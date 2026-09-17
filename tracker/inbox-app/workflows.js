@@ -218,7 +218,7 @@ function wfItemView(id) {
   const item = wfItem(id);
   if (!item) { workflowDialog.appendChild(wfNode('p', '삭제되었거나 찾을 수 없는 항목입니다.')); return; }
   workflowDialog.append(wfNode('h3', item.description), wfNode('p', `${wfType(item.type)} · ${item.status === 'done' ? '완료' : '미완료'}`, 'wf-section-note'));
-  if (item.permalink) { const a = wfNode('a', '슬랙 원문'); a.href = item.permalink; a.target = '_blank'; a.rel = 'noopener'; workflowDialog.appendChild(a); }
+  if (item.permalink) { const a = wfNode('a', '슬랙 원문', 'wf-link'); a.href = item.permalink; a.target = '_blank'; a.rel = 'noopener'; a.style.display = 'inline-block'; workflowDialog.appendChild(a); }
   const save = workflowFields(item, workflowDialog);
   const actions = wfNode('div', undefined, 'wf-actions');
   actions.appendChild(wfButton(item.status === 'done' ? '미완료로 되돌리기' : item.type === 'decision' ? 'PRD 반영 완료' : '완료로 표시', async () => {

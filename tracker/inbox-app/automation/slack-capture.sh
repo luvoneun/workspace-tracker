@@ -49,13 +49,31 @@ print(' '.join(f\"{v['id']}:my-{k if k!='todo' else 'todo'}\" for k, v in ch.ite
 " 2>/dev/null)
 
 found=0
+# 예전엔 fetch가 실패해도(네트워크 오류, 슬랙 API 오류 등) 전부 "새 메시지 0개"로
+# 뭉뚱그려져서 로그에 아무 흔적도 안 남았다 — 그래서 몇 시간씩 못 가져와도 몰랐다.
+# 이제는 실패와 "진짜 0개"를 구분해서, 실패는 로그에 채널명과 이유를 남긴다.
 for entry in $CHANNELS; do
   id="${entry%%:*}"
   key="${entry##*:}"
   cursor=$("$NODE" -e "try{const s=require('$STATE');process.stdout.write(s['$key']||'')}catch(e){}" 2>/dev/null)
-  count=$(bash "$APP/fetch_slack_channel.sh" "$id" 100 "$cursor" 2>/dev/null \
-    | "$NODE" -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{process.stdout.write(String(JSON.parse(d).messages.length))}catch(e){process.stdout.write('0')}})" 2>/dev/null)
-  [ -n "$count" ] && [ "$count" -gt 0 ] 2>/dev/null && found=$((found + count))
+  raw=$(bash "$APP/fetch_slack_channel.sh" "$id" 100 "$cursor" 2>>"$LOG")
+  fetch_status=$?
+  result=$(echo "$raw" | "$NODE" -e "
+    let d = '';
+    process.stdin.on('data', c => d += c);
+    process.stdin.on('end', () => {
+      try {
+        const j = JSON.parse(d);
+        if (j.ok === false) { process.stdout.write('ERR:' + (j.error || 'unknown')); return; }
+        process.stdout.write(String((j.messages || []).length));
+      } catch (e) { process.stdout.write('ERR:parse_failed'); }
+    });
+  " 2>/dev/null)
+  if [ "$fetch_status" -ne 0 ] || [ "${result#ERR:}" != "$result" ]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') $key 채널 확인 실패 — ${result:-fetch 실패 (exit $fetch_status)}" >> "$LOG"
+    continue
+  fi
+  [ -n "$result" ] && [ "$result" -gt 0 ] 2>/dev/null && found=$((found + result))
 done
 
 # 확인했다는 사실은 언제나 기록한다
@@ -76,6 +94,9 @@ if [ "$found" -eq 0 ]; then
   exit 0
 fi
 
-exec "$HOME/.local/share/workspace-automation/run-task.sh" "slack-capture" \
+# exec로 넘기면 이 프로세스 자체가 대체되어 위에서 건 EXIT trap(잠금 해제)이 실행되지 않는다.
+# 그래서 실제로 캡처가 일어날 때마다 잠금이 안 풀려서, 다음 최대 30분치 실행이 전부
+# "이전 실행이 아직 진행 중"으로 건너뛰어지는 문제가 있었다 — 그냥 호출해서 trap이 돌게 둔다.
+"$HOME/.local/share/workspace-automation/run-task.sh" "slack-capture" \
   ".claude/skills/ 폴더의 slack-todos.md, slack-alignments.md, slack-someday.md, slack-waiting.md 파일을 차례로 읽고 각 지시대로 실행해라. 새로 캡처된 항목이 있으면 몇 개인지, 어떤 내용인지 간단히 한국어로 보고해라 (원본 스레드를 못 읽은 항목, 중복이라 건너뛴 항목은 반드시 별도로 알려라). 새 항목이 전혀 없으면 \"(새 항목 없음)\" 한 줄만 출력하고 끝내라." \
   "mcp__slack,Read,Write,Edit,Bash,ToolSearch"

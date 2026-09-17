@@ -54,7 +54,43 @@
     line-height: 1.5;
   }
   .page { max-width: 1240px; margin: 0 auto; padding: 24px 16px 48px; }
+  .page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
   h1 { font-size: 20px; margin: 0 0 4px; }
+  .settings-btn {
+    width: 30px; height: 30px; line-height: 1; font-size: 15px;
+    color: color-mix(in srgb, var(--muted) 60%, transparent);
+    background: none; border: none; border-radius: 50%; cursor: pointer;
+    flex-shrink: 0; transition: color 120ms ease, background 120ms ease;
+  }
+  .settings-btn:hover { color: var(--text); background: var(--card); }
+
+  .settings-dialog {
+    width: min(560px, calc(100vw - 32px)); max-height: 82dvh; box-sizing: border-box;
+    padding: 24px; border: 1px solid var(--border); border-radius: 16px;
+    background: var(--bg); color: var(--text);
+  }
+  .settings-dialog::backdrop { background: #10182866; }
+  .settings-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .settings-head h2 { font-size: 18px; margin: 0; }
+  .settings-dialog .wr-view-tabs { margin-bottom: 14px; }
+
+  .automation-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 10px; }
+  .automation-card-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+  .automation-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); flex-shrink: 0; }
+  .automation-card.has-failure .automation-dot { background: var(--urgent); }
+  .automation-name { font-weight: 700; font-size: 13px; }
+  .automation-time { font-size: 11px; color: var(--muted); margin-left: auto; }
+  .automation-summary { font-size: 12px; color: var(--muted); line-height: 1.5; }
+  .automation-failures { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+  .automation-failure-row { font-size: 11px; color: var(--urgent); line-height: 1.6; }
+  .automation-log-toggle { margin-top: 8px; }
+  .automation-log-toggle summary { color: var(--muted); cursor: pointer; font-size: 11px; font-weight: 600; }
+  .automation-log-tail { margin: 8px 0 0; padding: 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; font-family: ui-monospace, monospace; font-size: 10px; line-height: 1.6; color: var(--muted); white-space: pre-wrap; word-break: break-all; max-height: 240px; overflow-y: auto; }
+
+  .settings-guide dt { font-weight: 700; font-size: 13px; margin: 16px 0 4px; }
+  .settings-guide dt:first-child { margin-top: 0; }
+  .settings-guide dd { margin: 0; font-size: 12px; color: var(--muted); line-height: 1.6; }
+  @media (max-width: 600px) { .settings-dialog { padding: 16px; } }
   .date-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
   .date-bar-info { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .refresh-btn {
@@ -697,6 +733,13 @@
   .plan-summary { font-size: 12px; font-weight: 600; color: var(--muted); margin-left: 8px; }
 
   .jira-control { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+  /* 좁은 사이드바 칼럼(확인 대기중 등)에 들어가면 배지 글자가 알약 모양을 깨고
+     단어 중간에서 두 줄로 꺾였다 — 한 줄로 줄이고 넘치면 말줄임표로 처리한다.
+     (전화 너비에서는 아래 @media에서 다시 줄바꿈을 허용한다.) */
+  .badge.jira-badge, .badge.group-badge {
+    display: inline-block; max-width: 100%;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: top;
+  }
   .badge.jira-badge {
     color: var(--accent);
     border-color: color-mix(in srgb, var(--accent) 30%, transparent);
@@ -1133,7 +1176,10 @@
 <body>
   <div class="pull-indicator" id="pullIndicator" aria-hidden="true">↻</div>
   <div class="page">
-    <h1 id="workspaceTitle">워크스페이스</h1>
+    <div class="page-header">
+      <h1 id="workspaceTitle">워크스페이스</h1>
+      <button type="button" id="settingsBtn" class="settings-btn" aria-label="환경설정" title="환경설정">⚙</button>
+    </div>
     <div class="date-bar">
       <span id="dateBar" class="date-bar-info"></span>
       <button type="button" id="refreshBtn" class="refresh-btn" aria-label="새로고침" title="새로고침">↻</button>
@@ -1250,6 +1296,19 @@
   </div>
 
   <div id="liveRegion" class="status-notice" role="status" aria-live="polite" hidden></div>
+
+  <dialog id="settingsDialog" class="settings-dialog" aria-label="환경설정">
+    <div class="settings-head">
+      <h2>환경설정</h2>
+      <button type="button" id="settingsCloseBtn" class="notice-dismiss" aria-label="닫기">닫기</button>
+    </div>
+    <div class="wr-view-tabs">
+      <button type="button" class="wr-view-btn active" data-settings-tab="status">상태</button>
+      <button type="button" class="wr-view-btn" data-settings-tab="guide">사용법</button>
+    </div>
+    <div id="settingsStatusView"></div>
+    <div id="settingsGuideView" hidden></div>
+  </dialog>
 
 <script src="/workflows.js"></script>
 <script>
@@ -2530,8 +2589,6 @@ function renderWaitingCard(item) {
   if (!done) {
     makeEditableDesc(body.querySelector('.desc'), item);
     makeEditableWho(body.querySelector('.who-badge'), item);
-    const follow = wfItem(item.id)?.followUp;
-    body.appendChild(wfButton(follow ? `다시 확인 ${follow} · 변경` : '다시 확인할 날짜', () => wfOpen({ kind: 'item', id: item.id }), 'wf-link'));
   }
   if (item.isNew) card.appendChild(renderNewDot(item));
   body.prepend(renderGroupControl({
@@ -2552,8 +2609,15 @@ function renderWaitingCard(item) {
       fadeOutAndRun(card, () => setTaskDue(item.id, dateInput.value || null), dateInput.value ? `마감일 ${dateInput.value}로 지정함` : '마감일 해제함');
     });
 
+    // "다시 확인할 날짜"(뒤이어 확인할 예정일)를 카드 맨 아래 따로 두면 "마감일"과 뭐가
+    // 다른 건지 헷갈린다 — 같은 ⋮ 메뉴 안에 나란히 두면 둘 다 "날짜 관련 설정"으로 읽힌다.
+    const follow = wfItem(item.id)?.followUp;
     card.appendChild(renderOverflowMenu([
       { custom: overflowField('마감일', dateInput) },
+      {
+        label: follow ? `다시 확인할 날짜 · ${follow}` : '다시 확인할 날짜 지정',
+        onClick: () => wfOpen({ kind: 'item', id: item.id }),
+      },
       { separator: true },
       {
         label: '삭제',
@@ -3067,6 +3131,21 @@ function renderInbox(items) {
       onSetGroup: (g) => setTaskGroup(item.id, g),
     }));
     card.appendChild(body);
+
+    // 아직 분류 전이라도 마감이 분명한 건은 미리 지정해둘 수 있어야 한다(예: 오늘/나중에 정하기 전에도).
+    const dueInput = document.createElement('input');
+    dueInput.type = 'date';
+    dueInput.className = 'overflow-date-input';
+    dueInput.value = item.due || '';
+    dueInput.setAttribute('aria-label', `${item.description} — 마감일 지정`);
+    dueInput.addEventListener('click', (e) => e.stopPropagation());
+    dueInput.addEventListener('change', async () => {
+      await setTaskDue(item.id, dueInput.value || null);
+      announce(dueInput.value ? `마감일 ${dueInput.value}로 지정함` : '마감일 해제함');
+    });
+    card.appendChild(renderOverflowMenu([
+      { custom: overflowField('마감일', dueInput) },
+    ]));
 
     const actions = document.createElement('div');
     actions.className = 'inbox-actions';
@@ -3910,6 +3989,111 @@ refreshBtn.addEventListener('click', async () => {
   await load();
   announce('새로고침했습니다.');
   setTimeout(() => refreshBtn.classList.remove('spinning'), 400);
+});
+
+// ---------- 환경설정 (상태 / 사용법) ----------
+
+function relativeTimeFrom(timeStr) {
+  // "YYYY-MM-DD HH:MM:SS" (로컬 시각) 기준으로 몇 분/시간 전인지
+  const then = new Date(timeStr.replace(' ', 'T'));
+  if (Number.isNaN(then.getTime())) return timeStr;
+  const diffMin = Math.round((Date.now() - then.getTime()) / 60000);
+  if (diffMin < 1) return '방금';
+  if (diffMin < 60) return `${diffMin}분 전`;
+  const diffHour = Math.round(diffMin / 60);
+  if (diffHour < 24) return `${diffHour}시간 전`;
+  return `${Math.round(diffHour / 24)}일 전`;
+}
+
+async function renderAutomationStatus() {
+  const view = document.getElementById('settingsStatusView');
+  view.innerHTML = '<div class="empty">불러오는 중…</div>';
+  let automations;
+  try {
+    const data = await request('/api/automation/status').then(r => r.json());
+    automations = data.automations || [];
+  } catch {
+    view.innerHTML = '<div class="empty">상태를 불러오지 못했습니다.</div>';
+    return;
+  }
+  if (!automations.length) {
+    view.innerHTML = '<div class="empty">설정된 자동화가 없습니다.</div>';
+    return;
+  }
+  view.innerHTML = '';
+  automations.forEach(a => {
+    const card = document.createElement('div');
+    card.className = 'automation-card' + (a.recentFailures.length ? ' has-failure' : '');
+    const head = document.createElement('div');
+    head.className = 'automation-card-head';
+    head.innerHTML = `
+      <span class="automation-dot" aria-hidden="true"></span>
+      <span class="automation-name">${escapeHtml(a.name)}</span>
+      <span class="automation-time">${a.lastRunAt ? escapeHtml(relativeTimeFrom(a.lastRunAt)) : '기록 없음'}</span>
+    `;
+    card.appendChild(head);
+    const summary = document.createElement('div');
+    summary.className = 'automation-summary';
+    summary.textContent = a.lastSummary || '아직 실행 기록이 없습니다.';
+    card.appendChild(summary);
+    if (a.recentFailures.length) {
+      const fails = document.createElement('div');
+      fails.className = 'automation-failures';
+      fails.innerHTML = a.recentFailures.map(f => `<div class="automation-failure-row">⚠ ${escapeHtml(f.time)} · ${escapeHtml(f.text)}</div>`).join('');
+      card.appendChild(fails);
+    }
+    if (a.tail && a.tail.length) {
+      const details = document.createElement('details');
+      details.className = 'automation-log-toggle';
+      const sum = document.createElement('summary');
+      sum.textContent = '로그 더 보기';
+      details.appendChild(sum);
+      const pre = document.createElement('pre');
+      pre.className = 'automation-log-tail';
+      pre.textContent = a.tail.join('\n');
+      details.appendChild(pre);
+      card.appendChild(details);
+    }
+    view.appendChild(card);
+  });
+}
+
+function renderSettingsGuide() {
+  const view = document.getElementById('settingsGuideView');
+  if (view.dataset.rendered) return;
+  view.dataset.rendered = 'true';
+  view.className = 'settings-guide';
+  view.innerHTML = `
+    <dl>
+      <dt>새로 들어온 것(인박스)이 뭔가요?</dt>
+      <dd>슬랙에서 자동으로 긁어온 항목이 우선 모이는 곳이에요. AI가 오늘 할지 나중에 할지 미리 정하지 않고, 직접 분류하시라고 남겨둔 것입니다. 분류하면 인박스에서 사라지고 해당 목록으로 옮겨가요.</dd>
+      <dt>주간요약의 "조용히 완료로 넘기기"는 뭔가요?</dt>
+      <dd>완료하긴 했지만 굳이 보고할 정도는 아닌 일을 위한 기능이에요. 넘기면 완료한 일 목록에선 빠지지만, 삭제되는 게 아니라 접힌 "조용히 완료한 일" 아카이브에 남고 복사용 텍스트(공유용)엔 나오지 않아요. 되돌리기(다시 담기)도 가능합니다.</dd>
+      <dt>그룹은 어떻게 바꾸나요?</dt>
+      <dd>카드의 ⋮ 메뉴 → 그룹에서 드롭다운으로 바로 고를 수 있어요. 여러 개를 한 번에 바꾸려면 "선택" 버튼으로 체크박스를 켜고 같은 드롭다운을 씁니다.</dd>
+      <dt>상단의 "○일 전 기준" 같은 표시는 뭔가요?</dt>
+      <dd>슬랙·캘린더·지라 자동 동기화가 최근에 못 돌았다는 뜻이에요. 이 환경설정 안의 "상태" 탭에서 무슨 일인지 더 자세히 볼 수 있습니다.</dd>
+      <dt>확인 대기는 뭔가요?</dt>
+      <dd>다른 사람의 답을 기다리는 항목이에요. 완료 표시하면 "해결됨"으로 남고, 할 일 쪽에서 "이 답변을 기다리는 중"으로 연결해두면 답이 오는 순간 알려줍니다.</dd>
+    </dl>
+  `;
+}
+
+const settingsDialog = document.getElementById('settingsDialog');
+document.getElementById('settingsBtn').addEventListener('click', () => {
+  settingsDialog.showModal();
+  renderAutomationStatus();
+});
+document.getElementById('settingsCloseBtn').addEventListener('click', () => settingsDialog.close());
+settingsDialog.querySelectorAll('[data-settings-tab]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    settingsDialog.querySelectorAll('[data-settings-tab]').forEach(b => b.classList.toggle('active', b === btn));
+    const tab = btn.dataset.settingsTab;
+    document.getElementById('settingsStatusView').hidden = tab !== 'status';
+    document.getElementById('settingsGuideView').hidden = tab !== 'guide';
+    if (tab === 'guide') renderSettingsGuide();
+    if (tab === 'status') renderAutomationStatus();
+  });
 });
 
 // 폰에서는 버튼이 작으니, 맨 위에서 아래로 끌어도 새로고침되게 한다.

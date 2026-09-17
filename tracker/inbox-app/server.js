@@ -1,6 +1,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { exec } = require('child_process');
 
 // 사람/회사마다 달라지는 값은 전부 workspace.config.json 한 곳에 모아둔다.
@@ -428,6 +429,67 @@ function getSlackSync() {
   } catch {
     return { lastSync: null, stale: true };
   }
+}
+
+// 자동화 로그 폴더 — 앱 설치 스크립트가 항상 이 경로에 고정해서 쓴다.
+function automationLogDir() {
+  return path.join(os.homedir(), '.local/share/workspace-automation/logs');
+}
+
+function tailLines(filePath, maxLines) {
+  if (!fs.existsSync(filePath)) return [];
+  return fs.readFileSync(filePath, 'utf-8').split('\n').slice(-maxLines);
+}
+
+// 환경설정 > 상태 탭에서 쓴다. run-task.sh가 남기는 "───── 시각 이름 시작/종료(exit N)"
+// 블록과, slack-capture.sh가 미리보기만 하고 건너뛸 때 남기는 한 줄짜리 기록을 함께 읽어서
+// "마지막으로 뭘 했는지" 사람이 읽을 수 있는 요약과 "최근에 실패한 적 있는지"를 뽑아낸다.
+function parseAutomationLog(lines) {
+  const startRe = /^─+ (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \S+ 시작$/;
+  const endRe = /^─+ (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \S+ 종료 \(exit (-?\d+)\)$/;
+  const plainRe = /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (.+)$/;
+  const events = [];
+  let block = null;
+  lines.forEach((line) => {
+    const s = startRe.exec(line);
+    if (s) { block = { body: [] }; return; }
+    const e = endRe.exec(line);
+    if (e) {
+      const exitCode = Number(e[2]);
+      const text = block ? block.body.join(' ').replace(/\s+/g, ' ').trim() : '';
+      events.push({ time: e[1], kind: exitCode === 0 ? 'run' : 'fail', text: text || (exitCode === 0 ? '완료' : `실패 (exit ${exitCode})`) });
+      block = null;
+      return;
+    }
+    if (block) { block.body.push(line); return; }
+    const p = plainRe.exec(line);
+    if (p) events.push({ time: p[1], kind: p[2].includes('채널 확인 실패') ? 'fail' : 'skip', text: p[2] });
+  });
+  return events;
+}
+
+function getAutomationStatus() {
+  const logDir = automationLogDir();
+  const specs = [
+    { key: 'slack', name: '슬랙 캡처', log: 'slack-capture.log', used: USES.slack },
+    { key: 'calendar', name: '캘린더 동기화', log: 'calendar-sync.log', used: USES.calendar },
+    { key: 'jira', name: '지라 동기화', log: 'jira-sync.log', used: USES.jira },
+  ];
+  return specs.filter((s) => s.used).map((spec) => {
+    const lines = tailLines(path.join(logDir, spec.log), 500);
+    const events = parseAutomationLog(lines);
+    const last = events[events.length - 1] || null;
+    const recentFailures = events.filter((e) => e.kind === 'fail').slice(-5).reverse();
+    return {
+      key: spec.key,
+      name: spec.name,
+      lastRunAt: last ? last.time : null,
+      lastKind: last ? last.kind : null,
+      lastSummary: last ? last.text : null,
+      recentFailures,
+      tail: lines.filter((l) => l.trim()).slice(-60),
+    };
+  });
 }
 
 function getJiraIssueCache() {
@@ -1120,6 +1182,12 @@ const handleRequest = (req, res) => {
       res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ ok: false, error: error.message }));
     });
+    return;
+  }
+
+  if (url.pathname === '/api/automation/status' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ automations: getAutomationStatus() }));
     return;
   }
 
