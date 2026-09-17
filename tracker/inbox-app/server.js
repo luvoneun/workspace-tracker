@@ -1,0 +1,1496 @@
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const { exec } = require('child_process');
+
+// 사람/회사마다 달라지는 값은 전부 workspace.config.json 한 곳에 모아둔다.
+// 다른 맥이나 다른 회사에서 쓸 때 이 파일만 갈아끼우면 된다.
+const CONFIG_PATH = process.env.WORKSPACE_CONFIG || path.join(__dirname, '../../workspace.config.json');
+
+function loadConfig() {
+  try {
+    return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+  } catch {
+    return {};
+  }
+}
+
+const CONFIG = loadConfig();
+// 안 쓰는 도구는 꺼둔다. 꺼진 도구는 "동기화 안 됨" 경고를 띄우지 않는다.
+const USES = { slack: true, calendar: true, jira: true, ...(CONFIG.integrations || {}) };
+
+const PORT = Number(process.env.WORKSPACE_PORT || CONFIG.server?.port || 4321);
+// localhost는 항상 열고, extraHost가 있으면 그 주소로도 추가로 연다 (폰·다른 기기용).
+const EXTRA_HOST = process.env.WORKSPACE_HOST || CONFIG.server?.extraHost || '';
+const TRACKER_DIR = process.env.WORKSPACE_DATA_DIR || path.join(__dirname, '..');
+const PUBLIC_DIR = __dirname;
+
+const TRACK_RE = /^- (.+?) #(task|bug|idea|decision|check)\[(.+)\]\s*$/;
+
+const ULID_ENCODING = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+function encodeTime(now, len) {
+  let str = '';
+  for (let i = len - 1; i >= 0; i--) {
+    const mod = now % 32;
+    str = ULID_ENCODING[mod] + str;
+    now = (now - mod) / 32;
+  }
+  return str;
+}
+function ulid() {
+  let random = '';
+  for (let i = 0; i < 16; i++) random += ULID_ENCODING[Math.floor(Math.random() * 32)];
+  return encodeTime(Date.now(), 10) + random;
+}
+
+function todayLocal() {
+  const d = new Date();
+  const offset = d.getTimezoneOffset() * 60000;
+  return new Date(d - offset).toISOString().slice(0, 10);
+}
+
+// ---------- 오늘 캘린더 일정 (tracker/calendar_today.md) ----------
+
+const CALENDAR_ITEM_RE = /^- (\d{2}:\d{2})-(\d{2}:\d{2}) \| (.+?)(?: \| (\S+))?$/;
+
+function getCalendarToday() {
+  if (!USES.calendar) return { events: [], lastSync: null, used: false };
+  const calPath = path.join(TRACKER_DIR, 'calendar_today.md');
+  if (!fs.existsSync(calPath)) return { events: [], lastSync: null, stale: true };
+  const lines = fs.readFileSync(calPath, 'utf-8').split('\n');
+  const events = [];
+  let lastSync = null;
+  lines.forEach((line) => {
+    if (line.startsWith('마지막 갱신:')) {
+      const value = line.replace('마지막 갱신:', '').trim();
+      lastSync = value && value !== '-' ? value : null;
+      return;
+    }
+    const m = line.match(CALENDAR_ITEM_RE);
+    if (!m) return;
+    events.push({ start: m[1], end: m[2], title: m[3], link: m[4] || null });
+  });
+  const date = lastSync && lastSync.slice(0, 10);
+  return { events: date === todayLocal() ? events : [], lastSync, stale: date !== todayLocal() };
+}
+
+// ---------- 트랙 아이템 (tracker/*.md, source:slack: 태그) ----------
+
+function parseFields(fieldStr) {
+  const fields = {};
+  fieldStr.split(/\s+/).forEach((tok) => {
+    const idx = tok.indexOf(':');
+    if (idx === -1) return;
+    fields[tok.slice(0, idx)] = tok.slice(idx + 1);
+  });
+  return fields;
+}
+
+function listTrackerFiles() {
+  return fs
+    .readdirSync(TRACKER_DIR)
+    .filter((f) => f.endsWith('.md'))
+    .map((f) => path.join(TRACKER_DIR, f));
+}
+
+// 슬랙에서 캡처됐지만 아직 화면에 한 번도 안 뜬 항목인지 — "NEW" 표시용
+function isNewSlack(fields) {
+  return !!(fields.source && fields.source.startsWith('slack:') && fields.seen !== 'true');
+}
+
+// Legacy items use due as their planned day until explicitly rescheduled.
+// "none" distinguishes an unscheduled task from an unmigrated legacy task.
+function plannedDay(fields) {
+  return fields.scheduled === 'none' ? null : fields.scheduled || fields.due || null;
+}
+
+// "새로 들어온 것" — 슬랙에서 캡처됐지만 오늘 할지 나중에 할지 아직 안 정한 것.
+// 오늘/나중에 목록에 섞여 묻히는 걸 막으려고 따로 모아둔다. 사람이 분류하면 inbox가 지워진다.
+function getInboxTasks() {
+  const items = [];
+  listTrackerFiles().forEach((filePath) => {
+    fs.readFileSync(filePath, 'utf-8').split('\n').forEach((line) => {
+      const m = line.match(TRACK_RE);
+      if (!m || m[2] !== 'task') return;
+      const fields = parseFields(m[3]);
+      if (fields.status === 'done' || fields.inbox !== 'true') return;
+      items.push({
+        description: m[1],
+        id: fields.id,
+        status: fields.status || 'to-do',
+        priority: fields.priority || 'medium',
+        created: fields.created,
+        due: fields.due || null,
+        permalink: fields.source && fields.source.startsWith('slack:') ? fields.source.slice('slack:'.length) : null,
+        jira: fields.jira || null,
+        group: fields.group ? fields.group.replace(/_/g, ' ') : null,
+      });
+    });
+  });
+  return items;
+}
+
+// "나중에 할 일" — committed tasks with no due date, or a due date in the future (not today/overdue)
+function getLaterTasks() {
+  const today = todayLocal();
+  const items = [];
+  listTrackerFiles().forEach((filePath) => {
+    const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
+    lines.forEach((line) => {
+      const m = line.match(TRACK_RE);
+      if (!m || m[2] !== 'task') return;
+      const fields = parseFields(m[3]);
+      if (fields.status === 'done' || fields.inbox === 'true') return;
+      const scheduled = plannedDay(fields);
+      if (scheduled && scheduled <= today) return;
+      items.push({
+        file: path.basename(filePath),
+        description: m[1],
+        type: m[2],
+        id: fields.id,
+        status: fields.status || 'to-do',
+        priority: fields.priority || 'medium',
+        created: fields.created,
+        due: fields.due || null,
+        scheduled,
+        doing: fields.doing || null,
+        permalink: fields.source && fields.source.startsWith('slack:') ? fields.source.slice('slack:'.length) : null,
+        jira: fields.jira || null,
+        group: fields.group ? fields.group.replace(/_/g, ' ') : null,
+        isNew: isNewSlack(fields),
+      });
+    });
+  });
+  return items;
+}
+
+// "정책/얼라인" — 결정/합의된 내용 (#decision 타입). 슬랙 캡처분과 직접 쓴 것 모두 포함.
+// PRD 반영 여부는 status(to-do/done)로 관리
+function getDecisions() {
+  const items = [];
+  listTrackerFiles().forEach((filePath) => {
+    const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
+    lines.forEach((line) => {
+      const m = line.match(TRACK_RE);
+      if (!m || m[2] !== 'decision') return;
+      const fields = parseFields(m[3]);
+      items.push({
+        file: path.basename(filePath),
+        description: m[1],
+        id: fields.id,
+        status: fields.status || 'to-do',
+        priority: fields.priority || 'medium',
+        created: fields.created,
+        completed: fields.status === 'done' ? fields.completed || (fields.updated ? localDateOf(fields.updated) : null) : null,
+        permalink: fields.source && fields.source.startsWith('slack:') ? fields.source.slice('slack:'.length) : null,
+        isNew: isNewSlack(fields),
+        jira: fields.jira || null,
+        group: fields.group ? fields.group.replace(/_/g, ' ') : null,
+      });
+    });
+  });
+  return items;
+}
+
+// "확인 대기중" — waiting on someone else to check/confirm something (#check 타입, source:slack:)
+function getWaitingItems() {
+  const items = [];
+  listTrackerFiles().forEach((filePath) => {
+    const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
+    lines.forEach((line) => {
+      const m = line.match(TRACK_RE);
+      if (!m || m[2] !== 'check') return;
+      const fields = parseFields(m[3]);
+      if (fields.status === 'done') return;
+      items.push({
+        file: path.basename(filePath),
+        description: m[1],
+        id: fields.id,
+        status: fields.status || 'to-do',
+        priority: fields.priority || 'medium',
+        created: fields.created,
+        due: fields.due || null,
+        who: fields.who ? fields.who.replace(/_/g, ' ') : null,
+        permalink: fields.source && fields.source.startsWith('slack:') ? fields.source.slice('slack:'.length) : null,
+        isNew: isNewSlack(fields),
+        jira: fields.jira || null,
+        group: fields.group ? fields.group.replace(/_/g, ' ') : null,
+      });
+    });
+  });
+  return items;
+}
+
+// "오늘 할 일" — merges manual + slack-sourced tasks due today or overdue (unfinished tasks roll forward automatically)
+function getTodayTasks() {
+  const today = todayLocal();
+  const items = [];
+  listTrackerFiles().forEach((filePath) => {
+    const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
+    lines.forEach((line) => {
+      const m = line.match(TRACK_RE);
+      if (!m || m[2] !== 'task') return;
+      const fields = parseFields(m[3]);
+      if (fields.inbox === 'true' && fields.status !== 'done') return;
+      const scheduled = plannedDay(fields);
+      const completedDate = fields.completed || (fields.updated ? localDateOf(fields.updated) : fields.due);
+      if (fields.status === 'done' ? completedDate !== today : !scheduled || scheduled > today) return;
+      items.push({
+        file: path.basename(filePath),
+        description: m[1],
+        type: m[2],
+        id: fields.id,
+        status: fields.status || 'to-do',
+        priority: fields.priority || 'medium',
+        created: fields.created,
+        due: fields.due,
+        scheduled,
+        doing: fields.doing || null,
+        permalink: fields.source && fields.source.startsWith('slack:') ? fields.source.slice('slack:'.length) : null,
+        jira: fields.jira || null,
+        group: fields.group ? fields.group.replace(/_/g, ' ') : null,
+        isNew: isNewSlack(fields),
+      });
+    });
+  });
+  return items;
+}
+
+function getIdeas() {
+  const items = [];
+  listTrackerFiles().forEach((filePath) => {
+    const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
+    lines.forEach((line) => {
+      const m = line.match(TRACK_RE);
+      if (!m || m[2] !== 'idea') return;
+      const fields = parseFields(m[3]);
+      if (fields.status === 'done') return;
+      items.push({
+        file: path.basename(filePath),
+        description: m[1],
+        id: fields.id,
+        status: fields.status || 'to-do',
+        priority: fields.priority || 'medium',
+        created: fields.created,
+        project: fields.project ? fields.project.replace(/_/g, ' ') : null,
+        isNew: isNewSlack(fields),
+      });
+    });
+  });
+  return items;
+}
+
+function setTrackField(id, fieldName, rawValue, matchType) {
+  const value = rawValue ? rawValue.trim().replace(/\s+/g, '_') : null;
+  const re = new RegExp(`${fieldName}:\\S+`);
+  let changed = false;
+  listTrackerFiles().forEach((filePath) => {
+    if (changed) return;
+    const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
+    let fileChanged = false;
+    const newLines = lines.map((line) => {
+      const m = line.match(TRACK_RE);
+      if (!m) return line;
+      if (matchType && m[2] !== matchType) return line;
+      const fields = parseFields(m[3]);
+      if (fields.id !== id) return line;
+      let newFieldStr = m[3];
+      if (value && (fieldName === 'jira' || fieldName === 'group')) {
+        const other = fieldName === 'jira' ? 'group' : 'jira';
+        newFieldStr = newFieldStr.split(/\s+/).filter(token => !token.startsWith(`${other}:`)).join(' ');
+      }
+      if (!value) {
+        newFieldStr = newFieldStr
+          .split(/\s+/)
+          .filter((tok) => !tok.startsWith(`${fieldName}:`))
+          .join(' ');
+      } else if (re.test(newFieldStr)) {
+        newFieldStr = newFieldStr.replace(re, `${fieldName}:${value}`);
+      } else {
+        newFieldStr = `${newFieldStr} ${fieldName}:${value}`;
+      }
+      fileChanged = true;
+      return `- ${m[1]} #${m[2]}[${newFieldStr}]`;
+    });
+    if (fileChanged) {
+      fs.writeFileSync(filePath, newLines.join('\n'));
+      changed = true;
+    }
+  });
+  return changed;
+}
+
+function setTrackJira(id, jiraKey) {
+  return setTrackField(id, 'jira', jiraKey, null);
+}
+
+function setTrackGroup(id, group) {
+  return setTrackField(id, 'group', group, null);
+}
+
+function setIdeaProject(id, project) {
+  return setTrackField(id, 'project', project, 'idea');
+}
+
+function setTrackDue(id, due) {
+  validateDate(due);
+  // Preserve the existing planned day when changing a legacy task's deadline.
+  for (const filePath of listTrackerFiles()) {
+    const match = fs.readFileSync(filePath, 'utf-8').split('\n').map(line => line.match(TRACK_RE))
+      .find(m => m && m[2] === 'task' && parseFields(m[3]).id === id);
+    if (match) {
+      const fields = parseFields(match[3]);
+      if (!fields.scheduled) setTrackField(id, 'scheduled', plannedDay(fields) || 'none', 'task');
+      break;
+    }
+  }
+  return setTrackField(id, 'due', due, null);
+}
+
+function validateDate(value) {
+  if (value == null || value === '') return;
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) ||
+      Number.isNaN(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value) {
+    throw new Error('유효한 날짜를 선택해 주세요.');
+  }
+}
+
+function localDateOf(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : fmtDate(date);
+}
+
+function setTrackPriority(id, priority) {
+  return setTrackField(id, 'priority', priority, null);
+}
+
+function setTrackWho(id, who) {
+  return setTrackField(id, 'who', who, 'check');
+}
+
+// "지금 하는 중" 표시. 시작한 날을 같이 남겨서 "N일째 진행 중"을 보여줄 수 있게 한다.
+function setTrackDoing(id, on) {
+  return setTrackField(id, 'doing', on ? todayLocal() : null, 'task');
+}
+
+function setTrackDescription(id, description) {
+  if (!description || !description.trim()) return false;
+  let changed = false;
+  listTrackerFiles().forEach((filePath) => {
+    if (changed) return;
+    const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
+    let fileChanged = false;
+    const newLines = lines.map((line) => {
+      const m = line.match(TRACK_RE);
+      if (!m) return line;
+      const fields = parseFields(m[3]);
+      if (fields.id !== id) return line;
+      fileChanged = true;
+      return `- ${description.trim()} #${m[2]}[${m[3]}]`;
+    });
+    if (fileChanged) {
+      fs.writeFileSync(filePath, newLines.join('\n'));
+      changed = true;
+    }
+  });
+  return changed;
+}
+
+// ---------- 지라 이슈 캐시 (tracker/jira_issues.md) ----------
+
+const JIRA_ITEM_RE = /^- (\S+) \| (.+?) \| (.+?) \| (.+)$/;
+
+// 지라 캐시가 언제 갱신됐는지. 자동 갱신이 실패해도 화면엔 낡은 목록이 그대로 뜨기 때문에,
+// 언제 기준인지 드러내서 낡은 걸 모른 채 고르는 일이 없게 한다.
+function getJiraSync() {
+  if (!USES.jira) return { used: false };
+  const jiraPath = path.join(TRACKER_DIR, 'jira_issues.md');
+  if (!fs.existsSync(jiraPath)) return { lastSync: null, stale: true };
+  const line = fs
+    .readFileSync(jiraPath, 'utf-8')
+    .split('\n')
+    .find((l) => l.startsWith('마지막 갱신:'));
+  const value = line ? line.replace('마지막 갱신:', '').trim() : '';
+  const lastSync = value && value !== '-' ? value.slice(0, 10) : null;
+  return { lastSync, stale: !lastSync || lastSync < todayLocal() };
+}
+
+// 슬랙 캡처는 가져올 게 없으면 아무 흔적도 남기지 않아서, 토큰이 만료돼 조용히 멈춰도
+// 화면은 멀쩡해 보인다. 캡처 스킬이 매 실행마다 남기는 checkedAt으로 마지막 확인 시각을 본다.
+function getSlackSync() {
+  if (!USES.slack) return { used: false };
+  const statePath = path.join(__dirname, '.slack_capture_state.json');
+  if (!fs.existsSync(statePath)) return { lastSync: null, stale: true };
+  try {
+    const state = JSON.parse(fs.readFileSync(statePath, 'utf-8'));
+    const lastSync = state.checkedAt ? localDateOf(state.checkedAt) : null;
+    return { lastSync, stale: !lastSync || lastSync < todayLocal() };
+  } catch {
+    return { lastSync: null, stale: true };
+  }
+}
+
+function getJiraIssueCache() {
+  const jiraPath = path.join(TRACKER_DIR, 'jira_issues.md');
+  if (!fs.existsSync(jiraPath)) return [];
+  const lines = fs.readFileSync(jiraPath, 'utf-8').split('\n');
+  const issues = [];
+  lines.forEach((line) => {
+    const m = line.match(JIRA_ITEM_RE);
+    if (!m) return;
+    issues.push({ key: m[1], type: m[2], status: m[3], summary: m[4] });
+  });
+  return issues;
+}
+
+// 지금까지 직접 입력해서 쓴 커스텀 그룹명 목록 (지라 티켓 아닌 것) — 그룹 지정 드롭다운에서 재사용하기 위함
+function getCustomGroups() {
+  const names = new Set();
+  listTrackerFiles().forEach((filePath) => {
+    fs.readFileSync(filePath, 'utf-8').split('\n').forEach((line) => {
+      const m = line.match(TRACK_RE);
+      if (!m || m[2] !== 'task') return;
+      const fields = parseFields(m[3]);
+      if (fields.status === 'done') return;
+      if (fields.group) names.add(fields.group.replace(/_/g, ' '));
+    });
+  });
+  return [...names].sort();
+}
+
+// ---------- 미팅 ↔ 프로젝트 연결 (사람이 직접 지정) ----------
+// 제목을 키로 저장해서, 정기 미팅은 한 번만 연결하면 다음 주에도 유지된다.
+
+const MEETING_LINKS_PATH = path.join(__dirname, '.meeting_links.json');
+
+function readMeetingLinks() {
+  if (!fs.existsSync(MEETING_LINKS_PATH)) return {};
+  try {
+    return JSON.parse(fs.readFileSync(MEETING_LINKS_PATH, 'utf-8'));
+  } catch {
+    return {};
+  }
+}
+
+function setMeetingLink(title, project) {
+  const key = String(title || '').trim();
+  if (!key) return false;
+  const links = readMeetingLinks();
+  if (project) links[key] = project;
+  else delete links[key];
+  fs.writeFileSync(MEETING_LINKS_PATH, JSON.stringify(links, null, 2));
+  return true;
+}
+
+function resolveProject(projectKey) {
+  if (!projectKey) return null;
+  const [type, ...rest] = projectKey.split(':');
+  const value = rest.join(':');
+  if (type === 'jira') {
+    const issue = getJiraIssueCache().find((i) => i.key === value);
+    return { type, value, label: issue ? `${value} · ${issue.summary}` : value };
+  }
+  if (type === 'group') return { type, value, label: value };
+  return null;
+}
+
+function getCalendarWithLinks() {
+  const calendar = getCalendarToday();
+  const links = readMeetingLinks();
+  const openTasks = [...getTodayTasks(), ...getLaterTasks()].filter((t) => t.status !== 'done');
+  const events = calendar.events.map((event) => {
+    const project = resolveProject(links[String(event.title).trim()]);
+    return {
+      ...event,
+      project,
+      relatedCount: project
+        ? openTasks.filter((t) => projectKeyOf(t) === `${project.type}:${project.value}`).length
+        : 0,
+    };
+  });
+  return { ...calendar, events };
+}
+
+// 오늘 미팅에 연결된 프로젝트들 — 제안이 "오늘 미팅 있는 일"을 건드리지 않도록 쓰인다
+function meetingProjectKeys() {
+  const links = readMeetingLinks();
+  const keys = new Set();
+  getCalendarToday().events.forEach((event) => {
+    const key = links[String(event.title).trim()];
+    if (key) keys.add(key);
+  });
+  return keys;
+}
+
+// ---------- 오늘 할 일 제안 ----------
+
+function projectKeyOf(item) {
+  if (item.jira) return `jira:${item.jira}`;
+  if (item.group) return `group:${item.group}`;
+  return null;
+}
+
+function daysBetween(fromDate, toDate) {
+  return Math.round((new Date(`${toDate}T00:00:00`) - new Date(`${fromDate}T00:00:00`)) / 86400000);
+}
+
+// 오늘 목록 상태에 따라 방향이 갈린다.
+// 여유 있으면 "이거 가져올까요?", 과부하면 "이건 미룰까요?", 적당하면 아무 말도 안 한다.
+function getTodaySuggestions() {
+  const openToday = getTodayTasks().filter((t) => t.status !== 'done');
+  if (openToday.length >= 8) return { mode: 'defer', total: openToday.length, items: suggestDeferrals(openToday) };
+  if (openToday.length < 5) return { mode: 'pull', total: openToday.length, items: suggestPulls() };
+  return { mode: 'none', total: openToday.length, items: [] };
+}
+
+// 오늘 하기 좋은 후보 — 나중에 할 일 중에서
+function suggestPulls() {
+  const today = todayLocal();
+  const meetingKeys = meetingProjectKeys();
+  return getLaterTasks()
+    .map((task) => {
+      const reasons = [];
+      let score = 0;
+      const key = projectKeyOf(task);
+      if (key && meetingKeys.has(key)) {
+        score += 10;
+        reasons.push('오늘 미팅 관련');
+      }
+      if (task.due) {
+        const left = daysBetween(today, task.due);
+        if (left <= 1) {
+          score += 9;
+          reasons.push(left < 0 ? '마감 지남' : '마감 임박');
+        } else if (left <= 3) {
+          score += 6;
+          reasons.push(`마감 ${left}일 전`);
+        } else if (left <= 7) {
+          score += 3;
+          reasons.push('이번 주 마감');
+        }
+      }
+      if (task.priority === 'critical') {
+        score += 6;
+        reasons.push('긴급');
+      } else if (task.priority === 'high') {
+        score += 4;
+        reasons.push('중요');
+      }
+      const waited = task.created ? daysBetween(task.created, today) : 0;
+      if (waited >= 7) {
+        score += 3;
+        reasons.push(`${waited}일째 대기`);
+      } else if (waited >= 3) {
+        score += 1;
+        reasons.push(`${waited}일째 대기`);
+      }
+      return { ...task, score, reasons };
+    })
+    .filter((task) => task.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
+}
+
+// 오늘 미뤄도 괜찮아 보이는 후보 — 오늘 미팅과 무관하고, 마감도 급하지 않고, 우선순위도 높지 않은 것
+function suggestDeferrals(openToday) {
+  const today = todayLocal();
+  const meetingKeys = meetingProjectKeys();
+  return openToday
+    .map((task) => {
+      const key = projectKeyOf(task);
+      if (key && meetingKeys.has(key)) return null;
+      if (task.priority === 'high' || task.priority === 'critical') return null;
+
+      const reasons = [];
+      let score = 0;
+      if (task.due) {
+        const left = daysBetween(today, task.due);
+        if (left <= 3) return null;
+        score += 2;
+        reasons.push(`마감 ${left}일 남음`);
+      } else {
+        score += 3;
+        reasons.push('마감 없음');
+      }
+      if (task.priority === 'low') {
+        score += 4;
+        reasons.push('우선순위 낮음');
+      }
+      if (!key) {
+        score += 1;
+        reasons.push('프로젝트 미지정');
+      }
+      return { ...task, score, reasons };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
+}
+
+function toggleTrackStatus(id) {
+  let changed = false;
+  listTrackerFiles().forEach((filePath) => {
+    if (changed) return;
+    const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
+    let fileChanged = false;
+    const newLines = lines.map((line) => {
+      const m = line.match(TRACK_RE);
+      if (!m) return line;
+      const fields = parseFields(m[3]);
+      if (fields.id !== id) return line;
+      const newStatus = fields.status === 'done' ? 'to-do' : 'done';
+      const nowIso = new Date().toISOString();
+      let newFieldStr = m[3].replace(/status:\S+/, `status:${newStatus}`);
+      newFieldStr = newFieldStr.replace(/\s+completed:\S+/g, '');
+      // 완료하면 "진행 중"은 자동으로 풀린다 — 따로 해제할 일이 없게.
+      if (newStatus === 'done') newFieldStr = newFieldStr.replace(/\s+doing:\S+/g, '') + ` completed:${todayLocal()}`;
+      newFieldStr = /updated:\S+/.test(newFieldStr)
+        ? newFieldStr.replace(/updated:\S+/, `updated:${nowIso}`)
+        : `${newFieldStr} updated:${nowIso}`;
+      fileChanged = true;
+      return `- ${m[1]} #${m[2]}[${newFieldStr}]`;
+    });
+    if (fileChanged) {
+      fs.writeFileSync(filePath, newLines.join('\n'));
+      changed = true;
+    }
+  });
+  return changed;
+}
+
+function appendTask({ description, priority, due }) {
+  const tasksPath = path.join(TRACKER_DIR, 'tasks.md');
+  if (!fs.existsSync(tasksPath)) {
+    fs.writeFileSync(tasksPath, '# Tasks\n\n');
+  }
+  const id = `task_${ulid()}`;
+  const created = todayLocal();
+  return { tasksPath, id, created };
+}
+
+function createManualTask({ description, priority, due = null, scheduled = todayLocal(), jira, group }) {
+  if (!description || !description.trim()) return { ok: false, error: 'empty description' };
+  validateDate(due);
+  validateDate(scheduled);
+  const { tasksPath, id, created } = appendTask({});
+  let fieldStr = `id:${id} status:to-do priority:${priority || 'medium'} created:${created}`;
+  fieldStr += ` scheduled:${scheduled || 'none'}`;
+  if (due) fieldStr += ` due:${due}`;
+  if (jira) fieldStr += ` jira:${jira.trim()}`;
+  else if (group) fieldStr += ` group:${group.trim().replace(/\s+/g, '_')}`;
+  fs.appendFileSync(tasksPath, `- ${description.trim()} #task[${fieldStr}]\n`);
+  return { ok: true, id };
+}
+
+function createLaterTask({ description, priority, jira, group }) {
+  return createManualTask({ description, priority, scheduled: null, jira, group });
+}
+
+function createWaitingItem({ description, priority, who, jira, group }) {
+  if (!description || !description.trim()) return { ok: false, error: 'empty description' };
+  const checksPath = path.join(TRACKER_DIR, 'checks.md');
+  if (!fs.existsSync(checksPath)) fs.writeFileSync(checksPath, '# Checks\n\n');
+  const id = `chk_${ulid()}`;
+  const created = todayLocal();
+  let fieldStr = `id:${id} status:to-do priority:${priority || 'medium'} created:${created}`;
+  if (who) fieldStr += ` who:${who.trim().replace(/\s+/g, '_')}`;
+  if (jira) fieldStr += ` jira:${jira.trim()}`;
+  else if (group) fieldStr += ` group:${group.trim().replace(/\s+/g, '_')}`;
+  fs.appendFileSync(checksPath, `- ${description.trim()} #check[${fieldStr}]\n`);
+  return { ok: true, id };
+}
+
+function createDecision({ description, priority, jira, group, permalink }) {
+  if (!description || !description.trim()) return { ok: false, error: 'empty description' };
+  if (permalink && !/^https:\/\/\S+$/.test(permalink)) return { ok: false, error: 'invalid permalink' };
+  const decisionsPath = path.join(TRACKER_DIR, 'decisions.md');
+  if (!fs.existsSync(decisionsPath)) fs.writeFileSync(decisionsPath, '# Decisions\n\n');
+  const id = `dec_${ulid()}`;
+  const created = todayLocal();
+  let fieldStr = `id:${id} status:to-do priority:${priority || 'medium'} created:${created}`;
+  // seen:true — carried over from a waiting item the user already handled, so it shouldn't show as NEW.
+  if (permalink) fieldStr += ` source:slack:${permalink} seen:true`;
+  if (jira) fieldStr += ` jira:${jira.trim()}`;
+  else if (group) fieldStr += ` group:${group.trim().replace(/\s+/g, '_')}`;
+  fs.appendFileSync(decisionsPath, `- ${description.trim()} #decision[${fieldStr}]\n`);
+  return { ok: true, id };
+}
+
+function createIdea({ description, priority, project }) {
+  if (!description || !description.trim()) return { ok: false, error: 'empty description' };
+  const ideasPath = path.join(TRACKER_DIR, 'ideas.md');
+  if (!fs.existsSync(ideasPath)) fs.writeFileSync(ideasPath, '# Ideas\n\n');
+  const id = `ida_${ulid()}`;
+  const created = todayLocal();
+  let fieldStr = `id:${id} status:to-do priority:${priority || 'medium'} created:${created}`;
+  if (project) fieldStr += ` project:${project.trim().replace(/\s+/g, '_')}`;
+  fs.appendFileSync(ideasPath, `- ${description.trim()} #idea[${fieldStr}]\n`);
+  return { ok: true, id };
+}
+
+function removeTrackItem(id, archive = true) {
+  let removed = null;
+  listTrackerFiles().forEach((filePath) => {
+    if (removed) return;
+    const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
+    const idx = lines.findIndex((line) => {
+      const m = line.match(TRACK_RE);
+      if (!m) return false;
+      const fields = parseFields(m[3]);
+      return fields.id === id;
+    });
+    if (idx === -1) return;
+    const m = lines[idx].match(TRACK_RE);
+    removed = { description: m[1], type: m[2], fields: parseFields(m[3]) };
+    if (archive) {
+      const trashPath = path.join(TRACKER_DIR, '.trash.json');
+      const trash = fs.existsSync(trashPath) ? JSON.parse(fs.readFileSync(trashPath, 'utf-8')) : [];
+      trash.push({ id, file: path.basename(filePath), line: lines[idx], index: idx, deletedAt: new Date().toISOString() });
+      fs.writeFileSync(trashPath, JSON.stringify(trash, null, 2));
+    }
+    lines.splice(idx, 1);
+    fs.writeFileSync(filePath, lines.join('\n'));
+  });
+  return removed;
+}
+
+function restoreTrackItem(id) {
+  const trashPath = path.join(TRACKER_DIR, '.trash.json');
+  const trash = fs.existsSync(trashPath) ? JSON.parse(fs.readFileSync(trashPath, 'utf-8')) : [];
+  const index = trash.findLastIndex(item => item.id === id);
+  if (index < 0) return false;
+  const item = trash[index];
+  if (path.basename(item.file) !== item.file || !item.file.endsWith('.md')) return false;
+  const exists = listTrackerFiles().some(file => fs.readFileSync(file, 'utf-8').split('\n').some(line => {
+    const match = line.match(TRACK_RE);
+    return match && parseFields(match[3]).id === id;
+  }));
+  if (!exists) {
+    const filePath = path.join(TRACKER_DIR, item.file);
+    const lines = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8').split('\n') : [];
+    lines.splice(Math.min(item.index, lines.length), 0, item.line);
+    fs.writeFileSync(filePath, lines.join('\n'));
+  }
+  trash.splice(index, 1);
+  fs.writeFileSync(trashPath, JSON.stringify(trash, null, 2));
+  return true;
+}
+
+function promoteIdeaToToday(id, due) {
+  validateDate(due);
+  const isIdea = listTrackerFiles().some(file => fs.readFileSync(file, 'utf-8').split('\n').some(line => {
+    const m = line.match(TRACK_RE);
+    return m && m[2] === 'idea' && parseFields(m[3]).id === id;
+  }));
+  if (!isIdea) return { ok: false, error: 'idea not found' };
+  const removed = removeTrackItem(id, false);
+  if (!removed || removed.type !== 'idea') return { ok: false, error: 'idea not found' };
+  return createManualTask({ description: removed.description, priority: removed.fields.priority, scheduled: due || todayLocal() });
+}
+
+// ---------- 주간 요약 (tracker/weekly_reports.md) ----------
+// 기록 전용: 새로 생긴 항목만 추가하고, 이미 쓴 줄(사람이 수정/삭제한 것 포함)은 절대 건드리지 않는다.
+
+const REPORT_SECTIONS = [
+  { key: 'done', heading: '완료한 일' },
+  { key: 'doing', heading: '진행중' },
+  { key: 'later', heading: '다음 주 계획' },
+  { key: 'decisions', heading: '새로 정해진 것' },
+  { key: 'waiting', heading: '확인 대기' },
+];
+
+function mondayOf(date) {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return d;
+}
+
+function fmtDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function currentWeekKey() {
+  return fmtDate(mondayOf(new Date()));
+}
+
+function weekLabel(weekKey) {
+  const monday = new Date(weekKey + 'T00:00:00');
+  const sunday = new Date(monday);
+  sunday.setDate(sunday.getDate() + 6);
+  const rangeStr = `${monday.getMonth() + 1}/${monday.getDate()}~${sunday.getMonth() + 1}/${sunday.getDate()}`;
+  return `${monday.getFullYear()}년 ${rangeStr}`;
+}
+
+function weeklyReportsPath() {
+  return path.join(TRACKER_DIR, 'weekly_reports.md');
+}
+
+function weeklyReportStatePath() {
+  return path.join(process.env.WORKSPACE_DATA_DIR || __dirname, '.weekly_report_state.json');
+}
+
+function readWeeklyReportState() {
+  const p = weeklyReportStatePath();
+  if (!fs.existsSync(p)) return {};
+  try {
+    return JSON.parse(fs.readFileSync(p, 'utf-8'));
+  } catch {
+    return {};
+  }
+}
+
+function writeWeeklyReportState(state) {
+  fs.writeFileSync(weeklyReportStatePath(), JSON.stringify(state, null, 2));
+}
+
+function emptyReportBody() {
+  return REPORT_SECTIONS.map((s) => `**${s.heading}**\n`).join('\n');
+}
+
+function parseWeeklyReports() {
+  const p = weeklyReportsPath();
+  if (!fs.existsSync(p)) return [];
+  const raw = fs.readFileSync(p, 'utf-8');
+  const parts = raw.split(/\n## /).slice(1);
+  return parts.map((part) => {
+    const newlineIdx = part.indexOf('\n');
+    const weekKey = part.slice(0, newlineIdx).trim();
+    const body = part.slice(newlineIdx + 1).replace(/\n+$/, '');
+    return { weekKey, body };
+  });
+}
+
+function writeWeeklyReports(list) {
+  const sections = list.map((r) => `## ${r.weekKey}\n\n${r.body.trim()}\n`).join('\n');
+  fs.writeFileSync(weeklyReportsPath(), `# Weekly Reports\n\n${sections}`);
+}
+
+function getWeeklyReports() {
+  const state = readWeeklyReportState();
+  return parseWeeklyReports().map((r) => ({ weekKey: r.weekKey, label: weekLabel(r.weekKey), body: r.body, generatedAt: state[r.weekKey]?.generatedAt || null }));
+}
+
+// 오늘 새로 생긴 항목 수 / 오늘 완료한 항목 수 — 상단 통계용
+function getTodayActivityCounts() {
+  const today = todayLocal();
+  let createdToday = 0;
+  listTrackerFiles().forEach((filePath) => {
+    fs.readFileSync(filePath, 'utf-8').split('\n').forEach((line) => {
+      const m = line.match(TRACK_RE);
+      if (!m) return;
+      const fields = parseFields(m[3]);
+      if (fields.created === today) createdToday += 1;
+    });
+  });
+  return { createdToday };
+}
+
+function saveWeeklyReportBody(weekKey, content) {
+  const reports = parseWeeklyReports();
+  const entry = reports.find((r) => r.weekKey === weekKey);
+  if (!entry) return false;
+  entry.body = content;
+  writeWeeklyReports(reports);
+  return true;
+}
+
+function insertBulletsUnderHeading(body, heading, lines) {
+  if (!lines.length) return body;
+  const bulletBlock = lines.map((l) => `- ${l}`).join('\n');
+  const headingRe = new RegExp(`(\\*\\*${heading}\\*\\*\\n(?:- .*\\n?)*)`);
+  if (headingRe.test(body)) {
+    return body.replace(headingRe, (match) => `${match.replace(/\n+$/, '')}\n${bulletBlock}\n`);
+  }
+  const sep = body.trim().length ? '\n\n' : '';
+  return `${body.trim()}${sep}**${heading}**\n${bulletBlock}\n`;
+}
+
+function getTasksDoneSince(dateStr, endDateStr) {
+  const items = [];
+  listTrackerFiles().forEach((filePath) => {
+    fs.readFileSync(filePath, 'utf-8').split('\n').forEach((line) => {
+      const m = line.match(TRACK_RE);
+      if (!m || m[2] !== 'task') return;
+      const fields = parseFields(m[3]);
+      if (fields.status !== 'done') return;
+      const ref = fields.completed || (fields.updated ? localDateOf(fields.updated) : fields.created);
+      if (!ref || ref < dateStr) return;
+      if (endDateStr && ref > endDateStr) return;
+      items.push({
+        id: fields.id,
+        description: m[1],
+        jira: fields.jira || null,
+        group: fields.group ? fields.group.replace(/_/g, ' ') : null,
+      });
+    });
+  });
+  return items;
+}
+
+// 요약 줄은 "내용 ^원본id" 형태로 쓴다. 그룹은 줄에 굽지 않고 원본에서 그때그때 읽어오므로,
+// 나중에 원본 그룹이 바뀌어도 요약이 따라간다. (사람이 직접 쓴 줄은 id가 없다)
+function formatReportLine(item) {
+  const result = item.id && getReportRefs()[item.id]?.status === 'done' ? workflows.outcome(item.id) : '';
+  return item.id ? `${result || item.description} ^${item.id}` : item.description;
+}
+
+function projectLabelOf(item) {
+  if (item.jira) {
+    const issue = getJiraIssueCache().find((i) => i.key === item.jira);
+    return issue ? `${item.jira} · ${issue.summary}` : item.jira;
+  }
+  return item.group || null;
+}
+
+// 요약에서 참조하는 원본들의 현재 상태 — 그룹 실시간 표시와 "이미 해결됨" 표시에 쓰인다
+function getReportRefs() {
+  const refs = {};
+  listTrackerFiles().forEach((filePath) => {
+    fs.readFileSync(filePath, 'utf-8').split('\n').forEach((line) => {
+      const m = line.match(TRACK_RE);
+      if (!m) return;
+      const fields = parseFields(m[3]);
+      if (!fields.id) return;
+      refs[fields.id] = {
+        id: fields.id,
+        type: m[2],
+        description: m[1],
+        status: fields.status || 'to-do',
+        created: fields.created || null,
+        completed: fields.completed || null,
+        scheduled: plannedDay(fields),
+        due: fields.due || null,
+        doing: fields.doing || null,
+        who: fields.who ? fields.who.replace(/_/g, ' ') : null,
+        priority: fields.priority || 'medium',
+        permalink: fields.source?.startsWith('slack:') ? fields.source.slice(6) : null,
+        jira: fields.jira || null,
+        group: fields.group ? fields.group.replace(/_/g, ' ') : null,
+        label: projectLabelOf({ jira: fields.jira, group: fields.group ? fields.group.replace(/_/g, ' ') : null }),
+        project: fields.project ? fields.project.replace(/_/g, ' ') : null,
+      };
+    });
+  });
+  return refs;
+}
+
+function getDecisionsSince(dateStr) {
+  const items = [];
+  listTrackerFiles().forEach((filePath) => {
+    fs.readFileSync(filePath, 'utf-8').split('\n').forEach((line) => {
+      const m = line.match(TRACK_RE);
+      if (!m || m[2] !== 'decision') return;
+      const fields = parseFields(m[3]);
+      if (!fields.created || fields.created < dateStr) return;
+      items.push({
+        id: fields.id,
+        description: m[1],
+        jira: fields.jira || null,
+        group: fields.group ? fields.group.replace(/_/g, ' ') : null,
+      });
+    });
+  });
+  return items;
+}
+
+// 지금 "진행 중"으로 표시해둔 업무 — 오늘 목록에 있든 뒤로 밀렸든 전부
+function getDoingTasks() {
+  const items = [];
+  listTrackerFiles().forEach((filePath) => {
+    fs.readFileSync(filePath, 'utf-8').split('\n').forEach((line) => {
+      const m = line.match(TRACK_RE);
+      if (!m || m[2] !== 'task') return;
+      const fields = parseFields(m[3]);
+      if (fields.status === 'done' || !fields.doing) return;
+      items.push({
+        id: fields.id,
+        description: m[1],
+        doing: fields.doing,
+        jira: fields.jira || null,
+        group: fields.group ? fields.group.replace(/_/g, ' ') : null,
+      });
+    });
+  });
+  return items;
+}
+
+function getOpenWaitingAll() {
+  return getWaitingItems().filter((i) => i.status !== 'done');
+}
+
+// 한 주치를 채운다. "다음 주 계획"은 자동으로 담지 않는다 — 사람이 직접 고른다.
+function fillWeek(entry, state, weekKey, { closing = false } = {}) {
+  if (!state[weekKey]) state[weekKey] = { done: [], doing: [], later: [], decisions: [], waiting: [] };
+  const seen = state[weekKey];
+
+  const sunday = new Date(`${weekKey}T00:00:00`);
+  sunday.setDate(sunday.getDate() + 6);
+  const weekEnd = fmtDate(sunday);
+
+  if (!seen.doing) seen.doing = [];
+  const doneCandidates = getTasksDoneSince(weekKey, weekEnd).filter((i) => !seen.done.includes(i.id));
+  const doingCandidates = getDoingTasks().filter((i) => !seen.doing.includes(i.id));
+  const decisionCandidates = getDecisionsSince(weekKey).filter((i) => !seen.decisions.includes(i.id));
+  const waitingCandidates = getOpenWaitingAll().filter((i) => !seen.waiting.includes(i.id));
+
+  let body = entry.body.replace('**막혀있는 것**', '**확인 대기**');
+  if (!body.includes('**진행중**')) body = body.replace('**다음 주 계획**', '**진행중**\n\n**다음 주 계획**');
+  body = insertBulletsUnderHeading(body, '완료한 일', doneCandidates.map(formatReportLine));
+  body = insertBulletsUnderHeading(body, '진행중', doingCandidates.map(formatReportLine));
+  body = insertBulletsUnderHeading(body, '새로 정해진 것', decisionCandidates.map(formatReportLine));
+  body = insertBulletsUnderHeading(body, '확인 대기', waitingCandidates.map(formatReportLine));
+  entry.body = body;
+
+  seen.done.push(...doneCandidates.map((i) => i.id));
+  seen.doing.push(...doingCandidates.map((i) => i.id));
+  seen.decisions.push(...decisionCandidates.map((i) => i.id));
+  seen.waiting.push(...waitingCandidates.map((i) => i.id));
+  seen.generatedAt = new Date().toISOString();
+  if (closing) seen.finalized = true;
+
+  return { done: doneCandidates.length, doing: doingCandidates.length, decisions: decisionCandidates.length, waiting: waitingCandidates.length };
+}
+
+function refreshWeeklyReport() {
+  const weekKey = currentWeekKey();
+  const reports = parseWeeklyReports();
+  const state = readWeeklyReportState();
+
+  // 지난 주가 열린 채 남아있으면 그 주 기준으로 한 번 더 채우고 확정한다.
+  // 금요일에 정리 못 하고 넘어가도 그 주가 미완성으로 굳지 않게 하려는 것.
+  reports
+    .filter((r) => r.weekKey < weekKey && !state[r.weekKey]?.finalized)
+    .forEach((past) => fillWeek(past, state, past.weekKey, { closing: true }));
+
+  let entry = reports.find((r) => r.weekKey === weekKey);
+  if (!entry) {
+    entry = { weekKey, body: emptyReportBody() };
+    reports.unshift(entry);
+  }
+  const added = fillWeek(entry, state, weekKey);
+
+  writeWeeklyReports(reports);
+  writeWeeklyReportState(state);
+
+  return { weekKey, label: weekLabel(weekKey), added: { ...added, later: 0 } };
+}
+
+// ---------- HTTP 서버 ----------
+
+const MIME = {
+  '.html': 'text/html',
+  '.css': 'text/css',
+  '.js': 'application/javascript',
+  '.png': 'image/png',
+  '.svg': 'image/svg+xml',
+  '.webmanifest': 'application/manifest+json',
+};
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', (chunk) => (body += chunk));
+    req.on('end', () => {
+      try {
+        resolve(body ? JSON.parse(body) : {});
+      } catch (e) {
+        reject(e);
+      }
+    });
+  });
+}
+
+const handleRequest = (req, res) => {
+  const url = new URL(req.url, `http://localhost:${PORT}`);
+
+  const workflowActions = {
+    '/api/workflow/item': workflows.patchItem,
+    '/api/workflow/meeting': workflows.saveMeeting,
+    '/api/workflow/capture': workflows.capture,
+    '/api/workflow/link': workflows.link,
+  };
+  if (req.method === 'POST' && workflowActions[url.pathname]) {
+    readBody(req).then(body => {
+      const result = workflowActions[url.pathname](body);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify(result));
+    }).catch(error => {
+      res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: error.message }));
+    });
+    return;
+  }
+
+  if (url.pathname === '/api/items' && req.method === 'GET') {
+    const allDecisions = getDecisions();
+    const payload = {
+      inboxTasks: getInboxTasks(),
+      laterTasks: getLaterTasks(),
+      waiting: getWaitingItems(),
+      todayTasks: getTodayTasks(),
+      ideas: getIdeas(),
+      decisions: allDecisions.filter((d) => d.status !== 'done'),
+      decisionArchive: allDecisions
+        .filter((d) => d.status === 'done')
+        .sort((a, b) => (b.completed || '').localeCompare(a.completed || '')),
+      weeklyReports: getWeeklyReports(),
+      jiraIssues: getJiraIssueCache(),
+      jiraSync: getJiraSync(),
+      slackSync: getSlackSync(),
+      title: CONFIG.title || '내 워크스페이스',
+      // 앱 화면 파일이 바뀌면 이 값이 달라진다. 브라우저가 이걸 보고 스스로 새로고침한다.
+      appVersion: (() => {
+        try {
+          return ['index.html', 'workflows.js', 'workflows.css'].map(file => fs.statSync(path.join(PUBLIC_DIR, file)).mtimeMs).join(':');
+        } catch {
+          return '0';
+        }
+      })(),
+      customGroups: getCustomGroups(),
+      calendar: getCalendarWithLinks(),
+      suggestions: getTodaySuggestions(),
+      reportRefs: getReportRefs(),
+      workflows: workflows.snapshot(),
+      today: todayLocal(),
+      ...getTodayActivityCounts(),
+    };
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify(payload));
+    return;
+  }
+
+  if (req.method === 'POST' && ['/api/track/set-scheduled', '/api/track/seen', '/api/track/restore'].includes(url.pathname)) {
+    readBody(req).then(({ id, scheduled }) => {
+      if (url.pathname.endsWith('set-scheduled')) validateDate(scheduled);
+      let ok;
+      if (url.pathname.endsWith('/restore')) ok = restoreTrackItem(id);
+      else if (url.pathname.endsWith('/seen')) ok = setTrackField(id, 'seen', 'true', null);
+      else {
+        ok = setTrackField(id, 'scheduled', scheduled || 'none', 'task');
+        // 날짜를 정했다는 건 분류가 끝났다는 뜻 — "새로 들어온 것"에서 내린다
+        setTrackField(id, 'inbox', null, 'task');
+      }
+      res.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok }));
+    }).catch(error => {
+      res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: String(error) }));
+    });
+    return;
+  }
+
+  if (url.pathname === '/api/weekly-report/refresh' && req.method === 'POST') {
+    try {
+      const result = refreshWeeklyReport();
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: true, ...result }));
+    } catch (e) {
+      res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: String(e) }));
+    }
+    return;
+  }
+
+  if (url.pathname === '/api/weekly-report/save' && req.method === 'POST') {
+    readBody(req)
+      .then(({ weekKey, content }) => {
+        const ok = saveWeeklyReportBody(weekKey, content || '');
+        res.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok }));
+      })
+      .catch((e) => {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: String(e) }));
+      });
+    return;
+  }
+
+  if (url.pathname === '/api/meeting/set-project' && req.method === 'POST') {
+    readBody(req)
+      .then(({ title, project }) => {
+        const ok = setMeetingLink(title, project || null);
+        res.writeHead(ok ? 200 : 400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok }));
+      })
+      .catch((e) => {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: String(e) }));
+      });
+    return;
+  }
+
+  if (url.pathname === '/api/today-task/create' && req.method === 'POST') {
+    readBody(req)
+      .then((payload) => {
+        const result = createManualTask(payload);
+        res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(result));
+      })
+      .catch((e) => {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: String(e) }));
+      });
+    return;
+  }
+
+  if (url.pathname === '/api/later-task/create' && req.method === 'POST') {
+    readBody(req)
+      .then((payload) => {
+        const result = createLaterTask(payload);
+        res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(result));
+      })
+      .catch((e) => {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: String(e) }));
+      });
+    return;
+  }
+
+  if (url.pathname === '/api/waiting/create' && req.method === 'POST') {
+    readBody(req)
+      .then((payload) => {
+        const result = createWaitingItem(payload);
+        res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(result));
+      })
+      .catch((e) => {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: String(e) }));
+      });
+    return;
+  }
+
+  if (url.pathname === '/api/decision/create' && req.method === 'POST') {
+    readBody(req)
+      .then((payload) => {
+        const result = createDecision(payload);
+        res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(result));
+      })
+      .catch((e) => {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: String(e) }));
+      });
+    return;
+  }
+
+  if (url.pathname === '/api/idea/create' && req.method === 'POST') {
+    readBody(req)
+      .then((payload) => {
+        const result = createIdea(payload);
+        res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(result));
+      })
+      .catch((e) => {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: String(e) }));
+      });
+    return;
+  }
+
+  if (url.pathname === '/api/idea/promote' && req.method === 'POST') {
+    readBody(req)
+      .then(({ id, due }) => {
+        const result = promoteIdeaToToday(id, due);
+        res.writeHead(result.ok ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(result));
+      })
+      .catch((e) => {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: String(e) }));
+      });
+    return;
+  }
+
+  if (url.pathname === '/api/track/set-jira' && req.method === 'POST') {
+    readBody(req)
+      .then(({ id, jiraKey }) => {
+        const ok = setTrackJira(id, jiraKey || null);
+        res.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok }));
+      })
+      .catch((e) => {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: String(e) }));
+      });
+    return;
+  }
+
+  if (url.pathname === '/api/track/set-group' && req.method === 'POST') {
+    readBody(req)
+      .then(({ id, group }) => {
+        const ok = setTrackGroup(id, group || null);
+        res.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok }));
+      })
+      .catch((e) => {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: String(e) }));
+      });
+    return;
+  }
+
+  if (url.pathname === '/api/idea/set-project' && req.method === 'POST') {
+    readBody(req)
+      .then(({ id, project }) => {
+        const ok = setIdeaProject(id, project || null);
+        res.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok }));
+      })
+      .catch((e) => {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: String(e) }));
+      });
+    return;
+  }
+
+  if (url.pathname === '/api/track/set-due' && req.method === 'POST') {
+    readBody(req)
+      .then(({ id, due }) => {
+        const ok = setTrackDue(id, due || null);
+        res.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok }));
+      })
+      .catch((e) => {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: String(e) }));
+      });
+    return;
+  }
+
+  if (url.pathname === '/api/track/set-doing' && req.method === 'POST') {
+    readBody(req)
+      .then(({ id, doing }) => {
+        const ok = setTrackDoing(id, !!doing);
+        res.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok }));
+      })
+      .catch((e) => {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: String(e) }));
+      });
+    return;
+  }
+
+  if (url.pathname === '/api/track/set-who' && req.method === 'POST') {
+    readBody(req)
+      .then(({ id, who }) => {
+        const ok = setTrackWho(id, who || null);
+        res.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok }));
+      })
+      .catch((e) => {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: String(e) }));
+      });
+    return;
+  }
+
+  if (url.pathname === '/api/track/set-priority' && req.method === 'POST') {
+    readBody(req)
+      .then(({ id, priority }) => {
+        const ok = setTrackPriority(id, priority || 'medium');
+        res.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok }));
+      })
+      .catch((e) => {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: String(e) }));
+      });
+    return;
+  }
+
+  if (url.pathname === '/api/track/set-description' && req.method === 'POST') {
+    readBody(req)
+      .then(({ id, description }) => {
+        const ok = setTrackDescription(id, description);
+        res.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok }));
+      })
+      .catch((e) => {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: String(e) }));
+      });
+    return;
+  }
+
+  if (url.pathname === '/api/track/remove' && req.method === 'POST') {
+    readBody(req)
+      .then(({ id }) => {
+        const removed = removeTrackItem(id);
+        res.writeHead(removed ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: !!removed }));
+      })
+      .catch((e) => {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: String(e) }));
+      });
+    return;
+  }
+
+  if (url.pathname === '/api/track/toggle' && req.method === 'POST') {
+    readBody(req)
+      .then(({ id }) => {
+        const ok = toggleTrackStatus(id);
+        res.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok }));
+      })
+      .catch((e) => {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: String(e) }));
+      });
+    return;
+  }
+
+  let filePath = url.pathname === '/' ? '/index.html' : url.pathname;
+  filePath = path.join(PUBLIC_DIR, filePath);
+  if (!filePath.startsWith(PUBLIC_DIR)) {
+    res.writeHead(403);
+    res.end('Forbidden');
+    return;
+  }
+  fs.readFile(filePath, (err, data) => {
+    if (err) {
+      res.writeHead(404);
+      res.end('Not found');
+      return;
+    }
+    const ext = path.extname(filePath);
+    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+    res.end(data);
+  });
+};
+
+const workflows = require('./workflow-store')({
+  directory: TRACKER_DIR, refs: getReportRefs, calendar: getCalendarWithLinks,
+  today: todayLocal, validateDate,
+  create: { task: createManualTask, check: createWaitingItem, decision: createDecision },
+  remove: removeTrackItem,
+});
+const server = http.createServer(handleRequest);
+
+if (require.main === module) {
+  const archiveMeetings = () => { try { workflows.archive(); } catch (error) { console.error('회의 기록 저장 실패:', error.message); } };
+  archiveMeetings();
+  fs.watchFile(path.join(TRACKER_DIR, 'calendar_today.md'), { interval: 1000, persistent: false }, archiveMeetings);
+  server.listen(PORT, '127.0.0.1', () => {
+    console.log(`슬랙 인박스 앱: http://localhost:${PORT}`);
+    if (!process.env.WORKSPACE_NO_OPEN) exec(`open http://localhost:${PORT}`);
+  });
+
+  // 다른 기기용 주소를 따로 연다. 0.0.0.0이 아니라 특정 주소(예: Tailscale)만 열어서,
+  // 같은 와이파이를 쓰는 다른 사람에게는 노출되지 않게 한다.
+  if (EXTRA_HOST && EXTRA_HOST !== '127.0.0.1') {
+    http
+      .createServer(handleRequest)
+      .listen(PORT, EXTRA_HOST, () => {
+        console.log(`다른 기기용: http://${EXTRA_HOST}:${PORT}`);
+      })
+      .on('error', (err) => console.error(`다른 기기용 주소를 열지 못함: ${err.message}`));
+  }
+}
+
+module.exports = { server };

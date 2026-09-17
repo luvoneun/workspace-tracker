@@ -1,0 +1,34 @@
+{
+  "title": "내 워크스페이스",
+  "integrations": {
+    "slack": true,
+    "calendar": true,
+    "jira": true
+  },
+  "slack": {
+    "workspaceUrl": "https://내회사.slack.com",
+    "tokenFile": "~/Desktop/personal/.slack_token",
+    "channels": {
+      "todo": {
+        "id": "여기에_채널ID",
+        "name": "#my-todo"
+      },
+      "align": {
+        "id": "여기에_채널ID",
+        "name": "#my-align"
+      },
+      "someday": {
+        "id": "여기에_채널ID",
+        "name": "#my-someday"
+      },
+      "waiting": {
+        "id": "여기에_채널ID",
+        "name": "#my-waiting"
+      }
+    }
+  },
+  "server": {
+    "port": 4321,
+    "extraHost": ""
+  }
+}

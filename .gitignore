@@ -1,0 +1,31 @@
+# 비밀 — 절대 올리지 말 것
+.slack_token
+workspace.config.json
+
+# 내 개인 업무 데이터 (다른 사람이 쓸 땐 빈 상태로 시작)
+tracker/tasks.md
+tracker/decisions.md
+tracker/checks.md
+tracker/ideas.md
+tracker/weekly_reports.md
+tracker/calendar_today.md
+tracker/jira_issues.md
+tracker/slack_inbox.md
+tracker/.trash.json
+tracker/.workflow.json
+
+# 실행 중 생기는 상태/로그
+tracker/inbox-app/.slack_capture_state.json
+tracker/inbox-app/.weekly_report_state.json
+tracker/inbox-app/.meeting_links.json
+tracker/inbox-app/output/
+**/logs/
+*.log
+.claude/scheduled_tasks.lock
+
+# 테스트/작업 도구가 만드는 캐시·스크린샷 (소스 아님)
+**/.playwright-cli/
+output/
+
+# macOS
+.DS_Store
