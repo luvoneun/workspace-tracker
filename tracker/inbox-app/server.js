@@ -907,15 +907,8 @@ function promoteIdeaToToday(id, due) {
 }
 
 // ---------- 주간 요약 (tracker/weekly_reports.md) ----------
-// 기록 전용: 새로 생긴 항목만 추가하고, 이미 쓴 줄(사람이 수정/삭제한 것 포함)은 절대 건드리지 않는다.
-
-const REPORT_SECTIONS = [
-  { key: 'done', heading: '완료한 일' },
-  { key: 'doing', heading: '진행중' },
-  { key: 'later', heading: '다음 주 계획' },
-  { key: 'decisions', heading: '새로 정해진 것' },
-  { key: 'waiting', heading: '확인 대기' },
-];
+// 읽기 전용: 예전에 쓰던 이 파일은 더 이상 앱이 고치지 않는다. 지금 편집은 보고 기록
+// (report-drafts.js / tracker/.report-drafts.json)에 저장하고, 여기서는 옛 내용을 읽어 보여주기만 한다.
 
 function mondayOf(date) {
   const d = new Date(date);
@@ -959,14 +952,6 @@ function readWeeklyReportState() {
   }
 }
 
-function writeWeeklyReportState(state) {
-  fs.writeFileSync(weeklyReportStatePath(), JSON.stringify(state, null, 2));
-}
-
-function emptyReportBody() {
-  return REPORT_SECTIONS.map((s) => `**${s.heading}**\n`).join('\n');
-}
-
 function parseWeeklyReports() {
   const p = weeklyReportsPath();
   if (!fs.existsSync(p)) return [];
@@ -978,11 +963,6 @@ function parseWeeklyReports() {
     const body = part.slice(newlineIdx + 1).replace(/\n+$/, '');
     return { weekKey, body };
   });
-}
-
-function writeWeeklyReports(list) {
-  const sections = list.map((r) => `## ${r.weekKey}\n\n${r.body.trim()}\n`).join('\n');
-  fs.writeFileSync(weeklyReportsPath(), `# Weekly Reports\n\n${sections}`);
 }
 
 function getWeeklyReports() {
@@ -1007,55 +987,6 @@ function getTodayActivityCounts() {
     });
   });
   return { createdToday };
-}
-
-function saveWeeklyReportBody(weekKey, content) {
-  const reports = parseWeeklyReports();
-  const entry = reports.find((r) => r.weekKey === weekKey);
-  if (!entry) return false;
-  entry.body = content;
-  writeWeeklyReports(reports);
-  return true;
-}
-
-function insertBulletsUnderHeading(body, heading, lines) {
-  if (!lines.length) return body;
-  const bulletBlock = lines.map((l) => `- ${l}`).join('\n');
-  const headingRe = new RegExp(`(\\*\\*${heading}\\*\\*\\n(?:- .*\\n?)*)`);
-  if (headingRe.test(body)) {
-    return body.replace(headingRe, (match) => `${match.replace(/\n+$/, '')}\n${bulletBlock}\n`);
-  }
-  const sep = body.trim().length ? '\n\n' : '';
-  return `${body.trim()}${sep}**${heading}**\n${bulletBlock}\n`;
-}
-
-function getTasksDoneSince(dateStr, endDateStr) {
-  const items = [];
-  listTrackerFiles().forEach((filePath) => {
-    fs.readFileSync(filePath, 'utf-8').split('\n').forEach((line) => {
-      const m = line.match(TRACK_RE);
-      if (!m || m[2] !== 'task') return;
-      const fields = parseFields(m[3]);
-      if (fields.status !== 'done') return;
-      const ref = fields.completed || (fields.updated ? localDateOf(fields.updated) : fields.created);
-      if (!ref || ref < dateStr) return;
-      if (endDateStr && ref > endDateStr) return;
-      items.push({
-        id: fields.id,
-        description: m[1],
-        jira: fields.jira || null,
-        group: fields.group ? fields.group.replace(/_/g, ' ') : null,
-      });
-    });
-  });
-  return items;
-}
-
-// 요약 줄은 "내용 ^원본id" 형태로 쓴다. 그룹은 줄에 굽지 않고 원본에서 그때그때 읽어오므로,
-// 나중에 원본 그룹이 바뀌어도 요약이 따라간다. (사람이 직접 쓴 줄은 id가 없다)
-function formatReportLine(item) {
-  const result = item.id && getReportRefs()[item.id]?.status === 'done' ? workflows.outcome(item.id) : '';
-  return item.id ? `${result || item.description} ^${item.id}` : item.description;
 }
 
 function projectLabelOf(item) {
@@ -1098,178 +1029,6 @@ function getReportRefs() {
   });
   if(readScope)readScope.refs=refs;
   return refs;
-}
-
-function getDecisionsSince(dateStr) {
-  const items = [];
-  listTrackerFiles().forEach((filePath) => {
-    fs.readFileSync(filePath, 'utf-8').split('\n').forEach((line) => {
-      const m = line.match(TRACK_RE);
-      if (!m || m[2] !== 'decision') return;
-      const fields = parseFields(m[3]);
-      if (!fields.created || fields.created < dateStr) return;
-      items.push({
-        id: fields.id,
-        description: m[1],
-        jira: fields.jira || null,
-        group: fields.group ? fields.group.replace(/_/g, ' ') : null,
-      });
-    });
-  });
-  return items;
-}
-
-// 지금 "진행 중"으로 표시해둔 업무 — 오늘 목록에 있든 뒤로 밀렸든 전부
-function getDoingTasks() {
-  const items = [];
-  listTrackerFiles().forEach((filePath) => {
-    fs.readFileSync(filePath, 'utf-8').split('\n').forEach((line) => {
-      const m = line.match(TRACK_RE);
-      if (!m || m[2] !== 'task') return;
-      const fields = parseFields(m[3]);
-      if (fields.status === 'done' || !fields.doing) return;
-      items.push({
-        id: fields.id,
-        description: m[1],
-        doing: fields.doing,
-        jira: fields.jira || null,
-        group: fields.group ? fields.group.replace(/_/g, ' ') : null,
-      });
-    });
-  });
-  return items;
-}
-
-function getOpenWaitingAll() {
-  return getWaitingItems().filter((i) => i.status !== 'done');
-}
-
-// 어떤 주가 끝나는 시점 기준으로, 예정일이 그날까지인데 아직 안 끝난 할 일 —
-// "오늘 할 일" 화면이 예정일 지난 걸 계속 다시 보여주는 것과 같은 조건(scheduled <= 기준일)을
-// 쓰되, 화면 표시 함수(getTodayTasks)는 건드리지 않고 원본 데이터만 직접 본다. 화면 표시 방식이
-// 나중에 바뀌어도(주말 처리 등) 이 로직은 영향을 안 받게 하려는 것.
-function getTasksIncompleteAsOf(weekEnd) {
-  const items = [];
-  listTrackerFiles().forEach((filePath) => {
-    fs.readFileSync(filePath, 'utf-8').split('\n').forEach((line) => {
-      const m = line.match(TRACK_RE);
-      if (!m || m[2] !== 'task') return;
-      const fields = parseFields(m[3]);
-      if (fields.status === 'done' || fields.inbox === 'true') return;
-      const scheduled = plannedDay(fields);
-      if (!scheduled || scheduled > weekEnd) return;
-      items.push({
-        id: fields.id,
-        description: m[1],
-        jira: fields.jira || null,
-        group: fields.group ? fields.group.replace(/_/g, ' ') : null,
-      });
-    });
-  });
-  return items;
-}
-
-// 한 주치를 채운다. "다음 주 계획"은 사람이 직접 고르는 게 기본이고, 지난 주에서 못 끝낸 할
-// 일만 refreshWeeklyReport가 따로 자동으로 이월해 넣는다(아래 참고).
-function fillWeek(entry, state, weekKey, { closing = false } = {}) {
-  if (!state[weekKey]) state[weekKey] = { done: [], doing: [], later: [], decisions: [], waiting: [] };
-  const seen = state[weekKey];
-
-  const sunday = new Date(`${weekKey}T00:00:00`);
-  sunday.setDate(sunday.getDate() + 6);
-  const weekEnd = fmtDate(sunday);
-
-  if (!seen.doing) seen.doing = [];
-  const doneCandidates = getTasksDoneSince(weekKey, weekEnd).filter((i) => !seen.done.includes(i.id));
-  const doingCandidates = closing ? [] : getDoingTasks().filter((i) => !seen.doing.includes(i.id));
-  const sourceRefs = getReportRefs();
-  const decisionCandidates = getDecisionsSince(weekKey).filter((i) => sourceRefs[i.id]?.created <= weekEnd && !seen.decisions.includes(i.id));
-  const waitingCandidates = closing ? [] : getOpenWaitingAll().filter((i) => !seen.waiting.includes(i.id));
-
-  let body = entry.body.replace('**막혀있는 것**', '**확인 대기**');
-  if (!body.includes('**진행중**')) body = body.replace('**다음 주 계획**', '**진행중**\n\n**다음 주 계획**');
-  body = insertBulletsUnderHeading(body, '완료한 일', doneCandidates.map(formatReportLine));
-  body = insertBulletsUnderHeading(body, '진행중', doingCandidates.map(formatReportLine));
-  body = insertBulletsUnderHeading(body, '새로 정해진 것', decisionCandidates.map(formatReportLine));
-  body = insertBulletsUnderHeading(body, '확인 대기', waitingCandidates.map(formatReportLine));
-  entry.body = body;
-
-  seen.done.push(...doneCandidates.map((i) => i.id));
-  seen.doing.push(...doingCandidates.map((i) => i.id));
-  seen.decisions.push(...decisionCandidates.map((i) => i.id));
-  seen.waiting.push(...waitingCandidates.map((i) => i.id));
-  const totalAdded = doneCandidates.length + doingCandidates.length + decisionCandidates.length + waitingCandidates.length;
-  // 실제로 새로 담은 게 있을 때만 "마지막 수집" 시각을 갱신한다 — 그래야 이 값이
-  // "몇 분 전에 열어봤다"가 아니라 "몇 분 전에 새 내용이 들어왔다"를 뜻하게 된다.
-  if (totalAdded > 0) seen.generatedAt = new Date().toISOString();
-  if (closing) seen.finalized = true;
-
-  return { done: doneCandidates.length, doing: doingCandidates.length, decisions: decisionCandidates.length, waiting: waitingCandidates.length, changed: totalAdded > 0 };
-}
-
-// 새로 완료된 일 등을 이번 주 요약에 채워 넣고, 주가 바뀌었으면 다음 주 칸을 새로 만든다.
-// 예전엔 이 함수를 부르는 곳이 화면 어디에도 없어서(수동 API만 있고 아무도 호출 안 함),
-// 완료한 일이 전혀 안 쌓이고 새 주도 안 생기는 문제가 있었다 — /api/items를 부를 때마다
-// (새로고침·자동 폴링·당겨서 새로고침 전부 포함) 같이 돌게 해서 화면을 열기만 해도 최신 상태가 되게 한다.
-function findOrCreateReportEntry(reports, wk) {
-  let entry = reports.find((r) => r.weekKey === wk);
-  if (!entry) {
-    entry = { weekKey: wk, body: emptyReportBody() };
-    reports.unshift(entry);
-  }
-  return entry;
-}
-
-function refreshWeeklyReport() {
-  const weekKey = currentWeekKey();
-  const reports = parseWeeklyReports();
-  const state = readWeeklyReportState();
-  let changed = false;
-
-  // 지난 주가 열린 채 남아있으면 오래된 주부터 순서대로 마감 처리한다. 순서가 중요한 이유:
-  // 마감하면서 "그 주까지 예정이었는데 안 끝난 할 일"을 바로 다음 주 계획으로 이월하는데,
-  // 오래된 주부터 처리해야 그 이월이 한 주씩 순서대로 이어진다.
-  const pastOpen = reports
-    .filter((r) => r.weekKey < weekKey && !state[r.weekKey]?.finalized)
-    .sort((a, b) => a.weekKey.localeCompare(b.weekKey));
-
-  pastOpen.forEach((past) => {
-    fillWeek(past, state, past.weekKey, { closing: true });
-    changed = true;
-
-    // 안 끝난 할 일은 다음 주 "다음 주 계획"으로 자동 이월한다. 계속 안 끝나면 매주
-    // 다시 이월된다("오늘 할 일"이 매일 다시 보이는 것과 같은 방식). 사람이 이월된 줄을
-    // 직접 지우거나 고쳐도, 같은 주에는 같은 항목을 또 밀어 넣지 않는다(seen.later로 구분).
-    const monday = new Date(`${past.weekKey}T00:00:00`);
-    const weekEnd = fmtDate(new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 6));
-    const nextWeekKey = fmtDate(new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 7));
-
-    if (!state[nextWeekKey]) state[nextWeekKey] = { done: [], doing: [], later: [], decisions: [], waiting: [] };
-    const seenLater = state[nextWeekKey].later || (state[nextWeekKey].later = []);
-    const carryCandidates = getTasksIncompleteAsOf(weekEnd).filter((i) => !seenLater.includes(i.id));
-
-    if (carryCandidates.length) {
-      const nextEntry = findOrCreateReportEntry(reports, nextWeekKey);
-      nextEntry.body = insertBulletsUnderHeading(nextEntry.body, '다음 주 계획', carryCandidates.map(formatReportLine));
-      seenLater.push(...carryCandidates.map((i) => i.id));
-      changed = true;
-    }
-  });
-
-  const isNewCurrentWeek = !reports.some((r) => r.weekKey === weekKey);
-  const entry = findOrCreateReportEntry(reports, weekKey);
-  if (isNewCurrentWeek) changed = true;
-  const added = fillWeek(entry, state, weekKey);
-  if (added.changed) changed = true;
-
-  reports.sort((a, b) => b.weekKey.localeCompare(a.weekKey));
-
-  if (changed) {
-    writeWeeklyReports(reports);
-    writeWeeklyReportState(state);
-  }
-
-  return { weekKey, label: weekLabel(weekKey), added: { ...added, later: 0 } };
 }
 
 // ---------- HTTP 서버 ----------
@@ -1456,32 +1215,6 @@ const handleRequest = (req, res) => {
       res.writeHead(error.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ ok: false, error: error.message || String(error), code: error.code }));
     });
-    return;
-  }
-
-  if (url.pathname === '/api/weekly-report/refresh' && req.method === 'POST') {
-    try {
-      const result = refreshWeeklyReport();
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: true, ...result }));
-    } catch (e) {
-      res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
-    }
-    return;
-  }
-
-  if (url.pathname === '/api/weekly-report/save' && req.method === 'POST') {
-    readBody(req)
-      .then(({ weekKey, content }) => {
-        const ok = saveWeeklyReportBody(weekKey, content || '');
-        res.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok }));
-      })
-      .catch((e) => {
-        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
-      });
     return;
   }
 
@@ -1766,8 +1499,6 @@ createIdea = transactional(createIdea);
 removeTrackItem = transactional(removeTrackItem);
 restoreTrackItem = transactional(restoreTrackItem);
 promoteIdeaToToday = transactional(promoteIdeaToToday);
-saveWeeklyReportBody = transactional(saveWeeklyReportBody);
-refreshWeeklyReport = transactional(refreshWeeklyReport);
 setMeetingLink = transactional(setMeetingLink);
 function safeHandle(req, res) {
   try {

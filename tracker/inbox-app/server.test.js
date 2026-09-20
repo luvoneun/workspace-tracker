@@ -123,15 +123,11 @@ test('meeting capture persists across calendar rollover and resolves live comple
   assert.equal(readTasks(), original);
 });
 
-test('completed outcome is used in new weekly summary entries without rewriting existing notes', async () => {
-  fs.writeFileSync(path.join(directory, 'weekly_reports.md'), '# Weekly Reports\n');
+test('completed outcome is used in the report draft text', async () => {
   await post('/api/workflow/item', { id: 'legacy', outcome: '디자인 전달일 금요일로 확정' });
   await post('/api/track/toggle', { id: 'legacy' });
-  await post('/api/weekly-report/refresh', {});
-  assert.match((await items()).weeklyReports[0].body, /디자인 전달일 금요일로 확정 \^legacy/);
-  await post('/api/workflow/item', { id: 'legacy', outcome: '수정한 결과' });
-  await post('/api/weekly-report/refresh', {});
-  assert.match((await items()).weeklyReports[0].body, /디자인 전달일 금요일로 확정 \^legacy/);
+  const rows = (await items()).weeklyReports.flatMap(report => report.draft?.rows || []);
+  assert.ok(rows.some(row => row.sourceIds.includes('legacy') && row.text.includes('디자인 전달일 금요일로 확정')));
 });
 
 test('workflow GET remains read-only', async () => {
@@ -272,24 +268,6 @@ test('stale calendar data is not presented as today’s meetings', async () => {
   calendar = (await items()).calendar;
   assert.equal(calendar.stale, false);
   assert.equal(calendar.events[0].end, '11:00');
-});
-
-test('weekly refresh never auto-fills next-week plans and preserves hand-picked plans', async () => {
-  const nextMonday = new Date();
-  nextMonday.setDate(nextMonday.getDate() + (nextMonday.getDay() === 0 ? 1 : 8 - nextMonday.getDay()));
-  await post('/api/today-task/create', { description: 'Next week', scheduled: date(nextMonday) });
-  await post('/api/later-task/create', { description: 'Unscheduled backlog' });
-  const result = await post('/api/weekly-report/refresh', {});
-  let report = (await items()).weeklyReports.find(item => item.weekKey === result.weekKey);
-  assert.doesNotMatch(report.body, /Next week|Unscheduled backlog/);
-  assert.equal(result.added.later, 0);
-  assert.ok(report.generatedAt);
-  const edited = report.body.replace('**다음 주 계획**', '**다음 주 계획**\n- Manually picked plan');
-  await post('/api/weekly-report/save', { weekKey: report.weekKey, content: edited });
-  await post('/api/weekly-report/refresh', {});
-  report = (await items()).weeklyReports.find(item => item.weekKey === result.weekKey);
-  assert.match(report.body, /Manually picked plan/);
-  assert.doesNotMatch(report.body, /Next week/);
 });
 
 test('promoting a non-idea fails without deleting the task', async () => {
