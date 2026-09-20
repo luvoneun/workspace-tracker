@@ -1834,7 +1834,7 @@ function renderDecisionCard(item) {
       <span class="meta">${done && item.completed ? '반영: ' + relativeDate(item.completed) : item.created ? '추가: ' + relativeDate(item.created) : ''}</span>
     </div>
     <div class="badges"><span class="badge">${done ? 'PRD 반영함' : 'PRD 미반영'}</span></div>
-    ${item.permalink ? `<a class="link channel" href="${item.permalink}" target="_blank" rel="noopener">슬랙 원문</a>` : ''}
+    ${item.permalink ? `<a class="link channel" href="${escapeAttr(item.permalink)}" target="_blank" rel="noopener">슬랙 원문</a>` : ''}
   `;
   if (!done) makeEditableDesc(body.querySelector('.desc'), item);
   body.prepend(renderGroupControl({
@@ -1947,7 +1947,7 @@ function renderWaitingCard(item) {
       <span class="meta">${item.created ? '추가: ' + relativeDate(item.created) : ''}</span>
     </div>
     <div class="badges">${badges.join('')}</div>
-    ${item.permalink ? `<a class="link channel" href="${item.permalink}" target="_blank" rel="noopener">슬랙 원문</a>` : ''}
+    ${item.permalink ? `<a class="link channel" href="${escapeAttr(item.permalink)}" target="_blank" rel="noopener">슬랙 원문</a>` : ''}
   `;
   if (!done) {
     makeEditableDesc(body.querySelector('.desc'), item);
@@ -2143,7 +2143,7 @@ function renderTaskCard(item, opts) {
       <span class="meta">${item.created ? '추가: ' + relativeDate(item.created) : ''}</span>
     </div>
     <div class="badges">${badges.join('')}</div>
-    ${item.permalink ? `<a class="link channel" href="${item.permalink}" target="_blank" rel="noopener">슬랙 원문</a>` : ''}
+    ${item.permalink ? `<a class="link channel" href="${escapeAttr(item.permalink)}" target="_blank" rel="noopener">슬랙 원문</a>` : ''}
   `;
   const priorityControl = renderPriorityBadge(item);
   const showPriority = ['high', 'critical'].includes(item.priority);
@@ -2475,7 +2475,7 @@ function renderInbox(items) {
         <span class="desc sender">${escapeHtml(item.description)}</span>
       </div>
       ${badges.length ? `<div class="badges">${badges.join('')}</div>` : ''}
-      ${item.permalink ? `<a class="link channel" href="${item.permalink}" target="_blank" rel="noopener">슬랙 원문</a>` : ''}
+      ${item.permalink ? `<a class="link channel" href="${escapeAttr(item.permalink)}" target="_blank" rel="noopener">슬랙 원문</a>` : ''}
     `;
     makeEditableDesc(body.querySelector('.desc'), item);
     // 분류하면서 어느 프로젝트 건인지도 같이 정할 수 있게 한다
@@ -2624,6 +2624,7 @@ function renderTodayTasks(items) {
 function renderGroupAddInput(key, endpoint, announceText) {
   const wrapper = document.createElement('details');
   wrapper.className = 'group-add';
+  wrapper.dataset.addKey = `${endpoint}::${key}`;
   const summary = document.createElement('summary');
   summary.textContent = '+ 이 그룹에 추가';
   const input = document.createElement('input');
@@ -2648,6 +2649,9 @@ function renderGroupAddInput(key, endpoint, announceText) {
       input.value = '';
       announce(announceText);
       await load();
+      // load()가 목록을 다시 그려서 이 input은 떨어져 나간다 — 같은 그룹의 새 input을 찾아 다시 연다.
+      const reopened = document.querySelector(`.group-add[data-add-key="${CSS.escape(wrapper.dataset.addKey)}"] .wr-add-input`);
+      if (reopened) { reopened.closest('details').open = true; reopened.focus(); }
     } catch { /* Keep the draft for retry. */ }
     finally { input.disabled = false; if (input.isConnected) input.focus(); }
   });

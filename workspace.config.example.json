@@ -7,7 +7,7 @@
   },
   "slack": {
     "workspaceUrl": "https://내회사.slack.com",
-    "tokenFile": "~/Desktop/personal/.slack_token",
+    "tokenFile": "~/personal/.slack_token",
     "channels": {
       "todo": {
         "id": "여기에_채널ID",

@@ -25,7 +25,7 @@ function wfButton(text, action, className) {
     button.disabled = true;
     try { await action(); } catch (error) {
       const region = workflowDialog?.querySelector('.wf-error');
-      if (region) region.textContent = '저장하지 못했습니다. 입력 내용을 확인하고 다시 시도해 주세요.';
+      if (region) region.textContent = (typeof error?.message === 'string' && error.message) || '저장하지 못했습니다. 입력 내용을 확인하고 다시 시도해 주세요.';
     } finally { button.disabled = false; }
   });
   return button;
