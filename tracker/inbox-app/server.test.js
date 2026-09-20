@@ -3,6 +3,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const net = require('node:net');
+const { spawn, spawnSync } = require('node:child_process');
+const { createHash } = require('node:crypto');
 
 process.env.TZ = 'Asia/Seoul';
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-regression-'));
@@ -30,6 +33,13 @@ test('cross-origin mutations are rejected',async()=>{
 });
 test('multiline creation fails without changing tasks',async()=>{
   const before=readTasks();assert.equal((await post('/api/today-task/create',{description:'first\nsecond'})).status,400);assert.equal(readTasks(),before);
+});
+test('a later task keeps its deadline and stays unscheduled',async()=>{
+  const created=await post('/api/later-task/create',{description:'Backlog with a deadline',due:'2026-12-31'});
+  assert.equal(created.ok,true);
+  assert.match(readTasks(),new RegExp(`id:${created.id} [^\\n]*scheduled:none due:2026-12-31`));
+  const later=(await items()).laterTasks.find(task=>task.id===created.id);
+  assert.equal(later.due,'2026-12-31');assert.equal(later.scheduled,null);
 });
 test('explicit completion is safe to retry',async()=>{
   await post('/api/track/toggle',{id:'legacy',status:'done'});await post('/api/track/toggle',{id:'legacy',status:'done'});
@@ -287,6 +297,72 @@ test('a decision kept from a waiting item carries its Slack link without showing
   assert.equal((await post('/api/decision/create', { description: 'Bad link', permalink: 'https://example.test/a b' })).status, 400);
 });
 
+// 시작 시 복구는 모듈로 불러올 때 실행되지 않는다. 실제 `node server.js`를 띄워서 확인한다.
+const freePort = () => new Promise(resolve => {
+  const probe = net.createServer();
+  probe.listen(0, '127.0.0.1', () => { const { port } = probe.address(); probe.close(() => resolve(port)); });
+});
+const deadPid = () => spawnSync(process.execPath, ['-e', '']).pid;
+const journalEntry = (file, before, after) => JSON.stringify({ changes: [{ file, before: Buffer.from(before).toString('base64'), after: createHash('sha256').update(after).digest('hex'), intermediate: [] }] });
+async function startServer(t, seed) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-recovery-'));
+  seed(home);
+  const port = await freePort();
+  const child = spawn(process.execPath, [path.join(__dirname, 'server.js')], {
+    env: { ...process.env, WORKSPACE_DATA_DIR: home, WORKSPACE_PORT: String(port), WORKSPACE_NO_OPEN: '1', WORKSPACE_HOST: '', WORKSPACE_CONFIG: path.join(home, 'absent.config.json') },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let log = '';
+  child.stdout.on('data', chunk => { log += chunk; });
+  child.stderr.on('data', chunk => { log += chunk; });
+  t.after(() => { child.kill('SIGKILL'); fs.rmSync(home, { recursive: true, force: true }); });
+  const base = `http://127.0.0.1:${port}`;
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) throw new Error(`서버가 종료되었습니다 (${child.exitCode}): ${log}`);
+    try { if ((await fetch(base + '/api/storage-status')).ok) return { home, base, log: () => log }; } catch { /* 아직 안 떴다 */ }
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  throw new Error(`서버가 응답하지 않았습니다: ${log}`);
+}
+
+test('a refused startup recovery keeps the app up with saving locked', async (t) => {
+  const external = '# Tasks\n- 바깥에서 고친 줄 #task[id:outside status:to-do created:2026-09-20]\n';
+  const server = await startServer(t, home => {
+    fs.writeFileSync(path.join(home, 'tasks.md'), external);
+    fs.writeFileSync(path.join(home, '.mutation-journal.json'), journalEntry(path.join(home, 'tasks.md'), '# Tasks\n', '# Tasks\n- 중단된 저장\n'));
+    fs.writeFileSync(path.join(home, '.mutation.lock'), String(deadPid()));
+  });
+  const status = await (await fetch(server.base + '/api/storage-status')).json();
+  assert.equal(status.recoveryNeeded, true);
+  assert.match(status.reason, /외부에서 변경된/);
+  const response = await fetch(server.base + '/api/today-task/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ description: '저장되면 안 되는 업무' }) });
+  const body = await response.json();
+  assert.equal(response.status, 503);
+  assert.equal(body.code, 'RECOVERY_NEEDED');
+  assert.match(body.error, /저장을 멈췄습니다/);
+  assert.equal(fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8'), external);
+  assert.ok(fs.existsSync(path.join(server.home, '.mutation-journal.json')));
+  assert.ok(fs.existsSync(path.join(server.home, '.mutation.lock')));
+  assert.equal(fs.existsSync(path.join(server.home, '.workflow.json')), false);
+});
+
+test('a restorable journal is recovered at startup and saving continues', async (t) => {
+  const interrupted = '# Tasks\n- 중단된 저장 #task[id:half status:to-do created:2026-09-20]\n';
+  const server = await startServer(t, home => {
+    fs.writeFileSync(path.join(home, 'tasks.md'), interrupted);
+    fs.writeFileSync(path.join(home, '.mutation-journal.json'), journalEntry(path.join(home, 'tasks.md'), '# Tasks\n', interrupted));
+    fs.writeFileSync(path.join(home, '.mutation.lock'), String(deadPid()));
+  });
+  assert.deepEqual(await (await fetch(server.base + '/api/storage-status')).json(), { recoveryNeeded: false, reason: null, message: null });
+  assert.equal(fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8'), '# Tasks\n');
+  assert.equal(fs.existsSync(path.join(server.home, '.mutation-journal.json')), false);
+  assert.equal(fs.existsSync(path.join(server.home, '.mutation.lock')), false);
+  const created = await fetch(server.base + '/api/today-task/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ description: '복구 후 저장' }) });
+  assert.equal(created.status, 200);
+  assert.match(fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8'), /복구 후 저장/);
+});
+
 test('meeting drafts from tiro-sync are reviewed once: accepted items land in their lists, dismissed ones stay hidden', async () => {
   const draftsPath = path.join(directory, 'meeting_drafts.json');
   fs.writeFileSync(path.join(directory, 'calendar_today.md'), `마지막 갱신: ${today}\n- 15:00-16:00 | 운영툴 킥오프\n`);
@@ -322,4 +398,128 @@ test('meeting drafts from tiro-sync are reviewed once: accepted items land in th
   } finally {
     fs.rmSync(draftsPath);
   }
+});
+
+// launchd가 부르는 자동화 스크립트. 앱과 따로 돌지만 여기가 멈추면 수집이 통째로 멎기 때문에,
+// 실제 스크립트를 임시 폴더·가짜 claude로 돌려서 "멈춤 방지" 장치만 확인한다.
+// (슬랙 API나 운영 서버는 건드리지 않는다 — 채널이 없는 설정이라 곧바로 실패하고 끝난다)
+const automationScript = name => path.join(__dirname, 'automation', name);
+const runScript = (script, args, env) => spawnSync('/bin/bash', [script, ...args], {
+  env: { ...process.env, ...env }, encoding: 'utf8', timeout: 60000,
+});
+const gone = pid => { try { process.kill(pid, 0); return false; } catch { return true; } };
+
+test('run-task.sh는 매달린 실행을 시간 제한으로 끊고 자식 프로세스까지 정리한다', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-run-task-'));
+  const claude = path.join(home, 'fake-claude.sh');
+  fs.writeFileSync(claude, '#!/bin/bash\nsleep 60 &\necho "child=$!"\necho "parent=$$"\nsleep 60\n');
+  fs.chmodSync(claude, 0o755);
+  const result = runScript(automationScript('run-task.sh'), ['hang', '프롬프트', 'Read'], {
+    WORKSPACE_DIR: home, AUTOMATION_LOG_DIR: path.join(home, 'logs'), CLAUDE_BIN: claude,
+    TASK_TIMEOUT_SECONDS: '2', TASK_KILL_GRACE_SECONDS: '1',
+  });
+  assert.equal(result.status, 124);
+  const log = fs.readFileSync(path.join(home, 'logs', 'hang.log'), 'utf8');
+  assert.match(log, /hang 시간 초과 \(2초\)/);
+  // 상태 탭이 읽는 시작/종료 줄 형식은 그대로여야 한다
+  assert.match(log, /^───── \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} hang 시작$/m);
+  assert.match(log, /^───── \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} hang 종료 \(exit 124\)$/m);
+  const pids = [...log.matchAll(/(?:child|parent)=(\d+)/g)].map(match => Number(match[1]));
+  assert.equal(pids.length, 2);
+  assert.deepEqual(pids.map(gone), [true, true]); // MCP 자식 흉내까지 남지 않는다
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('run-task.sh는 정상 실행의 인자·종료 코드·로그 형식을 그대로 넘긴다', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-run-task-'));
+  const claude = path.join(home, 'fake-claude.sh');
+  fs.writeFileSync(claude, `#!/bin/bash\nprintf '%s\\n' "$*" > "${path.join(home, 'args.txt')}"\necho "수집 결과 요약"\nexit \${FAKE_EXIT:-0}\n`);
+  fs.chmodSync(claude, 0o755);
+  const env = { WORKSPACE_DIR: home, AUTOMATION_LOG_DIR: path.join(home, 'logs'), CLAUDE_BIN: claude };
+  assert.equal(runScript(automationScript('run-task.sh'), ['ok', '프롬프트', 'Read,Write'], env).status, 0);
+  assert.equal(fs.readFileSync(path.join(home, 'args.txt'), 'utf8').trim(), '-p 프롬프트 --permission-mode acceptEdits --allowedTools Read,Write');
+  assert.equal(runScript(automationScript('run-task.sh'), ['ok', '프롬프트', 'Read,Write'], { ...env, FAKE_EXIT: '7' }).status, 7);
+  // 권한 모드·금지 도구는 선택 인자다(슬랙 캡처만 쓴다). 안 주면 위처럼 예전 그대로다.
+  assert.equal(runScript(automationScript('run-task.sh'), ['ok', '프롬프트', 'Read', 'manual', 'Write,Edit'], env).status, 0);
+  assert.equal(fs.readFileSync(path.join(home, 'args.txt'), 'utf8').trim(), '-p 프롬프트 --permission-mode manual --allowedTools Read --disallowedTools Write,Edit');
+  const log = fs.readFileSync(path.join(home, 'logs', 'ok.log'), 'utf8');
+  assert.doesNotMatch(log, /시간 초과/);
+  assert.match(log, /^───── \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} ok 종료 \(exit 0\)$/m);
+  assert.match(log, /^───── \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} ok 종료 \(exit 7\)$/m);
+  assert.equal(log.split('수집 결과 요약').length - 1, 3);
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('slack-capture.sh 잠금은 살아 있는 실행만 존중하고 죽은 잠금은 회수한다', (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-slack-lock-'));
+  const logs = path.join(home, 'logs');
+  const lock = path.join(logs, '.slack-capture.lock');
+  const config = path.join(home, 'workspace.config.json');
+  fs.writeFileSync(config, '{}'); // 채널이 없으니 잠금만 잡고 곧바로 실패하고 끝난다
+  const logText = () => fs.readFileSync(path.join(logs, 'slack-capture.log'), 'utf8');
+  const capture = () => runScript(automationScript('slack-capture.sh'), [], {
+    WORKSPACE_DIR: home, WORKSPACE_CONFIG: config, AUTOMATION_LOG_DIR: logs,
+    SLACK_CAPTURE_IGNORE_HOURS: '1', WORKSPACE_PORT: '4322',
+  });
+  const holdLock = pid => { fs.mkdirSync(lock, { recursive: true }); fs.writeFileSync(path.join(lock, 'pid'), `${pid}\n`); };
+  const longRunning = name => {
+    const script = path.join(home, name);
+    fs.writeFileSync(script, '#!/bin/bash\nsleep 60\n');
+    fs.chmodSync(script, 0o755);
+    const child = spawn('/bin/bash', [script], { stdio: 'ignore' });
+    t.after(() => child.kill('SIGKILL'));
+    return child.pid;
+  };
+
+  // 1) 진짜 캡처가 아직 돌고 있으면 건너뛰고, 남의 잠금은 풀지 않는다
+  const holder = longRunning('slack-capture-holder.sh');
+  holdLock(holder);
+  assert.equal(capture().status, 0);
+  assert.match(logText(), /이전 실행이 아직 진행 중/);
+  assert.equal(fs.readFileSync(path.join(lock, 'pid'), 'utf8').trim(), String(holder));
+
+  // 2) 잠금 폴더만 있고 pid를 아직 못 쓴 찰나도 "진행 중"으로 본다
+  fs.rmSync(lock, { recursive: true, force: true });
+  fs.mkdirSync(lock, { recursive: true });
+  assert.equal(capture().status, 0);
+  assert.equal(fs.existsSync(lock), true);
+
+  // 3) 주인이 죽은 잠금은 회수한다(예전 30분 규칙 없이 즉시)
+  fs.rmSync(lock, { recursive: true, force: true });
+  holdLock(deadPid());
+  fs.writeFileSync(path.join(logs, 'slack-capture.log'), '');
+  assert.equal(capture().status, 1);
+  assert.match(logText(), /채널 확인 실패/);
+  assert.equal(fs.existsSync(lock), false); // 잡았다가 스스로 풀었다
+
+  // 4) 번호만 같고 다른 프로그램이 쓰고 있는 PID도 회수한다
+  holdLock(longRunning('other-program.sh'));
+  fs.writeFileSync(path.join(logs, 'slack-capture.log'), '');
+  assert.equal(capture().status, 1);
+  assert.doesNotMatch(logText(), /이전 실행이 아직 진행 중/);
+  assert.equal(fs.existsSync(lock), false);
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('import-record.js는 JSON을 명령줄 인자로도, 표준 입력으로도 받는다', async () => {
+  const script = path.join(__dirname, 'import-record.js');
+  const env = { ...process.env, WORKSPACE_PORT: String(server.address().port), WORKSPACE_CONFIG: path.join(directory, 'absent.config.json') };
+  // 이 서버는 같은 프로세스에서 돌기 때문에 spawnSync로 막으면 응답을 못 한다 — 비동기로 부른다.
+  const record = (args, input) => new Promise(resolve => {
+    const child = spawn(process.execPath, [script, ...args], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+    let out = '';
+    child.stdout.on('data', chunk => { out += chunk; });
+    child.stdin.end(input || '');
+    child.on('close', code => resolve({ code, out }));
+  });
+  // 캡처 실행은 파이프·히어독이 막혀 있어서 인자 방식만 쓴다
+  const argv = await record(['item', JSON.stringify({ type: 'task', description: '인자로 넘긴 수집', permalink: 'https://example.test/argv' })]);
+  assert.equal(argv.code, 0);
+  assert.equal(JSON.parse(argv.out).ok, true);
+  assert.ok((await items()).inboxTasks.some(item => item.description === '인자로 넘긴 수집'));
+  // slack-capture.sh의 record_health는 여전히 표준 입력으로 보낸다
+  const stdin = await record(['health'], JSON.stringify({ channel: 'my-todo', success: true }));
+  assert.equal(stdin.code, 0);
+  assert.equal(JSON.parse(stdin.out).ok, true);
+  assert.equal((await record(['item', '깨진 JSON'])).code, 1);
 });

@@ -103,6 +103,22 @@ test('successful weekly save updates the cache used by week navigation', async (
   assert.match(app.run('weeklyReportsCache[0].body'), /edited/);
 });
 
+test('an older server without the storage endpoint shows no banner', async () => {
+  const app = client(new Response('Not found', { status: 404 }));
+  app.run("document.getElementById('storageBanner').hidden = true");
+  await app.run('refreshStorageStatus()');
+  assert.equal(app.nodes.get('storageBanner').hidden, true);
+  assert.equal(app.nodes.get('storageBanner').textContent, '');
+});
+
+test('a save refused for recovery shows the server message and keeps the banner up', async () => {
+  const app = client(new Response(JSON.stringify({ ok: false, code: 'RECOVERY_NEEDED', error: '데이터를 지키기 위해 저장을 멈췄습니다.' }), { status: 503 }));
+  await assert.rejects(app.run("request('/api/track/toggle', { method: 'POST', body: '{}' })"));
+  assert.equal(app.nodes.get('storageBanner').hidden, false);
+  assert.match(app.nodes.get('storageBanner').textContent, /복구 필요 상태/);
+  assert.match(app.nodes.get('liveRegion').textContent, /저장을 멈췄습니다/);
+});
+
 test('moving a summary line to another group rewrites its bracket prefix', () => {
   const app = client(new Response('{"ok":true}'));
   const rewritten = app.run(`(() => {

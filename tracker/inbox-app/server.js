@@ -797,8 +797,8 @@ function createManualTask({ description, priority, due = null, scheduled = today
   return { ok: true, id };
 }
 
-function createLaterTask({ description, priority, jira, group }) {
-  return createManualTask({ description, priority, scheduled: null, jira, group });
+function createLaterTask({ description, priority, due, jira, group }) {
+  return createManualTask({ description, priority, due, scheduled: null, jira, group });
 }
 
 function createWaitingItem({ description, priority, who, jira, group }) {
@@ -1301,6 +1301,21 @@ function readBody(req) {
 const handleRequest = (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
 
+  // 복구가 필요하면 파일에 닿기 전에 모든 쓰기를 돌려보낸다. 조회는 그대로 된다.
+  const storage = mutations.status();
+  if (req.method === 'POST' && storage.recoveryNeeded) {
+    res.writeHead(503, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false, code: 'RECOVERY_NEEDED', error: storage.message }));
+    return;
+  }
+
+  if (url.pathname === '/api/storage-status' && req.method === 'GET') {
+    // 업무 파일을 읽지 않는다. 목록이 안 열리는 상황에서도 이유를 볼 수 있어야 한다.
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify(storage));
+    return;
+  }
+
   if(url.pathname==='/api/import' && req.method==='POST') {
     readBody(req).then(body=>{
       const result=idempotent(req,body,()=>{
@@ -1340,7 +1355,7 @@ const handleRequest = (req, res) => {
         }
         throw new Error('지원하지 않는 가져오기입니다.');
       });res.writeHead(200,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(result));
-    }).catch(error=>{res.writeHead(error.status || 400,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify({ok:false,error:error.message}));});return;
+    }).catch(error=>{res.writeHead(error.status || 400,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify({ok:false,error:error.message,code:error.code}));});return;
   }
 
   if(url.pathname==='/api/access-token' && req.method==='GET') {
@@ -1350,7 +1365,7 @@ const handleRequest = (req, res) => {
 
   if (url.pathname === '/api/report/change' && req.method === 'POST') {
     readBody(req).then(body => { const result = idempotent(req, body, () => reportDrafts.change(body)); res.writeHead(200, {'Content-Type':'application/json; charset=utf-8'}); res.end(JSON.stringify(result)); })
-      .catch(error => { res.writeHead(error.status || 400, {'Content-Type':'application/json; charset=utf-8'}); res.end(JSON.stringify({ok:false,error:error.message})); });
+      .catch(error => { res.writeHead(error.status || 400, {'Content-Type':'application/json; charset=utf-8'}); res.end(JSON.stringify({ok:false,error:error.message,code:error.code})); });
     return;
   }
 
@@ -1368,8 +1383,8 @@ const handleRequest = (req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify(result));
     }).catch(error => {
-      res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: false, error: error.message }));
+      res.writeHead(error.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: error.message, code: error.code }));
     });
     return;
   }
@@ -1411,6 +1426,7 @@ const handleRequest = (req, res) => {
       suggestions: getTodaySuggestions(),
       reportRefs: getReportRefs(),
       workflows: workflows.snapshot(),
+      storage,
       today: todayLocal(),
       ...getTodayActivityCounts(),
     };
@@ -1435,8 +1451,8 @@ const handleRequest = (req, res) => {
       res.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ ok }));
     }).catch(error => {
-      res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: false, error: String(error) }));
+      res.writeHead(error.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: error.message || String(error), code: error.code }));
     });
     return;
   }
@@ -1447,8 +1463,8 @@ const handleRequest = (req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ ok: true, ...result }));
     } catch (e) {
-      res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: false, error: String(e) }));
+      res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
     }
     return;
   }
@@ -1461,8 +1477,8 @@ const handleRequest = (req, res) => {
         res.end(JSON.stringify({ ok }));
       })
       .catch((e) => {
-        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: String(e) }));
+        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
       });
     return;
   }
@@ -1475,8 +1491,8 @@ const handleRequest = (req, res) => {
         res.end(JSON.stringify({ ok }));
       })
       .catch((e) => {
-        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: String(e) }));
+        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
       });
     return;
   }
@@ -1489,8 +1505,8 @@ const handleRequest = (req, res) => {
         res.end(JSON.stringify(result));
       })
       .catch((e) => {
-        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: String(e) }));
+        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
       });
     return;
   }
@@ -1503,8 +1519,8 @@ const handleRequest = (req, res) => {
         res.end(JSON.stringify(result));
       })
       .catch((e) => {
-        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: String(e) }));
+        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
       });
     return;
   }
@@ -1517,8 +1533,8 @@ const handleRequest = (req, res) => {
         res.end(JSON.stringify(result));
       })
       .catch((e) => {
-        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: String(e) }));
+        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
       });
     return;
   }
@@ -1531,8 +1547,8 @@ const handleRequest = (req, res) => {
         res.end(JSON.stringify(result));
       })
       .catch((e) => {
-        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: String(e) }));
+        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
       });
     return;
   }
@@ -1545,8 +1561,8 @@ const handleRequest = (req, res) => {
         res.end(JSON.stringify(result));
       })
       .catch((e) => {
-        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: String(e) }));
+        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
       });
     return;
   }
@@ -1559,8 +1575,8 @@ const handleRequest = (req, res) => {
         res.end(JSON.stringify(result));
       })
       .catch((e) => {
-        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: String(e) }));
+        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
       });
     return;
   }
@@ -1573,8 +1589,8 @@ const handleRequest = (req, res) => {
         res.end(JSON.stringify({ ok }));
       })
       .catch((e) => {
-        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: String(e) }));
+        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
       });
     return;
   }
@@ -1587,8 +1603,8 @@ const handleRequest = (req, res) => {
         res.end(JSON.stringify({ ok }));
       })
       .catch((e) => {
-        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: String(e) }));
+        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
       });
     return;
   }
@@ -1601,8 +1617,8 @@ const handleRequest = (req, res) => {
         res.end(JSON.stringify({ ok }));
       })
       .catch((e) => {
-        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: String(e) }));
+        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
       });
     return;
   }
@@ -1615,8 +1631,8 @@ const handleRequest = (req, res) => {
         res.end(JSON.stringify({ ok }));
       })
       .catch((e) => {
-        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: String(e) }));
+        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
       });
     return;
   }
@@ -1629,8 +1645,8 @@ const handleRequest = (req, res) => {
         res.end(JSON.stringify({ ok }));
       })
       .catch((e) => {
-        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: String(e) }));
+        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
       });
     return;
   }
@@ -1643,8 +1659,8 @@ const handleRequest = (req, res) => {
         res.end(JSON.stringify({ ok }));
       })
       .catch((e) => {
-        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: String(e) }));
+        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
       });
     return;
   }
@@ -1657,8 +1673,8 @@ const handleRequest = (req, res) => {
         res.end(JSON.stringify({ ok }));
       })
       .catch((e) => {
-        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: String(e) }));
+        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
       });
     return;
   }
@@ -1671,8 +1687,8 @@ const handleRequest = (req, res) => {
         res.end(JSON.stringify({ ok }));
       })
       .catch((e) => {
-        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: String(e) }));
+        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
       });
     return;
   }
@@ -1685,8 +1701,8 @@ const handleRequest = (req, res) => {
         res.end(JSON.stringify({ ok: !!removed }));
       })
       .catch((e) => {
-        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: String(e) }));
+        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
       });
     return;
   }
@@ -1699,8 +1715,8 @@ const handleRequest = (req, res) => {
         res.end(JSON.stringify({ ok }));
       })
       .catch((e) => {
-        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: String(e) }));
+        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
       });
     return;
   }
@@ -1772,9 +1788,10 @@ function safeHandle(req, res) {
 const server = http.createServer(safeHandle);
 
 if (require.main === module) {
-  mutations.recover();
+  // 복구를 끝내지 못해도 서버는 뜬다. 쓰기는 잠기고, 화면이 이유를 보여 줄 수 있게.
+  try { mutations.recover(); } catch (error) { console.error('저장 복구가 필요합니다. 저장을 멈춥니다:', error.message); }
   if(EXTRA_HOST && !nativeFs.existsSync(ACCESS_TOKEN_PATH))atomicWrite(ACCESS_TOKEN_PATH,randomBytes(32).toString('hex'));
-  const archiveMeetings = () => { try { workflows.archive(); } catch (error) { console.error('회의 기록 저장 실패:', error.message); } };
+  const archiveMeetings = () => { try { mutations.run(() => workflows.archive()); } catch (error) { console.error('회의 기록 저장 실패:', error.message); } };
   archiveMeetings();
   fs.watchFile(path.join(TRACKER_DIR, 'calendar_today.md'), { interval: 1000, persistent: false }, archiveMeetings);
   server.listen(PORT, '127.0.0.1', () => {

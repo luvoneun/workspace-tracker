@@ -1198,6 +1198,13 @@
   }
   .notice-dismiss:hover { background: var(--bg); color: var(--text); }
   .notice-hint { font-size: 11px; color: var(--muted); flex-shrink: 0; }
+  /* 복구 필요 안내 — 스낵바와 같은 재료를 쓰되 스스로 사라지지 않게 문서 흐름에 둔다. */
+  .storage-banner {
+    display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 6px;
+    margin: 0 0 12px; padding: 10px 14px;
+    background: var(--card); color: var(--text);
+    border: 1px solid var(--urgent); border-radius: 12px; font-size: 13px;
+  }
   .sync-note, .report-note { font-size: 12px; color: var(--muted); margin: 6px 0 12px; overflow-wrap: anywhere; }
   .card[aria-busy="true"] { opacity: .65; pointer-events: none; }
   @media (max-width: 900px) {
@@ -1246,6 +1253,7 @@
       </button>
       <button type="button" id="settingsBtn" class="settings-btn" aria-label="환경설정" title="환경설정">⚙</button>
     </div>
+    <div id="storageBanner" class="storage-banner" role="status" hidden></div>
     <div class="date-bar">
       <span id="dateBar" class="date-bar-info"></span>
       <button type="button" id="refreshBtn" class="refresh-btn" aria-label="새로고침" title="새로고침">↻</button>
@@ -1451,6 +1459,29 @@ function showNotice(message, error = false, retry = null, action = null) {
   if (!error && !lastRemovedId) noticeTimer = setTimeout(() => { region.hidden = true; }, action ? 8000 : 4500);
 }
 
+// 저장이 멈춘 동안 계속 떠 있는 안내. 스낵바와 달리 스스로 사라지지 않는다.
+const STORAGE_BANNER_TEXT = '데이터를 지키기 위해 저장을 멈췄습니다. 지금까지의 기록은 그대로 있습니다. README의 "복구 필요 상태"를 따라 정리한 뒤 서버를 다시 시작해 주세요.';
+function renderStorageBanner(storage) {
+  const banner = document.getElementById('storageBanner');
+  // 예전 서버에는 이 정보가 없다. 모르는 상태에서는 화면을 바꾸지 않는다.
+  if (!banner || !storage) return;
+  banner.textContent = storage.recoveryNeeded ? STORAGE_BANNER_TEXT : '';
+  if (storage.recoveryNeeded && storage.reason) {
+    const hint = document.createElement('span');
+    hint.className = 'notice-hint';
+    hint.textContent = `원인: ${storage.reason}`;
+    banner.appendChild(hint);
+  }
+  banner.hidden = !storage.recoveryNeeded;
+}
+async function refreshStorageStatus() {
+  try {
+    const response = await fetch('/api/storage-status');
+    if (!response.ok) return; // 예전 서버에는 없는 주소다. 조용히 넘어간다.
+    renderStorageBanner(await response.json());
+  } catch { /* 연결 실패는 목록 쪽 안내로 충분하다 */ }
+}
+
 const pendingRequestKeys = new Map();
 async function request(url, options) {
   const writing = options?.method === 'POST';
@@ -1464,9 +1495,13 @@ async function request(url, options) {
   const timeout = setTimeout(() => controller.abort(), 15000);
   try {
     const response = await fetch(url, { ...options, signal: controller.signal });
-    if (!response.ok) throw new Error(`요청 실패 (${response.status})`);
-    const data = await response.clone().json();
-    if (data.ok === false) throw new Error(data.error || '저장하지 못했습니다.');
+    // 실패 응답에 담긴 서버 메시지를 버리지 않는다 (저장이 멈춘 이유 등).
+    const data = await response.clone().json().catch(() => null);
+    if (!response.ok || data?.ok === false) {
+      const failure = new Error(data?.error || (response.ok ? '저장하지 못했습니다.' : `요청 실패 (${response.status})`));
+      failure.code = data?.code;
+      throw failure;
+    }
     if(retryKey)pendingRequestKeys.delete(retryKey);
     if (writing) recordUndoFor(url, JSON.parse(options.body || '{}'));
     if (url === '/api/track/remove' && !undoReplaying) lastRemovedId = JSON.parse(options.body).id;
@@ -1474,7 +1509,10 @@ async function request(url, options) {
     return response;
   } catch (error) {
     error.reported = true;
-    showNotice(writing ? '저장을 확인하지 못했습니다. 입력은 유지됩니다. 연결을 확인한 뒤 다시 시도해 주세요.' : '목록을 불러오지 못했습니다.', true, writing ? null : () => load());
+    if (error.code === 'RECOVERY_NEEDED') {
+      renderStorageBanner({ recoveryNeeded: true });
+      showNotice(error.message, true);
+    } else showNotice(writing ? '저장을 확인하지 못했습니다. 입력은 유지됩니다. 연결을 확인한 뒤 다시 시도해 주세요.' : '목록을 불러오지 못했습니다.', true, writing ? null : () => load());
     throw error;
   } finally {
     clearTimeout(timeout);
@@ -1554,8 +1592,9 @@ document.addEventListener('keydown', (event) => {
 
 async function load() {
   let res;
-  try { res = await request('/api/items'); } catch { return; }
+  try { res = await request('/api/items'); } catch { refreshStorageStatus(); return; }
   const data = await res.json();
+  renderStorageBanner(data.storage);
   itemsById = new Map(['todayTasks', 'laterTasks', 'waiting', 'decisions', 'decisionArchive', 'ideas']
     .flatMap(key => data[key] || []).map(item => [item.id, item]));
   // 앱 화면이 바뀌었으면 데이터만 다시 받아선 소용없다 (새 UI가 아예 없는 상태).
@@ -4364,6 +4403,7 @@ setInterval(() => {
 }, 5 * 60 * 1000);
 
 load();
+refreshStorageStatus(); // 목록을 못 불러오는 상황에서도 저장이 멈춘 이유는 보이게
 fetchAutomationStatus(); // 환경설정을 열어보지 않아도 톱니바퀴에 실패 여부가 바로 보이게
 </script>
 </body>

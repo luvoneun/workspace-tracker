@@ -51,6 +51,19 @@ test('transaction failure restores only touched files',t=>{
   assert.throws(()=>tx.run(()=>{atomicWrite(a,'after');atomicWrite(b,'new');throw new Error('failure');}));
   assert.equal(fs.readFileSync(a,'utf8'),'before');assert.equal(fs.existsSync(b),false);assert.equal(fs.existsSync(path.join(f.directory,'.mutation.lock')),false);
 });
+test('a refused restore pauses saving instead of looking busy',t=>{
+  const f=fixture(t),file=path.join(f.directory,'tasks.md'),journal=path.join(f.directory,'.mutation-journal.json'),lock=path.join(f.directory,'.mutation.lock');
+  fs.writeFileSync(file,'before');
+  const tx=require('./mutation-store')(f.directory),{atomicWrite}=require('./safe-storage');
+  // 거래가 건드린 파일을 바깥에서 다시 고친 뒤 실패시킨다 — 되돌리면 그 수정이 사라진다.
+  assert.throws(()=>tx.run(()=>{atomicWrite(file,'after');fs.writeFileSync(file,'외부 편집');throw new Error('저장 실패');}),error=>error.status===503 && error.code==='RECOVERY_NEEDED');
+  assert.equal(fs.readFileSync(file,'utf8'),'외부 편집');
+  assert.ok(fs.existsSync(journal));assert.ok(fs.existsSync(lock));
+  assert.equal(tx.status().recoveryNeeded,true);assert.match(tx.status().reason,/저장 실패.*외부에서 변경된/);
+  const kept=[file,journal,lock].map(name=>fs.readFileSync(name,'utf8'));
+  assert.throws(()=>tx.run(()=>{throw new Error('실행되면 안 된다');}),error=>error.status===503 && error.code==='RECOVERY_NEEDED' && /저장을 멈췄습니다/.test(error.message));
+  assert.deepEqual([file,journal,lock].map(name=>fs.readFileSync(name,'utf8')),kept);
+});
 test('Slack history collects every page, and never returns partial success',async()=>{
   const {history}=require('./slack-history');let calls=0;
   const request=async()=>({ok:true,json:async()=>++calls===1?{ok:true,messages:[{ts:'2'}],has_more:true,response_metadata:{next_cursor:'next'}}:{ok:true,messages:[{ts:'1'}],has_more:false}});

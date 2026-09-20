@@ -67,7 +67,19 @@
 
 쓰기에는 임시 파일 교체, `.backups/`의 직전 파일, 변경 파일별 복구 저널을 사용합니다. 복구할 파일이 외부에서 다시 수정됐으면 덮어쓰지 않고 저널을 보존합니다. 이는 장기 백업을 대체하지 않습니다.
 
-Slack 수집은 모든 페이지를 읽고 `import-record.js`로 앱의 검증·저장 API를 사용합니다. 일부 저장에 실패하면 수집 커서를 유지합니다. 수집 시도와 성공은 별도로 표시합니다. 수집 스크립트 변경 후 설치된 `~/.local/share/workspace-automation/slack-capture.sh`도 함께 갱신해야 합니다.
+### 복구 필요 상태
+
+되돌리기가 거절되거나(외부에서 바뀐 파일), 서버 시작 때 복구를 끝내지 못하면 저장을 멈춥니다. 서버와 조회는 그대로 동작하고, 저장 요청만 503과 안내 문구로 거절하며 화면 위에 같은 안내가 계속 표시됩니다(`GET /api/storage-status`). 회의 기록 자동 저장도 함께 멈춥니다. 앱은 아무 파일도 자동으로 지우거나 되돌리지 않습니다.
+
+- 관련 파일: `tracker/.mutation-journal.json`(`{"changes":[{"file","before","after","intermediate"}]}` 형식이며 `before`는 변경 전 내용을 base64로 담습니다. 끝난 거래는 `{"committed":true}`), `tracker/.mutation.lock`(저장 중인 프로세스 번호), `<파일이 있는 폴더>/.backups/<파일명>.previous`(직전 내용).
+- 저널의 `changes[].file`을 하나씩 열어 지금 파일과 `before`를 디코드한 내용(`base64 -d`), 그리고 `.previous` 백업을 비교합니다.
+- 지금 파일이 맞으면 그대로 두고, 되돌리는 쪽이 맞으면 `before` 또는 `.previous` 내용을 직접 파일에 씁니다.
+- 정리한 뒤 저널과 잠금 파일을 지우지 말고 다른 이름으로 옮겨 둡니다(예: `.mutation-journal.json.2026-09-20`).
+- 서버를 다시 시작하면 복구를 다시 시도하고, 성공하면 저장이 풀립니다. 남은 파일은 확인 후 직접 정리합니다.
+
+Slack 수집은 모든 페이지를 읽고 `import-record.js`로 앱의 검증·저장 API를 사용합니다. JSON은 명령줄 인자로 넘기며(`node tracker/inbox-app/import-record.js item '{…}'`), 인자를 주지 않으면 표준 입력도 그대로 받습니다. 일부 저장에 실패하면 수집 커서를 유지합니다. 수집 시도와 성공은 별도로 표시합니다. 수집 스크립트 변경 후 설치된 `~/.local/share/workspace-automation/slack-capture.sh`도 함께 갱신해야 합니다.
+
+자동화 실행(`run-task.sh`)은 30분(`TASK_TIMEOUT_SECONDS`, 맥이 깨어 있는 시간 기준)이 넘으면 자식 프로세스까지 정리하고 `exit 124`로 끝냅니다. Slack 수집은 잠금 주인 프로세스가 살아 있는지 확인해서, 살아 있으면 건너뛰고 죽었으면 바로 회수합니다. 수집 실행은 파일 수정 도구 없이(Write·Edit 금지) `import-record.js`와 `fetch_slack_channel.sh` 두 명령만 쓸 수 있습니다.
 
 다른 기기 접속에는 인증이 필요합니다. 로컬 앱의 환경설정 → 사용법 → `다른 기기 접속 암호 복사`에서 암호를 복사하고, 접속 시 사용자 이름은 `workspace`를 사용합니다. 암호는 `tracker/.access-token`에 보관되며 Git에서 제외됩니다. 원격 접속은 기존 Tailscale 또는 HTTPS 보호 환경에서 사용합니다.
 

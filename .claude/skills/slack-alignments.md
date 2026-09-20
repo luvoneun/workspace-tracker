@@ -47,18 +47,21 @@
 
 5. **검증된 API로 등록**
    - Markdown 파일을 직접 생성·수정하지 않는다. UI와 같은 저장·복구 규칙을 사용해야 한다.
-   - 새 항목마다 `node tracker/inbox-app/import-record.js item`을 실행하고 표준 입력으로 JSON을 보낸다.
-   - JSON: `{"type":"decision","description":"정리한 한 줄","permalink":"원본 https 링크"}`
+   - 새 항목마다 아래 한 줄을 실행한다. JSON은 작은따옴표로 감싼 **명령줄 인자**로 넘긴다 — 파이프(`echo … | node …`)나 히어독은 캡처 실행의 명령 검사에 막힌다. 문구에 작은따옴표(`'`)가 있으면 명령이 깨지므로 `’`로 바꿔 넣는다.
+
+     ```bash
+     node tracker/inbox-app/import-record.js item '{"type":"decision","description":"정리한 한 줄","permalink":"원본 https 링크"}'
+     ```
    - 문구는 1,000자 이내 한 줄. 필요한 경우 `priority`, `jira`, `group`, `who`, `project`, 명시적 `due`를 추가한다. 추측한 날짜는 넣지 않는다.
    - task는 서버가 자동으로 인박스에 넣는다. ID·created·status는 서버가 만든다.
    - 반환값 `ok:true`를 확인한다. `duplicate:true`면 기존 원본 링크와 중복되어 추가하지 않은 것이다.
    - 서버가 꺼졌거나 저장에 실패하면 파일 직접 수정으로 우회하지 말고 실패를 알린다.
 
 6. **전부 성공한 뒤 커서 갱신**
-   - 모든 페이지 조회와 필요한 항목 저장이 성공한 경우에만 `node tracker/inbox-app/import-record.js cursor`로 `{"channel":"my-align","ts":"이번 조회의 최신 ts"}`를 표준 입력으로 전달한다.
+   - 모든 페이지 조회와 필요한 항목 저장이 성공한 경우에만 `node tracker/inbox-app/import-record.js cursor '{"channel":"my-align","ts":"이번 조회의 최신 ts"}'`를 같은 방식(명령줄 인자)으로 실행한다.
    - 하나라도 실패하면 커서를 전진시키지 않는다. 같은 항목 재시도는 서버에서 원본 링크로 중복 제거한다.
    - 조회 스크립트가 실패하면 부분 JSON으로 처리하지 않는다. 새 메시지가 없으면 커서를 유지한다.
-   - 전체 과정이 성공하면 `node tracker/inbox-app/import-record.js health`에 `{"channel":"my-align","success":true}`를 전달한다. 실패하면 `{"channel":"my-align","success":false,"error":"실패 이유"}`를 전달한다.
+   - 전체 과정이 성공하면 `node tracker/inbox-app/import-record.js health '{"channel":"my-align","success":true}'`를, 실패하면 `node tracker/inbox-app/import-record.js health '{"channel":"my-align","success":false,"error":"실패 이유"}'`를 실행한다.
    - 상태 JSON도 직접 덮어쓰지 않는다.
 
 ## 결과 출력
