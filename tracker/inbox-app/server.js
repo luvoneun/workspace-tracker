@@ -1504,7 +1504,9 @@ function safeHandle(req, res) {
   try {
     if(req.method==='GET')readScope={files:new Map()};
     const host = req.headers.host || '';
-    if(!remoteAuthorized(req)) {res.writeHead(401,{'WWW-Authenticate':'Basic realm="Workspace"'});res.end('Authentication required');return;}
+    // 홈 화면 추가 때 브라우저가 로그인 정보 없이 가져가는 앱 아이콘·manifest만 인증 없이 연다.
+    const publicAsset=req.method==='GET' && /^\/(icons\/[\w-]+\.png|manifest\.webmanifest)(\?.*)?$/.test(req.url||'');
+    if(!publicAsset && !remoteAuthorized(req)) {res.writeHead(401,{'WWW-Authenticate':'Basic realm="Workspace"'});res.end('Authentication required');return;}
     const hostname = host.split(':')[0];
     if (!['localhost','127.0.0.1',EXTRA_HOST].filter(Boolean).includes(hostname)) { res.writeHead(403); res.end('Forbidden host'); return; }
     if (req.method === 'POST' && (req.headers['content-type']?.split(';')[0] !== 'application/json' || (req.headers.origin && req.headers.origin !== `http://${host}`) || req.headers['sec-fetch-site'] === 'cross-site')) { res.writeHead(403); res.end('Forbidden request'); return; }
