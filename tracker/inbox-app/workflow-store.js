@@ -120,8 +120,11 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     }
     if(changed)write(state);
   }
-  function capture({ meetingId: id, type, description, project }) {
-    return addToMeeting(id, { type, description, project });
+  // due: 할 일의 마감일, 확인 대기의 회신 기한. 결정에는 마감일이 없다.
+  function capture({ meetingId: id, type, description, project, due }) {
+    if (due && type === 'decision') throw new Error('결정에는 마감일을 넣을 수 없습니다.');
+    validateDate(due);
+    return addToMeeting(id, { type, description, project, extra: due ? { due } : {} });
   }
   function addToMeeting(id, { type, description, project, extra = {}, draftId }) {
     if (!validItem({ type, description })) throw new Error('종류와 내용을 확인해 주세요.');
@@ -147,17 +150,38 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     const ids = [...accept.map(item => item?.id), ...dismiss];
     if (new Set(ids).size !== ids.length || ids.some(draftId => !pending.has(draftId))) throw new Error('이미 처리했거나 찾을 수 없는 항목입니다.');
     if (accept.some(item => !validItem(item))) throw new Error('종류와 내용을 확인해 주세요.');
+    // when: 할 일을 담을 때만 "오늘"을 고를 수 있다. 정하지 않으면 나중에 할 일.
+    if (accept.some(item => item.when !== undefined && !['today', 'later'].includes(item.when))) throw new Error('오늘 또는 나중을 골라 주세요.');
+    if (accept.some(item => item.when === 'today' && item.type !== 'task')) throw new Error('오늘은 할 일만 고를 수 있습니다.');
+    // due: 사람이 고른 날짜. null이면 지운 것이고, 보내지 않으면 초안에 있던 마감(할 일만)을 그대로 쓴다.
+    if (accept.some(item => item.due && item.type === 'decision')) throw new Error('결정에는 마감일을 넣을 수 없습니다.');
+    accept.forEach(item => validateDate(item.due));
     if (dismiss.length) {
       state.meetings[id] = resolveMeeting(id, state);
       state.reviewed = { ...state.reviewed, ...Object.fromEntries(dismiss.map(draftId => [draftId, 'dismissed'])) };
       write(state);
     }
-    // 회의에서 나온 할 일이 오늘 목록을 한꺼번에 채우지 않게 나중에 할 일로 담는다. 마감일은 초안에 명시된 경우만.
+    // 회의에서 나온 할 일이 오늘 목록을 한꺼번에 채우지 않게 기본은 나중에 할 일로 담는다. 사람이 "오늘"을 고른 것만 오늘로. 마감일은 초안에 명시된 경우만.
     const created = accept.map(item => addToMeeting(id, {
       type: item.type, description: item.description.trim(), draftId: item.id,
-      extra: item.type === 'task' ? { scheduled: null, due: pending.get(item.id).due || null } : {},
+      extra: item.type === 'task' ? { scheduled: item.when === 'today' ? today() : null, due: (item.due !== undefined ? item.due : pending.get(item.id).due) || null }
+        : item.type === 'check' ? { due: item.due || null } : {},
     }).id);
     return { ok: true, created };
+  }
+  // 방금 담은 것을 되돌린다: 항목은 삭제 휴지통(원문 보존)으로 옮기고, 초안은 다시 검토 대기로 올린다.
+  // review가 돌려준 created 목록 그대로만 받는다(이 회의에서 초안으로 만든 항목이 아니면 거절).
+  function undoReview({ meetingId: id, created }) {
+    if (!Array.isArray(created) || !created.length) throw new Error('되돌릴 항목이 없습니다.');
+    const state = read();
+    const draftOf = new Map(Object.entries(state.reviewed || {}).filter(([, itemId]) => itemId !== 'dismissed').map(([draftId, itemId]) => [itemId, draftId]));
+    if (new Set(created).size !== created.length || created.some(itemId => !draftOf.has(itemId) || state.items[itemId]?.meetingId !== id)) throw new Error('이미 되돌렸거나 되돌릴 수 없는 항목입니다.');
+    created.forEach(itemId => remove(itemId));
+    const reviewed = { ...state.reviewed }, linked = { ...state.items };
+    created.forEach(itemId => { delete reviewed[draftOf.get(itemId)]; delete linked[itemId]; });
+    state.reviewed = reviewed; state.items = linked;
+    write(state);
+    return { ok: true, restored: created.length };
   }
   function link({ id, meetingId }) {
     if (!refs()[id]) throw new Error('항목을 찾을 수 없습니다.');
@@ -169,5 +193,5 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     write(state);
     return { ok: true };
   }
-  return { archive, snapshot, patchItem, saveMeeting, syncProject, capture, review, link, outcome: id => read().items[id]?.outcome || '' };
+  return { archive, snapshot, patchItem, saveMeeting, syncProject, capture, review, undoReview, link, outcome: id => read().items[id]?.outcome || '' };
 };

@@ -388,6 +388,99 @@ test('meeting drafts from tiro-sync are reviewed once: accepted items land in th
   }
 });
 
+test('meeting drafts: a task can be accepted for today, and an accepted batch can be undone', async () => {
+  const draftsPath = path.join(directory, 'meeting_drafts.json');
+  const trashPath = path.join(directory, '.trash.json');
+  fs.writeFileSync(path.join(directory, 'calendar_today.md'), `마지막 갱신: ${today}\n- 11:00-11:50 | 온보딩 지표 리뷰\n`);
+  fs.writeFileSync(draftsPath, JSON.stringify({ notes: [{
+    noteGuid: 'u1', webUrl: 'https://tiro.ooo/n/u1', date: today, start: '11:00', end: '11:50', title: '온보딩 지표 리뷰',
+    items: [
+      { type: 'task', description: '퍼널 이탈 원인 가설 정리하기', due: shifted(2) },
+      { type: 'task', description: '코호트 쿼리 요청하기' },
+      { type: 'decision', description: '온보딩 실험은 2주 단위로 진행' },
+    ],
+  }] }));
+  try {
+    const meeting = (await items()).workflows.meetings.find(event => event.title === '온보딩 지표 리뷰');
+    const [first, second, third] = meeting.drafts;
+    // 잘못된 선택은 아무것도 만들지 않는다: 알 수 없는 값, 그리고 할 일이 아닌 항목의 "오늘"
+    const before = readTasks();
+    assert.equal((await post('/api/workflow/review', { meetingId: meeting.id, accept: [{ ...first, when: 'tomorrow' }] })).status, 400);
+    assert.equal((await post('/api/workflow/review', { meetingId: meeting.id, accept: [{ ...third, when: 'today' }] })).status, 400);
+    assert.equal(readTasks(), before);
+
+    // 기본은 나중, "오늘"을 고른 할 일만 오늘 목록으로 (마감일은 초안에 있던 것만)
+    const result = await post('/api/workflow/review', { meetingId: meeting.id, accept: [{ ...first, when: 'today' }, second, third] });
+    assert.equal(result.created.length, 3);
+    assert.match(readTasks(), new RegExp(`퍼널 이탈 원인 가설 정리하기 #task\\[id:${result.created[0]} .*scheduled:${today} due:${shifted(2)}`));
+    assert.match(readTasks(), new RegExp(`코호트 쿼리 요청하기 #task\\[id:${result.created[1]} .*scheduled:none`));
+
+    // 되돌리기: 다른 회의·모르는 항목은 거절하고, 맞으면 항목은 삭제 휴지통으로, 초안은 다시 검토 대기로
+    assert.equal((await post('/api/workflow/review-undo', { meetingId: 'other', created: result.created })).status, 400);
+    assert.equal((await post('/api/workflow/review-undo', { meetingId: meeting.id, created: ['nope'] })).status, 400);
+    assert.equal((await post('/api/workflow/review-undo', { meetingId: meeting.id, created: [] })).status, 400);
+    const undo = await post('/api/workflow/review-undo', { meetingId: meeting.id, created: result.created });
+    assert.equal(undo.ok, true);
+    assert.equal(undo.restored, 3);
+    assert.doesNotMatch(readTasks(), /퍼널 이탈 원인 가설 정리하기|코호트 쿼리 요청하기/);
+    assert.doesNotMatch(fs.readFileSync(path.join(directory, 'decisions.md'), 'utf8'), /온보딩 실험은 2주 단위로 진행/);
+    const trashed = JSON.parse(fs.readFileSync(trashPath, 'utf8')).map(entry => entry.id);
+    result.created.forEach(id => assert.ok(trashed.includes(id), '되돌린 항목은 삭제 휴지통에 원문이 남는다'));
+    const data = (await items()).workflows;
+    assert.equal(data.meetings.find(event => event.id === meeting.id).drafts.length, 3);
+    assert.equal(data.items.filter(item => item.meetingId === meeting.id).length, 0);
+    // 이미 되돌린 것은 다시 되돌릴 수 없고, 초안은 다시 담을 수 있다
+    assert.equal((await post('/api/workflow/review-undo', { meetingId: meeting.id, created: result.created })).status, 400);
+    assert.equal((await post('/api/workflow/review', { meetingId: meeting.id, accept: [second] })).ok, true);
+  } finally {
+    fs.rmSync(draftsPath, { force: true });
+  }
+});
+
+test('meeting review and capture take a due date for tasks and a reply deadline for checks, never for decisions', async () => {
+  const draftsPath = path.join(directory, 'meeting_drafts.json');
+  const checksPath = path.join(directory, 'checks.md');
+  fs.writeFileSync(path.join(directory, 'calendar_today.md'), `마지막 갱신: ${today}\n- 14:00-14:30 | 결제 실패 싱크\n`);
+  fs.writeFileSync(draftsPath, JSON.stringify({ notes: [{
+    noteGuid: 'due1', webUrl: 'https://tiro.ooo/n/due1', date: today, start: '14:00', end: '14:30', title: '결제 실패 싱크',
+    items: [
+      { type: 'task', description: '실패 사유 문구 초안 쓰기', due: shifted(2) },
+      { type: 'task', description: '재시도 정책 화면 목록 뽑기' },
+      { type: 'check', description: 'PG사에 실패 코드 명세 회신 받기' },
+      { type: 'decision', description: '실패 안내는 결제 화면 상단 배너로' },
+    ],
+  }] }));
+  try {
+    const meeting = (await items()).workflows.meetings.find(event => event.title === '결제 실패 싱크');
+    const [draftTask, plainTask, check, decision] = meeting.drafts;
+    // 잘못된 값은 아무것도 만들지 않는다: 날짜 형식, 결정의 마감
+    const before = { tasks: readTasks(), checks: fs.existsSync(checksPath) ? fs.readFileSync(checksPath, 'utf8') : '' };
+    assert.equal((await post('/api/workflow/review', { meetingId: meeting.id, accept: [{ ...check, due: '2026/09/30' }] })).status, 400);
+    assert.equal((await post('/api/workflow/review', { meetingId: meeting.id, accept: [{ ...decision, due: shifted(3) }] })).status, 400);
+    assert.equal(readTasks(), before.tasks);
+    assert.equal(fs.existsSync(checksPath) ? fs.readFileSync(checksPath, 'utf8') : '', before.checks);
+
+    // 사람이 고친 날짜: 초안의 마감을 지우고(null), 마감이 없던 할 일에 지정하고, 확인 대기에는 회신 기한을 지정한다
+    const result = await post('/api/workflow/review', { meetingId: meeting.id, accept: [{ ...draftTask, due: null }, { ...plainTask, due: shifted(5) }, { ...check, due: shifted(4) }, decision] });
+    assert.equal(result.created.length, 4);
+    assert.doesNotMatch(readTasks(), new RegExp(`실패 사유 문구 초안 쓰기 #task\\[id:${result.created[0]}[^\\]]* due:`));
+    assert.match(readTasks(), new RegExp(`재시도 정책 화면 목록 뽑기 #task\\[id:${result.created[1]} .*due:${shifted(5)}`));
+    assert.match(fs.readFileSync(checksPath, 'utf8'), new RegExp(`PG사에 실패 코드 명세 회신 받기 #check\\[id:${result.created[2]} [^\\]]*due:${shifted(4)}`));
+    assert.doesNotMatch(fs.readFileSync(path.join(directory, 'decisions.md'), 'utf8').split('\n').find(line => line.includes('결제 화면 상단 배너')) || '', /due:/);
+    assert.equal((await items()).workflows.items.find(item => item.id === result.created[2]).due, shifted(4), '화면에 실려 가는 항목에도 기한이 있다');
+
+    // 직접 담기도 같다
+    const captured = await post('/api/workflow/capture', { meetingId: meeting.id, type: 'check', description: '법무 회신 받기', due: shifted(6) });
+    assert.equal(captured.ok, true);
+    assert.match(fs.readFileSync(checksPath, 'utf8'), new RegExp(`법무 회신 받기 #check\\[id:${captured.id} [^\\]]*due:${shifted(6)}`));
+    assert.equal((await post('/api/workflow/capture', { meetingId: meeting.id, type: 'decision', description: '결정에 마감', due: shifted(6) })).status, 400);
+    assert.equal((await post('/api/workflow/capture', { meetingId: meeting.id, type: 'task', description: '잘못된 날짜', due: 'nope' })).status, 400);
+    assert.doesNotMatch(readTasks(), /잘못된 날짜/);
+  } finally {
+    fs.rmSync(draftsPath, { force: true });
+  }
+});
+
 // launchd가 부르는 자동화 스크립트. 앱과 따로 돌지만 여기가 멈추면 수집이 통째로 멎기 때문에,
 // 실제 스크립트를 임시 폴더·가짜 claude로 돌려서 "멈춤 방지" 장치만 확인한다.
 // (슬랙 API나 운영 서버는 건드리지 않는다 — 채널이 없는 설정이라 곧바로 실패하고 끝난다)

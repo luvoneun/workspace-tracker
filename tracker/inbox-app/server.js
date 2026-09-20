@@ -801,8 +801,9 @@ function createLaterTask({ description, priority, due, jira, group }) {
   return createManualTask({ description, priority, due, scheduled: null, jira, group });
 }
 
-function createWaitingItem({ description, priority, who, jira, group }) {
+function createWaitingItem({ description, priority, who, jira, group, due = null }) {
   validateDescription(description); validateFields({ priority, who, jira, group });
+  validateDate(due);
   if (!description || !description.trim()) return { ok: false, error: 'empty description' };
   const checksPath = path.join(TRACKER_DIR, 'checks.md');
   if (!fs.existsSync(checksPath)) fs.writeFileSync(checksPath, '# Checks\n\n');
@@ -810,6 +811,7 @@ function createWaitingItem({ description, priority, who, jira, group }) {
   const created = todayLocal();
   let fieldStr = `id:${id} status:to-do priority:${priority || 'medium'} created:${created}`;
   if (who) fieldStr += ` who:${who.trim().replace(/\s+/g, '_')}`;
+  if (due) fieldStr += ` due:${due}`; // 상대에게 회신 받아야 하는 기한
   if (jira) fieldStr += ` jira:${jira.trim()}`;
   else if (group) fieldStr += ` group:${group.trim().replace(/\s+/g, '_')}`;
   fs.appendFileSync(checksPath, `- ${description.trim()} #check[${fieldStr}]\n`);
@@ -1136,6 +1138,7 @@ const handleRequest = (req, res) => {
     '/api/workflow/meeting': workflows.saveMeeting,
     '/api/workflow/capture': workflows.capture,
     '/api/workflow/review': workflows.review,
+    '/api/workflow/review-undo': workflows.undoReview,
     '/api/workflow/link': workflows.link,
   };
   if (req.method === 'POST' && workflowActions[url.pathname]) {
