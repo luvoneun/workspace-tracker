@@ -67,6 +67,13 @@
 
 쓰기에는 임시 파일 교체, `.backups/`의 직전 파일, 변경 파일별 복구 저널을 사용합니다. 복구할 파일이 외부에서 다시 수정됐으면 덮어쓰지 않고 저널을 보존합니다. 이는 장기 백업을 대체하지 않습니다.
 
+### 업무 데이터 백업
+
+`tracker/`의 업무 데이터는 코드 저장소에서 제외돼 있어서, `automation/backup-data.sh`가 하루 한 번(19:30) 별도의 비공개 Git 저장소에 커밋하고 올립니다. 백업용 저장 공간은 프로젝트 밖 `~/.local/share/workspace-automation/data-backup.git`에 있고, 올릴 파일은 그 안의 `info/exclude` 허용 목록으로 고정합니다(접속 암호·잠금·`.backups`는 제외). 결과는 `logs/data-backup.log`에 남습니다.
+
+- 과거 상태 보기: `git --git-dir=~/.local/share/workspace-automation/data-backup.git log` 로 날짜를 찾고 `show <커밋>:tasks.md` 로 그날의 내용을 확인합니다.
+- 새 맥에서 복구: 비공개 저장소를 받아 파일을 `tracker/`에 넣은 뒤, `git clone --bare`로 같은 위치에 저장 공간을 만들고 `core.bare false`와 `info/exclude` 허용 목록을 다시 설정한 다음 `setup.sh`를 실행합니다.
+
 ### 복구 필요 상태
 
 되돌리기가 거절되거나(외부에서 바뀐 파일), 서버 시작 때 복구를 끝내지 못하면 저장을 멈춥니다. 서버와 조회는 그대로 동작하고, 저장 요청만 503과 안내 문구로 거절하며 화면 위에 같은 안내가 계속 표시됩니다(`GET /api/storage-status`). 회의 기록 자동 저장도 함께 멈춥니다. 앱은 아무 파일도 자동으로 지우거나 되돌리지 않습니다.

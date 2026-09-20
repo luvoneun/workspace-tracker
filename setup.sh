@@ -99,7 +99,7 @@ echo "[3/5] 자동화 스크립트 설치"
 # macOS가 Desktop 폴더를 보호해서 launchd가 그 안의 스크립트를 실행하지 못한다.
 # 그래서 보호 대상이 아닌 곳으로 복사해서 쓴다.
 mkdir -p "$INSTALL_DIR/logs"
-cp "$APP_DIR/automation/run-task.sh" "$APP_DIR/automation/slack-capture.sh" "$INSTALL_DIR/"
+cp "$APP_DIR/automation/run-task.sh" "$APP_DIR/automation/slack-capture.sh" "$APP_DIR/automation/backup-data.sh" "$INSTALL_DIR/"
 chmod +x "$INSTALL_DIR"/*.sh
 ok "$INSTALL_DIR 에 복사"
 
@@ -196,6 +196,38 @@ fi
   ".claude/skills/jira-sync.md 파일을 읽고 그 지시대로 담당 지라 이슈 캐시를 갱신해라. 조회된 이슈 수와 변동사항만 2줄 이내로 보고해라." \
   "mcp__atlassian,Read,Write,Edit,Bash,ToolSearch"
 
+# 업무 데이터 백업 — 하루 한 번(19:30). tracker/의 데이터는 코드 저장소에서 제외돼 있어서
+# 따로 백업한다. 백업 저장 공간($INSTALL_DIR/data-backup.git)을 만들어 둔 경우에만 등록한다
+# (만드는 법은 tracker/inbox-app/README.md의 "업무 데이터 백업").
+if [ -d "$INSTALL_DIR/data-backup.git" ]; then
+cat > "$AGENTS_DIR/com.luvon.workspace.data-backup.plist" << PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.luvon.workspace.data-backup</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>$INSTALL_DIR/backup-data.sh</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>WORKSPACE_DIR</key>
+    <string>$WORKSPACE</string>
+  </dict>
+  <key>StartCalendarInterval</key>
+  <dict><key>Hour</key><integer>19</integer><key>Minute</key><integer>30</integer></dict>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>StandardErrorPath</key>
+  <string>$INSTALL_DIR/logs/data-backup.err</string>
+</dict>
+</plist>
+PLIST
+fi
+
 # 앱 서버 — 로그인하면 뜨고, 꺼지면 다시 뜬다
 cat > "$AGENTS_DIR/com.luvon.workspace.server.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -262,7 +294,7 @@ remove_agent() {
 [ "$USE_CAL" = "yes" ] || remove_agent calendar-sync
 [ "$USE_JIRA" = "yes" ] || remove_agent jira-sync
 
-for f in server slack-capture calendar-sync jira-sync open-at-login; do
+for f in server slack-capture calendar-sync jira-sync data-backup open-at-login; do
   plist="$AGENTS_DIR/com.luvon.workspace.$f.plist"
   [ -f "$plist" ] || continue
   plutil -lint "$plist" >/dev/null 2>&1 || die "설정 파일 형식 오류: $f"
