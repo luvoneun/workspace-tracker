@@ -36,3 +36,6 @@ output/
 
 # macOS
 .DS_Store
+
+# impeccable 실행 파일(12MB) — 없으면 실행기가 버전에 맞춰 내려받는다
+.claude/skills/impeccable/scripts/bin/
