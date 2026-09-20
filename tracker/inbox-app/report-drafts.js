@@ -108,10 +108,11 @@ module.exports = ({ directory, sources, legacy, currentWeek }) => {
     undo.set(undoToken,{weekKey,rows:current.rows.map(clean),after:hash(rows)});if(undo.size>50)undo.delete(undo.keys().next().value);
     return {ok:true,report:view(weekKey,state),undoToken};
   }
-  function weeks(snapshot=sources()) {
+  function weeks(snapshot=sources(), state=read()) {
     const dates=snapshot.flatMap(item=>[item.completed,...(['decision','check'].includes(item.type)?[item.created]:[])]).filter(date=>/^\d{4}-\d{2}-\d{2}$/.test(date || ''));
     const keys=dates.map(date=>{const d=new Date(`${date}T12:00:00`);d.setDate(d.getDate()-((d.getDay()+6)%7));return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;});
-    return [...new Set([currentWeek(),...keys,...legacy().map(entry=>entry.weekKey),...Object.keys(read().weeks)])].sort().reverse();
+    return [...new Set([currentWeek(),...keys,...legacy().map(entry=>entry.weekKey),...Object.keys(state.weeks)])].sort().reverse();
   }
-  return {view,change,weeks};
+  // read는 한 번 읽은 보고 기록을 weeks·view에 함께 넘겨 주 수만큼 다시 읽지 않게 하려고 내보낸다.
+  return {view,change,weeks,read};
 };

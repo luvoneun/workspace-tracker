@@ -80,6 +80,15 @@ test('old undo cannot erase a later edit from another tab',t=>{
   const first=f.change({action:'edit',id,text:'첫 편집'});f.change({action:'edit',id,text:'두 번째 편집'});
   assert.throws(()=>f.change({action:'undo',token:first.undoToken}));assert.equal(f.view().rows[0].text,'두 번째 편집');
 });
+test('보고 기록을 한 번만 읽어도 주마다 만드는 내용은 그대로다',t=>{
+  const f=fixture(t);f.items.push({id:'b',type:'task',description:'지난주 정리하기',status:'done',created:'2026-09-01',completed:'2026-09-02',group:'가입'},{id:'c',type:'decision',description:'그 전 주 결정',status:'to-do',created:'2026-08-25'});
+  f.change({action:'edit',id:f.view().rows[0].id,text:'가입 문구 검토 완료'});
+  const separate=f.store.weeks(f.items).map(key=>f.store.view(key,undefined,f.items));
+  const file=path.join(f.directory,'.report-drafts.json'),real=fs.readFileSync;let reads=0;
+  fs.readFileSync=(name,...rest)=>{if(name===file)reads+=1;return real(name,...rest);};
+  let shared;try{const state=f.store.read();shared=f.store.weeks(f.items,state).map(key=>f.store.view(key,state,f.items));}finally{fs.readFileSync=real;}
+  assert.ok(shared.length>2);assert.deepEqual(shared,separate);assert.equal(reads,1);
+});
 test('a historical saved draft is not silently rewritten by source changes',t=>{
   const f=fixture(t);f.items[0].created='2026-09-01';f.items[0].completed='2026-09-02';
   let old=f.store.view('2026-08-31');f.store.change({weekKey:old.weekKey,revision:old.revision,action:'add',text:'기록 보존'});

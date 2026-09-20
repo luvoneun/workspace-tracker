@@ -1,4 +1,23 @@
 let workflowData = { items: [], meetings: [] };
+// 카드 하나 그릴 때마다 전체 항목을 훑던 자리들 — workflowData를 새로 받을 때 한 번만 색인해 둔다.
+let wfItemsById = new Map();
+let wfItemsByMeeting = new Map();
+function wfIndexData() {
+  wfItemsById = new Map(workflowData.items.map(item => [item.id, item]));
+  wfItemsByMeeting = new Map();
+  workflowData.items.forEach(item => {
+    if (!item.meetingId) return;
+    if (!wfItemsByMeeting.has(item.meetingId)) wfItemsByMeeting.set(item.meetingId, []);
+    wfItemsByMeeting.get(item.meetingId).push(item);
+  });
+}
+const wfMeetingItems = id => wfItemsByMeeting.get(id) || [];
+// 한 글자마다 목록을 통째로 다시 그리지 않게, 입력이 멎은 뒤 한 번만 그린다. 조합 중에도 input은
+// 그대로 오고 값을 늦게 읽을 뿐이라 한글 조합은 끊기지 않는다.
+function wfDebounce(action, delay = 150) {
+  let timer = null;
+  return () => { clearTimeout(timer); timer = setTimeout(action, delay); };
+}
 let workflowDialog = null;
 let workflowView = null;
 const workflowHistory = [];
@@ -10,7 +29,7 @@ let taskListsCache = { todayTasks: [], laterTasks: [] };
 const wfDraftEdits = new Map();
 const wfKey = item => item.jira ? `jira:${item.jira}` : item.group || item.project ? `group:${item.group || item.project}` : null;
 const wfMeetingKey = event => event.project ? `${event.project.type}:${event.project.value}` : null;
-const wfItem = id => workflowData.items.find(item => item.id === id);
+const wfItem = id => wfItemsById.get(id);
 const wfType = type => ({ task: '할 일', bug: '버그', check: '확인 대기', decision: '결정', idea: '아이디어' }[type] || type);
 function wfNode(tag, text, className) {
   const node = document.createElement(tag);
@@ -115,7 +134,7 @@ function wfSearch() {
       (!type.value || item.type === type.value) &&
       (!hideDone.checked || item.status !== 'done') &&
       wfSearchMatches(search.value, [item.description, item.outcome, item.label, item.jira, item.group, item.project]));
-    const meetings = (!type.value || type.value === 'meeting') ? workflowData.meetings.filter(event => wfSearchMatches(search.value, [event.title, event.series, event.date, event.project?.label, ...(event.drafts || []).map(draft => draft.description), ...workflowData.items.filter(item => item.meetingId === event.id).map(item => item.description)])) : [];
+    const meetings = (!type.value || type.value === 'meeting') ? workflowData.meetings.filter(event => wfSearchMatches(search.value, [event.title, event.series, event.date, event.project?.label, ...(event.drafts || []).map(draft => draft.description), ...wfMeetingItems(event.id).map(item => item.description)])) : [];
     count.textContent = matches.length + meetings.length ? `${matches.length + meetings.length}개 찾음` : '검색 결과가 없습니다.';
     matches.forEach(item => {
       const status = item.status === 'done' ? '완료' : item.doing ? '진행중' : '미완료';
@@ -123,7 +142,9 @@ function wfSearch() {
     });
     meetings.forEach(event => results.appendChild(wfMeetingRow(event)));
   }
-  search.addEventListener('input', render); type.addEventListener('change', render); hideDone.addEventListener('change', render); render();
+  const later = wfDebounce(() => { if (search.isConnected) render(); });
+  search.addEventListener('input', () => { workflowView.query = search.value; later(); });
+  type.addEventListener('change', render); hideDone.addEventListener('change', render); render();
   search.focus();
   workflowDialog.scrollTop = workflowView.scroll || 0;
 }
@@ -218,7 +239,7 @@ function wfItemRow(item) {
   return wfRow(item.description, `${wfType(item.type)} · ${state}${item.outcome ? ` · ${item.outcome}` : ''}`, () => wfOpen({ kind: 'item', id: item.id }));
 }
 function wfMeetingStats(event) {
-  const items = workflowData.items.filter(item => item.meetingId === event.id);
+  const items = wfMeetingItems(event.id);
   const tasks = items.filter(item => ['task', 'bug'].includes(item.type));
   const waiting = items.filter(item => item.type === 'check' && item.status !== 'done').length;
   const decisions = items.filter(item => item.type === 'decision').length;
@@ -237,11 +258,13 @@ function wfMeetingList() {
   const list = wfNode('div'); workflowDialog.appendChild(list);
   function render() {
     Object.assign(workflowView, { query: search.value, project: project.value, unresolved: unresolved.checked });
-    const events = workflowData.meetings.filter(event => `${event.title} ${event.series}`.toLowerCase().includes(search.value.toLowerCase()) && (!project.value || wfMeetingKey(event) === project.value) && (!unresolved.checked || workflowData.items.some(item => item.meetingId === event.id && item.status !== 'done')));
+    const events = workflowData.meetings.filter(event => `${event.title} ${event.series}`.toLowerCase().includes(search.value.toLowerCase()) && (!project.value || wfMeetingKey(event) === project.value) && (!unresolved.checked || wfMeetingItems(event.id).some(item => item.status !== 'done')));
     list.replaceChildren(...events.map(wfMeetingRow));
     if (!events.length) list.appendChild(wfNode('p', '조건에 맞는 회의가 없습니다.', 'wf-section-note'));
   }
-  search.addEventListener('input', render); project.addEventListener('change', render); unresolved.addEventListener('change', render); render();
+  const later = wfDebounce(() => { if (search.isConnected) render(); });
+  search.addEventListener('input', () => { workflowView.query = search.value; later(); });
+  project.addEventListener('change', render); unresolved.addEventListener('change', render); render();
 }
 function wfProject(key) {
   const items = workflowData.items.filter(item => wfKey(item) === key);
@@ -270,7 +293,7 @@ function wfMeeting(id) {
   // "반복 회의 시리즈"도 같은 이유로 뺐다: 프로젝트 연결이 이미 회의 제목 기준으로 자동 이어진다.
   if (event.drafts?.length) wfDrafts(event);
   workflowDialog.appendChild(wfNode('h3', '이 회의에서 나온 것'));
-  const items = workflowData.items.filter(item => item.meetingId === id);
+  const items = wfMeetingItems(id);
   items.forEach(item => workflowDialog.appendChild(wfItemRow(item)));
   if (!items.length) workflowDialog.appendChild(wfNode('p', '아직 기록한 항목이 없습니다.', 'wf-section-note'));
   // 종류·내용·추가를 한 줄로 — 세로로 쌓인 라벨 3단짜리 폼 대신 인박스 빠른입력과 같은 모양.
@@ -425,6 +448,7 @@ function workflowTaskBadges(item) {
 }
 function workflowRender(data) {
   workflowData = data.workflows || { items: [], meetings: [] };
+  wfIndexData();
   taskListsCache = { todayTasks: data.todayTasks || [], laterTasks: data.laterTasks || [] };
   const available = new Set([...taskListsCache.todayTasks, ...taskListsCache.laterTasks].filter(item => item.status !== 'done').map(item => item.id));
   for (const id of taskSelection) if (!available.has(id)) taskSelection.delete(id);

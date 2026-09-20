@@ -989,7 +989,9 @@ function getWeeklyReports() {
   const state = readWeeklyReportState();
   const old = parseWeeklyReports();
   const sources = workflows.snapshot().items;
-  return reportDrafts.weeks(sources).map(weekKey => ({ weekKey, label: weekLabel(weekKey), body: old.find(r=>r.weekKey===weekKey)?.body || '', generatedAt: state[weekKey]?.generatedAt || null, draft: reportDrafts.view(weekKey, undefined, sources) }));
+  // 보고 기록 파일은 한 번만 읽어서 주마다 돌려 쓴다 — view()가 주 수만큼 다시 읽지 않게.
+  const drafts = reportDrafts.read();
+  return reportDrafts.weeks(sources, drafts).map(weekKey => ({ weekKey, label: weekLabel(weekKey), body: old.find(r=>r.weekKey===weekKey)?.body || '', generatedAt: state[weekKey]?.generatedAt || null, draft: reportDrafts.view(weekKey, drafts, sources) }));
 }
 
 // 오늘 새로 생긴 항목 수 / 오늘 완료한 항목 수 — 상단 통계용
