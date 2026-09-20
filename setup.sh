@@ -17,7 +17,7 @@ APP_DIR="$WORKSPACE/tracker/inbox-app"
 INSTALL_DIR="$HOME/.local/share/workspace-automation"
 AGENTS_DIR="$HOME/Library/LaunchAgents"
 CONFIG="$WORKSPACE/workspace.config.json"
-APP_BUNDLE="$HOME/Applications/워크스페이스.app"
+APP_BUNDLE="$HOME/Applications/Workspace.app"
 
 ok()   { echo "  ✓ $1"; }
 warn() { echo "  ! $1"; }
