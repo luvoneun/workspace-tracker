@@ -90,7 +90,7 @@ node --test server.test.js client.test.js report-drafts.test.js
 ```
 
 `tracker/inbox-app`에서 실행합니다. 임시 디렉터리와 임시 포트를 사용하며 실제 업무 데이터는 변경하지 않습니다.
-클라이언트 테스트는 입력 보존, 실패 처리, 한글 조합 중 Enter, 주간요약 캐시 갱신을 검증합니다.
+클라이언트 테스트는 입력 보존, 실패 처리, 한글 조합 중 Enter, 복구 필요 안내 표시를 검증합니다.
 
 테스트·별도 실행 시 `WORKSPACE_DATA_DIR`, `WORKSPACE_PORT`, `WORKSPACE_NO_OPEN=1`을 사용할 수 있습니다.
 기본 서버는 로컬 컴퓨터의 `127.0.0.1`에만 바인딩합니다.

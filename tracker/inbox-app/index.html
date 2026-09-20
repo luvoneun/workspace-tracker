@@ -308,30 +308,6 @@
   .wr-detail-heading { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
   .wr-detail-week { font-size: 18px; font-weight: 700; }
   .wr-detail-range { font-size: 13px; font-weight: 500; color: var(--muted); }
-  /* 신문 단(段) 방식(columns)이 아니라 실제 그리드다 — 섹션 순서(완료한 일 → 진행중 →
-     다음 주 계획 → 새로 정해진 것 → 확인 대기)가 높이에 따라 뒤섞이지 않게 자리를 고정해둔다. */
-  .wr-sections-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    grid-template-areas:
-      "done doing"
-      "later later"
-      "decisions waiting";
-    column-gap: 20px;
-    row-gap: 20px;
-  }
-  .wr-sections-grid .wr-section { margin-bottom: 0; min-width: 0; }
-  .wr-sections-grid .wr-section[data-section-key="done"] { grid-area: done; }
-  .wr-sections-grid .wr-section[data-section-key="doing"] { grid-area: doing; }
-  .wr-sections-grid .wr-section[data-section-key="later"] { grid-area: later; }
-  .wr-sections-grid .wr-section[data-section-key="decisions"] { grid-area: decisions; }
-  .wr-sections-grid .wr-section[data-section-key="waiting"] { grid-area: waiting; }
-  @media (max-width: 700px) {
-    .wr-sections-grid {
-      grid-template-columns: 1fr;
-      grid-template-areas: "done" "doing" "later" "decisions" "waiting";
-    }
-  }
 
   .stats { display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
   .stat {
@@ -993,9 +969,6 @@
   }
   .col-right details.done-details { margin-bottom: 4px; }
 
-  #weeklyReportZone { margin-bottom: 8px; }
-  .weekly-report-entry { margin-bottom: 6px; }
-
   .wr-view-tabs { display: flex; gap: 4px; margin: 8px 0 10px; }
   .wr-view-btn {
     font-family: inherit;
@@ -1010,123 +983,6 @@
   }
   .wr-view-btn.active { color: #fff; background: var(--accent); border-color: var(--accent); }
 
-  .wr-section { margin-bottom: 14px; }
-  .wr-section:last-child { margin-bottom: 0; }
-  /* 섹션 제목(완료한 일 등)은 그 아래 그룹 라벨(IO-45438 등)과 뚜렷이 구분되어야 한다 —
-     둘 다 작은 파란 글씨면 뭐가 위계인지 눈에 안 들어온다. 제목은 본문색 + 굵게 + 밑줄로. */
-  .wr-section-heading { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 10px; padding-bottom: 6px; border-bottom: 2px solid var(--border); }
-  .wr-card {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 8px 10px;
-    margin-bottom: 6px;
-    font-size: 13px;
-  }
-  .wr-card-text { flex: 1; min-width: 0; cursor: text; white-space: pre-wrap; word-break: break-word; }
-  .wr-card-input {
-    flex: 1;
-    min-width: 0;
-    font-family: inherit;
-    font-size: 13px;
-    border: none;
-    background: none;
-    color: var(--text);
-    padding: 0;
-  }
-  .wr-card-input:focus { outline: none; }
-  .wr-card-del {
-    font-size: 12px;
-    color: var(--muted);
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 0 2px;
-    flex-shrink: 0;
-  }
-  .wr-group-header {
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--accent);
-    margin: 14px 0 6px;
-    padding-bottom: 4px;
-    border-bottom: 1px solid var(--border);
-  }
-  .wr-section-heading + .wr-group-header { margin-top: 0; }
-  .wr-group-header-none { color: var(--muted); font-weight: 500; }
-  .wr-card-del:hover { color: var(--urgent); }
-  .wr-picker { margin-top: 6px; }
-  .wr-picker summary { color: var(--muted); cursor: pointer; font-size: 12px; font-weight: 600; padding: 4px 0; }
-  .wr-picker-row {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    width: 100%;
-    text-align: left;
-    font: inherit;
-    font-size: 12px;
-    color: var(--text);
-    background: none;
-    border: none;
-    border-top: 1px solid var(--border);
-    padding: 7px 2px;
-    cursor: pointer;
-  }
-  .wr-picker-row:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
-  .wr-picker-row:disabled { opacity: .5; cursor: default; }
-  .wr-picker-desc { flex: 1; min-width: 0; }
-  .wr-picker-group { font-size: 11px; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
-  .wr-picker-reason { font-size: 11px; font-weight: 600; color: var(--success); white-space: nowrap; flex-shrink: 0; }
-  .wr-picker-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11px; font-weight: 700; color: var(--muted); padding: 10px 2px 4px; }
-  .wr-picker-heading .convert-btn { margin: 0; }
-  .wr-picker-heading-muted { padding-top: 14px; border-top: 1px solid var(--border); margin-top: 4px; }
-  /* 조용히 완료한 일 — 보고에선 빠지지만 기록은 남는 아카이브. 평소엔 접혀 있는다. */
-  .wr-archive { margin-top: 16px; }
-  .wr-archive summary { color: var(--muted); cursor: pointer; font-size: 12px; font-weight: 600; padding: 4px 0; }
-  .wr-archive-row {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 10px;
-    border-top: 1px solid var(--border);
-    padding: 7px 2px;
-  }
-  .wr-archive-text { flex: 1; min-width: 0; font-size: 12px; color: var(--muted); }
-  .wr-archive-row .convert-btn { margin: 0; flex-shrink: 0; }
-  .wr-card-group-control { margin: 0; }
-  /* 그리드 두 칸을 모두 가로질러야 하는 요소들 — columns 방식일 때 쓰던 column-span 대신 grid-column을 쓴다 */
-  /* 선택해서 한 번에 옮기는 건 가끔 쓰는 보조 기능이다 — 본문처럼 크게 적지 않고
-     흔한 툴바 관례대로 우측 끝에 작고 옅게 둔다. */
-  .wr-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin-bottom: 10px; }
-  .wr-tools[hidden] { display: none; }
-  /* .convert-btn의 기본 margin-top(다른 곳에서 문단 뒤에 버튼이 줄바꿈될 때 쓰는 여백)이
-     여기 flex 줄에서는 버튼만 라벨보다 아래로 처지게 만든다 — 이 안에서만 지운다.
-     또한 버튼은 터치 영역 확보용 min-height(36px)가 있는데, <button>은 그 남는 공간을
-     알아서 세로 중앙 정렬해주지 않아 글자가 위로 붙어 보인다 — 버튼 스스로 가운데 정렬시킨다. */
-  .wr-tools .convert-btn { margin: 0; display: inline-flex; align-items: center; }
-  .wr-tools-label { font-size: 12px; color: var(--muted); }
-  .wr-tools button, .wr-review button { min-height: 36px; }
-  /* 그룹 이동용 드롭다운 — "선택" 버튼 옆에 끼워 넣는 것이라 카드에서 쓸 때의 여백은 없앤다 */
-  .wr-bulk-group { display: inline-flex; }
-  .wr-bulk-group[hidden] { display: none; }
-  .wr-bulk-group .jira-control { margin: 0; }
-  /* 체크박스는 "선택" 모드일 때만 보인다 */
-  .wr-select { width: 18px; height: 18px; flex-shrink: 0; accent-color: var(--accent); }
-  .wr-sections-grid:not(.wr-selecting) .wr-select { display: none; }
-  .wr-card:has(.wr-select:checked) { background: color-mix(in srgb, var(--accent) 9%, var(--bg)); }
-  .wr-review { border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 16px; }
-  .wr-review summary { cursor: pointer; font-weight: 600; padding: 8px 0; }
-  .wr-review-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 0; }
-  .wr-review-row > span { flex: 1 1 220px; }
-  @media (max-width: 600px) { .wr-tools button, .wr-review button { min-height: 44px; } .wr-card { flex-wrap: wrap; } }
-  .wr-card { position: relative; padding-right: 34px; }
-  .wr-card .overflow-menu { top: 6px; right: 6px; }
-  .wr-card .overflow-btn { width: 22px; height: 22px; font-size: 14px; }
-  .wr-card.is-resolved .wr-card-text { text-decoration: line-through; color: var(--muted); }
-  .wr-card-resolved { font-size: 11px; font-weight: 600; color: var(--muted); white-space: nowrap; flex-shrink: 0; }
   .wr-add-input {
     width: 100%;
     font-size: 13px;
@@ -1138,22 +994,6 @@
   }
   .wr-add-input:focus { outline: none; border-color: var(--accent); }
   .wr-add-input::placeholder { color: var(--muted); }
-
-  .wr-copy-text {
-    width: 100%;
-    min-height: 220px;
-    font-family: inherit;
-    font-size: 13px;
-    line-height: 1.5;
-    padding: 12px 14px;
-    border-radius: 12px;
-    border: 1px solid var(--border);
-    background: var(--bg);
-    color: var(--text);
-    white-space: pre-wrap;
-    word-break: break-word;
-    margin: 0 0 10px;
-  }
 
   .today-group { margin-bottom: 14px; }
   .today-group:last-child { margin-bottom: 0; }
@@ -1168,13 +1008,13 @@
   .today-group-header.misc { color: var(--muted); }
 
   [hidden] { display: none !important; }
-  .grid > *, .wr-layout > *, .wr-sections-grid > * { min-width: 0; }
+  .grid > *, .wr-layout > * { min-width: 0; }
   .card { padding: 12px 14px; margin-bottom: 8px; gap: 10px; }
   .sender, .calendar-title, .badge { overflow-wrap: anywhere; }
   .badge { max-width: 100%; white-space: normal; }
   .overflow-btn { width: 32px; height: 32px; }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-  .desc-editable:focus-visible, .wr-card-text:focus-visible { background: var(--bg); }
+  .desc-editable:focus-visible { background: var(--bg); }
   .desc-editable:hover::after, .desc-editable:focus-visible::after { content: ' ✎'; color: var(--accent); }
   .group-add { margin: 0 0 10px; }
   .group-add summary { color: var(--muted); cursor: pointer; font-size: 12px; padding: 4px 0; }
@@ -1219,7 +1059,6 @@
     .overflow-btn { width: 36px; height: 36px; }
     input, select { max-width: 100%; }
     .quick-add input, .wr-add-input, .desc-edit-input, .who-edit-input, .group-input { font-size: 16px; }
-    .wr-card-group-control .jira-select { font-size: 16px; }
     .calendar-event { flex-wrap: wrap; }
   }
 
@@ -1389,7 +1228,6 @@
 <script>
 let jiraIssuesCache = [];
 let customGroupsCache = [];
-let reportRefsCache = {};
 let appVersion = null;
 
 // 화면을 다시 그리면 쓰던 입력이 날아가므로, 자동 갱신은 입력 중이면 건너뛴다
@@ -1397,7 +1235,6 @@ function isTyping() {
   const el = document.activeElement;
   return !!(el && (el.matches('input, textarea, select') || el.isContentEditable));
 }
-let openTasksCache = [];
 let planningMode = false;
 let todaySort = 'project';
 let selectedTaskId = null;
@@ -1609,8 +1446,6 @@ async function load() {
 
   jiraIssuesCache = data.jiraIssues || [];
   customGroupsCache = data.customGroups || [];
-  reportRefsCache = data.reportRefs || {};
-  openTasksCache = [...(data.todayTasks || []), ...(data.laterTasks || [])].filter(t => t.status !== 'done');
   workflowRender(data);
   renderDateBar(data);
   renderCalendar(data.calendar);
@@ -1874,90 +1709,8 @@ function formatWeekLabel(weekKey) {
   };
 }
 
-const WR_SECTIONS = [
-  { key: 'done', heading: '완료한 일' },
-  { key: 'doing', heading: '진행중' },
-  { key: 'later', heading: '다음 주 계획' },
-  { key: 'decisions', heading: '새로 정해진 것' },
-  { key: 'waiting', heading: '확인 대기' },
-  // 보고할 정도는 아니지만 기록은 남기고 싶은 완료 건. 카드형 화면엔 안 보이고
-  // "완료한 일" 아래 접힌 아카이브로만 노출되며, 복사용 텍스트에도 나오지 않는다.
-  { key: 'archived', heading: '조용히 완료한 일' },
-];
-
-// 줄 형식은 두 가지다.
-//  - "내용 ^원본id"  : 앱이 담은 줄. 그룹은 저장하지 않고 원본에서 실시간으로 읽는다.
-//  - "[그룹] 내용"    : 사람이 직접 쓴 줄. 참조할 원본이 없으므로 그룹을 줄에 적어둔다.
-function parseReportLine(raw) {
-  const ref = raw.match(/^(.*?)\s*\^(\S+)$/);
-  if (ref) return { id: ref[2], text: ref[1].trim(), group: null };
-  const m = raw.match(/^\[(.+?)\]\s*(.+)$/);
-  if (m) return { id: null, group: m[1], text: m[2] };
-  return { id: null, group: null, text: raw };
-}
-
-function serializeReportLine(line) {
-  if (line.id) return `${line.text} ^${line.id}`;
-  return line.group ? `[${line.group}] ${line.text}` : line.text;
-}
-
-// 화면에 보여줄 그룹 — 원본이 있으면 원본 것을 따른다
-function reportLineGroup(line) {
-  if (line.id) return (reportRefsCache[line.id] || {}).label || null;
-  return line.group || null;
-}
-
-function reportLineResolved(line) {
-  return !!(line.id && reportRefsCache[line.id] && reportRefsCache[line.id].status === 'done');
-}
-
-function parseReportBody(body) {
-  const sections = WR_SECTIONS.map(s => ({ ...s, lines: [] }));
-  const headingMap = new Map(WR_SECTIONS.map(s => [`**${s.heading}**`, s.key]));
-  headingMap.set('**막혀있는 것**', 'waiting');
-  let currentKey = null;
-  (body || '').split('\n').forEach(line => {
-    const trimmed = line.trim();
-    if (headingMap.has(trimmed)) {
-      currentKey = headingMap.get(trimmed);
-    } else if (trimmed.startsWith('- ') && currentKey) {
-      sections.find(s => s.key === currentKey).lines.push(parseReportLine(trimmed.slice(2)));
-    }
-  });
-  return sections;
-}
-
-function serializeReportBody(sections) {
-  return sections.map(s => `**${s.heading}**\n${s.lines.map(l => `- ${serializeReportLine(l)}`).join('\n')}`).join('\n\n') + '\n';
-}
-
-function serializeReportBodyForCopy(sections) {
-  // 조용히 완료한 일은 공유용 텍스트에 절대 섞이지 않는다 — 그게 이 기능의 존재 이유다.
-  return sections.filter(s => s.key !== 'archived').map(s => {
-    const byGroup = new Map();
-    s.lines.forEach(line => {
-      const key = reportLineGroup(line) || '__none__';
-      if (!byGroup.has(key)) byGroup.set(key, []);
-      byGroup.get(key).push(line.text);
-    });
-    const namedKeys = [...byGroup.keys()].filter(k => k !== '__none__').sort();
-    const orderedKeys = byGroup.has('__none__') ? [...namedKeys, '__none__'] : namedKeys;
-    const body = orderedKeys.map(key => {
-      const bullets = byGroup.get(key).map(t => `- ${t}`).join('\n');
-      return key === '__none__' ? bullets : `${key}\n${bullets}`;
-    }).join('\n\n');
-    return `**${s.heading}**\n${body}`;
-  }).join('\n\n') + '\n';
-}
-
 let selectedWeekKey = null;
 let weeklyReportsCache = [];
-let reportSavePending = false;
-let wrSelectMode = false; // "선택" 버튼을 눌러야 체크박스가 나타난다
-const reportDrafts = new Map();
-window.addEventListener('beforeunload', event => {
-  if (reportSavePending || reportDrafts.size) { event.preventDefault(); event.returnValue = ''; }
-});
 
 function renderWeeklyReports(items) {
   weeklyReportsCache = items;
@@ -1985,9 +1738,7 @@ function renderWeeklyReports(items) {
     btn.innerHTML = `<span class="wr-nav-week">${escapeHtml(navLabel.week)}</span><span class="wr-nav-range">${escapeHtml(navLabel.range)}</span>`;
     btn.setAttribute('aria-label', `${navLabel.week}, ${navLabel.range}`);
     btn.addEventListener('click', () => {
-      if (reportSavePending) return;
       selectedWeekKey = item.weekKey;
-      wrSelectMode = false;
       renderWeeklyReports(weeklyReportsCache);
     });
     nav.appendChild(btn);
@@ -2000,545 +1751,9 @@ function renderWeeklyReports(items) {
 }
 
 function renderWeeklyReportDetail(item) {
-  if (item.draft && typeof renderReportDraft === 'function') { renderReportDraft(item); return; }
-  const detail = document.getElementById('weeklyReportDetail');
-  detail.dataset.weekKey = item.weekKey;
-  const detailLabel = formatWeekLabel(item.weekKey);
-  detail.innerHTML = `
-    <div class="wr-detail-heading"><span class="wr-detail-week">${escapeHtml(detailLabel.week)}</span><span class="wr-detail-range">${escapeHtml(detailLabel.range)}</span></div>
-    <p class="report-note">${item.generatedAt ? `마지막 수집: ${escapeHtml(new Date(item.generatedAt).toLocaleString('ko-KR'))}` : '기존 요약 · 수집 시각 기록 없음'}<br>완료한 일·정해진 것·확인 대기는 자동으로 담깁니다. 문구는 자유롭게 고쳐도 되고, 그룹은 원본을 따라 항상 최신으로 표시됩니다. 다음 주 계획은 직접 골라서 담습니다.</p>
-    <div class="wr-view-tabs">
-      <button type="button" class="wr-view-btn active" data-view="cards">카드형</button>
-      <button type="button" class="wr-view-btn" data-view="copy">복사용</button>
-    </div>
-    <div class="wr-cards-view"></div>
-    <div class="wr-copy-view" hidden>
-      <div class="wr-copy-text"></div>
-      <button type="button" class="convert-btn wr-copy-btn">복사</button>
-    </div>
-  `;
-  detail.querySelectorAll('.wr-view-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const view = btn.dataset.view;
-      detail.querySelectorAll('.wr-view-btn').forEach(b => b.classList.toggle('active', b === btn));
-      detail.querySelector('.wr-cards-view').hidden = view !== 'cards';
-      detail.querySelector('.wr-copy-view').hidden = view !== 'copy';
-    });
-  });
-  detail.querySelector('.wr-copy-btn').addEventListener('click', async () => {
-    try {
-      await navigator.clipboard.writeText(detail.querySelector('.wr-copy-text').textContent);
-      announce('복사함');
-    } catch { showNotice('복사하지 못했습니다. 내용을 직접 선택해 복사해 주세요.', true); }
-  });
-
-  const sections = reportDrafts.get(item.weekKey) || parseReportBody(item.body);
-  if (reportDrafts.has(item.weekKey)) {
-    const retry = document.createElement('button');
-    retry.type = 'button';
-    retry.className = 'convert-btn';
-    retry.textContent = '저장되지 않은 변경 · 다시 저장';
-    retry.addEventListener('click', async () => {
-      retry.disabled = true;
-      try {
-        await saveWeeklyReportSections(item.weekKey, reportDrafts.get(item.weekKey));
-        renderWeeklyReportDetail(weeklyReportsCache.find(report => report.weekKey === item.weekKey));
-      } catch { retry.disabled = false; }
-    });
-    detail.querySelector('.report-note').appendChild(retry);
-  }
-  renderWrCardsView(detail, sections, item.weekKey);
-  detail.querySelector('.wr-copy-text').textContent = serializeReportBodyForCopy(sections);
-}
-
-async function saveWeeklyReportSections(weekKey, sections) {
-  const content = serializeReportBody(sections);
-  await request('/api/weekly-report/save', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ weekKey, content }),
-  });
-  const cached = weeklyReportsCache.find(item => item.weekKey === weekKey);
-  if (cached) cached.body = content;
-  reportDrafts.delete(weekKey);
-}
-
-function renderWrCardsView(detail, sections, weekKey) {
-  const container = detail.querySelector('.wr-cards-view');
-  const reviewWasOpen = container.querySelector('.wr-review')?.open;
-  container.innerHTML = '';
-  // 선택 툴바 · 지난주 계획 리뷰는 그리드 바깥의 평범한 세로 흐름에 둔다.
-  // 그리드 안에 넣으면(예전 방식) 5개 섹션이 칸을 이미 다 차지해서 툴바가 맨 아래로 밀려난다.
-  const grid = document.createElement('div');
-  grid.className = 'wr-sections-grid';
-  const selected = new Set();
-  const toolbar = document.createElement('div');
-  toolbar.className = 'wr-tools';
-  const selectionLabel = document.createElement('span');
-  selectionLabel.className = 'wr-tools-label';
-  // 그룹 이동은 항목 1개짜리 카드와 똑같은 드롭다운을 쓴다 — 예전엔 검색창+목록상자가
-  // 따로 뜨는 팝업이었는데, 1개일 때 쓰는 방식과 달라서 어색했다. bulkGroupWrap을 채우는
-  // 실제 컨트롤은 checked 개수가 바뀔 때마다 renderBulkGroupControl()이 새로 그린다.
-  const bulkGroupWrap = document.createElement('span');
-  bulkGroupWrap.className = 'wr-bulk-group';
-  const selectToggle = document.createElement('button');
-  selectToggle.type = 'button';
-  selectToggle.className = 'convert-btn';
-  const updateSelection = () => {
-    selectToggle.textContent = wrSelectMode ? '선택 종료' : '선택';
-    selectionLabel.textContent = wrSelectMode && selected.size ? `${selected.size}개 선택` : '';
-    bulkGroupWrap.hidden = !(wrSelectMode && selected.size);
-    grid.classList.toggle('wr-selecting', wrSelectMode);
-    renderBulkGroupControl();
-  };
-  selectToggle.addEventListener('click', () => {
-    wrSelectMode = !wrSelectMode;
-    if (!wrSelectMode) {
-      selected.clear();
-      container.querySelectorAll('.wr-select').forEach(input => { input.checked = false; });
-    }
-    updateSelection();
-  });
-  toolbar.append(selectionLabel, bulkGroupWrap, selectToggle);
-  container.appendChild(toolbar);
-  updateSelection();
-
-  const commitAndRerender = async (nextSections) => {
-    if (reportSavePending) return false;
-    reportSavePending = true;
-    const controls = [...document.querySelectorAll('#gridWeekly button, #gridWeekly input, #gridWeekly select, .tab-btn')];
-    controls.forEach(control => { control.disabled = true; });
-    try {
-      await saveWeeklyReportSections(weekKey, nextSections);
-      detail.querySelector('.wr-copy-text').textContent = serializeReportBodyForCopy(nextSections);
-      renderWrCardsView(detail, nextSections, weekKey);
-      return true;
-    } catch {
-      reportDrafts.set(weekKey, nextSections);
-      showNotice('주간요약을 저장하지 못했습니다. 편집 내용은 유지됩니다.', true, () => commitAndRerender(nextSections));
-      return false;
-    } finally {
-      reportSavePending = false;
-      controls.forEach(control => { control.disabled = false; });
-    }
-  };
-
-  const nextWith = (sectionKey, change) => {
-    const next = structuredClone(sections);
-    change(next.find(section => section.key === sectionKey).lines);
-    return next;
-  };
-
-  // 체크한 항목 전체에 그룹 하나를 적용한다. 카드 1개짜리 ⋮→그룹과 같은 로직(원본이 있으면
-  // 원본을, 없으면 요약 줄 자체를 바꾼다)을 여러 개에 대해 반복하고, 실행 취소까지 붙여준다.
-  const bulkApply = async ({ jiraKey, groupValue, clear }) => {
-    if (reportSavePending) return;
-    const targets = [...selected].map(key => JSON.parse(key));
-    if (!targets.length) return;
-    const issue = jiraKey ? jiraIssuesCache.find(i => i.key === jiraKey) : null;
-    const label = clear ? '그룹 없음' : issue ? `${issue.key} · ${issue.summary}` : groupValue;
-    const before = structuredClone(sections);
-    const next = structuredClone(sections);
-    const changed = new Map();
-    const restore = async () => {
-      for (const [id, ref] of changed) {
-        if (ref.jira) await setTaskJira(id, ref.jira);
-        else { await setTaskJira(id, null); await setTaskGroup(id, ref.group || null); }
-      }
-    };
-    reportSavePending = true;
-    try {
-      for (const target of targets) {
-        const line = next.find(section => section.key === target.section).lines[target.index];
-        if (line.id) {
-          if (!reportRefsCache[line.id]) throw new Error('원본 업무를 찾을 수 없는 항목이 있습니다.');
-          if (!changed.has(line.id)) {
-            changed.set(line.id, { ...reportRefsCache[line.id] });
-            if (clear) { await setTaskJira(line.id, null); await setTaskGroup(line.id, null); }
-            else if (jiraKey) await setTaskJira(line.id, jiraKey);
-            else await setTaskGroup(line.id, groupValue);
-          }
-        } else line.group = clear ? null : label;
-      }
-      await saveWeeklyReportSections(weekKey, next);
-      wrSelectMode = false;
-      await load();
-      renderWeeklyReportDetail(weeklyReportsCache.find(report => report.weekKey === weekKey));
-      showNotice(`${targets.length}개 항목을 ${label}으로 옮겼습니다.`, false, null, {
-        label: '실행 취소', onClick: async button => {
-          button.disabled = true;
-          if (weeklyReportsCache.find(report => report.weekKey === weekKey)?.body !== serializeReportBody(next)) {
-            showNotice('이후 편집한 내용이 있어 실행 취소할 수 없습니다. 그룹 이동으로 다시 변경해 주세요.', true);
-            return;
-          }
-          try {
-            await restore();
-            await saveWeeklyReportSections(weekKey, before);
-            await load();
-            renderWeeklyReportDetail(weeklyReportsCache.find(report => report.weekKey === weekKey));
-            announce('그룹 이동을 취소했습니다.');
-          } catch { button.disabled = false; }
-        },
-      });
-    } catch (error) {
-      let message = '이동하지 못했습니다. 다시 시도해 주세요.';
-      try { await restore(); } catch { message = '일부 항목의 그룹이 변경되었습니다. 새로고침 후 그룹을 확인해 주세요.'; }
-      showNotice(message, true);
-    } finally {
-      reportSavePending = false;
-    }
-  };
-
-  function renderBulkGroupControl() {
-    bulkGroupWrap.innerHTML = '';
-    if (!(wrSelectMode && selected.size)) return;
-    bulkGroupWrap.appendChild(renderGroupControl({
-      jira: null, group: null, forceClearable: true,
-      // silent: bulkApply가 자기 알림(실행 취소 포함)과 새로고침을 직접 하므로,
-      // renderGroupControl의 기본 "그룹 지정함" 알림이 그걸 덮어쓰지 않게 막는다.
-      silent: true,
-      // "그룹 해제"는 renderGroupControl이 onSetJira(null) 다음 onSetGroup(null)을
-      // 연달아 부르는 방식이라, 실제 적용은 앞쪽 호출 한 번으로 끝내고 뒤쪽은 무시한다.
-      onSetJira: key => key === null ? bulkApply({ clear: true }) : bulkApply({ jiraKey: key }),
-      onSetGroup: value => value === null ? Promise.resolve() : bulkApply({ groupValue: value }),
-    }));
-  }
-
-  const previousDate = new Date(`${weekKey}T12:00:00Z`);
-  previousDate.setUTCDate(previousDate.getUTCDate() - 7);
-  const previous = weeklyReportsCache.find(report => report.weekKey === previousDate.toISOString().slice(0, 10));
-  if (previous) {
-    const plans = parseReportBody(previous.body).find(section => section.key === 'later').lines;
-    const review = document.createElement('details');
-    review.className = 'wr-review';
-    review.open = !!reviewWasOpen;
-    const summary = document.createElement('summary');
-    summary.textContent = `지난주 계획 돌아보기 · ${plans.length}개`;
-    review.appendChild(summary);
-    plans.forEach(line => {
-      const row = document.createElement('div');
-      row.className = 'wr-review-row';
-      const label = document.createElement('span');
-      label.textContent = line.text;
-      row.appendChild(label);
-      const matches = candidate => line.id ? candidate.id === line.id : !candidate.id && candidate.text === line.text && candidate.group === line.group;
-      const source = line.id ? reportRefsCache[line.id] : null;
-      const state = !line.id ? '직접 작성' : !source ? '원본 없음' : source.status === 'done' ? '완료' : source.doing ? '진행중' : '미완료';
-      label.appendChild(wfNode('span', ` · ${state}`, 'wf-meta'));
-      if (source) row.appendChild(wfButton('원본 보기', () => wfOpen({ kind: 'item', id: line.id }), 'convert-btn'));
-      const existing = sections.find(section => section.lines.some(matches));
-      if (existing) row.appendChild(wfNode('span', `${existing.heading}에 담김`, 'wf-section-note'));
-      else {
-        const destination = wfSelect([['done', '완료한 일'], ['doing', '진행중'], ['later', '다음 주 계획']], source?.status === 'done' ? 'done' : source?.doing ? 'doing' : 'later');
-        destination.className = 'jira-select'; destination.setAttribute('aria-label', `${line.text} 담을 요약 항목`);
-        row.append(destination, wfButton('요약에 담기', async () => {
-          const next = structuredClone(sections);
-          next.find(section => section.key === destination.value).lines.push(structuredClone(line));
-          if (await commitAndRerender(next)) announce('요약에 담았습니다.');
-        }, 'convert-btn'));
-      }
-      review.appendChild(row);
-    });
-    container.appendChild(review);
-  }
-
-  container.appendChild(grid);
-
-  // 아카이브는 5칸짜리 그리드 자리표(grid-template-areas)에 없으니 여기서 걸러낸다.
-  sections.filter(section => section.key !== 'archived').forEach(section => {
-    const sectionEl = document.createElement('div');
-    sectionEl.className = 'wr-section';
-    sectionEl.dataset.sectionKey = section.key;
-
-    const heading = document.createElement('div');
-    heading.className = 'wr-section-heading';
-    heading.textContent = section.heading;
-    sectionEl.appendChild(heading);
-
-    const byGroup = new Map();
-    section.lines.forEach((line, idx) => {
-      const key = reportLineGroup(line) || '__none__';
-      if (!byGroup.has(key)) byGroup.set(key, []);
-      byGroup.get(key).push(idx);
-    });
-    const namedKeys = [...byGroup.keys()].filter(k => k !== '__none__').sort();
-    const orderedKeys = byGroup.has('__none__') ? [...namedKeys, '__none__'] : namedKeys;
-
-    orderedKeys.forEach(key => {
-      // Label the ungrouped bucket too, so its cards cannot read as part of the group above it.
-      if (key !== '__none__' || namedKeys.length) {
-        const groupHeader = document.createElement('div');
-        groupHeader.className = 'wr-group-header' + (key === '__none__' ? ' wr-group-header-none' : '');
-        groupHeader.textContent = key === '__none__' ? '그룹 없음' : key;
-        sectionEl.appendChild(groupHeader);
-      }
-      byGroup.get(key).forEach(lineIdx => {
-        const line = section.lines[lineIdx];
-        const resolved = section.key === 'waiting' && reportLineResolved(line);
-        const card = document.createElement('div');
-        card.className = 'wr-card' + (resolved ? ' is-resolved' : '');
-        const selection = document.createElement('input');
-        selection.type = 'checkbox';
-        selection.className = 'wr-select';
-        selection.setAttribute('aria-label', `${line.text} 선택`);
-        selection.addEventListener('change', () => {
-          const key = JSON.stringify({ section: section.key, index: lineIdx });
-          if (selection.checked) selected.add(key); else selected.delete(key);
-          updateSelection();
-        });
-        card.appendChild(selection);
-
-        const textEl = document.createElement('span');
-        textEl.className = 'wr-card-text';
-        textEl.textContent = line.text;
-        textEl.tabIndex = 0;
-        textEl.setAttribute('role', 'button');
-        textEl.setAttribute('aria-label', `${line.text} — 수정`);
-        textEl.addEventListener('keydown', event => {
-          if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); textEl.click(); }
-        });
-        textEl.addEventListener('click', () => {
-          if (reportSavePending) return;
-          const input = document.createElement('input');
-          input.type = 'text';
-          input.className = 'wr-card-input';
-          input.value = line.text;
-          input.setAttribute('aria-label', '주간요약 내용 수정');
-          card.replaceChild(input, textEl);
-          input.focus();
-          input.setSelectionRange(input.value.length, input.value.length);
-          let committed = false;
-          const commit = async () => {
-            if (committed) return;
-            const val = input.value.trim();
-            if (!val || val === line.text) { input.replaceWith(textEl); return; }
-            committed = true;
-            await commitAndRerender(nextWith(section.key, lines => { lines[lineIdx].text = val; }));
-            committed = false;
-          };
-          input.addEventListener('blur', commit);
-          input.addEventListener('keydown', (e) => {
-            if (e.isComposing) return;
-            if (e.key === 'Enter') input.blur();
-            if (e.key === 'Escape') { committed = true; input.replaceWith(textEl); textEl.focus(); }
-          });
-        });
-        card.appendChild(textEl);
-
-        // 한 줄만 옮길 땐 ⋮ 안의 그룹 드롭다운으로 충분하다(앱 전체와 같은 컨트롤).
-        // 여러 개를 한 번에 옮길 땐 "선택" 버튼으로 체크박스를 켜고 같은 드롭다운을 툴바에서 쓴다(renderBulkGroupControl).
-        // 원본이 있는 줄은 원본 업무의 그룹을 바꾼다 — 앱 어디서든 같은 컨트롤, 같은 결과.
-        // 사람이 직접 쓴 줄만 요약 안에 그룹을 따로 저장한다.
-        const currentGroup = reportLineGroup(line);
-        const groupControl = renderGroupControl({
-          jira: line.id && reportRefsCache[line.id] ? reportRefsCache[line.id].jira : null,
-          group: line.id && reportRefsCache[line.id] ? reportRefsCache[line.id].group : line.group,
-          onSetJira: async (key) => {
-            if (line.id) { await setTaskJira(line.id, key); return; }
-            const issue = key ? jiraIssuesCache.find(i => i.key === key) : null;
-            const label = issue ? `${issue.key} · ${issue.summary}` : key;
-            await commitAndRerender(nextWith(section.key, lines => { lines[lineIdx].group = label; }));
-          },
-          onSetGroup: async (value) => {
-            if (line.id) { await setTaskGroup(line.id, value); return; }
-            await commitAndRerender(nextWith(section.key, lines => { lines[lineIdx].group = value; }));
-          },
-        });
-        groupControl.classList.add('wr-card-group-control');
-
-        if (resolved) {
-          const resolvedTag = document.createElement('span');
-          resolvedTag.className = 'wr-card-resolved';
-          resolvedTag.textContent = '해결됨';
-          card.appendChild(resolvedTag);
-        }
-
-        // "완료한 일"은 빼도 사라지지 않는다 — 보고할 정도는 아닌 사소한 완료 건이라
-        // 아카이브로 옮겨두는 것뿐. 그 외 섹션은 예전처럼 그냥 뺀다(원본 업무는 항상 남는다).
-        const removeAction = section.key === 'done'
-          ? {
-              label: '조용히 완료로 넘기기',
-              onClick: () => {
-                const next = structuredClone(sections);
-                const [moved] = next.find(s => s.key === 'done').lines.splice(lineIdx, 1);
-                next.find(s => s.key === 'archived').lines.push(moved);
-                commitAndRerender(next);
-              },
-            }
-          : {
-              label: '요약에서 빼기',
-              danger: true,
-              onClick: () => {
-                if (!confirm(`"${line.text}"을 요약에서 뺄까요? 원본 업무는 그대로 남습니다.`)) return;
-                commitAndRerender(nextWith(section.key, lines => lines.splice(lineIdx, 1)));
-              },
-            };
-
-        // 그룹은 바로 위 헤더에 이미 적혀 있으니, 카드에는 배지를 또 달지 않고 ⋮ 안에 넣는다
-        card.appendChild(renderOverflowMenu([
-          { custom: overflowField('그룹', groupControl) },
-          { separator: true },
-          removeAction,
-        ]));
-
-        sectionEl.appendChild(card);
-      });
-    });
-
-    const addInput = document.createElement('input');
-    addInput.type = 'text';
-    addInput.className = 'wr-add-input';
-    addInput.placeholder = `${section.heading} 추가…`;
-    addInput.addEventListener('keydown', (e) => {
-      if (e.key !== 'Enter' || e.isComposing) return;
-      const val = addInput.value.trim();
-      if (!val) return;
-      commitAndRerender(nextWith(section.key, lines => lines.push({ id: null, group: null, text: val })));
-    });
-    sectionEl.appendChild(addInput);
-
-    // "다음 주 계획"은 자동으로 채우지 않는다 — 지금 열려있는 업무 중에서 직접 고른다.
-    if (section.key === 'later') {
-      sectionEl.appendChild(renderNextWeekPicker(section, commitAndRerender, nextWith, weekKey));
-    }
-
-    grid.appendChild(sectionEl);
-  });
-
-  const archived = sections.find(s => s.key === 'archived');
-  if (archived && archived.lines.length) {
-    container.appendChild(renderWrArchive(archived, sections, commitAndRerender));
-  }
-}
-
-function renderWrArchive(archived, sections, commitAndRerender) {
-  const details = document.createElement('details');
-  details.className = 'wr-archive';
-  const summary = document.createElement('summary');
-  summary.textContent = `조용히 완료한 일 ${archived.lines.length}개 · 보고엔 안 나갑니다`;
-  details.appendChild(summary);
-  archived.lines.forEach((line, idx) => {
-    const row = document.createElement('div');
-    row.className = 'wr-archive-row';
-    const text = document.createElement('span');
-    text.className = 'wr-archive-text';
-    text.textContent = line.text;
-    row.appendChild(text);
-    const restore = document.createElement('button');
-    restore.type = 'button';
-    restore.className = 'convert-btn';
-    restore.textContent = '완료한 일로 다시 담기';
-    restore.addEventListener('click', () => {
-      const next = structuredClone(sections);
-      const [moved] = next.find(s => s.key === 'archived').lines.splice(idx, 1);
-      next.find(s => s.key === 'done').lines.push(moved);
-      commitAndRerender(next);
-    });
-    row.appendChild(restore);
-    details.appendChild(row);
-  });
-  return details;
-}
-
-// weekKey(월요일)를 기준으로 그 다음 주 월~일 날짜 범위를 구한다.
-function nextWeekRange(weekKey) {
-  const addDays = (dateStr, n) => {
-    const d = new Date(`${dateStr}T00:00:00`);
-    d.setDate(d.getDate() + n);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  };
-  return { start: addDays(weekKey, 7), end: addDays(weekKey, 13) };
-}
-
-// "다음 주 계획" 추천 후보 — 자동으로 담지는 않고, 고르는 걸 도와주기만 한다.
-//  1. 지금 시점에 오늘 할 일에 남아있는 것 (마감 지난 건 자동으로 오늘로 끌려오므로, 이번 주 안 끝낸 건 전부 여기 잡힌다)
-//  2. 진행중으로 표시해뒀지만 일정을 뒤로 미뤄놔서 위 1번엔 안 걸리는 것
-//  3. 마감이 다음 주(월~일) 안에 있는 것
-function nextWeekRecommendReason(task, weekKey) {
-  if ((task.scheduled && task.scheduled <= todayStr()) || task.doing) return '이번 주 미완료';
-  const { start, end } = nextWeekRange(weekKey);
-  if (task.due && task.due >= start && task.due <= end) return '다음 주 마감';
-  return null;
-}
-
-function renderNextWeekPicker(section, commitAndRerender, nextWith, weekKey) {
-  const picked = new Set(section.lines.map(line => line.id).filter(Boolean));
-  const details = document.createElement('details');
-  details.className = 'wr-picker';
-
-  const summary = document.createElement('summary');
-  summary.textContent = '업무에서 고르기';
-  details.appendChild(summary);
-
-  const candidates = openTasksCache.filter(task => !picked.has(task.id));
-  if (!candidates.length) {
-    const empty = document.createElement('div');
-    empty.className = 'empty';
-    empty.textContent = '고를 수 있는 업무가 없습니다.';
-    details.appendChild(empty);
-    return details;
-  }
-
-  const addOne = async (task, row) => {
-    row.disabled = true;
-    await commitAndRerender(nextWith('later', lines => lines.push({ id: task.id, group: null, text: task.description })));
-    announce('다음 주 계획에 담았습니다.');
-  };
-
-  const buildRow = (task, reason) => {
-    const row = document.createElement('button');
-    row.type = 'button';
-    row.className = 'wr-picker-row';
-    const label = task.jira
-      ? (jiraIssuesCache.find(i => i.key === task.jira) || {}).summary || task.jira
-      : task.group;
-    row.innerHTML = `
-      <span class="wr-picker-desc">${escapeHtml(task.description)}</span>
-      ${reason ? `<span class="wr-picker-reason">${escapeHtml(reason)}</span>` : ''}
-      ${label ? `<span class="wr-picker-group">${escapeHtml(label)}</span>` : ''}
-    `;
-    row.addEventListener('click', () => addOne(task, row));
-    return row;
-  };
-
-  const recommended = [];
-  const rest = [];
-  candidates.forEach(task => {
-    const reason = nextWeekRecommendReason(task, weekKey);
-    if (reason) recommended.push({ task, reason }); else rest.push(task);
-  });
-
-  if (recommended.length) {
-    const head = document.createElement('div');
-    head.className = 'wr-picker-heading';
-    const label = document.createElement('span');
-    label.textContent = `추천 ${recommended.length}개`;
-    const addAll = document.createElement('button');
-    addAll.type = 'button';
-    addAll.className = 'convert-btn';
-    addAll.textContent = '전체 담기';
-    addAll.addEventListener('click', async () => {
-      addAll.disabled = true;
-      await commitAndRerender(nextWith('later', lines => {
-        recommended.forEach(({ task }) => lines.push({ id: task.id, group: null, text: task.description }));
-      }));
-      announce(`${recommended.length}개를 다음 주 계획에 담았습니다.`);
-    });
-    head.append(label, addAll);
-    details.appendChild(head);
-    recommended.forEach(({ task, reason }) => details.appendChild(buildRow(task, reason)));
-
-    if (rest.length) {
-      const restHead = document.createElement('div');
-      restHead.className = 'wr-picker-heading wr-picker-heading-muted';
-      restHead.textContent = '그 외 업무';
-      details.appendChild(restHead);
-    }
-  }
-
-  rest.forEach(task => details.appendChild(buildRow(task, null)));
-
-  return details;
+  // 보고 초안은 서버가 항상 붙여준다 — 없거나 보고 화면 스크립트가 없으면 상세를 비워둔다.
+  if (!item || !item.draft || typeof renderReportDraft !== 'function') { document.getElementById('weeklyReportDetail').innerHTML = ''; return; }
+  renderReportDraft(item);
 }
 
 let decisionArchiveCache = [];
@@ -3785,47 +3000,6 @@ async function toggleTask(id) {
     body: JSON.stringify({ id, status: source?.status === 'done' ? 'to-do' : 'done' }),
   });
   await load();
-}
-
-function renderJiraControl(jiraKey, onSet) {
-  const wrap = document.createElement('div');
-  wrap.className = 'jira-control';
-
-  if (jiraKey) {
-    const issue = jiraIssuesCache.find(i => i.key === jiraKey);
-    const label = issue ? `${jiraKey} · ${issue.summary}` : jiraKey;
-    const badge = document.createElement('span');
-    badge.className = 'badge jira-badge';
-    badge.textContent = label;
-    const clearBtn = document.createElement('button');
-    clearBtn.type = 'button';
-    clearBtn.className = 'jira-clear';
-    clearBtn.textContent = '연결 해제';
-    clearBtn.setAttribute('aria-label', `${label} 지라 연결 해제`);
-    clearBtn.addEventListener('click', async () => {
-      await onSet(null);
-      announce('지라 연결 해제함');
-      load();
-    });
-    wrap.appendChild(badge);
-    wrap.appendChild(clearBtn);
-  } else if (jiraIssuesCache.length) {
-    const select = document.createElement('select');
-    select.className = 'jira-select';
-    select.setAttribute('aria-label', '지라 이슈 연결');
-    const opts = [`<option value="">지라 이슈 연결…</option>`].concat(
-      jiraIssuesCache.map(i => `<option value="${escapeAttr(i.key)}">${escapeHtml(i.key)} · ${escapeHtml(i.summary)}</option>`)
-    );
-    select.innerHTML = opts.join('');
-    select.addEventListener('change', async () => {
-      if (!select.value) return;
-      await onSet(select.value);
-      announce('지라 이슈 연결함');
-      load();
-    });
-    wrap.appendChild(select);
-  }
-  return wrap;
 }
 
 function renderGroupControl({ jira, group, onSetJira, onSetGroup, forceClearable = false, silent = false }) {

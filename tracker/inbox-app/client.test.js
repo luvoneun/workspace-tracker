@@ -89,20 +89,6 @@ test('failed card action stays visible and restores its original checkbox state'
   assert.equal(app.nodes.has('liveRegion'), false);
 });
 
-test('failed weekly save does not replace the cached saved version', async () => {
-  const app = client(new Response('{"ok":false}', { status: 500 }));
-  app.run("weeklyReportsCache = [{weekKey:'2026-09-14', body:'original'}]");
-  await assert.rejects(app.run("saveWeeklyReportSections('2026-09-14', [{heading:'완료한 일', lines:[{text:'edited'}]}])"));
-  assert.equal(app.run('weeklyReportsCache[0].body'), 'original');
-});
-
-test('successful weekly save updates the cache used by week navigation', async () => {
-  const app = client(new Response('{"ok":true}'));
-  app.run("weeklyReportsCache = [{weekKey:'2026-09-14', body:'original'}]");
-  await app.run("saveWeeklyReportSections('2026-09-14', [{heading:'완료한 일', lines:[{text:'edited'}]}])");
-  assert.match(app.run('weeklyReportsCache[0].body'), /edited/);
-});
-
 test('an older server without the storage endpoint shows no banner', async () => {
   const app = client(new Response('Not found', { status: 404 }));
   app.run("document.getElementById('storageBanner').hidden = true");
@@ -117,28 +103,4 @@ test('a save refused for recovery shows the server message and keeps the banner 
   assert.equal(app.nodes.get('storageBanner').hidden, false);
   assert.match(app.nodes.get('storageBanner').textContent, /복구 필요 상태/);
   assert.match(app.nodes.get('liveRegion').textContent, /저장을 멈췄습니다/);
-});
-
-test('moving a summary line to another group rewrites its bracket prefix', () => {
-  const app = client(new Response('{"ok":true}'));
-  const rewritten = app.run(`(() => {
-    const sections = parseReportBody('**완료한 일**\\n- [IO-1 · 잘못 들어간 그룹] 배포 팔로업\\n');
-    const next = structuredClone(sections);
-    next[0].lines[0].group = '웹 커뮤니티';
-    return serializeReportBody(next);
-  })()`);
-  assert.match(rewritten, /- \[웹 커뮤니티\] 배포 팔로업/);
-  assert.doesNotMatch(rewritten, /잘못 들어간 그룹/);
-});
-
-test('clearing a summary line group drops the bracket prefix but keeps the text', () => {
-  const app = client(new Response('{"ok":true}'));
-  const rewritten = app.run(`(() => {
-    const sections = parseReportBody('**완료한 일**\\n- [웹 커뮤니티] 배포 팔로업\\n');
-    const next = structuredClone(sections);
-    next[0].lines[0].group = null;
-    return serializeReportBody(next);
-  })()`);
-  assert.match(rewritten, /- 배포 팔로업/);
-  assert.doesNotMatch(rewritten, /\[/);
 });
