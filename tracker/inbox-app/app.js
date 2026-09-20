@@ -101,7 +101,9 @@ async function request(url, options) {
     if(!pendingRequestKeys.has(retryKey))pendingRequestKeys.set(retryKey,crypto.randomUUID());
     options={...options,headers:{...options.headers,'Idempotency-Key':pendingRequestKeys.get(retryKey)}};
   }
-  if (writing) showNotice('저장 중…');
+  // 회의 정리 창의 담기·되돌리기·직접 담기는 창 안의 결과 카드가 결과를 알려 주니, 창에 반쯤 가려지는 저장 알림은 띄우지 않는다(실패는 그대로 알린다).
+  const quiet = writing && (options?.quiet || /^\/api\/workflow\/(review|review-undo|capture)$/.test(url));
+  if (writing && !quiet) showNotice('저장 중…');
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
   try {
@@ -121,7 +123,7 @@ async function request(url, options) {
     if(retryKey)pendingRequestKeys.delete(retryKey);
     if (writing) recordUndoFor(url, JSON.parse(options.body || '{}'));
     if (url === '/api/track/remove' && !undoReplaying) lastRemovedId = JSON.parse(options.body).id;
-    if (writing) showNotice('저장했습니다.');
+    if (writing && !quiet) showNotice('저장했습니다.');
     return response;
   } catch (error) {
     error.reported = true;
@@ -319,7 +321,7 @@ function renderDateBar(data) {
 function renderCalendar(calendar) {
   const events = ((calendar && calendar.events) || []).map(event => {
     const saved = workflowData.meetings.find(meeting => meeting.date === todayStr() && meeting.start === event.start && meeting.title === event.title);
-    return saved ? { ...event, project: saved.project, workflowId: saved.id } : event;
+    return saved ? { ...event, project: saved.project, workflowId: saved.id, draftCount: saved.drafts?.length || 0 } : event;
   });
   document.getElementById('calendarSectionCount').textContent = events.length;
   const list = document.getElementById('calendarList');
@@ -335,6 +337,7 @@ function renderCalendar(calendar) {
       <div class="cal-top">
         <span class="calendar-time">${event.start}–${event.end}</span>
         <span class="cal-top-right">
+          ${event.draftCount ? `<span class="badge cal-drafts" title="AI가 분류한 초안을 검토해 주세요">초안 ${event.draftCount}</span>` : ''}
           ${event.relatedCount ? `<span class="badge cal-related">할 일 ${event.relatedCount}</span>` : ''}
         </span>
       </div>
@@ -732,7 +735,7 @@ function renderWaitingCard(item) {
   if (item.due) {
     const diff = diffDays(item.due);
     if (diff < 0) badges.push(`<span class="badge overdue">${-diff}일 지남</span>`);
-    else if (diff > 0) badges.push(`<span class="badge due">마감 ${item.due}</span>`);
+    else if (diff > 0) badges.push(`<span class="badge due">회신 기한 ${item.due}</span>`);
     else badges.push(`<span class="badge due-today">오늘 마감</span>`);
   } else if (item.created && diffDays(item.created) <= -STALE_WAITING_DAYS) {
     badges.push(`<span class="badge stale">${-diffDays(item.created)}일째 대기</span>`);

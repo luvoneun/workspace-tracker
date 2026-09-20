@@ -49,6 +49,73 @@ function wfButton(text, action, className) {
   });
   return button;
 }
+// 고르는 값이 셋 안팎일 때 드롭다운 대신 한눈에 보이는 칸 버튼으로 고른다(종류, 실행 시점).
+const WF_TYPES = [['task', '할 일'], ['check', '확인 대기'], ['decision', '결정']];
+function wfSegment(options, value, onChange, label) {
+  const group = wfNode('div', undefined, 'wf-seg');
+  group.setAttribute('role', 'radiogroup');
+  group.setAttribute('aria-label', label);
+  const buttons = options.map(([key, text]) => {
+    const button = wfNode('button', text, 'wf-seg-btn');
+    button.type = 'button';
+    button.setAttribute('role', 'radio');
+    button.dataset.key = key;
+    return button;
+  });
+  const choose = key => buttons.forEach(button => {
+    const on = button.dataset.key === key;
+    button.setAttribute('aria-checked', String(on));
+    button.tabIndex = on ? 0 : -1;
+  });
+  buttons.forEach((button, index) => {
+    button.addEventListener('click', () => { choose(button.dataset.key); onChange(button.dataset.key); });
+    button.addEventListener('keydown', event => {
+      const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
+      if (!step) return;
+      event.preventDefault();
+      const next = buttons[(index + step + buttons.length) % buttons.length];
+      next.focus(); next.click();
+    });
+  });
+  choose(value);
+  group.append(...buttons);
+  return group;
+}
+const wfTypeSegment = (value, onChange, label = '종류') => wfSegment(WF_TYPES, value, onChange, label);
+// 날짜 칸: 비어 있으면 "+ 마감일" 버튼만 보이고(빈 날짜 입력칸을 늘 보여 주지 않으려고), 누르면 날짜 입력이 된다.
+function wfDateField(value, label, onChange) {
+  const wrap = wfNode('span', undefined, 'wf-datefield');
+  const empty = () => {
+    const add = wfNode('button', `+ ${label}`, 'wf-date-add');
+    add.type = 'button';
+    add.addEventListener('click', () => { const input = filled(''); input.focus(); input.showPicker?.(); });
+    wrap.replaceChildren(add);
+  };
+  const filled = current => {
+    const input = document.createElement('input');
+    input.type = 'date'; input.value = current; input.className = 'wf-date-input';
+    input.setAttribute('aria-label', label);
+    input.addEventListener('change', () => { onChange(input.value); if (!input.value) empty(); });
+    const clear = wfNode('button', '지우기', 'wf-date-clear');
+    clear.type = 'button';
+    clear.setAttribute('aria-label', `${label} 지우기`);
+    clear.addEventListener('click', () => { onChange(''); empty(); });
+    wrap.replaceChildren(input, clear);
+    return input;
+  };
+  if (value) filled(value); else empty();
+  return wrap;
+}
+// 날짜 이름: 할 일은 마감일, 확인 대기는 상대에게 회신 받아야 하는 기한. 결정에는 날짜가 없다.
+const wfDateLabel = type => type === 'check' ? '회신 기한' : type === 'decision' ? null : '마감일';
+// 서버에 보내는 초안 한 건: 종류·문구, 할 일이면 시점(오늘/나중), 결정이 아니면 날짜(비우면 null로 지운다).
+// AI가 문구 끝에 붙여 온 "(방향 확인 필요)" 표식은 화면에 보이지도, 항목 문구로 저장되지도 않게 뗀다.
+const wfCleanDraftText = text => text.replace(/\s*\(방향 확인 필요\)\s*$/, '');
+const wfAcceptItem = (id, edit) => ({
+  id, type: edit.type, description: edit.description.trim(),
+  ...(edit.type === 'task' ? { when: edit.when || 'later' } : {}),
+  ...(edit.type !== 'decision' ? { due: edit.due || null } : {}),
+});
 function wfField(parent, title, input) {
   input.setAttribute('aria-label', title);
   const label = wfNode('label', title);
@@ -90,7 +157,7 @@ function wfRender() {
   const header = wfNode('div', undefined, 'wf-head');
   if (workflowHistory.length) header.appendChild(wfButton('뒤로', () => wfOpen(workflowHistory.pop(), false)));
   const title = view.kind === 'search' ? '통합 검색' : view.kind === 'meetings' ? '회의 모아보기' : view.kind === 'projects' ? '프로젝트 모아보기' : view.kind === 'project' ? wfProjects().find(([key]) => key === view.key)?.[1] || view.key : view.kind === 'meeting' ? '회의 정리' : '항목 상세';
-  header.append(wfNode('h2', title), wfButton('닫기', () => workflowDialog.close()));
+  header.append(wfNode('h2', title, view.kind === 'meeting' ? 'wf-eyebrow' : undefined), wfButton('닫기', () => workflowDialog.close()));
   workflowDialog.appendChild(header);
   const error = wfNode('p', '', 'wf-error'); error.setAttribute('role', 'alert'); workflowDialog.appendChild(error);
   if (view.kind === 'meetings') wfMeetingList();
@@ -233,38 +300,92 @@ async function taskBatchApply(change) {
     document.querySelectorAll('.task-selection').forEach(input => { input.disabled = false; });
   }
 }
+// 항목 한 줄: 종류 칩 · 문구 · 상태. 카드마다 테두리를 두르지 않고, 묶음(wfItemList) 안에서 가는 선으로만 나눈다.
 function wfItemRow(item) {
   const blocker = item.blockedBy && wfItem(item.blockedBy);
-  const state = item.status === 'done' ? '완료' : blocker?.status !== 'done' && blocker ? '답변 대기' : item.doing ? '진행중' : '미완료';
-  return wfRow(item.description, `${wfType(item.type)} · ${state}${item.outcome ? ` · ${item.outcome}` : ''}`, () => wfOpen({ kind: 'item', id: item.id }));
+  const waiting = blocker?.status !== 'done' && blocker;
+  const state = item.status === 'done' ? '완료' : waiting ? '답변 대기' : item.doing ? '진행중' : '미완료';
+  const row = wfNode('div', undefined, `wf-row wf-irow${item.status === 'done' ? ' is-done' : ''}`);
+  const main = wfButton('', () => wfOpen({ kind: 'item', id: item.id }), 'wf-main wf-item');
+  main.appendChild(wfNode('span', wfType(item.type), `wf-tag wf-tag-${item.type}`));
+  const body = wfNode('span', undefined, 'wf-item-body');
+  body.appendChild(wfNode('span', item.description, 'wf-item-text'));
+  if (item.outcome) body.appendChild(wfNode('span', item.outcome, 'wf-item-outcome'));
+  main.appendChild(body);
+  // 오른쪽: 기한(있으면)과 눈여겨볼 상태. 기본 상태(미완료)는 모든 줄에 반복되니 보이지 않게 한다.
+  const meta = wfNode('span', undefined, 'wf-item-meta');
+  if (item.due && item.status !== 'done') {
+    const late = diffDays(item.due) < 0;
+    meta.appendChild(wfNode('span', `${item.type === 'check' ? '회신 기한' : '마감'} ${item.due.slice(5).replace('-', '/')}`, `wf-item-due${late ? ' is-late' : ''}`));
+  }
+  if (state !== '미완료') meta.appendChild(wfNode('span', state, `wf-item-state${waiting && item.status !== 'done' ? ' is-wait' : ''}`));
+  if (meta.children.length) main.appendChild(meta);
+  row.appendChild(main);
+  return row;
 }
-function wfMeetingStats(event) {
+function wfItemList(items) {
+  const list = wfNode('div', undefined, 'wf-ilist');
+  items.forEach(item => list.appendChild(wfItemRow(item)));
+  return list;
+}
+// 행 오른쪽의 상태 칩: 지금 손댈 것(검토할 초안)을 가장 눈에 띄게, 0인 숫자는 보이지 않게.
+function wfMeetingChips(event) {
   const items = wfMeetingItems(event.id);
-  const tasks = items.filter(item => ['task', 'bug'].includes(item.type));
-  const waiting = items.filter(item => item.type === 'check' && item.status !== 'done').length;
+  const open = types => items.filter(item => types.includes(item.type) && item.status !== 'done').length;
+  const chips = [];
+  if (event.drafts?.length) chips.push(['review', `초안 ${event.drafts.length} 검토`]);
+  if (open(['task', 'bug'])) chips.push(['count', `할 일 ${open(['task', 'bug'])}`]);
+  if (open(['check'])) chips.push(['count', `확인 대기 ${open(['check'])}`]);
   const decisions = items.filter(item => item.type === 'decision').length;
-  const review = event.drafts?.length ? ` · 검토 대기 ${event.drafts.length}개` : '';
-  return `${event.date} ${event.start}${review} · 할 일 ${tasks.filter(item => item.status === 'done').length}/${tasks.length} 완료 · 확인 대기 ${waiting}개 · 결정 ${decisions}개`;
+  if (decisions) chips.push(['count', `결정 ${decisions}`]);
+  if (!chips.length) chips.push(['none', items.length ? '모두 처리함' : '기록 없음']);
+  return chips;
 }
-function wfMeetingRow(event) { return wfRow(event.title, wfMeetingStats(event), () => wfOpen({ kind: 'meeting', id: event.id })); }
+function wfMeetingRow(event) {
+  const row = wfNode('div', undefined, `wf-row${event.drafts?.length ? ' wf-row-review' : ''}`);
+  const main = wfButton('', () => wfOpen({ kind: 'meeting', id: event.id }), 'wf-main wf-mrow');
+  main.appendChild(wfNode('span', event.start || '', 'wf-mtime'));
+  const body = wfNode('span', undefined, 'wf-mbody');
+  body.appendChild(wfNode('span', event.title, 'wf-mtitle'));
+  if (event.project) body.appendChild(wfNode('span', event.project.label || event.project.value, 'wf-chip wf-chip-project'));
+  main.appendChild(body);
+  const chips = wfNode('span', undefined, 'wf-mchips');
+  wfMeetingChips(event).forEach(([kind, text]) => chips.appendChild(wfNode('span', text, `wf-chip wf-chip-${kind}`)));
+  main.appendChild(chips);
+  row.appendChild(main);
+  return row;
+}
+const wfDayLabel = date => { const label = relativeDate(date); return label === date ? date : `${label} · ${date.slice(5).replace('-', '/')}`; };
 function wfMeetingList() {
   const filters = wfNode('div', undefined, 'wf-filters');
   const search = document.createElement('input'); search.type = 'search'; search.value = workflowView.query || '';
   wfField(filters, '제목·시리즈 검색', search);
   const project = wfField(filters, '프로젝트', wfSelect([['', '전체 프로젝트'], ...wfProjects()], workflowView.project));
+  const reviewOnly = document.createElement('input'); reviewOnly.type = 'checkbox'; reviewOnly.checked = !!workflowView.reviewOnly;
+  wfField(filters, '검토 대기', reviewOnly).parentElement.className = 'wf-check';
   const unresolved = document.createElement('input'); unresolved.type = 'checkbox'; unresolved.checked = !!workflowView.unresolved;
-  const checkLabel = wfField(filters, '미해결 항목 있음', unresolved).parentElement; checkLabel.className = 'wf-check';
+  wfField(filters, '미해결 항목 있음', unresolved).parentElement.className = 'wf-check';
   workflowDialog.appendChild(filters);
   const list = wfNode('div'); workflowDialog.appendChild(list);
+  // 날짜가 여럿일 때만 날짜 줄을 넣는다.
+  const withDates = (events, dates) => events.flatMap((event, index) => (dates > 1 && (!index || events[index - 1].date !== event.date))
+    ? [wfNode('div', wfDayLabel(event.date), 'wf-dateline'), wfMeetingRow(event)] : [wfMeetingRow(event)]);
   function render() {
-    Object.assign(workflowView, { query: search.value, project: project.value, unresolved: unresolved.checked });
-    const events = workflowData.meetings.filter(event => `${event.title} ${event.series}`.toLowerCase().includes(search.value.toLowerCase()) && (!project.value || wfMeetingKey(event) === project.value) && (!unresolved.checked || wfMeetingItems(event.id).some(item => item.status !== 'done')));
-    list.replaceChildren(...events.map(wfMeetingRow));
+    Object.assign(workflowView, { query: search.value, project: project.value, reviewOnly: reviewOnly.checked, unresolved: unresolved.checked });
+    const events = workflowData.meetings.filter(event => `${event.title} ${event.series}`.toLowerCase().includes(search.value.toLowerCase()) && (!project.value || wfMeetingKey(event) === project.value) && (!reviewOnly.checked || event.drafts?.length) && (!unresolved.checked || wfMeetingItems(event.id).some(item => item.status !== 'done'))).sort(wfMeetingOrder);
+    const pending = workflowData.meetings.filter(event => event.drafts?.length);
+    const summary = wfNode('p', pending.length ? `검토할 회의 ${pending.length} · 초안 ${pending.reduce((sum, event) => sum + event.drafts.length, 0)}개` : '검토할 초안이 없습니다.', pending.length ? 'wf-mlist-summary wf-mlist-summary-review' : 'wf-mlist-summary');
+    const review = events.filter(event => event.drafts?.length), rest = events.filter(event => !event.drafts?.length);
+    const dates = new Set(events.map(event => event.date)).size;
+    const nodes = [summary];
+    if (review.length) nodes.push(wfNode('h3', `검토 필요 ${review.length}`), ...withDates(review, dates));
+    if (rest.length) nodes.push(...(review.length ? [wfNode('h3', '그 밖의 회의')] : []), ...withDates(rest, dates));
+    list.replaceChildren(...nodes);
     if (!events.length) list.appendChild(wfNode('p', '조건에 맞는 회의가 없습니다.', 'wf-section-note'));
   }
   const later = wfDebounce(() => { if (search.isConnected) render(); });
   search.addEventListener('input', () => { workflowView.query = search.value; later(); });
-  project.addEventListener('change', render); unresolved.addEventListener('change', render); render();
+  project.addEventListener('change', render); reviewOnly.addEventListener('change', render); unresolved.addEventListener('change', render); render();
 }
 function wfProject(key) {
   const items = workflowData.items.filter(item => wfKey(item) === key);
@@ -272,7 +393,7 @@ function wfProject(key) {
     const matches = items.filter(filter).sort((a, b) => (b.created || '').localeCompare(a.created || ''));
     if (!matches.length) continue;
     workflowDialog.appendChild(wfNode('h3', `${title} · ${matches.length}`));
-    matches.forEach(item => workflowDialog.appendChild(wfItemRow(item)));
+    if (matches.length) workflowDialog.appendChild(wfItemList(matches));
   }
   workflowDialog.appendChild(wfNode('h3', '관련 회의'));
   const events = workflowData.meetings.filter(event => wfMeetingKey(event) === key || items.some(item => item.meetingId === event.id));
@@ -287,32 +408,50 @@ function wfMeeting(id) {
     const note = wfNode('a', '티로 노트 열기 ↗', 'wf-link'); note.href = url; note.target = '_blank'; note.rel = 'noopener';
     when.appendChild(note);
   });
-  workflowDialog.append(wfNode('h3', event.title), when);
+  // 프로젝트는 여기서 바꾸지 않는다(캘린더 카드 ⋮ → 프로젝트 연결). 어디로 담기는지만 보여 준다.
+  if (event.project) { const chip = wfNode('span', event.project.label || event.project.value, 'wf-chip wf-chip-project'); chip.title = '프로젝트는 오늘 미팅 카드의 ⋮ 메뉴에서 바꿉니다'; when.prepend(chip); }
+  workflowDialog.append(wfNode('h3', event.title, 'wf-title'), when);
+  wfResult(event);
   // 프로젝트 연결은 캘린더 카드의 ⋮ → "프로젝트 연결"에서 이미 한다(거기서 하면 두 저장소에
   // 다 반영되지만, 여기서 따로 저장하면 한쪽에만 반영돼서 서로 어긋났다) — 그래서 여기선 뺐다.
   // "반복 회의 시리즈"도 같은 이유로 뺐다: 프로젝트 연결이 이미 회의 제목 기준으로 자동 이어진다.
   if (event.drafts?.length) wfDrafts(event);
-  workflowDialog.appendChild(wfNode('h3', '이 회의에서 나온 것'));
-  const items = wfMeetingItems(id);
-  items.forEach(item => workflowDialog.appendChild(wfItemRow(item)));
+  const typeRank = item => { const rank = ['task', 'bug', 'check', 'decision'].indexOf(item.type); return rank < 0 ? 9 : rank; };
+  const items = [...wfMeetingItems(id)].sort((a, b) => typeRank(a) - typeRank(b));
+  const itemsHeading = wfNode('h3', '');
+  itemsHeading.append('이 회의에서 나온 것');
+  if (items.length) itemsHeading.appendChild(wfNode('span', String(items.length), 'wf-count wf-count-neutral'));
+  workflowDialog.appendChild(itemsHeading);
+  if (items.length) workflowDialog.appendChild(wfItemList(items));
   if (!items.length) workflowDialog.appendChild(wfNode('p', '아직 기록한 항목이 없습니다.', 'wf-section-note'));
   // 종류·내용·추가를 한 줄로 — 세로로 쌓인 라벨 3단짜리 폼 대신 인박스 빠른입력과 같은 모양.
   const form = wfNode('form', undefined, 'wf-capture-row');
-  const type = wfSelect([['task', '할 일'], ['decision', '결정'], ['check', '확인 대기']], 'task');
-  type.setAttribute('aria-label', '담을 종류');
-  form.appendChild(type);
+  let captureType = 'task', captureDue = '';
+  const captureDate = wfNode('span', undefined, 'wf-date-slot wf-capture-date');
+  const syncCaptureDate = () => {
+    captureDate.replaceChildren();
+    const label = wfDateLabel(captureType);
+    if (label) captureDate.appendChild(wfDateField(captureDue, label, value => { captureDue = value; }));
+  };
+  form.appendChild(wfTypeSegment('task', key => { captureType = key; syncCaptureDate(); }, '담을 종류'));
   const description = document.createElement('input'); description.required = true; description.maxLength = 1000;
   description.placeholder = '회의에서 나온 내용';
   description.setAttribute('aria-label', '회의에서 나온 내용');
   form.appendChild(description);
+  syncCaptureDate();
+  form.appendChild(captureDate);
   const submit = wfNode('button', '추가', 'wf-capture-add'); submit.type = 'submit'; form.appendChild(submit);
   form.addEventListener('submit', async e => {
     e.preventDefault(); if (!description.value.trim() || submit.disabled) return;
     submit.disabled = true;
-    try { await wfPost('capture', { meetingId: id, type: type.value, description: description.value }); await load(); wfRender(); }
+    try { await wfPost('capture', { meetingId: id, type: captureType, description: description.value, ...(captureType !== 'decision' && captureDue ? { due: captureDue } : {}) }); await load(); wfRender(); }
     catch { workflowDialog.querySelector('.wf-error').textContent = '추가하지 못했습니다. 입력 내용은 유지됩니다.'; submit.disabled = false; }
   });
-  workflowDialog.appendChild(form);
+  // 직접 적어 담기는 보조 도구: 검토할 초안이 있으면 접어 두어 주 흐름(검토 → 담기)에 방해되지 않게 하고, 초안이 없을 때만 펼친다.
+  const add = wfNode('details', undefined, 'wf-add');
+  add.open = !event.drafts?.length;
+  add.append(wfNode('summary', '직접 적어 담기'), form);
+  workflowDialog.appendChild(add);
   const existing = workflowData.items.filter(item => !item.meetingId && (!wfMeetingKey(event) || wfKey(item) === wfMeetingKey(event)));
   if (existing.length) {
     const link = wfNode('details'); link.appendChild(wfNode('summary', '기존 항목 연결'));
@@ -324,38 +463,131 @@ function wfMeeting(id) {
     workflowDialog.appendChild(link);
   }
 }
+// 날짜 내림차순, 같은 날은 시간 오름차순 — 하루 안에서는 회의 순서대로 처리한다.
+const wfMeetingOrder = (a, b) => (b.date || '').localeCompare(a.date || '') || (a.start || '').localeCompare(b.start || '');
+const wfNextReview = currentId => workflowData.meetings.filter(event => event.id !== currentId && event.drafts?.length).sort(wfMeetingOrder)[0];
+// 방금 초안을 담은 회의라면: 어디로 갔는지, 되돌리기, 다음 검토할 회의.
+// 결과 카드의 할 일 줄: created(서버가 만든 항목 번호)와 accepted(보낸 초안)는 같은 순서다. 오늘 할 일에 있는지(처음부터 오늘이었거나 방금 올렸거나)도 함께.
+const wfResultTasks = result => result.accepted.map((item, index) => ({ item, itemId: result.created[index] })).filter(({ item }) => item.type === 'task')
+  .map(({ item, itemId }) => ({ itemId, description: item.description, today: item.when === 'today' || (result.promoted || []).includes(itemId) }));
+// 나중에 담긴 할 일을 오늘 할 일로 올린다(창 안에서 결과를 보여 주니 저장 알림은 끈다).
+async function wfPromote(result, ids) {
+  for (const itemId of ids) {
+    await request('/api/track/set-scheduled', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: itemId, scheduled: todayStr() }), quiet: true });
+    (result.promoted ||= []).push(itemId);
+  }
+  await load(); wfRender();
+}
+// 방금 초안을 담은 회의라면: 결과 한 줄, 나중에 담긴 할 일을 오늘로 올리는 버튼, 되돌리기, 다음 검토할 회의. 가장 조용하게.
+function wfResult(event) {
+  const result = workflowView.result;
+  if (!result || result.meetingId !== event.id) return;
+  const box = wfNode('div', undefined, 'wf-result');
+  box.setAttribute('role', 'status');
+  const head = wfNode('div', undefined, 'wf-result-head');
+  head.appendChild(wfNode('strong', `✓ ${result.created.length}개 담음`, 'wf-result-title'));
+  head.appendChild(wfNode('span', WF_TYPES.map(([type, label]) => [label, result.accepted.filter(item => item.type === type).length]).filter(([, count]) => count).map(([label, count]) => `${label} ${count}`).join(' · '), 'wf-result-counts'));
+  head.appendChild(wfButton('실행 취소', async () => {
+    const undo = await wfPost('review-undo', { meetingId: event.id, created: result.created });
+    if (!undo.ok) throw new Error(undo.error || '되돌리지 못했습니다.');
+    result.accepted.forEach(item => wfDraftEdits.set(item.id, { type: item.type, description: item.description, when: item.when || 'later', due: item.due || '' }));
+    delete workflowView.result;
+    await load(); wfRender(); announce('담은 것을 되돌렸습니다.');
+  }, 'wf-result-undo'));
+  box.appendChild(head);
+
+  // 할 일은 기본이 "나중"으로 담기니, 이 자리에서 바로 오늘로 올릴 수 있게 한다. 셋까지는 줄마다, 그 이상은 한 줄로 묶는다.
+  const tasks = wfResultTasks(result);
+  const later = tasks.filter(task => !task.today);
+  if (tasks.length && tasks.length <= 3) {
+    tasks.forEach(task => {
+      const row = wfNode('div', undefined, 'wf-result-task');
+      row.append(wfNode('span', '할 일', 'wf-tag wf-tag-task'), wfNode('span', task.description, 'wf-result-task-text'));
+      row.appendChild(task.today ? wfNode('span', '오늘 할 일 ✓', 'wf-result-note') : wfButton('오늘로', () => wfPromote(result, [task.itemId]), 'wf-result-up'));
+      box.appendChild(row);
+    });
+  } else if (tasks.length) {
+    const row = wfNode('div', undefined, 'wf-result-task');
+    row.append(wfNode('span', '할 일', 'wf-tag wf-tag-task'), wfNode('span', later.length ? `나중에 담긴 할 일 ${later.length}개` : `할 일 ${tasks.length}개`, 'wf-result-task-text'));
+    row.appendChild(later.length ? wfButton('모두 오늘로', () => wfPromote(result, later.map(task => task.itemId)), 'wf-result-up') : wfNode('span', '오늘 할 일 ✓', 'wf-result-note'));
+    box.appendChild(row);
+  }
+
+  const next = wfNextReview(event.id);
+  const foot = wfNode('div', undefined, 'wf-result-next');
+  if (next) foot.appendChild(wfButton(`다음: ${next.title} (초안 ${next.drafts.length}) →`, () => wfOpen({ kind: 'meeting', id: next.id }), 'wf-result-link'));
+  else foot.appendChild(wfNode('span', '오늘 검토할 초안을 모두 처리했습니다.', 'wf-result-note'));
+  box.appendChild(foot);
+  workflowDialog.appendChild(box);
+}
 function wfDrafts(event) {
-  workflowDialog.appendChild(wfNode('h3', `AI가 분류한 것 · 검토 전 ${event.drafts.length}`));
-  workflowDialog.appendChild(wfNode('p', '종류와 문구를 고친 뒤 담으면 각 목록으로 들어갑니다. 할 일은 나중에 할 일로 담깁니다.', 'wf-section-note'));
-  const rows = event.drafts.map(draft => {
-    const edit = wfDraftEdits.get(draft.id) || { type: draft.type, description: draft.description };
+  const summary = wfNode('span', undefined, 'wf-draft-summary');
+  const refreshSummary = () => {
+    const counts = {};
+    let today = 0;
+    event.drafts.forEach(draft => {
+      const edit = wfDraftEdits.get(draft.id);
+      counts[edit.type] = (counts[edit.type] || 0) + 1;
+      if (edit.type === 'task' && edit.when === 'today') today++;
+    });
+    summary.textContent = WF_TYPES.filter(([key]) => counts[key]).map(([key, label]) => `${label} ${counts[key]}${key === 'task' && today ? `(오늘 ${today})` : ''}`).join(' · ');
+  };
+  // 카드 하나 = 초안 한 건. 읽는 순서대로: 문구(주인공) → 고르는 것들(종류·시점·날짜).
+  // 문구는 여러 줄로 늘어나는 입력칸에 전부 보인다. 한 줄 입력칸일 때는 긴 문구의 끝이 잘렸다.
+  const cards = event.drafts.map(draft => {
+    const edit = wfDraftEdits.get(draft.id) || { type: draft.type, description: wfCleanDraftText(draft.description), when: 'later', due: draft.due || '' };
     wfDraftEdits.set(draft.id, edit);
-    const row = wfNode('div', undefined, 'wf-capture-row wf-draft-row');
-    const type = wfSelect([['task', '할 일'], ['decision', '결정'], ['check', '확인 대기']], edit.type);
-    type.setAttribute('aria-label', '종류');
-    type.addEventListener('change', () => { edit.type = type.value; });
-    const description = document.createElement('input'); description.value = edit.description; description.maxLength = 1000;
-    description.setAttribute('aria-label', '내용');
-    description.addEventListener('input', () => { edit.description = description.value; });
+    const card = wfNode('div', undefined, 'wf-draft');
+    card.dataset.type = edit.type;
+
     const dismiss = wfButton('✕', async () => {
       await wfReview({ meetingId: event.id, dismiss: [draft.id] });
       wfDraftEdits.delete(draft.id); await load(); wfRender();
     }, 'wf-draft-dismiss');
     dismiss.setAttribute('aria-label', `빼기: ${edit.description}`);
-    row.append(type, description);
-    if (draft.due) row.appendChild(wfNode('span', `마감 ${draft.due.slice(5).replace('-', '/')}`, 'wf-meta wf-draft-due'));
-    row.appendChild(dismiss);
-    return row;
+    dismiss.title = '이 초안 빼기';
+
+    const description = document.createElement('textarea');
+    description.className = 'wf-draft-text'; description.rows = 1; description.maxLength = 1000;
+    description.value = edit.description;
+    description.setAttribute('aria-label', '내용');
+    const fit = () => { description.style.height = 'auto'; description.style.height = `${description.scrollHeight + description.offsetHeight - description.clientHeight}px`; };
+    description.addEventListener('input', () => {
+      // 문구는 한 줄이다: 붙여넣은 줄바꿈은 공백으로
+      if (description.value.includes('\n')) description.value = description.value.replace(/\s*\n\s*/g, ' ');
+      edit.description = description.value; fit();
+    });
+    description.addEventListener('keydown', event => { if (event.key === 'Enter') event.preventDefault(); });
+
+    const controls = wfNode('div', undefined, 'wf-draft-controls');
+    const whenSeg = wfSegment([['later', '나중에 할 일'], ['today', '오늘 할 일']], edit.when || 'later', key => { edit.when = key; refreshSummary(); }, '언제 할 일로 담을까');
+    whenSeg.title = '나중: 나중에 할 일로 담김 · 오늘: 오늘 할 일로 담김';
+    const dateSlot = wfNode('span', undefined, 'wf-date-slot');
+    const syncWhen = () => { whenSeg.hidden = edit.type !== 'task'; };
+    const syncDate = () => {
+      dateSlot.replaceChildren();
+      const label = wfDateLabel(edit.type);
+      if (label) dateSlot.appendChild(wfDateField(edit.due || '', label, value => { edit.due = value; }));
+    };
+    controls.append(wfTypeSegment(edit.type, key => { edit.type = key; card.dataset.type = key; syncWhen(); syncDate(); refreshSummary(); }), whenSeg, dateSlot);
+    syncWhen(); syncDate();
+
+    card.append(dismiss, description, controls);
+    requestAnimationFrame(fit);
+    return card;
   });
-  workflowDialog.append(...rows);
+  workflowDialog.append(...cards);
+  refreshSummary();
   const actions = wfNode('div', undefined, 'wf-actions wf-draft-actions');
+  actions.appendChild(summary);
   actions.appendChild(wfButton(`${event.drafts.length}개 담기`, async () => {
-    const accept = event.drafts.map(draft => ({ id: draft.id, ...wfDraftEdits.get(draft.id), description: wfDraftEdits.get(draft.id).description.trim() }));
+    const accept = event.drafts.map(draft => wfAcceptItem(draft.id, wfDraftEdits.get(draft.id)));
     if (accept.some(item => !item.description)) { workflowDialog.querySelector('.wf-error').textContent = '비어 있는 문구가 있습니다. 채우거나 ✕로 빼 주세요.'; return; }
-    await wfReview({ meetingId: event.id, accept });
+    const result = await wfReview({ meetingId: event.id, accept });
+    workflowView.result = { meetingId: event.id, created: result.created, accepted: accept };
     accept.forEach(item => wfDraftEdits.delete(item.id));
-    await load(); wfRender(); announce(`${accept.length}개를 담았습니다.`);
-  }));
+    await load(); wfRender(); // 결과 카드(role=status)가 담은 결과를 알려 주므로 따로 알림을 띄우지 않는다
+  }, 'wf-primary'));
   workflowDialog.appendChild(actions);
 }
 async function wfReview(body) {
@@ -424,7 +656,7 @@ function taskCoreFields(item, parent) {
 function wfItemView(id) {
   const item = wfItem(id);
   if (!item) { workflowDialog.appendChild(wfNode('p', '삭제되었거나 찾을 수 없는 항목입니다.')); return; }
-  workflowDialog.append(wfNode('h3', item.description), wfNode('p', `${wfType(item.type)} · ${item.status === 'done' ? '완료' : '미완료'}`, 'wf-section-note'));
+  workflowDialog.append(wfNode('h3', item.description, 'wf-title'), wfNode('p', `${wfType(item.type)} · ${item.status === 'done' ? '완료' : '미완료'}`, 'wf-section-note'));
   if(item.type==='task')taskCoreFields(item,workflowDialog);
   if (item.permalink) { const a = wfNode('a', '슬랙 원문', 'wf-link'); a.href = item.permalink; a.target = '_blank'; a.rel = 'noopener'; a.style.display = 'inline-block'; workflowDialog.appendChild(a); }
   const save = workflowFields(item, workflowDialog);
@@ -474,6 +706,6 @@ function workflowRender(data) {
   const checks = workflowData.items.filter(item => item.type === 'check' && item.status !== 'done' && item.followUp && item.followUp <= data.today && item.contacted !== data.today);
   const ready = workflowData.items.filter(item => ['task', 'bug'].includes(item.type) && item.status !== 'done' && item.blockedBy && wfItem(item.blockedBy)?.status === 'done');
   reminder.replaceChildren();
-  if (checks.length) { reminder.appendChild(wfNode('h3', '다시 확인할 항목')); checks.forEach(item => reminder.appendChild(wfItemRow(item))); }
-  if (ready.length) { reminder.appendChild(wfNode('h3', '답변이 해결된 업무')); ready.forEach(item => reminder.appendChild(wfItemRow(item))); }
+  if (checks.length) { reminder.appendChild(wfNode('h3', '다시 확인할 항목')); reminder.appendChild(wfItemList(checks)); }
+  if (ready.length) { reminder.appendChild(wfNode('h3', '답변이 해결된 업무')); reminder.appendChild(wfItemList(ready)); }
 }

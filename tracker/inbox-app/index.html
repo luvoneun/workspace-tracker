@@ -58,8 +58,10 @@
     margin: 0;
     background: var(--bg);
     color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", "Noto Sans KR", "Malgun Gothic", "Segoe UI", sans-serif;
     line-height: 1.5;
+    word-break: keep-all; /* 한글은 단어 중간이 아니라 띄어쓰기에서 줄을 바꾼다 */
+    overflow-wrap: break-word;
   }
   .page { max-width: 1240px; margin: 0 auto; padding: 24px 16px 48px; }
   /* Notion/Linear/Raycast처럼 — 검색은 헤더 정중앙에 "입력창처럼 생긴" 트리거 버튼으로 두고,
@@ -670,6 +672,7 @@
     font-variant-numeric: tabular-nums;
   }
   .calendar-title { color: var(--text); font-size: var(--text-md); font-weight: 600; line-height: 1.4; margin-top: 2px; }
+  .badge.cal-drafts { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); font-weight: 700; white-space: nowrap; }
   .badge.cal-related { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, transparent); white-space: nowrap; }
   .calendar-title-open { cursor: pointer; border-radius: 4px; }
   .calendar-title-open:hover { color: var(--accent); }
