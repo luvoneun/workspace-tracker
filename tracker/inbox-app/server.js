@@ -1177,7 +1177,7 @@ const handleRequest = (req, res) => {
       // 앱 화면 파일이 바뀌면 이 값이 달라진다. 브라우저가 이걸 보고 스스로 새로고침한다.
       appVersion: (() => {
         try {
-          return ['index.html', 'workflows.js', 'workflows.css', 'report-ui.js', 'report-ui.css'].map(file => fs.statSync(path.join(PUBLIC_DIR, file)).mtimeMs).join(':');
+          return ['index.html', 'app.js', 'workflows.js', 'workflows.css', 'report-ui.js', 'report-ui.css'].map(file => fs.statSync(path.join(PUBLIC_DIR, file)).mtimeMs).join(':');
         } catch {
           return '0';
         }
@@ -1457,7 +1457,7 @@ const handleRequest = (req, res) => {
   }
 
   let filePath = url.pathname === '/' ? '/index.html' : url.pathname;
-  if (!['/index.html','/workflows.js','/workflows.css','/report-ui.js','/report-ui.css','/manifest.webmanifest'].includes(filePath) && !/^\/icons\/[\w-]+\.(png|svg)$/.test(filePath)) {
+  if (!['/index.html','/app.js','/workflows.js','/workflows.css','/report-ui.js','/report-ui.css','/manifest.webmanifest'].includes(filePath) && !/^\/icons\/[\w-]+\.(png|svg)$/.test(filePath)) {
     res.writeHead(404); res.end('Not found'); return;
   }
   filePath = path.join(PUBLIC_DIR, filePath);

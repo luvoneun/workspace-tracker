@@ -45,7 +45,8 @@ workspace.config.json       사람/회사마다 다른 값 (git에 안 올라감
 setup.sh                    설치 스크립트
 tracker/*.md                내 업무 데이터 (git에 안 올라감)
 tracker/inbox-app/          앱 — 회사·개인 정보가 들어있지 않다
-  server.js  index.html
+  server.js                 서버·API
+  index.html  app.js        화면 뼈대·스타일 / 화면 동작 (workflows.js·report-ui.js는 기능별 화면)
   automation/               자동화 스크립트 원본
 .claude/skills/             수집 작업 지시서 (슬랙/캘린더/지라)
 ```
