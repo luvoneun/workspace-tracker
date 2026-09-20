@@ -54,15 +54,39 @@
     line-height: 1.5;
   }
   .page { max-width: 1240px; margin: 0 auto; padding: 24px 16px 48px; }
-  .page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+  /* Notion/Linear/Raycast처럼 — 검색은 헤더 정중앙에 "입력창처럼 생긴" 트리거 버튼으로 두고,
+     누르면 이미 있는 전체화면 검색으로 연결한다. 제목 길이가 바뀌어도 가운데를 유지하려고
+     3칸 그리드로 짠다(1fr 검색 1fr) — 제목/톱니는 각자 칸의 바깥쪽으로 붙는다. */
+  .page-header { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; }
+  .page-header h1 { justify-self: start; }
+  .page-header .settings-btn { justify-self: end; }
+  .search-pill {
+    justify-self: center; display: inline-flex; align-items: center; gap: 6px;
+    font: inherit; font-size: 13px; color: var(--muted);
+    background: var(--card); border: 1px solid var(--border); border-radius: 999px;
+    padding: 7px 16px; min-width: 160px; cursor: pointer;
+    transition: border-color 120ms ease, color 120ms ease;
+  }
+  .search-pill:hover { border-color: var(--accent); color: var(--text); }
+  @media (max-width: 520px) {
+    .search-pill { min-width: 0; padding: 7px 10px; }
+    .search-pill-text { display: none; }
+  }
   h1 { font-size: 20px; margin: 0 0 4px; }
   .settings-btn {
+    position: relative;
     width: 30px; height: 30px; line-height: 1; font-size: 15px;
     color: color-mix(in srgb, var(--muted) 60%, transparent);
     background: none; border: none; border-radius: 50%; cursor: pointer;
     flex-shrink: 0; transition: color 120ms ease, background 120ms ease;
   }
   .settings-btn:hover { color: var(--text); background: var(--card); }
+  /* 열어보지 않아도 "확인할 게 있다"는 걸 알 수 있게 */
+  .settings-btn.has-alert::after {
+    content: ''; position: absolute; top: 2px; right: 2px;
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--urgent); border: 1.5px solid var(--bg);
+  }
 
   .settings-dialog {
     width: min(560px, calc(100vw - 32px)); max-height: 82dvh; box-sizing: border-box;
@@ -83,6 +107,9 @@
   .automation-summary { font-size: 12px; color: var(--muted); line-height: 1.5; }
   .automation-failures { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
   .automation-failure-row { font-size: 11px; color: var(--urgent); line-height: 1.6; }
+  .automation-failure-row.muted { color: var(--muted); }
+  .automation-past-failures { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+  .automation-past-failures summary { color: var(--muted); cursor: pointer; font-size: 11px; font-weight: 600; }
   .automation-log-toggle { margin-top: 8px; }
   .automation-log-toggle summary { color: var(--muted); cursor: pointer; font-size: 11px; font-weight: 600; }
   .automation-log-tail { margin: 8px 0 0; padding: 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; font-family: ui-monospace, monospace; font-size: 10px; line-height: 1.6; color: var(--muted); white-space: pre-wrap; word-break: break-all; max-height: 240px; overflow-y: auto; }
@@ -450,6 +477,23 @@
     accent-color: var(--accent);
   }
   .checkbox:disabled { cursor: not-allowed; opacity: 0.35; }
+  /* 일괄 선택용 체크박스 — "완료" 체크박스랑 같은 자리에, 같은 모양으로 뜨니까
+     지금 누르면 완료 처리되는 건지 선택되는 건지 헷갈리고 무서워진다는 얘기를 들었다.
+     네모난 모양 + 테두리로 눈에 띄게 다르게 만들고, 카드 배경도 같이 물들여서
+     "이건 완료가 아니라 선택"이라는 게 바로 보이게 한다. */
+  .checkbox.task-selection {
+    appearance: none; -webkit-appearance: none;
+    width: 20px; height: 20px; margin-top: 2px;
+    border: 2px solid var(--border); border-radius: 5px;
+    background: var(--card); position: relative;
+    transition: background 120ms ease, border-color 120ms ease;
+  }
+  .checkbox.task-selection:checked { background: var(--accent); border-color: var(--accent); }
+  .checkbox.task-selection:checked::after {
+    content: ''; position: absolute; left: 5px; top: 1px;
+    width: 5px; height: 9px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg);
+  }
+  .card.batch-selected { background: color-mix(in srgb, var(--accent) 8%, var(--card)); border-color: var(--accent); }
   .body { flex: 1; min-width: 0; }
   .top-row {
     display: flex;
@@ -890,6 +934,25 @@
   #todayTaskZone { margin-bottom: 12px; }
   #todayTaskZone h2 { flex-wrap: wrap; }
   .today-toolbar { display: flex; justify-content: flex-end; margin: -2px 0 8px; }
+  /* 일괄 정리 — 선택 모드일 땐 테두리 있는 박스로 감싸서 "지금 특별한 모드"라는 걸 알려주고,
+     "모드 자체"(끝내기·몇 개·전체선택)와 "실제로 바꾸는 것"(날짜·그룹)을 두 줄로 나눈다. */
+  .task-batch-tools { margin-bottom: 10px; }
+  .task-batch-tools.active {
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;
+  }
+  .task-batch-mode-row { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+  .task-batch-mode-row .wf-section-note { margin: 0 0 0 4px; }
+  .task-batch-action-row {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding-top: 8px; border-top: 1px solid var(--border);
+  }
+  .task-batch-action-row .jira-control { margin: 0; }
+  .task-batch-date { display: flex; flex-direction: column; }
+  .task-batch-date summary { color: var(--muted); cursor: pointer; font-size: 12px; font-weight: 600; list-style: none; }
+  .task-batch-date summary::-webkit-details-marker { display: none; }
+  .task-batch-date[open] summary { color: var(--text); margin-bottom: 6px; }
+  .task-batch-date > input, .task-batch-date > button { margin-top: 4px; }
   .view-select { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; font-weight: 600; }
   .view-select select { font: inherit; color: var(--text); background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 5px 9px; cursor: pointer; }
   .view-select select:focus { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 1px; }
@@ -1116,7 +1179,6 @@
   .group-add { margin: 0 0 10px; }
   .group-add summary { color: var(--muted); cursor: pointer; font-size: 12px; padding: 4px 0; }
   .group-add input { margin-top: 4px; }
-  .new-dot { position: static; width: auto; height: auto; box-shadow: none; border: 0; border-radius: 6px; padding: 3px 6px; color: #fff; font-size: 11px; cursor: pointer; }
   /* 스낵바 — 예전엔 브라우저 기본 버튼(각진 회색)을 그대로 썼더니 앱의 둥근 알약 버튼과
      확 튀었다. 액션은 .convert-btn과 같은 모양으로, 닫기는 그보다 옅은 보조 버튼으로 구분한다. */
   .status-notice {
@@ -1172,12 +1234,16 @@
 
 </style>
 <link rel="stylesheet" href="/workflows.css">
+<link rel="stylesheet" href="/report-ui.css">
 </head>
 <body>
   <div class="pull-indicator" id="pullIndicator" aria-hidden="true">↻</div>
   <div class="page">
     <div class="page-header">
       <h1 id="workspaceTitle">워크스페이스</h1>
+      <button type="button" id="searchEntryBtn" class="search-pill" aria-label="통합 검색" title="검색">
+        <span aria-hidden="true">🔍</span><span class="search-pill-text">검색...</span>
+      </button>
       <button type="button" id="settingsBtn" class="settings-btn" aria-label="환경설정" title="환경설정">⚙</button>
     </div>
     <div class="date-bar">
@@ -1311,6 +1377,7 @@
   </dialog>
 
 <script src="/workflows.js"></script>
+<script src="/report-ui.js"></script>
 <script>
 let jiraIssuesCache = [];
 let customGroupsCache = [];
@@ -1384,8 +1451,14 @@ function showNotice(message, error = false, retry = null, action = null) {
   if (!error && !lastRemovedId) noticeTimer = setTimeout(() => { region.hidden = true; }, action ? 8000 : 4500);
 }
 
+const pendingRequestKeys = new Map();
 async function request(url, options) {
   const writing = options?.method === 'POST';
+  const retryKey = writing && /\/(create|capture|review)$/.test(url) ? url + options.body : null;
+  if(retryKey && typeof crypto !== 'undefined' && crypto.randomUUID) {
+    if(!pendingRequestKeys.has(retryKey))pendingRequestKeys.set(retryKey,crypto.randomUUID());
+    options={...options,headers:{...options.headers,'Idempotency-Key':pendingRequestKeys.get(retryKey)}};
+  }
   if (writing) showNotice('저장 중…');
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
@@ -1394,6 +1467,7 @@ async function request(url, options) {
     if (!response.ok) throw new Error(`요청 실패 (${response.status})`);
     const data = await response.clone().json();
     if (data.ok === false) throw new Error(data.error || '저장하지 못했습니다.');
+    if(retryKey)pendingRequestKeys.delete(retryKey);
     if (writing) recordUndoFor(url, JSON.parse(options.body || '{}'));
     if (url === '/api/track/remove' && !undoReplaying) lastRemovedId = JSON.parse(options.body).id;
     if (writing) showNotice('저장했습니다.');
@@ -1435,7 +1509,9 @@ function recordUndoFor(url, body) {
   const item = itemsById.get(body.id);
   const label = item ? item.description : '';
   if (url === '/api/track/toggle') {
-    pushUndo({ label, undo: () => postJson(url, { id: body.id }), redo: () => postJson(url, { id: body.id }) });
+    const before=item?.status || (body.status==='done'?'to-do':'done');
+    const after=body.status || (before==='done'?'to-do':'done');
+    pushUndo({ label, undo: () => postJson(url, { id: body.id,status:before }), redo: () => postJson(url, { id: body.id,status:after }) });
   } else if (url === '/api/track/set-scheduled' && item) {
     const before = item.scheduled || null;
     pushUndo({ label, undo: () => postJson(url, { id: body.id, scheduled: before }), redo: () => postJson(url, { id: body.id, scheduled: body.scheduled }) });
@@ -1532,6 +1608,8 @@ function renderPlanningMode() {
   button.setAttribute('aria-label', planningMode ? '계획·정리 모드 닫기' : '계획·정리 모드 열기');
   const laterZone = document.getElementById('laterTaskZone');
   if (laterZone && planningMode) laterZone.open = true;
+  if (!planningMode && taskSelectionMode) { taskSelectionMode = false; taskSelection.clear(); taskListsRender(); }
+  taskSelectionRefresh();
 }
 
 function renderDateBar(data) {
@@ -1592,7 +1670,6 @@ function renderCalendar(calendar) {
     `;
 
     const setProject = async (projectKey) => {
-      if (event.workflowId) await wfPost('meeting', { id: event.workflowId, project: projectKey });
       await request('/api/meeting/set-project', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1884,6 +1961,7 @@ function renderWeeklyReports(items) {
 }
 
 function renderWeeklyReportDetail(item) {
+  if (item.draft && typeof renderReportDraft === 'function') { renderReportDraft(item); return; }
   const detail = document.getElementById('weeklyReportDetail');
   detail.dataset.weekKey = item.weekKey;
   const detailLabel = formatWeekLabel(item.weekKey);
@@ -2105,21 +2183,20 @@ function renderWrCardsView(detail, sections, weekKey) {
       label.textContent = line.text;
       row.appendChild(label);
       const matches = candidate => line.id ? candidate.id === line.id : !candidate.id && candidate.text === line.text && candidate.group === line.group;
-      const existing = sections.find(section => ['done', 'doing', 'later'].includes(section.key) && section.lines.some(matches));
-      for (const [key, title] of [['done', '완료'], ['doing', '진행중'], ['later', '다음 주 계획']]) {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'convert-btn';
-        button.textContent = existing?.key === key ? `${title}에 담김` : title;
-        button.disabled = existing?.key === key;
-        button.addEventListener('click', async () => {
+      const source = line.id ? reportRefsCache[line.id] : null;
+      const state = !line.id ? '직접 작성' : !source ? '원본 없음' : source.status === 'done' ? '완료' : source.doing ? '진행중' : '미완료';
+      label.appendChild(wfNode('span', ` · ${state}`, 'wf-meta'));
+      if (source) row.appendChild(wfButton('원본 보기', () => wfOpen({ kind: 'item', id: line.id }), 'convert-btn'));
+      const existing = sections.find(section => section.lines.some(matches));
+      if (existing) row.appendChild(wfNode('span', `${existing.heading}에 담김`, 'wf-section-note'));
+      else {
+        const destination = wfSelect([['done', '완료한 일'], ['doing', '진행중'], ['later', '다음 주 계획']], source?.status === 'done' ? 'done' : source?.doing ? 'doing' : 'later');
+        destination.className = 'jira-select'; destination.setAttribute('aria-label', `${line.text} 담을 요약 항목`);
+        row.append(destination, wfButton('요약에 담기', async () => {
           const next = structuredClone(sections);
-          const retained = existing?.lines.find(matches) || line;
-          next.filter(section => ['done', 'doing', 'later'].includes(section.key)).forEach(section => { section.lines = section.lines.filter(candidate => !matches(candidate)); });
-          next.find(section => section.key === key).lines.push(structuredClone(retained));
-          if (await commitAndRerender(next)) announce(`${title}에 담았습니다. 원본 업무 상태는 유지됩니다.`);
-        });
-        row.appendChild(button);
+          next.find(section => section.key === destination.value).lines.push(structuredClone(line));
+          if (await commitAndRerender(next)) announce('요약에 담았습니다.');
+        }, 'convert-btn'));
       }
       review.appendChild(row);
     });
@@ -2441,12 +2518,44 @@ function renderDecisionArchive() {
   items.forEach(item => list.appendChild(renderDecisionCard(item)));
 }
 
+// 지라 연결이든 직접 지정한 그룹이든 같은 방식으로 라벨을 만든다 — 카드 위 뱃지랑 동일한 표기.
+function decisionGroupLabel(item) {
+  if (item.jira) {
+    const issue = jiraIssuesCache.find(i => i.key === item.jira);
+    return issue ? `${item.jira} · ${issue.summary}` : item.jira;
+  }
+  return item.group || null;
+}
+
 function renderDecisions(items) {
   document.getElementById('decisionCount').textContent = items.length;
   document.getElementById('decisionSectionCount').textContent = items.length;
   const list = document.getElementById('decisionList');
   list.innerHTML = '';
-  items.forEach(item => list.appendChild(renderDecisionCard(item)));
+  if (!items.length) return;
+
+  // "언젠가"랑 같은 방식 — 프로젝트/그룹별로 묶고, 없는 건 기타로
+  const groups = new Map();
+  items.forEach(item => {
+    const key = decisionGroupLabel(item) || '__misc__';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  });
+  const namedKeys = [...groups.keys()].filter(k => k !== '__misc__').sort();
+  const orderedKeys = groups.has('__misc__') ? [...namedKeys, '__misc__'] : namedKeys;
+
+  orderedKeys.forEach(key => {
+    const groupEl = document.createElement('div');
+    groupEl.className = 'today-group';
+
+    const header = document.createElement('div');
+    header.className = 'today-group-header' + (key === '__misc__' ? ' misc' : '');
+    header.textContent = key === '__misc__' ? '기타' : key;
+    groupEl.appendChild(header);
+
+    groups.get(key).forEach(item => groupEl.appendChild(renderDecisionCard(item)));
+    list.appendChild(groupEl);
+  });
 }
 
 function renderDecisionCard(item) {
@@ -2480,7 +2589,7 @@ function renderDecisionCard(item) {
     onSetJira: (key) => setTaskJira(item.id, key),
     onSetGroup: (g) => setTaskGroup(item.id, g),
   }));
-  if (item.isNew && !done) card.appendChild(renderNewDot(item));
+  if (item.isNew && !done) { card.appendChild(renderNewDot(item)); observeNewItem(card, item); }
 
   if (!done) {
     card.appendChild(renderOverflowMenu([
@@ -2590,7 +2699,7 @@ function renderWaitingCard(item) {
     makeEditableDesc(body.querySelector('.desc'), item);
     makeEditableWho(body.querySelector('.who-badge'), item);
   }
-  if (item.isNew) card.appendChild(renderNewDot(item));
+  if (item.isNew) { card.appendChild(renderNewDot(item)); observeNewItem(card, item); }
   body.prepend(renderGroupControl({
     jira: item.jira,
     group: item.group,
@@ -2736,7 +2845,9 @@ function renderTaskCard(item, opts) {
   card.dataset.taskId = item.id;
 
   let checkbox = null;
-  if (mode === 'today') {
+  if (taskSelectionMode && !done) {
+    checkbox = taskSelectionCheckbox(item, card);
+  } else if (mode === 'today') {
     checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.className = 'checkbox';
@@ -2788,7 +2899,11 @@ function renderTaskCard(item, opts) {
   body.tabIndex = 0;
   body.setAttribute('role', 'button');
   body.setAttribute('aria-label', `${item.description} 상세 보기`);
-  const open = () => openTaskDetail(item, mode);
+  const open = () => {
+    if (taskSelectionMode) { if (!done && !taskBatchBusy) checkbox.click(); return; }
+    openTaskDetail(item, mode);
+  };
+  if (taskSelectionMode && !done) body.setAttribute('aria-label', `${item.description} 선택`);
   body.addEventListener('click', (e) => {
     if (e.target.closest('button,select,input,a,.overflow-menu,.group-add')) return;
     open();
@@ -3063,21 +3178,7 @@ function renderTaskDetail(item) {
   close.addEventListener('click', closeTaskDetail);
   panel.appendChild(close);
   const heading = document.createElement('h3'); heading.textContent = '업무 상세'; panel.appendChild(heading);
-  const title = document.createElement('input');
-  title.className = 'task-detail-title-input'; title.value = item.description; title.setAttribute('aria-label', '업무 제목');
-  title.addEventListener('change', async () => { const value = title.value.trim(); if (!value || value === item.description) return; await request('/api/track/set-description', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: item.id, description: value }) }); await load(); });
-  panel.appendChild(title);
-  const field = (labelText, control) => { const wrap = document.createElement('div'); wrap.className = 'detail-field'; const label = document.createElement('label'); label.textContent = labelText; wrap.append(label, control); panel.appendChild(wrap); };
-  const due = document.createElement('input'); due.type = 'date'; due.value = item.due || ''; due.addEventListener('change', () => setTaskDue(item.id, due.value || null)); field('마감일', due);
-  const scheduled = document.createElement('input'); scheduled.type = 'date'; scheduled.value = item.scheduled || ''; scheduled.addEventListener('change', () => setTaskScheduled(item.id, scheduled.value || null)); field('실행 예정일', scheduled);
-  const priority = renderPriorityBadge(item); priority.className += ' detail-priority'; field('우선순위', priority);
-  const group = renderGroupControl({
-    jira: item.jira,
-    group: item.group,
-    onSetJira: (key) => setTaskJira(item.id, key),
-    onSetGroup: (value) => setTaskGroup(item.id, value),
-  });
-  field('그룹', group);
+  taskCoreFields(item, panel);
   const saveWorkflowFields = workflowFields({ ...item, type: 'task' }, panel);
   if (item.permalink) { const link = document.createElement('a'); link.className = 'channel'; link.href = item.permalink; link.target = '_blank'; link.rel = 'noopener'; link.textContent = '슬랙 원문 열기'; panel.appendChild(link); }
   const actions = document.createElement('div'); actions.className = 'detail-actions';
@@ -3340,7 +3441,7 @@ function renderIdeaCard(item) {
   body.innerHTML = `<div class="top-row"><span class="desc sender">${escapeHtml(item.description)}</span></div>`;
   body.prepend(renderIdeaGroupControl(item));
 
-  if (item.isNew) card.appendChild(renderNewDot(item));
+  if (item.isNew) { card.appendChild(renderNewDot(item)); observeNewItem(card, item); }
 
   const badges = document.createElement('div');
   badges.className = 'badges';
@@ -3500,20 +3601,49 @@ function makeEditableWho(el, item) {
   });
 }
 
+// "NEW"는 이제 누르는 버튼이 아니라 그냥 표시다 — 화면에 잠깐이라도 실제로 보이면
+// 조용히 알아서 사라진다(아래 observeNewItem). 액션을 안 해도, 그냥 훑어보기만 해도 없어진다.
 function renderNewDot(item) {
-  const dot = document.createElement('button');
-  dot.type = 'button';
+  const dot = document.createElement('span');
   dot.className = 'new-dot';
-  dot.textContent = 'NEW · 확인';
-  dot.setAttribute('aria-label', `${item.description} — 신규 확인`);
-  dot.addEventListener('click', async () => {
-    dot.disabled = true;
-    try {
-      await request('/api/track/seen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: item.id }) });
-      await load();
-    } catch { dot.disabled = false; }
-  });
+  dot.innerHTML = `<span class="sr-only">${escapeHtml(item.description)} — 새로 들어옴</span>`;
   return dot;
+}
+
+// 카드가 화면에 실제로 보이는 동안(스쳐 지나가는 스크롤 말고) 일정 시간 머물면
+// "확인함"으로 조용히 저장한다. 다시 그려질 때마다(load()) 카드가 새로 만들어지니
+// 관찰자 하나를 계속 재사용하고, 타이머는 카드별로 관리한다.
+let newItemObserver = null;
+const newItemTimers = new Map();
+function getNewItemObserver() {
+  if (newItemObserver) return newItemObserver;
+  newItemObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      const id = entry.target.dataset.newItemId;
+      if (!id) return;
+      if (entry.isIntersecting) {
+        if (newItemTimers.has(id)) return;
+        newItemTimers.set(id, setTimeout(async () => {
+          newItemTimers.delete(id);
+          newItemObserver.unobserve(entry.target);
+          try {
+            await request('/api/track/seen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+            const dot = entry.target.querySelector('.new-dot');
+            if (dot) dot.remove();
+          } catch {}
+        }, 1500));
+      } else if (newItemTimers.has(id)) {
+        clearTimeout(newItemTimers.get(id));
+        newItemTimers.delete(id);
+      }
+    });
+  }, { threshold: 0.6 });
+  return newItemObserver;
+}
+
+function observeNewItem(card, item) {
+  card.dataset.newItemId = item.id;
+  getNewItemObserver().observe(card);
 }
 
 // 더보기 메뉴 안에서 값을 바꾸는 항목은 무엇을 바꾸는지 라벨을 달아준다
@@ -3609,10 +3739,11 @@ function announce(text) {
 }
 
 async function toggleTask(id) {
+  const source = itemsById.get(id) || wfItem(id);
   await request('/api/track/toggle', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id }),
+    body: JSON.stringify({ id, status: source?.status === 'done' ? 'to-do' : 'done' }),
   });
   await load();
 }
@@ -4005,25 +4136,60 @@ function relativeTimeFrom(timeStr) {
   return `${Math.round(diffHour / 24)}일 전`;
 }
 
+// 자주 보는 실패 패턴은 원문(영어) 대신 한국어로 바꿔서 보여준다.
+// 모르는 패턴은 억지로 번역하지 않고 원문 그대로 둔다.
+function translateFailureText(text) {
+  const sessionLimit = text.match(/session limit.*?resets\s+([^)]+)/i);
+  if (sessionLimit) return `Claude 사용량 한도에 걸림 · ${sessionLimit[1].trim()}에 풀림`;
+  if (/session limit/i.test(text)) return 'Claude 사용량 한도에 걸림';
+  return text;
+}
+
+// 성공 보고문은 Claude가 매번 자유롭게 쓴 긴 문장이라(마크다운 ** 기호까지 그대로) 스캔하기 어렵다.
+// 첫 문장만 보여주고 나머지는 "로그 더 보기"에서 보게 한다.
+function trimSummaryText(text) {
+  if (!text) return text;
+  const clean = text.replace(/\*\*/g, '').trim();
+  const firstLine = clean.split('\n')[0];
+  const sentenceEnd = firstLine.search(/[.!?](?!\d)/);
+  let short = sentenceEnd >= 0 ? firstLine.slice(0, sentenceEnd + 1) : firstLine;
+  if (short.length > 80) short = short.slice(0, 80) + '…';
+  return short.length < clean.length ? `${short} …` : short;
+}
+
+let automationStatusCache = [];
+
+async function fetchAutomationStatus() {
+  try {
+    const data = await request('/api/automation/status').then(r => r.json());
+    automationStatusCache = data.automations || [];
+  } catch {
+    automationStatusCache = [];
+  }
+  // 안 열어봐도 톱니바퀴만 보고 "확인할 게 있다"를 알 수 있게 점을 켠다
+  // 지금 실제로 실패 중인 게 있을 때만 — 예전에 있었다가 해결된 건 알림이 아니다
+  const hasAlert = automationStatusCache.some(a => a.lastKind === 'fail');
+  document.getElementById('settingsBtn')?.classList.toggle('has-alert', hasAlert);
+  return automationStatusCache;
+}
+
 async function renderAutomationStatus() {
   const view = document.getElementById('settingsStatusView');
   view.innerHTML = '<div class="empty">불러오는 중…</div>';
-  let automations;
-  try {
-    const data = await request('/api/automation/status').then(r => r.json());
-    automations = data.automations || [];
-  } catch {
+  const automations = await fetchAutomationStatus();
+  if (!automations.length) {
     view.innerHTML = '<div class="empty">상태를 불러오지 못했습니다.</div>';
     return;
   }
-  if (!automations.length) {
-    view.innerHTML = '<div class="empty">설정된 자동화가 없습니다.</div>';
-    return;
-  }
   view.innerHTML = '';
-  automations.forEach(a => {
+  // "최근 실패 기록이 있음"과 "지금 문제임"은 다르다 — 예전엔 둘을 구분 안 해서,
+  // 벌써 고쳐져서 마지막 실행이 정상이었는데도 몇 시간 전 실패 이력 때문에 계속
+  // 빨간 점이 떠 있었다("이게 지금도 그런 건지 예전 건지 모르겠다"는 혼란의 원인).
+  // 가장 최근 실행 자체가 실패였을 때만 "지금 문제"로 본다.
+  [...automations].sort((a, b) => (b.lastKind === 'fail' ? 1 : 0) - (a.lastKind === 'fail' ? 1 : 0)).forEach(a => {
+    const failingNow = a.lastKind === 'fail';
     const card = document.createElement('div');
-    card.className = 'automation-card' + (a.recentFailures.length ? ' has-failure' : '');
+    card.className = 'automation-card' + (failingNow ? ' has-failure' : '');
     const head = document.createElement('div');
     head.className = 'automation-card-head';
     head.innerHTML = `
@@ -4034,13 +4200,25 @@ async function renderAutomationStatus() {
     card.appendChild(head);
     const summary = document.createElement('div');
     summary.className = 'automation-summary';
-    summary.textContent = a.lastSummary || '아직 실행 기록이 없습니다.';
+    const rawSummary = a.lastSummary || '아직 실행 기록이 없습니다.';
+    summary.textContent = trimSummaryText(failingNow ? translateFailureText(rawSummary) : rawSummary);
     card.appendChild(summary);
     if (a.recentFailures.length) {
-      const fails = document.createElement('div');
-      fails.className = 'automation-failures';
-      fails.innerHTML = a.recentFailures.map(f => `<div class="automation-failure-row">⚠ ${escapeHtml(f.time)} · ${escapeHtml(f.text)}</div>`).join('');
-      card.appendChild(fails);
+      if (failingNow) {
+        const fails = document.createElement('div');
+        fails.className = 'automation-failures';
+        fails.innerHTML = a.recentFailures.map(f => `<div class="automation-failure-row">⚠ ${escapeHtml(f.time)} · ${escapeHtml(translateFailureText(f.text))}</div>`).join('');
+        card.appendChild(fails);
+      } else {
+        // 지금은 정상 — 예전 실패는 경고가 아니라 참고용으로만, 접어서 조용히 둔다
+        const past = document.createElement('details');
+        past.className = 'automation-past-failures';
+        const sum = document.createElement('summary');
+        sum.textContent = `지난 문제 ${a.recentFailures.length}건 · 지금은 정상`;
+        past.appendChild(sum);
+        past.insertAdjacentHTML('beforeend', a.recentFailures.map(f => `<div class="automation-failure-row muted">${escapeHtml(f.time)} · ${escapeHtml(translateFailureText(f.text))}</div>`).join(''));
+        card.appendChild(past);
+      }
     }
     if (a.tail && a.tail.length) {
       const details = document.createElement('details');
@@ -4067,8 +4245,10 @@ function renderSettingsGuide() {
     <dl>
       <dt>새로 들어온 것(인박스)이 뭔가요?</dt>
       <dd>슬랙에서 자동으로 긁어온 항목이 우선 모이는 곳이에요. AI가 오늘 할지 나중에 할지 미리 정하지 않고, 직접 분류하시라고 남겨둔 것입니다. 분류하면 인박스에서 사라지고 해당 목록으로 옮겨가요.</dd>
-      <dt>주간요약의 "조용히 완료로 넘기기"는 뭔가요?</dt>
-      <dd>완료하긴 했지만 굳이 보고할 정도는 아닌 일을 위한 기능이에요. 넘기면 완료한 일 목록에선 빠지지만, 삭제되는 게 아니라 접힌 "조용히 완료한 일" 아카이브에 남고 복사용 텍스트(공유용)엔 나오지 않아요. 되돌리기(다시 담기)도 가능합니다.</dd>
+      <dt>보고 문장을 수정하면 원본 업무도 바뀌나요?</dt>
+      <dd>아니요. 보고 문장과 원본 기록은 별도로 보존됩니다. 새 관련 업무는 수정 제안으로 표시되며, 직접 적용하기 전에는 편집한 문장을 바꾸지 않습니다.</dd>
+      <dt>자잘한 업무는 어떻게 빼나요?</dt>
+      <dd>"이번 보고에서 제외"를 누르면 복사할 내용에서 빠집니다. 원본은 전체 업무 기록에 남고 언제든 보고에 복원할 수 있습니다.</dd>
       <dt>그룹은 어떻게 바꾸나요?</dt>
       <dd>카드의 ⋮ 메뉴 → 그룹에서 드롭다운으로 바로 고를 수 있어요. 여러 개를 한 번에 바꾸려면 "선택" 버튼으로 체크박스를 켜고 같은 드롭다운을 씁니다.</dd>
       <dt>상단의 "○일 전 기준" 같은 표시는 뭔가요?</dt>
@@ -4077,6 +4257,10 @@ function renderSettingsGuide() {
       <dd>다른 사람의 답을 기다리는 항목이에요. 완료 표시하면 "해결됨"으로 남고, 할 일 쪽에서 "이 답변을 기다리는 중"으로 연결해두면 답이 오는 순간 알려줍니다.</dd>
     </dl>
   `;
+  if(['localhost','127.0.0.1'].includes(location.hostname)) {
+    const access=document.createElement('button');access.className='convert-btn';access.type='button';access.textContent='다른 기기 접속 암호 복사';
+    access.addEventListener('click',async()=>{try{const result=await (await request('/api/access-token')).json();if(!result.token){showNotice('다른 기기 접속이 설정되지 않았습니다.');return;}await navigator.clipboard.writeText(result.token);showNotice('암호를 복사했습니다. 다른 기기에서 사용자 이름은 workspace를 입력해 주세요.');}catch{showNotice('암호를 복사하지 못했습니다.',true);}});view.appendChild(access);
+  }
 }
 
 const settingsDialog = document.getElementById('settingsDialog');
@@ -4171,15 +4355,16 @@ document.addEventListener('touchcancel', () => { if (pulling) resetPull(true); e
 
 // 다른 창 갔다가 돌아오면 최신 상태로
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden && !isTyping()) load();
+  if (!document.hidden && !isTyping()) { load(); fetchAutomationStatus(); }
 });
 
 // 계속 띄워둔 채로도 뒤처지지 않게
 setInterval(() => {
-  if (!document.hidden && !isTyping()) load();
+  if (!document.hidden && !isTyping()) { load(); fetchAutomationStatus(); }
 }, 5 * 60 * 1000);
 
 load();
+fetchAutomationStatus(); // 환경설정을 열어보지 않아도 톱니바퀴에 실패 여부가 바로 보이게
 </script>
 </body>
 </html>

@@ -10,7 +10,7 @@ NAME="$1"
 PROMPT="$2"
 TOOLS="$3"
 
-WORKSPACE="${WORKSPACE_DIR:-$HOME/Desktop/personal}"
+WORKSPACE="${WORKSPACE_DIR:-$HOME/personal}"
 LOG_DIR="$HOME/.local/share/workspace-automation/logs"
 LOG="$LOG_DIR/$NAME.log"
 

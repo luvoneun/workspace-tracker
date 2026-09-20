@@ -1,8 +1,16 @@
 const http = require('http');
-const fs = require('fs');
+const nativeFs = require('fs');
+const { atomicWrite } = require('./safe-storage');
+let readScope = null;
+const fs = { ...nativeFs, readFileSync: (file,encoding) => {
+  if(!readScope || typeof file!=='string')return nativeFs.readFileSync(file,encoding);
+  const key=`${file}:${encoding || 'buffer'}`;
+  if(!readScope.files.has(key))readScope.files.set(key,nativeFs.readFileSync(file,encoding));return readScope.files.get(key);
+}, writeFileSync: atomicWrite, appendFileSync: (file, data) => atomicWrite(file, (nativeFs.existsSync(file) ? nativeFs.readFileSync(file, 'utf8') : '') + data) };
 const path = require('path');
 const os = require('os');
 const { exec } = require('child_process');
+const { randomBytes, createHash, timingSafeEqual } = require('node:crypto');
 
 // 사람/회사마다 달라지는 값은 전부 workspace.config.json 한 곳에 모아둔다.
 // 다른 맥이나 다른 회사에서 쓸 때 이 파일만 갈아끼우면 된다.
@@ -25,6 +33,30 @@ const PORT = Number(process.env.WORKSPACE_PORT || CONFIG.server?.port || 4321);
 const EXTRA_HOST = process.env.WORKSPACE_HOST || CONFIG.server?.extraHost || '';
 const TRACKER_DIR = process.env.WORKSPACE_DATA_DIR || path.join(__dirname, '..');
 const PUBLIC_DIR = __dirname;
+const ACCESS_TOKEN_PATH = path.join(TRACKER_DIR, '.access-token');
+function remoteAuthorized(req) {
+  const address=req.socket.remoteAddress;
+  if(['127.0.0.1','::1','::ffff:127.0.0.1'].includes(address))return true;
+  if(!nativeFs.existsSync(ACCESS_TOKEN_PATH))return false;
+  const expected=nativeFs.readFileSync(ACCESS_TOKEN_PATH,'utf8').trim();
+  if(expected.length<32)return false;
+  const header=req.headers.authorization || '';
+  const supplied=header.startsWith('Basic ')?Buffer.from(header.slice(6),'base64').toString().split(':').slice(1).join(':'):header.startsWith('Bearer ')?header.slice(7):'';
+  const a=Buffer.from(expected),b=Buffer.from(supplied);return a.length===b.length && timingSafeEqual(a,b);
+}
+function idempotent(req, payload, action) {
+  const key=req.headers['idempotency-key'];
+  if(!key)return mutations.run(action);
+  if(!/^[a-zA-Z0-9-]{16,100}$/.test(key))throw new Error('요청 식별자를 확인해 주세요.');
+  return mutations.run(()=>{
+    const file=path.join(TRACKER_DIR,'.request-ledger.json');
+    const entries=nativeFs.existsSync(file)?JSON.parse(nativeFs.readFileSync(file,'utf8')):{};
+    const digest=createHash('sha256').update(req.url+JSON.stringify(payload)).digest('hex');
+    if(entries[key]) {if(entries[key].digest!==digest)throw new Error('다른 내용으로 같은 요청을 재사용할 수 없습니다.');return entries[key].result;}
+    const result=action();entries[key]={digest,result};
+    const retained=Object.fromEntries(Object.entries(entries).slice(-1000));atomicWrite(file,JSON.stringify(retained));return result;
+  });
+}
 
 const TRACK_RE = /^- (.+?) #(task|bug|idea|decision|check)\[(.+)\]\s*$/;
 
@@ -67,9 +99,10 @@ function getCalendarToday() {
       lastSync = value && value !== '-' ? value : null;
       return;
     }
-    const m = line.match(CALENDAR_ITEM_RE);
+    const externalId = line.match(/ \| id:(\S+)$/)?.[1];
+    const m = line.replace(/ \| id:\S+$/, '').match(CALENDAR_ITEM_RE);
     if (!m) return;
-    events.push({ start: m[1], end: m[2], title: m[3], link: m[4] || null });
+    events.push({ start: m[1], end: m[2], title: m[3], link: m[4] || null, ...(externalId ? {externalId} : {}) });
   });
   const date = lastSync && lastSync.slice(0, 10);
   return { events: date === todayLocal() ? events : [], lastSync, stale: date !== todayLocal() };
@@ -282,6 +315,7 @@ function getIdeas() {
 }
 
 function setTrackField(id, fieldName, rawValue, matchType) {
+  validateFields({ [fieldName]: rawValue });
   const value = rawValue ? rawValue.trim().replace(/\s+/g, '_') : null;
   const re = new RegExp(`${fieldName}:\\S+`);
   let changed = false;
@@ -306,7 +340,7 @@ function setTrackField(id, fieldName, rawValue, matchType) {
           .filter((tok) => !tok.startsWith(`${fieldName}:`))
           .join(' ');
       } else if (re.test(newFieldStr)) {
-        newFieldStr = newFieldStr.replace(re, `${fieldName}:${value}`);
+        newFieldStr = newFieldStr.replace(re, () => `${fieldName}:${value}`);
       } else {
         newFieldStr = `${newFieldStr} ${fieldName}:${value}`;
       }
@@ -348,6 +382,19 @@ function setTrackDue(id, due) {
   return setTrackField(id, 'due', due, null);
 }
 
+function validateDescription(value) {
+  if (typeof value !== 'string' || !value.trim() || value.length > 1000 || /[\r\n]/.test(value)) throw new Error('내용은 1,000자 이내 한 줄로 입력해 주세요.');
+}
+
+function validateFields(fields) {
+  for (const [key, value] of Object.entries(fields)) {
+    if (value == null || value === '') continue;
+    if (typeof value !== 'string' || value.length > 250 || /[\r\n\[\]]/.test(value)) throw new Error(`${key}: 올바른 값을 입력해 주세요.`);
+    if (key === 'priority' && !['low','medium','high','critical'].includes(value)) throw new Error('우선순위를 확인해 주세요.');
+    if (key === 'jira' && !/^[A-Za-z][A-Za-z0-9_]*-\d+$/.test(value)) throw new Error('지라 번호를 확인해 주세요.');
+  }
+}
+
 function validateDate(value) {
   if (value == null || value === '') return;
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) ||
@@ -375,6 +422,7 @@ function setTrackDoing(id, on) {
 }
 
 function setTrackDescription(id, description) {
+  validateDescription(description);
   if (!description || !description.trim()) return false;
   let changed = false;
   listTrackerFiles().forEach((filePath) => {
@@ -420,12 +468,12 @@ function getJiraSync() {
 // 화면은 멀쩡해 보인다. 캡처 스킬이 매 실행마다 남기는 checkedAt으로 마지막 확인 시각을 본다.
 function getSlackSync() {
   if (!USES.slack) return { used: false };
-  const statePath = path.join(__dirname, '.slack_capture_state.json');
+  const statePath = path.join(process.env.WORKSPACE_DATA_DIR || __dirname, '.slack_capture_state.json');
   if (!fs.existsSync(statePath)) return { lastSync: null, stale: true };
   try {
     const state = JSON.parse(fs.readFileSync(statePath, 'utf-8'));
-    const lastSync = state.checkedAt ? localDateOf(state.checkedAt) : null;
-    return { lastSync, stale: !lastSync || lastSync < todayLocal() };
+    const lastSync = state.lastSuccessAt ? localDateOf(state.lastSuccessAt) : null;
+    return { lastSync, lastAttempt: state.lastAttemptAt || state.checkedAt || null, error: state.lastError || null, stale: !!state.lastError || !lastSync || lastSync < todayLocal() };
   } catch {
     return { lastSync: null, stale: true };
   }
@@ -523,7 +571,7 @@ function getCustomGroups() {
 // ---------- 미팅 ↔ 프로젝트 연결 (사람이 직접 지정) ----------
 // 제목을 키로 저장해서, 정기 미팅은 한 번만 연결하면 다음 주에도 유지된다.
 
-const MEETING_LINKS_PATH = path.join(__dirname, '.meeting_links.json');
+const MEETING_LINKS_PATH = path.join(process.env.WORKSPACE_DATA_DIR || __dirname, '.meeting_links.json');
 
 function readMeetingLinks() {
   if (!fs.existsSync(MEETING_LINKS_PATH)) return {};
@@ -537,10 +585,12 @@ function readMeetingLinks() {
 function setMeetingLink(title, project) {
   const key = String(title || '').trim();
   if (!key) return false;
+  if(project && !resolveProject(project))throw new Error('프로젝트를 확인해 주세요.');
   const links = readMeetingLinks();
   if (project) links[key] = project;
   else delete links[key];
   fs.writeFileSync(MEETING_LINKS_PATH, JSON.stringify(links, null, 2));
+  workflows.syncProject(key, resolveProject(project));
   return true;
 }
 
@@ -689,7 +739,8 @@ function suggestDeferrals(openToday) {
     .slice(0, 3);
 }
 
-function toggleTrackStatus(id) {
+function toggleTrackStatus(id, desired) {
+  if (desired !== undefined && !['done','to-do'].includes(desired)) throw new Error('상태를 확인해 주세요.');
   let changed = false;
   listTrackerFiles().forEach((filePath) => {
     if (changed) return;
@@ -700,7 +751,8 @@ function toggleTrackStatus(id) {
       if (!m) return line;
       const fields = parseFields(m[3]);
       if (fields.id !== id) return line;
-      const newStatus = fields.status === 'done' ? 'to-do' : 'done';
+      const newStatus = desired || (fields.status === 'done' ? 'to-do' : 'done');
+      if (newStatus === fields.status) { changed = true; return line; }
       const nowIso = new Date().toISOString();
       let newFieldStr = m[3].replace(/status:\S+/, `status:${newStatus}`);
       newFieldStr = newFieldStr.replace(/\s+completed:\S+/g, '');
@@ -731,6 +783,7 @@ function appendTask({ description, priority, due }) {
 }
 
 function createManualTask({ description, priority, due = null, scheduled = todayLocal(), jira, group }) {
+  validateDescription(description); validateFields({ priority, jira, group });
   if (!description || !description.trim()) return { ok: false, error: 'empty description' };
   validateDate(due);
   validateDate(scheduled);
@@ -749,6 +802,7 @@ function createLaterTask({ description, priority, jira, group }) {
 }
 
 function createWaitingItem({ description, priority, who, jira, group }) {
+  validateDescription(description); validateFields({ priority, who, jira, group });
   if (!description || !description.trim()) return { ok: false, error: 'empty description' };
   const checksPath = path.join(TRACKER_DIR, 'checks.md');
   if (!fs.existsSync(checksPath)) fs.writeFileSync(checksPath, '# Checks\n\n');
@@ -763,6 +817,7 @@ function createWaitingItem({ description, priority, who, jira, group }) {
 }
 
 function createDecision({ description, priority, jira, group, permalink }) {
+  validateDescription(description); validateFields({ priority, jira, group });
   if (!description || !description.trim()) return { ok: false, error: 'empty description' };
   if (permalink && !/^https:\/\/\S+$/.test(permalink)) return { ok: false, error: 'invalid permalink' };
   const decisionsPath = path.join(TRACKER_DIR, 'decisions.md');
@@ -779,6 +834,7 @@ function createDecision({ description, priority, jira, group, permalink }) {
 }
 
 function createIdea({ description, priority, project }) {
+  validateDescription(description); validateFields({ priority, project });
   if (!description || !description.trim()) return { ok: false, error: 'empty description' };
   const ideasPath = path.join(TRACKER_DIR, 'ideas.md');
   if (!fs.existsSync(ideasPath)) fs.writeFileSync(ideasPath, '# Ideas\n\n');
@@ -931,7 +987,9 @@ function writeWeeklyReports(list) {
 
 function getWeeklyReports() {
   const state = readWeeklyReportState();
-  return parseWeeklyReports().map((r) => ({ weekKey: r.weekKey, label: weekLabel(r.weekKey), body: r.body, generatedAt: state[r.weekKey]?.generatedAt || null }));
+  const old = parseWeeklyReports();
+  const sources = workflows.snapshot().items;
+  return reportDrafts.weeks(sources).map(weekKey => ({ weekKey, label: weekLabel(weekKey), body: old.find(r=>r.weekKey===weekKey)?.body || '', generatedAt: state[weekKey]?.generatedAt || null, draft: reportDrafts.view(weekKey, undefined, sources) }));
 }
 
 // 오늘 새로 생긴 항목 수 / 오늘 완료한 항목 수 — 상단 통계용
@@ -1008,6 +1066,7 @@ function projectLabelOf(item) {
 
 // 요약에서 참조하는 원본들의 현재 상태 — 그룹 실시간 표시와 "이미 해결됨" 표시에 쓰인다
 function getReportRefs() {
+  if(readScope?.refs)return readScope.refs;
   const refs = {};
   listTrackerFiles().forEach((filePath) => {
     fs.readFileSync(filePath, 'utf-8').split('\n').forEach((line) => {
@@ -1035,6 +1094,7 @@ function getReportRefs() {
       };
     });
   });
+  if(readScope)readScope.refs=refs;
   return refs;
 }
 
@@ -1082,7 +1142,33 @@ function getOpenWaitingAll() {
   return getWaitingItems().filter((i) => i.status !== 'done');
 }
 
-// 한 주치를 채운다. "다음 주 계획"은 자동으로 담지 않는다 — 사람이 직접 고른다.
+// 어떤 주가 끝나는 시점 기준으로, 예정일이 그날까지인데 아직 안 끝난 할 일 —
+// "오늘 할 일" 화면이 예정일 지난 걸 계속 다시 보여주는 것과 같은 조건(scheduled <= 기준일)을
+// 쓰되, 화면 표시 함수(getTodayTasks)는 건드리지 않고 원본 데이터만 직접 본다. 화면 표시 방식이
+// 나중에 바뀌어도(주말 처리 등) 이 로직은 영향을 안 받게 하려는 것.
+function getTasksIncompleteAsOf(weekEnd) {
+  const items = [];
+  listTrackerFiles().forEach((filePath) => {
+    fs.readFileSync(filePath, 'utf-8').split('\n').forEach((line) => {
+      const m = line.match(TRACK_RE);
+      if (!m || m[2] !== 'task') return;
+      const fields = parseFields(m[3]);
+      if (fields.status === 'done' || fields.inbox === 'true') return;
+      const scheduled = plannedDay(fields);
+      if (!scheduled || scheduled > weekEnd) return;
+      items.push({
+        id: fields.id,
+        description: m[1],
+        jira: fields.jira || null,
+        group: fields.group ? fields.group.replace(/_/g, ' ') : null,
+      });
+    });
+  });
+  return items;
+}
+
+// 한 주치를 채운다. "다음 주 계획"은 사람이 직접 고르는 게 기본이고, 지난 주에서 못 끝낸 할
+// 일만 refreshWeeklyReport가 따로 자동으로 이월해 넣는다(아래 참고).
 function fillWeek(entry, state, weekKey, { closing = false } = {}) {
   if (!state[weekKey]) state[weekKey] = { done: [], doing: [], later: [], decisions: [], waiting: [] };
   const seen = state[weekKey];
@@ -1093,9 +1179,10 @@ function fillWeek(entry, state, weekKey, { closing = false } = {}) {
 
   if (!seen.doing) seen.doing = [];
   const doneCandidates = getTasksDoneSince(weekKey, weekEnd).filter((i) => !seen.done.includes(i.id));
-  const doingCandidates = getDoingTasks().filter((i) => !seen.doing.includes(i.id));
-  const decisionCandidates = getDecisionsSince(weekKey).filter((i) => !seen.decisions.includes(i.id));
-  const waitingCandidates = getOpenWaitingAll().filter((i) => !seen.waiting.includes(i.id));
+  const doingCandidates = closing ? [] : getDoingTasks().filter((i) => !seen.doing.includes(i.id));
+  const sourceRefs = getReportRefs();
+  const decisionCandidates = getDecisionsSince(weekKey).filter((i) => sourceRefs[i.id]?.created <= weekEnd && !seen.decisions.includes(i.id));
+  const waitingCandidates = closing ? [] : getOpenWaitingAll().filter((i) => !seen.waiting.includes(i.id));
 
   let body = entry.body.replace('**막혀있는 것**', '**확인 대기**');
   if (!body.includes('**진행중**')) body = body.replace('**다음 주 계획**', '**진행중**\n\n**다음 주 계획**');
@@ -1109,32 +1196,76 @@ function fillWeek(entry, state, weekKey, { closing = false } = {}) {
   seen.doing.push(...doingCandidates.map((i) => i.id));
   seen.decisions.push(...decisionCandidates.map((i) => i.id));
   seen.waiting.push(...waitingCandidates.map((i) => i.id));
-  seen.generatedAt = new Date().toISOString();
+  const totalAdded = doneCandidates.length + doingCandidates.length + decisionCandidates.length + waitingCandidates.length;
+  // 실제로 새로 담은 게 있을 때만 "마지막 수집" 시각을 갱신한다 — 그래야 이 값이
+  // "몇 분 전에 열어봤다"가 아니라 "몇 분 전에 새 내용이 들어왔다"를 뜻하게 된다.
+  if (totalAdded > 0) seen.generatedAt = new Date().toISOString();
   if (closing) seen.finalized = true;
 
-  return { done: doneCandidates.length, doing: doingCandidates.length, decisions: decisionCandidates.length, waiting: waitingCandidates.length };
+  return { done: doneCandidates.length, doing: doingCandidates.length, decisions: decisionCandidates.length, waiting: waitingCandidates.length, changed: totalAdded > 0 };
+}
+
+// 새로 완료된 일 등을 이번 주 요약에 채워 넣고, 주가 바뀌었으면 다음 주 칸을 새로 만든다.
+// 예전엔 이 함수를 부르는 곳이 화면 어디에도 없어서(수동 API만 있고 아무도 호출 안 함),
+// 완료한 일이 전혀 안 쌓이고 새 주도 안 생기는 문제가 있었다 — /api/items를 부를 때마다
+// (새로고침·자동 폴링·당겨서 새로고침 전부 포함) 같이 돌게 해서 화면을 열기만 해도 최신 상태가 되게 한다.
+function findOrCreateReportEntry(reports, wk) {
+  let entry = reports.find((r) => r.weekKey === wk);
+  if (!entry) {
+    entry = { weekKey: wk, body: emptyReportBody() };
+    reports.unshift(entry);
+  }
+  return entry;
 }
 
 function refreshWeeklyReport() {
   const weekKey = currentWeekKey();
   const reports = parseWeeklyReports();
   const state = readWeeklyReportState();
+  let changed = false;
 
-  // 지난 주가 열린 채 남아있으면 그 주 기준으로 한 번 더 채우고 확정한다.
-  // 금요일에 정리 못 하고 넘어가도 그 주가 미완성으로 굳지 않게 하려는 것.
-  reports
+  // 지난 주가 열린 채 남아있으면 오래된 주부터 순서대로 마감 처리한다. 순서가 중요한 이유:
+  // 마감하면서 "그 주까지 예정이었는데 안 끝난 할 일"을 바로 다음 주 계획으로 이월하는데,
+  // 오래된 주부터 처리해야 그 이월이 한 주씩 순서대로 이어진다.
+  const pastOpen = reports
     .filter((r) => r.weekKey < weekKey && !state[r.weekKey]?.finalized)
-    .forEach((past) => fillWeek(past, state, past.weekKey, { closing: true }));
+    .sort((a, b) => a.weekKey.localeCompare(b.weekKey));
 
-  let entry = reports.find((r) => r.weekKey === weekKey);
-  if (!entry) {
-    entry = { weekKey, body: emptyReportBody() };
-    reports.unshift(entry);
-  }
+  pastOpen.forEach((past) => {
+    fillWeek(past, state, past.weekKey, { closing: true });
+    changed = true;
+
+    // 안 끝난 할 일은 다음 주 "다음 주 계획"으로 자동 이월한다. 계속 안 끝나면 매주
+    // 다시 이월된다("오늘 할 일"이 매일 다시 보이는 것과 같은 방식). 사람이 이월된 줄을
+    // 직접 지우거나 고쳐도, 같은 주에는 같은 항목을 또 밀어 넣지 않는다(seen.later로 구분).
+    const monday = new Date(`${past.weekKey}T00:00:00`);
+    const weekEnd = fmtDate(new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 6));
+    const nextWeekKey = fmtDate(new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 7));
+
+    if (!state[nextWeekKey]) state[nextWeekKey] = { done: [], doing: [], later: [], decisions: [], waiting: [] };
+    const seenLater = state[nextWeekKey].later || (state[nextWeekKey].later = []);
+    const carryCandidates = getTasksIncompleteAsOf(weekEnd).filter((i) => !seenLater.includes(i.id));
+
+    if (carryCandidates.length) {
+      const nextEntry = findOrCreateReportEntry(reports, nextWeekKey);
+      nextEntry.body = insertBulletsUnderHeading(nextEntry.body, '다음 주 계획', carryCandidates.map(formatReportLine));
+      seenLater.push(...carryCandidates.map((i) => i.id));
+      changed = true;
+    }
+  });
+
+  const isNewCurrentWeek = !reports.some((r) => r.weekKey === weekKey);
+  const entry = findOrCreateReportEntry(reports, weekKey);
+  if (isNewCurrentWeek) changed = true;
   const added = fillWeek(entry, state, weekKey);
+  if (added.changed) changed = true;
 
-  writeWeeklyReports(reports);
-  writeWeeklyReportState(state);
+  reports.sort((a, b) => b.weekKey.localeCompare(a.weekKey));
+
+  if (changed) {
+    writeWeeklyReports(reports);
+    writeWeeklyReportState(state);
+  }
 
   return { weekKey, label: weekLabel(weekKey), added: { ...added, later: 0 } };
 }
@@ -1153,7 +1284,10 @@ const MIME = {
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
-    req.on('data', (chunk) => (body += chunk));
+    let bytes = 0;
+    req.on('data', chunk => { bytes += chunk.length; if (bytes > 1024 * 1024) { const error = new Error('요청이 너무 큽니다.'); error.status = 413; reject(error); return; } body += chunk; });
+    req.on('error', reject);
+    req.on('aborted', () => reject(new Error('요청이 중단되었습니다.')));
     req.on('end', () => {
       try {
         resolve(body ? JSON.parse(body) : {});
@@ -1167,15 +1301,70 @@ function readBody(req) {
 const handleRequest = (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
 
+  if(url.pathname==='/api/import' && req.method==='POST') {
+    readBody(req).then(body=>{
+      const result=idempotent(req,body,()=>{
+        const {kind,payload}=body;
+        if(!payload || typeof payload!=='object')throw new Error('입력을 확인해 주세요.');
+        if(kind==='item') {
+          const {type,description,permalink}=payload;
+          if(!['task','check','decision','idea'].includes(type) || typeof permalink!=='string' || !/^https:\/\/[^\s"<>]+$/.test(permalink))throw new Error('종류와 원본 링크를 확인해 주세요.');
+          validateDescription(description);validateFields({priority:payload.priority,jira:payload.jira,group:payload.group,who:payload.who,project:payload.project});validateDate(payload.due);
+          const existing=Object.values(getReportRefs()).find(item=>item.type===type && item.permalink===permalink);
+          if(existing)return {ok:true,id:existing.id,duplicate:true};
+          const create={task:createLaterTask,check:createWaitingItem,decision:createDecision,idea:createIdea}[type];
+          const result=create({...payload,permalink:undefined});
+          setTrackField(result.id,'source',`slack:${permalink}`,null);
+          if(type==='task'){setTrackField(result.id,'inbox','true','task');if(payload.due)setTrackDue(result.id,payload.due);}
+          return result;
+        }
+        if(kind==='cursor' || kind==='health') {
+          const file=path.join(process.env.WORKSPACE_DATA_DIR || __dirname,'.slack_capture_state.json');
+          const state=nativeFs.existsSync(file)?JSON.parse(nativeFs.readFileSync(file,'utf8')):{};
+          if(kind==='cursor') {
+            if(!['my-todo','my-align','my-waiting','my-someday'].includes(payload.channel) || !/^\d+\.\d+$/.test(payload.ts))throw new Error('커서를 확인해 주세요.');
+            if(!state[payload.channel] || Number(payload.ts)>Number(state[payload.channel]))state[payload.channel]=payload.ts;
+          } else {
+            if(typeof payload.success!=='boolean')throw new Error('성공 여부를 확인해 주세요.');
+            state.checkedAt=state.lastAttemptAt=new Date().toISOString();state.lastError=payload.success?null:String(payload.error || '동기화 실패').slice(0,500);
+            if(payload.channel) {
+              if(!['my-todo','my-align','my-waiting','my-someday'].includes(payload.channel))throw new Error('채널을 확인해 주세요.');
+              state.channelHealth ||= {};
+              state.channelHealth[payload.channel]={success:payload.success,attemptedAt:state.checkedAt,error:state.lastError};
+            }
+            const failed=Object.entries(state.channelHealth || {}).filter(([,value])=>!value.success);
+            if(failed.length)state.lastError=failed.map(([key])=>key).join(', ')+' 수집 실패';
+            if(payload.success && !state.lastError)state.lastSuccessAt=state.checkedAt;
+          }
+          atomicWrite(file,JSON.stringify(state,null,2));return {ok:true};
+        }
+        throw new Error('지원하지 않는 가져오기입니다.');
+      });res.writeHead(200,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(result));
+    }).catch(error=>{res.writeHead(error.status || 400,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify({ok:false,error:error.message}));});return;
+  }
+
+  if(url.pathname==='/api/access-token' && req.method==='GET') {
+    if(!['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket.remoteAddress)){res.writeHead(403);res.end('Local only');return;}
+    res.writeHead(200,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify({ok:true,token:nativeFs.existsSync(ACCESS_TOKEN_PATH)?nativeFs.readFileSync(ACCESS_TOKEN_PATH,'utf8').trim():null}));return;
+  }
+
+  if (url.pathname === '/api/report/change' && req.method === 'POST') {
+    readBody(req).then(body => { const result = idempotent(req, body, () => reportDrafts.change(body)); res.writeHead(200, {'Content-Type':'application/json; charset=utf-8'}); res.end(JSON.stringify(result)); })
+      .catch(error => { res.writeHead(error.status || 400, {'Content-Type':'application/json; charset=utf-8'}); res.end(JSON.stringify({ok:false,error:error.message})); });
+    return;
+  }
+
   const workflowActions = {
+    '/api/workflow/task-batch': batchTasks,
     '/api/workflow/item': workflows.patchItem,
     '/api/workflow/meeting': workflows.saveMeeting,
     '/api/workflow/capture': workflows.capture,
+    '/api/workflow/review': workflows.review,
     '/api/workflow/link': workflows.link,
   };
   if (req.method === 'POST' && workflowActions[url.pathname]) {
     readBody(req).then(body => {
-      const result = workflowActions[url.pathname](body);
+      const result = idempotent(req, body, () => workflowActions[url.pathname](body));
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify(result));
     }).catch(error => {
@@ -1192,6 +1381,7 @@ const handleRequest = (req, res) => {
   }
 
   if (url.pathname === '/api/items' && req.method === 'GET') {
+    // Automatic drafts are a read-only projection. Edited reports are saved explicitly.
     const allDecisions = getDecisions();
     const payload = {
       inboxTasks: getInboxTasks(),
@@ -1211,7 +1401,7 @@ const handleRequest = (req, res) => {
       // 앱 화면 파일이 바뀌면 이 값이 달라진다. 브라우저가 이걸 보고 스스로 새로고침한다.
       appVersion: (() => {
         try {
-          return ['index.html', 'workflows.js', 'workflows.css'].map(file => fs.statSync(path.join(PUBLIC_DIR, file)).mtimeMs).join(':');
+          return ['index.html', 'workflows.js', 'workflows.css', 'report-ui.js', 'report-ui.css'].map(file => fs.statSync(path.join(PUBLIC_DIR, file)).mtimeMs).join(':');
         } catch {
           return '0';
         }
@@ -1236,9 +1426,11 @@ const handleRequest = (req, res) => {
       if (url.pathname.endsWith('/restore')) ok = restoreTrackItem(id);
       else if (url.pathname.endsWith('/seen')) ok = setTrackField(id, 'seen', 'true', null);
       else {
-        ok = setTrackField(id, 'scheduled', scheduled || 'none', 'task');
-        // 날짜를 정했다는 건 분류가 끝났다는 뜻 — "새로 들어온 것"에서 내린다
-        setTrackField(id, 'inbox', null, 'task');
+        ok = mutations.run(() => {
+          const changed = setTrackField(id, 'scheduled', scheduled || 'none', 'task');
+          if(changed)setTrackField(id, 'inbox', null, 'task');
+          return changed;
+        });
       }
       res.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ ok }));
@@ -1292,7 +1484,7 @@ const handleRequest = (req, res) => {
   if (url.pathname === '/api/today-task/create' && req.method === 'POST') {
     readBody(req)
       .then((payload) => {
-        const result = createManualTask(payload);
+        const result = idempotent(req, payload, () => createManualTask(payload));
         res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify(result));
       })
@@ -1306,7 +1498,7 @@ const handleRequest = (req, res) => {
   if (url.pathname === '/api/later-task/create' && req.method === 'POST') {
     readBody(req)
       .then((payload) => {
-        const result = createLaterTask(payload);
+        const result = idempotent(req, payload, () => createLaterTask(payload));
         res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify(result));
       })
@@ -1320,7 +1512,7 @@ const handleRequest = (req, res) => {
   if (url.pathname === '/api/waiting/create' && req.method === 'POST') {
     readBody(req)
       .then((payload) => {
-        const result = createWaitingItem(payload);
+        const result = idempotent(req, payload, () => createWaitingItem(payload));
         res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify(result));
       })
@@ -1334,7 +1526,7 @@ const handleRequest = (req, res) => {
   if (url.pathname === '/api/decision/create' && req.method === 'POST') {
     readBody(req)
       .then((payload) => {
-        const result = createDecision(payload);
+        const result = idempotent(req, payload, () => createDecision(payload));
         res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify(result));
       })
@@ -1348,7 +1540,7 @@ const handleRequest = (req, res) => {
   if (url.pathname === '/api/idea/create' && req.method === 'POST') {
     readBody(req)
       .then((payload) => {
-        const result = createIdea(payload);
+        const result = idempotent(req, payload, () => createIdea(payload));
         res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify(result));
       })
@@ -1501,8 +1693,8 @@ const handleRequest = (req, res) => {
 
   if (url.pathname === '/api/track/toggle' && req.method === 'POST') {
     readBody(req)
-      .then(({ id }) => {
-        const ok = toggleTrackStatus(id);
+      .then(({ id, status }) => {
+        const ok = toggleTrackStatus(id, status);
         res.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ ok }));
       })
@@ -1514,6 +1706,9 @@ const handleRequest = (req, res) => {
   }
 
   let filePath = url.pathname === '/' ? '/index.html' : url.pathname;
+  if (!['/index.html','/workflows.js','/workflows.css','/report-ui.js','/report-ui.css','/manifest.webmanifest'].includes(filePath) && !/^\/icons\/[\w-]+\.(png|svg)$/.test(filePath)) {
+    res.writeHead(404); res.end('Not found'); return;
+  }
   filePath = path.join(PUBLIC_DIR, filePath);
   if (!filePath.startsWith(PUBLIC_DIR)) {
     res.writeHead(403);
@@ -1538,9 +1733,47 @@ const workflows = require('./workflow-store')({
   create: { task: createManualTask, check: createWaitingItem, decision: createDecision },
   remove: removeTrackItem,
 });
-const server = http.createServer(handleRequest);
+const batchTasks = require('./task-batch')({ files: listTrackerFiles, pattern: TRACK_RE, parse: parseFields, validateDate });
+const reportDrafts = require('./report-drafts')({ directory: TRACKER_DIR, sources: () => workflows.snapshot().items, legacy: parseWeeklyReports, currentWeek: currentWeekKey });
+const mutations = require('./mutation-store')(TRACKER_DIR, [MEETING_LINKS_PATH, weeklyReportStatePath()]);
+const transactional = fn => (...args) => mutations.run(() => fn(...args));
+setTrackField = transactional(setTrackField);
+setTrackDue = transactional(setTrackDue);
+setTrackDescription = transactional(setTrackDescription);
+toggleTrackStatus = transactional(toggleTrackStatus);
+createManualTask = transactional(createManualTask);
+createWaitingItem = transactional(createWaitingItem);
+createDecision = transactional(createDecision);
+createIdea = transactional(createIdea);
+removeTrackItem = transactional(removeTrackItem);
+restoreTrackItem = transactional(restoreTrackItem);
+promoteIdeaToToday = transactional(promoteIdeaToToday);
+saveWeeklyReportBody = transactional(saveWeeklyReportBody);
+refreshWeeklyReport = transactional(refreshWeeklyReport);
+setMeetingLink = transactional(setMeetingLink);
+function safeHandle(req, res) {
+  try {
+    if(req.method==='GET')readScope={files:new Map()};
+    const host = req.headers.host || '';
+    if(!remoteAuthorized(req)) {res.writeHead(401,{'WWW-Authenticate':'Basic realm="Workspace"'});res.end('Authentication required');return;}
+    const hostname = host.split(':')[0];
+    if (!['localhost','127.0.0.1',EXTRA_HOST].filter(Boolean).includes(hostname)) { res.writeHead(403); res.end('Forbidden host'); return; }
+    if (req.method === 'POST' && (req.headers['content-type']?.split(';')[0] !== 'application/json' || (req.headers.origin && req.headers.origin !== `http://${host}`) || req.headers['sec-fetch-site'] === 'cross-site')) { res.writeHead(403); res.end('Forbidden request'); return; }
+    res.setHeader('X-Content-Type-Options','nosniff');
+    res.setHeader('Referrer-Policy','no-referrer');
+    res.setHeader('Cache-Control','no-store');
+    handleRequest(req,res);
+  } catch(error) {
+    console.error('요청 처리 실패:', error.message);
+    if (!res.headersSent) res.writeHead(500, {'Content-Type':'application/json; charset=utf-8'});
+    res.end(JSON.stringify({ok:false,error:'기록을 읽지 못했습니다. 파일을 덮어쓰지 않았습니다. 백업을 확인해 주세요.'}));
+  } finally { readScope=null; }
+}
+const server = http.createServer(safeHandle);
 
 if (require.main === module) {
+  mutations.recover();
+  if(EXTRA_HOST && !nativeFs.existsSync(ACCESS_TOKEN_PATH))atomicWrite(ACCESS_TOKEN_PATH,randomBytes(32).toString('hex'));
   const archiveMeetings = () => { try { workflows.archive(); } catch (error) { console.error('회의 기록 저장 실패:', error.message); } };
   archiveMeetings();
   fs.watchFile(path.join(TRACKER_DIR, 'calendar_today.md'), { interval: 1000, persistent: false }, archiveMeetings);
@@ -1553,7 +1786,7 @@ if (require.main === module) {
   // 같은 와이파이를 쓰는 다른 사람에게는 노출되지 않게 한다.
   if (EXTRA_HOST && EXTRA_HOST !== '127.0.0.1') {
     http
-      .createServer(handleRequest)
+      .createServer(safeHandle)
       .listen(PORT, EXTRA_HOST, () => {
         console.log(`다른 기기용: http://${EXTRA_HOST}:${PORT}`);
       })

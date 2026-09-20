@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
+const { atomicWrite } = require('./safe-storage');
 
 // Additional relationships live beside the Markdown files; source IDs remain authoritative.
 module.exports = function workflowStore({ directory, refs, calendar, today, validateDate, create, remove }) {
@@ -12,21 +13,61 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     return state;
   }
   function write(state) {
-    const temp = `${filename}.tmp`;
-    fs.writeFileSync(temp, JSON.stringify(state, null, 2));
-    fs.renameSync(temp, filename);
+    atomicWrite(filename, JSON.stringify(state, null, 2));
   }
+  const draftsFile = path.join(directory, 'meeting_drafts.json');
   const meetingId = (date, event) => createHash('sha256').update(JSON.stringify([date, event.start, event.title])).digest('hex').slice(0, 24);
+  const draftId = (note, item) => `${note.noteGuid}:stable:${createHash('sha256').update(JSON.stringify([item.id || null,item.type,item.description?.trim()])).digest('hex').slice(0,24)}`;
   function currentMeetings() {
-    return calendar().events.map(event => ({ ...event, id: meetingId(today(), event), date: today(), series: event.title.trim() }));
+    const saved=Object.values(read().meetings);
+    return calendar().events.map(event => {
+      const prior=saved.find(old=>old.date===today() && ((event.externalId && old.externalId===event.externalId) || old.id===meetingId(today(),event)));
+      const id=prior?.id || (event.externalId ? createHash('sha256').update(`${today()}:${event.externalId}`).digest('hex').slice(0,24) : meetingId(today(),event));
+      return {...event,id,date:today(),series:event.title.trim()};
+    });
   }
+  // meeting_drafts.json is written by the tiro-sync skill and only read here; review results live in .workflow.json.
+  function draftNotes() {
+    if (!fs.existsSync(draftsFile)) return [];
+    try {
+      const { notes } = JSON.parse(fs.readFileSync(draftsFile, 'utf8'));
+      return Array.isArray(notes) ? notes.filter(note => note && typeof note.noteGuid === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(note.date) && /^\d{2}:\d{2}$/.test(note.start) && typeof note.title === 'string' && note.title.trim()) : [];
+    } catch (error) {
+      console.error('회의 초안을 읽지 못했습니다:', error.message);
+      return [];
+    }
+  }
+  function draftsByMeeting(state) {
+    const reviewed = state.reviewed || {};
+    const meetings = {};
+    for (const note of draftNotes()) {
+      const event = { start: note.start, end: /^\d{2}:\d{2}$/.test(note.end) ? note.end : '', title: note.title, link: null, project: null };
+      const matched=Object.values(state.meetings).find(saved=>saved.date===note.date && ((note.eventId && saved.externalId===note.eventId) || (saved.start===note.start && saved.title===note.title)));
+      const id = matched?.id || meetingId(note.date, event);
+      const entry = meetings[id] ||= { event: { ...event, id, date: note.date, series: note.title.trim() }, notes: [], drafts: [] };
+      if (/^https:\/\/\S+$/.test(note.webUrl || '')) entry.notes.push(note.webUrl);
+      (Array.isArray(note.items) ? note.items : []).forEach((item, index) => {
+        const id = draftId(note,item);
+        if (reviewed[id] || !validItem(item)) return;
+        let due;
+        try { if (item.type === 'task' && item.due) { validateDate(item.due); due = item.due; } } catch { due = undefined; }
+        entry.drafts.push({ id, type: item.type, description: item.description.trim(), ...(due ? { due } : {}) });
+      });
+    }
+    return meetings;
+  }
+  const validItem = item => ['task', 'check', 'decision'].includes(item?.type) && typeof item.description === 'string' && !!item.description.trim() && !/[\r\n]/.test(item.description) && item.description.length <= 1000;
   // Called by startup/file watcher, never as a side effect of GET /api/items.
   function archive() {
     const state = read();
     let changed = false;
+    for(const note of draftNotes())for(const [index,item] of (note.items || []).entries()) {
+      const old=`${note.noteGuid}:${index}`;
+      if(state.reviewed?.[old]) {state.reviewed[draftId(note,item)]=state.reviewed[old];delete state.reviewed[old];changed=true;}
+    }
     for (const event of currentMeetings()) {
       const prior = state.meetings[event.id];
-      const next = { ...event, ...prior, end: event.end, link: event.link };
+      const next = { ...event, ...prior, externalId: event.externalId || prior?.externalId, title:event.title, start:event.start, end: event.end, link: event.link };
       if (JSON.stringify(prior) !== JSON.stringify(next)) { state.meetings[event.id] = next; changed = true; }
     }
     if (changed) write(state);
@@ -37,6 +78,7 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     const items = Object.entries(all).map(([id, item]) => ({ id, ...item, ...state.items[id] }));
     const meetings = { ...state.meetings };
     for (const event of currentMeetings()) meetings[event.id] = { ...event, ...meetings[event.id] };
+    for (const [id, entry] of Object.entries(draftsByMeeting(state))) meetings[id] = { ...entry.event, ...meetings[id], tiroNotes: entry.notes, drafts: entry.drafts };
     return { items, meetings: Object.values(meetings).sort((a, b) => `${b.date} ${b.start}`.localeCompare(`${a.date} ${a.start}`)) };
   }
   function patchItem({ id, ...patch }) {
@@ -55,7 +97,7 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     return { ok: true };
   }
   function resolveMeeting(id, state) {
-    const event = state.meetings[id] || currentMeetings().find(event => event.id === id);
+    const event = state.meetings[id] || currentMeetings().find(event => event.id === id) || draftsByMeeting(state)[id]?.event;
     if (!event) throw new Error('회의를 찾을 수 없습니다.');
     return event;
   }
@@ -70,20 +112,52 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     write(state);
     return { ok: true };
   }
+  function syncProject(title, project) {
+    const state=read();let changed=false;
+    for(const event of [...Object.values(state.meetings),...currentMeetings()]) {
+      if(event.title!==title || event.date!==today())continue;
+      state.meetings[event.id]={...event,project};changed=true;
+    }
+    if(changed)write(state);
+  }
   function capture({ meetingId: id, type, description, project }) {
-    if (!['task', 'check', 'decision'].includes(type) || typeof description !== 'string' || !description.trim() || /[\r\n]/.test(description) || description.length > 1000) throw new Error('종류와 내용을 확인해 주세요.');
+    return addToMeeting(id, { type, description, project });
+  }
+  function addToMeeting(id, { type, description, project, extra = {}, draftId }) {
+    if (!validItem({ type, description })) throw new Error('종류와 내용을 확인해 주세요.');
     const state = read();
     const event = resolveMeeting(id, state);
     const selected = project === undefined ? event.project : project;
     if (selected && (!['jira', 'group'].includes(selected.type) || typeof selected.value !== 'string' || !selected.value.trim() || /[\r\n\[\]]/.test(selected.value))) throw new Error('프로젝트를 확인해 주세요.');
-    const result = create[type]({ description, ...(selected ? { [selected.type]: selected.value } : {}) });
+    const result = create[type]({ description, ...extra, ...(selected ? { [selected.type]: selected.value } : {}) });
     if (!result.ok) throw new Error('항목을 저장하지 못했습니다.');
     try {
       state.meetings[id] = event;
       state.items[result.id] = { meetingId: id };
+      if (draftId) state.reviewed = { ...state.reviewed, [draftId]: result.id };
       write(state);
     } catch (error) { remove(result.id, false); throw error; }
     return result;
+  }
+  // AI가 분류한 초안을 사람이 검토한 결과. 담은 것은 각 목록으로 만들고, 뺀 것은 다시 올라오지 않게 기록만 한다.
+  function review({ meetingId: id, accept = [], dismiss = [] }) {
+    if (!Array.isArray(accept) || !Array.isArray(dismiss) || (!accept.length && !dismiss.length)) throw new Error('검토할 항목을 골라 주세요.');
+    const state = read();
+    const pending = new Map((draftsByMeeting(state)[id]?.drafts || []).map(draft => [draft.id, draft]));
+    const ids = [...accept.map(item => item?.id), ...dismiss];
+    if (new Set(ids).size !== ids.length || ids.some(draftId => !pending.has(draftId))) throw new Error('이미 처리했거나 찾을 수 없는 항목입니다.');
+    if (accept.some(item => !validItem(item))) throw new Error('종류와 내용을 확인해 주세요.');
+    if (dismiss.length) {
+      state.meetings[id] = resolveMeeting(id, state);
+      state.reviewed = { ...state.reviewed, ...Object.fromEntries(dismiss.map(draftId => [draftId, 'dismissed'])) };
+      write(state);
+    }
+    // 회의에서 나온 할 일이 오늘 목록을 한꺼번에 채우지 않게 나중에 할 일로 담는다. 마감일은 초안에 명시된 경우만.
+    const created = accept.map(item => addToMeeting(id, {
+      type: item.type, description: item.description.trim(), draftId: item.id,
+      extra: item.type === 'task' ? { scheduled: null, due: pending.get(item.id).due || null } : {},
+    }).id);
+    return { ok: true, created };
   }
   function link({ id, meetingId }) {
     if (!refs()[id]) throw new Error('항목을 찾을 수 없습니다.');
@@ -95,5 +169,5 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     write(state);
     return { ok: true };
   }
-  return { archive, snapshot, patchItem, saveMeeting, capture, link, outcome: id => read().items[id]?.outcome || '' };
+  return { archive, snapshot, patchItem, saveMeeting, syncProject, capture, review, link, outcome: id => read().items[id]?.outcome || '' };
 };

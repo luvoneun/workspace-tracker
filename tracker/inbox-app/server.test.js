@@ -20,6 +20,41 @@ async function post(route, body) {
 }
 const items = async () => (await fetch(base + '/api/items')).json();
 
+test('static server denies implementation and private state files', async () => {
+  assert.equal((await fetch(base+'/server.js')).status,404);
+  assert.equal((await fetch(base+'/.weekly_report_state.json')).status,404);
+});
+test('cross-origin mutations are rejected',async()=>{
+  const response=await fetch(base+'/api/track/toggle',{method:'POST',headers:{'Content-Type':'application/json',Origin:'https://untrusted.example'},body:JSON.stringify({id:'legacy'})});
+  assert.equal(response.status,403);
+});
+test('multiline creation fails without changing tasks',async()=>{
+  const before=readTasks();assert.equal((await post('/api/today-task/create',{description:'first\nsecond'})).status,400);assert.equal(readTasks(),before);
+});
+test('explicit completion is safe to retry',async()=>{
+  await post('/api/track/toggle',{id:'legacy',status:'done'});await post('/api/track/toggle',{id:'legacy',status:'done'});
+  assert.equal((await items()).reportRefs.legacy.status,'done');
+});
+test('full item reads never create or rewrite weekly report files',async()=>{
+  const file=path.join(directory,'weekly_reports.md');const before=fs.existsSync(file)?fs.readFileSync(file,'utf8'):null;await items();assert.equal(fs.existsSync(file)?fs.readFileSync(file,'utf8'):null,before);
+});
+
+test('repeated create with a request key creates only once',async()=>{
+  const call=()=>fetch(base+'/api/today-task/create',{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':'fixture-request-0001'},body:JSON.stringify({description:'재시도 업무'})}).then(r=>r.json());
+  const a=await call(),b=await call();assert.equal(a.id,b.id);assert.equal(readTasks().split('재시도 업무').length-1,1);
+});
+test('automation import validates, deduplicates source links, and uses inbox',async()=>{
+  const payload={type:'task',description:'자동화 수집',permalink:'https://example.test/import-fixture'};
+  const a=await post('/api/import',{kind:'item',payload});const b=await post('/api/import',{kind:'item',payload:{...payload,description:'다시 표현'}});
+  assert.equal(a.ok,true);assert.equal(a.id,b.id);assert.equal(b.duplicate,true);assert.ok((await items()).inboxTasks.some(item=>item.id===a.id));
+  const before=readTasks();assert.equal((await post('/api/import',{kind:'item',payload:{...payload,description:'줄\n바꿈'}})).status,400);assert.equal(readTasks(),before);
+});
+test('a successful Slack channel cannot conceal another channel failure',async()=>{
+  await post('/api/import',{kind:'health',payload:{channel:'my-todo',success:false,error:'fixture failure'}});
+  await post('/api/import',{kind:'health',payload:{channel:'my-align',success:true}});
+  const state=JSON.parse(fs.readFileSync(path.join(directory,'.slack_capture_state.json'),'utf8'));assert.match(state.lastError,/my-todo/);
+});
+
 before(async () => {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   base = `http://127.0.0.1:${server.address().port}`;
@@ -113,6 +148,46 @@ test('GET is read-only and does not clear unread flags or overwrite overdue dead
   assert.equal(readTasks(), original);
   assert.equal(first.todayTasks.find(item => item.id === 'legacy').due, shifted(-2));
   assert.equal(second.todayTasks.find(item => item.id === 'legacy').isNew, true);
+});
+
+test('batch rescheduling preserves deadlines and undo restores legacy schedules', async () => {
+  const changed = await post('/api/workflow/task-batch', { ids: ['legacy', 'unseen'], change: { scheduled: shifted(1) } });
+  assert.equal(changed.ok, true);
+  let data = await items();
+  assert.equal(data.laterTasks.find(item => item.id === 'legacy').due, shifted(-2));
+  assert.equal(data.laterTasks.find(item => item.id === 'unseen').scheduled, shifted(1));
+  const restored = await post('/api/workflow/task-batch', { undoToken: changed.undoToken });
+  assert.equal(restored.ok, true);
+  data = await items();
+  assert.equal(data.todayTasks.find(item => item.id === 'legacy').scheduled, shifted(-2));
+  assert.doesNotMatch(readTasks().split('\n').find(line => line.includes('id:legacy')), /scheduled:/);
+  assert.equal((await post('/api/workflow/task-batch', { undoToken: restored.undoToken })).ok, true);
+  assert.equal((await items()).laterTasks.find(item => item.id === 'legacy').scheduled, shifted(1));
+});
+
+test('invalid batch targets and dates never partially modify tasks', async () => {
+  const original = readTasks();
+  assert.equal((await post('/api/workflow/task-batch', { ids: ['legacy', 'missing'], change: { project: 'group:수정 금지' } })).status, 400);
+  assert.equal((await post('/api/workflow/task-batch', { ids: ['legacy', 'unseen'], change: { scheduled: '2026-02-30' } })).status, 400);
+  assert.equal((await post('/api/workflow/task-batch', { ids: ['legacy', 'legacy'], change: { scheduled: today } })).status, 400);
+  assert.equal(readTasks(), original);
+});
+
+test('batch group undo preserves later title edits but rejects conflicting group edits', async () => {
+  await post('/api/track/set-jira', { id: 'legacy', jiraKey: 'IO-123' });
+  const changed = await post('/api/workflow/task-batch', { ids: ['legacy', 'unseen'], change: { project: 'group:새 그룹' } });
+  assert.equal(changed.ok, true);
+  assert.equal((await items()).todayTasks.find(item => item.id === 'legacy').jira, null);
+  await post('/api/track/set-description', { id: 'legacy', description: '나중에 수정한 제목' });
+  assert.equal((await post('/api/workflow/task-batch', { undoToken: changed.undoToken })).ok, true);
+  const task = (await items()).todayTasks.find(item => item.id === 'legacy');
+  assert.equal(task.description, '나중에 수정한 제목');
+  assert.equal(task.jira, 'IO-123');
+  const changedAgain = await post('/api/workflow/task-batch', { ids: ['legacy', 'unseen'], change: { project: null } });
+  await post('/api/track/set-group', { id: 'unseen', group: '다른 편집' });
+  const beforeUndo = readTasks();
+  assert.equal((await post('/api/workflow/task-batch', { undoToken: changedAgain.undoToken })).status, 400);
+  assert.equal(readTasks(), beforeUndo);
 });
 
 test('acknowledgement affects only the requested item', async () => {
@@ -210,4 +285,41 @@ test('a decision kept from a waiting item carries its Slack link without showing
   assert.equal(decision.jira, 'IO-1');
   assert.equal(decision.isNew, false);
   assert.equal((await post('/api/decision/create', { description: 'Bad link', permalink: 'https://example.test/a b' })).status, 400);
+});
+
+test('meeting drafts from tiro-sync are reviewed once: accepted items land in their lists, dismissed ones stay hidden', async () => {
+  const draftsPath = path.join(directory, 'meeting_drafts.json');
+  fs.writeFileSync(path.join(directory, 'calendar_today.md'), `마지막 갱신: ${today}\n- 15:00-16:00 | 운영툴 킥오프\n`);
+  fs.writeFileSync(draftsPath, JSON.stringify({ notes: [{
+    noteGuid: 'n1', webUrl: 'https://tiro.ooo/n/1', date: today, start: '15:00', end: '16:00', title: '운영툴 킥오프',
+    items: [
+      { type: 'task', description: '백엔드 담당자에게 스펙 요청하기', due: shifted(3) },
+      { type: 'decision', description: '프롬프트 버전은 운영툴에서만 관리' },
+      { type: 'check', description: '디자인 일정 회신 받기' },
+      { type: 'nonsense', description: '무시됨' },
+    ],
+  }] }));
+  try {
+    const meeting = (await items()).workflows.meetings.find(event => event.title === '운영툴 킥오프');
+    assert.deepEqual(meeting.tiroNotes, ['https://tiro.ooo/n/1']);
+    assert.equal(meeting.drafts.length, 3);
+    const [task, decision, check] = meeting.drafts;
+    const original = readTasks();
+    assert.equal((await post('/api/workflow/review', { meetingId: meeting.id, accept: [{ id: 'n1:9', type: 'task', description: '없는 초안' }] })).status, 400);
+    assert.equal((await post('/api/workflow/review', { meetingId: meeting.id, accept: [{ ...task, description: '' }] })).status, 400);
+    assert.equal(readTasks(), original);
+
+    assert.equal((await post('/api/workflow/review', { meetingId: meeting.id, dismiss: [check.id] })).ok, true);
+    const result = await post('/api/workflow/review', { meetingId: meeting.id, accept: [{ ...task, description: '스펙 요청하기' }, { ...decision, type: 'check' }] });
+    assert.equal(result.created.length, 2);
+    assert.match(readTasks(), new RegExp(`- 스펙 요청하기 #task\\[id:${result.created[0]} .*scheduled:none due:${shifted(3)}`));
+    assert.match(fs.readFileSync(path.join(directory, 'checks.md'), 'utf8'), /프롬프트 버전은 운영툴에서만 관리 #check/);
+
+    const data = (await items()).workflows;
+    assert.equal(data.meetings.find(event => event.id === meeting.id).drafts.length, 0);
+    assert.deepEqual(data.items.filter(item => item.meetingId === meeting.id).map(item => item.id).sort(), [...result.created].sort());
+    assert.equal((await post('/api/workflow/review', { meetingId: meeting.id, accept: [task] })).status, 400);
+  } finally {
+    fs.rmSync(draftsPath);
+  }
 });

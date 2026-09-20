@@ -113,10 +113,10 @@ EXTRA_HOST=$(python3 -c "import json;print(json.load(open('$CONFIG')).get('serve
 
 mkdir -p "$AGENTS_DIR"
 
-# 평일 9·11·13·15·17·19시의 지정한 분에 도는 일정표를 만든다
+# 매일(주말 포함) 9·11·13·15·17·19시의 지정한 분에 도는 일정표를 만든다
 calendar_intervals() {
   local minute="$1"
-  for wd in 1 2 3 4 5; do
+  for wd in 1 2 3 4 5 6 7; do
     for h in 9 11 13 15 17 19; do
       echo "    <dict><key>Weekday</key><integer>$wd</integer><key>Hour</key><integer>$h</integer><key>Minute</key><integer>$minute</integer></dict>"
     done

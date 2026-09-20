@@ -47,6 +47,19 @@
 .wf-error:empty { display: none; }
 .wf-error { color: var(--urgent); font-size: 13px; }
 .wf-fields { width: 100%; }
+.wf-optional { margin: 10px 0; }
+.wf-optional summary, .task-batch-date summary { color: var(--muted); cursor: pointer; font-size: 12px; font-weight: 600; padding: 6px 0; }
+.wf-optional[open] summary { color: var(--text); }
+.task-batch-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0 12px; }
+.task-batch-tools[hidden] { display: none; }
+.task-batch-tools .jira-control { margin: 0; max-width: 100%; }
+.task-batch-tools .jira-select { max-width: 100%; }
+.task-batch-tools .wf-section-note { margin: 0; }
+.task-batch-date[open] { flex-basis: 100%; }
+.task-batch-date input { max-width: 170px; }
+.task-selecting .task-row .overflow-menu, .task-selecting .task-row .plan-only, .task-selecting .task-row .priority-select, .task-selecting .task-row.done .checkbox { display: none; }
+.task-selecting .task-row.batch-selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--card)); }
+.task-selecting .task-row.done { opacity: .6; }
 .wf-actions { margin-top: 12px; }
 .wf-project-entry { font: inherit; color: var(--accent); border: 0; background: none; padding: 0; text-align: left; cursor: pointer; }
 
@@ -75,6 +88,16 @@
   background: var(--accent); border: none; border-radius: 8px; padding: 8px 16px; min-height: 38px; cursor: pointer;
 }
 .wf-capture-add:disabled { opacity: .5; cursor: default; }
+
+/* AI가 분류한 초안 — 담기 입력줄과 같은 모양으로, 줄 끝에 빼기(✕)만 붙인다 */
+.wf-when { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0; }
+.wf-when .wf-link { padding: 0; min-height: 0; }
+.wf-draft-row { flex-wrap: wrap; align-items: center; margin: 0 0 8px; }
+/* 알약 버튼 규칙(:not 두 개)보다 우선하도록 같은 명시도로 뒤에 둔다 */
+.wf-dialog .wf-draft-row button.wf-draft-dismiss:not(.wf-main) { flex-shrink: 0; background: none; color: var(--muted); padding: 8px 10px; }
+.wf-dialog .wf-draft-row button.wf-draft-dismiss:not(.wf-main):hover { background: none; color: var(--urgent); }
+.wf-draft-row .wf-draft-due { margin: 0; white-space: nowrap; }
+.wf-draft-actions { justify-content: flex-end; margin: 4px 0 8px; }
 
 .wf-dialog :focus-visible, .wf-link:focus-visible, .wf-project-entry:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 @media(max-width:600px) {

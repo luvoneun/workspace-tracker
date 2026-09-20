@@ -40,18 +40,21 @@
    - `tracker/checks.md`와 `tracker/tasks.md`, `tracker/decisions.md`를 읽고, 새로 캡처하려는 항목이 **이미 있는 항목과 사실상 같은 내용**이면 (표현이 달라도 같은 일을 가리키면) 등록하지 않는다
    - 건너뛴 항목은 반드시 결과 출력에 "🔁 이미 있는 '[기존 항목 문구]'랑 중복돼서 안 가져왔어요"로 알린다
 
-5. **확인 대기 항목으로 등록**
-   - 새 항목마다 ULID(`chk_` 접두사) 생성, `tracker/checks.md`에 아래 형식으로 추가 (파일 없으면 헤더 `# Checks`로 새로 생성)
+5. **검증된 API로 등록**
+   - Markdown 파일을 직접 생성·수정하지 않는다. UI와 같은 저장·복구 규칙을 사용해야 한다.
+   - 새 항목마다 `node tracker/inbox-app/import-record.js item`을 실행하고 표준 입력으로 JSON을 보낸다.
+   - JSON: `{"type":"check","description":"정리한 한 줄","permalink":"원본 https 링크"}`
+   - 문구는 1,000자 이내 한 줄. 필요한 경우 `priority`, `jira`, `group`, `who`, `project`, 명시적 `due`를 추가한다. 추측한 날짜는 넣지 않는다.
+   - task는 서버가 자동으로 인박스에 넣는다. ID·created·status는 서버가 만든다.
+   - 반환값 `ok:true`를 확인한다. `duplicate:true`면 기존 원본 링크와 중복되어 추가하지 않은 것이다.
+   - 서버가 꺼졌거나 저장에 실패하면 파일 직접 수정으로 우회하지 말고 실패를 알린다.
 
-```markdown
-- [무엇을 기다리는지] #check[id:chk_[ULID] status:to-do priority:medium created:YYYY-MM-DD source:slack:permalink who:담당자]
-```
-
-   (`who`는 파악 안 되면 생략)
-
-6. **상태 파일 갱신**
-   - 이번에 조회된 메시지 중 가장 큰(최신) ts를 `tracker/inbox-app/.slack_capture_state.json`의 `my-waiting` 키에 저장
-   - **새 메시지 유무와 상관없이** 같은 파일의 `checkedAt` 키에 현재 시각을 ISO 8601로 기록한다 (예: `"checkedAt": "2026-09-17T09:07:00+09:00"`). 앱이 "슬랙 캡처가 언제 마지막으로 돌았는지"를 이 값으로 판단하므로, 가져올 게 없어서 아무것도 안 하는 경우에도 반드시 갱신한다.
+6. **전부 성공한 뒤 커서 갱신**
+   - 모든 페이지 조회와 필요한 항목 저장이 성공한 경우에만 `node tracker/inbox-app/import-record.js cursor`로 `{"channel":"my-waiting","ts":"이번 조회의 최신 ts"}`를 표준 입력으로 전달한다.
+   - 하나라도 실패하면 커서를 전진시키지 않는다. 같은 항목 재시도는 서버에서 원본 링크로 중복 제거한다.
+   - 조회 스크립트가 실패하면 부분 JSON으로 처리하지 않는다. 새 메시지가 없으면 커서를 유지한다.
+   - 전체 과정이 성공하면 `node tracker/inbox-app/import-record.js health`에 `{"channel":"my-waiting","success":true}`를 전달한다. 실패하면 `{"channel":"my-waiting","success":false,"error":"실패 이유"}`를 전달한다.
+   - 상태 JSON도 직접 덮어쓰지 않는다.
 
 ## 결과 출력
 
