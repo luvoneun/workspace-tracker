@@ -260,28 +260,6 @@ cat > "$AGENTS_DIR/com.luvon.workspace.server.plist" << PLIST
 </plist>
 PLIST
 
-# 로그인하면 앱 창을 띄운다
-cat > "$AGENTS_DIR/com.luvon.workspace.open-at-login.plist" << PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>com.luvon.workspace.open-at-login</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/bin/bash</string>
-    <string>-c</string>
-    <string>sleep 8; open -a "\$HOME/Applications/워크스페이스.app"</string>
-  </array>
-  <key>RunAtLoad</key>
-  <true/>
-  <key>StandardErrorPath</key>
-  <string>$INSTALL_DIR/logs/open-at-login.err</string>
-</dict>
-</plist>
-PLIST
-
 # 껐는데 예전에 등록돼 있던 것은 내리고 지운다
 remove_agent() {
   local plist="$AGENTS_DIR/com.luvon.workspace.$1.plist"
@@ -293,8 +271,10 @@ remove_agent() {
 [ "$USE_SLACK" = "yes" ] || remove_agent slack-capture
 [ "$USE_CAL" = "yes" ] || remove_agent calendar-sync
 [ "$USE_JIRA" = "yes" ] || remove_agent jira-sync
+# 로그인할 때 앱 창을 자동으로 띄우던 기능은 없앴다(앱은 Dock에서 직접 연다). 예전 등록이 남아 있으면 지운다.
+remove_agent open-at-login
 
-for f in server slack-capture calendar-sync jira-sync data-backup open-at-login; do
+for f in server slack-capture calendar-sync jira-sync data-backup; do
   plist="$AGENTS_DIR/com.luvon.workspace.$f.plist"
   [ -f "$plist" ] || continue
   plutil -lint "$plist" >/dev/null 2>&1 || die "설정 파일 형식 오류: $f"
