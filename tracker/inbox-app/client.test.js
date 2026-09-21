@@ -870,6 +870,142 @@ test('an empty or unchanged meeting row title saves nothing, and a failed save k
   assert.equal(failing.app.run('escStack.length'), 1, 'Esc로 취소할 길도 그대로 남는다');
 });
 
+// 회의 카드/탭 줄 맨 앞의 체크 칸 — 종류마다 목록이 쓰는 체크박스를 그대로 줄여 쓴다.
+// task/bug/decision은 `.d-check` 안에 진짜 <input>이 한 겹 더 있다(children[0].children[0]).
+function firstCheckbox(node) {
+  let cur = node;
+  const seen = new Set();
+  while (cur && cur.type !== 'checkbox') {
+    if (seen.has(cur)) return null;
+    seen.add(cur);
+    cur = cur.children && cur.children[0];
+  }
+  return cur || null;
+}
+
+test('회의 줄의 체크 칸: 종류마다 목록과 같은 체크박스가 붙고, 아이디어는 자리만 비운다', () => {
+  const { app } = meetingRowClient(new Response('{"ok":true}'));
+  const row = (item) => app.run(`panelMeetingRow(${JSON.stringify(item)}, { id: 'm1' }, null)`);
+
+  const task = row({ id: 't1', type: 'task', description: '업무 문구', status: 'to-do', priority: 'medium' });
+  const taskBox = firstCheckbox(task.children[0]);
+  assert.equal(task.children[0].className, 'ck');
+  assert.equal(taskBox.className, 'd-cb');
+  assert.equal(taskBox.getAttribute('aria-label'), '업무 문구 — 완료로 표시', '업무 줄과 같은 이름표(우선순위 없음)다');
+  assert.equal(taskBox.checked, false);
+
+  const bug = row({ id: 'b1', type: 'bug', description: '버그 문구', status: 'done', priority: 'high' });
+  const bugBox = firstCheckbox(bug.children[0]);
+  assert.equal(bugBox.getAttribute('aria-label'), '버그 문구 — 완료로 표시', '완료한 줄에는 우선순위 꺾쇠가 없다');
+  assert.equal(bugBox.checked, true);
+
+  const check = row({ id: 'c1', type: 'check', description: '확인 문구', status: 'to-do' });
+  const checkBox = firstCheckbox(check.children[0]);
+  assert.equal(checkBox.className, 'd-wcb', '레일 확인 대기와 같은 체크(.d-wcb)다');
+  assert.equal(checkBox.getAttribute('aria-label'), '확인 문구 — 확인 완료로 표시');
+
+  const decision = row({ id: 'd1', type: 'decision', description: '결정 문구', status: 'done' });
+  const decisionBox = firstCheckbox(decision.children[0]);
+  assert.equal(decisionBox.className, 'd-cb');
+  assert.equal(decisionBox.title, 'PRD 반영함으로 표시');
+  assert.equal(decisionBox.getAttribute('aria-label'), '결정 문구 — PRD 반영함으로 표시');
+  assert.equal(decisionBox.checked, true, '반영 완료한 결정은 체크된 채로 남는다');
+
+  const idea = row({ id: 'i1', type: 'idea', description: '아이디어 문구', status: 'to-do' });
+  assert.equal(idea.children[0].className, 'ck');
+  assert.equal(idea.children[0].children.length, 0, '아이디어는 체크가 없다 — 자리만 비워 다른 줄과 제목 시작을 맞춘다');
+});
+
+test('회의 줄의 체크는 목록과 같은 toggle 길을 탄다(저장은 /api/track/toggle 하나)', async () => {
+  const { app, sent } = meetingRowClient(new Response('{"ok":true}'));
+  app.run(`workflowData = { items: [
+    { id: 't1', type: 'task', description: '업무 문구', status: 'to-do' },
+    { id: 'd1', type: 'decision', description: '결정 문구', status: 'to-do' },
+  ], meetings: [] }; wfIndexData(); itemsById = new Map();`);
+
+  const taskRow = app.run(`panelMeetingRow({ id: 't1', type: 'task', description: '업무 문구', status: 'to-do' }, { id: 'm1' }, null)`);
+  await firstCheckbox(taskRow.children[0]).listeners.change();
+  assert.deepEqual(sent.map(call => call.url), ['/api/track/toggle']);
+  assert.deepEqual(sent[0].body, { id: 't1', status: 'done' }, '목록의 업무 완료 체크와 같은 요청이다');
+
+  sent.length = 0;
+  const decisionRow = app.run(`panelMeetingRow({ id: 'd1', type: 'decision', description: '결정 문구', status: 'to-do' }, { id: 'm1' }, null)`);
+  await firstCheckbox(decisionRow.children[0]).listeners.change();
+  assert.deepEqual(sent.map(call => call.url), ['/api/track/toggle']);
+  assert.deepEqual(sent[0].body, { id: 'd1', status: 'done' }, '목록의 PRD 반영함 체크와 같은 요청이다');
+});
+
+test('회의 줄에서 문구를 고치는 동안은 체크박스를 잠그고, 되돌리면 다시 연다', () => {
+  const { app } = meetingRowClient(new Response('{"ok":true}'));
+  const row = app.run(`panelMeetingRow({ id: 'd1', type: 'decision', description: '결정 문구', status: 'to-do' }, { id: 'm1' }, null)`);
+  const box = firstCheckbox(row.children[0]);
+  const title = row.children[2];
+  assert.equal(box.disabled, false);
+  title.listeners.click(); // 결정은 상세가 없어 제목을 누르는 것이 곧 문구 고치기다
+  assert.equal(box.disabled, true, '고치는 동안은 체크할 수 없다');
+  app.run('escStack[escStack.length - 1]()'); // Esc는 입력만 되돌린다
+  assert.equal(box.disabled, false, '되돌리면 다시 누를 수 있다');
+});
+
+// 체크하면 초점이 이 상자로 온다 — isTyping()이 그걸 "입력 중"으로 오인해 회의 카드·탭의 새로고침을
+// 건너뛰면 줄이 is-done으로 바뀌지 않고 멈춘다. click에서 바로 초점을 내려 두어야 한다(change와는 다른
+// 이벤트라 저장 리스너와 겹치지 않는다).
+test('회의 줄의 체크박스는 누르면 바로 초점을 내려 회의 카드·탭 새로고침을 막지 않는다', () => {
+  const { app } = meetingRowClient(new Response('{"ok":true}'));
+  const row = app.run(`panelMeetingRow({ id: 'c1', type: 'check', description: '확인 문구', status: 'to-do' }, { id: 'm1' }, null)`);
+  const box = firstCheckbox(row.children[0]);
+  assert.equal(box.blurs, 0);
+  box.listeners.click();
+  assert.equal(box.blurs, 1, 'click에서 바로 blur한다');
+});
+
+// 프로젝트 탭의 확인 대기·결정 줄 — 목록이 쓰는 체크박스를 그대로 맨 앞에 단다. 아이디어·회의는 그대로 없다.
+test('프로젝트 탭의 확인 대기·결정 줄에는 체크박스가 붙고, 아이디어·회의 줄은 그대로다', () => {
+  const app = workflowsClient();
+  app.run(`workflowData = { items: [
+    { id: 'w1', type: 'check', description: '확인 문구', status: 'to-do', group: '가입 개선' },
+    { id: 'd1', type: 'decision', description: '결정 문구', status: 'to-do', group: '가입 개선' },
+    { id: 'd2', type: 'decision', description: '반영한 결정', status: 'done', completed: '2026-09-20', group: '가입 개선' },
+    { id: 'i1', type: 'idea', description: '아이디어 문구', status: 'to-do', group: '가입 개선' },
+  ], meetings: [] }; wfIndexData(); itemsById = new Map();`);
+  const body = app.run(`(() => {
+    const body = document.createElement('div');
+    renderProjectDetail(body, { key: 'group:가입 개선', label: '가입 개선', open: 2 });
+    return body;
+  })()`);
+  const section = (label) => body.children.find(c => c.className === 'd-psec'
+    && c.children[0].children.some(k => k.textContent === label));
+  const rowsOf = (label) => section(label).children[1].children;
+
+  const waitingRow = rowsOf('확인 대기')[0];
+  assert.equal(waitingRow.className, 'd-rec has-ck has-ac');
+  const waitingBox = firstCheckbox(waitingRow.children[0]);
+  assert.equal(waitingBox.className, 'd-wcb');
+  assert.equal(waitingBox.getAttribute('aria-label'), '확인 문구 — 확인 완료로 표시');
+
+  const decisionRows = rowsOf('결정');
+  assert.equal(decisionRows[0].className, 'd-rec has-ck has-ac');
+  const decisionBox = firstCheckbox(decisionRows[0].children[0]);
+  assert.equal(decisionBox.className, 'd-cb');
+  assert.equal(decisionBox.checked, false);
+  const archivedBox = firstCheckbox(decisionRows[1].children[0]);
+  assert.equal(archivedBox.checked, true, '이 구역은 반영 완료도 함께 보여 준다 — 체크된 채로 남는다');
+
+  const ideaRow = rowsOf('아이디어')[0];
+  assert.equal(ideaRow.className, 'd-rec has-ac', '아이디어 줄은 체크박스를 두지 않는다');
+
+  const meetingSection = body.children.find(c => c.className === 'd-psec' && c.children[0]
+    && c.children[0].children.some(k => k.textContent === '회의'));
+  assert.equal(meetingSection, undefined, '회의가 없는 프로젝트라 회의 구역 자체가 없다');
+});
+
+test('projectSimpleRow: 체크박스를 넘기지 않으면 예전과 똑같다(has-ck 없음)', () => {
+  const app = pureClient();
+  const row = app.run(`projectSimpleRow('문구', '메타', () => {}, 'id1', null)`);
+  assert.equal(row.className, 'd-rec');
+  assert.equal(row.children.length, 2, '체크 칸 없이 제목·메타 둘뿐이다');
+});
+
 test('the quiet option keeps a successful save from announcing itself, while failures still do', async () => {
   const notice = app => app.nodes.get('liveRegion')?.textContent ?? '';
   const loud = client(new Response('{"ok":true}'));
@@ -905,6 +1041,30 @@ test('프로젝트 목록: 열린 항목은 업무와 확인 대기만 세고, �
     ['정산', 0],
   ], '결정·아이디어·완료한 항목은 열린 항목에 들어가지 않고, 0건은 이름 순으로 맨 아래에 남는다');
   assert.deepEqual(rows('[]'), [], '프로젝트가 하나도 없으면 빈 목록');
+});
+
+// 아이디어·결정 탭의 결정 줄 — `PRD 반영함` 체크는 decisionCheckbox로 뽑아냈지만 마크업·동작은 그대로다.
+test('아이디어·결정 탭의 결정 줄 체크는 뽑아내기 전과 같은 마크업·같은 toggle 호출이다', async () => {
+  const item = { id: 'd1', description: '결정 문구' };
+  const app = pureClient();
+  app.context.fetch = async (url, init) => { app.sent.push({ url, body: init && init.body ? JSON.parse(init.body) : null }); return new Response('{"ok":true}'); };
+  app.sent = [];
+  app.run(`itemsById = new Map([['d1', ${JSON.stringify(item)}]]);`);
+
+  const pending = app.run(`recordDecisionRow(${JSON.stringify(item)}, false)`);
+  const box = pending.children[0].children[0];
+  assert.equal(pending.children[0].className, 'd-check');
+  assert.equal(box.className, 'd-cb');
+  assert.equal(box.checked, false);
+  assert.equal(box.title, 'PRD 반영함으로 표시');
+  assert.equal(box.getAttribute('aria-label'), '결정 문구 — PRD 반영함으로 표시');
+
+  const archived = app.run(`recordDecisionRow(${JSON.stringify(item)}, true)`);
+  assert.equal(archived.children[0].children[0].checked, true);
+
+  await box.listeners.change();
+  assert.deepEqual(app.sent.map(call => call.url), ['/api/track/toggle']);
+  assert.deepEqual(app.sent[0].body, { id: 'd1', status: 'done' });
 });
 
 test('일괄 선택: 완료한 줄은 후보에서 빠지고 전체 선택 여부는 후보 기준으로 센다', () => {

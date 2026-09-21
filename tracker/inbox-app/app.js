@@ -1167,10 +1167,18 @@ function projectDoneRow(item) {
 
 // 확인 대기·결정·아이디어·회의처럼 값이 한두 개뿐인 구역은 같은 한 줄 모양을 쓴다.
 // menuSections가 있으면(할 수 있는 일이 더보기뿐이라) 늘 보이는 ⋯을 단다 — 목록에서 쓰는 메뉴 그대로.
-function projectSimpleRow(text, meta, onOpen, id, menuSections) {
+// makeCheck가 있으면(확인 대기·결정 줄만) 맨 앞에 그 종류의 체크박스를 단다 — 아이디어·회의 줄은 그대로 비운다.
+function projectSimpleRow(text, meta, onOpen, id, menuSections, makeCheck) {
   const row = document.createElement('div');
-  row.className = 'd-rec' + (menuSections ? ' has-ac' : '') + (id && panelState && panelState.id === id ? ' is-sel' : '');
+  row.className = 'd-rec' + (makeCheck ? ' has-ck' : '') + (menuSections ? ' has-ac' : '') + (id && panelState && panelState.id === id ? ' is-sel' : '');
   if (id) row.dataset.taskId = id;
+  if (makeCheck) {
+    // 확인 대기(.d-wcb, 20px)·결정(.d-check, 30px) 둘 다 이 칸 가운데 놓인다.
+    const checkCell = document.createElement('span');
+    checkCell.className = 'ckc';
+    checkCell.appendChild(makeCheck(row));
+    row.appendChild(checkCell);
+  }
   const title = document.createElement('button');
   title.type = 'button';
   title.className = 'ti';
@@ -1223,13 +1231,15 @@ function renderProjectDetail(body, row) {
   }
 
   // menu가 있으면 줄마다 같은 목록이 쓰는 ⋯ 메뉴를 그대로 단다(회의용·프로젝트탭용으로 새로 만들지 않는다).
-  const simple = (label, list, meta, onOpen, menu) => {
+  // check가 있으면(확인 대기·결정만) 목록이 쓰는 체크박스를 그대로 맨 앞에 단다.
+  const simple = (label, list, meta, onOpen, menu, check) => {
     if (!list.length) return;
     const section = projectSection(label, list.length);
     const surface = document.createElement('div');
     surface.className = 'd-psurf plain';
     list.forEach(entry => surface.appendChild(projectSimpleRow(entry.text, meta(entry.item), () => onOpen(entry.item), entry.id,
-      menu ? (row) => menu(entry.item, row) : null)));
+      menu ? (row) => menu(entry.item, row) : null,
+      check ? (row) => check(entry.item, row) : null)));
     section.appendChild(surface);
     body.appendChild(section);
   };
@@ -1238,10 +1248,14 @@ function renderProjectDetail(body, row) {
 
   simple('확인 대기', asItems(items.filter(item => item.type === 'check' && item.status !== 'done')),
     // 누구에게 + 급한 날짜 말(`1일 늦음`·`오늘 답변 예정`)을 함께 — 담당이 적혀 있다고 늦은 것이 가려지면 안 된다.
-    item => [item.who, uiItemDueText(item)?.text].filter(Boolean).join(' · '), openPanel, waitingMenuSections);
-  // 결정은 미반영·반영을 글자로만 가른다(알약으로 그리지 않는다).
+    item => [item.who, uiItemDueText(item)?.text].filter(Boolean).join(' · '), openPanel, waitingMenuSections,
+    // 이 구역은 미완료만 보여 준다(위 필터) — 체크하면 확인 완료가 되어 목록에서 빠진다.
+    (item, row) => waitingCheckbox(item, row, false));
+  // 결정은 미반영·반영을 글자로만 가른다(알약으로 그리지 않는다). 이 구역은 반영 완료도 함께 보여 준다 —
+  // 체크해도 줄은 남고 오른쪽 글자만 `미반영` → 반영 날짜로 바뀐다(구역의 기존 규칙 그대로).
   simple('결정', asItems(items.filter(item => item.type === 'decision')),
-    item => item.status === 'done' ? `${uiKoDateShort(item.completed)} 반영` : '미반영', openPanel, decisionMenuSections);
+    item => item.status === 'done' ? `${uiKoDateShort(item.completed)} 반영` : '미반영', openPanel, decisionMenuSections,
+    (item, row) => decisionCheckbox(item, row, item.status === 'done'));
   simple('아이디어', asItems(items.filter(item => item.type === 'idea')),
     item => item.created ? `${uiKoDateShort(item.created)} 기록` : '', openPanel, ideaMenuSections);
 
@@ -2147,14 +2161,9 @@ function renderDecisionArchive() {
   items.forEach(item => list.appendChild(recordDecisionRow(item, true)));
 }
 
-// 결정 한 줄: PRD 반영 체크 | 문구(눌러서 그 자리 수정) + (반영 완료면) 프로젝트 | 반영 날짜 | 늘 보이는 더보기,
-// 그 아래 조용한 정보 줄(날짜·나온 회의·원문).
-function recordDecisionRow(item, archived) {
-  const row = document.createElement('div');
-  row.className = 'd-rec is-dec' + (archived ? ' is-done' : '');
-  // 검색 팔레트가 이 줄을 찾아 옮겨 갈 수 있게 표식을 남긴다.
-  row.dataset.itemId = item.id;
-
+// 결정의 `PRD 반영함` 체크 한 칸(`.d-check` + `.d-cb`, 업무 완료 체크와 같은 가족·같은 흰 체크).
+// 결정 줄이 있는 곳은 모두 이 부품을 쓴다(아이디어·결정 탭, 회의 카드/탭의 결정 줄, 프로젝트 탭 결정 줄).
+function decisionCheckbox(item, row, archived) {
   const check = document.createElement('span');
   check.className = 'd-check';
   const box = document.createElement('input');
@@ -2168,7 +2177,18 @@ function recordDecisionRow(item, archived) {
   );
   check.appendChild(box);
   check.insertAdjacentHTML('beforeend', UI_TICK_SVG);
-  row.appendChild(check);
+  return check;
+}
+
+// 결정 한 줄: PRD 반영 체크 | 문구(눌러서 그 자리 수정) + (반영 완료면) 프로젝트 | 반영 날짜 | 늘 보이는 더보기,
+// 그 아래 조용한 정보 줄(날짜·나온 회의·원문).
+function recordDecisionRow(item, archived) {
+  const row = document.createElement('div');
+  row.className = 'd-rec is-dec' + (archived ? ' is-done' : '');
+  // 검색 팔레트가 이 줄을 찾아 옮겨 갈 수 있게 표식을 남긴다.
+  row.dataset.itemId = item.id;
+
+  row.appendChild(decisionCheckbox(item, row, archived));
 
   const title = document.createElement('span');
   title.className = 'ti';
@@ -2425,6 +2445,33 @@ function renderWaiting(items) {
   waitingOrder(items).forEach(item => list.appendChild(renderWaitingRow(item)));
 }
 
+// 확인 대기 체크(`.d-wcb`, 체크는 CSS로 그린다) — 확인 대기 줄이 있는 곳은 모두 이 부품을 쓴다
+// (레일 확인 대기, 회의 카드/탭의 확인 대기 줄, 프로젝트 탭 확인 대기 줄).
+function waitingCheckboxInput(item, done) {
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.className = 'd-wcb';
+  checkbox.checked = done;
+  checkbox.setAttribute('aria-label', `${item.description} — 확인 완료로 표시`);
+  return checkbox;
+}
+// 저장 동작을 단다. 레일 줄은 체크박스가 줄보다 먼저 있어야 해서(uiRailRow가 체크박스를 받아 줄을 만든다)
+// 줄이 다 만들어진 뒤에 따로 부른다 — 회의 카드·프로젝트 탭 줄처럼 줄이 먼저 있는 자리는 waitingCheckbox 하나로 끝낸다.
+function wireWaitingCheckbox(checkbox, item, row, done) {
+  checkbox.addEventListener('change', () =>
+    fadeOutAndRun(row, async () => {
+      await toggleTask(item.id);
+      // 확인이 끝난 내용은 그대로 두면 사라진다 — 알림에서 바로 결정으로 남길 수 있게 한다.
+      if (!done) offerDecisionFromWaiting(item);
+    }, done ? '대기중으로 되돌렸어요' : null)
+  );
+}
+function waitingCheckbox(item, row, done) {
+  const checkbox = waitingCheckboxInput(item, done);
+  wireWaitingCheckbox(checkbox, item, row, done);
+  return checkbox;
+}
+
 // 레일의 확인 대기 한 줄 — 두 줄 구성.
 //   첫 줄: 제목(최대 2줄) + `원문`
 //   둘째 줄: `결제팀 · 2일째`(3일째부터 주의색) + 답변 받을 날 배지(지났거나 오늘일 때만)
@@ -2436,11 +2483,7 @@ function renderWaitingRow(item) {
   const detail = typeof wfItem === 'function' ? wfItem(item.id) : null;
   const recheck = waitingRecheck(detail, today);
 
-  const checkbox = document.createElement('input');
-  checkbox.type = 'checkbox';
-  checkbox.className = 'd-wcb';
-  checkbox.checked = done;
-  checkbox.setAttribute('aria-label', `${item.description} — 확인 완료로 표시`);
+  const checkbox = waitingCheckboxInput(item, done);
 
   // 조각으로 모아 두 줄째에 그대로 펼쳐 넣는다(한 겹 더 감싸면 사이 여백이 죽는다).
   const sub = document.createDocumentFragment();
@@ -2494,13 +2537,7 @@ function renderWaitingRow(item) {
   if (done) row.classList.add('is-done');
   if (item.isNew && !done) observeNewItem(row, item);
 
-  checkbox.addEventListener('change', () =>
-    fadeOutAndRun(row, async () => {
-      await toggleTask(item.id);
-      // 확인이 끝난 내용은 그대로 두면 사라진다 — 알림에서 바로 결정으로 남길 수 있게 한다.
-      if (!done) offerDecisionFromWaiting(item);
-    }, done ? '대기중으로 되돌렸어요' : null)
-  );
+  wireWaitingCheckbox(checkbox, item, row, done);
   return row;
 }
 
@@ -3591,7 +3628,8 @@ function panelMeetingItemState(item) {
 // 회의 줄의 문구를 그 자리에서 고친다 — 상세 제목(panelTitleEdit)과 같은 규칙이다:
 // Enter 저장 · 한글 조합 중 Enter는 글자를 확정하는 것이라 넘긴다 · Esc는 입력만 되돌리고
 // (회의 카드는 열린 채로) · 빈 값은 저장하지 않으며 · 저장이 실패하면 적은 글자를 그대로 둔다.
-function panelMeetingRowEdit(row, titleEl, item) {
+// checkbox(있으면)는 고치는 동안 누르지 못하게 잠근다 — 입력을 먼저 확정해야 한다(단순한 쪽).
+function panelMeetingRowEdit(row, titleEl, item, checkbox) {
   // 이미 고치는 중이면(제목을 눌러 열어 둔 채 ⋯로 또 눌렀을 때) 그 칸으로 보낸다.
   if (!titleEl.isConnected) { row.querySelector('.d-din')?.focus(); return; }
   const input = document.createElement('input');
@@ -3603,6 +3641,7 @@ function panelMeetingRowEdit(row, titleEl, item) {
   titleEl.replaceWith(input);
   input.focus();
   input.select?.();
+  if (checkbox) checkbox.disabled = true;
 
   let settled = false;
   // Esc는 가장 위에 열린 것부터 닫는다 — 여기서는 회의 카드가 아니라 이 입력칸만 되돌린다.
@@ -3610,6 +3649,7 @@ function panelMeetingRowEdit(row, titleEl, item) {
     if (settled) return;
     settled = true;
     escDrop(cancel);
+    if (checkbox) checkbox.disabled = false;
     if (!input.isConnected) return; // 카드가 이미 다시 그려졌으면 되돌릴 자리가 없다
     input.replaceWith(titleEl);
     titleEl.focus?.();
@@ -3624,11 +3664,12 @@ function panelMeetingRowEdit(row, titleEl, item) {
     input.disabled = true; // 포커스가 빠져 load()가 회의 카드를 다시 그릴 수 있게 된다
     try {
       await postJson('/api/track/set-description', { id: item.id, description: value });
-      await load(); // 개수(`이 회의에서 나온 것 N`)와 레일의 회의 줄까지 함께 맞춰진다
+      await load(); // 개수(`이 회의에서 나온 것 N`)와 레일의 회의 줄까지 함께 맞춰진다 — 새 줄의 체크박스는 잠겨 있지 않다
     } catch {
       settled = false;
       escPush(cancel);
       input.disabled = false;
+      if (checkbox) checkbox.disabled = false;
       input.focus();
     }
   };
@@ -3649,12 +3690,43 @@ function panelMeetingRowMenu(item, row, onEdit) {
   return [[{ label: '문구 고치기', onClick: onEdit }], ...base];
 }
 
+// 회의 줄 맨 앞의 체크 칸: 할 일·버그는 완료 체크, 확인 대기는 확인 완료, 결정은 `PRD 반영함` —
+// 목록이 쓰는 체크박스 그대로다. 아이디어는 체크가 없다(자리만 비워 다른 줄과 제목 시작을 맞춘다).
+// 업무·결정은 `.d-check` 안에 진짜 <input>이 한 겹 더 들어 있어(uiCheckCell·decisionCheckbox) 칸(cell)과
+// 진짜 체크박스(input)를 따로 돌려준다 — 문구 고치기가 잠글 것은 언제나 input이다.
+function panelMeetingCheck(item, row, done) {
+  const cell = document.createElement('span');
+  cell.className = 'ck';
+  let input = null;
+  if (item.type === 'task' || item.type === 'bug') {
+    const check = uiCheckCell(item, row, done);
+    cell.appendChild(check);
+    input = check.children[0];
+  } else if (item.type === 'check') {
+    input = waitingCheckbox(item, row, done);
+    cell.appendChild(input);
+  } else if (item.type === 'decision') {
+    const check = decisionCheckbox(item, row, done);
+    cell.appendChild(check);
+    input = check.children[0];
+  }
+  // 체크하면 이 상자가 초점을 받는다 — `isTyping()`은 어떤 <input>이든 초점이 있으면 "입력 중"으로 보고
+  // 회의 카드·탭의 새로고침(syncTaskDetail·renderMeetings)을 건너뛴다(문구 고치기 입력칸을 지키려는 장치다).
+  // 체크박스는 지킬 글자가 없으니 여기서 바로 초점을 내려 두 자리 모두 완료 모양으로 다시 그려지게 한다.
+  // (저장 리스너는 `change`에 붙어 있으니 `click`에 붙여 한 element에 같은 이벤트 리스너가 겹치지 않게 한다.)
+  if (input) input.addEventListener('click', () => input.blur());
+  return { cell, input };
+}
+
 function panelMeetingRow(item, event, stateText, host = MEETING_HOST_CARD) {
   const row = document.createElement('div');
-  row.className = 'd-mrow2' + (item.status === 'done' ? ' is-done' : '')
+  const done = item.status === 'done';
+  row.className = 'd-mrow2' + (done ? ' is-done' : '')
     + (panelState && panelState.kind !== 'meeting' && panelState.id === item.id ? ' is-sel' : '');
   // 회의 탭에서 제목을 누르면 이 줄 옆에 상세 카드가 뜬다 — 다른 목록과 같은 앵커 규칙을 쓴다.
   row.dataset.taskId = item.id;
+  const { cell: checkCell, input: checkbox } = panelMeetingCheck(item, row, done);
+  row.appendChild(checkCell);
   const tag = document.createElement('span');
   tag.className = 'tg';
   tag.textContent = wfType(item.type);
@@ -3665,7 +3737,7 @@ function panelMeetingRow(item, event, stateText, host = MEETING_HOST_CARD) {
   title.className = 'ti';
   title.title = item.description;
   title.textContent = item.description;
-  const edit = () => panelMeetingRowEdit(row, title, item);
+  const edit = () => panelMeetingRowEdit(row, title, item, checkbox);
   title.setAttribute('aria-label', openable ? `${item.description} 상세 보기` : `${item.description} — 문구 고치기`);
   title.addEventListener('click', openable ? () => host.openItem(item, event) : edit);
   const state = document.createElement('span');
