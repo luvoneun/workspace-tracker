@@ -16,6 +16,10 @@ let reportMergeHeading = null;        // 묶기 모드에서 고를 수 있는 �
 let reportExcludedOpen = false;
 
 const REPORT_PLAN_HEADING = '다음 주 계획';
+// 서버는 프로젝트가 없는 기록을 `그룹 없음`으로 준다 — 화면에서는 다른 목록과 같은 말로 적는다.
+// (복사 글자와 보고 문서의 소제목은 서버가 준 말 그대로 두고 건드리지 않는다.)
+const REPORT_NO_PROJECT_LABEL = '그룹 없음';
+const REPORT_NO_PROJECT = '프로젝트 없음';
 
 window.addEventListener('beforeunload', event => {
   if (reportEdits.size || reportBusy) { event.preventDefault(); event.returnValue = ''; }
@@ -421,24 +425,58 @@ function reportPlanSection(item, host, newIds) {
   host.appendChild(add);
 }
 
-// `전체 업무 기록` — 이번 주에 연결된 업무를 조용한 목록으로. 줄을 누르면 상세가 열린다.
-function reportRecordsView(item, host) {
+// 전체 업무 기록을 프로젝트로 묶는다(순수 함수). 프로젝트 차례는 보고 문서와 같게 — 기록이 문장에
+// 처음 나온 순서를 그대로 쓴다 — 두고, `프로젝트 없음`만 맨 아래로 내린다. 같은 기록이 여러 문장에
+// 걸려 있으면 한 번만 세고, 그 기록이 마지막으로 붙은 문장(복원할 대상)을 함께 들고 간다.
+function reportRecordGroups(rows) {
   const records = new Map();
-  item.draft.rows.forEach(row => [...(row.evidence || []), ...(row.suggestion?.evidence || [])]
-    .forEach(source => records.set(source.id, { source, row })));
-  if (!records.size) {
+  for (const row of rows || []) {
+    for (const source of [...(row.evidence || []), ...(row.suggestion?.evidence || [])]) {
+      records.set(source.id, { source, row });
+    }
+  }
+  const groups = new Map();
+  for (const entry of records.values()) {
+    const label = String(entry.source.label || '').trim();
+    const name = !label || label === REPORT_NO_PROJECT_LABEL ? REPORT_NO_PROJECT : label;
+    if (!groups.has(name)) groups.set(name, []);
+    groups.get(name).push(entry);
+  }
+  const names = [...groups.keys()].filter(name => name !== REPORT_NO_PROJECT);
+  if (groups.has(REPORT_NO_PROJECT)) names.push(REPORT_NO_PROJECT);
+  return names.map(name => ({ name, entries: groups.get(name) }));
+}
+
+// `전체 업무 기록` — 이번 주에 연결된 업무를 프로젝트로 묶은 조용한 목록. 줄을 누르면 상세가 열린다.
+// 오른쪽에는 기본값이 아닌 것만 적는다(`완료`·`보고에서 제외됨`) — `미완료`·`보고에 포함`은 찍지 않는다.
+function reportRecordsView(item, host) {
+  const groups = reportRecordGroups(item.draft.rows);
+  if (!groups.length) {
     host.appendChild(reportNode('div', '이번 주에 연결된 업무 기록이 없어요.', 'rp-hint'));
     return;
   }
   const list = reportNode('div', undefined, 'rp-recs');
-  for (const { source, row } of records.values()) {
-    const line = reportNode('div', undefined, 'rp-rec');
-    const open = reportNode('button', source.description, 'ti');
-    open.type = 'button';
-    open.addEventListener('click', () => panelOpen({ id: source.id }));
-    line.append(open, reportNode('span', `${source.label} · ${source.status === 'done' ? '완료' : '미완료'} · ${row.excluded ? '보고 제외' : '보고에 포함'}`, 'mt'));
-    if (row.excluded) line.appendChild(reportButton('보고에 복원', () => reportChange(item, { action: 'exclude', id: row.id }), 'd-btn sm'));
-    list.appendChild(line);
+  for (const group of groups) {
+    list.appendChild(uiGroupHeading(group.name, group.entries.length,
+      group.name === REPORT_NO_PROJECT ? {} : { projectName: group.name }));
+    for (const { source, row } of group.entries) {
+      const line = reportNode('div', undefined, 'rp-rec');
+      const wrap = reportNode('span', undefined, 'tiwrap');
+      const open = reportNode('button', source.description, 'ti');
+      open.type = 'button';
+      open.title = source.description;
+      open.addEventListener('click', () => panelOpen({ id: source.id }));
+      wrap.appendChild(open);
+      const link = uiSourceLink(source);
+      if (link) wrap.appendChild(link);
+      line.appendChild(wrap);
+      const notes = [];
+      if (source.status === 'done') notes.push('완료');
+      if (row.excluded) notes.push('보고에서 제외됨');
+      line.appendChild(reportNode('span', notes.join(' · '), 'mt'));
+      if (row.excluded) line.appendChild(reportButton('복원', () => reportChange(item, { action: 'exclude', id: row.id }), 'd-btn sm'));
+      list.appendChild(line);
+    }
   }
   host.appendChild(list);
 }

@@ -314,6 +314,15 @@ function uiProjectDot(name) {
   return dot;
 }
 
+// 그룹 제목이 프로젝트를 말해 주지 않는 자리에서 제목 뒤에 붙는 `· ● 이름`(색 점 + 회색 글자).
+function uiInlineProject(name) {
+  const tag = document.createElement('span');
+  tag.className = 'd-inproj';
+  tag.title = name;
+  tag.append('· ', uiProjectDot(name), name);
+  return tag;
+}
+
 // sticky 그룹 제목. 접히는 그룹은 줄 전체가 버튼이고, 마우스를 올리면 `+`로 그 자리에 추가한다.
 // 프로젝트 그룹이면 제목 앞에 그 프로젝트의 색 점이 붙는다.
 function uiGroupHeading(label, count, opts = {}) {
@@ -554,13 +563,7 @@ function uiTaskRow(item, opts = {}) {
     const wrap = document.createElement('span');
     wrap.className = 'd-titlewrap';
     wrap.appendChild(title);
-    if (inlineProject) {
-      const tag = document.createElement('span');
-      tag.className = 'd-inproj';
-      tag.title = inlineProject;
-      tag.append('· ', uiProjectDot(inlineProject), inlineProject);
-      wrap.appendChild(tag);
-    }
+    if (inlineProject) wrap.appendChild(uiInlineProject(inlineProject));
     if (source) wrap.appendChild(source);
     row.appendChild(wrap);
   } else {
@@ -1911,8 +1914,9 @@ function decisionJiraSummary(item) {
   return item.jira ? (jiraIssuesByKey.get(item.jira) || {}).summary || '' : '';
 }
 
-// 결정·아이디어 열 하나를 그린다: 프로젝트 그룹 제목(누르면 프로젝트 탭) + 그 아래 줄들.
-// 그룹 제목이 이미 프로젝트를 말해 주므로 줄에는 프로젝트 이름을 되풀이하지 않는다.
+// 결정·아이디어 열 하나를 그린다: 프로젝트 그룹 제목(오늘 목록과 같은 부품 — 색 점 + 이름 + 회색 숫자,
+// 누르면 프로젝트 탭) + 그 아래 줄들. 그룹 제목이 이미 프로젝트를 말해 주므로 줄에는 되풀이하지 않는다.
+// `프로젝트 없음` 묶음만 색 점 없이 맨 아래에 선다(uiGroupTasks가 순서를 맡는다).
 function renderRecordColumn(list, items, row, emptyText) {
   list.replaceChildren();
   if (!items.length) {
@@ -1921,9 +1925,26 @@ function renderRecordColumn(list, items, row, emptyText) {
   }
   uiGroupTasks(items).forEach(([key, group]) => {
     list.appendChild(uiGroupHeading(uiGroupLabel(key), group.length,
-      key === '__misc__' ? {} : { onOpenProject: () => openProjectTab(key) }));
+      key === '__misc__' ? {} : { projectName: key, onOpenProject: () => openProjectTab(key) }));
     group.forEach(item => list.appendChild(row(item)));
   });
+}
+
+// 반영 완료 줄에는 위에 프로젝트 그룹 제목이 없다 — 그 줄만 제목 뒤에 프로젝트를 적는다(지라면 키).
+function recordProjectName(item) {
+  return item.jira || item.group || item.project || '';
+}
+
+// 결정·아이디어 줄의 제목 자리: 제목 | (반영 완료면) `· ● 프로젝트` | (원문이 있으면) 조용한 `원문` 링크.
+function recordTitleCell(row, title, item, projectName) {
+  const source = uiSourceLink(item);
+  if (!projectName && !source) { row.appendChild(title); return; }
+  const wrap = document.createElement('span');
+  wrap.className = 'd-titlewrap';
+  wrap.appendChild(title);
+  if (projectName) wrap.appendChild(uiInlineProject(projectName));
+  if (source) wrap.appendChild(source);
+  row.appendChild(wrap);
 }
 
 function renderDecisions(items) {
@@ -1960,7 +1981,7 @@ function renderDecisionArchive() {
   items.forEach(item => list.appendChild(recordDecisionRow(item, true)));
 }
 
-// 결정 한 줄: PRD 반영 체크 | 문구(눌러서 그 자리 수정) | 반영 날짜 | hover 더보기.
+// 결정 한 줄: PRD 반영 체크 | 문구(눌러서 그 자리 수정) + 프로젝트·원문 | 반영 날짜 | 늘 보이는 더보기.
 function recordDecisionRow(item, archived) {
   const row = document.createElement('div');
   row.className = 'd-rec is-dec' + (archived ? ' is-done' : '');
@@ -1989,26 +2010,25 @@ function recordDecisionRow(item, archived) {
   // 말줄임으로 잘린 문구도 마우스를 올리면 전부 읽을 수 있게(수정 안내는 aria-label이 한다).
   title.title = item.description;
   if (item.isNew && !archived) { title.prepend(renderNewDot(item)); observeNewItem(row, item); }
-  row.appendChild(title);
+  recordTitleCell(row, title, item, archived ? recordProjectName(item) : '');
 
   const meta = document.createElement('span');
   meta.className = 'mt';
   meta.textContent = archived && item.completed ? `${uiKoDateShort(item.completed)} 반영` : '';
   row.appendChild(meta);
 
-  if (!archived) {
-    const acts = document.createElement('span');
-    acts.className = 'ac';
-    acts.appendChild(uiMoreButton(`${item.description} — 더 보기`, () => [
-      [{ field: '프로젝트', control: taskProjectControl(item) }],
-      [{ label: '삭제', danger: true, onClick: () => removeTracked(item, row) }],
-    ]));
-    row.appendChild(acts);
-  }
+  // 이 줄에서 할 수 있는 일이 더보기뿐이라 ⋯은 늘 보인다(반영 완료 줄도 같다).
+  const acts = document.createElement('span');
+  acts.className = 'ac';
+  acts.appendChild(uiMoreButton(`${item.description} — 더 보기`, () => [
+    [{ field: '프로젝트', control: taskProjectControl(item) }],
+    [{ label: '삭제', danger: true, onClick: () => removeTracked(item, row) }],
+  ]));
+  row.appendChild(acts);
   return row;
 }
 
-// 아이디어 한 줄: 체크박스 없이 문구 | `가능성 높음` | hover 더보기.
+// 아이디어 한 줄: 체크박스 없이 문구 + 원문 | `가능성 높음` | 늘 보이는 더보기.
 function recordIdeaRow(item) {
   const row = document.createElement('div');
   row.className = 'd-rec is-idea';
@@ -2019,7 +2039,7 @@ function recordIdeaRow(item) {
   title.textContent = item.description;
   title.title = item.description;
   if (item.isNew) { title.prepend(renderNewDot(item)); observeNewItem(row, item); }
-  row.appendChild(title);
+  recordTitleCell(row, title, item, '');
 
   const meta = document.createElement('span');
   meta.className = 'mt';

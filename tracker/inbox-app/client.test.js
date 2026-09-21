@@ -499,6 +499,28 @@ test('주간요약 문서는 상태 → 프로젝트 → 문장으로 묶고, �
   assert.deepEqual(JSON.parse(app.run(`JSON.stringify(reportDocSections([]))`)), [], '기록이 없으면 구역도 없다');
 });
 
+// 전체 업무 기록: 보고 문서와 같은 프로젝트 차례로 묶고, 프로젝트가 없는 기록만 맨 아래로 내린다.
+const REPORT_RECORD_ROWS = `[
+  { id: 'r1', excluded: false, evidence: [{ id: 's1', description: '가입 퍼널 데이터를 정리했습니다', label: '가입 개선', status: 'done' }] },
+  { id: 'r2', excluded: true, evidence: [{ id: 's2', description: '주간 회의 자료 준비하기', label: '그룹 없음', status: 'done' }] },
+  { id: 'r3', excluded: false,
+    evidence: [{ id: 's3', description: '정산 배치 설계하기', label: '결제 리뉴얼', status: 'to-do' }],
+    suggestion: { evidence: [{ id: 's4', description: '실패 알림 문구 고치기', label: '가입 개선', status: 'to-do' }] } },
+  { id: 'r4', excluded: false, evidence: [{ id: 's5', description: '큐 지연 원인 회신 받기', label: '', status: 'to-do' }] }
+]`;
+
+test('전체 업무 기록은 프로젝트로 묶이고, 프로젝트 없는 기록은 `프로젝트 없음`으로 맨 아래에 선다', () => {
+  const app = reportClient();
+  const groups = JSON.parse(app.run(
+    `JSON.stringify(reportRecordGroups(${REPORT_RECORD_ROWS}).map(g => [g.name, g.entries.map(e => e.source.id), g.entries.map(e => e.row.id)]))`));
+  assert.deepEqual(groups, [
+    ['가입 개선', ['s1', 's4'], ['r1', 'r3']],
+    ['결제 리뉴얼', ['s3'], ['r3']],
+    ['프로젝트 없음', ['s2', 's5'], ['r2', 'r4']],
+  ], '보고 문서에 나온 차례를 그대로 쓰고, 서버의 `그룹 없음`과 빈 값은 한 묶음으로 맨 아래에 둔다');
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(reportRecordGroups([]))')), [], '연결된 기록이 없으면 묶음도 없다');
+});
+
 test('슬랙 미리보기와 복사 글자는 한 원본에서 나오고, 제외한 문장만 빠진다', () => {
   const app = reportClient();
   const report = `{ rows: ${REPORT_ROWS} }`;
