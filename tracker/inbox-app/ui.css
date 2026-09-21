@@ -24,6 +24,9 @@
   --accent: #2563eb;       /* 채움·밑줄·체크박스·포커스 외곽선 */
   --accent-text: #1d54d0;  /* 파란 "글자"(링크·선택된 항목·칩) — 대비를 맞춘 값 */
   --accent-soft: rgba(37, 99, 235, 0.09);
+  /* 선택된 줄의 "불투명" 배경 — 줄 배경과 그 위에 겹쳐 뜨는 동작 묶음이 같은 색이어야 글자가 비치지 않는다 */
+  --sel: color-mix(in srgb, var(--accent) 9%, var(--surface));
+  --sel-hover: color-mix(in srgb, var(--accent) 9%, var(--hover));
   --on-fill: #ffffff;
 
   /* 의미 색 — 항상 문구와 함께 글자색으로만 쓴다 */
@@ -66,6 +69,8 @@
     --accent: #7aa2ff;
     --accent-text: #7aa2ff;
     --accent-soft: rgba(122, 162, 255, 0.16);
+    --sel: color-mix(in srgb, var(--accent) 16%, var(--surface));
+    --sel-hover: color-mix(in srgb, var(--accent) 16%, var(--hover));
     --on-fill: #0b1020;
     --urgent: #ff9292;
     --warn: #ffc46b;
@@ -92,6 +97,8 @@
   --accent: #7aa2ff;
   --accent-text: #7aa2ff;
   --accent-soft: rgba(122, 162, 255, 0.16);
+  --sel: color-mix(in srgb, var(--accent) 16%, var(--surface));
+  --sel-hover: color-mix(in srgb, var(--accent) 16%, var(--hover));
   --on-fill: #0b1020;
   --urgent: #ff9292;
   --warn: #ffc46b;
@@ -379,13 +386,107 @@ body {
   font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums;
 }
 
-/* ---------- 오늘 본문 ---------- */
-#gridToday { grid-template-columns: 260px minmax(0, 1fr); }
-.col-center { min-width: 0; }
+/* ---------- 오늘 레이아웃 (레일 250px + 본문) ---------- */
+/* 레일은 페이지 왼쪽 여백(20px)까지 물고 들어가므로 열은 그만큼 좁게 잡는다 — 눈에 보이는 폭이 250px */
+#gridToday { grid-template-columns: 230px minmax(0, 1fr); gap: 0; align-items: stretch; }
+#gridToday { min-height: calc(100dvh - var(--hdr) - 64px); }
+.col-center { min-width: 0; padding-left: 20px; }
 #inboxZone { margin-bottom: 12px; }
 #inboxZone[hidden] { display: none; }
 #todayTaskZone { margin-bottom: 12px; }
-#laterTaskZone[hidden] { display: none; }
+
+/* ---------- 왼쪽 레일 ---------- */
+/* .page의 좌·상·하 여백을 되물려 레일이 페이지 끝까지 닿게 한다(상자가 아니라 기둥으로 보이게) */
+.d-rail {
+  background: var(--rail); border-right: 1px solid var(--border);
+  margin: -16px 0 -48px -20px; padding: 6px 10px 28px; min-width: 0;
+}
+.d-rsec { margin-bottom: 14px; }
+.d-rsec[hidden] { display: none; }
+.d-rhd {
+  display: flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px;
+  font-size: 12px; font-weight: 600; color: var(--muted);
+}
+.d-rhd .n { color: var(--dim); font-weight: 400; }
+/* `전체 보기` 같은 곁들이 링크는 구역 제목보다 더 조용하게, 오른쪽 끝에 */
+.d-rhd .wf-link {
+  margin-left: auto; padding: 0 4px; height: 22px;
+  color: var(--muted); font-size: 11.5px; font-weight: 500;
+}
+.d-rhd .wf-link:hover { color: var(--text); }
+
+/* 레일 빠른 추가 — 상자형 30px */
+.d-qa {
+  display: block; width: 100%; height: 30px; margin: 2px 0 4px; padding: 0 10px;
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  background: var(--field); color: var(--text); font-family: inherit; font-size: 12.5px;
+}
+.d-qa::placeholder { color: var(--dim); }
+.d-qa:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+/* 미팅 줄: 시각 | 제목(프로젝트는 같은 줄 뒤 muted) | 조용한 개수 */
+.d-mrow {
+  position: relative; display: grid; grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: var(--r-xs);
+}
+.d-mrow + .d-mrow, .d-wrow + .d-wrow { box-shadow: inset 0 1px 0 var(--border); }
+.d-mrow:hover, .d-mrow:focus-within, .d-wrow:hover, .d-wrow:focus-within { background: var(--rail-hover); box-shadow: none; }
+.d-mrow:hover + .d-mrow, .d-mrow:focus-within + .d-mrow,
+.d-wrow:hover + .d-wrow, .d-wrow:focus-within + .d-wrow { box-shadow: none; }
+.d-mrow.is-sel, .d-wrow.is-sel { background: var(--sel); box-shadow: none; }
+.d-mrow.is-sel + .d-mrow, .d-wrow.is-sel + .d-wrow { box-shadow: none; }
+.d-mrow .t { font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: -0.01em; }
+.d-mrow.is-now .t { color: var(--text); }
+.d-mrow .ti, .d-wrow .ti {
+  min-width: 0; border: 0; background: none; padding: 0; margin: 0; text-align: left;
+  font-family: inherit; font-size: 13px; color: var(--text); cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.d-mrow .ti:hover, .d-wrow .ti:hover { color: var(--accent-text); }
+.d-mrow .ti .pj { color: var(--muted); font-size: 12px; margin-left: 6px; }
+.d-mrow .ct { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+
+/* 확인 대기·리마인드·후속 알림 줄 */
+.d-wrow {
+  position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "ti mt" "sub sub";
+  align-items: center; gap: 1px 8px; min-height: 30px; padding: 4px 8px; border-radius: var(--r-xs);
+}
+.d-wrow.has-ck { grid-template-columns: 18px minmax(0, 1fr) auto; grid-template-areas: "ck ti mt" "ck sub sub"; }
+.d-wrow .ck { grid-area: ck; display: grid; place-items: center; }
+.d-wrow .ti { grid-area: ti; }
+.d-wrow .mt { grid-area: mt; font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.d-wrow .mt b { font-weight: 500; }
+.d-wrow .sub { grid-area: sub; font-size: 11.5px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.d-wrow.is-wrap { align-items: start; }
+.d-wrow.is-wrap .ti { white-space: normal; text-overflow: clip; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.4; }
+.d-wrow.is-wrap .mt { padding-top: 1px; }
+.d-wrow .ti .new-dot { position: static; display: inline-block; width: 5px; height: 5px; margin-right: 5px; vertical-align: 2px; box-shadow: none; }
+/* 더보기는 hover·focus일 때만, 오른쪽 끝에 겹쳐 뜬다 */
+.d-wrow .ac, .d-mrow .ac {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  display: flex; align-items: center; padding-left: 16px;
+  background: linear-gradient(90deg, transparent 0, var(--rail-hover) 16px);
+  opacity: 0; pointer-events: none; transition: opacity 130ms var(--ease);
+}
+.d-wrow:hover .ac, .d-wrow:focus-within .ac, .d-mrow:hover .ac, .d-mrow:focus-within .ac { opacity: 1; pointer-events: auto; }
+/* 더보기가 나타나는 자리에 있던 조용한 정보는 같은 속도로 물러난다 — 글자가 반쯤 잘려 보이지 않게 */
+.d-mrow .ct, .d-wrow .mt { transition: opacity 130ms var(--ease); }
+.d-mrow:has(.ac):hover .ct, .d-mrow:has(.ac):focus-within .ct,
+.d-wrow:has(.ac):hover .mt, .d-wrow:has(.ac):focus-within .mt { opacity: 0; }
+.d-wrow.is-sel .ac, .d-mrow.is-sel .ac { background: linear-gradient(90deg, transparent 0, var(--sel) 16px); opacity: 1; pointer-events: auto; }
+.d-wcb { appearance: none; -webkit-appearance: none; margin: 0; width: 14px; height: 14px; border: 1.5px solid var(--dim); border-radius: 4px; background: var(--field); cursor: pointer; }
+.d-wcb:hover { border-color: var(--accent); }
+.d-wcb:checked { background: var(--accent); border-color: var(--accent); }
+
+/* 후속 알림(다시 확인할 항목 · 답변이 해결된 업무) — 구역 제목보다 작고 조용하게 */
+.d-fu { border-top: 1px solid var(--border); margin: 0 8px 14px; padding-top: 8px; }
+.d-fu .lbl { font-size: 11.5px; font-weight: 600; color: var(--muted); padding: 0 0 2px; }
+.d-fu .lbl + .lbl, .d-wrow + .lbl { margin-top: 6px; }
+.d-fu .d-wrow { padding-left: 0; padding-right: 0; min-height: 26px; }
+.d-fu .d-wrow .ti { font-size: 12.5px; }
+.d-fu .d-wrow .ac { right: 0; }
+.d-rempty { font-size: 12px; color: var(--dim); padding: 4px 8px 6px; }
 
 /* 구역 제목 — 22px, 목록 위에 얹히는 작은 머리글(제목 위의 또 다른 머리글은 쓰지 않는다) */
 .d-sechd { display: flex; align-items: center; gap: 8px; height: 22px; font-size: 12px; font-weight: 600; color: var(--muted); }
@@ -418,8 +519,10 @@ body {
 }
 
 /* ---------- 목록 머리줄 ---------- */
-.d-lhd { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; min-height: 28px; margin: 0 0 2px; }
-.d-lhd h2 { margin: 0; font-size: 14.5px; font-weight: 600; letter-spacing: -0.01em; }
+.d-lhd { display: flex; align-items: center; gap: 9px 8px; flex-wrap: wrap; min-height: 28px; margin: 0 0 2px; }
+.d-lhd > * { flex: none; }
+.d-lhd h2 { margin: 0; font-size: 14.5px; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; }
+.d-lhd .d-btn, .d-lhd .convert-btn, .d-seg button { white-space: nowrap; }
 .d-lhd h2::before { display: none; }
 .d-lhd .sub { font-size: 12px; color: var(--muted); }
 .d-lhd .sp { margin-left: auto; }
@@ -477,18 +580,22 @@ body {
 .d-addinput::placeholder { color: var(--dim); }
 
 /* ---------- 업무 행 ---------- */
+/* 줄 배경은 언제나 --rowbg 하나로 정한다 — 줄 위에 겹쳐 뜨는 동작 묶음이 같은 값을 쓰기 때문에
+   기본·hover·선택 어디서도 아래 글자가 비치지 않는다(선택 배경은 반투명이 아닌 불투명 --sel). */
 .d-row {
   display: grid; grid-template-columns: 24px minmax(0, 1fr) var(--wp) var(--wm);
   align-items: center; column-gap: 10px;
-  height: var(--row); padding: 0 var(--pad); position: relative; --rowbg: var(--surface);
+  height: var(--row); padding: 0 var(--pad); position: relative;
+  --rowbg: var(--surface); background: var(--rowbg);
 }
 .d-row + .d-row, .d-addrow + .d-row { box-shadow: inset 0 1px 0 var(--hair); }
-.d-row:hover, .d-row:focus-within { background: var(--hover); --rowbg: var(--hover); box-shadow: none; }
+.d-row:hover, .d-row:focus-within { --rowbg: var(--hover); box-shadow: none; }
 .d-row:hover + .d-row, .d-row:focus-within + .d-row { box-shadow: none; }
-.d-row.is-sel { background: var(--accent-soft); --rowbg: transparent; box-shadow: none; }
+.d-row.is-sel, .d-row.batch-selected { --rowbg: var(--sel); box-shadow: none; }
+.d-row.is-sel:hover, .d-row.is-sel:focus-within,
+.d-row.batch-selected:hover, .d-row.batch-selected:focus-within { --rowbg: var(--sel-hover); }
 .d-row.is-sel + .d-row { box-shadow: none; }
 .d-row.is-sel .d-title { font-weight: 600; color: var(--accent-text); }
-.d-row.batch-selected { background: var(--accent-soft); --rowbg: var(--surface); }
 .task-selecting .d-row.is-done { opacity: 0.6; }
 
 .d-check { position: relative; width: 24px; height: var(--row); display: grid; place-items: center; }
@@ -534,11 +641,11 @@ body {
   opacity: 0; pointer-events: none; transition: opacity 130ms var(--ease);
 }
 .d-row:hover .d-acts, .d-row:focus-within .d-acts, .d-row.is-sel .d-acts { opacity: 1; pointer-events: auto; }
-.d-row.is-sel .d-acts { background: linear-gradient(90deg, transparent 0, var(--accent-soft) 24px), var(--surface); }
 .d-acts .d-btn { height: 28px; padding: 0 7px; font-size: 11.5px; }
 
 .d-row.is-sug { grid-template-columns: 24px minmax(0, 1fr) var(--wp) var(--wm) 104px; --rowbg: var(--bg); }
 .d-row.is-sug, .d-row.is-sug:hover { background: none; box-shadow: none; }
+.d-row.is-sug:hover { --rowbg: var(--bg); }
 .d-row.is-sug .d-title { cursor: default; }
 .d-row.is-sug .d-acts { position: static; opacity: 1; pointer-events: auto; background: none; padding-left: 0; }
 
@@ -613,16 +720,69 @@ textarea.d-dtitle {
 .d-autosave { font-size: 11.5px; color: var(--muted); }
 .d-dsec .d-btn { margin-top: 4px; }
 
-/* 카드 위의 ⋯ 버튼 — 옛 카드들(확인 대기·결정·아이디어)은 아직 오른쪽 위 모서리에 둔다 */
+/* ---------- 나중에 할 일 서랍 ----------
+   헤더 아래 오른쪽에 붙어서 열린다. 900px 초과에서는 본문을 덮지 않고 밀어낸다(The Drawer Pushes Rule):
+   레일과 오늘 목록은 제자리에 남고 목록 폭만 줄어든다. scrim 없음, 그림자 없음(붙어 있는 면이므로). */
+.d-drawer {
+  position: fixed; top: var(--hdr); right: 0; bottom: 0; z-index: 40;
+  width: 404px; max-width: 100vw;
+  display: flex; flex-direction: column;
+  background: var(--surface); border-left: 1px solid var(--border);
+  transform: translateX(100%); visibility: hidden;
+  transition: transform 160ms var(--ease), visibility 160ms var(--ease);
+}
+body.later-open .d-drawer { transform: none; visibility: visible; }
+.page { transition: padding-right 160ms var(--ease); }
+/* 본문 오른쪽 끝이 서랍 왼쪽 선에 딱 닿게 — 가운데 정렬된 페이지의 바깥 여백만큼 덜 민다 */
+body.later-open .page { padding-right: max(20px, calc(424px - max(0px, (100vw - 1240px) / 2))); }
+.d-dhd {
+  display: flex; align-items: center; gap: 8px; flex: none;
+  height: 44px; padding: 0 10px 0 var(--pad); border-bottom: 1px solid var(--hair);
+}
+.d-dhd h2 { margin: 0; font-size: 13.5px; font-weight: 600; }
+.d-dhd h2::before { display: none; }
+.d-dhd .n { font-size: 12px; color: var(--muted); }
+.d-dhd .d-iconbtn { margin-left: auto; }
+.d-dbody { flex: 1; overflow: auto; padding: 8px 0 24px; }
+.d-dbody .d-qa { margin: 0 var(--pad) 8px; width: calc(100% - var(--pad) * 2); }
+.d-dbody .d-list { border: 0; border-radius: 0; margin: 0; background: none; }
+.d-dbody .d-grp { background: var(--surface); }
+/* 좁은 면의 행은 두 줄형: 제목이 전체 폭(최대 2줄), 기한·우선순위는 그 아래 작은 줄 */
+.d-dbody .d-row {
+  grid-template-columns: 24px minmax(0, 1fr);
+  grid-template-areas: "ck ti" "ck mt";
+  height: auto; min-height: 40px; padding: 6px var(--pad); row-gap: 1px; align-content: center;
+}
+.d-dbody .d-check { grid-area: ck; height: auto; align-self: center; }
+.d-dbody .d-title { grid-area: ti; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 19px; }
+.d-dbody .d-proj { display: none; }
+.d-dbody .d-meta { grid-area: mt; justify-content: flex-start; gap: 10px; font-size: 11.5px; }
+.d-dbody .d-meta:empty { display: none; }
+
+/* 카드 위의 ⋯ 버튼 — 옛 카드들(결정·아이디어)은 아직 오른쪽 위 모서리에 둔다 */
 .card > .d-more { position: absolute; top: 8px; right: 8px; }
 .card:has(> .d-more) { padding-right: 40px; }
-.cal-top-right .d-more { position: static; }
 
 /* ---------- 반응형 ---------- */
 @media (max-width: 1280px) {
   :root { --wm: 146px; --wp: 80px; }
 }
-/* 여기서부터는 패널이 열에서 빠져 나와 오른쪽에 떠 있는 판이 된다 */
+/* 서랍이 열려 있으면 패널은 열 안에 들어가지 않는다 — 목록이 제목도 못 보여 줄 만큼 좁아지기 때문이다.
+   같은 오른쪽 자리를 패널(z 45)이 서랍(z 40) 위에서 대신 쓴다(떠 있는 층은 최대 둘). */
+@media (min-width: 1121px) {
+  body.later-open #todayTaskZone.task-detail-open .task-content-layout { grid-template-columns: minmax(0, 1fr); }
+  body.later-open .d-side {
+    position: fixed; top: var(--hdr); right: 0; bottom: 0; left: auto;
+    width: 360px; max-width: 100vw; z-index: 45; margin: 0; padding: 0;
+    background: var(--surface); border-left: 1px solid var(--border); box-shadow: var(--pop); overflow: auto;
+  }
+  body.later-open .d-detail {
+    position: static; left: auto; right: auto; top: auto !important;
+    border: 0; border-radius: 0; box-shadow: none; padding: 16px 14px; max-height: none;
+  }
+}
+
+/* 1120px 이하에서는 서랍과 상관없이 늘 떠 있는 판이다(위와 같은 모양) */
 @media (max-width: 1120px) {
   #todayTaskZone.task-detail-open .task-content-layout { grid-template-columns: minmax(0, 1fr); }
   .d-side {
@@ -645,9 +805,21 @@ textarea.d-dtitle {
 }
 @media (max-width: 900px) {
   .page { padding: 14px 16px 80px; }
-  #gridToday { grid-template-columns: minmax(0, 1fr); }
-  #gridToday .col-center { order: -1; }
+  #gridToday { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  #gridToday .col-center { order: -1; padding-left: 0; }
   #gridToday .col-left { order: 1; }
+  .d-rail {
+    border-right: 0; border-top: 1px solid var(--border);
+    margin: 14px -16px -80px; padding: 10px 16px 24px;
+  }
+
+  /* 서랍은 아래에서 올라오는 전체 폭 시트가 된다(본문을 밀지 않는다) */
+  body.later-open .page { padding-right: 16px; }
+  .d-drawer {
+    top: auto; left: 0; right: 0; bottom: 0; width: auto; max-height: 86vh;
+    border-left: 0; border-top: 1px solid var(--border); border-radius: var(--r) var(--r) 0 0;
+    box-shadow: var(--pop); transform: translateY(100%);
+  }
 }
 @media (max-width: 640px) {
   .d-hdr { padding: 0 12px 0 16px; gap: 10px; }
@@ -658,6 +830,9 @@ textarea.d-dtitle {
 }
 @media (max-width: 520px) {
   .page { padding: 12px 16px 36px; }
+  body.later-open .page { padding-right: 16px; }
+  .d-rail { margin-bottom: -36px; }
+  .d-qa, .d-dbody .d-qa { font-size: 16px; }
   .d-banner { padding: 10px 16px; }
   .d-toast { left: 16px; right: 16px; bottom: 16px; max-width: none; }
 
@@ -676,6 +851,8 @@ textarea.d-dtitle {
     grid-area: ac; position: static; flex-direction: column; align-items: stretch;
     opacity: 1; pointer-events: auto; background: none; padding-left: 0;
   }
+  /* 서랍 안의 두 줄 행도 같은 규칙을 따른다 — 동작 칸을 따로 잡아 주지 않으면 줄이 세로로 늘어난다 */
+  .d-dbody .d-row { grid-template-columns: 28px minmax(0, 1fr) auto; grid-template-areas: "ck ti ac" "ck mt ac"; }
   .d-ibrow { grid-template-columns: minmax(0, 1fr); }
   .d-ibrow .jira-control { display: none; }
   .d-ibacts { flex-wrap: wrap; }

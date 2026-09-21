@@ -80,7 +80,7 @@
     align-items: start;
   }
   .grid[hidden] { display: none; }
-  .col-left, .col-right { min-width: 0; }
+  .col-left { min-width: 0; }
   @media (max-width: 900px) {
     .grid { grid-template-columns: 1fr; }
   }
@@ -143,9 +143,6 @@
   }
   .col-center h2::before { background: var(--accent); }
   h2.accent::before { background: var(--accent); }
-  #reminderZone.urgent h2::before { background: var(--urgent); }
-  #reminderZone.warn h2::before { background: var(--warn); }
-  #waitingZone h2::before { background: var(--warn); }
   .section-count {
     font-size: var(--text-xs);
     font-weight: 600;
@@ -179,8 +176,6 @@
   }
   .overflow-date-input:focus { outline: none; border-color: var(--accent); }
   .card.done { background: var(--done-bg); opacity: 0.72; box-shadow: none; }
-  #waitingList .card { border-radius: 10px; box-shadow: none; padding: 10px 12px; margin-bottom: 6px; }
-  #waitingList .card .badges { margin-top: 4px; }
   .card.list-row { padding: 16px 18px; }
   .checkbox {
     width: 20px;
@@ -289,20 +284,6 @@
   .badge.due-today::before { content: '◷ '; }
   .badge.stale { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, transparent); }
   .badge.priority-critical::before { content: '! '; }
-  .badge.who-badge { cursor: pointer; }
-  .badge.who-badge:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
-  .who-edit-input {
-    font-family: inherit;
-    font-size: var(--text-sm);
-    font-weight: 600;
-    color: var(--text);
-    border: none;
-    border-bottom: 1px solid var(--accent);
-    background: none;
-    padding: 0;
-    min-width: 80px;
-  }
-  .who-edit-input:focus { outline: none; }
   button.badge { font-family: inherit; cursor: pointer; }
   button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)); }
   select.badge {
@@ -313,45 +294,6 @@
   }
   select.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)); }
   select.badge:focus { outline: none; border-color: var(--accent); }
-
-  #calendarZone {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow);
-    padding: 16px 18px;
-    margin-bottom: 8px;
-  }
-  #calendarZone h2 { margin: 0 0 8px; }
-  .calendar-event {
-    padding: 10px 0;
-    border-bottom: 1px solid var(--border);
-    font-size: var(--text-base);
-  }
-  .cal-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-  .cal-top-right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
-  .cal-project {
-    margin-top: 4px;
-    font-size: var(--text-xs);
-    font-weight: 600;
-    color: var(--accent);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .calendar-event:last-child { border-bottom: none; }
-  .calendar-time {
-    font-size: var(--text-base);
-    font-weight: 700;
-    color: var(--accent);
-    white-space: nowrap;
-    font-variant-numeric: tabular-nums;
-  }
-  .calendar-title { color: var(--text); font-size: var(--text-md); font-weight: 600; line-height: 1.4; margin-top: 2px; }
-  .badge.cal-drafts { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); font-weight: 700; white-space: nowrap; }
-  .badge.cal-related { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, transparent); white-space: nowrap; }
-  .calendar-title-open { cursor: pointer; border-radius: 4px; }
-  .calendar-title-open:hover { color: var(--accent); }
 
   .meeting-panel-title { font-size: var(--text-md); font-weight: 700; line-height: 1.4; margin-top: 10px; }
   .meeting-panel-time { font-size: var(--text-xs); font-weight: 600; color: var(--accent); margin-top: 2px; }
@@ -444,32 +386,6 @@
     max-width: 220px;
   }
   .group-input:focus { outline: none; border-color: var(--accent); }
-
-  .card.reminder { border-left: 4px solid var(--accent); }
-  .card.reminder.overdue { border-left-color: var(--urgent); }
-  .card.reminder.due-today, .card.reminder.due-tomorrow { border-left-color: var(--warn); }
-  .reminder-link { width: 100%; display: flex; justify-content: space-between; gap: 8px; align-items: center; text-align: left; font: inherit; font-size: var(--text-sm); color: var(--text); background: var(--card); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--radius-sm); padding: 8px 10px; margin-bottom: 6px; cursor: pointer; }
-  .reminder-link.overdue { border-left-color: var(--urgent); }
-  .reminder-link.due-today, .reminder-link.due-tomorrow { border-left-color: var(--warn); }
-  .reminder-link:hover { background: color-mix(in srgb, var(--accent) 5%, var(--card)); }
-  .reminder-link-meta { color: var(--muted); font-size: var(--text-xs); white-space: nowrap; }
-  .card.waiting { border-left: 4px solid var(--warn); }
-
-  #reminderZone, #waitingZone {
-    display: block;
-    opacity: 1;
-    transition: opacity 150ms var(--ease-out), display 150ms allow-discrete;
-  }
-  #reminderZone[hidden], #waitingZone[hidden] {
-    display: none;
-    opacity: 0;
-  }
-  @starting-style {
-    #reminderZone:not([hidden]), #waitingZone:not([hidden]) { opacity: 0; }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    #reminderZone, #waitingZone { transition: none; }
-  }
 
   .done-details summary {
     cursor: pointer;
@@ -577,11 +493,6 @@
   .task-row .body.task-openable:focus { outline: 2px solid color-mix(in srgb, var(--accent) 50%, transparent); outline-offset: 2px; }
   .today-group { margin-bottom: 12px; }
   .today-group-header { position: sticky; top: 0; z-index: 1; background: var(--bg); padding: 6px 2px; }
-  @media (max-width: 900px) {
-    #gridToday .col-center { order: -1; }
-    #gridToday .col-left { order: 1; }
-    #gridToday .col-right { order: 2; }
-  }
 
   .wr-view-tabs { display: flex; gap: 4px; margin: 8px 0 10px; }
   .wr-view-btn {
@@ -624,7 +535,7 @@
   [hidden] { display: none !important; }
   .grid > *, .wr-layout > * { min-width: 0; }
   .card { padding: 12px 14px; margin-bottom: 8px; gap: 10px; }
-  .sender, .calendar-title, .badge { overflow-wrap: anywhere; }
+  .sender, .badge { overflow-wrap: anywhere; }
   .badge { max-width: 100%; white-space: normal; }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
   .desc-editable:focus-visible { background: var(--bg); }
@@ -643,18 +554,12 @@
   .card[aria-busy="true"] { opacity: .65; pointer-events: none; }
   @media (max-width: 900px) {
     .grid, .grid-2col, .wr-layout { grid-template-columns: minmax(0, 1fr); }
-    #gridToday:not(.planning-mode), #gridToday.planning-mode { grid-template-columns: minmax(0, 1fr); }
-    #gridToday .col-center { order: -1; }
-    #gridToday.planning-mode #laterTaskZone { display: block; }
-    #gridToday:not(.planning-mode) #laterTaskZone { display: none; }
     input, select { max-width: 100%; }
-    .quick-add input, .wr-add-input, .desc-edit-input, .who-edit-input, .group-input { font-size: 16px; }
-    .calendar-event { flex-wrap: wrap; }
+    .quick-add input, .wr-add-input, .desc-edit-input, .group-input { font-size: 16px; }
   }
 
   /* Product visual direction: calm, flat, task-first workbench. */
-  #calendarZone, .wr-nav-btn.active { box-shadow: none; }
-  #calendarZone { border-radius: 12px; }
+  .wr-nav-btn.active { box-shadow: none; }
   .card:not(.task-row) { border-radius: 12px; box-shadow: none; }
   .planning-toggle, .wr-view-btn, .convert-btn { transition: background-color 150ms ease, color 150ms ease, transform 120ms ease; }
   button:active { transform: scale(.98); }
@@ -700,28 +605,28 @@
   <div id="storageBanner" class="d-banner" role="status" hidden></div>
   <div class="page">
     <div class="grid" id="gridToday">
-      <aside class="col col-left">
+      <aside class="col col-left d-rail" aria-label="오늘 옆줄">
         <div class="d-quiet" id="railSummary">
           <span>결정 검토 <span class="num" id="decisionCount">0</span> · 확인 대기 <span class="num" id="waitingCount">0</span> · 오늘 신규 <span class="num" id="createdTodayCount">0</span></span>
         </div>
 
-        <div id="calendarZone">
-          <h2>오늘 미팅<span class="section-count" id="calendarSectionCount">0</span></h2>
+        <section class="d-rsec" id="calendarZone">
+          <div class="d-rhd"><span>오늘 미팅</span><span class="n num" id="calendarSectionCount">0</span></div>
           <div id="calendarList"></div>
-        </div>
+        </section>
 
-        <div id="reminderZone" hidden>
-          <h2 id="reminderHeading">리마인드<span class="section-count" id="reminderSectionCount">0</span></h2>
+        <section class="d-rsec" id="reminderZone" hidden>
+          <div class="d-rhd" id="reminderHeading"><span>리마인드</span><span class="n num" id="reminderSectionCount">0</span></div>
           <div id="reminderList"></div>
-        </div>
+        </section>
 
-        <div id="waitingZone">
-          <h2 id="waitingHeading">확인 대기중<span class="section-count" id="waitingSectionCount">0</span></h2>
-          <div class="quick-add">
-            <input type="text" id="waitingInput" placeholder="확인 대기 추가…" aria-label="확인 대기 추가" />
-          </div>
+        <section class="d-rsec d-fu" id="railFollowUps" hidden></section>
+
+        <section class="d-rsec" id="waitingZone">
+          <div class="d-rhd" id="waitingHeading"><span>확인 대기</span><span class="n num" id="waitingSectionCount">0</span></div>
+          <input type="text" class="d-qa" id="waitingInput" placeholder="확인 대기 추가 — Enter" aria-label="확인 대기 추가" />
           <div id="waitingList"></div>
-        </div>
+        </section>
       </aside>
 
       <main class="col col-center">
@@ -741,7 +646,7 @@
             </div>
             <span id="todayHeadExtra"></span>
             <div class="task-batch-tools" id="taskBatchTools"></div>
-            <button type="button" class="d-btn" id="laterTaskToggle" aria-expanded="false" aria-controls="laterTaskZone">나중에 할 일 <span class="num" id="laterTaskSectionCount">0</span></button>
+            <button type="button" class="d-btn" id="laterTaskToggle" aria-expanded="false" aria-controls="laterTaskDrawer">나중에 할 일 <span class="num" id="laterTaskSectionCount">0</span></button>
           </div>
           <div id="suggestZone" hidden></div>
           <div class="task-content-layout">
@@ -753,13 +658,6 @@
               <div id="todayTaskList"></div>
             </div>
             <aside id="taskDetailPanel" class="d-side" hidden aria-label="선택한 항목 상세"></aside>
-          </div>
-          <div id="laterTaskZone" hidden>
-            <div class="d-sechd">나중에 할 일</div>
-            <div class="quick-add">
-              <input type="text" id="laterTaskInput" placeholder="나중에 할 일 추가…" aria-label="나중에 할 일 추가" />
-            </div>
-            <div id="laterTaskList"></div>
           </div>
         </div>
       </main>
@@ -802,6 +700,19 @@
       <main class="wr-detail" id="weeklyReportDetail"></main>
     </div>
   </div>
+
+  <!-- 나중에 할 일 서랍 — 헤더 아래 오른쪽에 붙어서 열리고, 넓은 화면에서는 본문을 덮지 않고 밀어낸다 -->
+  <aside class="d-drawer" id="laterTaskDrawer" aria-label="나중에 할 일" aria-hidden="true">
+    <div class="d-dhd">
+      <h2>나중에 할 일</h2>
+      <span class="n num" id="laterDrawerCount">0</span>
+      <button type="button" class="d-iconbtn" id="laterTaskClose" aria-label="나중에 할 일 닫기"><svg class="d-i" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+    </div>
+    <div class="d-dbody">
+      <input type="text" class="d-qa" id="laterTaskInput" placeholder="나중에 할 일 추가 — Enter" aria-label="나중에 할 일 추가" />
+      <div id="laterTaskList"></div>
+    </div>
+  </aside>
 
   <div id="liveRegion" class="d-toast" role="status" aria-live="polite" hidden></div>
 

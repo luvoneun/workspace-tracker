@@ -136,6 +136,28 @@ test('the status column shows overdue, due today, carried-over and in-progress, 
   assert.doesNotMatch(escaped, /<개선>/);
 });
 
+test('waiting items are ordered by reply deadline first, then by when they were added', () => {
+  const app = pureClient();
+  const order = JSON.parse(app.run(`JSON.stringify(waitingOrder([
+    { id: 'c', created: '2026-09-10' },
+    { id: 'b', due: '2026-09-25' },
+    { id: 'a', due: '2026-09-22' },
+    { id: 'd', created: '2026-09-01' }
+  ]).map(i => i.id))`));
+  assert.deepEqual(order, ['a', 'b', 'd', 'c'], '기한이 있는 것이 먼저, 그 안에서는 빠른 기한 순');
+});
+
+test('waiting age turns to the warning colour from the third day of waiting', () => {
+  const app = pureClient();
+  const age = (created) => JSON.parse(app.run(`JSON.stringify(waitingAgeText('${created}', '2026-09-21'))`));
+  assert.deepEqual(age('2026-09-21'), { text: '오늘', tone: '' });
+  assert.deepEqual(age('2026-09-20'), { text: '1일째', tone: '' });
+  assert.deepEqual(age('2026-09-19'), { text: '2일째', tone: '' }, '이틀째까지는 조용하게');
+  assert.deepEqual(age('2026-09-18'), { text: '3일째', tone: 'warn' }, '사흘째부터 눈에 띄게');
+  assert.deepEqual(age('2026-09-11'), { text: '10일째', tone: 'warn' });
+  assert.equal(app.run("String(waitingAgeText(null, '2026-09-21'))"), 'null', '등록일이 없으면 아무 말도 하지 않는다');
+});
+
 test('the project column stays empty when the group heading already says it, and jira shows its key', () => {
   const app = pureClient();
   assert.equal(app.run("uiProjectLabel({ jira: 'AB-1' }, true)"), '');
