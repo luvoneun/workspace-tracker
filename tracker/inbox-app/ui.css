@@ -1468,6 +1468,61 @@ body.batch-open .d-toast { bottom: 76px; }
 }
 .d-jira .bar { display: inline-block; width: 84px; height: 6px; border-radius: 999px; background: var(--prog-track); overflow: hidden; }
 .d-jira .bar i { display: block; height: 100%; background: var(--success); border-radius: 999px; }
+/* 접힌 줄의 담당별 요약(미완료만) — 이름이 곧 거르개다(별도 토글·드롭다운을 두지 않는다).
+   색은 붙지 않고 거르는 중인 이름만 굵어진다. 줄 끝 꺾쇠가 목록을 펼친다 */
+.d-jira .foot .who { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 0 5px; min-width: 0; }
+.d-jira .foot .who .sep, .d-jira .foot .who .qt { color: var(--dim); }
+.d-jira .foot .sp { margin-left: auto; }
+.d-jwho {
+  display: inline-flex; align-items: center; min-height: 28px; padding: 0 5px; margin: 0 -5px;
+  border: 0; background: none; border-radius: var(--r-xs); cursor: pointer;
+  font-family: inherit; font-size: 12.5px; font-weight: 500; color: var(--dim); white-space: nowrap;
+  transition: background 170ms var(--ease), color 170ms var(--ease);
+}
+.d-jwho:hover { background: var(--hover); color: var(--text); }
+.d-jwho[aria-pressed="true"] { font-weight: 700; color: var(--text); }
+/* 거르기를 푸는 `전체`는 이름이 아니라 동작이다 — 이름 줄에서 파란 글자로 갈린다 */
+.d-jwho.clear { margin-left: 3px; color: var(--accent-text); font-weight: 600; }
+.d-jira .foot .d-jexp { flex: none; width: 28px; height: 28px; color: var(--dim); }
+.d-jira .foot .d-jexp .d-i { transform: rotate(90deg); transition: transform 170ms var(--ease); }
+.d-jira .foot .d-jexp[aria-expanded="true"] .d-i { transform: rotate(-90deg); }
+/* 펼친 하위 티켓 목록 — 카드 안에 그대로 이어 붙는다(새 면을 만들지 않는다).
+   한 줄 = 지라 상태(고정 폭) · 요약(지라 새 탭) · 담당자(오른쪽 고정 칸) · 조용한 배포 버전.
+   읽기 전용이라 누를 수 있는 것은 요약과 `완료 N개 더 보기`뿐이다 */
+.d-jkids { display: grid; gap: 1px; margin-top: 2px; }
+/* 칸 폭을 못 박아 상태·담당자·배포 버전이 줄마다 같은 자리에 선다(읽을 때 눈이 흔들리지 않게).
+   배포 버전 칸은 그 칸을 쓰는 줄이 하나라도 있을 때만 잡는다 */
+.d-jkid {
+  display: grid; grid-template-columns: 74px minmax(0, 1fr) 96px;
+  align-items: center; gap: 0 10px; min-height: 28px; font-size: 13px;
+}
+.d-jkids.has-ver .d-jkid { grid-template-columns: 74px minmax(0, 1fr) 96px 72px; }
+.d-jkid .st { font-size: 12.5px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.d-jkid .st.k-dim { color: var(--dim); }
+.d-jkid .st.k-pos { color: var(--success); }
+.d-jkid .sm {
+  min-width: 0; display: block; line-height: 28px; color: var(--text); text-decoration: none;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.d-jkid .sm:hover { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; }
+.d-jkid .wh {
+  text-align: right; font-size: 12.5px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.d-jkid .wh.is-none { color: var(--dim); }
+.d-jkid .ver {
+  text-align: right; font-size: 12px; color: var(--dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* 완료한 줄은 맨 아래에서 흐리게 선다(글자만 조용해진다 — 취소선·다른 면을 쓰지 않는다) */
+.d-jkid.is-done .sm, .d-jkid.is-done .wh, .d-jkid.is-done .ver { color: var(--dim); }
+.d-jkids .more { justify-self: start; min-height: 28px; padding: 0 4px; margin-left: -4px; font-size: 12.5px; }
+.d-jkids .none { display: flex; align-items: center; min-height: 28px; font-size: 12.5px; color: var(--dim); }
+.d-jkids .all {
+  justify-self: start; display: inline-flex; align-items: center; min-height: 28px;
+  font-size: 12.5px; font-weight: 600; color: var(--accent-text); text-decoration: none;
+}
+.d-jkids .all:hover { text-decoration: underline; text-underline-offset: 2px; }
 /* 값 자리는 상세 카드와 같은 값 고르개다(.d-dpick 그대로 — 새 모양을 만들지 않는다).
    누르는 자리는 28px이고, 값은 한 줄로 선다(칸이 좁아지면 칸끼리 줄을 바꾼다) */
 .d-jira .cell { flex: none; max-width: 100%; }
@@ -1567,6 +1622,11 @@ body.batch-open .d-toast { bottom: 76px; }
   .d-jira .cells { gap: 8px 18px; }
   /* 좁은 화면에서는 값이 길면 칸 안에서 줄을 바꾼다(카드 밖으로 넘치지 않게) */
   .d-jira .cell .d-dpick .v { flex: 0 1 auto; white-space: normal; }
+  /* 하위 티켓 줄은 두 줄이 된다 — 담당자가 요약 아래로 내려오고 배포 버전은 숨는다 */
+  .d-jkid, .d-jkids.has-ver .d-jkid { grid-template-columns: 68px minmax(0, 1fr); gap: 0 8px; padding: 2px 0; }
+  .d-jkid .wh { grid-column: 2; text-align: left; }
+  .d-jkid .sm { line-height: 22px; }
+  .d-jkid .ver { display: none; }
 }
 
 .d-psec { margin-top: 24px; }

@@ -19,6 +19,9 @@ const JIRA_CACHE_MS = 60 * 1000;
 const JIRA_CHILD_LIMIT = 100;
 // 띠 카드가 쓰는 값만 받아 온다 — 본문·댓글까지 끌고 오지 않는다.
 const ISSUE_FIELDS = 'summary,status,issuetype,assignee,duedate,fixVersions,subtasks';
+// 하위 티켓 줄이 쓰는 값만 받아 온다. 담당자는 **표시 이름만** 꺼내 쓴다 —
+// 지라가 주는 사용자 덩어리에서 이메일·계정 id는 어디에도 옮기지 않는다(테스트로 고정).
+const CHILD_FIELDS = 'summary,status,assignee,fixVersions,issuetype';
 const CHANGE_KINDS = ['status', 'version', 'due', 'versionEdit'];
 
 // 지라가 주는 범주 열쇠는 셋뿐이다. 모르는 값은 `진행`으로 본다(상태 이름은 그대로 보여 준다).
@@ -135,12 +138,40 @@ function shapeIssue(siteUrl, key, body, children) {
   };
 }
 
-// 하위 티켓은 개수만 센다(목록은 3단계 몫이다). 하나도 없으면 null — 화면이 진행률 줄을 아예 그리지 않는다.
+// 하위 티켓의 개수. 하나도 없으면 null — 화면이 진행률 줄을 아예 그리지 않는다.
 function countChildren(issues) {
   const list = Array.isArray(issues) ? issues : [];
   if (!list.length) return null;
   const done = list.filter(item => CATEGORY[item && item.fields && item.fields.status && item.fields.status.statusCategory && item.fields.status.statusCategory.key] === 'done').length;
   return { total: list.length, done };
+}
+
+// 하위 티켓 한 줄. 담당자는 `displayName` 하나만 옮긴다 — 지라가 같은 덩어리에 담아 주는
+// `emailAddress`·`accountId`는 읽지도 싣지도 않는다. 배포 버전도 이름만(줄 끝의 조용한 글자다).
+// 키 형식이 아닌 것은 버린다 — 그 키로 주소를 조립하기 때문이다.
+function shapeChild(siteUrl, entry) {
+  const key = text(entry && entry.key);
+  if (!JIRA_KEY_RE.test(key)) return null;
+  const fields = (entry && entry.fields) || {};
+  const status = fields.status || {};
+  const versions = Array.isArray(fields.fixVersions) ? fields.fixVersions : [];
+  return {
+    key,
+    url: issueUrl(siteUrl, key),
+    summary: text(fields.summary),
+    type: text(fields.issuetype && fields.issuetype.name),
+    status: { name: text(status.name), category: CATEGORY[status.statusCategory && status.statusCategory.key] || 'doing' },
+    assignee: text(fields.assignee && fields.assignee.displayName) || null,
+    version: text(versions[0] && versions[0].name) || null,
+  };
+}
+
+// `total`/`done`은 1단계와 똑같이 둔다(진행률 줄과 기존 테스트가 그대로 돈다).
+// `items`만 새로 얹는다 — 정렬·접기·거르기는 화면 몫이다.
+function shapeChildren(siteUrl, issues) {
+  const counted = countChildren(issues);
+  if (!counted) return null;
+  return { ...counted, items: (Array.isArray(issues) ? issues : []).map(entry => shapeChild(siteUrl, entry)).filter(Boolean) };
 }
 
 function createJiraClient({ settings, request = (...args) => fetch(...args), readToken } = {}) {
@@ -185,10 +216,11 @@ function createJiraClient({ settings, request = (...args) => fetch(...args), rea
     }
   }
 
-  // 에픽의 하위는 `subtasks`에 안 담길 수 있어서 JQL로 따로 센다.
+  // 에픽의 하위는 `subtasks`에 안 담길 수 있어서 JQL로 따로 읽는다.
   // 새 주소(`/search/jql`)가 없는 지라에서는 옛 주소(`/search`)로 한 번만 물러선다.
+  // `subtasks`로 물러서면 담당자·배포 버전은 오지 않는다 — 그 줄은 `담당 없음`으로 선다.
   async function children(key, secret, subtasks) {
-    const query = `jql=${encodeURIComponent(`parent=${key}`)}&fields=status&maxResults=${JIRA_CHILD_LIMIT}`;
+    const query = `jql=${encodeURIComponent(`parent=${key}`)}&fields=${CHILD_FIELDS}&maxResults=${JIRA_CHILD_LIMIT}`;
     try {
       let body;
       try {
@@ -197,12 +229,12 @@ function createJiraClient({ settings, request = (...args) => fetch(...args), rea
         if (error.status !== 404) throw error;
         body = await call(`/rest/api/3/search?${query}`, secret);
       }
-      const counted = countChildren(body && body.issues);
-      if (counted) return counted;
+      const shaped = shapeChildren(settings.siteUrl, body && body.issues);
+      if (shaped) return shaped;
     } catch {
-      // 하위 집계는 곁들이는 값이다 — 실패해도 카드 전체를 오류로 만들지 않는다.
+      // 하위 조회는 곁들이는 값이다 — 실패해도 카드 전체를 오류로 만들지 않는다.
     }
-    return countChildren(subtasks);
+    return shapeChildren(settings.siteUrl, subtasks);
   }
 
   const wantKey = (key) => { if (typeof key !== 'string' || !JIRA_KEY_RE.test(key)) throw jiraError('key'); return key; };
@@ -391,7 +423,7 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
 }
 
 module.exports = {
-  createJiraClient, createJiraApi, jiraSettings, issueUrl, projectOf, countChildren,
+  createJiraClient, createJiraApi, jiraSettings, issueUrl, projectOf, countChildren, shapeChildren,
   shapeTransitions, shapeVersions, writeKind,
   JIRA_KEY_RE, JIRA_TIMEOUT_MS, JIRA_CACHE_MS, JIRA_MESSAGE: MESSAGE,
 };

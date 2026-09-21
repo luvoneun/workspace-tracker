@@ -913,12 +913,46 @@ const jiraIssueBody = (extra = {}) => ({
     ...extra,
   },
 });
-// 하위 티켓 집계용 — 완료 2 / 전체 3
+// 하위 티켓 — 완료 2 / 전체 3. 3단계부터는 줄에 쓸 값(요약·담당·배포 버전)까지 함께 온다.
+// 지라는 담당자 덩어리에 이메일·계정 id도 실어 주지만 앱은 **표시 이름만** 옮긴다(아래 테스트로 고정).
 const jiraChildBody = { issues: [
-  { fields: { status: { statusCategory: { key: 'done' } } } },
-  { fields: { status: { statusCategory: { key: 'done' } } } },
-  { fields: { status: { statusCategory: { key: 'indeterminate' } } } },
+  {
+    key: 'IO-48395',
+    fields: {
+      summary: '임베드 카드 붙이기',
+      status: { name: '완료', statusCategory: { key: 'done' } },
+      issuetype: { name: '하위 작업' },
+      assignee: { displayName: '루본', emailAddress: JIRA_EMAIL, accountId: '5b10a2844c20165700ede21g' },
+      fixVersions: [{ id: '10101', name: 'v2.70.0', releaseDate: '2026-09-30', released: false }],
+    },
+  },
+  {
+    key: 'IO-48396',
+    fields: {
+      summary: '임베드 미리보기 붙이기',
+      status: { name: '완료', statusCategory: { key: 'done' } },
+      issuetype: { name: '하위 작업' },
+      assignee: null,
+      fixVersions: [],
+    },
+  },
+  {
+    key: 'IO-48397',
+    fields: {
+      summary: '게임 목록 불러오기',
+      status: { name: '진행 중', statusCategory: { key: 'indeterminate' } },
+      issuetype: { name: '하위 작업' },
+      assignee: { displayName: '엘리', emailAddress: 'elly@example.test', accountId: '712020:aaaa' },
+      fixVersions: [],
+    },
+  },
 ] };
+// `children.items` 한 줄의 기대 모양 — 담당은 표시 이름, 배포 버전은 이름뿐이다.
+const jiraChildItems = [
+  { key: 'IO-48395', url: `${JIRA_SITE}/browse/IO-48395`, summary: '임베드 카드 붙이기', type: '하위 작업', status: { name: '완료', category: 'done' }, assignee: '루본', version: 'v2.70.0' },
+  { key: 'IO-48396', url: `${JIRA_SITE}/browse/IO-48396`, summary: '임베드 미리보기 붙이기', type: '하위 작업', status: { name: '완료', category: 'done' }, assignee: null, version: null },
+  { key: 'IO-48397', url: `${JIRA_SITE}/browse/IO-48397`, summary: '게임 목록 불러오기', type: '하위 작업', status: { name: '진행 중', category: 'doing' }, assignee: '엘리', version: null },
+];
 function jiraFake(routes) {
   const calls = [];
   const request = async (url, options) => {
@@ -949,27 +983,31 @@ test('지라 읽기는 요약·상태 범주·배포 버전·기한·담당과 �
     assignee: '루본',
     due: '2026-10-02',
     versions: [{ id: '10101', name: 'v2.70.0', releaseDate: '2026-09-30', released: false }],
-    children: { total: 3, done: 2 },
+    children: { total: 3, done: 2, items: jiraChildItems },
   });
   // 링크는 앱이 조립한다(siteUrl + /browse/KEY) — 지라가 준 self 주소를 쓰지 않는다.
   assert.equal(issue.url, `${JIRA_SITE}/browse/IO-48394`);
-  // 요청은 두 번뿐이다: 이슈 하나 + 하위 집계 하나(목록 전체를 미리 부르지 않는다).
+  // 요청은 두 번뿐이다: 이슈 하나 + 하위 조회 하나(목록 전체를 미리 부르지 않는다).
   assert.equal(fake.calls.length, 2);
   assert.match(fake.calls[0].url, /fields=summary,status,issuetype,assignee,duedate,fixVersions,subtasks$/);
-  assert.match(fake.calls[1].url, /\/rest\/api\/3\/search\/jql\?jql=parent%3DIO-48394&fields=status&maxResults=100$/);
+  // 하위 조회가 받아 오는 칸은 이 다섯뿐이다 — 이메일·계정 id를 달라고 하지 않는다.
+  assert.match(fake.calls[1].url, /\/rest\/api\/3\/search\/jql\?jql=parent%3DIO-48394&fields=summary,status,assignee,fixVersions,issuetype&maxResults=100$/);
   // 인증은 Basic 한 벌이고, 그 값은 요청에만 실린다.
   assert.equal(fake.calls[0].headers.Authorization, `Basic ${Buffer.from(`${JIRA_EMAIL}:${JIRA_TOKEN}`).toString('base64')}`);
 });
 
 test('하위가 search에 없으면 subtasks로 세고, 새 search 주소가 없으면 옛 주소로 한 번 물러선다', async () => {
-  const subtasks = [{ fields: { status: { statusCategory: { key: 'done' } } } }, { fields: { status: { statusCategory: { key: 'new' } } } }];
+  const subtasks = [
+    { key: 'AB-2', fields: { summary: '먼저 한 것', status: { name: '완료', statusCategory: { key: 'done' } } } },
+    { key: 'AB-3', fields: { summary: '아직 안 한 것', status: { name: '할 일', statusCategory: { key: 'new' } } } },
+  ];
   const fallback = jiraFake({
     '/rest/api/3/issue/AB-1': () => json(jiraIssueBody({ subtasks })),
     '/rest/api/3/search/jql': () => json({ errorMessages: ['not found'] }, 404),
     '/rest/api/3/search?': () => json(jiraChildBody),
   });
   const fellBack = await jiraModule.createJiraClient({ settings: jiraSettings(), request: fallback.request, readToken: () => JIRA_TOKEN }).getIssueOverview('AB-1');
-  assert.deepEqual(fellBack.children, { total: 3, done: 2 });
+  assert.deepEqual(fellBack.children, { total: 3, done: 2, items: jiraChildItems });
   assert.equal(fallback.calls.length, 3);
 
   const empty = jiraFake({
@@ -977,10 +1015,69 @@ test('하위가 search에 없으면 subtasks로 세고, 새 search 주소가 없
     '/rest/api/3/search': () => json({ issues: [] }),
   });
   const counted = await jiraModule.createJiraClient({ settings: jiraSettings(), request: empty.request, readToken: () => JIRA_TOKEN }).getIssueOverview('AB-1');
-  assert.deepEqual(counted.children, { total: 2, done: 1 });
+  assert.equal(counted.children.total, 2);
+  assert.equal(counted.children.done, 1);
+  // `subtasks`에는 담당자·배포 버전이 없다 — 그 줄은 `담당 없음`으로 선다(줄 자체는 그대로 보여 준다).
+  assert.deepEqual(counted.children.items, [
+    { key: 'AB-2', url: `${JIRA_SITE}/browse/AB-2`, summary: '먼저 한 것', type: '', status: { name: '완료', category: 'done' }, assignee: null, version: null },
+    { key: 'AB-3', url: `${JIRA_SITE}/browse/AB-3`, summary: '아직 안 한 것', type: '', status: { name: '할 일', category: 'todo' }, assignee: null, version: null },
+  ]);
 
   const none = jiraFake({ '/rest/api/3/issue/AB-1': () => json(jiraIssueBody()), '/rest/api/3/search': () => json({ issues: [] }) });
   assert.equal((await jiraModule.createJiraClient({ settings: jiraSettings(), request: none.request, readToken: () => JIRA_TOKEN }).getIssueOverview('AB-1')).children, null);
+});
+
+// ---------- 지라 하위 티켓 목록 (BJR 3단계 — 읽기 전용) ----------
+test('하위 티켓 목록은 담당자를 표시 이름으로만 싣고 이메일·계정 id는 어디에도 남기지 않는다', async () => {
+  const fake = jiraFake({
+    '/rest/api/3/issue/IO-48394': () => json(jiraIssueBody()),
+    '/rest/api/3/search/jql': () => json(jiraChildBody),
+  });
+  const api = jiraModule.createJiraApi({ config: jiraConfig, request: fake.request, readFile: () => JIRA_TOKEN });
+  const answer = await api.read('IO-48394');
+  assert.deepEqual(answer.issue.children.items, jiraChildItems);
+  // 1단계의 `total`/`done`은 그대로다 — 진행률 줄과 기존 화면이 그대로 돈다.
+  assert.equal(answer.issue.children.total, 3);
+  assert.equal(answer.issue.children.done, 2);
+  const payload = JSON.stringify(answer);
+  assert.doesNotMatch(payload, new RegExp(JIRA_EMAIL), '지라가 준 담당자 이메일이 응답에 실리지 않는다');
+  assert.doesNotMatch(payload, /elly@example\.test/);
+  assert.doesNotMatch(payload, /accountId|emailAddress|5b10a2844c20165700ede21g|712020:aaaa/);
+  assert.doesNotMatch(payload, new RegExp(JIRA_TOKEN));
+  // 나가는 요청에도 그 칸을 달라고 하지 않는다.
+  assert.doesNotMatch(fake.calls.map(call => call.url).join(' '), /emailAddress|accountId/);
+});
+
+test('하위 티켓 목록은 키 형식이 아닌 것을 버리고, 모르는 값은 빈 자리로 흘린다', () => {
+  const shaped = jiraModule.shapeChildren(JIRA_SITE, [
+    { key: 'AB-2', fields: { summary: '정상', status: { name: '진행 중', statusCategory: { key: 'indeterminate' } } } },
+    // 키가 없거나 형식이 아니면 버린다 — 그 키로 주소를 조립하기 때문이다.
+    { fields: { status: { statusCategory: { key: 'done' } } } },
+    { key: 'javascript:alert(1)', fields: { summary: '수상한 것', status: { statusCategory: { key: 'new' } } } },
+    // 모르는 모양이 와도 오류가 아니라 빈 값으로 흐른다(범주를 모르면 `진행`으로 본다).
+    { key: 'AB-9', fields: {} },
+  ]);
+  // total·done은 지라가 준 목록 전체를 그대로 센다(줄을 버린 것과 별개다).
+  assert.equal(shaped.total, 4);
+  assert.equal(shaped.done, 1);
+  assert.deepEqual(shaped.items.map(item => item.key), ['AB-2', 'AB-9']);
+  assert.deepEqual(shaped.items[1], {
+    key: 'AB-9', url: `${JIRA_SITE}/browse/AB-9`, summary: '', type: '',
+    status: { name: '', category: 'doing' }, assignee: null, version: null,
+  });
+  assert.equal(jiraModule.shapeChildren(JIRA_SITE, []), null, '하나도 없으면 줄 자체가 없다');
+  assert.equal(jiraModule.shapeChildren(JIRA_SITE, null), null);
+});
+
+test('하위가 100개를 넘어도 지라에서 읽어 오는 것은 100개까지다', async () => {
+  const many = { issues: Array.from({ length: 100 }, (unused, at) => ({
+    key: `AB-${at + 2}`,
+    fields: { summary: `하위 ${at + 1}`, status: { name: '진행 중', statusCategory: { key: 'indeterminate' } }, assignee: { displayName: '루본' } },
+  })) };
+  const fake = jiraFake({ '/rest/api/3/issue/AB-1': () => json(jiraIssueBody()), '/rest/api/3/search/jql': () => json(many) });
+  const issue = await jiraModule.createJiraClient({ settings: jiraSettings(), request: fake.request, readToken: () => JIRA_TOKEN }).getIssueOverview('AB-1');
+  assert.equal(issue.children.items.length, 100);
+  assert.match(fake.calls[1].url, /maxResults=100$/, '더 달라고 조르지 않는다 — 나머지는 지라에서 본다');
 });
 
 test('지라 실패는 해요체 문구와 갈래로만 알리고 토큰·이메일을 싣지 않는다', async () => {

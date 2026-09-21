@@ -2629,6 +2629,12 @@ function nodeFind(node, className) {
   }
   return null;
 }
+function nodeFindAll(node, className, found = []) {
+  if (!node || typeof node !== 'object') return found;
+  if (String(node.className || '').split(' ').includes(className)) found.push(node);
+  (node.children || []).forEach(kid => nodeFindAll(kid, className, found));
+  return found;
+}
 const jiraIssue = (extra = {}) => ({
   key: 'IO-48394',
   url: 'https://example-jira.test/browse/IO-48394',
@@ -2764,6 +2770,234 @@ test('다른 프로젝트로 빨리 옮기면 늦게 온 지라 응답은 버린
   gates.second();
   await again;
   assert.match(calls[2], /key=AB-2&fresh=1$/);
+});
+
+// ---------- 지라 하위 티켓 목록 (BJR 3단계 — 읽기 전용) ----------
+// 지키는 것: ① 하위 티켓은 띠 카드 **안**에만 산다. ② 앱에서 바꾸는 길은 없다(누르면 지라가 열린다).
+// ③ 펼침은 프로젝트별로 기억하고, 2단계의 쓰기 뒤 `fresh` 재조회로 다시 그려져도 그대로다.
+const jiraStatusName = { doing: '진행 중', todo: '할 일', done: '완료' };
+const jiraKid = (key, summary, category, assignee, version = null) => ({
+  key,
+  url: `https://example-jira.test/browse/${key}`,
+  summary,
+  type: '하위 작업',
+  status: { name: jiraStatusName[category], category },
+  assignee,
+  version,
+});
+// 미완료는 루본 2 · 엘리 1 · 담당 없음 1, 완료는 1개다.
+const jiraKids = () => [
+  jiraKid('IO-48391', '임베드 카드 붙이기', 'done', '루본'),
+  jiraKid('IO-48392', '게임 목록 불러오기', 'doing', '루본', 'v2.70.0'),
+  jiraKid('IO-48393', '미리보기 문구 정리하기', 'todo', '엘리'),
+  jiraKid('IO-48395', '검수 항목 정리하기', 'doing', null),
+  jiraKid('IO-48396', '오류 문구 다듬기', 'todo', '루본'),
+];
+const jiraWithKids = (items = jiraKids(), extra = {}) => jiraIssue({
+  children: { total: items.length, done: items.filter(item => item.status.category === 'done').length, items },
+  ...extra,
+});
+// 카드를 실제 화면 자리(`#jiraStrip`)에 세운다 — 꺾쇠·이름을 누르면 그 자리가 다시 그려진다.
+function jiraKidFixture(issue, projectKey = 'jira:IO-48394', storage = null) {
+  const app = pureClient();
+  if (storage) app.context.localStorage = storage;
+  app.run(`jiraCard = { key: 'IO-48394', state: 'ok', issue: ${JSON.stringify(issue)}, error: '', at: Date.now(), seq: 1 };`);
+  const host = app.nodes.get('jiraStrip') || app.run("document.getElementById('jiraStrip')");
+  host.dataset.jiraKey = 'IO-48394';
+  host.dataset.project = projectKey;
+  app.run('jiraStripPaint()');
+  return { app, host, card: () => host.children[0] };
+}
+
+test('담당별 요약은 미완료만 세고 많은 순·가나다순으로, 넷을 넘으면 `외 N명`으로 줄인다', () => {
+  const app = pureClient();
+  const summary = items => JSON.parse(app.run(`JSON.stringify(jiraChildSummary(${JSON.stringify(items)}))`));
+  const basic = summary(jiraKids());
+  assert.deepEqual(basic.names, [{ name: '루본', count: 2 }, { name: '엘리', count: 1 }, { name: '담당 없음', count: 1 }],
+    '완료한 루본 것은 세지 않는다. 개수가 같으면 가나다이고 `담당 없음`은 이름이 아니라 맨 뒤다');
+  assert.equal(basic.extra, 0);
+  assert.equal(basic.allDone, false);
+
+  // 다섯 명이면 넷만 이름으로 적고 나머지는 `외 N명`이다.
+  const many = summary(['가나', '나다', '다라', '마바', '사아', '아자'].map((name, at) => jiraKid(`AB-${at + 1}`, '일', 'doing', name)));
+  assert.deepEqual(many.names.map(entry => entry.name), ['가나', '나다', '다라', '마바']);
+  assert.equal(many.extra, 2);
+
+  const done = summary(jiraKids().map(item => ({ ...item, status: { name: '완료', category: 'done' } })));
+  assert.deepEqual(done, { names: [], extra: 0, allDone: true }, '다 끝났으면 이름 자리에 `모두 완료`만 선다');
+  assert.equal(summary([]).allDone, true);
+
+  // 순서: 진행 → 할 일 → 완료, 같은 범주 안에서는 지라가 준 차례 그대로다.
+  const order = JSON.parse(app.run(`JSON.stringify(jiraChildOrder(${JSON.stringify(jiraKids())}).map(item => item.key))`));
+  assert.deepEqual(order, ['IO-48392', 'IO-48395', 'IO-48393', 'IO-48396', 'IO-48391']);
+});
+
+test('접힌 줄은 진행률 뒤에 담당별 개수를 적고, 하위가 없으면 줄 자체가 없다', () => {
+  const { card } = jiraKidFixture(jiraWithKids());
+  const foot = nodeFind(card(), 'foot');
+  assert.match(nodeText(foot), /하위 티켓 .*5개 중 1개 완료 .*루본 2 · 엘리 1 · 담당 없음 1/);
+  const caret = nodeFind(foot, 'd-jexp');
+  assert.equal(caret.getAttribute('aria-expanded'), 'false');
+  assert.equal(caret.getAttribute('aria-label'), '하위 티켓 펼치기');
+  assert.equal(nodeFind(card(), 'd-jkids'), null, '접혀 있으면 목록이 아예 없다');
+
+  // 다 끝났으면 이름 대신 `모두 완료`다.
+  const allDone = jiraKids().map(item => ({ ...item, status: { name: '완료', category: 'done' } }));
+  assert.match(nodeText(nodeFind(jiraKidFixture(jiraWithKids(allDone)).card(), 'foot')), /5개 중 5개 완료 모두 완료/);
+
+  // 하위가 하나도 없으면 진행률 줄도 꺾쇠도 없다(`0`은 찍지 않는다).
+  const bare = jiraKidFixture(jiraIssue({ children: null }));
+  assert.equal(nodeFind(bare.card(), 'foot'), null);
+  assert.equal(nodeFind(bare.card(), 'd-jexp'), null);
+});
+
+test('펼치면 티켓마다 지라 상태·요약·담당자·배포 버전이 서고, 완료는 맨 아래 흐리게 선다', () => {
+  const { app, card } = jiraKidFixture(jiraWithKids());
+  nodeFind(card(), 'd-jexp').listeners.click();
+  const list = nodeFind(card(), 'd-jkids');
+  assert.ok(list, '꺾쇠를 누르면 목록이 선다');
+  assert.equal(nodeFind(card(), 'd-jexp').getAttribute('aria-expanded'), 'true');
+  const rows = nodeFindAll(list, 'd-jkid');
+  assert.deepEqual(rows.map(row => nodeFind(row, 'sm').textContent),
+    ['게임 목록 불러오기', '검수 항목 정리하기', '미리보기 문구 정리하기', '오류 문구 다듬기', '임베드 카드 붙이기'],
+    '미완료가 먼저(진행 → 할 일)고 완료가 맨 아래다');
+  assert.equal(rows[4].className, 'd-jkid is-done');
+  assert.equal(rows[0].className, 'd-jkid');
+  // 한 줄 = 상태 · 요약 · 담당자 · 배포 버전. 상태는 범주로만 색이다(배지가 아니다).
+  assert.equal(nodeText(rows[0]), '진행 중 게임 목록 불러오기 루본 v2.70.0');
+  assert.equal(nodeFind(rows[0], 'st').className, 'st', '진행은 기본 색이다');
+  assert.equal(nodeFind(rows[2], 'st').className, 'st k-dim', '할 일은 회색이다');
+  assert.equal(nodeFind(rows[4], 'st').className, 'st k-pos', '완료는 성공색 글자다');
+  const none = nodeFind(rows[1], 'wh');
+  assert.equal(none.textContent, '담당 없음');
+  assert.equal(none.className, 'wh is-none');
+  assert.equal(nodeFind(rows[1], 'ver'), null, '배포 버전이 없으면 칸 자체가 없다');
+  // 링크는 앱이 조립한 주소로 새 탭에 열리고, 키는 title에만 보인다(BKEY).
+  const link = nodeFind(rows[0], 'sm');
+  assert.equal(link.href, 'https://example-jira.test/browse/IO-48392');
+  assert.equal(link.target, '_blank');
+  assert.equal(link.rel, 'noopener noreferrer');
+  assert.equal(link.title, 'IO-48392 · 지라에서 열어요');
+  assert.doesNotMatch(nodeText(list), /IO-483/, '목록 글자 어디에도 키는 없다');
+  // 지라가 준 글자는 전부 textContent다 — 목록에 새 innerHTML을 쓰지 않는다(꺾쇠 아이콘만 고정 마크업).
+  assert.equal(nodeHtml(list), '');
+  // 읽기 전용이다: 목록에는 값 고르개도 ⋯도 없다.
+  assert.equal(nodeFind(list, 'd-dpick'), null);
+  assert.equal(nodeFind(list, 'd-more'), null);
+  assert.doesNotMatch(nodeText(list), /할 일로 가져오기/);
+
+  // 다시 누르면 접힌다.
+  nodeFind(card(), 'd-jexp').listeners.click();
+  assert.equal(nodeFind(card(), 'd-jkids'), null);
+  assert.equal(app.run('jiraChildPick'), null);
+});
+
+test('완료가 다섯을 넘으면 나머지는 `완료 N개 더 보기` 뒤로 접는다', () => {
+  const items = [
+    jiraKid('AB-1', '남은 것', 'doing', '루본'),
+    ...Array.from({ length: 8 }, (unused, at) => jiraKid(`AB-${at + 2}`, `끝난 것 ${at + 1}`, 'done', '루본')),
+  ];
+  const { card } = jiraKidFixture(jiraWithKids(items));
+  nodeFind(card(), 'd-jexp').listeners.click();
+  assert.equal(nodeFindAll(card(), 'd-jkid').length, 6, '미완료 1 + 완료 5만 선다');
+  const more = nodeFind(card(), 'more');
+  assert.equal(more.textContent, '완료 3개 더 보기');
+  more.listeners.click();
+  assert.equal(nodeFindAll(card(), 'd-jkid').length, 9);
+  assert.equal(nodeFind(card(), 'more'), null);
+
+  // 다섯 이하면 접지 않는다.
+  const few = jiraKidFixture(jiraWithKids());
+  nodeFind(few.card(), 'd-jexp').listeners.click();
+  assert.equal(nodeFind(few.card(), 'more'), null);
+});
+
+test('접힌 줄의 이름을 누르면 펼쳐지며 그 담당 것만 보이고, `전체`로 푼다', () => {
+  const { app, card } = jiraKidFixture(jiraWithKids());
+  const whoButton = name => nodeFindAll(card(), 'd-jwho').find(button => button.textContent.startsWith(name));
+  assert.equal(nodeFind(card(), 'd-jkids'), null);
+  whoButton('루본').listeners.click();
+  assert.equal(app.run('jiraChildPick'), '루본');
+  assert.equal(nodeFind(card(), 'd-jexp').getAttribute('aria-expanded'), 'true', '이름을 누르면 함께 펼쳐진다');
+  assert.deepEqual(nodeFindAll(card(), 'd-jkid').map(row => nodeFind(row, 'sm').textContent),
+    ['게임 목록 불러오기', '오류 문구 다듬기', '임베드 카드 붙이기'], '그 사람의 완료한 것도 함께 보인다');
+  assert.equal(whoButton('루본').getAttribute('aria-pressed'), 'true');
+  assert.equal(whoButton('엘리').getAttribute('aria-pressed'), 'false');
+  // 거르는 중에만 `전체`가 붙는다.
+  const clear = nodeFindAll(card(), 'd-jwho').find(button => button.textContent === '전체');
+  assert.ok(clear);
+  clear.listeners.click();
+  assert.equal(app.run('jiraChildPick'), null);
+  assert.equal(nodeFindAll(card(), 'd-jkid').length, 5);
+  assert.equal(nodeFindAll(card(), 'd-jwho').find(button => button.textContent === '전체'), undefined);
+
+  // 같은 이름을 다시 누르면 해제된다(펼침은 그대로).
+  whoButton('엘리').listeners.click();
+  assert.equal(nodeFindAll(card(), 'd-jkid').length, 1);
+  whoButton('엘리').listeners.click();
+  assert.equal(app.run('jiraChildPick'), null);
+  assert.equal(nodeFindAll(card(), 'd-jkid').length, 5);
+
+  // 거르는 중에 그 사람의 티켓이 사라지면 조용한 한 줄만 남는다(빈 칸을 남기지 않는다).
+  whoButton('엘리').listeners.click();
+  app.run(`jiraCard = { ...jiraCard, issue: ${JSON.stringify(jiraWithKids(jiraKids().filter(item => item.assignee !== '엘리')))} }; jiraStripPaint()`);
+  assert.equal(nodeText(nodeFind(card(), 'd-jkids')), '이 담당의 하위 티켓이 없어요');
+});
+
+test('펼침은 프로젝트별로 기억하고, 쓰기 뒤 `fresh` 재조회로 다시 그려도 그대로다', () => {
+  const store = new Map();
+  const storage = { getItem: key => (store.has(key) ? store.get(key) : null), setItem: (key, value) => store.set(key, String(value)) };
+  const first = jiraKidFixture(jiraWithKids(), 'jira:IO-48394', storage);
+  nodeFind(first.card(), 'd-jexp').listeners.click();
+  assert.deepEqual(JSON.parse(store.get('jiraChildrenOpen')), ['jira:IO-48394']);
+
+  // 2단계의 쓰기가 끝나고 `fresh=1`로 다시 읽어 그려도 펼침·거르기는 그대로다.
+  first.app.run("jiraChildPick = '루본'");
+  first.app.run(`jiraCard = { ...jiraCard, issue: ${JSON.stringify(jiraWithKids())}, at: Date.now() }; jiraStripPaint()`);
+  assert.equal(nodeFind(first.card(), 'd-jexp').getAttribute('aria-expanded'), 'true');
+  assert.equal(nodeFindAll(first.card(), 'd-jkid').length, 3, '거르기도 살아 있다');
+  // 같은 프로젝트를 다시 그리는 것(jiraCardEnsure)으로는 거르기가 풀리지 않는다.
+  first.app.run("jiraCardEnsure('IO-48394')");
+  assert.equal(first.app.run('jiraChildPick'), '루본');
+  // 다른 프로젝트로 옮기면 거르기만 풀린다(펼침은 프로젝트마다 기억한 대로다).
+  first.app.run("jiraCardEnsure('AB-9')");
+  assert.equal(first.app.run('jiraChildPick'), null);
+
+  // 다음에 같은 프로젝트를 열면 기억한 대로 펼쳐져 있다.
+  const again = jiraKidFixture(jiraWithKids(), 'jira:IO-48394', storage);
+  assert.equal(nodeFind(again.card(), 'd-jexp').getAttribute('aria-expanded'), 'true');
+  assert.equal(nodeFindAll(again.card(), 'd-jkid').length, 5);
+  // 다른 프로젝트는 기억이 따로다.
+  const other = jiraKidFixture(jiraWithKids(), 'group:알림센터', storage);
+  assert.equal(nodeFind(other.card(), 'd-jexp').getAttribute('aria-expanded'), 'false');
+  // 손으로 건 그룹 프로젝트에서도 카드 모양은 같다.
+  nodeFind(other.card(), 'd-jexp').listeners.click();
+  assert.equal(nodeFindAll(other.card(), 'd-jkid').length, 5);
+  assert.deepEqual(JSON.parse(store.get('jiraChildrenOpen')), ['jira:IO-48394', 'group:알림센터']);
+});
+
+test('기억해 둘 곳이 막혀 있어도 펼치기는 그대로 동작한다', () => {
+  // 사생활 보호 창처럼 localStorage가 던지는 자리 — 기억만 못 할 뿐 화면은 그대로다.
+  const blocked = { getItem() { throw new Error('blocked'); }, setItem() { throw new Error('blocked'); } };
+  const { card } = jiraKidFixture(jiraWithKids(), 'jira:IO-48394', blocked);
+  nodeFind(card(), 'd-jexp').listeners.click();
+  assert.equal(nodeFindAll(card(), 'd-jkid').length, 5);
+});
+
+test('하위가 100개면 목록 끝에 `지라에서 전체 보기`가 붙는다', () => {
+  const items = Array.from({ length: 100 }, (unused, at) => jiraKid(`AB-${at + 1}`, `하위 ${at + 1}`, 'doing', '루본'));
+  const { card } = jiraKidFixture(jiraWithKids(items));
+  nodeFind(card(), 'd-jexp').listeners.click();
+  const all = nodeFind(card(), 'all');
+  assert.equal(all.textContent, '지라에서 전체 보기 ↗');
+  assert.equal(all.href, 'https://example-jira.test/browse/IO-48394');
+  assert.equal(all.rel, 'noopener noreferrer');
+  assert.equal(all.target, '_blank');
+  assert.match(all.title, /^IO-48394 · /);
+  // 100개가 안 되면 붙지 않는다.
+  const few = jiraKidFixture(jiraWithKids());
+  nodeFind(few.card(), 'd-jexp').listeners.click();
+  assert.equal(nodeFind(few.card(), 'all'), null);
 });
 
 // 로드 직후 아주 빨리 누른 탭이 마지막 탭 복원에 덮이던 경쟁(크롬 검수에서 발견).

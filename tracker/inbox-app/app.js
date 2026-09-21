@@ -1151,6 +1151,68 @@ function jiraChildrenLabel(children) {
   return { text: `${children.total}개 중 ${done}개 완료`, ratio: Math.round((done / children.total) * 100) };
 }
 
+// ---------- 하위 티켓 목록 (3단계 — 읽기 전용) ----------
+// 지라 것은 지라 카드 안에 둔다: 접힌 줄에 미완료의 담당별 개수, 펼치면 티켓마다
+// 지라 상태 · 요약(지라 새 탭) · 담당자 · 배포 버전. 여기서 지라에 쓰는 길은 만들지 않는다 —
+// 줄을 누르면 지라가 열릴 뿐이다.
+const JIRA_CHILD_NONE = '담당 없음';
+const JIRA_CHILD_NAMES = 4;      // 접힌 줄에 이름으로 적는 최대 인원 — 넘으면 `외 N명`
+const JIRA_CHILD_DONE_FOLD = 5;  // 완료가 이보다 많으면 나머지를 `완료 N개 더 보기`로 접는다
+const JIRA_CHILD_MAX = 100;      // 서버가 읽어 오는 최대 개수 — 다 차면 끝에 `지라에서 전체 보기`
+const JIRA_CHILD_OPEN_KEY = 'jiraChildrenOpen';
+// 펼침 여부는 프로젝트별로 기억한다. **켜고 끄는 값은 메모리의 이 Set이고** localStorage는
+// 곁들이는 기억이다 — 저장이 막혀 있어도(사생활 보호 창 등) 펼치기는 그대로 동작한다.
+let jiraChildOpen = null;
+// 거르기는 기억하지 않는다(프로젝트를 옮기면 풀린다). 접어 둔 완료도 마찬가지다.
+let jiraChildPick = null;
+let jiraChildDoneOpen = false;
+
+function jiraChildOpenSet() {
+  if (jiraChildOpen) return jiraChildOpen;
+  let saved = [];
+  try {
+    const raw = JSON.parse(localStorage.getItem(JIRA_CHILD_OPEN_KEY));
+    if (Array.isArray(raw)) saved = raw.filter(entry => typeof entry === 'string');
+  } catch {}
+  jiraChildOpen = new Set(saved);
+  return jiraChildOpen;
+}
+const jiraChildOpened = projectKey => jiraChildOpenSet().has(String(projectKey || ''));
+function jiraChildRemember(projectKey, open) {
+  const set = jiraChildOpenSet();
+  if (open) set.add(String(projectKey || ''));
+  else set.delete(String(projectKey || ''));
+  try { localStorage.setItem(JIRA_CHILD_OPEN_KEY, JSON.stringify([...set].slice(-40))); } catch {}
+}
+
+// 접힌 줄의 담당별 요약 — **미완료만** 센다(많은 순, 같으면 가나다).
+// 다 끝났으면 이름 대신 `모두 완료` 한 마디다.
+function jiraChildSummary(items) {
+  const open = (items || []).filter(item => item && item.status && item.status.category !== 'done');
+  if (!open.length) return { names: [], extra: 0, allDone: true };
+  const counts = new Map();
+  open.forEach((item) => {
+    const name = item.assignee || JIRA_CHILD_NONE;
+    counts.set(name, (counts.get(name) || 0) + 1);
+  });
+  // `담당 없음`은 이름이 아니므로 같은 개수끼리는 맨 뒤로 보낸다.
+  const all = [...counts].map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count
+      || (a.name === JIRA_CHILD_NONE ? 1 : 0) - (b.name === JIRA_CHILD_NONE ? 1 : 0)
+      || a.name.localeCompare(b.name, 'ko'));
+  return { names: all.slice(0, JIRA_CHILD_NAMES), extra: Math.max(all.length - JIRA_CHILD_NAMES, 0), allDone: false };
+}
+
+// 순서: 미완료 먼저(진행 → 할 일), 완료는 맨 아래. 같은 범주 안에서는 지라가 준 차례 그대로다.
+const JIRA_CHILD_RANK = { doing: 0, todo: 1, done: 2 };
+function jiraChildOrder(items) {
+  return (items || []).map((item, at) => ({ item, at }))
+    .sort((a, b) => (JIRA_CHILD_RANK[a.item?.status?.category] ?? 0) - (JIRA_CHILD_RANK[b.item?.status?.category] ?? 0) || a.at - b.at)
+    .map(entry => entry.item);
+}
+
+const jiraChildWhoOf = item => (item && item.assignee) || JIRA_CHILD_NONE;
+
 // 값 한 칸(라벨 위 · 값 아래). `pick`을 주면 값 자리가 상세 카드와 같은 값 고르개가 된다
 // (값 + 꺾쇠, hover 면). 고르개를 눌러도 곧바로 쓰지 않는다 — 확인 줄을 한 번 더 거친다.
 function jiraCell(label, text, tone, hint, pick) {
@@ -1619,23 +1681,179 @@ function jiraStripCard(issue, projectKey = '') {
 
   const children = jiraChildrenLabel(issue.children);
   if (children) {
-    const foot = document.createElement('div');
-    foot.className = 'foot';
-    const label = document.createElement('span');
-    label.textContent = '하위 티켓';
-    const bar = document.createElement('span');
-    bar.className = 'bar';
-    bar.setAttribute('role', 'img');
-    bar.setAttribute('aria-label', `하위 티켓 ${children.text}`);
-    const fill = document.createElement('i');
-    fill.setAttribute('style', `width:${children.ratio}%`);
-    bar.appendChild(fill);
-    const count = document.createElement('span');
-    count.textContent = children.text;
-    foot.append(label, bar, count);
-    card.appendChild(foot);
+    // 펼침은 카드가 선 프로젝트마다 기억한다 — `jira:KEY`든 손으로 건 그룹이든 같은 열쇠 하나다.
+    const seat = projectKey || `jira:${issue.key}`;
+    const items = (issue.children && Array.isArray(issue.children.items) ? issue.children.items : []).filter(Boolean);
+    const open = !!items.length && jiraChildOpened(seat);
+    card.appendChild(jiraChildFoot(seat, children, items, open));
+    if (open) card.appendChild(jiraChildList(issue, items));
   }
   return card;
+}
+
+// 접힌 줄: 진행률 + 미완료의 담당별 개수(누르면 그 사람 것만) + 줄 끝 꺾쇠.
+function jiraChildFoot(seat, children, items, open) {
+  const foot = document.createElement('div');
+  foot.className = 'foot';
+  const label = document.createElement('span');
+  label.textContent = '하위 티켓';
+  const bar = document.createElement('span');
+  bar.className = 'bar';
+  bar.setAttribute('role', 'img');
+  bar.setAttribute('aria-label', `하위 티켓 ${children.text}`);
+  const fill = document.createElement('i');
+  fill.setAttribute('style', `width:${children.ratio}%`);
+  bar.appendChild(fill);
+  const count = document.createElement('span');
+  count.textContent = children.text;
+  foot.append(label, bar, count);
+  if (!items.length) return foot;
+  foot.appendChild(jiraChildWho(seat, items));
+  const spacer = document.createElement('span');
+  spacer.className = 'sp';
+  const caret = document.createElement('button');
+  caret.type = 'button';
+  caret.className = 'd-iconbtn sm d-jexp';
+  caret.setAttribute('aria-expanded', open ? 'true' : 'false');
+  caret.setAttribute('aria-label', open ? '하위 티켓 접기' : '하위 티켓 펼치기');
+  caret.title = open ? '하위 티켓 목록을 접어요' : '하위 티켓 목록을 펼쳐요';
+  // 고정 마크업(꺾쇠 아이콘)만 붙는 자리다 — 지라가 준 글자는 전부 textContent로만 들어간다.
+  caret.insertAdjacentHTML('beforeend', uiIcon('chevron'));
+  caret.addEventListener('click', () => {
+    jiraChildRemember(seat, !open);
+    // 접으면 거르기도 함께 푼다 — 다시 폈을 때 왜 몇 줄뿐인지 모를 일이 없게.
+    if (open) { jiraChildPick = null; jiraChildDoneOpen = false; }
+    jiraStripPaint();
+  });
+  foot.append(spacer, caret);
+  return foot;
+}
+
+// 담당별 요약. 이름은 누르는 글자다(별도 토글·드롭다운을 만들지 않는다) — 거르는 중이면 굵어지고 `전체`가 붙는다.
+function jiraChildWho(seat, items) {
+  const box = document.createElement('span');
+  box.className = 'who';
+  const summary = jiraChildSummary(items);
+  if (summary.allDone) {
+    const all = document.createElement('span');
+    all.className = 'qt';
+    all.textContent = '모두 완료';
+    box.appendChild(all);
+    return box;
+  }
+  summary.names.forEach((entry, at) => {
+    if (at) {
+      const sep = document.createElement('span');
+      sep.className = 'sep';
+      sep.textContent = '·';
+      box.appendChild(sep);
+    }
+    const on = jiraChildPick === entry.name;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'd-jwho';
+    button.setAttribute('aria-pressed', on ? 'true' : 'false');
+    button.setAttribute('aria-label', `${entry.name} — 이 담당의 하위 티켓만 보기`);
+    button.title = on ? '눌러서 전체를 다시 봐요' : `${entry.name}가 맡은 하위 티켓만 봐요`;
+    button.textContent = `${entry.name} ${entry.count}`;
+    button.addEventListener('click', () => {
+      jiraChildPick = on ? null : entry.name;
+      jiraChildDoneOpen = false;
+      // 접혀 있을 때 이름을 누르면 펼쳐지며 그 사람 것만 보인다.
+      if (jiraChildPick) jiraChildRemember(seat, true);
+      jiraStripPaint();
+    });
+    box.appendChild(button);
+  });
+  if (summary.extra) {
+    const more = document.createElement('span');
+    more.className = 'qt';
+    more.textContent = `외 ${summary.extra}명`;
+    box.appendChild(more);
+  }
+  if (jiraChildPick) {
+    const clear = document.createElement('button');
+    clear.type = 'button';
+    clear.className = 'd-jwho clear';
+    clear.textContent = '전체';
+    clear.title = '담당자 거르기를 풀어요';
+    clear.addEventListener('click', () => { jiraChildPick = null; jiraChildDoneOpen = false; jiraStripPaint(); });
+    box.appendChild(clear);
+  }
+  return box;
+}
+
+// 펼친 목록. 읽기 전용이다 — 누를 수 있는 것은 요약(지라 새 탭)과 `완료 N개 더 보기`뿐이다.
+function jiraChildList(issue, items) {
+  const list = document.createElement('div');
+  list.className = 'd-jkids';
+  const picked = jiraChildPick ? items.filter(item => jiraChildWhoOf(item) === jiraChildPick) : items;
+  const ordered = jiraChildOrder(picked);
+  const done = ordered.filter(item => item.status && item.status.category === 'done');
+  const folded = jiraChildDoneOpen ? 0 : Math.max(done.length - JIRA_CHILD_DONE_FOLD, 0);
+  const shown = folded ? ordered.slice(0, ordered.length - folded) : ordered;
+  if (!shown.length) {
+    const none = document.createElement('div');
+    none.className = 'none';
+    none.textContent = '이 담당의 하위 티켓이 없어요';
+    list.appendChild(none);
+    return list;
+  }
+  // 배포 버전 칸은 그 칸을 쓰는 줄이 하나라도 있을 때만 자리를 잡는다(빈 칸을 남기지 않는다).
+  if (shown.some(item => item.version)) list.className = 'd-jkids has-ver';
+  shown.forEach(item => list.appendChild(jiraChildRow(item)));
+  if (folded) {
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'd-link more';
+    more.textContent = `완료 ${folded}개 더 보기`;
+    more.addEventListener('click', () => { jiraChildDoneOpen = true; jiraStripPaint(); });
+    list.appendChild(more);
+  }
+  // 지라에서 100개까지만 읽어 온다 — 다 찼으면 나머지는 지라에서 본다.
+  if (items.length >= JIRA_CHILD_MAX) {
+    const all = document.createElement('a');
+    all.className = 'all';
+    all.href = issue.url;
+    all.target = '_blank';
+    all.rel = 'noopener noreferrer';
+    all.title = `${issue.key} · 지라에서 하위 티켓을 전부 봐요`;
+    all.textContent = '지라에서 전체 보기 ↗';
+    list.appendChild(all);
+  }
+  return list;
+}
+
+// 한 줄 = 지라 상태 · 요약(지라 새 탭) · 담당자 · 조용한 배포 버전.
+// 상태는 범주로만 색이 붙는다(배지가 아니다) — 카드 위의 `지라 상태` 칸과 같은 규칙이다.
+function jiraChildRow(item) {
+  const row = document.createElement('div');
+  const category = item.status && item.status.category;
+  row.className = 'd-jkid' + (category === 'done' ? ' is-done' : '');
+  const status = document.createElement('span');
+  const tone = jiraStatusTone(category);
+  status.className = 'st' + (tone ? ` ${tone}` : '');
+  status.textContent = (item.status && item.status.name) || '';
+  const link = document.createElement('a');
+  link.className = 'sm';
+  // 주소는 앱이 조립한 것(siteUrl + /browse/KEY)이고, 키는 title에만 보인다(BKEY).
+  link.href = item.url;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  link.title = `${item.key} · 지라에서 열어요`;
+  link.textContent = item.summary || '제목 없음';
+  const who = document.createElement('span');
+  who.className = 'wh' + (item.assignee ? '' : ' is-none');
+  who.textContent = jiraChildWhoOf(item);
+  row.append(status, link, who);
+  if (item.version) {
+    const version = document.createElement('span');
+    version.className = 'ver';
+    version.title = '지라의 배포 버전이에요';
+    version.textContent = item.version;
+    row.appendChild(version);
+  }
+  return row;
 }
 
 // 카드 자리만 다시 그린다 — 늦게 온 응답 때문에 프로젝트 화면 전체를 다시 만들지 않는다.
@@ -1680,7 +1898,9 @@ async function jiraCardLoad(key, { fresh = false, quiet = false } = {}) {
 // 프로젝트를 열 때만 부른다. 같은 프로젝트를 다시 그리는 것(체크 등)으로는 다시 부르지 않고,
 // 60초가 지났으면 뼈대 없이 조용히 새로 읽는다(값이 깜빡이지 않게).
 function jiraCardEnsure(key) {
-  if (jiraCard.key !== key) { jiraConfirmClose(false); jiraCardLoad(key); return; }
+  // 다른 프로젝트로 옮기면 거르기는 푼다(펼침만 기억한다). 2단계의 조용한 재조회(`quiet`)나
+  // 쓰기 뒤의 `fresh` 재조회에서는 여기를 지나지 않으므로 펼침·거르기가 그대로 남는다.
+  if (jiraCard.key !== key) { jiraConfirmClose(false); jiraChildPick = null; jiraChildDoneOpen = false; jiraCardLoad(key); return; }
   // 확인 줄이 떠 있거나 쓰는 중이면 뒤에서 값을 갈아 끼우지 않는다(무엇을 확인 중인지가 바뀌면 안 된다).
   if (jiraBusy || jiraConfirm) return;
   if (jiraCard.state === 'ok' && Date.now() - jiraCard.at > JIRA_REFRESH_MS) jiraCardLoad(key, { quiet: true });
