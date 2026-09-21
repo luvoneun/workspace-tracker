@@ -2003,6 +2003,8 @@ function renderActiveTabLists() {
 // 그날의 첫 자동 갱신(캘린더 9:13 · 지라 9:17 · 슬랙 9시대)이 끝났을 시각.
 const SYNC_FIRST_RUN_BY = '09:30';
 
+// 지금 낡은 자동 갱신들. 톱니바퀴를 누르면 설정 > 상태의 첫 번째 낡은 줄을 밝힌다.
+let syncStale = [];
 function renderDateBar(data) {
   if (data.title) {
     document.getElementById('workspaceTitle').textContent = data.title;
@@ -2033,29 +2035,20 @@ function renderDateBar(data) {
   // 돌 차례가 아닌 것이라 알리지 않는다 — 오류가 있었거나 이틀 넘게 멈춘 것은 그대로 알린다.
   const beforeFirstRun = nowHHMM() < SYNC_FIRST_RUN_BY;
   const stale = found.filter(source => !(beforeFirstRun && !source.error && ageOf(source).days === 1));
-  if (!stale.length) return;
 
-  const titleOf = source => (source.lastSync
-    ? `${source.name} 자동 갱신이 ${source.lastSync} 이후 멈춰 있어요.`
-    : `${source.name}를 아직 한 번도 가져오지 못했어요.`);
-  // 경고는 늘 한 칸이다 — 여러 개가 한꺼번에 낡으면 칸이 늘어나 탭을 밀어냈다. 둘 이상이면 하나로 묶는다.
+  // 경고는 머리줄에 글자로 끼어들지 않는다 — 날짜 옆에 칸이 생기면 탭이 밀렸다(한 칸으로 줄여도 마찬가지).
+  // 설정 톱니바퀴의 주황 점으로만 알리고, 무엇이 낡았는지는 톱니바퀴의 툴팁과 설정 > 상태가 말한다.
+  // 실패(빨간 점, fetchAutomationStatus)가 함께 있으면 빨간 점이 이긴다(ui.css).
+  syncStale = stale.map(source => ({ key: source.key, text: `${source.name} ${ageOf(source).text}` }));
+  const gear = document.getElementById('settingsBtn');
+  if (!gear) return;
+  gear.classList.toggle('has-stale', syncStale.length > 0);
   const ages = stale.map(source => ageOf(source).text);
-  const text = stale.length === 1 ? `${stale[0].name} ${ages[0]}`
+  const summary = !stale.length ? ''
+    : stale.length === 1 ? syncStale[0].text
     : `자동 갱신 ${stale.length}개 ${ages.every(age => age === ages[0]) ? ages[0] : '확인 필요'}`;
-  // 누르면 설정의 `상태`가 열리고 그 자동화 줄이 밝혀진다 — "무슨 일인지"까지 한 번에.
-  const warn = document.createElement('button');
-  warn.type = 'button';
-  warn.className = 'd-warn';
-  const dot = document.createElement('i');
-  dot.className = 'd-dot';
-  dot.setAttribute('aria-hidden', 'true');
-  const label = document.createElement('span');
-  label.textContent = text;
-  warn.append(dot, label);
-  warn.title = `${stale.map(titleOf).join(' ')} 목록이 최신이 아닐 수 있어요. 누르면 자세한 상태를 볼 수 있어요.`;
-  warn.setAttribute('aria-label', `${text} — 자동화 상태 보기`);
-  warn.addEventListener('click', () => settingsOpen('status', stale[0].key));
-  bar.appendChild(warn);
+  gear.title = summary ? `설정 — ${summary}. 목록이 최신이 아닐 수 있어요. 누르면 자세한 상태를 볼 수 있어요.` : '설정';
+  gear.setAttribute('aria-label', summary ? `설정 — ${summary}` : '설정');
 }
 
 // 지금 진행 중인 회의만 시각을 진하게 적는다(HH:MM 비교).
@@ -6725,7 +6718,7 @@ function settingsClose() {
 
 // 브라우저가 스스로 닫으려 할 때(Esc)도 우리 길로 모은다 — 스택과 포커스 복귀가 어긋나지 않게.
 settingsDialog.addEventListener('cancel', (event) => { event.preventDefault(); settingsClose(); });
-document.getElementById('settingsBtn').addEventListener('click', () => settingsOpen('status'));
+document.getElementById('settingsBtn').addEventListener('click', () => settingsOpen('status', syncStale.length ? syncStale[0].key : null));
 document.getElementById('settingsCloseBtn').addEventListener('click', settingsClose);
 settingsDialog.querySelectorAll('[data-settings-tab]').forEach((button) => {
   button.addEventListener('click', () => settingsSetTab(button.dataset.settingsTab));

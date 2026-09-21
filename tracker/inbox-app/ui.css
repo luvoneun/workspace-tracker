@@ -386,13 +386,6 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 }
 
 /* 자동 갱신이 멈춘 것만 조용히 알린다 */
-.d-warn {
-  display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 6px;
-  border: 0; background: none; border-radius: var(--r-xs); color: var(--warn);
-  font-family: inherit; font-size: 12px; font-weight: 500; white-space: nowrap; cursor: pointer;
-}
-.d-warn:hover { background: var(--hover); }
-.d-warn .d-dot { width: 5px; height: 5px; margin: 0; }
 
 .d-tabs { display: flex; align-items: stretch; height: var(--hdr); margin-left: 10px; margin-right: auto; gap: 2px; min-width: 0; }
 .d-tab {
@@ -425,7 +418,9 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 
 .d-gear { position: relative; }
 .d-baddot { display: none; position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--urgent); box-shadow: 0 0 0 2px var(--bg); }
-.d-gear.has-alert .d-baddot { display: block; }
+/* 주황 = 자동 갱신이 낡았다(머리줄에 글자를 끼우지 않는다 — 탭이 밀렸다), 빨강 = 지금 실패 중. 둘 다면 빨강이 이긴다 */
+.d-gear.has-stale .d-baddot { display: block; background: var(--warn); }
+.d-gear.has-alert .d-baddot { display: block; background: var(--urgent); }
 
 /* ---------- 페이지 ---------- */
 /* 오늘 탭은 레일이 창 왼쪽 끝에 붙어야 해서 페이지를 가운데로 모으지 않는다.
