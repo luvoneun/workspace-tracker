@@ -671,6 +671,35 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
    `답변이 해결된 업무`는 리마인드 카드의 줄이 되었다. */
 .d-rempty { font-size: 13px; color: var(--dim); padding: 6px 10px 4px; }
 
+/* ---------- 확인 대기를 체크한 뒤의 `다음은?` 줄 ----------
+   세 자리(레일 확인 대기 카드 · 프로젝트 탭 확인 대기 구역 · 회의의 `이 회의에서 나온 것`)가
+   같은 모양을 쓴다. 알림과 달리 스스로 사라지지 않으므로, 고른 줄과 같은 연파랑(--sel)으로
+   "지금 여기"만 조용히 표시한다. 레일은 296px로 좁으니 버튼은 줄바꿈되어 가지런히 선다. */
+.d-wnextwrap { background: var(--sel); border-radius: 12px; }
+.d-wnextwrap > .d-wrow, .d-wnextwrap > .d-wrow:hover, .d-wnextwrap > .d-wrow:focus-within { background: none; }
+.d-wnextwrap > .d-rec, .d-wnextwrap > .d-rec:hover, .d-wnextwrap > .d-rec:focus-within { --rowbg: transparent; }
+.d-wrow.is-done .ti, .d-wnextwrap > .d-rec.is-done .ti { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--border); }
+.d-wnext { background: var(--sel); border-radius: 12px; padding: 8px 10px; }
+.d-wnextwrap > .d-wnext { background: none; padding-top: 0; }
+/* 회의 카드의 촘촘한 줄 사이에 끼어도 아래 줄의 구분선이 사라지지 않게 */
+.d-wnext + .d-mrow2 { border-top: 1px solid var(--hair); }
+.d-wnext .nx { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.d-wnext .nx > .lb { font-size: 12.5px; font-weight: 600; color: var(--muted); }
+/* 연파랑 판 위에서 3차(연회색) 버튼이 묻히지 않게 바탕만 흰 면으로 올린다 */
+.d-wnext .d-btn { background: var(--surface); }
+.d-wnext .d-btn:hover { background: var(--hover); color: var(--text); }
+.d-wnext .d-btn.is-cl { margin-left: auto; background: none; color: var(--dim); }
+.d-wnext .d-btn.is-cl:hover { background: var(--hover); color: var(--text); }
+.d-wnext .nx.is-ed .d-din { flex: 1 1 150px; min-width: 0; min-height: 32px; padding: 5px 10px; font-size: 13px; }
+.d-wnext .bl { margin-top: 8px; }
+.d-wnext .bl > .lb { display: block; margin-bottom: 2px; font-size: 12px; color: var(--dim); }
+.d-wnext .bln { display: flex; align-items: center; gap: 6px; min-height: 32px; }
+.d-wnext .bln .ti { flex: 1 1 auto; min-width: 0; font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.d-wnext .bln .ac { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.d-wnext .bln.is-more { font-size: 12.5px; color: var(--dim); }
+/* 레일(296px)에서는 `닫기`를 오른쪽 끝으로 밀지 않는다 — 혼자 한 줄에 남지 않게 그대로 흐르게 둔다 */
+#waitingList .d-wnext .d-btn.is-cl { margin-left: 0; }
+
 /* 구역 제목 — 굵고 크게. 개수는 둥근 회색 칩. */
 .d-sechd { display: flex; align-items: center; gap: 10px; height: 30px; font-size: 18px; font-weight: 700; letter-spacing: -0.015em; color: var(--text); }
 .d-sechd .n {

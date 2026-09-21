@@ -17,6 +17,7 @@ function element() {
     value: '', disabled: false, hidden: false, textContent: '', children: [], listeners: {}, dataset: {},
     parent: null, connected: true, blurs: 0,
     get isConnected() { return this.connected; },
+    get childNodes() { return this.children; },
     classList: { toggle() {}, contains() { return false; }, add() {}, remove() {} },
     addEventListener(name, handler) { this.listeners[name] = handler; },
     appendChild(child) { if (child && typeof child === 'object') child.parent = this; this.children.push(child); return child; },
@@ -51,7 +52,8 @@ function client(response) {
   const sandbox = {
     document: {
       getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); },
-      createElement: element, addEventListener() {},
+      // 조각(fragment)도 아이를 모아 한 번에 붙이는 그릇이라 같은 가짜 노드로 충분하다.
+      createElement: element, createDocumentFragment: element, addEventListener() {},
     },
     window: { addEventListener() {} },
     fetch: async () => { calls++; return typeof response === 'function' ? response() : response.clone(); },
@@ -2044,4 +2046,164 @@ test('프로젝트 탭: 지라에서 완료된 이슈에만 `지라에서 완료
   assert.equal(done.children[0].className, 'd-jdone');
   assert.equal(done.children[0].textContent, '지라에서 완료됨');
   assert.equal(titleOf('jira:AB-1').children.length, 0, '진행 중인 이슈에는 아무것도 붙지 않는다');
+});
+
+// ---------- 확인 대기를 체크한 뒤의 `다음은?` 줄 ----------
+// 답을 받은 직후가 다음 행동을 정하기 가장 좋은 때인데, 몇 초 만에 사라지는 알림으로는 그 순간이
+// 지나가 버렸다. 체크는 지금처럼 바로 저장되고, 제안 줄은 그 자리에 남는다.
+function waitingNextClient(response = new Response('{"ok":true,"id":"nt1"}')) {
+  const app = workflowsClient();
+  const sent = [];
+  app.context.fetch = async (url, init) => {
+    sent.push({ url, body: init && init.body ? JSON.parse(init.body) : null });
+    return typeof response === 'function' ? response() : response.clone();
+  };
+  app.run(`workflowData = { items: [
+    { id: 'ck1', type: 'check', description: '법무 검토 회신 받기', status: 'to-do', created: todayStr(), group: '가입 개선', who: '법무팀' },
+    { id: 'ck2', type: 'check', description: '벤더 확인 회신 받기', status: 'to-do', created: todayStr(), jira: 'PAY-77' },
+  ], meetings: [] }; wfIndexData(); itemsById = new Map(workflowData.items.map(item => [item.id, item]));`);
+  const check = id => app.run(`(() => { const item = wfItem('${id}'); item.status = 'done'; wfIndexData(); waitingNextOpen(item); return item; })()`);
+  return { app, sent, check };
+}
+
+test('확인 대기를 체크하면 저장은 그대로이고, 알림은 사실만 알린다(`결정으로 남기기` 버튼은 줄이 대신한다)', async () => {
+  const { app, sent } = waitingNextClient(new Response('{"ok":true}'));
+  const row = app.run("renderWaitingRow(wfItem('ck1'))");
+  await firstCheckbox(row.children[0]).listeners.change();
+  assert.deepEqual(sent.map(call => call.url), ['/api/track/toggle'], '저장 길은 목록과 같은 toggle 하나다');
+  assert.deepEqual(sent[0].body, { id: 'ck1', status: 'done' });
+  const region = app.nodes.get('liveRegion');
+  assert.equal(region.textContent, '확인 완료로 표시했어요');
+  assert.equal(region.children.some(node => node.textContent === '결정으로 남기기'), false, '알림에는 더 이상 후속 버튼이 없다');
+  assert.equal(app.run('waitingNextId'), 'ck1', '다음 행동은 체크한 그 자리에서 묻는다');
+});
+
+test('`다음은?` 줄은 목록을 다시 그려도 남고, 체크를 되돌리면 사라진다', () => {
+  const { app, check } = waitingNextClient();
+  check('ck1');
+  const draw = () => app.run("renderWaiting(workflowData.items.filter(item => item.status !== 'done'))");
+  draw();
+  const list = app.nodes.get('waitingList');
+  assert.equal(list.children[0].className, 'd-wnextwrap', '체크한 줄은 목록 맨 위에 한 번 더 서고');
+  assert.equal(list.children[0].children[1].className, 'd-wnext', '그 아래에 `다음은?` 줄이 붙는다');
+  draw();
+  assert.equal(list.children[0].className, 'd-wnextwrap', 'load()로 다시 그려도 그대로 남는다');
+  // ⌘Z나 체크 해제로 미완료가 되면 스스로 내려간다(저장하지 않는 메모리 상태라 판정은 지금 값으로 한다)
+  app.run("wfItem('ck1').status = 'to-do'; wfIndexData();");
+  assert.equal(app.run('waitingNextItem()'), null);
+  draw();
+  assert.notEqual(list.children[0].className, 'd-wnextwrap');
+});
+
+test('다른 확인 대기를 체크하면 `다음은?` 줄이 그쪽으로 옮겨 간다', () => {
+  const { app, check } = waitingNextClient();
+  check('ck1');
+  check('ck2');
+  assert.equal(app.run('waitingNextId'), 'ck2');
+  assert.equal(app.run("waitingNextItem('ck1')"), null, '먼저 체크한 줄에는 더 이상 붙지 않는다');
+  assert.equal(app.run("waitingNextItem('ck2').id"), 'ck2');
+});
+
+test('후속 할 일은 확인 대기와 같은 프로젝트로, 기한 없이 만들어진다(Enter는 오늘, 조합 중 Enter는 넘긴다)', async () => {
+  const { app, sent, check } = waitingNextClient();
+  const item = check('ck1');
+  const next = app.run("waitingNextRow(wfItem('ck1'))");
+  const bar = next.children[0];
+  assert.deepEqual(bar.children.map(node => node.textContent), ['다음은?', '후속 할 일', '결정으로 남기기', '답변 한 줄 남기기', '닫기']);
+  bar.children[1].listeners.click();
+  const form = next.children[0];
+  const input = form.children[0];
+  assert.equal(input.value, item.description, '확인 대기 문구가 미리 들어가고');
+  assert.equal(input.selected, true, '전체 선택된 채로 열린다');
+  assert.deepEqual(form.children.slice(1).map(node => node.textContent), ['오늘', '나중에']);
+
+  await input.listeners.keydown({ key: 'Enter', isComposing: true, preventDefault() {} });
+  assert.deepEqual(sent, [], '한글을 조합하는 중의 Enter는 글자를 확정하는 것이라 넘긴다');
+  await input.listeners.keydown({ key: 'Enter', preventDefault() {} });
+  assert.deepEqual(sent.map(call => call.url), ['/api/today-task/create']);
+  assert.deepEqual(sent[0].body, { description: '법무 검토 회신 받기', group: '가입 개선' }, '기한·우선순위는 넣지 않는다');
+  assert.equal(app.run('waitingNextId'), null, '만든 뒤에는 줄이 닫힌다');
+  assert.equal(app.run('undoStack.length'), 1, '되돌리기는 만든 업무를 지우는 기존 길이다');
+});
+
+test('`나중에`는 나중에 할 일로, 지라 확인 대기는 같은 지라 이슈로 만든다', async () => {
+  const { app, sent, check } = waitingNextClient();
+  check('ck2');
+  const next = app.run("waitingNextRow(wfItem('ck2'))");
+  next.children[0].children[1].listeners.click();
+  const form = next.children[0];
+  await form.children[2].listeners.click(); // 나중에
+  assert.deepEqual(sent.map(call => call.url), ['/api/later-task/create']);
+  assert.deepEqual(sent[0].body, { description: '벤더 확인 회신 받기', jira: 'PAY-77' });
+});
+
+test('답변 한 줄은 업무의 결과 한 줄과 같은 저장 길(outcome)을 쓴다', async () => {
+  const { app, sent, check } = waitingNextClient();
+  check('ck1');
+  const next = app.run("waitingNextRow(wfItem('ck1'))");
+  next.children[0].children[3].listeners.click();
+  const form = next.children[0];
+  const input = form.children[0];
+  assert.equal(input.getAttribute('aria-label'), '법무 검토 회신 받기 — 답변 한 줄');
+  input.value = ' 법무 검토 통과 ';
+  await input.listeners.keydown({ key: 'Enter', preventDefault() {} });
+  assert.deepEqual(sent.map(call => call.url), ['/api/workflow/item']);
+  assert.deepEqual(sent[0].body, { id: 'ck1', outcome: '법무 검토 통과' });
+  assert.equal(app.run('waitingNextId'), null);
+});
+
+test('이 답을 기다리던 업무는 있을 때만, 최대 세 줄까지 선다', () => {
+  const { app, check } = waitingNextClient();
+  check('ck1');
+  assert.equal(app.run("waitingNextRow(wfItem('ck1')).children.length"), 1, '연결된 업무가 없으면 그 줄은 그리지 않는다');
+  app.run(`workflowData.items.push(
+    { id: 't1', type: 'task', description: '업무1', status: 'to-do', blockedBy: 'ck1', scheduled: todayStr() },
+    { id: 't2', type: 'task', description: '업무2', status: 'to-do', blockedBy: 'ck1' },
+    { id: 't3', type: 'task', description: '업무3', status: 'to-do', blockedBy: 'ck1' },
+    { id: 't4', type: 'task', description: '업무4', status: 'to-do', blockedBy: 'ck1' },
+    { id: 't5', type: 'task', description: '끝난 업무', status: 'done', blockedBy: 'ck1' }
+  ); wfIndexData();`);
+  const blocked = app.run("waitingNextRow(wfItem('ck1')).children[1]");
+  assert.equal(blocked.className, 'bl');
+  assert.equal(blocked.children[0].textContent, '이 답을 기다리던 업무');
+  // 줄은 제목 + 버튼 묶음(.ac) 둘이고, 버튼은 좁은 자리에서 따로 줄바꿈되지 않게 한 덩어리로 붙어 있다.
+  const line = at => [blocked.children[at].children[0].textContent, ...blocked.children[at].children[1].children.map(node => node.textContent)];
+  assert.deepEqual(line(1), ['업무1', '열기'], '이미 오늘 할 일이면 `오늘로`는 없다');
+  assert.deepEqual(line(2), ['업무2', '오늘로', '열기']);
+  assert.equal(blocked.children.length, 5, '제목 + 세 줄 + 나머지 안내');
+  assert.equal(blocked.children[4].textContent, '외 1개');
+});
+
+test('`다음은?` 줄은 프로젝트 탭 확인 대기 구역 맨 위와 회의의 나온 줄 아래에 같은 부품으로 선다', () => {
+  const { app, check } = waitingNextClient();
+  app.run("workflowData.items.push({ id: 'ck3', type: 'check', description: '남은 확인', status: 'to-do', created: todayStr(), group: '가입 개선' }); wfIndexData();");
+  check('ck1');
+
+  const body = app.run(`(() => {
+    const body = document.createElement('div');
+    renderProjectDetail(body, { key: 'group:가입 개선', label: '가입 개선', open: 1 });
+    return body;
+  })()`);
+  const section = body.children.find(node => node.className === 'd-psec'
+    && node.children[0].children.some(kid => kid.textContent === '확인 대기'));
+  const surface = section.children[1];
+  assert.equal(surface.children[0].className, 'd-wnextwrap', '체크한 줄은 구역 맨 위에 다시 서고');
+  assert.equal(surface.children[0].children[1].className, 'd-wnext');
+  assert.equal(surface.children[1].children[1].textContent, '남은 확인', '남은 줄은 그대로다');
+
+  // 회의는 체크한 줄이 is-done으로 남으므로 그 줄 바로 아래에 붙는다
+  app.run("workflowData.items.forEach(item => { if (item.id === 'ck1') item.meetingId = 'm1'; }); wfIndexData();");
+  const box = app.run(`(() => { const box = document.createElement('div'); panelMeetingItems({ id: 'm1' }, box); return box; })()`);
+  const rows = box.children[0].children;
+  assert.equal(rows[1].className, 'd-mrow2 is-done');
+  assert.equal(rows[2].className, 'd-wnext');
+});
+
+test('`닫기`는 줄만 내린다 — 체크는 이미 저장됐으므로 아무것도 보내지 않는다', () => {
+  const { app, sent, check } = waitingNextClient();
+  check('ck1');
+  const next = app.run("waitingNextRow(wfItem('ck1'))");
+  next.children[0].children[4].listeners.click();
+  assert.equal(app.run('waitingNextId'), null);
+  assert.deepEqual(sent, []);
 });

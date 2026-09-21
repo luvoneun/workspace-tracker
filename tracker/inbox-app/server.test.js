@@ -144,6 +144,33 @@ test('completed outcome is used in the report draft text', async () => {
   assert.ok(rows.some(row => row.sourceIds.includes('legacy') && row.text.includes('디자인 전달일 금요일로 확정')));
 });
 
+// 확인 대기의 `답변 한 줄`은 업무의 `결과 한 줄`과 같은 칸(outcome)에 담긴다 — 주간요약 문장이 되는 값이다.
+test('답변 한 줄은 확인 대기에도 담기고, 결정·아이디어는 그대로 거절한다', async () => {
+  const check = await post('/api/waiting/create', { description: '번역 벤더 확인 회신 받기' });
+  assert.equal((await post('/api/workflow/item', { id: check.id, outcome: '벤더는 A사로 확정' })).ok, true);
+  assert.equal((await items()).workflows.items.find(item => item.id === check.id).outcome, '벤더는 A사로 확정');
+  // 업무 규칙은 그대로다
+  assert.equal((await post('/api/workflow/item', { id: 'legacy', outcome: '업무 결과 한 줄' })).ok, true);
+  const decision = await post('/api/decision/create', { description: '정산 주기는 매주 화요일' });
+  const idea = await post('/api/idea/create', { description: '온보딩에 진행률 바' });
+  assert.equal((await post('/api/workflow/item', { id: decision.id, outcome: '결정에는 결과가 없다' })).status, 400);
+  assert.equal((await post('/api/workflow/item', { id: idea.id, outcome: '아이디어에도 없다' })).status, 400);
+  // 한 줄·1,000자 규칙도 확인 대기에 그대로 걸린다
+  assert.equal((await post('/api/workflow/item', { id: check.id, outcome: 'ㄱ'.repeat(1001) })).status, 400);
+  assert.equal((await post('/api/workflow/item', { id: check.id, outcome: '두\n줄' })).status, 400);
+  assert.equal((await items()).workflows.items.find(item => item.id === check.id).outcome, '벤더는 A사로 확정');
+});
+
+test('주간요약의 `확인 완료` 문장은 답변 한 줄을 그대로 쓴다', async () => {
+  const check = await post('/api/waiting/create', { description: '법무 검토 회신 받기' });
+  await post('/api/workflow/item', { id: check.id, outcome: '법무 검토 통과, 문구 수정 없음' });
+  await post('/api/track/toggle', { id: check.id });
+  const rows = (await items()).weeklyReports.flatMap(report => report.draft?.rows || []);
+  const row = rows.find(entry => entry.sourceIds.includes(check.id));
+  assert.equal(row.heading, '확인 완료');
+  assert.equal(row.text, '법무 검토 통과, 문구 수정 없음');
+});
+
 test('workflow GET remains read-only', async () => {
   const before = fs.readFileSync(path.join(directory, '.workflow.json'), 'utf8');
   await items();

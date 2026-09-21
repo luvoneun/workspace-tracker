@@ -90,7 +90,9 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     if ('followUp' in patch) { if (source.type !== 'check') throw new Error('확인 대기에서만 지정할 수 있어요.'); validateDate(patch.followUp); }
     if ('contacted' in patch) { if (source.type !== 'check' || patch.contacted !== today()) throw new Error('확인 요청 날짜가 올바르지 않아요.'); }
     if ('blockedBy' in patch && (!['task', 'bug'].includes(source.type) || (patch.blockedBy !== null && (!all[patch.blockedBy] || all[patch.blockedBy].type !== 'check')))) throw new Error('연결할 확인 대기를 찾을 수 없어요.');
-    if ('outcome' in patch && (!['task', 'bug'].includes(source.type) || typeof patch.outcome !== 'string' || patch.outcome.length > 1000 || /[\r\n]/.test(patch.outcome))) throw new Error('결과는 1,000자 이내 한 줄로 적어 주세요.');
+    // outcome: 업무·버그의 `결과 한 줄`이자 확인 대기의 `답변 한 줄`이다(둘 다 주간요약 문장이 된다).
+    // 결정·아이디어에는 결과가 없다.
+    if ('outcome' in patch && (!['task', 'bug', 'check'].includes(source.type) || typeof patch.outcome !== 'string' || patch.outcome.length > 1000 || /[\r\n]/.test(patch.outcome))) throw new Error('결과는 1,000자 이내 한 줄로 적어 주세요.');
     const state = read();
     state.items[id] = { ...state.items[id], ...patch };
     write(state);

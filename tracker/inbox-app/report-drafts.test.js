@@ -385,3 +385,16 @@ test('a historical saved draft is not silently rewritten by source changes',t=>{
   f.items[0].description='이후 수정된 제목';old=f.store.view('2026-08-31');
   assert.equal(old.rows.find(row=>row.sourceIds.includes('a')).text,'문구 검토함');
 });
+// 확인 대기도 답변 한 줄(outcome)을 가질 수 있다 — `확인 완료` 문장은 그 한 줄이 되고, 없으면 문구 그대로다.
+test('확인 완료 문장은 답변 한 줄이 있으면 그것을 쓰고, 없으면 확인 대기 문구를 그대로 쓴다',t=>{
+  const f=fixture(t);
+  f.items.push({id:'c1',type:'check',description:'법무 검토 회신 받기',status:'done',created:'2026-09-15',completed:'2026-09-16',group:'가입',outcome:'법무 검토 통과, 문구 수정 없음'});
+  f.items.push({id:'c2',type:'check',description:'벤더 확인 회신 받기',status:'to-do',created:'2026-09-15',group:'결제'});
+  const rows=f.view().rows;
+  const answered=rows.find(row=>row.sourceIds.includes('c1'));
+  assert.equal(answered.heading,'확인 완료');
+  assert.equal(answered.text,'법무 검토 통과, 문구 수정 없음');
+  const waiting=rows.find(row=>row.sourceIds.includes('c2'));
+  assert.equal(waiting.heading,'확인 대기');
+  assert.equal(waiting.text,'벤더 확인 회신 받기');
+});

@@ -1336,11 +1336,13 @@ function renderProjectDetail(body, row) {
   // menu가 있으면 줄마다 같은 목록이 쓰는 ⋯ 메뉴를 그대로 단다(회의용·프로젝트탭용으로 새로 만들지 않는다).
   // check가 있으면(확인 대기·결정만) 목록이 쓰는 체크박스를 그대로 맨 앞에 단다.
   // withSource가 있으면(아이디어만) 원문이 있는 줄에 조용한 `원문` 링크를 붙인다.
-  const simple = (label, list, meta, onOpen, menu, check, withSource) => {
-    if (!list.length) return;
+  // lead가 있으면(확인 대기만) 구역 맨 위에 그 줄을 먼저 세운다 — 방금 체크한 줄의 `다음은?`이다.
+  const simple = (label, list, meta, onOpen, menu, check, withSource, lead) => {
+    if (!list.length && !lead) return;
     const section = projectSection(label, list.length);
     const surface = document.createElement('div');
     surface.className = 'd-psurf plain';
+    if (lead) surface.appendChild(lead);
     list.forEach(entry => surface.appendChild(projectSimpleRow(entry.text, meta(entry.item), () => onOpen(entry.item), entry.id,
       menu ? (row) => menu(entry.item, row) : null,
       check ? (row) => check(entry.item, row) : null,
@@ -1351,11 +1353,21 @@ function renderProjectDetail(body, row) {
   const asItems = list => list.map(item => ({ item, text: item.description, id: item.id }));
   const openPanel = item => panelOpen({ id: item.id });
 
+  // 방금 체크한 확인 대기는 아래 필터에서 빠지므로 구역 맨 위에 한 번 더 그려 `다음은?`을 잇는다.
+  const checkedNow = waitingNextItem();
+  const waitingLead = checkedNow && wfKey(checkedNow) === row.key
+    ? waitingNextLead(checkedNow, (entry) => {
+        const done = projectSimpleRow(entry.description, [entry.who, '확인 완료'].filter(Boolean).join(' · '),
+          () => panelOpen({ id: entry.id }), entry.id, null, (host) => waitingCheckbox(entry, host, true));
+        done.classList.add('is-done');
+        return done;
+      })
+    : null;
   simple('확인 대기', asItems(items.filter(item => item.type === 'check' && item.status !== 'done')),
     // 누구에게 + 급한 날짜 말(`1일 늦음`·`오늘 답변 예정`)을 함께 — 담당이 적혀 있다고 늦은 것이 가려지면 안 된다.
     item => [item.who, uiItemDueText(item)?.text].filter(Boolean).join(' · '), openPanel, waitingMenuSections,
     // 이 구역은 미완료만 보여 준다(위 필터) — 체크하면 확인 완료가 되어 목록에서 빠진다.
-    (item, row) => waitingCheckbox(item, row, false));
+    (item, row) => waitingCheckbox(item, row, false), false, waitingLead);
   // 결정은 미반영·반영을 글자로만 가른다(알약으로 그리지 않는다). 이 구역은 반영 완료도 함께 보여 준다 —
   // 체크해도 줄은 남고 오른쪽 글자만 `미반영` → 반영 날짜로 바뀐다(구역의 기존 규칙 그대로).
   simple('결정', asItems(items.filter(item => item.type === 'decision')),
@@ -2425,14 +2437,239 @@ async function createDecisionFromWaiting(item, button) {
     });
     await load();
     announce('결정으로 남겼어요 · 아이디어·결정 탭에서 다듬을 수 있어요');
-  } catch { if (button) button.disabled = false; }
+    return true;
+  } catch { if (button) button.disabled = false; return false; }
 }
 
-function offerDecisionFromWaiting(item) {
-  showNotice('확인 완료로 표시했어요', false, null, {
-    label: '결정으로 남기기',
-    onClick: (button) => createDecisionFromWaiting(item, button),
+// ---------- 확인 대기를 체크한 뒤의 `다음은?` 줄 ----------
+// 답을 받은 직후가 "그래서 이제 뭘 하지"를 정하기 가장 좋은 때인데, 몇 초 만에 사라지는 알림으로는
+// 그 순간이 지나가 버렸다. 그래서 체크한 그 자리에 제안 줄을 남긴다.
+// 체크 자체는 지금처럼 바로 저장되고(toggleTask · ⌘Z 그대로) 이 줄은 제안일 뿐이라 무시해도 된다.
+// 상태는 메모리에만 둔다(저장하지 않는다) — 목록이 다시 그려져도(load) 줄은 남고,
+// `닫기` · 액션 하나를 끝냄 · 다른 확인 대기를 체크함 · 탭을 떠남 · 새로고침 · 체크를 되돌림으로 사라진다.
+let waitingNextId = null;
+const WAITING_ANSWER_PLACEHOLDER = '받은 답을 한 줄로 — 주간요약의 확인 완료에 그대로 올라가요';
+
+function waitingNextOpen(item) { waitingNextId = item.id; }
+
+// 지금 `다음은?`을 물어야 하는 확인 대기. 체크를 되돌렸으면(⌘Z·다시 체크 해제) 스스로 내려간다.
+// id를 주면 그 항목일 때만 돌려준다(회의 줄처럼 자기 줄 아래에만 붙이는 자리).
+function waitingNextItem(id) {
+  if (!waitingNextId || (id !== undefined && id !== waitingNextId)) return null;
+  const item = typeof wfItem === 'function' ? wfItem(waitingNextId) : null;
+  if (!item || item.type !== 'check' || item.status !== 'done') { waitingNextId = null; return null; }
+  return item;
+}
+
+// 줄을 걷는다 — 목록을 통째로 다시 그리지 않고 그려져 있는 줄만 그 자리에서 없앤다.
+function waitingNextClose() {
+  waitingNextId = null;
+  [...(document.querySelectorAll?.('.d-wnext') || [])].forEach(node => (node.closest?.('.d-wnextwrap') || node).remove?.());
+}
+
+// 이 확인 대기를 `기다리는 답변`(blockedBy)으로 연결해 둔 미완료 업무 — 답이 왔으니 이제 움직일 수 있다.
+function waitingNextBlocked(item) {
+  const all = (typeof workflowData === 'object' && workflowData ? workflowData.items : null) || [];
+  return all.filter(task => ['task', 'bug'].includes(task.type) && task.status !== 'done' && task.blockedBy === item.id);
+}
+
+// 액션을 고르면 버튼 줄이 그 자리에서 입력 줄로 바뀐다. Enter는 첫 버튼과 같고(한글 조합 중에는 넘긴다),
+// Esc는 입력만 닫는다(escPush/escDrop — 카드·목록은 그대로 둔다).
+function waitingNextEdit(bar, { value, placeholder, label, buttons, onSubmit }) {
+  const form = document.createElement('div');
+  form.className = 'nx is-ed';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'd-din';
+  input.maxLength = 1000;
+  input.value = value || '';
+  input.placeholder = placeholder || '';
+  input.setAttribute('aria-label', label);
+  form.appendChild(input);
+
+  let settled = false;
+  const cancel = () => {
+    if (settled) return;
+    settled = true;
+    escDrop(cancel);
+    if (!form.isConnected) return; // 목록이 이미 다시 그려졌으면 되돌릴 자리가 없다
+    form.replaceWith(bar);
+  };
+  escPush(cancel);
+
+  const submit = async (mode, button) => {
+    if (settled || input.disabled) return;
+    const text = input.value.replace(/[\r\n]+/g, ' ').trim();
+    if (!text) { cancel(); return; }
+    input.disabled = true;
+    if (button) button.disabled = true;
+    try {
+      await onSubmit(text, mode);
+      settled = true;
+      escDrop(cancel);
+      waitingNextClose();
+    } catch {
+      input.disabled = false;
+      if (button) button.disabled = false;
+      input.focus();
+    }
+  };
+  buttons.forEach(([mode, text]) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'd-btn sm';
+    button.textContent = text;
+    button.setAttribute('aria-label', `${label} — ${text}`);
+    button.addEventListener('click', () => submit(mode, button));
+    form.appendChild(button);
   });
+  input.addEventListener('keydown', async (event) => {
+    if (event.key !== 'Enter' || event.isComposing) return;
+    event.preventDefault();
+    await submit(buttons[0][0]);
+  });
+  bar.replaceWith(form);
+  input.focus();
+  input.select?.();
+  return { form, input, cancel };
+}
+
+// 후속 할 일은 기존 업무 만들기 길을 그대로 쓴다 — 프로젝트는 확인 대기와 같게(지라면 같은 지라 이슈),
+// 기한·우선순위는 넣지 않는다(마감일을 추측해 만들지 않는다).
+// 되돌리기는 만든 업무를 지우는 기존 길(결정으로 남기기와 같다).
+async function waitingNextCreateTask(item, description, mode) {
+  const endpoint = mode === 'later' ? '/api/later-task/create' : '/api/today-task/create';
+  const response = await postJson(endpoint, {
+    description,
+    ...(item.jira ? { jira: item.jira } : item.group ? { group: item.group } : {}),
+  });
+  const { id } = await response.json();
+  pushUndo({
+    label: `${description} (후속 할 일)`,
+    undo: () => postJson('/api/track/remove', { id }),
+    redo: () => postJson('/api/track/restore', { id }),
+  });
+  await load();
+  announce(mode === 'later' ? '나중에 할 일에 추가했어요' : '오늘 할 일에 추가했어요');
+}
+
+// 답을 기다리던 업무 줄 — 최대 세 개, 더 있으면 `외 N개`. 이미 오늘 할 일이면 `오늘로`는 없다.
+function waitingNextBlockedList(blocked) {
+  const box = document.createElement('div');
+  box.className = 'bl';
+  const lead = document.createElement('span');
+  lead.className = 'lb';
+  lead.textContent = '이 답을 기다리던 업무';
+  box.appendChild(lead);
+  const today = todayStr();
+  blocked.slice(0, 3).forEach((task) => {
+    const line = document.createElement('div');
+    line.className = 'bln';
+    const title = document.createElement('span');
+    title.className = 'ti';
+    title.title = task.description;
+    title.textContent = task.description;
+    line.appendChild(title);
+    // 버튼은 한 덩어리로 붙여 둔다 — 레일처럼 좁은 자리에서 `오늘로`와 `열기`가 따로 줄바꿈되지 않게.
+    const acts = document.createElement('span');
+    acts.className = 'ac';
+    line.appendChild(acts);
+    if (task.scheduled !== today) {
+      const move = document.createElement('button');
+      move.type = 'button';
+      move.className = 'd-btn sm';
+      move.textContent = '오늘로';
+      move.setAttribute('aria-label', `${task.description} — 오늘로`);
+      move.addEventListener('click', async () => {
+        move.disabled = true;
+        try { await setTaskScheduled(task.id, todayStr()); announce('오늘 할 일로 옮겼어요'); }
+        catch { move.disabled = false; }
+      });
+      acts.appendChild(move);
+    }
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'd-btn sm';
+    open.textContent = '열기';
+    open.setAttribute('aria-label', `${task.description} 상세 보기`);
+    open.addEventListener('click', () => panelOpen({ id: task.id }));
+    acts.appendChild(open);
+    box.appendChild(line);
+  });
+  if (blocked.length > 3) {
+    const more = document.createElement('div');
+    more.className = 'bln is-more';
+    more.textContent = `외 ${blocked.length - 3}개`;
+    box.appendChild(more);
+  }
+  return box;
+}
+
+// `다음은?` 줄 한 벌. 세 자리(레일 확인 대기 카드 · 프로젝트 탭 확인 대기 구역 ·
+// 회의 카드/탭의 `이 회의에서 나온 것`)가 이 부품 하나를 쓴다.
+function waitingNextRow(item) {
+  const wrap = document.createElement('div');
+  wrap.className = 'd-wnext';
+  wrap.setAttribute('role', 'group');
+  wrap.setAttribute('aria-label', `${item.description} — 다음은?`);
+
+  const bar = document.createElement('div');
+  bar.className = 'nx';
+  const label = document.createElement('span');
+  label.className = 'lb';
+  label.textContent = '다음은?';
+  bar.appendChild(label);
+
+  const act = (text, onClick) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'd-btn sm';
+    button.textContent = text;
+    button.setAttribute('aria-label', `${item.description} — ${text}`);
+    button.addEventListener('click', () => onClick(button));
+    bar.appendChild(button);
+  };
+  act('후속 할 일', () => waitingNextEdit(bar, {
+    value: item.description,
+    placeholder: '후속 할 일 — Enter로 오늘 할 일',
+    label: `${item.description} — 후속 할 일`,
+    buttons: [['today', '오늘'], ['later', '나중에']],
+    onSubmit: (text, mode) => waitingNextCreateTask(item, text, mode),
+  }));
+  act('결정으로 남기기', async (button) => {
+    if (await createDecisionFromWaiting(item, button)) waitingNextClose();
+  });
+  act('답변 한 줄 남기기', () => waitingNextEdit(bar, {
+    value: (typeof wfItem === 'function' ? wfItem(item.id)?.outcome : '') || '',
+    placeholder: WAITING_ANSWER_PLACEHOLDER,
+    label: `${item.description} — 답변 한 줄`,
+    buttons: [['save', '저장']],
+    // 업무의 `결과 한 줄`과 같은 저장 길(outcome) — 주간요약의 `확인 완료` 문장이 이 한 줄이 된다.
+    onSubmit: async (text) => { await postJson('/api/workflow/item', { id: item.id, outcome: text }); await load(); },
+  }));
+
+  const dismiss = document.createElement('button');
+  dismiss.type = 'button';
+  dismiss.className = 'd-btn sm is-cl';
+  dismiss.textContent = '닫기';
+  dismiss.setAttribute('aria-label', `${item.description} — 다음은? 닫기`);
+  dismiss.addEventListener('click', () => waitingNextClose());
+  bar.appendChild(dismiss);
+  wrap.appendChild(bar);
+
+  const blocked = waitingNextBlocked(item);
+  if (blocked.length) wrap.appendChild(waitingNextBlockedList(blocked));
+  return wrap;
+}
+
+// 미완료만 보여 주는 목록(레일 확인 대기·프로젝트 탭)에서는 체크한 줄이 빠진다 —
+// 방금 체크한 줄을 목록 맨 위에 한 번 더 그리고 그 아래에 `다음은?`을 붙인다.
+function waitingNextLead(item, makeRow) {
+  const wrap = document.createElement('div');
+  wrap.className = 'd-wnextwrap';
+  wrap.appendChild(makeRow(item));
+  wrap.appendChild(waitingNextRow(item));
+  return wrap;
 }
 
 // 확인 요청을 오늘 다시 보냈다는 기록. 다시 확인할 날짜는 건드리지 않는다.
@@ -2573,6 +2810,10 @@ function renderWaiting(items) {
   const list = document.getElementById('waitingList');
   list.replaceChildren();
 
+  // 방금 체크한 줄은 이 목록(미완료만)에서 빠진다 — 맨 위에 한 번 더 그려 `다음은?`을 잇는다.
+  const checkedNow = waitingNextItem();
+  if (checkedNow) list.appendChild(waitingNextLead(checkedNow, entry => renderWaitingRow(entry, { showProject: true })));
+
   if (!items.length) {
     const empty = document.createElement('div');
     empty.className = 'd-rempty';
@@ -2608,10 +2849,12 @@ function waitingCheckboxInput(item, done) {
 function wireWaitingCheckbox(checkbox, item, row, done) {
   checkbox.addEventListener('change', () =>
     fadeOutAndRun(row, async () => {
-      await toggleTask(item.id);
-      // 확인이 끝난 내용은 그대로 두면 사라진다 — 알림에서 바로 결정으로 남길 수 있게 한다.
-      if (!done) offerDecisionFromWaiting(item);
-    }, done ? '대기중으로 되돌렸어요' : null)
+      // 확인이 끝난 내용은 그대로 두면 사라진다 — 체크한 그 자리에서 `다음은?`을 묻는다.
+      // 그 줄은 다시 그려진 목록에 함께 서야 하므로 목록을 다시 그리는 toggleTask보다 먼저 올려 둔다.
+      if (done) waitingNextClose(); else waitingNextOpen(item);
+      try { await toggleTask(item.id); }
+      catch (error) { waitingNextClose(); throw error; }
+    }, done ? '대기중으로 되돌렸어요' : '확인 완료로 표시했어요')
   );
 }
 function waitingCheckbox(item, row, done) {
@@ -2656,7 +2899,8 @@ function renderWaitingRow(item, opts = {}) {
     sub.appendChild(line);
   }
   // 답변 받을 날은 지났거나 오늘일 때만 배지로 세운다 — 먼 날짜는 줄을 시끄럽게 하지 않는다.
-  const reply = uiReplyText(item.due);
+  // 답을 받은 줄(체크한 뒤 `다음은?`과 함께 다시 그리는 줄)에는 늦음·다시 확인을 세우지 않는다.
+  const reply = done ? null : uiReplyText(item.due);
   if (reply) {
     const badge = document.createElement('span');
     badge.className = `bd${uiTone(reply.tone)}`;
@@ -2664,7 +2908,7 @@ function renderWaitingRow(item, opts = {}) {
     badge.textContent = reply.text;
     sub.appendChild(badge);
   }
-  const next = recheck ? '오늘 다시 확인'
+  const next = done ? '' : recheck ? '오늘 다시 확인'
     : detail?.followUp ? `${uiKoDateShort(detail.followUp)} 다시 확인`
     : detail?.contacted === today ? '오늘 요청함' : '';
   if (next) {
@@ -3383,17 +3627,22 @@ function panelTaskNotes(item, detail, box) {
   }
   box.appendChild(waiting);
 
-  const result = panelSection('결과 한 줄');
+  box.appendChild(panelOutcomeSection('결과 한 줄', '끝나고 한 줄로 남기면 주간요약에 그대로 올라가요', current, save));
+}
+
+// 업무의 `결과 한 줄`과 확인 대기의 `답변 한 줄`은 같은 부품·같은 저장 길(outcome)을 쓴다.
+function panelOutcomeSection(label, placeholder, current, save) {
+  const section = panelSection(label);
   const area = document.createElement('textarea');
   area.className = 'd-din';
   area.rows = 2;
   area.maxLength = 1000;
   area.value = current.outcome;
-  area.placeholder = '끝나고 한 줄로 남기면 주간요약에 그대로 올라가요';
-  area.setAttribute('aria-label', '결과 한 줄');
+  area.placeholder = placeholder;
+  area.setAttribute('aria-label', label);
   area.addEventListener('change', () => { current.outcome = area.value.replace(/[\r\n]+/g, ' ').trim(); save(); });
-  result.appendChild(area);
-  box.appendChild(result);
+  section.appendChild(area);
+  return section;
 }
 
 function panelCheck({ item, detail }, box) {
@@ -3425,15 +3674,28 @@ function panelCheck({ item, detail }, box) {
 
   const foot = document.createElement('div');
   foot.className = 'd-dfoot';
-  if (done) foot.appendChild(panelQuietButton('대기중으로 되돌리기', () => toggleTask(item.id)));
+  if (done) foot.appendChild(panelQuietButton('대기중으로 되돌리기', async () => { waitingNextClose(); await toggleTask(item.id); }));
   else foot.appendChild(panelQuietButton('확인됨으로 표시', async () => {
+    // 목록으로 돌아가면 그 줄에서 `다음은?`이 이어진다 — 알림은 저장됐다는 사실만 알린다.
+    waitingNextOpen(item);
     await toggleTask(item.id);
     panelClose();
-    offerDecisionFromWaiting(item);
+    announce('확인 완료로 표시했어요');
   }, 'd-btn pri'));
   // 확인이 끝난 내용을 남길지는 늘 고를 수 있어야 한다(알림이 사라진 뒤에도).
   foot.appendChild(panelQuietButton('결정으로 남기기', () => createDecisionFromWaiting(item)));
   box.appendChild(foot);
+
+  // 답을 받은 뒤에만 적을 것이 생긴다 — 업무의 `결과 한 줄`과 같은 부품·같은 저장 길(outcome)이다.
+  if (done) {
+    const current = { outcome: detail?.outcome || '' };
+    const initial = { ...current };
+    const save = async () => {
+      try { if (await panelFieldSave(item.id, initial, current)) await load(); }
+      catch { /* 저장 실패는 request()가 알린다 — 적은 내용은 그대로 둔다 */ }
+    };
+    box.appendChild(panelOutcomeSection('답변 한 줄', WAITING_ANSWER_PLACEHOLDER, current, save));
+  }
 
   const log = panelSection('확인 요청 기록');
   const line = document.createElement('div');
@@ -3912,7 +4174,12 @@ function panelMeetingItems(event, box, host = MEETING_HOST_CARD) {
   const items = [...wfMeetingItems(event.id)].sort((a, b) => typeRank(a) - typeRank(b));
   if (!items.length) return;
   const section = panelSection(`이 회의에서 나온 것 ${items.length}`);
-  items.forEach(item => section.appendChild(panelMeetingRow(item, event, null, host)));
+  items.forEach((item) => {
+    section.appendChild(panelMeetingRow(item, event, null, host));
+    // 체크한 확인 대기는 이 구역에 is-done으로 남는다 — 그 줄 바로 아래에 `다음은?`을 덧붙인다.
+    const next = item.type === 'check' ? waitingNextItem(item.id) : null;
+    if (next) section.appendChild(waitingNextRow(next));
+  });
   box.appendChild(section);
 }
 
@@ -4490,9 +4757,9 @@ function detailPopShape(box) {
   requestAnimationFrame(edges);
 }
 
-// 결과 한 줄은 한 줄로 시작해 쓰는 만큼만 자라고, 다섯 줄을 넘으면 칸 안에서 스크롤한다.
+// 결과 한 줄(확인 대기는 `답변 한 줄`)은 한 줄로 시작해 쓰는 만큼만 자라고, 다섯 줄을 넘으면 칸 안에서 스크롤한다.
 function detailAutoGrow(box, maxLines, onGrow) {
-  const area = box.querySelector('.d-dsec[data-sec="결과 한 줄"] .d-din');
+  const area = box.querySelector('.d-dsec[data-sec="결과 한 줄"] .d-din, .d-dsec[data-sec="답변 한 줄"] .d-din');
   if (!area) return;
   area.rows = 1;
   const cap = 21 * maxLines + 20;
@@ -5590,6 +5857,8 @@ projectKeyRestore();
 
 function setActiveTab(tab) {
   if (!TABS[tab]) tab = 'today';
+  // 확인 대기의 `다음은?` 줄은 그 자리의 제안이다 — 탭을 떠나면 함께 내린다.
+  if (tab !== activeTabKey) waitingNextClose();
   // 프로젝트 탭에 새로 들어올 때만 왼쪽 목록 차례를 다시 정렬한다(체크 등으로 이미 그 탭에 있는 동안
   // 다시 그리는 것은 고정된 차례를 그대로 쓴다 — projectOrderResort).
   if (tab === 'projects' && activeTabKey !== 'projects') projectOrderResort = true;
@@ -5652,6 +5921,7 @@ refreshBtn.addEventListener('click', async () => {
   refreshBtn.classList.add('spinning');
   // 새로고침은 프로젝트 탭에 들어올 때와 같이 왼쪽 목록 차례를 다시 정렬해도 되는 때다.
   projectOrderResort = true;
+  waitingNextClose(); // 화면을 새로 받는 때다 — 확인 대기의 `다음은?` 제안도 함께 내린다
   // 성공은 도는 아이콘이 말해 준다 — 알림을 또 띄우지 않는다(실패는 request가 알린다).
   refreshBtn.setAttribute('aria-busy', 'true');
   await load();
