@@ -126,14 +126,6 @@ async function wfReview(body) {
 function workflowOutcome(item) {
   showNotice('완료했어요', false, null, { label: '결과 한 줄 남기기', onClick: () => panelOpen({ id: item.id }) });
 }
-function workflowTaskBadges(item) {
-  const detail = wfItem(item.id);
-  if (!detail || item.status === 'done') return '';
-  const check = wfItem(detail.blockedBy);
-  let text = '';
-  if (check) text += `<span class="badge">${check.status === 'done' ? '답변 해결 · 진행 가능' : '답변 대기 중'}</span>`;
-  return text;
-}
 function workflowRender(data) {
   workflowData = data.workflows || { items: [], meetings: [] };
   wfIndexData();

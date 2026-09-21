@@ -1,6 +1,5 @@
 /* 워크스페이스 화면의 토큰과 공용 부품.
-   색·간격·반경·그림자는 전부 여기 토큰으로만 적고, 컴포넌트 규칙에는 색 값을 직접 쓰지 않는다.
-   index.html의 <style>에 남아 있는 옛 컴포넌트 규칙은 아래 "옛 이름" 블록 덕분에 그대로 돈다. */
+   색·간격·반경·그림자는 전부 여기 토큰으로만 적고, 컴포넌트 규칙에는 색 값을 직접 쓰지 않는다(스크롤바 제외). */
 
 /* 글꼴은 앱에 넣어 두고 서버가 직접 준다(외부에서 받아오지 않는다). 라이선스: fonts/Pretendard-LICENSE.txt */
 @font-face {
@@ -155,21 +154,6 @@
   --scrim: rgba(0, 0, 0, 0.5);
 }
 
-/* ---------- 옛 이름(alias) — 아직 남아 있는 옛 컴포넌트 CSS가 그대로 돌게 한다.
-   화면이 전부 새 모양이 되는 마지막 배치에서 옛 CSS와 함께 지운다. ---------- */
-:root {
-  --card: var(--surface);
-  --done-bg: var(--hover);
-  --radius: var(--r);
-  --radius-sm: var(--r-sm);
-  --ease-out: var(--ease);
-  --text-xs: 11.5px;
-  --text-sm: 12px;
-  --text-base: 13px;
-  --text-md: 14px;
-  --text-lg: 15px;
-}
-
 /* ---------- 리셋·타이포 ---------- */
 * { box-sizing: border-box; }
 
@@ -205,7 +189,89 @@ body {
 .d-pjdot[data-pj="4"] { background: var(--pj-4); }
 .d-pjdot[data-pj="5"] { background: var(--pj-5); }
 
-.sr-only-focusable:focus { position: static; }
+/* 화면에는 안 보이고 화면 읽기 프로그램만 읽는 글 */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+/* `hidden` 속성이 붙으면 어떤 display 규칙보다 먼저 사라진다 */
+[hidden] { display: none !important; }
+/* 새 부품은 저마다 :active를 가지고 있고, 이건 그 밖의 맨 button(지라·그룹 배지, 아이콘 버튼)용이다 */
+button:active { transform: scale(.98); }
+
+/* ---------- 탭 바깥 틀 (오늘·프로젝트 탭이 쓰는 두 칸 격자) ---------- */
+.grid { display: grid; gap: 20px; align-items: start; }
+.grid > * { min-width: 0; }
+
+/* ---------- 당겨서 새로고침 — 화면 맨 위에서 아래로 끌면 나타난다 ---------- */
+.pull-indicator {
+  position: fixed; top: 0; left: 50%; z-index: 60;
+  width: 32px; height: 32px; margin-left: -16px;
+  display: grid; place-items: center;
+  font-size: 15px; color: var(--muted);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 50%;
+  box-shadow: var(--shadow);
+  opacity: 0; pointer-events: none; transform: translateY(-40px);
+}
+.pull-indicator.snapping { transition: transform 260ms var(--ease), opacity 260ms var(--ease); }
+.pull-indicator.ready { color: var(--accent); border-color: var(--accent); }
+.pull-indicator.refreshing { color: var(--accent); animation: pull-spin 700ms linear infinite; }
+@keyframes pull-spin { to { transform: translateY(var(--pull-y, 56px)) rotate(360deg); } }
+
+/* ---------- 그 자리에서 고치는 제목 (새로 들어온 것·아이디어·결정) ---------- */
+.desc-editable { cursor: text; border-radius: 4px; }
+.desc-editable:hover { background: var(--hover); }
+.desc-editable:focus-visible { background: var(--field); }
+.desc-editable:hover::after, .desc-editable:focus-visible::after { content: ' ✎'; color: var(--accent); }
+.desc-edit-input {
+  font-family: inherit; font-weight: 600; font-size: 14px; color: var(--text);
+  border: none; border-bottom: 1px solid var(--accent); background: none;
+  padding: 0; flex: 1; min-width: 0;
+}
+.desc-edit-input:focus { outline: none; }
+
+/* ---------- 지라·프로젝트 배지와 그 자리 선택 칸 ---------- */
+.badge {
+  display: inline-block; max-width: 100%; vertical-align: top;
+  font-size: 11.5px; padding: 2px 8px; border-radius: 999px;
+  background: var(--bg); border: 1px solid var(--border); color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+button.badge { font-family: inherit; cursor: pointer; }
+button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)); }
+.badge.jira-badge {
+  color: var(--accent-text); font-weight: 600;
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.badge.group-badge { color: var(--text); border-color: var(--border); background: var(--bg); font-weight: 600; }
+.jira-control { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.jira-select {
+  font-size: 12px; color: var(--muted);
+  background: var(--bg); border: 1px solid var(--border); border-radius: 999px;
+  padding: 4px 10px; max-width: calc(100% - 4px); box-sizing: border-box;
+}
+.group-input {
+  font-size: 12px; color: var(--text);
+  background: var(--bg); border: 1px solid var(--border); border-radius: 999px;
+  padding: 4px 10px; max-width: 220px;
+}
+.group-input:focus { outline: none; border-color: var(--accent); }
+
+/* ---------- 새로 들어온 표시(NEW) ---------- */
+.new-dot {
+  position: absolute; top: -4px; right: -4px;
+  width: 11px; height: 11px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 0 2px var(--surface);
+}
+
+/* 레일 `오늘 미팅` 머리의 `전체 보기` 같은 곁들이 링크 */
+.wf-link {
+  border: 0; background: none; color: var(--accent-text);
+  font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+  padding: 6px; text-decoration: none;
+}
+.wf-link:hover { text-decoration: underline; }
 
 /* ---------- 버튼 세 등급 (둥근 사각. 알약은 입력칸·칩에만) ---------- */
 /* 3차 — 회색으로 채운 조용한 버튼 */
@@ -268,7 +334,7 @@ body {
 .d-seg { display: inline-flex; padding: 3px; gap: 2px; background: var(--neutral-bg); border-radius: var(--r-sm); }
 .d-seg button {
   height: 32px; padding: 0 14px; border: 0; border-radius: 9px; background: none;
-  font-family: inherit; font-size: 13.5px; font-weight: 600; color: var(--dim); cursor: pointer;
+  font-family: inherit; font-size: 13.5px; font-weight: 600; color: var(--muted); cursor: pointer;
   transition: background 170ms var(--ease), color 170ms var(--ease), transform 120ms var(--ease);
 }
 .d-seg button:hover { color: var(--text); }
@@ -286,8 +352,8 @@ body {
 .skip-link {
   position: absolute; left: 12px; top: -48px; z-index: 70;
   padding: 10px 14px; border-radius: var(--r-sm);
-  background: var(--accent); color: var(--on-fill);
-  font-size: var(--text-md); font-weight: 600; text-decoration: none;
+  background: var(--accent-strong); color: var(--on-fill);
+  font-size: 14px; font-weight: 600; text-decoration: none;
 }
 .skip-link:focus { top: 12px; }
 #todayTaskZone:focus { outline: none; }
@@ -463,7 +529,6 @@ body {
   transition: box-shadow 170ms var(--ease), background 170ms var(--ease);
 }
 .d-dateinput:focus { outline: none; background: var(--surface); box-shadow: 0 0 0 2px var(--accent); }
-.d-datenone { font-size: 13px; color: var(--dim); }
 
 /* 제목 아래의 조용한 한 줄(프로젝트 탭의 `열린 항목 8`) */
 .d-quiet { font-size: 13.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
@@ -510,9 +575,11 @@ body {
   font-size: 12.5px; font-weight: 600;
 }
 #waitingHeading .n { background: var(--warn-bg); color: var(--warn); }
-/* `전체 보기` 같은 곁들이 링크는 구역 제목보다 더 조용하게, 오른쪽 끝에 */
+/* `전체 보기` 같은 곁들이 링크는 구역 제목보다 더 조용하게, 오른쪽 끝에
+   (누르는 자리는 28px — 34px 머리줄 안에 그대로 들어간다) */
 .d-rhd .wf-link {
-  margin-left: auto; padding: 0 4px; height: 22px;
+  display: inline-flex; align-items: center;
+  margin-left: auto; padding: 0 6px; height: 28px;
   color: var(--dim); font-size: 12.5px; font-weight: 500;
 }
 .d-rhd .wf-link:hover { color: var(--accent-text); }
@@ -904,7 +971,6 @@ body.batch-open .d-row { grid-template-columns: 22px 30px minmax(0, 1fr) var(--w
 }
 .d-detail h3 { margin: 0; font-size: 13px; font-weight: 700; color: var(--text); }
 .d-dtop { display: flex; align-items: flex-start; gap: 6px; }
-.d-dclose { margin-left: auto; }
 .d-dtitle {
   flex: 1; min-width: 0;
   font-size: 20px; font-weight: 700; line-height: 29px; letter-spacing: -0.02em; color: var(--text);
@@ -1315,7 +1381,7 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-prow2.is-sel { --rowbg: var(--sel); }
 .d-prow2 .pl { font-size: 13px; color: var(--dim); white-space: nowrap; }
 .d-prow2 .ti {
-  border: 0; background: none; padding: 0; width: 100%; text-align: left; cursor: pointer;
+  border: 0; background: none; padding: 0; width: 100%; min-height: 28px; text-align: left; cursor: pointer;
   font-family: inherit; font-size: 16px; font-weight: 500; color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -1505,6 +1571,9 @@ body.batch-open .d-toast { bottom: 76px; }
 }
 @media (max-width: 900px) {
   .page { padding: 14px 16px 80px; }
+  /* 손가락으로 쓰는 폭에서는 입력칸 글자를 16px로 — 사파리가 초점에서 화면을 확대하지 않게 */
+  input, select { max-width: 100%; }
+  .desc-edit-input, .group-input { font-size: 16px; }
   #gridToday { grid-template-columns: minmax(0, 1fr); min-height: 0; }
   /* 프로젝트 목록도 레일처럼 본문 위로 쌓인다(카드는 그대로, 가로로 흐른다) */
   #gridProjects { grid-template-columns: minmax(0, 1fr); min-height: 0; }
@@ -1625,11 +1694,35 @@ body.batch-open .d-toast { bottom: 76px; }
   .d-selbar { padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px)); }
   .d-selbar .bar { gap: 2px; }
 
-  /* 환경설정은 화면을 거의 다 쓰는 판이 된다 */
+  /* 설정 창은 화면을 거의 다 쓰는 판이 된다 */
   #settingsDialog { width: calc(100vw - 16px); max-height: calc(100dvh - 48px); }
   .d-mhd { padding: 10px 10px 10px 14px; gap: 8px; }
   .d-mbody { padding: 12px 14px 20px; }
   .d-archq { font-size: 16px; height: 36px; }
+}
+
+/* ---------- 전화 너비: 헤더를 두 줄로 ----------
+   한 줄에 날짜 칩·탭 넷·아이콘 셋이 다 들어가지 않아 날짜와 탭이 겹쳤다.
+   탭 줄을 통째로 둘째 줄로 내리고 헤더 높이(--hdr)를 그만큼 키운다 —
+   레일·서랍·시트가 모두 이 값을 보고 자리를 잡는다. */
+@media (max-width: 520px) {
+  :root { --hdr: 100px; }
+  .d-hdr {
+    height: var(--hdr); flex-wrap: wrap; align-content: flex-start;
+    padding: 8px 12px 0 16px; gap: 8px;
+  }
+  .d-datewrap { order: 1; height: 36px; margin-right: auto; }
+  #refreshBtn { order: 2; }
+  #searchEntryBtn { order: 3; }
+  #settingsBtn { order: 4; }
+  .d-tabs {
+    order: 5; flex-basis: 100%; height: 48px; margin: 0;
+    overflow-x: auto; scrollbar-width: none;
+  }
+  .d-tabs::-webkit-scrollbar { display: none; }
+  .d-tab { padding: 0 10px; }
+  /* 서랍 머리는 헤더를 따라 커지지 않는다 */
+  .d-dhd { height: 60px; }
 }
 
 /* ---------- 스크롤바 (유일하게 토큰 밖 색을 쓰는 곳) ---------- */

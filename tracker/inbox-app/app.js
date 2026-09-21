@@ -347,7 +347,7 @@ function uiGroupHeading(label, count, opts = {}) {
   name.title = label;
   if (opts.onOpenProject) {
     name.type = 'button';
-    name.setAttribute('aria-label', `${label} 프로젝트 모아보기`);
+    name.setAttribute('aria-label', `${label} 프로젝트 보기`);
     name.addEventListener('click', opts.onOpenProject);
   }
   head.appendChild(name);
@@ -656,7 +656,7 @@ function uiRailRow(opts) {
     + (opts.wrap ? ' is-wrap' : '')
     + (opts.two ? ' is-two' : '')
     + (opts.selected ? ' is-sel' : '');
-  // 상세 패널이 열리고 닫힐 때 이 표식으로 찾아 `지금 보는 줄`을 표시한다.
+  // 상세 카드가 열리고 닫힐 때 이 표식으로 찾아 `지금 보는 줄`을 표시한다.
   if (opts.id !== undefined && opts.id !== null) row.dataset.railId = opts.id;
   if (opts.check) {
     const cell = document.createElement('span');
@@ -938,7 +938,7 @@ async function taskBatchRemove() {
 }
 
 // ---------- 프로젝트 탭 ----------
-// 왼쪽은 프로젝트 목록, 오른쪽은 고른 프로젝트 하나. 상세 패널은 오늘 탭과 같은 오른쪽 자리에 뜬다.
+// 왼쪽은 프로젝트 목록, 오른쪽은 고른 프로젝트 하나. 상세는 오늘 탭과 같이 누른 줄 옆 카드로 뜬다.
 
 // 목록에 적는 `열린 항목`은 한 규칙이다: 열린 업무(오늘+나중) + 열린 확인 대기.
 // 결정·아이디어·회의는 "해야 할 일"이 아니라서 세지 않는다.
@@ -2368,7 +2368,7 @@ function drawerSync() {
   document.body.classList.toggle('later-open', laterDrawerOpen);
   if (drawer) drawer.setAttribute('aria-hidden', String(!laterDrawerOpen));
   if (toggle) toggle.setAttribute('aria-expanded', String(laterDrawerOpen));
-  // 서랍이 열리고 닫히면 상세 패널이 열 안과 밖을 오간다 — 자리를 다시 잡아 준다.
+  // 서랍이 열리고 닫히면 상세 카드가 붙어 있던 줄이 움직인다 — 자리를 다시 잡아 준다.
   if (panelState) panelRender();
 }
 
@@ -2514,7 +2514,7 @@ function taskMenuSections({ item, mode, card }) {
 }
 
 // ---------- 회의 정리 열기 ----------
-// 회의 정리는 업무 상세와 같은 오른쪽 패널에서 연다(panelMeeting). 여기서는 레일의 미팅 줄이
+// 회의 정리는 업무 상세와 같은 줄 옆 카드에서 연다(panelMeeting). 여기서는 레일의 미팅 줄이
 // 가리키는 회의를 흐름 기록에서 찾아 넘기기만 한다. 아직 기록되지 않은 캘린더 회의는
 // 회의 자체를 그대로 넘겨 "직접 담기"만 있는 패널을 띄운다.
 function openMeetingPanel(event) {
@@ -4020,7 +4020,7 @@ function palPick(index) {
   const entry = palEntries[index];
   if (!entry) return;
   const back = { kind: 'palette', state: palSnapshot() };
-  // 상세 패널·회의 정리 패널은 오늘 탭의 세 번째 열이다 — 다른 탭에 있었다면 함께 옮긴다.
+  // 상세·회의 정리 카드는 누른 줄에 붙어 있다 — 다른 탭으로 옮겨 가면 함께 닫거나 옮긴다.
   if (entry.kind === 'meeting') {
     const id = entry.event.id;
     palClose(true);
@@ -4036,7 +4036,7 @@ function palPick(index) {
   panelOpen({ id: item.id, back });
 }
 
-// 결정·아이디어는 상세 패널이 없다 — 아이디어·결정 탭의 그 줄로 옮겨 가 잠깐 밝힌다.
+// 결정·아이디어는 상세 카드가 없다 — 아이디어·결정 탭의 그 줄로 옮겨 가 잠깐 밝힌다.
 function palRevealRecord(item) {
   setActiveTab('records');
   // 반영 완료는 접혀 있다 — 그 안의 결정을 고르면 먼저 펼친다.

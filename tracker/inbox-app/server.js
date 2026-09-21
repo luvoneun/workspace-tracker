@@ -489,7 +489,7 @@ function tailLines(filePath, maxLines) {
   return fs.readFileSync(filePath, 'utf-8').split('\n').slice(-maxLines);
 }
 
-// 환경설정 > 상태 탭에서 쓴다. run-task.sh가 남기는 "───── 시각 이름 시작/종료(exit N)"
+// 설정 > 상태 탭에서 쓴다. run-task.sh가 남기는 "───── 시각 이름 시작/종료(exit N)"
 // 블록과, slack-capture.sh가 미리보기만 하고 건너뛸 때 남기는 한 줄짜리 기록을 함께 읽어서
 // "마지막으로 뭘 했는지" 사람이 읽을 수 있는 요약과 "최근에 실패한 적 있는지"를 뽑아낸다.
 function parseAutomationLog(lines) {
@@ -1181,7 +1181,7 @@ const handleRequest = (req, res) => {
       // 앱 화면 파일이 바뀌면 이 값이 달라진다. 브라우저가 이걸 보고 스스로 새로고침한다.
       appVersion: (() => {
         try {
-          return ['index.html', 'app.js', 'ui.css', 'workflows.js', 'workflows.css', 'report-ui.js', 'report-ui.css'].map(file => fs.statSync(path.join(PUBLIC_DIR, file)).mtimeMs).join(':');
+          return ['index.html', 'app.js', 'ui.css', 'workflows.js', 'report-ui.js', 'report-ui.css'].map(file => fs.statSync(path.join(PUBLIC_DIR, file)).mtimeMs).join(':');
         } catch {
           return '0';
         }
@@ -1462,7 +1462,7 @@ const handleRequest = (req, res) => {
 
   let filePath = url.pathname === '/' ? '/index.html' : url.pathname;
   // 앱에 내장한 글꼴(Pretendard)도 화면 파일과 같은 길로 나간다. 인증 예외(publicAsset)에는 넣지 않는다.
-  if (!['/index.html','/app.js','/ui.css','/workflows.js','/workflows.css','/report-ui.js','/report-ui.css','/manifest.webmanifest'].includes(filePath)
+  if (!['/index.html','/app.js','/ui.css','/workflows.js','/report-ui.js','/report-ui.css','/manifest.webmanifest'].includes(filePath)
     && !/^\/icons\/[\w-]+\.(png|svg)$/.test(filePath) && !/^\/fonts\/[\w-]+\.woff2$/.test(filePath)) {
     res.writeHead(404); res.end('Not found'); return;
   }

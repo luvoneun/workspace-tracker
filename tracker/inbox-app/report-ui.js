@@ -405,7 +405,7 @@ function reportDocSummary(item, host, newIds) {
   host.appendChild(line);
 }
 
-// 근거 업무: 문장 아래 들여 쓴 목록. 줄을 누르면 오른쪽 상세 패널이 열린다.
+// 근거 업무: 문장 아래 들여 쓴 목록. 줄을 누르면 그 줄 옆에 상세 카드가 열린다.
 function reportEvidenceBlock(row) {
   const list = reportNode('div', undefined, 'rp-ev');
   const sources = row.currentEvidence || row.evidence || [];
