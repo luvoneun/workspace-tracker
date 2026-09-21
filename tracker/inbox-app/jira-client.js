@@ -10,11 +10,16 @@ const nodeFs = require('node:fs');
 const os = require('node:os');
 
 const JIRA_KEY_RE = /^[A-Z][A-Z0-9]*-\d+$/;
+const JIRA_PROJECT_RE = /^[A-Z][A-Z0-9]*$/;
+// 지라가 주는 id는 숫자 문자열이다. 주소에 그대로 끼우므로 숫자만 받는다.
+const JIRA_ID_RE = /^[0-9]{1,20}$/;
+const JIRA_DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 const JIRA_TIMEOUT_MS = 8000;
 const JIRA_CACHE_MS = 60 * 1000;
 const JIRA_CHILD_LIMIT = 100;
 // 띠 카드가 쓰는 값만 받아 온다 — 본문·댓글까지 끌고 오지 않는다.
 const ISSUE_FIELDS = 'summary,status,issuetype,assignee,duedate,fixVersions,subtasks';
+const CHANGE_KINDS = ['status', 'version', 'due', 'versionEdit'];
 
 // 지라가 주는 범주 열쇠는 셋뿐이다. 모르는 값은 `진행`으로 본다(상태 이름은 그대로 보여 준다).
 const CATEGORY = { new: 'todo', indeterminate: 'doing', done: 'done' };
@@ -26,6 +31,15 @@ const MESSAGE = {
   notfound: '지라에서 이 티켓을 찾지 못했어요.',
   network: '지라에 연결하지 못했어요.',
   other: '지라에 연결하지 못했어요.',
+  // 아래는 "바꾸기"(쓰기)에서만 쓰는 문구다 — 읽기 실패와 말이 섞이지 않게 따로 둔다.
+  off: '지라 연결이 필요해요.',
+  value: '보낸 값을 확인해 주세요.',
+  forbidden: '지라에서 이 티켓을 바꿀 권한이 없어요.',
+  reject: '지라가 이 변경을 받아들이지 않았어요. 지라에서 직접 확인해 주세요.',
+  write: '지라에 반영하지 못했어요.',
+  stale: '지라에서 고를 수 있는 값이 바뀌었어요. 카드를 새로 읽고 다시 골라 주세요.',
+  screen: '이 전환은 지라에서 직접 해 주세요.',
+  multi: '버전이 여러 개라 지라에서 직접 바꿔 주세요.',
 };
 
 function jiraError(kind, status) {
@@ -49,14 +63,60 @@ function jiraSettings(config) {
 }
 
 const issueUrl = (siteUrl, key) => `${siteUrl}/browse/${key}`;
+// 지라 키 `IO-48394`의 프로젝트는 `IO`다 — 버전 목록을 읽을 때 쓴다(따로 더 묻지 않는다).
+const projectOf = key => String(key || '').split('-')[0];
+
+const text = value => (typeof value === 'string' ? value : '');
+const day = value => (typeof value === 'string' && JIRA_DAY_RE.test(value) ? value : null);
+const idOf = value => (value != null && value !== '' ? String(value) : '');
+
+// 티켓에 걸린 버전 목록(id만). 바꾸기 직전에 "지금 몇 개가 걸려 있나"를 다시 확인하는 데 쓴다.
+const versionIdsOf = body => (Array.isArray(body && body.fields && body.fields.fixVersions) ? body.fields.fixVersions : [])
+  .map(version => idOf(version && version.id)).filter(Boolean);
+
+// 지라가 허용하는 전환만 선택지로 만든다. 보이는 이름은 `to.name`이고,
+// 같은 이름이 둘이면 그때만 전환 이름을 괄호로 붙여 구분한다.
+// `requiresInput`은 "지라에서 입력 화면을 거쳐야 하는 전환"이다(기본값 없는 필수 필드가 있는 것).
+function shapeTransitions(body) {
+  const list = Array.isArray(body && body.transitions) ? body.transitions : [];
+  const shaped = list.map((entry) => {
+    const fields = entry && entry.fields && typeof entry.fields === 'object' ? Object.values(entry.fields) : [];
+    return {
+      id: idOf(entry && entry.id),
+      toName: text(entry && entry.to && entry.to.name),
+      ownName: text(entry && entry.name),
+      requiresInput: fields.some(field => field && field.required === true && field.hasDefaultValue !== true),
+    };
+  }).filter(entry => entry.id && JIRA_ID_RE.test(entry.id));
+  const seen = new Map();
+  shaped.forEach(entry => seen.set(entry.toName, (seen.get(entry.toName) || 0) + 1));
+  return shaped.map(entry => ({
+    id: entry.id,
+    name: entry.toName
+      ? (seen.get(entry.toName) > 1 && entry.ownName ? `${entry.toName} (${entry.ownName})` : entry.toName)
+      : entry.ownName,
+    requiresInput: entry.requiresInput,
+  }));
+}
+
+// 프로젝트의 버전 목록. 고르개는 미배포·미보관만 내놓지만(거르는 것은 부르는 쪽),
+// "그 프로젝트의 버전이 맞나" 대조는 거르지 않은 전체로 한다.
+function shapeVersions(body) {
+  const list = Array.isArray(body) ? body : Array.isArray(body && body.values) ? body.values : [];
+  return list.map(version => ({
+    id: idOf(version && version.id),
+    name: text(version && version.name),
+    releaseDate: day(version && version.releaseDate),
+    released: !!(version && version.released),
+    archived: !!(version && version.archived),
+  })).filter(version => version.id && JIRA_ID_RE.test(version.id));
+}
 
 // 지라 응답에서 띠 카드가 쓰는 값만 뽑는다. 모르는 모양이 와도 빈 값으로 흐르게 한다.
 function shapeIssue(siteUrl, key, body, children) {
   const fields = (body && body.fields) || {};
   const status = fields.status || {};
   const versions = Array.isArray(fields.fixVersions) ? fields.fixVersions : [];
-  const text = value => (typeof value === 'string' ? value : '');
-  const day = value => (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null);
   return {
     key,
     url: issueUrl(siteUrl, key),
@@ -66,7 +126,7 @@ function shapeIssue(siteUrl, key, body, children) {
     assignee: text(fields.assignee && fields.assignee.displayName) || null,
     due: day(fields.duedate),
     versions: versions.map(version => ({
-      id: version && version.id != null ? String(version.id) : '',
+      id: idOf(version && version.id),
       name: text(version && version.name),
       releaseDate: day(version && version.releaseDate),
       released: !!(version && version.released),
@@ -93,28 +153,35 @@ function createJiraClient({ settings, request = (...args) => fetch(...args), rea
       return value;
     };
 
-  async function call(pathAndQuery, secret) {
+  // 지라로 나가는 단 하나의 길. `send`가 있으면 그 값을 본문으로 실어 보낸다(쓰기).
+  // 실패는 늘 우리 문구로 바꿔 던지되 `status`를 달아 둔다 — 쓰기 쪽이 400·403을 갈라 읽는다.
+  async function call(pathAndQuery, secret, { method = 'GET', send = null } = {}) {
     let response;
     try {
       response = await request(`${settings.siteUrl}${pathAndQuery}`, {
+        method,
         headers: {
           // 지라가 요구하는 Basic 인증. 이 값은 만들어 바로 보내고 어디에도 남기지 않는다.
           Authorization: `Basic ${Buffer.from(`${settings.email}:${secret}`).toString('base64')}`,
           Accept: 'application/json',
+          ...(send ? { 'Content-Type': 'application/json' } : {}),
         },
+        ...(send ? { body: JSON.stringify(send) } : {}),
         signal: AbortSignal.timeout(JIRA_TIMEOUT_MS),
       });
     } catch {
       // 끊긴 연결·시간 초과. 원인 문구에 주소·토큰이 섞이지 않게 우리 문구로만 알린다.
       throw jiraError('network');
     }
-    if (response.status === 401 || response.status === 403) throw jiraError('auth');
+    if (response.status === 401 || response.status === 403) throw jiraError('auth', response.status);
     if (response.status === 404) throw jiraError('notfound', 404);
-    if (!response.ok) throw jiraError('other');
+    if (!response.ok) throw jiraError('other', response.status);
+    // 쓰기는 보통 204(본문 없음)로 온다 — 돌려줄 값이 없으니 해석하지 않는다.
+    if (method !== 'GET') return null;
     try {
       return await response.json();
     } catch {
-      throw jiraError('other');
+      throw jiraError('other', response.status);
     }
   }
 
@@ -138,15 +205,79 @@ function createJiraClient({ settings, request = (...args) => fetch(...args), rea
     return countChildren(subtasks);
   }
 
+  const wantKey = (key) => { if (typeof key !== 'string' || !JIRA_KEY_RE.test(key)) throw jiraError('key'); return key; };
+  const wantId = (id) => { const value = idOf(id); if (!JIRA_ID_RE.test(value)) throw jiraError('value'); return value; };
+
   // 화면이 쓰는 한 덩어리. 실패는 `kind`가 붙은 Error로 던진다.
   async function getIssueOverview(key) {
-    if (typeof key !== 'string' || !JIRA_KEY_RE.test(key)) throw jiraError('key');
+    wantKey(key);
     const secret = token();
     const body = await call(`/rest/api/3/issue/${key}?fields=${ISSUE_FIELDS}`, secret);
     return shapeIssue(settings.siteUrl, key, body, await children(key, secret, body && body.fields && body.fields.subtasks));
   }
 
-  return { getIssueOverview };
+  // ---------- 바꾸기(2단계) ----------
+  // 전부 "고르개가 내놓을 선택지"와 "쓰기" 둘로만 나뉜다. 쓰기는 부르는 쪽이 확인 절차를 거친 뒤에만 부른다.
+
+  async function getTransitions(key) {
+    wantKey(key);
+    return shapeTransitions(await call(`/rest/api/3/issue/${key}/transitions?expand=transitions.fields`, token()));
+  }
+
+  async function getVersions(projectKey) {
+    if (typeof projectKey !== 'string' || !JIRA_PROJECT_RE.test(projectKey)) throw jiraError('key');
+    return shapeVersions(await call(`/rest/api/3/project/${projectKey}/versions`, token()));
+  }
+
+  // 티켓에 지금 걸린 버전 id만 가볍게 읽는다(하위 집계까지 끌고 오지 않는다).
+  async function getIssueVersionIds(key) {
+    wantKey(key);
+    return versionIdsOf(await call(`/rest/api/3/issue/${key}?fields=fixVersions`, token()));
+  }
+
+  async function transition(key, transitionId) {
+    wantKey(key);
+    await call(`/rest/api/3/issue/${key}/transitions`, token(), { method: 'POST', send: { transition: { id: wantId(transitionId) } } });
+  }
+
+  // `fields`에 담아 보낸 칸만 바뀐다(우리가 만든 값만 넣는다 — 받은 객체를 그대로 싣지 않는다).
+  async function updateIssueFields(key, fields) {
+    wantKey(key);
+    if (!fields || !Object.keys(fields).length) throw jiraError('value');
+    await call(`/rest/api/3/issue/${key}`, token(), { method: 'PUT', send: { fields } });
+  }
+
+  // 버전 자체(이름·배포일)를 고친다 — 그 버전을 쓰는 모든 티켓에 적용된다.
+  async function updateVersion(versionId, patch) {
+    const id = wantId(versionId);
+    const send = {};
+    if (patch && typeof patch.name === 'string') {
+      const name = patch.name.trim();
+      if (!name || name.length > 255 || /[\r\n]/.test(name)) throw jiraError('value');
+      send.name = name;
+    }
+    if (patch && 'releaseDate' in patch) {
+      if (patch.releaseDate === null) send.releaseDate = null;
+      else if (typeof patch.releaseDate === 'string' && JIRA_DAY_RE.test(patch.releaseDate)) send.releaseDate = patch.releaseDate;
+      else throw jiraError('value');
+    }
+    if (!Object.keys(send).length) throw jiraError('value');
+    await call(`/rest/api/3/version/${id}`, token(), { method: 'PUT', send });
+  }
+
+  return { getIssueOverview, getTransitions, getVersions, getIssueVersionIds, transition, updateIssueFields, updateVersion };
+}
+
+// 쓰기 실패를 화면 문구로 옮기는 단 하나의 표. 우리가 먼저 막은 것(대조 실패·필수 입력·여러 버전)은
+// 그 갈래를 그대로 쓰고, 지라가 준 것은 상태 번호로만 가른다(지라 원문은 절대 싣지 않는다).
+const WRITE_GUARDS = ['key', 'value', 'stale', 'screen', 'multi'];
+function writeKind(error) {
+  if (error && WRITE_GUARDS.includes(error.kind)) return error.kind;
+  const status = error && error.status;
+  if (status === 401 || status === 403) return 'forbidden';
+  if (status === 400) return 'reject';
+  if (status === 404) return 'notfound';
+  return 'write';
 }
 
 // 서버가 쓰는 겉면: 설정 확인 + 키별 60초 메모리 캐시 + 화면에 그대로 보여 줄 오류 문구.
@@ -184,7 +315,83 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
     }
   }
 
-  return { read, connected: !!settings };
+  // 고르개가 열릴 때만 부른다(카드를 그릴 때는 부르지 않는다). 파일도 캐시도 없다 —
+  // 선택지는 늘 지라의 지금 값이어야 하고, 쓰기 직전에 서버가 한 번 더 대조한다.
+  async function options(key) {
+    if (typeof key !== 'string' || !JIRA_KEY_RE.test(key)) return { ok: false, error: MESSAGE.key, kind: 'key' };
+    if (!settings) return { ok: true, connected: false };
+    const secret = token();
+    if (!secret) return { ok: true, connected: false };
+    try {
+      const client = createJiraClient({ settings, request, readToken: () => secret });
+      const [transitions, versions] = await Promise.all([client.getTransitions(key), client.getVersions(projectOf(key))]);
+      return {
+        ok: true,
+        connected: true,
+        transitions,
+        // 고를 수 있는 것은 아직 배포되지 않고 보관되지 않은 버전뿐이다(지금 걸린 버전은 화면이 더한다).
+        versions: versions.filter(version => !version.released && !version.archived)
+          .map(({ id, name, releaseDate }) => ({ id, name, releaseDate })),
+      };
+    } catch (error) {
+      const kind = MESSAGE[error && error.kind] ? error.kind : 'other';
+      return { ok: false, error: MESSAGE[kind], kind };
+    }
+  }
+
+  // 지라에 쓰는 단 하나의 길. 화면은 확인 절차를 거친 뒤에만 부르고,
+  // 여기서는 보낸 값을 다시 검증하고 id를 **쓰기 직전에 다시 조회해 대조**한다.
+  // 앱 데이터 저장소(mutation-store·idempotent)는 건드리지 않는다 — 지라는 앱 파일이 아니다.
+  async function change(body) {
+    const payload = body && typeof body === 'object' ? body : {};
+    const key = payload.key;
+    const what = payload.kind;
+    if (typeof key !== 'string' || !JIRA_KEY_RE.test(key)) return { ok: false, error: MESSAGE.key, kind: 'key' };
+    if (!CHANGE_KINDS.includes(what)) return { ok: false, error: MESSAGE.value, kind: 'value' };
+    if (!settings) return { ok: false, error: MESSAGE.off, kind: 'off' };
+    const secret = token();
+    if (!secret) return { ok: false, error: MESSAGE.off, kind: 'off' };
+    const client = createJiraClient({ settings, request, readToken: () => secret });
+    try {
+      if (what === 'status') {
+        const id = idOf(payload.transitionId);
+        // 고르개가 본 목록이 아니라 **지금** 목록으로 대조한다(그 사이 지라에서 바뀌었을 수 있다).
+        const allowed = (await client.getTransitions(key)).find(entry => entry.id === id);
+        if (!allowed) throw jiraError('stale');
+        if (allowed.requiresInput) throw jiraError('screen');
+        await client.transition(key, id);
+      } else if (what === 'version') {
+        const versionId = payload.versionId == null || payload.versionId === '' ? null : idOf(payload.versionId);
+        // 버전이 여러 개 걸린 티켓은 앱에서 바꾸지 않는다 — 다른 버전을 실수로 지우지 않게.
+        if ((await client.getIssueVersionIds(key)).length > 1) throw jiraError('multi');
+        if (versionId !== null && !(await client.getVersions(projectOf(key))).some(version => version.id === versionId)) throw jiraError('stale');
+        await client.updateIssueFields(key, { fixVersions: versionId ? [{ id: versionId }] : [] });
+      } else if (what === 'due') {
+        const due = payload.due == null || payload.due === '' ? null : payload.due;
+        if (due !== null && !(typeof due === 'string' && JIRA_DAY_RE.test(due))) throw jiraError('value');
+        await client.updateIssueFields(key, { duedate: due });
+      } else {
+        const versionId = idOf(payload.versionId);
+        if (!(await client.getVersions(projectOf(key))).some(version => version.id === versionId)) throw jiraError('stale');
+        const patch = {};
+        if (typeof payload.name === 'string') patch.name = payload.name;
+        if ('releaseDate' in payload) patch.releaseDate = payload.releaseDate === '' ? null : payload.releaseDate;
+        await client.updateVersion(versionId, patch);
+      }
+    } catch (error) {
+      const kind = writeKind(error);
+      return { ok: false, error: MESSAGE[kind], kind };
+    }
+    // 바뀐 티켓의 낡은 캐시는 버린다 — 화면이 곧바로 `fresh=1`로 다시 읽는다.
+    cache.delete(key);
+    return { ok: true };
+  }
+
+  return { read, options, change, connected: !!settings };
 }
 
-module.exports = { createJiraClient, createJiraApi, jiraSettings, issueUrl, countChildren, JIRA_KEY_RE, JIRA_TIMEOUT_MS, JIRA_CACHE_MS, JIRA_MESSAGE: MESSAGE };
+module.exports = {
+  createJiraClient, createJiraApi, jiraSettings, issueUrl, projectOf, countChildren,
+  shapeTransitions, shapeVersions, writeKind,
+  JIRA_KEY_RE, JIRA_TIMEOUT_MS, JIRA_CACHE_MS, JIRA_MESSAGE: MESSAGE,
+};

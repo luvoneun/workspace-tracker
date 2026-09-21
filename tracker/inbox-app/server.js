@@ -1305,6 +1305,42 @@ const handleRequest = (req, res) => {
     return;
   }
 
+  // 고르개가 열릴 때 지라가 허용하는 전환·버전 목록을 읽는다. 파일도 캐시도 없다(조회).
+  if (url.pathname === '/api/jira/options' && req.method === 'GET') {
+    if (!USES.jira) { res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ ok: false, error: '지라를 쓰지 않도록 설정돼 있어요.', kind: 'other' })); return; }
+    jira.options(url.searchParams.get('key'))
+      .then((payload) => {
+        res.writeHead(payload.kind === 'key' ? 400 : 200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(payload));
+      })
+      .catch(() => {
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: '지라에 연결하지 못했어요.', kind: 'other' }));
+      });
+    return;
+  }
+
+  // 지라에 쓰는 단 하나의 주소. 화면이 확인 절차를 거친 뒤에만 부르고, 서버는 보낸 값을 다시
+  // 검증한 뒤 id를 쓰기 직전에 지라에서 다시 조회해 대조한다. 앱 파일은 하나도 건드리지 않으므로
+  // `idempotent()`·mutation-store를 타지 않는다(그것들은 앱 데이터용이다) — 다만 복구 필요 상태의
+  // POST 차단은 맨 위 전역 분기를 그대로 탄다(앱 저장소가 아픈 동안 바깥에 쓰지 않는 쪽이 안전하다).
+  // 요청 본문은 어디에도 기록하지 않는다.
+  if (url.pathname === '/api/jira/change' && req.method === 'POST') {
+    if (!USES.jira) { res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ ok: false, error: '지라를 쓰지 않도록 설정돼 있어요.', kind: 'other' })); return; }
+    readBody(req)
+      .then(body => jira.change(body))
+      .then((payload) => {
+        // 보낸 쪽 잘못(키·값 형식)만 400이다. 지라 쪽 실패는 200 + `ok:false`로 문구를 실어 보낸다.
+        res.writeHead(payload.kind === 'key' || payload.kind === 'value' ? 400 : 200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(payload));
+      })
+      .catch(() => {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: '보낸 값을 확인해 주세요.', kind: 'value' }));
+      });
+    return;
+  }
+
   if (url.pathname === '/api/automation/status' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ automations: getAutomationStatus() }));

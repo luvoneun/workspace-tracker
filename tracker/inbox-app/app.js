@@ -1089,21 +1089,6 @@ function projectVisibleRows(rows, { showEmpty, selectedKey } = {}) {
   return { visible, zero, hiddenCount };
 }
 
-// 연결된 지라 이슈가 지라에서는 이미 끝났을 때 조용히 알린다 — 판정은 동기화가 `그 밖의 이슈`
-// 구역에 적는 상태 글자 하나(`완료`)로 한다(기본 구역은 미완료만 담으므로 여기에 걸리지 않는다).
-// 표시는 프로젝트 탭에만 붙인다.
-function uiJiraDone(key) {
-  const issue = typeof key === 'string' && key.startsWith('jira:') ? jiraIssuesByKey.get(key.slice('jira:'.length)) : null;
-  return !!issue && issue.status === '완료';
-}
-function uiJiraDoneTag(short) {
-  const tag = document.createElement('span');
-  tag.className = 'd-jdone';
-  tag.textContent = short ? '지라 완료' : '지라에서 완료됨';
-  if (short) tag.title = '지라에서 완료됨';
-  return tag;
-}
-
 // ---------- 지라 띠 카드 (프로젝트 탭, 읽기 전용) ----------
 // 지라에 연결된 프로젝트를 열면 제목 아래에 지라의 지금 상태를 한 장으로 보여 준다.
 // 앱 서버가 API 토큰으로 직접 읽어 오고(AI를 거치지 않는다) 이 화면은 **보기만** 한다 —
@@ -1154,8 +1139,9 @@ function jiraChildrenLabel(children) {
   return { text: `${children.total}개 중 ${done}개 완료`, ratio: Math.round((done / children.total) * 100) };
 }
 
-// 값 한 칸(라벨 위 · 값 아래). 2단계에서는 이 함수 안의 값 자리만 고르개로 바뀐다.
-function jiraCell(label, text, tone, hint) {
+// 값 한 칸(라벨 위 · 값 아래). `pick`을 주면 값 자리가 상세 카드와 같은 값 고르개가 된다
+// (값 + 꺾쇠, hover 면). 고르개를 눌러도 곧바로 쓰지 않는다 — 확인 줄을 한 번 더 거친다.
+function jiraCell(label, text, tone, hint, pick) {
   const cell = document.createElement('div');
   cell.className = 'cell';
   const lb = document.createElement('span');
@@ -1165,8 +1151,30 @@ function jiraCell(label, text, tone, hint) {
   value.className = 'v' + (text ? (tone ? ` ${tone}` : '') : ' is-none');
   // 지라가 준 글자는 언제나 textContent로만 넣는다(새 innerHTML을 쓰지 않는다).
   value.textContent = text || '없음';
-  if (hint) value.title = hint;
-  cell.append(lb, value);
+  cell.appendChild(lb);
+  if (!pick) {
+    if (hint) value.title = hint;
+    cell.appendChild(value);
+    return cell;
+  }
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'd-dpick';
+  button.setAttribute('aria-haspopup', 'true');
+  button.setAttribute('aria-expanded', 'false');
+  button.setAttribute('aria-label', `${label} — 눌러서 바꾸기`);
+  if (hint) button.title = hint;
+  if (pick.disabled) button.disabled = true;
+  const caret = document.createElement('span');
+  caret.className = 'cv';
+  // 고정 마크업(꺾쇠 아이콘)만 붙는 자리다 — 지라가 준 글자는 위 textContent로만 들어간다.
+  caret.insertAdjacentHTML('beforeend', uiIcon('chevron'));
+  button.append(value, caret);
+  button.addEventListener('click', (event) => {
+    if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+    jiraPickOpen(button, pick.sections);
+  });
+  cell.appendChild(button);
   return cell;
 }
 
@@ -1220,6 +1228,302 @@ function jiraSkeleton() {
   return card;
 }
 
+// ---------- 지라 바꾸기 (2단계 — 지라에 쓴다, 전부 확인 절차) ----------
+// 지키는 것: ① 확인 줄을 거치지 않으면 어떤 쓰기 요청도 나가지 않는다.
+// ② 낙관적 갱신을 하지 않는다 — 성공한 뒤 `fresh=1`로 다시 읽어 지라가 준 값만 그린다.
+// ③ 앱의 ⌘Z 대상이 아니다: `request()`를 타지 않아 `pushUndo`·`recordUndoFor`가 돌지 않는다.
+// ④ 쓰는 동안 세 고르개가 모두 잠겨 한 카드에서 동시에 두 개를 쓰지 않는다.
+const JIRA_OPTIONS_MS = 30 * 1000;
+let jiraOptions = { key: null, at: 0, transitions: [], versions: [] };
+let jiraBusy = false;
+let jiraConfirm = null;
+
+const jiraOpen = (url) => { if (typeof window !== 'undefined' && typeof window.open === 'function') window.open(url, '_blank', 'noopener'); };
+
+// 고르개를 여는 순간에만 지라에서 선택지를 읽는다(카드를 그릴 때는 부르지 않는다).
+async function jiraOptionsLoad(key) {
+  if (jiraOptions.key === key && Date.now() - jiraOptions.at < JIRA_OPTIONS_MS) return jiraOptions;
+  const response = await fetch(`/api/jira/options?key=${encodeURIComponent(key)}`);
+  const data = await response.json();
+  if (data.connected === false) throw new Error('지라 연결이 필요해요.');
+  if (data.ok !== true) throw new Error(data.error || '지라에 연결하지 못했어요.');
+  jiraOptions = { key, at: Date.now(), transitions: data.transitions || [], versions: data.versions || [] };
+  return jiraOptions;
+}
+
+// 지라에 쓰는 단 하나의 길. 확인 줄의 `바꾸기`만 이 함수를 부른다.
+async function jiraChangeSend(body) {
+  const response = await fetch('/api/jira/change', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  let data = null;
+  try { data = await response.json(); } catch { data = null; }
+  if (!data || data.ok !== true) throw new Error((data && data.error) || '지라에 반영하지 못했어요.');
+  return data;
+}
+
+// 카드 안에서 무언가를 찾는 자리 하나(가짜 창에서도 안전하게 흘러가게 물음표로 잇는다).
+const jiraCardNode = () => document.getElementById('jiraStrip')?.querySelector?.('.d-jira') || null;
+
+function jiraConfirmClose(repaint = true) {
+  if (!jiraConfirm) return;
+  const { onEsc, pickLabel } = jiraConfirm;
+  escDrop(onEsc);
+  jiraConfirm = null;
+  if (!repaint) return;
+  jiraStripPaint();
+  // 닫으면 값을 고르던 그 고르개로 초점이 돌아간다(메뉴에서 값을 고른 뒤 초점이 머리로 튀지 않게).
+  jiraCardNode()?.querySelector?.(`.d-dpick[aria-label^="${pickLabel}"]`)?.focus?.();
+}
+// 고른 값은 곧바로 나가지 않는다 — 카드 안에 확인 줄을 세우고 거기서만 보낸다.
+function jiraConfirmOpen(plan) {
+  jiraConfirmClose(false);
+  plan.onEsc = () => jiraConfirmClose();
+  escPush(plan.onEsc);
+  jiraConfirm = plan;
+  jiraStripPaint();
+  // 그려 붙인 뒤에 초점을 옮긴다 — 읽는 프로그램이 묻는 말부터 읽고, Tab이 `취소`·`바꾸기`로 이어진다.
+  jiraCardNode()?.querySelector?.('.d-jconfirm')?.focus?.();
+}
+// 바깥을 누르면 취소다(메뉴 안 클릭은 메뉴가 전파를 막으므로 여기 오지 않는다).
+document.addEventListener('click', (event) => {
+  if (!jiraConfirm) return;
+  const row = jiraCardNode()?.querySelector?.('.d-jconfirm');
+  if (row && typeof row.contains === 'function' && row.contains(event.target)) return;
+  jiraConfirmClose();
+});
+
+// 쓰는 동안 카드의 고르개·새로고침을 그 자리에서 잠근다(다시 그리지 않는다 — 확인 줄이 살아 있어야 한다).
+function jiraLockPicks(locked) {
+  const card = jiraCardNode();
+  if (!card || typeof card.querySelectorAll !== 'function') return;
+  card.querySelectorAll('.d-dpick, .d-jref').forEach((node) => { node.disabled = locked; });
+}
+
+// 고르개를 여는 길 하나. 선택지를 못 읽으면 알림만 띄우고 메뉴를 열지 않는다.
+async function jiraPickOpen(button, sections) {
+  if (jiraBusy) return;
+  if (uiMenuOpen && uiMenuOpen.anchor === button) { uiMenuClose(); return; }
+  // 떠 있던 확인 줄은 먼저 닫는다(다시 그린다) — 그러면 이 버튼이 떨어져 나가므로 같은 고르개를 다시 찾는다.
+  const label = button.getAttribute('aria-label') || '';
+  if (jiraConfirm) jiraConfirmClose();
+  const anchor = (button.isConnected === false && jiraCardNode()?.querySelector?.(`.d-dpick[aria-label="${label}"]`)) || button;
+  anchor.disabled = true;
+  let built;
+  try {
+    built = await sections();
+  } catch (error) {
+    showNotice(error.message || '지라에 연결하지 못했어요.', true);
+    return;
+  } finally {
+    anchor.disabled = false;
+  }
+  if (anchor.isConnected === false) return;
+  uiMenu(anchor, built);
+}
+
+const jiraVersionOptionLabel = version => (version.releaseDate ? `${version.name} · ${uiKoDateShort(version.releaseDate)}` : version.name);
+
+// 지라 상태: 지라가 허용하는 전환만 내놓는다. 추가 입력이 필요한 전환은 선택지에 두되 쓰지 않는다.
+async function jiraStatusSections(issue) {
+  const { transitions } = await jiraOptionsLoad(issue.key);
+  const before = issue.status?.name || '';
+  const items = transitions.map(entry => ({
+    label: entry.name,
+    onClick: () => {
+      if (entry.requiresInput) {
+        showNotice('이 전환은 지라에서 직접 해 주세요', true, null, { label: '지라에서 열기', onClick: () => jiraOpen(issue.url) });
+        return;
+      }
+      jiraConfirmOpen({
+        key: issue.key, label: '지라 상태', pickLabel: '지라 상태', before, after: entry.name,
+        body: { key: issue.key, kind: 'status', transitionId: entry.id },
+      });
+    },
+  }));
+  return [items.length ? items : [{ label: '지라에서 바꿀 수 있는 상태가 없어요', disabled: true, onClick: () => {} }]];
+}
+
+// 배포 버전: ① 이 티켓을 다른 버전으로 ② 이 버전 고치기(이름·배포일 — 모든 티켓에 적용된다).
+async function jiraVersionSections(issue) {
+  const { versions } = await jiraOptionsLoad(issue.key);
+  const attached = Array.isArray(issue.versions) ? issue.versions.filter(Boolean) : [];
+  const current = attached.length === 1 ? attached[0] : null;
+  const head = [{ field: '이 티켓을 다른 버전으로' }];
+  if (attached.length > 1) {
+    return [[...head,
+      { label: '버전이 여러 개라 지라에서 직접 바꿔 주세요', disabled: true, onClick: () => {} },
+      { label: '지라에서 열기', onClick: () => jiraOpen(issue.url) },
+    ]];
+  }
+  // 지금 걸린 버전이 미배포 목록에 없으면(이미 배포된 버전이면) 선택지에 함께 세운다.
+  const choices = versions.some(version => current && version.id === current.id) || !current
+    ? versions
+    : [...versions, { id: current.id, name: current.name, releaseDate: current.releaseDate }];
+  const move = choices
+    .filter(version => !current || version.id !== current.id)
+    .map(version => ({
+      label: jiraVersionOptionLabel(version),
+      onClick: () => jiraConfirmOpen({
+        key: issue.key, label: '지라의 배포 버전', pickLabel: '배포 버전', before: current ? current.name : '', after: version.name,
+        body: { key: issue.key, kind: 'version', versionId: version.id },
+      }),
+    }));
+  if (current) {
+    move.push({
+      label: '버전 없음',
+      onClick: () => jiraConfirmOpen({
+        key: issue.key, label: '지라의 배포 버전', pickLabel: '배포 버전', before: current.name, after: '',
+        body: { key: issue.key, kind: 'version', versionId: null },
+      }),
+    });
+  }
+  const first = [...head, ...(move.length ? move : [{ label: '고를 수 있는 미배포 버전이 없어요', disabled: true, onClick: () => {} }])];
+  if (!current) return [first];
+  const edit = [
+    { field: '이 버전 고치기' },
+    {
+      field: '이름',
+      control: uiMenuText({
+        value: current.name, label: '지라의 배포 버전 이름',
+        onChange: (next) => {
+          uiMenuClose();
+          if (!next || next === current.name) return;
+          jiraConfirmOpen({
+            key: issue.key, label: '이 버전의 이름', pickLabel: '배포 버전', before: current.name, after: next,
+            warn: '이 버전을 쓰는 모든 티켓에 적용돼요',
+            body: { key: issue.key, kind: 'versionEdit', versionId: current.id, name: next },
+          });
+        },
+      }),
+    },
+    {
+      field: '배포일',
+      control: uiDateField({
+        value: current.releaseDate || '', label: '지라의 배포일',
+        onChange: (next) => {
+          uiMenuClose();
+          if ((next || '') === (current.releaseDate || '')) return;
+          jiraConfirmOpen({
+            key: issue.key, label: '이 버전의 배포일', pickLabel: '배포 버전',
+            before: current.releaseDate ? uiKoDateShort(current.releaseDate) : '',
+            after: next ? uiKoDateShort(next) : '',
+            warn: '이 버전을 쓰는 모든 티켓에 적용돼요',
+            body: { key: issue.key, kind: 'versionEdit', versionId: current.id, releaseDate: next },
+          });
+        },
+      }),
+    },
+  ];
+  return [first, edit];
+}
+
+// 기한: 날짜 칸 하나(지우기 포함).
+async function jiraDueSections(issue) {
+  return [[
+    {
+      field: '지라의 기한',
+      control: uiDateField({
+        value: issue.due || '', label: '지라의 기한', pickLabel: '기한',
+        onChange: (next) => {
+          uiMenuClose();
+          if ((next || '') === (issue.due || '')) return;
+          jiraConfirmOpen({
+            key: issue.key, label: '지라의 기한', pickLabel: '기한',
+            before: issue.due ? uiKoDateShort(issue.due) : '',
+            after: next ? uiKoDateShort(next) : '',
+            body: { key: issue.key, kind: 'due', due: next },
+          });
+        },
+      }),
+    },
+  ]];
+}
+
+// 확인 줄 — `지라의 이 티켓을 바꿀까요?` + 티켓 요약(키는 조용한 글자) + 전→후 + `취소`/`바꾸기`.
+function jiraConfirmRow(issue, plan) {
+  const row = document.createElement('div');
+  row.className = 'd-jconfirm';
+  row.setAttribute('role', 'group');
+  row.setAttribute('aria-label', '지라에 보내기 전 확인');
+  row.setAttribute('tabindex', '-1');
+
+  const ask = document.createElement('div');
+  ask.className = 'ask';
+  ask.textContent = '지라의 이 티켓을 바꿀까요?';
+  const what = document.createElement('div');
+  what.className = 'what';
+  const summary = document.createElement('span');
+  summary.className = 'sm';
+  summary.textContent = issue.summary || issue.key;
+  const keyText = document.createElement('span');
+  keyText.className = 'ky';
+  keyText.textContent = issue.key;
+  what.append(summary, keyText);
+
+  const diff = document.createElement('div');
+  diff.className = 'diff';
+  const label = document.createElement('span');
+  label.className = 'lb';
+  label.textContent = `${plan.label}:`;
+  const before = document.createElement('span');
+  before.className = 'bf';
+  before.textContent = plan.before || '없음';
+  const arrow = document.createElement('span');
+  arrow.className = 'ar';
+  arrow.textContent = '→';
+  const after = document.createElement('span');
+  after.className = 'af';
+  after.textContent = plan.after || '없음';
+  diff.append(label, before, arrow, after);
+  row.append(ask, what, diff);
+
+  if (plan.warn) {
+    const warn = document.createElement('div');
+    warn.className = 'warn';
+    warn.textContent = plan.warn;
+    row.appendChild(warn);
+  }
+
+  const acts = document.createElement('div');
+  acts.className = 'acts';
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'd-btn sm';
+  cancel.textContent = '취소';
+  cancel.addEventListener('click', () => jiraConfirmClose());
+  const go = document.createElement('button');
+  go.type = 'button';
+  go.className = 'd-btn sm acc';
+  go.textContent = '바꾸기';
+  go.addEventListener('click', async () => {
+    if (jiraBusy) return;
+    jiraBusy = true;
+    jiraLockPicks(true);
+    cancel.disabled = true;
+    go.disabled = true;
+    go.textContent = '보내는 중…';
+    try {
+      await jiraChangeSend(plan.body);
+      jiraBusy = false;
+      jiraConfirmClose(false);
+      // 선택지도 함께 낡았다 — 다음에 고르개를 열면 지라에서 새로 읽는다.
+      jiraOptions = { key: null, at: 0, transitions: [], versions: [] };
+      showNotice('지라에서 바꿨어요', false, null, { label: '지라에서 열기', onClick: () => jiraOpen(issue.url) });
+      // 낙관적 갱신 금지 — 지라가 준 값만 그린다.
+      await jiraCardLoad(issue.key, { fresh: true });
+    } catch (error) {
+      jiraBusy = false;
+      jiraConfirmClose(false);
+      showNotice(error.message || '지라에 반영하지 못했어요.', true);
+      jiraStripPaint();
+    }
+  });
+  acts.append(cancel, go);
+  row.appendChild(acts);
+  return row;
+}
+
 function jiraStripBody(key) {
   if (!key) return null;
   if (jiraCard.key !== key || jiraCard.state === 'loading' || jiraCard.state === 'idle') return jiraSkeleton();
@@ -1266,6 +1570,7 @@ function jiraStripCard(issue) {
   refresh.className = 'd-iconbtn sm d-jref';
   refresh.setAttribute('aria-label', '지라 상태 새로고침');
   refresh.title = '지라에서 다시 읽어요';
+  if (jiraBusy) refresh.disabled = true;
   refresh.insertAdjacentHTML('beforeend', uiIcon('refresh'));
   refresh.addEventListener('click', () => jiraCardLoad(issue.key, { fresh: true }));
   top.append(tag, name, sub, spacer, link, refresh);
@@ -1273,12 +1578,22 @@ function jiraStripCard(issue) {
   const cells = document.createElement('div');
   cells.className = 'cells';
   const version = jiraVersionText(issue.versions);
+  // 쓰는 동안(그리고 확인 줄이 떠 있는 동안)은 세 고르개가 모두 잠긴다 — 한 카드에서 두 개를 동시에 쓰지 않는다.
+  const locked = jiraBusy;
   cells.append(
-    jiraCell('지라 상태', issue.status?.name, jiraStatusTone(issue.status?.category), '지라에 적힌 지금 상태예요'),
-    jiraCell('배포 버전', version ? `${version.name} ${version.note}`.trim() : '', version ? version.tone : '', version ? version.hint : '지라의 배포 버전이 아직 없어요'),
-    jiraCell('기한', issue.due ? uiKoDateShort(issue.due) : '', '', issue.due ? `지라에 적힌 기한은 ${uiKoDate(issue.due)}이에요` : '지라에 적힌 기한이 없어요'),
+    jiraCell('지라 상태', issue.status?.name, jiraStatusTone(issue.status?.category), '지라에 적힌 지금 상태예요 — 눌러서 바꿔요',
+      { disabled: locked, sections: () => jiraStatusSections(issue) }),
+    jiraCell('배포 버전', version ? `${version.name} ${version.note}`.trim() : '', version ? version.tone : '',
+      version ? version.hint : '지라의 배포 버전이 아직 없어요',
+      { disabled: locked, sections: () => jiraVersionSections(issue) }),
+    jiraCell('기한', issue.due ? uiKoDateShort(issue.due) : '', '',
+      issue.due ? `지라에 적힌 기한은 ${uiKoDate(issue.due)}이에요` : '지라에 적힌 기한이 없어요',
+      { disabled: locked, sections: () => jiraDueSections(issue) }),
   );
   card.append(top, cells);
+
+  // 확인 줄은 값 칸 바로 아래에 선다 — 무엇을 바꾸는지와 가장 가까운 자리다.
+  if (jiraConfirm && jiraConfirm.key === issue.key) card.appendChild(jiraConfirmRow(issue, jiraConfirm));
 
   const children = jiraChildrenLabel(issue.children);
   if (children) {
@@ -1301,14 +1616,6 @@ function jiraStripCard(issue) {
   return card;
 }
 
-// 띠 카드가 지금 상태를 받았으면 큰 제목 옆 `지라에서 완료됨`은 그 값으로 판정한다
-// (왼쪽 목록은 하루 한 번 도는 스냅샷 그대로 — BSL 결정).
-function jiraDoneLive(projectKey) {
-  const key = jiraKeyOf(projectKey);
-  if (key && jiraCard.key === key && jiraCard.state === 'ok' && jiraCard.issue) return jiraCard.issue.status?.category === 'done';
-  return uiJiraDone(projectKey);
-}
-
 // 카드 자리만 다시 그린다 — 늦게 온 응답 때문에 프로젝트 화면 전체를 다시 만들지 않는다.
 function jiraStripPaint() {
   const host = document.getElementById('jiraStrip');
@@ -1316,13 +1623,6 @@ function jiraStripPaint() {
   const key = host.dataset.jiraKey || '';
   const body = jiraStripBody(key);
   host.replaceChildren(...(body ? [body] : []));
-  const title = document.getElementById('projectBody')?.querySelector?.('.d-ptitle');
-  if (title && typeof title.querySelector === 'function') {
-    const tag = title.querySelector('.d-jdone');
-    const want = jiraDoneLive(`jira:${key}`);
-    if (tag && !want) tag.remove?.();
-    if (!tag && want) title.appendChild(uiJiraDoneTag());
-  }
 }
 
 async function jiraCardLoad(key, { fresh = false, quiet = false } = {}) {
@@ -1358,7 +1658,9 @@ async function jiraCardLoad(key, { fresh = false, quiet = false } = {}) {
 // 프로젝트를 열 때만 부른다. 같은 프로젝트를 다시 그리는 것(체크 등)으로는 다시 부르지 않고,
 // 60초가 지났으면 뼈대 없이 조용히 새로 읽는다(값이 깜빡이지 않게).
 function jiraCardEnsure(key) {
-  if (jiraCard.key !== key) { jiraCardLoad(key); return; }
+  if (jiraCard.key !== key) { jiraConfirmClose(false); jiraCardLoad(key); return; }
+  // 확인 줄이 떠 있거나 쓰는 중이면 뒤에서 값을 갈아 끼우지 않는다(무엇을 확인 중인지가 바뀌면 안 된다).
+  if (jiraBusy || jiraConfirm) return;
   if (jiraCard.state === 'ok' && Date.now() - jiraCard.at > JIRA_REFRESH_MS) jiraCardLoad(key, { quiet: true });
 }
 
@@ -1400,14 +1702,6 @@ function renderProjects() {
     name.textContent = displayLabel;
     // 눈에 보이는 자리는 요약만, title 툴팁에는 지라 키를 남긴다(BKEY 결정).
     name.title = uiGroupLabel(row.key, { withKey: true });
-    // 완료 글자가 붙는 줄만 두 칸으로 나눈다 — 긴 이름의 말줄임에 글자가 잘려 사라지지 않게.
-    if (uiJiraDone(row.key)) {
-      const label = document.createElement('span');
-      label.className = 't';
-      label.textContent = displayLabel;
-      name.className = 'nm has-tag';
-      name.replaceChildren(label, uiJiraDoneTag(true));
-    }
     const count = document.createElement('span');
     count.className = 'n num';
     count.textContent = row.open;
@@ -1591,7 +1885,6 @@ function renderProjectDetail(body, row) {
   title.className = 'd-ptitle';
   // 큰 제목은 요약만(BKEY 결정) — 한 프로젝트만 보여 주는 자리라 같은 요약과 헷갈릴 일이 없다.
   title.textContent = uiGroupLabel(row.key);
-  if (jiraDoneLive(row.key)) title.appendChild(uiJiraDoneTag());
   const summary = document.createElement('div');
   summary.className = 'd-quiet';
   // 그 아래 조용한 줄에만 지라 키를 덧붙인다(`열린 항목 2 · IO-48394`).

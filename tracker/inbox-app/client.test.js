@@ -2130,18 +2130,13 @@ test('wfProjects: 그 밖의 이슈는 항목이 걸려 있을 때만 프로젝�
   assert.deepEqual(keys.sort(), ['jira:AB-1', 'jira:ZZ-9'], '항목이 걸린 ZZ-9는 남고, 아무도 안 쓰는 ZZ-8은 목록에 서지 않는다');
 });
 
-// `지라에서 완료됨`은 프로젝트 탭에만 붙는 회색 글자다. 판정은 상태 글자 하나(`완료`)로 한다.
-test('프로젝트 탭: 지라에서 완료된 이슈에만 `지라에서 완료됨`이 붙는다', () => {
+// 지라에서 끝났는지는 띠 카드의 `지라 상태`가 말한다 — 제목 옆·목록의 글자는 두지 않는다(2026-09-25 결정).
+test('프로젝트 탭의 제목·목록에는 지라 완료 글자를 붙이지 않는다', () => {
   const app = workflowsClient();
   app.run(`jiraIssuesByKey = new Map([
     ['ZZ-9', { key: 'ZZ-9', summary: '끝난 이슈', status: '완료', extra: true }],
     ['AB-1', { key: 'AB-1', summary: '가입', status: '진행 중', extra: false }],
   ]);`);
-  assert.equal(app.run("uiJiraDone('jira:ZZ-9')"), true);
-  assert.equal(app.run("uiJiraDone('jira:AB-1')"), false);
-  assert.equal(app.run("uiJiraDone('jira:없음')"), false);
-  assert.equal(app.run("uiJiraDone('group:운영툴')"), false, '그룹 프로젝트에는 붙지 않는다');
-
   app.run("workflowData = { items: [], meetings: [] }; wfIndexData(); itemsById = new Map();");
   const titleOf = key => app.run(`(() => {
     const body = document.createElement('div');
@@ -2149,10 +2144,10 @@ test('프로젝트 탭: 지라에서 완료된 이슈에만 `지라에서 완료
     return body.children[0];
   })()`);
   const done = titleOf('jira:ZZ-9');
-  assert.equal(done.children.length, 1);
-  assert.equal(done.children[0].className, 'd-jdone');
-  assert.equal(done.children[0].textContent, '지라에서 완료됨');
-  assert.equal(titleOf('jira:AB-1').children.length, 0, '진행 중인 이슈에는 아무것도 붙지 않는다');
+  assert.equal(done.className, 'd-ptitle');
+  assert.equal(done.children.length, 0, '지라에서 끝난 이슈에도 제목 옆 글자가 없다');
+  assert.equal(done.textContent, '끝난 이슈');
+  assert.equal(titleOf('jira:AB-1').children.length, 0);
 });
 
 // BKEY(2026-09-24): 프로젝트 탭 오른쪽 — 큰 제목은 요약만, 그 아래 조용한 줄에만 지라 키가 붙는다.
@@ -2643,17 +2638,6 @@ test('다른 프로젝트로 빨리 옮기면 늦게 온 지라 응답은 버린
   assert.match(calls[2], /key=AB-2&fresh=1$/);
 });
 
-test('지라 응답이 오면 제목 옆 `지라에서 완료됨`은 그 값으로 판정한다', async () => {
-  const { app } = jiraClient(() => new Response(JSON.stringify({ ok: true, connected: true, issue: jiraIssue({ status: { name: '진행 중', category: 'doing' } }) })));
-  app.run("jiraIssuesByKey = new Map([['IO-48394', { key: 'IO-48394', status: '완료', summary: '스냅샷' }]]);");
-  assert.equal(app.run("uiJiraDone('jira:IO-48394')"), true, '스냅샷은 완료라고 말한다');
-  assert.equal(app.run("jiraDoneLive('jira:IO-48394')"), true, '아직 못 받았으면 스냅샷을 따른다');
-  app.run("document.getElementById('jiraStrip').dataset.jiraKey = 'IO-48394'");
-  await app.run("jiraCardLoad('IO-48394')");
-  assert.equal(app.run("jiraDoneLive('jira:IO-48394')"), false, '실시간 상태가 진행 중이면 글자를 숨긴다');
-  assert.equal(app.run("uiJiraDone('jira:IO-48394')"), true, '왼쪽 목록이 쓰는 스냅샷 판정은 그대로다');
-});
-
 // 로드 직후 아주 빨리 누른 탭이 마지막 탭 복원에 덮이던 경쟁(크롬 검수에서 발견).
 test('마지막 탭 복원은 사람이 이미 탭을 골랐으면 하지 않는다', () => {
   const app = pureClient();
@@ -2662,4 +2646,218 @@ test('마지막 탭 복원은 사람이 이미 탭을 골랐으면 하지 않는
   assert.equal(app.run("tabToRestore('weekly', true, null)"), null, '이미 누른 탭이 있으면 복원하지 않는다');
   assert.equal(app.run("tabToRestore('weekly', false, 'projects')"), 'projects', '앱이 켜지기 전에 누른 탭(초점이 남은 탭)을 따른다');
   assert.equal(app.run("tabToRestore('weekly', true, 'projects')"), null);
+});
+
+// ---------- 지라 바꾸기 (BJR 2단계) ----------
+// 여기서 지키는 것은 하나다: **확인 줄의 `바꾸기`를 누르기 전에는 어떤 POST도 나가지 않는다.**
+// 가짜 fetch가 method까지 기록하므로 "나갔는가"를 글자가 아니라 기록으로 판정한다.
+const jiraOptionsPayload = {
+  ok: true,
+  connected: true,
+  transitions: [
+    { id: '11', name: '진행 중', requiresInput: false },
+    { id: '21', name: '완료', requiresInput: false },
+    { id: '41', name: '보류', requiresInput: true },
+  ],
+  // 지금 티켓에 걸린 버전(id `1`)과 아직 배포되지 않은 다른 버전 하나.
+  versions: [
+    { id: '1', name: 'v2.70.0', releaseDate: '2026-09-30' },
+    { id: '10102', name: 'v2.71.0', releaseDate: null },
+  ],
+};
+// vm 안에서 만든 값은 바깥 realm의 값과 reference-equal이 아니다 — 견줄 때는 평범한 값으로 옮긴다.
+const plain = value => JSON.parse(JSON.stringify(value));
+function jiraChangeClient({ change = () => ({ ok: true }), issue = jiraIssue() } = {}) {
+  const app = pureClient();
+  const calls = [];
+  app.context.fetch = async (url, options) => {
+    const method = (options && options.method) || 'GET';
+    calls.push({ url: String(url), method, body: options && options.body ? JSON.parse(options.body) : null });
+    if (String(url).includes('/api/jira/options')) return new Response(JSON.stringify(jiraOptionsPayload));
+    if (String(url).includes('/api/jira/change')) {
+      const answer = await change();
+      return answer instanceof Response ? answer : new Response(JSON.stringify(answer));
+    }
+    return new Response(JSON.stringify({ ok: true, connected: true, issue }));
+  };
+  app.run(`jiraCard = { key: '${issue.key}', state: 'ok', issue: ${JSON.stringify(issue)}, error: '', at: Date.now(), seq: 1 };`);
+  app.run("jiraOptions = { key: null, at: 0, transitions: [], versions: [] }; jiraBusy = false; jiraConfirm = null;");
+  app.run(`document.getElementById('jiraStrip').dataset.jiraKey = '${issue.key}'`);
+  // 가짜 창에는 document.body도 화면 좌표도 없다 — 메뉴는 열지 않고 "무엇을 열려 했는지"만 붙잡는다.
+  app.run("lastMenu = null; uiMenu = (anchor, sections) => { lastMenu = sections; return null; };");
+  const posts = () => calls.filter(call => call.method === 'POST');
+  const card = () => app.nodes.get('jiraStrip').children[0];
+  return { app, calls, posts, card, confirm: () => nodeFind(card(), 'd-jconfirm') };
+}
+const jiraMenuItems = sections => sections.flat().filter(entry => entry && entry.label);
+
+test('지라 값을 골라도 확인 줄을 거치기 전에는 아무것도 보내지 않는다', async () => {
+  const fixture = jiraChangeClient();
+  const sections = await fixture.app.run('jiraStatusSections(jiraCard.issue)');
+  // 선택지는 지라가 허용한 전환뿐이고, 읽는 데 GET 하나만 나갔다.
+  assert.deepEqual(plain(jiraMenuItems(sections).map(entry => entry.label)), ['진행 중', '완료', '보류']);
+  assert.equal(fixture.calls.length, 1);
+  assert.match(fixture.calls[0].url, /\/api\/jira\/options\?key=IO-48394$/);
+  assert.equal(fixture.calls[0].method, 'GET');
+
+  jiraMenuItems(sections)[1].onClick();
+  assert.equal(fixture.posts().length, 0, '값을 고른 것만으로는 지라에 쓰지 않는다');
+  const row = fixture.confirm();
+  assert.ok(row, '카드 안에 확인 줄이 선다');
+  const text = nodeText(row);
+  assert.match(text, /지라의 이 티켓을 바꿀까요\?/);
+  assert.match(text, /게시글 작성하기_게임 임베드/, '확인 창에는 티켓 요약을 쓴다');
+  assert.match(text, /IO-48394/, '키는 조용한 글자로만 붙는다');
+  assert.match(text, /지라 상태: 진행 중 → 완료/, '전 → 후를 보여 준다');
+  assert.match(text, /취소 바꾸기/);
+  assert.equal(nodeFind(row, 'ky').textContent, 'IO-48394');
+
+  // 확인 줄이 떠 있는 채로 다른 고르개를 열면 확인 줄이 먼저 닫힌다(보내지 않는다).
+  fixture.app.context.duePick = nodeFind(fixture.card(), 'cells').children[2].children[1];
+  await fixture.app.run('jiraPickOpen(duePick, () => jiraDueSections(jiraCard.issue))');
+  assert.equal(fixture.app.run('jiraConfirm'), null);
+  assert.equal(fixture.confirm(), null);
+  assert.equal(fixture.posts().length, 0);
+
+  // `취소`는 아무것도 보내지 않고 줄만 닫는다.
+  jiraMenuItems(sections)[1].onClick();
+  nodeFind(fixture.confirm(), 'acts').children[0].listeners.click();
+  assert.equal(fixture.app.run('jiraConfirm'), null);
+  assert.equal(fixture.posts().length, 0);
+  assert.equal(fixture.confirm(), null);
+});
+
+test('확인 줄의 `바꾸기`만 지라에 쓰고, 성공하면 fresh=1로 다시 읽는다 (⌘Z 대상이 아니다)', async () => {
+  const fixture = jiraChangeClient();
+  const sections = await fixture.app.run('jiraStatusSections(jiraCard.issue)');
+  jiraMenuItems(sections)[1].onClick();
+  await nodeFind(fixture.confirm(), 'acts').children[1].listeners.click();
+
+  const posts = fixture.posts();
+  assert.equal(posts.length, 1, '쓰기는 정확히 한 번이다');
+  assert.match(posts[0].url, /\/api\/jira\/change$/);
+  assert.deepEqual(plain(posts[0].body), { key: 'IO-48394', kind: 'status', transitionId: '21' });
+  // 낙관적 갱신 금지 — 성공한 뒤 지라에서 새로 읽어 그 값만 그린다.
+  assert.match(fixture.calls[fixture.calls.length - 1].url, /\/api\/jira\/issue\?key=IO-48394&fresh=1$/);
+  // 앱의 ⌘Z 대상이 아니다.
+  assert.equal(fixture.app.run('undoStack.length'), 0);
+  assert.equal(fixture.app.run('redoStack.length'), 0);
+  assert.equal(fixture.app.run('lastUndoRecordedAt'), 0);
+  // 성공 알림에는 `지라에서 열기`가 붙는다.
+  const region = fixture.app.nodes.get('liveRegion');
+  assert.match(region.textContent, /지라에서 바꿨어요/);
+  assert.ok(region.children.some(kid => kid.textContent === '지라에서 열기'));
+  assert.equal(fixture.app.run('jiraConfirm'), null);
+  assert.equal(fixture.app.run('jiraBusy'), false);
+  // 선택지도 함께 버린다 — 다음에 고르개를 열면 지라에서 새로 읽는다.
+  assert.equal(fixture.app.run('jiraOptions.key'), null);
+});
+
+test('지라가 거절하면 아무것도 바꾸지 않고 해요체 문구만 알린다', async () => {
+  const fixture = jiraChangeClient({ change: () => ({ ok: false, error: '지라에서 이 티켓을 바꿀 권한이 없어요.', kind: 'forbidden' }) });
+  const sections = await fixture.app.run('jiraDueSections(jiraCard.issue)');
+  const dateField = sections[0][0].control;
+  dateField.children[1].listeners.click(); // ✕ 로 기한 지우기
+  const row = fixture.confirm();
+  assert.match(nodeText(row), /지라의 기한: 10월 2일 → 없음/);
+  await nodeFind(row, 'acts').children[1].listeners.click();
+  assert.equal(fixture.posts().length, 1);
+  assert.deepEqual(plain(fixture.posts()[0].body), { key: 'IO-48394', kind: 'due', due: null });
+  const region = fixture.app.nodes.get('liveRegion');
+  assert.equal(region.textContent, '지라에서 이 티켓을 바꿀 권한이 없어요.');
+  assert.equal(fixture.app.run('jiraConfirm'), null);
+  assert.equal(fixture.app.run('jiraBusy'), false);
+  // 실패했으니 다시 읽지 않는다 — 화면의 값은 그대로다.
+  assert.equal(fixture.calls.filter(call => call.url.includes('fresh=1')).length, 0);
+  assert.equal(fixture.app.run('jiraCard.issue.due'), '2026-10-02');
+});
+
+test('지라에 쓰는 동안에는 세 고르개가 모두 잠긴다', async () => {
+  let release;
+  const fixture = jiraChangeClient({ change: () => new Promise((resolve) => { release = () => resolve({ ok: true }); }) });
+  const sections = await fixture.app.run('jiraStatusSections(jiraCard.issue)');
+  jiraMenuItems(sections)[1].onClick();
+  const sending = nodeFind(fixture.confirm(), 'acts').children[1].listeners.click();
+  assert.equal(fixture.app.run('jiraBusy'), true);
+  const locked = fixture.app.run('jiraStripCard(jiraCard.issue)');
+  const picks = nodeFind(locked, 'cells').children.map(cell => nodeFind(cell, 'd-dpick'));
+  assert.equal(picks.length, 3);
+  assert.deepEqual(plain(picks.map(pick => pick.disabled)), [true, true, true]);
+  assert.equal(nodeFind(locked, 'd-jref').disabled, true, '새로고침도 함께 잠긴다');
+  // 쓰는 중에는 고르개를 눌러도 메뉴가 열리지 않는다(같은 카드에서 두 개를 동시에 쓰지 않는다).
+  await fixture.app.run('jiraPickOpen({ disabled: false, isConnected: true }, () => { throw new Error("열리면 안 된다"); })');
+  release();
+  await sending;
+  assert.equal(fixture.app.run('jiraBusy'), false);
+  assert.equal(fixture.posts().length, 1);
+});
+
+test('Esc는 확인 줄을 아무것도 보내지 않고 닫는다', async () => {
+  const fixture = jiraChangeClient();
+  const before = fixture.app.run('escStack.length');
+  const sections = await fixture.app.run('jiraStatusSections(jiraCard.issue)');
+  jiraMenuItems(sections)[0].onClick();
+  assert.equal(fixture.app.run('escStack.length'), before + 1);
+  fixture.app.run('escStack[escStack.length - 1]()');
+  assert.equal(fixture.app.run('jiraConfirm'), null);
+  assert.equal(fixture.app.run('escStack.length'), before);
+  assert.equal(fixture.posts().length, 0);
+  assert.equal(fixture.confirm(), null);
+});
+
+test('추가 입력이 필요한 전환은 쓰지 않고 지라에서 직접 하게 안내한다', async () => {
+  const fixture = jiraChangeClient();
+  const sections = await fixture.app.run('jiraStatusSections(jiraCard.issue)');
+  jiraMenuItems(sections)[2].onClick();
+  assert.equal(fixture.app.run('jiraConfirm'), null, '확인 줄조차 열지 않는다');
+  assert.equal(fixture.posts().length, 0);
+  const region = fixture.app.nodes.get('liveRegion');
+  assert.equal(region.textContent, '이 전환은 지라에서 직접 해 주세요');
+  assert.ok(region.children.some(kid => kid.textContent === '지라에서 열기'));
+});
+
+test('배포 버전 메뉴는 옮기기와 버전 고치기 둘이고, 여러 버전이 걸린 티켓은 안내만 한다', async () => {
+  const fixture = jiraChangeClient();
+  const [move, edit] = await fixture.app.run('jiraVersionSections(jiraCard.issue)');
+  assert.equal(move[0].field, '이 티켓을 다른 버전으로');
+  // 지금 걸린 버전(v2.70.0)은 빠지고, 남은 미배포 버전과 `버전 없음`만 선다.
+  assert.deepEqual(plain(move.filter(entry => entry.label).map(entry => entry.label)), ['v2.71.0', '버전 없음']);
+  move.filter(entry => entry.label)[0].onClick();
+  assert.equal(fixture.posts().length, 0);
+  assert.match(nodeText(fixture.confirm()), /지라의 배포 버전: v2\.70\.0 → v2\.71\.0/);
+  fixture.app.run('jiraConfirmClose()');
+
+  // 버전 자체를 고치면 그 버전을 쓰는 모든 티켓에 적용된다 — 확인 문구가 그렇게 말한다.
+  assert.equal(edit[0].field, '이 버전 고치기');
+  const name = edit[1].control;
+  name.value = 'v2.70.1';
+  await name.listeners.change();
+  const row = fixture.confirm();
+  assert.match(nodeText(row), /이 버전의 이름: v2\.70\.0 → v2\.70\.1/);
+  assert.match(nodeText(row), /이 버전을 쓰는 모든 티켓에 적용돼요/);
+  assert.deepEqual(plain(fixture.app.run('jiraConfirm.body')),
+    { key: 'IO-48394', kind: 'versionEdit', versionId: '1', name: 'v2.70.1' });
+  assert.equal(fixture.posts().length, 0);
+
+  // 버전이 여러 개면 옮기기 선택지 자체를 내놓지 않는다.
+  const many = jiraChangeClient({
+    issue: jiraIssue({ versions: [{ id: '1', name: 'v2.70.0', releaseDate: null, released: false }, { id: '2', name: 'v2.71.0', releaseDate: null, released: false }] }),
+  });
+  const sections = await many.app.run('jiraVersionSections(jiraCard.issue)');
+  assert.equal(sections.length, 1, '여러 버전이면 `이 버전 고치기`도 없다');
+  const labels = sections[0].filter(entry => entry.label);
+  assert.deepEqual(plain(labels.map(entry => entry.label)), ['버전이 여러 개라 지라에서 직접 바꿔 주세요', '지라에서 열기']);
+  assert.equal(labels[0].disabled, true);
+});
+
+test('배포일을 고치는 길도 확인 줄을 거치고, 지우기까지 된다', async () => {
+  const fixture = jiraChangeClient();
+  const [, edit] = await fixture.app.run('jiraVersionSections(jiraCard.issue)');
+  const dateField = edit[2].control;
+  dateField.children[0].value = '2026-10-07';
+  dateField.children[0].listeners.change();
+  assert.equal(fixture.posts().length, 0);
+  assert.deepEqual(plain(fixture.app.run('jiraConfirm.body')),
+    { key: 'IO-48394', kind: 'versionEdit', versionId: '1', releaseDate: '2026-10-07' });
+  assert.match(nodeText(fixture.confirm()), /이 버전을 쓰는 모든 티켓에 적용돼요/);
 });

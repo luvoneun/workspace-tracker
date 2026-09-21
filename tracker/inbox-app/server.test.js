@@ -882,8 +882,13 @@ test('미팅 노트 가져오기를 끄면 조회·요청이 막히고 상태 �
   assert.equal(fs.existsSync(notesRequestFile), false);
   const automations = (await (await fetch(origin + '/api/automation/status')).json()).automations;
   assert.equal(automations.some(entry => entry.key === 'tiro'), false);
-  // 지라도 꺼 둔 설정이다 — 직접 읽기 주소가 아예 열리지 않고, 화면도 `used:false`로 구역을 그리지 않는다.
+  // 지라도 꺼 둔 설정이다 — 직접 읽기·바꾸기 주소가 아예 열리지 않고, 화면도 `used:false`로 구역을 그리지 않는다.
   assert.equal((await fetch(origin + '/api/jira/issue?key=IO-48394')).status, 404);
+  assert.equal((await fetch(origin + '/api/jira/options?key=IO-48394')).status, 404);
+  assert.equal((await fetch(origin + '/api/jira/change', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key: 'IO-48394', kind: 'status', transitionId: '21' }),
+  })).status, 404);
   assert.deepEqual((await (await fetch(origin + '/api/items')).json()).jiraSync, { used: false });
   assert.deepEqual((await (await fetch(origin + '/api/items')).json()).meetingNotes, { used: false, state: 'off' });
 });
@@ -917,11 +922,12 @@ const jiraChildBody = { issues: [
 function jiraFake(routes) {
   const calls = [];
   const request = async (url, options) => {
-    calls.push({ url, headers: options.headers });
+    const method = (options && options.method) || 'GET';
+    calls.push({ url, headers: options.headers, method, body: options && options.body ? JSON.parse(options.body) : null });
     const hit = Object.keys(routes).find(part => String(url).includes(part));
     if (!hit) return json({ errorMessages: ['no route'] }, 500);
     const answer = routes[hit];
-    if (typeof answer === 'function') return answer();
+    if (typeof answer === 'function') return answer(String(url), method);
     return answer();
   };
   return { request, calls };
@@ -1076,4 +1082,252 @@ test('GET /api/jira/issue는 파일을 쓰지 않고, 설정이 없으면 연결
   assert.equal(bad.status, 400);
   assert.deepEqual(await bad.json(), { ok: false, error: '지라 번호를 확인해 주세요.', kind: 'key' });
   assert.equal(snapshot(), before, '조회는 어떤 파일도 만들거나 고치지 않는다');
+});
+
+// ---------- 지라 바꾸기 (BJR 2단계 — 지라에 쓴다) ----------
+// 여기서도 실제 지라에는 절대 닿지 않는다: 모든 요청은 가짜 fetch가 받아 기록만 한다.
+// `쓰기 요청이 나갔는가`는 기록된 method로 판정한다(GET만 나갔으면 아무것도 쓰지 않은 것이다).
+const jiraTransitionsBody = {
+  transitions: [
+    { id: '11', name: '작업 시작', to: { name: '진행 중' } },
+    // 같은 `to.name`이 둘이다 — 이름만으로는 구분되지 않으므로 전환 이름이 괄호로 붙어야 한다.
+    { id: '21', name: '완료 처리', to: { name: '완료' } },
+    { id: '31', name: '배포 대기로', to: { name: '완료' } },
+    // 기본값 없는 필수 입력이 있는 전환 — 선택지에는 두되 앱에서 쓰지 않는다.
+    { id: '41', name: '보류', to: { name: '보류' }, fields: { reason: { required: true, hasDefaultValue: false } } },
+    // 필수지만 기본값이 있는 칸은 입력 화면이 필요 없다.
+    { id: '51', name: '취소', to: { name: '취소됨' }, fields: { resolution: { required: true, hasDefaultValue: true } } },
+  ],
+};
+const jiraVersionsBody = [
+  { id: '10101', name: 'v2.70.0', releaseDate: '2026-09-30', released: false, archived: false },
+  { id: '10102', name: 'v2.71.0', releaseDate: null, released: false, archived: false },
+  { id: '10099', name: 'v2.60.0', releaseDate: '2026-08-01', released: true, archived: false },
+  { id: '10098', name: 'v2.50.0', released: false, archived: true },
+];
+// 순서가 중요하다 — 앞선 열쇠가 먼저 걸린다(`/transitions`가 `/issue/AB-1`보다 앞).
+const jiraChangeRoutes = (extra = {}) => ({
+  '/rest/api/3/issue/AB-1/transitions': () => json(jiraTransitionsBody),
+  '/rest/api/3/project/AB/versions': () => json(jiraVersionsBody),
+  '/rest/api/3/version/': () => new Response(null, { status: 204 }),
+  '/rest/api/3/issue/AB-1': () => json(jiraIssueBody()),
+  '/rest/api/3/search': () => json({ issues: [] }),
+  ...extra,
+});
+function jiraChangeApi(routes = jiraChangeRoutes(), options = {}) {
+  const fake = jiraFake(routes);
+  return { fake, api: jiraModule.createJiraApi({ config: jiraConfig, request: fake.request, readFile: () => JIRA_TOKEN, ...options }) };
+}
+const jiraWrites = fake => fake.calls.filter(call => call.method !== 'GET');
+
+test('지라 고르개의 선택지는 허용된 전환과 미배포 버전뿐이고, 읽기만 한다', async () => {
+  const { fake, api } = jiraChangeApi();
+  const payload = await api.options('AB-1');
+  assert.equal(payload.ok, true);
+  assert.equal(payload.connected, true);
+  assert.deepEqual(payload.transitions, [
+    { id: '11', name: '진행 중', requiresInput: false },
+    // 같은 이름이 둘일 때만 전환 이름이 괄호로 붙는다.
+    { id: '21', name: '완료 (완료 처리)', requiresInput: false },
+    { id: '31', name: '완료 (배포 대기로)', requiresInput: false },
+    { id: '41', name: '보류', requiresInput: true },
+    { id: '51', name: '취소됨', requiresInput: false },
+  ]);
+  // 배포됐거나 보관된 버전은 고를 수 없다.
+  assert.deepEqual(payload.versions, [
+    { id: '10101', name: 'v2.70.0', releaseDate: '2026-09-30' },
+    { id: '10102', name: 'v2.71.0', releaseDate: null },
+  ]);
+  assert.equal(jiraWrites(fake).length, 0, '선택지를 읽는 것만으로는 지라에 아무것도 쓰지 않는다');
+  // 프로젝트 키는 티켓 키에서 뽑는다 — 따로 더 묻지 않는다.
+  assert.ok(fake.calls.some(call => call.url.endsWith('/rest/api/3/project/AB/versions')));
+  assert.equal(jiraModule.projectOf('IO-48394'), 'IO');
+  // 설정이 없으면 지라를 부르지 않는다.
+  const off = jiraModule.createJiraApi({ config: {}, request: jiraFake({}).request });
+  assert.deepEqual(await off.options('AB-1'), { ok: true, connected: false });
+  assert.deepEqual(await off.options('nope'), { ok: false, error: '지라 번호를 확인해 주세요.', kind: 'key' });
+});
+
+test('지라 상태 바꾸기는 쓰기 직전에 전환 목록을 다시 조회해 대조한다', async () => {
+  const { fake, api } = jiraChangeApi();
+  assert.deepEqual(await api.change({ key: 'AB-1', kind: 'status', transitionId: '21' }), { ok: true });
+  const writes = jiraWrites(fake);
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].method, 'POST');
+  assert.ok(writes[0].url.endsWith('/rest/api/3/issue/AB-1/transitions'));
+  assert.deepEqual(writes[0].body, { transition: { id: '21' } });
+  // 쓰기 바로 앞에 전환 목록을 다시 읽는다(고르개가 본 목록을 믿지 않는다).
+  assert.ok(fake.calls[fake.calls.length - 2].url.includes('/transitions?expand=transitions.fields'));
+
+  // 목록에 없는 id는 쓰지 않는다.
+  const stale = jiraChangeApi();
+  assert.deepEqual(await stale.api.change({ key: 'AB-1', kind: 'status', transitionId: '99' }),
+    { ok: false, error: '지라에서 고를 수 있는 값이 바뀌었어요. 카드를 새로 읽고 다시 골라 주세요.', kind: 'stale' });
+  assert.equal(jiraWrites(stale.fake).length, 0);
+
+  // 필수 입력이 있는 전환도 쓰지 않는다 — 지라에서 직접 하게 안내한다.
+  const screen = jiraChangeApi();
+  assert.deepEqual(await screen.api.change({ key: 'AB-1', kind: 'status', transitionId: '41' }),
+    { ok: false, error: '이 전환은 지라에서 직접 해 주세요.', kind: 'screen' });
+  assert.equal(jiraWrites(screen.fake).length, 0);
+
+  // id 형식이 숫자가 아니면 아예 나가지 않는다(주소에 끼우는 값이다).
+  const bad = jiraChangeApi();
+  assert.equal((await bad.api.change({ key: 'AB-1', kind: 'status', transitionId: '../../x' })).kind, 'stale');
+  assert.equal(jiraWrites(bad.fake).length, 0);
+});
+
+test('배포 버전은 한 개짜리 티켓만 옮기고, `버전 없음`은 빈 배열로 보낸다', async () => {
+  const single = jiraChangeApi();
+  assert.deepEqual(await single.api.change({ key: 'AB-1', kind: 'version', versionId: '10102' }), { ok: true });
+  const [write] = jiraWrites(single.fake);
+  assert.equal(write.method, 'PUT');
+  assert.ok(write.url.endsWith('/rest/api/3/issue/AB-1'));
+  assert.deepEqual(write.body, { fields: { fixVersions: [{ id: '10102' }] } });
+
+  const cleared = jiraChangeApi();
+  assert.deepEqual(await cleared.api.change({ key: 'AB-1', kind: 'version', versionId: null }), { ok: true });
+  assert.deepEqual(jiraWrites(cleared.fake)[0].body, { fields: { fixVersions: [] } });
+
+  // 버전이 여러 개 걸린 티켓은 앱에서 바꾸지 않는다 — 다른 버전을 실수로 지우지 않게.
+  const many = jiraChangeApi(jiraChangeRoutes({
+    '/rest/api/3/issue/AB-1': () => json(jiraIssueBody({ fixVersions: [{ id: '10101', name: 'v2.70.0' }, { id: '10102', name: 'v2.71.0' }] })),
+  }));
+  assert.deepEqual(await many.api.change({ key: 'AB-1', kind: 'version', versionId: '10102' }),
+    { ok: false, error: '버전이 여러 개라 지라에서 직접 바꿔 주세요.', kind: 'multi' });
+  assert.equal(jiraWrites(many.fake).length, 0);
+
+  // 그 프로젝트의 버전이 아니면 쓰지 않는다.
+  const foreign = jiraChangeApi();
+  assert.equal((await foreign.api.change({ key: 'AB-1', kind: 'version', versionId: '99999' })).kind, 'stale');
+  assert.equal(jiraWrites(foreign.fake).length, 0);
+});
+
+test('지라의 기한은 지울 수 있고, 날짜 형식이 아니면 아무것도 보내지 않는다', async () => {
+  const set = jiraChangeApi();
+  assert.deepEqual(await set.api.change({ key: 'AB-1', kind: 'due', due: '2026-11-02' }), { ok: true });
+  assert.deepEqual(jiraWrites(set.fake)[0].body, { fields: { duedate: '2026-11-02' } });
+  assert.equal(jiraWrites(set.fake)[0].method, 'PUT');
+
+  const cleared = jiraChangeApi();
+  assert.deepEqual(await cleared.api.change({ key: 'AB-1', kind: 'due', due: null }), { ok: true });
+  assert.deepEqual(jiraWrites(cleared.fake)[0].body, { fields: { duedate: null } });
+
+  for (const due of ['내일', '2026-13-01x', 20261102, { }]) {
+    const bad = jiraChangeApi();
+    assert.deepEqual(await bad.api.change({ key: 'AB-1', kind: 'due', due }), { ok: false, error: '보낸 값을 확인해 주세요.', kind: 'value' });
+    assert.equal(jiraWrites(bad.fake).length, 0);
+  }
+});
+
+test('버전 고치기는 바뀐 칸만 보내고, 그 프로젝트의 버전만 받는다', async () => {
+  const renamed = jiraChangeApi();
+  assert.deepEqual(await renamed.api.change({ key: 'AB-1', kind: 'versionEdit', versionId: '10101', name: 'v2.70.1' }), { ok: true });
+  const [write] = jiraWrites(renamed.fake);
+  assert.equal(write.method, 'PUT');
+  assert.ok(write.url.endsWith('/rest/api/3/version/10101'));
+  assert.deepEqual(write.body, { name: 'v2.70.1' }, '이름만 고쳤으면 배포일은 보내지 않는다');
+
+  const dated = jiraChangeApi();
+  assert.deepEqual(await dated.api.change({ key: 'AB-1', kind: 'versionEdit', versionId: '10101', releaseDate: '2026-10-07' }), { ok: true });
+  assert.deepEqual(jiraWrites(dated.fake)[0].body, { releaseDate: '2026-10-07' });
+
+  const wiped = jiraChangeApi();
+  assert.deepEqual(await wiped.api.change({ key: 'AB-1', kind: 'versionEdit', versionId: '10101', releaseDate: null }), { ok: true });
+  assert.deepEqual(jiraWrites(wiped.fake)[0].body, { releaseDate: null });
+
+  for (const patch of [{ name: '  ' }, { name: 'a\nb' }, { name: 'x'.repeat(256) }, {}, { versionId: '99999', name: 'v9' }]) {
+    const bad = jiraChangeApi();
+    const result = await bad.api.change({ key: 'AB-1', kind: 'versionEdit', versionId: '10101', ...patch });
+    assert.equal(result.ok, false);
+    assert.ok(['value', 'stale'].includes(result.kind), `${JSON.stringify(patch)} → ${result.kind}`);
+    assert.equal(jiraWrites(bad.fake).length, 0);
+  }
+});
+
+test('지라 쓰기 실패는 갈래별 해요체 문구로만 알리고 토큰·이메일을 싣지 않는다', async () => {
+  const fail = (status) => jiraChangeApi(jiraChangeRoutes({
+    '/rest/api/3/issue/AB-1/transitions': (url, method) => (method === 'GET'
+      ? json(jiraTransitionsBody)
+      : status === 'network' ? (() => { throw new TypeError('fetch failed'); })() : json({ errorMessages: ['지라 원문 오류 — 화면에 나오면 안 된다'] }, status)),
+  }));
+  const run = async (status) => (await fail(status).api.change({ key: 'AB-1', kind: 'status', transitionId: '21' }));
+  assert.deepEqual(await run(403), { ok: false, error: '지라에서 이 티켓을 바꿀 권한이 없어요.', kind: 'forbidden' });
+  assert.deepEqual(await run(401), { ok: false, error: '지라에서 이 티켓을 바꿀 권한이 없어요.', kind: 'forbidden' });
+  assert.deepEqual(await run(400), { ok: false, error: '지라가 이 변경을 받아들이지 않았어요. 지라에서 직접 확인해 주세요.', kind: 'reject' });
+  assert.deepEqual(await run(404), { ok: false, error: '지라에서 이 티켓을 찾지 못했어요.', kind: 'notfound' });
+  assert.deepEqual(await run(409), { ok: false, error: '지라에 반영하지 못했어요.', kind: 'write' });
+  assert.deepEqual(await run(500), { ok: false, error: '지라에 반영하지 못했어요.', kind: 'write' });
+  assert.deepEqual(await run('network'), { ok: false, error: '지라에 반영하지 못했어요.', kind: 'write' });
+  // 지라가 준 원문도, 토큰·이메일도 응답에 섞이지 않는다.
+  for (const status of [403, 400, 500]) {
+    const payload = JSON.stringify(await run(status));
+    assert.doesNotMatch(payload, /지라 원문 오류/);
+    assert.doesNotMatch(payload, new RegExp(JIRA_TOKEN));
+    assert.doesNotMatch(payload, new RegExp(JIRA_EMAIL));
+  }
+  // 설정이 없거나 토큰을 못 읽으면 지라를 부르지 않고 연결 안내만 한다.
+  const off = jiraModule.createJiraApi({ config: {}, request: jiraFake({}).request });
+  assert.deepEqual(await off.change({ key: 'AB-1', kind: 'status', transitionId: '21' }), { ok: false, error: '지라 연결이 필요해요.', kind: 'off' });
+  const noToken = jiraChangeApi(jiraChangeRoutes(), { readFile: () => '' });
+  assert.deepEqual(await noToken.api.change({ key: 'AB-1', kind: 'status', transitionId: '21' }), { ok: false, error: '지라 연결이 필요해요.', kind: 'off' });
+  assert.equal(jiraWrites(noToken.fake).length, 0);
+  // 키·종류가 틀리면 지라를 부르지도 않는다.
+  const shape = jiraChangeApi();
+  assert.deepEqual(await shape.api.change({ key: 'nope', kind: 'status' }), { ok: false, error: '지라 번호를 확인해 주세요.', kind: 'key' });
+  assert.deepEqual(await shape.api.change({ key: 'AB-1', kind: 'delete' }), { ok: false, error: '보낸 값을 확인해 주세요.', kind: 'value' });
+  assert.deepEqual(await shape.api.change(null), { ok: false, error: '지라 번호를 확인해 주세요.', kind: 'key' });
+  assert.equal(shape.fake.calls.length, 0);
+});
+
+test('지라를 바꾸면 그 키의 읽기 캐시를 비운다', async () => {
+  const { fake, api } = jiraChangeApi();
+  const issueReads = () => fake.calls.filter(call => call.method === 'GET' && /\/rest\/api\/3\/issue\/AB-1\?fields=summary/.test(call.url)).length;
+  await api.read('AB-1');
+  await api.read('AB-1');
+  assert.equal(issueReads(), 1, '60초 캐시는 그대로다');
+  assert.deepEqual(await api.change({ key: 'AB-1', kind: 'due', due: '2026-11-02' }), { ok: true });
+  await api.read('AB-1');
+  assert.equal(issueReads(), 2, '바꾼 뒤에는 캐시가 비어 지라에서 새로 읽는다');
+});
+
+test('/api/jira/change는 확인된 요청만 받고, 조회는 파일을 쓰지 않는다', async () => {
+  const snapshot = () => fs.readdirSync(directory).sort().map((name) => {
+    const stat = fs.statSync(path.join(directory, name));
+    return `${name}:${stat.size}:${stat.mtimeMs}`;
+  }).join('|');
+  const before = snapshot();
+  // 이 서버에는 지라 설정이 없다(테스트 머리에서 없는 파일로 고정) — 그래서 바깥으로 나가지 않는다.
+  const options = await fetch(`${base}/api/jira/options?key=AB-1`);
+  assert.equal(options.status, 200);
+  assert.deepEqual(await options.json(), { ok: true, connected: false });
+  const badKey = await fetch(`${base}/api/jira/options?key=not-a-key`);
+  assert.equal(badKey.status, 400);
+  assert.deepEqual(await badKey.json(), { ok: false, error: '지라 번호를 확인해 주세요.', kind: 'key' });
+
+  const off = await post('/api/jira/change', { key: 'AB-1', kind: 'status', transitionId: '21' });
+  assert.equal(off.status, 200);
+  assert.deepEqual({ ok: off.ok, kind: off.kind, error: off.error }, { ok: false, kind: 'off', error: '지라 연결이 필요해요.' });
+  assert.equal((await post('/api/jira/change', { key: 'nope', kind: 'status' })).status, 400);
+  assert.equal((await post('/api/jira/change', { key: 'AB-1', kind: 'delete' })).status, 400);
+  // 지라 쓰기는 앱 파일을 하나도 건드리지 않는다(요청 원장에도 남지 않는다).
+  assert.equal(snapshot(), before);
+});
+
+test('복구가 필요한 동안에는 지라 쓰기도 막히고 조회만 된다', async (t) => {
+  const external = '# Tasks\n- 바깥에서 고친 줄 #task[id:outside status:to-do created:2026-09-20]\n';
+  const server = await startServer(t, (home) => {
+    fs.writeFileSync(path.join(home, 'tasks.md'), external);
+    fs.writeFileSync(path.join(home, '.mutation-journal.json'), journalEntry(path.join(home, 'tasks.md'), '# Tasks\n', '# Tasks\n- 중단된 저장\n'));
+    fs.writeFileSync(path.join(home, '.mutation.lock'), String(deadPid()));
+  });
+  const blocked = await fetch(server.base + '/api/jira/change', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key: 'AB-1', kind: 'status', transitionId: '21' }),
+  });
+  assert.equal(blocked.status, 503);
+  assert.match((await blocked.json()).error, /저장을 멈췄어요/, '앱 저장소가 아픈 동안에는 바깥에도 쓰지 않는다');
+  // 조회는 그대로 된다(설정이 없으므로 연결 안 됨으로 답한다).
+  assert.equal((await fetch(server.base + '/api/jira/issue?key=AB-1')).status, 200);
+  assert.equal((await fetch(server.base + '/api/jira/options?key=AB-1')).status, 200);
 });
