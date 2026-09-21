@@ -280,7 +280,7 @@
 #reportNestBarEl { left: 0; }
 #reportNestBarEl .rp-hint { white-space: nowrap; }
 body.nest-open .page { padding-bottom: 104px; }
-body.nest-open .d-toast { bottom: 76px; }
+body.nest-open .d-toast { bottom: 104px; }
 
 @media (max-width: 1280px) {
   #gridWeekly { grid-template-columns: 208px minmax(0, 1fr) 312px; gap: 14px; }

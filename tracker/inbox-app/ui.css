@@ -801,7 +801,8 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
    기본·hover·선택 어디서도 아래 글자가 비치지 않는다(선택 배경은 반투명이 아닌 불투명 --sel). */
 /* 실선으로 자르지 않는다 — 카드 한 장 안에서 여백과 둥근 회색 hover로 나눈다 */
 .d-row {
-  display: grid; grid-template-columns: 30px minmax(0, 1fr) var(--wp) var(--wm);
+  /* 날짜 정보 칸은 든 만큼만 차지한다 — 태그가 없는 줄에서 제목이 빈자리를 두고 일찍 잘리지 않게 */
+  display: grid; grid-template-columns: 30px minmax(0, 1fr) var(--wp) var(--wmcol, auto);
   align-items: center; column-gap: 12px;
   height: var(--row); padding: 0 var(--pad); position: relative;
   border-radius: 14px; --rowbg: var(--surface); background: var(--rowbg);
@@ -886,7 +887,7 @@ body.batch-open .d-row.is-done { opacity: 0.6; }
 }
 
 /* 여러 개 선택 중에만 생기는 왼쪽 한 칸. 같은 네모 가족이지만 작고 각져서 완료 체크와 구분된다 */
-body.batch-open .d-row { grid-template-columns: 22px 30px minmax(0, 1fr) var(--wp) var(--wm); }
+body.batch-open .d-row { grid-template-columns: 22px 30px minmax(0, 1fr) var(--wp) var(--wmcol, auto); }
 .d-sel { width: 22px; height: var(--row); display: grid; place-items: center; }
 .d-selcb {
   appearance: none; -webkit-appearance: none; margin: 0; display: block; position: relative;
@@ -964,7 +965,7 @@ body.batch-open .d-row { grid-template-columns: 22px 30px minmax(0, 1fr) var(--w
 .d-row.is-sug .d-title { cursor: default; }
 .d-row.is-sug .d-acts { position: static; opacity: 1; pointer-events: auto; background: none; padding-left: 0; }
 
-.d-row.is-done { --wm: 280px; }
+.d-row.is-done { --wmcol: 280px; }
 .d-row.is-done .d-title { color: var(--muted); font-weight: 400; cursor: pointer; text-decoration: line-through; text-decoration-color: var(--border); }
 .d-row.is-done .d-meta { justify-content: flex-start; font-weight: 400; }
 .d-row.is-done .d-meta .out { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1519,7 +1520,8 @@ body.batch-open .d-toast { bottom: 76px; }
 /* 좁은 창에서만 보이는 `아이디어 N | 결정 N` — 넓은 창에서는 두 칸이 함께 보이므로 감춘다. */
 .d-recseg { display: none; }
 .d-reccol { min-width: 0; }
-.d-reccol .d-lhd { margin-bottom: 4px; }
+/* 두 칸의 머리줄 높이를 같게 — 결정 쪽에만 찾기 입력(34px)이 있어 카드 윗선이 어긋났다 */
+.d-reccol .d-lhd { margin-bottom: 4px; min-height: 38px; }
 /* 구역 제목 옆의 개수는 둥근 회색 칩(오늘 할 일만 파란 칩이다) */
 .d-reccol .d-lhd > .sub {
   height: 22px; display: inline-flex; align-items: center; padding: 0 9px;

@@ -92,7 +92,7 @@ module.exports = ({ directory, sources, legacy, currentWeek }) => {
     const ordered=tops.flatMap(row=>[row,...(nested.get(row.id)||[])]);
     return { weekKey, rows: ordered, revision: hash({ stored, rows: ordered }), updatedAt: stored?.updatedAt || null };
   }
-  function clean(row) { const { suggestion, needsReview, currentEvidence, ...rest } = row; return rest; }
+  function clean(row) { const { suggestion, needsReview, currentEvidence, canSplit, partCount, ...rest } = row; return rest; }
   // 계획 문장에 붙이는 프로젝트 이름. 없으면 기존처럼 `직접 작성`으로 담는다.
   function planGroup(group) {
     if (group === undefined || group === null || group === '') return '직접 작성';

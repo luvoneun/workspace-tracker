@@ -362,6 +362,7 @@ async function reportChange(item, action, notice) {
         const latest = weeklyReportsCache.find(entry => entry.weekKey === item.weekKey);
         if (latest) { reportBusy = false; renderReportDraft(latest); }
       }
+      if (result.code === 'RECOVERY_NEEDED' && typeof renderStorageBanner === 'function') renderStorageBanner({ recoveryNeeded: true });
       throw new Error(result.error || '저장됐는지 확인하지 못했어요. 적은 내용은 그대로 있어요');
     }
     if (action.action === 'edit') reportEdits.delete(`${item.weekKey}:${action.id}`);
@@ -444,7 +445,9 @@ function reportNestStart(item, row) {
 }
 
 function reportNestEnd() {
-  if (reportBusy || reportNestParentId === null) return;
+  // 저장이 도는 중의 Esc는 아무것도 닫지 못한다 — 스택에서 빠진 자기를 되돌려 놓아야 다음 Esc가 듣는다.
+  if (reportBusy && reportNestParentId !== null) { if (!escStack.includes(reportNestEnd)) escPush(reportNestEnd); return; }
+  if (reportNestParentId === null) return;
   reportNestParentId = null;
   escDrop(reportNestEnd);
   if (reportRenderedItem) renderReportDraft(reportRenderedItem);

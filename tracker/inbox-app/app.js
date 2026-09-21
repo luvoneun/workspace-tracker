@@ -809,7 +809,9 @@ function taskSelectStart() {
 }
 
 function taskSelectEnd() {
-  if (!taskSelectionMode || taskBatchBusy) return;
+  // 저장이 도는 중의 Esc는 아무것도 닫지 못한다 — 스택에서 빠진 자기를 되돌려 놓아야 다음 Esc가 듣는다.
+  if (taskSelectionMode && taskBatchBusy) { if (!escStack.includes(taskSelectEnd)) escPush(taskSelectEnd); return; }
+  if (!taskSelectionMode) return;
   taskSelectionMode = false;
   taskSelection.clear();
   escDrop(taskSelectEnd);
@@ -1235,7 +1237,8 @@ function renderProjectDetail(body, row) {
   const openPanel = item => panelOpen({ id: item.id });
 
   simple('확인 대기', asItems(items.filter(item => item.type === 'check' && item.status !== 'done')),
-    item => item.who || (uiItemDueText(item)?.text ?? ''), openPanel, waitingMenuSections);
+    // 누구에게 + 급한 날짜 말(`1일 늦음`·`오늘 답변 예정`)을 함께 — 담당이 적혀 있다고 늦은 것이 가려지면 안 된다.
+    item => [item.who, uiItemDueText(item)?.text].filter(Boolean).join(' · '), openPanel, waitingMenuSections);
   // 결정은 미반영·반영을 글자로만 가른다(알약으로 그리지 않는다).
   simple('결정', asItems(items.filter(item => item.type === 'decision')),
     item => item.status === 'done' ? `${uiKoDateShort(item.completed)} 반영` : '미반영', openPanel, decisionMenuSections);
@@ -5571,7 +5574,7 @@ const SETTINGS_FAQ = [
   ['자잘한 업무는 어떻게 빼나요',
     '주간요약에서 문장의 <b>제외</b>를 누르면 복사할 내용에서 빠져요. 원본은 업무 기록에 남고 언제든 보고로 되돌릴 수 있어요.'],
   ['확인 대기는 뭔가요',
-    '다른 사람의 답을 기다리는 항목이에요. 언제까지 답을 받아야 하는지는 <b>회신 기한</b>에 적어요. 할 일 쪽에서 "이 답변을 기다리는 중"으로 연결해 두면 답이 오는 순간 알려 줘요.'],
+    '다른 사람의 답을 기다리는 항목이에요. 언제까지 답을 받아야 하는지는 <b>답변 받을 날</b>에 적어요. 할 일 쪽에서 "이 답변을 기다리는 중"으로 연결해 두면 답이 오는 순간 알려 줘요.'],
   ['머리줄의 "○일 전 기준" 같은 표시는 뭔가요',
     '슬랙·캘린더·지라 자동 동기화가 최근에 못 돌았다는 뜻이에요. 그 글자를 누르면 이 창의 <b>상태</b>에서 그 자동화 줄이 바로 보여요.'],
 ];
