@@ -314,19 +314,50 @@ test('projectFixedOrder keeps a remembered order and appends newly seen keys at 
     ['a', 'b', 'c'], 'projects not in the remembered order are appended, in their fresh-sort relative order');
 });
 
-test('projectVisibleRows hides 0-open projects but keeps the one currently selected', () => {
+// BARCHIVE: `항목 없는 프로젝트 N개 보기` 토글을 `지난 프로젝트` 구역이 대신한다 —
+// 열린 항목이 0이어도 아직 14일이 안 된 프로젝트는 위 목록에 남는다(예전 규칙과 달라진 점).
+test('projectPastRows: 조용한 것과 보관한 것만 지난 프로젝트로 내리고, 지금 보는 것은 남긴다', () => {
   const app = pureClient();
-  const rows = "[{ key: 'a', open: 2 }, { key: 'b', open: 0 }, { key: 'c', open: 0 }]";
-  const collapsed = JSON.parse(app.run(`JSON.stringify((() => {
-    const r = projectVisibleRows(${rows}, { showEmpty: false, selectedKey: 'b' });
-    return { visible: r.visible.map(x => x.key), hiddenCount: r.hiddenCount };
+  const rows = "[{ key: 'a', open: 2 }, { key: 'b', open: 0 }, { key: 'c', open: 0 }, { key: 'd', open: 1 }]";
+  const split = (options) => JSON.parse(app.run(`JSON.stringify((() => {
+    const r = projectPastRows(${rows}, ${options});
+    return { active: r.active.map(x => x.key), past: r.past.map(x => x.key), quietCount: r.quietCount };
   })())`));
-  assert.deepEqual(collapsed, { visible: ['a', 'b'], hiddenCount: 1 }, '0개인 b는 지금 보는 중이라 남고, c만 숨는다');
-  const expanded = JSON.parse(app.run(`JSON.stringify((() => {
-    const r = projectVisibleRows(${rows}, { showEmpty: true, selectedKey: 'b' });
-    return { visible: r.visible.map(x => x.key), hiddenCount: r.hiddenCount };
-  })())`));
-  assert.deepEqual(expanded, { visible: ['a', 'b', 'c'], hiddenCount: 0 }, '펼치면 전부 보인다');
+  assert.deepEqual(split("{ quietKeys: new Set(['b', 'c']), archivedKeys: new Set(), selectedKey: null }"),
+    { active: ['a', 'd'], past: ['b', 'c'], quietCount: 2 });
+  assert.deepEqual(split("{ quietKeys: new Set(['b', 'c']), archivedKeys: new Set(), selectedKey: 'b' }"),
+    { active: ['a', 'b', 'd'], past: ['c'], quietCount: 1 }, '지금 보는 b는 조용해도 위 목록에 남는다');
+  assert.deepEqual(split("{ quietKeys: new Set(), archivedKeys: new Set(['d']), selectedKey: null }"),
+    { active: ['a', 'b', 'c'], past: ['d'], quietCount: 0 },
+    '열린 항목이 있어도 보관한 것은 내려가고, 보관한 것은 권유 줄에 세지 않는다');
+  assert.deepEqual(split('{}'), { active: ['a', 'b', 'c', 'd'], past: [], quietCount: 0 });
+});
+
+test('조용함은 열린 항목 0 + 마지막 활동 14일 초과이고, 날짜를 하나도 모르면 조용한 것으로 본다', () => {
+  const app = pureClient();
+  const quiet = (row, last) => app.run(`String(projectQuiet(${row}, ${last === null ? 'null' : `'${last}'`}, '2026-09-22'))`);
+  assert.equal(quiet("{ key: 'a', open: 0 }", '2026-09-07'), 'true', '15일 전이면 조용하다');
+  assert.equal(quiet("{ key: 'a', open: 0 }", '2026-09-08'), 'false', '딱 14일은 아직 조용하지 않다');
+  assert.equal(quiet("{ key: 'a', open: 0 }", '2026-09-22'), 'false');
+  assert.equal(quiet("{ key: 'a', open: 0 }", null), 'true', '날짜를 하나도 모르면 조용한 것으로 본다');
+  assert.equal(quiet("{ key: 'a', open: 1 }", null), 'false', '열린 항목이 있으면 조용하지 않다');
+  assert.equal(quiet('null', null), 'false');
+});
+
+test('마지막 활동 날짜는 있는 값만 본다 — 항목의 완료·수정·등록과 회의 날짜 중 가장 최근', () => {
+  const app = workflowsClient();
+  const items = `[
+    { id: 'i1', group: '운영툴', created: '2026-08-01', completed: '2026-08-20' },
+    { id: 'i2', group: '운영툴', created: '2026-08-10', updated: '2026-09-02T11:00:00+09:00' },
+    { id: 'i3', group: '다른 것', created: '2026-09-20' },
+  ]`;
+  const meetings = `[
+    { id: 'm1', date: '2026-09-05', project: { type: 'group', value: '운영툴' } },
+    { id: 'm2', date: '2026-09-21', project: { type: 'group', value: '다른 것' } },
+  ]`;
+  assert.equal(app.run(`projectLastDay('group:운영툴', ${items}, ${meetings})`), '2026-09-05',
+    '회의 날짜도 함께 보고, updated의 시각 부분은 날짜만 읽는다');
+  assert.equal(app.run(`String(projectLastDay('group:빈 것', ${items}, ${meetings}))`), 'null', '아는 날짜가 없으면 null이다');
 });
 
 test('waiting age turns to the warning colour from the third day of waiting', () => {
@@ -2232,11 +2263,13 @@ test('프로젝트 탭의 제목·목록에는 지라 완료 글자를 붙이지
     renderProjectDetail(body, { key: '${key}', label: '${key}', open: 0 });
     return body.children[0];
   })()`);
+  // 제목 줄에 있는 것은 프로젝트의 ⋯(보관/보관 해제)뿐이다 — 상태를 말하는 글자는 붙지 않는다.
+  const extras = node => node.children.filter(kid => !String(kid.className || '').includes('d-more'));
   const done = titleOf('jira:ZZ-9');
   assert.equal(done.className, 'd-ptitle');
-  assert.equal(done.children.length, 0, '지라에서 끝난 이슈에도 제목 옆 글자가 없다');
+  assert.deepEqual(extras(done), [], '지라에서 끝난 이슈에도 제목 옆 글자가 없다');
   assert.equal(done.textContent, '끝난 이슈');
-  assert.equal(titleOf('jira:AB-1').children.length, 0);
+  assert.deepEqual(extras(titleOf('jira:AB-1')), []);
 });
 
 // BKEY(2026-09-24): 프로젝트 탭 오른쪽 — 큰 제목은 요약만, 그 아래 조용한 줄에만 지라 키가 붙는다.
@@ -2266,7 +2299,7 @@ test('renderProjects: 왼쪽 목록은 요약만, title 툴팁엔 키가 남는�
     workflowData = { meetings: [], items: [
       { id: 't1', type: 'task', status: 'to-do', jira: 'IO-1', label: 'IO-1 · 게시글 작성하기' },
     ] }; wfIndexData(); itemsById = new Map();
-    projectKey = null; projectOrderKeys = null; projectOrderResort = true; projectShowEmpty = false;
+    projectKey = null; projectOrderKeys = null; projectOrderResort = true; projectPastOpen = false;
     renderProjects();`);
   const list = app.nodes.get('projectList');
   const row = list.children.find(child => String(child.className || '').startsWith('d-prow'));
@@ -2400,7 +2433,7 @@ test('왼쪽 프로젝트 목록은 배포가 2주 안일 때만 조용한 날�
     .map(row => (row.children.find(kid => String(kid.className || '') === 'rt') || { children: [] })
       .children.find(kid => String(kid.className || '').startsWith('dp')))
     .filter(Boolean);
-  app.run('projectKey = null; projectOrderKeys = null; projectOrderResort = true; projectShowEmpty = false; renderProjects();');
+  app.run('projectKey = null; projectOrderKeys = null; projectOrderResort = true; projectPastOpen = false; renderProjects();');
   const days = cells();
   assert.deepEqual(days.map(day => day.className).sort(), ['dp', 'dp k-neg', 'dp k-warn', 'dp k-warn'],
     '열린 항목이 있는 네 프로젝트에만 배포일이 붙는다(이미 배포된 가입 퍼널은 빠진다)');
@@ -3593,7 +3626,9 @@ test('BJLINK: 내 담당 티켓 선택지는 `요약 · 키`로 최대 여덟 �
   assert.deepEqual(JSON.parse(app.run("JSON.stringify(jiraLinkSuggestions('io-12').map(one => one.key))")), ['IO-12345']);
   app.run("document.getElementById('jiraLinkRow').dataset.project = 'group:가입 개선'; jiraLinkOpen('group:가입 개선')");
   const picks = nodeFind(app.nodes.get('jiraLinkRow').children[0], 'opts');
-  assert.deepEqual(picks.children.map(kid => kid.textContent), ['내 담당 티켓', '게시글 작성하기_게임 임베드 · IO-12345', '정산 배치 · PAY-77']);
+  // 목록 끝에는 아직 누르지 않은 `완료한 티켓도 보기`가 조용한 글자로 붙어 있다(BARCHIVE).
+  assert.deepEqual(picks.children.map(kid => kid.textContent),
+    ['내 담당 티켓', '게시글 작성하기_게임 임베드 · IO-12345', '정산 배치 · PAY-77', '완료한 티켓도 보기']);
 });
 
 test('BJLINK: 이미 다른 프로젝트에 걸린 티켓도 막지 않고 조용히 알리기만 한다', async () => {
@@ -3687,4 +3722,262 @@ test('BJLIVE: 설정 > 상태의 지라 한 마디는 앱이 직접 읽고 있�
   assert.equal(note({ connected: true, lastSync: '2026-09-24', stale: true }, read), '');
   assert.equal(note({ live: true, liveAt: '어제쯤' }, read), '');
   assert.equal(note(null, read), '');
+});
+
+// ---------- BARCHIVE 1: 연결 입력칸의 `완료한 티켓도 보기` ----------
+// 최근 90일 안에 끝난 내 담당 티켓을 **그 버튼을 눌렀을 때만** 한 번 더 읽어 같은 목록 아래에
+// 조용한 글자로 덧붙인다. 지라는 전부 가짜 fetch다.
+function doneLinkClient({ issues = null, fail = false, connected = true } = {}) {
+  const app = workflowsClient();
+  const calls = [];
+  app.context.fetch = async (url, options) => {
+    calls.push(String(url));
+    if (String(url).includes('/api/jira/done')) {
+      if (fail) return new Response(JSON.stringify({ ok: false, error: '지라에 연결하지 못했어요.', kind: 'other' }));
+      if (!connected) return new Response(JSON.stringify({ ok: true, connected: false }));
+      return new Response(JSON.stringify({ ok: true, connected: true, issues: issues || [
+        { key: 'IO-99', summary: '끝난 임베드 정리', status: '완료', category: 'done', extra: false },
+        { key: 'PAY-12', summary: '끝난 정산 점검', status: '완료', category: 'done', extra: false },
+        { key: 'IO-12345', summary: '게시글 작성하기_게임 임베드', status: '완료', category: 'done', extra: false },
+      ] }));
+    }
+    const asked = (String(url).match(/key=([^&]+)/) || [, ''])[1];
+    return new Response(JSON.stringify({ ok: true, connected: true, issue: { key: decodeURIComponent(asked), summary: '미리 보기', status: { name: '완료' }, assignee: null } }));
+  };
+  app.run("latestData = { jiraSync: { used: true, connected: true, siteUrl: 'https://example-jira.test' } };");
+  app.run("workflowData = { items: [], meetings: [], projectLinks: {} }; wfIndexData(); itemsById = new Map();");
+  app.run(`jiraIssuesCache = [
+    { key: 'IO-12345', summary: '게시글 작성하기_게임 임베드' },
+    { key: 'PAY-77', summary: '정산 배치' },
+  ]; jiraIssuesByKey = new Map(jiraIssuesCache.map(one => [one.key, one]));`);
+  app.run("jiraLink = jiraLinkIdle(null);");
+  app.run("document.getElementById('jiraLinkRow').dataset.project = 'group:가입 개선'; jiraLinkOpen('group:가입 개선')");
+  const opts = () => nodeFind(app.nodes.get('jiraLinkRow').children[0], 'opts');
+  const lines = () => opts().children.map(kid => ({ text: kid.textContent, className: String(kid.className || '') }));
+  const more = () => opts().children.find(kid => kid.textContent === '완료한 티켓도 보기' || kid.textContent === '불러오는 중…');
+  const doneCalls = () => calls.filter(url => url.includes('/api/jira/done'));
+  return { app, calls, doneCalls, opts, lines, more };
+}
+
+test('BARCHIVE: `완료한 티켓도 보기`는 눌렀을 때만 최근 90일을 한 번 부르고, 받은 줄은 회색으로 아래에 붙는다', async () => {
+  const fixture = doneLinkClient();
+  assert.deepEqual(fixture.lines().map(line => line.text),
+    ['내 담당 티켓', '게시글 작성하기_게임 임베드 · IO-12345', '정산 배치 · PAY-77', '완료한 티켓도 보기']);
+  assert.equal(fixture.doneCalls().length, 0, '열기만 해서는 지라를 부르지 않는다');
+  assert.equal(fixture.more().className, 'pk qt', '조용한 글자다');
+
+  await fixture.app.run("jiraLinkLoadDone('group:가입 개선')");
+  assert.deepEqual(fixture.doneCalls(), ['/api/jira/done?days=90'], '기간은 90일이고 한 번만 부른다');
+  assert.deepEqual(fixture.lines(), [
+    { text: '내 담당 티켓', className: 'note' },
+    { text: '게시글 작성하기_게임 임베드 · IO-12345', className: 'pk' },
+    { text: '정산 배치 · PAY-77', className: 'pk' },
+    { text: '완료한 티켓', className: 'note' },
+    { text: '끝난 임베드 정리 · IO-99', className: 'pk qt' },
+    { text: '끝난 정산 점검 · PAY-12', className: 'pk qt' },
+  ], '완료한 것은 아래에 회색 `요약 · 키`로 붙고, 위 목록에 이미 있는 키는 두 번 세우지 않는다');
+
+  // 한 번 받으면 그 입력칸이 열려 있는 동안 다시 부르지 않는다.
+  await fixture.app.run("jiraLinkLoadDone('group:가입 개선')");
+  assert.equal(fixture.doneCalls().length, 1);
+  // 입력칸을 닫으면 받아 둔 목록도 버린다(다음에 열면 다시 버튼부터다).
+  fixture.app.run('jiraLinkReset()');
+  assert.equal(fixture.app.run('String(jiraLink.done)'), 'null');
+});
+
+test('BARCHIVE: 완료한 티켓도 같은 입력으로 걸러지고, 골라도 미리 보기 → 연결 흐름은 그대로다', async () => {
+  const fixture = doneLinkClient();
+  await fixture.app.run("jiraLinkLoadDone('group:가입 개선')");
+  const input = nodeFind(fixture.app.nodes.get('jiraLinkRow').children[0], 'in');
+  input.value = '정산';
+  input.listeners.input();
+  assert.deepEqual(fixture.lines().map(line => line.text),
+    ['내 담당 티켓', '정산 배치 · PAY-77', '완료한 티켓', '끝난 정산 점검 · PAY-12'], '한 입력이 두 목록을 함께 거른다');
+  input.value = '없는 말';
+  input.listeners.input();
+  assert.deepEqual(fixture.lines().map(line => line.text), ['완료한 티켓이 없어요']);
+
+  input.value = '정산';
+  input.listeners.input();
+  const pick = fixture.opts().children.find(kid => kid.textContent === '끝난 정산 점검 · PAY-12');
+  await pick.listeners.click();
+  assert.equal(fixture.app.run('jiraLink.state'), 'preview', '고르면 지금처럼 미리 보기로 간다');
+  assert.equal(fixture.app.run('jiraLink.issue.key'), 'PAY-12');
+  assert.equal(fixture.calls.filter(url => url.includes('/api/project/jira-link')).length, 0, '미리 보기 전에는 아무것도 저장하지 않는다');
+});
+
+test('BARCHIVE: 완료 목록을 못 읽으면 기존 문구·갈래를 그대로 쓴다', async () => {
+  const broken = doneLinkClient({ fail: true });
+  await broken.app.run("jiraLinkLoadDone('group:가입 개선')");
+  assert.equal(broken.app.run('jiraLink.doneError'), '지라에 연결하지 못했어요.');
+  assert.deepEqual(broken.lines().map(line => line.text).slice(-2), ['완료한 티켓도 보기', '지라에 연결하지 못했어요.'],
+    '다시 누를 수 있고 이유가 그 아래 조용히 선다');
+
+  const off = doneLinkClient({ connected: false });
+  await off.app.run("jiraLinkLoadDone('group:가입 개선')");
+  assert.equal(off.app.run('jiraLink.state'), 'off', '설정이 없으면 기존 `지라 연결이 필요해요` 갈래로 간다');
+});
+
+// ---------- BARCHIVE 2: 지난 프로젝트 ----------
+// 열린 항목이 없고 14일 넘게 조용한 프로젝트와 직접 보관한 프로젝트는 왼쪽 목록 끝으로 내려간다.
+// 바뀌는 것은 배치와 고르기 목록 소제목뿐이다 — 업무·기록·주간요약·검색은 그대로다.
+function archiveClient({ archive = {}, posts = new Response('{"ok":true}') } = {}) {
+  const app = workflowsClient();
+  const sent = [];
+  app.context.fetch = async (url, options) => {
+    sent.push({ url: String(url), body: options && options.body ? JSON.parse(options.body) : null });
+    return typeof posts === 'function' ? posts(String(url)) : posts.clone();
+  };
+  app.run("latestData = { jiraSync: { used: false } }; jiraIssuesCache = []; jiraIssuesByKey = new Map(); customGroupsCache = [];");
+  // 오늘로부터 며칠 전 — 날짜를 박아 두면 하루만 지나도 판정이 뒤집힌다.
+  app.run("dayAgo = n => { const d = new Date(); d.setDate(d.getDate() - n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };");
+  // 넷: 열린 항목이 있는 것 / 0개인데 어제까지 손댄 것 / 0개이고 한 달 조용한 것 / 날짜를 하나도 모르는 것.
+  app.run(`workflowData = { meetings: [], projectLinks: {}, projectArchive: ${JSON.stringify(archive)}, items: [
+    { id: 'a1', type: 'task', status: 'to-do', group: '살아 있는 것', created: dayAgo(3) },
+    { id: 'b1', type: 'task', status: 'done', group: '최근에 끝난 것', created: dayAgo(5), completed: dayAgo(1) },
+    { id: 'c1', type: 'task', status: 'done', group: '오래 조용한 것', created: dayAgo(60), completed: dayAgo(30) },
+    { id: 'd1', type: 'idea', status: 'to-do', project: '날짜 없는 것' },
+  ] }; wfIndexData(); itemsById = new Map();
+    projectKey = null; projectOrderKeys = null; projectOrderResort = true; projectPastOpen = false;`);
+  const render = () => app.run('renderProjects();');
+  const list = () => app.nodes.get('projectList');
+  const rowsOf = () => list().children.filter(kid => String(kid.className || '').startsWith('d-prow'))
+    .map(kid => ({ name: nodeFind(kid, 'nm').textContent, past: String(kid.className).includes('is-past') }));
+  const toggle = () => list().children.find(kid => String(kid.className || '') === 'd-plink');
+  const nudge = () => list().children.find(kid => String(kid.className || '') === 'd-pnudge');
+  return { app, sent, render, list, rowsOf, toggle, nudge };
+}
+
+test('BARCHIVE: 지난 프로젝트 구역이 `항목 없는 프로젝트 N개 보기`를 대신하고, 머리 개수는 위 목록만 센다', () => {
+  const fixture = archiveClient();
+  fixture.render();
+  assert.deepEqual(fixture.rowsOf().map(row => row.name), ['살아 있는 것', '최근에 끝난 것'],
+    '열린 항목이 0이어도 아직 14일이 안 된 것은 위 목록에 남는다');
+  assert.equal(fixture.app.nodes.get('projectList').children[0].children[1].textContent, 2, '머리의 개수는 위 목록의 수다');
+  assert.equal(fixture.toggle().textContent, '지난 프로젝트 2');
+  assert.equal(fixture.toggle().getAttribute('aria-expanded'), 'false');
+  assert.equal(fixture.list().children.some(kid => /항목 없는 프로젝트/.test(String(kid.textContent || ''))), false,
+    '옛 토글 글자는 어디에도 없다');
+
+  fixture.toggle().listeners.click();
+  assert.deepEqual(fixture.rowsOf(), [
+    { name: '살아 있는 것', past: false },
+    { name: '최근에 끝난 것', past: false },
+    { name: '날짜 없는 것', past: true },
+    { name: '오래 조용한 것', past: true },
+  ], '펼치면 흐린 줄로 이어 붙는다');
+  assert.equal(fixture.toggle().textContent, '지난 프로젝트 숨기기');
+});
+
+test('BARCHIVE: 권유 줄은 보관하지 않은 조용한 프로젝트만 세고, `모두 보관`이 한 건씩 보낸다', async () => {
+  const fixture = archiveClient();
+  fixture.render();
+  assert.equal(nodeText(fixture.nudge()), '조용한 프로젝트 2개 · 보관할까요? 모두 보관');
+  const all = nodeFind(fixture.nudge(), 'd-link');
+  await all.listeners.click();
+  assert.deepEqual(fixture.sent.map(call => [call.url, call.body]), [
+    ['/api/project/archive', { project: 'group:날짜 없는 것', archived: true }],
+    ['/api/project/archive', { project: 'group:오래 조용한 것', archived: true }],
+  ], '한 건씩 기존 저장 길로 보낸다');
+  assert.match(fixture.app.nodes.get('liveRegion').textContent, /2개를 보관했어요/);
+
+  // 전부 보관해 두면 권유 줄이 사라진다(구역은 그대로다).
+  const settled = archiveClient({ archive: { 'group:날짜 없는 것': '2026-09-20', 'group:오래 조용한 것': '2026-09-20' } });
+  settled.render();
+  assert.equal(settled.nudge(), undefined);
+  assert.equal(settled.toggle().textContent, '지난 프로젝트 2');
+});
+
+test('BARCHIVE: 보관한 프로젝트는 열린 항목이 생겨도 그대로 남고, 제목 아래가 그 사실을 알린다', async () => {
+  const fixture = archiveClient({ archive: { 'group:살아 있는 것': '2026-09-20' } });
+  // 보고 있는 프로젝트는 구역이 바뀌어도 자리를 지키므로, 다른 것을 보고 있는 상태로 둔다.
+  fixture.app.run("projectKey = 'group:최근에 끝난 것';");
+  fixture.render();
+  assert.deepEqual(fixture.rowsOf().map(row => row.name), ['최근에 끝난 것'], '보관한 것은 열린 항목이 있어도 내려간다');
+  assert.equal(fixture.toggle().textContent, '지난 프로젝트 3');
+  assert.equal(nodeText(fixture.nudge()), '조용한 프로젝트 2개 · 보관할까요? 모두 보관', '보관한 것은 권유에서 빠진다');
+
+  const detail = key => fixture.app.run(`(() => {
+    const body = document.createElement('div');
+    renderProjectDetail(body, { key: ${JSON.stringify(key)}, label: ${JSON.stringify(key)}, open: 2 });
+    return body;
+  })()`);
+  assert.equal(detail('group:살아 있는 것').children[1].textContent, '보관한 프로젝트 · 열린 항목 2');
+  assert.equal(detail('group:최근에 끝난 것').children[1].textContent, '열린 항목 2');
+});
+
+test('BARCHIVE: 제목 ⋯의 보관·보관 해제는 확인 없이 바로 하고 알림의 `되돌리기`로 되돌린다', async () => {
+  const fixture = archiveClient();
+  fixture.app.run("lastMenu = null; uiMenu = (anchor, sections) => { lastMenu = sections; return null; };");
+  const openMenu = (key, archived) => {
+    const body = fixture.app.run(`(() => {
+      const body = document.createElement('div');
+      renderProjectDetail(body, { key: ${JSON.stringify(key)}, label: ${JSON.stringify(key)}, open: 1 });
+      return body;
+    })()`);
+    nodeFind(body.children[0], 'd-more').listeners.click({ stopPropagation() {} });
+    const menu = fixture.app.run('lastMenu');
+    assert.equal(menu[0].map(entry => entry.label).join(','), archived ? '보관 해제' : '보관');
+    return menu[0][0];
+  };
+  await openMenu('group:살아 있는 것', false).onClick();
+  assert.deepEqual(fixture.sent.map(call => call.body), [{ project: 'group:살아 있는 것', archived: true }]);
+  const region = fixture.app.nodes.get('liveRegion');
+  assert.match(region.textContent, /지난 프로젝트로 옮겼어요/);
+  const undo = region.children.find(kid => kid.textContent === '되돌리기');
+  await undo.listeners.click(undo);
+  assert.deepEqual(fixture.sent.map(call => call.body).slice(-1), [{ project: 'group:살아 있는 것', archived: false }]);
+  assert.match(region.textContent, /보관을 해제했어요/);
+
+  // 보관 중이면 메뉴 글자가 `보관 해제`이고, 되돌리기는 다시 보관이다.
+  const kept = archiveClient({ archive: { 'group:살아 있는 것': '2026-09-20' } });
+  kept.app.run("lastMenu = null; uiMenu = (anchor, sections) => { lastMenu = sections; return null; };");
+  const body = kept.app.run(`(() => {
+    const body = document.createElement('div');
+    renderProjectDetail(body, { key: 'group:살아 있는 것', label: 'group:살아 있는 것', open: 1 });
+    return body;
+  })()`);
+  nodeFind(body.children[0], 'd-more').listeners.click({ stopPropagation() {} });
+  const entry = kept.app.run('lastMenu')[0][0];
+  assert.equal(entry.label, '보관 해제');
+  await entry.onClick();
+  assert.deepEqual(kept.sent.map(call => call.body), [{ project: 'group:살아 있는 것', archived: false }]);
+  assert.match(kept.app.nodes.get('liveRegion').textContent, /지난 프로젝트에서 꺼냈어요/);
+});
+
+test('BARCHIVE: 보관은 고르기 목록의 소제목만 바꾼다 — 선택지는 그대로 남는다', () => {
+  const app = workflowsClient();
+  app.run(`jiraIssuesCache = [{ key: 'IO-1', summary: '가' }, { key: 'IO-2', summary: '나' }];
+    jiraIssuesByKey = new Map(jiraIssuesCache.map(one => [one.key, one]));
+    customGroupsCache = ['운영툴', '끝난 팀'];
+    workflowData = { items: [], meetings: [], projectArchive: { 'group:끝난 팀': '2026-09-20', 'jira:IO-2': '2026-09-20' } };
+    wfIndexData();`);
+  const rest = JSON.parse(app.run("JSON.stringify(groupSelectOptions(null, false).rest)"));
+  assert.deepEqual(rest, [
+    '<option value="jira:IO-1">가 · IO-1</option>',
+    '<option value="group:운영툴">운영툴</option>',
+    '<optgroup label="지난 프로젝트">',
+    '<option value="jira:IO-2">나 · IO-2</option>',
+    '<option value="group:끝난 팀">끝난 팀</option>',
+    '</optgroup>',
+    '<option value="__custom__">직접 입력…</option>',
+  ], '보관한 것도 그대로 고를 수 있고, 목록 끝의 소제목 아래로 갈 뿐이다');
+
+  app.run("workflowData.projectArchive = {};");
+  assert.equal(app.run("groupSelectOptions(null, false).rest.join('')").includes('optgroup'), false,
+    '보관한 것이 없으면 소제목도 없다(옛 파일과 같은 모습)');
+});
+
+test('BARCHIVE: 보관은 주간요약 초안과 검색 결과를 바꾸지 않는다', () => {
+  const rows = (archive) => {
+    const app = workflowsClient();
+    app.run("dayAgo = n => { const d = new Date(); d.setDate(d.getDate() - n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };");
+    app.run(`jiraIssuesCache = []; jiraIssuesByKey = new Map(); customGroupsCache = [];
+      workflowData = { meetings: [], projectArchive: ${JSON.stringify(archive)}, items: [
+        { id: 'w1', type: 'task', status: 'done', description: '정산 배치 끝내기', group: '끝난 팀', created: dayAgo(30), completed: dayAgo(20) },
+        { id: 'w2', type: 'task', status: 'to-do', description: '정산 배치 이어 하기', group: '끝난 팀', created: dayAgo(30) },
+      ] }; wfIndexData(); itemsById = new Map(workflowData.items.map(item => [item.id, item]));`);
+    return JSON.parse(app.run("JSON.stringify(palFilter(workflowData.items, { query: '정산' }).map(item => [item.id, item.description, item.group]))"));
+  };
+  assert.deepEqual(rows({}), rows({ 'group:끝난 팀': '2026-09-20' }), '검색 결과는 보관해도 똑같다');
 });

@@ -1425,21 +1425,30 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-prow[aria-current="true"] { background: var(--sel); color: var(--accent-text); font-weight: 600; }
 .d-prow[aria-current="true"] .n { color: var(--accent-text); }
 .d-prow[aria-current="true"]:hover { background: var(--sel-hover); }
-/* 열린 항목이 없는 프로젝트는 흐리게, 목록 아래쪽에 머문다 */
-.d-prow.is-zero, .d-prow.is-zero .n { color: var(--dim); }
-.d-prow.is-zero .d-pjdot { opacity: 0.45; }
-/* 목록 끝의 `항목 없는 프로젝트 N개 보기` / `숨기기` — 조용한 글자 버튼(정보처럼, 버튼처럼 그리지 않는다) */
+/* 열린 항목이 없는 프로젝트와 `지난 프로젝트` 구역의 줄은 흐리게 — 목록 아래쪽에 머문다 */
+.d-prow.is-zero, .d-prow.is-zero .n,
+.d-prow.is-past, .d-prow.is-past .n { color: var(--dim); }
+.d-prow.is-zero .d-pjdot, .d-prow.is-past .d-pjdot { opacity: 0.45; }
+/* 목록 끝의 `지난 프로젝트 N` / `숨기기` — 조용한 글자 버튼(정보처럼, 버튼처럼 그리지 않는다) */
 .d-plink {
   display: block; width: 100%; margin-top: 4px; padding: 8px 10px; border: 0; background: none; border-radius: 12px;
   font-family: inherit; font-size: 13px; font-weight: 600; color: var(--dim); text-align: left; cursor: pointer;
   transition: background 170ms var(--ease), color 170ms var(--ease);
 }
 .d-plink:hover { background: var(--hover); color: var(--accent-text); }
+/* 그 바로 아래의 정리 권유 한 줄 — `조용한 프로젝트 3개 · 보관할까요?` + `모두 보관` */
+.d-pnudge {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  padding: 0 10px 6px; font-size: 12.5px; color: var(--dim);
+}
+.d-pnudge .d-link { min-height: 28px; padding: 0 4px; margin: 0 -4px; font-size: 12.5px; }
 
 .d-pmain { min-width: 0; padding-left: 20px; }
 .d-pwrap { max-width: 1000px; }
-.d-ptitle { margin: 0 0 2px; font-size: 24px; font-weight: 700; letter-spacing: -0.025em; }
+/* 제목 줄 — 이름 옆에 프로젝트 자체의 ⋯(보관/보관 해제)가 붙는다 */
+.d-ptitle { display: flex; align-items: center; gap: 2px; margin: 0 0 2px; font-size: 24px; font-weight: 700; letter-spacing: -0.025em; }
 .d-ptitle::before { display: none; }
+.d-ptitle .d-more { flex: none; width: 28px; height: 28px; color: var(--dim); }
 /* 지라 띠 카드 — 프로젝트 제목 아래, 첫 구역 위의 흰 카드 한 장(읽기 전용).
    첫 줄: `지라` 표시 + 요약 + 종류·담당 + `지라에서 열기` + 새로고침.
    둘째 줄: 라벨 위·값 아래의 칸들(지라 상태 · 배포 버전 · 기한).
@@ -1615,6 +1624,10 @@ body.batch-open .d-toast { bottom: 76px; }
   transition: background 170ms var(--ease), color 170ms var(--ease);
 }
 .d-jlink .pk:hover { background: var(--hover); color: var(--text); }
+/* `완료한 티켓도 보기`와 그렇게 받아 온 완료 티켓 줄 — 같은 줄 부품이되 조용한 글자다(완료 표시) */
+.d-jlink .pk.qt { color: var(--dim); }
+.d-jlink .pk.qt:hover { color: var(--text); }
+.d-jlink .pk:disabled, .d-jlink .pk:disabled:hover { background: none; color: var(--dim); cursor: default; }
 /* `연결`은 2차(연파랑), `취소`는 3차다 — 확인 줄과 같은 규칙 */
 .d-jlink .acts { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
 .d-jlink .acts .d-btn { background: var(--surface); }

@@ -1301,6 +1301,9 @@ const handleRequest = (req, res) => {
     '/api/workflow/review': workflows.review,
     '/api/workflow/review-undo': workflows.undoReview,
     '/api/workflow/link': workflows.link,
+    // 프로젝트를 `지난 프로젝트`로 내리거나 꺼낸다. 저장하는 것은 프로젝트 키 하나뿐이고,
+    // 업무·기록·주간요약은 하나도 바뀌지 않는다 — 앱의 기존 저장 길을 그대로 탄다.
+    '/api/project/archive': workflows.archiveProject,
   };
   if (req.method === 'POST' && workflowActions[url.pathname]) {
     readBody(req).then(body => {
@@ -1350,6 +1353,30 @@ const handleRequest = (req, res) => {
     };
     const asked = url.searchParams.get('fresh') === '1' || !jiraLive.current();
     (asked && jira.connected ? jiraLive.refresh() : Promise.resolve()).then(done, done);
+    return;
+  }
+
+  // 연결 입력칸에서 `완료한 티켓도 보기`를 눌렀을 때만 부른다 — 최근 며칠 안에 완료된 내 담당 티켓이다.
+  // 조회라 파일은 하나도 쓰지 않고, 서버 메모리에 60초만 들고 있는다. 인증 예외에는 넣지 않는다.
+  if (url.pathname === '/api/jira/done' && req.method === 'GET') {
+    if (!USES.jira) { res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ ok: false, error: '지라를 쓰지 않도록 설정돼 있어요.', kind: 'other' })); return; }
+    const asked = url.searchParams.get('days');
+    const days = asked === null || asked === '' ? JIRA_DONE_DAYS : Number(asked);
+    if (!Number.isInteger(days) || days < 1 || days > JIRA_DONE_MAX_DAYS) {
+      res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: '보낸 값을 확인해 주세요.', kind: 'value' }));
+      return;
+    }
+    jira.listDone(days)
+      .then((payload) => {
+        // 지라 쪽 실패는 200 + `ok:false`다(화면이 그 문구를 그 자리에 조용히 적는다).
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(payload));
+      })
+      .catch(() => {
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: '지라에 연결하지 못했어요.', kind: 'other' }));
+      });
     return;
   }
 
@@ -1783,6 +1810,8 @@ const jira = require('./jira-client').createJiraApi({ config: CONFIG });
 // 화면이 붙여 넣은 지라 주소의 호스트를 견줄 때만 쓰는 값이다(주소는 이미 카드의 `지라에서 열기`에
 // 그대로 나가 있다). 이메일·토큰은 어디에도 싣지 않는다.
 const JIRA_SITE_URL = (require('./jira-client').jiraSettings(CONFIG) || {}).siteUrl || '';
+// `완료한 티켓도 보기`가 묻는 기간(기본 90일, 상한 1년) — 값 검증은 이 둘로만 한다.
+const { JIRA_DONE_DAYS, JIRA_DONE_MAX_DAYS } = require('./jira-client');
 // 내 담당 티켓 목록도 앱이 직접 읽는다 — 값은 메모리에만 있고 파일은 쓰지 않는다.
 // 설정이 없으면(`connected`가 거짓) 타이머도 첫 읽기도 돌지 않는다.
 const jiraLive = require('./jira-live').createJiraLive({

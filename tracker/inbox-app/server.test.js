@@ -1848,3 +1848,179 @@ test('GET /api/jira/list는 설정이 없으면 연결 안 됨으로 답하고 �
   // 인증 예외가 아니다 — 원격에서 토큰 없이 부르면 다른 주소와 똑같이 막힌다(여기서는 로컬이라 열린다).
   assert.equal((await fetch(`${base}/api/jira/list`)).status, 200);
 });
+
+// ---------- 완료한 내 티켓도 연결 후보로 (BARCHIVE 1) ----------
+// 여기서도 실제 지라에는 닿지 않는다 — 전부 가짜 fetch다.
+const jiraDoneIssue = key => ({
+  key,
+  fields: {
+    summary: `${key}의 끝난 일`,
+    status: { name: '완료', statusCategory: { key: 'done' } },
+    issuetype: { name: '스토리' },
+    // 묻지 않은 칸을 지라가 끼워 보내도 앱이 옮기지 않는지 함께 본다.
+    assignee: { displayName: '루본', emailAddress: JIRA_EMAIL, accountId: '712020:done' },
+  },
+});
+
+test('완료한 내 티켓은 최근 90일·완료 범주만, 요약·상태·종류 세 칸만 묻는다', async () => {
+  const fake = jiraFake({ '/rest/api/3/search/jql': () => json(jiraListBody([jiraDoneIssue('IO-48394'), { key: '수상한키', fields: {} }])) });
+  const issues = await jiraListClient(fake).listDoneIssues(90);
+  assert.deepEqual(issues, [{
+    key: 'IO-48394', type: '스토리', status: '완료', summary: 'IO-48394의 끝난 일', extra: false,
+    // 묻지 않은 칸은 빈 값으로 흐른다(고르는 줄에 쓰지 않는다).
+    category: 'done', due: null, versions: [],
+  }], '키 형식이 아닌 줄은 버린다');
+  assert.equal(fake.calls.length, 1);
+  const [call] = fake.calls;
+  assert.equal(decodeURIComponent(call.url.split('jql=')[1].split('&')[0]),
+    'assignee = currentUser() AND statusCategory = Done AND resolved >= -90d ORDER BY resolved DESC');
+  assert.match(call.url, /fields=summary,status,issuetype&maxResults=100$/);
+  // 담당자 칸은 애초에 달라고 하지 않는다.
+  assert.doesNotMatch(call.url, /assignee&|assignee,|emailAddress|accountId/);
+  assert.doesNotMatch(JSON.stringify(issues), /emailAddress|accountId|lubon|루본/);
+  assert.doesNotMatch(JSON.stringify(issues), new RegExp(JIRA_EMAIL));
+});
+
+test('완료 목록도 100개까지만 들고 오고, 새 search 주소가 없으면 옛 주소로 한 번 물러선다', async () => {
+  const many = jiraListBody(Array.from({ length: 140 }, (unused, index) => jiraDoneIssue(`IO-${2000 + index}`)));
+  const capped = jiraFake({ '/rest/api/3/search/jql': () => json(many) });
+  assert.equal((await jiraListClient(capped).listDoneIssues()).length, 100);
+  // 기간을 주지 않거나 말이 안 되는 값이면 기본 90일이다(주소에 그대로 끼우므로 형식을 고정한다).
+  assert.match(decodeURIComponent(capped.calls[0].url), /resolved >= -90d/);
+  const odd = jiraFake({ '/rest/api/3/search/jql': () => json(jiraListBody([])) });
+  await jiraListClient(odd).listDoneIssues(0);
+  await jiraListClient(odd).listDoneIssues(9999);
+  await jiraListClient(odd).listDoneIssues('90; DROP');
+  assert.equal(odd.calls.every(call => decodeURIComponent(call.url).includes('resolved >= -90d')), true);
+  await jiraListClient(odd).listDoneIssues(30);
+  assert.match(decodeURIComponent(odd.calls[3].url), /resolved >= -30d/);
+
+  const fallback = jiraFake({
+    '/rest/api/3/search/jql': () => json({ errorMessages: ['not found'] }, 404),
+    '/rest/api/3/search?': () => json(jiraListBody([jiraDoneIssue('IO-48394')])),
+  });
+  assert.deepEqual((await jiraListClient(fallback).listDoneIssues()).map(issue => issue.key), ['IO-48394']);
+  assert.equal(fallback.calls.length, 2, '새 주소가 404일 때만, 옛 주소로 한 번만 물러선다');
+});
+
+test('완료 목록 API는 60초 메모리 캐시 한 벌이고, 설정·토큰이 없으면 연결 안 됨으로만 답한다', async () => {
+  const fake = jiraFake({ '/rest/api/3/search': () => json(jiraListBody([jiraDoneIssue('IO-48394')])) });
+  const off = jiraModule.createJiraApi({ config: {}, request: fake.request });
+  assert.deepEqual(await off.listDone(90), { ok: true, connected: false });
+  assert.equal(fake.calls.length, 0, '연결되지 않았으면 지라를 부르지 않는다');
+
+  const noToken = jiraModule.createJiraApi({ config: jiraConfig, request: fake.request, readFile: () => '' });
+  assert.deepEqual(await noToken.listDone(), { ok: true, connected: false });
+
+  let clock = 0;
+  const api = jiraModule.createJiraApi({ config: jiraConfig, request: fake.request, readFile: () => JIRA_TOKEN, now: () => clock });
+  const first = await api.listDone(90);
+  assert.equal(first.connected, true);
+  assert.deepEqual(first.issues.map(issue => issue.key), ['IO-48394']);
+  await api.listDone(90);
+  assert.equal(fake.calls.length, 1, '60초 안에는 다시 묻지 않는다(키 없이 한 벌)');
+  await api.listDone(30);
+  assert.equal(fake.calls.length, 2, '기간이 다르면 새로 읽는다');
+  clock += 61 * 1000;
+  await api.listDone(30);
+  assert.equal(fake.calls.length, 3, '60초가 지나면 새로 읽는다');
+  assert.doesNotMatch(JSON.stringify(first), new RegExp(`${JIRA_TOKEN}|${JIRA_EMAIL}`), '토큰·이메일은 어디에도 싣지 않는다');
+
+  const broken = jiraModule.createJiraApi({
+    config: jiraConfig, readFile: () => JIRA_TOKEN,
+    request: jiraFake({ '/rest/api/3/search': () => json({}, 401) }).request,
+  });
+  assert.deepEqual(await broken.listDone(), { ok: false, error: '지라 토큰을 확인해 주세요.', kind: 'auth' });
+});
+
+test('GET /api/jira/done은 설정이 없으면 연결 안 됨으로 답하고, 기간이 이상하면 400이고, 파일을 건드리지 않는다', async () => {
+  const snapshot = () => fs.readdirSync(directory).sort().map((name) => {
+    const stat = fs.statSync(path.join(directory, name));
+    return `${name}:${stat.size}:${stat.mtimeMs}`;
+  }).join('|');
+  const before = snapshot();
+  const response = await fetch(`${base}/api/jira/done?days=90`);
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true, connected: false });
+  assert.equal((await fetch(`${base}/api/jira/done`)).status, 200, '기간을 안 보내면 기본 90일이다');
+  for (const bad of ['0', '400', '-3', '9.5', 'ninety']) {
+    const refused = await fetch(`${base}/api/jira/done?days=${bad}`);
+    assert.equal(refused.status, 400, bad);
+    assert.equal((await refused.json()).error, '보낸 값을 확인해 주세요.');
+  }
+  assert.equal(snapshot(), before, 'GET은 어떤 파일도 쓰지 않는다');
+});
+
+// ---------- 지난 프로젝트로 보관하기 (BARCHIVE 2) ----------
+const archivePost = (origin, body, key) => fetch(origin + '/api/project/archive', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', ...(key ? { 'Idempotency-Key': key } : {}) },
+  body: JSON.stringify(body),
+}).then(async response => ({ status: response.status, ...await response.json() }));
+
+test('보관은 앱이 아는 프로젝트만, 키 형식대로만 받고 거절된 요청은 파일을 고치지 않는다', async () => {
+  assert.equal((await post('/api/today-task/create', { description: '보관 실험용 업무', group: '보관 실험' })).ok, true);
+  const workflowFile = path.join(directory, '.workflow.json');
+  const before = fs.readFileSync(workflowFile, 'utf8');
+  const refuse = async (body, message) => {
+    const answer = await archivePost(base, body);
+    assert.equal(answer.status, 400, JSON.stringify(body));
+    assert.equal(answer.error, message);
+  };
+  await refuse({ project: 'group:보관 실험' }, '보관할지 해제할지 알려 주세요.');
+  await refuse({ project: 'group:보관 실험', archived: 'true' }, '보관할지 해제할지 알려 주세요.');
+  await refuse({ project: '보관 실험', archived: true }, '프로젝트를 확인해 주세요.');
+  await refuse({ project: 'jira:io-12345', archived: true }, '프로젝트를 확인해 주세요.');
+  await refuse({ project: 'jira:IO-', archived: true }, '프로젝트를 확인해 주세요.');
+  await refuse({ project: 'group:없는 프로젝트', archived: true }, '프로젝트를 찾을 수 없어요.');
+  assert.equal(fs.readFileSync(workflowFile, 'utf8'), before, '거절된 요청은 파일을 고치지 않는다');
+});
+
+test('보관·해제는 프로젝트 키 하나만 저장하고 업무·기록은 하나도 바뀌지 않는다 — 옛 파일도 그대로 읽힌다', async (t) => {
+  const server = await startServer(t, (home) => {
+    fs.writeFileSync(path.join(home, 'tasks.md'),
+      '# Tasks\n- 정산 배치 설계 검토하기 #task[id:ar01 status:to-do created:2026-09-20 group:결제_리뉴얼]\n'
+      + '- 게임 임베드 검수하기 #task[id:ar02 status:to-do created:2026-09-20 jira:IO-12345]\n');
+    // projectArchive 칸이 없는 옛 파일 — 빈 표로 읽혀야 한다.
+    fs.writeFileSync(path.join(home, '.workflow.json'), JSON.stringify({ items: {}, meetings: {} }));
+  });
+  const read = async () => (await (await fetch(server.base + '/api/items')).json());
+  const first = await read();
+  assert.deepEqual(first.workflows.projectArchive, {}, '옛 파일은 빈 표로 읽힌다');
+
+  // 파일 표기(`결제_리뉴얼`)와 화면 표기(`결제 리뉴얼`)는 연결과 같은 한 꼴로 맞춘다.
+  const archived = await archivePost(server.base, { project: 'group:결제 리뉴얼', archived: true });
+  assert.deepEqual(archived, { status: 200, ok: true, project: 'group:결제 리뉴얼', archived: true });
+  const after = await read();
+  assert.deepEqual(Object.keys(after.workflows.projectArchive), ['group:결제 리뉴얼']);
+  assert.match(after.workflows.projectArchive['group:결제 리뉴얼'], /^\d{4}-\d{2}-\d{2}$/, '보관한 날이 함께 남는다');
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(server.home, '.workflow.json'), 'utf8')).projectArchive,
+    after.workflows.projectArchive);
+  // 업무·기록·주간요약은 그대로다 — 바뀌는 것은 화면의 왼쪽 목록 배치뿐이다.
+  assert.equal(fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8'), fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8'));
+  const task = after.laterTasks.concat(after.todayTasks).find(item => item.id === 'ar01');
+  assert.deepEqual([task.group, task.jira, task.status], ['결제 리뉴얼', null, 'to-do']);
+  assert.deepEqual(first.weeklyReports.map(week => week.draft.rows.length), after.weeklyReports.map(week => week.draft.rows.length));
+
+  // 지라 프로젝트는 키 형식으로만 받는다(이 저장소는 내 담당 목록을 들고 있지 않다).
+  assert.equal((await archivePost(server.base, { project: 'jira:IO-12345', archived: true })).ok, true);
+  assert.deepEqual(Object.keys((await read()).workflows.projectArchive).sort(), ['group:결제 리뉴얼', 'jira:IO-12345']);
+
+  // 같은 내용을 같은 식별자로 다시 보내면 한 번만 쓴다(기존 idempotency 규칙 그대로).
+  const key = 'barchive-idempotency-key-001';
+  const send = () => archivePost(server.base, { project: 'group:결제 리뉴얼', archived: false }, key);
+  assert.deepEqual(await send(), { status: 200, ok: true, project: 'group:결제 리뉴얼', archived: false });
+  assert.deepEqual(await send(), { status: 200, ok: true, project: 'group:결제 리뉴얼', archived: false });
+  assert.deepEqual(Object.keys((await read()).workflows.projectArchive), ['jira:IO-12345'], '해제하면 표에서 사라진다');
+});
+
+test('복구가 필요한 동안에는 보관도 저장되지 않는다', async (t) => {
+  const server = await startServer(t, (home) => {
+    fs.writeFileSync(path.join(home, 'tasks.md'), '# Tasks\n- 막힌 저장 #task[id:ar03 status:to-do created:2026-09-20 group:운영툴]\n');
+    fs.writeFileSync(path.join(home, '.mutation-journal.json'), journalEntry(path.join(home, 'tasks.md'), '# Tasks\n', '# Tasks\n- 중단된 저장\n'));
+    fs.writeFileSync(path.join(home, '.mutation.lock'), String(deadPid()));
+  });
+  const blocked = await archivePost(server.base, { project: 'group:운영툴', archived: true });
+  assert.equal(blocked.status, 503);
+  assert.match(blocked.error, /저장을 멈췄어요/);
+});

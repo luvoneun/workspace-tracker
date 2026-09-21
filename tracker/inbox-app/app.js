@@ -1059,10 +1059,10 @@ let projectKey = null;
 let projectDoneOpen = false;
 // 왼쪽 목록의 차례를 탭에 있는 동안 고정해 둔다 — 체크 한 번마다 load()가 다시 그리며 순서가
 // 뒤바뀌지 않게. 탭에 들어올 때·새로고침 때만(projectOrderResort) 다시 계산한다. 세션 동안만
-// 기억하는 값이라 localStorage에 넣지 않는다(projectShowEmpty도 같다).
+// 기억하는 값이라 localStorage에 넣지 않는다(projectPastOpen도 같다).
 let projectOrderKeys = null;
 let projectOrderResort = true;
-let projectShowEmpty = false;
+let projectPastOpen = false;
 function projectKeyRestore() {
   try { projectKey = localStorage.getItem(PROJECT_KEY_STORE) || null; } catch { projectKey = null; }
 }
@@ -1088,13 +1088,56 @@ function projectFixedOrder(rows, orderKeys) {
   return [...ordered, ...extra];
 }
 
-// 열린 항목이 없는 프로젝트를 숨기는 순수 함수 — 지금 보고 있는 프로젝트(selectedKey)만 예외로
-// 남긴다(보는 동안 0개가 되어도 갑자기 사라지지 않는다). showEmpty면 전부 보여 준다.
-function projectVisibleRows(rows, { showEmpty, selectedKey } = {}) {
-  const zero = rows.filter(row => !row.open);
-  const visible = showEmpty ? rows : rows.filter(row => row.open || row.key === selectedKey);
-  const hiddenCount = showEmpty ? 0 : zero.filter(row => row.key !== selectedKey).length;
-  return { visible, zero, hiddenCount };
+// ---------- 지난 프로젝트 ----------
+// 끝난 프로젝트가 왼쪽 목록에 계속 쌓였다. 열린 항목이 없고 한참 조용한 것과 사람이 직접 보관한
+// 것을 목록 끝의 접힌 구역으로 내린다. **바뀌는 것은 왼쪽 목록 배치와 고르기 목록 소제목뿐이다** —
+// 업무·기록·주간요약·검색·슬랙 복사는 하나도 달라지지 않는다.
+const PROJECT_QUIET_DAYS = 14;
+
+// 사람이 직접 보관해 둔 프로젝트 표(`프로젝트 키 → 보관한 날`). 서버가 목록과 함께 보내 준다.
+function projectArchiveMap() {
+  return (typeof workflowData === 'object' && workflowData && workflowData.projectArchive) || {};
+}
+const projectArchived = key => Object.prototype.hasOwnProperty.call(projectArchiveMap(), key);
+
+// 프로젝트의 마지막 활동 날짜 — **있는 값만** 본다(없는 날짜를 지어내지 않는다).
+// 그 프로젝트 항목들의 완료·수정·등록 날짜와, 그 프로젝트에 걸린 회의 날짜 중 가장 최근이다.
+function projectLastDay(key, items, meetings) {
+  let last = '';
+  const seen = (value) => {
+    const day = String(value || '').slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(day) && day > last) last = day;
+  };
+  (items || []).forEach((item) => {
+    if (wfKey(item) !== key) return;
+    seen(item.completed); seen(item.updated); seen(item.created);
+  });
+  (meetings || []).forEach((event) => { if (wfMeetingKey(event) === key) seen(event.date); });
+  return last || null;
+}
+
+// 조용함 = 열린 항목(미완료 업무 + 미완료 확인 대기)이 0이고, 마지막 활동이 14일 넘게 없음.
+// 날짜를 하나도 모르면 조용한 것으로 본다(열린 항목이 0이므로).
+function projectQuiet(row, lastDay, today) {
+  if (!row || row.open) return false;
+  if (!lastDay) return true;
+  return Math.round((new Date(`${today}T00:00:00`) - new Date(`${lastDay}T00:00:00`)) / 86400000) > PROJECT_QUIET_DAYS;
+}
+
+// 왼쪽 목록을 둘로 가르는 순수 함수 — 위 목록과 끝의 `지난 프로젝트`.
+// 지금 보고 있는 프로젝트(selectedKey)는 구역이 바뀌어도 보는 동안 위 목록에 남는다
+// (0개가 되어도 갑자기 사라지지 않던 기존 규칙 그대로다).
+// quietCount는 자동 분류로 내려왔지만 아직 **보관하지 않은** 수다(권유 줄이 쓴다).
+function projectPastRows(rows, { quietKeys, archivedKeys, selectedKey } = {}) {
+  const quiet = quietKeys || new Set();
+  const archived = archivedKeys || new Set();
+  const active = [];
+  const past = [];
+  rows.forEach((row) => {
+    const down = (quiet.has(row.key) || archived.has(row.key)) && row.key !== selectedKey;
+    (down ? past : active).push(row);
+  });
+  return { active, past, quietCount: past.filter(row => !archived.has(row.key)).length };
 }
 
 // ---------- 지라 띠 카드 (프로젝트 탭, 읽기 전용) ----------
@@ -1922,7 +1965,9 @@ function jiraCardEnsure(key) {
 //    그 티켓을 지라에서 읽을 수 있는지 한 번 더 확인한다.
 // ③ 지라·사람이 준 글자는 전부 textContent로만 넣는다.
 // 프로젝트 하나 분량만 기억한다 — 다른 프로젝트로 옮기면 적던 것·미리 보던 것을 버린다.
-let jiraLink = { project: null, state: 'idle', query: '', error: '', issue: null, busy: false, onEsc: null };
+// `done`은 `완료한 티켓도 보기`로 한 번 받아 둔 목록이다 — null이면 아직 부르지 않은 것이고,
+// 한 번 받으면 이 입력칸이 닫힐 때까지 다시 부르지 않는다(입력칸을 닫으면 jiraLinkIdle이 비운다).
+let jiraLink = { project: null, state: 'idle', query: '', error: '', issue: null, busy: false, onEsc: null, done: null, doneBusy: false, doneError: '' };
 
 const jiraLinkHost = () => document.getElementById('jiraLinkRow');
 // 설정 > 상태의 지라 줄에 덧붙는 조용한 한 마디. 앱이 목록을 직접 읽고 있을 때만 나온다 —
@@ -1938,7 +1983,7 @@ function jiraLiveNote(sync, at = Date.now()) {
 // 지라 직접 읽기 설정이 있는지와 그 주소 — 목록과 함께 온다(`jiraSync`). 토큰·이메일은 오지 않는다.
 const jiraLinkUsable = () => !!(latestData && latestData.jiraSync && latestData.jiraSync.connected);
 const jiraLinkSite = () => (latestData && latestData.jiraSync && latestData.jiraSync.siteUrl) || '';
-const jiraLinkIdle = project => ({ project, state: 'idle', query: '', error: '', issue: null, busy: false, onEsc: null });
+const jiraLinkIdle = project => ({ project, state: 'idle', query: '', error: '', issue: null, busy: false, onEsc: null, done: null, doneBusy: false, doneError: '' });
 
 // 번호(`io-12345`처럼 소문자로 적어도 된다)나 지라 주소 하나에서 키를 뽑는다.
 // 주소일 때만 호스트를 견준다 — 다른 지라의 주소는 받지 않는다(엉뚱한 티켓에 걸리지 않게).
@@ -1964,6 +2009,39 @@ function jiraLinkSuggestions(query) {
   return (jiraIssuesCache || []).filter(issue => issue && issue.key && !issue.extra)
     .filter(issue => !words || `${issue.summary || ''} ${issue.key}`.toLocaleLowerCase().includes(words))
     .slice(0, 8);
+}
+
+// `완료한 티켓도 보기`로 받아 둔 목록에서 고르는 것 — 내 담당 목록과 **같은 입력으로** 거른다.
+// 이미 위 목록에 있는 키는 두 번 세우지 않는다.
+function jiraLinkDoneSuggestions(query) {
+  const words = String(query || '').trim().toLocaleLowerCase();
+  const above = new Set(jiraLinkSuggestions(query).map(issue => issue.key));
+  return (jiraLink.done || []).filter(issue => issue && issue.key && !above.has(issue.key))
+    .filter(issue => !words || `${issue.summary || ''} ${issue.key}`.toLocaleLowerCase().includes(words))
+    .slice(0, 8);
+}
+
+// 고르는 줄 한 개의 글자(`요약 · 키`, BKEY 결정). 완료한 티켓은 내 담당 목록(jiraIssuesCache)에
+// 없을 수 있어서 받은 값으로 바로 짓는다.
+const jiraLinkPickText = issue => (issue && issue.summary ? `${issue.summary} · ${issue.key}` : (issue && issue.key) || '');
+
+// 그 버튼을 눌렀을 때만 부른다(최근 90일). 조회라 아무것도 저장하지 않는다.
+async function jiraLinkLoadDone(projectKey) {
+  if (jiraLink.doneBusy || jiraLink.done) return;
+  jiraLink = { ...jiraLink, doneBusy: true, doneError: '' };
+  jiraLinkPaint();
+  let data = null;
+  try {
+    const response = await fetch('/api/jira/done?days=90');
+    data = await response.json();
+  } catch { data = null; }
+  if (jiraLink.project !== projectKey) return;
+  if (!data || data.ok === false) jiraLink = { ...jiraLink, doneBusy: false, doneError: (data && data.error) || '지라에 연결하지 못했어요.' };
+  else if (data.connected === false) jiraLink = { ...jiraLink, doneBusy: false, state: 'off' };
+  else jiraLink = { ...jiraLink, doneBusy: false, doneError: '', done: Array.isArray(data.issues) ? data.issues : [] };
+  jiraLinkPaint();
+  // 눌렀던 버튼은 목록으로 바뀌어 사라진다 — 초점을 적던 입력칸으로 되돌린다.
+  jiraLinkFocus();
 }
 
 // 같은 티켓이 다른 프로젝트에도 걸려 있으면 막지 않고 조용히 알리기만 한다.
@@ -2060,20 +2138,42 @@ function jiraLinkInput(box, projectKey) {
   const opts = document.createElement('div');
   opts.className = 'opts';
   const fill = () => {
-    const found = jiraLinkSuggestions(input.value);
-    if (!found.length) { opts.replaceChildren(); return; }
-    const label = document.createElement('div');
-    label.className = 'note';
-    label.textContent = '내 담당 티켓';
-    opts.replaceChildren(label, ...found.map((issue) => {
+    const rows = [];
+    const note = (text) => {
+      const label = document.createElement('div');
+      label.className = 'note';
+      label.textContent = text;
+      rows.push(label);
+    };
+    const option = (text, onClick, quiet) => {
       const pick = document.createElement('button');
       pick.type = 'button';
-      pick.className = 'pk';
-      // 고르는 목록이라 `요약 · 키`다(BKEY 결정) — 앱의 이름 규칙 한 곳에서 짓는다.
-      pick.textContent = uiProjectName({ jira: issue.key }, { picker: true });
-      pick.addEventListener('click', () => jiraLinkFind(projectKey, issue.key));
+      pick.className = quiet ? 'pk qt' : 'pk';
+      pick.textContent = text;
+      pick.addEventListener('click', onClick);
+      rows.push(pick);
       return pick;
-    }));
+    };
+    const found = jiraLinkSuggestions(input.value);
+    if (found.length) {
+      note('내 담당 티켓');
+      // 고르는 목록이라 `요약 · 키`다(BKEY 결정) — 앱의 이름 규칙 한 곳에서 짓는다.
+      found.forEach(issue => option(uiProjectName({ jira: issue.key }, { picker: true }), () => jiraLinkFind(projectKey, issue.key)));
+    }
+    // 끝난 티켓을 프로젝트 기록으로 걸어 두는 경우가 있어서, 눌렀을 때만 최근 90일 완료분을
+    // 한 번 더 읽어 같은 목록 **아래**에 조용한 글자로 덧붙인다.
+    if (jiraLink.done) {
+      const done = jiraLinkDoneSuggestions(input.value);
+      if (done.length) {
+        note('완료한 티켓');
+        done.forEach(issue => option(jiraLinkPickText(issue), () => jiraLinkFind(projectKey, issue.key), true));
+      } else note('완료한 티켓이 없어요');
+    } else {
+      const more = option(jiraLink.doneBusy ? '불러오는 중…' : '완료한 티켓도 보기', () => jiraLinkLoadDone(projectKey), true);
+      more.disabled = jiraLink.doneBusy;
+      if (jiraLink.doneError) note(jiraLink.doneError);
+    }
+    opts.replaceChildren(...rows);
   };
   // 한 글자마다 다시 그리는 것은 이 선택지 목록뿐이다 — 입력칸은 그대로 있어 초점이 튀지 않는다.
   input.addEventListener('input', () => { jiraLink.query = input.value; fill(); });
@@ -2252,9 +2352,15 @@ function renderProjects() {
   projectOrderKeys = rows.map(row => row.key);
   if (!rows.some(row => row.key === projectKey)) projectKey = rows.length ? rows[0].key : null;
 
-  const { visible: visibleRows, zero: zeroRows, hiddenCount } = projectVisibleRows(rows, { showEmpty: projectShowEmpty, selectedKey: projectKey });
+  // 자동 분류(조용함)는 화면에서 계산하고 저장하지 않는다. 보관은 저장된 값이다.
+  const today = todayStr();
+  const archivedKeys = new Set(Object.keys(projectArchiveMap()));
+  const quietKeys = new Set(rows
+    .filter(row => projectQuiet(row, projectLastDay(row.key, workflowData.items, workflowData.meetings), today))
+    .map(row => row.key));
+  const { active: visibleRows, past: pastRows, quietCount } = projectPastRows(rows, { quietKeys, archivedKeys, selectedKey: projectKey });
   // 화면에 보이는 이름은 요약만(같은 요약이 둘 이상이면 그때만 키로 구분) — row.label은 정렬용 원본 그대로 둔다.
-  const labels = uiGroupLabels(visibleRows.map(row => row.key));
+  const labels = uiGroupLabels(visibleRows.concat(projectPastOpen ? pastRows : []).map(row => row.key));
 
   listEl.replaceChildren();
   const head = document.createElement('div');
@@ -2263,14 +2369,16 @@ function renderProjects() {
   headName.textContent = '프로젝트';
   const headCount = document.createElement('span');
   headCount.className = 'n num';
+  // 머리의 개수는 위 목록의 수다(지난 프로젝트는 세지 않는다).
   headCount.textContent = visibleRows.length;
   head.append(headName, headCount);
   listEl.appendChild(head);
 
-  visibleRows.forEach((row) => {
+  // 위 목록과 `지난 프로젝트` 구역이 같은 줄 부품을 쓴다 — 지난 것만 흐리게 그린다.
+  const addRow = (row, past) => {
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = 'd-prow' + (row.open ? '' : ' is-zero');
+    button.className = 'd-prow' + (row.open ? '' : ' is-zero') + (past ? ' is-past' : '');
     button.setAttribute('aria-current', String(row.key === projectKey));
     const displayLabel = labels.get(row.key);
     const name = document.createElement('span');
@@ -2305,20 +2413,76 @@ function renderProjects() {
       renderProjects();
     });
     listEl.appendChild(button);
-  });
+  };
+  visibleRows.forEach(row => addRow(row, false));
 
-  // 목록 끝의 조용한 글자 버튼 — 항목 없는 프로젝트가 하나도 없으면 아예 달지 않는다.
-  if (zeroRows.length) {
+  // 목록 끝의 접힌 구역 — 지난 프로젝트가 하나도 없으면 아예 달지 않는다.
+  if (pastRows.length) {
     const toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.className = 'd-plink';
-    toggle.setAttribute('aria-expanded', String(projectShowEmpty));
-    toggle.textContent = projectShowEmpty ? '항목 없는 프로젝트 숨기기' : `항목 없는 프로젝트 ${hiddenCount}개 보기`;
-    toggle.addEventListener('click', () => { projectShowEmpty = !projectShowEmpty; renderProjects(); });
+    toggle.setAttribute('aria-expanded', String(projectPastOpen));
+    toggle.textContent = projectPastOpen ? '지난 프로젝트 숨기기' : `지난 프로젝트 ${pastRows.length}`;
+    toggle.addEventListener('click', () => { projectPastOpen = !projectPastOpen; renderProjects(); });
     listEl.appendChild(toggle);
+    // 구역 머리 아래 조용한 한 줄 — 자동으로 내려왔지만 아직 보관하지 않은 것이 있을 때만.
+    if (quietCount) {
+      const nudge = document.createElement('div');
+      nudge.className = 'd-pnudge';
+      const words = document.createElement('span');
+      words.textContent = `조용한 프로젝트 ${quietCount}개 · 보관할까요?`;
+      const all = document.createElement('button');
+      all.type = 'button';
+      all.className = 'd-link';
+      all.textContent = '모두 보관';
+      all.addEventListener('click', () => projectArchiveAll(pastRows.filter(row => !archivedKeys.has(row.key)).map(row => row.key)));
+      nudge.append(words, all);
+      listEl.appendChild(nudge);
+    }
+    if (projectPastOpen) pastRows.forEach(row => addRow(row, true));
   }
 
   renderProjectDetail(body, rows.find(row => row.key === projectKey) || null);
+}
+
+// 보관·해제가 서버로 나가는 단 하나의 길. 저장하는 것은 프로젝트 키 하나이고 업무·기록은
+// 그대로다. 앱의 ⌘Z 대상은 아니다(pushUndo를 쓰지 않는다) — 되돌리는 길은 알림의 `되돌리기`뿐이다.
+const projectArchivePost = (key, archived) => request('/api/project/archive', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project: key, archived }),
+});
+async function projectArchiveSet(key, archived) {
+  try { await projectArchivePost(key, archived); } catch { return; }
+  await load();
+  showNotice(archived ? '지난 프로젝트로 옮겼어요' : '지난 프로젝트에서 꺼냈어요', false, null, {
+    label: '되돌리기',
+    onClick: async (button) => {
+      if (button) button.disabled = true;
+      try { await projectArchivePost(key, !archived); } catch { return; }
+      await load();
+      showNotice(archived ? '보관을 해제했어요' : '지난 프로젝트로 다시 옮겼어요');
+    },
+  });
+}
+// 권유 줄의 `모두 보관` — 한 건씩 보내고, 막히면 거기서 멈춘 뒤 된 것만 알린다.
+async function projectArchiveAll(keys) {
+  const done = [];
+  let stopped = false;
+  for (const key of keys) {
+    try { await projectArchivePost(key, true); done.push(key); } catch { stopped = true; break; }
+  }
+  if (!done.length) return;
+  await load();
+  showNotice(stopped ? `${done.length}개까지 보관하고 멈췄어요` : `${done.length}개를 보관했어요`, false, null, {
+    label: '되돌리기',
+    onClick: async (button) => {
+      if (button) button.disabled = true;
+      for (const key of [...done].reverse()) {
+        try { await projectArchivePost(key, false); } catch { break; }
+      }
+      await load();
+      showNotice('보관을 해제했어요');
+    },
+  });
 }
 
 // `언제 할지` 열의 한마디: 오늘 / 내일 / 9월 25일 / 나중에.
@@ -2472,15 +2636,21 @@ function renderProjectDetail(body, row) {
     return;
   }
   const items = workflowData.items.filter(item => wfKey(item) === row.key);
+  const archived = projectArchived(row.key);
   const title = document.createElement('h2');
   title.className = 'd-ptitle';
   // 큰 제목은 요약만(BKEY 결정) — 한 프로젝트만 보여 주는 자리라 같은 요약과 헷갈릴 일이 없다.
   title.textContent = uiGroupLabel(row.key);
+  // 제목 줄의 ⋯ — 지라 띠 카드의 ⋯(연결 해제)와는 다른 메뉴다. 여기는 프로젝트 자체의 일이다.
+  title.appendChild(uiMoreButton('프로젝트 메뉴', () => [[
+    { label: archived ? '보관 해제' : '보관', onClick: () => projectArchiveSet(row.key, !archived) },
+  ]]));
   const summary = document.createElement('div');
   summary.className = 'd-quiet';
   // 그 아래 조용한 줄에만 지라 키를 덧붙인다(`열린 항목 2 · IO-48394`).
+  // 보관해 둔 프로젝트에 열린 항목이 생기면 그 사실을 여기서 알린다 — 꺼낼지는 사람이 정한다.
   const jiraKey = jiraKeyOf(row.key);
-  summary.textContent = `열린 항목 ${row.open}` + (jiraKey ? ` · ${jiraKey}` : '');
+  summary.textContent = (archived ? '보관한 프로젝트 · ' : '') + `열린 항목 ${row.open}` + (jiraKey ? ` · ${jiraKey}` : '');
   body.append(title, summary);
 
   // 지라에 연결된 프로젝트에만, 제목 줄 아래·첫 구역 위에 지라 띠 카드가 선다 — `jira:KEY`
@@ -7073,22 +7243,26 @@ function groupSelectOptions(current, forceClearable) {
   // 여러 개를 한 번에 옮길 땐 "현재 그룹"이라는 게 없어도(current === null) 해제를 고를 수 있어야 한다.
   if (current || forceClearable) head.push(`<option value="__clear__">— 그룹 해제 —</option>`);
   const rest = [];
+  // 보관해 둔 프로젝트도 고를 수 있다 — 목록 끝의 `지난 프로젝트` 소제목 아래로 내려갈 뿐이다.
+  const past = [];
+  const put = (key, line) => (projectArchived(key) ? past : rest).push(line);
   // `그 밖의 이슈`(extra = 지라에서 완료됐거나 담당이 바뀐 것)는 새로 고를 수 있는 선택지로 내놓지
   // 않는다 — 요약을 보여 주려고 들고 있을 뿐이다. 다만 지금 걸려 있는 값이면 골라진 채로 보여야 한다.
   // 고르는 자리라 `요약 · 키`(BKEY 결정) — 눈이 먼저 가는 앞자리는 요약이고, 정렬도 요약 기준이다.
-  rest.push(...jiraIssuesCache
+  jiraIssuesCache
     .filter(i => !i.extra || (current && current.type === 'jira' && current.value === i.key))
     .slice()
     .sort((a, b) => String(a.summary || a.key).localeCompare(String(b.summary || b.key)))
-    .map(i => {
+    .forEach(i => {
       const selected = current && current.type === 'jira' && current.value === i.key;
       const text = i.summary ? `${i.summary} · ${i.key}` : i.key;
-      return `<option value="jira:${escapeAttr(i.key)}"${selected ? ' selected' : ''}>${escapeHtml(text)}</option>`;
-    }));
-  rest.push(...customGroupsCache.map(g => {
+      put(`jira:${i.key}`, `<option value="jira:${escapeAttr(i.key)}"${selected ? ' selected' : ''}>${escapeHtml(text)}</option>`);
+    });
+  customGroupsCache.forEach(g => {
     const selected = current && current.type === 'group' && current.value === g;
-    return `<option value="group:${escapeAttr(g)}"${selected ? ' selected' : ''}>${escapeHtml(g)}</option>`;
-  }));
+    put(`group:${g}`, `<option value="group:${escapeAttr(g)}"${selected ? ' selected' : ''}>${escapeHtml(g)}</option>`);
+  });
+  if (past.length) rest.push(`<optgroup label="지난 프로젝트">`, ...past, `</optgroup>`);
   rest.push(`<option value="__custom__">직접 입력…</option>`);
   return { head, rest };
 }

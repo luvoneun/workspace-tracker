@@ -28,6 +28,14 @@ const LIST_FIELDS = 'summary,status,issuetype,fixVersions,duedate';
 const JIRA_LIST_LIMIT = 100;
 // 기본 조회: 내가 담당이고 아직 끝나지 않은 것. 최근에 손댄 순서다.
 const MY_ISSUES_JQL = 'assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC';
+// 완료한 내 티켓(연결 입력칸의 `완료한 티켓도 보기`)이 받아 오는 칸 — 고르는 줄 한 개(`요약 · 키`)에
+// 필요한 것뿐이다. 여기도 담당자는 아예 요청하지 않는다(내 것만 읽는 목록이라 필요가 없다).
+const DONE_FIELDS = 'summary,status,issuetype';
+// 최근에 끝난 내 티켓. 기간은 부르는 쪽이 정한다(화면은 90일).
+const JIRA_DONE_DAYS = 90;
+const JIRA_DONE_MAX_DAYS = 365;
+const doneIssuesJql = days => `assignee = currentUser() AND statusCategory = Done AND resolved >= -${days}d ORDER BY resolved DESC`;
+const doneDaysOf = days => (Number.isInteger(days) && days >= 1 && days <= JIRA_DONE_MAX_DAYS ? days : JIRA_DONE_DAYS);
 const CHANGE_KINDS = ['status', 'version', 'due', 'versionEdit'];
 
 // 지라가 주는 범주 열쇠는 셋뿐이다. 모르는 값은 `진행`으로 본다(상태 이름은 그대로 보여 준다).
@@ -270,9 +278,9 @@ function createJiraClient({ settings, request = (...args) => fetch(...args), rea
   }
 
   // 목록 조회 한 번. 하위 티켓과 같은 길이다 — 새 주소(`/search/jql`)가 없는 지라에서는
-  // 옛 주소(`/search`)로 한 번만 물러선다.
-  async function search(jql, secret) {
-    const query = `jql=${encodeURIComponent(jql)}&fields=${LIST_FIELDS}&maxResults=${JIRA_LIST_LIMIT}`;
+  // 옛 주소(`/search`)로 한 번만 물러선다. 받아 오는 칸은 부르는 쪽이 고른다.
+  async function search(jql, secret, fields = LIST_FIELDS) {
+    const query = `jql=${encodeURIComponent(jql)}&fields=${fields}&maxResults=${JIRA_LIST_LIMIT}`;
     try {
       return await call(`/rest/api/3/search/jql?${query}`, secret);
     } catch (error) {
@@ -296,6 +304,13 @@ function createJiraClient({ settings, request = (...args) => fetch(...args), rea
       .map(entry => shapeListIssue(entry, true)).filter(Boolean)
       .filter(issue => !have.has(issue.key)).slice(0, JIRA_LIST_LIMIT);
     return [...mine, ...rest];
+  }
+
+  // 최근에 끝난 내 티켓. 연결 입력칸에서 `완료한 티켓도 보기`를 눌렀을 때만 부른다 —
+  // 목록과 같은 길·같은 모양이되 배포 버전·기한은 묻지 않는다(고르는 줄에 쓰지 않는다).
+  async function listDoneIssues(days = JIRA_DONE_DAYS) {
+    const body = await search(doneIssuesJql(doneDaysOf(days)), token(), DONE_FIELDS);
+    return ((body || {}).issues || []).map(entry => shapeListIssue(entry, false)).filter(Boolean).slice(0, JIRA_LIST_LIMIT);
   }
 
   const wantKey = (key) => { if (typeof key !== 'string' || !JIRA_KEY_RE.test(key)) throw jiraError('key'); return key; };
@@ -358,7 +373,7 @@ function createJiraClient({ settings, request = (...args) => fetch(...args), rea
     await call(`/rest/api/3/version/${id}`, token(), { method: 'PUT', send });
   }
 
-  return { getIssueOverview, listMyIssues, getTransitions, getVersions, getIssueVersionIds, transition, updateIssueFields, updateVersion };
+  return { getIssueOverview, listMyIssues, listDoneIssues, getTransitions, getVersions, getIssueVersionIds, transition, updateIssueFields, updateVersion };
 }
 
 // 쓰기 실패를 화면 문구로 옮기는 단 하나의 표. 우리가 먼저 막은 것(대조 실패·필수 입력·여러 버전)은
@@ -378,6 +393,8 @@ function writeKind(error) {
 function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = Date.now, ttlMs = JIRA_CACHE_MS } = {}) {
   const settings = jiraSettings(config);
   const cache = new Map();
+  // 완료한 내 티켓은 키가 없는 목록이라 캐시도 한 벌뿐이다(기간이 바뀌면 버린다).
+  let doneCache = null;
 
   function token() {
     try {
@@ -416,6 +433,24 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
     if (!secret) return { ok: true, connected: false };
     try {
       const issues = await createJiraClient({ settings, request, readToken: () => secret }).listMyIssues(linkedKeys);
+      return { ok: true, connected: true, issues };
+    } catch (error) {
+      const kind = MESSAGE[error && error.kind] ? error.kind : 'other';
+      return { ok: false, error: MESSAGE[kind], kind };
+    }
+  }
+
+  // 완료한 내 티켓. 연결 입력칸에서 그 버튼을 눌렀을 때만 부르고, 파일은 아무것도 쓰지 않는다.
+  // 서버 메모리에 60초만 들고 있는다 — 같은 입력칸을 여러 번 열어도 지라를 다시 부르지 않게.
+  async function listDone(days = JIRA_DONE_DAYS) {
+    if (!settings) return { ok: true, connected: false };
+    const secret = token();
+    if (!secret) return { ok: true, connected: false };
+    const span = doneDaysOf(days);
+    if (doneCache && doneCache.days === span && now() - doneCache.at < ttlMs) return { ok: true, connected: true, issues: doneCache.issues };
+    try {
+      const issues = await createJiraClient({ settings, request, readToken: () => secret }).listDoneIssues(span);
+      doneCache = { at: now(), days: span, issues };
       return { ok: true, connected: true, issues };
     } catch (error) {
       const kind = MESSAGE[error && error.kind] ? error.kind : 'other';
@@ -495,11 +530,12 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
     return { ok: true };
   }
 
-  return { read, list, options, change, connected: !!settings };
+  return { read, list, listDone, options, change, connected: !!settings };
 }
 
 module.exports = {
   createJiraClient, createJiraApi, jiraSettings, issueUrl, projectOf, countChildren, shapeChildren,
   shapeTransitions, shapeVersions, shapeListIssue, writeKind,
   JIRA_KEY_RE, JIRA_TIMEOUT_MS, JIRA_CACHE_MS, JIRA_LIST_LIMIT, MY_ISSUES_JQL, JIRA_MESSAGE: MESSAGE,
+  JIRA_DONE_DAYS, JIRA_DONE_MAX_DAYS, doneIssuesJql,
 };
