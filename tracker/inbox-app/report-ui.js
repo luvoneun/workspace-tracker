@@ -653,6 +653,22 @@ function reportRecordGroups(rows) {
   return names.map(name => ({ name, entries: groups.get(name) }));
 }
 
+// 전체 업무 기록 줄의 ⋯ — 맨 위 `보고에서 제외`/`보고에 복원` + 그 업무 종류의 기존 메뉴.
+// source는 보고가 들고 있는 요약 값(id·문구·상태·종류)뿐이라, 메뉴에 쓸 값은 앱의 전체 목록에서 다시 찾는다
+// (panelOpen이 상세를 열 때 쓰는 것과 같은 길 — panelResolve). 찾지 못하면(이미 사라진 항목 등) 제외/복원만 남긴다.
+function reportRecordMenuSections(item, source, row, card) {
+  const toggle = [{
+    label: row.excluded ? '보고에 복원' : '보고에서 제외',
+    onClick: () => reportChange(item, { action: 'exclude', id: row.id }),
+  }];
+  const resolved = typeof panelResolve === 'function' ? panelResolve(source.id) : null;
+  if (!resolved) return [toggle];
+  const base = source.type === 'check' ? waitingMenuSections(resolved.item, card)
+    : source.type === 'decision' ? decisionMenuSections(resolved.item, card)
+    : taskMenuSections({ item: resolved.item, mode: panelMode(resolved.item), card });
+  return [toggle, ...base];
+}
+
 // `전체 업무 기록` — 이번 주에 연결된 업무를 프로젝트로 묶은 조용한 목록. 줄을 누르면 상세가 열린다.
 // 오른쪽에는 기본값이 아닌 것만 적는다(`완료`·`보고에서 제외됨`) — `미완료`·`보고에 포함`은 찍지 않는다.
 function reportRecordsView(item, host) {
@@ -681,6 +697,10 @@ function reportRecordsView(item, host) {
       if (row.excluded) notes.push('보고에서 제외됨');
       line.appendChild(reportNode('span', notes.join(' · '), 'mt'));
       if (row.excluded) line.appendChild(reportButton('복원', () => reportChange(item, { action: 'exclude', id: row.id }), 'd-btn sm'));
+      // 이 줄에서 할 수 있는 일이 ⋯뿐이라 늘 보인다(다른 목록의 확인 대기·결정·아이디어 줄과 같은 규칙).
+      const acts = reportNode('span', undefined, 'ac');
+      acts.appendChild(uiMoreButton(`${source.description} — 더 보기`, () => reportRecordMenuSections(item, source, row, line)));
+      line.appendChild(acts);
       list.appendChild(line);
     }
   }

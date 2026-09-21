@@ -14,7 +14,7 @@ const definitions = script.slice(0, script.indexOf(DEFINITIONS_MARKER));
 function element() {
   const attributes = new Map();
   return {
-    value: '', disabled: false, hidden: false, textContent: '', children: [], listeners: {},
+    value: '', disabled: false, hidden: false, textContent: '', children: [], listeners: {}, dataset: {},
     parent: null, connected: true, blurs: 0,
     get isConnected() { return this.connected; },
     classList: { toggle() {}, contains() { return false; } },
@@ -157,12 +157,29 @@ test('the status column shows overdue, due today, carried-over and in-progress, 
   assert.equal(cells("{ priority: 'medium' }"), '', 'a middling priority is not printed');
   assert.match(cells("{ priority: 'critical' }"), /m-pri k-neg"[^>]*>.*긴급/s);
   assert.match(cells("{ priority: 'high' }"), /m-pri k-warn"[^>]*>.*중요/s, '높음은 화면에서 `중요`로 읽힌다');
-  // 종류마다 작은 아이콘과 풀어 쓴 툴팁이 함께 붙는다.
+  // 기한·밀림·진행에는 작은 아이콘과 풀어 쓴 툴팁이 함께 붙는다.
   assert.match(cells("{ scheduled: '2000-01-01' }"), /title="오늘 하려다 넘어온 업무예요"/);
-  assert.match(cells("{ priority: 'critical' }"), /<svg class="d-i"/, '상태말 앞에는 종류 아이콘이 붙는다');
+  assert.match(cells("{ due: '2000-01-01' }"), /<svg class="d-i"/, '상태말 앞에는 종류 아이콘이 붙는다');
+  // 우선순위는 아이콘 없이 글자와 색뿐이다(깃발 아이콘을 뺐다).
+  assert.doesNotMatch(cells("{ priority: 'critical' }"), /<svg/, '우선순위 표시에는 아이콘이 없다');
+  assert.doesNotMatch(cells("{ priority: 'high' }"), /<svg/);
   const escaped = cells('{}', "{ project: '가입 <개선>' }");
   assert.match(escaped, /m-proj">가입 &lt;개선&gt;/, 'user text is escaped');
   assert.doesNotMatch(escaped, /<개선>/);
+});
+
+test('상세 카드의 우선순위 값도 아이콘 없이 글자·색만 쓴다', () => {
+  const app = pureClient();
+  const cell = (item) => app.run(`(() => {
+    const c = panelPriorityCell(${item});
+    return { text: c.textContent, html: c.innerHTML, cls: c.className };
+  })()`);
+  const critical = cell("{ priority: 'critical' }");
+  assert.equal(critical.text, '긴급');
+  assert.equal(critical.html, undefined, '고정 아이콘 말고는 innerHTML을 쓰지 않는다(사용자 데이터는 textContent로)');
+  assert.match(critical.cls, /k-neg/);
+  const medium = cell("{ priority: 'medium' }");
+  assert.equal(medium.text, '보통', '값을 확인하는 자리라 보통·낮음도 조용히 적는다');
 });
 
 test('waiting items put today\'s re-checks on top, then reply deadlines, then when they were added', () => {
@@ -464,6 +481,16 @@ function meetingRowEditing(app) {
   })()`);
 }
 
+// 회의 줄의 ⋯가 여는 메뉴 — 레일의 오늘 미팅 줄과 회의 정리 카드 머리가 함께 쓴다(회의용으로 새로 만들지 않는다).
+test('meetingMenuSections lists 회의 정리 열기 then 프로젝트 연결, for both the rail row and the meeting card head', () => {
+  const { app } = meetingRowClient(new Response('{"ok":true}'));
+  const labels = (event) => JSON.parse(app.run(`JSON.stringify(
+    meetingMenuSections(${JSON.stringify(event)}).map(section => section.map(entry => entry.label || entry.field)))`));
+  assert.deepEqual(labels({ title: '주간 운영 회의', start: '10:00' }), [['회의 정리 열기'], ['프로젝트 연결']]);
+  assert.deepEqual(labels({ title: '가입 개선 킥오프', start: '09:00', project: { type: 'group', value: '가입 개선', label: '가입 개선' } }),
+    [['회의 정리 열기'], ['프로젝트 연결']], '프로젝트가 이미 연결돼 있어도 메뉴 항목은 같다');
+});
+
 test('a meeting row reuses the list menus and only puts 문구 고치기 on top', () => {
   const { app } = meetingRowClient(new Response('{"ok":true}'));
   const menu = (type) => JSON.parse(app.run(`JSON.stringify(
@@ -599,6 +626,40 @@ test('아이디어의 `가능성`은 높음만 글자로 적는다', () => {
   assert.equal(chance('null'), '');
 });
 
+// 프로젝트 탭의 확인 대기·결정·아이디어 줄 — 할 수 있는 일이 더보기뿐이라 ⋯이 늘 보이고,
+// 여는 메뉴는 다른 목록이 쓰는 메뉴 그대로다(프로젝트 탭용으로 새로 만들지 않는다).
+test('프로젝트 탭의 확인 대기·결정·아이디어 줄은 목록에서 쓰는 메뉴를 그대로 연다', () => {
+  const app = workflowsClient();
+  app.run(`workflowData = { meetings: [], items: [] }; wfIndexData(); itemsById = new Map();
+    var captured = null; uiMenu = (anchor, sections) => { captured = sections; };`);
+
+  const openMenu = (type, item, menuFn) => {
+    app.run(`
+      var item = ${JSON.stringify(item)};
+      var row = projectSimpleRow(item.description, '메타', () => {}, item.id, (row) => ${menuFn}(item, row));
+      captured = null;
+      row.children[row.children.length - 1].children[0].listeners.click({ stopPropagation() {} });
+    `);
+    return JSON.parse(app.run('JSON.stringify((captured || []).map(section => section.map(entry => entry.label || entry.field)))'));
+  };
+  const direct = (code) => JSON.parse(app.run(`JSON.stringify(${code}.map(section => section.map(entry => entry.label || entry.field)))`));
+
+  const waitingItem = { id: 'w1', type: 'check', description: '문구', status: 'to-do' };
+  const decisionItem = { id: 'd1', type: 'decision', description: '문구', status: 'to-do' };
+  const ideaItem = { id: 'i1', type: 'idea', description: '문구', status: 'to-do' };
+
+  assert.deepEqual(openMenu('check', waitingItem, 'waitingMenuSections'),
+    direct(`waitingMenuSections(${JSON.stringify(waitingItem)}, document.createElement('div'))`),
+    '확인 대기 줄은 확인 대기 줄의 메뉴를 그대로 쓴다');
+  assert.deepEqual(openMenu('decision', decisionItem, 'decisionMenuSections'),
+    direct(`decisionMenuSections(${JSON.stringify(decisionItem)}, document.createElement('div'))`),
+    '결정 줄은 결정 줄의 메뉴를 그대로 쓴다');
+  assert.deepEqual(openMenu('idea', ideaItem, 'ideaMenuSections'),
+    direct(`ideaMenuSections(${JSON.stringify(ideaItem)}, document.createElement('div'))`),
+    '아이디어 줄은 아이디어·결정 탭의 아이디어 메뉴를 그대로 쓴다');
+  assert.deepEqual(openMenu('decision', decisionItem, 'decisionMenuSections'), [['프로젝트'], ['삭제']], '결정에는 날짜가 없다');
+});
+
 // 주간요약 문서: 상태 → 프로젝트 → 문장으로 묶이고, 제외한 문장과 다음 주 계획은 문서 끝에 따로 간다.
 const REPORT_ROWS = `[
   { id: 'a1', heading: '완료한 일', group: '결제_리뉴얼', text: '정산 배치 설계를 끝냈습니다', sourceIds: ['s1'], excluded: false },
@@ -645,6 +706,45 @@ test('전체 업무 기록은 프로젝트로 묶이고, 프로젝트 없는 기
     ['프로젝트 없음', ['s2', 's5'], ['r2', 'r4']],
   ], '보고 문서에 나온 차례를 그대로 쓰고, 서버의 `그룹 없음`과 빈 값은 한 묶음으로 맨 아래에 둔다');
   assert.deepEqual(JSON.parse(app.run('JSON.stringify(reportRecordGroups([]))')), [], '연결된 기록이 없으면 묶음도 없다');
+});
+
+// 전체 업무 기록 줄의 ⋯: 맨 위는 제외/복원, 그 아래는 업무 종류의 기존 메뉴 그대로다(새로 만들지 않는다).
+function reportRecordMenuLabels(app, item, source, row) {
+  return JSON.parse(app.run(`JSON.stringify(
+    reportRecordMenuSections(${JSON.stringify(item)}, ${JSON.stringify(source)}, ${JSON.stringify(row)}, document.createElement('div'))
+      .map(section => section.map(entry => entry.label || entry.field)))`));
+}
+
+test('전체 업무 기록 줄의 더보기는 제외/복원 다음에 그 업무 종류의 줄 메뉴를 그대로 쓴다', () => {
+  const app = reportClient();
+  // reportRecordMenuSections는 panelResolve(→wfItem)로 값을 다시 찾으므로 workflows.js도 함께 올린다.
+  app.run(fs.readFileSync(path.join(__dirname, 'workflows.js'), 'utf8'));
+  app.run(`workflowData = { meetings: [], items: [
+    { id: 't1', type: 'task', status: 'to-do', description: '정산 배치 설계', priority: 'high', due: '2026-09-30' },
+    { id: 'd1', type: 'decision', status: 'to-do', description: '정책 문구' },
+  ] }; wfIndexData();
+  itemsById = new Map([['t1', workflowData.items[0]], ['d1', workflowData.items[1]]]);
+  taskListsCache = { todayTasks: [], laterTasks: [] };`);
+  const item = { weekKey: '2026-W38', draft: { revision: 1 } };
+
+  const taskSource = { id: 't1', description: '정산 배치 설계', type: 'task', status: 'to-do' };
+  const open = reportRecordMenuLabels(app, item, taskSource, { id: 'r1', excluded: false });
+  assert.equal(open[0][0], '보고에서 제외', '아직 제외하지 않은 줄의 맨 위는 `보고에서 제외`다');
+  const excluded = reportRecordMenuLabels(app, item, taskSource, { id: 'r1', excluded: true });
+  assert.equal(excluded[0][0], '보고에 복원', '이미 제외한 줄의 맨 위는 `보고에 복원`이다');
+
+  const directTask = JSON.parse(app.run(`JSON.stringify(
+    taskMenuSections({ item: itemsById.get('t1'), mode: panelMode(itemsById.get('t1')), card: document.createElement('div') })
+      .map(section => section.map(entry => entry.label || entry.field)))`));
+  assert.deepEqual(open.slice(1), directTask, '할 일은 업무 줄의 메뉴를 그대로 쓴다');
+
+  const decisionSource = { id: 'd1', description: '정책 문구', type: 'decision', status: 'to-do' };
+  const decisionMenu = reportRecordMenuLabels(app, item, decisionSource, { id: 'r2', excluded: false });
+  assert.deepEqual(decisionMenu, [['보고에서 제외'], ['프로젝트'], ['삭제']], '결정에는 날짜가 없다');
+
+  // 앱의 전체 목록에서 찾지 못하는 항목(이미 사라진 기록 등)은 제외/복원만 남긴다.
+  const missing = reportRecordMenuLabels(app, item, { id: 'gone', description: '없는 항목', type: 'task', status: 'to-do' }, { id: 'r3', excluded: false });
+  assert.deepEqual(missing, [['보고에서 제외']]);
 });
 
 // 슬랙 복사: 구역(상태) → 프로젝트 → 글머리 항목. 이 글자가 바뀌면 사용자의 슬랙 글 모양이 바뀐다.

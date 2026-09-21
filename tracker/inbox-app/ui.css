@@ -1106,13 +1106,8 @@ textarea.d-dtitle {
 .d-mrow2.is-done .ti { color: var(--muted); text-decoration: line-through; }
 /* 문구를 그 자리에서 고치는 칸 — 줄 높이를 밀어내지 않게 촘촘한 꼴로 */
 .d-mrow2 .d-din { min-height: 28px; padding: 4px 8px; font-size: 13px; }
-/* ⋯은 다른 목록의 줄과 같은 규칙이다: 손이 닿으면 나타나고, 터치 화면에서는 늘 보인다. */
-.d-mrow2 .ac {
-  display: flex; align-items: center; justify-content: flex-end;
-  opacity: 0; pointer-events: none; transition: opacity 130ms var(--ease);
-}
-.d-mrow2:hover .ac, .d-mrow2:focus-within .ac { opacity: 1; pointer-events: auto; }
-@media (hover: none) { .d-mrow2 .ac { opacity: 1; pointer-events: auto; } }
+/* 이 줄에서 할 수 있는 일이 더보기뿐이라 ⋯은 늘 보인다 — 평소 흐리게, 손이 닿으면 진하게. */
+.d-mrow2 .ac { display: flex; align-items: center; justify-content: flex-end; }
 .d-mrow2 .ac .d-more { width: 28px; height: 28px; color: var(--dim); }
 .d-mrow2:hover .ac .d-more, .d-mrow2:focus-within .ac .d-more { color: var(--text); }
 
@@ -1441,6 +1436,16 @@ body.batch-open .d-toast { bottom: 76px; }
 }
 .d-rec.is-sel .ti { font-weight: 600; color: var(--accent-text); }
 .d-rec .mt { font-size: 12.5px; color: var(--dim); text-align: right; white-space: nowrap; }
+/* 프로젝트 탭의 확인 대기·결정·아이디어·회의 줄 — 할 수 있는 일이 더보기뿐이라 ⋯은 늘 보인다.
+   조용한 글자(.mt)와 겹치지 않게 오른쪽에 자리를 비워 두고, 한 줄 높이 가운데에 겹쳐 세운다. */
+.d-rec.has-ac { position: relative; padding-right: 40px; }
+.d-rec.has-ac .ac {
+  position: absolute; right: 2px; top: 50%; transform: translateY(-50%);
+  display: flex; align-items: center;
+  opacity: 1; pointer-events: auto;
+}
+.d-rec.has-ac .ac .d-more { width: 28px; height: 28px; color: var(--dim); }
+.d-rec.has-ac:hover .ac .d-more, .d-rec.has-ac:focus-within .ac .d-more { color: var(--text); }
 
 /* ---------- 아이디어·결정 탭 ---------- */
 /* 두 열이 나란히 서고, 줄은 프로젝트 탭과 같은 `.d-rec`를 쓴다(결정만 체크 칸이 하나 더). */

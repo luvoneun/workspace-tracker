@@ -13,10 +13,9 @@ const UI_ICONS = {
   link: '<path d="M6.9 9.1a2.6 2.6 0 0 0 3.7 0l2-2a2.6 2.6 0 0 0-3.7-3.7l-.6.6"/><path d="M9.1 6.9a2.6 2.6 0 0 0-3.7 0l-2 2a2.6 2.6 0 0 0 3.7 3.7l.6-.6"/>',
   refresh: '<path d="M14 8a6 6 0 1 1-2-4.47L14 5.2"/><path d="M14 2v3.4h-3.4"/>',
   gear: '<circle cx="8" cy="8" r="2.4"/><path d="M8 1.7v1.7M8 12.6v1.7M14.3 8h-1.7M3.4 8H1.7M12.45 3.55l-1.2 1.2M4.75 11.25l-1.2 1.2M12.45 12.45l-1.2-1.2M4.75 4.75l-1.2-1.2"/>',
-  // 상태말 앞에 붙는 종류 표시 — 기한(달력) · 밀림(시계) · 우선순위(깃발) · 답변(말풍선)
+  // 상태말 앞에 붙는 종류 표시 — 기한(달력) · 밀림(시계) · 답변(말풍선). 우선순위는 글자와 색만으로 알린다(아이콘 없음).
   calendar: '<rect x="2.4" y="3.4" width="11.2" height="10.2" rx="2.2"/><path d="M2.4 6.6h11.2M5.6 2.2v2.4M10.4 2.2v2.4"/>',
   clock: '<circle cx="8" cy="8" r="5.8"/><path d="M8 4.8V8l2.2 1.5"/>',
-  flag: '<path d="M4 14V2.8M4 3.2h7.6l-1.5 2.6 1.5 2.6H4"/>',
   chat: '<path d="M13.6 8.6a4.8 4.8 0 0 1-4.8 4.8H5.2L2.4 15v-2.9A4.8 4.8 0 0 1 2.4 8V7.4a4.8 4.8 0 0 1 4.8-4.8h1.6a4.8 4.8 0 0 1 4.8 4.8z"/>',
 };
 function uiIcon(name) {
@@ -248,8 +247,8 @@ function uiProjectLabel(item, grouped) {
   return item.jira || item.group || '';
 }
 
-// 상태 열의 글자 셀: 밀린 표시 → 진행 중 → 우선순위(깃발 + 글자) → 기한(맨 오른쪽, 달력).
-// 종류마다 14px 아이콘과 풀어 쓴 title 툴팁이 붙는다. 급한 말(긴급·기한 N일 지남·오늘까지)만
+// 상태 열의 글자 셀: 밀린 표시 → 진행 중 → 우선순위(글자와 색뿐, 아이콘 없음) → 기한(맨 오른쪽, 달력).
+// 기한·밀림·진행에는 14px 아이콘과 풀어 쓴 title 툴팁이 함께 붙는다. 급한 말(긴급·기한 N일 지남·오늘까지)만
 // 배지로 서고 나머지는 회색 글자다(모양은 ui.css가 정한다).
 // 보통·낮음·먼 기한처럼 의미 없는 값은 자리를 비운다.
 const UI_PRIORITY_META = {
@@ -264,6 +263,9 @@ function uiMetaCells(item, opts = {}) {
   const cells = [];
   const cell = (cls, icon, text, hint) =>
     `<span class="${cls}"${hint ? ` title="${escapeAttr(hint)}"` : ''}>${uiIcon(icon)}${escapeHtml(text)}</span>`;
+  // 우선순위는 아이콘 없이 글자·색만으로 알린다(긴급은 빨간 배지 글자, 중요는 주황 글자).
+  const cellPlain = (cls, text, hint) =>
+    `<span class="${cls}"${hint ? ` title="${escapeAttr(hint)}"` : ''}>${escapeHtml(text)}</span>`;
   // 좁은 화면(≤520px)의 두 줄 행에서는 프로젝트가 정보 줄 맨 앞에 온다 — 넓은 화면에서는 제목 뒤·프로젝트 열이 보여 준다.
   if (opts.project) cells.push(`<span class="m-proj">${escapeHtml(opts.project)}</span>`);
   const carry = where === 'row' && !done ? uiCarryText(item.scheduled) : null;
@@ -273,7 +275,7 @@ function uiMetaCells(item, opts = {}) {
     cells.push(cell('m-doing', 'clock', days > 1 ? `${days}일째 진행 중` : '진행 중', '이미 손을 댄 업무예요'));
   }
   const priority = done ? null : UI_PRIORITY_META[item.priority];
-  if (priority) cells.push(cell(`m-pri${uiTone(priority.tone)}`, 'flag', priority.text, priority.hint));
+  if (priority) cells.push(cellPlain(`m-pri${uiTone(priority.tone)}`, priority.text, priority.hint));
   const due = done ? null : uiDueText(item.due, where);
   if (due) cells.push(cell(`m-due${uiTone(due.tone)}`, 'calendar', due.text, item.due ? `기한은 ${uiKoDate(item.due)}이에요` : ''));
   return cells.join('');
@@ -1062,11 +1064,11 @@ function projectTaskRow(item) {
   title.addEventListener('click', () => panelOpen({ id: item.id }));
   row.appendChild(title);
 
-  // 상태말은 오늘 목록과 같은 말·아이콘을 쓴다(깃발 + `긴급`/`중요`, 달력 + 기한).
+  // 상태말은 오늘 목록과 같은 말을 쓴다(우선순위는 글자·색만, 기한은 달력 아이콘).
   const priority = document.createElement('span');
   const meta = UI_PRIORITY_META[item.priority];
   priority.className = 'pr' + (meta ? uiTone(meta.tone) : '');
-  if (meta) { priority.innerHTML = uiIcon('flag') + escapeHtml(meta.text); priority.title = meta.hint; }
+  if (meta) { priority.textContent = meta.text; priority.title = meta.hint; }
   row.appendChild(priority);
 
   const due = uiDueText(item.due, 'full');
@@ -1123,13 +1125,21 @@ function projectDoneRow(item) {
   when.className = 'dd';
   when.textContent = item.completed ? `${uiKoDateShort(item.completed)} 완료` : '';
   row.appendChild(when);
+
+  // 진행할 업무 줄과 같은 ⋯ 규칙(손이 닿으면 나타난다) — 완료 취소는 체크로 이미 할 수 있다.
+  const acts = document.createElement('span');
+  acts.className = 'ac';
+  const mode = item.scheduled ? 'today' : 'later';
+  acts.appendChild(uiMoreButton(`${item.description} — 더 보기`, () => taskMenuSections({ item, mode, card: row })));
+  row.appendChild(acts);
   return row;
 }
 
 // 확인 대기·결정·아이디어·회의처럼 값이 한두 개뿐인 구역은 같은 한 줄 모양을 쓴다.
-function projectSimpleRow(text, meta, onOpen, id) {
+// menuSections가 있으면(할 수 있는 일이 더보기뿐이라) 늘 보이는 ⋯을 단다 — 목록에서 쓰는 메뉴 그대로.
+function projectSimpleRow(text, meta, onOpen, id, menuSections) {
   const row = document.createElement('div');
-  row.className = 'd-rec' + (id && panelState && panelState.id === id ? ' is-sel' : '');
+  row.className = 'd-rec' + (menuSections ? ' has-ac' : '') + (id && panelState && panelState.id === id ? ' is-sel' : '');
   if (id) row.dataset.taskId = id;
   const title = document.createElement('button');
   title.type = 'button';
@@ -1142,6 +1152,12 @@ function projectSimpleRow(text, meta, onOpen, id) {
   note.className = 'mt';
   note.textContent = meta || '';
   row.append(title, note);
+  if (menuSections) {
+    const acts = document.createElement('span');
+    acts.className = 'ac';
+    acts.appendChild(uiMoreButton(`${text} — 더 보기`, () => menuSections(row)));
+    row.appendChild(acts);
+  }
   return row;
 }
 
@@ -1176,12 +1192,14 @@ function renderProjectDetail(body, row) {
     body.appendChild(section);
   }
 
-  const simple = (label, list, meta, onOpen) => {
+  // menu가 있으면 줄마다 같은 목록이 쓰는 ⋯ 메뉴를 그대로 단다(회의용·프로젝트탭용으로 새로 만들지 않는다).
+  const simple = (label, list, meta, onOpen, menu) => {
     if (!list.length) return;
     const section = projectSection(label, list.length);
     const surface = document.createElement('div');
     surface.className = 'd-psurf plain';
-    list.forEach(entry => surface.appendChild(projectSimpleRow(entry.text, meta(entry.item), () => onOpen(entry.item), entry.id)));
+    list.forEach(entry => surface.appendChild(projectSimpleRow(entry.text, meta(entry.item), () => onOpen(entry.item), entry.id,
+      menu ? (row) => menu(entry.item, row) : null)));
     section.appendChild(surface);
     body.appendChild(section);
   };
@@ -1189,16 +1207,17 @@ function renderProjectDetail(body, row) {
   const openPanel = item => panelOpen({ id: item.id });
 
   simple('확인 대기', asItems(items.filter(item => item.type === 'check' && item.status !== 'done')),
-    item => item.who || (uiDueText(item.due, 'full')?.text ?? ''), openPanel);
+    item => item.who || (uiDueText(item.due, 'full')?.text ?? ''), openPanel, waitingMenuSections);
   // 결정은 미반영·반영을 글자로만 가른다(알약으로 그리지 않는다).
   simple('결정', asItems(items.filter(item => item.type === 'decision')),
-    item => item.status === 'done' ? `${uiKoDateShort(item.completed)} 반영` : '미반영', openPanel);
+    item => item.status === 'done' ? `${uiKoDateShort(item.completed)} 반영` : '미반영', openPanel, decisionMenuSections);
   simple('아이디어', asItems(items.filter(item => item.type === 'idea')),
-    item => item.created ? `${uiKoDateShort(item.created)} 기록` : '', openPanel);
+    item => item.created ? `${uiKoDateShort(item.created)} 기록` : '', openPanel, ideaMenuSections);
 
   const meetings = workflowData.meetings.filter(event => wfMeetingKey(event) === row.key || items.some(item => item.meetingId === event.id));
   simple('회의', meetings.map(event => ({ item: event, text: event.title, id: null })),
-    event => event.date ? uiKoDateShort(event.date) : '', event => panelOpen({ kind: 'meeting', id: event.id }));
+    event => event.date ? uiKoDateShort(event.date) : '', event => panelOpen({ kind: 'meeting', id: event.id }),
+    meetingMenuSections);
 
   if (done.length) {
     const section = document.createElement('section');
@@ -1615,32 +1634,39 @@ function renderCalendar(calendar) {
     if (event.draftCount) count.title = 'AI가 분류한 초안을 검토해 주세요';
     row.appendChild(count);
 
-    const setProject = async (projectKey) => {
-      await request('/api/meeting/set-project', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: event.title, project: projectKey }),
-      });
-    };
     const acts = document.createElement('span');
     acts.className = 'ac';
-    acts.appendChild(uiMoreButton(`${event.title} — 더 보기`, () => [
-      [{ label: '회의 정리 열기', onClick: () => openMeetingPanel(event) }],
-      [{
-        field: '프로젝트 연결',
-        control: renderGroupControl({
-          jira: event.project && event.project.type === 'jira' ? event.project.value : null,
-          group: event.project && event.project.type === 'group' ? event.project.value : null,
-          onSetJira: (key) => setProject(key ? `jira:${key}` : null),
-          onSetGroup: (value) => setProject(value ? `group:${value}` : null),
-        }),
-      }],
-    ]));
+    acts.appendChild(uiMoreButton(`${event.title} — 더 보기`, () => meetingMenuSections(event)));
     row.appendChild(acts);
 
     list.appendChild(row);
   });
   calendarClockStart();
+}
+
+// 회의 줄의 ⋯가 여는 메뉴 — 레일의 오늘 미팅 줄과 회의 정리 카드 머리가 함께 쓴다(메뉴를 새로 만들지 않는다).
+// 프로젝트를 바꾼 뒤에는 load()가 레일 줄과 열려 있는 카드 머리를 함께 다시 그린다.
+function meetingMenuSections(event) {
+  const setProject = async (projectKey) => {
+    await request('/api/meeting/set-project', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: event.title, project: projectKey }),
+    });
+    await load();
+  };
+  return [
+    [{ label: '회의 정리 열기', onClick: () => openMeetingPanel(event) }],
+    [{
+      field: '프로젝트 연결',
+      control: renderGroupControl({
+        jira: event.project && event.project.type === 'jira' ? event.project.value : null,
+        group: event.project && event.project.type === 'group' ? event.project.value : null,
+        onSetJira: (key) => setProject(key ? `jira:${key}` : null),
+        onSetGroup: (value) => setProject(value ? `group:${value}` : null),
+      }),
+    }],
+  ];
 }
 
 // 진행 중인 회의 표시는 시간이 지나면 저절로 바뀌어야 한다. 1분마다 줄의 색만 다시 칠한다
@@ -2039,6 +2065,32 @@ function decisionMenuSections(item, card) {
   ];
 }
 
+// 아이디어 줄의 더보기(아이디어·결정 탭과 프로젝트 탭이 함께 쓴다).
+function ideaMenuSections(item, row) {
+  const promote = async (due) => {
+    await postJson('/api/idea/promote', { id: item.id, due });
+    await load();
+  };
+  return [
+    [
+      { label: '오늘로 옮기기', onClick: () => fadeOutAndRun(row, () => promote(todayStr()), '오늘 할 일로 옮겼어요') },
+      {
+        field: '날짜 정해서 옮기기',
+        control: uiDateField({
+          value: '',
+          label: '옮길 날짜',
+          clearable: false,
+          onChange: (value) => { if (value) fadeOutAndRun(row, () => promote(value), '할 일로 옮겼어요'); },
+        }),
+      },
+      { label: '완료로 표시', onClick: () => fadeOutAndRun(row, () => toggleTask(item.id), '완료했어요') },
+      { field: '가능성', control: ideaChanceControl(item) },
+      { field: '프로젝트', control: ideaProjectControl(item) },
+    ],
+    [{ label: '삭제', danger: true, onClick: () => removeTracked(item, row) }],
+  ];
+}
+
 // 아이디어 한 줄: 체크박스 없이 문구 + 원문 | `가능성 높음` | 늘 보이는 더보기.
 function recordIdeaRow(item) {
   const row = document.createElement('div');
@@ -2057,30 +2109,9 @@ function recordIdeaRow(item) {
   meta.textContent = ideaChanceText(item);
   row.appendChild(meta);
 
-  const promote = async (due) => {
-    await postJson('/api/idea/promote', { id: item.id, due });
-    await load();
-  };
   const acts = document.createElement('span');
   acts.className = 'ac';
-  acts.appendChild(uiMoreButton(`${item.description} — 더 보기`, () => [
-    [
-      { label: '오늘로 옮기기', onClick: () => fadeOutAndRun(row, () => promote(todayStr()), '오늘 할 일로 옮겼어요') },
-      {
-        field: '날짜 정해서 옮기기',
-        control: uiDateField({
-          value: '',
-          label: '옮길 날짜',
-          clearable: false,
-          onChange: (value) => { if (value) fadeOutAndRun(row, () => promote(value), '할 일로 옮겼어요'); },
-        }),
-      },
-      { label: '완료로 표시', onClick: () => fadeOutAndRun(row, () => toggleTask(item.id), '완료했어요') },
-      { field: '가능성', control: ideaChanceControl(item) },
-      { field: '프로젝트', control: ideaProjectControl(item) },
-    ],
-    [{ label: '삭제', danger: true, onClick: () => removeTracked(item, row) }],
-  ]));
+  acts.appendChild(uiMoreButton(`${item.description} — 더 보기`, () => ideaMenuSections(item, row)));
   row.appendChild(acts);
   return row;
 }
@@ -2966,7 +2997,7 @@ function panelPriorityCell(item) {
   if (meta) {
     cell.className = uiTone(meta.tone).trim();
     cell.title = meta.hint;
-    cell.innerHTML = `${uiIcon('flag')}${meta.text}`;
+    cell.textContent = meta.text;
   } else {
     cell.className = 'k-mute';
     cell.textContent = item.priority === 'low' ? '낮음' : '보통';
@@ -3148,13 +3179,17 @@ function panelMeeting(event, box) {
     when.append(' · ', note);
   });
   head.append(title, when);
+  // 업무 상세 카드 머리(panelHead)와 같은 자리·같은 모양 — ✕ 왼쪽에 더보기.
+  // 메뉴는 레일의 회의 줄 ⋯가 여는 메뉴 그대로다(회의용으로 새로 만들지 않는다).
+  // 이미 열려 있는 카드라 `회의 정리 열기`는 뺀다 — 나머지는 레일의 회의 줄 메뉴 그대로.
+  const more = uiMoreButton(`${event.title} — 더 보기`, () => meetingMenuSections(event).slice(1), 'd-iconbtn');
   const close = document.createElement('button');
   close.type = 'button';
   close.className = 'd-iconbtn';
   close.setAttribute('aria-label', '회의 정리 닫기');
   close.innerHTML = uiIcon('close');
   close.addEventListener('click', panelClose);
-  top.append(head, close);
+  top.append(head, more, close);
   box.appendChild(top);
 
   const error = document.createElement('p');
@@ -3458,7 +3493,7 @@ function panelMeetingRow(item, event, stateText) {
     const meta = panelMeetingItemState(item);
     if (meta) { state.className = `st${uiTone(meta.tone)}`; state.textContent = meta.text; }
   }
-  // 다른 목록의 줄과 같은 자리·같은 규칙의 ⋯(손이 닿으면 나타나고, 터치 화면에서는 늘 보인다).
+  // 이 줄에서 할 수 있는 일이 더보기뿐이라 ⋯은 늘 보인다(평소 흐리게, 손이 닿으면 진하게).
   const acts = document.createElement('span');
   acts.className = 'ac';
   acts.appendChild(uiMoreButton(`${item.description} — 더 보기`, () => panelMeetingRowMenu(item, row, edit)));
