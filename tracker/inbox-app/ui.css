@@ -1536,7 +1536,9 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-prow2.is-sel .ti { font-weight: 600; color: var(--accent-text); }
 /* 상태말은 오늘 목록과 같은 규칙이다 — 아이콘 + 회색 글자, 급한 말만 6px 배지.
    우선순위 열은 없앴다(체크박스 안의 꺾쇠가 말한다) — 줄에는 기한만 남는다. */
+/* 격자 칸은 안의 것을 칸 너비만큼 늘린다 — 배지 바탕이 116px 전체로 퍼졌다. 내용 너비만 차지하고 오른쪽에 붙인다. */
 .d-prow2 .dd {
+  justify-self: end;
   display: inline-flex; align-items: center; justify-content: flex-end; gap: 4px;
   font-size: 13px; font-weight: 500; color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums;
 }
