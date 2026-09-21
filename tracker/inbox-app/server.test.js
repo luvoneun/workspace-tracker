@@ -879,5 +879,198 @@ test('미팅 노트 가져오기를 끄면 조회·요청이 막히고 상태 �
   assert.equal(fs.existsSync(notesRequestFile), false);
   const automations = (await (await fetch(origin + '/api/automation/status')).json()).automations;
   assert.equal(automations.some(entry => entry.key === 'tiro'), false);
+  // 지라도 꺼 둔 설정이다 — 직접 읽기 주소가 아예 열리지 않고, 화면도 `used:false`로 구역을 그리지 않는다.
+  assert.equal((await fetch(origin + '/api/jira/issue?key=IO-48394')).status, 404);
+  assert.deepEqual((await (await fetch(origin + '/api/items')).json()).jiraSync, { used: false });
   assert.deepEqual((await (await fetch(origin + '/api/items')).json()).meetingNotes, { used: false, state: 'off' });
+});
+
+// ---------- 지라 직접 읽기 (BJR 1단계 — 보기만) ----------
+// 실제 지라는 절대 부르지 않는다: 아래 테스트는 전부 가짜 fetch와 가짜 토큰 읽기만 쓴다.
+const jiraModule = require('./jira-client');
+const JIRA_SITE = 'https://example-jira.test';
+const JIRA_EMAIL = 'someone@example.test';
+const JIRA_TOKEN = 'fixture-token-never-real';
+const jiraConfig = { jira: { siteUrl: JIRA_SITE, email: JIRA_EMAIL, tokenFile: '/tmp/never-read-this' } };
+const jiraSettings = () => jiraModule.jiraSettings(jiraConfig);
+const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+const jiraIssueBody = (extra = {}) => ({
+  fields: {
+    summary: '게시글 작성하기_게임 임베드',
+    status: { name: '진행 중', statusCategory: { key: 'indeterminate' } },
+    issuetype: { name: '에픽' },
+    assignee: { displayName: '루본' },
+    duedate: '2026-10-02',
+    fixVersions: [{ id: '10101', name: 'v2.70.0', releaseDate: '2026-09-30', released: false }],
+    ...extra,
+  },
+});
+// 하위 티켓 집계용 — 완료 2 / 전체 3
+const jiraChildBody = { issues: [
+  { fields: { status: { statusCategory: { key: 'done' } } } },
+  { fields: { status: { statusCategory: { key: 'done' } } } },
+  { fields: { status: { statusCategory: { key: 'indeterminate' } } } },
+] };
+function jiraFake(routes) {
+  const calls = [];
+  const request = async (url, options) => {
+    calls.push({ url, headers: options.headers });
+    const hit = Object.keys(routes).find(part => String(url).includes(part));
+    if (!hit) return json({ errorMessages: ['no route'] }, 500);
+    const answer = routes[hit];
+    if (typeof answer === 'function') return answer();
+    return answer();
+  };
+  return { request, calls };
+}
+
+test('지라 읽기는 요약·상태 범주·배포 버전·기한·담당과 하위 집계를 한 덩어리로 돌려준다', async () => {
+  const fake = jiraFake({
+    '/rest/api/3/issue/IO-48394': () => json(jiraIssueBody()),
+    '/rest/api/3/search/jql': () => json(jiraChildBody),
+  });
+  const client = jiraModule.createJiraClient({ settings: jiraSettings(), request: fake.request, readToken: () => JIRA_TOKEN });
+  const issue = await client.getIssueOverview('IO-48394');
+  assert.deepEqual(issue, {
+    key: 'IO-48394',
+    url: `${JIRA_SITE}/browse/IO-48394`,
+    summary: '게시글 작성하기_게임 임베드',
+    type: '에픽',
+    status: { name: '진행 중', category: 'doing' },
+    assignee: '루본',
+    due: '2026-10-02',
+    versions: [{ id: '10101', name: 'v2.70.0', releaseDate: '2026-09-30', released: false }],
+    children: { total: 3, done: 2 },
+  });
+  // 링크는 앱이 조립한다(siteUrl + /browse/KEY) — 지라가 준 self 주소를 쓰지 않는다.
+  assert.equal(issue.url, `${JIRA_SITE}/browse/IO-48394`);
+  // 요청은 두 번뿐이다: 이슈 하나 + 하위 집계 하나(목록 전체를 미리 부르지 않는다).
+  assert.equal(fake.calls.length, 2);
+  assert.match(fake.calls[0].url, /fields=summary,status,issuetype,assignee,duedate,fixVersions,subtasks$/);
+  assert.match(fake.calls[1].url, /\/rest\/api\/3\/search\/jql\?jql=parent%3DIO-48394&fields=status&maxResults=100$/);
+  // 인증은 Basic 한 벌이고, 그 값은 요청에만 실린다.
+  assert.equal(fake.calls[0].headers.Authorization, `Basic ${Buffer.from(`${JIRA_EMAIL}:${JIRA_TOKEN}`).toString('base64')}`);
+});
+
+test('하위가 search에 없으면 subtasks로 세고, 새 search 주소가 없으면 옛 주소로 한 번 물러선다', async () => {
+  const subtasks = [{ fields: { status: { statusCategory: { key: 'done' } } } }, { fields: { status: { statusCategory: { key: 'new' } } } }];
+  const fallback = jiraFake({
+    '/rest/api/3/issue/AB-1': () => json(jiraIssueBody({ subtasks })),
+    '/rest/api/3/search/jql': () => json({ errorMessages: ['not found'] }, 404),
+    '/rest/api/3/search?': () => json(jiraChildBody),
+  });
+  const fellBack = await jiraModule.createJiraClient({ settings: jiraSettings(), request: fallback.request, readToken: () => JIRA_TOKEN }).getIssueOverview('AB-1');
+  assert.deepEqual(fellBack.children, { total: 3, done: 2 });
+  assert.equal(fallback.calls.length, 3);
+
+  const empty = jiraFake({
+    '/rest/api/3/issue/AB-1': () => json(jiraIssueBody({ subtasks })),
+    '/rest/api/3/search': () => json({ issues: [] }),
+  });
+  const counted = await jiraModule.createJiraClient({ settings: jiraSettings(), request: empty.request, readToken: () => JIRA_TOKEN }).getIssueOverview('AB-1');
+  assert.deepEqual(counted.children, { total: 2, done: 1 });
+
+  const none = jiraFake({ '/rest/api/3/issue/AB-1': () => json(jiraIssueBody()), '/rest/api/3/search': () => json({ issues: [] }) });
+  assert.equal((await jiraModule.createJiraClient({ settings: jiraSettings(), request: none.request, readToken: () => JIRA_TOKEN }).getIssueOverview('AB-1')).children, null);
+});
+
+test('지라 실패는 해요체 문구와 갈래로만 알리고 토큰·이메일을 싣지 않는다', async () => {
+  const settings = jiraSettings();
+  const run = async (routes) => {
+    try {
+      await jiraModule.createJiraClient({ settings, request: jiraFake(routes).request, readToken: () => JIRA_TOKEN }).getIssueOverview('AB-1');
+      return null;
+    } catch (error) { return error; }
+  };
+  const auth = await run({ '/issue/AB-1': () => json({ errorMessages: ['Client must be authenticated'] }, 401) });
+  assert.equal(auth.kind, 'auth');
+  assert.equal(auth.message, '지라 토큰을 확인해 주세요.');
+  assert.equal((await run({ '/issue/AB-1': () => json({}, 403) })).kind, 'auth');
+  const missing = await run({ '/issue/AB-1': () => json({ errorMessages: ['Issue does not exist'] }, 404) });
+  assert.equal(missing.kind, 'notfound');
+  assert.equal(missing.message, '지라에서 이 티켓을 찾지 못했어요.');
+  const timeout = await run({ '/issue/AB-1': () => { throw new DOMException('The operation was aborted', 'TimeoutError'); } });
+  assert.equal(timeout.kind, 'network');
+  assert.equal(timeout.message, '지라에 연결하지 못했어요.');
+  assert.equal((await run({ '/issue/AB-1': () => json({}, 500) })).kind, 'other');
+  // 잘못된 키는 아예 지라를 부르지 않는다.
+  const fake = jiraFake({ '/issue/': () => json(jiraIssueBody()) });
+  const client = jiraModule.createJiraClient({ settings, request: fake.request, readToken: () => JIRA_TOKEN });
+  for (const bad of ['io-1', 'AB1', 'AB-', 'AB-1x', '../../etc/passwd', '']) {
+    await assert.rejects(() => client.getIssueOverview(bad), error => error.kind === 'key' && error.message === '지라 번호를 확인해 주세요.');
+  }
+  assert.equal(fake.calls.length, 0);
+  // 어떤 문구에도 토큰·이메일이 섞이지 않는다.
+  for (const error of [auth, missing, timeout]) {
+    assert.doesNotMatch(error.message, new RegExp(JIRA_TOKEN));
+    assert.doesNotMatch(error.message, new RegExp(JIRA_EMAIL));
+  }
+});
+
+test('지라 API는 설정이 없거나 토큰을 못 읽으면 연결 안 됨으로만 답한다', async () => {
+  const fake = jiraFake({ '/issue/': () => json(jiraIssueBody()) });
+  const off = jiraModule.createJiraApi({ config: {}, request: fake.request });
+  assert.deepEqual(await off.read('AB-1'), { ok: true, connected: false });
+  assert.equal(off.connected, false);
+  // siteUrl이 https가 아니면 설정이 없는 것으로 본다.
+  const plain = jiraModule.createJiraApi({ config: { jira: { siteUrl: 'http://example-jira.test', email: JIRA_EMAIL, tokenFile: '/tmp/x' } }, request: fake.request });
+  assert.deepEqual(await plain.read('AB-1'), { ok: true, connected: false });
+  const noToken = jiraModule.createJiraApi({ config: jiraConfig, request: fake.request, readFile: () => { throw new Error('ENOENT'); } });
+  assert.deepEqual(await noToken.read('AB-1'), { ok: true, connected: false });
+  const blank = jiraModule.createJiraApi({ config: jiraConfig, request: fake.request, readFile: () => '  \n' });
+  assert.deepEqual(await blank.read('AB-1'), { ok: true, connected: false });
+  assert.equal(fake.calls.length, 0, '연결되지 않았으면 지라를 부르지 않는다');
+});
+
+test('지라 API는 키별로 60초 캐시하고 fresh=1이면 건너뛴다', async () => {
+  const fake = jiraFake({ '/rest/api/3/issue/': () => json(jiraIssueBody()), '/rest/api/3/search': () => json({ issues: [] }) });
+  let clock = 1000;
+  const api = jiraModule.createJiraApi({ config: jiraConfig, request: fake.request, readFile: () => JIRA_TOKEN, now: () => clock });
+  const first = await api.read('AB-1');
+  assert.equal(first.connected, true);
+  assert.equal(first.issue.summary, '게시글 작성하기_게임 임베드');
+  const issueCalls = () => fake.calls.filter(call => call.url.includes('/rest/api/3/issue/')).length;
+  assert.equal(issueCalls(), 1);
+  await api.read('AB-1');
+  assert.equal(issueCalls(), 1, '60초 안에는 다시 부르지 않는다');
+  await api.read('AB-2');
+  assert.equal(issueCalls(), 2, '캐시는 키마다 따로다');
+  await api.read('AB-1', { fresh: true });
+  assert.equal(issueCalls(), 3, 'fresh=1이면 캐시를 건너뛴다');
+  clock += 61 * 1000;
+  await api.read('AB-1');
+  assert.equal(issueCalls(), 4, '60초가 지나면 다시 읽는다');
+  // 키 형식은 API에서도 막는다.
+  assert.deepEqual(await api.read('nope'), { ok: false, error: '지라 번호를 확인해 주세요.', kind: 'key' });
+  // 돌려주는 값 어디에도 토큰·이메일이 없다.
+  const payload = JSON.stringify(await api.read('AB-1'));
+  assert.doesNotMatch(payload, new RegExp(JIRA_TOKEN));
+  assert.doesNotMatch(payload, new RegExp(JIRA_EMAIL));
+});
+
+test('지라 API의 실패 응답은 화면에 그대로 쓸 문구와 갈래를 담는다', async () => {
+  const api = kind => jiraModule.createJiraApi({
+    config: jiraConfig, readFile: () => JIRA_TOKEN,
+    request: jiraFake({ '/rest/api/3/issue/': () => (kind === 'network' ? (() => { throw new TypeError('fetch failed'); })() : json({}, kind)) }).request,
+  });
+  assert.deepEqual(await api(401).read('AB-1'), { ok: false, error: '지라 토큰을 확인해 주세요.', kind: 'auth' });
+  assert.deepEqual(await api(404).read('AB-1'), { ok: false, error: '지라에서 이 티켓을 찾지 못했어요.', kind: 'notfound' });
+  assert.deepEqual(await api('network').read('AB-1'), { ok: false, error: '지라에 연결하지 못했어요.', kind: 'network' });
+  assert.deepEqual(await api(500).read('AB-1'), { ok: false, error: '지라에 연결하지 못했어요.', kind: 'other' });
+});
+
+test('GET /api/jira/issue는 파일을 쓰지 않고, 설정이 없으면 연결 안 됨으로 답한다', async () => {
+  const snapshot = () => fs.readdirSync(directory).sort().map(name => {
+    const stat = fs.statSync(path.join(directory, name));
+    return `${name}:${stat.size}:${stat.mtimeMs}`;
+  }).join('|');
+  const before = snapshot();
+  const response = await fetch(`${base}/api/jira/issue?key=IO-48394`);
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true, connected: false });
+  // 형식이 틀린 키만 400이다. 지라 쪽 실패는 200 + `ok:false`로 오므로 화면이 조용히 그 문구를 적는다.
+  const bad = await fetch(`${base}/api/jira/issue?key=not-a-key`);
+  assert.equal(bad.status, 400);
+  assert.deepEqual(await bad.json(), { ok: false, error: '지라 번호를 확인해 주세요.', kind: 'key' });
+  assert.equal(snapshot(), before, '조회는 어떤 파일도 만들거나 고치지 않는다');
 });

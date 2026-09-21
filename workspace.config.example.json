@@ -28,6 +28,11 @@
       }
     }
   },
+  "jira": {
+    "siteUrl": "https://내회사.atlassian.net",
+    "email": "나@내회사.com",
+    "tokenFile": "~/.config/workspace-jira-token"
+  },
   "server": {
     "port": 4321,
     "extraHost": ""

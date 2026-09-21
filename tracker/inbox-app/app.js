@@ -1104,6 +1104,264 @@ function uiJiraDoneTag(short) {
   return tag;
 }
 
+// ---------- 지라 띠 카드 (프로젝트 탭, 읽기 전용) ----------
+// 지라에 연결된 프로젝트를 열면 제목 아래에 지라의 지금 상태를 한 장으로 보여 준다.
+// 앱 서버가 API 토큰으로 직접 읽어 오고(AI를 거치지 않는다) 이 화면은 **보기만** 한다 —
+// 바꾸기는 다음 단계에서 확인 절차와 함께 붙는다. 그래서 값 하나하나를 부품 함수(jiraCell)로
+// 그려, 그 자리만 고르개로 갈아 끼우면 되게 해 둔다.
+//
+// 지금 보고 있는 프로젝트 하나만 기억한다(목록 전체를 미리 부르지 않는다).
+// seq는 "늦게 온 응답"을 버리는 표다 — 다른 프로젝트로 빨리 옮기면 먼저 보낸 응답이 새 화면을 덮지 않는다.
+let jiraCard = { key: null, state: 'idle', issue: null, error: '', at: 0, seq: 0 };
+const JIRA_REFRESH_MS = 60 * 1000;
+
+// 이 화면에서 지라 구역을 아예 그리지 않는 때: `integrations.jira`를 꺼 둔 설정.
+function jiraUsed() {
+  return latestData?.jiraSync?.used !== false;
+}
+
+function jiraKeyOf(projectKey) {
+  return typeof projectKey === 'string' && projectKey.startsWith('jira:') ? projectKey.slice('jira:'.length) : '';
+}
+
+// 상태는 범주로만 색이 붙는다(배지가 아니다): 진행=기본 · 완료=성공색 글자 · 할 일=회색.
+function jiraStatusTone(category) {
+  return category === 'done' ? 'k-pos' : category === 'todo' ? 'k-dim' : '';
+}
+
+// 배포 버전 한 칸의 말. 이름은 그대로 보여 주고, 날짜는 뒤에 조용히 붙인다.
+// 색은 둘뿐이다 — 배포일이 3일 안이면 주의색, 지났는데 아직 배포 안 됐으면 급함 색.
+function jiraVersionText(versions) {
+  const list = Array.isArray(versions) ? versions.filter(Boolean) : [];
+  if (!list.length) return null;
+  const first = list[0];
+  const name = (first.name || '') + (list.length > 1 ? ` 외 ${list.length - 1}개` : '');
+  if (!first.releaseDate) return { name, note: '', tone: '', hint: '' };
+  const day = uiKoDateShort(first.releaseDate);
+  if (first.released) return { name, note: `· ${day} 배포함`, tone: '', hint: `${uiKoDate(first.releaseDate)}에 배포된 버전이에요` };
+  const left = diffDays(first.releaseDate);
+  if (Number.isNaN(left)) return { name, note: '', tone: '', hint: '' };
+  if (left < 0) return { name, note: `· ${day} 배포 예정 · ${-left}일 지남`, tone: 'k-neg', hint: '배포 예정일이 지났는데 아직 배포되지 않았어요' };
+  if (left === 0) return { name, note: '· 오늘 배포 예정', tone: 'k-warn', hint: `${uiKoDate(first.releaseDate)}에 배포할 버전이에요` };
+  if (left <= 3) return { name, note: `· ${day} 배포 예정 · ${left}일 남음`, tone: 'k-warn', hint: `${uiKoDate(first.releaseDate)}에 배포할 버전이에요` };
+  return { name, note: `· ${day} 배포 예정`, tone: '', hint: `${uiKoDate(first.releaseDate)}에 배포할 버전이에요` };
+}
+
+// 하위 티켓 진행률 — 하나도 없으면 줄 자체를 그리지 않는다(`0`은 찍지 않는다).
+function jiraChildrenLabel(children) {
+  if (!children || !children.total) return null;
+  const done = Math.min(Math.max(children.done || 0, 0), children.total);
+  return { text: `${children.total}개 중 ${done}개 완료`, ratio: Math.round((done / children.total) * 100) };
+}
+
+// 값 한 칸(라벨 위 · 값 아래). 2단계에서는 이 함수 안의 값 자리만 고르개로 바뀐다.
+function jiraCell(label, text, tone, hint) {
+  const cell = document.createElement('div');
+  cell.className = 'cell';
+  const lb = document.createElement('span');
+  lb.className = 'lb';
+  lb.textContent = label;
+  const value = document.createElement('span');
+  value.className = 'v' + (text ? (tone ? ` ${tone}` : '') : ' is-none');
+  // 지라가 준 글자는 언제나 textContent로만 넣는다(새 innerHTML을 쓰지 않는다).
+  value.textContent = text || '없음';
+  if (hint) value.title = hint;
+  cell.append(lb, value);
+  return cell;
+}
+
+// 조용한 한 줄 — 연결 안 됨·오류일 때 카드 대신 선다.
+function jiraQuietLine(text, actionLabel, onAction, hint) {
+  const line = document.createElement('div');
+  line.className = 'd-jline';
+  const words = document.createElement('span');
+  words.textContent = text;
+  line.append(words);
+  if (actionLabel) {
+    const sep = document.createElement('span');
+    sep.className = 'sep';
+    sep.textContent = '·';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'd-link';
+    button.textContent = actionLabel;
+    if (hint) button.title = hint;
+    button.addEventListener('click', onAction);
+    line.append(sep, button);
+  }
+  return line;
+}
+
+const JIRA_SETUP_HINT = 'README의 "지라 연결 설정" 절을 따라 workspace.config.json에 지라 항목을 넣어 주세요';
+
+// 부르는 동안 서는 뼈대 — 카드와 높이가 같고 깜빡이지 않는다(움직이는 효과를 주지 않는다).
+function jiraSkeleton() {
+  const card = document.createElement('div');
+  card.className = 'd-jira is-loading';
+  card.setAttribute('aria-hidden', 'true');
+  const top = document.createElement('div');
+  top.className = 'top';
+  const bar = (width) => { const el = document.createElement('span'); el.className = 'sk'; el.setAttribute('style', `width:${width}`); return el; };
+  const spacer = document.createElement('span');
+  spacer.className = 'sp';
+  const round = document.createElement('span');
+  round.className = 'sk round';
+  // 카드의 첫 줄과 같은 칸들(표시 · 요약 · 링크 · 새로고침) 자리를 그대로 잡아 둔다.
+  top.append(bar('34px'), bar('190px'), spacer, bar('82px'), round);
+  const cells = document.createElement('div');
+  cells.className = 'cells';
+  ['92px', '150px', '76px'].forEach((width) => {
+    const cell = document.createElement('div');
+    cell.className = 'cell';
+    cell.append(bar('52px'), bar(width));
+    cells.appendChild(cell);
+  });
+  card.append(top, cells);
+  return card;
+}
+
+function jiraStripBody(key) {
+  if (!key) return null;
+  if (jiraCard.key !== key || jiraCard.state === 'loading' || jiraCard.state === 'idle') return jiraSkeleton();
+  if (jiraCard.state === 'off') {
+    return jiraQuietLine('지라 연결이 필요해요', '설정 방법', () => showNotice(JIRA_SETUP_HINT), JIRA_SETUP_HINT);
+  }
+  if (jiraCard.state === 'error') {
+    return jiraQuietLine(jiraCard.error || '지라에 연결하지 못했어요.', '다시 시도', () => jiraCardLoad(key, { fresh: true }));
+  }
+  return jiraStripCard(jiraCard.issue);
+}
+
+// B 띠 카드: 첫 줄(지라 표시 · 요약 · 종류/담당 · 지라에서 열기 · 새로고침),
+// 둘째 줄(지라 상태 · 배포 버전 · 기한), 셋째 줄(하위 티켓 진행률).
+function jiraStripCard(issue) {
+  const card = document.createElement('div');
+  card.className = 'd-jira';
+  card.setAttribute('aria-label', '지라에서 읽어 온 지금 상태');
+
+  const top = document.createElement('div');
+  top.className = 'top';
+  const tag = document.createElement('span');
+  tag.className = 'tag';
+  tag.textContent = '지라';
+  const name = document.createElement('span');
+  name.className = 'nm';
+  name.textContent = issue.summary || issue.key;
+  name.title = issue.summary || issue.key;
+  const sub = document.createElement('span');
+  sub.className = 'sub';
+  sub.textContent = [issue.type, `담당 ${issue.assignee || '없음'}`].filter(Boolean).join(' · ');
+  const spacer = document.createElement('span');
+  spacer.className = 'sp';
+  const link = document.createElement('a');
+  link.className = 'd-jopen';
+  // 주소는 앱이 조립한다(siteUrl + /browse/KEY). 키는 여기 title로만 보인다(BKEY 결정).
+  link.href = issue.url;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  link.title = `${issue.key} · 지라에서 열어요`;
+  link.textContent = '지라에서 열기 ↗';
+  const refresh = document.createElement('button');
+  refresh.type = 'button';
+  refresh.className = 'd-iconbtn sm d-jref';
+  refresh.setAttribute('aria-label', '지라 상태 새로고침');
+  refresh.title = '지라에서 다시 읽어요';
+  refresh.insertAdjacentHTML('beforeend', uiIcon('refresh'));
+  refresh.addEventListener('click', () => jiraCardLoad(issue.key, { fresh: true }));
+  top.append(tag, name, sub, spacer, link, refresh);
+
+  const cells = document.createElement('div');
+  cells.className = 'cells';
+  const version = jiraVersionText(issue.versions);
+  cells.append(
+    jiraCell('지라 상태', issue.status?.name, jiraStatusTone(issue.status?.category), '지라에 적힌 지금 상태예요'),
+    jiraCell('배포 버전', version ? `${version.name} ${version.note}`.trim() : '', version ? version.tone : '', version ? version.hint : '지라의 배포 버전이 아직 없어요'),
+    jiraCell('기한', issue.due ? uiKoDateShort(issue.due) : '', '', issue.due ? `지라에 적힌 기한은 ${uiKoDate(issue.due)}이에요` : '지라에 적힌 기한이 없어요'),
+  );
+  card.append(top, cells);
+
+  const children = jiraChildrenLabel(issue.children);
+  if (children) {
+    const foot = document.createElement('div');
+    foot.className = 'foot';
+    const label = document.createElement('span');
+    label.textContent = '하위 티켓';
+    const bar = document.createElement('span');
+    bar.className = 'bar';
+    bar.setAttribute('role', 'img');
+    bar.setAttribute('aria-label', `하위 티켓 ${children.text}`);
+    const fill = document.createElement('i');
+    fill.setAttribute('style', `width:${children.ratio}%`);
+    bar.appendChild(fill);
+    const count = document.createElement('span');
+    count.textContent = children.text;
+    foot.append(label, bar, count);
+    card.appendChild(foot);
+  }
+  return card;
+}
+
+// 띠 카드가 지금 상태를 받았으면 큰 제목 옆 `지라에서 완료됨`은 그 값으로 판정한다
+// (왼쪽 목록은 하루 한 번 도는 스냅샷 그대로 — BSL 결정).
+function jiraDoneLive(projectKey) {
+  const key = jiraKeyOf(projectKey);
+  if (key && jiraCard.key === key && jiraCard.state === 'ok' && jiraCard.issue) return jiraCard.issue.status?.category === 'done';
+  return uiJiraDone(projectKey);
+}
+
+// 카드 자리만 다시 그린다 — 늦게 온 응답 때문에 프로젝트 화면 전체를 다시 만들지 않는다.
+function jiraStripPaint() {
+  const host = document.getElementById('jiraStrip');
+  if (!host) return;
+  const key = host.dataset.jiraKey || '';
+  const body = jiraStripBody(key);
+  host.replaceChildren(...(body ? [body] : []));
+  const title = document.getElementById('projectBody')?.querySelector?.('.d-ptitle');
+  if (title && typeof title.querySelector === 'function') {
+    const tag = title.querySelector('.d-jdone');
+    const want = jiraDoneLive(`jira:${key}`);
+    if (tag && !want) tag.remove?.();
+    if (!tag && want) title.appendChild(uiJiraDoneTag());
+  }
+}
+
+async function jiraCardLoad(key, { fresh = false, quiet = false } = {}) {
+  const seq = jiraCard.seq + 1;
+  jiraCard = quiet && jiraCard.key === key
+    ? { ...jiraCard, seq }
+    : { key, state: 'loading', issue: null, error: '', at: 0, seq };
+  jiraStripPaint();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  let next;
+  try {
+    const response = await fetch(`/api/jira/issue?key=${encodeURIComponent(key)}${fresh ? '&fresh=1' : ''}`, { signal: controller.signal });
+    const data = await response.json();
+    next = data.ok === false
+      ? { key, state: 'error', issue: null, error: data.error || '지라에 연결하지 못했어요.', at: Date.now(), seq }
+      : data.connected === false
+        ? { key, state: 'off', issue: null, error: '', at: Date.now(), seq }
+        : { key, state: 'ok', issue: data.issue, error: '', at: Date.now(), seq };
+  } catch {
+    next = { key, state: 'error', issue: null, error: '지라에 연결하지 못했어요.', at: Date.now(), seq };
+  } finally {
+    clearTimeout(timer);
+  }
+  // 다른 프로젝트로 옮겼거나 더 나중 요청이 이미 나갔으면 이 응답은 버린다.
+  if (jiraCard.seq !== seq) return;
+  // 뒤에서 조용히 새로 읽다가 실패한 것은 알리지 않는다 — 보고 있던 값이 오류 줄로 바뀌면 안 된다.
+  if (quiet && next.state === 'error' && jiraCard.state === 'ok') { jiraCard = { ...jiraCard, at: Date.now() }; return; }
+  jiraCard = next;
+  jiraStripPaint();
+}
+
+// 프로젝트를 열 때만 부른다. 같은 프로젝트를 다시 그리는 것(체크 등)으로는 다시 부르지 않고,
+// 60초가 지났으면 뼈대 없이 조용히 새로 읽는다(값이 깜빡이지 않게).
+function jiraCardEnsure(key) {
+  if (jiraCard.key !== key) { jiraCardLoad(key); return; }
+  if (jiraCard.state === 'ok' && Date.now() - jiraCard.at > JIRA_REFRESH_MS) jiraCardLoad(key, { quiet: true });
+}
+
 function renderProjects() {
   const listEl = document.getElementById('projectList');
   const body = document.getElementById('projectBody');
@@ -1333,13 +1591,24 @@ function renderProjectDetail(body, row) {
   title.className = 'd-ptitle';
   // 큰 제목은 요약만(BKEY 결정) — 한 프로젝트만 보여 주는 자리라 같은 요약과 헷갈릴 일이 없다.
   title.textContent = uiGroupLabel(row.key);
-  if (uiJiraDone(row.key)) title.appendChild(uiJiraDoneTag());
+  if (jiraDoneLive(row.key)) title.appendChild(uiJiraDoneTag());
   const summary = document.createElement('div');
   summary.className = 'd-quiet';
   // 그 아래 조용한 줄에만 지라 키를 덧붙인다(`열린 항목 2 · IO-48394`).
-  const jiraKey = row.key.startsWith('jira:') ? row.key.slice('jira:'.length) : '';
+  const jiraKey = jiraKeyOf(row.key);
   summary.textContent = `열린 항목 ${row.open}` + (jiraKey ? ` · ${jiraKey}` : '');
   body.append(title, summary);
+
+  // 지라에 연결된 프로젝트에만, 제목 줄 아래·첫 구역 위에 지라 띠 카드가 선다.
+  // 부르는 것은 이 자리 하나뿐이다 — 왼쪽 목록은 아무것도 미리 부르지 않는다.
+  if (jiraKey && jiraUsed()) {
+    const strip = document.createElement('div');
+    strip.id = 'jiraStrip';
+    strip.dataset.jiraKey = jiraKey;
+    body.appendChild(strip);
+    jiraCardEnsure(jiraKey);
+    jiraStripPaint();
+  }
 
   const tasks = items.filter(item => ['task', 'bug'].includes(item.type));
   const open = tasks.filter(item => item.status !== 'done').sort(compareTasks);
@@ -6006,6 +6275,14 @@ function setupQuickAdd(inputId, endpoint, announceText) {
   });
 }
 
+// 마지막으로 본 탭 복원 규칙. 페이지를 열자마자 사람이 탭을 누르면 그 선택이 먼저다 —
+// 복원이 뒤늦게 덮어써서 "탭 이름만 바뀌고 내용은 이전 탭" 상태가 되던 것을 막는다.
+// 앱이 다 켜지기 전에 누른 탭은 브라우저가 그 버튼에 초점을 남기므로, 그것도 사람이 고른 것으로 본다.
+function tabToRestore(savedTab, picked, focusedTab) {
+  if (picked) return null;
+  return focusedTab || savedTab || 'today';
+}
+
 // ---- client.test.js는 이 줄 위까지만 읽는다 (아래는 화면을 실제로 켜는 실행 코드) ----
 setupQuickAdd('todayTaskInput', '/api/today-task/create', '오늘 할 일에 추가했어요');
 setupQuickAdd('laterTaskInput', '/api/later-task/create', '나중에 할 일에 추가했어요');
@@ -6138,8 +6415,10 @@ function setActiveTab(tab) {
   } catch {}
 }
 
+// 사람이 탭을 한 번이라도 골랐는지 — 마지막 탭 복원이 그 선택을 덮지 않게 하는 표다.
+let tabUserPicked = false;
 Object.keys(TABS).forEach((key) => {
-  document.getElementById(TABS[key].btn).addEventListener('click', () => setActiveTab(key));
+  document.getElementById(TABS[key].btn).addEventListener('click', () => { tabUserPicked = true; setActiveTab(key); });
   document.getElementById(TABS[key].btn).addEventListener('keydown', event => {
     const keys = Object.keys(TABS);
     let index = keys.indexOf(key);
@@ -6149,6 +6428,7 @@ Object.keys(TABS).forEach((key) => {
     else if (event.key === 'End') index = keys.length - 1;
     else return;
     event.preventDefault();
+    tabUserPicked = true;
     setActiveTab(keys[index]);
     document.getElementById(TABS[keys[index]].btn).focus();
   });
@@ -6165,7 +6445,10 @@ let savedTab = 'today';
 try {
   savedTab = localStorage.getItem('activeTab') || 'today';
 } catch {}
-setActiveTab(savedTab);
+// 앱이 켜지기 전에 누른 탭 버튼에는 초점이 남아 있다 — 그 선택을 복원이 덮지 않게 함께 본다.
+const focusedTabKey = Object.keys(TABS).find(key => document.getElementById(TABS[key].btn) === document.activeElement) || null;
+const restoreTab = tabToRestore(savedTab, tabUserPicked, focusedTabKey);
+if (restoreTab) setActiveTab(restoreTab);
 
 // ---------- 새로고침 ----------
 // 자동화가 2시간마다 새 항목을 넣기 때문에, 창을 열어둔 채로는 그걸 못 본다.

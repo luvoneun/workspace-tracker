@@ -1285,6 +1285,26 @@ const handleRequest = (req, res) => {
     return;
   }
 
+  // 지라 직접 읽기 — 프로젝트 탭의 띠 카드가 열릴 때만 부른다. 파일은 쓰지 않고(조회),
+  // 키별 60초 메모리 캐시를 둔다(`fresh=1`이면 건너뛴다). 인증 예외에는 넣지 않는다.
+  if (url.pathname === '/api/jira/issue' && req.method === 'GET') {
+    if (!USES.jira) { res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ ok: false, error: '지라를 쓰지 않도록 설정돼 있어요.', kind: 'other' })); return; }
+    jira.read(url.searchParams.get('key'), { fresh: url.searchParams.get('fresh') === '1' })
+      .then((payload) => {
+        // 지라 쪽 실패는 200 + `ok:false`로 답한다 — 우리 서버가 제대로 답한 것이고,
+        // 화면은 그 문구를 카드 자리에 조용히 적는다(브라우저 콘솔에 붉은 줄을 남기지 않는다).
+        // 형식이 틀린 키만 400이다(보낸 쪽 잘못).
+        res.writeHead(payload.kind === 'key' ? 400 : 200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(payload));
+      })
+      .catch(() => {
+        // 여기 오는 것은 우리 쪽 잘못이다 — 지라가 준 글자는 이미 위에서 우리 문구로 바뀌어 있다.
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: '지라에 연결하지 못했어요.', kind: 'other' }));
+      });
+    return;
+  }
+
   if (url.pathname === '/api/automation/status' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ automations: getAutomationStatus() }));
@@ -1647,6 +1667,9 @@ const workflows = require('./workflow-store')({
 const batchTasks = require('./task-batch')({ files: listTrackerFiles, pattern: TRACK_RE, parse: parseFields, validateDate, today: todayLocal });
 const reportDrafts = require('./report-drafts')({ directory: TRACKER_DIR, sources: () => workflows.snapshot().items, legacy: parseWeeklyReports, currentWeek: currentWeekKey });
 const mutations = require('./mutation-store')(TRACKER_DIR, [MEETING_LINKS_PATH, weeklyReportStatePath()]);
+// 지라 직접 읽기. 설정이 없으면 `connected:false`만 돌려주고 아무 데도 접속하지 않는다.
+// 토큰 파일은 서버의 읽기 묶음(readScope)을 쓰지 않는다 — 요청마다 새로 읽고 들고 있지 않으려고.
+const jira = require('./jira-client').createJiraApi({ config: CONFIG });
 const transactional = fn => (...args) => mutations.run(() => fn(...args));
 setTrackField = transactional(setTrackField);
 setTrackDue = transactional(setTrackDue);

@@ -2477,3 +2477,187 @@ test('renderDateBar: 낡음 경고는 한 칸으로 묶이고, 아침 첫 자동
   assert.deepEqual(warns('08:00', { today, calendar: { stale: false, lastSync: today }, jiraSync: { stale: false, lastSync: today }, slackSync: { stale: true, lastSync: ago(1), error: '실패' } }), ['슬랙 캡처 어제 기준'], '오류가 있었으면 아침에도 알린다');
   assert.deepEqual(warns('10:00', { today, calendar: { stale: true, lastSync: null }, slackSync: { stale: false, lastSync: today }, jiraSync: { stale: true, lastSync: ago(2) } }), ['자동 갱신 2개 확인 필요']);
 });
+
+// ---------- 지라 띠 카드 (BJR 1단계 — 보기만) ----------
+// 실제 지라는 부르지 않는다. 화면이 받는 모양(`/api/jira/issue`의 응답)만 가짜로 만들어 쓴다.
+const jiraDay = days => {
+  const value = new Date();
+  value.setDate(value.getDate() + days);
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+};
+// 가짜 화면에는 innerHTML이 없다 — 붙인 글자를 모아 두는 `html`과 textContent를 함께 훑는다.
+function nodeText(node) {
+  if (!node || typeof node !== 'object') return '';
+  const own = node.children && node.children.length ? '' : String(node.textContent || '');
+  return [own, ...(node.children || []).map(nodeText)].filter(Boolean).join(' ');
+}
+function nodeHtml(node) {
+  if (!node || typeof node !== 'object') return '';
+  return [node.html || '', ...(node.children || []).map(nodeHtml)].join('');
+}
+function nodeFind(node, className) {
+  if (!node || typeof node !== 'object') return null;
+  if (String(node.className || '').split(' ').includes(className)) return node;
+  for (const kid of node.children || []) {
+    const hit = nodeFind(kid, className);
+    if (hit) return hit;
+  }
+  return null;
+}
+const jiraIssue = (extra = {}) => ({
+  key: 'IO-48394',
+  url: 'https://example-jira.test/browse/IO-48394',
+  summary: '게시글 작성하기_게임 임베드',
+  type: '에픽',
+  status: { name: '진행 중', category: 'doing' },
+  assignee: '루본',
+  due: '2026-10-02',
+  versions: [{ id: '1', name: 'v2.70.0', releaseDate: jiraDay(10), released: false }],
+  children: { total: 12, done: 7 },
+  ...extra,
+});
+function jiraClient(handler) {
+  const app = pureClient();
+  const calls = [];
+  app.context.fetch = async (url) => {
+    calls.push(String(url));
+    return handler(String(url));
+  };
+  app.run("jiraCard = { key: null, state: 'idle', issue: null, error: '', at: 0, seq: 0 };");
+  return { app, calls };
+}
+
+test('배포 버전의 말은 배포일이 3일 안이면 주의색, 지났는데 미배포면 급함 색이다', () => {
+  const app = pureClient();
+  const text = versions => app.run(`jiraVersionText(${JSON.stringify(versions)})`);
+  assert.equal(text([]), null, '버전이 없으면 칸이 `없음`이 된다');
+  const far = text([{ name: 'v2.70.0', releaseDate: jiraDay(10), released: false }]);
+  assert.match(far.note, /배포 예정$/);
+  assert.equal(far.tone, '', '먼 배포일에는 색이 없다');
+  assert.equal(text([{ name: 'v2.70.0', releaseDate: jiraDay(3), released: false }]).tone, 'k-warn');
+  assert.match(text([{ name: 'v2.70.0', releaseDate: jiraDay(3), released: false }]).note, /3일 남음$/);
+  assert.equal(text([{ name: 'v2.70.0', releaseDate: jiraDay(0), released: false }]).tone, 'k-warn');
+  assert.match(text([{ name: 'v2.70.0', releaseDate: jiraDay(0), released: false }]).note, /오늘 배포 예정/);
+  const late = text([{ name: 'v2.70.0', releaseDate: jiraDay(-2), released: false }]);
+  assert.equal(late.tone, 'k-neg');
+  assert.match(late.note, /2일 지남$/, '색만으로 말하지 않는다 — 글자도 달라진다');
+  const shipped = text([{ name: 'v2.70.0', releaseDate: jiraDay(-2), released: true }]);
+  assert.equal(shipped.tone, '', '이미 배포된 버전은 급하지 않다');
+  assert.match(shipped.note, /배포함$/);
+  assert.equal(text([{ name: 'v2.70.0', releaseDate: null, released: false }]).note, '', '날짜가 없으면 이름만 적는다');
+  assert.equal(text([{ name: 'v2.70.0', releaseDate: null }, { name: 'v2.71.0' }]).name, 'v2.70.0 외 1개');
+  // 상태 색은 범주로만 붙는다(배지가 아니다).
+  assert.equal(app.run("jiraStatusTone('done')"), 'k-pos');
+  assert.equal(app.run("jiraStatusTone('todo')"), 'k-dim');
+  assert.equal(app.run("jiraStatusTone('doing')"), '');
+  // 하위 티켓이 하나도 없으면 진행률 줄을 아예 그리지 않는다(`0`은 찍지 않는다).
+  assert.equal(app.run('jiraChildrenLabel(null)'), null);
+  assert.equal(app.run('jiraChildrenLabel({ total: 0, done: 0 })'), null);
+  assert.equal(app.run('jiraChildrenLabel({ total: 12, done: 7 }).text'), '12개 중 7개 완료');
+  assert.equal(app.run('jiraChildrenLabel({ total: 12, done: 7 }).ratio'), 58);
+});
+
+test('띠 카드는 값이 다 있으면 지라 상태·배포 버전·기한을 적고, 없으면 `없음`을 적는다', () => {
+  const app = pureClient();
+  const card = app.run(`jiraStripCard(${JSON.stringify(jiraIssue())})`);
+  const text = nodeText(card);
+  assert.match(text, /지라/);
+  assert.match(text, /게시글 작성하기_게임 임베드/);
+  assert.match(text, /에픽 · 담당 루본/);
+  assert.match(text, /지라 상태 진행 중/);
+  assert.match(text, /배포 버전 v2\.70\.0/);
+  assert.match(text, /기한 10월 2일/);
+  assert.match(text, /하위 티켓 .*12개 중 7개 완료/);
+  // 지라에서 온 글자는 전부 textContent로만 들어간다(새 innerHTML을 쓰지 않는다).
+  assert.doesNotMatch(nodeHtml(card), /게시글 작성하기|진행 중|v2\.70\.0/);
+  // 키는 `지라에서 열기` 링크의 title에만 보인다(BKEY 결정) — 카드 글자에는 없다.
+  assert.doesNotMatch(text, /IO-48394/);
+  const link = nodeFind(card, 'd-jopen');
+  assert.equal(link.getAttribute('href'), undefined);
+  assert.equal(link.href, 'https://example-jira.test/browse/IO-48394');
+  assert.equal(link.target, '_blank');
+  assert.equal(link.rel, 'noopener noreferrer');
+  assert.match(link.title, /^IO-48394 · /);
+
+  const bare = app.run(`jiraStripCard(${JSON.stringify(jiraIssue({ assignee: null, due: null, versions: [], children: null, status: { name: '완료', category: 'done' } }))})`);
+  const bareText = nodeText(bare);
+  assert.match(bareText, /담당 없음/);
+  assert.match(bareText, /배포 버전 없음/);
+  assert.match(bareText, /기한 없음/);
+  assert.doesNotMatch(bareText, /하위 티켓/, '하위가 없으면 진행률 줄이 없다');
+  assert.equal(nodeFind(bare, 'v').className, 'v k-pos', '완료 범주는 성공색 글자다');
+});
+
+test('띠 카드는 부르는 동안 뼈대를, 연결 안 됨·오류일 때는 조용한 한 줄을 세운다', async () => {
+  const { app } = jiraClient(() => new Response(JSON.stringify({ ok: true, connected: true, issue: jiraIssue() })));
+  app.run("document.getElementById('jiraStrip').dataset.jiraKey = 'IO-48394'");
+  const loading = app.run("jiraCard = { ...jiraCard, key: 'IO-48394', state: 'loading' }; jiraStripBody('IO-48394')");
+  assert.equal(loading.className, 'd-jira is-loading');
+  assert.equal(loading.getAttribute('aria-hidden'), 'true');
+  assert.equal(nodeText(loading), '', '뼈대에는 글자가 없다');
+
+  const off = app.run("jiraCard = { ...jiraCard, state: 'off' }; jiraStripBody('IO-48394')");
+  assert.equal(nodeText(off), '지라 연결이 필요해요 · 설정 방법');
+  const help = nodeFind(off, 'd-link');
+  assert.match(help.title, /README의 "지라 연결 설정" 절/);
+  assert.equal(help.href, undefined, '새 창으로 나가는 링크가 아니다');
+  help.listeners.click();
+  assert.match(app.nodes.get('liveRegion').textContent, /README의 "지라 연결 설정" 절/);
+
+  const failed = app.run("jiraCard = { ...jiraCard, state: 'error', error: '지라 토큰을 확인해 주세요.' }; jiraStripBody('IO-48394')");
+  assert.equal(nodeText(failed), '지라 토큰을 확인해 주세요. · 다시 시도');
+  await nodeFind(failed, 'd-link').listeners.click();
+  assert.equal(app.run('jiraCard.state'), 'ok', '`다시 시도`가 다시 읽어 온다');
+  assert.equal(app.run('jiraCard.issue.summary'), '게시글 작성하기_게임 임베드');
+});
+
+test('다른 프로젝트로 빨리 옮기면 늦게 온 지라 응답은 버린다', async () => {
+  const gates = {};
+  const { app, calls } = jiraClient(url => new Promise((resolve) => {
+    const key = url.includes('AB-1') ? 'first' : 'second';
+    gates[key] = () => resolve(new Response(JSON.stringify({ ok: true, connected: true, issue: jiraIssue({ key, summary: `${key} 요약` }) })));
+  }));
+  app.run("document.getElementById('jiraStrip').dataset.jiraKey = 'AB-1'");
+  const first = app.run("jiraCardLoad('AB-1')");
+  app.run("document.getElementById('jiraStrip').dataset.jiraKey = 'AB-2'");
+  const second = app.run("jiraCardLoad('AB-2')");
+  gates.second();
+  await second;
+  assert.equal(app.run('jiraCard.key'), 'AB-2');
+  gates.first();
+  await first;
+  assert.equal(app.run('jiraCard.key'), 'AB-2', '늦게 온 첫 응답이 새 화면을 덮지 않는다');
+  assert.equal(app.run('jiraCard.issue.summary'), 'second 요약');
+  assert.deepEqual(calls.map(url => url.replace(/^.*key=/, '')), ['AB-1', 'AB-2']);
+
+  // 같은 프로젝트를 다시 그리는 것만으로는 다시 부르지 않는다(60초 안).
+  app.run("jiraCardEnsure('AB-2')");
+  assert.equal(calls.length, 2);
+  // 새로고침은 `fresh=1`로 부른다.
+  gates.second = null;
+  const again = app.run("jiraCardLoad('AB-2', { fresh: true })");
+  gates.second();
+  await again;
+  assert.match(calls[2], /key=AB-2&fresh=1$/);
+});
+
+test('지라 응답이 오면 제목 옆 `지라에서 완료됨`은 그 값으로 판정한다', async () => {
+  const { app } = jiraClient(() => new Response(JSON.stringify({ ok: true, connected: true, issue: jiraIssue({ status: { name: '진행 중', category: 'doing' } }) })));
+  app.run("jiraIssuesByKey = new Map([['IO-48394', { key: 'IO-48394', status: '완료', summary: '스냅샷' }]]);");
+  assert.equal(app.run("uiJiraDone('jira:IO-48394')"), true, '스냅샷은 완료라고 말한다');
+  assert.equal(app.run("jiraDoneLive('jira:IO-48394')"), true, '아직 못 받았으면 스냅샷을 따른다');
+  app.run("document.getElementById('jiraStrip').dataset.jiraKey = 'IO-48394'");
+  await app.run("jiraCardLoad('IO-48394')");
+  assert.equal(app.run("jiraDoneLive('jira:IO-48394')"), false, '실시간 상태가 진행 중이면 글자를 숨긴다');
+  assert.equal(app.run("uiJiraDone('jira:IO-48394')"), true, '왼쪽 목록이 쓰는 스냅샷 판정은 그대로다');
+});
+
+// 로드 직후 아주 빨리 누른 탭이 마지막 탭 복원에 덮이던 경쟁(크롬 검수에서 발견).
+test('마지막 탭 복원은 사람이 이미 탭을 골랐으면 하지 않는다', () => {
+  const app = pureClient();
+  assert.equal(app.run("tabToRestore('weekly', false, null)"), 'weekly');
+  assert.equal(app.run("tabToRestore(null, false, null)"), 'today', '기억해 둔 탭이 없으면 오늘 탭이다');
+  assert.equal(app.run("tabToRestore('weekly', true, null)"), null, '이미 누른 탭이 있으면 복원하지 않는다');
+  assert.equal(app.run("tabToRestore('weekly', false, 'projects')"), 'projects', '앱이 켜지기 전에 누른 탭(초점이 남은 탭)을 따른다');
+  assert.equal(app.run("tabToRestore('weekly', true, 'projects')"), null);
+});
