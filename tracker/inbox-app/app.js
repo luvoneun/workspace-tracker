@@ -205,6 +205,325 @@ function uiDateField({ value, label = '기한', onChange, clearable = true }) {
   return wrap;
 }
 
+// 의미 색은 배경이 아니라 글자에 쓴다. 토큰 이름으로 옮겨 준다.
+function uiTone(tone) {
+  return tone === 'urgent' ? ' k-neg' : tone === 'warn' ? ' k-warn' : '';
+}
+
+// 행의 프로젝트 이름. 그룹 제목이 이미 그 프로젝트를 말해 주면 비운다.
+// 지라는 키만 적는다 — 요약은 그룹 제목과 상세가 보여 준다.
+function uiProjectLabel(item, grouped) {
+  if (grouped) return '';
+  return item.jira || item.group || '';
+}
+
+// 상태 열의 글자 셀: 밀린 표시 → 진행 중 → 우선순위(5px 점 + 글자) → 기한(맨 오른쪽).
+// 보통·낮음·먼 기한처럼 의미 없는 값은 자리를 비운다(알약으로 그리지 않는다).
+const UI_PRIORITY_META = { critical: { text: '긴급', tone: 'urgent' }, high: { text: '높음', tone: 'warn' } };
+function uiMetaCells(item, opts = {}) {
+  const where = opts.where || 'row';
+  const done = item.status === 'done';
+  const cells = [];
+  // 좁은 화면(≤520px)의 두 줄 행에서는 프로젝트가 정보 줄 맨 앞에 온다 — 넓은 화면에서는 프로젝트 열이 보여 주므로 숨긴다.
+  if (opts.project) cells.push(`<span class="m-proj">${escapeHtml(opts.project)}</span>`);
+  const carry = where === 'row' && !done ? uiCarryText(item.scheduled) : null;
+  if (carry) cells.push(`<span class="m-carry">${carry}</span>`);
+  if (item.doing && !done && !opts.inDoingGroup) {
+    const days = -diffDays(item.doing) + 1;
+    cells.push(`<span class="m-doing">${days > 1 ? `${days}일째 진행 중` : '진행 중'}</span>`);
+  }
+  const priority = done ? null : UI_PRIORITY_META[item.priority];
+  if (priority) cells.push(`<span class="m-pri${uiTone(priority.tone)}"><i class="d-dot"></i>${priority.text}</span>`);
+  const due = done ? null : uiDueText(item.due, where);
+  if (due) cells.push(`<span class="m-due${uiTone(due.tone)}">${due.text}</span>`);
+  return cells.join('');
+}
+
+// 28px sticky 그룹 제목. 접히는 그룹은 줄 전체가 버튼이고, 마우스를 올리면 `+`로 그 자리에 추가한다.
+function uiGroupHeading(label, count, opts = {}) {
+  const collapsible = typeof opts.onToggle === 'function';
+  const head = document.createElement(collapsible ? 'button' : 'div');
+  head.className = 'd-grp' + (opts.tone === 'doing' ? ' is-doing' : '') + (collapsible ? ' tog' : '');
+  if (collapsible) {
+    head.type = 'button';
+    head.setAttribute('aria-expanded', String(!!opts.open));
+    head.innerHTML = uiIcon('chevron');
+    head.addEventListener('click', opts.onToggle);
+  }
+  const name = document.createElement(opts.onOpenProject ? 'button' : 'span');
+  name.className = 'gl' + (opts.onOpenProject ? ' lk' : '');
+  name.textContent = label;
+  name.title = label;
+  if (opts.onOpenProject) {
+    name.type = 'button';
+    name.setAttribute('aria-label', `${label} 프로젝트 모아보기`);
+    name.addEventListener('click', opts.onOpenProject);
+  }
+  head.appendChild(name);
+  if (count) {
+    const number = document.createElement('span');
+    number.className = 'n num';
+    number.textContent = count;
+    head.appendChild(number);
+  }
+  if (opts.onAdd) {
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'd-iconbtn sm d-grpadd';
+    add.setAttribute('aria-label', `${label}에 할 일 추가`);
+    add.innerHTML = uiIcon('plus');
+    add.addEventListener('click', (event) => { event.stopPropagation(); opts.onAdd(); });
+    head.appendChild(add);
+  }
+  return head;
+}
+
+// 그룹 제목의 `+`로 여는 그 자리 입력줄. 저장 뒤 목록을 다시 그려도 같은 줄로 포커스가 돌아온다.
+function uiGroupAddRow(key, endpoint, announceText) {
+  const row = document.createElement('div');
+  row.className = 'd-addrow';
+  row.dataset.addKey = `${endpoint}::${key}`;
+  row.hidden = true;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'd-addinput';
+  input.placeholder = '이 그룹에 추가 — Enter';
+  input.setAttribute('aria-label', `${key === '__misc__' ? '프로젝트 없음' : key.slice(key.indexOf(':') + 1)} 그룹에 할 일 추가`);
+  input.addEventListener('keydown', async (event) => {
+    if (event.key === 'Escape' && !event.isComposing) { row.hidden = true; return; }
+    if (event.key !== 'Enter' || event.isComposing || input.disabled) return;
+    const description = input.value.trim();
+    if (!description) return;
+    input.disabled = true;
+    const payload = { description };
+    if (key.startsWith('jira:')) payload.jira = key.slice(5);
+    else if (key.startsWith('group:')) payload.group = key.slice(6);
+    try {
+      await request(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      input.value = '';
+      announce(announceText);
+      await load();
+      // load()가 목록을 다시 그려서 이 입력칸은 떨어져 나간다 — 같은 그룹의 새 줄을 찾아 다시 연다.
+      const reopened = document.querySelector(`.d-addrow[data-add-key="${CSS.escape(row.dataset.addKey)}"] .d-addinput`);
+      if (reopened) { reopened.closest('.d-addrow').hidden = false; reopened.focus(); }
+    } catch { /* Keep the draft for retry. */ }
+    finally { input.disabled = false; if (input.isConnected) input.focus(); }
+  });
+  row.appendChild(input);
+  return row;
+}
+
+// 옛 더보기 메뉴(renderOverflowMenu)의 항목 배열을 새 메뉴(uiMenu)의 묶음으로 옮긴다.
+// 메뉴 "내용"을 D로 다시 쓰는 것은 다음 배치다 — 여기서는 담는 그릇만 바꾼다(행이 잘리지 않게).
+function uiMenuSectionsFrom(actions) {
+  const sections = [[]];
+  actions.forEach((action) => {
+    if (!action) return;
+    const last = sections[sections.length - 1];
+    if (action.separator) { if (last.length) sections.push([]); return; }
+    if (action.custom) {
+      last.push({
+        field: action.custom.querySelector('.overflow-field-label')?.textContent || '',
+        control: action.custom.lastElementChild,
+      });
+      return;
+    }
+    last.push(action);
+  });
+  return sections;
+}
+
+// 완료 행의 결과 한 줄. 없으면 글자 링크, 누르면 그 자리에서 적는다(Enter 저장 / Esc 취소).
+function uiResultCell(meta, item) {
+  const detail = typeof wfItem === 'function' ? wfItem(item.id) : null;
+  const outcome = item.outcome || detail?.outcome || '';
+  meta.replaceChildren();
+  if (outcome) {
+    const text = document.createElement('span');
+    text.className = 'out';
+    text.textContent = outcome;
+    text.title = outcome;
+    meta.appendChild(text);
+    return;
+  }
+  const link = document.createElement('button');
+  link.type = 'button';
+  link.className = 'd-link';
+  link.textContent = '결과 한 줄 적기';
+  link.setAttribute('aria-label', `${item.description} — 결과 한 줄 적기`);
+  link.addEventListener('click', () => {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'd-resin';
+    input.placeholder = '결과 한 줄 — Enter로 저장';
+    input.setAttribute('aria-label', `${item.description} — 결과 한 줄`);
+    meta.replaceChildren(input);
+    input.focus();
+    input.addEventListener('keydown', async (event) => {
+      if (event.isComposing || input.disabled) return;
+      if (event.key === 'Escape') { uiResultCell(meta, item); return; }
+      if (event.key !== 'Enter') return;
+      const value = input.value.trim();
+      if (!value) { uiResultCell(meta, item); return; }
+      input.disabled = true;
+      try {
+        // 상세의 `결과 한 줄`과 같은 저장 경로를 쓴다.
+        await postJson('/api/workflow/item', { id: item.id, outcome: value });
+        await load();
+      } catch { input.disabled = false; }
+    });
+  });
+  meta.appendChild(link);
+}
+
+// D 행: 36px 한 줄, 체크 | 제목 | 프로젝트 | 상태 열.
+// 동작은 hover·focus·선택됐을 때 상태 열 위에 겹쳐 뜬다(제목 폭을 뺏지 않는다).
+function uiTaskRow(item, opts = {}) {
+  const mode = opts.mode || 'today';
+  const done = item.status === 'done';
+  const carried = mode === 'today' && !done && !!uiCarryText(item.scheduled);
+  const project = uiProjectLabel(item, opts.grouped);
+  const row = document.createElement('div');
+  row.className = 'd-row'
+    + (done ? ' is-done done' : '')
+    + (item.doing && !done ? ' is-doing' : '')
+    + (selectedTaskId === item.id ? ' is-sel' : '');
+  row.dataset.taskId = item.id;
+  row.setAttribute('role', 'group');
+
+  // 체크 칸 — 여러 개 선택 중에는 같은 자리에 선택 칸이 들어선다(완료 체크와 모양이 다르다).
+  const check = document.createElement('span');
+  check.className = 'd-check';
+  let selectBox = null;
+  if (taskSelectionMode) {
+    // 완료한 줄은 고를 수 없다 — 빈 칸으로 두어 완료 체크와 헷갈리지 않게 한다.
+    if (!done) { selectBox = taskSelectionCheckbox(item, row); check.appendChild(selectBox); }
+  } else {
+    check.appendChild(taskCompletionCheckbox(item, row, done));
+    check.insertAdjacentHTML('beforeend', '<svg class="d-tick" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7.4 5.7 10.1 11 4.2"/></svg>');
+  }
+  row.appendChild(check);
+
+  const title = document.createElement('span');
+  title.className = 'd-title';
+  title.title = item.description;
+  title.textContent = item.description;
+  title.tabIndex = 0;
+  title.setAttribute('role', 'button');
+  title.setAttribute('aria-label', taskSelectionMode && !done ? `${item.description} 선택` : `${item.description} 상세 보기`);
+  const open = () => {
+    if (taskSelectionMode) { if (selectBox && !taskBatchBusy) selectBox.click(); return; }
+    openTaskDetail(item, mode);
+  };
+  title.addEventListener('click', open);
+  title.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); }
+  });
+  // NEW는 누르는 버튼이 아니라 표시다 — 화면에 잠깐 머물면 조용히 사라진다(observeNewItem).
+  if (item.isNew && !done) { title.prepend(renderNewDot(item)); observeNewItem(row, item); }
+  row.appendChild(title);
+
+  const projectCell = document.createElement('span');
+  projectCell.className = 'd-proj';
+  projectCell.textContent = project;
+  if (project) projectCell.title = project;
+  row.appendChild(projectCell);
+
+  const meta = document.createElement('span');
+  meta.className = 'd-meta';
+  if (done) {
+    uiResultCell(meta, item);
+  } else {
+    meta.innerHTML = uiMetaCells(item, { where: mode === 'later' ? 'full' : 'row', inDoingGroup: opts.inDoingGroup, project });
+    // 답변을 기다리는 업무는 그 사실도 글자로 적는다.
+    const blocker = typeof wfItem === 'function' ? wfItem(wfItem(item.id)?.blockedBy) : null;
+    if (blocker) meta.insertAdjacentHTML('afterbegin', `<span class="m-wait${blocker.status === 'done' ? ' k-pos' : ''}">${blocker.status === 'done' ? '답변 해결' : '답변 대기'}</span>`);
+  }
+  row.appendChild(meta);
+
+  const acts = document.createElement('span');
+  acts.className = 'd-acts';
+  if (!done && !taskSelectionMode) {
+    const move = (label, scheduled, message) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'd-btn sm';
+      button.textContent = label;
+      button.setAttribute('aria-label', `${item.description} — ${label}`);
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        await fadeOutAndRun(row, () => setTaskScheduled(item.id, scheduled), message);
+        button.disabled = false;
+      });
+      acts.appendChild(button);
+    };
+    if (mode === 'later') {
+      move('오늘로', todayStr(), '오늘 할 일로 옮김');
+    } else {
+      if (carried) move('오늘 할게요', todayStr(), '오늘 할 일로 확정함');
+      move('내일', tomorrowStr(), '내일로 미룸');
+      move('나중에', null, '나중에 할 일로 옮김 · 기한은 그대로입니다.');
+    }
+    if (item.permalink) {
+      const link = document.createElement('a');
+      link.className = 'd-iconbtn sm';
+      link.href = item.permalink;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.title = '슬랙 원문';
+      link.setAttribute('aria-label', `${item.description} — 슬랙 원문 열기`);
+      link.innerHTML = uiIcon('link');
+      acts.appendChild(link);
+    }
+    const priorityControl = renderPriorityBadge(item);
+    const groupControl = renderGroupControl({
+      jira: item.jira,
+      group: item.group,
+      onSetJira: (key) => setTaskJira(item.id, key),
+      onSetGroup: (group) => setTaskGroup(item.id, group),
+    });
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'd-iconbtn sm';
+    more.setAttribute('aria-label', `${item.description} — 더 보기`);
+    more.innerHTML = uiIcon('more');
+    more.addEventListener('click', (event) => {
+      event.stopPropagation();
+      uiMenu(more, uiMenuSectionsFrom(taskMenuActions({ item, mode, card: row, groupControl, priorityControl, showPriority: false })));
+    });
+    acts.appendChild(more);
+  }
+  row.appendChild(acts);
+  return row;
+}
+
+// 그룹 열쇠(`jira:…` / `group:…` / `__misc__`)를 사람이 읽는 제목으로.
+function uiGroupLabel(key) {
+  if (key === '__misc__') return '프로젝트 없음';
+  if (key.startsWith('jira:')) {
+    const jiraKey = key.slice(5);
+    const issue = jiraIssuesByKey.get(jiraKey);
+    return issue ? `${jiraKey} · ${issue.summary}` : jiraKey;
+  }
+  return key.slice(6);
+}
+
+// 프로젝트별로 묶고, 프로젝트 없는 것은 맨 뒤에 둔다.
+function uiGroupTasks(items) {
+  const groups = new Map();
+  items.forEach((item) => {
+    const key = item.jira ? `jira:${item.jira}` : item.group ? `group:${item.group}` : '__misc__';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  });
+  const named = [...groups.keys()].filter(key => key !== '__misc__').sort();
+  return (groups.has('__misc__') ? [...named, '__misc__'] : named).map(key => [key, groups.get(key)]);
+}
+
 // ---------- 화면 상태 ----------
 
 let jiraIssuesCache = [];
@@ -218,8 +537,10 @@ function isTyping() {
   const el = document.activeElement;
   return !!(el && (el.matches('input, textarea, select') || el.isContentEditable));
 }
-let planningMode = false;
 let todaySort = 'project';
+// 완료 그룹과 미루기 제안은 접힌 채로 시작한다 — 첫 화면에 오늘 할 일이 가장 많이 보이게.
+let todayDoneOpen = false;
+let suggestOpen = false;
 let selectedTaskId = null;
 let selectedTaskMode = 'today';
 let noticeTimer;
@@ -460,7 +781,7 @@ async function load() {
     .sort((a, b) => diffDays(a.due) - diffDays(b.due));
   renderReminders(reminders);
   syncTaskDetail([...data.todayTasks || [], ...data.laterTasks || []]);
-  renderPlanningMode();
+  taskSelectionRefresh();
 }
 
 // 열려 있지도 않은 탭의 카드를 load()마다 다시 만들 필요는 없다 — 숫자·NEW 표시는 그대로
@@ -480,20 +801,6 @@ function renderActiveTabLists() {
     tabStale.weekly = false;
     renderWeeklyReports(latestData.weeklyReports || []);
   }
-}
-
-function renderPlanningMode() {
-  const grid = document.getElementById('gridToday');
-  const button = document.getElementById('planningToggle');
-  if (!grid || !button) return;
-  grid.classList.toggle('planning-mode', planningMode);
-  button.setAttribute('aria-pressed', String(planningMode));
-  button.textContent = planningMode ? '완료' : '계획·정리';
-  button.setAttribute('aria-label', planningMode ? '계획·정리 모드 닫기' : '계획·정리 모드 열기');
-  const laterZone = document.getElementById('laterTaskZone');
-  if (laterZone && planningMode) laterZone.open = true;
-  if (!planningMode && taskSelectionMode) { taskSelectionMode = false; taskSelection.clear(); taskListsRender(); }
-  taskSelectionRefresh();
 }
 
 function renderDateBar(data) {
@@ -602,6 +909,8 @@ function suggestDismissedToday() {
   try { return localStorage.getItem('suggestDismissed') === todayStr(); } catch { return false; }
 }
 
+// 미루기 제안은 접힌 한 줄로 두고, 펼쳤을 때만 업무 줄을 들여 보여 준다.
+// 근거는 알약으로 그리지 않는다(마감 없음·우선순위 낮음 같은 말은 새로 알려 주는 게 없다).
 function renderSuggestions(suggestions) {
   const zone = document.getElementById('suggestZone');
   const data = { ...(suggestions || { mode: 'none', items: [] }) };
@@ -609,47 +918,81 @@ function renderSuggestions(suggestions) {
     const blocked = wfItem(wfItem(item.id)?.blockedBy);
     return !blocked || blocked.status === 'done';
   });
+  // 이미 손댄 업무(진행 중)나 끝낸 업무는 미루자고 하지 않는다.
+  data.items = (data.items || []).filter((entry) => {
+    const task = itemsById.get(entry.id);
+    return !task || (task.status !== 'done' && !task.doing);
+  });
+  zone.replaceChildren();
   if (!data.items.length || suggestDismissedToday()) {
     zone.hidden = true;
     return;
   }
-
   const defer = data.mode === 'defer';
   zone.hidden = false;
-  zone.classList.toggle('defer', defer);
-  document.getElementById('suggestTitle').textContent = defer
-    ? `오늘 ${data.total}개는 많아 보여요. 이건 미룰까요?`
+
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'd-sug';
+  toggle.setAttribute('aria-expanded', String(suggestOpen));
+  toggle.innerHTML = uiIcon('chevron');
+  const label = document.createElement('span');
+  label.textContent = defer
+    ? `오늘 ${data.total}개 — ${data.items.length}개 미룰까요?`
     : '오늘 이건 어때요?';
+  toggle.appendChild(label);
+  toggle.addEventListener('click', () => { suggestOpen = !suggestOpen; renderSuggestions(suggestions); });
+  zone.appendChild(toggle);
+  if (!suggestOpen) return;
 
-  const list = document.getElementById('suggestList');
-  list.innerHTML = '';
-  data.items.forEach(item => {
+  const box = document.createElement('div');
+  box.className = 'd-sugbox';
+  data.items.forEach((entry) => {
+    const task = itemsById.get(entry.id) || { id: entry.id, description: entry.description };
     const row = document.createElement('div');
-    row.className = 'suggest-row';
-
-    const main = document.createElement('div');
-    main.className = 'suggest-main';
-    main.innerHTML = `
-      <span class="suggest-desc">${escapeHtml(item.description)}</span>
-      <span class="badges">${item.reasons.map(r => `<span class="badge">${escapeHtml(r)}</span>`).join('')}</span>
-    `;
-    row.appendChild(main);
-
-    const action = document.createElement('button');
-    action.type = 'button';
-    action.className = 'convert-btn suggest-action';
-    action.textContent = defer ? '내일로' : '오늘로';
-    action.addEventListener('click', async () => {
-      action.disabled = true;
-      try {
-        await setTaskScheduled(item.id, defer ? tomorrowStr() : todayStr());
-        announce(defer ? '내일로 미뤘습니다.' : '오늘 할 일로 옮겼습니다.');
-      } catch { action.disabled = false; }
-    });
-    row.appendChild(action);
-
-    list.appendChild(row);
+    row.className = 'd-row is-sug';
+    row.innerHTML = '<span class="d-check"></span>'
+      + `<span class="d-title" title="${escapeAttr(task.description)}">${escapeHtml(task.description)}</span>`
+      + '<span class="d-proj"></span>'
+      + `<span class="d-meta">${uiMetaCells(task)}</span>`;
+    const acts = document.createElement('span');
+    acts.className = 'd-acts';
+    const move = (text, scheduled, message) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'd-btn sm';
+      button.textContent = text;
+      button.setAttribute('aria-label', `${task.description} — ${text}`);
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        try {
+          await setTaskScheduled(entry.id, scheduled);
+          announce(message);
+        } catch { button.disabled = false; }
+      });
+      acts.appendChild(button);
+    };
+    if (defer) { move('내일', tomorrowStr(), '내일로 미룸'); move('나중에', null, '나중에 할 일로 옮김'); }
+    else move('오늘로', todayStr(), '오늘 할 일로 옮김');
+    row.appendChild(acts);
+    box.appendChild(row);
   });
+
+  const foot = document.createElement('div');
+  foot.className = 'd-sugfoot';
+  const dismiss = document.createElement('button');
+  dismiss.type = 'button';
+  dismiss.className = 'd-link';
+  dismiss.textContent = '오늘은 괜찮아요';
+  dismiss.addEventListener('click', () => {
+    try { localStorage.setItem('suggestDismissed', todayStr()); } catch {}
+    zone.hidden = true;
+    zone.replaceChildren();
+    announce('오늘은 제안을 접어둡니다.');
+  });
+  foot.appendChild(dismiss);
+  box.appendChild(foot);
+  zone.appendChild(box);
 }
 
 function relativeDate(dateStr) {
@@ -1018,53 +1361,29 @@ function renderWaitingCard(item) {
 
 function renderLaterTasks(items) {
   document.getElementById('laterTaskSectionCount').textContent = items.length;
-  const laterZone = document.getElementById('laterTaskZone');
-  if (!laterZone.dataset.initialized) {
-    laterZone.open = items.length > 0;
-    laterZone.dataset.initialized = 'true';
-  }
   const list = document.getElementById('laterTaskList');
-  list.innerHTML = '';
+  list.replaceChildren();
+  list.classList.toggle('d-list', items.length > 0);
   if (!items.length) {
-    list.innerHTML = '<div class="empty">나중에 할 일 없음</div>';
+    list.innerHTML = '<div class="d-empty">나중에 할 일이 없습니다.</div>';
     return;
   }
 
-  const groups = new Map();
-  items.forEach(item => {
-    const key = item.jira ? `jira:${item.jira}` : item.group ? `group:${item.group}` : '__misc__';
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(item);
-  });
-  const namedKeys = [...groups.keys()].filter(k => k !== '__misc__').sort();
-  const orderedKeys = groups.has('__misc__') ? [...namedKeys, '__misc__'] : namedKeys;
-
-  orderedKeys.forEach(key => {
-    const groupEl = document.createElement('div');
-    groupEl.className = 'today-group';
-
-    const header = document.createElement('div');
-    header.className = 'today-group-header' + (key === '__misc__' ? ' misc' : '');
-    if (key === '__misc__') {
-      header.textContent = '기타';
-    } else if (key.startsWith('jira:')) {
-      const jiraKey = key.slice(5);
-      const issue = jiraIssuesCache.find(i => i.key === jiraKey);
-      header.textContent = issue ? `${jiraKey} · ${issue.summary}` : jiraKey;
-    } else {
-      header.textContent = key.slice(6);
-    }
-    groupEl.appendChild(header);
-
-    const sorted = [...groups.get(key)].sort((a, b) => {
-      if (a.due && b.due) return a.due < b.due ? -1 : a.due > b.due ? 1 : 0;
-      if (a.due) return -1;
-      if (b.due) return 1;
-      return 0;
+  uiGroupTasks(items).forEach(([key, groupItems]) => {
+    const addRow = uiGroupAddRow(key, '/api/later-task/create', '나중에 할 일 추가함');
+    const heading = uiGroupHeading(uiGroupLabel(key), groupItems.length, {
+      onAdd: () => { addRow.hidden = false; addRow.querySelector('input').focus(); },
+      onOpenProject: key === '__misc__' ? null : () => wfOpen({ kind: 'project', key }),
     });
-    sorted.forEach(item => groupEl.appendChild(renderTaskCard(item, { mode: 'later', grouped: key !== '__misc__' })));
-    groupEl.appendChild(renderGroupAddInput(key, '/api/later-task/create', '나중에 할 일 추가함'));
-    list.appendChild(groupEl);
+    list.append(heading, addRow);
+    [...groupItems]
+      .sort((a, b) => {
+        if (a.due && b.due) return a.due < b.due ? -1 : a.due > b.due ? 1 : 0;
+        if (a.due) return -1;
+        if (b.due) return 1;
+        return 0;
+      })
+      .forEach(item => list.appendChild(uiTaskRow(item, { mode: 'later', grouped: key !== '__misc__' })));
   });
 }
 
@@ -1100,37 +1419,10 @@ function renderPriorityBadge(item, config) {
   return select;
 }
 
-// 마감·예정·진행 상태를 배지 HTML 목록으로 만든다.
-function taskBadges(item, mode, done, carried) {
-  const badges = [];
-  if (item.due) {
-    const diff = diffDays(item.due);
-    if (diff < 0) badges.push(`<span class="badge overdue">${-diff}일 지남</span>`);
-    else if (diff > 0) badges.push(`<span class="badge due">마감 ${item.due}</span>`);
-    else badges.push('<span class="badge due-today">오늘 마감</span>');
-  }
-  if (item.scheduled && mode === 'later') badges.push(`<span class="badge">실행 예정 ${escapeHtml(item.scheduled)}</span>`);
-  if (carried) badges.push(`<span class="badge stale plan-only">${escapeHtml(relativeDate(item.scheduled))}부터</span>`);
-  if (item.doing && !done) {
-    const days = -diffDays(item.doing) + 1;
-    badges.push(`<span class="badge doing">${days > 1 ? `${days}일째 진행 중` : '진행 중'}</span>`);
-  }
-  return badges;
-}
-
-// 그룹은 제목 위에 얹는 라벨로 — 무슨 일인지 읽기 전에 어느 건인지 먼저 잡히도록.
-// 프로젝트별 보기처럼 위 헤더가 이미 알려주는 곳에서는 생략한다.
-function taskEyebrow(item, grouped) {
-  if (grouped) return '';
-  const issue = item.jira ? jiraIssuesCache.find(i => i.key === item.jira) : null;
-  const projectLabel = item.jira ? (issue ? `${item.jira} · ${issue.summary}` : item.jira) : item.group;
-  return projectLabel ? `<div class="card-eyebrow" title="${escapeAttr(projectLabel)}">${escapeHtml(projectLabel)}</div>` : '';
-}
-
 function taskCompletionCheckbox(item, card, done) {
   const checkbox = document.createElement('input');
   checkbox.type = 'checkbox';
-  checkbox.className = 'checkbox';
+  checkbox.className = 'd-cb';
   checkbox.checked = done;
   checkbox.setAttribute('aria-label', `${item.description} — 완료로 표시`);
   checkbox.addEventListener('change', () =>
@@ -1198,108 +1490,13 @@ function taskMenuActions({ item, mode, card, groupControl, priorityControl, show
   return actions;
 }
 
-// 계획·정리 모드에서만 보이는 "내일 / 나중으로" 같은 이동 버튼 줄.
-function taskPlanActions({ item, mode, card, carried }) {
-  const planMoves = mode === 'later'
-    ? [{ label: '오늘로', scheduled: todayStr(), message: '오늘 할 일로 옮김' }]
-    : [
-        carried
-          ? { label: '오늘 할게요', scheduled: todayStr(), message: '오늘 할 일로 확정함' }
-          : { label: '내일', scheduled: tomorrowStr(), message: '내일로 미룸' },
-        { label: '나중으로', scheduled: null, message: '나중에 할 일로 옮김' },
-      ];
-  const planActions = document.createElement('div');
-  planActions.className = 'plan-actions plan-only';
-  planMoves.forEach(({ label, scheduled, message }) => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'convert-btn';
-    button.textContent = label;
-    button.setAttribute('aria-label', `${item.description} — ${label}`);
-    button.addEventListener('click', async () => {
-      button.disabled = true;
-      await fadeOutAndRun(card, () => setTaskScheduled(item.id, scheduled), message);
-      button.disabled = false;
-    });
-    planActions.appendChild(button);
-  });
-  return planActions;
-}
-
-function renderTaskCard(item, opts) {
-  const mode = (opts && opts.mode) || 'today';
-  // grouped: 위 헤더가 이미 프로젝트를 알려주고 있는지. 아니면 카드가 직접 보여준다.
-  const grouped = !!(opts && opts.grouped);
-  const done = item.status === 'done';
-  const card = document.createElement('div');
-  card.className = 'card task-row' + (done ? ' done' : '');
-  card.dataset.taskId = item.id;
-
-  let checkbox = null;
-  if (taskSelectionMode && !done) {
-    checkbox = taskSelectionCheckbox(item, card);
-  } else if (mode === 'today') {
-    checkbox = taskCompletionCheckbox(item, card, done);
-  }
-
-  const body = document.createElement('div');
-  body.className = 'body';
-  const carried = mode === 'today' && !done && item.scheduled && item.scheduled < todayStr();
-  const badges = taskBadges(item, mode, done, carried);
-  body.innerHTML = `
-    ${taskEyebrow(item, grouped)}
-    <div class="top-row">
-      <span class="desc sender">${escapeHtml(item.description)}</span>
-      <span class="meta">${item.created ? '추가: ' + relativeDate(item.created) : ''}</span>
-    </div>
-    <div class="badges">${badges.join('')}</div>
-    ${item.permalink ? `<a class="link channel" href="${escapeAttr(item.permalink)}" target="_blank" rel="noopener">슬랙 원문</a>` : ''}
-  `;
-  const priorityControl = renderPriorityBadge(item);
-  const showPriority = ['high', 'critical'].includes(item.priority);
-  body.querySelector('.badges').insertAdjacentHTML('beforeend', workflowTaskBadges(item));
-  if (showPriority) body.querySelector('.badges').appendChild(priorityControl);
-  body.classList.add('task-openable');
-  body.tabIndex = 0;
-  body.setAttribute('role', 'button');
-  body.setAttribute('aria-label', `${item.description} 상세 보기`);
-  const open = () => {
-    if (taskSelectionMode) { if (!done && !taskBatchBusy) checkbox.click(); return; }
-    openTaskDetail(item, mode);
-  };
-  if (taskSelectionMode && !done) body.setAttribute('aria-label', `${item.description} 선택`);
-  body.addEventListener('click', (e) => {
-    if (e.target.closest('button,select,input,a,.overflow-menu,.group-add')) return;
-    open();
-  });
-  body.addEventListener('keydown', (e) => {
-    if ((e.key === 'Enter' || e.key === ' ') && !e.target.closest('input,select,button,a')) { e.preventDefault(); open(); }
-  });
-  // 할 일은 "새로 들어온 것"에서 분류를 거쳐야 여기 오므로, 이미 본 항목이다 (NEW 표시 불필요)
-  const groupControl = renderGroupControl({
-    jira: item.jira,
-    group: item.group,
-    onSetJira: (key) => setTaskJira(item.id, key),
-    onSetGroup: (g) => setTaskGroup(item.id, g),
-  });
-
-  if (!done) {
-    card.appendChild(renderOverflowMenu(taskMenuActions({ item, mode, card, groupControl, priorityControl, showPriority })));
-    body.appendChild(taskPlanActions({ item, mode, card, carried }));
-  }
-
-  if (checkbox) card.appendChild(checkbox);
-  card.appendChild(body);
-  return card;
-}
-
 function closeTaskDetail() {
   selectedTaskId = null;
   meetingPanel = null;
   const zone = document.getElementById('todayTaskZone');
   const panel = document.getElementById('taskDetailPanel');
   if (zone) zone.classList.remove('task-detail-open');
-  document.querySelectorAll('.task-row.is-selected').forEach(row => row.classList.remove('is-selected'));
+  document.querySelectorAll('.d-row.is-sel').forEach(row => row.classList.remove('is-sel'));
   if (panel) { panel.hidden = true; panel.innerHTML = ''; }
 }
 
@@ -1319,7 +1516,7 @@ function openMeetingPanel(event) {
   const recorded = workflowData.meetings.find(meeting => meeting.date === todayStr() && meeting.start === event.start && meeting.title === event.title);
   if (recorded) { wfOpen({ kind: 'meeting', id: recorded.id }); return; }
   selectedTaskId = null;
-  document.querySelectorAll('.task-row.is-selected').forEach(row => row.classList.remove('is-selected'));
+  document.querySelectorAll('.d-row.is-sel').forEach(row => row.classList.remove('is-sel'));
   meetingPanel = { event, project: event.project || null, type: 'task', added: [] };
   renderMeetingPanel();
 }
@@ -1476,8 +1673,8 @@ function renderTaskDetail(item) {
 function openTaskDetail(item, mode = 'today') {
   selectedTaskId = item.id;
   selectedTaskMode = mode;
-  document.querySelectorAll('.task-row.is-selected').forEach(row => row.classList.remove('is-selected'));
-  document.querySelectorAll(`.task-row[data-task-id="${CSS.escape(String(item.id))}"]`).forEach(row => row.classList.add('is-selected'));
+  document.querySelectorAll('.d-row.is-sel').forEach(row => row.classList.remove('is-sel'));
+  document.querySelectorAll(`.d-row[data-task-id="${CSS.escape(String(item.id))}"]`).forEach(row => row.classList.add('is-sel'));
   renderTaskDetail(item);
 }
 
@@ -1488,69 +1685,61 @@ function renderInbox(items) {
   const list = document.getElementById('inboxList');
   document.getElementById('inboxCount').textContent = items.length;
   zone.hidden = items.length === 0;
-  list.innerHTML = '';
+  list.replaceChildren();
   if (!items.length) return;
 
   items.forEach(item => {
-    const card = document.createElement('div');
-    card.className = 'card inbox-card';
+    const row = document.createElement('div');
+    row.className = 'd-ibrow';
 
-    const body = document.createElement('div');
-    body.className = 'body';
-    const badges = [];
-    if (item.due) badges.push(`<span class="badge due">마감 ${escapeHtml(item.due)}</span>`);
-    // 그룹은 아래 컨트롤이 보여주므로 여기서 또 적지 않는다
-    body.innerHTML = `
-      <div class="top-row">
-        <span class="desc sender">${escapeHtml(item.description)}</span>
-      </div>
-      ${badges.length ? `<div class="badges">${badges.join('')}</div>` : ''}
-      ${item.permalink ? `<a class="link channel" href="${escapeAttr(item.permalink)}" target="_blank" rel="noopener">슬랙 원문</a>` : ''}
-    `;
-    makeEditableDesc(body.querySelector('.desc'), item);
+    const main = document.createElement('span');
+    main.className = 'd-ibmain';
+    const title = document.createElement('span');
+    title.className = 'ti';
+    title.textContent = item.description;
+    makeEditableDesc(title, item);
+    // 말줄임으로 잘린 문구도 마우스를 올리면 전부 읽을 수 있게(수정 안내는 aria-label이 한다).
+    title.title = item.description;
+    if (item.isNew) { title.prepend(renderNewDot(item)); observeNewItem(row, item); }
+    main.appendChild(title);
+    if (item.permalink) {
+      const link = document.createElement('a');
+      link.className = 'd-link';
+      link.href = item.permalink;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.textContent = '슬랙 원문';
+      main.appendChild(link);
+    }
+    row.appendChild(main);
+
     // 분류하면서 어느 프로젝트 건인지도 같이 정할 수 있게 한다
-    body.prepend(renderGroupControl({
+    row.appendChild(renderGroupControl({
       jira: item.jira,
       group: item.group,
       onSetJira: (key) => setTaskJira(item.id, key),
       onSetGroup: (g) => setTaskGroup(item.id, g),
     }));
-    card.appendChild(body);
 
-    // 아직 분류 전이라도 마감이 분명한 건은 미리 지정해둘 수 있어야 한다(예: 오늘/나중에 정하기 전에도).
-    const dueInput = document.createElement('input');
-    dueInput.type = 'date';
-    dueInput.className = 'overflow-date-input';
-    dueInput.value = item.due || '';
-    dueInput.setAttribute('aria-label', `${item.description} — 마감일 지정`);
-    dueInput.addEventListener('click', (e) => e.stopPropagation());
-    dueInput.addEventListener('change', async () => {
-      await setTaskDue(item.id, dueInput.value || null);
-      announce(dueInput.value ? `마감일 ${dueInput.value}로 지정함` : '마감일 해제함');
-    });
-    card.appendChild(renderOverflowMenu([
-      { custom: overflowField('마감일', dueInput) },
-    ]));
-
-    const actions = document.createElement('div');
-    actions.className = 'inbox-actions';
-
+    const actions = document.createElement('span');
+    actions.className = 'd-ibacts';
     const choose = (label, onClick, cls = '') => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = `inbox-btn ${cls}`.trim();
-      b.textContent = label;
-      b.addEventListener('click', onClick);
-      actions.appendChild(b);
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `d-btn sm ${cls}`.trim();
+      button.textContent = label;
+      button.setAttribute('aria-label', `${item.description} — ${label}`);
+      button.addEventListener('click', onClick);
+      actions.appendChild(button);
     };
 
     // 앞으로 할 것 — 분류
-    choose('오늘', () => fadeOutAndRun(card, () => setTaskScheduled(item.id, todayStr()), '오늘 할 일로 옮김'));
-    choose('나중에', () => fadeOutAndRun(card, () => setTaskScheduled(item.id, null), '나중에 할 일로 옮김'));
+    choose('오늘', () => fadeOutAndRun(row, () => setTaskScheduled(item.id, todayStr()), '오늘 할 일로 옮김'));
+    choose('나중에', () => fadeOutAndRun(row, () => setTaskScheduled(item.id, null), '나중에 할 일로 옮김'));
     // 이미 끝난 것 — 종결. 완료는 기록이 남고(주간요약에 들어감), 삭제는 남지 않는다
-    choose('완료', () => fadeOutAndRun(card, () => toggleTask(item.id), '완료로 표시함'), 'quiet');
+    choose('완료로 표시', () => fadeOutAndRun(row, () => toggleTask(item.id), '완료로 표시함'));
     choose('삭제', () => {
-      fadeOutAndRun(card, async () => {
+      fadeOutAndRun(row, async () => {
         await request('/api/track/remove', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1558,135 +1747,80 @@ function renderInbox(items) {
         });
         load();
       }, '삭제함');
-    }, 'danger');
+    }, 'dng');
 
-    card.appendChild(actions);
-    list.appendChild(card);
+    // 아직 분류 전이라도 기한이 분명한 건은 미리 지정해둘 수 있어야 한다.
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'd-iconbtn sm';
+    more.setAttribute('aria-label', `${item.description} — 더 보기`);
+    more.innerHTML = uiIcon('more');
+    more.addEventListener('click', (event) => {
+      event.stopPropagation();
+      uiMenu(more, [[{
+        field: '기한',
+        control: uiDateField({
+          value: item.due,
+          label: '기한',
+          onChange: async (value) => {
+            await setTaskDue(item.id, value);
+            announce(value ? `기한 ${uiKoDate(value)}로 지정함` : '기한 해제함');
+          },
+        }),
+      }]]);
+    });
+    actions.appendChild(more);
+
+    row.appendChild(actions);
+    list.appendChild(row);
   });
 }
 
 function renderTodayTasks(items) {
-  document.getElementById('todayTaskCount').textContent = items.filter(item => item.status !== 'done').length;
-  document.getElementById('todayDoneSummary').textContent = `완료 ${items.filter(item => item.status === 'done').length}`;
+  const doneItems = items.filter(item => item.status === 'done');
+  document.getElementById('todayTaskCount').textContent = items.length - doneItems.length;
+  document.getElementById('todayDoneSummary').textContent = `완료 ${doneItems.length}`;
   const list = document.getElementById('todayTaskList');
-  list.innerHTML = '';
-  if (!items.length) { list.innerHTML = '<div class="empty">오늘 예정된 할 일이 없습니다.</div>'; return; }
+  list.replaceChildren();
 
-  const doing = items.filter(i => i.status !== 'done' && i.doing);
-  // 진행 중인 건 프로젝트/우선순위와 무관하게 항상 맨 위에 따로 모은다
-  const active = items.filter(i => i.status !== 'done' && !i.doing);
-  const doneItems = items.filter(i => i.status === 'done');
+  // 진행 중인 건 프로젝트·우선순위와 무관하게 항상 맨 위에 따로 모은다
+  const doing = items.filter(item => item.status !== 'done' && item.doing);
+  const active = items.filter(item => item.status !== 'done' && !item.doing);
 
   if (doing.length) {
-    const doingEl = document.createElement('div');
-    doingEl.className = 'today-group today-doing-group';
-    const header = document.createElement('div');
-    header.className = 'today-group-header';
-    header.textContent = `진행 중 ${doing.length}`;
-    doingEl.appendChild(header);
-    [...doing].sort(compareTasks).forEach(item => doingEl.appendChild(renderTaskCard(item, { grouped: false })));
-    list.appendChild(doingEl);
+    list.appendChild(uiGroupHeading('진행 중', doing.length, { tone: 'doing' }));
+    [...doing].sort(compareTasks).forEach(item => list.appendChild(uiTaskRow(item, { mode: 'today', inDoingGroup: true })));
   }
 
   if (todaySort === 'priority') {
-    const priorityGroup = document.createElement('div');
-    priorityGroup.className = 'today-group';
-    const priorityHeader = document.createElement('div');
-    priorityHeader.className = 'today-group-header';
-    priorityHeader.textContent = '마감·중요도순';
-    priorityGroup.appendChild(priorityHeader);
-    [...active].sort(compareTasks).forEach(item => priorityGroup.appendChild(renderTaskCard(item, { grouped: false })));
-    list.appendChild(priorityGroup);
+    // 마감·중요도순은 한 줄기로 본다 — 프로젝트 제목이 있으면 훑는 순서가 깨진다.
+    if (active.length) {
+      list.appendChild(uiGroupHeading('마감·중요도순', active.length, {}));
+      [...active].sort(compareTasks).forEach(item => list.appendChild(uiTaskRow(item, { mode: 'today' })));
+    }
+  } else {
+    uiGroupTasks(active).forEach(([key, groupItems]) => {
+      const addRow = uiGroupAddRow(key, '/api/today-task/create', '오늘 할 일 추가함');
+      const heading = uiGroupHeading(uiGroupLabel(key), groupItems.length, {
+        onAdd: () => { addRow.hidden = false; addRow.querySelector('input').focus(); },
+        onOpenProject: key === '__misc__' ? null : () => wfOpen({ kind: 'project', key }),
+      });
+      list.append(heading, addRow);
+      [...groupItems].sort(compareTasks).forEach(item => list.appendChild(uiTaskRow(item, { mode: 'today', grouped: key !== '__misc__' })));
+    });
   }
 
-  const groups = new Map();
-  if (todaySort === 'priority') {
-    // Priority mode uses one flat list; project headers would defeat the scan order.
-    groups.clear();
+  if (!active.length && !doing.length) {
+    list.insertAdjacentHTML('beforeend', '<div class="d-empty">오늘 할 일이 비었습니다. 위 첫 줄에서 바로 추가하세요.</div>');
   }
-  if (todaySort !== 'priority') active.forEach(item => {
-    const key = item.jira ? `jira:${item.jira}` : item.group ? `group:${item.group}` : '__misc__';
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(item);
-  });
-  const namedKeys = [...groups.keys()].filter(k => k !== '__misc__').sort();
-  const orderedKeys = groups.has('__misc__') ? [...namedKeys, '__misc__'] : namedKeys;
-
-  if (todaySort !== 'priority') orderedKeys.forEach(key => {
-    const groupEl = document.createElement('div');
-    groupEl.className = 'today-group';
-
-    const header = document.createElement('div');
-    header.className = 'today-group-header' + (key === '__misc__' ? ' misc' : '');
-    if (key === '__misc__') {
-      header.textContent = '기타';
-    } else if (key.startsWith('jira:')) {
-      const jiraKey = key.slice(5);
-      const issue = jiraIssuesCache.find(i => i.key === jiraKey);
-      header.textContent = issue ? `${jiraKey} · ${issue.summary}` : jiraKey;
-    } else {
-      header.textContent = key.slice(6);
-    }
-    groupEl.appendChild(header);
-
-    if (key !== '__misc__') {
-      const projectButton = wfButton(header.textContent, () => wfOpen({ kind: 'project', key }), 'wf-project-entry');
-      header.replaceChildren(projectButton);
-    }
-    groups.get(key).sort(compareTasks).forEach(item => groupEl.appendChild(renderTaskCard(item, { grouped: key !== '__misc__' })));
-    groupEl.appendChild(renderGroupAddInput(key, '/api/today-task/create', '오늘 할 일 추가함'));
-    list.appendChild(groupEl);
-  });
 
   if (doneItems.length) {
-    const doneEl = document.createElement('div');
-    doneEl.className = 'today-group today-done-group';
-    const header = document.createElement('div');
-    header.className = 'today-group-header misc';
-    header.textContent = `완료 ${doneItems.length}`;
-    doneEl.appendChild(header);
-    doneItems.forEach(item => doneEl.appendChild(renderTaskCard(item)));
-    list.appendChild(doneEl);
+    list.appendChild(uiGroupHeading('완료', doneItems.length, {
+      open: todayDoneOpen,
+      onToggle: () => { todayDoneOpen = !todayDoneOpen; renderTodayTasks(items); },
+    }));
+    if (todayDoneOpen) doneItems.forEach(item => list.appendChild(uiTaskRow(item, { mode: 'today' })));
   }
-}
-
-function renderGroupAddInput(key, endpoint, announceText) {
-  const wrapper = document.createElement('details');
-  wrapper.className = 'group-add';
-  wrapper.dataset.addKey = `${endpoint}::${key}`;
-  const summary = document.createElement('summary');
-  summary.textContent = '+ 이 그룹에 추가';
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.className = 'wr-add-input';
-  input.placeholder = '이 그룹에 추가…';
-  input.setAttribute('aria-label', `${key === '__misc__' ? '기타' : key.slice(key.indexOf(':') + 1)} 그룹에 할 일 추가`);
-  input.addEventListener('keydown', async (e) => {
-    if (e.key !== 'Enter' || e.isComposing || input.disabled) return;
-    const description = input.value.trim();
-    if (!description) return;
-    input.disabled = true;
-    const payload = { description };
-    if (key.startsWith('jira:')) payload.jira = key.slice(5);
-    else if (key.startsWith('group:')) payload.group = key.slice(6);
-    try {
-      await request(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      input.value = '';
-      announce(announceText);
-      await load();
-      // load()가 목록을 다시 그려서 이 input은 떨어져 나간다 — 같은 그룹의 새 input을 찾아 다시 연다.
-      const reopened = document.querySelector(`.group-add[data-add-key="${CSS.escape(wrapper.dataset.addKey)}"] .wr-add-input`);
-      if (reopened) { reopened.closest('details').open = true; reopened.focus(); }
-    } catch { /* Keep the draft for retry. */ }
-    finally { input.disabled = false; if (input.isConnected) input.focus(); }
-  });
-  wrapper.append(summary, input);
-  wrapper.addEventListener('toggle', () => { if (wrapper.open) input.focus(); });
-  return wrapper;
 }
 
 function renderIdeas(items) {
@@ -2301,15 +2435,33 @@ document.getElementById('decisionArchiveSearch').addEventListener('input', (even
 });
 
 try { todaySort = localStorage.getItem('todaySort') || 'project'; } catch {}
-const todayViewSelect = document.getElementById('todayViewSelect');
-if (todayViewSelect) {
-  todayViewSelect.value = todaySort;
-  todayViewSelect.addEventListener('change', () => {
-    todaySort = todayViewSelect.value;
-    try { localStorage.setItem('todaySort', todaySort); } catch {}
-    load();
+// 보기 전환은 조용한 두 칸 세그먼트. 고른 값은 브라우저에 그대로 기억한다.
+const todayViewSeg = document.getElementById('todayViewSeg');
+function renderTodayViewSeg() {
+  todayViewSeg?.querySelectorAll('button').forEach((button) => {
+    button.setAttribute('aria-pressed', String(button.dataset.view === todaySort));
   });
 }
+todayViewSeg?.querySelectorAll('button').forEach((button) => {
+  button.addEventListener('click', () => {
+    if (todaySort === button.dataset.view) return;
+    todaySort = button.dataset.view;
+    try { localStorage.setItem('todaySort', todaySort); } catch {}
+    renderTodayViewSeg();
+    load();
+  });
+});
+renderTodayViewSeg();
+
+// 나중에 할 일은 아직 옛 목록 그대로다 — 머리줄 버튼으로 본문 아래에 펼쳐 보여 준다(서랍은 다음 배치).
+const laterTaskToggle = document.getElementById('laterTaskToggle');
+const laterTaskZone = document.getElementById('laterTaskZone');
+laterTaskToggle?.addEventListener('click', () => {
+  const open = laterTaskZone.hidden;
+  laterTaskZone.hidden = !open;
+  laterTaskToggle.setAttribute('aria-expanded', String(open));
+  if (open) laterTaskZone.scrollIntoView({ block: 'nearest' });
+});
 const TABS = {
   today: { grid: 'gridToday', btn: 'tabBtnToday' },
   records: { grid: 'gridRecords', btn: 'tabBtnRecords' },
@@ -2359,17 +2511,6 @@ document.getElementById('skipLink').addEventListener('click', event => {
   zone.scrollIntoView({ block: 'start' });
 });
 
-document.getElementById('planningToggle').addEventListener('click', () => {
-  planningMode = !planningMode;
-  renderPlanningMode();
-  announce(planningMode ? '계획·정리 모드를 열었습니다.' : '계획·정리 모드를 닫았습니다.');
-});
-
-document.getElementById('suggestDismiss').addEventListener('click', () => {
-  try { localStorage.setItem('suggestDismissed', todayStr()); } catch {}
-  document.getElementById('suggestZone').hidden = true;
-  announce('오늘은 제안을 접어둡니다.');
-});
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && selectedTaskId) closeTaskDetail();
 });

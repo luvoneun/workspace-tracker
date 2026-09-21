@@ -116,29 +116,43 @@ function pureClient() {
   return app;
 }
 
-test('task badges show overdue, due today, carried-over and doing states', () => {
+test('the status column shows overdue, due today, carried-over and in-progress, and stays empty when there is nothing to say', () => {
   const app = pureClient();
-  const badges = code => app.run(`taskBadges(${code}).join('|')`);
-  assert.match(badges("{ due: '2000-01-01' }, 'today', false, false"), /badge overdue">\d+일 지남/);
-  assert.match(badges('{ due: todayStr() }, \'today\', false, false'), /due-today">오늘 마감/);
-  assert.match(badges("{ due: '2999-12-31' }, 'today', false, false"), /badge due">마감 2999-12-31/);
-  assert.match(badges("{ scheduled: '2999-01-01' }, 'later', false, false"), /실행 예정 2999-01-01/);
-  assert.equal(badges("{ scheduled: '2999-01-01' }, 'today', false, false"), '');
-  assert.match(badges("{ scheduled: '2000-01-01' }, 'today', false, true"), /stale plan-only/);
-  assert.match(badges('{ doing: todayStr() }, \'today\', false, false'), /진행 중/);
-  assert.equal(badges('{ doing: todayStr() }, \'today\', true, false'), '', 'a done task is not shown as in progress');
+  const cells = (item, opts = '{}') => app.run(`uiMetaCells(${item}, ${opts})`);
+  assert.match(cells("{ due: '2000-01-01' }"), /m-due k-neg">\d+일 지남/);
+  assert.match(cells('{ due: todayStr() }'), /m-due k-warn">오늘까지/);
+  assert.match(cells('{ due: tomorrowStr() }'), /m-due">내일까지/);
+  assert.equal(cells("{ due: '2999-12-31' }"), '', 'a far deadline is not printed on a today row');
+  assert.match(cells("{ due: '2999-12-31' }", "{ where: 'full' }"), /12월 31일 \(.\)까지/, 'but it is printed where there is room');
+  assert.match(cells("{ scheduled: '2000-01-01' }"), /m-carry">\d+일 전부터/);
+  assert.equal(cells("{ scheduled: '2999-01-01' }"), '', 'a task planned for later is not called carried over');
+  assert.match(cells('{ doing: todayStr() }'), /m-doing">진행 중/);
+  assert.equal(cells('{ doing: todayStr(), status: "done" }'), '', 'a done task is not shown as in progress');
+  assert.equal(cells("{ doing: todayStr() }", '{ inDoingGroup: true }'), '', 'the group heading already says it');
+  assert.equal(cells("{ priority: 'medium' }"), '', 'a middling priority is not printed');
+  assert.match(cells("{ priority: 'critical' }"), /m-pri k-neg"><i class="d-dot"><\/i>긴급/);
+  const escaped = cells('{}', "{ project: '가입 <개선>' }");
+  assert.match(escaped, /m-proj">가입 &lt;개선&gt;/, 'user text is escaped');
+  assert.doesNotMatch(escaped, /<개선>/);
 });
 
-test('task eyebrow shows the project label unless the group header already does', () => {
+test('the project column stays empty when the group heading already says it, and jira shows its key', () => {
   const app = pureClient();
-  app.run("jiraIssuesCache = [{ key: 'AB-1', summary: '가입 <개선>' }]");
-  assert.equal(app.run("taskEyebrow({ jira: 'AB-1' }, true)"), '');
-  assert.equal(app.run('taskEyebrow({}, false)'), '');
-  const jira = app.run("taskEyebrow({ jira: 'AB-1' }, false)");
-  assert.match(jira, /AB-1 · 가입 &lt;개선&gt;/);
-  assert.doesNotMatch(jira, /<개선>/, 'user text is escaped');
-  assert.match(app.run("taskEyebrow({ jira: 'ZZ-9' }, false)"), />ZZ-9</, 'falls back to the key when the issue is not cached');
-  assert.match(app.run("taskEyebrow({ group: '운영툴' }, false)"), />운영툴</);
+  assert.equal(app.run("uiProjectLabel({ jira: 'AB-1' }, true)"), '');
+  assert.equal(app.run('uiProjectLabel({}, false)'), '');
+  assert.equal(app.run("uiProjectLabel({ jira: 'AB-1', group: '운영툴' }, false)"), 'AB-1', 'jira wins and only the key is printed');
+  assert.equal(app.run("uiProjectLabel({ group: '운영툴' }, false)"), '운영툴');
+});
+
+test('group headings read as "이름 개수" and jira headings add the summary', () => {
+  const app = pureClient();
+  app.run("jiraIssuesByKey = new Map([['AB-1', { key: 'AB-1', summary: '가입 개선' }]])");
+  assert.equal(app.run("uiGroupLabel('jira:AB-1')"), 'AB-1 · 가입 개선');
+  assert.equal(app.run("uiGroupLabel('jira:ZZ-9')"), 'ZZ-9', 'falls back to the key when the issue is not cached');
+  assert.equal(app.run("uiGroupLabel('group:운영툴')"), '운영툴');
+  assert.equal(app.run("uiGroupLabel('__misc__')"), '프로젝트 없음');
+  const order = JSON.parse(app.run("JSON.stringify(uiGroupTasks([{ id: 1 }, { id: 2, group: '나' }, { id: 3, jira: 'AB-1' }]).map(g => g[0]))"));
+  assert.deepEqual(order, ['group:나', 'jira:AB-1', '__misc__'], 'tasks without a project go last');
 });
 
 test('group select options offer clearing only when there is something to clear', () => {

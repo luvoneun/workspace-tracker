@@ -219,7 +219,7 @@ function wfSearch() {
 function taskSelectionRefresh() {
   const container = document.getElementById('taskBatchTools');
   if (!container) return;
-  container.hidden = !planningMode;
+  container.hidden = false;
   document.getElementById('gridToday').classList.toggle('task-selecting', taskSelectionMode);
   container.replaceChildren();
   container.classList.toggle('active', taskSelectionMode);
@@ -698,8 +698,8 @@ function workflowRender(data) {
   if (!document.getElementById('wfMeetingEntry')) {
     const button = wfButton('전체 보기', () => wfOpen({ kind: 'meetings' }), 'wf-link'); button.id = 'wfMeetingEntry';
     document.getElementById('calendarSectionCount').parentElement.appendChild(button);
-    const projects = wfButton('프로젝트 모아보기', () => wfOpen({ kind: 'projects' }), 'wf-link');
-    document.getElementById('planningToggle').parentElement.appendChild(projects);
+    const projects = wfButton('프로젝트 모아보기', () => wfOpen({ kind: 'projects' }), 'd-btn');
+    document.getElementById('todayHeadExtra').appendChild(projects);
   }
   let reminder = document.getElementById('wfFollowUps');
   if (!reminder) { reminder = wfNode('div'); reminder.id = 'wfFollowUps'; document.getElementById('waitingList').before(reminder); }

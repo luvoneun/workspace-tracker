@@ -80,21 +80,6 @@
     align-items: start;
   }
   .grid[hidden] { display: none; }
-  #gridToday:not(.planning-mode) { grid-template-columns: 260px minmax(0, 1fr); }
-  #gridToday:not(.planning-mode) #laterTaskZone { display: none; }
-  #gridToday.planning-mode { grid-template-columns: 260px minmax(0, 1fr) 300px; }
-  .planning-toggle {
-    margin-left: auto;
-    font-family: inherit;
-    font-size: var(--text-sm);
-    font-weight: 600;
-    color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
-    border: 0;
-    border-radius: 999px;
-    padding: 6px 12px;
-    cursor: pointer;
-  }
   .col-left, .col-right { min-width: 0; }
   @media (max-width: 900px) {
     .grid { grid-template-columns: 1fr; }
@@ -365,51 +350,7 @@
   .badge.due-today { color: var(--warn); border-color: var(--warn); background: color-mix(in srgb, var(--warn) 10%, transparent); font-weight: 600; }
   .badge.due-today::before { content: '◷ '; }
   .badge.stale { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, transparent); }
-  .badge.due-tomorrow { color: var(--warn); border-color: var(--warn); background: color-mix(in srgb, var(--warn) 10%, transparent); }
   .badge.priority-critical::before { content: '! '; }
-  .badge.doing { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); font-weight: 600; }
-  .card-eyebrow {
-    font-size: var(--text-xs);
-    font-weight: 600;
-    color: var(--muted);
-    margin-bottom: 3px;
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  #inboxZone { margin-bottom: 14px; }
-  #inboxZone[hidden] { display: none; }
-  #inboxZone h2::before { background: var(--warn); }
-  .inbox-card {
-    border-left: 3px solid var(--warn);
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-  }
-  .inbox-card .body { flex: 1; min-width: 180px; }
-  .inbox-actions { display: flex; gap: 6px; flex-shrink: 0; }
-  .inbox-btn {
-    font: inherit;
-    font-size: var(--text-sm);
-    font-weight: 600;
-    color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
-    border: none;
-    border-radius: 999px;
-    padding: 6px 12px;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: background-color 120ms ease, color 120ms ease;
-  }
-  .inbox-btn.quiet { color: var(--muted); background: none; }
-  .inbox-btn.quiet:hover { color: var(--success); background: color-mix(in srgb, var(--success) 12%, transparent); }
-  .inbox-btn.danger { color: var(--muted); background: none; }
-  .inbox-actions { border-left: 1px solid var(--border); padding-left: 10px; }
-
-  .today-doing-group .today-group-header { color: var(--accent); }
-  .today-doing-group .card { border-left: 3px solid var(--accent); }
   .badge.who-badge { cursor: pointer; }
   .badge.who-badge:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
   .who-edit-input {
@@ -517,54 +458,6 @@
   .meeting-added-undo { border: none; background: none; color: var(--muted); cursor: pointer; padding: 0 2px; flex-shrink: 0; }
   .meeting-added-undo:hover { color: var(--urgent); }
 
-  #suggestZone {
-    background: color-mix(in srgb, var(--accent) 6%, var(--card));
-    border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
-    border-radius: 12px;
-    padding: 10px 12px;
-    margin-bottom: 10px;
-  }
-  #suggestZone[hidden] { display: none; }
-  #suggestZone.defer {
-    background: color-mix(in srgb, var(--warn) 7%, var(--card));
-    border-color: color-mix(in srgb, var(--warn) 28%, transparent);
-  }
-  .suggest-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    font-size: var(--text-sm);
-    font-weight: 700;
-    color: var(--text);
-    margin-bottom: 8px;
-  }
-  .suggest-dismiss {
-    font: inherit;
-    font-size: var(--text-xs);
-    font-weight: 600;
-    color: var(--muted);
-    background: none;
-    border: none;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .suggest-dismiss:hover { color: var(--text); }
-  .suggest-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    padding: 6px 0;
-    border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-  }
-  .suggest-row:first-child { border-top: none; }
-  .suggest-main { flex: 1; min-width: 0; }
-  .suggest-desc { font-size: var(--text-base); font-weight: 600; display: block; margin-bottom: 3px; }
-  .suggest-action { margin: 0; flex-shrink: 0; padding: 4px 10px; }
-  #gridToday:not(.planning-mode) .plan-only { display: none; }
-  .plan-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
-  .plan-actions .convert-btn { margin: 0; padding: 4px 10px; }
-  .plan-summary { font-size: var(--text-sm); font-weight: 600; color: var(--muted); margin-left: 8px; }
 
   .jira-control { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
   /* 좁은 사이드바 칼럼(확인 대기중 등)에 들어가면 배지 글자가 알약 모양을 깨고
@@ -719,9 +612,6 @@
     outline: none;
     border-color: var(--accent);
   }
-  #todayTaskZone { margin-bottom: 12px; }
-  #todayTaskZone h2 { flex-wrap: wrap; }
-  .today-toolbar { display: flex; justify-content: flex-end; margin: -2px 0 8px; }
   /* 일괄 정리 — 선택 모드일 땐 테두리 있는 박스로 감싸서 "지금 특별한 모드"라는 걸 알려주고,
      "모드 자체"(끝내기·몇 개·전체선택)와 "실제로 바꾸는 것"(날짜·그룹)을 두 줄로 나눈다. */
   .task-batch-tools { margin-bottom: 10px; }
@@ -741,9 +631,6 @@
   .task-batch-date summary::-webkit-details-marker { display: none; }
   .task-batch-date[open] summary { color: var(--text); margin-bottom: 6px; }
   .task-batch-date > input, .task-batch-date > button { margin-top: 4px; }
-  .view-select { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: var(--text-xs); font-weight: 600; }
-  .view-select select { font: inherit; color: var(--text); background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 6px 8px; cursor: pointer; }
-  .view-select select:focus { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 1px; }
   .task-content-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
   #todayTaskZone.task-detail-open .task-content-layout { grid-template-columns: minmax(0, 1fr) 300px; }
   .task-detail { min-width: 0; position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto; background: var(--card); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); padding: 16px; }
@@ -772,12 +659,6 @@
     #gridToday .col-left { order: 1; }
     #gridToday .col-right { order: 2; }
   }
-  @media (max-width: 520px) {
-    h2 { margin-top: 18px; }
-    .planning-toggle { margin-left: 0; }
-    .today-toolbar { justify-content: flex-start; }
-  }
-  .col-right details.done-details { margin-bottom: 4px; }
 
   .wr-view-tabs { display: flex; gap: 4px; margin: 8px 0 10px; }
   .wr-view-btn {
@@ -861,8 +742,8 @@
   .task-row .badges { margin-top: 4px; }
   .badge.overdue::before, .badge.due-today::before, .badge.priority-critical::before { content: none; }
   /* 채운 강조 상태: 파랑(행동·선택) / 빨강(삭제). 글자색은 --on-fill이 라이트·다크에서 맞춰 준다. */
-  .planning-toggle:hover, .planning-toggle[aria-pressed="true"], .inbox-btn:hover, .convert-btn:hover, .wr-view-btn.active { color: var(--on-fill); background: var(--accent); }
-  .inbox-btn.danger:hover, .convert-btn.danger:hover { color: var(--on-fill); background: var(--urgent); }
+  .convert-btn:hover, .wr-view-btn.active { color: var(--on-fill); background: var(--accent); }
+  .convert-btn.danger:hover { color: var(--on-fill); background: var(--urgent); }
   .checkbox { width: 22px; height: 22px; }
   @media (pointer: coarse) {
     .checkbox, .checkbox.task-selection { width: 28px; height: 28px; }
@@ -924,41 +805,43 @@
 
       <main class="col col-center">
         <div id="inboxZone" hidden>
-          <h2 id="inboxHeading">새로 들어온 것<span class="section-count" id="inboxCount">0</span></h2>
-          <div id="inboxList"></div>
+          <div class="d-sechd" id="inboxHeading">새로 들어온 것<span class="n num" id="inboxCount">0</span></div>
+          <div class="d-inbox" id="inboxList"></div>
         </div>
 
         <div id="todayTaskZone" tabindex="-1">
-          <h2>오늘 할 일<span class="section-count" id="todayTaskCount">0</span><span class="plan-summary plan-only" id="todayDoneSummary"></span><button type="button" class="planning-toggle" id="planningToggle" aria-pressed="false">계획·정리</button></h2>
-          <div class="today-toolbar">
-            <label class="view-select">보기 <select id="todayViewSelect" aria-label="오늘 할 일 정렬 방식"><option value="project">프로젝트별</option><option value="priority">마감·중요도순</option></select></label>
-          </div>
-          <div id="suggestZone" hidden>
-            <div class="suggest-head">
-              <span id="suggestTitle"></span>
-              <button type="button" class="suggest-dismiss" id="suggestDismiss">오늘은 괜찮아요</button>
+          <div class="d-lhd">
+            <h2>오늘 할 일</h2>
+            <span class="sub num"><span id="todayTaskCount">0</span> · <span id="todayDoneSummary">완료 0</span></span>
+            <span class="sp"></span>
+            <div class="d-seg" id="todayViewSeg" role="group" aria-label="오늘 할 일 정렬 방식">
+              <button type="button" data-view="project" aria-pressed="true">프로젝트별</button>
+              <button type="button" data-view="priority" aria-pressed="false">마감·중요도순</button>
             </div>
-            <div id="suggestList"></div>
+            <span id="todayHeadExtra"></span>
+            <div class="task-batch-tools" id="taskBatchTools"></div>
+            <button type="button" class="d-btn" id="laterTaskToggle" aria-expanded="false" aria-controls="laterTaskZone">나중에 할 일 <span class="num" id="laterTaskSectionCount">0</span></button>
           </div>
-          <div class="quick-add">
-            <input type="text" id="todayTaskInput" placeholder="무엇을 해야 하나요? Enter로 추가" aria-label="오늘 할 일 추가" />
-          </div>
+          <div id="suggestZone" hidden></div>
           <div class="task-content-layout">
-            <div id="todayTaskList"></div>
+            <div class="d-list" id="todayListSurface">
+              <div class="d-qaf">
+                <svg class="d-i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2v9.6M3.2 8h9.6"/></svg>
+                <input type="text" id="todayTaskInput" placeholder="오늘 할 일 추가 — Enter" aria-label="오늘 할 일 추가" />
+              </div>
+              <div id="todayTaskList"></div>
+            </div>
             <aside id="taskDetailPanel" class="task-detail" hidden aria-label="선택한 업무 상세"></aside>
+          </div>
+          <div id="laterTaskZone" hidden>
+            <div class="d-sechd">나중에 할 일</div>
+            <div class="quick-add">
+              <input type="text" id="laterTaskInput" placeholder="나중에 할 일 추가…" aria-label="나중에 할 일 추가" />
+            </div>
+            <div id="laterTaskList"></div>
           </div>
         </div>
       </main>
-
-      <aside class="col col-right">
-        <details class="done-details" id="laterTaskZone">
-          <summary>나중에 할 일<span class="section-count" id="laterTaskSectionCount">0</span></summary>
-          <div class="quick-add">
-            <input type="text" id="laterTaskInput" placeholder="나중에 할 일 추가…" aria-label="나중에 할 일 추가" />
-          </div>
-          <div id="laterTaskList"></div>
-        </details>
-      </aside>
     </div>
 
     <div class="grid grid-2col" id="gridRecords" hidden>
