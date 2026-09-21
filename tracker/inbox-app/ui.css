@@ -701,8 +701,8 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 .d-ibrow .ti {
   font-size: 16px; font-weight: 500; color: var(--text); cursor: text; border-radius: 4px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  /* 프로젝트 표기·원문 링크가 붙어도 제목이 먼저 줄어든다(고정 폭인 둘과 겹치지 않는다) */
-  flex: 1 1 auto; min-width: 0;
+  /* 프로젝트 표기·원문 링크는 제목 바로 뒤에 붙는다 — 제목은 늘어나지 않고(0), 자리가 모자라면 먼저 줄어든다(1) */
+  flex: 0 1 auto; min-width: 0;
 }
 .d-ibmain .d-inproj { max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
 .d-ibrow .desc-edit-input { flex: 1; min-width: 0; font-size: 16px; font-weight: 500; }
