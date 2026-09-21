@@ -66,6 +66,17 @@ const reportSlackSaved = reportSlackSectionsLoad();
 let reportSlackSections = reportSlackSaved.on;
 let reportSlackSeen = reportSlackSaved.seen;
 
+// 슬랙 글의 프로젝트 줄에 지라 상태·배포 버전을 붙일지 — **기본은 꺼짐**이다(평소 보고에는 없던 정보다).
+// 주차와 상관없이 하나로 기억한다(localStorage가 막혀 있으면 꺼진 채로 시작한다).
+const REPORT_JIRA_INFO_KEY = 'workspace-report-jira-info';
+function reportJiraInfoLoad() {
+  try { return localStorage.getItem(REPORT_JIRA_INFO_KEY) === 'on'; } catch { return false; }
+}
+function reportJiraInfoSave() {
+  try { localStorage.setItem(REPORT_JIRA_INFO_KEY, reportJiraInfo ? 'on' : 'off'); } catch {}
+}
+let reportJiraInfo = reportJiraInfoLoad();
+
 window.addEventListener('beforeunload', event => {
   if (reportEdits.size || reportBusy) { event.preventDefault(); event.returnValue = ''; }
 });
@@ -198,9 +209,11 @@ function reportSlackModel(report, options = {}) {
     if (index >= 0) section.projects.push(section.projects.splice(index, 1)[0]);
     reportMultiProjectLast(section.projects, project => project.name, project => project.name === REPORT_SLACK_OTHER);
   }
+  const list = order.map(name => sections.get(name)).filter(section => section && (section.projects.length || section.memos.length));
   return {
     title: reportSlackTitle(report && report.weekKey),
-    sections: order.map(name => sections.get(name)).filter(section => section && (section.projects.length || section.memos.length)),
+    // `지라 정보` 토글이 켜졌을 때만 프로젝트 줄에 괄호 한 마디가 붙는다(기본 꺼짐).
+    sections: options.jira ? reportJiraAnnotate(list) : list,
   };
 }
 
@@ -234,6 +247,55 @@ function reportGroupTitles(names) {
     return [name, dupe ? name : label];
   }));
 }
+// ---------- 슬랙 글에 붙는 지라 정보(토글이 켜졌을 때만) ----------
+// 주간요약에 저장된 프로젝트 이름에서 지라 키를 얻는 단 하나의 길: 지라 프로젝트는 `KEY · 요약`으로
+// 저장돼 있고(REPORT_JIRA_LABEL), 직접 만든(그룹) 프로젝트는 손으로 걸어 둔 연결(projectLinks)이다.
+function reportJiraKeyOf(name) {
+  const match = REPORT_JIRA_LABEL.exec(String(name || ''));
+  if (match) return match[1];
+  const links = typeof jiraProjectLinks === 'function' ? jiraProjectLinks() : {};
+  return links[String(name || '').trim()] || '';
+}
+
+// 프로젝트 줄 뒤에 붙는 조용한 괄호: `(v2.70.0 · 9/30 배포 · QA 대기)`.
+// 값은 **이미 받아 둔 목록**(jiraIssuesByKey)에서만 읽는다 — 주간요약을 열었다고 지라를 새로 부르지 않는다.
+// 배포 버전 칸(live)이 없으면(스냅샷 대비책·옛 서버) 아무것도 붙이지 않는다.
+function reportJiraNote(name) {
+  const key = reportJiraKeyOf(name);
+  if (!key) return '';
+  const issues = typeof jiraIssuesByKey === 'object' ? jiraIssuesByKey : null;
+  const issue = issues && typeof issues.get === 'function' ? issues.get(key) : null;
+  if (!issue || !Array.isArray(issue.versions)) return '';
+  const parts = [];
+  const version = typeof deploySoonVersion === 'function' ? deploySoonVersion(issue) : null;
+  if (version) {
+    parts.push(version.name);
+    if (version.releaseDate && typeof uiDateSlash === 'function') parts.push(`${uiDateSlash(version.releaseDate)} 배포`);
+  }
+  const status = String(issue.status || '').trim();
+  if (status) parts.push(status);
+  return parts.length ? ` (${parts.join(' · ')})` : '';
+}
+
+// 같은 프로젝트가 여러 구역에 나오면 **처음 나오는 곳에만** 붙인다(구역마다 되풀이하면 글이 시끄럽다).
+function reportJiraAnnotate(sections) {
+  const seen = new Set();
+  for (const section of sections) {
+    for (const project of section.projects) {
+      if (seen.has(project.name)) continue;
+      seen.add(project.name);
+      const note = reportJiraNote(project.name);
+      if (note) project.note = note;
+    }
+  }
+  return sections;
+}
+
+// 슬랙 글의 프로젝트 줄 글자 — 일반 글자·HTML·미리보기가 모두 이 한 줄을 쓴다.
+function reportSlackProjectLine(project) {
+  return `${reportSlackProjectLabel(project.name)}${project.note || ''}`;
+}
+
 // 고르는 목록에서만 앞뒤를 바꾼다(`요약 · 키`) — 저장되는 값(옵션의 value)은 그대로 원래 이름이다.
 function reportPickerLabel(name) {
   const match = REPORT_JIRA_LABEL.exec(String(name || ''));
@@ -250,7 +312,7 @@ function reportSlackLines(model) {
     if (index) lines.push({ kind: 'gap', text: '' });
     lines.push({ kind: 'section', text: reportSlackSectionLabel(section.name) });
     for (const project of section.projects) {
-      lines.push({ kind: 'project', text: reportSlackProjectLabel(project.name) });
+      lines.push({ kind: 'project', text: reportSlackProjectLine(project) });
       for (const item of project.items) {
         lines.push({ kind: 'item', text: `• ${item.text}` });
         for (const note of item.notes) lines.push({ kind: 'note', text: `    ◦ ${note}` });
@@ -279,7 +341,7 @@ function reportSlackHtml(model) {
   for (const section of model.sections) {
     html.push(bold(reportSlackSectionLabel(section.name)));
     for (const project of section.projects) {
-      html.push(bold(reportSlackProjectLabel(project.name)));
+      html.push(bold(reportSlackProjectLine(project)));
       html.push(`<ul>${project.items.map(item => `<li>${escapeHtml(item.text)}${notes(item.notes)}</li>`).join('')}</ul>`);
     }
     for (const memo of section.memos) html.push(`<p>* ${escapeHtml(memo.text)}</p>${notes(memo.notes)}`);
@@ -549,7 +611,7 @@ function reportDocHead(item, host) {
       throw new Error('수정 중인 문장을 저장하거나 취소한 뒤 복사해 주세요.');
     }
     try {
-      await reportSlackCopy(reportSlackModel(report, { sections: [...reportSlackSections] }));
+      await reportSlackCopy(reportSlackModel(report, { sections: [...reportSlackSections], jira: reportJiraInfo }));
       announce('슬랙에 붙여 넣을 수 있게 복사했어요');
     } catch {
       reportSelectPreview();
@@ -1303,8 +1365,11 @@ function reportSlackChips(report) {
   }
   if (fresh) reportSlackSectionsSave();
   const wrap = reportNode('div', undefined, 'rp-secs');
-  wrap.setAttribute('role', 'group');
-  wrap.setAttribute('aria-label', '슬랙에 넣을 구역');
+  // 구역 칩만 한 묶음이다(`지라 정보`는 구역이 아니라 붙임말 토글이라 이 묶음 밖에 선다).
+  const group = reportNode('div', undefined, 'rp-secg');
+  group.setAttribute('role', 'group');
+  group.setAttribute('aria-label', '슬랙에 넣을 구역');
+  wrap.appendChild(group);
   for (const name of names) {
     const on = reportSlackSections.has(name);
     const chip = reportNode('button', name, 'd-chip' + (on ? ' is-on' : ''));
@@ -1319,8 +1384,20 @@ function reportSlackChips(report) {
       reportSlackSectionsSave();
       reportPreview(report);
     });
-    wrap.appendChild(chip);
+    group.appendChild(chip);
   }
+  // 조용한 토글 칩 하나 — 켜면 슬랙 글의 프로젝트 줄에만 지라 상태·배포 버전이 붙는다.
+  // 문서(가운데 화면)는 이 토글에 영향을 받지 않는다.
+  const jira = reportNode('button', '지라 정보', 'd-chip is-tg' + (reportJiraInfo ? ' is-on' : ''));
+  jira.type = 'button';
+  jira.setAttribute('aria-pressed', String(reportJiraInfo));
+  jira.title = '슬랙 글의 프로젝트 줄에 지라 상태와 배포 버전을 붙여요';
+  jira.addEventListener('click', () => {
+    reportJiraInfo = !reportJiraInfo;
+    reportJiraInfoSave();
+    reportPreview(report);
+  });
+  wrap.appendChild(jira);
   return wrap;
 }
 
@@ -1333,7 +1410,7 @@ function reportPreview(report) {
   host.appendChild(reportSlackChips(report));
   const box = reportNode('div', undefined, 'rp-slackbox');
   box.id = 'reportPreviewBox';
-  const lines = reportSlackLines(reportSlackModel(report, { sections: [...reportSlackSections] }));
+  const lines = reportSlackLines(reportSlackModel(report, { sections: [...reportSlackSections], jira: reportJiraInfo }));
   if (!lines.length) box.appendChild(reportNode('div', '슬랙에 넣을 문장이 없어요.', 'rp-hint'));
   // 구역 사이의 빈 줄은 진짜 줄바꿈 글자로 둔다 — 빈 칸은 직접 선택해 복사할 때 빈 줄로 따라오지 않는다.
   for (const line of lines) {

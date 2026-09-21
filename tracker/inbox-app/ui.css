@@ -1408,6 +1408,17 @@ body.batch-open .d-toast { bottom: 76px; }
   transition: background 170ms var(--ease);
 }
 .d-prow .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 오른쪽 끝 묶음 — (있으면) 조용한 배포일 + 열린 항목 수 */
+.d-prow .rt { display: flex; align-items: center; gap: 8px; }
+/* 배포가 2주 안이면 개수 앞에 조용한 날짜 한 마디(`9/30`). 고정 폭이라 이름 칸이 먼저 줄어들고,
+   색은 배지가 아니라 글자색이다 — 3일 안은 주의색, 지났는데 미배포면 급함 색. */
+.d-prow .dp {
+  min-width: 34px; text-align: right; white-space: nowrap;
+  font-size: 12.5px; font-weight: 500; color: var(--dim); font-variant-numeric: tabular-nums;
+}
+.d-prow[aria-current="true"] .dp { color: var(--accent-text); }
+.d-prow .dp.k-warn { color: var(--warn); }
+.d-prow .dp.k-neg { color: var(--urgent); }
 /* 열린 항목 수는 오른쪽 끝의 조용한 회색 숫자다(칩으로 세우지 않는다) */
 .d-prow .n { font-size: 13px; font-weight: 500; color: var(--dim); font-variant-numeric: tabular-nums; }
 .d-prow:hover { background: var(--hover); }
@@ -1982,6 +1993,8 @@ body.batch-open .d-toast { bottom: 76px; }
   .d-tabs { margin-left: 12px; overflow-x: auto; }
   .d-srch span { display: none; }
   .d-srch kbd { display: none; }
+  /* 좁은 화면에서는 프로젝트 이름이 먼저다 — 조용한 배포일은 물러난다(띠 카드가 같은 말을 한다) */
+  .d-prow .dp { display: none; }
 }
 @media (max-width: 520px) {
   .page { padding: 12px 16px 36px; }

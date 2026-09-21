@@ -2101,6 +2101,95 @@ test('슬랙으로 나가는 프로젝트 줄에는 지라 키를 싣지 않는�
   assert.equal(app.run(`reportProjectColorKey('PAY-77 · 결제 정산 주기 정책 변경')`), 'PAY-77', '색 점은 원래 키로 정한다');
 });
 
+// ---------- BDEPLOY: 주간요약 슬랙 글의 지라 정보(토글, 기본 끔) ----------
+// 값은 이미 받아 둔 목록에서만 읽는다 — 주간요약을 열었다고 지라를 새로 부르지 않는다.
+const REPORT_JIRA_SETUP = `
+  jiraIssuesByKey = new Map([
+    ['PAY-77', { key: 'PAY-77', summary: '결제 정산 주기 정책 변경', status: 'QA 대기', versions: [
+      { name: 'v2.70.0', releaseDate: '2026-09-30', released: false },
+      { name: 'v2.60.0', releaseDate: '2026-08-01', released: true },
+    ] }],
+    ['OPS-3', { key: 'OPS-3', summary: '운영툴', status: '개발 중', versions: [] }],
+    ['ALT-4', { key: 'ALT-4', summary: '알림센터', status: '', versions: [{ name: 'v3.0.0', releaseDate: null, released: false }] }],
+    ['OLD-9', { key: 'OLD-9', summary: '옛 서버', status: '진행 중' }],
+  ]);
+  workflowData = { items: [], meetings: [], projectLinks: { '운영툴': 'OPS-3' } };`;
+const REPORT_JIRA_REPORT = JSON.stringify({ weekKey: '2026-09-21', rows: [
+  { id: 'r1', heading: '완료한 일', group: 'PAY-77 · 결제 정산 주기 정책 변경', text: '정산 주기 확정', sourceIds: [], excluded: false },
+  { id: 'r2', heading: '완료한 일', group: '운영툴', text: '권한 매트릭스 정리', sourceIds: [], excluded: false },
+  { id: 'r3', heading: '진행중', group: 'PAY-77 · 결제 정산 주기 정책 변경', text: '배치 설계', sourceIds: [], excluded: false },
+  { id: 'r4', heading: '진행중', group: '가입 개선', text: '퍼널 점검', sourceIds: [], excluded: false },
+] });
+
+test('`지라 정보`를 켜면 슬랙 글의 프로젝트 줄에만 지라 상태·배포 버전이 붙는다 — 처음 나오는 곳 한 번만', () => {
+  const app = reportClient();
+  app.run(REPORT_JIRA_SETUP);
+  const text = on => app.run(`reportSlackText(reportSlackModel(${REPORT_JIRA_REPORT}, { sections: ['완료', '진행 중'], jira: ${on} }))`);
+  assert.equal(text(false).split('\n').includes('결제 정산 주기 정책 변경'), true, '기본(꺼짐)은 예전 글자 그대로다');
+  assert.equal(text(false).includes('QA 대기'), false);
+  const lines = text(true).split('\n');
+  assert.equal(lines.includes('결제 정산 주기 정책 변경 (v2.70.0 · 9/30 배포 · QA 대기)'), true);
+  assert.equal(lines.includes('운영툴 (개발 중)'), true, '버전이 없으면 상태만 붙는다(손으로 건 그룹 프로젝트도 같은 길)');
+  assert.equal(lines.includes('가입 개선'), true, '지라에 연결되지 않은 프로젝트는 그대로다');
+  assert.equal(lines.filter(line => line.startsWith('결제 정산 주기 정책 변경')).length, 2, '프로젝트 줄은 두 구역에 그대로 선다');
+  assert.equal(lines.filter(line => line === '결제 정산 주기 정책 변경').length, 1, '괄호는 처음 나오는 곳에만 붙는다');
+  assert.equal(text(true).includes('PAY-77'), false, '지라 키는 나가지 않는다');
+});
+
+test('세 형식(일반 글자·서식 있는 복사·미리보기)은 지라 정보를 켜도 같은 글자를 쓴다', () => {
+  const app = reportClient();
+  app.run(REPORT_JIRA_SETUP);
+  const model = `reportSlackModel(${REPORT_JIRA_REPORT}, { sections: ['완료'], jira: true })`;
+  const lines = JSON.parse(app.run(`JSON.stringify(reportSlackLines(${model}))`));
+  assert.equal(lines.map(line => line.text).join('\n'), app.run(`reportSlackText(${model})`));
+  const html = app.run(`reportSlackHtml(${model})`);
+  assert.equal(html.includes('<b>결제 정산 주기 정책 변경 (v2.70.0 · 9/30 배포 · QA 대기)</b>'), true);
+  assert.equal(html.includes('PAY-77'), false);
+});
+
+test('배포 버전 칸이 없거나(옛 서버·스냅샷) 모르는 프로젝트면 지라 정보는 조용히 빠진다', () => {
+  const app = reportClient();
+  app.run(REPORT_JIRA_SETUP);
+  const note = name => app.run(`reportJiraNote(${JSON.stringify(name)})`);
+  assert.equal(note('OLD-9 · 옛 서버'), '', 'live 칸이 없는 이슈에는 아무것도 붙이지 않는다');
+  assert.equal(note('ZZ-1 · 모르는 이슈'), '', '받아 둔 목록에 없으면 조용히 빠진다');
+  assert.equal(note('가입 개선'), '', '지라에 걸리지 않은 그룹 프로젝트도 그대로');
+  assert.equal(note('알림센터'), '', '연결이 없는 이름은 projectLinks에서도 안 나온다');
+  assert.equal(note('ALT-4 · 알림센터'), '', '배포일도 상태도 없으면 괄호 자체가 없다');
+  app.run('workflowData = { items: [], meetings: [] };');
+  assert.equal(note('운영툴'), '', 'projectLinks가 통째로 없어도 오류 없이 빈 글자다');
+});
+
+test('`지라 정보` 칩은 기본 꺼짐이고, 고른 값은 localStorage에 기억된다(막혀 있으면 꺼진 채로)', () => {
+  const app = reportClient();
+  app.run(REPORT_JIRA_SETUP);
+  // 미리보기는 구역 사이 빈 줄을 진짜 줄바꿈 글자로 둔다 — 가짜 창에도 그 자리를 만들어 준다.
+  app.context.document.createTextNode = text => ({ textContent: String(text) });
+  const saved = new Map();
+  app.context.localStorage = {
+    getItem: key => (saved.has(key) ? saved.get(key) : null),
+    setItem: (key, value) => saved.set(key, String(value)),
+  };
+  assert.equal(app.run('reportJiraInfo'), false, '기본은 꺼짐이다');
+  app.run(`reportPreview(${REPORT_JIRA_REPORT})`);
+  const chips = app.nodes.get('weeklyReportPreview').children[1];
+  const toggle = chips.children[chips.children.length - 1];
+  assert.equal(toggle.textContent, '지라 정보');
+  assert.equal(toggle.getAttribute('aria-pressed'), 'false');
+  assert.equal(chips.children[0].className, 'rp-secg', '구역 칩은 따로 묶여 있고 토글은 그 밖에 선다');
+  toggle.listeners.click();
+  assert.equal(app.run('reportJiraInfo'), true);
+  assert.equal(saved.get('workspace-report-jira-info'), 'on');
+  assert.equal(app.run('reportJiraInfoLoad()'), true, '다음에 열면 켜진 채로 시작한다');
+  toggle.listeners.click();
+  assert.equal(saved.get('workspace-report-jira-info'), 'off');
+
+  // 사생활 보호 창처럼 localStorage가 던지는 자리 — 기억만 못 할 뿐 화면은 그대로다.
+  app.context.localStorage = { getItem() { throw new Error('blocked'); }, setItem() { throw new Error('blocked'); } };
+  assert.equal(app.run('reportJiraInfoLoad()'), false);
+  assert.doesNotThrow(() => app.run('reportJiraInfoSave()'));
+});
+
 // 지라 동기화가 `그 밖의 이슈`로 적은 이슈(extra) — 요약은 그대로 쓰되 새 프로젝트 후보로는 내놓지 않는다.
 test('그 밖의 이슈는 프로젝트 고르기 선택지에서 빠지고, 지금 걸려 있는 값이면 그대로 보인다', () => {
   const app = pureClient();
@@ -2184,6 +2273,143 @@ test('renderProjects: 왼쪽 목록은 요약만, title 툴팁엔 키가 남는�
   const name = row.children.find(kid => String(kid.className || '').startsWith('nm'));
   assert.equal(name.textContent, '게시글 작성하기', '왼쪽 목록은 요약만');
   assert.equal(name.title, 'IO-1 · 게시글 작성하기', 'title 툴팁에는 키가 남는다');
+});
+
+// ---------- BDEPLOY: 배포 임박 알림 ----------
+// 배포일은 프로젝트를 열어야만 보여서 놓치기 쉬웠다. 값(`versions`)은 앱이 지라를 직접 읽을 때만
+// 실려 오므로, 그 칸이 없을 때 셋(리마인드·왼쪽 목록·슬랙 글)이 모두 조용히 빠지는 것까지 고정한다.
+function dayShift(n) {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+const version = (name, days, released = false) =>
+  `{ name: '${name}', releaseDate: ${days === null ? 'null' : `'${dayShift(days)}'`}, released: ${released} }`;
+// 프로젝트 넷: 지라 프로젝트 둘(지남·모레), 손으로 건 그룹 프로젝트 하나(오늘), 먼 배포 하나(+10일).
+const DEPLOY_ISSUES = `jiraIssuesByKey = new Map([
+  ['OPS-1', { key: 'OPS-1', summary: '운영툴 대시보드', status: '진행 중', versions: [${version('v2.71.0', 6)}, ${version('v2.69.0', -2)}, ${version('v2.68.0', -9, true)}] }],
+  ['IO-1', { key: 'IO-1', summary: '게임 임베드', status: 'QA 대기', versions: [${version('v2.70.0', 2)}] }],
+  ['PAY-7', { key: 'PAY-7', summary: '결제 정산', status: '개발 중', versions: [${version('v2.72.0', 0)}] }],
+  ['ALT-9', { key: 'ALT-9', summary: '알림센터', status: '대기', versions: [${version('v2.80.0', 10)}] }],
+  ['DONE-1', { key: 'DONE-1', summary: '가입 퍼널', status: '완료', versions: [${version('v2.60.0', -1, true)}] }],
+]);`;
+function deployClient() {
+  const app = workflowsClient();
+  app.run(`${DEPLOY_ISSUES}
+    jiraIssuesCache = [...jiraIssuesByKey.values()]; customGroupsCache = [];
+    workflowData = { meetings: [], items: [
+      { id: 't1', type: 'task', status: 'to-do', jira: 'OPS-1' },
+      { id: 't2', type: 'task', status: 'to-do', jira: 'IO-1' },
+      { id: 't3', type: 'check', status: 'to-do', jira: 'IO-1' },
+      { id: 't4', type: 'task', status: 'to-do', group: '결제 리뉴얼' },
+      { id: 't5', type: 'task', status: 'to-do', jira: 'ALT-9' },
+      { id: 't6', type: 'task', status: 'done', jira: 'DONE-1' },
+    ], projectLinks: { '결제 리뉴얼': 'PAY-7' } };
+    wfIndexData(); itemsById = new Map();`);
+  return app;
+}
+const deployRows = app => JSON.parse(app.run(
+  'JSON.stringify(deployReminders(uiProjectRows(wfProjects(), workflowData.items)))'));
+
+test('배포일 말투와 색은 한 곳에서만 만든다 — 지남은 급함, 3일 안은 주의, 그보다 멀면 색이 없다', () => {
+  const app = pureClient();
+  const day = n => JSON.parse(app.run(`JSON.stringify(deployDayText('${dayShift(n)}'))`));
+  assert.deepEqual(day(-2), { text: '배포일 2일 지남', tone: 'urgent', left: -2 });
+  assert.deepEqual(day(0), { text: '오늘 배포', tone: 'warn', left: 0 });
+  assert.deepEqual(day(1), { text: '내일 배포', tone: 'warn', left: 1 });
+  assert.deepEqual(day(3), { text: '배포 3일 전', tone: 'warn', left: 3 });
+  assert.deepEqual(day(4), { text: '배포 4일 전', tone: '', left: 4 });
+  assert.equal(app.run("String(deployDayText('말도 안 되는 날'))"), 'null');
+});
+
+test('가장 이른 미배포 버전만 고르고, 배포 버전 칸이 없으면(스냅샷 대비책) 아무것도 고르지 않는다', () => {
+  const app = pureClient();
+  const pick = issue => JSON.parse(app.run(`JSON.stringify(deploySoonVersion(${issue}))`));
+  assert.equal(pick(`{ versions: [${version('v2.71.0', 6)}, ${version('v2.69.0', -2)}] }`).name, 'v2.69.0');
+  assert.equal(pick(`{ versions: [${version('v2.68.0', -9, true)}, ${version('v2.70.0', 2)}] }`).name, 'v2.70.0',
+    '이미 배포된 버전은 고르지 않는다');
+  assert.equal(pick(`{ versions: [${version('v2.68.0', -9, true)}] }`), null);
+  assert.equal(pick(`{ versions: [${version('v2.72.0', null)}] }`), null, '배포일을 모르는 버전은 판단할 수 없다');
+  assert.equal(pick('{ versions: [] }'), null);
+  assert.equal(pick("{ key: 'IO-1', summary: '게임 임베드' }"), null, 'live 칸이 없는 옛 응답에서는 조용히 빠진다');
+  assert.equal(pick('null'), null);
+});
+
+test('배포 임박 줄은 열린 항목이 있는 프로젝트만, 3일 안만, 급한 순으로 — 손으로 건 그룹 프로젝트도 함께', () => {
+  const app = deployClient();
+  const rows = deployRows(app);
+  assert.deepEqual(rows.map(row => [row.label, row.name, row.text, row.open]), [
+    ['운영툴 대시보드', 'v2.69.0', '배포일 2일 지남', 1],
+    ['결제 리뉴얼', 'v2.72.0', '오늘 배포', 1],
+    ['게임 임베드', 'v2.70.0', '배포 2일 전', 2],
+  ], '지남 → 오늘 → 모레 차례이고, `열린 업무`는 미완료 업무 + 미완료 확인 대기다');
+  assert.equal(rows.some(row => row.label.includes('알림센터')), false, '배포가 먼 프로젝트는 서지 않는다');
+  assert.equal(rows.some(row => row.label.includes('가입 퍼널')), false, '열린 항목이 없으면 서지 않는다');
+  assert.equal(rows.some(row => /[A-Z]+-\d+/.test(`${row.label} ${row.name} ${row.text}`)), false,
+    '화면에 나가는 세 값(이름·버전·날짜 말)에는 지라 키가 없다(BKEY) — 프로젝트를 여는 열쇠만 데이터로 들고 있다');
+
+  // live 칸이 통째로 없는 옛 서버·스냅샷 대비책에서는 줄이 하나도 서지 않는다(오류도 없다).
+  app.run('jiraIssuesByKey = new Map([...jiraIssuesByKey].map(([key, issue]) => [key, { key, summary: issue.summary, status: issue.status }]));');
+  assert.deepEqual(deployRows(app), []);
+});
+
+test('리마인드 카드는 배포 임박 줄을 맨 위에 넷까지 세우고 나머지는 `외 N개`로, 개수 칩에는 전부 센다', () => {
+  const app = deployClient();
+  const many = Array.from({ length: 6 }, (_, at) => ({
+    key: `jira:K${at}`, label: `프로젝트 ${at}`, name: `v9.${at}.0`, text: `배포 ${at}일 전`, tone: 'warn', left: at, open: at + 1,
+  }));
+  app.context.many = many;
+  app.run('opened = null; openProjectTab = key => { opened = key; };');
+  app.run('renderReminders([], [], many)');
+  const list = app.nodes.get('reminderList');
+  assert.equal(app.nodes.get('reminderSectionCount').textContent, 6, '칩은 안 보이는 줄까지 센다');
+  assert.equal(app.nodes.get('reminderZone').hidden, false);
+  assert.equal(list.children.length, 5, '줄 넷 + `외 N개` 한 줄');
+  assert.equal(list.children[4].textContent, '외 2개');
+  const first = list.children[0];
+  const title = first.children.find(kid => String(kid.className || '') === 'ti');
+  assert.equal(title.textContent, '프로젝트 0', '첫 줄은 프로젝트 이름이다');
+  assert.equal(title.title, 'v9.0.0 배포 0일 전 · 프로젝트 0 · 열린 업무 1');
+  // 둘째 줄은 조각(fragment)으로 담아 넘긴다 — 가짜 DOM에서는 그 조각이 한 겹 더 남는다.
+  const sub = first.children.find(kid => String(kid.className || '') === 'sub').children[0];
+  assert.deepEqual(sub.children.map(kid => kid.textContent), ['v9.0.0 배포 0일 전', '열린 업무 1']);
+  assert.equal(sub.children[0].className, 'k-warn', '색은 글자색이다 — 배지(bd)가 아니다');
+  title.listeners.click();
+  assert.equal(app.run('opened'), 'jira:K0', '누르면 그 프로젝트가 열린다');
+
+  app.run('renderReminders([], [], [])');
+  assert.equal(app.nodes.get('reminderZone').hidden, true, '셋 다 없으면 카드가 통째로 빈다');
+});
+
+test('왼쪽 프로젝트 목록은 배포가 2주 안일 때만 조용한 날짜를 적고, title이 무슨 날인지 풀어 준다', () => {
+  const app = deployClient();
+  const note = key => JSON.parse(app.run(`JSON.stringify(projectDeployNote('${key}'))`));
+  assert.deepEqual(note('jira:IO-1'),
+    { text: dayShift(2).replace(/^\d{4}-0?(\d+)-0?(\d+)$/, '$1/$2'), tone: 'warn', title: `v2.70.0 · ${app.run(`uiKoDateShort('${dayShift(2)}')`)} 배포 예정` });
+  assert.equal(note('jira:ALT-9').tone, '', '2주 안이지만 3일보다 멀면 색이 없다');
+  assert.equal(note('jira:OPS-1').tone, 'urgent');
+  assert.equal(note('group:결제 리뉴얼').text, dayShift(0).replace(/^\d{4}-0?(\d+)-0?(\d+)$/, '$1/$2'), '손으로 건 그룹 프로젝트도 같은 길이다');
+  assert.equal(note('group:없는 프로젝트'), null);
+  assert.equal(note('jira:DONE-1'), null, '이미 배포된 버전만 있으면 적지 않는다');
+
+  app.run(`jiraIssuesByKey.set('FAR-1', { key: 'FAR-1', summary: '먼 것', versions: [${version('v3.0.0', 20)}] });`);
+  assert.equal(note('jira:FAR-1'), null, '2주보다 먼 배포일은 목록을 시끄럽게 하지 않는다');
+
+  const cells = () => app.nodes.get('projectList').children
+    .filter(child => String(child.className || '').startsWith('d-prow'))
+    .map(row => (row.children.find(kid => String(kid.className || '') === 'rt') || { children: [] })
+      .children.find(kid => String(kid.className || '').startsWith('dp')))
+    .filter(Boolean);
+  app.run('projectKey = null; projectOrderKeys = null; projectOrderResort = true; projectShowEmpty = false; renderProjects();');
+  const days = cells();
+  assert.deepEqual(days.map(day => day.className).sort(), ['dp', 'dp k-neg', 'dp k-warn', 'dp k-warn'],
+    '열린 항목이 있는 네 프로젝트에만 배포일이 붙는다(이미 배포된 가입 퍼널은 빠진다)');
+  assert.equal(days.every(day => /^\d+\/\d+$/.test(day.textContent)), true, '글자는 `9/30` 꼴이다');
+
+  // live 칸이 없으면 이 글자 자체가 없다.
+  app.run(`jiraIssuesByKey = new Map([...jiraIssuesByKey].map(([key, issue]) => [key, { key, summary: issue.summary }]));
+    projectOrderResort = true; renderProjects();`);
+  assert.equal(cells().length, 0);
 });
 
 // ---------- 확인 대기를 체크한 뒤의 `다음은?` 줄 ----------

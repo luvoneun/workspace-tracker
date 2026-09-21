@@ -46,6 +46,14 @@ function uiKoDateShort(dateStr) {
   return `${Number(month)}월 ${Number(day)}일`;
 }
 
+// 자리가 아주 좁은 곳(왼쪽 프로젝트 목록의 배포일)에서만 쓰는 가장 짧은 날짜: `9/30`.
+function uiDateSlash(dateStr) {
+  if (!dateStr) return '';
+  const [, month, day] = String(dateStr).split('-');
+  if (!month || !day) return String(dateStr);
+  return `${Number(month)}/${Number(day)}`;
+}
+
 // 기한 말투는 어디서나 같다: `기한 2일 지남`(urgent) `오늘까지`(warn) `내일까지` `9월 27일까지`.
 // where가 'row'면 오늘 목록의 한 줄 — 먼 기한은 찍지 않는다(의미 없는 값은 자리를 비운다).
 function uiDueText(due, where = 'full') {
@@ -2169,6 +2177,69 @@ async function jiraLinkRemove(projectKey, key) {
   });
 }
 
+// ---------- 배포 임박 (리마인드 카드 · 왼쪽 프로젝트 목록) ----------
+// 프로젝트에 걸린 지라 티켓의 **아직 배포되지 않은** 버전 가운데 배포일이 가장 이른 하나를 고른다.
+// 이 값(`versions`)은 앱이 지라를 직접 읽을 때만 실려 온다 — 스냅샷 파일로 물러서 있거나 옛 서버면
+// 칸 자체가 없고, 그때는 여기부터 null이 되어 아래 세 화면이 **조용히 아무것도 그리지 않는다**.
+function deploySoonVersion(issue) {
+  if (!issue || !Array.isArray(issue.versions)) return null;
+  const open = issue.versions.filter(version => version && !version.released && version.releaseDate);
+  if (!open.length) return null;
+  return open.slice().sort((a, b) => String(a.releaseDate).localeCompare(String(b.releaseDate)))[0];
+}
+
+// 배포일 색은 지라 띠 카드의 `배포 버전` 칸과 같은 규칙이다(배지가 아니라 글자색):
+// 3일 안이면 주의색, 지났는데 아직 배포되지 않았으면 급함 색.
+function deployTone(left) {
+  return left < 0 ? 'urgent' : left <= 3 ? 'warn' : '';
+}
+
+// 배포일 말투는 여기 한 곳에서만 만든다: `배포 3일 전` · `오늘 배포` · `내일 배포` · `배포일 2일 지남`.
+function deployDayText(releaseDate) {
+  const left = diffDays(releaseDate);
+  if (Number.isNaN(left)) return null;
+  if (left < 0) return { text: `배포일 ${-left}일 지남`, tone: deployTone(left), left };
+  if (left === 0) return { text: '오늘 배포', tone: deployTone(left), left };
+  if (left === 1) return { text: '내일 배포', tone: deployTone(left), left };
+  return { text: `배포 ${left}일 전`, tone: deployTone(left), left };
+}
+
+// 이 프로젝트의 배포 상황 한 덩어리. 지라 키는 `jiraKeyOf` 하나에서만 얻는다 —
+// 지라 프로젝트는 키 그 자체, 직접 만든(그룹) 프로젝트는 손으로 걸어 둔 연결이다.
+function projectDeploy(key) {
+  const jira = jiraKeyOf(key);
+  if (!jira) return null;
+  const version = deploySoonVersion(jiraIssuesByKey.get(jira));
+  if (!version) return null;
+  const day = deployDayText(version.releaseDate);
+  if (!day) return null;
+  return { name: version.name, date: version.releaseDate, left: day.left, tone: day.tone, text: day.text };
+}
+
+// 왼쪽 프로젝트 목록에 조용히 적는 배포일 — 14일 안일 때만 적는다(먼 날짜는 목록을 시끄럽게 한다).
+function projectDeployNote(key) {
+  const deploy = projectDeploy(key);
+  if (!deploy || deploy.left > 14) return null;
+  return {
+    text: uiDateSlash(deploy.date),
+    tone: deploy.tone,
+    title: `${deploy.name} · ${uiKoDateShort(deploy.date)} 배포 예정`,
+  };
+}
+
+// 리마인드 카드에 설 배포 임박 줄. 대상은 **열린 항목이 있는** 프로젝트 중, 가장 이른 미배포 버전의
+// 배포일이 오늘 기준 3일 안(지났는데 미배포인 것 포함)인 것이다. 급한 순(지남 → 오늘 → …)으로 세운다.
+function deployReminders(rows) {
+  const picked = (rows || []).filter(row => row && row.open).map((row) => {
+    const deploy = projectDeploy(row.key);
+    return deploy && deploy.left <= 3 ? { ...deploy, key: row.key, open: row.open } : null;
+  }).filter(Boolean);
+  const labels = uiGroupLabels(picked.map(entry => entry.key));
+  return picked
+    .map(entry => ({ ...entry, label: labels.get(entry.key) }))
+    .sort((a, b) => a.left - b.left || a.label.localeCompare(b.label));
+}
+
 function renderProjects() {
   const listEl = document.getElementById('projectList');
   const body = document.getElementById('projectBody');
@@ -2210,8 +2281,23 @@ function renderProjects() {
     const count = document.createElement('span');
     count.className = 'n num';
     count.textContent = row.open;
+    // 오른쪽 끝 묶음: (배포가 2주 안이면) 조용한 배포일 + 열린 항목 수.
+    // 배포일은 고정 폭이라 이름 칸이 먼저 줄어든다 — 이름이 배포일에 밀려 잘리지 않는다.
+    const right = document.createElement('span');
+    right.className = 'rt';
+    const deploy = projectDeployNote(row.key);
+    if (deploy) {
+      const day = document.createElement('span');
+      day.className = `dp${uiTone(deploy.tone)}`;
+      day.textContent = deploy.text;
+      day.title = deploy.title;
+      right.appendChild(day);
+      // `9/30`만으로는 무슨 날인지 읽히지 않는다 — 이 줄에만 이름표를 붙여 풀어 준다.
+      button.setAttribute('aria-label', `${displayLabel}, 열린 항목 ${row.open}, ${deploy.title}`);
+    }
+    right.appendChild(count);
     // 오늘 목록의 그룹 제목과 같은 색 점 — 같은 프로젝트는 어디서나 같은 색이다.
-    button.append(uiProjectDot(row.key), name, count);
+    button.append(uiProjectDot(row.key), name, right);
     button.addEventListener('click', () => {
       if (projectKey === row.key) return;
       projectKey = row.key;
@@ -2771,7 +2857,9 @@ async function load() {
   const answered = (workflowData?.items || [])
     .filter(item => ['task', 'bug'].includes(item.type) && item.status !== 'done' && item.blockedBy && wfItem(item.blockedBy)?.status === 'done')
     .map(item => itemsById.get(item.id) || item);
-  renderReminders(reminders, answered);
+  // 배포가 코앞인 프로젝트도 같은 카드에 올린다 — 프로젝트를 열어야만 배포일이 보여 놓치기 쉬웠다.
+  // 프로젝트 목록은 프로젝트 탭과 같은 함수로 만든다(열린 항목 수도 그 값 그대로다).
+  renderReminders(reminders, answered, deployReminders(uiProjectRows(wfProjects(), workflowData.items)));
   syncTaskDetail();
   palSync();
   taskSelectionRefresh();
@@ -3120,14 +3208,48 @@ function diffDays(dueStr) {
   return Math.round((due - today) / 86400000);
 }
 
-// 레일의 리마인드 — 기한이 코앞인 높은 우선순위 업무와, 기다리던 답변이 온 업무가 함께 온다
-// (고르는 곳은 load()). 제목은 2줄까지 허용하고, 오른쪽에 기한·`답변 왔어요`를 적는다.
-function renderReminders(reminders, answered = []) {
+// 배포 임박 한 줄 — 확인 대기와 같은 두 줄 부품이다.
+//   첫 줄: 프로젝트 이름(눌러서 프로젝트 탭)
+//   둘째 줄: `v2.70.0 배포 3일 전`(주의색·급함 색 글자, 배지가 아니다) + `열린 업무 2`
+// 닫기·미루기는 없다 — 배포되거나 열린 항목이 없어지면 스스로 사라진다.
+// 지라 키는 어디에도 싣지 않는다(BKEY 결정).
+function deployReminderRow(entry) {
+  const sub = document.createDocumentFragment();
+  const when = document.createElement('span');
+  when.className = uiTone(entry.tone).trim();
+  when.textContent = `${entry.name} ${entry.text}`;
+  sub.appendChild(when);
+  const open = document.createElement('span');
+  open.className = 'nx';
+  open.textContent = `열린 업무 ${entry.open}`;
+  sub.appendChild(open);
+
+  const row = uiRailRow({
+    text: entry.label,
+    two: true,
+    sub,
+    onOpen: () => openProjectTab(entry.key),
+  });
+  const title = row.querySelector('.ti');
+  if (title) {
+    const line = `${entry.name} ${entry.text} · ${entry.label} · 열린 업무 ${entry.open}`;
+    title.title = line;
+    title.setAttribute('aria-label', `${line} — 프로젝트 열기`);
+  }
+  return row;
+}
+
+// 레일의 리마인드 — 배포가 코앞인 프로젝트, 기다리던 답변이 온 업무, 기한이 코앞인 높은 우선순위
+// 업무가 함께 온다(고르는 곳은 load()). 차례는 급한 순이다: 배포 임박(되돌릴 수 없는 바깥 일정이라
+// 가장 앞) → 답변 왔어요 → 기한. 제목은 2줄까지 허용한다.
+const DEPLOY_REMINDER_MAX = 4;
+function renderReminders(reminders, answered = [], deploys = []) {
   const zone = document.getElementById('reminderZone');
   const list = document.getElementById('reminderList');
 
-  document.getElementById('reminderSectionCount').textContent = reminders.length + answered.length;
-  zone.hidden = reminders.length + answered.length === 0;
+  const total = reminders.length + answered.length + deploys.length;
+  document.getElementById('reminderSectionCount').textContent = total;
+  zone.hidden = total === 0;
 
   list.replaceChildren();
   const row = (item, meta) => uiRailRow({
@@ -3139,7 +3261,15 @@ function renderReminders(reminders, answered = []) {
     meta,
     onOpen: () => panelOpen({ id: item.id }),
   });
-  // 기다리던 답변이 온 업무가 먼저다 — 지금 바로 이어서 할 수 있는 일이다.
+  // 배포일은 미룰 수 없는 바깥 일정이라 카드 맨 위에 선다. 넷까지만 적고 나머지는 숫자로만 알린다.
+  deploys.slice(0, DEPLOY_REMINDER_MAX).forEach(entry => list.appendChild(deployReminderRow(entry)));
+  if (deploys.length > DEPLOY_REMINDER_MAX) {
+    const more = document.createElement('div');
+    more.className = 'd-rempty';
+    more.textContent = `외 ${deploys.length - DEPLOY_REMINDER_MAX}개`;
+    list.appendChild(more);
+  }
+  // 기다리던 답변이 온 업무가 그다음이다 — 지금 바로 이어서 할 수 있는 일이다.
   answered.forEach(item => list.appendChild(row(item, [{ text: '답변 왔어요', tone: 'success' }])));
   reminders.forEach(item => list.appendChild(row(item, [uiDueText(item.due)])));
 }

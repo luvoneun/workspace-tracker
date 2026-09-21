@@ -258,6 +258,8 @@
 .rp-slackhd { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
 /* 넣을 구역 고르기 — ⌘K의 토글 칩과 같은 부품(꺼짐 회색 / 켜짐 연파랑) */
 .rp-secs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; }
+/* 구역 칩 묶음은 자리를 따로 차지하지 않는다 — 구역 칩과 토글 칩(`지라 정보`)이 한 줄로 함께 흐른다 */
+.rp-secg { display: contents; }
 .rp-secs .d-chip { height: 28px; padding: 0 10px; background: var(--neutral-bg); }
 .rp-secs .d-chip:hover:not(:disabled) { background: var(--hover); color: var(--text); }
 .rp-secs .d-chip.is-on, .rp-secs .d-chip.is-on:hover { background: var(--accent-soft); color: var(--accent-text); }
