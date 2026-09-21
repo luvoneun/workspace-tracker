@@ -67,9 +67,9 @@ function wfSegment(options, value, onChange, label) {
   return group;
 }
 const wfTypeSegment = (value, onChange, label = '종류') => wfSegment(WF_TYPES, value, onChange, label);
-// 날짜 칸은 앱 공용 부품(uiDateField)을 쓴다 — 비어 있으면 `+ 마감일`, 누르면 그 자리에서 고른다.
-// 날짜 이름: 할 일은 마감일, 확인 대기는 상대에게 회신 받아야 하는 기한. 결정에는 날짜가 없다.
-const wfDateLabel = type => type === 'check' ? '회신 기한' : type === 'decision' ? null : '마감일';
+// 날짜 칸은 앱 공용 부품(uiDateField)을 쓴다 — 비어 있으면 `+ 기한`, 누르면 그 자리에서 고른다.
+// 날짜 이름: 할 일은 기한, 확인 대기는 상대에게 회신 받아야 하는 기한. 결정에는 날짜가 없다.
+const wfDateLabel = type => type === 'check' ? '회신 기한' : type === 'decision' ? null : '기한';
 // 서버에 보내는 초안 한 건: 종류·문구, 할 일이면 시점(오늘/나중), 결정이 아니면 날짜(비우면 null로 지운다).
 // AI가 문구 끝에 붙여 온 "(방향 확인 필요)" 표식은 화면에 보이지도, 항목 문구로 저장되지도 않게 뗀다.
 const wfCleanDraftText = text => text.replace(/\s*\(방향 확인 필요\)\s*$/, '');

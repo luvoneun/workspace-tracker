@@ -1092,7 +1092,7 @@ textarea.d-dtitle {
 
 /* 회의에서 나온 것 · 이전 회차 — 촘촘한 한 줄 */
 .d-mrow2 {
-  display: grid; grid-template-columns: 56px minmax(0, 1fr) auto;
+  display: grid; grid-template-columns: 56px minmax(0, 1fr) auto 28px;
   align-items: center; gap: 8px; min-height: 28px; padding: 3px 0; font-size: 13px;
 }
 .d-mrow2 + .d-mrow2 { border-top: 1px solid var(--hair); }
@@ -1104,6 +1104,17 @@ textarea.d-dtitle {
 .d-mrow2 button.ti:hover { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; }
 .d-mrow2 .st { font-size: 11.5px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .d-mrow2.is-done .ti { color: var(--muted); text-decoration: line-through; }
+/* 문구를 그 자리에서 고치는 칸 — 줄 높이를 밀어내지 않게 촘촘한 꼴로 */
+.d-mrow2 .d-din { min-height: 28px; padding: 4px 8px; font-size: 13px; }
+/* ⋯은 다른 목록의 줄과 같은 규칙이다: 손이 닿으면 나타나고, 터치 화면에서는 늘 보인다. */
+.d-mrow2 .ac {
+  display: flex; align-items: center; justify-content: flex-end;
+  opacity: 0; pointer-events: none; transition: opacity 130ms var(--ease);
+}
+.d-mrow2:hover .ac, .d-mrow2:focus-within .ac { opacity: 1; pointer-events: auto; }
+@media (hover: none) { .d-mrow2 .ac { opacity: 1; pointer-events: auto; } }
+.d-mrow2 .ac .d-more { width: 28px; height: 28px; color: var(--dim); }
+.d-mrow2:hover .ac .d-more, .d-mrow2:focus-within .ac .d-more { color: var(--text); }
 
 /* 직접 담기 · 기존 항목 연결 — 접히는 보조 구역 */
 .d-dsec.d-dadd > summary.lbl { display: flex; margin-bottom: 0; align-items: center; gap: 4px; min-height: 28px; list-style: none; cursor: pointer; }

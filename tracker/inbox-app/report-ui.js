@@ -17,9 +17,14 @@ let reportExcludedOpen = false;
 
 const REPORT_PLAN_HEADING = '다음 주 계획';
 // 서버는 프로젝트가 없는 기록을 `그룹 없음`으로 준다 — 화면에서는 다른 목록과 같은 말로 적는다.
-// (보고 문서의 소제목은 서버가 준 말 그대로 두고 건드리지 않는다.)
+// (상태 소제목(`완료한 일` 등)과 슬랙 복사의 `기타`는 서버가 준 말 그대로 두고 건드리지 않는다.)
 const REPORT_NO_PROJECT_LABEL = '그룹 없음';
 const REPORT_NO_PROJECT = '프로젝트 없음';
+// 화면에 적는 프로젝트 이름. 저장 값·서버가 준 값은 그대로 두고 보이는 말만 앱 용어로 옮긴다.
+const reportProjectText = (name) => {
+  const value = String(name ?? '').trim();
+  return !value || value === REPORT_NO_PROJECT_LABEL ? REPORT_NO_PROJECT : value;
+};
 // 서버가 프로젝트 없이 담은 계획 문장의 그룹 이름(`report-drafts.js`의 add 기본값).
 const REPORT_PLAN_NO_PROJECT = '직접 작성';
 
@@ -456,7 +461,7 @@ function reportSentenceRow(item, row, context) {
     box.type = 'checkbox';
     box.className = 'd-cb';
     box.checked = reportSelection.has(row.id);
-    box.setAttribute('aria-label', `${row.group} · ${row.text} 묶기 선택`);
+    box.setAttribute('aria-label', `${reportProjectText(row.group)} · ${row.text} 묶기 선택`);
     box.addEventListener('change', () => {
       if (box.checked) reportSelection.add(row.id); else reportSelection.delete(row.id);
       line.classList.toggle('is-sel', box.checked);
@@ -511,7 +516,7 @@ function reportSentenceRow(item, row, context) {
     document.getElementById('weeklyReportDetail')?.querySelector(`[data-edit-row="${row.id}"]`)?.focus();
   }, 'd-btn sm'));
   actions.appendChild(reportButton('제외', () => reportChange(item, { action: 'exclude', id: row.id }), 'd-btn sm'));
-  actions.appendChild(uiMoreButton(`${row.group} 문장 더보기`, () => [[
+  actions.appendChild(uiMoreButton(`${reportProjectText(row.group)} 문장 더보기`, () => [[
     row.sourceIds.length ? {
       label: reportEvidenceOpen.has(row.id) ? '근거 업무 숨기기' : '근거 업무 보기',
       onClick: () => {
@@ -798,7 +803,7 @@ function renderReportDraft(item) {
     for (const section of sections) {
       body.appendChild(reportNode('div', section.heading, 'rp-h'));
       for (const group of section.groups) {
-        body.appendChild(reportNode('div', group.group, 'rp-pj'));
+        body.appendChild(reportNode('div', reportProjectText(group.group), 'rp-pj'));
         for (const row of group.rows) reportSentenceRow(item, row, { host: body, newIds });
       }
     }

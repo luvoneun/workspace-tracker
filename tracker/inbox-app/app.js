@@ -2025,12 +2025,18 @@ function recordDecisionRow(item, archived) {
   // 이 줄에서 할 수 있는 일이 더보기뿐이라 ⋯은 늘 보인다(반영 완료 줄도 같다).
   const acts = document.createElement('span');
   acts.className = 'ac';
-  acts.appendChild(uiMoreButton(`${item.description} — 더 보기`, () => [
-    [{ field: '프로젝트', control: taskProjectControl(item) }],
-    [{ label: '삭제', danger: true, onClick: () => removeTracked(item, row) }],
-  ]));
+  acts.appendChild(uiMoreButton(`${item.description} — 더 보기`, () => decisionMenuSections(item, row)));
   row.appendChild(acts);
   return row;
+}
+
+// 결정 줄의 더보기(결정·아이디어 탭과 회의 카드가 함께 쓴다).
+// 결정에는 날짜가 없으므로(DECISIONS) 프로젝트와 삭제뿐이다.
+function decisionMenuSections(item, card) {
+  return [
+    [{ field: '프로젝트', control: taskProjectControl(item) }],
+    [{ label: '삭제', danger: true, onClick: () => removeTracked(item, card) }],
+  ];
 }
 
 // 아이디어 한 줄: 체크박스 없이 문구 + 원문 | `가능성 높음` | 늘 보이는 더보기.
@@ -3319,7 +3325,7 @@ function panelMeetingDrafts(event, box) {
     const syncWhen = () => { whenSeg.hidden = edit.type !== 'task'; };
     const syncDate = () => {
       dateSlot.replaceChildren();
-      const label = wfDateLabel(edit.type); // 할 일 → 마감일 · 확인 대기 → 회신 기한 · 결정 → 날짜 없음
+      const label = wfDateLabel(edit.type); // 할 일 → 기한 · 확인 대기 → 회신 기한 · 결정 → 날짜 없음
       if (label) dateSlot.appendChild(uiDateField({ value: edit.due || '', label, onChange: (value) => { edit.due = value || ''; } }));
     };
     controls.append(wfTypeSegment(edit.type, (key) => {
@@ -3365,26 +3371,86 @@ function panelMeetingItemState(item) {
   return null;
 }
 
+// 회의 줄의 문구를 그 자리에서 고친다 — 상세 제목(panelTitleEdit)과 같은 규칙이다:
+// Enter 저장 · 한글 조합 중 Enter는 글자를 확정하는 것이라 넘긴다 · Esc는 입력만 되돌리고
+// (회의 카드는 열린 채로) · 빈 값은 저장하지 않으며 · 저장이 실패하면 적은 글자를 그대로 둔다.
+function panelMeetingRowEdit(row, titleEl, item) {
+  // 이미 고치는 중이면(제목을 눌러 열어 둔 채 ⋯로 또 눌렀을 때) 그 칸으로 보낸다.
+  if (!titleEl.isConnected) { row.querySelector('.d-din')?.focus(); return; }
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'd-din';
+  input.maxLength = 1000;
+  input.value = item.description;
+  input.setAttribute('aria-label', `${item.description} — 문구 고치기`);
+  titleEl.replaceWith(input);
+  input.focus();
+  input.select?.();
+
+  let settled = false;
+  // Esc는 가장 위에 열린 것부터 닫는다 — 여기서는 회의 카드가 아니라 이 입력칸만 되돌린다.
+  const cancel = () => {
+    if (settled) return;
+    settled = true;
+    escDrop(cancel);
+    if (!input.isConnected) return; // 카드가 이미 다시 그려졌으면 되돌릴 자리가 없다
+    input.replaceWith(titleEl);
+    titleEl.focus?.();
+  };
+  escPush(cancel);
+  const commit = async () => {
+    if (settled) return;
+    const value = input.value.trim();
+    if (!value || value === item.description) { cancel(); return; }
+    settled = true;
+    escDrop(cancel);
+    input.disabled = true; // 포커스가 빠져 load()가 회의 카드를 다시 그릴 수 있게 된다
+    try {
+      await postJson('/api/track/set-description', { id: item.id, description: value });
+      await load(); // 개수(`이 회의에서 나온 것 N`)와 레일의 회의 줄까지 함께 맞춰진다
+    } catch {
+      settled = false;
+      escPush(cancel);
+      input.disabled = false;
+      input.focus();
+    }
+  };
+  input.addEventListener('blur', commit);
+  input.addEventListener('keydown', (keyEvent) => {
+    if (keyEvent.key !== 'Enter' || keyEvent.isComposing) return;
+    keyEvent.preventDefault();
+    input.blur();
+  });
+}
+
+// 회의 줄의 ⋯ — 앱의 다른 목록이 쓰는 메뉴를 그대로 쓰고, 맨 위에 `문구 고치기`만 얹는다.
+// 종류 바꾸기는 종류마다 저장 파일이 달라 서버에 옮기기가 필요해서 아직 없다(DECISIONS).
+function panelMeetingRowMenu(item, row, onEdit) {
+  const base = item.type === 'check' ? waitingMenuSections(item, row)
+    : item.type === 'decision' ? decisionMenuSections(item, row)
+    : taskMenuSections({ item, mode: panelMode(item), card: row });
+  return [[{ label: '문구 고치기', onClick: onEdit }], ...base];
+}
+
 function panelMeetingRow(item, event, stateText) {
   const row = document.createElement('div');
   row.className = 'd-mrow2' + (item.status === 'done' ? ' is-done' : '');
   const tag = document.createElement('span');
   tag.className = 'tg';
   tag.textContent = wfType(item.type);
-  // 업무·확인 대기는 같은 패널에서 상세를 연다(결정·아이디어는 상세가 없다).
+  // 업무·확인 대기는 같은 패널에서 상세를 연다. 결정은 상세가 없으니 제목이 곧 `문구 고치기`다.
   const openable = ['task', 'bug', 'check'].includes(item.type);
-  const title = document.createElement(openable ? 'button' : 'span');
+  const title = document.createElement('button');
+  title.type = 'button';
   title.className = 'ti';
   title.title = item.description;
   title.textContent = item.description;
-  if (openable) {
-    title.type = 'button';
-    title.setAttribute('aria-label', `${item.description} 상세 보기`);
-    title.addEventListener('click', () => panelOpen({
-      id: item.id,
-      back: { kind: 'meeting', id: event.id, event: event.id ? null : event, result: panelState?.result, back: panelState?.back },
-    }));
-  }
+  const edit = () => panelMeetingRowEdit(row, title, item);
+  title.setAttribute('aria-label', openable ? `${item.description} 상세 보기` : `${item.description} — 문구 고치기`);
+  title.addEventListener('click', openable ? () => panelOpen({
+    id: item.id,
+    back: { kind: 'meeting', id: event.id, event: event.id ? null : event, result: panelState?.result, back: panelState?.back },
+  }) : edit);
   const state = document.createElement('span');
   state.className = 'st';
   if (stateText) state.textContent = stateText;
@@ -3392,7 +3458,11 @@ function panelMeetingRow(item, event, stateText) {
     const meta = panelMeetingItemState(item);
     if (meta) { state.className = `st${uiTone(meta.tone)}`; state.textContent = meta.text; }
   }
-  row.append(tag, title, state);
+  // 다른 목록의 줄과 같은 자리·같은 규칙의 ⋯(손이 닿으면 나타나고, 터치 화면에서는 늘 보인다).
+  const acts = document.createElement('span');
+  acts.className = 'ac';
+  acts.appendChild(uiMoreButton(`${item.description} — 더 보기`, () => panelMeetingRowMenu(item, row, edit)));
+  row.append(tag, title, state, acts);
   return row;
 }
 

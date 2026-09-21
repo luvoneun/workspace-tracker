@@ -15,14 +15,32 @@ function element() {
   const attributes = new Map();
   return {
     value: '', disabled: false, hidden: false, textContent: '', children: [], listeners: {},
+    parent: null, connected: true, blurs: 0,
+    get isConnected() { return this.connected; },
     classList: { toggle() {}, contains() { return false; } },
     addEventListener(name, handler) { this.listeners[name] = handler; },
-    appendChild(child) { this.children.push(child); return child; },
+    appendChild(child) { if (child && typeof child === 'object') child.parent = this; this.children.push(child); return child; },
+    append(...kids) { kids.forEach(kid => this.appendChild(kid)); },
+    replaceChildren(...kids) { this.children = []; kids.forEach(kid => this.appendChild(kid)); },
+    // 그 자리에서 고치는 입력칸(제목 ↔ 입력칸)이 오가는 길 — 부모의 같은 자리를 바꿔 끼운다.
+    replaceWith(node) {
+      const parent = this.parent;
+      const at = parent ? parent.children.indexOf(this) : -1;
+      if (at >= 0) { parent.children[at] = node; node.parent = parent; node.connected = true; }
+      this.parent = null;
+      this.connected = false;
+    },
     setAttribute(name, value) { attributes.set(name, value); },
     getAttribute(name) { return attributes.get(name); },
     removeAttribute(name) { attributes.delete(name); },
     querySelectorAll() { return []; },
+    querySelector(selector) {
+      const want = String(selector).replace(/^\./, '');
+      return this.children.find(kid => String(kid?.className || '').split(' ').includes(want)) || null;
+    },
     focus() { this.focused = true; },
+    blur() { this.blurs += 1; this.focused = false; return this.listeners.blur?.(); },
+    select() { this.selected = true; },
   };
 }
 function client(response) {
@@ -374,7 +392,8 @@ test('accepted draft payload: when only for tasks, a date for tasks and checks (
   assert.deepEqual(payload('task'), { id: 'n1:0', type: 'task', description: '문구', when: 'later', due: null }, 'an emptied date is sent as null so the draft date is cleared');
   assert.deepEqual(payload('check', "when: 'today', due: '2026-10-02'"), { id: 'n1:0', type: 'check', description: '문구', due: '2026-10-02' }, 'checks never carry when');
   assert.deepEqual(payload('decision', "when: 'today', due: '2026-10-02'"), { id: 'n1:0', type: 'decision', description: '문구' }, 'decisions carry neither');
-  assert.deepEqual(['task', 'check', 'decision'].map(type => app.run(`wfDateLabel('${type}')`)), ['마감일', '회신 기한', null]);
+  assert.deepEqual(['task', 'check', 'decision'].map(type => app.run(`wfDateLabel('${type}')`)), ['기한', '회신 기한', null],
+    '날짜 이름은 화면 어디서나 같다 — 할 일은 `기한`, 확인 대기만 `회신 기한`');
 });
 
 test('saves from the meeting review window stay quiet on success (its result card reports them) but failures are still announced', async () => {
@@ -417,6 +436,109 @@ test('result card task rows: aligned with the created ids, and a promoted task c
   ]);
   app.run("sample.promoted = ['t3']");
   assert.deepEqual(rows().map(row => row.today), [false, true, true]);
+});
+
+// 회의 카드의 `이 회의에서 나온 것` 줄 — 앱의 다른 목록과 같은 ⋯ 메뉴를 쓰고, 그 자리에서 문구를 고친다.
+function meetingRowClient(response) {
+  const app = workflowsClient();
+  const sent = [];
+  app.context.fetch = async (url, init) => {
+    sent.push({ url, body: init && init.body ? JSON.parse(init.body) : null });
+    if (typeof response === 'function') return response();
+    return response.clone();
+  };
+  app.run('workflowData = { items: [], meetings: [] }; wfIndexData(); itemsById = new Map();');
+  return { app, sent };
+}
+
+// 고치기를 연 회의 줄 한 벌: 원래 제목 버튼과 그 자리에 들어온 입력칸을 함께 돌려준다.
+function meetingRowEditing(app) {
+  return app.run(`(() => {
+    const row = document.createElement('div');
+    const title = document.createElement('button');
+    title.className = 'ti';
+    title.textContent = '원래 문구';
+    row.append(title);
+    panelMeetingRowEdit(row, title, { id: 'i1', description: '원래 문구' });
+    return { row, title, input: row.children[0] };
+  })()`);
+}
+
+test('a meeting row reuses the list menus and only puts 문구 고치기 on top', () => {
+  const { app } = meetingRowClient(new Response('{"ok":true}'));
+  const menu = (type) => JSON.parse(app.run(`JSON.stringify(
+    panelMeetingRowMenu({ id: 'i1', type: '${type}', description: '문구', status: 'to-do' }, document.createElement('div'), () => {})
+      .map(section => section.map(entry => entry.label || entry.field)))`));
+  for (const type of ['task', 'bug', 'check', 'decision']) {
+    assert.equal(menu(type)[0][0], '문구 고치기', `${type} 줄의 메뉴 맨 위는 문구 고치기다`);
+    assert.ok(menu(type).flat().includes('삭제'), `${type} 줄도 여기서 지울 수 있다`);
+  }
+  // 맨 위 한 줄만 얹고 나머지는 목록에서 쓰는 메뉴 그대로다 — 회의 카드용 메뉴를 새로 만들지 않는다.
+  const listMenu = (code) => JSON.parse(app.run(`JSON.stringify(${code}.map(section => section.map(entry => entry.label || entry.field)))`));
+  assert.deepEqual(menu('task').slice(1),
+    listMenu("taskMenuSections({ item: { id: 'i1', type: 'task', description: '문구', status: 'to-do' }, mode: panelMode({ id: 'i1' }), card: document.createElement('div') })"),
+    '할 일은 업무 줄의 메뉴를 그대로 쓴다');
+  assert.deepEqual(menu('check').slice(1),
+    listMenu("waitingMenuSections({ id: 'i1', type: 'check', description: '문구', status: 'to-do' }, document.createElement('div'))"),
+    '확인 대기는 확인 대기 줄의 메뉴를 그대로 쓴다(회신 기한 포함)');
+  assert.ok(menu('check').flat().includes('회신 기한'));
+  assert.deepEqual(menu('decision'), [['문구 고치기'], ['프로젝트'], ['삭제']], '결정에는 날짜가 없다');
+  assert.ok(menu('task').flat().includes('기한'), '할 일의 날짜 이름은 `기한`이다');
+});
+
+test('a meeting row title is fixed in place: Enter saves, IME Enter waits, Esc cancels only the input', async () => {
+  const { app, sent } = meetingRowClient(new Response('{"ok":true}'));
+  const { row, title, input } = meetingRowEditing(app);
+  assert.equal(input.value, '원래 문구');
+  assert.equal(input.getAttribute('maxLength') ?? input.maxLength, 1000);
+  assert.equal(input.focused, true);
+  assert.equal(input.selected, true, '기존 문구는 전체 선택된 채로 들어온다');
+  assert.equal(title.isConnected, false);
+
+  // 한글을 조합하는 중의 Enter는 글자를 확정하는 것이다 — 저장으로 읽지 않는다.
+  input.listeners.keydown({ key: 'Enter', isComposing: true, preventDefault() {} });
+  assert.equal(input.blurs, 0);
+  assert.equal(sent.length, 0);
+
+  input.value = '고친 문구';
+  input.listeners.keydown({ key: 'Enter', preventDefault() {} });
+  assert.equal(input.blurs, 1, 'Enter는 저장으로 이어진다');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(sent.map(call => call.url), ['/api/track/set-description']);
+  assert.deepEqual(sent[0].body, { id: 'i1', description: '고친 문구' });
+
+  // Esc는 회의 카드가 아니라 이 입력칸만 되돌린다.
+  const { row: row2, title: title2, input: input2 } = meetingRowEditing(app);
+  assert.equal(app.run('escStack.length'), 1, '입력칸이 살아 있는 동안만 Esc를 가로챈다');
+  app.run('escStack[escStack.length - 1]()');
+  assert.equal(app.run('escStack.length'), 0, '되돌린 뒤에는 카드의 Esc가 다시 맨 위로 온다');
+  assert.equal(row2.children[0], title2, '제목이 그대로 돌아온다');
+  assert.equal(input2.isConnected, false);
+  assert.equal(sent.length, 1, '취소는 아무것도 저장하지 않는다');
+  assert.equal(row.children[0].isConnected, true);
+});
+
+test('an empty or unchanged meeting row title saves nothing, and a failed save keeps what was typed', async () => {
+  const ok = meetingRowClient(new Response('{"ok":true}'));
+  const blank = meetingRowEditing(ok.app);
+  blank.input.value = '   ';
+  await blank.input.listeners.blur();
+  assert.equal(ok.sent.length, 0, '빈 값은 저장하지 않는다');
+  assert.equal(blank.row.children[0], blank.title, '되돌아간다');
+
+  const same = meetingRowEditing(ok.app);
+  await same.input.listeners.blur();
+  assert.equal(ok.sent.length, 0, '고치지 않았으면 저장하지 않는다');
+
+  const failing = meetingRowClient(new Response('{"ok":false}', { status: 500 }));
+  const { input } = meetingRowEditing(failing.app);
+  input.value = '저장 실패 후에도 남아야 하는 문구';
+  await input.listeners.blur();
+  assert.equal(input.value, '저장 실패 후에도 남아야 하는 문구');
+  assert.equal(input.disabled, false);
+  assert.equal(input.focused, true);
+  assert.equal(input.isConnected, true, '실패했으니 입력칸이 그대로 있다');
+  assert.equal(failing.app.run('escStack.length'), 1, 'Esc로 취소할 길도 그대로 남는다');
 });
 
 test('the quiet option keeps a successful save from announcing itself, while failures still do', async () => {
@@ -497,6 +619,10 @@ test('주간요약 문서는 상태 → 프로젝트 → 문장으로 묶고, �
   assert.deepEqual(JSON.parse(app.run(`JSON.stringify(reportPlanRows(${REPORT_ROWS}).map(r => r.id))`)), ['p1']);
   assert.deepEqual(JSON.parse(app.run(`JSON.stringify(reportExcludedRows(${REPORT_ROWS}).map(r => r.id))`)), ['a4']);
   assert.deepEqual(JSON.parse(app.run(`JSON.stringify(reportDocSections([]))`)), [], '기록이 없으면 구역도 없다');
+  // 서버가 주는 값(`그룹 없음`)은 그대로 두고, 화면에 적는 말만 앱 용어로 옮긴다.
+  assert.equal(app.run("reportProjectText('그룹 없음')"), '프로젝트 없음');
+  assert.equal(app.run("reportProjectText('')"), '프로젝트 없음');
+  assert.equal(app.run("reportProjectText('결제_리뉴얼')"), '결제_리뉴얼', '프로젝트 이름은 서버가 준 그대로 적는다');
 });
 
 // 전체 업무 기록: 보고 문서와 같은 프로젝트 차례로 묶고, 프로젝트가 없는 기록만 맨 아래로 내린다.
