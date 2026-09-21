@@ -645,3 +645,47 @@ test('import-record.js는 JSON을 명령줄 인자로도, 표준 입력으로도
   assert.equal(JSON.parse(stdin.out).ok, true);
   assert.equal((await record(['item', '깨진 JSON'])).code, 1);
 });
+
+// 지라 동기화가 "업무에 연결돼 있는데 기본 조회에서 빠진 이슈"를 적는 구역. 줄 형식은 기본 구역과
+// 같아서 구역을 모르는 옛 서버가 읽어도 그냥 이슈로 읽히고(오류 없음), 구역이 없는 옛 파일은
+// 지금 서버가 읽어도 예전과 똑같다.
+test('지라 캐시는 `그 밖의 이슈` 구역을 extra로 표시하고, 구역 없는 옛 파일도 그대로 읽는다', async () => {
+  const jiraPath = path.join(directory, 'jira_issues.md');
+  const before = fs.existsSync(jiraPath) ? fs.readFileSync(jiraPath, 'utf8') : null;
+  const head = ['# 지라 이슈 (내 담당, 진행중/백로그)', '', '마지막 갱신: 2026-09-24', '', '- IO-1 | 에픽 | 진행 중 | 보드 AI', ''];
+  try {
+    fs.writeFileSync(jiraPath, head.join('\n'));
+    assert.deepEqual((await items()).jiraIssues,
+      [{ key: 'IO-1', type: '에픽', status: '진행 중', summary: '보드 AI', extra: false }],
+      '구역이 없는 옛 파일은 예전과 같이 전부 보통 이슈다');
+
+    const withSection = [...head, '## 업무에 연결된 그 밖의 이슈', '', '- IO-2 | 에픽 | 완료 | 게임 임베드', '',
+      '## 다른 소제목', '', '- IO-3 | 스토리 | Backlog | 알림 로그 정리', ''];
+    fs.writeFileSync(jiraPath, withSection.join('\n'));
+    assert.deepEqual((await items()).jiraIssues.map(issue => [issue.key, issue.status, issue.extra]),
+      [['IO-1', '진행 중', false], ['IO-2', '완료', true], ['IO-3', 'Backlog', false]],
+      '그 구역 안의 줄만 extra이고, 다른 소제목이 나오면 다시 보통 이슈로 돌아온다');
+
+    // 옛 서버(구역을 모르는 버전)의 파서 — 새 파일을 읽어도 오류 없이 이슈 셋을 얻는다.
+    const legacy = withSection.map(line => line.match(/^- (\S+) \| (.+?) \| (.+?) \| (.+)$/)).filter(Boolean);
+    assert.deepEqual(legacy.map(m => m[1]), ['IO-1', 'IO-2', 'IO-3']);
+  } finally {
+    if (before === null) fs.rmSync(jiraPath, { force: true });
+    else fs.writeFileSync(jiraPath, before);
+  }
+});
+
+// 같은 원본을 다른 메모로 다시 공유한 것은 개인 채널의 그 메시지 링크로 들어온다(슬랙 수집 지침 B).
+// 서버의 원본 링크 중복 제거는 permalink 글자가 같을 때만 걸린다는 것을 고정해 둔다.
+test('개인 채널 메시지 링크도 원본 링크로 받고, 링크가 다르면 별개 항목이 된다', async () => {
+  const channelLink = ts => `https://example-workspace.slack.com/archives/C09PERSONAL/p${ts}`;
+  const first = await post('/api/import', { kind: 'item', payload: { type: 'task', description: '공유에 메모를 달아 담은 일', permalink: channelLink('1758697200123456') } });
+  assert.equal(first.ok, true);
+  assert.notEqual(first.duplicate, true);
+  const again = await post('/api/import', { kind: 'item', payload: { type: 'task', description: '같은 링크를 다시', permalink: channelLink('1758697200123456') } });
+  assert.equal(again.duplicate, true, '같은 링크는 지금처럼 중복이다');
+  const second = await post('/api/import', { kind: 'item', payload: { type: 'task', description: '같은 원본을 다른 메모로 다시 공유', permalink: channelLink('1758783600987654') } });
+  assert.equal(second.ok, true);
+  assert.notEqual(second.duplicate, true, '개인 채널의 다른 메시지 링크는 별개 항목으로 들어온다');
+  assert.notEqual(second.id, first.id);
+});

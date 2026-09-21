@@ -106,7 +106,9 @@ function wfProjects() {
     const label = event.project.label || event.project.value;
     projects.set(key, event.project.type === 'group' ? wfGroupName(label) : label);
   });
-  jiraIssuesCache.forEach(issue => projects.set(`jira:${issue.key}`, `${issue.key} · ${issue.summary}`));
+  // `그 밖의 이슈`(extra)는 이미 항목이 걸려 있는 것의 요약을 보여 주려고 들고 있는 것이라
+  // 새 프로젝트 후보로 내놓지 않는다 — 항목이 걸려 있으면 위 줄에서 이미 들어왔다.
+  jiraIssuesCache.forEach(issue => { if (!issue.extra) projects.set(`jira:${issue.key}`, `${issue.key} · ${issue.summary}`); });
   customGroupsCache.forEach(group => { if (!projects.has(`group:${group}`)) projects.set(`group:${group}`, group); });
   return [...projects].sort((a, b) => a[1].localeCompare(b[1]));
 }

@@ -1071,6 +1071,21 @@ function projectVisibleRows(rows, { showEmpty, selectedKey } = {}) {
   return { visible, zero, hiddenCount };
 }
 
+// 연결된 지라 이슈가 지라에서는 이미 끝났을 때 조용히 알린다 — 판정은 동기화가 `그 밖의 이슈`
+// 구역에 적는 상태 글자 하나(`완료`)로 한다(기본 구역은 미완료만 담으므로 여기에 걸리지 않는다).
+// 표시는 프로젝트 탭에만 붙인다.
+function uiJiraDone(key) {
+  const issue = typeof key === 'string' && key.startsWith('jira:') ? jiraIssuesByKey.get(key.slice('jira:'.length)) : null;
+  return !!issue && issue.status === '완료';
+}
+function uiJiraDoneTag(short) {
+  const tag = document.createElement('span');
+  tag.className = 'd-jdone';
+  tag.textContent = short ? '지라 완료' : '지라에서 완료됨';
+  if (short) tag.title = '지라에서 완료됨';
+  return tag;
+}
+
 function renderProjects() {
   const listEl = document.getElementById('projectList');
   const body = document.getElementById('projectBody');
@@ -1105,6 +1120,15 @@ function renderProjects() {
     name.className = 'nm';
     name.textContent = row.label;
     name.title = row.label;
+    // 완료 글자가 붙는 줄만 두 칸으로 나눈다 — 긴 이름의 말줄임에 글자가 잘려 사라지지 않게.
+    // 자리가 좁아지므로 이 줄은 요약만 적는다(키만 남고 요약이 잘리면 무슨 프로젝트인지 알 수 없다. 전체 이름은 title).
+    if (uiJiraDone(row.key)) {
+      const label = document.createElement('span');
+      label.className = 't';
+      label.textContent = uiProjectName({ jira: row.key.slice('jira:'.length) }, { short: true });
+      name.className = 'nm has-tag';
+      name.replaceChildren(label, uiJiraDoneTag(true));
+    }
     const count = document.createElement('span');
     count.className = 'n num';
     count.textContent = row.open;
@@ -1287,6 +1311,7 @@ function renderProjectDetail(body, row) {
   const title = document.createElement('h2');
   title.className = 'd-ptitle';
   title.textContent = row.label;
+  if (uiJiraDone(row.key)) title.appendChild(uiJiraDoneTag());
   const summary = document.createElement('div');
   summary.className = 'd-quiet';
   summary.textContent = `열린 항목 ${row.open}`;
@@ -5252,7 +5277,9 @@ function groupSelectOptions(current, forceClearable) {
   // 여러 개를 한 번에 옮길 땐 "현재 그룹"이라는 게 없어도(current === null) 해제를 고를 수 있어야 한다.
   if (current || forceClearable) head.push(`<option value="__clear__">— 그룹 해제 —</option>`);
   const rest = [];
-  rest.push(...jiraIssuesCache.map(i => {
+  // `그 밖의 이슈`(extra = 지라에서 완료됐거나 담당이 바뀐 것)는 새로 고를 수 있는 선택지로 내놓지
+  // 않는다 — 요약을 보여 주려고 들고 있을 뿐이다. 다만 지금 걸려 있는 값이면 골라진 채로 보여야 한다.
+  rest.push(...jiraIssuesCache.filter(i => !i.extra || (current && current.type === 'jira' && current.value === i.key)).map(i => {
     const selected = current && current.type === 'jira' && current.value === i.key;
     return `<option value="jira:${escapeAttr(i.key)}"${selected ? ' selected' : ''}>${escapeHtml(i.key)} · ${escapeHtml(i.summary)}</option>`;
   }));

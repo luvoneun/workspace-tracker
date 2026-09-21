@@ -1991,3 +1991,57 @@ test('슬랙으로 나가는 프로젝트 줄에는 지라 키를 싣지 않는�
   assert.equal(html.includes('PAY-77'), false, '서식 있는 복사에도 키가 없다');
   assert.equal(app.run(`reportProjectColorKey('PAY-77 · 결제 정산 주기 정책 변경')`), 'PAY-77', '색 점은 원래 키로 정한다');
 });
+
+// 지라 동기화가 `그 밖의 이슈`로 적은 이슈(extra) — 요약은 그대로 쓰되 새 프로젝트 후보로는 내놓지 않는다.
+test('그 밖의 이슈는 프로젝트 고르기 선택지에서 빠지고, 지금 걸려 있는 값이면 그대로 보인다', () => {
+  const app = pureClient();
+  app.run(`jiraIssuesCache = [
+    { key: 'AB-1', summary: '가입', extra: false },
+    { key: 'ZZ-9', summary: '끝난 이슈', status: '완료', extra: true },
+  ]; customGroupsCache = [];`);
+  const options = code => JSON.parse(app.run(`JSON.stringify(groupSelectOptions(${code}))`));
+  const fresh = options('null, false').rest.join('');
+  assert.match(fresh, /value="jira:AB-1"/);
+  assert.doesNotMatch(fresh, /value="jira:ZZ-9"/, '완료된 이슈는 새로 고를 선택지로 내놓지 않는다');
+  const current = options("{ type: 'jira', value: 'ZZ-9' }, false").rest.join('');
+  assert.match(current, /value="jira:ZZ-9" selected/, '이미 걸려 있는 값은 골라진 채로 보여야 한다');
+});
+
+test('wfProjects: 그 밖의 이슈는 항목이 걸려 있을 때만 프로젝트 목록에 선다', () => {
+  const app = workflowsClient();
+  app.run(`workflowData = { meetings: [], items: [
+    { id: 'a1', type: 'task', status: 'to-do', jira: 'ZZ-9', label: 'ZZ-9 · 끝난 이슈' },
+  ] }; wfIndexData();
+  jiraIssuesCache = [
+    { key: 'AB-1', summary: '가입', extra: false },
+    { key: 'ZZ-9', summary: '끝난 이슈', status: '완료', extra: true },
+    { key: 'ZZ-8', summary: '아무도 안 쓰는 완료 이슈', status: '완료', extra: true },
+  ]; customGroupsCache = [];`);
+  const keys = JSON.parse(app.run('JSON.stringify(wfProjects().map(entry => entry[0]))'));
+  assert.deepEqual(keys.sort(), ['jira:AB-1', 'jira:ZZ-9'], '항목이 걸린 ZZ-9는 남고, 아무도 안 쓰는 ZZ-8은 목록에 서지 않는다');
+});
+
+// `지라에서 완료됨`은 프로젝트 탭에만 붙는 회색 글자다. 판정은 상태 글자 하나(`완료`)로 한다.
+test('프로젝트 탭: 지라에서 완료된 이슈에만 `지라에서 완료됨`이 붙는다', () => {
+  const app = workflowsClient();
+  app.run(`jiraIssuesByKey = new Map([
+    ['ZZ-9', { key: 'ZZ-9', summary: '끝난 이슈', status: '완료', extra: true }],
+    ['AB-1', { key: 'AB-1', summary: '가입', status: '진행 중', extra: false }],
+  ]);`);
+  assert.equal(app.run("uiJiraDone('jira:ZZ-9')"), true);
+  assert.equal(app.run("uiJiraDone('jira:AB-1')"), false);
+  assert.equal(app.run("uiJiraDone('jira:없음')"), false);
+  assert.equal(app.run("uiJiraDone('group:운영툴')"), false, '그룹 프로젝트에는 붙지 않는다');
+
+  app.run("workflowData = { items: [], meetings: [] }; wfIndexData(); itemsById = new Map();");
+  const titleOf = key => app.run(`(() => {
+    const body = document.createElement('div');
+    renderProjectDetail(body, { key: '${key}', label: '${key}', open: 0 });
+    return body.children[0];
+  })()`);
+  const done = titleOf('jira:ZZ-9');
+  assert.equal(done.children.length, 1);
+  assert.equal(done.children[0].className, 'd-jdone');
+  assert.equal(done.children[0].textContent, '지라에서 완료됨');
+  assert.equal(titleOf('jira:AB-1').children.length, 0, '진행 중인 이슈에는 아무것도 붙지 않는다');
+});

@@ -448,6 +448,9 @@ function setTrackDescription(id, description) {
 // ---------- 지라 이슈 캐시 (tracker/jira_issues.md) ----------
 
 const JIRA_ITEM_RE = /^- (\S+) \| (.+?) \| (.+?) \| (.+)$/;
+// 지라 동기화가 "업무에 연결돼 있는데 기본 조회(내 담당·미완료)에서 빠진 이슈"를 적는 구역.
+// 줄 형식은 기본 구역과 같아서 이 제목을 모르는 옛 서버가 읽어도 그냥 이슈 한 줄로 읽힌다.
+const JIRA_EXTRA_HEADING = '## 업무에 연결된 그 밖의 이슈';
 
 // 지라 캐시가 언제 갱신됐는지. 자동 갱신이 실패해도 화면엔 낡은 목록이 그대로 뜨기 때문에,
 // 언제 기준인지 드러내서 낡은 걸 모른 채 고르는 일이 없게 한다.
@@ -545,10 +548,14 @@ function getJiraIssueCache() {
   if (!fs.existsSync(jiraPath)) return [];
   const lines = fs.readFileSync(jiraPath, 'utf-8').split('\n');
   const issues = [];
+  // `extra`는 "요약을 보여 주기 위해서만 들고 있는 이슈"라는 표시다 — 화면은 이걸 새 프로젝트
+  // 후보로 내놓지 않는다. 구역이 없는 옛 파일은 전부 extra:false로 예전과 똑같이 읽힌다.
+  let extra = false;
   lines.forEach((line) => {
+    if (line.startsWith('## ')) extra = line.trim() === JIRA_EXTRA_HEADING;
     const m = line.match(JIRA_ITEM_RE);
     if (!m) return;
-    issues.push({ key: m[1], type: m[2], status: m[3], summary: m[4] });
+    issues.push({ key: m[1], type: m[2], status: m[3], summary: m[4], extra });
   });
   return issues;
 }
