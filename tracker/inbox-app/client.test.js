@@ -642,3 +642,80 @@ test('반영 완료 검색은 문구·프로젝트·지라 키·지라 요약을
   assert.equal(match(item, '없는말'), false);
   assert.equal(match("{ description: '메모', project: '리서치' }", '리서치'), true, '아이디어의 프로젝트 칸도 본다');
 });
+
+// 줄 옆 카드의 자리 계산. 화면 좌표만 보는 순수 함수라 여기서 그대로 확인한다
+// (헤더 60px 아래 12px, 화면 아래 12px을 지키며 누른 줄 옆에 선다).
+test('줄 옆 카드는 줄 오른쪽 끝 안쪽에 서고, 화면 밖으로 나가면 필요한 만큼만 끌어올린다', () => {
+  const app = pureClient();
+  const place = (row, card, view, side) =>
+    JSON.parse(app.run(`JSON.stringify(detailPopPosition(${JSON.stringify(row)}, ${JSON.stringify(card)}, ${JSON.stringify(view)}, ${JSON.stringify(side)}))`));
+  const view = { width: 1440, height: 900 };
+  const card = { width: 360, height: 420 };
+
+  const top = place({ top: 200, left: 300, right: 1100 }, card, view, 'body');
+  assert.deepEqual([top.left, top.top], [728, 200], '본문 줄은 줄 오른쪽 끝에서 12px 안쪽, 세로는 줄 윗변에 맞춘다');
+
+  const bottom = place({ top: 840, left: 300, right: 1100 }, card, view, 'body');
+  assert.equal(bottom.top, 900 - 12 - 420, '아래쪽 줄에서는 카드가 다 보일 만큼만 위로 올라간다');
+
+  const tall = place({ top: 500, left: 300, right: 1100 }, { width: 360, height: 5000 }, view, 'body');
+  assert.equal(tall.top, 72, '카드가 화면보다 길면 헤더 아래 12px에 붙고, 나머지는 카드 안에서 스크롤한다');
+  assert.equal(tall.maxHeight, 900 - 60 - 24, '카드 높이는 헤더와 위아래 여백을 뺀 만큼까지다');
+
+  const rail = place({ top: 300, left: 8, right: 240 }, card, view, 'rail');
+  assert.equal(rail.left, 252, '레일 줄은 줄 오른쪽 옆으로 나온다');
+
+  const drawer = place({ top: 300, left: 1040, right: 1432 }, card, view, 'drawer');
+  assert.equal(drawer.left, 668, '서랍 줄은 서랍 왼쪽 옆으로 나온다');
+
+  const narrow = place({ top: 300, left: 8, right: 300 }, card, { width: 600, height: 900 }, 'rail');
+  assert.equal(narrow.left, 600 - 360 - 8, '좁은 화면에서도 카드는 화면 안에 갇힌다');
+
+  const orphan = place(null, card, view, 'center');
+  assert.deepEqual([orphan.left, orphan.top], [540, 72], '붙을 줄이 없으면 화면 가운데 위(팔레트 자리)에 선다');
+});
+
+// 슬랙 복사: 모르는 소제목의 문장도 조용히 빠지지 않는다 — 그 이름 그대로의 구역이 된다.
+test('모르는 소제목은 그 이름 그대로의 구역이 되고, 차례는 아는 구역들 뒤 · `예정` 앞이다', () => {
+  const app = reportClient();
+  const rows = `[
+    { id: 'a1', heading: '완료한 일', group: '가입 개선', text: '퍼널 정리', sourceIds: [], excluded: false },
+    { id: 'x1', heading: '리스크', group: '운영툴', text: '큐 지연이 계속되고 있어요', sourceIds: [], excluded: false },
+    { id: 'x2', heading: '리스크', group: '그룹 없음', text: '인력 공백', sourceIds: [], excluded: false },
+    { id: 'p1', heading: '다음 주 계획', group: '알림센터', text: '검수 기획', sourceIds: [], excluded: false }
+  ]`;
+  const report = `{ weekKey: '2026-09-21', rows: ${rows} }`;
+  assert.equal(app.run(`reportSlackSectionOf('리스크')`), '리스크', '모르는 소제목은 이름 그대로 쓴다');
+  assert.equal(app.run(`reportSlackSectionOf('완료한 일')`), '완료', '아는 소제목은 그대로 슬랙 구역 이름으로 옮긴다');
+  assert.equal(app.run(`reportSlackSectionOf('  ')`), null, '이름이 없으면 구역도 없다');
+  assert.deepEqual(JSON.parse(app.run(`JSON.stringify(reportSlackSectionNames(${report}))`)),
+    ['완료', '진행 중', '결정', '확인 대기', '리스크', '예정'], '모르는 구역은 아는 구역들 뒤, `예정` 앞에 선다');
+  assert.equal(app.run(`reportSlackText(reportSlackModel(${report}, { sections: reportSlackSectionNames(${report}) }))`), [
+    '9월 3주차 (9/21~9/27)',
+    '',
+    '완료',
+    '가입 개선',
+    '• 퍼널 정리',
+    '',
+    '리스크',
+    '운영툴',
+    '• 큐 지연이 계속되고 있어요',
+    '기타',
+    '• 인력 공백',
+    '',
+    '예정',
+    '알림센터',
+    '• 검수 기획',
+  ].join('\n'), '모르는 소제목의 문장도 같은 모양으로 들어간다');
+});
+
+// 다음 주 계획의 프로젝트 선택 — 앱의 다른 프로젝트 선택과 같은 목록(그룹 + 지라 `KEY · 요약`).
+test('다음 주 계획 프로젝트 목록은 그룹과 지라를 함께 담고, 60자를 넘는 지라는 키만 쓴다', () => {
+  const app = reportClient();
+  app.run("customGroupsCache = ['운영툴', '가입 개선']");
+  app.run(`jiraIssuesCache = [{ key: 'PAY-77', summary: '정산 배치' }, { key: 'OPS-1', summary: '${'가'.repeat(70)}' }]`);
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(reportPlanProjectNames())')),
+    ['운영툴', '가입 개선', 'PAY-77 · 정산 배치', 'OPS-1'],
+    '저장되는 값은 화면에 보이는 이름 그대로이고, 60자를 넘는 지라는 키만 남는다');
+  assert.equal(app.run(`reportPlanJiraName('PAY-77', '${'나'.repeat(60)}')`), 'PAY-77');
+});

@@ -38,17 +38,24 @@ const REPORT_SLACK_OTHER = '기타';   // 프로젝트가 없는 문장을 모�
 const REPORT_SLACK_KEY = 'workspace-report-slack-sections';
 
 // 고른 구역은 주차와 상관없이 하나로 기억한다(localStorage가 막혀 있으면 기본값으로 시작).
+// `seen`은 한 번이라도 칩으로 보여 준 구역 이름이다 — 처음 보는 구역은 켠 채로 시작하고,
+// 사람이 끈 구역은 다음에도 꺼진 채로 둔다(모르는 소제목도 조용히 빠지지 않게).
 function reportSlackSectionsLoad() {
   try {
     const saved = JSON.parse(localStorage.getItem(REPORT_SLACK_KEY));
-    if (Array.isArray(saved)) return new Set(saved.filter(name => REPORT_SLACK_ALL.includes(name)));
+    if (Array.isArray(saved)) return { on: new Set(saved), seen: new Set(REPORT_SLACK_ALL) };
+    if (saved && Array.isArray(saved.on)) return { on: new Set(saved.on), seen: new Set(saved.seen || REPORT_SLACK_ALL) };
   } catch {}
-  return new Set(REPORT_SLACK_DEFAULT);
+  return { on: new Set(REPORT_SLACK_DEFAULT), seen: new Set(REPORT_SLACK_ALL) };
 }
 function reportSlackSectionsSave() {
-  try { localStorage.setItem(REPORT_SLACK_KEY, JSON.stringify([...reportSlackSections])); } catch {}
+  try {
+    localStorage.setItem(REPORT_SLACK_KEY, JSON.stringify({ on: [...reportSlackSections], seen: [...reportSlackSeen] }));
+  } catch {}
 }
-let reportSlackSections = reportSlackSectionsLoad();
+const reportSlackSaved = reportSlackSectionsLoad();
+let reportSlackSections = reportSlackSaved.on;
+let reportSlackSeen = reportSlackSaved.seen;
 
 window.addEventListener('beforeunload', event => {
   if (reportEdits.size || reportBusy) { event.preventDefault(); event.returnValue = ''; }
@@ -84,8 +91,22 @@ function reportSlackTitle(weekKey) {
   return `${label.week} (${label.range.replace(/^\d{4}년\s*/, '').replace(/\s*~\s*/, '~')})`;
 }
 
+// 모르는 소제목은 버리지 않는다 — 그 이름 그대로의 구역이 된다(조용히 빠지는 문장이 없게).
 function reportSlackSectionOf(heading) {
-  return REPORT_SLACK_SECTIONS.find(section => section.headings.includes(heading))?.name || null;
+  const known = REPORT_SLACK_SECTIONS.find(section => section.headings.includes(heading));
+  return known ? known.name : String(heading || '').trim() || null;
+}
+
+// 구역 차례: 아는 구역들 → 모르는 소제목(문서에 나온 차례대로) → `예정`.
+function reportSlackSectionNames(report) {
+  const extra = [];
+  for (const row of (report && report.rows ? report.rows : [])) {
+    const name = reportSlackSectionOf(row.heading);
+    if (!name || REPORT_SLACK_ALL.includes(name) || extra.includes(name)) continue;
+    extra.push(name);
+  }
+  const last = REPORT_SLACK_ALL[REPORT_SLACK_ALL.length - 1]; // 예정
+  return [...REPORT_SLACK_ALL.slice(0, -1), ...extra, last];
 }
 
 // 문장이 설 프로젝트 이름. `예정`에서 프로젝트가 없는 문장은 묶지 않고 구역 끝 메모로 보낸다(null).
@@ -102,6 +123,7 @@ function reportSlackProjectOf(row, sectionName) {
 // 구역 끝 · 여러 줄 문장은 둘째 줄부터 부연 · 내용이 없는 구역은 생략.
 function reportSlackModel(report, options = {}) {
   const chosen = new Set(options.sections || REPORT_SLACK_DEFAULT);
+  const order = reportSlackSectionNames(report);
   const sections = new Map();
   for (const row of (report && report.rows ? report.rows : [])) {
     if (row.excluded) continue;
@@ -124,7 +146,7 @@ function reportSlackModel(report, options = {}) {
   }
   return {
     title: reportSlackTitle(report && report.weekKey),
-    sections: REPORT_SLACK_ALL.map(name => sections.get(name)).filter(section => section && (section.projects.length || section.memos.length)),
+    sections: order.map(name => sections.get(name)).filter(section => section && (section.projects.length || section.memos.length)),
   };
 }
 
@@ -525,13 +547,31 @@ function reportExcludedBlock(item, host) {
   host.appendChild(box);
 }
 
-// 계획 문장에 붙일 프로젝트 — 앱의 프로젝트 목록을 그대로 쓰고, 고른 값은 다음 입력에 남는다.
+// 계획 문장에 붙일 프로젝트 — 앱의 다른 프로젝트 선택과 같은 목록(그룹 + 지라)을 쓴다.
+// 저장되는 값은 화면에 보이는 이름 그대로다(슬랙 글에 그 이름이 그대로 올라간다).
 let reportPlanGroup = '';
+
+// 지라는 `KEY · 요약`으로 적되, 서버가 받는 60자를 넘으면 키만 쓴다.
+const REPORT_PLAN_NAME_MAX = 60;
+function reportPlanJiraName(key, summary) {
+  const full = [key, summary].filter(Boolean).join(' · ');
+  return full.length > REPORT_PLAN_NAME_MAX ? key : full;
+}
+
+function reportPlanProjectNames() {
+  const groups = typeof customGroupsCache !== 'undefined' ? [...customGroupsCache] : [];
+  const jira = typeof jiraIssuesCache !== 'undefined' ? jiraIssuesCache.map(issue => reportPlanJiraName(issue.key, issue.summary)) : [];
+  const names = [];
+  for (const name of [...groups, ...jira]) {
+    if (name && name.length <= REPORT_PLAN_NAME_MAX && !names.includes(name)) names.push(name);
+  }
+  return names;
+}
 
 function reportPlanProjectPicker() {
   const pick = reportNode('select', undefined, 'd-msel rp-pick');
   pick.setAttribute('aria-label', '다음 주 계획 프로젝트');
-  const names = typeof customGroupsCache !== 'undefined' ? [...customGroupsCache] : [];
+  const names = reportPlanProjectNames();
   if (reportPlanGroup && !names.includes(reportPlanGroup)) names.unshift(reportPlanGroup);
   for (const [value, text] of [['', REPORT_NO_PROJECT], ...names.map(name => [name, name])]) {
     const option = reportNode('option', text);
@@ -646,11 +686,21 @@ function reportRecordsView(item, host) {
 
 // 슬랙에 넣을 구역 고르기 — 내용이 없는 구역은 누를 수 없고, 바꾸면 미리보기와 복사가 같이 바뀐다.
 function reportSlackChips(report) {
-  const filled = new Set(reportSlackModel(report, { sections: REPORT_SLACK_ALL }).sections.map(section => section.name));
+  const names = reportSlackSectionNames(report);
+  const filled = new Set(reportSlackModel(report, { sections: names }).sections.map(section => section.name));
+  // 처음 보는 구역(모르는 소제목)은 켠 채로 시작한다.
+  let fresh = false;
+  for (const name of names) {
+    if (reportSlackSeen.has(name)) continue;
+    reportSlackSeen.add(name);
+    reportSlackSections.add(name);
+    fresh = true;
+  }
+  if (fresh) reportSlackSectionsSave();
   const wrap = reportNode('div', undefined, 'rp-secs');
   wrap.setAttribute('role', 'group');
   wrap.setAttribute('aria-label', '슬랙에 넣을 구역');
-  for (const name of REPORT_SLACK_ALL) {
+  for (const name of names) {
     const on = reportSlackSections.has(name);
     const chip = reportNode('button', name, 'd-chip' + (on ? ' is-on' : ''));
     chip.type = 'button';

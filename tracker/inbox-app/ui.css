@@ -889,24 +889,18 @@ body.batch-open .d-row { grid-template-columns: 22px 30px minmax(0, 1fr) var(--w
 }
 .d-empty { font-size: 15px; font-weight: 500; color: var(--muted); padding: 34px var(--pad); }
 
-/* ---------- 상세 패널 (업무 · 확인 대기 · 회의 정리 한 자리) ----------
-   어느 줄을 눌러도 같은 자리에 연다: 오른쪽 칸 맨 위, 헤더 바로 아래에 붙어 따라다닌다.
-   내용이 길면 화면 밖으로 밀지 않고 패널 안에서 스크롤한다. */
-/* 오른쪽 칸은 목록만큼 늘어나야 한다 — 그래야 패널이 목록 끝까지 헤더 밑에 붙어 있는다(sticky). */
+/* ---------- 상세 (업무 · 확인 대기 · 회의 정리 한 벌) ----------
+   상세는 누른 줄 옆에 떠 있는 카드다(아래 `줄 옆 카드`). 목록은 늘 전체 폭을 쓴다.
+   `.d-side`는 아주 좁은 화면(≤520)에서 아래 시트로 쓰는 자리로만 남는다. */
 .task-content-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; align-items: stretch; }
-.task-detail-open .task-content-layout { grid-template-columns: minmax(0, 1fr) 340px; }
-/* 회의 정리는 초안 카드가 들어가므로 조금 더 넓게 연다 */
-.task-detail-open.meeting-open .task-content-layout { grid-template-columns: minmax(0, 1fr) 420px; }
-.d-side { min-width: 0; margin-left: 16px; }
+.d-side { display: none; }
 .d-side[hidden] { display: none; }
 
 .d-detail {
-  position: sticky; top: calc(var(--hdr) + 16px);
   display: flex; flex-direction: column; gap: 18px;
   padding: 22px;
   background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r);
   box-shadow: var(--soft);
-  max-height: calc(100dvh - var(--hdr) - 32px); overflow: auto;
 }
 .d-detail h3 { margin: 0; font-size: 13px; font-weight: 700; color: var(--text); }
 .d-dtop { display: flex; align-items: flex-start; gap: 6px; }
@@ -927,6 +921,21 @@ textarea.d-dtitle {
 
 .d-fields { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 14px; align-items: baseline; margin: 0; }
 .d-fields dt { font-size: 12.5px; color: var(--muted); }
+/* 값 칸은 눌러서 고친다 — 읽기만 하는 글자로 보이지 않게 hover 면과 꺾쇠를 둔다 */
+.d-dpick {
+  display: inline-flex; align-items: center; gap: 4px;
+  min-height: 28px; padding: 2px 6px; margin: -2px -6px;
+  border: 0; border-radius: var(--r-xs); background: none;
+  font-family: inherit; font-size: 14px; color: var(--text); text-align: left; cursor: pointer;
+  transition: background 130ms var(--ease);
+}
+.d-dpick:hover { background: var(--hover); }
+.d-dpick:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.d-dpick .v { display: inline-flex; align-items: center; gap: 4px; min-width: 0; white-space: nowrap; }
+/* 값이 아이콘 + 글자면(우선순위) 한 줄로 선다 — .d-i가 블록이라 그냥 두면 글자가 아래로 떨어진다 */
+.d-dpick .v > * { display: inline-flex; align-items: center; gap: 4px; }
+.d-dpick .cv { display: inline-flex; color: var(--dim); }
+.d-dpick .cv .d-i { transform: rotate(90deg); }
 .d-fields dd { margin: 0; min-width: 0; font-size: 14px; color: var(--text); font-variant-numeric: tabular-nums; }
 .d-dvalue { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .d-fields .jira-control { display: flex; margin: 0; min-width: 0; flex-wrap: wrap; }
@@ -1031,13 +1040,65 @@ textarea.d-dtitle {
 .d-mrow2.is-done .ti { color: var(--muted); text-decoration: line-through; }
 
 /* 직접 담기 · 기존 항목 연결 — 접히는 보조 구역 */
-.d-dadd > summary { list-style: none; cursor: pointer; }
+.d-dsec.d-dadd > summary.lbl { display: flex; margin-bottom: 0; align-items: center; gap: 4px; min-height: 28px; list-style: none; cursor: pointer; }
+.d-dadd > summary .d-i { color: var(--dim); transition: transform 130ms var(--ease); }
+.d-dadd[open] > summary .d-i { transform: rotate(90deg); }
 .d-dadd > summary::-webkit-details-marker { display: none; }
 .d-dadd > summary:hover { color: var(--text); }
-.d-dadd[open] > summary { margin-bottom: 6px; }
+.d-dsec.d-dadd[open] > summary.lbl { margin-bottom: 6px; }
 .d-dcap { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .d-dcap .d-din { flex: 1; min-width: 140px; min-height: 30px; padding: 5px 9px; }
 .d-dcap .d-msel { flex: 1; }
+
+/* ---------- 줄 옆 카드 (상세가 서는 자리) ----------
+   누른 줄 옆에 떠 있는 카드. 자리(left·top·width)는 app.js가 계산해 넣는다.
+   길어져도 화면을 넘지 않는다: 머리(제목)와 발(동작 줄·담기 바)은 붙박이, 가운데만 스크롤.
+   스크롤 중일 때만 머리·발 경계에 옅은 선이 생긴다. */
+.d-popd { position: fixed; z-index: 50; width: 360px; }
+.d-popd .d-detail.is-pop {
+  width: 100%; padding: 0; gap: 0;
+  display: flex; flex-direction: column; overflow: hidden;
+  border-radius: 20px; box-shadow: var(--pop);
+}
+.d-popd .d-detail.is-pop > .d-back { flex: none; margin: 14px 0 -6px; padding-left: 18px; }
+.d-popd .d-detail.is-pop > .d-dtop {
+  flex: none; padding: 18px 16px 12px 20px; background: var(--surface);
+  border-bottom: 1px solid transparent; transition: border-color 140ms var(--ease);
+}
+.d-popd .d-detail.is-pop:not(.at-top) > .d-dtop {
+  border-bottom-color: var(--hair); box-shadow: 0 8px 12px -10px var(--scrim);
+}
+/* 카드의 제목은 본문 제목보다 한 단계 작다. 길면 세 줄까지 보이고, 누르면 그 자리에서 고친다 */
+.d-popd .d-detail.is-pop .d-dtitle {
+  font-size: 17px; line-height: 25px;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.d-popd .d-detail.is-pop .d-dtitle.plain { display: block; -webkit-line-clamp: none; }
+.d-popd .d-detail.is-pop textarea.d-dtitle { display: block; overflow: auto; max-height: 110px; }
+.d-popbody {
+  flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain;
+  display: flex; flex-direction: column; gap: 16px;
+  padding: 14px 20px 16px;
+}
+.d-popd .d-detail.is-pop > .d-dfoot,
+.d-popd .d-detail.is-pop > .d-dbar {
+  flex: none; position: static; margin: 0; padding: 12px 20px 16px; background: var(--surface);
+  border-top: 1px solid var(--hair); transition: border-color 140ms var(--ease);
+}
+.d-popd .d-detail.is-pop:not(.at-end) > .d-dfoot,
+.d-popd .d-detail.is-pop:not(.at-end) > .d-dbar { box-shadow: 0 -8px 12px -10px var(--scrim); }
+.d-popd .d-detail.is-pop.at-end > .d-dfoot,
+.d-popd .d-detail.is-pop.at-end > .d-dbar { border-top-color: transparent; }
+/* 머리 바로 아래에 또 선을 긋지 않는다 — 첫 구역은 경계 없이 본문에서 시작한다
+   (회의 카드의 첫 자리는 비어 있을 때 숨는 오류 줄이라 그 다음 것도 같이 본다) */
+.d-popbody > :first-child,
+.d-popbody > .d-derr:empty:first-child + * { margin-top: 0; }
+.d-popbody > .d-dsec:first-child,
+.d-popbody > .d-derr:empty:first-child + .d-dsec { border-top: 0; padding-top: 0; }
+.d-popd .d-detail.is-pop .d-dsrc { margin-top: -6px; }
+.d-popd .d-detail.is-pop .d-din { resize: none; }
+.d-popd .d-detail.is-pop .d-derr { margin: 0; }
+.d-logmore { display: block; width: fit-content; margin: 6px 0 2px; font-size: 12.5px; }
 
 /* ---------- 나중에 할 일 서랍 ----------
    헤더 아래 오른쪽에 붙어서 열린다. 900px 초과에서는 본문을 덮지 않고 밀어낸다(The Drawer Pushes Rule):
@@ -1423,54 +1484,24 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-dsec .lbl { display: block; margin-bottom: 6px; font-size: 12px; font-weight: 600; color: var(--muted); }
 .d-hint { margin-top: 6px; font-size: 11.5px; color: var(--muted); }
 
-/* 상세를 열면 제목이 자리를 먼저 갖는다 — 프로젝트 열은 접고 상태 열은 내용만큼만 */
-#todayTaskZone.task-detail-open #todayTaskList .d-row { grid-template-columns: 30px minmax(0, 1fr) 0 max-content; }
-#todayTaskZone.task-detail-open #todayTaskList .d-proj { display: none; }
-
 /* ---------- 반응형 ---------- */
 @media (max-width: 1280px) {
   :root { --wm: 152px; --wp: 84px; }
 }
-/* 서랍이 열려 있으면 패널은 열 안에 들어가지 않는다 — 목록이 제목도 못 보여 줄 만큼 좁아지기 때문이다.
-   같은 오른쪽 자리를 패널(z 45)이 서랍(z 40) 위에서 대신 쓴다(떠 있는 층은 최대 둘).
-   자리는 여기서도 헤더 바로 아래 위쪽 고정이다. */
-@media (min-width: 1121px) {
-  body.later-open .task-detail-open .task-content-layout { grid-template-columns: minmax(0, 1fr); }
-  body.later-open .d-side {
-    position: fixed; top: var(--hdr); right: 0; bottom: 0; left: auto;
-    width: 360px; max-width: 100vw; z-index: 45; margin: 0; padding: 0;
-    background: var(--surface); border-left: 0; box-shadow: var(--drawer-sh); overflow: auto;
-  }
-  body.later-open .d-detail {
-    position: static; left: auto; right: auto; top: auto;
-    border: 0; border-radius: 0; box-shadow: none; padding: 20px 16px; max-height: none;
-  }
-  body.later-open .meeting-open .d-side { width: 420px; }
-  body.later-open .d-dbar { bottom: -20px; margin: -6px -16px -20px; padding: 12px 16px; }
-}
-
-/* 1120px 이하에서는 서랍과 상관없이 늘 떠 있는 판이다(위와 같은 모양) */
-@media (max-width: 1120px) {
-  .task-detail-open .task-content-layout { grid-template-columns: minmax(0, 1fr); }
+/* 손가락으로 쓰는 폭에서는 카드 대신 아래에서 올라오는 시트로 연다(app.js가 같은 기준으로 고른다).
+   서랍(z 40)·선택 막대(z 46) 위에 눕고, 길면 시트 안에서 스크롤한다. */
+@media (max-width: 520px) {
   .d-side {
-    position: fixed; top: var(--hdr); right: 0; bottom: 0; left: auto;
-    width: 360px; max-width: 100vw; z-index: 45; margin: 0; padding: 0;
-    background: var(--surface); border-left: 0; box-shadow: var(--drawer-sh); overflow: auto;
+    display: block;
+    position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 47;
+    max-height: 86vh; overflow: auto;
+    background: var(--surface); border-top: 1px solid var(--border);
+    border-radius: var(--r) var(--r) 0 0; box-shadow: var(--pop);
   }
-  .d-detail {
-    position: static; left: auto; right: auto; top: auto;
-    border: 0; border-radius: 0; box-shadow: none; padding: 20px 16px; max-height: none;
+  .d-side .d-detail {
+    border: 0; border-radius: var(--r) var(--r) 0 0; box-shadow: none; padding: 20px 16px;
   }
-  .meeting-open .d-side { width: 420px; }
-  .d-dbar { bottom: -20px; margin: -6px -16px -20px; padding: 12px 16px; }
-}
-/* 좁은 화면에서는 아래에서 올라오는 시트 */
-@media (max-width: 900px) {
-  .d-side, .meeting-open .d-side {
-    top: auto; left: 0; right: 0; bottom: 0; width: auto; max-height: 86vh;
-    border-left: 0; border-top: 1px solid var(--border); border-radius: var(--r) var(--r) 0 0;
-  }
-  .d-detail { border-radius: var(--r) var(--r) 0 0; }
+  .d-side .d-dbar { bottom: -20px; margin: -6px -16px -20px; padding: 12px 16px; }
 }
 @media (max-width: 900px) {
   .page { padding: 14px 16px 80px; }
@@ -1544,7 +1575,7 @@ body.batch-open .d-toast { bottom: 76px; }
   .d-pres.is-mtg .st { grid-row: 3; }
 
   /* 행은 두 줄로 쌓이고, 숨어 있던 동작은 항상 보인다 */
-  .d-row, .d-row.is-sug, #todayTaskZone.task-detail-open #todayTaskList .d-row {
+  .d-row, .d-row.is-sug {
     grid-template-columns: 30px minmax(0, 1fr) auto;
     grid-template-areas: "ck ti ac" "ck mt ac";
     height: auto; min-height: 60px; padding: 10px 12px; row-gap: 2px; column-gap: 10px;

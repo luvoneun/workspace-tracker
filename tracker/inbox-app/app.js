@@ -166,7 +166,12 @@ function uiMenu(anchor, sections) {
   document.body.appendChild(list);
   const button = anchor.getBoundingClientRect();
   const size = list.getBoundingClientRect();
-  const left = Math.max(8, Math.min(button.right - size.width, window.innerWidth - size.width - 8));
+  // 값 고르개(상세 카드의 `보통 ⌄`)는 값의 왼쪽에 맞춰 카드 안에서 열리고, ⋯ 메뉴는 버튼 오른쪽에 맞춘다.
+  const pick = anchor.classList.contains('d-dpick');
+  const card = pick && anchor.closest('.d-popd') ? anchor.closest('.d-popd').getBoundingClientRect() : null;
+  const edge = card ? card.right - 12 : window.innerWidth - 8;
+  const start = pick ? button.left : button.right - size.width;
+  const left = Math.max(8, Math.min(start, edge - size.width));
   const below = button.bottom + 4;
   const top = below + size.height > window.innerHeight - 8
     ? Math.max(8, button.top - 4 - size.height)
@@ -2518,16 +2523,15 @@ function openMeetingPanel(event) {
   panelOpen({ kind: 'meeting', event });
 }
 
-// ---------- 오른쪽 상세 패널 (업무 · 확인 대기 한 벌) ----------
-// 어디서 열든(오늘 목록·나중 목록·리마인드·검색·프로젝트·회의) 같은 자리에 같은 모양으로 연다.
-// 저장 버튼은 없다 — 값이 바뀔 때 저장하고, 맨 아래에 "자동으로 저장됩니다"라고 적는다.
+// ---------- 상세 (업무 · 확인 대기 · 회의 정리 한 벌) ----------
+// 어디서 열든(오늘 목록·나중 목록·리마인드·검색·프로젝트·회의) 누른 줄 옆에 떠 있는 카드로 연다.
+// 내용을 만드는 곳은 여기(panelTask·panelCheck·panelMeeting)이고, 어디에 붙일지는 아래 `줄 옆 카드`가 정한다.
+// 저장 버튼은 없다 — 값이 바뀔 때 저장하고, 맨 아래에 "고치면 바로 저장돼요"라고 적는다.
 
 let panelState = null;
 
-// 패널은 오늘 탭과 프로젝트 탭에 같은 자리로 하나씩 있다. 연 탭의 자리를 끝까지 쓴다
-// (탭을 옮겨도 열어 둔 상세는 그 탭에 그대로 남아 있다).
+// 아주 좁은 화면(≤520)의 아래 시트가 쓰는 자리. 오늘 탭과 프로젝트 탭에 하나씩 있고, 연 탭의 자리를 끝까지 쓴다.
 function panelSide() { return document.getElementById(panelState?.host === 'projects' ? 'projectDetailPanel' : 'taskDetailPanel'); }
-function panelZone() { return document.getElementById(panelState?.host === 'projects' ? 'projectZone' : 'todayTaskZone'); }
 
 // 업무 기록(tasks.md 등)과 흐름 기록(.workflow.json)은 다른 파일이다 — 둘 다 찾아 함께 넘긴다.
 function panelResolve(id) {
@@ -2552,8 +2556,12 @@ function panelOpen(view) {
   const kind = view.kind === 'meeting' ? 'meeting' : 'item';
   if (kind === 'item' && (view.id === undefined || view.id === null)) return;
   if (kind === 'meeting' && !view.id && !view.event) return;
-  // 패널 자리가 있는 탭은 오늘·프로젝트 둘이다 — 다른 탭에서 열면 오늘로 옮긴다.
-  if (typeof setActiveTab === 'function' && activeTabKey !== 'today' && activeTabKey !== 'projects') setActiveTab('today');
+  // 열려 있는 줄을 다시 누르면 닫힌다(카드일 때만 — 아래 시트는 예전 그대로 바뀌어 열린다).
+  if (!detailSheet() && panelState && panelState.kind === kind && (kind === 'meeting'
+    ? (view.id ? panelState.id === view.id : panelMeetingKey(panelState.event) === panelMeetingKey(view.event))
+    : panelState.id === view.id)) { panelClose(); return; }
+  // 카드는 떠 있으므로 보던 탭 그대로 연다. 시트가 쓰는 자리는 오늘·프로젝트 탭에만 있다.
+  if (detailSheet() && typeof setActiveTab === 'function' && activeTabKey !== 'today' && activeTabKey !== 'projects') setActiveTab('today');
   const host = activeTabKey === 'projects' ? 'projects' : 'today';
   if (!document.getElementById(host === 'projects' ? 'projectDetailPanel' : 'taskDetailPanel')) return;
   const opener = document.activeElement;
@@ -2569,6 +2577,8 @@ function panelOpen(view) {
     // 회의에서 연 항목이면 { kind: 'meeting', … }이 들어와 맨 위에 `← 회의로`가 붙는다.
     back: view.back || null,
     returnFocus: opener && opener !== document.body && opener.focus ? opener : null,
+    // 누른 줄이 어느 목록에 있었는지 — 같은 항목이 여러 목록에 보일 때 그 자리에 카드를 붙인다.
+    anchorHost: detailRowHostId(detailRowMatches(detailLastRow, view, kind) ? detailLastRow : null),
   };
   // Esc는 가장 위에 열린 것부터 닫는다 — 다시 열면 맨 위로 올린다.
   escDrop(panelClose);
@@ -2578,13 +2588,12 @@ function panelOpen(view) {
 
 function panelClose() {
   const side = panelSide();
-  const zone = panelZone();
   const back = panelState?.returnFocus;
   let reopen = panelState?.back;
   panelState = null;
   escDrop(panelClose);
-  if (zone) zone.classList.remove('task-detail-open', 'meeting-open');
-  document.querySelectorAll('.is-sel[data-task-id], .d-mrow.is-sel').forEach(row => row.classList.remove('is-sel'));
+  detailUnmount(); // 떠 있는 카드와 거기 붙은 스크롤·크기 감시를 함께 거둔다
+  document.querySelectorAll('.is-sel[data-task-id], .d-wrow.is-sel, .d-mrow.is-sel').forEach(row => row.classList.remove('is-sel'));
   if (side) { side.hidden = true; side.replaceChildren(); }
   // 팔레트에서 열었던 항목이면 찾던 자리로 돌려 놓는다(포커스도 검색 입력으로).
   // 팔레트 → 회의 → 항목처럼 거쳐 왔어도 처음 찾던 자리로 돌아간다.
@@ -2600,36 +2609,47 @@ function panelAnchorSelector() {
   return `[data-task-id="${CSS.escape(String(panelState.id))}"]`;
 }
 
-// 패널은 어느 줄을 눌러도 같은 자리에 연다 — 헤더 바로 아래, 오른쪽 칸 맨 위(ui.css의 sticky).
-// 누른 줄은 선택 강조로 표시한다. 자리를 계산하지 않으므로 여기서는 옛 인라인 값만 지운다.
+// 내용을 만들어 지금 자리(줄 옆 카드 · 좁은 화면의 아래 시트)에 붙인다.
+// 누른 줄은 선택 강조로 표시한다. 붙을 줄이 사라졌으면(완료·이동) 카드도 함께 닫힌다.
 function panelRender(focusFirst = false) {
-  const side = panelSide();
-  const zone = panelZone();
-  if (!side || !zone || !panelState) return;
+  if (!panelState) return;
   const meeting = panelState.kind === 'meeting' ? panelMeetingEvent() : null;
   const found = panelState.kind === 'meeting' ? null : panelResolve(panelState.id);
   if (!meeting && !found) { panelClose(); return; }
-  zone.classList.add('task-detail-open');
-  zone.classList.toggle('meeting-open', !!meeting);
-  side.hidden = false;
   const box = document.createElement('div');
   box.className = 'd-detail';
   if (meeting) panelMeeting(meeting, box);
   else if (found.kind === 'check') panelCheck(found, box);
   else panelTask(found, box);
-  side.replaceChildren(box);
+  if (detailSheet()) { if (!panelSheetMount(box, focusFirst)) return; }
+  else if (!detailPopMount(box, focusFirst)) { panelClose(); return; }
   const marked = panelState.kind === 'meeting'
     ? panelAnchorSelector()
     : `[data-task-id="${CSS.escape(String(panelState.id))}"], .d-wrow[data-rail-id="${CSS.escape(String(panelState.id))}"]`;
   document.querySelectorAll('.is-sel[data-task-id], .d-wrow.is-sel, .d-mrow.is-sel').forEach(row => row.classList.remove('is-sel'));
   document.querySelectorAll(marked).forEach(row => row.classList.add('is-sel'));
-  if (focusFirst) {
-    // 회의 정리는 고칠 제목이 없다 — 검토할 초안이 없을 때만 직접 담기 입력으로 보낸다.
-    const first = meeting ? (box.querySelector('.d-dcap input') || box) : box.querySelector('.d-dtitle');
-    first?.focus?.();
-    // 패널은 늘 헤더 바로 아래에 붙어 있으므로 화면을 끌어오지 않는다
-    // (누른 줄이 발밑으로 사라지지 않게. 좁은 화면에서는 떠 있는 판이라 역시 필요 없다).
-  }
+}
+
+// 아주 좁은 화면에서는 예전처럼 아래에서 올라오는 시트로 연다(손가락이 닿는 자리).
+function panelSheetMount(box, focusFirst) {
+  const side = panelSide();
+  if (!side) return false;
+  detailUnmount();
+  side.hidden = false;
+  side.replaceChildren(box);
+  if (focusFirst) panelFocusFirst(box);
+  return true;
+}
+
+// 열면 고칠 곳으로 바로 간다 — 업무·확인 대기는 제목, 회의는 검토할 초안이 없을 때만 직접 담기 입력.
+function panelFocusFirst(box) {
+  const first = panelState?.kind === 'meeting' ? (box.querySelector('.d-dcap input') || box) : box.querySelector('.d-dtitle');
+  first?.focus?.();
+}
+
+// 지금 떠 있는 상세 안에서 찾는다(카드 또는 좁은 화면의 시트).
+function panelDetailBox() {
+  return (detailPopHost && detailPopHost.querySelector('.d-detail')) || panelSide()?.querySelector('.d-detail') || null;
 }
 
 // load()가 끝날 때마다 불린다. 패널 안에서 타이핑하는 중이면 다시 그리지 않는다
@@ -2637,8 +2657,8 @@ function panelRender(focusFirst = false) {
 function syncTaskDetail() {
   if (!panelState) return;
   if (panelState.kind !== 'meeting' && !panelResolve(panelState.id)) { panelClose(); return; }
-  const side = panelSide();
-  if (side && isTyping() && side.contains(document.activeElement)) return;
+  const box = panelDetailBox();
+  if (box && isTyping() && box.contains(document.activeElement)) return;
   panelRender();
 }
 
@@ -2764,9 +2784,34 @@ function panelDateCell(label, value, onChange, deadline = true) {
   return wrap;
 }
 
+// 상세의 값은 읽기만 하는 글자가 아니다 — 눌러서 그 자리에서 고친다.
+// 값 + 꺾쇠를 누르면 줄의 ⋯와 같은 고르개(uiMenu)가 붙는다. 저장 길도 줄과 똑같다.
+function panelPickCell(label, content, sections) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'd-dpick';
+  button.setAttribute('aria-haspopup', 'true');
+  button.setAttribute('aria-expanded', 'false');
+  button.setAttribute('aria-label', `${label} — 눌러서 바꾸기`);
+  const value = document.createElement('span');
+  value.className = 'v';
+  if (typeof content === 'string') value.textContent = content;
+  else if (content) value.appendChild(content);
+  const caret = document.createElement('span');
+  caret.className = 'cv';
+  caret.innerHTML = uiIcon('chevron');
+  button.append(value, caret);
+  button.addEventListener('click', (event) => {
+    event.stopPropagation();
+    uiMenu(button, typeof sections === 'function' ? sections() : sections);
+  });
+  return button;
+}
+
 function panelSection(title) {
   const section = document.createElement('div');
   section.className = 'd-dsec';
+  section.dataset.sec = title; // 카드가 구역별로 손보는 자리를 찾는 이름표(결과 한 줄 · 확인 요청 기록)
   const label = document.createElement('span');
   label.className = 'lbl';
   label.textContent = title;
@@ -2822,6 +2867,9 @@ function panelTask({ item, detail, type }, box) {
     if (isTask) actions.push({ label: item.doing ? '진행 중 해제' : '진행 중으로 표시', onClick: () => setTaskDoing(item.id, !item.doing) });
     // 원문 열기는 제목 아래 링크가 늘 보여 주므로 메뉴에는 복사만 남긴다.
     if (item.permalink) actions.push({ label: '원본 링크 복사', onClick: () => panelCopyLink(item.permalink) });
+    // 동작 줄은 한 줄로 둔다 — 자주 쓰지 않는 이동은 메뉴로 내린다.
+    const goProject = typeof wfKey === 'function' ? wfKey(item) : null;
+    if (goProject) actions.push({ label: '프로젝트 보기', onClick: () => openProjectTab(goProject) });
     return [actions, [{
       label: '삭제',
       danger: true,
@@ -2837,12 +2885,16 @@ function panelTask({ item, detail, type }, box) {
 
   const fields = document.createElement('dl');
   fields.className = 'd-fields';
-  panelField(fields, '언제 할지', panelWhenText(item, mode));
+  // 값은 눌러서 바로 고친다 — 줄의 ⋯ 메뉴와 같은 고르개·같은 저장 길이다(완료한 업무는 옮길 일이 없다).
+  panelField(fields, '언제 할지', isTask && !done
+    ? panelPickCell('언제 할지', panelWhenText(item, mode), () => [[{ field: '언제 할지', control: taskWhenControl(item, mode, null) }]])
+    : panelWhenText(item, mode));
   if (isTask) panelField(fields, '기한', panelDateCell('기한', item.due, async (value) => {
     await setTaskDue(item.id, value);
     announce(value ? `기한을 ${uiKoDate(value)}로 정했어요` : '기한을 지웠어요');
   }));
-  panelField(fields, '우선순위', panelPriorityCell(item));
+  panelField(fields, '우선순위', panelPickCell('우선순위', panelPriorityCell(item),
+    () => [[{ field: '우선순위', control: taskPriorityControl(item) }]]));
   panelField(fields, '프로젝트', taskProjectControl(item));
   box.appendChild(fields);
 
@@ -2871,8 +2923,6 @@ function panelTask({ item, detail, type }, box) {
       }));
     }
   }
-  const itemProject = typeof wfKey === 'function' ? wfKey(item) : null;
-  if (itemProject) foot.appendChild(panelQuietButton('프로젝트 보기', () => openProjectTab(itemProject)));
   box.appendChild(foot);
 
   if (isTask) panelTaskNotes(item, detail, box);
@@ -3051,9 +3101,9 @@ function panelMeetingWhen(event) {
   return [[day, time].filter(Boolean).join(' '), project].filter(Boolean).join(' · ');
 }
 
-// 패널 안에서 저장이 실패한 자리를 그 자리에 적는다(알림은 request가 따로 띄운다).
+// 상세 안에서 저장이 실패한 자리를 그 자리에 적는다(알림은 request가 따로 띄운다).
 function panelSetError(text) {
-  const region = panelSide()?.querySelector('.d-derr');
+  const region = panelDetailBox()?.querySelector('.d-derr');
   if (region) region.textContent = text || '';
 }
 
@@ -3377,7 +3427,8 @@ function panelMeetingCapture(event, box, linked) {
   section.open = !(event.drafts && event.drafts.length);
   const label = document.createElement('summary');
   label.className = 'lbl';
-  label.textContent = '직접 적어 담기';
+  label.innerHTML = uiIcon('chevron');
+  label.append('직접 적어 담기');
   section.appendChild(label);
 
   const form = document.createElement('div');
@@ -3451,7 +3502,8 @@ function panelMeetingLink(event, box) {
   section.className = 'd-dsec d-dadd';
   const label = document.createElement('summary');
   label.className = 'lbl';
-  label.textContent = '기존 항목 연결';
+  label.innerHTML = uiIcon('chevron');
+  label.append('기존 항목 연결');
   section.appendChild(label);
 
   const row = document.createElement('div');
@@ -3473,6 +3525,260 @@ function panelMeetingLink(event, box) {
   }));
   section.appendChild(row);
   box.appendChild(section);
+}
+
+/* ---------- 줄 옆 카드 ----------
+   상세는 누른 줄 옆에 떠 있는 카드로 연다(자리를 옮겨 다니지 않고 눈이 줄에서 떨어지지 않게).
+   - 가로: 본문 줄은 줄 오른쪽 끝 안쪽, 레일 줄은 줄 오른쪽 옆, 서랍 줄은 서랍 왼쪽 옆.
+   - 세로: 줄 윗변에 맞추되 화면에 들어갈 만큼만 위로 끌어올린다(헤더 아래 12px · 아래 12px).
+   - 길어지면 카드가 화면을 넘지 않는다: 머리(제목)와 발(동작 줄·담기 바)은 붙박이, 가운데만 스크롤.
+   - 목록을 스크롤하면 줄을 따라가고, 줄이 화면 밖으로 완전히 나가면 닫힌다.
+   - 붙을 줄이 없이 열면(팔레트 등) 화면 가운데 위에 선다.
+   회의 정리는 검토하는 면이 넓어야 해서 같은 카드의 넓은 쪽(460px)을 쓰고, 빈 자리를 눌러도 닫히지 않는다. */
+const DETAIL_HDR = 60;        // --hdr
+const DETAIL_GAP = 12;        // 헤더 아래 · 화면 아래 · 줄에서 떨어지는 거리
+const DETAIL_W = 360;         // 업무 · 확인 대기
+const DETAIL_W_WIDE = 460;    // 회의 정리
+const DETAIL_SHEET_MAX = 520; // 여기보다 좁으면 아래에서 올라오는 시트
+
+let detailPopHost = null;
+let detailPopTick = 0;
+let detailPopSize = null;   // 내용이 자라면 자리를 다시 잡는 관찰자
+let detailPopFloat = false; // 붙을 줄 없이 연 카드 — 계속 화면 가운데 위에 선다
+let detailLastRow = null;   // 마지막으로 누른 줄 — 같은 항목이 여러 목록에 보일 때 그 자리를 쓴다
+
+function detailSheet() { return window.innerWidth <= DETAIL_SHEET_MAX; }
+
+function detailReduce() {
+  try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; }
+}
+
+// 줄이 어느 목록에 들어 있는지(다시 그려도 남는 id로 적어 둔다).
+function detailRowHostId(row) {
+  const holder = row && row.closest ? row.closest('[id]') : null;
+  return holder ? holder.id : null;
+}
+
+// 방금 누른 줄이 지금 여는 항목의 줄인지.
+function detailRowMatches(row, view, kind) {
+  if (!row || !row.dataset) return false;
+  if (kind === 'meeting') return row.dataset.meetingId !== undefined;
+  const id = String(view.id);
+  return row.dataset.taskId === id || row.dataset.railId === id;
+}
+
+document.addEventListener('click', (event) => {
+  const row = event.target.closest ? event.target.closest('[data-task-id], [data-rail-id], [data-meeting-id]') : null;
+  if (row) detailLastRow = row;
+}, true);
+
+// 지금 열어 둔 항목의 줄. 숨은 탭·닫힌 서랍 안의 줄은 세지 않는다.
+function detailAnchorRow() {
+  if (!panelState) return null;
+  let selector = null;
+  if (panelState.kind === 'meeting') {
+    const key = panelMeetingKey(panelMeetingEvent());
+    if (key) selector = `[data-meeting-id="${CSS.escape(String(key))}"]`;
+  } else if (panelState.id !== null && panelState.id !== undefined) {
+    const id = CSS.escape(String(panelState.id));
+    selector = `[data-task-id="${id}"], [data-rail-id="${id}"]`;
+  }
+  if (!selector) return null;
+  const rows = [...document.querySelectorAll(selector)]
+    .filter(row => row.offsetParent !== null && !row.closest('[hidden]'))
+    .filter(row => laterDrawerOpen || !row.closest('#laterTaskDrawer'));
+  if (!rows.length) return null;
+  const host = panelState.anchorHost ? document.getElementById(panelState.anchorHost) : null;
+  return (host && rows.find(row => host.contains(row))) || rows[0];
+}
+
+// 어느 쪽에 붙일지 — 서랍 줄은 서랍 왼쪽 옆, 레일 줄은 줄 오른쪽 옆, 나머지는 줄 오른쪽 끝 안쪽.
+function detailPopSide(row) {
+  if (!row || !row.closest) return 'body';
+  if (row.closest('#laterTaskDrawer')) return 'drawer';
+  if (row.closest('.d-rail')) return 'rail';
+  return 'body';
+}
+
+function detailPopWidth() {
+  const wide = panelState && panelState.kind === 'meeting';
+  const room = Math.max(280, window.innerWidth - 48);
+  return Math.min(wide ? DETAIL_W_WIDE : DETAIL_W, room);
+}
+
+// 카드 자리(순수 함수). row·view는 화면 좌표, card는 { width, height },
+// side는 'body' · 'rail' · 'drawer' · 'center'(붙을 줄이 없을 때).
+function detailPopPosition(row, card, view, side = 'body') {
+  const width = card.width || DETAIL_W;
+  const roof = DETAIL_HDR + DETAIL_GAP;
+  const maxHeight = Math.max(160, view.height - DETAIL_HDR - DETAIL_GAP * 2);
+  if (side === 'center' || !row) {
+    return { left: Math.round(Math.max(8, (view.width - width) / 2)), top: roof, maxHeight };
+  }
+  const height = Math.min(card.height || 0, maxHeight);
+  let left = side === 'rail' ? row.right + DETAIL_GAP
+    : side === 'drawer' ? row.left - width - DETAIL_GAP
+    : row.right - width - DETAIL_GAP;
+  left = Math.min(Math.max(8, left), Math.max(8, view.width - width - 8));
+  const top = Math.max(roof, Math.min(row.top, view.height - DETAIL_GAP - height));
+  return { left: Math.round(left), top: Math.round(top), maxHeight };
+}
+
+// 만들어 둔 상세를 카드에 넣고 줄 옆에 세운다. 붙어 있던 줄이 사라졌으면 false(부르는 쪽이 닫는다).
+function detailPopMount(box, focusFirst) {
+  const row = detailAnchorRow();
+  if (!detailPopHost) detailPopFloat = !row;
+  if (!row && !detailPopFloat) return false;
+  let host = detailPopHost;
+  if (!host) {
+    host = document.createElement('div');
+    host.className = 'd-popd';
+    host.setAttribute('role', 'region');
+    host.setAttribute('aria-label', '선택한 항목 상세');
+    document.body.appendChild(host);
+    detailPopHost = host;
+    document.addEventListener('mousedown', detailPopOutside, true);
+    window.addEventListener('scroll', detailPopFollow, true);
+    window.addEventListener('resize', detailPopFollow);
+    if (!detailReduce() && host.animate) {
+      host.animate([{ opacity: 0, transform: 'translateY(-4px) scale(0.985)' }, { opacity: 1, transform: 'none' }],
+        { duration: 140, easing: 'cubic-bezier(0.22, 0.8, 0.3, 1)' });
+    }
+  }
+  detailPopShape(box);
+  host.replaceChildren(box);
+  if (detailPopSize) detailPopSize.disconnect();
+  if (window.ResizeObserver) {
+    // 내용이 자라거나(결과 한 줄·기록 펼치기) 줄어들면 자리를 다시 잡는다.
+    detailPopSize = new ResizeObserver(() => detailPopReplace());
+    detailPopSize.observe(box);
+  }
+  detailPopPlace(detailPopFloat ? null : row);
+  if (focusFirst) panelFocusFirst(box);
+  return true;
+}
+
+// 머리(제목)와 발(동작 줄·담기 바)은 카드에 붙박이로 두고 가운데만 스크롤한다.
+function detailPopShape(box) {
+  box.classList.add('is-pop');
+  if (panelState && panelState.kind === 'meeting') box.classList.add('is-wide');
+  const back = box.querySelector(':scope > .d-back');
+  const head = box.querySelector(':scope > .d-dtop');
+  const foot = box.querySelector(':scope > .d-dfoot') || box.querySelector(':scope > .d-dbar');
+  const body = document.createElement('div');
+  body.className = 'd-popbody';
+  body.append(...[...box.children].filter(el => el !== back && el !== head && el !== foot));
+  box.replaceChildren(...[back, head, body, foot].filter(Boolean));
+  // 가운데가 스크롤되고 있을 때만 머리·발 경계에 옅은 선을 둔다.
+  const edges = () => {
+    box.classList.toggle('at-top', body.scrollTop <= 1);
+    box.classList.toggle('at-end', body.scrollTop + body.clientHeight >= body.scrollHeight - 1);
+  };
+  body.addEventListener('scroll', edges, { passive: true });
+  detailAutoGrow(box, 5, () => detailPopReplace());
+  detailLogClamp(box, () => detailPopReplace());
+  requestAnimationFrame(edges);
+}
+
+// 결과 한 줄은 한 줄로 시작해 쓰는 만큼만 자라고, 다섯 줄을 넘으면 칸 안에서 스크롤한다.
+function detailAutoGrow(box, maxLines, onGrow) {
+  const area = box.querySelector('.d-dsec[data-sec="결과 한 줄"] .d-din');
+  if (!area) return;
+  area.rows = 1;
+  const cap = 21 * maxLines + 20;
+  let last = 0;
+  const grow = () => {
+    area.style.height = 'auto';
+    const next = Math.min(area.scrollHeight, cap);
+    area.style.height = `${next}px`;
+    area.style.overflowY = area.scrollHeight > cap ? 'auto' : 'hidden';
+    if (onGrow && next !== last) onGrow();
+    last = next;
+  };
+  area.addEventListener('input', grow);
+  grow();
+}
+
+// 확인 요청 기록은 최신 3개만 펴 두고 나머지는 조용한 링크 뒤에 둔다(카드가 길어지지 않게).
+function detailLogClamp(box, onOpen) {
+  const section = box.querySelector('.d-dsec[data-sec="확인 요청 기록"]');
+  if (!section || section.querySelector('.d-logmore')) return;
+  const lines = [...section.querySelectorAll('.d-logline')];
+  if (lines.length <= 3) return;
+  const hidden = lines.slice(3);
+  hidden.forEach(line => { line.hidden = true; });
+  const more = document.createElement('button');
+  more.type = 'button';
+  more.className = 'd-link d-logmore';
+  more.textContent = `이전 기록 ${hidden.length}개 더 보기`;
+  more.addEventListener('click', () => {
+    hidden.forEach(line => { line.hidden = false; });
+    more.remove();
+    if (onOpen) onOpen();
+  });
+  hidden[hidden.length - 1].after(more);
+}
+
+function detailPopReplace() {
+  if (!detailPopHost) return;
+  if (detailPopFloat) { detailPopPlace(null); return; }
+  const row = detailAnchorRow();
+  if (row) detailPopPlace(row);
+}
+
+function detailPopPlace(row) {
+  const host = detailPopHost;
+  if (!host) return;
+  const width = detailPopWidth();
+  host.style.width = `${width}px`;
+  const view = { width: window.innerWidth, height: window.innerHeight };
+  const card = host.firstElementChild;
+  if (card) card.style.maxHeight = `${Math.max(160, view.height - DETAIL_HDR - DETAIL_GAP * 2)}px`;
+  const spot = detailPopPosition(row ? row.getBoundingClientRect() : null,
+    { width, height: host.offsetHeight }, view, row ? detailPopSide(row) : 'center');
+  host.style.left = `${spot.left}px`;
+  host.style.top = `${spot.top}px`;
+}
+
+// 스크롤하면 줄을 따라간다(갑자기 사라지지 않게). 줄이 화면 밖으로 나가면 그때 닫는다.
+function detailPopFollow() {
+  if (detailPopTick) return;
+  detailPopTick = requestAnimationFrame(() => {
+    detailPopTick = 0;
+    if (!detailPopHost || !panelState) return;
+    if (detailSheet()) { panelRender(); return; } // 창이 아주 좁아졌으면 아래 시트로 바꿔 연다
+    if (detailPopFloat) { detailPopPlace(null); return; }
+    // 스크롤해서 닫히는 것은 사람이 닫은 것이 아니다 — 팔레트로 되돌아가지 않는다(찾던 자리가 갑자기 튀어나오지 않게).
+    const drop = () => { panelState.back = null; panelClose(); };
+    const row = detailAnchorRow();
+    if (!row) { drop(); return; }
+    const rect = row.getBoundingClientRect();
+    if (rect.bottom < DETAIL_HDR || rect.top > window.innerHeight - 8) { drop(); return; }
+    detailPopPlace(row);
+  });
+}
+
+function detailPopOutside(event) {
+  if (!detailPopHost || detailPopHost.contains(event.target)) return;
+  // 회의 정리는 한참 붙들고 일하는 면이다 — 빈 자리를 눌렀다고 닫지 않는다(자리를 잃지 않게).
+  if (panelState && panelState.kind === 'meeting') return;
+  if (!event.target.closest) return;
+  // 카드에서 연 메뉴·날짜 고르개·팔레트·설정 창은 카드의 일부다.
+  if (event.target.closest('.d-menulist, .d-pal, dialog')) return;
+  // 다른 줄을 누른 것이면 그 줄이 카드를 옮겨 간다(같은 줄이면 그 줄이 닫는다).
+  if (event.target.closest('[data-task-id], [data-rail-id], [data-meeting-id]')) return;
+  panelClose();
+}
+
+// 카드와 거기 붙은 감시를 모두 거둔다(종일 띄워 두는 앱이라 남기면 그대로 쌓인다).
+function detailUnmount() {
+  if (detailPopSize) { detailPopSize.disconnect(); detailPopSize = null; }
+  if (detailPopTick) { cancelAnimationFrame(detailPopTick); detailPopTick = 0; }
+  if (detailPopHost) { detailPopHost.remove(); detailPopHost = null; }
+  detailPopFloat = false;
+  document.removeEventListener('mousedown', detailPopOutside, true);
+  window.removeEventListener('scroll', detailPopFollow, true);
+  window.removeEventListener('resize', detailPopFollow);
 }
 
 // ---------- ⌘K 검색 팔레트 (검색 · 회의 모아보기 · 오늘 신규) ----------
