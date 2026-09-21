@@ -2453,6 +2453,134 @@ test('버튼 옆 조용한 기록은 오늘 성공한 실행이 있을 때만 �
   app.run(`meetingNotesApply({ used: true, state: 'done', lastRunAt: '${meetingNotesDay(-1)} 14:20:05', lastKind: 'run' })`);
   assert.equal(app.run('meetingNotesLastText()'), '', '어제 것은 적지 않는다');
 });
+
+// ---------- BTIRO2: 미팅 노트를 이미 다 가져온 상태의 대응 ----------
+// 가짜 DOM에는 innerHTML이 없다 — nodeText·nodeFind(밑에서 정의)로 붙인 글자·자식을 훑는다.
+test('meetingNotesPendingToday: 오늘 이미 시작했고 아직 노트가 없는 회의만 센다(시작 전·지난 날짜·이미 가져온 회의는 뺀다)', () => {
+  const { app } = meetingNotesClient([]);
+  app.run("meetingNotesApply({ used: true, state: 'idle' })");
+  const today = meetingNotesDay(0);
+  app.run(`workflowData.meetings = [
+    { date: '${today}', start: '00:00', title: '이미 시작한 회의' },
+    { date: '${today}', start: '00:00', title: '이미 가져온 회의', tiroNotes: ['https://tiro.ooo/n/1'] },
+    { date: '${meetingNotesDay(-1)}', start: '00:00', title: '지난 날짜 회의' },
+  ]; wfIndexData();`);
+  assert.equal(app.run('meetingNotesPendingToday()'), 1);
+  if (new Date().getHours() < 23) {
+    app.run(`workflowData.meetings.push({ date: '${today}', start: '23:59', title: '아직 안 열린 회의' }); wfIndexData();`);
+    assert.equal(app.run('meetingNotesPendingToday()'), 1, '아직 시작하지 않은 오늘 회의는 더하지 않는다');
+  }
+});
+
+test('회의 탭 머리의 세 상태: 가져올 게 있으면 버튼+개수, 다 가져왔으면 상태 글자+`다시 확인`, 오늘 시작한 회의가 없으면 다른 글자', async () => {
+  const { app, sent } = meetingNotesClient([{ used: true, state: 'requested', scope: 'today' }]);
+  app.run("meetingNotesApply({ used: true, state: 'idle' })");
+  const list = () => app.nodes.get('meetingList');
+  const clean = text => text.replace(/\s+/g, ' ').trim();
+
+  // 오늘 시작한 회의가 하나도 없다
+  app.run('workflowData = { items: [], meetings: [] }; wfIndexData(); renderMeetings();');
+  assert.equal(nodeFind(list().children[0], 'd-btn'), null);
+  let idle = nodeFind(list(), 'd-mtlast');
+  assert.equal(clean(nodeText(idle)), '아직 가져올 미팅 노트가 없어요 다시 확인');
+
+  // 오늘 시작한 회의가 있고 아직 노트가 없다 — 버튼 + 개수(조용한 숫자 표현)
+  const today = meetingNotesDay(0);
+  app.run(`workflowData.meetings = [{ date: '${today}', start: '00:00', title: 'A' }]; wfIndexData(); renderMeetings();`);
+  const button = nodeFind(list().children[0], 'd-btn');
+  assert.equal(clean(nodeText(button)), '오늘 것 모두 가져오기 1');
+  assert.equal(button.disabled, false);
+
+  // 이미 다 가져왔다 — 버튼 대신 상태 글자 + `다시 확인`
+  app.run(`workflowData.meetings = [{ date: '${today}', start: '00:00', title: 'A', tiroNotes: ['https://tiro.ooo/n/1'] }]; wfIndexData(); renderMeetings();`);
+  assert.equal(nodeFind(list().children[0], 'd-btn'), null, '가져올 게 없으면 버튼은 서지 않는다');
+  idle = nodeFind(list(), 'd-mtlast');
+  assert.equal(clean(nodeText(idle)), '오늘 미팅 노트는 다 가져왔어요 다시 확인');
+
+  // `다시 확인`은 같은 `meetingNotesStart('today')` 길을 쓴다
+  const retry = nodeFind(idle, 'd-link');
+  await retry.listeners.click();
+  assert.deepEqual(sent, [{ url: '/api/meeting-notes/request', body: { scope: 'today' } }]);
+});
+
+test('오늘 미팅 줄 ⋯ 메뉴: 가져올 게 있으면 `오늘 것 모두 가져오기 N`, 없으면 비활성 문구', () => {
+  const { app } = meetingNotesClient([]);
+  app.run("meetingNotesApply({ used: true, state: 'idle' })");
+  const today = meetingNotesDay(0);
+  const sections = () => JSON.parse(app.run(`JSON.stringify(
+    meetingMenuSections({ title: 'A' }, { fetchAll: true }).map(section => section.map(entry => ({ label: entry.label, disabled: !!entry.disabled }))))`));
+
+  app.run(`workflowData.meetings = [{ date: '${today}', start: '00:00', title: 'A' }]; wfIndexData();`);
+  let entry = sections()[0].find(a => a.label.startsWith('오늘 것'));
+  assert.deepEqual(entry, { label: '오늘 것 모두 가져오기 1', disabled: false });
+
+  app.run(`workflowData.meetings = [{ date: '${today}', start: '00:00', title: 'A', tiroNotes: ['https://tiro.ooo/n/1'] }]; wfIndexData();`);
+  entry = sections()[0].find(a => a.label.includes('다 가져왔어요'));
+  assert.deepEqual(entry, { label: '오늘 미팅 노트는 다 가져왔어요', disabled: true });
+});
+
+test('가져오기가 끝난 뒤: 보내기 전 기억과 비교해 늘었으면 회의·초안 수로 알린다', async () => {
+  const { app } = meetingNotesClient([
+    { used: true, state: 'requested', scope: 'today' },
+    { used: true, state: 'done', scope: 'today', summary: '로그 요약(기억이 있으면 쓰이지 않는다)' },
+  ]);
+  app.run("meetingNotesApply({ used: true, state: 'idle' })");
+  await app.run("meetingNotesStart('today')");
+  const today = meetingNotesDay(0);
+  app.run(`load = async () => { loaded += 1; workflowData.meetings = [{ id: 'm1', date: '${today}', start: '09:00', title: 'X', tiroNotes: ['https://tiro.ooo/n/1'], drafts: [{ id: 'd1' }, { id: 'd2' }] }]; wfIndexData(); };`);
+  await app.run('meetingNotesPoll()');
+  assert.equal(app.nodes.get('liveRegion').textContent, '미팅 노트를 가져왔어요 · 회의 1개, 초안 2개');
+});
+
+test('가져오기가 끝났는데 늘어난 게 없으면 오류가 아니라 `새로 가져올 미팅 노트가 없었어요`로 알린다', async () => {
+  const { app } = meetingNotesClient([
+    { used: true, state: 'requested', scope: 'today' },
+    { used: true, state: 'done', scope: 'today', summary: '노트 0개' },
+  ]);
+  app.run("meetingNotesApply({ used: true, state: 'idle' })");
+  await app.run("meetingNotesStart('today')");
+  // workflowData는 그대로다(늘어난 회의·초안이 없다) — load()는 기본 목(무동작)을 그대로 쓴다.
+  await app.run('meetingNotesPoll()');
+  assert.equal(app.nodes.get('liveRegion').textContent, '새로 가져올 미팅 노트가 없었어요');
+});
+// 기억이 없을 때(페이지를 새로 열어 진행 중인 요청에 이어붙은 경우)는 위 `가져오기가 끝나면 목록을 다시
+// 그리고 한 번만 알린다` 테스트가 이미 확인한다 — meetingNotesStart를 부르지 않아 기억이 없으므로
+// status.summary로 만든 기존 문구(`미팅 노트를 가져왔어요 · 노트 2개, 초안 5개를 남겼습니다`)로 돌아간다.
+
+test('panelMeeting: 이미 가져온 회의에는 `미팅 노트 가져옴`이 뜨고, 링크가 있으면 `티로에서 열기`가 붙는다(초안이 0개여도 남는다)', () => {
+  const { app } = meetingNotesClient([]);
+  app.run("meetingNotesApply({ used: true, state: 'idle' })");
+  const past = {
+    id: 'm1', date: meetingNotesDay(-1), start: '10:00', end: '10:30', title: '지난 회의',
+    tiroNotes: ['https://tiro.ooo/n/1', 'https://tiro.ooo/n/2'], drafts: [],
+  };
+  app.context.__past = past;
+  app.run('workflowData.meetings = [__past]; wfIndexData();');
+  const box = app.run(`(() => { const box = document.createElement('div'); panelMeeting(__past, box); return box; })()`);
+  const get = nodeFind(box, 'd-dget');
+  assert.ok(get, '가져오기 버튼이 서던 자리에 표시가 선다');
+  assert.match(nodeText(get), /미팅 노트 가져옴/);
+  const links = get.children.filter(node => node.className === 'd-link');
+  assert.equal(links.length, 2, '노트가 여럿이면 링크도 그만큼');
+  assert.equal(links[0].textContent, '티로에서 열기 1');
+  assert.equal(links[1].textContent, '티로에서 열기 2');
+  assert.equal(links[0].target, '_blank');
+  assert.equal(links[0].rel, 'noopener noreferrer');
+
+  // 노트는 있어도(가져오긴 했어도) 서버가 준 값에 링크가 없으면(tiroNotes: []) 링크 없이 상태 글자만.
+  const noLink = { ...past, tiroNotes: [] };
+  app.context.__noLink = noLink;
+  const box2 = app.run(`(() => { const box = document.createElement('div'); panelMeeting(__noLink, box); return box; })()`);
+  const get2 = nodeFind(box2, 'd-dget');
+  assert.match(nodeText(get2), /미팅 노트 가져옴/);
+  assert.equal(get2.children.filter(node => node.className === 'd-link').length, 0);
+
+  // 시작 전 회의(캘린더에는 있지만 노트도 없고 아직 시작도 안 함)에는 이 자리 자체가 없다.
+  const future = { id: 'm2', date: meetingNotesDay(2), start: '10:00', title: '미래 회의' };
+  app.context.__future = future;
+  const box3 = app.run(`(() => { const box = document.createElement('div'); panelMeeting(__future, box); return box; })()`);
+  assert.equal(nodeFind(box3, 'd-dget'), null);
+});
 // 낡음 경고는 머리줄에 글자로 끼어들지 않는다(탭이 밀렸다) — 설정 톱니바퀴의 주황 점과 툴팁으로만 알린다.
 test('renderDateBar: 낡음 경고는 톱니바퀴의 점·툴팁으로만 알리고, 아침 첫 자동 갱신 전의 `어제 기준`은 알리지 않는다', () => {
   const app = pureClient();
