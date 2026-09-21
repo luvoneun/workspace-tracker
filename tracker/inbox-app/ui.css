@@ -70,8 +70,10 @@
   --grp: 36px;
   --hdr: 60px;
   --pad: 20px;    /* 카드 안쪽 좌우 여백 */
-  --wp: 104px;
-  --wm: 184px;
+  /* 프로젝트는 제목 뒤에 적으므로 줄 가운데 열은 폭 0이다(그만큼 제목이 넓어진다).
+     좁은 화면(≤520px)의 두 줄 행에서만 이름 붙인 칸으로 쓴다. */
+  --wp: 0px;
+  --wm: 168px;
   --rail-w: 296px;     /* 눈에 보이는 레일 폭 */
   --rail-bleed: 20px;  /* 레일이 물고 들어가는 페이지 왼쪽 여백 */
   --ease: cubic-bezier(0.22, 0.8, 0.3, 1);
@@ -832,6 +834,26 @@ body.batch-open .d-row.is-done { opacity: 0.6; }
 }
 .d-cb:checked ~ .d-tick { opacity: 1; }
 
+/* ---------- 우선순위는 체크박스 안의 위 화살표로 말한다 ----------
+   지라의 우선순위 아이콘과 같은 말이다: `중요` 한 겹 · `긴급` 두 겹. 자리를 새로 차지하지 않고
+   체크박스 열에 세로로 서므로, 줄 오른쪽에는 날짜 성격의 말만 남는다(DECISIONS 2026-09-23).
+   색만으로 말하지 않는다 — 체크박스의 title·aria-label이 `중요`·`긴급`을 함께 읽어 준다. */
+.d-cb.is-pri-high { border-color: var(--warn); background: var(--warn-bg); }
+.d-cb.is-pri-top { border-color: var(--urgent); background: var(--urgent-bg); }
+.d-pri {
+  position: absolute; width: 13px; height: 13px; pointer-events: none;
+  fill: none; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round;
+  transition: opacity 120ms var(--ease);
+}
+.d-cb.is-pri-high ~ .d-pri { stroke: var(--warn); }
+.d-cb.is-pri-top ~ .d-pri { stroke: var(--urgent); }
+/* 손이 닿거나 초점이 오면 꺾쇠를 감추고 평소의 체크박스(파란 테)로 돌아간다 — 누르면 무엇이 되는지가 먼저다.
+   체크한 뒤에도(완료 순간 애니메이션 포함) 꺾쇠는 없고 평소의 파란 채움 + 흰 체크다. */
+.d-cb.is-pri-high:hover, .d-cb.is-pri-top:hover,
+.d-cb.is-pri-high:focus-visible, .d-cb.is-pri-top:focus-visible { border-color: var(--accent); background: var(--surface); }
+.d-cb:hover ~ .d-pri, .d-cb:focus-visible ~ .d-pri, .d-cb:checked ~ .d-pri { opacity: 0; }
+.d-cb:checked.is-pri-high, .d-cb:checked.is-pri-top { background: var(--accent); border-color: var(--accent); }
+
 /* 레일 확인 대기의 체크 — 같은 가족, 한 치수 작게(체크는 CSS로 그린다) */
 .d-wcb {
   appearance: none; -webkit-appearance: none; margin: 0; position: relative;
@@ -901,20 +923,6 @@ body.batch-open .d-row { grid-template-columns: 22px 30px minmax(0, 1fr) var(--w
   font-size: 13px; color: var(--dim); white-space: nowrap; overflow: hidden;
   font-variant-numeric: tabular-nums;
 }
-/* 자리를 고정한 상태 열(오늘 목록·나중에 할 일 서랍·마감·중요도순) — 우선순위 | 상태 | 기한 세 칸이
-   줄마다 같은 x 자리에 선다(없는 칸도 자리를 지킨다). 같은 종류가 세로로 서야 훑을 수 있다.
-   비어 있던 프로젝트 열을 접고 그만큼을 상태 열이 쓴다 — 제목 폭은 거의 그대로다. */
-.d-row.is-cols { --wp: 0px; --wm: 306px; }
-.d-meta.is-fixed {
-  display: grid; grid-template-columns: 48px minmax(0, 1fr) 120px; gap: 0 6px; overflow: hidden;
-}
-/* 칸은 줄글 상자다 — 상태가 둘 이상 겹치면(밀림 + 답변 기다리는 중) 한 칸 안에 이어 쓰고,
-   넘치면 뒤를 말줄임한다. */
-.d-meta.is-fixed .m-c { display: block; align-self: center; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.d-meta.is-fixed .m-c > * { vertical-align: middle; }
-.d-meta.is-fixed .m-c.st > * + * { margin-left: 8px; }
-/* 기한이 가장 급한 정보라 맨 오른쪽 · 오른쪽 정렬. 나머지 둘은 칸 왼쪽에 붙는다. */
-.d-meta.is-fixed .m-c.due { text-align: right; }
 /* 상태말은 기본이 조용한 글자다 — 아이콘 + 회색 글자 */
 .d-meta .m-pri, .d-meta .m-due, .d-meta .m-wait, .d-meta .m-doing, .d-meta .m-carry, .d-meta .out {
   display: inline-flex; align-items: center; gap: 4px; color: var(--dim); font-weight: 500;
@@ -1390,13 +1398,13 @@ body.batch-open .d-toast { bottom: 76px; }
 
 /* 조용한 열 이름 줄 — 아래 행과 같은 격자를 쓴다 */
 .d-colhd {
-  display: grid; grid-template-columns: 30px 60px minmax(0, 1fr) 78px 116px; column-gap: 10px; align-items: center;
+  display: grid; grid-template-columns: 30px 60px minmax(0, 1fr) 116px; column-gap: 10px; align-items: center;
   height: 28px; margin: 0 0 2px; padding: 0 var(--pad); font-size: 12px; font-weight: 500; color: var(--dim);
 }
 .d-colhd .r { text-align: right; }
 
 .d-prow2 {
-  display: grid; grid-template-columns: 30px 60px minmax(0, 1fr) 78px 116px; align-items: center; column-gap: 10px;
+  display: grid; grid-template-columns: 30px 60px minmax(0, 1fr) 116px; align-items: center; column-gap: 10px;
   height: var(--row); padding: 0 var(--pad); position: relative; border-radius: 14px;
   --rowbg: var(--surface); background: var(--rowbg); transition: background 170ms var(--ease);
 }
@@ -1409,17 +1417,17 @@ body.batch-open .d-toast { bottom: 76px; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .d-prow2.is-sel .ti { font-weight: 600; color: var(--accent-text); }
-/* 상태말은 오늘 목록과 같은 규칙이다 — 아이콘 + 회색 글자, 급한 말만 6px 배지 */
-.d-prow2 .pr, .d-prow2 .dd {
+/* 상태말은 오늘 목록과 같은 규칙이다 — 아이콘 + 회색 글자, 급한 말만 6px 배지.
+   우선순위 열은 없앴다(체크박스 안의 꺾쇠가 말한다) — 줄에는 기한만 남는다. */
+.d-prow2 .dd {
   display: inline-flex; align-items: center; justify-content: flex-end; gap: 4px;
   font-size: 13px; font-weight: 500; color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums;
 }
-.d-prow2 .pr.k-warn { color: var(--warn); font-weight: 600; }
-.d-prow2 .pr.k-neg, .d-prow2 .dd.k-neg, .d-prow2 .dd.k-warn {
+.d-prow2 .dd.k-neg, .d-prow2 .dd.k-warn {
   height: 23px; padding: 0 8px; border-radius: 6px;
   font-size: 12.5px; font-weight: 600; pointer-events: none;
 }
-.d-prow2 .pr.k-neg, .d-prow2 .dd.k-neg { background: var(--urgent-bg); color: var(--urgent); }
+.d-prow2 .dd.k-neg { background: var(--urgent-bg); color: var(--urgent); }
 .d-prow2 .dd.k-warn { background: var(--warn-bg); color: var(--warn); }
 .d-prow2 .ac {
   position: absolute; right: 10px; top: 1px; bottom: 1px;
@@ -1624,9 +1632,7 @@ body.batch-open .d-toast { bottom: 76px; }
 
 /* ---------- 반응형 ---------- */
 @media (max-width: 1280px) {
-  :root { --wm: 152px; --wp: 84px; }
-  /* 자리를 고정한 줄은 상태 칸을 줄여 제목 폭을 지킨다(우선순위·기한 칸은 그대로) */
-  .d-row.is-cols { --wm: 268px; }
+  :root { --wm: 140px; }
 }
 /* 손가락으로 쓰는 폭에서는 카드 대신 아래에서 올라오는 시트로 연다(app.js가 같은 기준으로 고른다).
    서랍(z 40)·선택 막대(z 46) 위에 눕고, 길면 시트 안에서 스크롤한다. */
@@ -1736,10 +1742,8 @@ body.batch-open .d-toast { bottom: 76px; }
   /* 제목 묶음도 업무 행에만 칸 이름을 준다 — 결정·아이디어 줄에는 이름 붙인 칸이 없어 줄이 어긋난다 */
   .d-row .d-titlewrap { grid-area: ti; flex-wrap: wrap; }
   .d-proj { display: none; }
-  /* 두 줄 행에서는 격자를 풀고 지금처럼 이어 붙는 흐름으로 — 순서만 새 순서다 */
-  .d-meta, .d-meta.is-fixed { grid-area: mt; display: flex; justify-content: flex-start; flex-wrap: wrap; gap: 8px; row-gap: 5px; }
-  .d-meta.is-fixed .m-c { display: contents; }
-  .d-meta.is-fixed .m-c.st > * + * { margin-left: 0; }
+  /* 두 줄 행에서도 같은 순서로 이어 붙는다(상태 → 기한) — 왼쪽 정렬만 다르다 */
+  .d-meta { grid-area: mt; justify-content: flex-start; flex-wrap: wrap; row-gap: 5px; }
   .d-meta .m-proj { display: inline-flex; }
   .d-acts, .d-row.is-sug .d-acts {
     grid-area: ac; position: static; flex-direction: column; align-items: stretch;
@@ -1756,16 +1760,15 @@ body.batch-open .d-toast { bottom: 76px; }
   /* 프로젝트 면의 줄도 두 줄로 쌓이고, 동작은 항상 보인다 */
   .d-colhd { display: none; }
   .d-prow2 {
-    grid-template-columns: 30px auto auto minmax(0, 1fr) auto;
-    grid-template-areas: "ck ti ti ti ac" "ck a b c ac";
+    grid-template-columns: 30px auto minmax(0, 1fr) auto;
+    grid-template-areas: "ck ti ti ac" "ck a c ac";
     height: auto; min-height: 60px; padding: 10px 12px; row-gap: 2px; column-gap: 8px;
   }
-  .d-prow2.is-done { grid-template-areas: "ck ti ti ti c" "ck a a a a"; }
+  .d-prow2.is-done { grid-template-areas: "ck ti ti c" "ck a a a"; }
   .d-prow2 .d-check { grid-area: ck; width: 30px; height: auto; }
   .d-prow2 .ti { grid-area: ti; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-  .d-prow2 .pl, .d-prow2 .pr, .d-prow2 .dd, .d-prow2 .res { justify-self: start; text-align: left; font-size: 11.5px; }
+  .d-prow2 .pl, .d-prow2 .dd, .d-prow2 .res { justify-self: start; text-align: left; font-size: 11.5px; }
   .d-prow2 .pl { grid-area: a; }
-  .d-prow2 .pr { grid-area: b; }
   .d-prow2 .dd { grid-area: c; }
   .d-prow2.is-done .res { grid-area: a; }
   .d-prow2.is-done .dd { grid-area: c; justify-self: end; }

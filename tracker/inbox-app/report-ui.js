@@ -338,7 +338,7 @@ function reportNewCount(item) {
 
 // ---------- 저장 ----------
 
-async function reportChange(item, action) {
+async function reportChange(item, action, notice) {
   if (reportBusy) return;
   reportBusy = true;
   try {
@@ -360,14 +360,15 @@ async function reportChange(item, action) {
       throw new Error(result.error || '저장됐는지 확인하지 못했어요. 적은 내용은 그대로 있어요');
     }
     if (action.action === 'edit') reportEdits.delete(`${item.weekKey}:${action.id}`);
-    if (action.action === 'add') reportEdits.delete(`${item.weekKey}:new`);
+    // `add`로 적던 글을 비우는 것은 입력칸을 들고 있는 쪽(reportPlanAddLines)이 한다 —
+    // 다른 입력줄(프로젝트 소제목의 `+ 추가`)에서 담았는데 맨 아래 줄의 글이 날아가면 안 된다.
     reportUndo.set(item.weekKey, result.undoToken);
     item.draft = result.report;
     const cached = weeklyReportsCache.find(entry => entry.weekKey === item.weekKey);
     if (cached) cached.draft = result.report;
   } finally { reportBusy = false; }
   renderReportDraft(item);
-  reportSavedNotice(item, action);
+  reportSavedNotice(item, action, notice);
 }
 
 // 저장 뒤 알림 하나. 자리를 옮기는 변경(아래로 넣기·따로 빼기·옛 묶기·묶음 풀기)은 무엇이 바뀌었는지
@@ -376,9 +377,12 @@ const REPORT_MOVE_NOTICE = {
   nest: '문장을 아래로 넣었어요',
   unnest: '따로 뺐어요',
   split: '묶음을 풀었어요',
+  regroup: '프로젝트를 바꿨어요',
 };
-function reportSavedNotice(item, action) {
+// `notice`를 주면 그 문구만 조용히 알린다(다음 주 계획 담기처럼 무엇을 했는지 문구가 이미 다 말하는 자리).
+function reportSavedNotice(item, action, notice) {
   if (action.action === 'undo') { announce('되돌렸어요'); return; }
+  if (notice) { announce(notice); return; }
   const message = action.action === 'merge'
     ? `문장 ${action.ids.length}개를 묶었어요`
     : REPORT_MOVE_NOTICE[action.action];
@@ -486,6 +490,15 @@ function reportDocHead(item, host) {
   if (reportUndo.has(item.weekKey)) {
     head.appendChild(reportButton('되돌리기', () => reportChange(item, { action: 'undo', token: reportUndo.get(item.weekKey) })));
   }
+  // 금요일에 가장 먼저 하는 일이 계획 쓰기다 — 긴 문서를 훑지 않고 바로 그 자리로 데려간다(이번 주만).
+  if (reportPlanIsCurrentWeek(item.weekKey)) {
+    head.appendChild(reportButton('다음 주 계획 쓰기', () => {
+      const input = document.getElementById('reportPlanInput');
+      if (!input) return;
+      input.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      input.focus();
+    }));
+  }
   // 한 화면에 채운 버튼은 이것 하나다.
   head.appendChild(reportButton('슬랙용으로 복사', async () => {
     if ([...reportEdits.keys()].some(key => key.startsWith(item.weekKey + ':'))) {
@@ -561,18 +574,24 @@ function reportSuggestionBlock(item, row) {
 // 문장은 `따로 빼기`로 먼저 나와야 한다 — 한 단계까지만 들어간다).
 // `묶음 풀기`는 서버가 묶기 전 문장을 들고 있는 옛 합치기 행에만 붙는다(`canSplit`).
 function reportSentenceMenuSections(item, row) {
-  return [[
-    row.sourceIds.length ? {
-      label: reportEvidenceOpen.has(row.id) ? '근거 업무 숨기기' : '근거 업무 보기',
-      onClick: () => {
-        if (reportEvidenceOpen.has(row.id)) reportEvidenceOpen.delete(row.id); else reportEvidenceOpen.add(row.id);
-        renderReportDraft(item);
-      },
-    } : null,
-    !row.parent && !row.excluded ? { label: '이 아래로 문장 모으기', onClick: () => reportNestStart(item, row) } : null,
-    row.parent ? { label: '따로 빼기', onClick: () => reportChange(item, { action: 'unnest', id: row.id }) } : null,
-    row.canSplit ? { label: '묶음 풀기', onClick: () => reportChange(item, { action: 'split', id: row.id }) } : null,
-  ].filter(Boolean)];
+  return [
+    [
+      row.sourceIds.length ? {
+        label: reportEvidenceOpen.has(row.id) ? '근거 업무 숨기기' : '근거 업무 보기',
+        onClick: () => {
+          if (reportEvidenceOpen.has(row.id)) reportEvidenceOpen.delete(row.id); else reportEvidenceOpen.add(row.id);
+          renderReportDraft(item);
+        },
+      } : null,
+      !row.parent && !row.excluded ? { label: '이 아래로 문장 모으기', onClick: () => reportNestStart(item, row) } : null,
+      row.parent ? { label: '따로 빼기', onClick: () => reportChange(item, { action: 'unnest', id: row.id }) } : null,
+      row.canSplit ? { label: '묶음 풀기', onClick: () => reportChange(item, { action: 'split', id: row.id }) } : null,
+    ].filter(Boolean),
+    // 계획 문장만 프로젝트를 나중에 바꾼다(다른 구역의 프로젝트는 원본 업무가 정한다).
+    row.heading === REPORT_PLAN_HEADING
+      ? [{ field: '프로젝트 바꾸기', control: reportPlanRegroupPicker(item, row) }]
+      : null,
+  ].filter(section => section && section.length);
 }
 
 // 문장 한 줄. 동작(수정·제외·따로 빼기·더보기)은 hover·focus에서만 보인다.
@@ -723,47 +742,409 @@ function reportPlanProjectPicker() {
   return pick;
 }
 
+// 이미 담긴 계획 문장의 프로젝트를 바꾸는 고르개(문장 ⋯ 메뉴의 필드 줄). 서버는 `regroup`이고
+// 프로젝트 이름 검증(`planGroup`)은 담을 때와 같은 길을 쓴다.
+function reportPlanRegroupPicker(item, row) {
+  const pick = reportNode('select', undefined, 'd-msel');
+  pick.setAttribute('aria-label', '계획 문장 프로젝트 바꾸기');
+  const current = String(row.group || '').trim();
+  const none = !current || current === REPORT_PLAN_NO_PROJECT
+    || current === REPORT_NO_PROJECT_LABEL || current === REPORT_NO_PROJECT;
+  const names = reportPlanProjectNames();
+  // 지금 붙어 있는 이름이 목록에 없으면(프로젝트가 비었거나 이름이 바뀐 뒤) 그 이름을 맨 앞에 남긴다.
+  if (!none && !names.includes(current)) names.unshift(current);
+  for (const [value, text] of [['', REPORT_NO_PROJECT], ...names.map(name => [name, name])]) {
+    const option = reportNode('option', text);
+    option.value = value;
+    if (none ? value === '' : value === current) option.selected = true;
+    pick.appendChild(option);
+  }
+  pick.addEventListener('change', () => {
+    if (typeof uiMenuClose === 'function') uiMenuClose();
+    reportChange(item, { action: 'regroup', id: row.id, group: pick.value || undefined })
+      .catch(error => showNotice(error.message || '저장하지 못했어요. 적은 내용은 그대로 있어요', true));
+  });
+  return pick;
+}
+
+// ---------- 다음 주 계획: 후보에서 담기 · 직접 쓰기 ----------
+// DECISIONS("다음 주 계획은 사람이 직접 쓴다")는 그대로다 — 앱은 후보를 보여 줄 뿐이고,
+// 담기는 사람이 누른 것만이다. 후보 목록은 화면이 이미 들고 있는 업무 목록(`taskListsCache`)을 쓴다:
+// 새 API를 만들지 않는다.
+
+const REPORT_PLAN_TASK_KEY = 'workspace-report-plan-also-task';
+const REPORT_PLAN_MAX_LINES = 20;        // 여러 줄 붙여넣기의 상한
+const REPORT_PLAN_BOTTOM_KEY = 'new';    // 맨 아래 입력줄의 `reportEdits` 열쇠(기존 값 그대로)
+
+// `나중에 할 일에도 추가` 토글은 기본 켜짐이고 브라우저에 기억한다(막혀 있으면 기본값으로 시작).
+function reportPlanAlsoTaskLoad() {
+  try {
+    const saved = localStorage.getItem(REPORT_PLAN_TASK_KEY);
+    if (saved === '0') return false;
+  } catch {}
+  return true;
+}
+let reportPlanAlsoTask = reportPlanAlsoTaskLoad();
+let reportPlanLaterOpen = false;  // `나중에 할 일에서 고르기`를 펼쳐 뒀는지
+let reportPlanLaterQuery = '';    // 그 목록의 거르기 글자
+// 업무는 만들어졌는데 문장 추가가 실패했을 때, 다시 시도가 업무를 또 만들지 않도록 붙들어 두는 자리.
+// 열쇠는 주차 + 프로젝트 + 글이다(성공하면 바로 비운다 — 같은 글을 일부러 두 번 담는 길은 막지 않는다).
+const reportPlanMade = new Map();
+
+// 이번 주 보고에서만 후보·직접 쓰기의 업무 만들기를 연다(지난 주차는 기존 입력줄만).
+function reportPlanIsCurrentWeek(weekKey) {
+  if (typeof todayStr !== 'function') return false;
+  const monday = new Date(`${todayStr()}T12:00:00`);
+  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+  const key = `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
+  return key === weekKey;
+}
+
+// 화면이 이미 들고 있는 업무 목록. 없으면(다른 화면·테스트) 빈 목록으로 조용히 넘어간다.
+function reportPlanTaskLists() {
+  const lists = typeof taskListsCache === 'object' && taskListsCache ? taskListsCache : null;
+  return { today: (lists && lists.todayTasks) || [], later: (lists && lists.laterTasks) || [] };
+}
+// 후보는 미완료 업무 전부다(진행 중 포함). 완료한 것은 빠지고, `새로 들어온 것`은 애초에 이 목록에 없다.
+function reportPlanOpenTasks(items) {
+  return (items || []).filter(item => item && item.status !== 'done');
+}
+
+// 후보를 담을 때 문장에 붙일 프로젝트 이름 — 계획 문장이 쓰는 이름과 같은 꼴이어야
+// 문서에서 같은 소제목 아래로 모인다(지라는 `KEY · 요약`, 길면 키만).
+function reportPlanTaskGroup(task) {
+  if (!task) return '';
+  if (task.jira) {
+    const issue = typeof jiraIssuesByKey !== 'undefined' && jiraIssuesByKey && jiraIssuesByKey.get
+      ? jiraIssuesByKey.get(task.jira) : null;
+    return reportPlanJiraName(task.jira, issue ? issue.summary : '');
+  }
+  const name = String(task.group || task.project || '').trim();
+  return name && name.length <= REPORT_PLAN_NAME_MAX ? name : '';
+}
+
+// 프로젝트 이름 → 업무를 만들 때 보낼 값. 지라 이름(`KEY · 요약`)은 지라 키로 되돌린다.
+function reportPlanJiraKeyOf(name) {
+  const value = String(name || '').trim();
+  if (!value || typeof jiraIssuesCache === 'undefined' || !Array.isArray(jiraIssuesCache)) return null;
+  const issue = jiraIssuesCache.find(entry => reportPlanJiraName(entry.key, entry.summary) === value || entry.key === value);
+  return issue ? issue.key : null;
+}
+
+// 이미 담은 후보는 다시 담지 않는다 — 판정은 계획 행에 저장된 연결(`planOf`)로 하고 글자를 비교하지 않는다.
+// 제외해 둔 계획 문장도 문서에 남아 있으므로(복원할 수 있다) 담은 것으로 본다.
+function reportPlanClaimed(rows) {
+  return new Set((rows || [])
+    .filter(row => row.heading === REPORT_PLAN_HEADING && typeof row.planOf === 'string' && row.planOf)
+    .map(row => row.planOf));
+}
+
+// 후보 한 줄: 제목(말줄임) + 조용한 기한 + 오른쪽 `+ 담기`. 담은 뒤에는 흐리게 + `담음`.
+function reportPlanCandidateRow(item, task, groupName, claimed) {
+  const line = reportNode('div', undefined, 'rp-cand' + (claimed ? ' is-in' : ''));
+  const title = reportNode('span', task.description, 'ti');
+  title.title = task.description;
+  line.appendChild(title);
+  const due = typeof uiDueText === 'function' ? uiDueText(task.due, 'full') : null;
+  line.appendChild(reportNode('span', due ? due.text : '', 'mt'));
+  if (claimed) {
+    line.appendChild(reportNode('span', '담음', 'in'));
+    return line;
+  }
+  // 담아도 업무 자체는 바뀌지 않는다(언제 할지·상태 그대로) — 계획 문장만 하나 는다.
+  line.appendChild(reportButton('+ 담기', () => reportChange(item, {
+    action: 'add', text: task.description, group: groupName || undefined, planOf: task.id,
+  }, '다음 주 계획에 넣었어요'), 'd-btn sm'));
+  return line;
+}
+
+// 후보 목록을 프로젝트별로 그린다(목록의 프로젝트 묶기·제목 부품을 그대로 쓴다).
+function reportPlanCandidateList(item, host, tasks, claimed) {
+  host.replaceChildren();
+  const groups = typeof uiGroupTasks === 'function' ? uiGroupTasks(tasks) : [['__misc__', tasks]];
+  for (const [key, groupTasks] of groups) {
+    const label = typeof uiGroupLabel === 'function' ? uiGroupLabel(key) : REPORT_NO_PROJECT;
+    host.appendChild(reportNode('div', label, 'rp-candpj'));
+    const name = reportPlanTaskGroup(groupTasks[0]);
+    for (const task of groupTasks) {
+      host.appendChild(reportPlanCandidateRow(item, task, name, claimed.has(task.id)));
+    }
+  }
+  if (!tasks.length) host.appendChild(reportNode('div', '고를 업무가 없어요.', 'rp-hint'));
+}
+
+// `다음 주 후보` 구역 — 담은 문장들 아래에 선다. 고를 것이 아무것도 없으면 그리지 않는다.
+function reportPlanCandidateSection(item, host) {
+  const lists = reportPlanTaskLists();
+  const today = reportPlanOpenTasks(lists.today);
+  const later = reportPlanOpenTasks(lists.later);
+  if (!today.length && !later.length) return;
+  const claimed = reportPlanClaimed(item.draft.rows);
+
+  const head = reportNode('div', undefined, 'rp-candhd');
+  head.appendChild(reportNode('span', '다음 주 후보', 'hd'));
+  head.appendChild(reportNode('span', undefined, 'sp'));
+  const pick = reportNode('button', '나중에 할 일에서 고르기', 'd-btn sm');
+  pick.type = 'button';
+  pick.setAttribute('aria-pressed', String(reportPlanLaterOpen));
+  pick.addEventListener('click', () => {
+    reportPlanLaterOpen = !reportPlanLaterOpen;
+    reportPlanLaterQuery = '';
+    renderReportDraft(item);
+  });
+  head.appendChild(pick);
+  host.appendChild(head);
+
+  const list = reportNode('div', undefined, 'rp-cands' + (reportPlanLaterOpen ? ' is-scroll' : ''));
+  if (!reportPlanLaterOpen) {
+    if (!today.length) {
+      host.appendChild(reportNode('div', '오늘 할 일에 남은 업무가 없어요. 나중에 할 일에서 고를 수 있어요.', 'rp-hint'));
+      return;
+    }
+    reportPlanCandidateList(item, list, today, claimed);
+    host.appendChild(list);
+    return;
+  }
+  // 나중에 할 일은 많을 수 있다 — 위에 작은 거르기 칸을 두고 목록은 구역 안에서 스크롤한다.
+  const filter = reportNode('input', undefined, 'rp-candfilter');
+  filter.type = 'text';
+  filter.id = 'reportPlanFilter';
+  filter.placeholder = '나중에 할 일 거르기';
+  filter.setAttribute('aria-label', '나중에 할 일 거르기');
+  filter.value = reportPlanLaterQuery;
+  const draw = () => {
+    const needle = reportPlanLaterQuery.trim().toLowerCase();
+    reportPlanCandidateList(item, list, needle
+      ? later.filter(task => String(task.description || '').toLowerCase().includes(needle)
+        || reportPlanTaskGroup(task).toLowerCase().includes(needle))
+      : later, claimed);
+  };
+  // 글자를 칠 때는 목록만 다시 만든다 — 문서 전체를 다시 그리면 치던 글과 초점이 날아간다.
+  filter.addEventListener('input', () => { reportPlanLaterQuery = filter.value; draw(); });
+  host.append(filter, list);
+  draw();
+}
+
+// ---------- 직접 쓰기(+ 나중에 할 일에도) ----------
+
+// 줄 앞의 `프로젝트 이름: ` 접두는 기존 프로젝트 이름과 **정확히 같을 때만** 그 프로젝트로 보낸다.
+function reportPlanSplitPrefix(line, names, fallback) {
+  const at = String(line).indexOf(':');
+  if (at > 0) {
+    const name = line.slice(0, at).trim();
+    const rest = line.slice(at + 1).trim();
+    if (rest && names.includes(name)) return { text: rest, group: name };
+  }
+  return { text: String(line).trim(), group: fallback };
+}
+
+// 붙여넣은 여러 줄을 한 줄 = 한 문장으로 나눈다(빈 줄 무시, 최대 20줄).
+function reportPlanLines(value) {
+  return String(value ?? '').split(/\r?\n/).map(line => line.trim()).filter(Boolean).slice(0, REPORT_PLAN_MAX_LINES);
+}
+
+// 같은 글·같은 프로젝트로 `나중에 할 일` 업무를 만든다 — 기존 길(`/api/later-task/create`)이고
+// 기한·우선순위는 넣지 않는다(마감일은 사람이 말한 날짜만 — DECISIONS).
+async function reportPlanCreateTask(text, group) {
+  const payload = { description: text };
+  const jira = reportPlanJiraKeyOf(group);
+  if (jira) payload.jira = jira;
+  else if (group) payload.group = group;
+  const response = await request('/api/later-task/create', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+  });
+  const created = await response.json();
+  return created && typeof created.id === 'string' ? created.id : null;
+}
+
+// 문장 하나를 담는다. 순서는 업무 만들기 → 그 id를 `planOf`로 계획 문장 추가다.
+// 업무는 만들어졌는데 문장 추가가 실패하면 만든 id를 붙들어 둔다 — 다시 시도는 문장 추가만 한다.
+async function reportPlanAddOne(item, { text, group, alsoTask }) {
+  const memo = `${item.weekKey}|${group || ''}|${text}`;
+  let link = reportPlanMade.get(memo) || null;
+  let made = false;
+  if (alsoTask && !link) { link = await reportPlanCreateTask(text, group); made = true; }
+  if (link) reportPlanMade.set(memo, link);
+  await reportChange(item, { action: 'add', text, group: group || undefined, planOf: link || undefined },
+    link ? '다음 주 계획에 넣었어요 · 나중에 할 일에도 추가했어요' : '다음 주 계획에 넣었어요');
+  reportPlanMade.delete(memo);
+  return made;
+}
+
+// 여러 줄을 차례로 담는다. 중간에 실패하면 거기서 멈추고 남은 줄을 입력칸에 되돌려 놓는다.
+async function reportPlanAddLines(item, lines, { key, group, alsoTask, focusId }) {
+  const names = reportPlanProjectNames();
+  let madeTask = false;
+  // 담는 동안 입력칸은 비워 둔다 — 실패하면 남은 줄을 그 자리에 되돌려 놓는다.
+  reportEdits.delete(`${item.weekKey}:${key}`);
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = reportPlanSplitPrefix(lines[index], names, group);
+    try {
+      madeTask = (await reportPlanAddOne(item, { text: line.text, group: line.group, alsoTask })) || madeTask;
+    } catch (error) {
+      reportEdits.set(`${item.weekKey}:${key}`, lines.slice(index).join('\n'));
+      if (madeTask) await load();
+      renderReportDraft(item);
+      document.getElementById(focusId)?.focus();
+      showNotice(error.message || '저장됐는지 확인하지 못했어요. 적은 내용은 그대로 있어요', true);
+      return;
+    }
+  }
+  reportEdits.delete(`${item.weekKey}:${key}`);
+  // 만든 업무가 `나중에 할 일` 서랍과 후보 목록에 바로 보이게 목록을 다시 받는다.
+  if (madeTask) await load();
+  renderReportDraft(item);
+  // 다시 그려져도 같은 줄로 돌아온다 — 적던 글이 비어 접힌 `+ 추가` 줄은 다시 열어 준다
+  // (오늘 목록의 `+ 이 그룹에 추가`와 같은 포커스 복원).
+  const next = document.getElementById(focusId);
+  const row = next && next.closest ? next.closest('.rp-add') : null;
+  if (row) row.hidden = false;
+  next?.focus();
+}
+
+// 계획 문장 입력칸 한 벌 — 맨 아래 입력줄과 프로젝트 소제목의 `+ 추가`가 같은 길을 쓴다.
+// 평소에는 한 줄 입력이고, 여러 줄 붙여넣기가 중간에 실패해 남은 줄을 돌려놓을 때만 여러 줄 칸이 된다.
+function reportPlanInput(item, { key, id, placeholder, label, groupOf, alsoTaskOf }) {
+  const full = `${item.weekKey}:${key}`;
+  const draft = reportEdits.get(full) || '';
+  const multi = draft.includes('\n');
+  const el = reportNode(multi ? 'textarea' : 'input', undefined, multi ? 'rp-addmulti' : '');
+  if (!multi) el.type = 'text';
+  else el.rows = Math.min(6, draft.split('\n').length);
+  el.id = id;
+  el.placeholder = placeholder;
+  el.setAttribute('aria-label', label);
+  el.value = draft;
+  el.maxLength = 10000;
+  el.addEventListener('input', () => {
+    if (el.value) reportEdits.set(full, el.value); else reportEdits.delete(full);
+  });
+  const submit = async () => {
+    const lines = reportPlanLines(el.value);
+    if (!lines.length) return;
+    el.disabled = true;
+    try { await reportPlanAddLines(item, lines, { key, group: groupOf(), alsoTask: alsoTaskOf(), focusId: id }); }
+    catch (error) { showNotice(error.message || '저장됐는지 확인하지 못했어요. 적은 내용은 그대로 있어요', true); }
+    finally { el.disabled = false; }
+  };
+  el.addEventListener('keydown', async (event) => {
+    if (event.key === 'Escape' && !event.isComposing && key !== REPORT_PLAN_BOTTOM_KEY) {
+      reportEdits.delete(full);
+      renderReportDraft(item);
+      return;
+    }
+    // 한글을 조합하는 중의 Enter는 글자를 확정하는 것이지 추가가 아니다.
+    if (event.key !== 'Enter' || event.isComposing || event.shiftKey || el.disabled) return;
+    event.preventDefault();
+    await submit();
+  });
+  // 한 줄 붙여넣기는 평소대로 — 줄바꿈이 있을 때만 가로채서 한 줄 = 한 문장으로 차례로 담는다.
+  el.addEventListener('paste', (event) => {
+    const pasted = event.clipboardData && typeof event.clipboardData.getData === 'function'
+      ? event.clipboardData.getData('text') : '';
+    if (!/[\r\n]/.test(String(pasted))) return;
+    event.preventDefault();
+    const lines = reportPlanLines(pasted);
+    if (!lines.length) return;
+    el.disabled = true;
+    Promise.resolve()
+      .then(() => reportPlanAddLines(item, lines, { key, group: groupOf(), alsoTask: alsoTaskOf(), focusId: id }))
+      .catch(error => showNotice(error.message || '저장됐는지 확인하지 못했어요. 적은 내용은 그대로 있어요', true))
+      .finally(() => { el.disabled = false; });
+  });
+  return el;
+}
+
+// 프로젝트 소제목의 `+ 추가`가 여는 그 자리 입력줄(오늘 목록의 `+ 이 그룹에 추가`와 같은 모양).
+function reportPlanGroupAddRow(item, name) {
+  const key = `plan-add:${name}`;
+  const id = `reportPlanAdd-${encodeURIComponent(name)}`;
+  const row = reportNode('div', undefined, 'rp-add is-group');
+  row.innerHTML = uiIcon('plus');
+  // 저장 뒤 문서를 다시 그려도 적던 줄이 열려 있으면 그 자리로 돌아온다.
+  row.hidden = !reportEdits.has(`${item.weekKey}:${key}`);
+  const input = reportPlanInput(item, {
+    key, id, placeholder: '이 프로젝트에 한 문장 추가 — Enter', label: `${name} 프로젝트에 다음 주 계획 문장 추가`,
+    groupOf: () => name, alsoTaskOf: () => reportPlanAlsoTask,
+  });
+  if (String(input.className).includes('rp-addmulti')) row.className += ' is-multi';
+  row.appendChild(input);
+  return row;
+}
+
+// 프로젝트 소제목 + 그 자리에서 쓰는 `+ 추가`.
+function reportPlanProjectHead(name, onAdd) {
+  const head = reportNode('div', undefined, 'rp-pj');
+  head.appendChild(reportNode('span', name, 'nm'));
+  if (onAdd) {
+    const add = reportNode('button', '+ 추가', 'rp-pjadd');
+    add.type = 'button';
+    add.setAttribute('aria-label', `${name} 프로젝트에 다음 주 계획 문장 추가`);
+    add.addEventListener('click', onAdd);
+    head.appendChild(add);
+  }
+  return head;
+}
+
+// `나중에 할 일에도 추가` 토글(기본 켜짐). 켜져 있으면 직접 쓴 문장이 업무로도 만들어진다.
+function reportPlanAlsoTaskToggle() {
+  const toggle = reportNode('button', '나중에 할 일에도 추가', 'd-chip rp-also' + (reportPlanAlsoTask ? ' is-on' : ''));
+  toggle.type = 'button';
+  toggle.setAttribute('aria-pressed', String(reportPlanAlsoTask));
+  toggle.title = '직접 쓴 계획 문장을 같은 프로젝트의 나중에 할 일 업무로도 만들어요';
+  toggle.addEventListener('click', () => {
+    reportPlanAlsoTask = !reportPlanAlsoTask;
+    try { localStorage.setItem(REPORT_PLAN_TASK_KEY, reportPlanAlsoTask ? '1' : '0'); } catch {}
+    toggle.setAttribute('aria-pressed', String(reportPlanAlsoTask));
+    toggle.classList.toggle('is-on', reportPlanAlsoTask);
+  });
+  return toggle;
+}
+
 // 다음 주 계획 — 문서의 마지막 구역. 한 문장이 한 줄(서버의 `add`)이고, 사람이 직접 쓴 것만 들어간다.
 // 프로젝트를 고른 문장은 소제목 아래로 묶이고, 고르지 않은 문장은 구역 끝에 선다.
 function reportPlanSection(item, host, newIds) {
   const rows = reportPlanRows(item.draft.rows);
+  const current = reportPlanIsCurrentWeek(item.weekKey);
   host.appendChild(reportNode('div', REPORT_PLAN_HEADING, 'rp-h'));
   reportPlanGroups(rows).forEach((group, index) => {
     // 프로젝트를 고르지 않은 문장에는 소제목이 없다 — 앞 묶음에 딸려 보이지 않게 자리만 띄운다.
-    if (group.name) host.appendChild(reportNode('div', group.name, 'rp-pj'));
-    else if (index) host.appendChild(reportNode('div', undefined, 'rp-sep'));
+    if (group.name) {
+      // 소제목의 `+ 추가`는 그 프로젝트의 입력줄을 그 자리에서 연다(이번 주만).
+      const addRow = current ? reportPlanGroupAddRow(item, group.name) : null;
+      host.appendChild(reportPlanProjectHead(group.name, addRow ? () => {
+        addRow.hidden = false;
+        addRow.querySelector('input, textarea')?.focus();
+      } : null));
+      for (const row of group.rows) reportSentenceRow(item, row, { host, newIds, plan: true });
+      if (addRow) host.appendChild(addRow);
+      return;
+    }
+    if (index) host.appendChild(reportNode('div', undefined, 'rp-sep'));
     for (const row of group.rows) reportSentenceRow(item, row, { host, newIds, plan: true });
   });
   if (!rows.length) host.appendChild(reportNode('div', '직접 쓴 문장만 들어가요', 'rp-hint'));
 
-  const key = `${item.weekKey}:new`;
+  // 담은 문장들 바로 아래가 후보 자리다(이번 주만). 눌러 담는 것은 사람이고, 앱은 보여 주기만 한다.
+  if (current) reportPlanCandidateSection(item, host);
+
+  // 맨 아래 입력줄 하나는 늘 남는다 — 새 프로젝트·프로젝트 없음용이다.
   const add = reportNode('div', undefined, 'rp-add');
   add.innerHTML = uiIcon('plus');
   add.appendChild(reportPlanProjectPicker());
-  const input = reportNode('input');
-  input.type = 'text';
-  input.id = 'reportPlanInput';
-  input.placeholder = '다음 주에 할 일을 한 문장씩 추가 — Enter';
-  input.setAttribute('aria-label', '다음 주 계획 문장 추가');
-  input.value = reportEdits.get(key) || '';
-  input.maxLength = 10000;
-  input.addEventListener('input', () => {
-    if (input.value) reportEdits.set(key, input.value); else reportEdits.delete(key);
+  const input = reportPlanInput(item, {
+    key: REPORT_PLAN_BOTTOM_KEY, id: 'reportPlanInput',
+    placeholder: '다음 주에 할 일을 한 문장씩 추가 — Enter', label: '다음 주 계획 문장 추가',
+    groupOf: () => reportPlanGroup, alsoTaskOf: () => current && reportPlanAlsoTask,
   });
-  input.addEventListener('keydown', async (event) => {
-    // 한글을 조합하는 중의 Enter는 글자를 확정하는 것이지 추가가 아니다.
-    if (event.key !== 'Enter' || event.isComposing) return;
-    event.preventDefault();
-    if (!input.value.trim()) return;
-    input.disabled = true;
-    try { await reportChange(item, { action: 'add', text: input.value, group: reportPlanGroup || undefined }); }
-    catch (error) { showNotice(error.message || '저장됐는지 확인하지 못했어요. 적은 내용은 그대로 있어요', true); }
-    finally { input.disabled = false; }
-    // 다시 그려졌으면 새로 생긴 입력칸으로, 실패해서 그대로면 같은 칸으로 돌아온다.
-    document.getElementById('reportPlanInput')?.focus();
-  });
+  if (String(input.className).includes('rp-addmulti')) add.className += ' is-multi';
   add.appendChild(input);
   host.appendChild(add);
+  // 지난 주차에서는 업무를 만들지 않는다 — 토글을 보여 주지 않는다(기존 입력줄만).
+  if (!current) return;
+  const foot = reportNode('div', undefined, 'rp-addfoot');
+  foot.appendChild(reportPlanAlsoTaskToggle());
+  host.appendChild(foot);
 }
 
 // 전체 업무 기록을 프로젝트로 묶는다(순수 함수). 프로젝트 차례는 보고 문서와 같게 — 기록이 문장에

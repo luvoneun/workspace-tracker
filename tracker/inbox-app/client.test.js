@@ -30,6 +30,8 @@ function element() {
       this.parent = null;
       this.connected = false;
     },
+    // 고정 마크업(체크 아이콘·우선순위 꺾쇠)을 붙이는 자리 — 붙인 글자를 그대로 모아 둔다.
+    insertAdjacentHTML(position, html) { this.html = (this.html || '') + html; },
     setAttribute(name, value) { attributes.set(name, value); },
     getAttribute(name) { return attributes.get(name); },
     removeAttribute(name) { attributes.delete(name); },
@@ -168,26 +170,72 @@ test('the status column shows overdue, due today, carried-over and in-progress, 
   assert.doesNotMatch(escaped, /<개선>/);
 });
 
-// 오늘 목록·서랍·마감순의 줄 태그는 우선순위 → 상태(밀림·진행·답변) → 기한 순으로 자리가 고정된다.
-// 같은 종류가 줄마다 같은 x 자리에 서야 "중요한 것만"·"기한 있는 것만" 훑을 수 있다(DECISIONS).
-test('자리를 고정한 줄 태그는 우선순위 · 상태 · 기한 세 칸을 늘 같은 순서로 내고, 없는 칸은 비워 둔다', () => {
+// 업무 줄의 오른쪽에는 **날짜 성격의 말만** 선다 — 우선순위는 왼쪽 체크박스 안의 꺾쇠가 말한다
+// (BC의 세 칸 고정은 걷어 냈다 — 빈자리에 글자가 흩어져 보였다. DECISIONS 2026-09-23).
+test('업무 줄의 줄 태그는 우선순위 없이 상태 → 기한 차례로, 있는 것만 오른쪽에 붙는다', () => {
   const app = pureClient();
   const cells = (item, opts = '{}') => app.run(`uiMetaCells(${item}, ${opts})`);
-  const fixed = (item, extra = '') => app.run(`uiMetaCells(${item}, { fixed: true${extra} })`);
-  // 칸 세 개가 늘 이 순서로 나온다.
-  const parts = html => html.split('<span class="m-c ').slice(1).map(part => part.slice(0, part.indexOf('"')));
-  assert.deepEqual(parts(fixed('{}')), ['pri', 'st', 'due'], '아무 값이 없어도 세 칸은 자리를 지킨다');
-  assert.equal(fixed('{}'), '<span class="m-c pri"></span><span class="m-c st"></span><span class="m-c due"></span>');
-  const full = fixed("{ priority: 'critical', scheduled: '2000-01-01', due: '2000-01-01' }", ", waiting: 'waiting'");
-  assert.deepEqual(parts(full), ['pri', 'st', 'due']);
-  assert.match(full, /m-c pri">.*긴급.*<\/span><span class="m-c st">.*답변 기다리는 중.*일째 밀림.*<\/span><span class="m-c due">.*기한 \d+일 지남/s,
-    '우선순위 → 상태(답변 · 밀림) → 기한 차례다');
-  assert.match(fixed("{ doing: todayStr() }", ", waiting: 'answered'"), /m-c st">.*답변 왔어요.*진행 중/s, '상태가 겹치면 한 칸 안에 이어 쓴다');
-  assert.match(fixed("{ due: todayStr() }"), /<span class="m-c pri"><\/span><span class="m-c st"><\/span>/, '값이 없는 칸은 빈 자리로 남는다');
-  // 자리를 고정하지 않는 자리(미루기 제안 줄 등)는 있는 것만 이어 붙이던 모양 그대로다.
-  assert.equal(cells('{}'), '');
-  assert.doesNotMatch(cells("{ priority: 'high', due: todayStr() }"), /m-c/);
-  assert.match(cells("{ priority: 'high', scheduled: '2000-01-01', due: todayStr() }"), /중요.*밀림.*오늘까지/s, '순서는 고정한 줄과 같다');
+  const row = (item, extra = '') => app.run(`uiMetaCells(${item}, { noPriority: true${extra} })`);
+  assert.equal(row('{}'), '', '말할 것이 없으면 아무 칸도 만들지 않는다(빈 자리를 남기지 않는다)');
+  assert.doesNotMatch(row("{ priority: 'critical' }"), /긴급|m-pri/, '긴급도 줄 오른쪽에는 적지 않는다');
+  assert.doesNotMatch(row("{ priority: 'high' }"), /중요|m-pri/);
+  assert.equal(row("{ priority: 'high' }"), '', '우선순위뿐이면 줄 오른쪽은 비어 있다');
+  const full = row("{ priority: 'critical', scheduled: '2000-01-01', due: '2000-01-01' }", ", waiting: 'waiting'");
+  assert.doesNotMatch(full, /m-pri|class="m-c /, 'BC의 세 칸 자리 표시는 남아 있지 않다');
+  assert.match(full, /m-wait.*답변 기다리는 중.*m-carry.*일째 밀림.*m-due.*기한 \d+일 지남/s,
+    '상태(답변 · 밀림) → 기한 차례이고 기한이 맨 오른쪽이다');
+  assert.match(row("{ doing: todayStr() }", ", waiting: 'answered'"), /답변 왔어요.*진행 중/s, '상태가 겹치면 이어 쓴다');
+  assert.equal(row("{ due: todayStr() }"), '<span class="m-due k-warn" title="기한은 ' + app.run('uiKoDate(todayStr())')
+    + '이에요"><svg class="d-i" viewBox="0 0 16 16" aria-hidden="true">' + app.run('UI_ICONS.calendar') + '</svg>오늘까지</span>',
+    '기한만 있으면 기한 한 칸뿐이다');
+  // 체크박스가 없는 자리(미루기 제안 줄)에서는 우선순위를 예전처럼 글자로 쓴다.
+  assert.match(cells("{ priority: 'high', due: todayStr() }"), /m-pri k-warn.*중요.*오늘까지/s);
+  assert.match(cells("{ priority: 'high', scheduled: '2000-01-01', due: todayStr() }"), /중요.*밀림.*오늘까지/s);
+});
+
+// 우선순위는 체크박스 안의 위 꺾쇠다 — 중요 한 겹 · 긴급 두 겹. 색만으로 말하지 않는다.
+test('업무 체크박스는 우선순위를 꺾쇠·색·말로 함께 알린다', () => {
+  const app = pureClient();
+  const cell = (item, done = 'false') => JSON.parse(app.run(`(() => {
+    const row = document.createElement('div');
+    const cell = uiCheckCell(${item}, row, ${done});
+    const box = cell.children[0];
+    return JSON.stringify({
+      cell: cell.className, cls: box.className, label: box.getAttribute('aria-label'), title: box.title || null, html: cell.html,
+    });
+  })()`));
+  const base = { id: 't', description: '가입 문구 검토하기' };
+  const critical = cell(JSON.stringify({ ...base, priority: 'critical' }));
+  assert.equal(critical.cell, 'd-check');
+  assert.equal(critical.cls, 'd-cb is-pri-top');
+  assert.equal(critical.title, '가장 먼저 해야 하는 업무예요');
+  assert.equal(critical.label, '가입 문구 검토하기 — 긴급 · 완료로 표시');
+  assert.match(critical.html, /class="d-pri"/);
+  assert.ok(critical.html.includes(app.run('UI_ICONS.priTop')), '긴급은 위 꺾쇠 두 겹이다');
+
+  const high = cell(JSON.stringify({ ...base, priority: 'high' }));
+  assert.equal(high.cls, 'd-cb is-pri-high');
+  assert.equal(high.title, '중요한 업무예요');
+  assert.equal(high.label, '가입 문구 검토하기 — 중요 · 완료로 표시');
+  assert.ok(high.html.includes(app.run('UI_ICONS.priHigh')), '중요는 위 꺾쇠 한 겹이다');
+  assert.ok(!high.html.includes(app.run('UI_ICONS.priTop')));
+
+  for (const priority of ['medium', 'low', undefined]) {
+    const plain = cell(JSON.stringify({ ...base, priority }));
+    assert.equal(plain.cls, 'd-cb', `${priority}는 평소 체크박스 그대로다`);
+    assert.equal(plain.title, null);
+    assert.equal(plain.label, '가입 문구 검토하기 — 완료로 표시');
+    assert.doesNotMatch(plain.html, /d-pri/);
+  }
+  // 완료한 줄에는 꺾쇠가 없다(체크된 파란 네모가 이미 다 말한다).
+  const done = cell(JSON.stringify({ ...base, priority: 'critical' }), 'true');
+  assert.equal(done.cls, 'd-cb');
+  assert.doesNotMatch(done.html, /d-pri/);
+  assert.equal(done.label, '가입 문구 검토하기 — 완료로 표시');
+  // 사용자 글자는 마크업으로 들어가지 않는다(고정 문자열만 innerHTML로 붙는다).
+  const nasty = cell(JSON.stringify({ id: 'x', description: '<img src=x>', priority: 'high' }));
+  assert.doesNotMatch(nasty.html, /<img/);
+  assert.equal(nasty.label, '<img src=x> — 중요 · 완료로 표시');
 });
 
 test('상세 카드의 우선순위 값도 아이콘 없이 글자·색만 쓴다', () => {
@@ -418,7 +466,7 @@ test('회의 탭 기본 목록: 오늘(과 미래) 전부 + 14일 안의 기록 
   assert.deepEqual(ids("{ windowDays: 28 }"), ['future', 'today1', 'today2', 'recent-record', 'old-done', 'old-open'],
     '기간을 넓히면 그 안에 들어온 기록 있는 회의(old-done)가 나온다 — old-norecord는 아직 기간 밖');
   assert.deepEqual(ids("{ showNoRecord: true }"), ['future', 'today1', 'today2', 'recent-record', 'recent-norecord', 'old-open'],
-    '`기록 없는 회의도 보기`를 켜면 보이는 기간 안의 기록 없는 지난 회의(recent-norecord)도 나온다 — 기간 밖의 old-norecord는 그대로 빠진다');
+    '`빈 회의 포함`을 켜면 보이는 기간 안의 기록 없는 지난 회의(recent-norecord)도 나온다 — 기간 밖의 old-norecord는 그대로 빠진다');
   assert.deepEqual(ids("{ windowDays: 42, showNoRecord: true }"),
     ['future', 'today1', 'today2', 'recent-record', 'recent-norecord', 'old-done', 'old-open', 'old-norecord'],
     '기간을 충분히 넓히고 토글도 켜면 전부 나온다');
@@ -444,7 +492,7 @@ test('`이전 회의 더 보기`를 보일지(순수 함수): 지금 기간보�
   const hasMore = (windowDays, showNoRecord = false) => app.run(`meetingsHasMoreBeyond(events, '2026-09-21', ${windowDays}, { showNoRecord: ${showNoRecord}, itemsOf })`);
   assert.equal(hasMore(14), true, 'old-done(16일 전, 기록 있음)이 기간을 넓히면 새로 나온다');
   assert.equal(hasMore(16), false, '남은 것이 이미 보이는 회의(old-open)와 기록 없는 회의뿐이면 눌러도 늘어나지 않으니 감춘다');
-  assert.equal(hasMore(16, true), true, '`기록 없는 회의도 보기`를 켰으면 old-norecord(35일 전)가 남아 있다');
+  assert.equal(hasMore(16, true), true, '`빈 회의 포함`을 켰으면 old-norecord(35일 전)가 남아 있다');
   assert.equal(hasMore(35, true), false, '더 오래된 회의가 없으면 버튼을 감춘다');
 });
 
@@ -559,14 +607,15 @@ test('팔레트 필터 줄에는 회의 전용 토글이 없다 — `미완료�
   assert.deepEqual(paletteChips(app, '{}'), all, '다른 종류를 골라도 칩 줄이 흔들리지 않는다');
 });
 
-test('회의 탭 필터 줄의 칩 이름: `초안 있음`·`미완료만`·`기록 없는 회의도 보기`', () => {
+test('회의 탭 필터 줄의 칩 이름: `초안 있음`·`미완료만`·`빈 회의 포함`', () => {
   const app = workflowsClient();
   const labels = JSON.parse(app.run(`(() => {
     meetingsTabState = { key: null, unresolved: false, reviewOnly: false, project: '', windowDays: 14, showNoRecord: false, result: null };
     const bar = meetingsTabFilters([]);
-    return JSON.stringify(bar.children.filter(kid => kid.textContent).map(kid => kid.textContent));
+    return JSON.stringify(bar.children.filter(kid => kid.textContent).map(kid => [kid.textContent, kid.title || null]));
   })()`));
-  assert.deepEqual(labels, ['초안 있음', '미완료만', '기록 없는 회의도 보기']);
+  assert.deepEqual(labels, [['초안 있음', null], ['미완료만', null],
+    ['빈 회의 포함', '초안도 담은 항목도 없는 지난 회의까지 보여 줘요']], '짧은 칩 이름의 뜻은 툴팁이 풀어 준다');
 });
 
 test('팔레트 바닥은 `회의` 칩일 때만 회의 탭으로 가는 링크를 붙인다', () => {
@@ -1011,12 +1060,245 @@ test('주간요약 문장의 더보기는 모으기·따로 빼기·묶음 풀�
   assert.deepEqual(labels({ id: 'r2', group: '가입 개선', sourceIds: [] }), [['이 아래로 문장 모으기']], '근거가 없으면 근거 항목도 없다');
   assert.deepEqual(labels({ id: 'r5', group: '가입 개선', sourceIds: [], parent: 'r1' }), [['따로 빼기']],
     '이미 다른 문장 아래에 있는 문장은 더 모을 수 없고 빼기만 한다(한 단계까지만)');
-  assert.deepEqual(labels({ id: 'r6', group: '가입 개선', sourceIds: [], excluded: true }), [[]],
-    '제외한 문장 아래로는 모으지 않는다');
+  assert.deepEqual(labels({ id: 'r6', group: '가입 개선', sourceIds: [], excluded: true }), [],
+    '제외한 문장 아래로는 모으지 않는다 — 보여 줄 것이 없으면 빈 묶음도 만들지 않는다');
   assert.deepEqual(labels({ id: 'r3', group: '여러 프로젝트', sourceIds: ['s1', 's2'], canSplit: true, partCount: 2 }),
     [['근거 업무 보기', '이 아래로 문장 모으기', '묶음 풀기']]);
   // 옛 저장 데이터로 만든 묶음 문장에는 `parts`가 없어 `canSplit`도 오지 않는다 — 풀기만 보이지 않는다.
   assert.deepEqual(labels({ id: 'r4', group: '여러 프로젝트', sourceIds: ['s1', 's2'] }), [['근거 업무 보기', '이 아래로 문장 모으기']]);
+});
+
+// `프로젝트 바꾸기`는 다음 주 계획 문장에만 붙는다(다른 구역의 프로젝트는 원본 업무가 정한다).
+test('계획 문장의 ⋯에만 프로젝트 바꾸기 고르개가 붙는다', () => {
+  const app = reportClient();
+  const fields = row => JSON.parse(app.run(`JSON.stringify(
+    reportSentenceMenuSections(${REPORT_ITEM}, ${JSON.stringify(row)})
+      .map(section => section.map(entry => entry.field || entry.label)))`));
+  assert.deepEqual(fields({ id: 'p1', heading: '다음 주 계획', group: '결제 리뉴얼', sourceIds: [] }),
+    [['이 아래로 문장 모으기'], ['프로젝트 바꾸기']]);
+  assert.deepEqual(fields({ id: 'a1', heading: '완료한 일', group: '결제 리뉴얼', sourceIds: [] }),
+    [['이 아래로 문장 모으기']], '자동 문장에는 프로젝트 바꾸기가 없다');
+  // 고르개는 서버의 `regroup` 하나만 부른다(빈 값이면 프로젝트 없음).
+  const sent = JSON.parse(app.run(`(() => {
+    const calls = [];
+    reportChange = async (item, action) => { calls.push(action); };
+    uiMenuClose = () => {};
+    const pick = reportPlanRegroupPicker(${REPORT_ITEM}, { id: 'p1', heading: '다음 주 계획', group: '결제 리뉴얼' });
+    pick.value = '가입 개선'; pick.listeners.change();
+    pick.value = ''; pick.listeners.change();
+    return JSON.stringify(calls);
+  })()`));
+  assert.deepEqual(sent, [
+    { action: 'regroup', id: 'p1', group: '가입 개선' },
+    { action: 'regroup', id: 'p1' },
+  ]);
+});
+
+// ---------- 다음 주 후보 (BW) ----------
+// 후보는 화면이 이미 들고 있는 업무 목록에서 만든다(새 API 없음). 담았는지는 계획 행의 `planOf`로만
+// 판정하고 글자를 비교하지 않는다 — 문장을 고쳐도 `담음`이 풀리지 않게.
+const REPORT_CANDIDATE_SETUP = `
+  taskListsCache = {
+    todayTasks: [
+      { id: 't1', description: '가입 문구 검토하기', status: 'to-do', group: '가입 개선', due: '2999-09-27' },
+      { id: 't2', description: '정산 배치 설계하기', status: 'to-do', group: '결제 리뉴얼' },
+      { id: 't3', description: '이미 끝낸 일', status: 'done', group: '가입 개선' },
+      { id: 't4', description: '프로젝트 없는 일', status: 'to-do' },
+    ],
+    laterTasks: [{ id: 'l1', description: '나중에 볼 일', status: 'to-do', group: '알림센터' }],
+  };
+  jiraIssuesCache = []; jiraIssuesByKey = new Map();
+  const walk = node => (node.children || []).flatMap(kid =>
+    kid && kid.children ? [[String(kid.className || ''), String(kid.textContent || '')], ...walk(kid)] : []);
+`;
+function reportCandidateClient(rows = []) {
+  const app = reportClient();
+  const drawn = JSON.parse(app.run(`(() => {
+    ${REPORT_CANDIDATE_SETUP}
+    const item = { weekKey: 'W', draft: { rows: ${JSON.stringify(rows)} } };
+    const host = document.createElement('div');
+    reportPlanCandidateSection(item, host);
+    return JSON.stringify(walk(host));
+  })()`));
+  return { app, drawn };
+}
+test('다음 주 후보는 오늘 할 일의 미완료 업무만 프로젝트별로 세운다', () => {
+  const { drawn } = reportCandidateClient();
+  assert.deepEqual(drawn.filter(([cls]) => cls === 'rp-candpj').map(([, text]) => text),
+    ['가입 개선', '결제 리뉴얼', '프로젝트 없음'], '프로젝트별로 묶고 프로젝트 없는 것은 맨 뒤다');
+  assert.deepEqual(drawn.filter(([cls]) => cls === 'ti').map(([, text]) => text),
+    ['가입 문구 검토하기', '정산 배치 설계하기', '프로젝트 없는 일'], '완료한 업무와 나중에 할 일은 후보가 아니다');
+  assert.deepEqual(drawn.filter(([cls]) => cls === 'mt').map(([, text]) => text), ['9월 27일까지', '', ''],
+    '기한이 있으면 조용히 적는다');
+  assert.deepEqual(drawn.filter(([cls]) => cls.startsWith('d-btn')).map(([, text]) => text),
+    ['나중에 할 일에서 고르기', '+ 담기', '+ 담기', '+ 담기'], '구역 머리에 나중에 할 일 고르기가 하나 있다');
+  assert.equal(drawn.filter(([cls]) => cls === 'rp-cand is-in').length, 0);
+});
+test('이미 담은 후보는 `담음`으로 잠기고, 판정은 글자가 아니라 planOf로 한다', () => {
+  const { drawn } = reportCandidateClient([
+    // 글은 전혀 다르게 고쳐 뒀고, 제목이 같은 다른 문장은 연결이 없다.
+    { id: 'p1', heading: '다음 주 계획', group: '가입 개선', text: '문구 확정까지 끝내기', planOf: 't1', sourceIds: [] },
+    { id: 'p2', heading: '다음 주 계획', group: '결제 리뉴얼', text: '정산 배치 설계하기', sourceIds: [] },
+  ]);
+  const rows = drawn.filter(([cls]) => cls === 'rp-cand' || cls === 'rp-cand is-in');
+  assert.deepEqual(rows.map(([cls]) => cls), ['rp-cand is-in', 'rp-cand', 'rp-cand'],
+    '연결된 후보만 잠기고, 글자만 같은 문장은 잠그지 않는다');
+  assert.deepEqual(drawn.filter(([cls]) => cls === 'in').map(([, text]) => text), ['담음']);
+  assert.equal(drawn.filter(([, text]) => text === '+ 담기').length, 2, '담은 후보에는 담기 버튼이 없다');
+});
+test('`+ 담기`는 업무를 바꾸지 않고 add + planOf 하나만 보낸다', () => {
+  const app = reportClient();
+  const sent = JSON.parse(app.run(`(() => {
+    ${REPORT_CANDIDATE_SETUP}
+    const calls = [];
+    reportChange = async (item, action, notice) => { calls.push([action, notice]); };
+    const item = { weekKey: 'W', draft: { rows: [] } };
+    const host = document.createElement('div');
+    reportPlanCandidateSection(item, host);
+    const buttons = walk(host);
+    const find = text => {
+      const stack = [host];
+      while (stack.length) {
+        const node = stack.shift();
+        if (String(node.className || '').startsWith('d-btn') && node.textContent === text) return node;
+        (node.children || []).forEach(kid => { if (kid && kid.children) stack.push(kid); });
+      }
+      return null;
+    };
+    find('+ 담기').listeners.click();
+    return JSON.stringify(calls);
+  })()`));
+  assert.equal(sent.length, 1);
+  assert.deepEqual(sent[0][0], { action: 'add', text: '가입 문구 검토하기', group: '가입 개선', planOf: 't1' });
+  assert.equal(sent[0][1], '다음 주 계획에 넣었어요');
+});
+test('후보는 슬랙 복사에 절대 나가지 않는다', () => {
+  const app = reportClient();
+  const text = app.run(`(() => {
+    ${REPORT_CANDIDATE_SETUP}
+    const report = { rows: [
+      { id: 'p1', heading: '다음 주 계획', group: '결제 리뉴얼', text: '정산 배치 QA 붙기', planOf: 't2', sourceIds: [], excluded: false },
+    ] };
+    return reportSlackText(reportSlackModel(report, { sections: ['완료', '진행 중', '예정'] }));
+  })()`);
+  assert.match(text, /정산 배치 QA 붙기/);
+  for (const description of ['가입 문구 검토하기', '정산 배치 설계하기', '프로젝트 없는 일', '나중에 볼 일']) {
+    assert.doesNotMatch(text, new RegExp(description), `후보 문구(${description})는 복사 글자에 없다`);
+  }
+  assert.doesNotMatch(text, /t1|t2|planOf/, '연결 값도 나가지 않는다');
+});
+test('여러 줄 붙여넣기는 줄마다 한 문장이고, 접두는 기존 프로젝트 이름과 정확히 같을 때만 쓴다', () => {
+  const app = reportClient();
+  const lines = JSON.parse(app.run(`JSON.stringify(reportPlanLines(
+    '첫 줄\\n\\n  둘째 줄  \\r\\n셋째 줄'))`));
+  assert.deepEqual(lines, ['첫 줄', '둘째 줄', '셋째 줄'], '빈 줄은 무시하고 앞뒤 공백은 뗀다');
+  assert.equal(JSON.parse(app.run(`JSON.stringify(reportPlanLines(Array.from({ length: 30 }, (_, i) => 'L' + i).join('\\n')))`)).length,
+    20, '한 번에 20줄까지만 담는다');
+  const split = (line, fallback = '기본') => JSON.parse(app.run(
+    `JSON.stringify(reportPlanSplitPrefix(${JSON.stringify(line)}, ['결제 리뉴얼', '가입 개선'], ${JSON.stringify(fallback)}))`));
+  assert.deepEqual(split('결제 리뉴얼: 정산 배치 QA 붙기'), { text: '정산 배치 QA 붙기', group: '결제 리뉴얼' });
+  assert.deepEqual(split('결제: 정산 배치 QA 붙기'), { text: '결제: 정산 배치 QA 붙기', group: '기본' },
+    '이름이 정확히 같지 않으면 접두로 보지 않는다');
+  assert.deepEqual(split('오늘 할 일: 정리'), { text: '오늘 할 일: 정리', group: '기본' });
+  assert.deepEqual(split('결제 리뉴얼:'), { text: '결제 리뉴얼:', group: '기본' }, '접두만 있고 글이 없으면 그대로 둔다');
+  assert.deepEqual(split(': 앞이 비었어요'), { text: ': 앞이 비었어요', group: '기본' });
+});
+
+test('지난 주차에는 후보도 `나중에 할 일에도 추가` 토글도 없고 기존 입력줄만 남는다', () => {
+  const app = reportClient();
+  const shape = weekKey => JSON.parse(app.run(`(() => {
+    ${REPORT_CANDIDATE_SETUP}
+    customGroupsCache = ['가입 개선'];
+    const item = { weekKey: ${JSON.stringify(weekKey)}, draft: { rows: [
+      { id: 'p1', heading: '다음 주 계획', group: '가입 개선', text: '문구 확정까지 끝내기', sourceIds: [], excluded: false },
+    ] } };
+    const host = document.createElement('div');
+    reportPlanSection(item, host, new Set());
+    return JSON.stringify(walk(host).map(([cls, text]) => [cls, text]));
+  })()`));
+  const week = app.run(`(() => {
+    const monday = new Date(todayStr() + 'T12:00:00');
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    return monday.getFullYear() + '-' + String(monday.getMonth() + 1).padStart(2, '0') + '-' + String(monday.getDate()).padStart(2, '0');
+  })()`);
+  const now = shape(week);
+  assert.ok(now.some(([cls]) => cls === 'rp-candhd'), '이번 주에는 후보 구역이 있다');
+  assert.ok(now.some(([cls]) => cls.includes('rp-also')), '이번 주에는 토글이 있다');
+  assert.ok(now.some(([cls]) => cls === 'rp-pjadd'), '이번 주에는 프로젝트 소제목마다 `+ 추가`가 있다');
+  const past = shape('2020-01-06');
+  assert.equal(past.filter(([cls]) => cls === 'rp-candhd').length, 0);
+  assert.equal(past.filter(([cls]) => cls.includes('rp-also')).length, 0);
+  assert.equal(past.filter(([cls]) => cls === 'rp-pjadd').length, 0);
+  assert.equal(past.filter(([cls]) => cls === 'rp-add').length, 1, '기존 입력줄 하나는 그대로 남는다');
+});
+
+// 업무는 만들어졌는데 문장 추가가 실패하면, 다시 시도는 문장만 추가한다(업무를 두 번 만들지 않는다).
+test('직접 쓰기: 업무 만들기 → 문장 추가 순서이고, 문장만 실패하면 다시 시도가 업무를 또 만들지 않는다', async () => {
+  const app = reportClient();
+  await app.run(`(async () => {
+    calls = [];
+    load = async () => { calls.push(['load']); };
+    renderReportDraft = () => {};
+    request = async (url, options) => {
+      calls.push(['create', url, JSON.parse(options.body)]);
+      return { json: async () => ({ ok: true, id: 'new-1' }) };
+    };
+    failNext = true;
+    reportChange = async (item, action, notice) => {
+      calls.push(['change', action, notice]);
+      if (failNext) { failNext = false; throw new Error('저장하지 못했어요'); }
+    };
+    item = { weekKey: 'W', draft: { rows: [] } };
+    await reportPlanAddLines(item, ['정산 배치 QA 붙기'], { key: 'new', group: '결제 리뉴얼', alsoTask: true, focusId: 'reportPlanInput' });
+    await reportPlanAddLines(item, ['정산 배치 QA 붙기'], { key: 'new', group: '결제 리뉴얼', alsoTask: true, focusId: 'reportPlanInput' });
+  })()`);
+  const calls = JSON.parse(app.run('JSON.stringify(calls)'));
+  const creates = calls.filter(call => call[0] === 'create');
+  assert.equal(creates.length, 1, '업무는 한 번만 만든다');
+  assert.deepEqual(creates[0][1], '/api/later-task/create');
+  assert.deepEqual(creates[0][2], { description: '정산 배치 QA 붙기', group: '결제 리뉴얼' },
+    '기한·우선순위는 넣지 않는다(마감일을 추측하지 않는다)');
+  const changes = calls.filter(call => call[0] === 'change');
+  assert.equal(changes.length, 2, '다시 시도는 문장 추가만 한다');
+  assert.deepEqual(changes[1][1], { action: 'add', text: '정산 배치 QA 붙기', group: '결제 리뉴얼', planOf: 'new-1' });
+  assert.equal(changes[1][2], '다음 주 계획에 넣었어요 · 나중에 할 일에도 추가했어요');
+  // 실패한 뒤에는 남은 줄이 입력칸에 되돌아와 있다.
+  assert.equal(app.run("String(reportEdits.get('W:new'))"), 'undefined', '성공한 뒤에는 적던 글이 비워진다');
+});
+
+test('토글이 꺼져 있으면 업무를 만들지 않고 문장만 담는다', async () => {
+  const app = reportClient();
+  await app.run(`(async () => {
+    calls = [];
+    load = async () => { calls.push(['load']); };
+    renderReportDraft = () => {};
+    request = async (url) => { calls.push(['create', url]); return { json: async () => ({ ok: true, id: 'x' }) }; };
+    reportChange = async (item, action, notice) => { calls.push(['change', action, notice]); };
+    await reportPlanAddLines({ weekKey: 'W', draft: { rows: [] } }, ['직접 쓴 계획'],
+      { key: 'new', group: '', alsoTask: false, focusId: 'reportPlanInput' });
+  })()`);
+  const calls = JSON.parse(app.run('JSON.stringify(calls)'));
+  assert.equal(calls.filter(call => call[0] === 'create').length, 0);
+  assert.equal(calls.filter(call => call[0] === 'load').length, 0, '업무를 만들지 않았으면 목록을 다시 받지도 않는다');
+  assert.deepEqual(calls.filter(call => call[0] === 'change')[0][1], { action: 'add', text: '직접 쓴 계획' });
+  assert.equal(calls.filter(call => call[0] === 'change')[0][2], '다음 주 계획에 넣었어요');
+});
+
+test('여러 줄 담기가 중간에 실패하면 거기서 멈추고 남은 줄이 입력칸에 돌아온다', async () => {
+  const app = reportClient();
+  await app.run(`(async () => {
+    calls = [];
+    load = async () => {};
+    renderReportDraft = () => {};
+    reportChange = async (item, action) => {
+      calls.push(action.text);
+      if (action.text === '둘째 줄') throw new Error('저장하지 못했어요');
+    };
+    await reportPlanAddLines({ weekKey: 'W', draft: { rows: [] } }, ['첫 줄', '둘째 줄', '셋째 줄'],
+      { key: 'new', group: '가입 개선', alsoTask: false, focusId: 'reportPlanInput' });
+  })()`);
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), ['첫 줄', '둘째 줄']);
+  assert.equal(app.run("reportEdits.get('W:new')"), '둘째 줄\n셋째 줄', '실패한 줄부터 남은 줄이 그대로 돌아온다');
 });
 
 // 아래로 넣기·따로 빼기는 저장 경로 하나(`/api/report/change`)로 가고, 보내는 값은 id와 parentId뿐이다.

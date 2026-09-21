@@ -9,6 +9,8 @@ const project = item => item.jira ? `jira:${item.jira}` : item.group || item.pro
 const topic = item => item.meetingId || item.permalink || item.description.normalize('NFKC').trim().split(/\s+/).slice(0,2).join(' ');
 const bucket = item => `${project(item)}:${heading(item)}:${topic(item)}`;
 const evidence = item => ({ id: item.id, description: item.description, status: item.status, type: item.type, outcome: item.outcome || '', label: item.label || item.group || item.project || '그룹 없음', permalink: /^https?:\/\//.test(item.permalink || '') ? item.permalink : null });
+// 사람이 직접 쓰는 유일한 구역 — 자동 초안은 이 소제목을 만들지 않는다.
+const PLAN_HEADING = '다음 주 계획';
 const textOf = items => [...new Set(items.map(item => item.status === 'done' && item.outcome ? item.outcome : item.status === 'done' ? item.description.replace(/하기$/, '함') : item.description))].join('\n');
 
 module.exports = ({ directory, sources, legacy, currentWeek }) => {
@@ -71,7 +73,7 @@ module.exports = ({ directory, sources, legacy, currentWeek }) => {
     const groups = new Map();
     candidates.filter(item=>!claimed.has(item.id)).forEach(item=>{ const key=bucket(item); if(!groups.has(key))groups.set(key,[]);groups.get(key).push(item); });
     for (const [key,items] of groups) rows.push({ id:`auto-${hash([key,items.map(item=>item.id).sort()]).slice(0,16)}`,bucket:key,heading:heading(items[0]),group:items[0].label || items[0].group || items[0].project || '그룹 없음', text:textOf(items),sourceIds:items.map(item=>item.id),evidence:items.map(evidence),currentEvidence:items.map(evidence),locked:false,excluded:false,needsReview:false });
-    const order=['완료한 일','진행중','새로 정해진 것','확인 완료','확인 대기','다음 주 계획'];
+    const order=['완료한 일','진행중','새로 정해진 것','확인 완료','확인 대기',PLAN_HEADING];
     rows.forEach(row=>{if(row.evidence.some(item=>/\(.*확인 필요.*\)|\(미확정\)/.test(item.description)))row.needsReview=true;});
     // 묶기 전 문장(`parts`)은 저장 파일에만 둔다 — 화면에는 "풀 수 있는지"만 알린다(큰 배열을 매번 내보내지 않으려고).
     // `parts`가 없는 옛 묶음 행은 `canSplit`이 붙지 않아 화면에서 `묶음 풀기`가 보이지 않는다.
@@ -99,7 +101,18 @@ module.exports = ({ directory, sources, legacy, currentWeek }) => {
     if (!name || name.length > 60 || /[\u0000-\u001f\u007f]/.test(name)) throw new Error('프로젝트 이름을 60자 이내 한 줄로 입력해 주세요.');
     return name;
   }
-  function change({ weekKey, revision, action, id, parentId, text, ids, token, group }) {
+  // 계획 문장이 어느 업무에서 왔는지 가리키는 표시. 화면이 후보 줄의 `담음` 판정에만 쓴다.
+  // **`sourceIds`·`evidence`에는 절대 넣지 않는다** — 넣으면 view의 `claimed`가 그 업무를 이번 주
+  // `진행중` 자동 문장에서 빼 버린다(다음 주 계획에 담았다고 이번 주 기록이 사라지면 안 된다).
+  // 그 업무가 실제로 있는지는 서버가 확인하지 않는다(화면 표시용 연결일 뿐이다).
+  function planOf(value) {
+    if (value === undefined || value === null || value === '') return null;
+    if (typeof value !== 'string') throw new Error('담은 업무 표시를 확인해 주세요.');
+    const link = value.trim();
+    if (!link || link.length > 100 || /[\u0000-\u001f\u007f]/.test(link)) throw new Error('담은 업무 표시를 100자 이내 한 줄로 보내 주세요.');
+    return link;
+  }
+  function change({ weekKey, revision, action, id, parentId, text, ids, token, group, planOf: planSource }) {
     const state=read(), current=view(weekKey,state);
     if (revision !== current.revision) { const error=new Error('새 기록이나 다른 창의 변경이 있어요. 적은 내용은 그대로 있어요. 최신 내용을 확인한 뒤 다시 저장해 주세요.');error.status=409;throw error; }
     // 묶기 전 문장은 화면으로 나가지 않으므로(view가 `canSplit`만 알린다) 저장 파일에서 다시 붙인다.
@@ -116,7 +129,8 @@ module.exports = ({ directory, sources, legacy, currentWeek }) => {
       rows=prior.rows;
     } else if(action==='add') {
       if(typeof text!=='string'||!text.trim()||text.length>10000)throw new Error('보고 문장을 입력해 주세요.');
-      rows.push({id:randomUUID(),heading:'다음 주 계획',group:planGroup(group),text:text.trim(),sourceIds:[],evidence:[],locked:true,excluded:false});
+      const link=planOf(planSource);
+      rows.push({id:randomUUID(),heading:PLAN_HEADING,group:planGroup(group),text:text.trim(),sourceIds:[],evidence:[],locked:true,excluded:false,...(link?{planOf:link}:{})});
     } else if(action==='merge') {
       if(!Array.isArray(ids)||ids.length<2||new Set(ids).size!==ids.length)throw new Error('묶을 보고 항목을 선택해 주세요.');
       const selected=rows.filter(row=>ids.includes(row.id));
@@ -145,6 +159,12 @@ module.exports = ({ directory, sources, legacy, currentWeek }) => {
         row.parent=parent.id;
       }
       else if(action==='unnest') delete row.parent;
+      // 계획 문장의 프로젝트만 나중에 바꾼다(지우고 다시 넣지 않아도 되게). 다른 구역의 문장은
+      // 프로젝트가 원본 업무에서 오므로 여기서 손대지 않는다.
+      else if(action==='regroup') {
+        if(shown.heading!==PLAN_HEADING)throw new Error('다음 주 계획 문장만 프로젝트를 바꿀 수 있어요.');
+        row.group=planGroup(group);
+      }
       else if(action==='split') {
         // 묶은 뒤 문장을 고쳤더라도 묶기 전 문장들로 돌아간다(그 편집은 `undo`로 되살린다).
         if(!row.parts || !row.parts.length)throw new Error('이 문장은 풀 수 없어요.');

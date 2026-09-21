@@ -52,7 +52,7 @@ panelOpen(view) / panelClose() / panelRender()
   │                        + primary `완료로 표시` 하나 + quiet `내일`·`나중에`/`오늘로`·`프로젝트 보기`
   │                        + `기다리는 답변`·`결과 한 줄`(기본 펼침, 자동 저장) + `자동으로 저장됩니다`
   ├ panelCheck(item)    : `결정으로 남기기` 상시 + 다시 확인할 날짜 + 회신 기한 + 누구에게 + 프로젝트
-  └ panelMeeting(event) : 제목 + `티로 노트` + 결과 카드 + 초안 카드들 + 담기 바 + 항목 목록 + 직접 담기
+  └ panelMeeting(event) : 제목 + `미팅 노트` + 결과 카드 + 초안 카드들 + 담기 바 + 항목 목록 + 직접 담기
 ```
 - 저장 경로는 **전부 기존 API 그대로**: `/api/track/set-description|set-due|set-scheduled|set-priority|set-group|set-jira|toggle|remove|restore|seen`, `/api/workflow/item|capture|link|review|review-undo`. 서버 변경 없음(예외는 B7의 일괄 완료 하나).
 - `workflowFields`(598-646)의 `blockedBy`/`outcome`/`followUp`/`contacted` 저장 로직은 **그대로 옮긴다**(저장 버튼만 없애고 change 이벤트 자동 저장으로). `wfItem(item.id) || item` 재조회, 변경분만 보내는 `initial` 비교는 유지한다.
@@ -152,7 +152,7 @@ const script = ...; const definitions = script.slice(0, script.indexOf('// ---- 
 - **삭제:** `workflows.css`의 `wf-dialog`를 제외한 회의 관련 규칙(→ ui.css로)
 - **서버:** 없음
 - **테스트:** `client.test.js:191-241`(wfAcceptItem·wfResultTasks·wfCleanDraftText·quiet 알림) **그대로 통과해야 한다** — 이 배치의 핵심 안전망
-- **수동 확인:** 초안 3건 검토 → 담기 → 결과 카드 → `오늘로` → `실행 취소`로 초안이 되돌아오고 고친 문구가 남는가 · `티로 노트` 링크 · 기존 항목 연결
+- **수동 확인:** 초안 3건 검토 → 담기 → 결과 카드 → `오늘로` → `실행 취소`로 초안이 되돌아오고 고친 문구가 남는가 · `미팅 노트` 링크 · 기존 항목 연결
 - **parity:** A13, C(회의 상세 → 패널)
 - **규모:** app.js +430, workflows.js −330, ui.css +190
 

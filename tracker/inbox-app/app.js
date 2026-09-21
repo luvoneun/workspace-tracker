@@ -13,11 +13,16 @@ const UI_ICONS = {
   link: '<path d="M6.9 9.1a2.6 2.6 0 0 0 3.7 0l2-2a2.6 2.6 0 0 0-3.7-3.7l-.6.6"/><path d="M9.1 6.9a2.6 2.6 0 0 0-3.7 0l-2 2a2.6 2.6 0 0 0 3.7 3.7l.6-.6"/>',
   refresh: '<path d="M14 8a6 6 0 1 1-2-4.47L14 5.2"/><path d="M14 2v3.4h-3.4"/>',
   gear: '<circle cx="8" cy="8" r="2.4"/><path d="M8 1.7v1.7M8 12.6v1.7M14.3 8h-1.7M3.4 8H1.7M12.45 3.55l-1.2 1.2M4.75 11.25l-1.2 1.2M12.45 12.45l-1.2-1.2M4.75 4.75l-1.2-1.2"/>',
-  // 상태말 앞에 붙는 종류 표시 — 기한(달력) · 밀림(시계) · 답변(말풍선). 우선순위는 글자와 색만으로 알린다(아이콘 없음).
+  // 상태말 앞에 붙는 종류 표시 — 기한(달력) · 밀림(시계) · 답변(말풍선).
   calendar: '<rect x="2.4" y="3.4" width="11.2" height="10.2" rx="2.2"/><path d="M2.4 6.6h11.2M5.6 2.2v2.4M10.4 2.2v2.4"/>',
   clock: '<circle cx="8" cy="8" r="5.8"/><path d="M8 4.8V8l2.2 1.5"/>',
   chat: '<path d="M13.6 8.6a4.8 4.8 0 0 1-4.8 4.8H5.2L2.4 15v-2.9A4.8 4.8 0 0 1 2.4 8V7.4a4.8 4.8 0 0 1 4.8-4.8h1.6a4.8 4.8 0 0 1 4.8 4.8z"/>',
+  // 우선순위 — 업무 체크박스 안에 겹치는 위 꺾쇠(지라의 우선순위 아이콘과 같은 말): 중요 한 겹 · 긴급 두 겹.
+  priHigh: '<path d="M3.5 10.5 8 6l4.5 4.5"/>',
+  priTop: '<path d="M3.5 8.5 8 4l4.5 4.5M3.5 13 8 8.5l4.5 4.5"/>',
 };
+// 체크박스 위에 겹치는 흰 체크. 체크박스를 만드는 자리마다 같은 마크업을 쓴다(고정 문자열).
+const UI_TICK_SVG = '<svg class="d-tick" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7.4 5.7 10.1 11 4.2"/></svg>';
 function uiIcon(name) {
   const shape = UI_ICONS[name];
   return shape ? `<svg class="d-i" viewBox="0 0 16 16" aria-hidden="true">${shape}</svg>` : '';
@@ -264,16 +269,15 @@ function uiProjectLabel(item, grouped) {
   return item.jira || item.group || '';
 }
 
-// 상태 열의 글자 셀: 우선순위(글자와 색뿐, 아이콘 없음) → 상태(밀림 · N일째 진행 중 · 답변) → 기한(맨 오른쪽, 달력).
-// 기한·밀림·진행·답변에는 14px 아이콘과 풀어 쓴 title 툴팁이 함께 붙는다. 급한 말(긴급·기한 N일 지남·오늘까지)만
+// 줄 오른쪽의 글자 셀: 상태(밀림 · N일째 진행 중 · 답변) → 기한(맨 오른쪽, 달력). **날짜 성격의 말만** 선다.
+// 있는 것만 오른쪽으로 이어 붙이고(기한이 맨 오른쪽), 보통·낮음·먼 기한처럼 의미 없는 값은 아예 적지 않는다.
+// 기한·밀림·진행·답변에는 14px 아이콘과 풀어 쓴 title 툴팁이 함께 붙는다. 급한 말(기한 N일 지남·오늘까지)만
 // 배지로 서고 나머지는 회색 글자다(모양은 ui.css가 정한다).
-// 보통·낮음·먼 기한처럼 의미 없는 값은 자리를 비운다.
-// `opts.fixed`인 줄(오늘 목록·나중에 할 일 서랍·마감·중요도순)에서는 세 칸이 줄마다 같은 자리에 서도록
-// 빈 칸도 자리 표시로 내보낸다 — 같은 종류가 세로로 서야 "중요한 것만"·"기한 있는 것만" 훑을 수 있다.
-// 그 밖의 자리(미루기 제안 줄 등)는 있는 만큼만 이어 붙이던 기존 모양 그대로다.
+// **우선순위는 `opts.noPriority`인 줄에서는 여기 나오지 않는다** — 업무 체크박스가 안의 위 꺾쇠로 말한다
+// (같은 말을 한 줄에서 두 번 하지 않는다). 체크박스가 없는 자리(미루기 제안 줄)에서는 예전처럼 글자로 쓴다.
 const UI_PRIORITY_META = {
-  critical: { text: '긴급', tone: 'urgent', hint: '가장 먼저 해야 하는 업무예요' },
-  high: { text: '중요', tone: 'warn', hint: '중요한 업무예요' },
+  critical: { text: '긴급', tone: 'urgent', hint: '가장 먼저 해야 하는 업무예요', level: 'top', mark: 'priTop' },
+  high: { text: '중요', tone: 'warn', hint: '중요한 업무예요', level: 'high', mark: 'priHigh' },
 };
 // 화면 어디서나 같은 말로 고르게 한다(상세·메뉴의 선택지도 이 순서·이 말을 쓴다).
 const UI_PRIORITY_CHOICES = [['critical', '긴급'], ['high', '중요'], ['medium', '보통'], ['low', '낮음']];
@@ -288,9 +292,9 @@ function uiMetaCells(item, opts = {}) {
     `<span class="${cls}"${hint ? ` title="${escapeAttr(hint)}"` : ''}>${escapeHtml(text)}</span>`;
   // 좁은 화면(≤520px)의 두 줄 행에서는 프로젝트가 정보 줄 맨 앞에 온다 — 넓은 화면에서는 제목 뒤·프로젝트 열이 보여 준다.
   if (opts.project) cells.push(`<span class="m-proj">${escapeHtml(opts.project)}</span>`);
-  const priority = done ? null : UI_PRIORITY_META[item.priority];
+  // 체크박스가 우선순위를 말하는 줄에서는 글자로 또 적지 않는다.
+  const priority = done || opts.noPriority ? null : UI_PRIORITY_META[item.priority];
   const priorityCell = priority ? cellPlain(`m-pri${uiTone(priority.tone)}`, priority.text, priority.hint) : '';
-  // 날짜 성격의 상태는 한 칸에 모인다(겹치면 이어 쓰고, 넘치면 뒤가 말줄임된다).
   const status = [];
   if (opts.waiting) status.push(uiWaitCell(opts.waiting === 'answered'));
   const carry = where === 'row' && !done ? uiCarryText(item.scheduled) : null;
@@ -301,11 +305,22 @@ function uiMetaCells(item, opts = {}) {
   }
   const due = done ? null : uiDueText(item.due, where);
   const dueCell = due ? cell(`m-due${uiTone(due.tone)}`, 'calendar', due.text, item.due ? `기한은 ${uiKoDate(item.due)}이에요` : '') : '';
-  if (opts.fixed) {
-    cells.push(`<span class="m-c pri">${priorityCell}</span>`, `<span class="m-c st">${status.join('')}</span>`, `<span class="m-c due">${dueCell}</span>`);
-    return cells.join('');
-  }
   return [...cells, priorityCell, ...status, dueCell].filter(Boolean).join('');
+}
+
+// 업무 체크박스 한 칸(체크 + 흰 체크 + 우선순위 꺾쇠). 체크박스가 있는 줄은 모두 이 부품을 쓴다.
+// 꺾쇠는 체크박스 위에 겹치고 `pointer-events: none`이라 누르는 자리는 그대로 28px이다.
+// 완료한 줄에는 붙지 않는다(체크된 파란 네모가 이미 다 말한다).
+const uiPriorityMark = (item, done) => (!done && item ? UI_PRIORITY_META[item.priority] || null : null);
+function uiCheckCell(item, row, done) {
+  const cell = document.createElement('span');
+  cell.className = 'd-check';
+  cell.appendChild(taskCompletionCheckbox(item, row, done));
+  const mark = uiPriorityMark(item, done);
+  // 고정 문자열만 넣는다 — 사용자 글자는 체크박스의 aria-label·title(textContent 계열)로만 간다.
+  cell.insertAdjacentHTML('beforeend', UI_TICK_SVG
+    + (mark ? `<svg class="d-pri" viewBox="0 0 16 16" aria-hidden="true">${UI_ICONS[mark.mark]}</svg>` : ''));
+  return cell;
 }
 
 // 답변을 기다리는 업무에 붙는 말 한 마디(말풍선 아이콘 + 글자).
@@ -565,11 +580,7 @@ function uiTaskRow(item, opts = {}) {
     if (!done) { selectBox = taskSelectionCheckbox(item, row); cell.appendChild(selectBox); }
     row.appendChild(cell);
   }
-  const check = document.createElement('span');
-  check.className = 'd-check';
-  check.appendChild(taskCompletionCheckbox(item, row, done));
-  check.insertAdjacentHTML('beforeend', '<svg class="d-tick" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7.4 5.7 10.1 11 4.2"/></svg>');
-  row.appendChild(check);
+  row.appendChild(uiCheckCell(item, row, done));
 
   const title = document.createElement('span');
   title.className = 'd-title';
@@ -614,13 +625,11 @@ function uiTaskRow(item, opts = {}) {
   if (done) {
     uiResultCell(meta, item);
   } else {
-    // 답변을 기다리는 업무는 그 사실도 글자로 적는다(밀림·진행과 같은 상태 칸에 선다).
+    // 답변을 기다리는 업무는 그 사실도 글자로 적는다(밀림·진행과 같은 상태에 이어 선다).
     const blocker = typeof wfItem === 'function' ? wfItem(wfItem(item.id)?.blockedBy) : null;
-    // 이 줄들만 세 칸(우선순위 · 상태 · 기한)의 자리를 고정한다 — 완료한 줄·제안 줄은 예전 모양 그대로다.
-    meta.className = 'd-meta is-fixed';
-    row.classList.add('is-cols');
+    // 우선순위는 왼쪽 체크박스가 말한다 — 이 줄의 오른쪽에는 날짜 성격의 말만 오른쪽 끝에 붙는다.
     meta.innerHTML = uiMetaCells(item, {
-      where: mode === 'later' ? 'full' : 'row', inDoingGroup: opts.inDoingGroup, project, fixed: true,
+      where: mode === 'later' ? 'full' : 'row', inDoingGroup: opts.inDoingGroup, project, noPriority: true,
       waiting: blocker ? (blocker.status === 'done' ? 'answered' : 'waiting') : null,
     });
   }
@@ -1076,11 +1085,7 @@ function projectTaskRow(item) {
   row.className = 'd-prow2' + (panelState && panelState.id === item.id ? ' is-sel' : '');
   row.dataset.taskId = item.id;
 
-  const check = document.createElement('span');
-  check.className = 'd-check';
-  check.appendChild(taskCompletionCheckbox(item, row, false));
-  check.insertAdjacentHTML('beforeend', '<svg class="d-tick" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7.4 5.7 10.1 11 4.2"/></svg>');
-  row.appendChild(check);
+  row.appendChild(uiCheckCell(item, row, false));
 
   const place = document.createElement('span');
   place.className = 'pl';
@@ -1096,13 +1101,8 @@ function projectTaskRow(item) {
   title.addEventListener('click', () => panelOpen({ id: item.id }));
   row.appendChild(title);
 
-  // 상태말은 오늘 목록과 같은 말을 쓴다(우선순위는 글자·색만, 기한은 달력 아이콘).
-  const priority = document.createElement('span');
-  const meta = UI_PRIORITY_META[item.priority];
-  priority.className = 'pr' + (meta ? uiTone(meta.tone) : '');
-  if (meta) { priority.textContent = meta.text; priority.title = meta.hint; }
-  row.appendChild(priority);
-
+  // 우선순위 열은 없앴다 — 왼쪽 체크박스 안의 꺾쇠가 같은 말을 한다(한 줄에서 두 번 말하지 않는다).
+  // 정렬은 그대로 `마감·중요도순`(compareTasks)이다.
   const due = uiDueText(item.due, 'full');
   const deadline = document.createElement('span');
   deadline.className = 'dd' + (due ? uiTone(due.tone) : '');
@@ -1133,11 +1133,7 @@ function projectDoneRow(item) {
   row.className = 'd-prow2 is-done' + (panelState && panelState.id === item.id ? ' is-sel' : '');
   row.dataset.taskId = item.id;
 
-  const check = document.createElement('span');
-  check.className = 'd-check';
-  check.appendChild(taskCompletionCheckbox(item, row, true));
-  check.insertAdjacentHTML('beforeend', '<svg class="d-tick" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7.4 5.7 10.1 11 4.2"/></svg>');
-  row.appendChild(check);
+  row.appendChild(uiCheckCell(item, row, true));
 
   const title = document.createElement('button');
   title.type = 'button';
@@ -1218,7 +1214,7 @@ function renderProjectDetail(body, row) {
     surface.className = 'd-psurf';
     // 조용한 열 이름 줄 — 무슨 값이 어느 칸에 있는지 한 번만 적는다.
     surface.insertAdjacentHTML('beforeend',
-      '<div class="d-colhd"><span></span><span>언제 할지</span><span>업무</span><span class="r">우선순위</span><span class="r">기한</span></div>');
+      '<div class="d-colhd"><span></span><span>언제 할지</span><span>업무</span><span class="r">기한</span></div>');
     open.forEach(item => surface.appendChild(projectTaskRow(item)));
     section.appendChild(surface);
     body.appendChild(section);
@@ -2088,7 +2084,7 @@ function recordDecisionRow(item, archived) {
     fadeOutAndRun(row, () => toggleTask(item.id), archived ? 'PRD 미반영으로 되돌렸어요' : 'PRD 반영으로 표시했어요')
   );
   check.appendChild(box);
-  check.insertAdjacentHTML('beforeend', '<svg class="d-tick" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7.4 5.7 10.1 11 4.2"/></svg>');
+  check.insertAdjacentHTML('beforeend', UI_TICK_SVG);
   row.appendChild(check);
 
   const title = document.createElement('span');
@@ -2503,9 +2499,12 @@ function compareTasks(a, b) {
 function taskCompletionCheckbox(item, card, done) {
   const checkbox = document.createElement('input');
   checkbox.type = 'checkbox';
-  checkbox.className = 'd-cb';
+  // 우선순위는 색만으로 말하지 않는다 — 클래스는 꺾쇠·테두리 색을 정하고, 툴팁과 이름표가 말을 붙인다.
+  const mark = uiPriorityMark(item, done);
+  checkbox.className = 'd-cb' + (mark ? ` is-pri-${mark.level}` : '');
   checkbox.checked = done;
-  checkbox.setAttribute('aria-label', `${item.description} — 완료로 표시`);
+  if (mark) checkbox.title = mark.hint;
+  checkbox.setAttribute('aria-label', `${item.description} — ${mark ? `${mark.text} · ` : ''}완료로 표시`);
   checkbox.addEventListener('change', () => {
     // 끝내는 순간을 눈으로 보여 준다: 체크가 그려지고 → 제목에 줄이 그어지고 → 옅어진다.
     // 저장·되돌리기 쪽은 그대로다(클래스 하나만 붙인다. 움직임 줄이기에서는 ui.css가 끈다).
@@ -3265,7 +3264,7 @@ function panelMeeting(event, box, host = MEETING_HOST_CARD) {
     note.href = url;
     note.target = '_blank';
     note.rel = 'noopener';
-    note.textContent = (event.tiroNotes.length > 1) ? `티로 노트 ${index + 1}` : '티로 노트';
+    note.textContent = (event.tiroNotes.length > 1) ? `미팅 노트 ${index + 1}` : '미팅 노트';
     when.append(' · ', note);
   });
   head.append(title, when);
@@ -3780,7 +3779,7 @@ function meetingsBaseScope(meetings, { today, windowDays, showNoRecord, itemsOf 
 
 // `이전 회의 더 보기`를 보일지(순수 함수): 지금 기간보다 오래된 회의가 하나라도 남아 있으면 더 넓힐 것이 있다.
 // 눌렀을 때 실제로 새 줄이 나올 때만 `이전 회의 더 보기`를 보인다 — 기간 밖이라도 손댈 일이 남은 회의는
-// 이미 보이고 있고, 기록 없는 회의는 `기록 없는 회의도 보기`를 켰을 때만 나온다.
+// 이미 보이고 있고, 기록 없는 회의는 `빈 회의 포함`을 켰을 때만 나온다.
 function meetingsHasMoreBeyond(meetings, today, windowDays, { showNoRecord = false, itemsOf } = {}) {
   return (meetings || []).some(event => (event.date || '') < today && daysBeforeToday(event.date, today) > windowDays
     && !meetingHasOpenWork(event, itemsOf) && (showNoRecord || meetingHasRecord(event, itemsOf)));
@@ -3916,11 +3915,12 @@ function meetingsTabFilters(meetings) {
   bar.className = 'd-mfil';
   bar.setAttribute('role', 'group');
   bar.setAttribute('aria-label', '회의 거르기');
-  const chip = (text, on, onPick) => {
+  const chip = (text, on, onPick, hint) => {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'd-chip' + (on ? ' is-on' : '');
     button.textContent = text;
+    if (hint) button.title = hint;
     button.setAttribute('aria-pressed', String(!!on));
     button.addEventListener('click', () => { onPick(); renderMeetings(); });
     bar.appendChild(button);
@@ -3928,7 +3928,9 @@ function meetingsTabFilters(meetings) {
   chip('초안 있음', meetingsTabState.reviewOnly, () => { meetingsTabState.reviewOnly = !meetingsTabState.reviewOnly; });
   chip('미완료만', meetingsTabState.unresolved, () => { meetingsTabState.unresolved = !meetingsTabState.unresolved; });
   // 조용한 토글 — 기본은 꺼짐, 켜면 보이는 기간 안의 기록 없는 지난 회의도 함께 나온다.
-  chip('기록 없는 회의도 보기', meetingsTabState.showNoRecord, () => { meetingsTabState.showNoRecord = !meetingsTabState.showNoRecord; });
+  // 칩 이름은 짧게 두고 무슨 뜻인지는 툴팁이 풀어 준다(줄에 들어가야 하는 이름이다).
+  chip('빈 회의 포함', meetingsTabState.showNoRecord, () => { meetingsTabState.showNoRecord = !meetingsTabState.showNoRecord; },
+    '초안도 담은 항목도 없는 지난 회의까지 보여 줘요');
 
   // 프로젝트는 값이 여럿이라 칩 대신 고르는 칸이다(회의에 연결된 프로젝트만 후보로).
   const keys = new Map();
@@ -4277,7 +4279,7 @@ function detailUnmount() {
 // ---------- ⌘K 검색 팔레트 (검색 · 오늘 신규) ----------
 // 큰 창 대신 위에서 내려오는 한 겹. 여기는 **찾는 창**이다 — 훑어보며 몰아서 정리하는 일은 `회의` 탭이 맡는다
 // (DECISIONS 2026-09-22). 찾는 범위는 예전 통합 검색과 같다: 완료한 업무와 결과 한 줄,
-// 결정·확인 대기·아이디어, 회의와 회의 초안 문구까지(외부 티로 노트 전문은 찾지 않는다 — README와 같다).
+// 결정·확인 대기·아이디어, 회의와 회의 초안 문구까지(외부 미팅 노트 전문은 찾지 않는다 — README와 같다).
 
 const PAL_TYPES = [['', '전체'], ['task', '할 일'], ['check', '확인 대기'], ['decision', '결정'], ['idea', '아이디어'], ['meeting', '회의']];
 const PAL_TAG = { task: '할 일', bug: '할 일', check: '확인 대기', decision: '결정', idea: '아이디어' };

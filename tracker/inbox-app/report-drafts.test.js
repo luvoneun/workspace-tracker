@@ -109,6 +109,84 @@ test('잘못된 프로젝트 이름은 계획 문장과 함께 거절된다',t=>
   const old=f.view();f.items.push({...f.items[0],id:'b'});
   assert.throws(()=>f.store.change({weekKey:old.weekKey,revision:old.revision,action:'add',text:'문장',group:'가입 개선'}),error=>error.status===409);
 });
+// 후보에서 눌러 담은 계획 문장은 어느 업무에서 왔는지를 `planOf`로만 들고 있는다 —
+// `sourceIds`에 넣으면 그 업무가 이번 주 자동 문장에서 빠져 버린다.
+test('후보에서 담은 계획 문장은 planOf만 들고, 그 업무의 이번 주 자동 문장은 그대로 남는다',t=>{
+  const f=fixture(t);
+  f.items.push({id:'r',type:'task',description:'정산 배치 설계하기',status:'to-do',created:'2026-09-14',doing:'2026-09-15',group:'결제'});
+  const before=f.view().rows.find(row=>row.heading==='진행중');
+  assert.deepEqual(before.sourceIds,['r'],'담기 전에는 진행중 자동 문장이 그 업무를 들고 있다');
+  f.change({action:'add',text:'정산 배치 설계하기',group:'결제 리뉴얼',planOf:'r'});
+  const plan=f.view().rows.find(row=>row.heading==='다음 주 계획');
+  assert.equal(plan.planOf,'r');
+  assert.deepEqual(plan.sourceIds,[],'담은 연결은 sourceIds·evidence로 새지 않는다');
+  assert.deepEqual(plan.evidence,[]);
+  const after=f.view().rows.find(row=>row.heading==='진행중');
+  assert.ok(after,'담아도 이번 주 진행중 문장은 사라지지 않는다');
+  assert.deepEqual(after.sourceIds,['r']);
+  assert.equal(after.text,'정산 배치 설계하기');
+});
+test('planOf는 clean·carry·새 인스턴스를 거쳐도 보존되고, 없으면 붙지 않는다',t=>{
+  const f=fixture(t);
+  f.change({action:'add',text:'담은 문장',planOf:' task-1 '});
+  f.change({action:'add',text:'직접 쓴 문장'});
+  const linked=()=>f.view().rows.find(row=>row.planOf==='task-1');
+  assert.equal(linked().text,'담은 문장','앞뒤 공백은 뗀다');
+  assert.equal(f.view().rows.find(row=>row.text==='직접 쓴 문장').planOf,undefined,'연결 없이 쓴 문장에는 붙지 않는다');
+  // 다른 변경(수정·제외·되돌리기·프로젝트 바꾸기)을 거쳐도 연결은 살아 있다.
+  f.change({action:'edit',id:linked().id,text:'담았다가 고친 문장'});
+  assert.equal(f.view().rows.find(row=>row.text==='담았다가 고친 문장').planOf,'task-1');
+  const excluded=f.change({action:'exclude',id:linked().id});
+  assert.equal(f.view().rows.find(row=>row.planOf==='task-1').excluded,true);
+  f.change({action:'undo',token:excluded.undoToken});
+  assert.equal(f.view().rows.find(row=>row.planOf==='task-1').excluded,false);
+  const fresh=factory({directory:f.directory,sources:()=>f.items,legacy:()=>[],currentWeek:()=>'2026-09-14'});
+  assert.equal(fresh.view('2026-09-14').rows.find(row=>row.planOf==='task-1').text,'담았다가 고친 문장','새 인스턴스로 읽어도 그대로다');
+});
+test('잘못된 planOf는 계획 문장과 함께 거절된다',t=>{
+  const f=fixture(t);
+  for(const link of ['줄\n바꿈','t'.repeat(101),'   ',{id:'객체'},['t'],'제어\u0007문자',7])
+    assert.throws(()=>f.change({action:'add',text:'문장',planOf:link}),error=>!error.status && /담은 업무 표시/.test(error.message));
+  assert.equal(f.view().rows.filter(row=>row.heading==='다음 주 계획').length,0,'거절된 요청은 아무것도 남기지 않다');
+  assert.deepEqual(fs.readdirSync(f.directory),[]);
+});
+test('계획 문장의 프로젝트는 regroup으로 바꾸고, 계획 문장에만 허용된다',t=>{
+  const f=fixture(t);
+  f.change({action:'add',text:'정산 배치 QA 붙기',group:'결제 리뉴얼',planOf:'lt01'});
+  const plan=()=>f.view().rows.find(row=>row.heading==='다음 주 계획');
+  const id=plan().id;
+  f.change({action:'regroup',id,group:' 가입 개선 '});
+  assert.equal(plan().group,'가입 개선','앞뒤 공백은 떼고 고른 프로젝트를 적는다');
+  assert.equal(plan().planOf,'lt01','프로젝트를 바꿔도 담은 연결은 그대로다');
+  assert.equal(plan().text,'정산 배치 QA 붙기');
+  // 빈 값이면 프로젝트 없음(`직접 작성`)으로 돌아간다.
+  f.change({action:'regroup',id,group:''});
+  assert.equal(plan().group,'직접 작성');
+  // 잘못된 이름은 planGroup 검증이 그대로 막고, 되돌리기도 기존 길 그대로다.
+  assert.throws(()=>f.change({action:'regroup',id,group:'줄\n바꿈'}),/프로젝트 이름/);
+  const moved=f.change({action:'regroup',id,group:'알림센터'});
+  assert.equal(plan().group,'알림센터');
+  f.change({action:'undo',token:moved.undoToken});
+  assert.equal(plan().group,'직접 작성','되돌리면 바꾸기 전 프로젝트로 돌아간다');
+  // 자동 문장(다음 주 계획이 아닌 구역)은 프로젝트를 바꿀 수 없다.
+  const auto=f.view().rows.find(row=>row.heading==='완료한 일');
+  assert.throws(()=>f.change({action:'regroup',id:auto.id,group:'가입 개선'}),/다음 주 계획 문장만/);
+  assert.equal(f.view().rows.find(row=>row.id===auto.id).group,'가입','거절된 요청은 아무것도 바꾸지 않는다');
+  assert.throws(()=>f.change({action:'regroup',id:'없는-행',group:'가입 개선'}),/보고 항목을 찾을 수 없어요/);
+});
+test('planOf가 없던 옛 계획 문장은 그대로 읽히고 고칠 수 있다',t=>{
+  const f=fixture(t);
+  f.change({action:'add',text:'옛날에 직접 쓴 계획',group:'가입 개선'});
+  const file=path.join(f.directory,'.report-drafts.json'),saved=JSON.parse(fs.readFileSync(file,'utf8'));
+  assert.equal(saved.weeks['2026-09-14'].rows.find(row=>row.text==='옛날에 직접 쓴 계획').planOf,undefined);
+  const old=()=>f.view().rows.find(row=>row.text==='옛날에 직접 쓴 계획'||row.text==='고친 옛 계획');
+  assert.equal(old().group,'가입 개선');
+  f.change({action:'regroup',id:old().id,group:'결제 리뉴얼'});
+  assert.equal(old().group,'결제 리뉴얼');
+  f.change({action:'edit',id:old().id,text:'고친 옛 계획'});
+  assert.equal(old().text,'고친 옛 계획');
+  assert.equal(old().planOf,undefined,'없던 연결이 저절로 생기지도 않는다');
+});
 // 묶기·묶음 풀기 — 묶을 때 묶기 전 문장을 저장해 두고(`parts`), 나중에 `split`으로 되살린다.
 const REPORT_FILE='.report-drafts.json';
 function mergeFixture(t) {
