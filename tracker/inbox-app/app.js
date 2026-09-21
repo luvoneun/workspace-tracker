@@ -561,10 +561,12 @@ function uiGroupLabel(key) {
 }
 
 // 프로젝트별로 묶고, 프로젝트 없는 것은 맨 뒤에 둔다.
+// 아이디어는 프로젝트를 `project`에 담는다 — 흐름 기록의 `wfKey`와 같은 규칙으로 맞춘다.
 function uiGroupTasks(items) {
   const groups = new Map();
   items.forEach((item) => {
-    const key = item.jira ? `jira:${item.jira}` : item.group ? `group:${item.group}` : '__misc__';
+    const named = item.group || item.project;
+    const key = item.jira ? `jira:${item.jira}` : named ? `group:${named}` : '__misc__';
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(item);
   });
@@ -1427,14 +1429,16 @@ function renderDateBar(data) {
   // used === false 는 "이 회사에선 안 쓰는 도구" — 경고할 일이 아니다
   const stale = [];
   const slack = data.slackSync || {};
-  if (slack.used !== false && slack.stale) stale.push({ name: '슬랙 캡처', lastSync: slack.lastSync });
+  if (slack.used !== false && slack.stale) stale.push({ key: 'slack', name: '슬랙 캡처', lastSync: slack.lastSync });
   const cal = data.calendar || {};
-  if (cal.used !== false && (cal.stale || !cal.lastSync)) stale.push({ name: '캘린더', lastSync: cal.lastSync });
+  if (cal.used !== false && (cal.stale || !cal.lastSync)) stale.push({ key: 'calendar', name: '캘린더', lastSync: cal.lastSync });
   const jira = data.jiraSync || {};
-  if (jira.used !== false && jira.stale) stale.push({ name: '지라', lastSync: jira.lastSync });
+  if (jira.used !== false && jira.stale) stale.push({ key: 'jira', name: '지라', lastSync: jira.lastSync });
 
   stale.forEach(source => {
-    const warn = document.createElement('span');
+    // 누르면 환경설정의 `상태`가 열리고 그 자동화 줄이 밝혀진다 — "무슨 일인지"까지 한 번에.
+    const warn = document.createElement('button');
+    warn.type = 'button';
     warn.className = 'd-warn';
     const dot = document.createElement('i');
     dot.className = 'd-dot';
@@ -1445,8 +1449,10 @@ function renderDateBar(data) {
     label.textContent = `${source.name} ${age}`;
     warn.append(dot, label);
     warn.title = source.lastSync
-      ? `${source.name} 자동 갱신이 ${source.lastSync} 이후 멈춰 있습니다. 목록이 최신이 아닐 수 있어요.`
-      : `${source.name}를 아직 한 번도 가져오지 못했습니다.`;
+      ? `${source.name} 자동 갱신이 ${source.lastSync} 이후 멈춰 있습니다. 목록이 최신이 아닐 수 있어요. 누르면 자세한 상태를 봅니다.`
+      : `${source.name}를 아직 한 번도 가져오지 못했습니다. 누르면 자세한 상태를 봅니다.`;
+    warn.setAttribute('aria-label', `${source.name} ${age} — 자동화 상태 보기`);
+    warn.addEventListener('click', () => settingsOpen('status', source.key));
     bar.appendChild(warn);
   });
 }
@@ -1629,14 +1635,6 @@ function renderSuggestions(suggestions) {
   zone.appendChild(box);
 }
 
-function relativeDate(dateStr) {
-  const diff = diffDays(dateStr);
-  if (diff === 0) return '오늘';
-  if (diff === -1) return '어제';
-  if (diff < -1 && diff >= -6) return `${-diff}일 전`;
-  return dateStr;
-}
-
 function todayStr() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -1735,102 +1733,194 @@ function renderWeeklyReportDetail(item) {
   renderReportDraft(item);
 }
 
+// ---------- 아이디어·결정 탭 ----------
+// 두 열(아이디어 | 결정)을 프로젝트로 묶어 한 줄씩 적는다. 두 종류 다 날짜 칸이 없다
+// (DECISIONS: 마감일은 할 일에만). 결정만 `PRD 반영함` 체크가 있고, 아이디어는 더보기만 있다.
+
 let decisionArchiveCache = [];
 let decisionArchiveQuery = '';
+let decisionArchiveOpen = false;
 
-function renderDecisionArchive() {
-  const items = decisionArchiveCache.filter(item => {
-    if (!decisionArchiveQuery) return true;
-    const jiraSummary = item.jira ? (jiraIssuesByKey.get(item.jira) || {}).summary : '';
-    return [item.description, item.group, item.jira, jiraSummary]
-      .some(value => value && value.toLowerCase().includes(decisionArchiveQuery));
-  });
-  document.getElementById('decisionArchiveCount').textContent = items.length;
-  const list = document.getElementById('decisionArchiveList');
-  list.innerHTML = items.length ? '' : `<div class="empty">${decisionArchiveQuery ? '일치하는 결정 없음' : '반영 완료한 결정 없음'}</div>`;
-  items.forEach(item => list.appendChild(renderDecisionCard(item)));
+// 아이디어의 `가능성`은 높음만 글자로 적는다 — 보통·낮음·없음은 목록에 찍지 않는다.
+function ideaChanceText(item) {
+  return item && item.priority === 'high' ? '가능성 높음' : '';
 }
 
-// 지라 연결이든 직접 지정한 그룹이든 같은 방식으로 라벨을 만든다 — 카드 위 뱃지랑 동일한 표기.
-function decisionGroupLabel(item) {
-  if (item.jira) {
-    const issue = jiraIssuesByKey.get(item.jira);
-    return issue ? `${item.jira} · ${issue.summary}` : item.jira;
+// 반영 완료 검색: 문구·프로젝트·지라 키·지라 요약 가운데 하나라도 걸리면 남긴다.
+function recordArchiveMatch(item, query, jiraSummary) {
+  const needle = String(query || '').trim().toLowerCase();
+  if (!needle) return true;
+  return [item.description, item.group, item.project, item.jira, jiraSummary]
+    .some(value => value && String(value).toLowerCase().includes(needle));
+}
+
+function decisionJiraSummary(item) {
+  return item.jira ? (jiraIssuesByKey.get(item.jira) || {}).summary || '' : '';
+}
+
+// 결정·아이디어 열 하나를 그린다: 프로젝트 그룹 제목(누르면 프로젝트 탭) + 그 아래 줄들.
+// 그룹 제목이 이미 프로젝트를 말해 주므로 줄에는 프로젝트 이름을 되풀이하지 않는다.
+function renderRecordColumn(list, items, row, emptyText) {
+  list.replaceChildren();
+  if (!items.length) {
+    list.insertAdjacentHTML('beforeend', `<div class="d-empty">${emptyText}</div>`);
+    return;
   }
-  return item.group || null;
+  uiGroupTasks(items).forEach(([key, group]) => {
+    list.appendChild(uiGroupHeading(uiGroupLabel(key), group.length,
+      key === '__misc__' ? {} : { onOpenProject: () => openProjectTab(key) }));
+    group.forEach(item => list.appendChild(row(item)));
+  });
 }
 
 function renderDecisions(items) {
   document.getElementById('decisionSectionCount').textContent = items.length;
-  const list = document.getElementById('decisionList');
-  list.innerHTML = '';
-  if (!items.length) return;
+  renderRecordColumn(document.getElementById('decisionList'), items,
+    item => recordDecisionRow(item, false), '정해진 내용이 아직 없습니다. 위 첫 줄에서 바로 추가하세요.');
+}
 
-  // "언젠가"랑 같은 방식 — 프로젝트/그룹별로 묶고, 없는 건 기타로
-  const groups = new Map();
-  items.forEach(item => {
-    const key = decisionGroupLabel(item) || '__misc__';
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(item);
-  });
-  const namedKeys = [...groups.keys()].filter(k => k !== '__misc__').sort();
-  const orderedKeys = groups.has('__misc__') ? [...namedKeys, '__misc__'] : namedKeys;
+function renderIdeas(items) {
+  document.getElementById('ideaCount').textContent = items.length;
+  renderRecordColumn(document.getElementById('ideaList'), items,
+    recordIdeaRow, '아이디어가 아직 없습니다. 위 첫 줄에서 바로 적어 두세요.');
+}
 
-  orderedKeys.forEach(key => {
-    const groupEl = document.createElement('div');
-    groupEl.className = 'today-group';
+// 결정 열 아래 접힌 구역. 펼치면 위에 작은 검색 입력이 함께 보인다.
+function renderDecisionArchive() {
+  const toggle = document.getElementById('decisionArchiveToggle');
+  const body = document.getElementById('decisionArchiveBody');
+  const list = document.getElementById('decisionArchiveList');
+  if (!toggle || !body || !list) return;
+  const items = decisionArchiveCache.filter(item => recordArchiveMatch(item, decisionArchiveQuery, decisionJiraSummary(item)));
+  document.getElementById('decisionArchiveCount').textContent = items.length;
+  toggle.setAttribute('aria-expanded', String(decisionArchiveOpen));
+  body.hidden = !decisionArchiveOpen;
+  list.replaceChildren();
+  if (!decisionArchiveOpen) return;
+  if (!items.length) {
+    list.insertAdjacentHTML('beforeend', `<div class="d-empty">${decisionArchiveQuery ? '일치하는 결정 없음' : '반영 완료한 결정 없음'}</div>`);
+    return;
+  }
+  items.forEach(item => list.appendChild(recordDecisionRow(item, true)));
+}
 
-    const header = document.createElement('div');
-    header.className = 'today-group-header' + (key === '__misc__' ? ' misc' : '');
-    header.textContent = key === '__misc__' ? '기타' : key;
-    groupEl.appendChild(header);
+// 결정 한 줄: PRD 반영 체크 | 문구(눌러서 그 자리 수정) | 반영 날짜 | hover 더보기.
+function recordDecisionRow(item, archived) {
+  const row = document.createElement('div');
+  row.className = 'd-rec is-dec' + (archived ? ' is-done' : '');
+  // 검색 팔레트가 이 줄을 찾아 옮겨 갈 수 있게 표식을 남긴다.
+  row.dataset.itemId = item.id;
 
-    groups.get(key).forEach(item => groupEl.appendChild(renderDecisionCard(item)));
-    list.appendChild(groupEl);
+  const check = document.createElement('span');
+  check.className = 'd-check';
+  const box = document.createElement('input');
+  box.type = 'checkbox';
+  box.className = 'd-cb';
+  box.checked = archived;
+  box.title = 'PRD 반영함으로 표시';
+  box.setAttribute('aria-label', `${item.description} — PRD 반영함으로 표시`);
+  box.addEventListener('change', () =>
+    fadeOutAndRun(row, () => toggleTask(item.id), archived ? 'PRD 미반영으로 되돌림' : 'PRD 반영함으로 표시함')
+  );
+  check.appendChild(box);
+  check.insertAdjacentHTML('beforeend', '<svg class="d-tick" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7.4 5.7 10.1 11 4.2"/></svg>');
+  row.appendChild(check);
+
+  const title = document.createElement('span');
+  title.className = 'ti';
+  title.textContent = item.description;
+  if (!archived) makeEditableDesc(title, item);
+  // 말줄임으로 잘린 문구도 마우스를 올리면 전부 읽을 수 있게(수정 안내는 aria-label이 한다).
+  title.title = item.description;
+  if (item.isNew && !archived) { title.prepend(renderNewDot(item)); observeNewItem(row, item); }
+  row.appendChild(title);
+
+  const meta = document.createElement('span');
+  meta.className = 'mt';
+  meta.textContent = archived && item.completed ? `${uiKoDateShort(item.completed)} 반영` : '';
+  row.appendChild(meta);
+
+  if (!archived) {
+    const acts = document.createElement('span');
+    acts.className = 'ac';
+    acts.appendChild(uiMoreButton(`${item.description} — 더 보기`, () => [
+      [{ field: '프로젝트', control: taskProjectControl(item) }],
+      [{ label: '삭제', danger: true, onClick: () => removeTracked(item, row) }],
+    ]));
+    row.appendChild(acts);
+  }
+  return row;
+}
+
+// 아이디어 한 줄: 체크박스 없이 문구 | `가능성 높음` | hover 더보기.
+function recordIdeaRow(item) {
+  const row = document.createElement('div');
+  row.className = 'd-rec is-idea';
+  row.dataset.itemId = item.id;
+
+  const title = document.createElement('span');
+  title.className = 'ti';
+  title.textContent = item.description;
+  title.title = item.description;
+  if (item.isNew) { title.prepend(renderNewDot(item)); observeNewItem(row, item); }
+  row.appendChild(title);
+
+  const meta = document.createElement('span');
+  meta.className = 'mt';
+  meta.textContent = ideaChanceText(item);
+  row.appendChild(meta);
+
+  const promote = async (due) => {
+    await postJson('/api/idea/promote', { id: item.id, due });
+    await load();
+  };
+  const acts = document.createElement('span');
+  acts.className = 'ac';
+  acts.appendChild(uiMoreButton(`${item.description} — 더 보기`, () => [
+    [
+      { label: '오늘로 옮기기', onClick: () => fadeOutAndRun(row, () => promote(todayStr()), '오늘 할 일로 옮김') },
+      {
+        field: '날짜 정해서 옮기기',
+        control: uiDateField({
+          value: '',
+          label: '옮길 날짜',
+          clearable: false,
+          onChange: (value) => { if (value) fadeOutAndRun(row, () => promote(value), '할 일로 옮김'); },
+        }),
+      },
+      { label: '완료로 표시', onClick: () => fadeOutAndRun(row, () => toggleTask(item.id), '완료로 표시함') },
+      { field: '가능성', control: ideaChanceControl(item) },
+      { field: '프로젝트', control: ideaProjectControl(item) },
+    ],
+    [{ label: '삭제', danger: true, onClick: () => removeTracked(item, row) }],
+  ]));
+  row.appendChild(acts);
+  return row;
+}
+
+// 가능성은 우선순위와 같은 값을 쓰되(`/api/track/set-priority`) 이름만 다르게 부른다.
+const IDEA_CHANCE_CHIPS = [['high', '높음'], ['medium', '보통'], ['low', '낮음']];
+function ideaChanceControl(item) {
+  return uiMenuChips(IDEA_CHANCE_CHIPS, item.priority || 'medium', async (value) => {
+    uiMenuClose();
+    await setPriority(item.id, value);
+    announce('가능성을 바꿨습니다.');
+    await load();
   });
 }
 
-function renderDecisionCard(item) {
-  const done = item.status === 'done';
-  const card = document.createElement('div');
-  card.className = 'card task-row' + (done ? ' done' : '');
-  card.dataset.itemId = item.id;
-
-  const checkbox = document.createElement('input');
-  checkbox.type = 'checkbox';
-  checkbox.className = 'checkbox';
-  checkbox.checked = done;
-  checkbox.setAttribute('aria-label', `${item.description} — PRD 반영함으로 표시`);
-  checkbox.addEventListener('change', () =>
-    fadeOutAndRun(card, () => toggleTask(item.id), done ? 'PRD 미반영으로 되돌림' : 'PRD 반영함으로 표시함')
-  );
-
-  const body = document.createElement('div');
-  body.className = 'body';
-  body.innerHTML = `
-    <div class="top-row">
-      <span class="desc sender">${escapeHtml(item.description)}</span>
-      <span class="meta">${done && item.completed ? '반영: ' + relativeDate(item.completed) : item.created ? '추가: ' + relativeDate(item.created) : ''}</span>
-    </div>
-    <div class="badges"><span class="badge">${done ? 'PRD 반영함' : 'PRD 미반영'}</span></div>
-    ${item.permalink ? `<a class="link channel" href="${escapeAttr(item.permalink)}" target="_blank" rel="noopener">슬랙 원문</a>` : ''}
-  `;
-  if (!done) makeEditableDesc(body.querySelector('.desc'), item);
-  body.prepend(renderGroupControl({
-    jira: item.jira,
-    group: item.group,
-    onSetJira: (key) => setTaskJira(item.id, key),
-    onSetGroup: (g) => setTaskGroup(item.id, g),
-  }));
-  if (item.isNew && !done) { card.appendChild(renderNewDot(item)); observeNewItem(card, item); }
-
-  if (!done) card.appendChild(uiMoreButton(`${item.description} — 더 보기`, () => [
-    [{ label: '삭제', danger: true, onClick: () => removeTracked(item, card) }],
-  ]));
-
-  card.appendChild(checkbox);
-  card.appendChild(body);
-  return card;
+// 아이디어의 프로젝트는 지라 연결 없이 이름 한 칸이다(`/api/idea/set-project`).
+function ideaProjectControl(item) {
+  return uiMenuText({
+    value: item.project,
+    label: '프로젝트',
+    placeholder: '프로젝트 이름',
+    onChange: async (project) => {
+      await setIdeaProject(item.id, project);
+      announce(project ? '프로젝트 지정함' : '프로젝트 해제함');
+      await load();
+    },
+  });
 }
 
 const STALE_WAITING_DAYS = 3;
@@ -2081,36 +2171,9 @@ function drawerRestore() {
   escPush(drawerClose);
 }
 
-const TASK_PRIORITY_LABELS = { low: '우선순위 낮음', medium: '우선순위 보통', high: '우선순위 높음', critical: '긴급' };
-const TASK_PRIORITY_ORDER = ['low', 'medium', 'high', 'critical'];
-
 function compareTasks(a, b) {
   const rank = { critical: 0, high: 1, medium: 2, low: 3 };
   return (rank[a.priority] ?? 2) - (rank[b.priority] ?? 2) || (a.due || '9999').localeCompare(b.due || '9999');
-}
-
-function renderPriorityBadge(item, config) {
-  const labels = (config && config.labels) || TASK_PRIORITY_LABELS;
-  const order = (config && config.order) || TASK_PRIORITY_ORDER;
-  const select = document.createElement('select');
-  select.className = `badge priority-${item.priority} priority-select`;
-  select.setAttribute('aria-label', `${item.description} — 우선순위 선택`);
-  order.forEach((key) => {
-    const opt = document.createElement('option');
-    opt.value = key;
-    opt.textContent = labels[key] || key;
-    if (key === item.priority) opt.selected = true;
-    select.appendChild(opt);
-  });
-  select.addEventListener('change', async () => {
-    select.disabled = true;
-    try {
-      await setPriority(item.id, select.value);
-      await load();
-    } catch { select.value = item.priority; }
-    finally { select.disabled = false; }
-  });
-  return select;
 }
 
 function taskCompletionCheckbox(item, card, done) {
@@ -3429,15 +3492,19 @@ function palPick(index) {
   panelOpen({ id: item.id, back });
 }
 
-// 결정·아이디어는 상세 패널이 없다 — 기록 탭의 그 줄로 옮겨 가 잠깐 밝힌다.
+// 결정·아이디어는 상세 패널이 없다 — 아이디어·결정 탭의 그 줄로 옮겨 가 잠깐 밝힌다.
 function palRevealRecord(item) {
   setActiveTab('records');
-  const card = document.querySelector(`#gridRecords [data-item-id="${CSS.escape(String(item.id))}"]`);
-  if (!card) { announce(`${item.description} — 아이디어·결정 목록에서 찾아 주세요.`); return; }
-  card.closest('details')?.setAttribute('open', '');
-  card.scrollIntoView({ block: 'center' });
-  card.classList.add('is-flash');
-  setTimeout(() => card.classList.remove('is-flash'), 1600);
+  // 반영 완료는 접혀 있다 — 그 안의 결정을 고르면 먼저 펼친다.
+  if (item.status === 'done' && !decisionArchiveOpen) {
+    decisionArchiveOpen = true;
+    renderDecisionArchive();
+  }
+  const row = document.querySelector(`#gridRecords [data-item-id="${CSS.escape(String(item.id))}"]`);
+  if (!row) { announce(`${item.description} — 아이디어·결정 목록에서 찾아 주세요.`); return; }
+  row.scrollIntoView({ block: 'center' });
+  row.classList.add('is-flash');
+  setTimeout(() => row.classList.remove('is-flash'), 1600);
 }
 
 function palOpen(state) {
@@ -3684,89 +3751,6 @@ function renderTodayTasks(items) {
     }));
     if (todayDoneOpen) doneItems.forEach(item => list.appendChild(uiTaskRow(item, { mode: 'today' })));
   }
-}
-
-function renderIdeas(items) {
-  document.getElementById('ideaCount').textContent = items.length;
-  const list = document.getElementById('ideaList');
-  list.innerHTML = '';
-  if (!items.length) return;
-
-  const groups = new Map();
-  items.forEach(item => {
-    const key = item.project || '__misc__';
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(item);
-  });
-  const projectKeys = [...groups.keys()].filter(k => k !== '__misc__').sort();
-  const orderedKeys = groups.has('__misc__') ? [...projectKeys, '__misc__'] : projectKeys;
-
-  orderedKeys.forEach(key => {
-    const groupEl = document.createElement('div');
-    groupEl.className = 'today-group';
-
-    const header = document.createElement('div');
-    header.className = 'today-group-header' + (key === '__misc__' ? ' misc' : '');
-    header.textContent = key === '__misc__' ? '기타' : key;
-    groupEl.appendChild(header);
-
-    groups.get(key).forEach(item => groupEl.appendChild(renderIdeaCard(item)));
-    list.appendChild(groupEl);
-  });
-}
-
-function renderIdeaCard(item) {
-  const done = item.status === 'done';
-  const card = document.createElement('div');
-  card.className = 'card' + (done ? ' done' : '');
-  // 검색 팔레트가 이 줄을 찾아 옮겨 갈 수 있게 표식을 남긴다.
-  card.dataset.itemId = item.id;
-
-  const body = document.createElement('div');
-  body.className = 'body';
-  body.innerHTML = `<div class="top-row"><span class="desc sender">${escapeHtml(item.description)}</span></div>`;
-  body.prepend(renderIdeaGroupControl(item));
-
-  if (item.isNew) { card.appendChild(renderNewDot(item)); observeNewItem(card, item); }
-
-  const badges = document.createElement('div');
-  badges.className = 'badges';
-  badges.appendChild(renderPriorityBadge(item, {
-    labels: { low: '가능성 낮음', medium: '가능성 보통', high: '가능성 높음' },
-    order: ['low', 'medium', 'high'],
-  }));
-  body.appendChild(badges);
-
-  if (!done) {
-    const promote = async (due) => {
-      await request('/api/idea/promote', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: item.id, due }),
-      });
-      load();
-    };
-
-    card.appendChild(uiMoreButton(`${item.description} — 더 보기`, () => [
-      [
-        { label: '오늘로 옮기기', onClick: () => fadeOutAndRun(card, () => promote(todayStr()), '오늘 할 일로 옮김') },
-        { label: '완료로 표시', onClick: () => fadeOutAndRun(card, () => toggleTask(item.id), '완료로 표시함') },
-      ],
-      [{
-        field: '날짜 정해서 옮기기',
-        control: uiDateField({
-          value: '',
-          label: '옮길 날짜',
-          clearable: false,
-          onChange: (value) => { if (value) fadeOutAndRun(card, () => promote(value), '할 일로 옮김'); },
-        }),
-      }],
-      [{ label: '삭제', danger: true, onClick: () => removeTracked(item, card) }],
-    ]));
-  }
-
-  card.appendChild(body);
-  return card;
 }
 
 function escapeHtml(str) {
@@ -4070,47 +4054,6 @@ async function setPriority(id, priority) {
   });
 }
 
-function renderIdeaGroupControl(item) {
-  const wrap = document.createElement('div');
-  wrap.className = 'jira-control';
-
-  const showInput = () => {
-    wrap.innerHTML = '';
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'group-input';
-    input.placeholder = '그룹명 입력 후 Enter (비우면 해제)';
-    input.value = item.project || '';
-    input.setAttribute('aria-label', '메모 그룹 지정');
-    input.addEventListener('click', (e) => e.stopPropagation());
-    input.addEventListener('keydown', async (e) => {
-      if (e.key !== 'Enter') return;
-      const v = input.value.trim();
-      await setIdeaProject(item.id, v || null);
-      announce(v ? '그룹 지정함' : '그룹 해제함');
-      load();
-    });
-    wrap.appendChild(input);
-    input.focus();
-  };
-
-  if (item.project) {
-    const badge = document.createElement('button');
-    badge.type = 'button';
-    badge.className = 'badge group-badge';
-    badge.textContent = item.project;
-    badge.setAttribute('aria-label', `${item.project} — 클릭해서 변경/해제`);
-    badge.addEventListener('click', (e) => {
-      e.stopPropagation();
-      showInput();
-    });
-    wrap.appendChild(badge);
-  } else {
-    showInput();
-  }
-  return wrap;
-}
-
 async function setIdeaProject(id, project) {
   await request('/api/idea/set-project', {
     method: 'POST',
@@ -4151,15 +4094,21 @@ function setupQuickAdd(inputId, endpoint, announceText) {
 setupQuickAdd('todayTaskInput', '/api/today-task/create', '오늘 할 일 추가함');
 setupQuickAdd('laterTaskInput', '/api/later-task/create', '나중에 할 일 추가함');
 setupQuickAdd('waitingInput', '/api/waiting/create', '확인 대기 추가함');
-setupQuickAdd('ideaInput', '/api/idea/create', '메모 추가함');
-setupQuickAdd('decisionInput', '/api/decision/create', '정책/얼라인 추가함');
-// 한 글자마다 카드를 전부 다시 만들면 목록이 길수록 입력이 밀린다 — 입력이 멎은 뒤 한 번만
+setupQuickAdd('ideaInput', '/api/idea/create', '아이디어 추가함');
+setupQuickAdd('decisionInput', '/api/decision/create', '결정 추가함');
+// 한 글자마다 줄을 전부 다시 만들면 목록이 길수록 입력이 밀린다 — 입력이 멎은 뒤 한 번만
 // 그린다. 조합 중에도 input은 그대로 오고 값을 늦게 읽을 뿐이라 한글 입력은 끊기지 않는다.
 let decisionArchiveTimer = null;
 document.getElementById('decisionArchiveSearch').addEventListener('input', (event) => {
   decisionArchiveQuery = event.target.value.trim().toLowerCase();
   clearTimeout(decisionArchiveTimer);
   decisionArchiveTimer = setTimeout(renderDecisionArchive, 150);
+});
+// 반영 완료는 접힌 채로 시작한다 — 펼치면 그때 검색 입력과 줄이 함께 보인다.
+document.getElementById('decisionArchiveToggle').addEventListener('click', () => {
+  decisionArchiveOpen = !decisionArchiveOpen;
+  renderDecisionArchive();
+  if (decisionArchiveOpen) document.getElementById('decisionArchiveSearch').focus();
 });
 
 try { todaySort = localStorage.getItem('todaySort') || 'project'; } catch {}
@@ -4318,111 +4267,216 @@ async function fetchAutomationStatus() {
   return automationStatusCache;
 }
 
+// 상태 탭은 자동화마다 한 줄이다: 이름 | 마지막 실행 | (있으면) 다음 실행.
+// 헤더의 동기화 지연 경고에서 들어오면 그 줄을 잠깐 밝힌다(settingsFocusKey).
+let settingsFocusKey = null;
+
+const AUTOMATION_STATE_WORD = { run: '성공', fail: '실패', skip: '건너뜀' };
+
 async function renderAutomationStatus() {
   const view = document.getElementById('settingsStatusView');
-  view.innerHTML = '<div class="empty">불러오는 중…</div>';
+  view.replaceChildren();
+  view.insertAdjacentHTML('beforeend', '<div class="d-empty">불러오는 중…</div>');
   const automations = await fetchAutomationStatus();
+  view.replaceChildren();
   if (!automations.length) {
-    view.innerHTML = '<div class="empty">상태를 불러오지 못했습니다.</div>';
+    view.insertAdjacentHTML('beforeend', '<div class="d-empty">상태를 불러오지 못했습니다.</div>');
     return;
   }
-  view.innerHTML = '';
   // "최근 실패 기록이 있음"과 "지금 문제임"은 다르다 — 예전엔 둘을 구분 안 해서,
   // 벌써 고쳐져서 마지막 실행이 정상이었는데도 몇 시간 전 실패 이력 때문에 계속
   // 빨간 점이 떠 있었다("이게 지금도 그런 건지 예전 건지 모르겠다"는 혼란의 원인).
   // 가장 최근 실행 자체가 실패였을 때만 "지금 문제"로 본다.
-  [...automations].sort((a, b) => (b.lastKind === 'fail' ? 1 : 0) - (a.lastKind === 'fail' ? 1 : 0)).forEach(a => {
-    const failingNow = a.lastKind === 'fail';
-    const card = document.createElement('div');
-    card.className = 'automation-card' + (failingNow ? ' has-failure' : '');
-    const head = document.createElement('div');
-    head.className = 'automation-card-head';
-    head.innerHTML = `
-      <span class="automation-dot" aria-hidden="true"></span>
-      <span class="automation-name">${escapeHtml(a.name)}</span>
-      <span class="automation-time">${a.lastRunAt ? escapeHtml(relativeTimeFrom(a.lastRunAt)) : '기록 없음'}</span>
-    `;
-    card.appendChild(head);
-    const summary = document.createElement('div');
-    summary.className = 'automation-summary';
-    const rawSummary = a.lastSummary || '아직 실행 기록이 없습니다.';
-    summary.textContent = trimSummaryText(failingNow ? translateFailureText(rawSummary) : rawSummary);
-    card.appendChild(summary);
-    if (a.recentFailures.length) {
-      if (failingNow) {
-        const fails = document.createElement('div');
-        fails.className = 'automation-failures';
-        fails.innerHTML = a.recentFailures.map(f => `<div class="automation-failure-row">⚠ ${escapeHtml(f.time)} · ${escapeHtml(translateFailureText(f.text))}</div>`).join('');
-        card.appendChild(fails);
-      } else {
-        // 지금은 정상 — 예전 실패는 경고가 아니라 참고용으로만, 접어서 조용히 둔다
-        const past = document.createElement('details');
-        past.className = 'automation-past-failures';
-        const sum = document.createElement('summary');
-        sum.textContent = `지난 문제 ${a.recentFailures.length}건 · 지금은 정상`;
-        past.appendChild(sum);
-        past.insertAdjacentHTML('beforeend', a.recentFailures.map(f => `<div class="automation-failure-row muted">${escapeHtml(f.time)} · ${escapeHtml(translateFailureText(f.text))}</div>`).join(''));
-        card.appendChild(past);
-      }
-    }
-    if (a.tail && a.tail.length) {
-      const details = document.createElement('details');
-      details.className = 'automation-log-toggle';
-      const sum = document.createElement('summary');
-      sum.textContent = '로그 더 보기';
-      details.appendChild(sum);
-      const pre = document.createElement('pre');
-      pre.className = 'automation-log-tail';
-      pre.textContent = a.tail.join('\n');
-      details.appendChild(pre);
-      card.appendChild(details);
-    }
-    view.appendChild(card);
-  });
+  [...automations]
+    .sort((a, b) => (b.lastKind === 'fail' ? 1 : 0) - (a.lastKind === 'fail' ? 1 : 0))
+    .forEach(a => view.appendChild(automationRow(a)));
+
+  const focused = settingsFocusKey
+    ? view.querySelector(`[data-automation="${CSS.escape(String(settingsFocusKey))}"]`)
+    : null;
+  settingsFocusKey = null;
+  if (focused) { focused.classList.add('is-focus'); focused.scrollIntoView({ block: 'nearest' }); }
 }
+
+// 접히는 기록 묶음 하나(지금 실패 중이면 `최근 기록`, 해결된 과거 실패는 `지난 문제 N건`).
+function automationLogBlock(label, lines, muted) {
+  const box = document.createElement('details');
+  const head = document.createElement('summary');
+  head.innerHTML = uiIcon('chevron');
+  head.appendChild(document.createTextNode(label));
+  box.appendChild(head);
+  const body = document.createElement('div');
+  body.className = 'd-logs';
+  lines.forEach((text) => {
+    const line = document.createElement('div');
+    line.className = 'd-logline' + (muted ? ' is-muted' : '');
+    line.textContent = text;
+    body.appendChild(line);
+  });
+  box.appendChild(body);
+  return box;
+}
+
+function automationRow(a) {
+  const failingNow = a.lastKind === 'fail';
+  const row = document.createElement('div');
+  row.className = 'd-auto';
+  row.dataset.automation = a.key;
+
+  const top = document.createElement('div');
+  top.className = 'd-autotop';
+  const name = document.createElement('span');
+  name.className = 'nm';
+  name.textContent = a.name;
+  const state = document.createElement('span');
+  state.className = 'st' + (failingNow ? ' k-neg' : '');
+  state.textContent = a.lastRunAt
+    ? `${relativeTimeFrom(a.lastRunAt)} ${AUTOMATION_STATE_WORD[a.lastKind] || '실행'}`
+    : '기록 없음';
+  // 잘 돌고 있을 때의 보고문은 줄을 차지하지 않고 마우스를 올리면 보이게 둔다.
+  if (!failingNow && a.lastSummary) state.title = trimSummaryText(a.lastSummary);
+  if (failingNow) state.insertAdjacentHTML('afterbegin', '<i class="d-dot" aria-hidden="true"></i>');
+  top.append(name, state);
+  if (a.nextRunAt) {
+    const next = document.createElement('span');
+    next.className = 'nx';
+    next.textContent = `다음 실행 ${a.nextRunAt}`;
+    top.appendChild(next);
+  }
+  row.appendChild(top);
+
+  if (failingNow) {
+    const error = document.createElement('div');
+    error.className = 'd-autoerr';
+    error.textContent = trimSummaryText(translateFailureText(a.lastSummary || '실패했습니다.'));
+    row.appendChild(error);
+    const lines = a.recentFailures.map(f => `${f.time} · ${translateFailureText(f.text)}`)
+      .concat(a.tail && a.tail.length ? a.tail.slice(-20) : []);
+    if (lines.length) row.appendChild(automationLogBlock('최근 기록', lines, false));
+  } else if (a.recentFailures.length) {
+    // 지금은 정상 — 예전 실패는 경고가 아니라 참고용으로만, 접어서 조용히 둔다
+    row.appendChild(automationLogBlock(`지난 문제 ${a.recentFailures.length}건 · 지금은 정상`,
+      a.recentFailures.map(f => `${f.time} · ${translateFailureText(f.text)}`), true));
+  }
+  return row;
+}
+
+// 사용법은 문답을 읽기 좋게 늘어놓은 문서다. 이번 개편으로 달라진 동작에 맞춰 적는다.
+const SETTINGS_FAQ = [
+  ['오늘 하기 버거운 업무는 어떻게 미루나요',
+    '업무 줄에 마우스를 올리면 <b>내일</b>·<b>나중에</b>가 나옵니다. 나중에로 보낸 업무는 머리줄의 <b>나중에 할 일</b> 서랍에 모이고, 거기서 <b>오늘로</b> 다시 가져옵니다. 따로 "계획 모드"로 들어갈 필요가 없습니다.'],
+  ['새로 들어온 것(인박스)이 뭔가요',
+    '슬랙·회의에서 자동으로 모인 항목이 먼저 쌓이는 곳입니다. AI가 오늘 할지 나중에 할지 정하지 않습니다. 프로젝트만 지정하고 <b>오늘</b> 또는 <b>나중에</b>로 보내면 정리가 끝나고 인박스에서 사라집니다.'],
+  ['프로젝트는 어떻게 지정하고 어디서 모아 보나요',
+    '줄의 <b>⋯</b> 더보기 → <b>프로젝트</b>에서 지라 이슈나 그룹을 고릅니다. 모아 보려면 위쪽 <b>프로젝트</b> 탭으로 갑니다. 목록의 그룹 제목을 눌러도 그 프로젝트로 넘어갑니다.'],
+  ['여러 개를 한 번에 정리하려면',
+    '오늘 할 일 머리줄의 <b>여러 개 선택</b>을 누르면 줄마다 선택 칸이 하나 더 생깁니다(완료 체크는 그대로 씁니다). 목록 아래 막대에서 <b>오늘로</b>·<b>내일</b>·<b>나중에</b>·<b>날짜</b>·<b>프로젝트</b>·<b>완료로 표시</b>·<b>삭제</b>를 한 번에 적용합니다.'],
+  ['찾고 싶은 기록이 있으면',
+    '<b>⌘K</b>(윈도는 Ctrl+K)로 검색을 엽니다. 할 일·확인 대기·결정·아이디어·회의를 한 자리에서 찾고, 위 칩으로 종류를 좁힙니다. 검색에서 연 항목을 닫으면 찾던 자리로 그대로 돌아옵니다.'],
+  ['회의 내용은 어디서 정리하나요',
+    '왼쪽 <b>오늘 미팅</b>의 회의를 누르면 오른쪽에 회의 정리 패널이 열립니다. 초안을 고쳐 담고, 담은 뒤 뜨는 결과 카드의 <b>실행 취소</b>로 되돌릴 수 있습니다.'],
+  ['잘못 눌렀을 때는',
+    '완료·삭제·보고 제외는 아래 알림의 <b>되돌리기</b>로 바로 취소됩니다. <b>⌘Z</b>도 같은 일을 하고, <b>⌘⇧Z</b>로 다시 실행합니다.'],
+  ['결과 한 줄은 왜 적나요',
+    '완료한 업무에 적은 한 줄이 주간요약 문장으로 그대로 올라갑니다. 금요일에 다시 쓰지 않아도 됩니다.'],
+  ['보고 문장을 수정하면 원본 업무도 바뀌나요',
+    '아니요. 보고 문장과 원본 기록은 따로 보존됩니다. 원본이 바뀌면 수정 제안으로만 알려 주고, 직접 적용하기 전에는 편집한 문장을 바꾸지 않습니다.'],
+  ['자잘한 업무는 어떻게 빼나요',
+    '주간요약에서 <b>이번 보고에서 제외</b>를 누르면 복사할 내용에서 빠집니다. 원본은 업무 기록에 남고 언제든 보고에 되돌릴 수 있습니다.'],
+  ['확인 대기는 뭔가요',
+    '다른 사람의 답을 기다리는 항목입니다. 언제까지 답을 받아야 하는지는 <b>회신 기한</b>으로 적습니다. 할 일 쪽에서 "이 답변을 기다리는 중"으로 연결해 두면 답이 오는 순간 알려 줍니다.'],
+  ['머리줄의 "○일 전 기준" 같은 표시는 뭔가요',
+    '슬랙·캘린더·지라 자동 동기화가 최근에 못 돌았다는 뜻입니다. 그 글자를 누르면 이 창의 <b>상태</b>에서 해당 자동화 줄이 바로 보입니다.'],
+];
 
 function renderSettingsGuide() {
   const view = document.getElementById('settingsGuideView');
   if (view.dataset.rendered) return;
   view.dataset.rendered = 'true';
-  view.className = 'settings-guide';
-  view.innerHTML = `
-    <dl>
-      <dt>새로 들어온 것(인박스)이 뭔가요?</dt>
-      <dd>슬랙에서 자동으로 긁어온 항목이 우선 모이는 곳이에요. AI가 오늘 할지 나중에 할지 미리 정하지 않고, 직접 분류하시라고 남겨둔 것입니다. 분류하면 인박스에서 사라지고 해당 목록으로 옮겨가요.</dd>
-      <dt>보고 문장을 수정하면 원본 업무도 바뀌나요?</dt>
-      <dd>아니요. 보고 문장과 원본 기록은 별도로 보존됩니다. 새 관련 업무는 수정 제안으로 표시되며, 직접 적용하기 전에는 편집한 문장을 바꾸지 않습니다.</dd>
-      <dt>자잘한 업무는 어떻게 빼나요?</dt>
-      <dd>"이번 보고에서 제외"를 누르면 복사할 내용에서 빠집니다. 원본은 전체 업무 기록에 남고 언제든 보고에 복원할 수 있습니다.</dd>
-      <dt>그룹은 어떻게 바꾸나요?</dt>
-      <dd>카드의 ⋮ 메뉴 → 그룹에서 드롭다운으로 바로 고를 수 있어요. 여러 개를 한 번에 바꾸려면 "선택" 버튼으로 체크박스를 켜고 같은 드롭다운을 씁니다.</dd>
-      <dt>상단의 "○일 전 기준" 같은 표시는 뭔가요?</dt>
-      <dd>슬랙·캘린더·지라 자동 동기화가 최근에 못 돌았다는 뜻이에요. 이 환경설정 안의 "상태" 탭에서 무슨 일인지 더 자세히 볼 수 있습니다.</dd>
-      <dt>확인 대기는 뭔가요?</dt>
-      <dd>다른 사람의 답을 기다리는 항목이에요. 완료 표시하면 "해결됨"으로 남고, 할 일 쪽에서 "이 답변을 기다리는 중"으로 연결해두면 답이 오는 순간 알려줍니다.</dd>
-    </dl>
-  `;
-  if(['localhost','127.0.0.1'].includes(location.hostname)) {
-    const access=document.createElement('button');access.className='convert-btn';access.type='button';access.textContent='다른 기기 접속 암호 복사';
-    access.addEventListener('click',async()=>{try{const result=await (await request('/api/access-token')).json();if(!result.token){showNotice('다른 기기 접속이 설정되지 않았습니다.');return;}await navigator.clipboard.writeText(result.token);showNotice('암호를 복사했습니다. 다른 기기에서 사용자 이름은 workspace를 입력해 주세요.');}catch{showNotice('암호를 복사하지 못했습니다.',true);}});view.appendChild(access);
+  const doc = document.createElement('div');
+  doc.className = 'd-faq';
+  SETTINGS_FAQ.forEach(([question, answer]) => {
+    const q = document.createElement('div');
+    q.className = 'q';
+    q.textContent = question;
+    const a = document.createElement('div');
+    a.className = 'a';
+    // 문답은 코드에 적힌 고정 문장이다(사용자 입력이 섞이지 않는다).
+    a.innerHTML = answer;
+    doc.append(q, a);
+  });
+  view.appendChild(doc);
+
+  // 접속 암호는 이 맥에서 열었을 때만 꺼낼 수 있다(다른 기기에서는 버튼 자체를 두지 않는다).
+  if (['localhost', '127.0.0.1'].includes(location.hostname)) {
+    const section = document.createElement('div');
+    section.className = 'd-dsec';
+    const label = document.createElement('span');
+    label.className = 'lbl';
+    label.textContent = '다른 기기에서 열기';
+    const access = document.createElement('button');
+    access.type = 'button';
+    access.className = 'd-btn';
+    access.textContent = '접속 암호 복사';
+    access.addEventListener('click', async () => {
+      try {
+        const result = await (await request('/api/access-token')).json();
+        if (!result.token) { showNotice('다른 기기 접속이 설정되지 않았습니다.'); return; }
+        await navigator.clipboard.writeText(result.token);
+        showNotice('암호를 복사했습니다. 다른 기기에서 사용자 이름은 workspace를 입력해 주세요.');
+      } catch { showNotice('암호를 복사하지 못했습니다.', true); }
+    });
+    const hint = document.createElement('div');
+    hint.className = 'd-hint';
+    hint.textContent = '같은 와이파이·Tailscale에서 이 주소를 열고, 사용자 이름은 workspace를 입력합니다.';
+    section.append(label, access, hint);
+    view.appendChild(section);
   }
 }
 
+// ---------- 환경설정 열고 닫기 ----------
+// 드문 작업이라 모달(<dialog>)이 맞다. Esc는 앱의 스택 하나로 처리하고(떠 있는 것 중 맨 위만
+// 닫힌다), 닫으면 열었던 버튼으로 포커스가 돌아간다.
 const settingsDialog = document.getElementById('settingsDialog');
-document.getElementById('settingsBtn').addEventListener('click', () => {
-  settingsDialog.showModal();
-  renderAutomationStatus();
-});
-document.getElementById('settingsCloseBtn').addEventListener('click', () => settingsDialog.close());
-settingsDialog.querySelectorAll('[data-settings-tab]').forEach(btn => {
-  btn.addEventListener('click', () => {
-    settingsDialog.querySelectorAll('[data-settings-tab]').forEach(b => b.classList.toggle('active', b === btn));
-    const tab = btn.dataset.settingsTab;
-    document.getElementById('settingsStatusView').hidden = tab !== 'status';
-    document.getElementById('settingsGuideView').hidden = tab !== 'guide';
-    if (tab === 'guide') renderSettingsGuide();
-    if (tab === 'status') renderAutomationStatus();
+let settingsReturnFocus = null;
+let settingsEsc = null;
+
+function settingsSetTab(tab) {
+  settingsDialog.querySelectorAll('[data-settings-tab]').forEach((button) => {
+    button.setAttribute('aria-pressed', String(button.dataset.settingsTab === tab));
   });
+  document.getElementById('settingsStatusView').hidden = tab !== 'status';
+  document.getElementById('settingsGuideView').hidden = tab !== 'guide';
+  if (tab === 'guide') renderSettingsGuide();
+  if (tab === 'status') renderAutomationStatus();
+}
+
+// 헤더의 톱니바퀴와 동기화 지연 경고가 함께 쓰는 한 길.
+function settingsOpen(tab = 'status', focusKey = null) {
+  settingsFocusKey = focusKey;
+  if (settingsDialog.open) { settingsSetTab(tab); return; }
+  settingsReturnFocus = document.activeElement;
+  uiMenuClose();
+  settingsDialog.showModal();
+  settingsEsc = escPush(settingsClose);
+  settingsSetTab(tab);
+}
+
+function settingsClose() {
+  if (settingsEsc) { escDrop(settingsEsc); settingsEsc = null; }
+  if (!settingsDialog.open) return;
+  settingsDialog.close();
+  const back = settingsReturnFocus;
+  settingsReturnFocus = null;
+  back?.focus?.();
+}
+
+// 브라우저가 스스로 닫으려 할 때(Esc)도 우리 길로 모은다 — 스택과 포커스 복귀가 어긋나지 않게.
+settingsDialog.addEventListener('cancel', (event) => { event.preventDefault(); settingsClose(); });
+document.getElementById('settingsBtn').addEventListener('click', () => settingsOpen('status'));
+document.getElementById('settingsCloseBtn').addEventListener('click', settingsClose);
+settingsDialog.querySelectorAll('[data-settings-tab]').forEach((button) => {
+  button.addEventListener('click', () => settingsSetTab(button.dataset.settingsTab));
 });
 
 // 폰에서는 버튼이 작으니, 맨 위에서 아래로 끌어도 새로고침되게 한다.

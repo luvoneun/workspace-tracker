@@ -15,37 +15,6 @@
 <style>
   /* 토큰·리셋·헤더·탭·배너·알림 등 공용 부품은 /ui.css에 있다.
      아래는 아직 새 모양으로 바꾸지 않은 화면의 옛 규칙이다(배치마다 구역별로 사라진다). */
-  .settings-dialog {
-    width: min(560px, calc(100vw - 32px)); max-height: 82dvh; box-sizing: border-box;
-    padding: 24px; border: 1px solid var(--border); border-radius: 16px;
-    background: var(--bg); color: var(--text);
-  }
-  .settings-dialog::backdrop { background: #10182866; }
-  .settings-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
-  .settings-head h2 { font-size: 18px; margin: 0; }
-  .settings-dialog .wr-view-tabs { margin-bottom: 14px; }
-
-  .automation-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 10px; }
-  .automation-card-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
-  .automation-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); flex-shrink: 0; }
-  .automation-card.has-failure .automation-dot { background: var(--urgent); }
-  .automation-name { font-weight: 700; font-size: var(--text-base); }
-  .automation-time { font-size: var(--text-xs); color: var(--muted); margin-left: auto; }
-  .automation-summary { font-size: var(--text-sm); color: var(--muted); line-height: 1.5; }
-  .automation-failures { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
-  .automation-failure-row { font-size: var(--text-xs); color: var(--urgent); line-height: 1.6; }
-  .automation-failure-row.muted { color: var(--muted); }
-  .automation-past-failures { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
-  .automation-past-failures summary { color: var(--muted); cursor: pointer; font-size: var(--text-xs); font-weight: 600; }
-  .automation-log-toggle { margin-top: 8px; }
-  .automation-log-toggle summary { color: var(--muted); cursor: pointer; font-size: var(--text-xs); font-weight: 600; }
-  .automation-log-tail { margin: 8px 0 0; padding: 10px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); font-family: ui-monospace, monospace; font-size: var(--text-xs); line-height: 1.6; color: var(--muted); white-space: pre-wrap; word-break: break-all; max-height: 240px; overflow-y: auto; }
-
-  .settings-guide dt { font-weight: 700; font-size: var(--text-base); margin: 16px 0 4px; }
-  .settings-guide dt:first-child { margin-top: 0; }
-  .settings-guide dd { margin: 0; font-size: var(--text-sm); color: var(--muted); line-height: 1.6; }
-  @media (max-width: 600px) { .settings-dialog { padding: 16px; } }
-
   /* 당겨서 새로고침 — 화면 맨 위에서 아래로 끌면 나타난다 */
   .pull-indicator {
     position: fixed;
@@ -84,10 +53,6 @@
   @media (max-width: 900px) {
     .grid { grid-template-columns: 1fr; }
   }
-
-  .grid-2col { grid-template-columns: 320px minmax(0, 1fr); }
-  .col-narrow, .col-wide { min-width: 0; }
-  #decisionArchiveZone { margin-top: 16px; }
 
   .wr-layout {
     display: grid;
@@ -151,67 +116,6 @@
     padding: 1px 8px;
     border-radius: 999px;
   }
-  .card {
-    position: relative;
-    display: flex;
-    gap: 14px;
-    align-items: flex-start;
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow);
-    padding: 18px 20px;
-    margin-bottom: 12px;
-    transition: opacity 0.15s, box-shadow 0.15s;
-  }
-  .overflow-date-input {
-    width: 100%;
-    font-family: inherit;
-    font-size: var(--text-base);
-    color: var(--text);
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 6px 8px;
-  }
-  .overflow-date-input:focus { outline: none; border-color: var(--accent); }
-  .card.done { background: var(--done-bg); opacity: 0.72; box-shadow: none; }
-  .card.list-row { padding: 16px 18px; }
-  .checkbox {
-    width: 20px;
-    height: 20px;
-    margin-top: 2px;
-    flex-shrink: 0;
-    cursor: pointer;
-    accent-color: var(--accent);
-  }
-  .checkbox:disabled { cursor: not-allowed; opacity: 0.35; }
-  /* 일괄 선택용 체크박스 — "완료" 체크박스랑 같은 자리에, 같은 모양으로 뜨니까
-     지금 누르면 완료 처리되는 건지 선택되는 건지 헷갈리고 무서워진다는 얘기를 들었다.
-     네모난 모양 + 테두리로 눈에 띄게 다르게 만들고, 카드 배경도 같이 물들여서
-     "이건 완료가 아니라 선택"이라는 게 바로 보이게 한다. */
-  .checkbox.task-selection {
-    appearance: none; -webkit-appearance: none;
-    width: 20px; height: 20px; margin-top: 2px;
-    border: 2px solid var(--border); border-radius: 6px;
-    background: var(--card); position: relative;
-    transition: background 120ms ease, border-color 120ms ease;
-  }
-  .checkbox.task-selection:checked { background: var(--accent); border-color: var(--accent); }
-  .checkbox.task-selection:checked::after {
-    content: ''; position: absolute; left: 5px; top: 1px;
-    width: 5px; height: 9px; border: solid var(--on-fill); border-width: 0 2px 2px 0; transform: rotate(45deg);
-  }
-  .card.batch-selected { background: color-mix(in srgb, var(--accent) 8%, var(--card)); border-color: var(--accent); }
-  .body { flex: 1; min-width: 0; }
-  .top-row {
-    display: flex;
-    justify-content: space-between;
-    gap: 8px;
-    margin-bottom: 4px;
-    flex-wrap: wrap;
-  }
-  .sender { font-weight: 600; font-size: var(--text-md); }
   .desc-editable { cursor: text; border-radius: 4px; }
   .desc-editable:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
   .desc-edit-input {
@@ -227,19 +131,6 @@
     min-width: 0;
   }
   .desc-edit-input:focus { outline: none; }
-  .meta { color: color-mix(in srgb, var(--muted) 65%, transparent); font-size: var(--text-xs); white-space: nowrap; }
-  .summary {
-    font-size: var(--text-md);
-    line-height: 1.45;
-    word-break: break-word;
-  }
-  .card.done .summary, .card.done .sender, .card.done .desc { text-decoration: line-through; text-decoration-color: var(--muted); }
-  .channel {
-    display: inline-block;
-    font-size: var(--text-xs);
-    color: var(--accent);
-    margin-top: 6px;
-  }
   a.link { color: inherit; text-decoration: none; }
   @media (hover: hover) and (pointer: fine) {
     a.link:hover { text-decoration: underline; }
@@ -257,7 +148,6 @@
   }
   .empty { color: var(--muted); font-size: var(--text-md); padding: 12px 0; }
 
-  .badges { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
   .badge {
     font-size: var(--text-xs);
     padding: 2px 8px;
@@ -266,10 +156,6 @@
     border: 1px solid var(--border);
     color: var(--muted);
   }
-  .badge.priority-high, .badge.priority-critical { color: var(--urgent); border-color: color-mix(in srgb, var(--urgent) 33%, transparent); }
-  .badge.due { color: var(--accent); border-color: var(--accent); }
-  .badge.overdue { color: var(--urgent); border-color: var(--urgent); background: color-mix(in srgb, var(--urgent) 10%, transparent); font-weight: 600; }
-  .badge.overdue::before { content: '⚠ '; }
   .new-dot {
     position: absolute;
     top: -4px;
@@ -280,25 +166,13 @@
     background: var(--accent);
     box-shadow: 0 0 0 2px var(--card);
   }
-  .badge.due-today { color: var(--warn); border-color: var(--warn); background: color-mix(in srgb, var(--warn) 10%, transparent); font-weight: 600; }
-  .badge.due-today::before { content: '◷ '; }
-  .badge.stale { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, transparent); }
-  .badge.priority-critical::before { content: '! '; }
-  button.badge { font-family: inherit; cursor: pointer; }
-  button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)); }
-  select.badge {
-    font-family: inherit;
-    cursor: pointer;
-    -webkit-appearance: none;
-    appearance: none;
-  }
-  select.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)); }
-  select.badge:focus { outline: none; border-color: var(--accent); }
 
   .jira-control { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
   /* 좁은 사이드바 칼럼(확인 대기중 등)에 들어가면 배지 글자가 알약 모양을 깨고
      단어 중간에서 두 줄로 꺾였다 — 한 줄로 줄이고 넘치면 말줄임표로 처리한다.
      (전화 너비에서는 아래 @media에서 다시 줄바꿈을 허용한다.) */
+  button.badge { font-family: inherit; cursor: pointer; }
+  button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)); }
   .badge.jira-badge, .badge.group-badge {
     display: inline-block; max-width: 100%;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: top;
@@ -308,15 +182,6 @@
     border-color: color-mix(in srgb, var(--accent) 30%, transparent);
     background: color-mix(in srgb, var(--accent) 10%, transparent);
     font-weight: 600;
-  }
-  .jira-clear {
-    font-size: var(--text-xs);
-    color: var(--muted);
-    background: none;
-    border: none;
-    text-decoration: underline;
-    cursor: pointer;
-    padding: 0;
   }
   .jira-select {
     font-size: var(--text-sm);
@@ -328,7 +193,6 @@
     max-width: calc(100% - 4px);
     box-sizing: border-box;
   }
-  .card:has(> .d-more) .jira-control { margin-right: 26px; }
   .badge.group-badge {
     color: var(--text);
     border-color: var(--border);
@@ -345,38 +209,6 @@
     max-width: 220px;
   }
   .group-input:focus { outline: none; border-color: var(--accent); }
-
-  .done-details summary {
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: var(--text-md);
-    font-weight: 700;
-    color: var(--text);
-    margin: 28px 0 10px;
-    list-style: none;
-  }
-  .done-details summary::-webkit-details-marker { display: none; }
-  .done-details summary::before {
-    content: '▸';
-    font-size: var(--text-xs);
-    color: var(--muted);
-    display: inline-block;
-    transition: transform 0.15s;
-  }
-  .done-details[open] summary::before { transform: rotate(90deg); }
-  .done-details[open] #doneList {
-    opacity: 1;
-    transition: opacity 150ms var(--ease-out);
-  }
-  @starting-style {
-    .done-details[open] #doneList { opacity: 0; }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .done-details[open] #doneList { transition: none; }
-  }
-
   .convert-btn {
     font-size: var(--text-sm);
     font-weight: 600;
@@ -393,148 +225,25 @@
   .convert-btn.danger { color: var(--muted); }
   .convert-btn:disabled { color: var(--muted); background: var(--bg); cursor: default; }
   .convert-btn:disabled:hover { background: var(--bg); color: var(--muted); }
-  .due-date-input {
-    font-family: inherit;
-    font-size: var(--text-sm);
-    font-weight: 600;
-    color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
-    border: none;
-    border-radius: 999px;
-    padding: 6px 10px;
-    margin-top: 10px;
-    margin-right: 8px;
-    cursor: pointer;
-  }
-  .due-date-input:focus { outline: none; }
-
-  .quick-add { margin-bottom: 10px; }
-  .quick-add input {
-    width: 100%;
-    font-size: var(--text-base);
-    padding: 8px 14px;
-    border-radius: 999px;
-    border: 1px solid var(--border);
-    background: var(--card);
-    color: var(--text);
-  }
-  .quick-add input:focus {
-    outline: none;
-    border-color: var(--accent);
-  }
-  /* 일괄 정리 — 선택 모드일 땐 테두리 있는 박스로 감싸서 "지금 특별한 모드"라는 걸 알려주고,
-     "모드 자체"(끝내기·몇 개·전체선택)와 "실제로 바꾸는 것"(날짜·그룹)을 두 줄로 나눈다. */
-  .task-batch-tools { margin-bottom: 10px; }
-  .task-batch-tools.active {
-    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;
-  }
-  .task-batch-mode-row { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
-  .task-batch-mode-row .wf-section-note { margin: 0 0 0 4px; }
-  .task-batch-action-row {
-    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-    padding-top: 8px; border-top: 1px solid var(--border);
-  }
-  .task-batch-action-row .jira-control { margin: 0; }
-  .task-batch-date { display: flex; flex-direction: column; }
-  .task-batch-date summary { color: var(--muted); cursor: pointer; font-size: var(--text-sm); font-weight: 600; list-style: none; }
-  .task-batch-date summary::-webkit-details-marker { display: none; }
-  .task-batch-date[open] summary { color: var(--text); margin-bottom: 6px; }
-  .task-batch-date > input, .task-batch-date > button { margin-top: 4px; }
-  /* 회의 정리 패널이 아직 쓰는 라벨 칸(업무 상세는 ui.css의 .d-fields로 옮겼다) */
-  .detail-field { display: grid; gap: 6px; margin: 12px 0; }
-  .detail-field label { color: var(--muted); font-size: var(--text-xs); font-weight: 700; }
-  .detail-field input, .detail-field select { width: 100%; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 8px; }
-  .task-row { border-radius: var(--radius-sm); box-shadow: none; border-width: 0 0 1px; padding: 8px; margin: 0; gap: 10px; }
-  .task-row:hover { background: color-mix(in srgb, var(--accent) 4%, var(--card)); }
-  .task-row.is-selected { background: color-mix(in srgb, var(--accent) 9%, var(--card)); box-shadow: inset 3px 0 0 var(--accent); }
-  .task-row .body.task-openable { cursor: pointer; border-radius: 6px; }
-  .task-row .body.task-openable:focus { outline: 2px solid color-mix(in srgb, var(--accent) 50%, transparent); outline-offset: 2px; }
-  .today-group { margin-bottom: 12px; }
-  .today-group-header { position: sticky; top: 0; z-index: 1; background: var(--bg); padding: 6px 2px; }
-
-  .wr-view-tabs { display: flex; gap: 4px; margin: 8px 0 10px; }
-  .wr-view-btn {
-    font-family: inherit;
-    font-size: var(--text-sm);
-    font-weight: 600;
-    color: var(--muted);
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    padding: 4px 12px;
-    cursor: pointer;
-  }
-  .wr-view-btn.active { border-color: var(--accent); }
-
-  .wr-add-input {
-    width: 100%;
-    font-size: var(--text-base);
-    padding: 8px 10px;
-    border-radius: 10px;
-    border: 1px dashed var(--border);
-    background: var(--bg);
-    color: var(--text);
-  }
-  .wr-add-input:focus { outline: none; border-color: var(--accent); }
-  .wr-add-input::placeholder { color: var(--muted); }
-
-  .today-group { margin-bottom: 14px; }
-  .today-group:last-child { margin-bottom: 0; }
-  .today-done-group { margin-top: 22px; padding-top: 18px; border-top: 1px dashed var(--border); }
-  .today-group-header {
-    font-size: var(--text-sm);
-    font-weight: 700;
-    color: var(--accent);
-    margin-bottom: 6px;
-    padding-left: 2px;
-  }
-  .today-group-header.misc { color: var(--muted); }
-
   [hidden] { display: none !important; }
   .grid > *, .wr-layout > * { min-width: 0; }
-  .card { padding: 12px 14px; margin-bottom: 8px; gap: 10px; }
-  .sender, .badge { overflow-wrap: anywhere; }
-  .badge { max-width: 100%; white-space: normal; }
+  .badge { max-width: 100%; overflow-wrap: anywhere; white-space: normal; }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
   .desc-editable:focus-visible { background: var(--bg); }
   .desc-editable:hover::after, .desc-editable:focus-visible::after { content: ' ✎'; color: var(--accent); }
-  .group-add { margin: 0 0 10px; }
-  .group-add summary { color: var(--muted); cursor: pointer; font-size: var(--text-sm); padding: 4px 0; }
-  .group-add input { margin-top: 4px; }
-  .notice-dismiss {
-    font: inherit; font-size: var(--text-sm); color: var(--muted); background: none; border: none;
-    border-radius: 999px; padding: 6px 10px; margin: 0; cursor: pointer; flex-shrink: 0;
-    transition: background 120ms ease, color 120ms ease;
-  }
-  .notice-dismiss:hover { background: var(--bg); color: var(--text); }
-  .notice-hint { font-size: var(--text-xs); color: var(--muted); flex-shrink: 0; }
-  .sync-note, .report-note { font-size: var(--text-sm); color: var(--muted); margin: 6px 0 12px; overflow-wrap: anywhere; }
-  .card[aria-busy="true"] { opacity: .65; pointer-events: none; }
   @media (max-width: 900px) {
-    .grid, .grid-2col, .wr-layout { grid-template-columns: minmax(0, 1fr); }
+    .grid, .wr-layout { grid-template-columns: minmax(0, 1fr); }
     input, select { max-width: 100%; }
-    .quick-add input, .wr-add-input, .desc-edit-input, .group-input { font-size: 16px; }
+    .desc-edit-input, .group-input { font-size: 16px; }
   }
 
   /* Product visual direction: calm, flat, task-first workbench. */
   .wr-nav-btn.active { box-shadow: none; }
-  .card:not(.task-row) { border-radius: 12px; box-shadow: none; }
-  .planning-toggle, .wr-view-btn, .convert-btn { transition: background-color 150ms ease, color 150ms ease, transform 120ms ease; }
+  .convert-btn { transition: background-color 150ms ease, color 150ms ease, transform 120ms ease; }
   button:active { transform: scale(.98); }
-  .sender { letter-spacing: -0.01em; }
-  .task-row .meta { font-size: var(--text-xs); color: color-mix(in srgb, var(--muted) 65%, transparent); }
-  .task-row .badges { margin-top: 4px; }
-  .badge.overdue::before, .badge.due-today::before, .badge.priority-critical::before { content: none; }
   /* 채운 강조 상태: 파랑(행동·선택) / 빨강(삭제). 글자색은 --on-fill이 라이트·다크에서 맞춰 준다. */
-  .convert-btn:hover, .wr-view-btn.active { color: var(--on-fill); background: var(--accent); }
+  .convert-btn:hover { color: var(--on-fill); background: var(--accent); }
   .convert-btn.danger:hover { color: var(--on-fill); background: var(--urgent); }
-  .checkbox { width: 22px; height: 22px; }
-  @media (pointer: coarse) {
-    .checkbox, .checkbox.task-selection { width: 28px; height: 28px; }
-    .checkbox.task-selection:checked::after { left: 8px; top: 3px; width: 6px; height: 12px; }
-  }
-  .quick-add input, .wr-add-input { min-height: 44px; }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
   }
@@ -636,33 +345,41 @@
       </main>
     </div>
 
-    <div class="grid grid-2col" id="gridRecords" hidden>
-      <aside class="col col-narrow">
-        <details class="done-details" open>
-          <summary>언젠가<span class="section-count" id="ideaCount">0</span></summary>
-          <div class="quick-add">
-            <input type="text" id="ideaInput" placeholder="언젠가 메모 추가…" aria-label="언젠가 할 일 메모 추가" />
+    <!-- 아이디어·결정 탭 — 두 열(아이디어 | 결정), 좁은 화면에서는 한 열로 쌓인다.
+         결정 줄에만 `PRD 반영함` 체크가 있고, 반영한 결정은 아래 접힌 구역으로 내려간다. -->
+    <div class="d-reccols" id="gridRecords" hidden>
+      <section class="d-reccol" aria-labelledby="ideaColHead">
+        <div class="d-lhd"><h2 id="ideaColHead">아이디어</h2><span class="sub num" id="ideaCount">0</span></div>
+        <div class="d-list">
+          <div class="d-qaf">
+            <svg class="d-i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2v9.6M3.2 8h9.6"/></svg>
+            <input type="text" id="ideaInput" placeholder="아이디어 추가 — Enter" aria-label="아이디어 추가" />
           </div>
           <div id="ideaList"></div>
-        </details>
-      </aside>
+        </div>
+      </section>
 
-      <main class="col col-wide">
-        <details class="done-details" open>
-          <summary>정책/얼라인<span class="section-count" id="decisionSectionCount">0</span></summary>
-          <div class="quick-add">
-            <input type="text" id="decisionInput" placeholder="정해진 내용 추가…" aria-label="정책/얼라인 추가" />
+      <section class="d-reccol" aria-labelledby="decisionColHead">
+        <div class="d-lhd"><h2 id="decisionColHead">결정</h2><span class="sub num" id="decisionSectionCount">0</span></div>
+        <div class="d-list">
+          <div class="d-qaf">
+            <svg class="d-i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2v9.6M3.2 8h9.6"/></svg>
+            <input type="text" id="decisionInput" placeholder="결정 추가 — Enter" aria-label="결정 추가" />
           </div>
           <div id="decisionList"></div>
-        </details>
-        <details class="done-details" id="decisionArchiveZone">
-          <summary>반영 완료<span class="section-count" id="decisionArchiveCount">0</span></summary>
-          <div class="quick-add">
-            <input type="search" id="decisionArchiveSearch" placeholder="지난 결정 검색 (내용, 그룹, 지라)" aria-label="반영 완료한 결정 검색" autocomplete="off" />
+        </div>
+
+        <div class="d-arch" id="decisionArchiveZone">
+          <button type="button" class="d-grp tog" id="decisionArchiveToggle" aria-expanded="false" aria-controls="decisionArchiveBody">
+            <svg class="d-i" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg>
+            <span class="gl">반영 완료</span><span class="n num" id="decisionArchiveCount">0</span>
+          </button>
+          <div id="decisionArchiveBody" hidden>
+            <input type="search" id="decisionArchiveSearch" class="d-archq" placeholder="반영 완료 검색 (내용·프로젝트·지라)" aria-label="반영 완료한 결정 검색" autocomplete="off" />
+            <div class="d-list"><div id="decisionArchiveList"></div></div>
           </div>
-          <div id="decisionArchiveList"></div>
-        </details>
-      </main>
+        </div>
+      </section>
     </div>
 
     <div class="wr-layout" id="gridWeekly" hidden>
@@ -692,17 +409,21 @@
 
   <div id="liveRegion" class="d-toast" role="status" aria-live="polite" hidden></div>
 
-  <dialog id="settingsDialog" class="settings-dialog" aria-label="환경설정">
-    <div class="settings-head">
+  <!-- 환경설정 — 드물게 여는 창이라 모달 그대로 둔다(상태 / 사용법 두 칸) -->
+  <dialog id="settingsDialog" class="d-modal" aria-label="환경설정">
+    <div class="d-mhd">
       <h2>환경설정</h2>
-      <button type="button" id="settingsCloseBtn" class="notice-dismiss" aria-label="닫기">닫기</button>
+      <span class="d-seg" role="group" aria-label="환경설정 보기">
+        <button type="button" data-settings-tab="status" aria-pressed="true">상태</button>
+        <button type="button" data-settings-tab="guide" aria-pressed="false">사용법</button>
+      </span>
+      <span class="sp"></span>
+      <button type="button" class="d-iconbtn" id="settingsCloseBtn" aria-label="닫기"><svg class="d-i" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
     </div>
-    <div class="wr-view-tabs">
-      <button type="button" class="wr-view-btn active" data-settings-tab="status">상태</button>
-      <button type="button" class="wr-view-btn" data-settings-tab="guide">사용법</button>
+    <div class="d-mbody">
+      <div id="settingsStatusView"></div>
+      <div id="settingsGuideView" hidden></div>
     </div>
-    <div id="settingsStatusView"></div>
-    <div id="settingsGuideView" hidden></div>
   </dialog>
 
 <script src="/workflows.js"></script>

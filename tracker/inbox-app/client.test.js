@@ -446,3 +446,27 @@ test('일괄 선택: 완료한 줄은 후보에서 빠지고 전체 선택 여�
   assert.deepEqual(state(items, `['t1', 't2', 'done1']`).count, 2, '완료한 줄은 골라도 세지 않는다');
   assert.equal(state(`[{ id: 'done1', status: 'done' }]`, `[]`).all, false, '고를 게 없으면 전체 선택 상태가 아니다');
 });
+
+test('아이디어의 `가능성`은 높음만 글자로 적는다', () => {
+  const app = pureClient();
+  const chance = code => app.run(`ideaChanceText(${code})`);
+  assert.equal(chance("{ priority: 'high' }"), '가능성 높음');
+  assert.equal(chance("{ priority: 'medium' }"), '', '보통은 목록에 찍지 않는다');
+  assert.equal(chance("{ priority: 'low' }"), '', '낮음도 찍지 않는다');
+  assert.equal(chance('{}'), '', '값이 없으면 자리를 비운다');
+  assert.equal(chance('null'), '');
+});
+
+test('반영 완료 검색은 문구·프로젝트·지라 키·지라 요약을 함께 본다', () => {
+  const app = pureClient();
+  const match = (item, query, summary = "''") => app.run(`recordArchiveMatch(${item}, ${JSON.stringify(query)}, ${summary})`);
+  const item = "{ description: '접근로그 90일 보존', group: '운영툴', jira: 'PAY-77' }";
+  assert.equal(match(item, ''), true, '검색어가 없으면 전부 남는다');
+  assert.equal(match(item, '   '), true, '공백만 적은 것도 검색어가 아니다');
+  assert.equal(match(item, '보존'), true);
+  assert.equal(match(item, '운영툴'), true, '프로젝트 이름으로도 찾는다');
+  assert.equal(match(item, 'pay-77'), true, '지라 키는 대소문자를 가리지 않는다');
+  assert.equal(match(item, '결제', "'결제 기간 정리'"), true, '지라 요약으로도 찾는다');
+  assert.equal(match(item, '없는말'), false);
+  assert.equal(match("{ description: '메모', project: '리서치' }", '리서치'), true, '아이디어의 프로젝트 칸도 본다');
+});

@@ -245,9 +245,10 @@ body {
 /* 자동 갱신이 멈춘 것만 조용히 알린다 */
 .d-warn {
   display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 6px;
-  border-radius: var(--r-xs); color: var(--warn);
-  font-size: 12px; font-weight: 500; white-space: nowrap; cursor: help;
+  border: 0; background: none; border-radius: var(--r-xs); color: var(--warn);
+  font-family: inherit; font-size: 12px; font-weight: 500; white-space: nowrap; cursor: pointer;
 }
+.d-warn:hover { background: var(--hover); }
 .d-warn .d-dot { width: 5px; height: 5px; margin: 0; }
 
 .d-tabs { display: flex; align-items: stretch; height: var(--hdr); margin-left: 10px; margin-right: auto; gap: 2px; min-width: 0; }
@@ -921,10 +922,6 @@ body.later-open .page { padding-right: 424px; }
 .is-flash { animation: d-flash 1.6s var(--ease) both; }
 @keyframes d-flash { 0%, 55% { box-shadow: inset 0 0 0 2px var(--accent); } 100% { box-shadow: none; } }
 
-/* 카드 위의 ⋯ 버튼 — 옛 카드들(결정·아이디어)은 아직 오른쪽 위 모서리에 둔다 */
-.card > .d-more { position: absolute; top: 8px; right: 8px; }
-.card:has(> .d-more) { padding-right: 40px; }
-
 /* ---------- 여러 개 선택: 아래 고정 막대 ---------- */
 /* 본문 폭 안에 들어오고, 서랍이 열리면 그만큼 비켜선다. 알림(toast)은 이 막대 위로 올라간다. */
 .d-selbar {
@@ -1037,6 +1034,95 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-rec.is-sel .ti { font-weight: 600; color: var(--accent-text); }
 .d-rec .mt { font-size: 11.5px; color: var(--muted); text-align: right; white-space: nowrap; }
 
+/* ---------- 아이디어·결정 탭 ---------- */
+/* 두 열이 나란히 서고, 줄은 프로젝트 탭과 같은 `.d-rec`를 쓴다(결정만 체크 칸이 하나 더). */
+.d-reccols {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 28px; align-items: start; max-width: 1080px;
+}
+.d-reccols[hidden] { display: none; }
+.d-reccol { min-width: 0; }
+.d-reccol .d-lhd { margin-bottom: 4px; }
+
+.d-arch { margin-top: 16px; }
+.d-arch > .d-grp { width: 100%; padding: 0 var(--pad); border-radius: var(--r-xs); }
+.d-archq {
+  width: 100%; height: 30px; margin: 6px 0; padding: 0 10px; box-sizing: border-box;
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  background: var(--field); color: var(--text); font-family: inherit; font-size: 12.5px;
+}
+.d-archq::placeholder { color: var(--dim); }
+.d-archq:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+/* 결정·아이디어 줄. 동작은 줄 위에 겹쳐 뜨므로 오른쪽 자리를 비워 둔다. */
+.d-rec.is-dec, .d-rec.is-idea {
+  position: relative; align-items: start;
+  grid-template-columns: 24px minmax(0, 1fr) auto; padding: 5px 34px 5px var(--pad);
+}
+.d-rec.is-idea { grid-template-columns: minmax(0, 1fr) auto; }
+.d-rec .d-check { width: 24px; height: 22px; }
+.d-rec.is-dec .ti, .d-rec.is-idea .ti {
+  white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; line-height: 18px; padding: 2px 0;
+}
+.d-rec.is-dec .mt, .d-rec.is-idea .mt { padding-top: 3px; }
+.d-rec.is-done .ti { color: var(--muted); }
+.d-rec .desc-edit-input { width: 100%; }
+.d-rec .ac {
+  position: absolute; right: 2px; top: 2px; display: flex; align-items: center;
+  opacity: 0; pointer-events: none;
+}
+.d-rec:hover .ac, .d-rec:focus-within .ac { opacity: 1; pointer-events: auto; }
+@media (hover: none) { .d-rec .ac { opacity: 1; pointer-events: auto; } }
+
+/* ---------- 환경설정 (모달) ---------- */
+#settingsDialog {
+  width: min(620px, calc(100vw - 32px)); max-height: calc(100dvh - 120px); box-sizing: border-box;
+  display: flex; flex-direction: column; padding: 0;
+  border: 1px solid var(--border); border-radius: var(--r); background: var(--surface); color: var(--text);
+  box-shadow: var(--pop);
+}
+#settingsDialog::backdrop { background: var(--scrim); }
+#settingsDialog:not([open]) { display: none; }
+.d-mhd {
+  display: flex; align-items: center; gap: 12px; flex: none;
+  padding: 12px 12px 12px 16px; border-bottom: 1px solid var(--hair);
+}
+.d-mhd h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.d-mhd h2::before { display: none; }
+.d-mhd .sp { margin-left: auto; }
+.d-mbody { flex: 1; min-height: 0; overflow: auto; padding: 14px 16px 18px; }
+
+.d-auto { padding: 10px 0; }
+.d-auto + .d-auto { box-shadow: inset 0 1px 0 var(--hair); }
+.d-auto.is-focus { background: var(--accent-soft); box-shadow: none; border-radius: var(--r-sm); margin: 0 -10px; padding: 10px; }
+.d-autotop { display: flex; align-items: baseline; gap: 10px; }
+.d-autotop .nm { font-size: 14px; font-weight: 500; }
+.d-autotop .st { margin-left: auto; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.d-autotop .st.k-neg { color: var(--urgent); font-weight: 600; }
+.d-autotop .nx { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.d-autoerr { margin: 5px 0 4px; font-size: 12.5px; color: var(--urgent); }
+.d-auto details > summary {
+  display: inline-flex; align-items: center; gap: 4px; height: 24px; list-style: none;
+  font-size: 12px; font-weight: 600; color: var(--muted); cursor: pointer;
+}
+.d-auto details > summary::-webkit-details-marker { display: none; }
+.d-auto details > summary:hover { color: var(--text); }
+.d-auto details > summary .d-i { color: var(--dim); transition: transform 130ms var(--ease); }
+.d-auto details[open] > summary .d-i { transform: rotate(90deg); }
+.d-logs { padding: 2px 0 2px 2px; }
+.d-logline { font-size: 12px; line-height: 1.7; color: var(--text); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.d-logline.is-muted { color: var(--muted); }
+
+.d-faq { max-width: 64ch; }
+.d-faq .q { margin-top: 18px; font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+.d-faq .q:first-child { margin-top: 0; }
+.d-faq .a { margin-top: 4px; font-size: 13px; font-weight: 400; color: var(--muted); line-height: 1.65; }
+.d-faq .a b { font-weight: 600; color: var(--text); }
+.d-dsec { margin-top: 22px; padding-top: 12px; border-top: 1px solid var(--hair); }
+.d-dsec .lbl { display: block; margin-bottom: 6px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.d-hint { margin-top: 6px; font-size: 11.5px; color: var(--muted); }
+
 /* ---------- 반응형 ---------- */
 @media (max-width: 1280px) {
   :root { --wm: 146px; --wp: 80px; }
@@ -1088,6 +1174,8 @@ body.batch-open .d-toast { bottom: 76px; }
   #gridProjects { grid-template-columns: minmax(0, 1fr); min-height: 0; }
   #gridProjects .d-plist { order: -1; position: static; height: auto; overflow: visible; border-right: 0; border-bottom: 1px solid var(--border); margin: -14px -16px 12px; padding: 8px 16px; }
   #gridProjects .d-plist .d-prow { display: inline-grid; width: auto; margin-right: 4px; }
+  /* 아이디어·결정은 한 열로 쌓인다(아이디어가 위) */
+  .d-reccols { grid-template-columns: minmax(0, 1fr); gap: 20px; }
   .d-pmain { padding-left: 0; }
   .d-selbar { left: 0; }
   body.later-open .d-selbar { right: 0; }
@@ -1152,7 +1240,8 @@ body.batch-open .d-toast { bottom: 76px; }
     grid-template-areas: "sl ck ti ac" "sl ck mt ac";
   }
   .d-sel { grid-area: sl; height: auto; }
-  .d-check { grid-area: ck; width: 28px; height: auto; }
+  /* 업무 행에만 걸리게 한다 — 이름 붙인 칸이 없는 다른 줄(결정·아이디어)까지 흔들리지 않게 */
+  .d-row .d-check { grid-area: ck; width: 28px; height: auto; }
   .d-title { grid-area: ti; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .d-proj { display: none; }
   .d-meta { grid-area: mt; justify-content: flex-start; }
@@ -1186,6 +1275,12 @@ body.batch-open .d-toast { bottom: 76px; }
   .d-prow2 .ac { grid-area: ac; position: static; flex-direction: column; align-items: stretch; opacity: 1; pointer-events: auto; background: none; padding-left: 0; }
   .d-selbar { padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px)); }
   .d-selbar .bar { gap: 2px; }
+
+  /* 환경설정은 화면을 거의 다 쓰는 판이 된다 */
+  #settingsDialog { width: calc(100vw - 16px); max-height: calc(100dvh - 48px); }
+  .d-mhd { padding: 10px 10px 10px 14px; gap: 8px; }
+  .d-mbody { padding: 12px 14px 20px; }
+  .d-archq { font-size: 16px; height: 36px; }
 }
 
 /* ---------- 스크롤바 (유일하게 토큰 밖 색을 쓰는 곳) ---------- */
