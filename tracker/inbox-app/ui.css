@@ -1528,9 +1528,10 @@ body.batch-open .d-toast { bottom: 76px; }
 }
 /* 결정 머리줄 오른쪽의 `결정 찾기` — 미반영+반영 완료를 함께 거른다(반영 완료 전용 검색을 대체) */
 .d-recsearch {
-  width: 200px; height: 32px; padding: 0 14px; box-sizing: border-box;
+  width: 240px; height: 34px; padding: 0 14px; box-sizing: border-box;
   border: 0; border-radius: 999px;
-  background: var(--field); color: var(--text); font-family: inherit; font-size: 13.5px;
+  /* 머리줄은 카드 밖(회색 바탕)이라 회색 채움이면 안 보인다 — 흰 면으로 세운다 */
+  background: var(--surface); box-shadow: var(--soft); color: var(--text); font-family: inherit; font-size: 13.5px;
   transition: box-shadow 170ms var(--ease), background 170ms var(--ease);
 }
 .d-recsearch::placeholder { color: var(--dim); }

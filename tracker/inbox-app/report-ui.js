@@ -203,13 +203,18 @@ function reportSlackModel(report, options = {}) {
 
 // 한 줄씩 풀어 놓은 모양. 일반 글자와 미리보기가 같은 글자를 쓰게 하는 가운데 단계다
 // (미리보기를 직접 선택해 복사해도 아래 `reportSlackText`와 같은 글자가 나온다).
+// 슬랙에 나가는 구역 제목은 `[완료]` `[진행중]` `[예정]` 꼴이다(사용자가 올리는 글의 모양). 구역을 고르는
+// 칩과 저장된 선택은 이름 그대로(`진행 중`)를 쓴다 — 바뀌는 것은 나가는 글자뿐이다.
+function reportSlackSectionLabel(name) {
+  return `[${name === '진행 중' ? '진행중' : name}]`;
+}
 function reportSlackLines(model) {
   const lines = [];
   if (!model || !model.sections.length) return lines;
   if (model.title) lines.push({ kind: 'title', text: model.title }, { kind: 'gap', text: '' });
   model.sections.forEach((section, index) => {
     if (index) lines.push({ kind: 'gap', text: '' });
-    lines.push({ kind: 'section', text: section.name });
+    lines.push({ kind: 'section', text: reportSlackSectionLabel(section.name) });
     for (const project of section.projects) {
       lines.push({ kind: 'project', text: project.name });
       for (const item of project.items) {
@@ -238,7 +243,7 @@ function reportSlackHtml(model) {
   const html = [];
   if (model.title) html.push(bold(model.title));
   for (const section of model.sections) {
-    html.push(bold(section.name));
+    html.push(bold(reportSlackSectionLabel(section.name)));
     for (const project of section.projects) {
       html.push(bold(project.name));
       html.push(`<ul>${project.items.map(item => `<li>${escapeHtml(item.text)}${notes(item.notes)}</li>`).join('')}</ul>`);
@@ -848,13 +853,17 @@ function reportPlanCandidateRow(item, task, groupName, claimed) {
   const due = typeof uiDueText === 'function' ? uiDueText(task.due, 'full') : null;
   line.appendChild(reportNode('span', due ? due.text : '', 'mt'));
   if (claimed) {
-    line.appendChild(reportNode('span', '담음', 'in'));
+    // 담기 버튼과 같은 자리·같은 크기로 선다 — 담을 때마다 줄 높이와 오른쪽 끝이 흔들리지 않게.
+    const done = reportNode('span', undefined, 'rp-in');
+    done.innerHTML = uiIcon('check');
+    done.appendChild(reportNode('span', '담음', 'in'));
+    line.appendChild(done);
     return line;
   }
   // 담아도 업무 자체는 바뀌지 않는다(언제 할지·상태 그대로) — 계획 문장만 하나 는다.
   line.appendChild(reportButton('+ 담기', () => reportChange(item, {
     action: 'add', text: task.description, group: groupName || undefined, planOf: task.id,
-  }, '다음 주 계획에 넣었어요'), 'd-btn sm'));
+  }, '다음 주 계획에 넣었어요'), 'd-btn sm rp-take'));
   return line;
 }
 
@@ -864,7 +873,12 @@ function reportPlanCandidateList(item, host, tasks, claimed) {
   const groups = typeof uiGroupTasks === 'function' ? uiGroupTasks(tasks) : [['__misc__', tasks]];
   for (const [key, groupTasks] of groups) {
     const label = typeof uiGroupLabel === 'function' ? uiGroupLabel(key) : REPORT_NO_PROJECT;
-    host.appendChild(reportNode('div', label, 'rp-candpj'));
+    // 오늘 목록의 그룹 제목과 같은 말투(색 점 + 이름 + 개수) — 프로젝트가 한 덩어리로 뭉쳐 보이지 않게.
+    const head = reportNode('div', undefined, 'rp-candpj');
+    if (key !== '__misc__' && typeof uiProjectDot === 'function') head.appendChild(uiProjectDot(label));
+    head.appendChild(reportNode('span', label, 'pjn'));
+    head.appendChild(reportNode('span', String(groupTasks.length), 'n num'));
+    host.appendChild(head);
     const name = reportPlanTaskGroup(groupTasks[0]);
     for (const task of groupTasks) {
       host.appendChild(reportPlanCandidateRow(item, task, name, claimed.has(task.id)));

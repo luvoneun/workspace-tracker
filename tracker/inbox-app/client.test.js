@@ -1124,8 +1124,10 @@ function reportCandidateClient(rows = []) {
 }
 test('다음 주 후보는 오늘 할 일의 미완료 업무만 프로젝트별로 세운다', () => {
   const { drawn } = reportCandidateClient();
-  assert.deepEqual(drawn.filter(([cls]) => cls === 'rp-candpj').map(([, text]) => text),
+  assert.deepEqual(drawn.filter(([cls]) => cls === 'pjn').map(([, text]) => text),
     ['가입 개선', '결제 리뉴얼', '프로젝트 없음'], '프로젝트별로 묶고 프로젝트 없는 것은 맨 뒤다');
+  assert.deepEqual(drawn.filter(([cls]) => cls === 'n num').map(([, text]) => text), ['1', '1', '1'],
+    '프로젝트 제목에는 그 묶음의 후보 수가 붙는다(오늘 목록의 그룹 제목과 같은 말투)');
   assert.deepEqual(drawn.filter(([cls]) => cls === 'ti').map(([, text]) => text),
     ['가입 문구 검토하기', '정산 배치 설계하기', '프로젝트 없는 일'], '완료한 업무와 나중에 할 일은 후보가 아니다');
   assert.deepEqual(drawn.filter(([cls]) => cls === 'mt').map(([, text]) => text), ['9월 27일까지', '', ''],
@@ -1410,7 +1412,7 @@ test('슬랙 복사 글자는 구역 → 프로젝트 → 글머리 형식으로
   assert.equal(text, [
     '9월 3주차 (9/21~9/27)',
     '',
-    '완료',
+    '[완료]',
     '가입 개선',
     '• 가입 실패율 급증 원인 파악',
     '• 퍼널 데이터 정리해 대시보드 반영',
@@ -1421,11 +1423,11 @@ test('슬랙 복사 글자는 구역 → 프로젝트 → 글머리 형식으로
     '기타',
     '• 주간 회의 자료 준비',
     '',
-    '진행 중',
+    '[진행중]',
     '알림센터',
     '• 발송 실패 로그 확인',
     '',
-    '예정',
+    '[예정]',
     '알림센터',
     '• 웹/앱 검수 처리 기획 진행 및 논의',
     '* 과금 기획은 차차주 진행 예정',
@@ -1443,7 +1445,7 @@ test('넣을 구역을 고르면 미리보기·일반 글자·서식 있는 복�
   assert.deepEqual(names(['완료', '진행 중', '예정']), ['완료', '진행 중', '예정'], '기본값은 완료 · 진행 중 · 예정이다');
   assert.deepEqual(names(['결정', '확인 대기', '완료']), ['완료', '결정', '확인 대기'], '고른 차례와 상관없이 구역 차례는 하나로 정해져 있다');
   assert.deepEqual(names([]), [], '아무 구역도 고르지 않으면 복사할 것이 없다');
-  assert.equal(app.run(`reportSlackText(${model(['결정'])})`), ['9월 3주차 (9/21~9/27)', '', '결정', '운영툴', '• 접근 로그는 90일 보존'].join('\n'));
+  assert.equal(app.run(`reportSlackText(${model(['결정'])})`), ['9월 3주차 (9/21~9/27)', '', '[결정]', '운영툴', '• 접근 로그는 90일 보존'].join('\n'));
   assert.deepEqual(names(['완료', '진행 중', '결정', '확인 대기', '예정']).length, 5, '내용이 있는 구역만 세어도 다섯 구역이 모두 찬 자료다');
   assert.deepEqual(JSON.parse(app.run(`JSON.stringify(reportSlackModel({ weekKey: '2026-09-21', rows: ${REPORT_SLACK_ROWS} }, { sections: ['확인 대기'] }).sections)`)),
     [{ name: '확인 대기', projects: [{ name: '운영툴', items: [{ text: '큐 지연 원인 회신 대기', notes: [] }] }], memos: [] }]);
@@ -1460,7 +1462,7 @@ test('미리보기 줄·일반 글자·서식 있는 복사는 한 구조에서 
   assert.ok(lines.some(line => line.kind === 'memo' && line.text === '* 과금 기획은 차차주 진행 예정'));
 
   const html = app.run(`reportSlackHtml(${model})`);
-  assert.match(html, /^<p><b>9월 3주차 \(9\/21~9\/27\)<\/b><\/p><p><b>완료<\/b><\/p><p><b>가입 개선<\/b><\/p><ul><li>가입 실패율 급증 원인 파악<\/li>/);
+  assert.match(html, /^<p><b>9월 3주차 \(9\/21~9\/27\)<\/b><\/p><p><b>\[완료\]<\/b><\/p><p><b>가입 개선<\/b><\/p><ul><li>가입 실패율 급증 원인 파악<\/li>/);
   assert.match(html, /<li>퍼널 데이터 정리해 대시보드 반영<ul><li>이슈: 집계 지연<\/li><\/ul><\/li>/, '부연은 한 단계 들여 쓴 목록이 된다');
   assert.match(html, /<p>\* 과금 기획은 차차주 진행 예정<\/p>/, '프로젝트 없는 계획 문장은 메모 줄로 남는다');
   assert.equal(app.run(`reportSlackHtml({ sections: [] })`), '');
@@ -1494,7 +1496,7 @@ test('아래로 넣은 문장은 부모의 프로젝트 아래에 서고, 슬랙
   assert.equal(app.run(`reportSlackText(reportSlackModel(${report}, { sections: ['완료'] }))`), [
     '9월 3주차 (9/21~9/27)',
     '',
-    '완료',
+    '[완료]',
     '가입 개선',
     '• 가입 실패율 급증 원인 파악',
     '    ◦ 결제 로그 확인',
@@ -1510,7 +1512,7 @@ test('아래로 넣은 문장은 부모의 프로젝트 아래에 서고, 슬랙
     { id: 'a2', heading: '완료한 일', group: '결제 리뉴얼', text: '혼자 남은 문장', sourceIds: [], excluded: false }
   ] }`;
   assert.equal(app.run(`reportSlackText(reportSlackModel(${orphaned}, { sections: ['완료'] }))`), [
-    '9월 3주차 (9/21~9/27)', '', '완료', '결제 리뉴얼', '• 혼자 남은 문장',
+    '9월 3주차 (9/21~9/27)', '', '[완료]', '결제 리뉴얼', '• 혼자 남은 문장',
   ].join('\n'));
   assert.deepEqual(JSON.parse(app.run(`JSON.stringify(reportChildRows([]).size)`)), 0);
 });
@@ -1529,7 +1531,7 @@ test('다음 주 계획은 프로젝트로 묶이고, 프로젝트 없는 문장
   assert.equal(app.run(`reportSlackText(reportSlackModel({ weekKey: '2026-09-21', rows: ${rows} }, { sections: ['예정'] }))`), [
     '9월 3주차 (9/21~9/27)',
     '',
-    '예정',
+    '[예정]',
     '알림센터',
     '• 검수 처리 기획',
     '• 발송 정책 정리',
@@ -1657,17 +1659,17 @@ test('모르는 소제목은 그 이름 그대로의 구역이 되고, 차례는
   assert.equal(app.run(`reportSlackText(reportSlackModel(${report}, { sections: reportSlackSectionNames(${report}) }))`), [
     '9월 3주차 (9/21~9/27)',
     '',
-    '완료',
+    '[완료]',
     '가입 개선',
     '• 퍼널 정리',
     '',
-    '리스크',
+    '[리스크]',
     '운영툴',
     '• 큐 지연이 계속되고 있어요',
     '기타',
     '• 인력 공백',
     '',
-    '예정',
+    '[예정]',
     '알림센터',
     '• 검수 기획',
   ].join('\n'), '모르는 소제목의 문장도 같은 모양으로 들어간다');
