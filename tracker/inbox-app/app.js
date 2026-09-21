@@ -1917,6 +1917,16 @@ function jiraCardEnsure(key) {
 let jiraLink = { project: null, state: 'idle', query: '', error: '', issue: null, busy: false, onEsc: null };
 
 const jiraLinkHost = () => document.getElementById('jiraLinkRow');
+// 설정 > 상태의 지라 줄에 덧붙는 조용한 한 마디. 앱이 목록을 직접 읽고 있을 때만 나온다 —
+// 그렇지 않으면 빈 글자이고, 그 줄은 지금까지처럼 자동화 로그만 말한다(그때가 대비책을 쓰는 때다).
+function jiraLiveNote(sync, at = Date.now()) {
+  if (!sync || !sync.live || !sync.liveAt) return '';
+  const read = new Date(sync.liveAt).getTime();
+  if (Number.isNaN(read)) return '';
+  const minutes = Math.max(0, Math.round((at - read) / 60000));
+  const when = minutes < 1 ? '방금' : minutes < 60 ? `${minutes}분 전` : `${Math.round(minutes / 60)}시간 전`;
+  return `목록은 앱이 직접 읽어요 · ${when}`;
+}
 // 지라 직접 읽기 설정이 있는지와 그 주소 — 목록과 함께 온다(`jiraSync`). 토큰·이메일은 오지 않는다.
 const jiraLinkUsable = () => !!(latestData && latestData.jiraSync && latestData.jiraSync.connected);
 const jiraLinkSite = () => (latestData && latestData.jiraSync && latestData.jiraSync.siteUrl) || '';
@@ -2765,6 +2775,20 @@ async function load() {
   syncTaskDetail();
   palSync();
   taskSelectionRefresh();
+}
+
+// 내 담당 지라 목록(프로젝트 고르기 선택지·프로젝트 이름의 원천)도 서버가 지라에서 직접 읽는 값이다.
+// 새로고침은 그 목록을 먼저 조용히 갱신하고 나서 화면을 다시 받는다. 곁들이는 일이라
+// 실패해도(또는 이 주소가 없는 옛 서버여도) 알리지 않고 새로고침을 그대로 이어 간다.
+async function refreshJiraListQuietly() {
+  try {
+    await fetch('/api/jira/list?fresh=1', { headers: { Accept: 'application/json' } });
+  } catch { /* 새로고침은 그대로 진행한다 */ }
+}
+
+async function refreshListsFromServer() {
+  await refreshJiraListQuietly();
+  await load();
 }
 
 // 열려 있지도 않은 탭의 카드를 load()마다 다시 만들 필요는 없다 — 숫자·NEW 표시는 그대로
@@ -7327,7 +7351,7 @@ refreshBtn.addEventListener('click', async () => {
   waitingNextClose(); // 화면을 새로 받는 때다 — 확인 대기의 `다음은?` 제안도 함께 내린다
   // 성공은 도는 아이콘이 말해 준다 — 알림을 또 띄우지 않는다(실패는 request가 알린다).
   refreshBtn.setAttribute('aria-busy', 'true');
-  await load();
+  await refreshListsFromServer();
   refreshBtn.removeAttribute('aria-busy');
   setTimeout(() => refreshBtn.classList.remove('spinning'), 400);
 });
@@ -7460,6 +7484,15 @@ function automationRow(a) {
     top.appendChild(next);
   }
   row.appendChild(top);
+
+  // 지라 목록은 앱이 직접 읽는다 — 그때는 이 자동화가 대비책이라는 뜻이라 한 마디만 조용히 덧붙인다.
+  const note = a.key === 'jira' ? jiraLiveNote(latestData && latestData.jiraSync) : '';
+  if (note) {
+    const line = document.createElement('div');
+    line.className = 'd-autonote';
+    line.textContent = note;
+    row.appendChild(line);
+  }
 
   if (failingNow) {
     const error = document.createElement('div');

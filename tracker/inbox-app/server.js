@@ -459,6 +459,10 @@ const JIRA_EXTRA_HEADING = '## 업무에 연결된 그 밖의 이슈';
 function getJiraSync() {
   if (!USES.jira) return { used: false };
   const settings = { connected: jira.connected, siteUrl: JIRA_SITE_URL };
+  // 앱이 직접 읽은 목록이 있으면 그게 기준이다 — 스냅샷 파일의 날짜로 낡음을 따지지 않는다
+  // (그 파일은 대비책일 뿐이고, 화면의 `어제 기준` 경고는 대비책을 쓰는 동안에만 뜬다).
+  const live = jiraLive.current();
+  if (live) return { ...settings, live: true, liveAt: new Date(live.at).toISOString(), lastSync: todayLocal(), stale: false };
   const jiraPath = path.join(TRACKER_DIR, 'jira_issues.md');
   if (!fs.existsSync(jiraPath)) return { ...settings, lastSync: null, stale: true };
   const line = fs
@@ -670,7 +674,29 @@ function writeMeetingNotesRequest(body) {
   return { ok: true, ...meetingNotesStatus() };
 }
 
+// 업무에 걸려 있는 지라 키를 모은다 — 기본 조회(내 담당·미완료)에서 빠진 것만 한 번 더 물어
+// 요약이 사라지지 않게 하려고 쓴다. 항목의 `jira`, 회의에 연결한 지라 프로젝트, 손으로 건 `projectLinks`.
+function linkedJiraKeys() {
+  const keys = new Set();
+  const add = (value) => { if (typeof value === 'string' && /^[A-Z][A-Z0-9]*-\d+$/.test(value)) keys.add(value); };
+  try {
+    const snapshot = workflows.snapshot();
+    snapshot.items.forEach(item => add(item.jira));
+    Object.values(snapshot.projectLinks || {}).forEach(add);
+  } catch { /* 목록은 곁들이는 값이다 — 못 모으면 기본 조회만 한다 */ }
+  try {
+    Object.values(readMeetingLinks()).forEach((value) => {
+      if (typeof value === 'string' && value.startsWith('jira:')) add(value.slice(5));
+    });
+  } catch { /* 위와 같다 */ }
+  return [...keys];
+}
+
+// 프로젝트 고르기 목록·프로젝트 이름(요약)의 원천. 앱이 직접 읽어 둔 목록이 있으면 그것을 쓰고,
+// 없을 때만(설정 없음·토큰 만료·지라 장애) 동기화 스킬이 써 둔 스냅샷 파일로 물러선다.
 function getJiraIssueCache() {
+  const live = jiraLive.current();
+  if (live) return live.issues;
   const jiraPath = path.join(TRACKER_DIR, 'jira_issues.md');
   if (!fs.existsSync(jiraPath)) return [];
   const lines = fs.readFileSync(jiraPath, 'utf-8').split('\n');
@@ -1308,6 +1334,25 @@ const handleRequest = (req, res) => {
     return;
   }
 
+  // 내 담당 목록을 **지금** 다시 읽어 메모리만 바꾼다(파일은 쓰지 않는다). 헤더의 새로고침이
+  // 목록을 다시 받기 전에 조용히 부른다 — 돌려주는 것은 결과 한 줄뿐이고 티켓은 싣지 않는다.
+  if (url.pathname === '/api/jira/list' && req.method === 'GET') {
+    if (!USES.jira) { res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ ok: false, error: '지라를 쓰지 않도록 설정돼 있어요.', kind: 'other' })); return; }
+    const done = () => {
+      const live = jiraLive.current();
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({
+        ok: true,
+        connected: !!jira.connected,
+        count: live ? live.issues.length : 0,
+        liveAt: live ? new Date(live.at).toISOString() : null,
+      }));
+    };
+    const asked = url.searchParams.get('fresh') === '1' || !jiraLive.current();
+    (asked && jira.connected ? jiraLive.refresh() : Promise.resolve()).then(done, done);
+    return;
+  }
+
   // 고르개가 열릴 때 지라가 허용하는 전환·버전 목록을 읽는다. 파일도 캐시도 없다(조회).
   if (url.pathname === '/api/jira/options' && req.method === 'GET') {
     if (!USES.jira) { res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ ok: false, error: '지라를 쓰지 않도록 설정돼 있어요.', kind: 'other' })); return; }
@@ -1396,6 +1441,8 @@ const handleRequest = (req, res) => {
   }
 
   if (url.pathname === '/api/items' && req.method === 'GET') {
+    // 지라 목록이 묵었으면 갱신만 걸어 둔다 — 이 응답은 기다리지 않는다(지라 때문에 목록이 늦지 않게).
+    if (USES.jira) jiraLive.nudge();
     // Automatic drafts are a read-only projection. Edited reports are saved explicitly.
     const allDecisions = getDecisions();
     const payload = {
@@ -1736,6 +1783,13 @@ const jira = require('./jira-client').createJiraApi({ config: CONFIG });
 // 화면이 붙여 넣은 지라 주소의 호스트를 견줄 때만 쓰는 값이다(주소는 이미 카드의 `지라에서 열기`에
 // 그대로 나가 있다). 이메일·토큰은 어디에도 싣지 않는다.
 const JIRA_SITE_URL = (require('./jira-client').jiraSettings(CONFIG) || {}).siteUrl || '';
+// 내 담당 티켓 목록도 앱이 직접 읽는다 — 값은 메모리에만 있고 파일은 쓰지 않는다.
+// 설정이 없으면(`connected`가 거짓) 타이머도 첫 읽기도 돌지 않는다.
+const jiraLive = require('./jira-live').createJiraLive({
+  list: keys => jira.list(keys),
+  keys: linkedJiraKeys,
+  connected: () => USES.jira && jira.connected,
+});
 const transactional = fn => (...args) => mutations.run(() => fn(...args));
 setTrackField = transactional(setTrackField);
 setTrackDue = transactional(setTrackDue);
@@ -1777,6 +1831,8 @@ if (require.main === module) {
   if(EXTRA_HOST && !nativeFs.existsSync(ACCESS_TOKEN_PATH))atomicWrite(ACCESS_TOKEN_PATH,randomBytes(32).toString('hex'));
   const archiveMeetings = () => { try { mutations.run(() => workflows.archive()); } catch (error) { console.error('회의 기록 저장 실패:', error.message); } };
   archiveMeetings();
+  // 지라 목록은 뜰 때 한 번, 그 뒤 10분마다 읽는다(설정이 있을 때만, 타이머는 unref).
+  jiraLive.start();
   fs.watchFile(path.join(TRACKER_DIR, 'calendar_today.md'), { interval: 1000, persistent: false }, archiveMeetings);
   server.listen(PORT, '127.0.0.1', () => {
     console.log(`슬랙 인박스 앱: http://localhost:${PORT}`);
@@ -1795,4 +1851,6 @@ if (require.main === module) {
   }
 }
 
-module.exports = { server };
+// `jiraLive`는 화면 확인용 픽스처가 "뜰 때 한 번 읽기"를 직접 켜 보려고 함께 내보낸다
+// (테스트·픽스처 밖에서는 쓰지 않는다 — 운영에서는 위의 `jiraLive.start()`가 켠다).
+module.exports = { server, jiraLive };

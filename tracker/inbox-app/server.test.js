@@ -1554,3 +1554,297 @@ test('복구가 필요한 동안에는 지라 연결도 걸리지 않는다', as
   assert.equal(blocked.status, 503);
   assert.match(blocked.error, /저장을 멈췄어요/, '앱 저장소가 아픈 동안에는 연결도 걸지 않는다');
 });
+
+// ---------- 내 담당 지라 목록도 앱이 직접 읽는다 (BJLIVE) ----------
+// 여기서도 실제 지라에는 절대 닿지 않는다: 아래는 전부 가짜 fetch이고, 서버를 띄우는 자리는
+// 자기 임시 폴더의 가짜 설정·가짜 토큰만 쓴다.
+const jiraListBody = (issues) => ({ issues });
+const jiraListIssue = (key, extra = {}) => ({
+  key,
+  fields: {
+    summary: `${key}의 요약`,
+    status: { name: '진행 중', statusCategory: { key: 'indeterminate' } },
+    issuetype: { name: '스토리' },
+    duedate: '2026-10-02',
+    fixVersions: [{ id: '10101', name: 'v2.70.0', releaseDate: '2026-09-30', released: false }],
+    ...extra,
+  },
+});
+const jiraListClient = fake => jiraModule.createJiraClient({ settings: jiraSettings(), request: fake.request, readToken: () => JIRA_TOKEN });
+
+test('내 담당 목록은 파일과 같은 칸에 새 칸(범주·기한·배포 버전)만 얹어 돌려주고, 담당자는 아예 묻지 않는다', async () => {
+  const fake = jiraFake({ '/rest/api/3/search/jql': () => json(jiraListBody([jiraListIssue('IO-48394'), { key: '수상한키', fields: {} }])) });
+  const issues = await jiraListClient(fake).listMyIssues();
+  assert.deepEqual(issues, [{
+    // 기존 자리(프로젝트 이름 붙이기·고르기 목록)가 그대로 읽는 칸 — `status`는 상태 이름 글자다.
+    key: 'IO-48394', type: '스토리', status: '진행 중', summary: 'IO-48394의 요약', extra: false,
+    // 이번에 더한 칸(화면은 아직 그리지 않는다 — 배포 임박 알림·주간요약이 쓸 값이다).
+    category: 'doing', due: '2026-10-02',
+    versions: [{ name: 'v2.70.0', releaseDate: '2026-09-30', released: false }],
+  }], '키 형식이 아닌 줄은 버린다');
+  assert.equal(fake.calls.length, 1, '연결된 키가 없으면 한 번만 묻는다');
+  const [call] = fake.calls;
+  assert.match(call.url, /\/rest\/api\/3\/search\/jql\?jql=/);
+  assert.match(call.url, /fields=summary,status,issuetype,fixVersions,duedate&maxResults=100$/);
+  assert.equal(decodeURIComponent(call.url.split('jql=')[1].split('&')[0]), 'assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC');
+  // 담당자 칸은 애초에 달라고 하지 않는다 — 그래야 이메일·계정 id가 응답에 실릴 일이 없다.
+  assert.doesNotMatch(fake.calls.map(entry => entry.url).join(' '), /assignee&|assignee,|emailAddress|accountId/);
+});
+
+test('업무에 걸린 키는 기본 목록에 없을 때만 한 번 더 묻고 `그 밖의 이슈`로 표시된다', async () => {
+  const routes = {
+    '/rest/api/3/search/jql': (url) => {
+      const jql = decodeURIComponent(String(url).split('jql=')[1].split('&')[0]);
+      if (jql.startsWith('key in')) {
+        assert.equal(jql, 'key in (IO-77777)', '기본 목록에 이미 있는 키는 다시 묻지 않는다');
+        return json(jiraListBody([jiraListIssue('IO-77777', { status: { name: '완료', statusCategory: { key: 'done' } } })]));
+      }
+      return json(jiraListBody([jiraListIssue('IO-48394')]));
+    },
+  };
+  const fake = jiraFake(routes);
+  const issues = await jiraListClient(fake).listMyIssues(['IO-48394', 'IO-77777', 'IO-77777', 'not-a-key', null]);
+  assert.deepEqual(issues.map(issue => [issue.key, issue.extra, issue.status, issue.category]),
+    [['IO-48394', false, '진행 중', 'doing'], ['IO-77777', true, '완료', 'done']]);
+  assert.equal(fake.calls.length, 2, '기본 목록 한 번 + 남은 키 한 번');
+
+  // 걸린 키가 전부 기본 목록에 있으면 두 번째 조회는 아예 나가지 않는다.
+  const covered = jiraFake(routes);
+  await jiraListClient(covered).listMyIssues(['IO-48394']);
+  assert.equal(covered.calls.length, 1);
+});
+
+test('목록은 100개까지만 들고 오고, 새 search 주소가 없으면 옛 주소로 한 번 물러선다', async () => {
+  const many = jiraListBody(Array.from({ length: 140 }, (unused, index) => jiraListIssue(`IO-${1000 + index}`)));
+  const capped = jiraFake({ '/rest/api/3/search/jql': () => json(many) });
+  assert.equal((await jiraListClient(capped).listMyIssues()).length, 100);
+  assert.match(capped.calls[0].url, /maxResults=100$/);
+
+  const fallback = jiraFake({
+    '/rest/api/3/search/jql': () => json({ errorMessages: ['not found'] }, 404),
+    '/rest/api/3/search?': () => json(jiraListBody([jiraListIssue('IO-48394')])),
+  });
+  assert.deepEqual((await jiraListClient(fallback).listMyIssues()).map(issue => issue.key), ['IO-48394']);
+  assert.equal(fallback.calls.length, 2, '새 주소가 404일 때만, 옛 주소로 한 번만 물러선다');
+});
+
+test('목록 API는 설정·토큰이 없으면 연결 안 됨으로만 답하고, 실패는 해요체 문구로 알린다', async () => {
+  const fake = jiraFake({ '/rest/api/3/search': () => json(jiraListBody([jiraListIssue('IO-48394')])) });
+  const off = jiraModule.createJiraApi({ config: {}, request: fake.request });
+  assert.deepEqual(await off.list(['IO-48394']), { ok: true, connected: false });
+  assert.equal(fake.calls.length, 0, '연결되지 않았으면 지라를 부르지 않는다');
+
+  const noToken = jiraModule.createJiraApi({ config: jiraConfig, request: fake.request, readFile: () => '' });
+  assert.deepEqual(await noToken.list(), { ok: true, connected: false });
+
+  const ok = jiraModule.createJiraApi({ config: jiraConfig, request: fake.request, readFile: () => JIRA_TOKEN });
+  const answer = await ok.list();
+  assert.equal(answer.connected, true);
+  assert.equal(answer.issues.length, 1);
+  assert.doesNotMatch(JSON.stringify(answer), new RegExp(`${JIRA_TOKEN}|${JIRA_EMAIL}`), '토큰·이메일은 어디에도 싣지 않는다');
+
+  const broken = jiraModule.createJiraApi({
+    config: jiraConfig, readFile: () => JIRA_TOKEN,
+    request: jiraFake({ '/rest/api/3/search': () => json({}, 401) }).request,
+  });
+  assert.deepEqual(await broken.list(), { ok: false, error: '지라 토큰을 확인해 주세요.', kind: 'auth' });
+});
+
+// 보관함(jira-live)의 시간 규칙 — 가짜 시계와 가짜 목록 API로만 확인한다(지라에 닿지 않는다).
+const jiraLiveModule = require('./jira-live');
+function liveHarness({ answers = [], connected = true } = {}) {
+  let clock = 0;
+  const calls = [];
+  let pending = null;
+  const list = (keys) => {
+    calls.push(keys);
+    const answer = answers.length ? answers.shift() : { ok: true, connected: true, issues: [{ key: 'IO-1' }] };
+    if (answer === 'hang') return new Promise((resolve) => { pending = resolve; });
+    if (answer instanceof Error) return Promise.reject(answer);
+    return Promise.resolve(answer);
+  };
+  const live = jiraLiveModule.createJiraLive({ list, keys: () => ['IO-9'], connected: () => connected, now: () => clock });
+  return { live, calls, tick: ms => { clock += ms; }, release: value => { const resolve = pending; pending = null; resolve(value); } };
+}
+
+test('지라 목록 보관함은 실패해도 이전 값을 30분까지 쓰고, 그보다 묵으면 버린다', async () => {
+  const held = liveHarness({ answers: [
+    { ok: true, connected: true, issues: [{ key: 'IO-1' }] },
+    { ok: false, error: '지라에 연결하지 못했어요.', kind: 'network' },
+    new Error('fetch failed'),
+  ] });
+  await held.live.refresh();
+  assert.deepEqual(held.live.current().issues, [{ key: 'IO-1' }]);
+  assert.deepEqual(held.calls[0], ['IO-9'], '업무에 걸린 키를 함께 넘긴다');
+
+  held.tick(10 * 60 * 1000);
+  assert.equal(await held.live.refresh(), false);
+  assert.deepEqual(held.live.current().issues, [{ key: 'IO-1' }], '실패하면 이전 값을 그대로 둔다');
+  assert.equal(await held.live.refresh(), false, '던지는 실패도 조용히 흘린다');
+
+  held.tick(21 * 60 * 1000); // 마지막으로 성공한 지 31분
+  assert.equal(held.live.current(), null, '30분보다 묵으면 버린다(그때부터 파일 스냅샷을 쓴다)');
+});
+
+test('지라 목록 보관함은 동시에 두 번 돌지 않고, 5분 넘게 묵었을 때만 뒤에서 갱신을 건다', async () => {
+  const harness = liveHarness({ answers: ['hang', { ok: true, connected: true, issues: [{ key: 'IO-2' }] }] });
+  const first = harness.live.refresh();
+  const second = harness.live.refresh();
+  assert.equal(first, second, '도는 중이면 같은 갱신을 나눠 쓴다');
+  assert.equal(harness.calls.length, 1);
+  harness.release({ ok: true, connected: true, issues: [{ key: 'IO-1' }] });
+  await first;
+
+  harness.live.nudge();
+  assert.equal(harness.calls.length, 1, '방금 읽은 값은 그대로 쓴다');
+  harness.tick(5 * 60 * 1000);
+  harness.live.nudge();
+  assert.equal(harness.calls.length, 2, '5분이 지나면 갱신을 건다');
+});
+
+test('지라 설정이 없으면 목록 보관함은 타이머도 첫 읽기도 돌리지 않는다', async () => {
+  const off = liveHarness({ connected: false });
+  assert.equal(off.live.start(), false);
+  assert.equal(off.live.started(), false);
+  assert.equal(off.calls.length, 0);
+  off.live.nudge();
+  assert.equal(off.calls.length, 0);
+
+  const on = liveHarness();
+  assert.equal(on.live.start(), true);
+  assert.equal(on.calls.length, 1, '설정이 있으면 뜰 때 한 번 읽는다');
+  assert.equal(on.live.holdsProcess(), false, '타이머는 unref — 이것 때문에 프로세스가 남지 않는다');
+  assert.equal(on.live.start(), false, '두 번 켜지지 않는다');
+  on.live.stop();
+  assert.equal(on.live.started(), false);
+});
+
+// 가짜 지라를 끼운 서버 하나. 목록 응답이 스냅샷 파일과 **다르게** 오도록 두어,
+// 화면에 실린 값이 어디서 왔는지 눈으로 가를 수 있게 한다.
+const JIRA_LIVE_SITE = 'https://live-jira.test';
+async function startLiveJiraServer(t, { fail = false } = {}) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-jiralive-'));
+  fs.writeFileSync(path.join(home, 'tasks.md'),
+    '# Tasks\n- 정산 배치 설계 검토하기 #task[id:lv01 status:to-do created:2026-09-20 jira:IO-77777]\n');
+  // 스냅샷 파일(대비책) — 요약이 일부러 낡았고 날짜도 어제다.
+  fs.writeFileSync(path.join(home, 'jira_issues.md'),
+    '# 지라 이슈 (내 담당, 진행중/백로그)\n\n마지막 갱신: 2026-01-02\n\n- IO-12345 | 에픽 | 진행 중 | 파일에서 온 낡은 요약\n');
+  const tokenFile = path.join(home, '.jira_token_fixture');
+  fs.writeFileSync(tokenFile, 'fixture-token-never-real\n');
+  const config = path.join(home, 'workspace.config.json');
+  fs.writeFileSync(config, JSON.stringify({ jira: { siteUrl: JIRA_LIVE_SITE, email: 'fixture@example.test', tokenFile } }));
+  const wrapper = path.join(home, 'fake-jira-list-server.js');
+  fs.writeFileSync(wrapper, `'use strict';
+const SITE = ${JSON.stringify(JIRA_LIVE_SITE)};
+const FAIL = ${fail ? 'true' : 'false'};
+const realFetch = globalThis.fetch;
+globalThis.fetch = async (input, init) => {
+  const url = String(input && input.url ? input.url : input);
+  if (!url.startsWith(SITE)) return realFetch(input, init);
+  const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  if (FAIL) return json({ errorMessages: ['down'] }, 500);
+  const jql = url.includes('jql=') ? decodeURIComponent(url.split('jql=')[1].split('&')[0]) : '';
+  const issue = (key, summary, done) => ({ key, fields: {
+    summary,
+    status: done ? { name: '완료', statusCategory: { key: 'done' } } : { name: '진행 중', statusCategory: { key: 'indeterminate' } },
+    issuetype: { name: '에픽' }, duedate: '2026-10-02',
+    fixVersions: [{ id: '10101', name: 'v2.70.0', releaseDate: '2026-09-30', released: false }],
+    // 지라는 묻지 않아도 이런 칸을 끼워 보낼 수 있다 — 앱이 옮기지 않는지 함께 본다.
+    assignee: { displayName: '루본', emailAddress: 'lubon@live-jira.test', accountId: '712020:live' },
+  } });
+  if (jql.startsWith('key in')) return json({ issues: [issue('IO-77777', '업무에 걸린 다 끝난 티켓', true)] });
+  return json({ issues: [issue('IO-12345', '지라에서 바로 읽은 요약', false)] });
+};
+const { server } = require(${JSON.stringify(path.join(__dirname, 'server.js'))});
+server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => console.log('ready'));
+`);
+  const port = await freePort();
+  const child = spawn(process.execPath, [wrapper], {
+    env: { ...process.env, WORKSPACE_DATA_DIR: home, WORKSPACE_PORT: String(port), WORKSPACE_NO_OPEN: '1', WORKSPACE_HOST: '', WORKSPACE_CONFIG: config },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let log = '';
+  child.stdout.on('data', chunk => { log += chunk; });
+  child.stderr.on('data', chunk => { log += chunk; });
+  t.after(() => { child.kill('SIGKILL'); fs.rmSync(home, { recursive: true, force: true }); });
+  const origin = `http://127.0.0.1:${port}`;
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) throw new Error(`서버가 종료되었습니다 (${child.exitCode}): ${log}`);
+    try { if ((await fetch(origin + '/api/storage-status')).ok) return { home, origin }; } catch { /* 아직 안 떴다 */ }
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  throw new Error(`서버가 응답하지 않았습니다: ${log}`);
+}
+
+test('목록이 살아 있으면 고르기 목록·요약이 지라 값이 되고 낡음 경고가 사라진다 — 파일은 쓰지 않는다', async (t) => {
+  const server = await startLiveJiraServer(t);
+  const snapshotFile = path.join(server.home, 'jira_issues.md');
+  const stamp = () => { const stat = fs.statSync(snapshotFile); return `${stat.size}:${stat.mtimeMs}`; };
+  const before = stamp();
+  const read = async () => (await (await fetch(server.origin + '/api/items')).json());
+
+  // 첫 조회는 지라를 기다리지 않는다 — 그 자리에서 파일 값으로 답하고 갱신은 뒤에서 돈다.
+  const first = await read();
+  assert.equal(first.jiraIssues[0].summary, '파일에서 온 낡은 요약');
+  assert.notEqual(first.jiraSync.live, true);
+
+  const deadline = Date.now() + 10000;
+  let live = first;
+  while (Date.now() < deadline && live.jiraSync.live !== true) {
+    await new Promise(resolve => setTimeout(resolve, 50));
+    live = await read();
+  }
+  assert.equal(live.jiraSync.live, true, '뒤에서 돈 갱신이 들어오면 그때부터 지라 값이다');
+  assert.equal(live.jiraSync.stale, false, '앱이 직접 읽는 동안에는 `어제 기준` 경고가 뜨지 않는다');
+  assert.match(live.jiraSync.liveAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(live.jiraSync.connected, true);
+  assert.deepEqual(live.jiraIssues.map(issue => [issue.key, issue.summary, issue.extra, issue.category]), [
+    ['IO-12345', '지라에서 바로 읽은 요약', false, 'doing'],
+    // 업무에 걸렸지만 내 담당·미완료 목록에는 없는 티켓 — 요약만 쓰는 `그 밖의 이슈`다.
+    ['IO-77777', '업무에 걸린 다 끝난 티켓', true, 'done'],
+  ]);
+  assert.deepEqual(live.jiraIssues[0].versions, [{ name: 'v2.70.0', releaseDate: '2026-09-30', released: false }]);
+  assert.equal(live.jiraIssues[0].due, '2026-10-02');
+  // 항목의 프로젝트 이름(요약)도 지라에서 온 값이 붙는다(`projectLabelOf`가 같은 목록을 읽는다).
+  const task = live.workflows.items.find(item => item.id === 'lv01');
+  assert.equal(task.label, 'IO-77777 · 업무에 걸린 다 끝난 티켓');
+
+  const payload = JSON.stringify(live);
+  assert.doesNotMatch(payload, /emailAddress|accountId|lubon@live-jira\.test|712020:live/, '담당자 칸은 어디에도 옮기지 않는다');
+  assert.doesNotMatch(payload, /fixture-token-never-real|fixture@example\.test/);
+  assert.equal(stamp(), before, '조회도 갱신도 스냅샷 파일을 고치지 않는다');
+
+  // 즉시 갱신 주소 — 티켓은 싣지 않고 결과 한 줄만 돌려주고, 여기서도 파일을 쓰지 않는다.
+  const listed = await (await fetch(server.origin + '/api/jira/list?fresh=1')).json();
+  assert.deepEqual(Object.keys(listed).sort(), ['connected', 'count', 'liveAt', 'ok']);
+  assert.deepEqual([listed.ok, listed.connected, listed.count], [true, true, 2]);
+  assert.match(listed.liveAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(stamp(), before);
+  assert.equal(fs.existsSync(path.join(server.home, '.request-ledger.json')), false, 'GET은 앱 파일도 만들지 않는다');
+});
+
+test('지라가 죽어 있으면 스냅샷 파일 값으로 물러서고 낡음 경고도 그대로다', async (t) => {
+  const server = await startLiveJiraServer(t, { fail: true });
+  const listed = await (await fetch(server.origin + '/api/jira/list?fresh=1')).json();
+  assert.deepEqual([listed.ok, listed.connected, listed.count, listed.liveAt], [true, true, 0, null]);
+  const data = await (await fetch(server.origin + '/api/items')).json();
+  assert.deepEqual(data.jiraIssues.map(issue => [issue.key, issue.summary, issue.extra]), [['IO-12345', '파일에서 온 낡은 요약', false]]);
+  assert.equal(data.jiraSync.lastSync, '2026-01-02', '판정은 지금까지처럼 스냅샷 파일 날짜로 한다');
+  assert.equal(data.jiraSync.stale, true);
+  assert.notEqual(data.jiraSync.live, true);
+});
+
+test('GET /api/jira/list는 설정이 없으면 연결 안 됨으로 답하고 아무 파일도 건드리지 않는다', async () => {
+  const snapshot = () => fs.readdirSync(directory).sort().map((name) => {
+    const stat = fs.statSync(path.join(directory, name));
+    return `${name}:${stat.size}:${stat.mtimeMs}`;
+  }).join('|');
+  const before = snapshot();
+  const response = await fetch(`${base}/api/jira/list?fresh=1`);
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true, connected: false, count: 0, liveAt: null });
+  assert.equal(snapshot(), before);
+  // 인증 예외가 아니다 — 원격에서 토큰 없이 부르면 다른 주소와 똑같이 막힌다(여기서는 로컬이라 열린다).
+  assert.equal((await fetch(`${base}/api/jira/list`)).status, 200);
+});

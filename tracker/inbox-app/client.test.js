@@ -3419,3 +3419,46 @@ test('BJLINK: 연결해도 다른 화면의 프로젝트 이름·키 표기는 �
   assert.deepEqual(names(after.app), names(before.app));
   assert.deepEqual(names(after.app), ['운영툴', '운영툴', '운영툴', '운영툴', '운영툴'], '어느 자리에도 키가 새로 나오지 않는다');
 });
+
+// ---------- BJLIVE: 새로고침이 목록 갱신을 먼저 부른다 ----------
+// 화면이 하는 일은 둘뿐이다: `/api/jira/list?fresh=1`을 조용히 한 번 부르고, 그 다음 화면을 다시 받는다.
+// 그 부름이 실패하든 404(이 주소가 없는 옛 서버)든 새로고침은 그대로 이어져야 한다.
+function refreshClient(jiraAnswer) {
+  const app = client(new Response('{}'));
+  const order = [];
+  app.context.order = order;
+  app.run(`fetch = async (url) => { order.push(String(url)); ${jiraAnswer} };`);
+  app.run("load = async () => { order.push('load'); };");
+  return { app, order };
+}
+
+test('BJLIVE: 새로고침은 지라 목록 갱신을 먼저 부르고 그 다음 화면을 다시 받는다', async () => {
+  const ok = refreshClient("return new Response('{\"ok\":true}')");
+  await ok.app.run('refreshListsFromServer()');
+  assert.deepEqual(ok.order, ['/api/jira/list?fresh=1', 'load']);
+});
+
+test('BJLIVE: 목록 갱신이 실패하거나 옛 서버라 없어도 새로고침은 그대로 진행한다', async () => {
+  const broken = refreshClient("throw new TypeError('Network unavailable')");
+  await broken.app.run('refreshListsFromServer()');
+  assert.deepEqual(broken.order, ['/api/jira/list?fresh=1', 'load'], '실패해도 화면은 다시 받는다');
+  assert.equal(broken.app.nodes.has('liveRegion'), false, '곁들이는 일이라 알림도 띄우지 않는다');
+
+  const old = refreshClient("return new Response('Not found', { status: 404 })");
+  await old.app.run('refreshListsFromServer()');
+  assert.deepEqual(old.order, ['/api/jira/list?fresh=1', 'load']);
+  assert.equal(old.app.nodes.has('liveRegion'), false);
+});
+
+test('BJLIVE: 설정 > 상태의 지라 한 마디는 앱이 직접 읽고 있을 때만 나온다', () => {
+  const app = pureClient();
+  const note = (sync, at) => app.run(`jiraLiveNote(${JSON.stringify(sync)}, ${at})`);
+  const read = Date.UTC(2026, 8, 25, 1, 0, 0);
+  assert.equal(note({ live: true, liveAt: new Date(read).toISOString() }, read + 3 * 60000), '목록은 앱이 직접 읽어요 · 3분 전');
+  assert.equal(note({ live: true, liveAt: new Date(read).toISOString() }, read + 1000), '목록은 앱이 직접 읽어요 · 방금');
+  assert.equal(note({ live: true, liveAt: new Date(read).toISOString() }, read + 125 * 60000), '목록은 앱이 직접 읽어요 · 2시간 전');
+  // 대비책(스냅샷 파일)을 쓰는 동안에는 한 마디가 없다 — 그 줄은 지금까지처럼 자동화 기록만 말한다.
+  assert.equal(note({ connected: true, lastSync: '2026-09-24', stale: true }, read), '');
+  assert.equal(note({ live: true, liveAt: '어제쯤' }, read), '');
+  assert.equal(note(null, read), '');
+});

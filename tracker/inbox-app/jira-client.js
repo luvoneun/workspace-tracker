@@ -22,6 +22,12 @@ const ISSUE_FIELDS = 'summary,status,issuetype,assignee,duedate,fixVersions,subt
 // 하위 티켓 줄이 쓰는 값만 받아 온다. 담당자는 **표시 이름만** 꺼내 쓴다 —
 // 지라가 주는 사용자 덩어리에서 이메일·계정 id는 어디에도 옮기지 않는다(테스트로 고정).
 const CHILD_FIELDS = 'summary,status,assignee,fixVersions,issuetype';
+// 내 담당 목록(프로젝트 고르기·요약의 원천)이 받아 오는 칸. **담당자는 아예 요청하지 않는다** —
+// 내 것만 읽는 목록이라 필요가 없고, 요청하지 않으면 이메일·계정 id가 응답에 실릴 일도 없다.
+const LIST_FIELDS = 'summary,status,issuetype,fixVersions,duedate';
+const JIRA_LIST_LIMIT = 100;
+// 기본 조회: 내가 담당이고 아직 끝나지 않은 것. 최근에 손댄 순서다.
+const MY_ISSUES_JQL = 'assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC';
 const CHANGE_KINDS = ['status', 'version', 'due', 'versionEdit'];
 
 // 지라가 주는 범주 열쇠는 셋뿐이다. 모르는 값은 `진행`으로 본다(상태 이름은 그대로 보여 준다).
@@ -174,6 +180,32 @@ function shapeChildren(siteUrl, issues) {
   return { ...counted, items: (Array.isArray(issues) ? issues : []).map(entry => shapeChild(siteUrl, entry)).filter(Boolean) };
 }
 
+// 목록 한 줄. 모양은 지금까지 파일(`jira_issues.md`)에서 읽던 것과 **같은 칸 이름**으로 맞춘다
+// (`status`는 상태 **이름** 글자다) — 그래야 이 값을 쓰는 기존 자리들이 그대로 돈다.
+// 새 칸은 셋뿐이다: `category`(할 일·진행·완료), `due`, `versions`(배포 임박 알림·주간요약이 쓸 값).
+// 담당자 칸은 애초에 요청하지 않으므로 여기에도 없다.
+function shapeListIssue(entry, extra) {
+  const key = text(entry && entry.key);
+  if (!JIRA_KEY_RE.test(key)) return null;
+  const fields = (entry && entry.fields) || {};
+  const status = fields.status || {};
+  const versions = Array.isArray(fields.fixVersions) ? fields.fixVersions : [];
+  return {
+    key,
+    type: text(fields.issuetype && fields.issuetype.name),
+    status: text(status.name),
+    summary: text(fields.summary),
+    extra,
+    category: CATEGORY[status.statusCategory && status.statusCategory.key] || 'doing',
+    due: day(fields.duedate),
+    versions: versions.map(version => ({
+      name: text(version && version.name),
+      releaseDate: day(version && version.releaseDate),
+      released: !!(version && version.released),
+    })),
+  };
+}
+
 function createJiraClient({ settings, request = (...args) => fetch(...args), readToken } = {}) {
   if (!settings) throw new Error('지라 설정이 필요해요.');
   const token = typeof readToken === 'function'
@@ -237,6 +269,35 @@ function createJiraClient({ settings, request = (...args) => fetch(...args), rea
     return shapeChildren(settings.siteUrl, subtasks);
   }
 
+  // 목록 조회 한 번. 하위 티켓과 같은 길이다 — 새 주소(`/search/jql`)가 없는 지라에서는
+  // 옛 주소(`/search`)로 한 번만 물러선다.
+  async function search(jql, secret) {
+    const query = `jql=${encodeURIComponent(jql)}&fields=${LIST_FIELDS}&maxResults=${JIRA_LIST_LIMIT}`;
+    try {
+      return await call(`/rest/api/3/search/jql?${query}`, secret);
+    } catch (error) {
+      if (error.status !== 404) throw error;
+      return await call(`/rest/api/3/search?${query}`, secret);
+    }
+  }
+
+  // 프로젝트 고르기 목록·요약의 원천. ① 내 담당·미완료를 읽고,
+  // ② 업무에 걸려 있는 키 중 ①에 없는 것만 `key in (…)`로 한 번 더 읽어 `extra:true`로 붙인다
+  // (완료됐거나 담당이 바뀐 티켓의 요약이 사라지지 않게 — 파일 스냅샷의 `그 밖의 이슈`와 같은 규칙).
+  async function listMyIssues(linkedKeys = []) {
+    const secret = token();
+    const mine = (((await search(MY_ISSUES_JQL, secret)) || {}).issues || [])
+      .map(entry => shapeListIssue(entry, false)).filter(Boolean).slice(0, JIRA_LIST_LIMIT);
+    const have = new Set(mine.map(issue => issue.key));
+    const wanted = [...new Set((Array.isArray(linkedKeys) ? linkedKeys : [])
+      .filter(key => typeof key === 'string' && JIRA_KEY_RE.test(key) && !have.has(key)))].slice(0, JIRA_LIST_LIMIT);
+    if (!wanted.length) return mine;
+    const rest = (((await search(`key in (${wanted.join(',')})`, secret)) || {}).issues || [])
+      .map(entry => shapeListIssue(entry, true)).filter(Boolean)
+      .filter(issue => !have.has(issue.key)).slice(0, JIRA_LIST_LIMIT);
+    return [...mine, ...rest];
+  }
+
   const wantKey = (key) => { if (typeof key !== 'string' || !JIRA_KEY_RE.test(key)) throw jiraError('key'); return key; };
   const wantId = (id) => { const value = idOf(id); if (!JIRA_ID_RE.test(value)) throw jiraError('value'); return value; };
 
@@ -297,7 +358,7 @@ function createJiraClient({ settings, request = (...args) => fetch(...args), rea
     await call(`/rest/api/3/version/${id}`, token(), { method: 'PUT', send });
   }
 
-  return { getIssueOverview, getTransitions, getVersions, getIssueVersionIds, transition, updateIssueFields, updateVersion };
+  return { getIssueOverview, listMyIssues, getTransitions, getVersions, getIssueVersionIds, transition, updateIssueFields, updateVersion };
 }
 
 // 쓰기 실패를 화면 문구로 옮기는 단 하나의 표. 우리가 먼저 막은 것(대조 실패·필수 입력·여러 버전)은
@@ -341,6 +402,21 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
       const issue = await createJiraClient({ settings, request, readToken: () => secret }).getIssueOverview(key);
       cache.set(key, { at: now(), issue });
       return { ok: true, connected: true, issue };
+    } catch (error) {
+      const kind = MESSAGE[error && error.kind] ? error.kind : 'other';
+      return { ok: false, error: MESSAGE[kind], kind };
+    }
+  }
+
+  // 내 담당 목록. 캐시는 여기 두지 않는다 — 들고 있는 것은 서버의 `jira-live`뿐이고,
+  // 이 함수는 부를 때마다 지라에서 새로 읽는다. 파일은 아무것도 쓰지 않는다.
+  async function list(linkedKeys = []) {
+    if (!settings) return { ok: true, connected: false };
+    const secret = token();
+    if (!secret) return { ok: true, connected: false };
+    try {
+      const issues = await createJiraClient({ settings, request, readToken: () => secret }).listMyIssues(linkedKeys);
+      return { ok: true, connected: true, issues };
     } catch (error) {
       const kind = MESSAGE[error && error.kind] ? error.kind : 'other';
       return { ok: false, error: MESSAGE[kind], kind };
@@ -419,11 +495,11 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
     return { ok: true };
   }
 
-  return { read, options, change, connected: !!settings };
+  return { read, list, options, change, connected: !!settings };
 }
 
 module.exports = {
   createJiraClient, createJiraApi, jiraSettings, issueUrl, projectOf, countChildren, shapeChildren,
-  shapeTransitions, shapeVersions, writeKind,
-  JIRA_KEY_RE, JIRA_TIMEOUT_MS, JIRA_CACHE_MS, JIRA_MESSAGE: MESSAGE,
+  shapeTransitions, shapeVersions, shapeListIssue, writeKind,
+  JIRA_KEY_RE, JIRA_TIMEOUT_MS, JIRA_CACHE_MS, JIRA_LIST_LIMIT, MY_ISSUES_JQL, JIRA_MESSAGE: MESSAGE,
 };
