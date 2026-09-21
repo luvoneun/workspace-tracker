@@ -202,6 +202,42 @@ test('a task carried over says since when, and says nothing on the day it was pl
   assert.match(carry("'2000-01-01'"), /^\d+일 전부터$/);
 });
 
+test('the detail panel sends only the fields the person actually changed', () => {
+  const app = pureClient();
+  const changes = (initial, current) => JSON.parse(app.run(`JSON.stringify(panelFieldChanges('t1', ${initial}, ${current}))`));
+  const base = "{ blockedBy: 'c1', outcome: '', followUp: '' }";
+  assert.deepEqual(changes(base, base), { id: 't1' }, 'nothing changed means nothing but the id');
+  assert.deepEqual(
+    changes(base, "{ blockedBy: 'c1', outcome: '  지표 확인 끝  ', followUp: '' }"),
+    { id: 't1', outcome: '지표 확인 끝' },
+    'the untouched blockedBy is left out so it cannot overwrite a newer value',
+  );
+  assert.deepEqual(changes(base, "{ blockedBy: '', outcome: '', followUp: '' }"), { id: 't1', blockedBy: null }, 'an emptied link is sent as null');
+  assert.deepEqual(
+    changes("{ followUp: '2026-09-22' }", "{ followUp: '' }"),
+    { id: 't1', followUp: null },
+    'a cleared follow-up date is sent as null, and fields that are not on screen are never sent',
+  );
+});
+
+test('the detail panel saves without a save button: one request for a change, none when nothing changed', async () => {
+  const app = pureClient();
+  app.run('var sent = []; var pass = fetch; fetch = (url, options) => { sent.push({ url, body: JSON.parse(options.body) }); return pass(url, options); };');
+  const sent = () => JSON.parse(app.run('JSON.stringify(sent)'));
+
+  app.run("var initial = { blockedBy: '', outcome: '' }; var current = { blockedBy: '', outcome: '' }");
+  assert.equal(await app.run('panelFieldSave("t1", initial, current)'), false);
+  assert.deepEqual(sent(), [], 'leaving a field alone does not save');
+
+  app.run("current.outcome = '릴리스 노트 공유함'");
+  assert.equal(await app.run('panelFieldSave("t1", initial, current)'), true);
+  assert.deepEqual(sent(), [{ url: '/api/workflow/item', body: { id: 't1', outcome: '릴리스 노트 공유함' } }]);
+
+  // 저장된 값이 새 기준이 되므로, 같은 칸을 다시 떠나도 또 보내지 않는다.
+  assert.equal(await app.run('panelFieldSave("t1", initial, current)'), false);
+  assert.equal(sent().length, 1);
+});
+
 // 회의 모아보기·회의 정리의 판단 로직(workflows.js)은 app.js와 같은 전역 공간에서 돈다.
 function workflowsClient() {
   const app = pureClient();

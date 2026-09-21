@@ -139,6 +139,8 @@ function wfProjects() {
   return [...projects].sort((a, b) => a[1].localeCompare(b[1]));
 }
 function wfOpen(view, remember = true) {
+  // 항목 상세는 큰 창이 아니라 오른쪽 패널 한 자리에서 연다 — 어디서 열든 같은 모양·같은 버튼이다.
+  if (view.kind === 'item') { panelOpen(view); return; }
   if (!workflowDialog) {
     workflowHistory.length = 0;
     workflowDialog = wfNode('dialog', undefined, 'wf-dialog');
@@ -156,7 +158,7 @@ function wfRender() {
   workflowDialog.replaceChildren();
   const header = wfNode('div', undefined, 'wf-head');
   if (workflowHistory.length) header.appendChild(wfButton('뒤로', () => wfOpen(workflowHistory.pop(), false)));
-  const title = view.kind === 'search' ? '통합 검색' : view.kind === 'meetings' ? '회의 모아보기' : view.kind === 'projects' ? '프로젝트 모아보기' : view.kind === 'project' ? wfProjects().find(([key]) => key === view.key)?.[1] || view.key : view.kind === 'meeting' ? '회의 정리' : '항목 상세';
+  const title = view.kind === 'search' ? '통합 검색' : view.kind === 'meetings' ? '회의 모아보기' : view.kind === 'projects' ? '프로젝트 모아보기' : view.kind === 'project' ? wfProjects().find(([key]) => key === view.key)?.[1] || view.key : '회의 정리';
   header.append(wfNode('h2', title, view.kind === 'meeting' ? 'wf-eyebrow' : undefined), wfButton('닫기', () => workflowDialog.close()));
   workflowDialog.appendChild(header);
   const error = wfNode('p', '', 'wf-error'); error.setAttribute('role', 'alert'); workflowDialog.appendChild(error);
@@ -168,7 +170,6 @@ function wfRender() {
   });
   if (view.kind === 'project') wfProject(view.key);
   if (view.kind === 'meeting') wfMeeting(view.id);
-  if (view.kind === 'item') wfItemView(view.id);
 }
 function wfRow(title, meta, action) {
   const row = wfNode('div', undefined, 'wf-row');
@@ -231,7 +232,7 @@ function taskSelectionRefresh() {
   const modeRow = wfNode('div', undefined, 'task-batch-mode-row');
   const toggle = wfButton(taskSelectionMode ? '선택 끝내기' : '여러 개 선택', () => {
     if (taskBatchBusy) return;
-    taskSelectionMode = !taskSelectionMode; taskSelection.clear(); closeTaskDetail();
+    taskSelectionMode = !taskSelectionMode; taskSelection.clear(); panelClose();
     taskListsRender();
   }, 'convert-btn');
   toggle.disabled = taskBatchBusy; toggle.setAttribute('aria-pressed', String(taskSelectionMode));
@@ -594,78 +595,6 @@ async function wfReview(body) {
   const result = await wfPost('review', body);
   if (!result.ok) throw new Error(result.error || '검토 결과를 저장하지 못했습니다.');
   return result;
-}
-function workflowFields(item, parent) {
-  item = wfItem(item.id) || item;
-  const fields = wfNode('div', undefined, 'wf-fields');
-  const patch = { id: item.id };
-  let blockedBy, outcome, followUp;
-  if (['task', 'bug'].includes(item.type || 'task')) {
-    const related = item.blockedBy && wfItem(item.blockedBy);
-    if (item.blockedBy) fields.appendChild(related
-      ? wfButton(`${related.status === 'done' ? '답변 해결' : '답변 대기'} · ${related.description}`, () => wfOpen({ kind: 'item', id: related.id }), 'wf-link')
-      : wfNode('p', '연결했던 확인 대기가 삭제되었습니다.', 'wf-section-note'));
-    if (item.outcome) fields.appendChild(wfNode('p', item.outcome, 'wf-section-note'));
-    const extra = wfNode('details', undefined, 'wf-optional');
-    extra.appendChild(wfNode('summary', item.blockedBy || item.outcome ? '답변 대기·결과 편집' : '답변 대기·결과 추가'));
-    extra.open = !!(workflowView?.kind === 'item' && workflowView.id === item.id && workflowView.editOutcome);
-    fields.appendChild(extra);
-    const checks = workflowData.items.filter(check => check.type === 'check' && (check.status !== 'done' || check.id === item.blockedBy));
-    blockedBy = wfField(extra, '이 답변을 기다리는 중', wfSelect([['', '연결 없음'], ...checks.map(check => [check.id, `${check.status === 'done' ? '해결됨 · ' : ''}${check.description}`])], item.blockedBy));
-    outcome = document.createElement('input'); outcome.value = item.outcome || ''; outcome.maxLength = 1000;
-    wfField(extra, '결과 한 줄 (선택)', outcome);
-  }
-  if (item.type === 'check') {
-    followUp = document.createElement('input'); followUp.type = 'date'; followUp.value = item.followUp || '';
-    wfField(fields, '다시 확인할 날짜', followUp);
-    const contact = wfNode('details', undefined, 'wf-optional'); contact.appendChild(wfNode('summary', '확인 요청 기록'));
-    contact.appendChild(wfNode('p', item.contacted ? `마지막 확인 요청: ${item.contacted}` : '확인 요청 기록 없음', 'wf-section-note'));
-    fields.appendChild(contact);
-    contact.appendChild(wfButton('오늘 확인 요청함', async () => {
-      await wfPost('item', { id: item.id, contacted: todayStr(), followUp: followUp.value || null });
-      await load(); if (workflowDialog) wfRender(); else { fields.remove(); workflowFields(wfItem(item.id), parent); }
-      announce('확인 요청을 기록했습니다.');
-    }));
-  }
-  const initial = { blockedBy: blockedBy?.value, outcome: outcome?.value, followUp: followUp?.value };
-  const save = async () => {
-    const changes = { ...patch };
-    if (blockedBy && blockedBy.value !== initial.blockedBy) changes.blockedBy = blockedBy.value || null;
-    if (outcome && outcome.value !== initial.outcome) changes.outcome = outcome.value.trim();
-    if (followUp && followUp.value !== initial.followUp) changes.followUp = followUp.value || null;
-    if (Object.keys(changes).length > 1) await wfPost('item', changes);
-  };
-  const saveTarget = blockedBy ? fields.querySelector('.wf-optional') : fields;
-  if (blockedBy || followUp) saveTarget.appendChild(wfButton('저장', async () => {
-    await save(); await load(); if (workflowDialog) wfRender(); announce('저장했습니다.');
-  }));
-  if (wfKey(item)) fields.appendChild(wfButton('프로젝트 모아보기', () => wfOpen({ kind: 'project', key: wfKey(item) })));
-  if (item.meetingId) fields.appendChild(wfButton('이 항목이 나온 회의', () => wfOpen({ kind: 'meeting', id: item.meetingId })));
-  parent.appendChild(fields);
-  return save;
-}
-function taskCoreFields(item, parent) {
-  const title = document.createElement('input');title.className='task-detail-title-input';title.value=item.description;title.maxLength=1000;title.setAttribute('aria-label','업무 제목');
-  title.addEventListener('change',async()=>{const value=title.value.trim();if(!value||value===item.description)return;await postJson('/api/track/set-description',{id:item.id,description:value});await load();});parent.appendChild(title);
-  const field=(text,control)=>{const wrap=wfNode('label',text,'detail-field');wrap.appendChild(control);parent.appendChild(wrap);};
-  const due=document.createElement('input');due.type='date';due.value=item.due || '';due.addEventListener('change',()=>setTaskDue(item.id,due.value || null));field('마감일',due);
-  const scheduled=document.createElement('input');scheduled.type='date';scheduled.value=item.scheduled || '';scheduled.addEventListener('change',()=>setTaskScheduled(item.id,scheduled.value || null));field('실행 예정일',scheduled);
-  const priority=renderPriorityBadge(item);priority.className+=' detail-priority';field('우선순위',priority);
-  field('그룹',renderGroupControl({jira:item.jira,group:item.group,onSetJira:key=>setTaskJira(item.id,key),onSetGroup:value=>setTaskGroup(item.id,value)}));
-}
-function wfItemView(id) {
-  const item = wfItem(id);
-  if (!item) { workflowDialog.appendChild(wfNode('p', '삭제되었거나 찾을 수 없는 항목입니다.')); return; }
-  workflowDialog.append(wfNode('h3', item.description, 'wf-title'), wfNode('p', `${wfType(item.type)} · ${item.status === 'done' ? '완료' : '미완료'}`, 'wf-section-note'));
-  if(item.type==='task')taskCoreFields(item,workflowDialog);
-  if (item.permalink) { const a = wfNode('a', '슬랙 원문', 'wf-link'); a.href = item.permalink; a.target = '_blank'; a.rel = 'noopener'; a.style.display = 'inline-block'; workflowDialog.appendChild(a); }
-  const save = workflowFields(item, workflowDialog);
-  const actions = wfNode('div', undefined, 'wf-actions');
-  actions.appendChild(wfButton(item.status === 'done' ? '미완료로 되돌리기' : item.type === 'decision' ? 'PRD 반영 완료' : '완료로 표시', async () => {
-    await save(); await toggleTask(item.id); wfRender();
-  }));
-  if (['task', 'bug'].includes(item.type) && item.status !== 'done') actions.appendChild(wfButton('오늘 할 일로', async () => { await setTaskScheduled(item.id, todayStr()); await load(); wfRender(); }));
-  workflowDialog.appendChild(actions);
 }
 function workflowOutcome(item) {
   showNotice('완료로 표시했습니다.', false, null, { label: '결과 한 줄 남기기', onClick: () => wfOpen({ kind: 'item', id: item.id, editOutcome: true }) });
