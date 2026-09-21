@@ -365,18 +365,21 @@ test('the palette narrows by kind, by "완료 제외" and by "오늘 신규", an
   assert.deepEqual(ids("{ query: '권한', type: 'meeting' }"), [], '회의 필터에서는 항목을 섞지 않는다');
 });
 
-test('the palette meeting filter keeps drafts to review on top and can narrow to unresolved meetings', () => {
+test('the palette meeting filter keeps drafts to review on top and can narrow to unresolved meetings (decisions never count)', () => {
   const app = workflowsClient();
   app.run(`var events = [
     { id: 'm1', date: '2026-09-20', start: '10:00', title: '주간 운영 회의', drafts: [{ description: '권한 정책 초안' }] },
     { id: 'm2', date: '2026-09-21', start: '09:00', title: '가입 개선 킥오프' },
     { id: 'm3', date: '2026-09-21', start: '14:00', title: '지표 점검' },
   ];
-  var related = { m2: [{ id: 'x', status: 'to-do', description: '권한 범위 확인' }], m3: [{ id: 'y', status: 'done', description: '끝난 일' }] };
+  var related = {
+    m2: [{ id: 'x', type: 'task', status: 'to-do', description: '권한 범위 확인' }],
+    m3: [{ id: 'y', type: 'task', status: 'done', description: '끝난 일' }, { id: 'z', type: 'decision', status: 'to-do', description: '아직 반영 안 한 결정' }],
+  };
   var itemsOf = id => related[id] || [];`);
   const ids = state => JSON.parse(app.run(`JSON.stringify(palMeetings(events, { today: '2026-09-21', ...${state} }, itemsOf).map(e => e.id))`));
   assert.deepEqual(ids("{ type: 'meeting' }"), ['m1', 'm2', 'm3'], '검색어가 없으면 전체, 검토할 초안이 있는 회의가 먼저');
-  assert.deepEqual(ids("{ type: 'meeting', unresolved: true }"), ['m2'], '미해결 항목이 남은 회의만');
+  assert.deepEqual(ids("{ type: 'meeting', unresolved: true }"), ['m2'], '미완료 항목이 남은 회의만 — m3은 안 끝난 결정만 있어 빠진다(결정은 세지 않는다)');
   assert.deepEqual(ids("{ type: 'meeting', reviewOnly: true }"), ['m1']);
   assert.deepEqual(ids("{ type: 'meeting', newOnly: true }"), ['m2', 'm3'], '오늘 열린 회의만, 하루 안에서는 회의 순서대로');
   assert.deepEqual(ids("{ query: '권한' }"), ['m1', 'm2'], '초안 문구와 이 회의에서 나온 항목까지 찾는다');
@@ -385,41 +388,128 @@ test('the palette meeting filter keeps drafts to review on top and can narrow to
 });
 
 // 회의 탭 — 팔레트에서 떼어 온 훑어보는 면. 거르는 판단과 처음 고를 회의를 정하는 판단은 순수 함수다.
+// 기본 목록은 캘린더 회의가 매일 쌓여도 끝없이 길어지지 않게 기간으로 자른다(BML §1). today는 인자로 받는다.
+// 오늘 2026-09-21 기준: recent-*는 14일 안(1일·11일 전), old-*는 14일보다 오래됨(16일·16일·35일 전).
 const MEETINGS_TAB_FIXTURE = `var events = [
-    { id: 'm1', date: '2026-09-20', start: '10:00', title: '주간 운영 회의', project: { type: 'group', value: '운영툴', label: '운영툴' }, drafts: [{ description: '권한 정책 초안' }] },
-    { id: 'm2', date: '2026-09-21', start: '09:00', title: '가입 개선 킥오프', project: { type: 'group', value: '가입 개선', label: '가입 개선' } },
-    { id: 'm3', date: '2026-09-21', start: '14:00', title: '지표 점검' },
-    { id: 'm4', date: '2026-09-19', start: '16:00', title: '운영툴 회고', project: { type: 'group', value: '운영툴', label: '운영툴' } },
+    { id: 'today1', date: '2026-09-21', start: '09:00', title: '가입 개선 킥오프', project: { type: 'group', value: '가입 개선', label: '가입 개선' } },
+    { id: 'today2', date: '2026-09-21', start: '14:00', title: '지표 점검' },
+    { id: 'future', date: '2026-09-25', start: '10:00', title: '다음 주 회고' },
+    { id: 'recent-record', date: '2026-09-20', start: '10:00', title: '주간 운영 회의', project: { type: 'group', value: '운영툴', label: '운영툴' }, drafts: [{ description: '권한 정책 초안' }] },
+    { id: 'recent-norecord', date: '2026-09-10', start: '16:00', title: '운영툴 회고', project: { type: 'group', value: '운영툴', label: '운영툴' } },
+    { id: 'old-open', date: '2026-09-05', start: '11:00', title: '오래된 미완료 회의' },
+    { id: 'old-done', date: '2026-09-05', start: '09:00', title: '오래된 완료 회의' },
+    { id: 'old-norecord', date: '2026-08-17', start: '09:00', title: '아주 오래된 기록 없는 회의' },
   ];
-  var related = { m2: [{ id: 'x', status: 'to-do', description: '권한 범위 확인' }], m3: [{ id: 'y', status: 'done', description: '끝난 일' }] };
+  var related = {
+    'today1': [{ id: 'a', type: 'task', status: 'to-do', description: '권한 범위 확인' }],
+    'old-open': [{ id: 'b', type: 'task', status: 'to-do', description: '안 끝난 일' }],
+    'old-done': [{ id: 'c', type: 'check', status: 'done', description: '끝난 일' }],
+  };
   var itemsOf = id => related[id] || [];`;
 
-test('회의 탭 목록: 팔레트의 회의 필터를 그대로 쓰고, 차례는 날짜 내림차순(같은 날은 시각 순)이다', () => {
+test('회의 탭 기본 목록: 오늘(과 미래) 전부 + 14일 안의 기록 있는 회의 + 오래됐어도 손댈 일 남은 회의, 기록 없는 지난 회의는 숨긴다', () => {
   const app = workflowsClient();
   app.run(MEETINGS_TAB_FIXTURE);
-  const ids = state => JSON.parse(app.run(`JSON.stringify(meetingsTabList(events, ${state}, itemsOf).map(e => e.id))`));
-  assert.deepEqual(ids('{}'), ['m2', 'm3', 'm1', 'm4'],
-    '검토할 초안이 있다고 위로 올리지 않는다 — 훑어보는 면이라 "언제"가 먼저다');
-  assert.deepEqual(ids("{ reviewOnly: true }"), ['m1'], '검토 대기만');
-  assert.deepEqual(ids("{ unresolved: true }"), ['m2'], '미해결 항목이 남은 회의만');
-  assert.deepEqual(ids("{ project: 'group:운영툴' }"), ['m1', 'm4'], '프로젝트로 거른다');
-  assert.deepEqual(ids("{ project: 'group:운영툴', reviewOnly: true }"), ['m1'], '조건은 함께 걸린다');
+  const ids = state => JSON.parse(app.run(
+    `JSON.stringify(meetingsTabList(events, { today: '2026-09-21', ...${state} }, itemsOf).map(e => e.id))`));
+  assert.deepEqual(ids('{}'), ['future', 'today1', 'today2', 'recent-record', 'old-open'],
+    '미래·오늘 전부 + 14일 안의 기록 있는 회의 + 14일 밖이어도 미완료가 남은 회의. ' +
+    'recent-norecord(기록 없음)·old-done(끝났고 14일 밖)·old-norecord(기록 없고 14일 밖)는 빠진다');
+  assert.deepEqual(ids("{ windowDays: 28 }"), ['future', 'today1', 'today2', 'recent-record', 'old-done', 'old-open'],
+    '기간을 넓히면 그 안에 들어온 기록 있는 회의(old-done)가 나온다 — old-norecord는 아직 기간 밖');
+  assert.deepEqual(ids("{ showNoRecord: true }"), ['future', 'today1', 'today2', 'recent-record', 'recent-norecord', 'old-open'],
+    '`기록 없는 회의도 보기`를 켜면 보이는 기간 안의 기록 없는 지난 회의(recent-norecord)도 나온다 — 기간 밖의 old-norecord는 그대로 빠진다');
+  assert.deepEqual(ids("{ windowDays: 42, showNoRecord: true }"),
+    ['future', 'today1', 'today2', 'recent-record', 'recent-norecord', 'old-done', 'old-open', 'old-norecord'],
+    '기간을 충분히 넓히고 토글도 켜면 전부 나온다');
+});
+
+test('회의 탭 필터(초안 있음·미완료만·프로젝트)를 켜면 기간·기록 유무와 상관없이 전체 회의에서 거른다', () => {
+  const app = workflowsClient();
+  app.run(MEETINGS_TAB_FIXTURE);
+  const ids = state => JSON.parse(app.run(
+    `JSON.stringify(meetingsTabList(events, { today: '2026-09-21', ...${state} }, itemsOf).map(e => e.id))`));
+  assert.deepEqual(ids("{ reviewOnly: true }"), ['recent-record'], '초안 있음만');
+  assert.deepEqual(ids("{ unresolved: true }"), ['today1', 'old-open'],
+    '미완료 항목이 남은 회의만 — 기간 밖인 old-open도 찾아낸다(찾는 행동이라 기간 제한이 없다)');
+  assert.deepEqual(ids("{ project: 'group:운영툴' }"), ['recent-record', 'recent-norecord'],
+    '프로젝트로 거르면 기록 없는 recent-norecord도 나온다 — 기간·기록 제한이 풀린다');
+  assert.deepEqual(ids("{ project: 'group:운영툴', reviewOnly: true }"), ['recent-record'], '조건은 함께 걸린다');
   assert.deepEqual(ids("{ project: 'group:없는프로젝트' }"), []);
 });
 
-test('회의 탭이 처음 고르는 회의: 검토 대기 → 오늘 남은 회의 → 가장 최근, 고른 것이 있으면 그대로', () => {
+test('`이전 회의 더 보기`를 보일지(순수 함수): 지금 기간보다 오래된 회의가 남아 있으면 더 넓힐 것이 있다', () => {
   const app = workflowsClient();
   app.run(MEETINGS_TAB_FIXTURE);
-  const pick = (state, current, now) => app.run(
-    `String(meetingsTabPick(meetingsTabList(events, ${state}, itemsOf), ${JSON.stringify(current)}, '2026-09-21', '${now}'))`);
-  assert.equal(pick('{}', null, '08:00'), 'm1', '검토할 초안이 있는 회의가 먼저다(그중 가장 최근)');
-  assert.equal(pick('{}', 'm3', '08:00'), 'm3', '이미 고른 회의가 목록에 있으면 그대로 둔다');
-  assert.equal(pick("{ unresolved: true }", 'm3', '08:00'), 'm2', '거른 목록에 없으면 다시 고른다');
-  assert.equal(pick("{ reviewOnly: false, project: 'group:가입 개선' }", null, '08:00'), 'm2',
-    '검토 대기가 없으면 오늘 남은 회의 중 가장 이른 것');
-  assert.equal(pick("{ project: 'group:운영툴' }", null, '23:00'), 'm1',
-    '오늘 남은 회의가 없으면 가장 최근 회의');
-  assert.equal(pick("{ project: 'group:없는프로젝트' }", null, '08:00'), 'null', '회의가 없으면 고를 것도 없다');
+  const hasMore = (windowDays, showNoRecord = false) => app.run(`meetingsHasMoreBeyond(events, '2026-09-21', ${windowDays}, { showNoRecord: ${showNoRecord}, itemsOf })`);
+  assert.equal(hasMore(14), true, 'old-done(16일 전, 기록 있음)이 기간을 넓히면 새로 나온다');
+  assert.equal(hasMore(16), false, '남은 것이 이미 보이는 회의(old-open)와 기록 없는 회의뿐이면 눌러도 늘어나지 않으니 감춘다');
+  assert.equal(hasMore(16, true), true, '`기록 없는 회의도 보기`를 켰으면 old-norecord(35일 전)가 남아 있다');
+  assert.equal(hasMore(35, true), false, '더 오래된 회의가 없으면 버튼을 감춘다');
+});
+
+test('회의 탭이 처음 고르는 회의: 검토할 초안이 있으면 그중 가장 최근 → 오늘 남은 회의 → 가장 최근, 고른 것이 있으면 그대로', () => {
+  const app = workflowsClient();
+  app.run(`var list = [
+    { id: 'm1', date: '2026-09-20', start: '10:00', drafts: [{}] },
+    { id: 'm2', date: '2026-09-21', start: '09:00' },
+    { id: 'm3', date: '2026-09-21', start: '14:00' },
+    { id: 'm4', date: '2026-09-19', start: '16:00' },
+  ];`);
+  const pick = (list, current, now) => app.run(`String(meetingsTabPick(${list}, ${JSON.stringify(current)}, '2026-09-21', '${now}'))`);
+  assert.equal(pick('list', null, '08:00'), 'm1', '검토할 초안이 있는 회의가 먼저다(그중 가장 최근)');
+  assert.equal(pick('list', 'm3', '08:00'), 'm3', '이미 고른 회의가 목록에 있으면 그대로 둔다');
+  assert.equal(pick("list.filter(e => e.id !== 'm1')", 'm1', '08:00'), 'm2', '거른 목록에 없으면 다시 고른다');
+  assert.equal(pick("list.filter(e => e.id !== 'm1')", null, '08:00'), 'm2', '검토할 초안이 없으면 오늘 남은 회의 중 가장 이른 것');
+  assert.equal(pick("list.filter(e => e.id !== 'm1')", null, '23:00'), 'm2', '오늘 남은 회의가 없으면 가장 최근 회의(목록 맨 앞, 날짜 내림차순)');
+  assert.equal(pick('[]', null, '08:00'), 'null', '회의가 없으면 고를 것도 없다');
+});
+
+test('목록 밖의 회의를 열면 막고 있는 필터를 끄거나 기간을 넓혀서라도 오른쪽 내용을 반드시 연다', () => {
+  const app = workflowsClient();
+  app.run(`
+    var today = todayStr();
+    function daysAgo(n) {
+      const d = new Date(today + 'T00:00:00'); d.setDate(d.getDate() - n);
+      return \`\${d.getFullYear()}-\${String(d.getMonth() + 1).padStart(2, '0')}-\${String(d.getDate()).padStart(2, '0')}\`;
+    }
+    workflowData = { items: [], meetings: [{ id: 'far', date: daysAgo(40), start: '09:00', title: '아주 오래된 회의' }] };
+    wfIndexData();
+    meetingsTabState = { key: null, unresolved: false, reviewOnly: true, project: '', windowDays: 14, showNoRecord: false, result: null };
+  `);
+  assert.deepEqual(
+    JSON.parse(app.run("JSON.stringify(meetingsTabList(workflowData.meetings, meetingsTabState, wfMeetingItems).map(e => e.id))")),
+    [], '초안이 없는 회의라 `초안 있음` 필터에 걸려 처음에는 안 보인다');
+  app.run("meetingsTabRevealIfNeeded('far')");
+  assert.equal(app.run('String(meetingsTabState.reviewOnly)'), 'false', '가리고 있던 `초안 있음` 필터를 끈다');
+  assert.equal(app.run('meetingsTabState.windowDays >= 40'), true, '그 회의가 들어올 만큼 보이는 기간을 넓힌다');
+  assert.equal(app.run('String(meetingsTabState.showNoRecord)'), 'true', '기록도 없는 회의라 그 토글도 함께 켠다');
+  assert.deepEqual(
+    JSON.parse(app.run("JSON.stringify(meetingsTabList(workflowData.meetings, meetingsTabState, wfMeetingItems).map(e => e.id))")),
+    ['far'], '이제 기본 목록에 나타난다');
+});
+
+test('회의 탭 줄: `초안 N` 배지·`미완료 N` 글자는 title로 뜻을 풀고, 미완료는 할 일·확인 대기만 센다', () => {
+  const app = workflowsClient();
+  app.run(`
+    workflowData = { items: [
+      { id: 'a', type: 'task', status: 'to-do', meetingId: 'm1' },
+      { id: 'b', type: 'decision', status: 'to-do', meetingId: 'm1' },
+    ], meetings: [] };
+    wfIndexData();
+    meetingsTabState = { key: null, unresolved: false, reviewOnly: false, project: '', windowDays: 14, showNoRecord: false, result: null };
+  `);
+  const cells = event => JSON.parse(app.run(`(() => {
+    const row = meetingsTabRow(${event});
+    const badge = row.children[2];
+    return JSON.stringify({ text: badge.textContent, title: badge.title });
+  })()`));
+  const withoutDrafts = cells("{ id: 'm1', title: '주간 회의' }");
+  assert.equal(withoutDrafts.text, '미완료 1', '결정 1건은 안 끝났어도 세지 않는다 — 할 일 1건만');
+  assert.equal(withoutDrafts.title, '이 회의에서 나온 할 일·확인 대기 중 1개가 아직 안 끝났어요');
+  const withDrafts = cells("{ id: 'm1', title: '주간 회의', drafts: [{}, {}] }");
+  assert.equal(withDrafts.text, '초안 2');
+  assert.equal(withDrafts.title, 'AI가 뽑은 초안 2개를 아직 검토하지 않았어요');
 });
 
 test('회의 탭 이름 옆 숫자는 검토를 기다리는 초안이 있는 회의 수다', () => {
@@ -460,13 +550,23 @@ function paletteChips(app, state) {
   })()`));
 }
 
-test('팔레트 필터 줄에는 회의 전용 토글이 없다 — `미해결만`·`검토 대기`는 회의 탭으로 옮겼다', () => {
+test('팔레트 필터 줄에는 회의 전용 토글이 없다 — `미완료만`·`초안 있음`은 회의 탭으로 옮겼다', () => {
   const app = workflowsClient();
   const all = paletteChips(app, "{ type: 'meeting' }");
   assert.deepEqual(all, ['전체', '할 일', '확인 대기', '결정', '아이디어', '회의', '완료 제외'],
     '종류 칩과 `완료 제외`만 남는다');
-  assert.ok(!all.includes('미해결만') && !all.includes('검토 대기'));
+  assert.ok(!all.includes('미완료만') && !all.includes('초안 있음'));
   assert.deepEqual(paletteChips(app, '{}'), all, '다른 종류를 골라도 칩 줄이 흔들리지 않는다');
+});
+
+test('회의 탭 필터 줄의 칩 이름: `초안 있음`·`미완료만`·`기록 없는 회의도 보기`', () => {
+  const app = workflowsClient();
+  const labels = JSON.parse(app.run(`(() => {
+    meetingsTabState = { key: null, unresolved: false, reviewOnly: false, project: '', windowDays: 14, showNoRecord: false, result: null };
+    const bar = meetingsTabFilters([]);
+    return JSON.stringify(bar.children.filter(kid => kid.textContent).map(kid => kid.textContent));
+  })()`));
+  assert.deepEqual(labels, ['초안 있음', '미완료만', '기록 없는 회의도 보기']);
 });
 
 test('팔레트 바닥은 `회의` 칩일 때만 회의 탭으로 가는 링크를 붙인다', () => {

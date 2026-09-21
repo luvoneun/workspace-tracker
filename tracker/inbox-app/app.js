@@ -1525,7 +1525,7 @@ async function load() {
   const tabMeetings = document.getElementById('tabMeetingsNum');
   if (tabMeetings) {
     tabMeetings.textContent = reviewMeetings ? String(reviewMeetings) : '';
-    tabMeetings.title = reviewMeetings ? `검토할 초안이 있는 회의가 ${reviewMeetings}개 있어요` : '';
+    tabMeetings.title = reviewMeetings ? `검토할 초안이 있는 회의 ${reviewMeetings}개` : '';
   }
   renderInboxHeadCount(data.createdToday || 0);
 
@@ -1681,7 +1681,7 @@ function renderCalendar(calendar) {
     const count = document.createElement('span');
     count.className = 'ct num';
     count.textContent = event.draftCount ? `초안 ${event.draftCount}` : '';
-    if (event.draftCount) count.title = 'AI가 분류한 초안을 검토해 주세요';
+    if (event.draftCount) count.title = `AI가 뽑은 초안 ${event.draftCount}개를 아직 검토하지 않았어요`;
     row.appendChild(count);
 
     const acts = document.createElement('span');
@@ -3730,14 +3730,73 @@ function panelMeetingLink(event, box, host = MEETING_HOST_CARD) {
 /* ---------- 회의 탭 ----------
    프로젝트 탭과 같은 뼈대다: 왼쪽은 회의 목록 카드, 오른쪽은 고른 회의 하나.
    오른쪽 내용은 줄 옆 회의 카드와 같은 함수(panelMeeting)가 그린다 — 내용을 두 벌 만들지 않는다.
-   고른 회의·필터는 카드(panelState)와 다른 상태다(카드가 열려 있다는 뜻이 아니다). 세션 동안만 기억한다. */
-let meetingsTabState = { key: null, unresolved: false, reviewOnly: false, project: '', result: null };
+   고른 회의·필터는 카드(panelState)와 다른 상태다(카드가 열려 있다는 뜻이 아니다). 세션 동안만 기억한다.
+   기본 목록은 캘린더 회의가 매일 쌓여도 끝없이 길어지지 않게 기간으로 자른다(windowDays·showNoRecord도 세션 동안만). */
+const MEETINGS_TAB_WINDOW_DAYS = 14;
+let meetingsTabState = {
+  key: null, unresolved: false, reviewOnly: false, project: '',
+  windowDays: MEETINGS_TAB_WINDOW_DAYS, showNoRecord: false, result: null,
+};
 
-// 목록 거르기(순수 함수): 미해결만·검토 대기는 팔레트의 회의 필터를 그대로 쓰고, 프로젝트만 여기서 더 거른다.
-// 차례는 날짜 내림차순(같은 날은 시각 순) — 훑어보는 면이라 "언제"가 먼저다.
+// 날짜 문자열끼리 며칠 차이인지(순수 함수, 자정 기준) — dateStr이 today보다 며칠 앞섰는지.
+function daysBeforeToday(dateStr, today) {
+  return Math.round((new Date(`${today}T00:00:00`) - new Date(`${dateStr}T00:00:00`)) / 86400000);
+}
+
+// 미완료: 이 회의에서 나온 항목 중 할 일·확인 대기(버그 포함)이면서 안 끝난 것만 센다 — 결정은 세지 않는다
+// (프로젝트 탭이 `열린 항목`을 셀 때 쓰는 uiProjectOpenItem과 같은 기준).
+function meetingUnresolvedCount(event, itemsOf) {
+  const items = typeof itemsOf === 'function' ? itemsOf(event.id) : [];
+  return items.filter(uiProjectOpenItem).length;
+}
+
+// 기록이 있는지: 검토할 초안이 있거나, 이 회의에서 나온 항목이 하나라도 있으면(끝난 것·결정도 포함).
+function meetingHasRecord(event, itemsOf) {
+  if (event.drafts && event.drafts.length) return true;
+  const items = typeof itemsOf === 'function' ? itemsOf(event.id) : [];
+  return items.length > 0;
+}
+
+// 손댈 일이 남았는지: 검토할 초안이 있거나 미완료 항목(할 일·확인 대기)이 있으면 — 절대 숨기지 않을 회의.
+function meetingHasOpenWork(event, itemsOf) {
+  if (event.drafts && event.drafts.length) return true;
+  return meetingUnresolvedCount(event, itemsOf) > 0;
+}
+
+// 기본 목록 범위 판단(순수 함수, 회의 한 건): 오늘·미래는 전부, 보이는 기간 안은 기록이 있어야(토글을 켜면 없어도),
+// 기간 밖은 손댈 일이 남아야 보인다.
+function meetingInBaseScope(event, { today, windowDays, showNoRecord, itemsOf }) {
+  const date = event.date || '';
+  if (date >= today) return true;
+  if (daysBeforeToday(date, today) <= windowDays) return !!showNoRecord || meetingHasRecord(event, itemsOf);
+  return meetingHasOpenWork(event, itemsOf);
+}
+
+// 기본 목록(순수 함수): 오늘 회의 전부 + 보이는 기간 안의 기록 있는 회의(+ 토글 켜면 기록 없는 것도) +
+// 기간보다 오래됐어도 손댈 일이 남은 회의(다시는 숨기지 않는다). 오늘 날짜를 인자로 받아 테스트가 직접 판단을 부른다.
+function meetingsBaseScope(meetings, { today, windowDays, showNoRecord, itemsOf }) {
+  return (meetings || []).filter(event => meetingInBaseScope(event, { today, windowDays, showNoRecord, itemsOf }));
+}
+
+// `이전 회의 더 보기`를 보일지(순수 함수): 지금 기간보다 오래된 회의가 하나라도 남아 있으면 더 넓힐 것이 있다.
+// 눌렀을 때 실제로 새 줄이 나올 때만 `이전 회의 더 보기`를 보인다 — 기간 밖이라도 손댈 일이 남은 회의는
+// 이미 보이고 있고, 기록 없는 회의는 `기록 없는 회의도 보기`를 켰을 때만 나온다.
+function meetingsHasMoreBeyond(meetings, today, windowDays, { showNoRecord = false, itemsOf } = {}) {
+  return (meetings || []).some(event => (event.date || '') < today && daysBeforeToday(event.date, today) > windowDays
+    && !meetingHasOpenWork(event, itemsOf) && (showNoRecord || meetingHasRecord(event, itemsOf)));
+}
+
+// 목록 거르기(순수 함수). 필터(초안 있음·미완료만·프로젝트)를 하나라도 켜면 찾는 행동이므로 기간·기록 제한 없이
+// 전체 회의에서 거른다. 아무 필터도 없으면 기본 목록 범위만 본다. 차례는 날짜 내림차순(같은 날은 시각 순)
+// — 훑어보는 면이라 "언제"가 먼저다.
 function meetingsTabList(meetings, state, itemsOf) {
   const project = state.project || '';
-  return palMeetings(meetings, { type: 'meeting', unresolved: !!state.unresolved, reviewOnly: !!state.reviewOnly }, itemsOf)
+  const today = state.today || todayStr();
+  const filtering = !!(state.unresolved || state.reviewOnly || project);
+  const pool = filtering ? (meetings || []) : meetingsBaseScope(meetings, {
+    today, windowDays: state.windowDays || MEETINGS_TAB_WINDOW_DAYS, showNoRecord: !!state.showNoRecord, itemsOf,
+  });
+  return palMeetings(pool, { type: 'meeting', unresolved: !!state.unresolved, reviewOnly: !!state.reviewOnly, today }, itemsOf)
     .filter(event => !project || wfMeetingKey(event) === project)
     .sort(wfMeetingOrder);
 }
@@ -3764,9 +3823,26 @@ function meetingsTabSelect(id) {
   meetingsTabState.result = null;
 }
 
+// 목록 밖의 회의를 열 때: 가리고 있는 조건을 풀어서라도 보이게 한다 — 오른쪽 내용은 반드시 열려야 한다.
+// (단순한 쪽을 고른다: 새 줄을 끼워 넣지 않고 막고 있는 필터를 끄거나 보이는 기간을 그 회의가 들어올 만큼 넓힌다.)
+function meetingsTabRevealIfNeeded(id) {
+  const event = ((workflowData && workflowData.meetings) || []).find(item => item.id === id);
+  if (!event) return;
+  const itemsOf = typeof wfMeetingItems === 'function' ? wfMeetingItems : null;
+  if (meetingsTabState.reviewOnly && !(event.drafts && event.drafts.length)) meetingsTabState.reviewOnly = false;
+  if (meetingsTabState.unresolved && meetingUnresolvedCount(event, itemsOf) === 0) meetingsTabState.unresolved = false;
+  if (meetingsTabState.project && wfMeetingKey(event) !== meetingsTabState.project) meetingsTabState.project = '';
+  const today = todayStr();
+  const windowDays = meetingsTabState.windowDays || MEETINGS_TAB_WINDOW_DAYS;
+  if (meetingInBaseScope(event, { today, windowDays, showNoRecord: meetingsTabState.showNoRecord, itemsOf })) return;
+  const gap = daysBeforeToday(event.date || today, today);
+  meetingsTabState.windowDays = Math.max(windowDays, Math.ceil(gap / MEETINGS_TAB_WINDOW_DAYS) * MEETINGS_TAB_WINDOW_DAYS);
+  if (!meetingHasRecord(event, itemsOf)) meetingsTabState.showNoRecord = true;
+}
+
 // 레일의 `전체 보기` · 회의 카드 ⋯의 `회의 탭에서 열기` · 팔레트의 회의 결과가 함께 쓰는 길.
 function openMeetingsTab(id) {
-  if (id) meetingsTabSelect(id);
+  if (id) { meetingsTabRevealIfNeeded(id); meetingsTabSelect(id); }
   // 줄 옆 카드는 지금 탭의 줄에 붙어 있다 — 탭을 옮기기 전에 닫는다(팔레트로 되돌아가지 않게).
   if (panelState) { panelState.back = null; panelClose(); }
   tabStale.meetings = true;
@@ -3779,8 +3855,10 @@ function renderMeetings() {
   if (!listEl || !body) return;
   const meetings = (workflowData && workflowData.meetings) || [];
   const itemsOf = typeof wfMeetingItems === 'function' ? wfMeetingItems : null;
+  const today = todayStr();
+  const filtering = !!(meetingsTabState.unresolved || meetingsTabState.reviewOnly || meetingsTabState.project);
   const rows = meetingsTabList(meetings, meetingsTabState, itemsOf);
-  meetingsTabState.key = meetingsTabPick(rows, meetingsTabState.key, todayStr(), nowHHMM());
+  meetingsTabState.key = meetingsTabPick(rows, meetingsTabState.key, today, nowHHMM());
 
   listEl.replaceChildren();
   const head = document.createElement('div');
@@ -3800,7 +3878,7 @@ function renderMeetings() {
       lastDate = event.date;
       const day = document.createElement('div');
       day.className = 'd-mtday';
-      day.textContent = event.date === todayStr() ? '오늘' : uiKoDate(event.date);
+      day.textContent = event.date === today ? '오늘' : uiKoDate(event.date);
       listEl.appendChild(day);
     }
     listEl.appendChild(meetingsTabRow(event));
@@ -3810,6 +3888,23 @@ function renderMeetings() {
     empty.className = 'd-rempty';
     empty.textContent = meetings.length ? '고른 조건에 맞는 회의가 없어요.' : '아직 기록된 회의가 없어요.';
     listEl.appendChild(empty);
+  }
+
+  // 필터가 걸려 있으면 전체에서 찾은 것이니 기간 더 보기는 의미가 없다.
+  if (!filtering && meetingsHasMoreBeyond(meetings, today, meetingsTabState.windowDays || MEETINGS_TAB_WINDOW_DAYS,
+    { showNoRecord: !!meetingsTabState.showNoRecord, itemsOf })) {
+    const more = document.createElement('div');
+    more.className = 'd-mmore';
+    const link = document.createElement('button');
+    link.type = 'button';
+    link.className = 'd-link';
+    link.textContent = '이전 회의 더 보기';
+    link.addEventListener('click', () => {
+      meetingsTabState.windowDays = (meetingsTabState.windowDays || MEETINGS_TAB_WINDOW_DAYS) + MEETINGS_TAB_WINDOW_DAYS;
+      renderMeetings();
+    });
+    more.appendChild(link);
+    listEl.appendChild(more);
   }
 
   renderMeetingDetail(body, rows.find(event => event.id === meetingsTabState.key) || null);
@@ -3830,8 +3925,10 @@ function meetingsTabFilters(meetings) {
     button.addEventListener('click', () => { onPick(); renderMeetings(); });
     bar.appendChild(button);
   };
-  chip('미해결만', meetingsTabState.unresolved, () => { meetingsTabState.unresolved = !meetingsTabState.unresolved; });
-  chip('검토 대기', meetingsTabState.reviewOnly, () => { meetingsTabState.reviewOnly = !meetingsTabState.reviewOnly; });
+  chip('초안 있음', meetingsTabState.reviewOnly, () => { meetingsTabState.reviewOnly = !meetingsTabState.reviewOnly; });
+  chip('미완료만', meetingsTabState.unresolved, () => { meetingsTabState.unresolved = !meetingsTabState.unresolved; });
+  // 조용한 토글 — 기본은 꺼짐, 켜면 보이는 기간 안의 기록 없는 지난 회의도 함께 나온다.
+  chip('기록 없는 회의도 보기', meetingsTabState.showNoRecord, () => { meetingsTabState.showNoRecord = !meetingsTabState.showNoRecord; });
 
   // 프로젝트는 값이 여럿이라 칩 대신 고르는 칸이다(회의에 연결된 프로젝트만 후보로).
   const keys = new Map();
@@ -3885,14 +3982,18 @@ function meetingsTabRow(event) {
   button.title = [event.title, projectName].filter(Boolean).join(' · ');
 
   // 0은 찍지 않는다 — 지금 손댈 것(검토할 초안)만 배지로 세우고 나머지는 조용한 글자다.
+  // 미완료는 할 일·확인 대기만 센다 — 결정은 끝내는 대상이 아니라 세지 않는다.
   const drafts = (event.drafts && event.drafts.length) || 0;
-  const open = (typeof wfMeetingItems === 'function' ? wfMeetingItems(event.id) : []).filter(item => item.status !== 'done').length;
+  const open = meetingUnresolvedCount(event, typeof wfMeetingItems === 'function' ? wfMeetingItems : null);
   const badge = document.createElement('span');
   badge.className = 'ct num';
-  if (drafts) { badge.textContent = `초안 ${drafts}`; badge.title = 'AI가 분류한 초안을 검토해 주세요'; }
+  if (drafts) { badge.textContent = `초안 ${drafts}`; badge.title = `AI가 뽑은 초안 ${drafts}개를 아직 검토하지 않았어요`; }
   const state = document.createElement('span');
   state.className = 'st num';
-  if (!drafts && open) state.textContent = `미완료 ${open}`;
+  if (!drafts && open) {
+    state.textContent = `미완료 ${open}`;
+    state.title = `이 회의에서 나온 할 일·확인 대기 중 ${open}개가 아직 안 끝났어요`;
+  }
 
   button.append(time, wrap, drafts ? badge : state);
   button.addEventListener('click', () => {
@@ -4185,7 +4286,7 @@ let palState = null;
 let palNodes = null;
 let palEntries = [];
 
-// 회의 전용 토글(`미해결만`·`검토 대기`)은 회의 탭으로 옮겼다 — 팔레트는 낱말로 찾기만 한다.
+// 회의 전용 토글(`미완료만`·`초안 있음`)은 회의 탭으로 옮겼다 — 팔레트는 낱말로 찾기만 한다.
 function palDefaults(state) {
   return { query: '', type: '', hideDone: false, newOnly: false, active: 0, scroll: 0, ...(state || {}) };
 }
@@ -4207,9 +4308,10 @@ function palFilter(items, state) {
   });
 }
 
-// 회의 거르기(순수 함수): 검토 대기 · 미해결만 · 오늘 신규 · 검색어(초안 문구와 이 회의에서 나온 항목까지).
+// 회의 거르기(순수 함수): 초안 있음 · 미완료만 · 오늘 신규 · 검색어(초안 문구와 이 회의에서 나온 항목까지).
 // 검토할 초안이 있는 회의가 언제나 먼저 온다 — 지금 손댈 것이 위로.
-// 팔레트는 검색어·종류만 넘기고, `검토 대기`·`미해결만`은 회의 탭(meetingsTabList)이 넘긴다.
+// 팔레트는 검색어·종류만 넘기고, `초안 있음`·`미완료만`은 회의 탭(meetingsTabList)이 넘긴다.
+// 미완료는 할 일·확인 대기만 센다 — 결정은 세지 않는다(meetingUnresolvedCount와 같은 기준).
 function palMeetings(meetings, state, itemsOf) {
   if (state.type && state.type !== 'meeting') return [];
   const query = (state.query || '').trim();
@@ -4218,7 +4320,7 @@ function palMeetings(meetings, state, itemsOf) {
   const related = typeof itemsOf === 'function' ? itemsOf : () => [];
   return (meetings || []).filter((event) => {
     if (state.reviewOnly && !(event.drafts && event.drafts.length)) return false;
-    if (state.unresolved && !related(event.id).some(item => item.status !== 'done')) return false;
+    if (state.unresolved && meetingUnresolvedCount(event, related) === 0) return false;
     if (state.newOnly && event.date !== today) return false;
     if (!query) return true;
     return wfSearchMatches(query, [event.title, event.series, event.date, event.project?.label,
@@ -4299,8 +4401,8 @@ function palResultRow(entry, index, query) {
   };
   if (entry.kind === 'meeting') {
     const event = entry.event;
-    const related = typeof wfMeetingItems === 'function' ? wfMeetingItems(event.id) : [];
-    const open = related.filter(item => item.status !== 'done').length;
+    // 미완료는 할 일·확인 대기만 센다 — 회의 탭·줄 배지와 같은 기준(meetingUnresolvedCount).
+    const open = meetingUnresolvedCount(event, typeof wfMeetingItems === 'function' ? wfMeetingItems : null);
     const state = [];
     if (event.drafts && event.drafts.length) state.push(`초안 ${event.drafts.length} 검토`);
     if (open) state.push(`미완료 ${open}`);
