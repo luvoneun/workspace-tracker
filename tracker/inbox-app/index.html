@@ -54,41 +54,6 @@
     .grid { grid-template-columns: 1fr; }
   }
 
-  .wr-layout {
-    display: grid;
-    grid-template-columns: 220px minmax(0, 1fr);
-    gap: 24px;
-    align-items: start;
-  }
-  .wr-layout[hidden] { display: none; }
-  @media (max-width: 900px) {
-    .wr-layout { grid-template-columns: 1fr; }
-  }
-  .wr-sidebar { min-width: 0; }
-  .wr-detail { min-width: 0; }
-  #weeklyReportNav { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
-  .wr-nav-btn {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    text-align: left;
-    font-family: inherit;
-    color: var(--muted);
-    background: none;
-    border: none;
-    border-radius: 10px;
-    padding: 10px 12px;
-    cursor: pointer;
-  }
-  .wr-nav-btn:hover { background: var(--card); }
-  .wr-nav-btn.active { color: var(--text); background: var(--card); box-shadow: var(--shadow); }
-  .wr-nav-week { font-size: var(--text-base); font-weight: 700; }
-  .wr-nav-range { font-size: var(--text-xs); font-weight: 500; color: var(--muted); }
-  .wr-nav-btn.active .wr-nav-range { color: var(--muted); }
-  .wr-detail-heading { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
-  .wr-detail-week { font-size: 18px; font-weight: 700; }
-  .wr-detail-range { font-size: var(--text-base); font-weight: 500; color: var(--muted); }
-
   h2 {
     display: flex;
     align-items: center;
@@ -226,19 +191,18 @@
   .convert-btn:disabled { color: var(--muted); background: var(--bg); cursor: default; }
   .convert-btn:disabled:hover { background: var(--bg); color: var(--muted); }
   [hidden] { display: none !important; }
-  .grid > *, .wr-layout > * { min-width: 0; }
+  .grid > * { min-width: 0; }
   .badge { max-width: 100%; overflow-wrap: anywhere; white-space: normal; }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
   .desc-editable:focus-visible { background: var(--bg); }
   .desc-editable:hover::after, .desc-editable:focus-visible::after { content: ' ✎'; color: var(--accent); }
   @media (max-width: 900px) {
-    .grid, .wr-layout { grid-template-columns: minmax(0, 1fr); }
+    .grid { grid-template-columns: minmax(0, 1fr); }
     input, select { max-width: 100%; }
     .desc-edit-input, .group-input { font-size: 16px; }
   }
 
   /* Product visual direction: calm, flat, task-first workbench. */
-  .wr-nav-btn.active { box-shadow: none; }
   .convert-btn { transition: background-color 150ms ease, color 150ms ease, transform 120ms ease; }
   button:active { transform: scale(.98); }
   /* 채운 강조 상태: 파랑(행동·선택) / 빨강(삭제). 글자색은 --on-fill이 라이트·다크에서 맞춰 준다. */
@@ -382,14 +346,20 @@
       </section>
     </div>
 
-    <div class="wr-layout" id="gridWeekly" hidden>
-      <aside class="wr-sidebar">
-        <h2>주간 요약<span class="section-count" id="weeklyReportCount">0</span></h2>
+    <!-- 주간요약 탭 — 주차 목록 | 보고 문서 | 슬랙 미리보기.
+         평일에는 읽는 화면이고, 금요일에 문장을 고쳐 오른쪽 미리보기 그대로 슬랙에 붙인다. -->
+    <div id="gridWeekly" hidden>
+      <aside class="rp-weeks" aria-label="주차 목록">
+        <div class="d-grp"><span class="gl">주차</span><span class="n num" id="weeklyReportCount">0</span></div>
         <div id="weeklyReportNav"></div>
       </aside>
-      <main class="wr-detail" id="weeklyReportDetail"></main>
+      <main class="rp-doc" id="weeklyReportDetail"></main>
+      <aside class="rp-slack" id="weeklyReportPreview" aria-label="슬랙 미리보기"></aside>
     </div>
   </div>
+
+  <!-- 문장 묶기 중에만 뜨는 아래 고정 막대(오늘 탭의 일괄 정리 막대와 같은 부품) -->
+  <div class="d-selbar" id="reportMergeBar" role="group" aria-label="보고 문장 묶기" hidden></div>
 
   <!-- 나중에 할 일 서랍 — 헤더 아래 오른쪽에 붙어서 열리고, 넓은 화면에서는 본문을 덮지 않고 밀어낸다 -->
   <aside class="d-drawer" id="laterTaskDrawer" aria-label="나중에 할 일" aria-hidden="true">

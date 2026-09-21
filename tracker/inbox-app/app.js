@@ -1686,9 +1686,20 @@ function formatWeekLabel(weekKey) {
   };
 }
 
+// 주차 이름은 가까운 주만 말로 부른다: `이번 주` / `지난 주` / 그 밖에는 `9월 4주차`.
+function reportWeekName(weekKey) {
+  const monday = new Date(`${todayStr()}T12:00:00`);
+  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+  const weeks = Math.round((new Date(`${weekKey}T12:00:00`) - monday) / (7 * 86400000));
+  if (weeks === 0) return '이번 주';
+  if (weeks === -1) return '지난 주';
+  return formatWeekLabel(weekKey).week;
+}
+
 let selectedWeekKey = null;
 let weeklyReportsCache = [];
 
+// 주간요약 탭의 왼쪽 주차 목록. 문서와 슬랙 미리보기는 report-ui.js가 그린다.
 function renderWeeklyReports(items) {
   weeklyReportsCache = items;
   document.getElementById('weeklyReportCount').textContent = items.length;
@@ -1696,9 +1707,9 @@ function renderWeeklyReports(items) {
   const detail = document.getElementById('weeklyReportDetail');
 
   if (!items.length) {
-    nav.innerHTML = '';
-    detail.innerHTML = '<div class="empty">주간 요약 없음</div>';
+    nav.replaceChildren();
     selectedWeekKey = null;
+    renderWeeklyReportDetail(null);
     return;
   }
 
@@ -1706,14 +1717,31 @@ function renderWeeklyReports(items) {
     selectedWeekKey = items[0].weekKey;
   }
 
-  nav.innerHTML = '';
+  nav.replaceChildren();
   items.forEach(item => {
+    const label = formatWeekLabel(item.weekKey);
+    const name = reportWeekName(item.weekKey);
+    // 좁은 줄이라 연도는 떼고 `9/21 ~ 9/27`만 남긴다(문서 머리줄에는 연도까지 있다).
+    const range = label.range.replace(/^\d{4}년\s*/, '');
+    const fresh = typeof reportNewCount === 'function' ? reportNewCount(item) : 0;
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'wr-nav-btn' + (item.weekKey === selectedWeekKey ? ' active' : '');
-    const navLabel = formatWeekLabel(item.weekKey);
-    btn.innerHTML = `<span class="wr-nav-week">${escapeHtml(navLabel.week)}</span><span class="wr-nav-range">${escapeHtml(navLabel.range)}</span>`;
-    btn.setAttribute('aria-label', `${navLabel.week}, ${navLabel.range}`);
+    btn.className = 'rp-wk';
+    if (item.weekKey === selectedWeekKey) btn.setAttribute('aria-current', 'true');
+    const title = document.createElement('span');
+    title.className = 'nm';
+    title.textContent = name;
+    const sub = document.createElement('span');
+    sub.className = 'rg num';
+    sub.textContent = range;
+    btn.append(title, sub);
+    if (fresh) {
+      const mark = document.createElement('span');
+      mark.className = 'nw num';
+      mark.textContent = `새 기록 ${fresh}`;
+      btn.appendChild(mark);
+    }
+    btn.setAttribute('aria-label', `${name}, ${label.range}${fresh ? `, 새 기록 ${fresh}개` : ''}`);
     btn.addEventListener('click', () => {
       selectedWeekKey = item.weekKey;
       renderWeeklyReports(weeklyReportsCache);
@@ -1721,15 +1749,24 @@ function renderWeeklyReports(items) {
     nav.appendChild(btn);
   });
 
+  // 문장을 고치거나 다음 주 계획을 적는 중이면 다시 그리지 않는다(입력이 날아가지 않게).
   if (detail.contains(document.activeElement) && detail.dataset.weekKey === selectedWeekKey) return;
 
-  const current = items.find(i => i.weekKey === selectedWeekKey);
-  renderWeeklyReportDetail(current);
+  renderWeeklyReportDetail(items.find(i => i.weekKey === selectedWeekKey));
 }
 
 function renderWeeklyReportDetail(item) {
-  // 보고 초안은 서버가 항상 붙여준다 — 없거나 보고 화면 스크립트가 없으면 상세를 비워둔다.
-  if (!item || !item.draft || typeof renderReportDraft !== 'function') { document.getElementById('weeklyReportDetail').innerHTML = ''; return; }
+  // 보고 초안은 서버가 항상 붙여준다 — 없거나 보고 화면 스크립트가 없으면 문서와 미리보기를 비운다.
+  if (!item || !item.draft || typeof renderReportDraft !== 'function') {
+    const detail = document.getElementById('weeklyReportDetail');
+    detail.replaceChildren();
+    const empty = document.createElement('div');
+    empty.className = 'd-empty';
+    empty.textContent = '주간 요약 없음';
+    detail.appendChild(empty);
+    document.getElementById('weeklyReportPreview')?.replaceChildren();
+    return;
+  }
   renderReportDraft(item);
 }
 
@@ -4167,6 +4204,8 @@ function setActiveTab(tab) {
     document.getElementById(cfg.grid).setAttribute('aria-labelledby', cfg.btn);
   });
   activeTabKey = tab;
+  // 주간요약을 떠나면 문장 묶기 막대도 함께 내린다(떠 있는 막대가 다른 탭에 남지 않게).
+  if (tab !== 'weekly' && typeof reportMergeEnd === 'function') reportMergeEnd();
   document.getElementById('skipLink').hidden = tab !== 'today';
   renderActiveTabLists();
   try {

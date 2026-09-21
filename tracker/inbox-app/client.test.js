@@ -116,6 +116,13 @@ function pureClient() {
   return app;
 }
 
+// 주간요약 문서의 순수 함수(그룹화·복사 글자)는 report-ui.js에 있다 — 같은 가짜 창에 함께 올린다.
+function reportClient() {
+  const app = pureClient();
+  app.run(fs.readFileSync(path.join(__dirname, 'report-ui.js'), 'utf8'));
+  return app;
+}
+
 test('the status column shows overdue, due today, carried-over and in-progress, and stays empty when there is nothing to say', () => {
   const app = pureClient();
   const cells = (item, opts = '{}') => app.run(`uiMetaCells(${item}, ${opts})`);
@@ -455,6 +462,51 @@ test('아이디어의 `가능성`은 높음만 글자로 적는다', () => {
   assert.equal(chance("{ priority: 'low' }"), '', '낮음도 찍지 않는다');
   assert.equal(chance('{}'), '', '값이 없으면 자리를 비운다');
   assert.equal(chance('null'), '');
+});
+
+// 주간요약 문서: 상태 → 프로젝트 → 문장으로 묶이고, 제외한 문장과 다음 주 계획은 문서 끝에 따로 간다.
+const REPORT_ROWS = `[
+  { id: 'a1', heading: '완료한 일', group: '결제_리뉴얼', text: '정산 배치 설계를 끝냈습니다', sourceIds: ['s1'], excluded: false },
+  { id: 'a2', heading: '완료한 일', group: '결제_리뉴얼', text: '실패 알림 문구를 고쳤습니다', sourceIds: ['s2'], excluded: false },
+  { id: 'a3', heading: '완료한 일', group: '가입_개선', text: '퍼널 데이터를 정리했습니다', sourceIds: ['s3'], excluded: false },
+  { id: 'a4', heading: '완료한 일', group: '알림센터', text: '숨긴 문장입니다', sourceIds: ['s4'], excluded: true },
+  { id: 'b1', heading: '진행중', group: '운영툴', text: '권한 매트릭스를 다시 그리는 중', sourceIds: ['s5'], excluded: false },
+  { id: 'p1', heading: '다음 주 계획', group: '직접 작성', text: '정산 배치 QA 붙기', sourceIds: [], excluded: false }
+]`;
+
+test('주간요약 문서는 상태 → 프로젝트 → 문장으로 묶고, 제외·다음 주 계획은 본문에서 빠진다', () => {
+  const app = reportClient();
+  const sections = JSON.parse(app.run(`JSON.stringify(reportDocSections(${REPORT_ROWS}).map(s => [s.heading, s.groups.map(g => [g.group, g.rows.map(r => r.id)])]))`));
+  assert.deepEqual(sections, [
+    ['완료한 일', [['결제_리뉴얼', ['a1', 'a2']], ['가입_개선', ['a3']]]],
+    ['진행중', [['운영툴', ['b1']]]],
+  ], '서버가 준 상태 순서를 그대로 두고, 같은 프로젝트의 문장은 소제목 하나 아래로 모은다');
+  assert.deepEqual(JSON.parse(app.run(`JSON.stringify(reportPlanRows(${REPORT_ROWS}).map(r => r.id))`)), ['p1']);
+  assert.deepEqual(JSON.parse(app.run(`JSON.stringify(reportExcludedRows(${REPORT_ROWS}).map(r => r.id))`)), ['a4']);
+  assert.deepEqual(JSON.parse(app.run(`JSON.stringify(reportDocSections([]))`)), [], '기록이 없으면 구역도 없다');
+});
+
+test('슬랙 미리보기와 복사 글자는 한 원본에서 나오고, 제외한 문장만 빠진다', () => {
+  const app = reportClient();
+  const report = `{ rows: ${REPORT_ROWS} }`;
+  const text = app.run(`reportCopyText(${report})`);
+  assert.equal(text, [
+    '완료한 일 · 결제_리뉴얼\n- 정산 배치 설계를 끝냈습니다',
+    '완료한 일 · 결제_리뉴얼\n- 실패 알림 문구를 고쳤습니다',
+    '완료한 일 · 가입_개선\n- 퍼널 데이터를 정리했습니다',
+    '진행중 · 운영툴\n- 권한 매트릭스를 다시 그리는 중',
+    '다음 주 계획 · 직접 작성\n- 정산 배치 QA 붙기',
+  ].join('\n\n'), '복사 형식은 예전 그대로다 — 이 글자가 바뀌면 사용자의 슬랙 글 모양이 바뀐다');
+  assert.doesNotMatch(text, /숨긴 문장/, '제외한 문장은 복사에서 빠진다');
+
+  // 미리보기는 같은 함수가 만든 묶음을 그린 것이다 — 이어 붙이면 복사 글자와 정확히 같아야 한다.
+  const blocks = JSON.parse(app.run(`JSON.stringify(reportCopyBlocks(${report}))`));
+  assert.equal(blocks.map(block => [block.title, ...block.lines].join('\n')).join('\n\n'), text);
+  assert.deepEqual(blocks[blocks.length - 1], { title: '다음 주 계획 · 직접 작성', lines: ['- 정산 배치 QA 붙기'] }, '사람이 쓴 다음 주 계획도 복사에 들어간다');
+
+  const multi = `{ rows: [{ id: 'm', heading: '완료한 일', group: '운영툴', text: '첫 줄\\n둘째 줄', sourceIds: [], excluded: false }] }`;
+  assert.deepEqual(JSON.parse(app.run(`JSON.stringify(reportCopyBlocks(${multi})[0].lines)`)), ['- 첫 줄', '- 둘째 줄'], '여러 줄 문장은 줄마다 글머리를 단다');
+  assert.equal(app.run(`reportCopyText({ rows: [] })`), '', '담긴 문장이 없으면 복사할 글자도 없다');
 });
 
 test('반영 완료 검색은 문구·프로젝트·지라 키·지라 요약을 함께 본다', () => {

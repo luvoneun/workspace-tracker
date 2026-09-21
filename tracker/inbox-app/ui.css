@@ -285,7 +285,7 @@ body {
 /* 오늘 탭은 레일이 창 왼쪽 끝에 붙어야 해서 페이지를 가운데로 모으지 않는다.
    가운데 폭이 필요한 탭(아이디어·결정, 주간요약)에만 최대 폭을 준다. */
 .page { padding: 16px 20px 48px; }
-#gridRecords, #gridWeekly { max-width: 1240px; margin-left: auto; margin-right: auto; }
+#gridRecords { max-width: 1240px; margin-left: auto; margin-right: auto; }
 .pull-indicator { display: grid; place-items: center; }
 
 /* ---------- 복구 필요 배너 (헤더 아래 전체 폭 띠, 스스로 사라지지 않는다) ---------- */
