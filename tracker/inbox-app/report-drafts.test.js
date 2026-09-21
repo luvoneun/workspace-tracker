@@ -109,6 +109,85 @@ test('잘못된 프로젝트 이름은 계획 문장과 함께 거절된다',t=>
   const old=f.view();f.items.push({...f.items[0],id:'b'});
   assert.throws(()=>f.store.change({weekKey:old.weekKey,revision:old.revision,action:'add',text:'문장',group:'가입 개선'}),error=>error.status===409);
 });
+// 묶기·묶음 풀기 — 묶을 때 묶기 전 문장을 저장해 두고(`parts`), 나중에 `split`으로 되살린다.
+const REPORT_FILE='.report-drafts.json';
+function mergeFixture(t) {
+  const f=fixture(t);
+  f.items.push(
+    {id:'b',type:'task',description:'알림 배너 정리하기',status:'done',created:'2026-09-14',completed:'2026-09-15',group:'알림'},
+    {id:'c',type:'task',description:'정산 배치 설계하기',status:'done',created:'2026-09-14',completed:'2026-09-15',group:'결제'},
+  );
+  // 두 문장만 묶고 셋째(`정산 배치 설계함`)는 낱 문장으로 남겨 둔다.
+  f.mergeTwo=()=>f.change({action:'merge',ids:f.view().rows.filter(row=>row.text!=='정산 배치 설계함').map(row=>row.id)});
+  f.merged=()=>f.view().rows.find(row=>row.canSplit);
+  f.savedRows=()=>JSON.parse(fs.readFileSync(path.join(f.directory,REPORT_FILE),'utf8')).weeks['2026-09-14'].rows;
+  return f;
+}
+test('묶은 문장은 묶기 전 문장을 함께 저장하고, 화면에는 풀 수 있다는 것만 알린다',t=>{
+  const f=mergeFixture(t);f.mergeTwo();
+  const merged=f.merged();
+  assert.equal(merged.partCount,2);
+  assert.equal(merged.parts,undefined,'묶기 전 문장 전체는 화면으로 내보내지 않는다');
+  const parts=f.savedRows().find(row=>row.parts).parts;
+  assert.deepEqual(parts.map(part=>part.text).sort(),['문구 검토함','알림 배너 정리함']);
+  assert.deepEqual(parts.map(part=>part.group).sort(),['가입','알림']);
+});
+test('묶음 풀기는 묶기 전 문장을 그대로 되살린다',t=>{
+  const f=mergeFixture(t);
+  const shape=rows=>rows.filter(row=>row.text!=='정산 배치 설계함').map(row=>[row.text,row.group,row.sourceIds,!!row.excluded]);
+  const before=shape(f.view().rows);
+  f.mergeTwo();
+  f.change({action:'split',id:f.merged().id});
+  assert.deepEqual(shape(f.view().rows),before);
+  assert.equal(f.view().rows.some(row=>row.canSplit),false,'푼 뒤에는 풀 것이 남지 않는다');
+});
+test('묶음을 다시 묶은 것을 풀면 한 단계만 풀린다',t=>{
+  const f=mergeFixture(t);f.mergeTwo();
+  f.change({action:'merge',ids:[f.merged().id,f.view().rows.find(row=>row.text==='정산 배치 설계함').id]});
+  assert.equal(f.view().rows.length,1);
+  f.change({action:'split',id:f.merged().id});
+  assert.equal(f.view().rows.length,2,'바깥 묶음만 풀려 안쪽 묶음 하나와 낱 문장 하나가 된다');
+  assert.equal(f.merged().text,'문구 검토함\n알림 배너 정리함');
+  assert.equal(f.merged().partCount,2);
+  f.change({action:'split',id:f.merged().id});
+  assert.equal(f.view().rows.length,3);
+  assert.equal(f.view().rows.some(row=>row.canSplit),false);
+});
+test('묶지 않은 문장과 없는 문장은 풀 수 없다',t=>{
+  const f=fixture(t);
+  assert.throws(()=>f.change({action:'split',id:f.view().rows[0].id}),/풀 수 없어요/);
+  assert.throws(()=>f.change({action:'split',id:'없는-행'}),/찾을 수 없어요/);
+  assert.deepEqual(fs.readdirSync(f.directory),[],'거절된 요청은 아무것도 남기지 않는다');
+});
+test('묶음을 푼 뒤 되돌리면 다시 묶음 상태가 된다',t=>{
+  const f=mergeFixture(t);f.mergeTwo();
+  const result=f.change({action:'split',id:f.merged().id});
+  assert.equal(f.merged(),undefined);
+  f.change({action:'undo',token:result.undoToken});
+  assert.equal(f.merged().text,'문구 검토함\n알림 배너 정리함');
+  assert.equal(f.merged().partCount,2,'되돌린 묶음도 다시 풀 수 있다');
+});
+test('저장 파일을 새로 읽어도(새 인스턴스) 묶음을 풀 수 있다',t=>{
+  const f=mergeFixture(t);f.mergeTwo();
+  const fresh=factory({directory:f.directory,sources:()=>f.items,legacy:()=>[],currentWeek:()=>'2026-09-14'});
+  const view=()=>fresh.view('2026-09-14');
+  assert.equal(view().rows.find(row=>row.canSplit).partCount,2);
+  fresh.change({weekKey:'2026-09-14',revision:view().revision,action:'split',id:view().rows.find(row=>row.canSplit).id});
+  assert.deepEqual(view().rows.map(row=>row.text).sort(),['문구 검토함','알림 배너 정리함','정산 배치 설계함'].sort());
+  assert.equal(view().rows.some(row=>row.canSplit),false);
+});
+test('묶기 전 문장이 없는 옛 묶음은 그대로 읽히고, 풀기만 할 수 없다',t=>{
+  const f=mergeFixture(t);f.mergeTwo();
+  const file=path.join(f.directory,REPORT_FILE),saved=JSON.parse(fs.readFileSync(file,'utf8'));
+  saved.weeks['2026-09-14'].rows.forEach(row=>{delete row.parts;});
+  fs.writeFileSync(file,JSON.stringify(saved,null,2));
+  const merged=f.view().rows.find(row=>row.text==='문구 검토함\n알림 배너 정리함');
+  assert.ok(merged,'옛 묶음 문장은 그대로 읽힌다');
+  assert.equal(merged.canSplit,undefined);
+  assert.throws(()=>f.change({action:'split',id:merged.id}),/풀 수 없어요/);
+  f.change({action:'edit',id:merged.id,text:'가입·알림 정리 완료'});
+  assert.equal(f.view().rows.find(row=>row.id===merged.id).text,'가입·알림 정리 완료','다른 변경은 옛 데이터에서도 그대로 된다');
+});
 test('a historical saved draft is not silently rewritten by source changes',t=>{
   const f=fixture(t);f.items[0].created='2026-09-01';f.items[0].completed='2026-09-02';
   let old=f.store.view('2026-08-31');f.store.change({weekKey:old.weekKey,revision:old.revision,action:'add',text:'기록 보존'});

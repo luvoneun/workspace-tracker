@@ -747,6 +747,70 @@ test('전체 업무 기록 줄의 더보기는 제외/복원 다음에 그 업�
   assert.deepEqual(missing, [['보고에서 제외']]);
 });
 
+// 문장 줄의 ⋯: `묶음 풀기`는 서버가 묶기 전 문장을 들고 있다고 알려 준 행(`canSplit`)에만 붙는다.
+const REPORT_ITEM = `{ weekKey: '2026-09-14', draft: { revision: 1 } }`;
+test('주간요약 문장의 더보기에서 `묶음 풀기`는 묶은 문장에만 나온다', () => {
+  const app = reportClient();
+  const labels = row => JSON.parse(app.run(`JSON.stringify(
+    reportSentenceMenuSections(${REPORT_ITEM}, ${JSON.stringify(row)}).map(section => section.map(entry => entry.label)))`));
+  assert.deepEqual(labels({ id: 'r1', group: '가입 개선', sourceIds: ['s1'] }), [['근거 업무 보기', '다른 문장과 묶기']]);
+  assert.deepEqual(labels({ id: 'r2', group: '가입 개선', sourceIds: [] }), [['다른 문장과 묶기']], '근거가 없으면 근거 항목도 없다');
+  assert.deepEqual(labels({ id: 'r3', group: '여러 프로젝트', sourceIds: ['s1', 's2'], canSplit: true, partCount: 2 }),
+    [['근거 업무 보기', '다른 문장과 묶기', '묶음 풀기']]);
+  // 옛 저장 데이터로 만든 묶음 문장에는 `parts`가 없어 `canSplit`도 오지 않는다 — 풀기만 보이지 않는다.
+  assert.deepEqual(labels({ id: 'r4', group: '여러 프로젝트', sourceIds: ['s1', 's2'] }), [['근거 업무 보기', '다른 문장과 묶기']]);
+});
+
+test('묶기·묶음 풀기 알림은 무엇이 바뀌었는지 적고 되돌리기 버튼을 함께 준다', () => {
+  const notice = (action, token = "'tok'") => {
+    const app = reportClient();
+    app.run(`reportUndo.set('2026-09-14', ${token})`);
+    app.run(`reportSavedNotice(${REPORT_ITEM}, ${action})`);
+    const region = app.nodes.get('liveRegion');
+    return [region.textContent, region.children.map(kid => kid.textContent)];
+  };
+  assert.deepEqual(notice(`{ action: 'merge', ids: ['a', 'b', 'c'] }`), ['문장 3개를 묶었어요', ['되돌리기', '닫기']]);
+  assert.deepEqual(notice(`{ action: 'split', id: 'r3' }`), ['묶음을 풀었어요', ['되돌리기', '닫기']]);
+  assert.deepEqual(notice(`{ action: 'undo', token: 'tok' }`), ['되돌렸어요', ['닫기']]);
+  // 나머지 변경의 알림은 예전 그대로다.
+  assert.deepEqual(notice(`{ action: 'edit', id: 'r1', text: '고친 문장' }`), ['보고 내용을 저장했어요', ['닫기']]);
+  assert.deepEqual(notice(`{ action: 'exclude', id: 'r1' }`), ['보고 내용을 저장했어요', ['닫기']]);
+  // 되돌릴 토큰을 못 받았으면 버튼 없이 알림만 뜬다.
+  assert.deepEqual(notice(`{ action: 'merge', ids: ['a', 'b'] }`, 'undefined'), ['문장 2개를 묶었어요', ['닫기']]);
+});
+
+test('주간요약의 ⌘Z는 그 탭에서 되돌릴 것이 있을 때만 가로채고, 아니면 기존 되돌리기로 흘려보낸다', () => {
+  const app = reportClient();
+  app.run(`
+    activeTabKey = 'weekly';
+    reportRenderedItem = ${REPORT_ITEM};
+    reportUndo.set('2026-09-14', 'tok');
+    reportChange = async () => { globalThis.undone = (globalThis.undone || 0) + 1; };
+    makeEvent = (extra = {}) => ({ metaKey: true, key: 'z', target: { closest: () => null }, prevented: 0, stopped: 0,
+      preventDefault() { this.prevented += 1; }, stopImmediatePropagation() { this.stopped += 1; }, ...extra });
+    taken = extra => !!reportUndoHotkeyItem(makeEvent(extra));
+  `);
+  assert.equal(app.run('taken()'), true);
+  assert.equal(app.run("taken({ ctrlKey: true, metaKey: false })"), true, 'Ctrl+Z도 같다');
+  assert.equal(app.run('taken({ shiftKey: true })'), false, '⌘⇧Z(다시 실행)는 다루지 않는다');
+  assert.equal(app.run('taken({ altKey: true })'), false);
+  assert.equal(app.run('taken({ metaKey: false })'), false);
+  assert.equal(app.run("taken({ key: 'y' })"), false);
+  assert.equal(app.run('taken({ target: { closest: () => ({}) } })'), false, '입력칸 안에서는 글자 되돌리기로 남는다');
+  app.run("activeTabKey = 'today'");
+  assert.equal(app.run('taken()'), false, '다른 탭의 ⌘Z는 오늘 목록의 되돌리기 그대로다');
+  app.run("activeTabKey = 'weekly'; reportUndo.clear()");
+  assert.equal(app.run('taken()'), false, '그 주차의 되돌리기 토큰이 없으면 가로채지 않는다');
+
+  // 가로챌 때만 기본 동작과 app.js의 ⌘Z를 막는다.
+  app.run("reportUndo.set('2026-09-14', 'tok'); hit = makeEvent(); took = reportUndoHotkey(hit);");
+  assert.equal(app.run('took'), true);
+  assert.deepEqual([app.run('hit.prevented'), app.run('hit.stopped'), app.run('undone')], [1, 1, 1]);
+  app.run("miss = makeEvent({ target: { closest: () => ({}) } }); missTook = reportUndoHotkey(miss);");
+  assert.equal(app.run('missTook'), false);
+  assert.deepEqual([app.run('miss.prevented'), app.run('miss.stopped'), app.run('undone')], [0, 0, 1]);
+});
+
 // 슬랙 복사: 구역(상태) → 프로젝트 → 글머리 항목. 이 글자가 바뀌면 사용자의 슬랙 글 모양이 바뀐다.
 const REPORT_SLACK_ROWS = `[
   { id: 'a1', heading: '완료한 일', group: '가입 개선', text: '가입 실패율 급증 원인 파악', sourceIds: [], excluded: false },

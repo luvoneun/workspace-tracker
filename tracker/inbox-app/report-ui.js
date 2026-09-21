@@ -314,8 +314,49 @@ async function reportChange(item, action) {
     if (cached) cached.draft = result.report;
   } finally { reportBusy = false; }
   renderReportDraft(item);
-  announce('보고 내용을 저장했어요');
+  reportSavedNotice(item, action);
 }
+
+// 저장 뒤 알림 하나. 묶기·묶음 풀기는 무엇이 바뀌었는지 적고 그 자리에서 `되돌리기`까지 준다
+// (머리줄의 `되돌리기`와 같은 길이다). 나머지 변경은 예전 문구 그대로다.
+function reportSavedNotice(item, action) {
+  if (action.action === 'undo') { announce('되돌렸어요'); return; }
+  if (action.action !== 'merge' && action.action !== 'split') { announce('보고 내용을 저장했어요'); return; }
+  const message = action.action === 'merge' ? `문장 ${action.ids.length}개를 묶었어요` : '묶음을 풀었어요';
+  const token = reportUndo.get(item.weekKey);
+  showNotice(message, false, null, token ? { label: '되돌리기', onClick: () => reportUndoNow(item) } : null);
+}
+
+// 그 주차의 되돌리기(머리줄 버튼·알림 버튼·⌘Z가 모두 이 길을 쓴다).
+function reportUndoNow(item) {
+  const token = reportUndo.get(item.weekKey);
+  if (!token) return Promise.resolve();
+  return reportChange(item, { action: 'undo', token })
+    .catch(error => showNotice(error.message || '되돌리지 못했어요. 적은 내용은 그대로 있어요', true));
+}
+
+// ⌘Z / Ctrl+Z — 주간요약 탭에서 보고 되돌리기. 조건이 아니면 아무것도 하지 않고 앱의 기존 ⌘Z로 흘려보낸다.
+// (탭이 주간요약이 아니거나, 입력칸 안이거나, 그 주차의 되돌리기 토큰이 없으면 손대지 않는다.)
+function reportUndoHotkeyItem(event) {
+  if (!event || !(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return null;
+  if (String(event.key || '').toLowerCase() !== 'z') return null;
+  if (typeof activeTabKey === 'undefined' || activeTabKey !== 'weekly') return null;
+  if (event.target && event.target.closest && event.target.closest('input, textarea, select, [contenteditable="true"], [contenteditable=""]')) return null;
+  const item = reportRenderedItem;
+  return item && reportUndo.has(item.weekKey) ? item : null;
+}
+
+function reportUndoHotkey(event) {
+  const item = reportUndoHotkeyItem(event);
+  if (!item) return false;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  reportUndoNow(item);
+  return true;
+}
+
+// 앱이 켜질 때 한 번만 단다(탭을 오갈 때마다 쌓이지 않게). capture 단계라 app.js의 ⌘Z보다 먼저 본다.
+document.addEventListener('keydown', reportUndoHotkey, true);
 
 // ---------- 묶기 모드(같은 상태의 문장만) ----------
 
@@ -447,6 +488,22 @@ function reportSuggestionBlock(item, row) {
   return box;
 }
 
+// 문장 줄의 ⋯ 메뉴. `묶음 풀기`는 서버가 묶기 전 문장을 들고 있는 행에만 붙는다(`canSplit`) —
+// 옛 묶음 문장이나 낱 문장에는 나오지 않는다. 풀면 묶은 뒤에 고친 글은 사라지지만 `되돌리기`로 돌아온다.
+function reportSentenceMenuSections(item, row) {
+  return [[
+    row.sourceIds.length ? {
+      label: reportEvidenceOpen.has(row.id) ? '근거 업무 숨기기' : '근거 업무 보기',
+      onClick: () => {
+        if (reportEvidenceOpen.has(row.id)) reportEvidenceOpen.delete(row.id); else reportEvidenceOpen.add(row.id);
+        renderReportDraft(item);
+      },
+    } : null,
+    { label: '다른 문장과 묶기', onClick: () => reportMergeStart(item, row) },
+    row.canSplit ? { label: '묶음 풀기', onClick: () => reportChange(item, { action: 'split', id: row.id }) } : null,
+  ].filter(Boolean)];
+}
+
 // 문장 한 줄. 동작(수정·제외·더보기)은 hover·focus에서만 보인다.
 function reportSentenceRow(item, row, context) {
   const host = context.host;
@@ -516,16 +573,7 @@ function reportSentenceRow(item, row, context) {
     document.getElementById('weeklyReportDetail')?.querySelector(`[data-edit-row="${row.id}"]`)?.focus();
   }, 'd-btn sm'));
   actions.appendChild(reportButton('제외', () => reportChange(item, { action: 'exclude', id: row.id }), 'd-btn sm'));
-  actions.appendChild(uiMoreButton(`${reportProjectText(row.group)} 문장 더보기`, () => [[
-    row.sourceIds.length ? {
-      label: reportEvidenceOpen.has(row.id) ? '근거 업무 숨기기' : '근거 업무 보기',
-      onClick: () => {
-        if (reportEvidenceOpen.has(row.id)) reportEvidenceOpen.delete(row.id); else reportEvidenceOpen.add(row.id);
-        renderReportDraft(item);
-      },
-    } : null,
-    { label: '다른 문장과 묶기', onClick: () => reportMergeStart(item, row) },
-  ].filter(Boolean)]));
+  actions.appendChild(uiMoreButton(`${reportProjectText(row.group)} 문장 더보기`, () => reportSentenceMenuSections(item, row)));
   line.appendChild(actions);
   host.appendChild(line);
 

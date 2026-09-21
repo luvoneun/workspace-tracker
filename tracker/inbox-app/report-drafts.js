@@ -73,6 +73,9 @@ module.exports = ({ directory, sources, legacy, currentWeek }) => {
     for (const [key,items] of groups) rows.push({ id:`auto-${hash([key,items.map(item=>item.id).sort()]).slice(0,16)}`,bucket:key,heading:heading(items[0]),group:items[0].label || items[0].group || items[0].project || '그룹 없음', text:textOf(items),sourceIds:items.map(item=>item.id),evidence:items.map(evidence),currentEvidence:items.map(evidence),locked:false,excluded:false,needsReview:false });
     const order=['완료한 일','진행중','새로 정해진 것','확인 완료','확인 대기','다음 주 계획'];
     rows.forEach(row=>{if(row.evidence.some(item=>/\(.*확인 필요.*\)|\(미확정\)/.test(item.description)))row.needsReview=true;});
+    // 묶기 전 문장(`parts`)은 저장 파일에만 둔다 — 화면에는 "풀 수 있는지"만 알린다(큰 배열을 매번 내보내지 않으려고).
+    // `parts`가 없는 옛 묶음 행은 `canSplit`이 붙지 않아 화면에서 `묶음 풀기`가 보이지 않는다.
+    rows.forEach(row=>{if(row.parts){row.canSplit=true;row.partCount=row.parts.length;delete row.parts;}});
     rows.sort((a,b)=>(order.indexOf(a.heading)<0?99:order.indexOf(a.heading))-(order.indexOf(b.heading)<0?99:order.indexOf(b.heading)) || a.group.localeCompare(b.group));
     return { weekKey, rows, revision: hash({ stored, rows }), updatedAt: stored?.updatedAt || null };
   }
@@ -88,7 +91,11 @@ module.exports = ({ directory, sources, legacy, currentWeek }) => {
   function change({ weekKey, revision, action, id, text, ids, token, group }) {
     const state=read(), current=view(weekKey,state);
     if (revision !== current.revision) { const error=new Error('새 기록이나 다른 창의 변경이 있어요. 적은 내용은 그대로 있어요. 최신 내용을 확인한 뒤 다시 저장해 주세요.');error.status=409;throw error; }
-    let rows=current.rows.map(clean); const row=rows.find(row=>row.id===id), shown=current.rows.find(row=>row.id===id);
+    // 묶기 전 문장은 화면으로 나가지 않으므로(view가 `canSplit`만 알린다) 저장 파일에서 다시 붙인다.
+    // `parts`는 서버가 merge에서만 만든다 — 요청 본문의 값은 받지 않는다.
+    const storedParts=new Map((state.weeks[weekKey]?.rows||[]).filter(row=>row.parts).map(row=>[row.id,row.parts]));
+    const carry=row=>{const next=clean(row);if(storedParts.has(row.id))next.parts=storedParts.get(row.id);return next;};
+    let rows=current.rows.map(carry); const row=rows.find(row=>row.id===id), shown=current.rows.find(row=>row.id===id);
     if(action==='undo') {
       const prior=undo.get(token); if(!prior || prior.weekKey!==weekKey)throw new Error('되돌리기 기록이 만료됐어요.');
       if(hash(state.weeks[weekKey]?.rows)!==prior.after)throw new Error('그 뒤에 다른 변경이 있어 되돌릴 수 없어요. 최신 보고를 확인해 주세요.');
@@ -102,18 +109,27 @@ module.exports = ({ directory, sources, legacy, currentWeek }) => {
       if(selected.length!==ids.length||selected.some(row=>row.excluded)||new Set(selected.map(row=>row.heading)).size!==1)throw new Error('같은 상태의 문장만 묶을 수 있어요.');
       const sourceIds=[...new Set(selected.flatMap(row=>row.sourceIds))];
       rows=rows.filter(row=>!ids.includes(row.id));
-      rows.push({id:randomUUID(),heading:selected[0].heading,group:new Set(selected.map(row=>row.group)).size===1?selected[0].group:'여러 프로젝트',bucket:new Set(selected.map(row=>row.bucket)).size===1?selected[0].bucket:null,text:selected.map(row=>row.text).join('\n'),sourceIds,evidence:[...new Map(selected.flatMap(row=>row.evidence).map(item=>[item.id,item])).values()],locked:true,excluded:false});
+      // 묶기 전 문장을 그대로 품는다(나중에 `split`으로 되살린다). 이미 묶음이던 행은 그 행의 `parts`까지
+      // 함께 들어가 있어서, 묶음을 다시 묶은 것을 풀면 한 단계만 풀린다.
+      rows.push({id:randomUUID(),heading:selected[0].heading,group:new Set(selected.map(row=>row.group)).size===1?selected[0].group:'여러 프로젝트',bucket:new Set(selected.map(row=>row.bucket)).size===1?selected[0].bucket:null,text:selected.map(row=>row.text).join('\n'),sourceIds,evidence:[...new Map(selected.flatMap(row=>row.evidence).map(item=>[item.id,item])).values()],locked:true,excluded:false,parts:structuredClone(selected)});
     } else {
       if(!row)throw new Error('보고 항목을 찾을 수 없어요.');
       if(action==='edit') { if(typeof text!=='string'||!text.trim()||text.length>10000)throw new Error('보고 문장을 10,000자 이내로 입력해 주세요.');row.text=text.trim();row.locked=true;row.legacy=false;row.evidence=shown.currentEvidence; }
       else if(action==='exclude') row.excluded=!row.excluded;
       else if(action==='accept') { if(!shown.suggestion || shown.suggestion.missing || shown.suggestion.mixed)throw new Error('원본 상태를 확인하고 문장을 직접 수정해 주세요.');Object.assign(row,shown.suggestion,{locked:true,legacy:false});delete row.added;delete row.missing;delete row.mixed; }
       else if(action==='acknowledge') { row.evidence=shown.suggestion?.evidence || shown.currentEvidence;row.sourceIds=shown.suggestion?.sourceIds || row.sourceIds;row.legacy=false;row.locked=true; }
+      else if(action==='split') {
+        // 묶은 뒤 문장을 고쳤더라도 묶기 전 문장들로 돌아간다(그 편집은 `undo`로 되살린다).
+        if(!row.parts || !row.parts.length)throw new Error('이 문장은 풀 수 없어요.');
+        const used=new Set(rows.filter(entry=>entry.id!==id).map(entry=>entry.id));
+        const restored=structuredClone(row.parts).map(part=>{const next={...part,id:used.has(part.id)?randomUUID():part.id};used.add(next.id);return next;});
+        rows=rows.flatMap(entry=>entry.id===id?restored:[entry]);
+      }
       else throw new Error('지원하지 않는 보고 변경이에요.');
     }
     const undoToken=randomUUID();
     state.weeks[weekKey]={rows,updatedAt:new Date().toISOString()};atomicWrite(filename,JSON.stringify(state,null,2));
-    undo.set(undoToken,{weekKey,rows:current.rows.map(clean),after:hash(rows)});if(undo.size>50)undo.delete(undo.keys().next().value);
+    undo.set(undoToken,{weekKey,rows:current.rows.map(carry),after:hash(rows)});if(undo.size>50)undo.delete(undo.keys().next().value);
     return {ok:true,report:view(weekKey,state),undoToken};
   }
   function weeks(snapshot=sources(), state=read()) {
