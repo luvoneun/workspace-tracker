@@ -86,7 +86,8 @@ document.addEventListener('keydown', (event) => {
   escStack.pop()();
 });
 
-// ⌘K(윈도는 Ctrl+K)로 검색 — 입력칸 안에서도 되고, 한글을 조합하는 중에는 넘어간다.
+// ⌘K(윈도는 Ctrl+K)로 검색 팔레트 — 입력칸 안에서도 되고, 한글을 조합하는 중에는 넘어간다.
+// 헤더의 `검색 ⌘K` 버튼과 같은 길을 쓴다(닫으면 그 버튼으로 포커스가 돌아간다).
 document.addEventListener('keydown', (event) => {
   if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
   if (event.isComposing || String(event.key).toLowerCase() !== 'k') return;
@@ -877,6 +878,7 @@ async function load() {
     .sort((a, b) => diffDays(a.due) - diffDays(b.due));
   renderReminders(reminders);
   syncTaskDetail();
+  palSync();
   taskSelectionRefresh();
 }
 
@@ -1280,6 +1282,7 @@ function renderDecisionCard(item) {
   const done = item.status === 'done';
   const card = document.createElement('div');
   card.className = 'card task-row' + (done ? ' done' : '');
+  card.dataset.itemId = item.id;
 
   const checkbox = document.createElement('input');
   checkbox.type = 'checkbox';
@@ -1884,6 +1887,8 @@ function panelOpen(view) {
   const opener = document.activeElement;
   panelState = {
     id: view.id,
+    // 팔레트에서 열었으면 닫을 때 그 검색어·필터·스크롤 그대로 팔레트로 돌아간다.
+    back: view.back || null,
     returnFocus: opener && opener !== document.body && opener.focus ? opener : null,
   };
   // Esc는 가장 위에 열린 것부터 닫는다 — 다시 열면 맨 위로 올린다.
@@ -1896,12 +1901,15 @@ function panelClose() {
   const side = panelSide();
   const zone = document.getElementById('todayTaskZone');
   const back = panelState?.returnFocus;
+  const reopen = panelState?.back;
   panelState = null;
   meetingPanel = null;
   escDrop(panelClose);
   if (zone) zone.classList.remove('task-detail-open');
   document.querySelectorAll('.d-row.is-sel, .d-wrow.is-sel').forEach(row => row.classList.remove('is-sel'));
   if (side) { side.hidden = true; side.replaceChildren(); side.style.minHeight = ''; }
+  // 팔레트에서 열었던 항목이면 찾던 자리로 돌려 놓는다(포커스도 검색 입력으로).
+  if (reopen && reopen.kind === 'palette') { palOpen(reopen.state); return; }
   if (back && back.isConnected) back.focus();
 }
 
@@ -2314,6 +2322,363 @@ function panelCheck({ item, detail }, box) {
   panelAutosaveNote(box);
 }
 
+// ---------- ⌘K 검색 팔레트 (검색 · 회의 모아보기 · 오늘 신규) ----------
+// 큰 창 대신 위에서 내려오는 한 겹. 찾는 범위는 예전 통합 검색과 같다:
+// 완료한 업무와 결과 한 줄, 결정·확인 대기·아이디어, 회의와 회의 초안 문구까지
+// (외부 티로 노트 전문은 찾지 않는다 — README와 같다).
+
+const PAL_TYPES = [['', '전체'], ['task', '할 일'], ['check', '확인 대기'], ['decision', '결정'], ['idea', '아이디어'], ['meeting', '회의']];
+const PAL_TAG = { task: '할 일', bug: '할 일', check: '확인 대기', decision: '결정', idea: '아이디어' };
+
+let palState = null;
+let palNodes = null;
+let palEntries = [];
+
+function palDefaults(state) {
+  return { query: '', type: '', hideDone: false, unresolved: false, reviewOnly: false, newOnly: false, active: 0, scroll: 0, ...(state || {}) };
+}
+
+// 항목 거르기(순수 함수): 종류 · 완료 제외 · 오늘 신규 · 검색어. 회의는 palMeetings가 따로 본다.
+// 검색어도 필터도 없으면 아무것도 돌려주지 않는다 — 팔레트는 그때 안내 문구만 보여 준다.
+function palFilter(items, state) {
+  if (state.type === 'meeting') return [];
+  const query = (state.query || '').trim();
+  if (!query && !state.newOnly) return [];
+  const today = state.today || todayStr();
+  return (items || []).filter((item) => {
+    // `할 일`은 버그까지 함께 본다(목록에서도 한 종류로 다룬다).
+    if (state.type === 'task' ? !['task', 'bug'].includes(item.type) : state.type && item.type !== state.type) return false;
+    if (state.hideDone && item.status === 'done') return false;
+    if (state.newOnly && item.created !== today) return false;
+    if (!query) return true;
+    return wfSearchMatches(query, [item.description, item.outcome, item.label, item.jira, item.group, item.project]);
+  });
+}
+
+// 회의 거르기(순수 함수): 검토 대기 · 미해결만 · 오늘 신규 · 검색어(초안 문구와 이 회의에서 나온 항목까지).
+// 검토할 초안이 있는 회의가 언제나 먼저 온다 — 지금 손댈 것이 위로.
+function palMeetings(meetings, state, itemsOf) {
+  if (state.type && state.type !== 'meeting') return [];
+  const query = (state.query || '').trim();
+  if (!query && state.type !== 'meeting') return [];
+  const today = state.today || todayStr();
+  const related = typeof itemsOf === 'function' ? itemsOf : () => [];
+  return (meetings || []).filter((event) => {
+    if (state.reviewOnly && !(event.drafts && event.drafts.length)) return false;
+    if (state.unresolved && !related(event.id).some(item => item.status !== 'done')) return false;
+    if (state.newOnly && event.date !== today) return false;
+    if (!query) return true;
+    return wfSearchMatches(query, [event.title, event.series, event.date, event.project?.label,
+      ...(event.drafts || []).map(draft => draft.description), ...related(event.id).map(item => item.description)]);
+  }).sort((a, b) => ((b.drafts && b.drafts.length) ? 1 : 0) - ((a.drafts && a.drafts.length) ? 1 : 0) || wfMeetingOrder(a, b));
+}
+
+// 일치한 글자만 형광으로. 사람이 쓴 글자는 먼저 escape하고, 그 결과에만 <mark>를 끼운다.
+function palHighlight(text, query) {
+  const source = String(text || '');
+  const words = String(query || '').trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return escapeHtml(source);
+  const lower = source.toLocaleLowerCase();
+  const found = [];
+  words.forEach((word) => {
+    const needle = word.toLocaleLowerCase();
+    let at = needle ? lower.indexOf(needle) : -1;
+    while (at >= 0) { found.push([at, at + needle.length]); at = lower.indexOf(needle, at + needle.length); }
+  });
+  if (!found.length) return escapeHtml(source);
+  found.sort((a, b) => a[0] - b[0]);
+  const ranges = [];
+  found.forEach((range) => {
+    const last = ranges[ranges.length - 1];
+    if (last && range[0] <= last[1]) last[1] = Math.max(last[1], range[1]);
+    else ranges.push([range[0], range[1]]);
+  });
+  let html = '';
+  let at = 0;
+  ranges.forEach(([start, end]) => {
+    html += escapeHtml(source.slice(at, start)) + `<mark class="d-mark">${escapeHtml(source.slice(start, end))}</mark>`;
+    at = end;
+  });
+  return html + escapeHtml(source.slice(at));
+}
+
+function palList() {
+  const data = typeof workflowData === 'object' && workflowData ? workflowData : { items: [], meetings: [] };
+  const itemsOf = typeof wfMeetingItems === 'function' ? wfMeetingItems : null;
+  return [
+    ...palFilter(data.items, palState).map(item => ({ kind: 'item', item })),
+    ...palMeetings(data.meetings, palState, itemsOf).map(event => ({ kind: 'meeting', event })),
+  ];
+}
+
+// 결과 한 줄: 종류 | (회의는 날짜·시각) | 제목 | 프로젝트 | 상태·기한. 의미 없는 값은 자리를 비운다.
+function palResultRow(entry, index, query) {
+  const row = document.createElement('div');
+  row.className = 'd-pres' + (entry.kind === 'meeting' ? ' is-mtg' : '') + (index === palState.active ? ' is-sel' : '');
+  row.id = `palopt-${index}`;
+  row.setAttribute('role', 'option');
+  row.setAttribute('aria-selected', String(index === palState.active));
+  const cell = (className, html, title) => {
+    const span = document.createElement('span');
+    span.className = className;
+    if (html) span.innerHTML = html;
+    if (title) span.title = title;
+    row.appendChild(span);
+  };
+  if (entry.kind === 'meeting') {
+    const event = entry.event;
+    const related = typeof wfMeetingItems === 'function' ? wfMeetingItems(event.id) : [];
+    const open = related.filter(item => item.status !== 'done').length;
+    const state = [];
+    if (event.drafts && event.drafts.length) state.push(`초안 ${event.drafts.length} 검토`);
+    if (open) state.push(`미완료 ${open}`);
+    const when = `${uiKoDateShort(event.date)}${event.start ? ` · ${event.start}` : ''}`;
+    cell('tag', '회의');
+    cell('when num', escapeHtml(when));
+    cell('ti', palHighlight(event.title, query), event.title);
+    cell('pj', escapeHtml(event.project?.label || event.project?.value || ''));
+    cell('st', escapeHtml(state.join(' · ')));
+    row.setAttribute('aria-label', `회의 ${when} ${event.title}`);
+  } else {
+    const item = entry.item;
+    const project = item.label || item.group || item.project || '';
+    const due = item.status === 'done' ? null : uiDueText(item.due, 'full');
+    const status = item.status === 'done' ? { text: '완료', tone: '' } : due || (item.doing ? { text: '진행 중', tone: '' } : null);
+    cell('tag', escapeHtml(PAL_TAG[item.type] || item.type || ''));
+    cell('ti', palHighlight(item.description, query), item.description);
+    cell('pj', escapeHtml(project), project || undefined);
+    cell(`st${status ? uiTone(status.tone) : ''}`, status ? escapeHtml(status.text) : '');
+    row.setAttribute('aria-label', `${PAL_TAG[item.type] || ''} ${item.description}`);
+  }
+  row.addEventListener('click', () => palPick(index));
+  return row;
+}
+
+// 필터 칩 줄. 여기서만 알약 모양을 쓴다(지금 고른 것을 한눈에 보여 주는 자리라서).
+function palFilterChips() {
+  const bar = palNodes.chips;
+  bar.replaceChildren();
+  const chip = (text, on, onPick) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'd-chip' + (on ? ' is-on' : '');
+    button.textContent = text;
+    button.setAttribute('aria-pressed', String(!!on));
+    button.addEventListener('click', () => { onPick(); palRender(); palNodes.input.focus(); });
+    bar.appendChild(button);
+  };
+  PAL_TYPES.forEach(([value, text]) => chip(text, palState.type === value, () => {
+    palState.type = value;
+    palState.active = 0;
+    if (value !== 'meeting') { palState.unresolved = false; palState.reviewOnly = false; }
+  }));
+  const separator = document.createElement('span');
+  separator.className = 'sep';
+  separator.setAttribute('aria-hidden', 'true');
+  bar.appendChild(separator);
+  chip('완료 제외', palState.hideDone, () => { palState.hideDone = !palState.hideDone; palState.active = 0; });
+  if (palState.type === 'meeting') {
+    chip('미해결만', palState.unresolved, () => { palState.unresolved = !palState.unresolved; palState.active = 0; });
+    chip('검토 대기', palState.reviewOnly, () => { palState.reviewOnly = !palState.reviewOnly; palState.active = 0; });
+  }
+  if (palState.newOnly) {
+    const pill = document.createElement('span');
+    pill.className = 'd-chip is-on d-palnew';
+    pill.append('오늘 신규');
+    const clear = document.createElement('button');
+    clear.type = 'button';
+    clear.className = 'd-iconbtn sm';
+    clear.setAttribute('aria-label', '오늘 신규 필터 지우기');
+    clear.innerHTML = uiIcon('close');
+    clear.addEventListener('click', () => { palState.newOnly = false; palState.active = 0; palRender(); palNodes.input.focus(); });
+    pill.appendChild(clear);
+    bar.appendChild(pill);
+  }
+}
+
+function palRenderResults() {
+  if (!palState || !palNodes) return;
+  const query = (palState.query || '').trim();
+  palEntries = palList();
+  if (palState.active >= palEntries.length) palState.active = Math.max(0, palEntries.length - 1);
+  const box = palNodes.results;
+  box.replaceChildren();
+  if (!palEntries.length) {
+    const empty = document.createElement('div');
+    empty.className = 'd-empty';
+    empty.textContent = query || palState.newOnly || palState.type === 'meeting'
+      ? '찾는 항목이 없습니다.'
+      : '찾을 내용을 입력하세요. 완료한 업무와 회의 초안 문구까지 함께 찾습니다.';
+    box.appendChild(empty);
+    palNodes.input.removeAttribute('aria-activedescendant');
+    return;
+  }
+  palEntries.forEach((entry, index) => box.appendChild(palResultRow(entry, index, query)));
+  palNodes.input.setAttribute('aria-activedescendant', `palopt-${palState.active}`);
+}
+
+function palRender() {
+  if (!palState || !palNodes) return;
+  palFilterChips();
+  palRenderResults();
+}
+
+// load()가 끝날 때마다 불린다. 입력칸은 손대지 않고 결과 줄만 새로 그린다(적던 검색어가 날아가지 않게).
+function palSync() {
+  if (palState && palNodes) palRenderResults();
+}
+
+function palMove(step) {
+  if (!palEntries.length) return;
+  palState.active = (palState.active + step + palEntries.length) % palEntries.length;
+  palRenderResults();
+  palNodes.results.querySelector('.d-pres.is-sel')?.scrollIntoView({ block: 'nearest' });
+}
+
+// 지금 보고 있던 검색어·필터·스크롤·활성 줄. 열었던 항목을 닫으면 이 상태로 팔레트가 다시 열린다.
+function palSnapshot() {
+  return { ...palState, scroll: palNodes ? palNodes.results.scrollTop : 0 };
+}
+
+function palPick(index) {
+  const entry = palEntries[index];
+  if (!entry) return;
+  const back = { kind: 'palette', state: palSnapshot() };
+  if (entry.kind === 'meeting') {
+    const id = entry.event.id;
+    palClose(true);
+    wfOpen({ kind: 'meeting', id });
+    // 회의는 아직 옛 큰 창에서 연다 — 그 창을 닫으면 찾던 자리로 돌아온다.
+    if (typeof workflowDialog !== 'undefined' && workflowDialog) {
+      workflowDialog.addEventListener('close', () => palOpen(back.state), { once: true });
+    }
+    return;
+  }
+  const item = entry.item;
+  palClose(true);
+  if (item.type === 'decision' || item.type === 'idea') { palRevealRecord(item); return; }
+  // 상세 패널은 오늘 탭의 세 번째 열이다 — 다른 탭에 있었다면 함께 옮긴다.
+  setActiveTab('today');
+  panelOpen({ id: item.id, back });
+}
+
+// 결정·아이디어는 상세 패널이 없다 — 기록 탭의 그 줄로 옮겨 가 잠깐 밝힌다.
+function palRevealRecord(item) {
+  setActiveTab('records');
+  const card = document.querySelector(`#gridRecords [data-item-id="${CSS.escape(String(item.id))}"]`);
+  if (!card) { announce(`${item.description} — 아이디어·결정 목록에서 찾아 주세요.`); return; }
+  card.closest('details')?.setAttribute('open', '');
+  card.scrollIntoView({ block: 'center' });
+  card.classList.add('is-flash');
+  setTimeout(() => card.classList.remove('is-flash'), 1600);
+}
+
+function palOpen(state) {
+  const opener = document.activeElement;
+  // 큰 창·더보기 메뉴가 열려 있으면 먼저 닫는다(떠 있는 층은 한 번에 하나).
+  if (typeof workflowDialog !== 'undefined' && workflowDialog) workflowDialog.close();
+  uiMenuClose();
+  const reopening = !!palState;
+  if (palState) palClose(true);
+
+  palState = palDefaults(state);
+  if (!palState.returnFocus) {
+    palState.returnFocus = !reopening && opener && opener !== document.body && opener.focus
+      ? opener
+      : document.getElementById('searchEntryBtn');
+  }
+
+  const root = document.createElement('div');
+  root.className = 'd-pal';
+  const box = document.createElement('div');
+  box.className = 'd-palbox';
+  box.setAttribute('role', 'dialog');
+  box.setAttribute('aria-modal', 'true');
+  box.setAttribute('aria-label', '검색');
+
+  const bar = document.createElement('div');
+  bar.className = 'd-palin';
+  bar.insertAdjacentHTML('beforeend', uiIcon('search'));
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.id = 'palInput';
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+  input.value = palState.query || '';
+  input.placeholder = '할 일, 확인 대기, 결정, 아이디어, 회의 검색';
+  input.setAttribute('aria-label', '검색어');
+  input.setAttribute('role', 'combobox');
+  input.setAttribute('aria-expanded', 'true');
+  input.setAttribute('aria-controls', 'palResults');
+  input.setAttribute('aria-autocomplete', 'list');
+  bar.appendChild(input);
+
+  const chips = document.createElement('div');
+  chips.className = 'd-palfil';
+  chips.setAttribute('role', 'group');
+  chips.setAttribute('aria-label', '검색 범위');
+
+  const results = document.createElement('div');
+  results.className = 'd-palres';
+  results.id = 'palResults';
+  results.setAttribute('role', 'listbox');
+  results.setAttribute('aria-label', '검색 결과');
+
+  const foot = document.createElement('div');
+  foot.className = 'd-palfoot';
+  foot.textContent = '↑↓ 이동 · Enter 열기 · Esc 닫기';
+
+  box.append(bar, chips, results, foot);
+  root.appendChild(box);
+  document.body.appendChild(root);
+  palNodes = { root, box, input, chips, results };
+
+  root.addEventListener('mousedown', (event) => { if (!event.target.closest('.d-palbox')) palClose(); });
+  // 한 글자마다 목록을 통째로 다시 그리지 않게, 입력이 멎은 뒤 한 번만 그린다(한글 조합은 끊기지 않는다).
+  const later = wfDebounce(() => palRenderResults());
+  input.addEventListener('input', () => {
+    if (!palState) return;
+    palState.query = input.value;
+    palState.active = 0;
+    later();
+  });
+  input.addEventListener('keydown', (event) => {
+    if (event.isComposing) return; // 한글을 조합하는 중의 Enter는 글자를 확정하는 것이다
+    if (event.key === 'ArrowDown') { event.preventDefault(); palMove(1); return; }
+    if (event.key === 'ArrowUp') { event.preventDefault(); palMove(-1); return; }
+    if (event.key === 'Enter') { event.preventDefault(); palPick(palState.active); }
+  });
+  // 팔레트가 열려 있는 동안 Tab은 그 안에서만 돈다.
+  box.addEventListener('keydown', (event) => {
+    if (event.key !== 'Tab') return;
+    const focusable = [...box.querySelectorAll('input, button:not([disabled])')];
+    if (!focusable.length) return;
+    const at = focusable.indexOf(document.activeElement);
+    const next = event.shiftKey ? at - 1 : at + 1;
+    if (at >= 0 && next >= 0 && next < focusable.length) return;
+    event.preventDefault();
+    focusable[event.shiftKey ? focusable.length - 1 : 0].focus();
+  });
+
+  escPush(palClose);
+  palRender();
+  results.scrollTop = palState.scroll || 0;
+  input.focus();
+  input.setSelectionRange?.(input.value.length, input.value.length);
+}
+
+function palClose(silent) {
+  if (!palState) return;
+  const back = palState.returnFocus;
+  const root = palNodes?.root;
+  palState = null;
+  palNodes = null;
+  palEntries = [];
+  escDrop(palClose);
+  if (root) root.remove();
+  if (!silent && back && back.isConnected) back.focus();
+}
+
 // 슬랙에서 갓 들어온 할 일. 오늘 할지 나중에 할지는 여기서 직접 고른다.
 // 비어 있으면 섹션 자체를 숨겨서, 처리할 게 있을 때만 눈에 띄게 한다.
 function renderInbox(items) {
@@ -2488,6 +2853,8 @@ function renderIdeaCard(item) {
   const done = item.status === 'done';
   const card = document.createElement('div');
   card.className = 'card' + (done ? ' done' : '');
+  // 검색 팔레트가 이 줄을 찾아 옮겨 갈 수 있게 표식을 남긴다.
+  card.dataset.itemId = item.id;
 
   const body = document.createElement('div');
   body.className = 'body';
@@ -2947,6 +3314,10 @@ todayViewSeg?.querySelectorAll('button').forEach((button) => {
   });
 });
 renderTodayViewSeg();
+
+// 검색 팔레트를 여는 두 자리: 헤더의 `검색 ⌘K` 버튼, 레일 한 줄 요약의 `오늘 신규 N`.
+document.getElementById('searchEntryBtn')?.addEventListener('click', () => palOpen({}));
+document.getElementById('createdTodayBtn')?.addEventListener('click', () => palOpen({ newOnly: true }));
 
 // 나중에 할 일 서랍 — 머리줄 버튼으로 여닫고, 열어 둔 상태는 새로고침해도 그대로다.
 document.getElementById('laterTaskToggle')?.addEventListener('click', () => {

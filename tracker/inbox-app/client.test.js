@@ -267,6 +267,58 @@ function workflowsClient() {
   return app;
 }
 
+test('the palette narrows by kind, by "완료 제외" and by "오늘 신규", and says nothing without a query or a filter', () => {
+  const app = workflowsClient();
+  app.run(`var pool = [
+    { id: 'a', type: 'task', status: 'to-do', created: '2026-09-21', description: '권한 정책 정리' },
+    { id: 'b', type: 'bug', status: 'done', created: '2026-09-20', description: '권한 오류 수정' },
+    { id: 'c', type: 'check', status: 'to-do', created: '2026-09-21', description: '권한 범위 회신 받기' },
+    { id: 'd', type: 'decision', status: 'to-do', created: '2026-09-01', description: '권한은 팀장 승인으로' },
+    { id: 'e', type: 'idea', status: 'to-do', created: '2026-09-21', description: '다른 이야기' },
+  ]`);
+  const ids = state => JSON.parse(app.run(`JSON.stringify(palFilter(pool, { today: '2026-09-21', ...${state} }).map(i => i.id))`));
+  assert.deepEqual(ids("{}"), [], '검색어도 필터도 없으면 아무것도 내놓지 않는다');
+  assert.deepEqual(ids("{ query: '권한' }"), ['a', 'b', 'c', 'd']);
+  assert.deepEqual(ids("{ query: '권한 정리' }"), ['a'], '띄어쓴 낱말은 모두 들어 있어야 한다');
+  assert.deepEqual(ids("{ query: '권한', type: 'task' }"), ['a', 'b'], '`할 일`은 버그까지 함께 본다');
+  assert.deepEqual(ids("{ query: '권한', type: 'check' }"), ['c']);
+  assert.deepEqual(ids("{ query: '권한', hideDone: true }"), ['a', 'c', 'd']);
+  assert.deepEqual(ids("{ newOnly: true }"), ['a', 'c', 'e'], '검색어가 없어도 오늘 들어온 것은 전부 보여 준다');
+  assert.deepEqual(ids("{ newOnly: true, query: '권한' }"), ['a', 'c']);
+  assert.deepEqual(ids("{ query: '권한', type: 'meeting' }"), [], '회의 필터에서는 항목을 섞지 않는다');
+});
+
+test('the palette meeting filter keeps drafts to review on top and can narrow to unresolved meetings', () => {
+  const app = workflowsClient();
+  app.run(`var events = [
+    { id: 'm1', date: '2026-09-20', start: '10:00', title: '주간 운영 회의', drafts: [{ description: '권한 정책 초안' }] },
+    { id: 'm2', date: '2026-09-21', start: '09:00', title: '가입 개선 킥오프' },
+    { id: 'm3', date: '2026-09-21', start: '14:00', title: '지표 점검' },
+  ];
+  var related = { m2: [{ id: 'x', status: 'to-do', description: '권한 범위 확인' }], m3: [{ id: 'y', status: 'done', description: '끝난 일' }] };
+  var itemsOf = id => related[id] || [];`);
+  const ids = state => JSON.parse(app.run(`JSON.stringify(palMeetings(events, { today: '2026-09-21', ...${state} }, itemsOf).map(e => e.id))`));
+  assert.deepEqual(ids("{ type: 'meeting' }"), ['m1', 'm2', 'm3'], '검색어가 없으면 전체, 검토할 초안이 있는 회의가 먼저');
+  assert.deepEqual(ids("{ type: 'meeting', unresolved: true }"), ['m2'], '미해결 항목이 남은 회의만');
+  assert.deepEqual(ids("{ type: 'meeting', reviewOnly: true }"), ['m1']);
+  assert.deepEqual(ids("{ type: 'meeting', newOnly: true }"), ['m2', 'm3'], '오늘 열린 회의만, 하루 안에서는 회의 순서대로');
+  assert.deepEqual(ids("{ query: '권한' }"), ['m1', 'm2'], '초안 문구와 이 회의에서 나온 항목까지 찾는다');
+  assert.deepEqual(ids("{}"), [], '검색어도 회의 필터도 없으면 회의를 끼워 넣지 않는다');
+  assert.deepEqual(ids("{ query: '권한', type: 'task' }"), [], '다른 종류를 고르면 회의는 빠진다');
+});
+
+test('the palette highlights the matched letters and escapes the person’s own text first', () => {
+  const app = pureClient();
+  const mark = (text, query) => app.run(`palHighlight(${JSON.stringify(text)}, ${JSON.stringify(query)})`);
+  assert.equal(mark('가입 개선', '개선'), '가입 <mark class="d-mark">개선</mark>');
+  assert.equal(mark('가입 개선', ''), '가입 개선', '검색어가 없으면 형광 표시도 없다');
+  assert.equal(mark('AB-1 Login', 'login'), 'AB-1 <mark class="d-mark">Login</mark>', '대소문자는 가리지 않는다');
+  const escaped = mark('<b>권한</b> 정리', '권한');
+  assert.match(escaped, /&lt;b&gt;<mark class="d-mark">권한<\/mark>&lt;\/b&gt;/, '사람이 쓴 글자는 escape한 뒤에만 표시를 끼운다');
+  assert.doesNotMatch(escaped, /<b>/);
+  assert.equal(mark('권한', '<b>'), '권한', '검색어도 그대로 끼워 넣지 않는다');
+});
+
 test('meeting list chips put the drafts to review first and hide zero counts', () => {
   const app = workflowsClient();
   app.run(`workflowData = { meetings: [], items: [

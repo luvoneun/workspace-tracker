@@ -279,7 +279,10 @@ body {
 .d-gear.has-alert .d-baddot { display: block; }
 
 /* ---------- 페이지 ---------- */
-.page { max-width: 1240px; margin: 0 auto; padding: 16px 20px 48px; }
+/* 오늘 탭은 레일이 창 왼쪽 끝에 붙어야 해서 페이지를 가운데로 모으지 않는다.
+   가운데 폭이 필요한 탭(아이디어·결정, 주간요약)에만 최대 폭을 준다. */
+.page { padding: 16px 20px 48px; }
+#gridRecords, #gridWeekly { max-width: 1240px; margin-left: auto; margin-right: auto; }
 .pull-indicator { display: grid; place-items: center; }
 
 /* ---------- 복구 필요 배너 (헤더 아래 전체 폭 띠, 스스로 사라지지 않는다) ---------- */
@@ -385,19 +388,30 @@ body {
   padding: 2px 2px 8px;
   font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums;
 }
+/* `오늘 신규 N`은 누를 수 있다 — 오늘 들어온 것만 팔레트로 모아 본다(조용한 글자 버튼) */
+.d-qlink {
+  height: 20px; padding: 0 4px; border: 0; border-radius: var(--r-xs);
+  background: none; color: inherit; font: inherit; cursor: pointer;
+}
+.d-qlink:hover { background: var(--rail-hover); color: var(--text); }
 
 /* ---------- 오늘 레이아웃 (레일 250px + 본문) ---------- */
 /* 레일은 페이지 왼쪽 여백(20px)까지 물고 들어가므로 열은 그만큼 좁게 잡는다 — 눈에 보이는 폭이 250px */
 #gridToday { grid-template-columns: 230px minmax(0, 1fr); gap: 0; align-items: stretch; }
 #gridToday { min-height: calc(100dvh - var(--hdr) - 64px); }
+/* 창이 아주 넓어도 제목과 기한이 과하게 멀어지지 않게 목록 면의 폭을 묶고 왼쪽에 붙인다(20px은 안쪽 여백) */
 .col-center { min-width: 0; padding-left: 20px; }
+#gridToday .col-center { max-width: 1120px; }
 #inboxZone { margin-bottom: 12px; }
 #inboxZone[hidden] { display: none; }
 #todayTaskZone { margin-bottom: 12px; }
 
 /* ---------- 왼쪽 레일 ---------- */
-/* .page의 좌·상·하 여백을 되물려 레일이 페이지 끝까지 닿게 한다(상자가 아니라 기둥으로 보이게) */
+/* 창 왼쪽 끝에 붙어 헤더 아래 전체 높이를 차지하는 기둥. 길어지면 레일만 따로 스크롤한다.
+   (.page의 좌·상 여백을 되물려 창 끝까지 닿게 한다) */
 .d-rail {
+  position: sticky; top: var(--hdr); align-self: start;
+  height: calc(100dvh - var(--hdr)); overflow-y: auto; overscroll-behavior: contain;
   background: var(--rail); border-right: 1px solid var(--border);
   margin: -16px 0 -48px -20px; padding: 6px 10px 28px; min-width: 0;
 }
@@ -733,8 +747,8 @@ textarea.d-dtitle {
 }
 body.later-open .d-drawer { transform: none; visibility: visible; }
 .page { transition: padding-right 160ms var(--ease); }
-/* 본문 오른쪽 끝이 서랍 왼쪽 선에 딱 닿게 — 가운데 정렬된 페이지의 바깥 여백만큼 덜 민다 */
-body.later-open .page { padding-right: max(20px, calc(424px - max(0px, (100vw - 1240px) / 2))); }
+/* 페이지가 창 왼쪽에서 시작하므로 서랍 폭(404px)에 여백 20px만 더해 밀면 된다 */
+body.later-open .page { padding-right: 424px; }
 .d-dhd {
   display: flex; align-items: center; gap: 8px; flex: none;
   height: 44px; padding: 0 10px 0 var(--pad); border-bottom: 1px solid var(--hair);
@@ -758,6 +772,64 @@ body.later-open .page { padding-right: max(20px, calc(424px - max(0px, (100vw - 
 .d-dbody .d-proj { display: none; }
 .d-dbody .d-meta { grid-area: mt; justify-content: flex-start; gap: 10px; font-size: 11.5px; }
 .d-dbody .d-meta:empty { display: none; }
+
+/* ---------- ⌘K 검색 팔레트 ----------
+   가림막 위에 떠 있는 한 겹. 위에서 84px, 폭 620px, 결과는 34px 한 줄이다. */
+.d-pal {
+  position: fixed; inset: 0; z-index: 60; background: var(--scrim);
+  display: grid; justify-items: center; align-items: start; padding: 84px 16px 16px;
+}
+.d-palbox {
+  display: flex; flex-direction: column;
+  width: min(620px, 100vw - 32px); max-height: calc(100dvh - 100px);
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r);
+  box-shadow: var(--pop); overflow: hidden;
+  animation: d-pal-in 140ms var(--ease);
+}
+@keyframes d-pal-in { from { transform: translateY(-6px); opacity: 0; } to { transform: none; opacity: 1; } }
+.d-palin {
+  display: flex; align-items: center; gap: 10px; flex: none;
+  height: 46px; padding: 0 14px; border-bottom: 1px solid var(--hair); color: var(--dim);
+}
+.d-palin input {
+  flex: 1; min-width: 0; height: 100%; border: 0; background: none; outline: none;
+  color: var(--text); font-family: inherit; font-size: 14.5px;
+}
+.d-palin input::placeholder { color: var(--dim); }
+/* 필터 칩 — 화면에서 알약 모양이 허락된 유일한 자리다(지금 고른 것을 보여 준다) */
+.d-palfil {
+  display: flex; align-items: center; gap: 3px; flex-wrap: wrap; flex: none;
+  padding: 7px 10px; border-bottom: 1px solid var(--hair);
+}
+.d-palfil .d-chip { border-radius: 99px; }
+.d-palfil .sep { width: 1px; height: 14px; background: var(--border); margin: 0 5px; }
+.d-palnew { display: inline-flex; align-items: center; gap: 2px; padding-right: 2px; }
+.d-palnew .d-iconbtn { width: 20px; height: 20px; color: inherit; }
+.d-palres { flex: 1; min-height: 0; overflow: auto; padding: 5px; }
+.d-pres {
+  display: grid; grid-template-columns: 58px minmax(0, 1fr) 96px 78px;
+  align-items: center; gap: 10px; width: 100%; height: 34px; padding: 0 9px;
+  border-radius: var(--r-xs); cursor: pointer;
+}
+.d-pres.is-mtg { grid-template-columns: 58px 100px minmax(0, 1fr) 86px 72px; }
+.d-pres .tag { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.d-pres .ti { font-size: 13.5px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.d-pres .when, .d-pres .pj, .d-pres .st {
+  font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.d-pres .st { text-align: right; font-variant-numeric: tabular-nums; }
+.d-pres:hover { background: var(--hover); }
+.d-pres.is-sel { background: var(--sel); }
+.d-pres.is-sel .ti { font-weight: 600; color: var(--accent-text); }
+.d-mark { background: var(--mark); color: var(--text); border-radius: 2px; padding: 0 1px; }
+.d-palfoot {
+  flex: none; padding: 8px 14px; border-top: 1px solid var(--hair);
+  font-size: 11.5px; color: var(--muted);
+}
+
+/* 팔레트에서 연 결정·아이디어 줄을 잠깐 밝힌다 */
+.is-flash { animation: d-flash 1.6s var(--ease) both; }
+@keyframes d-flash { 0%, 55% { box-shadow: inset 0 0 0 2px var(--accent); } 100% { box-shadow: none; } }
 
 /* 카드 위의 ⋯ 버튼 — 옛 카드들(결정·아이디어)은 아직 오른쪽 위 모서리에 둔다 */
 .card > .d-more { position: absolute; top: 8px; right: 8px; }
@@ -808,7 +880,9 @@ body.later-open .page { padding-right: max(20px, calc(424px - max(0px, (100vw - 
   #gridToday { grid-template-columns: minmax(0, 1fr); min-height: 0; }
   #gridToday .col-center { order: -1; padding-left: 0; }
   #gridToday .col-left { order: 1; }
+  #gridToday .col-center { max-width: none; }
   .d-rail {
+    position: static; height: auto; overflow: visible;
     border-right: 0; border-top: 1px solid var(--border);
     margin: 14px -16px -80px; padding: 10px 16px 24px;
   }
@@ -835,6 +909,24 @@ body.later-open .page { padding-right: max(20px, calc(424px - max(0px, (100vw - 
   .d-qa, .d-dbody .d-qa { font-size: 16px; }
   .d-banner { padding: 10px 16px; }
   .d-toast { left: 16px; right: 16px; bottom: 16px; max-width: none; }
+
+  /* 팔레트는 화면 전체 폭으로, 결과는 `종류 | 나머지` 두 열 44px 이상으로 쌓인다 */
+  .d-pal { padding: 52px 0 0; }
+  .d-palbox { width: 100vw; max-width: none; max-height: calc(100dvh - 52px); border-radius: var(--r) var(--r) 0 0; }
+  .d-palin input { font-size: 16px; }
+  .d-pres, .d-pres.is-mtg {
+    grid-template-columns: 52px minmax(0, 1fr);
+    height: auto; min-height: 44px; padding: 5px 9px; row-gap: 1px;
+  }
+  .d-pres .tag { grid-column: 1; grid-row: 1 / span 2; align-self: start; padding-top: 2px; }
+  .d-pres .ti { grid-column: 2; grid-row: 1; }
+  .d-pres .st { grid-column: 2; grid-row: 2; text-align: left; }
+  .d-pres .pj { display: none; }
+  .d-pres.is-mtg .tag { grid-row: 1 / span 3; }
+  .d-pres.is-mtg .when { grid-column: 2; grid-row: 2; }
+  .d-pres.is-mtg .ti { grid-row: 1; }
+  .d-pres.is-mtg .st { grid-row: 3; }
+  .d-pres .st:empty, .d-pres .when:empty { display: none; }
 
   /* 행은 두 줄로 쌓이고, 숨어 있던 동작은 항상 보인다 */
   .d-row, .d-row.is-sug {
