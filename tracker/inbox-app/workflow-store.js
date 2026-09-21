@@ -10,6 +10,7 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     if (!fs.existsSync(filename)) return { items: {}, meetings: {} };
     const state = JSON.parse(fs.readFileSync(filename, 'utf8'));
     if (!state.items || !state.meetings) throw new Error('업무 연결 기록을 읽지 못했어요.');
+    // projectLinks 칸이 없는 옛 파일은 "연결이 하나도 없다"로 읽힌다(고쳐 쓰지 않는다).
     return state;
   }
   function write(state) {
@@ -79,7 +80,13 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     const meetings = { ...state.meetings };
     for (const event of currentMeetings()) meetings[event.id] = { ...event, ...meetings[event.id] };
     for (const [id, entry] of Object.entries(draftsByMeeting(state))) meetings[id] = { ...entry.event, ...meetings[id], tiroNotes: entry.notes, drafts: entry.drafts };
-    return { items, meetings: Object.values(meetings).sort((a, b) => `${b.date} ${b.start}`.localeCompare(`${a.date} ${a.start}`)) };
+    return {
+      items,
+      meetings: Object.values(meetings).sort((a, b) => `${b.date} ${b.start}`.localeCompare(`${a.date} ${a.start}`)),
+      // 손으로 걸어 둔 `그룹 이름 → 지라 키`. 화면은 지금 보고 있는 프로젝트의 것만 읽으므로,
+      // 그룹이 없어져 고아가 된 연결이 남아 있어도 아무 자리에도 나타나지 않는다.
+      projectLinks: { ...(state.projectLinks || {}) },
+    };
   }
   function patchItem({ id, ...patch }) {
     const all = refs();
@@ -185,6 +192,48 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     write(state);
     return { ok: true, restored: created.length };
   }
+  // ---------- 직접 만든(그룹) 프로젝트 ↔ 지라 티켓 하나 (사람이 손으로 건다) ----------
+  // 항목을 `jira:KEY`로 옮겨 쓰지 않는다 — 프로젝트 이름이 바뀌고 되돌리기 어렵다.
+  // 여기 저장하는 것은 `그룹 이름 → 지라 키` 표 하나뿐이고, 저장 길은 다른 기능과 같다
+  // (idempotent → mutations.run → .workflow.json 원자적 쓰기).
+  const PROJECT_LINK_KEY_RE = /^[A-Z][A-Z0-9]*-\d+$/;
+  const linkGroupName = value => String(value || '').replace(/_/g, ' ');
+  // 앱이 실제로 프로젝트로 보여 주는 그룹 이름들 — 화면의 wfKey/wfMeetingKey와 같은 규칙이다
+  // (지라 키가 있는 항목은 지라 프로젝트이지 그룹이 아니다).
+  function groupNames(state) {
+    const names = new Set();
+    for (const item of Object.values(refs())) {
+      if (item.jira) continue;
+      const named = item.group || item.project;
+      if (named) names.add(linkGroupName(named));
+    }
+    for (const event of Object.values(state.meetings)) {
+      if (event.project && event.project.type === 'group' && event.project.value) names.add(linkGroupName(event.project.value));
+    }
+    return names;
+  }
+  // 저장하기 전에 보낸 값만 본다(지라에는 닿지 않는다) — 부르는 쪽이 여기서 통과한 키만
+  // 지라에서 읽어 보고, 읽히면 그때 linkProject로 저장한다.
+  function checkProjectLink({ project, jira }) {
+    if (typeof project !== 'string' || !project.startsWith('group:')) throw new Error('직접 만든 프로젝트에만 지라 티켓을 연결할 수 있어요.');
+    const name = project.slice('group:'.length).trim();
+    if (!name || name.length > 200 || /[\r\n]/.test(name)) throw new Error('프로젝트를 확인해 주세요.');
+    if (!groupNames(read()).has(name)) throw new Error('프로젝트를 찾을 수 없어요.');
+    const key = jira === undefined || jira === null || jira === '' ? null : jira;
+    if (key !== null && (typeof key !== 'string' || !PROJECT_LINK_KEY_RE.test(key))) throw new Error('지라 번호를 확인해 주세요.');
+    return { name, key };
+  }
+  function linkProject({ project, jira }) {
+    const { name, key } = checkProjectLink({ project, jira });
+    const state = read();
+    const links = { ...(state.projectLinks || {}) };
+    if (key) links[name] = key;
+    else delete links[name];
+    state.projectLinks = links;
+    write(state);
+    return { ok: true, project, jira: key };
+  }
+
   function link({ id, meetingId }) {
     if (!refs()[id]) throw new Error('항목을 찾을 수 없어요.');
     const state = read();
@@ -195,5 +244,5 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     write(state);
     return { ok: true };
   }
-  return { archive, snapshot, patchItem, saveMeeting, syncProject, capture, review, undoReview, link, outcome: id => read().items[id]?.outcome || '' };
+  return { archive, snapshot, patchItem, saveMeeting, syncProject, capture, review, undoReview, link, checkProjectLink, linkProject, outcome: id => read().items[id]?.outcome || '' };
 };

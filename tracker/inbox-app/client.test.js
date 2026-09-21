@@ -2989,3 +2989,199 @@ test('배포일을 고치는 길도 확인 줄을 거치고, 지우기까지 된
     { key: 'IO-48394', kind: 'versionEdit', versionId: '1', releaseDate: '2026-10-07' });
   assert.match(nodeText(fixture.confirm()), /이 버전을 쓰는 모든 티켓에 적용돼요/);
 });
+
+// ---------- 직접 만든(그룹) 프로젝트에 지라 티켓 연결 (BJLINK) ----------
+// 실제 지라는 부르지 않는다. 화면이 받는 모양(`/api/jira/issue`의 응답, `/api/items`의 `workflows`)만 가짜로 만든다.
+function jiraLinkClient({ issue = jiraIssue(), links = {}, connected = true, answer = null } = {}) {
+  const app = workflowsClient();
+  const calls = [];
+  app.context.fetch = async (url, options) => {
+    const method = (options && options.method) || 'GET';
+    calls.push({ url: String(url), method, body: options && options.body ? JSON.parse(options.body) : null });
+    if (String(url).includes('/api/project/jira-link')) return new Response(JSON.stringify(answer || { ok: true }));
+    // 가짜 지라는 물어본 키를 그대로 돌려준다(어느 티켓을 미리 보는지가 드러나게).
+    const asked = (String(url).match(/key=([^&]+)/) || [, ''])[1];
+    return new Response(JSON.stringify(connected ? { ok: true, connected: true, issue: { ...issue, key: decodeURIComponent(asked) || issue.key } } : { ok: true, connected: false }));
+  };
+  app.run(`latestData = { jiraSync: { used: true, connected: ${connected}, siteUrl: 'https://example-jira.test' } };`);
+  app.run(`workflowData = { items: [], meetings: [], projectLinks: ${JSON.stringify(links)} }; wfIndexData(); itemsById = new Map();`);
+  app.run(`jiraIssuesCache = [
+    { key: 'IO-12345', summary: '게시글 작성하기_게임 임베드' },
+    { key: 'PAY-77', summary: '정산 배치' },
+    { key: 'ZZ-9', summary: '이미 끝난 것', extra: true },
+  ]; jiraIssuesByKey = new Map(jiraIssuesCache.map(one => [one.key, one]));`);
+  app.run("jiraLink = { project: null, state: 'idle', query: '', error: '', issue: null, busy: false, onEsc: null };");
+  app.run("jiraCard = { key: null, state: 'idle', issue: null, error: '', at: 0, seq: 0 };");
+  app.run("lastMenu = null; uiMenu = (anchor, sections) => { lastMenu = sections; return null; };");
+  const posts = () => calls.filter(call => call.method === 'POST');
+  const row = () => app.nodes.get('jiraLinkRow');
+  const open = (projectKey) => { app.run(`document.getElementById('jiraLinkRow').dataset.project = '${projectKey}'`); app.run(`jiraLinkOpen('${projectKey}')`); };
+  return { app, calls, posts, row, open, node: () => row().children[0] };
+}
+// 오른쪽 면에 선 자리 하나를 dataset으로 찾는다(가짜 창에는 id로 찾는 길이 없다).
+const detailHost = (body, want) => (body.children || []).find(kid => kid && kid.dataset && kid.dataset[want] !== undefined) || null;
+
+test('BJLINK: 지라 키는 한 함수에서 나오고, 연결 줄은 아직 걸지 않은 그룹 프로젝트에만 선다', () => {
+  const { app } = jiraLinkClient({ links: { 운영툴: 'IO-12345' } });
+  assert.equal(app.run("jiraKeyOf('jira:AB-1')"), 'AB-1');
+  assert.equal(app.run("jiraKeyOf('group:운영툴')"), 'IO-12345', '손으로 건 그룹도 같은 함수에서 키가 나온다');
+  assert.equal(app.run("jiraKeyOf('group:가입 개선')"), '', '걸지 않은 그룹에는 키가 없다');
+  assert.equal(app.run("jiraKeyOf('__misc__')"), '');
+  const detail = (key, open = 2) => app.run(`(() => {
+    const body = document.createElement('div');
+    renderProjectDetail(body, { key: ${JSON.stringify(key)}, label: ${JSON.stringify(key)}, open: ${open} });
+    return body;
+  })()`);
+
+  const plainGroup = detail('group:가입 개선');
+  assert.equal(detailHost(plainGroup, 'jiraKey'), null, '걸지 않은 그룹에는 띠 카드 자리가 없다');
+  assert.equal(detailHost(plainGroup, 'project').dataset.project, 'group:가입 개선');
+  assert.equal(plainGroup.children[1].textContent, '열린 항목 2', '키가 없으니 조용한 줄도 그대로다');
+
+  const linkedGroup = detail('group:운영툴', 3);
+  assert.equal(detailHost(linkedGroup, 'jiraKey').dataset.jiraKey, 'IO-12345', '걸린 그룹에는 같은 띠 카드가 선다');
+  assert.equal(detailHost(linkedGroup, 'jiraKey').dataset.project, 'group:운영툴');
+  assert.equal(linkedGroup.children[0].textContent, '운영툴', '큰 제목은 프로젝트 이름 그대로다');
+  assert.equal(linkedGroup.children[1].textContent, '열린 항목 3 · IO-12345', '키는 그 아래 조용한 줄에만 붙는다(BKEY)');
+
+  const jiraProject = detail('jira:AB-1');
+  assert.equal(detailHost(jiraProject, 'jiraKey').dataset.jiraKey, 'AB-1');
+  assert.equal(detailHost(jiraProject, 'jiraKey').dataset.project, 'jira:AB-1');
+
+  assert.equal(detailHost(detail('__misc__'), 'project'), null, '`프로젝트 없음`에는 연결 줄이 없다');
+  app.run("latestData = { jiraSync: { used: false } };");
+  const off = detail('group:가입 개선');
+  assert.equal(detailHost(off, 'project'), null, '지라를 쓰지 않도록 설정했으면 아무것도 없다');
+});
+
+test('BJLINK: 지라 설정이 없으면 연결 줄 대신 `지라 연결이 필요해요`가 선다', () => {
+  const { app } = jiraLinkClient({ connected: false });
+  const node = app.run("jiraLinkNode('group:가입 개선')");
+  assert.equal(nodeText(node), '지라 연결이 필요해요 · 설정 방법');
+  const ready = jiraLinkClient().app.run("jiraLinkNode('group:가입 개선')");
+  assert.equal(nodeText(ready), '지라 티켓 연결');
+  assert.equal(nodeFind(ready, 'd-jlinkgo').className, 'd-link d-jlinkgo', '조용한 글자 버튼 한 개뿐이다');
+});
+
+test('BJLINK: 번호도 주소도 받고, 다른 지라의 주소는 받지 않는다', () => {
+  const { app } = jiraLinkClient();
+  const parse = value => JSON.parse(app.run(`JSON.stringify(jiraKeyFromInput(${JSON.stringify(value)}, 'https://example-jira.test'))`));
+  assert.deepEqual(parse('IO-12345'), { key: 'IO-12345' });
+  assert.deepEqual(parse('  io-12345 '), { key: 'IO-12345' }, '소문자로 적어도 받는다');
+  assert.deepEqual(parse('https://example-jira.test/browse/IO-12345'), { key: 'IO-12345' });
+  assert.deepEqual(parse('https://example-jira.test/issues/io-12345'), { key: 'IO-12345' });
+  assert.deepEqual(parse('https://EXAMPLE-JIRA.test/browse/IO-12345?atlOrigin=x'), { key: 'IO-12345' });
+  assert.deepEqual(parse('https://example-jira.test/jira/software/projects/IO/boards/3?selectedIssue=IO-12345'), { key: 'IO-12345' });
+  assert.deepEqual(parse('https://other-jira.test/browse/IO-12345'), { error: '설정한 지라의 주소가 아니에요.' });
+  assert.deepEqual(parse('https://example-jira.test/browse/'), { error: '주소에서 지라 번호를 찾지 못했어요.' });
+  assert.deepEqual(parse('그냥 글자'), { error: '지라 번호를 확인해 주세요.' });
+  assert.deepEqual(parse('   '), { error: '지라 번호나 주소를 적어 주세요.' });
+});
+
+test('BJLINK: 미리 보기를 거치기 전에는 `연결` 요청이 나가지 않는다', async () => {
+  const fixture = jiraLinkClient();
+  fixture.open('group:가입 개선');
+  const input = nodeFind(fixture.node(), 'in');
+  assert.equal(input.placeholder, '지라 번호나 주소 — 예: IO-12345');
+  // 한글을 조합하는 중의 Enter는 찾지 않는다.
+  input.value = 'IO-12345';
+  await input.listeners.keydown({ key: 'Enter', isComposing: true });
+  assert.equal(fixture.calls.length, 0);
+  // 미리 보기 없이 연결을 시키려 해도 아무것도 나가지 않는다.
+  await fixture.app.run("jiraLinkConnect('group:가입 개선', { key: 'IO-12345' }, { }, { })");
+  assert.equal(fixture.posts().length, 0);
+
+  await input.listeners.keydown({ key: 'Enter', isComposing: false });
+  assert.equal(fixture.calls.length, 1);
+  assert.match(fixture.calls[0].url, /\/api\/jira\/issue\?key=IO-12345$/);
+  assert.equal(fixture.calls[0].method, 'GET', '찾기는 읽기만 한다');
+  assert.equal(fixture.app.run('jiraLink.state'), 'preview');
+  const preview = fixture.node();
+  assert.match(nodeText(preview), /게시글 작성하기_게임 임베드/);
+  assert.match(nodeText(preview), /진행 중 · 담당 루본/);
+  assert.equal(nodeFind(preview, 'ky').textContent, 'IO-12345', '키는 조용한 글자로만 선다');
+  assert.equal(fixture.posts().length, 0, '미리 보기까지는 저장이 없다');
+  // 지라가 준 글자는 전부 textContent로만 들어간다(새 innerHTML을 쓰지 않는다).
+  assert.doesNotMatch(nodeHtml(preview), /게시글 작성하기|진행 중/);
+
+  const connect = (preview.children.find(kid => kid.className === 'acts').children || []).find(kid => kid.textContent === '연결');
+  await connect.listeners.click();
+  assert.deepEqual(fixture.posts().map(call => [call.url, call.body]), [
+    ['/api/project/jira-link', { project: 'group:가입 개선', jira: 'IO-12345' }],
+  ]);
+  assert.equal(fixture.app.run('jiraLink.state'), 'idle');
+  assert.match(fixture.app.nodes.get('liveRegion').textContent, /지라 티켓을 연결했어요/);
+});
+
+test('BJLINK: 못 찾으면 그 자리에 조용한 오류가 뜨고 적은 글자는 남는다', async () => {
+  const fixture = jiraLinkClient();
+  fixture.app.context.fetch = async () => new Response(JSON.stringify({ ok: false, error: '지라에서 이 티켓을 찾지 못했어요.', kind: 'notfound' }));
+  fixture.open('group:가입 개선');
+  await fixture.app.run("jiraLinkFind('group:가입 개선', 'IO-99999')");
+  assert.equal(fixture.app.run('jiraLink.state'), 'input');
+  assert.equal(nodeFind(fixture.node(), 'er').textContent, '지라에서 이 티켓을 찾지 못했어요.');
+  assert.equal(nodeFind(fixture.node(), 'in').value, 'IO-99999', '적은 글자는 그대로 남는다');
+  // 다른 지라 주소는 서버에 묻지도 않는다.
+  await fixture.app.run("jiraLinkFind('group:가입 개선', 'https://other-jira.test/browse/IO-1')");
+  assert.equal(nodeFind(fixture.node(), 'er').textContent, '설정한 지라의 주소가 아니에요.');
+});
+
+test('BJLINK: 내 담당 티켓 선택지는 `요약 · 키`로 최대 여덟 개, `그 밖의 이슈`는 빼고 입력으로 걸러진다', () => {
+  const { app } = jiraLinkClient();
+  assert.deepEqual(JSON.parse(app.run("JSON.stringify(jiraLinkSuggestions('').map(one => one.key))")), ['IO-12345', 'PAY-77']);
+  assert.deepEqual(JSON.parse(app.run("JSON.stringify(jiraLinkSuggestions('정산').map(one => one.key))")), ['PAY-77']);
+  assert.deepEqual(JSON.parse(app.run("JSON.stringify(jiraLinkSuggestions('io-12').map(one => one.key))")), ['IO-12345']);
+  app.run("document.getElementById('jiraLinkRow').dataset.project = 'group:가입 개선'; jiraLinkOpen('group:가입 개선')");
+  const picks = nodeFind(app.nodes.get('jiraLinkRow').children[0], 'opts');
+  assert.deepEqual(picks.children.map(kid => kid.textContent), ['내 담당 티켓', '게시글 작성하기_게임 임베드 · IO-12345', '정산 배치 · PAY-77']);
+});
+
+test('BJLINK: 이미 다른 프로젝트에 걸린 티켓도 막지 않고 조용히 알리기만 한다', async () => {
+  const fixture = jiraLinkClient({ links: { 운영툴: 'IO-48394' } });
+  fixture.open('group:가입 개선');
+  await fixture.app.run("jiraLinkFind('group:가입 개선', 'IO-48394')");
+  assert.match(nodeText(fixture.node()), /다른 프로젝트 '운영툴'에도 연결돼 있어요/);
+  const acts = fixture.node().children.find(kid => kid.className === 'acts');
+  assert.deepEqual(acts.children.map(kid => kid.textContent), ['취소', '연결'], '막지 않는다 — `연결`이 그대로 있다');
+});
+
+test('BJLINK: 띠 카드의 ⋯은 손으로 건 그룹 프로젝트에만 있고, 해제는 알림의 `되돌리기`로 되돌린다', async () => {
+  const fixture = jiraLinkClient({ links: { 운영툴: 'IO-48394' } });
+  const bare = fixture.app.run(`jiraStripCard(${JSON.stringify(jiraIssue())})`);
+  assert.equal(nodeFind(bare, 'd-more'), null, '예전처럼 부르면 ⋯이 없다');
+  const jiraProject = fixture.app.run(`jiraStripCard(${JSON.stringify(jiraIssue())}, 'jira:IO-48394')`);
+  assert.equal(nodeFind(jiraProject, 'd-more'), null, '`jira:KEY` 프로젝트에는 풀 연결이 없다');
+
+  const card = fixture.app.run(`jiraStripCard(${JSON.stringify(jiraIssue())}, 'group:운영툴')`);
+  const more = nodeFind(card, 'd-more');
+  assert.equal(more.getAttribute('aria-label'), '지라 연결 — 더 보기');
+  more.listeners.click({ stopPropagation() {} });
+  const menu = JSON.parse(fixture.app.run("JSON.stringify(lastMenu.flat().map(one => one.label))"));
+  assert.deepEqual(menu, ['지라 연결 해제']);
+
+  await fixture.app.run("lastMenu[0][0].onClick()");
+  assert.deepEqual(fixture.posts().map(call => call.body), [{ project: 'group:운영툴', jira: null }]);
+  const notice = fixture.app.nodes.get('liveRegion');
+  assert.match(notice.textContent, /지라 연결을 해제했어요/);
+  const undo = notice.children.find(kid => kid.textContent === '되돌리기');
+  await undo.listeners.click();
+  assert.deepEqual(fixture.posts().map(call => call.body), [
+    { project: 'group:운영툴', jira: null },
+    { project: 'group:운영툴', jira: 'IO-48394' },
+  ], '되돌리기는 같은 키로 다시 건다');
+  assert.match(fixture.app.nodes.get('liveRegion').textContent, /지라 티켓을 다시 연결했어요/);
+});
+
+test('BJLINK: 연결해도 다른 화면의 프로젝트 이름·키 표기는 그대로다', () => {
+  const before = jiraLinkClient();
+  const after = jiraLinkClient({ links: { 운영툴: 'IO-48394' } });
+  const names = app => JSON.parse(app.run(`JSON.stringify([
+    uiGroupLabel('group:운영툴'),
+    uiGroupLabel('group:운영툴', { withKey: true }),
+    uiProjectName({ group: '운영툴' }),
+    uiProjectName({ group: '운영툴' }, { picker: true }),
+    uiProjectColorKey({ group: '운영툴' }),
+  ])`));
+  assert.deepEqual(names(after.app), names(before.app));
+  assert.deepEqual(names(after.app), ['운영툴', '운영툴', '운영툴', '운영툴', '운영툴'], '어느 자리에도 키가 새로 나오지 않는다');
+});

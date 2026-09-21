@@ -1331,3 +1331,129 @@ test('복구가 필요한 동안에는 지라 쓰기도 막히고 조회만 된�
   assert.equal((await fetch(server.base + '/api/jira/issue?key=AB-1')).status, 200);
   assert.equal((await fetch(server.base + '/api/jira/options?key=AB-1')).status, 200);
 });
+
+// ---------- 직접 만든(그룹) 프로젝트 ↔ 지라 티켓 연결 (BJLINK) ----------
+// 여기서도 실제 지라에는 닿지 않는다: 아래 서버는 자기 임시 폴더의 가짜 설정·가짜 토큰을 쓰고,
+// 지라 주소로 나가는 fetch는 자식 프로세스 안의 가짜 응답이 전부 가로챈다.
+const JIRA_LINK_SITE = 'https://link-jira.test';
+// 가짜 지라를 끼운 서버를 하나 띄운다(설정·토큰 파일은 그 임시 폴더 안에만 있다).
+async function startLinkedJiraServer(t, seed) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-jiralink-'));
+  seed(home);
+  const tokenFile = path.join(home, '.jira_token_fixture');
+  fs.writeFileSync(tokenFile, 'fixture-token-never-real\n');
+  const config = path.join(home, 'workspace.config.json');
+  fs.writeFileSync(config, JSON.stringify({ jira: { siteUrl: JIRA_LINK_SITE, email: 'fixture@example.test', tokenFile } }));
+  const known = { 'IO-12345': '게시글 작성하기_게임 임베드' };
+  const wrapper = path.join(home, 'fake-jira-server.js');
+  fs.writeFileSync(wrapper, `'use strict';
+const SITE = ${JSON.stringify(JIRA_LINK_SITE)};
+const KNOWN = ${JSON.stringify(known)};
+const realFetch = globalThis.fetch;
+globalThis.fetch = async (input, init) => {
+  const url = String(input && input.url ? input.url : input);
+  if (!url.startsWith(SITE)) return realFetch(input, init);
+  const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  const hit = url.match(/\\/rest\\/api\\/3\\/issue\\/([A-Z][A-Z0-9]*-\\d+)/);
+  if (hit && KNOWN[hit[1]]) return json({ fields: { summary: KNOWN[hit[1]], status: { name: '진행 중', statusCategory: { key: 'indeterminate' } }, issuetype: { name: '스토리' }, assignee: { displayName: '루본' }, duedate: null, fixVersions: [], subtasks: [] } });
+  if (hit) return json({ errorMessages: ['no issue'] }, 404);
+  return json({ issues: [] });
+};
+const { server } = require(${JSON.stringify(path.join(__dirname, 'server.js'))});
+server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => console.log('ready'));
+`);
+  const port = await freePort();
+  const child = spawn(process.execPath, [wrapper], {
+    env: { ...process.env, WORKSPACE_DATA_DIR: home, WORKSPACE_PORT: String(port), WORKSPACE_NO_OPEN: '1', WORKSPACE_HOST: '', WORKSPACE_CONFIG: config },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let log = '';
+  child.stdout.on('data', chunk => { log += chunk; });
+  child.stderr.on('data', chunk => { log += chunk; });
+  t.after(() => { child.kill('SIGKILL'); fs.rmSync(home, { recursive: true, force: true }); });
+  const origin = `http://127.0.0.1:${port}`;
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) throw new Error(`서버가 종료되었습니다 (${child.exitCode}): ${log}`);
+    try { if ((await fetch(origin + '/api/storage-status')).ok) return { home, origin }; } catch { /* 아직 안 떴다 */ }
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  throw new Error(`서버가 응답하지 않았습니다: ${log}`);
+}
+const linkPost = (origin, body) => fetch(origin + '/api/project/jira-link', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+}).then(async response => ({ status: response.status, ...await response.json() }));
+
+test('지라 연결은 직접 만든 프로젝트에만, 형식이 맞는 키로만, 지라에 연결돼 있을 때만 걸린다', async () => {
+  // 이 서버에는 지라 설정이 없다(테스트 맨 위의 `absent.config.json`) — 연결은 전부 거절된다.
+  assert.equal((await post('/api/today-task/create', { description: '연결 실험용 업무', group: '연결 실험' })).ok, true);
+  const workflowFile = path.join(directory, '.workflow.json');
+  const before = fs.existsSync(workflowFile) ? fs.readFileSync(workflowFile, 'utf8') : null;
+  const refuse = async (body, message) => {
+    const answer = await linkPost(base, body);
+    assert.equal(answer.status, 400, JSON.stringify(body));
+    assert.equal(answer.error, message);
+  };
+  await refuse({ project: 'jira:IO-12345', jira: 'IO-12345' }, '직접 만든 프로젝트에만 지라 티켓을 연결할 수 있어요.');
+  await refuse({ project: '연결 실험', jira: 'IO-12345' }, '직접 만든 프로젝트에만 지라 티켓을 연결할 수 있어요.');
+  await refuse({ project: 'group:없는 프로젝트', jira: 'IO-12345' }, '프로젝트를 찾을 수 없어요.');
+  await refuse({ project: 'group:연결 실험', jira: 'io-12345' }, '지라 번호를 확인해 주세요.');
+  await refuse({ project: 'group:연결 실험', jira: 'IO-' }, '지라 번호를 확인해 주세요.');
+  // 키는 맞지만 지라에 연결돼 있지 않다 — 읽어 볼 수 없으므로 걸지 않는다.
+  await refuse({ project: 'group:연결 실험', jira: 'IO-12345' }, '지라 연결이 필요해요.');
+  assert.equal(fs.existsSync(workflowFile) ? fs.readFileSync(workflowFile, 'utf8') : null, before, '거절된 요청은 파일을 고치지 않는다');
+  // 해제는 지라에 묻지 않는다 — 걸린 것이 없어도 조용히 통과하고, 목록에도 연결이 없다.
+  assert.equal((await linkPost(base, { project: 'group:연결 실험', jira: null })).ok, true);
+  assert.deepEqual((await items()).workflows.projectLinks, {});
+});
+
+test('지라 티켓 하나를 그룹 프로젝트에 걸고 풀 수 있다 — 저장 전에 지라에서 읽어 보고, 옛 파일도 그대로 읽힌다', async (t) => {
+  const server = await startLinkedJiraServer(t, (home) => {
+    fs.writeFileSync(path.join(home, 'tasks.md'), '# Tasks\n- 정산 배치 설계 검토하기 #task[id:lk01 status:to-do created:2026-09-20 group:결제_리뉴얼]\n');
+    // projectLinks 칸이 없는 옛 파일 — 빈 연결로 읽혀야 한다.
+    fs.writeFileSync(path.join(home, '.workflow.json'), JSON.stringify({ items: {}, meetings: {} }));
+  });
+  const read = async () => (await (await fetch(server.origin + '/api/items')).json());
+  const first = await read();
+  assert.deepEqual(first.workflows.projectLinks, {}, '옛 파일은 빈 연결로 읽힌다');
+  assert.equal(first.jiraSync.connected, true);
+  assert.equal(first.jiraSync.siteUrl, JIRA_LINK_SITE, '화면이 붙여 넣은 주소를 견줄 수 있게 주소만 싣는다');
+  assert.equal(JSON.stringify(first).includes('fixture-token-never-real'), false, '토큰은 어디에도 싣지 않는다');
+  assert.equal(JSON.stringify(first).includes('fixture@example.test'), false, '이메일도 싣지 않는다');
+
+  // 지라에 없는 티켓은 걸리지 않는다(저장도 하지 않는다).
+  const missing = await linkPost(server.origin, { project: 'group:결제 리뉴얼', jira: 'IO-99999' });
+  assert.equal(missing.status, 400);
+  assert.equal(missing.error, '지라에서 이 티켓을 찾지 못했어요.');
+  assert.deepEqual((await read()).workflows.projectLinks, {});
+
+  // 지라에서 읽히는 티켓만 걸린다. 파일 표기(`결제_리뉴얼`)와 화면 표기(`결제 리뉴얼`)는 한 꼴로 맞춘다.
+  const linked = await linkPost(server.origin, { project: 'group:결제 리뉴얼', jira: 'IO-12345' });
+  assert.deepEqual(linked, { status: 200, ok: true, project: 'group:결제 리뉴얼', jira: 'IO-12345' });
+  assert.deepEqual((await read()).workflows.projectLinks, { '결제 리뉴얼': 'IO-12345' });
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(server.home, '.workflow.json'), 'utf8')).projectLinks, { '결제 리뉴얼': 'IO-12345' });
+  // 프로젝트 이름도 항목도 그대로다 — 붙은 것은 연결 표시뿐이다.
+  const task = (await read()).todayTasks.concat((await read()).laterTasks).find(item => item.id === 'lk01');
+  assert.equal(task.group, '결제 리뉴얼');
+  assert.equal(task.jira, null);
+
+  // 같은 내용을 같은 식별자로 다시 보내면 한 번만 쓴다(기존 idempotency 규칙 그대로).
+  const key = 'bjlink-idempotency-key-0001';
+  const send = () => fetch(server.origin + '/api/project/jira-link', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key }, body: JSON.stringify({ project: 'group:결제 리뉴얼', jira: null }),
+  }).then(response => response.json());
+  assert.deepEqual(await send(), { ok: true, project: 'group:결제 리뉴얼', jira: null });
+  assert.deepEqual(await send(), { ok: true, project: 'group:결제 리뉴얼', jira: null });
+  assert.deepEqual((await read()).workflows.projectLinks, {}, '해제하면 칸에서 사라진다');
+});
+
+test('복구가 필요한 동안에는 지라 연결도 걸리지 않는다', async (t) => {
+  const server = await startServer(t, (home) => {
+    fs.writeFileSync(path.join(home, 'tasks.md'), '# Tasks\n- 막힌 저장 #task[id:lk02 status:to-do created:2026-09-20 group:운영툴]\n');
+    fs.writeFileSync(path.join(home, '.mutation-journal.json'), journalEntry(path.join(home, 'tasks.md'), '# Tasks\n', '# Tasks\n- 중단된 저장\n'));
+    fs.writeFileSync(path.join(home, '.mutation.lock'), String(deadPid()));
+  });
+  const blocked = await linkPost(server.base, { project: 'group:운영툴', jira: null });
+  assert.equal(blocked.status, 503);
+  assert.match(blocked.error, /저장을 멈췄어요/, '앱 저장소가 아픈 동안에는 연결도 걸지 않는다');
+});

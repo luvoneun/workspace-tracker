@@ -1513,6 +1513,48 @@ body.batch-open .d-toast { bottom: 76px; }
   margin: 12px 0 4px; font-size: 13px; color: var(--dim);
 }
 .d-jline .sep { color: var(--dim); }
+/* 아직 지라를 걸지 않은 그룹 프로젝트의 `지라 티켓 연결` — 같은 조용한 줄이되 누르는 자리가 28px이다 */
+.d-jline .d-jlinkgo { display: inline-flex; align-items: center; min-height: 28px; padding: 0 4px; margin-left: -4px; }
+/* 손으로 건 연결을 푸는 ⋯ — 카드 첫 줄의 새로고침과 같은 28px 아이콘 버튼이다 */
+.d-jira .top .d-more { flex: none; width: 28px; height: 28px; color: var(--dim); }
+
+/* 지라 티켓을 손으로 거는 줄 — 띠 카드가 서는 그 자리에서 입력 → 미리 보기로만 넓어진다
+   (새 창을 띄우지 않는다). 판은 확인 줄과 같은 `--sel`이고 새 색은 쓰지 않는다 */
+.d-jlink {
+  display: grid; gap: 8px; margin: 12px 0 4px; padding: 12px 14px;
+  border-radius: var(--r-sm); background: var(--sel); font-size: 13px; color: var(--muted);
+}
+.d-jlink .row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.d-jlink .in {
+  flex: 1 1 240px; min-width: 0; height: 32px; padding: 0 10px; border: 0; border-radius: var(--r-xs);
+  background: var(--field); font-family: inherit; font-size: 13.5px; color: var(--text);
+}
+.d-jlink .in::placeholder { color: var(--dim); }
+.d-jlink .in:focus { outline: none; background: var(--surface); box-shadow: 0 0 0 2px var(--accent); }
+.d-jlink .row .d-btn { background: var(--surface); }
+.d-jlink .er { color: var(--urgent); }
+.d-jlink .note { color: var(--dim); }
+/* 미리 보기 한 줄: 요약이 먼저, 상태·담당은 그 뒤, 키는 조용한 글자로만(BKEY) */
+.d-jlink .pv { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.d-jlink .pv .sm { font-weight: 600; color: var(--text); }
+.d-jlink .pv .ky { font-size: 12px; color: var(--dim); }
+/* 곁들이는 선택지(내 담당 티켓) — 비면 자리 자체가 없다 */
+.d-jlink .opts { display: grid; gap: 2px; }
+.d-jlink .opts:empty { display: none; }
+.d-jlink .pk {
+  display: flex; align-items: center; min-height: 28px; padding: 0 8px; margin: 0 -8px;
+  border: 0; background: none; border-radius: var(--r-xs);
+  font-family: inherit; font-size: 13px; font-weight: 500; color: var(--muted); text-align: left; cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  transition: background 170ms var(--ease), color 170ms var(--ease);
+}
+.d-jlink .pk:hover { background: var(--hover); color: var(--text); }
+/* `연결`은 2차(연파랑), `취소`는 3차다 — 확인 줄과 같은 규칙 */
+.d-jlink .acts { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.d-jlink .acts .d-btn { background: var(--surface); }
+.d-jlink .acts .d-btn.acc { background: var(--accent-soft); color: var(--accent-text); }
+.d-jlink .acts .d-btn.acc:hover { background: var(--accent-strong); color: var(--on-fill); }
+.d-jlink .d-btn:disabled, .d-jlink .d-btn:disabled:hover { background: var(--neutral-bg); color: var(--dim); }
 /* 좁은 화면에서는 첫 줄이 두 줄로 나뉜다 — 요약이 먼저, 종류·담당과 링크가 그 아래 */
 @media (max-width: 640px) {
   .d-jira { padding: 12px 14px; }

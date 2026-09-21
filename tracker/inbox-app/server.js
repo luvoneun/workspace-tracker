@@ -454,17 +454,20 @@ const JIRA_EXTRA_HEADING = '## 업무에 연결된 그 밖의 이슈';
 
 // 지라 캐시가 언제 갱신됐는지. 자동 갱신이 실패해도 화면엔 낡은 목록이 그대로 뜨기 때문에,
 // 언제 기준인지 드러내서 낡은 걸 모른 채 고르는 일이 없게 한다.
+// `connected`·`siteUrl`은 지라 직접 읽기 설정이 있는지와 그 주소다 — 화면이 `지라 티켓 연결` 줄을
+// 세울지 정하고, 붙여 넣은 주소가 그 지라의 것인지 견주는 데 쓴다(토큰·이메일은 싣지 않는다).
 function getJiraSync() {
   if (!USES.jira) return { used: false };
+  const settings = { connected: jira.connected, siteUrl: JIRA_SITE_URL };
   const jiraPath = path.join(TRACKER_DIR, 'jira_issues.md');
-  if (!fs.existsSync(jiraPath)) return { lastSync: null, stale: true };
+  if (!fs.existsSync(jiraPath)) return { ...settings, lastSync: null, stale: true };
   const line = fs
     .readFileSync(jiraPath, 'utf-8')
     .split('\n')
     .find((l) => l.startsWith('마지막 갱신:'));
   const value = line ? line.replace('마지막 갱신:', '').trim() : '';
   const lastSync = value && value !== '-' ? value.slice(0, 10) : null;
-  return { lastSync, stale: !lastSync || lastSync < todayLocal() };
+  return { ...settings, lastSync, stale: !lastSync || lastSync < todayLocal() };
 }
 
 // 슬랙 캡처는 가져올 게 없으면 아무 흔적도 남기지 않아서, 토큰이 만료돼 조용히 멈춰도
@@ -1341,6 +1344,30 @@ const handleRequest = (req, res) => {
     return;
   }
 
+  // 직접 만든(그룹) 프로젝트에 지라 티켓 **하나**를 손으로 건다(`jira:KEY` 프로젝트에는 걸지 않는다 —
+  // 이미 지라다). 순서가 안전장치다: ① 보낸 값과 그 그룹이 앱에 실제로 있는지 먼저 보고
+  // ② 지라에서 그 티켓을 **읽을 수 있을 때만** ③ 앱의 기존 저장 길(idempotent → mutations.run)로 저장한다.
+  // `jira: null`이면 해제다 — 지라에는 아무것도 묻지 않는다. 업무·기록은 하나도 바뀌지 않는다.
+  if (url.pathname === '/api/project/jira-link' && req.method === 'POST') {
+    if (!USES.jira) { res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ ok: false, error: '지라를 쓰지 않도록 설정돼 있어요.' })); return; }
+    readBody(req).then(async (body) => {
+      const { key } = workflows.checkProjectLink(body || {});
+      if (key) {
+        const seen = await jira.read(key);
+        if (seen.ok === false) { const error = new Error(seen.error); error.status = 400; throw error; }
+        if (seen.connected === false) { const error = new Error('지라 연결이 필요해요.'); error.status = 400; throw error; }
+      }
+      return idempotent(req, body, () => workflows.linkProject(body));
+    }).then((result) => {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify(result));
+    }).catch((error) => {
+      res.writeHead(error.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: error.message, code: error.code }));
+    });
+    return;
+  }
+
   if (url.pathname === '/api/automation/status' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ automations: getAutomationStatus() }));
@@ -1706,6 +1733,9 @@ const mutations = require('./mutation-store')(TRACKER_DIR, [MEETING_LINKS_PATH, 
 // 지라 직접 읽기. 설정이 없으면 `connected:false`만 돌려주고 아무 데도 접속하지 않는다.
 // 토큰 파일은 서버의 읽기 묶음(readScope)을 쓰지 않는다 — 요청마다 새로 읽고 들고 있지 않으려고.
 const jira = require('./jira-client').createJiraApi({ config: CONFIG });
+// 화면이 붙여 넣은 지라 주소의 호스트를 견줄 때만 쓰는 값이다(주소는 이미 카드의 `지라에서 열기`에
+// 그대로 나가 있다). 이메일·토큰은 어디에도 싣지 않는다.
+const JIRA_SITE_URL = (require('./jira-client').jiraSettings(CONFIG) || {}).siteUrl || '';
 const transactional = fn => (...args) => mutations.run(() => fn(...args));
 setTrackField = transactional(setTrackField);
 setTrackDue = transactional(setTrackDue);

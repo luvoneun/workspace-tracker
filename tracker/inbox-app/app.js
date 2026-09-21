@@ -1105,8 +1105,20 @@ function jiraUsed() {
   return latestData?.jiraSync?.used !== false;
 }
 
+// 손으로 걸어 둔 `그룹 이름 → 지라 키` 표. 서버가 목록과 함께 보내 주고(`workflows.projectLinks`),
+// 여기서만 읽는다. 그룹이 없어져 고아가 된 연결은 아무도 묻지 않으므로 화면에 나타나지 않는다.
+function jiraProjectLinks() {
+  return (typeof workflowData === 'object' && workflowData && workflowData.projectLinks) || {};
+}
+
+// 이 프로젝트의 지라 키를 얻는 단 하나의 함수. `jira:KEY`는 키 그 자체이고, 직접 만든(그룹)
+// 프로젝트는 사람이 손으로 걸어 둔 티켓이 있으면 그 키다 — 띠 카드도 `열린 항목 N · KEY` 줄도
+// 여기서만 키를 얻어, 두 갈래의 프로젝트가 같은 길을 쓴다.
 function jiraKeyOf(projectKey) {
-  return typeof projectKey === 'string' && projectKey.startsWith('jira:') ? projectKey.slice('jira:'.length) : '';
+  if (typeof projectKey !== 'string') return '';
+  if (projectKey.startsWith('jira:')) return projectKey.slice('jira:'.length);
+  if (projectKey.startsWith('group:')) return jiraProjectLinks()[projectKey.slice('group:'.length)] || '';
+  return '';
 }
 
 // 상태는 범주로만 색이 붙는다(배지가 아니다): 진행=기본 · 완료=성공색 글자 · 할 일=회색.
@@ -1297,7 +1309,7 @@ document.addEventListener('click', (event) => {
 function jiraLockPicks(locked) {
   const card = jiraCardNode();
   if (!card || typeof card.querySelectorAll !== 'function') return;
-  card.querySelectorAll('.d-dpick, .d-jref').forEach((node) => { node.disabled = locked; });
+  card.querySelectorAll('.d-dpick, .d-jref, .d-more').forEach((node) => { node.disabled = locked; });
 }
 
 // 고르개를 여는 길 하나. 선택지를 못 읽으면 알림만 띄우고 메뉴를 열지 않는다.
@@ -1524,7 +1536,8 @@ function jiraConfirmRow(issue, plan) {
   return row;
 }
 
-function jiraStripBody(key) {
+// projectKey는 이 카드가 서 있는 프로젝트다 — `group:…`이면 손으로 건 연결이라 카드에 ⋯(해제)가 붙는다.
+function jiraStripBody(key, projectKey = '') {
   if (!key) return null;
   if (jiraCard.key !== key || jiraCard.state === 'loading' || jiraCard.state === 'idle') return jiraSkeleton();
   if (jiraCard.state === 'off') {
@@ -1533,12 +1546,12 @@ function jiraStripBody(key) {
   if (jiraCard.state === 'error') {
     return jiraQuietLine(jiraCard.error || '지라에 연결하지 못했어요.', '다시 시도', () => jiraCardLoad(key, { fresh: true }));
   }
-  return jiraStripCard(jiraCard.issue);
+  return jiraStripCard(jiraCard.issue, projectKey);
 }
 
 // B 띠 카드: 첫 줄(지라 표시 · 요약 · 종류/담당 · 지라에서 열기 · 새로고침),
 // 둘째 줄(지라 상태 · 배포 버전 · 기한), 셋째 줄(하위 티켓 진행률).
-function jiraStripCard(issue) {
+function jiraStripCard(issue, projectKey = '') {
   const card = document.createElement('div');
   card.className = 'd-jira';
   card.setAttribute('aria-label', '지라에서 읽어 온 지금 상태');
@@ -1574,6 +1587,15 @@ function jiraStripCard(issue) {
   refresh.insertAdjacentHTML('beforeend', uiIcon('refresh'));
   refresh.addEventListener('click', () => jiraCardLoad(issue.key, { fresh: true }));
   top.append(tag, name, sub, spacer, link, refresh);
+  // 손으로 건 연결을 푸는 자리는 여기 하나다. `jira:KEY` 프로젝트의 카드에는 ⋯가 없다 —
+  // 그 카드는 프로젝트가 곧 티켓이라 풀 연결이 아니다.
+  if (typeof projectKey === 'string' && projectKey.startsWith('group:')) {
+    const more = uiMoreButton('지라 연결 — 더 보기', () => [[
+      { label: '지라 연결 해제', onClick: () => jiraLinkRemove(projectKey, issue.key) },
+    ]]);
+    if (jiraBusy) more.disabled = true;
+    top.appendChild(more);
+  }
 
   const cells = document.createElement('div');
   cells.className = 'cells';
@@ -1621,7 +1643,7 @@ function jiraStripPaint() {
   const host = document.getElementById('jiraStrip');
   if (!host) return;
   const key = host.dataset.jiraKey || '';
-  const body = jiraStripBody(key);
+  const body = jiraStripBody(key, host.dataset.project || '');
   host.replaceChildren(...(body ? [body] : []));
 }
 
@@ -1662,6 +1684,259 @@ function jiraCardEnsure(key) {
   // 확인 줄이 떠 있거나 쓰는 중이면 뒤에서 값을 갈아 끼우지 않는다(무엇을 확인 중인지가 바뀌면 안 된다).
   if (jiraBusy || jiraConfirm) return;
   if (jiraCard.state === 'ok' && Date.now() - jiraCard.at > JIRA_REFRESH_MS) jiraCardLoad(key, { quiet: true });
+}
+
+// ---------- 직접 만든(그룹) 프로젝트에 지라 티켓 연결 (BJLINK) ----------
+// 프로젝트 이름과 항목들은 그대로 두고 **연결 표시만** 붙인다(항목을 `jira:KEY`로 옮겨 쓰지 않는다).
+// 지키는 것:
+// ① 미리 보기를 거치지 않으면 `연결` 요청이 나가지 않는다 — 보내는 함수는 상태가 `preview`일 때만 돈다.
+// ② 저장은 앱의 기존 길(`request` → `POST /api/project/jira-link`) 하나뿐이고, 서버는 저장 전에
+//    그 티켓을 지라에서 읽을 수 있는지 한 번 더 확인한다.
+// ③ 지라·사람이 준 글자는 전부 textContent로만 넣는다.
+// 프로젝트 하나 분량만 기억한다 — 다른 프로젝트로 옮기면 적던 것·미리 보던 것을 버린다.
+let jiraLink = { project: null, state: 'idle', query: '', error: '', issue: null, busy: false, onEsc: null };
+
+const jiraLinkHost = () => document.getElementById('jiraLinkRow');
+// 지라 직접 읽기 설정이 있는지와 그 주소 — 목록과 함께 온다(`jiraSync`). 토큰·이메일은 오지 않는다.
+const jiraLinkUsable = () => !!(latestData && latestData.jiraSync && latestData.jiraSync.connected);
+const jiraLinkSite = () => (latestData && latestData.jiraSync && latestData.jiraSync.siteUrl) || '';
+const jiraLinkIdle = project => ({ project, state: 'idle', query: '', error: '', issue: null, busy: false, onEsc: null });
+
+// 번호(`io-12345`처럼 소문자로 적어도 된다)나 지라 주소 하나에서 키를 뽑는다.
+// 주소일 때만 호스트를 견준다 — 다른 지라의 주소는 받지 않는다(엉뚱한 티켓에 걸리지 않게).
+const JIRA_LINK_KEY_RE = /[A-Za-z][A-Za-z0-9]*-\d+/;
+const jiraLinkHostOf = value => (String(value || '').match(/^https?:\/\/([^/?#]+)/i) || [, ''])[1].toLowerCase();
+function jiraKeyFromInput(text, siteUrl) {
+  const value = String(text || '').trim();
+  if (!value) return { error: '지라 번호나 주소를 적어 주세요.' };
+  if (/^https?:\/\//i.test(value)) {
+    const site = jiraLinkHostOf(siteUrl);
+    if (site && jiraLinkHostOf(value) !== site) return { error: '설정한 지라의 주소가 아니에요.' };
+    const found = value.replace(/^https?:\/\/[^/?#]*/i, '').match(JIRA_LINK_KEY_RE);
+    if (!found) return { error: '주소에서 지라 번호를 찾지 못했어요.' };
+    return { key: found[0].toUpperCase() };
+  }
+  const key = value.toUpperCase();
+  return /^[A-Z][A-Z0-9]*-\d+$/.test(key) ? { key } : { error: '지라 번호를 확인해 주세요.' };
+}
+
+// 고르기 쉬우라고 곁들이는 선택지 — 내 담당 지라 목록(스냅샷)에서 최대 여덟 개. `그 밖의 이슈`는 뺀다.
+function jiraLinkSuggestions(query) {
+  const words = String(query || '').trim().toLocaleLowerCase();
+  return (jiraIssuesCache || []).filter(issue => issue && issue.key && !issue.extra)
+    .filter(issue => !words || `${issue.summary || ''} ${issue.key}`.toLocaleLowerCase().includes(words))
+    .slice(0, 8);
+}
+
+// 같은 티켓이 다른 프로젝트에도 걸려 있으면 막지 않고 조용히 알리기만 한다.
+function jiraLinkOtherProject(projectKey, key) {
+  const links = jiraProjectLinks();
+  return Object.keys(links).find(group => links[group] === key && `group:${group}` !== projectKey) || '';
+}
+
+function jiraLinkPaint() {
+  const host = jiraLinkHost();
+  if (!host) return;
+  host.replaceChildren(jiraLinkNode(host.dataset.project || ''));
+}
+function jiraLinkEnsure(projectKey) {
+  if (jiraLink.project === projectKey) return;
+  if (jiraLink.onEsc) escDrop(jiraLink.onEsc);
+  jiraLink = jiraLinkIdle(projectKey);
+}
+function jiraLinkReset(repaint = true) {
+  if (jiraLink.onEsc) escDrop(jiraLink.onEsc);
+  jiraLink = jiraLinkIdle(jiraLink.project);
+  if (repaint) jiraLinkPaint();
+}
+function jiraLinkOpen(projectKey) {
+  if (jiraLink.onEsc) escDrop(jiraLink.onEsc);
+  jiraLink = { ...jiraLinkIdle(projectKey), state: 'input' };
+  // Esc는 이 입력만 닫는다(탭·상세는 건드리지 않는다).
+  jiraLink.onEsc = escPush(() => jiraLinkReset());
+  jiraLinkPaint();
+  jiraLinkFocus();
+}
+const jiraLinkFocus = () => jiraLinkHost()?.querySelector?.('.d-jlink')?.querySelector?.('.in')?.focus?.();
+
+function jiraLinkNode(projectKey) {
+  // 지라 설정이 없거나 토큰을 못 읽으면 걸 것이 없다 — 띠 카드가 쓰는 그 줄을 그대로 세운다.
+  if (!jiraLinkUsable() || jiraLink.state === 'off') {
+    return jiraQuietLine('지라 연결이 필요해요', '설정 방법', () => showNotice(JIRA_SETUP_HINT), JIRA_SETUP_HINT);
+  }
+  if (jiraLink.project !== projectKey || jiraLink.state === 'idle') {
+    const line = document.createElement('div');
+    line.className = 'd-jline';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'd-link d-jlinkgo';
+    button.textContent = '지라 티켓 연결';
+    button.title = '이 프로젝트에 지라 티켓 하나를 연결해요';
+    button.addEventListener('click', () => jiraLinkOpen(projectKey));
+    line.appendChild(button);
+    return line;
+  }
+  const box = document.createElement('div');
+  box.className = 'd-jlink';
+  if (jiraLink.state === 'preview' && jiraLink.issue) jiraLinkPreview(box, projectKey, jiraLink.issue);
+  else jiraLinkInput(box, projectKey);
+  return box;
+}
+
+// 입력 줄: 번호·주소를 적거나(Enter·`찾기`) 아래 조용한 선택지에서 고른다.
+function jiraLinkInput(box, projectKey) {
+  const row = document.createElement('div');
+  row.className = 'row';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'in';
+  input.value = jiraLink.query;
+  input.placeholder = '지라 번호나 주소 — 예: IO-12345';
+  input.setAttribute('aria-label', '연결할 지라 번호나 주소');
+  const find = document.createElement('button');
+  find.type = 'button';
+  find.className = 'd-btn sm';
+  find.textContent = '찾기';
+  find.addEventListener('click', () => jiraLinkFind(projectKey, input.value));
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'd-btn sm';
+  cancel.textContent = '취소';
+  cancel.addEventListener('click', () => jiraLinkReset());
+  if (jiraLink.busy) { input.disabled = true; find.disabled = true; find.textContent = '찾는 중…'; }
+  input.addEventListener('keydown', (event) => {
+    // 한글을 조합하는 중의 Enter는 글자를 확정하는 Enter다 — 찾지 않는다.
+    if (event.key !== 'Enter' || event.isComposing) return;
+    if (typeof event.preventDefault === 'function') event.preventDefault();
+    return jiraLinkFind(projectKey, input.value);
+  });
+  row.append(input, find, cancel);
+  box.appendChild(row);
+  if (jiraLink.error) {
+    const error = document.createElement('div');
+    error.className = 'er';
+    error.setAttribute('role', 'status');
+    error.textContent = jiraLink.error;
+    box.appendChild(error);
+  }
+  const opts = document.createElement('div');
+  opts.className = 'opts';
+  const fill = () => {
+    const found = jiraLinkSuggestions(input.value);
+    if (!found.length) { opts.replaceChildren(); return; }
+    const label = document.createElement('div');
+    label.className = 'note';
+    label.textContent = '내 담당 티켓';
+    opts.replaceChildren(label, ...found.map((issue) => {
+      const pick = document.createElement('button');
+      pick.type = 'button';
+      pick.className = 'pk';
+      // 고르는 목록이라 `요약 · 키`다(BKEY 결정) — 앱의 이름 규칙 한 곳에서 짓는다.
+      pick.textContent = uiProjectName({ jira: issue.key }, { picker: true });
+      pick.addEventListener('click', () => jiraLinkFind(projectKey, issue.key));
+      return pick;
+    }));
+  };
+  // 한 글자마다 다시 그리는 것은 이 선택지 목록뿐이다 — 입력칸은 그대로 있어 초점이 튀지 않는다.
+  input.addEventListener('input', () => { jiraLink.query = input.value; fill(); });
+  fill();
+  box.appendChild(opts);
+}
+
+// 미리 보기 줄: 무엇을 거는지 먼저 보여 주고, `연결`은 여기에만 있다.
+function jiraLinkPreview(box, projectKey, issue) {
+  const view = document.createElement('div');
+  view.className = 'pv';
+  const name = document.createElement('span');
+  name.className = 'sm';
+  name.textContent = issue.summary || issue.key;
+  const rest = document.createElement('span');
+  rest.textContent = [issue.status && issue.status.name, `담당 ${issue.assignee || '없음'}`].filter(Boolean).join(' · ');
+  const key = document.createElement('span');
+  key.className = 'ky';
+  key.textContent = issue.key;
+  view.append(name, rest, key);
+  box.appendChild(view);
+  const other = jiraLinkOtherProject(projectKey, issue.key);
+  if (other) {
+    const note = document.createElement('div');
+    note.className = 'note';
+    note.textContent = `다른 프로젝트 '${other}'에도 연결돼 있어요`;
+    box.appendChild(note);
+  }
+  const acts = document.createElement('div');
+  acts.className = 'acts';
+  const back = document.createElement('button');
+  back.type = 'button';
+  back.className = 'd-btn sm';
+  back.textContent = '취소';
+  back.addEventListener('click', () => jiraLinkReset());
+  const go = document.createElement('button');
+  go.type = 'button';
+  go.className = 'd-btn sm acc';
+  go.textContent = '연결';
+  go.addEventListener('click', () => jiraLinkConnect(projectKey, issue, go, back));
+  acts.append(back, go);
+  box.appendChild(acts);
+}
+
+// 티켓을 읽어 미리 보기로 넘어간다. 여기서는 읽기만 한다(아무것도 저장하지 않는다).
+async function jiraLinkFind(projectKey, text) {
+  if (jiraLink.busy) return;
+  const parsed = jiraKeyFromInput(text, jiraLinkSite());
+  jiraLink = { ...jiraLink, project: projectKey, state: 'input', query: String(text || ''), error: parsed.error || '', issue: null };
+  if (parsed.error) { jiraLinkPaint(); jiraLinkFocus(); return; }
+  jiraLink = { ...jiraLink, busy: true };
+  jiraLinkPaint();
+  let data = null;
+  try {
+    const response = await fetch(`/api/jira/issue?key=${encodeURIComponent(parsed.key)}`);
+    data = await response.json();
+  } catch { data = null; }
+  // 보는 프로젝트가 그 사이 바뀌었으면 이 응답은 버린다.
+  if (jiraLink.project !== projectKey) return;
+  if (!data || data.ok === false) jiraLink = { ...jiraLink, busy: false, state: 'input', error: (data && data.error) || '지라에 연결하지 못했어요.' };
+  else if (data.connected === false) jiraLink = { ...jiraLink, busy: false, state: 'off' };
+  else jiraLink = { ...jiraLink, busy: false, state: 'preview', error: '', issue: data.issue };
+  jiraLinkPaint();
+  if (jiraLink.state === 'input') jiraLinkFocus();
+}
+
+// 연결·해제가 서버로 나가는 단 하나의 길.
+async function jiraLinkSend(projectKey, key) {
+  await request('/api/project/jira-link', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project: projectKey, jira: key }),
+  });
+  await load();
+}
+async function jiraLinkConnect(projectKey, issue, go, back) {
+  // 미리 보기를 거치지 않으면 여기까지 올 수 없다(버튼이 그 줄에만 있다) — 한 번 더 막아 둔다.
+  if (jiraLink.state !== 'preview' || !jiraLink.issue || jiraLink.busy) return;
+  jiraLink = { ...jiraLink, busy: true };
+  go.disabled = true; back.disabled = true; go.textContent = '연결하는 중…';
+  try {
+    await jiraLinkSend(projectKey, issue.key);
+  } catch {
+    // 실패 문구는 request()가 이미 알렸다 — 미리 보기는 그대로 두고 다시 누를 수 있게 한다.
+    jiraLink = { ...jiraLink, busy: false };
+    go.disabled = false; back.disabled = false; go.textContent = '연결';
+    return;
+  }
+  jiraLinkReset(false);
+  showNotice('지라 티켓을 연결했어요');
+}
+// 해제는 업무·기록에 영향이 없고 되돌리기는 다시 연결이라 확인 없이 바로 한다.
+// 앱의 ⌘Z 대상은 아니다 — 되돌리는 길은 알림의 `되돌리기` 하나뿐이다.
+async function jiraLinkRemove(projectKey, key) {
+  try { await jiraLinkSend(projectKey, null); } catch { return; }
+  showNotice('지라 연결을 해제했어요', false, null, {
+    label: '되돌리기',
+    onClick: async (button) => {
+      if (button) button.disabled = true;
+      try { await jiraLinkSend(projectKey, key); } catch { return; }
+      showNotice('지라 티켓을 다시 연결했어요');
+    },
+  });
 }
 
 function renderProjects() {
@@ -1892,15 +2167,26 @@ function renderProjectDetail(body, row) {
   summary.textContent = `열린 항목 ${row.open}` + (jiraKey ? ` · ${jiraKey}` : '');
   body.append(title, summary);
 
-  // 지라에 연결된 프로젝트에만, 제목 줄 아래·첫 구역 위에 지라 띠 카드가 선다.
+  // 지라에 연결된 프로젝트에만, 제목 줄 아래·첫 구역 위에 지라 띠 카드가 선다 — `jira:KEY`
+  // 프로젝트든 손으로 티켓을 건 그룹 프로젝트든 같은 카드·같은 길이다(jiraKeyOf가 키를 준다).
   // 부르는 것은 이 자리 하나뿐이다 — 왼쪽 목록은 아무것도 미리 부르지 않는다.
   if (jiraKey && jiraUsed()) {
     const strip = document.createElement('div');
     strip.id = 'jiraStrip';
     strip.dataset.jiraKey = jiraKey;
+    strip.dataset.project = row.key;
     body.appendChild(strip);
     jiraCardEnsure(jiraKey);
     jiraStripPaint();
+  } else if (jiraUsed() && typeof row.key === 'string' && row.key.startsWith('group:')) {
+    // 아직 걸지 않은 그룹 프로젝트에는 그 자리에 조용한 `지라 티켓 연결` 줄이 선다.
+    // `프로젝트 없음`(`__misc__`)과 지라 프로젝트에는 없다.
+    const host = document.createElement('div');
+    host.id = 'jiraLinkRow';
+    host.dataset.project = row.key;
+    body.appendChild(host);
+    jiraLinkEnsure(row.key);
+    jiraLinkPaint();
   }
 
   const tasks = items.filter(item => ['task', 'bug'].includes(item.type));
