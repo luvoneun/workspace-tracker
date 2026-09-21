@@ -2923,14 +2923,15 @@ function panelTask({ item, detail, type }, box) {
   const fields = document.createElement('dl');
   fields.className = 'd-fields';
   // 값은 눌러서 바로 고친다 — 줄의 ⋯ 메뉴와 같은 고르개·같은 저장 길이다(완료한 업무는 옮길 일이 없다).
-  panelField(fields, '언제 할지', isTask && !done
+  // 결정·아이디어에는 `언제 할지`·`우선순위`가 없다 — 없는 값을 보여 주지 않는다(값이 보이면 바꿀 수 있어야 한다).
+  if (isTask) panelField(fields, '언제 할지', !done
     ? panelPickCell('언제 할지', panelWhenText(item, mode), () => [[{ field: '언제 할지', control: taskWhenControl(item, mode, null) }]])
     : panelWhenText(item, mode));
   if (isTask) panelField(fields, '기한', panelDateCell('기한', item.due, async (value) => {
     await setTaskDue(item.id, value);
     announce(value ? `기한을 ${uiKoDate(value)}로 정했어요` : '기한을 지웠어요');
   }));
-  panelField(fields, '우선순위', panelPickCell('우선순위', panelPriorityCell(item),
+  if (isTask) panelField(fields, '우선순위', panelPickCell('우선순위', panelPriorityCell(item),
     () => [[{ field: '우선순위', control: taskPriorityControl(item) }]]));
   panelField(fields, '프로젝트', taskProjectControl(item));
   box.appendChild(fields);
