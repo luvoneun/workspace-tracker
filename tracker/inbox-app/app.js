@@ -12,7 +12,12 @@ const UI_ICONS = {
   chevron: '<path d="M6 3.5 10.5 8 6 12.5"/>',
   link: '<path d="M6.9 9.1a2.6 2.6 0 0 0 3.7 0l2-2a2.6 2.6 0 0 0-3.7-3.7l-.6.6"/><path d="M9.1 6.9a2.6 2.6 0 0 0-3.7 0l-2 2a2.6 2.6 0 0 0 3.7 3.7l.6-.6"/>',
   refresh: '<path d="M14 8a6 6 0 1 1-2-4.47L14 5.2"/><path d="M14 2v3.4h-3.4"/>',
-  gear: '<path d="M2 4.6h12M2 11.4h12"/><circle cx="6" cy="4.6" r="1.9"/><circle cx="10.4" cy="11.4" r="1.9"/>',
+  gear: '<circle cx="8" cy="8" r="2.4"/><path d="M8 1.7v1.7M8 12.6v1.7M14.3 8h-1.7M3.4 8H1.7M12.45 3.55l-1.2 1.2M4.75 11.25l-1.2 1.2M12.45 12.45l-1.2-1.2M4.75 4.75l-1.2-1.2"/>',
+  // 상태말 앞에 붙는 종류 표시 — 기한(달력) · 밀림(시계) · 우선순위(깃발) · 답변(말풍선)
+  calendar: '<rect x="2.4" y="3.4" width="11.2" height="10.2" rx="2.2"/><path d="M2.4 6.6h11.2M5.6 2.2v2.4M10.4 2.2v2.4"/>',
+  clock: '<circle cx="8" cy="8" r="5.8"/><path d="M8 4.8V8l2.2 1.5"/>',
+  flag: '<path d="M4 14V2.8M4 3.2h7.6l-1.5 2.6 1.5 2.6H4"/>',
+  chat: '<path d="M13.6 8.6a4.8 4.8 0 0 1-4.8 4.8H5.2L2.4 15v-2.9A4.8 4.8 0 0 1 2.4 8V7.4a4.8 4.8 0 0 1 4.8-4.8h1.6a4.8 4.8 0 0 1 4.8 4.8z"/>',
 };
 function uiIcon(name) {
   const shape = UI_ICONS[name];
@@ -37,17 +42,17 @@ function uiKoDateShort(dateStr) {
   return `${Number(month)}월 ${Number(day)}일`;
 }
 
-// 기한 말투는 어디서나 같다: `2일 지남`(urgent) `오늘까지`(warn) `내일까지` `9월 27일까지`.
+// 기한 말투는 어디서나 같다: `기한 2일 지남`(urgent) `오늘까지`(warn) `내일까지` `9월 27일까지`.
 // where가 'row'면 오늘 목록의 한 줄 — 먼 기한은 찍지 않는다(의미 없는 값은 자리를 비운다).
 function uiDueText(due, where = 'full') {
   if (!due) return null;
   const diff = diffDays(due);
   if (Number.isNaN(diff)) return null;
-  if (diff < 0) return { text: `${-diff}일 지남`, tone: 'urgent' };
+  if (diff < 0) return { text: `기한 ${-diff}일 지남`, tone: 'urgent' };
   if (diff === 0) return { text: '오늘까지', tone: 'warn' };
   if (diff === 1) return { text: '내일까지', tone: '' };
   if (where === 'row') return null;
-  return { text: `${uiKoDate(due)}까지`, tone: '' };
+  return { text: `${uiKoDateShort(due)}까지`, tone: '' };
 }
 
 // 상세에서는 날짜와 의미를 함께 적는다: `9월 22일 (화) · 오늘까지`.
@@ -56,18 +61,18 @@ function uiDueDetail(due) {
   const full = uiKoDate(due);
   const diff = diffDays(due);
   if (Number.isNaN(diff)) return { text: full, tone: '' };
-  if (diff < 0) return { text: `${full} · ${-diff}일 지남`, tone: 'urgent' };
+  if (diff < 0) return { text: `${full} · 기한 ${-diff}일 지남`, tone: 'urgent' };
   if (diff === 0) return { text: `${full} · 오늘까지`, tone: 'warn' };
   if (diff === 1) return { text: `${full} · 내일까지`, tone: '' };
   return { text: `${full}까지`, tone: '' };
 }
 
-// 오늘 목록에 언제부터 밀려 있는지: `어제부터` / `3일 전부터`
+// 오늘 목록에 언제부터 밀려 있는지: `어제에서 밀림` / `5일째 밀림`
 function uiCarryText(scheduled) {
   if (!scheduled) return null;
   const diff = diffDays(scheduled);
   if (Number.isNaN(diff) || diff >= 0) return null;
-  return diff === -1 ? '어제부터' : `${-diff}일 전부터`;
+  return diff === -1 ? '어제에서 밀림' : `${-diff}일째 밀림`;
 }
 
 // Esc는 가장 위에 열린 것부터 하나씩 닫는다(설정 → 메뉴 → 검색 → 회의 → 상세 → 서랍).
@@ -228,7 +233,7 @@ function uiDateField({ value, label = '기한', onChange, clearable = true }) {
 
 // 의미 색은 배경이 아니라 글자에 쓴다. 토큰 이름으로 옮겨 준다.
 function uiTone(tone) {
-  return tone === 'urgent' ? ' k-neg' : tone === 'warn' ? ' k-warn' : '';
+  return tone === 'urgent' ? ' k-neg' : tone === 'warn' ? ' k-warn' : tone === 'success' ? ' k-pos' : '';
 }
 
 // 행의 프로젝트 이름. 그룹 제목이 이미 그 프로젝트를 말해 주면 비운다.
@@ -238,29 +243,79 @@ function uiProjectLabel(item, grouped) {
   return item.jira || item.group || '';
 }
 
-// 상태 열의 글자 셀: 밀린 표시 → 진행 중 → 우선순위(5px 점 + 글자) → 기한(맨 오른쪽).
-// 보통·낮음·먼 기한처럼 의미 없는 값은 자리를 비운다(알약으로 그리지 않는다).
-const UI_PRIORITY_META = { critical: { text: '긴급', tone: 'urgent' }, high: { text: '높음', tone: 'warn' } };
+// 상태 열의 글자 셀: 밀린 표시 → 진행 중 → 우선순위(깃발 + 글자) → 기한(맨 오른쪽, 달력).
+// 종류마다 14px 아이콘과 풀어 쓴 title 툴팁이 붙는다. 급한 말(긴급·기한 N일 지남·오늘까지)만
+// 배지로 서고 나머지는 회색 글자다(모양은 ui.css가 정한다).
+// 보통·낮음·먼 기한처럼 의미 없는 값은 자리를 비운다.
+const UI_PRIORITY_META = {
+  critical: { text: '긴급', tone: 'urgent', hint: '가장 먼저 해야 하는 업무예요' },
+  high: { text: '중요', tone: 'warn', hint: '중요한 업무예요' },
+};
+// 화면 어디서나 같은 말로 고르게 한다(상세·메뉴의 선택지도 이 순서·이 말을 쓴다).
+const UI_PRIORITY_CHOICES = [['critical', '긴급'], ['high', '중요'], ['medium', '보통'], ['low', '낮음']];
 function uiMetaCells(item, opts = {}) {
   const where = opts.where || 'row';
   const done = item.status === 'done';
   const cells = [];
-  // 좁은 화면(≤520px)의 두 줄 행에서는 프로젝트가 정보 줄 맨 앞에 온다 — 넓은 화면에서는 프로젝트 열이 보여 주므로 숨긴다.
+  const cell = (cls, icon, text, hint) =>
+    `<span class="${cls}"${hint ? ` title="${escapeAttr(hint)}"` : ''}>${uiIcon(icon)}${escapeHtml(text)}</span>`;
+  // 좁은 화면(≤520px)의 두 줄 행에서는 프로젝트가 정보 줄 맨 앞에 온다 — 넓은 화면에서는 제목 뒤·프로젝트 열이 보여 준다.
   if (opts.project) cells.push(`<span class="m-proj">${escapeHtml(opts.project)}</span>`);
   const carry = where === 'row' && !done ? uiCarryText(item.scheduled) : null;
-  if (carry) cells.push(`<span class="m-carry">${carry}</span>`);
+  if (carry) cells.push(cell('m-carry', 'clock', carry, '오늘 하려다 넘어온 업무예요'));
   if (item.doing && !done && !opts.inDoingGroup) {
     const days = -diffDays(item.doing) + 1;
-    cells.push(`<span class="m-doing">${days > 1 ? `${days}일째 진행 중` : '진행 중'}</span>`);
+    cells.push(cell('m-doing', 'clock', days > 1 ? `${days}일째 진행 중` : '진행 중', '이미 손을 댄 업무예요'));
   }
   const priority = done ? null : UI_PRIORITY_META[item.priority];
-  if (priority) cells.push(`<span class="m-pri${uiTone(priority.tone)}"><i class="d-dot"></i>${priority.text}</span>`);
+  if (priority) cells.push(cell(`m-pri${uiTone(priority.tone)}`, 'flag', priority.text, priority.hint));
   const due = done ? null : uiDueText(item.due, where);
-  if (due) cells.push(`<span class="m-due${uiTone(due.tone)}">${due.text}</span>`);
+  if (due) cells.push(cell(`m-due${uiTone(due.tone)}`, 'calendar', due.text, item.due ? `기한은 ${uiKoDate(item.due)}이에요` : ''));
   return cells.join('');
 }
 
-// 28px sticky 그룹 제목. 접히는 그룹은 줄 전체가 버튼이고, 마우스를 올리면 `+`로 그 자리에 추가한다.
+// 답변을 기다리는 업무에 붙는 말 한 마디(말풍선 아이콘 + 글자).
+function uiWaitCell(resolved) {
+  return `<span class="m-wait${resolved ? ' k-pos' : ''}" title="${resolved ? '기다리던 답변이 왔어요' : '다른 사람의 답변을 기다리는 중이에요'}">`
+    + `${uiIcon('chat')}${resolved ? '답변 왔어요' : '답변 기다리는 중'}</span>`;
+}
+
+// 원문이 있으면 제목 바로 뒤에 조용한 `원문` 링크를 늘 보여 준다(새 탭, 줄 열기로 번지지 않게).
+function uiSourceLink(item, label = '원문') {
+  if (!item || !item.permalink) return null;
+  const link = document.createElement('a');
+  link.className = 'd-src';
+  link.href = item.permalink;
+  link.target = '_blank';
+  link.rel = 'noopener';
+  link.textContent = label;
+  link.title = '슬랙 원문을 새 탭에서 엽니다';
+  link.setAttribute('aria-label', `${item.description} — 슬랙 원문 열기`);
+  link.addEventListener('click', event => event.stopPropagation());
+  return link;
+}
+
+// 이름 → 늘 같은 색 하나(0~5). 같은 프로젝트가 그룹 열쇠(`group:가입_개선`)로도, 이름(`가입 개선`)으로도
+// 들어오므로 먼저 같은 꼴로 맞춘다. 겹침은 피하지 않는다 — 프로젝트가 하나 늘었다고 다른 색이 밀리면 안 된다.
+function uiProjectKey(name) {
+  return String(name || '').replace(/^(group|jira):/, '').toLowerCase().replace(/[\s_-]/g, '');
+}
+function uiProjectHue(name) {
+  const key = uiProjectKey(name);
+  let hash = 0;
+  for (let i = 0; i < key.length; i += 1) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+  return hash % 6;
+}
+function uiProjectDot(name) {
+  const dot = document.createElement('i');
+  dot.className = 'd-pjdot';
+  dot.dataset.pj = String(uiProjectHue(name));
+  dot.setAttribute('aria-hidden', 'true');
+  return dot;
+}
+
+// sticky 그룹 제목. 접히는 그룹은 줄 전체가 버튼이고, 마우스를 올리면 `+`로 그 자리에 추가한다.
+// 프로젝트 그룹이면 제목 앞에 그 프로젝트의 색 점이 붙는다.
 function uiGroupHeading(label, count, opts = {}) {
   const collapsible = typeof opts.onToggle === 'function';
   const head = document.createElement(collapsible ? 'button' : 'div');
@@ -271,6 +326,7 @@ function uiGroupHeading(label, count, opts = {}) {
     head.innerHTML = uiIcon('chevron');
     head.addEventListener('click', opts.onToggle);
   }
+  if (opts.projectName) head.appendChild(uiProjectDot(opts.projectName));
   const name = document.createElement(opts.onOpenProject ? 'button' : 'span');
   name.className = 'gl' + (opts.onOpenProject ? ' lk' : '');
   name.textContent = label;
@@ -489,12 +545,31 @@ function uiTaskRow(item, opts = {}) {
   });
   // NEW는 누르는 버튼이 아니라 표시다 — 화면에 잠깐 머물면 조용히 사라진다(observeNewItem).
   if (item.isNew && !done) { title.prepend(renderNewDot(item)); observeNewItem(row, item); }
-  row.appendChild(title);
+
+  // 그룹 제목이 프로젝트를 말해 주지 않는 자리(진행 중·마감순·서랍)에서는 제목 바로 뒤에 `· ● 프로젝트`.
+  // 원문이 있으면 그 뒤에 조용한 `원문` 링크가 늘 따라온다.
+  const inlineProject = project;
+  const source = uiSourceLink(item);
+  if (inlineProject || source) {
+    const wrap = document.createElement('span');
+    wrap.className = 'd-titlewrap';
+    wrap.appendChild(title);
+    if (inlineProject) {
+      const tag = document.createElement('span');
+      tag.className = 'd-inproj';
+      tag.title = inlineProject;
+      tag.append('· ', uiProjectDot(inlineProject), inlineProject);
+      wrap.appendChild(tag);
+    }
+    if (source) wrap.appendChild(source);
+    row.appendChild(wrap);
+  } else {
+    row.appendChild(title);
+  }
 
   const projectCell = document.createElement('span');
   projectCell.className = 'd-proj';
-  projectCell.textContent = project;
-  if (project) projectCell.title = project;
+  // 프로젝트는 이제 제목 뒤에 적는다 — 줄 가운데의 열은 좁은 화면 규칙만 쓰도록 비워 둔다.
   row.appendChild(projectCell);
 
   const meta = document.createElement('span');
@@ -505,7 +580,7 @@ function uiTaskRow(item, opts = {}) {
     meta.innerHTML = uiMetaCells(item, { where: mode === 'later' ? 'full' : 'row', inDoingGroup: opts.inDoingGroup, project });
     // 답변을 기다리는 업무는 그 사실도 글자로 적는다.
     const blocker = typeof wfItem === 'function' ? wfItem(wfItem(item.id)?.blockedBy) : null;
-    if (blocker) meta.insertAdjacentHTML('afterbegin', `<span class="m-wait${blocker.status === 'done' ? ' k-pos' : ''}">${blocker.status === 'done' ? '답변 해결' : '답변 대기'}</span>`);
+    if (blocker) meta.insertAdjacentHTML('afterbegin', uiWaitCell(blocker.status === 'done'));
   }
   row.appendChild(meta);
 
@@ -532,17 +607,7 @@ function uiTaskRow(item, opts = {}) {
       move('내일', tomorrowStr(), '내일로 미룸');
       move('나중에', null, '나중에 할 일로 옮김 · 기한은 그대로입니다.');
     }
-    if (item.permalink) {
-      const link = document.createElement('a');
-      link.className = 'd-iconbtn sm';
-      link.href = item.permalink;
-      link.target = '_blank';
-      link.rel = 'noopener';
-      link.title = '슬랙 원문';
-      link.setAttribute('aria-label', `${item.description} — 슬랙 원문 열기`);
-      link.innerHTML = uiIcon('link');
-      acts.appendChild(link);
-    }
+    // 슬랙 원문은 제목 뒤 `원문` 링크가 늘 보여 주므로 동작 묶음에는 두지 않는다.
     acts.appendChild(uiMoreButton(`${item.description} — 더 보기`, () => taskMenuSections({ item, mode, card: row })));
   }
   row.appendChild(acts);
@@ -581,6 +646,7 @@ function uiRailRow(opts) {
   row.className = 'd-wrow'
     + (opts.check ? ' has-ck' : '')
     + (opts.wrap ? ' is-wrap' : '')
+    + (opts.two ? ' is-two' : '')
     + (opts.selected ? ' is-sel' : '');
   // 상세 패널이 열리고 닫힐 때 이 표식으로 찾아 `지금 보는 줄`을 표시한다.
   if (opts.id !== undefined && opts.id !== null) row.dataset.railId = opts.id;
@@ -600,7 +666,15 @@ function uiRailRow(opts) {
     title.addEventListener('click', opts.onOpen);
   }
   if (opts.badge) title.prepend(opts.badge);
-  row.appendChild(title);
+  // 원문이 있으면 제목 바로 뒤에 조용한 `원문` 링크(줄 열기로 번지지 않는다)
+  if (opts.source) {
+    const wrap = document.createElement('span');
+    wrap.className = 'tiwrap';
+    wrap.append(title, opts.source);
+    row.appendChild(wrap);
+  } else {
+    row.appendChild(title);
+  }
 
   const meta = document.createElement('span');
   meta.className = 'mt';
@@ -616,7 +690,8 @@ function uiRailRow(opts) {
   if (opts.sub) {
     const sub = document.createElement('span');
     sub.className = 'sub';
-    sub.textContent = opts.sub;
+    if (typeof opts.sub === 'string') sub.textContent = opts.sub;
+    else sub.appendChild(opts.sub);
     row.appendChild(sub);
   }
   if (opts.more) {
@@ -689,7 +764,7 @@ function taskSelectEnd() {
   escDrop(taskSelectEnd);
   uiMenuClose();
   taskListsRender();
-  document.getElementById('taskSelectToggle')?.focus();
+  (document.getElementById('taskSelectToggle') || document.querySelector('#todayHeadMore .d-more'))?.focus();
 }
 
 function taskSelectBarButton(label, onClick, className = 'd-btn') {
@@ -1372,19 +1447,28 @@ async function load() {
   renderWaiting(data.waiting || []);
   renderTodayTasks(data.todayTasks || []);
   decisionArchiveCache = data.decisionArchive || [];
-  document.getElementById('decisionCount').textContent = (data.decisions || []).length;
+  // 아직 PRD에 반영하지 않은 결정 수. 탭 이름 옆 작은 숫자와 결정 구역 제목이 같은 값을 쓴다.
+  const pendingDecisions = (data.decisions || []).length;
+  document.getElementById('decisionCount').textContent = pendingDecisions;
   latestData = data;
   tabStale.projects = true; tabStale.records = true; tabStale.weekly = true;
   renderActiveTabLists();
-  const hasNewRecord = [...(data.ideas || []), ...(data.decisions || [])].some(i => i.isNew);
-  document.getElementById('tabBtnRecords').classList.toggle('has-new', hasNewRecord);
-  document.getElementById('createdTodayCount').textContent = data.createdToday || 0;
+  const tabNum = document.getElementById('tabRecordsNum');
+  if (tabNum) {
+    tabNum.textContent = pendingDecisions ? String(pendingDecisions) : '';
+    tabNum.title = pendingDecisions ? `PRD에 아직 반영하지 않은 결정이 ${pendingDecisions}개 있어요` : '';
+  }
+  renderInboxHeadCount(data.createdToday || 0);
 
   const todayIds = new Set((data.todayTasks || []).map(t => t.id));
   const reminders = [...(data.todayTasks || []), ...(data.laterTasks || [])]
     .filter(t => !todayIds.has(t.id) && t.status !== 'done' && t.due && diffDays(t.due) <= 1 && (t.priority === 'high' || t.priority === 'critical'))
     .sort((a, b) => diffDays(a.due) - diffDays(b.due));
-  renderReminders(reminders);
+  // 기다리던 답변이 온 업무도 리마인드 카드에 함께 올린다(옛 `답변이 해결된 업무` 묶음 자리).
+  const answered = (workflowData?.items || [])
+    .filter(item => ['task', 'bug'].includes(item.type) && item.status !== 'done' && item.blockedBy && wfItem(item.blockedBy)?.status === 'done')
+    .map(item => itemsById.get(item.id) || item);
+  renderReminders(reminders, answered);
   syncTaskDetail();
   palSync();
   taskSelectionRefresh();
@@ -1436,7 +1520,7 @@ function renderDateBar(data) {
   if (jira.used !== false && jira.stale) stale.push({ key: 'jira', name: '지라', lastSync: jira.lastSync });
 
   stale.forEach(source => {
-    // 누르면 환경설정의 `상태`가 열리고 그 자동화 줄이 밝혀진다 — "무슨 일인지"까지 한 번에.
+    // 누르면 설정의 `상태`가 열리고 그 자동화 줄이 밝혀진다 — "무슨 일인지"까지 한 번에.
     const warn = document.createElement('button');
     warn.type = 'button';
     warn.className = 'd-warn';
@@ -1481,10 +1565,16 @@ function renderCalendar(calendar) {
   }
   const now = nowHHMM();
   events.forEach(event => {
+    // 진행 중인 회의는 배지 없이 색으로 알린다(파란 글자 + 연파랑 줄). 끝난 회의는 흐리게.
+    const running = event.start <= now && now < (event.end || '99:99');
+    const past = !running && (event.end || event.start) <= now;
     const row = document.createElement('div');
-    row.className = 'd-mrow' + (event.start <= now && now < (event.end || '99:99') ? ' is-now' : '');
+    row.className = 'd-mrow' + (running ? ' is-now' : past ? ' is-past' : '');
     // 회의 정리 패널이 열리면 이 표식으로 찾아 `지금 보는 회의`를 표시한다.
     row.dataset.meetingId = event.workflowId || `${event.start || ''} ${event.title || ''}`;
+    // 1분마다 도는 시계가 이 값으로 `지금 하는 회의`를 다시 칠한다.
+    row.dataset.start = event.start || '';
+    row.dataset.end = event.end || '99:99';
 
     const time = document.createElement('span');
     time.className = 't num';
@@ -1507,13 +1597,10 @@ function renderCalendar(calendar) {
     title.addEventListener('click', () => openMeetingPanel(event));
     row.appendChild(title);
 
-    // 0은 찍지 않는다 — 검토할 초안이 있을 때와 관련 미완료가 있을 때만.
-    const counts = [];
-    if (event.draftCount) counts.push(`초안 ${event.draftCount}`);
-    if (event.relatedCount) counts.push(`할 일 ${event.relatedCount}`);
+    // 0은 찍지 않는다 — 검토할 초안이 있을 때만 배지 하나.
     const count = document.createElement('span');
     count.className = 'ct num';
-    count.textContent = counts.join(' · ');
+    count.textContent = event.draftCount ? `초안 ${event.draftCount}` : '';
     if (event.draftCount) count.title = 'AI가 분류한 초안을 검토해 주세요';
     row.appendChild(count);
 
@@ -1542,6 +1629,25 @@ function renderCalendar(calendar) {
 
     list.appendChild(row);
   });
+  calendarClockStart();
+}
+
+// 진행 중인 회의 표시는 시간이 지나면 저절로 바뀌어야 한다. 1분마다 줄의 색만 다시 칠한다
+// (목록을 새로 만들지 않으므로 입력 중에도 방해가 없다).
+let calendarClockTimer = null;
+function calendarClockTick() {
+  const now = nowHHMM();
+  document.querySelectorAll('#calendarList .d-mrow').forEach((row) => {
+    const start = row.dataset.start || '';
+    const end = row.dataset.end || '99:99';
+    const running = start <= now && now < end;
+    row.classList.toggle('is-now', running);
+    row.classList.toggle('is-past', !running && end <= now);
+  });
+}
+function calendarClockStart() {
+  if (calendarClockTimer) return;
+  calendarClockTimer = setInterval(calendarClockTick, 60000);
 }
 
 
@@ -1549,9 +1655,12 @@ function suggestDismissedToday() {
   try { return localStorage.getItem('suggestDismissed') === todayStr(); } catch { return false; }
 }
 
-// 미루기 제안은 접힌 한 줄로 두고, 펼쳤을 때만 업무 줄을 들여 보여 준다.
+// 미루기 제안은 머리줄의 진행 문장 뒤에 글자 링크로 붙는다(`… 5개 끝냈어요 · 2개 미룰까요?`).
+// 누르면 머리줄 아래로 업무 줄이 펼쳐진다. 제안이 없으면 앞 문장만 남는다.
 // 근거는 알약으로 그리지 않는다(마감 없음·우선순위 낮음 같은 말은 새로 알려 주는 게 없다).
 function renderSuggestions(suggestions) {
+  const slot = document.getElementById('suggestSlot');
+  if (slot) slot.replaceChildren();
   const zone = document.getElementById('suggestZone');
   const data = { ...(suggestions || { mode: 'none', items: [] }) };
   if (data.mode === 'pull') data.items = data.items.filter(item => {
@@ -1575,15 +1684,15 @@ function renderSuggestions(suggestions) {
   toggle.type = 'button';
   toggle.className = 'd-sug';
   toggle.setAttribute('aria-expanded', String(suggestOpen));
+  toggle.setAttribute('aria-controls', 'suggestZone');
   toggle.innerHTML = uiIcon('chevron');
   const label = document.createElement('span');
-  label.textContent = defer
-    ? `오늘 ${data.total}개 — ${data.items.length}개 미룰까요?`
-    : '오늘 이건 어때요?';
+  label.textContent = defer ? `${data.items.length}개 미룰까요?` : '오늘 이건 어때요?';
   toggle.appendChild(label);
   toggle.addEventListener('click', () => { suggestOpen = !suggestOpen; renderSuggestions(suggestions); });
-  zone.appendChild(toggle);
-  if (!suggestOpen) return;
+  // 링크는 머리줄의 진행 문장 뒤에, 펼친 줄은 머리줄 아래에 둔다.
+  if (slot) { slot.append('· ', toggle); } else { zone.appendChild(toggle); }
+  if (!suggestOpen) { zone.hidden = true; return; }
 
   const box = document.createElement('div');
   box.className = 'd-sugbox';
@@ -1652,24 +1761,28 @@ function diffDays(dueStr) {
   return Math.round((due - today) / 86400000);
 }
 
-// 레일의 리마인드 — 기한이 코앞인 높은 우선순위 업무만 온다(고르는 곳은 load()).
-// 제목은 2줄까지 허용하고, 오른쪽에 `오늘까지`/`내일까지`를 의미색 글자로 적는다.
-function renderReminders(reminders) {
+// 레일의 리마인드 — 기한이 코앞인 높은 우선순위 업무와, 기다리던 답변이 온 업무가 함께 온다
+// (고르는 곳은 load()). 제목은 2줄까지 허용하고, 오른쪽에 기한·`답변 왔어요`를 적는다.
+function renderReminders(reminders, answered = []) {
   const zone = document.getElementById('reminderZone');
   const list = document.getElementById('reminderList');
 
-  document.getElementById('reminderSectionCount').textContent = reminders.length;
-  zone.hidden = reminders.length === 0;
+  document.getElementById('reminderSectionCount').textContent = reminders.length + answered.length;
+  zone.hidden = reminders.length + answered.length === 0;
 
   list.replaceChildren();
-  reminders.forEach(item => list.appendChild(uiRailRow({
+  const row = (item, meta) => uiRailRow({
     id: item.id,
     text: item.description,
     wrap: true,
     selected: !!panelState && panelState.id === item.id,
-    meta: [uiDueText(item.due)],
+    source: uiSourceLink(item),
+    meta,
     onOpen: () => panelOpen({ id: item.id }),
-  })));
+  });
+  // 기다리던 답변이 온 업무가 먼저다 — 지금 바로 이어서 할 수 있는 일이다.
+  answered.forEach(item => list.appendChild(row(item, [{ text: '답변 왔어요', tone: 'success' }])));
+  reminders.forEach(item => list.appendChild(row(item, [uiDueText(item.due)])));
 }
 
 // weekKey(월요일, 'YYYY-MM-DD')를 "9월 3주차" + "9/14 ~ 9/20" 두 줄로 보여줄 조각으로 쪼갠다.
@@ -1812,6 +1925,9 @@ function renderRecordColumn(list, items, row, emptyText) {
 
 function renderDecisions(items) {
   document.getElementById('decisionSectionCount').textContent = items.length;
+  // 구역 제목 옆 조용한 한 마디 — 탭 이름 옆 숫자와 같은 값이다.
+  const note = document.getElementById('decisionPendingNote');
+  if (note) note.textContent = items.length ? `PRD 미반영 ${items.length}` : '';
   renderRecordColumn(document.getElementById('decisionList'), items,
     item => recordDecisionRow(item, false), '정해진 내용이 아직 없습니다. 위 첫 줄에서 바로 추가하세요.');
 }
@@ -2058,14 +2174,24 @@ function waitingMenuSections(item, card) {
   ];
 }
 
-// 확인 대기 정렬: 회신 기한이 있는 것이 먼저(빠른 기한 순), 그 다음 먼저 등록한 순.
-// 화면을 만지지 않는 순수 함수라 테스트가 직접 부른다.
-function waitingOrder(items) {
+// 오늘 다시 확인해야 하는 건(다시 확인할 날짜가 지났거나 오늘이고, 오늘 아직 요청하지 않은 건)인가.
+// 흐름 기록(.workflow.json)에 있는 값이라 바깥에서 받아 쓴다.
+function waitingRecheck(detail, today) {
+  return !!(detail && detail.followUp && detail.followUp <= today && detail.contacted !== today);
+}
+
+// 확인 대기 정렬: `오늘 다시 확인`이 맨 위 → 회신 기한이 있는 것(빠른 기한 순) → 먼저 등록한 순.
+// 화면을 만지지 않는 순수 함수라 테스트가 직접 부른다(오늘 날짜와 흐름 기록 조회를 넘겨받는다).
+function waitingOrder(items, today, detailOf) {
+  const day = today || todayStr();
+  const lookUp = detailOf || (id => (typeof wfItem === 'function' ? wfItem(id) : null));
+  const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+  const rank = item => (waitingRecheck(lookUp(item.id), day) ? 0 : item.due ? 1 : 2);
   return [...items].sort((a, b) => {
-    if (a.due && b.due) return a.due < b.due ? -1 : a.due > b.due ? 1 : 0;
-    if (a.due) return -1;
-    if (b.due) return 1;
-    return (a.created || '') < (b.created || '') ? -1 : (a.created || '') > (b.created || '') ? 1 : 0;
+    const ra = rank(a), rb = rank(b);
+    if (ra !== rb) return ra - rb;
+    if (ra === 1) return cmp(a.due, b.due);
+    return cmp(a.created || '', b.created || '');
   });
 }
 
@@ -2086,17 +2212,23 @@ function renderWaiting(items) {
   if (!items.length) {
     const empty = document.createElement('div');
     empty.className = 'd-rempty';
-    empty.textContent = '확인 대기중 없음';
+    empty.textContent = '기다리는 답변이 없어요.';
     list.appendChild(empty);
     return;
   }
   waitingOrder(items).forEach(item => list.appendChild(renderWaitingRow(item)));
 }
 
-// 레일의 확인 대기 한 줄: 체크(확인됨) | 제목 | `누구에게 · N일째`. 값 수정은 더보기·상세가 맡는다.
+// 레일의 확인 대기 한 줄 — 두 줄 구성.
+//   첫 줄: 제목(최대 2줄) + `원문`
+//   둘째 줄: `결제팀 · 2일째`(3일째부터 주의색) + 회신 기한 배지(지났거나 오늘일 때만)
+//            + `오늘 다시 확인` / `9월 24일 다시 확인` / `오늘 요청함`
+// 값 수정은 더보기·상세가 맡는다.
 function renderWaitingRow(item) {
   const done = item.status === 'done';
+  const today = todayStr();
   const detail = typeof wfItem === 'function' ? wfItem(item.id) : null;
+  const recheck = waitingRecheck(detail, today);
 
   const checkbox = document.createElement('input');
   checkbox.type = 'checkbox';
@@ -2104,20 +2236,52 @@ function renderWaitingRow(item) {
   checkbox.checked = done;
   checkbox.setAttribute('aria-label', `${item.description} — 확인 완료로 표시`);
 
-  // 회신 기한이 있으면 기한 말투가 먼저다(`2일 지남`·`오늘까지`). 없으면 며칠째 기다리는지.
-  const status = uiDueText(item.due, 'row') || waitingAgeText(item.created, todayStr());
-  const sub = detail?.followUp
-    ? `${uiKoDateShort(detail.followUp)} 다시 확인`
-    : detail?.contacted === todayStr() ? '오늘 요청함' : '';
+  // 조각으로 모아 두 줄째에 그대로 펼쳐 넣는다(한 겹 더 감싸면 사이 여백이 죽는다).
+  const sub = document.createDocumentFragment();
+  // `결제팀 · 2일째` — 한 덩어리로 붙여 읽는다(3일째부터 주의색 글자, 배지는 아니다).
+  const age = waitingAgeText(item.created, today);
+  if (item.who || age) {
+    const line = document.createElement('span');
+    line.className = 'who';
+    if (item.who) line.append(item.who);
+    if (age) {
+      const days = document.createElement('span');
+      days.className = uiTone(age.tone).trim();
+      days.title = '이만큼 답을 기다리고 있어요';
+      days.textContent = age.text;
+      if (item.who) line.append(' · ');
+      line.append(days);
+    }
+    sub.appendChild(line);
+  }
+  // 회신 기한은 지났거나 오늘일 때만 배지로 세운다 — 먼 기한은 줄을 시끄럽게 하지 않는다.
+  const due = uiDueText(item.due, 'row');
+  if (due && due.tone) {
+    const badge = document.createElement('span');
+    badge.className = `bd${uiTone(due.tone)}`;
+    badge.title = `회신 기한은 ${uiKoDate(item.due)}이에요`;
+    badge.textContent = due.text.startsWith('기한') ? due.text.replace('기한', '회신 기한') : `회신 기한 ${due.text}`;
+    sub.appendChild(badge);
+  }
+  const next = recheck ? '오늘 다시 확인'
+    : detail?.followUp ? `${uiKoDateShort(detail.followUp)} 다시 확인`
+    : detail?.contacted === today ? '오늘 요청함' : '';
+  if (next) {
+    const cell = document.createElement('span');
+    cell.className = 'nx';
+    cell.textContent = next;
+    sub.appendChild(cell);
+  }
 
   const row = uiRailRow({
     id: item.id,
     text: item.description,
     check: checkbox,
+    two: true,
     selected: !!panelState && panelState.id === item.id,
     badge: item.isNew && !done ? renderNewDot(item) : null,
-    meta: [item.who ? { text: item.who, strong: true } : null, status],
-    sub,
+    source: uiSourceLink(item),
+    sub: sub.childNodes.length ? sub : '',
     more: done ? null : uiMoreButton(`${item.description} — 더 보기`, () => waitingMenuSections(item, row)),
     onOpen: () => panelOpen({ id: item.id }),
   });
@@ -2148,6 +2312,7 @@ function renderLaterTasks(items) {
   uiGroupTasks(items).forEach(([key, groupItems]) => {
     const addRow = uiGroupAddRow(key, '/api/later-task/create', '나중에 할 일 추가함');
     const heading = uiGroupHeading(uiGroupLabel(key), groupItems.length, {
+      projectName: key === '__misc__' ? null : key,
       onAdd: () => { addRow.hidden = false; addRow.querySelector('input').focus(); },
       onOpenProject: key === '__misc__' ? null : () => openProjectTab(key),
     });
@@ -2219,9 +2384,12 @@ function taskCompletionCheckbox(item, card, done) {
   checkbox.className = 'd-cb';
   checkbox.checked = done;
   checkbox.setAttribute('aria-label', `${item.description} — 완료로 표시`);
-  checkbox.addEventListener('change', () =>
-    fadeOutAndRun(card, async () => { await toggleTask(item.id); if (!done) workflowOutcome(item); }, done ? '미완료로 되돌림' : null)
-  );
+  checkbox.addEventListener('change', () => {
+    // 끝내는 순간을 눈으로 보여 준다: 체크가 그려지고 → 제목에 줄이 그어지고 → 옅어진다.
+    // 저장·되돌리기 쪽은 그대로다(클래스 하나만 붙인다. 움직임 줄이기에서는 ui.css가 끈다).
+    if (!done) card.classList.add('is-completing');
+    fadeOutAndRun(card, async () => { await toggleTask(item.id); if (!done) workflowOutcome(item); }, done ? '미완료로 되돌림' : null);
+  });
   return checkbox;
 }
 
@@ -2265,7 +2433,8 @@ function taskWhenControl(item, mode, card) {
   return wrap;
 }
 
-const TASK_PRIORITY_CHIPS = [['critical', '긴급'], ['high', '높음'], ['medium', '보통'], ['low', '낮음']];
+// 저장하는 값(critical/high/medium/low)은 그대로 두고 화면에 보이는 말만 바꾼다.
+const TASK_PRIORITY_CHIPS = UI_PRIORITY_CHOICES;
 function taskPriorityControl(item) {
   return uiMenuChips(TASK_PRIORITY_CHIPS, item.priority || 'medium', async (value) => {
     uiMenuClose();
@@ -2393,7 +2562,7 @@ function panelClose() {
   escDrop(panelClose);
   if (zone) zone.classList.remove('task-detail-open', 'meeting-open');
   document.querySelectorAll('.is-sel[data-task-id], .d-mrow.is-sel').forEach(row => row.classList.remove('is-sel'));
-  if (side) { side.hidden = true; side.replaceChildren(); side.style.minHeight = ''; }
+  if (side) { side.hidden = true; side.replaceChildren(); }
   // 팔레트에서 열었던 항목이면 찾던 자리로 돌려 놓는다(포커스도 검색 입력으로).
   // 팔레트 → 회의 → 항목처럼 거쳐 왔어도 처음 찾던 자리로 돌아간다.
   while (reopen && reopen.kind === 'meeting') reopen = reopen.back;
@@ -2408,25 +2577,8 @@ function panelAnchorSelector() {
   return `[data-task-id="${CSS.escape(String(panelState.id))}"]`;
 }
 
-// 누른 줄 높이에 맞춰 연다. 좁은 화면에서는 오른쪽 고정 패널·아래 시트라 자리를 계산하지 않는다.
-function panelPlace(box) {
-  const side = panelSide();
-  if (!side || !box || !panelState) return;
-  box.style.top = '';
-  side.style.minHeight = '';
-  // 좁은 화면이거나 서랍이 열려 있으면 패널이 열 밖에 떠 있으므로(ui.css) 자리를 계산하지 않는다.
-  if (window.innerWidth <= 1120 || laterDrawerOpen) return;
-  const row = document.querySelector(`${panelAnchorSelector()}`);
-  let top = 10;
-  if (row) {
-    const offset = row.getBoundingClientRect().top - side.getBoundingClientRect().top - 6;
-    if (Number.isFinite(offset)) top = Math.max(10, offset);
-  }
-  box.style.top = `${Math.round(top)}px`;
-  // 패널은 자리에서 떠 있으므로(absolute) 열 높이가 모자라면 아랫 내용과 겹친다 — 열을 늘려 둔다.
-  side.style.minHeight = `${Math.round(top + box.offsetHeight + 10)}px`;
-}
-
+// 패널은 어느 줄을 눌러도 같은 자리에 연다 — 헤더 바로 아래, 오른쪽 칸 맨 위(ui.css의 sticky).
+// 누른 줄은 선택 강조로 표시한다. 자리를 계산하지 않으므로 여기서는 옛 인라인 값만 지운다.
 function panelRender(focusFirst = false) {
   const side = panelSide();
   const zone = panelZone();
@@ -2448,12 +2600,12 @@ function panelRender(focusFirst = false) {
     : `[data-task-id="${CSS.escape(String(panelState.id))}"], .d-wrow[data-rail-id="${CSS.escape(String(panelState.id))}"]`;
   document.querySelectorAll('.is-sel[data-task-id], .d-wrow.is-sel, .d-mrow.is-sel').forEach(row => row.classList.remove('is-sel'));
   document.querySelectorAll(marked).forEach(row => row.classList.add('is-sel'));
-  panelPlace(box);
   if (focusFirst) {
     // 회의 정리는 고칠 제목이 없다 — 검토할 초안이 없을 때만 직접 담기 입력으로 보낸다.
     const first = meeting ? (box.querySelector('.d-dcap input') || box) : box.querySelector('.d-dtitle');
     first?.focus?.();
-    box.scrollIntoView?.({ block: 'nearest' });
+    // 패널은 늘 헤더 바로 아래에 붙어 있으므로 화면을 끌어오지 않는다
+    // (누른 줄이 발밑으로 사라지지 않게. 좁은 화면에서는 떠 있는 판이라 역시 필요 없다).
   }
 }
 
@@ -2476,6 +2628,14 @@ function panelBackLink(box) {
   link.className = 'd-back';
   link.textContent = '← 회의로';
   link.addEventListener('click', () => panelOpen({ kind: 'meeting', id: back.id, event: back.event, result: back.result, back: back.back }));
+  box.appendChild(link);
+}
+
+// 원문이 있으면 제목 바로 아래에 `슬랙 원문 열기` 한 줄(줄의 `원문` 링크와 같은 곳으로 간다).
+function panelSourceLine(item, box) {
+  const link = uiSourceLink(item, '슬랙 원문 열기');
+  if (!link) return;
+  link.classList.add('d-dsrc');
   box.appendChild(link);
 }
 
@@ -2637,10 +2797,8 @@ function panelTask({ item, detail, type }, box) {
   box.appendChild(panelHead(item, () => {
     const actions = [];
     if (isTask) actions.push({ label: item.doing ? '진행 중 해제' : '진행 중으로 표시', onClick: () => setTaskDoing(item.id, !item.doing) });
-    if (item.permalink) {
-      actions.push({ label: '슬랙 원문', onClick: () => window.open(item.permalink, '_blank', 'noopener') });
-      actions.push({ label: '원본 링크 복사', onClick: () => panelCopyLink(item.permalink) });
-    }
+    // 원문 열기는 제목 아래 링크가 늘 보여 주므로 메뉴에는 복사만 남긴다.
+    if (item.permalink) actions.push({ label: '원본 링크 복사', onClick: () => panelCopyLink(item.permalink) });
     return [actions, [{
       label: '삭제',
       danger: true,
@@ -2652,6 +2810,7 @@ function panelTask({ item, detail, type }, box) {
       },
     }]];
   }));
+  panelSourceLine(item, box);
 
   const fields = document.createElement('dl');
   fields.className = 'd-fields';
@@ -2727,7 +2886,8 @@ function panelPriorityCell(item) {
   const meta = UI_PRIORITY_META[item.priority];
   if (meta) {
     cell.className = uiTone(meta.tone).trim();
-    cell.innerHTML = `<i class="d-dot"></i>${meta.text}`;
+    cell.title = meta.hint;
+    cell.innerHTML = `${uiIcon('flag')}${meta.text}`;
   } else {
     cell.className = 'k-mute';
     cell.textContent = item.priority === 'low' ? '낮음' : '보통';
@@ -2795,6 +2955,7 @@ function panelCheck({ item, detail }, box) {
   const done = item.status === 'done';
   panelBackLink(box);
   box.appendChild(panelHead(item, () => waitingMenuSections(item, box)));
+  panelSourceLine(item, box);
 
   const fields = document.createElement('dl');
   fields.className = 'd-fields';
@@ -3649,6 +3810,15 @@ function palClose(silent) {
   if (!silent && back && back.isConnected) back.focus();
 }
 
+// `새로 들어온 것` 제목 오른쪽 끝의 조용한 글자 버튼 — 오늘 들어온 것만 팔레트로 모아 본다.
+// 0이면 아예 보이지 않는다.
+function renderInboxHeadCount(count) {
+  const button = document.getElementById('createdTodayBtn');
+  const cell = document.getElementById('createdTodayCount');
+  if (cell) cell.textContent = count;
+  if (button) button.hidden = !count;
+}
+
 // 슬랙에서 갓 들어온 할 일. 오늘 할지 나중에 할지는 여기서 직접 고른다.
 // 비어 있으면 섹션 자체를 숨겨서, 처리할 게 있을 때만 눈에 띄게 한다.
 function renderInbox(items) {
@@ -3673,24 +3843,10 @@ function renderInbox(items) {
     title.title = item.description;
     if (item.isNew) { title.prepend(renderNewDot(item)); observeNewItem(row, item); }
     main.appendChild(title);
-    if (item.permalink) {
-      const link = document.createElement('a');
-      link.className = 'd-link';
-      link.href = item.permalink;
-      link.target = '_blank';
-      link.rel = 'noopener';
-      link.textContent = '슬랙 원문';
-      main.appendChild(link);
-    }
+    // 원문은 제목 바로 뒤에 늘 보인다(다른 줄과 같은 조용한 `원문` 링크).
+    const source = uiSourceLink(item);
+    if (source) main.appendChild(source);
     row.appendChild(main);
-
-    // 분류하면서 어느 프로젝트 건인지도 같이 정할 수 있게 한다
-    row.appendChild(renderGroupControl({
-      jira: item.jira,
-      group: item.group,
-      onSetJira: (key) => setTaskJira(item.id, key),
-      onSetGroup: (g) => setTaskGroup(item.id, g),
-    }));
 
     const actions = document.createElement('span');
     actions.className = 'd-ibacts';
@@ -3704,49 +3860,71 @@ function renderInbox(items) {
       actions.appendChild(button);
     };
 
-    // 앞으로 할 것 — 분류
+    // 줄에는 자주 쓰는 세 갈래만 늘 보인다 — 오늘 / 나중에 / 완료.
     choose('오늘', () => fadeOutAndRun(row, () => setTaskScheduled(item.id, todayStr()), '오늘 할 일로 옮김'));
     choose('나중에', () => fadeOutAndRun(row, () => setTaskScheduled(item.id, null), '나중에 할 일로 옮김'));
-    // 이미 끝난 것 — 종결. 완료는 기록이 남고(주간요약에 들어감), 삭제는 남지 않는다
-    choose('완료로 표시', () => fadeOutAndRun(row, () => toggleTask(item.id), '완료로 표시함'));
-    choose('삭제', () => {
-      fadeOutAndRun(row, async () => {
-        await request('/api/track/remove', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: item.id }),
-        });
-        load();
-      }, '삭제함');
-    }, 'dng');
+    // 완료는 기록이 남고(주간요약에 들어감), 삭제는 남지 않는다 — 삭제는 ⋯ 안으로 들어갔다.
+    choose('완료', () => fadeOutAndRun(row, () => toggleTask(item.id), '완료로 표시함'));
 
-    // 아직 분류 전이라도 기한·우선순위가 분명한 건은 미리 정해둘 수 있어야 한다.
-    // 프로젝트는 좁은 화면(≤520px)에서 줄의 선택 상자가 숨으므로 여기에도 둔다.
-    actions.appendChild(uiMoreButton(`${item.description} — 더 보기`, () => [[
-      {
-        field: '기한',
-        control: uiDateField({
-          value: item.due,
-          label: '기한',
-          onChange: async (value) => {
-            await setTaskDue(item.id, value);
-            announce(value ? `기한 ${uiKoDate(value)}로 지정함` : '기한 해제함');
-          },
-        }),
-      },
-      { field: '우선순위', control: taskPriorityControl(item) },
-      { field: '프로젝트', control: taskProjectControl(item) },
-    ]]));
+    // 값을 정하는 것과 삭제는 ⋯ 안에 있다. 아직 분류 전이라도 기한·우선순위가 분명한 건은 미리 정해 둘 수 있다.
+    actions.appendChild(uiMoreButton(`${item.description} — 더 보기`, () => [
+      [
+        { field: '프로젝트', control: taskProjectControl(item) },
+        {
+          field: '기한',
+          control: uiDateField({
+            value: item.due,
+            label: '기한',
+            onChange: async (value) => {
+              await setTaskDue(item.id, value);
+              announce(value ? `기한 ${uiKoDate(value)}로 지정함` : '기한 해제함');
+            },
+          }),
+        },
+        { field: '우선순위', control: taskPriorityControl(item) },
+      ],
+      [{
+        label: '삭제',
+        danger: true,
+        onClick: () => fadeOutAndRun(row, async () => {
+          await request('/api/track/remove', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: item.id }),
+          });
+          load();
+        }, '삭제함'),
+      }],
+    ]));
 
     row.appendChild(actions);
     list.appendChild(row);
   });
 }
 
+// 오늘 할 일 카드 윗변을 따라 흐르는 3px 선. 카드 모서리에 맞춰 잘리도록 카드를 덮는
+// 투명한 판 안에 둔다(판이 둥글게 잘라 준다). 할 일이 없으면 선도 없다.
+function renderTodayProgress(done, total) {
+  const card = document.getElementById('todayListSurface');
+  if (!card) return;
+  let bar = card.querySelector(':scope > .d-topprog');
+  if (!total) { if (bar) bar.remove(); return; }
+  if (!bar) {
+    bar = document.createElement('span');
+    bar.className = 'd-topprog';
+    bar.setAttribute('aria-hidden', 'true');
+    bar.appendChild(document.createElement('i'));
+    card.prepend(bar);
+  }
+  bar.firstChild.style.setProperty('--p', `${Math.round((done / total) * 100)}%`);
+}
+
 function renderTodayTasks(items) {
   const doneItems = items.filter(item => item.status === 'done');
   document.getElementById('todayTaskCount').textContent = items.length - doneItems.length;
-  document.getElementById('todayDoneSummary').textContent = `완료 ${doneItems.length}`;
+  // 한 마디로 오늘의 진행을 알려 준다. 아직 아무것도 없으면 아무 말도 하지 않는다.
+  document.getElementById('todayDoneSummary').textContent = items.length ? `${items.length}개 중 ${doneItems.length}개 끝냈어요` : '';
+  renderTodayProgress(doneItems.length, items.length);
   const list = document.getElementById('todayTaskList');
   list.replaceChildren();
 
@@ -3769,6 +3947,7 @@ function renderTodayTasks(items) {
     uiGroupTasks(active).forEach(([key, groupItems]) => {
       const addRow = uiGroupAddRow(key, '/api/today-task/create', '오늘 할 일 추가함');
       const heading = uiGroupHeading(uiGroupLabel(key), groupItems.length, {
+        projectName: key === '__misc__' ? null : key,
         onAdd: () => { addRow.hidden = false; addRow.querySelector('input').focus(); },
         onOpenProject: key === '__misc__' ? null : () => openProjectTab(key),
       });
@@ -3778,7 +3957,9 @@ function renderTodayTasks(items) {
   }
 
   if (!active.length && !doing.length) {
-    list.insertAdjacentHTML('beforeend', '<div class="d-empty">오늘 할 일이 비었습니다. 위 첫 줄에서 바로 추가하세요.</div>');
+    list.insertAdjacentHTML('beforeend', doneItems.length
+      ? '<div class="d-empty">오늘 할 일을 모두 끝냈어요.</div>'
+      : '<div class="d-empty">오늘 할 일이 비었어요. 위 첫 줄에서 바로 추가하세요.</div>');
   }
 
   if (doneItems.length) {
@@ -3873,7 +4054,8 @@ function getNewItemObserver() {
           newItemTimers.delete(id);
           newItemObserver.unobserve(entry.target);
           try {
-            await request('/api/track/seen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+            // NEW는 조용히 사라져야 한다 — 저장 알림을 띄우지 않는다(quiet).
+            await request('/api/track/seen', { method: 'POST', quiet: true, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
             const dot = entry.target.querySelector('.new-dot');
             if (dot) dot.remove();
           } catch {}
@@ -4149,29 +4331,49 @@ document.getElementById('decisionArchiveToggle').addEventListener('click', () =>
 });
 
 try { todaySort = localStorage.getItem('todaySort') || 'project'; } catch {}
-// 보기 전환은 조용한 두 칸 세그먼트. 고른 값은 브라우저에 그대로 기억한다.
+// 보기 전환은 머리줄 ⋯ 메뉴 안의 두 칸 칩이다. 고른 값은 브라우저에 그대로 기억한다(저장 키·동작 그대로).
 const todayViewSeg = document.getElementById('todayViewSeg');
 function renderTodayViewSeg() {
   todayViewSeg?.querySelectorAll('button').forEach((button) => {
     button.setAttribute('aria-pressed', String(button.dataset.view === todaySort));
   });
 }
+function setTodaySort(value) {
+  if (todaySort === value) return;
+  todaySort = value;
+  try { localStorage.setItem('todaySort', todaySort); } catch {}
+  renderTodayViewSeg();
+  load();
+}
 todayViewSeg?.querySelectorAll('button').forEach((button) => {
-  button.addEventListener('click', () => {
-    if (todaySort === button.dataset.view) return;
-    todaySort = button.dataset.view;
-    try { localStorage.setItem('todaySort', todaySort); } catch {}
-    renderTodayViewSeg();
-    load();
-  });
+  button.addEventListener('click', () => setTodaySort(button.dataset.view));
 });
 renderTodayViewSeg();
 
-// 검색 팔레트를 여는 두 자리: 헤더의 `검색 ⌘K` 버튼, 레일 한 줄 요약의 `오늘 신규 N`.
+// 오늘 할 일 머리줄의 ⋯ — 보기 전환과 여러 개 선택이 이 안에 있다(눌러 보는 건 하나뿐).
+const todayHeadMoreSlot = document.getElementById('todayHeadMore');
+if (todayHeadMoreSlot) {
+  todayHeadMoreSlot.appendChild(uiMoreButton('오늘 할 일 보기와 도구', () => [
+    [{
+      field: '보기',
+      control: uiMenuChips([['project', '프로젝트별'], ['priority', '마감·중요도순']], todaySort, (value) => {
+        uiMenuClose();
+        setTodaySort(value);
+      }),
+    }],
+    [{
+      label: taskSelectionMode ? '선택 끝내기' : '여러 개 선택',
+      disabled: taskBatchBusy,
+      onClick: () => { if (taskSelectionMode) taskSelectEnd(); else taskSelectStart(); },
+    }],
+  ], 'd-iconbtn sm d-headmore'));
+}
+
+// 검색 팔레트를 여는 두 자리: 헤더의 `검색 ⌘K` 버튼, `새로 들어온 것` 제목 옆 `오늘 신규 N`.
 document.getElementById('searchEntryBtn')?.addEventListener('click', () => palOpen({}));
 document.getElementById('createdTodayBtn')?.addEventListener('click', () => palOpen({ newOnly: true }));
 
-// 여러 개 선택 — 같은 버튼으로 시작하고 끝낸다(Esc도 끝내기).
+// 여러 개 선택 — 같은 자리에서 시작하고 끝낸다(Esc도 끝내기).
 document.getElementById('taskSelectToggle')?.addEventListener('click', () => {
   if (taskBatchBusy) return;
   if (taskSelectionMode) taskSelectEnd(); else taskSelectStart();
@@ -4255,7 +4457,7 @@ refreshBtn.addEventListener('click', async () => {
   setTimeout(() => refreshBtn.classList.remove('spinning'), 400);
 });
 
-// ---------- 환경설정 (상태 / 사용법) ----------
+// ---------- 설정 (상태 / 사용법) ----------
 
 function relativeTimeFrom(timeStr) {
   // "YYYY-MM-DD HH:MM:SS" (로컬 시각) 기준으로 몇 분/시간 전인지
@@ -4473,7 +4675,7 @@ function renderSettingsGuide() {
   }
 }
 
-// ---------- 환경설정 열고 닫기 ----------
+// ---------- 설정 열고 닫기 ----------
 // 드문 작업이라 모달(<dialog>)이 맞다. Esc는 앱의 스택 하나로 처리하고(떠 있는 것 중 맨 위만
 // 닫힌다), 닫으면 열었던 버튼으로 포커스가 돌아간다.
 const settingsDialog = document.getElementById('settingsDialog');
@@ -4603,4 +4805,4 @@ setInterval(() => {
 
 load();
 refreshStorageStatus(); // 목록을 못 불러오는 상황에서도 저장이 멈춘 이유는 보이게
-fetchAutomationStatus(); // 환경설정을 열어보지 않아도 톱니바퀴에 실패 여부가 바로 보이게
+fetchAutomationStatus(); // 설정을 열어보지 않아도 톱니바퀴에 실패 여부가 바로 보이게

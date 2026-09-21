@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<meta name="theme-color" content="#f8fafc" media="(prefers-color-scheme: light)" />
-<meta name="theme-color" content="#111318" media="(prefers-color-scheme: dark)" />
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#1e222a" media="(prefers-color-scheme: dark)" />
 <link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-32.png" />
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
 <link rel="apple-touch-icon" href="/icons/icon-180.png" />
@@ -82,7 +82,7 @@
     border-radius: 999px;
   }
   .desc-editable { cursor: text; border-radius: 4px; }
-  .desc-editable:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+  .desc-editable:hover { background: var(--hover); }
   .desc-edit-input {
     font-family: inherit;
     font-weight: 600;
@@ -226,22 +226,23 @@
     <nav class="d-tabs" role="tablist" aria-label="화면">
       <button type="button" class="d-tab" id="tabBtnToday" role="tab">오늘</button>
       <button type="button" class="d-tab" id="tabBtnProjects" role="tab">프로젝트</button>
-      <button type="button" class="d-tab" id="tabBtnRecords" role="tab">아이디어·결정<span class="d-tabdot" aria-hidden="true"></span></button>
+      <button type="button" class="d-tab" id="tabBtnRecords" role="tab">아이디어·결정<span class="d-tabnum num" id="tabRecordsNum"></span></button>
       <button type="button" class="d-tab" id="tabBtnWeekly" role="tab">주간요약</button>
     </nav>
     <button type="button" id="refreshBtn" class="d-iconbtn" aria-label="새로고침" title="새로고침"><svg class="d-i" viewBox="0 0 16 16" aria-hidden="true"><path d="M14 8a6 6 0 1 1-2-4.47L14 5.2"/><path d="M14 2v3.4h-3.4"/></svg></button>
     <button type="button" id="searchEntryBtn" class="d-srch" aria-label="통합 검색" title="검색">
       <svg class="d-i" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="M10.2 10.2 14 14"/></svg><span>검색</span><kbd>⌘K</kbd>
     </button>
-    <button type="button" id="settingsBtn" class="d-iconbtn d-gear" aria-label="환경설정" title="환경설정"><svg class="d-i" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4.6h12M2 11.4h12"/><circle cx="6" cy="4.6" r="1.9"/><circle cx="10.4" cy="11.4" r="1.9"/></svg><i class="d-baddot" aria-hidden="true"></i></button>
+    <button type="button" id="settingsBtn" class="d-iconbtn d-gear" aria-label="설정" title="설정"><svg class="d-i" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.4"/><path d="M8 1.7v1.7M8 12.6v1.7M14.3 8h-1.7M3.4 8H1.7M12.45 3.55l-1.2 1.2M4.75 11.25l-1.2 1.2M12.45 12.45l-1.2-1.2M4.75 4.75l-1.2-1.2"/></svg><i class="d-baddot" aria-hidden="true"></i></button>
   </header>
   <div id="storageBanner" class="d-banner" role="status" hidden></div>
   <div class="page">
     <div class="grid" id="gridToday">
       <aside class="col col-left d-rail" aria-label="오늘 옆줄">
-        <div class="d-quiet" id="railSummary">
-          <span>결정 검토 <span class="num" id="decisionCount">0</span> · 확인 대기 <span class="num" id="waitingCount">0</span> ·</span>
-          <button type="button" class="d-qlink" id="createdTodayBtn" aria-label="오늘 들어온 항목 모아 보기">오늘 신규 <span class="num" id="createdTodayCount">0</span></button>
+        <!-- 한 줄 요약은 화면에서 내렸다(숫자는 탭 이름 옆과 카드 제목 옆으로 갔다).
+             옛 자리에 있던 숫자 칸은 갱신 코드가 그대로 쓰도록 숨겨 둔 채 남는다. -->
+        <div class="d-quiet" id="railSummary" hidden>
+          결정 검토 <span class="num" id="decisionCount">0</span> · 확인 대기 <span class="num" id="waitingCount">0</span>
         </div>
 
         <section class="d-rsec" id="calendarZone">
@@ -254,32 +255,31 @@
           <div id="reminderList"></div>
         </section>
 
-        <section class="d-rsec d-fu" id="railFollowUps" hidden></section>
-
+        <!-- 확인 대기: 후속 알림이 카드 첫 줄로 올라오고, 입력칸은 카드 맨 아래에 있다 -->
         <section class="d-rsec" id="waitingZone">
           <div class="d-rhd" id="waitingHeading"><span>확인 대기</span><span class="n num" id="waitingSectionCount">0</span></div>
-          <input type="text" class="d-qa" id="waitingInput" placeholder="확인 대기 추가 — Enter" aria-label="확인 대기 추가" />
           <div id="waitingList"></div>
+          <input type="text" class="d-qa" id="waitingInput" placeholder="+ 확인 대기 추가" aria-label="확인 대기 추가" />
         </section>
       </aside>
 
       <main class="col col-center">
         <div id="inboxZone" hidden>
-          <div class="d-sechd" id="inboxHeading">새로 들어온 것<span class="n num" id="inboxCount">0</span></div>
+          <div class="d-sechd" id="inboxHeading">새로 들어온 것<span class="n num" id="inboxCount">0</span>
+            <button type="button" class="d-headnum" id="createdTodayBtn" aria-label="오늘 들어온 항목 모아 보기" hidden>오늘 신규 <span class="num" id="createdTodayCount">0</span></button>
+          </div>
           <div class="d-inbox" id="inboxList"></div>
         </div>
 
         <div id="todayTaskZone" tabindex="-1">
+          <!-- 머리줄: 제목 + 파란 개수 칩 + `19개 중 5개 끝냈어요 · 2개 미룰까요?`
+               / 오른쪽 `나중에 할 일 N` + ⋯(보기 전환·여러 개 선택). -->
           <div class="d-lhd">
             <h2>오늘 할 일</h2>
-            <span class="sub num"><span id="todayTaskCount">0</span> · <span id="todayDoneSummary">완료 0</span></span>
+            <span class="sub num"><span class="cnt" id="todayTaskCount">0</span><span id="todayDoneSummary"></span><span id="suggestSlot"></span></span>
             <span class="sp"></span>
-            <div class="d-seg" id="todayViewSeg" role="group" aria-label="오늘 할 일 정렬 방식">
-              <button type="button" data-view="project" aria-pressed="true">프로젝트별</button>
-              <button type="button" data-view="priority" aria-pressed="false">마감·중요도순</button>
-            </div>
-            <button type="button" class="d-btn" id="taskSelectToggle" aria-pressed="false" aria-controls="taskSelectBar">여러 개 선택</button>
             <button type="button" class="d-btn" id="laterTaskToggle" aria-expanded="false" aria-controls="laterTaskDrawer">나중에 할 일 <span class="num" id="laterTaskSectionCount">0</span></button>
+            <span id="todayHeadMore"></span>
           </div>
           <div id="suggestZone" hidden></div>
           <div class="task-content-layout">
@@ -324,7 +324,7 @@
       </section>
 
       <section class="d-reccol" aria-labelledby="decisionColHead">
-        <div class="d-lhd"><h2 id="decisionColHead">결정</h2><span class="sub num" id="decisionSectionCount">0</span></div>
+        <div class="d-lhd"><h2 id="decisionColHead">결정</h2><span class="sub num" id="decisionSectionCount">0</span><span class="d-quietnum num" id="decisionPendingNote"></span></div>
         <div class="d-list">
           <div class="d-qaf">
             <svg class="d-i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2v9.6M3.2 8h9.6"/></svg>
@@ -379,11 +379,11 @@
 
   <div id="liveRegion" class="d-toast" role="status" aria-live="polite" hidden></div>
 
-  <!-- 환경설정 — 드물게 여는 창이라 모달 그대로 둔다(상태 / 사용법 두 칸) -->
-  <dialog id="settingsDialog" class="d-modal" aria-label="환경설정">
+  <!-- 설정 — 드물게 여는 창이라 모달 그대로 둔다(상태 / 사용법 두 칸) -->
+  <dialog id="settingsDialog" class="d-modal" aria-label="설정">
     <div class="d-mhd">
-      <h2>환경설정</h2>
-      <span class="d-seg" role="group" aria-label="환경설정 보기">
+      <h2>설정</h2>
+      <span class="d-seg" role="group" aria-label="설정 보기">
         <button type="button" data-settings-tab="status" aria-pressed="true">상태</button>
         <button type="button" data-settings-tab="guide" aria-pressed="false">사용법</button>
       </span>

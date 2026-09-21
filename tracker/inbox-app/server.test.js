@@ -32,6 +32,15 @@ test('the screen stylesheet is served', async () => {
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type') || '', /text\/css/);
 });
+test('the embedded font is served, and nothing else under /fonts', async () => {
+  const font = await fetch(base + '/fonts/PretendardVariable.woff2');
+  assert.equal(font.status, 200);
+  assert.match(font.headers.get('content-type') || '', /font\/woff2/);
+  // 허용한 것은 `/fonts/<이름>.woff2` 하나뿐이다 — 상위 경로 탈출도, 다른 확장자도 열리지 않는다.
+  assert.equal((await fetch(base + '/fonts/../server.js')).status, 404);
+  assert.equal((await fetch(base + '/fonts/x.txt')).status, 404);
+  assert.equal((await fetch(base + '/fonts/Pretendard-LICENSE.txt')).status, 404);
+});
 test('cross-origin mutations are rejected',async()=>{
   const response=await fetch(base+'/api/track/toggle',{method:'POST',headers:{'Content-Type':'application/json',Origin:'https://untrusted.example'},body:JSON.stringify({id:'legacy'})});
   assert.equal(response.status,403);

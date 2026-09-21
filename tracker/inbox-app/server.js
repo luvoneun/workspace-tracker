@@ -1042,6 +1042,7 @@ const MIME = {
   '.png': 'image/png',
   '.svg': 'image/svg+xml',
   '.webmanifest': 'application/manifest+json',
+  '.woff2': 'font/woff2',
 };
 
 function readBody(req) {
@@ -1460,7 +1461,9 @@ const handleRequest = (req, res) => {
   }
 
   let filePath = url.pathname === '/' ? '/index.html' : url.pathname;
-  if (!['/index.html','/app.js','/ui.css','/workflows.js','/workflows.css','/report-ui.js','/report-ui.css','/manifest.webmanifest'].includes(filePath) && !/^\/icons\/[\w-]+\.(png|svg)$/.test(filePath)) {
+  // 앱에 내장한 글꼴(Pretendard)도 화면 파일과 같은 길로 나간다. 인증 예외(publicAsset)에는 넣지 않는다.
+  if (!['/index.html','/app.js','/ui.css','/workflows.js','/workflows.css','/report-ui.js','/report-ui.css','/manifest.webmanifest'].includes(filePath)
+    && !/^\/icons\/[\w-]+\.(png|svg)$/.test(filePath) && !/^\/fonts\/[\w-]+\.woff2$/.test(filePath)) {
     res.writeHead(404); res.end('Not found'); return;
   }
   filePath = path.join(PUBLIC_DIR, filePath);

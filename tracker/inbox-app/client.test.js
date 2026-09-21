@@ -126,32 +126,45 @@ function reportClient() {
 test('the status column shows overdue, due today, carried-over and in-progress, and stays empty when there is nothing to say', () => {
   const app = pureClient();
   const cells = (item, opts = '{}') => app.run(`uiMetaCells(${item}, ${opts})`);
-  assert.match(cells("{ due: '2000-01-01' }"), /m-due k-neg">\d+일 지남/);
-  assert.match(cells('{ due: todayStr() }'), /m-due k-warn">오늘까지/);
-  assert.match(cells('{ due: tomorrowStr() }'), /m-due">내일까지/);
+  assert.match(cells("{ due: '2000-01-01' }"), /m-due k-neg"[^>]*>.*기한 \d+일 지남/s);
+  assert.match(cells('{ due: todayStr() }'), /m-due k-warn"[^>]*>.*오늘까지/s);
+  assert.match(cells('{ due: tomorrowStr() }'), /m-due"[^>]*>.*내일까지/s);
   assert.equal(cells("{ due: '2999-12-31' }"), '', 'a far deadline is not printed on a today row');
-  assert.match(cells("{ due: '2999-12-31' }", "{ where: 'full' }"), /12월 31일 \(.\)까지/, 'but it is printed where there is room');
-  assert.match(cells("{ scheduled: '2000-01-01' }"), /m-carry">\d+일 전부터/);
+  assert.match(cells("{ due: '2999-12-31' }", "{ where: 'full' }"), /12월 31일까지/, 'but it is printed where there is room');
+  assert.match(cells("{ scheduled: '2000-01-01' }"), /m-carry"[^>]*>.*\d+일째 밀림/s);
   assert.equal(cells("{ scheduled: '2999-01-01' }"), '', 'a task planned for later is not called carried over');
-  assert.match(cells('{ doing: todayStr() }'), /m-doing">진행 중/);
+  assert.match(cells('{ doing: todayStr() }'), /m-doing"[^>]*>.*진행 중/s);
   assert.equal(cells('{ doing: todayStr(), status: "done" }'), '', 'a done task is not shown as in progress');
   assert.equal(cells("{ doing: todayStr() }", '{ inDoingGroup: true }'), '', 'the group heading already says it');
   assert.equal(cells("{ priority: 'medium' }"), '', 'a middling priority is not printed');
-  assert.match(cells("{ priority: 'critical' }"), /m-pri k-neg"><i class="d-dot"><\/i>긴급/);
+  assert.match(cells("{ priority: 'critical' }"), /m-pri k-neg"[^>]*>.*긴급/s);
+  assert.match(cells("{ priority: 'high' }"), /m-pri k-warn"[^>]*>.*중요/s, '높음은 화면에서 `중요`로 읽힌다');
+  // 종류마다 작은 아이콘과 풀어 쓴 툴팁이 함께 붙는다.
+  assert.match(cells("{ scheduled: '2000-01-01' }"), /title="오늘 하려다 넘어온 업무예요"/);
+  assert.match(cells("{ priority: 'critical' }"), /<svg class="d-i"/, '상태말 앞에는 종류 아이콘이 붙는다');
   const escaped = cells('{}', "{ project: '가입 <개선>' }");
   assert.match(escaped, /m-proj">가입 &lt;개선&gt;/, 'user text is escaped');
   assert.doesNotMatch(escaped, /<개선>/);
 });
 
-test('waiting items are ordered by reply deadline first, then by when they were added', () => {
+test('waiting items put today\'s re-checks on top, then reply deadlines, then when they were added', () => {
   const app = pureClient();
-  const order = JSON.parse(app.run(`JSON.stringify(waitingOrder([
-    { id: 'c', created: '2026-09-10' },
-    { id: 'b', due: '2026-09-25' },
-    { id: 'a', due: '2026-09-22' },
-    { id: 'd', created: '2026-09-01' }
-  ]).map(i => i.id))`));
-  assert.deepEqual(order, ['a', 'b', 'd', 'c'], '기한이 있는 것이 먼저, 그 안에서는 빠른 기한 순');
+  // 흐름 기록(다시 확인할 날짜·오늘 요청함)은 바깥에서 받아 쓴다 — 순수 함수로 두기 위해서다.
+  const order = JSON.parse(app.run(`
+    const details = { r: { followUp: '2026-09-20' }, s: { followUp: '2026-09-19', contacted: '2026-09-21' } };
+    JSON.stringify(waitingOrder([
+      { id: 'c', created: '2026-09-10' },
+      { id: 'b', due: '2026-09-25' },
+      { id: 'r', created: '2026-09-05' },
+      { id: 'a', due: '2026-09-22' },
+      { id: 's', created: '2026-09-02' },
+      { id: 'd', created: '2026-09-01' }
+    ], '2026-09-21', id => details[id] || null).map(i => i.id))`));
+  assert.deepEqual(order, ['r', 'a', 'b', 'd', 's', 'c'],
+    '오늘 다시 확인할 것이 맨 위 → 기한이 있는 것(빠른 기한 순) → 먼저 등록한 순');
+  assert.equal(app.run("String(waitingRecheck({ followUp: '2026-09-19', contacted: '2026-09-21' }, '2026-09-21'))"), 'false',
+    '오늘 이미 요청했으면 다시 확인할 것으로 올리지 않는다');
+  assert.equal(app.run("String(waitingRecheck({ followUp: '2026-09-25' }, '2026-09-21'))"), 'false', '아직 오지 않은 날짜는 조용하다');
 });
 
 test('waiting age turns to the warning colour from the third day of waiting', () => {
@@ -212,11 +225,11 @@ test('dates read as "9월 22일 (화)", without the year', () => {
 test('deadline wording is the same everywhere, and a far deadline is left off a today row', () => {
   const app = pureClient();
   const due = (code, where) => JSON.parse(app.run(`JSON.stringify(uiDueText(${code}, ${JSON.stringify(where)}))`));
-  assert.match(due("'2000-01-01'", 'full').text, /^\d+일 지남$/);
+  assert.match(due("'2000-01-01'", 'full').text, /^기한 \d+일 지남$/);
   assert.equal(due("'2000-01-01'", 'full').tone, 'urgent');
   assert.deepEqual(due('todayStr()', 'full'), { text: '오늘까지', tone: 'warn' });
   assert.deepEqual(due('tomorrowStr()', 'full'), { text: '내일까지', tone: '' });
-  assert.match(due("'2999-12-31'", 'full').text, /^12월 31일 \(.\)까지$/);
+  assert.match(due("'2999-12-31'", 'full').text, /^12월 31일까지$/, '먼 기한은 요일 없이 날짜만');
   assert.equal(due("'2999-12-31'", 'full').tone, '');
   assert.equal(due("'2999-12-31'", 'row'), null, 'a far deadline is not printed on a today row');
   assert.equal(due('null', 'full'), null, 'no deadline prints nothing');
@@ -228,7 +241,7 @@ test('a task carried over says since when, and says nothing on the day it was pl
   assert.equal(carry('todayStr()'), null);
   assert.equal(carry('tomorrowStr()'), null);
   assert.equal(carry('null'), null);
-  assert.match(carry("'2000-01-01'"), /^\d+일 전부터$/);
+  assert.match(carry("'2000-01-01'"), /^\d+일째 밀림$/);
 });
 
 test('the detail panel sends only the fields the person actually changed', () => {

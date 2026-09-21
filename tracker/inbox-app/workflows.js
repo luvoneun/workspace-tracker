@@ -147,27 +147,6 @@ function workflowRender(data) {
     button.addEventListener('click', () => palOpen({ type: 'meeting' }));
     document.getElementById('calendarSectionCount').parentElement.appendChild(button);
   }
-  // 후속 알림은 확인 대기 입력란과 목록 사이에 끼우지 않는다 — 리마인드 아래, 확인 대기 위의
-  // 작은 구역으로 둔다(구역 제목보다 조용한 이름표).
-  const reminder = document.getElementById('railFollowUps');
-  if (!reminder) return;
-  const checks = workflowData.items.filter(item => item.type === 'check' && item.status !== 'done' && item.followUp && item.followUp <= data.today && item.contacted !== data.today);
-  const ready = workflowData.items.filter(item => ['task', 'bug'].includes(item.type) && item.status !== 'done' && item.blockedBy && wfItem(item.blockedBy)?.status === 'done');
-  reminder.replaceChildren();
-  reminder.hidden = !checks.length && !ready.length;
-  const group = (label, items, meta) => {
-    reminder.appendChild(wfNode('div', `${label} ${items.length}`, 'lbl'));
-    items.forEach(item => reminder.appendChild(uiRailRow({
-      id: item.id,
-      text: item.description,
-      meta: meta ? meta(item) : [],
-      onOpen: () => panelOpen({ id: item.id }),
-    })));
-  };
-  // 누구에게 물었는지는 업무 기록 쪽에 있다(흐름 기록에는 없을 수 있다).
-  if (checks.length) group('다시 확인할 항목', checks, (item) => {
-    const who = itemsById.get(item.id)?.who || item.who;
-    return [who ? { text: who, strong: true } : null];
-  });
-  if (ready.length) group('답변이 해결된 업무', ready);
+  // 후속 알림은 따로 나열하지 않는다 — `다시 확인할 항목`은 확인 대기 목록 맨 위로 올라가고
+  // (waitingOrder + renderWaitingRow), `답변이 해결된 업무`는 리마인드 카드의 줄이 된다(renderReminders).
 }
