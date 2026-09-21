@@ -1219,7 +1219,7 @@ body.later-open .page { padding-right: 424px; }
 .d-dbody .d-meta:empty { display: none; }
 
 /* ---------- ⌘K 검색 팔레트 ----------
-   가림막 위에 떠 있는 한 겹. 위에서 84px, 폭 620px, 결과는 34px 한 줄이다. */
+   가림막 위에 떠 있는 한 겹. 위에서 84px, 폭 620px. 회의 모아보기·오늘 신규(`is-browse`)는 920×720으로 크게 연다. */
 .d-pal {
   position: fixed; inset: 0; z-index: 60; background: var(--scrim);
   display: grid; justify-items: center; align-items: start; padding: 84px 16px 16px;
@@ -1230,6 +1230,13 @@ body.later-open .page { padding-right: 424px; }
   background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r);
   box-shadow: var(--pop); overflow: hidden;
   animation: d-pal-in 140ms var(--ease);
+}
+/* 훑어보는 창(회의 모아보기 · 오늘 신규) — 검색보다 크게, 줄도 여유 있게. 좁은 화면 규칙(≤640)은 그대로 이긴다. */
+@media (min-width: 641px) {
+  .d-pal.is-browse { padding-top: 64px; }
+  .d-pal.is-browse .d-palbox { width: min(920px, 100vw - 48px); height: min(720px, 100dvh - 112px); max-height: none; }
+  .d-pal.is-browse .d-pres { min-height: 54px; padding: 6px 16px; gap: 16px; }
+  .d-pal.is-browse .d-pres.is-mtg { grid-template-columns: 62px 128px minmax(0, 1fr) auto; }
 }
 @keyframes d-pal-in { from { transform: translateY(-6px); opacity: 0; } to { transform: none; opacity: 1; } }
 .d-palin {
