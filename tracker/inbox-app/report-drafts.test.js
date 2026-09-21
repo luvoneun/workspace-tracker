@@ -89,6 +89,26 @@ test('보고 기록을 한 번만 읽어도 주마다 만드는 내용은 그대
   let shared;try{const state=f.store.read();shared=f.store.weeks(f.items,state).map(key=>f.store.view(key,state,f.items));}finally{fs.readFileSync=real;}
   assert.ok(shared.length>2);assert.deepEqual(shared,separate);assert.equal(reads,1);
 });
+test('다음 주 계획 문장은 프로젝트를 붙여 담을 수 있고, 없으면 예전처럼 직접 작성으로 담긴다',t=>{
+  const f=fixture(t);
+  f.change({action:'add',text:'정산 배치 QA 붙기',group:' 결제 리뉴얼 '});
+  const withGroup=f.view().rows.find(row=>row.text==='정산 배치 QA 붙기');
+  assert.equal(withGroup.group,'결제 리뉴얼','앞뒤 공백은 떼고 고른 프로젝트를 그대로 적는다');
+  assert.equal(withGroup.heading,'다음 주 계획');
+  f.change({action:'add',text:'과금 기획 정리'});
+  assert.equal(f.view().rows.find(row=>row.text==='과금 기획 정리').group,'직접 작성','group이 없는 기존 add는 그대로 동작한다');
+  f.change({action:'add',text:'프로젝트 없이 적기',group:''});
+  assert.equal(f.view().rows.find(row=>row.text==='프로젝트 없이 적기').group,'직접 작성','빈 문자열도 프로젝트 없음이다');
+});
+test('잘못된 프로젝트 이름은 계획 문장과 함께 거절된다',t=>{
+  const f=fixture(t);
+  for(const group of ['줄\n바꿈','가'.repeat(61),'  ',{name:'객체'},'제어\u0007문자'])
+    assert.throws(()=>f.change({action:'add',text:'문장',group}),error=>!error.status && /프로젝트 이름/.test(error.message));
+  assert.equal(f.view().rows.filter(row=>row.heading==='다음 주 계획').length,0,'거절된 요청은 아무것도 남기지 않는다');
+  // 낡은 revision이면 프로젝트를 붙였더라도 먼저 409로 막힌다(충돌 규칙은 그대로다).
+  const old=f.view();f.items.push({...f.items[0],id:'b'});
+  assert.throws(()=>f.store.change({weekKey:old.weekKey,revision:old.revision,action:'add',text:'문장',group:'가입 개선'}),error=>error.status===409);
+});
 test('a historical saved draft is not silently rewritten by source changes',t=>{
   const f=fixture(t);f.items[0].created='2026-09-01';f.items[0].completed='2026-09-02';
   let old=f.store.view('2026-08-31');f.store.change({weekKey:old.weekKey,revision:old.revision,action:'add',text:'기록 보존'});

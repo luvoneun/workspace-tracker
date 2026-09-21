@@ -77,7 +77,15 @@ module.exports = ({ directory, sources, legacy, currentWeek }) => {
     return { weekKey, rows, revision: hash({ stored, rows }), updatedAt: stored?.updatedAt || null };
   }
   function clean(row) { const { suggestion, needsReview, currentEvidence, ...rest } = row; return rest; }
-  function change({ weekKey, revision, action, id, text, ids, token }) {
+  // 계획 문장에 붙이는 프로젝트 이름. 없으면 기존처럼 `직접 작성`으로 담는다.
+  function planGroup(group) {
+    if (group === undefined || group === null || group === '') return '직접 작성';
+    if (typeof group !== 'string') throw new Error('프로젝트 이름을 확인해 주세요.');
+    const name = group.trim();
+    if (!name || name.length > 60 || /[\u0000-\u001f\u007f]/.test(name)) throw new Error('프로젝트 이름을 60자 이내 한 줄로 입력해 주세요.');
+    return name;
+  }
+  function change({ weekKey, revision, action, id, text, ids, token, group }) {
     const state=read(), current=view(weekKey,state);
     if (revision !== current.revision) { const error=new Error('새 기록이나 다른 창의 변경이 있어요. 적은 내용은 그대로 있어요. 최신 내용을 확인한 뒤 다시 저장해 주세요.');error.status=409;throw error; }
     let rows=current.rows.map(clean); const row=rows.find(row=>row.id===id), shown=current.rows.find(row=>row.id===id);
@@ -87,7 +95,7 @@ module.exports = ({ directory, sources, legacy, currentWeek }) => {
       rows=prior.rows;
     } else if(action==='add') {
       if(typeof text!=='string'||!text.trim()||text.length>10000)throw new Error('보고 문장을 입력해 주세요.');
-      rows.push({id:randomUUID(),heading:'다음 주 계획',group:'직접 작성',text:text.trim(),sourceIds:[],evidence:[],locked:true,excluded:false});
+      rows.push({id:randomUUID(),heading:'다음 주 계획',group:planGroup(group),text:text.trim(),sourceIds:[],evidence:[],locked:true,excluded:false});
     } else if(action==='merge') {
       if(!Array.isArray(ids)||ids.length<2||new Set(ids).size!==ids.length)throw new Error('묶을 보고 항목을 선택해 주세요.');
       const selected=rows.filter(row=>ids.includes(row.id));

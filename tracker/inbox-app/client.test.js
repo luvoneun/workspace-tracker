@@ -521,27 +521,112 @@ test('전체 업무 기록은 프로젝트로 묶이고, 프로젝트 없는 기
   assert.deepEqual(JSON.parse(app.run('JSON.stringify(reportRecordGroups([]))')), [], '연결된 기록이 없으면 묶음도 없다');
 });
 
-test('슬랙 미리보기와 복사 글자는 한 원본에서 나오고, 제외한 문장만 빠진다', () => {
+// 슬랙 복사: 구역(상태) → 프로젝트 → 글머리 항목. 이 글자가 바뀌면 사용자의 슬랙 글 모양이 바뀐다.
+const REPORT_SLACK_ROWS = `[
+  { id: 'a1', heading: '완료한 일', group: '가입 개선', text: '가입 실패율 급증 원인 파악', sourceIds: [], excluded: false },
+  { id: 'a2', heading: '완료한 일', group: '가입 개선', text: '퍼널 데이터 정리해 대시보드 반영\\n이슈: 집계 지연', sourceIds: [], excluded: false },
+  { id: 'a3', heading: '완료한 일', group: '결제 리뉴얼', text: '결제 실패 알림 슬랙 채널 공지', sourceIds: [], excluded: false },
+  { id: 'a4', heading: '완료한 일', group: '그룹 없음', text: '주간 회의 자료 준비', sourceIds: [], excluded: false },
+  { id: 'a5', heading: '완료한 일', group: '알림센터', text: '숨긴 문장입니다', sourceIds: [], excluded: true },
+  { id: 'c1', heading: '확인 완료', group: '가입 개선', text: '약관 문구 법무 회신 받음', sourceIds: [], excluded: false },
+  { id: 'b1', heading: '진행중', group: '알림센터', text: '발송 실패 로그 확인', sourceIds: [], excluded: false },
+  { id: 'd1', heading: '새로 정해진 것', group: '운영툴', text: '접근 로그는 90일 보존', sourceIds: [], excluded: false },
+  { id: 'w1', heading: '확인 대기', group: '운영툴', text: '큐 지연 원인 회신 대기', sourceIds: [], excluded: false },
+  { id: 'p1', heading: '다음 주 계획', group: '알림센터', text: '웹/앱 검수 처리 기획 진행 및 논의', sourceIds: [], excluded: false },
+  { id: 'p2', heading: '다음 주 계획', group: '직접 작성', text: '과금 기획은 차차주 진행 예정', sourceIds: [], excluded: false }
+]`;
+const REPORT_SLACK_REPORT = `{ weekKey: '2026-09-21', rows: ${REPORT_SLACK_ROWS} }`;
+
+test('슬랙 복사 글자는 구역 → 프로젝트 → 글머리 형식으로 고정된다', () => {
   const app = reportClient();
-  const report = `{ rows: ${REPORT_ROWS} }`;
-  const text = app.run(`reportCopyText(${report})`);
+  const text = app.run(`reportSlackText(reportSlackModel(${REPORT_SLACK_REPORT}))`);
   assert.equal(text, [
-    '완료한 일 · 결제_리뉴얼\n- 정산 배치 설계를 끝냈습니다',
-    '완료한 일 · 결제_리뉴얼\n- 실패 알림 문구를 고쳤습니다',
-    '완료한 일 · 가입_개선\n- 퍼널 데이터를 정리했습니다',
-    '진행중 · 운영툴\n- 권한 매트릭스를 다시 그리는 중',
-    '다음 주 계획 · 직접 작성\n- 정산 배치 QA 붙기',
-  ].join('\n\n'), '복사 형식은 예전 그대로다 — 이 글자가 바뀌면 사용자의 슬랙 글 모양이 바뀐다');
+    '9월 3주차 (9/21~9/27)',
+    '',
+    '완료',
+    '가입 개선',
+    '• 가입 실패율 급증 원인 파악',
+    '• 퍼널 데이터 정리해 대시보드 반영',
+    '    ◦ 이슈: 집계 지연',
+    '• 약관 문구 법무 회신 받음',
+    '결제 리뉴얼',
+    '• 결제 실패 알림 슬랙 채널 공지',
+    '기타',
+    '• 주간 회의 자료 준비',
+    '',
+    '진행 중',
+    '알림센터',
+    '• 발송 실패 로그 확인',
+    '',
+    '예정',
+    '알림센터',
+    '• 웹/앱 검수 처리 기획 진행 및 논의',
+    '* 과금 기획은 차차주 진행 예정',
+  ].join('\n'), '제목 → 구역 → 프로젝트 → 글머리, 부연은 공백 4칸 + ◦, 프로젝트 없는 것은 기타로 구역 끝');
   assert.doesNotMatch(text, /숨긴 문장/, '제외한 문장은 복사에서 빠진다');
+  assert.doesNotMatch(text, /이번 주|확인 완료/, '슬랙 글에는 상대 표현을 쓰지 않고, 확인 완료는 완료 안으로 들어간다');
+  assert.equal(app.run(`reportSlackText(reportSlackModel({ weekKey: '2026-09-21', rows: [] }))`), '',
+    '담긴 문장이 없으면 제목만 남기지 않고 아무것도 복사하지 않는다');
+});
 
-  // 미리보기는 같은 함수가 만든 묶음을 그린 것이다 — 이어 붙이면 복사 글자와 정확히 같아야 한다.
-  const blocks = JSON.parse(app.run(`JSON.stringify(reportCopyBlocks(${report}))`));
-  assert.equal(blocks.map(block => [block.title, ...block.lines].join('\n')).join('\n\n'), text);
-  assert.deepEqual(blocks[blocks.length - 1], { title: '다음 주 계획 · 직접 작성', lines: ['- 정산 배치 QA 붙기'] }, '사람이 쓴 다음 주 계획도 복사에 들어간다');
+test('넣을 구역을 고르면 미리보기·일반 글자·서식 있는 복사가 함께 바뀐다', () => {
+  const app = reportClient();
+  const model = sections => `reportSlackModel(${REPORT_SLACK_REPORT}, { sections: ${JSON.stringify(sections)} })`;
+  const names = list => JSON.parse(app.run(`JSON.stringify(${model(list)}.sections.map(s => s.name))`));
+  assert.deepEqual(names(['완료', '진행 중', '예정']), ['완료', '진행 중', '예정'], '기본값은 완료 · 진행 중 · 예정이다');
+  assert.deepEqual(names(['결정', '확인 대기', '완료']), ['완료', '결정', '확인 대기'], '고른 차례와 상관없이 구역 차례는 하나로 정해져 있다');
+  assert.deepEqual(names([]), [], '아무 구역도 고르지 않으면 복사할 것이 없다');
+  assert.equal(app.run(`reportSlackText(${model(['결정'])})`), ['9월 3주차 (9/21~9/27)', '', '결정', '운영툴', '• 접근 로그는 90일 보존'].join('\n'));
+  assert.deepEqual(names(['완료', '진행 중', '결정', '확인 대기', '예정']).length, 5, '내용이 있는 구역만 세어도 다섯 구역이 모두 찬 자료다');
+  assert.deepEqual(JSON.parse(app.run(`JSON.stringify(reportSlackModel({ weekKey: '2026-09-21', rows: ${REPORT_SLACK_ROWS} }, { sections: ['확인 대기'] }).sections)`)),
+    [{ name: '확인 대기', projects: [{ name: '운영툴', items: [{ text: '큐 지연 원인 회신 대기', notes: [] }] }], memos: [] }]);
+});
 
-  const multi = `{ rows: [{ id: 'm', heading: '완료한 일', group: '운영툴', text: '첫 줄\\n둘째 줄', sourceIds: [], excluded: false }] }`;
-  assert.deepEqual(JSON.parse(app.run(`JSON.stringify(reportCopyBlocks(${multi})[0].lines)`)), ['- 첫 줄', '- 둘째 줄'], '여러 줄 문장은 줄마다 글머리를 단다');
-  assert.equal(app.run(`reportCopyText({ rows: [] })`), '', '담긴 문장이 없으면 복사할 글자도 없다');
+test('미리보기 줄·일반 글자·서식 있는 복사는 한 구조에서 나온다', () => {
+  const app = reportClient();
+  const model = `reportSlackModel(${REPORT_SLACK_REPORT})`;
+  const lines = JSON.parse(app.run(`JSON.stringify(reportSlackLines(${model}))`));
+  assert.equal(lines.map(line => line.text).join('\n'), app.run(`reportSlackText(${model})`),
+    '미리보기에 그려지는 글자를 이어 붙이면 복사 글자와 정확히 같다(대체 경로에서 직접 선택해도 같은 글자다)');
+  assert.deepEqual(lines.slice(0, 4).map(line => line.kind), ['title', 'gap', 'section', 'project']);
+  assert.ok(lines.some(line => line.kind === 'note' && line.text === '    ◦ 이슈: 집계 지연'));
+  assert.ok(lines.some(line => line.kind === 'memo' && line.text === '* 과금 기획은 차차주 진행 예정'));
+
+  const html = app.run(`reportSlackHtml(${model})`);
+  assert.match(html, /^<p><b>9월 3주차 \(9\/21~9\/27\)<\/b><\/p><p><b>완료<\/b><\/p><p><b>가입 개선<\/b><\/p><ul><li>가입 실패율 급증 원인 파악<\/li>/);
+  assert.match(html, /<li>퍼널 데이터 정리해 대시보드 반영<ul><li>이슈: 집계 지연<\/li><\/ul><\/li>/, '부연은 한 단계 들여 쓴 목록이 된다');
+  assert.match(html, /<p>\* 과금 기획은 차차주 진행 예정<\/p>/, '프로젝트 없는 계획 문장은 메모 줄로 남는다');
+  assert.equal(app.run(`reportSlackHtml({ sections: [] })`), '');
+
+  // 사용자 문구는 그대로 HTML에 들어가면 안 된다.
+  const risky = `{ weekKey: '2026-09-21', rows: [{ id: 'x', heading: '완료한 일', group: '가입 <개선>', text: '<b>굵게</b> & 기호', sourceIds: [], excluded: false }] }`;
+  const escaped = app.run(`reportSlackHtml(reportSlackModel(${risky}))`);
+  assert.match(escaped, /<p><b>가입 &lt;개선&gt;<\/b><\/p>/);
+  assert.match(escaped, /<li>&lt;b&gt;굵게&lt;\/b&gt; &amp; 기호<\/li>/);
+  assert.equal(app.run(`reportSlackText(reportSlackModel(${risky}))`).includes('<b>굵게</b> & 기호'), true, '일반 글자에는 사용자가 쓴 그대로 들어간다');
+});
+
+test('다음 주 계획은 프로젝트로 묶이고, 프로젝트 없는 문장은 구역 끝에 선다', () => {
+  const app = reportClient();
+  const rows = `[
+    { id: 'p1', heading: '다음 주 계획', group: '직접 작성', text: '먼저 적은 메모', sourceIds: [], excluded: false },
+    { id: 'p2', heading: '다음 주 계획', group: '알림센터', text: '검수 처리 기획', sourceIds: [], excluded: false },
+    { id: 'p3', heading: '다음 주 계획', group: '알림센터', text: '발송 정책 정리', sourceIds: [], excluded: false },
+    { id: 'p4', heading: '다음 주 계획', group: '', text: '프로젝트 없이 적은 문장', sourceIds: [], excluded: false }
+  ]`;
+  assert.deepEqual(JSON.parse(app.run(`JSON.stringify(reportPlanGroups(${rows}).map(g => [g.name, g.rows.map(r => r.id)]))`)),
+    [['알림센터', ['p2', 'p3']], [null, ['p1', 'p4']]], '문서에서도 프로젝트 소제목 아래로 묶고, 프로젝트 없는 문장은 끝으로 내린다');
+  assert.deepEqual(JSON.parse(app.run(`JSON.stringify(reportPlanGroups([]))`)), [], '계획 문장이 없으면 묶음도 없다');
+  assert.equal(app.run(`reportSlackText(reportSlackModel({ weekKey: '2026-09-21', rows: ${rows} }, { sections: ['예정'] }))`), [
+    '9월 3주차 (9/21~9/27)',
+    '',
+    '예정',
+    '알림센터',
+    '• 검수 처리 기획',
+    '• 발송 정책 정리',
+    '* 먼저 적은 메모',
+    '* 프로젝트 없이 적은 문장',
+  ].join('\n'), '슬랙에서도 프로젝트 없는 계획 문장만 구역 끝 메모 줄이 된다');
 });
 
 test('반영 완료 검색은 문구·프로젝트·지라 키·지라 요약을 함께 본다', () => {

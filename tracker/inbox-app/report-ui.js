@@ -1,7 +1,7 @@
 // ---------- 주간요약 문서 ----------
 // 평일에는 "이번 주 뭐 했는지" 읽는 문서이고, 금요일에 문장을 고쳐 오른쪽 미리보기 그대로 슬랙에 붙인다.
 // 저장하는 길은 `/api/report/change` 하나뿐이고(DECISIONS 주간보고), 이 화면은 추측으로 문장을 만들지 않는다.
-// 오른쪽 미리보기와 `슬랙용으로 복사`는 반드시 같은 함수(reportCopyBlocks)에서 나온다 — 둘이 어긋나면 안 된다.
+// 오른쪽 미리보기와 `슬랙용으로 복사`는 반드시 같은 구조(reportSlackModel)에서 나온다 — 셋이 어긋나면 안 된다.
 
 const reportEdits = new Map();        // `${weekKey}:${행}` / `${weekKey}:new` → 입력 중인 글자(저장 실패해도 남는다)
 const reportUndo = new Map();         // weekKey → 되돌리기 토큰
@@ -17,9 +17,38 @@ let reportExcludedOpen = false;
 
 const REPORT_PLAN_HEADING = '다음 주 계획';
 // 서버는 프로젝트가 없는 기록을 `그룹 없음`으로 준다 — 화면에서는 다른 목록과 같은 말로 적는다.
-// (복사 글자와 보고 문서의 소제목은 서버가 준 말 그대로 두고 건드리지 않는다.)
+// (보고 문서의 소제목은 서버가 준 말 그대로 두고 건드리지 않는다.)
 const REPORT_NO_PROJECT_LABEL = '그룹 없음';
 const REPORT_NO_PROJECT = '프로젝트 없음';
+// 서버가 프로젝트 없이 담은 계획 문장의 그룹 이름(`report-drafts.js`의 add 기본값).
+const REPORT_PLAN_NO_PROJECT = '직접 작성';
+
+// 슬랙에 붙일 구역 — 화면·서버의 상태 이름을 슬랙 글의 구역 이름으로 옮긴다.
+// `확인 완료`는 따로 세우지 않고 `완료` 안으로 들어간다.
+const REPORT_SLACK_SECTIONS = [
+  { name: '완료', headings: ['완료한 일', '확인 완료'] },
+  { name: '진행 중', headings: ['진행중'] },
+  { name: '결정', headings: ['새로 정해진 것'] },
+  { name: '확인 대기', headings: ['확인 대기'] },
+  { name: '예정', headings: [REPORT_PLAN_HEADING] },
+];
+const REPORT_SLACK_ALL = REPORT_SLACK_SECTIONS.map(section => section.name);
+const REPORT_SLACK_DEFAULT = ['완료', '진행 중', '예정'];
+const REPORT_SLACK_OTHER = '기타';   // 프로젝트가 없는 문장을 모으는 구역 끝 묶음
+const REPORT_SLACK_KEY = 'workspace-report-slack-sections';
+
+// 고른 구역은 주차와 상관없이 하나로 기억한다(localStorage가 막혀 있으면 기본값으로 시작).
+function reportSlackSectionsLoad() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(REPORT_SLACK_KEY));
+    if (Array.isArray(saved)) return new Set(saved.filter(name => REPORT_SLACK_ALL.includes(name)));
+  } catch {}
+  return new Set(REPORT_SLACK_DEFAULT);
+}
+function reportSlackSectionsSave() {
+  try { localStorage.setItem(REPORT_SLACK_KEY, JSON.stringify([...reportSlackSections])); } catch {}
+}
+let reportSlackSections = reportSlackSectionsLoad();
 
 window.addEventListener('beforeunload', event => {
   if (reportEdits.size || reportBusy) { event.preventDefault(); event.returnValue = ''; }
@@ -48,19 +77,102 @@ function reportButton(text, action, className = 'd-btn') {
 
 // ---------- 순수 함수: 문서 뼈대와 복사 글자 ----------
 
-// 복사 글자의 재료. 형식은 예전 그대로다 — `상태 · 프로젝트` 한 줄 + `- 문장` 줄들, 묶음 사이 빈 줄.
-// 형식을 바꾸면 사용자의 슬랙 글 모양이 바뀐다.
-function reportCopyBlocks(report) {
-  return (report && report.rows ? report.rows : [])
-    .filter(row => !row.excluded)
-    .map(row => ({
-      title: `${row.heading} · ${row.group}`,
-      lines: String(row.text).split('\n').map(line => `- ${line}`),
-    }));
+// 슬랙 글의 첫 줄. 슬랙에 올라간 글은 나중에 읽히므로 `이번 주` 같은 상대 표현은 쓰지 않는다.
+function reportSlackTitle(weekKey) {
+  if (!weekKey || typeof formatWeekLabel !== 'function') return '';
+  const label = formatWeekLabel(weekKey);
+  return `${label.week} (${label.range.replace(/^\d{4}년\s*/, '').replace(/\s*~\s*/, '~')})`;
 }
 
-function reportCopyText(report) {
-  return reportCopyBlocks(report).map(block => [block.title, ...block.lines].join('\n')).join('\n\n');
+function reportSlackSectionOf(heading) {
+  return REPORT_SLACK_SECTIONS.find(section => section.headings.includes(heading))?.name || null;
+}
+
+// 문장이 설 프로젝트 이름. `예정`에서 프로젝트가 없는 문장은 묶지 않고 구역 끝 메모로 보낸다(null).
+function reportSlackProjectOf(row, sectionName) {
+  const group = String(row.group || '').trim();
+  const none = !group || group === REPORT_NO_PROJECT_LABEL || group === REPORT_NO_PROJECT;
+  if (sectionName === '예정') return none || group === REPORT_PLAN_NO_PROJECT ? null : group;
+  return none ? REPORT_SLACK_OTHER : group;
+}
+
+// 슬랙에 붙일 글의 구조(순수 함수). 일반 글자·서식 있는 복사·미리보기가 모두 여기서 나온다.
+// `options.sections`는 넣을 구역 이름의 목록이고, 빠뜨리면 기본값(완료·진행 중·예정)이다.
+// 규칙: 제외한 문장은 빠짐 · 구역 안에서 같은 프로젝트는 머리 하나 아래로 · 프로젝트 없는 것은 `기타`로
+// 구역 끝 · 여러 줄 문장은 둘째 줄부터 부연 · 내용이 없는 구역은 생략.
+function reportSlackModel(report, options = {}) {
+  const chosen = new Set(options.sections || REPORT_SLACK_DEFAULT);
+  const sections = new Map();
+  for (const row of (report && report.rows ? report.rows : [])) {
+    if (row.excluded) continue;
+    const name = reportSlackSectionOf(row.heading);
+    if (!name || !chosen.has(name)) continue;
+    const lines = String(row.text ?? '').split('\n').map(line => line.trim()).filter(Boolean);
+    if (!lines.length) continue;
+    if (!sections.has(name)) sections.set(name, { name, projects: [], memos: [] });
+    const section = sections.get(name);
+    const item = { text: lines[0], notes: lines.slice(1) };
+    const projectName = reportSlackProjectOf(row, name);
+    if (projectName === null) { section.memos.push(item); continue; }
+    let project = section.projects.find(entry => entry.name === projectName);
+    if (!project) { project = { name: projectName, items: [] }; section.projects.push(project); }
+    project.items.push(item);
+  }
+  for (const section of sections.values()) {
+    const index = section.projects.findIndex(project => project.name === REPORT_SLACK_OTHER);
+    if (index >= 0) section.projects.push(section.projects.splice(index, 1)[0]);
+  }
+  return {
+    title: reportSlackTitle(report && report.weekKey),
+    sections: REPORT_SLACK_ALL.map(name => sections.get(name)).filter(section => section && (section.projects.length || section.memos.length)),
+  };
+}
+
+// 한 줄씩 풀어 놓은 모양. 일반 글자와 미리보기가 같은 글자를 쓰게 하는 가운데 단계다
+// (미리보기를 직접 선택해 복사해도 아래 `reportSlackText`와 같은 글자가 나온다).
+function reportSlackLines(model) {
+  const lines = [];
+  if (!model || !model.sections.length) return lines;
+  if (model.title) lines.push({ kind: 'title', text: model.title }, { kind: 'gap', text: '' });
+  model.sections.forEach((section, index) => {
+    if (index) lines.push({ kind: 'gap', text: '' });
+    lines.push({ kind: 'section', text: section.name });
+    for (const project of section.projects) {
+      lines.push({ kind: 'project', text: project.name });
+      for (const item of project.items) {
+        lines.push({ kind: 'item', text: `• ${item.text}` });
+        for (const note of item.notes) lines.push({ kind: 'note', text: `    ◦ ${note}` });
+      }
+    }
+    for (const memo of section.memos) {
+      lines.push({ kind: 'memo', text: `* ${memo.text}` });
+      for (const note of memo.notes) lines.push({ kind: 'note', text: `    ◦ ${note}` });
+    }
+  });
+  return lines;
+}
+
+// 서식 없는 곳에 붙을 글자. 형식을 바꾸면 사용자의 슬랙 글 모양이 바뀐다(테스트가 고정한다).
+function reportSlackText(model) {
+  return reportSlackLines(model).map(line => line.text).join('\n');
+}
+
+// 서식 있는 복사. 슬랙 입력창에 붙이면 굵은 제목과 글머리 목록이 된다. 사용자 문구는 전부 escape한다.
+function reportSlackHtml(model) {
+  if (!model || !model.sections.length) return '';
+  const bold = text => `<p><b>${escapeHtml(text)}</b></p>`;
+  const notes = list => list.length ? `<ul>${list.map(note => `<li>${escapeHtml(note)}</li>`).join('')}</ul>` : '';
+  const html = [];
+  if (model.title) html.push(bold(model.title));
+  for (const section of model.sections) {
+    html.push(bold(section.name));
+    for (const project of section.projects) {
+      html.push(bold(project.name));
+      html.push(`<ul>${project.items.map(item => `<li>${escapeHtml(item.text)}${notes(item.notes)}</li>`).join('')}</ul>`);
+    }
+    for (const memo of section.memos) html.push(`<p>* ${escapeHtml(memo.text)}</p>${notes(memo.notes)}`);
+  }
+  return html.join('');
 }
 
 // 문서의 뼈대: 상태(서버가 준 순서) → 프로젝트 → 문장.
@@ -86,6 +198,25 @@ function reportDocSections(rows) {
 // 다음 주 계획은 사람이 직접 쓴 문장만 들어간다(DECISIONS) — 자동으로 채우지 않는다.
 function reportPlanRows(rows) {
   return (rows || []).filter(row => row.heading === REPORT_PLAN_HEADING && !row.excluded);
+}
+
+// 계획 문장도 문서에서는 프로젝트 소제목 아래로 묶인다. 프로젝트를 고르지 않은 문장은 구역 끝에
+// 소제목 없이 선다(`name: null`).
+function reportPlanGroups(rows) {
+  const groups = [];
+  const byName = new Map();
+  const loose = [];
+  for (const row of rows || []) {
+    const name = String(row.group || '').trim();
+    if (!name || name === REPORT_PLAN_NO_PROJECT || name === REPORT_NO_PROJECT_LABEL || name === REPORT_NO_PROJECT) {
+      loose.push(row);
+      continue;
+    }
+    if (!byName.has(name)) { const group = { name, rows: [] }; byName.set(name, group); groups.push(group); }
+    byName.get(name).rows.push(row);
+  }
+  if (loose.length) groups.push({ name: null, rows: loose });
+  return groups;
 }
 
 function reportExcludedRows(rows) {
@@ -224,8 +355,8 @@ function reportDocHead(item, host) {
       throw new Error('수정 중인 문장을 저장하거나 취소한 뒤 복사해 주세요.');
     }
     try {
-      await navigator.clipboard.writeText(reportCopyText(report));
-      announce('보고 내용을 복사했어요');
+      await reportSlackCopy(reportSlackModel(report, { sections: [...reportSlackSections] }));
+      announce('슬랙에 붙여 넣을 수 있게 복사했어요');
     } catch {
       reportSelectPreview();
       throw new Error('복사 미리보기의 내용을 직접 선택해 복사해 주세요.');
@@ -329,6 +460,8 @@ function reportSentenceRow(item, row, context) {
     input.setAttribute('aria-label', '보고 문장 수정');
     input.addEventListener('input', () => reportEdits.set(key, input.value));
     text.appendChild(input);
+    // Enter는 줄바꿈이다(저장은 아래 버튼) — 둘째 줄이 슬랙에서 어떻게 보이는지 조용히 알려 준다.
+    text.appendChild(reportNode('div', '둘째 줄부터는 슬랙에서 들여 쓴 부연으로 들어가요', 'rp-help'));
     const actions = reportNode('div', undefined, 'ed');
     actions.append(
       reportButton('저장', () => reportChange(item, { action: 'edit', id: row.id, text: input.value }), 'd-btn pri'),
@@ -339,12 +472,15 @@ function reportSentenceRow(item, row, context) {
     return;
   }
 
-  text.appendChild(reportNode('span', row.text, 'ln'));
+  // 첫 줄이 문장이고, 둘째 줄부터는 부연이다 — 슬랙에서 들여 쓴 작은 글머리로 들어간다.
+  const lines = String(row.text ?? '').split('\n');
+  text.appendChild(reportNode('span', lines[0], 'ln'));
   // 손으로 고친 문장에만 조용한 이름표를 붙인다. `자동 초안`은 찍지 않는다.
   if (row.locked && !context.plan) text.appendChild(reportNode('span', '직접 수정', 'edt'));
   if (row.needsReview && !row.suggestion) text.appendChild(reportNode('span', '원본 확인 필요', 'rv'));
   const rowNew = row.sourceIds.filter(id => newIds.has(id)).length;
   if (rowNew) text.appendChild(reportNode('span', `새 기록 ${rowNew}`, 'nw'));
+  if (lines.length > 1) text.appendChild(reportNode('div', lines.slice(1).join('\n'), 'sub'));
 
   const actions = reportNode('span', undefined, 'ac');
   actions.appendChild(reportButton('수정', () => {
@@ -389,16 +525,41 @@ function reportExcludedBlock(item, host) {
   host.appendChild(box);
 }
 
+// 계획 문장에 붙일 프로젝트 — 앱의 프로젝트 목록을 그대로 쓰고, 고른 값은 다음 입력에 남는다.
+let reportPlanGroup = '';
+
+function reportPlanProjectPicker() {
+  const pick = reportNode('select', undefined, 'd-msel rp-pick');
+  pick.setAttribute('aria-label', '다음 주 계획 프로젝트');
+  const names = typeof customGroupsCache !== 'undefined' ? [...customGroupsCache] : [];
+  if (reportPlanGroup && !names.includes(reportPlanGroup)) names.unshift(reportPlanGroup);
+  for (const [value, text] of [['', REPORT_NO_PROJECT], ...names.map(name => [name, name])]) {
+    const option = reportNode('option', text);
+    option.value = value;
+    if (value === reportPlanGroup) option.selected = true;
+    pick.appendChild(option);
+  }
+  pick.addEventListener('change', () => { reportPlanGroup = pick.value; });
+  return pick;
+}
+
 // 다음 주 계획 — 문서의 마지막 구역. 한 문장이 한 줄(서버의 `add`)이고, 사람이 직접 쓴 것만 들어간다.
+// 프로젝트를 고른 문장은 소제목 아래로 묶이고, 고르지 않은 문장은 구역 끝에 선다.
 function reportPlanSection(item, host, newIds) {
   const rows = reportPlanRows(item.draft.rows);
   host.appendChild(reportNode('div', REPORT_PLAN_HEADING, 'rp-h'));
-  for (const row of rows) reportSentenceRow(item, row, { host, newIds, plan: true });
+  reportPlanGroups(rows).forEach((group, index) => {
+    // 프로젝트를 고르지 않은 문장에는 소제목이 없다 — 앞 묶음에 딸려 보이지 않게 자리만 띄운다.
+    if (group.name) host.appendChild(reportNode('div', group.name, 'rp-pj'));
+    else if (index) host.appendChild(reportNode('div', undefined, 'rp-sep'));
+    for (const row of group.rows) reportSentenceRow(item, row, { host, newIds, plan: true });
+  });
   if (!rows.length) host.appendChild(reportNode('div', '직접 쓴 문장만 들어가요', 'rp-hint'));
 
   const key = `${item.weekKey}:new`;
   const add = reportNode('div', undefined, 'rp-add');
   add.innerHTML = uiIcon('plus');
+  add.appendChild(reportPlanProjectPicker());
   const input = reportNode('input');
   input.type = 'text';
   input.id = 'reportPlanInput';
@@ -415,7 +576,7 @@ function reportPlanSection(item, host, newIds) {
     event.preventDefault();
     if (!input.value.trim()) return;
     input.disabled = true;
-    try { await reportChange(item, { action: 'add', text: input.value }); }
+    try { await reportChange(item, { action: 'add', text: input.value, group: reportPlanGroup || undefined }); }
     catch (error) { showNotice(error.message || '저장됐는지 확인하지 못했어요. 적은 내용은 그대로 있어요', true); }
     finally { input.disabled = false; }
     // 다시 그려졌으면 새로 생긴 입력칸으로, 실패해서 그대로면 같은 칸으로 돌아온다.
@@ -483,23 +644,64 @@ function reportRecordsView(item, host) {
 
 // ---------- 슬랙 미리보기(상시) ----------
 
-// 복사될 글자를 그대로 그린다 — 여기 보이는 것과 클립보드에 담기는 것이 같아야 한다.
+// 슬랙에 넣을 구역 고르기 — 내용이 없는 구역은 누를 수 없고, 바꾸면 미리보기와 복사가 같이 바뀐다.
+function reportSlackChips(report) {
+  const filled = new Set(reportSlackModel(report, { sections: REPORT_SLACK_ALL }).sections.map(section => section.name));
+  const wrap = reportNode('div', undefined, 'rp-secs');
+  wrap.setAttribute('role', 'group');
+  wrap.setAttribute('aria-label', '슬랙에 넣을 구역');
+  for (const name of REPORT_SLACK_ALL) {
+    const on = reportSlackSections.has(name);
+    const chip = reportNode('button', name, 'd-chip' + (on ? ' is-on' : ''));
+    chip.type = 'button';
+    chip.setAttribute('aria-pressed', String(on));
+    if (!filled.has(name)) {
+      chip.disabled = true;
+      chip.title = '이 구역에 담긴 문장이 없어요';
+    }
+    chip.addEventListener('click', () => {
+      if (reportSlackSections.has(name)) reportSlackSections.delete(name); else reportSlackSections.add(name);
+      reportSlackSectionsSave();
+      reportPreview(report);
+    });
+    wrap.appendChild(chip);
+  }
+  return wrap;
+}
+
+// 슬랙에 붙었을 때의 모습을 그대로 그린다 — 여기 보이는 글자와 클립보드에 담기는 글자가 같아야 한다.
 function reportPreview(report) {
   const host = document.getElementById('weeklyReportPreview');
   if (!host) return;
   host.replaceChildren();
   host.appendChild(reportNode('div', '슬랙에 붙이면', 'rp-slackhd'));
+  host.appendChild(reportSlackChips(report));
   const box = reportNode('div', undefined, 'rp-slackbox');
   box.id = 'reportPreviewBox';
-  const blocks = reportCopyBlocks(report);
-  if (!blocks.length) box.appendChild(reportNode('div', '보고에 담긴 문장이 없어요.', 'rp-hint'));
-  for (const block of blocks) {
-    const group = reportNode('div', undefined, 'blk');
-    group.appendChild(reportNode('div', block.title, 'hd'));
-    for (const text of block.lines) group.appendChild(reportNode('div', text, 'bl'));
-    box.appendChild(group);
+  const lines = reportSlackLines(reportSlackModel(report, { sections: [...reportSlackSections] }));
+  if (!lines.length) box.appendChild(reportNode('div', '슬랙에 넣을 문장이 없어요.', 'rp-hint'));
+  // 구역 사이의 빈 줄은 진짜 줄바꿈 글자로 둔다 — 빈 칸은 직접 선택해 복사할 때 빈 줄로 따라오지 않는다.
+  for (const line of lines) {
+    if (line.kind === 'gap') box.appendChild(document.createTextNode('\n'));
+    else box.appendChild(reportNode('div', line.text, line.kind));
   }
   host.appendChild(box);
+}
+
+// 서식 있는 복사와 일반 글자를 함께 넣는다. `ClipboardItem`이 없거나 막히면 일반 글자만,
+// 그것도 막히면 예외를 그대로 올려 바깥에서 미리보기를 잡아 준다.
+async function reportSlackCopy(model) {
+  const text = reportSlackText(model);
+  if (typeof ClipboardItem === 'function' && navigator.clipboard && navigator.clipboard.write) {
+    try {
+      await navigator.clipboard.write([new ClipboardItem({
+        'text/html': new Blob([reportSlackHtml(model)], { type: 'text/html' }),
+        'text/plain': new Blob([text], { type: 'text/plain' }),
+      })]);
+      return;
+    } catch {}
+  }
+  await navigator.clipboard.writeText(text);
 }
 
 // 클립보드가 막힌 곳(사파리 권한·헤드리스)에서는 미리보기 글자를 잡아 준다 — ⌘C로 바로 복사되게.

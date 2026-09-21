@@ -56,6 +56,8 @@
 }
 .rp-body > .rp-h:first-of-type { border-top: 0; padding-top: 0; margin-top: 16px; }
 .rp-pj { margin: 18px 0 2px; font-size: 16px; font-weight: 700; letter-spacing: -0.01em; color: var(--text); }
+/* 소제목 없이 서는 묶음(프로젝트를 고르지 않은 계획 문장) 앞의 자리 */
+.rp-sep { height: 16px; }
 
 /* 문장 한 줄 — 글머리 | 문장 | 동작(hover·focus에서만) */
 .rp-s {
@@ -69,6 +71,11 @@
 /* 문장이 이 화면에서 가장 큰 글자다 */
 .rp-s .tx { font-size: 15.5px; line-height: 1.65; word-break: keep-all; overflow-wrap: anywhere; }
 .rp-s .ln { white-space: pre-wrap; }
+/* 둘째 줄부터는 부연이다 — 슬랙에서 들여 쓴 작은 글머리로 들어간다 */
+.rp-s .sub {
+  margin-top: 2px; padding-left: 12px; border-left: 1px solid var(--hair);
+  font-size: 13.5px; line-height: 1.6; color: var(--muted); white-space: pre-wrap;
+}
 .rp-s .edt, .rp-s .rv, .rp-s .nw { margin-left: 8px; font-size: 12px; white-space: nowrap; }
 .rp-s .edt { color: var(--muted); }
 .rp-s .rv { color: var(--warn); }
@@ -88,6 +95,7 @@
 }
 .rp-ta:focus { outline: none; background: var(--surface); box-shadow: 0 0 0 2px var(--accent); }
 .rp-s .ed { display: flex; gap: 4px; margin-top: 6px; }
+.rp-s .rp-help { margin-top: 5px; font-size: 12.5px; color: var(--dim); }
 
 /* 근거 업무 — 문장 아래로 들여쓴 목록(색 띠가 아니라 1px 선 하나) */
 .rp-ev { margin: 2px 0 8px 20px; padding-left: 14px; border-left: 1px solid var(--border); }
@@ -125,6 +133,12 @@
   transition: background 170ms var(--ease);
 }
 .rp-add .d-i { color: var(--dim); }
+/* 프로젝트 선택은 조용히 — 평소에는 글자만, 건드릴 때만 칸이 보인다 */
+.rp-add .rp-pick {
+  flex: 0 0 auto; max-width: 150px; height: 30px; background: none; color: var(--dim);
+  font-weight: 500; cursor: pointer;
+}
+.rp-add:focus-within .rp-pick, .rp-add .rp-pick:hover { background: var(--field); color: var(--text); }
 .rp-add input {
   flex: 1; min-width: 0; height: 100%; border: 0; background: none; outline: none;
   color: var(--text); font-family: inherit; font-size: 15px;
@@ -154,7 +168,7 @@
 .rp-rec .ti:hover { color: var(--accent-text); }
 .rp-rec .mt { font-size: 12.5px; color: var(--dim); text-align: right; white-space: nowrap; }
 
-/* 슬랙 미리보기 — 복사될 글자와 정확히 같은 내용. 오른쪽 흰 카드 한 장. */
+/* 슬랙 미리보기 — 붙였을 때의 모습 그대로. 오른쪽 흰 카드 한 장. */
 .rp-slack {
   position: sticky; top: calc(var(--hdr) + 16px); align-self: start;
   max-height: calc(100dvh - var(--hdr) - 32px); overflow-y: auto; overscroll-behavior: contain;
@@ -162,14 +176,26 @@
   background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r);
   box-shadow: var(--soft);
 }
-.rp-slackhd { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 10px; }
+.rp-slackhd { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+/* 넣을 구역 고르기 — ⌘K의 토글 칩과 같은 부품(꺼짐 회색 / 켜짐 연파랑) */
+.rp-secs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; }
+.rp-secs .d-chip { height: 28px; padding: 0 10px; background: var(--neutral-bg); }
+.rp-secs .d-chip:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+.rp-secs .d-chip.is-on, .rp-secs .d-chip.is-on:hover { background: var(--accent-soft); color: var(--accent-text); }
+.rp-secs .d-chip:disabled { opacity: 0.45; cursor: default; }
+/* 한 줄이 곧 붙여 넣을 한 줄이다 — 글자를 직접 선택해 복사해도 같은 글자가 나오게 텍스트 그대로 둔다. */
 .rp-slackbox {
   padding: 0; background: none; border: 0; border-radius: 0; box-shadow: none;
   font-size: 13.5px; line-height: 1.7; word-break: keep-all; overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
-.rp-slackbox .blk + .blk { margin-top: 14px; }
-.rp-slackbox .hd { font-weight: 700; }
-.rp-slackbox .bl { padding-left: 12px; text-indent: -12px; }
+.rp-slackbox .title { font-weight: 700; font-size: 14.5px; }
+.rp-slackbox .section, .rp-slackbox .project { font-weight: 700; }
+.rp-slackbox .section { margin-top: 2px; }
+.rp-slackbox .item, .rp-slackbox .memo { padding-left: 14px; text-indent: -14px; }
+/* 부연은 글자 자체가 공백 4칸으로 시작한다(pre-wrap) — 되돌아가는 줄만 `◦` 뒤에 맞춘다. */
+.rp-slackbox .note { padding-left: 30px; text-indent: -30px; color: var(--muted); }
+.rp-slackbox .memo { color: var(--muted); }
 
 /* 문장 묶기 막대는 주간요약 탭 전체 폭을 쓴다(왼쪽 레일이 없다) */
 #reportMergeBar { left: 0; }
@@ -211,7 +237,9 @@ body.merge-open .d-toast { bottom: 76px; }
   /* 좁은 화면에서는 동작이 늘 보이고 문장 아래로 내려간다 */
   .rp-s .ac { grid-column: 2; opacity: 1; pointer-events: auto; padding-top: 4px; }
   .rp-s .tx { font-size: 15px; }
+  .rp-add { padding: 0 8px; gap: 6px; }
   .rp-add input { font-size: 16px; }
+  .rp-add .rp-pick { max-width: 108px; padding: 0 2px; font-size: 12.5px; }
   .rp-rec { grid-template-columns: minmax(0, 1fr); row-gap: 2px; padding: 8px 12px; }
   .rp-rec .mt { text-align: left; }
   .rp-slack { padding: 14px 16px 16px; }
