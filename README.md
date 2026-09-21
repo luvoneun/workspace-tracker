@@ -19,6 +19,7 @@ bash setup.sh
 | `slack.tokenFile` | 슬랙 토큰을 저장한 파일 경로 |
 | `slack.channels` | 나만 보는 비공개 채널 4개의 ID |
 | `server.extraHost` | (선택) 폰·다른 기기에서 접근할 주소. Tailscale 주소를 넣는다 |
+| `server.chromeProfile` | (선택) Dock 앱을 열 크롬 프로필 폴더 이름(예: `Default`, `Profile 1`). 비우면 크롬이 마지막에 쓴 프로필로 열려, 앱에서 누른 링크(`지라에서 열기`·슬랙 원문 등)가 다른 계정에서 열릴 수 있다. 바꾼 뒤 `./setup.sh`를 다시 실행한다 |
 
 설치가 끝나면 서버·자동화·Dock 앱이 모두 등록된다.
 

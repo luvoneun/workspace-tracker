@@ -114,6 +114,13 @@ echo "[4/5] 맥 스케줄러(launchd) 등록"
 NODE_PATH="$(command -v node)"
 PORT=$(python3 -c "import json;print(json.load(open('$CONFIG')).get('server',{}).get('port',4321))")
 EXTRA_HOST=$(python3 -c "import json;print(json.load(open('$CONFIG')).get('server',{}).get('extraHost','') or '')")
+# Dock 앱을 열 크롬 프로필(예: Default, Profile 1). 비우면 크롬이 마지막에 쓴 프로필로 연다 — 그러면 `지라에서 열기`·슬랙 원문 같은
+# 링크가 회사 계정이 아닌 프로필에서 열릴 수 있다. 글자는 폴더 이름에 쓰이는 것만 받는다(쉘 명령에 들어간다).
+CHROME_PROFILE=$(python3 -c "
+import json, re
+v = json.load(open('$CONFIG')).get('server', {}).get('chromeProfile', '') or ''
+print(v if re.fullmatch(r'[A-Za-z0-9 _-]{1,40}', v) else '')
+")
 
 mkdir -p "$AGENTS_DIR"
 
@@ -338,10 +345,13 @@ echo
 echo "[5/5] Dock에 올릴 앱 만들기"
 
 URL="http://localhost:$PORT"
+# 프로필을 정해 두면 앱 창과 거기서 여는 링크가 늘 그 프로필(회사 계정)에서 열린다.
+PROFILE_ARG=""
+[ -n "$CHROME_PROFILE" ] && PROFILE_ARG="--profile-directory='$CHROME_PROFILE' "
 rm -rf "$APP_BUNDLE"
 mkdir -p "$HOME/Applications"
 cat > /tmp/ws-launcher.applescript << SCRIPT
-do shell script "URL=$URL; for i in 1 2 3 4 5 6 7 8 9 10; do curl -s -o /dev/null --max-time 1 \$URL && break; sleep 0.5; done; '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --app=\$URL > /dev/null 2>&1 &"
+do shell script "URL=$URL; for i in 1 2 3 4 5 6 7 8 9 10; do curl -s -o /dev/null --max-time 1 \$URL && break; sleep 0.5; done; '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' $PROFILE_ARG--app=\$URL > /dev/null 2>&1 &"
 SCRIPT
 
 if osacompile -o "$APP_BUNDLE" /tmp/ws-launcher.applescript 2>/dev/null; then
