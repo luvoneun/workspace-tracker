@@ -967,6 +967,8 @@ function renderCalendar(calendar) {
   events.forEach(event => {
     const row = document.createElement('div');
     row.className = 'd-mrow' + (event.start <= now && now < (event.end || '99:99') ? ' is-now' : '');
+    // 회의 정리 패널이 열리면 이 표식으로 찾아 `지금 보는 회의`를 표시한다.
+    row.dataset.meetingId = event.workflowId || `${event.start || ''} ${event.title || ''}`;
 
     const time = document.createElement('span');
     time.className = 't num';
@@ -1704,153 +1706,14 @@ function taskMenuSections({ item, mode, card }) {
   ];
 }
 
-// ---------- 회의 정리 ----------
-// 회의가 끝나면 할 일 말고도 정해진 것·확인 대기가 같이 나온다.
-// 종류만 바꿔가며 연달아 적을 수 있게, 할 일 상세와 같은 자리에 띄운다.
-
-let meetingPanel = null;
-
-const MEETING_CAPTURE_TYPES = [
-  { key: 'task', label: '할 일', endpoint: '/api/today-task/create', done: '할 일로 담음' },
-  { key: 'decision', label: '정해진 것', endpoint: '/api/decision/create', done: '정책/얼라인으로 담음' },
-  { key: 'check', label: '확인 대기', endpoint: '/api/waiting/create', done: '확인 대기로 담음' },
-];
-
+// ---------- 회의 정리 열기 ----------
+// 회의 정리는 업무 상세와 같은 오른쪽 패널에서 연다(panelMeeting). 여기서는 레일의 미팅 줄이
+// 가리키는 회의를 흐름 기록에서 찾아 넘기기만 한다. 아직 기록되지 않은 캘린더 회의는
+// 회의 자체를 그대로 넘겨 "직접 담기"만 있는 패널을 띄운다.
 function openMeetingPanel(event) {
   const recorded = workflowData.meetings.find(meeting => meeting.date === todayStr() && meeting.start === event.start && meeting.title === event.title);
-  if (recorded) { wfOpen({ kind: 'meeting', id: recorded.id }); return; }
-  panelClose();
-  meetingPanel = { event, project: event.project || null, type: 'task', added: [] };
-  escPush(panelClose);
-  renderMeetingPanel();
-}
-
-function renderMeetingPanel() {
-  if (!meetingPanel) return;
-  const zone = document.getElementById('todayTaskZone');
-  const side = panelSide();
-  if (!zone || !side) return;
-  const { event, project, added } = meetingPanel;
-
-  // 회의 정리도 업무 상세와 같은 자리(오른쪽 패널)를 쓴다 — 내용은 다음 배치에서 D 모양으로 바꾼다.
-  zone.classList.add('task-detail-open');
-  side.hidden = false;
-  const panel = document.createElement('div');
-  panel.className = 'd-detail';
-  side.replaceChildren(panel);
-  panel.innerHTML = `
-    <h3>회의 정리</h3>
-    <div class="meeting-panel-title">${escapeHtml(event.title)}</div>
-    <div class="meeting-panel-time">${event.start}–${event.end}</div>
-  `;
-  const close = document.createElement('button');
-  close.type = 'button';
-  close.className = 'd-iconbtn d-dclose';
-  close.setAttribute('aria-label', '회의 정리 닫기');
-  close.innerHTML = uiIcon('close');
-  close.addEventListener('click', panelClose);
-  panel.prepend(close);
-
-  // 담을 프로젝트 — 기본값은 미팅에 연결된 것. 한 회의에서 두 프로젝트를 다룰 때만 바꾼다.
-  const projectField = document.createElement('div');
-  projectField.className = 'detail-field';
-  const projectLabel = document.createElement('label');
-  projectLabel.textContent = '담을 프로젝트';
-  projectField.appendChild(projectLabel);
-  projectField.appendChild(renderGroupControl({
-    jira: project && project.type === 'jira' ? project.value : null,
-    group: project && project.type === 'group' ? project.value : null,
-    onSetJira: async (key) => {
-      meetingPanel.project = key ? { type: 'jira', value: key } : null;
-      renderMeetingPanel();
-    },
-    onSetGroup: async (value) => {
-      meetingPanel.project = value ? { type: 'group', value } : null;
-      renderMeetingPanel();
-    },
-  }));
-  panel.appendChild(projectField);
-
-  const row = document.createElement('div');
-  row.className = 'meeting-capture-row';
-  const typeSelect = document.createElement('select');
-  typeSelect.className = 'meeting-type-select';
-  typeSelect.setAttribute('aria-label', '담을 종류');
-  typeSelect.innerHTML = MEETING_CAPTURE_TYPES
-    .map(t => `<option value="${t.key}"${t.key === meetingPanel.type ? ' selected' : ''}>${t.label}</option>`)
-    .join('');
-  typeSelect.addEventListener('change', () => { meetingPanel.type = typeSelect.value; });
-
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.className = 'meeting-capture-input';
-  input.placeholder = '적고 Enter';
-  input.setAttribute('aria-label', '회의에서 나온 내용');
-  input.addEventListener('keydown', async (e) => {
-    if (e.key !== 'Enter' || e.isComposing) return;
-    const description = input.value.trim();
-    if (!description) return;
-    const type = MEETING_CAPTURE_TYPES.find(t => t.key === typeSelect.value);
-    const body = { description };
-    if (meetingPanel.project) body[meetingPanel.project.type] = meetingPanel.project.value;
-    input.disabled = true;
-    const result = await request(type.endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    }).then(r => r.json()).catch(() => null);
-    input.disabled = false;
-    if (!result || !result.ok) { input.focus(); return; }
-    meetingPanel.type = typeSelect.value;
-    meetingPanel.added.unshift({ id: result.id, type, description, project: meetingPanel.project });
-    announce(type.done);
-    renderMeetingPanel();
-    load();
-  });
-
-  row.append(typeSelect, input);
-  panel.appendChild(row);
-
-  if (added.length) {
-    const list = document.createElement('div');
-    list.className = 'meeting-added';
-    const heading = document.createElement('div');
-    heading.className = 'meeting-added-heading';
-    heading.textContent = `방금 담은 것 ${added.length}`;
-    list.appendChild(heading);
-
-    added.forEach((entry) => {
-      const el = document.createElement('div');
-      el.className = 'meeting-added-row';
-      el.innerHTML = `
-        <span class="meeting-added-type">${escapeHtml(entry.type.label)}</span>
-        <span class="meeting-added-desc">${escapeHtml(entry.description)}</span>
-      `;
-      const undo = document.createElement('button');
-      undo.type = 'button';
-      undo.className = 'meeting-added-undo';
-      undo.textContent = '×';
-      undo.setAttribute('aria-label', `${entry.description} 취소`);
-      undo.addEventListener('click', async () => {
-        undo.disabled = true;
-        await request('/api/track/remove', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: entry.id }),
-        });
-        // 목록이 다시 그려져도 엉뚱한 줄이 지워지지 않도록 위치가 아니라 id로 찾아 뺀다
-        meetingPanel.added = meetingPanel.added.filter(x => x.id !== entry.id);
-        announce('취소했습니다.');
-        renderMeetingPanel();
-        load();
-      });
-      el.appendChild(undo);
-      list.appendChild(el);
-    });
-    panel.appendChild(list);
-  }
-
-  panel.querySelector('.meeting-capture-input').focus();
+  if (recorded) { panelOpen({ kind: 'meeting', id: recorded.id }); return; }
+  panelOpen({ kind: 'meeting', event });
 }
 
 // ---------- 오른쪽 상세 패널 (업무 · 확인 대기 한 벌) ----------
@@ -1878,16 +1741,27 @@ function panelMode(item) {
   return item.scheduled ? 'today' : 'later';
 }
 
+// view: { id } 업무·확인 대기 상세 · { kind: 'meeting', id } 기록된 회의 · { kind: 'meeting', event } 아직 기록되지 않은 회의
 function panelOpen(view) {
   const side = panelSide();
-  if (!side || !view || view.id === undefined || view.id === null) return;
-  // 큰 창(검색·프로젝트·회의)에서 항목을 열면 창은 닫고 패널로 넘긴다.
+  if (!side || !view) return;
+  const kind = view.kind === 'meeting' ? 'meeting' : 'item';
+  if (kind === 'item' && (view.id === undefined || view.id === null)) return;
+  if (kind === 'meeting' && !view.id && !view.event) return;
+  // 큰 창(프로젝트)에서 열면 창은 닫고 패널로 넘긴다.
   if (typeof workflowDialog !== 'undefined' && workflowDialog) workflowDialog.close();
-  meetingPanel = null;
+  // 패널은 오늘 탭의 세 번째 열이다 — 다른 탭에 있었다면 함께 옮긴다.
+  if (typeof setActiveTab === 'function' && activeTabKey !== 'today') setActiveTab('today');
   const opener = document.activeElement;
   panelState = {
-    id: view.id,
+    kind,
+    id: view.id || null,
+    // 아직 흐름 기록에 없는 캘린더 회의는 연 그대로 들고 있는다(찾을 곳이 없다).
+    event: view.event || null,
+    // 회의에서 초안을 담은 직후의 결과 카드. 회의 → 항목 → 회의로 돌아와도 그대로 남는다.
+    result: view.result || null,
     // 팔레트에서 열었으면 닫을 때 그 검색어·필터·스크롤 그대로 팔레트로 돌아간다.
+    // 회의에서 연 항목이면 { kind: 'meeting', … }이 들어와 맨 위에 `← 회의로`가 붙는다.
     back: view.back || null,
     returnFocus: opener && opener !== document.body && opener.focus ? opener : null,
   };
@@ -1901,16 +1775,24 @@ function panelClose() {
   const side = panelSide();
   const zone = document.getElementById('todayTaskZone');
   const back = panelState?.returnFocus;
-  const reopen = panelState?.back;
+  let reopen = panelState?.back;
   panelState = null;
-  meetingPanel = null;
   escDrop(panelClose);
-  if (zone) zone.classList.remove('task-detail-open');
-  document.querySelectorAll('.d-row.is-sel, .d-wrow.is-sel').forEach(row => row.classList.remove('is-sel'));
+  if (zone) zone.classList.remove('task-detail-open', 'meeting-open');
+  document.querySelectorAll('.d-row.is-sel, .d-wrow.is-sel, .d-mrow.is-sel').forEach(row => row.classList.remove('is-sel'));
   if (side) { side.hidden = true; side.replaceChildren(); side.style.minHeight = ''; }
   // 팔레트에서 열었던 항목이면 찾던 자리로 돌려 놓는다(포커스도 검색 입력으로).
+  // 팔레트 → 회의 → 항목처럼 거쳐 왔어도 처음 찾던 자리로 돌아간다.
+  while (reopen && reopen.kind === 'meeting') reopen = reopen.back;
   if (reopen && reopen.kind === 'palette') { palOpen(reopen.state); return; }
   if (back && back.isConnected) back.focus();
+}
+
+// 지금 보고 있는 줄을 찾는 표식 — 업무·확인 대기는 항목 번호, 회의는 레일의 미팅 줄.
+function panelAnchorSelector() {
+  if (!panelState) return '.d-row[data-task-id="__none__"]';
+  if (panelState.kind === 'meeting') return `.d-mrow[data-meeting-id="${CSS.escape(String(panelMeetingKey(panelMeetingEvent()) || ''))}"]`;
+  return `.d-row[data-task-id="${CSS.escape(String(panelState.id))}"]`;
 }
 
 // 누른 줄 높이에 맞춰 연다. 좁은 화면에서는 오른쪽 고정 패널·아래 시트라 자리를 계산하지 않는다.
@@ -1921,7 +1803,7 @@ function panelPlace(box) {
   side.style.minHeight = '';
   // 좁은 화면이거나 서랍이 열려 있으면 패널이 열 밖에 떠 있으므로(ui.css) 자리를 계산하지 않는다.
   if (window.innerWidth <= 1120 || laterDrawerOpen) return;
-  const row = document.querySelector(`.d-row[data-task-id="${CSS.escape(String(panelState.id))}"]`);
+  const row = document.querySelector(`${panelAnchorSelector()}`);
   let top = 10;
   if (row) {
     const offset = row.getBoundingClientRect().top - side.getBoundingClientRect().top - 6;
@@ -1932,36 +1814,56 @@ function panelPlace(box) {
   side.style.minHeight = `${Math.round(top + box.offsetHeight + 10)}px`;
 }
 
-function panelRender(focusTitle = false) {
+function panelRender(focusFirst = false) {
   const side = panelSide();
   const zone = document.getElementById('todayTaskZone');
   if (!side || !zone || !panelState) return;
-  const found = panelResolve(panelState.id);
-  if (!found) { panelClose(); return; }
+  const meeting = panelState.kind === 'meeting' ? panelMeetingEvent() : null;
+  const found = panelState.kind === 'meeting' ? null : panelResolve(panelState.id);
+  if (!meeting && !found) { panelClose(); return; }
   zone.classList.add('task-detail-open');
+  zone.classList.toggle('meeting-open', !!meeting);
   side.hidden = false;
   const box = document.createElement('div');
   box.className = 'd-detail';
-  if (found.kind === 'check') panelCheck(found, box);
+  if (meeting) panelMeeting(meeting, box);
+  else if (found.kind === 'check') panelCheck(found, box);
   else panelTask(found, box);
   side.replaceChildren(box);
-  const selector = CSS.escape(String(panelState.id));
-  document.querySelectorAll('.d-row.is-sel, .d-wrow.is-sel').forEach(row => row.classList.remove('is-sel'));
-  document.querySelectorAll(`.d-row[data-task-id="${selector}"], .d-wrow[data-rail-id="${selector}"]`).forEach(row => row.classList.add('is-sel'));
+  const marked = panelState.kind === 'meeting'
+    ? panelAnchorSelector()
+    : `.d-row[data-task-id="${CSS.escape(String(panelState.id))}"], .d-wrow[data-rail-id="${CSS.escape(String(panelState.id))}"]`;
+  document.querySelectorAll('.d-row.is-sel, .d-wrow.is-sel, .d-mrow.is-sel').forEach(row => row.classList.remove('is-sel'));
+  document.querySelectorAll(marked).forEach(row => row.classList.add('is-sel'));
   panelPlace(box);
-  if (focusTitle) {
-    box.querySelector('.d-dtitle')?.focus();
+  if (focusFirst) {
+    // 회의 정리는 고칠 제목이 없다 — 검토할 초안이 없을 때만 직접 담기 입력으로 보낸다.
+    const first = meeting ? (box.querySelector('.d-dcap input') || box) : box.querySelector('.d-dtitle');
+    first?.focus?.();
     box.scrollIntoView?.({ block: 'nearest' });
   }
 }
 
-// load()가 끝날 때마다 불린다. 패널 안에서 타이핑하는 중이면 다시 그리지 않는다(적던 글이 날아가지 않게).
+// load()가 끝날 때마다 불린다. 패널 안에서 타이핑하는 중이면 다시 그리지 않는다
+// (적던 글·고치던 초안 문구가 날아가지 않게. 고친 초안은 wfDraftEdits에도 남는다).
 function syncTaskDetail() {
   if (!panelState) return;
-  if (!panelResolve(panelState.id)) { panelClose(); return; }
+  if (panelState.kind !== 'meeting' && !panelResolve(panelState.id)) { panelClose(); return; }
   const side = panelSide();
   if (side && isTyping() && side.contains(document.activeElement)) return;
   panelRender();
+}
+
+// 회의에서 연 항목이면 맨 위에 `← 회의로`. 회의 패널로 돌아갈 때 결과 카드와 그 위의 자리(팔레트)를 그대로 들고 간다.
+function panelBackLink(box) {
+  const back = panelState?.back;
+  if (!back || back.kind !== 'meeting') return;
+  const link = document.createElement('button');
+  link.type = 'button';
+  link.className = 'd-back';
+  link.textContent = '← 회의로';
+  link.addEventListener('click', () => panelOpen({ kind: 'meeting', id: back.id, event: back.event, result: back.result, back: back.back }));
+  box.appendChild(link);
 }
 
 // 제목 줄: 제목(누르면 그 자리 수정) + 더보기 + 닫기.
@@ -2118,6 +2020,7 @@ function panelTask({ item, detail, type }, box) {
   const mode = panelMode(item);
   const isTask = ['task', 'bug'].includes(type);
 
+  panelBackLink(box);
   box.appendChild(panelHead(item, () => {
     const actions = [];
     if (isTask) actions.push({ label: item.doing ? '진행 중 해제' : '진행 중으로 표시', onClick: () => setTaskDoing(item.id, !item.doing) });
@@ -2183,7 +2086,8 @@ function panelTask({ item, detail, type }, box) {
     link.type = 'button';
     link.className = 'd-link';
     link.textContent = '이 항목이 나온 회의';
-    link.addEventListener('click', () => wfOpen({ kind: 'meeting', id: detail.meetingId }));
+    // 같은 패널에서 그 회의를 연다. 팔레트에서 왔다면 닫을 때 돌아갈 자리는 그대로 들고 간다.
+    link.addEventListener('click', () => panelOpen({ kind: 'meeting', id: detail.meetingId, back: panelState?.back }));
     box.appendChild(link);
   }
   panelAutosaveNote(box);
@@ -2276,6 +2180,7 @@ function panelTaskNotes(item, detail, box) {
 
 function panelCheck({ item, detail }, box) {
   const done = item.status === 'done';
+  panelBackLink(box);
   box.appendChild(panelHead(item, () => waitingMenuSections(item, box)));
 
   const fields = document.createElement('dl');
@@ -2320,6 +2225,457 @@ function panelCheck({ item, detail }, box) {
   box.appendChild(log);
 
   panelAutosaveNote(box);
+}
+
+// ---------- 회의 정리 패널 ----------
+// 업무 상세와 같은 자리에서 회의를 정리한다: 결과 카드 → AI 초안 검토 → 이 회의에서 나온 것 →
+// 이전 회차의 미해결 항목 → 직접 적어 담기 → 기존 항목 연결. 내용이 없는 구역은 아예 두지 않는다.
+// 프로젝트·반복 회의 입력은 두지 않는다(DECISIONS 화면) — 프로젝트는 오늘 미팅 줄의 더보기에서 바꾼다.
+
+// 아직 흐름 기록에 없는 회의(캘린더에만 있는 회의)에서 직접 담을 때 쓰는 길.
+const MEETING_CAPTURE_ENDPOINT = { task: '/api/today-task/create', check: '/api/waiting/create', decision: '/api/decision/create' };
+
+// 패널이 보고 있는 회의. 기록된 회의는 늘 최신 자료에서 다시 찾는다(초안·항목이 바뀌므로).
+function panelMeetingEvent() {
+  if (!panelState || panelState.kind !== 'meeting') return null;
+  const meetings = (typeof workflowData === 'object' && workflowData ? workflowData.meetings : null) || [];
+  if (panelState.id) return meetings.find(event => event.id === panelState.id) || null;
+  return panelState.event || null;
+}
+
+// 레일의 미팅 줄을 찾는 표식. 기록 전 회의는 번호가 없으니 시각·제목으로 찾는다.
+const panelMeetingKey = event => event ? (event.id || `${event.start || ''} ${event.title || ''}`) : '';
+
+// 조용한 한 줄: `오늘 16:00–17:00 · 운영툴`
+function panelMeetingWhen(event) {
+  const day = !event.date || event.date === todayStr() ? '오늘' : uiKoDate(event.date);
+  const time = `${event.start || ''}${event.end ? `–${event.end}` : ''}`;
+  const project = event.project ? event.project.label || event.project.value : '';
+  return [[day, time].filter(Boolean).join(' '), project].filter(Boolean).join(' · ');
+}
+
+// 패널 안에서 저장이 실패한 자리를 그 자리에 적는다(알림은 request가 따로 띄운다).
+function panelSetError(text) {
+  const region = panelSide()?.querySelector('.d-derr');
+  if (region) region.textContent = text || '';
+}
+
+// 누르면 도는 버튼 — 도는 동안 꺼지고, 실패하면 패널 안에 이유를 적는다.
+function panelRunButton(text, action, className = 'd-btn') {
+  return panelQuietButton(text, async () => {
+    panelSetError('');
+    try { await action(); } catch (error) {
+      panelSetError((typeof error?.message === 'string' && error.message) || '저장하지 못했습니다. 입력 내용을 확인하고 다시 시도해 주세요.');
+    }
+  }, className);
+}
+
+function panelMeeting(event, box) {
+  // 흐름 기록에 있는 회의여야 초안·항목·연결을 다룰 수 있다.
+  const linked = !!event.id;
+  box.tabIndex = -1;
+
+  const top = document.createElement('div');
+  top.className = 'd-dtop';
+  const head = document.createElement('div');
+  head.className = 'd-dhead2';
+  const title = document.createElement('div');
+  title.className = 'd-dtitle plain';
+  title.textContent = event.title;
+  const when = document.createElement('div');
+  when.className = 'd-dsub';
+  when.textContent = panelMeetingWhen(event);
+  (event.tiroNotes || []).forEach((url, index) => {
+    const note = document.createElement('a');
+    note.className = 'd-link';
+    note.href = url;
+    note.target = '_blank';
+    note.rel = 'noopener';
+    note.textContent = (event.tiroNotes.length > 1) ? `티로 노트 ${index + 1}` : '티로 노트';
+    when.append(' · ', note);
+  });
+  head.append(title, when);
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'd-iconbtn';
+  close.setAttribute('aria-label', '회의 정리 닫기');
+  close.innerHTML = uiIcon('close');
+  close.addEventListener('click', panelClose);
+  top.append(head, close);
+  box.appendChild(top);
+
+  const error = document.createElement('p');
+  error.className = 'd-derr';
+  error.setAttribute('role', 'alert');
+  box.appendChild(error);
+
+  if (!linked) {
+    const note = document.createElement('div');
+    note.className = 'd-hint';
+    note.textContent = '아직 기록되지 않은 회의입니다. 여기서 적은 것은 회의에 연결되지 않고 바로 담깁니다.';
+    box.appendChild(note);
+  }
+  if (linked) {
+    panelMeetingResult(event, box);
+    if (event.drafts && event.drafts.length) panelMeetingDrafts(event, box);
+    panelMeetingItems(event, box);
+    panelMeetingPast(event, box);
+  }
+  panelMeetingCapture(event, box, linked);
+  if (linked) panelMeetingLink(event, box);
+}
+
+// 방금 초안을 담은 결과: 어디로 갔는지, 나중에 담긴 할 일을 오늘로, 되돌리기, 다음 검토할 회의.
+function panelMeetingResult(event, box) {
+  const result = panelState.result;
+  if (!result || result.meetingId !== event.id) return;
+  const card = document.createElement('div');
+  card.className = 'd-dres';
+  card.setAttribute('role', 'status');
+
+  const head = document.createElement('div');
+  head.className = 'hd';
+  const done = document.createElement('strong');
+  done.className = 'k-pos';
+  done.textContent = `✓ ${result.created.length}개 담음`;
+  const counts = document.createElement('span');
+  counts.className = 'ct';
+  counts.textContent = WF_TYPES
+    .map(([type, label]) => [label, result.accepted.filter(item => item.type === type).length])
+    .filter(([, count]) => count).map(([label, count]) => `${label} ${count}`).join(' · ');
+  head.append(done, counts);
+  head.appendChild(panelRunButton('실행 취소', async () => {
+    const undo = await wfPost('review-undo', { meetingId: event.id, created: result.created });
+    if (!undo.ok) throw new Error(undo.error || '되돌리지 못했습니다.');
+    // 되돌린 초안은 검토 대기로 돌아온다 — 사람이 고쳐 둔 문구·종류·날짜는 그대로 살려 둔다.
+    result.accepted.forEach(item => wfDraftEdits.set(item.id, { type: item.type, description: item.description, when: item.when || 'later', due: item.due || '' }));
+    panelState.result = null;
+    await load();
+    panelRender();
+    announce('담은 것을 되돌렸습니다.');
+  }, 'd-btn sm'));
+  card.appendChild(head);
+
+  // 할 일은 기본이 "나중"으로 담기니 이 자리에서 바로 오늘로 올릴 수 있게 한다. 셋까지는 줄마다, 그 이상은 한 줄로 묶는다.
+  const tasks = wfResultTasks(result);
+  const later = tasks.filter(task => !task.today);
+  const taskRow = (text, action) => {
+    const row = document.createElement('div');
+    row.className = 'tk';
+    const label = document.createElement('span');
+    label.className = 'ti';
+    label.textContent = text;
+    row.append(label, action);
+    card.appendChild(row);
+  };
+  const doneNote = () => {
+    const note = document.createElement('span');
+    note.className = 'k-mute';
+    note.textContent = '오늘 할 일 ✓';
+    return note;
+  };
+  if (tasks.length && tasks.length <= 3) {
+    tasks.forEach(task => taskRow(task.description, task.today
+      ? doneNote()
+      : panelRunButton('오늘로', () => panelPromoteTasks(result, [task.itemId]), 'd-btn sm')));
+  } else if (tasks.length) {
+    taskRow(later.length ? `나중에 담긴 할 일 ${later.length}개` : `할 일 ${tasks.length}개`, later.length
+      ? panelRunButton('모두 오늘로', () => panelPromoteTasks(result, later.map(task => task.itemId)), 'd-btn sm')
+      : doneNote());
+  }
+
+  const next = wfNextReview(event.id);
+  const foot = document.createElement('div');
+  foot.className = 'nx';
+  if (next) foot.appendChild(panelRunButton(`다음: ${next.title} (초안 ${next.drafts.length}) →`,
+    () => panelOpen({ kind: 'meeting', id: next.id, back: panelState?.back }), 'd-link'));
+  else {
+    const all = document.createElement('span');
+    all.className = 'k-mute';
+    all.textContent = '오늘 검토할 초안을 모두 처리했습니다.';
+    foot.appendChild(all);
+  }
+  card.appendChild(foot);
+  box.appendChild(card);
+}
+
+// 나중에 담긴 할 일을 오늘 할 일로 올린다(패널이 결과를 보여 주니 저장 알림은 끈다).
+async function panelPromoteTasks(result, ids) {
+  for (const itemId of ids) {
+    await request('/api/track/set-scheduled', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: itemId, scheduled: todayStr() }), quiet: true });
+    (result.promoted ||= []).push(itemId);
+  }
+  await load();
+  panelRender();
+}
+
+// AI가 분류한 초안. 읽는 순서대로 문구(주인공) → 고르는 것들(종류·시점·날짜),
+// 담기 바는 패널 아래에 붙어 있다. 고친 문구·종류는 wfDraftEdits에 남아 다시 그려도 유지된다.
+function panelMeetingDrafts(event, box) {
+  const section = panelSection(`AI가 분류한 초안 ${event.drafts.length}`);
+  section.classList.add('d-drafts');
+
+  const summary = document.createElement('span');
+  summary.className = 'sm';
+  const refreshSummary = () => {
+    const counts = {};
+    let today = 0;
+    event.drafts.forEach(draft => {
+      const edit = wfDraftEdits.get(draft.id);
+      counts[edit.type] = (counts[edit.type] || 0) + 1;
+      if (edit.type === 'task' && edit.when === 'today') today++;
+    });
+    summary.textContent = WF_TYPES.filter(([key]) => counts[key])
+      .map(([key, label]) => `${label} ${counts[key]}${key === 'task' && today ? `(오늘 ${today})` : ''}`).join(' · ');
+  };
+
+  event.drafts.forEach((draft) => {
+    const edit = wfDraftEdits.get(draft.id) || { type: draft.type, description: wfCleanDraftText(draft.description), when: 'later', due: draft.due || '' };
+    wfDraftEdits.set(draft.id, edit);
+    const card = document.createElement('div');
+    card.className = 'd-draft';
+    card.dataset.type = edit.type;
+
+    // 문구는 여러 줄로 늘어나는 입력칸에 전부 보인다(한 줄 입력칸일 때는 긴 문구의 끝이 잘렸다).
+    const text = document.createElement('textarea');
+    text.className = 'd-dtxt';
+    text.rows = 1;
+    text.maxLength = 1000;
+    text.value = edit.description;
+    text.setAttribute('aria-label', '초안 문구');
+    const fit = () => { text.style.height = 'auto'; text.style.height = `${text.scrollHeight + text.offsetHeight - text.clientHeight}px`; };
+    text.addEventListener('input', () => {
+      // 문구는 한 줄이다: 붙여넣은 줄바꿈은 공백으로
+      if (text.value.includes('\n')) text.value = text.value.replace(/\s*\n\s*/g, ' ');
+      edit.description = text.value;
+      fit();
+    });
+    text.addEventListener('keydown', (keyEvent) => {
+      if (keyEvent.key === 'Enter' && !keyEvent.isComposing) keyEvent.preventDefault(); // 조합 중의 Enter는 글자를 확정하는 것이다
+    });
+
+    const dismiss = panelRunButton('', async () => {
+      await wfReview({ meetingId: event.id, dismiss: [draft.id] });
+      wfDraftEdits.delete(draft.id);
+      await load();
+      panelRender();
+    }, 'd-iconbtn sm x');
+    dismiss.innerHTML = uiIcon('close');
+    dismiss.setAttribute('aria-label', `빼기: ${edit.description}`);
+    dismiss.title = '이 초안 빼기';
+
+    const controls = document.createElement('div');
+    controls.className = 'ct';
+    const whenSeg = wfSegment([['later', '나중에 할 일'], ['today', '오늘 할 일']], edit.when || 'later', (key) => { edit.when = key; refreshSummary(); }, '언제 할 일로 담을까');
+    whenSeg.title = '나중: 나중에 할 일로 담김 · 오늘: 오늘 할 일로 담김';
+    const dateSlot = document.createElement('span');
+    const syncWhen = () => { whenSeg.hidden = edit.type !== 'task'; };
+    const syncDate = () => {
+      dateSlot.replaceChildren();
+      const label = wfDateLabel(edit.type); // 할 일 → 마감일 · 확인 대기 → 회신 기한 · 결정 → 날짜 없음
+      if (label) dateSlot.appendChild(uiDateField({ value: edit.due || '', label, onChange: (value) => { edit.due = value || ''; } }));
+    };
+    controls.append(wfTypeSegment(edit.type, (key) => {
+      edit.type = key;
+      card.dataset.type = key;
+      syncWhen();
+      syncDate();
+      refreshSummary();
+    }), whenSeg, dateSlot);
+    syncWhen();
+    syncDate();
+
+    card.append(text, controls, dismiss);
+    section.appendChild(card);
+    requestAnimationFrame(fit);
+  });
+  box.appendChild(section);
+
+  const bar = document.createElement('div');
+  bar.className = 'd-dbar';
+  bar.appendChild(summary);
+  bar.appendChild(panelRunButton(`${event.drafts.length}개 담기`, async () => {
+    const accept = event.drafts.map(draft => wfAcceptItem(draft.id, wfDraftEdits.get(draft.id)));
+    if (accept.some(item => !item.description)) { panelSetError('비어 있는 문구가 있습니다. 채우거나 ✕로 빼 주세요.'); return; }
+    const result = await wfReview({ meetingId: event.id, accept });
+    panelState.result = { meetingId: event.id, created: result.created, accepted: accept };
+    accept.forEach(item => wfDraftEdits.delete(item.id));
+    await load();
+    panelRender(); // 결과 카드(role=status)가 담은 결과를 알려 주므로 따로 알림을 띄우지 않는다
+  }, 'd-btn pri'));
+  box.appendChild(bar);
+  refreshSummary();
+}
+
+// 항목 한 줄: 종류 | 문구 | 기한·상태. 기본 상태(미완료)는 모든 줄에 반복되니 적지 않는다.
+function panelMeetingItemState(item) {
+  if (item.status === 'done') return { text: '완료', tone: '' };
+  const blocker = typeof wfItem === 'function' && item.blockedBy ? wfItem(item.blockedBy) : null;
+  if (blocker && blocker.status !== 'done') return { text: '답변 대기', tone: 'warn' };
+  const due = uiDueText(item.due, 'full');
+  if (due) return due;
+  if (item.doing) return { text: '진행 중', tone: '' };
+  return null;
+}
+
+function panelMeetingRow(item, event, stateText) {
+  const row = document.createElement('div');
+  row.className = 'd-mrow2' + (item.status === 'done' ? ' is-done' : '');
+  const tag = document.createElement('span');
+  tag.className = 'tg';
+  tag.textContent = wfType(item.type);
+  // 업무·확인 대기는 같은 패널에서 상세를 연다(결정·아이디어는 상세가 없다).
+  const openable = ['task', 'bug', 'check'].includes(item.type);
+  const title = document.createElement(openable ? 'button' : 'span');
+  title.className = 'ti';
+  title.title = item.description;
+  title.textContent = item.description;
+  if (openable) {
+    title.type = 'button';
+    title.setAttribute('aria-label', `${item.description} 상세 보기`);
+    title.addEventListener('click', () => panelOpen({
+      id: item.id,
+      back: { kind: 'meeting', id: event.id, event: event.id ? null : event, result: panelState?.result, back: panelState?.back },
+    }));
+  }
+  const state = document.createElement('span');
+  state.className = 'st';
+  if (stateText) state.textContent = stateText;
+  else {
+    const meta = panelMeetingItemState(item);
+    if (meta) { state.className = `st${uiTone(meta.tone)}`; state.textContent = meta.text; }
+  }
+  row.append(tag, title, state);
+  return row;
+}
+
+function panelMeetingItems(event, box) {
+  const typeRank = (item) => { const rank = ['task', 'bug', 'check', 'decision'].indexOf(item.type); return rank < 0 ? 9 : rank; };
+  const items = [...wfMeetingItems(event.id)].sort((a, b) => typeRank(a) - typeRank(b));
+  if (!items.length) return;
+  const section = panelSection(`이 회의에서 나온 것 ${items.length}`);
+  items.forEach(item => section.appendChild(panelMeetingRow(item, event)));
+  box.appendChild(section);
+}
+
+// 같은 이름으로 반복되는 회의라면, 지난 회차에서 아직 안 끝난 것을 여기서 같이 본다.
+function panelMeetingPast(event, box) {
+  if (!event.series) return;
+  const meetings = (typeof workflowData === 'object' && workflowData ? workflowData.meetings : null) || [];
+  const past = meetings
+    .filter(other => other.id !== event.id && other.series === event.series && (other.date || '') < (event.date || ''))
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  const rows = [];
+  past.forEach(other => wfMeetingItems(other.id).filter(item => item.status !== 'done').forEach(item => rows.push({ item, at: other.date })));
+  if (!rows.length) return;
+  const section = panelSection(`이전 회차의 미해결 항목 ${rows.length}`);
+  rows.forEach(({ item, at }) => section.appendChild(panelMeetingRow(item, event, `${uiKoDateShort(at)} 회차`)));
+  box.appendChild(section);
+}
+
+// 직접 적어 담기 — 검토할 초안이 있으면 접어 두고(주 흐름은 검토 → 담기), 없을 때만 펼친다.
+function panelMeetingCapture(event, box, linked) {
+  const section = document.createElement('details');
+  section.className = 'd-dsec d-dadd';
+  section.open = !(event.drafts && event.drafts.length);
+  const label = document.createElement('summary');
+  label.className = 'lbl';
+  label.textContent = '직접 적어 담기';
+  section.appendChild(label);
+
+  const form = document.createElement('div');
+  form.className = 'd-dcap';
+  let type = 'task';
+  let due = '';
+  const dateSlot = document.createElement('span');
+  const syncDate = () => {
+    dateSlot.replaceChildren();
+    const name = wfDateLabel(type);
+    if (name) dateSlot.appendChild(uiDateField({ value: due, label: name, onChange: (value) => { due = value || ''; } }));
+  };
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'd-din';
+  input.maxLength = 1000;
+  input.placeholder = '회의에서 나온 내용';
+  input.setAttribute('aria-label', '회의에서 나온 내용');
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'd-btn pri';
+  add.textContent = '추가';
+
+  const submit = async () => {
+    const description = input.value.trim();
+    if (!description || add.disabled) return;
+    add.disabled = true;
+    panelSetError('');
+    try {
+      if (linked) await wfPost('capture', { meetingId: event.id, type, description, ...(type !== 'decision' && due ? { due } : {}) });
+      else {
+        // 기록되지 않은 회의: 회의에 연결하지 않고 목록에 바로 담는다(프로젝트는 회의에 연결된 것을 쓴다).
+        const project = event.project;
+        const body = {
+          description,
+          ...(type !== 'decision' && due ? { due } : {}),
+          ...(project && project.type && project.value ? { [project.type]: project.value } : {}),
+        };
+        const response = await request(MEETING_CAPTURE_ENDPOINT[type], { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const result = await response.json();
+        if (!result.ok) throw new Error(result.error || '담지 못했습니다.');
+      }
+      await load();
+      panelRender();
+    } catch {
+      panelSetError('추가하지 못했습니다. 입력 내용은 유지됩니다.');
+      add.disabled = false;
+      input.focus();
+    }
+  };
+  input.addEventListener('keydown', (keyEvent) => {
+    if (keyEvent.key !== 'Enter' || keyEvent.isComposing) return; // 한글을 조합하는 중의 Enter는 글자를 확정하는 것이다
+    keyEvent.preventDefault();
+    submit();
+  });
+  add.addEventListener('click', submit);
+
+  form.append(wfTypeSegment('task', (key) => { type = key; syncDate(); }, '담을 종류'), input, dateSlot, add);
+  syncDate();
+  section.appendChild(form);
+  box.appendChild(section);
+}
+
+// 이미 적어 둔 항목을 이 회의에서 나온 것으로 연결한다(같은 프로젝트의 항목만 후보로).
+function panelMeetingLink(event, box) {
+  const key = typeof wfMeetingKey === 'function' ? wfMeetingKey(event) : null;
+  const items = (typeof workflowData === 'object' && workflowData ? workflowData.items : null) || [];
+  const candidates = items.filter(item => !item.meetingId && (!key || wfKey(item) === key));
+  if (!candidates.length) return;
+  const section = document.createElement('details');
+  section.className = 'd-dsec d-dadd';
+  const label = document.createElement('summary');
+  label.className = 'lbl';
+  label.textContent = '기존 항목 연결';
+  section.appendChild(label);
+
+  const row = document.createElement('div');
+  row.className = 'd-dcap';
+  const select = document.createElement('select');
+  select.className = 'd-msel wide';
+  select.setAttribute('aria-label', '이 회의에서 나온 항목 선택');
+  [['', '항목 선택'], ...candidates.map(item => [item.id, `${wfType(item.type)} · ${item.description}`])].forEach(([value, text]) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = text;
+    select.appendChild(option);
+  });
+  row.append(select, panelRunButton('회의에 연결', async () => {
+    if (!select.value) return;
+    await wfPost('link', { id: select.value, meetingId: event.id });
+    await load();
+    panelRender();
+  }));
+  section.appendChild(row);
+  box.appendChild(section);
 }
 
 // ---------- ⌘K 검색 팔레트 (검색 · 회의 모아보기 · 오늘 신규) ----------
@@ -2544,20 +2900,18 @@ function palPick(index) {
   const entry = palEntries[index];
   if (!entry) return;
   const back = { kind: 'palette', state: palSnapshot() };
+  // 상세 패널·회의 정리 패널은 오늘 탭의 세 번째 열이다 — 다른 탭에 있었다면 함께 옮긴다.
   if (entry.kind === 'meeting') {
     const id = entry.event.id;
     palClose(true);
-    wfOpen({ kind: 'meeting', id });
-    // 회의는 아직 옛 큰 창에서 연다 — 그 창을 닫으면 찾던 자리로 돌아온다.
-    if (typeof workflowDialog !== 'undefined' && workflowDialog) {
-      workflowDialog.addEventListener('close', () => palOpen(back.state), { once: true });
-    }
+    setActiveTab('today');
+    // 회의 정리도 같은 패널에서 연다 — 닫으면 찾던 자리(검색어·필터·스크롤)로 돌아온다.
+    panelOpen({ kind: 'meeting', id, back });
     return;
   }
   const item = entry.item;
   palClose(true);
   if (item.type === 'decision' || item.type === 'idea') { palRevealRecord(item); return; }
-  // 상세 패널은 오늘 탭의 세 번째 열이다 — 다른 탭에 있었다면 함께 옮긴다.
   setActiveTab('today');
   panelOpen({ id: item.id, back });
 }

@@ -295,47 +295,6 @@
   select.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)); }
   select.badge:focus { outline: none; border-color: var(--accent); }
 
-  .meeting-panel-title { font-size: var(--text-md); font-weight: 700; line-height: 1.4; margin-top: 10px; }
-  .meeting-panel-time { font-size: var(--text-xs); font-weight: 600; color: var(--accent); margin-top: 2px; }
-  .meeting-capture-row { display: flex; gap: 6px; margin: 14px 0 4px; }
-  .meeting-type-select {
-    font: inherit;
-    font-size: var(--text-sm);
-    color: var(--text);
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 8px 6px;
-    flex-shrink: 0;
-  }
-  .meeting-capture-input {
-    flex: 1;
-    min-width: 0;
-    font: inherit;
-    font-size: var(--text-base);
-    color: var(--text);
-    background: var(--bg);
-    border: 1px solid var(--accent);
-    border-radius: var(--radius-sm);
-    padding: 8px 8px;
-  }
-  .meeting-capture-input:focus { outline: none; }
-  .meeting-added { margin-top: 16px; }
-  .meeting-added-heading { font-size: var(--text-xs); font-weight: 700; color: var(--muted); margin-bottom: 6px; }
-  .meeting-added-row {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    padding: 6px 0;
-    border-top: 1px solid var(--border);
-    font-size: var(--text-sm);
-  }
-  .meeting-added-type { font-size: var(--text-xs); font-weight: 700; color: var(--accent); white-space: nowrap; flex-shrink: 0; }
-  .meeting-added-desc { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-  .meeting-added-undo { border: none; background: none; color: var(--muted); cursor: pointer; padding: 0 2px; flex-shrink: 0; }
-  .meeting-added-undo:hover { color: var(--urgent); }
-
-
   .jira-control { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
   /* 좁은 사이드바 칼럼(확인 대기중 등)에 들어가면 배지 글자가 알약 모양을 깨고
      단어 중간에서 두 줄로 꺾였다 — 한 줄로 줄이고 넘치면 말줄임표로 처리한다.

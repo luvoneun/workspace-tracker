@@ -4,11 +4,9 @@
 .wf-dialog::backdrop { background: #10182866; }
 .wf-dialog h2 { font-size: 18px; margin: 0; }
 .wf-dialog h2::before { content: none; }
-.wf-dialog h2.wf-eyebrow { font-size: var(--text-sm); font-weight: 600; color: var(--muted); }
 /* 섹션 제목 — 주간요약 카드와 같은 규칙: 본문색 + 굵게 + 밑줄로, 그 아래 항목들과 위계가 분명하게 갈린다 */
 .wf-dialog h3 { display: flex; align-items: center; gap: 8px; font-size: var(--text-md); font-weight: 700; letter-spacing: -0.01em; color: var(--text); margin: 32px 0 10px; }
 .wf-dialog h3:first-of-type { margin-top: 4px; }
-.wf-dialog h3.wf-title { display: block; font-size: 24px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.3; color: var(--text); margin: 6px 0 6px; }
 /* 항목 목록 — 한 줄에 종류 칩 · 문구 · 상태. 카드 여러 장 대신 하나의 묶음 안에서 가는 선으로 나눈다 */
 .wf-ilist { border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); padding: 2px 8px; margin: 0 0 8px; }
 .wf-row.wf-irow { margin: 0; }
@@ -32,11 +30,6 @@
 .wf-chip-review { font-weight: 700; color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
 .wf-chip-project { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .wf-chip-none { background: none; padding-left: 0; font-weight: 500; }
-.wf-count.wf-count-neutral { color: var(--muted); background: color-mix(in srgb, var(--muted) 14%, transparent); }
-.wf-lead { margin: -4px 0 12px; }
-.wf-add { margin-top: 20px; }
-.wf-dialog .wf-add > summary, .wf-dialog .wf-add[open] > summary { padding: 6px 0; color: var(--muted); font-size: var(--text-sm); font-weight: 600; }
-.wf-count { font-size: var(--text-xs); font-weight: 600; letter-spacing: 0; color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); border-radius: 999px; padding: 2px 10px; }
 .wf-head, .wf-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .wf-head { justify-content: space-between; margin-bottom: 18px; }
 
@@ -98,100 +91,12 @@
 .wf-dialog summary { color: var(--muted); cursor: pointer; font-size: var(--text-sm); font-weight: 700; padding: 4px 0; }
 .wf-dialog details[open] summary { color: var(--text); margin-bottom: 4px; }
 
-/* 회의에서 나온 것 담기 — 종류·내용·추가를 한 줄로. index.html의 인박스/빠른입력과 같은 모양이라
-   라벨을 따로 세우지 않는다(placeholder + aria-label로 충분). */
-.wf-capture-row { display: flex; align-items: center; gap: 8px; margin: 14px 0 4px; }
-.wf-capture-row select {
-  flex-shrink: 0; width: auto; max-width: none; font-size: var(--text-sm); font-weight: 600; color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 8%, var(--card)); border: 1px solid var(--border); border-radius: 8px;
-  padding: 8px 10px; min-height: 38px;
-}
-.wf-capture-row input {
-  flex: 1; min-width: 0; max-width: none; font-size: var(--text-base);
-  background: var(--card); color: var(--text); border: 1px solid var(--border); border-radius: 8px;
-  padding: 8px 10px; min-height: 38px;
-}
-.wf-capture-row input:focus, .wf-capture-row select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-.wf-capture-add {
-  flex-shrink: 0; font: inherit; font-size: var(--text-sm); font-weight: 700; color: var(--on-fill);
-  background: var(--accent); border: none; border-radius: 8px; padding: 8px 16px; min-height: 38px; cursor: pointer;
-}
-.wf-capture-add:disabled { opacity: .5; cursor: default; }
-
-/* AI가 분류한 초안 — 문구가 주인공이다: 문구를 먼저 크게, 고르는 것들은 그 아래 작고 옅게.
-   종류는 카드 왼쪽 띠 색으로도 구분한다(아래 "이 회의에서 나온 것"의 종류 칩과 같은 색: 할 일 파랑 · 확인 대기 주황 · 결정 회색) */
-.wf-when { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0 0; }
-.wf-when .wf-link { padding: 0; min-height: 0; }
-.wf-draft { --tc: var(--accent); position: relative; background: var(--card); border: 1px solid var(--border); border-left: 3px solid var(--tc); border-radius: var(--radius); padding: 12px 44px 12px 16px; margin: 0 0 10px; box-shadow: var(--shadow); }
-.wf-when + .wf-draft { margin-top: 22px; }
-.wf-draft[data-type="check"] { --tc: var(--warn); }
-.wf-draft[data-type="decision"] { --tc: var(--muted); }
-/* 문구 입력칸: 평소엔 글처럼 보이고, 마우스를 올리거나 누르면 입력칸으로 보인다(터치 화면은 처음부터 테두리) */
-.wf-dialog textarea.wf-draft-text {
-  display: block; box-sizing: border-box; width: calc(100% + 16px); max-width: none; min-height: 0; resize: none; overflow: hidden;
-  margin: 0 -8px; padding: 6px 8px; font: inherit; font-size: var(--text-lg); font-weight: 500; line-height: 1.6; color: var(--text);
-  background: transparent; border: 1px solid transparent; border-radius: 8px;
-}
-.wf-dialog textarea.wf-draft-text:hover { border-color: var(--border); }
-.wf-dialog textarea.wf-draft-text:focus { background: var(--bg); border-color: var(--accent); }
-@media (hover: none) { .wf-dialog textarea.wf-draft-text { border-color: var(--border); } }
-.wf-draft-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
-/* 알약 버튼 규칙(:not 두 개)보다 우선하도록 같은 명시도로 뒤에 둔다 */
-.wf-dialog .wf-draft button.wf-draft-dismiss:not(.wf-main) { position: absolute; top: 8px; right: 8px; flex-shrink: 0; background: none; color: var(--muted); padding: 6px 10px; }
-.wf-dialog .wf-draft button.wf-draft-dismiss:not(.wf-main):hover { background: none; color: var(--urgent); }
-/* 카드 안의 고르는 것들은 문구보다 작고 옅게 */
-.wf-draft .wf-seg { padding: 2px; border-radius: 8px; }
-.wf-dialog .wf-draft .wf-seg button.wf-seg-btn:not(.wf-main):not(.wf-row > .wf-main) { min-height: 26px; padding: 3px 10px; font-size: var(--text-xs); }
-
-/* 날짜 칸 — 비어 있으면 점선 "+ 마감일", 값이 있으면 날짜 입력과 지우기 */
-.wf-date-slot { display: inline-flex; align-items: center; }
-.wf-datefield { display: inline-flex; align-items: center; gap: 2px; }
-.wf-dialog .wf-date-slot button.wf-date-add:not(.wf-main):not(.wf-row > .wf-main) { color: var(--muted); background: none; border: 1px dashed var(--border); border-radius: 999px; padding: 4px 11px; font-weight: 600; white-space: nowrap; }
-.wf-dialog .wf-date-slot button.wf-date-add:not(.wf-main):not(.wf-row > .wf-main):hover { color: var(--accent); background: none; border-color: var(--accent); }
-.wf-dialog .wf-date-slot button.wf-date-clear:not(.wf-main):not(.wf-row > .wf-main) { flex-shrink: 0; color: var(--muted); background: none; padding: 4px 8px; font-size: var(--text-xs); white-space: nowrap; }
-.wf-dialog .wf-date-slot button.wf-date-clear:not(.wf-main):not(.wf-row > .wf-main):hover { color: var(--urgent); background: none; }
-.wf-dialog .wf-date-slot input.wf-date-input { width: auto; max-width: none; min-height: 32px; padding: 3px 8px; font-size: var(--text-sm); font-weight: 600; }
-
-/* 종류 세 칸 버튼 — 고른 칸만 카드 색으로 떠오른다 */
-.wf-seg { display: inline-flex; flex-shrink: 0; gap: 2px; padding: 3px; border-radius: 10px; background: color-mix(in srgb, var(--muted) 14%, var(--bg)); }
-.wf-dialog .wf-seg button.wf-seg-btn:not(.wf-main):not(.wf-row > .wf-main) { font: inherit; font-size: var(--text-sm); font-weight: 600; color: var(--muted); background: none; border-radius: 8px; padding: 5px 12px; min-height: 30px; }
-.wf-dialog .wf-seg button.wf-seg-btn:not(.wf-main):not(.wf-row > .wf-main):hover { background: color-mix(in srgb, var(--card) 55%, transparent); color: var(--text); }
-.wf-dialog .wf-seg button.wf-seg-btn[aria-checked="true"]:not(.wf-main):not(.wf-row > .wf-main) { background: var(--card); color: var(--accent); box-shadow: 0 1px 2px rgba(15, 23, 42, .14); }
-
-/* 주 버튼 — 이 창에서 가장 중요한 동작(담기)만 파랑으로 채운다 */
-.wf-dialog button.wf-primary:not(.wf-main):not(.wf-row > .wf-main) { color: var(--on-fill); background: var(--accent); font-size: var(--text-base); font-weight: 700; border-radius: 10px; padding: 10px 20px; }
-.wf-dialog button.wf-primary:not(.wf-main):not(.wf-row > .wf-main):hover { color: var(--on-fill); background: color-mix(in srgb, var(--accent) 86%, black); }
-/* 초안을 담은 직후 결과: 어디로 갔는지, 되돌리기, 다음 검토 */
-.wf-result { display: grid; gap: 10px; border: 1px solid color-mix(in srgb, var(--success) 40%, var(--border)); background: color-mix(in srgb, var(--success) 8%, var(--card)); border-radius: var(--radius); padding: 12px 16px; margin: 14px 0 6px; }
-.wf-result-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; }
-.wf-result-title { font-size: var(--text-md); color: var(--success); }
-.wf-result-counts { flex: 1; min-width: 0; font-size: var(--text-sm); font-weight: 600; color: var(--muted); }
-.wf-result-task { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.wf-result-task-text { flex: 1; min-width: 0; font-size: var(--text-sm); font-weight: 500; overflow-wrap: anywhere; }
-.wf-result-note { font-size: var(--text-xs); font-weight: 600; color: var(--muted); white-space: nowrap; }
-.wf-result-next { font-size: var(--text-sm); }
-/* 다음 검토는 글자 링크로 조용히 — 결과 카드에서 가장 무거운 요소가 되지 않게 */
-.wf-dialog .wf-result button.wf-result-link:not(.wf-main):not(.wf-row > .wf-main) { background: none; border-radius: 0; padding: 0; color: var(--accent); font-size: var(--text-sm); font-weight: 600; text-align: left; }
-.wf-dialog .wf-result button.wf-result-link:not(.wf-main):not(.wf-row > .wf-main):hover { background: none; color: var(--accent); text-decoration: underline; }
-.wf-dialog .wf-result button.wf-result-up:not(.wf-main):not(.wf-row > .wf-main), .wf-dialog .wf-result button.wf-result-undo:not(.wf-main):not(.wf-row > .wf-main) { flex-shrink: 0; padding: 4px 12px; font-size: var(--text-xs); }
-.wf-seg[hidden] { display: none; }
-/* 담기 줄은 스크롤해도 창 아래에 붙어 있다 */
-.wf-draft-actions { position: sticky; bottom: -24px; z-index: 1; justify-content: space-between; margin: 12px -24px 0; padding: 12px 24px; background: var(--bg); border-top: 1px solid var(--border); }
-.wf-draft-summary { font-size: var(--text-sm); font-weight: 600; color: var(--muted); }
-
 .wf-dialog :focus-visible, .wf-link:focus-visible, .wf-project-entry:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 @media(max-width:600px) {
   .wf-dialog { padding: 16px; }
-  .wf-dialog button, .wf-dialog input, .wf-dialog select, .wf-fields button, .wf-link, .wf-capture-add { min-height: 44px; }
-  .wf-capture-row { flex-wrap: wrap; }
-  .wf-dialog .wf-seg button.wf-seg-btn:not(.wf-main):not(.wf-row > .wf-main) { min-height: 38px; padding: 6px 12px; }
+  .wf-dialog button, .wf-dialog input, .wf-dialog select, .wf-fields button, .wf-link { min-height: 44px; }
   .wf-row > .wf-main.wf-mrow { grid-template-columns: 42px minmax(0, 1fr); }
   .wf-row.wf-irow > .wf-main { grid-template-columns: 56px minmax(0, 1fr); }
   .wf-item-meta { grid-column: 2; }
-  .wf-capture-row .wf-capture-add { order: 1; margin-left: auto; }
-  .wf-capture-row .wf-capture-date { order: 1; }
-  .wf-capture-row input { order: 2; flex: 1 1 100%; }
   .wf-mchips { grid-column: 2; justify-content: flex-start; }
-  .wf-draft-actions { bottom: -16px; margin: 12px -16px 0; padding: 12px 16px; }
-  .wf-dialog button.wf-primary:not(.wf-main):not(.wf-row > .wf-main) { min-height: 44px; }
 }
