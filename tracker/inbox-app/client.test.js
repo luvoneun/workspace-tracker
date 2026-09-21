@@ -5,8 +5,12 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 // Exercise error paths against the actual client functions, without touching live data.
+// app.js는 "정의부"와 "화면을 실제로 켜는 실행 코드"로 나뉘고, 그 경계에 표식 주석이 있다.
+// 구조가 바뀌어도 표식만 지키면 이 테스트는 그대로 돈다.
+const DEFINITIONS_MARKER = '// ---- client.test.js는 이 줄 위까지만';
 const script = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
-const definitions = script.slice(0, script.indexOf("setupQuickAdd('todayTaskInput'"));
+if (!script.includes(DEFINITIONS_MARKER)) throw new Error('app.js에서 테스트가 자르는 표식을 찾지 못했습니다: ' + DEFINITIONS_MARKER);
+const definitions = script.slice(0, script.indexOf(DEFINITIONS_MARKER));
 function element() {
   const attributes = new Map();
   return {
@@ -151,6 +155,37 @@ test('group select options offer clearing only when there is something to clear'
   assert.doesNotMatch(current.rest.join(''), /value="jira:AB-1" selected/);
   assert.match(current.rest.join(''), /&lt;b&gt;x&lt;\/b&gt;/, 'group names are escaped');
   assert.match(current.rest.at(-1), /__custom__/);
+});
+
+test('dates read as "9월 22일 (화)", without the year', () => {
+  const app = pureClient();
+  const ko = value => app.run(`uiKoDate(${JSON.stringify(value)})`);
+  assert.equal(ko('2026-09-22'), '9월 22일 (화)');
+  assert.equal(ko('2026-01-05'), '1월 5일 (월)');
+  assert.equal(ko(''), '');
+  assert.equal(ko('없음'), '없음', 'a value that is not a date is left alone');
+});
+
+test('deadline wording is the same everywhere, and a far deadline is left off a today row', () => {
+  const app = pureClient();
+  const due = (code, where) => JSON.parse(app.run(`JSON.stringify(uiDueText(${code}, ${JSON.stringify(where)}))`));
+  assert.match(due("'2000-01-01'", 'full').text, /^\d+일 지남$/);
+  assert.equal(due("'2000-01-01'", 'full').tone, 'urgent');
+  assert.deepEqual(due('todayStr()', 'full'), { text: '오늘까지', tone: 'warn' });
+  assert.deepEqual(due('tomorrowStr()', 'full'), { text: '내일까지', tone: '' });
+  assert.match(due("'2999-12-31'", 'full').text, /^12월 31일 \(.\)까지$/);
+  assert.equal(due("'2999-12-31'", 'full').tone, '');
+  assert.equal(due("'2999-12-31'", 'row'), null, 'a far deadline is not printed on a today row');
+  assert.equal(due('null', 'full'), null, 'no deadline prints nothing');
+});
+
+test('a task carried over says since when, and says nothing on the day it was planned for', () => {
+  const app = pureClient();
+  const carry = code => app.run(`uiCarryText(${code})`);
+  assert.equal(carry('todayStr()'), null);
+  assert.equal(carry('tomorrowStr()'), null);
+  assert.equal(carry('null'), null);
+  assert.match(carry("'2000-01-01'"), /^\d+일 전부터$/);
 });
 
 // 회의 모아보기·회의 정리의 판단 로직(workflows.js)은 app.js와 같은 전역 공간에서 돈다.

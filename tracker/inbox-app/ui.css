@@ -1,0 +1,372 @@
+/* 워크스페이스 화면의 토큰과 공용 부품.
+   색·간격·반경·그림자는 전부 여기 토큰으로만 적고, 컴포넌트 규칙에는 색 값을 직접 쓰지 않는다.
+   index.html의 <style>에 남아 있는 옛 컴포넌트 규칙은 아래 "옛 이름" 블록 덕분에 그대로 돈다. */
+
+:root {
+  color-scheme: light dark;
+
+  /* 면 */
+  --bg: #f8fafc;
+  --rail: #f1f4f9;
+  --rail-hover: #e8edf4;
+  --surface: #ffffff;
+  --field: #ffffff;
+  --hover: #f4f6f9;
+  --border: #e2e5ea;
+  --hair: #edeff3;
+
+  /* 글자 */
+  --text: #18181b;
+  --muted: #52525b;
+  --dim: #5b6270;
+
+  /* 선택·행동 */
+  --accent: #2563eb;       /* 채움·밑줄·체크박스·포커스 외곽선 */
+  --accent-text: #1d54d0;  /* 파란 "글자"(링크·선택된 항목·칩) — 대비를 맞춘 값 */
+  --accent-soft: rgba(37, 99, 235, 0.09);
+  --on-fill: #ffffff;
+
+  /* 의미 색 — 항상 문구와 함께 글자색으로만 쓴다 */
+  --urgent: #b82e2e;
+  --warn: #8f5200;
+  --success: #237a4b;
+  --mark: #ffe7a3;
+
+  --scrim: rgba(15, 23, 42, 0.14);
+  --shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --pop: 0 16px 40px rgba(15, 23, 42, 0.16), 0 2px 8px rgba(15, 23, 42, 0.06);
+
+  /* 모양·치수 */
+  --r: 12px;
+  --r-sm: 8px;
+  --r-xs: 6px;
+  --pad: 12px;
+  --row: 36px;
+  --grp: 28px;
+  --hdr: 48px;
+  --wp: 92px;
+  --wm: 164px;
+  --ease: cubic-bezier(0.22, 0.8, 0.3, 1);
+  --font: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", "Noto Sans KR", "Malgun Gothic", "Segoe UI", sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111318;
+    --rail: #16191f;
+    --rail-hover: #1e232b;
+    --surface: #1b1f27;
+    --field: #151920;
+    --hover: #232832;
+    --border: #303640;
+    --hair: #262b33;
+    --text: #f3f4f6;
+    --muted: #aaaab2;
+    --dim: #9a9aa4;
+    --accent: #7aa2ff;
+    --accent-text: #7aa2ff;
+    --accent-soft: rgba(122, 162, 255, 0.16);
+    --on-fill: #0b1020;
+    --urgent: #ff9292;
+    --warn: #ffc46b;
+    --success: #74d69a;
+    --mark: rgba(255, 196, 107, 0.3);
+    --scrim: rgba(0, 0, 0, 0.5);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --pop: 0 16px 40px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #111318;
+  --rail: #16191f;
+  --rail-hover: #1e232b;
+  --surface: #1b1f27;
+  --field: #151920;
+  --hover: #232832;
+  --border: #303640;
+  --hair: #262b33;
+  --text: #f3f4f6;
+  --muted: #aaaab2;
+  --dim: #9a9aa4;
+  --accent: #7aa2ff;
+  --accent-text: #7aa2ff;
+  --accent-soft: rgba(122, 162, 255, 0.16);
+  --on-fill: #0b1020;
+  --urgent: #ff9292;
+  --warn: #ffc46b;
+  --success: #74d69a;
+  --mark: rgba(255, 196, 107, 0.3);
+  --scrim: rgba(0, 0, 0, 0.5);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --pop: 0 16px 40px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* ---------- 옛 이름(alias) — 아직 남아 있는 옛 컴포넌트 CSS가 그대로 돌게 한다.
+   화면이 전부 새 모양이 되는 마지막 배치에서 옛 CSS와 함께 지운다. ---------- */
+:root {
+  --card: var(--surface);
+  --done-bg: var(--hover);
+  --radius: var(--r);
+  --radius-sm: var(--r-sm);
+  --ease-out: var(--ease);
+  --text-xs: 11.5px;
+  --text-sm: 12px;
+  --text-base: 13px;
+  --text-md: 14px;
+  --text-lg: 15px;
+}
+
+/* ---------- 리셋·타이포 ---------- */
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.45;
+  word-break: keep-all; /* 한글은 단어 중간이 아니라 띄어쓰기에서 줄을 바꾼다 */
+  overflow-wrap: break-word;
+  overscroll-behavior-y: contain;
+  accent-color: var(--accent);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection { background: var(--accent-soft); color: var(--text); }
+.num { font-variant-numeric: tabular-nums; }
+.k-neg { color: var(--urgent); }
+.k-warn { color: var(--warn); }
+.k-pos { color: var(--success); }
+.k-mute { color: var(--muted); font-weight: 400; }
+
+.d-i { width: 14px; height: 14px; display: block; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.icon { width: 1em; height: 1em; display: block; flex-shrink: 0; }
+.d-dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: currentColor; margin-right: 5px; vertical-align: 1px; flex: none; }
+
+.sr-only-focusable:focus { position: static; }
+
+/* ---------- 버튼 세 등급 ---------- */
+.d-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  height: 28px; padding: 0 8px; border: 0; border-radius: var(--r-xs);
+  background: none; color: var(--muted);
+  font-family: inherit; font-size: 12px; font-weight: 500; white-space: nowrap;
+  cursor: pointer;
+  transition: background 130ms var(--ease), color 130ms var(--ease);
+}
+.d-btn:hover { background: var(--hover); color: var(--text); }
+.d-btn:disabled { color: var(--dim); cursor: default; }
+.d-btn:disabled:hover { background: none; color: var(--dim); }
+.d-btn.sm { padding: 0 7px; font-size: 11.5px; }
+
+.d-btn.pri {
+  height: 32px; padding: 0 14px; border-radius: var(--r-sm);
+  background: var(--accent); color: var(--on-fill); font-size: 13px; font-weight: 600;
+  transition: filter 130ms var(--ease);
+}
+.d-btn.pri:hover { background: var(--accent); color: var(--on-fill); filter: brightness(1.07); }
+.d-btn.pri:disabled { filter: none; opacity: 0.6; }
+
+.d-btn.dng { color: var(--muted); }
+.d-btn.dng:hover, .d-btn.dng:focus-visible { background: var(--hover); color: var(--urgent); }
+
+.d-link {
+  border: 0; background: none; padding: 0; cursor: pointer;
+  font-family: inherit; font-size: 12px; font-weight: 500;
+  color: var(--accent-text); border-radius: 4px;
+}
+.d-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+.d-iconbtn {
+  width: 28px; height: 28px; display: grid; place-items: center; flex: none;
+  border: 0; border-radius: var(--r-xs); background: none; color: var(--muted);
+  cursor: pointer; padding: 0;
+  transition: background 130ms var(--ease), color 130ms var(--ease), transform 400ms var(--ease);
+}
+.d-iconbtn:hover { background: var(--hover); color: var(--text); }
+.d-iconbtn.sm { width: 24px; height: 24px; }
+.d-iconbtn.spinning { transform: rotate(360deg); color: var(--accent); }
+
+/* 세그먼트 — 보기 전환 전용. 동작 버튼과 모양이 달라야 한다. */
+.d-seg { display: inline-flex; padding: 2px; gap: 2px; background: var(--hover); border-radius: var(--r-sm); }
+.d-seg button {
+  height: 26px; padding: 0 12px; border: 0; border-radius: var(--r-xs); background: none;
+  font-family: inherit; font-size: 12px; font-weight: 500; color: var(--muted); cursor: pointer;
+}
+.d-seg button:hover { color: var(--text); }
+.d-seg button[aria-pressed="true"] { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: var(--shadow); }
+
+/* 옛 화면에 남아 있는 `button:active { transform: scale(.98) }`가 새 부품에는 걸리지 않게 한다 */
+.d-btn:active, .d-tab:active, .d-iconbtn:active, .d-srch:active, .d-link:active, .d-seg button:active { transform: none; }
+
+/* ---------- 포커스 ---------- */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 4px; }
+
+.skip-link {
+  position: absolute; left: 12px; top: -48px; z-index: 70;
+  padding: 10px 14px; border-radius: var(--r-sm);
+  background: var(--accent); color: var(--on-fill);
+  font-size: var(--text-md); font-weight: 600; text-decoration: none;
+}
+.skip-link:focus { top: 12px; }
+#todayTaskZone:focus { outline: none; }
+
+/* ---------- 움직임 ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* ---------- 헤더 (48px 한 줄) ---------- */
+.d-hdr {
+  position: sticky; top: 0; z-index: 30;
+  height: var(--hdr); display: flex; align-items: center; gap: 14px;
+  padding: 0 14px 0 20px;
+  background: var(--bg); border-bottom: 1px solid var(--border);
+}
+.d-brand { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; }
+.d-datewrap { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.d-date { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* 자동 갱신이 멈춘 것만 조용히 알린다 */
+.d-warn {
+  display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 6px;
+  border-radius: var(--r-xs); color: var(--warn);
+  font-size: 12px; font-weight: 500; white-space: nowrap; cursor: help;
+}
+.d-warn .d-dot { width: 5px; height: 5px; margin: 0; }
+
+.d-tabs { display: flex; align-items: stretch; height: var(--hdr); margin-left: 10px; margin-right: auto; gap: 2px; min-width: 0; }
+.d-tab {
+  position: relative; padding: 0 10px; border: 0; background: none; cursor: pointer;
+  font-family: inherit; font-size: 13px; font-weight: 500; color: var(--muted); white-space: nowrap;
+  transition: color 130ms var(--ease);
+}
+.d-tab:hover { color: var(--text); }
+.d-tab[aria-selected="true"] { color: var(--accent-text); font-weight: 600; }
+.d-tab[aria-selected="true"]::after {
+  content: ''; position: absolute; left: 8px; right: 8px; bottom: -1px;
+  height: 2px; background: var(--accent); border-radius: 2px;
+}
+.d-tabdot { display: none; position: absolute; top: 10px; right: 2px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.d-tab.has-new .d-tabdot { display: block; }
+
+.d-srch {
+  display: flex; align-items: center; gap: 8px; flex: none;
+  height: 30px; padding: 0 10px;
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  background: var(--surface); color: var(--muted);
+  font-family: inherit; font-size: 12px; cursor: pointer;
+  transition: color 130ms var(--ease), border-color 130ms var(--ease);
+}
+.d-srch:hover { color: var(--text); border-color: var(--dim); }
+.d-srch kbd { font: inherit; font-size: 11px; font-weight: 500; color: var(--dim); letter-spacing: 0.02em; }
+
+.d-gear { position: relative; }
+.d-baddot { display: none; position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--urgent); box-shadow: 0 0 0 2px var(--bg); }
+.d-gear.has-alert .d-baddot { display: block; }
+
+/* ---------- 페이지 ---------- */
+.page { max-width: 1240px; margin: 0 auto; padding: 16px 20px 48px; }
+.pull-indicator { display: grid; place-items: center; }
+
+/* ---------- 복구 필요 배너 (헤더 아래 전체 폭 띠, 스스로 사라지지 않는다) ---------- */
+.d-banner {
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px;
+  padding: 10px 20px;
+  background: color-mix(in srgb, var(--urgent) 8%, var(--bg));
+  border-bottom: 1px solid var(--border);
+  color: var(--urgent); font-size: 13px;
+}
+.d-bnote { color: var(--muted); font-size: 11.5px; }
+
+/* ---------- 알림(toast) ---------- */
+.d-toast {
+  position: fixed; left: 24px; bottom: 24px; z-index: 70;
+  max-width: calc(100% - 48px);
+  display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px;
+  padding: 9px 10px 9px 14px;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--r-sm); box-shadow: var(--pop);
+  font-size: 13px;
+  animation: d-rise 140ms var(--ease);
+}
+.d-toast.error { border-color: var(--urgent); }
+.d-toast .d-btn { flex-shrink: 0; }
+.d-tnote { font-size: 11.5px; color: var(--muted); flex-shrink: 0; }
+@keyframes d-rise { from { transform: translateY(6px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* ---------- 더보기 메뉴 (한 벌) ---------- */
+.d-menulist {
+  position: fixed; left: 0; top: 0; z-index: 75;
+  width: 304px; max-width: calc(100vw - 24px);
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 4px; text-align: left;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-sm); box-shadow: var(--pop);
+  animation: d-pop 120ms var(--ease);
+}
+@keyframes d-pop { from { transform: translateY(-6px); opacity: 0; } to { transform: none; opacity: 1; } }
+.d-mitem {
+  display: flex; align-items: center; width: 100%; height: 32px; padding: 0 10px;
+  border: 0; border-radius: var(--r-xs); background: none; color: var(--text);
+  font-family: inherit; font-size: 13px; font-weight: 500; text-align: left; cursor: pointer;
+}
+.d-mitem:hover { background: var(--hover); }
+.d-mitem:disabled { color: var(--muted); cursor: default; }
+.d-mitem:disabled:hover { background: none; }
+.d-mitem.dng { color: var(--muted); }
+.d-mitem.dng:hover, .d-mitem.dng:focus-visible { background: var(--hover); color: var(--urgent); }
+.d-msep { display: block; height: 1px; background: var(--hair); margin: 4px 2px; }
+.d-mfield { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 2px 8px; flex-wrap: wrap; }
+.d-mfield > .ml { font-size: 11.5px; color: var(--muted); flex: none; min-width: 52px; white-space: nowrap; }
+.d-mfield > .mc { display: flex; gap: 4px; flex: 1; min-width: 0; justify-content: flex-end; align-items: center; }
+
+/* ---------- 날짜 칸 ---------- */
+.d-datefield { display: inline-flex; align-items: center; gap: 4px; }
+.d-dateinput {
+  height: 26px; min-width: 0; padding: 0 6px;
+  border: 1px solid var(--border); border-radius: var(--r-xs);
+  background: var(--field); color: var(--text);
+  font-family: inherit; font-size: 12px;
+}
+.d-dateinput:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.d-datenone { font-size: 12px; color: var(--dim); }
+
+/* ---------- 레일 한 줄 요약 ---------- */
+.d-quiet {
+  display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+  padding: 2px 2px 8px;
+  font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 반응형 ---------- */
+@media (max-width: 900px) {
+  .page { padding: 14px 16px 80px; }
+}
+@media (max-width: 640px) {
+  .d-hdr { padding: 0 12px 0 16px; gap: 10px; }
+  .d-brand { display: none; }
+  .d-tabs { margin-left: 0; overflow-x: auto; }
+  .d-srch span { display: none; }
+  .d-srch kbd { display: none; }
+}
+@media (max-width: 520px) {
+  .page { padding: 12px 16px 36px; }
+  .d-banner { padding: 10px 16px; }
+  .d-toast { left: 16px; right: 16px; bottom: 16px; max-width: none; }
+}
+
+/* ---------- 스크롤바 (유일하게 토큰 밖 색을 쓰는 곳) ---------- */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: #cbd0d8; border-radius: 8px; border: 3px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-track { background: transparent; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) ::-webkit-scrollbar-thumb { background: #3a4150; background-clip: content-box; border: 3px solid transparent; }
+}
+:root[data-theme="dark"] ::-webkit-scrollbar-thumb { background: #3a4150; background-clip: content-box; border: 3px solid transparent; }

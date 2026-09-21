@@ -1,3 +1,212 @@
+// ---------- D 공용 부품 ----------
+// 화면 여러 곳이 같이 쓰는 것들(아이콘·날짜 문구·더보기 메뉴·날짜 칸·Esc 순서).
+// 전부 "불릴 때만" DOM을 만든다 — 정의부만 읽어 검증하는 client.test.js에는 진짜 DOM이 없다.
+
+// 14px 인라인 SVG 한 벌. 선은 currentColor라 글자색을 그대로 물려받는다(이모지·글리프는 쓰지 않는다).
+const UI_ICONS = {
+  search: '<circle cx="7" cy="7" r="4.25"/><path d="M10.2 10.2 14 14"/>',
+  more: '<circle cx="8" cy="3.2" r="1.05"/><circle cx="8" cy="8" r="1.05"/><circle cx="8" cy="12.8" r="1.05"/>',
+  close: '<path d="M4 4l8 8M12 4l-8 8"/>',
+  plus: '<path d="M8 3.2v9.6M3.2 8h9.6"/>',
+  check: '<path d="M3.5 8.4 6.6 11.5 12.5 4.9"/>',
+  chevron: '<path d="M6 3.5 10.5 8 6 12.5"/>',
+  link: '<path d="M6.9 9.1a2.6 2.6 0 0 0 3.7 0l2-2a2.6 2.6 0 0 0-3.7-3.7l-.6.6"/><path d="M9.1 6.9a2.6 2.6 0 0 0-3.7 0l-2 2a2.6 2.6 0 0 0 3.7 3.7l.6-.6"/>',
+  refresh: '<path d="M14 8a6 6 0 1 1-2-4.47L14 5.2"/><path d="M14 2v3.4h-3.4"/>',
+  gear: '<path d="M2 4.6h12M2 11.4h12"/><circle cx="6" cy="4.6" r="1.9"/><circle cx="10.4" cy="11.4" r="1.9"/>',
+};
+function uiIcon(name) {
+  const shape = UI_ICONS[name];
+  return shape ? `<svg class="d-i" viewBox="0 0 16 16" aria-hidden="true">${shape}</svg>` : '';
+}
+
+const UI_WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
+// 2026-09-22 → "9월 22일 (화)". 날짜는 어디서나 이 꼴로만 쓰고 연도는 붙이지 않는다.
+function uiKoDate(dateStr) {
+  if (!dateStr) return '';
+  const [, month, day] = String(dateStr).split('-');
+  if (!month || !day) return String(dateStr);
+  const weekday = UI_WEEKDAYS[new Date(dateStr + 'T00:00:00').getDay()];
+  return `${Number(month)}월 ${Number(day)}일${weekday ? ` (${weekday})` : ''}`;
+}
+
+// 기한 말투는 어디서나 같다: `2일 지남`(urgent) `오늘까지`(warn) `내일까지` `9월 27일까지`.
+// where가 'row'면 오늘 목록의 한 줄 — 먼 기한은 찍지 않는다(의미 없는 값은 자리를 비운다).
+function uiDueText(due, where = 'full') {
+  if (!due) return null;
+  const diff = diffDays(due);
+  if (Number.isNaN(diff)) return null;
+  if (diff < 0) return { text: `${-diff}일 지남`, tone: 'urgent' };
+  if (diff === 0) return { text: '오늘까지', tone: 'warn' };
+  if (diff === 1) return { text: '내일까지', tone: '' };
+  if (where === 'row') return null;
+  return { text: `${uiKoDate(due)}까지`, tone: '' };
+}
+
+// 오늘 목록에 언제부터 밀려 있는지: `어제부터` / `3일 전부터`
+function uiCarryText(scheduled) {
+  if (!scheduled) return null;
+  const diff = diffDays(scheduled);
+  if (Number.isNaN(diff) || diff >= 0) return null;
+  return diff === -1 ? '어제부터' : `${-diff}일 전부터`;
+}
+
+// Esc는 가장 위에 열린 것부터 하나씩 닫는다(설정 → 메뉴 → 검색 → 회의 → 상세 → 서랍).
+// 여는 쪽이 escPush로 "닫는 방법"을 올려 두고, 닫을 때 escDrop으로 내린다.
+const escStack = [];
+function escPush(close) { escStack.push(close); return close; }
+function escDrop(close) {
+  const index = escStack.lastIndexOf(close);
+  if (index >= 0) escStack.splice(index, 1);
+}
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape' || event.isComposing || !escStack.length) return;
+  event.preventDefault();
+  // 스택에 열린 것이 있으면 아래쪽(옛) Esc 처리는 돌지 않는다.
+  if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+  escStack.pop()();
+});
+
+// ⌘K(윈도는 Ctrl+K)로 검색 — 입력칸 안에서도 되고, 한글을 조합하는 중에는 넘어간다.
+document.addEventListener('keydown', (event) => {
+  if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
+  if (event.isComposing || String(event.key).toLowerCase() !== 'k') return;
+  event.preventDefault();
+  document.getElementById('searchEntryBtn')?.click();
+});
+
+// 한 벌뿐인 더보기 메뉴. 한 번에 하나만 열리고, 아래 자리가 없으면 위로 뒤집힌다.
+// sections는 [[항목…], [항목…]] — 묶음 사이에 구분선이 들어간다.
+// 항목은 { label, onClick, danger, disabled } 또는 값을 바꾸는 { field, control }.
+let uiMenuOpen = null;
+function uiMenuClose() {
+  if (!uiMenuOpen) return;
+  const { list, anchor, onEsc } = uiMenuOpen;
+  uiMenuOpen = null;
+  escDrop(onEsc);
+  list.remove();
+  anchor.setAttribute('aria-expanded', 'false');
+}
+function uiMenu(anchor, sections) {
+  const sameButton = uiMenuOpen && uiMenuOpen.anchor === anchor;
+  uiMenuClose();
+  if (sameButton) return null;
+
+  const list = document.createElement('div');
+  list.className = 'd-menulist';
+  list.setAttribute('role', 'menu');
+  list.addEventListener('click', event => event.stopPropagation());
+  list.addEventListener('keydown', (event) => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    const focusable = [...list.querySelectorAll('button:not([disabled]), input, select')];
+    if (!focusable.length) return;
+    event.preventDefault();
+    const step = event.key === 'ArrowDown' ? 1 : -1;
+    const at = focusable.indexOf(document.activeElement);
+    focusable[(at + step + focusable.length) % focusable.length].focus();
+  });
+
+  sections.filter(section => section && section.length).forEach((section, index) => {
+    if (index) {
+      const separator = document.createElement('div');
+      separator.className = 'd-msep';
+      list.appendChild(separator);
+    }
+    section.forEach((entry) => {
+      if (!entry) return;
+      if (entry.field !== undefined) {
+        const row = document.createElement('div');
+        row.className = 'd-mfield';
+        const label = document.createElement('span');
+        label.className = 'ml';
+        label.textContent = entry.field;
+        const slot = document.createElement('span');
+        slot.className = 'mc';
+        if (entry.control) slot.appendChild(entry.control);
+        row.append(label, slot);
+        list.appendChild(row);
+        return;
+      }
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'd-mitem' + (entry.danger ? ' dng' : '');
+      item.setAttribute('role', 'menuitem');
+      item.textContent = entry.label;
+      if (entry.disabled) item.disabled = true;
+      item.addEventListener('click', () => { uiMenuClose(); entry.onClick(); });
+      list.appendChild(item);
+    });
+  });
+
+  document.body.appendChild(list);
+  const button = anchor.getBoundingClientRect();
+  const size = list.getBoundingClientRect();
+  const left = Math.max(8, Math.min(button.right - size.width, window.innerWidth - size.width - 8));
+  const below = button.bottom + 4;
+  const top = below + size.height > window.innerHeight - 8
+    ? Math.max(8, button.top - 4 - size.height)
+    : below;
+  list.style.left = `${Math.round(left)}px`;
+  list.style.top = `${Math.round(top)}px`;
+
+  anchor.setAttribute('aria-haspopup', 'true');
+  anchor.setAttribute('aria-expanded', 'true');
+  const onEsc = () => { uiMenuClose(); anchor.focus(); };
+  escPush(onEsc);
+  uiMenuOpen = { list, anchor, onEsc };
+  list.querySelector('button:not([disabled]), input, select')?.focus();
+  return list;
+}
+document.addEventListener('click', (event) => {
+  if (uiMenuOpen && !uiMenuOpen.anchor.contains(event.target)) uiMenuClose();
+});
+
+// 날짜 칸 한 벌. 비어 있으면 `+ 기한`, 누르면 그 자리에서 고르고 ✕로 지운다.
+function uiDateField({ value, label = '기한', onChange, clearable = true }) {
+  const wrap = document.createElement('span');
+  wrap.className = 'd-datefield';
+  let current = value || '';
+  let editing = false;
+
+  const draw = () => {
+    wrap.replaceChildren();
+    if (!current && !editing) {
+      const open = document.createElement('button');
+      open.type = 'button';
+      open.className = 'd-btn sm';
+      open.textContent = `+ ${label}`;
+      open.addEventListener('click', () => { editing = true; draw(); });
+      wrap.appendChild(open);
+      return;
+    }
+    const input = document.createElement('input');
+    input.type = 'date';
+    input.className = 'd-dateinput';
+    input.value = current;
+    input.setAttribute('aria-label', label);
+    input.addEventListener('change', () => {
+      current = input.value;
+      editing = false;
+      onChange(current || null);
+      draw();
+    });
+    wrap.appendChild(input);
+    if (current && clearable) {
+      const clear = document.createElement('button');
+      clear.type = 'button';
+      clear.className = 'd-iconbtn sm';
+      clear.setAttribute('aria-label', `${label} 지우기`);
+      clear.innerHTML = uiIcon('close');
+      clear.addEventListener('click', () => { current = ''; editing = false; onChange(null); draw(); });
+      wrap.appendChild(clear);
+    }
+    if (editing) input.focus();
+  };
+  draw();
+  return wrap;
+}
+
+// ---------- 화면 상태 ----------
+
 let jiraIssuesCache = [];
 // 결정 카드마다 지라 목록을 처음부터 훑지 않도록, 목록을 받을 때 키로 한 번만 색인해 둔다.
 let jiraIssuesByKey = new Map();
@@ -24,14 +233,14 @@ function showNotice(message, error = false, retry = null, action = null) {
   region.textContent = message;
   if (!error && !undoReplaying && Date.now() - lastUndoRecordedAt < 3000) {
     const hint = document.createElement('span');
-    hint.className = 'notice-hint';
+    hint.className = 'd-tnote';
     hint.textContent = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform) ? '⌘Z로 되돌리기' : 'Ctrl+Z로 되돌리기';
     region.appendChild(hint);
   }
   if (lastRemovedId && !error) {
     const undo = document.createElement('button');
     undo.type = 'button';
-    undo.className = 'convert-btn';
+    undo.className = 'd-btn sm';
     undo.textContent = '삭제 실행 취소';
     undo.addEventListener('click', async () => {
       const id = lastRemovedId;
@@ -48,7 +257,7 @@ function showNotice(message, error = false, retry = null, action = null) {
   if (retry) {
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = 'convert-btn';
+    button.className = 'd-btn sm';
     button.textContent = '다시 시도';
     button.addEventListener('click', retry);
     region.appendChild(button);
@@ -56,14 +265,14 @@ function showNotice(message, error = false, retry = null, action = null) {
   if (action) {
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = 'convert-btn';
+    button.className = 'd-btn sm';
     button.textContent = action.label;
     button.addEventListener('click', () => action.onClick(button));
     region.appendChild(button);
   }
   const dismiss = document.createElement('button');
   dismiss.type = 'button';
-  dismiss.className = 'notice-dismiss';
+  dismiss.className = 'd-btn sm';
   dismiss.textContent = '닫기';
   dismiss.addEventListener('click', () => { region.hidden = true; });
   region.appendChild(dismiss);
@@ -79,7 +288,7 @@ function renderStorageBanner(storage) {
   banner.textContent = storage.recoveryNeeded ? STORAGE_BANNER_TEXT : '';
   if (storage.recoveryNeeded && storage.reason) {
     const hint = document.createElement('span');
-    hint.className = 'notice-hint';
+    hint.className = 'd-bnote';
     hint.textContent = `원인: ${storage.reason}`;
     banner.appendChild(hint);
   }
@@ -293,7 +502,11 @@ function renderDateBar(data) {
     document.title = data.title;
   }
   const bar = document.getElementById('dateBar');
-  bar.innerHTML = `<span class="date-chip">${formatKoreanDate(data.today)}</span>`;
+  bar.replaceChildren();
+  const date = document.createElement('span');
+  date.className = 'd-date';
+  date.textContent = uiKoDate(data.today);
+  bar.appendChild(date);
 
   // 자동 갱신이 실패해도 화면엔 낡은 자료가 그대로 보이므로, 낡았을 때만 알린다
   // used === false 는 "이 회사에선 안 쓰는 도구" — 경고할 일이 아니다
@@ -306,15 +519,20 @@ function renderDateBar(data) {
   if (jira.used !== false && jira.stale) stale.push({ name: '지라', lastSync: jira.lastSync });
 
   stale.forEach(source => {
-    const chip = document.createElement('span');
-    chip.className = 'sync-chip';
+    const warn = document.createElement('span');
+    warn.className = 'd-warn';
+    const dot = document.createElement('i');
+    dot.className = 'd-dot';
+    dot.setAttribute('aria-hidden', 'true');
+    const label = document.createElement('span');
     const days = source.lastSync ? -diffDays(source.lastSync) : null;
     const age = days === null ? '동기화 안 됨' : days === 1 ? '어제 기준' : `${days}일 전 기준`;
-    chip.textContent = `${source.name} ${age}`;
-    chip.title = source.lastSync
+    label.textContent = `${source.name} ${age}`;
+    warn.append(dot, label);
+    warn.title = source.lastSync
       ? `${source.name} 자동 갱신이 ${source.lastSync} 이후 멈춰 있습니다. 목록이 최신이 아닐 수 있어요.`
       : `${source.name}를 아직 한 번도 가져오지 못했습니다.`;
-    bar.appendChild(chip);
+    bar.appendChild(warn);
   });
 }
 
@@ -432,12 +650,6 @@ function renderSuggestions(suggestions) {
 
     list.appendChild(row);
   });
-}
-
-function formatKoreanDate(dateStr) {
-  const [, m, d] = dateStr.split('-');
-  const weekday = ['일', '월', '화', '수', '목', '금', '토'][new Date(dateStr + 'T00:00:00').getDay()];
-  return `${Number(m)}월 ${Number(d)}일 <span class="dow">(${weekday})</span>`;
 }
 
 function relativeDate(dateStr) {
@@ -2073,6 +2285,7 @@ function setupQuickAdd(inputId, endpoint, announceText) {
   });
 }
 
+// ---- client.test.js는 이 줄 위까지만 읽는다 (아래는 화면을 실제로 켜는 실행 코드) ----
 setupQuickAdd('todayTaskInput', '/api/today-task/create', '오늘 할 일 추가함');
 setupQuickAdd('laterTaskInput', '/api/later-task/create', '나중에 할 일 추가함');
 setupQuickAdd('waitingInput', '/api/waiting/create', '확인 대기 추가함');

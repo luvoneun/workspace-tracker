@@ -27,6 +27,11 @@ test('static server denies implementation and private state files', async () => 
   assert.equal((await fetch(base+'/server.js')).status,404);
   assert.equal((await fetch(base+'/.weekly_report_state.json')).status,404);
 });
+test('the screen stylesheet is served', async () => {
+  const response = await fetch(base + '/ui.css');
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') || '', /text\/css/);
+});
 test('cross-origin mutations are rejected',async()=>{
   const response=await fetch(base+'/api/track/toggle',{method:'POST',headers:{'Content-Type':'application/json',Origin:'https://untrusted.example'},body:JSON.stringify({id:'legacy'})});
   assert.equal(response.status,403);
