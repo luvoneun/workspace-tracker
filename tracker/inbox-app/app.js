@@ -1731,6 +1731,9 @@ function renderActiveTabLists() {
   }
 }
 
+// 그날의 첫 자동 갱신(캘린더 9:13 · 지라 9:17 · 슬랙 9시대)이 끝났을 시각.
+const SYNC_FIRST_RUN_BY = '09:30';
+
 function renderDateBar(data) {
   if (data.title) {
     document.getElementById('workspaceTitle').textContent = data.title;
@@ -1745,34 +1748,45 @@ function renderDateBar(data) {
 
   // 자동 갱신이 실패해도 화면엔 낡은 자료가 그대로 보이므로, 낡았을 때만 알린다
   // used === false 는 "이 회사에선 안 쓰는 도구" — 경고할 일이 아니다
-  const stale = [];
+  const found = [];
   const slack = data.slackSync || {};
-  if (slack.used !== false && slack.stale) stale.push({ key: 'slack', name: '슬랙 캡처', lastSync: slack.lastSync });
+  if (slack.used !== false && slack.stale) found.push({ key: 'slack', name: '슬랙 캡처', lastSync: slack.lastSync, error: !!slack.error });
   const cal = data.calendar || {};
-  if (cal.used !== false && (cal.stale || !cal.lastSync)) stale.push({ key: 'calendar', name: '캘린더', lastSync: cal.lastSync });
+  if (cal.used !== false && (cal.stale || !cal.lastSync)) found.push({ key: 'calendar', name: '캘린더', lastSync: cal.lastSync });
   const jira = data.jiraSync || {};
-  if (jira.used !== false && jira.stale) stale.push({ key: 'jira', name: '지라', lastSync: jira.lastSync });
+  if (jira.used !== false && jira.stale) found.push({ key: 'jira', name: '지라', lastSync: jira.lastSync });
 
-  stale.forEach(source => {
-    // 누르면 설정의 `상태`가 열리고 그 자동화 줄이 밝혀진다 — "무슨 일인지"까지 한 번에.
-    const warn = document.createElement('button');
-    warn.type = 'button';
-    warn.className = 'd-warn';
-    const dot = document.createElement('i');
-    dot.className = 'd-dot';
-    dot.setAttribute('aria-hidden', 'true');
-    const label = document.createElement('span');
+  const ageOf = (source) => {
     const days = source.lastSync ? -diffDays(source.lastSync) : null;
-    const age = days === null ? '동기화 안 됨' : days === 1 ? '어제 기준' : `${days}일 전 기준`;
-    label.textContent = `${source.name} ${age}`;
-    warn.append(dot, label);
-    warn.title = source.lastSync
-      ? `${source.name} 자동 갱신이 ${source.lastSync} 이후 멈춰 있어요. 목록이 최신이 아닐 수 있어요. 누르면 자세한 상태를 볼 수 있어요.`
-      : `${source.name}를 아직 한 번도 가져오지 못했어요. 누르면 자세한 상태를 볼 수 있어요.`;
-    warn.setAttribute('aria-label', `${source.name} ${age} — 자동화 상태 보기`);
-    warn.addEventListener('click', () => settingsOpen('status', source.key));
-    bar.appendChild(warn);
-  });
+    return { days, text: days === null ? '동기화 안 됨' : days === 1 ? '어제 기준' : `${days}일 전 기준` };
+  };
+  // 자동 갱신은 아침 9시대에 그날 처음 돈다. 그 전(자정~아침)의 `어제 기준`은 고장이 아니라 아직
+  // 돌 차례가 아닌 것이라 알리지 않는다 — 오류가 있었거나 이틀 넘게 멈춘 것은 그대로 알린다.
+  const beforeFirstRun = nowHHMM() < SYNC_FIRST_RUN_BY;
+  const stale = found.filter(source => !(beforeFirstRun && !source.error && ageOf(source).days === 1));
+  if (!stale.length) return;
+
+  const titleOf = source => (source.lastSync
+    ? `${source.name} 자동 갱신이 ${source.lastSync} 이후 멈춰 있어요.`
+    : `${source.name}를 아직 한 번도 가져오지 못했어요.`);
+  // 경고는 늘 한 칸이다 — 여러 개가 한꺼번에 낡으면 칸이 늘어나 탭을 밀어냈다. 둘 이상이면 하나로 묶는다.
+  const ages = stale.map(source => ageOf(source).text);
+  const text = stale.length === 1 ? `${stale[0].name} ${ages[0]}`
+    : `자동 갱신 ${stale.length}개 ${ages.every(age => age === ages[0]) ? ages[0] : '확인 필요'}`;
+  // 누르면 설정의 `상태`가 열리고 그 자동화 줄이 밝혀진다 — "무슨 일인지"까지 한 번에.
+  const warn = document.createElement('button');
+  warn.type = 'button';
+  warn.className = 'd-warn';
+  const dot = document.createElement('i');
+  dot.className = 'd-dot';
+  dot.setAttribute('aria-hidden', 'true');
+  const label = document.createElement('span');
+  label.textContent = text;
+  warn.append(dot, label);
+  warn.title = `${stale.map(titleOf).join(' ')} 목록이 최신이 아닐 수 있어요. 누르면 자세한 상태를 볼 수 있어요.`;
+  warn.setAttribute('aria-label', `${text} — 자동화 상태 보기`);
+  warn.addEventListener('click', () => settingsOpen('status', stale[0].key));
+  bar.appendChild(warn);
 }
 
 // 지금 진행 중인 회의만 시각을 진하게 적는다(HH:MM 비교).

@@ -2458,3 +2458,22 @@ test('버튼 옆 조용한 기록은 오늘 성공한 실행이 있을 때만 �
   app.run(`meetingNotesApply({ used: true, state: 'done', lastRunAt: '${meetingNotesDay(-1)} 14:20:05', lastKind: 'run' })`);
   assert.equal(app.run('meetingNotesLastText()'), '', '어제 것은 적지 않는다');
 });
+// 날짜 옆의 낡음 경고는 늘 한 칸이다 — 여러 개가 한꺼번에 낡으면 칸이 늘어나 탭을 밀어냈다.
+test('renderDateBar: 낡음 경고는 한 칸으로 묶이고, 아침 첫 자동 갱신 전의 `어제 기준`은 알리지 않는다', () => {
+  const app = pureClient();
+  const warns = (clock, data) => app.run(`(() => {
+    nowHHMM = () => '${clock}';
+    document.getElementById('dateBar').replaceChildren();
+    renderDateBar(${JSON.stringify(data)});
+    return document.getElementById('dateBar').children.filter(node => node.className === 'd-warn').map(node => node.children[1].textContent);
+  })()`);
+  const today = app.run('todayStr()');
+  const ago = days => app.run(`(() => { const d = new Date(); d.setDate(d.getDate() - ${days}); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); })()`);
+  const allYesterday = { today, slackSync: { stale: true, lastSync: ago(1) }, calendar: { stale: true, lastSync: ago(1) }, jiraSync: { stale: true, lastSync: ago(1) } };
+  assert.deepEqual(warns('00:31', allYesterday), [], '자정~아침에는 아직 돌 차례가 아니다');
+  assert.deepEqual(warns('10:00', allYesterday), ['자동 갱신 3개 어제 기준'], '셋이 낡아도 한 칸');
+  assert.deepEqual(warns('10:00', { today, calendar: { stale: true, lastSync: ago(1) }, slackSync: { stale: false, lastSync: today }, jiraSync: { stale: false, lastSync: today } }), ['캘린더 어제 기준']);
+  assert.deepEqual(warns('08:00', { today, calendar: { stale: false, lastSync: today }, slackSync: { stale: false, lastSync: today }, jiraSync: { stale: true, lastSync: ago(3) } }), ['지라 3일 전 기준'], '이틀 넘게 멈춘 것은 아침에도 알린다');
+  assert.deepEqual(warns('08:00', { today, calendar: { stale: false, lastSync: today }, jiraSync: { stale: false, lastSync: today }, slackSync: { stale: true, lastSync: ago(1), error: '실패' } }), ['슬랙 캡처 어제 기준'], '오류가 있었으면 아침에도 알린다');
+  assert.deepEqual(warns('10:00', { today, calendar: { stale: true, lastSync: null }, slackSync: { stale: false, lastSync: today }, jiraSync: { stale: true, lastSync: ago(2) } }), ['자동 갱신 2개 확인 필요']);
+});
