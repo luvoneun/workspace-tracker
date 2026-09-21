@@ -172,7 +172,7 @@
 .rp-add.is-multi { height: auto; min-height: 48px; }
 /* `나중에 할 일에도 추가` 토글 — 입력줄 바로 아래의 조용한 한 줄 */
 .rp-addfoot { display: flex; align-items: center; gap: 8px; padding: 2px 14px 0; }
-.rp-also { height: 26px; font-size: 12.5px; }
+.rp-also { height: 28px; font-size: 12.5px; }
 
 /* 프로젝트 소제목 — 이름 + (다음 주 계획에서만) 그 자리 `+ 추가` */
 .rp-pj { display: flex; align-items: baseline; gap: 8px; }
