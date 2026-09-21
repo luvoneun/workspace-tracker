@@ -20,9 +20,12 @@ const REPORT_PLAN_HEADING = '다음 주 계획';
 const REPORT_NO_PROJECT_LABEL = '그룹 없음';
 const REPORT_NO_PROJECT = '프로젝트 없음';
 // 화면에 적는 프로젝트 이름. 저장 값·서버가 준 값은 그대로 두고 보이는 말만 앱 용어로 옮긴다.
+// 지라 키(`키 · 요약`)는 여기서도 뗀다(BKEY 결정) — 슬랙 복사(reportSlackProjectLabel)와 같은 규칙,
+// 정규식은 REPORT_JIRA_LABEL 하나뿐이다.
 const reportProjectText = (name) => {
   const value = String(name ?? '').trim();
-  return !value || value === REPORT_NO_PROJECT_LABEL ? REPORT_NO_PROJECT : value;
+  if (!value || value === REPORT_NO_PROJECT_LABEL) return REPORT_NO_PROJECT;
+  return typeof reportSlackProjectLabel === 'function' ? reportSlackProjectLabel(value) : value;
 };
 // 서버가 프로젝트 없이 담은 계획 문장의 그룹 이름(`report-drafts.js`의 add 기본값).
 const REPORT_PLAN_NO_PROJECT = '직접 작성';
@@ -206,7 +209,8 @@ function reportSlackModel(report, options = {}) {
 // 슬랙에 나가는 구역 제목은 `[완료]` `[진행중]` `[예정]` 꼴이다(사용자가 올리는 글의 모양). 구역을 고르는
 // 칩과 저장된 선택은 이름 그대로(`진행 중`)를 쓴다 — 바뀌는 것은 나가는 글자뿐이다.
 // 슬랙으로 나가는 글에는 지라 키를 싣지 않는다(`PAY-77 · 요약` → `요약`). 요약을 모르는 이슈는 키밖에 이름이 없어 그대로 나간다.
-// 묶기는 원래 이름으로 하고(키가 다르면 다른 프로젝트다) 나가는 글자만 바꾼다. 화면의 소제목은 그대로 `키 · 요약`이다.
+// 묶기는 원래 이름으로 하고(키가 다르면 다른 프로젝트다) 나가는 글자만 바꾼다. 화면의 소제목도 이제 요약만이다
+// (BKEY 결정, reportProjectText가 같은 규칙을 쓴다) — 저장되는 이름은 그대로 `키 · 요약`이다.
 const REPORT_JIRA_LABEL = /^([A-Z][A-Z0-9]*-\d+) · (.+)$/;
 function reportSlackProjectLabel(name) {
   const match = REPORT_JIRA_LABEL.exec(String(name || ''));
@@ -216,6 +220,24 @@ function reportSlackProjectLabel(name) {
 function reportProjectColorKey(name) {
   const match = REPORT_JIRA_LABEL.exec(String(name || ''));
   return match ? match[1] : name;
+}
+// 그룹 제목 자리(문서 소제목·전체 업무 기록·다음 주 계획)에서만 쓰는 도구 둘.
+// 같은 요약을 가진 지라 이름이 한 목록에 둘 이상이면 그때만 원래 이름(`키 · 요약`)을 남겨 구분한다.
+// 저장되는 이름은 그대로 두고 화면 표기만 정한다 — REPORT_JIRA_LABEL 하나로 판단한다(BKEY 결정).
+function reportGroupTitles(names) {
+  const labels = names.map(name => reportProjectText(name));
+  const counts = new Map();
+  labels.forEach(label => counts.set(label, (counts.get(label) || 0) + 1));
+  return new Map(names.map((name, i) => {
+    const label = labels[i];
+    const dupe = REPORT_JIRA_LABEL.test(String(name || '')) && counts.get(label) > 1;
+    return [name, dupe ? name : label];
+  }));
+}
+// 고르는 목록에서만 앞뒤를 바꾼다(`요약 · 키`) — 저장되는 값(옵션의 value)은 그대로 원래 이름이다.
+function reportPickerLabel(name) {
+  const match = REPORT_JIRA_LABEL.exec(String(name || ''));
+  return match ? `${match[2]} · ${match[1]}` : name;
 }
 function reportSlackSectionLabel(name) {
   return `[${name === '진행 중' ? '진행중' : name}]`;
@@ -750,12 +772,15 @@ function reportPlanProjectNames() {
   return names;
 }
 
+// 고르는 목록이라 옵션 글자만 `요약 · 키`로 바꾸고(BKEY 결정, 정렬도 그 글자 기준), 저장되는 값
+// (option.value)은 그대로 원래 이름이다 — 이전에 저장된 문장의 프로젝트와 같은 꼴로 묶이게 한다.
 function reportPlanProjectPicker() {
   const pick = reportNode('select', undefined, 'd-msel rp-pick');
   pick.setAttribute('aria-label', '다음 주 계획 프로젝트');
   const names = reportPlanProjectNames();
   if (reportPlanGroup && !names.includes(reportPlanGroup)) names.unshift(reportPlanGroup);
-  for (const [value, text] of [['', REPORT_NO_PROJECT], ...names.map(name => [name, name])]) {
+  const sorted = [...names].sort((a, b) => reportPickerLabel(a).localeCompare(reportPickerLabel(b)));
+  for (const [value, text] of [['', REPORT_NO_PROJECT], ...sorted.map(name => [name, reportPickerLabel(name)])]) {
     const option = reportNode('option', text);
     option.value = value;
     if (value === reportPlanGroup) option.selected = true;
@@ -776,7 +801,9 @@ function reportPlanRegroupPicker(item, row) {
   const names = reportPlanProjectNames();
   // 지금 붙어 있는 이름이 목록에 없으면(프로젝트가 비었거나 이름이 바뀐 뒤) 그 이름을 맨 앞에 남긴다.
   if (!none && !names.includes(current)) names.unshift(current);
-  for (const [value, text] of [['', REPORT_NO_PROJECT], ...names.map(name => [name, name])]) {
+  // 옵션 글자만 `요약 · 키`로 바꾼다(BKEY 결정) — 저장되는 값은 그대로 원래 이름이다.
+  const sorted = [...names].sort((a, b) => reportPickerLabel(a).localeCompare(reportPickerLabel(b)));
+  for (const [value, text] of [['', REPORT_NO_PROJECT], ...sorted.map(name => [name, reportPickerLabel(name)])]) {
     const option = reportNode('option', text);
     option.value = value;
     if (none ? value === '' : value === current) option.selected = true;
@@ -889,8 +916,9 @@ function reportPlanCandidateRow(item, task, groupName, claimed) {
 function reportPlanCandidateList(item, host, tasks, claimed) {
   host.replaceChildren();
   const groups = typeof uiGroupTasks === 'function' ? uiGroupTasks(tasks) : [['__misc__', tasks]];
+  const labels = typeof uiGroupLabels === 'function' ? uiGroupLabels(groups.map(([key]) => key)) : new Map();
   for (const [key, groupTasks] of groups) {
-    const label = typeof uiGroupLabel === 'function' ? uiGroupLabel(key) : REPORT_NO_PROJECT;
+    const label = labels.get(key) || REPORT_NO_PROJECT;
     // 오늘 목록의 그룹 제목과 같은 말투(색 점 + 이름 + 개수) — 프로젝트가 한 덩어리로 뭉쳐 보이지 않게.
     const head = reportNode('div', undefined, 'rp-candpj');
     if (key !== '__misc__' && typeof uiProjectDot === 'function') head.appendChild(uiProjectDot(key));
@@ -1139,12 +1167,15 @@ function reportPlanSection(item, host, newIds) {
   const rows = reportPlanRows(item.draft.rows);
   const current = reportPlanIsCurrentWeek(item.weekKey);
   host.appendChild(reportNode('div', REPORT_PLAN_HEADING, 'rp-h'));
-  reportPlanGroups(rows).forEach((group, index) => {
+  const groups = reportPlanGroups(rows);
+  const titles = reportGroupTitles(groups.filter(group => group.name).map(group => group.name));
+  groups.forEach((group, index) => {
     // 프로젝트를 고르지 않은 문장에는 소제목이 없다 — 앞 묶음에 딸려 보이지 않게 자리만 띄운다.
     if (group.name) {
-      // 소제목의 `+ 추가`는 그 프로젝트의 입력줄을 그 자리에서 연다(이번 주만).
+      // 소제목의 `+ 추가`는 그 프로젝트의 입력줄을 그 자리에서 연다(이번 주만). 저장되는 값은 원래
+      // 이름 그대로고, 소제목에 보이는 글자만 titles가 정한다.
       const addRow = current ? reportPlanGroupAddRow(item, group.name) : null;
-      host.appendChild(reportPlanProjectHead(group.name, addRow ? () => {
+      host.appendChild(reportPlanProjectHead(titles.get(group.name), addRow ? () => {
         addRow.hidden = false;
         addRow.querySelector('input, textarea')?.focus();
       } : null));
@@ -1226,8 +1257,9 @@ function reportRecordsView(item, host) {
     return;
   }
   const list = reportNode('div', undefined, 'rp-recs');
+  const titles = reportGroupTitles(groups.map(group => group.name));
   for (const group of groups) {
-    list.appendChild(uiGroupHeading(group.name, group.entries.length,
+    list.appendChild(uiGroupHeading(titles.get(group.name), group.entries.length,
       group.name === REPORT_NO_PROJECT ? {} : { projectName: reportProjectColorKey(group.name) }));
     for (const { source, row } of group.entries) {
       const line = reportNode('div', undefined, 'rp-rec');
@@ -1375,8 +1407,9 @@ function renderReportDraft(item) {
     if (!sections.length) body.appendChild(reportNode('div', '이번 주 기록이 생기면 여기에 나타나요.', 'rp-hint'));
     for (const section of sections) {
       body.appendChild(reportNode('div', section.heading, 'rp-h'));
+      const titles = reportGroupTitles(section.groups.map(group => group.group));
       for (const group of section.groups) {
-        body.appendChild(reportNode('div', reportProjectText(group.group), 'rp-pj'));
+        body.appendChild(reportNode('div', titles.get(group.group), 'rp-pj'));
         for (const row of group.rows) reportSentenceRow(item, row, { host: body, newIds });
       }
     }

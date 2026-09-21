@@ -264,16 +264,20 @@ function uiTone(tone) {
 
 // 프로젝트 이름을 만드는 단 하나의 규칙. 지라면 이슈를 찾아 이름을 짓고(모르면 키만),
 // 그 밖은 그룹/프로젝트 이름 그대로다.
-// short(줄 안에 조용히 붙는 짧은 표기 — 제목 뒤·확인 대기 급한 순·새로 들어온 것·회의 줄·팔레트 결과)면
-// 지라는 **요약만** 보여 준다(모르면 키). 긴 자리(그룹 제목·확인 대기 프로젝트별 소제목·프로젝트 탭·
-// 프로젝트 고르기·주간요약 소제목·슬랙 복사)는 지금처럼 `KEY · 요약` 그대로 쓴다(uiGroupLabel이 이미 이 규칙).
+// 기본(옵션 없음)은 **요약만**이다(모르면 키) — 목록·그룹 제목·프로젝트 탭·주간요약·팔레트 등 바깥
+// 화면은 전부 이 기본을 쓴다. 키가 꼭 필요한 두 자리만 opts로 청한다:
+// opts.withKey — 상세 카드의 값·title 툴팁처럼 `키 · 요약`을 그대로 보여줘야 하는 자리(BKEY 결정).
+// opts.picker — 프로젝트를 고르는 목록의 `요약 · 키`(고르는 순간은 어느 티켓인지 확인하는 자리라 키를
+// 남기되, 눈이 먼저 가는 앞자리는 요약이다).
 function uiProjectName(item, opts = {}) {
   if (!item) return '';
   if (item.jira) {
     const issue = jiraIssuesByKey.get(item.jira);
     const summary = issue ? issue.summary : '';
     if (!summary) return item.jira;
-    return opts.short ? summary : `${item.jira} · ${summary}`;
+    if (opts.withKey) return `${item.jira} · ${summary}`;
+    if (opts.picker) return `${summary} · ${item.jira}`;
+    return summary;
   }
   return item.group || item.project || '';
 }
@@ -287,7 +291,7 @@ function uiProjectColorKey(item) {
 // 행의 프로젝트 이름. 그룹 제목이 이미 그 프로젝트를 말해 주면 비운다.
 function uiProjectLabel(item, grouped) {
   if (grouped) return '';
-  return uiProjectName(item, { short: true });
+  return uiProjectName(item);
 }
 
 // 줄 오른쪽의 글자 셀: 상태(밀림 · N일째 진행 중 · 답변) → 기한(맨 오른쪽, 달력). **날짜 성격의 말만** 선다.
@@ -389,10 +393,10 @@ function uiProjectDot(name) {
 // 색 점은 표기와 무관하게 원래 키로 고른다(uiProjectColorKey). opts.lead === false면(줄 맨 앞에
 // 오는 확인 대기 급한 순처럼) 앞머리의 `· `를 붙이지 않는다.
 function uiInlineProject(item, opts = {}) {
-  const short = uiProjectName(item, { short: true });
+  const short = uiProjectName(item);
   const tag = document.createElement('span');
   tag.className = 'd-inproj';
-  tag.title = uiProjectName(item);
+  tag.title = uiProjectName(item, { withKey: true });
   const lead = opts.lead === false ? [] : ['· '];
   tag.append(...lead, uiProjectDot(uiProjectColorKey(item)), short);
   return tag;
@@ -691,15 +695,29 @@ function uiTaskRow(item, opts = {}) {
   return row;
 }
 
-// 그룹 열쇠(`jira:…` / `group:…` / `__misc__`)를 사람이 읽는 제목으로.
-function uiGroupLabel(key) {
+// 그룹 열쇠(`jira:…` / `group:…` / `__misc__`)를 사람이 읽는 제목으로. 기본은 요약만(모르면 키) —
+// uiProjectName과 같은 규칙이다. opts.withKey면 상세·툴팁 자리처럼 `키 · 요약`(그룹은 차이 없다).
+function uiGroupLabel(key, opts = {}) {
   if (key === '__misc__') return '프로젝트 없음';
-  if (key.startsWith('jira:')) {
-    const jiraKey = key.slice(5);
-    const issue = jiraIssuesByKey.get(jiraKey);
-    return issue ? `${jiraKey} · ${issue.summary}` : jiraKey;
-  }
+  if (key.startsWith('jira:')) return uiProjectName({ jira: key.slice(5) }, opts);
   return key.slice(6);
+}
+
+// 그룹 열쇠 여러 개를 한 번에 제목으로 바꾼다 — 같은 요약을 가진 지라 이슈가 이 목록에 둘 이상이면
+// 그때만 뒤에 키를 붙여 구분한다(`요약 · KEY`). 이 판단은 여기 한 곳에서만 한다.
+function uiGroupLabels(keys) {
+  const counts = new Map();
+  keys.forEach((key) => {
+    const label = uiGroupLabel(key);
+    counts.set(label, (counts.get(label) || 0) + 1);
+  });
+  const map = new Map();
+  keys.forEach((key) => {
+    const label = uiGroupLabel(key);
+    const dupe = key.startsWith('jira:') && counts.get(label) > 1;
+    map.set(key, dupe ? uiGroupLabel(key, { withKey: true }) : label);
+  });
+  return map;
 }
 
 // 프로젝트별로 묶고, 프로젝트 없는 것은 맨 뒤에 둔다.
@@ -1099,6 +1117,8 @@ function renderProjects() {
   if (!rows.some(row => row.key === projectKey)) projectKey = rows.length ? rows[0].key : null;
 
   const { visible: visibleRows, zero: zeroRows, hiddenCount } = projectVisibleRows(rows, { showEmpty: projectShowEmpty, selectedKey: projectKey });
+  // 화면에 보이는 이름은 요약만(같은 요약이 둘 이상이면 그때만 키로 구분) — row.label은 정렬용 원본 그대로 둔다.
+  const labels = uiGroupLabels(visibleRows.map(row => row.key));
 
   listEl.replaceChildren();
   const head = document.createElement('div');
@@ -1116,16 +1136,17 @@ function renderProjects() {
     button.type = 'button';
     button.className = 'd-prow' + (row.open ? '' : ' is-zero');
     button.setAttribute('aria-current', String(row.key === projectKey));
+    const displayLabel = labels.get(row.key);
     const name = document.createElement('span');
     name.className = 'nm';
-    name.textContent = row.label;
-    name.title = row.label;
+    name.textContent = displayLabel;
+    // 눈에 보이는 자리는 요약만, title 툴팁에는 지라 키를 남긴다(BKEY 결정).
+    name.title = uiGroupLabel(row.key, { withKey: true });
     // 완료 글자가 붙는 줄만 두 칸으로 나눈다 — 긴 이름의 말줄임에 글자가 잘려 사라지지 않게.
-    // 자리가 좁아지므로 이 줄은 요약만 적는다(키만 남고 요약이 잘리면 무슨 프로젝트인지 알 수 없다. 전체 이름은 title).
     if (uiJiraDone(row.key)) {
       const label = document.createElement('span');
       label.className = 't';
-      label.textContent = uiProjectName({ jira: row.key.slice('jira:'.length) }, { short: true });
+      label.textContent = displayLabel;
       name.className = 'nm has-tag';
       name.replaceChildren(label, uiJiraDoneTag(true));
     }
@@ -1310,11 +1331,14 @@ function renderProjectDetail(body, row) {
   const items = workflowData.items.filter(item => wfKey(item) === row.key);
   const title = document.createElement('h2');
   title.className = 'd-ptitle';
-  title.textContent = row.label;
+  // 큰 제목은 요약만(BKEY 결정) — 한 프로젝트만 보여 주는 자리라 같은 요약과 헷갈릴 일이 없다.
+  title.textContent = uiGroupLabel(row.key);
   if (uiJiraDone(row.key)) title.appendChild(uiJiraDoneTag());
   const summary = document.createElement('div');
   summary.className = 'd-quiet';
-  summary.textContent = `열린 항목 ${row.open}`;
+  // 그 아래 조용한 줄에만 지라 키를 덧붙인다(`열린 항목 2 · IO-48394`).
+  const jiraKey = row.key.startsWith('jira:') ? row.key.slice('jira:'.length) : '';
+  summary.textContent = `열린 항목 ${row.open}` + (jiraKey ? ` · ${jiraKey}` : '');
   body.append(title, summary);
 
   const tasks = items.filter(item => ['task', 'bug'].includes(item.type));
@@ -1796,8 +1820,8 @@ function renderCalendar(calendar) {
     title.textContent = event.title;
     // 프로젝트 이름은 어디서나 같은 꼴로 적는다(파일에 저장된 `가입_개선`을 `가입 개선`으로).
     // 줄 안의 짧은 표기라 지라는 요약만(모르면 키) — 전체 `KEY · 요약`은 title 툴팁에 남긴다.
-    const projectName = wfMeetingProjectName(event, { short: true });
-    const projectFull = wfMeetingProjectName(event);
+    const projectName = wfMeetingProjectName(event);
+    const projectFull = wfMeetingProjectName(event, { withKey: true });
     title.title = projectName ? `${event.title} · ${projectFull}` : event.title;
     title.setAttribute('aria-label', `${event.title} — 회의 정리`);
     if (projectName) {
@@ -2149,8 +2173,10 @@ function renderRecordColumn(list, items, row, emptyText) {
     list.insertAdjacentHTML('beforeend', `<div class="d-empty">${emptyText}</div>`);
     return;
   }
-  uiGroupTasks(items).forEach(([key, group]) => {
-    list.appendChild(uiGroupHeading(uiGroupLabel(key), group.length,
+  const groups = uiGroupTasks(items);
+  const labels = uiGroupLabels(groups.map(([key]) => key));
+  groups.forEach(([key, group]) => {
+    list.appendChild(uiGroupHeading(labels.get(key), group.length,
       key === '__misc__' ? {} : { projectName: key, onOpenProject: () => openProjectTab(key) }));
     group.forEach(item => list.appendChild(row(item)));
   });
@@ -2158,7 +2184,7 @@ function renderRecordColumn(list, items, row, emptyText) {
 
 // 반영 완료 줄에는 위에 프로젝트 그룹 제목이 없다 — 그 줄만 제목 뒤에 프로젝트를 적는다(지라면 요약, 모르면 키).
 function recordProjectName(item) {
-  return uiProjectName(item, { short: true });
+  return uiProjectName(item);
 }
 
 // 결정·아이디어 줄의 제목 자리: 제목 | (반영 완료면) `· ● 프로젝트` | (showSource면) 조용한 `원문` 링크.
@@ -2825,8 +2851,10 @@ function renderWaiting(items) {
     waitingOrder(items).forEach(item => list.appendChild(renderWaitingRow(item, { showProject: true })));
     return;
   }
-  waitingGroups(items).forEach(([key, group]) => {
-    list.appendChild(uiGroupHeading(uiGroupLabel(key), group.length, {
+  const groups = waitingGroups(items);
+  const labels = uiGroupLabels(groups.map(([key]) => key));
+  groups.forEach(([key, group]) => {
+    list.appendChild(uiGroupHeading(labels.get(key), group.length, {
       projectName: key === '__misc__' ? null : key,
       onOpenProject: key === '__misc__' ? null : () => openProjectTab(key),
     }));
@@ -2948,9 +2976,11 @@ function renderLaterTasks(items) {
     return;
   }
 
-  uiGroupTasks(items).forEach(([key, groupItems]) => {
+  const groups = uiGroupTasks(items);
+  const labels = uiGroupLabels(groups.map(([key]) => key));
+  groups.forEach(([key, groupItems]) => {
     const addRow = uiGroupAddRow(key, '/api/later-task/create', '나중에 할 일에 추가했어요');
-    const heading = uiGroupHeading(uiGroupLabel(key), groupItems.length, {
+    const heading = uiGroupHeading(labels.get(key), groupItems.length, {
       projectName: key === '__misc__' ? null : key,
       onAdd: () => { addRow.hidden = false; addRow.querySelector('input').focus(); },
       onOpenProject: key === '__misc__' ? null : () => openProjectTab(key),
@@ -3731,7 +3761,7 @@ const panelMeetingKey = event => event ? (event.id || `${event.start || ''} ${ev
 function panelMeetingWhen(event) {
   const day = !event.date || event.date === todayStr() ? '오늘' : uiKoDate(event.date);
   const time = `${event.start || ''}${event.end ? `–${event.end}` : ''}`;
-  return [[day, time].filter(Boolean).join(' '), wfMeetingProjectName(event, { short: true })].filter(Boolean).join(' · ');
+  return [[day, time].filter(Boolean).join(' '), wfMeetingProjectName(event)].filter(Boolean).join(' · ');
 }
 
 /* 회의 정리 내용은 한 벌이고 자리만 둘이다:
@@ -4515,7 +4545,8 @@ function meetingsTabFilters(meetings) {
   const keys = new Map();
   meetings.forEach((event) => {
     const key = wfMeetingKey(event);
-    if (key && !keys.has(key)) keys.set(key, wfMeetingProjectName(event));
+    // 프로젝트를 고르는 칸이라 `요약 · 키`(BKEY 결정) — 정렬도 이 표기(요약 기준) 그대로 쓴다.
+    if (key && !keys.has(key)) keys.set(key, wfMeetingProjectName(event, { picker: true }));
   });
   if (!keys.size) return bar;
   const select = document.createElement('select');
@@ -4551,8 +4582,8 @@ function meetingsTabRow(event) {
   title.textContent = event.title;
   wrap.appendChild(title);
   // 줄 안의 짧은 표기라 지라는 요약만(모르면 키) — 색 점은 원래 키로 고른다(표기와 무관하게 같은 색).
-  const projectName = wfMeetingProjectName(event, { short: true });
-  const projectFull = wfMeetingProjectName(event);
+  const projectName = wfMeetingProjectName(event);
+  const projectFull = wfMeetingProjectName(event, { withKey: true });
   if (projectName) {
     const tag = document.createElement('span');
     tag.className = 'pj';
@@ -4974,11 +5005,11 @@ function palResultRow(entry, index, query) {
     title.innerHTML = html;
     title.title = text;
     wrap.appendChild(title);
-    const short = projectItem ? uiProjectName(projectItem, { short: true }) : '';
+    const short = projectItem ? uiProjectName(projectItem) : '';
     if (!short) return;
     const tag = document.createElement('span');
     tag.className = 'pj';
-    tag.title = uiProjectName(projectItem);
+    tag.title = uiProjectName(projectItem, { withKey: true });
     const name = document.createElement('span');
     name.className = 'nm';
     name.textContent = short;
@@ -5383,9 +5414,11 @@ function renderTodayTasks(items) {
       [...active].sort(compareTasks).forEach(item => list.appendChild(uiTaskRow(item, { mode: 'today' })));
     }
   } else {
-    uiGroupTasks(active).forEach(([key, groupItems]) => {
+    const groups = uiGroupTasks(active);
+    const labels = uiGroupLabels(groups.map(([key]) => key));
+    groups.forEach(([key, groupItems]) => {
       const addRow = uiGroupAddRow(key, '/api/today-task/create', '오늘 할 일에 추가했어요');
-      const heading = uiGroupHeading(uiGroupLabel(key), groupItems.length, {
+      const heading = uiGroupHeading(labels.get(key), groupItems.length, {
         projectName: key === '__misc__' ? null : key,
         onAdd: () => { addRow.hidden = false; addRow.querySelector('input').focus(); },
         onOpenProject: key === '__misc__' ? null : () => openProjectTab(key),
@@ -5546,10 +5579,16 @@ function groupSelectOptions(current, forceClearable) {
   const rest = [];
   // `그 밖의 이슈`(extra = 지라에서 완료됐거나 담당이 바뀐 것)는 새로 고를 수 있는 선택지로 내놓지
   // 않는다 — 요약을 보여 주려고 들고 있을 뿐이다. 다만 지금 걸려 있는 값이면 골라진 채로 보여야 한다.
-  rest.push(...jiraIssuesCache.filter(i => !i.extra || (current && current.type === 'jira' && current.value === i.key)).map(i => {
-    const selected = current && current.type === 'jira' && current.value === i.key;
-    return `<option value="jira:${escapeAttr(i.key)}"${selected ? ' selected' : ''}>${escapeHtml(i.key)} · ${escapeHtml(i.summary)}</option>`;
-  }));
+  // 고르는 자리라 `요약 · 키`(BKEY 결정) — 눈이 먼저 가는 앞자리는 요약이고, 정렬도 요약 기준이다.
+  rest.push(...jiraIssuesCache
+    .filter(i => !i.extra || (current && current.type === 'jira' && current.value === i.key))
+    .slice()
+    .sort((a, b) => String(a.summary || a.key).localeCompare(String(b.summary || b.key)))
+    .map(i => {
+      const selected = current && current.type === 'jira' && current.value === i.key;
+      const text = i.summary ? `${i.summary} · ${i.key}` : i.key;
+      return `<option value="jira:${escapeAttr(i.key)}"${selected ? ' selected' : ''}>${escapeHtml(text)}</option>`;
+    }));
   rest.push(...customGroupsCache.map(g => {
     const selected = current && current.type === 'group' && current.value === g;
     return `<option value="group:${escapeAttr(g)}"${selected ? ' selected' : ''}>${escapeHtml(g)}</option>`;
@@ -5645,12 +5684,19 @@ function renderGroupControl({ jira, group, onSetJira, onSetGroup, forceClearable
   }
 
   // 이미 지정된 지라·그룹은 배지로 보이고, 누르면 같은 자리에서 선택 목록으로 바뀐다.
-  const appendBadge = (className, label, current) => {
+  // keyText가 있으면(지라뿐) 요약 뒤에 조용한 회색 글자로 키를 덧붙인다(BKEY 결정 — 상세 카드의 값 표시).
+  const appendBadge = (className, label, current, keyText) => {
     const badge = document.createElement('button');
     badge.type = 'button';
     badge.className = className;
     badge.textContent = label;
-    badge.setAttribute('aria-label', `${label} — 클릭해서 변경/해제`);
+    if (keyText) {
+      const key = document.createElement('span');
+      key.className = 'k-mute';
+      key.textContent = ` ${keyText}`;
+      badge.appendChild(key);
+    }
+    badge.setAttribute('aria-label', `${label}${keyText ? ` ${keyText}` : ''} — 클릭해서 변경/해제`);
     badge.addEventListener('click', (e) => {
       e.stopPropagation();
       const select = buildSelect(current, badge);
@@ -5663,7 +5709,8 @@ function renderGroupControl({ jira, group, onSetJira, onSetGroup, forceClearable
 
   if (jira) {
     const issue = jiraIssuesCache.find(i => i.key === jira);
-    return appendBadge('badge jira-badge', issue ? `${jira} · ${issue.summary}` : jira, { type: 'jira', value: jira });
+    const summary = issue ? issue.summary : '';
+    return appendBadge('badge jira-badge', summary || jira, { type: 'jira', value: jira }, summary ? jira : null);
   }
 
   if (group) return appendBadge('badge group-badge', group, { type: 'group', value: group });

@@ -26,7 +26,7 @@ const wfKey = item => item.jira ? `jira:${item.jira}` : item.group || item.proje
 // 같은 프로젝트가 목록에 두 번 나오지 않게 여기서 한 가지 꼴로 맞춘다.
 const wfGroupName = value => String(value).replace(/_/g, ' ');
 const wfMeetingKey = event => event.project ? `${event.project.type}:${event.project.type === 'group' ? wfGroupName(event.project.value) : event.project.value}` : null;
-// event.project(`{type, value, label}`)를 uiProjectName이 읽는 모양(item)으로 바꾼다 — 짧은/긴 표기와
+// event.project(`{type, value, label}`)를 uiProjectName이 읽는 모양(item)으로 바꾼다 — 표기와
 // 색 점 키를 한 곳(uiProjectName·uiProjectColorKey)에서 잡게 하려는 것이다.
 function wfMeetingProjectItem(event) {
   if (!event || !event.project) return null;
@@ -35,7 +35,8 @@ function wfMeetingProjectItem(event) {
     : { group: wfGroupName(event.project.label || event.project.value || '') };
 }
 // 화면에 적는 이름도 같은 꼴로 맞춘다 — 같은 프로젝트가 자리마다 다른 글자·다른 색 점으로 보이지 않게.
-// opts 없이 부르면(프로젝트 고르기 선택지처럼 긴 자리) `KEY · 요약`, { short: true }면 요약만(모르면 키).
+// opts 없이 부르면 요약만(모르면 키, BKEY 결정) — { withKey: true }면 상세·툴팁의 `키 · 요약`,
+// { picker: true }면 고르는 목록의 `요약 · 키`.
 const wfMeetingProjectName = (event, opts) =>
   (typeof uiProjectName === 'function' ? uiProjectName(wfMeetingProjectItem(event), opts) : '') || '';
 // 색 점은 표기와 무관하게 원래 키로 고른다.

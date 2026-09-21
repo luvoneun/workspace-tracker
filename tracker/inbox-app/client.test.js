@@ -340,15 +340,19 @@ test('waiting age turns to the warning colour from the third day of waiting', ()
   assert.equal(app.run("String(waitingAgeText(null, '2026-09-21'))"), 'null', '등록일이 없으면 아무 말도 하지 않는다');
 });
 
-test('uiProjectName: short spots show only the jira summary (fall back to the key when unknown), long spots keep "KEY · 요약"', () => {
+// BKEY(2026-09-24): 바깥 화면은 기본(옵션 없음)으로 요약만 보여 준다(모르면 키) — 상세·툴팁 자리만
+// { withKey: true }로 `키 · 요약`을 청하고, 고르는 목록만 { picker: true }로 `요약 · 키`를 청한다.
+test('uiProjectName: 기본은 요약만(모르면 키), withKey는 상세·툴팁의 "키 · 요약", picker는 고르기의 "요약 · 키"', () => {
   const app = pureClient();
   app.run("jiraIssuesByKey = new Map([['AB-1', { key: 'AB-1', summary: '가입 개선' }]])");
-  assert.equal(app.run("uiProjectName({ jira: 'AB-1' }, { short: true })"), '가입 개선', 'short form drops the key once the summary is known');
-  assert.equal(app.run("uiProjectName({ jira: 'AB-1' })"), 'AB-1 · 가입 개선', 'long form keeps KEY · 요약');
-  assert.equal(app.run("uiProjectName({ jira: 'ZZ-9' }, { short: true })"), 'ZZ-9', 'falls back to the key when the summary is unknown');
-  assert.equal(app.run("uiProjectName({ jira: 'ZZ-9' })"), 'ZZ-9', 'long form also falls back to the key when unknown');
-  assert.equal(app.run("uiProjectName({ group: '운영툴' }, { short: true })"), '운영툴', 'a plain group has no summary to drop');
-  assert.equal(app.run("uiProjectName({ project: '운영툴' })"), '운영툴', 'an idea\'s project field is read the same way');
+  assert.equal(app.run("uiProjectName({ jira: 'AB-1' })"), '가입 개선', '기본은 요약만');
+  assert.equal(app.run("uiProjectName({ jira: 'AB-1' }, { withKey: true })"), 'AB-1 · 가입 개선', 'withKey는 키 · 요약');
+  assert.equal(app.run("uiProjectName({ jira: 'AB-1' }, { picker: true })"), '가입 개선 · AB-1', 'picker는 요약 · 키');
+  assert.equal(app.run("uiProjectName({ jira: 'ZZ-9' })"), 'ZZ-9', '요약을 모르면 기본도 키 그대로');
+  assert.equal(app.run("uiProjectName({ jira: 'ZZ-9' }, { withKey: true })"), 'ZZ-9', 'withKey도 요약을 모르면 키 그대로');
+  assert.equal(app.run("uiProjectName({ jira: 'ZZ-9' }, { picker: true })"), 'ZZ-9', 'picker도 요약을 모르면 키 그대로');
+  assert.equal(app.run("uiProjectName({ group: '운영툴' })"), '운영툴', '그룹은 요약 개념이 없어 항상 이름 그대로');
+  assert.equal(app.run("uiProjectName({ project: '운영툴' })"), '운영툴', "아이디어의 project 필드도 같은 규칙으로 읽는다");
   assert.equal(app.run('uiProjectName(null)'), '');
   assert.equal(app.run('uiProjectName({})'), '');
 });
@@ -373,10 +377,11 @@ test('the project column stays empty when the group heading already says it, and
   assert.equal(app.run("uiProjectLabel({ group: '운영툴' }, false)"), '운영툴');
 });
 
-test('group headings read as "이름 개수" and jira headings add the summary', () => {
+test('group headings read as "이름 개수"(BKEY: 지라도 요약만, withKey면 키 · 요약)', () => {
   const app = pureClient();
   app.run("jiraIssuesByKey = new Map([['AB-1', { key: 'AB-1', summary: '가입 개선' }]])");
-  assert.equal(app.run("uiGroupLabel('jira:AB-1')"), 'AB-1 · 가입 개선');
+  assert.equal(app.run("uiGroupLabel('jira:AB-1')"), '가입 개선', '기본은 요약만');
+  assert.equal(app.run("uiGroupLabel('jira:AB-1', { withKey: true })"), 'AB-1 · 가입 개선', 'withKey는 키 · 요약');
   assert.equal(app.run("uiGroupLabel('jira:ZZ-9')"), 'ZZ-9', 'falls back to the key when the issue is not cached');
   assert.equal(app.run("uiGroupLabel('group:운영툴')"), '운영툴');
   assert.equal(app.run("uiGroupLabel('__misc__')"), '프로젝트 없음');
@@ -384,9 +389,30 @@ test('group headings read as "이름 개수" and jira headings add the summary',
   assert.deepEqual(order, ['group:나', 'jira:AB-1', '__misc__'], 'tasks without a project go last');
 });
 
-test('group select options offer clearing only when there is something to clear', () => {
+// BKEY: 같은 요약을 가진 지라 이슈가 한 목록에 둘 이상이면 그때만 키로 구분한다.
+test('uiGroupLabels: 같은 요약의 지라가 한 목록에 둘이면 그때만 키로 구분하고, 아니면 요약만', () => {
   const app = pureClient();
-  app.run("jiraIssuesCache = [{ key: 'AB-1', summary: '가입' }]; customGroupsCache = ['운영툴', '<b>x</b>']");
+  app.run(`jiraIssuesByKey = new Map([
+    ['AB-1', { key: 'AB-1', summary: '가입 개선' }],
+    ['CD-2', { key: 'CD-2', summary: '가입 개선' }],
+    ['EF-3', { key: 'EF-3', summary: '정산' }],
+  ])`);
+  const dupes = JSON.parse(app.run(
+    "JSON.stringify([...uiGroupLabels(['jira:AB-1', 'jira:CD-2', 'jira:EF-3', 'group:운영툴'])])"));
+  assert.deepEqual(dupes, [
+    ['jira:AB-1', 'AB-1 · 가입 개선'],
+    ['jira:CD-2', 'CD-2 · 가입 개선'],
+    ['jira:EF-3', '정산'],
+    ['group:운영툴', '운영툴'],
+  ], '겹치는 요약만 키로 구분하고 나머지는 요약만');
+  const alone = JSON.parse(app.run("JSON.stringify([...uiGroupLabels(['jira:AB-1', 'jira:EF-3'])])"));
+  assert.deepEqual(alone, [['jira:AB-1', '가입 개선'], ['jira:EF-3', '정산']], '겹치지 않으면 요약만');
+});
+
+// BKEY: 프로젝트를 고르는 목록은 `요약 · 키`이고, 정렬은 요약 기준이다.
+test('group select options offer clearing only when there is something to clear, and jira options read "요약 · 키" sorted by summary', () => {
+  const app = pureClient();
+  app.run("jiraIssuesCache = [{ key: 'AB-1', summary: '나중 요약' }, { key: 'ZZ-9', summary: '가입' }]; customGroupsCache = ['운영툴', '<b>x</b>']");
   const options = code => JSON.parse(app.run(`JSON.stringify(groupSelectOptions(${code}))`));
   const empty = options('null, false');
   assert.equal(empty.head.length, 1);
@@ -398,6 +424,39 @@ test('group select options offer clearing only when there is something to clear'
   assert.doesNotMatch(current.rest.join(''), /value="jira:AB-1" selected/);
   assert.match(current.rest.join(''), /&lt;b&gt;x&lt;\/b&gt;/, 'group names are escaped');
   assert.match(current.rest.at(-1), /__custom__/);
+  // 지라 옵션은 `요약 · 키`고, 요약 기준으로 정렬된다(값은 그대로 jira:KEY).
+  const jiraOptions = current.rest.filter(html => html.includes('value="jira:'));
+  assert.deepEqual(jiraOptions, [
+    `<option value="jira:ZZ-9">가입 · ZZ-9</option>`,
+    `<option value="jira:AB-1">나중 요약 · AB-1</option>`,
+  ], '요약이 앞, 키가 뒤 — 정렬은 요약(가입 → 나중 요약) 기준');
+});
+
+// BKEY: 항목 상세 카드의 프로젝트 값 — 요약 뒤에 조용한 회색 글자로 키(값 고르개가 닫혀 있을 때의 표시).
+test('renderGroupControl: 지라 값은 요약 뒤에 조용한 키가 붙고, 그룹·모르는 키는 그대로다', () => {
+  const app = pureClient();
+  app.run("jiraIssuesCache = [{ key: 'IO-48394', summary: '게시글 작성하기_게임 임베드' }]; customGroupsCache = []");
+  const badge = app.run(
+    "renderGroupControl({ jira: 'IO-48394', group: null, onSetJira: () => {}, onSetGroup: () => {} }).children[0]");
+  assert.equal(badge.className, 'badge jira-badge');
+  assert.equal(badge.textContent, '게시글 작성하기_게임 임베드', '보이는 자리는 요약만');
+  assert.equal(badge.children.length, 1);
+  assert.equal(badge.children[0].className, 'k-mute');
+  assert.equal(badge.children[0].textContent, ' IO-48394', '요약 뒤에 조용한 회색 글자로 키');
+  assert.equal(badge.getAttribute('aria-label'), '게시글 작성하기_게임 임베드 IO-48394 — 클릭해서 변경/해제');
+
+  // 요약을 모르는 키는 그대로만(조용한 키 span이 없다 — 이미 키뿐이라 덧붙일 것이 없다).
+  const unknown = app.run(
+    "renderGroupControl({ jira: 'ZZ-9', group: null, onSetJira: () => {}, onSetGroup: () => {} }).children[0]");
+  assert.equal(unknown.textContent, 'ZZ-9');
+  assert.equal(unknown.children.length, 0);
+
+  // 그룹은 그대로다(지라 키 같은 것이 없다).
+  const group = app.run(
+    "renderGroupControl({ jira: null, group: '운영툴', onSetJira: () => {}, onSetGroup: () => {} }).children[0]");
+  assert.equal(group.className, 'badge group-badge');
+  assert.equal(group.textContent, '운영툴');
+  assert.equal(group.children.length, 0);
 });
 
 test('dates read as "9월 22일 (화)", without the year', () => {
@@ -474,18 +533,19 @@ function workflowsClient() {
   return app;
 }
 
-test('wfMeetingProjectName: short is jira-summary-only (or the key), long keeps "KEY · 요약"; the color key ignores both', () => {
+test('wfMeetingProjectName: 기본은 요약만(모르면 키), withKey는 "키 · 요약", picker는 "요약 · 키"; 색 점은 셋 다 무관하다', () => {
   const app = workflowsClient();
   app.run("jiraIssuesByKey = new Map([['AB-1', { key: 'AB-1', summary: '가입 개선' }]])");
   const jiraEvent = "{ project: { type: 'jira', value: 'AB-1', label: 'AB-1' } }";
-  assert.equal(app.run(`wfMeetingProjectName(${jiraEvent}, { short: true })`), '가입 개선');
-  assert.equal(app.run(`wfMeetingProjectName(${jiraEvent})`), 'AB-1 · 가입 개선');
+  assert.equal(app.run(`wfMeetingProjectName(${jiraEvent})`), '가입 개선');
+  assert.equal(app.run(`wfMeetingProjectName(${jiraEvent}, { withKey: true })`), 'AB-1 · 가입 개선');
+  assert.equal(app.run(`wfMeetingProjectName(${jiraEvent}, { picker: true })`), '가입 개선 · AB-1');
   assert.equal(app.run(`wfMeetingColorKey(${jiraEvent})`), 'AB-1');
   const unknownJira = "{ project: { type: 'jira', value: 'ZZ-9', label: 'ZZ-9' } }";
-  assert.equal(app.run(`wfMeetingProjectName(${unknownJira}, { short: true })`), 'ZZ-9');
+  assert.equal(app.run(`wfMeetingProjectName(${unknownJira})`), 'ZZ-9');
   const groupEvent = "{ project: { type: 'group', value: '가입_개선', label: '가입_개선' } }";
-  assert.equal(app.run(`wfMeetingProjectName(${groupEvent}, { short: true })`), '가입 개선', '파일 표기(밑줄)를 사람이 읽는 꼴로 맞춘다');
-  assert.equal(app.run(`wfMeetingProjectName(${groupEvent})`), '가입 개선');
+  assert.equal(app.run(`wfMeetingProjectName(${groupEvent})`), '가입 개선', '파일 표기(밑줄)를 사람이 읽는 꼴로 맞춘다');
+  assert.equal(app.run(`wfMeetingProjectName(${groupEvent}, { withKey: true })`), '가입 개선');
   assert.equal(app.run('wfMeetingProjectName(null)'), '');
   assert.equal(app.run('wfMeetingProjectName({})'), '');
 });
@@ -1277,6 +1337,33 @@ test('주간요약 문서는 상태 → 프로젝트 → 문장으로 묶고, �
   assert.equal(app.run("reportProjectText('그룹 없음')"), '프로젝트 없음');
   assert.equal(app.run("reportProjectText('')"), '프로젝트 없음');
   assert.equal(app.run("reportProjectText('결제_리뉴얼')"), '결제_리뉴얼', '프로젝트 이름은 서버가 준 그대로 적는다');
+  // BKEY: 저장된 이름이 `키 · 요약`이어도 화면에는 요약만(슬랙 복사와 같은 규칙).
+  assert.equal(app.run("reportProjectText('PAY-77 · 정산 배치')"), '정산 배치', '지라 키는 화면에서도 뗀다');
+  assert.equal(app.run("reportProjectText('PAY-77')"), 'PAY-77', '요약을 모르는 이슈는 키 그대로');
+});
+
+// BKEY: 문서 소제목·전체 업무 기록·다음 주 계획처럼 그룹 제목이 서는 자리에서만 쓰는 dedup 도구.
+test('reportGroupTitles: 같은 요약의 지라 이름이 한 목록에 둘이면 원래 이름을 남기고, 저장 값은 건드리지 않는다', () => {
+  const app = reportClient();
+  const titles = code => JSON.parse(app.run(`JSON.stringify([...reportGroupTitles(${code})])`));
+  assert.deepEqual(
+    titles(`['PAY-77 · 정산 배치', 'PAY-78 · 정산 배치', '가입 개선']`),
+    [
+      ['PAY-77 · 정산 배치', 'PAY-77 · 정산 배치'],
+      ['PAY-78 · 정산 배치', 'PAY-78 · 정산 배치'],
+      ['가입 개선', '가입 개선'],
+    ], '겹치는 요약만 원래 이름(키 · 요약)으로 남고, 그룹 이름은 원래대로');
+  assert.deepEqual(
+    titles(`['PAY-77 · 정산 배치', '가입 개선']`),
+    [['PAY-77 · 정산 배치', '정산 배치'], ['가입 개선', '가입 개선']], '겹치지 않으면 요약만');
+});
+
+// BKEY: 고르는 목록은 `요약 · 키`(저장되는 값은 그대로).
+test('reportPickerLabel: 고르는 목록의 글자만 "요약 · 키"로 바꾸고 그 밖은 그대로', () => {
+  const app = reportClient();
+  assert.equal(app.run("reportPickerLabel('PAY-77 · 정산 배치')"), '정산 배치 · PAY-77');
+  assert.equal(app.run("reportPickerLabel('가입 개선')"), '가입 개선', '지라 꼴이 아니면 그대로');
+  assert.equal(app.run("reportPickerLabel('PAY-77')"), 'PAY-77', '요약 없이 키만 있으면 그대로');
 });
 
 // 전체 업무 기록: 보고 문서와 같은 프로젝트 차례로 묶고, 프로젝트가 없는 기록만 맨 아래로 내린다.
@@ -1382,6 +1469,26 @@ test('계획 문장의 ⋯에만 프로젝트 바꾸기 고르개가 붙는다',
   assert.deepEqual(sent, [
     { action: 'regroup', id: 'p1', group: '가입 개선' },
     { action: 'regroup', id: 'p1' },
+  ]);
+});
+
+// BKEY: 프로젝트를 고르는 <select>는 옵션 글자만 `요약 · 키`(요약 기준 정렬)이고, 저장되는 값(option.value)은
+// 그대로 원래 이름(`키 · 요약`)이라 예전에 저장된 문장과 같은 프로젝트로 묶인다.
+test('다음 주 계획 프로젝트 고르개(select)는 옵션 글자만 "요약 · 키"이고 값은 그대로다', () => {
+  const app = reportClient();
+  app.run("customGroupsCache = ['운영툴']; jiraIssuesCache = [{ key: 'PAY-77', summary: '정산 배치' }]");
+  const optionsOf = code => JSON.parse(app.run(
+    `JSON.stringify(${code}.children.map(option => [option.value, option.textContent]))`));
+  assert.deepEqual(optionsOf('reportPlanProjectPicker()'), [
+    ['', '프로젝트 없음'],
+    ['운영툴', '운영툴'],
+    ['PAY-77 · 정산 배치', '정산 배치 · PAY-77'],
+  ], '값은 원래 이름 그대로, 글자만 요약 · 키로 바뀌고 요약 기준으로 정렬된다(운영툴 → 정산 배치)');
+  assert.deepEqual(optionsOf(
+    `reportPlanRegroupPicker(${REPORT_ITEM}, { id: 'p1', heading: '다음 주 계획', group: 'PAY-77 · 정산 배치' })`), [
+    ['', '프로젝트 없음'],
+    ['운영툴', '운영툴'],
+    ['PAY-77 · 정산 배치', '정산 배치 · PAY-77'],
   ]);
 });
 
@@ -2046,6 +2153,42 @@ test('프로젝트 탭: 지라에서 완료된 이슈에만 `지라에서 완료
   assert.equal(done.children[0].className, 'd-jdone');
   assert.equal(done.children[0].textContent, '지라에서 완료됨');
   assert.equal(titleOf('jira:AB-1').children.length, 0, '진행 중인 이슈에는 아무것도 붙지 않는다');
+});
+
+// BKEY(2026-09-24): 프로젝트 탭 오른쪽 — 큰 제목은 요약만, 그 아래 조용한 줄에만 지라 키가 붙는다.
+test('renderProjectDetail: 큰 제목은 요약만, 그 아래 줄에만 `열린 항목 N · 키`로 키가 붙는다', () => {
+  const app = workflowsClient();
+  app.run(`jiraIssuesByKey = new Map([['IO-1', { key: 'IO-1', summary: '게시글 작성하기' }]]);
+    workflowData = { items: [], meetings: [] }; wfIndexData(); itemsById = new Map();`);
+  const jira = JSON.parse(app.run(`JSON.stringify((() => {
+    const body = document.createElement('div');
+    renderProjectDetail(body, { key: 'jira:IO-1', label: 'IO-1 · 게시글 작성하기', open: 2 });
+    return [body.children[0].textContent, body.children[1].textContent];
+  })())`));
+  assert.deepEqual(jira, ['게시글 작성하기', '열린 항목 2 · IO-1']);
+  const group = JSON.parse(app.run(`JSON.stringify((() => {
+    const body = document.createElement('div');
+    renderProjectDetail(body, { key: 'group:운영툴', label: '운영툴', open: 3 });
+    return [body.children[0].textContent, body.children[1].textContent];
+  })())`));
+  assert.deepEqual(group, ['운영툴', '열린 항목 3'], '그룹에는 키가 없으니 그대로');
+});
+
+// BKEY: 프로젝트 탭 왼쪽 목록은 요약만 보이고, title 툴팁에는 키가 남는다(색 점은 원래 키로).
+test('renderProjects: 왼쪽 목록은 요약만, title 툴팁엔 키가 남는다', () => {
+  const app = workflowsClient();
+  app.run(`jiraIssuesByKey = new Map([['IO-1', { key: 'IO-1', summary: '게시글 작성하기' }]]);
+    jiraIssuesCache = [...jiraIssuesByKey.values()]; customGroupsCache = [];
+    workflowData = { meetings: [], items: [
+      { id: 't1', type: 'task', status: 'to-do', jira: 'IO-1', label: 'IO-1 · 게시글 작성하기' },
+    ] }; wfIndexData(); itemsById = new Map();
+    projectKey = null; projectOrderKeys = null; projectOrderResort = true; projectShowEmpty = false;
+    renderProjects();`);
+  const list = app.nodes.get('projectList');
+  const row = list.children.find(child => String(child.className || '').startsWith('d-prow'));
+  const name = row.children.find(kid => String(kid.className || '').startsWith('nm'));
+  assert.equal(name.textContent, '게시글 작성하기', '왼쪽 목록은 요약만');
+  assert.equal(name.title, 'IO-1 · 게시글 작성하기', 'title 툴팁에는 키가 남는다');
 });
 
 // ---------- 확인 대기를 체크한 뒤의 `다음은?` 줄 ----------
