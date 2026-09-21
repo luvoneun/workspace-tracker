@@ -491,13 +491,15 @@ function reportDocHead(item, host) {
     seg.appendChild(button);
   }
   head.append(seg, reportNode('span', undefined, 'sp'));
+  // 머리줄의 동작 버튼은 한 묶음이다 — 자리가 모자라면 묶음째 다음 줄 오른쪽으로 내려간다(하나만 떨어져 나가지 않게).
+  const acts = reportNode('span', undefined, 'rp-acts');
 
   if (reportUndo.has(item.weekKey)) {
-    head.appendChild(reportButton('되돌리기', () => reportChange(item, { action: 'undo', token: reportUndo.get(item.weekKey) })));
+    acts.appendChild(reportButton('되돌리기', () => reportChange(item, { action: 'undo', token: reportUndo.get(item.weekKey) })));
   }
   // 금요일에 가장 먼저 하는 일이 계획 쓰기다 — 긴 문서를 훑지 않고 바로 그 자리로 데려간다(이번 주만).
   if (reportPlanIsCurrentWeek(item.weekKey)) {
-    head.appendChild(reportButton('다음 주 계획 쓰기', () => {
+    acts.appendChild(reportButton('다음 주 계획 쓰기', () => {
       const input = document.getElementById('reportPlanInput');
       if (!input) return;
       input.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -505,7 +507,7 @@ function reportDocHead(item, host) {
     }));
   }
   // 한 화면에 채운 버튼은 이것 하나다.
-  head.appendChild(reportButton('슬랙용으로 복사', async () => {
+  acts.appendChild(reportButton('슬랙용으로 복사', async () => {
     if ([...reportEdits.keys()].some(key => key.startsWith(item.weekKey + ':'))) {
       throw new Error('수정 중인 문장을 저장하거나 취소한 뒤 복사해 주세요.');
     }
@@ -517,6 +519,7 @@ function reportDocHead(item, host) {
       throw new Error('복사 미리보기의 내용을 직접 선택해 복사해 주세요.');
     }
   }, 'd-btn pri'));
+  head.appendChild(acts);
   host.appendChild(head);
 }
 
