@@ -123,10 +123,15 @@
       </main>
     </div>
 
-    <!-- 아이디어·결정 탭 — 두 열(아이디어 | 결정), 좁은 화면에서는 한 열로 쌓인다.
+    <!-- 아이디어·결정 탭 — 왼쪽 아이디어 좁은 칸 + 오른쪽 결정 넓은 본문, 좁은 화면에서는 세그먼트로 한쪽만 보인다.
          결정 줄에만 `PRD 반영함` 체크가 있고, 반영한 결정은 아래 접힌 구역으로 내려간다. -->
     <div class="d-reccols" id="gridRecords" hidden>
-      <section class="d-reccol" aria-labelledby="ideaColHead">
+      <div class="d-seg d-recseg" id="recordViewSeg" role="group" aria-label="아이디어·결정 보기">
+        <button type="button" data-record-view="idea" id="recordViewIdeaBtn" aria-pressed="false">아이디어 0</button>
+        <button type="button" data-record-view="decision" id="recordViewDecisionBtn" aria-pressed="true">결정 0</button>
+      </div>
+
+      <section class="d-reccol" id="ideaCol" aria-labelledby="ideaColHead">
         <div class="d-lhd"><h2 id="ideaColHead">아이디어</h2><span class="sub num" id="ideaCount">0</span></div>
         <div class="d-list">
           <div class="d-qaf">
@@ -137,8 +142,12 @@
         </div>
       </section>
 
-      <section class="d-reccol" aria-labelledby="decisionColHead">
-        <div class="d-lhd"><h2 id="decisionColHead">결정</h2><span class="sub num" id="decisionSectionCount">0</span><span class="d-quietnum num" id="decisionPendingNote"></span></div>
+      <section class="d-reccol" id="decisionCol" aria-labelledby="decisionColHead">
+        <div class="d-lhd">
+          <h2 id="decisionColHead">결정</h2><span class="sub num" id="decisionSectionCount">0</span>
+          <span class="sp"></span>
+          <input type="search" id="decisionSearch" class="d-recsearch" placeholder="결정 찾기" aria-label="결정 찾기" autocomplete="off" />
+        </div>
         <div class="d-list">
           <div class="d-qaf">
             <svg class="d-i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2v9.6M3.2 8h9.6"/></svg>
@@ -153,7 +162,6 @@
             <span class="gl">반영 완료</span><span class="n num" id="decisionArchiveCount">0</span>
           </button>
           <div id="decisionArchiveBody" hidden>
-            <input type="search" id="decisionArchiveSearch" class="d-archq" placeholder="반영 완료 검색 (내용·프로젝트·지라)" aria-label="반영 완료한 결정 검색" autocomplete="off" />
             <div class="d-list"><div id="decisionArchiveList"></div></div>
           </div>
         </div>

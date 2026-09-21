@@ -1538,7 +1538,8 @@ test('다음 주 계획은 프로젝트로 묶이고, 프로젝트 없는 문장
   ].join('\n'), '슬랙에서도 프로젝트 없는 계획 문장만 구역 끝 메모 줄이 된다');
 });
 
-test('반영 완료 검색은 문구·프로젝트·지라 키·지라 요약을 함께 본다', () => {
+// `결정 찾기`와 반영 완료 검색이 함께 쓰는 매칭 규칙 — 문구·프로젝트·지라 키·지라 요약을 본다.
+test('결정 찾기(recordArchiveMatch)는 문구·프로젝트·지라 키·지라 요약을 함께 본다', () => {
   const app = pureClient();
   const match = (item, query, summary = "''") => app.run(`recordArchiveMatch(${item}, ${JSON.stringify(query)}, ${summary})`);
   const item = "{ description: '접근로그 90일 보존', group: '운영툴', jira: 'PAY-77' }";
@@ -1550,6 +1551,60 @@ test('반영 완료 검색은 문구·프로젝트·지라 키·지라 요약을
   assert.equal(match(item, '결제', "'결제 기간 정리'"), true, '지라 요약으로도 찾는다');
   assert.equal(match(item, '없는말'), false);
   assert.equal(match("{ description: '메모', project: '리서치' }", '리서치'), true, '아이디어의 프로젝트 칸도 본다');
+});
+
+// `결정 찾기`는 미반영 결정 목록과 반영 완료 목록을 같은 기준(recordArchiveMatch)으로 함께 거른다 —
+// 검색 입력 하나로 두 목록에 각각 적용하는 방식이라, 같은 매처가 두 모양의 항목에 똑같이 동작하는지 본다.
+test('결정 찾기는 미반영 결정과 반영 완료를 같은 기준으로 함께 거른다', () => {
+  const app = pureClient();
+  const filter = (list, query) => list.filter(item => app.run(`recordArchiveMatch(${JSON.stringify(item)}, ${JSON.stringify(query)}, '')`));
+  const pending = [
+    { id: 'p1', description: '접근 로그 90일 보존', group: '운영툴' },
+    { id: 'p2', description: '결제 실패 알림 정책', group: '결제' },
+  ];
+  const archived = [
+    { id: 'a1', description: '접근 로그 30일 보존(구)', group: '운영툴', completed: '2026-09-10' },
+    { id: 'a2', description: '가입 절차 정리', group: '가입', completed: '2026-09-12' },
+  ];
+  assert.deepEqual(filter(pending, '보존').map(i => i.id), ['p1'], '미반영 결정에서 찾는다');
+  assert.deepEqual(filter(archived, '보존').map(i => i.id), ['a1'], '반영 완료에서도 같은 기준으로 찾는다');
+  assert.deepEqual(filter(pending, '없는말'), []);
+  assert.deepEqual(filter(archived, '없는말'), []);
+  assert.deepEqual(filter(pending, ''), pending, '검색어가 없으면 미반영 결정도 전부 남는다');
+  assert.deepEqual(filter(archived, ''), archived, '검색어가 없으면 반영 완료도 전부 남는다');
+});
+
+// 결정 아래 정보 줄: 날짜(created)·나온 회의(meetingId → 회의 제목)·원문 가운데 있는 것만, 이 순서로.
+test('결정 정보 줄은 날짜·나온 회의·원문 가운데 있는 값만 순서대로 조립한다', () => {
+  const app = workflowsClient();
+  app.run(`workflowData = { meetings: [
+    { id: 'm1', date: '2026-09-18', start: '10:00', title: '결제 리뉴얼 PRD 리뷰' },
+  ], items: [
+    { id: 'd1', meetingId: 'm1' },
+  ] }; wfIndexData();`);
+  const parts = item => JSON.parse(app.run(`JSON.stringify(recordInfoParts(${JSON.stringify(item)}))`));
+
+  assert.deepEqual(parts({ id: 'd1', created: '2026-09-18' }),
+    [{ kind: 'date', text: '9월 18일 결정' }, { kind: 'meeting', text: '결제 리뉴얼 PRD 리뷰에서', meetingId: 'm1' }],
+    '날짜와 나온 회의가 있으면 이 순서로 나온다(원문은 없으니 빠진다)');
+  assert.deepEqual(parts({ id: 'd2', created: '2026-09-18', permalink: 'https://slack.example/x' }),
+    [{ kind: 'date', text: '9월 18일 결정' }, { kind: 'source', text: '원문' }],
+    '회의에 연결되지 않은 결정은 회의 부분이 빠진다');
+  assert.deepEqual(parts({ id: 'd3' }), [], '아무 값도 없으면 정보 줄도 없다');
+  assert.deepEqual(parts({ id: 'd4', permalink: 'https://slack.example/y' }), [{ kind: 'source', text: '원문' }],
+    '원문만 있으면 원문만 남는다');
+});
+
+// 좁은 창(≤900) 세그먼트가 기억하는 값 — idea·decision이 아니면 기본값(결정)으로 돌아간다.
+test('아이디어·결정 탭의 좁은 창 세그먼트는 idea·decision만 기억하고, 그 밖의 값은 기본(결정)으로 돌아간다', () => {
+  const app = pureClient();
+  const from = value => app.run(`recordViewFrom(${JSON.stringify(value)})`);
+  assert.equal(from('idea'), 'idea');
+  assert.equal(from('decision'), 'decision');
+  assert.equal(from(null), 'decision', '저장된 값이 없으면 기본은 결정');
+  assert.equal(from(undefined), 'decision');
+  assert.equal(from('other'), 'decision', '알 수 없는 값도 기본(결정)으로');
+  assert.equal(from(''), 'decision');
 });
 
 // 줄 옆 카드의 자리 계산. 화면 좌표만 보는 순수 함수라 여기서 그대로 확인한다

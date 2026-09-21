@@ -1514,7 +1514,7 @@ async function load() {
   const tabNum = document.getElementById('tabRecordsNum');
   if (tabNum) {
     tabNum.textContent = pendingDecisions ? String(pendingDecisions) : '';
-    tabNum.title = pendingDecisions ? `PRD에 아직 반영하지 않은 결정이 ${pendingDecisions}개 있어요` : '';
+    tabNum.title = decisionPendingTitle(pendingDecisions);
   }
   // 회의 탭 이름 옆 숫자 — 검토를 기다리는 초안이 있는 회의 수(아이디어·결정과 같은 부품·같은 때).
   const reviewMeetings = meetingsReviewCount(workflowData.meetings);
@@ -1977,9 +1977,15 @@ function renderWeeklyReportDetail(item) {
 // 두 열(아이디어 | 결정)을 프로젝트로 묶어 한 줄씩 적는다. 두 종류 다 날짜 칸이 없다
 // (DECISIONS: 마감일은 할 일에만). 결정만 `PRD 반영함` 체크가 있고, 아이디어는 더보기만 있다.
 
+let decisionCache = [];
 let decisionArchiveCache = [];
-let decisionArchiveQuery = '';
+let decisionQuery = '';
 let decisionArchiveOpen = false;
+
+// 탭 이름 옆 숫자와 결정 구역 제목 칩이 같은 문구를 쓴다 — 한 곳에서만 고치면 된다.
+function decisionPendingTitle(n) {
+  return n ? `PRD에 아직 반영하지 않은 결정이 ${n}개 있어요` : '';
+}
 
 // 아이디어의 `가능성`은 높음만 글자로 적는다 — 보통·낮음·없음은 목록에 찍지 않는다.
 function ideaChanceText(item) {
@@ -2019,9 +2025,10 @@ function recordProjectName(item) {
   return item.jira || item.group || item.project || '';
 }
 
-// 결정·아이디어 줄의 제목 자리: 제목 | (반영 완료면) `· ● 프로젝트` | (원문이 있으면) 조용한 `원문` 링크.
-function recordTitleCell(row, title, item, projectName) {
-  const source = uiSourceLink(item);
+// 결정·아이디어 줄의 제목 자리: 제목 | (반영 완료면) `· ● 프로젝트` | (showSource면) 조용한 `원문` 링크.
+// 결정 줄은 원문을 아래 정보 줄로 옮겨 한 곳에만 적는다 — showSource를 꺼서 부른다.
+function recordTitleCell(row, title, item, projectName, showSource = true) {
+  const source = showSource ? uiSourceLink(item) : null;
   if (!projectName && !source) { row.appendChild(title); return; }
   const wrap = document.createElement('span');
   wrap.className = 'd-titlewrap';
@@ -2031,41 +2038,114 @@ function recordTitleCell(row, title, item, projectName) {
   row.appendChild(wrap);
 }
 
+// 결정 아래 정보 줄에 넣을 부분들 — 날짜(created)·나온 회의(meetingId → 회의 제목)·원문 가운데
+// 실제로 있는 값만, 이 순서로. DOM 없이도 조립 규칙을 확인할 수 있게 데이터만 뽑아 둔다.
+function recordInfoParts(item) {
+  const parts = [];
+  if (item.created) parts.push({ kind: 'date', text: `${uiKoDateShort(item.created)} 결정` });
+  const meetingId = (typeof wfItemsById !== 'undefined' ? wfItemsById.get(item.id) : null)?.meetingId;
+  const meeting = meetingId && typeof workflowData !== 'undefined'
+    ? workflowData.meetings.find(event => event.id === meetingId) : null;
+  if (meeting) parts.push({ kind: 'meeting', text: `${meeting.title}에서`, meetingId: meeting.id });
+  if (item.permalink) parts.push({ kind: 'source', text: '원문' });
+  return parts;
+}
+
+// 위 부분들을 실제 줄로 그린다 — 회의는 눌러서 회의 탭으로, 원문은 uiSourceLink 그대로.
+function recordInfoLine(item) {
+  const parts = recordInfoParts(item);
+  if (!parts.length) return null;
+  const line = document.createElement('div');
+  line.className = 'd-recinfo';
+  parts.forEach((part, index) => {
+    if (index) line.append(' · ');
+    if (part.kind === 'meeting') {
+      const link = document.createElement('button');
+      link.type = 'button';
+      link.className = 'd-recinfo-lk';
+      link.textContent = part.text;
+      link.addEventListener('click', event => { event.stopPropagation(); openMeetingsTab(part.meetingId); });
+      line.appendChild(link);
+    } else if (part.kind === 'source') {
+      line.appendChild(uiSourceLink(item, '원문'));
+    } else {
+      line.append(part.text);
+    }
+  });
+  return line;
+}
+
+// 결정 찾기: 같은 기준(recordArchiveMatch)으로 미반영 결정과 반영 완료를 함께 거른다.
+function decisionMatches(item) {
+  return recordArchiveMatch(item, decisionQuery, decisionJiraSummary(item));
+}
+
+// ---- 좁은 창(≤900) 세그먼트: 아이디어 | 결정 가운데 한쪽만 보인다 ----
+const RECORD_VIEW_KEY = 'recordView';
+let recordView = 'decision';
+// 저장된 값이 없거나 이상하면 기본값(결정)으로 — 순수 함수라 저장소 없이도 확인할 수 있다.
+function recordViewFrom(stored) {
+  return stored === 'idea' ? 'idea' : 'decision';
+}
+function recordViewRestore() {
+  try { recordView = recordViewFrom(localStorage.getItem(RECORD_VIEW_KEY)); } catch { recordView = 'decision'; }
+}
+// CSS 미디어 쿼리(≤900)가 실제 숨김을 맡는다 — 여기서는 상태 클래스·버튼 표시만 맞춘다(리사이즈 리스너 없음).
+function recordApplyView() {
+  document.getElementById('gridRecords')?.classList.toggle('is-view-idea', recordView === 'idea');
+  document.querySelectorAll('#recordViewSeg [data-record-view]').forEach((button) => {
+    button.setAttribute('aria-pressed', String(button.dataset.recordView === recordView));
+  });
+}
+function recordSetView(view) {
+  recordView = recordViewFrom(view);
+  try { localStorage.setItem(RECORD_VIEW_KEY, recordView); } catch {}
+  recordApplyView();
+}
+
 function renderDecisions(items) {
-  document.getElementById('decisionSectionCount').textContent = items.length;
-  // 구역 제목 옆 조용한 한 마디 — 탭 이름 옆 숫자와 같은 값이다.
-  const note = document.getElementById('decisionPendingNote');
-  if (note) note.textContent = items.length ? `PRD 미반영 ${items.length}` : '';
-  renderRecordColumn(document.getElementById('decisionList'), items,
-    item => recordDecisionRow(item, false), '정해진 내용이 아직 없어요. 맨 위 줄에서 바로 적을 수 있어요.');
+  decisionCache = items;
+  const countEl = document.getElementById('decisionSectionCount');
+  countEl.textContent = items.length;
+  countEl.title = decisionPendingTitle(items.length);
+  const segBtn = document.getElementById('recordViewDecisionBtn');
+  if (segBtn) segBtn.textContent = `결정 ${items.length}`;
+  renderRecordColumn(document.getElementById('decisionList'), items.filter(decisionMatches),
+    item => recordDecisionRow(item, false),
+    decisionQuery ? '찾는 결정이 없어요.' : '정해진 내용이 아직 없어요. 맨 위 줄에서 바로 적을 수 있어요.');
 }
 
 function renderIdeas(items) {
   document.getElementById('ideaCount').textContent = items.length;
+  const segBtn = document.getElementById('recordViewIdeaBtn');
+  if (segBtn) segBtn.textContent = `아이디어 ${items.length}`;
   renderRecordColumn(document.getElementById('ideaList'), items,
     recordIdeaRow, '아이디어가 아직 없어요. 맨 위 줄에서 바로 적어 둘 수 있어요.');
 }
 
-// 결정 열 아래 접힌 구역. 펼치면 위에 작은 검색 입력이 함께 보인다.
+// 결정 열 아래 접힌 구역. 결정 찾기로 찾는 중에는 자동으로 펼쳐져 결과를 보여 주고,
+// 지우면 접힘 상태(decisionArchiveOpen)로 돌아간다.
 function renderDecisionArchive() {
   const toggle = document.getElementById('decisionArchiveToggle');
   const body = document.getElementById('decisionArchiveBody');
   const list = document.getElementById('decisionArchiveList');
   if (!toggle || !body || !list) return;
-  const items = decisionArchiveCache.filter(item => recordArchiveMatch(item, decisionArchiveQuery, decisionJiraSummary(item)));
+  const items = decisionArchiveCache.filter(decisionMatches);
+  const open = decisionArchiveOpen || !!decisionQuery;
   document.getElementById('decisionArchiveCount').textContent = items.length;
-  toggle.setAttribute('aria-expanded', String(decisionArchiveOpen));
-  body.hidden = !decisionArchiveOpen;
+  toggle.setAttribute('aria-expanded', String(open));
+  body.hidden = !open;
   list.replaceChildren();
-  if (!decisionArchiveOpen) return;
+  if (!open) return;
   if (!items.length) {
-    list.insertAdjacentHTML('beforeend', `<div class="d-empty">${decisionArchiveQuery ? '찾는 결정이 없어요.' : '아직 반영 완료한 결정이 없어요.'}</div>`);
+    list.insertAdjacentHTML('beforeend', `<div class="d-empty">${decisionQuery ? '찾는 결정이 없어요.' : '아직 반영 완료한 결정이 없어요.'}</div>`);
     return;
   }
   items.forEach(item => list.appendChild(recordDecisionRow(item, true)));
 }
 
-// 결정 한 줄: PRD 반영 체크 | 문구(눌러서 그 자리 수정) + 프로젝트·원문 | 반영 날짜 | 늘 보이는 더보기.
+// 결정 한 줄: PRD 반영 체크 | 문구(눌러서 그 자리 수정) + (반영 완료면) 프로젝트 | 반영 날짜 | 늘 보이는 더보기,
+// 그 아래 조용한 정보 줄(날짜·나온 회의·원문).
 function recordDecisionRow(item, archived) {
   const row = document.createElement('div');
   row.className = 'd-rec is-dec' + (archived ? ' is-done' : '');
@@ -2094,12 +2174,17 @@ function recordDecisionRow(item, archived) {
   // 말줄임으로 잘린 문구도 마우스를 올리면 전부 읽을 수 있게(수정 안내는 aria-label이 한다).
   title.title = item.description;
   if (item.isNew && !archived) { title.prepend(renderNewDot(item)); observeNewItem(row, item); }
-  recordTitleCell(row, title, item, archived ? recordProjectName(item) : '');
+  // 원문은 제목 옆이 아니라 아래 정보 줄로 옮긴다(한 곳에만) — showSource: false.
+  recordTitleCell(row, title, item, archived ? recordProjectName(item) : '', false);
 
   const meta = document.createElement('span');
   meta.className = 'mt';
   meta.textContent = archived && item.completed ? `${uiKoDateShort(item.completed)} 반영` : '';
   row.appendChild(meta);
+
+  // 결정 아래 조용한 정보 한 줄: 날짜 · 나온 회의 · 원문(있는 것만). 반영 완료 줄에도 같이 붙는다.
+  const info = recordInfoLine(item);
+  if (info) row.appendChild(info);
 
   // 이 줄에서 할 수 있는 일이 더보기뿐이라 ⋯은 늘 보인다(반영 완료 줄도 같다).
   const acts = document.createElement('span');
@@ -4546,6 +4631,8 @@ function palPick(index) {
 // 결정·아이디어는 상세 카드가 없다 — 아이디어·결정 탭의 그 줄로 옮겨 가 잠깐 밝힌다.
 function palRevealRecord(item) {
   setActiveTab('records');
+  // 좁은 창에서는 세그먼트로 한쪽만 보인다 — 밝힐 항목이 있는 쪽을 연다.
+  recordSetView(item.type === 'idea' ? 'idea' : 'decision');
   // 반영 완료는 접혀 있다 — 그 안의 결정을 고르면 먼저 펼친다.
   if (item.status === 'done' && !decisionArchiveOpen) {
     decisionArchiveOpen = true;
@@ -5167,20 +5254,26 @@ setupQuickAdd('laterTaskInput', '/api/later-task/create', '나중에 할 일에 
 setupQuickAdd('waitingInput', '/api/waiting/create', '확인 대기에 추가했어요');
 setupQuickAdd('ideaInput', '/api/idea/create', '아이디어에 추가했어요');
 setupQuickAdd('decisionInput', '/api/decision/create', '결정에 추가했어요');
-// 한 글자마다 줄을 전부 다시 만들면 목록이 길수록 입력이 밀린다 — 입력이 멎은 뒤 한 번만
-// 그린다. 조합 중에도 input은 그대로 오고 값을 늦게 읽을 뿐이라 한글 입력은 끊기지 않는다.
-let decisionArchiveTimer = null;
-document.getElementById('decisionArchiveSearch').addEventListener('input', (event) => {
-  decisionArchiveQuery = event.target.value.trim().toLowerCase();
-  clearTimeout(decisionArchiveTimer);
-  decisionArchiveTimer = setTimeout(renderDecisionArchive, 150);
+// 한 글자마다 목록을 전부 다시 만들면 길수록 입력이 밀린다 — 입력이 멎은 뒤 한 번만 다시 그린다.
+// 조합 중에도 input은 그대로 오고 값을 늦게 읽을 뿐이라 한글 입력은 끊기지 않는다.
+// 입력칸 자체는 다시 만들지 않는다(renderDecisions/renderDecisionArchive는 목록 자리만 다시 그린다).
+let decisionSearchTimer = null;
+document.getElementById('decisionSearch').addEventListener('input', (event) => {
+  decisionQuery = event.target.value.trim().toLowerCase();
+  clearTimeout(decisionSearchTimer);
+  decisionSearchTimer = setTimeout(() => { renderDecisions(decisionCache); renderDecisionArchive(); }, 150);
 });
-// 반영 완료는 접힌 채로 시작한다 — 펼치면 그때 검색 입력과 줄이 함께 보인다.
+// 반영 완료는 접힌 채로 시작한다. 결정 찾기 중에는(renderDecisionArchive가) 자동으로 펼친다.
 document.getElementById('decisionArchiveToggle').addEventListener('click', () => {
   decisionArchiveOpen = !decisionArchiveOpen;
   renderDecisionArchive();
-  if (decisionArchiveOpen) document.getElementById('decisionArchiveSearch').focus();
 });
+// 좁은 창의 세그먼트 — 정적으로 한 번만 만든 버튼이라 리스너도 한 번만 단다.
+document.querySelectorAll('#recordViewSeg [data-record-view]').forEach((button) => {
+  button.addEventListener('click', () => recordSetView(button.dataset.recordView));
+});
+recordViewRestore();
+recordApplyView();
 
 try { todaySort = localStorage.getItem('todaySort') || 'project'; } catch {}
 // 보기 전환은 머리줄 ⋯ 메뉴 안의 두 칸 칩이다. 고른 값은 브라우저에 그대로 기억한다(저장 키·동작 그대로).
