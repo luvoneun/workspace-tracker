@@ -272,6 +272,61 @@ test('waiting items put today\'s re-checks on top, then reply deadlines, then wh
   assert.equal(app.run("String(waitingRecheck({ followUp: '2026-09-25' }, '2026-09-21'))"), 'false', '아직 오지 않은 날짜는 조용하다');
 });
 
+test('waitingGroups buckets by project, orders groups by their most urgent row, and keeps the within-group order', () => {
+  const app = pureClient();
+  const groups = JSON.parse(app.run(`
+    const details = { r: { followUp: '2026-09-20' } };
+    JSON.stringify(waitingGroups([
+      { id: 'misc1', created: '2026-09-10' },
+      { id: 'b', due: '2026-09-25', group: '결제팀' },
+      { id: 'r', created: '2026-09-05', jira: 'AB-1' },
+      { id: 'a', due: '2026-09-22', jira: 'AB-1' },
+    ], '2026-09-21', id => details[id] || null).map(([key, group]) => [key, group.map(i => i.id)]))`));
+  assert.deepEqual(groups, [
+    ['jira:AB-1', ['r', 'a']],
+    ['group:결제팀', ['b']],
+    ['__misc__', ['misc1']],
+  ], '가장 급한 줄(오늘 다시 확인인 r)이 있는 jira:AB-1 묶음이 위로, 프로젝트 없는 것은 맨 아래');
+});
+
+test('waitingGroups puts everything in "프로젝트 없음" when nothing has a project', () => {
+  const app = pureClient();
+  const groups = JSON.parse(app.run(`JSON.stringify(waitingGroups([
+    { id: 'x', created: '2026-09-10' },
+    { id: 'y', created: '2026-09-11' },
+  ], '2026-09-21', () => null).map(([key, group]) => [key, group.map(i => i.id)]))`));
+  assert.deepEqual(groups, [['__misc__', ['x', 'y']]]);
+});
+
+test('projectFixedOrder keeps a remembered order and appends newly seen keys at the end', () => {
+  const app = pureClient();
+  const rows = "[{ key: 'a', open: 1 }, { key: 'b', open: 3 }, { key: 'c', open: 0 }]";
+  assert.deepEqual(
+    JSON.parse(app.run(`JSON.stringify(projectFixedOrder(${rows}, null).map(r => r.key))`)),
+    ['a', 'b', 'c'], 'no remembered order (null) leaves the freshly sorted rows untouched');
+  assert.deepEqual(
+    JSON.parse(app.run(`JSON.stringify(projectFixedOrder(${rows}, ['c', 'a', 'b']).map(r => r.key))`)),
+    ['c', 'a', 'b'], 'a remembered order wins over the fresh sort');
+  assert.deepEqual(
+    JSON.parse(app.run(`JSON.stringify(projectFixedOrder(${rows}, ['a']).map(r => r.key))`)),
+    ['a', 'b', 'c'], 'projects not in the remembered order are appended, in their fresh-sort relative order');
+});
+
+test('projectVisibleRows hides 0-open projects but keeps the one currently selected', () => {
+  const app = pureClient();
+  const rows = "[{ key: 'a', open: 2 }, { key: 'b', open: 0 }, { key: 'c', open: 0 }]";
+  const collapsed = JSON.parse(app.run(`JSON.stringify((() => {
+    const r = projectVisibleRows(${rows}, { showEmpty: false, selectedKey: 'b' });
+    return { visible: r.visible.map(x => x.key), hiddenCount: r.hiddenCount };
+  })())`));
+  assert.deepEqual(collapsed, { visible: ['a', 'b'], hiddenCount: 1 }, '0개인 b는 지금 보는 중이라 남고, c만 숨는다');
+  const expanded = JSON.parse(app.run(`JSON.stringify((() => {
+    const r = projectVisibleRows(${rows}, { showEmpty: true, selectedKey: 'b' });
+    return { visible: r.visible.map(x => x.key), hiddenCount: r.hiddenCount };
+  })())`));
+  assert.deepEqual(expanded, { visible: ['a', 'b', 'c'], hiddenCount: 0 }, '펼치면 전부 보인다');
+});
+
 test('waiting age turns to the warning colour from the third day of waiting', () => {
   const app = pureClient();
   const age = (created) => JSON.parse(app.run(`JSON.stringify(waitingAgeText('${created}', '2026-09-21'))`));
@@ -283,11 +338,36 @@ test('waiting age turns to the warning colour from the third day of waiting', ()
   assert.equal(app.run("String(waitingAgeText(null, '2026-09-21'))"), 'null', '등록일이 없으면 아무 말도 하지 않는다');
 });
 
-test('the project column stays empty when the group heading already says it, and jira shows its key', () => {
+test('uiProjectName: short spots show only the jira summary (fall back to the key when unknown), long spots keep "KEY · 요약"', () => {
   const app = pureClient();
+  app.run("jiraIssuesByKey = new Map([['AB-1', { key: 'AB-1', summary: '가입 개선' }]])");
+  assert.equal(app.run("uiProjectName({ jira: 'AB-1' }, { short: true })"), '가입 개선', 'short form drops the key once the summary is known');
+  assert.equal(app.run("uiProjectName({ jira: 'AB-1' })"), 'AB-1 · 가입 개선', 'long form keeps KEY · 요약');
+  assert.equal(app.run("uiProjectName({ jira: 'ZZ-9' }, { short: true })"), 'ZZ-9', 'falls back to the key when the summary is unknown');
+  assert.equal(app.run("uiProjectName({ jira: 'ZZ-9' })"), 'ZZ-9', 'long form also falls back to the key when unknown');
+  assert.equal(app.run("uiProjectName({ group: '운영툴' }, { short: true })"), '운영툴', 'a plain group has no summary to drop');
+  assert.equal(app.run("uiProjectName({ project: '운영툴' })"), '운영툴', 'an idea\'s project field is read the same way');
+  assert.equal(app.run('uiProjectName(null)'), '');
+  assert.equal(app.run('uiProjectName({})'), '');
+});
+
+test('the color dot key stays the same regardless of the short/long text (uiProjectColorKey)', () => {
+  const app = pureClient();
+  app.run("jiraIssuesByKey = new Map([['AB-1', { key: 'AB-1', summary: '가입 개선' }]])");
+  assert.equal(app.run("uiProjectColorKey({ jira: 'AB-1' })"), 'AB-1');
+  assert.equal(app.run("uiProjectHue(uiProjectColorKey({ jira: 'AB-1' }))"), app.run("uiProjectHue('jira:AB-1')"),
+    'the same project keeps the same hue whether it arrives as a bare key or a prefixed group key');
+  assert.equal(app.run("uiProjectColorKey({ group: '운영툴' })"), '운영툴');
+  assert.equal(app.run("uiProjectColorKey({ project: '운영툴' })"), '운영툴');
+});
+
+test('the project column stays empty when the group heading already says it, and jira shows only the summary', () => {
+  const app = pureClient();
+  app.run("jiraIssuesByKey = new Map([['AB-1', { key: 'AB-1', summary: '가입 개선' }]])");
   assert.equal(app.run("uiProjectLabel({ jira: 'AB-1' }, true)"), '');
   assert.equal(app.run('uiProjectLabel({}, false)'), '');
-  assert.equal(app.run("uiProjectLabel({ jira: 'AB-1', group: '운영툴' }, false)"), 'AB-1', 'jira wins and only the key is printed');
+  assert.equal(app.run("uiProjectLabel({ jira: 'AB-1', group: '운영툴' }, false)"), '가입 개선', 'jira wins and shows the summary, not the key');
+  assert.equal(app.run("uiProjectLabel({ jira: 'ZZ-9' }, false)"), 'ZZ-9', 'an unknown jira issue falls back to its key');
   assert.equal(app.run("uiProjectLabel({ group: '운영툴' }, false)"), '운영툴');
 });
 
@@ -391,6 +471,55 @@ function workflowsClient() {
   app.run(fs.readFileSync(path.join(__dirname, 'workflows.js'), 'utf8'));
   return app;
 }
+
+test('wfMeetingProjectName: short is jira-summary-only (or the key), long keeps "KEY · 요약"; the color key ignores both', () => {
+  const app = workflowsClient();
+  app.run("jiraIssuesByKey = new Map([['AB-1', { key: 'AB-1', summary: '가입 개선' }]])");
+  const jiraEvent = "{ project: { type: 'jira', value: 'AB-1', label: 'AB-1' } }";
+  assert.equal(app.run(`wfMeetingProjectName(${jiraEvent}, { short: true })`), '가입 개선');
+  assert.equal(app.run(`wfMeetingProjectName(${jiraEvent})`), 'AB-1 · 가입 개선');
+  assert.equal(app.run(`wfMeetingColorKey(${jiraEvent})`), 'AB-1');
+  const unknownJira = "{ project: { type: 'jira', value: 'ZZ-9', label: 'ZZ-9' } }";
+  assert.equal(app.run(`wfMeetingProjectName(${unknownJira}, { short: true })`), 'ZZ-9');
+  const groupEvent = "{ project: { type: 'group', value: '가입_개선', label: '가입_개선' } }";
+  assert.equal(app.run(`wfMeetingProjectName(${groupEvent}, { short: true })`), '가입 개선', '파일 표기(밑줄)를 사람이 읽는 꼴로 맞춘다');
+  assert.equal(app.run(`wfMeetingProjectName(${groupEvent})`), '가입 개선');
+  assert.equal(app.run('wfMeetingProjectName(null)'), '');
+  assert.equal(app.run('wfMeetingProjectName({})'), '');
+});
+
+test('projectSimpleRow: source가 있으면 제목 뒤에 조용한 `원문` 링크를 붙인다(아이디어 줄)', () => {
+  const app = pureClient();
+  const noSource = app.run("projectSimpleRow('문구', '메타', () => {}, 'id1', null)");
+  assert.equal(noSource.children.length, 2, '원문이 없으면 예전과 같다');
+  const link = app.run("(() => { const a = document.createElement('a'); a.className = 'd-src'; a.textContent = '원문'; return a; })()");
+  app.context.__link = link;
+  const withSource = app.run("projectSimpleRow('문구', '메타', () => {}, 'id1', null, null, __link)");
+  assert.equal(withSource.children.length, 2, '제목+원문이 한 칸으로 묶이고 메타가 둘째 칸이다');
+  const wrap = withSource.children[0];
+  assert.equal(wrap.className, 'd-titlewrap');
+  assert.equal(wrap.children[0].className, 'ti');
+  assert.equal(wrap.children[1], link, '원문 링크가 제목 뒤에 그대로 붙는다');
+});
+
+test('renderInbox: 프로젝트가 있는 줄에만 조용한 프로젝트 표기가 원문 앞에 붙는다', () => {
+  const app = client(new Response('{"ok":true}'));
+  app.run("escapeHtml = s => String(s || '')");
+  app.run("workflowData = { items: [], meetings: [] }; jiraIssuesByKey = new Map()");
+  app.run(`renderInbox([
+    { id: 'i1', description: '업무1', group: '결제팀', permalink: 'https://slack.example/1' },
+    { id: 'i2', description: '업무2' },
+  ])`);
+  const list = app.nodes.get('inboxList');
+  const findClass = (node, cls) => (node.children || []).find(kid => kid && kid.className === cls);
+  const main1 = list.children[0].children[0];
+  const tag1 = findClass(main1, 'd-inproj');
+  assert.ok(tag1, '프로젝트가 있으면 표기가 붙는다');
+  assert.ok(findClass(main1, 'd-src'), '원문 링크도 그대로 붙는다');
+  assert.ok(main1.children.indexOf(tag1) < main1.children.indexOf(findClass(main1, 'd-src')), '프로젝트 표기가 원문보다 앞에 선다');
+  const main2 = list.children[1].children[0];
+  assert.equal(findClass(main2, 'd-inproj'), undefined, '프로젝트가 없으면 지어내지 않는다');
+});
 
 test('the palette narrows by kind, by "완료 제외" and by "오늘 신규", and says nothing without a query or a filter', () => {
   const app = workflowsClient();
@@ -1844,4 +1973,21 @@ test('다음 주 계획 프로젝트 목록은 그룹과 지라를 함께 담고
     ['운영툴', '가입 개선', 'PAY-77 · 정산 배치', 'OPS-1'],
     '저장되는 값은 화면에 보이는 이름 그대로이고, 60자를 넘는 지라는 키만 남는다');
   assert.equal(app.run(`reportPlanJiraName('PAY-77', '${'나'.repeat(60)}')`), 'PAY-77');
+});
+
+test('슬랙으로 나가는 프로젝트 줄에는 지라 키를 싣지 않는다(요약을 모르면 키 그대로)', () => {
+  const app = reportClient();
+  assert.equal(app.run(`reportSlackProjectLabel('PAY-77 · 결제 정산 주기 정책 변경')`), '결제 정산 주기 정책 변경');
+  assert.equal(app.run(`reportSlackProjectLabel('IO-48394')`), 'IO-48394', '요약을 모르는 이슈는 키밖에 이름이 없다');
+  assert.equal(app.run(`reportSlackProjectLabel('가입 개선')`), '가입 개선', '그룹 이름은 그대로');
+  assert.equal(app.run(`reportSlackProjectLabel('A · B')`), 'A · B', '지라 키 꼴이 아니면 가운뎃점이 있어도 건드리지 않는다');
+  const report = JSON.stringify({ weekKey: '2026-09-21', rows: [
+    { id: 'r1', heading: '완료한 일', group: 'PAY-77 · 결제 정산 주기 정책 변경', text: '정산 주기 확정', sourceIds: [], evidence: [], excluded: false },
+  ] });
+  const text = app.run(`reportSlackText(reportSlackModel(${report}, { sections: ['완료'] }))`);
+  assert.equal(text.includes('PAY-77'), false, '일반 글자에 키가 없다');
+  assert.equal(text.includes('결제 정산 주기 정책 변경'), true);
+  const html = app.run(`reportSlackHtml(reportSlackModel(${report}, { sections: ['완료'] }))`);
+  assert.equal(html.includes('PAY-77'), false, '서식 있는 복사에도 키가 없다');
+  assert.equal(app.run(`reportProjectColorKey('PAY-77 · 결제 정산 주기 정책 변경')`), 'PAY-77', '색 점은 원래 키로 정한다');
 });

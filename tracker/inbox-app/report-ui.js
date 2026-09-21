@@ -205,6 +205,18 @@ function reportSlackModel(report, options = {}) {
 // (미리보기를 직접 선택해 복사해도 아래 `reportSlackText`와 같은 글자가 나온다).
 // 슬랙에 나가는 구역 제목은 `[완료]` `[진행중]` `[예정]` 꼴이다(사용자가 올리는 글의 모양). 구역을 고르는
 // 칩과 저장된 선택은 이름 그대로(`진행 중`)를 쓴다 — 바뀌는 것은 나가는 글자뿐이다.
+// 슬랙으로 나가는 글에는 지라 키를 싣지 않는다(`PAY-77 · 요약` → `요약`). 요약을 모르는 이슈는 키밖에 이름이 없어 그대로 나간다.
+// 묶기는 원래 이름으로 하고(키가 다르면 다른 프로젝트다) 나가는 글자만 바꾼다. 화면의 소제목은 그대로 `키 · 요약`이다.
+const REPORT_JIRA_LABEL = /^([A-Z][A-Z0-9]*-\d+) · (.+)$/;
+function reportSlackProjectLabel(name) {
+  const match = REPORT_JIRA_LABEL.exec(String(name || ''));
+  return match ? match[2] : name;
+}
+// 색 점의 색은 표기가 아니라 원래 키로 정한다 — 같은 프로젝트가 자리마다 다른 색이면 안 된다.
+function reportProjectColorKey(name) {
+  const match = REPORT_JIRA_LABEL.exec(String(name || ''));
+  return match ? match[1] : name;
+}
 function reportSlackSectionLabel(name) {
   return `[${name === '진행 중' ? '진행중' : name}]`;
 }
@@ -216,7 +228,7 @@ function reportSlackLines(model) {
     if (index) lines.push({ kind: 'gap', text: '' });
     lines.push({ kind: 'section', text: reportSlackSectionLabel(section.name) });
     for (const project of section.projects) {
-      lines.push({ kind: 'project', text: project.name });
+      lines.push({ kind: 'project', text: reportSlackProjectLabel(project.name) });
       for (const item of project.items) {
         lines.push({ kind: 'item', text: `• ${item.text}` });
         for (const note of item.notes) lines.push({ kind: 'note', text: `    ◦ ${note}` });
@@ -245,7 +257,7 @@ function reportSlackHtml(model) {
   for (const section of model.sections) {
     html.push(bold(reportSlackSectionLabel(section.name)));
     for (const project of section.projects) {
-      html.push(bold(project.name));
+      html.push(bold(reportSlackProjectLabel(project.name)));
       html.push(`<ul>${project.items.map(item => `<li>${escapeHtml(item.text)}${notes(item.notes)}</li>`).join('')}</ul>`);
     }
     for (const memo of section.memos) html.push(`<p>* ${escapeHtml(memo.text)}</p>${notes(memo.notes)}`);
@@ -881,7 +893,7 @@ function reportPlanCandidateList(item, host, tasks, claimed) {
     const label = typeof uiGroupLabel === 'function' ? uiGroupLabel(key) : REPORT_NO_PROJECT;
     // 오늘 목록의 그룹 제목과 같은 말투(색 점 + 이름 + 개수) — 프로젝트가 한 덩어리로 뭉쳐 보이지 않게.
     const head = reportNode('div', undefined, 'rp-candpj');
-    if (key !== '__misc__' && typeof uiProjectDot === 'function') head.appendChild(uiProjectDot(label));
+    if (key !== '__misc__' && typeof uiProjectDot === 'function') head.appendChild(uiProjectDot(key));
     head.appendChild(reportNode('span', label, 'pjn'));
     head.appendChild(reportNode('span', String(groupTasks.length), 'n num'));
     host.appendChild(head);
@@ -1216,7 +1228,7 @@ function reportRecordsView(item, host) {
   const list = reportNode('div', undefined, 'rp-recs');
   for (const group of groups) {
     list.appendChild(uiGroupHeading(group.name, group.entries.length,
-      group.name === REPORT_NO_PROJECT ? {} : { projectName: group.name }));
+      group.name === REPORT_NO_PROJECT ? {} : { projectName: reportProjectColorKey(group.name) }));
     for (const { source, row } of group.entries) {
       const line = reportNode('div', undefined, 'rp-rec');
       const wrap = reportNode('span', undefined, 'tiwrap');

@@ -577,6 +577,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   font-size: 12.5px; font-weight: 600;
 }
 #waitingHeading .n { background: var(--warn-bg); color: var(--warn); }
+.d-rhd .sp { margin-left: auto; }
 /* `전체 보기` 같은 곁들이 링크는 구역 제목보다 더 조용하게, 오른쪽 끝에
    (누르는 자리는 28px — 34px 머리줄 안에 그대로 들어간다) */
 .d-rhd .wf-link {
@@ -645,6 +646,11 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 .d-wrow.is-two .sub { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; white-space: normal; overflow: visible; }
 .d-wrow.is-two .sub .who { color: var(--muted); font-weight: 600; }
 .d-wrow.is-two .sub .nx { color: var(--dim); }
+/* 확인 대기 `급한 순` 보기의 둘째 줄 맨 앞 프로젝트 표기 — 말줄임(레일 폭 안에서 다른 말과 겹치지 않게) */
+.d-wrow.is-two .sub .d-inproj { max-width: 44%; overflow: hidden; text-overflow: ellipsis; }
+/* 확인 대기 카드의 프로젝트 소제목 — 줄과 같은 왼쪽 자리(10px)에 맞춘 작은 그룹 제목 */
+#waitingList .d-grp { height: auto; min-height: 0; padding: 10px 10px 2px; font-size: 13px; }
+#waitingList .d-grp:first-child { padding-top: 2px; }
 .d-wrow .ti .new-dot { position: static; display: inline-block; width: 5px; height: 5px; margin-right: 5px; vertical-align: 2px; box-shadow: none; }
 /* 더보기는 hover·focus일 때만, 오른쪽 끝에 겹쳐 뜬다 */
 .d-wrow .ac, .d-mrow .ac {
@@ -695,7 +701,10 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 .d-ibrow .ti {
   font-size: 16px; font-weight: 500; color: var(--text); cursor: text; border-radius: 4px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  /* 프로젝트 표기·원문 링크가 붙어도 제목이 먼저 줄어든다(고정 폭인 둘과 겹치지 않는다) */
+  flex: 1 1 auto; min-width: 0;
 }
+.d-ibmain .d-inproj { max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
 .d-ibrow .desc-edit-input { flex: 1; min-width: 0; font-size: 16px; font-weight: 500; }
 .d-ibrow .d-link { flex: none; }
 .d-ibacts { display: flex; align-items: center; gap: 6px; }
@@ -1380,6 +1389,13 @@ body.batch-open .d-toast { bottom: 76px; }
 /* 열린 항목이 없는 프로젝트는 흐리게, 목록 아래쪽에 머문다 */
 .d-prow.is-zero, .d-prow.is-zero .n { color: var(--dim); }
 .d-prow.is-zero .d-pjdot { opacity: 0.45; }
+/* 목록 끝의 `항목 없는 프로젝트 N개 보기` / `숨기기` — 조용한 글자 버튼(정보처럼, 버튼처럼 그리지 않는다) */
+.d-plink {
+  display: block; width: 100%; margin-top: 4px; padding: 8px 10px; border: 0; background: none; border-radius: 12px;
+  font-family: inherit; font-size: 13px; font-weight: 600; color: var(--dim); text-align: left; cursor: pointer;
+  transition: background 170ms var(--ease), color 170ms var(--ease);
+}
+.d-plink:hover { background: var(--hover); color: var(--accent-text); }
 
 .d-pmain { min-width: 0; padding-left: 20px; }
 .d-pwrap { max-width: 1000px; }

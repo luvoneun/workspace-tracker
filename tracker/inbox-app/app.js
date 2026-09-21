@@ -262,11 +262,32 @@ function uiTone(tone) {
   return tone === 'urgent' ? ' k-neg' : tone === 'warn' ? ' k-warn' : tone === 'success' ? ' k-pos' : '';
 }
 
+// 프로젝트 이름을 만드는 단 하나의 규칙. 지라면 이슈를 찾아 이름을 짓고(모르면 키만),
+// 그 밖은 그룹/프로젝트 이름 그대로다.
+// short(줄 안에 조용히 붙는 짧은 표기 — 제목 뒤·확인 대기 급한 순·새로 들어온 것·회의 줄·팔레트 결과)면
+// 지라는 **요약만** 보여 준다(모르면 키). 긴 자리(그룹 제목·확인 대기 프로젝트별 소제목·프로젝트 탭·
+// 프로젝트 고르기·주간요약 소제목·슬랙 복사)는 지금처럼 `KEY · 요약` 그대로 쓴다(uiGroupLabel이 이미 이 규칙).
+function uiProjectName(item, opts = {}) {
+  if (!item) return '';
+  if (item.jira) {
+    const issue = jiraIssuesByKey.get(item.jira);
+    const summary = issue ? issue.summary : '';
+    if (!summary) return item.jira;
+    return opts.short ? summary : `${item.jira} · ${summary}`;
+  }
+  return item.group || item.project || '';
+}
+
+// 색 점을 고르는 원래 키 — 표기(짧은 요약이든 긴 `KEY · 요약`이든)와 무관하게 늘 같다.
+// 같은 프로젝트가 자리마다 다른 색으로 보이면 안 된다.
+function uiProjectColorKey(item) {
+  return (item && (item.jira || item.group || item.project)) || '';
+}
+
 // 행의 프로젝트 이름. 그룹 제목이 이미 그 프로젝트를 말해 주면 비운다.
-// 지라는 키만 적는다 — 요약은 그룹 제목과 상세가 보여 준다.
 function uiProjectLabel(item, grouped) {
   if (grouped) return '';
-  return item.jira || item.group || '';
+  return uiProjectName(item, { short: true });
 }
 
 // 줄 오른쪽의 글자 셀: 상태(밀림 · N일째 진행 중 · 답변) → 기한(맨 오른쪽, 달력). **날짜 성격의 말만** 선다.
@@ -364,11 +385,16 @@ function uiProjectDot(name) {
 }
 
 // 그룹 제목이 프로젝트를 말해 주지 않는 자리에서 제목 뒤에 붙는 `· ● 이름`(색 점 + 회색 글자).
-function uiInlineProject(name) {
+// 줄 안의 짧은 표기라 지라는 요약만 보여 준다(모르면 키) — 전체 `KEY · 요약`은 title 툴팁에 남긴다.
+// 색 점은 표기와 무관하게 원래 키로 고른다(uiProjectColorKey). opts.lead === false면(줄 맨 앞에
+// 오는 확인 대기 급한 순처럼) 앞머리의 `· `를 붙이지 않는다.
+function uiInlineProject(item, opts = {}) {
+  const short = uiProjectName(item, { short: true });
   const tag = document.createElement('span');
   tag.className = 'd-inproj';
-  tag.title = name;
-  tag.append('· ', uiProjectDot(name), name);
+  tag.title = uiProjectName(item);
+  const lead = opts.lead === false ? [] : ['· '];
+  tag.append(...lead, uiProjectDot(uiProjectColorKey(item)), short);
   return tag;
 }
 
@@ -608,7 +634,7 @@ function uiTaskRow(item, opts = {}) {
     const wrap = document.createElement('span');
     wrap.className = 'd-titlewrap';
     wrap.appendChild(title);
-    if (inlineProject) wrap.appendChild(uiInlineProject(inlineProject));
+    if (inlineProject) wrap.appendChild(uiInlineProject(item));
     if (source) wrap.appendChild(source);
     row.appendChild(wrap);
   } else {
@@ -1005,6 +1031,12 @@ function uiProjectRows(entries, items) {
 const PROJECT_KEY_STORE = 'projectKey';
 let projectKey = null;
 let projectDoneOpen = false;
+// 왼쪽 목록의 차례를 탭에 있는 동안 고정해 둔다 — 체크 한 번마다 load()가 다시 그리며 순서가
+// 뒤바뀌지 않게. 탭에 들어올 때·새로고침 때만(projectOrderResort) 다시 계산한다. 세션 동안만
+// 기억하는 값이라 localStorage에 넣지 않는다(projectShowEmpty도 같다).
+let projectOrderKeys = null;
+let projectOrderResort = true;
+let projectShowEmpty = false;
 function projectKeyRestore() {
   try { projectKey = localStorage.getItem(PROJECT_KEY_STORE) || null; } catch { projectKey = null; }
 }
@@ -1020,12 +1052,38 @@ function openProjectTab(key) {
   document.getElementById('projectList')?.querySelector('[aria-current="true"]')?.focus();
 }
 
+// 왼쪽 목록의 차례를 고정해 둘 때 쓰는 순수 함수 — 알고 있던 차례(orderKeys)를 그대로 따르고,
+// 처음 보는 키는 지금 정렬 결과(rows)의 상대 순서 그대로 끝에 붙는다. orderKeys가 없으면 그대로 돌려준다.
+function projectFixedOrder(rows, orderKeys) {
+  if (!orderKeys) return rows;
+  const known = new Map(rows.map(row => [row.key, row]));
+  const ordered = orderKeys.filter(key => known.has(key)).map(key => known.get(key));
+  const extra = rows.filter(row => !orderKeys.includes(row.key));
+  return [...ordered, ...extra];
+}
+
+// 열린 항목이 없는 프로젝트를 숨기는 순수 함수 — 지금 보고 있는 프로젝트(selectedKey)만 예외로
+// 남긴다(보는 동안 0개가 되어도 갑자기 사라지지 않는다). showEmpty면 전부 보여 준다.
+function projectVisibleRows(rows, { showEmpty, selectedKey } = {}) {
+  const zero = rows.filter(row => !row.open);
+  const visible = showEmpty ? rows : rows.filter(row => row.open || row.key === selectedKey);
+  const hiddenCount = showEmpty ? 0 : zero.filter(row => row.key !== selectedKey).length;
+  return { visible, zero, hiddenCount };
+}
+
 function renderProjects() {
   const listEl = document.getElementById('projectList');
   const body = document.getElementById('projectBody');
   if (!listEl || !body) return;
-  const rows = uiProjectRows(wfProjects(), workflowData.items);
+  let rows = uiProjectRows(wfProjects(), workflowData.items);
+  // 탭에 들어올 때·새로고침 때만(projectOrderResort) 다시 정렬한다 — 그 밖의 다시 그리기
+  // (체크 등으로 load()가 부르는 것)는 고정해 둔 차례를 그대로 쓴다.
+  rows = projectOrderResort || !projectOrderKeys ? rows : projectFixedOrder(rows, projectOrderKeys);
+  projectOrderResort = false;
+  projectOrderKeys = rows.map(row => row.key);
   if (!rows.some(row => row.key === projectKey)) projectKey = rows.length ? rows[0].key : null;
+
+  const { visible: visibleRows, zero: zeroRows, hiddenCount } = projectVisibleRows(rows, { showEmpty: projectShowEmpty, selectedKey: projectKey });
 
   listEl.replaceChildren();
   const head = document.createElement('div');
@@ -1034,11 +1092,11 @@ function renderProjects() {
   headName.textContent = '프로젝트';
   const headCount = document.createElement('span');
   headCount.className = 'n num';
-  headCount.textContent = rows.length;
+  headCount.textContent = visibleRows.length;
   head.append(headName, headCount);
   listEl.appendChild(head);
 
-  rows.forEach((row) => {
+  visibleRows.forEach((row) => {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'd-prow' + (row.open ? '' : ' is-zero');
@@ -1060,6 +1118,17 @@ function renderProjects() {
     });
     listEl.appendChild(button);
   });
+
+  // 목록 끝의 조용한 글자 버튼 — 항목 없는 프로젝트가 하나도 없으면 아예 달지 않는다.
+  if (zeroRows.length) {
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'd-plink';
+    toggle.setAttribute('aria-expanded', String(projectShowEmpty));
+    toggle.textContent = projectShowEmpty ? '항목 없는 프로젝트 숨기기' : `항목 없는 프로젝트 ${hiddenCount}개 보기`;
+    toggle.addEventListener('click', () => { projectShowEmpty = !projectShowEmpty; renderProjects(); });
+    listEl.appendChild(toggle);
+  }
 
   renderProjectDetail(body, rows.find(row => row.key === projectKey) || null);
 }
@@ -1168,7 +1237,8 @@ function projectDoneRow(item) {
 // 확인 대기·결정·아이디어·회의처럼 값이 한두 개뿐인 구역은 같은 한 줄 모양을 쓴다.
 // menuSections가 있으면(할 수 있는 일이 더보기뿐이라) 늘 보이는 ⋯을 단다 — 목록에서 쓰는 메뉴 그대로.
 // makeCheck가 있으면(확인 대기·결정 줄만) 맨 앞에 그 종류의 체크박스를 단다 — 아이디어·회의 줄은 그대로 비운다.
-function projectSimpleRow(text, meta, onOpen, id, menuSections, makeCheck) {
+// source가 있으면(아이디어 줄만) 제목 뒤에 조용한 `원문` 링크를 붙인다(다른 줄과 같은 uiSourceLink).
+function projectSimpleRow(text, meta, onOpen, id, menuSections, makeCheck, source) {
   const row = document.createElement('div');
   row.className = 'd-rec' + (makeCheck ? ' has-ck' : '') + (menuSections ? ' has-ac' : '') + (id && panelState && panelState.id === id ? ' is-sel' : '');
   if (id) row.dataset.taskId = id;
@@ -1186,10 +1256,18 @@ function projectSimpleRow(text, meta, onOpen, id, menuSections, makeCheck) {
   title.title = text;
   title.setAttribute('aria-label', `${text} 상세 보기`);
   title.addEventListener('click', onOpen);
+  if (source) {
+    const wrap = document.createElement('span');
+    wrap.className = 'd-titlewrap';
+    wrap.append(title, source);
+    row.appendChild(wrap);
+  } else {
+    row.appendChild(title);
+  }
   const note = document.createElement('span');
   note.className = 'mt';
   note.textContent = meta || '';
-  row.append(title, note);
+  row.append(note);
   if (menuSections) {
     const acts = document.createElement('span');
     acts.className = 'ac';
@@ -1232,14 +1310,16 @@ function renderProjectDetail(body, row) {
 
   // menu가 있으면 줄마다 같은 목록이 쓰는 ⋯ 메뉴를 그대로 단다(회의용·프로젝트탭용으로 새로 만들지 않는다).
   // check가 있으면(확인 대기·결정만) 목록이 쓰는 체크박스를 그대로 맨 앞에 단다.
-  const simple = (label, list, meta, onOpen, menu, check) => {
+  // withSource가 있으면(아이디어만) 원문이 있는 줄에 조용한 `원문` 링크를 붙인다.
+  const simple = (label, list, meta, onOpen, menu, check, withSource) => {
     if (!list.length) return;
     const section = projectSection(label, list.length);
     const surface = document.createElement('div');
     surface.className = 'd-psurf plain';
     list.forEach(entry => surface.appendChild(projectSimpleRow(entry.text, meta(entry.item), () => onOpen(entry.item), entry.id,
       menu ? (row) => menu(entry.item, row) : null,
-      check ? (row) => check(entry.item, row) : null)));
+      check ? (row) => check(entry.item, row) : null,
+      withSource ? uiSourceLink(entry.item) : null)));
     section.appendChild(surface);
     body.appendChild(section);
   };
@@ -1257,7 +1337,7 @@ function renderProjectDetail(body, row) {
     item => item.status === 'done' ? `${uiKoDateShort(item.completed)} 반영` : '미반영', openPanel, decisionMenuSections,
     (item, row) => decisionCheckbox(item, row, item.status === 'done'));
   simple('아이디어', asItems(items.filter(item => item.type === 'idea')),
-    item => item.created ? `${uiKoDateShort(item.created)} 기록` : '', openPanel, ideaMenuSections);
+    item => item.created ? `${uiKoDateShort(item.created)} 기록` : '', openPanel, ideaMenuSections, null, true);
 
   const meetings = workflowData.meetings.filter(event => wfMeetingKey(event) === row.key || items.some(item => item.meetingId === event.id));
   simple('회의', meetings.map(event => ({ item: event, text: event.title, id: null })),
@@ -1678,8 +1758,10 @@ function renderCalendar(calendar) {
     title.className = 'ti';
     title.textContent = event.title;
     // 프로젝트 이름은 어디서나 같은 꼴로 적는다(파일에 저장된 `가입_개선`을 `가입 개선`으로).
-    const projectName = wfMeetingProjectName(event);
-    title.title = projectName ? `${event.title} · ${projectName}` : event.title;
+    // 줄 안의 짧은 표기라 지라는 요약만(모르면 키) — 전체 `KEY · 요약`은 title 툴팁에 남긴다.
+    const projectName = wfMeetingProjectName(event, { short: true });
+    const projectFull = wfMeetingProjectName(event);
+    title.title = projectName ? `${event.title} · ${projectFull}` : event.title;
     title.setAttribute('aria-label', `${event.title} — 회의 정리`);
     if (projectName) {
       const project = document.createElement('span');
@@ -2037,9 +2119,9 @@ function renderRecordColumn(list, items, row, emptyText) {
   });
 }
 
-// 반영 완료 줄에는 위에 프로젝트 그룹 제목이 없다 — 그 줄만 제목 뒤에 프로젝트를 적는다(지라면 키).
+// 반영 완료 줄에는 위에 프로젝트 그룹 제목이 없다 — 그 줄만 제목 뒤에 프로젝트를 적는다(지라면 요약, 모르면 키).
 function recordProjectName(item) {
-  return item.jira || item.group || item.project || '';
+  return uiProjectName(item, { short: true });
 }
 
 // 결정·아이디어 줄의 제목 자리: 제목 | (반영 완료면) `· ● 프로젝트` | (showSource면) 조용한 `원문` 링크.
@@ -2050,7 +2132,7 @@ function recordTitleCell(row, title, item, projectName, showSource = true) {
   const wrap = document.createElement('span');
   wrap.className = 'd-titlewrap';
   wrap.appendChild(title);
-  if (projectName) wrap.appendChild(uiInlineProject(projectName));
+  if (projectName) wrap.appendChild(uiInlineProject(item));
   if (source) wrap.appendChild(source);
   row.appendChild(wrap);
 }
@@ -2429,7 +2511,38 @@ function waitingAgeText(created, today) {
   return { text: `${days}일째`, tone: days >= STALE_WAITING_DAYS ? 'warn' : '' };
 }
 
+// 확인 대기 카드의 `프로젝트별` 묶음. 먼저 급한 순(waitingOrder)으로 통째로 정렬한 뒤 프로젝트로
+// 묶는다 — 그 순서에서 처음 나오는 프로젝트가 위로 오므로 "가장 급한 줄이 있는 묶음이 위"가 되고,
+// 묶음 안의 차례도 그 순서 그대로 남는다. 프로젝트 없는 것은 `프로젝트 없음`으로 맨 아래.
+// 화면을 만지지 않는 순수 함수라 테스트가 직접 부른다.
+function waitingGroups(items, today, detailOf) {
+  const sorted = waitingOrder(items, today, detailOf);
+  const groups = new Map();
+  sorted.forEach((item) => {
+    const named = item.group || item.project;
+    const key = item.jira ? `jira:${item.jira}` : named ? `group:${named}` : '__misc__';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  });
+  const keys = [...groups.keys()];
+  const ordered = keys.includes('__misc__') ? [...keys.filter(key => key !== '__misc__'), '__misc__'] : keys;
+  return ordered.map(key => [key, groups.get(key)]);
+}
+
+// 카드 머리 ⋯의 보기 전환 — `프로젝트별`(기본) / `급한 순`. 고른 값은 브라우저에 기억한다.
+const WAITING_VIEW_KEY = 'waitingView';
+let waitingView = 'project';
+try { waitingView = localStorage.getItem(WAITING_VIEW_KEY) === 'urgent' ? 'urgent' : 'project'; } catch {}
+let waitingItemsCache = [];
+function setWaitingView(value) {
+  if (waitingView === value) return;
+  waitingView = value;
+  try { localStorage.setItem(WAITING_VIEW_KEY, waitingView); } catch {}
+  renderWaiting(waitingItemsCache);
+}
+
 function renderWaiting(items) {
+  waitingItemsCache = items;
   document.getElementById('waitingCount').textContent = items.length;
   document.getElementById('waitingSectionCount').textContent = items.length;
   const list = document.getElementById('waitingList');
@@ -2442,7 +2555,17 @@ function renderWaiting(items) {
     list.appendChild(empty);
     return;
   }
-  waitingOrder(items).forEach(item => list.appendChild(renderWaitingRow(item)));
+  if (waitingView === 'urgent') {
+    waitingOrder(items).forEach(item => list.appendChild(renderWaitingRow(item, { showProject: true })));
+    return;
+  }
+  waitingGroups(items).forEach(([key, group]) => {
+    list.appendChild(uiGroupHeading(uiGroupLabel(key), group.length, {
+      projectName: key === '__misc__' ? null : key,
+      onOpenProject: key === '__misc__' ? null : () => openProjectTab(key),
+    }));
+    group.forEach(item => list.appendChild(renderWaitingRow(item)));
+  });
 }
 
 // 확인 대기 체크(`.d-wcb`, 체크는 CSS로 그린다) — 확인 대기 줄이 있는 곳은 모두 이 부품을 쓴다
@@ -2474,10 +2597,10 @@ function waitingCheckbox(item, row, done) {
 
 // 레일의 확인 대기 한 줄 — 두 줄 구성.
 //   첫 줄: 제목(최대 2줄) + `원문`
-//   둘째 줄: `결제팀 · 2일째`(3일째부터 주의색) + 답변 받을 날 배지(지났거나 오늘일 때만)
-//            + `오늘 다시 확인` / `9월 24일 다시 확인` / `오늘 요청함`
+//   둘째 줄: (급한 순 보기면 맨 앞에 조용한 프로젝트 표기) + `결제팀 · 2일째`(3일째부터 주의색)
+//            + 답변 받을 날 배지(지났거나 오늘일 때만) + `오늘 다시 확인` / `9월 24일 다시 확인` / `오늘 요청함`
 // 값 수정은 더보기·상세가 맡는다.
-function renderWaitingRow(item) {
+function renderWaitingRow(item, opts = {}) {
   const done = item.status === 'done';
   const today = todayStr();
   const detail = typeof wfItem === 'function' ? wfItem(item.id) : null;
@@ -2487,6 +2610,10 @@ function renderWaitingRow(item) {
 
   // 조각으로 모아 두 줄째에 그대로 펼쳐 넣는다(한 겹 더 감싸면 사이 여백이 죽는다).
   const sub = document.createDocumentFragment();
+  // 프로젝트별 묶음일 때는 소제목이 이미 프로젝트를 말해 준다 — 급한 순일 때만 줄 맨 앞에 붙인다.
+  if (opts.showProject && (item.jira || item.group || item.project)) {
+    sub.appendChild(uiInlineProject(item, { lead: false }));
+  }
   // `결제팀 · 2일째` — 한 덩어리로 붙여 읽는다(3일째부터 주의색 글자, 배지는 아니다).
   const age = waitingAgeText(item.created, today);
   if (item.who || age) {
@@ -3317,7 +3444,7 @@ const panelMeetingKey = event => event ? (event.id || `${event.start || ''} ${ev
 function panelMeetingWhen(event) {
   const day = !event.date || event.date === todayStr() ? '오늘' : uiKoDate(event.date);
   const time = `${event.start || ''}${event.end ? `–${event.end}` : ''}`;
-  return [[day, time].filter(Boolean).join(' '), wfMeetingProjectName(event)].filter(Boolean).join(' · ');
+  return [[day, time].filter(Boolean).join(' '), wfMeetingProjectName(event, { short: true })].filter(Boolean).join(' · ');
 }
 
 /* 회의 정리 내용은 한 벌이고 자리만 둘이다:
@@ -4131,17 +4258,20 @@ function meetingsTabRow(event) {
   title.className = 'ti';
   title.textContent = event.title;
   wrap.appendChild(title);
-  const projectName = wfMeetingProjectName(event);
+  // 줄 안의 짧은 표기라 지라는 요약만(모르면 키) — 색 점은 원래 키로 고른다(표기와 무관하게 같은 색).
+  const projectName = wfMeetingProjectName(event, { short: true });
+  const projectFull = wfMeetingProjectName(event);
   if (projectName) {
     const tag = document.createElement('span');
     tag.className = 'pj';
+    tag.title = projectFull;
     const name = document.createElement('span');
     name.className = 'nm';
     name.textContent = projectName;
-    tag.append(uiProjectDot(projectName), name);
+    tag.append(uiProjectDot(wfMeetingColorKey(event)), name);
     wrap.appendChild(tag);
   }
-  button.title = [event.title, projectName].filter(Boolean).join(' · ');
+  button.title = [event.title, projectFull].filter(Boolean).join(' · ');
 
   // 0은 찍지 않는다 — 지금 손댈 것(검토할 초안)만 배지로 세우고 나머지는 조용한 글자다.
   // 미완료는 할 일·확인 대기만 센다 — 결정은 끝내는 대상이 아니라 세지 않는다.
@@ -4544,21 +4674,23 @@ function palResultRow(entry, index, query) {
     return span;
   };
   // 제목 + 그 뒤에 붙는 `· ● 프로젝트`(10번 규칙). 프로젝트가 없으면 제목만 남는다.
-  const titleCell = (html, text, project) => {
+  // 줄 안의 짧은 표기라 지라는 요약만(모르면 키) — 전체 `KEY · 요약`은 title 툴팁에, 색 점은 원래 키로.
+  const titleCell = (html, text, projectItem) => {
     const wrap = cell('tiwrap');
     const title = document.createElement('span');
     title.className = 'ti';
     title.innerHTML = html;
     title.title = text;
     wrap.appendChild(title);
-    if (!project) return;
+    const short = projectItem ? uiProjectName(projectItem, { short: true }) : '';
+    if (!short) return;
     const tag = document.createElement('span');
     tag.className = 'pj';
-    tag.title = project;
+    tag.title = uiProjectName(projectItem);
     const name = document.createElement('span');
     name.className = 'nm';
-    name.textContent = project;
-    tag.append('· ', uiProjectDot(project), name);
+    name.textContent = short;
+    tag.append('· ', uiProjectDot(uiProjectColorKey(projectItem)), name);
     wrap.appendChild(tag);
   };
   if (entry.kind === 'meeting') {
@@ -4571,16 +4703,15 @@ function palResultRow(entry, index, query) {
     const when = `${uiKoDateShort(event.date)}${event.start ? ` · ${event.start}` : ''}`;
     cell('tag', '회의');
     cell('when num', escapeHtml(when));
-    titleCell(palHighlight(event.title, query), event.title, event.project?.label || event.project?.value || '');
+    titleCell(palHighlight(event.title, query), event.title, typeof wfMeetingProjectItem === 'function' ? wfMeetingProjectItem(event) : null);
     cell('st', escapeHtml(state.join(' · ')));
     row.setAttribute('aria-label', `회의 ${when} ${event.title}`);
   } else {
     const item = entry.item;
-    const project = item.label || item.group || item.project || '';
     const due = item.status === 'done' ? null : uiItemDueText(item);
     const status = item.status === 'done' ? { text: '완료', tone: '' } : due || (item.doing ? { text: '진행 중', tone: '' } : null);
     cell('tag', escapeHtml(PAL_TAG[item.type] || item.type || ''));
-    titleCell(palHighlight(item.description, query), item.description, project);
+    titleCell(palHighlight(item.description, query), item.description, item);
     cell(`st${status ? uiTone(status.tone) : ''}`, status ? escapeHtml(status.text) : '');
     row.setAttribute('aria-label', `${PAL_TAG[item.type] || ''} ${item.description}`);
   }
@@ -4857,7 +4988,9 @@ function renderInbox(items) {
     title.title = item.description;
     if (item.isNew) { title.prepend(renderNewDot(item)); observeNewItem(row, item); }
     main.appendChild(title);
-    // 원문은 제목 바로 뒤에 늘 보인다(다른 줄과 같은 조용한 `원문` 링크).
+    // 프로젝트가 있으면 제목 뒤에 조용한 표기(다른 줄과 같은 uiInlineProject) — 없으면 지어내지 않는다.
+    if (item.jira || item.group || item.project) main.appendChild(uiInlineProject(item));
+    // 원문은 그 뒤에 늘 보인다(다른 줄과 같은 조용한 `원문` 링크).
     const source = uiSourceLink(item);
     if (source) main.appendChild(source);
     row.appendChild(main);
@@ -5389,6 +5522,20 @@ if (todayHeadMoreSlot) {
   ], 'd-iconbtn sm d-headmore'));
 }
 
+// 확인 대기 카드 머리의 ⋯ — 보기 전환(프로젝트별/급한 순)만 있다(눌러 보는 건 하나뿐).
+const waitingHeadMoreSlot = document.getElementById('waitingHeadMore');
+if (waitingHeadMoreSlot) {
+  waitingHeadMoreSlot.appendChild(uiMoreButton('확인 대기 보기', () => [
+    [{
+      field: '보기',
+      control: uiMenuChips([['project', '프로젝트별'], ['urgent', '급한 순']], waitingView, (value) => {
+        uiMenuClose();
+        setWaitingView(value);
+      }),
+    }],
+  ], 'd-iconbtn sm d-headmore'));
+}
+
 // 검색 팔레트를 여는 두 자리: 헤더의 `검색 ⌘K` 버튼, `새로 들어온 것` 제목 옆 `오늘 신규 N`.
 document.getElementById('searchEntryBtn')?.addEventListener('click', () => palOpen({}));
 document.getElementById('createdTodayBtn')?.addEventListener('click', () => palOpen({ newOnly: true }));
@@ -5416,6 +5563,9 @@ projectKeyRestore();
 
 function setActiveTab(tab) {
   if (!TABS[tab]) tab = 'today';
+  // 프로젝트 탭에 새로 들어올 때만 왼쪽 목록 차례를 다시 정렬한다(체크 등으로 이미 그 탭에 있는 동안
+  // 다시 그리는 것은 고정된 차례를 그대로 쓴다 — projectOrderResort).
+  if (tab === 'projects' && activeTabKey !== 'projects') projectOrderResort = true;
   Object.entries(TABS).forEach(([key, cfg]) => {
     const active = key === tab;
     document.getElementById(cfg.grid).hidden = !active;
@@ -5473,8 +5623,12 @@ const refreshBtn = document.getElementById('refreshBtn');
 
 refreshBtn.addEventListener('click', async () => {
   refreshBtn.classList.add('spinning');
+  // 새로고침은 프로젝트 탭에 들어올 때와 같이 왼쪽 목록 차례를 다시 정렬해도 되는 때다.
+  projectOrderResort = true;
+  // 성공은 도는 아이콘이 말해 준다 — 알림을 또 띄우지 않는다(실패는 request가 알린다).
+  refreshBtn.setAttribute('aria-busy', 'true');
   await load();
-  announce('새로고침했어요');
+  refreshBtn.removeAttribute('aria-busy');
   setTimeout(() => refreshBtn.classList.remove('spinning'), 400);
 });
 
@@ -5804,7 +5958,6 @@ async function endPull() {
   pullIndicator.classList.add('refreshing');
   try {
     await load();
-    announce('새로고침했어요');
   } finally {
     pullRefreshing = false;
     resetPull(true);
