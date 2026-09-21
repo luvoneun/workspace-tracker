@@ -17,7 +17,7 @@ module.exports = ({ directory, sources, legacy, currentWeek }) => {
   function read() {
     if (!fs.existsSync(filename)) return { schema: 1, weeks: {} };
     const value = JSON.parse(fs.readFileSync(filename, 'utf8'));
-    if (value.schema !== 1 || !value.weeks) throw new Error('보고 기록 형식을 확인해 주세요. 원본은 보존되어 있습니다.');
+    if (value.schema !== 1 || !value.weeks) throw new Error('보고 기록 형식을 확인해 주세요. 원본은 그대로 있어요.');
     return value;
   }
   function eligible(item, weekKey) {
@@ -79,11 +79,11 @@ module.exports = ({ directory, sources, legacy, currentWeek }) => {
   function clean(row) { const { suggestion, needsReview, currentEvidence, ...rest } = row; return rest; }
   function change({ weekKey, revision, action, id, text, ids, token }) {
     const state=read(), current=view(weekKey,state);
-    if (revision !== current.revision) { const error=new Error('새 기록이나 다른 창의 변경이 있습니다. 입력은 보존했습니다. 최신 내용을 확인한 뒤 다시 저장해 주세요.');error.status=409;throw error; }
+    if (revision !== current.revision) { const error=new Error('새 기록이나 다른 창의 변경이 있어요. 적은 내용은 그대로 있어요. 최신 내용을 확인한 뒤 다시 저장해 주세요.');error.status=409;throw error; }
     let rows=current.rows.map(clean); const row=rows.find(row=>row.id===id), shown=current.rows.find(row=>row.id===id);
     if(action==='undo') {
-      const prior=undo.get(token); if(!prior || prior.weekKey!==weekKey)throw new Error('되돌리기 기록이 만료되었습니다.');
-      if(hash(state.weeks[weekKey]?.rows)!==prior.after)throw new Error('이후 다른 변경이 있어 되돌릴 수 없습니다. 최신 보고를 확인해 주세요.');
+      const prior=undo.get(token); if(!prior || prior.weekKey!==weekKey)throw new Error('되돌리기 기록이 만료됐어요.');
+      if(hash(state.weeks[weekKey]?.rows)!==prior.after)throw new Error('그 뒤에 다른 변경이 있어 되돌릴 수 없어요. 최신 보고를 확인해 주세요.');
       rows=prior.rows;
     } else if(action==='add') {
       if(typeof text!=='string'||!text.trim()||text.length>10000)throw new Error('보고 문장을 입력해 주세요.');
@@ -91,17 +91,17 @@ module.exports = ({ directory, sources, legacy, currentWeek }) => {
     } else if(action==='merge') {
       if(!Array.isArray(ids)||ids.length<2||new Set(ids).size!==ids.length)throw new Error('묶을 보고 항목을 선택해 주세요.');
       const selected=rows.filter(row=>ids.includes(row.id));
-      if(selected.length!==ids.length||selected.some(row=>row.excluded)||new Set(selected.map(row=>row.heading)).size!==1)throw new Error('같은 상태의 보고 항목만 묶을 수 있습니다.');
+      if(selected.length!==ids.length||selected.some(row=>row.excluded)||new Set(selected.map(row=>row.heading)).size!==1)throw new Error('같은 상태의 문장만 묶을 수 있어요.');
       const sourceIds=[...new Set(selected.flatMap(row=>row.sourceIds))];
       rows=rows.filter(row=>!ids.includes(row.id));
       rows.push({id:randomUUID(),heading:selected[0].heading,group:new Set(selected.map(row=>row.group)).size===1?selected[0].group:'여러 프로젝트',bucket:new Set(selected.map(row=>row.bucket)).size===1?selected[0].bucket:null,text:selected.map(row=>row.text).join('\n'),sourceIds,evidence:[...new Map(selected.flatMap(row=>row.evidence).map(item=>[item.id,item])).values()],locked:true,excluded:false});
     } else {
-      if(!row)throw new Error('보고 항목을 찾을 수 없습니다.');
+      if(!row)throw new Error('보고 항목을 찾을 수 없어요.');
       if(action==='edit') { if(typeof text!=='string'||!text.trim()||text.length>10000)throw new Error('보고 문장을 10,000자 이내로 입력해 주세요.');row.text=text.trim();row.locked=true;row.legacy=false;row.evidence=shown.currentEvidence; }
       else if(action==='exclude') row.excluded=!row.excluded;
       else if(action==='accept') { if(!shown.suggestion || shown.suggestion.missing || shown.suggestion.mixed)throw new Error('원본 상태를 확인하고 문장을 직접 수정해 주세요.');Object.assign(row,shown.suggestion,{locked:true,legacy:false});delete row.added;delete row.missing;delete row.mixed; }
       else if(action==='acknowledge') { row.evidence=shown.suggestion?.evidence || shown.currentEvidence;row.sourceIds=shown.suggestion?.sourceIds || row.sourceIds;row.legacy=false;row.locked=true; }
-      else throw new Error('지원하지 않는 보고 변경입니다.');
+      else throw new Error('지원하지 않는 보고 변경이에요.');
     }
     const undoToken=randomUUID();
     state.weeks[weekKey]={rows,updatedAt:new Date().toISOString()};atomicWrite(filename,JSON.stringify(state,null,2));

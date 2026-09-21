@@ -13,7 +13,7 @@ module.exports = ({ files, pattern, parse, validateDate, today }) => {
   }
   return function batch({ ids, change, undoToken }) {
     const previous = undoToken ? history.get(undoToken) : null;
-    if (undoToken && !previous) throw new Error('실행 취소 기록이 만료되었습니다.');
+    if (undoToken && !previous) throw new Error('실행 취소 기록이 만료됐어요.');
     if (previous) ids = previous.map(item => item.id);
     if (!Array.isArray(ids) || !ids.length || ids.length > 500 || ids.some(id => typeof id !== 'string') || new Set(ids).size !== ids.length) throw new Error('선택한 업무를 확인해 주세요.');
     let keys, values;
@@ -31,9 +31,9 @@ module.exports = ({ files, pattern, parse, validateDate, today }) => {
       } else if (Object.hasOwn(change, 'status')) {
         // 일괄로 여는 상태 변경은 "완료로 표시" 하나뿐이다. 완료 취소는 줄마다 체크로 되돌린다.
         // 완료일은 서버가 오늘로 적는다(추측한 날짜를 기록으로 남기지 않는다).
-        if (change.status !== 'done') throw new Error('지원하지 않는 일괄 변경입니다.');
+        if (change.status !== 'done') throw new Error('지원하지 않는 일괄 변경이에요.');
         keys = ['status', 'completed']; values = { status: 'done', completed: today() };
-      } else throw new Error('지원하지 않는 일괄 변경입니다.');
+      } else throw new Error('지원하지 않는 일괄 변경이에요.');
     }
     const selected = new Set(ids), found = new Set(), changes = [], updates = [];
     for (const file of files()) {
@@ -43,11 +43,11 @@ module.exports = ({ files, pattern, parse, validateDate, today }) => {
         if (!match) return line;
         const fields = parse(match[3]);
         if (!selected.has(fields.id)) return line;
-        if (found.has(fields.id)) throw new Error('중복된 업무 ID가 있습니다.');
-        if (match[2] !== 'task' || (!previous && fields.status === 'done')) throw new Error('미완료 업무만 선택할 수 있습니다.');
+        if (found.has(fields.id)) throw new Error('중복된 업무 ID가 있어요.');
+        if (match[2] !== 'task' || (!previous && fields.status === 'done')) throw new Error('미완료 업무만 고를 수 있어요.');
         const current = pick(fields, keys);
         const record = previous?.find(item => item.id === fields.id);
-        if (record && keys.some(key => current[key] !== record.after[key])) throw new Error('이후 변경된 업무가 있어 실행 취소할 수 없습니다.');
+        if (record && keys.some(key => current[key] !== record.after[key])) throw new Error('그 뒤에 바뀐 업무가 있어 실행 취소할 수 없어요.');
         const next = record ? record.before : values;
         changes.push({ id: fields.id, before: current, after: { ...next } });
         found.add(fields.id);
@@ -55,7 +55,7 @@ module.exports = ({ files, pattern, parse, validateDate, today }) => {
       }).join('\n');
       if (before !== after) updates.push({ file, before, after });
     }
-    if (found.size !== ids.length) throw new Error('일부 업무가 삭제되었거나 찾을 수 없습니다. 새로고침해 주세요.');
+    if (found.size !== ids.length) throw new Error('일부 업무가 삭제됐거나 찾을 수 없어요. 새로고침해 주세요.');
     const written = [];
     try {
       for (const update of updates) {

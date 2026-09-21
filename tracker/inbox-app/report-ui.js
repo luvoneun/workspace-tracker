@@ -36,7 +36,7 @@ function reportButton(text, action, className = 'd-btn') {
   el.addEventListener('click', async () => {
     el.disabled = true;
     try { await action(); }
-    catch (error) { showNotice(error.message || '저장하지 못했습니다. 입력은 보존됩니다.', true); }
+    catch (error) { showNotice(error.message || '저장하지 못했어요. 적은 내용은 그대로 있어요', true); }
     finally { el.disabled = false; }
   });
   return el;
@@ -140,7 +140,7 @@ async function reportChange(item, action) {
         const latest = weeklyReportsCache.find(entry => entry.weekKey === item.weekKey);
         if (latest) { reportBusy = false; renderReportDraft(latest); }
       }
-      throw new Error(result.error || '저장을 확인하지 못했습니다. 입력은 보존됩니다.');
+      throw new Error(result.error || '저장됐는지 확인하지 못했어요. 적은 내용은 그대로 있어요');
     }
     if (action.action === 'edit') reportEdits.delete(`${item.weekKey}:${action.id}`);
     if (action.action === 'add') reportEdits.delete(`${item.weekKey}:new`);
@@ -152,7 +152,7 @@ async function reportChange(item, action) {
     if (cached) cached.draft = result.report;
   } finally { reportBusy = false; }
   renderReportDraft(item);
-  announce('보고 내용을 저장했습니다.');
+  announce('보고 내용을 저장했어요');
 }
 
 // ---------- 묶기 모드(같은 상태의 문장만) ----------
@@ -184,7 +184,7 @@ function reportMergeBar(item) {
   if (!open) return;
   const inner = reportNode('div', undefined, 'bar');
   inner.appendChild(reportNode('span', `${reportSelection.size}개 선택`, 'ct num'));
-  inner.appendChild(reportNode('span', `${reportMergeHeading} 안에서만 고를 수 있습니다`, 'rp-hint'));
+  inner.appendChild(reportNode('span', `${reportMergeHeading} 안에서만 고를 수 있어요`, 'rp-hint'));
   inner.appendChild(reportNode('span', undefined, 'sp'));
   const merge = reportButton('선택한 문장 묶기', () => reportChange(item, { action: 'merge', ids: [...reportSelection] }), 'd-btn pri');
   merge.disabled = reportBusy || reportSelection.size < 2;
@@ -221,7 +221,7 @@ function reportDocHead(item, host) {
     }
     try {
       await navigator.clipboard.writeText(reportCopyText(report));
-      announce('보고 내용을 복사했습니다.');
+      announce('보고 내용을 복사했어요');
     } catch {
       reportSelectPreview();
       throw new Error('복사 미리보기의 내용을 직접 선택해 복사해 주세요.');
@@ -272,7 +272,7 @@ function reportSuggestionBlock(item, row) {
   const suggestion = row.suggestion;
   const box = reportNode('div', undefined, 'rp-sg');
   box.appendChild(reportNode('div', suggestion.added ? `원본이 바뀌었어요 · 새 관련 업무 ${suggestion.added}개` : '원본이 바뀌었어요', 'hd'));
-  box.appendChild(reportNode('div', suggestion.text || '연결된 원본을 찾을 수 없습니다.', 'tx'));
+  box.appendChild(reportNode('div', suggestion.text || '연결된 원본을 찾지 못했어요.', 'tx'));
   const actions = reportNode('div', undefined, 'ac');
   if (!suggestion.missing && !suggestion.mixed) {
     actions.appendChild(reportButton('적용', () => reportChange(item, { action: 'accept', id: row.id }), 'd-btn sm'));
@@ -280,8 +280,8 @@ function reportSuggestionBlock(item, row) {
   actions.appendChild(reportButton('그대로 두기', () => reportChange(item, { action: 'acknowledge', id: row.id }), 'd-btn sm'));
   box.appendChild(actions);
   box.appendChild(reportNode('div', suggestion.mixed || suggestion.missing
-    ? '원본 상태가 다르거나 삭제된 업무가 있습니다. 문장을 직접 확인해 주세요.'
-    : '현재 문장은 그대로 보존됩니다.', 'hint'));
+    ? '원본 상태가 다르거나 삭제된 업무가 있어요. 문장을 직접 확인해 주세요.'
+    : '지금 문장은 그대로 둬요.', 'hint'));
   return box;
 }
 
@@ -390,7 +390,7 @@ function reportPlanSection(item, host, newIds) {
   const rows = reportPlanRows(item.draft.rows);
   host.appendChild(reportNode('div', REPORT_PLAN_HEADING, 'rp-h'));
   for (const row of rows) reportSentenceRow(item, row, { host, newIds, plan: true });
-  if (!rows.length) host.appendChild(reportNode('div', '직접 쓴 문장만 들어갑니다', 'rp-hint'));
+  if (!rows.length) host.appendChild(reportNode('div', '직접 쓴 문장만 들어가요', 'rp-hint'));
 
   const key = `${item.weekKey}:new`;
   const add = reportNode('div', undefined, 'rp-add');
@@ -412,7 +412,7 @@ function reportPlanSection(item, host, newIds) {
     if (!input.value.trim()) return;
     input.disabled = true;
     try { await reportChange(item, { action: 'add', text: input.value }); }
-    catch (error) { showNotice(error.message || '저장을 확인하지 못했습니다. 입력은 보존됩니다.', true); }
+    catch (error) { showNotice(error.message || '저장됐는지 확인하지 못했어요. 적은 내용은 그대로 있어요', true); }
     finally { input.disabled = false; }
     // 다시 그려졌으면 새로 생긴 입력칸으로, 실패해서 그대로면 같은 칸으로 돌아온다.
     document.getElementById('reportPlanInput')?.focus();
@@ -427,7 +427,7 @@ function reportRecordsView(item, host) {
   item.draft.rows.forEach(row => [...(row.evidence || []), ...(row.suggestion?.evidence || [])]
     .forEach(source => records.set(source.id, { source, row })));
   if (!records.size) {
-    host.appendChild(reportNode('div', '이번 주에 연결된 업무 기록이 없습니다.', 'rp-hint'));
+    host.appendChild(reportNode('div', '이번 주에 연결된 업무 기록이 없어요.', 'rp-hint'));
     return;
   }
   const list = reportNode('div', undefined, 'rp-recs');
@@ -454,7 +454,7 @@ function reportPreview(report) {
   const box = reportNode('div', undefined, 'rp-slackbox');
   box.id = 'reportPreviewBox';
   const blocks = reportCopyBlocks(report);
-  if (!blocks.length) box.appendChild(reportNode('div', '보고에 담긴 문장이 없습니다.', 'rp-hint'));
+  if (!blocks.length) box.appendChild(reportNode('div', '보고에 담긴 문장이 없어요.', 'rp-hint'));
   for (const block of blocks) {
     const group = reportNode('div', undefined, 'blk');
     group.appendChild(reportNode('div', block.title, 'hd'));
@@ -504,7 +504,7 @@ function renderReportDraft(item) {
     reportRecordsView(item, body);
   } else {
     const sections = reportDocSections(report.rows);
-    if (!sections.length) body.appendChild(reportNode('div', '이번 주 기록이 생기면 문서에 나타납니다.', 'rp-hint'));
+    if (!sections.length) body.appendChild(reportNode('div', '이번 주 기록이 생기면 여기에 나타나요.', 'rp-hint'));
     for (const section of sections) {
       body.appendChild(reportNode('div', section.heading, 'rp-h'));
       for (const group of section.groups) {

@@ -52,7 +52,7 @@ function idempotent(req, payload, action) {
     const file=path.join(TRACKER_DIR,'.request-ledger.json');
     const entries=nativeFs.existsSync(file)?JSON.parse(nativeFs.readFileSync(file,'utf8')):{};
     const digest=createHash('sha256').update(req.url+JSON.stringify(payload)).digest('hex');
-    if(entries[key]) {if(entries[key].digest!==digest)throw new Error('다른 내용으로 같은 요청을 재사용할 수 없습니다.');return entries[key].result;}
+    if(entries[key]) {if(entries[key].digest!==digest)throw new Error('다른 내용으로 같은 요청을 다시 쓸 수 없어요.');return entries[key].result;}
     const result=action();entries[key]={digest,result};
     const retained=Object.fromEntries(Object.entries(entries).slice(-1000));atomicWrite(file,JSON.stringify(retained));return result;
   });
@@ -1049,9 +1049,9 @@ function readBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
     let bytes = 0;
-    req.on('data', chunk => { bytes += chunk.length; if (bytes > 1024 * 1024) { const error = new Error('요청이 너무 큽니다.'); error.status = 413; reject(error); return; } body += chunk; });
+    req.on('data', chunk => { bytes += chunk.length; if (bytes > 1024 * 1024) { const error = new Error('요청이 너무 커요.'); error.status = 413; reject(error); return; } body += chunk; });
     req.on('error', reject);
-    req.on('aborted', () => reject(new Error('요청이 중단되었습니다.')));
+    req.on('aborted', () => reject(new Error('요청이 중간에 끊겼어요.')));
     req.on('end', () => {
       try {
         resolve(body ? JSON.parse(body) : {});
@@ -1117,7 +1117,7 @@ const handleRequest = (req, res) => {
           }
           atomicWrite(file,JSON.stringify(state,null,2));return {ok:true};
         }
-        throw new Error('지원하지 않는 가져오기입니다.');
+        throw new Error('지원하지 않는 가져오기예요.');
       });res.writeHead(200,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(result));
     }).catch(error=>{res.writeHead(error.status || 400,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify({ok:false,error:error.message,code:error.code}));});return;
   }
@@ -1523,7 +1523,7 @@ function safeHandle(req, res) {
   } catch(error) {
     console.error('요청 처리 실패:', error.message);
     if (!res.headersSent) res.writeHead(500, {'Content-Type':'application/json; charset=utf-8'});
-    res.end(JSON.stringify({ok:false,error:'기록을 읽지 못했습니다. 파일을 덮어쓰지 않았습니다. 백업을 확인해 주세요.'}));
+    res.end(JSON.stringify({ok:false,error:'기록을 읽지 못했어요. 파일은 덮어쓰지 않았어요. 백업을 확인해 주세요.'}));
   } finally { readScope=null; }
 }
 const server = http.createServer(safeHandle);

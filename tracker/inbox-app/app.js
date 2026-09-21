@@ -289,7 +289,7 @@ function uiSourceLink(item, label = '원문') {
   link.target = '_blank';
   link.rel = 'noopener';
   link.textContent = label;
-  link.title = '슬랙 원문을 새 탭에서 엽니다';
+  link.title = '슬랙 원문을 새 탭에서 열어요';
   link.setAttribute('aria-label', `${item.description} — 슬랙 원문 열기`);
   link.addEventListener('click', event => event.stopPropagation());
   return link;
@@ -601,11 +601,11 @@ function uiTaskRow(item, opts = {}) {
       acts.appendChild(button);
     };
     if (mode === 'later') {
-      move('오늘로', todayStr(), '오늘 할 일로 옮김');
+      move('오늘로', todayStr(), '오늘 할 일로 옮겼어요');
     } else {
-      if (carried) move('오늘 할게요', todayStr(), '오늘 할 일로 확정함');
-      move('내일', tomorrowStr(), '내일로 미룸');
-      move('나중에', null, '나중에 할 일로 옮김 · 기한은 그대로입니다.');
+      if (carried) move('오늘 할게요', todayStr(), '오늘 할 일로 옮겼어요');
+      move('내일', tomorrowStr(), '내일로 미뤘어요');
+      move('나중에', null, '나중에 할 일로 옮겼어요 · 기한은 그대로예요');
     }
     // 슬랙 원문은 제목 뒤 `원문` 링크가 늘 보여 주므로 동작 묶음에는 두지 않는다.
     acts.appendChild(uiMoreButton(`${item.description} — 더 보기`, () => taskMenuSections({ item, mode, card: row })));
@@ -845,7 +845,8 @@ function taskSelectionRefresh() {
   actions.push(project);
   inner.appendChild(project);
 
-  apply('완료로 표시', { status: 'done' });
+  // 완료로 표시는 이 막대에서 가장 많이 누르는 동작이라 2차(연파랑)로 한 단계 올린다.
+  apply('완료로 표시', { status: 'done' }, 'd-btn acc');
   const remove = taskSelectBarButton('삭제', () => taskBatchRemove(), 'd-btn dng');
   actions.push(remove);
   inner.appendChild(remove);
@@ -876,8 +877,8 @@ async function taskBatchApply(change) {
     pushUndo(entry);
     taskSelection.clear();
     await load();
-    showNotice(`${result.count}개 업무를 변경했습니다.`, false, null, { label: '실행 취소', onClick: async () => {
-      if (undoStack[undoStack.length - 1] !== entry) { showNotice('이후 작업부터 순서대로 실행 취소해 주세요.', true); return; }
+    showNotice(`${result.count}개를 바꿨어요`, false, null, { label: '실행 취소', onClick: async () => {
+      if (undoStack[undoStack.length - 1] !== entry) { showNotice('최근 작업부터 순서대로 실행 취소해 주세요', true); return; }
       await replayUndo('undo');
     } });
   } finally {
@@ -918,10 +919,10 @@ async function taskBatchRemove() {
   taskSelection.clear();
   await load();
   showNotice(
-    stopped ? `${removed.length}개까지 삭제하고 멈췄습니다. 나머지는 그대로 있습니다.` : `${removed.length}개를 삭제했습니다.`,
+    stopped ? `${removed.length}개까지 삭제하고 멈췄어요 · 나머지는 그대로 있어요` : `${removed.length}개를 삭제했어요`,
     false, null,
     { label: '되돌리기', onClick: async () => {
-      if (undoStack[undoStack.length - 1] !== entry) { showNotice('이후 작업부터 순서대로 실행 취소해 주세요.', true); return; }
+      if (undoStack[undoStack.length - 1] !== entry) { showNotice('최근 작업부터 순서대로 실행 취소해 주세요', true); return; }
       await replayUndo('undo');
     } },
   );
@@ -996,7 +997,8 @@ function renderProjects() {
     const count = document.createElement('span');
     count.className = 'n num';
     count.textContent = row.open;
-    button.append(name, count);
+    // 오늘 목록의 그룹 제목과 같은 색 점 — 같은 프로젝트는 어디서나 같은 색이다.
+    button.append(uiProjectDot(row.key), name, count);
     button.addEventListener('click', () => {
       if (projectKey === row.key) return;
       projectKey = row.key;
@@ -1052,16 +1054,17 @@ function projectTaskRow(item) {
   title.addEventListener('click', () => panelOpen({ id: item.id }));
   row.appendChild(title);
 
+  // 상태말은 오늘 목록과 같은 말·아이콘을 쓴다(깃발 + `긴급`/`중요`, 달력 + 기한).
   const priority = document.createElement('span');
   const meta = UI_PRIORITY_META[item.priority];
   priority.className = 'pr' + (meta ? uiTone(meta.tone) : '');
-  if (meta) priority.innerHTML = `<i class="d-dot"></i>${meta.text}`;
+  if (meta) { priority.innerHTML = uiIcon('flag') + escapeHtml(meta.text); priority.title = meta.hint; }
   row.appendChild(priority);
 
   const due = uiDueText(item.due, 'full');
   const deadline = document.createElement('span');
   deadline.className = 'dd' + (due ? uiTone(due.tone) : '');
-  deadline.textContent = due ? due.text : '';
+  if (due) { deadline.innerHTML = uiIcon('calendar') + escapeHtml(due.text); deadline.title = `기한은 ${uiKoDate(item.due)}이에요`; }
   row.appendChild(deadline);
 
   const acts = document.createElement('span');
@@ -1074,7 +1077,7 @@ function projectTaskRow(item) {
   move.addEventListener('click', async () => {
     move.disabled = true;
     await fadeOutAndRun(row, () => setTaskScheduled(item.id, mode === 'later' ? todayStr() : null),
-      mode === 'later' ? '오늘 할 일로 옮김' : '나중에 할 일로 옮김 · 기한은 그대로입니다.');
+      mode === 'later' ? '오늘 할 일로 옮겼어요' : '나중에 할 일로 옮겼어요 · 기한은 그대로예요');
     move.disabled = false;
   });
   acts.append(move, uiMoreButton(`${item.description} — 더 보기`, () => taskMenuSections({ item, mode, card: row })));
@@ -1137,7 +1140,7 @@ function projectSimpleRow(text, meta, onOpen, id) {
 function renderProjectDetail(body, row) {
   body.replaceChildren();
   if (!row) {
-    body.insertAdjacentHTML('beforeend', '<div class="d-empty">아직 프로젝트가 없습니다. 업무에 프로젝트를 지정하면 여기에 모입니다.</div>');
+    body.insertAdjacentHTML('beforeend', '<div class="d-empty">아직 프로젝트가 없어요. 업무에 프로젝트를 지정하면 여기 모여요.</div>');
     return;
   }
   const items = workflowData.items.filter(item => wfKey(item) === row.key);
@@ -1250,7 +1253,7 @@ function showNotice(message, error = false, retry = null, action = null) {
         await request('/api/track/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
         lastRemovedId = null;
         await load();
-        announce('삭제한 항목을 복원했습니다.');
+        announce('삭제한 항목을 되살렸어요');
       } catch { undo.disabled = false; }
     });
     region.appendChild(undo);
@@ -1281,7 +1284,7 @@ function showNotice(message, error = false, retry = null, action = null) {
 }
 
 // 저장이 멈춘 동안 계속 떠 있는 안내. 스낵바와 달리 스스로 사라지지 않는다.
-const STORAGE_BANNER_TEXT = '데이터를 지키기 위해 저장을 멈췄습니다. 지금까지의 기록은 그대로 있습니다. README의 "복구 필요 상태"를 따라 정리한 뒤 서버를 다시 시작해 주세요.';
+const STORAGE_BANNER_TEXT = '복구가 필요해서 저장을 멈췄어요. 지금까지의 기록은 그대로 있어요. README의 "복구 필요 상태"를 따라 정리한 뒤 서버를 다시 시작해 주세요.';
 function renderStorageBanner(storage) {
   const banner = document.getElementById('storageBanner');
   // 예전 서버에는 이 정보가 없다. 모르는 상태에서는 화면을 바꾸지 않는다.
@@ -1326,21 +1329,21 @@ async function request(url, options) {
     try { text = await response.text(); data = JSON.parse(text); parsed = true; } catch { data = null; }
     response.json = parsed ? async () => data : async () => JSON.parse(text);
     if (!response.ok || data?.ok === false) {
-      const failure = new Error(data?.error || (response.ok ? '저장하지 못했습니다.' : `요청 실패 (${response.status})`));
+      const failure = new Error(data?.error || (response.ok ? '저장하지 못했어요' : `요청이 실패했어요 (${response.status})`));
       failure.code = data?.code;
       throw failure;
     }
     if(retryKey)pendingRequestKeys.delete(retryKey);
     if (writing) recordUndoFor(url, JSON.parse(options.body || '{}'));
     if (url === '/api/track/remove' && !undoReplaying) lastRemovedId = JSON.parse(options.body).id;
-    if (writing && !quiet) showNotice('저장했습니다.');
+    if (writing && !quiet) showNotice('저장했어요');
     return response;
   } catch (error) {
     error.reported = true;
     if (error.code === 'RECOVERY_NEEDED') {
       renderStorageBanner({ recoveryNeeded: true });
       showNotice(error.message, true);
-    } else showNotice(writing ? '저장을 확인하지 못했습니다. 입력은 유지됩니다. 연결을 확인한 뒤 다시 시도해 주세요.' : '목록을 불러오지 못했습니다.', true, writing ? null : () => load());
+    } else showNotice(writing ? '저장됐는지 확인하지 못했어요. 입력한 내용은 그대로 있어요' : '목록을 불러오지 못했어요', true, writing ? null : () => load());
     throw error;
   } finally {
     clearTimeout(timeout);
@@ -1395,7 +1398,7 @@ async function replayUndo(direction) {
   const [from, to] = direction === 'undo' ? [undoStack, redoStack] : [redoStack, undoStack];
   const entry = from.pop();
   if (!entry) {
-    showNotice(direction === 'undo' ? '되돌릴 작업이 없습니다.' : '다시 실행할 작업이 없습니다.');
+    showNotice(direction === 'undo' ? '되돌릴 작업이 없어요' : '다시 실행할 작업이 없어요');
     return;
   }
   undoReplaying = true;
@@ -1403,7 +1406,7 @@ async function replayUndo(direction) {
     await entry[direction]();
     to.push(entry);
     await load();
-    showNotice(`${direction === 'undo' ? '되돌림' : '다시 실행'}${entry.label ? `: ${entry.label}` : ''}`);
+    showNotice(`${direction === 'undo' ? '되돌렸어요' : '다시 실행했어요'}${entry.label ? ` · ${entry.label}` : ''}`);
   } catch {
     from.push(entry);
   } finally {
@@ -1533,8 +1536,8 @@ function renderDateBar(data) {
     label.textContent = `${source.name} ${age}`;
     warn.append(dot, label);
     warn.title = source.lastSync
-      ? `${source.name} 자동 갱신이 ${source.lastSync} 이후 멈춰 있습니다. 목록이 최신이 아닐 수 있어요. 누르면 자세한 상태를 봅니다.`
-      : `${source.name}를 아직 한 번도 가져오지 못했습니다. 누르면 자세한 상태를 봅니다.`;
+      ? `${source.name} 자동 갱신이 ${source.lastSync} 이후 멈춰 있어요. 목록이 최신이 아닐 수 있어요. 누르면 자세한 상태를 볼 수 있어요.`
+      : `${source.name}를 아직 한 번도 가져오지 못했어요. 누르면 자세한 상태를 볼 수 있어요.`;
     warn.setAttribute('aria-label', `${source.name} ${age} — 자동화 상태 보기`);
     warn.addEventListener('click', () => settingsOpen('status', source.key));
     bar.appendChild(warn);
@@ -1559,7 +1562,7 @@ function renderCalendar(calendar) {
   if (!events.length) {
     const empty = document.createElement('div');
     empty.className = 'd-rempty';
-    empty.textContent = calendar?.stale || !calendar?.lastSync ? '오늘 일정을 확인할 수 없습니다.' : '오늘 미팅 없음';
+    empty.textContent = calendar?.stale || !calendar?.lastSync ? '오늘 일정을 가져오지 못했어요.' : '오늘은 미팅이 없어요.';
     list.appendChild(empty);
     return;
   }
@@ -1721,8 +1724,8 @@ function renderSuggestions(suggestions) {
       });
       acts.appendChild(button);
     };
-    if (defer) { move('내일', tomorrowStr(), '내일로 미룸'); move('나중에', null, '나중에 할 일로 옮김'); }
-    else move('오늘로', todayStr(), '오늘 할 일로 옮김');
+    if (defer) { move('내일', tomorrowStr(), '내일로 미뤘어요'); move('나중에', null, '나중에 할 일로 옮겼어요'); }
+    else move('오늘로', todayStr(), '오늘 할 일로 옮겼어요');
     row.appendChild(acts);
     box.appendChild(row);
   });
@@ -1737,7 +1740,7 @@ function renderSuggestions(suggestions) {
     try { localStorage.setItem('suggestDismissed', todayStr()); } catch {}
     zone.hidden = true;
     zone.replaceChildren();
-    announce('오늘은 제안을 접어둡니다.');
+    announce('오늘은 제안을 접어 둘게요');
   });
   foot.appendChild(dismiss);
   box.appendChild(foot);
@@ -1875,7 +1878,7 @@ function renderWeeklyReportDetail(item) {
     detail.replaceChildren();
     const empty = document.createElement('div');
     empty.className = 'd-empty';
-    empty.textContent = '주간 요약 없음';
+    empty.textContent = '아직 주간요약이 없어요.';
     detail.appendChild(empty);
     document.getElementById('weeklyReportPreview')?.replaceChildren();
     return;
@@ -1929,13 +1932,13 @@ function renderDecisions(items) {
   const note = document.getElementById('decisionPendingNote');
   if (note) note.textContent = items.length ? `PRD 미반영 ${items.length}` : '';
   renderRecordColumn(document.getElementById('decisionList'), items,
-    item => recordDecisionRow(item, false), '정해진 내용이 아직 없습니다. 위 첫 줄에서 바로 추가하세요.');
+    item => recordDecisionRow(item, false), '정해진 내용이 아직 없어요. 맨 위 줄에서 바로 적을 수 있어요.');
 }
 
 function renderIdeas(items) {
   document.getElementById('ideaCount').textContent = items.length;
   renderRecordColumn(document.getElementById('ideaList'), items,
-    recordIdeaRow, '아이디어가 아직 없습니다. 위 첫 줄에서 바로 적어 두세요.');
+    recordIdeaRow, '아이디어가 아직 없어요. 맨 위 줄에서 바로 적어 둘 수 있어요.');
 }
 
 // 결정 열 아래 접힌 구역. 펼치면 위에 작은 검색 입력이 함께 보인다.
@@ -1951,7 +1954,7 @@ function renderDecisionArchive() {
   list.replaceChildren();
   if (!decisionArchiveOpen) return;
   if (!items.length) {
-    list.insertAdjacentHTML('beforeend', `<div class="d-empty">${decisionArchiveQuery ? '일치하는 결정 없음' : '반영 완료한 결정 없음'}</div>`);
+    list.insertAdjacentHTML('beforeend', `<div class="d-empty">${decisionArchiveQuery ? '찾는 결정이 없어요.' : '아직 반영 완료한 결정이 없어요.'}</div>`);
     return;
   }
   items.forEach(item => list.appendChild(recordDecisionRow(item, true)));
@@ -1973,7 +1976,7 @@ function recordDecisionRow(item, archived) {
   box.title = 'PRD 반영함으로 표시';
   box.setAttribute('aria-label', `${item.description} — PRD 반영함으로 표시`);
   box.addEventListener('change', () =>
-    fadeOutAndRun(row, () => toggleTask(item.id), archived ? 'PRD 미반영으로 되돌림' : 'PRD 반영함으로 표시함')
+    fadeOutAndRun(row, () => toggleTask(item.id), archived ? 'PRD 미반영으로 되돌렸어요' : 'PRD 반영으로 표시했어요')
   );
   check.appendChild(box);
   check.insertAdjacentHTML('beforeend', '<svg class="d-tick" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7.4 5.7 10.1 11 4.2"/></svg>');
@@ -2031,17 +2034,17 @@ function recordIdeaRow(item) {
   acts.className = 'ac';
   acts.appendChild(uiMoreButton(`${item.description} — 더 보기`, () => [
     [
-      { label: '오늘로 옮기기', onClick: () => fadeOutAndRun(row, () => promote(todayStr()), '오늘 할 일로 옮김') },
+      { label: '오늘로 옮기기', onClick: () => fadeOutAndRun(row, () => promote(todayStr()), '오늘 할 일로 옮겼어요') },
       {
         field: '날짜 정해서 옮기기',
         control: uiDateField({
           value: '',
           label: '옮길 날짜',
           clearable: false,
-          onChange: (value) => { if (value) fadeOutAndRun(row, () => promote(value), '할 일로 옮김'); },
+          onChange: (value) => { if (value) fadeOutAndRun(row, () => promote(value), '할 일로 옮겼어요'); },
         }),
       },
-      { label: '완료로 표시', onClick: () => fadeOutAndRun(row, () => toggleTask(item.id), '완료로 표시함') },
+      { label: '완료로 표시', onClick: () => fadeOutAndRun(row, () => toggleTask(item.id), '완료했어요') },
       { field: '가능성', control: ideaChanceControl(item) },
       { field: '프로젝트', control: ideaProjectControl(item) },
     ],
@@ -2057,7 +2060,7 @@ function ideaChanceControl(item) {
   return uiMenuChips(IDEA_CHANCE_CHIPS, item.priority || 'medium', async (value) => {
     uiMenuClose();
     await setPriority(item.id, value);
-    announce('가능성을 바꿨습니다.');
+    announce('가능성을 바꿨어요');
     await load();
   });
 }
@@ -2070,7 +2073,7 @@ function ideaProjectControl(item) {
     placeholder: '프로젝트 이름',
     onChange: async (project) => {
       await setIdeaProject(item.id, project);
-      announce(project ? '프로젝트 지정함' : '프로젝트 해제함');
+      announce(project ? '프로젝트를 지정했어요' : '프로젝트를 지웠어요');
       await load();
     },
   });
@@ -2091,12 +2094,12 @@ async function createDecisionFromWaiting(item, button) {
       redo: () => postJson('/api/track/restore', { id }),
     });
     await load();
-    announce('정책/얼라인에 남겼습니다. 아이디어·결정 탭에서 내용을 다듬을 수 있어요.');
+    announce('결정으로 남겼어요 · 아이디어·결정 탭에서 다듬을 수 있어요');
   } catch { if (button) button.disabled = false; }
 }
 
 function offerDecisionFromWaiting(item) {
-  showNotice('확인 완료로 표시함', false, null, {
+  showNotice('확인 완료로 표시했어요', false, null, {
     label: '결정으로 남기기',
     onClick: (button) => createDecisionFromWaiting(item, button),
   });
@@ -2107,17 +2110,17 @@ async function markContactedToday(item) {
   const detail = typeof wfItem === 'function' ? wfItem(item.id) : null;
   await postJson('/api/workflow/item', { id: item.id, contacted: todayStr(), followUp: detail?.followUp || null });
   await load();
-  announce('확인 요청을 기록했습니다.');
+  announce('오늘 확인을 요청한 것으로 적었어요');
 }
 
 async function setTaskWho(id, who) {
   await postJson('/api/track/set-who', { id, who: who || null });
-  announce(who ? '누구에게 수정함' : '누구에게 해제함');
+  announce(who ? '누구에게를 적었어요' : '누구에게를 지웠어요');
   await load();
 }
 
 // 줄·상세 어디서 지우든 같은 길: 휴지통으로 보내고(원문 보존) 알림의 `삭제 실행 취소`로 되돌린다.
-function removeTracked(item, card, message = '삭제함') {
+function removeTracked(item, card, message = '삭제했어요') {
   return fadeOutAndRun(card, async () => {
     await postJson('/api/track/remove', { id: item.id });
     await load();
@@ -2140,7 +2143,7 @@ function waitingMenuSections(item, card) {
           label: '다시 확인할 날짜',
           onChange: async (value) => {
             await postJson('/api/workflow/item', { id: item.id, followUp: value });
-            announce(value ? `${uiKoDate(value)}에 다시 확인` : '다시 확인할 날짜 해제함');
+            announce(value ? `${uiKoDate(value)}에 다시 확인할게요` : '다시 확인할 날짜를 지웠어요');
             await load();
           },
         }),
@@ -2152,7 +2155,7 @@ function waitingMenuSections(item, card) {
           label: '회신 기한',
           onChange: async (value) => {
             await setTaskDue(item.id, value);
-            announce(value ? `회신 기한 ${uiKoDate(value)}로 지정함` : '회신 기한 해제함');
+            announce(value ? `회신 기한을 ${uiKoDate(value)}로 정했어요` : '회신 기한을 지웠어요');
           },
         }),
       },
@@ -2293,7 +2296,7 @@ function renderWaitingRow(item) {
       await toggleTask(item.id);
       // 확인이 끝난 내용은 그대로 두면 사라진다 — 알림에서 바로 결정으로 남길 수 있게 한다.
       if (!done) offerDecisionFromWaiting(item);
-    }, done ? '대기중으로 되돌림' : null)
+    }, done ? '대기중으로 되돌렸어요' : null)
   );
   return row;
 }
@@ -2305,12 +2308,12 @@ function renderLaterTasks(items) {
   list.replaceChildren();
   list.classList.toggle('d-list', items.length > 0);
   if (!items.length) {
-    list.innerHTML = '<div class="d-empty">나중에 할 일이 없습니다.</div>';
+    list.innerHTML = '<div class="d-empty">나중에 할 일이 없어요.</div>';
     return;
   }
 
   uiGroupTasks(items).forEach(([key, groupItems]) => {
-    const addRow = uiGroupAddRow(key, '/api/later-task/create', '나중에 할 일 추가함');
+    const addRow = uiGroupAddRow(key, '/api/later-task/create', '나중에 할 일에 추가했어요');
     const heading = uiGroupHeading(uiGroupLabel(key), groupItems.length, {
       projectName: key === '__misc__' ? null : key,
       onAdd: () => { addRow.hidden = false; addRow.querySelector('input').focus(); },
@@ -2388,7 +2391,7 @@ function taskCompletionCheckbox(item, card, done) {
     // 끝내는 순간을 눈으로 보여 준다: 체크가 그려지고 → 제목에 줄이 그어지고 → 옅어진다.
     // 저장·되돌리기 쪽은 그대로다(클래스 하나만 붙인다. 움직임 줄이기에서는 ui.css가 끈다).
     if (!done) card.classList.add('is-completing');
-    fadeOutAndRun(card, async () => { await toggleTask(item.id); if (!done) workflowOutcome(item); }, done ? '미완료로 되돌림' : null);
+    fadeOutAndRun(card, async () => { await toggleTask(item.id); if (!done) workflowOutcome(item); }, done ? '미완료로 되돌렸어요' : null);
   });
   return checkbox;
 }
@@ -2401,9 +2404,9 @@ function taskWhenControl(item, mode, card) {
     uiMenuClose();
     await fadeOutAndRun(card || wrap, () => setTaskScheduled(item.id, scheduled), message);
   };
-  const options = [['오늘', todayStr(), '오늘 할 일로 옮김'], ['내일', tomorrowStr(), '내일로 미룸']];
+  const options = [['오늘', todayStr(), '오늘 할 일로 옮겼어요'], ['내일', tomorrowStr(), '내일로 미뤘어요']];
   // 이미 나중에 있는 업무에 `나중에`를 또 보여 주지 않는다.
-  if (mode !== 'later') options.push(['나중에', null, '나중에 할 일로 옮김 · 기한은 그대로입니다.']);
+  if (mode !== 'later') options.push(['나중에', null, '나중에 할 일로 옮겼어요 · 기한은 그대로예요']);
   options.forEach(([text, scheduled, message]) => {
     const chip = document.createElement('button');
     chip.type = 'button';
@@ -2424,7 +2427,7 @@ function taskWhenControl(item, mode, card) {
     input.className = 'd-dateinput';
     input.value = item.scheduled || '';
     input.setAttribute('aria-label', '언제 할지 날짜');
-    input.addEventListener('change', () => { if (input.value) move(input.value, `${uiKoDate(input.value)}로 옮김`); });
+    input.addEventListener('change', () => { if (input.value) move(input.value, `${uiKoDate(input.value)}로 옮겼어요`); });
     wrap.replaceChildren(input);
     input.focus();
     input.showPicker?.();
@@ -2439,7 +2442,7 @@ function taskPriorityControl(item) {
   return uiMenuChips(TASK_PRIORITY_CHIPS, item.priority || 'medium', async (value) => {
     uiMenuClose();
     await setPriority(item.id, value);
-    announce('우선순위를 바꿨습니다.');
+    announce('우선순위를 바꿨어요');
     await load();
   });
 }
@@ -2461,7 +2464,7 @@ function taskMenuSections({ item, mode, card }) {
   }];
   if (mode === 'later') actions.push({
     label: '완료로 표시',
-    onClick: () => fadeOutAndRun(card, () => toggleTask(item.id), '완료로 표시함'),
+    onClick: () => fadeOutAndRun(card, () => toggleTask(item.id), '완료했어요'),
   });
   return [
     actions,
@@ -2474,7 +2477,7 @@ function taskMenuSections({ item, mode, card }) {
           label: '기한',
           onChange: async (value) => {
             await setTaskDue(item.id, value);
-            announce(value ? `기한 ${uiKoDate(value)}로 지정함` : '기한 해제함');
+            announce(value ? `기한을 ${uiKoDate(value)}로 정했어요` : '기한을 지웠어요');
           },
         }),
       },
@@ -2754,7 +2757,7 @@ function panelSection(title) {
 function panelAutosaveNote(box) {
   const note = document.createElement('div');
   note.className = 'd-autosave';
-  note.textContent = '자동으로 저장됩니다';
+  note.textContent = '고치면 바로 저장돼요';
   box.appendChild(note);
 }
 
@@ -2806,7 +2809,7 @@ function panelTask({ item, detail, type }, box) {
         panelClose();
         await postJson('/api/track/remove', { id: item.id });
         await load();
-        announce('삭제함');
+        announce('삭제했어요');
       },
     }]];
   }));
@@ -2817,7 +2820,7 @@ function panelTask({ item, detail, type }, box) {
   panelField(fields, '언제 할지', panelWhenText(item, mode));
   if (isTask) panelField(fields, '기한', panelDateCell('기한', item.due, async (value) => {
     await setTaskDue(item.id, value);
-    announce(value ? `기한 ${uiKoDate(value)}로 지정함` : '기한 해제함');
+    announce(value ? `기한을 ${uiKoDate(value)}로 정했어요` : '기한을 지웠어요');
   }));
   panelField(fields, '우선순위', panelPriorityCell(item));
   panelField(fields, '프로젝트', taskProjectControl(item));
@@ -2835,16 +2838,16 @@ function panelTask({ item, detail, type }, box) {
   if (!done && isTask) {
     if (mode === 'later') foot.appendChild(panelQuietButton('오늘로', async () => {
       await setTaskScheduled(item.id, todayStr());
-      announce('오늘 할 일로 옮김');
+      announce('오늘 할 일로 옮겼어요');
     }));
     else {
       foot.appendChild(panelQuietButton('내일', async () => {
         await setTaskScheduled(item.id, tomorrowStr());
-        announce('내일로 미룸');
+        announce('내일로 미뤘어요');
       }));
       foot.appendChild(panelQuietButton('나중에', async () => {
         await setTaskScheduled(item.id, null);
-        announce('나중에 할 일로 옮김 · 기한은 그대로입니다.');
+        announce('나중에 할 일로 옮겼어요 · 기한은 그대로예요');
       }));
     }
   }
@@ -2896,12 +2899,12 @@ function panelPriorityCell(item) {
 }
 
 function panelCopyLink(permalink) {
-  const done = () => announce('원본 링크를 복사했습니다.');
+  const done = () => announce('원본 링크를 복사했어요');
   try {
     const copy = navigator.clipboard?.writeText(permalink);
-    if (copy && copy.then) copy.then(done, () => announce('복사하지 못했습니다. 링크를 길게 눌러 복사해 주세요.'));
+    if (copy && copy.then) copy.then(done, () => announce('복사하지 못했어요. 링크를 길게 눌러 복사해 주세요'));
     else done();
-  } catch { announce('복사하지 못했습니다. 링크를 길게 눌러 복사해 주세요.'); }
+  } catch { announce('복사하지 못했어요. 링크를 길게 눌러 복사해 주세요'); }
 }
 
 // `기다리는 답변`과 `결과 한 줄`은 기본으로 펼쳐 둔다(접어 두면 아무도 적지 않았다).
@@ -2933,7 +2936,7 @@ function panelTaskNotes(item, detail, box) {
   if (current.blockedBy && !checks.some(check => check.id === current.blockedBy)) {
     const gone = document.createElement('div');
     gone.className = 'd-hint';
-    gone.textContent = '연결했던 확인 대기가 삭제되었습니다.';
+    gone.textContent = '연결했던 확인 대기가 삭제됐어요.';
     waiting.appendChild(gone);
   }
   box.appendChild(waiting);
@@ -2944,7 +2947,7 @@ function panelTaskNotes(item, detail, box) {
   area.rows = 2;
   area.maxLength = 1000;
   area.value = current.outcome;
-  area.placeholder = '끝나고 한 줄로 남기면 주간요약에 그대로 올라갑니다';
+  area.placeholder = '끝나고 한 줄로 남기면 주간요약에 그대로 올라가요';
   area.setAttribute('aria-label', '결과 한 줄');
   area.addEventListener('change', () => { current.outcome = area.value.replace(/[\r\n]+/g, ' ').trim(); save(); });
   result.appendChild(area);
@@ -2968,11 +2971,11 @@ function panelCheck({ item, detail }, box) {
   // 확인 대기의 기한은 "상대에게 회신을 받아야 하는 날"이다 — 화면 이름을 그렇게 적는다.
   panelField(fields, '회신 기한', panelDateCell('회신 기한', item.due, async (value) => {
     await setTaskDue(item.id, value);
-    announce(value ? `회신 기한 ${uiKoDate(value)}로 지정함` : '회신 기한 해제함');
+    announce(value ? `회신 기한을 ${uiKoDate(value)}로 정했어요` : '회신 기한을 지웠어요');
   }));
   panelField(fields, '다시 확인할 날짜', panelDateCell('다시 확인할 날짜', detail?.followUp, async (value) => {
     await postJson('/api/workflow/item', { id: item.id, followUp: value });
-    announce(value ? `${uiKoDate(value)}에 다시 확인` : '다시 확인할 날짜 해제함');
+    announce(value ? `${uiKoDate(value)}에 다시 확인할게요` : '다시 확인할 날짜를 지웠어요');
     await load();
   }, false));
   panelField(fields, '프로젝트', taskProjectControl(item));
@@ -2993,7 +2996,7 @@ function panelCheck({ item, detail }, box) {
   const log = panelSection('확인 요청 기록');
   const line = document.createElement('div');
   line.className = detail?.contacted ? 'd-logline' : 'd-hint';
-  line.textContent = detail?.contacted ? `${uiKoDate(detail.contacted)} 요청함` : '아직 없습니다.';
+  line.textContent = detail?.contacted ? `${uiKoDate(detail.contacted)} 요청함` : '아직 요청한 기록이 없어요.';
   log.appendChild(line);
   log.appendChild(panelQuietButton('오늘 확인 요청함', () => markContactedToday(item), 'd-btn sm'));
   box.appendChild(log);
@@ -3039,7 +3042,7 @@ function panelRunButton(text, action, className = 'd-btn') {
   return panelQuietButton(text, async () => {
     panelSetError('');
     try { await action(); } catch (error) {
-      panelSetError((typeof error?.message === 'string' && error.message) || '저장하지 못했습니다. 입력 내용을 확인하고 다시 시도해 주세요.');
+      panelSetError((typeof error?.message === 'string' && error.message) || '저장하지 못했어요. 내용을 확인한 뒤 다시 시도해 주세요.');
     }
   }, className);
 }
@@ -3086,7 +3089,7 @@ function panelMeeting(event, box) {
   if (!linked) {
     const note = document.createElement('div');
     note.className = 'd-hint';
-    note.textContent = '아직 기록되지 않은 회의입니다. 여기서 적은 것은 회의에 연결되지 않고 바로 담깁니다.';
+    note.textContent = '아직 기록되지 않은 회의예요. 여기서 적은 것은 회의에 연결되지 않고 바로 담겨요.';
     box.appendChild(note);
   }
   if (linked) {
@@ -3120,13 +3123,13 @@ function panelMeetingResult(event, box) {
   head.append(done, counts);
   head.appendChild(panelRunButton('실행 취소', async () => {
     const undo = await wfPost('review-undo', { meetingId: event.id, created: result.created });
-    if (!undo.ok) throw new Error(undo.error || '되돌리지 못했습니다.');
+    if (!undo.ok) throw new Error(undo.error || '되돌리지 못했어요.');
     // 되돌린 초안은 검토 대기로 돌아온다 — 사람이 고쳐 둔 문구·종류·날짜는 그대로 살려 둔다.
     result.accepted.forEach(item => wfDraftEdits.set(item.id, { type: item.type, description: item.description, when: item.when || 'later', due: item.due || '' }));
     panelState.result = null;
     await load();
     panelRender();
-    announce('담은 것을 되돌렸습니다.');
+    announce('담은 것을 되돌렸어요');
   }, 'd-btn sm'));
   card.appendChild(head);
 
@@ -3166,7 +3169,7 @@ function panelMeetingResult(event, box) {
   else {
     const all = document.createElement('span');
     all.className = 'k-mute';
-    all.textContent = '오늘 검토할 초안을 모두 처리했습니다.';
+    all.textContent = '오늘 검토할 초안을 모두 처리했어요.';
     foot.appendChild(all);
   }
   card.appendChild(foot);
@@ -3241,7 +3244,7 @@ function panelMeetingDrafts(event, box) {
     const controls = document.createElement('div');
     controls.className = 'ct';
     const whenSeg = wfSegment([['later', '나중에 할 일'], ['today', '오늘 할 일']], edit.when || 'later', (key) => { edit.when = key; refreshSummary(); }, '언제 할 일로 담을까');
-    whenSeg.title = '나중: 나중에 할 일로 담김 · 오늘: 오늘 할 일로 담김';
+    whenSeg.title = '나중에: 나중에 할 일로 담겨요 · 오늘: 오늘 할 일로 담겨요';
     const dateSlot = document.createElement('span');
     const syncWhen = () => { whenSeg.hidden = edit.type !== 'task'; };
     const syncDate = () => {
@@ -3270,7 +3273,7 @@ function panelMeetingDrafts(event, box) {
   bar.appendChild(summary);
   bar.appendChild(panelRunButton(`${event.drafts.length}개 담기`, async () => {
     const accept = event.drafts.map(draft => wfAcceptItem(draft.id, wfDraftEdits.get(draft.id)));
-    if (accept.some(item => !item.description)) { panelSetError('비어 있는 문구가 있습니다. 채우거나 ✕로 빼 주세요.'); return; }
+    if (accept.some(item => !item.description)) { panelSetError('비어 있는 문구가 있어요. 채우거나 ✕로 빼 주세요'); return; }
     const result = await wfReview({ meetingId: event.id, accept });
     panelState.result = { meetingId: event.id, created: result.created, accepted: accept };
     accept.forEach(item => wfDraftEdits.delete(item.id));
@@ -3395,12 +3398,12 @@ function panelMeetingCapture(event, box, linked) {
         };
         const response = await request(MEETING_CAPTURE_ENDPOINT[type], { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         const result = await response.json();
-        if (!result.ok) throw new Error(result.error || '담지 못했습니다.');
+        if (!result.ok) throw new Error(result.error || '담지 못했어요.');
       }
       await load();
       panelRender();
     } catch {
-      panelSetError('추가하지 못했습니다. 입력 내용은 유지됩니다.');
+      panelSetError('추가하지 못했어요. 적은 내용은 그대로 있어요.');
       add.disabled = false;
       input.focus();
     }
@@ -3554,6 +3557,25 @@ function palResultRow(entry, index, query) {
     if (html) span.innerHTML = html;
     if (title) span.title = title;
     row.appendChild(span);
+    return span;
+  };
+  // 제목 + 그 뒤에 붙는 `· ● 프로젝트`(10번 규칙). 프로젝트가 없으면 제목만 남는다.
+  const titleCell = (html, text, project) => {
+    const wrap = cell('tiwrap');
+    const title = document.createElement('span');
+    title.className = 'ti';
+    title.innerHTML = html;
+    title.title = text;
+    wrap.appendChild(title);
+    if (!project) return;
+    const tag = document.createElement('span');
+    tag.className = 'pj';
+    tag.title = project;
+    const name = document.createElement('span');
+    name.className = 'nm';
+    name.textContent = project;
+    tag.append('· ', uiProjectDot(project), name);
+    wrap.appendChild(tag);
   };
   if (entry.kind === 'meeting') {
     const event = entry.event;
@@ -3565,8 +3587,7 @@ function palResultRow(entry, index, query) {
     const when = `${uiKoDateShort(event.date)}${event.start ? ` · ${event.start}` : ''}`;
     cell('tag', '회의');
     cell('when num', escapeHtml(when));
-    cell('ti', palHighlight(event.title, query), event.title);
-    cell('pj', escapeHtml(event.project?.label || event.project?.value || ''));
+    titleCell(palHighlight(event.title, query), event.title, event.project?.label || event.project?.value || '');
     cell('st', escapeHtml(state.join(' · ')));
     row.setAttribute('aria-label', `회의 ${when} ${event.title}`);
   } else {
@@ -3575,8 +3596,7 @@ function palResultRow(entry, index, query) {
     const due = item.status === 'done' ? null : uiDueText(item.due, 'full');
     const status = item.status === 'done' ? { text: '완료', tone: '' } : due || (item.doing ? { text: '진행 중', tone: '' } : null);
     cell('tag', escapeHtml(PAL_TAG[item.type] || item.type || ''));
-    cell('ti', palHighlight(item.description, query), item.description);
-    cell('pj', escapeHtml(project), project || undefined);
+    titleCell(palHighlight(item.description, query), item.description, project);
     cell(`st${status ? uiTone(status.tone) : ''}`, status ? escapeHtml(status.text) : '');
     row.setAttribute('aria-label', `${PAL_TAG[item.type] || ''} ${item.description}`);
   }
@@ -3588,24 +3608,24 @@ function palResultRow(entry, index, query) {
 function palFilterChips() {
   const bar = palNodes.chips;
   bar.replaceChildren();
-  const chip = (text, on, onPick) => {
+  const chip = (text, on, onPick, host = bar) => {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'd-chip' + (on ? ' is-on' : '');
     button.textContent = text;
     button.setAttribute('aria-pressed', String(!!on));
     button.addEventListener('click', () => { onPick(); palRender(); palNodes.input.focus(); });
-    bar.appendChild(button);
+    host.appendChild(button);
   };
+  // 종류는 회색 트랙 위에 나란히 선다 — 고른 하나만 연파랑.
+  const track = document.createElement('span');
+  track.className = 'd-palseg';
+  bar.appendChild(track);
   PAL_TYPES.forEach(([value, text]) => chip(text, palState.type === value, () => {
     palState.type = value;
     palState.active = 0;
     if (value !== 'meeting') { palState.unresolved = false; palState.reviewOnly = false; }
-  }));
-  const separator = document.createElement('span');
-  separator.className = 'sep';
-  separator.setAttribute('aria-hidden', 'true');
-  bar.appendChild(separator);
+  }, track));
   chip('완료 제외', palState.hideDone, () => { palState.hideDone = !palState.hideDone; palState.active = 0; });
   if (palState.type === 'meeting') {
     chip('미해결만', palState.unresolved, () => { palState.unresolved = !palState.unresolved; palState.active = 0; });
@@ -3637,8 +3657,8 @@ function palRenderResults() {
     const empty = document.createElement('div');
     empty.className = 'd-empty';
     empty.textContent = query || palState.newOnly || palState.type === 'meeting'
-      ? '찾는 항목이 없습니다.'
-      : '찾을 내용을 입력하세요. 완료한 업무와 회의 초안 문구까지 함께 찾습니다.';
+      ? '찾는 항목이 없어요.'
+      : '찾을 내용을 적어 보세요. 완료한 업무와 회의 초안 문구까지 함께 찾아요.';
     box.appendChild(empty);
     palNodes.input.removeAttribute('aria-activedescendant');
     return;
@@ -3861,10 +3881,10 @@ function renderInbox(items) {
     };
 
     // 줄에는 자주 쓰는 세 갈래만 늘 보인다 — 오늘 / 나중에 / 완료.
-    choose('오늘', () => fadeOutAndRun(row, () => setTaskScheduled(item.id, todayStr()), '오늘 할 일로 옮김'));
-    choose('나중에', () => fadeOutAndRun(row, () => setTaskScheduled(item.id, null), '나중에 할 일로 옮김'));
+    choose('오늘', () => fadeOutAndRun(row, () => setTaskScheduled(item.id, todayStr()), '오늘 할 일로 옮겼어요'));
+    choose('나중에', () => fadeOutAndRun(row, () => setTaskScheduled(item.id, null), '나중에 할 일로 옮겼어요'));
     // 완료는 기록이 남고(주간요약에 들어감), 삭제는 남지 않는다 — 삭제는 ⋯ 안으로 들어갔다.
-    choose('완료', () => fadeOutAndRun(row, () => toggleTask(item.id), '완료로 표시함'));
+    choose('완료', () => fadeOutAndRun(row, () => toggleTask(item.id), '완료했어요'));
 
     // 값을 정하는 것과 삭제는 ⋯ 안에 있다. 아직 분류 전이라도 기한·우선순위가 분명한 건은 미리 정해 둘 수 있다.
     actions.appendChild(uiMoreButton(`${item.description} — 더 보기`, () => [
@@ -3877,7 +3897,7 @@ function renderInbox(items) {
             label: '기한',
             onChange: async (value) => {
               await setTaskDue(item.id, value);
-              announce(value ? `기한 ${uiKoDate(value)}로 지정함` : '기한 해제함');
+              announce(value ? `기한을 ${uiKoDate(value)}로 정했어요` : '기한을 지웠어요');
             },
           }),
         },
@@ -3893,7 +3913,7 @@ function renderInbox(items) {
             body: JSON.stringify({ id: item.id }),
           });
           load();
-        }, '삭제함'),
+        }, '삭제했어요'),
       }],
     ]));
 
@@ -3945,7 +3965,7 @@ function renderTodayTasks(items) {
     }
   } else {
     uiGroupTasks(active).forEach(([key, groupItems]) => {
-      const addRow = uiGroupAddRow(key, '/api/today-task/create', '오늘 할 일 추가함');
+      const addRow = uiGroupAddRow(key, '/api/today-task/create', '오늘 할 일에 추가했어요');
       const heading = uiGroupHeading(uiGroupLabel(key), groupItems.length, {
         projectName: key === '__misc__' ? null : key,
         onAdd: () => { addRow.hidden = false; addRow.querySelector('input').focus(); },
@@ -3959,7 +3979,7 @@ function renderTodayTasks(items) {
   if (!active.length && !doing.length) {
     list.insertAdjacentHTML('beforeend', doneItems.length
       ? '<div class="d-empty">오늘 할 일을 모두 끝냈어요.</div>'
-      : '<div class="d-empty">오늘 할 일이 비었어요. 위 첫 줄에서 바로 추가하세요.</div>');
+      : '<div class="d-empty">오늘 할 일이 비었어요. 맨 위 줄에서 바로 추가할 수 있어요.</div>');
   }
 
   if (doneItems.length) {
@@ -4011,7 +4031,7 @@ function makeEditableDesc(el, item) {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id: item.id, description: val }),
           });
-          announce('내용 수정함');
+          announce('내용을 고쳤어요');
           await load();
         } catch { committed = false; }
         finally { input.disabled = false; }
@@ -4149,7 +4169,7 @@ function renderGroupControl({ jira, group, onSetJira, onSetGroup, forceClearable
         (async () => {
           await onSetJira(null);
           await onSetGroup(null);
-          if (!silent) { announce('그룹 해제함'); load(); }
+          if (!silent) { announce('그룹을 지웠어요'); load(); }
         })();
         return;
       }
@@ -4171,7 +4191,7 @@ function renderGroupControl({ jira, group, onSetJira, onSetGroup, forceClearable
           if (!v) return;
           inputCommitted = true;
           await onSetGroup(v);
-          if (!silent) { announce('그룹 지정함'); load(); }
+          if (!silent) { announce('그룹을 지정했어요'); load(); }
         });
         input.addEventListener('blur', () => {
           if (inputCommitted) return;
@@ -4186,14 +4206,14 @@ function renderGroupControl({ jira, group, onSetJira, onSetGroup, forceClearable
         const g = select.value.slice('group:'.length);
         (async () => {
           await onSetGroup(g);
-          if (!silent) { announce('그룹 지정함'); load(); }
+          if (!silent) { announce('그룹을 지정했어요'); load(); }
         })();
         return;
       }
       const key = select.value.replace(/^jira:/, '');
       (async () => {
         await onSetJira(key);
-        if (!silent) { announce('지라 이슈 연결함'); load(); }
+        if (!silent) { announce('지라 이슈를 연결했어요'); load(); }
       })();
     });
     select.addEventListener('blur', () => {
@@ -4310,11 +4330,11 @@ function setupQuickAdd(inputId, endpoint, announceText) {
 }
 
 // ---- client.test.js는 이 줄 위까지만 읽는다 (아래는 화면을 실제로 켜는 실행 코드) ----
-setupQuickAdd('todayTaskInput', '/api/today-task/create', '오늘 할 일 추가함');
-setupQuickAdd('laterTaskInput', '/api/later-task/create', '나중에 할 일 추가함');
-setupQuickAdd('waitingInput', '/api/waiting/create', '확인 대기 추가함');
-setupQuickAdd('ideaInput', '/api/idea/create', '아이디어 추가함');
-setupQuickAdd('decisionInput', '/api/decision/create', '결정 추가함');
+setupQuickAdd('todayTaskInput', '/api/today-task/create', '오늘 할 일에 추가했어요');
+setupQuickAdd('laterTaskInput', '/api/later-task/create', '나중에 할 일에 추가했어요');
+setupQuickAdd('waitingInput', '/api/waiting/create', '확인 대기에 추가했어요');
+setupQuickAdd('ideaInput', '/api/idea/create', '아이디어에 추가했어요');
+setupQuickAdd('decisionInput', '/api/decision/create', '결정에 추가했어요');
 // 한 글자마다 줄을 전부 다시 만들면 목록이 길수록 입력이 밀린다 — 입력이 멎은 뒤 한 번만
 // 그린다. 조합 중에도 input은 그대로 오고 값을 늦게 읽을 뿐이라 한글 입력은 끊기지 않는다.
 let decisionArchiveTimer = null;
@@ -4453,7 +4473,7 @@ const refreshBtn = document.getElementById('refreshBtn');
 refreshBtn.addEventListener('click', async () => {
   refreshBtn.classList.add('spinning');
   await load();
-  announce('새로고침했습니다.');
+  announce('새로고침했어요');
   setTimeout(() => refreshBtn.classList.remove('spinning'), 400);
 });
 
@@ -4517,11 +4537,11 @@ const AUTOMATION_STATE_WORD = { run: '성공', fail: '실패', skip: '건너뜀'
 async function renderAutomationStatus() {
   const view = document.getElementById('settingsStatusView');
   view.replaceChildren();
-  view.insertAdjacentHTML('beforeend', '<div class="d-empty">불러오는 중…</div>');
+  view.insertAdjacentHTML('beforeend', '<div class="d-empty">불러오는 중이에요…</div>');
   const automations = await fetchAutomationStatus();
   view.replaceChildren();
   if (!automations.length) {
-    view.insertAdjacentHTML('beforeend', '<div class="d-empty">상태를 불러오지 못했습니다.</div>');
+    view.insertAdjacentHTML('beforeend', '<div class="d-empty">상태를 불러오지 못했어요.</div>');
     return;
   }
   // "최근 실패 기록이 있음"과 "지금 문제임"은 다르다 — 예전엔 둘을 구분 안 해서,
@@ -4589,7 +4609,7 @@ function automationRow(a) {
   if (failingNow) {
     const error = document.createElement('div');
     error.className = 'd-autoerr';
-    error.textContent = trimSummaryText(translateFailureText(a.lastSummary || '실패했습니다.'));
+    error.textContent = trimSummaryText(translateFailureText(a.lastSummary || '실패했어요.'));
     row.appendChild(error);
     const lines = a.recentFailures.map(f => `${f.time} · ${translateFailureText(f.text)}`)
       .concat(a.tail && a.tail.length ? a.tail.slice(-20) : []);
@@ -4605,29 +4625,29 @@ function automationRow(a) {
 // 사용법은 문답을 읽기 좋게 늘어놓은 문서다. 이번 개편으로 달라진 동작에 맞춰 적는다.
 const SETTINGS_FAQ = [
   ['오늘 하기 버거운 업무는 어떻게 미루나요',
-    '업무 줄에 마우스를 올리면 <b>내일</b>·<b>나중에</b>가 나옵니다. 나중에로 보낸 업무는 머리줄의 <b>나중에 할 일</b> 서랍에 모이고, 거기서 <b>오늘로</b> 다시 가져옵니다. 따로 "계획 모드"로 들어갈 필요가 없습니다.'],
+    '업무 줄에 마우스를 올리면 <b>내일</b>·<b>나중에</b>가 나와요. 나중에로 보낸 업무는 머리줄의 <b>나중에 할 일</b> 서랍에 모이고, 거기서 <b>오늘로</b> 다시 가져와요. 따로 "계획 모드"로 들어갈 필요가 없어요.'],
   ['새로 들어온 것(인박스)이 뭔가요',
-    '슬랙·회의에서 자동으로 모인 항목이 먼저 쌓이는 곳입니다. AI가 오늘 할지 나중에 할지 정하지 않습니다. 프로젝트만 지정하고 <b>오늘</b> 또는 <b>나중에</b>로 보내면 정리가 끝나고 인박스에서 사라집니다.'],
+    '슬랙·회의에서 자동으로 모인 항목이 먼저 쌓이는 곳이에요. AI는 오늘 할지 나중에 할지 정하지 않아요. 프로젝트만 지정하고 <b>오늘</b> 또는 <b>나중에</b>로 보내면 정리가 끝나고 여기서 사라져요.'],
   ['프로젝트는 어떻게 지정하고 어디서 모아 보나요',
-    '줄의 <b>⋯</b> 더보기 → <b>프로젝트</b>에서 지라 이슈나 그룹을 고릅니다. 모아 보려면 위쪽 <b>프로젝트</b> 탭으로 갑니다. 목록의 그룹 제목을 눌러도 그 프로젝트로 넘어갑니다.'],
+    '줄의 <b>⋯</b> 더보기 → <b>프로젝트</b>에서 지라 이슈나 그룹을 고르면 돼요. 모아 보려면 위쪽 <b>프로젝트</b> 탭으로 가요. 목록의 그룹 제목을 눌러도 그 프로젝트로 넘어가요.'],
   ['여러 개를 한 번에 정리하려면',
-    '오늘 할 일 머리줄의 <b>여러 개 선택</b>을 누르면 줄마다 선택 칸이 하나 더 생깁니다(완료 체크는 그대로 씁니다). 목록 아래 막대에서 <b>오늘로</b>·<b>내일</b>·<b>나중에</b>·<b>날짜</b>·<b>프로젝트</b>·<b>완료로 표시</b>·<b>삭제</b>를 한 번에 적용합니다.'],
+    '오늘 할 일 머리줄의 <b>⋯</b> → <b>여러 개 선택</b>을 누르면 줄마다 선택 칸이 하나 더 생겨요(완료 체크는 그대로 써요). 목록 아래 막대에서 <b>오늘로</b>·<b>내일</b>·<b>나중에</b>·<b>날짜</b>·<b>프로젝트</b>·<b>완료로 표시</b>·<b>삭제</b>를 한 번에 적용해요.'],
   ['찾고 싶은 기록이 있으면',
-    '<b>⌘K</b>(윈도는 Ctrl+K)로 검색을 엽니다. 할 일·확인 대기·결정·아이디어·회의를 한 자리에서 찾고, 위 칩으로 종류를 좁힙니다. 검색에서 연 항목을 닫으면 찾던 자리로 그대로 돌아옵니다.'],
+    '<b>⌘K</b>(윈도는 Ctrl+K)로 검색을 열어요. 할 일·확인 대기·결정·아이디어·회의를 한 자리에서 찾고, 위 칩으로 종류를 좁힐 수 있어요. 검색에서 연 항목을 닫으면 찾던 자리로 그대로 돌아와요.'],
   ['회의 내용은 어디서 정리하나요',
-    '왼쪽 <b>오늘 미팅</b>의 회의를 누르면 오른쪽에 회의 정리 패널이 열립니다. 초안을 고쳐 담고, 담은 뒤 뜨는 결과 카드의 <b>실행 취소</b>로 되돌릴 수 있습니다.'],
+    '왼쪽 <b>오늘 미팅</b>의 회의를 누르면 오른쪽에 회의 정리 패널이 열려요. 초안을 고쳐 담고, 담은 뒤 뜨는 결과 카드의 <b>실행 취소</b>로 되돌릴 수 있어요.'],
   ['잘못 눌렀을 때는',
-    '완료·삭제·보고 제외는 아래 알림의 <b>되돌리기</b>로 바로 취소됩니다. <b>⌘Z</b>도 같은 일을 하고, <b>⌘⇧Z</b>로 다시 실행합니다.'],
+    '완료·삭제·보고 제외는 아래 알림의 <b>되돌리기</b>로 바로 취소할 수 있어요. <b>⌘Z</b>도 같은 일을 하고, <b>⌘⇧Z</b>로 다시 실행해요.'],
   ['결과 한 줄은 왜 적나요',
-    '완료한 업무에 적은 한 줄이 주간요약 문장으로 그대로 올라갑니다. 금요일에 다시 쓰지 않아도 됩니다.'],
+    '완료한 업무에 적은 한 줄이 주간요약 문장으로 그대로 올라가요. 금요일에 다시 쓰지 않아도 돼요.'],
   ['보고 문장을 수정하면 원본 업무도 바뀌나요',
-    '아니요. 보고 문장과 원본 기록은 따로 보존됩니다. 원본이 바뀌면 수정 제안으로만 알려 주고, 직접 적용하기 전에는 편집한 문장을 바꾸지 않습니다.'],
+    '아니요. 보고 문장과 원본 기록은 따로 남아요. 원본이 바뀌면 수정 제안으로만 알려 주고, 직접 적용하기 전에는 고쳐 둔 문장을 바꾸지 않아요.'],
   ['자잘한 업무는 어떻게 빼나요',
-    '주간요약에서 <b>이번 보고에서 제외</b>를 누르면 복사할 내용에서 빠집니다. 원본은 업무 기록에 남고 언제든 보고에 되돌릴 수 있습니다.'],
+    '주간요약에서 문장의 <b>제외</b>를 누르면 복사할 내용에서 빠져요. 원본은 업무 기록에 남고 언제든 보고로 되돌릴 수 있어요.'],
   ['확인 대기는 뭔가요',
-    '다른 사람의 답을 기다리는 항목입니다. 언제까지 답을 받아야 하는지는 <b>회신 기한</b>으로 적습니다. 할 일 쪽에서 "이 답변을 기다리는 중"으로 연결해 두면 답이 오는 순간 알려 줍니다.'],
+    '다른 사람의 답을 기다리는 항목이에요. 언제까지 답을 받아야 하는지는 <b>회신 기한</b>에 적어요. 할 일 쪽에서 "이 답변을 기다리는 중"으로 연결해 두면 답이 오는 순간 알려 줘요.'],
   ['머리줄의 "○일 전 기준" 같은 표시는 뭔가요',
-    '슬랙·캘린더·지라 자동 동기화가 최근에 못 돌았다는 뜻입니다. 그 글자를 누르면 이 창의 <b>상태</b>에서 해당 자동화 줄이 바로 보입니다.'],
+    '슬랙·캘린더·지라 자동 동기화가 최근에 못 돌았다는 뜻이에요. 그 글자를 누르면 이 창의 <b>상태</b>에서 그 자동화 줄이 바로 보여요.'],
 ];
 
 function renderSettingsGuide() {
@@ -4662,14 +4682,14 @@ function renderSettingsGuide() {
     access.addEventListener('click', async () => {
       try {
         const result = await (await request('/api/access-token')).json();
-        if (!result.token) { showNotice('다른 기기 접속이 설정되지 않았습니다.'); return; }
+        if (!result.token) { showNotice('다른 기기 접속이 아직 설정되지 않았어요'); return; }
         await navigator.clipboard.writeText(result.token);
-        showNotice('암호를 복사했습니다. 다른 기기에서 사용자 이름은 workspace를 입력해 주세요.');
-      } catch { showNotice('암호를 복사하지 못했습니다.', true); }
+        showNotice('암호를 복사했어요 · 다른 기기에서 사용자 이름은 workspace를 넣어 주세요');
+      } catch { showNotice('암호를 복사하지 못했어요', true); }
     });
     const hint = document.createElement('div');
     hint.className = 'd-hint';
-    hint.textContent = '같은 와이파이·Tailscale에서 이 주소를 열고, 사용자 이름은 workspace를 입력합니다.';
+    hint.textContent = '같은 와이파이·Tailscale에서 이 주소를 열고, 사용자 이름은 workspace를 넣으면 돼요.';
     section.append(label, access, hint);
     view.appendChild(section);
   }
@@ -4783,7 +4803,7 @@ async function endPull() {
   pullIndicator.classList.add('refreshing');
   try {
     await load();
-    announce('새로고침했습니다.');
+    announce('새로고침했어요');
   } finally {
     pullRefreshing = false;
     resetPull(true);

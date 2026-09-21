@@ -120,11 +120,11 @@ const wfResultTasks = result => result.accepted.map((item, index) => ({ item, it
   .map(({ item, itemId }) => ({ itemId, description: item.description, today: item.when === 'today' || (result.promoted || []).includes(itemId) }));
 async function wfReview(body) {
   const result = await wfPost('review', body);
-  if (!result.ok) throw new Error(result.error || '검토 결과를 저장하지 못했습니다.');
+  if (!result.ok) throw new Error(result.error || '검토 결과를 저장하지 못했어요.');
   return result;
 }
 function workflowOutcome(item) {
-  showNotice('완료로 표시했습니다.', false, null, { label: '결과 한 줄 남기기', onClick: () => panelOpen({ id: item.id }) });
+  showNotice('완료했어요', false, null, { label: '결과 한 줄 남기기', onClick: () => panelOpen({ id: item.id }) });
 }
 function workflowTaskBadges(item) {
   const detail = wfItem(item.id);

@@ -59,9 +59,9 @@ test('a refused restore pauses saving instead of looking busy',t=>{
   assert.throws(()=>tx.run(()=>{atomicWrite(file,'after');fs.writeFileSync(file,'외부 편집');throw new Error('저장 실패');}),error=>error.status===503 && error.code==='RECOVERY_NEEDED');
   assert.equal(fs.readFileSync(file,'utf8'),'외부 편집');
   assert.ok(fs.existsSync(journal));assert.ok(fs.existsSync(lock));
-  assert.equal(tx.status().recoveryNeeded,true);assert.match(tx.status().reason,/저장 실패.*외부에서 변경된/);
+  assert.equal(tx.status().recoveryNeeded,true);assert.match(tx.status().reason,/저장 실패.*밖에서 바뀐 파일/);
   const kept=[file,journal,lock].map(name=>fs.readFileSync(name,'utf8'));
-  assert.throws(()=>tx.run(()=>{throw new Error('실행되면 안 된다');}),error=>error.status===503 && error.code==='RECOVERY_NEEDED' && /저장을 멈췄습니다/.test(error.message));
+  assert.throws(()=>tx.run(()=>{throw new Error('실행되면 안 된다');}),error=>error.status===503 && error.code==='RECOVERY_NEEDED' && /저장을 멈췄어요/.test(error.message));
   assert.deepEqual([file,journal,lock].map(name=>fs.readFileSync(name,'utf8')),kept);
 });
 test('Slack history collects every page, and never returns partial success',async()=>{

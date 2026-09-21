@@ -364,12 +364,12 @@ test('a refused startup recovery keeps the app up with saving locked', async (t)
   });
   const status = await (await fetch(server.base + '/api/storage-status')).json();
   assert.equal(status.recoveryNeeded, true);
-  assert.match(status.reason, /외부에서 변경된/);
+  assert.match(status.reason, /밖에서 바뀐 파일/);
   const response = await fetch(server.base + '/api/today-task/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ description: '저장되면 안 되는 업무' }) });
   const body = await response.json();
   assert.equal(response.status, 503);
   assert.equal(body.code, 'RECOVERY_NEEDED');
-  assert.match(body.error, /저장을 멈췄습니다/);
+  assert.match(body.error, /저장을 멈췄어요/);
   assert.equal(fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8'), external);
   assert.ok(fs.existsSync(path.join(server.home, '.mutation-journal.json')));
   assert.ok(fs.existsSync(path.join(server.home, '.mutation.lock')));

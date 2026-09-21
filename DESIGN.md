@@ -1,0 +1,731 @@
+---
+name: 워크스페이스
+description: 종일 옆에 띄워 두는 1인용 업무 트래커 — 연회색 바탕 위 테두리 없는 큰 둥근 흰 카드, 파랑은 선택과 행동에만, 완료는 체크박스
+colors:
+  bg: "#f2f4f6"
+  surface: "#ffffff"
+  surface-line: "transparent"
+  field: "#f2f4f6"
+  hover: "#f4f6f8"
+  rail-hover: "#f4f6f8"
+  border: "#e3e7eb"
+  hair: "#eef1f4"
+  check-line: "#8b95a1"
+  text: "#191f28"
+  muted: "#4e5968"
+  dim: "#636c78"
+  accent: "#3182f6"
+  accent-strong: "#1b64da"
+  accent-text: "#1b64da"
+  accent-soft: "#e8f3ff"
+  on-fill: "#ffffff"
+  sel: "#eef5ff"
+  sel-hover: "#e6f1ff"
+  urgent: "#c9252d"
+  urgent-bg: "#ffeceb"
+  warn: "#b0560a"
+  warn-bg: "#fff4e5"
+  success: "#0d7a4a"
+  success-bg: "#e6f6ee"
+  neutral-bg: "#eef1f4"
+  mark: "#ffe7a3"
+  warm: "#fffaf2"
+  warm-hover: "#fff4e4"
+  prog-track: "#e9edf2"
+  pj-0: "#4f83e8"
+  pj-1: "#2f9b87"
+  pj-2: "#c0842b"
+  pj-3: "#8a6ed2"
+  pj-4: "#cd6579"
+  pj-5: "#5d9b47"
+  scrim: "rgba(25,31,40,.16)"
+  bg-dark: "#15181e"
+  surface-dark: "#1e222a"
+  surface-line-dark: "#2b313b"
+  field-dark: "#262b34"
+  hover-dark: "#272c35"
+  border-dark: "#333a45"
+  hair-dark: "#2b313b"
+  check-line-dark: "#636e7d"
+  text-dark: "#eaedf1"
+  muted-dark: "#a8b1bd"
+  dim-dark: "#8b95a1"
+  accent-dark: "#4b91f1"
+  accent-strong-dark: "#4b91f1"
+  accent-text-dark: "#7aa9ff"
+  accent-soft-dark: "#1b2a44"
+  on-fill-dark: "#0b1020"
+  sel-dark: "#1c2533"
+  sel-hover-dark: "#212c3d"
+  urgent-dark: "#ff8f8f"
+  urgent-bg-dark: "#3a2022"
+  warn-dark: "#ffbe6b"
+  warn-bg-dark: "#3a2e1b"
+  success-dark: "#6ddba0"
+  success-bg-dark: "#1c3729"
+  neutral-bg-dark: "#2a2f38"
+  mark-dark: "rgba(255,190,107,.3)"
+  warm-dark: "#26221b"
+  warm-hover-dark: "#2e2820"
+  prog-track-dark: "#2b313b"
+  pj-0-dark: "#7aa2ff"
+  pj-1-dark: "#57c6ad"
+  pj-2-dark: "#dfa85c"
+  pj-3-dark: "#b198ff"
+  pj-4-dark: "#ef92a0"
+  pj-5-dark: "#8ccb72"
+  scrim-dark: "rgba(0,0,0,.5)"
+typography:
+  font:
+    fontFamily: "'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', 'Segoe UI', sans-serif"
+  project-title:
+    fontSize: "24px"
+    fontWeight: 700
+    letterSpacing: "-0.025em"
+  doc-title:
+    fontSize: "22px"
+    fontWeight: 700
+    letterSpacing: "-0.02em"
+  brand:
+    fontSize: "20px"
+    fontWeight: 700
+    letterSpacing: "-0.02em"
+  detail-title:
+    fontSize: "20px"
+    fontWeight: 700
+    lineHeight: "29px"
+    letterSpacing: "-0.02em"
+  list-title:
+    fontSize: "19px"
+    fontWeight: 700
+    letterSpacing: "-0.015em"
+  section-title:
+    fontSize: "18px"
+    fontWeight: 700
+    letterSpacing: "-0.015em"
+  card-title:
+    fontSize: "16px"
+    fontWeight: 700
+    letterSpacing: "-0.015em"
+  row-title:
+    fontSize: "16px"
+    fontWeight: 500
+    lineHeight: "25px"
+    letterSpacing: "-0.012em"
+  doc-body:
+    fontSize: "15.5px"
+    fontWeight: 400
+    lineHeight: 1.65
+  tab:
+    fontSize: "15px"
+    fontWeight: 500
+  group-title:
+    fontSize: "14.5px"
+    fontWeight: 600
+  body:
+    fontSize: "14px"
+    fontWeight: 400
+    lineHeight: 1.55
+  button:
+    fontSize: "13.5px"
+    fontWeight: 600
+  meta:
+    fontSize: "13px"
+    fontWeight: 500
+    fontFeature: "tabular-nums"
+  chip:
+    fontSize: "12.5px"
+    fontWeight: 600
+rounded:
+  r: "20px"
+  r-sm: "12px"
+  r-xs: "10px"
+  row: "14px"
+  rail-row: "12px"
+  menu: "18px"
+  toast: "16px"
+  badge: "6px"
+  check: "6px"
+  pill: "999px"
+spacing:
+  "2": "2px"
+  "4": "4px"
+  "6": "6px"
+  "8": "8px"
+  "10": "10px"
+  "12": "12px"
+  "14": "14px"
+  "16": "16px"
+  pad: "20px"
+  "22": "22px"
+  doc-gutter: "32px"
+sizes:
+  hdr: "60px"
+  row: "54px"
+  grp: "36px"
+  rail-w: "296px"
+  rail-bleed: "20px"
+  wp: "104px"
+  wm: "184px"
+shadows:
+  soft: "0 1px 3px rgba(25,31,40,.04), 0 8px 24px rgba(25,31,40,.06)"
+  shadow: "0 1px 2px rgba(25,31,40,.06)"
+  pop: "0 12px 36px rgba(25,31,40,.14), 0 2px 8px rgba(25,31,40,.06)"
+  drawer-sh: "-10px 0 30px rgba(25,31,40,.07)"
+  soft-dark: "0 1px 3px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3)"
+  pop-dark: "0 12px 36px rgba(0,0,0,.55), 0 2px 8px rgba(0,0,0,.35)"
+motion:
+  ease: "cubic-bezier(.22,.8,.3,1)"
+components:
+  card:
+    backgroundColor: "{colors.surface}"
+    borderColor: "{colors.surface-line}"
+    rounded: "{rounded.r}"
+    shadow: "{shadows.soft}"
+    padding: "10px"
+  button-primary:
+    backgroundColor: "{colors.accent-strong}"
+    textColor: "{colors.on-fill}"
+    rounded: "{rounded.r-sm}"
+    height: "42px"
+    padding: "0 20px"
+  button-secondary:
+    backgroundColor: "{colors.accent-soft}"
+    textColor: "{colors.accent-text}"
+    rounded: "{rounded.r-xs}"
+    height: "33px"
+    padding: "0 13px"
+  button-tertiary:
+    backgroundColor: "{colors.neutral-bg}"
+    textColor: "{colors.muted}"
+    rounded: "{rounded.r-xs}"
+    height: "34px"
+    padding: "0 13px"
+  button-danger:
+    backgroundColor: "transparent"
+    textColor: "{colors.urgent}"
+    rounded: "{rounded.r-xs}"
+    height: "34px"
+  field:
+    backgroundColor: "{colors.field}"
+    textColor: "{colors.text}"
+    rounded: "{rounded.r-sm}"
+    height: "30px"
+    padding: "0 10px"
+  quick-add:
+    backgroundColor: "transparent"
+    rounded: "{rounded.pill}"
+    height: "48px"
+    padding: "0 20px"
+  checkbox:
+    backgroundColor: "{colors.surface}"
+    borderColor: "{colors.check-line}"
+    rounded: "{rounded.check}"
+    width: "22px"
+    height: "22px"
+  checkbox-checked:
+    backgroundColor: "{colors.accent}"
+    textColor: "{colors.on-fill}"
+  badge:
+    rounded: "{rounded.badge}"
+    height: "23px"
+    padding: "0 8px"
+  count-chip:
+    backgroundColor: "{colors.neutral-bg}"
+    textColor: "{colors.muted}"
+    rounded: "{rounded.pill}"
+    height: "22px"
+    padding: "0 9px"
+  task-row:
+    backgroundColor: "{colors.surface}"
+    rounded: "{rounded.row}"
+    height: "{sizes.row}"
+    padding: "0 {spacing.pad}"
+  task-row-hover:
+    backgroundColor: "{colors.hover}"
+  task-row-selected:
+    backgroundColor: "{colors.sel}"
+    textColor: "{colors.accent-text}"
+  header:
+    backgroundColor: "{colors.surface}"
+    height: "{sizes.hdr}"
+    padding: "0 18px 0 24px"
+  rail:
+    backgroundColor: "transparent"
+    width: "{sizes.rail-w}"
+  detail-panel:
+    backgroundColor: "{colors.surface}"
+    rounded: "{rounded.r}"
+    width: "340px"
+    padding: "22px"
+  later-drawer:
+    backgroundColor: "{colors.bg}"
+    width: "404px"
+  overflow-menu:
+    backgroundColor: "{colors.surface}"
+    rounded: "{rounded.menu}"
+    width: "304px"
+    padding: "6px"
+    shadow: "{shadows.pop}"
+  search-palette:
+    backgroundColor: "{colors.surface}"
+    rounded: "{rounded.r}"
+    width: "620px"
+    shadow: "{shadows.pop}"
+  toast:
+    backgroundColor: "{colors.surface}"
+    rounded: "{rounded.toast}"
+    padding: "12px 12px 12px 18px"
+    shadow: "{shadows.pop}"
+  select-bar:
+    backgroundColor: "{colors.surface}"
+    rounded: "{rounded.r}"
+    maxWidth: "1120px"
+    shadow: "{shadows.pop}"
+  settings-dialog:
+    backgroundColor: "{colors.surface}"
+    rounded: "{rounded.r}"
+    width: "620px"
+    shadow: "{shadows.pop}"
+  report-doc:
+    backgroundColor: "{colors.surface}"
+    rounded: "{rounded.r}"
+    padding: "28px 32px 48px"
+    maxWidth: "720px"
+  slack-preview:
+    backgroundColor: "{colors.surface}"
+    rounded: "{rounded.r}"
+    padding: "18px 20px 20px"
+---
+
+# Design System: 워크스페이스
+
+이 문서의 값은 전부 지금 앱의 코드(`tracker/inbox-app/ui.css`, `report-ui.css`, `app.js`)에서 읽었다. 앞선 D안 초안은 폐기했다 — 사용자가 시안 여섯 벌을 비교한 뒤 고른 **확정 룩**이 기준이다. 토큰 값은 맨 위 frontmatter가 기준이고, 아래 표는 같은 값을 역할과 함께 다시 적은 것이다. 제품 차원의 결정(무엇을 보여 줄지)은 `DECISIONS.md`에 있고, 이 문서는 **어떻게 보이게 할지**만 다룬다.
+
+## Overview
+
+**북극성 — 사용자의 말 그대로:** "동글동글하고, 색이 좀 있고, 글씨 간의 여유가 있는 것이 좋다" · "토스/flex 느낌이 나면 좋겠다" · "전체적으로 괜찮은데 약간 복잡스럽다" · "완료 표시는 체크박스가 맞다".
+
+이 네 마디가 모든 판단의 기준이다. **동글동글**은 20px 카드와 14px 줄 모서리로, **색**은 연회색 바탕 위에 뜬 흰 면과 프로젝트 색 점으로, **여유**는 54px 줄과 16px 카드 간격으로, **복잡하지 않게**는 "급한 것만 배지, 나머지는 회색 글자"로 지킨다.
+
+한 문장으로: **연회색 바탕 위에 테두리 없는 큰 둥근 흰 카드가 떠 있고, 그 안에 여백으로 나뉜 줄이 쌓인다.** 실선으로 자르지 않고, 카드 안에 카드를 넣지 않는다.
+
+**Key Characteristics**
+- 60px 흰 헤더 + 296px 왼쪽 레일(바탕은 투명, 그 위에 흰 카드 셋) + 본문 카드
+- 카드: `--surface` + 20px 모서리 + 테두리 없음 + `--soft` 그림자(다크에서만 hairline)
+- 줄 54px, 줄 사이 실선 없음 — 여백과 14px 둥근 회색 hover로 나눈다
+- 버튼 3단(파란 채움 / 연파랑 / 연회색), 정보는 버튼처럼 그리지 않는다
+- 완료는 **둥근 네모 체크박스**(22px·6px), 켜지면 파란 채움 + 흰 체크
+- 상태 배지는 **급한 것만** 6px 모서리로 세우고, 나머지는 아이콘 + 회색 글자
+- 말투는 해요체(`내일로 미뤘어요`), 버튼·메뉴 이름은 짧은 명사형(`내일`)
+
+## Colors
+
+연회색 바탕(`--bg`)과 흰 면(`--surface`)의 두 단계, 그 위에 파랑 하나와 의미 색 셋. 색이 한 화면에 네 계통(파랑·주황·빨강·초록)을 넘지 않는다.
+
+### Primary — 파랑은 채움과 글자를 나눈다
+
+| 토큰 | 라이트 | 다크 | 허용 역할 |
+|---|---|---|---|
+| `--accent` | `#3182f6` | `#4b91f1` | **글자를 얹지 않는** 파랑: 체크박스 채움, 입력 초점 테, `:focus-visible` 외곽선, 탭 밑줄, 오늘 카드 윗변 진행 선 |
+| `--accent-strong` | `#1b64da` | `#4b91f1` | **흰 글자를 얹는** 채움 버튼(primary, 2차 버튼의 hover) |
+| `--accent-text` | `#1b64da` | `#7aa9ff` | 파란 글자: 선택된 줄 제목, 글자 링크, 2차 버튼 글자, 진행 중인 회의의 시각·제목 |
+| `--accent-soft` | `#e8f3ff` | `#1b2a44` | 2차 버튼 바탕, 오늘 할 일 개수 칩, 주차 목록의 `새 기록 N` 칩, 팔레트에서 고른 종류 칩 |
+| `--sel` / `--sel-hover` | `#eef5ff` / `#e6f1ff` | `#1c2533` / `#212c3d` | 고른 줄의 바탕(불투명해야 한다 — 겹쳐 뜨는 동작 묶음이 같은 값을 쓴다) |
+| `--on-fill` | `#ffffff` | `#0b1020` | 채움 위 글자와 체크 표시 |
+
+> `#3182f6` 위의 흰 글자는 3.71:1로 미달이다. 그래서 **채움(`--accent`)과 흰 글자를 얹는 채움(`--accent-strong`)을 나눴다.** 이 둘을 다시 합치지 않는다.
+
+### Secondary — 뜻 있는 색(글자값 / 틴트 바탕이 한 쌍)
+
+| 토큰 | 라이트 | 다크 | 허용 역할 |
+|---|---|---|---|
+| `--urgent` / `--urgent-bg` | `#c9252d` / `#ffeceb` | `#ff8f8f` / `#3a2022` | `긴급` · `기한 N일 지남` · `회신 기한 N일 지남` 배지, 삭제 버튼 글자, 자동화 실패 배지 |
+| `--warn` / `--warn-bg` | `#b0560a` / `#fff4e5` | `#ffbe6b` / `#3a2e1b` | `오늘까지` 배지, `중요`(배경 없는 글자), 새로 들어온 것·확인 대기의 개수 칩 |
+| `--success` / `--success-bg` | `#0d7a4a` / `#e6f6ee` | `#6ddba0` / `#1c3729` | `답변 왔어요` 글자, 회의 담기 결과 카드의 면 |
+| `--neutral-bg` | `#eef1f4` | `#2a2f38` | 중립 개수 칩, 3차 버튼, 세그먼트 트랙, 날짜 칩 |
+| `--mark` | `#ffe7a3` | `rgba(255,190,107,.3)` | 검색어 일치 부분(글자색은 `--text`) |
+
+### Neutral
+
+| 토큰 | 라이트 | 다크 | 허용 역할 |
+|---|---|---|---|
+| `--bg` | `#f2f4f6` | `#15181e` | 페이지 바탕, 레일 바탕, 서랍 판 |
+| `--surface` | `#ffffff` | `#1e222a` | 모든 카드·패널·메뉴·팔레트·모달·알림 |
+| `--surface-line` | `transparent` | `#2b313b` | 카드 테두리 — **라이트에서는 없다**(다크에서만 hairline) |
+| `--field` | `#f2f4f6` | `#262b34` | 입력칸 채움 |
+| `--hover` / `--rail-hover` | `#f4f6f8` | `#272c35` | 줄 hover |
+| `--border` | `#e3e7eb` | `#333a45` | 컨트롤 테두리, 근거 업무 들여쓰기 선, 취소선 색 |
+| `--hair` | `#eef1f4` | `#2b313b` | 헤더 밑선, 패널 구역선, 문서 구분선 |
+| `--check-line` | `#8b95a1` | `#636e7d` | 꺼진 체크박스 테두리 |
+| `--text` | `#191f28` | `#eaedf1` | 제목·본문 |
+| `--muted` | `#4e5968` | `#a8b1bd` | 보조 글자, 3차 버튼 글자, 배지 안 중립 글자 |
+| `--dim` | `#636c78` | `#8b95a1` | 가장 조용한 글자 — 상태말, 개수 숫자, placeholder, 0건 프로젝트 |
+| `--warm` / `--warm-hover` | `#fffaf2` / `#fff4e4` | `#26221b` / `#2e2820` | `새로 들어온 것` 카드(아주 옅은 따뜻한 면) |
+| `--prog-track` | `#e9edf2` | `#2b313b` | 오늘 카드 윗변 진행 선의 트랙 |
+| `--scrim` | `rgba(25,31,40,.16)` | `rgba(0,0,0,.5)` | 팔레트·설정 뒤 가림막 |
+
+테마 전환: 기본은 `prefers-color-scheme`, `:root[data-theme="dark|light"]`가 있으면 그것이 이긴다. 컴포넌트 규칙에는 색 값을 직접 적지 않는다. 토큰 밖 색을 쓰는 곳은 스크롤바 thumb(`#cbd0d8` / 다크 `#3a4150`) 하나뿐이다.
+
+### 프로젝트 색 (여섯 개)
+
+`--pj-0…5`(`#4f83e8 #2f9b87 #c0842b #8a6ed2 #cd6579 #5d9b47`, 다크는 한 단계 밝게)를 **이름 해시 % 6**으로 고른다(`uiProjectHue`). 같은 프로젝트는 그룹 열쇠(`group:가입_개선`)로 오든 이름(`가입 개선`)으로 오든 같은 색이다 — `uiProjectKey`가 접두사·대소문자·공백/`_`/`-`를 먼저 지운다. **겹침을 피하지 않는다**: 프로젝트가 하나 늘었다고 다른 프로젝트의 색이 밀리면 안 된다.
+
+색 점(7px 원)을 찍는 자리는 넷뿐이다 — ① 오늘 목록의 프로젝트 그룹 제목 ② 제목 뒤 `· ● 이름` 표기 ③ 프로젝트 탭의 왼쪽 목록 ④ ⌘K 결과 줄의 제목 뒤.
+
+### Named Rules
+
+**The Blue Means Go Rule.** 파랑은 "지금 선택된 것"과 "누르면 실행되는 주 행동"에만 쓴다. 정보·장식·아이콘 기본색에 파랑을 쓰지 않는다. 화면에서 파란 것을 보면 선택돼 있거나 누를 수 있어야 한다.
+
+**The Badge Is For Urgency Rule.** 틴트 바탕을 깐 배지는 **급한 말**에만 쓴다: `긴급` · `기한 N일 지남` · `오늘까지` · `회신 기한 N일 지남` · 회의의 `초안 N` · 자동화의 `N분 전 실패`. 나머지 상태말(`중요`, `어제에서 밀림`, `진행 중`, `답변 기다리는 중`, 먼 기한)은 아이콘 + 회색 글자다.
+
+**The Four Hues Rule.** 한 화면에 동시에 보이는 색 계통은 파랑·주황·빨강·초록 넷을 넘지 않는다. 다섯 번째 색이 필요하면 그건 정보를 줄여야 한다는 신호다.
+
+## Typography
+
+**Body Font:** `"Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", "Segoe UI", sans-serif`
+
+Pretendard Variable(v1.3.9, SIL OFL 1.1)은 **앱에 넣어 두고 서버가 직접 준다**(`/fonts/PretendardVariable.woff2`, `font-display: swap`). 외부에서 받아오지 않는다. 라이선스는 `tracker/inbox-app/fonts/Pretendard-LICENSE.txt`.
+
+기본은 14px / 1.55, `word-break: keep-all`(한글은 띄어쓰기에서 줄을 바꾼다), `-webkit-font-smoothing: antialiased`. 숫자가 세로로 맞아야 하는 곳(개수·기한·시각·날짜)은 `.num` = `font-variant-numeric: tabular-nums`.
+
+### Hierarchy
+
+| 역할 | 크기 / 굵기 / 줄높이 / 자간 | 쓰는 곳 |
+|---|---|---|
+| project-title | 24 / 700 / -0.025em | 프로젝트 탭의 프로젝트 이름 |
+| doc-title | 22 / 700 / -0.02em | 주간요약 문서 제목(`이번 주`) |
+| brand · detail-title | 20 / 700 / -0.02em (상세는 줄높이 29px) | 앱 이름, 상세 패널의 항목 제목 |
+| list-title | 19 / 700 / -0.015em | `오늘 할 일`, `아이디어`, `결정` 머리줄 |
+| section-title | 18 / 700 / -0.015em | `새로 들어온 것` |
+| card-title | 16 / 700 / -0.015em | 레일 카드 제목(`오늘 미팅`), 문서의 프로젝트 소제목, 프로젝트 탭 구역 제목(17px) |
+| row-title | 16 / 500 / 25px / -0.012em | 업무 줄 제목, 새로 들어온 줄 제목, 프로젝트 탭 줄 제목 |
+| doc-body | 15.5 / 400 / 1.65 | 주간보고 문장 — 이 화면에서 가장 큰 본문 |
+| tab | 15 / 500 (선택 700) | 헤더 탭 |
+| group-title | 14.5 / 600 | 목록 안 그룹 제목(`가입 개선`) |
+| body | 14 / 400 / 1.55 | 본문, 메뉴 항목, 알림, 레일 줄 제목(14.5) |
+| button | 13.5 / 600 | 버튼·세그먼트 글자(작은 버튼 13) |
+| meta | 13 / 500 / tabular | 상태말, 개수 숫자, 조용한 글자 버튼 |
+| chip | 12.5 / 600 | 개수 칩, 상태 배지, `원문` 링크(500) |
+
+입력칸 글자: 빠른 추가 15px, 팔레트 입력 17px, 다음 주 계획 15px, 상세 입력 14px, 초안 문구 14px. 520px 이하의 입력은 iOS 확대를 막으려고 16px로 올린다.
+
+### Named Rules
+
+**The 700 Is A Heading Rule.** 굵기 700은 제목에만 쓴다(위 표의 project/doc/brand/detail/list/section/card-title, 레일 미팅 시각, 슬랙 미리보기의 묶음 제목). 선택된 것·진행 중인 줄은 600까지, 부가 정보는 최대 500이다.
+
+**The Title Is The Loudest Rule.** 한 줄에서 가장 크고 진한 것은 제목(16px `--text`)이다. 옆의 정보는 전부 13px `--dim` 이하이고, 의미가 있을 때만 색이 붙는다. 완료한 줄은 제목이 `--muted` 400 + 취소선(선 색 `--border`)으로 내려간다.
+
+**The Numbers Line Up Rule.** 개수·날짜·시각·기한에는 `.num`을 붙인다. 숫자가 흔들리면 목록이 지저분해 보인다.
+
+## Spacing · Shapes · Elevation
+
+**간격.** 2px 눈금에서 2·4·6·8·10·12·14·16·20·22·28·32만 쓴다. 고정 값: 카드 안쪽 여백 10px, 줄 좌우 여백 `--pad` 20px, 줄 열 간격 12px, 카드 사이 16px, 문서 안쪽 여백 28/32px, 레일 카드 안쪽 10px.
+
+**치수.** `--hdr` 60px · `--row` 54px · `--grp` 36px · `--rail-w` 296px · `--rail-bleed` 20px · `--wp` 104px(프로젝트 열) · `--wm` 184px(상태 열).
+
+**모서리.** 네 단계다: 카드·모달·팔레트·막대 `--r` 20px, 입력칸·세그먼트·메뉴 항목 `--r-sm` 12px, 버튼 `--r-xs` 10px, 줄 hover 14px(레일 줄 12px). 알약(999px)은 **개수 칩·날짜 칩·필터 칩·빠른 추가 칸**에만 허락된다. 상태 배지는 알약이 아니라 **6px**이다 — 버튼과 확실히 달라야 한다. 체크박스도 6px.
+
+**그림자.** 테두리 대신 그림자가 카드를 띄운다.
+- `--soft` (`0 1px 3px rgba(25,31,40,.04), 0 8px 24px rgba(25,31,40,.06)`): 모든 카드·패널·문서.
+- `--shadow` (`0 1px 2px …`): 세그먼트의 흰 손잡이 하나.
+- `--pop` (`0 12px 36px …, 0 2px 8px …`): 떠 있는 것 — 더보기 메뉴, ⌘K 팔레트, 설정 모달, 알림, 여러 개 선택 막대.
+- `--drawer-sh` (`-10px 0 30px …`): 나중에 할 일 서랍, 1120px 이하의 떠 있는 상세 판.
+
+**아이콘.** 14px 인라인 SVG 한 벌(`uiIcon`)만 쓴다 — `viewBox="0 0 16 16"`, `stroke: currentColor`, 굵기 1.5, 끝 둥글게, 채움 없음. 이모지·글리프 문자는 쓰지 않는다. 있는 아이콘: `search more close plus check chevron link refresh gear calendar clock flag chat`.
+
+### Named Rules
+
+**The One Card Rule.** 카드(`--surface` + 20px + `--soft`) 안에 또 카드를 넣지 않는다. 카드 안의 구분은 여백과 그룹 제목, 아주 가끔 `--hair` 한 줄로만 한다. 서랍과 프로젝트 목록도 "바탕색 판 + 그 안의 흰 카드"이지 카드 속 카드가 아니다.
+
+**The No Line Between Rows Rule.** 목록 줄을 실선으로 자르지 않는다. 줄은 여백과 둥근 회색 hover로 나뉜다.
+
+**The Only Floating Things Cast Pop Rule.** 붙어 있는 카드는 `--soft`, 다른 것 위에 떠서 잠깐 나타나는 것만 `--pop`을 쓴다.
+
+## Layout
+
+| 영역 | 값 |
+|---|---|
+| 헤더 | 60px `--surface`, 테두리 대신 `box-shadow: 0 1px 0 var(--hair)`, 여백 `0 18px 0 24px`, 간격 16px. 왼쪽부터 앱 이름(20/700) → 날짜 회색 칩(28px, 999px) → 자동화 지연 표시(지금 실패 중일 때만) → 탭 → (오른쪽) 새로고침 · 검색(`⌘K`) · 설정(톱니바퀴) |
+| 탭 | `오늘 \| 프로젝트 \| 아이디어·결정 \| 주간요약`. 15/500, 선택은 700 + 2.5px 파란 밑줄. 탭 이름 옆 작은 숫자(`d-tabnum`, 12.5px `--dim`)는 0이면 비운다 |
+| 페이지 | `.page` 여백 `16px 20px 48px`. 아이디어·결정 탭만 최대 1240px 가운데 정렬 |
+| 오늘 탭 | grid `calc(296px - 20px) minmax(0,1fr)`. 레일은 `--rail-bleed` 20px만큼 페이지 왼쪽 여백을 되물어 창 끝까지 닿는다. 본문 열은 왼쪽 20px 안쪽 여백 + 최대 1120px |
+| 왼쪽 레일 | 296px, 바탕 투명, 오른쪽 선 없음, `position: sticky; top: 60px`, 레일만 따로 스크롤. 그 위에 흰 카드 셋 — **오늘 미팅 / 리마인드 / 확인 대기**(카드 사이 16px). 요약 줄·큰 숫자 카드 없음 |
+| 본문 | `새로 들어온 것`(따뜻한 카드) → 오늘 할 일 머리줄 → 미루기 제안 → 목록 카드(첫 줄이 빠른 추가) |
+| 상세 패널 | **언제나 헤더 바로 아래 위쪽 고정**(`sticky; top: calc(60px + 16px)`). 어느 줄을 눌러도 같은 자리에 열리고, 길면 패널 안에서 스크롤한다(`max-height: 100dvh - 60px - 32px`). 폭 340px, 회의 정리는 420px. 누른 줄은 `--sel`로 표시된다 |
+| 나중에 할 일 서랍 | 폭 404px, 헤더 아래 오른쪽에 붙어 열린다. 900px 초과에서는 본문을 덮지 않고 `padding-right: 424px`로 **밀어낸다**(160ms). 바탕은 `--bg` 판이고 그 안에 흰 카드 목록이 들어간다 |
+| 프로젝트 탭 | grid `264px minmax(0,1fr)`. 왼쪽은 흰 카드 목록(줄 40px, 색 점 + 이름 + 오른쪽 회색 숫자, 0건은 `--dim`), 오른쪽은 제목(24/700) + 구역마다 흰 카드 + 열 이름 줄 + 54px 줄, 내용 최대 1000px |
+| 아이디어·결정 탭 | 2열(간격 28px, 최대 1080px). 각 열이 흰 카드 하나. 머리줄 = 제목(19/700) + 회색 개수 칩 + (결정만) 조용한 `PRD 미반영 N`. `반영 완료`는 카드 밖 아래에 접어 둔다 |
+| 주간요약 탭 | grid `236px minmax(0,1fr) 356px`, 간격 16px = 주차 목록 카드 \| 문서 카드 \| 슬랙 미리보기 카드. 세 카드 모두 흰 면이고 문서 본문은 720px까지만 넓어진다 |
+| 아래 고정 막대 | 여러 개 선택·문장 묶기 막대는 화면 아래에 떠 있는 흰 둥근 막대(`--pop`, 최대 1120px). 본문은 `padding-bottom: 104px`, 알림은 `bottom: 76px`로 비켜선다 |
+
+**반응형 경계.**
+
+| 폭 | 바뀌는 것 |
+|---|---|
+| ≤1280 | 상태 열 152px, 프로젝트 열 84px. 주간요약 `208px 1fr 312px`, 문서 여백 24/26px |
+| ≥1121 + 서랍 열림 | 상세는 열 안에 들어가지 않고 서랍 위(z 45)의 떠 있는 판이 된다 — 자리는 그대로 헤더 바로 아래 |
+| ≤1120 | 상세는 늘 떠 있는 360px 판(회의 420px). 주간요약은 `196px 1fr`이 되고 슬랙 미리보기가 문서 아래 전체 폭 카드로 내려온다. **주차 목록 카드는 제 높이만큼만 차지한다**(늘려 두면 문서 옆에 빈 자리가 길게 남는다) |
+| ≤900 | 레일·프로젝트 목록·주차 목록이 본문 위로 쌓인다(가로 스크롤 한 줄). 서랍과 상세는 아래에서 올라오는 전체 폭 시트(최대 86vh, 위쪽 모서리 20px). 아이디어·결정은 1열 |
+| ≤640 | 헤더 여백 `0 12px 0 16px`, 앱 이름 숨김, 검색은 아이콘만, 날짜 칩 26px |
+| ≤520 | 줄이 두 줄 격자로 쌓이고(최소 60px) hover 동작은 항상 보인다. 팔레트는 전체 폭, 결과는 `56px 1fr` 두 열 최소 46px. 프로젝트 열 이름 줄은 숨긴다 |
+
+어느 폭에서도 좌우 여백 16px 이상, 가로 페이지 스크롤 없음.
+
+### Named Rules
+
+**The Panel Opens At The Top Rule.** 상세 패널은 줄 높이를 따라다니지 않는다. 어느 줄을 눌러도 헤더 바로 아래 같은 자리에 열린다 — 눈이 패널을 다시 찾지 않아도 되게.
+
+**The Drawer Pushes Rule.** `나중에 할 일`은 본문을 덮지 않고 밀어낸다(900px 초과). 레일과 오늘 목록은 제자리에 남고 목록 폭만 줄어든다.
+
+## Components
+
+### 버튼 세 등급 (이게 전부다)
+
+| 등급 | 모양 | 쓰는 곳 |
+|---|---|---|
+| **1차 (파란 채움)** | 42px, 여백 `0 20px`, 12px 모서리, `--accent-strong` + `--on-fill`, 14.5/600. hover `brightness(1.08)` | **한 패널에 하나**: 상세의 `완료로 표시`, 회의의 `N개 담기`, 주간요약의 `슬랙용으로 복사`, 문장 묶기의 `선택한 문장 묶기` |
+| **2차 (연파랑)** | 33px, 여백 `0 13px`, 10px 모서리, `--accent-soft` + `--accent-text`, 13.5/600. hover는 파란 채움 | 줄 위에 떠오르는 동작(`내일` `나중에` `오늘로`), 새로 들어온 줄의 `오늘`·`나중에`·`완료`, 선택 막대의 `완료로 표시`(`.d-btn.acc`) |
+| **3차 (연회색)** | 34px(작은 형 32px), 여백 `0 13px`, 10px 모서리, `--neutral-bg` + `--muted`, 13.5/600. hover `--hover` + `--text` | 그 밖의 모든 조용한 동작 |
+| **삭제 (빨간 글자)** | 3차와 같은 크기, 배경 없음, `--urgent` 글자. hover에서 `--urgent-bg` | `삭제`. 확인창 없이 실행하고 알림의 `실행 취소`(⌘Z)로 되돌린다 |
+
+전부 `:active { transform: scale(.98) }`, 전환 170ms. 곁가지: **글자 링크**(`.d-link`, `--accent-text` 13/600, hover 밑줄), **아이콘 버튼**(34px 원, `--muted` → hover `--hover`, `aria-label` 필수), **조용한 글자 버튼**(`.d-headnum`, 28px, `--dim` 13/500 — `오늘 신규 14`처럼 숫자를 누를 수 있게 한 자리).
+
+**새로 들어온 줄의 동작**은 평소 3차(연회색)이고, 줄에 손이 닿으면(`:hover`/`:focus-within`) 그제야 2차(연파랑)로 물든다.
+
+### 세그먼트
+
+회색 트랙(`--neutral-bg`, 12px, 안쪽 3px) + 흰 손잡이(9px, `--shadow`). 칸은 32px / `0 14px` / 13.5px 600 `--dim`, 눌린 칸만 `--surface` + `--text`. 보기 전환은 `aria-pressed`, 값을 고르는 것(초안의 종류·`나중에/오늘`)은 `aria-checked`를 쓰고 **모양은 같다**. 동작 버튼과 반드시 달라 보여야 한다.
+
+### 입력칸
+
+테두리 0, `--field` 채움, 12px 모서리, 초점에서 `background: --surface` + `box-shadow: 0 0 0 2px var(--accent)`. 적용 대상: 메뉴의 글자·선택 칸, 날짜 칸, 상세의 여러 줄 입력, 회의 초안 문구(`.d-dtxt`, 최소 38px), 주간요약 문장 수정(`.rp-ta`).
+
+**빠른 추가는 다르다.** 목록 첫 줄과 다음 주 계획은 평소 **그냥 맨 줄**(48px, 배경 없음, `+` 아이콘 + 안내글 15px)이고, **초점에서만** `--field` 채움 + `outline: 2px solid var(--accent); outline-offset: -1px`이 생긴다. 레일·서랍의 빠른 추가는 40px 회색 알약이다.
+
+### 체크박스 한 가족
+
+화면의 체크박스는 한 가족뿐이다 — **모서리 둥근 네모**.
+
+| 자리 | 크기 / 모서리 | 누르는 영역 |
+|---|---|---|
+| 업무 줄 · 서랍 · 결정의 `PRD 반영` · 주간요약 묶기 (`.d-cb`) | 22px / 6px | `::after { inset: -3px }` = 28px |
+| 레일 확인 대기 (`.d-wcb`) | 20px / 6px | `::after { inset: -4px }` = 28px |
+| 여러 개 선택 칸 (`.d-selcb`) | 17px / 4px | `::after { inset: -6px }` = 29px |
+
+꺼짐: 1.5px `--check-line` 테두리 + `--surface` 안쪽. hover: 테두리 `--accent`. 켜짐: `--accent` 채움 + `--on-fill` 체크. 선택 칸만 안쪽 2px 흰 테를 넣어 완료 체크와 구분한다(둘은 같은 화면에 동시에 뜨지 않는다).
+
+**완료하는 순간**(320ms + 520ms): 체크가 그려지며 살짝 커졌다 돌아오고(`d-pop-check`) → 제목에 줄이 왼쪽에서 그어지고 → 옅어진다(`d-strike`). `prefers-reduced-motion`에서는 둘 다 끈다.
+
+### 배지 · 칩
+
+- **상태 배지** — 23px, **6px 모서리**(알약 아님), 12.5/600, 틴트 바탕 + 같은 계열 진한 글자, `pointer-events: none`(눌러 보고 싶어지지 않게). 세우는 말은 위 **The Badge Is For Urgency Rule**의 목록뿐이다.
+- **개수 칩** — 22px, 999px, `--neutral-bg` + `--muted`, 12.5/600. 구역 제목과 카드 제목에만 붙인다. 예외 둘: 오늘 할 일의 남은 개수는 `--accent-soft` 파란 칩, 새로 들어온 것·확인 대기는 `--warn-bg` 주황 칩.
+- **그룹 제목의 개수는 칩이 아니다** — 조용한 회색 숫자(13px / 500 / `--dim`)다.
+- **필터 칩**(⌘K) — 30px, 999px. 종류는 회색 트랙 위에 나란히 서고 고른 하나만 `--accent-soft`. 켜고 끄는 칩(`완료 제외`)은 트랙 밖에서 `--neutral-bg`(꺼짐) / `--accent-soft`(켜짐).
+
+### 업무 줄 (Signature)
+
+- **격자** `30px minmax(0,1fr) 104px 184px`, 열 간격 12px, 높이 54px, 좌우 여백 20px, 14px 모서리.
+- **열 순서** 체크박스 | 제목(+ `· ● 프로젝트` + `원문`) | (비어 있는 프로젝트 열) | 상태 열 — 오른쪽 정렬, 간격 8px, 안에서 **밀림 → 진행 중 → 우선순위 → 기한(맨 오른쪽)**.
+- **배경은 `--rowbg` 하나로 정한다** — 기본 `--surface`, hover/focus-within `--hover`, 선택 `--sel`(+ 제목 600 `--accent-text`), 선택 + hover `--sel-hover`. 줄 위에 겹쳐 뜨는 동작 묶음이 같은 값을 쓰므로 반드시 불투명해야 한다.
+- **hover/focus 동작** 오른쪽 끝에 상태 열 **위로 겹쳐** 나타난다(제목 폭을 뺏지 않는다). 왼쪽 24px은 `transparent → var(--rowbg)` 그라디언트로 아래 글자를 가린다. 130ms.
+- **완료한 줄** 제목 `--muted` 400 + 취소선, 상태 열이 280px로 넓어져 왼쪽 정렬로 결과 한 줄을 보여 준다. 결과가 없으면 글자 링크 `결과 한 줄 적기` → 그 자리에서 입력칸(Enter 저장 / Esc 취소).
+- **상세를 열면** 프로젝트 열은 접히고 상태 열은 내용만큼만 잡는다 — 제목이 먼저 자리를 갖는다.
+- **≤520px** 두 줄 격자 `"ck ti ac" / "ck mt ac"`, 최소 60px. 제목 최대 2줄, 프로젝트는 정보 줄 맨 앞으로, 동작은 항상 보이고 세로로 쌓인다.
+
+### 상태말 — 말과 아이콘 표
+
+종류마다 14px 아이콘 + 풀어 쓴 `title` 툴팁이 붙는다. **배지** 칸이 ✓인 것만 틴트 바탕으로 선다.
+
+| 종류 | 아이콘 | 말 | 색 | 배지 | 툴팁 |
+|---|---|---|---|---|---|
+| 기한 | `calendar` | `오늘까지` | `--warn` | ✓ | `기한은 9월 22일 (화)이에요` |
+| 기한 | `calendar` | `기한 2일 지남` | `--urgent` | ✓ | 〃 |
+| 기한 | `calendar` | `내일까지` / `9월 27일까지` | `--dim` | — | 〃 |
+| 밀림 | `clock` | `어제에서 밀림` / `5일째 밀림` | `--dim` | — | `오늘 하려다 넘어온 업무예요` |
+| 진행 | `clock` | `진행 중` / `3일째 진행 중` | `--dim` | — | `이미 손을 댄 업무예요` |
+| 우선순위 | `flag` | `긴급` | `--urgent` | ✓ | `가장 먼저 해야 하는 업무예요` |
+| 우선순위 | `flag` | `중요` | `--warn` (600, 배경 없음) | — | `중요한 업무예요` |
+| 우선순위 | — | `보통` · `낮음` | 찍지 않는다 | — | — |
+| 답변 | `chat` | `답변 기다리는 중` | `--dim` | — | `다른 사람의 답변을 기다리는 중이에요` |
+| 답변 | `chat` | `답변 왔어요` | `--success` (600) | — | `기다리던 답변이 왔어요` |
+| 회신 | `calendar` | `회신 기한 1일 지남` | `--urgent` | ✓ | — |
+| 원문 | — | `원문` | `--dim` 12.5/500 | — | `슬랙 원문을 새 탭에서 열어요` |
+
+데이터 값(`critical`/`high`)은 그대로 두고 **표시하는 말만** 이 표를 따른다. 값을 고르는 자리(상세·메뉴)의 선택지는 `긴급 / 중요 / 보통 / 낮음`.
+
+### 그룹 제목
+
+높이 `--grp` + 위 14px 여백, 좌우 20px, 14.5/600 `--muted`. 프로젝트 그룹이면 앞에 색 점, 뒤에 회색 숫자. `진행 중` 그룹만 `--text`. 목록 카드 안에서는 `position: sticky; top: 0` + `--surface` 배경. 접히는 그룹(`완료 5`, `반영 완료 4`, `완료한 업무 N`)은 줄 전체가 버튼이고 꺾쇠가 90° 돈다(130ms). 마우스를 올리면 오른쪽에 `+`가 나타나 그 자리에서 추가한다.
+
+### 새로 들어온 것
+
+아주 옅은 따뜻한 카드(`--warm`, 20px, `--soft`). 줄은 최소 54px, `minmax(0,1fr) auto`: 제목(16/500, 인라인 수정 가능) + `원문` | `오늘` `나중에` `완료` + ⋯. 프로젝트 지정·기한·우선순위·삭제는 ⋯ 안에 있다. 제목 오른쪽 끝의 `오늘 신규 N`은 누르면 ⌘K 팔레트를 오늘 들어온 것만으로 연다. `NEW`는 버튼이 아니라 표시다(DECISIONS) — 화면에 잠깐 머물면 조용히 사라진다.
+
+### 오늘 할 일 머리줄 · 진행 표시
+
+머리줄: 제목(19/700) + 파란 개수 칩 + `19개 중 5개 끝냈어요` + (제안이 있으면) 글자 링크 `2개 미룰까요?` / 오른쪽 `나중에 할 일 13` + ⋯(보기 전환 `프로젝트별`·`마감·중요도순`, `여러 개 선택`, `프로젝트 모아보기`).
+
+진행은 별도 띠가 아니라 **오늘 목록 카드 윗변을 따라 흐르는 3px 파란 선**이다. 카드를 덮는 투명한 판(`inset: 0`, 20px 모서리, `overflow: hidden`, `pointer-events: none`) 안에 두어 모서리에 맞게 잘린다. 폭은 `--p`, 전환 320ms.
+
+### 레일 카드 셋
+
+- **오늘 미팅** — 줄 격자 `44px minmax(0,1fr) auto`, 높이 자동(최소 44px). 시각 14/700 `--text`, 제목은 **두 줄까지**(말줄임 없음), 프로젝트는 뒤에 작은 회색 글자, 오른쪽에 `초안 N` 배지.
+  - 진행 중인 회의: **배지 없이 색으로** — 줄에 `--accent-soft` 바탕, 시각·제목이 `--accent-text`.
+  - 끝난 회의: 전부 `--dim`으로 흐리게. 앞으로 있을 회의: 그대로.
+- **리마인드** — 다시 확인할 것과 답변이 해결된 업무가 여기 모인다.
+- **확인 대기** — 줄이 두 줄 구성이다: 첫 줄 제목(두 줄까지), 둘째 줄 `결제팀 · 2일째`(3일째부터 `--warn`) + 기한이 지났거나 오늘이면 배지 + `9월 24일 다시 확인` / `오늘 요청함`. 다시 확인할 항목은 목록 맨 위로 올라온다. 입력칸은 카드 맨 아래 `+ 확인 대기 추가`.
+
+더보기(⋯)는 hover·focus에서만 오른쪽 끝에 겹쳐 뜨고, 그 자리에 있던 조용한 정보는 같은 속도로 물러난다(글자가 반쯤 잘려 보이지 않게).
+
+### 상세 패널 (업무 · 확인 대기 · 회의 정리 공용)
+
+흰 카드 20px, 안쪽 22px, 구역 간격 18px. 위에서부터: (넘어왔으면) 뒤로 링크 → 제목(20/700, 누르면 그 자리에서 textarea) + ⋯ + 닫기 → `슬랙 원문 열기` → 필드 격자 `<dl>` `auto minmax(0,1fr)`(라벨 12.5 `--muted` / 값 14 `--text`) → 동작 줄(1차 하나 + 3차 몇) → 구역(위 1px `--hair`) → `고치면 바로 저장돼요`. 저장 버튼은 없다.
+
+**회의 정리 패널**(420px)은 같은 부품을 쓴다. 초안 묶음: 문구가 주인공인 회색 채움 입력(`.d-dtxt`) + 종류 세그먼트 + (할 일이면) `나중에 할 일 / 오늘 할 일` 세그먼트 + 날짜 칸, 오른쪽 위에 ✕. 구역은 면을 만들지 않고 `--hair` 한 줄과 여백으로만 나눈다.
+
+**담기 바**는 패널 아래에 붙어 있는 흰 띠(`sticky`, 위 1px `--hair`): 왼쪽에 `할 일 1 · 확인 대기 1 · 결정 1`, 오른쪽에 1차 `N개 담기`.
+
+**결과 카드**는 담은 직후에 뜨는 **연초록 면**(`--success-bg`, 12px): `✓ 3개 담음` + 종류별 개수 + `실행 취소`, 나중에 담긴 할 일을 그 자리에서 `오늘로`, 맨 아래 다음 검토할 회의. 이 면 위의 3차 버튼은 회색 대신 흰 알맹이가 된다.
+
+### 더보기 메뉴 (한 벌)
+
+모든 줄·상세의 ⋯가 같은 컴포넌트를 쓴다(`aria-haspopup`, `aria-expanded`, `role="menu"` / `role="menuitem"`).
+`position: fixed`, 폭 304px(최대 `100vw - 24px`), `--surface`, 18px 모서리, `--pop`, 안쪽 6px. 항목 38px / `0 12px` / 14px 500 / 10px 모서리, hover `--hover`. 구분선 1px `--hair`. `삭제`는 맨 아래 구분선 뒤이고 평소엔 `--muted`, hover에서만 `--urgent`.
+**필드 줄**: 라벨(12.5 `--muted`, 최소 52px) + 오른쪽 정렬 컨트롤(칩 30px 999px — 현재 값만 `--accent-soft`; 글자·선택·날짜 칸 30px 12px 모서리).
+버튼 오른쪽 끝에 맞춰 4px 아래에 열리고, 자리가 없으면 위로 뒤집힌다(가장자리 8px 유지). 열리면 첫 항목에 포커스, ↑↓ 이동, Esc는 닫고 ⋯로 포커스를 돌려준다. 한 번에 하나만 열린다. 등장 120ms.
+
+### ⌘K 검색 팔레트
+
+가림막(`--scrim`) 위, 위에서 84px, 폭 `min(620px, 100vw - 32px)`, 20px 모서리, `--pop`, 등장 140ms.
+- **입력 줄** 60px, 여백 `0 20px`, 17px 글자 + 17px 돋보기.
+- **필터 줄** 회색 트랙 위 종류 칩(`전체 할 일 확인 대기 결정 아이디어 회의`) + 트랙 밖 토글 칩(`완료 제외`, 회의일 때 `미해결만`·`검토 대기`). `오늘 신규` 필터가 걸리면 지울 수 있는 칩이 붙는다.
+- **결과 줄** 최소 46px, 12px 모서리. 항목은 `62px minmax(0,1fr) auto` = 종류(12.5 `--dim`) | 제목(15px, 일치 부분 `--mark`) + `· ● 프로젝트` | 상태. 회의는 앞에 날짜·시각 열이 하나 더 붙는다. 상태는 오늘 목록과 같은 규칙(급한 것만 배지). 고른 줄 `--sel` + 제목 600.
+- **바닥** `↑↓ 이동 · Enter 열기 · Esc 닫기`(12px `--dim`).
+- 닫으면 찾던 자리(검색어·필터·스크롤·활성 줄)로 그대로 돌아온다.
+
+### 여러 개 선택 막대 · 문장 묶기 막대
+
+화면 아래에 떠 있는 흰 둥근 막대(20px, `--pop`, 최대 1120px, 여백 `10px 14px`). 왼쪽부터 **`2개 선택`(15/700 — 가장 먼저 읽힌다)** → `전체 선택` 글자 링크 → 동작들 → (오른쪽) `선택 끝내기`. 동작 중 `완료로 표시`만 2차(연파랑)이고 `삭제`는 빨간 글자, 나머지는 3차다. 아무것도 고르지 않았으면 바꾸는 버튼은 눌리지 않는다.
+
+### 나중에 할 일 서랍
+
+`--bg` 판(404px) + `--drawer-sh`, 그 안에 흰 카드 목록 하나. 머리 60px(제목 17/700 + 회색 개수 칩 + 닫기), 회색 알약 빠른 추가, 프로젝트 그룹. 좁은 면이라 줄은 두 줄형이다: `30px minmax(0,1fr) max-content`, 최소 58px, 제목 최대 2줄, **프로젝트 열은 접고 상태 열은 내용만큼만** 잡는다(그러지 않으면 좁은 서랍에서 제목 폭이 0이 된다).
+
+### 설정 (모달)
+
+`<dialog>` 20px 흰 카드, 폭 `min(620px, 100vw - 32px)`, `--pop`. 머리(여백 `14px 14px 14px 20px`, 아래 `--hair`): 제목 18/700 + 세그먼트 `상태`/`사용법` + 닫기. 본문 여백 `14px 16px 18px`.
+**상태 탭**은 자동화마다 한 줄 54px(안쪽 8px + 줄 38px): 이름 14.5/500 | 오른쪽에 `31분 전 성공`(13 `--dim`). **지금 실패 중일 때만** 빨간 배지(`● 32분 전 실패`, 6px, `--urgent-bg`)와 오류 문장, 접힌 `최근 기록`이 붙는다. 해결된 과거 실패는 `지난 문제 2건 · 지금은 정상`으로 접어 둔다. 헤더 톱니바퀴의 경고 점도 같은 규칙이다(DECISIONS).
+**사용법 탭**은 문답 목록(질문 14/600, 답 13 `--muted` 1.65, 최대 64ch).
+
+### 주간요약 문서
+
+세 개의 흰 카드다. 가운데 문서 카드가 주인공이고, 그 안은 **흰 카드 위의 문서**처럼 읽힌다(안쪽 28/32px, 본문 최대 720px).
+
+- **머리줄** 제목 `이번 주`(22/700) + 기간 + 세그먼트(`보고`/`전체 업무 기록`) + (있으면) `되돌리기` + 오른쪽 끝 **1차 `슬랙용으로 복사`**. 복사 버튼은 여기 한 곳에만 둔다.
+- **조용한 한 줄** `보고 8문장 · 근거 업무 8개`(13 `--dim`), 확인이 필요한 문장이 있으면 그 자리로 데려가는 글자 링크.
+- **위계** 상태 제목(12.5/600 `--dim`, 위 1px `--hair`) → 프로젝트 소제목(16/700 `--text`) → **문장(15.5 / 1.65 — 이 화면에서 가장 큰 본문)**.
+- **문장 줄** `22px minmax(0,1fr) auto` = 글머리(또는 묶기 체크박스) | 문장 | `수정` `제외` ⋯ — hover·focus에서만(≤520px는 항상). 손으로 고친 문장에만 `직접 수정`, 자동 초안에는 아무 표시도 하지 않는다.
+- **수정**은 그 자리에서 textarea(15.5 / 1.65, 회색 채움 + 파란 테) + `저장`(1차) `취소`.
+- **근거 업무**는 문장 아래 왼쪽 1px `--border` 선으로 들여쓴 목록.
+- **묶기**는 아래 고정 막대를 쓴다 — 일괄 선택 막대와 **같은 부품**(`.d-selbar`): `1개 선택` + `완료한 일 안에서만 고를 수 있어요` + 1차 `선택한 문장 묶기` + `취소`.
+- **다음 주 계획**은 문서의 마지막 구역이고 빠른 추가 부품을 쓴다(48px 맨 줄, 초점에서만 채움 + 파란 테). 사람이 직접 쓴 문장만 들어간다(DECISIONS).
+- **슬랙 미리보기 카드**는 오른쪽 흰 카드: `슬랙에 붙이면`(13/700) 아래 13.5 / 1.7 본문, 묶음 제목 700, 글머리 줄 내어쓰기. **복사될 글자와 한 글자도 다르면 안 된다**(테스트가 형식을 고정한다).
+
+### 알림(toast) · 복구 배너 · 빈 화면
+
+- **알림** 왼쪽 아래 24px 고정, `--surface`, 16px 모서리, `--pop`, 여백 `12px 12px 12px 18px`, 14px. 문구 + (해당되면) `⌘Z로 되돌리기` 안내 · `삭제 실행 취소` · `다시 시도` · 후속 동작 · `닫기`. 4.5초 뒤 사라짐(동작이 붙으면 8초), 등장 140ms(아래 6px에서), `role="status"`. **오류일 때만** 빨간 테두리가 생기고 스스로 사라지지 않는다.
+- **복구 필요 배너** 헤더 아래 전체 폭 띠, `--urgent-bg` + `--urgent` 14/600, 여백 `12px 24px`. **스스로 사라지지 않는다.** 원인은 뒤에 `--muted` 12.5px로 덧붙인다.
+- **빈 화면** 15/500 `--muted`, 여백 `34px 20px`. 한 줄 친근한 문구 하나만 적는다: `오늘 할 일이 비었어요. 맨 위 줄에서 바로 추가할 수 있어요.` · `오늘 할 일을 모두 끝냈어요.` · `오늘은 미팅이 없어요.` · `찾는 항목이 없어요.`
+
+## 말투 (해요체)
+
+**말을 거는 문장은 해요체.** 알림·안내·빈 화면·오류·도움말·`title` 툴팁·`aria-live` 문구, 그리고 서버가 화면에 돌려주는 오류 문구까지 전부.
+**버튼·메뉴·열 이름·구역 제목은 짧은 명사형.** `완료로 표시` · `내일` · `나중에` · `오늘로` · `삭제` · `프로젝트 없음` · `기록 없음`.
+
+규칙 셋: ① 짧고 구체적으로 ② 사과·과장 없이 ③ **무엇이 일어났는지 / 어떻게 하면 되는지**를 적는다.
+
+| 상황 | 이렇게 |
+|---|---|
+| 잘된 일 | `내일로 미뤘어요` · `완료했어요` · `삭제했어요` · `되돌렸어요` · `저장했어요` · `오늘 할 일로 옮겼어요` |
+| 단서를 붙일 때 | `나중에 할 일로 옮겼어요 · 기한은 그대로예요` |
+| 저장이 불확실할 때 | `저장됐는지 확인하지 못했어요. 입력한 내용은 그대로 있어요` |
+| 막혔을 때 | `복구가 필요해서 저장을 멈췄어요.` · `같은 상태의 문장만 묶을 수 있어요.` · `최근 작업부터 순서대로 실행 취소해 주세요` |
+| 빈 화면 | `아이디어가 아직 없어요. 맨 위 줄에서 바로 적어 둘 수 있어요.` |
+
+바꾸지 않는 것: 로그·주석·테스트 설명. 문구를 바꾸면 그 문구를 고정한 테스트도 같이 고친다.
+
+### 용어 (그대로 쓴다)
+
+`오늘로` · `내일` · `나중에` · `완료로 표시` · `결정` · `아이디어` · `확인 대기` · `언제 할지` · `기한`(할 일) · `회신 기한`(확인 대기) · `다시 확인할 날짜` · `프로젝트` · `원문` · `결과 한 줄` · `초안`.
+업무를 끝내는 일이 아니면 `완료`라고 쓰지 않는다 — 결정은 `PRD 반영`, 확인 대기는 `확인됨으로 표시`. 날짜는 `9월 22일 (화)`, 좁은 자리에서는 `9월 22일`. 연도는 붙이지 않는다.
+
+**찍지 않는 것.** 목록·줄·개수에 `보통` · `낮음` · `없음` · `0`을 찍지 않는다 — 값이 의미 없으면 자리를 비운다. 예외는 값을 고르거나 확인하는 자리뿐이다(상세 필드의 `없음`, 메뉴의 우선순위 칩).
+
+## 모션
+
+`--ease: cubic-bezier(.22, .8, .3, 1)`.
+
+| 움직임 | 길이 |
+|---|---|
+| 줄·버튼 hover 색, 입력 초점 | 170ms |
+| 겹쳐 뜨는 동작 묶음, 꺾쇠 회전 | 130ms |
+| 메뉴 등장(위 6px에서) | 120ms |
+| 팔레트·알림 등장(위/아래 6px에서) | 140ms |
+| 서랍 열고 닫기, 본문 밀림 | 160ms |
+| 체크 커졌다 돌아오기 | 320ms |
+| 진행 선 채우기 | 320ms |
+| 완료 순간의 줄 긋기 + 옅어짐 | 520ms |
+| 새로고침 아이콘 한 바퀴 | 400ms |
+| 팔레트에서 연 줄 밝히기 | 1.6s |
+
+등장은 6px 이동 + 투명도뿐이다. 장식적인 움직임은 없다. `prefers-reduced-motion: reduce`에서는 모든 transition·animation을 `.01ms`로 줄이고, 완료 순간의 두 애니메이션과 진행 선 전환은 아예 끈다.
+
+## 접근성 바닥
+
+**대비 (계산값, 4.5:1 기준)**
+
+라이트 — `--text`/흰 **16.6** · `--text`/바탕 **15.0** · `--muted`/흰 **7.11** · `--muted`/바탕 **6.45** · `--dim`/흰 **5.32** · `--dim`/바탕 **4.83** · `--accent-text`/흰 **5.41** · `--accent-text`/바탕 **4.91** · `--accent-text`/`--accent-soft` **4.82** · 흰 글자/`--accent-strong` **5.41**.
+배지 — urgent `#c9252d`/`#ffeceb` **4.87** · warn `#b0560a`/`#fff4e5` **4.62** · success `#0d7a4a`/`#e6f6ee` **4.82** · 중립 `#4e5968`/`#eef1f4` **6.27**.
+
+다크 — `--text`/면 **13.6** · `--muted`/면 **7.35** · `--muted`/바탕 **8.20** · `--dim`/면 **5.25** · `--accent-text`/면 **6.79** · `--accent-text`/`--accent-soft` **6.12** · `--on-fill`/`--accent` **5.97**.
+배지 — urgent **6.79** · warn **8.09** · success **7.55** · 중립 **6.20**.
+
+> 참고 색에서 일부러 벗어난 곳: 토스 계열의 `#8b95a1`는 흰 바탕에서 3.04:1이라 글자로 쓸 수 없다 → 라이트의 `--dim`을 `#636c78`로 한 단계 어둡게 했다(다크에서는 `#8b95a1` 그대로, 5.25 ✓).
+
+**그 밖의 바닥**
+- 포커스: `:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px }`. 입력칸은 2px 파란 테나 `outline`으로 대신한다. hover에만 보이는 동작은 `:focus-within`에서도 보여야 한다.
+- 누르는 영역: 줄 안의 컨트롤 28px 이상(체크박스는 투명한 `::after`로 확보), 줄 자체 54px, 520px 이하에서는 줄 60px 이상.
+- 컨트롤 대비 3:1 이상(꺼진 체크박스 테두리 `--check-line`이 흰 면 위 3.04 ✓).
+- 키보드: ⌘K 검색 · ⌘Z 되돌리기 / ⌘⇧Z 다시 실행 · Esc는 **가장 위에 열린 것부터** 하나씩 닫는다(설정 → 메뉴 → 검색 → 회의 → 상세 → 서랍). 맨 위에 `오늘 할 일로 건너뛰기` 링크.
+- 탭은 `role="tablist"`/`aria-selected`, 아이콘 버튼은 `aria-label`, 알림은 `role="status"` + `aria-live="polite"`, 팔레트는 `role="dialog"` + `combobox`/`listbox`/`option`.
+- 한글 조합 중(`event.isComposing`)의 Enter는 글자를 확정하는 것이지 실행이 아니다. 입력 중에는 자동 갱신으로 화면을 다시 그리지 않는다.
+
+## Do's and Don'ts
+
+### Do
+- **Do** 색·모서리·그림자·간격은 토큰(`--accent`, `--r`, `--soft`, `--pad` …)만 쓴다. 컴포넌트 규칙에 색 값을 직접 적지 않는다.
+- **Do** 목록은 테두리 없는 20px 흰 카드 하나에 담고, 그 안은 여백과 그룹 제목으로만 나눈다.
+- **Do** 줄은 54px 한 줄, 열 순서 `체크박스 | 제목 | 상태(밀림 · 진행 · 우선순위 · 기한)`를 지킨다. 기한이 항상 맨 오른쪽이다.
+- **Do** 줄 위 동작은 상태 열 위에 겹쳐 띄우고(`:hover`, `:focus-within`, 선택됨), 520px 이하에서는 항상 보이게 한다.
+- **Do** 상태말은 아이콘 + 회색 글자로 적고, 급한 말만 6px 배지로 세운다.
+- **Do** 완료는 둥근 네모 체크박스로 한다. 완료하는 순간을 짧게 보여 준다.
+- **Do** 한 패널에 1차 버튼은 하나만 둔다. 나머지는 2·3차, `삭제`는 빨간 글자.
+- **Do** 새 더보기 메뉴가 필요하면 한 벌뿐인 메뉴 컴포넌트에 항목을 더한다.
+- **Do** 말을 거는 문장은 해요체로, 버튼 이름은 명사형으로 적는다.
+- **Do** 화면을 고치면 라이트·다크, 1280/1120/900/640/520, `prefers-reduced-motion`에서 확인한다.
+
+### Don't
+- **Don't** 정보를 버튼처럼 생긴 **파란 알약**으로 그리지 않는다. 배경이 칠해진 둥근 것은 전부 누를 수 있어야 한다.
+- **Don't** 상태 배지를 알약(999px)으로 만들지 않는다 — 6px이다. 그리고 급하지 않은 말에는 배지를 쓰지 않는다.
+- **Don't** 파랑을 선택·행동 밖에 쓰지 않는다. `--accent` 위에 흰 글자를 얹지 않는다(`--accent-strong`을 쓴다).
+- **Don't** 카드 안에 카드를 넣지 않는다. 붙어 있는 카드에 `--pop`을 주지 않는다.
+- **Don't** 목록 줄을 실선으로 자르지 않는다.
+- **Don't** 부가 정보에 굵기 700을 쓰지 않는다. 700은 제목의 것이다.
+- **Don't** `보통` · `낮음` · `없음` · `0개` 같은 빈 정보를 목록에 찍지 않는다.
+- **Don't** 상세 패널을 누른 줄 높이에 맞춰 열지 않는다 — 언제나 헤더 바로 아래다.
+- **Don't** 이모지·글리프 아이콘, 1px을 넘는 색 띠, 제목 위의 작은 머리글(eyebrow), 큰 숫자 통계 카드를 쓰지 않는다.
+- **Don't** 계획 모드·저장 버튼·삭제 확인창을 되살리지 않는다. 옮기기는 그 자리에서, 저장은 자동, 삭제는 되돌리기로.
+- **Don't** 웹폰트 CDN·라이브러리·이미지·빌드 단계를 들이지 않는다. 글꼴은 앱에 넣어 둔 파일 하나를 서버가 직접 준다.
+- **Don't** 업무를 끝내는 일이 아닌 것에 `완료`라는 말을 붙이지 않는다.

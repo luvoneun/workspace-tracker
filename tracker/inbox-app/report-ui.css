@@ -3,59 +3,73 @@
    여기에는 "문서"에만 있는 타이포와 세 열의 자리만 적는다. */
 
 #gridWeekly {
-  display: grid; grid-template-columns: 200px minmax(0, 1fr) 340px;
-  gap: 0; align-items: stretch; min-height: calc(100dvh - var(--hdr) - 64px);
+  display: grid; grid-template-columns: 236px minmax(0, 1fr) 356px;
+  gap: 16px; align-items: start; min-height: calc(100dvh - var(--hdr) - 64px);
 }
 #gridWeekly[hidden] { display: none; }
 #gridWeekly > * { min-width: 0; }
 
-/* 주차 목록 — 왼쪽 레일과 같은 재질로 창 끝까지 닿는다(.page 여백을 되물린다) */
+/* 주차 목록 — 바탕색 판 위의 흰 카드. 길어지면 카드 안에서만 스크롤한다. */
 .rp-weeks {
-  position: sticky; top: var(--hdr); align-self: start;
-  height: calc(100dvh - var(--hdr)); overflow-y: auto; overscroll-behavior: contain;
-  background: var(--rail); border-right: 1px solid var(--border);
-  margin: -16px 0 -48px -20px; padding: 8px 10px 28px;
+  position: sticky; top: calc(var(--hdr) + 16px); align-self: start;
+  max-height: calc(100dvh - var(--hdr) - 32px); overflow-y: auto; overscroll-behavior: contain;
+  background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r);
+  box-shadow: var(--soft); margin: 0; padding: 10px;
 }
+.rp-weeks > .d-grp { position: sticky; top: -10px; z-index: 2; background: var(--surface); height: 32px; padding: 0 10px; }
 .rp-wk {
-  display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px;
-  width: 100%; min-height: 40px; padding: 6px 10px; border: 0; background: none;
-  border-radius: var(--r-xs); color: var(--text); font-family: inherit; text-align: left; cursor: pointer;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0 8px;
+  width: 100%; min-height: 48px; padding: 6px 10px; border: 0; background: none;
+  border-radius: 12px; color: var(--text); font-family: inherit; text-align: left; cursor: pointer;
+  transition: background 170ms var(--ease);
 }
-.rp-wk .nm { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rp-wk .rg { font-size: 11.5px; color: var(--muted); }
-.rp-wk .nw { font-size: 11.5px; color: var(--accent-text); }
-.rp-wk:hover { background: var(--rail-hover); }
-.rp-wk[aria-current="true"] { background: var(--accent-soft); }
+.rp-wk .nm { grid-column: 1; font-size: 14.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rp-wk .rg { grid-column: 1; font-size: 12.5px; color: var(--dim); }
+/* `새 기록 N`은 둥근 연파랑 칩 */
+.rp-wk .nw {
+  grid-column: 2; grid-row: 1 / span 2; justify-self: end;
+  height: 22px; display: inline-flex; align-items: center; padding: 0 9px; border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent-text); font-size: 12px; font-weight: 600;
+}
+.rp-wk:hover { background: var(--hover); }
+.rp-wk[aria-current="true"] { background: var(--sel); }
+.rp-wk[aria-current="true"]:hover { background: var(--sel-hover); }
 .rp-wk[aria-current="true"] .nm { color: var(--accent-text); font-weight: 600; }
 
-/* 문서 — 본문은 720px까지만 넓어진다(읽는 화면이므로 줄 길이를 지킨다) */
-.rp-doc { padding: 18px 28px 64px; }
-.rp-body { max-width: 720px; }
-.rp-hd { gap: 8px 10px; }
-.rp-title { font-size: 19px; font-weight: 600; letter-spacing: -0.02em; }
-.rp-sum { display: flex; align-items: center; gap: 10px; margin: 2px 0 6px; font-size: 12px; color: var(--muted); }
-.rp-hint { font-size: 12px; color: var(--muted); }
-
-/* 상태 제목(label) → 프로젝트 제목 → 문장 */
-.rp-h {
-  margin: 26px 0 0; padding-top: 8px; border-top: 1px solid var(--hair);
-  font-size: 12px; font-weight: 600; color: var(--muted);
+/* 문서 — 흰 카드 위에 얹힌 한 장의 글. 본문은 720px까지만 넓어진다(읽는 화면이므로 줄 길이를 지킨다). */
+.rp-doc {
+  background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r);
+  box-shadow: var(--soft); padding: 28px 32px 48px;
 }
-.rp-body > .rp-h:first-of-type { border-top: 0; padding-top: 0; }
-.rp-pj { margin: 14px 0 2px; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.rp-body { max-width: 720px; }
+.rp-hd { gap: 10px; margin-bottom: 2px; }
+.rp-title { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+.rp-hd .sub { color: var(--dim); font-size: 13.5px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.rp-sum { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; font-size: 13px; color: var(--dim); }
+.rp-hint { font-size: 13px; color: var(--dim); }
+.rp-h + .rp-hint { margin-top: 8px; }
+
+/* 상태 제목(작고 조용하게) → 프로젝트 제목(굵게) → 문장(가장 큰 본문) */
+.rp-h {
+  margin: 30px 0 0; padding-top: 12px; border-top: 1px solid var(--hair);
+  font-size: 12.5px; font-weight: 600; color: var(--dim); letter-spacing: 0.01em;
+}
+.rp-body > .rp-h:first-of-type { border-top: 0; padding-top: 0; margin-top: 16px; }
+.rp-pj { margin: 18px 0 2px; font-size: 16px; font-weight: 700; letter-spacing: -0.01em; color: var(--text); }
 
 /* 문장 한 줄 — 글머리 | 문장 | 동작(hover·focus에서만) */
 .rp-s {
-  position: relative; display: grid; grid-template-columns: 14px minmax(0, 1fr) auto;
-  align-items: start; gap: 6px; padding: 3px 6px 3px 0; border-radius: var(--r-xs);
+  position: relative; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: start; gap: 4px 8px; padding: 4px 8px 4px 4px; margin-left: -4px; border-radius: var(--r-xs);
 }
-.rp-s .bu { color: var(--dim); font-size: 15px; line-height: 1.65; }
-.rp-s .d-cb { margin-top: 5px; }
+.rp-s .bu { justify-self: center; color: var(--dim); font-size: 15.5px; line-height: 1.65; }
+.rp-s .d-cb { margin-top: 4px; }
 .rp-s.is-sel { background: var(--sel); }
 .rp-s.is-off { opacity: 0.55; }
-.rp-s .tx { font-size: 15px; line-height: 1.65; word-break: keep-all; overflow-wrap: anywhere; }
+/* 문장이 이 화면에서 가장 큰 글자다 */
+.rp-s .tx { font-size: 15.5px; line-height: 1.65; word-break: keep-all; overflow-wrap: anywhere; }
 .rp-s .ln { white-space: pre-wrap; }
-.rp-s .edt, .rp-s .rv, .rp-s .nw { margin-left: 8px; font-size: 11.5px; white-space: nowrap; }
+.rp-s .edt, .rp-s .rv, .rp-s .nw { margin-left: 8px; font-size: 12px; white-space: nowrap; }
 .rp-s .edt { color: var(--muted); }
 .rp-s .rv { color: var(--warn); }
 .rp-s .nw { color: var(--accent-text); }
@@ -65,84 +79,89 @@
 }
 .rp-s:hover .ac, .rp-s:focus-within .ac { opacity: 1; pointer-events: auto; }
 
-/* 그 자리 수정 */
+/* 그 자리 수정 — 다른 입력칸과 같은 부품(테두리 없는 회색 채움 + 파란 테) */
 .rp-ta {
   box-sizing: border-box; width: 100%; resize: vertical;
-  padding: 8px 10px; border: 1px solid var(--accent); border-radius: var(--r-xs);
-  background: var(--field); color: var(--text); font-family: inherit; font-size: 15px; line-height: 1.65;
+  padding: 10px 14px; border: 0; border-radius: var(--r-sm);
+  background: var(--field); color: var(--text); font-family: inherit; font-size: 15.5px; line-height: 1.65;
+  box-shadow: 0 0 0 2px var(--accent);
 }
-.rp-ta:focus { outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
+.rp-ta:focus { outline: none; background: var(--surface); box-shadow: 0 0 0 2px var(--accent); }
 .rp-s .ed { display: flex; gap: 4px; margin-top: 6px; }
 
 /* 근거 업무 — 문장 아래로 들여쓴 목록(색 띠가 아니라 1px 선 하나) */
-.rp-ev { margin: 2px 0 6px 20px; padding-left: 12px; border-left: 1px solid var(--border); }
+.rp-ev { margin: 2px 0 8px 20px; padding-left: 14px; border-left: 1px solid var(--border); }
 .rp-ev .ev {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: baseline;
-  width: 100%; padding: 4px 6px; border: 0; background: none; border-radius: var(--r-xs);
-  font-family: inherit; font-size: 12.5px; color: var(--text); text-align: left; cursor: pointer;
+  width: 100%; min-height: 32px; padding: 5px 8px; border: 0; background: none; border-radius: var(--r-xs);
+  font-family: inherit; font-size: 13px; color: var(--text); text-align: left; cursor: pointer;
 }
 .rp-ev .ev:hover { background: var(--hover); }
 .rp-ev .ev .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rp-ev .ev .o { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
-.rp-ev .none { padding: 4px 6px; font-size: 12px; color: var(--muted); }
+.rp-ev .ev .o { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
+.rp-ev .none { padding: 5px 8px; font-size: 12.5px; color: var(--dim); }
 
 /* 수정 제안 — 조용한 블록, 지금 문장은 덮어쓰지 않는다 */
-.rp-sg { margin: 2px 0 8px 20px; padding: 8px 12px; background: var(--hover); border-radius: var(--r-sm); }
-.rp-sg .hd { font-size: 12px; font-weight: 600; color: var(--muted); }
-.rp-sg .tx { margin-top: 4px; font-size: 13.5px; line-height: 1.6; white-space: pre-wrap; word-break: keep-all; }
-.rp-sg .ac { display: flex; gap: 4px; margin-top: 6px; }
-.rp-sg .hint { margin-top: 4px; font-size: 11.5px; color: var(--muted); }
+.rp-sg { margin: 4px 0 10px 20px; padding: 12px 14px; background: var(--field); border-radius: var(--r-sm); }
+.rp-sg .hd { font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.rp-sg .tx { margin-top: 4px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-break: keep-all; }
+.rp-sg .ac { display: flex; gap: 4px; margin-top: 8px; }
+.rp-sg .hint { margin-top: 6px; font-size: 12px; color: var(--dim); }
 
 /* 제외한 문장 — 문서 끝(다음 주 계획 위)에 접어 둔다 */
-.rp-ex { margin-top: 26px; padding-top: 8px; border-top: 1px solid var(--hair); }
-.rp-ex summary { font-size: 12px; font-weight: 600; color: var(--muted); cursor: pointer; padding: 4px 0; min-height: 28px; }
+.rp-ex { margin-top: 30px; padding-top: 12px; border-top: 1px solid var(--hair); }
+.rp-ex summary { font-size: 12.5px; font-weight: 600; color: var(--dim); cursor: pointer; padding: 4px 0; min-height: 28px; }
 .rp-ex .row {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center;
   padding: 4px 0; color: var(--muted); font-size: 13.5px; line-height: 1.6;
 }
 .rp-ex .row .tx { word-break: keep-all; overflow-wrap: anywhere; }
 
-/* 다음 주 계획 — 항상 보이는 한 줄 입력(사람이 직접 쓴 문장만 들어간다) */
+/* 다음 주 계획 — 항상 보이는 한 줄 입력(사람이 직접 쓴 문장만 들어간다).
+   목록의 빠른 추가와 같은 부품이다: 평소에는 맨 줄, 초점에서만 회색 채움 + 파란 테. */
 .rp-add {
-  display: flex; align-items: center; gap: 8px; height: var(--row); margin-top: 4px;
-  padding: 0 8px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--field);
+  display: flex; align-items: center; gap: 8px; height: 48px; margin-top: 4px;
+  padding: 0 14px; border: 0; border-radius: var(--r-sm); background: none;
+  transition: background 170ms var(--ease);
 }
 .rp-add .d-i { color: var(--dim); }
 .rp-add input {
   flex: 1; min-width: 0; height: 100%; border: 0; background: none; outline: none;
-  color: var(--text); font-family: inherit; font-size: 13.5px;
+  color: var(--text); font-family: inherit; font-size: 15px;
 }
 .rp-add input::placeholder { color: var(--dim); }
-.rp-add:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.rp-add:focus-within { background: var(--field); outline: 2px solid var(--accent); outline-offset: -1px; }
 
-/* 전체 업무 기록 — 같은 문서 폭 안의 조용한 목록 */
-.rp-recs { margin-top: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; }
+/* 전체 업무 기록 — 같은 문서 폭 안의 조용한 목록(문서 카드 안이라 면을 또 만들지 않는다) */
+.rp-recs { margin-top: 10px; }
 .rp-rec {
   display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center;
-  min-height: var(--row); padding: 4px var(--pad);
+  min-height: var(--row); padding: 4px 12px; border-radius: 12px;
+  transition: background 170ms var(--ease);
 }
-.rp-rec + .rp-rec { box-shadow: inset 0 1px 0 var(--hair); }
-.rp-rec:hover, .rp-rec:focus-within { background: var(--hover); box-shadow: none; }
-.rp-rec:hover + .rp-rec, .rp-rec:focus-within + .rp-rec { box-shadow: none; }
+.rp-rec:hover, .rp-rec:focus-within { background: var(--hover); }
 .rp-rec .ti {
   border: 0; background: none; padding: 0; text-align: left; cursor: pointer;
-  font-family: inherit; font-size: 13px; color: var(--text);
+  font-family: inherit; font-size: 14.5px; color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.rp-rec .mt { font-size: 11.5px; color: var(--muted); text-align: right; white-space: nowrap; }
+.rp-rec .ti:hover { color: var(--accent-text); }
+.rp-rec .mt { font-size: 12.5px; color: var(--dim); text-align: right; white-space: nowrap; }
 
-/* 슬랙 미리보기 — 복사될 글자와 정확히 같은 내용 */
+/* 슬랙 미리보기 — 복사될 글자와 정확히 같은 내용. 오른쪽 흰 카드 한 장. */
 .rp-slack {
-  margin: -16px -20px -48px 0; padding: 18px 16px 40px;
-  background: var(--bg); border-left: 1px solid var(--border);
+  position: sticky; top: calc(var(--hdr) + 16px); align-self: start;
+  max-height: calc(100dvh - var(--hdr) - 32px); overflow-y: auto; overscroll-behavior: contain;
+  margin: 0; padding: 18px 20px 20px;
+  background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r);
+  box-shadow: var(--soft);
 }
-.rp-slackhd { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
+.rp-slackhd { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 10px; }
 .rp-slackbox {
-  padding: 14px; background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--r); box-shadow: var(--shadow);
-  font-size: 13px; line-height: 1.7; word-break: keep-all; overflow-wrap: anywhere;
+  padding: 0; background: none; border: 0; border-radius: 0; box-shadow: none;
+  font-size: 13.5px; line-height: 1.7; word-break: keep-all; overflow-wrap: anywhere;
 }
-.rp-slackbox .blk + .blk { margin-top: 12px; }
+.rp-slackbox .blk + .blk { margin-top: 14px; }
 .rp-slackbox .hd { font-weight: 700; }
 .rp-slackbox .bl { padding-left: 12px; text-indent: -12px; }
 
@@ -153,40 +172,41 @@ body.merge-open .page { padding-bottom: 104px; }
 body.merge-open .d-toast { bottom: 76px; }
 
 @media (max-width: 1280px) {
-  #gridWeekly { grid-template-columns: 176px minmax(0, 1fr) 300px; }
+  #gridWeekly { grid-template-columns: 208px minmax(0, 1fr) 312px; gap: 14px; }
+  .rp-doc { padding: 24px 26px 40px; }
 }
-/* 미리보기는 숨기지 않고 문서 아래로 내려온다 */
+/* 미리보기는 숨기지 않고 문서 아래로 내려온다.
+   주차 목록은 제 높이만큼만 차지해야 한다 — 늘려 두면 문서 옆에 빈 자리가 길게 남는다. */
 @media (max-width: 1120px) {
-  #gridWeekly { grid-template-columns: 168px minmax(0, 1fr); }
+  #gridWeekly { grid-template-columns: 196px minmax(0, 1fr); }
   .rp-slack {
-    grid-column: 1 / -1; margin: 0 -20px -48px; padding: 16px 20px 40px;
-    border-left: 0; border-top: 1px solid var(--border);
+    grid-column: 1 / -1; position: static; max-height: none; overflow: visible;
+    margin: 0; padding: 18px 20px 20px;
   }
   .rp-slackbox { max-width: 720px; }
 }
 /* 주차 목록은 문서 위의 가로 스크롤 한 줄이 된다 */
 @media (max-width: 900px) {
-  #gridWeekly { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  #gridWeekly { grid-template-columns: minmax(0, 1fr); min-height: 0; gap: 12px; }
   .rp-weeks {
-    order: -1; position: static; height: auto; overflow-x: auto; overflow-y: hidden;
+    order: -1; position: static; max-height: none; overflow-x: auto; overflow-y: hidden;
     display: flex; gap: 4px; white-space: nowrap;
-    border-right: 0; border-bottom: 1px solid var(--border);
-    margin: -14px -16px 10px; padding: 8px 16px;
+    margin: 0; padding: 8px;
   }
-  .rp-weeks .d-grp { display: none; }
+  .rp-weeks > .d-grp { display: none; }
   .rp-weeks > div { display: flex; gap: 4px; }
-  .rp-wk { width: auto; min-width: 104px; }
-  .rp-doc { padding: 4px 0 40px; }
-  .rp-slack { margin: 0 -16px -80px; padding: 16px; }
+  .rp-wk { width: auto; min-width: 128px; }
+  .rp-doc { padding: 20px 18px 32px; }
 }
 @media (max-width: 520px) {
-  .rp-title { font-size: 17px; }
-  .rp-s { grid-template-columns: 14px minmax(0, 1fr); }
+  .rp-doc { padding: 16px 14px 28px; }
+  .rp-title { font-size: 19px; }
+  .rp-s { grid-template-columns: 22px minmax(0, 1fr); }
   /* 좁은 화면에서는 동작이 늘 보이고 문장 아래로 내려간다 */
   .rp-s .ac { grid-column: 2; opacity: 1; pointer-events: auto; padding-top: 4px; }
   .rp-s .tx { font-size: 15px; }
   .rp-add input { font-size: 16px; }
-  .rp-rec { grid-template-columns: minmax(0, 1fr); row-gap: 2px; padding: 8px var(--pad); }
+  .rp-rec { grid-template-columns: minmax(0, 1fr); row-gap: 2px; padding: 8px 12px; }
   .rp-rec .mt { text-align: left; }
-  .rp-slack { margin-bottom: -36px; }
+  .rp-slack { padding: 14px 16px 16px; }
 }

@@ -54,7 +54,7 @@ test('quick-add preserves the draft and re-enables input after an HTTP error', a
   assert.equal(input.value, '저장 실패 후에도 남아야 하는 내용');
   assert.equal(input.disabled, false);
   assert.equal(input.focused, true);
-  assert.match(app.nodes.get('liveRegion').textContent, /저장을 확인하지 못했습니다/);
+  assert.match(app.nodes.get('liveRegion').textContent, /저장됐는지 확인하지 못했어요/);
 });
 
 test('quick-add preserves the draft after a connection failure', async () => {
@@ -101,11 +101,11 @@ test('an older server without the storage endpoint shows no banner', async () =>
 });
 
 test('a save refused for recovery shows the server message and keeps the banner up', async () => {
-  const app = client(new Response(JSON.stringify({ ok: false, code: 'RECOVERY_NEEDED', error: '데이터를 지키기 위해 저장을 멈췄습니다.' }), { status: 503 }));
+  const app = client(new Response(JSON.stringify({ ok: false, code: 'RECOVERY_NEEDED', error: '복구가 필요해서 저장을 멈췄어요.' }), { status: 503 }));
   await assert.rejects(app.run("request('/api/track/toggle', { method: 'POST', body: '{}' })"));
   assert.equal(app.nodes.get('storageBanner').hidden, false);
   assert.match(app.nodes.get('storageBanner').textContent, /복구 필요 상태/);
-  assert.match(app.nodes.get('liveRegion').textContent, /저장을 멈췄습니다/);
+  assert.match(app.nodes.get('liveRegion').textContent, /저장을 멈췄어요/);
 });
 
 // escapeHtml은 브라우저 DOM(textContent → innerHTML)에 기대는데 이 테스트의 가짜 DOM에는 그 동작이 없다.
@@ -382,18 +382,18 @@ test('saves from the meeting review window stay quiet on success (its result car
   const ok = () => new Response('{"ok":true}', { status: 200 });
   const normal = client(ok());
   await normal.run("request('/api/today-task/create', { method: 'POST', body: '{}' })");
-  assert.match(notice(normal), /저장했습니다/);
+  assert.match(notice(normal), /저장했어요/);
   for (const route of ['review', 'review-undo', 'capture']) {
     const quiet = client(ok());
     await quiet.run(`request('/api/workflow/${route}', { method: 'POST', body: '{}' })`);
     assert.doesNotMatch(notice(quiet), /저장/, `${route} is quiet on success`);
   }
-  const failing = client(new Response('{"ok":false,"error":"이미 처리했거나 찾을 수 없는 항목입니다."}', { status: 400 }));
+  const failing = client(new Response('{"ok":false,"error":"이미 처리했거나 찾을 수 없는 항목이에요."}', { status: 400 }));
   await assert.rejects(failing.run("request('/api/workflow/review', { method: 'POST', body: '{}' })"));
-  assert.match(notice(failing), /저장을 확인하지 못했습니다|이미 처리/);
+  assert.match(notice(failing), /저장됐는지 확인하지 못했어요|이미 처리/);
   const item = client(ok());
   await item.run("request('/api/workflow/item', { method: 'POST', body: '{}' })");
-  assert.match(notice(item), /저장했습니다/, 'other workflow saves (item details) keep their notice');
+  assert.match(notice(item), /저장했어요/, 'other workflow saves (item details) keep their notice');
 });
 
 test('the trailing "(방향 확인 필요)" marker from the AI is removed from draft text, and only when it trails', () => {
@@ -423,7 +423,7 @@ test('the quiet option keeps a successful save from announcing itself, while fai
   const notice = app => app.nodes.get('liveRegion')?.textContent ?? '';
   const loud = client(new Response('{"ok":true}'));
   await loud.run("request('/api/track/set-scheduled', { method: 'POST', body: '{}' })");
-  assert.match(notice(loud), /저장했습니다/);
+  assert.match(notice(loud), /저장했어요/);
   const quiet = client(new Response('{"ok":true}'));
   await quiet.run("request('/api/track/set-scheduled', { method: 'POST', body: '{}', quiet: true })");
   assert.equal(notice(quiet), '');
