@@ -411,3 +411,38 @@ test('the quiet option keeps a successful save from announcing itself, while fai
   await assert.rejects(failing.run("request('/api/track/set-scheduled', { method: 'POST', body: '{}', quiet: true })"));
   assert.notEqual(notice(failing), '');
 });
+
+test('프로젝트 목록: 열린 항목은 업무와 확인 대기만 세고, 많은 순 다음은 이름 순이다', () => {
+  const app = workflowsClient();
+  app.run(`workflowData = { meetings: [], items: [
+    { id: 'a1', type: 'task', status: 'to-do', group: '가입 개선' },
+    { id: 'a2', type: 'task', status: 'to-do', group: '가입 개선' },
+    { id: 'a3', type: 'check', status: 'to-do', group: '가입 개선' },
+    { id: 'a4', type: 'task', status: 'done', group: '가입 개선' },
+    { id: 'a5', type: 'decision', status: 'to-do', group: '가입 개선' },
+    { id: 'a6', type: 'idea', status: 'to-do', group: '가입 개선' },
+    { id: 'b1', type: 'bug', status: 'to-do', jira: 'PAY-77' },
+    { id: 'c1', type: 'decision', status: 'to-do', group: '정산' },
+    { id: 'd1', type: 'check', status: 'done', group: '리서치' },
+  ] }; wfIndexData();`);
+  const rows = entries => JSON.parse(app.run(`JSON.stringify(uiProjectRows(${entries}, workflowData.items))`));
+  const listed = rows(`[['group:가입 개선', '가입 개선'], ['jira:PAY-77', 'PAY-77 · 결제'], ['group:정산', '정산'], ['group:리서치', '리서치']]`);
+  assert.deepEqual(listed.map(row => [row.label, row.open]), [
+    ['가입 개선', 3],
+    ['PAY-77 · 결제', 1],
+    ['리서치', 0],
+    ['정산', 0],
+  ], '결정·아이디어·완료한 항목은 열린 항목에 들어가지 않고, 0건은 이름 순으로 맨 아래에 남는다');
+  assert.deepEqual(rows('[]'), [], '프로젝트가 하나도 없으면 빈 목록');
+});
+
+test('일괄 선택: 완료한 줄은 후보에서 빠지고 전체 선택 여부는 후보 기준으로 센다', () => {
+  const app = pureClient();
+  const state = (items, selected) => JSON.parse(app.run(`JSON.stringify(taskSelectAllState(${items}, ${selected}))`));
+  const items = `[{ id: 't1', status: 'to-do' }, { id: 't2', status: 'to-do' }, { id: 'done1', status: 'done' }]`;
+  assert.deepEqual(state(items, `[]`), { candidates: ['t1', 't2'], count: 0, all: false });
+  assert.deepEqual(state(items, `['t1']`), { candidates: ['t1', 't2'], count: 1, all: false });
+  assert.deepEqual(state(items, `['t1', 't2']`), { candidates: ['t1', 't2'], count: 2, all: true });
+  assert.deepEqual(state(items, `['t1', 't2', 'done1']`).count, 2, '완료한 줄은 골라도 세지 않는다');
+  assert.equal(state(`[{ id: 'done1', status: 'done' }]`, `[]`).all, false, '고를 게 없으면 전체 선택 상태가 아니다');
+});

@@ -456,17 +456,20 @@ function uiTaskRow(item, opts = {}) {
   row.dataset.taskId = item.id;
   row.setAttribute('role', 'group');
 
-  // 체크 칸 — 여러 개 선택 중에는 같은 자리에 선택 칸이 들어선다(완료 체크와 모양이 다르다).
-  const check = document.createElement('span');
-  check.className = 'd-check';
+  // 여러 개 선택 중에는 완료 체크 왼쪽에 선택 칸이 한 칸 더 생긴다(네모 하나, 모양이 다르다).
+  // 완료 체크는 선택 모드에서도 그대로 눌러 한 건만 끝낼 수 있다.
   let selectBox = null;
   if (taskSelectionMode) {
-    // 완료한 줄은 고를 수 없다 — 빈 칸으로 두어 완료 체크와 헷갈리지 않게 한다.
-    if (!done) { selectBox = taskSelectionCheckbox(item, row); check.appendChild(selectBox); }
-  } else {
-    check.appendChild(taskCompletionCheckbox(item, row, done));
-    check.insertAdjacentHTML('beforeend', '<svg class="d-tick" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7.4 5.7 10.1 11 4.2"/></svg>');
+    const cell = document.createElement('span');
+    cell.className = 'd-sel';
+    // 완료한 줄은 고를 수 없다 — 칸은 자리만 지킨다.
+    if (!done) { selectBox = taskSelectionCheckbox(item, row); cell.appendChild(selectBox); }
+    row.appendChild(cell);
   }
+  const check = document.createElement('span');
+  check.className = 'd-check';
+  check.appendChild(taskCompletionCheckbox(item, row, done));
+  check.insertAdjacentHTML('beforeend', '<svg class="d-tick" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7.4 5.7 10.1 11 4.2"/></svg>');
   row.appendChild(check);
 
   const title = document.createElement('span');
@@ -621,6 +624,509 @@ function uiRailRow(opts) {
     row.appendChild(slot);
   }
   return row;
+}
+
+// ---------- 여러 개 선택 (일괄 정리) ----------
+// 머리줄의 조용한 `여러 개 선택`을 누르면 줄마다 선택 칸이 한 칸 더 생기고(완료 체크는 그대로),
+// 화면 아래에 고정 막대가 뜬다. 오늘 목록과 나중에 할 일 서랍이 함께 대상이다.
+// 저장은 전부 기존 API로 간다: 날짜·프로젝트·완료는 `/api/workflow/task-batch`,
+// 삭제만 한 건씩 `/api/track/remove`를 보내고 알림 하나로 되돌린다(DECISIONS: 원문 보존 그대로).
+
+let taskSelectionMode = false;
+let taskBatchBusy = false;
+const taskSelection = new Set();
+
+// 전체 선택/해제 계산. 완료한 줄은 고를 수 없으므로 후보에서 빠진다.
+function taskSelectAllState(items, selected) {
+  const chosen = new Set(selected);
+  const candidates = items.filter(item => item.status !== 'done').map(item => item.id);
+  return {
+    candidates,
+    count: candidates.filter(id => chosen.has(id)).length,
+    all: candidates.length > 0 && candidates.every(id => chosen.has(id)),
+  };
+}
+
+const taskSelectPool = () => [...taskListsCache.todayTasks, ...taskListsCache.laterTasks];
+
+// 줄 왼쪽의 선택 칸(네모). 완료 체크와 달리 줄을 사라지게 하지 않는다.
+function taskSelectionCheckbox(item, row) {
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.className = 'd-selcb';
+  input.checked = taskSelection.has(item.id);
+  input.disabled = taskBatchBusy;
+  input.setAttribute('aria-label', `${item.description} — 일괄 정리 선택`);
+  row.classList.toggle('batch-selected', input.checked);
+  input.addEventListener('change', () => {
+    if (input.checked) taskSelection.add(item.id); else taskSelection.delete(item.id);
+    row.classList.toggle('batch-selected', input.checked);
+    taskSelectionRefresh();
+  });
+  return input;
+}
+
+function taskListsRender() {
+  renderTodayTasks(taskListsCache.todayTasks);
+  renderLaterTasks(taskListsCache.laterTasks);
+  taskSelectionRefresh();
+}
+
+function taskSelectStart() {
+  if (taskSelectionMode) return;
+  taskSelectionMode = true;
+  taskSelection.clear();
+  escPush(taskSelectEnd);
+  taskListsRender();
+}
+
+function taskSelectEnd() {
+  if (!taskSelectionMode || taskBatchBusy) return;
+  taskSelectionMode = false;
+  taskSelection.clear();
+  escDrop(taskSelectEnd);
+  uiMenuClose();
+  taskListsRender();
+  document.getElementById('taskSelectToggle')?.focus();
+}
+
+function taskSelectBarButton(label, onClick, className = 'd-btn') {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = className;
+  button.textContent = label;
+  button.addEventListener('click', onClick);
+  return button;
+}
+
+function taskSelectionRefresh() {
+  const toggle = document.getElementById('taskSelectToggle');
+  if (toggle) {
+    toggle.textContent = taskSelectionMode ? '선택 끝내기' : '여러 개 선택';
+    toggle.setAttribute('aria-pressed', String(taskSelectionMode));
+    toggle.disabled = taskBatchBusy;
+  }
+  document.body.classList.toggle('batch-open', taskSelectionMode);
+  const bar = document.getElementById('taskSelectBar');
+  if (!bar) return;
+  bar.hidden = !taskSelectionMode;
+  bar.replaceChildren();
+  if (!taskSelectionMode) return;
+
+  const state = taskSelectAllState(taskSelectPool(), [...taskSelection]);
+  const inner = document.createElement('div');
+  inner.className = 'bar';
+
+  const count = document.createElement('span');
+  count.className = 'ct num';
+  count.textContent = `${state.count}개 선택`;
+  inner.appendChild(count);
+  inner.appendChild(taskSelectBarButton(state.all ? '전체 선택 해제' : '전체 선택', () => {
+    if (state.all) taskSelection.clear();
+    else state.candidates.forEach(id => taskSelection.add(id));
+    taskListsRender();
+  }, 'd-link'));
+
+  const actions = [];
+  const apply = (label, change, className) => {
+    const button = taskSelectBarButton(label, () => taskBatchApply(change), className);
+    actions.push(button);
+    inner.appendChild(button);
+  };
+  apply('오늘로', { scheduled: todayStr() });
+  apply('내일', { scheduled: tomorrowStr() });
+  apply('나중에', { scheduled: null });
+
+  // `날짜…`는 누른 자리에서 날짜 칸으로 바뀐다(더보기의 `날짜…`와 같은 방식).
+  const pick = taskSelectBarButton('날짜…', () => {
+    const input = document.createElement('input');
+    input.type = 'date';
+    input.className = 'd-dateinput';
+    input.setAttribute('aria-label', '선택한 업무를 옮길 날짜');
+    input.addEventListener('change', () => { if (input.value && input.checkValidity()) taskBatchApply({ scheduled: input.value }); });
+    pick.replaceWith(input);
+    input.focus();
+    input.showPicker?.();
+  });
+  actions.push(pick);
+  inner.appendChild(pick);
+
+  const project = taskSelectBarButton('프로젝트…', (event) => {
+    event.stopPropagation();
+    uiMenu(project, [[{
+      field: '프로젝트',
+      control: renderGroupControl({
+        jira: null, group: null, silent: true, forceClearable: true,
+        onSetJira: key => taskBatchApply({ project: key ? `jira:${key}` : null }),
+        // `— 그룹 해제 —`는 지라 해제 한 번으로 끝난다 — 같은 선택에 두 번 보내지 않는다.
+        onSetGroup: group => group === null ? Promise.resolve() : taskBatchApply({ project: `group:${group}` }),
+      }),
+    }]]);
+  });
+  project.setAttribute('aria-haspopup', 'true');
+  project.setAttribute('aria-expanded', 'false');
+  actions.push(project);
+  inner.appendChild(project);
+
+  apply('완료로 표시', { status: 'done' });
+  const remove = taskSelectBarButton('삭제', () => taskBatchRemove(), 'd-btn dng');
+  actions.push(remove);
+  inner.appendChild(remove);
+
+  const spacer = document.createElement('span');
+  spacer.className = 'sp';
+  inner.appendChild(spacer);
+  const end = taskSelectBarButton('선택 끝내기', taskSelectEnd);
+  end.disabled = taskBatchBusy;
+  inner.appendChild(end);
+
+  // 아무것도 고르지 않았으면 바꾸는 버튼은 눌리지 않는다(끝내기·전체 선택은 그대로).
+  actions.forEach((button) => { button.disabled = taskBatchBusy || !state.count; });
+  bar.appendChild(inner);
+}
+
+// 날짜·프로젝트·완료 — 기존 일괄 저장 API 한 곳으로 간다. 되돌리기는 서버가 준 undoToken으로.
+async function taskBatchApply(change) {
+  if (taskBatchBusy || !taskSelection.size) return;
+  taskBatchBusy = true;
+  taskSelectionRefresh();
+  document.querySelectorAll('.d-selcb').forEach(input => { input.disabled = true; });
+  try {
+    const result = await wfPost('task-batch', { ids: [...taskSelection], change });
+    let token = result.undoToken;
+    const restore = async () => { const back = await wfPost('task-batch', { undoToken: token }); token = back.undoToken; };
+    const entry = { label: `${result.count}개 업무 일괄 정리`, undo: restore, redo: restore };
+    pushUndo(entry);
+    taskSelection.clear();
+    await load();
+    showNotice(`${result.count}개 업무를 변경했습니다.`, false, null, { label: '실행 취소', onClick: async () => {
+      if (undoStack[undoStack.length - 1] !== entry) { showNotice('이후 작업부터 순서대로 실행 취소해 주세요.', true); return; }
+      await replayUndo('undo');
+    } });
+  } finally {
+    taskBatchBusy = false;
+    taskSelectionRefresh();
+    document.querySelectorAll('.d-selcb').forEach(input => { input.disabled = false; });
+  }
+}
+
+// 일괄 삭제는 서버를 새로 만들지 않는다 — 고른 순서대로 한 건씩 휴지통으로 보내고(원문 보존),
+// 알림 하나의 `되돌리기`로 역순 복원한다. 중간에 실패하면 멈추고 어디까지 지웠는지 알린다.
+async function taskBatchRemove() {
+  if (taskBatchBusy || !taskSelection.size) return;
+  const ids = [...taskSelection];
+  taskBatchBusy = true;
+  taskSelectionRefresh();
+  const removed = [];
+  let stopped = false;
+  // 한 건씩 보내는 동안 ⌘Z 기록은 남기지 않는다 — 아래에서 묶음 하나로 올린다.
+  const replaying = undoReplaying;
+  undoReplaying = true;
+  try {
+    for (const id of ids) {
+      try { await postJson('/api/track/remove', { id }); removed.push(id); }
+      catch { stopped = true; break; }
+    }
+  } finally {
+    undoReplaying = replaying;
+    taskBatchBusy = false;
+  }
+  if (!removed.length) { taskSelectionRefresh(); return; }
+  const entry = {
+    label: `${removed.length}개 업무 삭제`,
+    undo: async () => { for (const id of [...removed].reverse()) await postJson('/api/track/restore', { id }); },
+    redo: async () => { for (const id of removed) await postJson('/api/track/remove', { id }); },
+  };
+  pushUndo(entry);
+  taskSelection.clear();
+  await load();
+  showNotice(
+    stopped ? `${removed.length}개까지 삭제하고 멈췄습니다. 나머지는 그대로 있습니다.` : `${removed.length}개를 삭제했습니다.`,
+    false, null,
+    { label: '되돌리기', onClick: async () => {
+      if (undoStack[undoStack.length - 1] !== entry) { showNotice('이후 작업부터 순서대로 실행 취소해 주세요.', true); return; }
+      await replayUndo('undo');
+    } },
+  );
+  taskSelectionRefresh();
+}
+
+// ---------- 프로젝트 탭 ----------
+// 왼쪽은 프로젝트 목록, 오른쪽은 고른 프로젝트 하나. 상세 패널은 오늘 탭과 같은 오른쪽 자리에 뜬다.
+
+// 목록에 적는 `열린 항목`은 한 규칙이다: 열린 업무(오늘+나중) + 열린 확인 대기.
+// 결정·아이디어·회의는 "해야 할 일"이 아니라서 세지 않는다.
+const uiProjectOpenItem = item => ['task', 'bug', 'check'].includes(item.type) && item.status !== 'done';
+
+// 많은 순 → 같은 수면 이름 순. 0건 프로젝트는 자연히 맨 아래로 내려가고 목록에서 흐리게 그린다.
+function uiProjectRows(entries, items) {
+  const open = new Map();
+  items.forEach((item) => {
+    if (!uiProjectOpenItem(item)) return;
+    const key = wfKey(item);
+    if (key) open.set(key, (open.get(key) || 0) + 1);
+  });
+  return entries
+    .map(([key, label]) => ({ key, label, open: open.get(key) || 0 }))
+    .sort((a, b) => b.open - a.open || a.label.localeCompare(b.label));
+}
+
+const PROJECT_KEY_STORE = 'projectKey';
+let projectKey = null;
+let projectDoneOpen = false;
+function projectKeyRestore() {
+  try { projectKey = localStorage.getItem(PROJECT_KEY_STORE) || null; } catch { projectKey = null; }
+}
+
+// 오늘 목록의 그룹 제목·업무 상세의 `프로젝트 보기`가 부르는 길.
+function openProjectTab(key) {
+  projectKey = key;
+  try { localStorage.setItem(PROJECT_KEY_STORE, key); } catch {}
+  // 이 패널은 오늘 탭 자리에 있다 — 프로젝트 탭으로 옮겨 가기 전에 닫는다(팔레트로 되돌아가지 않게).
+  if (panelState) { panelState.back = null; panelClose(); }
+  tabStale.projects = true;
+  setActiveTab('projects');
+  document.getElementById('projectList')?.querySelector('[aria-current="true"]')?.focus();
+}
+
+function renderProjects() {
+  const listEl = document.getElementById('projectList');
+  const body = document.getElementById('projectBody');
+  if (!listEl || !body) return;
+  const rows = uiProjectRows(wfProjects(), workflowData.items);
+  if (!rows.some(row => row.key === projectKey)) projectKey = rows.length ? rows[0].key : null;
+
+  listEl.replaceChildren();
+  const head = document.createElement('div');
+  head.className = 'd-rhd';
+  const headName = document.createElement('span');
+  headName.textContent = '프로젝트';
+  const headCount = document.createElement('span');
+  headCount.className = 'n num';
+  headCount.textContent = rows.length;
+  head.append(headName, headCount);
+  listEl.appendChild(head);
+
+  rows.forEach((row) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'd-prow' + (row.open ? '' : ' is-zero');
+    button.setAttribute('aria-current', String(row.key === projectKey));
+    const name = document.createElement('span');
+    name.className = 'nm';
+    name.textContent = row.label;
+    name.title = row.label;
+    const count = document.createElement('span');
+    count.className = 'n num';
+    count.textContent = row.open;
+    button.append(name, count);
+    button.addEventListener('click', () => {
+      if (projectKey === row.key) return;
+      projectKey = row.key;
+      try { localStorage.setItem(PROJECT_KEY_STORE, row.key); } catch {}
+      renderProjects();
+    });
+    listEl.appendChild(button);
+  });
+
+  renderProjectDetail(body, rows.find(row => row.key === projectKey) || null);
+}
+
+// `언제 할지` 열의 한마디: 오늘 / 내일 / 9월 25일 / 나중에.
+function projectPlaceWord(item) {
+  if (!item.scheduled) return '나중에';
+  const diff = diffDays(item.scheduled);
+  if (diff === 0) return '오늘';
+  if (diff === 1) return '내일';
+  return uiKoDateShort(item.scheduled);
+}
+
+function projectSection(title, count) {
+  const section = document.createElement('section');
+  section.className = 'd-psec';
+  section.appendChild(uiGroupHeading(title, count));
+  return section;
+}
+
+// 프로젝트 면의 업무 한 줄: 체크 | 언제 할지 | 업무 | 우선순위 | 기한. hover에 옮기기와 더보기.
+function projectTaskRow(item) {
+  const mode = item.scheduled ? 'today' : 'later';
+  const row = document.createElement('div');
+  row.className = 'd-prow2' + (panelState && panelState.id === item.id ? ' is-sel' : '');
+  row.dataset.taskId = item.id;
+
+  const check = document.createElement('span');
+  check.className = 'd-check';
+  check.appendChild(taskCompletionCheckbox(item, row, false));
+  check.insertAdjacentHTML('beforeend', '<svg class="d-tick" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7.4 5.7 10.1 11 4.2"/></svg>');
+  row.appendChild(check);
+
+  const place = document.createElement('span');
+  place.className = 'pl';
+  place.textContent = projectPlaceWord(item);
+  row.appendChild(place);
+
+  const title = document.createElement('button');
+  title.type = 'button';
+  title.className = 'ti';
+  title.textContent = item.description;
+  title.title = item.description;
+  title.setAttribute('aria-label', `${item.description} 상세 보기`);
+  title.addEventListener('click', () => panelOpen({ id: item.id }));
+  row.appendChild(title);
+
+  const priority = document.createElement('span');
+  const meta = UI_PRIORITY_META[item.priority];
+  priority.className = 'pr' + (meta ? uiTone(meta.tone) : '');
+  if (meta) priority.innerHTML = `<i class="d-dot"></i>${meta.text}`;
+  row.appendChild(priority);
+
+  const due = uiDueText(item.due, 'full');
+  const deadline = document.createElement('span');
+  deadline.className = 'dd' + (due ? uiTone(due.tone) : '');
+  deadline.textContent = due ? due.text : '';
+  row.appendChild(deadline);
+
+  const acts = document.createElement('span');
+  acts.className = 'ac';
+  const move = document.createElement('button');
+  move.type = 'button';
+  move.className = 'd-btn sm';
+  move.textContent = mode === 'later' ? '오늘로' : '나중에';
+  move.setAttribute('aria-label', `${item.description} — ${move.textContent}`);
+  move.addEventListener('click', async () => {
+    move.disabled = true;
+    await fadeOutAndRun(row, () => setTaskScheduled(item.id, mode === 'later' ? todayStr() : null),
+      mode === 'later' ? '오늘 할 일로 옮김' : '나중에 할 일로 옮김 · 기한은 그대로입니다.');
+    move.disabled = false;
+  });
+  acts.append(move, uiMoreButton(`${item.description} — 더 보기`, () => taskMenuSections({ item, mode, card: row })));
+  row.appendChild(acts);
+  return row;
+}
+
+// 완료한 업무 한 줄: 체크(되돌리기) | 제목 | 결과 한 줄 | `9월 21일 완료`.
+function projectDoneRow(item) {
+  const row = document.createElement('div');
+  row.className = 'd-prow2 is-done' + (panelState && panelState.id === item.id ? ' is-sel' : '');
+  row.dataset.taskId = item.id;
+
+  const check = document.createElement('span');
+  check.className = 'd-check';
+  check.appendChild(taskCompletionCheckbox(item, row, true));
+  check.insertAdjacentHTML('beforeend', '<svg class="d-tick" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7.4 5.7 10.1 11 4.2"/></svg>');
+  row.appendChild(check);
+
+  const title = document.createElement('button');
+  title.type = 'button';
+  title.className = 'ti';
+  title.textContent = item.description;
+  title.title = item.description;
+  title.setAttribute('aria-label', `${item.description} 상세 보기`);
+  title.addEventListener('click', () => panelOpen({ id: item.id }));
+  row.appendChild(title);
+
+  const result = document.createElement('span');
+  result.className = 'res';
+  uiResultCell(result, item);
+  row.appendChild(result);
+
+  const when = document.createElement('span');
+  when.className = 'dd';
+  when.textContent = item.completed ? `${uiKoDateShort(item.completed)} 완료` : '';
+  row.appendChild(when);
+  return row;
+}
+
+// 확인 대기·결정·아이디어·회의처럼 값이 한두 개뿐인 구역은 같은 한 줄 모양을 쓴다.
+function projectSimpleRow(text, meta, onOpen, id) {
+  const row = document.createElement('div');
+  row.className = 'd-rec' + (id && panelState && panelState.id === id ? ' is-sel' : '');
+  if (id) row.dataset.taskId = id;
+  const title = document.createElement('button');
+  title.type = 'button';
+  title.className = 'ti';
+  title.textContent = text;
+  title.title = text;
+  title.setAttribute('aria-label', `${text} 상세 보기`);
+  title.addEventListener('click', onOpen);
+  const note = document.createElement('span');
+  note.className = 'mt';
+  note.textContent = meta || '';
+  row.append(title, note);
+  return row;
+}
+
+function renderProjectDetail(body, row) {
+  body.replaceChildren();
+  if (!row) {
+    body.insertAdjacentHTML('beforeend', '<div class="d-empty">아직 프로젝트가 없습니다. 업무에 프로젝트를 지정하면 여기에 모입니다.</div>');
+    return;
+  }
+  const items = workflowData.items.filter(item => wfKey(item) === row.key);
+  const title = document.createElement('h2');
+  title.className = 'd-ptitle';
+  title.textContent = row.label;
+  const summary = document.createElement('div');
+  summary.className = 'd-quiet';
+  summary.textContent = `열린 항목 ${row.open}`;
+  body.append(title, summary);
+
+  const tasks = items.filter(item => ['task', 'bug'].includes(item.type));
+  const open = tasks.filter(item => item.status !== 'done').sort(compareTasks);
+  const done = tasks.filter(item => item.status === 'done').sort((a, b) => (b.completed || '').localeCompare(a.completed || ''));
+
+  if (open.length) {
+    const section = projectSection('진행할 업무', open.length);
+    const surface = document.createElement('div');
+    surface.className = 'd-psurf';
+    // 조용한 열 이름 줄 — 무슨 값이 어느 칸에 있는지 한 번만 적는다.
+    surface.insertAdjacentHTML('beforeend',
+      '<div class="d-colhd"><span></span><span>언제 할지</span><span>업무</span><span class="r">우선순위</span><span class="r">기한</span></div>');
+    open.forEach(item => surface.appendChild(projectTaskRow(item)));
+    section.appendChild(surface);
+    body.appendChild(section);
+  }
+
+  const simple = (label, list, meta, onOpen) => {
+    if (!list.length) return;
+    const section = projectSection(label, list.length);
+    const surface = document.createElement('div');
+    surface.className = 'd-psurf plain';
+    list.forEach(entry => surface.appendChild(projectSimpleRow(entry.text, meta(entry.item), () => onOpen(entry.item), entry.id)));
+    section.appendChild(surface);
+    body.appendChild(section);
+  };
+  const asItems = list => list.map(item => ({ item, text: item.description, id: item.id }));
+  const openPanel = item => panelOpen({ id: item.id });
+
+  simple('확인 대기', asItems(items.filter(item => item.type === 'check' && item.status !== 'done')),
+    item => item.who || (uiDueText(item.due, 'full')?.text ?? ''), openPanel);
+  // 결정은 미반영·반영을 글자로만 가른다(알약으로 그리지 않는다).
+  simple('결정', asItems(items.filter(item => item.type === 'decision')),
+    item => item.status === 'done' ? `${uiKoDateShort(item.completed)} 반영` : '미반영', openPanel);
+  simple('아이디어', asItems(items.filter(item => item.type === 'idea')),
+    item => item.created ? `${uiKoDateShort(item.created)} 기록` : '', openPanel);
+
+  const meetings = workflowData.meetings.filter(event => wfMeetingKey(event) === row.key || items.some(item => item.meetingId === event.id));
+  simple('회의', meetings.map(event => ({ item: event, text: event.title, id: null })),
+    event => event.date ? uiKoDateShort(event.date) : '', event => panelOpen({ kind: 'meeting', id: event.id }));
+
+  if (done.length) {
+    const section = document.createElement('section');
+    section.className = 'd-psec';
+    section.appendChild(uiGroupHeading('완료한 업무', done.length, {
+      open: projectDoneOpen,
+      onToggle: () => { projectDoneOpen = !projectDoneOpen; renderProjects(); },
+    }));
+    if (projectDoneOpen) {
+      const surface = document.createElement('div');
+      surface.className = 'd-psurf';
+      done.forEach(item => surface.appendChild(projectDoneRow(item)));
+      section.appendChild(surface);
+    }
+    body.appendChild(section);
+  }
 }
 
 // ---------- 화면 상태 ----------
@@ -866,7 +1372,7 @@ async function load() {
   decisionArchiveCache = data.decisionArchive || [];
   document.getElementById('decisionCount').textContent = (data.decisions || []).length;
   latestData = data;
-  tabStale.records = true; tabStale.weekly = true;
+  tabStale.projects = true; tabStale.records = true; tabStale.weekly = true;
   renderActiveTabLists();
   const hasNewRecord = [...(data.ideas || []), ...(data.decisions || [])].some(i => i.isNew);
   document.getElementById('tabBtnRecords').classList.toggle('has-new', hasNewRecord);
@@ -886,9 +1392,13 @@ async function load() {
 // 갱신하고, 목록은 그 탭이 열려 있거나 열릴 때 만든다(새 자료가 오면 다시 만든다).
 let latestData = null;
 let activeTabKey = 'today';
-const tabStale = { records: true, weekly: true };
+const tabStale = { projects: true, records: true, weekly: true };
 function renderActiveTabLists() {
   if (!latestData) return;
+  if (activeTabKey === 'projects' && tabStale.projects) {
+    tabStale.projects = false;
+    renderProjects();
+  }
   if (activeTabKey === 'records' && tabStale.records) {
     tabStale.records = false;
     renderIdeas(latestData.ideas || []);
@@ -1512,7 +2022,7 @@ function renderLaterTasks(items) {
     const addRow = uiGroupAddRow(key, '/api/later-task/create', '나중에 할 일 추가함');
     const heading = uiGroupHeading(uiGroupLabel(key), groupItems.length, {
       onAdd: () => { addRow.hidden = false; addRow.querySelector('input').focus(); },
-      onOpenProject: key === '__misc__' ? null : () => wfOpen({ kind: 'project', key }),
+      onOpenProject: key === '__misc__' ? null : () => openProjectTab(key),
     });
     list.append(heading, addRow);
     [...groupItems]
@@ -1722,7 +2232,10 @@ function openMeetingPanel(event) {
 
 let panelState = null;
 
-function panelSide() { return document.getElementById('taskDetailPanel'); }
+// 패널은 오늘 탭과 프로젝트 탭에 같은 자리로 하나씩 있다. 연 탭의 자리를 끝까지 쓴다
+// (탭을 옮겨도 열어 둔 상세는 그 탭에 그대로 남아 있다).
+function panelSide() { return document.getElementById(panelState?.host === 'projects' ? 'projectDetailPanel' : 'taskDetailPanel'); }
+function panelZone() { return document.getElementById(panelState?.host === 'projects' ? 'projectZone' : 'todayTaskZone'); }
 
 // 업무 기록(tasks.md 등)과 흐름 기록(.workflow.json)은 다른 파일이다 — 둘 다 찾아 함께 넘긴다.
 function panelResolve(id) {
@@ -1743,17 +2256,17 @@ function panelMode(item) {
 
 // view: { id } 업무·확인 대기 상세 · { kind: 'meeting', id } 기록된 회의 · { kind: 'meeting', event } 아직 기록되지 않은 회의
 function panelOpen(view) {
-  const side = panelSide();
-  if (!side || !view) return;
+  if (!view) return;
   const kind = view.kind === 'meeting' ? 'meeting' : 'item';
   if (kind === 'item' && (view.id === undefined || view.id === null)) return;
   if (kind === 'meeting' && !view.id && !view.event) return;
-  // 큰 창(프로젝트)에서 열면 창은 닫고 패널로 넘긴다.
-  if (typeof workflowDialog !== 'undefined' && workflowDialog) workflowDialog.close();
-  // 패널은 오늘 탭의 세 번째 열이다 — 다른 탭에 있었다면 함께 옮긴다.
-  if (typeof setActiveTab === 'function' && activeTabKey !== 'today') setActiveTab('today');
+  // 패널 자리가 있는 탭은 오늘·프로젝트 둘이다 — 다른 탭에서 열면 오늘로 옮긴다.
+  if (typeof setActiveTab === 'function' && activeTabKey !== 'today' && activeTabKey !== 'projects') setActiveTab('today');
+  const host = activeTabKey === 'projects' ? 'projects' : 'today';
+  if (!document.getElementById(host === 'projects' ? 'projectDetailPanel' : 'taskDetailPanel')) return;
   const opener = document.activeElement;
   panelState = {
+    host,
     kind,
     id: view.id || null,
     // 아직 흐름 기록에 없는 캘린더 회의는 연 그대로 들고 있는다(찾을 곳이 없다).
@@ -1773,13 +2286,13 @@ function panelOpen(view) {
 
 function panelClose() {
   const side = panelSide();
-  const zone = document.getElementById('todayTaskZone');
+  const zone = panelZone();
   const back = panelState?.returnFocus;
   let reopen = panelState?.back;
   panelState = null;
   escDrop(panelClose);
   if (zone) zone.classList.remove('task-detail-open', 'meeting-open');
-  document.querySelectorAll('.d-row.is-sel, .d-wrow.is-sel, .d-mrow.is-sel').forEach(row => row.classList.remove('is-sel'));
+  document.querySelectorAll('.is-sel[data-task-id], .d-mrow.is-sel').forEach(row => row.classList.remove('is-sel'));
   if (side) { side.hidden = true; side.replaceChildren(); side.style.minHeight = ''; }
   // 팔레트에서 열었던 항목이면 찾던 자리로 돌려 놓는다(포커스도 검색 입력으로).
   // 팔레트 → 회의 → 항목처럼 거쳐 왔어도 처음 찾던 자리로 돌아간다.
@@ -1790,9 +2303,9 @@ function panelClose() {
 
 // 지금 보고 있는 줄을 찾는 표식 — 업무·확인 대기는 항목 번호, 회의는 레일의 미팅 줄.
 function panelAnchorSelector() {
-  if (!panelState) return '.d-row[data-task-id="__none__"]';
+  if (!panelState) return '[data-task-id="__none__"]';
   if (panelState.kind === 'meeting') return `.d-mrow[data-meeting-id="${CSS.escape(String(panelMeetingKey(panelMeetingEvent()) || ''))}"]`;
-  return `.d-row[data-task-id="${CSS.escape(String(panelState.id))}"]`;
+  return `[data-task-id="${CSS.escape(String(panelState.id))}"]`;
 }
 
 // 누른 줄 높이에 맞춰 연다. 좁은 화면에서는 오른쪽 고정 패널·아래 시트라 자리를 계산하지 않는다.
@@ -1816,7 +2329,7 @@ function panelPlace(box) {
 
 function panelRender(focusFirst = false) {
   const side = panelSide();
-  const zone = document.getElementById('todayTaskZone');
+  const zone = panelZone();
   if (!side || !zone || !panelState) return;
   const meeting = panelState.kind === 'meeting' ? panelMeetingEvent() : null;
   const found = panelState.kind === 'meeting' ? null : panelResolve(panelState.id);
@@ -1832,8 +2345,8 @@ function panelRender(focusFirst = false) {
   side.replaceChildren(box);
   const marked = panelState.kind === 'meeting'
     ? panelAnchorSelector()
-    : `.d-row[data-task-id="${CSS.escape(String(panelState.id))}"], .d-wrow[data-rail-id="${CSS.escape(String(panelState.id))}"]`;
-  document.querySelectorAll('.d-row.is-sel, .d-wrow.is-sel, .d-mrow.is-sel').forEach(row => row.classList.remove('is-sel'));
+    : `[data-task-id="${CSS.escape(String(panelState.id))}"], .d-wrow[data-rail-id="${CSS.escape(String(panelState.id))}"]`;
+  document.querySelectorAll('.is-sel[data-task-id], .d-wrow.is-sel, .d-mrow.is-sel').forEach(row => row.classList.remove('is-sel'));
   document.querySelectorAll(marked).forEach(row => row.classList.add('is-sel'));
   panelPlace(box);
   if (focusFirst) {
@@ -2076,8 +2589,8 @@ function panelTask({ item, detail, type }, box) {
       }));
     }
   }
-  const projectKey = typeof wfKey === 'function' ? wfKey(item) : null;
-  if (projectKey) foot.appendChild(panelQuietButton('프로젝트 보기', () => wfOpen({ kind: 'project', key: projectKey })));
+  const itemProject = typeof wfKey === 'function' ? wfKey(item) : null;
+  if (itemProject) foot.appendChild(panelQuietButton('프로젝트 보기', () => openProjectTab(itemProject)));
   box.appendChild(foot);
 
   if (isTask) panelTaskNotes(item, detail, box);
@@ -2929,8 +3442,7 @@ function palRevealRecord(item) {
 
 function palOpen(state) {
   const opener = document.activeElement;
-  // 큰 창·더보기 메뉴가 열려 있으면 먼저 닫는다(떠 있는 층은 한 번에 하나).
-  if (typeof workflowDialog !== 'undefined' && workflowDialog) workflowDialog.close();
+  // 더보기 메뉴가 열려 있으면 먼저 닫는다(떠 있는 층은 한 번에 하나).
   uiMenuClose();
   const reopening = !!palState;
   if (palState) palClose(true);
@@ -3154,7 +3666,7 @@ function renderTodayTasks(items) {
       const addRow = uiGroupAddRow(key, '/api/today-task/create', '오늘 할 일 추가함');
       const heading = uiGroupHeading(uiGroupLabel(key), groupItems.length, {
         onAdd: () => { addRow.hidden = false; addRow.querySelector('input').focus(); },
-        onOpenProject: key === '__misc__' ? null : () => wfOpen({ kind: 'project', key }),
+        onOpenProject: key === '__misc__' ? null : () => openProjectTab(key),
       });
       list.append(heading, addRow);
       [...groupItems].sort(compareTasks).forEach(item => list.appendChild(uiTaskRow(item, { mode: 'today', grouped: key !== '__misc__' })));
@@ -3673,6 +4185,12 @@ renderTodayViewSeg();
 document.getElementById('searchEntryBtn')?.addEventListener('click', () => palOpen({}));
 document.getElementById('createdTodayBtn')?.addEventListener('click', () => palOpen({ newOnly: true }));
 
+// 여러 개 선택 — 같은 버튼으로 시작하고 끝낸다(Esc도 끝내기).
+document.getElementById('taskSelectToggle')?.addEventListener('click', () => {
+  if (taskBatchBusy) return;
+  if (taskSelectionMode) taskSelectEnd(); else taskSelectStart();
+});
+
 // 나중에 할 일 서랍 — 머리줄 버튼으로 여닫고, 열어 둔 상태는 새로고침해도 그대로다.
 document.getElementById('laterTaskToggle')?.addEventListener('click', () => {
   if (laterDrawerOpen) drawerClose(); else drawerOpen();
@@ -3681,9 +4199,11 @@ document.getElementById('laterTaskClose')?.addEventListener('click', drawerClose
 drawerRestore();
 const TABS = {
   today: { grid: 'gridToday', btn: 'tabBtnToday' },
+  projects: { grid: 'gridProjects', btn: 'tabBtnProjects' },
   records: { grid: 'gridRecords', btn: 'tabBtnRecords' },
   weekly: { grid: 'gridWeekly', btn: 'tabBtnWeekly' },
 };
+projectKeyRestore();
 
 function setActiveTab(tab) {
   if (!TABS[tab]) tab = 'today';

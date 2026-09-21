@@ -1,102 +1,10 @@
+/* 옛 큰 창(.wf-dialog)은 사라졌다. 남은 것은 아직 D로 옮기지 않은 화면이 쓰는 세 가지뿐이다:
+   레일 `오늘 미팅` 머리의 `전체 보기` 링크, 주간요약 문서의 조용한 글자 두 종류. */
 .wf-link { border: 0; background: none; color: var(--accent); font: inherit; font-size: var(--text-sm); font-weight: 600; cursor: pointer; padding: 6px; text-decoration: none; }
 .wf-link:hover { text-decoration: underline; }
-.wf-dialog { box-sizing: border-box; width: min(780px, calc(100vw - 24px)); max-height: 90dvh; padding: 24px; border: 1px solid var(--border); border-radius: 16px; background: var(--bg); color: var(--text); }
-.wf-dialog::backdrop { background: #10182866; }
-.wf-dialog h2 { font-size: 18px; margin: 0; }
-.wf-dialog h2::before { content: none; }
-/* 섹션 제목 — 주간요약 카드와 같은 규칙: 본문색 + 굵게 + 밑줄로, 그 아래 항목들과 위계가 분명하게 갈린다 */
-.wf-dialog h3 { display: flex; align-items: center; gap: 8px; font-size: var(--text-md); font-weight: 700; letter-spacing: -0.01em; color: var(--text); margin: 32px 0 10px; }
-.wf-dialog h3:first-of-type { margin-top: 4px; }
-/* 항목 목록 — 한 줄에 종류 칩 · 문구 · 상태. 카드 여러 장 대신 하나의 묶음 안에서 가는 선으로 나눈다 */
-.wf-ilist { border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); padding: 2px 8px; margin: 0 0 8px; }
-.wf-row.wf-irow { margin: 0; }
-.wf-row.wf-irow > .wf-main { display: grid; grid-template-columns: 62px minmax(0, 1fr) auto; align-items: baseline; gap: 10px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; box-shadow: none; padding: 10px 6px; font-weight: 500; }
-.wf-ilist > .wf-irow:last-child > .wf-main { border-bottom: 0; }
-.wf-row.wf-irow > .wf-main:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); border-bottom-color: var(--border); }
-.wf-tag { justify-self: start; font-size: var(--text-xs); font-weight: 700; line-height: 1.5; padding: 1px 9px; border-radius: 999px; color: var(--muted); background: color-mix(in srgb, var(--muted) 14%, transparent); white-space: nowrap; }
-.wf-tag-task { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
-.wf-tag-check { color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
-.wf-item-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.wf-item-text { font-size: var(--text-md); font-weight: 500; line-height: 1.5; overflow-wrap: anywhere; }
-.wf-item-outcome { font-size: var(--text-sm); font-weight: 500; color: var(--muted); }
-.wf-item-state, .wf-item-due { font-size: var(--text-xs); font-weight: 600; color: var(--muted); white-space: nowrap; }
-.wf-item-due.is-late { color: var(--urgent); }
-.wf-item-meta { display: flex; align-items: baseline; gap: 10px; white-space: nowrap; }
-.wf-item-state.is-wait { color: var(--warn); }
-.wf-irow.is-done .wf-item-text { color: var(--muted); text-decoration: line-through; }
-.wf-irow.is-done .wf-tag { opacity: .6; }
-/* 상태 칩 — 회의 모아보기 행, 회의 정리 창 머리에서 같이 쓴다 */
-.wf-chip { display: inline-block; font-size: var(--text-xs); font-weight: 600; letter-spacing: 0; line-height: 1.5; color: var(--muted); background: color-mix(in srgb, var(--muted) 14%, transparent); border-radius: 999px; padding: 2px 9px; white-space: nowrap; }
-.wf-chip-review { font-weight: 700; color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
-.wf-chip-project { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
-.wf-chip-none { background: none; padding-left: 0; font-weight: 500; }
-.wf-head, .wf-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.wf-head { justify-content: space-between; margin-bottom: 18px; }
-
-/* 항목 한 줄 — 밑줄 리스트가 아니라 카드처럼. 다른 화면의 .card와 같은 톤을 쓴다 */
-.wf-row { margin-bottom: 8px; }
-.wf-row > .wf-main {
-  display: block; width: 100%; box-sizing: border-box;
-  border: 1px solid var(--border); border-radius: var(--radius);
-  background: var(--card); box-shadow: var(--shadow);
-  padding: 12px 14px; text-align: left; color: var(--text); font: inherit; cursor: pointer;
-  transition: box-shadow 120ms ease, border-color 120ms ease;
-}
-.wf-row > .wf-main:hover { border-color: var(--accent); }
-.wf-main { line-height: 1.5; font-weight: 600; }
+.wf-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .wf-meta { display: block; margin-top: 3px; font-size: var(--text-sm); font-weight: 500; color: var(--muted); line-height: 1.5; }
-
-.wf-dialog button, .wf-dialog select, .wf-dialog input { min-height: 40px; }
-.wf-dialog input[type=checkbox] { min-height: 0; }
-/* 액션 버튼 — 앱 전체에서 쓰는 알약 버튼(.convert-btn)과 같은 모양 */
-.wf-dialog button:not(.wf-main):not(.wf-row > .wf-main), .wf-fields button {
-  font: inherit; font-size: var(--text-sm); font-weight: 600;
-  color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent);
-  border: none; border-radius: 999px; padding: 8px 14px; min-height: 0;
-  cursor: pointer; transition: background 120ms ease, color 120ms ease;
-}
-.wf-dialog button:not(.wf-main):not(.wf-row > .wf-main):hover, .wf-fields button:hover { background: var(--accent); color: var(--on-fill); }
-.wf-dialog button:disabled { opacity: .5; cursor: default; }
-
-/* 입력 필드 — 세로로 쌓인 라벨+입력 한 쌍이 12px 마진까지 먹던 걸 줄이고,
-   짧은 값(종류, 프로젝트 같은 드롭다운)이 화면 전체 너비를 다 차지하지 않게 한다 */
-.wf-dialog label, .wf-fields label { display: flex; flex-direction: column; gap: 4px; font-size: var(--text-xs); font-weight: 600; color: var(--muted); margin: 10px 0; }
-.wf-dialog input:not([type=checkbox]), .wf-dialog select, .wf-fields input, .wf-fields select {
-  box-sizing: border-box; width: 100%; max-width: 360px; padding: 8px 10px; font: inherit; font-size: var(--text-base);
-  background: var(--card); color: var(--text); border: 1px solid var(--border); border-radius: 8px; min-height: 38px;
-}
 .wf-section-note { color: var(--muted); font-size: var(--text-sm); line-height: 1.6; }
-.wf-error:empty { display: none; }
-.wf-error { color: var(--urgent); font-size: var(--text-base); }
-.wf-fields { width: 100%; }
-.wf-optional { margin: 10px 0; }
-.wf-optional summary, .task-batch-date summary { color: var(--muted); cursor: pointer; font-size: var(--text-sm); font-weight: 600; padding: 6px 0; }
-.wf-optional[open] summary { color: var(--text); }
-.task-batch-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0 12px; }
-.task-batch-tools[hidden] { display: none; }
-.task-batch-tools .jira-control { margin: 0; max-width: 100%; }
-.task-batch-tools .jira-select { max-width: 100%; }
-.task-batch-tools .wf-section-note { margin: 0; }
-.task-batch-date[open] { flex-basis: 100%; }
-.task-batch-date input { max-width: 170px; }
-.task-selecting .task-row .overflow-menu, .task-selecting .task-row .plan-only, .task-selecting .task-row .priority-select, .task-selecting .task-row.done .checkbox { display: none; }
-.task-selecting .task-row.batch-selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--card)); }
-.task-selecting .task-row.done { opacity: .6; }
-.wf-actions { margin-top: 12px; }
-.wf-project-entry { font: inherit; color: var(--accent); border: 0; background: none; padding: 0; text-align: left; cursor: pointer; }
-
-/* 접힌 보조 설정(프로젝트·반복 회의 설정, 기존 항목 연결 등) — 앱 다른 곳의 접기 UI와 같은 톤 */
-.wf-dialog details { margin-top: 16px; }
-.wf-dialog details + details { margin-top: 8px; }
-.wf-dialog summary { color: var(--muted); cursor: pointer; font-size: var(--text-sm); font-weight: 700; padding: 4px 0; }
-.wf-dialog details[open] summary { color: var(--text); margin-bottom: 4px; }
-
-.wf-dialog :focus-visible, .wf-link:focus-visible, .wf-project-entry:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 @media(max-width:600px) {
-  .wf-dialog { padding: 16px; }
-  .wf-dialog button, .wf-dialog input, .wf-dialog select, .wf-fields button, .wf-link { min-height: 44px; }
-  .wf-row > .wf-main.wf-mrow { grid-template-columns: 42px minmax(0, 1fr); }
-  .wf-row.wf-irow > .wf-main { grid-template-columns: 56px minmax(0, 1fr); }
-  .wf-item-meta { grid-column: 2; }
-  .wf-mchips { grid-column: 2; justify-content: flex-start; }
+  .wf-link { min-height: 44px; }
 }

@@ -211,6 +211,33 @@ test('batch group undo preserves later title edits but rejects conflicting group
   assert.equal(readTasks(), beforeUndo);
 });
 
+test('일괄 완료는 오늘 날짜로 끝내고, 실행 취소는 완료 표시를 걷어낸다', async () => {
+  const changed = await post('/api/workflow/task-batch', { ids: ['legacy', 'unseen'], change: { status: 'done' } });
+  assert.equal(changed.ok, true);
+  const line = id => readTasks().split('\n').find(text => text.includes(`id:${id}`));
+  assert.match(line('legacy'), new RegExp(`status:done[^\\n]*completed:${today}|completed:${today}[^\\n]*status:done`));
+  let data = await items();
+  assert.equal(data.todayTasks.find(item => item.id === 'legacy').status, 'done');
+  assert.equal(data.todayTasks.find(item => item.id === 'unseen').status, 'done');
+  assert.equal(data.todayTasks.find(item => item.id === 'legacy').due, shifted(-2), '마감일은 그대로 남는다');
+  const restored = await post('/api/workflow/task-batch', { undoToken: changed.undoToken });
+  assert.equal(restored.ok, true);
+  assert.doesNotMatch(line('legacy'), /completed:/);
+  data = await items();
+  assert.equal(data.reportRefs.legacy.status, 'to-do');
+  assert.equal(data.reportRefs.unseen.status, 'to-do');
+});
+
+test('일괄 완료 뒤에 바뀐 업무가 있으면 실행 취소를 거절한다', async () => {
+  const changed = await post('/api/workflow/task-batch', { ids: ['legacy', 'unseen'], change: { status: 'done' } });
+  assert.equal(changed.ok, true);
+  assert.equal((await post('/api/track/toggle', { id: 'unseen', status: 'to-do' })).ok, true);
+  const before = readTasks();
+  assert.equal((await post('/api/workflow/task-batch', { undoToken: changed.undoToken })).status, 400);
+  assert.equal(readTasks(), before, '거절된 실행 취소는 한 줄도 바꾸지 않는다');
+  assert.equal((await post('/api/workflow/task-batch', { ids: ['legacy'], change: { status: 'to-do' } })).status, 400, '일괄로 여는 상태 변경은 완료 하나뿐이다');
+});
+
 test('acknowledgement affects only the requested item', async () => {
   assert.equal((await post('/api/track/seen', { id: 'legacy' })).ok, true);
   const data = await items();

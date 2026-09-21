@@ -64,7 +64,7 @@ function renderReportDraft(item) {
     if(!records.size)host.appendChild(reportNode('p','이번 주에 연결된 업무 기록이 없습니다.','wf-section-note'));
     for(const {source,row} of records.values()) {
       const line=reportNode('div',undefined,'report-record');line.append(reportNode('span',source.description),reportNode('span',`${source.label} · ${source.status==='done'?'완료':'미완료'} · ${row.excluded?'보고 제외':'보고에 포함'}`,'wf-meta'));
-      line.appendChild(reportButton('원본 보기',()=>wfOpen({kind:'item',id:source.id})));if(row.excluded)line.appendChild(reportButton('보고에 복원',()=>reportChange(item,{action:'exclude',id:row.id})));host.appendChild(line);
+      line.appendChild(reportButton('원본 보기',()=>panelOpen({ id: source.id })));if(row.excluded)line.appendChild(reportButton('보고에 복원',()=>reportChange(item,{action:'exclude',id:row.id})));host.appendChild(line);
     }
     return;
   }
@@ -92,7 +92,7 @@ function renderReportDraft(item) {
     }
     card.appendChild(reportButton(row.excluded?'보고에 복원':'이번 보고에서 제외',()=>reportChange(item,{action:'exclude',id:row.id})));
     const proof=reportNode('details',undefined,'report-proof');proof.appendChild(reportNode('summary',`근거 업무 ${row.sourceIds.length}개`));
-    for(const source of row.currentEvidence || row.evidence) {const line=reportNode('div',undefined,'report-record');line.append(reportNode('span',source.description),reportNode('span',source.status==='done'?'완료':'미완료','wf-meta'),reportButton('원본 보기',()=>wfOpen({kind:'item',id:source.id})));proof.appendChild(line);}
+    for(const source of row.currentEvidence || row.evidence) {const line=reportNode('div',undefined,'report-record');line.append(reportNode('span',source.description),reportNode('span',source.status==='done'?'완료':'미완료','wf-meta'),reportButton('원본 보기',()=>panelOpen({ id: source.id })));proof.appendChild(line);}
     if(!row.sourceIds.length)proof.appendChild(reportNode('p','기존 보고 문장 · 연결된 원본 없음','wf-section-note'));card.appendChild(proof);
     if(row.suggestion) {
       const proposal=reportNode('details',undefined,'report-proposal');proposal.appendChild(reportNode('summary',row.suggestion.added?`새 관련 업무 ${row.suggestion.added}개 · 수정 제안 보기`:'원본 변경 · 확인 필요'));

@@ -3,7 +3,7 @@ const { atomicWrite } = require('./safe-storage');
 const fs = { ...nativeFs, writeFileSync: atomicWrite };
 const { randomUUID } = require('node:crypto');
 
-module.exports = ({ files, pattern, parse, validateDate }) => {
+module.exports = ({ files, pattern, parse, validateDate, today }) => {
   const history = new Map();
   const pick = (fields, keys) => Object.fromEntries(keys.map(key => [key, fields[key] ?? null]));
   function editFields(raw, values) {
@@ -28,6 +28,11 @@ module.exports = ({ files, pattern, parse, validateDate }) => {
         if (project !== null && (typeof project !== 'string' || !/^(jira|group):\S/.test(project) || /[\r\n\[\]]/.test(project) || project.length > 250)) throw new Error('그룹을 확인해 주세요.');
         keys = ['jira', 'group']; values = { jira: null, group: null };
         if (project) { const split = project.indexOf(':'); values[project.slice(0, split)] = project.slice(split + 1).trim().replace(/\s+/g, '_'); }
+      } else if (Object.hasOwn(change, 'status')) {
+        // 일괄로 여는 상태 변경은 "완료로 표시" 하나뿐이다. 완료 취소는 줄마다 체크로 되돌린다.
+        // 완료일은 서버가 오늘로 적는다(추측한 날짜를 기록으로 남기지 않는다).
+        if (change.status !== 'done') throw new Error('지원하지 않는 일괄 변경입니다.');
+        keys = ['status', 'completed']; values = { status: 'done', completed: today() };
       } else throw new Error('지원하지 않는 일괄 변경입니다.');
     }
     const selected = new Set(ids), found = new Set(), changes = [], updates = [];

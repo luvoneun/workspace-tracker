@@ -1487,7 +1487,7 @@ const workflows = require('./workflow-store')({
   create: { task: createManualTask, check: createWaitingItem, decision: createDecision },
   remove: removeTrackItem,
 });
-const batchTasks = require('./task-batch')({ files: listTrackerFiles, pattern: TRACK_RE, parse: parseFields, validateDate });
+const batchTasks = require('./task-batch')({ files: listTrackerFiles, pattern: TRACK_RE, parse: parseFields, validateDate, today: todayLocal });
 const reportDrafts = require('./report-drafts')({ directory: TRACKER_DIR, sources: () => workflows.snapshot().items, legacy: parseWeeklyReports, currentWeek: currentWeekKey });
 const mutations = require('./mutation-store')(TRACKER_DIR, [MEETING_LINKS_PATH, weeklyReportStatePath()]);
 const transactional = fn => (...args) => mutations.run(() => fn(...args));

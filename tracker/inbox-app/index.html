@@ -552,6 +552,7 @@
     <div class="d-datewrap" id="dateBar"></div>
     <nav class="d-tabs" role="tablist" aria-label="화면">
       <button type="button" class="d-tab" id="tabBtnToday" role="tab">오늘</button>
+      <button type="button" class="d-tab" id="tabBtnProjects" role="tab">프로젝트</button>
       <button type="button" class="d-tab" id="tabBtnRecords" role="tab">아이디어·결정<span class="d-tabdot" aria-hidden="true"></span></button>
       <button type="button" class="d-tab" id="tabBtnWeekly" role="tab">주간요약</button>
     </nav>
@@ -604,8 +605,7 @@
               <button type="button" data-view="project" aria-pressed="true">프로젝트별</button>
               <button type="button" data-view="priority" aria-pressed="false">마감·중요도순</button>
             </div>
-            <span id="todayHeadExtra"></span>
-            <div class="task-batch-tools" id="taskBatchTools"></div>
+            <button type="button" class="d-btn" id="taskSelectToggle" aria-pressed="false" aria-controls="taskSelectBar">여러 개 선택</button>
             <button type="button" class="d-btn" id="laterTaskToggle" aria-expanded="false" aria-controls="laterTaskDrawer">나중에 할 일 <span class="num" id="laterTaskSectionCount">0</span></button>
           </div>
           <div id="suggestZone" hidden></div>
@@ -618,6 +618,19 @@
               <div id="todayTaskList"></div>
             </div>
             <aside id="taskDetailPanel" class="d-side" hidden aria-label="선택한 항목 상세"></aside>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <!-- 프로젝트 탭 — 왼쪽은 프로젝트 목록, 오른쪽은 고른 프로젝트 하나(상세 패널은 오늘 탭과 같은 오른쪽 자리) -->
+    <div class="grid" id="gridProjects" hidden>
+      <aside class="d-plist" id="projectList" aria-label="프로젝트 목록"></aside>
+      <main class="d-pmain">
+        <div class="d-pwrap" id="projectZone">
+          <div class="task-content-layout">
+            <div id="projectBody"></div>
+            <aside id="projectDetailPanel" class="d-side" hidden aria-label="선택한 항목 상세"></aside>
           </div>
         </div>
       </main>
@@ -673,6 +686,9 @@
       <div id="laterTaskList"></div>
     </div>
   </aside>
+
+  <!-- 여러 개 선택 중에만 뜨는 아래 고정 막대. 본문 폭 안에 들어오고, 서랍이 열리면 그만큼 비켜선다 -->
+  <div class="d-selbar" id="taskSelectBar" role="group" aria-label="선택한 업무 일괄 정리" hidden></div>
 
   <div id="liveRegion" class="d-toast" role="status" aria-live="polite" hidden></div>
 
