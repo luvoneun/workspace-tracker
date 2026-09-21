@@ -17,7 +17,7 @@ function element() {
     value: '', disabled: false, hidden: false, textContent: '', children: [], listeners: {}, dataset: {},
     parent: null, connected: true, blurs: 0,
     get isConnected() { return this.connected; },
-    classList: { toggle() {}, contains() { return false; } },
+    classList: { toggle() {}, contains() { return false; }, add() {}, remove() {} },
     addEventListener(name, handler) { this.listeners[name] = handler; },
     appendChild(child) { if (child && typeof child === 'object') child.parent = this; this.children.push(child); return child; },
     append(...kids) { kids.forEach(kid => this.appendChild(kid)); },
@@ -166,6 +166,28 @@ test('the status column shows overdue, due today, carried-over and in-progress, 
   const escaped = cells('{}', "{ project: '가입 <개선>' }");
   assert.match(escaped, /m-proj">가입 &lt;개선&gt;/, 'user text is escaped');
   assert.doesNotMatch(escaped, /<개선>/);
+});
+
+// 오늘 목록·서랍·마감순의 줄 태그는 우선순위 → 상태(밀림·진행·답변) → 기한 순으로 자리가 고정된다.
+// 같은 종류가 줄마다 같은 x 자리에 서야 "중요한 것만"·"기한 있는 것만" 훑을 수 있다(DECISIONS).
+test('자리를 고정한 줄 태그는 우선순위 · 상태 · 기한 세 칸을 늘 같은 순서로 내고, 없는 칸은 비워 둔다', () => {
+  const app = pureClient();
+  const cells = (item, opts = '{}') => app.run(`uiMetaCells(${item}, ${opts})`);
+  const fixed = (item, extra = '') => app.run(`uiMetaCells(${item}, { fixed: true${extra} })`);
+  // 칸 세 개가 늘 이 순서로 나온다.
+  const parts = html => html.split('<span class="m-c ').slice(1).map(part => part.slice(0, part.indexOf('"')));
+  assert.deepEqual(parts(fixed('{}')), ['pri', 'st', 'due'], '아무 값이 없어도 세 칸은 자리를 지킨다');
+  assert.equal(fixed('{}'), '<span class="m-c pri"></span><span class="m-c st"></span><span class="m-c due"></span>');
+  const full = fixed("{ priority: 'critical', scheduled: '2000-01-01', due: '2000-01-01' }", ", waiting: 'waiting'");
+  assert.deepEqual(parts(full), ['pri', 'st', 'due']);
+  assert.match(full, /m-c pri">.*긴급.*<\/span><span class="m-c st">.*답변 기다리는 중.*일째 밀림.*<\/span><span class="m-c due">.*기한 \d+일 지남/s,
+    '우선순위 → 상태(답변 · 밀림) → 기한 차례다');
+  assert.match(fixed("{ doing: todayStr() }", ", waiting: 'answered'"), /m-c st">.*답변 왔어요.*진행 중/s, '상태가 겹치면 한 칸 안에 이어 쓴다');
+  assert.match(fixed("{ due: todayStr() }"), /<span class="m-c pri"><\/span><span class="m-c st"><\/span>/, '값이 없는 칸은 빈 자리로 남는다');
+  // 자리를 고정하지 않는 자리(미루기 제안 줄 등)는 있는 것만 이어 붙이던 모양 그대로다.
+  assert.equal(cells('{}'), '');
+  assert.doesNotMatch(cells("{ priority: 'high', due: todayStr() }"), /m-c/);
+  assert.match(cells("{ priority: 'high', scheduled: '2000-01-01', due: todayStr() }"), /중요.*밀림.*오늘까지/s, '순서는 고정한 줄과 같다');
 });
 
 test('상세 카드의 우선순위 값도 아이콘 없이 글자·색만 쓴다', () => {
@@ -878,21 +900,61 @@ test('전체 업무 기록 줄의 더보기는 제외/복원 다음에 그 업�
   assert.deepEqual(missing, [['보고에서 제외']]);
 });
 
-// 문장 줄의 ⋯: `묶음 풀기`는 서버가 묶기 전 문장을 들고 있다고 알려 준 행(`canSplit`)에만 붙는다.
+// 문장 줄의 ⋯: `이 아래로 문장 모으기`는 최상위·제외되지 않은 문장에만, `따로 빼기`는 들어간 문장에만,
+// `묶음 풀기`는 서버가 묶기 전 문장을 들고 있다고 알려 준 옛 합치기 행(`canSplit`)에만 붙는다.
 const REPORT_ITEM = `{ weekKey: '2026-09-14', draft: { revision: 1 } }`;
-test('주간요약 문장의 더보기에서 `묶음 풀기`는 묶은 문장에만 나온다', () => {
+test('주간요약 문장의 더보기는 모으기·따로 빼기·묶음 풀기를 상황에 맞게만 보여 준다', () => {
   const app = reportClient();
   const labels = row => JSON.parse(app.run(`JSON.stringify(
     reportSentenceMenuSections(${REPORT_ITEM}, ${JSON.stringify(row)}).map(section => section.map(entry => entry.label)))`));
-  assert.deepEqual(labels({ id: 'r1', group: '가입 개선', sourceIds: ['s1'] }), [['근거 업무 보기', '다른 문장과 묶기']]);
-  assert.deepEqual(labels({ id: 'r2', group: '가입 개선', sourceIds: [] }), [['다른 문장과 묶기']], '근거가 없으면 근거 항목도 없다');
+  assert.deepEqual(labels({ id: 'r1', group: '가입 개선', sourceIds: ['s1'] }), [['근거 업무 보기', '이 아래로 문장 모으기']]);
+  assert.deepEqual(labels({ id: 'r2', group: '가입 개선', sourceIds: [] }), [['이 아래로 문장 모으기']], '근거가 없으면 근거 항목도 없다');
+  assert.deepEqual(labels({ id: 'r5', group: '가입 개선', sourceIds: [], parent: 'r1' }), [['따로 빼기']],
+    '이미 다른 문장 아래에 있는 문장은 더 모을 수 없고 빼기만 한다(한 단계까지만)');
+  assert.deepEqual(labels({ id: 'r6', group: '가입 개선', sourceIds: [], excluded: true }), [[]],
+    '제외한 문장 아래로는 모으지 않는다');
   assert.deepEqual(labels({ id: 'r3', group: '여러 프로젝트', sourceIds: ['s1', 's2'], canSplit: true, partCount: 2 }),
-    [['근거 업무 보기', '다른 문장과 묶기', '묶음 풀기']]);
+    [['근거 업무 보기', '이 아래로 문장 모으기', '묶음 풀기']]);
   // 옛 저장 데이터로 만든 묶음 문장에는 `parts`가 없어 `canSplit`도 오지 않는다 — 풀기만 보이지 않는다.
-  assert.deepEqual(labels({ id: 'r4', group: '여러 프로젝트', sourceIds: ['s1', 's2'] }), [['근거 업무 보기', '다른 문장과 묶기']]);
+  assert.deepEqual(labels({ id: 'r4', group: '여러 프로젝트', sourceIds: ['s1', 's2'] }), [['근거 업무 보기', '이 아래로 문장 모으기']]);
 });
 
-test('묶기·묶음 풀기 알림은 무엇이 바뀌었는지 적고 되돌리기 버튼을 함께 준다', () => {
+// 아래로 넣기·따로 빼기는 저장 경로 하나(`/api/report/change`)로 가고, 보내는 값은 id와 parentId뿐이다.
+test('모으기 메뉴와 `따로 빼기`는 nest·unnest를 그대로 부른다', () => {
+  const app = reportClient();
+  app.run(`
+    calls = [];
+    reportChange = async (item, action) => { calls.push(action); };
+    renderReportDraft = () => {};
+    item = { weekKey: '2026-09-14', draft: { revision: 1, rows: [
+      { id: 'a', heading: '완료한 일', group: '가입 개선', text: '퍼널 정리', sourceIds: [], excluded: false },
+      { id: 'b', heading: '완료한 일', group: '결제 리뉴얼', text: '정산 배치', sourceIds: [], excluded: false, parent: 'a' },
+    ] } };
+    pick = (row, label) => reportSentenceMenuSections(item, row).flat().find(entry => entry.label === label).onClick();
+  `);
+  app.run("pick(item.draft.rows[0], '이 아래로 문장 모으기')");
+  assert.equal(app.run('reportNestParentId'), 'a', '모으기 모드의 기준 문장이 된다');
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), [], '모드에 들어가는 것만으로는 저장하지 않는다');
+  app.run("pick(item.draft.rows[1], '따로 빼기')");
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), [{ action: 'unnest', id: 'b' }]);
+  // 모으기 모드에서 문장을 누르면 그 자리에서 nest 한 번. 모드는 그대로 남는다(여러 개를 연달아 넣는다).
+  app.run(`
+    host = document.createElement('div');
+    reportSentenceRow(item, item.draft.rows[1], { host });
+    picked = host.children[0];
+  `);
+  assert.equal(app.run('picked.getAttribute("role")'), undefined, '이미 들어간 문장은 과녁이 아니다');
+  app.run(`
+    item.draft.rows[1].parent = undefined;
+    host = document.createElement('div');
+    reportSentenceRow(item, item.draft.rows[1], { host });
+    host.children[0].listeners.click();
+  `);
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls[1])')), { action: 'nest', id: 'b', parentId: 'a' });
+  assert.equal(app.run('reportNestParentId'), 'a', '넣은 뒤에도 모으기 모드가 이어진다');
+});
+
+test('자리를 옮긴 변경(넣기·빼기·묶기·풀기)의 알림은 무엇이 바뀌었는지 적고 되돌리기 버튼을 함께 준다', () => {
   const notice = (action, token = "'tok'") => {
     const app = reportClient();
     app.run(`reportUndo.set('2026-09-14', ${token})`);
@@ -900,6 +962,8 @@ test('묶기·묶음 풀기 알림은 무엇이 바뀌었는지 적고 되돌리
     const region = app.nodes.get('liveRegion');
     return [region.textContent, region.children.map(kid => kid.textContent)];
   };
+  assert.deepEqual(notice(`{ action: 'nest', id: 'r2', parentId: 'r1' }`), ['문장을 아래로 넣었어요', ['되돌리기', '닫기']]);
+  assert.deepEqual(notice(`{ action: 'unnest', id: 'r2' }`), ['따로 뺐어요', ['되돌리기', '닫기']]);
   assert.deepEqual(notice(`{ action: 'merge', ids: ['a', 'b', 'c'] }`), ['문장 3개를 묶었어요', ['되돌리기', '닫기']]);
   assert.deepEqual(notice(`{ action: 'split', id: 'r3' }`), ['묶음을 풀었어요', ['되돌리기', '닫기']]);
   assert.deepEqual(notice(`{ action: 'undo', token: 'tok' }`), ['되돌렸어요', ['닫기']]);
@@ -1025,6 +1089,48 @@ test('미리보기 줄·일반 글자·서식 있는 복사는 한 구조에서 
   assert.match(escaped, /<p><b>가입 &lt;개선&gt;<\/b><\/p>/);
   assert.match(escaped, /<li>&lt;b&gt;굵게&lt;\/b&gt; &amp; 기호<\/li>/);
   assert.equal(app.run(`reportSlackText(reportSlackModel(${risky}))`).includes('<b>굵게</b> & 기호'), true, '일반 글자에는 사용자가 쓴 그대로 들어간다');
+});
+
+// 다른 문장 아래로 넣은 문장: 문서에서는 부모의 프로젝트 아래 들여 쓴 줄, 슬랙에서는 부모 항목의 `◦` 부연.
+const REPORT_NEST_ROWS = `[
+  { id: 'a1', heading: '완료한 일', group: '가입 개선', text: '가입 실패율 급증 원인 파악', sourceIds: [], excluded: false },
+  { id: 'a2', heading: '완료한 일', group: '결제 리뉴얼', text: '결제 로그 확인\\n로그 보존 기간도 정리', sourceIds: [], excluded: false, parent: 'a1' },
+  { id: 'a3', heading: '완료한 일', group: '가입 개선', text: '빠진 문장', sourceIds: [], excluded: true, parent: 'a1' },
+  { id: 'a4', heading: '완료한 일', group: '그룹 없음', text: '주간 회의 자료 준비', sourceIds: [], excluded: false },
+  { id: 'a5', heading: '완료한 일', group: '여러 프로젝트', text: '옛 합치기 문장', sourceIds: [], excluded: false }
+]`;
+
+test('아래로 넣은 문장은 부모의 프로젝트 아래에 서고, 슬랙에서는 부모 항목의 `◦` 부연이 된다', () => {
+  const app = reportClient();
+  const report = `{ weekKey: '2026-09-21', rows: ${REPORT_NEST_ROWS} }`;
+  // 문서: 부모의 프로젝트 소제목 아래, 부모 바로 뒤. `여러 프로젝트`는 구역 끝(`프로젝트 없음` 앞).
+  assert.deepEqual(JSON.parse(app.run(`JSON.stringify(reportDocSections(${REPORT_NEST_ROWS})
+    .map(s => [s.heading, s.groups.map(g => [g.group, g.rows.map(r => r.id)])]))`)), [
+    ['완료한 일', [['가입 개선', ['a1', 'a2']], ['여러 프로젝트', ['a5']], ['그룹 없음', ['a4']]]],
+  ], '자식은 자기 프로젝트(결제 리뉴얼)가 아니라 부모의 프로젝트 아래에 서고, 제외한 자식은 빠진다');
+  // 슬랙: 부모 항목 아래 `◦` 줄. 자식이 여러 줄이면 줄마다 한 `◦`.
+  assert.equal(app.run(`reportSlackText(reportSlackModel(${report}, { sections: ['완료'] }))`), [
+    '9월 3주차 (9/21~9/27)',
+    '',
+    '완료',
+    '가입 개선',
+    '• 가입 실패율 급증 원인 파악',
+    '    ◦ 결제 로그 확인',
+    '    ◦ 로그 보존 기간도 정리',
+    '여러 프로젝트',
+    '• 옛 합치기 문장',
+    '기타',
+    '• 주간 회의 자료 준비',
+  ].join('\n'), '자식 문장은 부모 아래 부연으로만 나가고, 다른 프로젝트 이름은 슬랙 글에 적지 않는다');
+  // 부모를 제외하면 서버가 자식의 `parent`를 지워 주므로 자식은 최상위 항목으로 나간다.
+  const orphaned = `{ weekKey: '2026-09-21', rows: [
+    { id: 'a1', heading: '완료한 일', group: '가입 개선', text: '부모 문장', sourceIds: [], excluded: true },
+    { id: 'a2', heading: '완료한 일', group: '결제 리뉴얼', text: '혼자 남은 문장', sourceIds: [], excluded: false }
+  ] }`;
+  assert.equal(app.run(`reportSlackText(reportSlackModel(${orphaned}, { sections: ['완료'] }))`), [
+    '9월 3주차 (9/21~9/27)', '', '완료', '결제 리뉴얼', '• 혼자 남은 문장',
+  ].join('\n'));
+  assert.deepEqual(JSON.parse(app.run(`JSON.stringify(reportChildRows([]).size)`)), 0);
 });
 
 test('다음 주 계획은 프로젝트로 묶이고, 프로젝트 없는 문장은 구역 끝에 선다', () => {

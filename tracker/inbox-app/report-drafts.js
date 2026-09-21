@@ -76,8 +76,19 @@ module.exports = ({ directory, sources, legacy, currentWeek }) => {
     // 묶기 전 문장(`parts`)은 저장 파일에만 둔다 — 화면에는 "풀 수 있는지"만 알린다(큰 배열을 매번 내보내지 않으려고).
     // `parts`가 없는 옛 묶음 행은 `canSplit`이 붙지 않아 화면에서 `묶음 풀기`가 보이지 않는다.
     rows.forEach(row=>{if(row.parts){row.canSplit=true;row.partCount=row.parts.length;delete row.parts;}});
-    rows.sort((a,b)=>(order.indexOf(a.heading)<0?99:order.indexOf(a.heading))-(order.indexOf(b.heading)<0?99:order.indexOf(b.heading)) || a.group.localeCompare(b.group));
-    return { weekKey, rows, revision: hash({ stored, rows }), updatedAt: stored?.updatedAt || null };
+    // 다른 문장 아래로 들어간 문장(`parent`)은 그 부모 바로 뒤에 선다. 부모가 사라졌거나 제외됐거나
+    // (자동 갱신으로) 상태가 달라졌거나 부모가 다시 누군가의 자식이면 그 문장은 최상위로 보인다 —
+    // 저장된 값은 그대로 두고 보이는 결과에서만 뺀다(GET은 파일을 쓰지 않는다).
+    const byRowId=new Map(rows.map(row=>[row.id,row]));
+    rows.forEach(row=>{const parent=row.parent?byRowId.get(row.parent):null;
+      if(row.parent&&(!parent||parent.id===row.id||parent.excluded||parent.heading!==row.heading))delete row.parent;});
+    rows.forEach(row=>{if(row.parent&&byRowId.get(row.parent).parent)delete row.parent;});
+    const tops=rows.filter(row=>!row.parent);
+    tops.sort((a,b)=>(order.indexOf(a.heading)<0?99:order.indexOf(a.heading))-(order.indexOf(b.heading)<0?99:order.indexOf(b.heading)) || a.group.localeCompare(b.group));
+    const nested=new Map();
+    rows.forEach(row=>{if(!row.parent)return;if(!nested.has(row.parent))nested.set(row.parent,[]);nested.get(row.parent).push(row);});
+    const ordered=tops.flatMap(row=>[row,...(nested.get(row.id)||[])]);
+    return { weekKey, rows: ordered, revision: hash({ stored, rows: ordered }), updatedAt: stored?.updatedAt || null };
   }
   function clean(row) { const { suggestion, needsReview, currentEvidence, ...rest } = row; return rest; }
   // 계획 문장에 붙이는 프로젝트 이름. 없으면 기존처럼 `직접 작성`으로 담는다.
@@ -88,13 +99,16 @@ module.exports = ({ directory, sources, legacy, currentWeek }) => {
     if (!name || name.length > 60 || /[\u0000-\u001f\u007f]/.test(name)) throw new Error('프로젝트 이름을 60자 이내 한 줄로 입력해 주세요.');
     return name;
   }
-  function change({ weekKey, revision, action, id, text, ids, token, group }) {
+  function change({ weekKey, revision, action, id, parentId, text, ids, token, group }) {
     const state=read(), current=view(weekKey,state);
     if (revision !== current.revision) { const error=new Error('새 기록이나 다른 창의 변경이 있어요. 적은 내용은 그대로 있어요. 최신 내용을 확인한 뒤 다시 저장해 주세요.');error.status=409;throw error; }
     // 묶기 전 문장은 화면으로 나가지 않으므로(view가 `canSplit`만 알린다) 저장 파일에서 다시 붙인다.
     // `parts`는 서버가 merge에서만 만든다 — 요청 본문의 값은 받지 않는다.
     const storedParts=new Map((state.weeks[weekKey]?.rows||[]).filter(row=>row.parts).map(row=>[row.id,row.parts]));
-    const carry=row=>{const next=clean(row);if(storedParts.has(row.id))next.parts=storedParts.get(row.id);return next;};
+    // 고아 규칙에 걸린 `parent`는 view가 결과에서만 뺀다 — 저장 파일의 값은 조용히 지우지 않는다.
+    const storedParents=new Map((state.weeks[weekKey]?.rows||[]).filter(row=>row.parent).map(row=>[row.id,row.parent]));
+    const carry=row=>{const next=clean(row);if(storedParts.has(row.id))next.parts=storedParts.get(row.id);
+      if(next.parent===undefined&&storedParents.has(row.id))next.parent=storedParents.get(row.id);return next;};
     let rows=current.rows.map(carry); const row=rows.find(row=>row.id===id), shown=current.rows.find(row=>row.id===id);
     if(action==='undo') {
       const prior=undo.get(token); if(!prior || prior.weekKey!==weekKey)throw new Error('되돌리기 기록이 만료됐어요.');
@@ -118,6 +132,19 @@ module.exports = ({ directory, sources, legacy, currentWeek }) => {
       else if(action==='exclude') row.excluded=!row.excluded;
       else if(action==='accept') { if(!shown.suggestion || shown.suggestion.missing || shown.suggestion.mixed)throw new Error('원본 상태를 확인하고 문장을 직접 수정해 주세요.');Object.assign(row,shown.suggestion,{locked:true,legacy:false});delete row.added;delete row.missing;delete row.mixed; }
       else if(action==='acknowledge') { row.evidence=shown.suggestion?.evidence || shown.currentEvidence;row.sourceIds=shown.suggestion?.sourceIds || row.sourceIds;row.legacy=false;row.locked=true; }
+      // 문장을 다른 문장 아래로 넣는다(글자를 합치지 않는다 — 들어간 문장도 독립된 문장으로 남는다).
+      // 판단은 화면이 보고 있는 결과(`current.rows`)를 기준으로 한다 — 고아 규칙으로 최상위로 보이던
+      // 문장은 화면에서 본 그대로 최상위로 다룬다.
+      else if(action==='nest') {
+        const parent=current.rows.find(entry=>entry.id===parentId);
+        if(!parent||parent.id===row.id)throw new Error('아래로 넣을 문장을 찾을 수 없어요.');
+        if(parent.heading!==shown.heading)throw new Error('같은 상태의 문장 아래로만 넣을 수 있어요.');
+        if(parent.parent)throw new Error('이미 다른 문장 아래에 있는 문장 밑으로는 넣을 수 없어요.');
+        if(shown.excluded||parent.excluded)throw new Error('제외한 문장은 넣을 수 없어요.');
+        if(current.rows.some(entry=>entry.parent===row.id))throw new Error('아래에 문장이 있는 문장은 먼저 비워 주세요.');
+        row.parent=parent.id;
+      }
+      else if(action==='unnest') delete row.parent;
       else if(action==='split') {
         // 묶은 뒤 문장을 고쳤더라도 묶기 전 문장들로 돌아간다(그 편집은 `undo`로 되살린다).
         if(!row.parts || !row.parts.length)throw new Error('이 문장은 풀 수 없어요.');

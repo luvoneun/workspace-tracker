@@ -264,10 +264,13 @@ function uiProjectLabel(item, grouped) {
   return item.jira || item.group || '';
 }
 
-// 상태 열의 글자 셀: 밀린 표시 → 진행 중 → 우선순위(글자와 색뿐, 아이콘 없음) → 기한(맨 오른쪽, 달력).
-// 기한·밀림·진행에는 14px 아이콘과 풀어 쓴 title 툴팁이 함께 붙는다. 급한 말(긴급·기한 N일 지남·오늘까지)만
+// 상태 열의 글자 셀: 우선순위(글자와 색뿐, 아이콘 없음) → 상태(밀림 · N일째 진행 중 · 답변) → 기한(맨 오른쪽, 달력).
+// 기한·밀림·진행·답변에는 14px 아이콘과 풀어 쓴 title 툴팁이 함께 붙는다. 급한 말(긴급·기한 N일 지남·오늘까지)만
 // 배지로 서고 나머지는 회색 글자다(모양은 ui.css가 정한다).
 // 보통·낮음·먼 기한처럼 의미 없는 값은 자리를 비운다.
+// `opts.fixed`인 줄(오늘 목록·나중에 할 일 서랍·마감·중요도순)에서는 세 칸이 줄마다 같은 자리에 서도록
+// 빈 칸도 자리 표시로 내보낸다 — 같은 종류가 세로로 서야 "중요한 것만"·"기한 있는 것만" 훑을 수 있다.
+// 그 밖의 자리(미루기 제안 줄 등)는 있는 만큼만 이어 붙이던 기존 모양 그대로다.
 const UI_PRIORITY_META = {
   critical: { text: '긴급', tone: 'urgent', hint: '가장 먼저 해야 하는 업무예요' },
   high: { text: '중요', tone: 'warn', hint: '중요한 업무예요' },
@@ -285,17 +288,24 @@ function uiMetaCells(item, opts = {}) {
     `<span class="${cls}"${hint ? ` title="${escapeAttr(hint)}"` : ''}>${escapeHtml(text)}</span>`;
   // 좁은 화면(≤520px)의 두 줄 행에서는 프로젝트가 정보 줄 맨 앞에 온다 — 넓은 화면에서는 제목 뒤·프로젝트 열이 보여 준다.
   if (opts.project) cells.push(`<span class="m-proj">${escapeHtml(opts.project)}</span>`);
+  const priority = done ? null : UI_PRIORITY_META[item.priority];
+  const priorityCell = priority ? cellPlain(`m-pri${uiTone(priority.tone)}`, priority.text, priority.hint) : '';
+  // 날짜 성격의 상태는 한 칸에 모인다(겹치면 이어 쓰고, 넘치면 뒤가 말줄임된다).
+  const status = [];
+  if (opts.waiting) status.push(uiWaitCell(opts.waiting === 'answered'));
   const carry = where === 'row' && !done ? uiCarryText(item.scheduled) : null;
-  if (carry) cells.push(cell('m-carry', 'clock', carry, '오늘 하려다 넘어온 업무예요'));
+  if (carry) status.push(cell('m-carry', 'clock', carry, '오늘 하려다 넘어온 업무예요'));
   if (item.doing && !done && !opts.inDoingGroup) {
     const days = -diffDays(item.doing) + 1;
-    cells.push(cell('m-doing', 'clock', days > 1 ? `${days}일째 진행 중` : '진행 중', '이미 손을 댄 업무예요'));
+    status.push(cell('m-doing', 'clock', days > 1 ? `${days}일째 진행 중` : '진행 중', '이미 손을 댄 업무예요'));
   }
-  const priority = done ? null : UI_PRIORITY_META[item.priority];
-  if (priority) cells.push(cellPlain(`m-pri${uiTone(priority.tone)}`, priority.text, priority.hint));
   const due = done ? null : uiDueText(item.due, where);
-  if (due) cells.push(cell(`m-due${uiTone(due.tone)}`, 'calendar', due.text, item.due ? `기한은 ${uiKoDate(item.due)}이에요` : ''));
-  return cells.join('');
+  const dueCell = due ? cell(`m-due${uiTone(due.tone)}`, 'calendar', due.text, item.due ? `기한은 ${uiKoDate(item.due)}이에요` : '') : '';
+  if (opts.fixed) {
+    cells.push(`<span class="m-c pri">${priorityCell}</span>`, `<span class="m-c st">${status.join('')}</span>`, `<span class="m-c due">${dueCell}</span>`);
+    return cells.join('');
+  }
+  return [...cells, priorityCell, ...status, dueCell].filter(Boolean).join('');
 }
 
 // 답변을 기다리는 업무에 붙는 말 한 마디(말풍선 아이콘 + 글자).
@@ -604,10 +614,15 @@ function uiTaskRow(item, opts = {}) {
   if (done) {
     uiResultCell(meta, item);
   } else {
-    meta.innerHTML = uiMetaCells(item, { where: mode === 'later' ? 'full' : 'row', inDoingGroup: opts.inDoingGroup, project });
-    // 답변을 기다리는 업무는 그 사실도 글자로 적는다.
+    // 답변을 기다리는 업무는 그 사실도 글자로 적는다(밀림·진행과 같은 상태 칸에 선다).
     const blocker = typeof wfItem === 'function' ? wfItem(wfItem(item.id)?.blockedBy) : null;
-    if (blocker) meta.insertAdjacentHTML('afterbegin', uiWaitCell(blocker.status === 'done'));
+    // 이 줄들만 세 칸(우선순위 · 상태 · 기한)의 자리를 고정한다 — 완료한 줄·제안 줄은 예전 모양 그대로다.
+    meta.className = 'd-meta is-fixed';
+    row.classList.add('is-cols');
+    meta.innerHTML = uiMetaCells(item, {
+      where: mode === 'later' ? 'full' : 'row', inDoingGroup: opts.inDoingGroup, project, fixed: true,
+      waiting: blocker ? (blocker.status === 'done' ? 'answered' : 'waiting') : null,
+    });
   }
   row.appendChild(meta);
 
@@ -5140,8 +5155,8 @@ function setActiveTab(tab) {
     document.getElementById(cfg.grid).setAttribute('aria-labelledby', cfg.btn);
   });
   activeTabKey = tab;
-  // 주간요약을 떠나면 문장 묶기 막대도 함께 내린다(떠 있는 막대가 다른 탭에 남지 않게).
-  if (tab !== 'weekly' && typeof reportMergeEnd === 'function') reportMergeEnd();
+  // 주간요약을 떠나면 문장 모으기 막대도 함께 내린다(떠 있는 막대가 다른 탭에 남지 않게).
+  if (tab !== 'weekly' && typeof reportNestEnd === 'function') reportNestEnd();
   document.getElementById('skipLink').hidden = tab !== 'today';
   renderActiveTabLists();
   try {

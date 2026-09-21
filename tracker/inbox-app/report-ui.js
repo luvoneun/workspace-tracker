@@ -5,14 +5,13 @@
 
 const reportEdits = new Map();        // `${weekKey}:${행}` / `${weekKey}:new` → 입력 중인 글자(저장 실패해도 남는다)
 const reportUndo = new Map();         // weekKey → 되돌리기 토큰
-const reportSelection = new Set();    // 묶기 모드에서 고른 문장
 const reportEvidenceOpen = new Set(); // 근거 업무를 펼쳐 둔 문장
 const reportNewRecords = new Map();   // weekKey → { revision, ids } 안 본 새 기록
 let reportBusy = false;
 let reportMode = 'draft';             // 'draft' 보고 · 'records' 전체 업무 기록
 let reportRenderedWeek = null;
 let reportRenderedItem = null;
-let reportMergeHeading = null;        // 묶기 모드에서 고를 수 있는 상태(서버도 같은 상태만 허용한다)
+let reportNestParentId = null;        // 모으기 모드의 기준 문장(이 문장 아래로 넣는다)
 let reportExcludedOpen = false;
 
 const REPORT_PLAN_HEADING = '다음 주 계획';
@@ -27,6 +26,8 @@ const reportProjectText = (name) => {
 };
 // 서버가 프로젝트 없이 담은 계획 문장의 그룹 이름(`report-drafts.js`의 add 기본값).
 const REPORT_PLAN_NO_PROJECT = '직접 작성';
+// 옛 합치기 행(서로 다른 프로젝트의 문장을 한 문장으로 합친 것)에만 남는 그룹 이름.
+const REPORT_MULTI_PROJECT = '여러 프로젝트';
 
 // 슬랙에 붙일 구역 — 화면·서버의 상태 이름을 슬랙 글의 구역 이름으로 옮긴다.
 // `확인 완료`는 따로 세우지 않고 `완료` 안으로 들어간다.
@@ -122,23 +123,67 @@ function reportSlackProjectOf(row, sectionName) {
   return none ? REPORT_SLACK_OTHER : group;
 }
 
+// ---------- 다른 문장 아래로 들어간 문장(`parent`) ----------
+// 서버가 고아 규칙(부모가 없거나 제외됐거나 상태가 다르거나 부모가 또 누군가의 자식)을 이미 적용해
+// `parent`를 지운 채로 준다 — 화면은 그 판단을 다시 하지 않고, 목록에 없는 부모만 최상위로 되돌린다.
+function reportChildRows(rows) {
+  const kept = (rows || []).filter(row => !row.excluded);
+  const tops = new Set(kept.filter(row => !row.parent).map(row => row.id));
+  const children = new Map();
+  for (const row of kept) {
+    if (!row.parent || !tops.has(row.parent)) continue;
+    if (!children.has(row.parent)) children.set(row.parent, []);
+    children.get(row.parent).push(row);
+  }
+  return children;
+}
+function reportParentRow(rows, row) {
+  if (!row || !row.parent) return null;
+  return (rows || []).find(entry => entry.id === row.parent && !entry.excluded && !entry.parent) || null;
+}
+
+// 옛 합치기 행이 모이는 `여러 프로젝트`는 그 구역의 맨 끝 — 프로젝트 없는 묶음(`기타`·`프로젝트 없음`)이
+// 있으면 그 바로 앞에 선다(문서·슬랙 같은 규칙).
+function reportMultiProjectLast(list, nameOf, noneOf) {
+  const at = list.findIndex(entry => nameOf(entry) === REPORT_MULTI_PROJECT);
+  if (at < 0) return list;
+  const [multi] = list.splice(at, 1);
+  const last = list.length - 1;
+  list.splice(last >= 0 && noneOf(list[last]) ? last : list.length, 0, multi);
+  return list;
+}
+
+// 모으기 모드에서 이 문장을 기준 문장 아래로 넣을 수 있는지 — 서버 `nest`와 같은 조건이다.
+function reportCanNest(rows, row, parent) {
+  if (!row || !parent || row.id === parent.id) return false;
+  if (row.excluded || parent.excluded) return false;
+  if (row.heading !== parent.heading) return false;
+  if (row.parent || parent.parent) return false;
+  return !(rows || []).some(entry => entry.parent === row.id);
+}
+
 // 슬랙에 붙일 글의 구조(순수 함수). 일반 글자·서식 있는 복사·미리보기가 모두 여기서 나온다.
 // `options.sections`는 넣을 구역 이름의 목록이고, 빠뜨리면 기본값(완료·진행 중·예정)이다.
 // 규칙: 제외한 문장은 빠짐 · 구역 안에서 같은 프로젝트는 머리 하나 아래로 · 프로젝트 없는 것은 `기타`로
-// 구역 끝 · 여러 줄 문장은 둘째 줄부터 부연 · 내용이 없는 구역은 생략.
+// 구역 끝 · 여러 줄 문장은 둘째 줄부터 부연 · 아래로 들어간 문장의 각 줄도 그 부모의 부연(`◦`)으로 ·
+// 내용이 없는 구역은 생략.
 function reportSlackModel(report, options = {}) {
   const chosen = new Set(options.sections || REPORT_SLACK_DEFAULT);
   const order = reportSlackSectionNames(report);
   const sections = new Map();
-  for (const row of (report && report.rows ? report.rows : [])) {
-    if (row.excluded) continue;
+  const rows = report && report.rows ? report.rows : [];
+  const children = reportChildRows(rows);
+  const linesOf = row => String(row.text ?? '').split('\n').map(line => line.trim()).filter(Boolean);
+  for (const row of rows) {
+    if (row.excluded || reportParentRow(rows, row)) continue;
     const name = reportSlackSectionOf(row.heading);
     if (!name || !chosen.has(name)) continue;
-    const lines = String(row.text ?? '').split('\n').map(line => line.trim()).filter(Boolean);
+    const lines = linesOf(row);
     if (!lines.length) continue;
     if (!sections.has(name)) sections.set(name, { name, projects: [], memos: [] });
     const section = sections.get(name);
-    const item = { text: lines[0], notes: lines.slice(1) };
+    // 아래로 들어간 문장은 자기 프로젝트가 달라도 부모의 항목 밑 부연으로 붙는다(보이는 대로 나간다).
+    const item = { text: lines[0], notes: [...lines.slice(1), ...(children.get(row.id) || []).flatMap(linesOf)] };
     const projectName = reportSlackProjectOf(row, name);
     if (projectName === null) { section.memos.push(item); continue; }
     let project = section.projects.find(entry => entry.name === projectName);
@@ -148,6 +193,7 @@ function reportSlackModel(report, options = {}) {
   for (const section of sections.values()) {
     const index = section.projects.findIndex(project => project.name === REPORT_SLACK_OTHER);
     if (index >= 0) section.projects.push(section.projects.splice(index, 1)[0]);
+    reportMultiProjectLast(section.projects, project => project.name, project => project.name === REPORT_SLACK_OTHER);
   }
   return {
     title: reportSlackTitle(report && report.weekKey),
@@ -204,11 +250,14 @@ function reportSlackHtml(model) {
 
 // 문서의 뼈대: 상태(서버가 준 순서) → 프로젝트 → 문장.
 // 제외한 문장과 다음 주 계획은 문서 끝에 따로 모이므로 여기서는 빠진다.
+// 다른 문장 아래로 들어간 문장은 자기 프로젝트가 달라도 **부모의 프로젝트** 아래, 부모 바로 뒤에 선다.
 function reportDocSections(rows) {
   const sections = [];
   const byHeading = new Map();
+  const children = reportChildRows(rows);
   for (const row of rows || []) {
     if (row.excluded || row.heading === REPORT_PLAN_HEADING) continue;
+    if (reportParentRow(rows, row)) continue;
     if (!byHeading.has(row.heading)) {
       const section = { heading: row.heading, groups: [] };
       byHeading.set(row.heading, section);
@@ -217,7 +266,10 @@ function reportDocSections(rows) {
     const section = byHeading.get(row.heading);
     let group = section.groups.find(entry => entry.group === row.group);
     if (!group) { group = { group: row.group, rows: [] }; section.groups.push(group); }
-    group.rows.push(row);
+    group.rows.push(row, ...(children.get(row.id) || []));
+  }
+  for (const section of sections) {
+    reportMultiProjectLast(section.groups, group => group.group, group => reportProjectText(group.group) === REPORT_NO_PROJECT);
   }
   return sections;
 }
@@ -233,14 +285,17 @@ function reportPlanGroups(rows) {
   const groups = [];
   const byName = new Map();
   const loose = [];
+  const children = reportChildRows(rows);
   for (const row of rows || []) {
+    if (reportParentRow(rows, row)) continue;
+    const kids = children.get(row.id) || [];
     const name = String(row.group || '').trim();
     if (!name || name === REPORT_PLAN_NO_PROJECT || name === REPORT_NO_PROJECT_LABEL || name === REPORT_NO_PROJECT) {
-      loose.push(row);
+      loose.push(row, ...kids);
       continue;
     }
     if (!byName.has(name)) { const group = { name, rows: [] }; byName.set(name, group); groups.push(group); }
-    byName.get(name).rows.push(row);
+    byName.get(name).rows.push(row, ...kids);
   }
   if (loose.length) groups.push({ name: null, rows: loose });
   return groups;
@@ -306,9 +361,7 @@ async function reportChange(item, action) {
     }
     if (action.action === 'edit') reportEdits.delete(`${item.weekKey}:${action.id}`);
     if (action.action === 'add') reportEdits.delete(`${item.weekKey}:new`);
-    if (action.action === 'merge') { reportMergeHeading = null; escDrop(reportMergeEnd); }
     reportUndo.set(item.weekKey, result.undoToken);
-    reportSelection.clear();
     item.draft = result.report;
     const cached = weeklyReportsCache.find(entry => entry.weekKey === item.weekKey);
     if (cached) cached.draft = result.report;
@@ -317,12 +370,19 @@ async function reportChange(item, action) {
   reportSavedNotice(item, action);
 }
 
-// 저장 뒤 알림 하나. 묶기·묶음 풀기는 무엇이 바뀌었는지 적고 그 자리에서 `되돌리기`까지 준다
-// (머리줄의 `되돌리기`와 같은 길이다). 나머지 변경은 예전 문구 그대로다.
+// 저장 뒤 알림 하나. 자리를 옮기는 변경(아래로 넣기·따로 빼기·옛 묶기·묶음 풀기)은 무엇이 바뀌었는지
+// 적고 그 자리에서 `되돌리기`까지 준다(머리줄의 `되돌리기`와 같은 길이다). 나머지는 예전 문구 그대로다.
+const REPORT_MOVE_NOTICE = {
+  nest: '문장을 아래로 넣었어요',
+  unnest: '따로 뺐어요',
+  split: '묶음을 풀었어요',
+};
 function reportSavedNotice(item, action) {
   if (action.action === 'undo') { announce('되돌렸어요'); return; }
-  if (action.action !== 'merge' && action.action !== 'split') { announce('보고 내용을 저장했어요'); return; }
-  const message = action.action === 'merge' ? `문장 ${action.ids.length}개를 묶었어요` : '묶음을 풀었어요';
+  const message = action.action === 'merge'
+    ? `문장 ${action.ids.length}개를 묶었어요`
+    : REPORT_MOVE_NOTICE[action.action];
+  if (!message) { announce('보고 내용을 저장했어요'); return; }
   const token = reportUndo.get(item.weekKey);
   showNotice(message, false, null, token ? { label: '되돌리기', onClick: () => reportUndoNow(item) } : null);
 }
@@ -358,40 +418,49 @@ function reportUndoHotkey(event) {
 // 앱이 켜질 때 한 번만 단다(탭을 오갈 때마다 쌓이지 않게). capture 단계라 app.js의 ⌘Z보다 먼저 본다.
 document.addEventListener('keydown', reportUndoHotkey, true);
 
-// ---------- 묶기 모드(같은 상태의 문장만) ----------
+// ---------- 모으기 모드(기준 문장 아래로 문장을 넣는다) ----------
+// 글자를 합치지 않는다 — 누른 문장이 그 자리에서 기준 문장 아래로 한 단계 들어가고 모드는 그대로 남는다.
 
-function reportMergeStart(item, row) {
-  reportMergeHeading = row.heading;
-  reportSelection.clear();
-  reportSelection.add(row.id);
-  escDrop(reportMergeEnd);
-  escPush(reportMergeEnd);
+// 지금 모으고 있는 기준 문장. 그 문장이 사라졌으면(다른 창의 변경 등) 모드가 끝난 것으로 본다.
+function reportNestParent(report) {
+  if (reportNestParentId === null) return null;
+  return (report && report.rows ? report.rows : []).find(row => row.id === reportNestParentId && !row.excluded && !row.parent) || null;
+}
+
+function reportNestStart(item, row) {
+  reportNestParentId = row.id;
+  escDrop(reportNestEnd);
+  escPush(reportNestEnd);
   renderReportDraft(item);
 }
 
-function reportMergeEnd() {
-  if (reportBusy || reportMergeHeading === null) return;
-  reportMergeHeading = null;
-  reportSelection.clear();
-  escDrop(reportMergeEnd);
+function reportNestEnd() {
+  if (reportBusy || reportNestParentId === null) return;
+  reportNestParentId = null;
+  escDrop(reportNestEnd);
   if (reportRenderedItem) renderReportDraft(reportRenderedItem);
 }
 
-function reportMergeBar(item) {
-  const bar = document.getElementById('reportMergeBar');
+// 막대에 적는 기준 문장 — 첫 줄만, 길면 줄인다.
+function reportNestLabel(text) {
+  const line = String(text ?? '').split('\n')[0].trim();
+  return line.length > 24 ? `${line.slice(0, 24)}…` : line;
+}
+
+function reportNestBar(item) {
+  const bar = document.getElementById('reportNestBarEl');
   if (!bar) return;
-  const open = reportMergeHeading !== null && reportMode === 'draft';
-  document.body.classList.toggle('merge-open', open);
+  const parent = reportNestParent(item.draft);
+  const open = !!parent && reportMode === 'draft';
+  document.body.classList.toggle('nest-open', open);
   bar.hidden = !open;
   bar.replaceChildren();
   if (!open) return;
   const inner = reportNode('div', undefined, 'bar');
-  inner.appendChild(reportNode('span', `${reportSelection.size}개 선택`, 'ct num'));
-  inner.appendChild(reportNode('span', `${reportMergeHeading} 안에서만 고를 수 있어요`, 'rp-hint'));
+  inner.appendChild(reportNode('span', `「${reportNestLabel(parent.text)}」 아래로`, 'ct'));
+  inner.appendChild(reportNode('span', '넣을 문장을 눌러 주세요', 'rp-hint'));
   inner.appendChild(reportNode('span', undefined, 'sp'));
-  const merge = reportButton('선택한 문장 묶기', () => reportChange(item, { action: 'merge', ids: [...reportSelection] }), 'd-btn pri');
-  merge.disabled = reportBusy || reportSelection.size < 2;
-  inner.append(merge, reportButton('취소', () => reportMergeEnd()));
+  inner.appendChild(reportButton('완료', () => reportNestEnd(), 'd-btn pri'));
   bar.appendChild(inner);
 }
 
@@ -488,8 +557,9 @@ function reportSuggestionBlock(item, row) {
   return box;
 }
 
-// 문장 줄의 ⋯ 메뉴. `묶음 풀기`는 서버가 묶기 전 문장을 들고 있는 행에만 붙는다(`canSplit`) —
-// 옛 묶음 문장이나 낱 문장에는 나오지 않는다. 풀면 묶은 뒤에 고친 글은 사라지지만 `되돌리기`로 돌아온다.
+// 문장 줄의 ⋯ 메뉴. `이 아래로 문장 모으기`는 최상위·제외되지 않은 문장에만 붙는다(아래로 들어간
+// 문장은 `따로 빼기`로 먼저 나와야 한다 — 한 단계까지만 들어간다).
+// `묶음 풀기`는 서버가 묶기 전 문장을 들고 있는 옛 합치기 행에만 붙는다(`canSplit`).
 function reportSentenceMenuSections(item, row) {
   return [[
     row.sourceIds.length ? {
@@ -499,37 +569,43 @@ function reportSentenceMenuSections(item, row) {
         renderReportDraft(item);
       },
     } : null,
-    { label: '다른 문장과 묶기', onClick: () => reportMergeStart(item, row) },
+    !row.parent && !row.excluded ? { label: '이 아래로 문장 모으기', onClick: () => reportNestStart(item, row) } : null,
+    row.parent ? { label: '따로 빼기', onClick: () => reportChange(item, { action: 'unnest', id: row.id }) } : null,
     row.canSplit ? { label: '묶음 풀기', onClick: () => reportChange(item, { action: 'split', id: row.id }) } : null,
   ].filter(Boolean)];
 }
 
-// 문장 한 줄. 동작(수정·제외·더보기)은 hover·focus에서만 보인다.
+// 문장 한 줄. 동작(수정·제외·따로 빼기·더보기)은 hover·focus에서만 보인다.
+// 다른 문장 아래로 들어간 문장은 한 단계 들여 쓴 `◦` 줄이고, 모으기 모드에서는 넣을 수 있는 문장만
+// 밝게 서서 눌리는 과녁이 된다(누르는 즉시 들어간다).
 function reportSentenceRow(item, row, context) {
   const host = context.host;
   const newIds = context.newIds || new Set();
   const key = `${item.weekKey}:${row.id}`;
-  const line = reportNode('div', undefined, 'rp-s');
+  const rows = item.draft.rows || [];
+  const parentRow = reportParentRow(rows, row);
+  const line = reportNode('div', undefined, 'rp-s' + (parentRow ? ' is-sub' : ''));
   if (row.needsReview) line.dataset.review = 'true';
 
-  const merging = reportMergeHeading !== null;
-  if (merging && row.heading === reportMergeHeading) {
-    const box = reportNode('input');
-    box.type = 'checkbox';
-    box.className = 'd-cb';
-    box.checked = reportSelection.has(row.id);
-    box.setAttribute('aria-label', `${reportProjectText(row.group)} · ${row.text} 묶기 선택`);
-    box.addEventListener('change', () => {
-      if (box.checked) reportSelection.add(row.id); else reportSelection.delete(row.id);
-      line.classList.toggle('is-sel', box.checked);
-      reportMergeBar(item);
+  const nestParent = reportNestParent(item.draft);
+  const nesting = !!nestParent && reportMode === 'draft';
+  const isNestParent = nesting && row.id === nestParent.id;
+  const canNest = nesting && !reportEdits.has(key) && reportCanNest(rows, row, nestParent);
+  if (isNestParent) line.classList.add('is-nest');
+  else if (nesting && !canNest) line.classList.add('is-off');
+  if (canNest) {
+    line.classList.add('is-pick');
+    line.tabIndex = 0;
+    line.setAttribute('role', 'button');
+    line.setAttribute('aria-label', `${row.text} — 「${reportNestLabel(nestParent.text)}」 아래로 넣기`);
+    const nest = () => reportChange(item, { action: 'nest', id: row.id, parentId: nestParent.id })
+      .catch(error => showNotice(error.message || '저장하지 못했어요. 적은 내용은 그대로 있어요', true));
+    line.addEventListener('click', nest);
+    line.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); nest(); }
     });
-    if (box.checked) line.classList.add('is-sel');
-    line.appendChild(box);
-  } else {
-    if (merging) line.classList.add('is-off');
-    line.appendChild(reportNode('span', '•', 'bu'));
   }
+  line.appendChild(reportNode('span', parentRow ? '◦' : '•', 'bu'));
 
   const text = reportNode('div', undefined, 'tx');
   line.appendChild(text);
@@ -559,6 +635,11 @@ function reportSentenceRow(item, row, context) {
   // 첫 줄이 문장이고, 둘째 줄부터는 부연이다 — 슬랙에서 들여 쓴 작은 글머리로 들어간다.
   const lines = String(row.text ?? '').split('\n');
   text.appendChild(reportNode('span', lines[0], 'ln'));
+  // 아래로 들어간 문장의 프로젝트가 부모와 다르면 그 이름을 조용히 적는다(문서에서만 — 슬랙에는 안 나간다).
+  if (parentRow && row.group !== parentRow.group) {
+    text.appendChild(reportNode('span', `· ${reportProjectText(row.group)}`, 'pj'));
+  }
+  if (isNestParent) text.appendChild(reportNode('span', '여기 아래로', 'here'));
   // 손으로 고친 문장에만 조용한 이름표를 붙인다. `자동 초안`은 찍지 않는다.
   if (row.locked && !context.plan) text.appendChild(reportNode('span', '직접 수정', 'edt'));
   if (row.needsReview && !row.suggestion) text.appendChild(reportNode('span', '원본 확인 필요', 'rv'));
@@ -566,15 +647,21 @@ function reportSentenceRow(item, row, context) {
   if (rowNew) text.appendChild(reportNode('span', `새 기록 ${rowNew}`, 'nw'));
   if (lines.length > 1) text.appendChild(reportNode('div', lines.slice(1).join('\n'), 'sub'));
 
-  const actions = reportNode('span', undefined, 'ac');
-  actions.appendChild(reportButton('수정', () => {
-    reportEdits.set(key, row.text);
-    renderReportDraft(item);
-    document.getElementById('weeklyReportDetail')?.querySelector(`[data-edit-row="${row.id}"]`)?.focus();
-  }, 'd-btn sm'));
-  actions.appendChild(reportButton('제외', () => reportChange(item, { action: 'exclude', id: row.id }), 'd-btn sm'));
-  actions.appendChild(uiMoreButton(`${reportProjectText(row.group)} 문장 더보기`, () => reportSentenceMenuSections(item, row)));
-  line.appendChild(actions);
+  // 모으기 모드에서는 줄을 누르는 것이 "넣기"다 — 수정·제외·⋯과 헷갈리지 않게 그동안은 감춘다.
+  if (!nesting) {
+    const actions = reportNode('span', undefined, 'ac');
+    actions.appendChild(reportButton('수정', () => {
+      reportEdits.set(key, row.text);
+      renderReportDraft(item);
+      document.getElementById('weeklyReportDetail')?.querySelector(`[data-edit-row="${row.id}"]`)?.focus();
+    }, 'd-btn sm'));
+    actions.appendChild(reportButton('제외', () => reportChange(item, { action: 'exclude', id: row.id }), 'd-btn sm'));
+    if (parentRow) {
+      actions.appendChild(reportButton('따로 빼기', () => reportChange(item, { action: 'unnest', id: row.id }), 'd-btn sm'));
+    }
+    actions.appendChild(uiMoreButton(`${reportProjectText(row.group)} 문장 더보기`, () => reportSentenceMenuSections(item, row)));
+    line.appendChild(actions);
+  }
   host.appendChild(line);
 
   if (reportEvidenceOpen.has(row.id)) host.appendChild(reportEvidenceBlock(row));
@@ -846,14 +933,19 @@ function renderReportDraft(item) {
   const host = document.getElementById('weeklyReportDetail');
   if (!host) return;
   if (reportRenderedWeek !== item.weekKey) {
-    reportSelection.clear();
-    reportMergeHeading = null;
-    escDrop(reportMergeEnd);
+    reportNestParentId = null;
+    escDrop(reportNestEnd);
     reportEvidenceOpen.clear();
     reportRenderedWeek = item.weekKey;
   }
   reportRenderedItem = item;
   const report = item.draft;
+  // 다시 그릴 때마다 모으기 모드가 아직 말이 되는지 확인한다 — 기준 문장이 사라졌거나
+  // `전체 업무 기록`으로 옮겼으면 모드는 끝난다(남은 Esc 리스너도 함께 내린다).
+  if (reportNestParentId !== null && (reportMode !== 'draft' || !reportNestParent(report))) {
+    reportNestParentId = null;
+    escDrop(reportNestEnd);
+  }
   host.dataset.weekKey = item.weekKey;
   host.replaceChildren();
 
@@ -879,6 +971,6 @@ function renderReportDraft(item) {
     reportPlanSection(item, body, newIds);
   }
 
-  reportMergeBar(item);
+  reportNestBar(item);
   reportPreview(report);
 }

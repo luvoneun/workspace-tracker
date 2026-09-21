@@ -188,6 +188,119 @@ test('묶기 전 문장이 없는 옛 묶음은 그대로 읽히고, 풀기만 �
   f.change({action:'edit',id:merged.id,text:'가입·알림 정리 완료'});
   assert.equal(f.view().rows.find(row=>row.id===merged.id).text,'가입·알림 정리 완료','다른 변경은 옛 데이터에서도 그대로 된다');
 });
+// 문장을 다른 문장 아래로 넣기(`nest`/`unnest`) — 글자를 합치지 않고 행에 `parent`만 붙인다.
+function nestFixture(t) {
+  const f=fixture(t);
+  f.items.push(
+    {id:'b',type:'task',description:'알림 배너 정리하기',status:'done',created:'2026-09-14',completed:'2026-09-15',group:'알림'},
+    {id:'c',type:'task',description:'정산 배치 설계하기',status:'done',created:'2026-09-14',completed:'2026-09-15',group:'결제'},
+  );
+  f.row=text=>f.view().rows.find(row=>row.text===text);
+  f.shape=()=>f.view().rows.map(row=>[row.text,row.parent||null]);
+  f.savedRows=()=>JSON.parse(fs.readFileSync(path.join(f.directory,REPORT_FILE),'utf8')).weeks['2026-09-14'].rows;
+  return f;
+}
+test('문장을 다른 문장 아래로 넣으면 글자는 그대로 두고 부모 바로 뒤에 선다',t=>{
+  const f=nestFixture(t);
+  assert.deepEqual(f.shape(),[['문구 검토함',null],['정산 배치 설계함',null],['알림 배너 정리함',null]],'넣기 전에는 프로젝트 이름순이다');
+  const parent=f.row('문구 검토함').id;
+  f.change({action:'nest',id:f.row('알림 배너 정리함').id,parentId:parent});
+  assert.deepEqual(f.shape(),[['문구 검토함',null],['알림 배너 정리함',parent],['정산 배치 설계함',null]],'넣은 문장은 부모 바로 뒤로 온다');
+  assert.equal(f.row('알림 배너 정리함').text,'알림 배너 정리함','글자는 합치지 않는다');
+  assert.equal(f.row('알림 배너 정리함').group,'알림','프로젝트·근거도 그대로 남는다');
+  assert.deepEqual(f.row('알림 배너 정리함').sourceIds,['b']);
+  // 여러 개를 넣으면 넣은 순서대로 부모 뒤에 줄을 선다.
+  f.change({action:'nest',id:f.row('정산 배치 설계함').id,parentId:parent});
+  assert.deepEqual(f.shape().map(([text])=>text),['문구 검토함','알림 배너 정리함','정산 배치 설계함']);
+  // 따로 빼면 원래 자리로 돌아간다.
+  f.change({action:'unnest',id:f.row('알림 배너 정리함').id});
+  assert.deepEqual(f.shape(),[['문구 검토함',null],['정산 배치 설계함',parent],['알림 배너 정리함',null]]);
+});
+test('아래로 넣기는 같은 상태의 낱 문장끼리만 된다',t=>{
+  const f=nestFixture(t);
+  f.items.push({id:'d',type:'task',description:'진행 중인 일',status:'to-do',created:'2026-09-14',doing:'2026-09-15',group:'가입'});
+  const a=f.row('문구 검토함').id,b=f.row('알림 배너 정리함').id,c=f.row('정산 배치 설계함').id,doing=f.row('진행 중인 일').id;
+  assert.throws(()=>f.change({action:'nest',id:b,parentId:'없는-행'}),/찾을 수 없어요/);
+  assert.throws(()=>f.change({action:'nest',id:b}),/찾을 수 없어요/,'부모를 적지 않으면 거절한다');
+  assert.throws(()=>f.change({action:'nest',id:b,parentId:b}),/찾을 수 없어요/,'자기 자신 아래로는 넣을 수 없다');
+  assert.throws(()=>f.change({action:'nest',id:'없는-행',parentId:a}),/보고 항목을 찾을 수 없어요/);
+  assert.throws(()=>f.change({action:'nest',id:doing,parentId:a}),/같은 상태의 문장 아래로만/);
+  assert.deepEqual(f.shape().filter(([,parent])=>parent),[],'거절된 요청은 아무것도 남기지 않는다');
+  f.change({action:'nest',id:b,parentId:a});
+  assert.throws(()=>f.change({action:'nest',id:c,parentId:b}),/이미 다른 문장 아래에 있는/,'한 단계까지만 넣는다');
+  assert.throws(()=>f.change({action:'nest',id:a,parentId:c}),/먼저 비워 주세요/,'아래에 문장이 있는 문장은 옮기지 않는다');
+  f.change({action:'exclude',id:c});
+  assert.throws(()=>f.change({action:'nest',id:f.view().rows.find(row=>row.excluded).id,parentId:a}),/제외한 문장은/);
+  assert.throws(()=>f.change({action:'nest',id:a,parentId:f.view().rows.find(row=>row.excluded).id}),/제외한 문장은/);
+  assert.deepEqual(f.view().rows.find(row=>row.id===b).parent,a,'거절된 요청들 뒤에도 먼저 넣은 문장은 그대로다');
+});
+test('자동 초안 문장을 넣어도 id는 그대로고 원본을 계속 따라온다',t=>{
+  const f=nestFixture(t);
+  const a=f.row('문구 검토함').id,b=f.row('알림 배너 정리함').id;
+  assert.ok(a.startsWith('auto-')&&b.startsWith('auto-'),'아직 저장되지 않은 자동 초안이다');
+  f.change({action:'nest',id:b,parentId:a});
+  assert.deepEqual(f.savedRows().map(row=>row.id).sort(),f.view().rows.map(row=>row.id).sort(),'넣는 순간 모든 행이 저장 행이 된다');
+  assert.equal(f.view().rows.find(row=>row.id===b).parent,a);
+  // 저장된 뒤에도 잠기지 않은 행은 원본을 따라 갱신되고, id는 바뀌지 않아 들여쓰기가 끊기지 않는다.
+  f.items.find(item=>item.id==='b').description='알림 배너 정리 마무리하기';
+  f.items.find(item=>item.id==='a').outcome='가입 문구 확정';
+  const after=f.view().rows;
+  assert.equal(after.find(row=>row.id===b).text,'알림 배너 정리 마무리함');
+  assert.equal(after.find(row=>row.id===a).text,'가입 문구 확정');
+  assert.equal(after.find(row=>row.id===b).parent,a,'id가 그대로라 들여쓰기도 그대로다');
+});
+test('부모가 사라지거나 제외되거나 상태가 달라지면 넣었던 문장은 최상위로 보인다',t=>{
+  const f=nestFixture(t);
+  const a=f.row('문구 검토함').id,b=f.row('알림 배너 정리함').id;
+  f.change({action:'nest',id:b,parentId:a});
+  // ① 부모를 제외하면 자식은 최상위로 보이고, 복원하면 다시 들어간다(저장값은 그대로다).
+  f.change({action:'exclude',id:a});
+  assert.equal(f.view().rows.find(row=>row.id===b).parent,undefined);
+  assert.equal(f.savedRows().find(row=>row.id===b).parent,a,'보이는 결과에서만 빼고 저장값은 지우지 않는다');
+  f.change({action:'exclude',id:a});
+  assert.equal(f.view().rows.find(row=>row.id===b).parent,a);
+  // ② 부모의 상태(소제목)가 원본을 따라 달라지면 최상위로 보인다.
+  const source=f.items.find(item=>item.id==='a');
+  source.status='to-do';delete source.completed;source.doing='2026-09-15';
+  assert.equal(f.view().rows.find(row=>row.id===a).heading,'진행중');
+  assert.equal(f.view().rows.find(row=>row.id===b).parent,undefined);
+  source.status='done';source.completed='2026-09-15';
+  assert.equal(f.view().rows.find(row=>row.id===b).parent,a,'상태가 돌아오면 다시 들여쓴다');
+  // ③ 가리키는 부모가 아예 없으면(근거가 바뀌어 자동 행 id가 달라진 경우 등) 조용히 최상위로 선다.
+  const file=path.join(f.directory,REPORT_FILE),saved=JSON.parse(fs.readFileSync(file,'utf8'));
+  saved.weeks['2026-09-14'].rows.find(row=>row.id===b).parent='사라진-행';
+  fs.writeFileSync(file,JSON.stringify(saved,null,2));
+  assert.equal(f.view().rows.find(row=>row.id===b).parent,undefined);
+  assert.equal(f.view().rows.length,3,'문장이 사라지지도, 두 번 나오지도 않는다');
+});
+test('아래로 넣기는 되돌릴 수 있고, 저장 파일을 새로 읽어도 그대로다',t=>{
+  const f=nestFixture(t);
+  const a=f.row('문구 검토함').id,b=f.row('알림 배너 정리함').id;
+  const result=f.change({action:'nest',id:b,parentId:a});
+  f.change({action:'undo',token:result.undoToken});
+  assert.equal(f.view().rows.find(row=>row.id===b).parent,undefined,'되돌리면 넣기 전으로 돌아간다');
+  const again=f.change({action:'nest',id:b,parentId:a});
+  const removed=f.change({action:'unnest',id:b});
+  f.change({action:'undo',token:removed.undoToken});
+  assert.equal(f.view().rows.find(row=>row.id===b).parent,a,'따로 빼기도 되돌린다');
+  assert.ok(again.undoToken);
+  const fresh=factory({directory:f.directory,sources:()=>f.items,legacy:()=>[],currentWeek:()=>'2026-09-14'});
+  assert.equal(fresh.view('2026-09-14').rows.find(row=>row.id===b).parent,a,'새 인스턴스로 읽어도 유지된다');
+});
+test('옛 데이터와 요청 본문의 임의 필드는 아래로 넣기에 영향을 주지 않는다',t=>{
+  const f=nestFixture(t);
+  // `parent`가 없던 옛 행은 그대로 읽히고, 요청에 직접 적어 보낸 `parent`는 무시된다.
+  const a=f.row('문구 검토함').id,b=f.row('알림 배너 정리함').id;
+  f.change({action:'edit',id:b,text:'직접 고친 문장',parent:a,rows:[],parts:[{text:'끼워 넣기'}]});
+  const saved=f.savedRows().find(row=>row.id===b);
+  assert.equal(saved.parent,undefined,'서버가 검증한 id만 `parent`로 저장한다');
+  assert.equal(saved.parts,undefined);
+  assert.equal(f.view().rows.find(row=>row.id===b).text,'직접 고친 문장');
+  // 잠근(직접 고친) 문장도 아래로 넣을 수 있다.
+  f.change({action:'nest',id:b,parentId:a});
+  assert.equal(f.view().rows.find(row=>row.id===b).parent,a);
+  assert.equal(f.view().rows.find(row=>row.id===b).text,'직접 고친 문장');
+});
 test('a historical saved draft is not silently rewritten by source changes',t=>{
   const f=fixture(t);f.items[0].created='2026-09-01';f.items[0].completed='2026-09-02';
   let old=f.store.view('2026-08-31');f.store.change({weekKey:old.weekKey,revision:old.revision,action:'add',text:'기록 보존'});

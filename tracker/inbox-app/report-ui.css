@@ -65,9 +65,25 @@
   align-items: start; gap: 4px 8px; padding: 4px 8px 4px 4px; margin-left: -4px; border-radius: var(--r-xs);
 }
 .rp-s .bu { justify-self: center; color: var(--dim); font-size: 15.5px; line-height: 1.65; }
-.rp-s .d-cb { margin-top: 4px; }
-.rp-s.is-sel { background: var(--sel); }
-.rp-s.is-off { opacity: 0.55; }
+
+/* 다른 문장 아래로 들어간 문장 — 한 단계 들여 쓴 `◦` 줄. 여러 줄 글자의 부연(.rp-s .sub)과 같은 가족이다. */
+.rp-s.is-sub { margin-left: 18px; }
+.rp-s.is-sub .bu { font-size: 13px; line-height: 1.75; }
+.rp-s.is-sub .tx { font-size: 13.5px; line-height: 1.6; color: var(--muted); }
+/* 부모와 프로젝트가 다를 때만 붙는 조용한 이름(문서에서만 — 슬랙 글에는 나가지 않는다) */
+.rp-s .pj { margin-left: 8px; font-size: 12px; color: var(--dim); white-space: nowrap; }
+
+/* 모으기 모드: 기준 문장은 연파랑 바탕 + `여기 아래로`, 넣을 수 있는 문장만 눌리고 나머지는 흐리다. */
+.rp-s.is-nest { background: var(--sel); }
+.rp-s .here {
+  margin-left: 8px; height: 20px; display: inline-flex; align-items: center; padding: 0 8px;
+  border-radius: 999px; background: var(--accent-soft); color: var(--accent-text);
+  font-size: 11.5px; font-weight: 600; white-space: nowrap;
+}
+.rp-s.is-pick { cursor: pointer; }
+.rp-s.is-pick:hover { background: var(--hover); }
+.rp-s.is-pick:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.rp-s.is-off { opacity: 0.45; pointer-events: none; }
 /* 문장이 이 화면에서 가장 큰 글자다 */
 .rp-s .tx { font-size: 15.5px; line-height: 1.65; word-break: keep-all; overflow-wrap: anywhere; }
 .rp-s .ln { white-space: pre-wrap; }
@@ -202,10 +218,10 @@
 .rp-slackbox .memo { color: var(--muted); }
 
 /* 문장 묶기 막대는 주간요약 탭 전체 폭을 쓴다(왼쪽 레일이 없다) */
-#reportMergeBar { left: 0; }
-#reportMergeBar .rp-hint { white-space: nowrap; }
-body.merge-open .page { padding-bottom: 104px; }
-body.merge-open .d-toast { bottom: 76px; }
+#reportNestBarEl { left: 0; }
+#reportNestBarEl .rp-hint { white-space: nowrap; }
+body.nest-open .page { padding-bottom: 104px; }
+body.nest-open .d-toast { bottom: 76px; }
 
 @media (max-width: 1280px) {
   #gridWeekly { grid-template-columns: 208px minmax(0, 1fr) 312px; gap: 14px; }
