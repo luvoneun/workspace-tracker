@@ -24,6 +24,7 @@
     <nav class="d-tabs" role="tablist" aria-label="화면">
       <button type="button" class="d-tab" id="tabBtnToday" role="tab">오늘</button>
       <button type="button" class="d-tab" id="tabBtnProjects" role="tab">프로젝트</button>
+      <button type="button" class="d-tab" id="tabBtnMeetings" role="tab">회의<span class="d-tabnum num" id="tabMeetingsNum"></span></button>
       <button type="button" class="d-tab" id="tabBtnRecords" role="tab">아이디어·결정<span class="d-tabnum num" id="tabRecordsNum"></span></button>
       <button type="button" class="d-tab" id="tabBtnWeekly" role="tab">주간요약</button>
     </nav>
@@ -102,6 +103,21 @@
           <div class="task-content-layout">
             <div id="projectBody"></div>
             <aside id="projectDetailPanel" class="d-side" hidden aria-label="선택한 항목 상세"></aside>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <!-- 회의 탭 — 프로젝트 탭과 같은 구조다: 왼쪽은 회의 목록, 오른쪽은 고른 회의의 정리 화면.
+         오른쪽 내용은 줄 옆 회의 카드와 같은 함수(panelMeeting)가 그린다(내용을 두 벌 만들지 않는다).
+         업무·확인 대기 제목을 누르면 여기서도 누른 줄 옆에 상세 카드가 뜬다. -->
+    <div class="grid" id="gridMeetings" hidden>
+      <aside class="d-plist" id="meetingList" aria-label="회의 목록"></aside>
+      <main class="d-pmain">
+        <div class="d-pwrap" id="meetingZone">
+          <div class="task-content-layout">
+            <div id="meetingBody"></div>
+            <aside id="meetingDetailPanel" class="d-side" hidden aria-label="선택한 항목 상세"></aside>
           </div>
         </div>
       </main>

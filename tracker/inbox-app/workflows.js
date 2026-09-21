@@ -26,6 +26,12 @@ const wfKey = item => item.jira ? `jira:${item.jira}` : item.group || item.proje
 // 같은 프로젝트가 목록에 두 번 나오지 않게 여기서 한 가지 꼴로 맞춘다.
 const wfGroupName = value => String(value).replace(/_/g, ' ');
 const wfMeetingKey = event => event.project ? `${event.project.type}:${event.project.type === 'group' ? wfGroupName(event.project.value) : event.project.value}` : null;
+// 화면에 적는 이름도 같은 꼴로 맞춘다 — 같은 프로젝트가 자리마다 다른 글자·다른 색 점으로 보이지 않게.
+const wfMeetingProjectName = (event) => {
+  if (!event || !event.project) return '';
+  const label = event.project.label || event.project.value || '';
+  return event.project.type === 'group' ? wfGroupName(label) : label;
+};
 const wfItem = id => wfItemsById.get(id);
 const wfType = type => ({ task: '할 일', bug: '버그', check: '확인 대기', decision: '결정', idea: '아이디어' }[type] || type);
 function wfNode(tag, text, className) {
@@ -68,8 +74,8 @@ function wfSegment(options, value, onChange, label) {
 }
 const wfTypeSegment = (value, onChange, label = '종류') => wfSegment(WF_TYPES, value, onChange, label);
 // 날짜 칸은 앱 공용 부품(uiDateField)을 쓴다 — 비어 있으면 `+ 기한`, 누르면 그 자리에서 고른다.
-// 날짜 이름: 할 일은 기한, 확인 대기는 상대에게 회신 받아야 하는 기한. 결정에는 날짜가 없다.
-const wfDateLabel = type => type === 'check' ? '회신 기한' : type === 'decision' ? null : '기한';
+// 날짜 이름: 할 일은 기한, 확인 대기는 상대에게 답변을 받기로 한 날. 결정에는 날짜가 없다.
+const wfDateLabel = type => type === 'check' ? '답변 받을 날' : type === 'decision' ? null : '기한';
 // 서버에 보내는 초안 한 건: 종류·문구, 할 일이면 시점(오늘/나중), 결정이 아니면 날짜(비우면 null로 지운다).
 // AI가 문구 끝에 붙여 온 "(방향 확인 필요)" 표식은 화면에 보이지도, 항목 문구로 저장되지도 않게 뗀다.
 const wfCleanDraftText = text => text.replace(/\s*\(방향 확인 필요\)\s*$/, '');
@@ -133,10 +139,11 @@ function workflowRender(data) {
   // 지워졌거나 완료된 업무는 일괄 선택에서 조용히 빠진다.
   const available = new Set([...taskListsCache.todayTasks, ...taskListsCache.laterTasks].filter(item => item.status !== 'done').map(item => item.id));
   for (const id of taskSelection) if (!available.has(id)) taskSelection.delete(id);
-  // 레일의 `오늘 미팅` 머리에 붙는 회의 전체 보기 — 팔레트의 `회의` 필터로 간다.
+  // 레일의 `오늘 미팅` 머리에 붙는 회의 전체 보기 — 몰아서 정리하는 면인 `회의` 탭으로 간다.
+  // 버튼은 한 번만 만들고 리스너도 그때 한 번만 단다(종일 띄워 두는 앱이라 쌓이면 안 된다).
   if (!document.getElementById('wfMeetingEntry')) {
     const button = wfNode('button', '전체 보기', 'wf-link'); button.type = 'button'; button.id = 'wfMeetingEntry';
-    button.addEventListener('click', () => palOpen({ type: 'meeting' }));
+    button.addEventListener('click', () => openMeetingsTab(null));
     document.getElementById('calendarSectionCount').parentElement.appendChild(button);
   }
   // 후속 알림은 따로 나열하지 않는다 — `다시 확인할 항목`은 확인 대기 목록 맨 위로 올라가고

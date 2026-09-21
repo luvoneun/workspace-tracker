@@ -362,6 +362,126 @@ test('the palette meeting filter keeps drafts to review on top and can narrow to
   assert.deepEqual(ids("{ query: '권한', type: 'task' }"), [], '다른 종류를 고르면 회의는 빠진다');
 });
 
+// 회의 탭 — 팔레트에서 떼어 온 훑어보는 면. 거르는 판단과 처음 고를 회의를 정하는 판단은 순수 함수다.
+const MEETINGS_TAB_FIXTURE = `var events = [
+    { id: 'm1', date: '2026-09-20', start: '10:00', title: '주간 운영 회의', project: { type: 'group', value: '운영툴', label: '운영툴' }, drafts: [{ description: '권한 정책 초안' }] },
+    { id: 'm2', date: '2026-09-21', start: '09:00', title: '가입 개선 킥오프', project: { type: 'group', value: '가입 개선', label: '가입 개선' } },
+    { id: 'm3', date: '2026-09-21', start: '14:00', title: '지표 점검' },
+    { id: 'm4', date: '2026-09-19', start: '16:00', title: '운영툴 회고', project: { type: 'group', value: '운영툴', label: '운영툴' } },
+  ];
+  var related = { m2: [{ id: 'x', status: 'to-do', description: '권한 범위 확인' }], m3: [{ id: 'y', status: 'done', description: '끝난 일' }] };
+  var itemsOf = id => related[id] || [];`;
+
+test('회의 탭 목록: 팔레트의 회의 필터를 그대로 쓰고, 차례는 날짜 내림차순(같은 날은 시각 순)이다', () => {
+  const app = workflowsClient();
+  app.run(MEETINGS_TAB_FIXTURE);
+  const ids = state => JSON.parse(app.run(`JSON.stringify(meetingsTabList(events, ${state}, itemsOf).map(e => e.id))`));
+  assert.deepEqual(ids('{}'), ['m2', 'm3', 'm1', 'm4'],
+    '검토할 초안이 있다고 위로 올리지 않는다 — 훑어보는 면이라 "언제"가 먼저다');
+  assert.deepEqual(ids("{ reviewOnly: true }"), ['m1'], '검토 대기만');
+  assert.deepEqual(ids("{ unresolved: true }"), ['m2'], '미해결 항목이 남은 회의만');
+  assert.deepEqual(ids("{ project: 'group:운영툴' }"), ['m1', 'm4'], '프로젝트로 거른다');
+  assert.deepEqual(ids("{ project: 'group:운영툴', reviewOnly: true }"), ['m1'], '조건은 함께 걸린다');
+  assert.deepEqual(ids("{ project: 'group:없는프로젝트' }"), []);
+});
+
+test('회의 탭이 처음 고르는 회의: 검토 대기 → 오늘 남은 회의 → 가장 최근, 고른 것이 있으면 그대로', () => {
+  const app = workflowsClient();
+  app.run(MEETINGS_TAB_FIXTURE);
+  const pick = (state, current, now) => app.run(
+    `String(meetingsTabPick(meetingsTabList(events, ${state}, itemsOf), ${JSON.stringify(current)}, '2026-09-21', '${now}'))`);
+  assert.equal(pick('{}', null, '08:00'), 'm1', '검토할 초안이 있는 회의가 먼저다(그중 가장 최근)');
+  assert.equal(pick('{}', 'm3', '08:00'), 'm3', '이미 고른 회의가 목록에 있으면 그대로 둔다');
+  assert.equal(pick("{ unresolved: true }", 'm3', '08:00'), 'm2', '거른 목록에 없으면 다시 고른다');
+  assert.equal(pick("{ reviewOnly: false, project: 'group:가입 개선' }", null, '08:00'), 'm2',
+    '검토 대기가 없으면 오늘 남은 회의 중 가장 이른 것');
+  assert.equal(pick("{ project: 'group:운영툴' }", null, '23:00'), 'm1',
+    '오늘 남은 회의가 없으면 가장 최근 회의');
+  assert.equal(pick("{ project: 'group:없는프로젝트' }", null, '08:00'), 'null', '회의가 없으면 고를 것도 없다');
+});
+
+test('회의 탭 이름 옆 숫자는 검토를 기다리는 초안이 있는 회의 수다', () => {
+  const app = workflowsClient();
+  const count = code => Number(app.run(`meetingsReviewCount(${code})`));
+  assert.equal(count(`[{ drafts: [{}] }, { drafts: [{}, {}] }, { drafts: [] }, {}]`), 2, '초안 수가 아니라 회의 수다');
+  assert.equal(count('[]'), 0);
+  assert.equal(count('null'), 0);
+});
+
+test('회의 탭의 결과 카드는 줄 옆 카드와 다른 자리에 담기고, 회의를 바꾸면 내려간다', () => {
+  const app = workflowsClient();
+  app.run("panelState = { kind: 'meeting', id: 'm1', result: { meetingId: 'm1' } }; meetingsTabState.key = 'm2'; meetingsTabState.result = { meetingId: 'm2' };");
+  assert.equal(app.run('MEETING_HOST_CARD.getResult().meetingId'), 'm1');
+  assert.equal(app.run('MEETING_HOST_TAB.getResult().meetingId'), 'm2');
+  app.run('MEETING_HOST_TAB.setResult(null)');
+  assert.equal(app.run('String(MEETING_HOST_TAB.getResult())'), 'null');
+  assert.equal(app.run('MEETING_HOST_CARD.getResult().meetingId'), 'm1', '두 자리는 서로의 결과 카드를 건드리지 않는다');
+  // 다른 회의를 고르면 방금 담은 결과는 그 회의의 것이라 함께 내려간다(줄 옆 카드가 회의를 옮길 때와 같다).
+  app.run("meetingsTabState.result = { meetingId: 'm2' }; meetingsTabSelect('m2');");
+  assert.equal(app.run('MEETING_HOST_TAB.getResult().meetingId'), 'm2', '같은 회의를 다시 고르는 것은 아무 일도 아니다');
+  app.run("meetingsTabSelect('m3')");
+  assert.equal(app.run('String(MEETING_HOST_TAB.getResult())'), 'null');
+  assert.equal(app.run('meetingsTabState.key'), 'm3');
+});
+
+// 팔레트는 찾는 창이다 — 회의 전용 토글은 회의 탭으로 갔고, 대신 그 탭으로 가는 조용한 링크가 바닥에 붙는다.
+function paletteChips(app, state) {
+  app.run(`palState = palDefaults(${state});
+    palNodes = { chips: document.createElement('div'), input: document.createElement('input'),
+      results: document.createElement('div'), foot: document.createElement('div') };
+    palFilterChips();`);
+  return JSON.parse(app.run(`(() => {
+    const out = [];
+    const walk = node => (node.children || []).forEach(kid => { if (kid.textContent) out.push(kid.textContent); walk(kid); });
+    walk(palNodes.chips);
+    return JSON.stringify(out);
+  })()`));
+}
+
+test('팔레트 필터 줄에는 회의 전용 토글이 없다 — `미해결만`·`검토 대기`는 회의 탭으로 옮겼다', () => {
+  const app = workflowsClient();
+  const all = paletteChips(app, "{ type: 'meeting' }");
+  assert.deepEqual(all, ['전체', '할 일', '확인 대기', '결정', '아이디어', '회의', '완료 제외'],
+    '종류 칩과 `완료 제외`만 남는다');
+  assert.ok(!all.includes('미해결만') && !all.includes('검토 대기'));
+  assert.deepEqual(paletteChips(app, '{}'), all, '다른 종류를 골라도 칩 줄이 흔들리지 않는다');
+});
+
+test('팔레트 바닥은 `회의` 칩일 때만 회의 탭으로 가는 링크를 붙인다', () => {
+  const app = workflowsClient();
+  const foot = (state) => {
+    app.run(`palState = palDefaults(${state});
+      palNodes = { chips: document.createElement('div'), input: document.createElement('input'),
+        results: document.createElement('div'), foot: document.createElement('div') };
+      palFoot();`);
+    return JSON.parse(app.run("JSON.stringify(palNodes.foot.children.map(kid => typeof kid === 'string' ? kid : kid.textContent))"));
+  };
+  assert.deepEqual(foot('{}'), ['↑↓ 이동 · Enter 열기 · Esc 닫기']);
+  assert.deepEqual(foot("{ type: 'meeting' }"), ['↑↓ 이동 · Enter 열기 · Esc 닫기', '회의 탭에서 모두 보기']);
+  assert.deepEqual(foot("{ newOnly: true }"), ['↑↓ 이동 · Enter 열기 · Esc 닫기'], '오늘 신규는 그대로 팔레트에 있다');
+});
+
+test('확인 대기의 날짜 배지는 짧다 — 지났거나 오늘일 때만 세우고, 뜻은 툴팁이 푼다', () => {
+  const app = pureClient();
+  const reply = code => JSON.parse(app.run(`JSON.stringify(uiReplyText(${code}))`));
+  assert.equal(reply("'2000-01-01'").text.replace(/\d+/, 'N'), 'N일 늦음');
+  assert.equal(reply("'2000-01-01'").tone, 'urgent');
+  assert.deepEqual(reply('todayStr()'), { text: '오늘 답변 예정', tone: 'warn' });
+  assert.equal(reply('tomorrowStr()'), null, '내일 받기로 한 날은 줄에 찍지 않는다');
+  assert.equal(reply("'2999-12-31'"), null);
+  assert.equal(reply('null'), null);
+  // 배지 문구는 한 곳(UI_REPLY_WORDS)에서만 만든다 — 말이 또 바뀌어도 고칠 자리가 하나다.
+  assert.equal(app.run("UI_REPLY_WORDS.late(3)"), '3일 늦음');
+  assert.equal(app.run("UI_REPLY_WORDS.today()"), '오늘 답변 예정');
+
+  // 확인 대기가 보이는 다른 자리(프로젝트 탭·팔레트 결과·회의에서 나온 줄)도 같은 말을 쓴다.
+  const cell = (item, where = "'full'") => JSON.parse(app.run(`JSON.stringify(uiItemDueText(${item}, ${where}))`));
+  assert.deepEqual(cell("{ type: 'check', due: todayStr() }"), { text: '오늘 답변 예정', tone: 'warn' });
+  assert.deepEqual(cell("{ type: 'task', due: todayStr() }"), { text: '오늘까지', tone: 'warn' }, '할 일은 기한 말투 그대로');
+  assert.match(cell("{ type: 'check', due: '2999-12-31' }").text, /12월 31일까지/, '먼 날짜는 날짜를 그대로 적어 정보를 잃지 않는다');
+  assert.equal(cell('{ type: "check" }'), null);
+});
+
 test('the palette highlights the matched letters and escapes the person’s own text first', () => {
   const app = pureClient();
   const mark = (text, query) => app.run(`palHighlight(${JSON.stringify(text)}, ${JSON.stringify(query)})`);
@@ -409,8 +529,8 @@ test('accepted draft payload: when only for tasks, a date for tasks and checks (
   assert.deepEqual(payload('task'), { id: 'n1:0', type: 'task', description: '문구', when: 'later', due: null }, 'an emptied date is sent as null so the draft date is cleared');
   assert.deepEqual(payload('check', "when: 'today', due: '2026-10-02'"), { id: 'n1:0', type: 'check', description: '문구', due: '2026-10-02' }, 'checks never carry when');
   assert.deepEqual(payload('decision', "when: 'today', due: '2026-10-02'"), { id: 'n1:0', type: 'decision', description: '문구' }, 'decisions carry neither');
-  assert.deepEqual(['task', 'check', 'decision'].map(type => app.run(`wfDateLabel('${type}')`)), ['기한', '회신 기한', null],
-    '날짜 이름은 화면 어디서나 같다 — 할 일은 `기한`, 확인 대기만 `회신 기한`');
+  assert.deepEqual(['task', 'check', 'decision'].map(type => app.run(`wfDateLabel('${type}')`)), ['기한', '답변 받을 날', null],
+    '날짜 이름은 화면 어디서나 같다 — 할 일은 `기한`, 확인 대기만 `답변 받을 날`');
 });
 
 test('saves from the meeting review window stay quiet on success (its result card reports them) but failures are still announced', async () => {
@@ -484,11 +604,22 @@ function meetingRowEditing(app) {
 // 회의 줄의 ⋯가 여는 메뉴 — 레일의 오늘 미팅 줄과 회의 정리 카드 머리가 함께 쓴다(회의용으로 새로 만들지 않는다).
 test('meetingMenuSections lists 회의 정리 열기 then 프로젝트 연결, for both the rail row and the meeting card head', () => {
   const { app } = meetingRowClient(new Response('{"ok":true}'));
-  const labels = (event) => JSON.parse(app.run(`JSON.stringify(
-    meetingMenuSections(${JSON.stringify(event)}).map(section => section.map(entry => entry.label || entry.field)))`));
-  assert.deepEqual(labels({ title: '주간 운영 회의', start: '10:00' }), [['회의 정리 열기'], ['프로젝트 연결']]);
+  const labels = (event, opts = '') => JSON.parse(app.run(`JSON.stringify(
+    meetingMenuSections(${JSON.stringify(event)}${opts ? `, ${opts}` : ''}).map(section => section.map(entry => entry.label || entry.field)))`));
+  assert.deepEqual(labels({ title: '주간 운영 회의', start: '10:00' }), [['회의 정리 열기'], ['프로젝트 연결']],
+    '아직 기록되지 않은 회의는 탭에서 고를 수 없어 `회의 탭에서 열기`가 없다');
   assert.deepEqual(labels({ title: '가입 개선 킥오프', start: '09:00', project: { type: 'group', value: '가입 개선', label: '가입 개선' } }),
     [['회의 정리 열기'], ['프로젝트 연결']], '프로젝트가 이미 연결돼 있어도 메뉴 항목은 같다');
+  // 기록된 회의에는 탭으로 가는 길이 하나 더 붙는다. 레일 줄은 번호를 `workflowId`로 들고 온다.
+  assert.deepEqual(labels({ id: 'm1', title: '알림센터 인프라 협의', start: '16:00' }),
+    [['회의 정리 열기', '회의 탭에서 열기'], ['프로젝트 연결']]);
+  assert.deepEqual(labels({ workflowId: 'm1', title: '알림센터 인프라 협의', start: '16:00' }),
+    [['회의 정리 열기', '회의 탭에서 열기'], ['프로젝트 연결']]);
+  // 이미 그 자리에 있으면 그 자리로 가는 항목은 뺀다 — 회의 카드 머리, 회의 탭의 머리.
+  assert.deepEqual(labels({ id: 'm1', title: '알림센터 인프라 협의' }, '{ open: false }'),
+    [['회의 탭에서 열기'], ['프로젝트 연결']]);
+  assert.deepEqual(labels({ id: 'm1', title: '알림센터 인프라 협의' }, '{ open: false, toTab: false }'),
+    [['프로젝트 연결']]);
 });
 
 test('a meeting row reuses the list menus and only puts 문구 고치기 on top', () => {
@@ -507,8 +638,8 @@ test('a meeting row reuses the list menus and only puts 문구 고치기 on top'
     '할 일은 업무 줄의 메뉴를 그대로 쓴다');
   assert.deepEqual(menu('check').slice(1),
     listMenu("waitingMenuSections({ id: 'i1', type: 'check', description: '문구', status: 'to-do' }, document.createElement('div'))"),
-    '확인 대기는 확인 대기 줄의 메뉴를 그대로 쓴다(회신 기한 포함)');
-  assert.ok(menu('check').flat().includes('회신 기한'));
+    '확인 대기는 확인 대기 줄의 메뉴를 그대로 쓴다(답변 받을 날 포함)');
+  assert.ok(menu('check').flat().includes('답변 받을 날'));
   assert.deepEqual(menu('decision'), [['문구 고치기'], ['프로젝트'], ['삭제']], '결정에는 날짜가 없다');
   assert.ok(menu('task').flat().includes('기한'), '할 일의 날짜 이름은 `기한`이다');
 });

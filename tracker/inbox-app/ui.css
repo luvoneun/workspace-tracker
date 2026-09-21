@@ -917,9 +917,9 @@ body.batch-open .d-row { grid-template-columns: 22px 30px minmax(0, 1fr) var(--w
 .d-meta .m-pri .d-dot { display: none; }   /* 아이콘이 이미 말해 준다 */
 .d-meta .m-proj { display: none; }
 .d-meta .d-link { flex: none; }
-/* 레일 줄의 배지도 같은 모양 — 급한 말(`오늘까지`·`회신 기한 N일 지남`)과 `초안 N`만 세운다.
+/* 레일 줄의 배지도 같은 모양 — 급한 말(`오늘까지`·`답변 N일 늦음`)과 `초안 N`만 세운다.
    며칠째 기다리는지 같은 말은 배지가 아니라 색 글자다(.d-wrow .sub .k-warn). */
-.d-wrow .mt .k-neg, .d-wrow .mt .k-warn, .d-wrow .sub .bd, .d-mrow .ct:not(:empty) {
+.d-wrow .mt .k-neg, .d-wrow .mt .k-warn, .d-wrow .sub .bd, .d-mrow .ct:not(:empty), .d-mtrow .ct:not(:empty) {
   display: inline-flex; align-items: center; height: 23px; padding: 0 8px; border-radius: 6px;
   font-size: 12.5px; font-weight: 600; white-space: nowrap; pointer-events: none;
   background: var(--neutral-bg); color: var(--muted);
@@ -1219,7 +1219,7 @@ body.later-open .page { padding-right: 424px; }
 .d-dbody .d-meta:empty { display: none; }
 
 /* ---------- ⌘K 검색 팔레트 ----------
-   가림막 위에 떠 있는 한 겹. 641px 이상에서는 위에서 64px, 920×720 고정 크기(검색·회의 모아보기·오늘 신규 모두 같다). */
+   가림막 위에 떠 있는 한 겹. 위에서 84px, 폭 620px, 결과는 46px 한 줄이다. */
 .d-pal {
   position: fixed; inset: 0; z-index: 60; background: var(--scrim);
   display: grid; justify-items: center; align-items: start; padding: 84px 16px 16px;
@@ -1230,13 +1230,6 @@ body.later-open .page { padding-right: 424px; }
   background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r);
   box-shadow: var(--pop); overflow: hidden;
   animation: d-pal-in 140ms var(--ease);
-}
-/* 팔레트는 어느 필터에서나 같은 크기다 — 칩을 바꿀 때 창이 커졌다 작아졌다 하지 않게. 좁은 화면 규칙(≤640)은 그대로 이긴다. */
-@media (min-width: 641px) {
-  .d-pal { padding-top: 64px; }
-  .d-palbox { width: min(920px, 100vw - 48px); height: min(720px, 100dvh - 112px); max-height: none; }
-  .d-palbox .d-pres { min-height: 54px; padding: 6px 16px; gap: 16px; }
-  .d-palbox .d-pres.is-mtg { grid-template-columns: 62px 128px minmax(0, 1fr) auto; }
 }
 @keyframes d-pal-in { from { transform: translateY(-6px); opacity: 0; } to { transform: none; opacity: 1; } }
 .d-palin {
@@ -1296,9 +1289,12 @@ body.later-open .page { padding-right: 424px; }
 .d-mark { background: var(--mark); color: var(--text); border-radius: 3px; padding: 0 2px; }
 .d-palres .d-empty { padding: 26px var(--pad); }
 .d-palfoot {
-  flex: none; padding: 10px 20px; border-top: 1px solid var(--hair);
+  flex: none; display: flex; align-items: center; gap: 12px;
+  padding: 10px 20px; border-top: 1px solid var(--hair);
   font-size: 12px; color: var(--dim);
 }
+/* `회의` 칩일 때만 붙는 조용한 링크 — 훑어보는 일은 회의 탭이 맡는다 */
+.d-palfoot .d-link { margin-left: auto; }
 
 /* 팔레트에서 연 결정·아이디어 줄을 잠깐 밝힌다 */
 .is-flash { animation: d-flash 1.6s var(--ease) both; }
@@ -1454,6 +1450,43 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-rec.has-ac .ac .d-more { width: 28px; height: 28px; color: var(--dim); }
 .d-rec.has-ac:hover .ac .d-more, .d-rec.has-ac:focus-within .ac .d-more { color: var(--text); }
 
+/* ---------- 회의 탭 ----------
+   프로젝트 탭과 같은 뼈대다(왼쪽 목록 카드 + 오른쪽 내용). 왼쪽 목록은 `시각 · 제목 · 프로젝트 · 상태`가
+   한 줄에 들어와야 해서 프로젝트 목록보다 조금 넓다. 오른쪽은 줄 옆 회의 카드와 같은 내용이지만
+   떠 있는 카드가 아니라 페이지 안의 흰 카드로 선다. */
+#gridMeetings { grid-template-columns: 340px minmax(0, 1fr); gap: 0; align-items: start; min-height: calc(100dvh - var(--hdr) - 64px); }
+/* 목록 위의 조용한 토글 칩 + 프로젝트 고르기 */
+.d-mfil { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 6px 4px 8px; }
+.d-mfil .d-chip { height: 30px; border-radius: 999px; background: var(--neutral-bg); }
+.d-mfil .d-chip:hover { background: var(--hover); color: var(--text); }
+.d-mfil .d-chip.is-on, .d-mfil .d-chip.is-on:hover { background: var(--accent-soft); color: var(--accent-text); }
+.d-mfil .d-msel { width: 100%; max-width: none; height: 32px; }
+/* 날짜 소제목 — 묶음을 알려 주기만 하는 조용한 글자다(칩·숫자 없음) */
+.d-mtday { padding: 14px 10px 2px; font-size: 12.5px; font-weight: 600; color: var(--dim); }
+.d-mtday:first-child { padding-top: 4px; }
+.d-mtrow {
+  display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 8px;
+  width: 100%; min-height: 40px; padding: 5px 10px; border: 0; background: none; border-radius: 12px;
+  color: var(--text); font-family: inherit; text-align: left; cursor: pointer;
+  transition: background 170ms var(--ease);
+}
+.d-mtrow .t { font-size: 13px; font-weight: 700; color: var(--dim); font-variant-numeric: tabular-nums; }
+.d-mtrow .tw { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.d-mtrow .ti { font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 프로젝트는 제목 바로 뒤에 색 점 + 회색 글자로 붙는다(10번 규칙) */
+.d-mtrow .pj { display: inline-flex; align-items: center; gap: 4px; flex: none; max-width: 46%; font-size: 12.5px; color: var(--dim); white-space: nowrap; overflow: hidden; }
+.d-mtrow .pj .nm { overflow: hidden; text-overflow: ellipsis; }
+.d-mtrow .st { font-size: 12.5px; color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.d-mtrow .st:empty, .d-mtrow .ct:empty { display: none; }
+.d-mtrow:hover { background: var(--hover); }
+.d-mtrow[aria-current="true"] { background: var(--sel); }
+.d-mtrow[aria-current="true"] .ti { font-weight: 600; color: var(--accent-text); }
+.d-mtrow[aria-current="true"] .t, .d-mtrow[aria-current="true"] .st { color: var(--accent-text); }
+.d-mtrow[aria-current="true"]:hover { background: var(--sel-hover); }
+/* 오른쪽 자리: 떠 있는 카드가 아니라 페이지 안의 카드다 — 담기 바만 아래에 붙어 따라온다 */
+.d-detail.is-tab { max-width: 940px; }
+.d-detail.is-tab .d-dbar { bottom: 0; border-radius: 0 0 var(--r) var(--r); }
+
 /* ---------- 아이디어·결정 탭 ---------- */
 /* 두 열이 나란히 서고, 줄은 프로젝트 탭과 같은 `.d-rec`를 쓴다(결정만 체크 칸이 하나 더). */
 .d-reccols {
@@ -1598,14 +1631,16 @@ body.batch-open .d-toast { bottom: 76px; }
   input, select { max-width: 100%; }
   .desc-edit-input, .group-input { font-size: 16px; }
   #gridToday { grid-template-columns: minmax(0, 1fr); min-height: 0; }
-  /* 프로젝트 목록도 레일처럼 본문 위로 쌓인다(카드는 그대로, 가로로 흐른다) */
-  #gridProjects { grid-template-columns: minmax(0, 1fr); min-height: 0; }
-  #gridProjects .d-plist {
+  /* 프로젝트·회의 목록도 레일처럼 본문 위로 쌓인다(카드는 그대로, 가로로 흐른다) */
+  #gridProjects, #gridMeetings { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  #gridProjects .d-plist, #gridMeetings .d-plist {
     order: -1; position: static; max-height: none; overflow-x: auto; overflow-y: hidden;
     margin: 0 0 12px; padding: 8px; white-space: nowrap;
   }
   #gridProjects .d-plist .d-rhd { display: none; }
   #gridProjects .d-plist .d-prow { display: inline-grid; width: auto; margin-right: 4px; }
+  /* 회의 목록은 칩 줄과 날짜 소제목이 있어 가로로 흘리지 않고 세로로 그대로 둔다(높이만 줄인다) */
+  #gridMeetings .d-plist { overflow-x: hidden; overflow-y: auto; max-height: 40vh; white-space: normal; }
   /* 아이디어·결정은 한 열로 쌓인다(아이디어가 위) */
   .d-reccols { grid-template-columns: minmax(0, 1fr); gap: 20px; }
   .d-pmain { padding-left: 0; }
