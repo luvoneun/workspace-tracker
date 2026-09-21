@@ -4101,8 +4101,6 @@ function palRenderResults() {
 
 function palRender() {
   if (!palState || !palNodes) return;
-  // 회의 모아보기·오늘 신규는 찾는 창이 아니라 훑어보는 창이다 — 크게 연다.
-  palNodes.root.classList.toggle('is-browse', palState.type === 'meeting' || !!palState.newOnly);
   palFilterChips();
   palRenderResults();
 }
