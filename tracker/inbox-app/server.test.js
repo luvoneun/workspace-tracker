@@ -14,6 +14,9 @@ process.env.WORKSPACE_DATA_DIR = directory;
 // 읽지도 쓰지도 않게.
 const automationHome = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-automation-'));
 process.env.WORKSPACE_AUTOMATION_DIR = automationHome;
+// 설정도 없는 파일로 끼운다 — 운영 폴더에서 돌릴 때 실제 `workspace.config.json`(지라 주소·토큰 위치)을 읽어
+// 테스트가 실제 지라에 닿는 일이 없게. 설정이 필요한 테스트는 따로 띄운 서버에 자기 설정을 준다.
+process.env.WORKSPACE_CONFIG = path.join(directory, 'absent.config.json');
 const { server } = require('./server');
 const date = value => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
 const today = date(new Date());
