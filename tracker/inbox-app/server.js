@@ -26,7 +26,7 @@ function loadConfig() {
 
 const CONFIG = loadConfig();
 // 안 쓰는 도구는 꺼둔다. 꺼진 도구는 "동기화 안 됨" 경고를 띄우지 않는다.
-const USES = { slack: true, calendar: true, jira: true, ...(CONFIG.integrations || {}) };
+const USES = { slack: true, calendar: true, jira: true, tiro: true, ...(CONFIG.integrations || {}) };
 
 const PORT = Number(process.env.WORKSPACE_PORT || CONFIG.server?.port || 4321);
 // localhost는 항상 열고, extraHost가 있으면 그 주소로도 추가로 연다 (폰·다른 기기용).
@@ -482,9 +482,13 @@ function getSlackSync() {
   }
 }
 
-// 자동화 로그 폴더 — 앱 설치 스크립트가 항상 이 경로에 고정해서 쓴다.
+// 자동화 폴더 — 앱 설치 스크립트가 항상 이 경로에 고정해서 쓴다.
+// 테스트·화면 확인용 픽스처는 WORKSPACE_AUTOMATION_DIR로 임시 폴더를 끼워 실제 홈 폴더를 건드리지 않는다.
+function automationDir() {
+  return process.env.WORKSPACE_AUTOMATION_DIR || path.join(os.homedir(), '.local/share/workspace-automation');
+}
 function automationLogDir() {
-  return path.join(os.homedir(), '.local/share/workspace-automation/logs');
+  return path.join(automationDir(), 'logs');
 }
 
 function tailLines(filePath, maxLines) {
@@ -525,6 +529,8 @@ function getAutomationStatus() {
     { key: 'slack', name: '슬랙 캡처', log: 'slack-capture.log', used: USES.slack },
     { key: 'calendar', name: '캘린더 동기화', log: 'calendar-sync.log', used: USES.calendar },
     { key: 'jira', name: '지라 동기화', log: 'jira-sync.log', used: USES.jira },
+    // 일정표 없이 앱의 버튼을 눌렀을 때만 도는 자동화다(DECISIONS 2026-09-24). 상태·로그는 나머지와 같은 자리에서 본다.
+    { key: 'tiro', name: '미팅 노트 가져오기', log: 'tiro-sync.log', used: USES.tiro },
   ];
   return specs.filter((s) => s.used).map((spec) => {
     const lines = tailLines(path.join(logDir, spec.log), 500);
@@ -541,6 +547,124 @@ function getAutomationStatus() {
       tail: lines.filter((l) => l.trim()).slice(-60),
     };
   });
+}
+
+// ---------- 미팅 노트 가져오기 (티로) ----------
+// 서버는 아무것도 실행하지 않는다. 요청 표시 파일 하나를 쓰고, 실행은 launchd 에이전트가
+// 기존 run-task.sh로 한다(DECISIONS 2026-09-24). 진행 상태는 그 실행이 남긴 로그로만 읽는다.
+const MEETING_NOTES_LOG = 'tiro-sync.log';
+const MEETING_NOTES_START_GRACE_MS = 60 * 1000;   // 이 안에 시작 줄이 없으면 자동 실행이 등록되지 않은 것으로 본다
+const MEETING_NOTES_RUN_LIMIT_MS = 35 * 60 * 1000; // run-task.sh의 30분 제한보다 넉넉하게
+const MEETING_NOTES_NOT_REGISTERED = '자동 실행이 등록되지 않은 것 같아요. setup.sh를 다시 실행해 주세요.';
+
+function meetingNotesRequestFile() {
+  return path.join(automationDir(), 'requests', 'tiro-sync.request');
+}
+
+// 로그의 실행 블록을 시각과 함께 늘어놓는다. parseAutomationLog은 "끝난 블록"만 돌려주므로
+// (형식은 그대로 둔다) 여기서 "시작 시각"과 "아직 끝나지 않은 블록"만 최소로 보탠다.
+function meetingNotesRuns(lines) {
+  const startRe = /^─+ (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \S+ 시작$/;
+  const endRe = /^─+ (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \S+ 종료 \(exit (-?\d+)\)$/;
+  const runs = [];
+  let open = null;
+  lines.forEach((line) => {
+    const started = startRe.exec(line);
+    if (started) { open = { startedAt: started[1], finishedAt: null, exitCode: null }; runs.push(open); return; }
+    const ended = endRe.exec(line);
+    if (!ended) return;
+    if (!open) { open = { startedAt: null, finishedAt: null, exitCode: null }; runs.push(open); }
+    open.finishedAt = ended[1];
+    open.exitCode = Number(ended[2]);
+    open = null;
+  });
+  return runs;
+}
+
+// 로그 시각(`YYYY-MM-DD HH:MM:SS`, 로컬)을 밀리초로. 로그는 초 단위라 요청 시각과 견줄 때 2초를 봐준다.
+const meetingNotesTime = text => (text ? new Date(text.replace(' ', 'T')).getTime() : NaN);
+
+function meetingNotesStatus() {
+  if (!USES.tiro) return { used: false, state: 'off' };
+  let request = null;
+  try {
+    const parsed = JSON.parse(nativeFs.readFileSync(meetingNotesRequestFile(), 'utf8'));
+    if (parsed && typeof parsed === 'object' && typeof parsed.requestedAt === 'string') request = parsed;
+  } catch { request = null; }
+  const lines = tailLines(path.join(automationLogDir(), MEETING_NOTES_LOG), 500);
+  const events = parseAutomationLog(lines);
+  const blocks = events.filter(event => event.kind === 'run' || event.kind === 'fail');
+  const summaryAt = time => (blocks.find(event => event.time === time) || {}).text || '';
+  const last = blocks[blocks.length - 1] || null;
+  const base = {
+    used: true,
+    state: 'idle',
+    requestedAt: request ? request.requestedAt : null,
+    scope: request && request.scope === 'meeting' ? 'meeting' : request ? 'today' : null,
+    meeting: request && request.meeting ? request.meeting : null,
+    startedAt: null,
+    finishedAt: null,
+    summary: null,
+    // 버튼 옆 조용한 한 줄(`오늘 14:20에 가져왔어요`)이 쓰는 마지막 실행 기록.
+    lastRunAt: last ? last.time : null,
+    lastKind: last ? last.kind : null,
+  };
+  if (!request) return base;
+  const requestedAt = Date.parse(request.requestedAt);
+  if (!Number.isFinite(requestedAt)) return base;
+  const run = meetingNotesRuns(lines).filter(item => meetingNotesTime(item.startedAt) >= requestedAt - 2000).pop() || null;
+  const now = Date.now();
+  if (!run) {
+    return now - requestedAt > MEETING_NOTES_START_GRACE_MS
+      ? { ...base, state: 'failed', summary: MEETING_NOTES_NOT_REGISTERED }
+      : { ...base, state: 'requested' };
+  }
+  const startedAt = run.startedAt;
+  if (!run.finishedAt) {
+    return now - meetingNotesTime(startedAt) > MEETING_NOTES_RUN_LIMIT_MS
+      ? { ...base, state: 'failed', startedAt, summary: '35분이 넘도록 끝나지 않았어요. 설정 > 상태에서 로그를 확인해 주세요.' }
+      : { ...base, state: 'running', startedAt };
+  }
+  const summary = summaryAt(run.finishedAt);
+  return {
+    ...base,
+    state: run.exitCode === 0 ? 'done' : 'failed',
+    startedAt,
+    finishedAt: run.finishedAt,
+    summary: summary || (run.exitCode === 0 ? '완료' : `실패 (exit ${run.exitCode})`),
+  };
+}
+
+// 요청 표시 파일 쓰기. 회의 값은 "앱이 아는 회의"에서 그대로 옮겨 적는다 — 임의의 글자가
+// 자동화 프롬프트로 흘러가지 않게, 사람이 보낸 글자는 검증과 대조에만 쓴다.
+function writeMeetingNotesRequest(body) {
+  if (!USES.tiro) { const error = new Error('미팅 노트 가져오기를 쓰지 않도록 설정돼 있어요.'); error.status = 404; throw error; }
+  const current = meetingNotesStatus();
+  if (current.state === 'requested' || current.state === 'running') {
+    const error = new Error('지금 가져오는 중이에요.');
+    error.status = 409;
+    throw error;
+  }
+  const scope = body && body.scope;
+  if (scope !== 'today' && scope !== 'meeting') throw new Error('무엇을 가져올지 확인해 주세요.');
+  const payload = { requestedAt: new Date().toISOString(), scope };
+  if (scope === 'meeting') {
+    const wanted = body.meeting;
+    if (!wanted || typeof wanted !== 'object') throw new Error('회의를 확인해 주세요.');
+    const { date, start, title } = wanted;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '') || !/^\d{2}:\d{2}$/.test(start || '')) throw new Error('회의 날짜와 시각을 확인해 주세요.');
+    if (typeof title !== 'string' || !title.trim() || title.length > 200 || /[\r\n]/.test(title)) throw new Error('회의 제목을 확인해 주세요.');
+    const today = todayLocal();
+    if (date > today) throw new Error('아직 열리지 않은 회의예요.');
+    if (date === today && start > new Date().toTimeString().slice(0, 5)) throw new Error('아직 시작하지 않은 회의예요.');
+    const known = workflows.snapshot().meetings.find(event => event.date === date && event.start === start && event.title === title);
+    if (!known) throw new Error('앱이 아는 회의가 아니에요.');
+    payload.meeting = { date: known.date, start: known.start, end: /^\d{2}:\d{2}$/.test(known.end || '') ? known.end : '', title: known.title };
+  }
+  const file = meetingNotesRequestFile();
+  nativeFs.mkdirSync(path.dirname(file), { recursive: true });
+  nativeFs.writeFileSync(file, `${JSON.stringify(payload)}\n`);
+  return { ok: true, ...meetingNotesStatus() };
 }
 
 function getJiraIssueCache() {
@@ -1167,6 +1291,27 @@ const handleRequest = (req, res) => {
     return;
   }
 
+  // 미팅 노트 가져오기 — 조회는 파일을 쓰지 않고(로그·요청 표시 파일을 읽기만),
+  // 요청은 표시 파일 하나만 쓴다. 프로세스는 띄우지 않는다.
+  if (url.pathname === '/api/meeting-notes/status' && req.method === 'GET') {
+    if (!USES.tiro) { res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ ok: false, error: '미팅 노트 가져오기를 쓰지 않도록 설정돼 있어요.' })); return; }
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify(meetingNotesStatus()));
+    return;
+  }
+
+  if (url.pathname === '/api/meeting-notes/request' && req.method === 'POST') {
+    readBody(req).then(body => {
+      const result = writeMeetingNotesRequest(body);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify(result));
+    }).catch(error => {
+      res.writeHead(error.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: error.message, code: error.code }));
+    });
+    return;
+  }
+
   if (url.pathname === '/api/items' && req.method === 'GET') {
     // Automatic drafts are a read-only projection. Edited reports are saved explicitly.
     const allDecisions = getDecisions();
@@ -1198,6 +1343,8 @@ const handleRequest = (req, res) => {
       suggestions: getTodaySuggestions(),
       reportRefs: getReportRefs(),
       workflows: workflows.snapshot(),
+      // 미팅 노트 가져오기의 지금 상태 — 페이지를 새로 열어도 진행 중인 가져오기가 이어지게 첫 조회에 함께 싣는다.
+      meetingNotes: meetingNotesStatus(),
       storage,
       today: todayLocal(),
       ...getTodayActivityCounts(),

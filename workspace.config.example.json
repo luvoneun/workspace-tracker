@@ -3,7 +3,8 @@
   "integrations": {
     "slack": true,
     "calendar": true,
-    "jira": true
+    "jira": true,
+    "tiro": true
   },
   "slack": {
     "workspaceUrl": "https://내회사.slack.com",

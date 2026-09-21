@@ -1651,6 +1651,8 @@ async function load() {
     }
   }
 
+  // 미팅 노트 가져오기의 상태는 목록과 함께 온다 — 페이지를 새로 열어도 진행 중이면 같은 표시로 이어진다.
+  meetingNotesApply(data.meetingNotes);
   jiraIssuesCache = data.jiraIssues || [];
   jiraIssuesByKey = new Map(jiraIssuesCache.map(issue => [issue.key, issue]));
   customGroupsCache = data.customGroups || [];
@@ -1842,7 +1844,7 @@ function renderCalendar(calendar) {
 
     const acts = document.createElement('span');
     acts.className = 'ac';
-    acts.appendChild(uiMoreButton(`${event.title} — 더 보기`, () => meetingMenuSections(event)));
+    acts.appendChild(uiMoreButton(`${event.title} — 더 보기`, () => meetingMenuSections(event, { fetchAll: true })));
     row.appendChild(acts);
 
     list.appendChild(row);
@@ -1854,7 +1856,9 @@ function renderCalendar(calendar) {
 // 프로젝트를 바꾼 뒤에는 load()가 레일 줄과 열려 있는 카드 머리를 함께 다시 그린다.
 // 이미 열려 있는 자리에서는 그 자리로 가는 항목을 뺀다: 회의 카드는 `회의 정리 열기`를(open: false),
 // 회의 탭은 거기에 더해 `회의 탭에서 열기`를(toTab: false) 빼고 연다.
-function meetingMenuSections(event, { open = true, toTab = true } = {}) {
+// `fetchAll`은 오늘 탭 레일의 오늘 미팅 줄에서만 켠다 — `오늘 것 모두 가져오기`를 레일에서도 누를 수 있게
+// (회의 탭 머리의 버튼과 같은 함수를 쓴다).
+function meetingMenuSections(event, { open = true, toTab = true, fetchAll = false } = {}) {
   // 레일의 캘린더 줄에는 번호가 `workflowId`로 온다 — 흐름 기록에 있는 회의만 탭에서 고를 수 있다.
   const tabId = event.id || event.workflowId || null;
   const setProject = async (projectKey) => {
@@ -1868,6 +1872,13 @@ function meetingMenuSections(event, { open = true, toTab = true } = {}) {
   const actions = [];
   if (open) actions.push({ label: '회의 정리 열기', onClick: () => openMeetingPanel(event) });
   if (toTab && tabId) actions.push({ label: '회의 탭에서 열기', onClick: () => openMeetingsTab(tabId) });
+  if (fetchAll && meetingNotesState.used !== false) {
+    actions.push({
+      label: '오늘 것 모두 가져오기',
+      disabled: meetingNotesBusy(),
+      onClick: () => meetingNotesStart('today'),
+    });
+  }
   return [
     ...(actions.length ? [actions] : []),
     [{
@@ -3739,6 +3750,167 @@ function panelCheck({ item, detail }, box) {
 }
 
 // ---------- 회의 정리 패널 ----------
+/* ---------- 미팅 노트 가져오기 (티로) ----------
+   자동으로는 가져오지 않는다 — 티로에서 사람이 먼저 검수한 뒤 버튼을 눌렀을 때만이다(DECISIONS 2026-09-24).
+   앱 서버는 요청 표시 파일 하나만 남기고 실제 수집은 맥 스케줄러가 한다. 그래서 화면이 하는 일은 셋뿐이다:
+   누른 그 버튼만 `가져오는 중…`으로 바꾸고, 5초마다 상태를 되묻고, 끝나면 목록을 다시 그리며 한 번 알린다. */
+const MEETING_NOTES_POLL_MS = 5000;
+const MEETING_NOTES_WATCH_MS = 40 * 60 * 1000;
+let meetingNotesState = { used: true, state: 'idle' };
+let meetingNotesTimer = null;
+let meetingNotesWatchUntil = 0;
+// 지금 화면에 그려져 있는 가져오기 버튼들. 상태가 바뀌면 글자·활성만 바꾼다(회의 화면을 통째로
+// 다시 그리면 고치던 초안 문구가 날아간다).
+const meetingNotesButtons = new Set();
+
+const meetingNotesBusy = () => ['requested', 'running'].includes(meetingNotesState.state);
+const meetingNotesEventKey = event => (event ? `${event.date || ''} ${event.start || ''} ${event.title || ''}` : '');
+// 지금 도는 요청이 어느 버튼의 것인가 — `today`(오늘 것 모두) 또는 회의 하나.
+function meetingNotesRunningKey() {
+  if (!meetingNotesBusy()) return null;
+  return meetingNotesState.scope === 'meeting' ? meetingNotesEventKey(meetingNotesState.meeting) : 'today';
+}
+// 이 회의의 미팅 노트를 이미 가져왔는지. 노트를 한 번 가져오면 초안을 다 검토해 0개가 되어도
+// 서버가 그 회의에 노트 목록(tiroNotes)을 실어 준다 — 그래서 초안 수가 아니라 이 목록의 유무로 본다.
+const meetingNotesHasNote = event => Array.isArray(event && event.tiroNotes);
+// 회의마다 붙는 버튼은 아직 노트가 없고 이미 시작한 회의에만 — 지난 회의도 되고, 시작 전 회의에는 없다.
+function meetingNotesCanFetch(event) {
+  if (meetingNotesState.used === false) return false;
+  if (!event || !event.date || !event.start || meetingNotesHasNote(event)) return false;
+  const today = todayStr();
+  if (event.date > today) return false;
+  return !(event.date === today && event.start > nowHHMM());
+}
+
+function meetingNotesApplyButton(entry) {
+  const mine = meetingNotesRunningKey() === entry.key;
+  entry.el.textContent = mine ? '가져오는 중…' : entry.label;
+  entry.el.disabled = meetingNotesBusy();
+  entry.el.setAttribute('aria-busy', String(mine));
+}
+function meetingNotesSyncButtons() {
+  [...meetingNotesButtons].forEach((entry) => {
+    if (entry.el.isConnected === false) { meetingNotesButtons.delete(entry); return; }
+    meetingNotesApplyButton(entry);
+  });
+}
+// target: 'today' 또는 회의 하나. 두 버튼이 같은 길을 쓴다.
+function meetingNotesButton(label, target, className = 'd-btn sm') {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = className;
+  const entry = {
+    el: button, label,
+    scope: target === 'today' ? 'today' : 'meeting',
+    meeting: target === 'today' ? null : target,
+    key: target === 'today' ? 'today' : meetingNotesEventKey(target),
+  };
+  button.addEventListener('click', () => meetingNotesStart(entry.scope, entry.meeting));
+  meetingNotesButtons.add(entry);
+  meetingNotesApplyButton(entry);
+  return button;
+}
+
+// scope: 'today'(오늘 것 모두) 또는 'meeting'(그 회의 하나). 버튼과 메뉴 항목이 같은 길을 쓴다.
+async function meetingNotesStart(scope, event) {
+  if (meetingNotesBusy()) return;
+  const meeting = scope === 'meeting' && event
+    ? { date: event.date, start: event.start, end: event.end || '', title: event.title }
+    : null;
+  const body = meeting ? { scope: 'meeting', meeting } : { scope: 'today' };
+  // 먼저 이 버튼을 진행 중으로 바꾼다 — 두 번 눌러 요청이 겹치지 않게(서버도 409로 막는다).
+  meetingNotesState = { ...meetingNotesState, state: 'requested', scope: body.scope, meeting };
+  meetingNotesSyncButtons();
+  try {
+    const response = await request('/api/meeting-notes/request', {
+      method: 'POST', quiet: true,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    meetingNotesApply(await response.json());
+  } catch (error) {
+    meetingNotesState = { ...meetingNotesState, state: 'idle', scope: null, meeting: null };
+    meetingNotesSyncButtons();
+    showNotice(error && error.message ? error.message : '미팅 노트를 가져오지 못했어요', true);
+    return;
+  }
+  meetingNotesWatchUntil = Date.now() + MEETING_NOTES_WATCH_MS;
+  meetingNotesSchedule();
+}
+
+// 상태를 화면에 반영한다. 진행 중이던 것이 방금 끝났으면 true를 돌려주고, 알림은 부르는 쪽이 load() 뒤에 띄운다.
+function meetingNotesApply(status) {
+  if (!status || typeof status !== 'object' || typeof status.state !== 'string') return false;
+  const before = meetingNotesState.state;
+  meetingNotesState = status;
+  meetingNotesSyncButtons();
+  if (meetingNotesBusy()) {
+    if (!meetingNotesWatchUntil) meetingNotesWatchUntil = Date.now() + MEETING_NOTES_WATCH_MS;
+    meetingNotesSchedule();
+  } else {
+    meetingNotesWatchUntil = 0;
+    clearTimeout(meetingNotesTimer);
+    meetingNotesTimer = null;
+  }
+  return ['done', 'failed'].includes(status.state) && ['requested', 'running'].includes(before);
+}
+
+function meetingNotesSchedule() {
+  clearTimeout(meetingNotesTimer);
+  meetingNotesTimer = null;
+  if (!meetingNotesBusy() || Date.now() > meetingNotesWatchUntil) return;
+  // 숨은 탭에서는 묻지 않고 쉰다. 돌아오면 visibilitychange가 다시 깨운다.
+  if (typeof document !== 'undefined' && document.hidden) return;
+  meetingNotesTimer = setTimeout(meetingNotesPoll, MEETING_NOTES_POLL_MS);
+}
+
+async function meetingNotesPoll() {
+  meetingNotesTimer = null;
+  let status = null;
+  try {
+    const response = await fetch('/api/meeting-notes/status');
+    if (response.ok) status = await response.json();
+  } catch { /* 잠깐 끊긴 것은 다음 물음에서 다시 본다 */ }
+  if (!status) { meetingNotesSchedule(); return; }
+  if (!meetingNotesApply(status)) return;
+  await load();
+  meetingNotesAnnounce(status);
+}
+
+// 로그에 남은 보고문은 길다 — 알림 뒤에 조용히 붙일 만큼만 자른다.
+const meetingNotesSummary = (text) => {
+  if (typeof text !== 'string') return '';
+  const clean = text.replace(/\s+/g, ' ').trim();
+  return clean.length > 80 ? `${clean.slice(0, 80)}…` : clean;
+};
+const meetingNotesFind = meeting => ((typeof workflowData === 'object' && workflowData ? workflowData.meetings : null) || [])
+  .find(event => meetingNotesEventKey(event) === meetingNotesEventKey(meeting)) || null;
+
+function meetingNotesAnnounce(status) {
+  if (status.state === 'failed') {
+    showNotice('미팅 노트를 가져오지 못했어요', true, null,
+      { label: '자세히', onClick: () => { if (typeof settingsOpen === 'function') settingsOpen('status', 'tiro'); } });
+    return;
+  }
+  if (status.scope === 'meeting') {
+    const event = meetingNotesFind(status.meeting);
+    // 끝났는데도 이 회의에 노트가 없으면 그 시간에 녹음된 것이 없었던 것이다(오류가 아니다).
+    if (!meetingNotesHasNote(event)) { showNotice('이 회의 시간에 녹음된 노트를 찾지 못했어요'); return; }
+    const count = (event.drafts || []).length;
+    showNotice(count ? `미팅 노트를 가져왔어요 · 초안 ${count}개` : '미팅 노트를 가져왔어요');
+    return;
+  }
+  const summary = meetingNotesSummary(status.summary);
+  showNotice(summary ? `미팅 노트를 가져왔어요 · ${summary}` : '미팅 노트를 가져왔어요');
+}
+
+// 버튼 옆 조용한 한 줄. 오늘 가져온 기록이 있을 때만 — 어제 것은 알려 줄 필요가 없다.
+function meetingNotesLastText() {
+  const at = meetingNotesState.lastRunAt || '';
+  if (!at.startsWith(todayStr()) || meetingNotesState.lastKind !== 'run') return '';
+  return `오늘 ${at.slice(11, 16)}에 가져왔어요`;
+}
+
 // 업무 상세와 같은 자리에서 회의를 정리한다: 결과 카드 → AI 초안 검토 → 이 회의에서 나온 것 →
 // 이전 회차의 미해결 항목 → 직접 적어 담기 → 기존 항목 연결. 내용이 없는 구역은 아예 두지 않는다.
 // 프로젝트·반복 회의 입력은 두지 않는다(DECISIONS 화면) — 프로젝트는 오늘 미팅 줄의 더보기에서 바꾼다.
@@ -3859,6 +4031,14 @@ function panelMeeting(event, box, host = MEETING_HOST_CARD) {
   error.className = 'd-derr';
   error.setAttribute('role', 'alert');
   box.appendChild(error);
+
+  // 이 회의의 미팅 노트를 아직 안 가져왔으면 머리 아래 조용한 버튼 하나(지난 회의에서도 된다).
+  if (meetingNotesCanFetch(event)) {
+    const get = document.createElement('div');
+    get.className = 'd-dget';
+    get.appendChild(meetingNotesButton('이 회의의 미팅 노트 가져오기', event));
+    box.appendChild(get);
+  }
 
   if (!linked) {
     const note = document.createElement('div');
@@ -4477,7 +4657,22 @@ function renderMeetings() {
   headCount.className = 'n num';
   headCount.textContent = rows.length;
   head.append(headName, headCount);
-  listEl.append(head, meetingsTabFilters(meetings));
+  // 머리 오른쪽 끝의 조용한 버튼 — 오늘 회의의 미팅 노트를 한꺼번에.
+  const notesLast = [];
+  if (meetingNotesState.used !== false) {
+    const spacer = document.createElement('span');
+    spacer.className = 'sp';
+    head.append(spacer, meetingNotesButton('오늘 것 모두 가져오기', 'today'));
+    // 그 버튼 아래에 오늘 가져온 기록 한 줄(목록 칸이 좁아 머리줄에 같이 두면 글자가 잘린다).
+    const last = meetingNotesLastText();
+    if (last) {
+      const note = document.createElement('div');
+      note.className = 'd-mtlast';
+      note.textContent = last;
+      notesLast.push(note);
+    }
+  }
+  listEl.append(head, ...notesLast, meetingsTabFilters(meetings));
 
   // 날짜별 조용한 소제목 — 묶음을 알려 주기만 한다(개수·칩 없음).
   let lastDate = null;
@@ -6313,7 +6508,10 @@ document.addEventListener('touchcancel', () => { if (pulling) resetPull(true); e
 
 // 다른 창 갔다가 돌아오면 최신 상태로
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden && !isTyping()) { load(); fetchAutomationStatus(); }
+  if (document.hidden) return;
+  // 숨은 동안 쉬던 미팅 노트 상태 묻기를 다시 깨운다(글을 쓰는 중이어도 이건 이어져야 한다).
+  meetingNotesSchedule();
+  if (!isTyping()) { load(); fetchAutomationStatus(); }
 });
 
 // 계속 띄워둔 채로도 뒤처지지 않게

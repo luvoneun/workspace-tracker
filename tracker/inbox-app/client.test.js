@@ -2350,3 +2350,111 @@ test('`닫기`는 줄만 내린다 — 체크는 이미 저장됐으므로 아�
   assert.equal(app.run('waitingNextId'), null);
   assert.deepEqual(sent, []);
 });
+
+// ---------- 미팅 노트 가져오기 ----------
+// 화면이 하는 일은 셋뿐이다: 누른 그 버튼만 `가져오는 중…`으로 바꾸고, 상태를 되묻고,
+// 끝나면 목록을 다시 그리며 한 번 알린다(서버는 요청 표시 파일만 쓴다 — DECISIONS 2026-09-24).
+function meetingNotesClient(queue) {
+  const app = workflowsClient();
+  const sent = [];
+  app.context.fetch = async (url, init) => {
+    sent.push({ url, body: init && init.body ? JSON.parse(init.body) : null });
+    const next = queue.shift();
+    return new Response(JSON.stringify(next || {}), { status: next && next.httpStatus ? next.httpStatus : 200 });
+  };
+  app.run('workflowData = { items: [], meetings: [] }; wfIndexData();');
+  app.run("var loaded = 0; load = async () => { loaded += 1; };");
+  return { app, sent };
+}
+const meetingNotesDay = days => {
+  const value = new Date();
+  value.setDate(value.getDate() + days);
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+};
+
+test('미팅 노트 버튼은 아직 노트가 없고 이미 시작한 회의에만 선다', () => {
+  const { app } = meetingNotesClient([]);
+  app.run("meetingNotesApply({ used: true, state: 'idle' })");
+  const can = event => app.run(`meetingNotesCanFetch(${JSON.stringify(event)})`);
+  const past = { date: meetingNotesDay(-3), start: '10:00', end: '11:00', title: '지난 주간 싱크' };
+  assert.equal(can(past), true, '지난 회의에서도 가져올 수 있다');
+  assert.equal(can({ ...past, tiroNotes: ['https://tiro.ooo/n/1'] }), false, '이미 가져온 회의에는 그리지 않는다');
+  assert.equal(can({ ...past, tiroNotes: [] }), false, '노트는 있고 링크만 없는 회의도 마찬가지다');
+  assert.equal(can({ ...past, date: meetingNotesDay(1) }), false, '미래 회의에는 그리지 않는다');
+  // 23:59에 돌리면 그 회의도 이미 시작한 것이라 그때만 건너뛴다
+  if (new Date().getHours() < 23) assert.equal(can({ date: meetingNotesDay(0), start: '23:59', title: '아직 안 열린 회의' }), false, '아직 시작하지 않았으면 그리지 않는다');
+  assert.equal(can({ date: meetingNotesDay(0), start: '00:00', title: '이미 시작한 회의' }), true);
+  // 쓰지 않도록 꺼 두면 아무 데도 그리지 않는다
+  app.run("meetingNotesApply({ used: false, state: 'off' })");
+  assert.equal(can(past), false);
+});
+
+test('누른 버튼만 `가져오는 중…`이 되고 다른 가져오기 버튼은 눌리지 않는다', async () => {
+  const meeting = { date: meetingNotesDay(-2), start: '14:00', end: '15:00', title: '결제 리뉴얼 PRD 리뷰' };
+  const { app, sent } = meetingNotesClient([{ ok: true, used: true, state: 'requested', scope: 'meeting', meeting }]);
+  app.run("meetingNotesApply({ used: true, state: 'idle' })");
+  const all = app.run("meetingNotesButton('오늘 것 모두 가져오기', 'today')");
+  const one = app.run(`meetingNotesButton('이 회의의 미팅 노트 가져오기', ${JSON.stringify(meeting)})`);
+  assert.equal(one.textContent, '이 회의의 미팅 노트 가져오기');
+  assert.equal(one.disabled, false);
+
+  await one.listeners.click();
+  assert.deepEqual(sent, [{ url: '/api/meeting-notes/request', body: { scope: 'meeting', meeting } }]);
+  assert.equal(one.textContent, '가져오는 중…', '누른 버튼만 진행 표시가 된다');
+  assert.equal(one.disabled, true);
+  assert.equal(all.textContent, '오늘 것 모두 가져오기');
+  assert.equal(all.disabled, true, '동시에 하나만 — 다른 버튼은 눌리지 않는다');
+
+  // 진행 중에는 다시 눌러도 요청이 한 번 더 나가지 않는다
+  await all.listeners.click();
+  assert.equal(sent.length, 1);
+});
+
+test('가져오기가 끝나면 목록을 다시 그리고 한 번만 알린다', async () => {
+  const { app } = meetingNotesClient([{ used: true, state: 'done', scope: 'today', summary: '노트 2개, 초안 5개를 남겼습니다' }]);
+  app.run("meetingNotesApply({ used: true, state: 'running', scope: 'today' })");
+  const button = app.run("meetingNotesButton('오늘 것 모두 가져오기', 'today')");
+  assert.equal(button.textContent, '가져오는 중…', '페이지를 새로 열어도 진행 중이면 같은 표시로 이어진다');
+  await app.run('meetingNotesPoll()');
+  assert.equal(app.run('loaded'), 1, '끝나면 load()로 다시 그린다');
+  assert.match(app.nodes.get('liveRegion').textContent, /^미팅 노트를 가져왔어요 · 노트 2개, 초안 5개를 남겼습니다/);
+  assert.equal(button.textContent, '오늘 것 모두 가져오기');
+  assert.equal(button.disabled, false);
+  // 같은 상태를 다시 읽어도 알림은 한 번뿐이다
+  app.nodes.get('liveRegion').textContent = '';
+  app.run("meetingNotesApply({ used: true, state: 'done', scope: 'today', summary: '노트 2개' })");
+  assert.equal(app.nodes.get('liveRegion').textContent, '');
+});
+
+test('회의 하나를 가져오면 그 회의의 초안 수로 알리고, 없으면 못 찾았다고 알린다', async () => {
+  const meeting = { date: meetingNotesDay(-1), start: '16:00', end: '17:00', title: '알림센터 인프라 협의' };
+  const done = { used: true, state: 'done', scope: 'meeting', meeting };
+  const { app } = meetingNotesClient([done, done]);
+  app.run("meetingNotesApply({ used: true, state: 'running', scope: 'meeting', meeting: " + JSON.stringify(meeting) + ' })');
+  await app.run('meetingNotesPoll()');
+  assert.match(app.nodes.get('liveRegion').textContent, /이 회의 시간에 녹음된 노트를 찾지 못했어요/);
+
+  app.run(`workflowData = { items: [], meetings: [{ id: 'm9', ...${JSON.stringify(meeting)}, tiroNotes: ['https://tiro.ooo/n/9'], drafts: [{ id: 'd1' }, { id: 'd2' }] }] }; wfIndexData();`);
+  app.run("meetingNotesApply({ used: true, state: 'running', scope: 'meeting', meeting: " + JSON.stringify(meeting) + ' })');
+  await app.run('meetingNotesPoll()');
+  assert.match(app.nodes.get('liveRegion').textContent, /^미팅 노트를 가져왔어요 · 초안 2개/);
+});
+
+test('실패하면 오류 알림에 `자세히`가 붙는다', async () => {
+  const { app } = meetingNotesClient([{ used: true, state: 'failed', scope: 'today', summary: '자동 실행이 등록되지 않은 것 같아요.' }]);
+  app.run("meetingNotesApply({ used: true, state: 'requested', scope: 'today' })");
+  await app.run('meetingNotesPoll()');
+  const region = app.nodes.get('liveRegion');
+  assert.match(region.textContent, /미팅 노트를 가져오지 못했어요/);
+  assert.equal(region.children.some(node => node && node.textContent === '자세히'), true);
+});
+
+test('버튼 옆 조용한 기록은 오늘 성공한 실행이 있을 때만 적는다', () => {
+  const { app } = meetingNotesClient([]);
+  app.run(`meetingNotesApply({ used: true, state: 'done', lastRunAt: '${meetingNotesDay(0)} 14:20:05', lastKind: 'run' })`);
+  assert.equal(app.run('meetingNotesLastText()'), '오늘 14:20에 가져왔어요');
+  app.run(`meetingNotesApply({ used: true, state: 'failed', lastRunAt: '${meetingNotesDay(0)} 14:20:05', lastKind: 'fail' })`);
+  assert.equal(app.run('meetingNotesLastText()'), '');
+  app.run(`meetingNotesApply({ used: true, state: 'done', lastRunAt: '${meetingNotesDay(-1)} 14:20:05', lastKind: 'run' })`);
+  assert.equal(app.run('meetingNotesLastText()'), '', '어제 것은 적지 않는다');
+});

@@ -10,6 +10,10 @@ const { createHash } = require('node:crypto');
 process.env.TZ = 'Asia/Seoul';
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-regression-'));
 process.env.WORKSPACE_DATA_DIR = directory;
+// 자동화 로그·요청 폴더도 임시 폴더로 끼운다 — 테스트가 실제 홈 폴더(`~/.local/share/workspace-automation`)를
+// 읽지도 쓰지도 않게.
+const automationHome = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-automation-'));
+process.env.WORKSPACE_AUTOMATION_DIR = automationHome;
 const { server } = require('./server');
 const date = value => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
 const today = date(new Date());
@@ -96,6 +100,7 @@ before(async () => {
 after(async () => {
   await new Promise(resolve => server.close(resolve));
   fs.rmSync(directory, { recursive: true });
+  fs.rmSync(automationHome, { recursive: true, force: true });
 });
 beforeEach(() => {
   fs.writeFileSync(path.join(directory, '.workflow.json'), JSON.stringify({ items: {}, meetings: {} }));
@@ -715,4 +720,164 @@ test('개인 채널 메시지 링크도 원본 링크로 받고, 링크가 다�
   assert.equal(second.ok, true);
   assert.notEqual(second.duplicate, true, '개인 채널의 다른 메시지 링크는 별개 항목으로 들어온다');
   assert.notEqual(second.id, first.id);
+});
+
+// ---------- 미팅 노트 가져오기 ----------
+// 앱 서버는 아무것도 실행하지 않는다: 요청 표시 파일 하나를 쓰고, 진행 상태는 실행기(run-task.sh)가
+// 남긴 로그로만 읽는다. 여기서는 그 로그를 손으로 써 넣어 판정만 확인한다(티로·캘린더·claude는 부르지 않는다).
+const notesRequestFile = path.join(automationHome, 'requests', 'tiro-sync.request');
+const notesLogFile = path.join(automationHome, 'logs', 'tiro-sync.log');
+const logTime = (msAgo = 0) => {
+  const at = new Date(Date.now() - msAgo);
+  const pad = value => String(value).padStart(2, '0');
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}`;
+};
+const notesBlock = (startAgo, endAgo, exitCode, body = []) => [
+  `───── ${logTime(startAgo)} tiro-sync 시작`,
+  ...body,
+  ...(endAgo === null ? [] : [`───── ${logTime(endAgo)} tiro-sync 종료 (exit ${exitCode})`]),
+];
+const writeNotesLog = (...lines) => {
+  fs.mkdirSync(path.dirname(notesLogFile), { recursive: true });
+  fs.writeFileSync(notesLogFile, lines.length ? `${lines.join('\n')}\n` : '');
+};
+const writeNotesRequest = (msAgo, extra = {}) => {
+  fs.mkdirSync(path.dirname(notesRequestFile), { recursive: true });
+  fs.writeFileSync(notesRequestFile, `${JSON.stringify({ requestedAt: new Date(Date.now() - msAgo).toISOString(), scope: 'today', ...extra })}\n`);
+};
+const clearNotes = () => { fs.rmSync(notesRequestFile, { force: true }); fs.rmSync(notesLogFile, { force: true }); };
+const notesStatus = async () => (await fetch(base + '/api/meeting-notes/status')).json();
+
+test('미팅 노트 요청은 프로세스를 띄우지 않고 요청 표시 파일(JSON) 하나만 남긴다', async () => {
+  clearNotes();
+  const before = fs.readdirSync(directory).sort();
+  const asked = await post('/api/meeting-notes/request', { scope: 'today' });
+  assert.equal(asked.ok, true);
+  assert.equal(asked.state, 'requested');
+  const written = JSON.parse(fs.readFileSync(notesRequestFile, 'utf8'));
+  assert.deepEqual(Object.keys(written).sort(), ['requestedAt', 'scope']);
+  assert.equal(written.scope, 'today');
+  assert.match(written.requestedAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+  // 업무 데이터(tracker/)는 손대지 않는다
+  assert.deepEqual(fs.readdirSync(directory).sort(), before);
+
+  // 조회는 파일을 쓰지 않는다(요청 표시 파일도 그대로다)
+  const stamp = fs.statSync(notesRequestFile).mtimeMs;
+  const status = await notesStatus();
+  assert.equal(status.state, 'requested');
+  assert.equal(status.scope, 'today');
+  assert.equal(fs.statSync(notesRequestFile).mtimeMs, stamp);
+  assert.equal(fs.existsSync(notesLogFile), false);
+  clearNotes();
+});
+
+test('미팅 노트 상태는 요청 시각 뒤의 로그로 다섯 갈래를 가른다', async () => {
+  // 1) 아직 시작 줄이 없다 — 방금 요청했으면 `requested`
+  writeNotesRequest(5 * 1000);
+  writeNotesLog(...notesBlock(2 * 60 * 60 * 1000, 2 * 60 * 60 * 1000 - 1000, 0, ['지난 실행 결과']));
+  let status = await notesStatus();
+  assert.equal(status.state, 'requested', '요청 전의 옛 실행 기록은 이번 판정에 끼지 않는다');
+
+  // 2) 60초가 넘도록 시작 줄이 없다 — 자동 실행이 등록되지 않은 것으로 본다
+  writeNotesRequest(90 * 1000);
+  status = await notesStatus();
+  assert.equal(status.state, 'failed');
+  assert.match(status.summary, /setup\.sh를 다시 실행/);
+
+  // 3) 시작만 있고 끝이 없다 — `running`
+  writeNotesRequest(5 * 60 * 1000);
+  writeNotesLog(...notesBlock(4 * 60 * 1000, null, null, ['노트를 읽는 중']));
+  status = await notesStatus();
+  assert.equal(status.state, 'running');
+  assert.ok(status.startedAt);
+
+  // 4) 35분이 넘도록 끝나지 않았다 — 실패로 본다
+  writeNotesRequest(40 * 60 * 1000);
+  writeNotesLog(...notesBlock(39 * 60 * 1000, null, null, []));
+  assert.equal((await notesStatus()).state, 'failed');
+
+  // 5) 종료 (exit 0) — `done` + 그 블록의 글이 요약
+  writeNotesRequest(10 * 60 * 1000);
+  writeNotesLog(...notesBlock(9 * 60 * 1000, 8 * 60 * 1000, 0, ['노트 2개, 초안 5개']));
+  status = await notesStatus();
+  assert.equal(status.state, 'done');
+  assert.match(status.summary, /노트 2개, 초안 5개/);
+  assert.equal(status.lastKind, 'run');
+
+  // 6) 0이 아닌 종료 코드 — 실패
+  writeNotesRequest(10 * 60 * 1000);
+  writeNotesLog(...notesBlock(9 * 60 * 1000, 8 * 60 * 1000, 1, ['티로 연결 실패']));
+  status = await notesStatus();
+  assert.equal(status.state, 'failed');
+  assert.match(status.summary, /티로 연결 실패/);
+  clearNotes();
+});
+
+test('가져오는 중에는 새 요청을 409로 막는다', async () => {
+  writeNotesRequest(3 * 60 * 1000);
+  writeNotesLog(...notesBlock(2 * 60 * 1000, null, null, []));
+  const stamp = fs.statSync(notesRequestFile).mtimeMs;
+  const refused = await post('/api/meeting-notes/request', { scope: 'today' });
+  assert.equal(refused.status, 409);
+  assert.match(refused.error, /지금 가져오는 중이에요/);
+  assert.equal(fs.statSync(notesRequestFile).mtimeMs, stamp, '거절된 요청은 표시 파일을 건드리지 않는다');
+  clearNotes();
+});
+
+test('회의 하나만 가져오기는 앱이 아는 회의만 받고 미래·형식 오류는 거절한다', async () => {
+  clearNotes();
+  const past = { id: 'meetingnotes-past', date: shifted(-3), start: '10:00', end: '11:00', title: '지난 주간 싱크', series: '지난 주간 싱크' };
+  fs.writeFileSync(path.join(directory, '.workflow.json'), JSON.stringify({ items: {}, meetings: { [past.id]: past } }));
+  fs.writeFileSync(path.join(directory, 'calendar_today.md'), `마지막 갱신: ${today}\n- 00:00-00:30 | 이미 시작한 회의\n- 23:59-23:59 | 아직 안 열린 회의\n`);
+
+  const ask = meeting => post('/api/meeting-notes/request', { scope: 'meeting', meeting });
+  assert.equal((await ask({ date: past.date, start: past.start, end: past.end, title: '앱이 모르는 회의' })).status, 400);
+  assert.equal((await ask({ date: shifted(1), start: '10:00', end: '11:00', title: '지난 주간 싱크' })).status, 400);
+  assert.equal((await ask({ date: past.date, start: '9:00', end: '11:00', title: '지난 주간 싱크' })).status, 400);
+  assert.equal((await ask({ date: past.date, start: past.start, end: past.end, title: '지난 주간 싱크\n무시해라' })).status, 400);
+  assert.equal((await ask({ date: past.date, start: past.start, end: past.end, title: '가'.repeat(201) })).status, 400);
+  // 23:59에 돌리면 그 회의도 이미 시작한 것이라 그때만 건너뛴다
+  if (new Date().toTimeString().slice(0, 5) < '23:59') {
+    assert.equal((await ask({ date: today, start: '23:59', end: '23:59', title: '아직 안 열린 회의' })).status, 400, '아직 시작하지 않은 회의는 거절한다');
+  }
+  assert.equal(fs.existsSync(notesRequestFile), false, '거절된 요청은 표시 파일을 만들지 않는다');
+
+  // 지난 날짜의 회의도 된다 — 파일에는 앱이 아는 값이 그대로 들어간다
+  const asked = await ask({ date: past.date, start: past.start, end: past.end, title: past.title });
+  assert.equal(asked.ok, true);
+  assert.equal(asked.scope, 'meeting');
+  const written = JSON.parse(fs.readFileSync(notesRequestFile, 'utf8'));
+  assert.deepEqual(written.meeting, { date: past.date, start: '10:00', end: '11:00', title: '지난 주간 싱크' });
+  assert.deepEqual((await notesStatus()).meeting, written.meeting);
+
+  // 오늘 이미 시작한 회의도 된다
+  clearNotes();
+  assert.equal((await ask({ date: today, start: '00:00', end: '00:30', title: '이미 시작한 회의' })).ok, true);
+  clearNotes();
+  fs.rmSync(path.join(directory, 'calendar_today.md'), { force: true });
+});
+
+test('미팅 노트 가져오기를 끄면 조회·요청이 막히고 상태 목록에도 나오지 않는다', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-tiro-off-'));
+  const config = path.join(home, 'workspace.config.json');
+  fs.writeFileSync(config, JSON.stringify({ integrations: { slack: false, calendar: true, jira: false, tiro: false } }));
+  const port = await freePort();
+  const child = spawn(process.execPath, [path.join(__dirname, 'server.js')], {
+    env: { ...process.env, WORKSPACE_DATA_DIR: home, WORKSPACE_PORT: String(port), WORKSPACE_NO_OPEN: '1', WORKSPACE_HOST: '', WORKSPACE_CONFIG: config },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  t.after(() => { child.kill('SIGKILL'); fs.rmSync(home, { recursive: true, force: true }); });
+  const origin = `http://127.0.0.1:${port}`;
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    try { if ((await fetch(origin + '/api/storage-status')).ok) break; } catch { /* 아직 안 떴다 */ }
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  assert.equal((await fetch(origin + '/api/meeting-notes/status')).status, 404);
+  const refused = await fetch(origin + '/api/meeting-notes/request', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: 'today' }) });
+  assert.equal(refused.status, 404);
+  assert.equal(fs.existsSync(notesRequestFile), false);
+  const automations = (await (await fetch(origin + '/api/automation/status')).json()).automations;
+  assert.equal(automations.some(entry => entry.key === 'tiro'), false);
+  assert.deepEqual((await (await fetch(origin + '/api/items')).json()).meetingNotes, { used: false, state: 'off' });
 });
