@@ -834,10 +834,12 @@ test('회의 탭 필터 줄의 칩 이름: `초안 있음`·`미완료만`·`빈
   const labels = JSON.parse(app.run(`(() => {
     meetingsTabState = { key: null, unresolved: false, reviewOnly: false, project: '', windowDays: 14, showNoRecord: false, result: null };
     const bar = meetingsTabFilters([]);
-    return JSON.stringify(bar.children.filter(kid => kid.textContent).map(kid => [kid.textContent, kid.title || null]));
+    return JSON.stringify(bar.children.filter(kid => kid.textContent)
+      .map(kid => [kid.textContent, kid.title || null, kid.getAttribute('aria-description') || null]));
   })()`));
-  assert.deepEqual(labels, [['초안 있음', null], ['미완료만', null],
-    ['빈 회의 포함', '초안도 담은 항목도 없는 지난 회의까지 보여 줘요']], '짧은 칩 이름의 뜻은 툴팁이 풀어 준다');
+  assert.deepEqual(labels, [['초안 있음', null, null], ['미완료만', null, null],
+    ['빈 회의 포함', '아무것도 담지 않은 회의도 함께 보여요', '아무것도 담지 않은 회의도 함께 보여요']],
+    '짧은 칩 이름의 뜻은 툴팁과 읽어 주는 설명이 함께 풀어 준다');
 });
 
 test('팔레트 바닥은 `회의` 칩일 때만 회의 탭으로 가는 링크를 붙인다', () => {
@@ -1022,6 +1024,7 @@ test('a meeting row reuses the list menus and only puts 문구 고치기 on top'
       .map(section => section.map(entry => entry.label || entry.field)))`));
   for (const type of ['task', 'bug', 'check', 'decision']) {
     assert.equal(menu(type)[0][0], '문구 고치기', `${type} 줄의 메뉴 맨 위는 문구 고치기다`);
+    assert.equal(menu(type)[0][1], '종류 바꾸기', `${type} 줄에서 종류를 바꾼다`);
     assert.ok(menu(type).flat().includes('삭제'), `${type} 줄도 여기서 지울 수 있다`);
   }
   // 맨 위 한 줄만 얹고 나머지는 목록에서 쓰는 메뉴 그대로다 — 회의 카드용 메뉴를 새로 만들지 않는다.
@@ -1033,7 +1036,7 @@ test('a meeting row reuses the list menus and only puts 문구 고치기 on top'
     listMenu("waitingMenuSections({ id: 'i1', type: 'check', description: '문구', status: 'to-do' }, document.createElement('div'))"),
     '확인 대기는 확인 대기 줄의 메뉴를 그대로 쓴다(답변 받을 날 포함)');
   assert.ok(menu('check').flat().includes('답변 받을 날'));
-  assert.deepEqual(menu('decision'), [['문구 고치기'], ['프로젝트'], ['삭제']], '결정에는 날짜가 없다');
+  assert.deepEqual(menu('decision'), [['문구 고치기', '종류 바꾸기'], ['프로젝트'], ['삭제']], '결정에는 날짜가 없다');
   assert.ok(menu('task').flat().includes('기한'), '할 일의 날짜 이름은 `기한`이다');
 });
 
@@ -4141,4 +4144,150 @@ test('BARCHIVE: 보관은 주간요약 초안과 검색 결과를 바꾸지 않�
     return JSON.parse(app.run("JSON.stringify(palFilter(workflowData.items, { query: '정산' }).map(item => [item.id, item.description, item.group]))"));
   };
   assert.deepEqual(rows({}), rows({ 'group:끝난 팀': '2026-09-20' }), '검색 결과는 보관해도 똑같다');
+});
+
+// ---------- BSMALL ①: 우선순위·기한 변경 ⌘Z ----------
+// 안전장치(recordUndoFor)는 손대지 않는다 — 값을 바꾸는 호출부에서 pushUndo를 부르기만 한다.
+function undoValueClient() {
+  const app = workflowsClient();
+  const sent = [];
+  app.context.fetch = async (url, init) => {
+    sent.push({ url, body: init && init.body ? JSON.parse(init.body) : null });
+    return new Response('{"ok":true}');
+  };
+  app.run(`itemsById = new Map([
+    ['t1', { id: 't1', type: 'task', description: '우선순위를 바꿀 업무', priority: 'medium', due: null }],
+    ['t2', { id: 't2', type: 'task', description: '기한을 바꿀 업무', priority: 'medium', due: '2026-09-30' }],
+  ]);`);
+  return { app, sent };
+}
+
+test('BSMALL: 우선순위 변경은 ⌘Z로 이전 값으로 돌아가고 ⌘⇧Z로 다시 적용된다', async () => {
+  const { app, sent } = undoValueClient();
+  await app.run("setPriority('t1', 'critical')");
+  assert.deepEqual(sent.map(call => [call.url, call.body]), [['/api/track/set-priority', { id: 't1', priority: 'critical' }]]);
+  assert.equal(app.run('undoStack.length'), 1);
+  assert.match(app.run('undoStack[0].label'), /우선순위 변경/);
+
+  await app.run("replayUndo('undo')");
+  assert.deepEqual(sent[1], { url: '/api/track/set-priority', body: { id: 't1', priority: 'medium' } }, '⌘Z는 이전 값으로 보낸다');
+  assert.equal(app.run('undoStack.length'), 0);
+  await app.run("replayUndo('redo')");
+  assert.deepEqual(sent[2], { url: '/api/track/set-priority', body: { id: 't1', priority: 'critical' } }, '⌘⇧Z는 다시 바꾼 값으로');
+  assert.equal(app.run('undoStack.length'), 1);
+});
+
+test('BSMALL: 기한 변경도 같은 길이고, 값이 그대로면 기록을 남기지 않는다', async () => {
+  const { app, sent } = undoValueClient();
+  await app.run("setTaskDue('t2', '2026-10-15')");
+  assert.deepEqual(sent[0], { url: '/api/track/set-due', body: { id: 't2', due: '2026-10-15' } });
+  assert.equal(app.run('undoStack.length'), 1);
+  await app.run("replayUndo('undo')");
+  assert.deepEqual(sent[1], { url: '/api/track/set-due', body: { id: 't2', due: '2026-09-30' } });
+
+  // 같은 값으로 다시 보내면 되돌릴 것이 없다
+  app.run('undoStack.length = 0; redoStack.length = 0;');
+  await app.run("setPriority('t1', 'medium')");
+  assert.equal(app.run('undoStack.length'), 0);
+});
+
+test('BSMALL: 아이디어의 `가능성`도 같은 저장 길이라 ⌘Z 대상이고, 이름만 그 화면의 말로 남는다', async () => {
+  const { app, sent } = undoValueClient();
+  app.run(`workflowData = { items: [{ id: 'i1', type: 'idea', description: '온보딩 진행률 바', priority: 'medium', status: 'to-do' }], meetings: [] };
+    wfIndexData(); itemsById.set('i1', workflowData.items[0]);`);
+  const chips = app.run("ideaChanceControl(wfItem('i1'))");
+  await chips.children[0].listeners.click();
+  assert.deepEqual(sent[0], { url: '/api/track/set-priority', body: { id: 'i1', priority: 'high' } });
+  assert.match(app.run('undoStack[0].label'), /가능성 변경/);
+});
+
+// ---------- BSMALL ②: 회의에서 담은 항목의 종류 바꾸기 ----------
+test('BSMALL: 종류 바꾸기 칩은 지금 종류만 비활성이고, 고르면 같은 id로 retype을 보낸다', async () => {
+  const { app, sent } = meetingRowClient(new Response('{"ok":true,"id":"i1","type":"decision","from":"check"}'));
+  app.run(`workflowData = { items: [{ id: 'i1', type: 'check', description: '담은 확인 대기', status: 'to-do' }], meetings: [] };
+    wfIndexData(); itemsById = new Map(workflowData.items.map(item => [item.id, item]));`);
+  const menu = app.run("panelMeetingRowMenu(wfItem('i1'), document.createElement('div'), () => {})");
+  const chips = menu[0][1].control;
+  assert.equal(menu[0][1].field, '종류 바꾸기');
+  assert.deepEqual(chips.children.map(chip => [chip.textContent, chip.disabled]),
+    [['할 일', false], ['확인 대기', true], ['결정', false]], '지금 종류는 누를 수 없다');
+
+  await chips.children[2].listeners.click();
+  assert.deepEqual(sent.map(call => [call.url, call.body]), [['/api/workflow/retype', { id: 'i1', type: 'decision' }]]);
+  const region = app.nodes.get('liveRegion');
+  assert.equal(region.textContent, '결정으로 바꿨어요', '받침에 맞는 조사로 적는다(할 일로 · 확인 대기로 · 결정으로)');
+  assert.equal(app.run('undoStack.length'), 1, '⌘Z로도 되돌린다');
+  assert.match(app.run('undoStack[0].label'), /종류 바꾸기/);
+
+  // 알림의 `되돌리기`는 반대 방향 retype 하나이고, 그 뒤에는 ⌘Z가 같은 일을 또 하지 않는다
+  const undo = region.children.find(node => node.textContent === '되돌리기');
+  await undo.listeners.click();
+  assert.deepEqual(sent[1], { url: '/api/workflow/retype', body: { id: 'i1', type: 'check' } });
+  assert.equal(app.run('undoStack.length'), 0);
+});
+
+test('BSMALL: 완료한 항목은 종류 바꾸기 칩이 모두 비활성이고 이유를 알려 준다', () => {
+  const { app } = meetingRowClient(new Response('{"ok":true}'));
+  const menu = app.run("panelMeetingRowMenu({ id: 'i1', type: 'task', description: '끝난 업무', status: 'done' }, document.createElement('div'), () => {})");
+  const chips = menu[0][1].control;
+  assert.deepEqual(chips.children.map(chip => chip.disabled), [true, true, true]);
+  assert.equal(chips.title, '완료한 항목은 종류를 바꿀 수 없어요');
+  assert.equal(chips.getAttribute('aria-description'), '완료한 항목은 종류를 바꿀 수 없어요');
+});
+
+// ---------- BSMALL ③: 결정의 `내용` ----------
+test('BSMALL: 결정 카드의 `내용`은 note로 저장되고 줄바꿈을 지킨다(4,000자)', async () => {
+  const { app, sent } = meetingRowClient(new Response('{"ok":true}'));
+  const box = app.run(`(() => {
+    const box = document.createElement('div');
+    panelDecisionNote({ id: 'd1', description: '정산 주기는 매주 화요일' }, { note: '이미 적어 둔 내용' }, box);
+    return box;
+  })()`);
+  const section = box.children[0];
+  assert.equal(section.dataset.sec, '내용');
+  assert.equal(section.children[0].textContent, '내용');
+  const area = section.children[1];
+  assert.equal(area.value, '이미 적어 둔 내용');
+  assert.equal(area.maxLength, 4000);
+  area.value = '배경: 정산이 월요일에 몰렸다.\n예외: 공휴일이면 다음 영업일.';
+  await area.listeners.change();
+  assert.deepEqual(sent.map(call => [call.url, call.body]),
+    [['/api/workflow/item', { id: 'd1', note: '배경: 정산이 월요일에 몰렸다.\n예외: 공휴일이면 다음 영업일.' }]],
+    '줄바꿈을 한 칸으로 바꾸지 않는다(결과 한 줄과 다른 점)');
+});
+
+test('BSMALL: 결정 줄의 `내용` 표시는 적어 둔 내용이 있을 때만 선다', () => {
+  const { app } = meetingRowClient(new Response('{"ok":true}'));
+  app.run(`workflowData = { items: [
+    { id: 'd1', type: 'decision', description: '내용이 있는 결정', status: 'to-do' },
+    { id: 'd2', type: 'decision', description: '내용이 없는 결정', status: 'to-do', note: '   ' },
+  ], meetings: [] }; wfIndexData();`);
+  assert.equal(app.run("recordNoteMark({ id: 'd1', description: '내용이 있는 결정' })"), null, '아직 아무것도 없으면 표시도 없다');
+  assert.equal(app.run("recordNoteMark({ id: 'd2', description: '내용이 없는 결정' })"), null, '빈칸만 적힌 것도 없는 것으로 본다');
+  app.run("wfItem('d1').note = '배경과 예외';");
+  const mark = app.run("recordNoteMark({ id: 'd1', description: '내용이 있는 결정' })");
+  assert.equal(mark.textContent, '내용');
+  assert.equal(mark.className, 'd-recnote');
+  assert.equal(mark.getAttribute('aria-label'), '내용이 있는 결정 — 내용 보기');
+});
+
+// ---------- BSMALL ④: 레일의 짧은 버튼 이름 ----------
+test('BSMALL: `다음은?`은 레일에서만 짧은 이름을 쓰고, 읽어 주는 이름은 그대로다', () => {
+  const { app, check } = waitingNextClient();
+  check('ck1');
+  const names = (code) => app.run(code).children[0].children.map(node => node.textContent);
+  assert.deepEqual(names("waitingNextRow(wfItem('ck1'))"),
+    ['다음은?', '후속 할 일', '결정으로 남기기', '답변 한 줄 남기기', '닫기'], '넓은 자리는 그대로다');
+  const compact = app.run("waitingNextRow(wfItem('ck1'), { compact: true })");
+  assert.deepEqual(compact.children[0].children.map(node => node.textContent),
+    ['다음은?', '후속 할 일', '결정으로', '답변 남기기', '닫기']);
+  assert.deepEqual(compact.children[0].children.slice(1, 4).map(node => node.getAttribute('aria-label')),
+    ['법무 검토 회신 받기 — 후속 할 일', '법무 검토 회신 받기 — 결정으로 남기기', '법무 검토 회신 받기 — 답변 한 줄 남기기'],
+    'aria-label은 긴 이름을 그대로 쓴다');
+
+  // 레일(확인 대기 카드)만 compact로 부른다
+  app.run("renderWaiting(workflowData.items.filter(item => item.status !== 'done'))");
+  const lead = app.nodes.get('waitingList').children[0];
+  assert.deepEqual(lead.children[1].children[0].children.map(node => node.textContent),
+    ['다음은?', '후속 할 일', '결정으로', '답변 남기기', '닫기']);
 });

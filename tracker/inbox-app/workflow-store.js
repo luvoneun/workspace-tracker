@@ -4,7 +4,7 @@ const { createHash } = require('node:crypto');
 const { atomicWrite } = require('./safe-storage');
 
 // Additional relationships live beside the Markdown files; source IDs remain authoritative.
-module.exports = function workflowStore({ directory, refs, calendar, today, validateDate, create, remove }) {
+module.exports = function workflowStore({ directory, refs, calendar, today, validateDate, create, remove, move }) {
   const filename = path.join(directory, '.workflow.json');
   function read() {
     if (!fs.existsSync(filename)) return { items: {}, meetings: {} };
@@ -97,13 +97,16 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     const source = all[id];
     if (!source) throw new Error('항목을 찾을 수 없어요.');
     const keys = Object.keys(patch);
-    if (!keys.length || keys.some(key => !['followUp', 'contacted', 'blockedBy', 'outcome'].includes(key))) throw new Error('지원하지 않는 변경이에요.');
+    if (!keys.length || keys.some(key => !['followUp', 'contacted', 'blockedBy', 'outcome', 'note'].includes(key))) throw new Error('지원하지 않는 변경이에요.');
     if ('followUp' in patch) { if (source.type !== 'check') throw new Error('확인 대기에서만 지정할 수 있어요.'); validateDate(patch.followUp); }
     if ('contacted' in patch) { if (source.type !== 'check' || patch.contacted !== today()) throw new Error('확인 요청 날짜가 올바르지 않아요.'); }
     if ('blockedBy' in patch && (!['task', 'bug'].includes(source.type) || (patch.blockedBy !== null && (!all[patch.blockedBy] || all[patch.blockedBy].type !== 'check')))) throw new Error('연결할 확인 대기를 찾을 수 없어요.');
     // outcome: 업무·버그의 `결과 한 줄`이자 확인 대기의 `답변 한 줄`이다(둘 다 주간요약 문장이 된다).
     // 결정·아이디어에는 결과가 없다.
     if ('outcome' in patch && (!['task', 'bug', 'check'].includes(source.type) || typeof patch.outcome !== 'string' || patch.outcome.length > 1000 || /[\r\n]/.test(patch.outcome))) throw new Error('결과는 1,000자 이내 한 줄로 적어 주세요.');
+    // note: 결정의 `내용`처럼 여러 줄로 적는 본문이다. 종류를 가리지 않고 이 앱 파일(.workflow.json)에만
+    // 저장한다 — tracker/*.md의 한 줄 형식은 건드리지 않는다.
+    if ('note' in patch && (typeof patch.note !== 'string' || patch.note.length > 4000)) throw new Error('내용은 4,000자 이내로 적어 주세요.');
     const state = read();
     state.items[id] = { ...state.items[id], ...patch };
     write(state);
@@ -268,6 +271,33 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     return { ok: true, project: key, archived };
   }
 
+  // ---------- 담은 항목의 종류 바꾸기 ----------
+  // 새 항목을 만들지 않는다 — 같은 id로 업무 파일의 줄만 옮긴다(move). 회의 연결(state.items[id].meetingId)과
+  // 검토 기록(state.reviewed)은 항목 번호로 이어져 있어서 그대로 남는다.
+  // 여기서 손보는 것은 새 종류에 없는 흐름 기록 칸을 지우는 것 하나뿐이다.
+  const RETYPE_DROP = {
+    task: ['followUp', 'contacted'],            // 다시 확인할 날짜·확인 요청 기록은 확인 대기의 것이다
+    check: ['blockedBy'],                        // 기다리는 답변 연결은 할 일의 것이다
+    decision: ['blockedBy', 'followUp', 'contacted', 'outcome'], // 결정에는 결과 한 줄이 없다
+  };
+  function retype({ id, type }) {
+    if (!['task', 'check', 'decision'].includes(type)) throw new Error('바꿀 종류를 확인해 주세요.');
+    const source = refs()[id];
+    if (!source) throw new Error('항목을 찾을 수 없어요.');
+    if (!['task', 'bug', 'check', 'decision'].includes(source.type)) throw new Error('이 종류는 바꿀 수 없어요.');
+    if (source.type === type) throw new Error('이미 같은 종류예요.');
+    if (source.status === 'done') throw new Error('완료한 항목은 종류를 바꿀 수 없어요.');
+    const moved = move(id, type);
+    const state = read();
+    const entry = state.items[id];
+    if (entry) {
+      const next = { ...entry };
+      RETYPE_DROP[type].forEach(key => { delete next[key]; });
+      if (JSON.stringify(next) !== JSON.stringify(entry)) { state.items[id] = next; write(state); }
+    }
+    return { ok: true, id, type, from: moved.from };
+  }
+
   function link({ id, meetingId }) {
     if (!refs()[id]) throw new Error('항목을 찾을 수 없어요.');
     const state = read();
@@ -278,5 +308,5 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     write(state);
     return { ok: true };
   }
-  return { archive, snapshot, patchItem, saveMeeting, syncProject, capture, review, undoReview, link, checkProjectLink, linkProject, checkProjectArchive, archiveProject, outcome: id => read().items[id]?.outcome || '' };
+  return { archive, snapshot, patchItem, saveMeeting, syncProject, capture, review, undoReview, retype, link, checkProjectLink, linkProject, checkProjectArchive, archiveProject, outcome: id => read().items[id]?.outcome || '' };
 };

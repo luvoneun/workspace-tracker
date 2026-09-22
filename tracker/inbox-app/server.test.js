@@ -195,6 +195,120 @@ test('existing items can be linked to a meeting without duplication or reassignm
   assert.equal((await items()).workflows.items.find(item => item.id === 'legacy').meetingId, events[0].id);
 });
 
+// ---------- 담은 항목의 종류 바꾸기 (같은 id로 파일만 옮긴다) ----------
+const lineOf = (file, id) => (fs.existsSync(path.join(directory, file))
+  ? fs.readFileSync(path.join(directory, file), 'utf8').split('\n').find(line => line.includes(`id:${id} `) || line.includes(`id:${id}]`))
+  : undefined);
+
+test('종류 바꾸기는 같은 id로 파일을 옮기고 회의 연결·검토 기록을 지킨다', async () => {
+  fs.writeFileSync(path.join(directory, 'calendar_today.md'), `마지막 갱신: ${today}\n- 09:00-10:00 | 종류 바꾸기 회의\n`);
+  const meeting = (await items()).workflows.meetings[0];
+  const created = await post('/api/workflow/capture', { meetingId: meeting.id, type: 'check', description: '종류를 바꿀 확인 대기', due: shifted(3) });
+  assert.equal(created.ok, true);
+  await post('/api/workflow/item', { id: created.id, followUp: today, contacted: today });
+  assert.ok(lineOf('checks.md', created.id));
+
+  const moved = await post('/api/workflow/retype', { id: created.id, type: 'decision' });
+  assert.deepEqual({ ok: moved.ok, id: moved.id, type: moved.type, from: moved.from }, { ok: true, id: created.id, type: 'decision', from: 'check' });
+  assert.equal(lineOf('checks.md', created.id), undefined, '옛 파일에서는 빠지고');
+  const line = lineOf('decisions.md', created.id);
+  assert.match(line, /#decision\[/, '새 파일에 같은 번호로 들어간다');
+  assert.match(line, /^- 종류를 바꿀 확인 대기 /, '문구는 그대로다');
+  assert.match(line, new RegExp(`id:${created.id} `));
+  assert.doesNotMatch(line, /due:/, '결정에는 날짜가 없다');
+  assert.doesNotMatch(line, /who:/);
+
+  const data = (await items()).workflows;
+  const item = data.items.find(entry => entry.id === created.id);
+  assert.equal(item.type, 'decision');
+  assert.equal(item.meetingId, meeting.id, '회의 연결은 번호가 같아 그대로 남는다');
+  assert.equal(item.followUp, undefined, '확인 대기의 칸은 함께 정리된다');
+  assert.equal(item.contacted, undefined);
+});
+
+test('세 방향 전환 모두 되고, 할 일로 올 때는 나중에 할 일로 들어간다', async () => {
+  const created = await post('/api/today-task/create', { description: '세 방향 전환 업무', due: shifted(5), priority: 'high' });
+  assert.equal((await post('/api/workflow/retype', { id: created.id, type: 'check' })).ok, true);
+  let line = lineOf('checks.md', created.id);
+  assert.match(line, /#check\[/);
+  assert.match(line, /priority:high/, '우선순위는 세 종류 모두 파일에 적는 칸이라 남는다');
+  assert.match(line, new RegExp(`due:${shifted(5)}`), '확인 대기에도 날짜가 있다(답변 받을 날)');
+  assert.doesNotMatch(line, /scheduled:/, '실행 예정일은 할 일의 칸이다');
+
+  assert.equal((await post('/api/workflow/retype', { id: created.id, type: 'decision' })).ok, true);
+  assert.doesNotMatch(lineOf('decisions.md', created.id), /due:/);
+
+  assert.equal((await post('/api/workflow/retype', { id: created.id, type: 'task' })).ok, true);
+  line = lineOf('tasks.md', created.id);
+  assert.match(line, /#task\[/);
+  assert.match(line, /scheduled:none/, '종류를 바꿨다고 오늘 목록이 채워지지 않는다');
+  const lists = await items();
+  assert.ok(lists.laterTasks.some(task => task.id === created.id));
+  assert.ok(!lists.todayTasks.some(task => task.id === created.id));
+});
+
+test('종류 바꾸기는 완료한 항목·같은 종류·없는 항목을 거절하고 파일을 건드리지 않는다', async () => {
+  const done = await post('/api/waiting/create', { description: '이미 끝난 확인' });
+  await post('/api/track/toggle', { id: done.id, status: 'done' });
+  const checks = fs.readFileSync(path.join(directory, 'checks.md'), 'utf8');
+  const refused = await post('/api/workflow/retype', { id: done.id, type: 'decision' });
+  assert.equal(refused.status, 400);
+  assert.match(refused.error, /완료한 항목은 종류를 바꿀 수 없어요/);
+  assert.equal((await post('/api/workflow/retype', { id: done.id, type: 'check' })).status, 400, '같은 종류는 거절한다');
+  assert.equal((await post('/api/workflow/retype', { id: 'missing-id', type: 'task' })).status, 400);
+  assert.equal((await post('/api/workflow/retype', { id: 'legacy', type: 'idea' })).status, 400, '아이디어로는 바꾸지 않는다');
+  assert.equal(fs.readFileSync(path.join(directory, 'checks.md'), 'utf8'), checks);
+  assert.match(readTasks(), /id:legacy /);
+});
+
+test('종류 바꾸기도 같은 요청 식별자로 두 번 보내면 한 번만 옮긴다', async () => {
+  const created = await post('/api/later-task/create', { description: '재시도 전환 업무' });
+  const call = () => fetch(base + '/api/workflow/retype', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'fixture-retype-0001' },
+    body: JSON.stringify({ id: created.id, type: 'decision' }),
+  }).then(response => response.json());
+  const a = await call(), b = await call();
+  assert.deepEqual(a, b);
+  assert.equal(fs.readFileSync(path.join(directory, 'decisions.md'), 'utf8').split(created.id).length - 1, 1);
+  assert.equal(lineOf('tasks.md', created.id), undefined);
+});
+
+// ---------- 결정의 `내용`(note) ----------
+test('결정의 내용은 .workflow.json에만 담기고 decisions.md는 그대로다', async () => {
+  const decision = await post('/api/decision/create', { description: '정산 주기는 매주 화요일로 한다' });
+  const before = fs.readFileSync(path.join(directory, 'decisions.md'), 'utf8');
+  const note = '배경: 벤더 정산이 월요일에 몰렸다.\n예외: 공휴일이면 다음 영업일.';
+  assert.equal((await post('/api/workflow/item', { id: decision.id, note })).ok, true);
+  assert.equal(fs.readFileSync(path.join(directory, 'decisions.md'), 'utf8'), before, '업무 파일의 형식은 건드리지 않는다');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(directory, '.workflow.json'), 'utf8')).items[decision.id].note, note);
+  assert.equal((await items()).workflows.items.find(item => item.id === decision.id).note, note);
+  // 종류를 가리지 않고 적을 수 있고(업무에도), 4,000자를 넘으면 거절한다.
+  assert.equal((await post('/api/workflow/item', { id: 'legacy', note: '업무에도 적을 수 있다' })).ok, true);
+  assert.equal((await post('/api/workflow/item', { id: decision.id, note: 'ㄱ'.repeat(4001) })).status, 400);
+  assert.equal((await post('/api/workflow/item', { id: decision.id, note: 4000 })).status, 400);
+  assert.equal((await post('/api/workflow/item', { id: decision.id, note: 'ㄱ'.repeat(4000) })).ok, true);
+  // 지우는 것은 빈 글자다.
+  assert.equal((await post('/api/workflow/item', { id: decision.id, note: '' })).ok, true);
+  assert.equal((await items()).workflows.items.find(item => item.id === decision.id).note, '');
+});
+
+test('내용을 적어도 주간요약 문장은 그대로다', async () => {
+  await post('/api/workflow/item', { id: 'legacy', outcome: '디자인 전달일 확정' });
+  await post('/api/track/toggle', { id: 'legacy' });
+  const textOf = data => data.weeklyReports.flatMap(report => report.draft?.rows || []).filter(row => row.sourceIds.includes('legacy')).map(row => row.text).join('|');
+  const before = textOf(await items());
+  await post('/api/workflow/item', { id: 'legacy', note: '주간요약에는 나가지 않는 본문' });
+  assert.equal(textOf(await items()), before);
+});
+
+test('note 칸이 없는 옛 흐름 기록도 그대로 읽힌다', async () => {
+  fs.writeFileSync(path.join(directory, '.workflow.json'), JSON.stringify({ items: { legacy: { meetingId: null } }, meetings: {} }));
+  const item = (await items()).workflows.items.find(entry => entry.id === 'legacy');
+  assert.equal(item.note, undefined);
+  assert.equal((await post('/api/workflow/item', { id: 'legacy', note: '나중에 적은 내용' })).ok, true);
+  assert.equal((await items()).workflows.items.find(entry => entry.id === 'legacy').note, '나중에 적은 내용');
+});
+
 test('calendar archive preserves meetings without captured items and reads do not write', () => {
   let events = [{ title: '기록할 회의', start: '09:00', end: '10:00' }];
   const store = require('./workflow-store')({ directory, refs: () => ({}), calendar: () => ({ events }), today: () => today });
@@ -405,6 +519,11 @@ test('a refused startup recovery keeps the app up with saving locked', async (t)
   assert.equal(response.status, 503);
   assert.equal(body.code, 'RECOVERY_NEEDED');
   assert.match(body.error, /저장을 멈췄어요/);
+  assert.equal(fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8'), external);
+  // 종류 바꾸기도 같은 저장 길을 타므로 복구 필요 상태에서는 파일을 열어 보지도 않고 503으로 멈춘다.
+  const retype = await fetch(server.base + '/api/workflow/retype', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'outside', type: 'check' }) });
+  assert.equal(retype.status, 503);
+  assert.equal((await retype.json()).code, body.code, '다른 저장과 똑같이 막힌다');
   assert.equal(fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8'), external);
   assert.ok(fs.existsSync(path.join(server.home, '.mutation-journal.json')));
   assert.ok(fs.existsSync(path.join(server.home, '.mutation.lock')));

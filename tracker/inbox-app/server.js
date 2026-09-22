@@ -1034,6 +1034,64 @@ function removeTrackItem(id, archive = true) {
   return removed;
 }
 
+// ---------- 종류 바꾸기 (같은 id로 파일만 옮긴다) ----------
+// 새 항목을 만들고 옛 항목을 지우는 방식이 아니다 — 회의 연결·검토 기록이 id로 이어져 있어서
+// 번호가 바뀌면 그 줄들이 끊긴다. 그래서 줄을 통째로 새 파일로 옮기고 종류 표시만 바꾼다.
+// 부르는 곳은 workflow-store.retype 하나이고, 저장 길은 기존 그대로다(idempotent → mutations.run).
+const RETYPE_FILE = { task: 'tasks.md', check: 'checks.md', decision: 'decisions.md' };
+const RETYPE_HEAD = { task: '# Tasks', check: '# Checks', decision: '# Decisions' };
+// 종류별로 파일에 남길 칸과 그 차례. 여기 없는 칸은 옮기면서 버린다.
+// - 결정에는 날짜가 없다(DECISIONS: 마감일은 할 일·확인 대기만) → due·scheduled·doing·inbox·who 제거
+// - 확인 대기에는 실행 예정일·진행 중이 없다 → scheduled·doing·inbox 제거
+// - 할 일에는 `누구에게`가 없다 → who 제거
+// priority는 세 종류가 모두 파일에 적는 칸이라(create* 함수들) 그대로 가져간다.
+const RETYPE_KEEP = {
+  task: ['id', 'status', 'priority', 'created', 'scheduled', 'due', 'doing', 'inbox', 'jira', 'group', 'source', 'seen', 'completed', 'updated'],
+  check: ['id', 'status', 'priority', 'created', 'due', 'who', 'jira', 'group', 'source', 'seen', 'completed', 'updated'],
+  decision: ['id', 'status', 'priority', 'created', 'jira', 'group', 'source', 'seen', 'completed', 'updated'],
+};
+function retypeTrackItem(id, type) {
+  if (!RETYPE_FILE[type]) throw new Error('바꿀 종류를 확인해 주세요.');
+  let found = null;
+  for (const filePath of listTrackerFiles()) {
+    const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
+    const index = lines.findIndex((line) => {
+      const m = line.match(TRACK_RE);
+      return !!m && parseFields(m[3]).id === id;
+    });
+    if (index === -1) continue;
+    found = { filePath, lines, index, match: lines[index].match(TRACK_RE) };
+    break;
+  }
+  if (!found) throw new Error('항목을 찾을 수 없어요.');
+  const from = found.match[2];
+  const fields = parseFields(found.match[3]);
+  if (!['task', 'bug', 'check', 'decision'].includes(from)) throw new Error('이 종류는 바꿀 수 없어요.');
+  if (from === type) throw new Error('이미 같은 종류예요.');
+  if (fields.status === 'done') throw new Error('완료한 항목은 종류를 바꿀 수 없어요.');
+  const values = {};
+  RETYPE_KEEP[type].forEach((name) => { if (fields[name] !== undefined && fields[name] !== '') values[name] = fields[name]; });
+  // 할 일로 오면 "나중에 할 일"로 들어간다 — 종류를 바꿨다고 오늘 목록이 채워지지 않게(DECISIONS).
+  if (type === 'task' && !values.scheduled) values.scheduled = 'none';
+  if (!values.status) values.status = 'to-do';
+  if (!values.priority) values.priority = 'medium';
+  values.updated = new Date().toISOString();
+  const fieldStr = RETYPE_KEEP[type].filter(name => values[name] !== undefined).map(name => `${name}:${values[name]}`).join(' ');
+  const line = `- ${found.match[1]} #${type}[${fieldStr}]`;
+  const targetPath = path.join(TRACKER_DIR, RETYPE_FILE[type]);
+  // 옛 항목이 이미 그 파일에 있으면(옛 기록은 한 파일에 섞여 있기도 하다) 그 자리에서 종류만 바꾼다.
+  if (path.resolve(targetPath) === path.resolve(found.filePath)) {
+    found.lines[found.index] = line;
+    fs.writeFileSync(found.filePath, found.lines.join('\n'));
+    return { ok: true, id, type, from };
+  }
+  found.lines.splice(found.index, 1);
+  fs.writeFileSync(found.filePath, found.lines.join('\n'));
+  if (!fs.existsSync(targetPath)) fs.writeFileSync(targetPath, `${RETYPE_HEAD[type]}\n\n`);
+  fs.appendFileSync(targetPath, `${line}\n`);
+  return { ok: true, id, type, from };
+}
+
 function restoreTrackItem(id) {
   const trashPath = path.join(TRACKER_DIR, '.trash.json');
   const trash = fs.existsSync(trashPath) ? JSON.parse(fs.readFileSync(trashPath, 'utf-8')) : [];
@@ -1301,6 +1359,8 @@ const handleRequest = (req, res) => {
     '/api/workflow/review': workflows.review,
     '/api/workflow/review-undo': workflows.undoReview,
     '/api/workflow/link': workflows.link,
+    // 담은 항목의 종류 바꾸기. 같은 id로 파일만 옮기므로 회의 연결·검토 기록이 그대로 남는다.
+    '/api/workflow/retype': workflows.retype,
     // 프로젝트를 `지난 프로젝트`로 내리거나 꺼낸다. 저장하는 것은 프로젝트 키 하나뿐이고,
     // 업무·기록·주간요약은 하나도 바뀌지 않는다 — 앱의 기존 저장 길을 그대로 탄다.
     '/api/project/archive': workflows.archiveProject,
@@ -1800,6 +1860,8 @@ const workflows = require('./workflow-store')({
   today: todayLocal, validateDate,
   create: { task: createManualTask, check: createWaitingItem, decision: createDecision },
   remove: removeTrackItem,
+  // 종류 바꾸기: 같은 id로 업무 파일의 줄만 옮긴다(위 retypeTrackItem).
+  move: retypeTrackItem,
 });
 const batchTasks = require('./task-batch')({ files: listTrackerFiles, pattern: TRACK_RE, parse: parseFields, validateDate, today: todayLocal });
 const reportDrafts = require('./report-drafts')({ directory: TRACKER_DIR, sources: () => workflows.snapshot().items, legacy: parseWeeklyReports, currentWeek: currentWeekKey });

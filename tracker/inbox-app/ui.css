@@ -499,6 +499,10 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 }
 .d-chip:hover { background: var(--hover); color: var(--text); }
 .d-chip.is-on { background: var(--accent-soft); color: var(--accent-text); }
+/* 지금 값이라 누를 것이 없는 칩(종류 바꾸기의 현재 종류) — 색은 그대로 두고 손맛만 뗀다. */
+.d-chip:disabled { cursor: default; }
+.d-chip:disabled:hover { background: none; color: var(--muted); }
+.d-chip.is-on:disabled:hover { background: var(--accent-soft); color: var(--accent-text); }
 
 .d-mtext, .d-msel {
   height: 30px; min-width: 0; padding: 0 10px;
@@ -1877,6 +1881,12 @@ body.batch-open .d-toast { bottom: 76px; }
 }
 .d-recinfo-lk { border: 0; background: none; padding: 0; color: var(--dim); font: inherit; cursor: pointer; }
 .d-recinfo-lk:hover { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; }
+/* 결정 제목 뒤의 조용한 `내용` 표시 — 적어 둔 본문이 있을 때만 서고, 누르면 그 결정의 카드가 열린다. */
+.d-recnote {
+  flex: none; border: 0; background: none; padding: 0;
+  color: var(--dim); font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer;
+}
+.d-recnote:hover, .d-recnote:focus-visible { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; }
 /* 제목 뒤에 붙는 `· ● 프로젝트`·`원문`은 제목과 같은 줄에서 첫 줄 글자선에 맞춘다. */
 .d-rec .d-titlewrap { align-items: baseline; gap: 6px; }
 .d-rec .d-titlewrap > .ti { flex: 0 1 auto; min-width: 0; }

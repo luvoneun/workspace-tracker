@@ -507,7 +507,8 @@ function uiMoreButton(label, sections, className = 'd-iconbtn sm') {
 }
 
 // 메뉴 안에서 값을 고르는 칩 줄. 지금 값만 파랗게 표시한다(드롭다운보다 한눈에 보인다).
-function uiMenuChips(options, current, onPick) {
+// disableCurrent: 지금 값을 다시 고를 일이 없는 칸(종류 바꾸기)에서는 그 칩을 눌리지 않게 둔다.
+function uiMenuChips(options, current, onPick, disableCurrent = false) {
   const wrap = document.createElement('span');
   wrap.className = 'd-chips';
   options.forEach(([value, text]) => {
@@ -516,6 +517,7 @@ function uiMenuChips(options, current, onPick) {
     chip.className = 'd-chip' + (value === current ? ' is-on' : '');
     chip.setAttribute('role', 'menuitem');
     chip.textContent = text;
+    if (disableCurrent && value === current) chip.disabled = true;
     chip.addEventListener('click', () => onPick(value, wrap));
     wrap.appendChild(chip);
   });
@@ -3695,15 +3697,31 @@ function recordProjectName(item) {
 
 // 결정·아이디어 줄의 제목 자리: 제목 | (반영 완료면) `· ● 프로젝트` | (showSource면) 조용한 `원문` 링크.
 // 결정 줄은 원문을 아래 정보 줄로 옮겨 한 곳에만 적는다 — showSource를 꺼서 부른다.
-function recordTitleCell(row, title, item, projectName, showSource = true) {
+function recordTitleCell(row, title, item, projectName, showSource = true, extra = null) {
   const source = showSource ? uiSourceLink(item) : null;
-  if (!projectName && !source) { row.appendChild(title); return; }
+  if (!projectName && !source && !extra) { row.appendChild(title); return; }
   const wrap = document.createElement('span');
   wrap.className = 'd-titlewrap';
   wrap.appendChild(title);
   if (projectName) wrap.appendChild(uiInlineProject(item));
+  if (extra) wrap.appendChild(extra);
   if (source) wrap.appendChild(source);
   row.appendChild(wrap);
+}
+
+// 결정에 적어 둔 `내용`이 있을 때만 제목 뒤에 서는 조용한 표시. 누르면 그 결정의 상세 카드가 열린다.
+// 내용 자체는 카드에서 읽고 고친다 — 목록 줄은 훑어보는 자리라 본문을 펼치지 않는다.
+function recordNoteMark(item) {
+  const note = (typeof wfItem === 'function' ? wfItem(item.id)?.note : '') || '';
+  if (!note.trim()) return null;
+  const mark = document.createElement('button');
+  mark.type = 'button';
+  mark.className = 'd-recnote';
+  mark.textContent = '내용';
+  mark.title = '적어 둔 내용을 카드에서 읽어요';
+  mark.setAttribute('aria-label', `${item.description} — 내용 보기`);
+  mark.addEventListener('click', (event) => { event.stopPropagation(); panelOpen({ id: item.id }); });
+  return mark;
 }
 
 // 결정 아래 정보 줄에 넣을 부분들 — 날짜(created)·나온 회의(meetingId → 회의 제목)·원문 가운데
@@ -3849,7 +3867,7 @@ function recordDecisionRow(item, archived) {
   title.title = item.description;
   if (item.isNew && !archived) { title.prepend(renderNewDot(item)); observeNewItem(row, item); }
   // 원문은 제목 옆이 아니라 아래 정보 줄로 옮긴다(한 곳에만) — showSource: false.
-  recordTitleCell(row, title, item, archived ? recordProjectName(item) : '', false);
+  recordTitleCell(row, title, item, archived ? recordProjectName(item) : '', false, recordNoteMark(item));
 
   const meta = document.createElement('span');
   meta.className = 'mt';
@@ -3933,7 +3951,7 @@ const IDEA_CHANCE_CHIPS = [['high', '높음'], ['medium', '보통'], ['low', '�
 function ideaChanceControl(item) {
   return uiMenuChips(IDEA_CHANCE_CHIPS, item.priority || 'medium', async (value) => {
     uiMenuClose();
-    await setPriority(item.id, value);
+    await setPriority(item.id, value, '가능성 변경');
     announce('가능성을 바꿨어요');
     await load();
   });
@@ -4139,7 +4157,10 @@ function waitingNextBlockedList(blocked) {
 
 // `다음은?` 줄 한 벌. 세 자리(레일 확인 대기 카드 · 프로젝트 탭 확인 대기 구역 ·
 // 회의 카드/탭의 `이 회의에서 나온 것`)가 이 부품 하나를 쓴다.
-function waitingNextRow(item) {
+// compact: 레일(296px)처럼 좁은 자리에서만 버튼 이름을 짧게 쓴다 — 긴 이름은 aria-label에 그대로 남긴다.
+// CSS로 글자를 바꾸지 않는다(화면에 읽히는 글자와 읽어 주는 글자가 어긋나면 안 된다).
+const WAITING_NEXT_SHORT = { '결정으로 남기기': '결정으로', '답변 한 줄 남기기': '답변 남기기' };
+function waitingNextRow(item, { compact = false } = {}) {
   const wrap = document.createElement('div');
   wrap.className = 'd-wnext';
   wrap.setAttribute('role', 'group');
@@ -4156,7 +4177,7 @@ function waitingNextRow(item) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'd-btn sm';
-    button.textContent = text;
+    button.textContent = (compact && WAITING_NEXT_SHORT[text]) || text;
     button.setAttribute('aria-label', `${item.description} — ${text}`);
     button.addEventListener('click', () => onClick(button));
     bar.appendChild(button);
@@ -4196,11 +4217,11 @@ function waitingNextRow(item) {
 
 // 미완료만 보여 주는 목록(레일 확인 대기·프로젝트 탭)에서는 체크한 줄이 빠진다 —
 // 방금 체크한 줄을 목록 맨 위에 한 번 더 그리고 그 아래에 `다음은?`을 붙인다.
-function waitingNextLead(item, makeRow) {
+function waitingNextLead(item, makeRow, options) {
   const wrap = document.createElement('div');
   wrap.className = 'd-wnextwrap';
   wrap.appendChild(makeRow(item));
-  wrap.appendChild(waitingNextRow(item));
+  wrap.appendChild(waitingNextRow(item, options));
   return wrap;
 }
 
@@ -4253,7 +4274,7 @@ function waitingMenuSections(item, card) {
           value: item.due,
           label: '답변 받을 날',
           onChange: async (value) => {
-            await setTaskDue(item.id, value);
+            await setTaskDue(item.id, value, '답변 받을 날 변경');
             announce(value ? `답변 받을 날을 ${uiKoDate(value)}로 정했어요` : '답변 받을 날을 지웠어요');
           },
         }),
@@ -4343,8 +4364,9 @@ function renderWaiting(items) {
   list.replaceChildren();
 
   // 방금 체크한 줄은 이 목록(미완료만)에서 빠진다 — 맨 위에 한 번 더 그려 `다음은?`을 잇는다.
+  // 레일(296px)이라 버튼 이름은 짧은 쪽을 쓴다(compact).
   const checkedNow = waitingNextItem();
-  if (checkedNow) list.appendChild(waitingNextLead(checkedNow, entry => renderWaitingRow(entry, { showProject: true })));
+  if (checkedNow) list.appendChild(waitingNextLead(checkedNow, entry => renderWaitingRow(entry, { showProject: true }), { compact: true }));
 
   if (!items.length) {
     const empty = document.createElement('div');
@@ -4996,6 +5018,8 @@ function panelFieldChanges(id, initial, current) {
   if ('blockedBy' in current && current.blockedBy !== initial.blockedBy) changes.blockedBy = current.blockedBy || null;
   if ('outcome' in current && current.outcome !== initial.outcome) changes.outcome = (current.outcome || '').trim();
   if ('followUp' in current && current.followUp !== initial.followUp) changes.followUp = current.followUp || null;
+  // note: 결정의 `내용`. 줄바꿈을 그대로 둔다(한 줄인 outcome과 다르다).
+  if ('note' in current && current.note !== initial.note) changes.note = current.note || '';
   return changes;
 }
 
@@ -5078,6 +5102,7 @@ function panelTask({ item, detail, type }, box) {
   box.appendChild(foot);
 
   if (isTask) panelTaskNotes(item, detail, box);
+  if (type === 'decision') panelDecisionNote(item, detail, box);
   if (detail?.meetingId) {
     const link = document.createElement('button');
     link.type = 'button';
@@ -5166,6 +5191,32 @@ function panelTaskNotes(item, detail, box) {
   box.appendChild(panelOutcomeSection('결과 한 줄', '끝나고 한 줄로 남기면 주간요약에 그대로 올라가요', current, save));
 }
 
+// 결정의 `내용` — 정책 결정은 제목 한 줄로 끝나지 않는다. 여러 줄로 적고, 저장은 앱 파일
+// (.workflow.json의 note)에만 한다 — tracker/decisions.md의 한 줄 형식은 그대로 둔다.
+// 저장 타이밍·자동 높이는 업무의 `결과 한 줄`과 같다(change 때 저장, detailAutoGrow).
+// 주간요약·슬랙에는 나가지 않는다(결정 문장은 지금처럼 제목만).
+const DECISION_NOTE_MAX = 4000;
+function panelDecisionNote(item, detail, box) {
+  const current = { note: detail?.note || '' };
+  const initial = { ...current };
+  const save = async () => {
+    try { if (await panelFieldSave(item.id, initial, current)) await load(); }
+    catch { /* 저장 실패는 request()가 알린다 — 적은 내용은 그대로 둔다 */ }
+  };
+  const section = panelSection('내용');
+  const area = document.createElement('textarea');
+  area.className = 'd-din';
+  area.rows = 2;
+  area.maxLength = DECISION_NOTE_MAX;
+  area.value = current.note;
+  area.placeholder = '결정의 배경·조건·예외를 적어 두면 나중에 그대로 읽어요';
+  area.setAttribute('aria-label', '내용');
+  area.addEventListener('change', () => { current.note = area.value; save(); });
+  section.appendChild(area);
+  box.appendChild(section);
+  return section;
+}
+
 // 업무의 `결과 한 줄`과 확인 대기의 `답변 한 줄`은 같은 부품·같은 저장 길(outcome)을 쓴다.
 function panelOutcomeSection(label, placeholder, current, save) {
   const section = panelSection(label);
@@ -5197,7 +5248,7 @@ function panelCheck({ item, detail }, box) {
   }));
   // 확인 대기의 기한은 "상대에게 답을 받기로 한 날"이다 — 화면 이름을 그렇게 적는다.
   panelField(fields, '답변 받을 날', panelDateCell('답변 받을 날', item.due, async (value) => {
-    await setTaskDue(item.id, value);
+    await setTaskDue(item.id, value, '답변 받을 날 변경');
     announce(value ? `답변 받을 날을 ${uiKoDate(value)}로 정했어요` : '답변 받을 날을 지웠어요');
   }));
   panelField(fields, '다시 확인할 날짜', panelDateCell('다시 확인할 날짜', detail?.followUp, async (value) => {
@@ -5885,13 +5936,63 @@ function panelMeetingRowEdit(row, titleEl, item, checkbox) {
   });
 }
 
-// 회의 줄의 ⋯ — 앱의 다른 목록이 쓰는 메뉴를 그대로 쓰고, 맨 위에 `문구 고치기`만 얹는다.
-// 종류 바꾸기는 종류마다 저장 파일이 달라 서버에 옮기기가 필요해서 아직 없다(DECISIONS).
+// 담은 항목의 종류 바꾸기 — 서버가 같은 id로 파일만 옮긴다(회의 연결·검토 기록이 그대로 남는다).
+// 되돌리기는 반대 방향으로 한 번 더 바꾸는 것이고, 알림의 `되돌리기`와 ⌘Z가 같은 길을 쓴다.
+const RETYPE_CHIPS = [['task', '할 일'], ['check', '확인 대기'], ['decision', '결정']];
+const RETYPE_DISABLED_HINT = '완료한 항목은 종류를 바꿀 수 없어요';
+// `로`/`으로` — 받침이 없거나 ㄹ이면 `로`(할 일로 · 확인 대기로), 그 밖에는 `으로`(결정으로).
+function uiRoParticle(word) {
+  const last = String(word || '').trim().slice(-1);
+  const code = last.charCodeAt(0);
+  if (!(code >= 0xac00 && code <= 0xd7a3)) return '로';
+  const tail = (code - 0xac00) % 28;
+  return tail === 0 || tail === 8 ? '로' : '으로';
+}
+const retypeDoneText = type => `${wfType(type)}${uiRoParticle(wfType(type))}`;
+async function retypeSend(id, type) {
+  const result = await wfPost('retype', { id, type });
+  if (!result.ok) throw new Error(result.error || '종류를 바꾸지 못했어요.');
+  await load();
+}
+async function retypeMeetingItem(item, type) {
+  const from = item.type;
+  await retypeSend(item.id, type);
+  const entry = {
+    label: `${item.description} (종류 바꾸기)`,
+    undo: () => postJson('/api/workflow/retype', { id: item.id, type: from }),
+    redo: () => postJson('/api/workflow/retype', { id: item.id, type }),
+  };
+  pushUndo(entry);
+  showNotice(`${retypeDoneText(type)} 바꿨어요`, false, null, {
+    label: '되돌리기',
+    onClick: async (button) => {
+      if (button) button.disabled = true;
+      try { await retypeSend(item.id, from); } catch { if (button) button.disabled = false; return; }
+      // ⌘Z가 같은 되돌리기를 한 번 더 하지 않게 그 기록을 뺀다(삭제 되돌리기와 같은 규칙).
+      const at = undoStack.lastIndexOf(entry);
+      if (at >= 0) undoStack.splice(at, 1);
+      showNotice(`${retypeDoneText(from)} 되돌렸어요`);
+    },
+  });
+}
+
+// 회의 줄의 ⋯ — 앱의 다른 목록이 쓰는 메뉴를 그대로 쓰고, 맨 위에 `문구 고치기`와 `종류 바꾸기`를 얹는다.
 function panelMeetingRowMenu(item, row, onEdit) {
   const base = item.type === 'check' ? waitingMenuSections(item, row)
     : item.type === 'decision' ? decisionMenuSections(item, row)
     : taskMenuSections({ item, mode: panelMode(item), card: row });
-  return [[{ label: '문구 고치기', onClick: onEdit }], ...base];
+  // 완료한 항목은 옮기지 않는다 — 끝난 줄이라 종류를 바꿀 일이 없다(서버도 거절한다).
+  const done = item.status === 'done';
+  const chips = uiMenuChips(RETYPE_CHIPS, item.type, async (value) => {
+    uiMenuClose();
+    try { await retypeMeetingItem(item, value); } catch { /* request()가 이미 알린다 */ }
+  }, true);
+  if (done) {
+    Array.from(chips.children).forEach((chip) => { chip.disabled = true; });
+    chips.title = RETYPE_DISABLED_HINT;
+    chips.setAttribute('aria-description', RETYPE_DISABLED_HINT);
+  }
+  return [[{ label: '문구 고치기', onClick: onEdit }, { field: '종류 바꾸기', control: chips }], ...base];
 }
 
 // 회의 줄 맨 앞의 체크 칸: 할 일·버그는 완료 체크, 확인 대기는 확인 완료, 결정은 `PRD 반영함` —
@@ -6314,7 +6415,8 @@ function meetingsTabFilters(meetings) {
     button.type = 'button';
     button.className = 'd-chip' + (on ? ' is-on' : '');
     button.textContent = text;
-    if (hint) button.title = hint;
+    // 이름은 줄에 들어가야 해서 짧게 두고, 무슨 뜻인지는 툴팁(title)과 읽어 주는 설명(aria-description)이 푼다.
+    if (hint) { button.title = hint; button.setAttribute('aria-description', hint); }
     button.setAttribute('aria-pressed', String(!!on));
     button.addEventListener('click', () => { onPick(); renderMeetings(); });
     bar.appendChild(button);
@@ -6324,7 +6426,7 @@ function meetingsTabFilters(meetings) {
   // 조용한 토글 — 기본은 꺼짐, 켜면 보이는 기간 안의 기록 없는 지난 회의도 함께 나온다.
   // 칩 이름은 짧게 두고 무슨 뜻인지는 툴팁이 풀어 준다(줄에 들어가야 하는 이름이다).
   chip('빈 회의 포함', meetingsTabState.showNoRecord, () => { meetingsTabState.showNoRecord = !meetingsTabState.showNoRecord; },
-    '초안도 담은 항목도 없는 지난 회의까지 보여 줘요');
+    '아무것도 담지 않은 회의도 함께 보여요');
 
   // 프로젝트는 값이 여럿이라 칩 대신 고르는 칸이다(회의에 연결된 프로젝트만 후보로).
   const keys = new Map();
@@ -6573,9 +6675,10 @@ function detailPopShape(box) {
   requestAnimationFrame(edges);
 }
 
-// 결과 한 줄(확인 대기는 `답변 한 줄`)은 한 줄로 시작해 쓰는 만큼만 자라고, 다섯 줄을 넘으면 칸 안에서 스크롤한다.
+// 결과 한 줄(확인 대기는 `답변 한 줄`, 결정은 `내용`)은 한 줄로 시작해 쓰는 만큼만 자라고,
+// 다섯 줄을 넘으면 칸 안에서 스크롤한다.
 function detailAutoGrow(box, maxLines, onGrow) {
-  const area = box.querySelector('.d-dsec[data-sec="결과 한 줄"] .d-din, .d-dsec[data-sec="답변 한 줄"] .d-din');
+  const area = box.querySelector('.d-dsec[data-sec="결과 한 줄"] .d-din, .d-dsec[data-sec="답변 한 줄"] .d-din, .d-dsec[data-sec="내용"] .d-din');
   if (!area) return;
   area.rows = 1;
   const cap = 21 * maxLines + 20;
@@ -7525,11 +7628,20 @@ async function setTaskDoing(id, doing) {
   load();
 }
 
-async function setTaskDue(id, due) {
+// 기한(확인 대기에서는 `답변 받을 날`)도 ⌘Z 대상이다. 되돌릴 값은 보내기 전에 읽어 둔다 —
+// load()가 돌면 itemsById가 새 값으로 바뀐다. 기록은 호출부에서 pushUndo를 부르기만 한다.
+async function setTaskDue(id, due, undoLabel = '기한 변경') {
+  const before = itemsById.get(id)?.due || null;
   await request('/api/track/set-due', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ id, due }),
+  });
+  const after = due || null;
+  if (before !== after) pushUndo({
+    label: `${itemsById.get(id)?.description || ''} (${undoLabel})`,
+    undo: () => postJson('/api/track/set-due', { id, due: before }),
+    redo: () => postJson('/api/track/set-due', { id, due: after }),
   });
   load();
 }
@@ -7542,11 +7654,20 @@ async function setTaskScheduled(id, scheduled) {
   await load();
 }
 
-async function setPriority(id, priority) {
+// 우선순위(아이디어 화면에서는 `가능성` — 같은 값·같은 저장 길)도 ⌘Z 대상이다.
+// 이름은 그 화면에서 부르는 말로 남긴다.
+async function setPriority(id, priority, undoLabel = '우선순위 변경') {
+  const before = itemsById.get(id)?.priority || 'medium';
   await request('/api/track/set-priority', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ id, priority }),
+  });
+  const after = priority || 'medium';
+  if (before !== after) pushUndo({
+    label: `${itemsById.get(id)?.description || ''} (${undoLabel})`,
+    undo: () => postJson('/api/track/set-priority', { id, priority: before }),
+    redo: () => postJson('/api/track/set-priority', { id, priority: after }),
   });
 }
 
@@ -7950,7 +8071,7 @@ const SETTINGS_FAQ = [
   ['회의 내용은 어디서 정리하나요',
     '왼쪽 <b>오늘 미팅</b>의 회의를 누르면 오른쪽에 회의 정리 패널이 열려요. 초안을 고쳐 담고, 담은 뒤 뜨는 결과 카드의 <b>실행 취소</b>로 되돌릴 수 있어요.'],
   ['잘못 눌렀을 때는',
-    '완료·삭제·보고 제외는 아래 알림의 <b>되돌리기</b>로 바로 취소할 수 있어요. <b>⌘Z</b>도 같은 일을 하고, <b>⌘⇧Z</b>로 다시 실행해요.'],
+    '완료·삭제·보고 제외는 아래 알림의 <b>되돌리기</b>로 바로 취소할 수 있어요. <b>⌘Z</b>도 같은 일을 하고(우선순위·기한 변경, 종류 바꾸기도 대상이에요), <b>⌘⇧Z</b>로 다시 실행해요.'],
   ['결과 한 줄은 왜 적나요',
     '완료한 업무에 적은 한 줄이 주간요약 문장으로 그대로 올라가요. 금요일에 다시 쓰지 않아도 돼요.'],
   ['보고 문장을 수정하면 원본 업무도 바뀌나요',
