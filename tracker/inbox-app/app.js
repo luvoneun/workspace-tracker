@@ -4276,6 +4276,11 @@ if (todayHeadMoreSlot) {
       }),
     }],
     [{
+      // 하루 마감 — 남은 오늘 업무에 `내일/나중에/완료`를 찍어 한 번에 저장한다(wrap-ui.js).
+      label: '오늘 정리',
+      disabled: taskBatchBusy,
+      onClick: () => wrapOpen(),
+    }, {
       label: taskSelectionMode ? '선택 끝내기' : '여러 개 선택',
       disabled: taskBatchBusy,
       onClick: () => { if (taskSelectionMode) taskSelectEnd(); else taskSelectStart(); },

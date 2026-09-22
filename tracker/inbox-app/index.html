@@ -201,6 +201,17 @@
 
   <div id="liveRegion" class="d-toast" role="status" aria-live="polite" hidden></div>
 
+  <!-- 오늘 정리 — 하루를 마감할 때만 여는 창이라 설정과 같은 모달 판(.d-modal)을 그대로 쓴다 -->
+  <dialog id="wrapDialog" class="d-modal" aria-label="오늘 정리">
+    <div class="d-mhd">
+      <h2>오늘 정리</h2>
+      <span class="d-wrapdate" id="wrapDialogDate"></span>
+      <span class="sp"></span>
+      <button type="button" class="d-iconbtn" id="wrapCloseBtn" aria-label="닫기"><svg class="d-i" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+    </div>
+    <div class="d-mbody" id="wrapBody"></div>
+  </dialog>
+
   <!-- 설정 — 드물게 여는 창이라 모달 그대로 둔다(상태 / 사용법 / 삭제한 항목 세 칸) -->
   <dialog id="settingsDialog" class="d-modal" aria-label="설정">
     <div class="d-mhd">
@@ -228,6 +239,7 @@
 <script src="/meetings-ui.js"></script>
 <script src="/waiting-ui.js"></script>
 <script src="/settings-ui.js"></script>
+<script src="/wrap-ui.js"></script>
 <script src="/report-ui.js"></script>
 <script src="/app.js"></script>
 </body>

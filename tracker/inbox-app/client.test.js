@@ -134,7 +134,7 @@ test('a save refused for recovery shows the server message and keeps the banner 
 // 같은 결과를 내는 함수를 넣어, 화면 문자열을 만드는 나머지 로직을 검증한다.
 // 화면 코드는 여러 파일로 나뉘어 있고, 브라우저에서는 index.html의 <script> 차례대로
 // 같은 전역 공간에서 돈다. 테스트도 같은 가짜 창에 같은 차례로 이어 붙인다.
-const CLIENT_PARTS = ['jira-ui.js', 'meeting-notes-ui.js', 'project-new-ui.js', 'projects-ui.js', 'meetings-ui.js', 'waiting-ui.js', 'settings-ui.js'];
+const CLIENT_PARTS = ['jira-ui.js', 'meeting-notes-ui.js', 'project-new-ui.js', 'projects-ui.js', 'meetings-ui.js', 'waiting-ui.js', 'settings-ui.js', 'wrap-ui.js'];
 function pureClient() {
   const app = client(new Response('{}'));
   CLIENT_PARTS.forEach(file => app.run(fs.readFileSync(path.join(__dirname, file), 'utf8')));
@@ -5025,4 +5025,171 @@ test('BJCREATE: 직군 목록은 설정 세트를 따르고, 줄 편집은 앱�
   await bjcButton(nodeFind(fixture.body(), 'd-pnewedit'), '저장').listeners.click();
   assert.deepEqual(fixture.sent.slice(-1), [{ url: '/api/workflow/jira-roles', body: { roles: [{ label: 'Web', prefix: '[Web]' }, { label: 'Data', prefix: '[Data]' }] } }]);
   assert.match(fixture.app.nodes.get('liveRegion').textContent, /직군 목록을 저장했어요/);
+});
+
+// ---------- BWRAP: 오늘 정리 ----------
+// 남은 오늘 업무에 `그대로 | 내일 | 나중에 | 완료`를 찍고 **기존 일괄 저장 길**로만 보낸다
+// (`/api/workflow/task-batch` — 여러 개 선택 막대와 같은 API·같은 change).
+const wrapTask = (id, description, extra = {}) => ({ id, description, type: 'task', status: 'to-do', ...extra });
+const WRAP_BUILD = ({ today }) => [
+  wrapTask('w1', '알림센터 발송 실패 로그 확인하기', { doing: today, group: '알림센터' }),
+  wrapTask('w2', '결제 정산 배치 설계 검토하기', { due: today, group: '결제 리뉴얼' }),
+  wrapTask('w3', '가입 약관 문구 확인하기', { due: '2000-01-01', group: '가입 개선' }),
+  wrapTask('w4', '운영툴 권한 신청 처리하기', {}),
+  wrapTask('d1', '가입 퍼널 대시보드 반영하기', { status: 'done', group: '가입 개선' }),
+  wrapTask('d2', '주간 회의 자료 준비하기', { status: 'done' }),
+];
+function wrapClient(build = WRAP_BUILD) {
+  const app = workflowsClient();
+  const sent = [];
+  const state = { failAt: 0 };
+  let token = 0;
+  app.context.fetch = async (url, options) => {
+    const body = options && options.body ? JSON.parse(options.body) : null;
+    sent.push({ url: String(url), body });
+    if (state.failAt && sent.length === state.failAt) return new Response('{"ok":false,"error":"저장하지 못했어요"}', { status: 500 });
+    token += 1;
+    return new Response(JSON.stringify({ ok: true, count: (body && body.ids || []).length, undoToken: `u${token}` }));
+  };
+  app.run('loads = 0; load = async () => { loads += 1; };');
+  const today = app.run('todayStr()');
+  const tomorrow = app.run('tomorrowStr()');
+  app.context.__tasks = build({ today, tomorrow });
+  // 나중에 할 일은 오늘 목록이 아니다 — 대상에 섞이면 안 된다.
+  app.context.__later = [{ id: 'later1', description: '나중에 할 일', type: 'task', status: 'to-do' }];
+  app.run('taskListsCache = { todayTasks: __tasks, laterTasks: __later }');
+  const body = () => app.nodes.get('wrapBody');
+  const rows = () => nodeFindAll(body(), 'd-wraprow');
+  const pick = (index, label) => {
+    const seg = nodeFind(rows()[index], 'd-seg');
+    seg.children.find(button => button.textContent === label).listeners.click();
+  };
+  const foot = () => nodeFind(body(), 'd-wrapfoot');
+  const go = () => foot().children[0];
+  const cancel = () => foot().children[1];
+  return { app, sent, state, today, tomorrow, body, rows, pick, foot, go, cancel };
+}
+
+test('BWRAP: 대상은 오늘 목록의 미완료 업무뿐이고, 기본은 전부 `그대로`라 주 버튼이 눌리지 않는다', () => {
+  const fixture = wrapClient();
+  fixture.app.run('wrapOpen()');
+  assert.equal(fixture.app.run('wrapState.rows.map(row => row.id).join(",")'), 'w1,w2,w3,w4',
+    '완료한 줄도, 나중에 할 일도 대상이 아니다');
+  assert.equal(fixture.app.run('wrapState.rows.every(row => row.choice === "keep")'), true, '앱이 미룰 것을 추측하지 않는다');
+  assert.equal(nodeFind(fixture.body(), 'd-wrapsum').textContent, '6개 중 2개 끝냈어요 · 남은 4개');
+  assert.equal(fixture.go().textContent, '바꿀 게 없어요');
+  assert.equal(fixture.go().disabled, true);
+
+  // 줄은 제목 + `· ● 프로젝트` + 업무 줄과 같은 상태말이다(있는 것만).
+  const rows = fixture.rows();
+  assert.equal(nodeFind(rows[0], 'ti').textContent, '알림센터 발송 실패 로그 확인하기');
+  assert.equal(nodeFind(rows[0], 'd-inproj').children.filter(kid => typeof kid === 'string').join(''), '· 알림센터');
+  assert.equal(nodeFind(rows[0], 'm-doing').children.filter(kid => typeof kid === 'string').join(''), '진행 중');
+  assert.equal(nodeFind(rows[1], 'm-due').className, 'm-due k-warn', '오늘까지는 주의색 배지다');
+  assert.equal(nodeFind(rows[2], 'm-due').className, 'm-due k-neg', '지난 기한은 급함색 배지다');
+  assert.equal(nodeFind(rows[3], 'd-meta').children.length, 0, '말할 것이 없으면 아무 칸도 만들지 않는다');
+  assert.equal(nodeFind(rows[0], 'd-seg').children.map(button => button.textContent).join(','), '그대로,내일,나중에,완료');
+});
+
+test('BWRAP: 남은 오늘 업무가 없으면 창을 열지 않고 한마디만 한다', () => {
+  const fixture = wrapClient(() => [wrapTask('d1', '다 끝낸 업무', { status: 'done' })]);
+  fixture.app.run('wrapOpen()');
+  assert.equal(fixture.app.run('wrapState'), null, '창을 열지 않는다');
+  assert.match(fixture.app.nodes.get('liveRegion').textContent, /오늘 할 일을 모두 끝냈어요/);
+  assert.equal(fixture.sent.length, 0);
+});
+
+test('BWRAP: 주 버튼 라벨은 고른 개수를 따라 바뀌고, 취소는 아무것도 저장하지 않는다', () => {
+  const fixture = wrapClient();
+  fixture.app.run('wrapOpen()');
+  fixture.pick(0, '완료');
+  assert.equal(fixture.go().textContent, '정리 끝 — 완료 1', '0인 갈래는 생략한다');
+  fixture.pick(1, '내일');
+  fixture.pick(2, '내일');
+  fixture.pick(3, '나중에');
+  assert.equal(fixture.go().textContent, '정리 끝 — 내일 2 · 나중에 1 · 완료 1');
+  assert.equal(fixture.go().disabled, false);
+  // 다시 `그대로`로 돌리면 그만큼 줄어든다
+  fixture.pick(3, '그대로');
+  assert.equal(fixture.go().textContent, '정리 끝 — 내일 2 · 완료 1');
+
+  fixture.cancel().listeners.click();
+  assert.equal(fixture.app.run('wrapState'), null);
+  assert.equal(fixture.sent.length, 0, '고른 것은 버린다 — 아무것도 보내지 않는다');
+  assert.equal(fixture.app.run('undoStack.length'), 0);
+});
+
+test('BWRAP: `정리 끝`은 갈래마다 한 번씩(완료 → 내일 → 나중에) 기존 일괄 저장 길로 보낸다', async () => {
+  const fixture = wrapClient();
+  fixture.app.run('wrapOpen()');
+  fixture.pick(0, '완료');
+  fixture.pick(1, '내일');
+  fixture.pick(2, '내일');
+  fixture.pick(3, '나중에');
+  await fixture.go().listeners.click();
+
+  assert.deepEqual(fixture.sent, [
+    { url: '/api/workflow/task-batch', body: { ids: ['w1'], change: { status: 'done' } } },
+    { url: '/api/workflow/task-batch', body: { ids: ['w2', 'w3'], change: { scheduled: fixture.tomorrow } } },
+    { url: '/api/workflow/task-batch', body: { ids: ['w4'], change: { scheduled: null } } },
+  ], '`그대로`인 줄은 어디에도 실리지 않고, 갈래마다 한 번씩만 간다');
+  assert.equal(fixture.app.run('loads'), 1);
+  assert.equal(fixture.app.run('wrapState'), null, '저장 뒤 창이 닫힌다');
+  assert.match(fixture.app.nodes.get('liveRegion').textContent, /오늘 정리했어요 · 내일 2 · 나중에 1 · 완료 1/);
+});
+
+test('BWRAP: ⌘Z 항목은 하나이고, 되돌리기는 보낸 차례의 반대로 undoToken을 돌린다', async () => {
+  const fixture = wrapClient();
+  fixture.app.run('wrapOpen()');
+  fixture.pick(0, '완료');
+  fixture.pick(1, '내일');
+  fixture.pick(3, '나중에');
+  await fixture.go().listeners.click();
+  assert.equal(fixture.app.run('undoStack.length'), 1, '세 번 보냈어도 되돌릴 항목은 하나다');
+  assert.equal(fixture.app.run('undoStack[0].label'), '오늘 정리');
+
+  const before = fixture.sent.length;
+  await fixture.app.run("replayUndo('undo')");
+  assert.deepEqual(fixture.sent.slice(before).map(entry => entry.body), [
+    { undoToken: 'u3' }, { undoToken: 'u2' }, { undoToken: 'u1' },
+  ], '나중에 → 내일 → 완료 차례로 되돌린다');
+  assert.equal(fixture.app.run('undoStack.length'), 0);
+  assert.equal(fixture.app.run('redoStack.length'), 1);
+});
+
+test('BWRAP: 중간에 멈추면 성공한 갈래만 ⌘Z에 담고, 창은 닫지 않고 실패한 줄만 남긴다', async () => {
+  const fixture = wrapClient();
+  fixture.state.failAt = 2; // 완료는 되고 내일에서 멈춘다 — 나중에는 시작하지 않는다
+  fixture.app.run('wrapOpen()');
+  fixture.pick(0, '완료');
+  fixture.pick(1, '내일');
+  fixture.pick(2, '내일');
+  fixture.pick(3, '나중에');
+  await fixture.go().listeners.click();
+
+  assert.equal(fixture.sent.length, 2, '실패한 갈래에서 멈춘다');
+  assert.match(fixture.app.nodes.get('liveRegion').textContent, /완료 1개는 옮겼지만 내일 2개는 못 옮겼어요 · 다시 시도해 주세요/);
+  assert.equal(fixture.app.run('undoStack.length'), 1, '성공한 갈래만 담는다');
+  assert.notEqual(fixture.app.run('wrapState'), null, '창은 닫지 않는다');
+  assert.equal(fixture.app.run('wrapState.rows.map(row => row.id + ":" + row.choice).join(",")'),
+    'w2:tomorrow,w3:tomorrow,w4:later', '보낸 줄만 빠지고 고른 값은 그대로다');
+  assert.equal(fixture.go().textContent, '정리 끝 — 내일 2 · 나중에 1');
+  assert.equal(fixture.go().disabled, false, '다시 누를 수 있다');
+});
+
+test('BWRAP: `끝낸 것`은 접힌 소제목이고, 0개면 소제목 자체가 없다', () => {
+  const fixture = wrapClient();
+  fixture.app.run('wrapOpen()');
+  const headings = () => nodeFindAll(fixture.body(), 'd-grp').map(head => nodeFind(head, 'gl').textContent);
+  assert.deepEqual(headings(), ['끝낸 것', '남은 것']);
+  assert.equal(nodeFindAll(fixture.body(), 'd-wrapdone').length, 0, '처음에는 접혀 있다');
+
+  nodeFindAll(fixture.body(), 'd-grp')[0].listeners.click();
+  assert.deepEqual(nodeFindAll(fixture.body(), 'd-wrapdone').map(row => row.textContent),
+    ['가입 퍼널 대시보드 반영하기', '주간 회의 자료 준비하기']);
+
+  const none = wrapClient(({ today }) => [wrapTask('w1', '남은 업무', { doing: today })]);
+  none.app.run('wrapOpen()');
+  assert.deepEqual(nodeFindAll(none.body(), 'd-grp').map(head => nodeFind(head, 'gl').textContent), ['남은 것']);
+  assert.equal(nodeFind(none.body(), 'd-wrapsum').textContent, '1개 중 0개 끝냈어요 · 남은 1개');
 });

@@ -2058,14 +2058,15 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-rec.is-dec:focus-within .ac .d-more, .d-rec.is-idea:focus-within .ac .d-more { color: var(--text); }
 
 /* ---------- 설정 (모달) ---------- */
-#settingsDialog {
+/* 창 뼈대(.d-modal)는 드물게 여는 창들이 함께 쓴다 — 설정, 오늘 정리. 안쪽만 각자 정한다. */
+.d-modal {
   width: min(620px, calc(100vw - 32px)); max-height: calc(100dvh - 120px); box-sizing: border-box;
   display: flex; flex-direction: column; padding: 0;
   border: 1px solid var(--surface-line); border-radius: var(--r); background: var(--surface); color: var(--text);
   box-shadow: var(--pop);
 }
-#settingsDialog::backdrop { background: var(--scrim); }
-#settingsDialog:not([open]) { display: none; }
+.d-modal::backdrop { background: var(--scrim); }
+.d-modal:not([open]) { display: none; }
 .d-mhd {
   display: flex; align-items: center; gap: 12px; flex: none;
   padding: 14px 14px 14px 20px; border-bottom: 1px solid var(--hair);
@@ -2128,6 +2129,32 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-trow .ta .d-more { width: 28px; height: 28px; color: var(--dim); }
 .d-trow:hover .ta .d-more, .d-trow:focus-within .ta .d-more { color: var(--text); }
 .d-trow .ta .tq { font-size: 12.5px; color: var(--muted); }
+
+/* ---------- 오늘 정리 (모달) ----------
+   설정과 같은 판(.d-modal) 위에 줄 목록 하나다. 줄은 `제목 · ● 프로젝트 | 상태말 | 세그먼트`이고
+   상태말은 업무 줄과 같은 칸(.d-meta)을 그대로 쓴다. */
+#wrapDialog { width: min(720px, calc(100vw - 32px)); }
+.d-mhd .d-wrapdate { font-size: 13px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.d-wrapsum { margin: 0 0 8px; font-size: 13px; color: var(--dim); }
+.d-wrapdone {
+  padding: 4px 0 4px 22px; font-size: 13px; color: var(--dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.d-wraprow { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 5px 0; }
+.d-wraprow + .d-wraprow { box-shadow: inset 0 1px 0 var(--hair); }
+.d-wraprow .tiwrap { display: flex; align-items: baseline; gap: 6px; flex: 1 1 auto; min-width: 0; }
+.d-wraprow .ti { flex: 1 1 auto; min-width: 4em; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.d-wraprow .tiwrap .d-inproj { flex: 0 1 auto; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
+.d-wraprow .d-meta { flex: none; overflow: visible; }
+.d-wraprow .d-seg { flex: none; }
+/* 줄이 많아 본문이 스크롤해도 주 버튼은 늘 보인다 — 상세 카드의 동작 줄(.d-dbar)과 같은 방식이다
+   (본문 여백만큼 음수 여백으로 빼내고 바닥에 붙인다). */
+.d-wrapfoot {
+  position: sticky; bottom: -18px; z-index: 1;
+  display: flex; align-items: center; gap: 8px;
+  margin: 14px -16px -18px; padding: 12px 16px;
+  background: var(--surface); border-top: 1px solid var(--hair);
+}
 
 /* 프로젝트 제목 자리의 이름 바꾸기 — 제목(.d-ptitle)이 있던 그 줄을 그대로 쓴다. */
 .d-pren { display: flex; align-items: center; gap: 6px; margin: 0 0 2px; max-width: 520px; }
@@ -2196,6 +2223,9 @@ body.batch-open .d-toast { bottom: 76px; }
     border-left: 0; border-top: 1px solid var(--border); border-radius: var(--r) var(--r) 0 0;
     box-shadow: var(--pop); transform: translateY(100%);
   }
+
+  /* 오늘 정리는 줄마다 세그먼트를 들고 있어 일찍 좁아진다 — 설정 창과 같은 전체 폭 판이 된다 */
+  #wrapDialog { width: calc(100vw - 16px); max-height: calc(100dvh - 48px); }
 }
 @media (max-width: 640px) {
   .d-hdr { padding: 0 12px 0 16px; gap: 12px; }
@@ -2297,6 +2327,12 @@ body.batch-open .d-toast { bottom: 76px; }
   .d-mhd #settingsCloseBtn { order: 2; }
   .d-mhd .d-seg { order: 3; flex-basis: 100%; }
   .d-mbody { padding: 12px 14px 20px; }
+  /* 오늘 정리 줄은 두 줄로 쌓인다 — 세그먼트가 줄 폭을 통째로 쓰고 넷이 고르게 나눠 선다 */
+  .d-wraprow { flex-wrap: wrap; row-gap: 6px; padding: 8px 0; }
+  .d-wraprow .tiwrap { flex-basis: 100%; }
+  .d-wraprow .d-seg { flex: 1 1 100%; }
+  .d-wraprow .d-seg button { flex: 1 1 0; padding: 0 8px; }
+  .d-wrapfoot { bottom: -20px; margin: 12px -14px -20px; padding: 10px 14px; }
   .d-recsearch { width: 100%; font-size: 16px; height: 36px; }
 }
 
