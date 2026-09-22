@@ -2022,6 +2022,25 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-dsec .lbl { display: block; margin-bottom: 6px; font-size: 12px; font-weight: 600; color: var(--muted); }
 .d-hint { margin-top: 6px; font-size: 11.5px; color: var(--muted); }
 
+/* 삭제한 항목 한 줄 — 자동화 줄(.d-auto)과 같은 리듬이다: 종류·문구·프로젝트 / 삭제 시각 | 되살리기 ⋯ */
+.d-trow { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
+.d-trow + .d-trow { box-shadow: inset 0 1px 0 var(--hair); }
+.d-trow .tm { flex: 1; min-width: 0; }
+.d-trow .tl { display: flex; align-items: baseline; gap: 6px; min-width: 0; min-height: 22px; }
+.d-trow .kd { flex: none; font-size: 12px; font-weight: 600; color: var(--muted); }
+.d-trow .tx { flex: 1 1 auto; min-width: 6em; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 좁은 폭에서 프로젝트 이름이 문구를 밀어내지 않게 — 받은 것 줄(.d-ibmain)과 같은 상한 */
+.d-trow .tl .d-inproj { flex: 0 1 auto; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
+.d-trow .tw { margin-top: 2px; font-size: 12.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.d-trow .ta { display: flex; align-items: center; gap: 4px; flex: none; }
+.d-trow .ta .d-more { width: 28px; height: 28px; color: var(--dim); }
+.d-trow:hover .ta .d-more, .d-trow:focus-within .ta .d-more { color: var(--text); }
+.d-trow .ta .tq { font-size: 12.5px; color: var(--muted); }
+
+/* 프로젝트 제목 자리의 이름 바꾸기 — 제목(.d-ptitle)이 있던 그 줄을 그대로 쓴다. */
+.d-pren { display: flex; align-items: center; gap: 6px; margin: 0 0 2px; max-width: 520px; }
+.d-pren .d-din { flex: 1 1 220px; min-width: 0; min-height: 36px; font-size: 18px; font-weight: 700; letter-spacing: -0.02em; }
+
 /* ---------- 반응형 ---------- */
 @media (max-width: 1280px) {
   :root { --wm: 140px; }
@@ -2176,6 +2195,11 @@ body.batch-open .d-toast { bottom: 76px; }
   /* 설정 창은 화면을 거의 다 쓰는 판이 된다 */
   #settingsDialog { width: calc(100vw - 16px); max-height: calc(100dvh - 48px); }
   .d-mhd { padding: 10px 10px 10px 14px; gap: 8px; }
+  /* 칸이 셋(상태·사용법·삭제한 항목)이라 좁은 폭에서는 제목 줄 아래로 통째로 내려온다 */
+  .d-mhd { flex-wrap: wrap; row-gap: 8px; }
+  .d-mhd .sp { order: 1; }
+  .d-mhd #settingsCloseBtn { order: 2; }
+  .d-mhd .d-seg { order: 3; flex-basis: 100%; }
   .d-mbody { padding: 12px 14px 20px; }
   .d-recsearch { width: 100%; font-size: 16px; height: 36px; }
 }

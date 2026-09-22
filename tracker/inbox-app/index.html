@@ -201,13 +201,14 @@
 
   <div id="liveRegion" class="d-toast" role="status" aria-live="polite" hidden></div>
 
-  <!-- 설정 — 드물게 여는 창이라 모달 그대로 둔다(상태 / 사용법 두 칸) -->
+  <!-- 설정 — 드물게 여는 창이라 모달 그대로 둔다(상태 / 사용법 / 삭제한 항목 세 칸) -->
   <dialog id="settingsDialog" class="d-modal" aria-label="설정">
     <div class="d-mhd">
       <h2>설정</h2>
       <span class="d-seg" role="group" aria-label="설정 보기">
         <button type="button" data-settings-tab="status" aria-pressed="true">상태</button>
         <button type="button" data-settings-tab="guide" aria-pressed="false">사용법</button>
+        <button type="button" data-settings-tab="trash" aria-pressed="false" id="settingsTrashTab">삭제한 항목</button>
       </span>
       <span class="sp"></span>
       <button type="button" class="d-iconbtn" id="settingsCloseBtn" aria-label="닫기"><svg class="d-i" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
@@ -215,6 +216,7 @@
     <div class="d-mbody">
       <div id="settingsStatusView"></div>
       <div id="settingsGuideView" hidden></div>
+      <div id="settingsTrashView" hidden></div>
     </div>
   </dialog>
 

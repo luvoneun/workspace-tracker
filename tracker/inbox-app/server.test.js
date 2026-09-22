@@ -2175,3 +2175,262 @@ test('복구가 필요한 동안에는 보관도 저장되지 않는다', async 
   assert.equal(blocked.status, 503);
   assert.match(blocked.error, /저장을 멈췄어요/);
 });
+
+// ---------- 설정 > 삭제한 항목 (BTRASH) ----------
+// 삭제한 줄의 원문은 `.trash.json`에 남는다. 목록은 조회이고(파일을 쓰지 않는다), 되살리기는 기존
+// `/api/track/restore`가, 완전히 지우기는 아래 `trash-purge`가 맡는다. 자동 영구 삭제는 없다.
+const purgePost = (origin, body, key) => fetch(origin + '/api/track/trash-purge', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', ...(key ? { 'Idempotency-Key': key } : {}) },
+  body: JSON.stringify(body),
+}).then(async response => ({ status: response.status, ...await response.json() }));
+
+const seedTrash = (home) => {
+  fs.writeFileSync(path.join(home, 'tasks.md'), '# Tasks\n');
+  fs.writeFileSync(path.join(home, 'checks.md'), '# Checks\n');
+  fs.writeFileSync(path.join(home, '.trash.json'), JSON.stringify([
+    { id: 'tr01', file: 'tasks.md', index: 1, deletedAt: '2026-09-21T13:10:00.000Z',
+      line: '- 정산 배치 설계 검토하기 #task[id:tr01 status:to-do priority:high created:2026-09-20 group:결제_리뉴얼]' },
+    { id: 'tr02', file: 'checks.md', index: 1, deletedAt: '2026-09-22T01:05:00.000Z',
+      line: '- 법무 검토 회신 #check[id:tr02 status:to-do priority:medium created:2026-09-21 who:엘리 jira:IO-12345]' },
+    { id: 'tr03', file: 'ideas.md', index: 1, deletedAt: '2026-09-20T09:00:00.000Z',
+      line: '- 알림 묶어 보내기 #idea[id:tr03 status:to-do priority:low created:2026-09-19 project:알림센터]' },
+  ], null, 2));
+};
+const homeSnapshot = home => fs.readdirSync(home).sort().map((name) => {
+  const stat = fs.statSync(path.join(home, name));
+  return `${name}:${stat.size}:${stat.mtimeMs}`;
+}).join('|');
+
+test('BTRASH: 삭제한 항목 목록은 원문 줄에서 종류·문구·프로젝트만 뽑아 최근 순으로 주고 파일을 쓰지 않는다', async (t) => {
+  const server = await startServer(t, seedTrash);
+  const before = homeSnapshot(server.home);
+  const list = await (await fetch(server.base + '/api/track/trash')).json();
+  assert.equal(list.ok, true);
+  assert.deepEqual(list.items.map(entry => entry.id), ['tr02', 'tr01', 'tr03'], '삭제 시각 내림차순이다');
+  assert.deepEqual(list.items[1], {
+    id: 'tr01', type: 'task', typeLabel: '할 일', description: '정산 배치 설계 검토하기',
+    file: 'tasks.md', deletedAt: '2026-09-21T13:10:00.000Z', project: '결제 리뉴얼', projectKey: 'group:결제 리뉴얼',
+  });
+  assert.equal(list.items[0].typeLabel, '확인 대기');
+  assert.equal(list.items[0].project, 'IO-12345', '지라 요약을 모르면 키만 적는다(BKEY)');
+  assert.deepEqual([list.items[2].typeLabel, list.items[2].project], ['아이디어', '알림센터'], '아이디어의 프로젝트 칸은 `project:`다');
+  assert.ok(!JSON.stringify(list).includes('status:to-do'), '원문 줄 전체(흐름 기록 칸)는 싣지 않는다');
+  assert.equal(homeSnapshot(server.home), before, 'GET은 어떤 파일도 쓰지 않는다');
+});
+
+test('BTRASH: 완전히 지우기는 그 줄만 휴지통에서 빼고, 같은 식별자로 다시 보내도 한 번만 지운다', async (t) => {
+  const server = await startServer(t, seedTrash);
+  const trashFile = path.join(server.home, '.trash.json');
+  const ids = () => JSON.parse(fs.readFileSync(trashFile, 'utf8')).map(entry => entry.id);
+
+  const gone = await purgePost(server.base, { id: 'tr03' });
+  assert.deepEqual(gone, { status: 200, ok: true, id: 'tr03', removed: 1 });
+  assert.deepEqual(ids(), ['tr01', 'tr02'], '고른 항목만 빠지고 나머지 원문은 그대로 남는다');
+  assert.deepEqual((await (await fetch(server.base + '/api/track/trash')).json()).items.map(entry => entry.id), ['tr02', 'tr01']);
+
+  const again = await purgePost(server.base, { id: 'tr03' });
+  assert.deepEqual([again.status, again.error], [400, '이미 지운 항목이에요.']);
+  for (const bad of [{}, { id: '' }, { id: 7 }]) {
+    assert.deepEqual((await purgePost(server.base, bad)).error, '지울 항목을 확인해 주세요.', JSON.stringify(bad));
+  }
+  assert.deepEqual(ids(), ['tr01', 'tr02'], '거절된 요청은 파일을 고치지 않는다');
+
+  // 같은 내용을 같은 식별자로 다시 보내면 한 번만 쓴다(앱의 기존 저장 길 그대로).
+  const key = 'btrash-idempotency-key-001';
+  const send = () => purgePost(server.base, { id: 'tr01' }, key);
+  assert.deepEqual(await send(), { status: 200, ok: true, id: 'tr01', removed: 1 });
+  assert.deepEqual(await send(), { status: 200, ok: true, id: 'tr01', removed: 1 });
+  assert.deepEqual(ids(), ['tr02'], '두 번 보내도 한 번만 빠진다');
+
+  // 남은 항목은 여전히 기존 되살리기 길로 원래 자리에 돌아간다.
+  const restored = await fetch(server.base + '/api/track/restore', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'tr02' }),
+  });
+  assert.equal(restored.status, 200);
+  assert.match(fs.readFileSync(path.join(server.home, 'checks.md'), 'utf8'), /법무 검토 회신 #check\[id:tr02/);
+  assert.deepEqual(ids(), []);
+});
+
+test('BTRASH: 복구가 필요한 동안에는 완전히 지우기도 막힌다', async (t) => {
+  const server = await startServer(t, (home) => {
+    seedTrash(home);
+    // 저널이 되돌리려는 내용과 지금 파일이 달라(바깥에서 고친 파일) 복구가 거절된다 → 저장이 잠긴다.
+    fs.writeFileSync(path.join(home, 'tasks.md'), '# Tasks\n- 바깥에서 고친 줄 #task[id:tr09 status:to-do created:2026-09-20]\n');
+    fs.writeFileSync(path.join(home, '.mutation-journal.json'), journalEntry(path.join(home, 'tasks.md'), '# Tasks\n', '# Tasks\n- 중단된 저장\n'));
+    fs.writeFileSync(path.join(home, '.mutation.lock'), String(deadPid()));
+  });
+  const blocked = await purgePost(server.base, { id: 'tr01' });
+  assert.equal(blocked.status, 503);
+  assert.match(blocked.error, /저장을 멈췄어요/);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(server.home, '.trash.json'), 'utf8')).length, 3);
+  // 조회는 복구 필요 상태에서도 그대로 된다(무엇이 남아 있는지 볼 수 있어야 한다).
+  assert.equal((await (await fetch(server.base + '/api/track/trash')).json()).items.length, 3);
+});
+
+// ---------- 직접 만든 프로젝트 이름 바꾸기 (BRENAME) ----------
+// 이름은 업무 줄·회의·연결·보관·주간요약에 글자로 박혀 있다. 한 트랜잭션으로 전부 바꾸고,
+// 하나라도 실패하면 전부 되돌아간다(반쯤 바뀐 이름을 남기지 않는다).
+const renamePost = (origin, body, key) => fetch(origin + '/api/project/rename', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', ...(key ? { 'Idempotency-Key': key } : {}) },
+  body: JSON.stringify(body),
+}).then(async response => ({ status: response.status, ...await response.json() }));
+
+const RENAME_REPORT = {
+  schema: 1,
+  weeks: {
+    '2026-09-14': {
+      rows: [
+        { id: 'r1', heading: '완료한 일', group: '결제 리뉴얼', bucket: 'group:결제 리뉴얼:완료한 일:정산 배치',
+          text: '정산 배치 설계 검토함', sourceIds: ['rn01'],
+          evidence: [{ id: 'rn01', description: '정산 배치 설계 검토하기', status: 'done', type: 'task', outcome: '', label: '결제 리뉴얼', permalink: null }],
+          locked: true, excluded: false },
+        { id: 'r2', heading: '진행중', group: '운영툴', bucket: 'group:운영툴:진행중:운영툴 대시보드',
+          text: '운영툴 대시보드 개선', sourceIds: [], evidence: [], locked: true, excluded: false },
+      ],
+      updatedAt: '2026-09-20T00:00:00.000Z',
+    },
+  },
+};
+function seedRename(home, report = RENAME_REPORT) {
+  fs.writeFileSync(path.join(home, 'tasks.md'), '# Tasks\n'
+    + '- 정산 배치 설계 검토하기 #task[id:rn01 status:to-do priority:high created:2026-09-20 group:결제_리뉴얼]\n'
+    + '- 게임 임베드 검수하기 #task[id:rn02 status:to-do priority:medium created:2026-09-20 jira:IO-12345]\n'
+    + '- 대시보드 지표 정리하기 #task[id:rn06 status:to-do priority:medium created:2026-09-20 group:운영툴]\n');
+  fs.writeFileSync(path.join(home, 'checks.md'), '# Checks\n'
+    + '- 법무 검토 회신 #check[id:rn03 status:to-do priority:medium created:2026-09-20 who:엘리 group:결제_리뉴얼]\n');
+  fs.writeFileSync(path.join(home, 'decisions.md'), '# Decisions\n'
+    + '- 정산 주기는 주 단위로 한다 #decision[id:rn04 status:to-do priority:medium created:2026-09-20 group:결제_리뉴얼]\n');
+  fs.writeFileSync(path.join(home, 'ideas.md'), '# Ideas\n'
+    + '- 정산 리포트 자동화 #idea[id:rn05 status:to-do priority:low created:2026-09-20 project:결제_리뉴얼]\n');
+  fs.writeFileSync(path.join(home, '.workflow.json'), JSON.stringify({
+    items: {}, meetings: {
+      m1: { id: 'm1', date: '2026-09-20', start: '10:00', end: '11:00', title: '결제 주간 싱크', series: '결제 주간 싱크', link: null,
+        project: { type: 'group', value: '결제 리뉴얼', label: '결제 리뉴얼' } },
+      m2: { id: 'm2', date: '2026-09-19', start: '14:00', end: '15:00', title: '운영 회의', series: '운영 회의', link: null,
+        project: { type: 'group', value: '운영툴', label: '운영툴' } },
+    },
+    projectLinks: { '결제 리뉴얼': 'IO-12345' },
+    projectArchive: { 'group:결제 리뉴얼': '2026-09-19', 'jira:IO-9999': '2026-09-18' },
+  }, null, 2));
+  fs.writeFileSync(path.join(home, '.meeting_links.json'), JSON.stringify({ '결제 주간 싱크': 'group:결제 리뉴얼', '운영 회의': 'group:운영툴' }, null, 2));
+  fs.writeFileSync(path.join(home, '.report-drafts.json'), JSON.stringify(report, null, 2));
+}
+const readJson = file => JSON.parse(fs.readFileSync(file, 'utf8'));
+
+test('BRENAME: 직접 만든 프로젝트의 이름만, 형식과 겹침을 확인한 뒤에 바꾼다 — 거절된 요청은 파일을 고치지 않는다', async (t) => {
+  const server = await startServer(t, seedRename);
+  const files = ['tasks.md', 'checks.md', 'decisions.md', 'ideas.md', '.workflow.json', '.meeting_links.json', '.report-drafts.json'];
+  const before = files.map(name => fs.readFileSync(path.join(server.home, name), 'utf8'));
+  const refuse = async (body, message) => {
+    const answer = await renamePost(server.base, body);
+    assert.equal(answer.status, 400, JSON.stringify(body));
+    assert.equal(answer.error, message, JSON.stringify(body));
+  };
+  const FORMAT = '새 이름은 60자 이내 한 줄로, 대괄호 없이 적어 주세요.';
+  await refuse({ project: 'jira:IO-12345', name: '결제 정산' }, '직접 만든 프로젝트의 이름만 바꿀 수 있어요. 지라 프로젝트의 이름은 지라 요약을 따라요.');
+  await refuse({ project: '결제 리뉴얼', name: '결제 정산' }, '직접 만든 프로젝트의 이름만 바꿀 수 있어요. 지라 프로젝트의 이름은 지라 요약을 따라요.');
+  await refuse({ project: 'group:   ', name: '결제 정산' }, '프로젝트를 확인해 주세요.');
+  await refuse({ project: 'group:없는 프로젝트', name: '결제 정산' }, '프로젝트를 찾을 수 없어요.');
+  await refuse({ project: 'group:결제 리뉴얼' }, '새 이름을 입력해 주세요.');
+  await refuse({ project: 'group:결제 리뉴얼', name: '   ' }, FORMAT);
+  await refuse({ project: 'group:결제 리뉴얼', name: '가'.repeat(61) }, FORMAT);
+  await refuse({ project: 'group:결제 리뉴얼', name: '결제\n정산' }, FORMAT);
+  await refuse({ project: 'group:결제 리뉴얼', name: '결제 [정산]' }, FORMAT);
+  await refuse({ project: 'group:결제 리뉴얼', name: '결제 리뉴얼' }, '이미 같은 이름이에요.');
+  await refuse({ project: 'group:결제 리뉴얼', name: '결제_리뉴얼' }, '이미 같은 이름이에요.');
+  await refuse({ project: 'group:결제 리뉴얼', name: '운영툴' }, '같은 이름의 프로젝트가 이미 있어요.');
+  await refuse({ project: 'group:결제 리뉴얼', name: ' 운영툴 ' }, '같은 이름의 프로젝트가 이미 있어요.');
+  assert.deepEqual(files.map(name => fs.readFileSync(path.join(server.home, name), 'utf8')), before);
+  // 띄어쓰기만 고치는 것은 자기 이름과의 겹침이 아니다.
+  assert.equal((await renamePost(server.base, { project: 'group:결제 리뉴얼', name: '결제  리뉴얼' })).ok, true);
+});
+
+test('BRENAME: 이름을 바꾸면 항목·회의·연결·보관·주간요약이 한 번에 따라오고 지라 항목은 그대로다', async (t) => {
+  const server = await startServer(t, seedRename);
+  const answer = await renamePost(server.base, { project: 'group:결제 리뉴얼', name: '결제 정산' });
+  assert.deepEqual(answer, {
+    status: 200, ok: true, project: 'group:결제 정산', from: '결제 리뉴얼', to: '결제 정산',
+    changed: { items: 4, meetings: 2, links: 1, archive: 1, report: 1 },
+  });
+
+  // ① 업무 파일 — 파일 표기의 공백→밑줄 규칙은 그대로, 지라가 걸린 줄과 다른 그룹은 손대지 않는다.
+  const tasks = fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8');
+  assert.match(tasks, /정산 배치 설계 검토하기 #task\[id:rn01 status:to-do priority:high created:2026-09-20 group:결제_정산\]/);
+  assert.match(tasks, /게임 임베드 검수하기 #task\[id:rn02 status:to-do priority:medium created:2026-09-20 jira:IO-12345\]/);
+  assert.match(tasks, /group:운영툴\]/);
+  assert.match(fs.readFileSync(path.join(server.home, 'checks.md'), 'utf8'), /who:엘리 group:결제_정산\]/);
+  assert.match(fs.readFileSync(path.join(server.home, 'decisions.md'), 'utf8'), /group:결제_정산\]/);
+  assert.match(fs.readFileSync(path.join(server.home, 'ideas.md'), 'utf8'), /project:결제_정산\]/, '아이디어의 프로젝트 칸도 함께 바뀐다');
+
+  // ②③④ 회의 프로젝트 · 수동 지라 연결 · 보관 표
+  const workflow = readJson(path.join(server.home, '.workflow.json'));
+  assert.deepEqual(workflow.meetings.m1.project, { type: 'group', value: '결제 정산', label: '결제 정산' });
+  assert.deepEqual(workflow.meetings.m2.project, { type: 'group', value: '운영툴', label: '운영툴' });
+  assert.deepEqual(workflow.projectLinks, { '결제 정산': 'IO-12345' });
+  assert.deepEqual(workflow.projectArchive, { 'group:결제 정산': '2026-09-19', 'jira:IO-9999': '2026-09-18' });
+
+  // ⑤ 회의 제목 → 프로젝트 표
+  assert.deepEqual(readJson(path.join(server.home, '.meeting_links.json')), { '결제 주간 싱크': 'group:결제 정산', '운영 회의': 'group:운영툴' });
+
+  // ⑥ 주간요약 저장본 — 저장 형식은 그대로 두고 그룹 이름 값만 바뀐다.
+  const rows = readJson(path.join(server.home, '.report-drafts.json')).weeks['2026-09-14'].rows;
+  assert.equal(rows[0].group, '결제 정산');
+  assert.equal(rows[0].bucket, 'group:결제 정산:완료한 일:정산 배치');
+  assert.equal(rows[0].evidence[0].label, '결제 정산');
+  assert.equal(rows[0].text, '정산 배치 설계 검토함', '보고 문장은 손대지 않는다');
+  assert.deepEqual(rows[0].sourceIds, ['rn01']);
+  assert.deepEqual([rows[1].group, rows[1].bucket], ['운영툴', 'group:운영툴:진행중:운영툴 대시보드']);
+
+  // 화면이 받는 값(왼쪽 목록·오늘 목록·주간요약)도 새 이름 하나로 모인다.
+  const data = await (await fetch(server.base + '/api/items')).json();
+  assert.ok(data.customGroups.includes('결제 정산') && !data.customGroups.includes('결제 리뉴얼'));
+  assert.equal(data.workflows.items.find(item => item.id === 'rn01').group, '결제 정산');
+  assert.equal(data.workflows.items.find(item => item.id === 'rn05').project, '결제 정산');
+  assert.equal(data.workflows.meetings.find(event => event.id === 'm1').project.value, '결제 정산');
+  const week = data.weeklyReports.find(entry => entry.weekKey === '2026-09-14');
+  assert.deepEqual([...new Set(week.draft.rows.map(row => row.group))].sort(), ['결제 정산', '운영툴']);
+  assert.equal(data.ideas.find(item => item.id === 'rn05').project, '결제 정산');
+
+  // 반대 방향으로 한 번 더 보내면 그대로 돌아간다(화면의 `되돌리기`가 쓰는 길).
+  assert.equal((await renamePost(server.base, { project: 'group:결제 정산', name: '결제 리뉴얼' })).ok, true);
+  assert.match(fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8'), /group:결제_리뉴얼\]/);
+  assert.deepEqual(readJson(path.join(server.home, '.workflow.json')).projectLinks, { '결제 리뉴얼': 'IO-12345' });
+});
+
+test('BRENAME: 한 자리라도 실패하면 전부 되돌아간다 — 반쯤 바뀐 이름을 남기지 않는다', async (t) => {
+  // 가짜 실패 주입: 주간요약 저장본의 형식을 깨 둔다(마지막 자리에서 터진다).
+  const server = await startServer(t, home => seedRename(home, { schema: 2, weeks: {} }));
+  const files = ['tasks.md', 'checks.md', 'decisions.md', 'ideas.md', '.workflow.json', '.meeting_links.json', '.report-drafts.json'];
+  const before = files.map(name => fs.readFileSync(path.join(server.home, name), 'utf8'));
+
+  const failed = await renamePost(server.base, { project: 'group:결제 리뉴얼', name: '결제 정산' });
+  assert.equal(failed.status, 400);
+  assert.match(failed.error, /보고 기록 형식을 확인해 주세요/);
+  assert.deepEqual(files.map(name => fs.readFileSync(path.join(server.home, name), 'utf8')), before,
+    '앞서 쓴 업무 파일·회의 기록·연결 표까지 전부 되돌아간다');
+
+  // 저장은 잠기지 않는다(되돌리기가 받아들여졌으므로) — 다른 저장은 그대로 된다.
+  assert.equal((await (await fetch(server.base + '/api/storage-status')).json()).recoveryNeeded, false);
+  const archived = await archivePost(server.base, { project: 'group:운영툴', archived: true });
+  assert.equal(archived.ok, true);
+
+  // 같은 요청이 형식을 고친 뒤에는 통한다 — 위에서 되돌아간 것이 "아무것도 안 했다"가 아니라
+  // **업무 파일까지 쓴 뒤 되돌린 것**임을 이 줄이 보여 준다.
+  fs.writeFileSync(path.join(server.home, '.report-drafts.json'), JSON.stringify(RENAME_REPORT, null, 2));
+  assert.equal((await renamePost(server.base, { project: 'group:결제 리뉴얼', name: '결제 정산' })).ok, true);
+  assert.match(fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8'), /group:결제_정산\]/);
+});
+
+test('BRENAME: 복구가 필요한 동안에는 이름도 바꾸지 않는다', async (t) => {
+  const server = await startServer(t, (home) => {
+    seedRename(home);
+    fs.writeFileSync(path.join(home, '.mutation-journal.json'), journalEntry(path.join(home, 'tasks.md'), '# Tasks\n', '# Tasks\n- 중단된 저장\n'));
+    fs.writeFileSync(path.join(home, '.mutation.lock'), String(deadPid()));
+  });
+  const blocked = await renamePost(server.base, { project: 'group:결제 리뉴얼', name: '결제 정산' });
+  assert.equal(blocked.status, 503);
+  assert.match(blocked.error, /저장을 멈췄어요/);
+  assert.match(fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8'), /group:결제_리뉴얼\]/);
+});

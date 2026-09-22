@@ -398,3 +398,39 @@ test('확인 완료 문장은 답변 한 줄이 있으면 그것을 쓰고, 없�
   assert.equal(waiting.heading,'확인 대기');
   assert.equal(waiting.text,'벤더 확인 회신 받기');
 });
+test('BRENAME: 그룹 이름 바꾸기는 소제목·묶음 열쇠·근거 이름표만 고치고 문장과 연결은 그대로 둔다',t=>{
+  const f=fixture(t);
+  const id=f.view().rows[0].id;
+  f.change({action:'edit',id,text:'가입 문구 검토 완료'});
+  // 묶기 전 문장(parts)까지 같은 규칙으로 따라가는지 함께 본다.
+  const file=path.join(f.directory,'.report-drafts.json');
+  const state=JSON.parse(fs.readFileSync(file,'utf8'));
+  const row=state.weeks['2026-09-14'].rows[0];
+  row.parts=[{id:'p1',heading:row.heading,group:'가입',bucket:row.bucket,text:'묶기 전 문장',sourceIds:['a'],evidence:[{id:'a',label:'가입'}],locked:true,excluded:false}];
+  state.weeks['2026-09-14'].rows.push({id:'other',heading:'진행중',group:'운영툴',bucket:'group:운영툴:진행중:운영',text:'운영툴 개선',sourceIds:[],evidence:[],locked:true,excluded:false});
+  fs.writeFileSync(file,JSON.stringify(state,null,2));
+
+  assert.equal(f.store.renameGroup('가입','가입 개선'),2,'바뀐 줄 수를 돌려준다(묶기 전 문장 포함)');
+  const saved=JSON.parse(fs.readFileSync(file,'utf8')).weeks['2026-09-14'].rows;
+  assert.equal(saved[0].group,'가입 개선');
+  assert.equal(saved[0].bucket,'group:가입 개선:완료한 일:문구 검토하기');
+  assert.equal(saved[0].evidence[0].label,'가입 개선');
+  assert.equal(saved[0].text,'가입 문구 검토 완료','보고 문장은 손대지 않는다');
+  assert.deepEqual(saved[0].sourceIds,['a']);
+  assert.equal(saved[0].parts[0].group,'가입 개선');
+  assert.equal(saved[0].parts[0].bucket,'group:가입 개선:완료한 일:문구 검토하기');
+  assert.equal(saved[0].parts[0].evidence[0].label,'가입 개선');
+  assert.deepEqual([saved[1].group,saved[1].bucket],['운영툴','group:운영툴:진행중:운영'],'다른 프로젝트는 그대로다');
+
+  // 바꿀 것이 없으면 파일을 쓰지 않는다.
+  const before=fs.statSync(file).mtimeMs;
+  assert.equal(f.store.renameGroup('없는 프로젝트','새 이름'),0);
+  assert.equal(fs.statSync(file).mtimeMs,before);
+});
+test('BRENAME: 보고 기록 형식이 깨져 있으면 이름 바꾸기는 저장하지 않고 멈춘다',t=>{
+  const f=fixture(t);
+  const file=path.join(f.directory,'.report-drafts.json');
+  fs.writeFileSync(file,JSON.stringify({schema:2,weeks:{}}));
+  assert.throws(()=>f.store.renameGroup('가입','가입 개선'),/보고 기록 형식을 확인해 주세요/);
+  assert.equal(fs.readFileSync(file,'utf8'),JSON.stringify({schema:2,weeks:{}}));
+});

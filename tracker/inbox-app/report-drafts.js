@@ -184,6 +184,30 @@ module.exports = ({ directory, sources, legacy, currentWeek }) => {
     const keys=dates.map(date=>{const d=new Date(`${date}T12:00:00`);d.setDate(d.getDate()-((d.getDay()+6)%7));return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;});
     return [...new Set([currentWeek(),...keys,...legacy().map(entry=>entry.weekKey),...Object.keys(state.weeks)])].sort().reverse();
   }
+  // 직접 만든 프로젝트의 이름이 바뀔 때, 저장된 보고에 글자로 박혀 있는 그룹 이름만 바꾼다.
+  // 저장 형식은 그대로 두고 값만 고친다 — 문장(`text`)·연결(`sourceIds`)은 손대지 않는다.
+  // 바꾸는 자리는 셋이다: 프로젝트 소제목이 되는 `group`, 자동 갱신이 짝을 찾는 `bucket`의 앞머리,
+  // 근거 줄에 적히는 `evidence[].label`. 묶기 전 문장(`parts`)도 같은 규칙으로 따라간다.
+  // 부르는 쪽(server.js renameProject)의 트랜잭션 안에서 돈다 — 여기서 실패하면 전부 되돌아간다.
+  function renameGroup(from, to) {
+    const state = read();
+    const head = `group:${from}:`;
+    let rows = 0;
+    const fix = (row) => {
+      if (!row || typeof row !== 'object') return;
+      let touched = false;
+      if (row.group === from) { row.group = to; touched = true; }
+      if (typeof row.bucket === 'string' && row.bucket.startsWith(head)) { row.bucket = `group:${to}:${row.bucket.slice(head.length)}`; touched = true; }
+      (Array.isArray(row.evidence) ? row.evidence : []).forEach((item) => {
+        if (item && item.label === from) { item.label = to; touched = true; }
+      });
+      (Array.isArray(row.parts) ? row.parts : []).forEach(fix);
+      if (touched) rows += 1;
+    };
+    for (const week of Object.values(state.weeks || {})) (week?.rows || []).forEach(fix);
+    if (rows) atomicWrite(filename, JSON.stringify(state, null, 2));
+    return rows;
+  }
   // read는 한 번 읽은 보고 기록을 weeks·view에 함께 넘겨 주 수만큼 다시 읽지 않게 하려고 내보낸다.
-  return {view,change,weeks,read};
+  return {view,change,weeks,read,renameGroup};
 };

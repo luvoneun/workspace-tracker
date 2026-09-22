@@ -1114,6 +1114,135 @@ function restoreTrackItem(id) {
   return true;
 }
 
+// ---------- 삭제한 항목 (tracker/.trash.json) ----------
+// 삭제는 확인창 없이 바로 실행되고 원문 줄이 여기 남는다(removeTrackItem). 설정 > `삭제한 항목`이
+// 이 목록을 읽어 되살리기(기존 restoreTrackItem)와 완전히 지우기(purgeTrashItem)를 건다.
+// 자동 영구 삭제는 하지 않는다(DECISIONS) — 목록에서 사람이 고른 것만 지운다.
+const trashPathOf = () => path.join(TRACKER_DIR, '.trash.json');
+function readTrash() {
+  const file = trashPathOf();
+  if (!fs.existsSync(file)) return [];
+  try {
+    const value = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    return Array.isArray(value) ? value : [];
+  } catch {
+    // 형식이 깨졌으면 "없음"으로 읽고 파일은 그대로 둔다(조회가 파일을 고치지 않는다).
+    return [];
+  }
+}
+const TRASH_TYPE_WORD = { task: '할 일', bug: '할 일', check: '확인 대기', decision: '결정', idea: '아이디어' };
+// 원문 줄에서 화면이 쓰는 것만 뽑는다 — 종류·문구·프로젝트뿐이고 전체 줄(흐름 기록 칸)은 싣지 않는다.
+// 지라 프로젝트의 이름은 요약만 적는다(모르면 키 — BKEY 결정).
+function listTrash() {
+  return readTrash()
+    .map((entry) => {
+      const match = typeof entry?.line === 'string' ? entry.line.match(TRACK_RE) : null;
+      const fields = match ? parseFields(match[3]) : {};
+      const group = fields.group || fields.project;
+      const issue = fields.jira ? getJiraIssueCache().find(item => item.key === fields.jira) : null;
+      return {
+        id: typeof entry?.id === 'string' ? entry.id : null,
+        type: match ? match[2] : null,
+        typeLabel: match ? (TRASH_TYPE_WORD[match[2]] || '항목') : '항목',
+        description: match ? match[1] : '',
+        file: typeof entry?.file === 'string' ? entry.file : '',
+        deletedAt: typeof entry?.deletedAt === 'string' ? entry.deletedAt : null,
+        project: fields.jira ? (issue ? issue.summary : fields.jira) : group ? group.replace(/_/g, ' ') : null,
+        projectKey: fields.jira ? `jira:${fields.jira}` : group ? `group:${group.replace(/_/g, ' ')}` : null,
+      };
+    })
+    .filter(entry => entry.id)
+    .sort((a, b) => String(b.deletedAt || '').localeCompare(String(a.deletedAt || '')));
+}
+// 완전히 지우기 — `.trash.json`에서 그 항목만 뺀다. 업무 파일은 건드리지 않는다(이미 지워진 줄이다).
+function purgeTrashItem(id) {
+  if (typeof id !== 'string' || !id.trim()) throw new Error('지울 항목을 확인해 주세요.');
+  const file = trashPathOf();
+  const trash = readTrash();
+  const kept = trash.filter(entry => entry?.id !== id);
+  if (kept.length === trash.length) throw new Error('이미 지운 항목이에요.');
+  fs.writeFileSync(file, JSON.stringify(kept, null, 2));
+  return { ok: true, id, removed: trash.length - kept.length };
+}
+
+// ---------- 직접 만든(그룹) 프로젝트 이름 바꾸기 ----------
+// 프로젝트 이름은 기록 여러 곳에 글자로 박혀 있다. 한 트랜잭션(idempotent → mutations.run) 안에서
+// 다섯 자리를 모두 바꾸고, 하나라도 실패하면 mutation-store의 저널이 전부 되돌린다 — 반쯤 바뀐
+// 이름을 남기지 않는다. 지라 프로젝트의 이름은 지라 요약이라 여기서 받지 않는다.
+//   ① tracker/*.md 의 `group:`·`project:` 칸(아이디어는 `project:`다) — 파일 표기는 공백→밑줄
+//   ② .workflow.json 의 회의 프로젝트(`project.type === 'group'`)
+//   ③ .workflow.json 의 `projectLinks` 키 · ④ `projectArchive` 키
+//   ⑤ .meeting_links.json 의 `group:` 값 · ⑥ 주간요약 저장본(.report-drafts.json)의 그룹 이름
+// 응답의 `meetings`는 ②와 ⑤를 함께 센다(둘 다 회의의 프로젝트다).
+const PROJECT_NAME_MAX = 60;
+const groupNameKey = value => String(value || '').replace(/_/g, ' ').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+function renameProject({ project, name }) {
+  if (typeof project !== 'string' || !project.startsWith('group:')) throw new Error('직접 만든 프로젝트의 이름만 바꿀 수 있어요. 지라 프로젝트의 이름은 지라 요약을 따라요.');
+  const from = project.slice('group:'.length).replace(/_/g, ' ').trim();
+  if (!from) throw new Error('프로젝트를 확인해 주세요.');
+  if (typeof name !== 'string') throw new Error('새 이름을 입력해 주세요.');
+  // 파일 표기에서 밑줄은 공백이다(`결제_리뉴얼` == `결제 리뉴얼`) — 화면이 읽는 꼴 하나로 맞춰서
+  // 받는다. 그러지 않으면 "글자는 달라졌는데 앱에서는 같은 이름"인 상태가 생긴다.
+  const to = name.replace(/_/g, ' ').trim();
+  if (!to || to.length > PROJECT_NAME_MAX || /[\r\n\[\]]/.test(to)) throw new Error(`새 이름은 ${PROJECT_NAME_MAX}자 이내 한 줄로, 대괄호 없이 적어 주세요.`);
+  const groups = workflows.groupList();
+  if (!groups.includes(from)) throw new Error('프로젝트를 찾을 수 없어요.');
+  if (to === from) throw new Error('이미 같은 이름이에요.');
+  // 겹침은 공백·대소문자를 고르게 맞춘 뒤 본다. 지금 이름 자신은 빼고 본다(띄어쓰기만 고치는 경우).
+  const taken = new Set([
+    ...groups.filter(entry => entry !== from),
+    ...getCustomGroups().filter(entry => entry !== from),
+    ...getJiraIssueCache().map(issue => issue.summary),
+  ].map(groupNameKey));
+  if (taken.has(groupNameKey(to))) throw new Error('같은 이름의 프로젝트가 이미 있어요.');
+
+  // ① 업무 파일의 줄 — 지라가 걸린 항목은 그룹 이름을 쓰지 않으므로 건너뛴다.
+  const token = to.replace(/\s+/g, '_');
+  let items = 0;
+  listTrackerFiles().forEach((filePath) => {
+    const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
+    let touched = false;
+    const next = lines.map((line) => {
+      const match = line.match(TRACK_RE);
+      if (!match || parseFields(match[3]).jira) return line;
+      const fieldStr = match[3].split(/\s+/).map((part) => {
+        const at = part.indexOf(':');
+        if (at === -1) return part;
+        const key = part.slice(0, at);
+        if (key !== 'group' && key !== 'project') return part;
+        return part.slice(at + 1).replace(/_/g, ' ') === from ? `${key}:${token}` : part;
+      }).join(' ');
+      if (fieldStr === match[3]) return line;
+      touched = true;
+      items += 1;
+      return `- ${match[1]} #${match[2]}[${fieldStr}]`;
+    });
+    if (touched) fs.writeFileSync(filePath, next.join('\n'));
+  });
+
+  // ②③④ 회의 프로젝트·수동 지라 연결·보관 표
+  const moved = workflows.renameGroup(from, to);
+
+  // ⑤ 회의 제목 → 프로젝트 표(정기 회의의 연결)
+  const links = readMeetingLinks();
+  let meetingLinks = 0;
+  for (const [title, value] of Object.entries(links)) {
+    if (typeof value !== 'string' || !value.startsWith('group:')) continue;
+    if (value.slice('group:'.length).replace(/_/g, ' ').trim() !== from) continue;
+    links[title] = `group:${to}`;
+    meetingLinks += 1;
+  }
+  if (meetingLinks) fs.writeFileSync(MEETING_LINKS_PATH, JSON.stringify(links, null, 2));
+
+  // ⑥ 주간요약 저장본 — 저장 형식은 그대로 두고 그룹 이름 값만 바꾼다.
+  const report = reportDrafts.renameGroup(from, to);
+
+  return {
+    ok: true, project: `group:${to}`, from, to,
+    changed: { items, meetings: moved.meetings + meetingLinks, links: moved.links, archive: moved.archive, report },
+  };
+}
+
 function promoteIdeaToToday(id, due) {
   validateDate(due);
   const isIdea = listTrackerFiles().some(file => fs.readFileSync(file, 'utf-8').split('\n').some(line => {
@@ -1386,6 +1515,10 @@ const handleRequest = (req, res) => {
     // 프로젝트를 `지난 프로젝트`로 내리거나 꺼낸다. 저장하는 것은 프로젝트 키 하나뿐이고,
     // 업무·기록·주간요약은 하나도 바뀌지 않는다 — 앱의 기존 저장 길을 그대로 탄다.
     '/api/project/archive': workflows.archiveProject,
+    // 직접 만든 프로젝트의 이름 바꾸기 — 그 프로젝트에 속한 모든 기록을 한 트랜잭션으로 함께 바꾼다.
+    '/api/project/rename': renameProject,
+    // 삭제한 항목 완전히 지우기 — `.trash.json`에서 그 줄만 뺀다(업무 파일은 이미 그 줄이 없다).
+    '/api/track/trash-purge': ({ id }) => purgeTrashItem(id),
   };
   if (req.method === 'POST' && workflowActions[url.pathname]) {
     readBody(req).then(body => {
@@ -1590,6 +1723,14 @@ const handleRequest = (req, res) => {
     };
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify(payload));
+    return;
+  }
+
+  // 설정 > `삭제한 항목`이 창을 열 때마다 읽는 목록. 조회라 어떤 파일도 쓰지 않고,
+  // 인증 예외(publicAsset)에도 넣지 않는다. 되살리기는 기존 `/api/track/restore`가 맡는다.
+  if (url.pathname === '/api/track/trash' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: true, items: listTrash() }));
     return;
   }
 

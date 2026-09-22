@@ -192,7 +192,9 @@ function uiMenu(anchor, sections) {
     });
   });
 
-  document.body.appendChild(list);
+  // 모달(`<dialog>`) 안에서 연 메뉴는 그 모달 안에 붙인다 — 맨 위 층(top layer) 밖에 있으면
+  // 보이기만 하고 눌리지 않는다(설정 창의 ⋯). 자리는 `position: fixed`라 어디에 붙어도 같다.
+  (anchor.closest('dialog[open]') || document.body).appendChild(list);
   const button = anchor.getBoundingClientRect();
   const size = list.getBoundingClientRect();
   // 값 고르개(상세 카드의 `보통 ⌄`)는 값의 왼쪽에 맞춰 카드 안에서 열리고, ⋯ 메뉴는 버튼 오른쪽에 맞춘다.

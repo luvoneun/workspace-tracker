@@ -258,6 +258,10 @@ const SETTINGS_FAQ = [
     '자동으로 가져오지 않고 <b>버튼을 눌러야</b> 가져와요. 회의 정리 화면에서 그 회의만 가져오거나, 회의 목록 머리의 <b>오늘 것 모두 가져오기</b>로 오늘 회의를 한 번에 가져올 수 있어요. 이미 가져온 회의는 조용한 글자로 <b>미팅 노트 가져옴</b>이라고 표시돼요. 끝난 회의인데 아직 안 가져왔으면 왼쪽 레일 리마인드 카드에 한 줄로 알려 주고, 눌러서 바로 그 회의로 가요.'],
   ['회의에서 담은 항목을 잘못 골랐으면',
     '이미 담은 할 일·확인 대기·결정도 나중에 종류를 바꿀 수 있어요. 그 줄의 ⋯ → <b>종류 바꾸기</b>에서 고르면 새로 만들지 않고 같은 항목을 옮기는 것이라 회의 연결과 기록이 그대로 남아요. 완료한 항목은 바꿀 수 없고, 잘못 바꿨으면 알림의 되돌리기나 ⌘Z로 돌려요.'],
+  ['실수로 지웠는데 알림이 이미 사라졌으면',
+    '이 창의 <b>삭제한 항목</b>에서 되살려요. 지운 항목은 원문 그대로 남아 있고, 언제 지웠는지도 함께 보여요. 줄의 <b>되살리기</b>를 누르면 원래 자리로 돌아가요. 정말 지우고 싶으면 ⋯ → <b>완전히 지우기</b>인데, 이건 되돌릴 수 없어서 한 번 더 물어봐요. 저절로 사라지는 건 없어요.'],
+  ['프로젝트 이름을 바꾸고 싶으면',
+    '프로젝트 탭에서 그 프로젝트를 열고 제목 옆 ⋯ → <b>이름 바꾸기</b>를 눌러요. 제목 자리가 입력칸이 되고 Enter로 저장해요. 그 프로젝트의 업무·확인 대기·결정·아이디어·회의·주간요약이 한 번에 같이 바뀌고, 하나라도 실패하면 아무것도 바뀌지 않아요. 알림의 <b>되돌리기</b>로 옛 이름으로 돌아가요. 지라 프로젝트는 이름이 지라 요약이라 여기서 못 바꿔요.'],
   ['잘못 눌렀을 때는',
     '완료·삭제·보고 제외는 아래 알림의 <b>되돌리기</b>로 바로 취소할 수 있어요. <b>⌘Z</b>도 같은 일을 하고(우선순위·기한 변경, 종류 바꾸기도 대상이에요), <b>⌘⇧Z</b>로 다시 실행해요.'],
   ['결과 한 줄은 왜 적나요',
@@ -329,6 +333,141 @@ function renderSettingsGuide() {
   }
 }
 
+// ---------- 설정 > 삭제한 항목 ----------
+// 삭제는 확인창 없이 바로 실행되고 되돌릴 길은 알림의 `삭제 실행 취소`·⌘Z뿐이라, 시간이 지나
+// 알아차리면 닫혀 있었다. 여기서 원문이 남아 있는 목록을 보고 되살리거나 완전히 지운다.
+// 자동 영구 삭제는 없다(DECISIONS) — 이 목록에서 사람이 고른 것만 지운다.
+// 설정 창을 열 때마다 새로 읽고(GET), 탭 이름의 개수도 그 값이다.
+let settingsTrash = null;
+
+function settingsTrashLabel() {
+  const tab = document.getElementById('settingsTrashTab');
+  if (!tab) return;
+  const count = settingsTrash ? settingsTrash.length : 0;
+  tab.textContent = count ? `삭제한 항목 ${count}` : '삭제한 항목';
+}
+
+async function settingsTrashLoad() {
+  try {
+    const data = await (await request('/api/track/trash')).json();
+    settingsTrash = Array.isArray(data.items) ? data.items : [];
+  } catch {
+    settingsTrash = [];
+  }
+  settingsTrashLabel();
+  return settingsTrash;
+}
+
+// `9월 21일 22:10에 삭제` — 언제 지운 것인지가 되살릴지 판단하는 값이라 시각까지 적는다.
+function settingsTrashWhen(value) {
+  const when = value ? new Date(value) : null;
+  if (!when || Number.isNaN(when.getTime())) return '언제 삭제했는지 몰라요';
+  const time = `${String(when.getHours()).padStart(2, '0')}:${String(when.getMinutes()).padStart(2, '0')}`;
+  return `${when.getMonth() + 1}월 ${when.getDate()}일 ${time}에 삭제`;
+}
+
+// 목록에서 한 줄을 빼고 다시 그린다 — 되살리기·완전히 지우기가 같은 길을 쓴다.
+function settingsTrashDrop(id) {
+  settingsTrash = (settingsTrash || []).filter(entry => entry.id !== id);
+  settingsTrashLabel();
+  renderSettingsTrash();
+}
+
+// `완전히 지우기`는 되돌릴 수 없으니 확인 줄을 한 번 세운다(창을 띄우지 않고 그 자리에서).
+function settingsTrashConfirm(entry, acts) {
+  const ask = document.createElement('span');
+  ask.className = 'ta is-ask';
+  const words = document.createElement('span');
+  words.className = 'tq';
+  words.textContent = '되살릴 수 없어요';
+  const yes = document.createElement('button');
+  yes.type = 'button';
+  yes.className = 'd-btn sm dng';
+  yes.textContent = '지우기';
+  const no = document.createElement('button');
+  no.type = 'button';
+  no.className = 'd-btn sm';
+  no.textContent = '취소';
+  no.addEventListener('click', () => { ask.replaceWith(acts); });
+  yes.addEventListener('click', async () => {
+    yes.disabled = true;
+    try {
+      await request('/api/track/trash-purge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: entry.id }) });
+    } catch { yes.disabled = false; return; }
+    settingsTrashDrop(entry.id);
+    showNotice(`완전히 지웠어요 · ${entry.description}`);
+  });
+  ask.append(words, yes, no);
+  acts.replaceWith(ask);
+  yes.focus();
+}
+
+function settingsTrashRow(entry) {
+  const row = document.createElement('div');
+  row.className = 'd-trow';
+
+  const main = document.createElement('div');
+  main.className = 'tm';
+  const line = document.createElement('div');
+  line.className = 'tl';
+  const kind = document.createElement('span');
+  kind.className = 'kd';
+  kind.textContent = entry.typeLabel || '항목';
+  const text = document.createElement('span');
+  text.className = 'tx';
+  text.textContent = entry.description || '(문구가 남아 있지 않아요)';
+  text.title = entry.description || '';
+  line.append(kind, text);
+  // 프로젝트는 다른 줄과 같은 표기(`· ● 이름`)다 — 지라 프로젝트는 요약만 적힌다(서버가 정한다).
+  if (entry.project) {
+    const tag = document.createElement('span');
+    tag.className = 'd-inproj';
+    tag.append('· ', uiProjectDot(entry.projectKey || entry.project), entry.project);
+    line.appendChild(tag);
+  }
+  const when = document.createElement('div');
+  when.className = 'tw';
+  when.textContent = settingsTrashWhen(entry.deletedAt);
+  main.append(line, when);
+  row.appendChild(main);
+
+  const acts = document.createElement('span');
+  acts.className = 'ta';
+  const restore = document.createElement('button');
+  restore.type = 'button';
+  restore.className = 'd-btn sm';
+  restore.textContent = '되살리기';
+  restore.setAttribute('aria-label', `${entry.description} — 되살리기`);
+  restore.addEventListener('click', async () => {
+    restore.disabled = true;
+    try {
+      await request('/api/track/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: entry.id }) });
+    } catch { restore.disabled = false; return; }
+    settingsTrashDrop(entry.id);
+    await load();
+    showNotice(`되살렸어요 · ${entry.description}`);
+  });
+  acts.append(restore, uiMoreButton(`${entry.description} — 더 보기`,
+    () => [[{ label: '완전히 지우기', danger: true, onClick: () => settingsTrashConfirm(entry, acts) }]]));
+  row.appendChild(acts);
+  return row;
+}
+
+function renderSettingsTrash() {
+  const view = document.getElementById('settingsTrashView');
+  if (!view) return;
+  view.replaceChildren();
+  if (settingsTrash === null) {
+    view.insertAdjacentHTML('beforeend', '<div class="d-empty">불러오는 중이에요…</div>');
+    return;
+  }
+  if (!settingsTrash.length) {
+    view.insertAdjacentHTML('beforeend', '<div class="d-empty">삭제한 항목이 없어요.</div>');
+    return;
+  }
+  settingsTrash.forEach(entry => view.appendChild(settingsTrashRow(entry)));
+}
+
 // ---------- 설정 열고 닫기 ----------
 // 드문 작업이라 모달(<dialog>)이 맞다. Esc는 앱의 스택 하나로 처리하고(떠 있는 것 중 맨 위만
 // 닫힌다), 닫으면 열었던 버튼으로 포커스가 돌아간다.
@@ -342,8 +481,10 @@ function settingsSetTab(tab) {
   });
   document.getElementById('settingsStatusView').hidden = tab !== 'status';
   document.getElementById('settingsGuideView').hidden = tab !== 'guide';
+  document.getElementById('settingsTrashView').hidden = tab !== 'trash';
   if (tab === 'guide') renderSettingsGuide();
   if (tab === 'status') renderAutomationStatus();
+  if (tab === 'trash') renderSettingsTrash();
 }
 
 // 헤더의 톱니바퀴와 동기화 지연 경고가 함께 쓰는 한 길.
@@ -354,7 +495,13 @@ function settingsOpen(tab = 'status', focusKey = null) {
   uiMenuClose();
   settingsDialog.showModal();
   settingsEsc = escPush(settingsClose);
+  // 삭제한 항목은 열 때마다 새로 읽는다 — 탭 이름의 개수(`삭제한 항목 3`)도 이 값이다.
+  settingsTrash = null;
+  settingsTrashLabel();
   settingsSetTab(tab);
+  settingsTrashLoad().then(() => {
+    if (settingsDialog.open && document.getElementById('settingsTrashView')?.hidden === false) renderSettingsTrash();
+  });
 }
 
 function settingsClose() {

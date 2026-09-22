@@ -4360,8 +4360,9 @@ test('BARCHIVE: 제목 ⋯의 보관·보관 해제는 확인 없이 바로 하�
     })()`);
     nodeFind(body.children[0], 'd-more').listeners.click({ stopPropagation() {} });
     const menu = fixture.app.run('lastMenu');
-    assert.equal(menu[0].map(entry => entry.label).join(','), archived ? '보관 해제' : '보관');
-    return menu[0][0];
+    // 직접 만든 프로젝트에는 `이름 바꾸기`가 함께 선다(BRENAME) — 보관 항목은 그 뒤다.
+    assert.equal(menu[0].map(entry => entry.label).join(','), archived ? '이름 바꾸기,보관 해제' : '이름 바꾸기,보관');
+    return menu[0][1];
   };
   await openMenu('group:살아 있는 것', false).onClick();
   assert.deepEqual(fixture.sent.map(call => call.body), [{ project: 'group:살아 있는 것', archived: true }]);
@@ -4381,7 +4382,7 @@ test('BARCHIVE: 제목 ⋯의 보관·보관 해제는 확인 없이 바로 하�
     return body;
   })()`);
   nodeFind(body.children[0], 'd-more').listeners.click({ stopPropagation() {} });
-  const entry = kept.app.run('lastMenu')[0][0];
+  const entry = kept.app.run('lastMenu')[0][1];
   assert.equal(entry.label, '보관 해제');
   await entry.onClick();
   assert.deepEqual(kept.sent.map(call => call.body), [{ project: 'group:살아 있는 것', archived: false }]);
@@ -4663,4 +4664,179 @@ test('BNEXTRAIL: `자세히`는 상세 카드를 열고 ✕는 줄만 내린다 
   // 아직 답을 받지 않은 확인 대기에는 이 구역이 없다
   app.run("wfItem('ck1').status = 'to-do'; wfIndexData();");
   assert.deepEqual(panelSectionsOf(panelCheckBox(app, 'ck1')), ['확인 요청 기록']);
+});
+
+// ---------- BTRASH: 설정 > 삭제한 항목 ----------
+// 삭제는 확인창 없이 바로 실행되고 되돌릴 길은 알림·⌘Z뿐이라 시간이 지나면 닫혔다.
+// 여기서 원문이 남아 있는 목록을 보고 되살리거나(기존 restore) 완전히 지운다.
+const TRASH_ITEMS = [
+  { id: 'tr02', type: 'check', typeLabel: '확인 대기', description: '법무 검토 회신', file: 'checks.md',
+    deletedAt: '2026-09-22T01:05:00.000Z', project: '게임 임베드', projectKey: 'jira:IO-12345' },
+  { id: 'tr01', type: 'task', typeLabel: '할 일', description: '정산 배치 설계 검토하기', file: 'tasks.md',
+    deletedAt: '2026-09-21T13:10:00.000Z', project: '결제 리뉴얼', projectKey: 'group:결제 리뉴얼' },
+  { id: 'tr03', type: 'idea', typeLabel: '아이디어', description: '알림 묶어 보내기', file: 'ideas.md',
+    deletedAt: '2026-09-20T09:00:00.000Z', project: null, projectKey: null },
+];
+function trashClient(items = TRASH_ITEMS) {
+  const app = pureClient();
+  const sent = [];
+  app.context.fetch = async (url, options) => {
+    sent.push({ url: String(url), body: options && options.body ? JSON.parse(options.body) : null });
+    if (String(url) === '/api/track/trash') return new Response(JSON.stringify({ ok: true, items }));
+    return new Response('{"ok":true}');
+  };
+  app.run('loads = 0; load = async () => { loads += 1; };');
+  app.run('lastMenu = null; uiMenu = (anchor, sections) => { lastMenu = sections; return null; };');
+  const view = () => app.nodes.get('settingsTrashView');
+  const rows = () => view().children.filter(kid => String(kid.className || '') === 'd-trow');
+  return { app, sent, view, rows };
+}
+
+test('BTRASH: 탭 이름의 개수는 목록을 읽은 값이고, 0이면 숫자를 붙이지 않는다', async () => {
+  const app = trashClient().app;
+  await app.run('settingsTrashLoad()');
+  assert.equal(app.nodes.get('settingsTrashTab').textContent, '삭제한 항목 3');
+
+  const empty = trashClient([]).app;
+  await empty.run('settingsTrashLoad()');
+  assert.equal(empty.nodes.get('settingsTrashTab').textContent, '삭제한 항목');
+});
+
+test('BTRASH: 목록은 종류·문구·프로젝트와 삭제 시각을 한 줄로 적고, 비어 있으면 한 줄만 남는다', async () => {
+  const fixture = trashClient();
+  await fixture.app.run("settingsTrashLoad().then(() => settingsSetTab('trash'))");
+  assert.equal(fixture.app.nodes.get('settingsTrashView').hidden, false);
+  assert.equal(fixture.app.nodes.get('settingsStatusView').hidden, true);
+  const rows = fixture.rows();
+  assert.equal(rows.length, 3);
+  assert.equal(nodeFind(rows[1], 'kd').textContent, '할 일');
+  assert.equal(nodeFind(rows[1], 'tx').textContent, '정산 배치 설계 검토하기');
+  assert.equal(nodeFind(rows[1], 'tw').textContent, '9월 21일 22:10에 삭제');
+  // 프로젝트는 다른 줄과 같은 표기(`· ● 이름`)다 — 지라는 서버가 요약만 실어 준다.
+  assert.equal(nodeFind(rows[0], 'd-inproj').children.filter(kid => typeof kid === 'string').join(''), '· 게임 임베드');
+  assert.equal(nodeFind(rows[2], 'd-inproj'), null, '프로젝트가 없으면 아무것도 지어내지 않는다');
+  assert.equal(nodeFind(rows[0], 'ta').children[0].textContent, '되살리기');
+
+  const empty = trashClient([]);
+  await empty.app.run("settingsTrashLoad().then(() => settingsSetTab('trash'))");
+  assert.equal(empty.rows().length, 0);
+  assert.match(String(empty.view().html || ''), /삭제한 항목이 없어요\./);
+});
+
+test('BTRASH: 되살리기는 기존 복구 길로 보내고 목록에서 빼고 화면을 다시 읽는다', async () => {
+  const fixture = trashClient();
+  await fixture.app.run("settingsTrashLoad().then(() => settingsSetTab('trash'))");
+  const restore = nodeFind(fixture.rows()[1], 'ta').children[0];
+  await restore.listeners.click();
+  assert.deepEqual(fixture.sent.slice(-1), [{ url: '/api/track/restore', body: { id: 'tr01' } }]);
+  assert.equal(fixture.app.run('loads'), 1, '되살린 항목이 목록에 돌아오게 화면을 다시 읽는다');
+  assert.match(fixture.app.nodes.get('liveRegion').textContent, /되살렸어요 · 정산 배치 설계 검토하기/);
+  assert.equal(fixture.rows().map(row => nodeFind(row, 'tx').textContent).join(','), '법무 검토 회신,알림 묶어 보내기');
+  assert.equal(fixture.app.nodes.get('settingsTrashTab').textContent, '삭제한 항목 2');
+});
+
+test('BTRASH: 완전히 지우기는 확인 줄을 한 번 거치고, 취소하면 아무것도 보내지 않는다', async () => {
+  const fixture = trashClient();
+  await fixture.app.run("settingsTrashLoad().then(() => settingsSetTab('trash'))");
+  const row = fixture.rows()[1];
+  nodeFind(row, 'd-more').listeners.click({ stopPropagation() {} });
+  const menu = fixture.app.run('lastMenu');
+  assert.equal(menu[0].map(entry => `${entry.label}:${!!entry.danger}`).join(','), '완전히 지우기:true');
+
+  menu[0][0].onClick();
+  const ask = nodeFind(row, 'is-ask');
+  assert.equal(nodeFind(ask, 'tq').textContent, '되살릴 수 없어요');
+  assert.equal(ask.children.filter(kid => kid.textContent === '지우기' || kid.textContent === '취소').map(kid => kid.textContent).join(','), '지우기,취소');
+  const sentBefore = fixture.sent.length;
+  ask.children.find(kid => kid.textContent === '취소').listeners.click();
+  assert.equal(fixture.sent.length, sentBefore, '취소는 아무것도 보내지 않는다');
+  assert.equal(nodeFind(row, 'ta').children[0].textContent, '되살리기', '확인 줄 자리에 동작 묶음이 그대로 돌아온다');
+
+  // 다시 열어 `지우기`를 누르면 그때만 나간다.
+  nodeFind(row, 'd-more').listeners.click({ stopPropagation() {} });
+  fixture.app.run('lastMenu')[0][0].onClick();
+  await nodeFind(row, 'is-ask').children.find(kid => kid.textContent === '지우기').listeners.click();
+  assert.deepEqual(fixture.sent.slice(-1), [{ url: '/api/track/trash-purge', body: { id: 'tr01' } }]);
+  assert.match(fixture.app.nodes.get('liveRegion').textContent, /완전히 지웠어요 · 정산 배치 설계 검토하기/);
+  assert.equal(fixture.rows().map(row => nodeFind(row, 'tx').textContent).join(','), '법무 검토 회신,알림 묶어 보내기');
+  assert.equal(fixture.app.run('loads'), 0, '이미 목록에 없는 줄이라 화면을 다시 읽지 않는다');
+});
+
+// ---------- BRENAME: 직접 만든 프로젝트 이름 바꾸기 ----------
+function renameClient() {
+  const fixture = archiveClient();
+  fixture.app.run('loads = 0; load = async () => { loads += 1; };');
+  fixture.app.run("lastMenu = null; uiMenu = (anchor, sections) => { lastMenu = sections; return null; };");
+  const detail = (key) => fixture.app.run(`(() => {
+    const body = document.createElement('div');
+    renderProjectDetail(body, { key: ${JSON.stringify(key)}, label: ${JSON.stringify(key)}, open: 1 });
+    return body;
+  })()`);
+  return { ...fixture, detail };
+}
+
+test('BRENAME: 이름 바꾸기는 직접 만든 프로젝트에만 있고, 지라 프로젝트는 제목이 이유를 말한다', () => {
+  const fixture = renameClient();
+  const group = fixture.detail('group:살아 있는 것');
+  nodeFind(group.children[0], 'd-more').listeners.click({ stopPropagation() {} });
+  assert.equal(fixture.app.run('lastMenu')[0].map(entry => entry.label).join(','), '이름 바꾸기,보관');
+  assert.equal(group.children[0].title, undefined, '직접 만든 프로젝트의 제목에는 설명이 붙지 않는다');
+
+  const jira = fixture.detail('jira:IO-12345');
+  nodeFind(jira.children[0], 'd-more').listeners.click({ stopPropagation() {} });
+  assert.equal(fixture.app.run('lastMenu')[0].map(entry => entry.label).join(','), '보관', '지라 프로젝트에는 이름 바꾸기가 없다');
+  assert.equal(jira.children[0].title, '이름은 지라 요약을 따라요');
+});
+
+test('BRENAME: 제목 자리가 입력칸이 되고 Enter로 보낸다 — 한글 조합 중 Enter는 넘기고 취소는 제목으로 돌아간다', async () => {
+  const fixture = renameClient();
+  const body = fixture.detail('group:살아 있는 것');
+  const title = body.children[0];
+  nodeFind(title, 'd-more').listeners.click({ stopPropagation() {} });
+  fixture.app.run('lastMenu')[0][0].onClick();
+
+  const box = body.children[0];
+  assert.equal(box.className, 'd-pren');
+  const input = nodeFind(box, 'd-din');
+  assert.equal(input.value, '살아 있는 것');
+  assert.equal(input.selected, true, '현재 이름이 전체 선택된 채로 열린다');
+  assert.equal(box.children.filter(kid => kid !== input).map(kid => kid.textContent).join(','), '저장,취소');
+
+  input.value = '살아 있는 프로젝트';
+  await input.listeners.keydown({ key: 'Enter', isComposing: true, preventDefault() {} });
+  assert.equal(fixture.sent.length, 0, '한글을 조합하는 중의 Enter는 글자를 확정하는 것이다');
+
+  await input.listeners.keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+  assert.deepEqual(fixture.sent, [{ url: '/api/project/rename', body: { project: 'group:살아 있는 것', name: '살아 있는 프로젝트' } }]);
+  assert.equal(fixture.app.run('projectKey'), 'group:살아 있는 프로젝트', '바꾼 이름의 프로젝트가 열린 채로 남는다');
+  assert.equal(fixture.app.run('projectOrderResort'), true, '키가 바뀌었으니 왼쪽 목록 차례를 다시 잡는다');
+  assert.equal(fixture.app.run('loads'), 1);
+
+  // 취소는 입력만 닫고 제목을 그대로 되돌린다.
+  const second = fixture.detail('group:살아 있는 것');
+  nodeFind(second.children[0], 'd-more').listeners.click({ stopPropagation() {} });
+  fixture.app.run('lastMenu')[0][0].onClick();
+  const cancel = second.children[0].children.find(kid => kid.textContent === '취소');
+  cancel.listeners.click();
+  assert.equal(second.children[0].className, 'd-ptitle');
+  assert.equal(fixture.sent.length, 1, '취소는 아무것도 보내지 않는다');
+});
+
+test('BRENAME: 알림의 `되돌리기`는 반대 방향으로 한 번 더 바꾸는 것이고 ⌘Z 대상은 아니다', async () => {
+  const fixture = renameClient();
+  const body = fixture.detail('group:살아 있는 것');
+  nodeFind(body.children[0], 'd-more').listeners.click({ stopPropagation() {} });
+  fixture.app.run('lastMenu')[0][0].onClick();
+  const box = body.children[0];
+  nodeFind(box, 'd-din').value = '살아 있는 프로젝트';
+  await box.children.find(kid => kid.textContent === '저장').listeners.click();
+
+  const region = fixture.app.nodes.get('liveRegion');
+  assert.match(region.textContent, /이름을 바꿨어요 · 살아 있는 것 → 살아 있는 프로젝트/);
+  const undo = region.children.find(kid => kid.textContent === '되돌리기');
+  await undo.listeners.click(undo);
+  assert.deepEqual(fixture.sent.slice(-1), [{ url: '/api/project/rename', body: { project: 'group:살아 있는 프로젝트', name: '살아 있는 것' } }]);
+  assert.match(region.textContent, /이름을 되돌렸어요 · 살아 있는 프로젝트 → 살아 있는 것/);
+  assert.equal(fixture.app.run('projectKey'), 'group:살아 있는 것');
+  assert.equal(fixture.app.run('undoStack.length'), 0, '앱의 ⌘Z 대상은 아니다 — 되돌리는 길은 알림뿐이다');
 });

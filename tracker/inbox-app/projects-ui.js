@@ -254,6 +254,97 @@ async function projectArchiveAll(keys) {
   });
 }
 
+// ---------- 직접 만든 프로젝트 이름 바꾸기 ----------
+// 서버가 그 프로젝트에 속한 모든 기록(항목·회의·연결·보관·주간요약)을 **한 트랜잭션**으로 함께
+// 바꾼다 — 반쯤 바뀐 이름을 남기지 않는다. 지라 프로젝트의 이름은 지라 요약이라 여기에 없다.
+// 앱의 ⌘Z 대상은 아니다(pushUndo를 쓰지 않는다) — 되돌리는 길은 알림의 `되돌리기`(반대 방향 이름
+// 바꾸기)뿐이다. 보관(projectArchiveSet)과 같은 규칙이다.
+const projectRenamePost = (key, name) => request('/api/project/rename', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project: key, name }),
+});
+
+// 바꾼 뒤 그 프로젝트를 연 채로 다시 그린다 — 키가 `group:새 이름`으로 바뀌므로 기억해 둔 차례도 다시 잡는다.
+async function projectRenameApply(name) {
+  projectKey = `group:${name}`;
+  try { localStorage.setItem(PROJECT_KEY_STORE, projectKey); } catch {}
+  projectOrderResort = true;
+  await load();
+}
+
+async function projectRenameSave(fromKey, to) {
+  const from = fromKey.slice('group:'.length);
+  try { await projectRenamePost(fromKey, to); } catch { return false; }
+  await projectRenameApply(to);
+  showNotice(`이름을 바꿨어요 · ${from} → ${to}`, false, null, {
+    label: '되돌리기',
+    onClick: async (button) => {
+      if (button) button.disabled = true;
+      try { await projectRenamePost(`group:${to}`, from); } catch { return; }
+      await projectRenameApply(from);
+      showNotice(`이름을 되돌렸어요 · ${to} → ${from}`);
+    },
+  });
+  return true;
+}
+
+// 제목 자리가 그대로 입력칸이 된다(현재 이름·전체 선택). Enter/`저장`으로 보내고 Esc/`취소`로 되돌린다.
+// 한글을 조합하는 중의 Enter는 글자를 확정하는 것이라 넘긴다(앱의 다른 입력칸과 같은 규칙).
+function projectRenameStart(title, key) {
+  if (!title.isConnected) return;
+  const box = document.createElement('div');
+  box.className = 'd-pren';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'd-din';
+  input.maxLength = 60;
+  input.value = key.slice('group:'.length);
+  input.setAttribute('aria-label', '프로젝트 이름');
+  const save = document.createElement('button');
+  save.type = 'button';
+  save.className = 'd-btn sm acc';
+  save.textContent = '저장';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'd-btn sm';
+  cancelBtn.textContent = '취소';
+  box.append(input, save, cancelBtn);
+  title.replaceWith(box);
+  input.focus();
+  input.select?.();
+
+  let settled = false;
+  const cancel = () => {
+    if (settled) return;
+    settled = true;
+    escDrop(cancel);
+    if (!box.isConnected) return;
+    box.replaceWith(title);
+    title.focus?.();
+  };
+  escPush(cancel);
+  cancelBtn.addEventListener('click', cancel);
+
+  const commit = async () => {
+    if (settled) return;
+    const value = input.value.trim();
+    if (!value || value === key.slice('group:'.length)) { cancel(); return; }
+    input.disabled = true; save.disabled = true; cancelBtn.disabled = true;
+    if (!await projectRenameSave(key, value)) {
+      input.disabled = false; save.disabled = false; cancelBtn.disabled = false;
+      input.focus();
+      return;
+    }
+    settled = true;
+    escDrop(cancel);
+  };
+  save.addEventListener('click', commit);
+  input.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' || event.isComposing || input.disabled) return;
+    event.preventDefault();
+    return commit();
+  });
+}
+
 // `언제 할지` 열의 한마디: 오늘 / 내일 / 9월 25일 / 나중에.
 function projectPlaceWord(item) {
   if (!item.scheduled) return '나중에';
@@ -410,8 +501,14 @@ function renderProjectDetail(body, row) {
   title.className = 'd-ptitle';
   // 큰 제목은 요약만(BKEY 결정) — 한 프로젝트만 보여 주는 자리라 같은 요약과 헷갈릴 일이 없다.
   title.textContent = uiGroupLabel(row.key);
+  // 이름을 바꿀 수 있는 것은 직접 만든(그룹) 프로젝트뿐이다 — 지라 프로젝트의 이름은 지라 요약이라
+  // 메뉴 항목을 두지 않고 제목의 툴팁으로만 그 사실을 알린다.
+  const key = typeof row.key === 'string' ? row.key : '';
+  const named = key.startsWith('group:');
+  if (key.startsWith('jira:')) title.title = '이름은 지라 요약을 따라요';
   // 제목 줄의 ⋯ — 지라 띠 카드의 ⋯(연결 해제)와는 다른 메뉴다. 여기는 프로젝트 자체의 일이다.
   title.appendChild(uiMoreButton('프로젝트 메뉴', () => [[
+    ...(named ? [{ label: '이름 바꾸기', onClick: () => projectRenameStart(title, row.key) }] : []),
     { label: archived ? '보관 해제' : '보관', onClick: () => projectArchiveSet(row.key, !archived) },
   ]]));
   const summary = document.createElement('div');

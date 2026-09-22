@@ -271,6 +271,38 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     return { ok: true, project: key, archived };
   }
 
+  // ---------- 직접 만든(그룹) 프로젝트 이름 바꾸기 ----------
+  // 이 저장소가 가진 세 자리(회의 프로젝트·projectLinks 키·projectArchive 키)만 바꾼다. 업무 파일과
+  // 회의 연결 파일·주간요약은 부르는 쪽(server.js renameProject)이 같은 트랜잭션 안에서 이어서 바꾼다.
+  // 칸이 없던 옛 파일에 `projectLinks`·`projectArchive`를 새로 만들어 넣지는 않는다(snapshot 주석과 같은 규칙).
+  const groupList = () => [...groupNames(read())];
+  function renameGroup(from, to) {
+    const state = read();
+    let meetings = 0, links = 0, archive = 0;
+    for (const [id, event] of Object.entries(state.meetings)) {
+      if (!event.project || event.project.type !== 'group' || linkGroupName(event.project.value) !== from) continue;
+      state.meetings[id] = { ...event, project: { ...event.project, value: to, label: to } };
+      meetings += 1;
+    }
+    if (state.projectLinks) {
+      const next = {};
+      for (const [name, key] of Object.entries(state.projectLinks)) {
+        if (linkGroupName(name) === from) { next[to] = key; links += 1; } else next[name] = key;
+      }
+      state.projectLinks = next;
+    }
+    if (state.projectArchive) {
+      const next = {};
+      for (const [key, day] of Object.entries(state.projectArchive)) {
+        const named = key.startsWith('group:') && linkGroupName(key.slice('group:'.length)) === from;
+        if (named) { next[`group:${to}`] = day; archive += 1; } else next[key] = day;
+      }
+      state.projectArchive = next;
+    }
+    if (meetings || links || archive) write(state);
+    return { meetings, links, archive };
+  }
+
   // ---------- 담은 항목의 종류 바꾸기 ----------
   // 새 항목을 만들지 않는다 — 같은 id로 업무 파일의 줄만 옮긴다(move). 회의 연결(state.items[id].meetingId)과
   // 검토 기록(state.reviewed)은 항목 번호로 이어져 있어서 그대로 남는다.
@@ -308,5 +340,5 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     write(state);
     return { ok: true };
   }
-  return { archive, snapshot, patchItem, saveMeeting, syncProject, capture, review, undoReview, retype, link, checkProjectLink, linkProject, checkProjectArchive, archiveProject, outcome: id => read().items[id]?.outcome || '' };
+  return { archive, snapshot, patchItem, saveMeeting, syncProject, capture, review, undoReview, retype, link, checkProjectLink, linkProject, checkProjectArchive, archiveProject, groupList, renameGroup, outcome: id => read().items[id]?.outcome || '' };
 };
