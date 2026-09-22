@@ -744,11 +744,15 @@ test('run-task.sh는 정상 실행의 인자·종료 코드·로그 형식을 �
   fs.chmodSync(claude, 0o755);
   const env = { WORKSPACE_DIR: home, AUTOMATION_LOG_DIR: path.join(home, 'logs'), CLAUDE_BIN: claude };
   assert.equal(runScript(automationScript('run-task.sh'), ['ok', '프롬프트', 'Read,Write'], env).status, 0);
-  assert.equal(fs.readFileSync(path.join(home, 'args.txt'), 'utf8').trim(), '-p 프롬프트 --permission-mode acceptEdits --allowedTools Read,Write');
+  assert.equal(fs.readFileSync(path.join(home, 'args.txt'), 'utf8').trim(), '-p 프롬프트 --model sonnet --permission-mode acceptEdits --allowedTools Read,Write');
   assert.equal(runScript(automationScript('run-task.sh'), ['ok', '프롬프트', 'Read,Write'], { ...env, FAKE_EXIT: '7' }).status, 7);
   // 권한 모드·금지 도구는 선택 인자다(슬랙 캡처만 쓴다). 안 주면 위처럼 예전 그대로다.
   assert.equal(runScript(automationScript('run-task.sh'), ['ok', '프롬프트', 'Read', 'manual', 'Write,Edit'], env).status, 0);
-  assert.equal(fs.readFileSync(path.join(home, 'args.txt'), 'utf8').trim(), '-p 프롬프트 --permission-mode manual --allowedTools Read --disallowedTools Write,Edit');
+  assert.equal(fs.readFileSync(path.join(home, 'args.txt'), 'utf8').trim(), '-p 프롬프트 --model sonnet --permission-mode manual --allowedTools Read --disallowedTools Write,Edit');
+  // 모델은 TASK_MODEL로 바꿀 수 있다(계정 기본 모델과 무관하게 자동화 비용을 고정하려는 장치).
+  // 로그 문구 개수 단언을 건드리지 않게 다른 이름(ok2)으로 실행한다.
+  assert.equal(runScript(automationScript('run-task.sh'), ['ok2', '프롬프트', 'Read,Write'], { ...env, TASK_MODEL: 'opus' }).status, 0);
+  assert.equal(fs.readFileSync(path.join(home, 'args.txt'), 'utf8').trim(), '-p 프롬프트 --model opus --permission-mode acceptEdits --allowedTools Read,Write');
   const log = fs.readFileSync(path.join(home, 'logs', 'ok.log'), 'utf8');
   assert.doesNotMatch(log, /시간 초과/);
   assert.match(log, /^───── \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} ok 종료 \(exit 0\)$/m);
