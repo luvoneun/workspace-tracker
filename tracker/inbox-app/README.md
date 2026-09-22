@@ -307,7 +307,7 @@ Slack 수집은 모든 페이지를 읽고 `import-record.js`로 앱의 검증·
 
 미팅 노트 가져오기는 일정표 없이 **앱의 버튼으로만** 돕니다. 앱 서버는 프로세스를 띄우지 않고 요청 표시 파일 `~/.local/share/workspace-automation/requests/tiro-sync.request`(JSON: `{"requestedAt", "scope": "today"|"meeting", "meeting": {…}}`) 하나만 씁니다. 그 파일을 `WatchPaths`로 지켜보던 launchd 에이전트(`com.luvon.workspace.tiro-sync`)가 기존 `run-task.sh`로 `.claude/skills/tiro-sync.md`를 실행하고, 앱은 `logs/tiro-sync.log`의 시작·종료 줄로 진행 상태를 읽습니다(`GET /api/meeting-notes/status` — 파일을 쓰지 않습니다). 요청에 담기는 회의 값은 **앱이 아는 회의 목록에 실제로 있는 회의**만 통과하고(형식 오류·미래 회의는 거절), 요청 파일의 글자는 자동화가 데이터로만 다룹니다. 60초가 지나도 실행이 시작되지 않으면 `setup.sh를 다시 실행해 주세요`로, 35분이 넘으면 실패로 봅니다. 가져오는 중에 들어온 요청은 409(`지금 가져오는 중이에요`)로 막습니다. 티로 MCP(`tiro-mcp`, user 범위)가 `claude`에 연결돼 있어야 실행이 성공합니다.
 
-자동화 실행(`run-task.sh`)은 30분(`TASK_TIMEOUT_SECONDS`, 맥이 깨어 있는 시간 기준)이 넘으면 자식 프로세스까지 정리하고 `exit 124`로 끝냅니다. Slack 수집은 잠금 주인 프로세스가 살아 있는지 확인해서, 살아 있으면 건너뛰고 죽었으면 바로 회수합니다. 수집 실행은 파일 수정 도구 없이(Write·Edit 금지) `import-record.js`와 `fetch_slack_channel.sh` 두 명령만 쓸 수 있습니다.
+자동화 실행(`run-task.sh`)은 모델을 **Sonnet으로 고정**해 부릅니다(`--model sonnet`, 바꾸려면 `TASK_MODEL`) — 계정 기본 모델을 따라가면 `/model`을 바꾼 뒤 수집·동기화가 비싼 모델로 돌아 사용량 한도를 먹기 때문입니다. 30분(`TASK_TIMEOUT_SECONDS`, 맥이 깨어 있는 시간 기준)이 넘으면 자식 프로세스까지 정리하고 `exit 124`로 끝냅니다. Slack 수집은 잠금 주인 프로세스가 살아 있는지 확인해서, 살아 있으면 건너뛰고 죽었으면 바로 회수합니다. 수집 실행은 파일 수정 도구 없이(Write·Edit 금지) `import-record.js`와 `fetch_slack_channel.sh` 두 명령만 쓸 수 있습니다.
 
 자동 갱신(슬랙·캘린더·지라)이 낡았으면 머리줄에 글자를 끼우지 않고 **설정 톱니바퀴에 주황 점**이 켜집니다(지라는 앱이 목록을 직접 읽고 있는 동안에는 낡을 일이 없어 이 경고가 뜨지 않습니다)(지금 실패 중이면 빨간 점이 이깁니다). 무엇이 낡았는지는 톱니바퀴의 툴팁(`설정 — 캘린더 어제 기준`, 둘 이상이면 `자동 갱신 3개 어제 기준`·나이가 다르면 `확인 필요`)이 말하고, 누르면 설정 > 상태의 그 줄이 밝혀집니다. 그날의 첫 자동 갱신(9시대)이 돌기 전인 09:30 이전에는 `어제 기준`을 알리지 않습니다(오류가 있었거나 이틀 넘게 멈춘 것은 그대로 알립니다).
 

@@ -57,7 +57,10 @@ echo "───── $(date '+%Y-%m-%d %H:%M:%S') $NAME 시작" >> "$LOG"
 # 훑어 대상을 고르는 방식은 잘못 고르면 관계없는 프로그램까지 죽이므로 쓰지 않는다.
 # 잡 제어를 켜면 백그라운드 잡의 표준 입력이 자동으로 /dev/null이 되지 않아(터미널에서
 # 부르면 SIGTTIN으로 멈출 수 있다) 직접 끊어준다 — claude -p는 stdin을 쓰지 않는다.
-CLAUDE_ARGS=(-p "$PROMPT" --permission-mode "$MODE" --allowedTools "$TOOLS")
+# 모델은 여기서 못 박는다 — 계정 기본 모델(`/model`로 바뀜)을 따라가면 자동화가 비싼 모델로 돌아
+# 사용량 한도를 먹는다. 수집·동기화는 Sonnet으로 충분하다. 바꾸려면 TASK_MODEL만 준다.
+CLAUDE_MODEL="${TASK_MODEL:-sonnet}"
+CLAUDE_ARGS=(-p "$PROMPT" --model "$CLAUDE_MODEL" --permission-mode "$MODE" --allowedTools "$TOOLS")
 [ -n "$DENY" ] && CLAUDE_ARGS+=(--disallowedTools "$DENY")
 
 set -m
