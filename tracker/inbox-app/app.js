@@ -3990,9 +3990,17 @@ function groupSelectOptions(current, forceClearable) {
   // 여러 개를 한 번에 옮길 땐 "현재 그룹"이라는 게 없어도(current === null) 해제를 고를 수 있어야 한다.
   if (current || forceClearable) head.push(`<option value="__clear__">— 그룹 해제 —</option>`);
   const rest = [];
-  // 보관해 둔 프로젝트도 고를 수 있다 — 목록 끝의 `지난 프로젝트` 소제목 아래로 내려갈 뿐이다.
+  // 지난 프로젝트도 고를 수 있다 — 목록 끝의 `지난 프로젝트` 소제목 아래로 내려갈 뿐이다.
+  // 왼쪽 목록과 같은 자동 판정(projectQuiet)을 쓴다 — 저장된 값이 아니라 매번 다시 계산한다.
   const past = [];
-  const put = (key, line) => (projectArchived(key) ? past : rest).push(line);
+  const quietToday = todayStr();
+  const wfItems = (typeof workflowData === 'object' && workflowData && workflowData.items) || [];
+  const wfMeetings = (typeof workflowData === 'object' && workflowData && workflowData.meetings) || [];
+  const put = (key, line) => {
+    const open = wfItems.filter(item => uiProjectOpenItem(item) && wfKey(item) === key).length;
+    const quiet = projectQuiet({ open }, projectLastDay(key, wfItems, wfMeetings), quietToday);
+    (quiet ? past : rest).push(line);
+  };
   // `그 밖의 이슈`(extra = 지라에서 완료됐거나 담당이 바뀐 것)는 새로 고를 수 있는 선택지로 내놓지
   // 않는다 — 요약을 보여 주려고 들고 있을 뿐이다. 다만 지금 걸려 있는 값이면 골라진 채로 보여야 한다.
   // 고르는 자리라 `요약 · 키`(BKEY 결정) — 눈이 먼저 가는 앞자리는 요약이고, 정렬도 요약 기준이다.

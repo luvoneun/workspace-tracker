@@ -2106,80 +2106,6 @@ test('GET /api/jira/done은 설정이 없으면 연결 안 됨으로 답하고, 
   assert.equal(snapshot(), before, 'GET은 어떤 파일도 쓰지 않는다');
 });
 
-// ---------- 지난 프로젝트로 보관하기 (BARCHIVE 2) ----------
-const archivePost = (origin, body, key) => fetch(origin + '/api/project/archive', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json', ...(key ? { 'Idempotency-Key': key } : {}) },
-  body: JSON.stringify(body),
-}).then(async response => ({ status: response.status, ...await response.json() }));
-
-test('보관은 앱이 아는 프로젝트만, 키 형식대로만 받고 거절된 요청은 파일을 고치지 않는다', async () => {
-  assert.equal((await post('/api/today-task/create', { description: '보관 실험용 업무', group: '보관 실험' })).ok, true);
-  const workflowFile = path.join(directory, '.workflow.json');
-  const before = fs.readFileSync(workflowFile, 'utf8');
-  const refuse = async (body, message) => {
-    const answer = await archivePost(base, body);
-    assert.equal(answer.status, 400, JSON.stringify(body));
-    assert.equal(answer.error, message);
-  };
-  await refuse({ project: 'group:보관 실험' }, '보관할지 해제할지 알려 주세요.');
-  await refuse({ project: 'group:보관 실험', archived: 'true' }, '보관할지 해제할지 알려 주세요.');
-  await refuse({ project: '보관 실험', archived: true }, '프로젝트를 확인해 주세요.');
-  await refuse({ project: 'jira:io-12345', archived: true }, '프로젝트를 확인해 주세요.');
-  await refuse({ project: 'jira:IO-', archived: true }, '프로젝트를 확인해 주세요.');
-  await refuse({ project: 'group:없는 프로젝트', archived: true }, '프로젝트를 찾을 수 없어요.');
-  assert.equal(fs.readFileSync(workflowFile, 'utf8'), before, '거절된 요청은 파일을 고치지 않는다');
-});
-
-test('보관·해제는 프로젝트 키 하나만 저장하고 업무·기록은 하나도 바뀌지 않는다 — 옛 파일도 그대로 읽힌다', async (t) => {
-  const server = await startServer(t, (home) => {
-    fs.writeFileSync(path.join(home, 'tasks.md'),
-      '# Tasks\n- 정산 배치 설계 검토하기 #task[id:ar01 status:to-do created:2026-09-20 group:결제_리뉴얼]\n'
-      + '- 게임 임베드 검수하기 #task[id:ar02 status:to-do created:2026-09-20 jira:IO-12345]\n');
-    // projectArchive 칸이 없는 옛 파일 — 빈 표로 읽혀야 한다.
-    fs.writeFileSync(path.join(home, '.workflow.json'), JSON.stringify({ items: {}, meetings: {} }));
-  });
-  const read = async () => (await (await fetch(server.base + '/api/items')).json());
-  const first = await read();
-  assert.deepEqual(first.workflows.projectArchive, {}, '옛 파일은 빈 표로 읽힌다');
-
-  // 파일 표기(`결제_리뉴얼`)와 화면 표기(`결제 리뉴얼`)는 연결과 같은 한 꼴로 맞춘다.
-  const archived = await archivePost(server.base, { project: 'group:결제 리뉴얼', archived: true });
-  assert.deepEqual(archived, { status: 200, ok: true, project: 'group:결제 리뉴얼', archived: true });
-  const after = await read();
-  assert.deepEqual(Object.keys(after.workflows.projectArchive), ['group:결제 리뉴얼']);
-  assert.match(after.workflows.projectArchive['group:결제 리뉴얼'], /^\d{4}-\d{2}-\d{2}$/, '보관한 날이 함께 남는다');
-  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(server.home, '.workflow.json'), 'utf8')).projectArchive,
-    after.workflows.projectArchive);
-  // 업무·기록·주간요약은 그대로다 — 바뀌는 것은 화면의 왼쪽 목록 배치뿐이다.
-  assert.equal(fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8'), fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8'));
-  const task = after.laterTasks.concat(after.todayTasks).find(item => item.id === 'ar01');
-  assert.deepEqual([task.group, task.jira, task.status], ['결제 리뉴얼', null, 'to-do']);
-  assert.deepEqual(first.weeklyReports.map(week => week.draft.rows.length), after.weeklyReports.map(week => week.draft.rows.length));
-
-  // 지라 프로젝트는 키 형식으로만 받는다(이 저장소는 내 담당 목록을 들고 있지 않다).
-  assert.equal((await archivePost(server.base, { project: 'jira:IO-12345', archived: true })).ok, true);
-  assert.deepEqual(Object.keys((await read()).workflows.projectArchive).sort(), ['group:결제 리뉴얼', 'jira:IO-12345']);
-
-  // 같은 내용을 같은 식별자로 다시 보내면 한 번만 쓴다(기존 idempotency 규칙 그대로).
-  const key = 'barchive-idempotency-key-001';
-  const send = () => archivePost(server.base, { project: 'group:결제 리뉴얼', archived: false }, key);
-  assert.deepEqual(await send(), { status: 200, ok: true, project: 'group:결제 리뉴얼', archived: false });
-  assert.deepEqual(await send(), { status: 200, ok: true, project: 'group:결제 리뉴얼', archived: false });
-  assert.deepEqual(Object.keys((await read()).workflows.projectArchive), ['jira:IO-12345'], '해제하면 표에서 사라진다');
-});
-
-test('복구가 필요한 동안에는 보관도 저장되지 않는다', async (t) => {
-  const server = await startServer(t, (home) => {
-    fs.writeFileSync(path.join(home, 'tasks.md'), '# Tasks\n- 막힌 저장 #task[id:ar03 status:to-do created:2026-09-20 group:운영툴]\n');
-    fs.writeFileSync(path.join(home, '.mutation-journal.json'), journalEntry(path.join(home, 'tasks.md'), '# Tasks\n', '# Tasks\n- 중단된 저장\n'));
-    fs.writeFileSync(path.join(home, '.mutation.lock'), String(deadPid()));
-  });
-  const blocked = await archivePost(server.base, { project: 'group:운영툴', archived: true });
-  assert.equal(blocked.status, 503);
-  assert.match(blocked.error, /저장을 멈췄어요/);
-});
-
 // ---------- 설정 > 삭제한 항목 (BTRASH) ----------
 // 삭제한 줄의 원문은 `.trash.json`에 남는다. 목록은 조회이고(파일을 쓰지 않는다), 되살리기는 기존
 // `/api/track/restore`가, 완전히 지우기는 아래 `trash-purge`가 맡는다. 자동 영구 삭제는 없다.
@@ -2417,8 +2343,8 @@ test('BRENAME: 한 자리라도 실패하면 전부 되돌아간다 — 반쯤 �
 
   // 저장은 잠기지 않는다(되돌리기가 받아들여졌으므로) — 다른 저장은 그대로 된다.
   assert.equal((await (await fetch(server.base + '/api/storage-status')).json()).recoveryNeeded, false);
-  const archived = await archivePost(server.base, { project: 'group:운영툴', archived: true });
-  assert.equal(archived.ok, true);
+  const created = await fetch(server.base + '/api/today-task/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ description: '되돌린 뒤에도 저장은 된다' }) }).then(r => r.json());
+  assert.equal(created.ok, true);
 
   // 같은 요청이 형식을 고친 뒤에는 통한다 — 위에서 되돌아간 것이 "아무것도 안 했다"가 아니라
   // **업무 파일까지 쓴 뒤 되돌린 것**임을 이 줄이 보여 준다.

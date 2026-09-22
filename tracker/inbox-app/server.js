@@ -1512,9 +1512,6 @@ const handleRequest = (req, res) => {
     '/api/workflow/link': workflows.link,
     // 담은 항목의 종류 바꾸기. 같은 id로 파일만 옮기므로 회의 연결·검토 기록이 그대로 남는다.
     '/api/workflow/retype': workflows.retype,
-    // 프로젝트를 `지난 프로젝트`로 내리거나 꺼낸다. 저장하는 것은 프로젝트 키 하나뿐이고,
-    // 업무·기록·주간요약은 하나도 바뀌지 않는다 — 앱의 기존 저장 길을 그대로 탄다.
-    '/api/project/archive': workflows.archiveProject,
     // 직접 만든 프로젝트의 이름 바꾸기 — 그 프로젝트에 속한 모든 기록을 한 트랜잭션으로 함께 바꾼다.
     '/api/project/rename': renameProject,
     // 삭제한 항목 완전히 지우기 — `.trash.json`에서 그 줄만 뺀다(업무 파일은 이미 그 줄이 없다).

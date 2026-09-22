@@ -1565,16 +1565,10 @@ body.batch-open .d-toast { bottom: 76px; }
   transition: background 170ms var(--ease), color 170ms var(--ease);
 }
 .d-plink:hover { background: var(--hover); color: var(--accent-text); }
-/* 그 바로 아래의 정리 권유 한 줄 — `조용한 프로젝트 3개 · 보관할까요?` + `모두 보관` */
-.d-pnudge {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
-  padding: 0 10px 6px; font-size: 12.5px; color: var(--dim);
-}
-.d-pnudge .d-link { min-height: 28px; padding: 0 4px; margin: 0 -4px; font-size: 12.5px; }
 
 .d-pmain { min-width: 0; padding-left: 20px; }
 .d-pwrap { max-width: 1000px; }
-/* 제목 줄 — 이름 옆에 프로젝트 자체의 ⋯(보관/보관 해제)가 붙는다 */
+/* 제목 줄 — 그룹 프로젝트만 이름 옆에 프로젝트 자체의 ⋯(이름 바꾸기)가 붙는다 */
 .d-ptitle { display: flex; align-items: center; gap: 2px; margin: 0 0 2px; font-size: 24px; font-weight: 700; letter-spacing: -0.025em; }
 .d-ptitle::before { display: none; }
 .d-ptitle .d-more { flex: none; width: 28px; height: 28px; color: var(--dim); }

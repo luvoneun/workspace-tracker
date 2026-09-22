@@ -86,10 +86,6 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
       // 손으로 걸어 둔 `그룹 이름 → 지라 키`. 화면은 지금 보고 있는 프로젝트의 것만 읽으므로,
       // 그룹이 없어져 고아가 된 연결이 남아 있어도 아무 자리에도 나타나지 않는다.
       projectLinks: { ...(state.projectLinks || {}) },
-      // 사람이 직접 `지난 프로젝트`로 내려 둔 것(`프로젝트 키 → 보관한 날`). 화면의 왼쪽 목록 배치와
-      // 고르기 목록 소제목만 이 값을 읽는다 — 업무·기록·주간요약·검색은 이 표를 보지 않는다.
-      // 프로젝트가 없어져 고아가 된 줄이 남아 있어도 아무 자리에도 나타나지 않는다.
-      projectArchive: { ...(state.projectArchive || {}) },
       // 새 프로젝트 화면의 직군 세트(`[{ label, prefix }]`). 파일에 칸이 없으면 `null`이고
       // 그때는 **화면이** 기본 세트를 쓴다 — 여기서 기본값을 파일에 써 넣지 않는다.
       // 사람이 전부 지우면 빈 배열이 저장되고, 그때는 빈 목록이 그대로 보인다.
@@ -245,36 +241,6 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     return { ok: true, project, jira: key };
   }
 
-  // ---------- 지난 프로젝트로 직접 내려 둔 프로젝트 (보관) ----------
-  // 저장하는 것은 `프로젝트 키 → 보관한 날` 표 하나뿐이고, 저장 길은 projectLinks와 같다
-  // (idempotent → mutations.run → .workflow.json 원자적 쓰기). 항목은 하나도 건드리지 않는다.
-  // 그룹은 `checkProjectLink`와 똑같이 "앱이 실제로 보여 주는 그룹인가"를 본다. 지라 프로젝트는
-  // 이 저장소가 목록을 들고 있지 않으므로(내 담당 목록은 메모리에만 있다) 키 형식으로만 받는다 —
-  // 모르는 키가 남아도 어느 화면에도 나타나지 않는다(위 snapshot 주석과 같은 규칙).
-  const PROJECT_ARCHIVE_JIRA_RE = /^jira:[A-Z][A-Z0-9]*-\d+$/;
-  function checkProjectArchive({ project, archived }) {
-    if (typeof archived !== 'boolean') throw new Error('보관할지 해제할지 알려 주세요.');
-    if (typeof project !== 'string' || project.length > 250 || /[\r\n]/.test(project)) throw new Error('프로젝트를 확인해 주세요.');
-    if (project.startsWith('group:')) {
-      const name = project.slice('group:'.length).trim();
-      if (!name) throw new Error('프로젝트를 확인해 주세요.');
-      if (!groupNames(read()).has(name)) throw new Error('프로젝트를 찾을 수 없어요.');
-      return { key: `group:${name}`, archived };
-    }
-    if (!PROJECT_ARCHIVE_JIRA_RE.test(project)) throw new Error('프로젝트를 확인해 주세요.');
-    return { key: project, archived };
-  }
-  function archiveProject(body) {
-    const { key, archived } = checkProjectArchive(body || {});
-    const state = read();
-    const kept = { ...(state.projectArchive || {}) };
-    if (archived) kept[key] = today();
-    else delete kept[key];
-    state.projectArchive = kept;
-    write(state);
-    return { ok: true, project: key, archived };
-  }
-
   // ---------- 새 프로젝트 화면의 직군 세트 ----------
   // `workspace.config.json`은 사람이 손으로 고치는 파일이라 앱이 쓰지 않는다 — 직군 세트는 앱
   // 데이터다. 저장 길은 projectLinks·projectArchive와 같다(idempotent → mutations.run → 원자적 쓰기).
@@ -419,5 +385,5 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     write(state);
     return { ok: true };
   }
-  return { archive, snapshot, patchItem, saveMeeting, syncProject, capture, review, undoReview, retype, link, checkProjectLink, linkProject, checkProjectArchive, archiveProject, checkJiraRoles, saveJiraRoles, groupList, renameGroup, attentionDismissed, dismissAttention, undismissAttention, outcome: id => read().items[id]?.outcome || '' };
+  return { archive, snapshot, patchItem, saveMeeting, syncProject, capture, review, undoReview, retype, link, checkProjectLink, linkProject, checkJiraRoles, saveJiraRoles, groupList, renameGroup, attentionDismissed, dismissAttention, undismissAttention, outcome: id => read().items[id]?.outcome || '' };
 };

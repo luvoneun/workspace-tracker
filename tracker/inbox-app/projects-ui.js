@@ -1,4 +1,4 @@
-// 프로젝트 탭 한 벌 — 왼쪽 목록(열린 항목 수·지난 프로젝트·보관)과 오른쪽 프로젝트 하나의 상세.
+// 프로젝트 탭 한 벌 — 왼쪽 목록(열린 항목 수·지난 프로젝트)과 오른쪽 프로젝트 하나의 상세.
 // app.js에서 그대로 옮긴 코드다. app.js의 공용 부품(uiTaskRow·uiGroupHeading·uiMenu·request·
 // showNotice·pushUndo·load·panelOpen·workflowData)과 jira-ui.js(지라 띠 카드·배포 임박)에 기댄다.
 // index.html에서 jira-ui.js 뒤, app.js보다 먼저 읽힌다.
@@ -58,16 +58,12 @@ function projectFixedOrder(rows, orderKeys) {
 }
 
 // ---------- 지난 프로젝트 ----------
-// 끝난 프로젝트가 왼쪽 목록에 계속 쌓였다. 열린 항목이 없고 한참 조용한 것과 사람이 직접 보관한
-// 것을 목록 끝의 접힌 구역으로 내린다. **바뀌는 것은 왼쪽 목록 배치와 고르기 목록 소제목뿐이다** —
-// 업무·기록·주간요약·검색·슬랙 복사는 하나도 달라지지 않는다.
+// 끝난 프로젝트가 왼쪽 목록에 계속 쌓였다. 열린 항목이 없고 한참 조용한 것을 목록 끝의 접힌
+// 구역으로 자동으로 내린다(매번 다시 계산, 저장하지 않는다). 업무가 하나라도 생기면 자동으로
+// 다시 위 목록으로 올라온다 — 사람이 손으로 접거나 영구히 숨기는 길은 없다.
+// **바뀌는 것은 왼쪽 목록 배치와 고르기 목록 소제목뿐이다** — 업무·기록·주간요약·검색·슬랙 복사는
+// 하나도 달라지지 않는다.
 const PROJECT_QUIET_DAYS = 14;
-
-// 사람이 직접 보관해 둔 프로젝트 표(`프로젝트 키 → 보관한 날`). 서버가 목록과 함께 보내 준다.
-function projectArchiveMap() {
-  return (typeof workflowData === 'object' && workflowData && workflowData.projectArchive) || {};
-}
-const projectArchived = key => Object.prototype.hasOwnProperty.call(projectArchiveMap(), key);
 
 // 프로젝트의 마지막 활동 날짜 — **있는 값만** 본다(없는 날짜를 지어내지 않는다).
 // 그 프로젝트 항목들의 완료·수정·등록 날짜와, 그 프로젝트에 걸린 회의 날짜 중 가장 최근이다.
@@ -96,17 +92,15 @@ function projectQuiet(row, lastDay, today) {
 // 왼쪽 목록을 둘로 가르는 순수 함수 — 위 목록과 끝의 `지난 프로젝트`.
 // 지금 보고 있는 프로젝트(selectedKey)는 구역이 바뀌어도 보는 동안 위 목록에 남는다
 // (0개가 되어도 갑자기 사라지지 않던 기존 규칙 그대로다).
-// quietCount는 자동 분류로 내려왔지만 아직 **보관하지 않은** 수다(권유 줄이 쓴다).
-function projectPastRows(rows, { quietKeys, archivedKeys, selectedKey } = {}) {
+function projectPastRows(rows, { quietKeys, selectedKey } = {}) {
   const quiet = quietKeys || new Set();
-  const archived = archivedKeys || new Set();
   const active = [];
   const past = [];
   rows.forEach((row) => {
-    const down = (quiet.has(row.key) || archived.has(row.key)) && row.key !== selectedKey;
+    const down = quiet.has(row.key) && row.key !== selectedKey;
     (down ? past : active).push(row);
   });
-  return { active, past, quietCount: past.filter(row => !archived.has(row.key)).length };
+  return { active, past };
 }
 
 function renderProjects() {
@@ -121,13 +115,12 @@ function renderProjects() {
   projectOrderKeys = rows.map(row => row.key);
   if (!rows.some(row => row.key === projectKey)) projectKey = rows.length ? rows[0].key : null;
 
-  // 자동 분류(조용함)는 화면에서 계산하고 저장하지 않는다. 보관은 저장된 값이다.
+  // 자동 분류(조용함)는 화면에서 계산하고 저장하지 않는다 — 매번 다시 판정한다.
   const today = todayStr();
-  const archivedKeys = new Set(Object.keys(projectArchiveMap()));
   const quietKeys = new Set(rows
     .filter(row => projectQuiet(row, projectLastDay(row.key, workflowData.items, workflowData.meetings), today))
     .map(row => row.key));
-  const { active: visibleRows, past: pastRows, quietCount } = projectPastRows(rows, { quietKeys, archivedKeys, selectedKey: projectKey });
+  const { active: visibleRows, past: pastRows } = projectPastRows(rows, { quietKeys, selectedKey: projectKey });
   // 화면에 보이는 이름은 요약만(같은 요약이 둘 이상이면 그때만 키로 구분) — row.label은 정렬용 원본 그대로 둔다.
   const labels = uiGroupLabels(visibleRows.concat(projectPastOpen ? pastRows : []).map(row => row.key));
 
@@ -202,20 +195,6 @@ function renderProjects() {
     toggle.textContent = projectPastOpen ? '지난 프로젝트 숨기기' : `지난 프로젝트 ${pastRows.length}`;
     toggle.addEventListener('click', () => { projectPastOpen = !projectPastOpen; renderProjects(); });
     listEl.appendChild(toggle);
-    // 구역 머리 아래 조용한 한 줄 — 자동으로 내려왔지만 아직 보관하지 않은 것이 있을 때만.
-    if (quietCount) {
-      const nudge = document.createElement('div');
-      nudge.className = 'd-pnudge';
-      const words = document.createElement('span');
-      words.textContent = `조용한 프로젝트 ${quietCount}개 · 보관할까요?`;
-      const all = document.createElement('button');
-      all.type = 'button';
-      all.className = 'd-link';
-      all.textContent = '모두 보관';
-      all.addEventListener('click', () => projectArchiveAll(pastRows.filter(row => !archivedKeys.has(row.key)).map(row => row.key)));
-      nudge.append(words, all);
-      listEl.appendChild(nudge);
-    }
     if (projectPastOpen) pastRows.forEach(row => addRow(row, true));
   }
 
@@ -224,51 +203,11 @@ function renderProjects() {
   else renderProjectDetail(body, rows.find(row => row.key === projectKey) || null);
 }
 
-// 보관·해제가 서버로 나가는 단 하나의 길. 저장하는 것은 프로젝트 키 하나이고 업무·기록은
-// 그대로다. 앱의 ⌘Z 대상은 아니다(pushUndo를 쓰지 않는다) — 되돌리는 길은 알림의 `되돌리기`뿐이다.
-const projectArchivePost = (key, archived) => request('/api/project/archive', {
-  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project: key, archived }),
-});
-async function projectArchiveSet(key, archived) {
-  try { await projectArchivePost(key, archived); } catch { return; }
-  await load();
-  showNotice(archived ? '지난 프로젝트로 옮겼어요' : '지난 프로젝트에서 꺼냈어요', false, null, {
-    label: '되돌리기',
-    onClick: async (button) => {
-      if (button) button.disabled = true;
-      try { await projectArchivePost(key, !archived); } catch { return; }
-      await load();
-      showNotice(archived ? '보관을 해제했어요' : '지난 프로젝트로 다시 옮겼어요');
-    },
-  });
-}
-// 권유 줄의 `모두 보관` — 한 건씩 보내고, 막히면 거기서 멈춘 뒤 된 것만 알린다.
-async function projectArchiveAll(keys) {
-  const done = [];
-  let stopped = false;
-  for (const key of keys) {
-    try { await projectArchivePost(key, true); done.push(key); } catch { stopped = true; break; }
-  }
-  if (!done.length) return;
-  await load();
-  showNotice(stopped ? `${done.length}개까지 보관하고 멈췄어요` : `${done.length}개를 보관했어요`, false, null, {
-    label: '되돌리기',
-    onClick: async (button) => {
-      if (button) button.disabled = true;
-      for (const key of [...done].reverse()) {
-        try { await projectArchivePost(key, false); } catch { break; }
-      }
-      await load();
-      showNotice('보관을 해제했어요');
-    },
-  });
-}
-
 // ---------- 직접 만든 프로젝트 이름 바꾸기 ----------
-// 서버가 그 프로젝트에 속한 모든 기록(항목·회의·연결·보관·주간요약)을 **한 트랜잭션**으로 함께
+// 서버가 그 프로젝트에 속한 모든 기록(항목·회의·연결·주간요약)을 **한 트랜잭션**으로 함께
 // 바꾼다 — 반쯤 바뀐 이름을 남기지 않는다. 지라 프로젝트의 이름은 지라 요약이라 여기에 없다.
 // 앱의 ⌘Z 대상은 아니다(pushUndo를 쓰지 않는다) — 되돌리는 길은 알림의 `되돌리기`(반대 방향 이름
-// 바꾸기)뿐이다. 보관(projectArchiveSet)과 같은 규칙이다.
+// 바꾸기)뿐이다.
 const projectRenamePost = (key, name) => request('/api/project/rename', {
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project: key, name }),
 });
@@ -506,7 +445,6 @@ function renderProjectDetail(body, row) {
     return;
   }
   const items = workflowData.items.filter(item => wfKey(item) === row.key);
-  const archived = projectArchived(row.key);
   const title = document.createElement('h2');
   title.className = 'd-ptitle';
   // 큰 제목은 요약만(BKEY 결정) — 한 프로젝트만 보여 주는 자리라 같은 요약과 헷갈릴 일이 없다.
@@ -517,16 +455,17 @@ function renderProjectDetail(body, row) {
   const named = key.startsWith('group:');
   if (key.startsWith('jira:')) title.title = '이름은 지라 요약을 따라요';
   // 제목 줄의 ⋯ — 지라 띠 카드의 ⋯(연결 해제)와는 다른 메뉴다. 여기는 프로젝트 자체의 일이다.
-  title.appendChild(uiMoreButton('프로젝트 메뉴', () => [[
-    ...(named ? [{ label: '이름 바꾸기', onClick: () => projectRenameStart(title, row.key) }] : []),
-    { label: archived ? '보관 해제' : '보관', onClick: () => projectArchiveSet(row.key, !archived) },
-  ]]));
+  // 이름을 바꿀 수 있는 그룹 프로젝트에만 단다 — 지라 프로젝트는 할 수 있는 일이 없어 ⋯ 버튼 자체가 없다.
+  if (named) {
+    title.appendChild(uiMoreButton('프로젝트 메뉴', () => [[
+      { label: '이름 바꾸기', onClick: () => projectRenameStart(title, row.key) },
+    ]]));
+  }
   const summary = document.createElement('div');
   summary.className = 'd-quiet';
   // 그 아래 조용한 줄에만 지라 키를 덧붙인다(`열린 항목 2 · IO-48394`).
-  // 보관해 둔 프로젝트에 열린 항목이 생기면 그 사실을 여기서 알린다 — 꺼낼지는 사람이 정한다.
   const jiraKey = jiraKeyOf(row.key);
-  summary.textContent = (archived ? '보관한 프로젝트 · ' : '') + `열린 항목 ${row.open}` + (jiraKey ? ` · ${jiraKey}` : '');
+  summary.textContent = `열린 항목 ${row.open}` + (jiraKey ? ` · ${jiraKey}` : '');
   body.append(title, summary);
 
   // 지라에 연결된 프로젝트에만, 제목 줄 아래·첫 구역 위에 지라 띠 카드가 선다 — `jira:KEY`
