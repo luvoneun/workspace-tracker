@@ -694,7 +694,8 @@ test('회의 탭 기본 목록: 오늘(과 미래) 전부 + 14일 안의 기록 
     '기간을 충분히 넓히고 토글도 켜면 전부 나온다');
 });
 
-test('회의 탭 필터(초안 있음·미완료만·프로젝트)를 켜면 기간·기록 유무와 상관없이 전체 회의에서 거른다', () => {
+// BMGROUP: 프로젝트 드롭다운은 없앴다 — 목록을 거르는 것은 칩 둘뿐이고, 프로젝트는 `프로젝트별` 보기가 맡는다.
+test('회의 탭 필터(초안 있음·미완료만)를 켜면 기간·기록 유무와 상관없이 전체 회의에서 거른다', () => {
   const app = workflowsClient();
   app.run(MEETINGS_TAB_FIXTURE);
   const ids = state => JSON.parse(app.run(
@@ -702,10 +703,9 @@ test('회의 탭 필터(초안 있음·미완료만·프로젝트)를 켜면 기
   assert.deepEqual(ids("{ reviewOnly: true }"), ['recent-record'], '초안 있음만');
   assert.deepEqual(ids("{ unresolved: true }"), ['today1', 'old-open'],
     '미완료 항목이 남은 회의만 — 기간 밖인 old-open도 찾아낸다(찾는 행동이라 기간 제한이 없다)');
-  assert.deepEqual(ids("{ project: 'group:운영툴' }"), ['recent-record', 'recent-norecord'],
-    '프로젝트로 거르면 기록 없는 recent-norecord도 나온다 — 기간·기록 제한이 풀린다');
-  assert.deepEqual(ids("{ project: 'group:운영툴', reviewOnly: true }"), ['recent-record'], '조건은 함께 걸린다');
-  assert.deepEqual(ids("{ project: 'group:없는프로젝트' }"), []);
+  assert.deepEqual(ids("{ reviewOnly: true, unresolved: true }"), [], '조건은 함께 걸린다');
+  // 프로젝트는 이제 거르지 않는다 — 목록은 그대로고 화면이 소제목으로 묶을 뿐이다.
+  assert.deepEqual(ids("{ project: 'group:운영툴' }"), ids('{}'), '옛 프로젝트 필터 값은 아무 일도 하지 않는다');
 });
 
 test('`이전 회의 더 보기`를 보일지(순수 함수): 지금 기간보다 오래된 회의가 남아 있으면 더 넓힐 것이 있다', () => {
@@ -829,17 +829,268 @@ test('팔레트 필터 줄에는 회의 전용 토글이 없다 — `미완료�
   assert.deepEqual(paletteChips(app, '{}'), all, '다른 종류를 골라도 칩 줄이 흔들리지 않는다');
 });
 
-test('회의 탭 필터 줄의 칩 이름: `초안 있음`·`미완료만`·`빈 회의 포함`', () => {
+test('회의 탭 필터 줄의 칩 이름: `초안 있음`·`미완료만`·`빈 회의 포함` + 보기 전환 세그먼트(드롭다운은 없다)', () => {
   const app = workflowsClient();
-  const labels = JSON.parse(app.run(`(() => {
-    meetingsTabState = { key: null, unresolved: false, reviewOnly: false, project: '', windowDays: 14, showNoRecord: false, result: null };
-    const bar = meetingsTabFilters([]);
-    return JSON.stringify(bar.children.filter(kid => kid.textContent)
-      .map(kid => [kid.textContent, kid.title || null, kid.getAttribute('aria-description') || null]));
-  })()`));
+  app.run("meetingsTabState = { key: null, unresolved: false, reviewOnly: false, windowDays: 14, showNoRecord: false, result: null };");
+  const bar = app.run('meetingsTabFilters()');
+  const labels = bar.children.filter(kid => kid.textContent)
+    .map(kid => [kid.textContent, kid.title || null, kid.getAttribute('aria-description') || null]);
   assert.deepEqual(labels, [['초안 있음', null, null], ['미완료만', null, null],
     ['빈 회의 포함', '아무것도 담지 않은 회의도 함께 보여요', '아무것도 담지 않은 회의도 함께 보여요']],
     '짧은 칩 이름의 뜻은 툴팁과 읽어 주는 설명이 함께 풀어 준다');
+  // BMGROUP: 프로젝트 드롭다운(.d-msel)은 없앴고 그 자리에 두 칸 세그먼트가 선다.
+  assert.equal(nodeFind(bar, 'd-msel'), null, '프로젝트 고르는 드롭다운은 더 이상 없다');
+  const seg = nodeFind(bar, 'd-seg');
+  assert.ok(seg, '`.d-seg` 부품을 그대로 쓴다');
+  assert.equal(seg.getAttribute('aria-label'), '회의 목록 보기');
+  assert.deepEqual(seg.children.map(kid => [kid.textContent, kid.getAttribute('aria-pressed')]),
+    [['날짜순', 'true'], ['프로젝트별', 'false']], '보기 전환이라 aria-pressed를 쓴다(기본은 날짜순)');
+});
+
+// ---------- BMGROUP: 회의 목록의 두 보기(날짜순 · 프로젝트별) ----------
+// 오늘을 기준으로 잡은 회의 넷: 운영툴(반복, 오늘 + 지난 회차) · 결제 리뉴얼 · 프로젝트 없음.
+function meetingsViewClient() {
+  const app = workflowsClient();
+  app.run(`
+    load = async () => {};
+    meetingNotesApply({ used: false, state: 'idle' });
+    var today = todayStr();
+    function dayAgo(n) {
+      const d = new Date(today + 'T00:00:00'); d.setDate(d.getDate() - n);
+      return \`\${d.getFullYear()}-\${String(d.getMonth() + 1).padStart(2, '0')}-\${String(d.getDate()).padStart(2, '0')}\`;
+    }
+    var ops = { type: 'group', value: '운영툴', label: '운영툴' };
+    var pay = { type: 'group', value: '결제 리뉴얼', label: '결제 리뉴얼' };
+    workflowData = {
+      items: [
+        { id: 't1', type: 'task', status: 'to-do', description: '권한 범위 확인', meetingId: 'ops1', group: '운영툴' },
+        { id: 't2', type: 'task', status: 'to-do', description: '발송 정책 검토', meetingId: 'ops1', group: '알림센터' },
+        { id: 'c1', type: 'check', status: 'to-do', description: '법무 회신 받기', meetingId: 'ops1', group: '운영툴' },
+        { id: 'd1', type: 'decision', status: 'to-do', description: '재시도는 3회', meetingId: 'ops1', group: '운영툴' },
+        { id: 't0', type: 'task', status: 'to-do', description: '지난 회차에 남은 일', meetingId: 'ops0', group: '운영툴' },
+        { id: 'd2', type: 'decision', status: 'to-do', description: '정산 주기는 월 1회', meetingId: 'pay1', group: '결제 리뉴얼' },
+        { id: 't3', type: 'task', status: 'to-do', description: '자유 논의에서 나온 일', meetingId: 'free1' },
+      ],
+      meetings: [
+        { id: 'ops1', date: today, start: '10:00', title: '운영툴 주간 싱크', series: '운영툴 주간 싱크', project: ops },
+        { id: 'ops0', date: dayAgo(7), start: '10:00', title: '운영툴 주간 싱크', series: '운영툴 주간 싱크', project: ops },
+        { id: 'pay1', date: dayAgo(1), start: '14:00', title: '결제 리뉴얼 PRD 리뷰', series: '결제 리뉴얼 PRD 리뷰', project: pay },
+        { id: 'free1', date: dayAgo(2), start: '09:00', title: '자유 논의' },
+      ],
+    };
+    wfIndexData();
+    meetingsTabState = { key: 'ops1', unresolved: false, reviewOnly: false, windowDays: 14, showNoRecord: false, result: null };
+    meetingsTabClosed.clear();
+  `);
+  return app;
+}
+const meetingsHeadings = list => nodeFindAll(list, 'd-grp')
+  .map(head => [nodeFind(head, 'gl').textContent, head.getAttribute('aria-expanded')]);
+const meetingsRowIds = app => nodeFindAll(app.nodes.get('meetingList'), 'd-mtrow')
+  .map(row => nodeFind(row, 'ti').textContent);
+
+test('회의 목록의 프로젝트별 보기: 미완료가 남은 프로젝트가 먼저, `프로젝트 없음`은 맨 끝', () => {
+  const app = meetingsViewClient();
+  // 순수 함수부터 — 화면과 같은 차례를 이 함수 하나가 정한다.
+  const groups = JSON.parse(app.run(`JSON.stringify(
+    meetingsTabGroups(meetingsTabList(workflowData.meetings, meetingsTabState, wfMeetingItems), wfMeetingItems)
+      .map(g => [g.key, g.open, g.list.map(e => e.id)]))`));
+  assert.deepEqual(groups, [
+    ['group:운영툴', 4, ['ops1', 'ops0']],
+    ['group:결제 리뉴얼', 0, ['pay1']],
+    ['__misc__', 1, ['free1']],
+  ], '미완료가 있는 운영툴이 먼저(그 안은 날짜 내림차순), 미완료가 없는 결제 리뉴얼이 뒤, 프로젝트 없음은 미완료가 있어도 맨 끝');
+
+  app.run("meetingsTabView = 'project'; renderMeetings();");
+  const list = app.nodes.get('meetingList');
+  assert.deepEqual(meetingsHeadings(list),
+    [['운영툴', 'true'], ['결제 리뉴얼', 'true'], ['프로젝트 없음', 'true']],
+    '소제목은 접히는 그룹 제목 부품이라 aria-expanded를 들고 있다');
+  assert.deepEqual(meetingsRowIds(app), ['운영툴 주간 싱크', '운영툴 주간 싱크', '결제 리뉴얼 PRD 리뷰', '자유 논의']);
+  // 날짜 소제목이 없으니 줄이 날짜를 함께 적는다.
+  const first = nodeFindAll(list, 'd-mtrow')[0];
+  assert.match(first.children[0].textContent, /^\d+\/\d+ 10:00$/, '`9/22 10:00`처럼 날짜 + 시각이다');
+  assert.equal(nodeFind(first, 'pj'), null, '소제목이 이미 프로젝트를 말해 주므로 줄에서는 뺀다');
+  assert.equal(nodeFind(list, 'd-mtday'), null, '프로젝트별 보기에는 날짜 소제목이 없다');
+});
+
+test('회의 목록의 두 보기는 같은 줄을 보여 준다 — 칩 셋은 두 보기에서 똑같이 걸린다', () => {
+  const app = meetingsViewClient();
+  app.run("meetingsTabView = 'date'; renderMeetings();");
+  const byDate = meetingsRowIds(app);
+  assert.ok(nodeFind(app.nodes.get('meetingList'), 'd-mtday'), '날짜순에는 날짜 소제목이 있다');
+  app.run("meetingsTabView = 'project'; renderMeetings();");
+  assert.deepEqual([...meetingsRowIds(app)].sort(), [...byDate].sort(), '거르는 결과는 보기와 무관하다');
+
+  // `미완료만` 칩은 두 보기에서 같은 줄을 남긴다(결제 리뉴얼은 결정뿐이라 빠진다).
+  app.run("meetingsTabState.unresolved = true; meetingsTabView = 'date'; renderMeetings();");
+  const urgentByDate = meetingsRowIds(app);
+  app.run("meetingsTabView = 'project'; renderMeetings();");
+  assert.deepEqual([...meetingsRowIds(app)].sort(), [...urgentByDate].sort());
+  assert.ok(!urgentByDate.includes('결제 리뉴얼 PRD 리뷰'), '미완료가 없는 회의는 두 보기 모두에서 빠진다');
+  assert.deepEqual(meetingsHeadings(app.nodes.get('meetingList')).map(([name]) => name), ['운영툴', '프로젝트 없음']);
+});
+
+test('프로젝트 소제목을 누르면 그 프로젝트만 접힌다 — 세션 동안만 기억하고 고른 회의는 다시 펼친다', () => {
+  const app = meetingsViewClient();
+  app.run("meetingsTabView = 'project'; renderMeetings();");
+  const head = nodeFindAll(app.nodes.get('meetingList'), 'd-grp')[0];
+  head.listeners.click();
+  assert.equal(app.run("meetingsTabClosed.has('group:운영툴')"), true);
+  assert.deepEqual(meetingsHeadings(app.nodes.get('meetingList')),
+    [['운영툴', 'false'], ['결제 리뉴얼', 'true'], ['프로젝트 없음', 'true']]);
+  assert.deepEqual(meetingsRowIds(app), ['결제 리뉴얼 PRD 리뷰', '자유 논의'], '접은 프로젝트의 줄은 빠진다');
+  // 목록 밖의 회의를 열면 그 프로젝트는 다시 펼쳐진다 — 오른쪽 내용은 반드시 보여야 한다.
+  app.run("meetingsTabRevealIfNeeded('ops1'); renderMeetings();");
+  assert.equal(app.run("meetingsTabClosed.has('group:운영툴')"), false);
+});
+
+test('보기 전환은 브라우저에 기억한다(기본은 날짜순) — 접어 둔 프로젝트는 기억하지 않는다', () => {
+  const app = meetingsViewClient();
+  app.run("var saved = {}; localStorage = { getItem: k => (k in saved ? saved[k] : null), setItem: (k, v) => { saved[k] = String(v); } };");
+  app.run("setMeetingsView('project')");
+  assert.equal(app.run('meetingsTabView'), 'project');
+  assert.equal(app.run("saved['meetingsView']"), 'project');
+  app.run("setMeetingsView('date')");
+  assert.equal(app.run("saved['meetingsView']"), 'date');
+  // 값이 깨졌거나 저장소를 못 읽어도 기본은 날짜순이다.
+  app.run("setMeetingsView('엉뚱한 값')");
+  assert.equal(app.run('meetingsTabView'), 'date');
+});
+
+test('회의 정리 부제목의 프로젝트 이름을 누르면 왼쪽이 프로젝트별로 바뀌고 그 프로젝트만 펼쳐진다', () => {
+  const app = meetingsViewClient();
+  app.run("meetingsTabView = 'date'; renderMeetings();");
+  // 줄 옆 카드에는 갈 왼쪽 목록이 없으니 예전처럼 글자로만 적는다.
+  const card = app.run("panelMeetingWhenLine(workflowData.meetings[0], MEETING_HOST_CARD)");
+  assert.equal(nodeFind(card, 'pjlink'), null);
+  assert.match(card.textContent, /운영툴$/);
+
+  const sub = app.run("panelMeetingWhenLine(workflowData.meetings[0], MEETING_HOST_TAB)");
+  const link = nodeFind(sub, 'pjlink');
+  assert.equal(link.textContent, '운영툴');
+  assert.equal(link.getAttribute('aria-label'), '운영툴 회의만 모아 보기');
+  link.listeners.click();
+  assert.equal(app.run('meetingsTabView'), 'project');
+  assert.deepEqual(meetingsHeadings(app.nodes.get('meetingList')),
+    [['운영툴', 'true'], ['결제 리뉴얼', 'false'], ['프로젝트 없음', 'false']], '고른 프로젝트만 펼쳐진 채로 선다');
+  assert.deepEqual(meetingsRowIds(app), ['운영툴 주간 싱크', '운영툴 주간 싱크']);
+});
+
+test('`더 보기`는 날짜순에서는 목록 끝 한 줄, 프로젝트별에서는 프로젝트마다 `더 보기 N`이다', () => {
+  const app = meetingsViewClient();
+  // 보이는 기간(14일) 밖의 기록 있는 운영툴 회의 둘을 더 둔다.
+  app.run(`
+    workflowData.meetings.push(
+      { id: 'ops-old1', date: dayAgo(20), start: '10:00', title: '운영툴 옛 싱크', series: '운영툴 주간 싱크', project: ops },
+      { id: 'ops-old2', date: dayAgo(30), start: '10:00', title: '운영툴 더 옛 싱크', series: '운영툴 주간 싱크', project: ops });
+    workflowData.items.push(
+      { id: 'o1', type: 'task', status: 'done', description: '끝난 일', meetingId: 'ops-old1', group: '운영툴' },
+      { id: 'o2', type: 'task', status: 'done', description: '끝난 일2', meetingId: 'ops-old2', group: '운영툴' });
+    wfIndexData();
+  `);
+  app.run("meetingsTabView = 'date'; renderMeetings();");
+  let more = nodeFindAll(app.nodes.get('meetingList'), 'd-mmore');
+  assert.deepEqual(more.map(node => nodeText(node)), ['이전 회의 더 보기'], '날짜순은 목록 끝에 한 줄이다');
+
+  app.run("meetingsTabView = 'project'; renderMeetings();");
+  more = nodeFindAll(app.nodes.get('meetingList'), 'd-mmore');
+  assert.deepEqual(more.map(node => [node.className, nodeText(node)]),
+    [['d-mmore is-in', '더 보기 2']], '프로젝트별은 그 프로젝트의 소제목 아래에 개수와 함께 붙는다');
+  more[0].children[0].listeners.click();
+  assert.equal(app.run('meetingsTabState.windowDays'), 28, '누르면 보이는 기간이 14일씩 늘어난다');
+});
+
+test('프로젝트 소제목 옆의 지라 상태는 앱이 그 티켓을 들고 있을 때만, 범주 색으로 붙는다', () => {
+  const app = meetingsViewClient();
+  const note = key => app.run(`meetingsProjectStatus(${JSON.stringify(key)})`);
+  assert.equal(note('group:운영툴'), null, '지라와 이어지지 않은 그룹에는 아무것도 붙이지 않는다');
+  assert.equal(note('__misc__'), null);
+  app.run("jiraIssuesByKey = new Map([['AL-1', { key: 'AL-1', summary: '알림센터', status: { name: '진행 중', category: 'doing' } }]]);");
+  assert.equal(note('jira:AL-9'), null, '모르는 티켓이면 생략한다');
+  const doing = note('jira:AL-1');
+  assert.equal(doing.textContent, '진행 중');
+  assert.equal(doing.className, 'js k-acc', '진행 중은 파란 글자(BJCOLOR)');
+  // 손으로 걸어 둔 그룹도 같은 길을 쓴다(jiraKeyOf).
+  app.run("workflowData.projectLinks = { '운영툴': 'AL-1' };");
+  assert.equal(note('group:운영툴').textContent, '진행 중');
+  // 대비책 파일에서 온 목록은 상태가 글자뿐이라(범주가 없다) 아무것도 붙이지 않는다.
+  app.run("jiraIssuesByKey = new Map([['AL-1', { key: 'AL-1', summary: '알림센터', status: '진행 중' }]]);");
+  assert.equal(note('jira:AL-1'), null);
+});
+
+// ---------- BMGROUP: `이 회의에서 나온 것`의 종류 소제목 ----------
+// 구역의 모양을 한 줄씩 읽는다: 소제목이면 그 글자, 줄이면 class + 제목.
+function meetingSectionShape(section) {
+  return section.children.slice(1).map((node) => {
+    const cls = String(node.className || '');
+    if (cls.includes('d-mgrp')) return `소제목 ${cls.includes('is-pj') ? '(프로젝트)' : ''}${nodeText(node)}`.replace('  ', ' ');
+    if (cls.includes('d-mrow2')) return `${cls} | ${nodeFind(node, 'ti').textContent}`;
+    return cls;
+  });
+}
+const meetingSection = (app, code) => app.run(`(() => { const box = document.createElement('div'); ${code}; return box.children[0]; })()`);
+
+test('`이 회의에서 나온 것`은 종류 소제목으로 나뉘고, 한 종류 안에 프로젝트가 둘 이상일 때만 한 번 더 나뉜다', () => {
+  const app = meetingsViewClient();
+  const section = meetingSection(app, "panelMeetingItems(workflowData.meetings[0], box)");
+  assert.equal(section.children[0].textContent, '이 회의에서 나온 것 4', '구역 제목은 그대로다');
+  assert.deepEqual(meetingSectionShape(section), [
+    '소제목 할 일 2',
+    '소제목 (프로젝트)알림센터',
+    'd-mrow2 no-tg | 발송 정책 검토',
+    '소제목 (프로젝트)운영툴',
+    'd-mrow2 no-tg | 권한 범위 확인',
+    '소제목 확인 대기 1',
+    'd-mrow2 no-tg | 법무 회신 받기',
+    '소제목 결정 1',
+    'd-mrow2 no-tg | 재시도는 3회',
+  ], '할 일에는 프로젝트가 둘이라 한 번 더 나뉘고, 확인 대기·결정은 하나뿐이라 나누지 않는다');
+  // 소제목이 종류를 말해 주므로 줄에서는 종류 글자를 뺀다(두 번 말하지 않는다 — `no-tg`).
+  const rows = nodeFindAll(section, 'd-mrow2');
+  assert.ok(rows.every(row => nodeFind(row, 'tg') === null));
+  // 프로젝트 소제목은 `· ● 이름`이고, 회의 자체의 프로젝트도 이름 그대로 적는다.
+  const projectHeads = nodeFindAll(section, 'd-mgrp').filter(head => String(head.className).includes('is-pj'));
+  assert.deepEqual(projectHeads.map(head => head.children[0]), ['· ', '· ']);
+  assert.deepEqual(projectHeads.map(head => nodeFind(head, 'd-pjdot').dataset.pj !== undefined), [true, true]);
+  // 프로젝트로 나눈 줄에는 `· ● 이름`을 되풀이하지 않는다.
+  assert.ok(rows.every(row => nodeFind(row, 'd-inproj') === null));
+});
+
+test('종류가 하나뿐이면 소제목을 세우지 않는다 — 구역 제목이 이미 개수를 말한다', () => {
+  const app = meetingsViewClient();
+  const section = meetingSection(app, "panelMeetingItems(workflowData.meetings[2], box)");
+  assert.equal(section.children[0].textContent, '이 회의에서 나온 것 1');
+  assert.deepEqual(meetingSectionShape(section), ['d-mrow2 | 정산 주기는 월 1회'], '줄의 종류 글자도 그대로 남는다');
+  assert.equal(nodeFind(section, 'tg').textContent, '결정');
+});
+
+test('회의에 없는 프로젝트의 항목은 줄 제목 뒤 `· ● 이름`으로 남는다 — 프로젝트로 나누지 않은 자리에서만', () => {
+  const app = meetingsViewClient();
+  // 결정 하나를 다른 프로젝트로 옮긴다 — 종류가 셋이라 소제목은 서지만 결정 안의 프로젝트는 하나뿐이다.
+  app.run("wfItem('d1').group = '알림센터'; wfIndexData();");
+  const section = meetingSection(app, "panelMeetingItems(workflowData.meetings[0], box)");
+  const decision = nodeFindAll(section, 'd-mrow2').find(row => nodeFind(row, 'ti').textContent === '재시도는 3회');
+  assert.equal(decision.className, 'd-mrow2 no-tg has-pj');
+  const tag = nodeFind(decision, 'd-inproj');
+  assert.deepEqual([tag.children[0], tag.children[2]], ['· ', '알림센터'], '기존 `· ● 이름` 부품 그대로다');
+});
+
+test('`이전 회차의 미해결 항목`도 같은 종류 소제목을 쓰지만 프로젝트로 나누지는 않는다', () => {
+  const app = meetingsViewClient();
+  app.run(`workflowData.items.push(
+    { id: 'c0', type: 'check', status: 'to-do', description: '지난 회차의 확인', meetingId: 'ops0', group: '알림센터' });
+    wfIndexData();`);
+  const section = meetingSection(app, "panelMeetingPast(workflowData.meetings[0], box)");
+  assert.equal(section.children[0].textContent, '이전 회차의 미해결 항목 2');
+  assert.deepEqual(meetingSectionShape(section), [
+    '소제목 할 일 1',
+    'd-mrow2 no-tg | 지난 회차에 남은 일',
+    '소제목 확인 대기 1',
+    'd-mrow2 no-tg has-pj | 지난 회차의 확인',
+  ], '회차 표기가 이미 있으니 프로젝트 소제목은 세우지 않는다');
+  // 줄 오른쪽에는 그대로 회차가 적힌다.
+  assert.match(nodeFindAll(section, 'd-mrow2')[0].children[2].textContent, /회차$/);
 });
 
 test('팔레트 바닥은 `회의` 칩일 때만 회의 탭으로 가는 링크를 붙인다', () => {
@@ -2595,7 +2846,8 @@ test('`다음은?` 줄은 프로젝트 탭 확인 대기 구역 맨 위와 회�
   app.run("workflowData.items.forEach(item => { if (item.id === 'ck1') item.meetingId = 'm1'; }); wfIndexData();");
   const box = app.run(`(() => { const box = document.createElement('div'); panelMeetingItems({ id: 'm1' }, box); return box; })()`);
   const rows = box.children[0].children;
-  assert.equal(rows[1].className, 'd-mrow2 is-done');
+  // 회의에 프로젝트가 없고 항목에는 있으므로 줄이 `· ● 가입 개선`을 달고 있다(has-pj) — 종류는 하나뿐이라 소제목은 없다.
+  assert.equal(rows[1].className, 'd-mrow2 has-pj is-done');
   assert.equal(rows[2].className, 'd-wnext');
 });
 

@@ -1116,6 +1116,9 @@ textarea.d-dtitle {
 .d-dtitle.plain:hover { background: none; }
 .d-dsub { margin-top: 3px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .d-dsub .d-link { font-size: 13px; }
+/* 회의 탭에서만 — 부제목의 프로젝트 이름이 왼쪽 목록을 그 프로젝트로 데려가는 버튼이다(그룹 제목의 이름과 같은 꼴) */
+.d-dsub .pjlink { border: 0; background: none; padding: 0; color: inherit; font: inherit; cursor: pointer; border-radius: 4px; }
+.d-dsub .pjlink:hover { color: var(--accent-text); }
 .d-derr { margin: -6px 0 0; color: var(--urgent); font-size: 13px; }
 .d-derr:empty { display: none; }
 
@@ -1169,6 +1172,20 @@ textarea.d-dtitle {
   align-items: center; gap: 8px; min-height: 28px; padding: 3px 0; font-size: 13px;
 }
 .d-mrow2 + .d-mrow2 { border-top: 1px solid var(--hair); }
+/* 종류 소제목이 이미 종류를 말해 주는 자리에서는 줄의 종류 글자 칸이 통째로 빠진다(두 번 말하지 않는다) */
+.d-mrow2.no-tg { grid-template-columns: 30px minmax(0, 1fr) auto 28px; }
+/* 이 회의의 프로젝트가 아닌 줄에만 붙는 `· ● 이름` — 제목과 한 칸을 나눠 써서 제목 바로 뒤에 붙는다 */
+.d-mrow2 .tw { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.d-mrow2 .tw .ti { width: auto; flex: 0 1 auto; }
+.d-mrow2 .tw .d-inproj { flex: none; min-width: 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+/* 종류·프로젝트 소제목 — 줄 사이를 알려 주기만 하는 조용한 글자다(그룹 제목 부품이 아니다) */
+.d-mgrp {
+  display: flex; align-items: center; gap: 5px;
+  margin: 10px 0 2px; font-size: 13px; font-weight: 600; color: var(--muted);
+}
+.d-mgrp:first-of-type { margin-top: 2px; }
+.d-mgrp .n { font-weight: 500; color: var(--dim); font-variant-numeric: tabular-nums; }
+.d-mgrp.is-pj { margin: 6px 0 2px; padding-left: 8px; font-size: 12.5px; font-weight: 500; color: var(--dim); }
 .d-mrow2 .ck { display: grid; place-items: center; }
 /* 촘촘한 줄이라 `.d-check`의 평소 높이(54px)는 너무 크다 — 상자 크기만 남기고 줄 높이에 맞춘다. */
 .d-mrow2 .d-check { height: auto; }
@@ -1777,7 +1794,19 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-mfil .d-chip { height: 30px; border-radius: 999px; background: var(--neutral-bg); }
 .d-mfil .d-chip:hover { background: var(--hover); color: var(--text); }
 .d-mfil .d-chip.is-on, .d-mfil .d-chip.is-on:hover { background: var(--accent-soft); color: var(--accent-text); }
-.d-mfil .d-msel { width: 100%; max-width: none; height: 32px; }
+/* 보기 전환 `날짜순 | 프로젝트별` — 칩 줄 아래에 제 줄로 선다(좁은 칸이라 칩과 나란히 두면 잘린다) */
+.d-mseg { flex: 1 0 100%; padding: 2px; }
+.d-mseg button { height: 28px; padding: 0 12px; font-size: 13px; }
+/* 프로젝트별 보기의 소제목 — 목록 카드 안이라 레일 확인 대기와 같은 촘촘한 꼴로 줄인다 */
+#meetingList .d-grp { height: auto; min-height: 0; padding: 12px 10px 3px; font-size: 13.5px; }
+#meetingList .d-grp.tog { border-radius: 10px; }
+/* 소제목 옆의 조용한 지라 상태 — 범주 색 글자만(BJCOLOR), 칸이 좁으면 먼저 줄어든다 */
+#meetingList .d-grp .js {
+  min-width: 0; margin-left: 2px; font-size: 12px; font-weight: 500; color: var(--dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#meetingList .d-grp .js.k-acc { color: var(--accent-text); }
+#meetingList .d-grp .js.k-pos { color: var(--success); }
 /* 날짜 소제목 — 묶음을 알려 주기만 하는 조용한 글자다(칩·숫자 없음) */
 /* 조용한 회색 글자 한 줄 — `오늘 것 모두 가져오기` 아래의 오늘 가져온 기록, 가져올 게 없을 때의 상태 글자
    (+ `다시 확인`), 회의 정리의 `미팅 노트 가져옴` 표시가 함께 쓴다 */
@@ -1785,14 +1814,18 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-mtlast .d-link { margin-left: 6px; padding: 7px 2px; font-size: 12.5px; }
 .d-mtday { padding: 14px 10px 2px; font-size: 12.5px; font-weight: 600; color: var(--dim); }
 .d-mtday:first-child { padding-top: 4px; }
-/* 목록 끝의 `이전 회의 더 보기` — 조용한 글자 링크, 가운데 정렬 */
+/* 목록 끝의 `이전 회의 더 보기` — 조용한 글자 링크, 가운데 정렬.
+   프로젝트별 보기에서는 소제목 아래 그 프로젝트의 줄 끝에 `더 보기 N`으로 붙는다(왼쪽 글자선에 맞춘다) */
 .d-mmore { padding: 10px 10px 4px; text-align: center; }
+.d-mmore.is-in { padding: 4px 10px 6px 52px; text-align: left; }
 .d-mtrow {
   display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 8px;
   width: 100%; min-height: 40px; padding: 5px 10px; border: 0; background: none; border-radius: 12px;
   color: var(--text); font-family: inherit; text-align: left; cursor: pointer;
   transition: background 170ms var(--ease);
 }
+/* 프로젝트별 보기에는 날짜 소제목이 없어 줄이 날짜를 함께 적는다(`9/22 10:00`) — 그만큼 첫 칸이 넓다 */
+.d-mtrow.has-date { grid-template-columns: 74px minmax(0, 1fr) auto; }
 .d-mtrow .t { font-size: 13px; font-weight: 700; color: var(--dim); font-variant-numeric: tabular-nums; }
 .d-mtrow .tw { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .d-mtrow .ti { font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

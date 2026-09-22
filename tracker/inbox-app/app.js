@@ -5552,10 +5552,35 @@ function panelMeetingEvent() {
 const panelMeetingKey = event => event ? (event.id || `${event.start || ''} ${event.title || ''}`) : '';
 
 // 조용한 한 줄: `오늘 16:00–17:00 · 운영툴`
-function panelMeetingWhen(event) {
+function panelMeetingWhenTime(event) {
   const day = !event.date || event.date === todayStr() ? '오늘' : uiKoDate(event.date);
   const time = `${event.start || ''}${event.end ? `–${event.end}` : ''}`;
-  return [[day, time].filter(Boolean).join(' '), wfMeetingProjectName(event)].filter(Boolean).join(' · ');
+  return [day, time].filter(Boolean).join(' ');
+}
+function panelMeetingWhen(event) {
+  return [panelMeetingWhenTime(event), wfMeetingProjectName(event)].filter(Boolean).join(' · ');
+}
+
+// 회의 탭에서는 이 줄의 프로젝트 이름이 왼쪽 목록을 그 프로젝트로 데려가는 버튼이다(글자 모양은 그대로).
+// 줄 옆 카드에는 갈 왼쪽 목록이 없으니 예전처럼 글자로만 적는다.
+function panelMeetingWhenLine(event, host) {
+  const when = document.createElement('div');
+  when.className = 'd-dsub';
+  const name = wfMeetingProjectName(event);
+  const key = wfMeetingKey(event);
+  if (host.kind !== 'tab' || !name || !key) {
+    when.textContent = panelMeetingWhen(event);
+    return when;
+  }
+  const link = document.createElement('button');
+  link.type = 'button';
+  link.className = 'pjlink';
+  link.textContent = name;
+  link.title = wfMeetingProjectName(event, { withKey: true });
+  link.setAttribute('aria-label', `${name} 회의만 모아 보기`);
+  link.addEventListener('click', () => meetingsShowProject(key));
+  when.append(`${panelMeetingWhenTime(event)} · `, link);
+  return when;
 }
 
 /* 회의 정리 내용은 한 벌이고 자리만 둘이다:
@@ -5618,10 +5643,7 @@ function panelMeeting(event, box, host = MEETING_HOST_CARD) {
   const title = document.createElement('div');
   title.className = 'd-dtitle plain';
   title.textContent = event.title;
-  const when = document.createElement('div');
-  when.className = 'd-dsub';
-  when.textContent = panelMeetingWhen(event);
-  head.append(title, when);
+  head.append(title, panelMeetingWhenLine(event, host));
   // 업무 상세 카드 머리(panelHead)와 같은 자리·같은 모양 — ✕ 왼쪽에 더보기.
   // 메뉴는 레일의 회의 줄 ⋯가 여는 메뉴 그대로다(회의용으로 새로 만들지 않는다).
   // 이미 열려 있는 자리라 `회의 정리 열기`는 빼고, 회의 탭에서는 `회의 탭에서 열기`도 뺀다.
@@ -6023,10 +6045,23 @@ function panelMeetingCheck(item, row, done) {
   return { cell, input };
 }
 
-function panelMeetingRow(item, event, stateText, host = MEETING_HOST_CARD) {
+// 줄에 붙일 프로젝트 표기 — 이 회의 자체의 프로젝트와 다른 항목만 적는다(같으면 머리가 이미 말했다).
+// 부서 간 회의처럼 한 회의에서 여러 프로젝트 일이 나올 때 어느 프로젝트 것인지 알려 주는 자리다.
+function panelMeetingRowProject(item, event) {
+  if (typeof wfKey !== 'function' || typeof wfMeetingKey !== 'function') return null;
+  const key = wfKey(item);
+  if (!key || key === wfMeetingKey(event)) return null;
+  return uiInlineProject(item);
+}
+
+// opts.type === false — 종류 소제목이 이미 종류를 말해 주는 자리(줄에서 `할 일`/`확인 대기` 글자를 뺀다).
+// opts.project === false — 프로젝트 소제목으로 이미 나눈 자리(줄에서 `· ● 이름`을 뺀다).
+function panelMeetingRow(item, event, stateText, host = MEETING_HOST_CARD, opts = {}) {
   const row = document.createElement('div');
   const done = item.status === 'done';
-  row.className = 'd-mrow2' + (done ? ' is-done' : '')
+  const project = opts.project === false ? null : panelMeetingRowProject(item, event);
+  row.className = 'd-mrow2' + (opts.type === false ? ' no-tg' : '') + (project ? ' has-pj' : '')
+    + (done ? ' is-done' : '')
     + (panelState && panelState.kind !== 'meeting' && panelState.id === item.id ? ' is-sel' : '');
   // 회의 탭에서 제목을 누르면 이 줄 옆에 상세 카드가 뜬다 — 다른 목록과 같은 앵커 규칙을 쓴다.
   row.dataset.taskId = item.id;
@@ -6056,25 +6091,93 @@ function panelMeetingRow(item, event, stateText, host = MEETING_HOST_CARD) {
   const acts = document.createElement('span');
   acts.className = 'ac';
   acts.appendChild(uiMoreButton(`${item.description} — 더 보기`, () => panelMeetingRowMenu(item, row, edit)));
-  row.append(tag, title, state, acts);
+  if (opts.type !== false) row.appendChild(tag);
+  // 프로젝트 표기가 있을 때만 제목과 한 칸에 묶는다(`제목 · ● 이름`) — 없으면 줄 모양은 예전 그대로다.
+  if (project) {
+    const wrap = document.createElement('span');
+    wrap.className = 'tw';
+    wrap.append(title, project);
+    row.appendChild(wrap);
+  } else {
+    row.appendChild(title);
+  }
+  row.append(state, acts);
   return row;
 }
 
+// `이 회의에서 나온 것`을 종류로 나눈다(순수 함수): 할 일(버그 포함) · 확인 대기 · 결정, 그 밖은 끝에.
+// 종류가 하나뿐이면 구역 제목이 이미 개수를 말하므로 소제목을 세우지 않는다(부르는 쪽이 길이로 판단한다).
+const MEETING_TYPE_GROUPS = [['할 일', ['task', 'bug']], ['확인 대기', ['check']], ['결정', ['decision']]];
+const MEETING_TYPE_KNOWN = ['task', 'bug', 'check', 'decision'];
+function panelMeetingTypeGroups(items) {
+  const all = [...(items || [])];
+  const groups = [];
+  MEETING_TYPE_GROUPS.forEach(([label, types]) => {
+    const picked = all.filter(item => types.includes(item.type));
+    if (picked.length) groups.push({ label, items: picked });
+  });
+  // 아이디어처럼 표에 없는 종류는 제 이름으로 맨 끝에 선다.
+  const others = new Map();
+  all.filter(item => !MEETING_TYPE_KNOWN.includes(item.type)).forEach((item) => {
+    const label = wfType(item.type);
+    if (!others.has(label)) others.set(label, []);
+    others.get(label).push(item);
+  });
+  others.forEach((list, label) => groups.push({ label, items: list }));
+  return groups;
+}
+
+// 종류·프로젝트 소제목 — 조용한 회색 한 줄이다(그룹 제목 부품이 아니다, 줄 사이를 알려 주기만 한다).
+// opts.projectName이 있으면 프로젝트 소제목(`· ● 알림센터`)이 된다.
+function panelMeetingSubhead(label, count, opts = {}) {
+  const head = document.createElement('div');
+  head.className = 'd-mgrp' + (opts.projectName === undefined ? '' : ' is-pj');
+  if (opts.projectName) head.append('· ', uiProjectDot(opts.projectName));
+  const name = document.createElement('span');
+  name.textContent = label;
+  head.appendChild(name);
+  if (count) {
+    const number = document.createElement('span');
+    number.className = 'n num';
+    number.textContent = count;
+    head.appendChild(number);
+  }
+  return head;
+}
+
+// 한 종류 묶음을 구역에 붙인다. 종류가 둘 이상이어서 소제목이 선 자리에서는 줄의 종류 글자를 빼고,
+// 그 종류 안에 프로젝트가 **둘 이상**일 때만 프로젝트 소제목으로 한 번 더 나눈다(하나뿐이면 나누지 않는다).
+function panelMeetingTypeRows(section, group, { headed, split, row }) {
+  if (headed) section.appendChild(panelMeetingSubhead(group.label, group.items.length));
+  const groups = split ? uiGroupTasks(group.items) : [];
+  if (groups.length > 1) {
+    groups.forEach(([key, items]) => {
+      section.appendChild(panelMeetingSubhead(uiGroupLabel(key), 0, { projectName: key === '__misc__' ? null : key }));
+      items.forEach(item => row(item, { type: !headed, project: false }));
+    });
+    return;
+  }
+  group.items.forEach(item => row(item, { type: !headed, project: true }));
+}
+
 function panelMeetingItems(event, box, host = MEETING_HOST_CARD) {
-  const typeRank = (item) => { const rank = ['task', 'bug', 'check', 'decision'].indexOf(item.type); return rank < 0 ? 9 : rank; };
-  const items = [...wfMeetingItems(event.id)].sort((a, b) => typeRank(a) - typeRank(b));
+  const items = wfMeetingItems(event.id);
   if (!items.length) return;
   const section = panelSection(`이 회의에서 나온 것 ${items.length}`);
-  items.forEach((item) => {
-    section.appendChild(panelMeetingRow(item, event, null, host));
+  const groups = panelMeetingTypeGroups(items);
+  const headed = groups.length > 1;
+  const row = (item, opts) => {
+    section.appendChild(panelMeetingRow(item, event, null, host, { type: opts.type, project: opts.project }));
     // 체크한 확인 대기는 이 구역에 is-done으로 남는다 — 그 줄 바로 아래에 `다음은?`을 덧붙인다.
     const next = item.type === 'check' ? waitingNextItem(item.id) : null;
     if (next) section.appendChild(waitingNextRow(next));
-  });
+  };
+  groups.forEach(group => panelMeetingTypeRows(section, group, { headed, split: true, row }));
   box.appendChild(section);
 }
 
 // 같은 이름으로 반복되는 회의라면, 지난 회차에서 아직 안 끝난 것을 여기서 같이 본다.
+// 종류 소제목은 같은 규칙이고, 프로젝트로 한 번 더 나누지는 않는다 — 줄마다 이미 회차 표기가 있다.
 function panelMeetingPast(event, box, host = MEETING_HOST_CARD) {
   if (!event.series) return;
   const meetings = (typeof workflowData === 'object' && workflowData ? workflowData.meetings : null) || [];
@@ -6085,7 +6188,12 @@ function panelMeetingPast(event, box, host = MEETING_HOST_CARD) {
   past.forEach(other => wfMeetingItems(other.id).filter(item => item.status !== 'done').forEach(item => rows.push({ item, at: other.date })));
   if (!rows.length) return;
   const section = panelSection(`이전 회차의 미해결 항목 ${rows.length}`);
-  rows.forEach(({ item, at }) => section.appendChild(panelMeetingRow(item, event, `${uiKoDateShort(at)} 회차`, host)));
+  const at = new Map(rows.map(({ item, at: date }) => [item.id, date]));
+  const groups = panelMeetingTypeGroups(rows.map(({ item }) => item));
+  const headed = groups.length > 1;
+  const row = (item, opts) => section.appendChild(
+    panelMeetingRow(item, event, `${uiKoDateShort(at.get(item.id))} 회차`, host, { type: opts.type, project: opts.project }));
+  groups.forEach(group => panelMeetingTypeRows(section, group, { headed, split: false, row }));
   box.appendChild(section);
 }
 
@@ -6203,9 +6311,27 @@ function panelMeetingLink(event, box, host = MEETING_HOST_CARD) {
    기본 목록은 캘린더 회의가 매일 쌓여도 끝없이 길어지지 않게 기간으로 자른다(windowDays·showNoRecord도 세션 동안만). */
 const MEETINGS_TAB_WINDOW_DAYS = 14;
 let meetingsTabState = {
-  key: null, unresolved: false, reviewOnly: false, project: '',
+  key: null, unresolved: false, reviewOnly: false,
   windowDays: MEETINGS_TAB_WINDOW_DAYS, showNoRecord: false, result: null,
 };
+
+// 목록을 훑는 두 보기 — `날짜순`(기본)과 `프로젝트별`. 프로젝트로 거르던 드롭다운은 없앴고,
+// "한 프로젝트만 보기"는 프로젝트별 보기에서 다른 소제목을 접는 것으로 대신한다(BMGROUP 결정).
+// 고른 보기만 브라우저에 기억하고(확인 대기 카드의 보기 전환과 같은 규칙), 접어 둔 프로젝트는
+// 세션 동안만 기억한다 — 다시 열었을 때 회의가 숨어 있으면 안 된다.
+const MEETINGS_VIEW_KEY = 'meetingsView';
+let meetingsTabView = 'date';
+try { meetingsTabView = localStorage.getItem(MEETINGS_VIEW_KEY) === 'project' ? 'project' : 'date'; } catch {}
+const meetingsTabClosed = new Set();
+// 부제목의 프로젝트 이름을 눌러 보기를 바꾼 뒤 그 소제목으로 한 번만 스크롤하려고 잠깐 들고 있는 자리.
+let meetingsScrollTo = null;
+function setMeetingsView(value) {
+  const next = value === 'project' ? 'project' : 'date';
+  if (meetingsTabView === next) return;
+  meetingsTabView = next;
+  try { localStorage.setItem(MEETINGS_VIEW_KEY, meetingsTabView); } catch {}
+  renderMeetings();
+}
 
 // 날짜 문자열끼리 며칠 차이인지(순수 함수, 자정 기준) — dateStr이 today보다 며칠 앞섰는지.
 function daysBeforeToday(dateStr, today) {
@@ -6247,27 +6373,49 @@ function meetingsBaseScope(meetings, { today, windowDays, showNoRecord, itemsOf 
   return (meetings || []).filter(event => meetingInBaseScope(event, { today, windowDays, showNoRecord, itemsOf }));
 }
 
-// `이전 회의 더 보기`를 보일지(순수 함수): 지금 기간보다 오래된 회의가 하나라도 남아 있으면 더 넓힐 것이 있다.
-// 눌렀을 때 실제로 새 줄이 나올 때만 `이전 회의 더 보기`를 보인다 — 기간 밖이라도 손댈 일이 남은 회의는
-// 이미 보이고 있고, 기록 없는 회의는 `빈 회의 포함`을 켰을 때만 나온다.
-function meetingsHasMoreBeyond(meetings, today, windowDays, { showNoRecord = false, itemsOf } = {}) {
-  return (meetings || []).some(event => (event.date || '') < today && daysBeforeToday(event.date, today) > windowDays
+// `더 보기`를 누르면 새로 나올 회의들(순수 함수): 지금 기간보다 오래됐고, 눌렀을 때 실제로 줄이 늘어나는 것만.
+// 기간 밖이라도 손댈 일이 남은 회의는 이미 보이고 있고, 기록 없는 회의는 `빈 회의 포함`을 켰을 때만 나온다.
+function meetingsBeyondWindow(meetings, today, windowDays, { showNoRecord = false, itemsOf } = {}) {
+  return (meetings || []).filter(event => (event.date || '') < today && daysBeforeToday(event.date, today) > windowDays
     && !meetingHasOpenWork(event, itemsOf) && (showNoRecord || meetingHasRecord(event, itemsOf)));
 }
 
-// 목록 거르기(순수 함수). 필터(초안 있음·미완료만·프로젝트)를 하나라도 켜면 찾는 행동이므로 기간·기록 제한 없이
+// `이전 회의 더 보기`를 보일지(순수 함수): 더 넓힐 것이 하나라도 남아 있으면 보인다.
+function meetingsHasMoreBeyond(meetings, today, windowDays, opts = {}) {
+  return meetingsBeyondWindow(meetings, today, windowDays, opts).length > 0;
+}
+
+// 목록 거르기(순수 함수). 필터(초안 있음·미완료만)를 하나라도 켜면 찾는 행동이므로 기간·기록 제한 없이
 // 전체 회의에서 거른다. 아무 필터도 없으면 기본 목록 범위만 본다. 차례는 날짜 내림차순(같은 날은 시각 순)
-// — 훑어보는 면이라 "언제"가 먼저다.
+// — 훑어보는 면이라 "언제"가 먼저다. 프로젝트는 여기서 거르지 않는다(프로젝트별 보기가 대신한다).
 function meetingsTabList(meetings, state, itemsOf) {
-  const project = state.project || '';
   const today = state.today || todayStr();
-  const filtering = !!(state.unresolved || state.reviewOnly || project);
+  const filtering = !!(state.unresolved || state.reviewOnly);
   const pool = filtering ? (meetings || []) : meetingsBaseScope(meetings, {
     today, windowDays: state.windowDays || MEETINGS_TAB_WINDOW_DAYS, showNoRecord: !!state.showNoRecord, itemsOf,
   });
   return palMeetings(pool, { type: 'meeting', unresolved: !!state.unresolved, reviewOnly: !!state.reviewOnly, today }, itemsOf)
-    .filter(event => !project || wfMeetingKey(event) === project)
     .sort(wfMeetingOrder);
+}
+
+// 프로젝트별 보기의 묶음(순수 함수). 목록은 이미 날짜 내림차순이라 묶음 안의 차례는 그대로 두고,
+// 묶음끼리의 차례만 정한다: **미완료 항목이 남은 프로젝트가 먼저**, 그 안에서는 가장 최근 회의 날짜순.
+// `프로젝트 없음`은 언제나 맨 끝이다.
+function meetingsTabGroups(rows, itemsOf) {
+  const groups = new Map();
+  (rows || []).forEach((event) => {
+    const key = wfMeetingKey(event) || '__misc__';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(event);
+  });
+  return [...groups].map(([key, list]) => ({
+    key,
+    list,
+    open: list.reduce((sum, event) => sum + meetingUnresolvedCount(event, itemsOf), 0),
+    latest: list.reduce((at, event) => ((event.date || '') > at ? (event.date || '') : at), ''),
+  })).sort((a, b) => (a.key === '__misc__' ? 1 : 0) - (b.key === '__misc__' ? 1 : 0)
+    || (a.open ? 0 : 1) - (b.open ? 0 : 1)
+    || b.latest.localeCompare(a.latest));
 }
 
 // 처음 들어오면 무엇을 고를까(순수 함수): 이미 고른 회의가 목록에 남아 있으면 그대로 →
@@ -6300,7 +6448,8 @@ function meetingsTabRevealIfNeeded(id) {
   const itemsOf = typeof wfMeetingItems === 'function' ? wfMeetingItems : null;
   if (meetingsTabState.reviewOnly && !(event.drafts && event.drafts.length)) meetingsTabState.reviewOnly = false;
   if (meetingsTabState.unresolved && meetingUnresolvedCount(event, itemsOf) === 0) meetingsTabState.unresolved = false;
-  if (meetingsTabState.project && wfMeetingKey(event) !== meetingsTabState.project) meetingsTabState.project = '';
+  // 프로젝트별 보기에서 그 프로젝트를 접어 뒀으면 펼친다 — 고른 회의 줄은 반드시 보여야 한다.
+  meetingsTabClosed.delete(wfMeetingKey(event) || '__misc__');
   const today = todayStr();
   const windowDays = meetingsTabState.windowDays || MEETINGS_TAB_WINDOW_DAYS;
   if (meetingInBaseScope(event, { today, windowDays, showNoRecord: meetingsTabState.showNoRecord, itemsOf })) return;
@@ -6325,7 +6474,7 @@ function renderMeetings() {
   const meetings = (workflowData && workflowData.meetings) || [];
   const itemsOf = typeof wfMeetingItems === 'function' ? wfMeetingItems : null;
   const today = todayStr();
-  const filtering = !!(meetingsTabState.unresolved || meetingsTabState.reviewOnly || meetingsTabState.project);
+  const filtering = !!(meetingsTabState.unresolved || meetingsTabState.reviewOnly);
   const rows = meetingsTabList(meetings, meetingsTabState, itemsOf);
   meetingsTabState.key = meetingsTabPick(rows, meetingsTabState.key, today, nowHHMM());
 
@@ -6363,9 +6512,35 @@ function renderMeetings() {
       notesLast.push(note);
     }
   }
-  listEl.append(head, ...notesLast, meetingsTabFilters(meetings));
+  listEl.append(head, ...notesLast, meetingsTabFilters());
 
-  // 날짜별 조용한 소제목 — 묶음을 알려 주기만 한다(개수·칩 없음).
+  // 필터가 걸려 있으면 전체에서 찾은 것이니 기간 더 보기는 의미가 없다.
+  const beyond = filtering ? [] : meetingsBeyondWindow(meetings, today,
+    meetingsTabState.windowDays || MEETINGS_TAB_WINDOW_DAYS,
+    { showNoRecord: !!meetingsTabState.showNoRecord, itemsOf });
+
+  if (!rows.length) {
+    const empty = document.createElement('div');
+    empty.className = 'd-rempty';
+    empty.textContent = meetings.length ? '고른 조건에 맞는 회의가 없어요.' : '아직 기록된 회의가 없어요.';
+    listEl.appendChild(empty);
+  } else if (meetingsTabView === 'project') {
+    meetingsTabProjectRows(listEl, rows, beyond, itemsOf);
+  } else {
+    meetingsTabDateRows(listEl, rows, today);
+  }
+
+  // 날짜순은 목록 끝에 한 줄, 프로젝트별은 프로젝트마다 한 줄이라 그 안에서 이미 붙였다
+  // (어느 프로젝트에도 걸리지 않은 것이 남았을 때만 끝에 한 줄 더).
+  if (beyond.length && (meetingsTabView !== 'project' || meetingsTabBeyondRest(rows, beyond))) {
+    listEl.appendChild(meetingsMoreRow('이전 회의 더 보기'));
+  }
+
+  renderMeetingDetail(body, rows.find(event => event.id === meetingsTabState.key) || null);
+}
+
+// 날짜순 — 날짜별 조용한 소제목(묶음을 알려 주기만 한다, 개수·칩 없음) 아래로 줄이 선다.
+function meetingsTabDateRows(listEl, rows, today) {
   let lastDate = null;
   rows.forEach((event) => {
     if (event.date !== lastDate) {
@@ -6377,35 +6552,91 @@ function renderMeetings() {
     }
     listEl.appendChild(meetingsTabRow(event));
   });
-  if (!rows.length) {
-    const empty = document.createElement('div');
-    empty.className = 'd-rempty';
-    empty.textContent = meetings.length ? '고른 조건에 맞는 회의가 없어요.' : '아직 기록된 회의가 없어요.';
-    listEl.appendChild(empty);
-  }
-
-  // 필터가 걸려 있으면 전체에서 찾은 것이니 기간 더 보기는 의미가 없다.
-  if (!filtering && meetingsHasMoreBeyond(meetings, today, meetingsTabState.windowDays || MEETINGS_TAB_WINDOW_DAYS,
-    { showNoRecord: !!meetingsTabState.showNoRecord, itemsOf })) {
-    const more = document.createElement('div');
-    more.className = 'd-mmore';
-    const link = document.createElement('button');
-    link.type = 'button';
-    link.className = 'd-link';
-    link.textContent = '이전 회의 더 보기';
-    link.addEventListener('click', () => {
-      meetingsTabState.windowDays = (meetingsTabState.windowDays || MEETINGS_TAB_WINDOW_DAYS) + MEETINGS_TAB_WINDOW_DAYS;
-      renderMeetings();
-    });
-    more.appendChild(link);
-    listEl.appendChild(more);
-  }
-
-  renderMeetingDetail(body, rows.find(event => event.id === meetingsTabState.key) || null);
 }
 
-// 목록 위의 조용한 토글 칩 + 프로젝트 고르기 — 팔레트에 있던 회의 전용 필터가 이 자리로 왔다.
-function meetingsTabFilters(meetings) {
+// 프로젝트별 — 프로젝트 소제목(색 점 + 이름 + 회의 수) 아래로 그 프로젝트의 회의가 날짜 내림차순으로 선다.
+// 소제목을 누르면 접히고(세션 동안만 기억), 날짜 소제목이 없으니 줄에 날짜를 함께 적는다.
+function meetingsTabProjectRows(listEl, rows, beyond, itemsOf) {
+  const groups = meetingsTabGroups(rows, itemsOf);
+  const labels = uiGroupLabels(groups.map(group => group.key));
+  groups.forEach(({ key, list }) => {
+    const open = !meetingsTabClosed.has(key);
+    const heading = uiGroupHeading(labels.get(key), list.length, {
+      projectName: key === '__misc__' ? null : key,
+      open,
+      onToggle: () => {
+        if (meetingsTabClosed.has(key)) meetingsTabClosed.delete(key);
+        else meetingsTabClosed.add(key);
+        renderMeetings();
+      },
+    });
+    heading.dataset.mproject = key;
+    const status = meetingsProjectStatus(key);
+    if (status) heading.appendChild(status);
+    listEl.appendChild(heading);
+    if (meetingsScrollTo === key) { meetingsScrollTo = null; heading.scrollIntoView?.({ block: 'nearest' }); }
+    if (!open) return;
+    list.forEach(event => listEl.appendChild(meetingsTabRow(event, { withDate: true })));
+    const more = beyond.filter(event => (wfMeetingKey(event) || '__misc__') === key).length;
+    if (more) listEl.appendChild(meetingsMoreRow(`더 보기 ${more}`, 'd-mmore is-in'));
+  });
+}
+
+// 프로젝트별 보기에서 어느 소제목 아래에도 붙지 않는 `더 보기`가 남았는지(지금 목록에 줄이 하나도 없는 프로젝트).
+function meetingsTabBeyondRest(rows, beyond) {
+  const listed = new Set((rows || []).map(event => wfMeetingKey(event) || '__misc__'));
+  return beyond.some(event => !listed.has(wfMeetingKey(event) || '__misc__'));
+}
+
+// 보이는 기간을 14일씩 넓히는 조용한 글자 줄 — 목록 끝과 프로젝트 소제목 아래가 같은 부품을 쓴다.
+function meetingsMoreRow(text, className = 'd-mmore') {
+  const more = document.createElement('div');
+  more.className = className;
+  const link = document.createElement('button');
+  link.type = 'button';
+  link.className = 'd-link';
+  link.textContent = text;
+  link.addEventListener('click', () => {
+    meetingsTabState.windowDays = (meetingsTabState.windowDays || MEETINGS_TAB_WINDOW_DAYS) + MEETINGS_TAB_WINDOW_DAYS;
+    renderMeetings();
+  });
+  more.appendChild(link);
+  return more;
+}
+
+// 프로젝트 소제목 옆의 조용한 글자 — 지라 프로젝트(또는 손으로 연결한 그룹)의 지금 상태 이름을
+// 범주 색으로 적는다(BJCOLOR 규칙). 앱이 그 티켓을 들고 있지 않으면 아무것도 붙이지 않는다.
+function meetingsProjectStatus(key) {
+  if (key === '__misc__') return null;
+  const issue = jiraIssuesByKey.get(jiraKeyOf(key));
+  const name = issue && issue.status ? issue.status.name : '';
+  if (!name) return null;
+  const tone = jiraStatusTone(issue.status.category);
+  const note = document.createElement('span');
+  note.className = 'js' + (tone ? ` ${tone}` : '');
+  note.title = '지라에 적힌 지금 상태예요';
+  note.textContent = name;
+  return note;
+}
+
+// 회의 정리 화면 부제목의 프로젝트 이름을 누르면 오는 길 — 왼쪽 목록을 `프로젝트별`로 바꾸고
+// 그 프로젝트만 펼친 뒤(다른 프로젝트는 접는다) 그 소제목으로 스크롤한다. 드롭다운으로 하던
+// "한 프로젝트만 보기"를 대신하는 자리다.
+function meetingsShowProject(key) {
+  const meetings = (workflowData && workflowData.meetings) || [];
+  meetingsTabClosed.clear();
+  meetings.forEach((event) => {
+    const other = wfMeetingKey(event) || '__misc__';
+    if (other !== key) meetingsTabClosed.add(other);
+  });
+  meetingsTabView = 'project';
+  try { localStorage.setItem(MEETINGS_VIEW_KEY, meetingsTabView); } catch {}
+  meetingsScrollTo = key;
+  renderMeetings();
+}
+
+// 목록 위의 보기 전환 세그먼트 + 조용한 토글 칩 — 팔레트에 있던 회의 전용 필터가 이 자리로 왔다.
+function meetingsTabFilters() {
   const bar = document.createElement('div');
   bar.className = 'd-mfil';
   bar.setAttribute('role', 'group');
@@ -6427,40 +6658,38 @@ function meetingsTabFilters(meetings) {
   // 칩 이름은 짧게 두고 무슨 뜻인지는 툴팁이 풀어 준다(줄에 들어가야 하는 이름이다).
   chip('빈 회의 포함', meetingsTabState.showNoRecord, () => { meetingsTabState.showNoRecord = !meetingsTabState.showNoRecord; },
     '아무것도 담지 않은 회의도 함께 보여요');
-
-  // 프로젝트는 값이 여럿이라 칩 대신 고르는 칸이다(회의에 연결된 프로젝트만 후보로).
-  const keys = new Map();
-  meetings.forEach((event) => {
-    const key = wfMeetingKey(event);
-    // 프로젝트를 고르는 칸이라 `요약 · 키`(BKEY 결정) — 정렬도 이 표기(요약 기준) 그대로 쓴다.
-    if (key && !keys.has(key)) keys.set(key, wfMeetingProjectName(event, { picker: true }));
-  });
-  if (!keys.size) return bar;
-  const select = document.createElement('select');
-  select.className = 'd-msel';
-  select.setAttribute('aria-label', '프로젝트로 거르기');
-  [['', '프로젝트 전체'], ...[...keys].sort((a, b) => String(a[1]).localeCompare(String(b[1])))].forEach(([value, text]) => {
-    const option = document.createElement('option');
-    option.value = value;
-    option.textContent = text;
-    if (value === meetingsTabState.project) option.selected = true;
-    select.appendChild(option);
-  });
-  select.addEventListener('change', () => { meetingsTabState.project = select.value; renderMeetings(); });
-  bar.appendChild(select);
+  bar.appendChild(meetingsViewSegment());
   return bar;
 }
 
+// 보기 전환 `날짜순 | 프로젝트별` — 아이디어·결정 머리와 같은 세그먼트 부품이다(보기 전환이라 aria-pressed).
+function meetingsViewSegment() {
+  const seg = document.createElement('div');
+  seg.className = 'd-seg d-mseg';
+  seg.setAttribute('role', 'group');
+  seg.setAttribute('aria-label', '회의 목록 보기');
+  [['date', '날짜순'], ['project', '프로젝트별']].forEach(([value, text]) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = text;
+    button.setAttribute('aria-pressed', String(meetingsTabView === value));
+    button.addEventListener('click', () => setMeetingsView(value));
+    seg.appendChild(button);
+  });
+  return seg;
+}
+
 // 목록 한 줄: 시각 | 제목 + `● 프로젝트` | 상태(`초안 N` 배지 · `미완료 N` 조용한 글자).
-function meetingsTabRow(event) {
+// 프로젝트별 보기에는 날짜 소제목이 없으므로 맨 앞에 날짜를 함께 적는다(`9/22 10:00`).
+function meetingsTabRow(event, opts = {}) {
   const button = document.createElement('button');
   button.type = 'button';
-  button.className = 'd-mtrow';
+  button.className = 'd-mtrow' + (opts.withDate ? ' has-date' : '');
   button.setAttribute('aria-current', String(event.id === meetingsTabState.key));
 
   const time = document.createElement('span');
   time.className = 't num';
-  time.textContent = event.start || '';
+  time.textContent = [opts.withDate ? uiDateSlash(event.date) : '', event.start || ''].filter(Boolean).join(' ');
 
   const wrap = document.createElement('span');
   wrap.className = 'tw';
@@ -6469,7 +6698,8 @@ function meetingsTabRow(event) {
   title.textContent = event.title;
   wrap.appendChild(title);
   // 줄 안의 짧은 표기라 지라는 요약만(모르면 키) — 색 점은 원래 키로 고른다(표기와 무관하게 같은 색).
-  const projectName = wfMeetingProjectName(event);
+  // 프로젝트별 보기에서는 소제목이 이미 프로젝트를 말해 주므로 줄에서는 뺀다(두 번 말하지 않는다).
+  const projectName = opts.withDate ? '' : wfMeetingProjectName(event);
   const projectFull = wfMeetingProjectName(event, { withKey: true });
   if (projectName) {
     const tag = document.createElement('span');
