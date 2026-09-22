@@ -63,6 +63,14 @@
       </aside>
 
       <main class="col col-center">
+        <!-- 반응 필요: 내가 답해야 하는 것(1차 지라 댓글). 0개이거나 연결이 없으면 구역째 숨는다 -->
+        <section class="d-attn" id="attentionZone" hidden aria-labelledby="attentionHeading">
+          <div class="d-sechd" id="attentionHeading">반응 필요<span class="n num" id="attentionCount">0</span>
+            <span class="d-quiet" id="attentionNote"></span>
+          </div>
+          <div class="d-atlist" id="attentionList"></div>
+        </section>
+
         <div id="inboxZone" hidden>
           <div class="d-sechd" id="inboxHeading">새로 들어온 것<span class="n num" id="inboxCount">0</span>
             <button type="button" class="d-headnum" id="createdTodayBtn" aria-label="오늘 들어온 항목 모아 보기" hidden>오늘 신규 <span class="num" id="createdTodayCount">0</span></button>
@@ -240,6 +248,7 @@
 <script src="/waiting-ui.js"></script>
 <script src="/settings-ui.js"></script>
 <script src="/wrap-ui.js"></script>
+<script src="/attention-ui.js"></script>
 <script src="/report-ui.js"></script>
 <script src="/app.js"></script>
 </body>

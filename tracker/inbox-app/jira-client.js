@@ -37,6 +37,13 @@ const JIRA_DONE_MAX_DAYS = 365;
 const doneIssuesJql = days => `assignee = currentUser() AND statusCategory = Done AND resolved >= -${days}d ORDER BY resolved DESC`;
 const doneDaysOf = days => (Number.isInteger(days) && days >= 1 && days <= JIRA_DONE_MAX_DAYS ? days : JIRA_DONE_DAYS);
 const CHANGE_KINDS = ['status', 'version', 'due', 'versionEdit'];
+// 반응 필요(BATTENTION 1차)가 읽는 것 — 내가 담당·보고·지켜보는 이슈 중 최근 14일 안에 갱신된 것.
+// 받아 오는 칸은 셋뿐이고(요약·상태·댓글) 담당자는 아예 묻지 않는다.
+const ATTENTION_JQL = '(assignee = currentUser() OR reporter = currentUser() OR watcher = currentUser()) AND updated >= -14d ORDER BY updated DESC';
+const ATTENTION_FIELDS = 'summary,status,comment';
+const ATTENTION_LIMIT = 50;        // 한 번에 보는 이슈 수
+const ATTENTION_COMMENT_LIMIT = 20; // 댓글 칸이 잘려 왔을 때 그 이슈만 다시 읽는 개수
+const ATTENTION_PREVIEW_MAX = 140;  // 미리보기 글자 수
 // 새로 만들기(BJCREATE)가 쓰는 상한 — 한 번에 만드는 이슈는 에픽 하나 + 하위 12개까지다.
 const JIRA_CREATE_MAX = 12;
 const JIRA_SUMMARY_MAX = 255;
@@ -259,6 +266,92 @@ function shapeListIssue(entry, extra) {
   };
 }
 
+// ---------- 반응 필요 (BATTENTION 1차 — 지라 댓글) ----------
+// "내 마지막 댓글 뒤에 다른 사람이 남긴 댓글이 있는 이슈"만 한 줄로 만든다.
+// 내 계정 id는 **판별에만** 쓰고 돌려주는 값에는 넣지 않는다. 사람은 표시 이름만 옮긴다
+// (지라가 같이 주는 이메일·계정 id는 어디에도 싣지 않는다 — 하위 티켓 줄과 같은 규칙).
+
+// ADF(지라 댓글 본문)를 한 줄 글자로 편다: 글자 노드는 그대로, `mention`은 `@표시이름`,
+// 줄바꿈·문단 사이는 공백 하나, 그 밖(그림·첨부 같은 것)은 빈 글자다.
+function adfText(node) {
+  if (!node || typeof node !== 'object') return '';
+  if (node.type === 'text') return text(node.text);
+  if (node.type === 'mention') {
+    const name = text(node.attrs && node.attrs.text).replace(/^@/, '').trim();
+    return name ? `@${name}` : '';
+  }
+  if (node.type === 'hardBreak') return ' ';
+  if (!Array.isArray(node.content)) return '';
+  // 문단 **안**은 이어 붙이고(글자가 갈라지지 않게), 문단끼리는 공백 하나로 잇는다.
+  return node.content.map(adfText).join(node.type === 'paragraph' ? '' : ' ');
+}
+
+function attentionPreview(body) {
+  const flat = adfText(body).replace(/\s+/g, ' ').trim();
+  return flat.length > ATTENTION_PREVIEW_MAX ? `${flat.slice(0, ATTENTION_PREVIEW_MAX - 1).trimEnd()}…` : flat;
+}
+
+// 이 댓글이 나를 불렀나 — 본문 어딘가에 `mention` 노드가 있고 그 id가 내 계정 id인지만 본다.
+function adfMentions(node, accountId) {
+  if (!node || typeof node !== 'object' || !accountId) return false;
+  if (node.type === 'mention') return idOf(node.attrs && node.attrs.id) === accountId;
+  return Array.isArray(node.content) && node.content.some(kid => adfMentions(kid, accountId));
+}
+
+const commentAuthorId = entry => idOf(entry && entry.author && entry.author.accountId);
+const commentAuthorName = entry => text(entry && entry.author && entry.author.displayName);
+const isoTime = (value) => {
+  const at = Date.parse(typeof value === 'string' ? value : '');
+  return Number.isNaN(at) ? null : new Date(at).toISOString();
+};
+// 댓글을 `created` 오름차순으로 놓는다 — 잘려 온 이슈를 다시 읽을 때는 최신순으로 오기 때문에
+// 판정 전에 늘 한 번 맞춰 둔다(시각을 못 읽는 줄은 받은 차례를 지킨다).
+function sortedComments(list) {
+  return (Array.isArray(list) ? list : [])
+    .filter(entry => entry && typeof entry === 'object')
+    .map((entry, index) => ({ entry, index, at: Date.parse(entry.created) || 0 }))
+    .sort((a, b) => (a.at - b.at) || (a.index - b.index))
+    .map(item => item.entry);
+}
+
+// 이슈 하나 → 줄 하나(또는 null). `mineId`가 없으면 아무것도 만들지 않는다(누가 나인지 모르면 판정하지 않는다).
+function shapeAttention(siteUrl, entry, mineId, comments) {
+  const key = text(entry && entry.key);
+  if (!JIRA_KEY_RE.test(key) || !mineId) return null;
+  const list = sortedComments(comments);
+  // 내 마지막 댓글 뒤에 남은 다른 사람 댓글. 내 댓글이 없으면(-1) 다른 사람 댓글 전부가 대상이다.
+  const mineAt = list.map(commentAuthorId).lastIndexOf(mineId);
+  const after = list.slice(mineAt + 1).filter(item => commentAuthorId(item) !== mineId);
+  if (!after.length) return null;
+  const last = after[after.length - 1];
+  const lastId = idOf(last.id);
+  // id는 `출처:키:마지막 다른 사람 댓글 id`다 — 숫자가 아니면 그 줄을 만들지 않는다(치우기가 그 id로 걸린다).
+  if (!JIRA_ID_RE.test(lastId)) return null;
+  const who = commentAuthorName(last);
+  const names = new Set(after.map(commentAuthorName).filter(Boolean));
+  names.delete(who);
+  const fields = (entry && entry.fields) || {};
+  const status = fields.status || {};
+  return {
+    id: `jira:${key}:${lastId}`,
+    source: 'jira',
+    key,
+    url: issueUrl(siteUrl, key),
+    summary: text(fields.summary),
+    status: text(status.name),
+    statusTone: CATEGORY[status.statusCategory && status.statusCategory.key] || 'doing',
+    who,
+    others: names.size,
+    count: after.length,
+    preview: attentionPreview(last.body),
+    at: isoTime(last.created),
+    mention: after.some(item => adfMentions(item.body, mineId)),
+  };
+}
+
+// 나를 부른 줄이 먼저, 그 안에서는 마지막 댓글이 최신인 것부터.
+const attentionOrder = (a, b) => (Number(b.mention) - Number(a.mention)) || String(b.at || '').localeCompare(String(a.at || ''));
+
 function createJiraClient({ settings, request = (...args) => fetch(...args), readToken } = {}) {
   if (!settings) throw new Error('지라 설정이 필요해요.');
   const token = typeof readToken === 'function'
@@ -325,8 +418,8 @@ function createJiraClient({ settings, request = (...args) => fetch(...args), rea
 
   // 목록 조회 한 번. 하위 티켓과 같은 길이다 — 새 주소(`/search/jql`)가 없는 지라에서는
   // 옛 주소(`/search`)로 한 번만 물러선다. 받아 오는 칸은 부르는 쪽이 고른다.
-  async function search(jql, secret, fields = LIST_FIELDS) {
-    const query = `jql=${encodeURIComponent(jql)}&fields=${fields}&maxResults=${JIRA_LIST_LIMIT}`;
+  async function search(jql, secret, fields = LIST_FIELDS, limit = JIRA_LIST_LIMIT) {
+    const query = `jql=${encodeURIComponent(jql)}&fields=${fields}&maxResults=${limit}`;
     try {
       return await call(`/rest/api/3/search/jql?${query}`, secret);
     } catch (error) {
@@ -357,6 +450,43 @@ function createJiraClient({ settings, request = (...args) => fetch(...args), rea
   async function listDoneIssues(days = JIRA_DONE_DAYS) {
     const body = await search(doneIssuesJql(doneDaysOf(days)), token(), DONE_FIELDS);
     return ((body || {}).issues || []).map(entry => shapeListIssue(entry, false)).filter(Boolean).slice(0, JIRA_LIST_LIMIT);
+  }
+
+  // ---------- 반응 필요 (BATTENTION) ----------
+  // 누가 나인지는 지라에 한 번 물어 계정 id로 안다. 이 값은 **부르는 쪽 메모리에만** 두고
+  // 돌려주는 값·오류 문구 어디에도 싣지 않는다(테스트로 고정).
+  async function getMyAccountId() {
+    const body = await call('/rest/api/3/myself', token());
+    const id = idOf(body && body.accountId);
+    if (!id) throw jiraError('auth');
+    return id;
+  }
+
+  // 내가 담당·보고·지켜보는 이슈(최근 14일) → 내 마지막 댓글 뒤에 다른 사람 댓글이 있는 줄만.
+  // 댓글 칸이 잘려 온 이슈만 한 번씩 더 읽는다(그 이슈의 최근 20개).
+  async function listAttention(mineId) {
+    if (!mineId) throw jiraError('auth');
+    const secret = token();
+    const body = await search(ATTENTION_JQL, secret, ATTENTION_FIELDS, ATTENTION_LIMIT);
+    const issues = (Array.isArray(body && body.issues) ? body.issues : []).slice(0, ATTENTION_LIMIT);
+    const rows = [];
+    for (const entry of issues) {
+      const key = text(entry && entry.key);
+      if (!JIRA_KEY_RE.test(key)) continue;
+      const comment = (entry.fields && entry.fields.comment) || {};
+      let comments = Array.isArray(comment.comments) ? comment.comments : [];
+      if (Number.isInteger(comment.total) && comment.total > comments.length) {
+        try {
+          const more = await call(`/rest/api/3/issue/${key}/comment?orderBy=-created&maxResults=${ATTENTION_COMMENT_LIMIT}`, secret);
+          if (Array.isArray(more && more.comments)) comments = more.comments;
+        } catch {
+          // 곁들이는 조회다 — 실패하면 목록에 실려 온 댓글로만 판단한다(목록 전체를 오류로 만들지 않는다).
+        }
+      }
+      const row = shapeAttention(settings.siteUrl, entry, mineId, comments);
+      if (row) rows.push(row);
+    }
+    return rows.sort(attentionOrder);
   }
 
   const wantKey = (key) => { if (typeof key !== 'string' || !JIRA_KEY_RE.test(key)) throw jiraError('key'); return key; };
@@ -465,6 +595,7 @@ function createJiraClient({ settings, request = (...args) => fetch(...args), rea
   return {
     getIssueOverview, listMyIssues, listDoneIssues, getTransitions, getVersions, getIssueVersionIds,
     transition, updateIssueFields, updateVersion, getCreateMeta, getIssueBrief, createIssue,
+    getMyAccountId, listAttention,
   };
 }
 
@@ -504,6 +635,8 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
   // 방금 보낸 만들기 요청의 지문 → 받은 시각. 같은 계획이 60초 안에 두 번 오면 거절한다
   // (새로고침·두 번 누르기로 지라에 같은 이슈가 두 벌 생기지 않게). 메모리에만 있다.
   const madePlans = new Map();
+  // 내 계정 id(반응 필요의 "나" 판별). 프로세스마다 한 번 묻고 메모리에만 둔다 — 어디에도 나가지 않는다.
+  let mineId = null;
 
   function token() {
     try {
@@ -562,6 +695,24 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
       doneCache = { at: now(), days: span, issues };
       return { ok: true, connected: true, issues };
     } catch (error) {
+      const kind = MESSAGE[error && error.kind] ? error.kind : 'other';
+      return { ok: false, error: MESSAGE[kind], kind };
+    }
+  }
+
+  // 반응 필요(지라 댓글). 파일은 하나도 쓰지 않고, 들고 있는 것은 서버의 `attention-live`뿐이다.
+  // 내 계정 id만 이 closure의 메모리에 한 번 담아 두고(토큰이 만료되면 버린다) 응답에는 싣지 않는다.
+  async function attention() {
+    if (!settings) return { ok: true, connected: false };
+    const secret = token();
+    if (!secret) return { ok: true, connected: false };
+    const client = createJiraClient({ settings, request, readToken: () => secret });
+    try {
+      if (!mineId) mineId = await client.getMyAccountId();
+      return { ok: true, connected: true, items: await client.listAttention(mineId) };
+    } catch (error) {
+      // 토큰이 바뀌면 나도 달라질 수 있다 — 인증 실패면 다음번에 다시 묻는다.
+      if (error && (error.status === 401 || error.status === 403)) mineId = null;
       const kind = MESSAGE[error && error.kind] ? error.kind : 'other';
       return { ok: false, error: MESSAGE[kind], kind };
     }
@@ -761,7 +912,7 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
     };
   }
 
-  return { read, list, listDone, options, change, createMeta, create, connected: !!settings };
+  return { read, list, listDone, attention, options, change, createMeta, create, connected: !!settings };
 }
 
 module.exports = {
@@ -770,4 +921,6 @@ module.exports = {
   shapeCreateTypes, epicTypeOf, childTypesOf, defaultChildType,
   JIRA_KEY_RE, JIRA_TIMEOUT_MS, JIRA_CACHE_MS, JIRA_LIST_LIMIT, MY_ISSUES_JQL, JIRA_MESSAGE: MESSAGE,
   JIRA_DONE_DAYS, JIRA_DONE_MAX_DAYS, doneIssuesJql, JIRA_CREATE_MAX, JIRA_SUMMARY_MAX,
+  adfText, attentionPreview, shapeAttention, attentionOrder,
+  ATTENTION_JQL, ATTENTION_LIMIT, ATTENTION_PREVIEW_MAX,
 };

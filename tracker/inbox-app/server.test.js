@@ -56,7 +56,7 @@ test('every screen script is served and counted in appVersion, and server files 
   assert.equal((await items()).appVersion.split(':').length, served.length + 1,
     'appVersion은 index.html + 나가는 화면 파일 전부를 센다');
   // 브라우저에 절대 나가면 안 되는 파일들 — 서버·저장소·테스트·픽스처.
-  const blocked = ['server.js', 'safe-storage.js', 'jira-client.js', 'jira-live.js', 'report-drafts.js',
+  const blocked = ['server.js', 'safe-storage.js', 'jira-client.js', 'jira-live.js', 'attention-live.js', 'report-drafts.js',
     'task-batch.js', 'slack-history.js', 'import-record.js', 'browser-fixture.js',
     'workflow-store.js', 'mutation-store.js', 'server.test.js', 'client.test.js', 'report-drafts.test.js'];
   for (const name of blocked) {
@@ -2750,4 +2750,441 @@ test('BJCREATE: 복구가 필요한 동안에는 지라에 만들지도, 직군 
   assert.equal(roles.status, 503);
   // 조회는 그대로 된다.
   assert.equal((await fetch(`${server.base}/api/jira/create-meta?project=IO`)).status, 200);
+});
+
+// ---------- 반응 필요 (BATTENTION 1차 — 지라 댓글) ----------
+// 여기도 실제 지라에는 절대 닿지 않는다: 전부 가짜 fetch이고, 사람 이름·계정 id·댓글 글자는
+// 모두 이 파일에서 지어낸 것이다. 내 계정 id는 판별에만 쓰이고 응답에 실리지 않는지도 함께 본다.
+const ATTENTION_ME = 'fixture-me-account';
+const ATTENTION_OTHER = 'fixture-other-account';
+const adfDoc = (...parts) => ({ type: 'doc', version: 1, content: [{ type: 'paragraph', content: parts }] });
+const adfSay = value => adfDoc({ type: 'text', text: value });
+const attentionComment = (id, accountId, name, created, body) => ({
+  id, created, body,
+  // 지라는 묻지 않아도 이메일·계정 id를 끼워 보낸다 — 앱이 옮기지 않는지 함께 본다.
+  author: { accountId, displayName: name, emailAddress: `${name}@example.test` },
+});
+const attentionIssue = (key, comments, extra = {}) => ({
+  key,
+  fields: {
+    summary: `${key}의 요약`,
+    status: extra.status || { name: '진행 중', statusCategory: { key: 'indeterminate' } },
+    comment: { comments, total: extra.total === undefined ? comments.length : extra.total },
+  },
+});
+const attentionRow = (comments, extra = {}) =>
+  jiraModule.shapeAttention(JIRA_SITE, attentionIssue(extra.key || 'IO-48394', comments, extra), ATTENTION_ME, comments);
+const mineSaid = (id, at, body) => attentionComment(id, ATTENTION_ME, '나', at, body || adfSay('제가 확인할게요'));
+const theySaid = (id, at, name, body) => attentionComment(id, ATTENTION_OTHER + name, name, at, body || adfSay(`${name}의 댓글`));
+
+test('반응 필요는 내 마지막 댓글 뒤에 남은 다른 사람 댓글만 줄로 만든다', () => {
+  const a = theySaid('10002', '2026-09-21T02:00:00.000+0000', '테스터A');
+  const mine = mineSaid('10001', '2026-09-21T09:00:00.000+0000');
+  const b = theySaid('10003', '2026-09-22T03:00:00.000+0000', '테스터B');
+  assert.deepEqual(attentionRow([a, mine, b]), {
+    id: 'jira:IO-48394:10003', source: 'jira', key: 'IO-48394', url: `${JIRA_SITE}/browse/IO-48394`,
+    summary: 'IO-48394의 요약', status: '진행 중', statusTone: 'doing',
+    who: '테스터B', others: 0, count: 1, preview: '테스터B의 댓글',
+    at: '2026-09-22T03:00:00.000Z', mention: false,
+  }, '내 댓글보다 앞선 댓글은 세지 않는다');
+
+  // 내 댓글이 없으면 다른 사람 댓글 전부가 대상이고, 작성자가 둘이면 `외 N명`이 붙는다.
+  const many = attentionRow([a, b]);
+  assert.deepEqual([many.count, many.who, many.others], [2, '테스터B', 1]);
+  // 같은 사람이 두 번 적었으면 `외 N명`은 없다.
+  assert.equal(attentionRow([a, theySaid('10004', '2026-09-22T04:00:00.000+0000', '테스터A')]).others, 0);
+
+  assert.equal(attentionRow([a, b, mineSaid('10005', '2026-09-23T01:00:00.000+0000')]), null, '내가 마지막으로 답했으면 줄이 없다');
+  assert.equal(attentionRow([mine]), null, '다른 사람 댓글이 하나도 없으면 줄이 없다');
+  assert.equal(attentionRow([]), null);
+  // 주소를 이 키로 조립하고 치우기가 이 id로 걸린다 — 형식이 아니면 줄을 만들지 않는다.
+  assert.equal(attentionRow([a], { key: '수상한키' }), null);
+  assert.equal(attentionRow([theySaid('10-a', '2026-09-22T03:00:00.000+0000', '테스터A')]), null);
+  assert.equal(jiraModule.shapeAttention(JIRA_SITE, attentionIssue('IO-48394', [a]), '', [a]), null, '누가 나인지 모르면 아무 줄도 만들지 않는다');
+});
+
+test('댓글이 최신순으로 와도 created 차례로 놓고 판정한다', () => {
+  const mine = mineSaid('10001', '2026-09-22T05:00:00.000+0000');
+  const theirs = theySaid('10002', '2026-09-22T04:00:00.000+0000', '테스터A');
+  // 최신순(내 댓글이 먼저)으로 와도 "내가 마지막으로 답한" 것이므로 줄이 없어야 한다.
+  assert.equal(attentionRow([mine, theirs]), null);
+  const later = theySaid('10003', '2026-09-22T06:00:00.000+0000', '테스터A');
+  assert.equal(attentionRow([later, mine, theirs]).id, 'jira:IO-48394:10003');
+});
+
+test('완료한 이슈도 빼지 않고, 지라 상태 글자와 범주를 함께 싣는다', () => {
+  const row = attentionRow([theySaid('10002', '2026-09-22T03:00:00.000+0000', '테스터A')], {
+    status: { name: '완료', statusCategory: { key: 'done' } },
+  });
+  assert.deepEqual([row.status, row.statusTone], ['완료', 'done'], '완료된 티켓에도 질문이 달린다');
+  const unknown = attentionRow([theySaid('10002', '2026-09-22T03:00:00.000+0000', '테스터A')], { status: {} });
+  assert.deepEqual([unknown.status, unknown.statusTone], ['', 'doing'], '모르는 범주는 진행으로 본다');
+});
+
+test('나를 부른 댓글은 표시가 붙고, 미리보기는 140자까지 편다', () => {
+  const called = adfDoc(
+    { type: 'text', text: '이거 ' },
+    { type: 'mention', attrs: { id: ATTENTION_ME, text: '@나' } },
+    { type: 'text', text: ' 확인 부탁해요' },
+  );
+  const row = attentionRow([theySaid('10002', '2026-09-22T03:00:00.000+0000', '테스터A', called)]);
+  assert.equal(row.mention, true);
+  assert.equal(row.preview, '이거 @나 확인 부탁해요', 'mention은 @표시이름으로 펴진다');
+  // 다른 사람을 부른 댓글은 나를 부른 것이 아니다.
+  const elsewhere = adfDoc({ type: 'mention', attrs: { id: 'someone-else', text: '@테스터B' } });
+  assert.equal(attentionRow([theySaid('10002', '2026-09-22T03:00:00.000+0000', '테스터A', elsewhere)]).mention, false);
+
+  // 문단 사이는 공백 하나, 글자가 아닌 노드(그림·첨부)는 비운다.
+  const mixed = { type: 'doc', content: [
+    { type: 'paragraph', content: [{ type: 'text', text: '첫 문단' }] },
+    { type: 'mediaSingle', attrs: { layout: 'center' } },
+    { type: 'paragraph', content: [{ type: 'text', text: '둘째 문단' }] },
+  ] };
+  assert.equal(jiraModule.attentionPreview(mixed), '첫 문단 둘째 문단');
+  const long = jiraModule.attentionPreview(adfSay('가'.repeat(400)));
+  assert.equal(long.length, 140);
+  assert.match(long, /…$/);
+  assert.equal(jiraModule.attentionPreview(null), '');
+});
+
+test('줄 차례는 나를 부른 것이 먼저, 그 안에서는 마지막 댓글이 최신인 것부터다', () => {
+  const rows = [
+    { mention: false, at: '2026-09-22T09:00:00.000Z', key: 'A-1' },
+    { mention: true, at: '2026-09-20T09:00:00.000Z', key: 'A-2' },
+    { mention: false, at: '2026-09-22T11:00:00.000Z', key: 'A-3' },
+    { mention: true, at: '2026-09-21T09:00:00.000Z', key: 'A-4' },
+  ].sort(jiraModule.attentionOrder);
+  assert.deepEqual(rows.map(row => row.key), ['A-4', 'A-2', 'A-3', 'A-1']);
+});
+
+test('반응 필요 조회는 이슈 50개·칸 셋만 묻고, 댓글이 잘린 이슈만 한 번 더 읽는다', async () => {
+  const cut = attentionIssue('IO-48395', [theySaid('20002', '2026-09-22T03:00:00.000+0000', '테스터A')], { total: 30 });
+  const fake = jiraFake({
+    '/rest/api/3/myself': () => json({ accountId: ATTENTION_ME, emailAddress: JIRA_EMAIL, displayName: '나' }),
+    '/rest/api/3/search/jql': () => json({ issues: [
+      attentionIssue('IO-48394', [mineSaid('10001', '2026-09-20T01:00:00.000+0000'), theySaid('10002', '2026-09-21T02:00:00.000+0000', '테스터A')]),
+      cut,
+      attentionIssue('IO-48396', [theySaid('30002', '2026-09-20T02:00:00.000+0000', '테스터B'), mineSaid('30003', '2026-09-21T02:00:00.000+0000')]),
+      { key: '수상한키', fields: {} },
+    ] }),
+    '/rest/api/3/issue/IO-48395/comment': () => json({ comments: [
+      theySaid('20003', '2026-09-22T05:00:00.000+0000', '테스터B'),
+      theySaid('20002', '2026-09-22T03:00:00.000+0000', '테스터A'),
+    ] }),
+  });
+  const items = await jiraListClient(fake).listAttention(ATTENTION_ME);
+  assert.deepEqual(items.map(item => item.id), ['jira:IO-48395:20003', 'jira:IO-48394:10002'],
+    '내가 마지막으로 답한 이슈와 형식이 틀린 키는 빠진다');
+  assert.equal(items[0].count, 2, '다시 읽어 온 댓글로 판정한다');
+  // 요청은 둘뿐이다: 목록 하나 + 잘린 이슈 하나(다른 이슈는 다시 읽지 않는다).
+  assert.equal(fake.calls.length, 2);
+  const [list, comment] = fake.calls;
+  assert.equal(decodeURIComponent(list.url.split('jql=')[1].split('&')[0]), jiraModule.ATTENTION_JQL);
+  assert.match(list.url, /fields=summary,status,comment&maxResults=50$/);
+  assert.match(comment.url, /\/rest\/api\/3\/issue\/IO-48395\/comment\?orderBy=-created&maxResults=20$/);
+  // 담당자 칸은 애초에 달라고 하지 않는다(JQL의 `assignee = currentUser()`는 조건이지 받아 오는 칸이 아니다).
+  assert.doesNotMatch(fake.calls.map(call => call.url).join(' '), /emailAddress|accountId|fields=[^&]*assignee/);
+
+  // 다시 읽기가 실패해도 목록 전체를 오류로 만들지 않는다 — 받아 온 댓글로만 판단한다.
+  const broken = jiraFake({
+    '/rest/api/3/search/jql': () => json({ issues: [cut] }),
+    '/rest/api/3/issue/IO-48395/comment': () => json({}, 500),
+  });
+  assert.deepEqual((await jiraListClient(broken).listAttention(ATTENTION_ME)).map(item => item.count), [1]);
+});
+
+test('반응 필요 API는 내 계정 id를 한 번만 묻고 응답 어디에도 싣지 않는다', async () => {
+  const routes = {
+    '/rest/api/3/myself': () => json({ accountId: ATTENTION_ME, emailAddress: JIRA_EMAIL, displayName: '나' }),
+    '/rest/api/3/search': () => json({ issues: [attentionIssue('IO-48394', [theySaid('10002', '2026-09-22T03:00:00.000+0000', '테스터A')])] }),
+  };
+  const fake = jiraFake(routes);
+  const api = jiraModule.createJiraApi({ config: jiraConfig, request: fake.request, readFile: () => JIRA_TOKEN });
+  const answer = await api.attention();
+  assert.equal(answer.connected, true);
+  assert.deepEqual(answer.items.map(item => [item.key, item.who]), [['IO-48394', '테스터A']]);
+  await api.attention();
+  assert.equal(fake.calls.filter(call => call.url.includes('/myself')).length, 1, '누가 나인지는 프로세스마다 한 번만 묻는다');
+  const payload = JSON.stringify(answer);
+  assert.doesNotMatch(payload, /accountId|emailAddress|fixture-me-account|fixture-other-account/);
+  assert.doesNotMatch(payload, new RegExp(`${JIRA_TOKEN}|${JIRA_EMAIL}`));
+  assert.doesNotMatch(payload, /@/, '이메일이 섞일 자리가 없다(부름 표시가 없는 댓글이라 @도 없다)');
+
+  // 설정·토큰이 없으면 지라를 부르지 않는다.
+  const off = jiraModule.createJiraApi({ config: {}, request: jiraFake(routes).request });
+  assert.deepEqual(await off.attention(), { ok: true, connected: false });
+  const noToken = jiraModule.createJiraApi({ config: jiraConfig, request: fake.request, readFile: () => '' });
+  assert.deepEqual(await noToken.attention(), { ok: true, connected: false });
+
+  // 토큰이 만료되면 해요체 문구로만 알리고, 다음번에는 누가 나인지 다시 묻는다.
+  let denied = true;
+  const flaky = jiraFake({
+    '/rest/api/3/myself': () => (denied ? json({}, 401) : json({ accountId: ATTENTION_ME })),
+    '/rest/api/3/search': () => json({ issues: [] }),
+  });
+  const retried = jiraModule.createJiraApi({ config: jiraConfig, request: flaky.request, readFile: () => JIRA_TOKEN });
+  assert.deepEqual(await retried.attention(), { ok: false, error: '지라 토큰을 확인해 주세요.', kind: 'auth' });
+  denied = false;
+  assert.deepEqual((await retried.attention()).items, []);
+  assert.equal(flaky.calls.filter(call => call.url.includes('/myself')).length, 2);
+});
+
+// 보관함(attention-live)의 시간 규칙 — 가짜 시계와 가짜 목록으로만 확인한다(지라에 닿지 않는다).
+const attentionLiveModule = require('./attention-live');
+function attentionHarness({ answers = [], connected = true } = {}) {
+  let clock = 0;
+  const calls = [];
+  let pending = null;
+  const load = () => {
+    calls.push(clock);
+    const answer = answers.length ? answers.shift() : { ok: true, connected: true, items: [{ id: 'jira:IO-1:1' }] };
+    if (answer === 'hang') return new Promise((resolve) => { pending = resolve; });
+    if (answer instanceof Error) return Promise.reject(answer);
+    return Promise.resolve(answer);
+  };
+  const live = attentionLiveModule.createAttentionLive({ load, connected: () => connected, now: () => clock });
+  return { live, calls, tick: (ms) => { clock += ms; }, release: (value) => { const resolve = pending; pending = null; resolve(value); } };
+}
+
+test('반응 필요 보관함은 실패하면 30분까지 이전 값을 `기준`으로 쓰고, 그보다 묵으면 빈 목록 + 문구다', async () => {
+  const held = attentionHarness({ answers: [
+    { ok: true, connected: true, items: [{ id: 'jira:IO-1:1' }] },
+    { ok: false, error: '지라에 연결하지 못했어요.', kind: 'network' },
+    new Error('fetch failed'),
+  ] });
+  await held.live.refresh();
+  assert.deepEqual(held.live.view(), { items: [{ id: 'jira:IO-1:1' }], updatedAt: new Date(0).toISOString(), stale: false });
+
+  held.tick(10 * 60 * 1000);
+  assert.equal(await held.live.refresh(), false);
+  const kept = held.live.view();
+  assert.deepEqual(kept.items, [{ id: 'jira:IO-1:1' }], '실패하면 이전 값을 그대로 쓴다');
+  assert.equal(kept.stale, true);
+  assert.equal(kept.error, undefined);
+  assert.equal(await held.live.refresh(), false, '던지는 실패도 조용히 흘린다');
+
+  held.tick(21 * 60 * 1000); // 마지막으로 성공한 지 31분
+  assert.deepEqual(held.live.view(), { items: [], updatedAt: null, stale: false, error: '지라 댓글을 읽지 못했어요.' });
+});
+
+test('반응 필요 보관함은 동시에 두 번 돌지 않고, 설정이 없으면 타이머도 첫 읽기도 없다', async () => {
+  const harness = attentionHarness({ answers: ['hang'] });
+  const first = harness.live.refresh();
+  assert.equal(harness.live.refresh(), first, '도는 중이면 같은 갱신을 나눠 쓴다');
+  assert.equal(harness.calls.length, 1);
+  harness.release({ ok: true, connected: true, items: [] });
+  await first;
+
+  const off = attentionHarness({ connected: false });
+  assert.equal(off.live.start(), false);
+  assert.equal(off.calls.length, 0);
+  const on = attentionHarness();
+  assert.equal(on.live.start(), true);
+  assert.equal(on.calls.length, 1, '설정이 있으면 뜰 때 한 번 읽는다');
+  assert.equal(on.live.holdsProcess(), false, '타이머는 unref — 이것 때문에 프로세스가 남지 않는다');
+  assert.equal(on.live.start(), false, '두 번 켜지지 않는다');
+  on.live.stop();
+  assert.equal(on.live.started(), false);
+  // 설정이 없다는 답은 실패가 아니다 — 오류 문구를 만들지 않는다.
+  const none = attentionHarness({ answers: [{ ok: true, connected: false }] });
+  await none.live.refresh();
+  assert.deepEqual(none.live.view(), { items: [], updatedAt: null, stale: false });
+
+  // 값이 없는 동안 조회가 스스로 읽는 것은 1분에 한 번까지다(지라가 죽어 있어도 화면을 열 때마다 묻지 않게).
+  const down = attentionHarness({ answers: [new Error('down'), new Error('down'), new Error('down')] });
+  assert.equal(down.live.needsRead(), true, '아직 한 번도 못 읽었으면 읽는다');
+  await down.live.refresh();
+  assert.equal(down.live.needsRead(), false, '방금 읽어 봤으면 다시 묻지 않는다');
+  down.tick(61 * 1000);
+  assert.equal(down.live.needsRead(), true);
+  await down.live.refresh();
+  assert.equal(down.calls.length, 2);
+});
+
+// 가짜 지라를 끼운 서버 하나. 반응 필요만 보려고 이슈 셋을 둔다:
+// ① 나를 부른 댓글 · ② 작성자가 둘인 댓글 · ③ 내가 마지막으로 답한 이슈(줄이 없어야 한다).
+const ATTENTION_SITE = 'https://attention-jira.test';
+async function startAttentionServer(t) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-attention-'));
+  fs.writeFileSync(path.join(home, 'tasks.md'), '# Tasks\n- 댓글 확인하기 #task[id:at01 status:to-do created:2026-09-20]\n');
+  const tokenFile = path.join(home, '.jira_token_fixture');
+  fs.writeFileSync(tokenFile, 'fixture-token-never-real\n');
+  const config = path.join(home, 'workspace.config.json');
+  fs.writeFileSync(config, JSON.stringify({ jira: { siteUrl: ATTENTION_SITE, email: 'fixture@example.test', tokenFile } }));
+  const wrapper = path.join(home, 'fake-attention-server.js');
+  fs.writeFileSync(wrapper, `'use strict';
+const SITE = ${JSON.stringify(ATTENTION_SITE)};
+const ME = ${JSON.stringify(ATTENTION_ME)};
+const realFetch = globalThis.fetch;
+globalThis.fetch = async (input, init) => {
+  const url = String(input && input.url ? input.url : input);
+  if (!url.startsWith(SITE)) return realFetch(input, init);
+  const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  if (url.includes('/rest/api/3/myself')) return json({ accountId: ME, emailAddress: 'fixture@example.test', displayName: '나' });
+  const say = (line, mention) => ({ type: 'doc', content: [{ type: 'paragraph', content: [
+    ...(mention ? [{ type: 'mention', attrs: { id: ME, text: '@나' } }, { type: 'text', text: ' ' }] : []),
+    { type: 'text', text: line },
+  ] }] });
+  const comment = (id, who, at, line, mention) => ({
+    id, created: at, body: say(line, mention),
+    author: { accountId: who === '나' ? ME : 'other-' + who, displayName: who, emailAddress: 'someone@example.test' },
+  });
+  const issue = (key, comments) => ({ key, fields: {
+    summary: key + '의 요약',
+    status: { name: '배포 대기', statusCategory: { key: 'indeterminate' } },
+    comment: { comments, total: comments.length },
+  } });
+  return json({ issues: [
+    issue('IO-48394', [comment('10001', '테스터A', '2026-09-22T05:31:00.000+0000', '해외 서버에서는 안 뜨나요?', true)]),
+    issue('IO-48395', [
+      comment('20001', '나', '2026-09-21T01:00:00.000+0000', '제가 볼게요', false),
+      comment('20002', '테스터B', '2026-09-21T02:00:00.000+0000', '문구만 확인 부탁해요', false),
+      comment('20003', '테스터C', '2026-09-21T03:00:00.000+0000', '저도 같은 생각이에요', false),
+    ]),
+    issue('IO-48396', [
+      comment('30001', '테스터A', '2026-09-20T01:00:00.000+0000', '이건 어떻게 할까요', false),
+      comment('30002', '나', '2026-09-20T02:00:00.000+0000', '제가 처리했어요', false),
+    ]),
+  ] });
+};
+const { server } = require(${JSON.stringify(path.join(__dirname, 'server.js'))});
+server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => console.log('ready'));
+`);
+  const port = await freePort();
+  const child = spawn(process.execPath, [wrapper], {
+    env: { ...process.env, WORKSPACE_DATA_DIR: home, WORKSPACE_PORT: String(port), WORKSPACE_NO_OPEN: '1', WORKSPACE_HOST: '', WORKSPACE_CONFIG: config },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let log = '';
+  child.stdout.on('data', chunk => { log += chunk; });
+  child.stderr.on('data', chunk => { log += chunk; });
+  t.after(() => { child.kill('SIGKILL'); fs.rmSync(home, { recursive: true, force: true }); });
+  const origin = `http://127.0.0.1:${port}`;
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) throw new Error(`서버가 종료되었습니다 (${child.exitCode}): ${log}`);
+    try { if ((await fetch(origin + '/api/storage-status')).ok) return { home, origin }; } catch { /* 아직 안 떴다 */ }
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  throw new Error(`서버가 응답하지 않았습니다: ${log}`);
+}
+
+test('GET /api/attention은 나를 부른 줄을 맨 위에 두고, 조회는 어떤 파일도 만들지 않는다', async (t) => {
+  const server = await startAttentionServer(t);
+  const snapshot = () => fs.readdirSync(server.home).sort().map((name) => {
+    const stat = fs.statSync(path.join(server.home, name));
+    return `${name}:${stat.size}:${stat.mtimeMs}`;
+  }).join('|');
+  const before = snapshot();
+  const read = async (query = '') => (await (await fetch(`${server.origin}/api/attention${query}`)).json());
+  const first = await read();
+  assert.equal(first.ok, true);
+  assert.equal(first.connected, true);
+  assert.deepEqual(first.items.map(item => [item.key, item.mention, item.count, item.who, item.others]), [
+    ['IO-48394', true, 1, '테스터A', 0],
+    ['IO-48395', false, 2, '테스터C', 1],
+  ], '내가 마지막으로 답한 이슈는 줄이 없다');
+  assert.equal(first.items[0].preview, '@나 해외 서버에서는 안 뜨나요?');
+  assert.deepEqual([first.items[0].status, first.items[0].statusTone], ['배포 대기', 'doing']);
+  assert.equal(first.items[0].url, `${ATTENTION_SITE}/browse/IO-48394`);
+  assert.match(first.updatedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(first.stale, false);
+  assert.equal(first.error, undefined);
+  // 토큰·이메일·계정 id는 어디에도 실리지 않는다(부름 표시의 `@나`만 남는다).
+  const payload = JSON.stringify(first);
+  assert.doesNotMatch(payload, /accountId|emailAddress|fixture-token-never-real|fixture@example\.test|someone@example\.test|other-테스터/);
+  assert.doesNotMatch(payload, /@(?!나)/);
+  assert.equal((await read('?fresh=1')).items.length, 2);
+  assert.equal(snapshot(), before, '조회도 갱신도 파일을 만들지 않는다');
+  assert.equal(fs.existsSync(path.join(server.home, '.workflow.json')), false);
+
+  // `했어요` — 그 줄이 빠지고, 저장은 `.workflow.json` 한 칸뿐이다.
+  const send = async (route, id) => {
+    const response = await fetch(`${server.origin}${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+    return { status: response.status, ...await response.json() };
+  };
+  const done = await send('/api/attention/dismiss', 'jira:IO-48394:10001');
+  assert.deepEqual([done.status, done.ok, done.id], [200, true, 'jira:IO-48394:10001']);
+  const saved = JSON.parse(fs.readFileSync(path.join(server.home, '.workflow.json'), 'utf8'));
+  assert.match(saved.attention.dismissed['jira:IO-48394:10001'], /^\d{4}-\d{2}-\d{2}T/);
+  assert.deepEqual((await read()).items.map(item => item.key), ['IO-48395'], '치운 줄은 빠진 채로 온다');
+  // `되돌리기` — 다시 나타난다.
+  assert.equal((await send('/api/attention/undismiss', 'jira:IO-48394:10001')).ok, true);
+  assert.deepEqual((await read()).items.map(item => item.key), ['IO-48394', 'IO-48395']);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(server.home, '.workflow.json'), 'utf8')).attention, { dismissed: {} });
+});
+
+test('GET /api/attention은 지라 설정이 없으면 연결 안 됨으로만 답한다', async () => {
+  const before = fs.readdirSync(directory).sort().join('|');
+  const response = await fetch(`${base}/api/attention`);
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true, connected: false, items: [] });
+  assert.equal(fs.readdirSync(directory).sort().join('|'), before);
+  // 인증 예외가 아니다 — 원격에서 토큰 없이 부르면 다른 주소와 똑같이 막힌다(여기서는 로컬이라 열린다).
+  assert.equal((await fetch(`${base}/api/attention?fresh=1`)).status, 200);
+});
+
+test('반응 필요 치우기는 id 형식을 검증하고 같은 요청을 두 번 쓰지 않는다', async () => {
+  assert.equal((await post('/api/attention/dismiss', { id: 'jira:IO-48394' })).status, 400);
+  assert.equal((await post('/api/attention/dismiss', { id: 'JIRA:IO-48394:10001' })).status, 400);
+  assert.equal((await post('/api/attention/dismiss', { id: 'jira:io-48394:10001' })).status, 400);
+  assert.equal((await post('/api/attention/dismiss', {})).status, 400);
+  assert.equal((await post('/api/attention/undismiss', { id: '../../etc/passwd' })).status, 400);
+  const workflowPath = path.join(directory, '.workflow.json');
+  assert.equal(JSON.parse(fs.readFileSync(workflowPath, 'utf8')).attention, undefined, '거절한 요청은 파일을 고치지 않는다');
+
+  const call = () => fetch(`${base}/api/attention/dismiss`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'attention-request-0001' },
+    body: JSON.stringify({ id: 'jira:IO-48394:10001' }),
+  }).then(r => r.json());
+  const a = await call();
+  const b = await call();
+  assert.deepEqual(a, b);
+  assert.equal(a.id, 'jira:IO-48394:10001');
+  assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(workflowPath, 'utf8')).attention.dismissed), ['jira:IO-48394:10001']);
+});
+
+test('저장이 멈춘 동안에는 반응 필요도 치우지 못한다', async (t) => {
+  const server = await startServer(t, (home) => {
+    fs.writeFileSync(path.join(home, 'tasks.md'), '# Tasks\n- 바깥에서 고친 줄 #task[id:outside status:to-do created:2026-09-20]\n');
+    fs.writeFileSync(path.join(home, '.mutation-journal.json'), journalEntry(path.join(home, 'tasks.md'), '# Tasks\n', '# Tasks\n- 중단된 저장\n'));
+    fs.writeFileSync(path.join(home, '.mutation.lock'), String(deadPid()));
+  });
+  const response = await fetch(`${server.base}/api/attention/dismiss`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'jira:IO-48394:10001' }),
+  });
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).code, 'RECOVERY_NEEDED');
+  // 조회는 그대로 된다(지라 설정이 없으니 연결 안 됨으로 답한다).
+  assert.equal((await fetch(`${server.base}/api/attention`)).status, 200);
+  assert.equal(fs.existsSync(path.join(server.home, '.workflow.json')), false);
+});
+
+test('치운 목록은 200개·30일로 정리하되 지금 화면에 있는 줄은 지킨다', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-attention-store-'));
+  const store = require('./workflow-store')({
+    directory: home, refs: () => ({}), calendar: () => ({ events: [] }),
+    today: () => today, validateDate: () => {}, create: {}, remove: () => {}, move: () => {},
+  });
+  const ago = days => new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  const seeded = { 'jira:OLD-1:1': ago(40), 'jira:OLD-2:2': ago(31) };
+  // 200개를 넘기려고 오래되지 않은 줄을 잔뜩 넣어 둔다(오래된 것부터 버려야 한다).
+  for (let index = 0; index < 205; index += 1) seeded[`jira:FILL-${index}:${index + 1}`] = new Date(Date.now() - (205 - index) * 60000).toISOString();
+  fs.writeFileSync(path.join(home, '.workflow.json'), JSON.stringify({ items: {}, meetings: {}, attention: { dismissed: seeded } }));
+
+  // 30일이 지난 `OLD-2`는 버리고, 지금 화면에 있는 `OLD-1`은 오래됐어도 지킨다(버리면 곧바로 다시 올라온다).
+  store.dismissAttention({ id: 'jira:NEW-1:9' }, new Set(['jira:OLD-1:1', 'jira:NEW-1:9']));
+  const table = store.attentionDismissed();
+  assert.equal(table['jira:OLD-2:2'], undefined, '30일이 지난 줄은 버린다');
+  assert.ok(table['jira:OLD-1:1'], '지금 목록에 있는 줄은 오래됐어도 지킨다');
+  assert.ok(table['jira:NEW-1:9']);
+  assert.equal(Object.keys(table).length, 200, '200개를 넘으면 오래된 것부터 버린다');
+  assert.equal(table['jira:FILL-0:1'], undefined, '가장 오래된 것부터 빠진다');
+  assert.ok(table['jira:FILL-204:205']);
+
+  store.undismissAttention({ id: 'jira:NEW-1:9' });
+  assert.equal(store.attentionDismissed()['jira:NEW-1:9'], undefined);
+  assert.throws(() => store.dismissAttention({ id: 'nope' }), /보낸 값을 확인해 주세요/);
+  fs.rmSync(home, { recursive: true, force: true });
 });

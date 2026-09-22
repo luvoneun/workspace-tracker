@@ -1398,7 +1398,7 @@ const MIME = {
 // 서버 파일·테스트·픽스처·저장소 코드는 **절대 나가면 안 되므로** 여기서 못 박는다(server.test.js가 고정).
 // 인증 예외(publicAsset)와는 다른 이야기다 — 여기 있는 파일도 원격에서는 인증을 거친다.
 const CLIENT_BLOCKED = new Set([
-  'server.js', 'safe-storage.js', 'jira-client.js', 'jira-live.js', 'report-drafts.js',
+  'server.js', 'safe-storage.js', 'jira-client.js', 'jira-live.js', 'attention-live.js', 'report-drafts.js',
   'task-batch.js', 'slack-history.js', 'import-record.js', 'browser-fixture.js',
 ]);
 function isClientFile(name) {
@@ -1521,6 +1521,10 @@ const handleRequest = (req, res) => {
     '/api/track/trash-purge': ({ id }) => purgeTrashItem(id),
     // 새 프로젝트 화면의 직군 세트. 지라에는 아무것도 묻지 않고 `.workflow.json` 한 칸만 바꾼다.
     '/api/workflow/jira-roles': workflows.saveJiraRoles,
+    // 반응 필요 줄 치우기·되돌리기. 지라에는 아무것도 보내지 않고 `.workflow.json`의 표 한 칸만 바꾼다.
+    // 지금 목록에 있는 id는 정리에서 지키려고 캐시의 id 묶음을 함께 넘긴다(지우면 그 줄이 다시 올라온다).
+    '/api/attention/dismiss': body => workflows.dismissAttention(body, attentionKeep()),
+    '/api/attention/undismiss': workflows.undismissAttention,
   };
   if (req.method === 'POST' && workflowActions[url.pathname]) {
     readBody(req).then(body => {
@@ -1570,6 +1574,35 @@ const handleRequest = (req, res) => {
     };
     const asked = url.searchParams.get('fresh') === '1' || !jiraLive.current();
     (asked && jira.connected ? jiraLive.refresh() : Promise.resolve()).then(done, done);
+    return;
+  }
+
+  // 반응 필요(1차: 지라 댓글) — 내 마지막 댓글 뒤에 다른 사람 댓글이 있는 이슈 목록이다.
+  // 조회라 어떤 파일도 쓰지 않고, 값은 서버 메모리(attention-live)에만 있다. 인증 예외도 아니다.
+  // 지라를 쓰지 않거나 설정이 없으면 `connected:false`로만 답한다(화면은 구역 자체를 그리지 않는다).
+  if (url.pathname === '/api/attention' && req.method === 'GET') {
+    if (!USES.jira || !jira.connected) {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: true, connected: false, items: [] }));
+      return;
+    }
+    const done = () => {
+      const view = attentionLive.view();
+      const hidden = workflows.attentionDismissed();
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({
+        ok: true,
+        connected: true,
+        items: view.items.filter(item => !hidden[item.id]),
+        updatedAt: view.updatedAt,
+        stale: view.stale,
+        ...(view.error ? { error: view.error } : {}),
+      }));
+    };
+    // 아직 값이 없거나 `fresh=1`이면 지금 읽는다(그 밖에는 10분마다 도는 값을 그대로 쓴다).
+    // 지라가 죽어 있는 동안 화면을 열 때마다 다시 묻지 않게, 스스로 읽는 쪽은 1분을 바닥으로 둔다.
+    const asked = url.searchParams.get('fresh') === '1' || attentionLive.needsRead();
+    (asked ? attentionLive.refresh() : Promise.resolve()).then(done, done);
     return;
   }
 
@@ -2087,6 +2120,14 @@ const jiraLive = require('./jira-live').createJiraLive({
   keys: linkedJiraKeys,
   connected: () => USES.jira && jira.connected,
 });
+// 반응 필요(1차: 지라 댓글)도 앱이 직접 읽는다 — 값은 메모리에만 있고 파일은 쓰지 않는다.
+// 설정이 없으면(`connected`가 거짓) 타이머도 첫 읽기도 돌지 않는다(내 담당 목록과 같은 규칙).
+const attentionLive = require('./attention-live').createAttentionLive({
+  load: () => jira.attention(),
+  connected: () => USES.jira && jira.connected,
+});
+// 치운 목록을 정리할 때 "지금 화면에 있는 줄"을 지키려고 쓰는 id 묶음이다.
+const attentionKeep = () => new Set(((attentionLive.current() || {}).items || []).map(item => item.id));
 const transactional = fn => (...args) => mutations.run(() => fn(...args));
 setTrackField = transactional(setTrackField);
 setTrackDue = transactional(setTrackDue);
@@ -2130,6 +2171,8 @@ if (require.main === module) {
   archiveMeetings();
   // 지라 목록은 뜰 때 한 번, 그 뒤 10분마다 읽는다(설정이 있을 때만, 타이머는 unref).
   jiraLive.start();
+  // 반응 필요(지라 댓글)도 같은 리듬이다.
+  attentionLive.start();
   fs.watchFile(path.join(TRACKER_DIR, 'calendar_today.md'), { interval: 1000, persistent: false }, archiveMeetings);
   server.listen(PORT, '127.0.0.1', () => {
     console.log(`슬랙 인박스 앱: http://localhost:${PORT}`);
@@ -2148,6 +2191,6 @@ if (require.main === module) {
   }
 }
 
-// `jiraLive`는 화면 확인용 픽스처가 "뜰 때 한 번 읽기"를 직접 켜 보려고 함께 내보낸다
-// (테스트·픽스처 밖에서는 쓰지 않는다 — 운영에서는 위의 `jiraLive.start()`가 켠다).
-module.exports = { server, jiraLive };
+// `jiraLive`·`attentionLive`는 화면 확인용 픽스처가 "뜰 때 한 번 읽기"를 직접 켜 보려고 함께 내보낸다
+// (테스트·픽스처 밖에서는 쓰지 않는다 — 운영에서는 위의 `start()`가 켠다).
+module.exports = { server, jiraLive, attentionLive };

@@ -750,6 +750,65 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 }
 .d-headnum:hover { background: var(--hover); color: var(--accent-text); }
 
+/* ---------- 반응 필요 (오늘 탭 맨 위 — 1차 지라 댓글) ---------- */
+/* `새로 들어온 것`과 같은 리듬(머리줄 + 줄 목록)이되 따뜻한 색은 쓰지 않는다 — 여기는 바깥에서
+   온 말이라 평소 카드 면 위에 선다. 0개면 구역째 없다(hidden). */
+.d-attn { margin: 0 0 10px; }
+.d-atlist {
+  background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r);
+  box-shadow: var(--soft); padding: 6px; margin: 6px 0 0;
+}
+/* 줄은 두 줄이다: [요약 · 상태] [누가 · 언제 · 부름] / [미리보기 · 댓글 N개]. */
+.d-atrow {
+  position: relative; display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "tl mt" "sb sb" "ed ed";
+  align-items: center; column-gap: 10px; row-gap: 2px;
+  min-height: var(--row); padding: 8px 10px 8px var(--pad);
+  border-radius: 14px; --rowbg: var(--surface);
+  transition: background 170ms var(--ease);
+}
+.d-atrow:hover, .d-atrow:focus-within { background: var(--hover); --rowbg: var(--hover); }
+.d-atrow .tl { grid-area: tl; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.d-atrow .ti {
+  font-size: 16px; font-weight: 500; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; min-width: 0;
+}
+.d-atrow .mt {
+  grid-area: mt; display: flex; align-items: center; gap: 8px; justify-self: end;
+  transition: opacity 130ms var(--ease);
+}
+.d-atrow .wh { font-size: 12.5px; color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* `나를 불렀어요`는 바탕을 채우지 않는다 — 급한 말 셋만 배지다 */
+.d-atrow .mn { font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.d-atrow .sb { grid-area: sb; display: flex; align-items: baseline; gap: 6px; min-width: 0; padding-right: 130px; }
+.d-atrow .pv { font-size: 13px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.d-atrow .ct { flex: none; font-size: 12.5px; color: var(--dim); }
+/* 동작은 업무 줄과 같다 — 마우스·초점에 줄 위로 겹쳐 뜨고, 왼쪽 24px이 아래 글자를 가린다 */
+.d-atacts {
+  position: absolute; right: 10px; top: 1px; bottom: 1px;
+  display: flex; align-items: center; justify-content: flex-end; gap: 6px;
+  padding-left: 24px; background: linear-gradient(90deg, transparent 0, var(--rowbg) 24px);
+  border-radius: 0 13px 13px 0;
+  opacity: 0; pointer-events: none; transition: opacity 130ms var(--ease);
+}
+.d-atrow:hover .d-atacts, .d-atrow:focus-within .d-atacts { opacity: 1; pointer-events: auto; }
+.d-atrow:hover .mt, .d-atrow:focus-within .mt { opacity: 0; }
+.d-atacts .d-btn { background: var(--accent-soft); color: var(--accent-text); height: 33px; padding: 0 13px; }
+.d-atacts .d-btn:hover { background: var(--accent-strong); color: var(--on-fill); }
+.d-atacts .d-src { margin-right: 2px; }
+/* `할 일로` 입력칸 — 확인 대기의 `후속 할 일`과 같은 부품(.nx)을 줄 아래에 그대로 편다 */
+.d-atrow .ed { grid-area: ed; min-width: 0; }
+.d-atrow .ed:empty, .d-atrow .ed .nx:empty { display: none; }
+.d-atrow .ed .nx { display: flex; align-items: center; gap: 6px; margin: 4px 0 2px; padding-right: 10px; }
+.d-atrow .ed .nx .d-din { flex: 1; min-width: 0; }
+/* 입력칸이 열려 있는 동안에는 그 줄의 동작 묶음을 감춘다 — 겹쳐 뜨는 판이 `오늘`·`나중에`를 가린다.
+   그 자리에 있던 `누가 · 언제`는 다시 보인다(가릴 판이 없으므로). */
+.d-atrow:has(.nx.is-ed) .d-atacts { display: none; }
+.d-atrow:has(.nx.is-ed):hover .mt, .d-atrow:has(.nx.is-ed):focus-within .mt { opacity: 1; }
+.d-atmore { margin: 2px 0 2px var(--pad); background: none; color: var(--dim); }
+.d-atmore:hover { background: var(--hover); color: var(--accent-text); }
+
 /* ---------- 새로 들어온 것 (아주 옅은 따뜻한 카드) ---------- */
 .d-inbox {
   background: var(--warm); border: 1px solid var(--warm-line); border-radius: var(--r);
@@ -2294,6 +2353,23 @@ body.batch-open .d-toast { bottom: 76px; }
   .d-acts .d-btn, .d-ibacts .d-btn { height: 32px; padding: 0 11px; }
   /* 서랍 안의 두 줄 행도 같은 규칙을 따른다 — 동작 칸을 따로 잡아 주지 않으면 줄이 세로로 늘어난다 */
   .d-dbody .d-row { grid-template-columns: 30px minmax(0, 1fr) auto; grid-template-areas: "ck ti ac" "ck mt ac"; }
+  /* 반응 필요 줄은 세 줄로 쌓인다: 제목 / `누가 · 언제` + 미리보기 / 동작(늘 보인다) */
+  .d-atrow {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas: "tl tl" "mt sb" "ac ac" "ed ed";
+    align-items: start; height: auto; padding: 10px 12px; row-gap: 4px;
+  }
+  .d-atrow .tl { flex-wrap: wrap; }
+  .d-atrow .ti { white-space: normal; }
+  .d-atrow .mt { justify-self: start; }
+  .d-atrow .sb { padding-right: 0; }
+  .d-atrow:hover .mt, .d-atrow:focus-within .mt { opacity: 1; }
+  .d-atacts {
+    grid-area: ac; position: static; justify-content: flex-start; flex-wrap: wrap;
+    opacity: 1; pointer-events: auto; background: none; padding-left: 0;
+  }
+  .d-atacts .d-btn { height: 32px; padding: 0 11px; }
+
   /* 새로 들어온 줄은 제목 한 줄 / 동작 한 줄 */
   .d-ibrow { grid-template-columns: minmax(0, 1fr); row-gap: 6px; }
   .d-ibrow .jira-control { display: none; }

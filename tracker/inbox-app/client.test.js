@@ -134,7 +134,7 @@ test('a save refused for recovery shows the server message and keeps the banner 
 // 같은 결과를 내는 함수를 넣어, 화면 문자열을 만드는 나머지 로직을 검증한다.
 // 화면 코드는 여러 파일로 나뉘어 있고, 브라우저에서는 index.html의 <script> 차례대로
 // 같은 전역 공간에서 돈다. 테스트도 같은 가짜 창에 같은 차례로 이어 붙인다.
-const CLIENT_PARTS = ['jira-ui.js', 'meeting-notes-ui.js', 'project-new-ui.js', 'projects-ui.js', 'meetings-ui.js', 'waiting-ui.js', 'settings-ui.js', 'wrap-ui.js'];
+const CLIENT_PARTS = ['jira-ui.js', 'meeting-notes-ui.js', 'project-new-ui.js', 'projects-ui.js', 'meetings-ui.js', 'waiting-ui.js', 'settings-ui.js', 'wrap-ui.js', 'attention-ui.js'];
 function pureClient() {
   const app = client(new Response('{}'));
   CLIENT_PARTS.forEach(file => app.run(fs.readFileSync(path.join(__dirname, file), 'utf8')));
@@ -5164,4 +5164,202 @@ test('BWRAP: `끝낸 것`은 접힌 소제목이고, 0개면 소제목 자체가
   none.app.run('wrapOpen()');
   assert.deepEqual(nodeFindAll(none.body(), 'd-grp').map(head => nodeFind(head, 'gl').textContent), ['남은 것']);
   assert.equal(nodeFind(none.body(), 'd-wrapsum').textContent, '1개 중 0개 끝냈어요 · 남은 1개');
+});
+
+// ---------- BATTENTION: 오늘 탭 맨 위의 `반응 필요` (1차 지라 댓글) ----------
+// 값은 `GET /api/attention`에서만 오고, 저장하는 것은 치운 줄의 id 하나뿐이다.
+// 여기 나오는 이름·댓글·티켓 번호는 전부 지어낸 것이다(실제 지라에는 닿지 않는다).
+const attentionAgo = minutes => new Date(Date.now() - minutes * 60000).toISOString();
+const attentionItem = (over = {}) => ({
+  id: 'jira:IO-48394:10001', source: 'jira', key: 'IO-48394', url: 'https://fake-jira.test/browse/IO-48394',
+  summary: '게시글 작성하기_게임 임베드', status: '배포 대기', statusTone: 'doing',
+  who: '테스터A', others: 0, count: 1, preview: '해외 서버에서는 안 뜨나요?',
+  at: attentionAgo(120), mention: false, ...over,
+});
+function attentionClient(answer = {}) {
+  const app = workflowsClient();
+  const sent = [];
+  const state = { answer: { ok: true, connected: true, items: [attentionItem()], updatedAt: attentionAgo(3), stale: false, ...answer }, fail: null };
+  app.context.fetch = async (url, options) => {
+    const body = options && options.body ? JSON.parse(options.body) : null;
+    sent.push({ url: String(url), body });
+    if (state.fail && String(url) === state.fail) return new Response('{"ok":false,"error":"저장하지 못했어요"}', { status: 500 });
+    if (String(url).startsWith('/api/attention?') || String(url) === '/api/attention') return new Response(JSON.stringify(state.answer));
+    return new Response(JSON.stringify({ ok: true, id: 'made-task-1' }));
+  };
+  app.run('loads = 0; load = async () => { loads += 1; };');
+  const zone = () => app.nodes.get('attentionZone');
+  const rows = () => nodeFindAll(app.nodes.get('attentionList'), 'd-atrow');
+  const button = (row, label) => nodeFindAll(row, 'd-btn').find(node => node.textContent === label);
+  return { app, sent, state, zone, rows, button, notice: () => app.nodes.get('liveRegion').textContent };
+}
+
+test('BATTENTION: 0개이거나 연결이 없으면 구역 자체가 없다 — 빈 말도 없다', async () => {
+  const empty = attentionClient({ items: [] });
+  await empty.app.run('attentionLoad()');
+  assert.equal(empty.zone().hidden, true);
+  assert.equal(empty.rows().length, 0);
+
+  const off = attentionClient({ connected: false, items: [attentionItem()] });
+  await off.app.run('attentionLoad()');
+  assert.equal(off.zone().hidden, true, '연결이 없으면 값이 와도 그리지 않는다');
+
+  // 이 주소를 모르는 옛 서버(404)도 조용히 지나간다.
+  const old = attentionClient();
+  old.app.context.fetch = async () => new Response('Not found', { status: 404 });
+  await old.app.run('attentionLoad()');
+  assert.equal(old.zone().hidden, true);
+});
+
+test('BATTENTION: 머리줄은 개수와 `지라 댓글 · N분 전`을 적고, 묵은 값이면 `기준`이라고 밝힌다', async () => {
+  const fixture = attentionClient();
+  await fixture.app.run('attentionLoad()');
+  assert.equal(fixture.zone().hidden, false);
+  assert.equal(fixture.app.nodes.get('attentionCount').textContent, '1');
+  assert.equal(fixture.app.nodes.get('attentionNote').textContent, '지라 댓글 · 3분 전');
+  assert.equal(fixture.app.nodes.get('attentionNote').className, 'd-quiet');
+
+  const stale = attentionClient({ stale: true, updatedAt: attentionAgo(180) });
+  await stale.app.run('attentionLoad()');
+  assert.equal(stale.app.nodes.get('attentionNote').textContent, '지라 댓글 · 3시간 전 기준');
+  assert.equal(stale.app.nodes.get('attentionNote').className, 'd-quiet k-warn', '주의색 글자다');
+});
+
+test('BATTENTION: 줄은 요약·`누가 · 언제`·미리보기이고 키는 툴팁과 `열기`에만 있다 — 지라 상태는 적지 않는다', async () => {
+  const fixture = attentionClient({ items: [attentionItem({ who: '테스터A', others: 1, count: 2, mention: true, statusTone: 'done', status: '완료' })] });
+  await fixture.app.run('attentionLoad()');
+  const [row] = fixture.rows();
+  const title = nodeFind(row, 'ti');
+  assert.equal(title.textContent, '게시글 작성하기_게임 임베드', '줄에는 요약만 적는다');
+  assert.equal(title.title, 'IO-48394 · 게시글 작성하기_게임 임베드', '키는 툴팁에만');
+  assert.equal(nodeFind(row, 'st'), null, '지라 상태는 반응 필요 줄에서 말하지 않는다(정보가 두 겹이라 뺐다)');
+  assert.equal(nodeFind(row, 'wh').textContent, '테스터A 외 1명 · 2시간 전');
+  assert.equal(nodeFind(row, 'mn').textContent, '@멘션');
+  assert.equal(nodeFind(row, 'mn').className, 'mn k-warn');
+  assert.equal(nodeFind(row, 'pv').textContent, '해외 서버에서는 안 뜨나요?');
+  assert.equal(nodeFind(row, 'ct').textContent, '· 댓글 2개');
+  const open = nodeFind(row, 'd-src');
+  assert.deepEqual([open.textContent, open.href, open.target], ['열기', 'https://fake-jira.test/browse/IO-48394', '_blank']);
+  assert.equal(nodeFind(row, 'd-pjdot').dataset.pj, fixture.app.run("String(uiProjectHue('jira:IO-48394'))"));
+
+  // 댓글이 하나뿐이면 `댓글 N개`를 찍지 않고, 부름이 없으면 배지도 없다.
+  const one = attentionClient();
+  await one.app.run('attentionLoad()');
+  assert.equal(nodeFind(one.rows()[0], 'ct'), null);
+  assert.equal(nodeFind(one.rows()[0], 'mn'), null);
+});
+
+test('BATTENTION: `했어요`는 그 줄만 치우고 알림의 `되돌리기`로 되돌린다 — ⌘Z 대상이 아니다', async () => {
+  const fixture = attentionClient({ items: [attentionItem(), attentionItem({ id: 'jira:IO-48395:20002', key: 'IO-48395', summary: '정산 배치' })] });
+  await fixture.app.run('attentionLoad()');
+  await fixture.button(fixture.rows()[0], '했어요').listeners.click();
+  assert.deepEqual(fixture.sent[fixture.sent.length - 1], { url: '/api/attention/dismiss', body: { id: 'jira:IO-48394:10001' } });
+  assert.deepEqual(fixture.rows().map(row => nodeFind(row, 'ti').textContent), ['정산 배치'], '그 줄만 사라진다');
+  assert.match(fixture.notice(), /반응 필요에서 치웠어요 · 게시글 작성하기_게임 임베드/);
+  assert.equal(fixture.app.run('undoStack.length'), 0, '바깥 상태와 얽힌 표시라 ⌘Z 대상이 아니다');
+
+  // 알림의 `되돌리기`는 반대 방향으로 한 번 더 보내고 목록을 다시 읽는다.
+  const undo = fixture.app.nodes.get('liveRegion').children.find(node => node.textContent === '되돌리기');
+  await undo.listeners.click();
+  assert.equal(fixture.sent[fixture.sent.length - 2].url, '/api/attention/undismiss');
+  assert.deepEqual(fixture.sent[fixture.sent.length - 2].body, { id: 'jira:IO-48394:10001' });
+  assert.equal(fixture.sent[fixture.sent.length - 1].url, '/api/attention', '되돌린 뒤 목록을 다시 읽는다');
+  assert.equal(fixture.rows().length, 2);
+});
+
+test('BATTENTION: 치우기가 실패하면 줄이 그대로 남고 알림도 치웠다고 하지 않는다', async () => {
+  const fixture = attentionClient();
+  fixture.state.fail = '/api/attention/dismiss';
+  await fixture.app.run('attentionLoad()');
+  await fixture.button(fixture.rows()[0], '했어요').listeners.click();
+  assert.equal(fixture.rows().length, 1);
+  assert.doesNotMatch(fixture.notice(), /치웠어요/);
+});
+
+test('BATTENTION: `할 일로`는 `후속 할 일`과 같은 입력칸이고, 만들면 그 줄을 치운다', async () => {
+  const fixture = attentionClient();
+  await fixture.app.run('attentionLoad()');
+  fixture.button(fixture.rows()[0], '할 일로').listeners.click();
+  const form = nodeFind(fixture.rows()[0], 'is-ed');
+  const input = nodeFind(form, 'd-din');
+  assert.equal(input.value, '댓글 답하기 — 게시글 작성하기_게임 임베드', '미리 채운다');
+  assert.equal(input.selected, true, '전체 선택된 채로 연다');
+  assert.deepEqual(form.children.filter(node => node.className === 'd-btn sm').map(node => node.textContent), ['오늘', '나중에']);
+
+  // 한글을 조합하는 중의 Enter는 글자를 확정하는 것이라 넘긴다.
+  const before = fixture.sent.length;
+  await input.listeners.keydown({ key: 'Enter', isComposing: true, preventDefault() {} });
+  assert.equal(fixture.sent.length, before);
+
+  await input.listeners.keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+  const made = fixture.sent[before];
+  assert.equal(made.url, '/api/today-task/create', 'Enter는 오늘 할 일이다');
+  assert.deepEqual(made.body, { description: '댓글 답하기 — 게시글 작성하기_게임 임베드', jira: 'IO-48394' });
+  assert.equal(fixture.sent[before + 1].url, '/api/attention/dismiss', '업무를 만든 것이 곧 반응한 것이다');
+  assert.equal(fixture.app.run('undoStack.length'), 1, '만든 업무는 ⌘Z로 지운다(기존 등록 규칙)');
+  assert.equal(fixture.rows().length, 0);
+  assert.match(fixture.notice(), /오늘 할 일에 추가했어요/);
+});
+
+test('BATTENTION: `나중에`로 담을 수도 있고, Esc는 입력칸만 닫는다', async () => {
+  const fixture = attentionClient();
+  await fixture.app.run('attentionLoad()');
+  fixture.button(fixture.rows()[0], '할 일로').listeners.click();
+  let form = nodeFind(fixture.rows()[0], 'is-ed');
+  // Esc는 입력만 닫는다 — 줄은 그대로 남는다.
+  fixture.app.run('escStack[escStack.length - 1]()');
+  assert.equal(nodeFind(fixture.rows()[0], 'is-ed'), null);
+  assert.equal(fixture.rows().length, 1);
+
+  fixture.button(fixture.rows()[0], '할 일로').listeners.click();
+  form = nodeFind(fixture.rows()[0], 'is-ed');
+  await form.children.find(node => node.textContent === '나중에').listeners.click();
+  assert.equal(fixture.sent[fixture.sent.length - 2].url, '/api/later-task/create');
+  assert.equal(fixture.sent[fixture.sent.length - 1].url, '/api/attention/dismiss');
+});
+
+test('BATTENTION: 여덟 줄까지 보이고 나머지는 `외 N개 보기`로 편다', async () => {
+  const many = Array.from({ length: 11 }, (unused, index) => attentionItem({ id: `jira:IO-4839${index}:1000${index}`, key: `IO-4839${index}`, summary: `댓글 ${index}` }));
+  const fixture = attentionClient({ items: many });
+  await fixture.app.run('attentionLoad()');
+  assert.equal(fixture.rows().length, 8);
+  assert.equal(fixture.app.nodes.get('attentionCount').textContent, '11', '개수 칩은 안 보이는 줄까지 센다');
+  const more = nodeFind(fixture.app.nodes.get('attentionList'), 'd-atmore');
+  assert.equal(more.textContent, '외 3개 보기');
+  more.listeners.click();
+  assert.equal(fixture.rows().length, 11);
+  assert.equal(nodeFind(fixture.app.nodes.get('attentionList'), 'd-atmore'), null, '다시 접는 길은 없다');
+});
+
+test('BATTENTION: 헤더 새로고침은 다음 읽기 한 번만 `fresh=1`로 묻는다', async () => {
+  const fixture = attentionClient();
+  await fixture.app.run('attentionLoad()');
+  assert.equal(fixture.sent[0].url, '/api/attention');
+  // 새로고침 버튼이 지나는 길 — 지라 목록과 같은 방식으로 표시만 남긴다.
+  await fixture.app.run('refreshListsFromServer()');
+  assert.equal(fixture.app.run('attentionWantFresh'), true);
+  await fixture.app.run('attentionLoad()');
+  assert.equal(fixture.sent[fixture.sent.length - 1].url, '/api/attention?fresh=1');
+  await fixture.app.run('attentionLoad()');
+  assert.equal(fixture.sent[fixture.sent.length - 1].url, '/api/attention', '한 번만 쓰인다');
+});
+
+test('BATTENTION: 설정 > 상태에는 `반응 필요 · 지라 댓글` 한 줄이 선다', async () => {
+  const fixture = attentionClient();
+  await fixture.app.run('attentionLoad()');
+  const row = fixture.app.run('attentionStatusRow()');
+  assert.equal(nodeFind(row, 'nm').textContent, '반응 필요 · 지라 댓글');
+  assert.equal(nodeFind(row, 'st').textContent, '3분 전 확인');
+  assert.equal(row.dataset.automation, 'attention');
+
+  const broken = attentionClient({ items: [], updatedAt: null, stale: false, error: '지라 댓글을 읽지 못했어요.' });
+  await broken.app.run('attentionLoad()');
+  const failed = broken.app.run('attentionStatusRow()');
+  assert.equal(nodeFind(failed, 'st').textContent, '지라 댓글을 읽지 못했어요.');
+  assert.equal(nodeFind(failed, 'st').className, 'st k-neg');
+  assert.equal(broken.zone().hidden, true, '실패해도 구역은 서지 않는다 — 상태는 설정에서 본다');
+
+  const off = attentionClient({ connected: false, items: [] });
+  await off.app.run('attentionLoad()');
+  assert.equal(off.app.run('attentionStatusRow()'), null, '연결이 없으면 줄 자체가 없다');
 });

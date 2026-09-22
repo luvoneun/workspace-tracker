@@ -1312,6 +1312,8 @@ async function load() {
   // 배포가 코앞인 프로젝트도 같은 카드에 올린다 — 프로젝트를 열어야만 배포일이 보여 놓치기 쉬웠다.
   // 프로젝트 목록은 프로젝트 탭과 같은 함수로 만든다(열린 항목 수도 그 값 그대로다).
   renderReminders(reminders, answered, deployReminders(uiProjectRows(wfProjects(), workflowData.items)));
+  // 반응 필요(오늘 탭 맨 위)는 서버 메모리에서 따로 읽는다 — 목록 응답을 그것 때문에 늦추지 않는다.
+  if (typeof attentionLoad === 'function') attentionLoad();
   syncTaskDetail();
   palSync();
   taskSelectionRefresh();
@@ -1328,6 +1330,9 @@ async function refreshJiraListQuietly() {
 
 async function refreshListsFromServer() {
   await refreshJiraListQuietly();
+  // 반응 필요도 같은 방식으로 지라에 새로 묻는다 — 다음 읽기 한 번만 `fresh=1`이 붙고,
+  // 실패해도(또는 이 주소가 없는 옛 서버여도) 알리지 않는다.
+  if (typeof attentionMarkFresh === 'function') attentionMarkFresh();
   await load();
 }
 

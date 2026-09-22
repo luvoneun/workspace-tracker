@@ -335,6 +335,53 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     return { meetings, links, archive };
   }
 
+  // ---------- 반응 필요에서 치운 줄 (BATTENTION) ----------
+  // 저장하는 것은 `줄 id → 치운 시각` 표 하나뿐이다 — 댓글 글자도, 사람 이름도 저장하지 않는다.
+  // id는 `출처:키:마지막 다른 사람 댓글 id`라 댓글이 더 달리면 값이 달라져 그 줄이 다시 나타난다.
+  // 저장 길은 다른 기능과 같다(idempotent → mutations.run → .workflow.json 원자적 쓰기).
+  const ATTENTION_ID_RE = /^[a-z]+:[A-Z][A-Z0-9]*-\d+:\d+$/;
+  const ATTENTION_MAX = 200;
+  const ATTENTION_DAYS = 30;
+  const dismissedTable = state => ({ ...((state.attention || {}).dismissed || {}) });
+  // 서버가 목록을 거를 때 읽는다. 파일을 못 읽어도 화면이 멈추지 않게 빈 표로 흐른다.
+  function attentionDismissed() {
+    try { return dismissedTable(read()); } catch { return {}; }
+  }
+  function checkAttentionId(body) {
+    const id = body && body.id;
+    if (typeof id !== 'string' || !ATTENTION_ID_RE.test(id)) throw new Error('보낸 값을 확인해 주세요.');
+    return id;
+  }
+  // 치울 때마다 표를 정리한다: 30일이 지난 것과, 200개를 넘으면 오래된 것부터 버린다.
+  // 다만 **지금 목록에 있는 id**는 버리지 않는다 — 버리는 순간 그 줄이 다시 올라온다.
+  function pruneDismissed(table, keep) {
+    const at = value => Date.parse(value) || 0;
+    const oldest = Date.now() - ATTENTION_DAYS * 24 * 60 * 60 * 1000;
+    const droppable = Object.keys(table).filter(id => !keep.has(id));
+    droppable.filter(id => at(table[id]) < oldest).forEach((id) => { delete table[id]; });
+    const left = droppable.filter(id => table[id] !== undefined).sort((a, b) => at(table[a]) - at(table[b]));
+    while (Object.keys(table).length > ATTENTION_MAX && left.length) delete table[left.shift()];
+    return table;
+  }
+  function dismissAttention(body, keep = new Set()) {
+    const id = checkAttentionId(body || {});
+    const state = read();
+    const table = dismissedTable(state);
+    table[id] = new Date().toISOString();
+    state.attention = { ...(state.attention || {}), dismissed: pruneDismissed(table, new Set([...keep, id])) };
+    write(state);
+    return { ok: true, id };
+  }
+  function undismissAttention(body) {
+    const id = checkAttentionId(body || {});
+    const state = read();
+    const table = dismissedTable(state);
+    delete table[id];
+    state.attention = { ...(state.attention || {}), dismissed: table };
+    write(state);
+    return { ok: true, id };
+  }
+
   // ---------- 담은 항목의 종류 바꾸기 ----------
   // 새 항목을 만들지 않는다 — 같은 id로 업무 파일의 줄만 옮긴다(move). 회의 연결(state.items[id].meetingId)과
   // 검토 기록(state.reviewed)은 항목 번호로 이어져 있어서 그대로 남는다.
@@ -372,5 +419,5 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     write(state);
     return { ok: true };
   }
-  return { archive, snapshot, patchItem, saveMeeting, syncProject, capture, review, undoReview, retype, link, checkProjectLink, linkProject, checkProjectArchive, archiveProject, checkJiraRoles, saveJiraRoles, groupList, renameGroup, outcome: id => read().items[id]?.outcome || '' };
+  return { archive, snapshot, patchItem, saveMeeting, syncProject, capture, review, undoReview, retype, link, checkProjectLink, linkProject, checkProjectArchive, archiveProject, checkJiraRoles, saveJiraRoles, groupList, renameGroup, attentionDismissed, dismissAttention, undismissAttention, outcome: id => read().items[id]?.outcome || '' };
 };

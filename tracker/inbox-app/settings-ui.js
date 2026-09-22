@@ -153,6 +153,11 @@ async function renderAutomationStatus() {
     .sort((a, b) => (b.lastKind === 'fail' ? 1 : 0) - (a.lastKind === 'fail' ? 1 : 0))
     .forEach(a => view.appendChild(automationRow(a)));
 
+  // 반응 필요(지라 댓글)는 자동화가 아니라 앱이 직접 읽는 것이라 목록 끝에 한 줄로 붙인다
+  // (연결이 없으면 줄 자체가 없다 — 화면의 구역도 그때는 없다).
+  const attention = typeof attentionStatusRow === 'function' ? attentionStatusRow() : null;
+  if (attention) view.appendChild(attention);
+
   const focused = settingsFocusKey
     ? view.querySelector(`[data-automation="${CSS.escape(String(settingsFocusKey))}"]`)
     : null;
@@ -238,6 +243,10 @@ function automationRow(a) {
 const SETTINGS_FAQ = [
   ['오늘 하기 버거운 업무는 어떻게 미루나요',
     '업무 줄에 마우스를 올리면 <b>내일</b>·<b>나중에</b>가 나와요. 나중에로 보낸 업무는 머리줄의 <b>나중에 할 일</b> 서랍에 모이고, 거기서 <b>오늘로</b> 다시 가져와요. 따로 "계획 모드"로 들어갈 필요가 없어요.'],
+  ['오늘 탭 맨 위의 `반응 필요`는 뭔가요',
+    '제가 답해야 하는 지라 댓글이 모이는 자리예요. 제가 담당·보고·지켜보는 티켓 중 <b>제 마지막 댓글 뒤에 다른 사람이 남긴 댓글</b>이 있으면 한 줄이 떠요(최근 14일). 저를 부른 댓글(@이름)은 맨 위에 <b>@멘션</b>과 함께 서요. <b>지라에 댓글을 달면 다음 갱신에서 저절로 사라지고</b>, 지금 치우고 싶으면 <b>했어요</b>를 눌러요(알림의 되돌리기로 되돌려요 — 댓글이 더 달리면 다시 떠요). <b>할 일로</b>는 그 자리에서 할 일을 하나 만들고 그 줄을 치워요. 답할 게 하나도 없으면 구역 자체가 안 보여요.'],
+  ['`반응 필요`가 안 보여요',
+    '답할 게 없거나 지라에 연결되지 않은 거예요. 지금 잘 읽고 있는지는 이 창의 <b>상태</b> 맨 아래 <b>반응 필요 · 지라 댓글</b> 줄에서 봐요(<b>3분 전 확인</b>처럼 적혀요). 제가 담당·보고·지켜보지 않는 티켓의 댓글과 14일보다 오래된 댓글은 아직 못 봐요. 피그마 댓글은 다음 단계예요.'],
   ['새로 들어온 것(인박스)이 뭔가요',
     '슬랙·회의에서 자동으로 모인 항목이 먼저 쌓이는 곳이에요. AI는 오늘 할지 나중에 할지 정하지 않아요. 프로젝트만 지정하고 <b>오늘</b> 또는 <b>나중에</b>로 보내면 정리가 끝나고 여기서 사라져요.'],
   ['프로젝트는 어떻게 지정하고 어디서 모아 보나요',
