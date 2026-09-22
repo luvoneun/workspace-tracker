@@ -1929,6 +1929,8 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-autoerr { margin: 2px 0 4px; font-size: 13px; color: var(--urgent); }
 /* 앱이 그 목록을 직접 읽고 있을 때의 조용한 한 마디(지라 줄). 경고가 아니라 사실이라 흐린 글자다. */
 .d-autonote { margin: 0 0 4px; font-size: 12.5px; color: var(--dim); }
+/* 슬랙 줄 아래 처리 대장의 0인 항목(등록·중복·건너뜀·시스템)은 한 단계 더 흐리게. */
+.d-autonote .is-zero { opacity: 0.55; }
 .d-auto details > summary {
   display: inline-flex; align-items: center; gap: 4px; height: 28px; list-style: none;
   font-size: 12px; font-weight: 600; color: var(--muted); cursor: pointer;

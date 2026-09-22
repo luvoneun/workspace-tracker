@@ -2731,6 +2731,72 @@ test('meetingNotesPendingToday: 오늘 이미 시작했고 아직 노트가 없�
   }
 });
 
+// ---------- BNOTES A: 안 가져온 미팅 노트 알림 ----------
+test('meetingNotesMissingToday: 끝난 오늘 회의 중 아직 노트가 없는 회의만 센다(end 없으면 start+1시간, 시작 전·진행 중·지난 날짜·이미 가져온 회의는 뺀다), tiro를 안 쓰면 없다', () => {
+  // 자정 근처 35분은 아래 고정 시각(00:00대)이 아직 "끝난" 것이 아닐 수 있어 건너뛴다.
+  if (new Date().getHours() === 0 && new Date().getMinutes() < 35) return;
+  const { app } = meetingNotesClient([]);
+  app.run("meetingNotesApply({ used: true, state: 'idle' })");
+  const today = meetingNotesDay(0);
+  const yesterday = meetingNotesDay(-1);
+  app.run(`workflowData.meetings = [
+    { id: 'm1', date: '${today}', start: '00:00', end: '00:30', title: '끝난 회의(정한 end)' },
+    { id: 'm2', date: '${today}', start: '00:00', title: '끝난 회의(end 없음 → start+1시간)' },
+    { id: 'm3', date: '${today}', start: '00:00', end: '00:30', title: '이미 가져온 회의', tiroNotes: ['https://tiro.ooo/n/1'] },
+    { id: 'm4', date: '${yesterday}', start: '00:00', end: '00:30', title: '지난 날짜 회의' },
+  ]; wfIndexData();`);
+  let missing = () => JSON.parse(app.run('JSON.stringify(meetingNotesMissingToday().map(e => e.id))'));
+  assert.deepEqual(missing(), ['m1', 'm2'], '정한 end든 start+1시간 추정이든 이미 끝났고 노트가 없으면 대상, 노트 있거나 지난 날짜는 아니다');
+
+  if (new Date().getHours() < 23) {
+    app.run(`workflowData.meetings.push(
+      { id: 'm5', date: '${today}', start: '23:59', title: '아직 안 열린 회의' },
+      { id: 'm6', date: '${today}', start: '00:00', end: '23:59', title: '진행 중인 회의(아직 안 끝남)' },
+    ); wfIndexData();`);
+    assert.deepEqual(missing(), ['m1', 'm2'], '시작 전·아직 안 끝난 회의는 더하지 않는다');
+  }
+
+  app.run("meetingNotesApply({ used: false, state: 'off' })");
+  assert.deepEqual(missing(), [], 'tiro를 쓰지 않으면 대상이 없다');
+});
+
+test('안 가져온 미팅 노트 줄: 하나면 첫 줄에 제목까지, 여럿이면 개수 + 둘째 줄에 제목들(길면 가져오는 중 표시가 그 뒤에), 누르면 회의 탭에서 첫 회의를 연다', () => {
+  const { app } = meetingNotesClient([]);
+  app.run("meetingNotesApply({ used: true, state: 'idle' })");
+  app.run('opened = null; openMeetingsTab = id => { opened = id; };');
+  const subOf = row => row.children.find(kid => String(kid.className || '') === 'sub');
+  const titleOf = row => row.children.find(kid => String(kid.className || '') === 'ti');
+
+  // 회의가 하나면 첫 줄에 제목까지 있고 둘째 줄은 없다.
+  app.run("renderReminders([], [], [], [{ id: 'm1', title: '운영툴 주간 싱크' }])");
+  assert.equal(app.nodes.get('reminderSectionCount').textContent, 1, '리마인드 개수 칩에 한 줄로 센다');
+  assert.equal(app.nodes.get('reminderZone').hidden, false);
+  let row = app.nodes.get('reminderList').children[0];
+  assert.equal(titleOf(row).textContent, '미팅 노트를 안 가져왔어요 · 운영툴 주간 싱크');
+  assert.equal(subOf(row), undefined);
+  titleOf(row).listeners.click();
+  assert.equal(app.run('opened'), 'm1', '누르면 회의 탭에서 그 회의를 연다');
+
+  // 여럿이면 첫 줄은 개수, 둘째 줄은 제목들
+  app.run("renderReminders([], [], [], [{ id: 'm1', title: '운영툴 주간 싱크' }, { id: 'm2', title: '결제 리뉴얼 PRD 리뷰' }])");
+  row = app.nodes.get('reminderList').children[0];
+  assert.equal(titleOf(row).textContent, '미팅 노트를 안 가져온 회의 2개');
+  assert.equal(subOf(row).textContent, '운영툴 주간 싱크 · 결제 리뉴얼 PRD 리뷰');
+  titleOf(row).listeners.click();
+  assert.equal(app.run('opened'), 'm1', '가장 이른 회의를 연다');
+
+  // 가져오는 중이면 둘째 줄 끝에 그 표시가 붙는다
+  app.run("meetingNotesApply({ used: true, state: 'running', scope: 'today' })");
+  app.run("renderReminders([], [], [], [{ id: 'm1', title: '운영툴 주간 싱크' }, { id: 'm2', title: '결제 리뉴얼 PRD 리뷰' }])");
+  row = app.nodes.get('reminderList').children[0];
+  assert.equal(subOf(row).textContent, '운영툴 주간 싱크 · 결제 리뉴얼 PRD 리뷰 · 가져오는 중…');
+
+  // 대상이 없으면(다른 리마인드도 없으면) 카드 자체가 빈다
+  app.run("meetingNotesApply({ used: true, state: 'idle' })");
+  app.run('renderReminders([], [], [], [])');
+  assert.equal(app.nodes.get('reminderZone').hidden, true);
+});
+
 test('회의 탭 머리의 세 상태: 가져올 게 있으면 버튼+개수, 다 가져왔으면 상태 글자+`다시 확인`, 오늘 시작한 회의가 없으면 다른 글자', async () => {
   const { app, sent } = meetingNotesClient([{ used: true, state: 'requested', scope: 'today' }]);
   app.run("meetingNotesApply({ used: true, state: 'idle' })");
@@ -3741,6 +3807,82 @@ test('BJLIVE: 설정 > 상태의 지라 한 마디는 앱이 직접 읽고 있�
   assert.equal(note({ connected: true, lastSync: '2026-09-24', stale: true }, read), '');
   assert.equal(note({ live: true, liveAt: '어제쯤' }, read), '');
   assert.equal(note(null, read), '');
+});
+
+// ---------- BNOTES B: 설정 > 상태의 슬랙 처리 대장 ----------
+test('slackLedgerFromTail: 처리 대장 문장을 가장 최근 것 하나만 찾고, 그 실행의 건너뛴 것·⚠️ 줄만(각 상한까지) 모은다', () => {
+  const app = pureClient();
+  const ledger = tail => JSON.parse(app.run(`JSON.stringify(slackLedgerFromTail(${JSON.stringify(tail)}))`));
+
+  assert.equal(ledger([]), null, '줄이 없으면 아무것도 없다');
+  assert.equal(ledger(['그냥 로그 한 줄', '이번에 본 메시지 처리 대장이 아닌 줄']), null, '문장이 없으면(옛 로그) 아무것도 없다');
+
+  const tail = [
+    '───── 2026-09-20 09:00:00 slack-capture 시작',
+    '이번에 본 메시지 3개 = 등록 3 · 링크 중복 0 · 비슷한 일이라 건너뜀 0 · 시스템 0',
+    "🔁 이미 있는 '어제 것'랑 중복돼서 안 가져왔어요",
+    '───── 2026-09-20 09:00:05 slack-capture 종료 (exit 0)',
+    '───── 2026-09-21 09:00:00 slack-capture 시작',
+    '이번에 본 메시지 12개 = 등록 3 · 링크 중복 7 · 비슷한 일이라 건너뜀 0 · 시스템 2',
+    "🔁 이미 있는 '결제 오류 확인 요청'랑 중복돼서 안 가져왔어요",
+    "🔁 이미 있는 '알림센터 로그 정리'랑 중복돼서 안 가져왔어요",
+    "🔁 이미 있는 '가입 문구 검토'랑 중복돼서 안 가져왔어요",
+    "🔁 이미 있는 '네 번째는 상한 밖'랑 중복돼서 안 가져왔어요",
+    '⚠️ 글 없이 파일만 있는 메시지',
+    '⚠️ 원본 스레드를 못 읽어서 공유 당시 텍스트만 사용함',
+    '⚠️ 세 번째는 상한 밖',
+    '───── 2026-09-21 09:00:40 slack-capture 종료 (exit 0)',
+  ];
+  const result = ledger(tail);
+  assert.deepEqual(result.counts, { seen: '12', registered: '3', duplicate: '7', skipped: '0', system: '2' }, '가장 최근 문장만 쓴다');
+  assert.equal(result.mismatch, '');
+  assert.deepEqual(result.skipped, ['결제 오류 확인 요청', '알림센터 로그 정리', '가입 문구 검토'], '건너뛴 것은 최대 3개고, 이전 실행 것(어제 것)은 섞이지 않는다');
+  assert.deepEqual(result.warnings, ['⚠️ 글 없이 파일만 있는 메시지', '⚠️ 원본 스레드를 못 읽어서 공유 당시 텍스트만 사용함'], '⚠️ 줄은 최대 2개');
+
+  const mismatchTail = [
+    '───── 2026-09-21 09:00:00 slack-capture 시작',
+    '합이 안 맞습니다 (5개를 봤는데 3+1+0+0개만 설명됨)',
+    '───── 2026-09-21 09:00:12 slack-capture 종료 (exit 0)',
+  ];
+  const mismatchResult = ledger(mismatchTail);
+  assert.equal(mismatchResult.mismatch, '합이 안 맞습니다 (5개를 봤는데 3+1+0+0개만 설명됨)');
+  assert.equal(mismatchResult.counts, null);
+});
+
+test('slackLedgerNotes: 처리 대장을 설정 > 상태의 슬랙 줄 아래 조용한 줄로 그리고 0인 항목은 흐리게, 합이 안 맞으면 주의색, 문장이 없으면 아무것도 안 그린다', () => {
+  const app = pureClient();
+  app.context.document.createTextNode = text => ({ textContent: String(text) });
+  // 가짜 DOM에는 textContent 자동 합산이 없다 — 자식의 textContent를 이어 붙여 본다(nodeText와 같은 생각).
+  const notes = tail => JSON.parse(app.run(`(() => {
+    const flat = node => (node.children && node.children.length
+      ? node.children.map(kid => kid.textContent || '').join('')
+      : String(node.textContent || ''));
+    return JSON.stringify(slackLedgerNotes(${JSON.stringify(tail)}).map(node => ({
+      className: node.className,
+      text: flat(node),
+      zero: (node.children || []).filter(kid => kid.className === 'is-zero').map(kid => kid.textContent),
+    })));
+  })()`));
+
+  assert.deepEqual(notes([]), [], '문장이 없으면 아무것도 안 그린다');
+
+  const tail = [
+    '이번에 본 메시지 12개 = 등록 3 · 링크 중복 0 · 비슷한 일이라 건너뜀 0 · 시스템 2',
+    "🔁 이미 있는 '결제 오류 확인 요청'랑 중복돼서 안 가져왔어요",
+    '⚠️ 글 없이 파일만 있는 메시지',
+  ];
+  const rows = notes(tail);
+  assert.equal(rows[0].className, 'd-autonote');
+  assert.equal(rows[0].text, '최근 수집 · 본 메시지 12개 → 등록 3 · 중복 0 · 건너뜀 0 · 시스템 2');
+  assert.deepEqual(rows[0].zero, ['중복 0', '건너뜀 0'], '0인 항목만 흐리게(is-zero)');
+  assert.equal(rows[1].className, 'd-autonote');
+  assert.equal(rows[1].text, "건너뛴 것: 결제 오류 확인 요청");
+  assert.equal(rows[2].text, '⚠️ 글 없이 파일만 있는 메시지');
+
+  const mismatchRows = notes(['합이 안 맞습니다 (5개를 봤는데 3+1+0+0개만 설명됨)']);
+  assert.equal(mismatchRows.length, 1);
+  assert.equal(mismatchRows[0].className, 'd-autonote k-warn', '합이 안 맞으면 주의색 글자다');
+  assert.equal(mismatchRows[0].text, '합이 안 맞습니다 (5개를 봤는데 3+1+0+0개만 설명됨)');
 });
 
 // ---------- BARCHIVE 1: 연결 입력칸의 `완료한 티켓도 보기` ----------

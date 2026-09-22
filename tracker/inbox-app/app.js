@@ -1981,6 +1981,81 @@ function jiraLiveNote(sync, at = Date.now()) {
   const when = minutes < 1 ? '방금' : minutes < 60 ? `${minutes}분 전` : `${Math.round(minutes / 60)}시간 전`;
   return `목록은 앱이 직접 읽어요 · ${when}`;
 }
+// 설정 > 상태의 슬랙 줄 아래 처리 대장 한 줄(BNOTES). 슬랙 수집 지침이 실행마다 로그 맨 앞에 남기는
+// `이번에 본 메시지 N개 = 등록 a · 링크 중복 b · 비슷한 일이라 건너뜀 c · 시스템 d`(또는 합이 안 맞을
+// 때의 `합이 안 맞습니다 …`) 문장을 tail(최근 60줄)에서 가장 최근 것 하나만 찾는다. 그 실행(같은
+// 시작~종료 블록) 안의 `🔁 이미 있는 '…'랑 중복돼서 안 가져왔어요`(건너뛴 것, 최대 3개)와 `⚠️`로
+// 시작하는 줄(원문 못 읽음·파일만 있는 메시지, 최대 2개)도 함께 뽑는다. 문장이 없으면(옛 로그·처리
+// 대장이 없던 실행) null을 돌려주고, 그 자리는 아무것도 그리지 않는다.
+const SLACK_LEDGER_RE = /^이번에 본 메시지 (\d+)개 = 등록 (\d+) · 링크 중복 (\d+) · 비슷한 일이라 건너뜀 (\d+) · 시스템 (\d+)$/;
+const SLACK_MISMATCH_RE = /^합이 안 맞습니다.*$/;
+const SLACK_SKIP_RE = /^🔁\s*이미 있는\s*'(.+)'\s*랑 중복돼서 안 가져왔어요/;
+const SLACK_WARN_RE = /^⚠️/;
+const SLACK_BLOCK_START_RE = /^─+ \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \S+ 시작$/;
+const SLACK_BLOCK_END_RE = /^─+ \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \S+ 종료 \(exit -?\d+\)$/;
+
+function slackLedgerFromTail(tail) {
+  const lines = (Array.isArray(tail) ? tail : []).map(line => String(line).trim()).filter(Boolean);
+  let at = -1;
+  lines.forEach((line, index) => { if (SLACK_LEDGER_RE.test(line) || SLACK_MISMATCH_RE.test(line)) at = index; });
+  if (at === -1) return null;
+  const summary = lines[at];
+  // 실행 블록 경계 — run-task.sh가 남기는 시작/종료 줄 사이만 "그 실행"으로 본다.
+  let start = 0;
+  for (let i = at - 1; i >= 0; i -= 1) { if (SLACK_BLOCK_START_RE.test(lines[i])) { start = i + 1; break; } }
+  let end = lines.length;
+  for (let i = at + 1; i < lines.length; i += 1) {
+    if (SLACK_BLOCK_START_RE.test(lines[i]) || SLACK_BLOCK_END_RE.test(lines[i])) { end = i; break; }
+  }
+  const block = lines.slice(start, end);
+  const match = SLACK_LEDGER_RE.exec(summary);
+  return {
+    mismatch: SLACK_MISMATCH_RE.test(summary) ? summary : '',
+    counts: match ? { seen: match[1], registered: match[2], duplicate: match[3], skipped: match[4], system: match[5] } : null,
+    skipped: block.map(line => SLACK_SKIP_RE.exec(line)).filter(Boolean).map(m => m[1]).slice(0, 3),
+    warnings: block.filter(line => SLACK_WARN_RE.test(line)).slice(0, 2),
+  };
+}
+
+// 위 결과를 설정 > 상태의 슬랙 줄 아래 조용한 줄(들)로 만든다 — 합이 안 맞으면 그 문장을 주의색으로
+// 그대로, 아니면 넷의 셈을 한 줄로(0인 항목은 흐리게). 건너뛴 것·원문 못 읽은 줄은 그 아래 따로 한 줄씩.
+function slackLedgerNotes(tail) {
+  const ledger = slackLedgerFromTail(tail);
+  if (!ledger) return [];
+  const nodes = [];
+  const summary = document.createElement('div');
+  summary.className = 'd-autonote' + (ledger.mismatch ? ' k-warn' : '');
+  if (ledger.mismatch) {
+    summary.textContent = ledger.mismatch;
+  } else if (ledger.counts) {
+    summary.appendChild(document.createTextNode(`최근 수집 · 본 메시지 ${ledger.counts.seen}개 → `));
+    [['등록', ledger.counts.registered], ['중복', ledger.counts.duplicate], ['건너뜀', ledger.counts.skipped], ['시스템', ledger.counts.system]]
+      .forEach(([label, value], index) => {
+        if (index) summary.appendChild(document.createTextNode(' · '));
+        const part = document.createElement('span');
+        if (Number(value) === 0) part.className = 'is-zero';
+        part.textContent = `${label} ${value}`;
+        summary.appendChild(part);
+      });
+  } else {
+    return [];
+  }
+  nodes.push(summary);
+  if (ledger.skipped.length) {
+    const skip = document.createElement('div');
+    skip.className = 'd-autonote';
+    skip.textContent = `건너뛴 것: ${ledger.skipped.join(', ')}`;
+    nodes.push(skip);
+  }
+  ledger.warnings.forEach((line) => {
+    const warn = document.createElement('div');
+    warn.className = 'd-autonote';
+    warn.textContent = line;
+    nodes.push(warn);
+  });
+  return nodes;
+}
+
 // 지라 직접 읽기 설정이 있는지와 그 주소 — 목록과 함께 온다(`jiraSync`). 토큰·이메일은 오지 않는다.
 const jiraLinkUsable = () => !!(latestData && latestData.jiraSync && latestData.jiraSync.connected);
 const jiraLinkSite = () => (latestData && latestData.jiraSync && latestData.jiraSync.siteUrl) || '';
@@ -3030,7 +3105,7 @@ async function load() {
     .map(item => itemsById.get(item.id) || item);
   // 배포가 코앞인 프로젝트도 같은 카드에 올린다 — 프로젝트를 열어야만 배포일이 보여 놓치기 쉬웠다.
   // 프로젝트 목록은 프로젝트 탭과 같은 함수로 만든다(열린 항목 수도 그 값 그대로다).
-  renderReminders(reminders, answered, deployReminders(uiProjectRows(wfProjects(), workflowData.items)));
+  renderReminders(reminders, answered, deployReminders(uiProjectRows(wfProjects(), workflowData.items)), meetingNotesMissingToday());
   syncTaskDetail();
   palSync();
   taskSelectionRefresh();
@@ -3410,15 +3485,34 @@ function deployReminderRow(entry) {
   return row;
 }
 
-// 레일의 리마인드 — 배포가 코앞인 프로젝트, 기다리던 답변이 온 업무, 기한이 코앞인 높은 우선순위
-// 업무가 함께 온다(고르는 곳은 load()). 차례는 급한 순이다: 배포 임박(되돌릴 수 없는 바깥 일정이라
-// 가장 앞) → 답변 왔어요 → 기한. 제목은 2줄까지 허용한다.
+// 안 가져온 미팅 노트 한 줄(BNOTES) — 끝난 오늘 회의 중 아직 노트가 없는 회의를 모아 알린다.
+// 회의가 하나면 첫 줄에 그 제목까지 적고 둘째 줄은 두지 않는다. 여럿이면 첫 줄은 개수, 둘째 줄은
+// 조용한 글자로 제목들(길면 말줄임). 가져오는 중이면 둘째 줄 끝에 그 표시를 덧붙인다.
+// 누르면 회의 탭에서 그중 가장 이른 회의를 연다.
+function meetingNotesReminderRow(missing) {
+  const count = missing.length;
+  const titles = missing.map(event => event.title).join(' · ');
+  const text = count === 1
+    ? `미팅 노트를 안 가져왔어요 · ${missing[0].title}`
+    : `미팅 노트를 안 가져온 회의 ${count}개`;
+  let sub = count === 1 ? '' : titles;
+  if (meetingNotesBusy()) sub = sub ? `${sub} · 가져오는 중…` : '가져오는 중…';
+  return uiRailRow({
+    text,
+    sub: sub || undefined,
+    onOpen: () => openMeetingsTab(missing[0].id),
+  });
+}
+
+// 레일의 리마인드 — 배포가 코앞인 프로젝트, 안 가져온 미팅 노트, 기다리던 답변이 온 업무, 기한이
+// 코앞인 높은 우선순위 업무가 함께 온다(고르는 곳은 load()). 차례는 급한 순이다: 배포 임박(되돌릴
+// 수 없는 바깥 일정이라 가장 앞) → 미팅 노트 → 답변 왔어요 → 기한. 제목은 2줄까지 허용한다.
 const DEPLOY_REMINDER_MAX = 4;
-function renderReminders(reminders, answered = [], deploys = []) {
+function renderReminders(reminders, answered = [], deploys = [], missingNotes = []) {
   const zone = document.getElementById('reminderZone');
   const list = document.getElementById('reminderList');
 
-  const total = reminders.length + answered.length + deploys.length;
+  const total = reminders.length + answered.length + deploys.length + (missingNotes.length ? 1 : 0);
   document.getElementById('reminderSectionCount').textContent = total;
   zone.hidden = total === 0;
 
@@ -3440,6 +3534,8 @@ function renderReminders(reminders, answered = [], deploys = []) {
     more.textContent = `외 ${deploys.length - DEPLOY_REMINDER_MAX}개`;
     list.appendChild(more);
   }
+  // 그다음이 안 가져온 미팅 노트 — 회의를 열어야만 노트를 못 가져온 걸 알 수 있어 놓치기 쉬웠다.
+  if (missingNotes.length) list.appendChild(meetingNotesReminderRow(missingNotes));
   // 기다리던 답변이 온 업무가 그다음이다 — 지금 바로 이어서 할 수 있는 일이다.
   answered.forEach(item => list.appendChild(row(item, [{ text: '답변 왔어요', tone: 'success' }])));
   reminders.forEach(item => list.appendChild(row(item, [uiDueText(item.due)])));
@@ -5193,6 +5289,28 @@ function meetingNotesStartedToday() {
   const today = todayStr();
   const now = nowHHMM();
   return meetings.some(event => event && event.date === today && event.start && event.start <= now);
+}
+
+// "끝난 회의"를 가릴 때 쓰는 종료 시각 — end가 없으면 start + 1시간으로 본다(BNOTES가 허용한 유일한 추측).
+function meetingNotesEffectiveEnd(event) {
+  if (event && event.end) return event.end;
+  if (!event || !/^\d{2}:\d{2}$/.test(event.start || '')) return null;
+  const [h, m] = event.start.split(':').map(Number);
+  // 자정을 넘어가면 감지 않는다 — 23:xx에 시작한 회의를 다음 날 00:xx로 접어 "벌써 끝났다"로 잘못 보면 안 된다.
+  const mins = Math.min(23 * 60 + 59, h * 60 + m + 60);
+  return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+}
+// 리마인드 카드가 알릴 대상 — 오늘 날짜이고 이미 끝났고(위 규칙) 아직 노트가 없는 회의만.
+// 지난 날짜 회의는 대상이 아니다(어제 것까지 매일 알리면 시끄럽다). 이른 시각 순으로 준다.
+function meetingNotesMissingToday() {
+  if (meetingNotesState.used === false) return [];
+  const meetings = (typeof workflowData === 'object' && workflowData ? workflowData.meetings : null) || [];
+  const today = todayStr();
+  const now = nowHHMM();
+  return meetings
+    .filter(event => event && event.date === today && !meetingNotesHasNote(event))
+    .filter(event => { const end = meetingNotesEffectiveEnd(event); return !!end && end <= now; })
+    .sort((a, b) => (a.start || '').localeCompare(b.start || ''));
 }
 
 function meetingNotesApplyButton(entry) {
@@ -7798,6 +7916,8 @@ function automationRow(a) {
     line.textContent = note;
     row.appendChild(line);
   }
+  // 슬랙 줄 아래 최근 수집의 처리 대장(BNOTES) — 로그를 열지 않고도 뭐가 왜 안 들어왔는지 본다.
+  if (a.key === 'slack') slackLedgerNotes(a.tail).forEach(line => row.appendChild(line));
 
   if (failingNow) {
     const error = document.createElement('div');
