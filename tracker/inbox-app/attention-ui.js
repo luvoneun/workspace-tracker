@@ -153,16 +153,22 @@ function attentionRow(item) {
   card.className = 'd-atrow';
   card.setAttribute('aria-label', `반응 필요 — ${attentionLabel(item)}`);
 
-  const top = document.createElement('div');
-  top.className = 'tl';
+  // 앞머리(출처 이름표 + 색 점)는 제 칸(`ld`)에 따로 선다 — 그래야 둘째 줄 미리보기가 제목 바로
+  // 아래에서 시작한다(앞머리 아래가 아니라). 자리는 ui.css의 grid-template-areas가 정한다.
+  const lead = document.createElement('div');
+  lead.className = 'ld';
   const sourceName = attentionSourceName(item);
   if (sourceName) {
     const source = document.createElement('span');
     source.className = 'sc';
     source.textContent = sourceName;
-    top.appendChild(source);
+    lead.appendChild(source);
   }
-  top.appendChild(uiProjectDot(`jira:${item.key}`));
+  lead.appendChild(uiProjectDot(`jira:${item.key}`));
+  card.appendChild(lead);
+
+  const top = document.createElement('div');
+  top.className = 'tl';
   const title = document.createElement('span');
   title.className = 'ti';
   title.title = `${item.key} · ${attentionLabel(item)}`;
