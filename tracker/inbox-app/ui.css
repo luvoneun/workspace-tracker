@@ -1726,9 +1726,10 @@ body.batch-open .d-toast { bottom: 76px; }
 
 /* 지라 티켓을 손으로 거는 줄 — 띠 카드가 서는 그 자리에서 입력 → 미리 보기로만 넓어진다
    (새 창을 띄우지 않는다). 판은 확인 줄과 같은 `--sel`이고 새 색은 쓰지 않는다 */
+/* 파랑은 선택·행동에만 쓴다(DESIGN.md) — 이 박스는 커서 위치가 아니라 정보 상자라 중립색으로 */
 .d-jlink {
   display: grid; gap: 8px; margin: 12px 0 4px; padding: 12px 14px;
-  border-radius: var(--r-sm); background: var(--sel); font-size: 13px; color: var(--muted);
+  border-radius: var(--r-sm); background: var(--neutral-bg); font-size: 13px; color: var(--muted);
 }
 .d-jlink .row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .d-jlink .in {
@@ -1797,7 +1798,11 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-plist .d-rhd .d-pnewgo:hover { background: var(--hover); color: var(--accent-text); }
 .d-plist .d-rhd .d-pnewgo:active { transform: scale(0.98); }
 
-.d-pnew { display: grid; gap: 14px; margin-top: 16px; }
+/* 결과 카드(.d-pnewres)와 같은 흰 판 — 채우는 동안도 결과 화면과 같은 카드 위에 있어야 한다 */
+.d-pnew {
+  display: grid; gap: 14px; margin-top: 16px; padding: 16px; border-radius: var(--r);
+  background: var(--surface); border: 1px solid var(--surface-line); box-shadow: var(--soft);
+}
 /* 라벨은 왼쪽 고정 폭, 값은 나머지 — 좁아지면 아래에서 한 줄로 쌓인다 */
 /* 직계 자식(>)으로만 건다 — 이 폼 안에 빌려 쓰는 부품(`.d-jlink`)도 안에 `.row`·`.in`을 쓰는데, 조상 셀렉터로 걸면
    같은 특이도의 뒷 규칙이 그 부품의 flex를 grid로 덮어써 입력칸이 92px로 찌그러졌다(critique P1). */
@@ -1810,7 +1815,7 @@ body.batch-open .d-toast { bottom: 76px; }
 /* 고른 에픽 한 줄 — 요약이 먼저, 상태는 뒤, 키는 조용한 글자로만(BKEY) */
 .d-pnewepic {
   display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px;
-  padding: 8px 12px; border-radius: var(--r-sm); background: var(--sel); font-size: 13px; color: var(--muted);
+  padding: 8px 12px; border-radius: var(--r-sm); background: var(--neutral-bg); font-size: 13px; color: var(--muted);
 }
 .d-pnewepic .sm { font-weight: 600; color: var(--text); }
 .d-pnewepic .ky { font-size: 12px; color: var(--dim); }
