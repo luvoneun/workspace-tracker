@@ -471,11 +471,20 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   border: 0; border-radius: var(--r-xs); background: none; color: var(--text);
   font-family: inherit; font-size: 14px; font-weight: 500; text-align: left; cursor: pointer;
 }
+/* 지라 상태 고르개의 선택지 글씨 — 카드 값·하위 목록과 같은 범주 색(BJCOLOR). 회색(할 일)은
+   hover·키보드 초점에서 --text로 진해져 "비활성"으로 보이지 않는다 */
+.d-mitem.k-dim { color: var(--dim); }
+.d-mitem.k-acc { color: var(--accent-text); }
+.d-mitem.k-pos { color: var(--success); }
 .d-mitem:hover { background: var(--hover); }
+.d-mitem.k-dim:hover, .d-mitem.k-dim:focus-visible { color: var(--text); }
 .d-mitem:disabled { color: var(--muted); cursor: default; }
 .d-mitem:disabled:hover { background: none; }
 .d-mitem.dng { color: var(--muted); }
 .d-mitem.dng:hover, .d-mitem.dng:focus-visible { background: var(--hover); color: var(--urgent); }
+/* 비활성 항목(추가 입력이 필요한 전환 등)은 범주 색과 겹쳐도 비활성 표현이 이긴다 */
+.d-mitem:disabled.k-dim, .d-mitem:disabled.k-acc, .d-mitem:disabled.k-pos,
+.d-mitem:disabled.k-dim:hover, .d-mitem:disabled.k-dim:focus-visible { color: var(--muted); }
 .d-msep { display: block; height: 1px; background: var(--hair); margin: 4px 2px; }
 .d-mfield { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 2px 10px; flex-wrap: wrap; }
 .d-mfield > .ml { font-size: 12.5px; color: var(--muted); flex: none; min-width: 52px; white-space: nowrap; }
@@ -1476,8 +1485,9 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-jira .lb { font-size: 12px; font-weight: 600; color: var(--dim); }
 .d-jira .v { min-height: 22px; font-size: 14px; font-weight: 600; color: var(--text); }
 .d-jira .v.is-none { color: var(--dim); font-weight: 500; }
-/* 값에 붙는 색은 넷뿐이다 — 기본(진행) · 회색(할 일) · 성공(완료) · 주의/급함(배포일). 배지로 세우지 않는다 */
+/* 값에 붙는 색은 다섯뿐이다 — 파랑(진행) · 회색(할 일) · 성공(완료) · 주의/급함(배포일). 배지로 세우지 않는다 */
 .d-jira .v.k-dim { color: var(--dim); }
+.d-jira .v.k-acc { color: var(--accent-text); }
 .d-jira .v.k-pos { color: var(--success); }
 .d-jira .v.k-warn { color: var(--warn); }
 .d-jira .v.k-neg { color: var(--urgent); }
@@ -1519,6 +1529,7 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-jkids.has-ver .d-jkid { grid-template-columns: 74px minmax(0, 1fr) 96px 72px; }
 .d-jkid .st { font-size: 12.5px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .d-jkid .st.k-dim { color: var(--dim); }
+.d-jkid .st.k-acc { color: var(--accent-text); }
 .d-jkid .st.k-pos { color: var(--success); }
 .d-jkid .sm {
   min-width: 0; display: block; line-height: 28px; color: var(--text); text-decoration: none;

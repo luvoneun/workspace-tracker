@@ -1186,13 +1186,13 @@ test('GET /api/jira/issue는 파일을 쓰지 않고, 설정이 없으면 연결
 // `쓰기 요청이 나갔는가`는 기록된 method로 판정한다(GET만 나갔으면 아무것도 쓰지 않은 것이다).
 const jiraTransitionsBody = {
   transitions: [
-    { id: '11', name: '작업 시작', to: { name: '진행 중' } },
+    { id: '11', name: '작업 시작', to: { name: '진행 중', statusCategory: { key: 'indeterminate' } } },
     // 같은 `to.name`이 둘이다 — 이름만으로는 구분되지 않으므로 전환 이름이 괄호로 붙어야 한다.
-    { id: '21', name: '완료 처리', to: { name: '완료' } },
-    { id: '31', name: '배포 대기로', to: { name: '완료' } },
+    { id: '21', name: '완료 처리', to: { name: '완료', statusCategory: { key: 'done' } } },
+    { id: '31', name: '배포 대기로', to: { name: '완료', statusCategory: { key: 'indeterminate' } } },
     // 기본값 없는 필수 입력이 있는 전환 — 선택지에는 두되 앱에서 쓰지 않는다.
-    { id: '41', name: '보류', to: { name: '보류' }, fields: { reason: { required: true, hasDefaultValue: false } } },
-    // 필수지만 기본값이 있는 칸은 입력 화면이 필요 없다.
+    { id: '41', name: '보류', to: { name: '보류', statusCategory: { key: 'new' } }, fields: { reason: { required: true, hasDefaultValue: false } } },
+    // statusCategory가 없으면(모르는 모양) 범주는 `doing`으로 흐른다. 필수지만 기본값이 있는 칸은 입력 화면이 필요 없다.
     { id: '51', name: '취소', to: { name: '취소됨' }, fields: { resolution: { required: true, hasDefaultValue: true } } },
   ],
 };
@@ -1223,12 +1223,13 @@ test('지라 고르개의 선택지는 허용된 전환과 미배포 버전뿐�
   assert.equal(payload.ok, true);
   assert.equal(payload.connected, true);
   assert.deepEqual(payload.transitions, [
-    { id: '11', name: '진행 중', requiresInput: false },
+    { id: '11', name: '진행 중', category: 'doing', requiresInput: false },
     // 같은 이름이 둘일 때만 전환 이름이 괄호로 붙는다.
-    { id: '21', name: '완료 (완료 처리)', requiresInput: false },
-    { id: '31', name: '완료 (배포 대기로)', requiresInput: false },
-    { id: '41', name: '보류', requiresInput: true },
-    { id: '51', name: '취소됨', requiresInput: false },
+    { id: '21', name: '완료 (완료 처리)', category: 'done', requiresInput: false },
+    { id: '31', name: '완료 (배포 대기로)', category: 'doing', requiresInput: false },
+    { id: '41', name: '보류', category: 'todo', requiresInput: true },
+    // statusCategory를 안 준 전환은 `doing`으로 흐른다(BJCOLOR — 진행 범주와 같은 기본값).
+    { id: '51', name: '취소됨', category: 'doing', requiresInput: false },
   ]);
   // 배포됐거나 보관된 버전은 고를 수 없다.
   assert.deepEqual(payload.versions, [

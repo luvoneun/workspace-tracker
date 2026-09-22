@@ -102,6 +102,7 @@ function shapeTransitions(body) {
       id: idOf(entry && entry.id),
       toName: text(entry && entry.to && entry.to.name),
       ownName: text(entry && entry.name),
+      category: CATEGORY[entry && entry.to && entry.to.statusCategory && entry.to.statusCategory.key] || 'doing',
       requiresInput: fields.some(field => field && field.required === true && field.hasDefaultValue !== true),
     };
   }).filter(entry => entry.id && JIRA_ID_RE.test(entry.id));
@@ -112,6 +113,7 @@ function shapeTransitions(body) {
     name: entry.toName
       ? (seen.get(entry.toName) > 1 && entry.ownName ? `${entry.toName} (${entry.ownName})` : entry.toName)
       : entry.ownName,
+    category: entry.category,
     requiresInput: entry.requiresInput,
   }));
 }

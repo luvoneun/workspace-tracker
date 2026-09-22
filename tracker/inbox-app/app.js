@@ -183,7 +183,7 @@ function uiMenu(anchor, sections) {
       }
       const item = document.createElement('button');
       item.type = 'button';
-      item.className = 'd-mitem' + (entry.danger ? ' dng' : '');
+      item.className = 'd-mitem' + (entry.danger ? ' dng' : '') + (entry.tone ? ` ${entry.tone}` : '');
       item.setAttribute('role', 'menuitem');
       item.textContent = entry.label;
       if (entry.disabled) item.disabled = true;
@@ -1172,9 +1172,9 @@ function jiraKeyOf(projectKey) {
   return '';
 }
 
-// 상태는 범주로만 색이 붙는다(배지가 아니다): 진행=기본 · 완료=성공색 글자 · 할 일=회색.
+// 상태는 범주로만 색이 붙는다(배지가 아니다): 진행=파란 글자 · 완료=성공색 글자 · 할 일=회색.
 function jiraStatusTone(category) {
-  return category === 'done' ? 'k-pos' : category === 'todo' ? 'k-dim' : '';
+  return category === 'done' ? 'k-pos' : category === 'todo' ? 'k-dim' : 'k-acc';
 }
 
 // 배포 버전 한 칸의 말. 이름은 그대로 보여 주고, 날짜는 뒤에 조용히 붙인다.
@@ -1455,6 +1455,7 @@ async function jiraStatusSections(issue) {
   const before = issue.status?.name || '';
   const items = transitions.map(entry => ({
     label: entry.name,
+    tone: jiraStatusTone(entry.category),
     onClick: () => {
       if (entry.requiresInput) {
         showNotice('이 전환은 지라에서 직접 해 주세요', true, null, { label: '지라에서 열기', onClick: () => jiraOpen(issue.url) });

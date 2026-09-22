@@ -2936,10 +2936,11 @@ test('배포 버전의 말은 배포일이 3일 안이면 주의색, 지났는�
   assert.match(shipped.note, /배포함$/);
   assert.equal(text([{ name: 'v2.70.0', releaseDate: null, released: false }]).note, '', '날짜가 없으면 이름만 적는다');
   assert.equal(text([{ name: 'v2.70.0', releaseDate: null }, { name: 'v2.71.0' }]).name, 'v2.70.0 외 1개');
-  // 상태 색은 범주로만 붙는다(배지가 아니다).
+  // 상태 색은 범주로만 붙는다(배지가 아니다). 진행은 파란 글자다(BJCOLOR).
   assert.equal(app.run("jiraStatusTone('done')"), 'k-pos');
   assert.equal(app.run("jiraStatusTone('todo')"), 'k-dim');
-  assert.equal(app.run("jiraStatusTone('doing')"), '');
+  assert.equal(app.run("jiraStatusTone('doing')"), 'k-acc');
+  assert.equal(app.run("jiraStatusTone(undefined)"), 'k-acc', '모르는 범주도 진행과 같은 색으로 흐른다');
   // 하위 티켓이 하나도 없으면 진행률 줄을 아예 그리지 않는다(`0`은 찍지 않는다).
   assert.equal(app.run('jiraChildrenLabel(null)'), null);
   assert.equal(app.run('jiraChildrenLabel({ total: 0, done: 0 })'), null);
@@ -2958,6 +2959,7 @@ test('띠 카드는 값이 다 있으면 지라 상태·배포 버전·기한을
   assert.match(text, /배포 버전 v2\.70\.0/);
   assert.match(text, /기한 10월 2일/);
   assert.match(text, /하위 티켓 .*12개 중 7개 완료/);
+  assert.equal(nodeFind(card, 'v').className, 'v k-acc', '진행 범주는 파란 글자다(BJCOLOR)');
   // 지라에서 온 글자는 전부 textContent로만 들어간다(새 innerHTML을 쓰지 않는다).
   assert.doesNotMatch(nodeHtml(card), /게시글 작성하기|진행 중|v2\.70\.0/);
   // 키는 `지라에서 열기` 링크의 title에만 보인다(BKEY 결정) — 카드 글자에는 없다.
@@ -3124,7 +3126,7 @@ test('펼치면 티켓마다 지라 상태·요약·담당자·배포 버전이 
   assert.equal(rows[0].className, 'd-jkid');
   // 한 줄 = 상태 · 요약 · 담당자 · 배포 버전. 상태는 범주로만 색이다(배지가 아니다).
   assert.equal(nodeText(rows[0]), '진행 중 게임 목록 불러오기 루본 v2.70.0');
-  assert.equal(nodeFind(rows[0], 'st').className, 'st', '진행은 기본 색이다');
+  assert.equal(nodeFind(rows[0], 'st').className, 'st k-acc', '진행은 파란 글자다');
   assert.equal(nodeFind(rows[2], 'st').className, 'st k-dim', '할 일은 회색이다');
   assert.equal(nodeFind(rows[4], 'st').className, 'st k-pos', '완료는 성공색 글자다');
   const none = nodeFind(rows[1], 'wh');
@@ -3276,9 +3278,9 @@ const jiraOptionsPayload = {
   ok: true,
   connected: true,
   transitions: [
-    { id: '11', name: '진행 중', requiresInput: false },
-    { id: '21', name: '완료', requiresInput: false },
-    { id: '41', name: '보류', requiresInput: true },
+    { id: '11', name: '진행 중', category: 'doing', requiresInput: false },
+    { id: '21', name: '완료', category: 'done', requiresInput: false },
+    { id: '41', name: '보류', category: 'todo', requiresInput: true },
   ],
   // 지금 티켓에 걸린 버전(id `1`)과 아직 배포되지 않은 다른 버전 하나.
   versions: [
@@ -3317,6 +3319,8 @@ test('지라 값을 골라도 확인 줄을 거치기 전에는 아무것도 보
   const sections = await fixture.app.run('jiraStatusSections(jiraCard.issue)');
   // 선택지는 지라가 허용한 전환뿐이고, 읽는 데 GET 하나만 나갔다.
   assert.deepEqual(plain(jiraMenuItems(sections).map(entry => entry.label)), ['진행 중', '완료', '보류']);
+  // 선택지 글씨도 카드 값과 같은 범주 색이다(BJCOLOR) — 진행 파랑 · 완료 초록 · 할 일 회색.
+  assert.deepEqual(plain(jiraMenuItems(sections).map(entry => entry.tone)), ['k-acc', 'k-pos', 'k-dim']);
   assert.equal(fixture.calls.length, 1);
   assert.match(fixture.calls[0].url, /\/api\/jira\/options\?key=IO-48394$/);
   assert.equal(fixture.calls[0].method, 'GET');
@@ -3435,6 +3439,21 @@ test('추가 입력이 필요한 전환은 쓰지 않고 지라에서 직접 하
   const region = fixture.app.nodes.get('liveRegion');
   assert.equal(region.textContent, '이 전환은 지라에서 직접 해 주세요');
   assert.ok(region.children.some(kid => kid.textContent === '지라에서 열기'));
+});
+
+// 비활성 항목(고를 수 있는 전환이 없을 때의 안내 문구)에는 범주 색을 붙이지 않는다 —
+// 색 규칙과 겹치면 비활성 표현이 이긴다는 규칙을 데이터 쪽에서 지킨다(BJCOLOR).
+test('고를 수 있는 지라 상태가 없으면 안내 문구만 비활성으로 서고, 범주 색이 붙지 않는다', async () => {
+  const fixture = jiraChangeClient();
+  fixture.app.context.fetch = async (url) => (String(url).includes('/api/jira/options')
+    ? new Response(JSON.stringify({ ok: true, connected: true, transitions: [], versions: [] }))
+    : new Response(JSON.stringify({ ok: true, connected: true, issue: jiraIssue() })));
+  const sections = await fixture.app.run('jiraStatusSections(jiraCard.issue)');
+  const items = sections.flat();
+  assert.equal(items.length, 1);
+  assert.equal(items[0].label, '지라에서 바꿀 수 있는 상태가 없어요');
+  assert.equal(items[0].disabled, true);
+  assert.equal(items[0].tone, undefined);
 });
 
 test('배포 버전 메뉴는 옮기기와 버전 고치기 둘이고, 여러 버전이 걸린 티켓은 안내만 한다', async () => {
