@@ -1263,6 +1263,28 @@ const MIME = {
   '.woff2': 'font/woff2',
 };
 
+// ---------- 브라우저로 나가는 화면 파일 ----------
+// 화면 코드가 여러 파일로 나뉘어 있어서 이름을 하나하나 적지 않는다 — `PUBLIC_DIR`의 `*.js`/`*.css`
+// 가운데 아래 차단 규칙에 걸리지 않는 것만 나간다(파일을 더해도 서버를 고칠 필요가 없다).
+// 서버 파일·테스트·픽스처·저장소 코드는 **절대 나가면 안 되므로** 여기서 못 박는다(server.test.js가 고정).
+// 인증 예외(publicAsset)와는 다른 이야기다 — 여기 있는 파일도 원격에서는 인증을 거친다.
+const CLIENT_BLOCKED = new Set([
+  'server.js', 'safe-storage.js', 'jira-client.js', 'jira-live.js', 'report-drafts.js',
+  'task-batch.js', 'slack-history.js', 'import-record.js', 'browser-fixture.js',
+]);
+function isClientFile(name) {
+  if (!/^[A-Za-z0-9][\w.-]*\.(js|css)$/.test(name)) return false;   // 이름 한 칸짜리(하위 경로 없음)만
+  if (/\.test\.js$/.test(name)) return false;                        // *.test.js
+  if (/-store\.js$/.test(name)) return false;                        // *-store.js
+  if (/-fixture\.js$/.test(name)) return false;                      // *-fixture.js
+  return !CLIENT_BLOCKED.has(name);
+}
+// 브라우저가 스스로 새로고침할지 판단하는 값(appVersion)도 같은 목록을 쓴다 — 허용한 화면 파일이
+// 하나라도 바뀌면 값이 달라진다. 목록이 어긋날 일이 없게 한 곳에서만 만든다.
+function clientFiles() {
+  return fs.readdirSync(PUBLIC_DIR).filter(isClientFile).sort();
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
@@ -1550,7 +1572,7 @@ const handleRequest = (req, res) => {
       // 앱 화면 파일이 바뀌면 이 값이 달라진다. 브라우저가 이걸 보고 스스로 새로고침한다.
       appVersion: (() => {
         try {
-          return ['index.html', 'app.js', 'ui.css', 'workflows.js', 'report-ui.js', 'report-ui.css'].map(file => fs.statSync(path.join(PUBLIC_DIR, file)).mtimeMs).join(':');
+          return ['index.html', ...clientFiles()].map(file => fs.statSync(path.join(PUBLIC_DIR, file)).mtimeMs).join(':');
         } catch {
           return '0';
         }
@@ -1833,7 +1855,9 @@ const handleRequest = (req, res) => {
 
   let filePath = url.pathname === '/' ? '/index.html' : url.pathname;
   // 앱에 내장한 글꼴(Pretendard)도 화면 파일과 같은 길로 나간다. 인증 예외(publicAsset)에는 넣지 않는다.
-  if (!['/index.html','/app.js','/ui.css','/workflows.js','/report-ui.js','/report-ui.css','/manifest.webmanifest'].includes(filePath)
+  // 화면 코드(`*.js`/`*.css`)는 isClientFile이 정한다 — 서버 파일·테스트·픽스처는 거기서 막힌다.
+  if (!['/index.html','/manifest.webmanifest'].includes(filePath)
+    && !(filePath.startsWith('/') && !filePath.slice(1).includes('/') && isClientFile(filePath.slice(1)))
     && !/^\/icons\/[\w-]+\.(png|svg)$/.test(filePath) && !/^\/fonts\/[\w-]+\.woff2$/.test(filePath)) {
     res.writeHead(404); res.end('Not found'); return;
   }

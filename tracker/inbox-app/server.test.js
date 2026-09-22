@@ -34,6 +34,37 @@ test('static server denies implementation and private state files', async () => 
   assert.equal((await fetch(base+'/server.js')).status,404);
   assert.equal((await fetch(base+'/.weekly_report_state.json')).status,404);
 });
+// 화면 코드가 여러 파일이라 세 곳(index.html의 <script>, 정적 파일 허용, appVersion)이 어긋나면
+// 화면이 조용히 깨진다(404 · 자동 새로고침 누락). 셋이 같은 집합을 보는지 여기서 못 박는다.
+// 허용은 이름을 적지 않고 패턴으로 하므로, 나가면 안 되는 서버 파일은 아래에서 따로 확인한다.
+test('every screen script is served and counted in appVersion, and server files never are', async () => {
+  const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  const scripts = [...html.matchAll(/<script src="\/([\w.-]+\.js)"><\/script>/g)].map(match => match[1]);
+  assert.ok(scripts.includes('app.js'), 'index.html이 app.js를 읽어야 한다');
+  for (const name of scripts) {
+    const response = await fetch(base + '/' + name);
+    assert.equal(response.status, 200, `${name}은 화면에 나가야 한다`);
+    assert.match(response.headers.get('content-type') || '', /javascript/);
+  }
+  // 이 폴더의 `*.js`/`*.css` 가운데 실제로 나가는 것 = appVersion이 세는 것(index.html 한 줄을 더한 수).
+  const candidates = fs.readdirSync(__dirname).filter(name => /\.(js|css)$/.test(name)).sort();
+  const served = [];
+  for (const name of candidates) {
+    if ((await fetch(base + '/' + name)).status === 200) served.push(name);
+  }
+  assert.ok(served.includes('ui.css') && scripts.every(name => served.includes(name)));
+  assert.equal((await items()).appVersion.split(':').length, served.length + 1,
+    'appVersion은 index.html + 나가는 화면 파일 전부를 센다');
+  // 브라우저에 절대 나가면 안 되는 파일들 — 서버·저장소·테스트·픽스처.
+  const blocked = ['server.js', 'safe-storage.js', 'jira-client.js', 'jira-live.js', 'report-drafts.js',
+    'task-batch.js', 'slack-history.js', 'import-record.js', 'browser-fixture.js',
+    'workflow-store.js', 'mutation-store.js', 'server.test.js', 'client.test.js', 'report-drafts.test.js'];
+  for (const name of blocked) {
+    assert.equal((await fetch(base + '/' + name)).status, 404, `${name}은 화면에 나가면 안 된다`);
+  }
+  assert.equal((await fetch(base + '/automation/run-task.sh')).status, 404);
+});
+
 test('the screen stylesheet is served', async () => {
   const response = await fetch(base + '/ui.css');
   assert.equal(response.status, 200);
