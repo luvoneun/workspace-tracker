@@ -1311,7 +1311,7 @@ async function load() {
     .map(item => itemsById.get(item.id) || item);
   // 배포가 코앞인 프로젝트도 같은 카드에 올린다 — 프로젝트를 열어야만 배포일이 보여 놓치기 쉬웠다.
   // 프로젝트 목록은 프로젝트 탭과 같은 함수로 만든다(열린 항목 수도 그 값 그대로다).
-  renderReminders(reminders, answered, deployReminders(uiProjectRows(wfProjects(), workflowData.items)), meetingNotesMissingToday());
+  renderReminders(reminders, answered, deployReminders(uiProjectRows(wfProjects(), workflowData.items)));
   syncTaskDetail();
   palSync();
   taskSelectionRefresh();
@@ -1691,34 +1691,16 @@ function deployReminderRow(entry) {
   return row;
 }
 
-// 안 가져온 미팅 노트 한 줄(BNOTES) — 끝난 오늘 회의 중 아직 노트가 없는 회의를 모아 알린다.
-// 회의가 하나면 첫 줄에 그 제목까지 적고 둘째 줄은 두지 않는다. 여럿이면 첫 줄은 개수, 둘째 줄은
-// 조용한 글자로 제목들(길면 말줄임). 가져오는 중이면 둘째 줄 끝에 그 표시를 덧붙인다.
-// 누르면 회의 탭에서 그중 가장 이른 회의를 연다.
-function meetingNotesReminderRow(missing) {
-  const count = missing.length;
-  const titles = missing.map(event => event.title).join(' · ');
-  const text = count === 1
-    ? `미팅 노트를 안 가져왔어요 · ${missing[0].title}`
-    : `미팅 노트를 안 가져온 회의 ${count}개`;
-  let sub = count === 1 ? '' : titles;
-  if (meetingNotesBusy()) sub = sub ? `${sub} · 가져오는 중…` : '가져오는 중…';
-  return uiRailRow({
-    text,
-    sub: sub || undefined,
-    onOpen: () => openMeetingsTab(missing[0].id),
-  });
-}
-
-// 레일의 리마인드 — 배포가 코앞인 프로젝트, 안 가져온 미팅 노트, 기다리던 답변이 온 업무, 기한이
-// 코앞인 높은 우선순위 업무가 함께 온다(고르는 곳은 load()). 차례는 급한 순이다: 배포 임박(되돌릴
-// 수 없는 바깥 일정이라 가장 앞) → 미팅 노트 → 답변 왔어요 → 기한. 제목은 2줄까지 허용한다.
+// 레일의 리마인드 — 배포가 코앞인 프로젝트, 기다리던 답변이 온 업무, 기한이 코앞인 높은 우선순위
+// 업무가 함께 온다(고르는 곳은 load()). 차례는 급한 순이다: 배포 임박(되돌릴 수 없는 바깥 일정이라
+// 가장 앞) → 답변 왔어요 → 기한. 제목은 2줄까지 허용한다. 안 가져온 미팅 노트는 여기 오르지 않는다 —
+// 노트를 안 쓰는 회의도 많아 매번 알리면 소음이었다. 회의 탭이 그 회의에서 알린다.
 const DEPLOY_REMINDER_MAX = 4;
-function renderReminders(reminders, answered = [], deploys = [], missingNotes = []) {
+function renderReminders(reminders, answered = [], deploys = []) {
   const zone = document.getElementById('reminderZone');
   const list = document.getElementById('reminderList');
 
-  const total = reminders.length + answered.length + deploys.length + (missingNotes.length ? 1 : 0);
+  const total = reminders.length + answered.length + deploys.length;
   document.getElementById('reminderSectionCount').textContent = total;
   zone.hidden = total === 0;
 
@@ -1740,8 +1722,6 @@ function renderReminders(reminders, answered = [], deploys = [], missingNotes = 
     more.textContent = `외 ${deploys.length - DEPLOY_REMINDER_MAX}개`;
     list.appendChild(more);
   }
-  // 그다음이 안 가져온 미팅 노트 — 회의를 열어야만 노트를 못 가져온 걸 알 수 있어 놓치기 쉬웠다.
-  if (missingNotes.length) list.appendChild(meetingNotesReminderRow(missingNotes));
   // 기다리던 답변이 온 업무가 그다음이다 — 지금 바로 이어서 할 수 있는 일이다.
   answered.forEach(item => list.appendChild(row(item, [{ text: '답변 왔어요', tone: 'success' }])));
   reminders.forEach(item => list.appendChild(row(item, [uiDueText(item.due)])));

@@ -3042,41 +3042,13 @@ test('meetingNotesMissingToday: 끝난 오늘 회의 중 아직 노트가 없는
   assert.deepEqual(missing(), [], 'tiro를 쓰지 않으면 대상이 없다');
 });
 
-test('안 가져온 미팅 노트 줄: 하나면 첫 줄에 제목까지, 여럿이면 개수 + 둘째 줄에 제목들(길면 가져오는 중 표시가 그 뒤에), 누르면 회의 탭에서 첫 회의를 연다', () => {
+test('안 가져온 미팅 노트는 리마인드 카드에 오르지 않는다 — 회의 탭에서만 알린다', () => {
   const { app } = meetingNotesClient([]);
   app.run("meetingNotesApply({ used: true, state: 'idle' })");
-  app.run('opened = null; openMeetingsTab = id => { opened = id; };');
-  const subOf = row => row.children.find(kid => String(kid.className || '') === 'sub');
-  const titleOf = row => row.children.find(kid => String(kid.className || '') === 'ti');
-
-  // 회의가 하나면 첫 줄에 제목까지 있고 둘째 줄은 없다.
-  app.run("renderReminders([], [], [], [{ id: 'm1', title: '운영툴 주간 싱크' }])");
-  assert.equal(app.nodes.get('reminderSectionCount').textContent, 1, '리마인드 개수 칩에 한 줄로 센다');
-  assert.equal(app.nodes.get('reminderZone').hidden, false);
-  let row = app.nodes.get('reminderList').children[0];
-  assert.equal(titleOf(row).textContent, '미팅 노트를 안 가져왔어요 · 운영툴 주간 싱크');
-  assert.equal(subOf(row), undefined);
-  titleOf(row).listeners.click();
-  assert.equal(app.run('opened'), 'm1', '누르면 회의 탭에서 그 회의를 연다');
-
-  // 여럿이면 첫 줄은 개수, 둘째 줄은 제목들
-  app.run("renderReminders([], [], [], [{ id: 'm1', title: '운영툴 주간 싱크' }, { id: 'm2', title: '결제 리뉴얼 PRD 리뷰' }])");
-  row = app.nodes.get('reminderList').children[0];
-  assert.equal(titleOf(row).textContent, '미팅 노트를 안 가져온 회의 2개');
-  assert.equal(subOf(row).textContent, '운영툴 주간 싱크 · 결제 리뉴얼 PRD 리뷰');
-  titleOf(row).listeners.click();
-  assert.equal(app.run('opened'), 'm1', '가장 이른 회의를 연다');
-
-  // 가져오는 중이면 둘째 줄 끝에 그 표시가 붙는다
-  app.run("meetingNotesApply({ used: true, state: 'running', scope: 'today' })");
-  app.run("renderReminders([], [], [], [{ id: 'm1', title: '운영툴 주간 싱크' }, { id: 'm2', title: '결제 리뉴얼 PRD 리뷰' }])");
-  row = app.nodes.get('reminderList').children[0];
-  assert.equal(subOf(row).textContent, '운영툴 주간 싱크 · 결제 리뉴얼 PRD 리뷰 · 가져오는 중…');
-
-  // 대상이 없으면(다른 리마인드도 없으면) 카드 자체가 빈다
-  app.run("meetingNotesApply({ used: true, state: 'idle' })");
-  app.run('renderReminders([], [], [], [])');
-  assert.equal(app.nodes.get('reminderZone').hidden, true);
+  assert.equal(app.run('typeof meetingNotesReminderRow'), 'undefined', '리마인드용 줄 함수가 없다');
+  app.run('renderReminders([], [], [])');
+  assert.equal(app.nodes.get('reminderZone').hidden, true, '다른 리마인드가 없으면 카드가 빈다');
+  assert.equal(app.nodes.get('reminderSectionCount').textContent, 0);
 });
 
 test('회의 탭 머리의 세 상태: 가져올 게 있으면 버튼+개수, 다 가져왔으면 상태 글자+`다시 확인`, 오늘 시작한 회의가 없으면 다른 글자', async () => {
