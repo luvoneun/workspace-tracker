@@ -770,6 +770,8 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 }
 .d-atrow:hover, .d-atrow:focus-within { background: var(--hover); --rowbg: var(--hover); }
 .d-atrow .tl { grid-area: tl; display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* 출처 이름표(지라·피그마) — 조용한 글자, 프로젝트 색 점보다 앞에 선다 */
+.d-atrow .sc { flex: none; font-size: 12px; font-weight: 600; color: var(--dim); }
 .d-atrow .ti {
   font-size: 16px; font-weight: 500; color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; min-width: 0;

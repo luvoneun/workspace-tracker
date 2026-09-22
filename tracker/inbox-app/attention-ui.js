@@ -20,6 +20,9 @@ let attentionWantFresh = false;
 function attentionMarkFresh() { attentionWantFresh = true; }
 
 const attentionLabel = item => item.summary || item.key || '';
+// 출처 이름표 — 지금은 지라뿐이지만 나중에 다른 출처가 늘어도 줄에서 바로 구분되게 값으로 정한다.
+const ATTENTION_SOURCE_NAME = { jira: '지라', figma: '피그마' };
+const attentionSourceName = item => ATTENTION_SOURCE_NAME[item.source] || '';
 
 // 줄 오른쪽의 `Yosef 외 1명 · 2시간 전`. 시각은 설정 > 상태와 같은 부품(relativeTimeFrom)을 쓴다.
 function attentionWhoText(item) {
@@ -28,11 +31,12 @@ function attentionWhoText(item) {
   return [who, when].filter(Boolean).join(' · ');
 }
 
-// 머리줄의 조용한 한 마디. 마지막 읽기가 실패한 동안에는 `… 기준`이라고 밝힌다(주의색 글자).
+// 머리줄의 조용한 한 마디 — **평소에는 아무것도 적지 않는다**(`새로 들어온 것 4`처럼 제목+개수만
+// 있어야 다른 구역과 리듬이 맞는다. 작동 여부는 이미 설정 > 상태에서 본다). 값이 묵어서 이전 값을
+// 쓰는 동안에만(`stale`) `… 기준`이라고 밝힌다(주의색 글자) — 이건 알아 둬야 하는 정보라 남긴다.
 function attentionNoteText(state = attentionState) {
-  if (!state.updatedAt) return '지라 댓글';
-  const when = relativeTimeFrom(state.updatedAt);
-  return state.stale ? `지라 댓글 · ${when} 기준` : `지라 댓글 · ${when}`;
+  if (!state.updatedAt || !state.stale) return '';
+  return `${relativeTimeFrom(state.updatedAt)} 기준`;
 }
 
 const attentionDrop = (id) => { attentionState = { ...attentionState, items: attentionState.items.filter(item => item.id !== id) }; };
@@ -151,6 +155,13 @@ function attentionRow(item) {
 
   const top = document.createElement('div');
   top.className = 'tl';
+  const sourceName = attentionSourceName(item);
+  if (sourceName) {
+    const source = document.createElement('span');
+    source.className = 'sc';
+    source.textContent = sourceName;
+    top.appendChild(source);
+  }
   top.appendChild(uiProjectDot(`jira:${item.key}`));
   const title = document.createElement('span');
   title.className = 'ti';
@@ -208,7 +219,9 @@ function attentionRender() {
 
   document.getElementById('attentionCount').textContent = String(items.length);
   const note = document.getElementById('attentionNote');
-  note.textContent = attentionNoteText();
+  const noteText = attentionNoteText();
+  note.textContent = noteText;
+  note.hidden = !noteText;
   note.className = attentionState.stale ? 'd-quiet k-warn' : 'd-quiet';
 
   const shown = attentionAll ? items : items.slice(0, ATTENTION_SHOWN);

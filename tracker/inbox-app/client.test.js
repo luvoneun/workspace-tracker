@@ -5211,18 +5211,24 @@ test('BATTENTION: 0개이거나 연결이 없으면 구역 자체가 없다 — 
   assert.equal(old.zone().hidden, true);
 });
 
-test('BATTENTION: 머리줄은 개수와 `지라 댓글 · N분 전`을 적고, 묵은 값이면 `기준`이라고 밝힌다', async () => {
+test('BATTENTION: 머리줄은 개수만 적고 평소에는 문구가 없다(다른 구역 제목과 같은 리듬) — 값이 묵었을 때만 `N시간 전 기준`을 밝힌다', async () => {
   const fixture = attentionClient();
   await fixture.app.run('attentionLoad()');
   assert.equal(fixture.zone().hidden, false);
   assert.equal(fixture.app.nodes.get('attentionCount').textContent, '1');
-  assert.equal(fixture.app.nodes.get('attentionNote').textContent, '지라 댓글 · 3분 전');
-  assert.equal(fixture.app.nodes.get('attentionNote').className, 'd-quiet');
+  assert.equal(fixture.app.nodes.get('attentionNote').hidden, true, '평소에는 `지라 댓글 · N분 전`처럼 적지 않는다 — 작동 여부는 설정 > 상태에서 본다');
 
   const stale = attentionClient({ stale: true, updatedAt: attentionAgo(180) });
   await stale.app.run('attentionLoad()');
-  assert.equal(stale.app.nodes.get('attentionNote').textContent, '지라 댓글 · 3시간 전 기준');
+  assert.equal(stale.app.nodes.get('attentionNote').hidden, false);
+  assert.equal(stale.app.nodes.get('attentionNote').textContent, '3시간 전 기준');
   assert.equal(stale.app.nodes.get('attentionNote').className, 'd-quiet k-warn', '주의색 글자다');
+});
+
+test('BATTENTION: 줄 앞에 출처 이름표(지라)가 붙는다', async () => {
+  const fixture = attentionClient();
+  await fixture.app.run('attentionLoad()');
+  assert.equal(nodeFind(fixture.rows()[0], 'sc').textContent, '지라');
 });
 
 test('BATTENTION: 줄은 요약·`누가 · 언제`·미리보기이고 키는 툴팁과 `열기`에만 있다 — 지라 상태는 적지 않는다', async () => {
