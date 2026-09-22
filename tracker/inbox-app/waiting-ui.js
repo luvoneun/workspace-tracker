@@ -11,6 +11,8 @@
 // 상태는 메모리에만 둔다(저장하지 않는다) — 목록이 다시 그려져도(load) 줄은 남고,
 // `닫기` · 액션 하나를 끝냄 · 다른 확인 대기를 체크함 · 탭을 떠남 · 새로고침 · 체크를 되돌림으로 사라진다.
 let waitingNextId = null;
+// 방금 그린 `다음은?` 줄의 `후속 할 일` 입력칸을 여는 함수 — 레일의 한 줄 제안이 상세 카드를 열면서 쓴다.
+let waitingNextOpener = null;
 const WAITING_ANSWER_PLACEHOLDER = '받은 답을 한 줄로 — 주간요약의 확인 완료에 그대로 올라가요';
 
 function waitingNextOpen(item) { waitingNextId = item.id; }
@@ -25,9 +27,10 @@ function waitingNextItem(id) {
 }
 
 // 줄을 걷는다 — 목록을 통째로 다시 그리지 않고 그려져 있는 줄만 그 자리에서 없앤다.
+// 상세 카드 안의 `다음은?`(`.is-panel`)은 제안이 아니라 그 카드의 붙박이 구역이라 걷지 않는다.
 function waitingNextClose() {
   waitingNextId = null;
-  [...(document.querySelectorAll?.('.d-wnext') || [])].forEach(node => (node.closest?.('.d-wnextwrap') || node).remove?.());
+  [...(document.querySelectorAll?.('.d-wnext:not(.is-panel)') || [])].forEach(node => (node.closest?.('.d-wnextwrap') || node).remove?.());
 }
 
 // 이 확인 대기를 `기다리는 답변`(blockedBy)으로 연결해 둔 미완료 업무 — 답이 왔으니 이제 움직일 수 있다.
@@ -168,44 +171,47 @@ function waitingNextBlockedList(blocked) {
   return box;
 }
 
-// `다음은?` 줄 한 벌. 세 자리(레일 확인 대기 카드 · 프로젝트 탭 확인 대기 구역 ·
-// 회의 카드/탭의 `이 회의에서 나온 것`)가 이 부품 하나를 쓴다.
-// compact: 레일(296px)처럼 좁은 자리에서만 버튼 이름을 짧게 쓴다 — 긴 이름은 aria-label에 그대로 남긴다.
-// CSS로 글자를 바꾸지 않는다(화면에 읽히는 글자와 읽어 주는 글자가 어긋나면 안 된다).
-const WAITING_NEXT_SHORT = { '결정으로 남기기': '결정으로', '답변 한 줄 남기기': '답변 남기기' };
-function waitingNextRow(item, { compact = false } = {}) {
+// `다음은?` 줄 한 벌. 넓은 자리 셋(프로젝트 탭 확인 대기 구역 · 회의 카드/탭의 `이 회의에서 나온 것` ·
+// 확인 대기 상세 카드)이 이 부품 하나를 쓴다. 좁은 레일은 한 줄짜리(waitingNextOne)를 쓴다.
+// panel: 상세 카드 안의 붙박이 구역으로 그린다 — 바로 위에 `답변 한 줄` 칸이 있으므로 그 버튼은 빼고,
+// 제안이 아니라 카드의 한 부분이라 `닫기`도 없다(`.is-panel`이라 waitingNextClose도 걷지 않는다).
+function waitingNextRow(item, { panel = false } = {}) {
   const wrap = document.createElement('div');
-  wrap.className = 'd-wnext';
+  wrap.className = panel ? 'd-wnext is-panel' : 'd-wnext';
   wrap.setAttribute('role', 'group');
   wrap.setAttribute('aria-label', `${item.description} — 다음은?`);
 
   const bar = document.createElement('div');
   bar.className = 'nx';
-  const label = document.createElement('span');
-  label.className = 'lb';
-  label.textContent = '다음은?';
-  bar.appendChild(label);
+  // 상세 카드에서는 구역 제목이 이미 `다음은?`이다 — 같은 말을 두 번 쓰지 않는다.
+  if (!panel) {
+    const label = document.createElement('span');
+    label.className = 'lb';
+    label.textContent = '다음은?';
+    bar.appendChild(label);
+  }
 
   const act = (text, onClick) => {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'd-btn sm';
-    button.textContent = (compact && WAITING_NEXT_SHORT[text]) || text;
+    button.textContent = text;
     button.setAttribute('aria-label', `${item.description} — ${text}`);
     button.addEventListener('click', () => onClick(button));
     bar.appendChild(button);
   };
-  act('후속 할 일', () => waitingNextEdit(bar, {
+  const followUp = () => waitingNextEdit(bar, {
     value: item.description,
     placeholder: '후속 할 일 — Enter로 오늘 할 일',
     label: `${item.description} — 후속 할 일`,
     buttons: [['today', '오늘'], ['later', '나중에']],
     onSubmit: (text, mode) => waitingNextCreateTask(item, text, mode),
-  }));
+  });
+  act('후속 할 일', followUp);
   act('결정으로 남기기', async (button) => {
     if (await createDecisionFromWaiting(item, button)) waitingNextClose();
   });
-  act('답변 한 줄 남기기', () => waitingNextEdit(bar, {
+  if (!panel) act('답변 한 줄 남기기', () => waitingNextEdit(bar, {
     value: (typeof wfItem === 'function' ? wfItem(item.id)?.outcome : '') || '',
     placeholder: WAITING_ANSWER_PLACEHOLDER,
     label: `${item.description} — 답변 한 줄`,
@@ -214,27 +220,105 @@ function waitingNextRow(item, { compact = false } = {}) {
     onSubmit: async (text) => { await postJson('/api/workflow/item', { id: item.id, outcome: text }); await load(); },
   }));
 
-  const dismiss = document.createElement('button');
-  dismiss.type = 'button';
-  dismiss.className = 'd-btn sm is-cl';
-  dismiss.textContent = '닫기';
-  dismiss.setAttribute('aria-label', `${item.description} — 다음은? 닫기`);
-  dismiss.addEventListener('click', () => waitingNextClose());
-  bar.appendChild(dismiss);
+  if (!panel) {
+    const dismiss = document.createElement('button');
+    dismiss.type = 'button';
+    dismiss.className = 'd-btn sm is-cl';
+    dismiss.textContent = '닫기';
+    dismiss.setAttribute('aria-label', `${item.description} — 다음은? 닫기`);
+    dismiss.addEventListener('click', () => waitingNextClose());
+    bar.appendChild(dismiss);
+  }
   wrap.appendChild(bar);
 
   const blocked = waitingNextBlocked(item);
   if (blocked.length) wrap.appendChild(waitingNextBlockedList(blocked));
+  // 레일의 한 줄 제안이 상세 카드를 열면서 이 입력칸까지 바로 열 수 있게 여는 길을 남겨 둔다.
+  wrap.openFollowUp = followUp;
+  waitingNextOpener = followUp;
+  return wrap;
+}
+
+// 상세 카드를 열면서 그 안의 `후속 할 일` 입력칸까지 바로 여는 길(레일 한 줄 제안 ②).
+// panelOpen이 카드를 그 자리에서 다 그려 붙이므로, 그때 그려진 줄이 남겨 둔 여는 함수를 바로 부른다.
+function waitingNextOpenFollowUp(item) {
+  waitingNextOpener = null;
+  panelOpen({ id: item.id });
+  const open = waitingNextOpener;
+  waitingNextOpener = null;
+  open?.();
+}
+
+// 좁은 레일(296px)의 확인 대기 카드에서는 체크한 줄 아래에 **한 줄만** 남긴다 — 레일은 훑어보는
+// 자리라 선택지를 다 펼치면 카드가 화면을 다 먹었다(BNEXTRAIL 결정). 전체 `다음은?`은 `자세히`가
+// 여는 상세 카드에 있다. 제안은 하나뿐이고 누르면 바로 실행된다.
+function waitingNextOne(item) {
+  const wrap = document.createElement('div');
+  wrap.className = 'd-wnext is-one';
+  wrap.setAttribute('role', 'group');
+  wrap.setAttribute('aria-label', `${item.description} — 다음은?`);
+
+  const bar = document.createElement('div');
+  bar.className = 'nx';
+  const lead = document.createElement('span');
+  lead.className = 'lb';
+  lead.textContent = '답을 받았어요 ·';
+  bar.appendChild(lead);
+
+  // 기다리던 업무가 있으면 그것부터 — 답이 왔으니 오늘로 당기는 것이 다음 한 걸음이다.
+  // 이미 다 오늘 할 일이면 옮길 것이 없으니 `보기`로 상세 카드를 연다.
+  const blocked = waitingNextBlocked(item);
+  const today = todayStr();
+  const move = blocked.filter(task => task.scheduled !== today);
+  const name = !blocked.length ? '후속 할 일 만들기'
+    : move.length ? `기다리던 업무 ${move.length}개를 오늘로`
+    : `기다리던 업무 ${blocked.length}개 보기`;
+  const suggest = document.createElement('button');
+  suggest.type = 'button';
+  suggest.className = 'd-link sg';
+  suggest.textContent = `${name} →`;
+  suggest.title = name;
+  suggest.setAttribute('aria-label', `${item.description} — ${name}`);
+  suggest.addEventListener('click', async () => {
+    if (!blocked.length) { waitingNextOpenFollowUp(item); return; }
+    if (!move.length) { panelOpen({ id: item.id }); return; }
+    suggest.disabled = true;
+    // 기존 길(set-scheduled)을 업무마다 한 번씩 — ⌘Z도 기존 규칙대로 각각 기록된다.
+    try {
+      for (const task of move) await setTaskScheduled(task.id, today);
+      announce(`오늘 할 일로 옮겼어요 · ${move.length}개`);
+    } catch { suggest.disabled = false; }
+  });
+  bar.appendChild(suggest);
+
+  const detail = document.createElement('button');
+  detail.type = 'button';
+  detail.className = 'd-btn sm de';
+  detail.textContent = '자세히';
+  detail.setAttribute('aria-label', `${item.description} — 다음은? 자세히`);
+  detail.addEventListener('click', () => panelOpen({ id: item.id }));
+  bar.appendChild(detail);
+
+  const dismiss = document.createElement('button');
+  dismiss.type = 'button';
+  dismiss.className = 'd-btn sm is-cl';
+  dismiss.textContent = '✕';
+  dismiss.setAttribute('aria-label', `${item.description} — 다음은? 닫기`);
+  dismiss.addEventListener('click', () => waitingNextClose());
+  bar.appendChild(dismiss);
+
+  wrap.appendChild(bar);
   return wrap;
 }
 
 // 미완료만 보여 주는 목록(레일 확인 대기·프로젝트 탭)에서는 체크한 줄이 빠진다 —
 // 방금 체크한 줄을 목록 맨 위에 한 번 더 그리고 그 아래에 `다음은?`을 붙인다.
-function waitingNextLead(item, makeRow, options) {
+// 레일(one)만 한 줄짜리를 쓰고, 넓은 프로젝트 탭은 버튼 줄 그대로다.
+function waitingNextLead(item, makeRow, { one = false } = {}) {
   const wrap = document.createElement('div');
   wrap.className = 'd-wnextwrap';
   wrap.appendChild(makeRow(item));
-  wrap.appendChild(waitingNextRow(item, options));
+  wrap.appendChild(one ? waitingNextOne(item) : waitingNextRow(item));
   return wrap;
 }
 
@@ -355,9 +439,9 @@ function renderWaiting(items) {
   list.replaceChildren();
 
   // 방금 체크한 줄은 이 목록(미완료만)에서 빠진다 — 맨 위에 한 번 더 그려 `다음은?`을 잇는다.
-  // 레일(296px)이라 버튼 이름은 짧은 쪽을 쓴다(compact).
+  // 레일(296px)은 훑어보는 자리라 그 아래는 한 줄짜리 제안이다(one).
   const checkedNow = waitingNextItem();
-  if (checkedNow) list.appendChild(waitingNextLead(checkedNow, entry => renderWaitingRow(entry, { showProject: true }), { compact: true }));
+  if (checkedNow) list.appendChild(waitingNextLead(checkedNow, entry => renderWaitingRow(entry, { showProject: true }), { one: true }));
 
   if (!items.length) {
     const empty = document.createElement('div');

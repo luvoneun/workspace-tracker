@@ -708,6 +708,33 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 /* 레일(296px)에서는 `닫기`를 오른쪽 끝으로 밀지 않는다 — 혼자 한 줄에 남지 않게 그대로 흐르게 둔다 */
 #waitingList .d-wnext .d-btn.is-cl { margin-left: 0; }
 
+/* 레일의 한 줄 제안 — 줄바꿈하지 않고, `자세히`·`✕`는 오른쪽에 그대로 남는다(BNEXTRAIL).
+   296px 레일에는 네 조각이 다 들어가지 않는다(다 펴면 ~343px, 실제 자리는 222px). 그래서
+   앞머리(`답을 받았어요 ·`)가 자리를 먼저 내주고, 정작 눌러야 할 제안 글자가 온전히 남는다 —
+   앞머리는 자리가 있는 넓은 곳에서만 보이고, 읽어 주는 이름에는 늘 제안 전문이 들어 있다. */
+.d-wnext.is-one { padding-right: 6px; container-type: inline-size; }
+.d-wnext.is-one .nx { flex-wrap: nowrap; gap: 2px; }
+.d-wnext.is-one .nx > .lb { flex: none; font-weight: 500; white-space: nowrap; }
+/* 앞머리와 제안을 함께 펴려면 340px쯤 든다 — 296px 레일에서는 앞머리를 접고 제안을 온전히 보인다.
+   (`답을 받았어요`는 줄 전체의 읽어 주는 이름과 체크된 줄 자체가 이미 말해 준다.) */
+@container (max-width: 339px) {
+  .d-wnext.is-one .nx > .lb { display: none; }
+}
+.d-wnext.is-one .sg {
+  flex: 1 1 auto; min-width: 0; text-align: left; font-size: 12.5px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.d-wnext.is-one .d-btn { flex: none; font-size: 12.5px; }
+.d-wnext.is-one .d-btn.de { padding: 0 4px; color: var(--dim); background: none; }
+.d-wnext.is-one .d-btn.de:hover { background: var(--hover); color: var(--text); }
+/* ✕도 누름 영역은 28px 아래로 내려가지 않는다 */
+.d-wnext.is-one .d-btn.is-cl { padding: 0 5px; min-width: 28px; }
+
+/* 상세 카드 안의 `다음은?`은 카드 바탕 위에 그대로 앉는다(고른 줄 표시가 아니다) */
+.d-wnext.is-panel { background: none; padding: 0; }
+.d-wnext.is-panel .d-btn { background: var(--neutral-bg); }
+.d-wnext.is-panel .bl { margin-top: 10px; }
+
 /* 구역 제목 — 굵고 크게. 개수는 둥근 회색 칩. */
 .d-sechd { display: flex; align-items: center; gap: 10px; height: 30px; font-size: 18px; font-weight: 700; letter-spacing: -0.015em; color: var(--text); }
 .d-sechd .n {

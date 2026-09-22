@@ -304,23 +304,37 @@ function reportPickerLabel(name) {
 function reportSlackSectionLabel(name) {
   return `[${name === '진행 중' ? '진행중' : name}]`;
 }
+// 구역 안에서 빈 줄로 갈리는 묶음 — 프로젝트 하나가 한 묶음이고, 프로젝트 없는 메모 줄들은 모아서 한 묶음이다.
+// 빈 줄 자리를 여기 한 곳에서 정해 일반 글자·서식 있는 복사·미리보기가 어긋날 수 없게 한다.
+function reportSlackBlocks(section) {
+  const blocks = section.projects.map(project => ({ project }));
+  if (section.memos.length) blocks.push({ memos: section.memos });
+  return blocks;
+}
+// 빈 줄은 구역 이름 뒤와 묶음 사이에 하나씩(묶음마다 앞에 하나) — 구역 끝에는 붙지 않으므로
+// 구역 사이의 빈 줄과 겹쳐 연속 빈 줄이 되지 않는다.
 function reportSlackLines(model) {
   const lines = [];
   if (!model || !model.sections.length) return lines;
-  if (model.title) lines.push({ kind: 'title', text: model.title }, { kind: 'gap', text: '' });
+  const gap = () => lines.push({ kind: 'gap', text: '' });
+  if (model.title) { lines.push({ kind: 'title', text: model.title }); gap(); }
   model.sections.forEach((section, index) => {
-    if (index) lines.push({ kind: 'gap', text: '' });
+    if (index) gap();
     lines.push({ kind: 'section', text: reportSlackSectionLabel(section.name) });
-    for (const project of section.projects) {
-      lines.push({ kind: 'project', text: reportSlackProjectLine(project) });
-      for (const item of project.items) {
-        lines.push({ kind: 'item', text: `• ${item.text}` });
-        for (const note of item.notes) lines.push({ kind: 'note', text: `    ◦ ${note}` });
+    for (const block of reportSlackBlocks(section)) {
+      gap();
+      if (block.project) {
+        lines.push({ kind: 'project', text: reportSlackProjectLine(block.project) });
+        for (const item of block.project.items) {
+          lines.push({ kind: 'item', text: `• ${item.text}` });
+          for (const note of item.notes) lines.push({ kind: 'note', text: `    ◦ ${note}` });
+        }
+        continue;
       }
-    }
-    for (const memo of section.memos) {
-      lines.push({ kind: 'memo', text: `* ${memo.text}` });
-      for (const note of memo.notes) lines.push({ kind: 'note', text: `    ◦ ${note}` });
+      for (const memo of block.memos) {
+        lines.push({ kind: 'memo', text: `* ${memo.text}` });
+        for (const note of memo.notes) lines.push({ kind: 'note', text: `    ◦ ${note}` });
+      }
     }
   });
   return lines;
@@ -332,20 +346,28 @@ function reportSlackText(model) {
 }
 
 // 서식 있는 복사. 슬랙 입력창에 붙이면 굵은 제목과 글머리 목록이 된다. 사용자 문구는 전부 escape한다.
+// 빈 줄은 일반 글자와 같은 자리(reportSlackBlocks)에 빈 단락으로 넣는다 — 붙였을 때 간격이 같아야 한다.
+// 빈 단락은 `<p><br></p>`다(속이 완전히 빈 `<p></p>`는 붙는 곳에서 지워지는 일이 있다).
+const REPORT_SLACK_HTML_GAP = '<p><br></p>';
 function reportSlackHtml(model) {
   if (!model || !model.sections.length) return '';
   const bold = text => `<p><b>${escapeHtml(text)}</b></p>`;
   const notes = list => list.length ? `<ul>${list.map(note => `<li>${escapeHtml(note)}</li>`).join('')}</ul>` : '';
   const html = [];
-  if (model.title) html.push(bold(model.title));
-  for (const section of model.sections) {
+  if (model.title) html.push(bold(model.title), REPORT_SLACK_HTML_GAP);
+  model.sections.forEach((section, index) => {
+    if (index) html.push(REPORT_SLACK_HTML_GAP);
     html.push(bold(reportSlackSectionLabel(section.name)));
-    for (const project of section.projects) {
-      html.push(bold(reportSlackProjectLine(project)));
-      html.push(`<ul>${project.items.map(item => `<li>${escapeHtml(item.text)}${notes(item.notes)}</li>`).join('')}</ul>`);
+    for (const block of reportSlackBlocks(section)) {
+      html.push(REPORT_SLACK_HTML_GAP);
+      if (block.project) {
+        html.push(bold(reportSlackProjectLine(block.project)));
+        html.push(`<ul>${block.project.items.map(item => `<li>${escapeHtml(item.text)}${notes(item.notes)}</li>`).join('')}</ul>`);
+        continue;
+      }
+      for (const memo of block.memos) html.push(`<p>* ${escapeHtml(memo.text)}</p>${notes(memo.notes)}`);
     }
-    for (const memo of section.memos) html.push(`<p>* ${escapeHtml(memo.text)}</p>${notes(memo.notes)}`);
-  }
+  });
   return html.join('');
 }
 

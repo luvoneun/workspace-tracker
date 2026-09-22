@@ -2100,27 +2100,35 @@ test('슬랙 복사 글자는 구역 → 프로젝트 → 글머리 형식으로
     '9월 3주차 (9/21~9/27)',
     '',
     '[완료]',
+    '',
     '가입 개선',
     '• 가입 실패율 급증 원인 파악',
     '• 퍼널 데이터 정리해 대시보드 반영',
     '    ◦ 이슈: 집계 지연',
     '• 약관 문구 법무 회신 받음',
+    '',
     '결제 리뉴얼',
     '• 결제 실패 알림 슬랙 채널 공지',
+    '',
     '기타',
     '• 주간 회의 자료 준비',
     '',
     '[진행중]',
+    '',
     '알림센터',
     '• 발송 실패 로그 확인',
     '',
     '[예정]',
+    '',
     '알림센터',
     '• 웹/앱 검수 처리 기획 진행 및 논의',
+    '',
     '* 과금 기획은 차차주 진행 예정',
-  ].join('\n'), '제목 → 구역 → 프로젝트 → 글머리, 부연은 공백 4칸 + ◦, 프로젝트 없는 것은 기타로 구역 끝');
+  ].join('\n'), '제목 → 구역 → 프로젝트 → 글머리, 구역 이름 뒤와 프로젝트 묶음 사이에 빈 줄 하나, 부연은 공백 4칸 + ◦, 프로젝트 없는 것은 기타로 구역 끝');
   assert.doesNotMatch(text, /숨긴 문장/, '제외한 문장은 복사에서 빠진다');
   assert.doesNotMatch(text, /이번 주|확인 완료/, '슬랙 글에는 상대 표현을 쓰지 않고, 확인 완료는 완료 안으로 들어간다');
+  assert.doesNotMatch(text, /\n\n\n/, '빈 줄이 잇따라 두 개가 되지는 않는다(구역 끝 묶음 뒤에는 넣지 않는다)');
+  assert.equal(text.endsWith('\n'), false, '글 끝에도 빈 줄을 남기지 않는다');
   assert.equal(app.run(`reportSlackText(reportSlackModel({ weekKey: '2026-09-21', rows: [] }))`), '',
     '담긴 문장이 없으면 제목만 남기지 않고 아무것도 복사하지 않는다');
 });
@@ -2132,7 +2140,7 @@ test('넣을 구역을 고르면 미리보기·일반 글자·서식 있는 복�
   assert.deepEqual(names(['완료', '진행 중', '예정']), ['완료', '진행 중', '예정'], '기본값은 완료 · 진행 중 · 예정이다');
   assert.deepEqual(names(['결정', '확인 대기', '완료']), ['완료', '결정', '확인 대기'], '고른 차례와 상관없이 구역 차례는 하나로 정해져 있다');
   assert.deepEqual(names([]), [], '아무 구역도 고르지 않으면 복사할 것이 없다');
-  assert.equal(app.run(`reportSlackText(${model(['결정'])})`), ['9월 3주차 (9/21~9/27)', '', '[결정]', '운영툴', '• 접근 로그는 90일 보존'].join('\n'));
+  assert.equal(app.run(`reportSlackText(${model(['결정'])})`), ['9월 3주차 (9/21~9/27)', '', '[결정]', '', '운영툴', '• 접근 로그는 90일 보존'].join('\n'));
   assert.deepEqual(names(['완료', '진행 중', '결정', '확인 대기', '예정']).length, 5, '내용이 있는 구역만 세어도 다섯 구역이 모두 찬 자료다');
   assert.deepEqual(JSON.parse(app.run(`JSON.stringify(reportSlackModel({ weekKey: '2026-09-21', rows: ${REPORT_SLACK_ROWS} }, { sections: ['확인 대기'] }).sections)`)),
     [{ name: '확인 대기', projects: [{ name: '운영툴', items: [{ text: '큐 지연 원인 회신 대기', notes: [] }] }], memos: [] }]);
@@ -2144,14 +2152,20 @@ test('미리보기 줄·일반 글자·서식 있는 복사는 한 구조에서 
   const lines = JSON.parse(app.run(`JSON.stringify(reportSlackLines(${model}))`));
   assert.equal(lines.map(line => line.text).join('\n'), app.run(`reportSlackText(${model})`),
     '미리보기에 그려지는 글자를 이어 붙이면 복사 글자와 정확히 같다(대체 경로에서 직접 선택해도 같은 글자다)');
-  assert.deepEqual(lines.slice(0, 4).map(line => line.kind), ['title', 'gap', 'section', 'project']);
+  assert.deepEqual(lines.slice(0, 5).map(line => line.kind), ['title', 'gap', 'section', 'gap', 'project'],
+    '구역 이름 뒤에도 빈 줄이 하나 선다');
   assert.ok(lines.some(line => line.kind === 'note' && line.text === '    ◦ 이슈: 집계 지연'));
   assert.ok(lines.some(line => line.kind === 'memo' && line.text === '* 과금 기획은 차차주 진행 예정'));
 
   const html = app.run(`reportSlackHtml(${model})`);
-  assert.match(html, /^<p><b>9월 3주차 \(9\/21~9\/27\)<\/b><\/p><p><b>\[완료\]<\/b><\/p><p><b>가입 개선<\/b><\/p><ul><li>가입 실패율 급증 원인 파악<\/li>/);
+  assert.match(html, /^<p><b>9월 3주차 \(9\/21~9\/27\)<\/b><\/p><p><br><\/p><p><b>\[완료\]<\/b><\/p><p><br><\/p><p><b>가입 개선<\/b><\/p><ul><li>가입 실패율 급증 원인 파악<\/li>/,
+    '서식 있는 복사도 같은 자리에 빈 단락을 넣어 일반 글자와 간격이 같다');
   assert.match(html, /<li>퍼널 데이터 정리해 대시보드 반영<ul><li>이슈: 집계 지연<\/li><\/ul><\/li>/, '부연은 한 단계 들여 쓴 목록이 된다');
-  assert.match(html, /<p>\* 과금 기획은 차차주 진행 예정<\/p>/, '프로젝트 없는 계획 문장은 메모 줄로 남는다');
+  assert.match(html, /<\/ul><p><br><\/p><p><b>결제 리뉴얼<\/b><\/p>/, '프로젝트 묶음 사이에도 빈 단락 하나');
+  assert.match(html, /<p><br><\/p><p>\* 과금 기획은 차차주 진행 예정<\/p>/, '프로젝트 없는 계획 문장은 빈 단락 뒤 메모 줄로 남는다');
+  assert.equal((html.match(/<p><br><\/p>/g) || []).length, lines.filter(line => line.kind === 'gap').length,
+    '빈 줄 수가 일반 글자와 정확히 같다(같은 구조 함수에서 나온다)');
+  assert.doesNotMatch(html, /<p><br><\/p><p><br><\/p>/, '빈 단락이 잇따르지 않는다');
   assert.equal(app.run(`reportSlackHtml({ sections: [] })`), '');
 
   // 사용자 문구는 그대로 HTML에 들어가면 안 된다.
@@ -2184,12 +2198,15 @@ test('아래로 넣은 문장은 부모의 프로젝트 아래에 서고, 슬랙
     '9월 3주차 (9/21~9/27)',
     '',
     '[완료]',
+    '',
     '가입 개선',
     '• 가입 실패율 급증 원인 파악',
     '    ◦ 결제 로그 확인',
     '    ◦ 로그 보존 기간도 정리',
+    '',
     '여러 프로젝트',
     '• 옛 합치기 문장',
+    '',
     '기타',
     '• 주간 회의 자료 준비',
   ].join('\n'), '자식 문장은 부모 아래 부연으로만 나가고, 다른 프로젝트 이름은 슬랙 글에 적지 않는다');
@@ -2199,7 +2216,7 @@ test('아래로 넣은 문장은 부모의 프로젝트 아래에 서고, 슬랙
     { id: 'a2', heading: '완료한 일', group: '결제 리뉴얼', text: '혼자 남은 문장', sourceIds: [], excluded: false }
   ] }`;
   assert.equal(app.run(`reportSlackText(reportSlackModel(${orphaned}, { sections: ['완료'] }))`), [
-    '9월 3주차 (9/21~9/27)', '', '[완료]', '결제 리뉴얼', '• 혼자 남은 문장',
+    '9월 3주차 (9/21~9/27)', '', '[완료]', '', '결제 리뉴얼', '• 혼자 남은 문장',
   ].join('\n'));
   assert.deepEqual(JSON.parse(app.run(`JSON.stringify(reportChildRows([]).size)`)), 0);
 });
@@ -2219,12 +2236,14 @@ test('다음 주 계획은 프로젝트로 묶이고, 프로젝트 없는 문장
     '9월 3주차 (9/21~9/27)',
     '',
     '[예정]',
+    '',
     '알림센터',
     '• 검수 처리 기획',
     '• 발송 정책 정리',
+    '',
     '* 먼저 적은 메모',
     '* 프로젝트 없이 적은 문장',
-  ].join('\n'), '슬랙에서도 프로젝트 없는 계획 문장만 구역 끝 메모 줄이 된다');
+  ].join('\n'), '슬랙에서도 프로젝트 없는 계획 문장만 구역 끝 메모 줄이 되고, 메모 줄들은 빈 줄 하나 뒤에 한 묶음으로 선다');
 });
 
 // `결정 찾기`와 반영 완료 검색이 함께 쓰는 매칭 규칙 — 문구·프로젝트·지라 키·지라 요약을 본다.
@@ -2347,16 +2366,20 @@ test('모르는 소제목은 그 이름 그대로의 구역이 되고, 차례는
     '9월 3주차 (9/21~9/27)',
     '',
     '[완료]',
+    '',
     '가입 개선',
     '• 퍼널 정리',
     '',
     '[리스크]',
+    '',
     '운영툴',
     '• 큐 지연이 계속되고 있어요',
+    '',
     '기타',
     '• 인력 공백',
     '',
     '[예정]',
+    '',
     '알림센터',
     '• 검수 기획',
   ].join('\n'), '모르는 소제목의 문장도 같은 모양으로 들어간다');
@@ -2740,7 +2763,7 @@ test('`다음은?` 줄은 목록을 다시 그려도 남고, 체크를 되돌리
   draw();
   const list = app.nodes.get('waitingList');
   assert.equal(list.children[0].className, 'd-wnextwrap', '체크한 줄은 목록 맨 위에 한 번 더 서고');
-  assert.equal(list.children[0].children[1].className, 'd-wnext', '그 아래에 `다음은?` 줄이 붙는다');
+  assert.equal(list.children[0].children[1].className, 'd-wnext is-one', '그 아래에 한 줄짜리 `다음은?`이 붙는다');
   draw();
   assert.equal(list.children[0].className, 'd-wnextwrap', 'load()로 다시 그려도 그대로 남는다');
   // ⌘Z나 체크 해제로 미완료가 되면 스스로 내려간다(저장하지 않는 메모리 상태라 판정은 지금 값으로 한다)
@@ -4527,23 +4550,117 @@ test('BSMALL: 결정 줄의 `내용` 표시는 적어 둔 내용이 있을 때�
   assert.equal(mark.getAttribute('aria-label'), '내용이 있는 결정 — 내용 보기');
 });
 
-// ---------- BSMALL ④: 레일의 짧은 버튼 이름 ----------
-test('BSMALL: `다음은?`은 레일에서만 짧은 이름을 쓰고, 읽어 주는 이름은 그대로다', () => {
+// ---------- BNEXTRAIL: 좁은 레일의 `다음은?`은 한 줄 제안 + 상세 카드 ----------
+// 레일은 훑어보는 자리다 — 체크했다고 선택지를 다 펼치면 카드가 화면을 다 먹는다.
+const panelSectionsOf = box => box.children.map(node => (node.dataset && node.dataset.sec) || '').filter(Boolean);
+const panelSectionOf = (box, name) => box.children.find(node => node.dataset && node.dataset.sec === name);
+const panelCheckBox = (app, id) => app.run(`(() => {
+  const box = document.createElement('div');
+  panelCheck({ item: wfItem('${id}'), detail: { outcome: '' } }, box);
+  return box;
+})()`);
+
+test('BNEXTRAIL: 레일에서 체크하면 한 줄만 늘어나고, 넓은 자리는 버튼 줄 그대로다', () => {
   const { app, check } = waitingNextClient();
   check('ck1');
-  const names = (code) => app.run(code).children[0].children.map(node => node.textContent);
-  assert.deepEqual(names("waitingNextRow(wfItem('ck1'))"),
-    ['다음은?', '후속 할 일', '결정으로 남기기', '답변 한 줄 남기기', '닫기'], '넓은 자리는 그대로다');
-  const compact = app.run("waitingNextRow(wfItem('ck1'), { compact: true })");
-  assert.deepEqual(compact.children[0].children.map(node => node.textContent),
-    ['다음은?', '후속 할 일', '결정으로', '답변 남기기', '닫기']);
-  assert.deepEqual(compact.children[0].children.slice(1, 4).map(node => node.getAttribute('aria-label')),
-    ['법무 검토 회신 받기 — 후속 할 일', '법무 검토 회신 받기 — 결정으로 남기기', '법무 검토 회신 받기 — 답변 한 줄 남기기'],
-    'aria-label은 긴 이름을 그대로 쓴다');
-
-  // 레일(확인 대기 카드)만 compact로 부른다
   app.run("renderWaiting(workflowData.items.filter(item => item.status !== 'done'))");
   const lead = app.nodes.get('waitingList').children[0];
-  assert.deepEqual(lead.children[1].children[0].children.map(node => node.textContent),
-    ['다음은?', '후속 할 일', '결정으로', '답변 남기기', '닫기']);
+  assert.equal(lead.children.length, 2, '체크한 줄 한 번 더 + 제안 한 줄이 전부다');
+  const one = lead.children[1];
+  assert.equal(one.className, 'd-wnext is-one');
+  assert.equal(one.children.length, 1, '`이 답을 기다리던 업무` 목록까지 펼치지 않는다');
+  assert.deepEqual(one.children[0].children.map(node => node.textContent),
+    ['답을 받았어요 ·', '후속 할 일 만들기 →', '자세히', '✕']);
+  assert.equal(one.children[0].children[3].getAttribute('aria-label'), '법무 검토 회신 받기 — 다음은? 닫기');
+  assert.equal(one.children[0].children[1].getAttribute('aria-label'), '법무 검토 회신 받기 — 후속 할 일 만들기');
+
+  // 넓은 자리(프로젝트 탭 확인 대기 구역·회의의 나온 줄)는 예전 버튼 줄 그대로다
+  assert.deepEqual(app.run("waitingNextRow(wfItem('ck1'))").children[0].children.map(node => node.textContent),
+    ['다음은?', '후속 할 일', '결정으로 남기기', '답변 한 줄 남기기', '닫기']);
+});
+
+test('BNEXTRAIL: 기다리던 업무가 있으면 한 줄 제안이 그 업무들을 오늘로 옮긴다', async () => {
+  const { app, sent, check } = waitingNextClient();
+  app.run(`workflowData.items.push(
+    { id: 't1', type: 'task', description: '업무1', status: 'to-do', blockedBy: 'ck1', scheduled: todayStr() },
+    { id: 't2', type: 'task', description: '업무2', status: 'to-do', blockedBy: 'ck1' },
+    { id: 't3', type: 'task', description: '업무3', status: 'to-do', blockedBy: 'ck1', scheduled: '2026-01-01' },
+    { id: 't4', type: 'task', description: '끝난 업무', status: 'done', blockedBy: 'ck1' }
+  ); wfIndexData();`);
+  check('ck1');
+  const suggest = app.run("waitingNextOne(wfItem('ck1'))").children[0].children[1];
+  assert.equal(suggest.textContent, '기다리던 업무 2개를 오늘로 →', '이미 오늘인 업무·끝난 업무는 세지 않는다');
+  await suggest.listeners.click();
+  assert.deepEqual(sent.map(call => call.url), ['/api/track/set-scheduled', '/api/track/set-scheduled'],
+    '기존 길을 업무마다 한 번씩 — ⌘Z도 기존 규칙대로 각각 기록된다');
+  assert.deepEqual(sent.map(call => call.body), [
+    { id: 't2', scheduled: app.run('todayStr()') },
+    { id: 't3', scheduled: app.run('todayStr()') },
+  ]);
+  assert.equal(app.nodes.get('liveRegion').textContent, '오늘 할 일로 옮겼어요 · 2개');
+});
+
+test('BNEXTRAIL: 기다리던 업무가 전부 오늘이면 옮기지 않고 상세 카드를 연다', () => {
+  const { app, sent, check } = waitingNextClient();
+  app.run(`workflowData.items.push(
+    { id: 't1', type: 'task', description: '업무1', status: 'to-do', blockedBy: 'ck1', scheduled: todayStr() }
+  ); wfIndexData(); var opened = []; panelOpen = view => opened.push(view);`);
+  check('ck1');
+  const suggest = app.run("waitingNextOne(wfItem('ck1'))").children[0].children[1];
+  assert.equal(suggest.textContent, '기다리던 업무 1개 보기 →');
+  suggest.listeners.click();
+  assert.deepEqual(sent, [], '옮길 것이 없으면 아무것도 보내지 않는다');
+  assert.equal(app.run('opened.length'), 1);
+  assert.equal(app.run("opened[0].id"), 'ck1');
+});
+
+test('BNEXTRAIL: 기다리던 업무가 없으면 상세 카드를 열고 `후속 할 일` 입력칸까지 바로 연다', () => {
+  const { app, check } = waitingNextClient();
+  check('ck1');
+  app.run(`var openedBox = null; panelOpen = view => {
+    openedBox = document.createElement('div');
+    panelCheck({ item: wfItem(view.id), detail: { outcome: '' } }, openedBox);
+  };`);
+  const suggest = app.run("waitingNextOne(wfItem('ck1'))").children[0].children[1];
+  assert.equal(suggest.textContent, '후속 할 일 만들기 →');
+  suggest.listeners.click();
+  const box = app.run('openedBox');
+  assert.ok(box, '상세 카드가 열린다');
+  const form = panelSectionOf(box, '다음은?').children[1].children[0];
+  assert.equal(form.className, 'nx is-ed', '버튼 줄이 이미 입력 줄로 바뀌어 있다');
+  assert.equal(form.children[0].value, '법무 검토 회신 받기', '문구가 미리 채워지고');
+  assert.equal(form.children[0].selected, true, '전체 선택된 채로 열린다');
+  assert.deepEqual(form.children.slice(1).map(node => node.textContent), ['오늘', '나중에']);
+});
+
+test('BNEXTRAIL: `자세히`는 상세 카드를 열고 ✕는 줄만 내린다 — 상세 카드에는 전체 `다음은?`이 선다', () => {
+  const { app, sent, check } = waitingNextClient();
+  check('ck1');
+  app.run("var opened = []; panelOpen = view => opened.push(view);");
+  const bar = app.run("waitingNextOne(wfItem('ck1'))").children[0];
+  bar.children[2].listeners.click();
+  assert.equal(app.run('opened.length'), 1);
+  assert.equal(app.run("opened[0].id"), 'ck1');
+  assert.equal(bar.children[2].getAttribute('aria-label'), '법무 검토 회신 받기 — 다음은? 자세히');
+  bar.children[3].listeners.click();
+  assert.equal(app.run('waitingNextId'), null, '✕는 지금의 `닫기`와 같다');
+  assert.deepEqual(sent, [], '체크는 이미 저장됐으므로 아무것도 보내지 않는다');
+
+  // 상세 카드: 완료 상태 구역에 `답변 한 줄` 칸과 나란히 전체 `다음은?`이 선다
+  app.run(`workflowData.items.push(
+    { id: 't2', type: 'task', description: '업무2', status: 'to-do', blockedBy: 'ck1' }
+  ); wfIndexData();`);
+  const box = panelCheckBox(app, 'ck1');
+  assert.deepEqual(panelSectionsOf(box), ['답변 한 줄', '다음은?', '확인 요청 기록'],
+    '`답변 한 줄` 칸 바로 뒤에 붙어 같은 것을 두 번 묻지 않는다');
+  const row = panelSectionOf(box, '다음은?').children[1];
+  assert.equal(row.className, 'd-wnext is-panel', '레일의 한 줄 제안과 달리 걷히지 않는 붙박이 구역이다');
+  assert.deepEqual(row.children[0].children.map(node => node.textContent),
+    ['후속 할 일', '결정으로 남기기'], '구역 제목이 이미 `다음은?`이라 앞머리 글자와 `답변 한 줄 남기기`·`닫기`는 빠진다');
+  assert.equal(row.children[1].className, 'bl', '`이 답을 기다리던 업무` 목록도 여기 넓게 선다');
+  assert.equal(row.children[1].children[1].children[0].textContent, '업무2');
+
+  // 아직 답을 받지 않은 확인 대기에는 이 구역이 없다
+  app.run("wfItem('ck1').status = 'to-do'; wfIndexData();");
+  assert.deepEqual(panelSectionsOf(panelCheckBox(app, 'ck1')), ['확인 요청 기록']);
 });

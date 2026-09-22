@@ -3004,6 +3004,11 @@ function panelCheck({ item, detail }, box) {
       catch { /* 저장 실패는 request()가 알린다 — 적은 내용은 그대로 둔다 */ }
     };
     box.appendChild(panelOutcomeSection('답변 한 줄', WAITING_ANSWER_PLACEHOLDER, current, save));
+    // 좁은 레일에서는 한 줄 제안만 남으므로, 전체 선택지는 여기 넓게 그린다(`자세히`가 여는 자리).
+    // `답변 한 줄`은 바로 위 칸이 맡아 이 줄에서는 빠진다 — 같은 것을 두 번 묻지 않는다.
+    const next = panelSection('다음은?');
+    next.appendChild(waitingNextRow(item, { panel: true }));
+    box.appendChild(next);
   }
 
   const log = panelSection('확인 요청 기록');
