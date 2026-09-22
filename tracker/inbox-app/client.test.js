@@ -5084,6 +5084,79 @@ test('BJCREATE: 직군 목록은 설정 세트를 따르고, 줄 편집은 앱�
   assert.match(fixture.app.nodes.get('liveRegion').textContent, /직군 목록을 저장했어요/);
 });
 
+// ---------- BJASSIGN: 새로 만든 에픽만 나에게 자동 배정, 프로젝트 목록에 즉시 반영 ----------
+test('BJASSIGN: 새 에픽을 만들면 헤더 새로고침과 같은 조용한 길로 지라 목록을 새로 읽고 화면을 다시 받는다(그 순서로)', async () => {
+  const fixture = projectNewClient();
+  fixture.start();
+  fixture.set("projectNew.name = '게시글 작성하기_게임 임베드'; projectNew.project = 'IO'; projectNew.roles = ['Web']");
+  const order = [];
+  const baseFetch = fixture.app.context.fetch;
+  fixture.app.context.fetch = async (url, options) => { order.push(String(url)); return baseFetch(url, options); };
+  fixture.app.context.load = async () => { order.push('load'); };
+  nodeFind(fixture.body(), 'pri').listeners.click();
+  await bjcButton(nodeFind(fixture.body(), 'd-jconfirm'), '만들기').listeners.click();
+  assert.deepEqual(order, ['/api/jira/create', '/api/jira/list?fresh=1', 'load'], '에픽을 새로 만들면 만들기 뒤에 조용한 새로고침 → 다시 읽기 순서다');
+});
+
+test('BJASSIGN: 이미 있는 에픽에 붙일 때는 지라 목록을 새로 읽지 않는다 — 그 에픽은 재배정하지 않는다', async () => {
+  const attachMade = { ok: true, connected: true, epic: { key: 'IO-48394', url: 'https://example-jira.test/browse/IO-48394', summary: '임베드', created: false }, children: [{ summary: '[Web] 임베드', key: 'IO-48401', url: 'x' }], made: 1, failed: 0 };
+  const fixture = projectNewClient({ made: attachMade });
+  fixture.start();
+  fixture.set(`projectNew.mode = 'attach'; projectNew.roles = ['Web']; projectNew.epic = { key: 'IO-48394', summary: '임베드', children: { items: [] } }`);
+  const calls = [];
+  const baseFetch = fixture.app.context.fetch;
+  fixture.app.context.fetch = async (url, options) => { calls.push(String(url)); return baseFetch(url, options); };
+  fixture.app.context.load = async () => { calls.push('load'); };
+  nodeFind(fixture.body(), 'pri').listeners.click();
+  await bjcButton(nodeFind(fixture.body(), 'd-jconfirm'), '만들기').listeners.click();
+  assert.deepEqual(calls, ['/api/jira/create'], '있는 에픽에 붙일 때는 새로고침·다시 읽기를 하지 않는다');
+});
+
+test('BJASSIGN: 결과 카드는 에픽 배정 실패를 조용한 회색 글자로만 알리고, 하위 줄에는 담당자 문구가 없다', async () => {
+  const assignFailedMade = {
+    ok: true, connected: true,
+    epic: { key: 'IO-48400', url: 'https://example-jira.test/browse/IO-48400', summary: '게시글 작성하기_게임 임베드', created: true, assignError: '지라에서 이 프로젝트에 이슈를 만들 권한이 없어요.' },
+    children: [{ summary: '[Web] 게시글 작성하기_게임 임베드', key: 'IO-48401', url: 'x' }],
+    made: 2, failed: 0,
+  };
+  const fixture = projectNewClient({ made: assignFailedMade });
+  fixture.start();
+  fixture.set("projectNew.name = '게시글 작성하기_게임 임베드'; projectNew.project = 'IO'; projectNew.roles = ['Web']");
+  fixture.app.run('load = async () => {};'); // 이 테스트는 새로고침 순서를 보지 않는다
+  nodeFind(fixture.body(), 'pri').listeners.click();
+  await bjcButton(nodeFind(fixture.body(), 'd-jconfirm'), '만들기').listeners.click();
+  const result = nodeFind(fixture.body(), 'd-pnewres');
+  const epicRow = nodeFindAll(result, 'kid')[0];
+  assert.match(bjcWords(epicRow), /담당자 지정은 안 됐어요 — 지라에서 직접 정해 주세요/);
+  const note = nodeFind(epicRow, 'note');
+  assert.ok(note, '조용한 회색 글자(.note)로 붙는다 — 급한 색(.er)이 아니다');
+  // 하위 줄(두 번째 kid)에는 담당자 관련 문구가 없다 — 하위는 배정을 아예 시도하지 않는다.
+  const childRow = nodeFindAll(result, 'kid')[1];
+  assert.doesNotMatch(bjcWords(childRow), /담당자/);
+});
+
+test('BJASSIGN: 결과 화면의 첫 할 일은 선택이라고 적는다(새 에픽이 이미 배정돼 목록에 뜬 뒤라서)', async () => {
+  const fixture = projectNewClient();
+  fixture.start();
+  fixture.set("projectNew.name = '게시글 작성하기_게임 임베드'; projectNew.project = 'IO'; projectNew.roles = ['Web']");
+  nodeFind(fixture.body(), 'pri').listeners.click();
+  await bjcButton(nodeFind(fixture.body(), 'd-jconfirm'), '만들기').listeners.click();
+  const result = nodeFind(fixture.body(), 'd-pnewres');
+  assert.match(bjcWords(nodeFind(result, 'first')), /첫 할 일을 바로 만들 수도 있어요\(선택\)/);
+  assert.doesNotMatch(bjcWords(result), /적으면 앱에도 이 프로젝트가 생겨요/, '더는 사실이 아닌 문구는 없앤다');
+});
+
+test('BJASSIGN: 에픽 모드에서 첫 할 일을 비워도 확인 줄까지 그대로 진행된다', () => {
+  const fixture = projectNewClient();
+  fixture.start();
+  fixture.set("projectNew.name = '게시글 작성하기_게임 임베드'; projectNew.project = 'IO'; projectNew.roles = ['Web']");
+  assert.equal(fixture.app.run('projectNew.first'), '', '첫 할 일 칸을 건드리지 않았다');
+  const go = nodeFind(fixture.body(), 'pri');
+  assert.equal(go.disabled, false, '첫 할 일이 비어 있어도 눌린다');
+  go.listeners.click();
+  assert.ok(nodeFind(fixture.body(), 'd-jconfirm'), '확인 줄까지 그대로 간다');
+});
+
 // ---------- BWRAP: 오늘 정리 ----------
 // 남은 오늘 업무에 `그대로 | 내일 | 나중에 | 완료`를 찍고 **기존 일괄 저장 길**로만 보낸다
 // (`/api/workflow/task-batch` — 여러 개 선택 막대와 같은 API·같은 change).

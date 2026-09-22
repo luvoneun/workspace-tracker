@@ -2450,12 +2450,18 @@ const jiraCreateTypes = { issueTypes: [
   { id: '10004', name: '버그', subtask: false, hierarchyLevel: 0 },
   { id: '10101', name: '하위 작업', subtask: true, hierarchyLevel: -1 },
 ] };
+// BJASSIGN — 새로 만든 에픽만 이 계정으로 배정한다(하위 티켓은 배정을 아예 시도하지 않는다).
+const JIRA_CREATE_ME = 'fixture-create-me-account';
 // 만들기 요청을 차례대로 받아 새 키를 내주는 가짜 지라. `refuse`에 적은 요약은 그 상태로 거절한다.
-function jiraMakeFake({ types = jiraCreateTypes, refuse = {}, epic = null } = {}) {
+// `mineId`가 null이면 `/myself`가 401을 돌려주고(누가 나인지 조회 실패), `assignStatus`가 204가
+// 아니면 에픽 배정(`PUT .../assignee`)이 그 상태로 거절된다.
+function jiraMakeFake({ types = jiraCreateTypes, refuse = {}, epic = null, mineId = JIRA_CREATE_ME, assignStatus = 204 } = {}) {
   let next = 48400;
   const made = [];
+  const assigned = [];
   const fake = jiraFake({
     '/issue/createmeta': () => json(types),
+    '/rest/api/3/myself': () => (mineId ? json({ accountId: mineId }) : json({}, 401)),
     // 이미 있는 에픽을 대조할 때 읽는 자리(요약과 종류 id만 묻는다)
     '/rest/api/3/issue/IO-': () => (epic ? json({ fields: { summary: epic.summary, issuetype: { id: epic.typeId } } }) : json({ errorMessages: ['no issue'] }, 404)),
   });
@@ -2471,9 +2477,16 @@ function jiraMakeFake({ types = jiraCreateTypes, refuse = {}, epic = null } = {}
       made.push({ key, summary, parent: sent.fields.parent ? sent.fields.parent.key : null, type: sent.fields.issuetype.id });
       return json({ id: '1', key });
     }
+    if (method === 'PUT' && String(url).endsWith('/assignee')) {
+      const sent = JSON.parse(options.body);
+      fake.calls.push({ url, headers: options.headers, method, body: sent });
+      if (assignStatus !== 204) return json({ errorMessages: ['assign refused'] }, assignStatus);
+      assigned.push({ url, accountId: sent.accountId });
+      return new Response(null, { status: 204 });
+    }
     return fake.request(url, options);
   };
-  return { request, calls: fake.calls, made };
+  return { request, calls: fake.calls, made, assigned };
 }
 const jiraMakeApi = (fake, extra = {}) => jiraModule.createJiraApi({ config: jiraConfig, request: fake.request, readFile: () => JIRA_TOKEN, ...extra });
 
@@ -2754,6 +2767,105 @@ test('BJCREATE: 복구가 필요한 동안에는 지라에 만들지도, 직군 
   assert.equal(roles.status, 503);
   // 조회는 그대로 된다.
   assert.equal((await fetch(`${server.base}/api/jira/create-meta?project=IO`)).status, 200);
+});
+
+// ---------- BJASSIGN — 새로 만든 에픽만 나에게 자동 배정 ----------
+// 하위 티켓은 직군별로 다른 사람에게 갈 수 있어 배정을 아예 시도하지 않는다(지금처럼 담당 없음).
+test('BJASSIGN: 새로 만든 에픽은 만든 직후 나에게 배정하고, 배정 주소·본문은 accountId 하나뿐이다', async () => {
+  const fake = jiraMakeFake();
+  const result = await jiraMakeApi(fake).create({ plan: {
+    projectKey: 'IO',
+    epic: { summary: '게시글 작성하기_게임 임베드' },
+    children: [{ summary: '[Web] 게시글 작성하기_게임 임베드', issueTypeId: '10001' }],
+  } });
+  assert.equal(result.ok, true);
+  assert.equal(result.epic.created, true);
+  assert.equal(result.epic.assigned, true);
+  assert.equal(result.epic.assignError, undefined);
+  assert.equal(fake.assigned.length, 1, '배정은 에픽 하나뿐이다');
+  assert.equal(fake.assigned[0].url, `${JIRA_SITE}/rest/api/3/issue/${result.epic.key}/assignee`);
+  assert.equal(fake.assigned[0].accountId, JIRA_CREATE_ME);
+  // 몸통(body)에는 accountId 하나만 실리고, 주소(querystring)에는 accountId 값 자체가 없다.
+  const put = fake.calls.find(call => call.method === 'PUT' && call.url.endsWith('/assignee'));
+  assert.deepEqual(Object.keys(put.body), ['accountId']);
+  assert.doesNotMatch(put.url.split('?')[1] || '', new RegExp(JIRA_CREATE_ME));
+  // 하위 티켓에는 배정을 아예 시도하지 않는다 — `children[]`에 `assigned`/`assignError` 칸도 없다.
+  assert.ok(result.children[0].key, '하위는 그대로 만들어진다');
+  assert.equal('assigned' in result.children[0], false);
+  assert.equal('assignError' in result.children[0], false);
+  // 응답·계정 id 어디에도 계정 식별자가 노출되지 않는다.
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(JIRA_CREATE_ME));
+});
+
+test('BJASSIGN: 누가 나인지는 프로세스마다(같은 api 인스턴스) 한 번만 묻고 재사용한다', async () => {
+  const fake = jiraMakeFake();
+  const api = jiraMakeApi(fake);
+  await api.create({ plan: { projectKey: 'IO', epic: { summary: '한 번' }, children: [] } });
+  await api.create({ plan: { projectKey: 'IO', epic: { summary: '두 번' }, children: [] } });
+  assert.equal(fake.calls.filter(call => call.url.includes('/myself')).length, 1, '두 번째 create()는 myself를 다시 묻지 않는다');
+  assert.equal(fake.assigned.length, 2, '배정 자체는 매번 시도한다');
+});
+
+test('BJASSIGN: 누가 나인지 조회에 실패하면 아무것도 만들지 않고 전체를 중단한다', async () => {
+  const denied = jiraMakeFake({ mineId: null });
+  const result = await jiraMakeApi(denied).create({ plan: {
+    projectKey: 'IO', epic: { summary: '만들면 안 됨' }, children: [{ summary: '[Web] 하위', issueTypeId: '10001' }],
+  } });
+  assert.equal(result.ok, false);
+  assert.equal(result.kind, 'makeForbidden');
+  assert.equal(denied.made.length, 0, '에픽도 하위도 만들지 않는다');
+  assert.equal(denied.assigned.length, 0);
+  assert.equal(denied.calls.filter(call => call.method === 'POST').length, 0, '지라에 쓰기 요청 자체가 없다');
+});
+
+test('BJASSIGN: myself가 401/403이면 다음 create() 때 다시 묻는다', async () => {
+  let denied = true;
+  const flaky = jiraMakeFake({ mineId: JIRA_CREATE_ME });
+  // 첫 시도만 401로 거절되게 route를 뒤엎는다(누가 나인지 조회만) — `create()`가 이 값을 읽기 전에 끼운다.
+  const base = flaky.request;
+  const request = (url, options) => (String(url).includes('/rest/api/3/myself') && denied ? Promise.resolve(json({}, 401)) : base(url, options));
+  const api = jiraModule.createJiraApi({ config: jiraConfig, request, readFile: () => JIRA_TOKEN });
+  const first = await api.create({ plan: { projectKey: 'IO', epic: { summary: '거절됨' }, children: [] } });
+  assert.equal(first.kind, 'makeForbidden');
+  assert.equal(flaky.made.length, 0);
+  denied = false;
+  const second = await api.create({ plan: { projectKey: 'IO', epic: { summary: '이번엔 됨' }, children: [] } });
+  assert.equal(second.ok, true);
+  assert.equal(second.epic.assigned, true);
+});
+
+test('BJASSIGN: 이미 있는 에픽에 붙일 때는 에픽을 재배정하지 않는다 — `assigned` 칸 자체가 없다', async () => {
+  const fake = jiraMakeFake({ epic: { summary: '남의 에픽', typeId: '10000' } });
+  const result = await jiraMakeApi(fake).create({ plan: {
+    projectKey: 'IO', epic: { key: 'IO-48394' }, children: [{ summary: '[Web] 붙임', issueTypeId: '10001' }],
+  } });
+  assert.equal(result.ok, true);
+  assert.equal(result.epic.created, false);
+  assert.equal('assigned' in result.epic, false, 'attach 모드는 assigned 칸을 두지 않는다');
+  assert.equal('assignError' in result.epic, false);
+  assert.equal(fake.assigned.length, 0, '배정 요청 자체가 나가지 않는다');
+});
+
+test('BJASSIGN: 배정만 실패해도 이미 만든 티켓은 그대로 유지되고 assignError만 붙는다', async () => {
+  const fake = jiraMakeFake({ assignStatus: 403 });
+  const result = await jiraMakeApi(fake).create({ plan: {
+    projectKey: 'IO', epic: { summary: '배정만 실패' }, children: [{ summary: '[Web] 하위', issueTypeId: '10001' }],
+  } });
+  assert.equal(result.ok, true, '만들기 자체는 성공이다');
+  assert.equal(result.epic.created, true);
+  assert.ok(result.epic.key, '에픽은 실제로 만들어졌다');
+  assert.equal(result.epic.assigned, undefined);
+  assert.equal(result.epic.assignError, '지라에서 이 프로젝트에 이슈를 만들 권한이 없어요.');
+  assert.equal(fake.made.length, 2, '에픽 + 하위 모두 만들어졌다');
+  assert.equal(result.made, 2, '배정 실패가 만든 개수를 깎지 않는다');
+  assert.equal(result.failed, 0);
+});
+
+test('BJASSIGN: 설정·토큰이 없으면 myself도 묻지 않는다', async () => {
+  const fake = jiraMakeFake();
+  const off = jiraModule.createJiraApi({ config: {}, request: fake.request });
+  await off.create({ plan: { projectKey: 'IO', epic: { summary: 'x' }, children: [] } });
+  assert.equal(fake.calls.length, 0);
 });
 
 // ---------- 반응 필요 (BATTENTION 1차 — 지라 댓글) ----------

@@ -556,7 +556,8 @@ function createJiraClient({ settings, request = (...args) => fetch(...args), rea
   }
 
   // ---------- 새로 만들기(BJCREATE) ----------
-  // 만드는 것은 에픽 하나와 그 아래 하위 티켓들뿐이다. 담당자·설명·배포 버전·기한은 넣지 않는다.
+  // 만드는 것은 에픽 하나와 그 아래 하위 티켓들뿐이다. 새로 만든 에픽만 나에게 자동 배정하고
+  // (BJASSIGN), 하위 티켓은 직군별로 사람이 나중에 따로 지정한다(담당 없음 그대로). 설명·배포 버전·기한은 넣지 않는다.
 
   // 그 프로젝트에서 만들 수 있는 이슈 종류. 새 주소가 없는 지라에서는 옛 주소로 한 번만 물러선다
   // (하위 티켓 조회와 같은 규칙이다).
@@ -592,9 +593,18 @@ function createJiraClient({ settings, request = (...args) => fetch(...args), rea
     return { key, url: issueUrl(settings.siteUrl, key) };
   }
 
+  // 담당자를 accountId로 지정한다(BJASSIGN — 새로 만든 에픽만 부른다). accountId는 사람이 보는
+  // 값이 아니라 지라 내부 식별자라 본문(body)에만 싣고 주소(querystring)에는 절대 넣지 않는다.
+  async function assignIssue(key, accountId) {
+    wantKey(key);
+    const id = idOf(accountId);
+    if (!id) throw jiraError('auth');
+    await call(`/rest/api/3/issue/${key}/assignee`, token(), { method: 'PUT', send: { accountId: id } });
+  }
+
   return {
     getIssueOverview, listMyIssues, listDoneIssues, getTransitions, getVersions, getIssueVersionIds,
-    transition, updateIssueFields, updateVersion, getCreateMeta, getIssueBrief, createIssue,
+    transition, updateIssueFields, updateVersion, getCreateMeta, getIssueBrief, createIssue, assignIssue,
     getMyAccountId, listAttention,
   };
 }
@@ -879,16 +889,40 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
       const epicType = epicTypeOf(types);
       if (!epicType) return give('epicType');
       if (brief.typeId !== epicType.id) return give('notEpic');
+      // 이미 있는 에픽에 붙이는 것뿐이라 재배정하지 않는다 — 남의 에픽일 수 있다.
+      // (그래서 "누가 나인지"도 여기서는 묻지 않는다 — attach는 mineId를 아예 안 쓴다.)
       epic = { key: epicKey, url: issueUrl(settings.siteUrl, epicKey), summary: brief.summary, created: false };
     } else {
       const epicType = epicTypeOf(types);
       if (!epicType) return give('epicType');
+      // 새로 만드는 에픽은 무조건 나에게 배정한다(BJASSIGN) — 그래야 프로젝트 목록에도 바로 뜬다.
+      // 누가 나인지는 이 모듈 상단의 `mineId`에 프로세스마다 한 번만 묻고 그대로 재사용한다
+      // (`attention()`이 쓰는 것과 같은 값). 이 조회가 실패하면 아무것도 만들지 않은 채로 전체를 중단한다
+      // — "만들어졌는데 담당자가 없는" 상태가 생기지 않게 하려는 것이다. 에픽을 만들기 **전에** 확인해서
+      // 만든 뒤에 배정처만 실패로 남는 어중간한 상태를 피한다.
+      if (!mineId) {
+        try {
+          mineId = await client.getMyAccountId();
+        } catch (error) {
+          // 토큰이 바뀌면 나도 달라질 수 있다 — 인증 실패면 다음번에 다시 묻는다(attention()과 같은 규칙).
+          if (error && (error.status === 401 || error.status === 403)) mineId = null;
+          return give(makeKind(error));
+        }
+      }
       try {
         const made = await client.createIssue({ projectKey, issueTypeId: epicType.id, summary: epicSummary });
         epic = { ...made, summary: epicSummary, created: true };
       } catch (error) {
         // 에픽이 실패하면 아무것도 만들지 않은 것과 같다 — 하위는 시작하지도 않는다.
         return give(makeKind(error));
+      }
+      // 새로 만든 에픽만 나에게 배정한다. 실패해도 이미 만들어진 티켓이라 전체를 실패로 돌리지 않고
+      // 그 이유만 결과에 얹는다 — 하위 티켓은 직군별로 사람이 나중에 따로 지정하므로 여기서는 배정하지 않는다.
+      try {
+        await client.assignIssue(epic.key, mineId);
+        epic.assigned = true;
+      } catch (error) {
+        epic.assignError = MESSAGE[makeKind(error)];
       }
     }
 

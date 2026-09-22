@@ -1799,12 +1799,14 @@ body.batch-open .d-toast { bottom: 76px; }
 
 .d-pnew { display: grid; gap: 14px; margin-top: 16px; }
 /* 라벨은 왼쪽 고정 폭, 값은 나머지 — 좁아지면 아래에서 한 줄로 쌓인다 */
-.d-pnew .row { display: grid; grid-template-columns: 92px minmax(0, 1fr); align-items: start; gap: 4px 12px; }
-.d-pnew .row > .lb { padding-top: 8px; font-size: 13.5px; font-weight: 600; color: var(--muted); }
-.d-pnew .row > .ct { display: grid; gap: 6px; min-width: 0; }
+/* 직계 자식(>)으로만 건다 — 이 폼 안에 빌려 쓰는 부품(`.d-jlink`)도 안에 `.row`·`.in`을 쓰는데, 조상 셀렉터로 걸면
+   같은 특이도의 뒷 규칙이 그 부품의 flex를 grid로 덮어써 입력칸이 92px로 찌그러졌다(critique P1). */
+.d-pnew > .row { display: grid; grid-template-columns: 92px minmax(0, 1fr); align-items: start; gap: 4px 12px; }
+.d-pnew > .row > .lb { padding-top: 8px; font-size: 13.5px; font-weight: 600; color: var(--muted); }
+.d-pnew > .row > .ct { display: grid; gap: 6px; min-width: 0; }
 .d-pnew .note, .d-pnewpv .note, .d-pnewacts .note, .d-pnewres .note { font-size: 12.5px; color: var(--dim); }
 .d-pnew .er, .d-pnewacts .er, .d-pnewedit .er, .d-pnewres .er, .d-pnewtype .er { font-size: 12.5px; color: var(--urgent); }
-.d-pnew .in { max-width: 520px; min-height: 34px; }
+.d-pnew > .row > .ct > .in { max-width: 520px; min-height: 34px; }
 /* 고른 에픽 한 줄 — 요약이 먼저, 상태는 뒤, 키는 조용한 글자로만(BKEY) */
 .d-pnewepic {
   display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px;
@@ -1871,8 +1873,8 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-pnewres .first .ln { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .d-pnewres .first .in { flex: 1 1 260px; min-width: 0; min-height: 34px; }
 @media (max-width: 640px) {
-  .d-pnew .row { grid-template-columns: minmax(0, 1fr); }
-  .d-pnew .row > .lb { padding-top: 0; }
+  .d-pnew > .row { grid-template-columns: minmax(0, 1fr); }
+  .d-pnew > .row > .lb { padding-top: 0; }
   .d-pnewpv .ti { flex-basis: 100%; }
 }
 

@@ -1,6 +1,8 @@
 // 새 프로젝트 화면 한 벌 — 프로젝트 탭 왼쪽 목록 머리의 `+`가 여는 오른쪽 면이다.
 // 이름과 직군을 고르면 지라에 **에픽 하나 + 직군별 하위 티켓**을 만든다(이미 있는 에픽에 붙일 수도).
-// 담당자·설명·배포 버전·기한은 넣지 않는다 — 사람이 지라에서 정한다(1차 범위).
+// 새로 만든 에픽은 나에게 자동 배정돼 왼쪽 프로젝트 목록에도 바로 뜬다(BJASSIGN) — 하위 티켓은
+// 직군별로 다른 사람에게 갈 수 있어 담당자를 지정하지 않는다(사람이 지라에서 정한다).
+// 설명·배포 버전·기한도 넣지 않는다 — 사람이 지라에서 정한다(1차 범위).
 //
 // 지키는 것:
 // - 만들 목록 전체를 미리 보여 주고 확인 줄을 한 번 더 거친 뒤에만 보낸다. **앱의 ⌘Z 대상이 아니다**
@@ -191,9 +193,31 @@ function projectNewPickEpic(issue) {
 }
 
 // ---------- 그리기 ----------
-function projectNewPaint() {
+// 다시 그리면 트리를 통째로 바꾸므로(`body.replaceChildren`) 초점이 있던 요소가 사라진다 — 그리기 전에
+// 초점 요소의 이름표(aria-label, 버튼은 글자)를 적어 두고 새 트리에서 같은 것을 찾아 초점을 되돌린다.
+// `preferred`는 blur 핸들러가 넘기는 "초점이 옮겨 가려던 요소"(event.relatedTarget)다 — Tab으로 나가는
+// 순간 다시 그리면 브라우저가 갈 곳을 잃고 <body>로 떨어졸던 것(critique P0)을 막는다.
+function projectNewFocusKey(el) {
+  if (!el || el === document.body || typeof el.getAttribute !== 'function') return null;
+  const label = el.getAttribute('aria-label');
+  if (label) return { tag: el.tagName, label };
+  if (el.tagName === 'BUTTON' && el.textContent) return { tag: 'BUTTON', text: el.textContent.trim() };
+  return null;
+}
+function projectNewRefocus(body, key) {
+  if (!key || !body) return;
+  const found = [...body.querySelectorAll(key.tag)].find(el => key.label
+    ? el.getAttribute('aria-label') === key.label
+    : (el.textContent || '').trim() === key.text);
+  if (found && typeof found.focus === 'function') found.focus();
+}
+function projectNewPaint(preferred) {
   const body = document.getElementById('projectBody');
-  if (body && projectNew) projectNewRender(body);
+  if (!body || !projectNew) return;
+  const key = projectNewFocusKey(preferred || document.activeElement);
+  projectNewRender(body);
+  // 브라우저가 Tab의 기본 동작(초점 이동)을 끝낸 뒤에 되돌린다 — blur 핸들러 안에서 바로 하면 덮인다.
+  if (key) setTimeout(() => projectNewRefocus(body, key), 0);
 }
 
 function projectNewField(label, control, hint) {
@@ -740,11 +764,25 @@ async function projectNewSend(state) {
   state.result = data;
   projectNewPaint();
   showNotice(`지라에 ${data.made}개를 만들었어요`, false, null, { label: '지라에서 열기', onClick: () => jiraOpen(data.epic.url) });
+  // 새로 만든 에픽은 나에게 배정돼 "내 담당 지라 목록"에는 바로 들어가지만, 업무가 하나도
+  // 안 걸려 있어(열린 항목 0) 왼쪽 목록의 접힌 `지난 프로젝트`로 곧장 떨어진다. `첫 할 일`을 적을 때와
+  // 같은 길(openProjectTab)로 지금 보는 프로젝트로 선택해 두면, "보는 동안은 0개여도 위 목록에
+  // 남는다"는 기존 규칙 덕에 결과 화면을 그대로 보면서 왼쪽 목록에도 나타난다(이 화면 자체는
+  // `projectNew`가 살아 있는 한 계속 떠 있으므로 프로젝트 상세로 튀지 않는다). 그 뒤 헤더 새로고침과
+  // 같은 조용한 길로 지라 목록을 한 번 더 읽고 화면을 다시 받는다(실패해도 알리지 않는다).
+  // 차례가 중요하다: 목록을 **먼저** 새로 받은 뒤 선택해야 한다 — 먼저 선택하면 openProjectTab이
+  // 옛 데이터로 곧장 다시 그리면서(setActiveTab → renderActiveTabLists) "없는 프로젝트"로 보고
+  // 선택을 첫 줄로 되돌려 버린다.
+  if (data.epic && data.epic.created) {
+    await refreshJiraListQuietly();
+    await load();
+    openProjectTab(`jira:${data.epic.key}`);
+  }
 }
 
 // ---------- 만든 뒤 ----------
-// 성공도 부분 실패도 같은 자리에 선다. 앱 프로젝트(`jira:KEY`)는 그 에픽에 걸린 항목이 하나
-// 있어야 목록에 뜨므로, 첫 할 일을 적는 줄을 여기에 둔다(적으면 그 프로젝트가 열린다).
+// 성공도 부분 실패도 같은 자리에 선다. 새로 만든 에픽은 나에게 자동 배정되므로(BJASSIGN)
+// 그 순간 왼쪽 프로젝트 목록에도 뜬다 — 첫 할 일 줄은 그래도 바로 업무를 하나 만들고 싶을 때 쓰는 선택 자리다.
 function projectNewResult(state) {
   const box = document.createElement('div');
   box.className = 'd-pnewres';
@@ -768,6 +806,14 @@ function projectNewResult(state) {
   key.className = 'ky';
   key.textContent = result.epic.key;
   epic.append(kind, title, key);
+  // 에픽은 만들어졌지만 나에게 배정하는 것만 실패했을 때 — 만들기 자체는 성공이라 급한 색이 아니라
+  // 조용한 회색으로만 알린다(하위 티켓은 애초에 배정을 시도하지 않으므로 이 문구가 붙지 않는다).
+  if (result.epic.assignError) {
+    const assignNote = document.createElement('span');
+    assignNote.className = 'note';
+    assignNote.textContent = '담당자 지정은 안 됐어요 — 지라에서 직접 정해 주세요';
+    epic.appendChild(assignNote);
+  }
   box.appendChild(epic);
 
   result.children.forEach((child) => {
@@ -810,12 +856,13 @@ function projectNewResult(state) {
   acts.append(open, done);
   box.appendChild(acts);
 
-  // 첫 할 일 한 줄 — 이것이 그 에픽으로 걸리는 순간 앱에도 프로젝트가 생긴다.
+  // 첫 할 일 한 줄(선택) — 새 에픽은 이미 나에게 배정돼 프로젝트 목록에 떴으므로 필수는 아니다.
+  // 바로 업무를 하나 만들고 싶을 때만 적는다.
   const first = document.createElement('div');
   first.className = 'first';
   const label = document.createElement('div');
   label.className = 'note';
-  label.textContent = '첫 할 일을 적으면 앱에도 이 프로젝트가 생겨요.';
+  label.textContent = '첫 할 일을 바로 만들 수도 있어요(선택)';
   const row = document.createElement('div');
   row.className = 'ln';
   const input = projectNewInput(state.first, '첫 할 일 — 예: 기획 초안 정리하기', '첫 할 일', (value) => { state.first = value; }, 200);
@@ -930,13 +977,14 @@ function projectNewRender(body) {
   if (state.mode === 'epic') {
     const project = projectNewInput(state.project, '지라 프로젝트 키 — 예: IO', '지라 프로젝트 키', (value) => { state.project = value; }, 20);
     // 한 글자마다 지라를 부르지 않는다 — 칸을 벗어나거나 Enter를 눌렀을 때만 종류를 읽는다.
-    const settle = () => {
+    const settle = (next) => {
       state.project = project.value.trim().toUpperCase();
       project.value = state.project;
-      projectNewPaint();
+      // Tab으로 나가는 중이면 초점이 가려던 요소(next)를 새 트리에서 찾아 되돌린다(P0).
+      projectNewPaint(next);
       projectNewMetaLoad(state.project);
     };
-    project.addEventListener('blur', settle);
+    project.addEventListener('blur', (event) => settle(event && event.relatedTarget));
     project.addEventListener('keydown', (event) => {
       if (event.key !== 'Enter' || event.isComposing) return;
       if (typeof event.preventDefault === 'function') event.preventDefault();
