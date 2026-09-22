@@ -86,6 +86,9 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
       // 손으로 걸어 둔 `그룹 이름 → 지라 키`. 화면은 지금 보고 있는 프로젝트의 것만 읽으므로,
       // 그룹이 없어져 고아가 된 연결이 남아 있어도 아무 자리에도 나타나지 않는다.
       projectLinks: { ...(state.projectLinks || {}) },
+      // 지라 프로젝트의 앱 안 별칭(`{ "IO-48501": "결제 리뉴얼" }`, BJALIAS). 칸이 없는 옛 파일은
+      // 하나도 없다로 읽힌다(projectLinks 주석과 같은 규칙).
+      projectAliases: { ...(state.projectAliases || {}) },
       // 새 프로젝트 화면의 직군 세트(`[{ label, prefix }]`). 파일에 칸이 없으면 `null`이고
       // 그때는 **화면이** 기본 세트를 쓴다 — 여기서 기본값을 파일에 써 넣지 않는다.
       // 사람이 전부 지우면 빈 배열이 저장되고, 그때는 빈 목록이 그대로 보인다.
@@ -241,6 +244,40 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     return { ok: true, project, jira: key };
   }
 
+  // ---------- 지라 프로젝트 앱 안 별칭 (BJALIAS) ----------
+  // 지라 요약은 그대로 두고 앱 안에서만 쓰는 이름을 덧씌운다. 여기서 보는 것은 형식(지라 키·글자
+  // 길이·대괄호)뿐이다 — 그룹 이름·다른 별칭·지라 요약과의 겹침 검사는 부르는 쪽(server.js)이
+  // 이 함수를 부르기 전에 마친다(지라 요약 목록은 여기서 보이지 않는다 — checkProjectLink와 같은
+  // 역할 나눔). 저장 길은 projectLinks와 같다(idempotent → mutations.run → 원자적 쓰기).
+  const PROJECT_ALIAS_MAX = 60;
+  function checkProjectAlias({ jira, alias }) {
+    if (typeof jira !== 'string' || !PROJECT_LINK_KEY_RE.test(jira)) throw new Error('지라 번호를 확인해 주세요.');
+    if (alias === undefined || alias === null || alias === '') return { jira, alias: null };
+    if (typeof alias !== 'string') throw new Error(`별칭은 ${PROJECT_ALIAS_MAX}자 이내 한 줄로, 대괄호 없이 적어 주세요.`);
+    // 밑줄→공백 정리는 renameProject의 `to`와 같은 규칙이다(연속 공백은 여기서 지우지 않는다 —
+    // 겹침 비교에서만 groupNameKey가 고르게 맞춘다. renameProject의 "결제  리뉴얼"이 자기 이름과
+    // 겹치지 않는 것과 같은 이유다).
+    const cleaned = alias.replace(/_/g, ' ').trim();
+    if (!cleaned || cleaned.length > PROJECT_ALIAS_MAX || /[\r\n\[\]]/.test(cleaned)) throw new Error(`별칭은 ${PROJECT_ALIAS_MAX}자 이내 한 줄로, 대괄호 없이 적어 주세요.`);
+    return { jira, alias: cleaned };
+  }
+  function setProjectAlias({ jira, alias }) {
+    const { jira: key, alias: cleaned } = checkProjectAlias({ jira, alias });
+    const state = read();
+    const aliases = { ...(state.projectAliases || {}) };
+    const previous = aliases[key] || null;
+    if (cleaned) aliases[key] = cleaned;
+    else delete aliases[key];
+    state.projectAliases = aliases;
+    write(state);
+    return { ok: true, jira: key, alias: cleaned, previous };
+  }
+  // 겹침 검사(server.js)·이름표 짓기(projectLabelOf 등)가 읽는 자리 — read()는 file I/O라 매번
+  // 새로 읽는다(스냅샷 캐시가 아니다).
+  function projectAliases() {
+    return { ...(read().projectAliases || {}) };
+  }
+
   // ---------- 새 프로젝트 화면의 직군 세트 ----------
   // `workspace.config.json`은 사람이 손으로 고치는 파일이라 앱이 쓰지 않는다 — 직군 세트는 앱
   // 데이터다. 저장 길은 projectLinks·projectArchive와 같다(idempotent → mutations.run → 원자적 쓰기).
@@ -385,5 +422,5 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     write(state);
     return { ok: true };
   }
-  return { archive, snapshot, patchItem, saveMeeting, syncProject, capture, review, undoReview, retype, link, checkProjectLink, linkProject, checkJiraRoles, saveJiraRoles, groupList, renameGroup, attentionDismissed, dismissAttention, undismissAttention, outcome: id => read().items[id]?.outcome || '' };
+  return { archive, snapshot, patchItem, saveMeeting, syncProject, capture, review, undoReview, retype, link, checkProjectLink, linkProject, checkProjectAlias, setProjectAlias, projectAliases, checkJiraRoles, saveJiraRoles, groupList, renameGroup, attentionDismissed, dismissAttention, undismissAttention, outcome: id => read().items[id]?.outcome || '' };
 };

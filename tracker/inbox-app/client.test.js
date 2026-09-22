@@ -448,6 +448,48 @@ test('uiGroupLabels: 같은 요약의 지라가 한 목록에 둘이면 그때�
   assert.deepEqual(alone, [['jira:AB-1', '가입 개선'], ['jira:EF-3', '정산']], '겹치지 않으면 요약만');
 });
 
+// ---------- BJALIAS: 지라 프로젝트 앱 안 별칭 ----------
+// 규칙은 하나 — 별칭이 있으면 앱 안 어디서나(uiProjectName·uiGroupLabel·uiGroupLabels·wfProjects) 그
+// 이름이다. 캐시에 요약이 없어도(내 담당 목록 밖) 별칭만 있으면 이름이 있는 것으로 본다.
+test('BJALIAS: uiProjectName·uiGroupLabel은 별칭이 있으면 그 이름을 쓰고, 없으면 요약이다', () => {
+  const app = pureClient();
+  app.run("jiraIssuesByKey = new Map([['AB-1', { key: 'AB-1', summary: '[Q4] 결제 리뉴얼 v2 (iOS/AOS)' }]])");
+  app.run("projectAliasesCache = { 'AB-1': '결제 리뉴얼' }");
+  assert.equal(app.run("uiProjectName({ jira: 'AB-1' })"), '결제 리뉴얼');
+  assert.equal(app.run("uiProjectName({ jira: 'AB-1' }, { withKey: true })"), 'AB-1 · 결제 리뉴얼');
+  assert.equal(app.run("uiProjectName({ jira: 'AB-1' }, { picker: true })"), '결제 리뉴얼 · AB-1');
+  assert.equal(app.run("uiGroupLabel('jira:AB-1')"), '결제 리뉴얼');
+  assert.equal(app.run("uiGroupLabel('jira:AB-1', { withKey: true })"), 'AB-1 · 결제 리뉴얼');
+  // 캐시에 없는(내 담당 목록 밖) 티켓도 별칭만 있으면 이름이 있는 것으로 본다 — 키만 보이지 않는다.
+  app.run("projectAliasesCache = { 'ZZ-9': '모르는 프로젝트' }");
+  assert.equal(app.run("uiProjectName({ jira: 'ZZ-9' })"), '모르는 프로젝트');
+  assert.equal(app.run("uiProjectName({ jira: 'ZZ-9' }, { withKey: true })"), 'ZZ-9 · 모르는 프로젝트');
+  // 별칭이 없으면 예전처럼 요약(모르면 키) 그대로다.
+  app.run("projectAliasesCache = {}");
+  assert.equal(app.run("uiProjectName({ jira: 'AB-1' })"), '[Q4] 결제 리뉴얼 v2 (iOS/AOS)');
+});
+test('BJALIAS: uiGroupLabels — 별칭 두 개가 같은 글자면 그때만 키로 구분한다', () => {
+  const app = pureClient();
+  app.run(`jiraIssuesByKey = new Map([
+    ['AB-1', { key: 'AB-1', summary: '결제 정산 API' }],
+    ['CD-2', { key: 'CD-2', summary: '알림 발송 정리' }],
+  ]); projectAliasesCache = { 'AB-1': '정산', 'CD-2': '정산' };`);
+  const dupes = JSON.parse(app.run("JSON.stringify([...uiGroupLabels(['jira:AB-1', 'jira:CD-2'])])"));
+  assert.deepEqual(dupes, [['jira:AB-1', 'AB-1 · 정산'], ['jira:CD-2', 'CD-2 · 정산']], '별칭이 같은 글자로 겹치면 키로 구분한다');
+  app.run("projectAliasesCache = { 'AB-1': '정산' };"); // CD-2는 별칭 없이 요약 그대로 → 겹치지 않는다
+  const alone = JSON.parse(app.run("JSON.stringify([...uiGroupLabels(['jira:AB-1', 'jira:CD-2'])])"));
+  assert.deepEqual(alone, [['jira:AB-1', '정산'], ['jira:CD-2', '알림 발송 정리']]);
+});
+test('BJALIAS: wfProjects의 지라 라벨도 같은 헬퍼(uiProjectName)를 쓴다', () => {
+  const app = workflowsClient();
+  app.run("workflowData = { items: [], meetings: [] }; jiraIssuesCache = [{ key: 'AB-1', summary: '[Q4] 결제 리뉴얼 v2 (iOS/AOS)' }]; customGroupsCache = [];");
+  app.run("jiraIssuesByKey = new Map(jiraIssuesCache.map(i => [i.key, i]))");
+  app.run("projectAliasesCache = {}");
+  assert.deepEqual(JSON.parse(app.run("JSON.stringify(wfProjects().find(([key]) => key === 'jira:AB-1'))")), ['jira:AB-1', 'AB-1 · [Q4] 결제 리뉴얼 v2 (iOS/AOS)']);
+  app.run("projectAliasesCache = { 'AB-1': '결제 리뉴얼' }");
+  assert.deepEqual(JSON.parse(app.run("JSON.stringify(wfProjects().find(([key]) => key === 'jira:AB-1'))")), ['jira:AB-1', 'AB-1 · 결제 리뉴얼'], '별칭이 있으면 그 이름이 붙는다');
+});
+
 // BKEY: 프로젝트를 고르는 목록은 `요약 · 키`이고, 정렬은 요약 기준이다.
 test('group select options offer clearing only when there is something to clear, and jira options read "요약 · 키" sorted by summary', () => {
   const app = pureClient();
@@ -4633,9 +4675,9 @@ test('BNOARCHIVE: 조용한 프로젝트에 업무가 생기면 자동으로 다
   assert.ok(fixture.rowsOf().some(row => row.name === '오래 조용한 것' && !row.past), '업무가 생기면 자동으로 다시 올라온다');
 });
 
-test('BNOARCHIVE: 제목 ⋯ 메뉴에 보관 항목이 없다 — 그룹 프로젝트는 이름 바꾸기만, 지라 프로젝트는 ⋯ 버튼 자체가 없고 요약 줄에 `보관한 프로젝트` 문구도 없다', () => {
+test('BNOARCHIVE: 제목 ⋯ 메뉴에 보관 항목이 없다 — 그룹 프로젝트는 이름 바꾸기만, 지라 프로젝트는 이름 바꾸기(별칭)만이고 요약 줄에 `보관한 프로젝트` 문구도 없다', () => {
   const app = workflowsClient();
-  app.run("latestData = { jiraSync: { used: false } }; jiraIssuesCache = []; jiraIssuesByKey = new Map(); customGroupsCache = [];");
+  app.run("latestData = { jiraSync: { used: false } }; jiraIssuesCache = []; jiraIssuesByKey = new Map(); customGroupsCache = []; projectAliasesCache = {};");
   app.run("workflowData = { meetings: [], items: [] }; wfIndexData();");
   app.run("lastMenu = null; uiMenu = (anchor, sections) => { lastMenu = sections; return null; };");
   const detail = key => app.run(`(() => {
@@ -4649,9 +4691,12 @@ test('BNOARCHIVE: 제목 ⋯ 메뉴에 보관 항목이 없다 — 그룹 프로
   nodeFind(groupBody.children[0], 'd-more').listeners.click({ stopPropagation() {} });
   assert.equal(app.run('lastMenu')[0].map(entry => entry.label).join(','), '이름 바꾸기', '그룹 프로젝트는 이름 바꾸기만 남는다');
 
+  // 지라 프로젝트는 보관 관련 항목은 없지만, 별칭을 위한 `이름 바꾸기`는 있다(BJALIAS — 보관을
+  // 없애며 사라졌던 ⋯이 이 용도로 돌아왔다).
   app.run('lastMenu = null;');
   const jiraBody = detail('jira:IO-1');
-  assert.equal(nodeFind(jiraBody.children[0], 'd-more'), null, '지라 프로젝트는 할 수 있는 일이 없어 ⋯ 버튼 자체가 없다');
+  nodeFind(jiraBody.children[0], 'd-more').listeners.click({ stopPropagation() {} });
+  assert.equal(app.run('lastMenu')[0].map(entry => entry.label).join(','), '이름 바꾸기', '별칭이 없으면 이름 바꾸기 하나뿐이다');
 });
 
 test('BNOARCHIVE: 지난 프로젝트도 고르기 목록에 그대로 있고, `지난 프로젝트` 소제목 아래로만 간다', () => {
@@ -5249,7 +5294,7 @@ function renameClient() {
   return { ...fixture, detail };
 }
 
-test('BRENAME: 이름 바꾸기는 직접 만든 프로젝트에만 있고, 지라 프로젝트는 제목이 이유를 말한다 — ⋯ 버튼 자체가 없다', () => {
+test('BRENAME: 그룹 프로젝트는 이름 바꾸기, 지라 프로젝트는 별칭이 없으면 제목이 이유를 말하고 ⋯은 이름 바꾸기 하나다(BJALIAS)', () => {
   const fixture = renameClient();
   const group = fixture.detail('group:살아 있는 것');
   nodeFind(group.children[0], 'd-more').listeners.click({ stopPropagation() {} });
@@ -5257,8 +5302,10 @@ test('BRENAME: 이름 바꾸기는 직접 만든 프로젝트에만 있고, 지�
   assert.equal(group.children[0].title, undefined, '직접 만든 프로젝트의 제목에는 설명이 붙지 않는다');
 
   const jira = fixture.detail('jira:IO-12345');
-  assert.equal(nodeFind(jira.children[0], 'd-more'), null, '지라 프로젝트는 할 수 있는 일이 없어 ⋯ 버튼 자체가 없다');
-  assert.equal(jira.children[0].title, '이름은 지라 요약을 따라요');
+  assert.equal(jira.children[0].title, '이름은 지라 요약을 따라요', '별칭이 없을 때만 붙는 툴팁이다');
+  fixture.app.run('lastMenu = null;');
+  nodeFind(jira.children[0], 'd-more').listeners.click({ stopPropagation() {} });
+  assert.equal(fixture.app.run('lastMenu')[0].map(entry => entry.label).join(','), '이름 바꾸기', '보관을 없애며 사라졌던 ⋯이 별칭을 위해 돌아왔다 — 되돌리기 항목은 별칭이 있을 때만');
 });
 
 test('BRENAME: 제목 자리가 입력칸이 되고 Enter로 보낸다 — 한글 조합 중 Enter는 넘기고 취소는 제목으로 돌아간다', async () => {
@@ -5312,6 +5359,98 @@ test('BRENAME: 알림의 `되돌리기`는 반대 방향으로 한 번 더 바�
   assert.match(region.textContent, /이름을 되돌렸어요 · 살아 있는 프로젝트 → 살아 있는 것/);
   assert.equal(fixture.app.run('projectKey'), 'group:살아 있는 것');
   assert.equal(fixture.app.run('undoStack.length'), 0, '앱의 ⌘Z 대상은 아니다 — 되돌리는 길은 알림뿐이다');
+});
+
+// ---------- BJALIAS: 지라 프로젝트 앱 안 별칭(화면) ----------
+// 가짜 fetch만 쓴다 — 지라에는 아무것도 나가지 않는다(POST는 /api/project/alias 하나뿐이다).
+function aliasClient() {
+  const store = { 'IO-48501': null }; // 서버가 들고 있는 값 흉내 — `previous` 계산에 쓴다.
+  const fixture = projectListClient({ posts: (url) => {
+    if (!url.includes('/api/project/alias')) return new Response('{"ok":true}');
+    const body = fixture.sent[fixture.sent.length - 1].body;
+    const previous = store[body.jira] || null;
+    store[body.jira] = body.alias || null;
+    return new Response(JSON.stringify({ ok: true, jira: body.jira, alias: body.alias || null, previous }));
+  } });
+  fixture.app.run('loads = 0; load = async () => { loads += 1; };');
+  fixture.app.run("lastMenu = null; uiMenu = (anchor, sections) => { lastMenu = sections; return null; };");
+  fixture.app.run("jiraIssuesByKey = new Map([['IO-48501', { key: 'IO-48501', summary: '[Q4] 결제 리뉴얼 v2 (iOS/AOS)' }]]); jiraIssuesCache = [...jiraIssuesByKey.values()];");
+  const detail = (key, alias) => fixture.app.run(`(() => {
+    projectAliasesCache = ${alias ? JSON.stringify({ 'IO-48501': alias }) : '{}'};
+    const body = document.createElement('div');
+    renderProjectDetail(body, { key: ${JSON.stringify(key)}, label: ${JSON.stringify(key)}, open: 1 });
+    return body;
+  })()`);
+  return { ...fixture, detail, store };
+}
+
+test('BJALIAS: 지라 프로젝트 ⋯ 메뉴 — 별칭이 없으면 이름 바꾸기만, 있으면 지라 이름으로 되돌리기가 더 붙는다', () => {
+  const fixture = aliasClient();
+  const bare = fixture.detail('jira:IO-48501', null);
+  nodeFind(bare.children[0], 'd-more').listeners.click({ stopPropagation() {} });
+  assert.equal(fixture.app.run('lastMenu')[0].map(entry => entry.label).join(','), '이름 바꾸기');
+
+  fixture.app.run('lastMenu = null;');
+  const aliased = fixture.detail('jira:IO-48501', '결제 리뉴얼');
+  nodeFind(aliased.children[0], 'd-more').listeners.click({ stopPropagation() {} });
+  assert.equal(fixture.app.run('lastMenu')[0].map(entry => entry.label).join(','), '이름 바꾸기,지라 이름으로 되돌리기');
+});
+
+test('BJALIAS: 조용한 줄 — 별칭이 없으면 예전과 같고, 있으면 `지라: 원문`이 늘 붙는다', () => {
+  const fixture = aliasClient();
+  const bare = fixture.detail('jira:IO-48501', null);
+  assert.equal(bare.children[1].textContent, '열린 항목 1 · IO-48501');
+  const aliased = fixture.detail('jira:IO-48501', '결제 리뉴얼');
+  assert.equal(aliased.children[1].textContent, '열린 항목 1 · IO-48501 · 지라: [Q4] 결제 리뉴얼 v2 (iOS/AOS)');
+  assert.equal(aliased.children[1].title, aliased.children[1].textContent, '길어질 수 있어 title에도 전체를 남긴다');
+});
+
+test('BJALIAS: 제목 자리 인라인 저장 → POST /api/project/alias · 알림 · 되돌리기, 키는 그대로라 projectKey를 다시 잡지 않는다', async () => {
+  const fixture = aliasClient();
+  const body = fixture.detail('jira:IO-48501', null);
+  fixture.app.run("projectKey = 'jira:IO-48501';");
+  const title = body.children[0];
+  nodeFind(title, 'd-more').listeners.click({ stopPropagation() {} });
+  fixture.app.run('lastMenu')[0][0].onClick();
+
+  const box = body.children[0];
+  assert.equal(box.className, 'd-pren');
+  const input = nodeFind(box, 'd-din');
+  assert.equal(input.value, '[Q4] 결제 리뉴얼 v2 (iOS/AOS)', '별칭이 없을 때는 현재 표시 이름 — 지라 요약이 전체 선택된 채로 열린다');
+
+  input.value = '결제 리뉴얼';
+  await input.listeners.keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+  assert.deepEqual(fixture.sent, [{ url: '/api/project/alias', body: { jira: 'IO-48501', alias: '결제 리뉴얼' } }]);
+  assert.equal(fixture.app.run('projectKey'), 'jira:IO-48501', '지라 키는 바뀌지 않으므로 그대로 열린 채로 남는다');
+  assert.equal(fixture.app.run('loads'), 1);
+
+  const region = fixture.app.nodes.get('liveRegion');
+  assert.match(region.textContent, /이름을 바꿨어요 · \[Q4\] 결제 리뉴얼 v2 \(iOS\/AOS\) → 결제 리뉴얼/);
+  const undo = region.children.find(kid => kid.textContent === '되돌리기');
+  await undo.listeners.click(undo);
+  assert.deepEqual(fixture.sent.slice(-1), [{ url: '/api/project/alias', body: { jira: 'IO-48501', alias: null } }]);
+  assert.match(region.textContent, /이름을 되돌렸어요 · 결제 리뉴얼 → \[Q4\] 결제 리뉴얼 v2 \(iOS\/AOS\)/);
+  assert.equal(fixture.app.run('undoStack.length'), 0, '앱의 ⌘Z 대상은 아니다');
+});
+
+test('BJALIAS: 그룹 프로젝트의 제목 ⋯ 메뉴는 그대로다(별칭은 지라 프로젝트만의 일)', () => {
+  const fixture = renameClient();
+  const group = fixture.detail('group:살아 있는 것');
+  nodeFind(group.children[0], 'd-more').listeners.click({ stopPropagation() {} });
+  assert.equal(fixture.app.run('lastMenu')[0].map(entry => entry.label).join(','), '이름 바꾸기', '그룹 프로젝트에는 별칭 항목이 없다');
+});
+
+test('BJALIAS: 프로젝트 찾기(projectFindFilter)는 별칭·지라 원래 요약 둘 다로 찾힌다', () => {
+  const app = workflowsClient(); // projectFindFilter가 쓰는 wfSearchMatches는 workflows.js에 있다
+  app.run("jiraIssuesByKey = new Map([['IO-48501', { key: 'IO-48501', summary: '[Q4] 결제 리뉴얼 v2 (iOS/AOS)' }]])");
+  app.run("projectAliasesCache = { 'IO-48501': '결제 리뉴얼' }");
+  const rows = [{ key: 'jira:IO-48501', label: 'jira:IO-48501' }];
+  const byAlias = JSON.parse(app.run(`JSON.stringify(projectFindFilter(${JSON.stringify(rows)}, '결제 리뉴얼').map(r => r.key))`));
+  assert.deepEqual(byAlias, ['jira:IO-48501'], '별칭으로 찾힌다(우선 표시되는 이름)');
+  const byRaw = JSON.parse(app.run(`JSON.stringify(projectFindFilter(${JSON.stringify(rows)}, 'iOS/AOS').map(r => r.key))`));
+  assert.deepEqual(byRaw, ['jira:IO-48501'], '별칭에 가려진 지라 원래 요약으로도 찾힌다');
+  const none = JSON.parse(app.run(`JSON.stringify(projectFindFilter(${JSON.stringify(rows)}, '알림센터').map(r => r.key))`));
+  assert.deepEqual(none, []);
 });
 
 // ---------- 새 프로젝트 화면 (BJCREATE) ----------

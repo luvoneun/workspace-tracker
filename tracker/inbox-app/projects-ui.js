@@ -119,10 +119,15 @@ function projectDeployTone(releaseDate) {
 }
 
 // 이름(요약·그룹)·키로 거른다 — 팔레트의 wfSearchMatches와 같은 규칙(NFKC·대소문자 무시·모든 낱말 포함).
+// 별칭이 있으면 uiGroupLabel이 별칭을 돌려주므로, 지라 원래 요약도 haystack에 함께 넣어 그 글자로도 찾힌다(BJALIAS).
 function projectFindFilter(rows, query) {
   const needle = query.trim();
   if (!needle) return rows;
-  return rows.filter(row => wfSearchMatches(needle, [uiGroupLabel(row.key, { withKey: true })]));
+  return rows.filter((row) => {
+    const jira = jiraKeyOf(row.key);
+    const raw = jira ? (jiraIssuesByKey.get(jira)?.summary || '') : '';
+    return wfSearchMatches(needle, [uiGroupLabel(row.key, { withKey: true }), raw]);
+  });
 }
 
 // 오늘 목록의 그룹 제목·업무 상세의 `프로젝트 보기`가 부르는 길.
@@ -485,18 +490,58 @@ async function projectRenameSave(fromKey, to) {
   return true;
 }
 
-// 제목 자리가 그대로 입력칸이 된다(현재 이름·전체 선택). Enter/`저장`으로 보내고 Esc/`취소`로 되돌린다.
-// 한글을 조합하는 중의 Enter는 글자를 확정하는 것이라 넘긴다(앱의 다른 입력칸과 같은 규칙).
+// ---------- 지라 프로젝트 앱 안 별칭 (BJALIAS) ----------
+// 지라 프로젝트의 이름(요약)은 그대로 두고 앱 안에서만 쓰는 별칭을 덧씌운다. 규칙은 하나 —
+// 별칭이 있으면 앱 안 어디서나(왼쪽 목록·그룹 제목·프로젝트 고르기·주간요약·슬랙 복사) 그 이름이고,
+// 지라 원래 이름은 프로젝트 탭 제목 아래 조용한 줄에 늘 보인다. 지라에는 아무것도 쓰지 않는다.
+// alias:null이면 별칭을 지운다(제목 ⋯의 `지라 이름으로 되돌리기`도 이 함수를 그대로 쓴다).
+const projectAliasPost = (jira, alias) => request('/api/project/alias', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jira, alias }),
+});
+
+// 지라 키는 이름이 바뀌지 않으므로 그룹 이름 바꾸기와 달리 projectKey·차례를 다시 잡지 않아도 된다
+// (같은 프로젝트가 열린 채로 남는다). 앱의 ⌘Z 대상은 아니다 — 되돌리는 길은 알림의 `되돌리기`(서버가
+// 돌려준 `previous`로 반대 방향 저장)뿐이다.
+async function projectAliasSave(jiraKey, alias) {
+  const from = uiGroupLabel(`jira:${jiraKey}`);
+  // 지라 요약(별칭이 없을 때의 기본 이름)은 요청 전에 이미 안다 — 그룹 이름 바꾸기처럼 되돌리기·
+  // 재로드 뒤의 표시 이름도 여기서 직접 짓는다(re-load가 캐시를 다시 채우는 시점에 기대지 않는다).
+  const rawSummary = jiraIssuesByKey.get(jiraKey)?.summary || jiraKey;
+  const to = alias || rawSummary;
+  let result;
+  try {
+    const response = await projectAliasPost(jiraKey, alias);
+    result = await response.json();
+  } catch { return false; }
+  await load();
+  showNotice(`이름을 바꿨어요 · ${from} → ${to}`, false, null, {
+    label: '되돌리기',
+    onClick: async (button) => {
+      if (button) button.disabled = true;
+      const back = result.previous || rawSummary;
+      try { await projectAliasPost(jiraKey, result.previous ?? null); } catch { return; }
+      await load();
+      showNotice(`이름을 되돌렸어요 · ${to} → ${back}`);
+    },
+  });
+  return true;
+}
+
+// 제목 자리가 그대로 입력칸이 된다(현재 표시 이름·전체 선택). Enter/`저장`으로 보내고 Esc/`취소`로
+// 되돌린다. 한글을 조합하는 중의 Enter는 글자를 확정하는 것이라 넘긴다(앱의 다른 입력칸과 같은 규칙).
+// 직접 만든(그룹) 프로젝트는 이름을 그대로 바꾸고, 지라 프로젝트(`jira:KEY`)는 앱 안 별칭을 저장한다.
 function projectRenameStart(title, key) {
   if (!title.isConnected) return;
+  const jira = key.startsWith('jira:') ? key.slice('jira:'.length) : '';
+  const current = uiGroupLabel(key);
   const box = document.createElement('div');
   box.className = 'd-pren';
   const input = document.createElement('input');
   input.type = 'text';
   input.className = 'd-din';
   input.maxLength = 60;
-  input.value = key.slice('group:'.length);
-  input.setAttribute('aria-label', '프로젝트 이름');
+  input.value = current;
+  input.setAttribute('aria-label', jira ? '프로젝트 별칭' : '프로젝트 이름');
   const save = document.createElement('button');
   save.type = 'button';
   save.className = 'd-btn sm acc';
@@ -525,9 +570,10 @@ function projectRenameStart(title, key) {
   const commit = async () => {
     if (settled) return;
     const value = input.value.trim();
-    if (!value || value === key.slice('group:'.length)) { cancel(); return; }
+    if (!value || value === current) { cancel(); return; }
     input.disabled = true; save.disabled = true; cancelBtn.disabled = true;
-    if (!await projectRenameSave(key, value)) {
+    const ok = jira ? await projectAliasSave(jira, value) : await projectRenameSave(key, value);
+    if (!ok) {
       input.disabled = false; save.disabled = false; cancelBtn.disabled = false;
       input.focus();
       return;
@@ -697,24 +743,34 @@ function renderProjectDetail(body, row) {
   const title = document.createElement('h2');
   title.className = 'd-ptitle';
   // 큰 제목은 요약만(BKEY 결정) — 한 프로젝트만 보여 주는 자리라 같은 요약과 헷갈릴 일이 없다.
+  // 지라 프로젝트에 별칭이 있으면 uiGroupLabel이 이미 그 이름을 돌려준다(BJALIAS).
   title.textContent = uiGroupLabel(row.key);
-  // 이름을 바꿀 수 있는 것은 직접 만든(그룹) 프로젝트뿐이다 — 지라 프로젝트의 이름은 지라 요약이라
-  // 메뉴 항목을 두지 않고 제목의 툴팁으로만 그 사실을 알린다.
   const key = typeof row.key === 'string' ? row.key : '';
   const named = key.startsWith('group:');
-  if (key.startsWith('jira:')) title.title = '이름은 지라 요약을 따라요';
+  const jiraKey = jiraKeyOf(row.key);
+  // 직접 만든(그룹) 프로젝트는 이름을 그대로 바꾸고, 지라 프로젝트는 앱 안 별칭만 덧씌운다
+  // (지라 요약 자체는 고치지 않는다 — BJALIAS). 별칭이 없을 때만 툴팁으로 그 사실을 알린다.
+  const jiraAlias = key.startsWith('jira:') ? projectAliasesCache[key.slice('jira:'.length)] : '';
+  if (key.startsWith('jira:') && !jiraAlias) title.title = '이름은 지라 요약을 따라요';
   // 제목 줄의 ⋯ — 지라 띠 카드의 ⋯(연결 해제)와는 다른 메뉴다. 여기는 프로젝트 자체의 일이다.
-  // 이름을 바꿀 수 있는 그룹 프로젝트에만 단다 — 지라 프로젝트는 할 수 있는 일이 없어 ⋯ 버튼 자체가 없다.
-  if (named) {
-    title.appendChild(uiMoreButton('프로젝트 메뉴', () => [[
-      { label: '이름 바꾸기', onClick: () => projectRenameStart(title, row.key) },
-    ]]));
+  if (named || key.startsWith('jira:')) {
+    const menuItems = [{ label: '이름 바꾸기', onClick: () => projectRenameStart(title, row.key) }];
+    if (jiraAlias) menuItems.push({ label: '지라 이름으로 되돌리기', onClick: () => projectAliasSave(key.slice('jira:'.length), null) });
+    title.appendChild(uiMoreButton('프로젝트 메뉴', () => [menuItems]));
   }
   const summary = document.createElement('div');
-  summary.className = 'd-quiet';
-  // 그 아래 조용한 줄에만 지라 키를 덧붙인다(`열린 항목 2 · IO-48394`).
-  const jiraKey = jiraKeyOf(row.key);
-  summary.textContent = `열린 항목 ${row.open}` + (jiraKey ? ` · ${jiraKey}` : '');
+  // 별칭이 있으면 지라 원문이 길어질 수 있어 말줄임 + title로 전체를 남긴다(BJALIAS).
+  summary.className = 'd-quiet' + (jiraAlias ? ' d-ptquiet' : '');
+  // 그 아래 조용한 줄에 지라 키를 덧붙이고(`열린 항목 2 · IO-48394`), 별칭이 있으면 지라 원래
+  // 이름도 늘 보여 준다(어긋남을 숨기지 않는다 — 보관/조용함 교훈).
+  const summaryParts = [`열린 항목 ${row.open}`];
+  if (jiraKey) summaryParts.push(jiraKey);
+  if (jiraAlias) {
+    const rawSummary = jiraIssuesByKey.get(key.slice('jira:'.length))?.summary || '';
+    if (rawSummary) summaryParts.push(`지라: ${rawSummary}`);
+  }
+  summary.textContent = summaryParts.join(' · ');
+  if (jiraAlias) summary.title = summary.textContent;
   body.append(title, summary);
 
   // 지라에 연결된 프로젝트에만, 제목 줄 아래·첫 구역 위에 지라 띠 카드가 선다 — `jira:KEY`

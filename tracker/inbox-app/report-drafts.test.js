@@ -434,6 +434,65 @@ test('BRENAME: 보고 기록 형식이 깨져 있으면 이름 바꾸기는 저�
   assert.throws(()=>f.store.renameGroup('가입','가입 개선'),/보고 기록 형식을 확인해 주세요/);
   assert.equal(fs.readFileSync(file,'utf8'),JSON.stringify({schema:2,weeks:{}}));
 });
+// ---------- BJALIAS: 지라 프로젝트 앱 안 별칭 ----------
+// relabelProject는 renameGroup과 정확히 대칭이지만, 짝짓는 자리가 bucket 머리(jira:KEY:)다 —
+// 지라 키는 별칭을 붙여도 바뀌지 않으므로 bucket 값 자체는 손대지 않는다(renameGroup은 bucket도 고친다).
+test('BJALIAS: relabelProject는 bucket이 그 프로젝트인 행에서만 group·evidence[].label·parts를 바꾸고 bucket은 그대로 둔다',t=>{
+  const f=fixture(t);
+  const file=path.join(f.directory,'.report-drafts.json');
+  const state={schema:1,weeks:{'2026-09-14':{rows:[
+    {id:'j1',heading:'완료한 일',group:'IO-1 · 결제 리뉴얼(요약)',bucket:'jira:IO-1:완료한 일:정산',text:'정산 배치 검토함',sourceIds:['x1'],
+      evidence:[{id:'x1',label:'IO-1 · 결제 리뉴얼(요약)'}],locked:true,excluded:false},
+    // 다른 지라 키(IO-2) — 같은 글자(우연히 겹쳐도) 건드리면 안 된다.
+    {id:'j2',heading:'완료한 일',group:'IO-2 · 알림센터',bucket:'jira:IO-2:완료한 일:정비',text:'정비함',sourceIds:['x2'],
+      evidence:[{id:'x2',label:'IO-2 · 알림센터'}],locked:true,excluded:false},
+    // 합쳐진(merge) 행 — parts 안의 IO-1 문장도 같이 바뀐다.
+    {id:'j3',heading:'진행중',group:'IO-1 · 결제 리뉴얼(요약)',bucket:'jira:IO-1:진행중:API',text:'API 작업\nAPI 검토',sourceIds:['x3','x4'],
+      evidence:[{id:'x3',label:'IO-1 · 결제 리뉴얼(요약)'}],locked:true,excluded:false,
+      parts:[
+        {id:'p1',heading:'진행중',group:'IO-1 · 결제 리뉴얼(요약)',bucket:'jira:IO-1:진행중:API',text:'API 작업',sourceIds:['x3'],evidence:[{id:'x3',label:'IO-1 · 결제 리뉴얼(요약)'}],locked:true,excluded:false},
+        {id:'p2',heading:'진행중',group:'IO-1 · 결제 리뉴얼(요약)',bucket:'jira:IO-1:진행중:API2',text:'API 검토',sourceIds:['x4'],evidence:[{id:'x4',label:'IO-1 · 결제 리뉴얼(요약)'}],locked:true,excluded:false},
+      ]},
+  ],updatedAt:'2026-09-20T00:00:00.000Z'}}};
+  fs.writeFileSync(file,JSON.stringify(state,null,2));
+
+  const changed=f.store.relabelProject('jira:IO-1:','IO-1 · 결제 리뉴얼(요약)','IO-1 · 결제 리뉴얼');
+  assert.equal(changed,4,'바뀐 줄 수 — j1·j3와 j3의 parts(p1·p2)를 각각 센다(renameGroup과 같은 셈법)');
+  const rows=JSON.parse(fs.readFileSync(file,'utf8')).weeks['2026-09-14'].rows;
+  const j1=rows.find(row=>row.id==='j1');
+  assert.equal(j1.group,'IO-1 · 결제 리뉴얼');
+  assert.equal(j1.bucket,'jira:IO-1:완료한 일:정산','지라 키는 바뀌지 않으므로 bucket은 그대로다');
+  assert.equal(j1.evidence[0].label,'IO-1 · 결제 리뉴얼');
+  assert.equal(j1.text,'정산 배치 검토함','문장은 손대지 않는다');
+
+  const j3=rows.find(row=>row.id==='j3');
+  assert.equal(j3.group,'IO-1 · 결제 리뉴얼');
+  assert.equal(j3.evidence[0].label,'IO-1 · 결제 리뉴얼');
+  assert.equal(j3.parts[0].group,'IO-1 · 결제 리뉴얼');
+  assert.equal(j3.parts[0].bucket,'jira:IO-1:진행중:API');
+  assert.equal(j3.parts[0].evidence[0].label,'IO-1 · 결제 리뉴얼');
+  assert.equal(j3.parts[1].group,'IO-1 · 결제 리뉴얼');
+  assert.equal(j3.parts[1].evidence[0].label,'IO-1 · 결제 리뉴얼');
+
+  const j2=rows.find(row=>row.id==='j2');
+  assert.equal(j2.group,'IO-2 · 알림센터','다른 지라 키의 행은 손대지 않는다');
+  assert.equal(j2.evidence[0].label,'IO-2 · 알림센터');
+
+  // 바꿀 것이 없으면 파일을 쓰지 않는다.
+  const before=fs.statSync(file).mtimeMs;
+  assert.equal(f.store.relabelProject('jira:IO-9:','없는 이름','새 이름'),0);
+  assert.equal(fs.statSync(file).mtimeMs,before);
+});
+test('BJALIAS: 자동(초안) row의 group·evidence[].label은 원본 항목의 label을 그대로 쓴다 — 서버가 별칭을 입혀 보내면 그 값이 쓰인다',t=>{
+  const f=fixture(t);
+  // label은 서버(projectLabelOf)가 "별칭 있으면 별칭, 없으면 요약"으로 지어 붙이는 값이다.
+  // report-drafts.js는 이 값을 그대로 group·evidence[].label로 옮길 뿐 스스로 별칭을 짓지 않는다.
+  f.items.push({id:'jb',type:'task',description:'배포 파이프라인 정리하기',status:'done',created:'2026-09-15',completed:'2026-09-16',jira:'IO-3',label:'IO-3 · 배포 자동화'});
+  const row=f.view().rows.find(row=>row.sourceIds.includes('jb'));
+  assert.equal(row.group,'IO-3 · 배포 자동화');
+  assert.equal(row.evidence.find(item=>item.id==='jb').label,'IO-3 · 배포 자동화');
+  assert.match(row.bucket,/^jira:IO-3:/,'bucket은 지라 키로 짓는다(라벨 글자가 아니다) — relabelProject가 이 자리로 행을 찾는다');
+});
 // BFOLD — 여러 문장을 골라 사람이 지은 요약 한 줄(`manual`) 아래로 모으고(`fold`), 그 부모를 접고
 // 펼치고(`setFolded`) 풀 수 있다(`unfold`). 글자는 합치지 않는다 — nest처럼 각 문장은 독립으로 남는다.
 test('한 줄로 모으기 검증: 최소 개수·같은 상태·제외 안 함·중첩 금지·요약 글 길이',t=>{

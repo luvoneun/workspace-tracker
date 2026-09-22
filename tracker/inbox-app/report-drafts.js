@@ -247,6 +247,29 @@ module.exports = ({ directory, sources, legacy, currentWeek }) => {
     if (rows) atomicWrite(filename, JSON.stringify(state, null, 2));
     return rows;
   }
+  // 지라 프로젝트의 앱 안 별칭이 바뀔 때, 저장된 보고에 글자로 박혀 있는 표시 이름만 바꾼다(BJALIAS).
+  // renameGroup과 정확히 대칭이지만 짝짓는 자리가 다르다 — 지라 키는 바뀌지 않으므로(bucket은 그대로)
+  // `group`/`evidence[].label`을 그 프로젝트의 bucket(`jira:KEY:`로 시작)에 속한 행에서만 바꾼다.
+  // 다른 프로젝트의 행에 같은 글자가 우연히 있어도(계획 문장 등) 건드리지 않는다.
+  function relabelProject(bucketHead, from, to) {
+    const state = read();
+    let rows = 0;
+    const fix = (row) => {
+      if (!row || typeof row !== 'object') return;
+      let touched = false;
+      if (typeof row.bucket === 'string' && row.bucket.startsWith(bucketHead)) {
+        if (row.group === from) { row.group = to; touched = true; }
+        (Array.isArray(row.evidence) ? row.evidence : []).forEach((item) => {
+          if (item && item.label === from) { item.label = to; touched = true; }
+        });
+      }
+      (Array.isArray(row.parts) ? row.parts : []).forEach(fix);
+      if (touched) rows += 1;
+    };
+    for (const week of Object.values(state.weeks || {})) (week?.rows || []).forEach(fix);
+    if (rows) atomicWrite(filename, JSON.stringify(state, null, 2));
+    return rows;
+  }
   // read는 한 번 읽은 보고 기록을 weeks·view에 함께 넘겨 주 수만큼 다시 읽지 않게 하려고 내보낸다.
-  return {view,change,weeks,read,renameGroup};
+  return {view,change,weeks,read,renameGroup,relabelProject};
 };

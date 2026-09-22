@@ -713,6 +713,17 @@ function getJiraIssueCache() {
   return issues;
 }
 
+// 지라 프로젝트의 앱 안 별칭(BJALIAS) — `.workflow.json`을 매번 새로 읽는다(스냅샷 캐시가 아니다,
+// workflows.snapshot()은 refs()를 통해 이 요약 계산을 부르므로 여기서 다시 부르면 되돈다).
+function getProjectAliases() {
+  return workflows.projectAliases();
+}
+// 지라 요약으로 이름표를 짓는 모든 자리가 부르는 단 하나의 헬퍼 — 별칭이 있으면 별칭, 없으면 요약.
+// 둘 다 없으면 빈 글자를 돌려주고, 부르는 쪽이 키로 물러선다(BJALIAS).
+function projectDisplayName(key, summary) {
+  return getProjectAliases()[key] || summary || '';
+}
+
 // 지금까지 직접 입력해서 쓴 커스텀 그룹명 목록 (지라 티켓 아닌 것) — 그룹 지정 드롭다운에서 재사용하기 위함
 function getCustomGroups() {
   const names = new Set();
@@ -760,7 +771,9 @@ function resolveProject(projectKey) {
   const value = rest.join(':');
   if (type === 'jira') {
     const issue = getJiraIssueCache().find((i) => i.key === value);
-    return { type, value, label: issue ? `${value} · ${issue.summary}` : value };
+    // 별칭이 있으면 회의 프로젝트 라벨에도 그 이름이 붙는다(BJALIAS).
+    const name = projectDisplayName(value, issue ? issue.summary : '');
+    return { type, value, label: name ? `${value} · ${name}` : value };
   }
   if (type === 'group') return { type, value, label: value };
   return null;
@@ -1147,7 +1160,8 @@ function listTrash() {
         description: match ? match[1] : '',
         file: typeof entry?.file === 'string' ? entry.file : '',
         deletedAt: typeof entry?.deletedAt === 'string' ? entry.deletedAt : null,
-        project: fields.jira ? (issue ? issue.summary : fields.jira) : group ? group.replace(/_/g, ' ') : null,
+        // 별칭이 있으면 삭제한 항목 목록에도 그 이름이 붙는다(BJALIAS).
+        project: fields.jira ? (projectDisplayName(fields.jira, issue ? issue.summary : '') || fields.jira) : group ? group.replace(/_/g, ' ') : null,
         projectKey: fields.jira ? `jira:${fields.jira}` : group ? `group:${group.replace(/_/g, ' ')}` : null,
       };
     })
@@ -1176,6 +1190,18 @@ function purgeTrashItem(id) {
 // 응답의 `meetings`는 ②와 ⑤를 함께 센다(둘 다 회의의 프로젝트다).
 const PROJECT_NAME_MAX = 60;
 const groupNameKey = value => String(value || '').replace(/_/g, ' ').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+// 겹침 검사 하나로 그룹 이름 바꾸기(renameProject)와 지라 별칭(setProjectAliasAction)이 함께 쓴다 —
+// 그룹 이름·다른 별칭·지라 요약 가운데 아무거나와 겹치면 안 된다(BJALIAS). exclude*는 "지금 이 이름
+// 자신"이라 빼고 본다(그룹은 자기 이름, 지라는 자기 요약·자기 별칭을 뺀다).
+function projectNamesTaken({ excludeGroup = null, excludeJira = null } = {}) {
+  const aliases = getProjectAliases();
+  return new Set([
+    ...workflows.groupList().filter(entry => entry !== excludeGroup),
+    ...getCustomGroups().filter(entry => entry !== excludeGroup),
+    ...getJiraIssueCache().filter(issue => issue.key !== excludeJira).map(issue => issue.summary),
+    ...Object.entries(aliases).filter(([key]) => key !== excludeJira).map(([, alias]) => alias),
+  ].map(groupNameKey));
+}
 function renameProject({ project, name }) {
   if (typeof project !== 'string' || !project.startsWith('group:')) throw new Error('직접 만든 프로젝트의 이름만 바꿀 수 있어요. 지라 프로젝트의 이름은 지라 요약을 따라요.');
   const from = project.slice('group:'.length).replace(/_/g, ' ').trim();
@@ -1189,11 +1215,7 @@ function renameProject({ project, name }) {
   if (!groups.includes(from)) throw new Error('프로젝트를 찾을 수 없어요.');
   if (to === from) throw new Error('이미 같은 이름이에요.');
   // 겹침은 공백·대소문자를 고르게 맞춘 뒤 본다. 지금 이름 자신은 빼고 본다(띄어쓰기만 고치는 경우).
-  const taken = new Set([
-    ...groups.filter(entry => entry !== from),
-    ...getCustomGroups().filter(entry => entry !== from),
-    ...getJiraIssueCache().map(issue => issue.summary),
-  ].map(groupNameKey));
+  const taken = projectNamesTaken({ excludeGroup: from });
   if (taken.has(groupNameKey(to))) throw new Error('같은 이름의 프로젝트가 이미 있어요.');
 
   // ① 업무 파일의 줄 — 지라가 걸린 항목은 그룹 이름을 쓰지 않으므로 건너뛴다.
@@ -1241,6 +1263,28 @@ function renameProject({ project, name }) {
     ok: true, project: `group:${to}`, from, to,
     changed: { items, meetings: moved.meetings + meetingLinks, links: moved.links, archive: moved.archive, report },
   };
+}
+
+// ---------- 지라 프로젝트 앱 안 별칭 (BJALIAS) ----------
+// 지라 요약은 고쳐 쓰지 않고(GET /api/jira/list 응답 불변) 앱 안에서만 쓰는 이름을 덧씌운다.
+// 형식 검증은 workflows.checkProjectAlias가 하고, 여기서는 지라 요약 목록이 필요한 두 가지만 본다:
+// ① 요약과 똑같은 별칭은 뜻이 없어 지운 것으로 처리(null 저장) ② 그룹 이름·다른 별칭·(자기 자신을
+// 뺀) 지라 요약과 겹치면 거절. 마지막으로 주간요약 저장본의 표시 이름을 같은 트랜잭션 안에서 갱신한다
+// (report-drafts.relabelProject — renameGroup과 정확히 대칭).
+function setProjectAliasAction({ jira, alias }) {
+  const { jira: key, alias: parsed } = workflows.checkProjectAlias({ jira, alias });
+  const issue = getJiraIssueCache().find((i) => i.key === key);
+  let cleaned = parsed;
+  if (cleaned && issue && groupNameKey(cleaned) === groupNameKey(issue.summary)) cleaned = null;
+  if (cleaned) {
+    const taken = projectNamesTaken({ excludeJira: key });
+    if (taken.has(groupNameKey(cleaned))) throw new Error('같은 이름의 프로젝트가 이미 있어요.');
+  }
+  const before = projectLabelOf({ jira: key });
+  const result = workflows.setProjectAlias({ jira: key, alias: cleaned });
+  const after = projectLabelOf({ jira: key });
+  if (before !== after) reportDrafts.relabelProject(`jira:${key}:`, before, after);
+  return result;
 }
 
 function promoteIdeaToToday(id, due) {
@@ -1338,10 +1382,13 @@ function getTodayActivityCounts() {
   return { createdToday };
 }
 
+// 자동 row의 group·evidence[].label이 이 값을 그대로 쓴다(report-drafts.js의 getReportRefs 연결) —
+// 별칭이 있으면 그 이름이 주간요약 소제목·근거에도 붙는다(BJALIAS).
 function projectLabelOf(item) {
   if (item.jira) {
     const issue = getJiraIssueCache().find((i) => i.key === item.jira);
-    return issue ? `${item.jira} · ${issue.summary}` : item.jira;
+    const name = projectDisplayName(item.jira, issue ? issue.summary : '');
+    return name ? `${item.jira} · ${name}` : item.jira;
   }
   return item.group || null;
 }
@@ -1514,6 +1561,9 @@ const handleRequest = (req, res) => {
     '/api/workflow/retype': workflows.retype,
     // 직접 만든 프로젝트의 이름 바꾸기 — 그 프로젝트에 속한 모든 기록을 한 트랜잭션으로 함께 바꾼다.
     '/api/project/rename': renameProject,
+    // 지라 프로젝트의 앱 안 별칭(BJALIAS) — 지라 요약은 그대로 두고, 주간요약 저장본의 표시 이름만
+    // 같은 트랜잭션으로 함께 갱신한다. 지라에는 아무것도 쓰지 않는다.
+    '/api/project/alias': setProjectAliasAction,
     // 삭제한 항목 완전히 지우기 — `.trash.json`에서 그 줄만 뺀다(업무 파일은 이미 그 줄이 없다).
     '/api/track/trash-purge': ({ id }) => purgeTrashItem(id),
     // 새 프로젝트 화면의 직군 세트. 지라에는 아무것도 묻지 않고 `.workflow.json` 한 칸만 바꾼다.

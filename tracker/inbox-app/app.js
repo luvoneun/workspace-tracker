@@ -283,7 +283,9 @@ function uiProjectName(item, opts = {}) {
   if (!item) return '';
   if (item.jira) {
     const issue = jiraIssuesByKey.get(item.jira);
-    const summary = issue ? issue.summary : '';
+    // 별칭이 있으면 지라 요약 대신 그 이름을 쓴다(BJALIAS) — 내 담당 목록 밖이라 요약을 모르는
+    // 티켓도 별칭만 있으면 이름이 있는 것으로 본다(모른다고 키만 보이지 않는다).
+    const summary = projectAliasesCache[item.jira] || (issue ? issue.summary : '');
     if (!summary) return item.jira;
     if (opts.withKey) return `${item.jira} · ${summary}`;
     if (opts.picker) return `${summary} · ${item.jira}`;
@@ -1044,6 +1046,8 @@ let jiraIssuesCache = [];
 // 결정 카드마다 지라 목록을 처음부터 훑지 않도록, 목록을 받을 때 키로 한 번만 색인해 둔다.
 let jiraIssuesByKey = new Map();
 let customGroupsCache = [];
+// 지라 키 → 앱 안 별칭(BJALIAS). projectLinks가 오는 자리(workflowData)와 같은 곳에서 받는다.
+let projectAliasesCache = {};
 let appVersion = null;
 
 // 화면을 다시 그리면 쓰던 입력이 날아가므로, 자동 갱신은 입력 중이면 건너뛴다
@@ -1273,6 +1277,7 @@ async function load() {
   jiraIssuesByKey = new Map(jiraIssuesCache.map(issue => [issue.key, issue]));
   customGroupsCache = data.customGroups || [];
   workflowRender(data);
+  projectAliasesCache = (workflowData && workflowData.projectAliases) || {};
   renderDateBar(data);
   renderCalendar(data.calendar);
   renderSuggestions(data.suggestions);

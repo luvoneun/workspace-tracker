@@ -2365,6 +2365,162 @@ test('BRENAME: 복구가 필요한 동안에는 이름도 바꾸지 않는다', 
   assert.match(fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8'), /group:결제_리뉴얼\]/);
 });
 
+// ---------- 지라 프로젝트 앱 안 별칭 (BJALIAS) ----------
+// 기본은 지라 요약, 별칭이 있으면 앱 안 어디서나 그 이름이다. 지라 요약 자체는 고쳐 쓰지 않는다
+// (GET /api/jira/list 응답 불변) — `.workflow.json`의 `projectAliases` 칸 하나만 바뀐다.
+const aliasPost = (origin, body) => fetch(origin + '/api/project/alias', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+}).then(async response => ({ status: response.status, ...await response.json() }));
+
+const ALIAS_REPORT = {
+  schema: 1,
+  weeks: {
+    '2026-09-14': {
+      rows: [
+        { id: 'ar1', heading: '진행중', group: 'IO-48501 · [Q4] 결제 리뉴얼 v2 (iOS/AOS)', bucket: 'jira:IO-48501:진행중:API',
+          text: 'API 정리', sourceIds: ['al01'],
+          evidence: [{ id: 'al01', description: 'API 정리하기', status: 'to-do', type: 'task', outcome: '', label: 'IO-48501 · [Q4] 결제 리뉴얼 v2 (iOS/AOS)', permalink: null }],
+          locked: true, excluded: false },
+        // 다른 지라 키(IO-9002)의 행 — 별칭을 바꿔도 이 행은 손대지 않아야 한다.
+        { id: 'ar2', heading: '진행중', group: 'IO-9002 · 알림센터', bucket: 'jira:IO-9002:진행중:정비',
+          text: '정비', sourceIds: ['al02'],
+          evidence: [{ id: 'al02', description: '정비하기', status: 'to-do', type: 'task', outcome: '', label: 'IO-9002 · 알림센터', permalink: null }],
+          locked: true, excluded: false },
+        // 합쳐진(merge) 행 — parts 안의 문장도 같은 규칙으로 함께 바뀐다.
+        { id: 'ar3', heading: '완료한 일', group: 'IO-48501 · [Q4] 결제 리뉴얼 v2 (iOS/AOS)', bucket: 'jira:IO-48501:완료한 일:QA',
+          text: 'QA함\nQA 재확인함', sourceIds: ['al04', 'al05'],
+          evidence: [{ id: 'al04', description: 'QA', status: 'done', type: 'task', outcome: '', label: 'IO-48501 · [Q4] 결제 리뉴얼 v2 (iOS/AOS)', permalink: null }],
+          locked: true, excluded: false,
+          parts: [
+            { id: 'p1', heading: '완료한 일', group: 'IO-48501 · [Q4] 결제 리뉴얼 v2 (iOS/AOS)', bucket: 'jira:IO-48501:완료한 일:QA', text: 'QA함', sourceIds: ['al04'],
+              evidence: [{ id: 'al04', description: 'QA', status: 'done', type: 'task', outcome: '', label: 'IO-48501 · [Q4] 결제 리뉴얼 v2 (iOS/AOS)', permalink: null }], locked: true, excluded: false },
+            { id: 'p2', heading: '완료한 일', group: 'IO-48501 · [Q4] 결제 리뉴얼 v2 (iOS/AOS)', bucket: 'jira:IO-48501:완료한 일:QA2', text: 'QA 재확인함', sourceIds: ['al05'],
+              evidence: [{ id: 'al05', description: 'QA 재확인', status: 'done', type: 'task', outcome: '', label: 'IO-48501 · [Q4] 결제 리뉴얼 v2 (iOS/AOS)', permalink: null }], locked: true, excluded: false },
+          ] },
+      ],
+      updatedAt: '2026-09-20T00:00:00.000Z',
+    },
+  },
+};
+function seedAlias(home) {
+  fs.writeFileSync(path.join(home, 'tasks.md'), '# Tasks\n'
+    + '- API 정리하기 #task[id:al01 status:to-do priority:high created:2026-09-20 jira:IO-48501]\n'
+    + '- 알림센터 정비하기 #task[id:al02 status:to-do priority:medium created:2026-09-20 jira:IO-9002]\n'
+    + '- 운영툴 정리하기 #task[id:al03 status:to-do priority:medium created:2026-09-20 group:운영툴]\n');
+  fs.writeFileSync(path.join(home, 'jira_issues.md'),
+    '# 지라 이슈 (내 담당, 진행중/백로그)\n\n마지막 갱신: 2026-09-20\n\n'
+    + '- IO-48501 | 에픽 | 진행 중 | [Q4] 결제 리뉴얼 v2 (iOS/AOS)\n'
+    + '- IO-9002 | 에픽 | 진행 중 | 알림센터 정리\n'
+    + '- IO-6100 | 에픽 | 진행 중 | 정산 배치 자동화\n');
+  // 오늘 캘린더 + 회의↔프로젝트 연결 — resolveProject가 GET마다 새로 라벨을 짓는 자리라, 저장된
+  // 정적 문자열이 아니라 이 길로만 별칭 반영을 확인할 수 있다.
+  fs.writeFileSync(path.join(home, 'calendar_today.md'), `마지막 갱신: ${today}\n- 10:00-11:00 | 결제 주간 싱크\n`);
+  fs.writeFileSync(path.join(home, '.meeting_links.json'), JSON.stringify({ '결제 주간 싱크': 'jira:IO-48501' }, null, 2));
+  fs.writeFileSync(path.join(home, '.workflow.json'), JSON.stringify({
+    items: {}, meetings: {},
+    projectAliases: { 'IO-9002': '알림센터' },
+  }, null, 2));
+  fs.writeFileSync(path.join(home, '.report-drafts.json'), JSON.stringify(ALIAS_REPORT, null, 2));
+}
+
+test('BJALIAS: 별칭 검증 — 형식·길이·대괄호·겹침 3갈래·지라 요약과 같으면 null로 저장한다', async (t) => {
+  const server = await startServer(t, seedAlias);
+  const refuse = async (body, message) => {
+    const answer = await aliasPost(server.base, body);
+    assert.equal(answer.status, 400, JSON.stringify(body));
+    assert.equal(answer.error, message, JSON.stringify(body));
+  };
+  const FORMAT = '별칭은 60자 이내 한 줄로, 대괄호 없이 적어 주세요.';
+  await refuse({ jira: 'io-48501', alias: '결제 리뉴얼' }, '지라 번호를 확인해 주세요.');
+  await refuse({ jira: '결제', alias: '결제 리뉴얼' }, '지라 번호를 확인해 주세요.');
+  await refuse({ jira: 'IO-48501', alias: '가'.repeat(61) }, FORMAT);
+  await refuse({ jira: 'IO-48501', alias: '결제\n리뉴얼' }, FORMAT);
+  await refuse({ jira: 'IO-48501', alias: '결제 [리뉴얼]' }, FORMAT);
+  await refuse({ jira: 'IO-48501', alias: '   ' }, FORMAT);
+  // 겹침 3갈래: 그룹 이름 · 다른 지라의 별칭 · (자기 자신을 뺀) 지라 요약.
+  await refuse({ jira: 'IO-48501', alias: '운영툴' }, '같은 이름의 프로젝트가 이미 있어요.');
+  await refuse({ jira: 'IO-48501', alias: '알림센터' }, '같은 이름의 프로젝트가 이미 있어요.');
+  await refuse({ jira: 'IO-48501', alias: '알림센터 정리' }, '같은 이름의 프로젝트가 이미 있어요.');
+
+  // 자기 자신의 별칭과는 겹치지 않는다 — 같은 값으로 다시 저장해도 거절되지 않는다.
+  assert.equal((await aliasPost(server.base, { jira: 'IO-9002', alias: '알림센터' })).ok, true);
+  // 지라 키가 내 목록·캐시에 없어도(IO-77777) 저장은 허용한다 — 요약을 모르는 프로젝트도 이름을 붙일 수 있다.
+  assert.deepEqual(await aliasPost(server.base, { jira: 'IO-77777', alias: '모르는 프로젝트' }),
+    { status: 200, ok: true, jira: 'IO-77777', alias: '모르는 프로젝트', previous: null });
+
+  // 지라 요약과 정확히 같은 별칭은 저장하지 않고 지운 것과 같이 처리한다(alias:null) — 대괄호가
+  // 없는 요약(IO-48501의 요약은 대괄호가 있어 애초에 별칭으로 적을 수 없으므로 다른 키로 확인한다).
+  assert.deepEqual(await aliasPost(server.base, { jira: 'IO-6100', alias: '정산 배치 자동화' }),
+    { status: 200, ok: true, jira: 'IO-6100', alias: null, previous: null });
+});
+
+test('BJALIAS: 저장·지우기가 .workflow.json과 GET /api/items(workflows.projectAliases)에 그대로 나타난다', async (t) => {
+  const server = await startServer(t, seedAlias);
+  const saved = await aliasPost(server.base, { jira: 'IO-48501', alias: '결제 리뉴얼' });
+  assert.deepEqual(saved, { status: 200, ok: true, jira: 'IO-48501', alias: '결제 리뉴얼', previous: null });
+  assert.deepEqual(readJson(path.join(server.home, '.workflow.json')).projectAliases, { 'IO-9002': '알림센터', 'IO-48501': '결제 리뉴얼' });
+  const data = await (await fetch(server.base + '/api/items')).json();
+  assert.deepEqual(data.workflows.projectAliases, { 'IO-9002': '알림센터', 'IO-48501': '결제 리뉴얼' });
+  // 지라 요약(GET /api/jira/list에 해당하는 캐시)은 건드리지 않는다.
+  assert.equal(data.jiraIssues.find(issue => issue.key === 'IO-48501').summary, '[Q4] 결제 리뉴얼 v2 (iOS/AOS)');
+
+  const cleared = await aliasPost(server.base, { jira: 'IO-48501', alias: null });
+  assert.deepEqual(cleared, { status: 200, ok: true, jira: 'IO-48501', alias: null, previous: '결제 리뉴얼' });
+  assert.deepEqual(readJson(path.join(server.home, '.workflow.json')).projectAliases, { 'IO-9002': '알림센터' });
+});
+
+test('BJALIAS: 회의 프로젝트 라벨(resolveProject)에도 별칭이 붙는다', async (t) => {
+  const server = await startServer(t, seedAlias);
+  const before = await (await fetch(server.base + '/api/items')).json();
+  assert.equal(before.calendar.events[0].project.label, 'IO-48501 · [Q4] 결제 리뉴얼 v2 (iOS/AOS)', '별칭 전에는 지라 요약 그대로다');
+
+  await aliasPost(server.base, { jira: 'IO-48501', alias: '결제 리뉴얼' });
+  const after = await (await fetch(server.base + '/api/items')).json();
+  assert.equal(after.calendar.events[0].project.label, 'IO-48501 · 결제 리뉴얼');
+});
+
+test('BJALIAS: 주간요약 저장본의 group·evidence[].label·parts가 별칭으로 바뀌고, bucket은 그대로이며 다른 키의 행은 손대지 않는다', async (t) => {
+  const server = await startServer(t, seedAlias);
+  const answer = await aliasPost(server.base, { jira: 'IO-48501', alias: '결제 리뉴얼' });
+  assert.equal(answer.ok, true);
+  const rows = readJson(path.join(server.home, '.report-drafts.json')).weeks['2026-09-14'].rows;
+
+  const ar1 = rows.find(row => row.id === 'ar1');
+  assert.equal(ar1.group, 'IO-48501 · 결제 리뉴얼');
+  assert.equal(ar1.bucket, 'jira:IO-48501:진행중:API', 'bucket은 그대로다 — 지라 키는 바뀌지 않는다');
+  assert.equal(ar1.evidence[0].label, 'IO-48501 · 결제 리뉴얼');
+
+  const ar3 = rows.find(row => row.id === 'ar3');
+  assert.equal(ar3.group, 'IO-48501 · 결제 리뉴얼');
+  assert.equal(ar3.evidence[0].label, 'IO-48501 · 결제 리뉴얼');
+  assert.equal(ar3.text, 'QA함\nQA 재확인함', '문장은 손대지 않는다');
+  assert.equal(ar3.parts[0].group, 'IO-48501 · 결제 리뉴얼');
+  assert.equal(ar3.parts[1].group, 'IO-48501 · 결제 리뉴얼');
+  assert.equal(ar3.parts[0].evidence[0].label, 'IO-48501 · 결제 리뉴얼');
+  assert.equal(ar3.parts[1].evidence[0].label, 'IO-48501 · 결제 리뉴얼');
+
+  // 다른 지라 키(IO-9002)의 행은 손대지 않는다.
+  const ar2 = rows.find(row => row.id === 'ar2');
+  assert.equal(ar2.group, 'IO-9002 · 알림센터');
+  assert.equal(ar2.evidence[0].label, 'IO-9002 · 알림센터');
+});
+
+test('BJALIAS: renameProject(그룹 이름 바꾸기)의 겹침 검사에도 별칭이 들어간다', async (t) => {
+  const server = await startServer(t, seedAlias);
+  await aliasPost(server.base, { jira: 'IO-48501', alias: '결제 리뉴얼' });
+  const answer = await renamePost(server.base, { project: 'group:운영툴', name: '결제 리뉴얼' });
+  assert.equal(answer.status, 400);
+  assert.equal(answer.error, '같은 이름의 프로젝트가 이미 있어요.');
+});
+
+test('BJALIAS: projectAliases 칸이 없는 옛 파일은 하나도 없다로 읽히고, 관련 없는 저장이 그 칸을 새로 만들지 않는다', async (t) => {
+  const server = await startServer(t, seedRename); // seedRename의 .workflow.json에는 projectAliases 칸이 없다
+  const data = await (await fetch(server.base + '/api/items')).json();
+  assert.deepEqual(data.workflows.projectAliases, {});
+  await renamePost(server.base, { project: 'group:운영툴', name: '운영 콘솔' });
+  assert.equal('projectAliases' in readJson(path.join(server.home, '.workflow.json')), false, '고쳐 쓰지 않는다');
+});
+
 // ---------- 지라에 새로 만들기 (BJCREATE — 지라에 이슈를 만든다) ----------
 // 여기서도 실제 지라에는 절대 닿지 않는다: 모든 요청은 가짜 fetch가 받아 기록만 한다.
 // `무엇이 만들어졌는가`는 기록된 method·본문으로 판정한다(GET만 나갔으면 아무것도 만들지 않은 것이다).
