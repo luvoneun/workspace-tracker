@@ -36,6 +36,95 @@ function projectKeyRestore() {
   try { projectKey = localStorage.getItem(PROJECT_KEY_STORE) || null; } catch { projectKey = null; }
 }
 
+// ---------- BPVIEW: 왼쪽 목록을 지라 상태로 묶기 · 배포별 보기 · 프로젝트 찾기 ----------
+// 사람이 관리하는 보관·폴더·태그 대신, 앱이 이미 아는 값(지라 상태·배포 버전)으로 자동으로 묶는다.
+// 서버 변경 없음 — 상태(category)·버전(versions)은 jiraIssuesCache에 이미 있다(DECISIONS 2026-09-23).
+const PROJECT_LIST_VIEW_KEY = 'projectListView';
+let projectListView = 'status';
+try { projectListView = localStorage.getItem(PROJECT_LIST_VIEW_KEY) === 'deploy' ? 'deploy' : 'status'; } catch {}
+function setProjectListView(value) {
+  const next = value === 'deploy' ? 'deploy' : 'status';
+  if (projectListView === next) return;
+  projectListView = next;
+  try { localStorage.setItem(PROJECT_LIST_VIEW_KEY, projectListView); } catch {}
+  renderProjects();
+}
+
+// 찾기 칸의 값 — 저장하지 않는다(탭을 떠나면 setActiveTab이 비운다).
+let projectFindQuery = '';
+const PROJECT_FIND_MIN = 8; // 전체 프로젝트(지난 프로젝트 포함)가 이보다 적으면 찾기 칸 자체가 없다.
+let projectTodoOpen = false; // `시작 전` 접힘 — 지난 프로젝트(projectPastOpen)와 같은 방식(세션 동안만 기억).
+const projectDeployClosed = new Set(); // 배포별 보기에서 접어 둔 버전 키 — 기본은 전부 펼침.
+
+// 판정 함수 — quiet(지난 프로젝트)가 가장 먼저다. 그다음은 지라 상태(category)·열린 업무로
+// 진행 중/시작 전을 가른다. 지라가 없는 그룹은(quiet가 아니라면) 항상 진행 중이다.
+function projectStatusOf(row, quiet) {
+  if (quiet) return 'past';
+  const jira = jiraKeyOf(row.key);
+  if (!jira) return 'doing';
+  const category = jiraIssuesByKey.get(jira)?.category;
+  if (category === 'doing' || row.open > 0) return 'doing';
+  if (category === 'todo') return 'todo';
+  return 'doing';
+}
+
+// 활성 목록(이미 quiet은 빠졌다)을 진행 중/시작 전으로 가른다 — 차례는 그대로(정렬은 위에서 끝났다).
+function projectStatusGroups(visibleRows) {
+  const doing = [];
+  const todo = [];
+  visibleRows.forEach(row => (projectStatusOf(row, false) === 'todo' ? todo : doing).push(row));
+  return { doing, todo };
+}
+
+// 이 프로젝트의 미배포 버전 중 배포일이 가장 이른 것(배포일 없는 버전은 뒤). 없으면 null(`배포 미정`).
+function projectDeployVersion(key) {
+  const jira = jiraKeyOf(key);
+  const issue = jira ? jiraIssuesByKey.get(jira) : null;
+  const list = issue && Array.isArray(issue.versions) ? issue.versions.filter(v => v && !v.released) : [];
+  if (!list.length) return null;
+  return list.slice().sort((a, b) => {
+    const ad = a.releaseDate || ''; const bd = b.releaseDate || '';
+    if (ad && bd) return ad.localeCompare(bd);
+    return ad ? -1 : bd ? 1 : 0;
+  })[0];
+}
+
+// 활성 목록을 배포 버전으로 묶는다 — 배포일 이른 순 → 배포일 없는 버전 → `배포 미정`(name: null) 마지막.
+// 같은 버전 이름을 쓰는 프로젝트는 한 덩어리로 합친다.
+function projectDeployGroups(visibleRows) {
+  const buckets = new Map();
+  const none = [];
+  visibleRows.forEach((row) => {
+    const version = projectDeployVersion(row.key);
+    if (!version) { none.push(row); return; }
+    if (!buckets.has(version.name)) buckets.set(version.name, { name: version.name, releaseDate: version.releaseDate || null, rows: [] });
+    buckets.get(version.name).rows.push(row);
+  });
+  const groups = [...buckets.values()].sort((a, b) => {
+    if (a.releaseDate && b.releaseDate) return a.releaseDate.localeCompare(b.releaseDate);
+    if (a.releaseDate) return -1;
+    if (b.releaseDate) return 1;
+    return a.name.localeCompare(b.name);
+  });
+  if (none.length) groups.push({ name: null, releaseDate: null, rows: none });
+  return groups;
+}
+
+// 배포일 색 — 3일 안이면 주의, 지났으면 급함(jiraVersionText·deployDayText와 같은 문턱, 재사용).
+function projectDeployTone(releaseDate) {
+  if (!releaseDate) return '';
+  const left = diffDays(releaseDate);
+  if (Number.isNaN(left)) return '';
+  return left < 0 ? 'urgent' : left <= 3 ? 'warn' : '';
+}
+
+// 이름(요약·그룹)·키로 거른다 — 팔레트의 wfSearchMatches와 같은 규칙(NFKC·대소문자 무시·모든 낱말 포함).
+function projectFindFilter(rows, query) {
+  const needle = query.trim();
+  if (!needle) return rows;
+  return rows.filter(row => wfSearchMatches(needle, [uiGroupLabel(row.key, { withKey: true })]));
+}
+
 // 오늘 목록의 그룹 제목·업무 상세의 `프로젝트 보기`가 부르는 길.
 function openProjectTab(key) {
   projectKey = key;
@@ -103,7 +192,216 @@ function projectPastRows(rows, { quietKeys, selectedKey } = {}) {
   return { active, past };
 }
 
-function renderProjects() {
+// 머리(`프로젝트 N +`) — 위 목록과 `지난 프로젝트` 소제목이 같은 줄 부품을 쓰듯, 여기도 한 곳에서만 짓는다.
+function projectListHead(count) {
+  const head = document.createElement('div');
+  head.className = 'd-rhd';
+  const headName = document.createElement('span');
+  headName.textContent = '프로젝트';
+  const headCount = document.createElement('span');
+  headCount.className = 'n num';
+  headCount.textContent = count;
+  // 개수 옆의 조용한 `+` — 새 프로젝트 화면을 오른쪽에 연다(project-new-ui.js).
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'd-pnewgo';
+  add.textContent = '+';
+  add.title = '새 프로젝트';
+  add.setAttribute('aria-label', '새 프로젝트');
+  add.addEventListener('click', () => projectNewStart());
+  head.append(headName, headCount, add);
+  return head;
+}
+
+// 보기 전환 `상태별 | 배포별` — 회의 탭 `날짜순 | 프로젝트별`과 같은 부품(wfSegment 대신 같은 모양을
+// 직접 그린다 — 보기 전환이라 aria-pressed다, meetingsViewSegment와 같은 방식).
+function projectViewSegment() {
+  const seg = document.createElement('div');
+  seg.className = 'd-seg d-pfseg';
+  seg.setAttribute('role', 'group');
+  seg.setAttribute('aria-label', '프로젝트 목록 보기');
+  [['status', '상태별'], ['deploy', '배포별']].forEach(([value, text]) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = text;
+    button.setAttribute('aria-pressed', String(projectListView === value));
+    button.addEventListener('click', () => setProjectListView(value));
+    seg.appendChild(button);
+  });
+  return seg;
+}
+
+// 프로젝트 찾기 칸 — 8개 이상일 때만 선다. 입력할 때마다 목록 부분만 다시 그린다(rowsOnly) — 이
+// 칸 자체는 다시 만들지 않는다(한글 조합 중에 칸이 통째로 바뀌면 조합이 끊긴다. project-new-ui.js의
+// `이름` 칸과 같은 방식 — 손대는 칸 밖에서 결과만 다시 그린다). Esc는 비우기만, 초점은 칸에 남는다.
+function projectFindInput() {
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.id = 'projectFind';
+  input.className = 'd-din d-pfind';
+  input.placeholder = '프로젝트 찾기';
+  input.setAttribute('aria-label', '프로젝트 찾기');
+  input.value = projectFindQuery;
+  input.addEventListener('input', () => {
+    projectFindQuery = input.value;
+    renderProjects({ rowsOnly: true });
+  });
+  input.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || event.isComposing || !projectFindQuery) return;
+    event.preventDefault();
+    projectFindQuery = '';
+    input.value = '';
+    renderProjects({ rowsOnly: true });
+  });
+  return input;
+}
+
+// 위 목록과 `시작 전`·`지난 프로젝트` 구역이 같은 줄 부품을 쓴다 — 지난 것만 흐리게 그린다.
+function projectRowButton(row, past, labels) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'd-prow' + (row.open ? '' : ' is-zero') + (past ? ' is-past' : '');
+  button.setAttribute('aria-current', String(row.key === projectKey));
+  const displayLabel = labels.get(row.key);
+  const name = document.createElement('span');
+  name.className = 'nm';
+  name.textContent = displayLabel;
+  // 눈에 보이는 자리는 요약만, title 툴팁에는 지라 키를 남긴다(BKEY 결정).
+  name.title = uiGroupLabel(row.key, { withKey: true });
+  const count = document.createElement('span');
+  count.className = 'n num';
+  count.textContent = row.open;
+  // 오른쪽 끝 묶음: (배포가 2주 안이면) 조용한 배포일 + 열린 항목 수.
+  // 배포일은 고정 폭이라 이름 칸이 먼저 줄어든다 — 이름이 배포일에 밀려 잘리지 않는다.
+  const right = document.createElement('span');
+  right.className = 'rt';
+  const deploy = projectDeployNote(row.key);
+  if (deploy) {
+    const day = document.createElement('span');
+    day.className = `dp${uiTone(deploy.tone)}`;
+    day.textContent = deploy.text;
+    day.title = deploy.title;
+    right.appendChild(day);
+    // `9/30`만으로는 무슨 날인지 읽히지 않는다 — 이 줄에만 이름표를 붙여 풀어 준다.
+    button.setAttribute('aria-label', `${displayLabel}, 열린 항목 ${row.open}, ${deploy.title}`);
+  }
+  right.appendChild(count);
+  // 오늘 목록의 그룹 제목과 같은 색 점 — 같은 프로젝트는 어디서나 같은 색이다.
+  button.append(uiProjectDot(row.key), name, right);
+  button.addEventListener('click', () => {
+    if (projectKey === row.key) return;
+    projectKey = row.key;
+    try { localStorage.setItem(PROJECT_KEY_STORE, row.key); } catch {}
+    renderProjects();
+  });
+  return button;
+}
+
+// 접히는 소제목 — `시작 전`·`지난 프로젝트`가 같은 부품을 쓴다(닫히면 `라벨 N`, 열리면 `라벨 숨기기`).
+// 찾는 동안(locked)은 접힘을 무시하고 전부 펼쳐 두므로 `숨기기`가 거짓말이 된다 — 그때는 맞는 개수만
+// 적은 소제목 글자로 서고 누를 수 없다.
+function projectToggleButton(label, count, open, onToggle, { locked = false } = {}) {
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'd-plink';
+  toggle.setAttribute('aria-expanded', String(open));
+  toggle.textContent = open && !locked ? `${label} 숨기기` : `${label} ${count}`;
+  if (locked) toggle.disabled = true;
+  else toggle.addEventListener('click', onToggle);
+  return toggle;
+}
+
+// 배포별 보기의 소제목 — 앱 공용 접이식 그룹 제목(uiGroupHeading)을 쓰고, 배포일이 있으면 그 부분만
+// 색 글자로 바꿔 끼운다(배지가 아니라 글자 — jiraVersionText·띠 카드와 같은 규칙, projectDeployTone 재사용).
+// uiGroupHeading과 같은 모양(같은 클래스·같은 접이식 동작)이지만, `이름 · 날짜 배포  개수` 순서로
+// 이름과 개수 사이에 색 글자(날짜)를 끼워야 해서 직접 짓는다 — uiGroupHeading은 이름 하나만 받는다.
+function projectDeployHeading(bucket, count, open, onToggle) {
+  const head = document.createElement('button');
+  head.type = 'button';
+  head.className = 'd-grp tog';
+  head.setAttribute('aria-expanded', String(open));
+  head.innerHTML = uiIcon('chevron');
+  head.addEventListener('click', onToggle);
+  const name = document.createElement('span');
+  name.className = 'gl';
+  name.textContent = bucket.name || '배포 미정';
+  head.appendChild(name);
+  if (bucket.releaseDate) {
+    const tone = projectDeployTone(bucket.releaseDate);
+    const date = document.createElement('span');
+    date.className = 'd-pdepdate' + uiTone(tone);
+    date.textContent = `· ${uiKoDateShort(bucket.releaseDate)} 배포`;
+    head.appendChild(date);
+    const title = `${bucket.name} · ${uiKoDate(bucket.releaseDate)} 배포 예정`;
+    name.title = title;
+    head.title = title;
+  } else {
+    name.title = name.textContent;
+  }
+  if (count) {
+    const number = document.createElement('span');
+    number.className = 'n num';
+    number.textContent = count;
+    head.appendChild(number);
+  }
+  return head;
+}
+
+function projectFindEmpty() {
+  const empty = document.createElement('div');
+  empty.className = 'd-empty';
+  empty.textContent = '맞는 프로젝트가 없어요.';
+  return empty;
+}
+
+// 상태별 보기의 본문 — `진행 중`은 소제목 없이 맨 위(늘 펼침), `시작 전`이 있을 때만 그 소제목이 선다.
+// 찾는 동안은 접힘을 무시하고 전부 펼치고, 맞는 게 없는 덩어리는 소제목도 그리지 않는다.
+function projectListPaintStatusTail(listEl, { doingRows, todoRows, pastRows, labels, query, filtering }) {
+  const doingF = filtering ? projectFindFilter(doingRows, query) : doingRows;
+  const todoF = filtering ? projectFindFilter(todoRows, query) : todoRows;
+  const pastF = filtering ? projectFindFilter(pastRows, query) : pastRows;
+  if (filtering && !doingF.length && !todoF.length && !pastF.length) { listEl.appendChild(projectFindEmpty()); return; }
+  doingF.forEach(row => listEl.appendChild(projectRowButton(row, false, labels)));
+  if (todoRows.length && (!filtering || todoF.length)) {
+    // 지금 보는 프로젝트가 `시작 전`에 있으면 그 덩어리를 자동으로 펼친 채로 그린다.
+    const open = filtering || projectTodoOpen || todoRows.some(row => row.key === projectKey);
+    listEl.appendChild(projectToggleButton('시작 전', filtering ? todoF.length : todoRows.length, open, () => { projectTodoOpen = !projectTodoOpen; renderProjects(); }, { locked: filtering }));
+    if (open) (filtering ? todoF : todoRows).forEach(row => listEl.appendChild(projectRowButton(row, false, labels)));
+  }
+  if (pastRows.length && (!filtering || pastF.length)) {
+    const open = filtering || projectPastOpen;
+    listEl.appendChild(projectToggleButton('지난 프로젝트', filtering ? pastF.length : pastRows.length, open, () => { projectPastOpen = !projectPastOpen; renderProjects(); }, { locked: filtering }));
+    if (open) (filtering ? pastF : pastRows).forEach(row => listEl.appendChild(projectRowButton(row, true, labels)));
+  }
+}
+
+// 배포별 보기의 본문 — 버전마다 소제목(기본 펼침, 접을 수 있다) + `지난 프로젝트`(두 보기에서 같다).
+function projectListPaintDeployTail(listEl, { visibleRows, pastRows, labels, query, filtering }) {
+  const groups = projectDeployGroups(visibleRows);
+  const groupsF = filtering
+    ? groups.map(bucket => ({ ...bucket, rows: projectFindFilter(bucket.rows, query) })).filter(bucket => bucket.rows.length)
+    : groups;
+  const pastF = filtering ? projectFindFilter(pastRows, query) : pastRows;
+  if (filtering && !groupsF.length && !pastF.length) { listEl.appendChild(projectFindEmpty()); return; }
+  groupsF.forEach((bucket) => {
+    const key = bucket.name || '__none__';
+    const open = filtering || !projectDeployClosed.has(key);
+    listEl.appendChild(projectDeployHeading(bucket, bucket.rows.length, open, () => {
+      if (projectDeployClosed.has(key)) projectDeployClosed.delete(key); else projectDeployClosed.add(key);
+      renderProjects();
+    }));
+    if (open) bucket.rows.forEach(row => listEl.appendChild(projectRowButton(row, false, labels)));
+  });
+  if (pastRows.length && (!filtering || pastF.length)) {
+    const open = filtering || projectPastOpen;
+    listEl.appendChild(projectToggleButton('지난 프로젝트', filtering ? pastF.length : pastRows.length, open, () => { projectPastOpen = !projectPastOpen; renderProjects(); }, { locked: filtering }));
+    if (open) (filtering ? pastF : pastRows).forEach(row => listEl.appendChild(projectRowButton(row, true, labels)));
+  }
+}
+
+// opts.rowsOnly — 찾기 칸에서 글자를 칠 때만 쓰는 가벼운 다시 그리기다. 머리·세그먼트·찾기 칸은
+// 그대로 두고(칸 자체를 다시 만들면 한글 조합이 끊긴다) 그 뒤에 이어 붙은 소제목·줄만 지우고 다시 쌓는다.
+function renderProjects(opts = {}) {
   const listEl = document.getElementById('projectList');
   const body = document.getElementById('projectBody');
   if (!listEl || !body) return;
@@ -121,83 +419,34 @@ function renderProjects() {
     .filter(row => projectQuiet(row, projectLastDay(row.key, workflowData.items, workflowData.meetings), today))
     .map(row => row.key));
   const { active: visibleRows, past: pastRows } = projectPastRows(rows, { quietKeys, selectedKey: projectKey });
+  const { doing: doingRows, todo: todoRows } = projectStatusGroups(visibleRows);
   // 화면에 보이는 이름은 요약만(같은 요약이 둘 이상이면 그때만 키로 구분) — row.label은 정렬용 원본 그대로 둔다.
-  const labels = uiGroupLabels(visibleRows.concat(projectPastOpen ? pastRows : []).map(row => row.key));
+  const labels = uiGroupLabels(rows.map(row => row.key));
+  const showFind = rows.length >= PROJECT_FIND_MIN;
+  const query = projectFindQuery;
+  const filtering = showFind && !!query.trim();
+  // 머리 수는 두 보기에서 같다 — 지난 프로젝트를 뺀 전체 수(진행 중 + 시작 전). 세그먼트만 바꿨는데
+  // 숫자가 달라지면 "무엇의 개수인가"를 다시 읽어야 해서, 보기와 무관한 하나의 뜻으로 고정한다.
+  const headCount = visibleRows.length;
 
-  listEl.replaceChildren();
-  const head = document.createElement('div');
-  head.className = 'd-rhd';
-  const headName = document.createElement('span');
-  headName.textContent = '프로젝트';
-  const headCount = document.createElement('span');
-  headCount.className = 'n num';
-  // 머리의 개수는 위 목록의 수다(지난 프로젝트는 세지 않는다).
-  headCount.textContent = visibleRows.length;
-  // 개수 옆의 조용한 `+` — 새 프로젝트 화면을 오른쪽에 연다(project-new-ui.js).
-  const add = document.createElement('button');
-  add.type = 'button';
-  add.className = 'd-pnewgo';
-  add.textContent = '+';
-  add.title = '새 프로젝트';
-  add.setAttribute('aria-label', '새 프로젝트');
-  add.addEventListener('click', () => projectNewStart());
-  head.append(headName, headCount, add);
-  listEl.appendChild(head);
-
-  // 위 목록과 `지난 프로젝트` 구역이 같은 줄 부품을 쓴다 — 지난 것만 흐리게 그린다.
-  const addRow = (row, past) => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'd-prow' + (row.open ? '' : ' is-zero') + (past ? ' is-past' : '');
-    button.setAttribute('aria-current', String(row.key === projectKey));
-    const displayLabel = labels.get(row.key);
-    const name = document.createElement('span');
-    name.className = 'nm';
-    name.textContent = displayLabel;
-    // 눈에 보이는 자리는 요약만, title 툴팁에는 지라 키를 남긴다(BKEY 결정).
-    name.title = uiGroupLabel(row.key, { withKey: true });
-    const count = document.createElement('span');
-    count.className = 'n num';
-    count.textContent = row.open;
-    // 오른쪽 끝 묶음: (배포가 2주 안이면) 조용한 배포일 + 열린 항목 수.
-    // 배포일은 고정 폭이라 이름 칸이 먼저 줄어든다 — 이름이 배포일에 밀려 잘리지 않는다.
-    const right = document.createElement('span');
-    right.className = 'rt';
-    const deploy = projectDeployNote(row.key);
-    if (deploy) {
-      const day = document.createElement('span');
-      day.className = `dp${uiTone(deploy.tone)}`;
-      day.textContent = deploy.text;
-      day.title = deploy.title;
-      right.appendChild(day);
-      // `9/30`만으로는 무슨 날인지 읽히지 않는다 — 이 줄에만 이름표를 붙여 풀어 준다.
-      button.setAttribute('aria-label', `${displayLabel}, 열린 항목 ${row.open}, ${deploy.title}`);
-    }
-    right.appendChild(count);
-    // 오늘 목록의 그룹 제목과 같은 색 점 — 같은 프로젝트는 어디서나 같은 색이다.
-    button.append(uiProjectDot(row.key), name, right);
-    button.addEventListener('click', () => {
-      if (projectKey === row.key) return;
-      projectKey = row.key;
-      try { localStorage.setItem(PROJECT_KEY_STORE, row.key); } catch {}
-      renderProjects();
-    });
-    listEl.appendChild(button);
-  };
-  visibleRows.forEach(row => addRow(row, false));
-
-  // 목록 끝의 접힌 구역 — 지난 프로젝트가 하나도 없으면 아예 달지 않는다.
-  if (pastRows.length) {
-    const toggle = document.createElement('button');
-    toggle.type = 'button';
-    toggle.className = 'd-plink';
-    toggle.setAttribute('aria-expanded', String(projectPastOpen));
-    toggle.textContent = projectPastOpen ? '지난 프로젝트 숨기기' : `지난 프로젝트 ${pastRows.length}`;
-    toggle.addEventListener('click', () => { projectPastOpen = !projectPastOpen; renderProjects(); });
-    listEl.appendChild(toggle);
-    if (projectPastOpen) pastRows.forEach(row => addRow(row, true));
+  const rowsOnly = !!opts.rowsOnly && showFind && listEl.querySelector('.d-pfind');
+  if (!rowsOnly) {
+    listEl.replaceChildren();
+    listEl.appendChild(projectListHead(headCount));
+    listEl.appendChild(projectViewSegment());
+    if (showFind) listEl.appendChild(projectFindInput());
+  } else {
+    // 찾기 칸 뒤에 이어 붙은 소제목·줄만 지운다 — 칸 자체(anchor)는 children 배열 안 자리만 확인하고 건드리지 않는다.
+    const anchor = listEl.querySelector('.d-pfind');
+    const keepIndex = [...listEl.children].indexOf(anchor);
+    while (listEl.children.length > keepIndex + 1) listEl.removeChild(listEl.children[listEl.children.length - 1]);
   }
 
+  if (projectListView === 'deploy') projectListPaintDeployTail(listEl, { visibleRows, pastRows, labels, query, filtering });
+  else projectListPaintStatusTail(listEl, { doingRows, todoRows, pastRows, labels, query, filtering });
+
+  // 찾는 동안 오른쪽 면은 손대지 않는다(검색은 왼쪽 목록만의 일이다 — 지라를 다시 부르지 않는다).
+  if (rowsOnly) return;
   // 새 프로젝트 화면이 열려 있으면 오른쪽 면은 그것 하나다(왼쪽 목록은 그대로 보인다).
   if (projectNew) projectNewRender(body);
   else renderProjectDetail(body, rows.find(row => row.key === projectKey) || null);

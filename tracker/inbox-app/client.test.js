@@ -23,6 +23,12 @@ function element() {
     appendChild(child) { if (child && typeof child === 'object') child.parent = this; this.children.push(child); return child; },
     append(...kids) { kids.forEach(kid => this.appendChild(kid)); },
     replaceChildren(...kids) { this.children = []; kids.forEach(kid => this.appendChild(kid)); },
+    // 찾기 칸처럼 한 자리만 지우고 나머지는 그대로 두는 다시 그리기(BPVIEW)가 쓴다.
+    removeChild(child) {
+      const at = this.children.indexOf(child);
+      if (at >= 0) { this.children.splice(at, 1); child.parent = null; child.connected = false; }
+      return child;
+    },
     // 그 자리에서 고치는 입력칸(제목 ↔ 입력칸)이 오가는 길 — 부모의 같은 자리를 바꿔 끼운다.
     replaceWith(node) {
       const parent = this.parent;
@@ -4435,6 +4441,219 @@ test('BNOARCHIVE: 지난 프로젝트도 고르기 목록에 그대로 있고, `
   assert.equal(app.run("groupSelectOptions(null, false).rest.join('')").includes('optgroup'), false,
     '조용한 것이 없으면 소제목도 없다(옛 파일과 같은 모습)');
 });
+
+// ---------- BPVIEW: 왼쪽 목록을 지라 상태로 묶기 · 배포별 보기 · 프로젝트 찾기 ----------
+// 사람이 관리하는 보관·폴더·태그 대신, 앱이 이미 아는 값(지라 상태·배포 버전)으로 자동으로 묶는다.
+// 서버 변경 없음 — 판정 함수(projectStatusOf)·묶기(projectStatusGroups·projectDeployGroups)·
+// 거르기(projectFindFilter)는 순수 함수라 DOM 없이도 검증한다.
+test('BPVIEW: projectStatusOf — quiet가 가장 먼저, 그다음 지라 상태·열린 업무로 진행 중/시작 전을 가른다(6갈래)', () => {
+  const app = workflowsClient();
+  app.run(`jiraIssuesByKey = new Map([
+    ['D1', { key: 'D1', category: 'doing' }],
+    ['T1', { key: 'T1', category: 'todo' }],
+  ]);
+  workflowData = { items: [], meetings: [], projectLinks: { '연결된 그룹': 'T1' } };`);
+  const status = (row, quiet) => app.run(`projectStatusOf(${JSON.stringify(row)}, ${quiet})`);
+  assert.equal(status({ key: 'jira:D1', open: 3 }, true), 'past', '① quiet가 가장 먼저다');
+  assert.equal(status({ key: 'jira:D1', open: 0 }, false), 'doing', '② 지라 상태가 doing이면 진행 중');
+  assert.equal(status({ key: 'jira:T1', open: 2 }, false), 'doing', '③ todo여도 열린 업무가 있으면 진행 중');
+  assert.equal(status({ key: 'jira:T1', open: 0 }, false), 'todo', '④ todo + 열린 업무 0이면 시작 전');
+  assert.equal(status({ key: 'group:살아 있는 것', open: 0 }, false), 'doing', '⑤ 그룹인데 지라가 없으면 늘 진행 중');
+  assert.equal(status({ key: 'group:연결된 그룹', open: 0 }, false), 'todo', '⑥ 그룹에 연결된 지라가 todo + 열린 업무 0이면 시작 전');
+});
+
+test('BPVIEW: projectStatusGroups는 차례를 지키며 진행 중/시작 전으로만 가른다(quiet은 이미 빠졌다)', () => {
+  const app = workflowsClient();
+  app.run(`jiraIssuesByKey = new Map([
+    ['A', { key: 'A', category: 'doing' }],
+    ['B', { key: 'B', category: 'todo' }],
+    ['C', { key: 'C', category: 'todo' }],
+  ]); workflowData = { items: [], meetings: [], projectLinks: {} };`);
+  const rows = [
+    { key: 'jira:A', label: 'A', open: 2 },
+    { key: 'jira:B', label: 'B', open: 0 },
+    { key: 'jira:C', label: 'C', open: 0 },
+  ];
+  const groups = JSON.parse(app.run(`JSON.stringify(projectStatusGroups(${JSON.stringify(rows)}))`));
+  assert.deepEqual(groups.doing.map(r => r.key), ['jira:A']);
+  assert.deepEqual(groups.todo.map(r => r.key), ['jira:B', 'jira:C']);
+});
+
+test('BPVIEW: projectDeployGroups는 배포일 이른 순 → 날짜 없는 버전 → `배포 미정` 순으로 묶고, 같은 버전 이름은 합친다', () => {
+  const app = workflowsClient();
+  app.run(`dayShift = n => { const d = new Date(); d.setDate(d.getDate() + n); return \`\${d.getFullYear()}-\${String(d.getMonth() + 1).padStart(2, '0')}-\${String(d.getDate()).padStart(2, '0')}\`; };
+    jiraIssuesByKey = new Map([
+      ['A', { key: 'A', versions: [{ name: 'v2.70.0', releaseDate: dayShift(6), released: false }] }],
+      ['B', { key: 'B', versions: [{ name: 'v2.70.0', releaseDate: dayShift(6), released: false }] }],
+      ['C', { key: 'C', versions: [{ name: 'v2.71.0', releaseDate: dayShift(20), released: false }] }],
+      ['D', { key: 'D', versions: [{ name: 'v2.72.0', releaseDate: null, released: false }] }],
+      ['E', { key: 'E', versions: [{ name: 'v2.60.0', releaseDate: dayShift(-9), released: true }] }],
+    ]); workflowData = { items: [], meetings: [], projectLinks: {} };`);
+  const rows = ['A', 'B', 'C', 'D', 'E'].map(k => ({ key: `jira:${k}`, label: k, open: 0 }))
+    .concat([{ key: 'group:그룹', label: '그룹', open: 0 }]);
+  const groups = JSON.parse(app.run(`JSON.stringify(projectDeployGroups(${JSON.stringify(rows)}))`));
+  assert.deepEqual(groups.map(g => [g.name, g.rows.map(r => r.key)]), [
+    ['v2.70.0', ['jira:A', 'jira:B']],
+    ['v2.71.0', ['jira:C']],
+    ['v2.72.0', ['jira:D']],
+    [null, ['jira:E', 'group:그룹']],
+  ], '이미 배포된 버전(E)만 있는 것과 지라 없는 그룹은 함께 `배포 미정`으로 묶인다');
+});
+
+test('BPVIEW: projectFindFilter는 이름·요약·키로 거르고(NFKC·대소문자 무시·모든 낱말 포함), 빈 칸이면 그대로 돌려준다', () => {
+  const app = workflowsClient();
+  app.run(`jiraIssuesByKey = new Map([['IO-1', { key: 'IO-1', summary: '결제 리뉴얼' }]]);
+    workflowData = { items: [], meetings: [], projectLinks: {} };`);
+  const rows = [{ key: 'jira:IO-1', label: 'IO-1', open: 1 }, { key: 'group:가입 개선', label: '가입 개선', open: 2 }];
+  const names = query => JSON.parse(app.run(`JSON.stringify(projectFindFilter(${JSON.stringify(rows)}, ${JSON.stringify(query)}).map(r => r.key))`));
+  assert.deepEqual(names(''), ['jira:IO-1', 'group:가입 개선'], '빈 칸이면 그대로');
+  assert.deepEqual(names('결제'), ['jira:IO-1'], '요약으로 찾는다');
+  assert.deepEqual(names('io-1'), ['jira:IO-1'], '키로도 맞는다(대소문자 무시)');
+  assert.deepEqual(names('가입 개선'), ['group:가입 개선'], '띄어쓴 낱말을 모두 포함해야 맞는다');
+  assert.deepEqual(names('개선 가입'), ['group:가입 개선'], '낱말 순서는 상관없다');
+});
+
+// 화면(DOM) 검증 — 8개(프로젝트 찾기 문턱)를 채운 fixture. 진행 중 넷(D1·D2·D5·그룹) · 시작 전
+// 둘(D3·D4, 둘 다 D1과 같은 버전을 써서 배포별 보기의 합치기도 함께 본다) · 지난 프로젝트 둘.
+function bpviewClient() {
+  const app = workflowsClient();
+  app.run(`latestData = { jiraSync: { used: false } }; customGroupsCache = [];
+    dayAgo = n => { const d = new Date(); d.setDate(d.getDate() - n); return \`\${d.getFullYear()}-\${String(d.getMonth() + 1).padStart(2, '0')}-\${String(d.getDate()).padStart(2, '0')}\`; };
+    dayShift = n => { const d = new Date(); d.setDate(d.getDate() + n); return \`\${d.getFullYear()}-\${String(d.getMonth() + 1).padStart(2, '0')}-\${String(d.getDate()).padStart(2, '0')}\`; };
+    jiraIssuesByKey = new Map([
+      ['IO-1', { key: 'IO-1', summary: '결제 리뉴얼', category: 'doing', versions: [{ name: 'v2.70.0', releaseDate: dayShift(6), released: false }] }],
+      ['IO-2', { key: 'IO-2', summary: '가입 개선', category: 'doing', versions: [] }],
+      ['IO-3', { key: 'IO-3', summary: '정산 자동화', category: 'todo', versions: [{ name: 'v2.70.0', releaseDate: dayShift(6), released: false }] }],
+      ['IO-4', { key: 'IO-4', summary: '리포트 개편', category: 'todo', versions: [{ name: 'v2.71.0', releaseDate: dayShift(20), released: false }] }],
+      ['IO-5', { key: 'IO-5', summary: '실험 대시보드', category: 'todo', versions: [{ name: 'v2.72.0', releaseDate: null, released: false }] }],
+      ['IO-6', { key: 'IO-6', summary: '끝난 캠페인', category: 'doing', versions: [] }],
+    ]);
+    jiraIssuesCache = [...jiraIssuesByKey.values()];
+    workflowData = { meetings: [], projectLinks: {}, items: [
+      { id: 't1', type: 'task', status: 'to-do', jira: 'IO-1', created: dayAgo(1) },
+      { id: 't2', type: 'task', status: 'to-do', jira: 'IO-2', created: dayAgo(1) },
+      { id: 't3', type: 'task', status: 'done', jira: 'IO-3', created: dayAgo(3), completed: dayAgo(2) },
+      { id: 't4', type: 'task', status: 'done', jira: 'IO-4', created: dayAgo(3), completed: dayAgo(1) },
+      { id: 't5', type: 'task', status: 'to-do', jira: 'IO-5', created: dayAgo(1) },
+      { id: 't6', type: 'task', status: 'done', jira: 'IO-6', created: dayAgo(60), completed: dayAgo(30) },
+      { id: 't7', type: 'task', status: 'to-do', group: '운영툴 정비', created: dayAgo(1) },
+      { id: 't8', type: 'task', status: 'done', group: '오래된 실험', created: dayAgo(90), completed: dayAgo(40) },
+    ] }; wfIndexData(); itemsById = new Map();
+    projectKey = null; projectOrderKeys = null; projectOrderResort = true; projectPastOpen = false;
+    projectListView = 'status'; projectTodoOpen = false; projectFindQuery = ''; projectDeployClosed.clear();`);
+  const render = () => app.run('renderProjects();');
+  const list = () => app.nodes.get('projectList');
+  const rowsOf = () => list().children.filter(kid => String(kid.className || '').startsWith('d-prow'))
+    .map(kid => ({ name: nodeFind(kid, 'nm').textContent, past: String(kid.className).includes('is-past') }));
+  const toggles = () => list().children.filter(kid => String(kid.className || '') === 'd-plink');
+  const headings = () => list().children.filter(kid => String(kid.className || '').startsWith('d-grp'));
+  const findInput = () => list().children.find(kid => kid.id === 'projectFind');
+  return { app, render, list, rowsOf, toggles, headings, findInput };
+}
+
+test('BPVIEW: 8개 미만이면 찾기 칸 자체가 없다', () => {
+  const fixture = projectListClient(); // 4개짜리 fixture(BNOARCHIVE)를 빌린다.
+  fixture.render();
+  assert.equal(fixture.list().children.some(kid => kid.id === 'projectFind'), false);
+});
+
+test('BPVIEW: 상태별 보기 — 진행 중은 소제목 없이 맨 위, 시작 전은 접힌 소제목, 머리 수는 지난 프로젝트만 뺀 전체', () => {
+  const fixture = bpviewClient();
+  fixture.render();
+  assert.ok(fixture.findInput(), '전체 8개라 찾기 칸이 있다');
+  assert.equal(fixture.list().children[0].children[1].textContent, 6, '머리의 N은 진행 중 + 시작 전이다(지난 프로젝트 둘만 뺀다 — 배포별 보기와 같은 수)');
+  assert.deepEqual(fixture.rowsOf().map(r => r.name), ['결제 리뉴얼', '가입 개선', '실험 대시보드', '운영툴 정비'],
+    '진행 중 넷이 소제목 없이 먼저 온다 — 정산 자동화·리포트 개편(시작 전)은 접혀서 안 보인다');
+  const todoToggle = fixture.toggles().find(t => t.textContent.startsWith('시작 전'));
+  assert.equal(todoToggle.textContent, '시작 전 2');
+  assert.equal(todoToggle.getAttribute('aria-expanded'), 'false', '시작 전은 기본으로 접혀 있다');
+  todoToggle.listeners.click();
+  assert.deepEqual(fixture.rowsOf().map(r => r.name).slice(4), ['정산 자동화', '리포트 개편'], '펼치면 시작 전 프로젝트가 이어 붙는다');
+});
+
+test('BPVIEW: 지금 보는 프로젝트가 `시작 전`에 있으면 그 덩어리가 자동으로 펼쳐진다', () => {
+  const fixture = bpviewClient();
+  fixture.app.run("projectKey = 'jira:IO-4';");
+  fixture.render();
+  const todoToggle = fixture.toggles().find(t => t.textContent.startsWith('시작 전'));
+  assert.equal(todoToggle.getAttribute('aria-expanded'), 'true');
+  assert.ok(fixture.rowsOf().some(row => row.name === '리포트 개편'));
+});
+
+test('BPVIEW: 배포별 보기 — 버전으로 묶어 배포일 이른 순 → 날짜 없는 버전 → 배포 미정 순, 머리 수는 지난 프로젝트만 뺀다', () => {
+  const fixture = bpviewClient();
+  fixture.app.run("setProjectListView('deploy');");
+  fixture.render();
+  assert.equal(fixture.app.run('projectListView'), 'deploy');
+  assert.equal(fixture.list().children[0].children[1].textContent, 6, '진행 중 + 시작 전(지난 프로젝트 둘만 뺀다) — 상태별 보기와 같은 수');
+  const names = fixture.headings().map(h => nodeFind(h, 'gl').textContent);
+  assert.deepEqual(names, ['v2.70.0', 'v2.71.0', 'v2.72.0', '배포 미정']);
+  const counts = fixture.headings().map(h => nodeFind(h, 'n').textContent);
+  assert.deepEqual(counts, [2, 1, 1, 2], '같은 버전(v2.70.0)을 쓰는 결제 리뉴얼·정산 자동화가 합쳐진다');
+  const dated = nodeFind(fixture.headings()[0], 'd-pdepdate');
+  assert.match(dated.textContent, /^· .+ 배포$/);
+  assert.equal(nodeFind(fixture.headings()[2], 'd-pdepdate'), null, '배포일이 없는 버전은 날짜 글자 자체가 없다');
+  assert.equal(nodeFind(fixture.headings()[3], 'd-pdepdate'), null, '`배포 미정`도 마찬가지다');
+  // 모든 소제목이 펼쳐진 채로 시작한다 — v2.70.0 소제목 바로 뒤에 그 버전의 두 프로젝트가 있다.
+  const v270 = fixture.headings()[0];
+  const after = fixture.list().children.slice(fixture.list().children.indexOf(v270) + 1, fixture.list().children.indexOf(v270) + 3);
+  assert.deepEqual(after.map(kid => nodeFind(kid, 'nm')?.textContent), ['결제 리뉴얼', '정산 자동화']);
+});
+
+test('BPVIEW: 배포별 보기의 소제목도 접고 펼 수 있다(세션 동안 기억)', () => {
+  const fixture = bpviewClient();
+  fixture.app.run("setProjectListView('deploy');");
+  fixture.render();
+  const v270 = fixture.headings()[0];
+  assert.equal(v270.getAttribute('aria-expanded'), 'true', '기본은 펼침이다');
+  v270.listeners.click();
+  assert.equal(fixture.headings()[0].getAttribute('aria-expanded'), 'false');
+  assert.equal(fixture.rowsOf().some(row => row.name === '결제 리뉴얼'), false, '접으면 그 아래 줄이 사라진다');
+});
+
+test('BPVIEW: 찾기 — 이름·키로 거르고, 접힘을 무시하고 전부 펼치며, 맞는 게 없는 덩어리는 소제목도 없다', () => {
+  const fixture = bpviewClient();
+  fixture.render();
+  const input = fixture.findInput();
+  input.value = '리포트';
+  input.listeners.input();
+  assert.deepEqual(fixture.rowsOf().map(row => row.name), ['리포트 개편'], '진행 중에는 없고 시작 전에서만 맞았다');
+  const todoToggle = fixture.toggles().find(t => t.textContent.startsWith('시작 전'));
+  assert.equal(todoToggle.getAttribute('aria-expanded'), 'true', '찾는 동안은 접힘을 무시하고 펼친다');
+  assert.equal(fixture.toggles().some(t => t.textContent.startsWith('지난 프로젝트')), false, '지난 프로젝트에는 맞는 게 없어 소제목도 없다');
+});
+
+test('BPVIEW: 찾기 — 하나도 없으면 안내 한 줄, Esc는 비우고 칸에 초점을 남긴다', () => {
+  const fixture = bpviewClient();
+  fixture.render();
+  const input = fixture.findInput();
+  input.value = '존재하지않는프로젝트이름';
+  input.listeners.input();
+  assert.equal(fixture.rowsOf().length, 0);
+  assert.equal(fixture.toggles().length, 0);
+  const empty = fixture.list().children.find(kid => String(kid.className || '') === 'd-empty');
+  assert.equal(empty.textContent, '맞는 프로젝트가 없어요.');
+
+  input.listeners.keydown({ key: 'Escape', isComposing: false, preventDefault() {} });
+  assert.equal(input.value, '', 'Esc는 칸을 비운다');
+  assert.equal(fixture.app.run('projectFindQuery'), '');
+  assert.ok(fixture.rowsOf().length > 0, '비우면 다시 전체가 보인다');
+});
+
+test('BPVIEW: 찾기 칸에 입력해도 목록 부분만 다시 그린다 — 칸·머리·세그먼트는 같은 노드 그대로다', () => {
+  const fixture = bpviewClient();
+  fixture.render();
+  const before = { input: fixture.findInput(), head: fixture.list().children[0], seg: fixture.list().children[1] };
+  before.input.value = '결제';
+  before.input.listeners.input();
+  assert.equal(fixture.findInput(), before.input, '찾기 칸 자체는 다시 만들지 않는다(한글 조합이 끊기지 않게)');
+  assert.equal(fixture.list().children[0], before.head, '머리도 그대로다');
+  assert.equal(fixture.list().children[1], before.seg, '세그먼트도 그대로다');
+  assert.deepEqual(fixture.rowsOf().map(row => row.name), ['결제 리뉴얼'], '그 뒤의 목록만 새로 그렸다');
+});
+
+// setActiveTab(탭을 떠나면 projectFindQuery를 비우는 곳)은 app.js의 "실행 코드" 구역(DEFINITIONS_MARKER
+// 아래)이라 이 test 파일이 읽는 정의부에는 없다 — Playwright로 4324에서 직접 확인한다.
 
 // ---------- BSMALL ①: 우선순위·기한 변경 ⌘Z ----------
 // 안전장치(recordUndoFor)는 손대지 않는다 — 값을 바꾸는 호출부에서 pushUndo를 부르기만 한다.

@@ -1564,7 +1564,17 @@ body.batch-open .d-toast { bottom: 76px; }
   font-family: inherit; font-size: 13px; font-weight: 600; color: var(--dim); text-align: left; cursor: pointer;
   transition: background 170ms var(--ease), color 170ms var(--ease);
 }
-.d-plink:hover { background: var(--hover); color: var(--accent-text); }
+.d-plink:not(:disabled):hover { background: var(--hover); color: var(--accent-text); }
+/* 찾는 동안은 전부 펼쳐 둔 소제목이라 누를 수 없다 — 글자만 남긴다 */
+.d-plink:disabled { cursor: default; }
+
+/* BPVIEW — 보기 전환(상태별|배포별)은 회의 탭 `날짜순|프로젝트별`(.d-mseg)과 같은 크기다 */
+.d-plist .d-pfseg { margin: 6px 0 8px; }
+.d-plist .d-pfseg button { height: 28px; padding: 0 12px; font-size: 13px; }
+/* 프로젝트 찾기 — 8개 이상일 때만 서는 조용한 입력칸(.d-din 그대로, 자리만 한 줄 전체) */
+.d-pfind { display: block; width: 100%; height: 32px; margin: 0 0 8px; }
+/* 배포별 소제목의 배포일 — 배지가 아니라 글자다(색은 k-warn·k-neg 공용 규칙을 그대로 쓴다) */
+.d-pdepdate { font-weight: 500; }
 
 .d-pmain { min-width: 0; padding-left: 20px; }
 .d-pwrap { max-width: 1000px; }

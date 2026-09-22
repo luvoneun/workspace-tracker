@@ -4365,6 +4365,12 @@ function setActiveTab(tab) {
   // 프로젝트 탭에 새로 들어올 때만 왼쪽 목록 차례를 다시 정렬한다(체크 등으로 이미 그 탭에 있는 동안
   // 다시 그리는 것은 고정된 차례를 그대로 쓴다 — projectOrderResort).
   if (tab === 'projects' && activeTabKey !== 'projects') projectOrderResort = true;
+  // 프로젝트 찾기 칸의 값은 저장하지 않는다 — 탭을 떠나면 비운다(BPVIEW). 탭은 숨겨질 뿐 다시 그려지지
+  // 않으므로(tabStale.projects가 그대로다) 값을 지우는 것만으로는 부족하다 — 목록도 다시 그려 둔다.
+  if (tab !== 'projects' && activeTabKey === 'projects' && projectFindQuery) {
+    projectFindQuery = '';
+    renderProjects();
+  }
   Object.entries(TABS).forEach(([key, cfg]) => {
     const active = key === tab;
     document.getElementById(cfg.grid).hidden = !active;
