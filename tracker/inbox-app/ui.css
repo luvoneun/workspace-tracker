@@ -754,8 +754,10 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 /* `새로 들어온 것`과 같은 리듬(머리줄 + 줄 목록)이되 따뜻한 색은 쓰지 않는다 — 여기는 바깥에서
    온 말이라 평소 카드 면 위에 선다. 0개면 구역째 없다(hidden). */
 .d-attn { margin: 0 0 10px; }
+/* 판은 `새로 들어온 것`과 같은 따뜻한 카드다 — 둘 다 "바깥에서 들어와 내가 손대야 할 것"이라 위 두 카드가
+   한 덩어리(노랑)로 묶이고 그 아래 `오늘 할 일`(흰색)과 갈린다. 흰 카드였을 땐 흰-노랑-흰으로 튀었다(A안). */
 .d-atlist {
-  background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r);
+  background: var(--warm); border: 1px solid var(--warm-line); border-radius: var(--r);
   box-shadow: var(--soft); padding: 6px; margin: 6px 0 0;
 }
 /* 줄은 두 줄이다: [요약 · 상태] [누가 · 언제 · 부름] / [미리보기 · 댓글 N개]. */
@@ -766,10 +768,10 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   grid-template-areas: "ld tl mt" ". sb sb" ". ed ed";
   align-items: center; column-gap: 8px; row-gap: 2px;
   min-height: var(--row); padding: 8px 10px 8px var(--pad);
-  border-radius: 14px; --rowbg: var(--surface);
+  border-radius: 14px; --rowbg: var(--warm);
   transition: background 170ms var(--ease);
 }
-.d-atrow:hover, .d-atrow:focus-within { background: var(--hover); --rowbg: var(--hover); }
+.d-atrow:hover, .d-atrow:focus-within { background: var(--warm-hover); --rowbg: var(--warm-hover); }
 .d-atrow .ld { grid-area: ld; display: flex; align-items: center; gap: 8px; }
 .d-atrow .tl { grid-area: tl; display: flex; align-items: center; gap: 8px; min-width: 0; }
 /* 출처 이름표(지라·피그마) — 조용한 글자, 프로젝트 색 점보다 앞에 선다 */
