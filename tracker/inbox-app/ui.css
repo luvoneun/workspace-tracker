@@ -1442,11 +1442,15 @@ body.later-open .page { padding-right: 424px; }
 .d-palnew .d-iconbtn::after { content: ''; position: absolute; inset: -4px; }
 .d-palres { flex: 1; min-height: 0; overflow: auto; padding: 4px 8px 8px; border-top: 1px solid var(--hair); }
 .d-pres {
-  display: grid; grid-template-columns: 62px minmax(0, 1fr) auto;
+  display: grid; grid-template-columns: 28px 62px minmax(0, 1fr) auto;
   align-items: center; gap: 12px; width: 100%; min-height: 46px; padding: 4px 12px;
   border-radius: 12px; cursor: pointer;
 }
 .d-pres.is-mtg { grid-template-columns: 62px 104px minmax(0, 1fr) auto; }
+/* 맨 앞 28px은 완료 체크 칸이다(할 일·버그·확인 대기만, BPAL). 대상 아닌 줄(결정·아이디어)은
+   같은 크기의 빈 `.d-check`로 자리만 지켜 tag·title이 밀리지 않는다. 회의는 이 칸이 아예 없다
+   (is-mtg는 위에서 그대로 4열 62px 104px 1fr auto를 쓴다). */
+.d-pres .d-check { width: 28px; height: auto; }
 /* 종류는 조용한 글자다(칩으로 세우지 않는다) */
 .d-pres .tag { font-size: 12.5px; font-weight: 500; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .d-pres .tiwrap { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
@@ -1454,17 +1458,20 @@ body.later-open .page { padding-right: 424px; }
 /* 프로젝트는 제목 바로 뒤에 작은 색 점 + 회색 글자로 붙는다(10번 규칙) */
 .d-pres .pj { display: inline-flex; align-items: center; gap: 4px; flex: none; max-width: 42%; font-size: 13px; color: var(--dim); white-space: nowrap; overflow: hidden; }
 .d-pres .pj .nm { overflow: hidden; text-overflow: ellipsis; }
-.d-pres .when, .d-pres .st {
+.d-pres .when { font-size: 13px; color: var(--dim); white-space: nowrap; }
+/* 상태 칸은 배지(.stx)와 `오늘로` 글자 버튼(BPAL)을 나란히 담는다 — 텍스트는 하나도 없어도(:empty) 자리만 비운다 */
+.d-pres .st {
+  display: flex; align-items: center; gap: 8px;
   font-size: 13px; color: var(--dim); white-space: nowrap;
+  justify-self: end; text-align: right; font-variant-numeric: tabular-nums;
 }
-.d-pres .st { justify-self: end; text-align: right; font-variant-numeric: tabular-nums; }
 /* 상태도 오늘 목록과 같은 규칙 — 급한 말만 6px 배지 */
-.d-pres .st.k-neg, .d-pres .st.k-warn {
+.d-pres .stx.k-neg, .d-pres .stx.k-warn {
   display: inline-flex; align-items: center; height: 23px; padding: 0 8px; border-radius: 6px;
   font-size: 12.5px; font-weight: 600;
 }
-.d-pres .st.k-neg { background: var(--urgent-bg); color: var(--urgent); }
-.d-pres .st.k-warn { background: var(--warn-bg); color: var(--warn); }
+.d-pres .stx.k-neg { background: var(--urgent-bg); color: var(--urgent); }
+.d-pres .stx.k-warn { background: var(--warn-bg); color: var(--warn); }
 .d-pres .st:empty, .d-pres .when:empty, .d-pres .pj:empty { display: none; }
 .d-pres:hover { background: var(--hover); }
 .d-pres.is-sel { background: var(--sel); }
@@ -2316,17 +2323,19 @@ body.batch-open .d-toast { bottom: 76px; }
   .d-palin { height: 54px; padding: 0 14px; }
   .d-palin input { font-size: 16px; }
   .d-palfil { padding: 0 10px 10px; }
-  .d-pres, .d-pres.is-mtg {
-    grid-template-columns: 56px minmax(0, 1fr);
-    height: auto; min-height: 46px; padding: 6px 10px; row-gap: 1px;
-  }
-  .d-pres .tag { grid-column: 1; grid-row: 1 / span 2; align-self: start; padding-top: 3px; }
-  .d-pres .tiwrap { grid-column: 2; grid-row: 1; }
-  .d-pres .st { grid-column: 2; grid-row: 2; justify-self: start; text-align: left; }
-  .d-pres.is-mtg .tag { grid-row: 1 / span 3; }
+  /* 체크박스 칸(28px)은 좁은 폭에서도 줄지 않는다 — 제목이 먼저 줄어든다(BPAL). 회의는 그 칸이
+     없으니 예전과 같은 2열이다. */
+  .d-pres, .d-pres.is-mtg { height: auto; min-height: 46px; padding: 6px 10px; row-gap: 1px; }
+  .d-pres { grid-template-columns: 28px 56px minmax(0, 1fr); }
+  .d-pres.is-mtg { grid-template-columns: 56px minmax(0, 1fr); }
+  .d-pres .d-check { grid-column: 1; grid-row: 1 / span 2; align-self: start; }
+  .d-pres .tag { grid-column: 2; grid-row: 1 / span 2; align-self: start; padding-top: 3px; }
+  .d-pres .tiwrap { grid-column: 3; grid-row: 1; }
+  .d-pres .st { grid-column: 3; grid-row: 2; justify-self: start; text-align: left; }
+  .d-pres.is-mtg .tag { grid-column: 1; grid-row: 1 / span 3; }
   .d-pres.is-mtg .when { grid-column: 2; grid-row: 2; }
-  .d-pres.is-mtg .tiwrap { grid-row: 1; }
-  .d-pres.is-mtg .st { grid-row: 3; }
+  .d-pres.is-mtg .tiwrap { grid-column: 2; grid-row: 1; }
+  .d-pres.is-mtg .st { grid-column: 2; grid-row: 3; }
 
   /* 행은 두 줄로 쌓이고, 숨어 있던 동작은 항상 보인다 */
   .d-row, .d-row.is-sug {

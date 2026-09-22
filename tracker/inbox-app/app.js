@@ -3271,6 +3271,10 @@ function detailUnmount() {
 
 const PAL_TYPES = [['', '전체'], ['task', '할 일'], ['check', '확인 대기'], ['decision', '결정'], ['idea', '아이디어'], ['meeting', '회의']];
 const PAL_TAG = { task: '할 일', bug: '할 일', check: '확인 대기', decision: '결정', idea: '아이디어' };
+// 검색 결과에서 바로 처리하는 종류(BPAL): 완료 체크는 할 일·버그·확인 대기, `오늘로`는 할 일·버그만
+// (확인 대기는 `scheduled`가 아니라 답변 받을 날 개념이라 오늘로 옮기는 동작이 없다).
+const PAL_CHECKABLE = ['task', 'bug', 'check'];
+const PAL_TODAYABLE = ['task', 'bug'];
 
 let palState = null;
 let palNodes = null;
@@ -3406,11 +3410,45 @@ function palResultRow(entry, index, query) {
     row.setAttribute('aria-label', `회의 ${when} ${event.title}`);
   } else {
     const item = entry.item;
+    // 맨 앞 28px 칸: 완료 체크가 있는 종류(할 일·버그·확인 대기)만 채우고, 나머지(결정·아이디어)는
+    // 같은 크기의 빈 `.d-check`로 자리만 지켜 tag·title이 밀리지 않게 한다(BPAL).
+    if (PAL_CHECKABLE.includes(item.type)) {
+      const box = uiCheckCell(item, row, item.status === 'done');
+      // 클릭이 줄 열기(row.click → palPick)로 번지지 않게 여기서 끝낸다.
+      box.addEventListener('click', event => event.stopPropagation());
+      row.appendChild(box);
+    } else {
+      const spacer = document.createElement('span');
+      spacer.className = 'd-check';
+      row.appendChild(spacer);
+    }
     const due = item.status === 'done' ? null : uiItemDueText(item);
     const status = item.status === 'done' ? { text: '완료', tone: '' } : due || (item.doing ? { text: '진행 중', tone: '' } : null);
     cell('tag', escapeHtml(PAL_TAG[item.type] || item.type || ''));
     titleCell(palHighlight(item.description, query), item.description, item);
-    cell(`st${status ? uiTone(status.tone) : ''}`, status ? escapeHtml(status.text) : '');
+    // 상태 칸은 배지(.stx)와 `오늘로` 버튼을 함께 담는다 — 사용자 글자는 textContent로만 넣는다.
+    const stCell = document.createElement('span');
+    stCell.className = 'st';
+    row.appendChild(stCell);
+    if (status) {
+      const badge = document.createElement('span');
+      badge.className = `stx${uiTone(status.tone)}`;
+      badge.textContent = status.text;
+      stCell.appendChild(badge);
+    }
+    // `오늘로` — 완료가 아니고 오늘이 아닌 할 일·버그에만(BPAL 대상 정정).
+    if (item.status !== 'done' && PAL_TODAYABLE.includes(item.type) && item.scheduled !== todayStr()) {
+      const todayBtn = document.createElement('button');
+      todayBtn.type = 'button';
+      todayBtn.className = 'd-headnum';
+      todayBtn.textContent = '오늘로';
+      todayBtn.setAttribute('aria-label', `${item.description} — 오늘 할 일로 옮기기`);
+      todayBtn.addEventListener('click', async (event) => {
+        event.stopPropagation();
+        await fadeOutAndRun(row, () => setTaskScheduled(item.id, todayStr()), '오늘 할 일로 옮겼어요');
+      });
+      stCell.appendChild(todayBtn);
+    }
     row.setAttribute('aria-label', `${PAL_TAG[item.type] || ''} ${item.description}`);
   }
   row.addEventListener('click', () => palPick(index));

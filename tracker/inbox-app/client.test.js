@@ -661,6 +661,91 @@ test('the palette meeting filter keeps drafts to review on top and can narrow to
   assert.deepEqual(ids("{ query: '권한', type: 'task' }"), [], '다른 종류를 고르면 회의는 빠진다');
 });
 
+// BPAL: 검색 결과 줄에서 바로 완료 체크·`오늘로`를 처리한다(할 일·버그·확인 대기만, 결정·아이디어·회의는 대상 아님).
+function palRowClient(response) {
+  const app = workflowsClient();
+  const sent = [];
+  app.context.fetch = async (url, init) => {
+    sent.push({ url, body: init && init.body ? JSON.parse(init.body) : null });
+    if (typeof response === 'function') return response();
+    return response.clone();
+  };
+  app.run('workflowData = { items: [], meetings: [] }; wfIndexData(); itemsById = new Map();');
+  return { app, sent };
+}
+function palRow(app, item, index = 0, query = '') {
+  app.run(`palState = palDefaults({ active: ${index} });`);
+  return app.run(`palResultRow({ kind: 'item', item: ${JSON.stringify(item)} }, ${index}, ${JSON.stringify(query)})`);
+}
+
+test('BPAL: 체크박스는 대상 종류(할 일·버그·확인 대기)에만 있고, 결정·아이디어는 같은 자리를 비워 둔다', () => {
+  const { app } = palRowClient(new Response('{"ok":true}'));
+  const cb = (type) => palRow(app, { id: 'x1', type, description: '문구', status: 'to-do' }).children[0];
+  ['task', 'bug', 'check'].forEach(type => {
+    const cell = cb(type);
+    assert.equal(cell.className, 'd-check');
+    assert.equal(cell.children.length, 1, `${type}에는 체크박스가 있다`);
+  });
+  ['decision', 'idea'].forEach(type => {
+    const cell = cb(type);
+    assert.equal(cell.className, 'd-check', '같은 크기의 칸이 자리를 지킨다');
+    assert.equal(cell.children.length, 0, `${type}은 체크박스가 없다`);
+  });
+  // 회의는 그 칸이 아예 없다 — 첫 칸이 바로 `tag`다.
+  app.run(`palState = palDefaults({ active: 0 });`);
+  const meetingRow = app.run(`palResultRow({ kind: 'meeting', event: { id: 'm1', title: '회의', date: '2026-09-22', start: '10:00', drafts: [] } }, 0, '')`);
+  assert.equal(meetingRow.children[0].className, 'tag', '회의 줄은 예전 그대로다');
+});
+
+test('BPAL: 체크박스를 누르면 목록과 같은 toggle 하나로 저장하고, 팔레트는 열린 채로 남는다', async () => {
+  const { app, sent } = palRowClient(new Response('{"ok":true}'));
+  app.run(`workflowData.items = [{ id: 't1', type: 'task', description: '업무 문구', status: 'to-do' }]; wfIndexData();`);
+  const row = palRow(app, { id: 't1', type: 'task', description: '업무 문구', status: 'to-do' });
+  const box = firstCheckbox(row.children[0]);
+  await box.listeners.change();
+  assert.deepEqual(sent.map(call => call.url), ['/api/track/toggle'], '저장 길은 목록과 같은 toggle 하나다');
+  assert.deepEqual(sent[0].body, { id: 't1', status: 'done' });
+  assert.notEqual(app.run('palState'), null, '처리한 뒤에도 팔레트는 닫히지 않는다');
+});
+
+test('BPAL: 체크박스·`오늘로` 클릭은 stopPropagation으로 줄 열기(팔레트 닫고 상세 열기)를 막는다', () => {
+  const { app } = palRowClient(new Response('{"ok":true}'));
+  const row = palRow(app, { id: 't1', type: 'task', description: '업무 문구', status: 'to-do' });
+  let stopped = 0;
+  const stub = { stopPropagation: () => { stopped += 1; } };
+  row.children[0].listeners.click(stub);
+  assert.equal(stopped, 1, '체크박스 칸의 클릭이 멈춘다');
+  const todayBtn = nodeFind(row, 'd-headnum');
+  todayBtn.listeners.click(stub);
+  assert.equal(stopped, 2, '`오늘로` 클릭도 멈춘다');
+});
+
+test('BPAL: `오늘로`는 완료가 아니고 오늘이 아닌 할 일·버그에만 있다(확인 대기는 대상 아님)', () => {
+  const { app } = palRowClient(new Response('{"ok":true}'));
+  const today = app.run('todayStr()');
+  const row = (item) => palRow(app, item);
+  assert.ok(nodeFind(row({ id: 'a', type: 'task', description: '업무', status: 'to-do', scheduled: '2026-09-01' }), 'd-headnum'),
+    '할 일이고 오늘이 아니면 보인다');
+  assert.ok(nodeFind(row({ id: 'b', type: 'bug', description: '버그', status: 'to-do' }), 'd-headnum'), '버그도 대상이다');
+  assert.equal(nodeFind(row({ id: 'c', type: 'task', description: '업무', status: 'to-do', scheduled: today }), 'd-headnum'), null,
+    '이미 오늘이면 보이지 않는다');
+  assert.equal(nodeFind(row({ id: 'd', type: 'task', description: '업무', status: 'done', scheduled: '2026-09-01' }), 'd-headnum'), null,
+    '완료한 줄에는 없다');
+  assert.equal(nodeFind(row({ id: 'e', type: 'check', description: '확인', status: 'to-do', scheduled: '2026-09-01' }), 'd-headnum'), null,
+    '확인 대기는 `scheduled`가 아니라 답변 받을 날 개념이라 대상이 아니다');
+});
+
+test('BPAL: `오늘로`를 누르면 목록의 `오늘` 칩과 같은 set-scheduled 하나로 저장한다', async () => {
+  const { app, sent } = palRowClient(new Response('{"ok":true}'));
+  const row = palRow(app, { id: 't1', type: 'task', description: '업무 문구', status: 'to-do', scheduled: '2026-09-01' });
+  const todayBtn = nodeFind(row, 'd-headnum');
+  await todayBtn.listeners.click({ stopPropagation() {} });
+  assert.deepEqual(sent.map(call => call.url), ['/api/track/set-scheduled']);
+  assert.deepEqual(sent[0].body, { id: 't1', scheduled: app.run('todayStr()') });
+  assert.match(app.nodes.get('liveRegion').textContent, /오늘 할 일로 옮겼어요/);
+  assert.notEqual(app.run('palState'), null, '처리한 뒤에도 팔레트는 열려 있다');
+});
+
 // 회의 탭 — 팔레트에서 떼어 온 훑어보는 면. 거르는 판단과 처음 고를 회의를 정하는 판단은 순수 함수다.
 // 기본 목록은 캘린더 회의가 매일 쌓여도 끝없이 길어지지 않게 기간으로 자른다(BML §1). today는 인자로 받는다.
 // 오늘 2026-09-21 기준: recent-*는 14일 안(1일·11일 전), old-*는 14일보다 오래됨(16일·16일·35일 전).
