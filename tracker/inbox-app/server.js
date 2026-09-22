@@ -1519,6 +1519,8 @@ const handleRequest = (req, res) => {
     '/api/project/rename': renameProject,
     // 삭제한 항목 완전히 지우기 — `.trash.json`에서 그 줄만 뺀다(업무 파일은 이미 그 줄이 없다).
     '/api/track/trash-purge': ({ id }) => purgeTrashItem(id),
+    // 새 프로젝트 화면의 직군 세트. 지라에는 아무것도 묻지 않고 `.workflow.json` 한 칸만 바꾼다.
+    '/api/workflow/jira-roles': workflows.saveJiraRoles,
   };
   if (req.method === 'POST' && workflowActions[url.pathname]) {
     readBody(req).then(body => {
@@ -1622,6 +1624,45 @@ const handleRequest = (req, res) => {
       .then((payload) => {
         // 보낸 쪽 잘못(키·값 형식)만 400이다. 지라 쪽 실패는 200 + `ok:false`로 문구를 실어 보낸다.
         res.writeHead(payload.kind === 'key' || payload.kind === 'value' ? 400 : 200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(payload));
+      })
+      .catch(() => {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: '보낸 값을 확인해 주세요.', kind: 'value' }));
+      });
+    return;
+  }
+
+  // 새 프로젝트 화면이 하위 티켓 종류를 고를 때 부른다 — 그 지라 프로젝트에서 만들 수 있는 이슈
+  // 종류다. 조회라 파일은 하나도 쓰지 않고, 서버 메모리에 프로젝트마다 60초만 담아 둔다.
+  if (url.pathname === '/api/jira/create-meta' && req.method === 'GET') {
+    if (!USES.jira) { res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ ok: false, error: '지라를 쓰지 않도록 설정돼 있어요.', kind: 'other' })); return; }
+    jira.createMeta(url.searchParams.get('project'))
+      .then((payload) => {
+        // 형식이 틀린 프로젝트 키만 400이다(보낸 쪽 잘못). 지라 쪽 실패는 200 + `ok:false`다.
+        res.writeHead(payload.kind === 'key' ? 400 : 200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(payload));
+      })
+      .catch(() => {
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: '지라에 연결하지 못했어요.', kind: 'other' }));
+      });
+    return;
+  }
+
+  // 지라에 **여러 이슈를 만드는** 단 하나의 주소(에픽 하나 + 직군별 하위). 화면이 만들 목록 전체를
+  // 보여 주고 확인을 받은 뒤에만 부른다. 서버는 보낸 값을 다시 검증하고, 만들 수 있는 이슈 종류를
+  // 쓰기 직전에 지라에서 다시 읽어 대조하며, 같은 계획을 60초 안에 두 번 받으면 거절한다.
+  // 앱 파일은 하나도 건드리지 않으므로 `idempotent()`·mutation-store를 타지 않는다(그것들은 앱
+  // 데이터용이다) — 다만 복구 필요 상태의 POST 차단은 맨 위 전역 분기를 그대로 탄다.
+  // 요청 본문은 어디에도 기록하지 않는다.
+  if (url.pathname === '/api/jira/create' && req.method === 'POST') {
+    if (!USES.jira) { res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ ok: false, error: '지라를 쓰지 않도록 설정돼 있어요.', kind: 'other' })); return; }
+    readBody(req)
+      .then(body => jira.create(body))
+      .then((payload) => {
+        // 보낸 쪽 잘못(키·값 형식·개수)만 400이다. 지라 쪽 실패는 200 + `ok:false`로 문구를 실어 보낸다.
+        res.writeHead(['key', 'value', 'tooMany'].includes(payload.kind) ? 400 : 200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify(payload));
       })
       .catch(() => {

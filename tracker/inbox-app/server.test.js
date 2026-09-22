@@ -2434,3 +2434,320 @@ test('BRENAME: 복구가 필요한 동안에는 이름도 바꾸지 않는다', 
   assert.match(blocked.error, /저장을 멈췄어요/);
   assert.match(fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8'), /group:결제_리뉴얼\]/);
 });
+
+// ---------- 지라에 새로 만들기 (BJCREATE — 지라에 이슈를 만든다) ----------
+// 여기서도 실제 지라에는 절대 닿지 않는다: 모든 요청은 가짜 fetch가 받아 기록만 한다.
+// `무엇이 만들어졌는가`는 기록된 method·본문으로 판정한다(GET만 나갔으면 아무것도 만들지 않은 것이다).
+// 확정된 값 그대로다: 에픽 10000(계층 1) · 작업 10001 · 스토리 10003 · 버그 10004 · 하위 작업은 계층 -1.
+const jiraCreateTypes = { issueTypes: [
+  { id: '10000', name: '에픽', subtask: false, hierarchyLevel: 1 },
+  { id: '10001', name: '작업', subtask: false, hierarchyLevel: 0 },
+  { id: '10003', name: '스토리', subtask: false, hierarchyLevel: 0 },
+  { id: '10004', name: '버그', subtask: false, hierarchyLevel: 0 },
+  { id: '10101', name: '하위 작업', subtask: true, hierarchyLevel: -1 },
+] };
+// 만들기 요청을 차례대로 받아 새 키를 내주는 가짜 지라. `refuse`에 적은 요약은 그 상태로 거절한다.
+function jiraMakeFake({ types = jiraCreateTypes, refuse = {}, epic = null } = {}) {
+  let next = 48400;
+  const made = [];
+  const fake = jiraFake({
+    '/issue/createmeta': () => json(types),
+    // 이미 있는 에픽을 대조할 때 읽는 자리(요약과 종류 id만 묻는다)
+    '/rest/api/3/issue/IO-': () => (epic ? json({ fields: { summary: epic.summary, issuetype: { id: epic.typeId } } }) : json({ errorMessages: ['no issue'] }, 404)),
+  });
+  const request = async (url, options) => {
+    const method = (options && options.method) || 'GET';
+    if (method === 'POST' && String(url).endsWith('/rest/api/3/issue')) {
+      const sent = JSON.parse(options.body);
+      fake.calls.push({ url, headers: options.headers, method, body: sent });
+      const summary = sent.fields.summary;
+      if (refuse[summary]) return json({ errorMessages: ['refused'] }, refuse[summary]);
+      next += 1;
+      const key = `IO-${next}`;
+      made.push({ key, summary, parent: sent.fields.parent ? sent.fields.parent.key : null, type: sent.fields.issuetype.id });
+      return json({ id: '1', key });
+    }
+    return fake.request(url, options);
+  };
+  return { request, calls: fake.calls, made };
+}
+const jiraMakeApi = (fake, extra = {}) => jiraModule.createJiraApi({ config: jiraConfig, request: fake.request, readFile: () => JIRA_TOKEN, ...extra });
+
+test('BJCREATE: 만들 수 있는 종류는 계층으로 가른다 — 에픽은 계층 1, 하위 후보는 표준 타입뿐', () => {
+  const shaped = jiraModule.shapeCreateTypes(jiraCreateTypes);
+  assert.deepEqual(shaped.map(type => [type.id, type.level]), [['10000', 1], ['10001', 0], ['10003', 0], ['10004', 0], ['10101', -1]]);
+  assert.equal(jiraModule.epicTypeOf(shaped).id, '10000', '이름이 아니라 계층 1로 고른다');
+  assert.deepEqual(jiraModule.childTypesOf(shaped).map(type => type.id), ['10001', '10003', '10004'], '하위 작업(subtask)은 쓰지 않는다');
+  assert.equal(jiraModule.defaultChildType(shaped).id, '10001', '기본은 이름에 `작업`/`Task`가 있는 것');
+  // 옛 주소의 모양(projects[0].issuetypes)도 같은 결과로 편다. `hierarchyLevel`이 없으면 subtask로만 가른다.
+  const old = jiraModule.shapeCreateTypes({ projects: [{ key: 'IO', issuetypes: [
+    { id: '10000', name: 'Epic', subtask: false },
+    { id: '10002', name: 'Task', subtask: false },
+    { id: '10101', name: 'Sub-task', subtask: true },
+  ] }] });
+  assert.deepEqual(old.map(type => [type.id, type.level]), [['10000', 0], ['10002', 0], ['10101', -1]]);
+  assert.equal(jiraModule.defaultChildType(old).id, '10002');
+  assert.equal(jiraModule.shapeCreateTypes({}).length, 0, '모르는 모양이 와도 빈 목록으로 흐른다');
+});
+
+test('BJCREATE: create-meta는 새 주소를 먼저 부르고 없으면 옛 주소로 한 번 물러서며 60초 캐시한다', async () => {
+  const fallback = jiraFake({
+    '/issue/createmeta/IO/issuetypes': () => json({ errorMessages: ['not found'] }, 404),
+    '/issue/createmeta?projectKeys=IO': () => json({ projects: [{ key: 'IO', issuetypes: jiraCreateTypes.issueTypes }] }),
+  });
+  const fellBack = await jiraMakeApi(fallback).createMeta('IO');
+  assert.equal(fellBack.ok, true);
+  assert.deepEqual(fellBack.types.map(type => type.name), ['작업', '스토리', '버그']);
+  assert.deepEqual(fellBack.epic, { id: '10000', name: '에픽' });
+  assert.equal(fellBack.defaultTypeId, '10001');
+  assert.equal(fallback.calls.length, 2);
+
+  let clock = 1000;
+  const fake = jiraFake({ '/issue/createmeta': () => json(jiraCreateTypes) });
+  const api = jiraMakeApi(fake, { now: () => clock });
+  await api.createMeta('IO');
+  await api.createMeta('IO');
+  assert.equal(fake.calls.length, 1, '60초 안에는 다시 부르지 않는다');
+  await api.createMeta('PAY');
+  assert.equal(fake.calls.length, 2, '캐시는 프로젝트마다 따로다');
+  clock += 61 * 1000;
+  await api.createMeta('IO');
+  assert.equal(fake.calls.length, 3, '60초가 지나면 다시 읽는다');
+  // 프로젝트 키 형식은 API에서도 막는다(지라를 부르지 않는다).
+  assert.deepEqual(await api.createMeta('io-1'), { ok: false, error: '지라 번호를 확인해 주세요.', kind: 'key' });
+  assert.equal(fake.calls.length, 3);
+  // 돌려주는 값 어디에도 토큰·이메일이 없다.
+  const payload = JSON.stringify(await api.createMeta('IO'));
+  assert.doesNotMatch(payload, new RegExp(JIRA_TOKEN));
+  assert.doesNotMatch(payload, new RegExp(JIRA_EMAIL));
+});
+
+test('BJCREATE: 에픽을 먼저 만들고 하위를 차례대로 그 에픽에 붙인다 — 보내는 칸은 넷뿐이다', async () => {
+  const fake = jiraMakeFake();
+  const result = await jiraMakeApi(fake).create({ plan: {
+    projectKey: 'IO',
+    epic: { summary: '게시글 작성하기_게임 임베드' },
+    children: [
+      { summary: '[Web] 게시글 작성하기_게임 임베드', issueTypeId: '10001' },
+      { summary: '[QA] 게시글 작성하기_게임 임베드', issueTypeId: '10001' },
+    ],
+  } });
+  assert.equal(result.ok, true);
+  assert.equal(result.made, 3);
+  assert.equal(result.failed, 0);
+  assert.equal(result.epic.created, true);
+  assert.equal(result.epic.url, `${JIRA_SITE}/browse/${result.epic.key}`);
+  assert.deepEqual(result.children.map(child => child.summary), ['[Web] 게시글 작성하기_게임 임베드', '[QA] 게시글 작성하기_게임 임베드']);
+  // 순서: 종류 조회(GET) → 에픽 → 하위 둘. 하위는 모두 그 에픽을 부모로 단다.
+  assert.deepEqual(fake.made.map(entry => [entry.summary, entry.parent, entry.type]), [
+    ['게시글 작성하기_게임 임베드', null, '10000'],
+    ['[Web] 게시글 작성하기_게임 임베드', result.epic.key, '10001'],
+    ['[QA] 게시글 작성하기_게임 임베드', result.epic.key, '10001'],
+  ]);
+  const posts = fake.calls.filter(call => call.method === 'POST');
+  assert.equal(posts.length, 3);
+  assert.deepEqual(Object.keys(posts[1].body.fields).sort(), ['issuetype', 'parent', 'project', 'summary']);
+  assert.deepEqual(posts[0].body.fields.project, { key: 'IO' });
+  // 쓰기 직전에 만들 수 있는 종류를 **다시 읽어** 대조한다.
+  assert.match(fake.calls[0].url, /\/issue\/createmeta\/IO\/issuetypes/);
+  assert.equal(fake.calls[0].method, 'GET');
+  // 응답과 요청 어디에도 토큰·이메일이 없다.
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(`${JIRA_TOKEN}|${JIRA_EMAIL}`));
+  assert.doesNotMatch(fake.calls.map(call => call.url).join(' '), new RegExp(`${JIRA_TOKEN}|${JIRA_EMAIL}`));
+});
+
+test('BJCREATE: 하위 하나가 실패해도 다음은 계속하고, 실패한 줄만 이유를 달고 온다', async () => {
+  const fake = jiraMakeFake({ refuse: { '[Android] 임베드': 400, '[QA] 임베드': 403 } });
+  const result = await jiraMakeApi(fake).create({ plan: {
+    projectKey: 'IO',
+    epic: { summary: '임베드' },
+    children: [
+      { summary: '[Web] 임베드', issueTypeId: '10001' },
+      { summary: '[Android] 임베드', issueTypeId: '10001' },
+      { summary: '[QA] 임베드', issueTypeId: '10001' },
+    ],
+  } });
+  assert.equal(result.ok, true);
+  assert.equal(result.made, 2, '에픽 + 성공한 하위 하나');
+  assert.equal(result.failed, 2);
+  assert.ok(result.children[0].key);
+  assert.equal(result.children[1].kind, 'makeReject');
+  assert.match(result.children[1].error, /필수 항목이 더 있을 수 있어요/);
+  assert.equal(result.children[2].kind, 'makeForbidden');
+  assert.match(result.children[2].error, /권한이 없어요/);
+  assert.equal(fake.made.length, 2, '실패한 것은 만들어지지 않았다');
+  // 지라 원문(`refused`)은 어느 문구에도 섞이지 않는다.
+  assert.doesNotMatch(JSON.stringify(result), /refused/);
+});
+
+test('BJCREATE: 에픽 자체가 실패하면 하위는 시작하지도 않는다', async () => {
+  const fake = jiraMakeFake({ refuse: { '만들 수 없는 에픽': 400 } });
+  const result = await jiraMakeApi(fake).create({ plan: {
+    projectKey: 'IO',
+    epic: { summary: '만들 수 없는 에픽' },
+    children: [{ summary: '[Web] 하위', issueTypeId: '10001' }],
+  } });
+  assert.equal(result.ok, false);
+  assert.equal(result.kind, 'makeReject');
+  assert.equal(fake.made.length, 0);
+  assert.equal(fake.calls.filter(call => call.method === 'POST').length, 1, '에픽 하나만 시도했다');
+});
+
+test('BJCREATE: 이미 있는 에픽에 붙일 때는 그 티켓이 정말 에픽인지 쓰기 직전에 확인한다', async () => {
+  const good = jiraMakeFake({ epic: { summary: '게시글 작성하기_게임 임베드', typeId: '10000' } });
+  const ok = await jiraMakeApi(good).create({ plan: {
+    projectKey: 'IO', epic: { key: 'IO-48394' }, children: [{ summary: '[Web] 붙임', issueTypeId: '10001' }],
+  } });
+  assert.equal(ok.ok, true);
+  assert.equal(ok.epic.created, false);
+  assert.equal(ok.epic.summary, '게시글 작성하기_게임 임베드');
+  assert.equal(ok.made, 1, '에픽은 이미 있으므로 세지 않는다');
+  assert.deepEqual(good.made.map(entry => entry.parent), ['IO-48394']);
+
+  // 에픽이 아닌 티켓(작업)에는 붙이지 않는다 — 아무것도 만들지 않는다.
+  const wrong = jiraMakeFake({ epic: { summary: '그냥 작업', typeId: '10001' } });
+  const refused = await jiraMakeApi(wrong).create({ plan: {
+    projectKey: 'IO', epic: { key: 'IO-48394' }, children: [{ summary: '[Web] 붙임', issueTypeId: '10001' }],
+  } });
+  assert.deepEqual(refused, { ok: false, error: '고른 티켓이 에픽이 아니에요.', kind: 'notEpic' });
+  assert.equal(wrong.made.length, 0);
+
+  // 다른 프로젝트의 에픽 키는 형식 단계에서 거절한다(지라를 부르지도 않는다).
+  const other = jiraMakeFake();
+  assert.equal((await jiraMakeApi(other).create({ plan: {
+    projectKey: 'IO', epic: { key: 'PAY-1' }, children: [{ summary: '[Web] 붙임', issueTypeId: '10001' }],
+  } })).kind, 'key');
+  assert.equal(other.calls.length, 0);
+});
+
+test('BJCREATE: 보낸 값은 개수·요약·종류까지 다시 검증하고, 종류가 바뀌었으면 아무것도 만들지 않는다', async () => {
+  const many = jiraMakeFake();
+  const over = await jiraMakeApi(many).create({ plan: {
+    projectKey: 'IO', epic: { summary: '너무 많음' },
+    children: Array.from({ length: 13 }, (unused, at) => ({ summary: `[R${at}] 하위`, issueTypeId: '10001' })),
+  } });
+  assert.deepEqual(over, { ok: false, error: '한 번에 12개까지 만들 수 있어요.', kind: 'tooMany' });
+  assert.equal(many.calls.length, 0, '개수부터 틀리면 지라를 부르지 않는다');
+
+  const bad = jiraMakeFake();
+  const api = jiraMakeApi(bad);
+  const cases = [
+    { plan: { projectKey: 'io', epic: { summary: 'x' }, children: [] }, kind: 'key' },
+    { plan: { projectKey: 'IO', epic: { summary: '   ' }, children: [] }, kind: 'value' },
+    { plan: { projectKey: 'IO', epic: { summary: 'x'.repeat(256) }, children: [] }, kind: 'value' },
+    { plan: { projectKey: 'IO', epic: { summary: '줄\n바꿈' }, children: [] }, kind: 'value' },
+    { plan: { projectKey: 'IO', epic: { summary: 'x' }, children: [{ summary: '', issueTypeId: '10001' }] }, kind: 'value' },
+    { plan: { projectKey: 'IO', epic: { summary: 'x' }, children: [{ summary: '하위', issueTypeId: '../etc' }] }, kind: 'value' },
+    { plan: { projectKey: 'IO', epic: { key: 'IO-1' }, children: [] }, kind: 'value' },
+    { kind: 'value' },
+  ];
+  for (const entry of cases) assert.equal((await api.create(entry.plan ? { plan: entry.plan } : {})).kind, entry.kind, JSON.stringify(entry.plan));
+  assert.equal(bad.calls.length, 0, '형식이 틀리면 지라를 부르지 않는다');
+
+  // 화면이 본 종류가 지라에서 사라졌으면(쓰기 직전 재조회 대조) 아무것도 만들지 않는다.
+  const stale = jiraMakeFake({ types: { issueTypes: [{ id: '10000', name: '에픽', subtask: false, hierarchyLevel: 1 }] } });
+  const gone = await jiraMakeApi(stale).create({ plan: {
+    projectKey: 'IO', epic: { summary: 'x' }, children: [{ summary: '[Web] 하위', issueTypeId: '10001' }],
+  } });
+  assert.equal(gone.kind, 'typeStale');
+  assert.equal(stale.made.length, 0);
+
+  // 에픽 타입이 아예 없는 프로젝트에는 새 에픽을 만들지 않는다.
+  const noEpic = jiraMakeFake({ types: { issueTypes: [{ id: '10001', name: '작업', subtask: false, hierarchyLevel: 0 }] } });
+  assert.equal((await jiraMakeApi(noEpic).create({ plan: { projectKey: 'IO', epic: { summary: 'x' }, children: [] } })).kind, 'epicType');
+  assert.equal(noEpic.made.length, 0);
+});
+
+test('BJCREATE: 같은 계획을 60초 안에 두 번 받으면 거절하고, 아무것도 못 만든 요청은 곧바로 다시 받는다', async () => {
+  let clock = 1000;
+  const fake = jiraMakeFake();
+  const api = jiraMakeApi(fake, { now: () => clock });
+  const plan = { projectKey: 'IO', epic: { summary: '한 번만' }, children: [{ summary: '[Web] 한 번만', issueTypeId: '10001' }] };
+  assert.equal((await api.create({ plan })).ok, true);
+  assert.equal(fake.made.length, 2);
+  assert.deepEqual(await api.create({ plan }), { ok: false, error: '같은 내용을 방금 보냈어요. 잠시 뒤에 다시 시도해 주세요.', kind: 'duplicate' });
+  assert.equal(fake.made.length, 2, '두 번째 요청은 지라에 닿지 않는다');
+  clock += 61 * 1000;
+  assert.equal((await api.create({ plan })).ok, true, '60초가 지나면 같은 계획도 다시 받는다');
+  assert.equal(fake.made.length, 4);
+
+  // 아무것도 만들지 못하고 끝난 계획은 지문을 남기지 않는다(바로 다시 시도할 수 있어야 한다).
+  const refusing = jiraMakeFake({ refuse: { '거절되는 에픽': 400 } });
+  const retry = jiraMakeApi(refusing);
+  const badPlan = { plan: { projectKey: 'IO', epic: { summary: '거절되는 에픽' }, children: [] } };
+  assert.equal((await retry.create(badPlan)).kind, 'makeReject');
+  assert.equal((await retry.create(badPlan)).kind, 'makeReject', '중복이 아니라 같은 실패로 답한다');
+});
+
+test('BJCREATE: 설정이 없거나 토큰을 못 읽으면 지라를 부르지 않고 연결 필요로만 답한다', async () => {
+  const fake = jiraMakeFake();
+  const plan = { plan: { projectKey: 'IO', epic: { summary: 'x' }, children: [] } };
+  const off = jiraModule.createJiraApi({ config: {}, request: fake.request });
+  assert.deepEqual(await off.create(plan), { ok: false, error: '지라 연결이 필요해요.', kind: 'off' });
+  assert.deepEqual(await off.createMeta('IO'), { ok: true, connected: false });
+  const noToken = jiraModule.createJiraApi({ config: jiraConfig, request: fake.request, readFile: () => { throw new Error('ENOENT'); } });
+  assert.deepEqual(await noToken.create(plan), { ok: false, error: '지라 연결이 필요해요.', kind: 'off' });
+  assert.equal(fake.calls.length, 0);
+});
+
+test('BJCREATE: 새 주소 둘은 조회면 파일을 쓰지 않고, 형식이 틀린 값만 400이다', async () => {
+  const snapshot = () => fs.readdirSync(directory).sort().map(name => {
+    const stat = fs.statSync(path.join(directory, name));
+    return `${name}:${stat.size}:${stat.mtimeMs}`;
+  }).join('|');
+  const before = snapshot();
+  const meta = await fetch(`${base}/api/jira/create-meta?project=IO`);
+  assert.equal(meta.status, 200);
+  assert.deepEqual(await meta.json(), { ok: true, connected: false });
+  const badMeta = await fetch(`${base}/api/jira/create-meta?project=io-1`);
+  assert.equal(badMeta.status, 400);
+  assert.deepEqual(await badMeta.json(), { ok: false, error: '지라 번호를 확인해 주세요.', kind: 'key' });
+  // 설정이 없으면 만들기도 `지라 연결이 필요해요`로만 답한다(200 + ok:false).
+  const off = await post('/api/jira/create', { plan: { projectKey: 'IO', epic: { summary: 'x' }, children: [] } });
+  assert.equal(off.status, 200);
+  assert.equal(off.kind, 'off');
+  // 보낸 쪽 잘못(키·값·개수)만 400이다.
+  assert.equal((await post('/api/jira/create', { plan: { projectKey: 'io', epic: { summary: 'x' } } })).status, 400);
+  assert.equal((await post('/api/jira/create', {})).status, 400);
+  assert.equal(snapshot(), before, '두 주소 모두 어떤 파일도 만들거나 고치지 않는다');
+});
+
+test('BJCREATE: 직군 세트는 앱 데이터로만 저장하고 검증을 통과한 것만 목록에 실린다', async () => {
+  const saved = await post('/api/workflow/jira-roles', { roles: [{ label: 'Web', prefix: '[Web]' }, { label: ' Data ', prefix: ' [Data] ' }] });
+  assert.equal(saved.ok, true);
+  assert.deepEqual((await items()).workflows.jiraRoles, [{ label: 'Web', prefix: '[Web]' }, { label: 'Data', prefix: '[Data]' }]);
+  const bad = [
+    { roles: 'nope' },
+    { roles: Array.from({ length: 21 }, (unused, at) => ({ label: `R${at}`, prefix: `[R${at}]` })) },
+    { roles: [{ label: '', prefix: '[x]' }] },
+    { roles: [{ label: 'x'.repeat(31), prefix: '[x]' }] },
+    { roles: [{ label: 'x', prefix: 'y'.repeat(21) }] },
+    { roles: [{ label: '줄\n바꿈', prefix: '[x]' }] },
+    { roles: [{ label: 'Web', prefix: '[Web]' }, { label: 'web', prefix: '[W]' }] },
+  ];
+  for (const body of bad) assert.equal((await post('/api/workflow/jira-roles', body)).status, 400, JSON.stringify(body));
+  assert.deepEqual((await items()).workflows.jiraRoles, [{ label: 'Web', prefix: '[Web]' }, { label: 'Data', prefix: '[Data]' }], '거절된 요청은 저장을 고치지 않는다');
+  // 전부 지우면 빈 목록이 그대로 남는다(기본값이 되살아나지 않는다 — 기본값은 화면이 쓴다).
+  assert.equal((await post('/api/workflow/jira-roles', { roles: [] })).ok, true);
+  assert.deepEqual((await items()).workflows.jiraRoles, []);
+});
+
+test('BJCREATE: 복구가 필요한 동안에는 지라에 만들지도, 직군 세트를 저장하지도 않는다', async (t) => {
+  const server = await startServer(t, (home) => {
+    // 저널이 기억하는 `이전 내용`과 파일이 다르다 = 밖에서 바뀐 파일이라 복구를 거절한다.
+    fs.writeFileSync(path.join(home, 'tasks.md'), '# Tasks\n- 바깥에서 고친 줄 #task[id:outside status:to-do created:2026-09-20]\n');
+    fs.writeFileSync(path.join(home, '.mutation-journal.json'), journalEntry(path.join(home, 'tasks.md'), '# Tasks\n', '# Tasks\n- 중단된 저장\n'));
+    fs.writeFileSync(path.join(home, '.mutation.lock'), String(deadPid()));
+  });
+  const send = async (route, body) => {
+    const response = await fetch(server.base + route, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    return { status: response.status, ...await response.json() };
+  };
+  const made = await send('/api/jira/create', { plan: { projectKey: 'IO', epic: { summary: 'x' }, children: [] } });
+  assert.equal(made.status, 503);
+  assert.match(made.error, /저장을 멈췄어요/);
+  const roles = await send('/api/workflow/jira-roles', { roles: [{ label: 'Web', prefix: '[Web]' }] });
+  assert.equal(roles.status, 503);
+  // 조회는 그대로 된다.
+  assert.equal((await fetch(`${server.base}/api/jira/create-meta?project=IO`)).status, 200);
+});

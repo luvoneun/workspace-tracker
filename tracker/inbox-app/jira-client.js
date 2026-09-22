@@ -37,6 +37,11 @@ const JIRA_DONE_MAX_DAYS = 365;
 const doneIssuesJql = days => `assignee = currentUser() AND statusCategory = Done AND resolved >= -${days}d ORDER BY resolved DESC`;
 const doneDaysOf = days => (Number.isInteger(days) && days >= 1 && days <= JIRA_DONE_MAX_DAYS ? days : JIRA_DONE_DAYS);
 const CHANGE_KINDS = ['status', 'version', 'due', 'versionEdit'];
+// 새로 만들기(BJCREATE)가 쓰는 상한 — 한 번에 만드는 이슈는 에픽 하나 + 하위 12개까지다.
+const JIRA_CREATE_MAX = 12;
+const JIRA_SUMMARY_MAX = 255;
+// 만들 수 있는 이슈 종류 목록(createmeta)에서 읽어 오는 개수. 한 프로젝트의 종류는 이보다 훨씬 적다.
+const JIRA_TYPE_LIMIT = 100;
 
 // 지라가 주는 범주 열쇠는 셋뿐이다. 모르는 값은 `진행`으로 본다(상태 이름은 그대로 보여 준다).
 const CATEGORY = { new: 'todo', indeterminate: 'doing', done: 'done' };
@@ -57,6 +62,15 @@ const MESSAGE = {
   stale: '지라에서 고를 수 있는 값이 바뀌었어요. 카드를 새로 읽고 다시 골라 주세요.',
   screen: '이 전환은 지라에서 직접 해 주세요.',
   multi: '버전이 여러 개라 지라에서 직접 바꿔 주세요.',
+  // 아래는 "새로 만들기"(BJCREATE)에서만 쓰는 문구다 — 바꾸기와 말이 섞이지 않게 따로 둔다.
+  make: '지라에 만들지 못했어요.',
+  makeReject: '지라가 이 값을 받아들이지 않았어요 — 필수 항목이 더 있을 수 있어요. 지라에서 직접 확인해 주세요.',
+  makeForbidden: '지라에서 이 프로젝트에 이슈를 만들 권한이 없어요.',
+  epicType: '이 지라 프로젝트에서는 에픽을 만들 수 없어요.',
+  notEpic: '고른 티켓이 에픽이 아니에요.',
+  typeStale: '지라에서 만들 수 있는 종류가 바뀌었어요. 화면을 새로 읽고 다시 골라 주세요.',
+  tooMany: '한 번에 12개까지 만들 수 있어요.',
+  duplicate: '같은 내용을 방금 보냈어요. 잠시 뒤에 다시 시도해 주세요.',
 };
 
 function jiraError(kind, status) {
@@ -129,6 +143,35 @@ function shapeVersions(body) {
     released: !!(version && version.released),
     archived: !!(version && version.archived),
   })).filter(version => version.id && JIRA_ID_RE.test(version.id));
+}
+
+// 그 프로젝트에서 만들 수 있는 이슈 종류(createmeta). 새 주소는 `issueTypes`, 옛 주소는
+// `projects[0].issuetypes`로 온다 — 둘 다 같은 모양으로 펴서 돌려준다.
+// `hierarchyLevel`이 기준이다(이름에 기대지 않는다): 1 = 에픽, 0 = 표준, -1 = 하위 작업.
+// 그 칸이 없는 옛 지라는 `subtask`로만 갈라 표준/하위 작업을 나눈다.
+function shapeCreateTypes(body) {
+  const list = Array.isArray(body && body.issueTypes) ? body.issueTypes
+    : Array.isArray(body && body.values) ? body.values
+      : (Array.isArray(body && body.projects) && body.projects[0] && Array.isArray(body.projects[0].issuetypes))
+        ? body.projects[0].issuetypes : [];
+  return list.map((entry) => {
+    const subtask = !!(entry && entry.subtask);
+    return {
+      id: idOf(entry && entry.id),
+      name: text(entry && entry.name),
+      subtask,
+      level: Number.isInteger(entry && entry.hierarchyLevel) ? entry.hierarchyLevel : (subtask ? -1 : 0),
+    };
+  }).filter(type => type.id && JIRA_ID_RE.test(type.id));
+}
+// 에픽은 계층 1 하나다(이름이 `Epic`이든 `에픽`이든 상관없다).
+const epicTypeOf = types => (Array.isArray(types) ? types : []).find(type => type.level === 1) || null;
+// 하위로 달 수 있는 것은 표준 타입(계층 0)뿐이다 — 하위 작업(subtask)은 쓰지 않는다.
+const childTypesOf = types => (Array.isArray(types) ? types : []).filter(type => type.level === 0 && !type.subtask);
+// 기본값은 이름에 `작업`/`Task`가 있는 것, 없으면 첫 번째다(IO 프로젝트의 실제 하위는 전부 `작업`이었다).
+function defaultChildType(types) {
+  const list = childTypesOf(types);
+  return list.find(type => /task|작업/i.test(type.name)) || list[0] || null;
 }
 
 // 지라 응답에서 띠 카드가 쓰는 값만 뽑는다. 모르는 모양이 와도 빈 값으로 흐르게 한다.
@@ -228,7 +271,8 @@ function createJiraClient({ settings, request = (...args) => fetch(...args), rea
 
   // 지라로 나가는 단 하나의 길. `send`가 있으면 그 값을 본문으로 실어 보낸다(쓰기).
   // 실패는 늘 우리 문구로 바꿔 던지되 `status`를 달아 둔다 — 쓰기 쪽이 400·403을 갈라 읽는다.
-  async function call(pathAndQuery, secret, { method = 'GET', send = null } = {}) {
+  // `read`는 쓰기인데 답을 읽어야 할 때만 켠다(이슈 만들기가 새 키를 받아 온다).
+  async function call(pathAndQuery, secret, { method = 'GET', send = null, read = false } = {}) {
     let response;
     try {
       response = await request(`${settings.siteUrl}${pathAndQuery}`, {
@@ -250,7 +294,7 @@ function createJiraClient({ settings, request = (...args) => fetch(...args), rea
     if (response.status === 404) throw jiraError('notfound', 404);
     if (!response.ok) throw jiraError('other', response.status);
     // 쓰기는 보통 204(본문 없음)로 온다 — 돌려줄 값이 없으니 해석하지 않는다.
-    if (method !== 'GET') return null;
+    if (method !== 'GET' && !read) return null;
     try {
       return await response.json();
     } catch {
@@ -317,6 +361,12 @@ function createJiraClient({ settings, request = (...args) => fetch(...args), rea
 
   const wantKey = (key) => { if (typeof key !== 'string' || !JIRA_KEY_RE.test(key)) throw jiraError('key'); return key; };
   const wantId = (id) => { const value = idOf(id); if (!JIRA_ID_RE.test(value)) throw jiraError('value'); return value; };
+  const wantProject = (key) => { if (typeof key !== 'string' || !JIRA_PROJECT_RE.test(key)) throw jiraError('key'); return key; };
+  const wantSummary = (value) => {
+    const summary = typeof value === 'string' ? value.trim() : '';
+    if (!summary || summary.length > JIRA_SUMMARY_MAX || /[\r\n]/.test(summary)) throw jiraError('value');
+    return summary;
+  };
 
   // 화면이 쓰는 한 덩어리. 실패는 `kind`가 붙은 Error로 던진다.
   async function getIssueOverview(key) {
@@ -375,7 +425,47 @@ function createJiraClient({ settings, request = (...args) => fetch(...args), rea
     await call(`/rest/api/3/version/${id}`, token(), { method: 'PUT', send });
   }
 
-  return { getIssueOverview, listMyIssues, listDoneIssues, getTransitions, getVersions, getIssueVersionIds, transition, updateIssueFields, updateVersion };
+  // ---------- 새로 만들기(BJCREATE) ----------
+  // 만드는 것은 에픽 하나와 그 아래 하위 티켓들뿐이다. 담당자·설명·배포 버전·기한은 넣지 않는다.
+
+  // 그 프로젝트에서 만들 수 있는 이슈 종류. 새 주소가 없는 지라에서는 옛 주소로 한 번만 물러선다
+  // (하위 티켓 조회와 같은 규칙이다).
+  async function getCreateMeta(projectKey) {
+    wantProject(projectKey);
+    const secret = token();
+    try {
+      return shapeCreateTypes(await call(`/rest/api/3/issue/createmeta/${projectKey}/issuetypes?maxResults=${JIRA_TYPE_LIMIT}`, secret));
+    } catch (error) {
+      if (error.status !== 404) throw error;
+      return shapeCreateTypes(await call(`/rest/api/3/issue/createmeta?projectKeys=${projectKey}&expand=projects.issuetypes`, secret));
+    }
+  }
+
+  // 대조용으로 가볍게 읽는다(요약과 종류 id만) — 띠 카드가 쓰는 한 덩어리를 끌고 오지 않는다.
+  async function getIssueBrief(key) {
+    wantKey(key);
+    const body = await call(`/rest/api/3/issue/${key}?fields=summary,issuetype`, token());
+    const fields = (body && body.fields) || {};
+    return { key, summary: text(fields.summary), typeId: idOf(fields.issuetype && fields.issuetype.id) };
+  }
+
+  // 이슈 하나 만들기. 보내는 칸은 우리가 지은 네 개뿐이다(받은 객체를 그대로 싣지 않는다).
+  // 에픽 하위는 `parent`로 단다 — 구형 지라의 `에픽 링크` 커스텀 필드는 1차에서 지원하지 않고,
+  // 그 지라는 400을 돌려주므로 화면이 `지라에서 직접 확인해 주세요`로 안내한다.
+  async function createIssue({ projectKey, issueTypeId, summary, parentKey = null } = {}) {
+    wantProject(projectKey);
+    const fields = { project: { key: projectKey }, issuetype: { id: wantId(issueTypeId) }, summary: wantSummary(summary) };
+    if (parentKey) fields.parent = { key: wantKey(parentKey) };
+    const body = await call('/rest/api/3/issue', token(), { method: 'POST', send: { fields }, read: true });
+    const key = text(body && body.key);
+    if (!JIRA_KEY_RE.test(key)) throw jiraError('make');
+    return { key, url: issueUrl(settings.siteUrl, key) };
+  }
+
+  return {
+    getIssueOverview, listMyIssues, listDoneIssues, getTransitions, getVersions, getIssueVersionIds,
+    transition, updateIssueFields, updateVersion, getCreateMeta, getIssueBrief, createIssue,
+  };
 }
 
 // 쓰기 실패를 화면 문구로 옮기는 단 하나의 표. 우리가 먼저 막은 것(대조 실패·필수 입력·여러 버전)은
@@ -390,6 +480,18 @@ function writeKind(error) {
   return 'write';
 }
 
+// 새로 만들기의 같은 표. 만들기는 실패 이유가 줄마다 따로 보이므로 문구를 따로 둔다
+// (400은 "필수 항목이 더 있을 수 있어요"까지 말해 준다 — 지라 원문은 여기서도 싣지 않는다).
+const MAKE_GUARDS = ['key', 'value', 'typeStale', 'epicType', 'notEpic'];
+function makeKind(error) {
+  if (error && MAKE_GUARDS.includes(error.kind)) return error.kind;
+  const status = error && error.status;
+  if (status === 401 || status === 403) return 'makeForbidden';
+  if (status === 400) return 'makeReject';
+  if (status === 404) return 'notfound';
+  return 'make';
+}
+
 // 서버가 쓰는 겉면: 설정 확인 + 키별 60초 메모리 캐시 + 화면에 그대로 보여 줄 오류 문구.
 // 파일은 아무것도 쓰지 않는다(조회는 기록을 남기지 않는다).
 function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = Date.now, ttlMs = JIRA_CACHE_MS } = {}) {
@@ -397,6 +499,11 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
   const cache = new Map();
   // 완료한 내 티켓은 키가 없는 목록이라 캐시도 한 벌뿐이다(기간이 바뀌면 버린다).
   let doneCache = null;
+  // 만들 수 있는 이슈 종류는 프로젝트마다 60초 메모리 캐시다(파일은 쓰지 않는다).
+  const metaCache = new Map();
+  // 방금 보낸 만들기 요청의 지문 → 받은 시각. 같은 계획이 60초 안에 두 번 오면 거절한다
+  // (새로고침·두 번 누르기로 지라에 같은 이슈가 두 벌 생기지 않게). 메모리에만 있다.
+  const madePlans = new Map();
 
   function token() {
     try {
@@ -532,12 +639,135 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
     return { ok: true };
   }
 
-  return { read, list, listDone, options, change, connected: !!settings };
+  // ---------- 새로 만들기(BJCREATE) ----------
+
+  // 새 프로젝트 화면이 하위 티켓 종류를 고를 때만 부른다. 조회라 파일은 쓰지 않고,
+  // 프로젝트마다 60초만 메모리에 담아 둔다(같은 화면을 다시 열어도 지라를 또 부르지 않게).
+  async function createMeta(projectKey) {
+    if (typeof projectKey !== 'string' || !JIRA_PROJECT_RE.test(projectKey)) return { ok: false, error: MESSAGE.key, kind: 'key' };
+    if (!settings) return { ok: true, connected: false };
+    const secret = token();
+    if (!secret) return { ok: true, connected: false };
+    const hit = metaCache.get(projectKey);
+    if (hit && now() - hit.at < ttlMs) return { ok: true, connected: true, ...hit.value };
+    try {
+      const types = await createJiraClient({ settings, request, readToken: () => secret }).getCreateMeta(projectKey);
+      const epic = epicTypeOf(types);
+      const preferred = defaultChildType(types);
+      const value = {
+        project: projectKey,
+        // 화면에는 id와 이름만 나간다 — 지라가 준 나머지 덩어리는 옮기지 않는다.
+        epic: epic ? { id: epic.id, name: epic.name } : null,
+        types: childTypesOf(types).map(({ id, name }) => ({ id, name })),
+        defaultTypeId: preferred ? preferred.id : null,
+      };
+      metaCache.set(projectKey, { at: now(), value });
+      return { ok: true, connected: true, ...value };
+    } catch (error) {
+      const kind = MESSAGE[error && error.kind] ? error.kind : 'other';
+      return { ok: false, error: MESSAGE[kind], kind };
+    }
+  }
+
+  // 지라에 여러 이슈를 만드는 단 하나의 길. 화면이 미리 보기 + 확인 줄을 거친 뒤에만 부른다.
+  // 앱 데이터 저장소(mutation-store·idempotent)는 건드리지 않는다 — 지라는 앱 파일이 아니다.
+  // 순서는 늘 같다: ① 보낸 값 검증 → ② 같은 계획인지(60초) → ③ 만들 수 있는 종류를 **쓰기 직전에
+  // 다시 읽어 대조** → ④ 에픽 → ⑤ 하위를 하나씩. 하위 하나가 실패해도 다음은 계속한다.
+  async function create(body) {
+    const plan = body && typeof body === 'object' && body.plan && typeof body.plan === 'object' ? body.plan : null;
+    const bad = (kind) => ({ ok: false, error: MESSAGE[kind], kind });
+    if (!plan) return bad('value');
+    const projectKey = typeof plan.projectKey === 'string' ? plan.projectKey : '';
+    if (!JIRA_PROJECT_RE.test(projectKey)) return bad('key');
+    const asked = plan.epic && typeof plan.epic === 'object' ? plan.epic : null;
+    if (!asked) return bad('value');
+    // 에픽은 둘 중 하나다: 이미 있는 것(key)에 붙이거나, 요약을 주고 새로 만들거나.
+    const epicKey = asked.key == null || asked.key === '' ? null : asked.key;
+    if (epicKey !== null && (typeof epicKey !== 'string' || !JIRA_KEY_RE.test(epicKey) || projectOf(epicKey) !== projectKey)) return bad('key');
+    const clean = (value) => {
+      const summary = typeof value === 'string' ? value.trim() : '';
+      return summary && summary.length <= JIRA_SUMMARY_MAX && !/[\r\n]/.test(summary) ? summary : null;
+    };
+    const epicSummary = epicKey ? null : clean(asked.summary);
+    if (!epicKey && !epicSummary) return bad('value');
+    const asking = Array.isArray(plan.children) ? plan.children : [];
+    if (asking.length > JIRA_CREATE_MAX) return bad('tooMany');
+    // 이미 있는 에픽에 붙이는데 만들 하위가 하나도 없으면 만들 것이 없다.
+    if (epicKey && !asking.length) return bad('value');
+    const children = asking.map(child => ({
+      summary: clean(child && child.summary),
+      issueTypeId: idOf(child && child.issueTypeId),
+    }));
+    if (children.some(child => !child.summary || !JIRA_ID_RE.test(child.issueTypeId))) return bad('value');
+    if (!settings) return bad('off');
+    const secret = token();
+    if (!secret) return bad('off');
+
+    const signature = JSON.stringify([projectKey, epicKey, epicSummary, children.map(child => [child.summary, child.issueTypeId])]);
+    for (const [key, at] of madePlans) if (now() - at >= ttlMs) madePlans.delete(key);
+    if (madePlans.has(signature)) return bad('duplicate');
+    madePlans.set(signature, now());
+    // 아무것도 만들지 못하고 끝난 길은 지문을 지운다 — 곧바로 다시 시도할 수 있어야 한다.
+    const give = (kind) => { madePlans.delete(signature); return bad(kind); };
+
+    const client = createJiraClient({ settings, request, readToken: () => secret });
+    let types;
+    try {
+      types = await client.getCreateMeta(projectKey);
+    } catch (error) { return give(makeKind(error)); }
+    // 고르개가 본 목록이 아니라 **지금** 목록으로 대조한다(그 사이 지라에서 바뀌었을 수 있다).
+    const allowed = new Set(childTypesOf(types).map(type => type.id));
+    if (children.some(child => !allowed.has(child.issueTypeId))) return give('typeStale');
+
+    let epic;
+    if (epicKey) {
+      let brief;
+      try {
+        brief = await client.getIssueBrief(epicKey);
+      } catch (error) { return give(makeKind(error)); }
+      const epicType = epicTypeOf(types);
+      if (!epicType) return give('epicType');
+      if (brief.typeId !== epicType.id) return give('notEpic');
+      epic = { key: epicKey, url: issueUrl(settings.siteUrl, epicKey), summary: brief.summary, created: false };
+    } else {
+      const epicType = epicTypeOf(types);
+      if (!epicType) return give('epicType');
+      try {
+        const made = await client.createIssue({ projectKey, issueTypeId: epicType.id, summary: epicSummary });
+        epic = { ...made, summary: epicSummary, created: true };
+      } catch (error) {
+        // 에픽이 실패하면 아무것도 만들지 않은 것과 같다 — 하위는 시작하지도 않는다.
+        return give(makeKind(error));
+      }
+    }
+
+    const results = [];
+    for (const child of children) {
+      try {
+        const made = await client.createIssue({ projectKey, issueTypeId: child.issueTypeId, summary: child.summary, parentKey: epic.key });
+        results.push({ summary: child.summary, key: made.key, url: made.url });
+      } catch (error) {
+        const kind = makeKind(error);
+        results.push({ summary: child.summary, error: MESSAGE[kind], kind });
+      }
+    }
+    return {
+      ok: true,
+      connected: true,
+      epic,
+      children: results,
+      made: results.filter(entry => entry.key).length + (epic.created ? 1 : 0),
+      failed: results.filter(entry => entry.error).length,
+    };
+  }
+
+  return { read, list, listDone, options, change, createMeta, create, connected: !!settings };
 }
 
 module.exports = {
   createJiraClient, createJiraApi, jiraSettings, issueUrl, projectOf, countChildren, shapeChildren,
-  shapeTransitions, shapeVersions, shapeListIssue, writeKind,
+  shapeTransitions, shapeVersions, shapeListIssue, writeKind, makeKind,
+  shapeCreateTypes, epicTypeOf, childTypesOf, defaultChildType,
   JIRA_KEY_RE, JIRA_TIMEOUT_MS, JIRA_CACHE_MS, JIRA_LIST_LIMIT, MY_ISSUES_JQL, JIRA_MESSAGE: MESSAGE,
-  JIRA_DONE_DAYS, JIRA_DONE_MAX_DAYS, doneIssuesJql,
+  JIRA_DONE_DAYS, JIRA_DONE_MAX_DAYS, doneIssuesJql, JIRA_CREATE_MAX, JIRA_SUMMARY_MAX,
 };

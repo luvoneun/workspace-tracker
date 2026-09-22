@@ -1712,6 +1712,98 @@ body.batch-open .d-toast { bottom: 76px; }
   .d-jkid .ver { display: none; }
 }
 
+/* ---------- 새 프로젝트 화면 ----------
+   왼쪽 목록 머리의 조용한 `+`가 여는 오른쪽 면이다. 판·간격·버튼 등급은 전부 기존 것을 그대로
+   쓰고 새 색을 만들지 않는다 — 확인 줄은 지라 값 바꾸기와 같은 `.d-jconfirm`이다. */
+.d-plist .d-rhd .d-pnewgo {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; margin-left: -2px; padding: 0;
+  border: 0; background: none; border-radius: var(--r-xs);
+  font-family: inherit; font-size: 17px; font-weight: 500; line-height: 1; color: var(--dim); cursor: pointer;
+  transition: background 170ms var(--ease), color 170ms var(--ease);
+}
+.d-plist .d-rhd .d-pnewgo:hover { background: var(--hover); color: var(--accent-text); }
+.d-plist .d-rhd .d-pnewgo:active { transform: scale(0.98); }
+
+.d-pnew { display: grid; gap: 14px; margin-top: 16px; }
+/* 라벨은 왼쪽 고정 폭, 값은 나머지 — 좁아지면 아래에서 한 줄로 쌓인다 */
+.d-pnew .row { display: grid; grid-template-columns: 92px minmax(0, 1fr); align-items: start; gap: 4px 12px; }
+.d-pnew .row > .lb { padding-top: 8px; font-size: 13.5px; font-weight: 600; color: var(--muted); }
+.d-pnew .row > .ct { display: grid; gap: 6px; min-width: 0; }
+.d-pnew .note, .d-pnewpv .note, .d-pnewacts .note, .d-pnewres .note { font-size: 12.5px; color: var(--dim); }
+.d-pnew .er, .d-pnewacts .er, .d-pnewedit .er, .d-pnewres .er, .d-pnewtype .er { font-size: 12.5px; color: var(--urgent); }
+.d-pnew .in { max-width: 520px; min-height: 34px; }
+/* 고른 에픽 한 줄 — 요약이 먼저, 상태는 뒤, 키는 조용한 글자로만(BKEY) */
+.d-pnewepic {
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px;
+  padding: 8px 12px; border-radius: var(--r-sm); background: var(--sel); font-size: 13px; color: var(--muted);
+}
+.d-pnewepic .sm { font-weight: 600; color: var(--text); }
+.d-pnewepic .ky { font-size: 12px; color: var(--dim); }
+.d-pnewepic .d-link { margin-left: auto; }
+/* 직군 체크 목록 — 체크박스는 앱의 가족(.d-wcb, 28px 누름 영역) 그대로다 */
+.d-pnewroles { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.d-pnewroles .rl { display: inline-flex; align-items: center; gap: 7px; min-height: 30px; font-size: 13.5px; color: var(--text); cursor: pointer; }
+.d-pnewroles .rl.is-had { color: var(--dim); }
+.d-pnewroles .rl.is-own { cursor: default; color: var(--muted); }
+.d-pnewroles .hd { font-size: 12px; color: var(--dim); }
+.d-pnewroles .x {
+  width: 24px; height: 24px; border: 0; background: none; border-radius: var(--r-xs);
+  font-family: inherit; font-size: 12px; color: var(--dim); cursor: pointer;
+}
+.d-pnewroles .x:hover { background: var(--hover); color: var(--text); }
+.d-pnewown { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.d-pnewown .in { flex: 0 1 220px; }
+.d-pnewown .d-link { margin-left: auto; }
+/* 직군 목록 줄 편집 — 같은 판 위의 줄들(한 줄 = 이름 · 접두어 · 삭제) */
+.d-pnewedit { display: grid; gap: 6px; padding: 10px 12px; border-radius: var(--r-sm); background: var(--sel); }
+.d-pnewedit .ln { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.d-pnewedit .ln .in { flex: 1 1 130px; max-width: 220px; }
+.d-pnewedit .acts { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.d-pnewedit .d-btn { background: var(--surface); }
+.d-pnewedit .d-btn.acc { background: var(--accent-soft); color: var(--accent-text); }
+.d-pnewedit .d-btn.acc:hover { background: var(--accent-strong); color: var(--on-fill); }
+.d-pnewtype { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-height: 30px; }
+/* 미리 보기 — 만들 것을 나무 모양으로 한 줄씩. 제목은 그 자리에서 고친다 */
+.d-pnewpvbox { margin-top: 18px; }
+.d-pnewpv {
+  display: grid; gap: 4px; padding: 12px 14px; border-radius: var(--r);
+  background: var(--surface); border: 1px solid var(--surface-line); box-shadow: var(--soft);
+  font-size: 13px; color: var(--muted);
+}
+.d-pnewpv .ep, .d-pnewpv .kid { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.d-pnewpv .kd { flex: none; min-width: 32px; font-size: 12px; font-weight: 600; color: var(--dim); }
+.d-pnewpv .sm { font-weight: 600; color: var(--text); }
+.d-pnewpv .wh, .d-pnewpv .ty { font-size: 12.5px; color: var(--dim); }
+.d-pnewpv .hd { font-size: 12px; color: var(--warn); }
+.d-pnewpv .br { flex: none; width: 12px; color: var(--dim); }
+.d-pnewpv .ti { flex: 1 1 260px; min-width: 0; min-height: 32px; font-size: 13px; }
+/* 주 버튼 줄 — 1차(파란 채움)는 이 면에 하나뿐이다 */
+.d-pnewgobox { margin-top: 16px; }
+.d-pnewacts { display: grid; gap: 6px; max-width: 520px; }
+.d-pnewacts .go { display: flex; flex-wrap: wrap; gap: 8px; }
+/* 만든 뒤 — 성공도 부분 실패도 같은 자리에 선다 */
+.d-pnewres {
+  display: grid; gap: 6px; margin-top: 16px; padding: 14px 16px; border-radius: var(--r);
+  background: var(--surface); border: 1px solid var(--surface-line); box-shadow: var(--soft);
+  font-size: 13px; color: var(--muted);
+}
+.d-pnewres .hd { font-size: 15px; font-weight: 700; color: var(--text); }
+.d-pnewres .kid { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.d-pnewres .kid .kd { flex: none; min-width: 32px; font-size: 12px; font-weight: 600; color: var(--dim); }
+.d-pnewres .kid .sm { color: var(--text); }
+.d-pnewres .kid .ky { font-size: 12px; color: var(--dim); }
+.d-pnewres .kid.is-bad .sm { color: var(--muted); }
+.d-pnewres .acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.d-pnewres .first { display: grid; gap: 6px; margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--surface-line); }
+.d-pnewres .first .ln { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.d-pnewres .first .in { flex: 1 1 260px; min-width: 0; min-height: 34px; }
+@media (max-width: 640px) {
+  .d-pnew .row { grid-template-columns: minmax(0, 1fr); }
+  .d-pnew .row > .lb { padding-top: 0; }
+  .d-pnewpv .ti { flex-basis: 100%; }
+}
+
 .d-psec { margin-top: 24px; }
 .d-psurf {
   background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r);
@@ -2072,7 +2164,11 @@ body.batch-open .d-toast { bottom: 76px; }
     order: -1; position: static; max-height: none; overflow-x: auto; overflow-y: hidden;
     margin: 0 0 12px; padding: 8px; white-space: nowrap;
   }
-  #gridProjects .d-plist .d-rhd { display: none; }
+  /* 가로로 흐르는 칩 줄에서는 머리의 이름·개수를 감춘다 — `새 프로젝트 +`만 첫 칩으로 남긴다
+     (감추면 좁은 화면에서 새 프로젝트를 여는 길이 아예 없어진다) */
+  #gridProjects .d-plist .d-rhd { display: inline-flex; height: auto; padding: 0; margin-right: 4px; vertical-align: middle; }
+  #gridProjects .d-plist .d-rhd > span { display: none; }
+  #gridProjects .d-plist .d-rhd .d-pnewgo { margin: 0; }
   #gridProjects .d-plist .d-prow { display: inline-grid; width: auto; margin-right: 4px; }
   /* 회의 목록은 칩 줄과 날짜 소제목이 있어 가로로 흘리지 않고 세로로 그대로 둔다(높이만 줄인다) */
   #gridMeetings .d-plist { overflow-x: hidden; overflow-y: auto; max-height: 40vh; white-space: normal; }

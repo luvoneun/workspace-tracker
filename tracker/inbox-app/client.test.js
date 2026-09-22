@@ -134,7 +134,7 @@ test('a save refused for recovery shows the server message and keeps the banner 
 // 같은 결과를 내는 함수를 넣어, 화면 문자열을 만드는 나머지 로직을 검증한다.
 // 화면 코드는 여러 파일로 나뉘어 있고, 브라우저에서는 index.html의 <script> 차례대로
 // 같은 전역 공간에서 돈다. 테스트도 같은 가짜 창에 같은 차례로 이어 붙인다.
-const CLIENT_PARTS = ['jira-ui.js', 'meeting-notes-ui.js', 'projects-ui.js', 'meetings-ui.js', 'waiting-ui.js', 'settings-ui.js'];
+const CLIENT_PARTS = ['jira-ui.js', 'meeting-notes-ui.js', 'project-new-ui.js', 'projects-ui.js', 'meetings-ui.js', 'waiting-ui.js', 'settings-ui.js'];
 function pureClient() {
   const app = client(new Response('{}'));
   CLIENT_PARTS.forEach(file => app.run(fs.readFileSync(path.join(__dirname, file), 'utf8')));
@@ -4839,4 +4839,190 @@ test('BRENAME: 알림의 `되돌리기`는 반대 방향으로 한 번 더 바�
   assert.match(region.textContent, /이름을 되돌렸어요 · 살아 있는 프로젝트 → 살아 있는 것/);
   assert.equal(fixture.app.run('projectKey'), 'group:살아 있는 것');
   assert.equal(fixture.app.run('undoStack.length'), 0, '앱의 ⌘Z 대상은 아니다 — 되돌리는 길은 알림뿐이다');
+});
+
+// ---------- 새 프로젝트 화면 (BJCREATE) ----------
+// 실제 지라에는 닿지 않는다 — 가짜 fetch가 create-meta·create 응답을 대신 준다.
+const BJC_META = { ok: true, connected: true, project: 'IO', epic: { id: '10000', name: '에픽' }, types: [{ id: '10001', name: '작업' }], defaultTypeId: '10001' };
+const BJC_MADE = {
+  ok: true, connected: true,
+  epic: { key: 'IO-48400', url: 'https://example-jira.test/browse/IO-48400', summary: '게시글 작성하기_게임 임베드', created: true },
+  children: [
+    { summary: '[Web] 게시글 작성하기_게임 임베드', key: 'IO-48401', url: 'https://example-jira.test/browse/IO-48401' },
+    { summary: '[QA] 게시글 작성하기_게임 임베드', error: '지라에서 이 프로젝트에 이슈를 만들 권한이 없어요.', kind: 'makeForbidden' },
+  ],
+  made: 2, failed: 1,
+};
+function projectNewClient({ meta = BJC_META, made = BJC_MADE, roles = null } = {}) {
+  const fixture = archiveClient({ posts: (url) => {
+    if (url.includes('/api/jira/create-meta')) return new Response(JSON.stringify(meta));
+    if (url.includes('/api/jira/create')) return new Response(JSON.stringify(typeof made === 'function' ? made() : made));
+    return new Response('{"ok":true}');
+  } });
+  fixture.app.run('loads = 0; load = async () => { loads += 1; };');
+  fixture.app.run('openedProject = null; openProjectTab = key => { openedProject = key; };');
+  fixture.app.run("lastMenu = null; uiMenu = (anchor, sections) => { lastMenu = sections; return null; };");
+  fixture.app.run(`workflowData.jiraRoles = ${JSON.stringify(roles)};`);
+  const start = () => {
+    fixture.app.run('projectNewStart()');
+    // 지라 종류는 화면이 열리자마자 읽으므로 테스트에서는 그 결과를 바로 끼운다.
+    fixture.app.run(`projectNew.types = ${JSON.stringify(meta.types)}; projectNew.typeId = ${JSON.stringify(meta.defaultTypeId)}; projectNew.typeProject = 'IO'; projectNewPaint();`);
+  };
+  const body = () => fixture.app.nodes.get('projectBody');
+  const set = (code) => fixture.app.run(`${code}; projectNewPaint();`);
+  return { ...fixture, start, body, set };
+}
+const bjcText = node => (node ? String(node.textContent || '') : '');
+// 가짜 노드의 textContent는 자기 것뿐이라, 묶음을 읽을 때는 자식까지 훑어 모은다.
+function bjcWords(node) {
+  if (!node || typeof node !== 'object') return '';
+  return [String(node.textContent || ''), ...(node.children || []).map(bjcWords)].filter(Boolean).join(' ');
+}
+const bjcButton = (node, label) => nodeFindAll(node, 'd-btn').find(kid => bjcText(kid) === label);
+
+test('BJCREATE: 왼쪽 목록 머리의 `+`가 새 프로젝트 화면을 열고, 미리 보기 제목은 `접두어 + 이름`이다', () => {
+  const fixture = projectNewClient();
+  fixture.render();
+  const add = fixture.list().children[0].children.find(kid => String(kid.className || '') === 'd-pnewgo');
+  assert.ok(add, '머리줄에 조용한 `+`가 있다');
+  assert.equal(add.getAttribute('aria-label'), '새 프로젝트');
+  add.listeners.click();
+  assert.equal(bjcText(fixture.body().children[0]), '새 프로젝트');
+
+  fixture.set("projectNew.name = '게시글 작성하기_게임 임베드'; projectNew.project = 'IO'; projectNew.roles = ['Web', 'QA']; projectNew.types = [{ id: '10001', name: '작업' }]; projectNew.typeId = '10001'");
+  const preview = nodeFind(fixture.body(), 'd-pnewpv');
+  assert.equal(bjcWords(nodeFind(preview, 'ep')).includes('새로 만듦'), true, '새 에픽이면 `새로 만듦`이라고 적는다');
+  const titles = nodeFindAll(preview, 'ti').map(input => input.value);
+  assert.deepEqual(titles, ['[Web] 게시글 작성하기_게임 임베드', '[QA] 게시글 작성하기_게임 임베드']);
+  assert.deepEqual(nodeFindAll(preview, 'br').map(kid => kid.textContent), ['├', '└']);
+  assert.deepEqual(nodeFindAll(preview, 'wh').map(kid => kid.textContent).slice(1), ['담당 없음', '담당 없음'], '담당은 비운다');
+  assert.equal(bjcText(nodeFind(fixture.body(), 'pri')), '지라에 3개 만들기', '에픽 하나를 함께 센다');
+
+  // 미리 보기 줄에서 제목을 그 자리에서 고치면 그 글자가 그대로 나간다.
+  const first = nodeFindAll(preview, 'ti')[0];
+  first.value = '[Web] 손으로 고친 제목';
+  first.listeners.input();
+  assert.equal(fixture.app.run("projectNewRows(projectNew)[0].summary"), '[Web] 손으로 고친 제목');
+});
+
+test('BJCREATE: 직군을 하나도 안 고르면 에픽만, 직접 입력은 그 자리에서만 더해지고, 겹치는 직군은 알려 준다', () => {
+  const fixture = projectNewClient();
+  fixture.start();
+  fixture.set("projectNew.name = '임베드'; projectNew.project = 'IO'");
+  assert.equal(fixture.app.run('projectNewCount(projectNew)'), 1, '미선택이면 에픽 하나뿐이다');
+  assert.match(bjcWords(nodeFind(fixture.body(), 'd-pnewpv')), /직군을 고르지 않으면 에픽만 만들어요/);
+
+  // 직접 입력 — 접두어를 적고 Enter면 체크된 항목으로 더해진다(설정에는 저장하지 않는다).
+  const own = nodeFind(fixture.body(), 'd-pnewown');
+  const input = nodeFind(own, 'in');
+  input.value = '[Data]';
+  input.listeners.keydown({ key: 'Enter', isComposing: true, preventDefault() {} });
+  assert.equal(fixture.app.run('projectNew.extra.length'), 0, '한글 조합 중 Enter는 넘긴다');
+  input.listeners.keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+  assert.equal(fixture.app.run('projectNewCount(projectNew)'), 2);
+  assert.equal(fixture.app.run("projectNewRows(projectNew)[0].summary"), '[Data] 임베드');
+  assert.deepEqual(fixture.sent.filter(entry => entry.url.includes('jira-roles')), [], '직접 입력은 설정에 저장하지 않는다');
+
+  // 이미 그 접두어의 하위가 있는 에픽에 붙일 때는 체크가 꺼진 채로 `이미 있어요 KEY`라고만 알린다.
+  fixture.set(`projectNew.mode = 'attach'; projectNew.roles = ['Web']; projectNew.epic = { key: 'IO-48394', summary: '임베드', children: { items: [{ key: 'IO-48401', summary: '[Web] 임베드' }] } }`);
+  assert.equal(fixture.app.run("projectNewExisting(projectNew, { label: 'Web', prefix: '[Web]' })"), 'IO-48401');
+  fixture.app.run("projectNewPickEpic({ key: 'IO-48394', summary: '임베드', children: { items: [{ key: 'IO-48401', summary: '[Web] 임베드' }] } })");
+  assert.equal(fixture.app.run('projectNew.roles.length'), 0, '겹치는 직군의 체크는 꺼진다');
+  assert.match(bjcWords(nodeFind(fixture.body(), 'd-pnewroles')), /이미 있어요 IO-48401/);
+  assert.match(bjcWords(nodeFind(fixture.body(), 'd-pnewpv')), /IO-48394에 붙임/);
+});
+
+test('BJCREATE: 확인 줄을 거치지 않으면 만들기 요청이 나가지 않고, 만든 뒤에도 ⌘Z 대상이 아니다', async () => {
+  const fixture = projectNewClient({ made: { ...BJC_MADE, children: [BJC_MADE.children[0]], made: 2, failed: 0 } });
+  fixture.start();
+  fixture.set("projectNew.name = '게시글 작성하기_게임 임베드'; projectNew.project = 'IO'; projectNew.roles = ['Web']");
+  const go = nodeFind(fixture.body(), 'pri');
+  assert.equal(go.disabled, false);
+  go.listeners.click();
+  assert.deepEqual(fixture.sent.filter(entry => entry.url === '/api/jira/create'), [], '주 버튼만으로는 아무것도 보내지 않는다');
+
+  const confirm = nodeFind(fixture.body(), 'd-jconfirm');
+  assert.match(bjcWords(confirm), /지라에 이슈 2개를 만들까요\? 되돌릴 수 없어요\./);
+  bjcButton(confirm, '취소').listeners.click();
+  assert.equal(nodeFind(fixture.body(), 'd-jconfirm'), null, '취소는 확인 줄만 닫는다');
+  assert.deepEqual(fixture.sent.filter(entry => entry.url === '/api/jira/create'), []);
+
+  nodeFind(fixture.body(), 'pri').listeners.click();
+  await bjcButton(nodeFind(fixture.body(), 'd-jconfirm'), '만들기').listeners.click();
+  assert.deepEqual(fixture.sent.filter(entry => entry.url === '/api/jira/create'), [{ url: '/api/jira/create', body: { plan: {
+    projectKey: 'IO',
+    epic: { summary: '게시글 작성하기_게임 임베드' },
+    children: [{ summary: '[Web] 게시글 작성하기_게임 임베드', issueTypeId: '10001' }],
+  } } }]);
+  assert.match(fixture.app.nodes.get('liveRegion').textContent, /지라에 2개를 만들었어요/);
+  assert.equal(fixture.app.run('undoStack.length'), 0, '지라에 만드는 것은 앱의 ⌘Z 대상이 아니다');
+  assert.match(bjcWords(nodeFind(fixture.body(), 'd-pnewres')), /지라에 2개를 만들었어요/);
+});
+
+test('BJCREATE: 부분 실패는 만든 것과 실패한 줄·이유를 보여 주고, 다시 시도는 실패한 것만 보낸다', async () => {
+  const fixture = projectNewClient();
+  fixture.start();
+  fixture.set("projectNew.name = '게시글 작성하기_게임 임베드'; projectNew.project = 'IO'; projectNew.roles = ['Web', 'QA']");
+  nodeFind(fixture.body(), 'pri').listeners.click();
+  await bjcButton(nodeFind(fixture.body(), 'd-jconfirm'), '만들기').listeners.click();
+
+  const result = nodeFind(fixture.body(), 'd-pnewres');
+  assert.equal(bjcText(nodeFind(result, 'hd')), '만들어진 것 2 · 실패 1');
+  assert.match(bjcWords(result), /지라에서 이 프로젝트에 이슈를 만들 권한이 없어요/);
+  assert.ok(bjcButton(result, '지라에서 열기'));
+
+  // 실패한 줄만, 이미 만든 에픽에 붙여 다시 보낸다(에픽을 두 번 만들지 않는다).
+  fixture.app.run(`projectNew.result.children = projectNew.result.children.map(child => child.error ? { ...child } : child);`);
+  const again = bjcButton(fixture.body(), '실패한 것 다시 시도');
+  fixture.app.run(`lastMade = { ok: true, connected: true, epic: { key: 'IO-48400', url: 'x', summary: 's', created: false },
+    children: [{ summary: '[QA] 게시글 작성하기_게임 임베드', key: 'IO-48402', url: 'y' }], made: 1, failed: 0 };`);
+  fixture.app.context.fetch = async (url, options) => {
+    fixture.sent.push({ url: String(url), body: options && options.body ? JSON.parse(options.body) : null });
+    return new Response(JSON.stringify(fixture.app.run('lastMade')));
+  };
+  await again.listeners.click();
+  assert.deepEqual(fixture.sent.slice(-1)[0].body, { plan: {
+    projectKey: 'IO',
+    epic: { key: 'IO-48400' },
+    children: [{ summary: '[QA] 게시글 작성하기_게임 임베드', issueTypeId: '10001' }],
+  } });
+  assert.equal(bjcText(nodeFind(fixture.body(), 'hd')), '지라에 3개를 만들었어요');
+  assert.match(fixture.app.nodes.get('liveRegion').textContent, /남은 것도 다 만들었어요/);
+});
+
+test('BJCREATE: `지라 없이`는 첫 할 일이 있어야 하고, 기존 업무 만들기로만 프로젝트를 만든다', async () => {
+  const fixture = projectNewClient();
+  fixture.start();
+  fixture.set("projectNew.mode = 'none'; projectNew.name = '결제 리뉴얼'");
+  assert.equal(nodeFind(fixture.body(), 'pri').disabled, true);
+  assert.match(bjcWords(nodeFind(fixture.body(), 'd-pnewacts')), /첫 할 일이 있어야 프로젝트가 생겨요/);
+  assert.equal(bjcText(nodeFind(fixture.body(), 'pri')), '프로젝트 만들기');
+
+  fixture.set("projectNew.first = '기획 초안 정리하기'");
+  await nodeFind(fixture.body(), 'pri').listeners.click();
+  assert.deepEqual(fixture.sent.slice(-1), [{ url: '/api/later-task/create', body: { description: '기획 초안 정리하기', group: '결제 리뉴얼' } }]);
+  assert.deepEqual(fixture.sent.filter(entry => entry.url === '/api/jira/create'), [], '지라에는 아무것도 보내지 않는다');
+  assert.equal(fixture.app.run('openedProject'), 'group:결제 리뉴얼');
+  assert.equal(fixture.app.run('projectNew'), null, '만들고 나면 화면을 닫는다');
+});
+
+test('BJCREATE: 직군 목록은 설정 세트를 따르고, 줄 편집은 앱의 저장 길로만 나간다', async () => {
+  const fixture = projectNewClient({ roles: [{ label: 'Web', prefix: '[Web]' }, { label: 'Data', prefix: '[Data]' }] });
+  fixture.start();
+  assert.equal(fixture.app.run("projectNewRoles().map(role => role.label).join(',')"), 'Web,Data', '저장된 세트가 있으면 그것을 쓴다');
+  fixture.app.run('workflowData.jiraRoles = null');
+  assert.equal(fixture.app.run("projectNewRoles().map(role => role.label).join(',')"), 'Web,iOS,Android,Backend,Design,QA', '없으면 기본 세트다');
+
+  fixture.app.run('workflowData.jiraRoles = [{ label: "Web", prefix: "[Web]" }]');
+  fixture.set('projectNew.roleEdit = null');
+  bjcButton(fixture.body(), '직군 목록 고치기') || nodeFindAll(fixture.body(), 'd-link').find(kid => bjcText(kid) === '직군 목록 고치기').listeners.click();
+  const edit = nodeFind(fixture.body(), 'd-pnewedit');
+  assert.ok(edit, '그 자리에서 줄 편집이 열린다');
+  bjcButton(edit, '직군 추가').listeners.click();
+  const lines = nodeFindAll(fixture.body(), 'ln');
+  nodeFindAll(lines[1], 'in')[0].listeners.input();
+  fixture.app.run('projectNew.roleEdit[1] = { label: "Data", prefix: "[Data]" }');
+  await bjcButton(nodeFind(fixture.body(), 'd-pnewedit'), '저장').listeners.click();
+  assert.deepEqual(fixture.sent.slice(-1), [{ url: '/api/workflow/jira-roles', body: { roles: [{ label: 'Web', prefix: '[Web]' }, { label: 'Data', prefix: '[Data]' }] } }]);
+  assert.match(fixture.app.nodes.get('liveRegion').textContent, /직군 목록을 저장했어요/);
 });

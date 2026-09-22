@@ -90,6 +90,10 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
       // 고르기 목록 소제목만 이 값을 읽는다 — 업무·기록·주간요약·검색은 이 표를 보지 않는다.
       // 프로젝트가 없어져 고아가 된 줄이 남아 있어도 아무 자리에도 나타나지 않는다.
       projectArchive: { ...(state.projectArchive || {}) },
+      // 새 프로젝트 화면의 직군 세트(`[{ label, prefix }]`). 파일에 칸이 없으면 `null`이고
+      // 그때는 **화면이** 기본 세트를 쓴다 — 여기서 기본값을 파일에 써 넣지 않는다.
+      // 사람이 전부 지우면 빈 배열이 저장되고, 그때는 빈 목록이 그대로 보인다.
+      jiraRoles: Array.isArray(state.jiraRoles) ? state.jiraRoles.map(role => ({ label: role.label, prefix: role.prefix })) : null,
     };
   }
   function patchItem({ id, ...patch }) {
@@ -271,6 +275,34 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     return { ok: true, project: key, archived };
   }
 
+  // ---------- 새 프로젝트 화면의 직군 세트 ----------
+  // `workspace.config.json`은 사람이 손으로 고치는 파일이라 앱이 쓰지 않는다 — 직군 세트는 앱
+  // 데이터다. 저장 길은 projectLinks·projectArchive와 같다(idempotent → mutations.run → 원자적 쓰기).
+  // 지라에는 아무것도 묻지 않는다(접두어는 우리가 붙이는 글자일 뿐이다).
+  const ROLE_MAX = 20;
+  function checkJiraRoles({ roles }) {
+    if (!Array.isArray(roles)) throw new Error('직군 목록을 확인해 주세요.');
+    if (roles.length > ROLE_MAX) throw new Error(`직군은 ${ROLE_MAX}개까지 저장할 수 있어요.`);
+    const seen = new Set();
+    return roles.map((role) => {
+      const label = typeof (role && role.label) === 'string' ? role.label.trim() : '';
+      const prefix = typeof (role && role.prefix) === 'string' ? role.prefix.trim() : '';
+      if (!label || label.length > 30 || /[\r\n]/.test(label)) throw new Error('직군 이름은 30자 이내 한 줄로 적어 주세요.');
+      if (!prefix || prefix.length > 20 || /[\r\n]/.test(prefix)) throw new Error('접두어는 20자 이내 한 줄로 적어 주세요.');
+      const key = label.toLocaleLowerCase();
+      if (seen.has(key)) throw new Error('같은 직군 이름이 두 번 있어요.');
+      seen.add(key);
+      return { label, prefix };
+    });
+  }
+  function saveJiraRoles(body) {
+    const roles = checkJiraRoles(body || {});
+    const state = read();
+    state.jiraRoles = roles;
+    write(state);
+    return { ok: true, roles };
+  }
+
   // ---------- 직접 만든(그룹) 프로젝트 이름 바꾸기 ----------
   // 이 저장소가 가진 세 자리(회의 프로젝트·projectLinks 키·projectArchive 키)만 바꾼다. 업무 파일과
   // 회의 연결 파일·주간요약은 부르는 쪽(server.js renameProject)이 같은 트랜잭션 안에서 이어서 바꾼다.
@@ -340,5 +372,5 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     write(state);
     return { ok: true };
   }
-  return { archive, snapshot, patchItem, saveMeeting, syncProject, capture, review, undoReview, retype, link, checkProjectLink, linkProject, checkProjectArchive, archiveProject, groupList, renameGroup, outcome: id => read().items[id]?.outcome || '' };
+  return { archive, snapshot, patchItem, saveMeeting, syncProject, capture, review, undoReview, retype, link, checkProjectLink, linkProject, checkProjectArchive, archiveProject, checkJiraRoles, saveJiraRoles, groupList, renameGroup, outcome: id => read().items[id]?.outcome || '' };
 };

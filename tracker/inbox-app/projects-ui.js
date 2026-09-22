@@ -140,7 +140,15 @@ function renderProjects() {
   headCount.className = 'n num';
   // 머리의 개수는 위 목록의 수다(지난 프로젝트는 세지 않는다).
   headCount.textContent = visibleRows.length;
-  head.append(headName, headCount);
+  // 개수 옆의 조용한 `+` — 새 프로젝트 화면을 오른쪽에 연다(project-new-ui.js).
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'd-pnewgo';
+  add.textContent = '+';
+  add.title = '새 프로젝트';
+  add.setAttribute('aria-label', '새 프로젝트');
+  add.addEventListener('click', () => projectNewStart());
+  head.append(headName, headCount, add);
   listEl.appendChild(head);
 
   // 위 목록과 `지난 프로젝트` 구역이 같은 줄 부품을 쓴다 — 지난 것만 흐리게 그린다.
@@ -211,7 +219,9 @@ function renderProjects() {
     if (projectPastOpen) pastRows.forEach(row => addRow(row, true));
   }
 
-  renderProjectDetail(body, rows.find(row => row.key === projectKey) || null);
+  // 새 프로젝트 화면이 열려 있으면 오른쪽 면은 그것 하나다(왼쪽 목록은 그대로 보인다).
+  if (projectNew) projectNewRender(body);
+  else renderProjectDetail(body, rows.find(row => row.key === projectKey) || null);
 }
 
 // 보관·해제가 서버로 나가는 단 하나의 길. 저장하는 것은 프로젝트 키 하나이고 업무·기록은

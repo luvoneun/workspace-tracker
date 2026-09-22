@@ -833,6 +833,11 @@ function jiraCardEnsure(key) {
 // `done`은 `완료한 티켓도 보기`로 한 번 받아 둔 목록이다 — null이면 아직 부르지 않은 것이고,
 // 한 번 받으면 이 입력칸이 닫힐 때까지 다시 부르지 않는다(입력칸을 닫으면 jiraLinkIdle이 비운다).
 let jiraLink = { project: null, state: 'idle', query: '', error: '', issue: null, busy: false, onEsc: null, done: null, doneBusy: false, doneError: '' };
+// 새 프로젝트 화면이 이 입력칸을 **그대로 빌려 쓴다**(같은 부품을 두 벌 만들지 않으려고).
+// 값이 있으면 고른 티켓을 저장하지 않고 빌린 화면에 넘긴다 — `{ openLabel, label, onPick(issue) }`.
+// 프로젝트 탭의 연결 줄에서는 늘 null이라 기존 동작이 하나도 달라지지 않는다.
+let jiraLinkPick = null;
+function jiraLinkBorrow(pick) { jiraLinkPick = pick; }
 
 const jiraLinkHost = () => document.getElementById('jiraLinkRow');
 // 설정 > 상태의 지라 줄에 덧붙는 조용한 한 마디. 앱이 목록을 직접 읽고 있을 때만 나온다 —
@@ -952,8 +957,8 @@ function jiraLinkNode(projectKey) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'd-link d-jlinkgo';
-    button.textContent = '지라 티켓 연결';
-    button.title = '이 프로젝트에 지라 티켓 하나를 연결해요';
+    button.textContent = jiraLinkPick ? jiraLinkPick.openLabel : '지라 티켓 연결';
+    button.title = jiraLinkPick ? jiraLinkPick.openLabel : '이 프로젝트에 지라 티켓 하나를 연결해요';
     button.addEventListener('click', () => jiraLinkOpen(projectKey));
     line.appendChild(button);
     return line;
@@ -1078,8 +1083,9 @@ function jiraLinkPreview(box, projectKey, issue) {
   const go = document.createElement('button');
   go.type = 'button';
   go.className = 'd-btn sm acc';
-  go.textContent = '연결';
-  go.addEventListener('click', () => jiraLinkConnect(projectKey, issue, go, back));
+  // 빌려 쓰는 화면(새 프로젝트)에서는 저장하지 않고 고른 티켓만 넘긴다 — 지라에도 앱에도 쓰지 않는다.
+  go.textContent = jiraLinkPick ? jiraLinkPick.label : '연결';
+  go.addEventListener('click', () => (jiraLinkPick ? jiraLinkPick.onPick(issue) : jiraLinkConnect(projectKey, issue, go, back)));
   acts.append(back, go);
   box.appendChild(acts);
 }
