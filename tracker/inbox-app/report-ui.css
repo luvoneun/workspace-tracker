@@ -95,6 +95,15 @@
 }
 .rp-s .edt, .rp-s .rv, .rp-s .nw { margin-left: 8px; font-size: 12px; white-space: nowrap; }
 .rp-s .edt { color: var(--muted); }
+/* 접힌 부모(한 줄로 모으기) 뒤의 조용한 `· N건 ▸` — 눌러서 화면에서만 펼쳐 본다(저장 안 함). */
+.rp-s .rp-foldtoggle {
+  display: inline-flex; align-items: center; height: 28px; margin-left: 6px; padding: 0 6px;
+  border: 0; border-radius: var(--r-xs); background: none;
+  color: var(--dim); font-family: inherit; font-size: 12.5px; font-weight: 600;
+  white-space: nowrap; cursor: pointer;
+}
+.rp-s .rp-foldtoggle:hover { background: var(--hover); color: var(--text); }
+.rp-s .rp-foldtoggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .rp-s .rv { color: var(--warn); }
 .rp-s .nw { color: var(--accent-text); }
 .rp-s .ac {

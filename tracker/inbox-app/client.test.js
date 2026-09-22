@@ -1812,16 +1812,16 @@ test('주간요약 문장의 더보기는 모으기·따로 빼기·묶음 풀�
   const app = reportClient();
   const labels = row => JSON.parse(app.run(`JSON.stringify(
     reportSentenceMenuSections(${REPORT_ITEM}, ${JSON.stringify(row)}).map(section => section.map(entry => entry.label)))`));
-  assert.deepEqual(labels({ id: 'r1', group: '가입 개선', sourceIds: ['s1'] }), [['근거 업무 보기', '이 아래로 문장 모으기']]);
-  assert.deepEqual(labels({ id: 'r2', group: '가입 개선', sourceIds: [] }), [['이 아래로 문장 모으기']], '근거가 없으면 근거 항목도 없다');
+  assert.deepEqual(labels({ id: 'r1', group: '가입 개선', sourceIds: ['s1'] }), [['근거 업무 보기', '이 아래로 문장 모으기', '한 줄로 모으기…']]);
+  assert.deepEqual(labels({ id: 'r2', group: '가입 개선', sourceIds: [] }), [['이 아래로 문장 모으기', '한 줄로 모으기…']], '근거가 없으면 근거 항목도 없다');
   assert.deepEqual(labels({ id: 'r5', group: '가입 개선', sourceIds: [], parent: 'r1' }), [['따로 빼기']],
     '이미 다른 문장 아래에 있는 문장은 더 모을 수 없고 빼기만 한다(한 단계까지만)');
   assert.deepEqual(labels({ id: 'r6', group: '가입 개선', sourceIds: [], excluded: true }), [],
     '제외한 문장 아래로는 모으지 않는다 — 보여 줄 것이 없으면 빈 묶음도 만들지 않는다');
   assert.deepEqual(labels({ id: 'r3', group: '여러 프로젝트', sourceIds: ['s1', 's2'], canSplit: true, partCount: 2 }),
-    [['근거 업무 보기', '이 아래로 문장 모으기', '묶음 풀기']]);
+    [['근거 업무 보기', '이 아래로 문장 모으기', '한 줄로 모으기…', '묶음 풀기']]);
   // 옛 저장 데이터로 만든 묶음 문장에는 `parts`가 없어 `canSplit`도 오지 않는다 — 풀기만 보이지 않는다.
-  assert.deepEqual(labels({ id: 'r4', group: '여러 프로젝트', sourceIds: ['s1', 's2'] }), [['근거 업무 보기', '이 아래로 문장 모으기']]);
+  assert.deepEqual(labels({ id: 'r4', group: '여러 프로젝트', sourceIds: ['s1', 's2'] }), [['근거 업무 보기', '이 아래로 문장 모으기', '한 줄로 모으기…']]);
 });
 
 // `프로젝트 바꾸기`는 다음 주 계획 문장에만 붙는다(다른 구역의 프로젝트는 원본 업무가 정한다).
@@ -1831,9 +1831,9 @@ test('계획 문장의 ⋯에만 프로젝트 바꾸기 고르개가 붙는다',
     reportSentenceMenuSections(${REPORT_ITEM}, ${JSON.stringify(row)})
       .map(section => section.map(entry => entry.field || entry.label)))`));
   assert.deepEqual(fields({ id: 'p1', heading: '다음 주 계획', group: '결제 리뉴얼', sourceIds: [] }),
-    [['이 아래로 문장 모으기'], ['프로젝트 바꾸기']]);
+    [['이 아래로 문장 모으기', '한 줄로 모으기…'], ['프로젝트 바꾸기']]);
   assert.deepEqual(fields({ id: 'a1', heading: '완료한 일', group: '결제 리뉴얼', sourceIds: [] }),
-    [['이 아래로 문장 모으기']], '자동 문장에는 프로젝트 바꾸기가 없다');
+    [['이 아래로 문장 모으기', '한 줄로 모으기…']], '자동 문장에는 프로젝트 바꾸기가 없다');
   // 고르개는 서버의 `regroup` 하나만 부른다(빈 값이면 프로젝트 없음).
   const sent = JSON.parse(app.run(`(() => {
     const calls = [];
@@ -2308,6 +2308,251 @@ test('아래로 넣은 문장은 부모의 프로젝트 아래에 서고, 슬랙
     '9월 3주차 (9/21~9/27)', '', '[완료]', '', '결제 리뉴얼', '• 혼자 남은 문장',
   ].join('\n'));
   assert.deepEqual(JSON.parse(app.run(`JSON.stringify(reportChildRows([]).size)`)), 0);
+});
+
+// ---------- BFOLD: 여러 문장을 한 줄로 모으기 + 접힘/펼침 ----------
+const REPORT_FOLD_PICK_ROWS = `[
+  { id: 'a', heading: '완료한 일', group: '가입 개선', text: '문장 A', sourceIds: [], excluded: false },
+  { id: 'b', heading: '완료한 일', group: '결제 리뉴얼', text: '문장 B', sourceIds: [], excluded: false },
+  { id: 'c', heading: '진행중', group: '가입 개선', text: '문장 C', sourceIds: [], excluded: false },
+  { id: 'e', heading: '완료한 일', group: '알림센터', text: '이미 아래에 있는 문장', sourceIds: [], excluded: false, parent: 'a' }
+]`;
+test('한 줄로 모으기 고르기 모드: 시작 문장은 이미 골라진 상태고, 같은 소제목만 고르고 뺄 수 있으며 최소 2개부터 확인이 눌리고 Esc로 취소한다', () => {
+  const app = reportClient();
+  app.run(`
+    renderReportDraft = () => {};
+    document.body = document.createElement('div');
+    item = { weekKey: '2026-09-14', draft: { revision: 1, rows: ${REPORT_FOLD_PICK_ROWS} } };
+    reportFoldStart(item, item.draft.rows[0]);
+  `);
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify([...reportFoldIds])')), ['a'], '시작한 문장은 이미 골라진 상태다');
+  assert.equal(app.run('reportFoldHeading'), '완료한 일');
+  assert.equal(app.run('escStack.includes(reportFoldEnd)'), true, 'Esc 스택에 올라간다');
+  // 가짜 DOM의 classList.add는 아무 일도 하지 않으므로(className 문자열을 바꾸지 않는다) 고르기
+  // 대상 여부는 실제 코드가 함께 붙이는 role·aria-label로 확인한다(기존 nest 테스트와 같은 방식).
+  const rowState = idx => JSON.parse(app.run(`(() => {
+    const host = document.createElement('div');
+    reportSentenceRow(item, item.draft.rows[${idx}], { host });
+    const line = host.children[0];
+    return JSON.stringify({ role: line.getAttribute('role') || null, label: line.getAttribute('aria-label') || null });
+  })()`));
+  assert.deepEqual(rowState(0), { role: 'button', label: '문장 A — 고르기 해제' }, '고른 문장(시작 문장)은 눌러서 뺄 수 있다');
+  assert.deepEqual(rowState(1), { role: 'button', label: '문장 B — 한 줄로 모으기에 담기' }, '같은 소제목의 최상위 문장은 고를 수 있다');
+  assert.deepEqual(rowState(2), { role: null, label: null }, '다른 소제목의 문장은 눌리지 않는다');
+  assert.deepEqual(rowState(3), { role: null, label: null }, '이미 다른 문장 아래에 있는 문장은 고를 수 없다');
+  // 후보 문장을 누르면 고르기에 더해진다.
+  app.run(`
+    host = document.createElement('div');
+    reportSentenceRow(item, item.draft.rows[1], { host });
+    host.children[0].listeners.click();
+  `);
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify([...reportFoldIds].sort())')), ['a', 'b']);
+  // 막대: 2개를 고르면 확인 버튼이 눌린다.
+  app.run('reportPickBar(item)');
+  let bar = app.nodes.get('reportNestBarEl').children[0];
+  assert.equal(bar.children.find(kid => kid.textContent === '한 줄로 모을 문장을 골라요 · 2개') !== undefined, true);
+  let confirm = bar.children.find(kid => kid.textContent === '한 줄로 모으기');
+  assert.equal(confirm.disabled, false);
+  // 다시 눌러 빼면 1개 — 확인 버튼이 비활성이다.
+  app.run(`
+    host = document.createElement('div');
+    reportSentenceRow(item, item.draft.rows[1], { host });
+    host.children[0].listeners.click();
+  `);
+  app.run('reportPickBar(item)');
+  bar = app.nodes.get('reportNestBarEl').children[0];
+  confirm = bar.children.find(kid => kid.textContent === '한 줄로 모으기');
+  assert.equal(confirm.disabled, true, '2개 미만이면 비활성이다');
+  // Esc(스택 맨 위 실행) = 취소.
+  app.run('escStack[escStack.length - 1]()');
+  assert.equal(app.run('reportFoldIds'), null);
+  assert.equal(app.run('escStack.includes(reportFoldEnd)'), false);
+});
+test('한 줄로 모으기와 이 아래로 문장 모으기(nest)는 함께 열리지 않는다', () => {
+  const app = reportClient();
+  app.run(`
+    renderReportDraft = () => {};
+    item = { weekKey: '2026-09-14', draft: { revision: 1, rows: ${REPORT_FOLD_PICK_ROWS} } };
+    reportFoldStart(item, item.draft.rows[0]);
+  `);
+  assert.notEqual(app.run('reportFoldIds'), null);
+  app.run("reportNestStart(item, item.draft.rows[1])");
+  assert.equal(app.run('reportFoldIds'), null, 'nest를 시작하면 fold 고르기는 닫힌다');
+  assert.equal(app.run('reportNestParentId'), 'b');
+  app.run('reportFoldStart(item, item.draft.rows[0])');
+  assert.equal(app.run('reportNestParentId'), null, 'fold를 시작하면 nest 모드는 닫힌다');
+});
+test('확인을 누르면 fold를 보내고, 초기 문장은 프로젝트가 하나면 이름을 붙이고 여럿이면 개수만 담는다', async () => {
+  const app = reportClient();
+  app.run(`
+    renderReportDraft = () => {};
+    calls = [];
+    reportChange = async (item, action) => { calls.push(action); };
+    item = { weekKey: '2026-09-14', draft: { revision: 1, rows: [
+      { id: 'a', heading: '완료한 일', group: '가입 개선', text: '문장 A', sourceIds: [], excluded: false },
+      { id: 'b', heading: '완료한 일', group: '가입 개선', text: '문장 B', sourceIds: [], excluded: false },
+      { id: 'c', heading: '완료한 일', group: '결제 리뉴얼', text: '문장 C', sourceIds: [], excluded: false },
+    ] } };
+    reportFoldStart(item, item.draft.rows[0]);
+    reportFoldIds.add('b');
+  `);
+  await app.run("reportFoldConfirm(item)");
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls[0])')),
+    { action: 'fold', ids: ['a', 'b'], text: '가입 개선 소소한 작업 2건' }, '프로젝트가 하나면 이름을 앞에 붙인다');
+  app.run(`
+    calls = [];
+    reportFoldStart(item, item.draft.rows[0]);
+    reportFoldIds.add('c');
+  `);
+  await app.run("reportFoldConfirm(item)");
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls[0])')),
+    { action: 'fold', ids: ['a', 'c'], text: '소소한 작업 2건' }, '프로젝트가 다르면 개수만 담는다');
+  // 고르기 모드는 확인을 누르는 즉시 닫힌다.
+  assert.equal(app.run('reportFoldIds'), null);
+});
+test('한 줄로 모으기 성공 뒤에는 새 부모가 그 자리에서 바로 수정 모드로 열리고 글 전체가 담긴다', async () => {
+  const app = reportClient();
+  app.run(`
+    renderReportDraft = () => {};
+    item = { weekKey: '2026-09-14', draft: { revision: 1, rows: [
+      { id: 'a', heading: '완료한 일', group: '가입 개선', text: '문장 A', sourceIds: [], excluded: false },
+      { id: 'b', heading: '완료한 일', group: '가입 개선', text: '문장 B', sourceIds: [], excluded: false },
+    ] } };
+    // 실제 서버 대신, fold가 성공한 뒤의 모양으로 draft를 직접 바꿔치기한다(reportChange를 흉내).
+    reportChange = async (target, action) => {
+      target.draft = { revision: 2, rows: [
+        { id: 'p1', heading: '완료한 일', group: '가입 개선', text: action.text, sourceIds: [], evidence: [], excluded: false, folded: true, manual: true, locked: true },
+        { ...target.draft.rows[0], parent: 'p1' },
+        { ...target.draft.rows[1], parent: 'p1' },
+      ] };
+    };
+    reportFoldStart(item, item.draft.rows[0]);
+    reportFoldIds.add('b');
+  `);
+  await app.run("reportFoldConfirm(item)");
+  assert.equal(app.run("reportEdits.get('2026-09-14:p1')"), '가입 개선 소소한 작업 2건',
+    '새 부모의 수정 칸이 원래 글 전체를 담은 채 열린다(전체 선택은 브라우저 select()에 맡긴다)');
+});
+test('접힌 부모는 문장 뒤에 조용한 `· N건 ▸`이 붙고, 눌러 펼쳐 보는 것은 화면 상태일 뿐 저장하지 않는다', () => {
+  const app = reportClient();
+  const rows = `[
+    { id: 'p1', heading: '완료한 일', group: '여러 프로젝트', text: '소소한 작업 2건', sourceIds: [], excluded: false, folded: true, manual: true, locked: true },
+    { id: 'a1', heading: '완료한 일', group: '가입 개선', text: '가입 배너 문구 확인', sourceIds: [], excluded: false, parent: 'p1' },
+    { id: 'a2', heading: '완료한 일', group: '결제 리뉴얼', text: '정산 배치 재처리 로그 확인', sourceIds: [], excluded: false, parent: 'p1' }
+  ]`;
+  app.run(`
+    calls = [];
+    reportChange = async () => { calls.push('change'); };
+    renderReportDraft = target => { rendered = target; };
+    item = { weekKey: '2026-09-14', draft: { revision: 1, rows: ${rows} } };
+  `);
+  const draw = () => app.run(`(() => {
+    const host = document.createElement('div');
+    reportSentenceRow(item, item.draft.rows[0], { host });
+    return host.children[0];
+  })()`);
+  let line = draw();
+  const toggle = line.children.find(kid => kid.className && kid.className.split(' ').includes('tx'))
+    .children.find(kid => kid.className === 'rp-foldtoggle');
+  assert.equal(toggle.textContent, '· 2건 ▸', '접혀 있을 때는 개수와 ▸');
+  assert.equal(toggle.getAttribute('aria-label'), '아래 문장 2개 보기');
+  toggle.listeners.click({ stopPropagation() {} });
+  assert.equal(app.run('reportFoldOpen.has("p1")'), true, '펼쳐 본 것은 화면 상태로 남는다');
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), [], '저장(fold 계열 액션)은 하지 않는다');
+  line = draw();
+  const toggle2 = line.children.find(kid => kid.className && kid.className.split(' ').includes('tx'))
+    .children.find(kid => kid.className === 'rp-foldtoggle');
+  assert.equal(toggle2.textContent, '· 2건 ▾', '다시 그리면 펼친 상태(▾)로 보인다');
+});
+test('setFolded 메뉴 항목은 아래에 문장이 있는 부모에만 붙고, 접힘·펼침을 그대로 부른다', () => {
+  const app = reportClient();
+  app.run(`
+    calls = [];
+    reportChange = async (target, action) => { calls.push(action); };
+  `);
+  const withChild = `{ id: 'p1', heading: '완료한 일', group: '여러 프로젝트', text: '소소한 작업 2건', sourceIds: [], excluded: false, folded: true, manual: true }`;
+  const item = `{ weekKey: '2026-09-14', draft: { revision: 1, rows: [
+    ${withChild},
+    { id: 'a1', heading: '완료한 일', group: '가입 개선', text: '가입 배너 문구 확인', sourceIds: [], excluded: false, parent: 'p1' }
+  ] } }`;
+  const labels = row => JSON.parse(app.run(`JSON.stringify(
+    reportSentenceMenuSections(${item}, ${row}).map(section => section.map(entry => entry.label)))`));
+  // 기존 항목(이 아래로 문장 모으기·한 줄로 모으기…)의 붙는 조건은 그대로다(최상위·제외 안 됨) —
+  // 아래에 문장이 있는 부모에도 함께 붙는다(잘못 누르면 서버가 막고 알린다).
+  assert.deepEqual(labels(withChild), [['근거 업무 보기', '이 아래로 문장 모으기', '펼쳐서 보이기', '풀기']],
+    '접힌 부모에는 펼쳐서 보이기 · 풀기가 더해진다');
+  app.run(`
+    pick = (target, row, label) => reportSentenceMenuSections(target, row).flat().find(entry => entry.label === label).onClick();
+    pick(${item}, ${withChild}, '펼쳐서 보이기');
+  `);
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls[0])')), { action: 'setFolded', id: 'p1', folded: false });
+  const unfolded = withChild.replace('folded: true', 'folded: false');
+  assert.deepEqual(labels(unfolded), [['근거 업무 보기', '이 아래로 문장 모으기', '접어서 한 줄로 보이기', '풀기']], '부모 줄에는 `한 줄로 모으기…`가 붙지 않는다(아래 문장을 가진 문장은 새 요약 아래로 못 들어간다) — `이 아래로 문장 모으기`는 더 넣는 길이라 남는다');
+});
+test('풀기(unfold) 메뉴는 서버의 unfold를 그대로 부른다', () => {
+  const app = reportClient();
+  app.run(`
+    calls = [];
+    reportChange = async (target, action) => { calls.push(action); };
+    item = { weekKey: '2026-09-14', draft: { revision: 1, rows: [
+      { id: 'p1', heading: '완료한 일', group: '여러 프로젝트', text: '소소한 작업 2건', sourceIds: [], excluded: false, folded: true, manual: true },
+      { id: 'a1', heading: '완료한 일', group: '가입 개선', text: '가입 배너 문구 확인', sourceIds: [], excluded: false, parent: 'p1' },
+    ] } };
+    pick = (row, label) => reportSentenceMenuSections(item, row).flat().find(entry => entry.label === label).onClick();
+    pick(item.draft.rows[0], '풀기');
+  `);
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls[0])')), { action: 'unfold', id: 'p1' });
+});
+const REPORT_FOLD_ROWS = `[
+  { id: 'p1', heading: '완료한 일', group: '여러 프로젝트', text: '소소한 작업 2건', sourceIds: [], evidence: [], excluded: false, folded: true, manual: true },
+  { id: 'a1', heading: '완료한 일', group: '가입 개선', text: '가입 배너 문구 확인', sourceIds: [], excluded: false, parent: 'p1' },
+  { id: 'a2', heading: '완료한 일', group: '결제 리뉴얼', text: '정산 배치 재처리 로그 확인', sourceIds: [], excluded: false, parent: 'p1' }
+]`;
+test('세 형식(일반 글자·서식 있는 복사·미리보기)은 접힌 부모는 한 줄만, 펼친 부모는 부모+아래 문장을 담는다', () => {
+  const app = reportClient();
+  const folded = `{ weekKey: '2026-09-21', rows: ${REPORT_FOLD_ROWS} }`;
+  const textFolded = app.run(`reportSlackText(reportSlackModel(${folded}, { sections: ['완료'] }))`);
+  assert.equal(textFolded, [
+    '9월 3주차 (9/21~9/27)', '', '[완료]', '', '여러 프로젝트', '• 소소한 작업 2건',
+  ].join('\n'), '접힌 부모는 부모 한 줄만 나가고 아래 문장·◦ 부연이 없다');
+  assert.doesNotMatch(textFolded, /가입 배너|정산 배치/);
+  const unfolded = `{ weekKey: '2026-09-21', rows: ${REPORT_FOLD_ROWS.replace('folded: true', 'folded: false')} }`;
+  const textUnfolded = app.run(`reportSlackText(reportSlackModel(${unfolded}, { sections: ['완료'] }))`);
+  assert.equal(textUnfolded, [
+    '9월 3주차 (9/21~9/27)', '', '[완료]', '', '여러 프로젝트', '• 소소한 작업 2건',
+    '    ◦ 가입 배너 문구 확인', '    ◦ 정산 배치 재처리 로그 확인',
+  ].join('\n'), '펼친 부모는 부모 + 들여쓴 아래 문장이 그대로 나간다');
+  // 미리보기(reportSlackLines)를 이어 붙이면 일반 글자와 정확히 같다 — 한 구조에서 나온다.
+  const lines = JSON.parse(app.run(`JSON.stringify(reportSlackLines(reportSlackModel(${folded}, { sections: ['완료'] })))`));
+  assert.equal(lines.map(l => l.text).join('\n'), textFolded);
+  const html = app.run(`reportSlackHtml(reportSlackModel(${folded}, { sections: ['완료'] }))`);
+  assert.doesNotMatch(html, /가입 배너|정산 배치/, '서식 있는 복사도 접힌 부모의 아래 문장을 싣지 않는다');
+});
+test('접힌 부모만 있는 프로젝트 블록에는 지라 정보가 붙지 않는다(근거 없음) — 같은 이름이 다른 곳에서 근거와 함께 나오면 거기에는 붙는다', () => {
+  const app = reportClient();
+  app.run(`
+    jiraIssuesByKey = new Map([['PAY-77', { status: '진행 중', versions: [] }]]);
+    deploySoonVersion = () => null;
+  `);
+  const rows = `[
+    { id: 'p1', heading: '완료한 일', group: 'PAY-77 · 결제 정산', text: '소소한 작업 2건', sourceIds: [], evidence: [], excluded: false, folded: true, manual: true },
+    { id: 'a1', heading: '완료한 일', group: 'PAY-77 · 결제 정산', text: '자식 문장', sourceIds: [], excluded: false, parent: 'p1' },
+    { id: 'b1', heading: '진행중', group: 'PAY-77 · 결제 정산', text: '근거 있는 문장', sourceIds: ['s1'], excluded: false }
+  ]`;
+  const report = `{ weekKey: '2026-09-21', rows: ${rows} }`;
+  const sections = JSON.parse(app.run(`JSON.stringify(reportSlackModel(${report}, { sections: ['완료', '진행 중'], jira: true }).sections)`));
+  assert.equal(sections[0].projects[0].note, undefined, '접힌 부모만 있는 완료 블록에는 지라 정보가 붙지 않는다');
+  assert.equal(sections[1].projects[0].note, ' (진행 중)', '근거가 있는 같은 프로젝트에는 붙는다');
+});
+test('한 줄로 모으기의 저장 알림은 개수를 적고 되돌리기 버튼을 함께 준다', () => {
+  const notice = (action, token = "'tok'") => {
+    const app = reportClient();
+    app.run(`reportUndo.set('2026-09-14', ${token})`);
+    app.run(`reportSavedNotice(${REPORT_ITEM}, ${action})`);
+    const region = app.nodes.get('liveRegion');
+    return [region.textContent, region.children.map(kid => kid.textContent)];
+  };
+  assert.deepEqual(notice(`{ action: 'fold', ids: ['a', 'b', 'c'] }`), ['한 줄로 모았어요 · 3건', ['되돌리기', '닫기']]);
 });
 
 test('다음 주 계획은 프로젝트로 묶이고, 프로젝트 없는 문장은 구역 끝에 선다', () => {

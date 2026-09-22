@@ -13,6 +13,9 @@ let reportRenderedWeek = null;
 let reportRenderedItem = null;
 let reportNestParentId = null;        // 모으기 모드의 기준 문장(이 문장 아래로 넣는다)
 let reportExcludedOpen = false;
+let reportFoldIds = null;             // 한 줄로 모으기 고르기 모드에서 지금 고른 id들(Set) — 꺼져 있으면 null
+let reportFoldHeading = null;         // 고르기 모드에서 고를 수 있는 소제목(첫 문장의 heading)
+const reportFoldOpen = new Set();     // 접힌 부모를 화면에서만 펼쳐 본 것(저장 안 함)
 
 const REPORT_PLAN_HEADING = '다음 주 계획';
 // 서버는 프로젝트가 없는 기록을 `그룹 없음`으로 준다 — 화면에서는 다른 목록과 같은 말로 적는다.
@@ -155,6 +158,12 @@ function reportParentRow(rows, row) {
   if (!row || !row.parent) return null;
   return (rows || []).find(entry => entry.id === row.parent && !entry.excluded && !entry.parent) || null;
 }
+// 접힌 부모(`folded`)의 아래 문장은 화면에서만 뺀다(문서 그리기 전용 — 저장·슬랙은 건드리지 않는다).
+// 화면 상태로 펼쳐 본(`reportFoldOpen`) 부모의 아래는 그대로 그린다.
+function reportRowHiddenByFold(rows, row) {
+  const parentRow = reportParentRow(rows, row);
+  return !!(parentRow && parentRow.folded && !reportFoldOpen.has(parentRow.id));
+}
 
 // 옛 합치기 행이 모이는 `여러 프로젝트`는 그 구역의 맨 끝 — 프로젝트 없는 묶음(`기타`·`프로젝트 없음`)이
 // 있으면 그 바로 앞에 선다(문서·슬랙 같은 규칙).
@@ -176,6 +185,30 @@ function reportCanNest(rows, row, parent) {
   return !(rows || []).some(entry => entry.parent === row.id);
 }
 
+// ---------- 한 줄로 모으기(fold) — 여러 문장을 골라 사람이 지은 요약 한 줄 아래로 넣는다 ----------
+// 고를 수 있는 문장의 조건은 nest 후보와 같다(최상위·제외 안 됨·아래에 문장 없음), 거기에 고르기를
+// 시작한 문장과 같은 소제목이어야 한다는 조건이 더해진다. 글자는 합치지 않는다(fold는 서버가 처리).
+function reportCanFold(rows, row) {
+  if (!row || row.excluded || row.parent) return false;
+  return !(rows || []).some(entry => entry.parent === row.id);
+}
+
+// 초기 요약 문장 — 프로젝트가 하나면 이름을 앞에 붙이고, 여럿이면 개수만(BKEY: 지라는 요약만).
+function reportFoldSeedText(selected) {
+  const names = new Set((selected || []).map(row => reportProjectText(row.group)));
+  const count = (selected || []).length;
+  return names.size === 1 ? `${[...names][0]} 소소한 작업 ${count}건` : `소소한 작업 ${count}건`;
+}
+
+// fold 성공 뒤 방금 만든 새 부모를 찾는다 — 서버가 새 id를 만들어 응답에 담아 오므로, 고른 id들과
+// 자식이 정확히 같은 manual 부모를 찾는다(다른 fold 묶음과 헷갈리지 않게).
+function reportFoldParentOf(rows, ids) {
+  const set = new Set(ids);
+  return (rows || []).find(row => row.manual && !row.parent
+    && (rows || []).filter(entry => entry.parent === row.id).length === set.size
+    && (rows || []).filter(entry => entry.parent === row.id).every(entry => set.has(entry.id)));
+}
+
 // 슬랙에 붙일 글의 구조(순수 함수). 일반 글자·서식 있는 복사·미리보기가 모두 여기서 나온다.
 // `options.sections`는 넣을 구역 이름의 목록이고, 빠뜨리면 기본값(완료·진행 중·예정)이다.
 // 규칙: 제외한 문장은 빠짐 · 구역 안에서 같은 프로젝트는 머리 하나 아래로 · 프로젝트 없는 것은 `기타`로
@@ -188,6 +221,8 @@ function reportSlackModel(report, options = {}) {
   const rows = report && report.rows ? report.rows : [];
   const children = reportChildRows(rows);
   const linesOf = row => String(row.text ?? '').split('\n').map(line => line.trim()).filter(Boolean);
+  // 접힌 부모만 있는 프로젝트 블록(근거 없음)은 지라 정보를 붙이지 않는다 — reportJiraAnnotate가 읽는다.
+  const foldedOnly = new Set();
   for (const row of rows) {
     if (row.excluded || reportParentRow(rows, row)) continue;
     const name = reportSlackSectionOf(row.heading);
@@ -196,13 +231,15 @@ function reportSlackModel(report, options = {}) {
     if (!lines.length) continue;
     if (!sections.has(name)) sections.set(name, { name, projects: [], memos: [] });
     const section = sections.get(name);
-    // 아래로 들어간 문장은 자기 프로젝트가 달라도 부모의 항목 밑 부연으로 붙는다(보이는 대로 나간다).
-    const item = { text: lines[0], notes: [...lines.slice(1), ...(children.get(row.id) || []).flatMap(linesOf)] };
+    // 아래로 들어간 문장은 자기 프로젝트가 달라도 부모의 항목 밑 부연으로 붙는다(보이는 대로 나간다) —
+    // 단, 접힌 부모(`folded`)는 부모 한 줄만 나가고 아래 문장은 붙지 않는다(한 줄로 줄이는 취지).
+    const item = { text: lines[0], notes: [...lines.slice(1), ...(row.folded ? [] : (children.get(row.id) || []).flatMap(linesOf))] };
     const projectName = reportSlackProjectOf(row, name);
     if (projectName === null) { section.memos.push(item); continue; }
     let project = section.projects.find(entry => entry.name === projectName);
-    if (!project) { project = { name: projectName, items: [] }; section.projects.push(project); }
+    if (!project) { project = { name: projectName, items: [] }; section.projects.push(project); foldedOnly.add(project); }
     project.items.push(item);
+    if (!row.folded) foldedOnly.delete(project);
   }
   for (const section of sections.values()) {
     const index = section.projects.findIndex(project => project.name === REPORT_SLACK_OTHER);
@@ -213,7 +250,7 @@ function reportSlackModel(report, options = {}) {
   return {
     title: reportSlackTitle(report && report.weekKey),
     // `지라 정보` 토글이 켜졌을 때만 프로젝트 줄에 괄호 한 마디가 붙는다(기본 꺼짐).
-    sections: options.jira ? reportJiraAnnotate(list) : list,
+    sections: options.jira ? reportJiraAnnotate(list, foldedOnly) : list,
   };
 }
 
@@ -278,11 +315,13 @@ function reportJiraNote(name) {
 }
 
 // 같은 프로젝트가 여러 구역에 나오면 **처음 나오는 곳에만** 붙인다(구역마다 되풀이하면 글이 시끄럽다).
-function reportJiraAnnotate(sections) {
+// `foldedOnly`에 든 블록(접힌 부모만 있어 근거가 없는 블록)은 건너뛴다 — `seen`에 올리지 않으므로
+// 같은 프로젝트가 근거 있는 문장과 함께 나오면 그 자리에는 그대로 붙는다.
+function reportJiraAnnotate(sections, foldedOnly = new Set()) {
   const seen = new Set();
   for (const section of sections) {
     for (const project of section.projects) {
-      if (seen.has(project.name)) continue;
+      if (seen.has(project.name) || foldedOnly.has(project)) continue;
       seen.add(project.name);
       const note = reportJiraNote(project.name);
       if (note) project.note = note;
@@ -509,6 +548,8 @@ function reportSavedNotice(item, action, notice) {
   if (notice) { announce(notice); return; }
   const message = action.action === 'merge'
     ? `문장 ${action.ids.length}개를 묶었어요`
+    : action.action === 'fold'
+    ? `한 줄로 모았어요 · ${action.ids.length}건`
     : REPORT_MOVE_NOTICE[action.action];
   if (!message) { announce('보고 내용을 저장했어요'); return; }
   const token = reportUndo.get(item.weekKey);
@@ -556,6 +597,7 @@ function reportNestParent(report) {
 }
 
 function reportNestStart(item, row) {
+  reportFoldEnd(); // 두 고르기 모드는 함께 열리지 않는다.
   reportNestParentId = row.id;
   escDrop(reportNestEnd);
   escPush(reportNestEnd);
@@ -577,20 +619,81 @@ function reportNestLabel(text) {
   return line.length > 24 ? `${line.slice(0, 24)}…` : line;
 }
 
-function reportNestBar(item) {
+// ---------- 한 줄로 모으기 고르기 모드 ----------
+// nest처럼 기준 문장에서 시작하지만, 여러 문장을 골라 두었다가 확인을 눌러야(fold) 저장된다.
+// 시작한 문장은 이미 골라진 상태이고, 같은 소제목의 문장만 고르고 뺄 수 있다.
+
+function reportFoldStart(item, row) {
+  reportNestEnd(); // 두 고르기 모드는 함께 열리지 않는다.
+  reportFoldIds = new Set([row.id]);
+  reportFoldHeading = row.heading;
+  escDrop(reportFoldEnd);
+  escPush(reportFoldEnd);
+  renderReportDraft(item);
+}
+
+function reportFoldEnd() {
+  if (reportBusy && reportFoldIds !== null) { if (!escStack.includes(reportFoldEnd)) escPush(reportFoldEnd); return; }
+  if (reportFoldIds === null) return;
+  reportFoldIds = null;
+  reportFoldHeading = null;
+  escDrop(reportFoldEnd);
+  if (reportRenderedItem) renderReportDraft(reportRenderedItem);
+}
+
+// 확인을 누르면 서버에 `fold`를 보내고, 성공하면 새 부모 문장을 그 자리에서 바로 수정 모드로 연다
+// (글 전체가 선택된 채로 — 기존 `edit` 인라인 UI를 그대로 재사용한다).
+async function reportFoldConfirm(item) {
+  if (!reportFoldIds || reportFoldIds.size < 2 || reportBusy) return;
+  const ids = [...reportFoldIds];
+  const text = reportFoldSeedText((item.draft.rows || []).filter(row => ids.includes(row.id)));
+  reportFoldIds = null;
+  reportFoldHeading = null;
+  escDrop(reportFoldEnd);
+  try {
+    await reportChange(item, { action: 'fold', ids, text });
+  } catch (error) {
+    showNotice(error.message || '저장하지 못했어요. 적은 내용은 그대로 있어요', true);
+    return;
+  }
+  const parent = reportFoldParentOf(item.draft.rows, ids);
+  if (!parent) return;
+  reportEdits.set(`${item.weekKey}:${parent.id}`, parent.text);
+  renderReportDraft(item);
+  const input = document.getElementById('weeklyReportDetail')?.querySelector(`[data-edit-row="${parent.id}"]`);
+  if (input) { input.focus(); input.select(); }
+}
+
+// 모으기 막대(nest) · 한 줄로 모으기 고르기 막대(fold) — 같은 부품(`.d-selbar`, `#reportNestBarEl`)을
+// 함께 쓴다(둘은 동시에 열리지 않는다). 어느 쪽도 아니면 감춘다.
+function reportPickBar(item) {
   const bar = document.getElementById('reportNestBarEl');
   if (!bar) return;
-  const parent = reportNestParent(item.draft);
-  const open = !!parent && reportMode === 'draft';
+  const nestParent = reportNestParent(item.draft);
+  const nesting = !!nestParent && reportMode === 'draft';
+  const folding = reportFoldIds !== null && reportMode === 'draft';
+  const open = nesting || folding;
   document.body.classList.toggle('nest-open', open);
   bar.hidden = !open;
   bar.replaceChildren();
   if (!open) return;
+  // 같은 막대를 두 모드가 나눠 쓴다 — 지금 모드에 맞게 이름표를 바꿔 단다.
+  bar.setAttribute('aria-label', folding ? '한 줄로 모으기 고르기' : '문장 아래로 모으기');
   const inner = reportNode('div', undefined, 'bar');
-  inner.appendChild(reportNode('span', `「${reportNestLabel(parent.text)}」 아래로`, 'ct'));
-  inner.appendChild(reportNode('span', '넣을 문장을 눌러 주세요', 'rp-hint'));
-  inner.appendChild(reportNode('span', undefined, 'sp'));
-  inner.appendChild(reportButton('완료', () => reportNestEnd(), 'd-btn pri'));
+  if (nesting) {
+    inner.appendChild(reportNode('span', `「${reportNestLabel(nestParent.text)}」 아래로`, 'ct'));
+    inner.appendChild(reportNode('span', '넣을 문장을 눌러 주세요', 'rp-hint'));
+    inner.appendChild(reportNode('span', undefined, 'sp'));
+    inner.appendChild(reportButton('완료', () => reportNestEnd(), 'd-btn pri'));
+  } else {
+    const count = reportFoldIds.size;
+    inner.appendChild(reportNode('span', `한 줄로 모을 문장을 골라요 · ${count}개`, 'ct'));
+    inner.appendChild(reportNode('span', undefined, 'sp'));
+    inner.appendChild(reportButton('취소', () => reportFoldEnd()));
+    const confirm = reportButton('한 줄로 모으기', () => reportFoldConfirm(item), 'd-btn pri');
+    if (count < 2) confirm.disabled = true;
+    inner.appendChild(confirm);
+  }
   bar.appendChild(inner);
 }
 
@@ -663,11 +766,15 @@ function reportDocSummary(item, host, newIds) {
 }
 
 // 근거 업무: 문장 아래 들여 쓴 목록. 줄을 누르면 그 줄 옆에 상세 카드가 열린다.
-function reportEvidenceBlock(row) {
+// `manual`(한 줄로 모으기로 만든 요약)은 자기 근거가 없다 — 아래 문장들의 근거를 이어 보여 준다
+// (새 부품 없이 이 목록을 그대로 쓴다).
+function reportEvidenceBlock(row, rows) {
   const list = reportNode('div', undefined, 'rp-ev');
-  const sources = row.currentEvidence || row.evidence || [];
+  const kids = row.manual ? (rows || []).filter(entry => entry.parent === row.id) : [];
+  const sources = kids.length ? kids.flatMap(entry => entry.currentEvidence || entry.evidence || []) : (row.currentEvidence || row.evidence || []);
+  if (kids.length) list.appendChild(reportNode('div', `아래 문장 ${kids.length}개의 근거`, 'none'));
   if (!sources.length) {
-    list.appendChild(reportNode('div', '기존 보고 문장 · 연결된 원본 없음', 'none'));
+    if (!kids.length) list.appendChild(reportNode('div', '기존 보고 문장 · 연결된 원본 없음', 'none'));
     return list;
   }
   for (const source of sources) {
@@ -699,22 +806,33 @@ function reportSuggestionBlock(item, row) {
   return box;
 }
 
-// 문장 줄의 ⋯ 메뉴. `이 아래로 문장 모으기`는 최상위·제외되지 않은 문장에만 붙는다(아래로 들어간
-// 문장은 `따로 빼기`로 먼저 나와야 한다 — 한 단계까지만 들어간다).
+// 문장 줄의 ⋯ 메뉴. `이 아래로 문장 모으기`는 최상위·제외되지 않은 문장에, `한 줄로 모으기…`는 그중 아래 문장이
+// 없는 문장에만 붙는다(아래로 들어간 문장은 `따로 빼기`로 먼저 나와야 한다 — 한 단계까지만 들어간다).
 // `묶음 풀기`는 서버가 묶기 전 문장을 들고 있는 옛 합치기 행에만 붙는다(`canSplit`).
+// 아래에 문장이 있는 부모(nest든 fold든)에는 `접어서 한 줄로 보이기`/`펼쳐서 보이기`·`풀기`가 붙는다.
 function reportSentenceMenuSections(item, row) {
+  const rows = item.draft.rows || [];
+  const hasChildren = rows.some(entry => entry.parent === row.id);
   return [
     [
-      row.sourceIds.length ? {
+      row.sourceIds.length || (row.manual && hasChildren) ? {
         label: reportEvidenceOpen.has(row.id) ? '근거 업무 숨기기' : '근거 업무 보기',
         onClick: () => {
           if (reportEvidenceOpen.has(row.id)) reportEvidenceOpen.delete(row.id); else reportEvidenceOpen.add(row.id);
           renderReportDraft(item);
         },
       } : null,
+      // `이 아래로 문장 모으기`는 이미 아래에 문장이 있는 부모에도 붙는다(더 넣는 길). `한 줄로 모으기…`는
+      // 붙지 않는다 — 아래 문장을 가진 문장은 새 요약 아래로 들어갈 수 없어(서버가 거절) 늘 실패하는 항목이 된다.
       !row.parent && !row.excluded ? { label: '이 아래로 문장 모으기', onClick: () => reportNestStart(item, row) } : null,
+      !row.parent && !row.excluded && !hasChildren ? { label: '한 줄로 모으기…', onClick: () => reportFoldStart(item, row) } : null,
       row.parent ? { label: '따로 빼기', onClick: () => reportChange(item, { action: 'unnest', id: row.id }) } : null,
       row.canSplit ? { label: '묶음 풀기', onClick: () => reportChange(item, { action: 'split', id: row.id }) } : null,
+      hasChildren ? {
+        label: row.folded ? '펼쳐서 보이기' : '접어서 한 줄로 보이기',
+        onClick: () => reportChange(item, { action: 'setFolded', id: row.id, folded: !row.folded }),
+      } : null,
+      hasChildren ? { label: '풀기', onClick: () => reportChange(item, { action: 'unfold', id: row.id }) } : null,
     ].filter(Boolean),
     // 계획 문장만 프로젝트를 나중에 바꾼다(다른 구역의 프로젝트는 원본 업무가 정한다).
     row.heading === REPORT_PLAN_HEADING
@@ -753,6 +871,30 @@ function reportSentenceRow(item, row, context) {
       if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); nest(); }
     });
   }
+
+  // 한 줄로 모으기 고르기 모드 — 같은 소제목의 최상위·아래 문장 없는 문장만 고르고 뺄 수 있다.
+  // 고른 문장은 기존 선택 톤(`.is-nest`, `--sel`)을 그대로 빌려 쓴다(새 색 없음).
+  const folding = reportFoldIds !== null && reportMode === 'draft';
+  const foldSelected = folding && reportFoldIds.has(row.id);
+  const foldCandidate = folding && !foldSelected && row.heading === reportFoldHeading && reportCanFold(rows, row);
+  if (folding) {
+    if (foldSelected) line.classList.add('is-nest');
+    else if (!foldCandidate) line.classList.add('is-off');
+  }
+  if (foldSelected || foldCandidate) {
+    line.classList.add('is-pick');
+    line.tabIndex = 0;
+    line.setAttribute('role', 'button');
+    line.setAttribute('aria-label', `${row.text} — ${foldSelected ? '고르기 해제' : '한 줄로 모으기에 담기'}`);
+    const toggle = () => {
+      if (reportFoldIds.has(row.id)) reportFoldIds.delete(row.id); else reportFoldIds.add(row.id);
+      renderReportDraft(item);
+    };
+    line.addEventListener('click', toggle);
+    line.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggle(); }
+    });
+  }
   line.appendChild(reportNode('span', parentRow ? '◦' : '•', 'bu'));
 
   const text = reportNode('div', undefined, 'tx');
@@ -788,6 +930,22 @@ function reportSentenceRow(item, row, context) {
     text.appendChild(reportNode('span', `· ${reportProjectText(row.group)}`, 'pj'));
   }
   if (isNestParent) text.appendChild(reportNode('span', '여기 아래로', 'here'));
+  // 접힌 부모는 문장 뒤에 조용한 `· N건 ▸` 버튼이 붙는다 — 누르면 아래 문장이 화면에서만(저장 안 함)
+  // 흐린 글자로 펼쳐 보인다. 다시 누르면 접힌다(`▾` → `▸`).
+  const childCount = rows.filter(entry => entry.parent === row.id).length;
+  if (row.folded && childCount) {
+    const peek = reportFoldOpen.has(row.id);
+    const toggle = reportNode('button', `· ${childCount}건 ${peek ? '▾' : '▸'}`, 'rp-foldtoggle');
+    toggle.type = 'button';
+    toggle.setAttribute('aria-label', `아래 문장 ${childCount}개 보기`);
+    toggle.setAttribute('aria-expanded', String(peek));
+    toggle.addEventListener('click', (event) => {
+      event.stopPropagation();
+      if (peek) reportFoldOpen.delete(row.id); else reportFoldOpen.add(row.id);
+      renderReportDraft(item);
+    });
+    text.appendChild(toggle);
+  }
   // 손으로 고친 문장에만 조용한 이름표를 붙인다. `자동 초안`은 찍지 않는다.
   if (row.locked && !context.plan) text.appendChild(reportNode('span', '직접 수정', 'edt'));
   if (row.needsReview && !row.suggestion) text.appendChild(reportNode('span', '원본 확인 필요', 'rv'));
@@ -795,8 +953,9 @@ function reportSentenceRow(item, row, context) {
   if (rowNew) text.appendChild(reportNode('span', `새 기록 ${rowNew}`, 'nw'));
   if (lines.length > 1) text.appendChild(reportNode('div', lines.slice(1).join('\n'), 'sub'));
 
-  // 모으기 모드에서는 줄을 누르는 것이 "넣기"다 — 수정·제외·⋯과 헷갈리지 않게 그동안은 감춘다.
-  if (!nesting) {
+  // 모으기·한 줄로 모으기 고르기 모드에서는 줄을 누르는 것이 곧 "고르기/넣기"다 — 수정·제외·⋯과
+  // 헷갈리지 않게 그동안은 감춘다.
+  if (!nesting && !folding) {
     const actions = reportNode('span', undefined, 'ac');
     actions.appendChild(reportButton('수정', () => {
       reportEdits.set(key, row.text);
@@ -812,7 +971,7 @@ function reportSentenceRow(item, row, context) {
   }
   host.appendChild(line);
 
-  if (reportEvidenceOpen.has(row.id)) host.appendChild(reportEvidenceBlock(row));
+  if (reportEvidenceOpen.has(row.id)) host.appendChild(reportEvidenceBlock(row, rows));
   if (row.suggestion) host.appendChild(reportSuggestionBlock(item, row));
 }
 
@@ -1263,12 +1422,18 @@ function reportPlanSection(item, host, newIds) {
         addRow.hidden = false;
         addRow.querySelector('input, textarea')?.focus();
       } : null));
-      for (const row of group.rows) reportSentenceRow(item, row, { host, newIds, plan: true });
+      for (const row of group.rows) {
+        if (reportRowHiddenByFold(item.draft.rows, row)) continue;
+        reportSentenceRow(item, row, { host, newIds, plan: true });
+      }
       if (addRow) host.appendChild(addRow);
       return;
     }
     if (index) host.appendChild(reportNode('div', undefined, 'rp-sep'));
-    for (const row of group.rows) reportSentenceRow(item, row, { host, newIds, plan: true });
+    for (const row of group.rows) {
+      if (reportRowHiddenByFold(item.draft.rows, row)) continue;
+      reportSentenceRow(item, row, { host, newIds, plan: true });
+    }
   });
   if (!rows.length) host.appendChild(reportNode('div', '직접 쓴 문장만 들어가요', 'rp-hint'));
 
@@ -1479,6 +1644,10 @@ function renderReportDraft(item) {
   if (reportRenderedWeek !== item.weekKey) {
     reportNestParentId = null;
     escDrop(reportNestEnd);
+    reportFoldIds = null;
+    reportFoldHeading = null;
+    escDrop(reportFoldEnd);
+    reportFoldOpen.clear();
     reportEvidenceOpen.clear();
     reportRenderedWeek = item.weekKey;
   }
@@ -1489,6 +1658,18 @@ function renderReportDraft(item) {
   if (reportNestParentId !== null && (reportMode !== 'draft' || !reportNestParent(report))) {
     reportNestParentId = null;
     escDrop(reportNestEnd);
+  }
+  // 한 줄로 모으기 고르기 모드도 같은 이유로 다시 확인한다 — 고른 문장 중 사라졌거나 더 이상
+  // 고를 수 없게 된 것은 조용히 뺀다. `전체 업무 기록`으로 옮기면 모드는 끝난다.
+  if (reportFoldIds !== null) {
+    if (reportMode !== 'draft') { reportFoldIds = null; reportFoldHeading = null; escDrop(reportFoldEnd); }
+    else {
+      for (const id of [...reportFoldIds]) {
+        const found = (report.rows || []).find(candidate => candidate.id === id);
+        if (!found || found.excluded || found.parent) reportFoldIds.delete(id);
+      }
+      if (!reportFoldIds.size) { reportFoldIds = null; reportFoldHeading = null; escDrop(reportFoldEnd); }
+    }
   }
   host.dataset.weekKey = item.weekKey;
   host.replaceChildren();
@@ -1509,13 +1690,17 @@ function renderReportDraft(item) {
       const titles = reportGroupTitles(section.groups.map(group => group.group));
       for (const group of section.groups) {
         body.appendChild(reportNode('div', titles.get(group.group), 'rp-pj'));
-        for (const row of group.rows) reportSentenceRow(item, row, { host: body, newIds });
+        for (const row of group.rows) {
+          // `reportDocSections`는 그대로 두고(순수 함수) 이 그리기 단계에서만 접힌 부모의 아래를 거른다.
+          if (reportRowHiddenByFold(report.rows, row)) continue;
+          reportSentenceRow(item, row, { host: body, newIds });
+        }
       }
     }
     reportExcludedBlock(item, body);
     reportPlanSection(item, body, newIds);
   }
 
-  reportNestBar(item);
+  reportPickBar(item);
   reportPreview(report);
 }

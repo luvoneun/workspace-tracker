@@ -43,7 +43,7 @@ module.exports = ({ directory, sources, legacy, currentWeek }) => {
         text: line.replace(/^- /,'').replace(/\s\^[^\s]+\s*$/,''), sourceIds: id ? [id] : [], evidence: item ? [evidence(item)] : [], locked: true, legacy: true, excluded: title === '조용히 완료한 일' }];
     });
   }
-  function view(weekKey, state = read(), sourceSnapshot) {
+  function view(weekKey, state = read(), sourceSnapshot, opts = {}) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(weekKey)) throw new Error('주간 날짜를 확인해 주세요.');
     const all = sourceSnapshot || sources(), byId = new Map(all.map(item => [item.id,item]));
     const old = legacy().find(entry => entry.weekKey === weekKey);
@@ -90,7 +90,12 @@ module.exports = ({ directory, sources, legacy, currentWeek }) => {
     const nested=new Map();
     rows.forEach(row=>{if(!row.parent)return;if(!nested.has(row.parent))nested.set(row.parent,[]);nested.get(row.parent).push(row);});
     const ordered=tops.flatMap(row=>[row,...(nested.get(row.id)||[])]);
-    return { weekKey, rows: ordered, revision: hash({ stored, rows: ordered }), updatedAt: stored?.updatedAt || null };
+    // 사람이 지은 요약 문장(`manual`, fold로 만든 부모)은 아래 문장이 (직접 지운 게 아니라) 고아 규칙으로
+    // 전부 떨어져 나가면 화면에서 뜻 없는 빈 줄로 남지 않게 뺀다 — 저장값은 그대로 둔다(기존 parent
+    // 고아 규칙과 같은 태도). `opts.raw`는 change()가 다음 저장을 준비할 때만 쓰는 내부용으로, 숨긴 행도
+    // 그대로 들고 있어야 carry()가 저장값을 잃지 않는다.
+    const visible = opts.raw ? ordered : ordered.filter(row => !(row.manual && !(nested.get(row.id) || []).length));
+    return { weekKey, rows: visible, revision: hash({ stored, rows: ordered }), updatedAt: stored?.updatedAt || null };
   }
   function clean(row) { const { suggestion, needsReview, currentEvidence, canSplit, partCount, ...rest } = row; return rest; }
   // 계획 문장에 붙이는 프로젝트 이름. 없으면 기존처럼 `직접 작성`으로 담는다.
@@ -112,8 +117,8 @@ module.exports = ({ directory, sources, legacy, currentWeek }) => {
     if (!link || link.length > 100 || /[\u0000-\u001f\u007f]/.test(link)) throw new Error('담은 업무 표시를 100자 이내 한 줄로 보내 주세요.');
     return link;
   }
-  function change({ weekKey, revision, action, id, parentId, text, ids, token, group, planOf: planSource }) {
-    const state=read(), current=view(weekKey,state);
+  function change({ weekKey, revision, action, id, parentId, text, ids, token, group, planOf: planSource, folded }) {
+    const state=read(), current=view(weekKey,state,undefined,{raw:true});
     if (revision !== current.revision) { const error=new Error('새 기록이나 다른 창의 변경이 있어요. 적은 내용은 그대로 있어요. 최신 내용을 확인한 뒤 다시 저장해 주세요.');error.status=409;throw error; }
     // 묶기 전 문장은 화면으로 나가지 않으므로(view가 `canSplit`만 알린다) 저장 파일에서 다시 붙인다.
     // `parts`는 서버가 merge에서만 만든다 — 요청 본문의 값은 받지 않는다.
@@ -140,6 +145,24 @@ module.exports = ({ directory, sources, legacy, currentWeek }) => {
       // 묶기 전 문장을 그대로 품는다(나중에 `split`으로 되살린다). 이미 묶음이던 행은 그 행의 `parts`까지
       // 함께 들어가 있어서, 묶음을 다시 묶은 것을 풀면 한 단계만 풀린다.
       rows.push({id:randomUUID(),heading:selected[0].heading,group:new Set(selected.map(row=>row.group)).size===1?selected[0].group:'여러 프로젝트',bucket:new Set(selected.map(row=>row.bucket)).size===1?selected[0].bucket:null,text:selected.map(row=>row.text).join('\n'),sourceIds,evidence:[...new Map(selected.flatMap(row=>row.evidence).map(item=>[item.id,item])).values()],locked:true,excluded:false,parts:structuredClone(selected)});
+    } else if(action==='fold') {
+      // 여러 문장을 골라 사람이 지은 요약 한 줄(`manual`) 아래로 넣는다(nest와 같은 후보 조건 + 같은 heading).
+      // 글자는 합치지 않는다 — 고른 문장은 그대로 독립된 문장으로 남고, 새 부모만 하나 생긴다.
+      if(!Array.isArray(ids)||ids.length<2||new Set(ids).size!==ids.length)throw new Error('한 줄로 모을 문장을 두 개 이상 골라 주세요.');
+      const selected=rows.filter(row=>ids.includes(row.id));
+      if(selected.length!==ids.length||new Set(selected.map(row=>row.heading)).size!==1)throw new Error('같은 상태의 문장만 한 줄로 모을 수 있어요.');
+      if(selected.some(row=>row.excluded))throw new Error('제외한 문장은 모을 수 없어요.');
+      if(selected.some(row=>row.parent))throw new Error('이미 다른 문장 아래에 있는 문장은 모을 수 없어요.');
+      if(selected.some(candidate=>rows.some(entry=>entry.parent===candidate.id)))throw new Error('아래에 문장이 있는 문장은 먼저 비워 주세요.');
+      const trimmed=typeof text==='string'?text.trim():'';
+      if(!trimmed||trimmed.length>200||/\n/.test(text))throw new Error('요약 문장을 200자 이내 한 줄로 적어 주세요.');
+      const parentId=randomUUID();
+      const group=new Set(selected.map(row=>row.group)).size===1?selected[0].group:'여러 프로젝트';
+      // 부모는 뒤에 붙이지 않고 선택한 첫 문장(화면 순서 기준) 자리에 넣는다 — 나머지는 자리 그대로 두고
+      // `parent`만 붙인다(view의 tops/children 재구성이 부모 바로 뒤로 옮겨 준다).
+      const firstIndex=rows.findIndex(row=>ids.includes(row.id));
+      selected.forEach(row=>{row.parent=parentId;});
+      rows.splice(firstIndex,0,{id:parentId,heading:selected[0].heading,group,bucket:null,text:trimmed,sourceIds:[],evidence:[],locked:true,excluded:false,folded:true,manual:true});
     } else {
       if(!row)throw new Error('보고 항목을 찾을 수 없어요.');
       if(action==='edit') { if(typeof text!=='string'||!text.trim()||text.length>10000)throw new Error('보고 문장을 10,000자 이내로 입력해 주세요.');row.text=text.trim();row.locked=true;row.legacy=false;row.evidence=shown.currentEvidence; }
@@ -158,7 +181,23 @@ module.exports = ({ directory, sources, legacy, currentWeek }) => {
         if(current.rows.some(entry=>entry.parent===row.id))throw new Error('아래에 문장이 있는 문장은 먼저 비워 주세요.');
         row.parent=parent.id;
       }
-      else if(action==='unnest') delete row.parent;
+      else if(action==='unnest') {
+        // 마지막 아래 문장을 빼서 사람이 지은 요약(`manual`) 부모 아래가 비면 그 부모도 함께 지운다 —
+        // 뜻 없는 빈 요약 줄을 남기지 않는다. 원래 있던 문장을 부모로 쓴 nest 묶음은 그대로 남는다.
+        const parentId=row.parent;
+        delete row.parent;
+        const parent=parentId?rows.find(entry=>entry.id===parentId):null;
+        if(parent&&parent.manual&&!rows.some(entry=>entry.parent===parentId))rows=rows.filter(entry=>entry.id!==parentId);
+      }
+      else if(action==='setFolded') {
+        if(row.parent||!rows.some(entry=>entry.parent===row.id))throw new Error('아래에 문장이 있는 문장만 접을 수 있어요.');
+        row.folded=!!folded;
+      }
+      else if(action==='unfold') {
+        rows.forEach(entry=>{if(entry.parent===row.id)delete entry.parent;});
+        if(row.manual)rows=rows.filter(entry=>entry.id!==row.id);
+        else row.folded=false;
+      }
       // 계획 문장의 프로젝트만 나중에 바꾼다(지우고 다시 넣지 않아도 되게). 다른 구역의 문장은
       // 프로젝트가 원본 업무에서 오므로 여기서 손대지 않는다.
       else if(action==='regroup') {

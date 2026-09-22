@@ -434,3 +434,146 @@ test('BRENAME: 보고 기록 형식이 깨져 있으면 이름 바꾸기는 저�
   assert.throws(()=>f.store.renameGroup('가입','가입 개선'),/보고 기록 형식을 확인해 주세요/);
   assert.equal(fs.readFileSync(file,'utf8'),JSON.stringify({schema:2,weeks:{}}));
 });
+// BFOLD — 여러 문장을 골라 사람이 지은 요약 한 줄(`manual`) 아래로 모으고(`fold`), 그 부모를 접고
+// 펼치고(`setFolded`) 풀 수 있다(`unfold`). 글자는 합치지 않는다 — nest처럼 각 문장은 독립으로 남는다.
+test('한 줄로 모으기 검증: 최소 개수·같은 상태·제외 안 함·중첩 금지·요약 글 길이',t=>{
+  const f=nestFixture(t);
+  f.items.push({id:'d',type:'task',description:'가입 배너 문구 확인하기',status:'done',created:'2026-09-14',completed:'2026-09-15',group:'가입'});
+  const a=f.row('문구 검토함').id,b=f.row('알림 배너 정리함').id,c=f.row('정산 배치 설계함').id,d=f.row('가입 배너 문구 확인함').id;
+  assert.throws(()=>f.change({action:'fold',ids:[a],text:'요약'}),/두 개 이상 골라 주세요/);
+  assert.throws(()=>f.change({action:'fold',ids:[a,a],text:'요약'}),/두 개 이상 골라 주세요/,'중복도 거절한다');
+  f.items.push({id:'e',type:'task',description:'진행 중인 일',status:'to-do',created:'2026-09-14',doing:'2026-09-15',group:'가입'});
+  const doing=f.row('진행 중인 일').id;
+  assert.throws(()=>f.change({action:'fold',ids:[a,doing],text:'요약'}),/같은 상태의 문장만 한 줄로 모을 수 있어요/);
+  assert.throws(()=>f.change({action:'fold',ids:[a,'없는-행'],text:'요약'}),/같은 상태의 문장만 한 줄로 모을 수 있어요/,'화면에 없는 id도 같은 문구로 거절한다');
+  f.change({action:'exclude',id:d});
+  assert.throws(()=>f.change({action:'fold',ids:[a,f.view().rows.find(row=>row.excluded).id],text:'요약'}),/제외한 문장은 모을 수 없어요/);
+  f.change({action:'exclude',id:d});
+  f.change({action:'nest',id:b,parentId:a});
+  assert.throws(()=>f.change({action:'fold',ids:[b,c],text:'요약'}),/이미 다른 문장 아래에 있는 문장은 모을 수 없어요/,'이미 다른 문장 아래에 있는 문장은 고를 수 없다');
+  assert.throws(()=>f.change({action:'fold',ids:[a,c],text:'요약'}),/아래에 문장이 있는 문장은 먼저 비워 주세요/,'이미 부모 역할인 문장도 고를 수 없다');
+  f.change({action:'unnest',id:b});
+  assert.throws(()=>f.change({action:'fold',ids:[a,c],text:''}),/200자 이내 한 줄로 적어 주세요/,'빈 글은 거절한다');
+  assert.throws(()=>f.change({action:'fold',ids:[a,c],text:'가'.repeat(201)}),/200자 이내 한 줄로 적어 주세요/,'201자는 거절한다');
+  assert.throws(()=>f.change({action:'fold',ids:[a,c],text:'줄바꿈\n있음'}),/200자 이내 한 줄로 적어 주세요/,'줄바꿈이 있으면 거절한다');
+  assert.equal(f.view().rows.filter(row=>row.manual).length,0,'거절된 요청은 아무것도 남기지 않는다');
+});
+test('한 줄로 모으기: 새 부모는 먼저 고른 문장이 서 있던 자리를 그대로 쓰고, 같은 프로젝트끼리는 그 프로젝트로 남는다',t=>{
+  const f=fixture(t);
+  f.items.push(
+    {id:'b',type:'task',description:'가입 배너 문구 확인하기',status:'done',created:'2026-09-14',completed:'2026-09-15',group:'가입'},
+    {id:'c',type:'task',description:'가입 온보딩 문구 확정하기',status:'done',created:'2026-09-14',completed:'2026-09-15',group:'가입'},
+  );
+  const row=text=>f.view().rows.find(r=>r.text===text);
+  assert.deepEqual(f.view().rows.map(r=>r.text),['문구 검토함','가입 배너 문구 확인함','가입 온보딩 문구 확정함'],'같은 프로젝트 안에서는 원본 순서 그대로다');
+  const a=row('문구 검토함').id,b=row('가입 배너 문구 확인함').id;
+  const result=f.change({action:'fold',ids:[a,b],text:'가입 소소한 작업 2건'});
+  const after=f.view().rows;
+  assert.equal(after[0].text,'가입 소소한 작업 2건','새 부모가 먼저 고른 문장(맨 앞)의 자리를 그대로 쓴다');
+  assert.equal(after[0].group,'가입','같은 프로젝트를 모으면 그 프로젝트로 남는다');
+  assert.deepEqual(after.map(r=>[r.text,r.parent||null]),[
+    ['가입 소소한 작업 2건',null],
+    ['문구 검토함',after[0].id],
+    ['가입 배너 문구 확인함',after[0].id],
+    ['가입 온보딩 문구 확정함',null],
+  ]);
+  assert.ok(result.undoToken);
+});
+test('한 줄로 모으기: 프로젝트가 다르면 여러 프로젝트로 묶이고, folded:true·manual인 새 부모가 생긴다',t=>{
+  const f=nestFixture(t);
+  const a=f.row('문구 검토함').id,b=f.row('알림 배너 정리함').id;
+  f.change({action:'fold',ids:[a,b],text:'소소한 작업 2건'});
+  const parent=f.view().rows.find(row=>row.manual);
+  assert.equal(parent.text,'소소한 작업 2건');
+  assert.equal(parent.group,'여러 프로젝트');
+  assert.equal(parent.folded,true);
+  assert.equal(parent.manual,true);
+  assert.equal(parent.locked,true);
+  assert.equal(parent.excluded,false);
+  assert.equal(parent.bucket,null);
+  assert.deepEqual(parent.sourceIds,[]);
+  assert.deepEqual(parent.evidence,[]);
+  assert.equal(f.view().rows.find(row=>row.id===a).parent,parent.id);
+  assert.equal(f.view().rows.find(row=>row.id===b).parent,parent.id);
+});
+test('setFolded는 아래에 문장이 있는 최상위 문장만 접고 펼치며, 기존 nest 부모에도 쓸 수 있다',t=>{
+  const f=nestFixture(t);
+  const a=f.row('문구 검토함').id,b=f.row('알림 배너 정리함').id;
+  assert.throws(()=>f.change({action:'setFolded',id:a,folded:true}),/아래에 문장이 있는 문장만 접을 수 있어요/,'아직 아무것도 안 들어간 문장은 접을 수 없다');
+  f.change({action:'nest',id:b,parentId:a});
+  assert.throws(()=>f.change({action:'setFolded',id:b,folded:true}),/아래에 문장이 있는 문장만 접을 수 있어요/,'자식 문장은 최상위가 아니라 접을 수 없다');
+  f.change({action:'setFolded',id:a,folded:true});
+  assert.equal(f.view().rows.find(row=>row.id===a).folded,true,'기존 nest로 만든 부모에도 쓸 수 있다');
+  f.change({action:'setFolded',id:a,folded:false});
+  assert.equal(f.view().rows.find(row=>row.id===a).folded,false);
+});
+test('unfold: 사람이 지은 요약 부모는 지워지고, 원래 문장을 부모로 쓴 묶음은 남아서 펼쳐진다',t=>{
+  const f=nestFixture(t);
+  const a=f.row('문구 검토함').id,b=f.row('알림 배너 정리함').id,c=f.row('정산 배치 설계함').id;
+  f.change({action:'nest',id:b,parentId:a});
+  f.change({action:'setFolded',id:a,folded:true});
+  f.change({action:'unfold',id:a});
+  assert.equal(f.view().rows.some(row=>row.id===a),true,'원래 문장을 부모로 쓴 묶음은 unfold해도 그 행이 남는다');
+  assert.equal(f.view().rows.find(row=>row.id===a).folded,false);
+  assert.equal(f.view().rows.find(row=>row.id===b).parent,undefined,'아래 문장은 최상위로 돌아온다');
+
+  f.change({action:'fold',ids:[a,c],text:'소소한 작업 2건'});
+  const parent=f.view().rows.find(row=>row.manual);
+  const unfoldResult=f.change({action:'unfold',id:parent.id});
+  assert.equal(f.view().rows.some(row=>row.id===parent.id),false,'사람이 지은 요약 부모는 아래가 최상위로 돌아오면 함께 지워진다');
+  assert.equal(f.view().rows.find(row=>row.id===a).parent,undefined);
+  assert.equal(f.view().rows.find(row=>row.id===c).parent,undefined);
+  f.change({action:'undo',token:unfoldResult.undoToken});
+  assert.equal(f.view().rows.some(row=>row.id===parent.id),true,'되돌리면 부모가 되살아난다');
+  assert.equal(f.view().rows.find(row=>row.id===a).parent,parent.id);
+  assert.equal(f.view().rows.find(row=>row.id===c).parent,parent.id);
+});
+test('unnest: manual 부모의 마지막 아래 문장을 빼면 그 부모도 함께 지워지고, 원래 문장 부모는 남는다',t=>{
+  const f=nestFixture(t);
+  const a=f.row('문구 검토함').id,b=f.row('알림 배너 정리함').id,c=f.row('정산 배치 설계함').id;
+  f.change({action:'fold',ids:[a,b],text:'소소한 작업 2건'});
+  const parentId=f.view().rows.find(row=>row.manual).id;
+  f.change({action:'unnest',id:a});
+  assert.equal(f.view().rows.some(row=>row.id===parentId),true,'아직 아래 문장이 남아 있으면 부모는 지워지지 않는다');
+  f.change({action:'unnest',id:b});
+  assert.equal(f.view().rows.some(row=>row.id===parentId),false,'마지막 아래 문장을 빼면 manual 부모도 함께 지워진다');
+  // 원래 문장을 부모로 쓴 묶음(nest)의 마지막 아래 문장을 빼도 부모는 남는다(기존 동작 그대로다).
+  f.change({action:'nest',id:c,parentId:a});
+  f.change({action:'unnest',id:c});
+  assert.equal(f.view().rows.some(row=>row.id===a),true,'원래 문장 부모는 마지막 아래 문장이 빠져도 남는다');
+});
+test('view: folded를 그대로 내보내고, manual 부모 아래가 고아 규칙으로 전부 비면 화면에서만 숨기고 저장은 지우지 않는다',t=>{
+  const f=nestFixture(t);
+  const a=f.row('문구 검토함').id,b=f.row('알림 배너 정리함').id;
+  f.change({action:'fold',ids:[a,b],text:'소소한 작업 2건'});
+  const parentId=f.view().rows.find(row=>row.manual).id;
+  assert.equal(f.view().rows.find(row=>row.id===parentId).folded,true,'view가 folded를 그대로 내보낸다');
+  // 두 자식 모두 자동 초안이라 아직 잠기지 않았다 — 원본 상태가 바뀌어 소제목이 달라지면 고아 규칙이 걸린다.
+  const srcA=f.items.find(item=>item.id==='a'),srcB=f.items.find(item=>item.id==='b');
+  srcA.status='to-do';delete srcA.completed;srcA.doing='2026-09-15';
+  srcB.status='to-do';delete srcB.completed;srcB.doing='2026-09-15';
+  assert.equal(f.view().rows.some(row=>row.id===parentId),false,'아래가 전부 고아로 떨어져 나가면 화면에서만 뺀다');
+  const saved=JSON.parse(fs.readFileSync(path.join(f.directory,REPORT_FILE),'utf8')).weeks['2026-09-14'].rows;
+  assert.ok(saved.some(row=>row.id===parentId),'저장값은 지우지 않는다');
+  // 다른 변경(편집)을 저장해도 숨은 부모는 사라지지 않는다.
+  f.change({action:'edit',id:a,text:'편집한 문장'});
+  const savedAfter=JSON.parse(fs.readFileSync(path.join(f.directory,REPORT_FILE),'utf8')).weeks['2026-09-14'].rows;
+  assert.ok(savedAfter.some(row=>row.id===parentId),'숨겨진 뒤 다른 저장을 해도 사라지지 않는다');
+  // 상태가 되돌아오면 다시 보인다.
+  srcA.status='done';srcA.completed='2026-09-15';delete srcA.doing;
+  srcB.status='done';srcB.completed='2026-09-15';delete srcB.doing;
+  assert.equal(f.view().rows.find(row=>row.id===parentId)?.folded,true,'상태가 돌아오면 다시 보인다');
+});
+test('한 줄로 모으기는 되돌릴 수 있고, 저장 파일을 새로 읽어도 유지된다',t=>{
+  const f=nestFixture(t);
+  const a=f.row('문구 검토함').id,b=f.row('알림 배너 정리함').id;
+  const before=f.shape();
+  const result=f.change({action:'fold',ids:[a,b],text:'소소한 작업 2건'});
+  f.change({action:'undo',token:result.undoToken});
+  assert.deepEqual(f.shape(),before,'되돌리면 모으기 전으로 돌아간다');
+  const again=f.change({action:'fold',ids:[a,b],text:'소소한 작업 2건'});
+  assert.ok(again.undoToken);
+  const fresh=factory({directory:f.directory,sources:()=>f.items,legacy:()=>[],currentWeek:()=>'2026-09-14'});
+  const parent=fresh.view('2026-09-14').rows.find(row=>row.manual);
+  assert.equal(parent.text,'소소한 작업 2건');
+});
