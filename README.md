@@ -38,7 +38,7 @@
 각 연동의 단계는 앱 화면(`설정 > 연동`)이 그 자리에서 안내해요. 토큰을 어디서 받는지만 미리 적어 둘게요.
 
 - **지라**: [id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens)에서 `API 토큰 만들기`.
-- **슬랙**: 팀 슬랙 앱에서 본인 토큰을 받는 법은 캡처와 함께 [`docs/연동.md`](docs/연동.md)에 정리해 뒀어요.
+- **슬랙**: 앱 안의 `토큰 받는 곳 열기 ↗`를 누르면 팀 슬랙 앱 페이지가 열려요(`Install to Workspace` → `User OAuth Token` 복사). 채널은 링크를 붙여 넣거나 앱이 대신 만들어 줘요 — 자세한 단계는 캡처와 함께 [`docs/연동.md`](docs/연동.md)에 있어요.
 
 **토큰은 채팅이나 메일로 보내지 말고, 앱의 그 칸에만 붙여 넣어 주세요.**
 

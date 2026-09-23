@@ -441,7 +441,18 @@ const JIRA_TOKEN_URL = 'https://id.atlassian.com/manage-profile/security/api-tok
 // placeholder로만 보여 준다.
 const SETTINGS_EXAMPLE_VALUES = ['https://내회사.atlassian.net', '나@내회사.com'];
 const settingsRealValue = value => (SETTINGS_EXAMPLE_VALUES.includes(String(value || '').trim()) ? '' : value);
-const SETTINGS_SLACK_MORE = [['align', '맞춰야 할 것'], ['someday', '언젠가 할 것'], ['waiting', '기다리는 것']];
+// 선택 채널 셋 — 키 · 이름 · 만들어 줄 때의 기본 채널 이름.
+const SETTINGS_SLACK_MORE = [
+  ['align', '맞춰야 할 것', 'my-align'],
+  ['someday', '언젠가 할 것', 'my-someday'],
+  ['waiting', '기다리는 것', 'my-waiting'],
+];
+// 팀 슬랙 앱 주소를 모르면 슬랙 앱 목록 화면으로 보낸다(서버가 주는 값과 같은 기본값).
+const SETTINGS_SLACK_APPS_URL = 'https://api.slack.com/apps';
+const settingsSlackAppUrl = value => (/^https:\/\/\S+$/.test(String(value || '').trim()) ? String(value).trim() : SETTINGS_SLACK_APPS_URL);
+// 슬랙 채널 이름 규칙대로 화면에서 정리한다 — 소문자·숫자·`-`·`_`만 80자, 띄어쓰기는 `-`로.
+const settingsSlackChannelName = value => String(value || '').trim().toLowerCase()
+  .replace(/\s+/g, '-').replace(/[^a-z0-9_-]/g, '').slice(0, 80);
 const SETTINGS_NOTES_MODES = [['tiro', '티로'], ['manual', '직접 옮겨서'], ['other', '다른 것']];
 
 async function settingsIntegrationsLoad() {
@@ -608,8 +619,92 @@ function settingsJiraRow(data) {
   return row;
 }
 
-// 슬랙 수집 — ① 비공개 채널 만들기 ② 토큰 ③ 채널 링크. 채널 넷 중 `todo` 하나만 이 흐름으로 받고,
-// 나머지 셋은 `더 연결(선택)` 아래 같은 칸이다.
+// 채널 하나를 만들어 달라고 서버에 부탁한다. 저장이 아니라 **묻기만** 하는 길이라
+// `/api/integrations/save`와 따로다 — 여기서는 설정도 토큰 파일도 만들어지지 않는다.
+// 토큰은 요청 본문으로만 나가고(이 맥 안), 응답·오류 문구에는 실리지 않는다.
+async function settingsSlackCreateChannel(token, name) {
+  try {
+    const response = await fetch('/api/integrations/slack-channel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ token, name }),
+    });
+    let data = null;
+    try { data = await response.json(); } catch { data = null; }
+    if (!response.ok || !data || data.ok !== true) {
+      return { ok: false, error: (data && typeof data.error === 'string' && data.error) || '슬랙에서 채널을 만들지 못했어요', code: (data && data.code) || '' };
+    }
+    return data;
+  } catch {
+    return { ok: false, error: '서버에 닿지 못했어요 — 앱이 켜져 있는지 확인해 주세요.', code: '' };
+  }
+}
+
+// 채널 한 칸의 두 갈래. **기본은 링크 붙여 넣기**(이미 만든 채널을 쓰는 길)이고, 앱이 대신
+// 만들어 주는 갈래는 그 아래 조용한 링크로 접어 둔다 — 팀 슬랙 앱에 채널 만들기 권한
+// (`groups:write`)이 없을 수 있어서, 늘 되는 길을 앞에 둔다.
+// `value()`는 `연결`에 실을 값 하나다: 붙여 넣은 링크가 있으면 그것, 없으면 방금 만든 채널의 id.
+function settingsSlackChannelPicker({ label, defaultName, createText, token, error }) {
+  const box = document.createElement('div');
+  box.className = 'd-intgch';
+  const made = { id: '' };
+
+  const link = settingsField(label, { placeholder: 'https://회사.slack.com/archives/C0123…' });
+  const open = document.createElement('button');
+  open.type = 'button';
+  open.className = 'd-ablink';
+  open.textContent = '앱이 대신 만들어 줄 수도 있어요 → 만들어 주기';
+
+  const fold = document.createElement('div');
+  fold.className = 'd-intgother';
+  fold.hidden = true;
+  const name = settingsField('채널 이름', { value: defaultName, placeholder: 'my-todo' });
+  name.input.addEventListener('input', () => {
+    const clean = settingsSlackChannelName(name.input.value);
+    if (clean !== name.input.value) name.input.value = clean;
+  });
+  const create = document.createElement('button');
+  create.type = 'button';
+  create.className = 'd-btn sm';
+  create.textContent = createText;
+  fold.append(name.wrap, create);
+
+  const done = document.createElement('div');
+  done.className = 'd-hint';
+  done.hidden = true;
+
+  open.addEventListener('click', () => {
+    fold.hidden = !fold.hidden;
+    if (!fold.hidden) name.input.focus();
+  });
+
+  create.addEventListener('click', async () => {
+    if (error) error.textContent = '';
+    const wanted = settingsSlackChannelName(name.input.value);
+    name.input.value = wanted;
+    if (!wanted) { if (error) error.textContent = '채널 이름을 적어 주세요'; name.input.focus(); return; }
+    create.disabled = true;
+    const result = await settingsSlackCreateChannel(token.value, wanted);
+    create.disabled = false;
+    if (!result || result.ok !== true) {
+      if (error) error.textContent = result.error;
+      // 권한이 없으면 만들어 줄 길이 아예 없다 — 늘 되는 길(링크 붙여 넣기)로 도로 데려다 놓는다.
+      if (result && result.code === 'missing_scope') { fold.hidden = true; link.wrap.hidden = false; link.input.focus(); }
+      return;
+    }
+    made.id = result.id;
+    link.input.value = '';
+    done.hidden = false;
+    done.textContent = `#${result.name} 채널을 만들었어요 — 아래 연결을 눌러 주세요`;
+    showNotice(`#${result.name} 채널을 만들었어요`);
+  });
+
+  box.append(link.wrap, open, fold, done);
+  return { wrap: box, value: () => String(link.input.value || '').trim() || made.id };
+}
+
+// 슬랙 수집 — ① 토큰 받기 ② 토큰 붙여 넣기 ③ 채널. 채널 넷 중 `todo` 하나만 이 흐름으로 받고,
+// 나머지 셋은 `더 연결(선택)` 아래 같은 두 갈래다.
 function settingsSlackRow(data) {
   const slack = data.slack || {};
   const todo = (slack.channels && slack.channels.todo) || {};
@@ -637,30 +732,61 @@ function settingsSlackRow(data) {
     return row;
   }
 
-  const step = document.createElement('div');
-  step.className = 'd-hint';
-  step.textContent = '나만 있는 비공개 채널을 슬랙에서 만들어요(이름은 아무거나).';
-  const token = settingsField('토큰', { type: 'password', placeholder: '붙여 넣기', hint: '팀 슬랙 앱에서 받은 본인 토큰 — 채팅·메일로 보내지 마세요' });
-  const channel = settingsField('채널 링크 붙여 넣기', { placeholder: 'https://회사.slack.com/archives/C0123…' });
+  const error = settingsErrorLine();
+
+  // ① 토큰 받기 — 팀 슬랙 앱 페이지를 새 탭으로 연다(주소는 설정의 `slack.appUrl`, 없으면 목록 화면).
+  const step1 = document.createElement('div');
+  step1.className = 'd-istep';
+  step1.textContent = '① 토큰 받기';
+  const open = document.createElement('a');
+  open.className = 'd-ablink';
+  open.href = settingsSlackAppUrl(slack.appUrl);
+  open.target = '_blank';
+  open.rel = 'noopener noreferrer';
+  open.textContent = '토큰 받는 곳 열기 ↗';
+  const how = document.createElement('div');
+  how.className = 'd-hint';
+  how.textContent = '팀 슬랙 앱 페이지에서 Install to Workspace(또는 Reinstall)를 누르고 User OAuth Token을 복사해요';
+  const who = document.createElement('div');
+  who.className = 'd-hint';
+  who.textContent = '이 앱의 Collaborator로 아직 추가되지 않았으면 만든 사람에게 요청해요';
+
+  // ② 토큰 붙여 넣기 — 늘 password 칸이고, 저장한 뒤에는 화면 어디에도 다시 나오지 않는다.
+  const token = settingsField('② 토큰 붙여 넣기', { type: 'password', placeholder: '붙여 넣기', hint: '팀 슬랙 앱에서 받은 본인 토큰 — 채팅·메일로 보내지 마세요' });
+
+  // ③ 채널 — 기본은 이미 만든 채널의 링크를 붙여 넣는 길이다.
+  const step3 = document.createElement('div');
+  step3.className = 'd-istep';
+  step3.textContent = '③ 채널';
+  const make = document.createElement('div');
+  make.className = 'd-hint';
+  make.textContent = '슬랙에서 나만 있는 비공개 채널을 만들고 채널 이름 우클릭 → 링크 복사';
+  const channel = settingsSlackChannelPicker({
+    label: '채널 링크 붙여 넣기', defaultName: 'my-todo',
+    createText: '나만 있는 비공개 채널 만들어 주기', token: token.input, error,
+  });
+
   const more = document.createElement('details');
   more.className = 'd-dsec d-dadd';
   const moreHead = document.createElement('summary');
   moreHead.className = 'lbl';
-  moreHead.textContent = '더 연결(선택)';
+  // 회의 정리의 `직접 적어 담기`와 같은 접이식 소제목 — 꺾쇠가 있어야 누를 수 있는 줄로 읽힌다.
+  moreHead.innerHTML = uiIcon('chevron');
+  moreHead.append('더 연결(선택)');
   more.appendChild(moreHead);
-  const extra = SETTINGS_SLACK_MORE.map(([key, label]) => {
-    const field = settingsField(label, { placeholder: '채널 링크나 ID' });
-    more.appendChild(field.wrap);
-    return [key, field.input];
+  const extra = SETTINGS_SLACK_MORE.map(([key, label, defaultName]) => {
+    const picker = settingsSlackChannelPicker({ label, defaultName, createText: '만들어 주기', token: token.input, error });
+    more.appendChild(picker.wrap);
+    return [key, picker];
   });
-  const error = settingsErrorLine();
   const go = document.createElement('button');
   go.type = 'button';
   go.className = 'd-btn pri sm';
   go.textContent = '연결';
   go.addEventListener('click', async () => {
-    const channels = { todo: channel.input.value };
-    extra.forEach(([key, input]) => { if (input.value) channels[key] = input.value; });
+    // 만들어 준 채널도 붙여 넣은 링크와 똑같이 `연결`에서 한 번 읽어 본다(`#이름 · 비공개 · 잘 읽혀요`).
+    const channels = { todo: channel.value() };
+    extra.forEach(([key, picker]) => { const value = picker.value(); if (value) channels[key] = value; });
     const result = await settingsIntegrationSave({ slack: { enabled: true, token: token.input.value, channels } },
       { error, button: go, done: '슬랙 채널에 연결했어요' });
     const info = result && result.slack && result.slack.channels && result.slack.channels.todo;
@@ -670,7 +796,7 @@ function settingsSlackRow(data) {
         : `${info.name} · 공개 채널이에요 — 나만 보는 채널을 권해요`, !info.isPrivate);
     }
   });
-  body.append(step, token.wrap, channel.wrap, more, error, go);
+  body.append(step1, open, how, who, token.wrap, step3, make, channel.wrap, more, error, go);
   act.addEventListener('click', () => { body.hidden = !body.hidden; if (!body.hidden) token.input.focus(); });
   return row;
 }

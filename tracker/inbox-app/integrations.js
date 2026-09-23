@@ -20,6 +20,11 @@ const SLACK_TIMEOUT_MS = 8000;
 // 자리라 **채널이 없는 것과 같이 본다** — 남겨 두면 setup.sh가 `채널 ID를 아직 채우지 않았어요`로
 // 멈추고, 연동 탭 요약도 있지도 않은 채널을 `외 N개`로 센다.
 const PLACEHOLDER_CHANNEL_ID = '여기에_채널ID';
+// 토큰을 받으러 갈 자리. 만드는 사람이 config의 `slack.appUrl`에 팀 슬랙 앱 주소
+// (`https://api.slack.com/apps/A0XXXX`)를 적어 두면 그 주소로, 없으면 목록 화면으로 보낸다.
+const SLACK_APPS_URL = 'https://api.slack.com/apps';
+// 슬랙 채널 이름 규칙 — 소문자·숫자·`-`·`_`만 80자까지.
+const SLACK_CHANNEL_NAME_RE = /^[a-z0-9_-]{1,80}$/;
 
 const MESSAGE = {
   jiraSite: '지라 주소는 https://로 시작해야 해요',
@@ -30,12 +35,19 @@ const MESSAGE = {
   slackChannel: '슬랙 채널 링크나 ID를 붙여 넣어 주세요',
   slackRead: '슬랙에서 이 채널을 읽지 못했어요 — 토큰과 채널을 확인해 주세요',
   slackPublic: '공개 채널이에요 — 나만 보는 채널을 권해요',
+  slackName: '채널 이름은 소문자·숫자·-·_만 80자까지 쓸 수 있어요',
+  slackAuth: '토큰이 맞지 않아요',
+  slackScope: '이 슬랙 앱에는 채널 만들기 권한이 없어요 — 슬랙에서 직접 만들고 링크를 붙여 주세요',
+  slackTaken: '이미 같은 이름의 채널이 있어요 — 다른 이름을 적거나 그 채널 링크를 붙여 주세요',
+  slackCreate: '슬랙에서 채널을 만들지 못했어요',
   other: '보낸 값을 확인해 주세요.',
 };
 
-function bad(message) {
+function bad(message, code) {
   const error = new Error(message);
   error.status = 400;
+  // 화면이 갈래를 나눌 때만 쓰는 짧은 표지(슬랙이 준 오류 이름 중 아는 것만) — 값이나 토큰은 싣지 않는다.
+  if (code) error.code = code;
   return error;
 }
 
@@ -115,6 +127,50 @@ async function slackCheckChannel(token, id, request = (...args) => fetch(...args
   return { name: String(body.channel.name || ''), isPrivate: body.channel.is_private === true };
 }
 
+// 슬랙에 한 번 물어보는 길 하나. 토큰은 **헤더로만** 나가고 돌려주는 값에는 남지 않는다.
+async function slackCall(token, method, payload, request) {
+  const options = {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    signal: AbortSignal.timeout(SLACK_TIMEOUT_MS),
+  };
+  if (payload) {
+    options.headers['Content-Type'] = 'application/json; charset=utf-8';
+    options.body = JSON.stringify(payload);
+  }
+  const response = await request(`https://slack.com/api/${method}`, options);
+  return response.json();
+}
+
+// 나만 있는 비공개 채널을 대신 만든다(`③ 채널`의 접어 둔 갈래).
+// 만들기 전에 `auth.test`로 **토큰이 맞는지 먼저** 보고, 맞을 때만 만든다 — 틀린 토큰으로
+// 채널부터 만들려 들지 않는다. 설정 파일도 토큰 파일도 여기서는 쓰지 않는다(id만 돌려준다).
+async function slackCreateChannel(token, name, request = (...args) => fetch(...args)) {
+  const secret = trimmed(token);
+  const wanted = trimmed(name).toLowerCase();
+  if (!secret) throw bad(MESSAGE.slackToken);
+  if (!SLACK_CHANNEL_NAME_RE.test(wanted)) throw bad(MESSAGE.slackName);
+
+  let auth;
+  try { auth = await slackCall(secret, 'auth.test', null, request); } catch { throw bad(MESSAGE.slackCreate); }
+  if (!auth || auth.ok !== true) throw bad(MESSAGE.slackAuth, 'invalid_auth');
+
+  let body;
+  try { body = await slackCall(secret, 'conversations.create', { name: wanted, is_private: true }, request); }
+  catch { throw bad(MESSAGE.slackCreate); }
+  if (!body || body.ok !== true) {
+    const kind = String((body && body.error) || '');
+    if (kind === 'missing_scope') throw bad(MESSAGE.slackScope, 'missing_scope');
+    if (kind === 'name_taken') throw bad(MESSAGE.slackTaken, 'name_taken');
+    if (kind === 'invalid_auth' || kind === 'not_authed') throw bad(MESSAGE.slackAuth, 'invalid_auth');
+    throw bad(MESSAGE.slackCreate);
+  }
+  const channel = body.channel && typeof body.channel === 'object' ? body.channel : {};
+  const id = String(channel.id || '');
+  if (!id) throw bad(MESSAGE.slackCreate);
+  return { id, name: String(channel.name || wanted) };
+}
+
 // ---------- config 합치기 ----------
 // 아는 칸만 갈아 끼우고 나머지는 들어온 그대로 돌려준다.
 function clone(value) {
@@ -164,6 +220,10 @@ function withMeetingNotes(config, mode, name) {
   return next;
 }
 
+// `slack.appUrl`은 **연동 저장이 건드리지 않는 칸**이다(만드는 사람이 손으로 적는다).
+// https로 시작하지 않으면 슬랙 앱 목록 화면으로 보낸다 — 화면의 링크가 이상한 곳으로 가지 않게.
+const slackAppUrl = value => (/^https:\/\/[^\s]+$/.test(trimmed(value)) ? trimmed(value) : SLACK_APPS_URL);
+
 // 화면이 읽는 지금 상태. 토큰은 있음/없음만 싣는다.
 function readIntegrations(config, { tokenDir, claude } = {}) {
   const uses = clone(config.integrations);
@@ -189,6 +249,8 @@ function readIntegrations(config, { tokenDir, claude } = {}) {
     slack: {
       enabled: on('slack'),
       workspaceUrl: trimmed(slack.workspaceUrl),
+      // 토큰을 받으러 갈 주소(토큰이 아니다). 사람이 적어 둔 값이 https가 아니면 목록 화면으로 보낸다.
+      appUrl: slackAppUrl(slack.appUrl),
       hasToken: !!findToken(paths, 'slack', slack.tokenFile),
       channels: Object.fromEntries(SLACK_CHANNEL_KEYS.map((key) => {
         const entry = clone(channels[key]);
@@ -335,7 +397,7 @@ function claudeInstalled(pathValue = process.env.PATH) {
 }
 
 module.exports = {
-  SLACK_CHANNEL_KEYS, INTEGRATION_MESSAGE: MESSAGE,
-  tokenPaths, parseChannelId, slackCheckChannel, readIntegrations, saveIntegrations,
+  SLACK_CHANNEL_KEYS, SLACK_APPS_URL, INTEGRATION_MESSAGE: MESSAGE,
+  tokenPaths, parseChannelId, slackCheckChannel, slackCreateChannel, readIntegrations, saveIntegrations,
   scheduleRestart, errorLines, maskLine, claudeInstalled, writeTokenFile,
 };

@@ -8,6 +8,7 @@
   },
   "slack": {
     "workspaceUrl": "https://내회사.slack.com",
+    "appUrl": "",
     "tokenFile": "~/.config/workspace-slack-token",
     "channels": {
       "todo": {

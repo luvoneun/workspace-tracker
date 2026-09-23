@@ -2106,6 +2106,23 @@ const handleRequest = (req, res) => {
     return;
   }
 
+  // 슬랙 비공개 채널 대신 만들기 — `설정 > 연동 > 슬랙 수집`의 ③ 채널에서 접어 둔 갈래다.
+  // 여기서는 **아무 파일도 쓰지 않는다**: 토큰은 슬랙 헤더로만 나가고, 만든 채널의 id·이름만 돌려준다
+  // (그 id를 화면이 그다음 `연결`에 실어 보내고, 저장은 예전대로 `/api/integrations/save`만 한다).
+  if (url.pathname === '/api/integrations/slack-channel' && req.method === 'POST') {
+    readBody(req)
+      .then(body => integrations.slackCreateChannel((body || {}).token, (body || {}).name))
+      .then((channel) => {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: true, id: channel.id, name: channel.name }));
+      })
+      .catch((error) => {
+        res.writeHead(error.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: error.message, code: error.code || '' }));
+      });
+    return;
+  }
+
   if (url.pathname === '/api/automation/status' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ automations: getAutomationStatus() }));

@@ -2241,6 +2241,13 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-ifield .lb { display: block; margin-bottom: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
 .d-ifield .d-din { width: 100%; box-sizing: border-box; }
 .d-ifield .d-hint { display: block; margin-top: 4px; }
+/* 단계 제목(①②③) — 입력칸 이름(.d-ifield .lb)과 같은 글자다. */
+.d-istep { font-size: 12px; font-weight: 600; color: var(--muted); }
+.d-intgbody > .d-hint, .d-intgch > .d-hint { margin-top: 0; }
+/* 채널 한 칸의 두 갈래 — 링크 붙여 넣기(기본) + 접어 둔 `만들어 주기` */
+.d-intgch { display: flex; flex-direction: column; gap: 8px; }
+.d-intgch > .d-ablink { align-self: flex-start; }
+.d-dadd .d-intgch + .d-intgch { margin-top: 12px; }
 .d-intgother { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; }
 .d-intgother[hidden] { display: none; }
 .d-intgother .d-ifield { flex: 1 1 180px; }

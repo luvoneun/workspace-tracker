@@ -6426,12 +6426,16 @@ test('연동 탭: 네 줄이 서고 지라·슬랙 토큰 칸은 password이며 
   assert.deepEqual(jiraFields.map(f => f.kids[1].type), ['text', 'text', 'password'], '토큰만 password 칸이다');
   assert.match(jira.text, /Atlassian 토큰 만들기/);
 
-  // 슬랙 3단계: 비공개 채널 안내 · 토큰(password) · 채널 링크 + `더 연결(선택)`의 세 칸
+  // 슬랙 3단계(SLACKEZ): ① 토큰 받는 곳 링크 ② 토큰(password) ③ 채널 — 채널 칸마다
+  // 링크 붙여 넣기(기본)와 접어 둔 `만들어 주기`의 이름 칸이 짝으로 선다.
   const slackFields = fields(slack);
-  assert.deepEqual(slackFields.map(f => f.kids[0].text), ['토큰', '채널 링크 붙여 넣기', '맞춰야 할 것', '언젠가 할 것', '기다리는 것']);
+  assert.deepEqual(slackFields.map(f => f.kids[0].text),
+    ['② 토큰 붙여 넣기', '채널 링크 붙여 넣기', '채널 이름', '맞춰야 할 것', '채널 이름', '언젠가 할 것', '채널 이름', '기다리는 것', '채널 이름']);
   assert.equal(slackFields[0].kids[1].type, 'password');
   assert.equal(slackFields[1].kids[1].type, 'text');
-  assert.match(slack.text, /나만 있는 비공개 채널을 슬랙에서 만들어요/);
+  assert.match(slack.text, /① 토큰 받기토큰 받는 곳 열기 ↗/);
+  assert.match(slack.text, /Install to Workspace\(또는 Reinstall\)를 누르고 User OAuth Token을 복사해요/);
+  assert.match(slack.text, /③ 채널슬랙에서 나만 있는 비공개 채널을 만들고 채널 이름 우클릭 → 링크 복사/);
   assert.match(slack.text, /채팅·메일로 보내지 마세요/);
 
   // 회의록은 세 갈래 세그먼트, 티로는 Claude Code가 있으면 고를 수 있다
@@ -6469,6 +6473,141 @@ test('연동 탭: 이미 연결됐으면 해제 버튼이고, Claude Code가 없
   assert.deepEqual(seg.kids.map(button => button.disabled), [true, false, false], '티로는 Claude Code가 필요하다');
   assert.match(notes.text, /노션 쓰는 중/);
   assert.ok(!JSON.stringify(view).includes('나@회사.com') || jira.text.includes('연결됨'), '연결된 뒤에는 입력칸 자체를 그리지 않는다');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SLACKEZ — 슬랙 수집을 "링크 눌러 토큰 복사 → 붙이기 → 연결" 세 번으로
+
+// 연동 상태·채널 만들기·저장이 서로 다른 응답을 줘야 해서, 부른 순서대로 답을 꽂아 두는 가짜 창이다.
+function slackezClient(state = {}, replies = []) {
+  const payload = {
+    ok: true,
+    jira: { enabled: false, siteUrl: '', email: '', hasToken: false },
+    slack: {
+      enabled: false, workspaceUrl: '', appUrl: '', hasToken: false,
+      channels: { todo: { id: '', name: '' }, align: { id: '', name: '' }, someday: { id: '', name: '' }, waiting: { id: '', name: '' } },
+      ...state,
+    },
+    calendar: { enabled: false },
+    meetingNotes: { mode: 'manual', name: '' },
+    claude: true,
+    install: 'manual',
+  };
+  const app = settingsClient(payload);
+  const sent = [];
+  app.context.fetch = async (url, options = {}) => {
+    sent.push({ url: String(url), body: options.body ? JSON.parse(options.body) : null });
+    // 지금 상태 읽기는 늘 같은 값이고, 꽂아 둔 답은 채널 만들기·저장에만 쓴다.
+    const next = String(url) === '/api/integrations' ? { body: payload } : (replies.shift() || { body: payload });
+    return new Response(JSON.stringify(next.body), { status: next.status || 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  app.run(`window.findByClass = (node, cls) => {
+    const hits = [];
+    const walk = (one) => { if (String(one.className || '').split(' ').includes(cls)) hits.push(one); (one.children || []).forEach(walk); };
+    walk(node);
+    return hits;
+  };`);
+  const row = () => app.run("document.getElementById('settingsIntegrationsView').children[1]");
+  return { app, sent, row, find: cls => app.run(`window.findByClass(document.getElementById('settingsIntegrationsView').children[1], ${JSON.stringify(cls)})`) };
+}
+
+test('SLACKEZ: ① 토큰 받는 곳 링크는 설정의 팀 슬랙 앱 주소로 새 탭에서 열린다', async () => {
+  const plain = slackezClient();
+  await plain.app.run('renderSettingsIntegrations()');
+  const link = plain.find('d-ablink')[0];
+  assert.equal(link.href, 'https://api.slack.com/apps', '주소를 모르면 슬랙 앱 목록으로 보낸다');
+  assert.equal(link.target, '_blank');
+  assert.equal(link.rel, 'noopener noreferrer');
+  assert.equal(link.textContent, '토큰 받는 곳 열기 ↗');
+
+  const ours = slackezClient({ appUrl: 'https://api.slack.com/apps/A0XXXX' });
+  await ours.app.run('renderSettingsIntegrations()');
+  assert.equal(ours.find('d-ablink')[0].href, 'https://api.slack.com/apps/A0XXXX');
+
+  // 주소 칸에 이상한 값이 적혀 있어도 그 자리로 보내지 않는다(서버와 같은 규칙을 화면도 한 번 더 본다)
+  assert.equal(plain.app.run("settingsSlackAppUrl('javascript:alert(1)')"), 'https://api.slack.com/apps');
+  assert.equal(plain.app.run("settingsSlackAppUrl(' https://api.slack.com/apps/A0YYYY ')"), 'https://api.slack.com/apps/A0YYYY');
+});
+
+test('SLACKEZ: ③ 채널은 링크 붙여 넣기가 기본이고 `만들어 주기`는 접혀 있다 — 만들면 그 id가 `연결`에 담긴다', async () => {
+  const fixture = slackezClient({}, [
+    { body: { ok: true, id: 'C0NEW111', name: 'my-todo' } },                                      // 채널 만들기
+    { body: { ok: true, restart: false, slack: { channels: { todo: { name: '#my-todo', isPrivate: true } } } } }, // 연결(저장)
+  ]);
+  await fixture.app.run('renderSettingsIntegrations()');
+
+  // 칸 차례: ② 토큰(password) → ③ 채널 링크 → (접힌) 채널 이름
+  const inputs = fixture.find('d-din');
+  assert.equal(inputs[0].type, 'password', '토큰 칸은 늘 password다');
+  assert.equal(inputs[1].type, 'text');
+  assert.equal(inputs[2].value, 'my-todo', '만들어 줄 때의 기본 이름');
+  const fold = fixture.find('d-intgother')[0];
+  assert.equal(fold.hidden, true, '만들어 주기는 접혀 있다');
+
+  inputs[0].value = 'slack-secret';
+  fixture.find('d-ablink')[1].listeners.click();
+  assert.equal(fold.hidden, false, '조용한 링크를 누르면 이름 칸과 버튼이 펼쳐진다');
+
+  const create = fixture.find('d-btn')[1];   // 슬랙 줄의 버튼 차례: 연결하기 · 만들어 주기(todo) · 선택 채널 셋 · 연결
+  assert.equal(create.textContent, '나만 있는 비공개 채널 만들어 주기');
+  await create.listeners.click();
+  const asked = fixture.sent[fixture.sent.length - 1];
+  assert.equal(asked.url, '/api/integrations/slack-channel');
+  assert.deepEqual(asked.body, { token: 'slack-secret', name: 'my-todo' });
+  assert.match(fixture.find('d-hint').map(hint => hint.textContent).join('|'), /#my-todo 채널을 만들었어요/);
+
+  // `연결`은 방금 만든 채널 id를 그대로 실어 보낸다(확인은 예전과 같은 길을 탄다)
+  const go = fixture.find('pri')[0];
+  assert.equal(go.textContent, '연결');
+  await go.listeners.click();
+  const saved = fixture.sent.find(one => one.url === '/api/integrations/save');
+  assert.deepEqual(saved.body, { slack: { enabled: true, token: 'slack-secret', channels: { todo: 'C0NEW111' } } });
+  assert.match(fixture.app.nodes.get('liveRegion').textContent, /#my-todo · 비공개 · 잘 읽혀요/);
+});
+
+test('SLACKEZ: 채널 만들기 권한이 없으면 그 자리에 이유를 적고 링크 붙여 넣기로 되돌린다', async () => {
+  const fixture = slackezClient({}, [
+    { status: 400, body: { ok: false, code: 'missing_scope', error: '이 슬랙 앱에는 채널 만들기 권한이 없어요 — 슬랙에서 직접 만들고 링크를 붙여 주세요' } },
+  ]);
+  await fixture.app.run('renderSettingsIntegrations()');
+  fixture.find('d-din')[0].value = 'slack-secret';
+  fixture.find('d-ablink')[1].listeners.click();
+  await fixture.find('d-btn')[1].listeners.click();
+
+  assert.match(fixture.find('d-derr')[0].textContent, /이 슬랙 앱에는 채널 만들기 권한이 없어요/);
+  assert.equal(fixture.find('d-intgother')[0].hidden, true, '만들어 주기는 도로 접힌다');
+  const link = fixture.find('d-ifield')[1];
+  assert.equal(link.hidden, false, '링크 붙여 넣기 칸은 펼쳐진 채로 남는다');
+  assert.equal(fixture.find('d-din')[1].focused, true, '커서도 그 칸으로 간다');
+
+  // 이름이 비면 슬랙을 부르지도 않는다
+  const before = fixture.sent.length;
+  fixture.find('d-din')[2].value = '   ';
+  await fixture.find('d-btn')[1].listeners.click();
+  assert.equal(fixture.sent.length, before, '이름이 없으면 묻지 않는다');
+  assert.match(fixture.find('d-derr')[0].textContent, /채널 이름을 적어 주세요/);
+});
+
+test('SLACKEZ: 채널 이름은 슬랙 규칙대로 화면에서 정리한다(소문자·숫자·-·_ 80자)', async () => {
+  const fixture = slackezClient();
+  await fixture.app.run('renderSettingsIntegrations()');
+  const clean = value => fixture.app.run(`settingsSlackChannelName(${JSON.stringify(value)})`);
+  assert.equal(clean('My-TODO'), 'my-todo');
+  assert.equal(clean(' 내 할일 todo! '), '--todo', '쓸 수 없는 글자만 떨어뜨린다(모양은 사람이 다듬는다)');
+  assert.equal(clean('할일'), '', '쓸 수 있는 글자가 없으면 빈 이름이다');
+  assert.equal(clean('my todo list'), 'my-todo-list', '띄어쓰기는 -로 바꾼다');
+  assert.equal(clean('a'.repeat(120)).length, 80);
+  assert.equal(clean('my_todo-2'), 'my_todo-2');
+
+  // 칸에 적는 동안에도 같은 규칙으로 정리된다
+  const name = fixture.find('d-din')[2];
+  name.value = 'My TODO!';
+  name.listeners.input();
+  assert.equal(name.value, 'my-todo');
+
+  // 선택 채널 셋도 같은 두 갈래이고 기본 이름만 다르다
+  const names = fixture.find('d-din').filter(input => input.value).map(input => input.value);
+  assert.equal(names.join(' '), 'my-todo my-align my-someday my-waiting');
 });
 
 test('시작 카드는 기록이 하나도 없을 때만 서고, 세 줄로 다음 행동을 안내한다', () => {
