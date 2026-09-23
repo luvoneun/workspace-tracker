@@ -13,6 +13,8 @@ const { exec, execFile } = require('child_process');
 const { DATA_FORMAT_VERSION, readDataVersion, TOO_NEW_MESSAGE } = require('./migrate');
 // 설정 > 연동이 쓰는 한 벌(값 확인·config 합치기·토큰 파일·문제 보고의 오류 줄).
 const integrations = require('./integrations');
+// 설정 › 꾸미기(Dock 아이콘·이름·제목 — 이 맥에만).
+const personalize = require('./personalize');
 const { randomBytes, createHash, timingSafeEqual } = require('node:crypto');
 
 // 사람/회사마다 달라지는 값은 전부 workspace.config.json 한 곳에 모아둔다.
@@ -30,6 +32,10 @@ function loadConfig() {
 const CONFIG = loadConfig();
 // 안 쓰는 도구는 꺼둔다. 꺼진 도구는 "동기화 안 됨" 경고를 띄우지 않는다.
 const USES = { slack: true, calendar: true, jira: true, tiro: true, ...(CONFIG.integrations || {}) };
+// 캘린더를 비밀 주소(iCal)로 앱이 직접 읽는지(설정 > 연동 > 캘린더). 켜고 끄는 값처럼 서버가 뜰 때 읽는다.
+const CALENDAR_ICAL = USES.calendar !== false && !!CONFIG.calendar && CONFIG.calendar.source === 'ical';
+// 화면 헤더·탭 제목. 설정 › 꾸미기에서 바꾸면 이 값도 곧바로 바꾼다(서버를 다시 켜지 않아도 된다).
+let APP_TITLE = CONFIG.title || '내 워크스페이스';
 
 const PORT = Number(process.env.WORKSPACE_PORT || CONFIG.server?.port || 4321);
 // localhost는 항상 열고, extraHost가 있으면 그 주소로도 추가로 연다 (폰·다른 기기용).
@@ -93,6 +99,9 @@ const CALENDAR_ITEM_RE = /^- (\d{2}:\d{2})-(\d{2}:\d{2}) \| (.+?)(?: \| (\S+))?$
 
 function getCalendarToday() {
   if (!USES.calendar) return { events: [], lastSync: null, used: false };
+  // 비밀 주소로 앱이 직접 읽은 게 있으면 그게 기준이다 — 스냅샷 파일은 보지 않는다(지라와 같은 우선순위).
+  const live = CALENDAR_ICAL ? calendarLive.current() : null;
+  if (live) return { events: live.events, lastSync: todayLocal(), stale: false, live: true, liveAt: new Date(live.at).toISOString() };
   const calPath = path.join(TRACKER_DIR, 'calendar_today.md');
   if (!fs.existsSync(calPath)) return { events: [], lastSync: null, stale: true };
   const lines = fs.readFileSync(calPath, 'utf-8').split('\n');
@@ -539,7 +548,8 @@ function getAutomationStatus() {
   const logDir = automationLogDir();
   const specs = [
     { key: 'slack', name: '슬랙 캡처', log: 'slack-capture.log', used: USES.slack },
-    { key: 'calendar', name: '캘린더 동기화', log: 'calendar-sync.log', used: USES.calendar },
+    // 비밀 주소 갈래는 앱이 직접 읽으므로 이 자동화(calendar-sync)가 없다 — 목록에서 뺀다.
+    { key: 'calendar', name: '캘린더 동기화', log: 'calendar-sync.log', used: USES.calendar && !CALENDAR_ICAL },
     // 지라 캐시 자동화(jira-sync)는 없앴다 — 앱이 지라를 직접 읽는다(DECISIONS 2026-09-24). 상태는
     // 이 자동화 목록이 아니라 화면(jira-ui.js의 jiraLiveStatusRow)이 자동화 목록 끝에 조용한 줄로 따로 그린다.
     // 일정표 없이 앱의 버튼을 눌렀을 때만 도는 자동화다(DECISIONS 2026-09-24). 상태·로그는 나머지와 같은 자리에서 본다.
@@ -1652,8 +1662,19 @@ async function aboutApp() {
     gitRef: ref ? ref.trim() : null,
     modified,
     latest: latestRelease,
+    // 설정 › 꾸미기 › 앱 위치 — 사람이 Finder의 `폴더로 이동`에 붙여 넣을 경로(홈은 `~`로 줄인다).
+    // 서버는 Finder를 열거나 프로세스를 띄우지 않고 글자만 준다.
+    appBundle: `~/Applications/${currentDockName()}.app`,
+    updateFile: personalize.tildePath(path.join(REPO_DIR, '업데이트.command'), os.homedir()),
   };
 }
+
+// 지금 Dock 이름(`server.dockName`, 없거나 규칙에 안 맞으면 `Workspace`). 설정을 새로 읽는다.
+function currentDockName() {
+  try { return personalize.checkDockName(((currentConfigFile().server) || {}).dockName); } catch { return personalize.DOCK_NAME_DEFAULT; }
+}
+// 이 컴퓨터에만 두는 폴더(`local/` — 업데이트해도 남는다). 테스트는 WORKSPACE_REPO_DIR로 임시 폴더를 끼운다.
+const LOCAL_DIR = path.join(REPO_DIR, 'local');
 
 // ---------- 설정 > 연동 ----------
 // `workspace.config.json`을 앱이 쓰는 **단 하나의 자리**다(DECISIONS 2026-09-23). 저장할 때마다
@@ -1704,7 +1725,7 @@ function aboutDiagnostics() {
 const CLIENT_BLOCKED = new Set([
   'server.js', 'safe-storage.js', 'jira-client.js', 'jira-live.js', 'attention-live.js', 'report-drafts.js',
   'task-batch.js', 'slack-history.js', 'import-record.js', 'browser-fixture.js', 'migrate.js',
-  'integrations.js',
+  'integrations.js', 'ical.js', 'calendar-live.js', 'personalize.js',
 ]);
 function isClientFile(name) {
   if (!/^[A-Za-z0-9][\w.-]*\.(js|css)$/.test(name)) return false;   // 이름 한 칸짜리(하위 경로 없음)만
@@ -1719,11 +1740,11 @@ function clientFiles() {
   return fs.readdirSync(PUBLIC_DIR).filter(isClientFile).sort();
 }
 
-function readBody(req) {
+function readBody(req, limit = 1024 * 1024) {
   return new Promise((resolve, reject) => {
     let body = '';
     let bytes = 0;
-    req.on('data', chunk => { bytes += chunk.length; if (bytes > 1024 * 1024) { const error = new Error('요청이 너무 커요.'); error.status = 413; reject(error); return; } body += chunk; });
+    req.on('data', chunk => { bytes += chunk.length; if (bytes > limit) { const error = new Error('요청이 너무 커요.'); error.status = 413; reject(error); return; } body += chunk; });
     req.on('error', reject);
     req.on('aborted', () => reject(new Error('요청이 중간에 끊겼어요.')));
     req.on('end', () => {
@@ -2088,6 +2109,8 @@ const handleRequest = (req, res) => {
   // 열 때마다 슬랙 채널 이름을 따라간다(5분 캐시, 이름만 고침 — slackFollower 참고). 카드의 상태 줄에
   // 쓰는 "언제 읽었나"(지라 직접 읽기·슬랙 수집)와 지라 개수도 함께 싣는다(값은 메모리·상태 파일에서).
   if (url.pathname === '/api/integrations' && req.method === 'GET') {
+    // 캘린더 비밀 주소가 묵었으면 뒤에서 한 번 더 읽게만 걸어 둔다(이 응답은 기다리지 않는다).
+    if (CALENDAR_ICAL) calendarLive.nudge();
     const followed = slackFollowOn()
       ? slackFollower.follow({ read: currentConfigFile, configPath: CONFIG_PATH }).catch(() => ({ missing: {} }))
       : Promise.resolve({ missing: {} });
@@ -2103,6 +2126,12 @@ const handleRequest = (req, res) => {
         ? attention.items.filter(item => !hidden[item.id]).length : null;
       const slackSync = getSlackSync();
       state.slack.readAt = slackSync && slackSync.used !== false ? slackSyncSuccessAt() : null;
+      // 캘린더 비밀 주소 갈래의 상태 줄(`비밀 주소로 읽는 중 · 오늘 3개 · 10분 전`)에 쓰는 값 — 메모리에서만.
+      const calendar = CALENDAR_ICAL ? calendarLive.current() : null;
+      state.calendar.live = CALENDAR_ICAL;
+      state.calendar.readAt = calendar ? new Date(calendar.at).toISOString() : null;
+      state.calendar.eventCount = calendar ? calendar.events.length : null;
+      state.calendar.failed = CALENDAR_ICAL ? calendarLive.failed() : false;
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ ok: true, ...state, install: process.env.WORKSPACE_MANAGED ? 'managed' : 'manual' }));
     }).catch(() => {
@@ -2137,6 +2166,8 @@ const handleRequest = (req, res) => {
         body,
         jiraCheck: settings => require('./jira-client').checkJiraAccount(settings),
         slackCheck: (token, id) => integrations.slackCheckChannel(token, id),
+        // 비밀 주소는 한 번 읽어 오늘 일정 수만 센다(10초 제한). 주소는 응답·로그에 남지 않는다.
+        calendarCheck: address => integrations.icalCheck(address),
       }))
       .then(({ result }) => {
         const managed = !!process.env.WORKSPACE_MANAGED;
@@ -2203,6 +2234,8 @@ const handleRequest = (req, res) => {
   if (url.pathname === '/api/items' && req.method === 'GET') {
     // 지라 목록이 묵었으면 갱신만 걸어 둔다 — 이 응답은 기다리지 않는다(지라 때문에 목록이 늦지 않게).
     if (USES.jira) jiraLive.nudge();
+    // 캘린더 비밀 주소도 같다 — 묵었으면 뒤에서 다시 읽게만 걸어 둔다.
+    if (CALENDAR_ICAL) calendarLive.nudge();
     // Automatic drafts are a read-only projection. Edited reports are saved explicitly.
     const allDecisions = getDecisions();
     const payload = {
@@ -2219,7 +2252,7 @@ const handleRequest = (req, res) => {
       jiraIssues: getJiraIssueCache(),
       jiraSync: getJiraSync(),
       slackSync: getSlackSync(),
-      title: CONFIG.title || '내 워크스페이스',
+      title: APP_TITLE,
       // 앱 화면 파일이 바뀌면 이 값이 달라진다. 브라우저가 이걸 보고 스스로 새로고침한다.
       appVersion: (() => {
         try {
@@ -2512,6 +2545,73 @@ const handleRequest = (req, res) => {
     return;
   }
 
+  // ---------- 설정 › 꾸미기 (이 맥에만) ----------
+  // Dock 아이콘 — 내 그림(`local/icon.png`)이 있으면 그것, 없으면 기본 토끼. 탭 아이콘(favicon)도 이 주소다.
+  if (url.pathname === '/app-icon.png' && req.method === 'GET') {
+    try {
+      const icon = personalize.currentIcon(LOCAL_DIR, PUBLIC_DIR);
+      res.writeHead(200, { 'Content-Type': icon.type });
+      res.end(icon.data);
+    } catch {
+      res.writeHead(404); res.end('Not found');
+    }
+    return;
+  }
+
+  // 지금 값 — 조회라 파일을 쓰지 않는다.
+  if (url.pathname === '/api/personalize' && req.method === 'GET') {
+    const config = currentConfigFile();
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({
+      ok: true, title: APP_TITLE, dockName: currentDockName(), customIcon: personalize.hasCustomIcon(LOCAL_DIR),
+      titleSaved: typeof config.title === 'string' ? config.title : '',
+    }));
+    return;
+  }
+
+  // 이름 저장(`title`·`server.dockName`만). 제목은 곧바로 화면에 쓰이고, Dock 이름이 바뀌면 Dock 앱을
+  // 다시 만들어 달라는 표시 파일 하나를 쓴다(프로세스는 띄우지 않는다).
+  if (url.pathname === '/api/personalize' && req.method === 'POST') {
+    readBody(req)
+      .then(body => integrations.savePersonalize({ configPath: CONFIG_PATH, current: currentConfigFile(), body }))
+      .then(({ config, changed }) => {
+        if (typeof config.title === 'string' && config.title) APP_TITLE = config.title;
+        if (changed.dockName) personalize.writeRefreshRequest(automationDir(), 'dockName');
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: true, title: APP_TITLE, dockName: currentDockName(), refresh: changed.dockName }));
+      })
+      .catch((error) => {
+        res.writeHead(error.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: error.status ? error.message : '저장하지 못했어요.' }));
+      });
+    return;
+  }
+
+  // Dock 아이콘 그림 저장·되돌리기. 그림은 `{ image: base64 }`(화면이 정사각형으로 잘라 PNG로 보낸다),
+  // 되돌리기는 `{ reset: true }` — `local/icon.png` 한 파일만 쓰거나 지운다. 5MB 그림의 base64가 들어오도록
+  // 이 길만 본문 한도를 8MB로 둔다.
+  if (url.pathname === '/api/personalize/icon' && req.method === 'POST') {
+    readBody(req, 8 * 1024 * 1024)
+      .then((body) => {
+        const data = body && typeof body === 'object' ? body : {};
+        if (data.reset === true) {
+          personalize.resetIcon(LOCAL_DIR);
+        } else {
+          const text = typeof data.image === 'string' ? data.image.replace(/^data:image\/(?:png|jpeg);base64,/, '') : '';
+          if (!text || !/^[A-Za-z0-9+/=\s]+$/.test(text)) throw Object.assign(new Error(personalize.PERSONALIZE_MESSAGE.iconType), { status: 400 });
+          personalize.saveIcon(LOCAL_DIR, Buffer.from(text, 'base64'));
+        }
+        personalize.writeRefreshRequest(automationDir(), data.reset === true ? 'icon-reset' : 'icon');
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: true, customIcon: personalize.hasCustomIcon(LOCAL_DIR), refresh: true }));
+      })
+      .catch((error) => {
+        res.writeHead(error.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: error.status ? error.message : '그림을 저장하지 못했어요.' }));
+      });
+    return;
+  }
+
   // 이 컴퓨터에만 두는 꾸밈(`local/local.css`). 저장소에 없는 파일이라 **없어도 빈 200**으로 준다 —
   // 화면은 늘 같은 한 줄을 읽고, 브라우저 콘솔에 404가 남지 않는다. 허용하는 경로는 이것 하나뿐이다.
   if (url.pathname === '/local/local.css' && req.method === 'GET') {
@@ -2580,6 +2680,15 @@ const attentionLive = require('./attention-live').createAttentionLive({
   load: () => jira.attention(),
   connected: () => USES.jira && jira.connected,
 });
+// 캘린더 비밀 주소(iCal)도 앱이 직접 읽는다 — 30분마다(+ 조회가 5분 넘게 묵은 값을 보면 뒤에서), 값은
+// 메모리에만 있고 파일은 쓰지 않는다. 주소는 요청마다 파일에서 읽고 들고 있지 않는다(토큰과 같은 급).
+// 새로 읽으면 회의 기록을 한 번 맞춘다(calendar_today.md가 바뀌었을 때와 같은 일 — 아래 main에서 끼운다).
+let calendarAfterRead = null;
+const calendarLive = require('./calendar-live').createCalendarLive({
+  load: () => integrations.fetchIcal(integrations.savedIcalUrl(CONFIG)),
+  connected: () => CALENDAR_ICAL,
+  onUpdate: () => { if (typeof calendarAfterRead === 'function') calendarAfterRead(); },
+});
 // 치운 목록을 정리할 때 "지금 화면에 있는 줄"을 지키려고 쓰는 id 묶음이다.
 const attentionKeep = () => new Set(((attentionLive.current() || {}).items || []).map(item => item.id));
 const transactional = fn => (...args) => mutations.run(() => fn(...args));
@@ -2633,6 +2742,9 @@ if (require.main === module) {
   jiraLive.start();
   // 반응 필요(지라 댓글)도 같은 리듬이다.
   attentionLive.start();
+  // 캘린더 비밀 주소 — 뜰 때 한 번, 그 뒤 30분마다(비밀 주소 갈래일 때만). 읽으면 회의 기록을 맞춘다.
+  calendarAfterRead = archiveMeetings;
+  calendarLive.start();
   fs.watchFile(path.join(TRACKER_DIR, 'calendar_today.md'), { interval: 1000, persistent: false }, archiveMeetings);
   server.listen(PORT, '127.0.0.1', () => {
     console.log(`슬랙 인박스 앱: http://localhost:${PORT}`);
@@ -2651,6 +2763,6 @@ if (require.main === module) {
   }
 }
 
-// `jiraLive`·`attentionLive`는 화면 확인용 픽스처가 "뜰 때 한 번 읽기"를 직접 켜 보려고 함께 내보낸다
+// `jiraLive`·`attentionLive`·`calendarLive`는 화면 확인용 픽스처가 "뜰 때 한 번 읽기"를 직접 켜 보려고 함께 내보낸다
 // (테스트·픽스처 밖에서는 쓰지 않는다 — 운영에서는 위의 `start()`가 켠다).
-module.exports = { server, jiraLive, attentionLive, setExitForTests };
+module.exports = { server, jiraLive, attentionLive, calendarLive, setExitForTests };

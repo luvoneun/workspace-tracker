@@ -1,7 +1,8 @@
 // 연동 설정(설정 > 연동)이 쓰는 서버 쪽 한 벌 — 값 확인, `workspace.config.json` 합치기,
 // 토큰 파일 쓰기, 문제 보고에 실을 오류 줄 고르기.
 //
-// 여기만 `workspace.config.json`을 고친다(DECISIONS 2026-09-23). 규칙 셋:
+// 여기만 `workspace.config.json`을 고친다(DECISIONS 2026-09-23 — 설정 › 꾸미기의 이름 저장도 이 파일의
+// savePersonalize로 한다). 규칙 셋:
 //   1) **아는 키만** 바꾸고 모르는 키는 그대로 둔다 — 사람이 손으로 적어 둔 값이 사라지지 않게.
 //   2) **토큰은 config에 적지 않는다** — 파일(0600)로만 두고 config에는 경로만 적는다.
 //   3) 토큰 값은 돌려주는 값·로그·오류 문구 어디에도 싣지 않는다(있음/없음만).
@@ -13,6 +14,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { atomicWrite } = require('./safe-storage');
+const { parseCalendar, todayEvents } = require('./ical');
 
 const SLACK_CHANNEL_KEYS = ['todo', 'align', 'someday', 'waiting'];
 const SLACK_TIMEOUT_MS = 8000;
@@ -42,6 +44,10 @@ const MESSAGE = {
   slackCreate: '슬랙에서 채널을 만들지 못했어요',
   slackBot: '이건 Bot 토큰이에요 — 바로 위의 User OAuth Token(xoxp-)을 복사해 주세요',
   slackReach: '슬랙에 닿지 못했어요 — 잠시 뒤 다시 해 주세요',
+  icalUrl: '비밀 주소를 붙여 넣어 주세요',
+  icalHttps: '주소는 https://로 시작해야 해요',
+  icalRead: '이 주소를 읽지 못했어요 — 비밀 주소를 다시 복사해 주세요',
+  icalNotCalendar: '캘린더 주소가 아니에요 — iCal 형식의 비공개 주소를 복사해 주세요',
   other: '보낸 값을 확인해 주세요.',
 };
 
@@ -70,6 +76,8 @@ function tokenPaths(tokenDir) {
     dir, custom: !!custom,
     jira: { file: path.join(dir, 'workspace-jira-token'), config: shape('workspace-jira-token') },
     slack: { file: path.join(dir, 'workspace-slack-token'), config: shape('workspace-slack-token') },
+    // 캘린더 비밀 주소(iCal)도 토큰과 같은 급이다 — 파일(0600)로만 두고 config에는 경로만.
+    calendar: { file: path.join(dir, 'workspace-calendar-ical'), config: shape('workspace-calendar-ical') },
   };
 }
 
@@ -185,6 +193,56 @@ async function slackTokenCheck(token, request = (...args) => fetch(...args)) {
   return { ok: true };
 }
 
+// ---------- 캘린더 비밀 주소(iCal) ----------
+// 비밀 주소는 토큰과 같은 급이다: 돌려주는 값·로그·오류 문구 어디에도 싣지 않는다(오류 문구는 우리 글자만).
+const ICAL_TIMEOUT_MS = 10000;
+const ICAL_MAX_BYTES = 20 * 1024 * 1024;
+
+// 붙여 넣은 주소를 다듬는다. 애플 캘린더가 주는 `webcal://`은 같은 주소의 https로 읽는다.
+function normalizeIcalUrl(value) {
+  const text = trimmed(value).replace(/^webcal:\/\//i, 'https://');
+  if (!text) throw bad(MESSAGE.icalUrl);
+  if (!/^https:\/\/[^\s]+$/i.test(text)) throw bad(MESSAGE.icalHttps);
+  try { new URL(text); } catch { throw bad(MESSAGE.icalHttps); }
+  return text;
+}
+
+// 비밀 주소에서 캘린더 글자를 한 번 받아 온다(10초 제한). 파일은 쓰지 않는다.
+async function fetchIcal(url, request = (...args) => fetch(...args), timeoutMs = ICAL_TIMEOUT_MS) {
+  const address = normalizeIcalUrl(url);
+  let text;
+  try {
+    const response = await request(address, {
+      headers: { Accept: 'text/calendar, text/plain;q=0.9, */*;q=0.1' },
+      redirect: 'follow',
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!response || !response.ok) throw new Error('status');
+    const length = Number(response.headers && typeof response.headers.get === 'function' ? response.headers.get('content-length') : 0);
+    if (length > ICAL_MAX_BYTES) throw new Error('too big');
+    text = await response.text();
+  } catch {
+    throw bad(MESSAGE.icalRead);
+  }
+  if (text.length > ICAL_MAX_BYTES) throw bad(MESSAGE.icalRead);
+  if (!/BEGIN:VCALENDAR/i.test(text)) throw bad(MESSAGE.icalNotCalendar);
+  return text;
+}
+
+// `연결` 전에 한 번 읽어 **오늘 일정 수**만 센다(`오늘 일정 3개가 보여요`). 일정 내용은 돌려주지 않는다.
+async function icalCheck(url, { request, now = Date.now(), timeZone } = {}) {
+  const text = await fetchIcal(url, request);
+  const calendar = parseCalendar(text);
+  if (!calendar.ok) throw bad(MESSAGE.icalNotCalendar);
+  return { ok: true, count: todayEvents(calendar, { now, timeZone }).length };
+}
+
+// 저장된 비밀 주소(없으면 빈 글자). 서버 안에서만 쓴다 — 응답에는 절대 싣지 않는다.
+function savedIcalUrl(config, tokenDir) {
+  const found = findToken(tokenPaths(tokenDir), 'calendar', clone(clone(config).calendar).icalFile);
+  return found ? found.value : '';
+}
+
 // ---------- config 합치기 ----------
 // 아는 칸만 갈아 끼우고 나머지는 들어온 그대로 돌려준다.
 function clone(value) {
@@ -232,8 +290,17 @@ function withSlack(config, { enabled, workspaceUrl, tokenFile, channels }) {
   return next;
 }
 
-function withCalendar(config, enabled) {
-  return { ...config, integrations: { ...clone(config.integrations), calendar: enabled } };
+// 캘린더는 켜고 끄는 값(`integrations.calendar`)과 "어느 갈래로 읽는지"(`calendar.source`: `ical` | `claude`,
+// 비밀 주소 갈래면 `calendar.icalFile` 경로)를 함께 적는다. 끌 때는 갈래·경로를 그대로 둔다(주소 파일은 사람 것).
+function withCalendar(config, enabled, { source, icalFile } = {}) {
+  const next = { ...config, integrations: { ...clone(config.integrations), calendar: enabled } };
+  if (source !== undefined || icalFile !== undefined) {
+    const calendar = clone(config.calendar);
+    if (source !== undefined) calendar.source = source;
+    if (icalFile !== undefined) calendar.icalFile = icalFile;
+    next.calendar = calendar;
+  }
+  return next;
 }
 
 // 회의록은 켜고 끄는 값(`integrations.tiro`)과 "무엇으로 쓰는지"(`meetingNotes`) 둘을 함께 적는다.
@@ -283,7 +350,13 @@ function readIntegrations(config, { tokenDir, claude } = {}) {
         return [key, { id, name: id ? trimmed(entry.name) : '' }];
       })),
     },
-    calendar: { enabled: on('calendar') },
+    calendar: {
+      enabled: on('calendar'),
+      // 어느 갈래로 읽는지 — 비밀 주소면 `ical`, 아니면 예전처럼 Claude Code(`claude`).
+      source: trimmed(clone(config.calendar).source) === 'ical' ? 'ical' : 'claude',
+      // 주소가 저장돼 있는지만(주소 자체는 싣지 않는다).
+      hasIcal: !!findToken(paths, 'calendar', clone(config.calendar).icalFile),
+    },
     meetingNotes: { mode, name: mode === 'other' ? trimmed(notes.other) : '' },
     claude: claude === true,
   };
@@ -294,7 +367,7 @@ function readIntegrations(config, { tokenDir, claude } = {}) {
 // 저장은 config 한 번 + 토큰 파일뿐이고, 실패하면 아무것도 쓰지 않는다.
 async function saveIntegrations({
   configPath, current = {}, body = {}, tokenDir,
-  jiraCheck, slackCheck, write = atomicWrite, writeToken = writeTokenFile,
+  jiraCheck, slackCheck, calendarCheck, write = atomicWrite, writeToken = writeTokenFile,
 } = {}) {
   if (!body || typeof body !== 'object') throw bad(MESSAGE.other);
   const paths = tokenPaths(tokenDir);
@@ -364,7 +437,24 @@ async function saveIntegrations({
 
   if (body.calendar && typeof body.calendar === 'object') {
     touched = true;
-    config = withCalendar(config, body.calendar.enabled === true);
+    if (body.calendar.enabled !== true) {
+      config = withCalendar(config, false);
+    } else if (body.calendar.source === 'ical') {
+      // 비밀 주소 갈래 — 한 번 읽어 오늘 일정 수를 센 뒤에만 저장한다. 칸을 비우면 저장된 주소로 다시 확인한다.
+      const url = trimmed(body.calendar.url);
+      const saved = url ? null : findToken(paths, 'calendar', clone(config.calendar).icalFile);
+      if (!url && !saved) throw bad(MESSAGE.icalUrl);
+      const address = url ? normalizeIcalUrl(url) : saved.value;
+      const checked = await (calendarCheck || (() => { throw bad(MESSAGE.icalRead); }))(address);
+      if (!checked || !checked.ok) throw bad(MESSAGE.icalRead);
+      if (url) pending.push([paths.calendar.file, address]);
+      config = withCalendar(config, true, { source: 'ical', icalFile: url ? paths.calendar.config : saved.config });
+      result.calendar = { source: 'ical', count: Number(checked.count) || 0 };
+    } else {
+      // `Claude Code로` 갈래 — 예전 동작 그대로 켜고, 갈래만 `claude`로 적는다(비밀 주소 파일·경로는 그대로 둔다).
+      config = withCalendar(config, true, { source: 'claude' });
+      result.calendar = { source: 'claude' };
+    }
   }
 
   if (body.meetingNotes && typeof body.meetingNotes === 'object') {
@@ -381,6 +471,33 @@ async function saveIntegrations({
   pending.forEach(([file, value]) => writeToken(file, value));
   write(configPath, `${JSON.stringify(config, null, 2)}\n`);
   return { config, result };
+}
+
+// ---------- 설정 › 꾸미기(이 맥에만) ----------
+// 여기서도 **아는 키만** 바꾼다: `title`(화면 헤더·탭 제목)과 `server.dockName`(Dock 앱 이름).
+// 저장 방식은 연동 저장과 같다(파일을 새로 읽어 그 위에 얹고, 원자적 교체).
+async function savePersonalize({ configPath, current = {}, body = {}, write = atomicWrite } = {}) {
+  const personalize = require('./personalize');
+  if (!body || typeof body !== 'object') throw bad(MESSAGE.other);
+  const next = { ...current };
+  const changed = { title: false, dockName: false };
+  let touched = false;
+  if (body.title !== undefined) {
+    const title = personalize.checkTitle(body.title);
+    changed.title = title !== trimmed(current.title);
+    next.title = title;
+    touched = true;
+  }
+  if (body.dockName !== undefined) {
+    const dockName = personalize.checkDockName(body.dockName);
+    const before = trimmed(clone(current.server).dockName) || personalize.DOCK_NAME_DEFAULT;
+    changed.dockName = dockName !== before;
+    next.server = { ...clone(current.server), dockName };
+    touched = true;
+  }
+  if (!touched) throw bad(personalize.PERSONALIZE_MESSAGE.nothing);
+  write(configPath, `${JSON.stringify(next, null, 2)}\n`);
+  return { config: next, changed };
 }
 
 // ---------- 채널 이름 따라가기 ----------
@@ -500,4 +617,5 @@ module.exports = {
   tokenPaths, parseChannelId, slackCheckChannel, slackCreateChannel, readIntegrations, saveIntegrations,
   scheduleRestart, errorLines, maskLine, claudeInstalled, writeTokenFile,
   slackTokenCheck, savedSlackToken, createSlackNameFollower, SLACK_FOLLOW_MS,
+  normalizeIcalUrl, fetchIcal, icalCheck, savedIcalUrl, ICAL_TIMEOUT_MS, savePersonalize,
 };

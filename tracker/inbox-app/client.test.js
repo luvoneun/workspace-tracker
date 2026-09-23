@@ -6814,17 +6814,22 @@ test('WP-D1 E. 지라: 팀 주소가 있으면 묻지 않고(바꾸기로만 연
   assert.ok(!JSON.stringify(plain.shape("document.getElementById('settingsIntegrationsView')")).includes('내회사'), '예시값은 입력칸에 들어가지 않는다');
 });
 
-test('WP-D1 F. 캘린더: `Claude Code로` 세 줄 + 복사 + 켜기, `비밀 주소 붙이기`는 자리만(곧 돼요, 누를 수 없음)', async () => {
+// WP-D2에서 바뀜: `비밀 주소 붙이기`는 이제 자리만이 아니라 실제 갈래다(곧 돼요·is-off·aria-disabled 단언을 새 동작으로 바꿈).
+// `Claude Code로` 갈래의 세 줄·복사·켜기(본문 `{ calendar: { enabled: true } }`)는 그대로다.
+test('WP-D1·D2 F. 캘린더: `비밀 주소 붙이기`(누구나)가 먼저 — 세 줄 + 가려진 칸 + 연결, `Claude Code로` 세 줄 + 복사 + 켜기', async () => {
   const fx = intgClient({}, [{ body: { ok: true, restart: false } }]);
   await fx.app.run('renderSettingsIntegrations()');
   fx.toggle('calendar').listeners.click();
   const choices = fx.find('calendar', 'd-ichoice');
   same(choices.map(one => one.dataset.choice), ['ical', 'claude'], '누구나 갈래가 먼저다');
-  assert.equal(choices[0].className, 'd-ichoice is-off');
-  assert.equal(choices[0].getAttribute('aria-disabled'), 'true');
-  assert.equal(fx.find('calendar', 'd-din').length, 0, '비밀 주소 칸은 아직 없다');
+  same(choices.map(one => one.className), ['d-ichoice', 'd-ichoice'], '둘 다 누를 수 있다');
+  assert.equal(choices[0].getAttribute('aria-disabled'), undefined);
+  const secret = fx.find('calendar', 'd-din');
+  assert.equal(secret.length, 1, '칸은 비밀 주소 하나');
+  assert.equal(secret[0].type, 'password', '비밀 주소는 토큰처럼 가린다');
   const text = fx.text('calendar');
-  assert.match(text, /비밀 주소 붙이기누구나곧 돼요/);
+  assert.ok(!/곧 돼요/.test(text));
+  assert.match(text, /비밀 주소 붙이기누구나1구글 캘린더 → 설정 → 내 캘린더의 설정\(내 이름\)2캘린더 통합 → iCal 형식의 비공개 주소3복사 → 아래 칸에 붙여 넣기/);
   assert.match(text, /1claude\.ai 설정 → 커넥터 → Google Calendar 연결claude\.ai\/settings\/connectors복사/);
   assert.match(text, /2Claude Code에서 \/mcp → 로그인\/mcp복사/);
   assert.match(text, /3여기서 켜기 켜기/);
@@ -6839,6 +6844,65 @@ test('WP-D1 F. 캘린더: `Claude Code로` 세 줄 + 복사 + 켜기, `비밀 �
   noClaude.toggle('calendar').listeners.click();
   assert.equal(noClaude.button('calendar', '켜기').disabled, true, 'Claude Code가 없으면 켤 수 없다');
   assert.match(noClaude.text('calendar'), /이 맥에는 설치 안 됨 — 설치하면 켤 수 있어요/);
+  assert.equal(noClaude.button('calendar', '연결').disabled, false, '비밀 주소 갈래는 Claude 없이도 된다');
+});
+
+test('WP-D2 F. 비밀 주소 연결: 빈 칸은 보내지 않고, 붙이면 `{ source: ical, url }` 한 번 — 서버가 센 오늘 일정 수를 알린다', async () => {
+  const fx = intgClient({}, [
+    { status: 400, body: { ok: false, error: '캘린더 주소가 아니에요 — iCal 형식의 비공개 주소를 복사해 주세요' } },
+    { body: { ok: true, restart: false, calendar: { source: 'ical', count: 3 } } },
+  ]);
+  await fx.app.run('renderSettingsIntegrations()');
+  fx.toggle('calendar').listeners.click();
+  const error = () => fx.find('calendar', 'd-derr')[0].textContent;
+  await fx.button('calendar', '연결').listeners.click();
+  assert.equal(error(), '비밀 주소를 붙여 넣어 주세요');
+  assert.equal(fx.sent.filter(one => one.url === '/api/integrations/save').length, 0, '빈 칸은 서버에 보내지 않는다');
+
+  const input = fx.find('calendar', 'd-din')[0];
+  input.value = 'https://calendar.google.com/calendar/ical/me/private-abc/basic.ics';
+  await fx.button('calendar', '연결').listeners.click();
+  assert.equal(error(), '캘린더 주소가 아니에요 — iCal 형식의 비공개 주소를 복사해 주세요', '서버 문구를 그 자리에 적는다');
+  await fx.button('calendar', '연결').listeners.click();
+  const saves = fx.sent.filter(one => one.url === '/api/integrations/save');
+  same(saves[1].body, { calendar: { enabled: true, source: 'ical', url: 'https://calendar.google.com/calendar/ical/me/private-abc/basic.ics' } });
+  assert.match(fx.live(), /캘린더를 연결했어요 · 오늘 일정 3개가 보여요 · 서버를 다시 켜면 적용돼요/);
+});
+
+test('WP-D2 F. 연결된 캘린더: `비밀 주소로 읽는 중 · 오늘 3개 · 10분 전` + ⋯ 다시 연결(주소 바꾸기)·해제…(주소 파일은 남아요)', async () => {
+  const fx = intgClient({ calendar: { enabled: true, source: 'ical', hasIcal: true, live: true, readAt: ago(10), eventCount: 3, failed: false } },
+    [{ body: { ok: true, restart: false, calendar: { source: 'ical', count: 2 } } }, { body: { ok: true, restart: false } }]);
+  await fx.app.run('renderSettingsIntegrations()');
+  assert.equal(fx.shape(`window.findByClass(document.getElementById('settingsIntegrationsView').children[3], 'st')[0]`).text, '● 비밀 주소로 읽는 중 · 오늘 3개 · 10분 전');
+  assert.match(fx.text('calendar'), /앱이 비밀 주소를 직접 읽어요 · 30분마다/);
+  assert.match(fx.shape("document.getElementById('settingsIntegrationsView').children[0]").text, /연결됨 1 · 남은 것 3$/);
+  const menu = fx.menu('calendar');
+  same(menu.map(section => section.map(entry => entry.label)), [['다시 연결(주소 바꾸기)'], ['해제…']]);
+
+  // 다시 연결 — 비밀 주소 갈래 하나만, 칸을 비우면 지금 주소로 다시 읽는다
+  menu[0][0].onClick();
+  same(fx.find('calendar', 'd-ichoice').map(one => one.dataset.choice), ['ical']);
+  assert.match(fx.text('calendar'), /비밀 주소를 바꿔 붙여요/);
+  assert.match(fx.text('calendar'), /칸을 비워 두고 연결하면 지금 주소로 다시 읽어요\./);
+  await fx.button('calendar', '연결').listeners.click();
+  same(fx.sent.find(one => one.url === '/api/integrations/save').body, { calendar: { enabled: true, source: 'ical', url: '' } });
+
+  // 해제 — 카드 안 확인 줄, 주소 파일은 남는다
+  fx.menu('calendar')[1][0].onClick();
+  const confirm = fx.find('calendar', 'd-iconfirm')[0];
+  assert.equal(confirm.children[0].textContent, '해제하면 오늘 일정 가져오기가 멈춰요. 주소 파일은 남아요.');
+  await confirm.children[2].listeners.click();
+  same(fx.sent.filter(one => one.url === '/api/integrations/save')[1].body, { calendar: { enabled: false } });
+  assert.match(fx.live(), /연결을 해제했어요 — 주소 파일은 그대로 있어요/);
+
+  // Claude Code 갈래는 예전 한 줄 그대로, 못 읽고 있으면 그 말
+  const claude = intgClient({ calendar: { enabled: true, source: 'claude' } });
+  await claude.app.run('renderSettingsIntegrations()');
+  assert.equal(claude.shape(`window.findByClass(document.getElementById('settingsIntegrationsView').children[3], 'st')[0]`).text, '● Claude Code로 읽는 중');
+  same(claude.menu('calendar').map(section => section.map(entry => entry.label)), [['해제…']]);
+  const broken = intgClient({ calendar: { enabled: true, source: 'ical', hasIcal: true, readAt: null, eventCount: null, failed: true } });
+  await broken.app.run('renderSettingsIntegrations()');
+  assert.equal(broken.shape(`window.findByClass(document.getElementById('settingsIntegrationsView').children[3], 'st')[0]`).text, '● 비밀 주소를 읽지 못했어요');
 });
 
 test('WP-D1 G. 회의록: 세그먼트 `직접 옮기기 | 티로`, 티로는 세 줄(명령 복사)을 보고 마지막 버튼으로만 저장한다', async () => {
@@ -6907,24 +6971,239 @@ test('WP-D1: 도움말 문답에 `슬랙에서 이렇게 보내요`가 있다', 
   assert.match(entry[2], /해야 할 일 → 할 일 · 답을 기다리는 것 → 기다리는 것 · 정해진 정책 → 정해진 것 · 참고거리 → 언젠가/);
 });
 
-test('시작 카드는 기록이 하나도 없을 때만 서고, 세 줄로 다음 행동을 안내한다', () => {
+// WP-D2에서 바뀜: 예전 `시작하기` 카드(기록이 0일 때만)는 없앴다 — 같은 자리에 `사용설명서` 카드가 선다(시안 I).
+function guideClient({ blocked = false } = {}) {
   const app = pureClient();
-  const empty = data => app.run(`startCardEmpty(${JSON.stringify(data)})`);
-  assert.equal(empty({ todayTasks: [], laterTasks: [], inboxTasks: [], waiting: [], ideas: [], decisions: [], decisionArchive: [], workflows: { meetings: [] } }), true);
-  assert.equal(empty({ todayTasks: [{ id: 'a' }], workflows: { meetings: [] } }), false, '업무가 하나라도 있으면 사라진다');
-  assert.equal(empty({ decisionArchive: [{ id: 'a' }], workflows: { meetings: [] } }), false, '지난 결정만 있어도 새 설치가 아니다');
-  assert.equal(empty({ workflows: { meetings: [{ id: 'm' }] } }), false, '회의가 있어도 사라진다');
-  assert.equal(empty(null), false);
+  const store = new Map();
+  app.context.localStorage = blocked
+    ? { getItem() { throw new Error('막힘'); }, setItem() { throw new Error('막힘'); } }
+    : { getItem: key => (store.has(key) ? store.get(key) : null), setItem: (key, value) => store.set(key, String(value)) };
+  app.context.document.createTextNode = text => ({ textContent: String(text) });
+  app.run(NODE_SHAPE);
+  app.run(`window.went = [];
+    settingsOpen = (tab, key) => window.went.push([tab, key || null]);
+    settingsGuideShow = question => window.went.push(['show', question]);
+    settingsClose = () => window.went.push(['close']);`);
+  const shape = node => JSON.parse(app.run(`JSON.stringify(window.shapeOf(${node}))`));
+  return { app, store, shape, went: () => JSON.parse(app.run('JSON.stringify(window.went)')) };
+}
 
-  app.run('renderStartCard({ workflows: { meetings: [] } })');
-  const zone = app.nodes.get('startCardZone');
+test('WP-D2 I. 사용설명서 카드: 닫기 전까지는 기록이 있어도 늘 서고, 네 줄이 각자 데려가는 곳이 있다', () => {
+  const fx = guideClient();
+  fx.app.run('renderGuideCard()');
+  const zone = fx.app.nodes.get('startCardZone');
   assert.equal(zone.hidden, false);
   const card = zone.children[0];
-  assert.equal(card.className, 'd-start');
-  assert.deepEqual(card.children.map(kid => kid.textContent), ['시작하기', '할 일 하나 적어 보기', '프로젝트 만들기', '연동 켜기']);
+  assert.equal(card.className, 'd-start d-guidecard');
+  assert.equal(fx.shape("document.getElementById('startCardZone').children[0].children[0]").text, '사용설명서닫기');
+  const rows = card.children.slice(1);
+  same(rows.map(row => row.children[0].textContent), ['Dock에 두기', '할 일 적기', '연동은 나중에', '슬랙에서 보내는 법']);
+  same(rows.map(row => String(row.type || '')), ['', 'button', 'button', 'button'], 'Dock 줄만 버튼이 아니다(할 일이 앱 밖에 있다)');
+  const text = index => fx.shape(`document.getElementById('startCardZone').children[0].children[${index + 1}]`).text;
+  assert.equal(text(0), 'Dock에 두기지금 Dock의 토끼 아이콘 우클릭 → 옵션 → Dock에 유지앱이 어디 있는지 모르겠으면 → 설정 › 꾸미기 › 앱 위치');
+  assert.equal(text(1), '할 일 적기맨 위 칸에 적고 Enter');
+  assert.equal(text(2), '연동은 나중에설정 ⚙ → 연동에서 하나씩');
+  assert.equal(text(3), '슬랙에서 보내는 법전달로 채널에 보내요');
+  const dock = rows[0].children[1].children.find(kid => kid.className === 'd-guidedock');
+  assert.equal(dock.getAttribute('aria-hidden'), 'true', 'Dock 그림은 꾸밈이다');
+  assert.equal(dock.children.find(kid => kid.className === 'me').src, '/app-icon.png', '지금 아이콘을 그대로 보여 준다');
 
-  app.run('renderStartCard({ todayTasks: [{ id: 1 }], workflows: { meetings: [] } })');
-  assert.equal(app.nodes.get('startCardZone').hidden, true);
+  // 줄마다 데려가는 곳
+  rows[1].listeners.click();
+  assert.equal(fx.app.nodes.get('todayTaskInput').focused, true, '할 일 입력칸으로 초점');
+  rows[2].listeners.click();
+  rows[3].listeners.click();
+  rows[0].children[1].children.find(kid => String(kid.className).includes('d-guidewhere')).listeners.click();
+  same(fx.went(), [['close'], ['integrations', null], ['guide', null], ['show', '슬랙에서 이렇게 보내요'], ['personalize', 'app-place']]);
+
+  // 새로고침마다 다시 만들지 않는다(누르려던 줄의 초점이 사라지지 않게) — 기록이 있어도 그대로 선다
+  fx.app.run('renderGuideCard()');
+  assert.equal(fx.app.nodes.get('startCardZone').children[0], card);
+  assert.equal(fx.app.run("typeof startCardEmpty"), 'undefined', '예전 시작 카드(기록 0일 때만)는 없앴다');
+});
+
+test('WP-D2 I. 사용설명서 닫기: 이 브라우저에 기억하고(config 아님), 도움말 맨 위에 같은 네 줄로 남는다 — 저장이 막혀도 이 창에서는 닫힌다', () => {
+  const fx = guideClient();
+  fx.app.run('renderSettingsManual()');
+  assert.equal(fx.app.nodes.get('settingsManualView').hidden, true, '닫기 전에는 도움말에 두 번 두지 않는다');
+  fx.app.run('renderGuideCard()');
+  const close = fx.app.nodes.get('startCardZone').children[0].children[0].children[1];
+  assert.equal(close.getAttribute('aria-label'), '사용설명서 닫기 — 도움말에 남아요');
+  close.listeners.click();
+  assert.equal(fx.store.get('guideCardClosed'), '1');
+  assert.equal(fx.app.nodes.get('startCardZone').hidden, true);
+  assert.equal(fx.app.nodes.get('startCardZone').children.length, 0);
+  fx.app.run('renderGuideCard()');
+  assert.equal(fx.app.nodes.get('startCardZone').hidden, true, '다시 그려도 닫힌 채다');
+
+  fx.app.run('renderSettingsManual()');
+  const view = fx.app.nodes.get('settingsManualView');
+  assert.equal(view.hidden, false);
+  const box = view.children[0];
+  assert.equal(box.className, 'd-manual');
+  assert.equal(box.children[0].textContent, '사용설명서');
+  same(box.children.slice(1).map(row => row.children[0].textContent), ['Dock에 두기', '할 일 적기', '연동은 나중에', '슬랙에서 보내는 법']);
+
+  // 저장이 막힌 브라우저 — 이 창이 열려 있는 동안만 닫힌다
+  const blocked = guideClient({ blocked: true });
+  blocked.app.run('renderGuideCard()');
+  assert.equal(blocked.app.nodes.get('startCardZone').hidden, false);
+  blocked.app.nodes.get('startCardZone').children[0].children[0].children[1].listeners.click();
+  assert.equal(blocked.app.nodes.get('startCardZone').hidden, true);
+});
+
+test('WP-D2 I. 도움말: 문답마다 찾아갈 표지가 있고, `슬랙에서 보내는 법`은 그 문답을 밝힌다', () => {
+  const app = pureClient();
+  app.context.document.createTextNode = text => ({ textContent: String(text) });
+  app.context.location = { hostname: 'example.test' };
+  app.run('renderSettingsGuide()');
+  const doc = app.nodes.get('settingsGuideView').children[0];
+  const q = doc.children.find(kid => kid.className === 'q' && kid.dataset.faq === '슬랙에서 이렇게 보내요');
+  assert.ok(q, '문답 제목에 data-faq 표지');
+  const added = [];
+  q.classList = { add: name => added.push(name), remove() {} };
+  app.nodes.get('settingsGuideView').querySelectorAll = () => doc.children.filter(kid => kid.dataset && kid.dataset.faq);
+  assert.equal(app.run("settingsGuideShow('슬랙에서 이렇게 보내요')"), q);
+  same(added, ['is-hit']);
+  assert.equal(q.focused, true);
+  assert.equal(app.run("settingsGuideShow('없는 문답')"), null);
+
+  const faq = JSON.parse(app.run('JSON.stringify(SETTINGS_FAQ)')).flatMap(([, rows]) => rows);
+  assert.ok(faq.some(([question]) => question === 'Dock 아이콘·이름을 바꾸려면'));
+  assert.match(faq.find(([question]) => question === 'Claude 없이 캘린더를 붙이려면')[2], /iCal 형식의 비공개 주소/);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WP-D2 L — 설정 › 꾸미기(이 맥에만): 세 줄 + 저장 + 앱 위치
+
+function personalizeClient(state = {}, replies = []) {
+  const payload = { ok: true, title: '○○의 워크스페이스', dockName: 'Workspace', customIcon: false, ...state };
+  const about = { version: '1.0.0', appBundle: '~/Applications/Workspace.app', updateFile: '~/workspace/업데이트.command' };
+  const app = settingsClient(payload);
+  const sent = [];
+  const copied = [];
+  app.context.navigator = { clipboard: { writeText: async (text) => { copied.push(text); } }, platform: 'MacIntel' };
+  app.context.fetch = async (url, options = {}) => {
+    const address = String(url);
+    sent.push({ url: address, method: options.method || 'GET', body: options.body ? JSON.parse(options.body) : null });
+    let next = { body: { ok: true } };
+    if (address === '/api/personalize' && !options.method) next = { body: payload };
+    else if (address === '/api/about') next = { body: about };
+    else next = replies.shift() || next;
+    return new Response(JSON.stringify(next.body), { status: next.status || 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  app.run(NODE_SHAPE);
+  app.run(`window.findByClass = (node, cls) => {
+    const hits = [];
+    const walk = (one) => { if (one && String(one.className || '').split(' ').includes(cls)) hits.push(one); ((one && one.children) || []).forEach(walk); };
+    walk(node);
+    return hits;
+  };`);
+  const view = () => app.nodes.get('settingsPersonalizeView');
+  const text = node => JSON.parse(app.run(`JSON.stringify(window.shapeOf(${node}))`)).text;
+  const find = cls => app.run(`window.findByClass(document.getElementById('settingsPersonalizeView'), ${JSON.stringify(cls)})`);
+  const inputs = () => find('d-din');
+  const button = label => find('d-btn').concat(find('d-ablink')).find(one => one.textContent === label);
+  const posts = () => sent.filter(one => one.method === 'POST');
+  return { app, sent, copied, view, text, find, inputs, button, posts };
+}
+
+test('WP-D2 L. 꾸미기: Dock 아이콘 · Dock 이름 · 워크스페이스 제목 + 안내 줄 + 저장, 맨 아래 앱 위치(경로 복사)', async () => {
+  const fx = personalizeClient();
+  await fx.app.run('renderSettingsPersonalize()');
+  const kids = fx.view().children;
+  same(kids.map(one => one.className), ['d-pset', 'd-pset', 'd-pset', 'd-derr', 'd-pfoot', 'd-pset d-pplace']);
+  assert.equal(fx.text("document.getElementById('settingsPersonalizeView').children[0].children[0]"), 'Dock 아이콘');
+  assert.equal(fx.text("document.getElementById('settingsPersonalizeView').children[1].children[0]"), 'Dock 이름Dock·앱 전환에 보여요');
+  assert.equal(fx.text("document.getElementById('settingsPersonalizeView').children[2].children[0]"), '워크스페이스 제목화면 왼쪽 위에 보여요');
+  assert.equal(fx.text("document.getElementById('settingsPersonalizeView').children[4]"), '이 맥에만 적용돼요 — 다른 사람 앱에는 영향이 없어요(업데이트해도 남아요)저장');
+  const preview = fx.find('d-piconimg')[0];
+  assert.match(preview.src, /^\/app-icon\.png\?v=\d+$/, '지금 아이콘은 서버가 고른 /app-icon.png');
+  assert.equal(fx.button('기본으로 되돌리기').hidden, true, '내 그림이 없으면 되돌릴 것도 없다');
+  const file = fx.find('d-piconpv')[0].children.find(kid => kid.type === 'file');
+  assert.equal(file.accept, 'image/png,image/jpeg');
+  same(fx.inputs().map(one => one.value), ['Workspace', '○○의 워크스페이스']);
+
+  // 앱 위치 — 경로 둘(홈은 ~) + 복사 + Finder 안내
+  assert.equal(fx.text("document.getElementById('settingsPersonalizeView').children[5]"),
+    '앱 위치파일을 찾을 때Dock 앱~/Applications/Workspace.app복사업데이트 파일~/workspace/업데이트.command복사Finder에서 ⇧⌘G(폴더로 이동)에 붙여 넣으면 바로 가요');
+  assert.equal(fx.view().children[5].dataset.focus, 'app-place');
+  const copies = fx.app.run("window.findByClass(document.getElementById('settingsPersonalizeView').children[5], 'd-btn')");
+  await copies[0].listeners.click();
+  await copies[1].listeners.click();
+  same(fx.copied, ['~/Applications/Workspace.app', '~/workspace/업데이트.command']);
+  assert.match(fx.app.nodes.get('liveRegion').textContent, /경로를 복사했어요/);
+
+  // 아무것도 안 바꾸고 저장하면 보내지 않는다
+  await fx.button('저장').listeners.click();
+  assert.equal(fx.find('d-derr')[0].textContent, '바꾼 것이 없어요');
+  assert.equal(fx.posts().length, 0);
+});
+
+test('WP-D2 L. 꾸미기 저장: 바뀐 칸만 보내고, 제목은 헤더·탭 제목에 곧바로, Dock이 바뀌면 `Dock은 앱을 닫고 다시 열면 보여요`', async () => {
+  const fx = personalizeClient({}, [
+    { body: { ok: true, title: '새 제목', dockName: 'Workspace', refresh: false } },
+    { body: { ok: true, title: '새 제목', dockName: '내 일터', refresh: true } },
+  ]);
+  fx.app.context.document.title = '';
+  await fx.app.run('renderSettingsPersonalize()');
+  // 규칙에 안 맞으면 보내지 않는다
+  fx.inputs()[0].value = 'a/b';
+  await fx.button('저장').listeners.click();
+  assert.equal(fx.find('d-derr')[0].textContent, 'Dock 이름은 1~30자로 적어 주세요 — / : 와 줄바꿈은 쓸 수 없어요');
+  fx.inputs()[0].value = 'Workspace';
+  fx.inputs()[1].value = ' ';
+  await fx.button('저장').listeners.click();
+  assert.equal(fx.find('d-derr')[0].textContent, '워크스페이스 제목은 1~40자로 적어 주세요');
+  assert.equal(fx.posts().length, 0);
+
+  fx.inputs()[1].value = '새 제목';
+  await fx.button('저장').listeners.click();
+  same(fx.posts()[0], { url: '/api/personalize', method: 'POST', body: { title: '새 제목' } });
+  assert.equal(fx.app.nodes.get('workspaceTitle').textContent, '새 제목', '서버를 다시 켜지 않고 헤더에 반영');
+  assert.equal(fx.app.context.document.title, '새 제목');
+  const saved = () => fx.find('d-psaved')[0];
+  assert.equal(fx.text("window.findByClass(document.getElementById('settingsPersonalizeView'), 'd-psaved')[0]"), '✓ 바뀌었어요', '제목만 바꾸면 Dock 말은 없다');
+  assert.equal(saved().getAttribute('role'), 'status');
+
+  fx.inputs()[0].value = '내 일터';
+  await fx.button('저장').listeners.click();
+  same(fx.posts()[1].body, { dockName: '내 일터' });
+  assert.equal(fx.text("window.findByClass(document.getElementById('settingsPersonalizeView'), 'd-psaved')[0]"), '✓ 바뀌었어요 · Dock은 앱을 닫고 다시 열면 보여요');
+});
+
+test('WP-D2 L. 꾸미기 아이콘: 형식·크기는 화면에서 먼저 거르고, 자른 그림은 저장을 눌러야 보내며, 되돌리기는 reset 한 번', async () => {
+  const fx = personalizeClient({ customIcon: true }, [
+    { body: { ok: true, customIcon: true, refresh: true } },
+    { body: { ok: true, customIcon: false, refresh: true } },
+  ]);
+  fx.app.context.document.getElementById('appFavicon').href = '/app-icon.png';
+  await fx.app.run('renderSettingsPersonalize()');
+  same(fx.app.run('personalizeCropBox(1200, 800)'), { sx: 200, sy: 0, size: 800 });
+  same(fx.app.run('personalizeCropBox(800, 1200)'), { sx: 0, sy: 200, size: 800 });
+  assert.equal(fx.app.run("personalizeFileError({ type: 'image/gif', size: 10 })"), 'PNG나 JPG 그림만 쓸 수 있어요');
+  assert.equal(fx.app.run("personalizeFileError({ type: 'image/png', size: 5 * 1024 * 1024 + 1 })"), '그림은 5MB까지 쓸 수 있어요');
+  assert.equal(fx.app.run("personalizeFileError({ type: 'image/jpeg', size: 1000 })"), '');
+
+  const file = () => fx.find('d-piconpv')[0].children.find(kid => kid.type === 'file');
+  file().files = [{ type: 'image/png', size: 6 * 1024 * 1024 }];
+  await file().listeners.change();
+  assert.equal(fx.find('d-derr')[0].textContent, '그림은 5MB까지 쓸 수 있어요');
+
+  // 가운데 자르기는 캔버스가 한다(가짜 창에는 캔버스가 없어 자른 결과만 끼운다)
+  fx.app.run("personalizeCrop = async () => ({ canvas: document.createElement('canvas'), data: 'iVBORw0KGgo=' })");
+  file().files = [{ type: 'image/png', size: 1000 }];
+  await file().listeners.change();
+  assert.equal(fx.find('d-piconslot')[0].children[0].getAttribute('aria-label'), '고른 그림(가운데를 정사각형으로 잘랐어요)', '미리보기가 자른 그림으로 바뀐다');
+  assert.equal(fx.posts().length, 0, '고르기만 해서는 보내지 않는다');
+  await fx.button('저장').listeners.click();
+  same(fx.posts()[0], { url: '/api/personalize/icon', method: 'POST', body: { image: 'iVBORw0KGgo=' } });
+  assert.match(fx.app.nodes.get('appFavicon').href, /^\/app-icon\.png\?v=\d+$/, '탭 아이콘도 새로 읽는다');
+  assert.equal(fx.text("window.findByClass(document.getElementById('settingsPersonalizeView'), 'd-psaved')[0]"), '✓ 바뀌었어요 · Dock은 앱을 닫고 다시 열면 보여요');
+
+  assert.equal(fx.button('기본으로 되돌리기').hidden, false);
+  await fx.button('기본으로 되돌리기').listeners.click();
+  same(fx.posts()[1], { url: '/api/personalize/icon', method: 'POST', body: { reset: true } });
 });
 
 test('도움말: 개념 사전 9개 + 쓰는 순서의 여섯 묶음 + 항목마다 `필요한 것` 표지', () => {

@@ -1282,7 +1282,7 @@ async function load() {
   renderCalendar(data.calendar);
   renderSuggestions(data.suggestions);
   renderInbox(data.inboxTasks || []);
-  renderStartCard(data);
+  renderGuideCard();
   renderLaterTasks(data.laterTasks || []);
   renderWaiting(data.waiting || []);
   renderTodayTasks(data.todayTasks || []);
@@ -3709,46 +3709,110 @@ function renderInboxHeadCount(count) {
   if (button) button.hidden = !count;
 }
 
-// 아무 기록도 없는 새 설치에만 서는 시작 카드(`새로 들어온 것` 자리). 저장하지 않고 조건만 본다 —
-// 항목이 하나라도 생기면 저절로 사라지므로 닫기 버튼도 두지 않는다.
-function startCardEmpty(data) {
-  if (!data) return false;
-  const rows = ['inboxTasks', 'laterTasks', 'todayTasks', 'waiting', 'ideas', 'decisions', 'decisionArchive']
-    .reduce((sum, key) => sum + (Array.isArray(data[key]) ? data[key].length : 0), 0);
-  const meetings = ((data.workflows || {}).meetings || []).length;
-  return rows === 0 && meetings === 0;
+// ---------- 사용설명서 카드 (오늘 탭) ----------
+// 닫기 전까지는 **늘** `새로 들어온 것` 자리에 선다(기록이 있든 없든). 닫으면 config가 아니라 이 브라우저에
+// 기억하고(localStorage `guideCardClosed` — 막혀 있으면 이 창이 열려 있는 동안만), 같은 네 줄은
+// 설정 › 도움말 맨 위의 `사용설명서`로 남는다(settings-ui.js의 renderSettingsManual).
+const GUIDE_CARD_KEY = 'guideCardClosed';
+let guideCardClosedHere = false;
+
+function guideCardClosed() {
+  if (guideCardClosedHere) return true;
+  try { return localStorage.getItem(GUIDE_CARD_KEY) === '1'; } catch { return false; }
 }
 
-// 세 줄은 각각 "지금 할 수 있는 가장 작은 다음 행동"으로 데려간다.
-const START_CARD_STEPS = [
-  ['할 일 하나 적어 보기', () => document.getElementById('todayTaskInput')?.focus()],
-  ['프로젝트 만들기', () => {
-    if (typeof setActiveTab === 'function') setActiveTab('projects');
-    if (typeof projectNewStart === 'function') projectNewStart();
-  }],
-  ['연동 켜기', () => { if (typeof settingsOpen === 'function') settingsOpen('integrations'); }],
-];
+function guideCardClose() {
+  guideCardClosedHere = true;
+  try { localStorage.setItem(GUIDE_CARD_KEY, '1'); } catch { /* 막혀 있으면 이 창이 열려 있는 동안만 기억한다 */ }
+  renderGuideCard();
+  document.getElementById('todayTaskZone')?.focus?.();
+}
 
-function renderStartCard(data) {
+// 줄마다 데려가는 곳. 설정 창 안(도움말의 사용설명서)에서 누른 줄도 같은 곳으로 간다.
+function guideGoTodayInput() {
+  if (typeof settingsClose === 'function') settingsClose();
+  if (typeof setActiveTab === 'function' && activeTabKey !== 'today') setActiveTab('today');
+  document.getElementById('todayTaskInput')?.focus();
+}
+function guideGoIntegrations() { if (typeof settingsOpen === 'function') settingsOpen('integrations'); }
+function guideGoSlackHow() {
+  if (typeof settingsOpen === 'function') settingsOpen('guide');
+  if (typeof settingsGuideShow === 'function') settingsGuideShow('슬랙에서 이렇게 보내요');
+}
+function guideGoAppPlace() { if (typeof settingsOpen === 'function') settingsOpen('personalize', 'app-place'); }
+
+// 굵은 글자가 섞인 **코드에 적힌 고정 문장**을 innerHTML 없이 세운다(조각: 문자열 또는 ['b', 글]).
+function guideRich(node, parts) {
+  parts.forEach((part) => {
+    if (typeof part === 'string') { node.appendChild(document.createTextNode(part)); return; }
+    const piece = document.createElement(part[0]);
+    piece.textContent = part[1];
+    node.appendChild(piece);
+  });
+  return node;
+}
+
+// 네 줄 — 오늘 탭 카드와 도움말의 사용설명서가 같은 줄을 쓴다. 누르면 데려가는 줄은 버튼이고,
+// `Dock에 두기`는 할 일이 이 앱 밖(Dock)에 있어 버튼이 아니다(작은 Dock 그림 + 앱 위치 링크).
+function guideRows() {
+  const row = (tag, title, parts, run) => {
+    const node = document.createElement(tag);
+    node.className = 'd-guide';
+    if (tag === 'button') { node.type = 'button'; node.addEventListener('click', run); }
+    const name = document.createElement('span');
+    name.className = 't';
+    name.textContent = title;
+    const words = guideRich(document.createElement('span'), parts);
+    words.className = 'd';
+    node.append(name, words);
+    return { node, words };
+  };
+  const dock = row('div', 'Dock에 두기', ['지금 Dock의 토끼 아이콘 우클릭 → ', ['b', '옵션'], ' → ', ['b', 'Dock에 유지']]);
+  const picture = document.createElement('span');
+  picture.className = 'd-guidedock';
+  picture.setAttribute('aria-hidden', 'true');
+  const me = document.createElement('img');
+  me.className = 'me';
+  me.src = '/app-icon.png';
+  me.alt = '';
+  picture.append(document.createElement('i'), document.createElement('i'), me, document.createElement('i'));
+  const where = document.createElement('button');
+  where.type = 'button';
+  where.className = 'd-ablink d-guidewhere';
+  where.textContent = '앱이 어디 있는지 모르겠으면 → 설정 › 꾸미기 › 앱 위치';
+  where.addEventListener('click', guideGoAppPlace);
+  dock.words.append(picture, where);
+  return [
+    dock.node,
+    row('button', '할 일 적기', ['맨 위 칸에 적고 ', ['b', 'Enter']], guideGoTodayInput).node,
+    row('button', '연동은 나중에', ['설정 ⚙ → ', ['b', '연동'], '에서 하나씩'], guideGoIntegrations).node,
+    row('button', '슬랙에서 보내는 법', [['b', '전달'], '로 채널에 보내요'], guideGoSlackHow).node,
+  ];
+}
+
+function renderGuideCard() {
   const zone = document.getElementById('startCardZone');
   if (!zone) return;
-  zone.replaceChildren();
-  zone.hidden = !startCardEmpty(data);
-  if (zone.hidden) return;
+  zone.hidden = guideCardClosed();
+  if (zone.hidden) { zone.replaceChildren(); return; }
+  // 새로고침마다 다시 만들지 않는다 — 누르려던 줄의 초점이 사라지지 않게.
+  if (zone.children.length) return;
   const card = document.createElement('div');
-  card.className = 'd-start';
-  const title = document.createElement('div');
-  title.className = 'hd';
-  title.textContent = '시작하기';
-  card.appendChild(title);
-  START_CARD_STEPS.forEach(([label, run]) => {
-    const step = document.createElement('button');
-    step.type = 'button';
-    step.className = 'd-startrow';
-    step.textContent = label;
-    step.addEventListener('click', run);
-    card.appendChild(step);
-  });
+  card.className = 'd-start d-guidecard';
+  card.setAttribute('role', 'region');
+  card.setAttribute('aria-label', '사용설명서');
+  const head = document.createElement('div');
+  head.className = 'hd';
+  const title = document.createElement('span');
+  title.textContent = '사용설명서';
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'd-btn sm sp';
+  close.textContent = '닫기';
+  close.setAttribute('aria-label', '사용설명서 닫기 — 도움말에 남아요');
+  close.addEventListener('click', guideCardClose);
+  head.append(title, close);
+  card.append(head, ...guideRows());
   zone.appendChild(card);
 }
 

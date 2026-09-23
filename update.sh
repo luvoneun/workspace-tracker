@@ -250,6 +250,9 @@ if [ "$UPDATED" = "1" ]; then
     cp "$APP_DIR/automation/run-task.sh" "$APP_DIR/automation/slack-capture.sh" "$APP_DIR/automation/backup-data.sh" "$INSTALL_DIR/" 2>/dev/null \
       && chmod +x "$INSTALL_DIR"/*.sh 2>/dev/null \
       && ok "자동화 스크립트 복사본도 갱신했어요"
+    # Dock 앱 만들기(설정 › 꾸미기가 부른다)도 복사본이 돈다. 이 파일이 없는 옛 버전이면 건너뛴다.
+    [ -f "$APP_DIR/automation/app-refresh.sh" ] && cp "$APP_DIR/automation/app-refresh.sh" "$INSTALL_DIR/" 2>/dev/null \
+      && chmod +x "$INSTALL_DIR/app-refresh.sh" 2>/dev/null
   fi
 fi
 

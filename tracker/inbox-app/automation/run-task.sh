@@ -85,6 +85,24 @@ if integration_off "$INTEGRATION_KEY"; then
   exit 0
 fi
 
+# 캘린더를 비밀 주소(iCal)로 앱 서버가 직접 읽고 있으면(`calendar.source: "ical"`) Claude로 읽는
+# calendar-sync는 돌 필요가 없다 — setup.sh도 이때는 등록을 내린다. 설정을 못 읽으면 예전처럼 돈다.
+calendar_ical() {
+  [ -n "$NODE" ] || return 1
+  [ "$("$NODE" -e '
+const fs = require("fs");
+try {
+  const config = JSON.parse(fs.readFileSync(process.argv[1], "utf-8"));
+  const calendar = (config && config.calendar) || {};
+  process.stdout.write(calendar.source === "ical" ? "ical" : "");
+} catch (error) { process.stdout.write(""); }
+' "$CONFIG" 2>/dev/null)" = "ical" ]
+}
+if [ "$NAME" = "calendar-sync" ] && calendar_ical; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S') $NAME 비밀 주소로 앱이 직접 읽고 있어 건너뛰어요" >> "$LOG"
+  exit 0
+fi
+
 # 프로세스 그룹에 좀비가 아닌 프로세스가 아직 남아 있는지 본다.
 # (죽은 뒤 아직 수거되지 않은 좀비는 "살아 있음"으로 세면 안 된다)
 group_alive() {

@@ -60,7 +60,8 @@ test('every screen script is served and counted in appVersion, and server files 
   // 브라우저에 절대 나가면 안 되는 파일들 — 서버·저장소·테스트·픽스처.
   const blocked = ['server.js', 'safe-storage.js', 'jira-client.js', 'jira-live.js', 'attention-live.js', 'report-drafts.js',
     'task-batch.js', 'slack-history.js', 'import-record.js', 'browser-fixture.js', 'migrate.js', 'integrations.js',
-    'workflow-store.js', 'mutation-store.js', 'server.test.js', 'client.test.js', 'report-drafts.test.js'];
+    'workflow-store.js', 'mutation-store.js', 'server.test.js', 'client.test.js', 'report-drafts.test.js',
+    'ical.js', 'calendar-live.js', 'personalize.js'];
   for (const name of blocked) {
     assert.equal((await fetch(base + '/' + name)).status, 404, `${name}은 화면에 나가면 안 된다`);
   }
@@ -4887,4 +4888,537 @@ test('setup.sh는 jira-sync를 등록하지 않고, 지라 켬/끔과 무관하�
   assert.ok(loadLoop.includes('tiro-sync') && loadLoop.includes('data-backup'), '나머지 자동화는 그대로 등록한다');
   // 옛 이름(com.luvon.workspace.jira-sync) 정리용 목록에는 남겨 둔다 — 옛 설치가 지운다.
   assert.match(script, /AGENT_NAMES="[^"]*\bjira-sync\b[^"]*"/, '옛 라벨 정리용 이름 목록은 그대로 남긴다');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WP-D2 — 캘린더 비밀 주소(iCal) 직접 읽기 · 설정 › 꾸미기 · app-refresh.sh
+//
+// 여기서도 **실제 캘린더·실제 설정·실제 홈 폴더에는 절대 닿지 않는다**: iCal은 아래 픽스처 글자이고,
+// 캘린더 주소로 나가는 fetch는 가짜 응답이 전부 가로챈다. 스크립트는 PATH 앞에 세운 가짜
+// osacompile·iconutil·codesign·plutil·xattr·python3와 임시 HOME으로만 돈다.
+const ical = require('./ical');
+const { createCalendarLive } = require('./calendar-live');
+const personalizeStore = require('./personalize');
+
+// 2026-09-24(목)을 오늘로 두는 캘린더. 줄마다 무엇을 확인하는지 SUMMARY에 적었다.
+const ICAL_FIXTURE = [
+  'BEGIN:VCALENDAR',
+  'VERSION:2.0',
+  'X-WR-TIMEZONE:Asia/Seoul',
+  'BEGIN:VEVENT', 'UID:single@google.com',
+  'DTSTART;TZID=Asia/Seoul:20260924T100000', 'DTEND;TZID=Asia/Seoul:20260924T110000',
+  'SUMMARY:단일 회의\\, 확인', 'X-GOOGLE-CONFERENCE:https://meet.google.com/abc-defg-hij',
+  'BEGIN:VALARM', 'ACTION:DISPLAY', 'SUMMARY:알림은 제목이 아니다', 'TRIGGER:-PT10M', 'END:VALARM',
+  'END:VEVENT',
+  'BEGIN:VEVENT', 'UID:utc@google.com', 'DTSTART:20260924T050000Z', 'DTEND:20260924T053000Z', 'SUMMARY:UTC 회의', 'END:VEVENT',
+  'BEGIN:VEVENT', 'UID:allday@google.com', 'DTSTART;VALUE=DATE:20260924', 'DTEND;VALUE=DATE:20260925', 'SUMMARY:휴가', 'END:VEVENT',
+  'BEGIN:VEVENT', 'UID:cancel@google.com', 'STATUS:CANCELLED',
+  'DTSTART;TZID=Asia/Seoul:20260924T120000', 'DTEND;TZID=Asia/Seoul:20260924T123000', 'SUMMARY:취소된 회의', 'END:VEVENT',
+  'BEGIN:VEVENT', 'UID:daily@google.com',
+  'DTSTART;TZID=Asia/Seoul:20260901T090000', 'DTEND;TZID=Asia/Seoul:20260901T091500',
+  'RRULE:FREQ=DAILY;UNTIL=20260930T000000Z', 'SUMMARY:데일리 스탠드업', 'END:VEVENT',
+  'BEGIN:VEVENT', 'UID:weekly@google.com',
+  'DTSTART;TZID=Asia/Seoul:20260907T160000', 'DURATION:PT1H',
+  'RRULE:FREQ=WEEKLY;BYDAY=MO,TH', 'EXDATE;TZID=Asia/Seoul:20260917T160000', 'SUMMARY:주간 싱크', 'END:VEVENT',
+  'BEGIN:VEVENT', 'UID:count@google.com', 'DTSTART;TZID=Asia/Seoul:20260903T170000',
+  'RRULE:FREQ=WEEKLY;COUNT=3', 'SUMMARY:세 번만', 'END:VEVENT',
+  'BEGIN:VEVENT', 'UID:ex@google.com', 'DTSTART;TZID=Asia/Seoul:20260922T130000',
+  'RRULE:FREQ=DAILY', 'EXDATE;TZID=Asia/Seoul:20260924T130000', 'SUMMARY:오늘은 빠짐', 'END:VEVENT',
+  'BEGIN:VEVENT', 'UID:moved@google.com', 'DTSTART;TZID=Asia/Seoul:20260921T150000', 'DTEND;TZID=Asia/Seoul:20260921T153000',
+  'RRULE:FREQ=DAILY', 'SUMMARY:매일 리뷰', 'END:VEVENT',
+  'BEGIN:VEVENT', 'UID:moved@google.com', 'RECURRENCE-ID;TZID=Asia/Seoul:20260924T150000',
+  'DTSTART;TZID=Asia/Seoul:20260924T153000', 'DTEND;TZID=Asia/Seoul:20260924T160000', 'SUMMARY:매일 리뷰(미룸)', 'END:VEVENT',
+  'BEGIN:VEVENT', 'UID:monthly@google.com', 'DTSTART;TZID=Asia/Seoul:20260827T113000',
+  'RRULE:FREQ=MONTHLY;BYDAY=4TH', 'SUMMARY:월간 회고', 'END:VEVENT',
+  'BEGIN:VEVENT', 'UID:floating@google.com', 'DTSTART:20260924T180000', 'DTEND:20260924T183000',
+  'SUMMARY:떠 있는 시각은 캘린더 시간', 'END:VEVENT',
+  'BEGIN:VEVENT', 'UID:ny@google.com', 'DTSTART;TZID=America/New_York:20260924T060000',
+  'DTEND;TZID=America/New_York:20260924T070000', 'SUMMARY:뉴욕 회의', 'END:VEVENT',
+  'BEGIN:VEVENT', 'UID:late@google.com', 'DTSTART;TZID=Asia/Seoul:20260924T233000',
+  'DTEND;TZID=Asia/Seoul:20260925T003000', 'SUMMARY:자정을 넘는', '  회의', 'END:VEVENT',
+  'END:VCALENDAR',
+].join('\r\n');
+const SEOUL = { timeZone: 'Asia/Seoul' };
+const at = (y, m, d, h = 12) => Date.UTC(y, m - 1, d, h - 9, 0, 0);   // 서울 시각 → 순간
+
+test('WP-D2 iCal: 오늘 시작하는 일정만 — 단일·UTC·반복(DAILY UNTIL·WEEKLY BYDAY·COUNT·EXDATE·MONTHLY 몇째 요일)·옮긴 회차·시간대, 취소·종일은 뺀다', () => {
+  const calendar = ical.parseCalendar(ICAL_FIXTURE);
+  assert.equal(calendar.ok, true);
+  assert.equal(calendar.zone, 'Asia/Seoul');
+  const events = ical.todayEvents(calendar, { now: at(2026, 9, 24), ...SEOUL });
+  assert.deepEqual(events.map(one => `${one.start}-${one.end} ${one.title}`), [
+    '09:00-09:15 데일리 스탠드업',
+    '10:00-11:00 단일 회의, 확인',
+    '11:30-11:30 월간 회고',
+    '14:00-14:30 UTC 회의',
+    '15:30-16:00 매일 리뷰(미룸)',
+    '16:00-17:00 주간 싱크',
+    '18:00-18:30 떠 있는 시각은 캘린더 시간',
+    '19:00-20:00 뉴욕 회의',
+    '23:30-23:59 자정을 넘는 회의',
+  ]);
+  // calendar_today.md를 읽었을 때와 같은 모양 — 회의 링크는 https만, id는 구글 일정 id 꼴
+  const single = events.find(one => one.title.startsWith('단일'));
+  assert.deepEqual(Object.keys(single).sort(), ['end', 'externalId', 'link', 'start', 'title']);
+  assert.equal(single.link, 'https://meet.google.com/abc-defg-hij');
+  assert.equal(single.externalId, 'single');
+  assert.equal(events[0].externalId, 'daily_20260924T000000Z', '반복 회차는 `_시각Z`가 붙는다');
+  assert.equal(events.find(one => one.title === 'UTC 회의').link, null);
+
+  // 종일 일정은 읽기는 하되(allDay) 오늘 목록에는 넣지 않는다
+  const all = ical.occurrencesOn(calendar, { now: at(2026, 9, 24), ...SEOUL });
+  assert.ok(all.some(one => one.allDay && one.title === '휴가'));
+  assert.ok(!events.some(one => one.title === '휴가'));
+
+  const titlesOn = (...day) => ical.todayEvents(calendar, { now: at(...day), ...SEOUL }).map(one => one.title);
+  assert.ok(!titlesOn(2026, 9, 17).includes('주간 싱크'), 'EXDATE로 뺀 회차');
+  assert.ok(titlesOn(2026, 9, 21).includes('주간 싱크'), 'BYDAY 월요일');
+  assert.ok(!titlesOn(2026, 9, 22).includes('주간 싱크'), 'BYDAY에 없는 화요일');
+  assert.ok(titlesOn(2026, 9, 17).includes('세 번만') && !titlesOn(2026, 9, 24).includes('세 번만'), 'COUNT=3이면 세 번째에서 끝난다');
+  assert.ok(titlesOn(2026, 9, 29).includes('데일리 스탠드업') && !titlesOn(2026, 10, 1).includes('데일리 스탠드업'), 'UNTIL 다음 날부터 없다');
+  assert.ok(titlesOn(2026, 10, 22).includes('월간 회고') && !titlesOn(2026, 10, 15).includes('월간 회고'), '넷째 목요일만');
+  assert.ok(titlesOn(2026, 9, 23).includes('매일 리뷰') && !titlesOn(2026, 9, 24).includes('매일 리뷰'), '옮긴 회차만 그날 원래 자리를 대신한다');
+  assert.ok(titlesOn(2026, 9, 23).includes('오늘은 빠짐'));
+  // VCALENDAR가 아니면 읽지 않는다
+  assert.equal(ical.parseCalendar('<html>로그인</html>').ok, false);
+});
+
+test('WP-D2 calendar-live: 메모리에만 들고, 실패하면 이전 값, 묵으면 버리고, 자정이 지나면 새 날 일정을 뽑는다', async () => {
+  let clock = at(2026, 9, 24, 23);
+  let answer = ICAL_FIXTURE;
+  let calls = 0;
+  const live = createCalendarLive({
+    load: async () => { calls += 1; if (answer instanceof Error) throw answer; return answer; },
+    connected: () => true, now: () => clock, ...SEOUL, keepMs: 3 * 3600000,
+  });
+  assert.equal(live.current(), null, '읽기 전에는 값이 없다(그때는 calendar_today.md를 본다)');
+  assert.equal(await live.refresh(), true);
+  assert.equal(live.current().events.length, 9);
+  assert.equal(live.failed(), false);
+
+  // 동시에 두 번 돌지 않는다
+  await Promise.all([live.refresh(), live.refresh()]);
+  assert.equal(calls, 2);
+
+  answer = new Error('닿지 못함');
+  clock += 60000;
+  assert.equal(await live.refresh(), false);
+  assert.equal(live.current().events.length, 9, '실패해도 이전 값을 쓴다');
+  assert.equal(live.failed(), true);
+
+  // 자정이 지나면 다시 읽지 않아도 새 날(9/25 금)의 일정이 나온다(마지막 성공에서 두 시간 — 아직 버리지 않는다)
+  clock = at(2026, 9, 25, 1);
+  assert.ok(!live.current().events.some(one => one.title === '주간 싱크'), '금요일에는 주간 싱크가 없다');
+  assert.ok(live.current().events.some(one => one.title === '데일리 스탠드업'));
+
+  clock += 3 * 3600000;
+  assert.equal(live.current(), null, '세 시간 넘게 못 읽으면 버린다');
+
+  // 연결이 없으면 타이머도 첫 읽기도 없다. 있으면 타이머는 프로세스를 붙잡지 않는다.
+  const off = createCalendarLive({ load: async () => { throw new Error('불리면 안 된다'); }, connected: () => false });
+  assert.equal(off.start(), false);
+  assert.equal(off.started(), false);
+  const on = createCalendarLive({ load: async () => ICAL_FIXTURE, connected: () => true });
+  assert.equal(on.start(), true);
+  assert.equal(on.holdsProcess(), false);
+  on.stop();
+});
+
+test('WP-D2 연동 저장: 비밀 주소는 한 번 읽어 센 뒤 0600 파일로만, config에는 갈래·경로만 — 실패하면 아무것도 쓰지 않는다', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-ical-save-'));
+  const tokenDir = path.join(home, 'tokens');
+  const configPath = path.join(home, 'workspace.config.json');
+  const secret = 'https://calendar.google.com/calendar/ical/me%40example.test/private-0123456789abcdef/basic.ics';
+  const writes = [];
+  const write = (file, text) => { writes.push(file); fs.writeFileSync(file, text); };
+  const current = { title: '내 이름', integrations: { calendar: false } };
+
+  // 1) 읽어 보다 실패하면 설정도 주소 파일도 만들지 않는다
+  await assert.rejects(() => integrationsStore.saveIntegrations({
+    configPath, current, tokenDir, write,
+    body: { calendar: { enabled: true, source: 'ical', url: secret } },
+    calendarCheck: async () => { throw Object.assign(new Error(integrationsStore.INTEGRATION_MESSAGE.icalRead), { status: 400 }); },
+  }), /이 주소를 읽지 못했어요 — 비밀 주소를 다시 복사해 주세요/);
+  assert.deepEqual(writes, []);
+  assert.equal(fs.existsSync(path.join(tokenDir, 'workspace-calendar-ical')), false);
+  const okCheck = async () => ({ ok: true, count: 1 });
+  await assert.rejects(() => integrationsStore.saveIntegrations({ configPath, current, tokenDir, write, body: { calendar: { enabled: true, source: 'ical', url: 'http://calendar.google.com/x.ics' } }, calendarCheck: okCheck }), /https:\/\/로 시작해야/);
+  await assert.rejects(() => integrationsStore.saveIntegrations({ configPath, current, tokenDir, write, body: { calendar: { enabled: true, source: 'ical', url: '' } }, calendarCheck: okCheck }), /비밀 주소를 붙여 넣어 주세요/);
+  assert.deepEqual(writes, []);
+
+  // 2) 성공 — 주소는 파일(0600)로만, config에는 source·icalFile만, 결과에는 개수만
+  const checked = [];
+  const { config, result } = await integrationsStore.saveIntegrations({
+    configPath, current, tokenDir, write,
+    body: { calendar: { enabled: true, source: 'ical', url: ` ${secret} ` } },
+    calendarCheck: async (address) => { checked.push(address); return { ok: true, count: 3 }; },
+  });
+  assert.deepEqual(checked, [secret]);
+  assert.deepEqual(result.calendar, { source: 'ical', count: 3 });
+  assert.equal(config.integrations.calendar, true);
+  assert.deepEqual(config.calendar, { source: 'ical', icalFile: path.join(tokenDir, 'workspace-calendar-ical') });
+  assert.equal(config.title, '내 이름', '모르는 키는 그대로');
+  const file = path.join(tokenDir, 'workspace-calendar-ical');
+  assert.equal(fs.readFileSync(file, 'utf8').trim(), secret);
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  assert.ok(!JSON.stringify({ config, result }).includes('private-0123456789abcdef'), '주소는 config·결과 어디에도 없다');
+  const state = integrationsStore.readIntegrations(config, { tokenDir });
+  assert.deepEqual(state.calendar, { enabled: true, source: 'ical', hasIcal: true });
+  assert.ok(!JSON.stringify(state).includes('private-'), '지금 상태에도 주소는 없다(있음/없음만)');
+  assert.equal(integrationsStore.savedIcalUrl(config, tokenDir), secret, '서버 안에서만 꺼내 쓴다');
+
+  // 3) 칸을 비운 다시 연결은 저장된 주소로 다시 확인하고, 파일은 다시 쓰지 않는다
+  const again = [];
+  await integrationsStore.saveIntegrations({
+    configPath, current: config, tokenDir, write,
+    body: { calendar: { enabled: true, source: 'ical', url: '' } },
+    calendarCheck: async (address) => { again.push(address); return { ok: true, count: 2 }; },
+    writeToken: () => { throw new Error('주소 파일을 다시 쓰면 안 된다'); },
+  });
+  assert.deepEqual(again, [secret]);
+
+  // 4) `Claude Code로`를 고르면 갈래만 claude로 — 주소 파일·경로는 그대로(사람 것)
+  const claude = await integrationsStore.saveIntegrations({ configPath, current: config, tokenDir, write, body: { calendar: { enabled: true } } });
+  assert.deepEqual(claude.config.calendar, { source: 'claude', icalFile: path.join(tokenDir, 'workspace-calendar-ical') });
+  assert.deepEqual(claude.result.calendar, { source: 'claude' });
+  assert.equal(integrationsStore.readIntegrations(claude.config, { tokenDir }).calendar.source, 'claude');
+  // 5) 해제는 켜짐만 끈다
+  const off = await integrationsStore.saveIntegrations({ configPath, current: config, tokenDir, write, body: { calendar: { enabled: false } } });
+  assert.equal(off.config.integrations.calendar, false);
+  assert.equal(off.config.calendar.source, 'ical');
+  assert.ok(fs.existsSync(file), '주소 파일은 지우지 않는다');
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('WP-D2 비밀 주소 읽기: webcal은 https로, 10초 제한, 캘린더가 아니거나 못 읽으면 우리 문구(주소는 문구에 없다)', async () => {
+  const secret = 'webcal://calendar.example.test/private-abc/basic.ics';
+  const seen = [];
+  const answer = (body, status = 200) => async (url, options) => { seen.push({ url, options }); return new Response(body, { status }); };
+  const text = await integrationsStore.fetchIcal(secret, answer(ICAL_FIXTURE));
+  assert.ok(text.startsWith('BEGIN:VCALENDAR'));
+  assert.equal(seen[0].url, 'https://calendar.example.test/private-abc/basic.ics');
+  assert.ok(seen[0].options.signal, '제한 시간이 있다');
+  const errorOf = async (request) => { try { await integrationsStore.fetchIcal(secret, request); return ''; } catch (error) { return error.message; } };
+  assert.equal(await errorOf(answer('<html>로그인</html>')), '캘린더 주소가 아니에요 — iCal 형식의 비공개 주소를 복사해 주세요');
+  assert.equal(await errorOf(answer('없음', 404)), '이 주소를 읽지 못했어요 — 비밀 주소를 다시 복사해 주세요');
+  assert.equal(await errorOf(async () => { throw new Error(`connect failed ${secret}`); }), '이 주소를 읽지 못했어요 — 비밀 주소를 다시 복사해 주세요');
+  const counted = await integrationsStore.icalCheck(secret, { request: answer(ICAL_FIXTURE), now: at(2026, 9, 24), timeZone: 'Asia/Seoul' });
+  assert.deepEqual(counted, { ok: true, count: 9 }, '오늘 일정 수만 돌려준다');
+});
+
+test('WP-D2 서버: 비밀 주소로 읽은 오늘 일정이 calendar_today.md보다 먼저이고, 연동 탭에 개수·시각만 싣는다(주소는 없다)', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-ical-route-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const data = path.join(home, 'tracker');
+  fs.mkdirSync(data);
+  const tokens = path.join(home, 'tokens');
+  fs.mkdirSync(tokens);
+  const secret = 'https://calendar.example.test/calendar/ical/private-feedface/basic.ics';
+  fs.writeFileSync(path.join(tokens, 'workspace-calendar-ical'), `${secret}\n`, { mode: 0o600 });
+  const config = path.join(home, 'workspace.config.json');
+  fs.writeFileSync(config, JSON.stringify({
+    integrations: { slack: false, calendar: true, jira: false, tiro: false },
+    calendar: { source: 'ical', icalFile: path.join(tokens, 'workspace-calendar-ical') },
+  }, null, 2));
+  // 대비책 파일에는 다른 회의를 적어 둔다 — 직접 읽은 게 있으면 이 파일은 보지 않아야 한다.
+  fs.writeFileSync(path.join(data, 'calendar_today.md'), `마지막 갱신: ${today}\n- 08:00-09:00 | 파일에만 있는 회의\n`);
+  const automation = path.join(home, 'automation');
+  const wrapper = path.join(home, 'fake-ical-server.js');
+  fs.writeFileSync(wrapper, `'use strict';
+const realFetch = globalThis.fetch;
+globalThis.fetch = async (input, init) => {
+  const url = String(input && input.url ? input.url : input);
+  if (!url.startsWith('https://calendar.example.test/')) return realFetch(input, init);
+  const d = new Date();
+  const day = String(d.getFullYear()) + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0');
+  const body = ['BEGIN:VCALENDAR', 'BEGIN:VEVENT', 'UID:a@google.com', 'DTSTART:' + day + 'T100000', 'DTEND:' + day + 'T110000', 'SUMMARY:주소로 읽은 회의', 'END:VEVENT',
+    'BEGIN:VEVENT', 'UID:b@google.com', 'DTSTART:' + day + 'T140000', 'DTEND:' + day + 'T143000', 'SUMMARY:두 번째 회의', 'END:VEVENT', 'END:VCALENDAR'].join('\\r\\n');
+  return new Response(body, { status: 200, headers: { 'Content-Type': 'text/calendar' } });
+};
+const { server, calendarLive } = require(${JSON.stringify(path.join(__dirname, 'server.js'))});
+server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => { calendarLive.start(); console.log('ready'); });
+`);
+  const port = await freePort();
+  const child = spawn(process.execPath, [wrapper], {
+    env: {
+      ...process.env, WORKSPACE_PORT: String(port), WORKSPACE_NO_OPEN: '1', WORKSPACE_HOST: '', WORKSPACE_NO_REMOTE_CHECK: '1',
+      WORKSPACE_DATA_DIR: data, WORKSPACE_CONFIG: config, WORKSPACE_TOKEN_DIR: tokens, WORKSPACE_AUTOMATION_DIR: automation,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let log = '';
+  child.stdout.on('data', chunk => { log += chunk; });
+  child.stderr.on('data', chunk => { log += chunk; });
+  t.after(() => child.kill('SIGKILL'));
+  const origin = `http://127.0.0.1:${port}`;
+  let calendar = null;
+  const deadline = Date.now() + 10000;
+  for (;;) {
+    if (Date.now() > deadline) throw new Error(`직접 읽은 일정이 오지 않았습니다: ${log} ${JSON.stringify(calendar)}`);
+    if (child.exitCode !== null) throw new Error(`서버가 종료되었습니다 (${child.exitCode}): ${log}`);
+    try { calendar = (await (await fetch(origin + '/api/items')).json()).calendar; if (calendar && calendar.live) break; } catch { /* 아직 */ }
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  assert.deepEqual(calendar.events.map(one => `${one.start}-${one.end} ${one.title}`), ['10:00-11:00 주소로 읽은 회의', '14:00-14:30 두 번째 회의']);
+  assert.equal(calendar.stale, false);
+  assert.equal(calendar.events[0].externalId, 'a');
+
+  const stateText = await (await fetch(origin + '/api/integrations')).text();
+  const state = JSON.parse(stateText);
+  assert.equal(state.calendar.source, 'ical');
+  assert.equal(state.calendar.eventCount, 2);
+  assert.ok(state.calendar.readAt);
+  assert.equal(state.calendar.failed, false);
+  assert.ok(!stateText.includes('feedface') && !stateText.includes('calendar.example.test'), '비밀 주소는 응답에 없다');
+  const automations = (await (await fetch(origin + '/api/automation/status')).json()).automations;
+  assert.ok(!automations.some(one => one.key === 'calendar'), '비밀 주소 갈래에는 calendar-sync 자동화 줄이 없다');
+  assert.ok(!log.includes('feedface'), '로그에도 주소가 없다');
+});
+
+// 가짜 그림 바이트 — 서버는 시그니처와 머리(IHDR / SOF)만 읽는다.
+const fakePng = (width, height, extra = 0) => {
+  const head = Buffer.alloc(33 + extra);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(head, 0);
+  head.writeUInt32BE(13, 8);
+  head.write('IHDR', 12, 'ascii');
+  head.writeUInt32BE(width, 16);
+  head.writeUInt32BE(height, 20);
+  return head;
+};
+const fakeJpeg = (width, height) => Buffer.from([
+  0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
+  0xff, 0xc0, 0x00, 0x11, 0x08, height >> 8, height & 0xff, width >> 8, width & 0xff, 0x03, 0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01,
+  0xff, 0xd9,
+]);
+
+test('WP-D2 꾸미기: 그림은 형식·크기·치수를 확인하고, Dock 이름·제목은 규칙대로만 받는다', () => {
+  assert.deepEqual(personalizeStore.imageInfo(fakePng(512, 256)), { type: 'png', width: 512, height: 256 });
+  assert.deepEqual(personalizeStore.imageInfo(fakeJpeg(300, 200)), { type: 'jpeg', width: 300, height: 200 });
+  assert.equal(personalizeStore.imageInfo(Buffer.from('GIF89a' + 'x'.repeat(40))), null);
+  assert.throws(() => personalizeStore.checkIcon(fakePng(64, 512)), /가로세로 128px 이상인 그림을 골라 주세요/);
+  assert.throws(() => personalizeStore.checkIcon(Buffer.from('GIF89a' + 'x'.repeat(40))), /PNG나 JPG 그림만 쓸 수 있어요/);
+  assert.throws(() => personalizeStore.checkIcon(fakePng(512, 512, 5 * 1024 * 1024)), /그림은 5MB까지 쓸 수 있어요/);
+  assert.equal(personalizeStore.checkIcon(fakeJpeg(128, 128)).type, 'jpeg');
+
+  assert.equal(personalizeStore.checkDockName('  내 일터 '), '내 일터');
+  for (const wrong of ['', ' ', 'a/b', 'a:b', '줄\n바꿈', '.숨김', 'x'.repeat(31)]) {
+    assert.throws(() => personalizeStore.checkDockName(wrong), /Dock 이름은 1~30자로/, JSON.stringify(wrong));
+  }
+  assert.equal(personalizeStore.checkDockName('가'.repeat(30)).length, 30, '한글 30자까지');
+  assert.throws(() => personalizeStore.checkTitle(''), /워크스페이스 제목은 1~40자로/);
+  assert.throws(() => personalizeStore.checkTitle('가'.repeat(41)), /1~40자/);
+  assert.equal(personalizeStore.tildePath('/Users/someone/work/업데이트.command', '/Users/someone'), '~/work/업데이트.command');
+  assert.equal(personalizeStore.tildePath('/opt/work/업데이트.command', '/Users/someone'), '/opt/work/업데이트.command');
+});
+
+test('WP-D2 꾸미기 라우트: local/icon.png 한 파일만 쓰고 지우며, 제목은 곧바로 반영되고, Dock이 바뀌면 요청 표시 파일 하나만 쓴다', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-personalize-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const repo = path.join(home, 'repo');
+  const data = path.join(repo, 'tracker');
+  fs.mkdirSync(path.join(repo, 'local'), { recursive: true });
+  fs.mkdirSync(data);
+  fs.writeFileSync(path.join(repo, 'VERSION'), '1.0.0\n');
+  fs.writeFileSync(path.join(repo, 'local', 'local.css'), 'body{}\n');
+  const config = path.join(home, 'workspace.config.json');
+  fs.writeFileSync(config, JSON.stringify({ title: '처음 제목', integrations: { slack: false, calendar: false, jira: false, tiro: false }, server: { port: 1 } }, null, 2));
+  const automation = path.join(home, 'automation');
+  const app = await startAppServer(t, { WORKSPACE_REPO_DIR: repo, WORKSPACE_DATA_DIR: data, WORKSPACE_CONFIG: config, WORKSPACE_AUTOMATION_DIR: automation });
+  const request = path.join(automation, 'requests', 'app-refresh.request');
+  const send = (route, body) => fetch(app.base + route, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const icon = path.join(repo, 'local', 'icon.png');
+
+  // 기본은 앱에 든 토끼
+  const plain = await fetch(app.base + '/app-icon.png');
+  assert.equal(plain.status, 200);
+  assert.equal(plain.headers.get('content-type'), 'image/png');
+  assert.ok(Buffer.from(await plain.arrayBuffer()).equals(fs.readFileSync(path.join(__dirname, 'icons', 'icon-512.png'))));
+  const first = await (await fetch(app.base + '/api/personalize')).json();
+  assert.deepEqual([first.title, first.dockName, first.customIcon], ['처음 제목', 'Workspace', false]);
+
+  // 틀린 그림은 아무것도 쓰지 않는다
+  for (const [image, words] of [[fakePng(100, 100), /128px/], [Buffer.from('GIF89a' + 'x'.repeat(40)), /PNG나 JPG/], [fakePng(512, 512, 5 * 1024 * 1024), /5MB/]]) {
+    const refused = await send('/api/personalize/icon', { image: image.toString('base64') });
+    assert.equal(refused.status, 400);
+    assert.match((await refused.json()).error, words);
+  }
+  assert.equal(fs.existsSync(icon), false);
+  assert.equal(fs.existsSync(request), false, '실패하면 Dock을 다시 만들라고 하지 않는다');
+
+  // 맞는 그림 — local/icon.png에만 쓰고, 요청 표시 파일 하나를 남긴다(프로세스는 띄우지 않는다)
+  const good = fakePng(256, 256, 64);
+  const saved = await (await send('/api/personalize/icon', { image: `data:image/png;base64,${good.toString('base64')}` })).json();
+  assert.deepEqual(saved, { ok: true, customIcon: true, refresh: true });
+  assert.ok(fs.readFileSync(icon).equals(good));
+  assert.deepEqual(fs.readdirSync(path.join(repo, 'local')).sort(), ['icon.png', 'local.css'], '임시 파일이 남지 않는다');
+  assert.equal(JSON.parse(fs.readFileSync(request, 'utf8')).reason, 'icon');
+  assert.ok(Buffer.from(await (await fetch(app.base + '/app-icon.png')).arrayBuffer()).equals(good), '탭·Dock 아이콘 주소가 내 그림을 준다');
+
+  // 되돌리기는 icon.png 한 파일만 지운다
+  fs.rmSync(request);
+  assert.deepEqual(await (await send('/api/personalize/icon', { reset: true })).json(), { ok: true, customIcon: false, refresh: true });
+  assert.equal(fs.existsSync(icon), false);
+  assert.equal(fs.readFileSync(path.join(repo, 'local', 'local.css'), 'utf8'), 'body{}\n', '다른 파일은 그대로');
+  assert.ok(fs.existsSync(request));
+
+  // 제목만 바꾸면 곧바로 목록 응답에 쓰이고, Dock은 다시 만들지 않는다
+  fs.rmSync(request);
+  const titled = await (await send('/api/personalize', { title: '  새 제목 ' })).json();
+  assert.deepEqual(titled, { ok: true, title: '새 제목', dockName: 'Workspace', refresh: false });
+  assert.equal((await (await fetch(app.base + '/api/items')).json()).title, '새 제목', '서버를 다시 켜지 않아도 된다');
+  assert.equal(fs.existsSync(request), false);
+  let written = JSON.parse(fs.readFileSync(config, 'utf8'));
+  assert.equal(written.title, '새 제목');
+  assert.deepEqual(written.server, { port: 1 }, '아는 키만 바꾼다');
+
+  // Dock 이름 — config의 server.dockName, 요청 표시 파일, 앱 위치 경로
+  const docked = await (await send('/api/personalize', { dockName: 'My Work' })).json();
+  assert.equal(docked.refresh, true);
+  written = JSON.parse(fs.readFileSync(config, 'utf8'));
+  assert.deepEqual(written.server, { port: 1, dockName: 'My Work' });
+  assert.equal(JSON.parse(fs.readFileSync(request, 'utf8')).reason, 'dockName');
+  const about = await (await fetch(app.base + '/api/about')).json();
+  assert.equal(about.appBundle, '~/Applications/My Work.app');
+  assert.ok(about.updateFile.endsWith('/업데이트.command'));
+  // 틀린 이름은 설정을 바꾸지 않는다
+  const before = fs.readFileSync(config, 'utf8');
+  const wrong = await send('/api/personalize', { dockName: '../밖' });
+  assert.equal(wrong.status, 400);
+  assert.match((await wrong.json()).error, /Dock 이름은 1~30자로/);
+  assert.equal((await send('/api/personalize', {})).status, 400);
+  assert.equal(fs.readFileSync(config, 'utf8'), before);
+});
+
+// app-refresh.sh는 실제 ~/Applications·실제 osacompile에 닿지 않는다 — 임시 HOME과 PATH 앞의 가짜 명령만 쓴다.
+test('WP-D2 app-refresh.sh: Dock 앱을 만들고, 이름이 바뀌면 기록된 옛 이름 하나만 지우며 ~/Applications 밖·남의 앱은 건드리지 않는다', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-app-refresh-'));
+  const homeDir = path.join(root, 'home');
+  const apps = path.join(homeDir, 'Applications');
+  const ws = path.join(root, 'ws');
+  const install = path.join(root, 'install');
+  const bin = path.join(root, 'bin');
+  const calls = path.join(root, 'calls.log');
+  fs.mkdirSync(path.join(ws, 'tracker', 'inbox-app', 'icons'), { recursive: true });
+  fs.copyFileSync(path.join(__dirname, 'icons', 'icon-512.png'), path.join(ws, 'tracker', 'inbox-app', 'icons', 'icon-512.png'));
+  fs.mkdirSync(bin);
+  fs.mkdirSync(path.join(root, 'tmp'));
+  const log = name => `echo "${name} $*" >> ${JSON.stringify(calls)}`;
+  writeExec(path.join(bin, 'osacompile'), `#!/bin/bash\n${log('osacompile')}\nout=""; while [ $# -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done\nmkdir -p "$out/Contents/Resources/Scripts" && touch "$out/Contents/Resources/Scripts/main.scpt" "$out/Contents/Info.plist"\n`);
+  writeExec(path.join(bin, 'python3'), `#!/bin/bash\n${log('python3')}\ntouch "$3/ws.icns"\n`);
+  for (const name of ['iconutil', 'codesign', 'plutil', 'xattr', 'lsregister']) writeExec(path.join(bin, name), `#!/bin/bash\n${log(name)}\n`);
+  const config = path.join(ws, 'workspace.config.json');
+  const run = (dockName) => {
+    fs.writeFileSync(config, JSON.stringify({ server: { port: 4399, ...(dockName ? { dockName } : {}) } }));
+    return spawnSync('/bin/bash', [automationScript('app-refresh.sh')], {
+      encoding: 'utf8', timeout: 60000,
+      env: { ...process.env, HOME: homeDir, PATH: `${bin}:${process.env.PATH}`, TMPDIR: path.join(root, 'tmp'),
+        WORKSPACE_DIR: ws, WORKSPACE_CONFIG: config, WORKSPACE_INSTALL_DIR: install, LSREGISTER_BIN: path.join(bin, 'lsregister') },
+    });
+  };
+  const record = () => fs.readFileSync(path.join(install, 'app-bundle-name'), 'utf8').trim();
+  const ours = name => { const dir = path.join(apps, `${name}.app`, 'Contents', 'Resources', 'Scripts'); fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, 'main.scpt'), ''); };
+
+  // 1) 처음 — 기본 이름 Workspace, 아이콘까지 넣고 이름을 적어 둔다
+  const first = run('');
+  assert.equal(first.status, 0, first.stdout + first.stderr);
+  assert.ok(fs.existsSync(path.join(apps, 'Workspace.app', 'Contents', 'Resources', 'applet.icns')));
+  assert.equal(record(), 'Workspace');
+  assert.match(fs.readFileSync(calls, 'utf8'), /codesign --force --deep -s - .*Workspace\.app/);
+  assert.deepEqual(fs.readdirSync(path.join(root, 'tmp')), [], '임시 폴더는 남기지 않는다');
+
+  // 2) 이름을 바꾸면 새 앱을 만들고 기록된 옛 이름(Workspace) 하나만 지운다 — 다른 앱은 그대로
+  ours('Other');
+  const renamed = run('My Work');
+  assert.equal(renamed.status, 0, renamed.stdout + renamed.stderr);
+  assert.ok(fs.existsSync(path.join(apps, 'My Work.app')), renamed.stdout + renamed.stderr + fs.readdirSync(apps).join(','));
+  assert.equal(fs.existsSync(path.join(apps, 'Workspace.app')), false);
+  assert.ok(fs.existsSync(path.join(apps, 'Other.app')), '목록을 훑어 지우지 않는다');
+  assert.equal(record(), 'My Work');
+
+  // 3) 기록이 ~/Applications 밖을 가리키면 지우지 않는다
+  const outside = path.join(homeDir, 'outside.app');
+  fs.mkdirSync(path.join(outside, 'Contents', 'Resources', 'Scripts'), { recursive: true });
+  fs.writeFileSync(path.join(outside, 'Contents', 'Resources', 'Scripts', 'main.scpt'), '');
+  fs.writeFileSync(path.join(install, 'app-bundle-name'), '../outside\n');
+  const refused = run('My Work');
+  assert.equal(refused.status, 0);
+  assert.ok(fs.existsSync(outside), '~/Applications 밖은 절대 지우지 않는다');
+  assert.match(refused.stdout, /이전 이름 기록이 이상해서 옛 앱은 지우지 않았어요/);
+
+  // 4) 이 설치가 만든 앱(스크립트 앱)이 아니면 이름이 기록돼 있어도 두고 간다
+  fs.mkdirSync(path.join(apps, 'Notes.app', 'Contents'), { recursive: true });
+  fs.writeFileSync(path.join(install, 'app-bundle-name'), 'Notes\n');
+  const kept = run('My Work');
+  assert.equal(kept.status, 0);
+  assert.ok(fs.existsSync(path.join(apps, 'Notes.app')));
+  assert.match(kept.stdout, /이 설치가 만든 앱이 아니라서 그대로 뒀어요/);
+
+  // 5) 규칙에 안 맞는 이름(경로 글자)은 기본 이름으로 만든다
+  const odd = run('../evil');
+  assert.equal(odd.status, 0);
+  assert.ok(fs.existsSync(path.join(apps, 'Workspace.app')));
+  assert.equal(fs.existsSync(path.join(homeDir, 'evil.app')), false);
+
+  // 6) Dock 이름이 이미 있는 다른 앱(스크립트 앱 아님)과 같으면 그 앱을 지우지 않고 멈춘다
+  fs.mkdirSync(path.join(apps, 'Slack.app', 'Contents', 'MacOS'), { recursive: true });
+  fs.writeFileSync(path.join(apps, 'Slack.app', 'Contents', 'MacOS', 'Slack'), 'real');
+  const clash = run('Slack');
+  assert.notEqual(clash.status, 0);
+  assert.equal(fs.readFileSync(path.join(apps, 'Slack.app', 'Contents', 'MacOS', 'Slack'), 'utf8'), 'real');
+  assert.match(clash.stdout, /다른 앱이라 그대로 뒀어요/);
+  assert.equal(record(), 'Workspace', '실패하면 이름 기록을 바꾸지 않는다');
+
+  const script = fs.readFileSync(automationScript('app-refresh.sh'), 'utf8');
+  assert.ok(!/killall|pkill|kill -9/.test(script), 'Dock을 다시 시작하지 않는다');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('WP-D2 run-task.sh: 캘린더가 비밀 주소 갈래면 calendar-sync는 claude를 부르지 않고 건너뛴다', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-ical-skip-'));
+  const logs = path.join(home, 'logs');
+  const called = path.join(home, 'called.txt');
+  const claude = path.join(home, 'fake-claude.sh');
+  writeExec(claude, `#!/bin/bash\necho "불렸음" >> ${JSON.stringify(called)}\n`);
+  const config = path.join(home, 'workspace.config.json');
+  fs.writeFileSync(config, JSON.stringify({ integrations: { calendar: true, tiro: true }, calendar: { source: 'ical' } }));
+  const env = { WORKSPACE_DIR: home, WORKSPACE_CONFIG: config, AUTOMATION_LOG_DIR: logs, CLAUDE_BIN: claude };
+  assert.equal(runScript(automationScript('run-task.sh'), ['calendar-sync', '프롬프트', 'Read'], env).status, 0);
+  assert.match(fs.readFileSync(path.join(logs, 'calendar-sync.log'), 'utf8'), /calendar-sync 비밀 주소로 앱이 직접 읽고 있어 건너뛰어요/);
+  assert.equal(fs.existsSync(called), false);
+  // 다른 작업은 그대로 돈다
+  assert.equal(runScript(automationScript('run-task.sh'), ['tiro-sync', '프롬프트', 'Read'], env).status, 0);
+  assert.equal(fs.readFileSync(called, 'utf8').trim(), '불렸음');
+  // Claude Code 갈래로 돌아가면 예전처럼 돈다
+  fs.writeFileSync(config, JSON.stringify({ integrations: { calendar: true }, calendar: { source: 'claude' } }));
+  fs.rmSync(called);
+  assert.equal(runScript(automationScript('run-task.sh'), ['calendar-sync', '프롬프트', 'Read'], env).status, 0);
+  assert.equal(fs.readFileSync(called, 'utf8').trim(), '불렸음');
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+// setup.sh는 실행하지 않는다 — 조각을 문자열로 확인하고, 설정 읽기 조각만 돌려 본다.
+test('WP-D2 setup.sh: app-refresh를 늘 등록하고(요청 파일 WatchPaths), 캘린더가 비밀 주소면 calendar-sync를 내리며, Dock 앱은 app-refresh.sh가 만든다', () => {
+  const script = fs.readFileSync(path.join(REPO_ROOT, 'setup.sh'), 'utf8');
+  assert.match(script, /<string>\$LABEL\.app-refresh<\/string>/);
+  assert.match(script, /<string>\$\(xml_escape "\$INSTALL_DIR\/requests\/app-refresh\.request"\)<\/string>/);
+  assert.match(script, /for f in server slack-capture calendar-sync tiro-sync data-backup app-refresh; do/);
+  assert.match(script, /"\$APP_DIR\/automation\/app-refresh\.sh" "\$INSTALL_DIR\/"/, '설치 위치로 복사한다');
+  assert.match(script, /bash "\$INSTALL_DIR\/app-refresh\.sh"/, '5단계는 app-refresh.sh 하나가 한다');
+  assert.ok(!script.includes('osacompile'), 'Dock 앱 만드는 코드는 setup.sh에 두 벌 두지 않는다');
+  assert.match(script, /\[ "\$USE_CAL_SYNC" = "yes" \] && write_task_agent "calendar-sync"/);
+  assert.match(script, /\[ "\$USE_CAL_SYNC" = "yes" \] \|\| remove_agent calendar-sync/);
+  assert.match(script, /\[ "\$CAL_SOURCE" = "ical" \] && USE_CAL_SYNC="no"/);
+  assert.ok(!/killall|pkill/.test(script), 'Dock·프로세스를 이름으로 끝내지 않는다');
+
+  const reader = script.split("CONFIG_READER='")[1].split("\n'\n")[0];
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-setup-ical-'));
+  const config = path.join(home, 'workspace.config.json');
+  const read = (...args) => spawnSync(process.execPath, ['-e', reader, config, ...args], { encoding: 'utf8' }).stdout;
+  fs.writeFileSync(config, JSON.stringify({ integrations: { calendar: true }, calendar: { source: 'ical' } }));
+  assert.equal(read('calendarSource'), 'ical');
+  fs.writeFileSync(config, JSON.stringify({ integrations: { calendar: true }, calendar: { source: 'claude' } }));
+  assert.equal(read('calendarSource'), '');
+  fs.writeFileSync(config, JSON.stringify({}));
+  assert.equal(read('calendarSource'), '');
+  fs.rmSync(home, { recursive: true, force: true });
 });

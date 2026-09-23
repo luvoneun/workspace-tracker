@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
 <meta name="theme-color" content="#1e222a" media="(prefers-color-scheme: dark)" />
-<link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-32.png" />
+<!-- 탭 아이콘은 Dock 아이콘과 같다 — 설정 › 꾸미기에서 고른 그림이 있으면 그것, 없으면 기본 토끼(서버가 고른다) -->
+<link rel="icon" type="image/png" href="/app-icon.png" id="appFavicon" />
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
 <link rel="apple-touch-icon" href="/icons/icon-180.png" />
 <link rel="manifest" href="/manifest.webmanifest" />
@@ -73,7 +74,7 @@
           <div class="d-atlist" id="attentionList"></div>
         </section>
 
-        <!-- 시작 카드: 아무 기록도 없을 때만(저장하지 않고 조건만 본다) `새로 들어온 것` 자리에 선다 -->
+        <!-- 사용설명서 카드: 닫기 전까지는 늘 `새로 들어온 것` 자리에 선다(닫으면 이 브라우저에 기억 — 도움말 맨 위에 남는다) -->
         <div id="startCardZone" hidden></div>
 
         <div id="inboxZone" hidden>
@@ -225,13 +226,14 @@
     <div class="d-mbody" id="wrapBody"></div>
   </dialog>
 
-  <!-- 설정 — 드물게 여는 창이라 모달 그대로 둔다(상태 / 연동 / 도움말 / 삭제한 항목 네 칸) -->
+  <!-- 설정 — 드물게 여는 창이라 모달 그대로 둔다(상태 / 연동 / 꾸미기 / 도움말 / 삭제한 항목 다섯 칸) -->
   <dialog id="settingsDialog" class="d-modal" aria-label="설정">
     <div class="d-mhd">
       <h2>설정</h2>
       <span class="d-seg" role="group" aria-label="설정 보기">
         <button type="button" data-settings-tab="status" aria-pressed="true">상태</button>
         <button type="button" data-settings-tab="integrations" aria-pressed="false">연동</button>
+        <button type="button" data-settings-tab="personalize" aria-pressed="false">꾸미기</button>
         <button type="button" data-settings-tab="guide" aria-pressed="false">도움말</button>
         <button type="button" data-settings-tab="trash" aria-pressed="false" id="settingsTrashTab">삭제한 항목</button>
       </span>
@@ -241,6 +243,9 @@
     <div class="d-mbody">
       <div id="settingsStatusView"></div>
       <div id="settingsIntegrationsView" hidden></div>
+      <div id="settingsPersonalizeView" hidden></div>
+      <!-- 오늘 탭의 사용설명서 카드를 닫았으면 도움말 맨 위에 같은 네 줄이 남는다 -->
+      <div id="settingsManualView" hidden></div>
       <div id="settingsGuideView" hidden></div>
       <div id="settingsTrashView" hidden></div>
     </div>

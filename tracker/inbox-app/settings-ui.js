@@ -600,6 +600,8 @@ function settingsAgo(value, at = Date.now()) {
 // 다시 켜지고(응답의 `restart`), 개발용에서는 다시 켜 달라고만 말한다.
 async function settingsIntegrationApplied(result, done) {
   const view = document.getElementById('settingsIntegrationsView');
+  // `done`은 글자이거나, 저장 결과를 받아 글자를 돌려주는 함수다(캘린더: 오늘 일정 수).
+  if (typeof done === 'function') done = done(result);
   if (!result || result.restart !== true) {
     showNotice(`${done} · 서버를 다시 켜면 적용돼요`);
     await renderSettingsIntegrations();
@@ -800,7 +802,8 @@ function settingsIntgConfirmOff(card, body, words = '해제하면 자동 수집�
   const error = settingsErrorLine();
   yes.addEventListener('click', () => settingsIntegrationSave(body, {
     error, button: yes,
-    done: words.includes('토큰') ? '연결을 해제했어요 — 토큰 파일은 그대로 있어요' : '연결을 해제했어요',
+    done: words.includes('토큰') ? '연결을 해제했어요 — 토큰 파일은 그대로 있어요'
+      : (words.includes('주소 파일') ? '연결을 해제했어요 — 주소 파일은 그대로 있어요' : '연결을 해제했어요'),
   }));
   line.append(text, no, yes, error);
   card.confirmSlot.replaceChildren(line);
@@ -1243,28 +1246,74 @@ function settingsJiraCard(data) {
 }
 
 // ---------- 캘린더 ----------
-// 두 갈래 중 이번에는 `Claude Code로`만 동작한다. `비밀 주소 붙이기(누구나)`는 자리만 있다(곧 돼요).
-function settingsCalendarOpen(card, data) {
+// 갈래 둘 — `비밀 주소 붙이기`(누구나, Claude 없이 앱이 직접 읽는다)가 먼저, `Claude Code로`가 다음.
+// 비밀 주소는 토큰과 같은 급이라 칸은 가려져 있고(password), 저장한 뒤에는 화면·응답 어디에도 다시 나오지 않는다.
+const SETTINGS_ICAL_OFF = '해제하면 오늘 일정 가져오기가 멈춰요. 주소 파일은 남아요.';
+
+function settingsIcalChoice(card, data, mode) {
+  const box = settingsEl('d-ichoice');
+  box.dataset.choice = 'ical';
+  const head = settingsEl('hd');
+  const tag = document.createElement('span');
+  tag.className = 'd-itag';
+  tag.textContent = '누구나';
+  head.append(document.createTextNode('비밀 주소 붙이기'), tag);
+  const steps = settingsNumbered([
+    [['구글 캘린더 → ', ['b', '설정'], ' → ', ['b', '내 캘린더의 설정'], '(내 이름)']],
+    [[['b', '캘린더 통합'], ' → ', ['b', 'iCal 형식의 비공개 주소']]],
+    [[['b', '복사'], ' → 아래 칸에 붙여 넣기']],
+  ]);
+  const field = settingsField('비밀 주소', {
+    type: 'password',
+    placeholder: 'https://calendar.google.com/calendar/ical/…/basic.ics',
+    hint: '비밀 주소는 비밀번호처럼 다뤄요 — 채팅·메일로 보내지 마세요',
+  });
+  field.input.setAttribute('aria-label', '캘린더 비밀 주소');
+  field.input.autocomplete = 'off';
+  const error = settingsErrorLine();
+  const go = settingsButton('연결', 'd-btn pri');
+  const connect = () => {
+    const url = String(field.input.value || '').trim();
+    // 다시 연결은 칸을 비워 두면 저장된 주소로 한 번 더 읽는다(주소를 바꿀 때만 붙여 넣는다).
+    if (!url && !(mode === 'again' && data.calendar && data.calendar.hasIcal)) {
+      error.textContent = '비밀 주소를 붙여 넣어 주세요';
+      field.input.focus();
+      return;
+    }
+    return settingsIntegrationSave({ calendar: { enabled: true, source: 'ical', url } }, {
+      error, button: go,
+      done: result => settingsIcalDone(result),
+    });
+  };
+  go.addEventListener('click', connect);
+  settingsOnEnter(field.input, connect);
+  const note = settingsEl('d-ismall', mode === 'again' && data.calendar && data.calendar.hasIcal
+    ? '칸을 비워 두고 연결하면 지금 주소로 다시 읽어요.'
+    : '앱이 30분마다 이 주소를 직접 읽어요 — Claude는 필요 없어요.');
+  const foot = settingsEl('d-irow');
+  foot.appendChild(go);
+  box.append(head, steps, field.wrap, error, foot, note);
+  return { box, input: field.input };
+}
+
+// 연결 뒤 알림 — 서버가 한 번 읽어 센 오늘 일정 수를 그대로 말한다.
+function settingsIcalDone(result) {
+  const count = result && result.calendar && typeof result.calendar.count === 'number' ? result.calendar.count : null;
+  return count === null ? '캘린더를 연결했어요' : `캘린더를 연결했어요 · 오늘 일정 ${count}개가 보여요`;
+}
+
+function settingsCalendarOpen(card, data, mode) {
   const ask = document.createElement('p');
   ask.className = 'd-ihow';
-  ask.textContent = '어떤 길로 붙일까요?';
+  ask.textContent = mode === 'again' ? '비밀 주소를 바꿔 붙여요' : '어떤 길로 붙일까요?';
   const pair = settingsEl('d-ichoices');
+  const ical = settingsIcalChoice(card, data, mode);
 
-  const secret = settingsEl('d-ichoice is-off');
-  secret.setAttribute('aria-disabled', 'true');
-  secret.dataset.choice = 'ical';
-  const secretHead = settingsEl('hd');
-  const secretTag = document.createElement('span');
-  secretTag.className = 'd-itag';
-  secretTag.textContent = '누구나';
-  const soon = document.createElement('span');
-  soon.className = 'soon';
-  soon.textContent = '곧 돼요';
-  secretHead.append(document.createTextNode('비밀 주소 붙이기'), secretTag, soon);
-  const secretHow = document.createElement('p');
-  secretHow.className = 'd-ihow';
-  settingsRich(secretHow, ['구글 캘린더 설정 → ', ['b', '내 캘린더'], ' → ', ['b', '비밀 주소(iCal 형식)'], ' 복사 → 여기에 붙이기']);
-  secret.append(secretHead, secretHow);
+  if (mode === 'again') {
+    card.body.append(ask, ical.box);
+    ical.input.focus();
+    return;
+  }
 
   const claude = settingsEl('d-ichoice');
   claude.dataset.choice = 'claude';
@@ -1287,23 +1336,46 @@ function settingsCalendarOpen(card, data) {
     : 'Claude Code(유료 구독)가 있어야 해요 · 이 맥에는 설치 안 됨 — 설치하면 켤 수 있어요');
   claude.append(claudeHead, steps, need, error);
 
-  pair.append(secret, claude);
+  pair.append(ical.box, claude);
   card.body.append(ask, pair);
+  ical.input.focus();
+}
+
+// 연결된 카드의 한 줄. 비밀 주소면 `비밀 주소로 읽는 중 · 오늘 3개 · 10분 전`, 못 읽고 있으면 그 말.
+function settingsCalendarStatus(calendar) {
+  if (calendar.source !== 'ical') return 'Claude Code로 읽는 중';
+  const ago = settingsAgo(calendar.readAt);
+  if (!calendar.readAt && calendar.failed) return '비밀 주소를 읽지 못했어요';
+  return ['비밀 주소로 읽는 중',
+    typeof calendar.eventCount === 'number' ? `오늘 ${calendar.eventCount}개` : '',
+    ago].filter(Boolean).join(' · ');
 }
 
 function settingsCalendarCard(data) {
-  const on = !!(data.calendar && data.calendar.enabled);
+  const calendar = data.calendar || {};
+  const on = !!calendar.enabled;
+  const ical = on && calendar.source === 'ical';
   let card = null;
   card = settingsIntgCard({
     kind: 'calendar', name: '캘린더', chip: '누구나 · Claude',
     use: '오늘 회의가 뜨고 회의 정리가 열려요',
-    need: on ? 'Claude Code로 오늘 일정을 읽어요' : '3분 · 비밀 주소 또는 Claude Code',
-    status: on ? 'Claude Code로 읽는 중' : null,
-    menu: on ? () => [[
-      { label: '해제…', danger: true, onClick: () => settingsIntgConfirmOff(card, { calendar: { enabled: false } }, '해제하면 오늘 일정 가져오기가 멈춰요.') },
-    ]] : null,
-    onOpen: self => settingsCalendarOpen(self, data),
+    need: on
+      ? (ical ? '앱이 비밀 주소를 직접 읽어요 · 30분마다' : 'Claude Code로 오늘 일정을 읽어요')
+      : '3분 · 비밀 주소 또는 Claude Code',
+    status: on ? settingsCalendarStatus(calendar) : null,
+    menu: on ? () => [
+      ...(ical ? [[{ label: '다시 연결(주소 바꾸기)', onClick: () => card.open('again') }]] : []),
+      [{
+        label: '해제…', danger: true,
+        onClick: () => settingsIntgConfirmOff(card, { calendar: { enabled: false } }, ical ? SETTINGS_ICAL_OFF : '해제하면 오늘 일정 가져오기가 멈춰요.'),
+      }],
+    ] : null,
+    onOpen: (self, mode) => settingsCalendarOpen(self, data, mode),
   });
+  if (ical && !calendar.readAt && calendar.failed) {
+    const dot = card.top.querySelector('.ok');
+    if (dot) dot.className = 'bad';
+  }
   return card;
 }
 
@@ -1454,6 +1526,283 @@ async function renderSettingsIntegrations() {
   }
 }
 
+// ---------- 설정 > 꾸미기 (이 맥에만) ----------
+// 세 줄(Dock 아이콘 · Dock 이름 · 워크스페이스 제목) + 저장, 맨 아래 `앱 위치`. 프리셋은 두지 않는다.
+// 아이콘은 고르는 순간 화면에서 정사각형 가운데로 잘라(캔버스) 미리 보여 주고, `저장`을 눌러야 서버로 간다.
+// Dock 앱은 서버가 아니라 launchd 에이전트(app-refresh)가 다시 만든다 — Dock을 다시 시작하지 않으므로
+// 저장 뒤 한 줄로 `Dock은 앱을 닫고 다시 열면 보여요`를 알린다.
+const PERSONALIZE_ICON_MAX = 5 * 1024 * 1024;
+const PERSONALIZE_ICON_MIN = 128;
+const PERSONALIZE_ICON_OUT = 1024;
+let personalizeSavedNote = null;   // 저장 뒤 다시 그린 화면에 한 번 보일 `✓ 바뀌었어요` 줄({ dock })
+
+// 가운데 정사각형 — 긴 쪽의 양 끝을 똑같이 잘라 낸다.
+function personalizeCropBox(width, height) {
+  const w = Number(width) || 0;
+  const h = Number(height) || 0;
+  const size = Math.max(0, Math.min(w, h));
+  return { sx: Math.floor((w - size) / 2), sy: Math.floor((h - size) / 2), size };
+}
+
+// 서버와 같은 규칙(personalize.js). 틀리면 그 문구, 맞으면 빈 글자.
+function personalizeNameError(dockName, title) {
+  const name = String(dockName || '').trim();
+  const head = String(title || '').trim();
+  if (!name || [...name].length > 30 || /[/:\r\n\t]/.test(name) || name.startsWith('.')) {
+    return 'Dock 이름은 1~30자로 적어 주세요 — / : 와 줄바꿈은 쓸 수 없어요';
+  }
+  if (!head || [...head].length > 40 || /[\r\n]/.test(head)) return '워크스페이스 제목은 1~40자로 적어 주세요';
+  return '';
+}
+
+function personalizeFileError(file) {
+  if (!file) return '그림을 고르지 않았어요';
+  if (!['image/png', 'image/jpeg'].includes(file.type)) return 'PNG나 JPG 그림만 쓸 수 있어요';
+  if (file.size > PERSONALIZE_ICON_MAX) return '그림은 5MB까지 쓸 수 있어요';
+  return '';
+}
+
+// 고른 그림을 가운데 정사각형으로 잘라 PNG(최대 1024px)로 만든다. 미리보기도 이 캔버스다.
+function personalizeCrop(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      const width = image.naturalWidth;
+      const height = image.naturalHeight;
+      if (Math.min(width, height) < PERSONALIZE_ICON_MIN) { reject(new Error('가로세로 128px 이상인 그림을 골라 주세요')); return; }
+      const box = personalizeCropBox(width, height);
+      const out = Math.min(box.size, PERSONALIZE_ICON_OUT);
+      const canvas = document.createElement('canvas');
+      canvas.width = out;
+      canvas.height = out;
+      canvas.getContext('2d').drawImage(image, box.sx, box.sy, box.size, box.size, 0, 0, out, out);
+      resolve({ canvas, data: canvas.toDataURL('image/png').split(',')[1] || '' });
+    };
+    image.onerror = () => { URL.revokeObjectURL(url); reject(new Error('그림을 열지 못했어요')); };
+    image.src = url;
+  });
+}
+
+// 이름 있는 한 줄 — 왼쪽 이름(+작은 설명), 오른쪽 값.
+function personalizeRow(name, small, ...value) {
+  const row = settingsEl('d-pset');
+  const key = settingsEl('k');
+  key.appendChild(document.createTextNode(name));
+  if (small) {
+    const note = document.createElement('small');
+    note.textContent = small;
+    key.appendChild(note);
+  }
+  const cell = settingsEl('v');
+  cell.append(...value);
+  row.append(key, cell);
+  return row;
+}
+
+// 헤더 제목·탭 제목·탭 아이콘을 곧바로 바꾼다(서버를 다시 켜지 않는다).
+function personalizeApply({ title, icon } = {}) {
+  if (title) {
+    const head = document.getElementById('workspaceTitle');
+    if (head) head.textContent = title;
+    document.title = title;
+  }
+  if (icon) {
+    const favicon = document.getElementById('appFavicon');
+    if (favicon) favicon.href = `/app-icon.png?v=${Date.now()}`;
+  }
+}
+
+// `앱 위치` — Dock 앱과 업데이트 파일의 경로(홈은 `~`). Finder의 `폴더로 이동`에 붙여 넣으라고만 알린다.
+// 서버는 Finder를 열지 않는다 — 경로 글자만 준다(GET /api/about의 appBundle·updateFile).
+function personalizePlace(about) {
+  const lines = [['Dock 앱', about && about.appBundle], ['업데이트 파일', about && about.updateFile]]
+    .filter(([, value]) => typeof value === 'string' && value)
+    .map(([label, value]) => {
+      const line = settingsEl('d-pplaceline');
+      const name = document.createElement('span');
+      name.className = 'lb';
+      name.textContent = label;
+      const code = settingsEl('d-icode');
+      const text = document.createElement('code');
+      text.textContent = value;
+      code.append(text, settingsButton('복사', 'd-btn xs', () => settingsCopy(value, '경로를 복사했어요')));
+      line.append(name, code);
+      return line;
+    });
+  const body = lines.length
+    ? [...lines, settingsEl('d-ismall', 'Finder에서 ⇧⌘G(폴더로 이동)에 붙여 넣으면 바로 가요')]
+    : [settingsEl('d-ismall', '앱 위치를 읽지 못했어요.')];
+  const place = personalizeRow('앱 위치', '파일을 찾을 때', ...body);
+  place.className = 'd-pset d-pplace';
+  place.dataset.focus = 'app-place';
+  return place;
+}
+
+async function renderSettingsPersonalize() {
+  const view = document.getElementById('settingsPersonalizeView');
+  if (!view) return;
+  view.replaceChildren(settingsEl('d-empty', '불러오는 중이에요…'));
+  let state = null;
+  let about = null;
+  try { state = await (await request('/api/personalize')).json(); } catch { state = null; }
+  try { about = await (await fetch('/api/about', { headers: { Accept: 'application/json' } })).json(); } catch { about = null; }
+  view.replaceChildren();
+  if (!state || state.ok !== true) {
+    view.appendChild(settingsEl('d-empty', '꾸미기 값을 불러오지 못했어요.'));
+    return;
+  }
+  let picked = null;   // 잘라 둔 PNG(base64) — 저장을 눌러야 서버로 간다
+
+  // 1) Dock 아이콘
+  const preview = settingsEl('d-piconslot');
+  const current = document.createElement('img');
+  current.className = 'd-piconimg';
+  current.src = `/app-icon.png?v=${Date.now()}`;
+  current.alt = state.customIcon ? '지금 아이콘(내 그림)' : '지금 아이콘(토끼)';
+  preview.appendChild(current);
+  const file = document.createElement('input');
+  file.type = 'file';
+  file.accept = 'image/png,image/jpeg';
+  file.hidden = true;
+  file.setAttribute('aria-label', 'Dock 아이콘 그림 고르기');
+  const choose = settingsButton('내 그림 고르기', 'd-btn acc', () => file.click());
+  const error = settingsErrorLine();
+  const reset = settingsButton('기본으로 되돌리기', 'd-ablink', async () => {
+    error.textContent = '';
+    reset.disabled = true;
+    const answer = await settingsIntegrationAsk('/api/personalize/icon', { reset: true }, '되돌리지 못했어요');
+    if (!answer.ok) { error.textContent = answer.error; reset.disabled = false; return; }
+    personalizeApply({ icon: true });
+    personalizeSavedNote = { dock: true };
+    await renderSettingsPersonalize();
+  });
+  reset.hidden = !state.customIcon;
+  const iconLine = settingsEl('d-piconpv');
+  iconLine.append(preview, choose, reset, file);
+  const iconNote = settingsEl('d-ismall', 'PNG·JPG — 정사각형으로 잘라요');
+  file.addEventListener('change', async () => {
+    error.textContent = '';
+    const one = file.files && file.files[0];
+    const wrong = personalizeFileError(one);
+    if (wrong) { error.textContent = wrong; file.value = ''; return; }
+    try {
+      const cropped = await personalizeCrop(one);
+      picked = cropped.data;
+      cropped.canvas.className = 'd-piconimg';
+      cropped.canvas.setAttribute('role', 'img');
+      cropped.canvas.setAttribute('aria-label', '고른 그림(가운데를 정사각형으로 잘랐어요)');
+      preview.replaceChildren(cropped.canvas);
+      iconNote.textContent = '가운데를 정사각형으로 잘랐어요 — 저장하면 Dock 아이콘이 돼요';
+    } catch (problem) {
+      error.textContent = (problem && problem.message) || '그림을 열지 못했어요';
+    }
+    file.value = '';
+  });
+
+  // 2) Dock 이름 · 3) 워크스페이스 제목
+  const dock = document.createElement('input');
+  dock.className = 'd-din';
+  dock.value = state.dockName || 'Workspace';
+  dock.maxLength = 30;
+  dock.setAttribute('aria-label', 'Dock 이름');
+  const title = document.createElement('input');
+  title.className = 'd-din';
+  title.value = state.title || '';
+  title.maxLength = 40;
+  title.setAttribute('aria-label', '워크스페이스 제목');
+
+  const save = settingsButton('저장', 'd-btn pri');
+  const run = async () => {
+    error.textContent = '';
+    const wrong = personalizeNameError(dock.value, title.value);
+    if (wrong) { error.textContent = wrong; return; }
+    const names = {};
+    if (dock.value.trim() !== state.dockName) names.dockName = dock.value.trim();
+    if (title.value.trim() !== state.title) names.title = title.value.trim();
+    if (!picked && !Object.keys(names).length) { error.textContent = '바꾼 것이 없어요'; return; }
+    save.disabled = true;
+    let dockTouched = false;
+    if (picked) {
+      const answer = await settingsIntegrationAsk('/api/personalize/icon', { image: picked }, '그림을 저장하지 못했어요');
+      if (!answer.ok) { error.textContent = answer.error; save.disabled = false; return; }
+      personalizeApply({ icon: true });
+      picked = null;
+      dockTouched = true;
+    }
+    if (Object.keys(names).length) {
+      const answer = await settingsIntegrationAsk('/api/personalize', names, '저장하지 못했어요');
+      if (!answer.ok) { error.textContent = answer.error; save.disabled = false; return; }
+      personalizeApply({ title: answer.title });
+      dockTouched = dockTouched || answer.refresh === true;
+    }
+    personalizeSavedNote = { dock: dockTouched };
+    await renderSettingsPersonalize();
+  };
+  save.addEventListener('click', run);
+  settingsOnEnter(dock, run);
+  settingsOnEnter(title, run);
+
+  const foot = settingsEl('d-pfoot');
+  foot.append(settingsEl('d-ismall', '이 맥에만 적용돼요 — 다른 사람 앱에는 영향이 없어요(업데이트해도 남아요)'), save);
+  view.append(
+    personalizeRow('Dock 아이콘', '', iconLine, iconNote),
+    personalizeRow('Dock 이름', 'Dock·앱 전환에 보여요', dock),
+    personalizeRow('워크스페이스 제목', '화면 왼쪽 위에 보여요', title),
+    error, foot,
+  );
+  if (personalizeSavedNote) {
+    const done = settingsEl('d-psaved');
+    done.setAttribute('role', 'status');
+    done.appendChild(document.createTextNode('✓ 바뀌었어요'));
+    if (personalizeSavedNote.dock) {
+      const more = document.createElement('span');
+      more.textContent = ' · Dock은 앱을 닫고 다시 열면 보여요';
+      done.appendChild(more);
+    }
+    view.appendChild(done);
+    personalizeSavedNote = null;
+  }
+  const place = personalizePlace(about);
+  view.appendChild(place);
+  if (settingsFocusKey === 'app-place') {
+    settingsFocusKey = null;
+    place.classList.add('is-focus');
+    if (typeof place.scrollIntoView === 'function') place.scrollIntoView({ block: 'center' });
+  }
+}
+
+// ---------- 설정 > 도움말 맨 위의 사용설명서 ----------
+// 오늘 탭의 사용설명서 카드를 닫았을 때만 선다 — 같은 네 줄(app.js의 guideRows)을 그대로 쓴다.
+function renderSettingsManual() {
+  const view = document.getElementById('settingsManualView');
+  if (!view) return;
+  view.replaceChildren();
+  const closed = typeof guideCardClosed === 'function' && guideCardClosed();
+  view.hidden = !closed;
+  if (!closed || typeof guideRows !== 'function') return;
+  const box = settingsEl('d-manual');
+  box.setAttribute('role', 'region');
+  box.setAttribute('aria-label', '사용설명서');
+  box.append(settingsEl('hd', '사용설명서'), ...guideRows());
+  view.appendChild(box);
+}
+
+// 도움말의 문답 하나로 데려간다(사용설명서의 `슬랙에서 보내는 법`). 잠깐 밝혀 어디인지 보이게 한다.
+function settingsGuideShow(question) {
+  const view = document.getElementById('settingsGuideView');
+  if (!view || typeof view.querySelectorAll !== 'function') return null;
+  const hit = [...view.querySelectorAll('[data-faq]')].find(node => node.dataset.faq === question) || null;
+  if (!hit) return null;
+  hit.classList.add('is-hit');
+  hit.tabIndex = -1;
+  if (typeof hit.scrollIntoView === 'function') hit.scrollIntoView({ block: 'start' });
+  if (typeof hit.focus === 'function') hit.focus({ preventScroll: true });
+  setTimeout(() => hit.classList.remove('is-hit'), 2400);
+  return hit;
+}
+
 // ---------- 설정 > 도움말 ----------
 // 맨 위 개념 한 줄 사전(9개) — 앱이 쓰는 말이 무슨 뜻인지 한 문장씩.
 const SETTINGS_GLOSSARY = [
@@ -1477,6 +1826,8 @@ const SETTINGS_FAQ = [
       '맨 위 <b>오늘 할 일</b> 칸에 한 줄 적고 Enter를 누르면 끝이에요. 프로젝트·회의·주간요약은 필요해질 때 쓰면 돼요.'],
     ['연동은 꼭 켜야 하나요', '없음',
       '아니요. 지라·슬랙·캘린더·회의록은 전부 선택이에요. <b>설정 &gt; 연동</b>에서 하나씩 켜고, 켠 것만 자동으로 모아 와요. 하나도 켜지 않아도 직접 적는 기능은 전부 돼요.'],
+    ['Dock 아이콘·이름을 바꾸려면', '없음',
+      '<b>설정 &gt; 꾸미기</b>에서 내 그림을 고르고(가운데를 정사각형으로 잘라요) Dock 이름·워크스페이스 제목을 적은 뒤 <b>저장</b>해요. 이 맥에만 적용되고 업데이트해도 남아요. Dock은 앱을 닫고 다시 열면 바뀌어 보여요.'],
   ]],
   ['매일', [
     ['오늘 하기 버거운 업무는 어떻게 미루나요', '없음',
@@ -1519,6 +1870,8 @@ const SETTINGS_FAQ = [
       '제가 답해야 하는 지라 댓글이 모이는 자리예요. <b>지라에 직접 물어봐서 가져와요(설정 &gt; 연동의 지라 연결만 있으면 됩니다). 슬랙 앱이나 다른 설정은 필요 없어요.</b> 제가 담당·보고·지켜보는 티켓 중 제 마지막 댓글 뒤에 남이 댓글을 달았으면 뜨고(최근 14일), 지라에 답글을 달면 다음 갱신에서 저절로 사라져요.'],
     ['`반응 필요`에 안 보이는 것도 있나요', '지라 연결',
       '제가 담당·보고·지켜보지 않는 티켓과 14일보다 오래된 댓글은 아직 못 봐요. <b>피그마 댓글은 여기로 자동으로 오지 않아요</b> — 피그마의 슬랙 알림을 나만 보는 채널(#my-todo)에 공유하면 슬랙 수집을 거쳐 <b>할 일</b>로 들어와요. 잘 읽고 있는지는 <b>상태</b> 탭 맨 아래 <b>반응 필요 · 지라 댓글</b> 줄에서 봐요.'],
+    ['Claude 없이 캘린더를 붙이려면', '구글 캘린더',
+      '<b>설정 &gt; 연동 &gt; 캘린더</b>의 <b>비밀 주소 붙이기</b>예요. 구글 캘린더 설정 → 내 캘린더의 설정 → 캘린더 통합 → <b>iCal 형식의 비공개 주소</b>를 복사해 붙이면 앱이 30분마다 직접 읽어요. 이 주소는 비밀번호처럼 다뤄요.'],
     ['슬랙에서 이렇게 보내요', '슬랙 연결',
       '<b>남의 메시지</b>는 ⋯ → <b>전달</b>(또는 공유)로 #my-todo 같은 내 채널에 보내요. 메모 한 줄을 같이 적으면 할 일 문구에 참고해요. <b>내 생각</b>은 그 채널에 그냥 적어도 돼요(한 메시지가 한 항목). 해야 할 일 → 할 일 · 답을 기다리는 것 → 기다리는 것 · 정해진 정책 → 정해진 것 · 참고거리 → 언젠가.'],
     ['슬랙에서 수집한 게 잘 들어왔는지 보려면', '슬랙 연결 + Claude Code',
@@ -1572,6 +1925,8 @@ function renderSettingsGuide() {
       const q = document.createElement('div');
       q.className = 'q';
       q.textContent = question;
+      // 사용설명서의 `슬랙에서 보내는 법`이 이 표지로 문답을 찾아간다(settingsGuideShow).
+      q.dataset.faq = question;
       const tag = document.createElement('div');
       tag.className = 'need';
       tag.textContent = `필요한 것: ${need}`;
@@ -1759,9 +2114,12 @@ function settingsSetTab(tab) {
   });
   document.getElementById('settingsStatusView').hidden = tab !== 'status';
   document.getElementById('settingsIntegrationsView').hidden = tab !== 'integrations';
+  document.getElementById('settingsPersonalizeView').hidden = tab !== 'personalize';
+  document.getElementById('settingsManualView').hidden = tab !== 'guide';
   document.getElementById('settingsGuideView').hidden = tab !== 'guide';
   document.getElementById('settingsTrashView').hidden = tab !== 'trash';
-  if (tab === 'guide') renderSettingsGuide();
+  if (tab === 'guide') { renderSettingsManual(); renderSettingsGuide(); }
+  if (tab === 'personalize') renderSettingsPersonalize();
   if (tab === 'status') renderAutomationStatus();
   if (tab === 'integrations') renderSettingsIntegrations();
   if (tab === 'trash') renderSettingsTrash();
