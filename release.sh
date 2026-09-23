@@ -48,11 +48,17 @@ echo "  테스트를 돌려요 (조금 걸려요)"
 ( cd "$WORKSPACE/tracker/inbox-app" && node --test server.test.js client.test.js report-drafts.test.js ) || die "테스트가 통과하지 않았어요."
 ok "테스트 통과"
 
-printf '%s\n' "$NEW" > "$VERSION_FILE"
-git add "$VERSION_FILE" || die "VERSION을 담지 못했어요."
-git commit -q -m "릴리스 v$NEW" || die "커밋하지 못했어요."
-git tag "v$NEW" || die "태그를 만들지 못했어요."
-ok "VERSION 갱신 · 커밋 · v$NEW 태그"
+# VERSION이 이미 그 값이면(첫 릴리스처럼) 커밋할 것이 없다 — 그때는 태그만 단다.
+if [ "$CURRENT" = "$NEW" ]; then
+  git tag "v$NEW" || die "태그를 만들지 못했어요."
+  ok "VERSION은 이미 $NEW · v$NEW 태그"
+else
+  printf '%s\n' "$NEW" > "$VERSION_FILE"
+  git add "$VERSION_FILE" || die "VERSION을 담지 못했어요."
+  git commit -q -m "릴리스 v$NEW" || die "커밋하지 못했어요."
+  git tag "v$NEW" || die "태그를 만들지 못했어요."
+  ok "VERSION 갱신 · 커밋 · v$NEW 태그"
+fi
 
 echo
 if [ "$PUSH" = "1" ]; then
