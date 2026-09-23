@@ -33,7 +33,9 @@ AI는 목록 파일을 직접 건드리지 않습니다. 초안 파일만 씁니
 
 2. **기준 파일 읽기**
    - 요청 파일(위 "입력")을 먼저 읽어 어느 모드인지 정한다
-   - `tracker/calendar_today.md` — 오늘 모드에서 `마지막 갱신:` 날짜가 오늘이 아니면 **중단하지 말고** `.claude/skills/calendar-sync.md`대로 캘린더를 먼저 갱신한 뒤 진행한다(앱 버튼 한 번으로 끝나야 한다). 갱신에 실패했을 때만 이유를 알리고 중단한다. 특정 회의 모드에서는 이 확인을 하지 않는다
+   - **오늘 회의 목록** — 오늘 모드에서 무엇을 기준으로 쓸지는 `workspace.config.json`의 `calendar.source`를 보고 고른다. 특정 회의 모드에서는 아래 확인을 하지 않는다
+     - `calendar.source`가 `"ical"`(앱이 비밀 주소로 직접 읽는 갈래): `tracker/calendar_today.md`를 보지 않고 캘린더 갱신(`calendar-sync`, Claude 캘린더 MCP)도 **시도하지 않는다**. 대신 실행 중인 앱에서 읽는다 — `workspace.config.json`의 `server.port`(칸이 없으면 4321)로 `curl -s http://localhost:<포트>/api/items`를 불러 응답의 `calendar.events`(각 항목의 `start`·`end`·`title`)가 오늘 회의 목록이다. 서버가 꺼져 있어 `curl`이 실패하면 이유를 알리고 중단한다
+     - 그 밖(칸이 없거나 `"claude"`): `tracker/calendar_today.md` — `마지막 갱신:` 날짜가 오늘이 아니면 **중단하지 말고** `.claude/skills/calendar-sync.md`대로 캘린더를 먼저 갱신한 뒤 진행한다(앱 버튼 한 번으로 끝나야 한다). 갱신에 실패했을 때만 이유를 알리고 중단한다
    - `tracker/meeting_drafts.json` — 없으면 `{ "notes": [] }`로 취급
    - `tracker/tasks.md`, `tracker/checks.md`, `tracker/decisions.md` — 중복 판단용
 
@@ -46,7 +48,7 @@ AI는 목록 파일을 직접 건드리지 않습니다. 초안 파일만 씁니
 
 4. **노트마다 회의와 맞추기**
    - `get_note`(`include: summary`)로 `recordingStartAt`/`recordingEndAt`을 받아 **Asia/Seoul 시각으로 환산**
-   - 오늘 모드: `calendar_today.md`의 `- HH:MM-HH:MM | 제목` 줄 중 **녹음 시간과 가장 많이 겹치는 회의** 하나를 고른다. 겹치는 게 여러 개로 비슷하면 노트 제목과 가까운 쪽. 겹치는 회의가 없으면 이 노트는 쓰지 않고 결과에 "📭 캘린더에 없는 회의라 건너뜀: [노트 제목]"으로 알린다
+   - 오늘 모드: 오늘 회의 목록(위 2번 — `calendar_today.md`의 `- HH:MM-HH:MM | 제목` 줄, 또는 비밀 주소 갈래면 앱이 준 `calendar.events`) 중 **녹음 시간과 가장 많이 겹치는 회의** 하나를 고른다. 겹치는 게 여러 개로 비슷하면 노트 제목과 가까운 쪽. 겹치는 회의가 없으면 이 노트는 쓰지 않고 결과에 "📭 캘린더에 없는 회의라 건너뜀: [노트 제목]"으로 알린다
    - 특정 회의 모드: 요청한 회의 하나가 기준이다. 녹음 시간이 그 회의 시간과 겹치는 노트만 남기고 나머지 노트는 건너뛴다(결과에 알릴 필요도 없다)
    - 요약이 아직 없으면(처리 중) 쓰지 않고 "⏳ 아직 요약 전: [노트 제목] — 다음 실행 때 가져옵니다"로 알린다
 

@@ -690,6 +690,114 @@ function writeMeetingNotesRequest(body) {
   return { ok: true, ...meetingNotesStatus() };
 }
 
+// ---------- 지금 가져오기 (설정 > 연동 카드의 버튼) ----------
+// 지라·캘린더(비밀 주소)는 서버가 메모리 보관함을 곧바로 다시 읽고 결과를 기다린다(제한 시간 안에서).
+// 슬랙·캘린더(Claude)·티로는 **프로세스를 띄우지 않는다** — 요청 표시 파일 하나만 쓰고 launchd 에이전트가
+// 기존 실행기로 돈다(미팅 노트 가져오기와 같은 원칙). 같은 연동은 1분에 한 번이다(서버 메모리에서 센다).
+const FETCH_THROTTLE_MS = 60 * 1000;
+const FETCH_WAIT_MS = { jira: 15000, calendar: 10000 };
+const FETCH_KEYS = ['jira', 'calendar', 'slack', 'tiro'];
+// 요청 파일을 지켜보는 launchd 이름(`com.workspace.app.<이름>`)과 요청 파일. 티로는 이미 있는 길을 그대로 쓴다.
+const FETCH_AGENT = { slack: 'slack-capture-now', calendar: 'calendar-sync-now', tiro: 'tiro-sync' };
+const FETCH_REQUEST_FILE = { slack: 'slack-capture.request', calendar: 'calendar-sync.request' };
+const FETCH_MESSAGE = {
+  key: '무엇을 가져올지 확인해 주세요.',
+  off: '연결돼 있지 않아요.',
+  throttled: '방금 가져왔어요 — 1분 뒤에 다시 할 수 있어요',
+  notInstalled: '업데이트.command를 한 번 실행하면 쓸 수 있어요',
+  jiraAuth: '지라 토큰이 만료됐거나 권한이 없어요 — 다시 연결해 주세요',
+  jiraFailed: '지라를 읽지 못했어요 — 잠시 뒤 다시 시도해 주세요',
+  jiraSlow: '지라가 15초 안에 답하지 않았어요 — 잠시 뒤 다시 시도해 주세요',
+  calendarAuth: '비밀 주소를 읽을 수 없어요 — 주소가 바뀌었으면 다시 연결해 주세요',
+  calendarFailed: '캘린더를 읽지 못했어요 — 잠시 뒤 다시 시도해 주세요',
+  calendarSlow: '캘린더가 10초 안에 답하지 않았어요 — 잠시 뒤 다시 시도해 주세요',
+};
+// 슬랙이 준 오류 이름 중 "토큰을 다시 받아야 하는 것"(수집 로그의 `채널 확인 실패 — ERR:<이름>`).
+const SLACK_AUTH_RE = /\b(invalid_auth|token_revoked|account_inactive)\b/;
+const fetchLastAt = new Map();
+
+function launchAgentsDir() {
+  return process.env.WORKSPACE_LAUNCH_AGENTS_DIR || path.join(os.homedir(), 'Library', 'LaunchAgents');
+}
+// 그 자동화가 launchd에 등록돼 있는지 — plist 파일이 **있는지만** 본다(읽지도 고치지도 않는다).
+function launchAgentInstalled(name) {
+  return nativeFs.existsSync(path.join(launchAgentsDir(), `com.workspace.app.${name}.plist`));
+}
+
+function fetchUsed(key) {
+  if (key === 'jira') return !!(USES.jira && jira.connected);
+  if (key === 'calendar') return !!USES.calendar;
+  if (key === 'slack') return !!USES.slack;
+  return !!USES.tiro;
+}
+
+// 제한 시간 안에 끝나지 않으면 'timeout'. 도는 읽기는 끊지 않는다(보관함이 알아서 끝낸다).
+function fetchWithin(promise, ms) {
+  let timer = null;
+  const late = new Promise((resolve) => { timer = setTimeout(() => resolve('timeout'), ms); });
+  return Promise.race([promise, late]).finally(() => clearTimeout(timer));
+}
+
+// 1분 제한·등록 안 됨·읽기 실패는 "요청은 잘 받았고 결과가 이렇다"라서 200에 `ok:false`로 답한다
+// (브라우저가 4xx·5xx를 콘솔 오류로 남기지 않게). 잘못된 키·연결 안 된 연동만 400·404다.
+const fetchAnswer = (status, body) => ({ status, body });
+const fetchFail = (status, reason, message) => fetchAnswer(status, { ok: false, reason, message });
+
+async function fetchNow(key) {
+  if (!FETCH_KEYS.includes(key)) return fetchFail(400, 'failed', FETCH_MESSAGE.key);
+  if (!fetchUsed(key)) return fetchFail(404, 'failed', FETCH_MESSAGE.off);
+  const last = fetchLastAt.get(key);
+  if (last && Date.now() - last < FETCH_THROTTLE_MS) return fetchFail(200, 'throttled', FETCH_MESSAGE.throttled);
+  const direct = key === 'jira' || (key === 'calendar' && CALENDAR_ICAL);
+  if (!direct && !launchAgentInstalled(FETCH_AGENT[key])) return fetchFail(200, 'not-installed', FETCH_MESSAGE.notInstalled);
+  fetchLastAt.set(key, Date.now());
+
+  if (key === 'jira') {
+    const result = await fetchWithin(jiraLive.refresh(), FETCH_WAIT_MS.jira);
+    const live = jiraLive.current();
+    if (result === true && live) return fetchAnswer(200, { ok: true, mode: 'done', count: live.issues.length, readAt: new Date(live.at).toISOString() });
+    if (result === 'timeout') return fetchFail(200, 'failed', FETCH_MESSAGE.jiraSlow);
+    const failure = jiraLive.failure();
+    return failure && failure.auth ? fetchFail(200, 'auth', FETCH_MESSAGE.jiraAuth) : fetchFail(200, 'failed', FETCH_MESSAGE.jiraFailed);
+  }
+  if (key === 'calendar' && CALENDAR_ICAL) {
+    const result = await fetchWithin(calendarLive.refresh(), FETCH_WAIT_MS.calendar);
+    const live = calendarLive.current();
+    if (result === true && live) return fetchAnswer(200, { ok: true, mode: 'done', count: live.events.length, readAt: new Date(live.at).toISOString() });
+    if (result === 'timeout') return fetchFail(200, 'failed', FETCH_MESSAGE.calendarSlow);
+    const failure = calendarLive.failure();
+    return failure && failure.auth ? fetchFail(200, 'auth', FETCH_MESSAGE.calendarAuth) : fetchFail(200, 'failed', FETCH_MESSAGE.calendarFailed);
+  }
+  if (key === 'tiro') {
+    // 이미 있는 `미팅 노트 가져오기`(오늘 모드) 길 그대로 — 도는 중이면 그 말을 돌려준다.
+    try { writeMeetingNotesRequest({ scope: 'today' }); } catch (error) {
+      fetchLastAt.delete(key);
+      return fetchFail(error.status === 409 ? 200 : (error.status || 400), error.status === 409 ? 'throttled' : 'failed', error.message);
+    }
+    return fetchAnswer(200, { ok: true, mode: 'requested' });
+  }
+  const file = path.join(automationDir(), 'requests', FETCH_REQUEST_FILE[key]);
+  nativeFs.mkdirSync(path.dirname(file), { recursive: true });
+  nativeFs.writeFileSync(file, `${JSON.stringify({ requestedAt: new Date().toISOString() })}\n`);
+  return fetchAnswer(200, { ok: true, mode: 'requested' });
+}
+
+// 연동 카드 상태 줄에 쓰는 "지금 실패 중인가"(값은 메모리·로그에서만 읽는다).
+// 자동화는 상태 탭과 같은 기준 — **가장 최근 실행이 실패**일 때만 실패 중이다.
+const logTimeIso = text => { const at = meetingNotesTime(text); return Number.isFinite(at) ? new Date(at).toISOString() : null; };
+function fetchStateLive(failure) {
+  return { failing: !!failure, auth: !!(failure && failure.auth), failedAt: failure ? new Date(failure.at).toISOString() : null };
+}
+function fetchStateAutomation(automation, authRe = null) {
+  const failing = !!automation && automation.lastKind === 'fail';
+  return {
+    failing,
+    auth: failing && !!authRe && authRe.test(automation.lastSummary || ''),
+    failedAt: failing ? logTimeIso(automation.lastRunAt) : null,
+    lastRunAt: automation && automation.lastRunAt ? logTimeIso(automation.lastRunAt) : null,
+  };
+}
+
 // 업무에 걸려 있는 지라 키를 모은다 — 기본 조회(내 담당·미완료)에서 빠진 것만 한 번 더 물어
 // 요약이 사라지지 않게 하려고 쓴다. 항목의 `jira`, 회의에 연결한 지라 프로젝트, 손으로 건 `projectLinks`.
 function linkedJiraKeys() {
@@ -2132,6 +2240,13 @@ const handleRequest = (req, res) => {
       state.calendar.readAt = calendar ? new Date(calendar.at).toISOString() : null;
       state.calendar.eventCount = calendar ? calendar.events.length : null;
       state.calendar.failed = CALENDAR_ICAL ? calendarLive.failed() : false;
+      // `지금 가져오기` 버튼과 빨간 상태 줄이 쓰는 "지금 실패 중인가"(토큰 문제면 auth).
+      const automations = getAutomationStatus();
+      const automation = key => automations.find(one => one.key === key) || null;
+      state.jira.fetch = fetchStateLive(jiraLive.failure());
+      state.slack.fetch = fetchStateAutomation(automation('slack'), SLACK_AUTH_RE);
+      state.calendar.fetch = CALENDAR_ICAL ? fetchStateLive(calendarLive.failure()) : fetchStateAutomation(automation('calendar'));
+      state.meetingNotes.fetch = fetchStateAutomation(automation('tiro'));
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ ok: true, ...state, install: process.env.WORKSPACE_MANAGED ? 'managed' : 'manual' }));
     }).catch(() => {
@@ -2200,6 +2315,22 @@ const handleRequest = (req, res) => {
       .catch((error) => {
         res.writeHead(error.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ ok: false, error: error.message, code: error.code || '' }));
+      });
+    return;
+  }
+
+  // 지금 가져오기 — 지라·캘린더(비밀 주소)는 곧바로 다시 읽어 결과를, 나머지는 요청 표시 파일만 쓴다.
+  // 토큰·비밀 주소는 응답에 싣지 않는다(결과는 개수·시각·갈래뿐).
+  if (url.pathname === '/api/integrations/fetch' && req.method === 'POST') {
+    readBody(req)
+      .then(body => fetchNow(body && typeof body === 'object' ? body.key : ''))
+      .then(({ status, body }) => {
+        res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(body));
+      })
+      .catch(() => {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, reason: 'failed', message: FETCH_MESSAGE.key }));
       });
     return;
   }

@@ -7289,3 +7289,164 @@ test('빈 화면 문구는 "무엇이 없다"가 아니라 "여기서 뭘 하면
   const html = app.run("(() => { const box = document.createElement('div'); renderProjectDetail(box, null); return box.html || ''; })()");
   assert.match(html, /위의 \+로 만들거나 업무에 프로젝트를 지정하면 여기 모여요/);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WP-D2.5 — 연동 카드마다 `지금 가져오기`(연결된 카드에만) · 1분 제한 · 실패 중이면 빨간 줄 + 다시 시도/다시 연결
+
+const WPD25_CONNECTED = {
+  jira: { enabled: true, siteUrl: 'https://회사.atlassian.net', email: '나@회사.com', displayName: '하늘', hasToken: true, readAt: ago(3), issueCount: 12 },
+  slack: {
+    enabled: true, hasToken: true, readAt: ago(5),
+    channels: { todo: { id: 'C1', name: '#my-todo' }, waiting: { id: '', name: '' }, align: { id: '', name: '' }, someday: { id: '', name: '' } },
+  },
+  calendar: { enabled: true, source: 'ical', hasIcal: true, live: true, readAt: ago(10), eventCount: 3, failed: false },
+  meetingNotes: { mode: 'tiro', name: '' },
+};
+const wpd25 = (overrides = {}, replies = []) => intgClient({ ...WPD25_CONNECTED, ...overrides }, replies);
+const stText = (fx, index) => fx.shape(`window.findByClass(document.getElementById('settingsIntegrationsView').children[${index}], 'st')[0]`).text;
+const fetchButton = (fx, kind) => fx.find(kind, 'd-ifetch')[0];
+const fetchCalls = fx => fx.sent.filter(one => one.url === '/api/integrations/fetch');
+
+test('WP-D2.5 지금 가져오기: 연결된 카드에만, 상태 줄 오른쪽 · ⋯ 왼쪽에 작은 보조 버튼', async () => {
+  const none = intgClient();
+  await none.app.run('renderSettingsIntegrations()');
+  assert.ok(['slack', 'jira', 'calendar', 'notes'].every(kind => !fetchButton(none, kind)), '연결 안 된 카드에는 없다');
+
+  const fx = wpd25();
+  await fx.app.run('renderSettingsIntegrations()');
+  for (const kind of ['slack', 'jira', 'calendar', 'notes']) {
+    const button = fetchButton(fx, kind);
+    assert.ok(button, `${kind} 카드에 버튼이 있다`);
+    assert.equal(button.textContent, '지금 가져오기');
+    assert.equal(button.className, 'd-btn sm d-ifetch');
+    const kids = fx.top(kind).children;
+    const at = kids.indexOf(button);
+    assert.ok(at > kids.findIndex(one => String(one.className).split(' ').includes('st')), '상태 줄 오른쪽');
+    const more = kids.findIndex(one => String(one.className).includes('d-more'));
+    if (more >= 0) assert.ok(at < more, '⋯ 왼쪽');
+  }
+  assert.equal(fx.toggle('slack').hidden, true, '연결된 카드의 여는 버튼은 여전히 숨어 있다');
+  // 회의록(티로)은 ⋯가 없어 `바꾸기`가 늘 서고, 상태 줄은 마지막으로 가져온 때다
+  assert.equal(fx.toggle('notes').hidden, false);
+  assert.equal(fx.toggle('notes').textContent, '바꾸기');
+  assert.equal(stText(fx, 4), '● 아직 가져온 적 없어요');
+  const ran = wpd25({ meetingNotes: { mode: 'tiro', name: '', fetch: { failing: false, lastRunAt: ago(20) } } });
+  await ran.app.run('renderSettingsIntegrations()');
+  assert.equal(stText(ran, 4), '● 20분 전 가져옴');
+  // Claude 갈래 캘린더는 자동화 마지막 실행 시각을 붙인다
+  const claude = wpd25({ calendar: { enabled: true, source: 'claude', fetch: { failing: false, lastRunAt: ago(7) } } });
+  await claude.app.run('renderSettingsIntegrations()');
+  assert.equal(stText(claude, 3), '● Claude Code로 읽는 중 · 7분 전');
+});
+
+test('WP-D2.5 지금 가져오기(즉시형): 지라는 `방금 읽음 · N개`, 캘린더는 `방금 읽음 · 오늘 N개` + 오늘 미팅 다시 그리기, 1분 안에 다시 누르면 부르지 않고 알린다', async () => {
+  const fx = wpd25({}, [
+    { body: { ok: true, mode: 'done', count: 7, readAt: new Date().toISOString() } },
+    { body: { ok: true, mode: 'done', count: 2, readAt: new Date().toISOString() } },
+  ]);
+  await fx.app.run('renderSettingsIntegrations()');
+  fx.app.run('window.loaded = 0; load = async () => { window.loaded += 1; };');
+  await fetchButton(fx, 'jira').listeners.click();
+  same(fetchCalls(fx).map(one => one.body), [{ key: 'jira' }]);
+  assert.equal(stText(fx, 2), '● 방금 읽음 · 7개');
+  assert.equal(fetchButton(fx, 'jira').getAttribute('aria-disabled'), 'true', '1분 동안 흐리게 둔다');
+  // 1분 안에 다시 누르면 서버에 묻지 않고 그 말을 한다
+  await fetchButton(fx, 'jira').listeners.click();
+  assert.equal(fetchCalls(fx).length, 1);
+  assert.match(fx.live(), /방금 가져왔어요 — 1분 뒤에 다시 할 수 있어요/);
+
+  await fetchButton(fx, 'calendar').listeners.click();
+  assert.equal(stText(fx, 3), '● 방금 읽음 · 오늘 2개');
+  assert.equal(fx.app.run('window.loaded'), 1, '오늘 미팅 카드도 한 번 새로 그린다');
+  // 다시 그려도 방금 결과와 흐림은 남는다
+  await fx.app.run('renderSettingsIntegrations()');
+  assert.equal(stText(fx, 2), '● 방금 읽음 · 7개');
+  assert.equal(fetchButton(fx, 'jira').getAttribute('aria-disabled'), 'true');
+});
+
+test('WP-D2.5 지금 가져오기(요청형): 슬랙·티로는 `요청했어요 · 1~2분 뒤 반영돼요`, 서버의 1분 제한·등록 안 됨은 그 말을 알린다', async () => {
+  const fx = wpd25({}, [
+    { body: { ok: true, mode: 'requested' } },
+    { body: { ok: false, reason: 'not-installed', message: '업데이트.command를 한 번 실행하면 쓸 수 있어요' } },
+    { body: { ok: false, reason: 'throttled', message: '방금 가져왔어요 — 1분 뒤에 다시 할 수 있어요' } },
+  ]);
+  await fx.app.run('renderSettingsIntegrations()');
+  await fetchButton(fx, 'slack').listeners.click();
+  assert.equal(stText(fx, 1), '● 요청했어요 · 1~2분 뒤 반영돼요');
+  same(fetchCalls(fx).map(one => one.body), [{ key: 'slack' }]);
+
+  await fetchButton(fx, 'notes').listeners.click();
+  same(fetchCalls(fx).at(-1).body, { key: 'tiro' });
+  assert.match(fx.live(), /업데이트\.command를 한 번 실행하면 쓸 수 있어요/);
+  assert.equal(stText(fx, 4), '● 아직 가져온 적 없어요', '등록이 없으면 상태 줄은 그대로다');
+  assert.notEqual(fetchButton(fx, 'notes').getAttribute('aria-disabled'), 'true', '등록 안 됨은 1분 제한을 걸지 않는다');
+
+  await fetchButton(fx, 'jira').listeners.click();
+  assert.match(fx.live(), /방금 가져왔어요 — 1분 뒤에 다시 할 수 있어요/);
+  assert.equal(fetchButton(fx, 'jira').getAttribute('aria-disabled'), 'true');
+
+  // 다시 그려도 요청 표시는 남고, 자동화가 요청 뒤에 돌았으면(lastRunAt) 평소 줄로 돌아간다
+  await fx.app.run('renderSettingsIntegrations()');
+  assert.equal(stText(fx, 1), '● 요청했어요 · 1~2분 뒤 반영돼요');
+  fx.payload.slack.fetch = { failing: false, auth: false, failedAt: null, lastRunAt: new Date(Date.now() + 5000).toISOString() };
+  fx.payload.slack.readAt = new Date().toISOString();
+  await fx.app.run('renderSettingsIntegrations()');
+  assert.equal(stText(fx, 1), '● #my-todo · 방금 읽음');
+});
+
+test('WP-D2.5 실패 중: 상태 줄은 빨간 한 줄 `읽지 못했어요 · 10분 전` + `다시 시도`, 토큰 문제면 `다시 연결`이 그 카드의 위저드를 연다', async () => {
+  const fx = wpd25({
+    jira: { ...WPD25_CONNECTED.jira, fetch: { failing: true, auth: false, failedAt: ago(10) } },
+    slack: { ...WPD25_CONNECTED.slack, fetch: { failing: true, auth: true, failedAt: ago(4) } },
+    calendar: { ...WPD25_CONNECTED.calendar, fetch: { failing: true, auth: true, failedAt: ago(30) } },
+  }, [{ body: { ok: false, reason: 'failed', message: '지라를 읽지 못했어요 — 잠시 뒤 다시 시도해 주세요' } }]);
+  await fx.app.run('renderSettingsIntegrations()');
+  assert.equal(stText(fx, 2), '● 읽지 못했어요 · 10분 전');
+  const st = fx.find('jira', 'st')[0];
+  assert.equal(st.className, 'st k-neg');
+  assert.equal(st.children[0].className, 'bad');
+  assert.equal(fetchButton(fx, 'jira').textContent, '다시 시도');
+  await fetchButton(fx, 'jira').listeners.click();
+  same(fetchCalls(fx).map(one => one.body), [{ key: 'jira' }], '다시 시도는 같은 길로 다시 읽는다');
+  assert.match(fx.live(), /지라를 읽지 못했어요/);
+  assert.equal(stText(fx, 2), '● 읽지 못했어요 · 방금');
+
+  // 슬랙 토큰 문제 → `다시 연결`은 서버에 묻지 않고 토큰부터 여는 위저드를 편다
+  assert.equal(stText(fx, 1), '● 읽지 못했어요 · 4분 전');
+  assert.equal(fetchButton(fx, 'slack').textContent, '다시 연결');
+  await fetchButton(fx, 'slack').listeners.click();
+  assert.equal(fetchCalls(fx).length, 1);
+  assert.equal(fx.find('slack', 'd-intgbody')[0].hidden, false);
+  assert.equal(fx.find('slack', 'd-din')[0].type, 'password', '토큰 칸부터');
+  // 비밀 주소 문제 → 캘린더의 `다시 연결(주소 바꾸기)`
+  assert.equal(fetchButton(fx, 'calendar').textContent, '다시 연결');
+  await fetchButton(fx, 'calendar').listeners.click();
+  same(fx.find('calendar', 'd-ichoice').map(one => one.dataset.choice), ['ical']);
+  assert.match(fx.text('calendar'), /비밀 주소를 바꿔 붙여요/);
+});
+
+test('WP-D2.5 누른 결과가 토큰 문제면 그 자리에서 빨간 줄 + `다시 연결`로 바뀐다(Claude 갈래 캘린더는 다시 시도만)', async () => {
+  const fx = wpd25({ calendar: { enabled: true, source: 'claude', fetch: { failing: true, auth: false, failedAt: ago(2) } } }, [
+    { body: { ok: false, reason: 'auth', message: '지라 토큰이 만료됐거나 권한이 없어요 — 다시 연결해 주세요' } },
+  ]);
+  await fx.app.run('renderSettingsIntegrations()');
+  assert.equal(fetchButton(fx, 'calendar').textContent, '다시 시도', 'Claude 갈래는 다시 연결할 위저드가 없다');
+  await fetchButton(fx, 'jira').listeners.click();
+  assert.equal(fx.find('jira', 'st')[0].className, 'st k-neg');
+  assert.equal(stText(fx, 2), '● 읽지 못했어요 · 방금');
+  assert.equal(fetchButton(fx, 'jira').textContent, '다시 연결');
+  assert.match(fx.live(), /다시 연결해 주세요/);
+  await fetchButton(fx, 'jira').listeners.click();
+  assert.equal(fetchCalls(fx).length, 1, '다시 연결은 서버에 묻지 않는다');
+  assert.equal(fx.find('jira', 'd-intgbody')[0].hidden, false, '지라 위저드가 열린다');
+});
+
+test('WP-D2.5 도움말: `지금 바로 새로 가져오고 싶어요` 문답이 있다', () => {
+  const app = pureClient();
+  const faq = JSON.parse(app.run('JSON.stringify(SETTINGS_FAQ)'));
+  const found = faq.flatMap(([, rows]) => rows).find(([question]) => question === '지금 바로 새로 가져오고 싶어요');
+  assert.ok(found);
+  assert.match(found[2], /지금 가져오기/);
+  assert.match(found[2], /1분에 한 번/);
+  assert.match(found[2], /다시 연결/);
+});

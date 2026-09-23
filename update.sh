@@ -5,7 +5,9 @@
 #   bash update.sh --rollback   이전 버전과 백업 데이터로 되돌리기
 #   bash update.sh --yes        묻지 않고 기본 선택으로 진행(고친 파일은 그대로 둔다)
 #
-# 순서: 확인 → 백업 → 받기 → 변환 → 재시작 → 점검.
+# 순서: (위치) → 확인 → 백업 → 받기 → 변환 → 재시작 → 점검.
+# 회사(playio) 폴더 안에 설치돼 있으면 맨 먼저 묻지 않고 ~/workspace로 옮긴 뒤 새 위치에서 이어서 돈다
+# (automation/install-location.sh — setup.sh와 같은 판단). 옮길 수 없으면 아무것도 바꾸지 않고 멈춘다.
 # **업무 데이터는 이 스크립트가 지우지 않는다.** 코드만 갈아끼우고, 데이터는 먼저 복사해 둔 뒤
 # 형식 변환만 한다. 어느 단계든 실패하면 이전 코드와 백업 데이터로 되돌릴 수 있다(--rollback).
 #
@@ -15,6 +17,13 @@
 set -uo pipefail
 
 WORKSPACE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# 0. 설치 위치 지키기 — 회사(playio) 폴더면 ~/workspace로 옮기고 새 위치의 update.sh로 이어서 돈다(돌아오지 않는다).
+if [ -f "$WORKSPACE/tracker/inbox-app/automation/install-location.sh" ]; then
+  # shellcheck source=tracker/inbox-app/automation/install-location.sh
+  . "$WORKSPACE/tracker/inbox-app/automation/install-location.sh"
+  install_location_guard "$WORKSPACE" "update.sh" "$@" || { echo; echo "업데이트를 멈췄어요. 앱과 데이터는 그대로예요."; exit 1; }
+fi
 cd "$WORKSPACE" || exit 1
 APP_DIR="$WORKSPACE/tracker/inbox-app"
 CONFIG="$WORKSPACE/workspace.config.json"
@@ -161,6 +170,7 @@ fi
 
 echo
 echo "워크스페이스 업데이트 (지금 v${VERSION:-알 수 없음} · ${CHANNEL})"
+[ "${WORKSPACE_RELOCATED:-}" = "1" ] && echo "0. 설치 위치 옮기기 — 회사 폴더 밖 ~/workspace로 옮겼어요"
 echo
 
 # ─────────────────────────────────────────────  1. 확인
@@ -250,6 +260,8 @@ if [ "$UPDATED" = "1" ]; then
     cp "$APP_DIR/automation/run-task.sh" "$APP_DIR/automation/slack-capture.sh" "$APP_DIR/automation/backup-data.sh" "$INSTALL_DIR/" 2>/dev/null \
       && chmod +x "$INSTALL_DIR"/*.sh 2>/dev/null \
       && ok "자동화 스크립트 복사본도 갱신했어요"
+    # 설치 위치 판단(setup.sh·update.sh가 같이 쓰는 것)도 복사본 규칙대로 함께 둔다. 없는 옛 버전이면 건너뛴다.
+    [ -f "$APP_DIR/automation/install-location.sh" ] && cp "$APP_DIR/automation/install-location.sh" "$INSTALL_DIR/" 2>/dev/null
     # Dock 앱 만들기(설정 › 꾸미기가 부른다)도 복사본이 돈다. 이 파일이 없는 옛 버전이면 건너뛴다.
     [ -f "$APP_DIR/automation/app-refresh.sh" ] && cp "$APP_DIR/automation/app-refresh.sh" "$INSTALL_DIR/" 2>/dev/null \
       && chmod +x "$INSTALL_DIR/app-refresh.sh" 2>/dev/null
@@ -276,7 +288,17 @@ fi
 
 # ─────────────────────────────────────────────  5. 재시작
 echo "[5/6] 앱 다시 시작"
-restart_app
+if [ "${WORKSPACE_RELOCATED:-}" = "1" ]; then
+  # 폴더를 옮겼으면 launchd에 적힌 경로가 옛 자리다 — 다시 시작만 하면 뜨지 않는다. 새 위치의 setup.sh(묻는 것 없음)로
+  # launchd 경로·workspace.env·Dock 앱을 다시 적고, 그 등록이 앱을 새 위치에서 띄운다.
+  if WORKSPACE_RELOCATED= bash "$WORKSPACE/setup.sh"; then
+    ok "새 위치($WORKSPACE)로 자동화·앱을 다시 등록했어요"
+  else
+    warn "새 위치로 다시 등록하지 못했어요 — bash $WORKSPACE/setup.sh 를 한 번 실행해 주세요."
+  fi
+else
+  restart_app
+fi
 
 # ─────────────────────────────────────────────  6. 점검
 echo "[6/6] 잘 떴는지 확인"

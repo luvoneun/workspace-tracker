@@ -24,6 +24,7 @@ function createCalendarLive({
   let busy = null;
   let timer = null;
   let failedAt = null;
+  let failedAuth = false; // 마지막 실패가 "주소를 읽을 권한 없음"(401/403/404 — 주소가 바뀌었거나 지워졌다)인지
 
   const dayKey = () => {
     const t = new Date(now());
@@ -49,15 +50,17 @@ function createCalendarLive({
       try {
         const text = await load();
         const calendar = parseCalendar(text);
-        if (!calendar.ok) { failedAt = now(); return false; }
+        if (!calendar.ok) { failedAt = now(); failedAuth = false; return false; }
         held = { at: now(), calendar };
         memo = null;
         failedAt = null;
+        failedAuth = false;
         if (typeof onUpdate === 'function') { try { onUpdate(); } catch { /* 곁들이는 일이다 */ } }
         return true;
-      } catch {
+      } catch (error) {
         // 실패는 조용히 흘린다 — 이전 값(또는 파일 스냅샷)이 그대로 쓰인다. 주소는 어디에도 남기지 않는다.
         failedAt = now();
+        failedAuth = !!(error && error.auth);
         return false;
       } finally {
         busy = null;
@@ -90,6 +93,8 @@ function createCalendarLive({
     started: () => !!timer,
     // 마지막 읽기가 실패했는지(연동 탭의 상태 줄이 쓴다). 성공하면 지워진다.
     failed: () => failedAt !== null,
+    // 마지막 실패의 때와 갈래({ at, auth }), 없으면 null.
+    failure: () => (failedAt === null ? null : { at: failedAt, auth: failedAuth }),
     holdsProcess: () => !!timer && typeof timer.hasRef === 'function' && timer.hasRef(),
   };
 }

@@ -9,9 +9,11 @@
 1. 터미널을 열어요(Spotlight → `터미널`).
 2. 아래를 그대로 붙여 넣고 Enter.
    ```sh
-   git clone https://github.com/luvoneun/workspace-tracker.git workspace && cd workspace && bash setup.sh
+   git clone https://github.com/luvoneun/workspace-tracker.git ~/workspace && cd ~/workspace && bash setup.sh
    ```
 3. 끝나면 Dock에 `Workspace` 앱이 생겨요.
+
+권장 위치는 `~/workspace`예요. 회사 저장소(playio) 안에 두면 업데이트할 때 `~/workspace`로 자동으로 옮겨져요.
 
 **질문은 하나도 없어요.**
 
@@ -47,6 +49,8 @@
 앱 폴더의 `업데이트.command`를 더블클릭해요(터미널 창이 뜨는 게 정상이에요 — 6줄쯤 지나고 아무 키나 누르면 닫혀요). `설정`에 `새 버전이 있어요`가 뜰 때만 하면 돼요.
 
 데이터는 업데이트 전에 먼저 백업되고, 업데이트가 지우는 일은 없어요. 문제가 생기면 `bash update.sh --rollback`으로 되돌려요.
+
+`0. 위치 옮기기` — 앱 폴더가 회사(playio) 폴더 안에 있으면 업데이트가 맨 먼저 묻지 않고 `~/workspace`로 옮긴 뒤 이어서 진행해요(`~/workspace`가 이미 있거나 다른 디스크면 아무것도 바꾸지 않고 멈춰요).
 
 ## 문제가 생기면
 

@@ -49,7 +49,10 @@ fi
 # 5분마다 깨어나는 방식이라, 여기서 시간대(9~19시)인지 직접 판단해서 아니면 조용히 빠진다.
 # 평일만 도는 줄 알았는데 주말에도 돌게 해달라고 하셔서 요일 제한은 뺐다 — 시간대만 본다.
 # (테스트에서만 SLACK_CAPTURE_IGNORE_HOURS=1로 이 판단을 끈다)
-if [ "${SLACK_CAPTURE_IGNORE_HOURS:-0}" != "1" ]; then
+# 앱의 `지금 가져오기`로 부른 실행(launchd `slack-capture-now`가 SLACK_CAPTURE_MANUAL=1을 준다)은 사람이
+# 지금 원한 것이라 시간대를 보지 않는다. 연동 끔 검사(위)와 잠금(아래)은 그대로다 — 5분 주기 실행과 겹치면
+# 잠금으로 한쪽만 돈다.
+if [ "${SLACK_CAPTURE_IGNORE_HOURS:-0}" != "1" ] && [ "${SLACK_CAPTURE_MANUAL:-0}" != "1" ]; then
   hour=$(date '+%H')
   if [ "$hour" -lt 9 ] || [ "$hour" -ge 19 ]; then
     exit 0

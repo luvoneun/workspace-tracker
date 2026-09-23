@@ -18,6 +18,9 @@ function createJiraLive({
   let held = null;  // { at, issues } — 마지막으로 읽어 온 목록
   let busy = null;  // 도는 중인 갱신 하나
   let timer = null;
+  // 마지막 읽기가 실패했으면 그때와 갈래({ at, auth }) — 연동 탭의 상태 줄·`지금 가져오기`가 쓴다.
+  // `auth`는 지라가 401/403으로 답했다는 뜻(토큰 만료·권한 없음). 성공하면 지운다.
+  let failure = null;
 
   // 지금 쓸 수 있는 값. 너무 묵은 것은 여기서 버린다(그때부터는 파일 스냅샷이 쓰인다).
   function current() {
@@ -34,11 +37,14 @@ function createJiraLive({
         const answer = await list(linked);
         if (answer && answer.ok && answer.connected && Array.isArray(answer.issues)) {
           held = { at: now(), issues: answer.issues };
+          failure = null;
           return true;
         }
         // 실패는 조용히 흘린다 — 이전 값(또는 파일 스냅샷)이 그대로 쓰인다.
+        if (answer && answer.ok === false) failure = { at: now(), auth: answer.kind === 'auth' };
         return false;
       } catch {
+        failure = { at: now(), auth: false };
         return false;
       } finally {
         busy = null;
@@ -70,6 +76,7 @@ function createJiraLive({
   return {
     current, refresh, nudge, start, stop,
     started: () => !!timer,
+    failure: () => failure,
     // 테스트가 "이 타이머가 프로세스를 붙잡고 있지 않다"를 확인하는 자리다.
     holdsProcess: () => !!timer && typeof timer.hasRef === 'function' && timer.hasRef(),
   };

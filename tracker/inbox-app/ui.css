@@ -2257,6 +2257,10 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-intgtop .st { margin-left: auto; min-width: 0; font-size: 13px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .d-intgtop .st .ok { color: var(--success); }
 .d-intgtop .st .bad { color: var(--urgent); }
+/* 지금 실패 중인 연동의 상태 줄(`읽지 못했어요 · 10분 전`) — 빨간 글자 한 줄 */
+.d-intgtop .st.k-neg { color: var(--urgent); }
+/* 지금 가져오기: 1분 제한 동안은 흐리게(누르면 이유를 알려 주려고 disabled는 쓰지 않는다) */
+.d-intgtop .d-ifetch[aria-disabled="true"], .d-intgtop .d-ifetch[aria-disabled="true"]:hover { color: var(--dim); background: var(--neutral-bg); }
 .d-intgtop .d-btn { flex: none; }
 .d-intgtop .d-itag + .d-btn { margin-left: auto; }
 /* 필요한 것 칩 — 회색 글자 칩 하나로 통일한다(주황을 쓰지 않는다) */
@@ -2340,6 +2344,7 @@ a.d-btn { text-decoration: none; }
 @media (max-width: 520px) {
   .d-intgtop .st { flex-basis: 100%; order: 4; margin-left: 0; white-space: normal; }
   .d-intgtop .st ~ .d-btn:not([hidden]), .d-intgtop .st ~ .d-btn[hidden] + .d-more { margin-left: auto; }
+  .d-intgtop .st ~ .d-btn:not([hidden]) ~ .d-ifetch { margin-left: 0; }
   .d-ich { grid-template-columns: 20px minmax(0, 1fr); }
   .d-ich .nm { grid-column: 2; }
   .d-intgbody { padding: 12px; }

@@ -211,18 +211,23 @@ function normalizeIcalUrl(value) {
 async function fetchIcal(url, request = (...args) => fetch(...args), timeoutMs = ICAL_TIMEOUT_MS) {
   const address = normalizeIcalUrl(url);
   let text;
+  let status = 0;
   try {
     const response = await request(address, {
       headers: { Accept: 'text/calendar, text/plain;q=0.9, */*;q=0.1' },
       redirect: 'follow',
       signal: AbortSignal.timeout(timeoutMs),
     });
+    status = response ? Number(response.status) || 0 : 0;
     if (!response || !response.ok) throw new Error('status');
     const length = Number(response.headers && typeof response.headers.get === 'function' ? response.headers.get('content-length') : 0);
     if (length > ICAL_MAX_BYTES) throw new Error('too big');
     text = await response.text();
   } catch {
-    throw bad(MESSAGE.icalRead);
+    const error = bad(MESSAGE.icalRead);
+    // 401·403·404는 주소 자체가 막혔다는 뜻이다(재설정·삭제) — `다시 연결`로 안내하려고 표시만 붙인다(주소는 싣지 않는다).
+    if ([401, 403, 404].includes(status)) error.auth = true;
+    throw error;
   }
   if (text.length > ICAL_MAX_BYTES) throw bad(MESSAGE.icalRead);
   if (!/BEGIN:VCALENDAR/i.test(text)) throw bad(MESSAGE.icalNotCalendar);

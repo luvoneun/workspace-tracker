@@ -14,6 +14,8 @@ process.env.WORKSPACE_DATA_DIR = directory;
 // 읽지도 쓰지도 않게.
 const automationHome = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-automation-'));
 process.env.WORKSPACE_AUTOMATION_DIR = automationHome;
+// `지금 가져오기`가 "등록돼 있는지" 보는 launchd 폴더도 임시 폴더다 — 실제 ~/Library/LaunchAgents를 보지 않게.
+process.env.WORKSPACE_LAUNCH_AGENTS_DIR = path.join(automationHome, 'LaunchAgents');
 // 설정도 없는 파일로 끼운다 — 운영 폴더에서 돌릴 때 실제 `workspace.config.json`(지라 주소·토큰 위치)을 읽어
 // 테스트가 실제 지라에 닿는 일이 없게. 설정이 필요한 테스트는 따로 띄운 서버에 자기 설정을 준다.
 process.env.WORKSPACE_CONFIG = path.join(directory, 'absent.config.json');
@@ -5401,7 +5403,8 @@ test('WP-D2 setup.sh: app-refresh를 늘 등록하고(요청 파일 WatchPaths),
   const script = fs.readFileSync(path.join(REPO_ROOT, 'setup.sh'), 'utf8');
   assert.match(script, /<string>\$LABEL\.app-refresh<\/string>/);
   assert.match(script, /<string>\$\(xml_escape "\$INSTALL_DIR\/requests\/app-refresh\.request"\)<\/string>/);
-  assert.match(script, /for f in server slack-capture calendar-sync tiro-sync data-backup app-refresh; do/);
+  // WP-D2.5에서 `지금 가져오기` 에이전트 둘(slack-capture-now·calendar-sync-now)이 뒤에 붙었다.
+  assert.match(script, /for f in server slack-capture calendar-sync tiro-sync data-backup app-refresh slack-capture-now calendar-sync-now; do/);
   assert.match(script, /"\$APP_DIR\/automation\/app-refresh\.sh" "\$INSTALL_DIR\/"/, '설치 위치로 복사한다');
   assert.match(script, /bash "\$INSTALL_DIR\/app-refresh\.sh"/, '5단계는 app-refresh.sh 하나가 한다');
   assert.ok(!script.includes('osacompile'), 'Dock 앱 만드는 코드는 setup.sh에 두 벌 두지 않는다');
@@ -5421,4 +5424,391 @@ test('WP-D2 setup.sh: app-refresh를 늘 등록하고(요청 파일 WatchPaths),
   fs.writeFileSync(config, JSON.stringify({}));
   assert.equal(read('calendarSource'), '');
   fs.rmSync(home, { recursive: true, force: true });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WP-D2.5 — `지금 가져오기` · 설치 위치 지키기 · 티로 프롬프트
+//
+// 실제 지라·캘린더·슬랙·launchd·홈 폴더에는 닿지 않는다: 바깥으로 나가는 fetch는 가짜 응답이 전부 가로채고,
+// launchd 파일은 주입한 임시 폴더(WORKSPACE_LAUNCH_AGENTS_DIR)에서 "있는지만" 본다. 스크립트는 조각만 돌린다.
+
+// 가짜 지라·캘린더를 끼운 서버 하나. `mode` 파일의 글자(ok|auth)로 두 쪽의 답을 바꾼다.
+async function startFetchServer(t, { calendarSource = 'ical', mode = 'ok' } = {}) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-fetch-now-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const data = path.join(home, 'tracker');
+  const tokens = path.join(home, 'tokens');
+  const agents = path.join(home, 'LaunchAgents');
+  const automation = path.join(home, 'automation');
+  [data, tokens, agents, path.join(automation, 'logs')].forEach(dir => fs.mkdirSync(dir, { recursive: true }));
+  fs.writeFileSync(path.join(tokens, 'workspace-jira-token'), 'jira-secret-token\n', { mode: 0o600 });
+  fs.writeFileSync(path.join(tokens, 'workspace-slack-token'), 'slack-secret-token\n', { mode: 0o600 });
+  fs.writeFileSync(path.join(tokens, 'workspace-calendar-ical'), 'https://calendar.example.test/feedface/basic.ics\n', { mode: 0o600 });
+  const modeFile = path.join(home, 'mode');
+  fs.writeFileSync(modeFile, mode);
+  const config = path.join(home, 'workspace.config.json');
+  fs.writeFileSync(config, JSON.stringify({
+    integrations: { slack: true, calendar: true, jira: true, tiro: true },
+    jira: { siteUrl: 'https://jira.example.test', email: 'me@example.test', tokenFile: path.join(tokens, 'workspace-jira-token') },
+    slack: { tokenFile: path.join(tokens, 'workspace-slack-token'), channels: { todo: { id: 'C0TODO11', name: '#my-todo' } } },
+    calendar: calendarSource === 'ical' ? { source: 'ical', icalFile: path.join(tokens, 'workspace-calendar-ical') } : { source: 'claude' },
+    meetingNotes: 'tiro',
+  }, null, 2));
+  const wrapper = path.join(home, 'fake-remote-server.js');
+  fs.writeFileSync(wrapper, `'use strict';
+const fs = require('fs');
+const realFetch = globalThis.fetch;
+globalThis.fetch = async (input, init) => {
+  const url = String(input && input.url ? input.url : input);
+  const mode = fs.readFileSync(${JSON.stringify(modeFile)}, 'utf8').trim();
+  if (url.startsWith('https://jira.example.test/')) {
+    if (mode === 'auth') return new Response('{}', { status: 401 });
+    const issue = key => ({ key, fields: { summary: key + ' 요약', status: { name: '진행 중', statusCategory: { key: 'indeterminate' } }, issuetype: { name: 'Task' } } });
+    return new Response(JSON.stringify({ issues: [issue('IO-1'), issue('IO-2')] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+  if (url.startsWith('https://calendar.example.test/')) {
+    if (mode === 'auth') return new Response('gone', { status: 404 });
+    const d = new Date();
+    const day = String(d.getFullYear()) + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0');
+    const body = ['BEGIN:VCALENDAR', 'BEGIN:VEVENT', 'UID:a@google.com', 'DTSTART:' + day + 'T100000', 'DTEND:' + day + 'T110000', 'SUMMARY:지금 읽은 회의', 'END:VEVENT', 'END:VCALENDAR'].join('\\r\\n');
+    return new Response(body, { status: 200, headers: { 'Content-Type': 'text/calendar' } });
+  }
+  return realFetch(input, init);
+};
+const { server } = require(${JSON.stringify(path.join(__dirname, 'server.js'))});
+server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => console.log('ready'));
+`);
+  const port = await freePort();
+  const child = spawn(process.execPath, [wrapper], {
+    env: {
+      ...process.env, WORKSPACE_PORT: String(port), WORKSPACE_NO_OPEN: '1', WORKSPACE_HOST: '', WORKSPACE_NO_REMOTE_CHECK: '1',
+      WORKSPACE_DATA_DIR: data, WORKSPACE_CONFIG: config, WORKSPACE_TOKEN_DIR: tokens,
+      WORKSPACE_AUTOMATION_DIR: automation, WORKSPACE_LAUNCH_AGENTS_DIR: agents,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let log = '';
+  child.stdout.on('data', chunk => { log += chunk; });
+  child.stderr.on('data', chunk => { log += chunk; });
+  t.after(() => child.kill('SIGKILL'));
+  const base = `http://127.0.0.1:${port}`;
+  const deadline = Date.now() + 10000;
+  for (;;) {
+    if (Date.now() > deadline) throw new Error(`서버가 응답하지 않았습니다: ${log}`);
+    if (child.exitCode !== null) throw new Error(`서버가 종료되었습니다 (${child.exitCode}): ${log}`);
+    try { if ((await fetch(base + '/api/storage-status')).ok) break; } catch { /* 아직 */ }
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  const ask = async (key) => {
+    const response = await fetch(base + '/api/integrations/fetch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key }) });
+    const text = await response.text();
+    return { status: response.status, text, ...JSON.parse(text) };
+  };
+  const plist = name => fs.writeFileSync(path.join(agents, `com.workspace.app.${name}.plist`), '<plist/>\n');
+  const request = name => path.join(automation, 'requests', name);
+  return { home, base, ask, plist, request, modeFile, automation, log: () => log };
+}
+const SECRETS = /jira-secret-token|slack-secret-token|feedface|calendar\.example\.test/;
+
+test('WP-D2.5 지금 가져오기: 지라·캘린더(비밀 주소)는 곧바로 다시 읽고, 슬랙·티로는 plist가 있을 때만 요청 파일을 쓰며, 같은 연동은 1분에 한 번', async (t) => {
+  const app = await startFetchServer(t);
+  // 지라 — 서버가 곧바로 다시 읽어 개수와 시각을 준다
+  const jira = await app.ask('jira');
+  assert.equal(jira.status, 200);
+  assert.equal(jira.mode, 'done');
+  assert.equal(jira.count, 2);
+  assert.ok(Date.parse(jira.readAt) > Date.now() - 60000);
+  // 1분 안에 다시 누르면 막는다(서버 메모리에서 센다)
+  const again = await app.ask('jira');
+  assert.equal(again.status, 200, '결과를 알리는 답이라 200(브라우저 콘솔에 오류로 남지 않게)');
+  assert.equal(again.reason, 'throttled');
+  assert.equal(again.message, '방금 가져왔어요 — 1분 뒤에 다시 할 수 있어요');
+
+  // 캘린더(비밀 주소) — 곧바로 다시 읽어 오늘 일정 수를 준다. 오늘 미팅도 그 값으로 바뀐다
+  const calendar = await app.ask('calendar');
+  assert.equal(calendar.status, 200);
+  assert.equal(calendar.mode, 'done');
+  assert.equal(calendar.count, 1);
+  const items = await (await fetch(app.base + '/api/items')).json();
+  assert.deepEqual(items.calendar.events.map(one => one.title), ['지금 읽은 회의']);
+
+  // 슬랙 — launchd 파일이 없으면(옛 설치·setup 미실행) 파일을 쓰지 않고 안내만 한다. 1분 제한도 쓰지 않는다
+  const missing = await app.ask('slack');
+  assert.equal(missing.status, 200);
+  assert.equal(missing.reason, 'not-installed');
+  assert.equal(missing.message, '업데이트.command를 한 번 실행하면 쓸 수 있어요');
+  assert.equal(fs.existsSync(app.request('slack-capture.request')), false, '등록이 없으면 요청 파일을 쓰지 않는다');
+  app.plist('slack-capture-now');
+  const slack = await app.ask('slack');
+  assert.equal(slack.status, 200);
+  assert.equal(slack.mode, 'requested');
+  const asked = JSON.parse(fs.readFileSync(app.request('slack-capture.request'), 'utf8'));
+  assert.deepEqual(Object.keys(asked), ['requestedAt']);
+  assert.equal((await app.ask('slack')).reason, 'throttled');
+
+  // 티로 — 이미 있는 미팅 노트 가져오기(오늘 모드) 길 그대로, tiro-sync plist가 있을 때만
+  assert.equal((await app.ask('tiro')).reason, 'not-installed');
+  assert.equal(fs.existsSync(app.request('tiro-sync.request')), false);
+  app.plist('tiro-sync');
+  const tiro = await app.ask('tiro');
+  assert.equal(tiro.mode, 'requested');
+  assert.equal(JSON.parse(fs.readFileSync(app.request('tiro-sync.request'), 'utf8')).scope, 'today');
+
+  // 모르는 키는 거절
+  const wrong = await app.ask('figma');
+  assert.equal(wrong.status, 400);
+  assert.equal(wrong.ok, false);
+
+  // 응답·연동 상태·로그 어디에도 토큰·비밀 주소가 없다
+  for (const one of [jira, again, calendar, missing, slack, tiro]) assert.ok(!SECRETS.test(one.text), one.text);
+  const state = await (await fetch(app.base + '/api/integrations')).text();
+  assert.ok(!SECRETS.test(state), '연동 상태에도 없다');
+  assert.deepEqual(JSON.parse(state).jira.fetch, { failing: false, auth: false, failedAt: null });
+  assert.ok(!SECRETS.test(app.log()), '서버 로그에도 없다');
+  // 서버는 프로세스를 띄우지 않는다 — 이 경로 어디에도 child_process가 없다
+  const route = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8').split('async function fetchNow(key) {')[1].split('\n}\n')[0];
+  assert.ok(!/exec|spawn|execFile/.test(route), '지금 가져오기는 프로세스를 띄우지 않는다');
+});
+
+test('WP-D2.5 지금 가져오기 실패: 지라 401·비밀 주소 404는 auth, 연동 상태의 fetch도 실패 중·auth로, 슬랙은 로그의 invalid_auth로 가른다', async (t) => {
+  const app = await startFetchServer(t, { mode: 'auth' });
+  const jira = await app.ask('jira');
+  assert.equal(jira.status, 200);
+  assert.equal(jira.reason, 'auth');
+  assert.match(jira.message, /다시 연결해 주세요/);
+  const calendar = await app.ask('calendar');
+  assert.equal(calendar.reason, 'auth');
+  assert.ok(!SECRETS.test(jira.text + calendar.text));
+
+  // 슬랙: 상태 탭과 같은 기준 — 가장 최근 실행이 실패이고 그 이유가 토큰이면 auth
+  const slackLog = path.join(app.automation, 'logs', 'slack-capture.log');
+  const stamp = offset => { const d = new Date(Date.now() - offset * 60000); const p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; };
+  fs.writeFileSync(slackLog, `${stamp(30)} 새 메시지 없음 — Claude 호출 생략\n${stamp(10)} todo 채널 확인 실패 — ERR:invalid_auth\n`);
+  fs.writeFileSync(path.join(app.automation, 'logs', 'tiro-sync.log'), `───── ${stamp(20)} tiro-sync 시작\n가져온 노트 1개\n───── ${stamp(19)} tiro-sync 종료 (exit 0)\n`);
+  const state = await (await fetch(app.base + '/api/integrations')).json();
+  assert.equal(state.jira.fetch.failing, true);
+  assert.equal(state.jira.fetch.auth, true);
+  assert.ok(state.jira.fetch.failedAt);
+  assert.equal(state.calendar.fetch.failing, true);
+  assert.equal(state.calendar.fetch.auth, true);
+  assert.equal(state.slack.fetch.failing, true);
+  assert.equal(state.slack.fetch.auth, true);
+  assert.ok(Math.abs(Date.parse(state.slack.fetch.failedAt) - (Date.now() - 10 * 60000)) < 5000);
+  assert.equal(state.meetingNotes.fetch.failing, false);
+  assert.ok(state.meetingNotes.fetch.lastRunAt, '티로는 마지막으로 가져온 때를 준다');
+
+  // 네트워크 같은 다른 실패는 auth가 아니다(슬랙: 토큰 말고 다른 오류)
+  fs.writeFileSync(slackLog, `${stamp(5)} todo 채널 확인 실패 — ERR:ratelimited\n`);
+  const other = await (await fetch(app.base + '/api/integrations')).json();
+  assert.deepEqual([other.slack.fetch.failing, other.slack.fetch.auth], [true, false]);
+  // 다음 실행이 성공하면 실패 중이 아니다(지난 실패는 접어 둔다)
+  fs.appendFileSync(slackLog, `${stamp(1)} 새 메시지 없음 — Claude 호출 생략\n`);
+  const healed = await (await fetch(app.base + '/api/integrations')).json();
+  assert.equal(healed.slack.fetch.failing, false);
+});
+
+test('WP-D2.5 지금 가져오기(캘린더 Claude 갈래): calendar-sync-now plist가 있을 때만 calendar-sync.request를 쓰고, 상태 줄 시각은 calendar-sync 로그에서', async (t) => {
+  const app = await startFetchServer(t, { calendarSource: 'claude' });
+  assert.equal((await app.ask('calendar')).reason, 'not-installed');
+  assert.equal(fs.existsSync(app.request('calendar-sync.request')), false);
+  app.plist('calendar-sync-now');
+  const asked = await app.ask('calendar');
+  assert.equal(asked.mode, 'requested');
+  assert.ok(Date.parse(JSON.parse(fs.readFileSync(app.request('calendar-sync.request'), 'utf8')).requestedAt));
+  fs.writeFileSync(path.join(app.automation, 'logs', 'calendar-sync.log'), '───── 2026-09-24 10:13:00 calendar-sync 시작\n일정 3개\n───── 2026-09-24 10:14:00 calendar-sync 종료 (exit 0)\n');
+  const state = await (await fetch(app.base + '/api/integrations')).json();
+  assert.equal(state.calendar.fetch.failing, false);
+  assert.equal(state.calendar.fetch.lastRunAt, new Date('2026-09-24T10:14:00').toISOString());
+});
+
+test('WP-D2.5 지라·캘린더 보관함은 마지막 실패의 갈래(auth)를 들고 있다가 성공하면 지운다', async () => {
+  const { createJiraLive } = require('./jira-live');
+  let answer = { ok: false, kind: 'auth' };
+  const live = createJiraLive({ list: async () => answer, now: () => 1000 });
+  await live.refresh();
+  assert.deepEqual(live.failure(), { at: 1000, auth: true });
+  answer = { ok: false, kind: 'network' };
+  await live.refresh();
+  assert.deepEqual(live.failure(), { at: 1000, auth: false });
+  answer = { ok: true, connected: true, issues: [] };
+  await live.refresh();
+  assert.equal(live.failure(), null);
+
+  let status = 403;
+  const calendar = createCalendarLive({
+    load: () => integrationsStore.fetchIcal('https://calendar.example.test/x.ics', async () => new Response('no', { status })),
+    now: () => 2000,
+  });
+  await calendar.refresh();
+  assert.deepEqual(calendar.failure(), { at: 2000, auth: true });
+  status = 500;
+  await calendar.refresh();
+  assert.deepEqual(calendar.failure(), { at: 2000, auth: false });
+  await assert.rejects(integrationsStore.fetchIcal('https://calendar.example.test/x.ics', async () => new Response('no', { status: 404 })),
+    error => error.auth === true && !/calendar\.example\.test/.test(error.message));
+});
+
+test('WP-D2.5 slack-capture.sh: SLACK_CAPTURE_MANUAL=1이면 시간대 판단을 건너뛰고, 연동을 껐으면 여전히 멈춘다', () => {
+  const script = fs.readFileSync(automationScript('slack-capture.sh'), 'utf8');
+  assert.match(script, /if \[ "\$\{SLACK_CAPTURE_IGNORE_HOURS:-0\}" != "1" \] && \[ "\$\{SLACK_CAPTURE_MANUAL:-0\}" != "1" \]; then/);
+  // 연동 끔 검사가 시간 판단보다 먼저다
+  assert.ok(script.indexOf('슬랙 수집이 꺼져 있어 건너뛰어요') < script.indexOf('SLACK_CAPTURE_MANUAL:-0'));
+
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-slack-manual-'));
+  const logs = path.join(home, 'logs');
+  const config = path.join(home, 'workspace.config.json');
+  const env = { WORKSPACE_DIR: home, WORKSPACE_CONFIG: config, AUTOMATION_LOG_DIR: logs };
+  fs.writeFileSync(config, '{}');
+  // 스크립트가 PATH를 새로 잡아 시계를 바꿔 끼울 수 없다 — 지금 시각이 9~19시 밖일 때만 "주기 실행은 조용히 빠진다"를 본다.
+  const hour = new Date().getHours();
+  if (hour < 9 || hour >= 19) {
+    assert.equal(runScript(automationScript('slack-capture.sh'), [], env).status, 0, '5분 주기 실행은 시간대 밖이면 조용히 빠진다');
+    assert.equal(fs.existsSync(path.join(logs, 'slack-capture.log')), false);
+  }
+  // 수동 실행은 몇 시든 채널 확인까지 간다(채널이 없어 곧바로 실패로 끝난다)
+  const manual = runScript(automationScript('slack-capture.sh'), [], { ...env, SLACK_CAPTURE_MANUAL: '1' });
+  assert.equal(manual.status, 1);
+  assert.match(fs.readFileSync(path.join(logs, 'slack-capture.log'), 'utf8'), /채널 확인 실패/);
+  fs.writeFileSync(config, JSON.stringify({ integrations: { slack: false } }));
+  assert.equal(runScript(automationScript('slack-capture.sh'), [], { ...env, SLACK_CAPTURE_MANUAL: '1' }).status, 0);
+  assert.match(fs.readFileSync(path.join(logs, 'slack-capture.log'), 'utf8'), /슬랙 수집이 꺼져 있어 건너뛰어요/);
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('WP-D2.5 setup.sh: 지금 가져오기 에이전트 둘을 등록하고(ical이면 calendar-sync-now 없음), 티로 프롬프트는 calendar.source로 고른다', () => {
+  const script = fs.readFileSync(path.join(REPO_ROOT, 'setup.sh'), 'utf8');
+  // 슬랙: 같은 slack-capture.sh를 SLACK_CAPTURE_MANUAL=1로, 요청 파일을 지켜본다(슬랙을 켰을 때만)
+  const slackBlock = script.split('if [ "$USE_SLACK" = "yes" ]; then\ncat > "$AGENTS_DIR/$LABEL.slack-capture.plist"')[1].split('\nfi\n')[0];
+  assert.match(slackBlock, /<string>\$LABEL\.slack-capture-now<\/string>/);
+  assert.match(slackBlock, /<key>SLACK_CAPTURE_MANUAL<\/key>\n\s*<string>1<\/string>/);
+  assert.match(slackBlock, /<string>\$\(xml_escape "\$INSTALL_DIR\/requests\/slack-capture\.request"\)<\/string>/);
+  assert.match(slackBlock, /<key>WatchPaths<\/key>/);
+  assert.match(slackBlock, /<key>RunAtLoad<\/key>\n\s*<false\/>/);
+  // 캘린더(Claude): calendar-sync-now는 USE_CAL_SYNC일 때만(ical이면 no) — run-task.sh에는 calendar-sync 이름으로
+  assert.match(script, /\[ "\$USE_CAL_SYNC" = "yes" \] && write_watch_agent "calendar-sync-now" "\$INSTALL_DIR\/requests\/calendar-sync\.request" \\\n\s*"\$CAL_SYNC_PROMPT" "\$CAL_SYNC_TOOLS" "calendar-sync"/);
+  assert.match(script, /\[ "\$CAL_SOURCE" = "ical" \] && USE_CAL_SYNC="no"/);
+  assert.match(script, /\[ "\$USE_SLACK" = "yes" \] \|\| remove_agent slack-capture-now/);
+  assert.match(script, /\[ "\$USE_CAL_SYNC" = "yes" \] \|\| remove_agent calendar-sync-now/);
+  assert.match(script, /local name="\$1" watch="\$2" prompt tools task/);
+  assert.match(script, /<string>\$task<\/string>/);
+
+  // write_watch_agent 조각만 꺼내 임시 폴더에 plist를 써 본다(launchctl은 부르지 않는다)
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-setup-watch-'));
+  const piece = script.split('xml_escape() {')[1].split('\n# 슬랙 캡처 — 새 메시지가 있을 때만')[0];
+  const runner = `AGENTS_DIR=${JSON.stringify(home)}; LABEL=com.workspace.app; INSTALL_DIR=/x/inst; WORKSPACE=/x/ws\nxml_escape() {${piece}\nwrite_watch_agent "calendar-sync-now" "/x/inst/requests/calendar-sync.request" "프롬프트 <&>" "Read" "calendar-sync"\nwrite_watch_agent "tiro-sync" "/x/inst/requests/tiro-sync.request" "p" "t"\n`;
+  const ran = spawnSync('/bin/bash', ['-c', runner], { encoding: 'utf8' });
+  assert.equal(ran.status, 0, ran.stderr);
+  const now = fs.readFileSync(path.join(home, 'com.workspace.app.calendar-sync-now.plist'), 'utf8');
+  assert.match(now, /<string>com\.workspace\.app\.calendar-sync-now<\/string>/);
+  assert.match(now, /<string>\/x\/inst\/run-task\.sh<\/string>\n\s*<string>calendar-sync<\/string>/, '실행 이름은 calendar-sync(로그·상태를 한 줄로)');
+  assert.match(now, /프롬프트 &lt;&amp;&gt;/);
+  assert.match(now, /logs\/calendar-sync\.err/);
+  const tiro = fs.readFileSync(path.join(home, 'com.workspace.app.tiro-sync.plist'), 'utf8');
+  assert.match(tiro, /<string>\/x\/inst\/run-task\.sh<\/string>\n\s*<string>tiro-sync<\/string>/, '다섯째 값이 없으면 예전 그대로');
+  fs.rmSync(home, { recursive: true, force: true });
+
+  // 티로 프롬프트: calendar.source를 보고 고른다 — ical이면 calendar-sync를 시도하지 않고 앱의 오늘 미팅을
+  const tiroPrompt = script.split('write_watch_agent "tiro-sync"')[1].split('\n\n')[0];
+  assert.match(tiroPrompt, /calendar\.source를 보고 골라라/);
+  assert.match(tiroPrompt, /캘린더 갱신\(calendar-sync\)을 시도하지 말고 앱의 GET \/api\/items가 주는 오늘 미팅/);
+  const skill = fs.readFileSync(path.join(REPO_ROOT, '.claude', 'skills', 'tiro-sync.md'), 'utf8');
+  assert.match(skill, /`calendar\.source`가 `"ical"`/);
+  assert.match(skill, /\/api\/items`를 불러 응답의 `calendar\.events`/);
+});
+
+// 설치 위치 지키기 — 함수 조각만 source해서 임시 HOME·임시 폴더·가짜 git 저장소로만 시험한다.
+test('WP-D2.5 install-location: playio 폴더면 ~/workspace로 옮겨 새 위치의 스크립트로 이어 가고, 못 옮기면 멈추며, 그 밖은 그대로(바탕화면은 경고만)', { skip: !gitReady }, () => {
+  const lib = path.join(__dirname, 'automation', 'install-location.sh');
+  const script = fs.readFileSync(lib, 'utf8');
+  assert.ok(!/rm -rf|rm -r /.test(script), '옮기기 코드는 지우지 않는다');
+  assert.ok(!/pkill|killall|xargs kill/.test(script));
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-relocate-')));
+  const home = path.join(root, 'home');
+  fs.mkdirSync(home);
+  const target = path.join(home, 'workspace');
+  // 설치 폴더 하나를 흉내 낸다 — 옮긴 뒤 이어서 돌 `setup.sh`는 받은 인자와 표시를 적기만 한다
+  const makeInstall = (dir) => {
+    fs.mkdirSync(dir, { recursive: true });
+    writeExec(path.join(dir, 'setup.sh'), '#!/bin/bash\necho "continued:$(cd "$(dirname "$0")" && pwd -P):${WORKSPACE_RELOCATED:-}:$*"\n');
+    fs.writeFileSync(path.join(dir, 'marker.txt'), 'data\n');
+    return dir;
+  };
+  const guard = (dir, extra = '') => spawnSync('/bin/bash', ['-c',
+    `. ${JSON.stringify(lib)}\n${extra}\ncd ${JSON.stringify(root)}\ninstall_location_guard ${JSON.stringify(dir)} setup.sh --one two\necho "stayed:$?"`], {
+    encoding: 'utf8', env: { ...process.env, HOME: home, WORKSPACE_RELOCATE_TARGET: target, WORKSPACE_RELOCATED: '' },
+  });
+
+  // 1) 경로에 PlayIO(대소문자 무시) → 옮기고 새 위치의 같은 스크립트로 이어 간다(인자·표시 그대로)
+  const company = makeInstall(path.join(root, 'PlayIO-docs', 'tools', 'workspace-tracker'));
+  const moved = guard(company);
+  assert.equal(moved.status, 0, moved.stderr);
+  assert.match(moved.stdout, new RegExp(`continued:${target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:1:--one two`));
+  assert.ok(!moved.stdout.includes('stayed:'), 'exec로 넘어가 돌아오지 않는다');
+  assert.equal(fs.readFileSync(path.join(target, 'marker.txt'), 'utf8'), 'data\n');
+  assert.equal(fs.existsSync(company), false, '옛 자리에 링크·폴더를 새로 만들지 않는다');
+  assert.ok(fs.existsSync(path.join(root, 'PlayIO-docs', 'tools')), '회사 쪽 다른 폴더는 그대로다');
+
+  // 2) 대상이 이미 있으면(무엇이든) 멈추고 아무것도 바꾸지 않는다
+  const second = makeInstall(path.join(root, 'playio', 'workspace-tracker'));
+  const blocked = guard(second);
+  assert.match(blocked.stdout, /회사\(playio\) 폴더 안에 설치돼 있어서 ~\/workspace로 옮겨야 하는데, ~\/workspace가 이미 있어요\. 그 폴더 이름을 바꾼 뒤 다시 실행해 주세요\./);
+  assert.match(blocked.stdout, /stayed:1/);
+  assert.ok(fs.existsSync(path.join(second, 'marker.txt')));
+  fs.rmSync(target, { recursive: true, force: true });
+  fs.symlinkSync(path.join(root, 'nowhere'), target);
+  assert.match(guard(second).stdout, /이미 있어요[\s\S]*stayed:1/, '깨진 링크도 "있음"이다');
+  fs.unlinkSync(target);
+
+  // 3) 다른 디스크(장치 번호가 다름 — 주입) → 복사하지 않고 멈춘다
+  const otherDisk = guard(second, 'install_location_device() { case "$1" in *playio*) echo 1 ;; *) echo 2 ;; esac; }');
+  assert.match(otherDisk.stdout, /다른 디스크라 한 번에 옮길 수 없어요[\s\S]*stayed:1/);
+  assert.ok(fs.existsSync(path.join(second, 'marker.txt')) && !fs.existsSync(target));
+
+  // 4) 바깥쪽 git 저장소의 remote에 playio → 옮긴다(설치 폴더 자신의 .git은 보지 않는다)
+  const outer = path.join(root, 'company-repo');
+  fs.mkdirSync(outer);
+  runGit(outer, ['init', '-q']);
+  runGit(outer, ['remote', 'add', 'origin', 'git@github.com:PlayIO-Corp/docs.git']);
+  const nested = makeInstall(path.join(outer, 'sub', 'tracker-copy'));
+  runGit(nested, ['init', '-q']);
+  runGit(nested, ['remote', 'add', 'origin', 'https://github.com/luvoneun/workspace-tracker.git']);
+  const viaRemote = guard(nested);
+  assert.match(viaRemote.stdout, /continued:.*\/home\/workspace:1:/);
+  fs.rmSync(target, { recursive: true, force: true });
+
+  // 5) 일반 폴더·이름을 바꾼 폴더 → 그대로(자기 저장소 remote는 보지 않는다)
+  const plain = makeInstall(path.join(root, 'elsewhere', 'my-renamed-tracker'));
+  runGit(plain, ['init', '-q']);
+  runGit(plain, ['remote', 'add', 'origin', 'https://github.com/playio-mirror/workspace-tracker.git']);
+  const stay = guard(plain);
+  assert.equal(stay.stdout.trim(), 'stayed:0');
+  assert.ok(fs.existsSync(path.join(plain, 'marker.txt')) && !fs.existsSync(target));
+
+  // 6) 바탕화면 아래 → 경고 한 줄만, 그대로
+  const desk = makeInstall(path.join(home, 'Desktop', 'workspace-tracker'));
+  const warned = guard(desk);
+  assert.match(warned.stdout, /바탕화면·문서·iCloud 폴더는 동기화 때문에 느리거나 파일이 꼬일 수 있어요 — 권장 위치는 ~\/workspace예요\.\nstayed:0/);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('WP-D2.5 update.sh·setup.sh는 설치 위치 판단을 맨 앞에서 부르고, 옮겼으면 0단계 한 줄 + 새 위치에서 setup.sh를 다시 돌린다', () => {
+  const update = fs.readFileSync(path.join(REPO_ROOT, 'update.sh'), 'utf8');
+  const setup = fs.readFileSync(path.join(REPO_ROOT, 'setup.sh'), 'utf8');
+  const command = fs.readFileSync(path.join(REPO_ROOT, '업데이트.command'), 'utf8');
+  const guardAt = text => text.indexOf('install_location_guard "$WORKSPACE"');
+  assert.ok(guardAt(update) > 0 && guardAt(update) < update.indexOf('cd "$WORKSPACE" || exit 1'), 'update.sh: 폴더에 들어가기 전에');
+  assert.ok(guardAt(update) < update.indexOf('[1/6]') && guardAt(update) < update.indexOf('ROLLBACK" = "1"'));
+  assert.match(update, /install_location_guard "\$WORKSPACE" "update\.sh" "\$@"/);
+  assert.ok(guardAt(setup) > 0 && guardAt(setup) < setup.indexOf('[1/5]') && guardAt(setup) < setup.indexOf('xattr -d'), 'setup.sh: 맨 앞에서');
+  assert.match(setup, /install_location_guard "\$WORKSPACE" "setup\.sh" "\$@"/);
+  for (const text of [update, setup]) {
+    assert.match(text, /\. "\$WORKSPACE\/tracker\/inbox-app\/automation\/install-location\.sh"/);
+    assert.match(text, /echo "0\. 설치 위치 옮기기 — 회사 폴더 밖 ~\/workspace로 옮겼어요"/);
+  }
+  assert.match(update, /if \[ "\$\{WORKSPACE_RELOCATED:-\}" = "1" \]; then\n[\s\S]*?WORKSPACE_RELOCATED= bash "\$WORKSPACE\/setup\.sh"/);
+  // 복사본 규칙: 두 스크립트 모두 install-location.sh를 설치 폴더로 복사한다
+  assert.match(setup, /\ncp "\$APP_DIR\/automation\/run-task\.sh" [^\n]*"\$APP_DIR\/automation\/install-location\.sh" [^\n]*"\$INSTALL_DIR\/"\n/);
+  assert.match(update, /cp "\$APP_DIR\/automation\/install-location\.sh" "\$INSTALL_DIR\/"/);
+  assert.match(command, /bash update\.sh && cd "\$\(pwd -P\)" && bash setup\.sh/);
+  for (const text of [update, setup]) assert.ok(!/pkill|killall|xargs kill/.test(text));
 });
