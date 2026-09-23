@@ -11,6 +11,8 @@ const path = require('path');
 const os = require('os');
 const { exec, execFile } = require('child_process');
 const { DATA_FORMAT_VERSION, readDataVersion, TOO_NEW_MESSAGE } = require('./migrate');
+// 설정 > 연동이 쓰는 한 벌(값 확인·config 합치기·토큰 파일·문제 보고의 오류 줄).
+const integrations = require('./integrations');
 const { randomBytes, createHash, timingSafeEqual } = require('node:crypto');
 
 // 사람/회사마다 달라지는 값은 전부 workspace.config.json 한 곳에 모아둔다.
@@ -1596,7 +1598,8 @@ function git(args, timeout = 3000) {
 // 추적 파일의 수정·삭제만 센다 — 미추적·gitignore는 빠지므로 업무 데이터는 여기 잡히지 않는다.
 // 파일 이름만 쓰고 내용은 읽지 않는다.
 async function gitModified() {
-  const out = await git(['status', '--porcelain']);
+  // `core.quotepath=false` — 한글 파일 이름이 8진수 escape(`\354\227…`)로 오지 않게(문제 보고에 그대로 실린다).
+  const out = await git(['-c', 'core.quotepath=false', 'status', '--porcelain']);
   if (out === null) return null;
   return out.split('\n').filter(Boolean).filter((line) => {
     const state = line.slice(0, 2);
@@ -1651,6 +1654,35 @@ async function aboutApp() {
   };
 }
 
+// ---------- 설정 > 연동 ----------
+// `workspace.config.json`을 앱이 쓰는 **단 하나의 자리**다(DECISIONS 2026-09-23). 저장할 때마다
+// 파일을 새로 읽어 합치므로, 그 사이 사람이 손으로 적어 둔 값도 그대로 남는다.
+// 토큰은 config에 적지 않는다 — 파일(0600)로만 두고 경로만 적는다.
+function currentConfigFile() {
+  try { return JSON.parse(nativeFs.readFileSync(CONFIG_PATH, 'utf8')); } catch { return {}; }
+}
+// `claude` 실행 파일이 이 맥에 있는지 — 프로세스마다 한 번만 보고(PATH만 훑는다) 들고 있는다.
+let claudeFound = null;
+function claudeReady() {
+  if (claudeFound === null) claudeFound = integrations.claudeInstalled();
+  return claudeFound;
+}
+// 앱을 끝내는 길은 이 하나뿐이다 — 테스트는 여기를 갈아 끼워 실제 종료가 절대 일어나지 않게 한다.
+let exitApp = code => process.exit(code);
+function setExitForTests(fn) { exitApp = typeof fn === 'function' ? fn : (code => process.exit(code)); }
+
+// 문제 보고에 붙는 최근 오류 줄. 서버 로그(`server.err`)를 **읽기만** 하고 토큰 파일은 열지 않는다.
+function aboutDiagnostics() {
+  // 어느 맥·어느 Node에서 났는지는 고칠 때 가장 먼저 묻는 값이라 함께 싣는다(개인 정보가 아니다).
+  const base = { ok: true, os: `${os.type()} ${os.release()}`, node: process.version };
+  const file = path.join(automationLogDir(), 'server.err');
+  try {
+    return { ...base, found: true, lines: integrations.errorLines(nativeFs.readFileSync(file, 'utf8')) };
+  } catch {
+    return { ...base, found: false, lines: [] };
+  }
+}
+
 // ---------- 브라우저로 나가는 화면 파일 ----------
 // 화면 코드가 여러 파일로 나뉘어 있어서 이름을 하나하나 적지 않는다 — `PUBLIC_DIR`의 `*.js`/`*.css`
 // 가운데 아래 차단 규칙에 걸리지 않는 것만 나간다(파일을 더해도 서버를 고칠 필요가 없다).
@@ -1659,6 +1691,7 @@ async function aboutApp() {
 const CLIENT_BLOCKED = new Set([
   'server.js', 'safe-storage.js', 'jira-client.js', 'jira-live.js', 'attention-live.js', 'report-drafts.js',
   'task-batch.js', 'slack-history.js', 'import-record.js', 'browser-fixture.js', 'migrate.js',
+  'integrations.js',
 ]);
 function isClientFile(name) {
   if (!/^[A-Za-z0-9][\w.-]*\.(js|css)$/.test(name)) return false;   // 이름 한 칸짜리(하위 경로 없음)만
@@ -2031,6 +2064,48 @@ const handleRequest = (req, res) => {
     return;
   }
 
+  // 문제 보고에 붙일 최근 오류 줄 — 조회라 파일을 쓰지 않는다.
+  if (url.pathname === '/api/about/diagnostics' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify(aboutDiagnostics()));
+    return;
+  }
+
+  // 지금 연동 상태 — 토큰 값은 싣지 않고 있음/없음만 알려 준다.
+  if (url.pathname === '/api/integrations' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({
+      ok: true,
+      ...integrations.readIntegrations(currentConfigFile(), { claude: claudeReady() }),
+      install: process.env.WORKSPACE_MANAGED ? 'managed' : 'manual',
+    }));
+    return;
+  }
+
+  // 연동 저장 — 켜는 쪽은 먼저 지라·슬랙에 읽어 보고 성공했을 때만 쓴다.
+  // `USES`·지라 설정은 서버가 뜰 때 읽으므로, launchd가 띄운 자리면 응답 뒤 스스로 끝낸다(다시 떠 준다).
+  if (url.pathname === '/api/integrations/save' && req.method === 'POST') {
+    readBody(req)
+      .then(body => integrations.saveIntegrations({
+        configPath: CONFIG_PATH,
+        current: currentConfigFile(),
+        body,
+        jiraCheck: settings => require('./jira-client').checkJiraAccount(settings),
+        slackCheck: (token, id) => integrations.slackCheckChannel(token, id),
+      }))
+      .then(({ result }) => {
+        const managed = !!process.env.WORKSPACE_MANAGED;
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ...result, restart: managed }));
+        integrations.scheduleRestart({ managed, exit: exitApp });
+      })
+      .catch((error) => {
+        res.writeHead(error.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: error.message }));
+      });
+    return;
+  }
+
   if (url.pathname === '/api/automation/status' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ automations: getAutomationStatus() }));
@@ -2370,6 +2445,16 @@ const handleRequest = (req, res) => {
     return;
   }
 
+  // 이 컴퓨터에만 두는 꾸밈(`local/local.css`). 저장소에 없는 파일이라 **없어도 빈 200**으로 준다 —
+  // 화면은 늘 같은 한 줄을 읽고, 브라우저 콘솔에 404가 남지 않는다. 허용하는 경로는 이것 하나뿐이다.
+  if (url.pathname === '/local/local.css' && req.method === 'GET') {
+    let css = '';
+    try { css = nativeFs.readFileSync(path.join(REPO_DIR, 'local', 'local.css'), 'utf8'); } catch { css = ''; }
+    res.writeHead(200, { 'Content-Type': 'text/css; charset=utf-8' });
+    res.end(css);
+    return;
+  }
+
   let filePath = url.pathname === '/' ? '/index.html' : url.pathname;
   // 앱에 내장한 글꼴(Pretendard)도 화면 파일과 같은 길로 나간다. 인증 예외(publicAsset)에는 넣지 않는다.
   // 화면 코드(`*.js`/`*.css`)는 isClientFile이 정한다 — 서버 파일·테스트·픽스처는 거기서 막힌다.
@@ -2501,4 +2586,4 @@ if (require.main === module) {
 
 // `jiraLive`·`attentionLive`는 화면 확인용 픽스처가 "뜰 때 한 번 읽기"를 직접 켜 보려고 함께 내보낸다
 // (테스트·픽스처 밖에서는 쓰지 않는다 — 운영에서는 위의 `start()`가 켠다).
-module.exports = { server, jiraLive, attentionLive };
+module.exports = { server, jiraLive, attentionLive, setExitForTests };

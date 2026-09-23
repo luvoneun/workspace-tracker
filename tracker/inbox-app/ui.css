@@ -419,6 +419,8 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 .d-gear { position: relative; }
 .d-baddot { display: none; position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--urgent); box-shadow: 0 0 0 2px var(--bg); }
 /* 주황 = 자동 갱신이 낡았다(머리줄에 글자를 끼우지 않는다 — 탭이 밀렸다), 빨강 = 지금 실패 중. 둘 다면 빨강이 이긴다 */
+/* 점의 뜻은 셋이고 차례가 있다: 새 버전(파랑) < 낡음(주황) < 지금 실패(빨강). */
+.d-gear.has-update .d-baddot { display: block; background: var(--accent); }
 .d-gear.has-stale .d-baddot { display: block; background: var(--warn); }
 .d-gear.has-alert .d-baddot { display: block; background: var(--urgent); }
 
@@ -814,6 +816,21 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 .d-atrow:has(.nx.is-ed):hover .mt, .d-atrow:has(.nx.is-ed):focus-within .mt { opacity: 1; }
 .d-atmore { margin: 2px 0 2px var(--pad); background: none; color: var(--dim); }
 .d-atmore:hover { background: var(--hover); color: var(--accent-text); }
+
+/* ---------- 시작 카드 (기록이 하나도 없을 때만) ----------
+   `새로 들어온 것`과 같은 따뜻한 카드다 — 같은 자리에 서고, 항목이 생기면 저절로 사라진다. */
+.d-start {
+  background: var(--warm); border: 1px solid var(--warm-line); border-radius: var(--r);
+  box-shadow: var(--soft); padding: 14px 10px 10px; margin: 6px 0 0;
+}
+.d-start .hd { padding: 0 var(--pad) 6px; font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
+.d-startrow {
+  display: block; width: 100%; min-height: var(--row); padding: 8px var(--pad);
+  border: 0; border-radius: 14px; background: none; text-align: left;
+  font-size: 15px; font-weight: 500; color: var(--accent-text); cursor: pointer;
+  transition: background 170ms var(--ease);
+}
+.d-startrow:hover { background: var(--warm-hover); }
 
 /* ---------- 새로 들어온 것 (아주 옅은 따뜻한 카드) ---------- */
 .d-inbox {
@@ -2195,9 +2212,53 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-logline { font-size: 12px; line-height: 1.7; color: var(--text); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .d-logline.is-muted { color: var(--muted); }
 
+/* 앱 정보 — 상태 탭 맨 아래의 조용한 줄. 경고가 아니라 사실이라 흐린 글자다. */
+.d-about .d-abline { font-size: 12.5px; color: var(--dim); }
+.d-ablink {
+  padding: 0; border: 0; background: none; font: inherit; color: var(--dim);
+  text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
+}
+.d-ablink:hover { color: var(--text); }
+.d-abfiles { margin-top: 4px; font-size: 12px; line-height: 1.7; color: var(--dim); overflow-wrap: anywhere; }
+.d-abfiles[hidden], .d-abhow[hidden], .d-abnew[hidden] { display: none; }
+.d-abnew { margin-top: 6px; font-size: 12.5px; color: var(--accent-text); }
+.d-abnew .d-ablink { color: var(--accent-text); }
+.d-abhow { margin-top: 4px; font-size: 12.5px; line-height: 1.7; color: var(--muted); }
+.d-about .d-btn { margin-top: 10px; }
+
+/* 연동 한 줄 — 자동화 줄(.d-auto)과 같은 리듬: 이름 | 상태 | 버튼 / 그 아래 펼쳐지는 자리 */
+.d-intg { padding: 10px 0; }
+.d-intg + .d-intg { box-shadow: inset 0 1px 0 var(--hair); }
+.d-intgtop { display: flex; align-items: center; gap: 10px; min-height: 38px; }
+.d-intgtop .nm { font-size: 14.5px; font-weight: 500; }
+.d-intgtop .st { margin-left: auto; font-size: 13px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.d-intgtop .d-btn { flex: none; }
+.d-intgbody { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.d-intgbody[hidden] { display: none; }
+.d-intgbody > .d-btn { align-self: flex-start; }
+.d-intgnote, .d-intgfoot { margin-top: 6px; font-size: 12.5px; color: var(--dim); }
+.d-ifield { display: block; }
+.d-ifield .lb { display: block; margin-bottom: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.d-ifield .d-din { width: 100%; box-sizing: border-box; }
+.d-ifield .d-hint { display: block; margin-top: 4px; }
+.d-intgother { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; }
+.d-intgother[hidden] { display: none; }
+.d-intgother .d-ifield { flex: 1 1 180px; }
+.d-intg .d-seg { align-self: flex-start; }
+
 .d-faq { max-width: 64ch; }
+.d-faqintro { font-size: 13px; color: var(--muted); line-height: 1.65; }
+/* 개념 한 줄 사전 — 문답 앞에서 말뜻부터 푼다 */
+.d-words { margin-top: 12px; padding: 12px 14px; background: var(--neutral-bg); border-radius: var(--r-sm); }
+.d-word { font-size: 12.5px; color: var(--muted); line-height: 1.7; }
+.d-word .w { font-weight: 600; color: var(--text); }
+.d-faq .grp {
+  margin-top: 24px; font-size: 12px; font-weight: 600; color: var(--dim);
+  padding-top: 10px; border-top: 1px solid var(--hair);
+}
 .d-faq .q { margin-top: 18px; font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
 .d-faq .q:first-child { margin-top: 0; }
+.d-faq .need { margin-top: 3px; font-size: 11.5px; color: var(--dim); }
 .d-faq .a { margin-top: 4px; font-size: 13px; font-weight: 400; color: var(--muted); line-height: 1.65; }
 .d-faq .a b { font-weight: 600; color: var(--text); }
 .d-dsec { margin-top: 22px; padding-top: 12px; border-top: 1px solid var(--hair); }
@@ -2430,11 +2491,16 @@ body.batch-open .d-toast { bottom: 76px; }
   /* 설정 창은 화면을 거의 다 쓰는 판이 된다 */
   #settingsDialog { width: calc(100vw - 16px); max-height: calc(100dvh - 48px); }
   .d-mhd { padding: 10px 10px 10px 14px; gap: 8px; }
-  /* 칸이 셋(상태·사용법·삭제한 항목)이라 좁은 폭에서는 제목 줄 아래로 통째로 내려온다 */
+  /* 칸이 넷(상태·연동·도움말·삭제한 항목)이라 좁은 폭에서는 제목 줄 아래로 통째로 내려온다 */
   .d-mhd { flex-wrap: wrap; row-gap: 8px; }
   .d-mhd .sp { order: 1; }
   .d-mhd #settingsCloseBtn { order: 2; }
   .d-mhd .d-seg { order: 3; flex-basis: 100%; }
+  #settingsDialog .d-mhd .d-seg button { flex: 1 1 0; min-width: 0; padding: 0 6px; }
+  /* 연동 줄도 두 줄로 쌓인다 — 버튼이 상태 글자에 밀려 잘리지 않게 */
+  .d-intgtop { flex-wrap: wrap; row-gap: 6px; }
+  .d-intgtop .st { margin-left: auto; }
+  .d-intgtop .d-btn { order: 3; }
   .d-mbody { padding: 12px 14px 20px; }
   /* 오늘 정리 줄은 두 줄로 쌓인다 — 세그먼트가 줄 폭을 통째로 쓰고 넷이 고르게 나눠 선다 */
   .d-wraprow { flex-wrap: wrap; row-gap: 6px; padding: 8px 0; }

@@ -14,6 +14,8 @@
 <title>워크스페이스</title>
 <link rel="stylesheet" href="/ui.css">
 <link rel="stylesheet" href="/report-ui.css">
+<!-- 이 컴퓨터에만 두는 꾸밈. 파일이 없으면 서버가 빈 CSS를 주므로 늘 이 한 줄이다(README의 `local/`). -->
+<link rel="stylesheet" href="/local/local.css">
 </head>
 <body>
   <a class="skip-link" id="skipLink" href="#todayTaskZone">오늘 할 일로 건너뛰기</a>
@@ -70,6 +72,9 @@
           </div>
           <div class="d-atlist" id="attentionList"></div>
         </section>
+
+        <!-- 시작 카드: 아무 기록도 없을 때만(저장하지 않고 조건만 본다) `새로 들어온 것` 자리에 선다 -->
+        <div id="startCardZone" hidden></div>
 
         <div id="inboxZone" hidden>
           <div class="d-sechd" id="inboxHeading">새로 들어온 것<span class="n num" id="inboxCount">0</span>
@@ -220,13 +225,14 @@
     <div class="d-mbody" id="wrapBody"></div>
   </dialog>
 
-  <!-- 설정 — 드물게 여는 창이라 모달 그대로 둔다(상태 / 사용법 / 삭제한 항목 세 칸) -->
+  <!-- 설정 — 드물게 여는 창이라 모달 그대로 둔다(상태 / 연동 / 도움말 / 삭제한 항목 네 칸) -->
   <dialog id="settingsDialog" class="d-modal" aria-label="설정">
     <div class="d-mhd">
       <h2>설정</h2>
       <span class="d-seg" role="group" aria-label="설정 보기">
         <button type="button" data-settings-tab="status" aria-pressed="true">상태</button>
-        <button type="button" data-settings-tab="guide" aria-pressed="false">사용법</button>
+        <button type="button" data-settings-tab="integrations" aria-pressed="false">연동</button>
+        <button type="button" data-settings-tab="guide" aria-pressed="false">도움말</button>
         <button type="button" data-settings-tab="trash" aria-pressed="false" id="settingsTrashTab">삭제한 항목</button>
       </span>
       <span class="sp"></span>
@@ -234,6 +240,7 @@
     </div>
     <div class="d-mbody">
       <div id="settingsStatusView"></div>
+      <div id="settingsIntegrationsView" hidden></div>
       <div id="settingsGuideView" hidden></div>
       <div id="settingsTrashView" hidden></div>
     </div>

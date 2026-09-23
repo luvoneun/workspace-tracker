@@ -456,10 +456,16 @@ function createJiraClient({ settings, request = (...args) => fetch(...args), rea
   // 누가 나인지는 지라에 한 번 물어 계정 id로 안다. 이 값은 **부르는 쪽 메모리에만** 두고
   // 돌려주는 값·오류 문구 어디에도 싣지 않는다(테스트로 고정).
   async function getMyAccountId() {
+    return (await getMyself()).accountId;
+  }
+
+  // 연동 설정에서 "이 토큰으로 지라에 들어가지나" 확인할 때 쓴다 — 계정 id와 **표시 이름**만 읽는다.
+  // 이메일·토큰은 돌려주지 않는다.
+  async function getMyself() {
     const body = await call('/rest/api/3/myself', token());
     const id = idOf(body && body.accountId);
     if (!id) throw jiraError('auth');
-    return id;
+    return { accountId: id, displayName: text(body && body.displayName) };
   }
 
   // 내가 담당·보고·지켜보는 이슈(최근 14일) → 내 마지막 댓글 뒤에 다른 사람 댓글이 있는 줄만.
@@ -605,8 +611,28 @@ function createJiraClient({ settings, request = (...args) => fetch(...args), rea
   return {
     getIssueOverview, listMyIssues, listDoneIssues, getTransitions, getVersions, getIssueVersionIds,
     transition, updateIssueFields, updateVersion, getCreateMeta, getIssueBrief, createIssue, assignIssue,
-    getMyAccountId, listAttention,
+    getMyAccountId, getMyself, listAttention,
   };
+}
+
+// 설정 > 연동의 `연결` 하나가 쓰는 길 — 아직 저장되지 않은 값으로 지라에 한 번 물어본다.
+// 성공하면 표시 이름만 돌려주고, 실패는 갈래만 알린다(주소·이메일·토큰은 어디에도 싣지 않는다).
+async function checkJiraAccount({ siteUrl, email, token, request } = {}) {
+  const site = String(siteUrl || '').trim().replace(/\/+$/, '');
+  if (!/^https:\/\/[^\s/?#]+$/.test(site) || !String(email || '').trim() || !String(token || '').trim()) {
+    return { ok: false, kind: 'auth' };
+  }
+  try {
+    const client = createJiraClient({
+      settings: { siteUrl: site, email: String(email).trim(), tokenFile: '' },
+      request,
+      readToken: () => String(token).trim(),
+    });
+    const me = await client.getMyself();
+    return { ok: true, displayName: me.displayName };
+  } catch (error) {
+    return { ok: false, kind: MESSAGE[error && error.kind] ? error.kind : 'other' };
+  }
 }
 
 // 쓰기 실패를 화면 문구로 옮기는 단 하나의 표. 우리가 먼저 막은 것(대조 실패·필수 입력·여러 버전)은
@@ -969,7 +995,7 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
 }
 
 module.exports = {
-  createJiraClient, createJiraApi, jiraSettings, issueUrl, projectOf, countChildren, shapeChildren,
+  createJiraClient, createJiraApi, checkJiraAccount, jiraSettings, issueUrl, projectOf, countChildren, shapeChildren,
   shapeTransitions, shapeVersions, shapeListIssue, writeKind, makeKind,
   shapeCreateTypes, epicTypeOf, childTypesOf, defaultChildType,
   JIRA_KEY_RE, JIRA_TIMEOUT_MS, JIRA_CACHE_MS, JIRA_LIST_LIMIT, MY_ISSUES_JQL, JIRA_MESSAGE: MESSAGE,

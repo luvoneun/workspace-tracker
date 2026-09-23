@@ -995,7 +995,7 @@ function renderMeetings() {
   if (!rows.length) {
     const empty = document.createElement('div');
     empty.className = 'd-rempty';
-    empty.textContent = meetings.length ? '고른 조건에 맞는 회의가 없어요.' : '아직 기록된 회의가 없어요.';
+    empty.textContent = meetings.length ? '고른 조건에 맞는 회의가 없어요.' : '아직 회의가 없어요 · 캘린더를 연결하거나(설정 > 연동) 회의 정리에서 직접 만들 수 있어요';
     listEl.appendChild(empty);
   } else if (meetingsTabView === 'project') {
     meetingsTabProjectRows(listEl, rows, beyond, itemsOf);

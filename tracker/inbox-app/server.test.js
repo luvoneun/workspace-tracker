@@ -59,7 +59,7 @@ test('every screen script is served and counted in appVersion, and server files 
     'appVersion은 index.html + 나가는 화면 파일 전부를 센다');
   // 브라우저에 절대 나가면 안 되는 파일들 — 서버·저장소·테스트·픽스처.
   const blocked = ['server.js', 'safe-storage.js', 'jira-client.js', 'jira-live.js', 'attention-live.js', 'report-drafts.js',
-    'task-batch.js', 'slack-history.js', 'import-record.js', 'browser-fixture.js', 'migrate.js',
+    'task-batch.js', 'slack-history.js', 'import-record.js', 'browser-fixture.js', 'migrate.js', 'integrations.js',
     'workflow-store.js', 'mutation-store.js', 'server.test.js', 'client.test.js', 'report-drafts.test.js'];
   for (const name of blocked) {
     assert.equal((await fetch(base + '/' + name)).status, 404, `${name}은 화면에 나가면 안 된다`);
@@ -3971,4 +3971,252 @@ test('update.sh: main 갈래는 태그가 아니라 origin/main을 앞으로만 
   assert.equal(fix.versionOf(), '1.1.0');
   assert.equal(runGit(fix.clone, ['rev-parse', '--abbrev-ref', 'HEAD']).stdout.trim(), 'main', '갈래를 떼어 놓지 않는다');
   assert.equal(runGit(fix.clone, ['rev-parse', 'HEAD']).stdout.trim(), runGit(fix.clone, ['rev-parse', 'origin/main']).stdout.trim());
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 설정 > 연동 (WP-B) — 앱이 `workspace.config.json`을 쓰는 단 하나의 자리
+//
+// 여기서도 **실제 설정·실제 토큰 파일·실제 지라/슬랙에는 절대 닿지 않는다**: config는 임시 폴더에
+// 따로 만든 파일이고, 토큰 폴더도 임시 폴더를 끼우며(WORKSPACE_TOKEN_DIR), 바깥으로 나가는 길은
+// 전부 가짜 fetch다. 프로세스를 끝내는 `exit`도 끼워 넣으므로 테스트가 스스로 종료되지 않는다.
+const integrationsStore = require('./integrations');
+
+test('연동: 문제 보고에 실을 오류 줄만 고르고 이메일·지라 키·주소의 조회 조건을 가린다', () => {
+  const log = [
+    '2026-09-23 09:00:00 잘 돌았어요 — 회의에서 나온 업무 3건 등록',
+    '2026-09-23 09:01:00 Error: connect ECONNREFUSED https://회사.atlassian.net/rest/api/3/search?jql=assignee=me',
+    '    at Object.<anonymous> (/Users/someone/app/server.js:1:1)',
+    '2026-09-23 09:02:00 지라 동기화 실패 — 나@회사.com 계정으로 IO-48394를 읽지 못했어요',
+    `2026-09-23 09:03:00 에러: ${'가'.repeat(400)}`,
+  ].join('\n');
+  const lines = integrationsStore.errorLines(log);
+  assert.equal(lines.length, 4, '오류 줄과 스택만 남는다(정상 보고문은 빠진다)');
+  assert.ok(!lines.join('\n').includes('회의에서 나온 업무'), '업무 문장은 실리지 않는다');
+  assert.ok(!lines.join('\n').includes('나@회사.com'), '이메일은 가린다');
+  assert.ok(!lines.join('\n').includes('IO-48394'), '지라 키는 가린다');
+  assert.ok(!lines.join('\n').includes('jql='), '주소의 조회 조건은 가린다');
+  assert.ok(lines.every(line => line.length <= 200), '줄마다 200자에서 자른다');
+  assert.deepEqual(integrationsStore.errorLines(''), []);
+});
+
+test('연동: 채널 링크·ID에서 채널만 뽑고, 아니면 null이다', () => {
+  const id = integrationsStore.parseChannelId;
+  assert.equal(id('https://회사.slack.com/archives/C0123ABCD'), 'C0123ABCD');
+  assert.equal(id('https://회사.slack.com/archives/C0123ABCD/p1700000000000'), 'C0123ABCD');
+  assert.equal(id(' C0123ABCD '), 'C0123ABCD');
+  assert.equal(id('#my-todo'), null);
+  assert.equal(id(''), null);
+});
+
+test('연동: 지라 계정 확인은 myself 하나만 부르고 표시 이름만 돌려준다(토큰은 어디에도 안 실린다)', async () => {
+  const fake = jiraFake({ '/rest/api/3/myself': () => json({ accountId: 'acc-1', displayName: '하늘' }) });
+  const ok = await jiraModule.checkJiraAccount({ siteUrl: 'https://example-jira.test/', email: 'me@example.test', token: 'secret-token', request: fake.request });
+  assert.deepEqual(ok, { ok: true, displayName: '하늘' });
+  assert.equal(fake.calls.length, 1);
+  assert.ok(fake.calls[0].url.endsWith('/rest/api/3/myself'));
+  assert.ok(!JSON.stringify(ok).includes('secret-token'));
+
+  const denied = jiraFake({ '/rest/api/3/myself': () => json({}, 401) });
+  assert.deepEqual(await jiraModule.checkJiraAccount({ siteUrl: 'https://example-jira.test', email: 'me@example.test', token: 'bad', request: denied.request }), { ok: false, kind: 'auth' });
+  // 주소가 https가 아니면 아무 데도 부르지 않는다
+  const never = jiraFake({});
+  assert.equal((await jiraModule.checkJiraAccount({ siteUrl: 'http://example-jira.test', email: 'me@example.test', token: 't', request: never.request })).ok, false);
+  assert.equal(never.calls.length, 0);
+});
+
+test('연동: 슬랙 채널 확인은 이름과 비공개 여부만 읽고, 실패는 우리 문구로 바꾼다', async () => {
+  const calls = [];
+  const okFetch = async (url, options) => { calls.push({ url, options }); return json({ ok: true, channel: { name: 'my-todo', is_private: true, topic: '비밀 이야기' } }); };
+  const info = await integrationsStore.slackCheckChannel('slack-secret', 'C0123ABCD', okFetch);
+  assert.deepEqual(info, { name: 'my-todo', isPrivate: true });
+  assert.match(calls[0].url, /conversations\.info\?channel=C0123ABCD$/);
+  assert.equal(calls[0].options.headers.Authorization, 'Bearer slack-secret');
+
+  const bad = async () => json({ ok: false, error: 'channel_not_found' });
+  await assert.rejects(() => integrationsStore.slackCheckChannel('t', 'C1', bad), /슬랙에서 이 채널을 읽지 못했어요/);
+});
+
+// 임시 config + 임시 토큰 폴더 한 벌. 실제 `~/.config`·실제 설정에는 닿지 않는다.
+function integrationsFixture(t, seed = {}) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-integrations-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const configPath = path.join(home, 'workspace.config.json');
+  fs.writeFileSync(configPath, JSON.stringify(seed, null, 2));
+  const tokenDir = path.join(home, 'config');
+  const read = () => JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  return { home, configPath, tokenDir, read };
+}
+
+test('연동 저장: 아는 키만 바꾸고 모르는 키는 그대로 두며, 토큰은 파일(0600)에만 들어간다', async (t) => {
+  const fix = integrationsFixture(t, {
+    title: '내가 지은 이름',
+    integrations: { slack: false, calendar: false, jira: false, tiro: false },
+    server: { port: 4321, extraHost: '', chromeProfile: 'Profile 1' },
+    내가적어둔칸: { 아무거나: true },
+    jira: { siteUrl: 'https://옛주소.atlassian.net', 메모: '지우면 안 됨' },
+  });
+  const { result } = await integrationsStore.saveIntegrations({
+    configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir,
+    body: { jira: { enabled: true, siteUrl: 'https://회사.atlassian.net/', email: '나@회사.com', token: 'jira-secret' } },
+    jiraCheck: async () => ({ ok: true, displayName: '하늘' }),
+  });
+
+  const saved = fix.read();
+  assert.equal(saved.title, '내가 지은 이름', '모르는 키는 그대로 둔다');
+  assert.deepEqual(saved.내가적어둔칸, { 아무거나: true });
+  assert.equal(saved.server.chromeProfile, 'Profile 1');
+  assert.equal(saved.jira.메모, '지우면 안 됨', '같은 묶음 안의 모르는 칸도 지킨다');
+  assert.equal(saved.integrations.jira, true);
+  assert.equal(saved.integrations.slack, false, '건드리지 않은 연동은 그대로다');
+  assert.equal(saved.jira.siteUrl, 'https://회사.atlassian.net', '끝의 빗금은 떼고 적는다');
+  assert.equal(saved.jira.email, '나@회사.com');
+  assert.match(saved.jira.tokenFile, /workspace-jira-token$/);
+
+  assert.ok(!JSON.stringify(saved).includes('jira-secret'), '토큰은 설정 파일에 절대 적지 않는다');
+  assert.ok(!JSON.stringify(result).includes('jira-secret'), '토큰은 응답에도 실리지 않는다');
+  assert.deepEqual(result.jira, { displayName: '하늘' });
+
+  const tokenFile = path.join(fix.tokenDir, 'workspace-jira-token');
+  assert.equal(fs.readFileSync(tokenFile, 'utf8').trim(), 'jira-secret');
+  assert.equal(fs.statSync(tokenFile).mode & 0o777, 0o600, '토큰 파일은 나만 읽는다');
+});
+
+test('연동 저장: 슬랙은 todo 하나만 필수이고 나머지 셋은 선택, 채널 이름은 슬랙이 준 것으로 적는다', async (t) => {
+  const fix = integrationsFixture(t, { slack: { channels: { todo: { id: '옛ID', name: '#옛이름' } } } });
+  const asked = [];
+  const { result } = await integrationsStore.saveIntegrations({
+    configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir,
+    body: {
+      slack: {
+        enabled: true, token: 'slack-secret',
+        channels: { todo: 'https://회사.slack.com/archives/C0TODO11', waiting: 'C0WAIT11' },
+      },
+    },
+    slackCheck: async (token, id) => { asked.push([token, id]); return { name: id === 'C0TODO11' ? 'my-todo' : 'my-waiting', isPrivate: id === 'C0TODO11' }; },
+  });
+  const saved = fix.read();
+  assert.deepEqual(asked, [['slack-secret', 'C0TODO11'], ['slack-secret', 'C0WAIT11']]);
+  assert.deepEqual(saved.slack.channels.todo, { id: 'C0TODO11', name: '#my-todo' });
+  assert.deepEqual(saved.slack.channels.waiting, { id: 'C0WAIT11', name: '#my-waiting' });
+  assert.equal(saved.integrations.slack, true);
+  assert.equal(result.slack.channels.todo.isPrivate, true);
+  assert.equal(result.slack.channels.waiting.isPrivate, false, '공개 채널도 막지는 않고 알려만 준다');
+  assert.ok(!JSON.stringify(saved).includes('slack-secret'));
+  assert.equal(fs.statSync(path.join(fix.tokenDir, 'workspace-slack-token')).mode & 0o777, 0o600);
+});
+
+test('연동 저장: 회의록 세 갈래와 해제는 토큰 파일을 지우지 않는다', async (t) => {
+  const fix = integrationsFixture(t, {});
+  const save = body => integrationsStore.saveIntegrations({ configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir, body });
+
+  await save({ meetingNotes: { mode: 'tiro' } });
+  assert.equal(fix.read().integrations.tiro, true);
+  assert.equal(fix.read().meetingNotes, 'tiro');
+  await save({ meetingNotes: { mode: 'manual' } });
+  assert.equal(fix.read().integrations.tiro, false);
+  assert.equal(fix.read().meetingNotes, 'manual');
+  await save({ meetingNotes: { mode: 'other', name: '노션' } });
+  assert.deepEqual(fix.read().meetingNotes, { other: '노션' });
+  await assert.rejects(() => save({ meetingNotes: { mode: 'other', name: '  ' } }), /어떤 앱인지 이름을 적어 주세요/);
+
+  // 해제는 켬 값만 끄고 토큰 파일은 사람 것이라 두고 간다
+  fs.mkdirSync(fix.tokenDir, { recursive: true });
+  fs.writeFileSync(path.join(fix.tokenDir, 'workspace-jira-token'), 'keep-me\n', { mode: 0o600 });
+  await save({ jira: { enabled: false } });
+  assert.equal(fix.read().integrations.jira, false);
+  assert.equal(fs.readFileSync(path.join(fix.tokenDir, 'workspace-jira-token'), 'utf8').trim(), 'keep-me');
+});
+
+test('연동 저장: 값이 틀리거나 확인에 실패하면 설정 파일도 토큰 파일도 건드리지 않는다', async (t) => {
+  const fix = integrationsFixture(t, { title: '그대로' });
+  const before = fs.readFileSync(fix.configPath, 'utf8');
+  const save = body => integrationsStore.saveIntegrations({
+    configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir, body,
+    jiraCheck: async () => ({ ok: false }),
+    slackCheck: async () => { throw Object.assign(new Error('슬랙에서 이 채널을 읽지 못했어요 — 토큰과 채널을 확인해 주세요'), { status: 400 }); },
+  });
+  await assert.rejects(() => save({ jira: { enabled: true, siteUrl: 'http://회사.atlassian.net', email: 'a@b.c', token: 't' } }), /지라 주소는 https:\/\/로 시작해야 해요/);
+  await assert.rejects(() => save({ jira: { enabled: true, siteUrl: 'https://회사.atlassian.net', email: 'a@b.c', token: 't' } }), /지라에서 이 토큰으로 로그인하지 못했어요/);
+  await assert.rejects(() => save({ slack: { enabled: true, token: 't', channels: { todo: '#my-todo' } } }), /슬랙 채널 링크나 ID를 붙여 넣어 주세요/);
+  await assert.rejects(() => save({ slack: { enabled: true, token: 't', channels: { todo: 'C0TODO11' } } }), /슬랙에서 이 채널을 읽지 못했어요/);
+  assert.equal(fs.readFileSync(fix.configPath, 'utf8'), before, '실패하면 설정은 한 글자도 바뀌지 않는다');
+  assert.equal(fs.existsSync(path.join(fix.tokenDir, 'workspace-jira-token')), false, '실패하면 토큰 파일도 만들지 않는다');
+});
+
+test('연동 저장: 다시 켜기는 launchd가 띄운 자리에서만 하고, 테스트에서는 끼워 넣은 exit만 불린다', () => {
+  const calls = [];
+  const timers = [];
+  const timer = (fn, delay) => { timers.push([fn, delay]); return { unref() {} }; };
+  assert.equal(integrationsStore.scheduleRestart({ managed: false, exit: code => calls.push(code), timer }), false);
+  assert.deepEqual(timers, [], '개발용 서버는 끝내지 않는다');
+
+  assert.equal(integrationsStore.scheduleRestart({ managed: true, exit: code => calls.push(code), timer }), true);
+  assert.equal(timers.length, 1);
+  assert.equal(timers[0][1], 500, '응답이 나간 뒤에 끝낸다');
+  timers[0][0]();
+  assert.deepEqual(calls, [0], '실제 process.exit은 불리지 않는다');
+});
+
+test('연동 라우트: 지금 상태는 토큰 값을 싣지 않고, 저장은 설정 파일 하나만 쓰며 local.css는 없어도 빈 200이다', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-intg-route-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const data = path.join(home, 'tracker');
+  fs.mkdirSync(data);
+  const config = path.join(home, 'workspace.config.json');
+  const tokens = path.join(home, 'tokens');
+  fs.mkdirSync(tokens);
+  fs.writeFileSync(path.join(tokens, 'workspace-slack-token'), 'slack-secret\n', { mode: 0o600 });
+  fs.writeFileSync(config, JSON.stringify({
+    title: '내가 지은 이름',
+    integrations: { slack: true, calendar: false, jira: false, tiro: false },
+    slack: { tokenFile: path.join(tokens, 'workspace-slack-token'), channels: { todo: { id: 'C0TODO11', name: '#my-todo' } } },
+  }, null, 2));
+  const app = await startAppServer(t, {
+    WORKSPACE_DATA_DIR: data, WORKSPACE_CONFIG: config, WORKSPACE_TOKEN_DIR: tokens,
+    WORKSPACE_AUTOMATION_DIR: path.join(home, 'automation'),
+  });
+
+  const state = await (await fetch(app.base + '/api/integrations')).json();
+  assert.equal(state.slack.enabled, true);
+  assert.equal(state.slack.hasToken, true, '토큰이 있는지만 알려 준다');
+  assert.equal(state.slack.channels.todo.name, '#my-todo');
+  assert.equal(state.jira.enabled, false);
+  assert.equal(state.meetingNotes.mode, 'manual');
+  assert.equal(state.install, 'manual');
+  assert.ok(!JSON.stringify(state).includes('slack-secret'), '토큰 값은 응답에 절대 없다');
+
+  // 값이 틀리면 우리 문구 그대로 400이고 설정은 그대로다
+  const before = fs.readFileSync(config, 'utf8');
+  const refused = await fetch(app.base + '/api/integrations/save', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jira: { enabled: true, siteUrl: 'ftp://회사', email: 'a@b.c', token: 't' } }),
+  });
+  assert.equal(refused.status, 400);
+  assert.match((await refused.json()).error, /지라 주소는 https:\/\/로 시작해야 해요/);
+  assert.equal(fs.readFileSync(config, 'utf8'), before);
+
+  // 켜기는 설정 파일만 바꾼다. 개발용 서버(manual)라 스스로 끝내지 않는다.
+  const saved = await (await fetch(app.base + '/api/integrations/save', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ calendar: { enabled: true } }),
+  })).json();
+  assert.equal(saved.ok, true);
+  assert.equal(saved.restart, false, '개발용 서버는 스스로 끝내지 않는다');
+  const after = JSON.parse(fs.readFileSync(config, 'utf8'));
+  assert.equal(after.integrations.calendar, true);
+  assert.equal(after.title, '내가 지은 이름');
+  assert.equal(after.slack.channels.todo.id, 'C0TODO11');
+  assert.ok((await fetch(app.base + '/api/about')).ok, '저장 뒤에도 서버는 그대로 떠 있다');
+
+  // 이 컴퓨터에만 두는 꾸밈 — 파일이 없어도 빈 CSS를 200으로 준다(콘솔에 404가 남지 않게)
+  const css = await fetch(app.base + '/local/local.css');
+  assert.equal(css.status, 200);
+  assert.match(css.headers.get('content-type') || '', /text\/css/);
+  assert.equal((await css.text()).trim(), '');
+  assert.equal((await fetch(app.base + '/local/other.css')).status, 404, '그 한 경로 말고는 열리지 않는다');
+
+  // 문제 보고가 읽는 오류 줄 — 로그가 없으면 조용히 빈 목록이다
+  const diagnostics = await (await fetch(app.base + '/api/about/diagnostics')).json();
+  assert.equal(diagnostics.found, false);
+  assert.deepEqual(diagnostics.lines, []);
 });

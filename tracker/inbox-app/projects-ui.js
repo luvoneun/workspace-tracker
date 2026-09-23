@@ -795,7 +795,7 @@ async function projectMoveSuggestRun(groupName, jiraKey) {
 function renderProjectDetail(body, row) {
   body.replaceChildren();
   if (!row) {
-    body.insertAdjacentHTML('beforeend', '<div class="d-empty">아직 프로젝트가 없어요. 업무에 프로젝트를 지정하면 여기 모여요.</div>');
+    body.insertAdjacentHTML('beforeend', '<div class="d-empty">아직 프로젝트가 없어요. 위의 +로 만들거나 업무에 프로젝트를 지정하면 여기 모여요.</div>');
     return;
   }
   const items = workflowData.items.filter(item => wfKey(item) === row.key);

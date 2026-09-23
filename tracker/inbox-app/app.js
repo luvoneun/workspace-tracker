@@ -1282,6 +1282,7 @@ async function load() {
   renderCalendar(data.calendar);
   renderSuggestions(data.suggestions);
   renderInbox(data.inboxTasks || []);
+  renderStartCard(data);
   renderLaterTasks(data.laterTasks || []);
   renderWaiting(data.waiting || []);
   renderTodayTasks(data.todayTasks || []);
@@ -1827,7 +1828,7 @@ function renderWeeklyReportDetail(item) {
     detail.replaceChildren();
     const empty = document.createElement('div');
     empty.className = 'd-empty';
-    empty.textContent = '아직 주간요약이 없어요.';
+    empty.textContent = '이번 주에 완료한 업무가 생기면 여기 문장이 만들어져요';
     detail.appendChild(empty);
     document.getElementById('weeklyReportPreview')?.replaceChildren();
     return;
@@ -3703,6 +3704,49 @@ function renderInboxHeadCount(count) {
   const cell = document.getElementById('createdTodayCount');
   if (cell) cell.textContent = count;
   if (button) button.hidden = !count;
+}
+
+// 아무 기록도 없는 새 설치에만 서는 시작 카드(`새로 들어온 것` 자리). 저장하지 않고 조건만 본다 —
+// 항목이 하나라도 생기면 저절로 사라지므로 닫기 버튼도 두지 않는다.
+function startCardEmpty(data) {
+  if (!data) return false;
+  const rows = ['inboxTasks', 'laterTasks', 'todayTasks', 'waiting', 'ideas', 'decisions', 'decisionArchive']
+    .reduce((sum, key) => sum + (Array.isArray(data[key]) ? data[key].length : 0), 0);
+  const meetings = ((data.workflows || {}).meetings || []).length;
+  return rows === 0 && meetings === 0;
+}
+
+// 세 줄은 각각 "지금 할 수 있는 가장 작은 다음 행동"으로 데려간다.
+const START_CARD_STEPS = [
+  ['할 일 하나 적어 보기', () => document.getElementById('todayTaskInput')?.focus()],
+  ['프로젝트 만들기', () => {
+    if (typeof setActiveTab === 'function') setActiveTab('projects');
+    if (typeof projectNewStart === 'function') projectNewStart();
+  }],
+  ['연동 켜기', () => { if (typeof settingsOpen === 'function') settingsOpen('integrations'); }],
+];
+
+function renderStartCard(data) {
+  const zone = document.getElementById('startCardZone');
+  if (!zone) return;
+  zone.replaceChildren();
+  zone.hidden = !startCardEmpty(data);
+  if (zone.hidden) return;
+  const card = document.createElement('div');
+  card.className = 'd-start';
+  const title = document.createElement('div');
+  title.className = 'hd';
+  title.textContent = '시작하기';
+  card.appendChild(title);
+  START_CARD_STEPS.forEach(([label, run]) => {
+    const step = document.createElement('button');
+    step.type = 'button';
+    step.className = 'd-startrow';
+    step.textContent = label;
+    step.addEventListener('click', run);
+    card.appendChild(step);
+  });
+  zone.appendChild(card);
 }
 
 // 슬랙에서 갓 들어온 할 일. 오늘 할지 나중에 할지는 여기서 직접 고른다.

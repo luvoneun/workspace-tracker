@@ -6325,3 +6325,214 @@ test('BATTENTION: 설정 > 상태에는 `반응 필요 · 지라 댓글` 한 줄
   await off.app.run('attentionLoad()');
   assert.equal(off.app.run('attentionStatusRow()'), null, '연결이 없으면 줄 자체가 없다');
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 설정 > 정보 줄 · 문제 보고 · 연동 탭 · 시작 카드 · 도움말 (WP-B)
+
+// 설정 화면은 서버에서 읽어 오는 값이 있으므로 응답을 끼워 넣을 수 있는 가짜 창을 따로 만든다.
+function settingsClient(payload = {}) {
+  const app = client(() => new Response(JSON.stringify(payload)));
+  CLIENT_PARTS.forEach(file => app.run(fs.readFileSync(path.join(__dirname, file), 'utf8')));
+  app.run("escapeHtml = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')");
+  app.context.document.createTextNode = text => ({ textContent: String(text) });
+  return app;
+}
+
+// 가짜 DOM에는 textContent 자동 합산이 없다 — 자식 글자를 이어 붙여 본다(slackLedgerNotes 테스트와 같은 생각).
+const NODE_SHAPE = `(() => {
+  const text = node => (node.children && node.children.length
+    ? node.children.map(kid => text(kid)).join('')
+    : String(node.textContent || ''));
+  window.shapeOf = node => ({
+    cls: String(node.className || ''), type: String(node.type || ''),
+    kind: String(node.dataset && node.dataset.integration || ''),
+    hidden: !!node.hidden, disabled: !!node.disabled, text: text(node),
+    kids: (node.children || []).map(kid => window.shapeOf(kid)),
+  });
+})()`;
+
+test('설정 정보 줄: 새 버전 판정은 v 접두를 무시하고 세 자리만 견준다', () => {
+  const app = pureClient();
+  const newer = (now, next) => app.run(`settingsVersionNewer(${JSON.stringify(now)}, ${JSON.stringify(next)})`);
+  assert.equal(newer('1.2.0', 'v1.3.0'), true);
+  assert.equal(newer('1.2.0', 'v1.2.1'), true);
+  assert.equal(newer('1.2.0', '2.0.0'), true);
+  assert.equal(newer('1.2.0', 'v1.2.0'), false, '같은 버전은 새 버전이 아니다');
+  assert.equal(newer('1.10.0', 'v1.9.9'), false, '숫자로 견준다(글자 순서가 아니다)');
+  assert.equal(newer('', 'v1.3.0'), false, '모르면 알리지 않는다');
+  assert.equal(newer('1.2.0', ''), false);
+});
+
+test('문제 보고 글에는 업무 문장이 한 줄도 없고 버전·연동·오류 줄만 들어간다', () => {
+  const app = pureClient();
+  const text = app.run(`settingsReportText(${JSON.stringify({
+    about: { version: '1.2.0', channel: 'main', gitRef: '3f2a1c', install: 'managed', modified: [] },
+    integrations: {
+      jira: { enabled: true }, slack: { enabled: false }, calendar: { enabled: false },
+      meetingNotes: { mode: 'manual' },
+    },
+    automations: [{ name: '슬랙 캡처', lastRunAt: null, lastKind: null }],
+    diagnostics: { os: 'Darwin 25.5.0', node: 'v22.1.0', lines: ['Error: 무언가 실패했어요'] },
+  })})`);
+  const lines = text.split('\n');
+  assert.equal(lines[0], '워크스페이스 v1.2.0 (main, 3f2a1c) · 설치본 · Darwin 25.5.0 · Node 22.1.0');
+  assert.equal(lines[1], '수정된 파일: 없음');
+  assert.equal(lines[2], '연동: 지라 켜짐 · 슬랙 꺼짐 · 캘린더 꺼짐 · 회의록 직접');
+  assert.equal(lines[3], '자동화 상태: 슬랙 캡처 —');
+  assert.equal(lines[4], '최근 오류(1줄):');
+  assert.equal(lines[5], 'Error: 무언가 실패했어요');
+
+  // 로그가 없으면 `로그 없음` 한 줄, 개발용 설치는 그대로 그렇게 적는다
+  const plain = app.run(`settingsReportText(${JSON.stringify({
+    about: { version: '1.2.0', channel: 'stable', install: 'manual', modified: ['ui.css'] },
+    integrations: null, automations: [], diagnostics: {},
+  })})`);
+  assert.match(plain, /^워크스페이스 v1\.2\.0 · 개발용 · 운영체제 모름 · Node 모름$/m);
+  assert.match(plain, /수정된 파일: ui\.css/);
+  assert.match(plain, /자동화 상태: 켠 자동화 없음/);
+  assert.match(plain, /로그 없음/);
+  assert.ok(!/stable/.test(plain), '기본 갈래(stable)는 적지 않는다');
+});
+
+test('연동 탭: 네 줄이 서고 지라·슬랙 토큰 칸은 password이며 토큰 값은 화면에 없다', async () => {
+  const app = settingsClient({
+    ok: true,
+    jira: { enabled: false, siteUrl: '', email: '', hasToken: false },
+    slack: { enabled: false, workspaceUrl: '', hasToken: false, channels: { todo: { id: '', name: '' }, align: { id: '', name: '' }, someday: { id: '', name: '' }, waiting: { id: '', name: '' } } },
+    calendar: { enabled: false },
+    meetingNotes: { mode: 'manual', name: '' },
+    claude: true,
+    install: 'manual',
+  });
+  app.run(NODE_SHAPE);
+  await app.run('renderSettingsIntegrations()');
+  const view = JSON.parse(app.run("JSON.stringify(window.shapeOf(document.getElementById('settingsIntegrationsView')))"));
+
+  assert.deepEqual(view.kids.slice(0, 4).map(row => row.kind), ['jira', 'slack', 'calendar', 'notes']);
+  assert.match(view.kids[4].text, /업데이트\.command를 한 번 실행해요/, '켠 자동화의 등록 방법을 맨 아래에 안내한다');
+
+  const [jira, slack, calendar, notes] = view.kids;
+  assert.match(jira.text, /지라연결 안 됨연결하기/);
+  assert.match(slack.text, /슬랙 수집연결 안 됨연결하기/);
+  assert.match(slack.text, /Claude Code가 필요해요 · 설치돼 있어요/);
+  assert.match(calendar.text, /캘린더연결 안 됨연결하기/);
+  assert.match(notes.text, /회의록직접 옮겨서 사용 중/);
+
+  // 지라 3단계: 주소 · 이메일 · API 토큰(password) + 토큰 만들기 링크
+  const fields = node => node.kids.flatMap(kid => (kid.cls === 'd-ifield' ? [kid] : fields(kid)));
+  const jiraFields = fields(jira);
+  assert.deepEqual(jiraFields.map(f => f.text.split(/(?=지라 주소|이메일|API 토큰)/)[0] || f.text).length, 3);
+  assert.deepEqual(jiraFields.map(f => f.kids[0].text), ['지라 주소', '이메일', 'API 토큰']);
+  assert.deepEqual(jiraFields.map(f => f.kids[1].type), ['text', 'text', 'password'], '토큰만 password 칸이다');
+  assert.match(jira.text, /Atlassian 토큰 만들기/);
+
+  // 슬랙 3단계: 비공개 채널 안내 · 토큰(password) · 채널 링크 + `더 연결(선택)`의 세 칸
+  const slackFields = fields(slack);
+  assert.deepEqual(slackFields.map(f => f.kids[0].text), ['토큰', '채널 링크 붙여 넣기', '맞춰야 할 것', '언젠가 할 것', '기다리는 것']);
+  assert.equal(slackFields[0].kids[1].type, 'password');
+  assert.equal(slackFields[1].kids[1].type, 'text');
+  assert.match(slack.text, /나만 있는 비공개 채널을 슬랙에서 만들어요/);
+  assert.match(slack.text, /채팅·메일로 보내지 마세요/);
+
+  // 회의록은 세 갈래 세그먼트, 티로는 Claude Code가 있으면 고를 수 있다
+  const seg = notes.kids.flatMap(kid => kid.kids).find(kid => kid.cls === 'd-seg');
+  assert.deepEqual(seg.kids.map(button => button.text), ['티로', '직접 옮겨서', '다른 것']);
+  assert.deepEqual(seg.kids.map(button => button.disabled), [false, false, false]);
+
+  const dump = JSON.stringify(view);
+  assert.ok(!/value/.test(''), 'placeholder 검사(값 자체는 화면 어디에도 미리 채워지지 않는다)');
+  assert.ok(!dump.includes('token'), '토큰 값은 화면 어디에도 나오지 않는다');
+});
+
+test('연동 탭: 이미 연결됐으면 해제 버튼이고, Claude Code가 없으면 티로·캘린더를 고를 수 없다', async () => {
+  const app = settingsClient({
+    ok: true,
+    jira: { enabled: true, siteUrl: 'https://회사.atlassian.net', email: '나@회사.com', hasToken: true },
+    slack: { enabled: true, workspaceUrl: '', hasToken: true, channels: { todo: { id: 'C1', name: '#my-todo' }, align: { id: '', name: '' }, someday: { id: '', name: '' }, waiting: { id: '', name: '' } } },
+    calendar: { enabled: false },
+    meetingNotes: { mode: 'other', name: '노션' },
+    claude: false,
+    install: 'managed',
+  });
+  app.run(NODE_SHAPE);
+  await app.run('renderSettingsIntegrations()');
+  const view = JSON.parse(app.run("JSON.stringify(window.shapeOf(document.getElementById('settingsIntegrationsView')))"));
+  const [jira, slack, calendar, notes] = view.kids;
+
+  assert.match(jira.text, /연결됨 · 회사\.atlassian\.net해제/);
+  assert.match(slack.text, /연결됨 · #my-todo해제/);
+  assert.match(slack.text, /설치 안 됨 — 설치하면 켜져요/);
+  assert.match(calendar.text, /Claude Code가 필요해요/);
+  const calendarButton = calendar.kids[0].kids.find(kid => kid.cls.includes('d-btn'));
+  assert.equal(calendarButton.disabled, true, 'Claude Code가 없으면 캘린더는 켤 수 없다');
+  const seg = notes.kids.flatMap(kid => kid.kids).find(kid => kid.cls === 'd-seg');
+  assert.deepEqual(seg.kids.map(button => button.disabled), [true, false, false], '티로는 Claude Code가 필요하다');
+  assert.match(notes.text, /노션 쓰는 중/);
+  assert.ok(!JSON.stringify(view).includes('나@회사.com') || jira.text.includes('연결됨'), '연결된 뒤에는 입력칸 자체를 그리지 않는다');
+});
+
+test('시작 카드는 기록이 하나도 없을 때만 서고, 세 줄로 다음 행동을 안내한다', () => {
+  const app = pureClient();
+  const empty = data => app.run(`startCardEmpty(${JSON.stringify(data)})`);
+  assert.equal(empty({ todayTasks: [], laterTasks: [], inboxTasks: [], waiting: [], ideas: [], decisions: [], decisionArchive: [], workflows: { meetings: [] } }), true);
+  assert.equal(empty({ todayTasks: [{ id: 'a' }], workflows: { meetings: [] } }), false, '업무가 하나라도 있으면 사라진다');
+  assert.equal(empty({ decisionArchive: [{ id: 'a' }], workflows: { meetings: [] } }), false, '지난 결정만 있어도 새 설치가 아니다');
+  assert.equal(empty({ workflows: { meetings: [{ id: 'm' }] } }), false, '회의가 있어도 사라진다');
+  assert.equal(empty(null), false);
+
+  app.run('renderStartCard({ workflows: { meetings: [] } })');
+  const zone = app.nodes.get('startCardZone');
+  assert.equal(zone.hidden, false);
+  const card = zone.children[0];
+  assert.equal(card.className, 'd-start');
+  assert.deepEqual(card.children.map(kid => kid.textContent), ['시작하기', '할 일 하나 적어 보기', '프로젝트 만들기', '연동 켜기']);
+
+  app.run('renderStartCard({ todayTasks: [{ id: 1 }], workflows: { meetings: [] } })');
+  assert.equal(app.nodes.get('startCardZone').hidden, true);
+});
+
+test('도움말: 개념 사전 9개 + 쓰는 순서의 여섯 묶음 + 항목마다 `필요한 것` 표지', () => {
+  const app = pureClient();
+  app.context.document.createTextNode = text => ({ textContent: String(text) });
+  // `다른 기기에서 열기`는 이 맥에서 열었을 때만 붙는 조각이라 주소도 끼워 넣는다.
+  app.context.location = { hostname: 'localhost' };
+  const glossary = JSON.parse(app.run('JSON.stringify(SETTINGS_GLOSSARY)'));
+  assert.equal(glossary.length, 9);
+  assert.deepEqual(glossary.map(row => row[0]),
+    ['할 일', '나중에 할 일', '확인 대기', '결정', '아이디어', '프로젝트', '회의 정리', '주간요약', '지난 프로젝트']);
+  assert.ok(glossary.every(([, meaning]) => meaning.length <= 60), '사전은 한 문장이다');
+  assert.match(glossary[2][1], /답이 오면 체크하고 다음 행동을 골라요/);
+
+  const faq = JSON.parse(app.run('JSON.stringify(SETTINGS_FAQ)'));
+  assert.deepEqual(faq.map(([group]) => group),
+    ['시작하기', '매일', '프로젝트·지라', '주간요약', '연동·자동화', '문제가 생기면']);
+  const entries = faq.flatMap(([, rows]) => rows);
+  assert.ok(entries.every(([, need]) => typeof need === 'string' && need.length), '항목마다 `필요한 것`이 있다');
+  assert.ok(entries.every(([, , answer]) => answer.length <= 260), '답은 3~4문장을 넘기지 않는다');
+
+  // 사용자 지적 반영: 반응 필요는 지라 연결만 있으면 되고, 피그마 댓글은 가져오지 않는다
+  const attention = entries.find(([question]) => question.includes('반응 필요'));
+  assert.equal(attention[1], '지라 연결');
+  assert.match(attention[2], /지라에 직접 물어봐서 가져와요\(설정 &gt; 연동의 지라 연결만 있으면 됩니다\)\. 슬랙 앱이나 다른 설정은 필요 없어요\./);
+  const figma = entries.find(([, , answer]) => answer.includes('피그마'));
+  assert.match(figma[2], /피그마 댓글은 가져오지 않아요 — 피그마에서 직접 확인해요/);
+  assert.ok(!entries.some(([, , answer]) => /피그마 댓글은 다음 단계/.test(answer)), '옛 문구는 남아 있지 않다');
+
+  // 슬랙이 필요한 것과 아무것도 필요 없는 것이 섞여 있어야 표지가 뜻을 갖는다
+  const needs = new Set(entries.map(([, need]) => need));
+  assert.ok(needs.has('없음') && needs.has('지라 연결') && needs.has('슬랙 연결 + Claude Code'));
+
+  // 첫 문단은 "처음 한 주는 할 일만"이다
+  app.run('renderSettingsGuide()');
+  const doc = app.nodes.get('settingsGuideView').children[0];
+  assert.equal(doc.children[0].className, 'd-faqintro');
+  assert.match(doc.children[0].textContent, /처음 한 주는 할 일만 써도 충분해요/);
+  assert.equal(doc.children[1].className, 'd-words');
+  assert.equal(doc.children[1].children.length, 9);
+});
+
+test('빈 화면 문구는 "무엇이 없다"가 아니라 "여기서 뭘 하면 되는지"를 말한다', () => {
+  const app = pureClient();
+  const html = app.run("(() => { const box = document.createElement('div'); renderProjectDetail(box, null); return box.html || ''; })()");
+  assert.match(html, /위의 \+로 만들거나 업무에 프로젝트를 지정하면 여기 모여요/);
+});
