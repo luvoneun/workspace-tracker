@@ -1377,8 +1377,71 @@ function renderActiveTabLists() {
 // 그날의 첫 자동 갱신(캘린더 9:13 · 지라 9:17 · 슬랙 9시대)이 끝났을 시각.
 const SYNC_FIRST_RUN_BY = '09:30';
 
-// 지금 낡은 자동 갱신들(톱니바퀴의 주황 점과 툴팁). 누르면 설정 › 연동이 열린다.
+// 연동마다 "늦었나 · 첫 읽기를 기다리나" — 톱니바퀴의 주황 점(renderDateBar)과 설정 › 연동의 요약·카드가 함께 쓰는
+// **한 기준**이다. 재료는 서버가 /api/items와 /api/integrations(`sync`)에 똑같이 싣는 `slackSync`·`calendar`·`jiraSync`.
+// - 쓰지 않는(`used: false`) 것·연결 안 된(`connected: false`) 것은 보지 않는다(연동 탭에 그 카드가 연결돼 있지 않다).
+// - 한 번도 읽지 않은 것(`neverRead`)은 늦은 게 아니라 첫 읽기를 기다리는 것이다. 단 슬랙 수집이 launchd에 등록돼
+//   있지 않으면(`scheduled: false`) 기다려도 읽지 않으므로 늦은 쪽(`setup`)에 넣는다.
+// - 자동 갱신은 아침 9시대에 그날 처음 돈다. 그 전(자정~아침)의 `어제 기준`은 고장이 아니라 아직 돌 차례가 아닌
+//   것이라 늦음으로 세지 않는다 — 오류가 있었거나 이틀 넘게 멈춘 것은 그대로 센다.
+const SYNC_NAMES = { slack: '슬랙 수집', calendar: '캘린더', jira: '지라' };
+function syncLag(data, { clock = nowHHMM(), now = Date.now() } = {}) {
+  const out = { late: [], waiting: [] };
+  if (!data) return out;
+  const beforeFirstRun = clock < SYNC_FIRST_RUN_BY;
+  [['slack', data.slackSync], ['calendar', data.calendar], ['jira', data.jiraSync]].forEach(([key, value]) => {
+    // 값이 아예 없으면(그 연동을 싣지 않은 응답) 판단하지 않는다.
+    if (!value || typeof value !== 'object') return;
+    const source = value;
+    if (source.used === false || source.connected === false) return;
+    const name = SYNC_NAMES[key];
+    if (source.neverRead && !source.error) {
+      if (key === 'slack' && source.scheduled === false) {
+        out.late.push({ key, name, setup: true, age: '시작 전', text: '아직 읽기 전이에요' });
+      } else {
+        out.waiting.push(key);
+      }
+      return;
+    }
+    const stale = key === 'calendar' ? !!(source.stale || !source.lastSync) : !!source.stale;
+    if (!stale) return;
+    const days = source.lastSync ? -diffDays(source.lastSync) : null;
+    if (beforeFirstRun && !source.error && days === 1) return;
+    out.late.push({
+      key, name,
+      age: days === null ? '동기화 안 됨' : days === 1 ? '어제 기준' : `${days}일 전 기준`,
+      text: syncLagText(source.lastSuccessAt, days, now),
+    });
+  });
+  return out;
+}
+
+// 늦은 카드의 주황 상태 줄 — 마지막으로 읽은 시각을 알면 `N시간째`, 날짜만 알면 `어제부터`·`N일째`.
+function syncLagText(lastAt, days, now = Date.now()) {
+  const at = Date.parse(lastAt || '');
+  if (Number.isFinite(at) && at <= now) {
+    const hours = Math.max(1, Math.floor((now - at) / 3600000));
+    return hours < 48 ? `${hours}시간째 새로 읽지 못했어요` : `${Math.floor(hours / 24)}일째 새로 읽지 못했어요`;
+  }
+  if (days === null || days === undefined) return '아직 한 번도 읽지 못했어요';
+  return days <= 1 ? '어제부터 새로 읽지 못했어요' : `${days}일째 새로 읽지 못했어요`;
+}
+
+// 지금 늦은 연동들(톱니바퀴의 주황 점과 툴팁). 누르면 설정 › 연동이 열리고 그 카드가 잠깐 밝아진다.
 let syncStale = [];
+function paintSyncGear(late) {
+  syncStale = late.map(source => ({ key: source.key, text: `${source.name} ${source.age}` }));
+  const gear = document.getElementById('settingsBtn');
+  if (!gear) return;
+  gear.classList.toggle('has-stale', syncStale.length > 0);
+  const ages = late.map(source => source.age);
+  const summary = !late.length ? ''
+    : late.length === 1 ? syncStale[0].text
+    : `자동 갱신 ${late.length}개 ${ages.every(age => age === ages[0]) ? ages[0] : '확인 필요'}`;
+  gear.title = summary ? `설정 — ${summary}. 목록이 최신이 아닐 수 있어요. 누르면 연동 탭에서 봐요.` : '설정';
+  gear.setAttribute('aria-label', summary ? `설정 — ${summary}` : '설정');
+}
+
 function renderDateBar(data) {
   if (data.title) {
     document.getElementById('workspaceTitle').textContent = data.title;
@@ -1391,38 +1454,11 @@ function renderDateBar(data) {
   date.textContent = uiKoDate(data.today);
   bar.appendChild(date);
 
-  // 자동 갱신이 실패해도 화면엔 낡은 자료가 그대로 보이므로, 낡았을 때만 알린다
-  // used === false 는 "이 회사에선 안 쓰는 도구" — 경고할 일이 아니다
-  const found = [];
-  const slack = data.slackSync || {};
-  if (slack.used !== false && slack.stale) found.push({ key: 'slack', name: '슬랙 캡처', lastSync: slack.lastSync, error: !!slack.error });
-  const cal = data.calendar || {};
-  if (cal.used !== false && (cal.stale || !cal.lastSync)) found.push({ key: 'calendar', name: '캘린더', lastSync: cal.lastSync });
-  const jira = data.jiraSync || {};
-  if (jira.used !== false && jira.stale) found.push({ key: 'jira', name: '지라', lastSync: jira.lastSync });
-
-  const ageOf = (source) => {
-    const days = source.lastSync ? -diffDays(source.lastSync) : null;
-    return { days, text: days === null ? '동기화 안 됨' : days === 1 ? '어제 기준' : `${days}일 전 기준` };
-  };
-  // 자동 갱신은 아침 9시대에 그날 처음 돈다. 그 전(자정~아침)의 `어제 기준`은 고장이 아니라 아직
-  // 돌 차례가 아닌 것이라 알리지 않는다 — 오류가 있었거나 이틀 넘게 멈춘 것은 그대로 알린다.
-  const beforeFirstRun = nowHHMM() < SYNC_FIRST_RUN_BY;
-  const stale = found.filter(source => !(beforeFirstRun && !source.error && ageOf(source).days === 1));
-
+  // 자동 갱신이 실패해도 화면엔 낡은 자료가 그대로 보이므로, 늦었을 때만 알린다.
   // 경고는 머리줄에 글자로 끼어들지 않는다 — 날짜 옆에 칸이 생기면 탭이 밀렸다(한 칸으로 줄여도 마찬가지).
-  // 설정 톱니바퀴의 주황 점으로만 알리고, 무엇이 낡았는지는 톱니바퀴의 툴팁과 설정 › 연동의 카드가 말한다.
+  // 설정 톱니바퀴의 주황 점으로만 알리고, 무엇이 늦었는지는 톱니바퀴의 툴팁과 설정 › 연동의 카드가 말한다.
   // 실패(빨간 점, fetchAutomationStatus)가 함께 있으면 빨간 점이 이긴다(ui.css).
-  syncStale = stale.map(source => ({ key: source.key, text: `${source.name} ${ageOf(source).text}` }));
-  const gear = document.getElementById('settingsBtn');
-  if (!gear) return;
-  gear.classList.toggle('has-stale', syncStale.length > 0);
-  const ages = stale.map(source => ageOf(source).text);
-  const summary = !stale.length ? ''
-    : stale.length === 1 ? syncStale[0].text
-    : `자동 갱신 ${stale.length}개 ${ages.every(age => age === ages[0]) ? ages[0] : '확인 필요'}`;
-  gear.title = summary ? `설정 — ${summary}. 목록이 최신이 아닐 수 있어요. 누르면 자세한 상태를 볼 수 있어요.` : '설정';
-  gear.setAttribute('aria-label', summary ? `설정 — ${summary}` : '설정');
+  paintSyncGear(syncLag(data).late);
 }
 
 // 지금 진행 중인 회의만 시각을 진하게 적는다(HH:MM 비교).
@@ -4648,3 +4684,11 @@ setInterval(() => {
 load();
 refreshStorageStatus(); // 목록을 못 불러오는 상황에서도 저장이 멈춘 이유는 보이게
 fetchAutomationStatus(); // 설정을 열어보지 않아도 톱니바퀴에 실패 여부가 바로 보이게
+// 새 버전(톱니바퀴의 파란 점)도 설정을 열지 않고 보이게 — 페이지를 열 때 한 번, 그 뒤 6시간마다 서버가 이미 가진
+// 값만 읽는다(`?cached=1` — 원격에 새로 묻는 것은 서버의 6시간 주기 그대로).
+settingsAboutLoad({ cached: true }).then((about) => {
+  // 서버가 막 떠서 첫 확인이 아직 돌고 있었으면 1분 뒤 한 번만 더 읽는다.
+  const update = about && about.update;
+  if (update && !update.available && !update.checkedAt) setTimeout(() => settingsAboutLoad({ cached: true }), 60 * 1000);
+});
+setInterval(() => settingsAboutLoad({ cached: true }), 6 * 60 * 60 * 1000);

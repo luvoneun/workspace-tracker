@@ -182,7 +182,11 @@ function getCalendarToday() {
   const live = CALENDAR_ICAL ? calendarLive.current() : null;
   if (live) return { events: live.events, lastSync: todayLocal(), stale: false, live: true, liveAt: new Date(live.at).toISOString() };
   const calPath = path.join(TRACKER_DIR, 'calendar_today.md');
-  if (!fs.existsSync(calPath)) return { events: [], lastSync: null, stale: true };
+  // 한 번도 읽지 않은 것(`neverRead`)은 늦은 것이 아니라 첫 읽기를 기다리는 것이다 — 톱니바퀴·연동 탭이 같이 본다.
+  if (!fs.existsSync(calPath)) {
+    const neverRead = !CALENDAR_ICAL || !calendarLive.history().length;
+    return { events: [], lastSync: null, stale: true, ...(neverRead ? { neverRead: true } : {}) };
+  }
   const lines = fs.readFileSync(calPath, 'utf-8').split('\n');
   const events = [];
   let lastSync = null;
@@ -557,7 +561,11 @@ function getJiraSync() {
   const live = jiraLive.current();
   if (live) return { ...settings, live: true, liveAt: new Date(live.at).toISOString(), lastSync: todayLocal(), stale: false };
   const jiraPath = path.join(TRACKER_DIR, 'jira_issues.md');
-  if (!fs.existsSync(jiraPath)) return { ...settings, lastSync: null, stale: true };
+  if (!fs.existsSync(jiraPath)) {
+    // 연결은 됐는데 아직 한 번도 읽지 않았으면 첫 읽기를 기다리는 것이다(늦은 것이 아니다).
+    const neverRead = !!jira.connected && !jiraLive.history().length;
+    return { ...settings, lastSync: null, stale: true, ...(neverRead ? { neverRead: true } : {}) };
+  }
   const line = fs
     .readFileSync(jiraPath, 'utf-8')
     .split('\n')
@@ -569,17 +577,34 @@ function getJiraSync() {
 
 // 슬랙 캡처는 가져올 게 없으면 아무 흔적도 남기지 않아서, 토큰이 만료돼 조용히 멈춰도
 // 화면은 멀쩡해 보인다. 캡처 스킬이 매 실행마다 남기는 checkedAt으로 마지막 확인 시각을 본다.
+// `connected`(토큰·할 일 채널까지 있는가 — 연동 탭 카드와 같은 기준)·`scheduled`(수집이 launchd에 등록됐는가)·
+// `neverRead`(한 번도 돈 흔적이 없음)는 톱니바퀴의 점과 연동 탭이 같은 판단을 하도록 함께 싣는다.
 function getSlackSync() {
   if (!USES.slack) return { used: false };
   const statePath = path.join(process.env.WORKSPACE_DATA_DIR || __dirname, '.slack_capture_state.json');
-  if (!fs.existsSync(statePath)) return { lastSync: null, stale: true };
+  const extra = { connected: slackConnectedNow(), scheduled: launchAgentInstalled('slack-capture') };
+  if (!fs.existsSync(statePath)) return { lastSync: null, stale: true, neverRead: true, ...extra };
   try {
     const state = JSON.parse(fs.readFileSync(statePath, 'utf-8'));
     const lastSync = state.lastSuccessAt ? localDateOf(state.lastSuccessAt) : null;
-    return { lastSync, lastAttempt: state.lastAttemptAt || state.checkedAt || null, error: state.lastError || null, stale: !!state.lastError || !lastSync || lastSync < todayLocal() };
+    const neverRead = !state.lastSuccessAt && !state.lastError && !state.lastAttemptAt && !state.checkedAt;
+    return {
+      lastSync, lastSuccessAt: typeof state.lastSuccessAt === 'string' ? state.lastSuccessAt : null,
+      lastAttempt: state.lastAttemptAt || state.checkedAt || null, error: state.lastError || null,
+      stale: !!state.lastError || !lastSync || lastSync < todayLocal(),
+      ...(neverRead ? { neverRead: true } : {}), ...extra,
+    };
   } catch {
-    return { lastSync: null, stale: true };
+    return { lastSync: null, stale: true, ...extra };
   }
+}
+
+// 슬랙 수집이 연결됐는가 — 연동 탭 카드(`settingsIntgCounts`)와 같은 기준: 켜짐 · 토큰 파일 · 할 일 채널.
+function slackConnectedNow() {
+  try {
+    const slack = integrations.readIntegrations(currentConfigFile(), { claude: false }).slack;
+    return !!(slack.enabled && slack.hasToken && slack.channels && slack.channels.todo && slack.channels.todo.id);
+  } catch { return false; }
 }
 
 // 자동화 폴더 — 앱 설치 스크립트가 항상 이 경로에 고정해서 쓴다.
@@ -1933,8 +1958,11 @@ function updateOffer(version, channel) {
 
 const updateCommandPath = () => personalize.tildePath(path.join(REPO_DIR, '업데이트.command'), os.homedir());
 
-async function aboutApp() {
-  await freshRemoteCheck();
+// `cached`면(페이지를 열 때·6시간마다 톱니바퀴의 파란 점) 원격에 새로 묻지 않고 가진 값만 준다 —
+// 6시간 주기 확인이 아직 안 걸려 있으면 그 주기만 건다(설정을 열 때와 같은 한 번).
+async function aboutApp({ cached = false } = {}) {
+  if (cached) startRemoteCheck();
+  else await freshRemoteCheck();
   const channel = updateChannel();
   const [modified, ref, changes] = await Promise.all([gitModified(), git(['rev-parse', '--short', 'HEAD']), changesUrl(channel)]);
   const version = appVersion();
@@ -2018,7 +2046,18 @@ const UPDATE_MESSAGE = {
 const UPDATE_ROLLBACK_FROM_STEP = 3;
 function rollbackAllowed(status) {
   if (!status || status.action !== 'update' || status.step < UPDATE_ROLLBACK_FROM_STEP) return false;
+  if (updateSettled(status)) return false;
   return status.state === 'failed' || (status.state === 'running' && !updateRecent(status.updatedAt));
+}
+// 멈춘 업데이트 뒤에 다른 업데이트가 끝까지 돌았는가. update.sh는 ③에서 되돌릴 자리(.workspace-last-good)를
+// 늘 새로 적고, 터미널(업데이트.command)로 받은 업데이트는 상태 파일을 쓰지 않는다 — 그 파일이 멈춘 기록보다
+// 새것이면 옛 실패는 지난 일이다(화면에 다시 띄우지 않고, 그 기록으로 되돌리지도 않는다). 파일은 읽기만 한다.
+const updateLastGoodPath = () => path.join(REPO_DIR, '.workspace-last-good');
+function updateSettled(status) {
+  if (!status || status.state === 'done') return false;
+  const at = Date.parse(status.updatedAt || status.finishedAt || '');
+  if (!Number.isFinite(at)) return false;
+  try { return nativeFs.statSync(updateLastGoodPath()).mtimeMs > at + 1000; } catch { return false; }
 }
 const updateRequestPath = () => path.join(automationDir(), 'requests', 'update.request');
 const updateStatusPath = () => path.join(automationDir(), 'update-status.json');
@@ -2067,7 +2106,12 @@ function updateInProgress(status, pending) {
 function updateStatusView() {
   const status = readUpdateStatus();
   const pending = readUpdateRequest();
-  return { ok: true, status, pending, running: updateInProgress(status, pending), updateFile: updateCommandPath() };
+  // `rollback`은 서버가 지금 되돌리기를 받는지, `settled`는 멈춘 기록 뒤에 다른 업데이트가 끝났는지 —
+  // 설정 › 앱을 새로 열었을 때 지난 실패 줄(+ 되돌리기·다시 시도)을 다시 보일지 화면이 이 둘로 정한다.
+  return {
+    ok: true, status, pending, running: updateInProgress(status, pending), updateFile: updateCommandPath(),
+    rollback: rollbackAllowed(status), settled: updateSettled(status),
+  };
 }
 
 // 회사(playio) 폴더 안인가 — install-location.sh와 같은 규칙(실제 경로 칸에 playio, 또는 바깥 저장소 remote에 playio).
@@ -2514,7 +2558,7 @@ const handleRequest = (req, res) => {
 
   // 앱 정보 — 조회라 파일을 쓰지 않는다.
   if (url.pathname === '/api/about' && req.method === 'GET') {
-    aboutApp().then((about) => {
+    aboutApp({ cached: url.searchParams.get('cached') === '1' }).then((about) => {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify(about));
     }).catch(() => {
@@ -2606,6 +2650,10 @@ const handleRequest = (req, res) => {
       state.calendar.log = CALENDAR_ICAL ? liveLog('calendar', calendarLive.history()) : events('calendar');
       state.meetingNotes.log = events('tiro');
       state.alerts = integrationAlerts(config, automations);
+      // 늦음·첫 읽기 전 판단의 재료 — /api/items(톱니바퀴의 주황 점)와 같은 값이라 둘이 같은 말을 한다.
+      const calendarSync = { ...getCalendarToday() };
+      delete calendarSync.events;
+      state.sync = { slackSync, jiraSync: getJiraSync(), calendar: calendarSync };
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ ok: true, ...state, install: process.env.WORKSPACE_MANAGED ? 'managed' : 'manual' }));
     }).catch(() => {

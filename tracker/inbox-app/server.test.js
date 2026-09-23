@@ -6700,7 +6700,7 @@ test('WP-E 채널 고르기 저장: 뺐던 채널을 다시 켜면 같은 id로(
 
   const before = fs.readFileSync(fix.configPath, 'utf8');
   await assert.rejects(() => save({ slack: { enabled: true, token: '', on: ['someday'] } }),
-    error => error.code === 'channel_gone' && error.key === 'someday' && /#my-someday을 찾을 수 없어요/.test(error.message));
+    error => error.code === 'channel_gone' && error.key === 'someday' && /#my-someday 채널을 찾을 수 없어요/.test(error.message));
   assert.equal(fs.readFileSync(fix.configPath, 'utf8'), before, '사라진 채널을 켜려 하면 아무것도 쓰지 않는다');
   // 보관된 채널도 사라진 것과 같다
   const archived = integrationsStore.saveIntegrations({
@@ -6709,6 +6709,13 @@ test('WP-E 채널 고르기 저장: 뺐던 채널을 다시 켜면 같은 id로(
     slackCheck: async () => ({ name: 'my-align', archived: true }),
   });
   await assert.rejects(() => archived, error => error.code === 'channel_gone');
+  // 슬랙에 닿지 못한 것은 사라진 것이 아니다 — slack_unreachable(그 칸과 함께)로 거절하고 아무것도 쓰지 않는다
+  const offlineBefore = fs.readFileSync(fix.configPath, 'utf8');
+  await assert.rejects(() => integrationsStore.saveIntegrations({
+    configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir, body: { slack: { enabled: true, token: '', on: ['someday'] } },
+    slackCheck: async () => { throw Object.assign(new Error('x'), { status: 400, code: 'slack_unreachable' }); },
+  }), error => error.code === 'slack_unreachable' && error.key === 'someday' && error.message === '슬랙에 연결하지 못했어요 — 잠시 뒤 다시 눌러 주세요');
+  assert.equal(fs.readFileSync(fix.configPath, 'utf8'), offlineBefore);
 
   // 사라진 뺀 채널을 다시 체크하면 화면은 새로 만든다 — 새 id는 channels로 오고, off는 지워지고 만든 때부터 읽는다
   await integrationsStore.saveIntegrations({
@@ -7072,8 +7079,9 @@ test('WP-E backup-data.sh: 이 맥 안 daily/YYYY-MM-DD에 복사(접속 암호 
   // 스크립트의 지우기는 날짜 폴더 하나씩만(글자 검사 후) — 다른 rm -rf는 없다
   const script = fs.readFileSync(automationScript('backup-data.sh'), 'utf8');
   const removes = script.split('\n').filter(line => /\brm -rf\b/.test(line) && !/^\s*#/.test(line));
-  assert.deepEqual(removes.map(line => line.trim()), ['rm -rf -- "$DAILY/$name"']);
+  assert.deepEqual(removes.map(line => line.trim()), ['rm -rf -- "$DAILY/$name"', 'rm -rf -- "$DAILY/$name"'], '날짜 폴더 하나 · 남은 임시/옛 폴더 하나 — 둘 다 이름 검사 뒤');
   assert.match(script, /\[\[ "\$name" =~ \^\[0-9\]\{4\}-\[0-9\]\{2\}-\[0-9\]\{2\}\$ \]\] \|\| return 1/);
+  assert.match(script, /\[\[ "\$name" =~ \^\\\.\(tmp\|old\)-\[0-9\]\{4\}-\[0-9\]\{2\}-\[0-9\]\{2\}-\[0-9\]\+\$ \]\] \|\| return 1/);
 });
 
 test('WP-E backup-data.sh: 데이터 목록은 update.sh와 같고(접속 암호만 뺌), GitHub 저장 공간이 있으면 한 겹 더 올린다', { skip: !gitReady }, (t) => {
@@ -7144,4 +7152,86 @@ test('WP-E update.sh: 매일 백업(daily/)은 업데이트 백업의 목록·�
   assert.deepEqual(snapshot(), before);
   const script = fs.readFileSync(path.join(REPO_ROOT, 'update.sh'), 'utf8');
   assert.match(script, /^BACKUP_NAME_RE='\^\[0-9\]\{4\}-\[0-9\]\{2\}-\[0-9\]\{2\}-\[0-9\]\{4\}\$'$/m, 'daily는 이 이름 규칙에 맞지 않는다');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// QA 1.1.0 정정 2
+
+test('QA2 backup-data.sh: 같은 날 다시 돌면 옛 것을 먼저 지우지 않고(옆 이름으로 비켜 둔 뒤) 새 것이 자리 잡으면 지운다', (t) => {
+  const fix = backupFixture(t);
+  assert.equal(fix.run().status, 0, fix.logText());
+  const todayDir = path.join(fix.backup, 'daily', fix.today);
+  fs.writeFileSync(path.join(fix.tracker, 'tasks.md'), '# Tasks\n- 두 번째\n');
+  assert.equal(fix.run().status, 0, fix.logText());
+  assert.match(fs.readFileSync(path.join(todayDir, 'tasks.md'), 'utf8'), /두 번째/);
+  assert.deepEqual(fix.daily().filter(name => name.startsWith('.')), [], '옆 이름(.old-)·임시(.tmp-) 폴더가 남지 않는다');
+  const script = fs.readFileSync(automationScript('backup-data.sh'), 'utf8');
+  const swap = script.slice(script.indexOf('# 다 복사한 뒤에만'), script.indexOf('# 7일치만 남긴다'));
+  assert.ok(!/drop_day "\$DAY"/.test(swap), '옛 날짜 폴더를 먼저 지우지 않는다');
+  assert.ok(swap.indexOf('mv "$DAILY/$DAY" "$OLD"') < swap.indexOf('mv "$TMP" "$DAILY/$DAY"'), '옛 것을 비켜 둔 뒤 새 것을 옮긴다');
+  assert.match(swap, /if ! mv "\$TMP" "\$DAILY\/\$DAY"; then\n\s+\[ -d "\$OLD" \] && mv "\$OLD" "\$DAILY\/\$DAY"/, '실패하면 옛 것을 원래 이름으로 되돌린다');
+  assert.ok(swap.indexOf('drop_leftover "${OLD##*/}"') > swap.indexOf('mv "$TMP" "$DAILY/$DAY"'), '옛 것은 성공한 뒤에만 지운다');
+});
+
+test('QA2 backup-data.sh: 시작할 때 daily/의 `.tmp-`·`.old-` 중 이름 규칙에 정확히 맞고 하루가 넘은 것만 정리한다', (t) => {
+  const fix = backupFixture(t);
+  const daily = path.join(fix.backup, 'daily');
+  fs.mkdirSync(daily, { recursive: true });
+  const old = new Date(Date.now() - 2 * 86400000);
+  const make = (name, aged, file = 'tasks.md') => {
+    const dir = path.join(daily, name);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, file), name);
+    if (aged) fs.utimesSync(dir, old, old);
+    return dir;
+  };
+  make('.tmp-2020-01-01-123', true);
+  make('.old-2020-01-01-456', true);
+  make('.tmp-2020-01-02-789', false);          // 하루가 안 됨 — 지금 도는 다른 실행일 수 있다
+  make('.tmp-notes', true);                     // 이름 규칙이 아님
+  make('.old-2020-01-01-12x', true);            // 이름 규칙이 아님
+  make('.old-2020-01-01', true);                // 번호가 없음
+  const outside = path.join(fix.home, 'outside');
+  fs.mkdirSync(outside);
+  fs.writeFileSync(path.join(outside, 'keep.txt'), '밖의 파일');
+  fs.symlinkSync(outside, path.join(daily, '.old-2020-01-01-999'));
+  assert.equal(fix.run().status, 0, fix.logText());
+  const left = fix.daily().filter(name => name.startsWith('.'));
+  assert.deepEqual(left, ['.old-2020-01-01', '.old-2020-01-01-12x', '.old-2020-01-01-999', '.tmp-2020-01-02-789', '.tmp-notes']);
+  assert.equal(fs.readFileSync(path.join(outside, 'keep.txt'), 'utf8'), '밖의 파일', '바로가기는 따라가지 않는다');
+  assert.ok(fs.lstatSync(path.join(daily, '.old-2020-01-01-999')).isSymbolicLink());
+});
+
+test('QA2 update 상태: 새로고침 뒤 화면이 되돌리기를 다시 보일지 `rollback`·`settled`로 알린다(뒤에 다른 업데이트가 끝까지 돌았으면 받지 않는다)', async (t) => {
+  const app = await startUpdateServer(t);
+  app.plist();
+  const at = new Date(Date.now() - 60000).toISOString();
+  fs.writeFileSync(app.statusFile, JSON.stringify({ action: 'update', from: '1.0.0', to: '1.1.0', step: 4, state: 'failed', message: '데이터 형식을 바꾸지 못했어요', startedAt: at, updatedAt: at, finishedAt: at, steps: [] }));
+  const first = await app.status();
+  assert.equal(first.rollback, true);
+  assert.equal(first.settled, false);
+  // 터미널의 업데이트.command로 다시 받아 ③에서 되돌릴 자리를 새로 적었다(상태 파일은 그대로)
+  fs.writeFileSync(path.join(app.repo, '.workspace-last-good'), 'abc\n');
+  const later = await app.status();
+  assert.equal(later.settled, true);
+  assert.equal(later.rollback, false);
+  const refused = await app.post({ action: 'rollback' });
+  assert.equal(refused.reason, 'nothing-to-undo', '지난 실패 기록으로 새 업데이트를 되돌리지 않는다');
+  assert.equal(fs.existsSync(app.request), false);
+  // 되돌릴 자리가 멈춘 기록보다 옛것이면(그 업데이트가 ③에서 적은 것) 그대로 받는다
+  const past = new Date(Date.now() - 120000);
+  fs.utimesSync(path.join(app.repo, '.workspace-last-good'), past, past);
+  assert.equal((await app.status()).rollback, true);
+});
+
+test('QA2 슬랙 채널 확인: 닿지 못한 것(slack_unreachable)과 사라진 것(channel_not_found)을 구분한다', async () => {
+  const unreachable = async () => { throw new TypeError('fetch failed'); };
+  await assert.rejects(() => integrationsStore.slackCheckChannel('t', 'C0X', unreachable), error => error.code === 'slack_unreachable');
+  const gone = async () => new Response(JSON.stringify({ ok: false, error: 'channel_not_found' }));
+  await assert.rejects(() => integrationsStore.slackCheckChannel('t', 'C0X', gone), error => error.code === 'channel_not_found');
+});
+
+test('QA2 GET /api/about?cached=1은 원격 확인을 기다리지 않고 가진 값만 준다', async () => {
+  const about = await (await fetch(base + '/api/about?cached=1')).json();
+  assert.ok('version' in about && 'update' in about);
 });

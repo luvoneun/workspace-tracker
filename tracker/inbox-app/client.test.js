@@ -3553,7 +3553,7 @@ test('renderDateBar: 낡음 경고는 톱니바퀴의 점·툴팁으로만 알�
   assert.deepEqual(gear('10:00', allYesterday), { chips: 1, label: '설정 — 자동 갱신 3개 어제 기준', keys: ['slack', 'calendar', 'jira'] }, '셋이 낡아도 머리줄에는 칸이 늘지 않는다');
   assert.equal(gear('10:00', { today, calendar: { stale: true, lastSync: ago(1) }, slackSync: { stale: false, lastSync: today }, jiraSync: { stale: false, lastSync: today } }).label, '설정 — 캘린더 어제 기준');
   assert.equal(gear('08:00', { today, calendar: { stale: false, lastSync: today }, slackSync: { stale: false, lastSync: today }, jiraSync: { stale: true, lastSync: ago(3) } }).label, '설정 — 지라 3일 전 기준', '이틀 넘게 멈춘 것은 아침에도 알린다');
-  assert.equal(gear('08:00', { today, calendar: { stale: false, lastSync: today }, jiraSync: { stale: false, lastSync: today }, slackSync: { stale: true, lastSync: ago(1), error: '실패' } }).label, '설정 — 슬랙 캡처 어제 기준', '오류가 있었으면 아침에도 알린다');
+  assert.equal(gear('08:00', { today, calendar: { stale: false, lastSync: today }, jiraSync: { stale: false, lastSync: today }, slackSync: { stale: true, lastSync: ago(1), error: '실패' } }).label, '설정 — 슬랙 수집 어제 기준', '오류가 있었으면 아침에도 알린다(이름은 연동 탭 카드 이름)');
   assert.equal(gear('10:00', { today, calendar: { stale: true, lastSync: null }, slackSync: { stale: false, lastSync: today }, jiraSync: { stale: true, lastSync: ago(2) } }).label, '설정 — 자동 갱신 2개 확인 필요');
   assert.equal(gear('10:00', { today, calendar: { stale: false, lastSync: today }, slackSync: { stale: false, lastSync: today }, jiraSync: { stale: false, lastSync: today } }).label, '설정', '다 최신이면 점도 말도 없다(점은 낡은 것이 있을 때만 켜진다)');
 });
@@ -6606,9 +6606,13 @@ test('WP-D1 C. 슬랙 ② 채널: 쓸 곳 네 줄(할 일은 필수), 고른 줄
   box('waiting').listeners.change();
   assert.equal(make().textContent, '고른 채널 2개 만들어 주기');
 
-  // 이름은 슬랙 규칙대로 적는 동안 정리한다
+  // 이름은 치는 동안에는 그대로 두고(띄어쓰기·한글 조합을 막지 않는다) 칸을 떠날 때 슬랙 규칙대로 정리한다
+  name('todo').value = 'My TODO ';
+  name('todo').listeners.input();
+  assert.equal(name('todo').value, 'My TODO ', '치는 동안에는 끝의 띄어쓰기도 자르지 않는다');
   name('todo').value = 'My TODO!';
   name('todo').listeners.input();
+  name('todo').listeners.blur();
   assert.equal(name('todo').value, 'my-todo');
   const clean = value => fx.app.run(`settingsSlackChannelName(${JSON.stringify(value)})`);
   assert.equal(clean(' 내 할일 todo! '), '--todo', '쓸 수 없는 글자만 떨어뜨린다');
@@ -7854,7 +7858,7 @@ test('WP-E E. 채널 고르기 빼기·더하기: 체크를 풀면 그 줄이 �
   assert.equal(pickGo(fx).textContent, '1개 빼기');
   assert.equal(pickRow(fx, 'waiting').children[0].focused, true, '다시 그려도 누른 칸에 초점이 남는다');
   const confirm = fx.find('slack', 'd-iconfirm')[0];
-  assert.equal(confirm.children[0].textContent, '#my-waiting을 빼면 앱이 이 채널을 더 이상 읽지 않아요. 슬랙 채널과 이미 들어온 항목은 그대로예요.');
+  assert.equal(confirm.children[0].textContent, '#my-waiting 채널을 빼면 앱이 더 이상 읽지 않아요. 슬랙 채널과 이미 들어온 항목은 그대로예요.');
 
   await pickToggle(fx, 'align', true);
   assert.equal(pickGo(fx).textContent, '1개 만들고 1개 빼기');
@@ -7896,12 +7900,12 @@ test('WP-E E·F. 뺐던 채널은 다시 체크하면 새로 만들지 않고 �
   await pickToggle(fx, 'align', true);
   assert.equal(pickGo(fx).textContent, '1개 만들고 1개 다시 연결하기');
   assert.match(pickText(fx, 'align'), /다시 연결해요 — 뺀 동안 온 메시지는 가져오지 않아요/);
-  assert.match(fx.text('slack'), /#my-align을 다시 연결해요 — 뺀 동안 온 메시지는 가져오지 않아요/);
+  assert.match(fx.text('slack'), /#my-align 채널을 다시 연결해요 — 뺀 동안 온 메시지는 가져오지 않아요/);
   // 뺀 채널이 슬랙에서도 사라졌으면 다시 체크할 때 새로 만든다(이름 칸)
   assert.equal(pickRow(fx, 'someday').children[2].className, 'nmwrap');
   // 사라진(연결된) 채널: 체크된 채 주황 판 + 이름 칸, 두면 다시 만들고 풀면 뺀다
   assert.equal(pickRow(fx, 'waiting').className, 'd-ich is-on is-gone');
-  assert.match(pickText(fx, 'waiting'), /#my-waiting을 찾을 수 없어요 — 체크한 채로 두면 다시 만들어요새 채널 이름/);
+  assert.match(pickText(fx, 'waiting'), /#my-waiting 채널을 찾을 수 없어요 — 체크한 채로 두면 다시 만들어요새 채널 이름/);
   await pickToggle(fx, 'waiting', false);
   assert.equal(pickGo(fx).textContent, '1개 다시 연결하고 1개 빼기');
   await pickGo(fx).listeners.click();
@@ -7920,7 +7924,7 @@ test('WP-E F. 사라진 채널: 카드에 주황 한 줄 + 채널 고르기, 할
   await fx.app.run('renderSettingsIntegrations()');
   const warn = fx.find('slack', 'k-warn')[0];
   assert.equal(warn.dataset.missing, 'align');
-  assert.match(fx.text('slack'), /#my-align을 찾을 수 없어요 — 슬랙에서 지웠거나 보관했어요 · 채널 고르기/);
+  assert.match(fx.text('slack'), /#my-align 채널을 찾을 수 없어요 — 슬랙에서 지웠거나 보관했어요 · 채널 고르기/);
   assert.match(fx.shape("document.getElementById('settingsIntegrationsView').children[0]").text, /^● 연결 1개 모두 잘 읽고 있어요/, '할 일이 아닌 채널은 멈춘 것으로 세지 않는다');
 
   const gone = intgClient({
@@ -7931,7 +7935,7 @@ test('WP-E F. 사라진 채널: 카드에 주황 한 줄 + 채널 고르기, 할
   }, [{ body: { ok: true, prefix: 'hana' } }]);
   await gone.app.run('renderSettingsIntegrations()');
   assert.match(gone.shape("document.getElementById('settingsIntegrationsView').children[0]").text, /^● 1개가 멈췄어요/);
-  assert.equal(stText(gone, 1), '● #my-todo을 찾을 수 없어요');
+  assert.equal(stText(gone, 1), '● #my-todo 채널을 찾을 수 없어요');
   assert.equal(gone.find('slack', 'st')[0].className, 'st k-neg');
   const why = gone.find('slack', 'd-intgwhy')[0];
   assert.equal(why.children.map(one => one.textContent).join(''), '슬랙에서 지웠거나 보관했어요 · 채널 고르기');
@@ -8060,4 +8064,188 @@ test('WP-E 도움말: `상태 탭`을 가리키는 문구가 없고, 새 문답(
     const source = fs.readFileSync(path.join(__dirname, file), 'utf8');
     assert.ok(!/settingsOpen\('status'|data-settings-tab="status"|settingsStatusView/.test(source), `${file}`);
   }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// QA 1.1.0 정정 2 — 점과 연동 탭이 한 기준 · 새로고침 뒤 되돌리기 · 첫 로드 파란 점 · 사라진 채널 · 첫 읽기 전
+
+test('QA2 늦음 한 기준: syncLag가 톱니바퀴 주황 점과 연동 탭 요약·카드에 같은 답을 준다(연결 안 됨·첫 읽기 전은 늦음이 아니다)', async () => {
+  const app = pureClient();
+  const lag = (data, clock = '10:00', now = null) => JSON.parse(app.run(`JSON.stringify(syncLag(${JSON.stringify(data)}, { clock: '${clock}'${now ? `, now: ${now}` : ''} }))`));
+  const day = days => app.run(`(() => { const d = new Date(); d.setDate(d.getDate() - ${days}); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); })()`);
+  const today = day(0);
+  // 방금 연결한 슬랙(상태 파일 없음) — 기다리는 중이지 늦은 것이 아니다
+  same(lag({ slackSync: { stale: true, lastSync: null, neverRead: true, connected: true, scheduled: true } }), { late: [], waiting: ['slack'] });
+  // 수집이 launchd에 등록돼 있지 않으면 기다려도 읽지 않는다 — 늦은 쪽(setup)
+  same(lag({ slackSync: { stale: true, lastSync: null, neverRead: true, connected: true, scheduled: false } }).late.map(one => [one.key, one.setup, one.text]), [['slack', true, '아직 읽기 전이에요']]);
+  // 연결 안 된 것·쓰지 않는 것은 보지 않는다
+  same(lag({ slackSync: { stale: true, lastSync: null, neverRead: true, connected: false, scheduled: false }, jiraSync: { used: false } }), { late: [], waiting: [] });
+  // 마지막으로 읽은 시각을 알면 `N시간째`, 날짜만 알면 `어제부터`·`N일째`
+  const now = Date.parse('2026-09-24T10:00:00');
+  const late = lag({ slackSync: { stale: true, lastSync: day(1), lastSuccessAt: new Date(now - 15 * 3600000).toISOString(), connected: true }, calendar: { stale: true, lastSync: day(3) }, jiraSync: { stale: false, lastSync: today } }, '10:00', now).late;
+  same(late.map(one => [one.key, one.name, one.text]), [['slack', '슬랙 수집', '15시간째 새로 읽지 못했어요'], ['calendar', '캘린더', '3일째 새로 읽지 못했어요']]);
+  assert.equal(app.run(`syncLagText(null, 1)`), '어제부터 새로 읽지 못했어요');
+  assert.equal(app.run(`syncLagText(new Date(Date.now() - 50 * 3600000).toISOString(), 3)`), '2일째 새로 읽지 못했어요');
+  // 아침 첫 갱신 전의 `어제 기준`은 늦음이 아니다(점과 탭이 똑같이)
+  same(lag({ calendar: { stale: true, lastSync: day(1) } }, '08:00').late, []);
+
+  // 톱니바퀴: 첫 읽기 전이면 점이 없고, 툴팁은 카드 이름 + `연동 탭에서 봐요`
+  const gear = data => JSON.parse(app.run(`(() => { nowHHMM = () => '10:00'; renderDateBar(${JSON.stringify({ today, ...data })}); const b = document.getElementById('settingsBtn'); return JSON.stringify({ label: b.getAttribute('aria-label'), title: b.title, keys: syncStale.map(one => one.key) }); })()`));
+  same(gear({ slackSync: { stale: true, lastSync: null, neverRead: true, connected: true, scheduled: true }, calendar: { stale: false, lastSync: today }, jiraSync: { stale: false, lastSync: today } }).keys, []);
+  const stale = gear({ calendar: { stale: true, lastSync: day(1) }, slackSync: { stale: false, lastSync: today }, jiraSync: { stale: false, lastSync: today } });
+  assert.equal(stale.title, '설정 — 캘린더 어제 기준. 목록이 최신이 아닐 수 있어요. 누르면 연동 탭에서 봐요.');
+  assert.doesNotMatch(stale.title, /슬랙 캡처|자세한 상태/);
+});
+
+test('QA2 연동 탭: 늦은 카드는 주황 상태 줄 + 요약 `● N개가 늦어요`, 주황 점을 누르면 그 카드가 주황 판으로 잠깐 밝아진다', async () => {
+  const today = new Date();
+  const two = n => String(n).padStart(2, '0');
+  const day = d => { const t = new Date(Date.now() - d * 86400000); return `${t.getFullYear()}-${two(t.getMonth() + 1)}-${two(t.getDate())}`; };
+  const fx = wpd25();
+  fx.payload.sync = {
+    slackSync: { stale: true, lastSync: day(1), lastSuccessAt: new Date(Date.now() - 20 * 3600000).toISOString(), connected: true, scheduled: true },
+    calendar: { stale: false, lastSync: day(0), live: true },
+    jiraSync: { stale: false, lastSync: day(0), live: true, connected: true },
+  };
+  fx.app.run(`nowHHMM = () => '10:00'; settingsFocusKey = 'stale';`);
+  await fx.app.run('renderSettingsIntegrations()');
+  const head = fx.view().children[0];
+  assert.equal(fx.shape("document.getElementById('settingsIntegrationsView').children[0]").text, '● 1개가 늦어요연결됨 4 · 남은 것 0');
+  assert.equal(head.children[0].className, 'lead k-warn');
+  assert.equal(head.children[0].children[0].className, 'warn');
+  const st = fx.find('slack', 'st')[0];
+  assert.equal(st.className, 'st k-warn');
+  assert.equal(fx.shape(`window.findByClass(document.getElementById('settingsIntegrationsView').children[1], 'st')[0]`).text, '● 20시간째 새로 읽지 못했어요');
+  assert.equal(fx.card('slack').dataset.late, 'true');
+  assert.match(fx.card('slack').className, /\bis-flash\b.*\bis-warn\b/, '주황 점을 누르고 들어오면 늦은 카드만 주황 판');
+  assert.ok(!/is-flash/.test(fx.card('jira').className));
+  // 점도 방금 읽은 같은 값으로 맞춘다
+  same(fx.app.run('syncStale.map(one => one.key)'), ['slack']);
+  // 톱니바퀴: 주황 점이면 연동 탭 + stale 표지
+  fx.app.run(`settingsAlertKeys = []; document.getElementById('settingsBtn').classList.contains = cls => cls === 'has-stale';`);
+  same(fx.app.run('settingsGearTab()'), ['integrations', 'stale']);
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /\.d-intg\.is-flash\.is-warn \{ background: var\(--warn-bg\); \}/);
+  assert.match(css, /\.d-intghead \.lead\.k-warn \{ color: var\(--warn\); font-weight: 600; \}/);
+  assert.match(css, /\.d-intgtop \.st\.k-warn \{ color: var\(--warn\); \}/);
+
+  // 멈춘 카드는 빨강이 이긴다(늦음으로 세지 않는다)
+  const bad = wpd25({ slack: { ...WPD25_CONNECTED.slack, fetch: { failing: true, failedAt: ago(3) } } });
+  bad.payload.sync = fx.payload.sync;
+  bad.app.run(`nowHHMM = () => '10:00';`);
+  await bad.app.run('renderSettingsIntegrations()');
+  assert.equal(bad.shape("document.getElementById('settingsIntegrationsView').children[0]").text, '● 1개가 멈췄어요연결됨 4 · 남은 것 0');
+});
+
+test('QA2 첫 읽기 전: 요약 `연결 N개 · 첫 읽기를 기다리는 중 M개`, 카드 `아직 읽기 전이에요`(회색) — 수집이 등록 안 됐으면 주황으로 업데이트.command 안내', async () => {
+  const two = n => String(n).padStart(2, '0');
+  const t = new Date();
+  const today = `${t.getFullYear()}-${two(t.getMonth() + 1)}-${two(t.getDate())}`;
+  const waiting = wpd25();
+  waiting.payload.sync = {
+    slackSync: { stale: true, lastSync: null, neverRead: true, connected: true, scheduled: true },
+    calendar: { stale: false, lastSync: today, live: true },
+    jiraSync: { stale: false, lastSync: today, live: true, connected: true },
+  };
+  await waiting.app.run('renderSettingsIntegrations()');
+  assert.equal(waiting.shape("document.getElementById('settingsIntegrationsView').children[0]").text, '● 연결 4개 · 첫 읽기를 기다리는 중 1개연결됨 4 · 남은 것 0');
+  assert.equal(waiting.view().children[0].children[0].children[0].className, 'wait');
+  const st = waiting.find('slack', 'st')[0];
+  assert.equal(st.className, 'st');
+  assert.equal(waiting.shape(`window.findByClass(document.getElementById('settingsIntegrationsView').children[1], 'st')[0]`).text, '● 아직 읽기 전이에요');
+  assert.equal(waiting.find('slack', 'd-intgwhy').length, 0);
+  assert.doesNotMatch(waiting.shape("document.getElementById('settingsIntegrationsView').children[0]").text, /모두 잘 읽고 있어요/, '읽기 전인데 잘 읽는다고 하지 않는다');
+
+  const setup = wpd25();
+  setup.payload.sync = { ...waiting.payload.sync, slackSync: { ...waiting.payload.sync.slackSync, scheduled: false } };
+  await setup.app.run('renderSettingsIntegrations()');
+  assert.equal(setup.shape("document.getElementById('settingsIntegrationsView').children[0]").text, '● 1개가 늦어요연결됨 4 · 남은 것 0');
+  assert.equal(setup.find('slack', 'st')[0].className, 'st k-warn');
+  const line = setup.find('slack', 'd-intgwhy')[0];
+  assert.equal(line.className, 'd-intgwhy k-warn');
+  assert.equal(line.textContent, '업데이트.command를 한 번 실행하면 수집이 시작돼요');
+});
+
+test('QA2 새로고침 뒤 업데이트 실패: ③ 이후면 실패 줄 + 되돌리기, ①②면 다시 시도, 되돌리기가 끝났거나 뒤에 성공한 업데이트가 있으면 없다', () => {
+  const app = pureClient();
+  const left = data => JSON.parse(app.run(`JSON.stringify(settingsUpdateLeftover(${JSON.stringify(data)}))`));
+  const failed = (step, extra = {}) => ({ status: { action: 'update', step, state: 'failed', message: '데이터 형식을 바꾸지 못했어요' }, running: false, updateFile: '~/workspace/업데이트.command', ...extra });
+  same(left(failed(4, { rollback: true, settled: false })), { kind: 'failed', action: 'update', step: 4, message: '데이터 형식을 바꾸지 못했어요', updateFile: '~/workspace/업데이트.command' });
+  assert.equal(left(failed(4, { rollback: false, settled: false })), null, '서버가 되돌리기를 받지 않으면 보이지 않는다');
+  assert.equal(left(failed(4, { rollback: false, settled: true })), null, '뒤에 다른 업데이트가 끝까지 돌았으면 지난 일이다');
+  assert.equal(left(failed(2, { rollback: false, settled: false })).step, 2, '①② 실패는 다시 시도로');
+  assert.equal(left(failed(2, { settled: true })), null);
+  assert.equal(left({ status: { action: 'rollback', step: 6, state: 'done' }, rollback: false }), null, '되돌리기가 끝났으면 없다');
+  assert.equal(left({ status: { action: 'update', step: 6, state: 'done' } }), null);
+  assert.equal(left({ status: null }), null);
+  assert.equal(left(failed(4, { status: { action: 'rollback', step: 2, state: 'failed', message: 'x' } })).action, 'rollback', '되돌리기 자체의 실패는 그 줄');
+});
+
+test('QA2 새로고침 뒤 업데이트 실패: 앱 탭을 열면 상태 파일의 실패를 다시 그린다', async () => {
+  const fx = updateClient(D3_ABOUT, { status: () => ({ ...d3Status('failed', 4, { message: '데이터 형식을 바꾸지 못했어요' }), rollback: true, settled: false }) });
+  fx.app.run('settingsAboutFill()');
+  await fx.flush();
+  await fx.flush();
+  assert.match(fx.text(), /업데이트하지 못했어요 — 데이터 형식을 바꾸지 못했어요/);
+  assert.match(fx.text(), /이전 버전으로 되돌리기/);
+});
+
+test('QA2 파란 점: 페이지를 열 때 `?cached=1`로 한 번, 그 뒤 6시간마다 — 설정을 열지 않아도 켜진다', async () => {
+  const script = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const boot = script.slice(script.indexOf(DEFINITIONS_MARKER));
+  assert.match(boot, /settingsAboutLoad\(\{ cached: true \}\)/);
+  assert.match(boot, /setInterval\(\(\) => settingsAboutLoad\(\{ cached: true \}\), 6 \* 60 \* 60 \* 1000\)/);
+  const fx = intgClient();
+  const asked = [];
+  fx.app.context.fetch = async (url) => { asked.push(String(url)); return new Response(JSON.stringify({ version: '1.0.0', update: { available: true, label: 'v1.1.0' } }), { status: 200 }); };
+  let lit = false;
+  fx.app.run(`document.getElementById('settingsBtn').classList.toggle = (cls, on) => { if (cls === 'has-update') window.__lit = on; };`);
+  await fx.app.run('settingsAboutLoad({ cached: true })');
+  lit = fx.app.run('window.__lit');
+  same(asked, ['/api/about?cached=1']);
+  assert.equal(lit, true);
+  // 못 읽으면 조용히 가진 값을 둔다(알림을 띄우지 않는다)
+  fx.app.context.fetch = async () => { throw new TypeError('offline'); };
+  await fx.app.run('settingsAboutLoad({ cached: true })');
+  assert.equal(fx.app.run('settingsHasUpdate()'), true);
+});
+
+test('QA2 사라진 채널: 뺐던 채널을 다시 체크했는데 서버가 channel_gone이면 그 줄이 곧바로 새로 만들기(기본 이름 = 원래 이름)', async () => {
+  const fx = await intgPick({
+    off: { align: { name: '#my-align' } },
+  }, [{ status: 400, body: { ok: false, code: 'channel_gone', key: 'align', error: '#my-align 채널을 찾을 수 없어요 — 슬랙에서 지웠거나 보관했어요. 체크한 채로 두면 새로 만들어요' } }]);
+  await pickToggle(fx, 'align', true);
+  assert.equal(pickGo(fx).textContent, '1개 다시 연결하기');
+  await pickGo(fx).listeners.click();
+  assert.match(pickText(fx, 'align'), /#my-align 채널을 찾을 수 없어요 — 같은 이름으로 새로 만들어요/);
+  const row = pickRow(fx, 'align');
+  assert.equal(row.className, 'd-ich is-on is-gone');
+  const field = row.children[2];
+  assert.equal(field.className, 'nmwrap', '이름 칸이 열린다');
+  assert.equal(field.children[1].value, 'my-align', '기본 이름은 원래 이름');
+  assert.equal(field.children[1].focused, true, '초점은 그 칸');
+  assert.equal(pickGo(fx).textContent, '1개 만들기');
+  assert.equal(fx.find('slack', 'd-derr').map(one => one.textContent).join(''), '', '막다른 오류 줄은 남기지 않는다');
+
+  // 슬랙에 닿지 못한 것은 사라진 것과 다르다 — 줄은 그대로, 다시 누르라는 말만
+  const offline = await intgPick({
+    off: { align: { name: '#my-align' } },
+  }, [{ status: 400, body: { ok: false, code: 'slack_unreachable', key: 'align', error: '슬랙에 연결하지 못했어요 — 잠시 뒤 다시 눌러 주세요' } }]);
+  await pickToggle(offline, 'align', true);
+  await pickGo(offline).listeners.click();
+  assert.match(pickText(offline, 'align'), /다시 연결해요 — 뺀 동안 온 메시지는 가져오지 않아요/);
+  assert.match(offline.text('slack'), /슬랙에 연결하지 못했어요 — 잠시 뒤 다시 눌러 주세요/);
+});
+
+test('QA2 할 일 채널 예시: 도움말은 저장된 이름, 모르면 `#이름-todo` — `#my-todo`를 사람의 채널처럼 적지 않는다', () => {
+  const app = pureClient();
+  const faq = JSON.parse(app.run('JSON.stringify(SETTINGS_FAQ)'));
+  const all = JSON.stringify(faq);
+  assert.doesNotMatch(all, /#my-todo/);
+  assert.equal((all.match(/\{todo\}/g) || []).length, 2);
+  assert.equal(app.run('settingsTodoName()'), '#이름-todo');
+  app.run(`settingsIntegrations = { slack: { channels: { todo: { id: 'C1', name: '#hana-todo' } } } }`);
+  assert.equal(app.run('settingsTodoName()'), '#hana-todo');
+  assert.equal(app.run(`settingsChannelObject('#hana-todo')`), '#hana-todo 채널을');
+  assert.equal(app.run(`settingsChannelObject('')`), '채널을');
 });

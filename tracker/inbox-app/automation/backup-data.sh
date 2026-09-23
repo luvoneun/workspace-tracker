@@ -3,7 +3,9 @@
 # 이 데이터는 코드 저장소에서 일부러 제외돼 있어서(.gitignore) 따로 챙기지 않으면 백업이 전혀 없다. 두 겹이다:
 #
 #   1. 이 맥 안(모두 — 나와 동료가 같은 기본 동작): 데이터 파일을 ~/workspace-data-backup/daily/YYYY-MM-DD/에
-#      복사한다. 임시 폴더에 다 복사한 뒤 이름을 바꿔 넣고(같은 날 다시 돌면 그날 것을 교체), 7일치만 남긴다.
+#      복사한다. 임시 폴더에 다 복사한 뒤 이름을 바꿔 넣고(같은 날 다시 돌면 그날 것을 교체 — 옛 것은 새 것이
+#      자리를 잡은 뒤에야 지운다), 7일치만 남긴다. 지난 실행이 중간에 끊겨 남긴 `.tmp-*`·`.old-*`는 하루가
+#      지난 것만 정리한다.
 #      update.sh의 업데이트 직전 백업(같은 폴더 바로 아래 YYYY-MM-DD-HHMM)과는 섞이지 않는다 — 여기서는
 #      daily/ 안의 이름이 정확히 YYYY-MM-DD인 폴더만 보고, update.sh는 daily/를 보지 않는다.
 #   2. GitHub(추가 한 겹): 백업용 Git 저장 공간(data-backup.git)을 만들어 둔 사람만. 저장 공간은 프로젝트 밖에 두고
@@ -55,6 +57,7 @@ FAILED=0
 # ─────────────────────────────  1. 이 맥 안(모두)
 DAY="$(date '+%Y-%m-%d')"
 TMP="$DAILY/.tmp-$DAY-$$"
+OLD="$DAILY/.old-$DAY-$$"
 
 # 임시 폴더를 비우고 지운다 — 우리가 복사한 이름만 지운다(폴더째 지우지 않는다).
 drop_tmp() {
@@ -73,9 +76,32 @@ drop_day() {
   rm -rf -- "$DAILY/$name"
 }
 
+# 지난 실행이 남긴 임시(.tmp-)·옛(.old-) 폴더 하나를 지운다 — 이름이 정확히 `.tmp-YYYY-MM-DD-숫자` /
+# `.old-YYYY-MM-DD-숫자`일 때만, daily/ 바로 아래 그 경로 하나만(바로가기는 따라가지 않고 건드리지 않는다).
+drop_leftover() {
+  local name="$1"
+  [[ "$name" =~ ^\.(tmp|old)-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+$ ]] || return 1
+  [ -n "$DAILY" ] && [ ! -L "$DAILY/$name" ] || return 1
+  [ -d "$DAILY/$name" ] || return 0
+  rm -rf -- "$DAILY/$name"
+}
+
+# 시작할 때 한 번 — 이름 규칙에 맞고 하루(1440분)가 넘게 된 것만. 지금 도는 다른 실행의 것은 하루가 안 됐다.
+drop_stale_leftovers() {
+  local name
+  ls -1A "$DAILY" 2>/dev/null | while IFS= read -r name; do
+    [[ "$name" =~ ^\.(tmp|old)-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+$ ]] || continue
+    [ -d "$DAILY/$name" ] && [ ! -L "$DAILY/$name" ] || continue
+    [ -n "$(find "$DAILY/$name" -maxdepth 0 -type d -mmin +1440 2>/dev/null)" ] || continue
+    drop_leftover "$name"
+  done
+  return 0
+}
+
 local_backup() {
   local f
   mkdir -p "$DAILY" || { say "로컬 실패 — 백업 폴더를 만들지 못함 ($DAILY)"; return 1; }
+  drop_stale_leftovers
   drop_tmp
   mkdir "$TMP" || { say "로컬 실패 — 임시 폴더를 만들지 못함"; return 1; }
   for f in $DATA_FILES; do
@@ -86,9 +112,18 @@ local_backup() {
     [ -f "$STATE_DIR/$f" ] || continue
     cp -p "$STATE_DIR/$f" "$TMP/$f" || { drop_tmp; say "로컬 실패 — 파일을 복사하지 못함 ($f)"; return 1; }
   done
-  # 다 복사한 뒤에만 오늘 것을 바꿔 넣는다(같은 날 다시 돌면 그날 것을 교체).
-  drop_day "$DAY" || { drop_tmp; say "로컬 실패 — 오늘 폴더를 바꾸지 못함"; return 1; }
-  mv "$TMP" "$DAILY/$DAY" || { drop_tmp; say "로컬 실패 — 오늘 폴더를 만들지 못함"; return 1; }
+  # 다 복사한 뒤에만 오늘 것을 바꿔 넣는다(같은 날 다시 돌면 그날 것을 교체). 옛 것을 먼저 지우지 않는다 —
+  # 옆 이름(.old-)으로 비켜 두고 새 것을 날짜 이름으로 옮긴 뒤, 성공했을 때만 옛 것을 지운다(실패하면 되돌린다).
+  if [ -d "$DAILY/$DAY" ]; then
+    mv "$DAILY/$DAY" "$OLD" || { drop_tmp; say "로컬 실패 — 오늘 폴더를 바꾸지 못함"; return 1; }
+  fi
+  if ! mv "$TMP" "$DAILY/$DAY"; then
+    [ -d "$OLD" ] && mv "$OLD" "$DAILY/$DAY"
+    drop_tmp
+    say "로컬 실패 — 오늘 폴더를 만들지 못함"
+    return 1
+  fi
+  [ -d "$OLD" ] && drop_leftover "${OLD##*/}"
 
   # 7일치만 남긴다 — 이름이 정확히 날짜인 폴더만, 날짜순으로 가장 오래된 것부터.
   local all total old

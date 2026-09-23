@@ -2258,13 +2258,20 @@ body.batch-open .d-toast { bottom: 76px; }
 /* 맨 위 한 줄 요약 — `● 연결 N개 모두 잘 읽고 있어요`(점만 초록) / `● N개가 멈췄어요`(글자까지 빨강 600). */
 .d-intghead .lead .ok { color: var(--success); }
 .d-intghead .lead.k-neg { color: var(--urgent); font-weight: 600; }
+/* 늦은 것이 있으면 `● N개가 늦어요`(주황 600) · 첫 읽기를 기다리면 점만 조용한 회색. */
+.d-intghead .lead.k-warn { color: var(--warn); font-weight: 600; }
+.d-intghead .lead .warn { color: var(--warn); }
+.d-intghead .lead .wait { color: var(--dim); }
 /* 빨간 점을 누르고 들어오면 멈춘 카드가 약 2초 붉은 판(시안 B). 동작 줄이기면 전환 없이 바탕만 바뀐다. */
 .d-intg.is-flash { margin: 0 -10px; padding-left: 10px; padding-right: 10px; border-radius: var(--r-sm); background: var(--urgent-bg); box-shadow: none; animation: none; }
 .d-intg { transition: background 400ms var(--ease); }
 @media (prefers-reduced-motion: reduce) { .d-intg { transition: none; } }
+/* 주황 점(늦음)을 누르고 들어오면 늦은 카드가 같은 방식으로 주황 판. */
+.d-intg.is-flash.is-warn { background: var(--warn-bg); }
 /* 멈춘 카드의 이유 한 줄 — 상태 줄 바로 아래. */
 .d-intgwhy { margin-top: 2px; font-size: 12.5px; color: var(--urgent); }
 .d-intgwhy .d-ablink { color: var(--urgent); }
+.d-intgwhy.k-warn { color: var(--warn); }
 /* ⋯ › 최근 기록 — 시각 · 결과 한 줄(최근 10개), 실패는 빨강. 맨 아래 `오류 전문 복사`. */
 .d-ilog { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .d-ilog li { display: flex; gap: 10px; min-width: 0; }
@@ -2281,6 +2288,10 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-intgtop .st .bad { color: var(--urgent); }
 /* 지금 실패 중인 연동의 상태 줄(`읽지 못했어요 · 10분 전`) — 빨간 글자 한 줄 */
 .d-intgtop .st.k-neg { color: var(--urgent); }
+/* 늦은 연동의 상태 줄(`15시간째 새로 읽지 못했어요`) — 주황 글자 · 첫 읽기 전은 점만 회색 */
+.d-intgtop .st.k-warn { color: var(--warn); }
+.d-intgtop .st .warn { color: var(--warn); }
+.d-intgtop .st .wait { color: var(--dim); }
 /* 지금 가져오기: 1분 제한 동안은 흐리게(누르면 이유를 알려 주려고 disabled는 쓰지 않는다) */
 .d-intgtop .d-ifetch[aria-disabled="true"], .d-intgtop .d-ifetch[aria-disabled="true"]:hover { color: var(--dim); background: var(--neutral-bg); }
 .d-intgtop .d-btn { flex: none; }

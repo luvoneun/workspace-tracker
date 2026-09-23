@@ -44,6 +44,7 @@ const MESSAGE = {
   slackCreate: '슬랙에서 채널을 만들지 못했어요',
   slackTodoOff: '할 일 채널은 뺄 수 없어요 — 슬랙 수집 전체를 끄려면 해제해 주세요',
   slackGone: '을 찾을 수 없어요 — 슬랙에서 지웠거나 보관했어요. 체크한 채로 두면 새로 만들어요',
+  slackOffline: '슬랙에 연결하지 못했어요 — 잠시 뒤 다시 눌러 주세요',
   slackBot: '이건 Bot 토큰이에요 — 바로 위의 User OAuth Token(xoxp-)을 복사해 주세요',
   slackReach: '슬랙에 닿지 못했어요 — 잠시 뒤 다시 해 주세요',
   icalUrl: '비밀 주소를 붙여 넣어 주세요',
@@ -133,8 +134,10 @@ async function slackCheckChannel(token, id, request = (...args) => fetch(...args
     });
     body = await response.json();
   } catch {
-    throw bad(MESSAGE.slackRead);
+    // 슬랙에 닿지 못한 것(네트워크·시간 초과)은 채널이 사라진 것과 다르다 — 표지를 따로 둔다.
+    throw bad(MESSAGE.slackRead, 'slack_unreachable');
   }
+  if (body && (body.error === 'channel_not_found' || body.error === 'is_archived')) throw bad(MESSAGE.slackRead, 'channel_not_found');
   if (!body || body.ok !== true || !body.channel) throw bad(MESSAGE.slackRead);
   // `created`(만든 때, 초)는 새 채널을 "그때부터" 읽게 하는 since에, `archived`는 뺐던 채널을 다시 켤 때 쓴다.
   const created = Number(body.channel.created);
@@ -493,9 +496,20 @@ async function saveIntegrations({
         if (!id) throw bad(MESSAGE.slackChannel);
         if (entry.off !== true) continue;
         let info = null;
-        try { info = await (slackCheck || (() => { throw bad(MESSAGE.slackRead); }))(secret, id); } catch { info = null; }
+        try {
+          info = await (slackCheck || (() => { throw bad(MESSAGE.slackRead); }))(secret, id);
+        } catch (error) {
+          // 슬랙에 닿지 못했으면 사라졌다고 하지 않는다 — 잠시 뒤 다시 누르게 한다(설정은 그대로).
+          if (error && error.code === 'slack_unreachable') {
+            const offline = bad(MESSAGE.slackOffline, 'slack_unreachable');
+            offline.key = key;
+            throw offline;
+          }
+          info = null;
+        }
         if (!info || info.archived) {
-          const error = bad(`${trimmed(entry.name) || '채널'}${MESSAGE.slackGone}`, 'channel_gone');
+          const name = trimmed(entry.name);
+          const error = bad(`${name ? `${name} 채널` : '채널'}${MESSAGE.slackGone}`, 'channel_gone');
           error.key = key;
           throw error;
         }
