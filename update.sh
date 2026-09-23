@@ -330,6 +330,9 @@ if [ "$UPDATED" = "1" ]; then
     # 앱 안 `업데이트 받기` 실행기도 복사본이 돈다(지금 이 실행기가 돌고 있어도 안전하다 — 실행기는 통째로 읽고 시작한다).
     [ -f "$APP_DIR/automation/update-runner.sh" ] && cp "$APP_DIR/automation/update-runner.sh" "$INSTALL_DIR/" 2>/dev/null \
       && chmod +x "$INSTALL_DIR/update-runner.sh" 2>/dev/null
+    # 켠 연동 자동 등록 실행기도 복사본이 돈다. 이 파일이 없는 옛 버전이면 건너뛴다.
+    [ -f "$APP_DIR/automation/apply-runner.sh" ] && cp "$APP_DIR/automation/apply-runner.sh" "$INSTALL_DIR/" 2>/dev/null \
+      && chmod +x "$INSTALL_DIR/apply-runner.sh" 2>/dev/null
   fi
 fi
 

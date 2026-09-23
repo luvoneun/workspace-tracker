@@ -6452,12 +6452,13 @@ test('WP-D1 A. 목록: 카드 차례는 슬랙 수집 → 지라 → 캘린더 �
   // 접힌 카드에는 입력칸이 아예 없다 — 누른 카드만 그 자리에서 펼친다
   assert.ok(['slack', 'jira', 'calendar', 'notes'].every(kind => fx.find(kind, 'd-intgbody')[0].hidden && !fx.find(kind, 'd-din').length));
 
-  // 맨 아래 조용한 줄: 요청하기 · 각자 붙이는 법(새 탭) · 자동화 등록 안내
+  // 맨 아래 조용한 줄: 요청하기 · 각자 붙이는 법(새 탭) — 켠 자동화는 저장하면 앱이 등록하므로 업데이트.command 안내는 없다
   const foot = kids[kids.length - 1];
   assert.equal(foot.className, 'd-intgfoot');
   const footText = fx.shape("document.getElementById('settingsIntegrationsView').children.at(-1)").text;
   assert.match(footText, /^다른 도구를 쓰고 있어요 → 요청하기 · 각자 붙이는 법 ↗/);
-  assert.match(footText, /켠 자동화를 등록하려면 앱 폴더의 업데이트\.command를 한 번 실행해요\./);
+  assert.doesNotMatch(footText, /업데이트\.command|켠 자동화를 등록하려면/);
+  assert.equal(fx.find('slack', 'd-intgsetup').length + fx.app.run("window.findByClass(document.getElementById('settingsIntegrationsView'), 'd-intgsetup').length"), 0);
   const own = fx.app.run("window.findByClass(document.getElementById('settingsIntegrationsView').children.at(-1), 'd-ablink')[1]");
   assert.equal(own.target, '_blank');
   assert.equal(own.rel, 'noopener noreferrer');
@@ -6578,12 +6579,12 @@ async function intgSlackAtChannels(state, replies) {
 }
 const intgRow = (fx, key) => fx.find('slack', 'd-ich').find(one => one.dataset.channel === key);
 
-test('WP-D1 C. 슬랙 ② 채널: 쓸 곳 네 줄(할 일은 필수), 고른 줄만 이름 칸이 켜지고 버튼이 고른 수를 말한다', async () => {
+test('WP-D1 C. 슬랙 ② 채널: 쓸 곳 네 줄(할 일은 기본 체크·해제 가능), 고른 줄만 이름 칸이 켜지고 버튼이 고른 수를 말한다', async () => {
   const fx = await intgSlackAtChannels({}, []);
   const rows = fx.find('slack', 'd-ich');
   same(rows.map(one => one.dataset.channel), ['todo', 'waiting', 'align', 'someday']);
   same(rows.map(one => fx.shape(`window.findByClass(document.getElementById('settingsIntegrationsView').children[1], 'd-ich').find(one => one.dataset.channel === ${JSON.stringify(one.dataset.channel)}).children[1]`).text), [
-    '할 일 필수오늘 탭 새로 들어온 것으로 와요',
+    '할 일오늘 탭 새로 들어온 것으로 와요',
     '기다리는 것누가 답해 줘야 하는 것 → 오늘 탭 확인 대기',
     '정해진 것정책·결정 → 아이디어·결정 탭의 결정',
     '언젠가나중에 참고할 거리 → 아이디어·결정 탭의 아이디어',
@@ -6591,11 +6592,12 @@ test('WP-D1 C. 슬랙 ② 채널: 쓸 곳 네 줄(할 일은 필수), 고른 줄
   const box = key => intgRow(fx, key).children[0];
   const name = key => intgRow(fx, key).children[2];
   same(['todo', 'waiting', 'align', 'someday'].map(key => [box(key).checked, box(key).disabled, name(key).value, name(key).disabled]), [
-    [true, true, 'my-todo', false],
+    [true, false, 'my-todo', false],
     [true, false, 'my-waiting', false],
     [false, false, 'my-align', true],
     [false, false, 'my-someday', true],
-  ], '할 일은 늘 켜짐, 기본 이름은 my-*, 고르지 않은 줄의 이름 칸은 꺼져 있다');
+  ], '할 일은 기본 체크(풀 수 있다), 기본 이름은 my-*, 고르지 않은 줄의 이름 칸은 꺼져 있다');
+  assert.ok(!fx.find('slack', 'need').length, '`필수` 표시는 없다');
   const make = () => fx.find('slack', 'pri')[0];
   assert.equal(make().textContent, '고른 채널 2개 만들어 주기');
   box('align').checked = true;
@@ -6605,6 +6607,21 @@ test('WP-D1 C. 슬랙 ② 채널: 쓸 곳 네 줄(할 일은 필수), 고른 줄
   box('waiting').checked = false;
   box('waiting').listeners.change();
   assert.equal(make().textContent, '고른 채널 2개 만들어 주기');
+  // 할 일도 풀 수 있다 — 하나도 안 고르면 버튼이 흐려지고 이유 한 줄
+  const none = () => fx.find('slack', 'd-ichnone')[0].textContent;
+  assert.equal(none(), '');
+  box('todo').checked = false;
+  box('todo').listeners.change();
+  assert.equal(make().textContent, '고른 채널 1개 만들어 주기');
+  assert.equal(name('todo').disabled, true);
+  box('align').checked = false;
+  box('align').listeners.change();
+  same([make().textContent, make().disabled, none()], ['고른 채널 0개 만들어 주기', true, '받을 곳을 하나 이상 골라 주세요']);
+  box('todo').checked = true;
+  box('todo').listeners.change();
+  box('align').checked = true;
+  box('align').listeners.change();
+  same([make().textContent, make().disabled, none()], ['고른 채널 2개 만들어 주기', false, '']);
 
   // 이름은 치는 동안에는 그대로 두고(띄어쓰기·한글 조합을 막지 않는다) 칸을 떠날 때 슬랙 규칙대로 정리한다
   name('todo').value = 'My TODO ';
@@ -7672,9 +7689,11 @@ test('WP-E A·B. 맨 위 요약: 정상이면 `● 연결 N개 모두 잘 읽고
   assert.equal(fetchButton(auth, 'jira').textContent, '다시 연결');
   assert.match(auth.find('jira', 'd-intgwhy')[0].children.map(one => one.textContent).join(''), /^토큰이 만료됐거나 권한이 없어요 — 다시 연결을 누르면 이 카드에서 토큰 단계부터 다시 열려요$/);
 
-  // 셈은 순수 함수로도 — 연결된 카드만, 할 일 채널이 사라졌으면 멈춘 것
+  // 셈은 순수 함수로도 — 연결된 카드만, 켜진 채널이 모두 사라졌으면 멈춘 것(일부면 아니다)
   const failing = state => JSON.parse(ok.app.run(`JSON.stringify(settingsIntgFailing(${JSON.stringify(state)}))`));
   same(failing({ ...WPD25_CONNECTED, slack: { ...WPD25_CONNECTED.slack, channels: { todo: { id: 'C1', name: '#my-todo', missing: true } } } }), ['slack']);
+  same(failing({ ...WPD25_CONNECTED, slack: { ...WPD25_CONNECTED.slack, fetch: {}, channels: { todo: { id: 'C1', missing: true }, align: { id: 'C3' } } } }), [], '일부만 사라지면 멈춘 것이 아니다');
+  same(failing({ ...WPD25_CONNECTED, slack: { ...WPD25_CONNECTED.slack, fetch: {}, channels: { align: { id: 'C3', missing: true }, someday: { id: 'C4', missing: true } } } }), ['slack'], '할 일 없이도 켜진 채널이 모두 사라지면 멈춘 것');
   same(failing({ slack: { enabled: true, hasToken: false, fetch: { failing: true }, channels: { todo: { id: 'C1' } } } }), [], '연결 안 된 카드는 세지 않는다');
   same(failing({ ...WPD25_CONNECTED, calendar: { enabled: true, source: 'ical', readAt: null, failed: true } }), ['calendar'], '비밀 주소를 한 번도 못 읽었으면 멈춘 것');
 });
@@ -7822,14 +7841,14 @@ const pickToggle = async (fx, key, on) => {
   await box.listeners.change();
 };
 
-test('WP-E E. 채널 고르기: 연결된 채널은 고정 이름(`#이름` + 연결됨), 새 줄은 `새 채널 이름` 칸(기본 `<슬랙 이름>-키`), 할 일은 뺄 수 없다', async () => {
+test('WP-E E. 채널 고르기: 연결된 채널은 고정 이름(`#이름` + 연결됨), 새 줄은 `새 채널 이름` 칸(기본 `<슬랙 이름>-키`), 할 일도 다른 줄과 같다', async () => {
   const fx = await intgPick();
   same(fx.sent.filter(one => one.url === '/api/integrations/slack-token-check').map(one => one.body), [{ token: '' }], '앞머리는 저장된 토큰으로 묻는다(토큰 칸 없음)');
   assert.match(fx.text('slack'), /받을 곳을 더하거나 빼요\. 새로 고른 곳은 비공개 채널을 만들어 드려요\./);
   assert.equal(fx.find('slack', 'd-isteps').length, 0, '위저드 단계 줄은 없다');
   same(['todo', 'waiting', 'align', 'someday'].map(key => pickRow(fx, key).className), ['d-ich is-on', 'd-ich is-on', 'd-ich', 'd-ich']);
-  assert.equal(pickText(fx, 'todo'), '할 일 필수 — 뺄 수 없어요오늘 탭 새로 들어온 것으로 와요#my-todo연결됨');
-  same([pickRow(fx, 'todo').children[0].checked, pickRow(fx, 'todo').children[0].disabled], [true, true]);
+  assert.equal(pickText(fx, 'todo'), '할 일오늘 탭 새로 들어온 것으로 와요#my-todo연결됨');
+  same([pickRow(fx, 'todo').children[0].checked, pickRow(fx, 'todo').children[0].disabled], [true, false]);
   assert.equal(pickRow(fx, 'waiting').children[2].className, 'lock', '연결된 채널 이름은 고정 글자');
   assert.equal(pickText(fx, 'align'), '정해진 것정책·결정 → 아이디어·결정 탭의 결정새 채널 이름');
   const alignName = pickRow(fx, 'align').children[2].children[1];
@@ -7877,8 +7896,19 @@ test('WP-E E. 채널 고르기 빼기·더하기: 체크를 풀면 그 줄이 �
 
   // 빼기만 하면 채널을 만들러 가지 않는다
   const only = await intgPick({}, [{ body: { ok: true, restart: false } }]);
-  // 할 일은 체크를 풀 수 없다(칸이 꺼져 있다)
-  assert.equal(pickRow(only, 'todo').children[0].disabled, true);
+  // 할 일도 뺄 수 있다(다른 줄과 같은 확인 줄) — 단 마지막 하나는 뺄 수 없다
+  assert.equal(pickRow(only, 'todo').children[0].disabled, false);
+  await pickToggle(only, 'todo', false);
+  assert.equal(pickRow(only, 'todo').className, 'd-ich is-off');
+  assert.equal(pickGo(only).textContent, '1개 빼기');
+  assert.equal(only.find('slack', 'd-iconfirm')[0].children[0].textContent, '#my-todo 채널을 빼면 앱이 더 이상 읽지 않아요. 슬랙 채널과 이미 들어온 항목은 그대로예요.');
+  await pickToggle(only, 'waiting', false);
+  assert.equal(pickRow(only, 'waiting').children[0].checked, true, '마지막 채널은 체크가 풀리지 않는다');
+  assert.equal(pickRow(only, 'waiting').className, 'd-ich is-on');
+  assert.match(only.text('slack'), /마지막 채널은 뺄 수 없어요 — 슬랙 수집을 끄려면 ⋯ › 해제/);
+  assert.equal(pickGo(only).textContent, '1개 빼기');
+  await pickToggle(only, 'todo', true);
+  assert.doesNotMatch(only.text('slack'), /마지막 채널은/, '다시 고르면 이유 줄은 거둔다');
   await pickToggle(only, 'waiting', false);
   await pickGo(only).listeners.click();
   assert.equal(only.sent.filter(one => one.url === '/api/integrations/slack-channel').length, 0);
@@ -7914,7 +7944,7 @@ test('WP-E E·F. 뺐던 채널은 다시 체크하면 새로 만들지 않고 �
   assert.match(fx.live(), /다시 연결했어요 — 뺀 동안 온 메시지는 가져오지 않아요 · 채널 1개를 뺐어요/);
 });
 
-test('WP-E F. 사라진 채널: 카드에 주황 한 줄 + 채널 고르기, 할 일 채널이 사라지면 빨간 상태 줄·요약에 멈춤으로 센다', async () => {
+test('WP-E F. 사라진 채널: 일부면 카드에 주황 한 줄 + 채널 고르기, 켜진 채널이 모두 사라지면 빨간 상태 줄·요약에 멈춤으로 센다', async () => {
   const fx = intgClient({
     slack: {
       enabled: true, hasToken: true, readAt: ago(5),
@@ -7925,7 +7955,44 @@ test('WP-E F. 사라진 채널: 카드에 주황 한 줄 + 채널 고르기, 할
   const warn = fx.find('slack', 'k-warn')[0];
   assert.equal(warn.dataset.missing, 'align');
   assert.match(fx.text('slack'), /#my-align 채널을 찾을 수 없어요 — 슬랙에서 지웠거나 보관했어요 · 채널 고르기/);
-  assert.match(fx.shape("document.getElementById('settingsIntegrationsView').children[0]").text, /^● 연결 1개 모두 잘 읽고 있어요/, '할 일이 아닌 채널은 멈춘 것으로 세지 않는다');
+  assert.match(fx.shape("document.getElementById('settingsIntegrationsView').children[0]").text, /^● 연결 1개 모두 잘 읽고 있어요/, '일부만 사라지면 멈춘 것으로 세지 않는다');
+
+  // 할 일 채널이 사라져도 다른 켜진 채널이 살아 있으면 주황(할 일 특별 취급 없음)
+  const part = intgClient({
+    slack: {
+      enabled: true, hasToken: true, readAt: ago(5),
+      channels: { todo: { id: 'C1', name: '#my-todo', missing: true }, align: { id: 'C3', name: '#my-align' }, waiting: { id: '', name: '' }, someday: { id: '', name: '' } },
+    },
+  });
+  await part.app.run('renderSettingsIntegrations()');
+  assert.equal(part.find('slack', 'k-warn')[0].dataset.missing, 'todo');
+  assert.equal(part.find('slack', 'd-intgwhy').length, 0);
+  assert.match(part.shape("document.getElementById('settingsIntegrationsView').children[0]").text, /^● 연결 1개 모두 잘 읽고 있어요/);
+
+  // 켜진 채널 둘이 모두 사라지면 빨강 — 주황 줄 대신 상태 줄 하나
+  const both = intgClient({
+    slack: {
+      enabled: true, hasToken: true, readAt: ago(5),
+      channels: { todo: { id: '', name: '' }, align: { id: 'C3', name: '#my-align', missing: true }, waiting: { id: 'C2', name: '#my-waiting', missing: true }, someday: { id: '', name: '' } },
+    },
+  });
+  await both.app.run('renderSettingsIntegrations()');
+  assert.match(both.shape("document.getElementById('settingsIntegrationsView').children[0]").text, /^● 1개가 멈췄어요/);
+  assert.equal(stText(both, 1), '● 켜진 채널을 모두 찾을 수 없어요');
+  assert.equal(both.find('slack', 'k-warn').length, 0);
+
+  // 할 일 없이 연결돼 있어도 연결된 카드다 — 대표 채널은 켜진 것 중 첫 번째, 보내는 법 예시도 그 채널
+  const noTodo = intgClient({
+    slack: {
+      enabled: true, hasToken: true, readAt: ago(5),
+      channels: { todo: { id: '', name: '' }, align: { id: 'C3', name: '#hana-align' }, waiting: { id: 'C2', name: '#hana-waiting' }, someday: { id: '', name: '' } },
+    },
+  });
+  await noTodo.app.run('renderSettingsIntegrations()');
+  assert.equal(stText(noTodo, 1), '● #hana-waiting 외 1개 · 5분 전 읽음');
+  await noTodo.menu('slack')[0].find(entry => entry.label === '보내는 법').onClick();
+  assert.match(noTodo.text('slack'), /받는 곳에 #hana-waiting처럼 쓸 채널을 골라 보내요/);
+  assert.doesNotMatch(noTodo.text('slack'), /#이름-todo/);
 
   const gone = intgClient({
     slack: {
@@ -7941,9 +8008,9 @@ test('WP-E F. 사라진 채널: 카드에 주황 한 줄 + 채널 고르기, 할
   assert.equal(why.children.map(one => one.textContent).join(''), '슬랙에서 지웠거나 보관했어요 · 채널 고르기');
   await why.children[1].listeners.click();
   await new Promise(resolve => setImmediate(resolve));
-  // 할 일은 뺄 수 없다 — 체크된 채 이름 칸(다시 만들기만)
+  // 하나뿐인 채널이라 뺄 수 없다 — 체크된 채 이름 칸(다시 만들기)
   const todo = pickRow(gone, 'todo');
-  same([todo.children[0].checked, todo.children[0].disabled, todo.className], [true, true, 'd-ich is-on is-gone']);
+  same([todo.children[0].checked, todo.children[0].disabled, todo.className], [true, false, 'd-ich is-on is-gone']);
   assert.equal(todo.children[2].children[1].value, 'hana-todo');
   assert.equal(pickGo(gone).textContent, '1개 만들기');
 });
@@ -8246,6 +8313,9 @@ test('QA2 할 일 채널 예시: 도움말은 저장된 이름, 모르면 `#이�
   assert.equal(app.run('settingsTodoName()'), '#이름-todo');
   app.run(`settingsIntegrations = { slack: { channels: { todo: { id: 'C1', name: '#hana-todo' } } } }`);
   assert.equal(app.run('settingsTodoName()'), '#hana-todo');
+  // 할 일을 켜지 않았으면 그 사람이 켠 첫 채널 이름으로(화면 차례: 할 일 · 기다리는 것 · 정해진 것 · 언젠가)
+  app.run(`settingsIntegrations = { slack: { channels: { todo: { id: '', name: '' }, align: { id: 'C3', name: '#hana-align' }, waiting: { id: 'C2', name: '#hana-waiting' } } } }`);
+  assert.equal(app.run('settingsTodoName()'), '#hana-waiting');
   assert.equal(app.run(`settingsChannelObject('#hana-todo')`), '#hana-todo 채널을');
   assert.equal(app.run(`settingsChannelObject('')`), '채널을');
 });

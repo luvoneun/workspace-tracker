@@ -34,6 +34,11 @@ die()  { echo "  ✗ $1"; echo; echo "설치를 멈춰요."; exit 1; }
 # 그 밖의 폴더는 어디든 그대로 쓰고, 바탕화면·문서·iCloud 아래면 경고 한 줄만 남긴다.
 # shellcheck source=tracker/inbox-app/automation/install-location.sh
 . "$WORKSPACE/tracker/inbox-app/automation/install-location.sh" || die "설치 위치를 확인하지 못했어요."
+# 켠 연동 자동 등록(apply-runner)에서 부른 것이면 폴더를 옮기지 않는다 — 앱이 도는 중에 폴더가 사라지지 않게.
+# 옮겨야 하는 자리면 아무것도 바꾸지 않고 멈춘다(사람이 업데이트.command로 옮긴다).
+if [ "${WORKSPACE_APPLY_RUNNER:-}" = "1" ] && install_location_is_playio "$WORKSPACE"; then
+  die "폴더를 옮겨야 해요 — 업데이트.command를 더블클릭해 주세요."
+fi
 install_location_guard "$WORKSPACE" "setup.sh" "$@" || { echo; echo "설치를 멈춰요. 아무것도 바꾸지 않았어요."; exit 1; }
 
 echo
@@ -188,7 +193,7 @@ mkdir -p "$INSTALL_DIR/logs"
 # 앱이 "미팅 노트 가져오기"를 요청할 때 표시 파일 하나를 남기는 자리. 앱 서버는 프로세스를 띄우지
 # 않고 이 파일만 쓰고, 그걸 지켜보던 launchd 에이전트가 실행한다.
 mkdir -p "$INSTALL_DIR/requests"
-cp "$APP_DIR/automation/run-task.sh" "$APP_DIR/automation/slack-capture.sh" "$APP_DIR/automation/backup-data.sh" "$APP_DIR/automation/install-location.sh" "$APP_DIR/automation/update-runner.sh" "$APP_DIR/automation/app-refresh.sh" "$INSTALL_DIR/"
+cp "$APP_DIR/automation/run-task.sh" "$APP_DIR/automation/slack-capture.sh" "$APP_DIR/automation/backup-data.sh" "$APP_DIR/automation/install-location.sh" "$APP_DIR/automation/apply-runner.sh" "$APP_DIR/automation/update-runner.sh" "$APP_DIR/automation/app-refresh.sh" "$INSTALL_DIR/"
 chmod +x "$INSTALL_DIR"/*.sh
 ok "$INSTALL_DIR 에 복사"
 # 복사본은 저장소 밖에서 돌기 때문에 "내 워크스페이스가 어디인지"를 따로 알려 줘야 한다.
@@ -411,6 +416,7 @@ PLIST
 # 앱 안 `업데이트 받기` — 일정표가 없다. 설정 › 앱에서 `업데이트 받기`·`이전 버전으로 되돌리기`를 누르면 앱 서버가
 # 요청 표시 파일 하나를 쓰고(프로세스는 띄우지 않는다), launchd가 그걸 보고 update-runner.sh를 한 번 돌린다.
 # 연동과 무관하게 늘 등록한다. 실행기가 도는 중에는(WORKSPACE_UPDATE_RUNNER=1) 이 등록을 다시 올리지 않는다 — 올리면 그 실행이 끊긴다.
+OLD_UPDATE_PLIST="$(cat "$AGENTS_DIR/$LABEL.update.plist" 2>/dev/null)"
 cat > "$AGENTS_DIR/$LABEL.update.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -436,6 +442,40 @@ cat > "$AGENTS_DIR/$LABEL.update.plist" << PLIST
   <false/>
   <key>StandardErrorPath</key>
   <string>$(xml_escape "$INSTALL_DIR/logs/update.err")</string>
+</dict>
+</plist>
+PLIST
+
+# 켠 연동 자동 등록 — 일정표가 없다. 설정 › 연동에서 켬/끔·캘린더 갈래·슬랙 채널처럼 등록에 영향을 주는 값을
+# 저장하면 앱 서버가 요청 표시 파일 하나를 쓰고(프로세스는 띄우지 않는다), launchd가 그걸 보고 apply-runner.sh를
+# 한 번 돌린다 — 그 실행기가 이 setup.sh를 WORKSPACE_APPLY_RUNNER=1로 다시 부른다. 연동과 무관하게 늘 등록한다.
+# 실행기가 도는 중에는 이 등록을 다시 올리지 않는다 — 올리면 그 실행이 끊긴다.
+OLD_APPLY_PLIST="$(cat "$AGENTS_DIR/$LABEL.apply.plist" 2>/dev/null)"
+cat > "$AGENTS_DIR/$LABEL.apply.plist" << PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>$LABEL.apply</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>$(xml_escape "$INSTALL_DIR/apply-runner.sh")</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>WORKSPACE_DIR</key>
+    <string>$(xml_escape "$WORKSPACE")</string>
+  </dict>
+  <key>WatchPaths</key>
+  <array>
+    <string>$(xml_escape "$INSTALL_DIR/requests/apply.request")</string>
+  </array>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>StandardErrorPath</key>
+  <string>$(xml_escape "$INSTALL_DIR/logs/apply.err")</string>
 </dict>
 </plist>
 PLIST
@@ -472,7 +512,11 @@ cat > "$AGENTS_DIR/$LABEL.data-backup.plist" << PLIST
 PLIST
 
 # 앱 서버 — 로그인하면 뜨고, 꺼지면 다시 뜬다
-# 앱 안 업데이트(실행기)에서 부를 때는 update.sh가 이미 새 코드로 다시 띄웠으므로, 내용이 그대로면 다시 올리지 않는다.
+# 실행기(앱 안 업데이트·켠 연동 자동 등록)에서 부를 때는 내용이 그대로면 다시 올리지 않는다 — 업데이트는
+# update.sh가 이미 새 코드로 다시 띄웠고, 연동 저장은 서버가 스스로 다시 떴다.
+IN_RUNNER=""
+[ "${WORKSPACE_UPDATE_RUNNER:-}" = "1" ] && IN_RUNNER="update"
+[ "${WORKSPACE_APPLY_RUNNER:-}" = "1" ] && IN_RUNNER="apply"
 OLD_SERVER_PLIST="$(cat "$AGENTS_DIR/$LABEL.server.plist" 2>/dev/null)"
 cat > "$AGENTS_DIR/$LABEL.server.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -540,21 +584,34 @@ for f in server slack-capture calendar-sync tiro-sync data-backup app-refresh sl
   plist="$AGENTS_DIR/$LABEL.$f.plist"
   [ -f "$plist" ] || continue
   plutil -lint "$plist" >/dev/null 2>&1 || die "설정 파일 형식 오류: $f"
-  if [ "$f" = "server" ] && [ "${WORKSPACE_UPDATE_RUNNER:-}" = "1" ] && [ "$OLD_SERVER_PLIST" = "$(cat "$plist")" ]; then
-    ok "server 그대로 (업데이트가 이미 다시 시작했어요)"
+  if [ "$f" = "server" ] && [ -n "$IN_RUNNER" ] && [ "$OLD_SERVER_PLIST" = "$(cat "$plist")" ]; then
+    ok "server 그대로 (이미 다시 시작했어요)"
     continue
   fi
   launchctl unload "$plist" 2>/dev/null
   launchctl load "$plist" 2>/dev/null && ok "$f 등록"
 done
-# 앱 안 업데이트 실행기 — 그 실행기 안에서 부른 setup.sh면 다시 올리지 않는다(올리면 도는 실행이 끊긴다).
+# 실행기 둘(앱 안 업데이트·켠 연동 자동 등록) — 실행기 안에서 부른 setup.sh면 다시 올리지 않는다(올리면 도는 실행이
+# 끊긴다). 다른 쪽 실행기는 내용이 새로 생겼거나 바뀌었을 때만 올린다(옛 설치가 앱 안 업데이트로 apply를 처음 받을 때).
 UPDATE_PLIST="$AGENTS_DIR/$LABEL.update.plist"
 plutil -lint "$UPDATE_PLIST" >/dev/null 2>&1 || die "설정 파일 형식 오류: update"
-if [ "${WORKSPACE_UPDATE_RUNNER:-}" = "1" ]; then
+APPLY_PLIST="$AGENTS_DIR/$LABEL.apply.plist"
+plutil -lint "$APPLY_PLIST" >/dev/null 2>&1 || die "설정 파일 형식 오류: apply"
+if [ "$IN_RUNNER" = "update" ]; then
   ok "update 그대로 (지금 도는 업데이트)"
+elif [ "$IN_RUNNER" = "apply" ] && [ "$OLD_UPDATE_PLIST" = "$(cat "$UPDATE_PLIST")" ]; then
+  ok "update 그대로"
 else
   launchctl unload "$UPDATE_PLIST" 2>/dev/null
   launchctl load "$UPDATE_PLIST" 2>/dev/null && ok "update 등록"
+fi
+if [ "$IN_RUNNER" = "apply" ]; then
+  ok "apply 그대로 (지금 도는 등록)"
+elif [ "$IN_RUNNER" = "update" ] && [ "$OLD_APPLY_PLIST" = "$(cat "$APPLY_PLIST")" ]; then
+  ok "apply 그대로"
+else
+  launchctl unload "$APPLY_PLIST" 2>/dev/null
+  launchctl load "$APPLY_PLIST" 2>/dev/null && ok "apply 등록"
 fi
 
 # ─────────────────────────────────────────────

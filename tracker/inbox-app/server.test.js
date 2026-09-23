@@ -775,7 +775,7 @@ test('slack-capture.sh 잠금은 살아 있는 실행만 존중하고 죽은 잠
   const logs = path.join(home, 'logs');
   const lock = path.join(logs, '.slack-capture.lock');
   const config = path.join(home, 'workspace.config.json');
-  fs.writeFileSync(config, '{}'); // 채널이 없으니 잠금만 잡고 곧바로 실패하고 끝난다
+  fs.writeFileSync(config, '{}'); // 켜진 채널이 없으니 잠금만 잡고 곧바로 "건너뛰어요"로 끝난다
   const logText = () => fs.readFileSync(path.join(logs, 'slack-capture.log'), 'utf8');
   const capture = () => runScript(automationScript('slack-capture.sh'), [], {
     WORKSPACE_DIR: home, WORKSPACE_CONFIG: config, AUTOMATION_LOG_DIR: logs,
@@ -808,15 +808,16 @@ test('slack-capture.sh 잠금은 살아 있는 실행만 존중하고 죽은 잠
   fs.rmSync(lock, { recursive: true, force: true });
   holdLock(deadPid());
   fs.writeFileSync(path.join(logs, 'slack-capture.log'), '');
-  assert.equal(capture().status, 1);
-  assert.match(logText(), /채널 확인 실패/);
+  assert.equal(capture().status, 0);
+  assert.match(logText(), /켜진 채널이 없어 건너뛰어요/);
   assert.equal(fs.existsSync(lock), false); // 잡았다가 스스로 풀었다
 
   // 4) 번호만 같고 다른 프로그램이 쓰고 있는 PID도 회수한다
   holdLock(longRunning('other-program.sh'));
   fs.writeFileSync(path.join(logs, 'slack-capture.log'), '');
-  assert.equal(capture().status, 1);
+  assert.equal(capture().status, 0);
   assert.doesNotMatch(logText(), /이전 실행이 아직 진행 중/);
+  assert.match(logText(), /켜진 채널이 없어 건너뛰어요/);
   assert.equal(fs.existsSync(lock), false);
   fs.rmSync(home, { recursive: true, force: true });
 });
@@ -4243,7 +4244,7 @@ test('연동 저장: 아는 키만 바꾸고 모르는 키는 그대로 두며, 
   assert.equal(fs.statSync(tokenFile).mode & 0o777, 0o600, '토큰 파일은 나만 읽는다');
 });
 
-test('연동 저장: 슬랙은 todo 하나만 필수이고 나머지 셋은 선택, 채널 이름은 슬랙이 준 것으로 적는다', async (t) => {
+test('연동 저장: 슬랙 채널은 넷 중 하나 이상이면 되고(할 일도 선택), 채널 이름은 슬랙이 준 것으로 적는다', async (t) => {
   const fix = integrationsFixture(t, { slack: { channels: { todo: { id: '옛ID', name: '#옛이름' } } } });
   const asked = [];
   const { result } = await integrationsStore.saveIntegrations({
@@ -5692,10 +5693,10 @@ test('WP-D2.5 slack-capture.sh: SLACK_CAPTURE_MANUAL=1이면 시간대 판단을
     assert.equal(runScript(automationScript('slack-capture.sh'), [], env).status, 0, '5분 주기 실행은 시간대 밖이면 조용히 빠진다');
     assert.equal(fs.existsSync(path.join(logs, 'slack-capture.log')), false);
   }
-  // 수동 실행은 몇 시든 채널 확인까지 간다(채널이 없어 곧바로 실패로 끝난다)
+  // 수동 실행은 몇 시든 채널 확인까지 간다(켜진 채널이 없어 수집하지 않고 한 줄 남긴다)
   const manual = runScript(automationScript('slack-capture.sh'), [], { ...env, SLACK_CAPTURE_MANUAL: '1' });
-  assert.equal(manual.status, 1);
-  assert.match(fs.readFileSync(path.join(logs, 'slack-capture.log'), 'utf8'), /채널 확인 실패/);
+  assert.equal(manual.status, 0);
+  assert.match(fs.readFileSync(path.join(logs, 'slack-capture.log'), 'utf8'), /켜진 채널이 없어 건너뛰어요/);
   fs.writeFileSync(config, JSON.stringify({ integrations: { slack: false } }));
   assert.equal(runScript(automationScript('slack-capture.sh'), [], { ...env, SLACK_CAPTURE_MANUAL: '1' }).status, 0);
   assert.match(fs.readFileSync(path.join(logs, 'slack-capture.log'), 'utf8'), /슬랙 수집이 꺼져 있어 건너뛰어요/);
@@ -6229,8 +6230,9 @@ test('WP-D3 setup.sh: update 에이전트를 늘 등록하고(실행기 안에�
   const intro = script.slice(script.indexOf('# 앱 안 `업데이트 받기`'), script.indexOf('cat > "$AGENTS_DIR/$LABEL.update.plist"'));
   assert.ok(intro.length > 0 && !/USE_(SLACK|CAL|JIRA|TIRO)/.test(intro), '연동과 무관하게 늘');
   assert.match(script, /"\$APP_DIR\/automation\/update-runner\.sh" "\$APP_DIR\/automation\/app-refresh\.sh" "\$INSTALL_DIR\/"/, '실행기도 설치 위치로 복사한다');
-  assert.match(script, /if \[ "\$\{WORKSPACE_UPDATE_RUNNER:-\}" = "1" \]; then\n  ok "update 그대로 \(지금 도는 업데이트\)"\nelse\n  launchctl unload "\$UPDATE_PLIST"/);
-  assert.match(script, /\[ "\$f" = "server" \] && \[ "\$\{WORKSPACE_UPDATE_RUNNER:-\}" = "1" \] && \[ "\$OLD_SERVER_PLIST" = "\$\(cat "\$plist"\)" \]/,
+  assert.match(script, /\[ "\$\{WORKSPACE_UPDATE_RUNNER:-\}" = "1" \] && IN_RUNNER="update"/);
+  assert.match(script, /if \[ "\$IN_RUNNER" = "update" \]; then\n  ok "update 그대로 \(지금 도는 업데이트\)"\nelif/);
+  assert.match(script, /\[ "\$f" = "server" \] && \[ -n "\$IN_RUNNER" \] && \[ "\$OLD_SERVER_PLIST" = "\$\(cat "\$plist"\)" \]/,
     '실행기 안에서는 내용이 그대로인 서버를 다시 올리지 않는다(update.sh가 이미 새 코드로 다시 띄웠다)');
   // 남은 일(/mcp)은 Claude 갈래 연동이 켜져 있을 때만 — 지라는 앱이 직접 읽는다
   const connect = script.slice(script.indexOf('CONNECT=""'), script.indexOf('# 마무리 세 줄'));
@@ -6650,7 +6652,7 @@ test('WP-E 연동 상태: 뺀 채널(off)은 없는 것으로 읽고(연결 수�
   assert.ok(!JSON.stringify(state).includes('since'), 'since는 화면에 나가지 않는다');
 });
 
-test('WP-E 채널 고르기 저장: 빼기는 off만 적고(id·이름 유지) 슬랙에 묻지 않으며, 할 일은 뺄 수 없다', async (t) => {
+test('WP-E 채널 고르기 저장: 빼기는 off만 적고(id·이름 유지) 슬랙에 묻지 않으며, 마지막 하나는 뺄 수 없다', async (t) => {
   const fix = integrationsFixture(t, {
     title: '그대로',
     integrations: { slack: true },
@@ -6668,9 +6670,23 @@ test('WP-E 채널 고르기 저장: 빼기는 off만 적고(id·이름 유지) �
   assert.equal(saved.title, '그대로');
 
   const before = fs.readFileSync(fix.configPath, 'utf8');
-  await assert.rejects(() => save({ slack: { enabled: true, token: '', off: ['todo'] } }), /할 일 채널은 뺄 수 없어요/);
+  // 기다리는 것은 이미 뺐다 — 남은 할 일이 마지막 하나라 뺄 수 없다
+  await assert.rejects(() => save({ slack: { enabled: true, token: '', off: ['todo'] } }), /^Error: 마지막 채널은 뺄 수 없어요 — 슬랙 수집을 끄려면 ⋯ › 해제$/);
+  await assert.rejects(() => save({ slack: { enabled: true, token: '', off: ['todo', 'waiting'] } }), /마지막 채널은 뺄 수 없어요/);
   await assert.rejects(() => save({ slack: { enabled: true, token: '', off: ['아무거나'] } }), /보낸 값을 확인해 주세요/);
   assert.equal(fs.readFileSync(fix.configPath, 'utf8'), before, '거절하면 한 글자도 바뀌지 않는다');
+  assert.equal(asked, 0);
+
+  // 다른 채널이 켜져 있으면 할 일도 뺄 수 있다(할 일 특별 취급 없음)
+  const other = integrationsFixture(t, {
+    integrations: { slack: true },
+    slack: { channels: { todo: { id: 'C0TODO11', name: '#my-todo' }, waiting: { id: 'C0WAIT11', name: '#my-waiting' } } },
+  });
+  await integrationsStore.saveIntegrations({ configPath: other.configPath, current: other.read(), tokenDir: other.tokenDir,
+    body: { slack: { enabled: true, token: '', channels: {}, off: ['todo'], on: [] } }, slackCheck });
+  assert.deepEqual(other.read().slack.channels.todo, { id: 'C0TODO11', name: '#my-todo', off: true });
+  assert.deepEqual(other.read().slack.channels.waiting, { id: 'C0WAIT11', name: '#my-waiting' });
+  assert.equal(asked, 0);
 });
 
 test('WP-E 채널 고르기 저장: 뺐던 채널을 다시 켜면 같은 id로(새로 만들지 않고) 지금부터 읽고, 사라졌으면 channel_gone으로 거절한다', async (t) => {
@@ -6780,12 +6796,17 @@ globalThis.fetch = async (input, init = {}) => {
 const { server } = require(${JSON.stringify(path.join(__dirname, 'server.js'))});
 server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => console.log('ready'));
 `);
+  // 켠 연동 자동 등록(launchd apply)이 있는 설치 — plist는 있는지만 본다
+  const agents = path.join(home, 'agents');
+  fs.mkdirSync(agents);
+  fs.writeFileSync(path.join(agents, 'com.workspace.app.apply.plist'), '<plist/>');
   const port = await freePort();
   const child = spawn(process.execPath, [wrapper], {
     env: {
       ...process.env, WORKSPACE_PORT: String(port), WORKSPACE_NO_OPEN: '1', WORKSPACE_HOST: '', WORKSPACE_NO_REMOTE_CHECK: '1',
       WORKSPACE_SLACK_FOLLOW: '1', WORKSPACE_DATA_DIR: data, WORKSPACE_CONFIG: config, WORKSPACE_TOKEN_DIR: tokens,
       WORKSPACE_AUTOMATION_DIR: path.join(home, 'automation'), WORKSPACE_BACKUP_DIR: path.join(home, 'backup'),
+      WORKSPACE_LAUNCH_AGENTS_DIR: agents,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -6804,6 +6825,8 @@ server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => console.log
   const post = (route, body) => fetch(origin + route, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const slackLog = () => (fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').trim().split('\n').filter(Boolean) : []);
   const channels = () => JSON.parse(fs.readFileSync(config, 'utf8')).slack.channels;
+  const applyRequest = path.join(home, 'automation', 'requests', 'apply.request');
+  const takeApply = () => { const text = fs.existsSync(applyRequest) ? fs.readFileSync(applyRequest, 'utf8') : null; fs.rmSync(applyRequest, { force: true }); return text; };
 
   // 지금 상태 — 뺀 채널은 없는 칸, 이름·사라짐만 off로
   const state = await (await fetch(origin + '/api/integrations')).json();
@@ -6823,6 +6846,14 @@ server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => console.log
   assert.equal(off.ok, true);
   assert.equal(slackLog().length, count, '빼기 저장은 슬랙에 한 번도 묻지 않는다(보관·삭제·나가기 없음)');
   assert.deepEqual(channels().waiting, { id: 'C0WAIT11', name: '#my-waiting', off: true });
+  // 슬랙 채널(off 포함)이 바뀌었다 — 켠 연동 자동 등록 요청 파일 한 줄(서버는 프로세스를 띄우지 않는다)
+  assert.equal(off.apply, 'requested');
+  assert.match(takeApply(), /^\{"action":"apply","requestedAt":"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z"\}\n$/);
+  // 등록과 무관한 저장(회의록 갈래가 그대로 꺼짐)은 요청 파일을 쓰지 않는다
+  const notes = await (await post('/api/integrations/save', { meetingNotes: { mode: 'other', name: '노션' } })).json();
+  assert.equal(notes.ok, true);
+  assert.equal(notes.apply, undefined);
+  assert.equal(takeApply(), null);
 
   // 다시 켜기 — conversations.info 하나, 만들기 없음
   const on = await (await post('/api/integrations/save', { slack: { enabled: true, token: '', channels: {}, off: [], on: ['align'] } })).json();
@@ -6837,18 +6868,42 @@ server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => console.log
   const goneBody = await gone.json();
   assert.equal(goneBody.code, 'channel_gone');
   assert.equal(goneBody.key, 'someday');
+  // 다시 켜기(align)는 등록 값이 바뀐 저장, 실패한 저장(someday)은 요청 파일을 쓰지 않는다
+  assert.equal(on.apply, 'requested');
+  fs.rmSync(applyRequest, { force: true });
+  const failed = await post('/api/integrations/save', { slack: { enabled: true, token: '', on: ['someday'] } });
+  assert.equal(failed.status, 400);
+  assert.equal(takeApply(), null, '실패한 저장은 요청하지 않는다');
   assert.ok(!slackLog().some(line => /^conversations\.(create|archive|leave|kick)|^channels\./.test(line)), '슬랙 쓰기 API는 한 번도 부르지 않았다');
   assert.ok(!JSON.stringify(state).includes('xoxp-') && !JSON.stringify(goneBody).includes('xoxp-'), '토큰은 응답에 없다');
 
-  // 할 일 채널이 사라지면 — 연동 탭을 열 때(이름 따라가기) 알게 되고, 톱니바퀴 빨간 점의 근거(alerts)에 센다
+  // 할 일 채널만 사라지면(정해진 것은 살아 있다) 일부라 멈춘 것이 아니다 — 카드의 주황 줄일 뿐
   const moved = JSON.parse(fs.readFileSync(config, 'utf8'));
   moved.slack.channels.todo = { id: 'C0GONE11', name: '#my-todo' };
   fs.writeFileSync(config, JSON.stringify(moved, null, 2));
+  const partly = await (await fetch(origin + '/api/integrations')).json();
+  assert.equal(partly.slack.channels.todo.missing, true);
+  assert.deepEqual(partly.alerts, [], '일부만 사라지면 빨간 점이 아니다');
+  // 켜진 채널이 모두 사라지면 — 연동 탭을 열 때(이름 따라가기) 알게 되고, 톱니바퀴 빨간 점의 근거(alerts)에 센다
+  moved.slack.channels.align = { id: 'C0GONE11', name: '#my-align' };
+  fs.writeFileSync(config, JSON.stringify(moved, null, 2));
   const broken = await (await fetch(origin + '/api/integrations')).json();
   assert.equal(broken.slack.channels.todo.missing, true);
+  assert.equal(broken.slack.channels.align.missing, true);
   assert.deepEqual(broken.alerts, ['slack']);
   const status = await (await fetch(origin + '/api/automation/status')).json();
   assert.deepEqual(status.alerts, ['slack'], '빨간 점도 같은 판단(슬랙에 다시 묻지 않고 들고 있는 답만 본다)');
+
+  // 켠 연동 자동 등록이 마지막에 실패했으면 launchd에 기대는 카드(슬랙)의 최근 기록 맨 위에 한 줄 — 다음에 성공하면 거둔다
+  const applyLog = path.join(home, 'automation', 'logs', 'apply.log');
+  fs.mkdirSync(path.dirname(applyLog), { recursive: true });
+  fs.writeFileSync(applyLog, '2099-01-01 09:00:00 자동화 등록 실패 — 업데이트.command를 한 번 실행해 주세요\n');
+  const withFail = await (await fetch(origin + '/api/integrations')).json();
+  assert.deepEqual(withFail.slack.log[0], { time: '2099-01-01 09:00:00', kind: 'fail', text: '자동화 등록 실패 — 업데이트.command를 한 번 실행해 주세요' });
+  assert.ok(!withFail.jira.log.some(one => /자동화 등록/.test(one.text)), '앱이 직접 읽는 지라에는 싣지 않는다');
+  fs.appendFileSync(applyLog, '2099-01-01 09:05:00 자동화 등록 완료\n');
+  const fixed = await (await fetch(origin + '/api/integrations')).json();
+  assert.ok(!fixed.slack.log.some(one => /자동화 등록/.test(one.text)));
 });
 
 test('WP-E 앱 탭 백업 상태(GET /api/backup): 처음 · 로컬만 · GitHub 포함 · 실패 — 로그와 날짜 폴더만 읽는다', async () => {
@@ -7234,4 +7289,172 @@ test('QA2 슬랙 채널 확인: 닿지 못한 것(slack_unreachable)과 사라�
 test('QA2 GET /api/about?cached=1은 원격 확인을 기다리지 않고 가진 값만 준다', async () => {
   const about = await (await fetch(base + '/api/about?cached=1')).json();
   assert.ok('version' in about && 'update' in about);
+});
+
+// ---------- WP-F 켠 연동 자동 등록 · 슬랙 할 일 채널 선택 ----------
+
+test('WP-F 연동 저장: 할 일 없이 다른 채널 하나로 연결할 수 있고, 하나도 없으면 거절한다', async (t) => {
+  const fix = integrationsFixture(t, {});
+  const slackCheck = async (token, id) => ({ name: id === 'C0WAIT11' ? 'hana-waiting' : 'x', isPrivate: true, created: 1790000000 });
+  const save = body => integrationsStore.saveIntegrations({ configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir, body, slackCheck });
+  const before = fs.readFileSync(fix.configPath, 'utf8');
+  await assert.rejects(() => save({ slack: { enabled: true, token: 'xoxp-new', channels: {} } }), /슬랙 채널 링크나 ID를 붙여 넣어 주세요/);
+  assert.equal(fs.readFileSync(fix.configPath, 'utf8'), before, '채널이 하나도 없으면 아무것도 쓰지 않는다');
+  await save({ slack: { enabled: true, token: 'xoxp-new', channels: { waiting: 'C0WAIT11' } } });
+  const saved = fix.read();
+  assert.equal(saved.integrations.slack, true);
+  assert.deepEqual(saved.slack.channels.waiting, { id: 'C0WAIT11', name: '#hana-waiting', since: '1790000000.000000' });
+  assert.equal(saved.slack.channels.todo, undefined, '할 일 칸은 만들지 않는다');
+  // 다시 연결(토큰만 바꾸기)도 할 일 없이 된다 — 저장된 켜진 채널로 충분하다
+  await save({ slack: { enabled: true, token: 'xoxp-newer', channels: {} } });
+  assert.equal(fix.read().slack.channels.waiting.id, 'C0WAIT11');
+});
+
+test('WP-F 등록 값(registrationKey): 켬/끔·캘린더 갈래·슬랙 채널(off 포함)만 보고 제목·이름·회의록 앱 이름은 보지 않는다', () => {
+  const key = integrationsStore.registrationKey;
+  const base = {
+    title: 'A', integrations: { slack: true, calendar: true, jira: false, tiro: false },
+    calendar: { source: 'claude' }, meetingNotes: 'manual',
+    slack: { channels: { todo: { id: 'C1', name: '#a' }, waiting: { id: 'C2', name: '#b' } } },
+  };
+  const same = next => key(base) === key(next);
+  assert.ok(same({ ...base, title: 'B' }), '제목');
+  assert.ok(same({ ...base, meetingNotes: { other: '노션' } }), '회의록이 그대로 꺼져 있으면 무관');
+  assert.ok(same({ ...base, slack: { channels: { todo: { id: 'C1', name: '#renamed' }, waiting: { id: 'C2', name: '#b' } } } }), '채널 이름만 바뀜');
+  assert.ok(!same({ ...base, integrations: { ...base.integrations, tiro: true } }), '회의록(티로) 켬');
+  assert.ok(!same({ ...base, integrations: { ...base.integrations, slack: false } }), '슬랙 끔');
+  assert.ok(!same({ ...base, calendar: { source: 'ical' } }), '캘린더 갈래');
+  assert.ok(!same({ ...base, slack: { channels: { ...base.slack.channels, waiting: { id: 'C2', name: '#b', off: true } } } }), '채널 빼기');
+  assert.ok(!same({ ...base, slack: { channels: { ...base.slack.channels, align: { id: 'C3' } } } }), '채널 더하기');
+});
+
+// apply-runner.sh — 가짜 setup.sh가 받은 환경만 적는다(실제 setup.sh·launchctl은 부르지 않는다).
+function applyRunnerFixture(t) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-wpf-apply-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const workspace = path.join(root, 'workspace');
+  const install = path.join(root, 'install');
+  const trail = path.join(root, 'trail.txt');
+  fs.mkdirSync(workspace);
+  fs.mkdirSync(path.join(install, 'requests'), { recursive: true });
+  const request = path.join(install, 'requests', 'apply.request');
+  const fakeSetup = (extra = '', code = 0) => writeExec(path.join(workspace, 'setup.sh'),
+    `#!/bin/bash\necho "setup $* apply=\${WORKSPACE_APPLY_RUNNER:-} update=\${WORKSPACE_UPDATE_RUNNER:-}" >> ${JSON.stringify(trail)}\n${extra}exit ${code}\n`);
+  fakeSetup();
+  const ask = () => fs.writeFileSync(request, `${JSON.stringify({ action: 'apply', requestedAt: new Date().toISOString() })}\n`);
+  const run = () => runScript(automationScript('apply-runner.sh'), [], { HOME: root, WORKSPACE_DIR: workspace, WORKSPACE_INSTALL_DIR: install });
+  const lines = () => (fs.existsSync(trail) ? fs.readFileSync(trail, 'utf8').trim().split('\n').filter(Boolean) : []);
+  const logFile = path.join(install, 'logs', 'apply.log');
+  const log = () => (fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8') : '');
+  const lock = path.join(install, 'logs', '.apply.lock');
+  return { root, workspace, install, trail, request, fakeSetup, ask, run, lines, log, lock };
+}
+
+test('WP-F apply-runner.sh: 모양이 맞는 요청만 setup.sh를 WORKSPACE_APPLY_RUNNER=1로 한 번 돌리고, 결과 한 줄을 apply.log에 남긴다', (t) => {
+  const fix = applyRunnerFixture(t);
+  fix.ask();
+  assert.equal(fix.run().status, 0);
+  assert.deepEqual(fix.lines(), ['setup  apply=1 update='], 'apply·update 에이전트를 다시 올리지 않게 표시를 준다');
+  assert.equal(fs.existsSync(fix.request), false, '요청은 한 번만 처리한다');
+  assert.equal(fs.existsSync(fix.lock), false, '잠금은 풀고 끝난다');
+  assert.match(fix.log(), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} 자동화 등록 완료\n$/);
+  assert.match(fs.readFileSync(path.join(fix.install, 'logs', 'apply-setup.log'), 'utf8'), /apply-runner 종료 \(exit 0\)/);
+
+  // 모양이 틀린 요청은 그 파일만 지우고 아무것도 하지 않는다(글자를 명령·경로로 쓰지 않는다)
+  fs.writeFileSync(fix.trail, '');
+  for (const body of ['{"action":"apply; touch pwned","requestedAt":"2026-09-24T00:00:00.000Z"}\n', '{"action":"update","requestedAt":"2026-09-24T00:00:00.000Z"}\n',
+    '{"requestedAt":"2026-09-24T00:00:00.000Z","action":"apply"}\n', 'apply\n',
+    '{"action":"apply","requestedAt":"2026-09-24T00:00:00.000Z"}\n{"action":"apply","requestedAt":"$(touch pwned)"}\n']) {
+    fs.writeFileSync(fix.request, body);
+    assert.equal(fix.run().status, 0);
+    assert.equal(fs.existsSync(fix.request), false, '모양이 틀린 요청은 그 파일만 지운다');
+  }
+  assert.deepEqual(fix.lines(), []);
+  assert.equal(fs.existsSync(path.join(fix.workspace, 'pwned')), false);
+  assert.equal(fix.run().status, 0, '요청 파일이 없으면(지운 것도 launchd를 깨운다) 조용히 끝난다');
+  assert.deepEqual(fix.lines(), []);
+
+  // setup.sh가 실패하면 고정 문구 한 줄
+  fix.fakeSetup('', 1);
+  fix.ask();
+  assert.equal(fix.run().status, 0);
+  assert.match(fix.log().trim().split('\n').pop(), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} 자동화 등록 실패 — 업데이트\.command를 한 번 실행해 주세요$/);
+
+  // 도는 사이에 새 요청이 오면 끝난 뒤 한 번 더
+  fs.writeFileSync(fix.trail, '');
+  const once = path.join(fix.root, 'once');
+  fix.fakeSetup(`if [ ! -f ${JSON.stringify(once)} ]; then touch ${JSON.stringify(once)}; printf '{"action":"apply","requestedAt":"2026-09-24T00:00:01.000Z"}\\n' > ${JSON.stringify(fix.request)}; fi\n`);
+  fix.ask();
+  assert.equal(fix.run().status, 0);
+  assert.equal(fix.lines().length, 2);
+  assert.equal(fs.existsSync(fix.request), false);
+
+  const script = fs.readFileSync(automationScript('apply-runner.sh'), 'utf8');
+  assert.ok(!/rm -rf|pkill|killall|xargs kill|\bkill\b/.test(script), '지우기는 파일 하나·잠금은 rmdir, 프로세스는 끝내지 않는다');
+  assert.match(script, /^main "\$@"; exit \$\?$/m, '본문을 통째로 읽고 시작한다(복사본이 바뀌어도 안전)');
+  assert.match(script, /rmdir "\$lock"/);
+});
+
+test('WP-F apply-runner.sh: 살아 있는 실행기가 쥔 잠금이면 건너뛰고(요청은 남김), 주인이 없는 잠금은 치우고 돈다', async (t) => {
+  const fix = applyRunnerFixture(t);
+  fs.mkdirSync(fix.lock, { recursive: true });
+  // 명령줄에 apply-runner가 보이는 프로세스 하나를 직접 띄워 잠금 주인으로 삼는다(끝날 때 그 자식만 끝낸다).
+  const holder = spawn('/bin/bash', ['-c', 'sleep 30; true', 'apply-runner'], { stdio: 'ignore' });
+  t.after(() => { if (holder.exitCode === null) holder.kill(); });
+  fs.writeFileSync(path.join(fix.lock, 'pid'), `${holder.pid}\n`);
+  for (let i = 0; i < 40 && !/apply-runner/.test(spawnSync('ps', ['-o', 'command=', '-p', String(holder.pid)], { encoding: 'utf8' }).stdout); i += 1) {
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  fix.ask();
+  assert.equal(fix.run().status, 0);
+  assert.deepEqual(fix.lines(), [], '도는 실행기가 있으면 건너뛴다');
+  assert.ok(fs.existsSync(fix.request), '건너뛴 요청은 그대로 남는다(도는 실행기가 이어서 처리한다)');
+  holder.kill();
+  await new Promise(resolve => holder.once('exit', resolve));
+  assert.equal(fix.run().status, 0);
+  assert.deepEqual(fix.lines(), ['setup  apply=1 update=']);
+  assert.equal(fs.existsSync(fix.lock), false);
+});
+
+test('WP-F setup.sh: apply 에이전트를 늘 등록하고, 실행기 표시일 때 apply·update·(내용 같으면) server를 다시 올리지 않는다', () => {
+  const script = fs.readFileSync(path.join(REPO_ROOT, 'setup.sh'), 'utf8');
+  assert.match(script, /<string>\$LABEL\.apply<\/string>/);
+  assert.match(script, /<string>\$\(xml_escape "\$INSTALL_DIR\/apply-runner\.sh"\)<\/string>/);
+  assert.match(script, /<string>\$\(xml_escape "\$INSTALL_DIR\/requests\/apply\.request"\)<\/string>/);
+  const plist = script.slice(script.indexOf('cat > "$AGENTS_DIR/$LABEL.apply.plist"'), script.indexOf('# 업무 데이터 백업'));
+  assert.match(plist, /<key>WatchPaths<\/key>/);
+  assert.match(plist, /<key>RunAtLoad<\/key>\n  <false\/>/);
+  const intro = script.slice(script.indexOf('# 켠 연동 자동 등록 — 일정표가 없다'), script.indexOf('cat > "$AGENTS_DIR/$LABEL.apply.plist"'));
+  assert.ok(intro.length > 0 && !/USE_(SLACK|CAL|JIRA|TIRO)/.test(intro), '연동과 무관하게 늘');
+  assert.match(script, /"\$APP_DIR\/automation\/apply-runner\.sh" "\$APP_DIR\/automation\/update-runner\.sh"/, '실행기도 설치 위치로 복사한다');
+  assert.match(script, /\[ "\$\{WORKSPACE_APPLY_RUNNER:-\}" = "1" \] && IN_RUNNER="apply"/);
+  assert.match(script, /if \[ "\$IN_RUNNER" = "apply" \]; then\n  ok "apply 그대로 \(지금 도는 등록\)"\nelif/, 'apply 실행기 안에서는 apply를 다시 올리지 않는다');
+  assert.match(script, /elif \[ "\$IN_RUNNER" = "apply" \] && \[ "\$OLD_UPDATE_PLIST" = "\$\(cat "\$UPDATE_PLIST"\)" \]; then\n  ok "update 그대로"/, 'apply 실행기 안에서는 내용이 그대로인 update도 다시 올리지 않는다');
+  assert.match(script, /\[ "\$f" = "server" \] && \[ -n "\$IN_RUNNER" \] && \[ "\$OLD_SERVER_PLIST" = "\$\(cat "\$plist"\)" \]/);
+  // 요청 파일로 돈 setup은 폴더를 옮기지 않는다(회사 폴더면 멈추고 업데이트.command로)
+  const guard = script.indexOf('install_location_guard "$WORKSPACE"');
+  const stop = script.indexOf('if [ "${WORKSPACE_APPLY_RUNNER:-}" = "1" ] && install_location_is_playio "$WORKSPACE"; then');
+  assert.ok(stop > 0 && stop < guard);
+  const update = fs.readFileSync(path.join(REPO_ROOT, 'update.sh'), 'utf8');
+  assert.match(update, /cp "\$APP_DIR\/automation\/apply-runner\.sh" "\$INSTALL_DIR\/"/, '업데이트 뒤 실행기 복사본도 갱신한다');
+});
+
+test('WP-F slack-capture.sh: 할 일 채널 없이도 켜진 채널만 읽고 그 지침만 넘긴다', (t) => {
+  const fix = captureFixture(t, { slack: { channels: {
+    waiting: { id: 'C0WAIT11', name: '#hana-waiting' },
+    someday: { id: 'C0SOME11', name: '#hana-someday' },
+  } } });
+  const busy = fix.run({ FAKE_FOUND: '1' });
+  assert.equal(busy.status, 0, busy.stderr + fix.logText());
+  assert.equal(fix.urls().length, 2);
+  const prompt = fs.readFileSync(fix.prompt, 'utf8');
+  assert.match(prompt, /^\.claude\/skills\/ 폴더의 slack-someday\.md, slack-waiting\.md 파일을 차례로 읽고/);
+  assert.ok(!prompt.includes('slack-todos.md'));
+
+  // 모두 뺐으면(손으로 고친 설정) 수집하지 않고 한 줄만 — 실패로 세지 않는다
+  const none = captureFixture(t, { slack: { channels: { todo: { id: 'C0TODO11', off: true } } } });
+  assert.equal(none.run().status, 0);
+  assert.deepEqual(none.urls(), []);
+  assert.match(none.logText(), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} 켜진 채널이 없어 건너뛰어요$/m);
+  assert.doesNotMatch(none.logText(), /채널 확인 실패/);
 });

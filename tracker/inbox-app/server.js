@@ -577,12 +577,14 @@ function getJiraSync() {
 
 // 슬랙 캡처는 가져올 게 없으면 아무 흔적도 남기지 않아서, 토큰이 만료돼 조용히 멈춰도
 // 화면은 멀쩡해 보인다. 캡처 스킬이 매 실행마다 남기는 checkedAt으로 마지막 확인 시각을 본다.
-// `connected`(토큰·할 일 채널까지 있는가 — 연동 탭 카드와 같은 기준)·`scheduled`(수집이 launchd에 등록됐는가)·
+// `connected`(토큰·켜진 채널까지 있는가 — 연동 탭 카드와 같은 기준)·`scheduled`(수집이 launchd에 등록됐는가 —
+// 켠 연동 자동 등록(apply)이 있으면 곧 등록되므로 등록된 것으로 본다. 그 등록이 마지막에 실패했으면 아니다)·
 // `neverRead`(한 번도 돈 흔적이 없음)는 톱니바퀴의 점과 연동 탭이 같은 판단을 하도록 함께 싣는다.
 function getSlackSync() {
   if (!USES.slack) return { used: false };
   const statePath = path.join(process.env.WORKSPACE_DATA_DIR || __dirname, '.slack_capture_state.json');
-  const extra = { connected: slackConnectedNow(), scheduled: launchAgentInstalled('slack-capture') };
+  const scheduled = launchAgentInstalled('slack-capture') || (launchAgentInstalled('apply') && !applyLastFailure());
+  const extra = { connected: slackConnectedNow(), scheduled };
   if (!fs.existsSync(statePath)) return { lastSync: null, stale: true, neverRead: true, ...extra };
   try {
     const state = JSON.parse(fs.readFileSync(statePath, 'utf-8'));
@@ -599,11 +601,11 @@ function getSlackSync() {
   }
 }
 
-// 슬랙 수집이 연결됐는가 — 연동 탭 카드(`settingsIntgCounts`)와 같은 기준: 켜짐 · 토큰 파일 · 할 일 채널.
+// 슬랙 수집이 연결됐는가 — 연동 탭 카드(`settingsIntgCounts`)와 같은 기준: 켜짐 · 토큰 파일 · 켜진 채널 하나 이상(어느 채널이든).
 function slackConnectedNow() {
   try {
     const slack = integrations.readIntegrations(currentConfigFile(), { claude: false }).slack;
-    return !!(slack.enabled && slack.hasToken && slack.channels && slack.channels.todo && slack.channels.todo.id);
+    return !!(slack.enabled && slack.hasToken && Object.values(slack.channels || {}).some(one => one && one.id));
   } catch { return false; }
 }
 
@@ -836,6 +838,36 @@ function launchAgentInstalled(name) {
   return nativeFs.existsSync(path.join(launchAgentsDir(), `com.workspace.app.${name}.plist`));
 }
 
+// ---------- 켠 연동 자동 등록 ----------
+// 연동 저장이 등록에 영향을 주는 값(켬/끔·캘린더 갈래·슬랙 채널)을 바꿨으면 요청 표시 파일
+// `requests/apply.request`(`{"action":"apply","requestedAt":"…"}` 한 줄)만 쓴다 — 서버는 프로세스를 띄우지 않는다.
+// launchd `com.workspace.app.apply`가 그걸 보고 설치 위치 복사본 `apply-runner.sh`로 `setup.sh`를 다시 돌린다.
+// 그 에이전트가 없는 옛 설치면 쓰지 않는다(카드가 `업데이트.command를 한 번 실행하면 수집이 시작돼요`를 말한다).
+const applyRequestPath = () => path.join(automationDir(), 'requests', 'apply.request');
+function requestApply() {
+  if (!launchAgentInstalled('apply')) return 'not-installed';
+  const file = applyRequestPath();
+  nativeFs.mkdirSync(path.dirname(file), { recursive: true });
+  nativeFs.writeFileSync(file, `${JSON.stringify({ action: 'apply', requestedAt: new Date().toISOString() })}\n`);
+  return 'requested';
+}
+
+// apply-runner.sh가 `logs/apply.log`에 남긴 결과 줄 중 **마지막 것이 실패**면 그 줄(시각·고정 문구), 아니면 null.
+// 이 한 줄은 launchd 등록에 기대는 카드(슬랙·캘린더 Claude·회의록)의 최근 기록 맨 위에 선다.
+const APPLY_LINE_RE = /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (자동화 등록 (?:완료|실패.*))$/;
+function applyLastFailure() {
+  const last = tailLines(path.join(automationLogDir(), 'apply.log'), 50)
+    .map(line => APPLY_LINE_RE.exec(line)).filter(Boolean).pop();
+  if (!last || !last[2].startsWith('자동화 등록 실패')) return null;
+  return { time: last[1], kind: 'fail', text: last[2].slice(0, 200) };
+}
+// 카드의 최근 기록(새것 먼저, 10개)에 등록 실패 한 줄을 시각 차례로 끼운다.
+function withApplyFailure(events) {
+  const failure = applyLastFailure();
+  if (!failure) return events;
+  return [...events, failure].sort((a, b) => String(b.time).localeCompare(String(a.time))).slice(0, 10);
+}
+
 function fetchUsed(key) {
   if (key === 'jira') return !!(USES.jira && jira.connected);
   if (key === 'calendar') return !!USES.calendar;
@@ -913,12 +945,12 @@ function fetchStateAutomation(automation, authRe = null) {
 }
 
 // 연동마다 "지금 멈췄나" — 연동 탭 맨 위 요약·카드의 빨간 줄·톱니바퀴의 빨간 점이 같은 판단을 쓴다.
-// 슬랙은 수집이 실패 중이거나 **할 일 채널이 사라졌으면** 멈춘 것이다(사라졌는지는 이름 따라가기가 이미 들고 있는
-// 답만 본다 — 여기서 슬랙에 묻지 않는다). 값은 로그·메모리에서만 읽고 파일은 쓰지 않는다.
+// 슬랙은 수집이 실패 중이거나 **켜진 채널이 모두 사라졌으면** 멈춘 것이다(일부만 사라졌으면 카드의 주황 줄일 뿐이다.
+// 사라졌는지는 이름 따라가기가 이미 들고 있는 답만 본다 — 여기서 슬랙에 묻지 않는다). 값은 로그·메모리에서만 읽고 파일은 쓰지 않는다.
 function integrationAlerts(config = currentConfigFile(), automations = getAutomationStatus()) {
   const failingAutomation = key => automations.some(one => one.key === key && one.lastKind === 'fail');
   const alerts = [];
-  if (USES.slack && (failingAutomation('slack') || slackFollower.knownMissing(config, 'todo'))) alerts.push('slack');
+  if (USES.slack && (failingAutomation('slack') || slackFollower.allKnownMissing(config))) alerts.push('slack');
   if (USES.jira && jira.connected && jiraLive.failure()) alerts.push('jira');
   if (USES.calendar && (CALENDAR_ICAL ? !!calendarLive.failure() : failingAutomation('calendar'))) alerts.push('calendar');
   if (USES.tiro && failingAutomation('tiro')) alerts.push('notes');
@@ -2645,10 +2677,11 @@ const handleRequest = (req, res) => {
         ? Object.values(getReportRefs()).filter(item => item.permalink && item.created === today).length : null;
       // 카드 ⋯ › 최근 기록 — 자동화는 로그의 최근 10번, 앱이 직접 읽는 것은 메모리에 있는 만큼.
       const events = key => (automation(key) || {}).events || [];
-      state.slack.log = events('slack');
+      // 켠 연동 자동 등록이 마지막에 실패했으면 launchd에 기대는 카드(슬랙·캘린더 Claude·회의록)의 기록에 한 줄.
+      state.slack.log = withApplyFailure(events('slack'));
       state.jira.log = liveLog('jira', jiraLive.history());
-      state.calendar.log = CALENDAR_ICAL ? liveLog('calendar', calendarLive.history()) : events('calendar');
-      state.meetingNotes.log = events('tiro');
+      state.calendar.log = CALENDAR_ICAL ? liveLog('calendar', calendarLive.history()) : withApplyFailure(events('calendar'));
+      state.meetingNotes.log = withApplyFailure(events('tiro'));
       state.alerts = integrationAlerts(config, automations);
       // 늦음·첫 읽기 전 판단의 재료 — /api/items(톱니바퀴의 주황 점)와 같은 값이라 둘이 같은 말을 한다.
       const calendarSync = { ...getCalendarToday() };
@@ -2685,20 +2718,26 @@ const handleRequest = (req, res) => {
   // 연동 저장 — 켜는 쪽은 먼저 지라·슬랙에 읽어 보고 성공했을 때만 쓴다.
   // `USES`·지라 설정은 서버가 뜰 때 읽으므로, launchd가 띄운 자리면 응답 뒤 스스로 끝낸다(다시 떠 준다).
   if (url.pathname === '/api/integrations/save' && req.method === 'POST') {
+    let before = {};
     readBody(req)
       .then(body => integrations.saveIntegrations({
         configPath: CONFIG_PATH,
-        current: currentConfigFile(),
+        current: (before = currentConfigFile()),
         body,
         jiraCheck: settings => require('./jira-client').checkJiraAccount(settings),
         slackCheck: (token, id) => integrations.slackCheckChannel(token, id),
         // 비밀 주소는 한 번 읽어 오늘 일정 수만 센다(10초 제한). 주소는 응답·로그에 남지 않는다.
         calendarCheck: address => integrations.icalCheck(address),
       }))
-      .then(({ result }) => {
+      .then(({ result, config }) => {
         const managed = !!process.env.WORKSPACE_MANAGED;
+        // 등록에 영향을 주는 값이 바뀌었을 때만 켠 연동 자동 등록을 요청한다(요청 파일만 — 실패해도 저장은 끝났다).
+        let apply = null;
+        if (integrations.registrationKey(before) !== integrations.registrationKey(config)) {
+          try { apply = requestApply(); } catch { apply = 'failed'; }
+        }
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ...result, restart: managed }));
+        res.end(JSON.stringify({ ...result, restart: managed, ...(apply ? { apply } : {}) }));
         integrations.scheduleRestart({ managed, exit: exitApp });
       })
       .catch((error) => {

@@ -142,10 +142,11 @@ CHANNELS=$("$NODE" -e '
 const fs = require("fs");
 const c = JSON.parse(fs.readFileSync(process.argv[1], "utf-8"));
 const ch = (c.slack && c.slack.channels) || {};
-process.stdout.write(Object.entries(ch)
+const on = Object.entries(ch)
   .filter(([k, v]) => v && typeof v.id === "string" && /^[^\s:]+$/.test(v.id) && v.off !== true)
-  .map(([k, v]) => v.id + ":my-" + k + ":" + (/^[0-9]+[.][0-9]+$/.test(String(v.since || "")) ? v.since : ""))
-  .join(" "));
+  .map(([k, v]) => v.id + ":my-" + k + ":" + (/^[0-9]+[.][0-9]+$/.test(String(v.since || "")) ? v.since : ""));
+// 켜진 채널이 하나도 없으면(설정을 읽기는 했다) 표시 하나만 — 아래에서 "수집 안 함"으로 한 줄 남긴다.
+process.stdout.write(on.length ? on.join(" ") : "NONE");
 ' "$CONFIG" 2>>"$LOG")
 
 # 토큰 파일도 bash의 [ -f ]/cat이 아니라 node로 읽는다 — 같은 Desktop 밑 파일인데도
@@ -166,6 +167,11 @@ failures=0
 if [ -z "$CHANNELS" ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') 채널 확인 실패 — 설정된 채널을 읽을 수 없음" >> "$LOG"
   exit 1
+fi
+# 받을 채널은 넷 중 켜진 것 아무거나다(할 일 채널이 꼭 있어야 하는 것은 아니다). 하나도 없으면 수집하지 않는다.
+if [ "$CHANNELS" = "NONE" ]; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S') 켜진 채널이 없어 건너뛰어요" >> "$LOG"
+  exit 0
 fi
 # 예전엔 fetch가 실패해도(네트워크 오류, 슬랙 API 오류 등) 전부 "새 메시지 0개"로
 # 뭉뚱그려져서 로그에 아무 흔적도 안 남았다 — 그래서 몇 시간씩 못 가져와도 몰랐다.

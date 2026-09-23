@@ -1381,6 +1381,21 @@ function settingsSlackSendHow(todoName = SETTINGS_TODO_EXAMPLE) {
 
 // 할 일 채널 이름을 아직 모를 때 쓰는 일반 표기(예시 이름 `#my-todo`를 사람의 채널처럼 적지 않는다).
 const SETTINGS_TODO_EXAMPLE = '#이름-todo';
+// 받을 채널은 넷 중 하나 이상이면 된다(할 일도 선택). 켜진(연결된) 채널의 키를 화면 차례대로.
+const settingsSlackOnKeys = channels => SETTINGS_SLACK_CHANNELS.map(([key]) => key)
+  .filter(key => channels && channels[key] && channels[key].id);
+// 대표 채널 — 상태 줄의 `#이름 외 N개`와 `슬랙에서 이렇게 보내요`의 예시. 켜진 채널 중 할 일이 있으면 할 일, 없으면 첫 번째.
+function settingsSlackMainKey(channels) {
+  const on = settingsSlackOnKeys(channels);
+  return on.includes('todo') ? 'todo' : (on[0] || null);
+}
+// 대표 채널의 이름(모르면 `#이름-todo`).
+function settingsSlackMainName(channels) {
+  const key = settingsSlackMainKey(channels);
+  return (key && channels[key].name) || SETTINGS_TODO_EXAMPLE;
+}
+const SETTINGS_SLACK_NONE = '받을 곳을 하나 이상 골라 주세요';
+const SETTINGS_SLACK_LAST = '마지막 채널은 뺄 수 없어요 — 슬랙 수집을 끄려면 ⋯ › 해제';
 const settingsSlackLabel = key => (SETTINGS_SLACK_CHANNELS.find(([one]) => one === key) || [key, key])[1];
 // `#이름` 뒤 조사는 이름 끝 글자(영문·숫자가 대부분)로 받침을 가릴 수 없다 — 늘 `채널`을 붙여 `#이름 채널을`로 쓴다.
 const settingsChannelObject = name => (String(name || '').trim() ? `${String(name).trim()} 채널을` : '채널을');
@@ -1472,6 +1487,9 @@ function settingsSlackWizard(card, data, mode = 'new') {
     const list = settingsEl('d-ichlist');
     const error = settingsErrorLine();
     const make = settingsButton('', 'd-btn pri');
+    // 하나도 고르지 않았으면 버튼 아래에서 이유를 말한다(버튼은 흐리게).
+    const none = settingsEl('d-ismall d-ichnone');
+    none.setAttribute('role', 'status');
     const inputs = {};
     const label = () => {
       const count = wanted().length;
@@ -1479,10 +1497,11 @@ function settingsSlackWizard(card, data, mode = 'new') {
       const canSkip = Object.keys(state.made).length > 0 || mode === 'token';
       make.textContent = count ? `고른 채널 ${count}개 만들어 주기` : (canSkip ? '다음 →' : '고른 채널 0개 만들어 주기');
       make.disabled = !count && !canSkip;
+      none.textContent = make.disabled ? SETTINGS_SLACK_NONE : '';
     };
     SETTINGS_SLACK_CHANNELS.forEach(([key, name, where]) => {
       const pick = state.picks[key];
-      const locked = linked(key) || !!state.made[key] || key === 'todo';
+      const locked = linked(key) || !!state.made[key];
       const row = document.createElement('label');
       row.className = 'd-ich' + (pick.on ? ' is-on' : '');
       row.dataset.channel = key;
@@ -1496,12 +1515,6 @@ function settingsSlackWizard(card, data, mode = 'new') {
       const strong = document.createElement('b');
       strong.textContent = name;
       text.appendChild(strong);
-      if (key === 'todo') {
-        const need = document.createElement('span');
-        need.className = 'need';
-        need.textContent = '필수';
-        text.append(document.createTextNode(' '), need);
-      }
       const sub = document.createElement('span');
       sub.className = 'd-ismall sub';
       settingsRich(sub, where);
@@ -1576,7 +1589,7 @@ function settingsSlackWizard(card, data, mode = 'new') {
     });
     label();
     const wrap = settingsEl('d-ichwrap');
-    wrap.append(how, list, make);
+    wrap.append(how, list, make, none);
     if (mode === 'new') {
       const later = document.createElement('p');
       later.className = 'd-ismall';
@@ -1604,7 +1617,10 @@ function settingsSlackWizard(card, data, mode = 'new') {
     const how = document.createElement('p');
     how.className = 'd-ihow';
     how.textContent = '연결하면 5분마다 이 채널들을 읽어 앱에 넣어요.';
-    const todoName = state.made.todo ? `#${state.made.todo.name}` : ((saved.todo && saved.todo.name) || SETTINGS_TODO_EXAMPLE);
+    // 예시 채널 — 켠 채널 중 할 일이 있으면 할 일, 없으면 첫 번째(만든 것과 이미 연결된 것을 함께 본다).
+    const picked = Object.fromEntries(SETTINGS_SLACK_CHANNELS.map(([key]) => [key,
+      state.made[key] ? { id: state.made[key].id, name: `#${state.made[key].name}` } : (linked(key) ? saved[key] : null)]));
+    const todoName = settingsSlackMainName(picked);
     const error = settingsErrorLine();
     const go = settingsButton('연결', 'd-btn pri');
     go.addEventListener('click', () => {
@@ -1644,10 +1660,11 @@ async function settingsSlackMakeChannels(token, keys, state) {
 
 // ---------- 슬랙 ⋯ › 채널 고르기(시안 E·F) ----------
 // 한 화면에서 **더하기·빼기**. 연결된 채널은 체크된 줄에 이름을 고정 글자(`#이름` + `연결됨`)로만 보이고
-// (이름은 슬랙에서 바꾼다 — 앱이 따라간다), 새로 고른 줄에만 이름 칸이 선다. `할 일`은 뺄 수 없다.
+// (이름은 슬랙에서 바꾼다 — 앱이 따라간다), 새로 고른 줄에만 이름 칸이 선다. 어느 채널이든 뺄 수 있지만
+// **마지막 하나**는 뺄 수 없다(체크를 풀면 그대로 두고 이유 한 줄 — 슬랙 수집을 끄려면 ⋯ › 해제).
 // - 빼기: 설정에서 지우지 않고 `off`로 표시만 한다(슬랙 채널·이미 들어온 항목은 그대로). 누르기 전에 확인 줄이 선다.
 // - 뺐던 채널을 다시 체크: 새로 만들지 않고 같은 채널을 다시 켠다 — 그때부터 읽는다(뺀 동안 온 메시지는 가져오지 않는다).
-// - 사라진 채널(슬랙에서 지웠거나 보관): 체크한 채로 두면 다시 만들고, 풀면 뺀다(할 일은 다시 만들기만).
+// - 사라진 채널(슬랙에서 지웠거나 보관): 체크한 채로 두면 다시 만들고, 풀면 뺀다.
 const SETTINGS_SLACK_BACK = '다시 연결했어요 — 뺀 동안 온 메시지는 가져오지 않아요';
 
 // 줄마다 지금 할 일 — `keep`(그대로) · `add`(새로·다시 만들기) · `back`(뺐던 채널 다시 켜기) · `off`(빼기) · `none`.
@@ -1715,7 +1732,6 @@ function settingsSlackPick(card, data) {
       const box = document.createElement('input');
       box.type = 'checkbox';
       box.checked = pick.on;
-      box.disabled = key === 'todo';
       box.setAttribute('aria-label', `${name} 받기`);
       boxes[key] = box;
       const text = document.createElement('span');
@@ -1723,12 +1739,6 @@ function settingsSlackPick(card, data) {
       const strong = document.createElement('b');
       strong.textContent = name;
       text.appendChild(strong);
-      if (key === 'todo') {
-        const need = document.createElement('span');
-        need.className = 'need';
-        need.textContent = '필수 — 뺄 수 없어요';
-        text.append(document.createTextNode(' '), need);
-      }
       const sub = document.createElement('span');
       sub.className = 'd-ismall sub';
       if (act === 'off') { sub.className = 'd-ismall sub k-neg'; sub.textContent = '빼요'; }
@@ -1781,7 +1791,15 @@ function settingsSlackPick(card, data) {
         row.appendChild(field);
       }
       box.addEventListener('change', () => {
-        pick.on = !!box.checked;
+        // 마지막 하나는 뺄 수 없다 — 체크를 되돌리고 이유를 말한다.
+        const others = Object.keys(state.picks).filter(one => one !== key && state.picks[one].on);
+        if (!box.checked && !others.length) {
+          box.checked = true;
+          state.error = SETTINGS_SLACK_LAST;
+        } else {
+          pick.on = !!box.checked;
+          if (state.error === SETTINGS_SLACK_LAST) state.error = '';
+        }
         state.focus = key;
         draw();
       });
@@ -1894,22 +1912,26 @@ function settingsSlackPick(card, data) {
 function settingsSlackCard(data) {
   const slack = data.slack || {};
   const channels = slack.channels || {};
-  const todo = channels.todo || {};
-  const connected = !!(slack.enabled && slack.hasToken && todo.id);
-  const linkedKeys = SETTINGS_SLACK_CHANNELS.map(([key]) => key).filter(key => channels[key] && channels[key].id);
-  const more = linkedKeys.filter(key => key !== 'todo').length;
+  // 받을 채널은 넷 중 하나 이상이면 된다 — 대표 채널은 켜진 것 중 할 일이 있으면 할 일, 없으면 첫 번째.
+  const linkedKeys = settingsSlackOnKeys(channels);
+  const main = channels[settingsSlackMainKey(channels)] || {};
+  const connected = !!(slack.enabled && slack.hasToken && linkedKeys.length);
+  const more = linkedKeys.length - 1;
   const ago = settingsAgo(slack.readAt);
-  const status = connected ? `${todo.name || '채널'}${more ? ` 외 ${more}개` : ''}${ago ? ` · ${ago} 읽음` : ''}` : null;
+  const status = connected ? `${main.name || '채널'}${more ? ` 외 ${more}개` : ''}${ago ? ` · ${ago} 읽음` : ''}` : null;
   const fetchState = slack.fetch || {};
   let card = null;
   const pickLink = () => settingsButton('채널 고르기', 'd-ablink', () => card.open('pick'));
-  // 할 일 채널이 사라졌으면 수집이 멈춘 것과 같은 급이다 — 빨간 상태 줄 + 이유 한 줄(시안 F).
-  const todoGone = connected && !!todo.missing;
+  // 켜진 채널이 **모두** 사라졌으면 수집이 멈춘 것과 같은 급이다 — 빨간 상태 줄 + 이유 한 줄(시안 F).
+  // 일부만 사라졌으면 그 채널마다 주황 한 줄(아래 extra).
+  const allGone = connected && linkedKeys.every(key => channels[key].missing);
   let alert = null;
-  if (todoGone) alert = { status: `${todo.name ? settingsChannelObject(todo.name) : '할 일 채널을'} 찾을 수 없어요`, why: ['슬랙에서 지웠거나 보관했어요 · ', pickLink()] };
-  else if (connected && fetchState.failing) alert = { why: settingsFailWhy('slack', fetchState) };
-  // 그 밖의 사라진 채널은 둘째 줄 아래 주의색 한 줄 — 누르면 채널 고르기로 간다.
-  const extra = linkedKeys.filter(key => key !== 'todo' && channels[key].missing).map((key) => {
+  if (allGone) {
+    const gone = linkedKeys.length === 1 ? settingsChannelObject(channels[linkedKeys[0]].name) : '켜진 채널을 모두';
+    alert = { status: `${gone} 찾을 수 없어요`, why: ['슬랙에서 지웠거나 보관했어요 · ', pickLink()] };
+  } else if (connected && fetchState.failing) alert = { why: settingsFailWhy('slack', fetchState) };
+  // 일부만 사라진 채널은 둘째 줄 아래 주의색 한 줄 — 누르면 채널 고르기로 간다.
+  const extra = (allGone ? [] : linkedKeys.filter(key => channels[key].missing)).map((key) => {
     const line = settingsEl('d-intgneed k-warn');
     line.dataset.missing = key;
     line.append(document.createTextNode(`${settingsChannelObject(channels[key].name)} 찾을 수 없어요 — 슬랙에서 지웠거나 보관했어요 · `), pickLink());
@@ -1935,7 +1957,7 @@ function settingsSlackCard(data) {
     status, menu, extra, alert,
     fetch: connected ? { key: 'slack', state: fetchState, reconnect: () => card.open('token') } : null,
     onOpen: (self, mode) => {
-      if (mode === 'how') { self.body.appendChild(settingsSlackSendHow(todo.name || SETTINGS_TODO_EXAMPLE)); return; }
+      if (mode === 'how') { self.body.appendChild(settingsSlackSendHow(settingsSlackMainName(channels))); return; }
       if (mode === 'log') {
         const automation = (automationStatusCache || []).find(a => a.key === 'slack');
         settingsIntgLog(self, 'slack', '슬랙 수집', slack.log || [], slackLedgerNotes(automation ? automation.tail : []));
@@ -2322,13 +2344,13 @@ function settingsNotesCard(data) {
 
 // ---------- 목록 ----------
 // 맨 위 한 줄(선택이라는 말 + `연결됨 N · 남은 것 M`) → 카드 넷 → 맨 아래 조용한 줄
-// (`다른 도구를 쓰고 있어요 → 요청하기 · 각자 붙이는 법 ↗`)과 자동화 등록 안내.
+// (`다른 도구를 쓰고 있어요 → 요청하기 · 각자 붙이는 법 ↗`). 켠 자동화는 저장하면 앱이 알아서 등록한다(launchd `apply`).
 // 카드마다 연결됐는가 — 셈(`연결됨 N`)과 늦음·첫 읽기 전을 카드에 붙일지가 같은 기준을 쓴다.
 function settingsIntgConnected(data) {
   const slack = data.slack || {};
   const jira = data.jira || {};
   return {
-    slack: !!(slack.enabled && slack.hasToken && slack.channels && slack.channels.todo && slack.channels.todo.id),
+    slack: !!(slack.enabled && slack.hasToken && settingsSlackOnKeys(slack.channels).length),
     jira: !!(jira.enabled && jira.hasToken && jira.siteUrl),
     calendar: !!(data.calendar && data.calendar.enabled),
     notes: !!(data.meetingNotes && data.meetingNotes.mode === 'tiro'),
@@ -2353,16 +2375,17 @@ function settingsIntgLagFrom(data, failing = []) {
 }
 
 // 지금 멈춘 카드(연결된 것만) — 요약 줄의 `N개가 멈췄어요`와 빨간 점을 눌렀을 때 잠깐 붉힐 카드.
-// 슬랙은 수집이 실패 중이거나 할 일 채널이 사라졌을 때, 캘린더(비밀 주소)는 한 번도 못 읽었을 때도 멈춘 것이다.
+// 슬랙은 수집이 실패 중이거나 켜진 채널이 모두 사라졌을 때(일부면 주황 줄일 뿐), 캘린더(비밀 주소)는 한 번도 못 읽었을 때도 멈춘 것이다.
 function settingsIntgFailing(data) {
   const slack = data.slack || {};
   const jira = data.jira || {};
   const calendar = data.calendar || {};
   const notes = data.meetingNotes || {};
-  const todo = (slack.channels && slack.channels.todo) || {};
+  const onKeys = settingsSlackOnKeys(slack.channels);
+  const allGone = onKeys.length > 0 && onKeys.every(key => slack.channels[key].missing);
   const failing = (state) => !!(state && state.failing);
   const out = [];
-  if (slack.enabled && slack.hasToken && todo.id && (failing(slack.fetch) || todo.missing)) out.push('slack');
+  if (slack.enabled && slack.hasToken && onKeys.length && (failing(slack.fetch) || allGone)) out.push('slack');
   if (jira.enabled && jira.hasToken && jira.siteUrl && failing(jira.fetch)) out.push('jira');
   if (calendar.enabled && (failing(calendar.fetch) || (calendar.source === 'ical' && !calendar.readAt && calendar.failed))) out.push('calendar');
   if (notes.mode === 'tiro' && failing(notes.fetch)) out.push('notes');
@@ -2409,9 +2432,7 @@ function settingsIntgFoot() {
   open.setAttribute('aria-expanded', 'false');
   line.append(document.createTextNode('다른 도구를 쓰고 있어요 → '), open, document.createTextNode(' · '),
     settingsOutLink('각자 붙이는 법 ↗', SETTINGS_OWN_TOOL_URL, 'd-ablink'));
-  // 켠 자동화는 launchd에 따로 등록돼야 실제로 돈다 — 그 한 번은 업데이트.command가 해 준다.
-  const setup = settingsEl('d-intgsetup', '켠 자동화를 등록하려면 앱 폴더의 업데이트.command를 한 번 실행해요.');
-  foot.append(line, ask, setup);
+  foot.append(line, ask);
   return foot;
 }
 
@@ -2827,7 +2848,7 @@ const SETTINGS_FAQ = [
     ['슬랙 채널에 다른 사람을 초대해도 되나요', '슬랙 연결',
       '이 채널들은 나만 있는 채널로 써요 — 다른 사람을 초대하면 그 사람이 쓴 메시지도 할 일로 들어와요.'],
     ['받을 채널을 더하거나 빼려면', '슬랙 연결',
-      '슬랙 카드 <b>⋯ › 채널 고르기</b>예요. 새로 고른 곳은 비공개 채널을 만들어 주고, 체크를 풀면 앱이 그 채널을 더 이상 읽지 않아요(슬랙 채널과 이미 들어온 항목은 그대로예요). 뺐던 채널을 다시 체크하면 <b>그때부터</b> 읽어요 — 뺀 동안 온 메시지는 가져오지 않아요. <b>할 일</b>은 뺄 수 없고, 채널 이름은 슬랙에서 바꾸면 앱이 따라가요.'],
+      '슬랙 카드 <b>⋯ › 채널 고르기</b>예요. 새로 고른 곳은 비공개 채널을 만들어 주고, 체크를 풀면 앱이 더 이상 읽지 않아요(슬랙 채널과 들어온 항목은 그대로). 다시 체크하면 <b>그때부터</b> 읽어요. 받을 곳은 <b>하나 이상</b>이면 되고(할 일도 선택), 마지막 하나까지 끄려면 <b>⋯ › 해제</b>예요.'],
     ['지금 바로 새로 가져오고 싶어요', '그 연동 연결',
       '<b>설정 &gt; 연동</b>에서 연결된 카드의 <b>지금 가져오기</b>를 눌러요. 지라·캘린더(비밀 주소)는 곧바로 다시 읽고, 슬랙·캘린더(Claude)·티로는 요청을 남겨 1~2분 뒤 반영돼요. 같은 연동은 1분에 한 번이에요. 지금 못 읽고 있으면 버튼이 <b>다시 시도</b>로, 토큰·주소 문제면 <b>다시 연결</b>로 바뀌어요.'],
     ['머리줄의 `○일 전 기준`이나 톱니 점은 뭔가요', '없음',
@@ -2846,10 +2867,11 @@ const SETTINGS_FAQ = [
 ];
 
 
-// 저장된 할 일 채널 이름(연동 탭을 한 번 읽었으면), 모르면 `#이름-todo`.
+// 도움말의 예시 채널 — 저장된 할 일 채널 이름, 할 일을 켜지 않았으면 그 사람이 켠 첫 채널(연동 탭을 한 번 읽었으면).
+// 모르면 `#이름-todo`.
 function settingsTodoName() {
-  const todo = settingsIntegrations && settingsIntegrations.slack && settingsIntegrations.slack.channels && settingsIntegrations.slack.channels.todo;
-  return (todo && todo.id && todo.name) || SETTINGS_TODO_EXAMPLE;
+  const channels = settingsIntegrations && settingsIntegrations.slack && settingsIntegrations.slack.channels;
+  return channels ? settingsSlackMainName(channels) : SETTINGS_TODO_EXAMPLE;
 }
 
 function renderSettingsGuide() {
@@ -2894,7 +2916,7 @@ function renderSettingsGuide() {
       tag.textContent = `필요한 것: ${need}`;
       const a = document.createElement('div');
       a.className = 'a';
-      // 문답은 코드에 적힌 고정 문장이다. 끼워 넣는 것은 저장된 할 일 채널 이름 하나뿐이고 글자로 바꿔(escape) 넣는다.
+      // 문답은 코드에 적힌 고정 문장이다. 끼워 넣는 것은 저장된 채널 이름 하나뿐이고 글자로 바꿔(escape) 넣는다.
       a.innerHTML = answer.split('{todo}').join(escapeHtml(settingsTodoName()));
       doc.append(q, tag, a);
     });
