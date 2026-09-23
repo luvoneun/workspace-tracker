@@ -493,6 +493,85 @@ test('BJALIAS: 자동(초안) row의 group·evidence[].label은 원본 항목의
   assert.equal(row.evidence.find(item=>item.id==='jb').label,'IO-3 · 배포 자동화');
   assert.match(row.bucket,/^jira:IO-3:/,'bucket은 지라 키로 짓는다(라벨 글자가 아니다) — relabelProject가 이 자리로 행을 찾는다');
 });
+// ---------- BMOVE: 그룹 → 지라 에픽으로 옮기기 ----------
+// moveGroup은 renameGroup·relabelProject와 같은 세 자리(group·bucket 머리·evidence[].label)를
+// 보되, bucket의 종류 자체가 `group:`→`jira:`로 바뀐다는 점이 다르다. 되돌리기(moveGroupUndo)가
+// 정확해야 하므로 **바뀐 행의 id 목록**을 돌려준다(renameGroup은 개수만 돌려줬다).
+test('BMOVE: moveGroup은 group:from: 행만 jira:to: 꼴로 바꾸고 바뀐 행 id를 돌려준다',t=>{
+  const f=fixture(t);
+  const file=path.join(f.directory,'.report-drafts.json');
+  const state={schema:1,weeks:{'2026-09-14':{rows:[
+    {id:'m1',heading:'완료한 일',group:'결제 리뉴얼',bucket:'group:결제 리뉴얼:완료한 일:정산',text:'정산 배치 검토함',sourceIds:['x1'],
+      evidence:[{id:'x1',label:'결제 리뉴얼'}],locked:true,excluded:false},
+    // 다른 그룹 — 손대면 안 된다.
+    {id:'m2',heading:'완료한 일',group:'운영툴',bucket:'group:운영툴:완료한 일:정비',text:'정비함',sourceIds:['x2'],
+      evidence:[{id:'x2',label:'운영툴'}],locked:true,excluded:false},
+    // 합쳐진(merge) 행 — parts 안의 문장도 같이 바뀐다.
+    {id:'m3',heading:'진행중',group:'결제 리뉴얼',bucket:'group:결제 리뉴얼:진행중:API',text:'API 작업\nAPI 검토',sourceIds:['x3','x4'],
+      evidence:[{id:'x3',label:'결제 리뉴얼'}],locked:true,excluded:false,
+      parts:[
+        {id:'p1',heading:'진행중',group:'결제 리뉴얼',bucket:'group:결제 리뉴얼:진행중:API',text:'API 작업',sourceIds:['x3'],evidence:[{id:'x3',label:'결제 리뉴얼'}],locked:true,excluded:false},
+        {id:'p2',heading:'진행중',group:'결제 리뉴얼',bucket:'group:결제 리뉴얼:진행중:API2',text:'API 검토',sourceIds:['x4'],evidence:[{id:'x4',label:'결제 리뉴얼'}],locked:true,excluded:false},
+      ]},
+  ],updatedAt:'2026-09-20T00:00:00.000Z'}}};
+  fs.writeFileSync(file,JSON.stringify(state,null,2));
+
+  const ids=f.store.moveGroup('결제 리뉴얼','IO-48501','IO-48501 · 결제 리뉴얼');
+  assert.deepEqual(ids,['m1','m3'],'옮긴 최상위 행 id만 돌려준다');
+  const rows=JSON.parse(fs.readFileSync(file,'utf8')).weeks['2026-09-14'].rows;
+  const m1=rows.find(row=>row.id==='m1');
+  assert.equal(m1.group,'IO-48501 · 결제 리뉴얼');
+  assert.equal(m1.bucket,'jira:IO-48501:완료한 일:정산');
+  assert.equal(m1.evidence[0].label,'IO-48501 · 결제 리뉴얼');
+  assert.equal(m1.text,'정산 배치 검토함','문장은 손대지 않는다');
+
+  const m3=rows.find(row=>row.id==='m3');
+  assert.equal(m3.group,'IO-48501 · 결제 리뉴얼');
+  assert.equal(m3.bucket,'jira:IO-48501:진행중:API');
+  assert.equal(m3.parts[0].group,'IO-48501 · 결제 리뉴얼');
+  assert.equal(m3.parts[0].bucket,'jira:IO-48501:진행중:API');
+  assert.equal(m3.parts[1].group,'IO-48501 · 결제 리뉴얼');
+  assert.equal(m3.parts[1].bucket,'jira:IO-48501:진행중:API2');
+
+  const m2=rows.find(row=>row.id==='m2');
+  assert.equal(m2.group,'운영툴','다른 그룹은 손대지 않는다');
+  assert.equal(m2.bucket,'group:운영툴:완료한 일:정비');
+
+  // view()에서 지라 프로젝트 소제목으로 나온다(그룹 소제목이 아니다).
+  const view=f.store.view('2026-09-14');
+  assert.ok(view.rows.some(row=>row.group==='IO-48501 · 결제 리뉴얼' && row.bucket==='jira:IO-48501:완료한 일:정산'));
+
+  // 바꿀 것이 없으면 파일을 쓰지 않는다.
+  const before=fs.statSync(file).mtimeMs;
+  assert.deepEqual(f.store.moveGroup('없는 프로젝트','IO-9','IO-9'),[]);
+  assert.equal(fs.statSync(file).mtimeMs,before);
+});
+test('BMOVE: moveGroupUndo는 기록에 있는 id들만 되돌리고, 그 사이 새로 생긴 행·없는 id는 건드리지 않는다',t=>{
+  const f=fixture(t);
+  const file=path.join(f.directory,'.report-drafts.json');
+  const state={schema:1,weeks:{'2026-09-14':{rows:[
+    {id:'u1',heading:'완료한 일',group:'IO-48501 · 결제 리뉴얼',bucket:'jira:IO-48501:완료한 일:정산',text:'정산 배치 검토함',sourceIds:['x1'],
+      evidence:[{id:'x1',label:'IO-48501 · 결제 리뉴얼'}],locked:true,excluded:false},
+    // 옮긴 뒤 이 에픽에 새로 생긴 행(이동 기록에는 없다) — undo가 건드리면 안 된다.
+    {id:'u2',heading:'완료한 일',group:'IO-48501 · 결제 리뉴얼',bucket:'jira:IO-48501:완료한 일:새작업',text:'새 작업함',sourceIds:['x2'],
+      evidence:[{id:'x2',label:'IO-48501 · 결제 리뉴얼'}],locked:true,excluded:false},
+  ],updatedAt:'2026-09-20T00:00:00.000Z'}}};
+  fs.writeFileSync(file,JSON.stringify(state,null,2));
+
+  const result=f.store.moveGroupUndo(['u1'],'결제 리뉴얼','IO-48501','IO-48501 · 결제 리뉴얼');
+  assert.deepEqual(result,{restored:1,skipped:0});
+  const rows=JSON.parse(fs.readFileSync(file,'utf8')).weeks['2026-09-14'].rows;
+  const u1=rows.find(row=>row.id==='u1');
+  assert.equal(u1.group,'결제 리뉴얼');
+  assert.equal(u1.bucket,'group:결제 리뉴얼:완료한 일:정산');
+  assert.equal(u1.evidence[0].label,'결제 리뉴얼');
+  const u2=rows.find(row=>row.id==='u2');
+  assert.equal(u2.group,'IO-48501 · 결제 리뉴얼','기록에 없는(새로 생긴) 행은 그대로 둔다');
+
+  // 이미 되돌렸거나 없는 id는 건너뛴다.
+  const skip=f.store.moveGroupUndo(['u1','없는-id'],'결제 리뉴얼','IO-48501','IO-48501 · 결제 리뉴얼');
+  assert.deepEqual(skip,{restored:0,skipped:2});
+});
 // BFOLD — 여러 문장을 골라 사람이 지은 요약 한 줄(`manual`) 아래로 모으고(`fold`), 그 부모를 접고
 // 펼치고(`setFolded`) 풀 수 있다(`unfold`). 글자는 합치지 않는다 — nest처럼 각 문장은 독립으로 남는다.
 test('한 줄로 모으기 검증: 최소 개수·같은 상태·제외 안 함·중첩 금지·요약 글 길이',t=>{

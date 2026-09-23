@@ -2521,6 +2521,318 @@ test('BJALIAS: projectAliases 칸이 없는 옛 파일은 하나도 없다로 �
   assert.equal('projectAliases' in readJson(path.join(server.home, '.workflow.json')), false, '고쳐 쓰지 않는다');
 });
 
+// ---------- 직접 만든 프로젝트 → 지라 에픽으로 옮기기 (BMOVE) ----------
+// 항목·회의·주간요약 소속을 한 트랜잭션으로 지라 에픽 쪽으로 옮긴다. renameProject와 같은 자리를
+// 건드리되, 그룹 칸을 지우고 지라 칸을 새로 넣는다는 점이 다르다. 여기서도 실제 지라에는 닿지
+// 않는다 — 서버는 자기 임시 폴더의 가짜 설정·가짜 토큰을 쓰고, 지라로 나가는 fetch는 자식 프로세스
+// 안의 가짜 응답이 전부 가로챈다.
+const movePost = (origin, body, key) => fetch(origin + '/api/project/move', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', ...(key ? { 'Idempotency-Key': key } : {}) },
+  body: JSON.stringify(body),
+}).then(async response => ({ status: response.status, ...await response.json() }));
+const moveUndoPost = (origin, body) => fetch(origin + '/api/project/move-undo', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+}).then(async response => ({ status: response.status, ...await response.json() }));
+
+const JIRA_MOVE_SITE = 'https://move-jira.test';
+const MOVE_TYPES = { issueTypes: [
+  { id: '10000', name: '에픽', subtask: false, hierarchyLevel: 1 },
+  { id: '10001', name: '작업', subtask: false, hierarchyLevel: 0 },
+  { id: '10101', name: '하위 작업', subtask: true, hierarchyLevel: -1 },
+] };
+// IO-48501은 에픽, IO-9002는 에픽이 아닌 스토리 — "에픽만" 검증에 쓴다. IO-99999는 아예 모르는
+// 티켓이라(못 읽음) 검증에 쓴다.
+const MOVE_KNOWN = {
+  'IO-48501': { summary: '결제 리뉴얼 v2', typeId: '10000' },
+  'IO-9002': { summary: '알림센터 스토리', typeId: '10001' },
+};
+// `direct`는 복구(BRECOVERY) 테스트만 쓴다 — server.js를 `require()`로 빌려 쓰면(다른 BMOVE 서버들과
+// 같은 방식) `require.main === module`이 거짓이라 시작할 때 도는 `mutations.recover()`가 통째로
+// 건너뛰어진다(서버가 그 검사로 "지금 막 시작했을 때"를 가려서다). 복구가 실제로 걸리는지 보려면
+// server.js를 **그대로 진입점**으로 띄우고, 가짜 지라는 `--require` 미리 불러오기로 fetch만 바꿔치기한다.
+async function startMoveJiraServer(t, seed, { direct = false } = {}) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-jiramove-'));
+  seed(home);
+  const tokenFile = path.join(home, '.jira_token_fixture');
+  fs.writeFileSync(tokenFile, 'fixture-token-never-real\n');
+  const config = path.join(home, 'workspace.config.json');
+  fs.writeFileSync(config, JSON.stringify({ jira: { siteUrl: JIRA_MOVE_SITE, email: 'fixture@example.test', tokenFile } }));
+  const fetchPatch = `'use strict';
+const SITE = ${JSON.stringify(JIRA_MOVE_SITE)};
+const KNOWN = ${JSON.stringify(MOVE_KNOWN)};
+const TYPES = ${JSON.stringify(MOVE_TYPES)};
+const realFetch = globalThis.fetch;
+globalThis.fetch = async (input, init) => {
+  const url = String(input && input.url ? input.url : input);
+  if (!url.startsWith(SITE)) return realFetch(input, init);
+  const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  if (url.includes('/issue/createmeta/')) return json(TYPES);
+  const hit = url.match(/\\/rest\\/api\\/3\\/issue\\/([A-Z][A-Z0-9]*-\\d+)/);
+  if (hit && KNOWN[hit[1]]) return json({ fields: { summary: KNOWN[hit[1]].summary, issuetype: { id: KNOWN[hit[1]].typeId } } });
+  if (hit) return json({ errorMessages: ['no issue'] }, 404);
+  return json({ issues: [] });
+};
+`;
+  const port = await freePort();
+  let child;
+  if (direct) {
+    const preload = path.join(home, 'fake-jira-move-preload.js');
+    fs.writeFileSync(preload, fetchPatch);
+    child = spawn(process.execPath, ['--require', preload, path.join(__dirname, 'server.js')], {
+      env: { ...process.env, WORKSPACE_DATA_DIR: home, WORKSPACE_PORT: String(port), WORKSPACE_NO_OPEN: '1', WORKSPACE_HOST: '', WORKSPACE_CONFIG: config },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } else {
+    const wrapper = path.join(home, 'fake-jira-move-server.js');
+    fs.writeFileSync(wrapper, `${fetchPatch}
+const { server } = require(${JSON.stringify(path.join(__dirname, 'server.js'))});
+server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => console.log('ready'));
+`);
+    child = spawn(process.execPath, [wrapper], {
+      env: { ...process.env, WORKSPACE_DATA_DIR: home, WORKSPACE_PORT: String(port), WORKSPACE_NO_OPEN: '1', WORKSPACE_HOST: '', WORKSPACE_CONFIG: config },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  }
+  let log = '';
+  child.stdout.on('data', chunk => { log += chunk; });
+  child.stderr.on('data', chunk => { log += chunk; });
+  t.after(() => { child.kill('SIGKILL'); fs.rmSync(home, { recursive: true, force: true }); });
+  const origin = `http://127.0.0.1:${port}`;
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) throw new Error(`서버가 종료되었습니다 (${child.exitCode}): ${log}`);
+    try { if ((await fetch(origin + '/api/storage-status')).ok) return { home, origin }; } catch { /* 아직 안 떴다 */ }
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  throw new Error(`서버가 응답하지 않았습니다: ${log}`);
+}
+
+const MOVE_REPORT = {
+  schema: 1,
+  weeks: {
+    '2026-09-14': {
+      rows: [
+        { id: 'r1', heading: '완료한 일', group: '결제 리뉴얼', bucket: 'group:결제 리뉴얼:완료한 일:정산 배치',
+          text: '정산 배치 설계 검토함', sourceIds: ['mv02'],
+          evidence: [{ id: 'mv02', description: '완료한 정산 작업', status: 'done', type: 'task', outcome: '', label: '결제 리뉴얼', permalink: null }],
+          locked: true, excluded: false },
+        { id: 'r2', heading: '진행중', group: '운영툴', bucket: 'group:운영툴:진행중:운영툴 대시보드',
+          text: '운영툴 대시보드 개선', sourceIds: [], evidence: [], locked: true, excluded: false },
+      ],
+      updatedAt: '2026-09-20T00:00:00.000Z',
+    },
+  },
+};
+function seedMove(home, report = MOVE_REPORT) {
+  fs.writeFileSync(path.join(home, 'tasks.md'), '# Tasks\n'
+    + '- 정산 배치 설계 검토하기 #task[id:mv01 status:to-do priority:high created:2026-09-20 group:결제_리뉴얼]\n'
+    + '- 완료한 정산 작업 #task[id:mv02 status:done priority:medium created:2026-09-18 completed:2026-09-19 group:결제_리뉴얼]\n'
+    + '- 게임 임베드 검수하기 #task[id:mv03 status:to-do priority:medium created:2026-09-20 jira:IO-9999]\n'
+    + '- 대시보드 지표 정리하기 #task[id:mv06 status:to-do priority:medium created:2026-09-20 group:운영툴]\n');
+  fs.writeFileSync(path.join(home, 'checks.md'), '# Checks\n'
+    + '- 법무 검토 회신 #check[id:mv04 status:to-do priority:medium created:2026-09-20 who:엘리 group:결제_리뉴얼]\n');
+  fs.writeFileSync(path.join(home, 'decisions.md'), '# Decisions\n'
+    + '- 정산 주기는 주 단위로 한다 #decision[id:mv05 status:to-do priority:medium created:2026-09-20 group:결제_리뉴얼]\n');
+  fs.writeFileSync(path.join(home, 'ideas.md'), '# Ideas\n'
+    + '- 정산 리포트 자동화 #idea[id:mv07 status:to-do priority:low created:2026-09-20 project:결제_리뉴얼]\n');
+  fs.writeFileSync(path.join(home, '.workflow.json'), JSON.stringify({
+    items: {}, meetings: {
+      m1: { id: 'm1', date: '2026-09-20', start: '10:00', end: '11:00', title: '결제 주간 싱크', series: '결제 주간 싱크', link: null,
+        project: { type: 'group', value: '결제 리뉴얼', label: '결제 리뉴얼' } },
+      m2: { id: 'm2', date: '2026-09-19', start: '14:00', end: '15:00', title: '운영 회의', series: '운영 회의', link: null,
+        project: { type: 'group', value: '운영툴', label: '운영툴' } },
+    },
+    projectLinks: { '결제 리뉴얼': 'IO-1111' },
+  }, null, 2));
+  fs.writeFileSync(path.join(home, '.meeting_links.json'), JSON.stringify({ '결제 주간 싱크': 'group:결제 리뉴얼', '운영 회의': 'group:운영툴' }, null, 2));
+  fs.writeFileSync(path.join(home, '.report-drafts.json'), JSON.stringify(report, null, 2));
+}
+
+test('BMOVE: 검증 — 직접 만든 프로젝트만, 에픽만, 읽을 수 있을 때만, 있는 그룹만 옮길 수 있다', async (t) => {
+  const server = await startMoveJiraServer(t, seedMove);
+  const refuse = async (body, message) => {
+    const answer = await movePost(server.origin, body);
+    assert.equal(answer.status, 400, JSON.stringify(body));
+    assert.equal(answer.error, message, JSON.stringify(body));
+  };
+  // 직접 만든 프로젝트만(group:이 아니면).
+  await refuse({ project: 'jira:IO-9999', to: 'IO-48501' }, '직접 만든 프로젝트만 옮길 수 있어요.');
+  await refuse({ project: '결제 리뉴얼', to: 'IO-48501' }, '직접 만든 프로젝트만 옮길 수 있어요.');
+  // 지라 번호 형식.
+  await refuse({ project: 'group:결제 리뉴얼', to: 'io-48501' }, '지라 번호를 확인해 주세요.');
+  await refuse({ project: 'group:결제 리뉴얼', to: '' }, '지라 번호를 확인해 주세요.');
+  // 에픽만(IO-9002는 스토리).
+  await refuse({ project: 'group:결제 리뉴얼', to: 'IO-9002' }, '에픽에만 옮길 수 있어요.');
+  // 지라에서 읽을 수 있을 때만(IO-99999는 가짜 지라가 모른다).
+  await refuse({ project: 'group:결제 리뉴얼', to: 'IO-99999' }, '지라에서 이 티켓을 읽지 못했어요.');
+  // 있는 그룹만.
+  await refuse({ project: 'group:없는 프로젝트', to: 'IO-48501' }, '프로젝트를 찾을 수 없어요.');
+
+  // 전부 거절됐으니 어떤 파일도 바뀌지 않는다.
+  assert.match(fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8'), /group:결제_리뉴얼\]/);
+  assert.equal(fs.existsSync(path.join(server.home, '.mutation-journal.json')), false);
+});
+
+test('BMOVE: 옮기면 항목·회의·연결·주간요약이 한 트랜잭션으로 지라 쪽으로 넘어가고 그룹은 저절로 사라진다', async (t) => {
+  const server = await startMoveJiraServer(t, seedMove);
+  const answer = await movePost(server.origin, { project: 'group:결제 리뉴얼', to: 'IO-48501' });
+  assert.equal(answer.status, 200);
+  assert.equal(answer.ok, true);
+  assert.equal(answer.project, 'jira:IO-48501');
+  assert.equal(answer.from, '결제 리뉴얼');
+  assert.equal(answer.to, 'IO-48501');
+  assert.match(answer.moveId, /^mv_/);
+  assert.deepEqual(answer.changed, { items: 5, meetings: 2, links: 1, report: 1 });
+
+  // ① 업무 파일 — 지라가 걸린 줄(mv03)과 다른 그룹(mv06)은 그대로, 나머지 넷은 jira:IO-48501로.
+  const tasks = fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8');
+  assert.match(tasks, /정산 배치 설계 검토하기 #task\[id:mv01 status:to-do priority:high created:2026-09-20 jira:IO-48501\]/);
+  assert.doesNotMatch(tasks, /id:mv01[^\n]*group:/);
+  assert.match(tasks, /완료한 정산 작업 #task\[id:mv02 status:done priority:medium created:2026-09-18 completed:2026-09-19 jira:IO-48501\]/);
+  assert.match(tasks, /id:mv03 status:to-do priority:medium created:2026-09-20 jira:IO-9999\]/, '이미 지라가 걸린 줄은 그대로다');
+  assert.match(tasks, /id:mv06[^\n]*group:운영툴\]/, '다른 그룹은 그대로다');
+  assert.match(fs.readFileSync(path.join(server.home, 'checks.md'), 'utf8'), /id:mv04 status:to-do priority:medium created:2026-09-20 who:엘리 jira:IO-48501\]/);
+  assert.match(fs.readFileSync(path.join(server.home, 'decisions.md'), 'utf8'), /id:mv05 status:to-do priority:medium created:2026-09-20 jira:IO-48501\]/);
+  assert.match(fs.readFileSync(path.join(server.home, 'ideas.md'), 'utf8'), /id:mv07 status:to-do priority:low created:2026-09-20 jira:IO-48501\]/, '아이디어도 project: 대신 jira:로 옮긴다');
+
+  // ②③ 회의 프로젝트 · 수동 지라 연결(옮긴 뒤에는 뜻이 없어 지운다)
+  const workflow = readJson(path.join(server.home, '.workflow.json'));
+  assert.deepEqual(workflow.meetings.m1.project, { type: 'jira', value: 'IO-48501', label: 'IO-48501' });
+  assert.deepEqual(workflow.meetings.m2.project, { type: 'group', value: '운영툴', label: '운영툴' });
+  assert.deepEqual(workflow.projectLinks, {});
+
+  // ④ 회의 제목 → 프로젝트 표
+  assert.deepEqual(readJson(path.join(server.home, '.meeting_links.json')), { '결제 주간 싱크': 'jira:IO-48501', '운영 회의': 'group:운영툴' });
+
+  // ⑤ 주간요약 저장본 — group:결제 리뉴얼: 행만 jira:IO-48501: 꼴로, 이름은 방금 읽은 지라 요약으로.
+  const rows = readJson(path.join(server.home, '.report-drafts.json')).weeks['2026-09-14'].rows;
+  const r1 = rows.find(row => row.id === 'r1');
+  assert.equal(r1.group, 'IO-48501 · 결제 리뉴얼 v2');
+  assert.equal(r1.bucket, 'jira:IO-48501:완료한 일:정산 배치');
+  assert.equal(r1.evidence[0].label, 'IO-48501 · 결제 리뉴얼 v2');
+  assert.equal(r1.text, '정산 배치 설계 검토함', '보고 문장은 손대지 않는다');
+  const r2 = rows.find(row => row.id === 'r2');
+  assert.deepEqual([r2.group, r2.bucket], ['운영툴', 'group:운영툴:진행중:운영툴 대시보드']);
+
+  // ⑥ 이동 기록은 저장은 되지만 화면(snapshot)에는 내려보내지 않는다.
+  assert.ok(Array.isArray(workflow.projectMoves) && workflow.projectMoves.length === 1);
+  const record = workflow.projectMoves[0];
+  assert.equal(record.id, answer.moveId);
+  assert.equal(record.from, '결제 리뉴얼');
+  assert.equal(record.to, 'IO-48501');
+  assert.deepEqual([...record.items].sort(), ['mv01', 'mv02', 'mv04', 'mv05', 'mv07']);
+  assert.deepEqual(record.meetings, ['m1']);
+  assert.deepEqual(record.links, { '결제 리뉴얼': 'IO-1111' });
+  assert.deepEqual(record.meetingLinks, ['결제 주간 싱크']);
+  assert.deepEqual(record.reportRows, ['r1']);
+
+  // 그룹은 항목이 하나도 안 남아 화면 목록에서 저절로 사라진다.
+  const data = await (await fetch(server.origin + '/api/items')).json();
+  assert.ok(!data.customGroups.includes('결제 리뉴얼') && data.customGroups.includes('운영툴'));
+  assert.equal(data.workflows.projectMoves, undefined, '이동 기록은 화면에 내려보내지 않는다');
+});
+
+test('BMOVE: 한 자리라도 실패하면 전부 되돌아간다 — 업무 파일까지 쓴 뒤 되돌린 것이다', async (t) => {
+  const server = await startMoveJiraServer(t, home => seedMove(home, { schema: 2, weeks: {} }));
+  const files = ['tasks.md', 'checks.md', 'decisions.md', 'ideas.md', '.workflow.json', '.meeting_links.json', '.report-drafts.json'];
+  const before = files.map(name => fs.readFileSync(path.join(server.home, name), 'utf8'));
+
+  const failed = await movePost(server.origin, { project: 'group:결제 리뉴얼', to: 'IO-48501' });
+  assert.equal(failed.status, 400);
+  assert.match(failed.error, /보고 기록 형식을 확인해 주세요/);
+  assert.deepEqual(files.map(name => fs.readFileSync(path.join(server.home, name), 'utf8')), before);
+
+  assert.equal((await (await fetch(server.origin + '/api/storage-status')).json()).recoveryNeeded, false, '되돌리기가 받아들여져 저장은 잠기지 않는다');
+  fs.writeFileSync(path.join(server.home, '.report-drafts.json'), JSON.stringify(MOVE_REPORT, null, 2));
+  assert.equal((await movePost(server.origin, { project: 'group:결제 리뉴얼', to: 'IO-48501' })).ok, true, '형식을 고친 뒤에는 통한다');
+});
+
+test('BMOVE: 복구가 필요한 동안에는 옮기지 않는다', async (t) => {
+  const server = await startMoveJiraServer(t, (home) => {
+    seedMove(home);
+    fs.writeFileSync(path.join(home, '.mutation-journal.json'), journalEntry(path.join(home, 'tasks.md'), '# Tasks\n', '# Tasks\n- 중단된 저장\n'));
+    fs.writeFileSync(path.join(home, '.mutation.lock'), String(deadPid()));
+  }, { direct: true });
+  const blocked = await movePost(server.origin, { project: 'group:결제 리뉴얼', to: 'IO-48501' });
+  assert.equal(blocked.status, 503);
+  assert.match(blocked.error, /저장을 멈췄어요/);
+  assert.match(fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8'), /group:결제_리뉴얼\]/);
+});
+
+test('BMOVE: 이동 기록은 최근 20개만 남긴다', async (t) => {
+  const server = await startMoveJiraServer(t, (home) => {
+    seedMove(home);
+    const workflow = readJson(path.join(home, '.workflow.json'));
+    workflow.projectMoves = Array.from({ length: 20 }, (unused, index) => ({ id: `mv_old${index}`, from: `옛 프로젝트${index}`, to: 'IO-0', at: '2026-09-01T00:00:00.000Z', items: [], meetings: [], links: null, meetingLinks: [], reportRows: [], reportLabel: 'IO-0', counts: { items: 0, meetings: 0, report: 0 } }));
+    fs.writeFileSync(path.join(home, '.workflow.json'), JSON.stringify(workflow, null, 2));
+  });
+  const answer = await movePost(server.origin, { project: 'group:결제 리뉴얼', to: 'IO-48501' });
+  assert.equal(answer.ok, true);
+  const moves = readJson(path.join(server.home, '.workflow.json')).projectMoves;
+  assert.equal(moves.length, 20, '가장 오래된 기록을 밀어내고 20개만 유지한다');
+  assert.equal(moves[0].id, 'mv_old1', '가장 오래된 것(mv_old0)이 밀려난다');
+  assert.equal(moves[19].id, answer.moveId);
+});
+
+test('BMOVE: 되돌리기는 기록에 있는 그 대상만 반대로 옮기고, 한 번만 된다', async (t) => {
+  const server = await startMoveJiraServer(t, seedMove);
+  const files = ['tasks.md', 'checks.md', 'decisions.md', 'ideas.md', '.meeting_links.json', '.report-drafts.json'];
+  const before = files.map(name => fs.readFileSync(path.join(server.home, name), 'utf8'));
+  const workflowBefore = readJson(path.join(server.home, '.workflow.json'));
+
+  const moved = await movePost(server.origin, { project: 'group:결제 리뉴얼', to: 'IO-48501' });
+  assert.equal(moved.ok, true);
+  const undone = await moveUndoPost(server.origin, { moveId: moved.moveId });
+  assert.equal(undone.status, 200);
+  assert.deepEqual(undone, { status: 200, ok: true, project: 'group:결제 리뉴얼', restored: { items: 5, meetings: 2, report: 1 }, skipped: 0 });
+  assert.deepEqual(files.map(name => fs.readFileSync(path.join(server.home, name), 'utf8')), before, '옮기기 전과 글자 하나까지 같다');
+  // .workflow.json은 meetings·projectLinks가 옮기기 전과 같다 — 이동 기록(`projectMoves`)만 빈 배열로
+  // 남는다(비운 기록도 한 번 만들어진 칸은 다른 표(반응 필요 치우기 등)처럼 지우지 않고 둔다).
+  const workflowAfter = readJson(path.join(server.home, '.workflow.json'));
+  assert.deepEqual(workflowAfter.meetings, workflowBefore.meetings);
+  assert.deepEqual(workflowAfter.projectLinks, workflowBefore.projectLinks);
+  assert.deepEqual(workflowAfter.projectMoves, []);
+
+  // 한 번 되돌리면 기록이 지워져 다시는 되돌릴 수 없다.
+  const again = await moveUndoPost(server.origin, { moveId: moved.moveId });
+  assert.equal(again.status, 400);
+  assert.match(again.error, /되돌릴 기록이 없어요/);
+  const missing = await moveUndoPost(server.origin, { moveId: 'mv_없는것' });
+  assert.equal(missing.status, 400);
+  assert.match(missing.error, /되돌릴 기록이 없어요/);
+});
+
+test('BMOVE: 옮긴 뒤 그 에픽에 새로 생긴 항목·다시 바뀐 회의는 되돌리기가 건드리지 않는다', async (t) => {
+  const server = await startMoveJiraServer(t, seedMove);
+  const moved = await movePost(server.origin, { project: 'group:결제 리뉴얼', to: 'IO-48501' });
+  assert.equal(moved.ok, true);
+
+  // 이 에픽에 새로 생긴 항목 — 이동 기록에는 없는 id다.
+  const created = await fetch(server.origin + '/api/today-task/create', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ description: '옮긴 뒤 새로 생긴 일', jira: 'IO-48501' }),
+  }).then(r => r.json());
+  assert.equal(created.ok, true);
+
+  // 회의 m1은 옮긴 뒤 이미 다른 지라 키로 다시 바뀌었다고 가정한다(그 사이 사람이 손으로 바꿈).
+  const workflow = readJson(path.join(server.home, '.workflow.json'));
+  workflow.meetings.m1.project = { type: 'jira', value: 'IO-9002', label: 'IO-9002' };
+  fs.writeFileSync(path.join(server.home, '.workflow.json'), JSON.stringify(workflow, null, 2));
+
+  const undone = await moveUndoPost(server.origin, { moveId: moved.moveId });
+  assert.equal(undone.ok, true);
+  assert.equal(undone.restored.items, 5, '기록에 있던 항목은 그대로 되돌아간다');
+  assert.equal(undone.restored.meetings, 1, 'm1은 건너뛰고 회의 제목 표(m1 아닌 결제 주간 싱크)만 돌아간다');
+  assert.equal(undone.skipped, 1, 'm1 하나는 건너뛴다');
+
+  // 새로 생긴 항목은 그대로 지라에 남는다.
+  const data = await (await fetch(server.origin + '/api/items')).json();
+  const survivor = [...data.todayTasks, ...data.laterTasks].find(item => item.id === created.id);
+  assert.equal(survivor.jira, 'IO-48501');
+  // m1은 사람이 다시 바꾼 값(IO-9002) 그대로 남는다 — undo가 덮어쓰지 않는다.
+  assert.deepEqual(readJson(path.join(server.home, '.workflow.json')).meetings.m1.project, { type: 'jira', value: 'IO-9002', label: 'IO-9002' });
+});
+
 // ---------- 지라에 새로 만들기 (BJCREATE — 지라에 이슈를 만든다) ----------
 // 여기서도 실제 지라에는 절대 닿지 않는다: 모든 요청은 가짜 fetch가 받아 기록만 한다.
 // `무엇이 만들어졌는가`는 기록된 method·본문으로 판정한다(GET만 나갔으면 아무것도 만들지 않은 것이다).

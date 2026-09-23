@@ -226,6 +226,9 @@ const JIRA_OPTIONS_MS = 30 * 1000;
 let jiraOptions = { key: null, at: 0, transitions: [], versions: [] };
 let jiraBusy = false;
 let jiraConfirm = null;
+// 옮기기(BMOVE) 확인 줄 — 띠 카드 ⋯의 `IO-123으로 옮기기…`를 눌렀을 때만 값이 있다.
+// `{ projectKey, key, busy }` — 지라에는 아무것도 쓰지 않으므로 jiraBusy(위 세 고르개용)와는 따로 잠근다.
+let jiraStripMoveConfirm = null;
 
 const jiraOpen = (url) => { if (typeof window !== 'undefined' && typeof window.open === 'function') window.open(url, '_blank', 'noopener'); };
 
@@ -566,11 +569,13 @@ function jiraStripCard(issue, projectKey = '') {
   refresh.addEventListener('click', () => jiraCardLoad(issue.key, { fresh: true }));
   top.append(tag, name, sub, spacer, link, refresh);
   // 손으로 건 연결을 푸는 자리는 여기 하나다. `jira:KEY` 프로젝트의 카드에는 ⋯가 없다 —
-  // 그 카드는 프로젝트가 곧 티켓이라 풀 연결이 아니다.
+  // 그 카드는 프로젝트가 곧 티켓이라 풀 연결이 아니다. 에픽이면 옮기기(BMOVE)도 같은 메뉴에 선다.
   if (typeof projectKey === 'string' && projectKey.startsWith('group:')) {
-    const more = uiMoreButton('지라 연결 — 더 보기', () => [[
-      { label: '지라 연결 해제', onClick: () => jiraLinkRemove(projectKey, issue.key) },
-    ]]);
+    const menuItems = [{ label: '지라 연결 해제', onClick: () => jiraLinkRemove(projectKey, issue.key) }];
+    if (issue.type === '에픽') {
+      menuItems.push({ label: `${issue.key}으로 옮기기…`, onClick: () => { jiraStripMoveConfirm = { projectKey, key: issue.key, busy: false }; jiraStripPaint(); } });
+    }
+    const more = uiMoreButton('지라 연결 — 더 보기', () => [menuItems]);
     if (jiraBusy) more.disabled = true;
     top.appendChild(more);
   }
@@ -594,6 +599,14 @@ function jiraStripCard(issue, projectKey = '') {
 
   // 확인 줄은 값 칸 바로 아래에 선다 — 무엇을 바꾸는지와 가장 가까운 자리다.
   if (jiraConfirm && jiraConfirm.key === issue.key) card.appendChild(jiraConfirmRow(issue, jiraConfirm));
+  // 옮기기(BMOVE) 확인 줄 — ⋯의 `IO-123으로 옮기기…`를 눌렀을 때만 선다.
+  if (jiraStripMoveConfirm && jiraStripMoveConfirm.key === issue.key && jiraStripMoveConfirm.projectKey === projectKey) {
+    card.appendChild(wfMoveConfirmNode(projectKey.slice('group:'.length), issue.key, {
+      busy: jiraStripMoveConfirm.busy,
+      onCancel: () => { jiraStripMoveConfirm = null; jiraStripPaint(); },
+      onConfirm: () => jiraStripMoveRun(projectKey, issue.key),
+    }));
+  }
 
   const children = jiraChildrenLabel(issue.children);
   if (children) {
@@ -816,10 +829,29 @@ async function jiraCardLoad(key, { fresh = false, quiet = false } = {}) {
 function jiraCardEnsure(key) {
   // 다른 프로젝트로 옮기면 거르기는 푼다(펼침만 기억한다). 2단계의 조용한 재조회(`quiet`)나
   // 쓰기 뒤의 `fresh` 재조회에서는 여기를 지나지 않으므로 펼침·거르기가 그대로 남는다.
-  if (jiraCard.key !== key) { jiraConfirmClose(false); jiraChildPick = null; jiraChildDoneOpen = false; jiraCardLoad(key); return; }
+  if (jiraCard.key !== key) { jiraConfirmClose(false); jiraChildPick = null; jiraChildDoneOpen = false; jiraStripMoveConfirm = null; jiraCardLoad(key); return; }
   // 확인 줄이 떠 있거나 쓰는 중이면 뒤에서 값을 갈아 끼우지 않는다(무엇을 확인 중인지가 바뀌면 안 된다).
-  if (jiraBusy || jiraConfirm) return;
+  if (jiraBusy || jiraConfirm || jiraStripMoveConfirm) return;
   if (jiraCard.state === 'ok' && Date.now() - jiraCard.at > JIRA_REFRESH_MS) jiraCardLoad(key, { quiet: true });
+}
+
+// 옮기기(BMOVE)가 나가는 단 하나의 길 — 띠 카드 ⋯의 확인 줄에서만 부른다. 데이터가 아직 보이는
+// 동안에는(카드가 열려 있어도) 값을 갈아 끼우지 않게 jiraCardEnsure가 이 값이 있는 동안 막아 준다.
+async function jiraStripMoveRun(projectKey, jiraKey) {
+  if (!jiraStripMoveConfirm || jiraStripMoveConfirm.busy) return;
+  jiraStripMoveConfirm = { ...jiraStripMoveConfirm, busy: true };
+  jiraStripPaint();
+  let result;
+  try {
+    result = await wfProjectMoveSend(projectKey.slice('group:'.length), jiraKey);
+  } catch {
+    if (!jiraStripMoveConfirm) return;
+    jiraStripMoveConfirm = { ...jiraStripMoveConfirm, busy: false };
+    jiraStripPaint();
+    return;
+  }
+  jiraStripMoveConfirm = null;
+  await wfProjectMoveFinish(result);
 }
 
 // ---------- 직접 만든(그룹) 프로젝트에 지라 티켓 연결 (BJLINK) ----------
@@ -854,7 +886,8 @@ function jiraLiveNote(sync, at = Date.now()) {
 // 지라 직접 읽기 설정이 있는지와 그 주소 — 목록과 함께 온다(`jiraSync`). 토큰·이메일은 오지 않는다.
 const jiraLinkUsable = () => !!(latestData && latestData.jiraSync && latestData.jiraSync.connected);
 const jiraLinkSite = () => (latestData && latestData.jiraSync && latestData.jiraSync.siteUrl) || '';
-const jiraLinkIdle = project => ({ project, state: 'idle', query: '', error: '', issue: null, busy: false, onEsc: null, done: null, doneBusy: false, doneError: '' });
+// moveConfirm·moveBusy는 옮기기(BMOVE) 확인 줄 — 미리 보기에서 `이 에픽으로 옮기기`를 눌렀을 때만 쓴다.
+const jiraLinkIdle = project => ({ project, state: 'idle', query: '', error: '', issue: null, busy: false, onEsc: null, done: null, doneBusy: false, doneError: '', moveConfirm: false, moveBusy: false });
 
 // 번호(`io-12345`처럼 소문자로 적어도 된다)나 지라 주소 하나에서 키를 뽑는다.
 // 주소일 때만 호스트를 견준다 — 다른 지라의 주소는 받지 않는다(엉뚱한 티켓에 걸리지 않게).
@@ -1073,6 +1106,17 @@ function jiraLinkPreview(box, projectKey, issue) {
     note.textContent = `다른 프로젝트 '${other}'에도 연결돼 있어요`;
     box.appendChild(note);
   }
+  // 옮기기(BMOVE)는 빌려 쓰는 화면(새 프로젝트)에는 없다 — 거기서는 아직 만들지 않은 프로젝트라
+  // 옮길 대상이 없다. 고른 티켓이 에픽일 때만 `이 에픽으로 옮기기`가 보인다.
+  const isEpic = issue.type === '에픽';
+  if (!jiraLinkPick && isEpic && jiraLink.moveConfirm) {
+    box.appendChild(wfMoveConfirmNode(projectKey.slice('group:'.length), issue.key, {
+      busy: jiraLink.moveBusy,
+      onCancel: () => { jiraLink = { ...jiraLink, moveConfirm: false }; jiraLinkPaint(); },
+      onConfirm: () => jiraLinkMoveRun(projectKey, issue.key),
+    }));
+    return;
+  }
   const acts = document.createElement('div');
   acts.className = 'acts';
   const back = document.createElement('button');
@@ -1084,10 +1128,37 @@ function jiraLinkPreview(box, projectKey, issue) {
   go.type = 'button';
   go.className = 'd-btn sm acc';
   // 빌려 쓰는 화면(새 프로젝트)에서는 저장하지 않고 고른 티켓만 넘긴다 — 지라에도 앱에도 쓰지 않는다.
-  go.textContent = jiraLinkPick ? jiraLinkPick.label : '연결';
+  // 옮기기 버튼이 함께 있을 때는 `연결`을 `연결만`으로 불러 옮기기와 헷갈리지 않게 한다.
+  go.textContent = jiraLinkPick ? jiraLinkPick.label : (!jiraLinkPick && isEpic ? '연결만' : '연결');
   go.addEventListener('click', () => (jiraLinkPick ? jiraLinkPick.onPick(issue) : jiraLinkConnect(projectKey, issue, go, back)));
   acts.append(back, go);
+  if (!jiraLinkPick && isEpic) {
+    const move = document.createElement('button');
+    move.type = 'button';
+    move.className = 'd-btn sm';
+    move.textContent = '이 에픽으로 옮기기';
+    move.addEventListener('click', () => { jiraLink = { ...jiraLink, moveConfirm: true }; jiraLinkPaint(); });
+    acts.appendChild(move);
+  }
   box.appendChild(acts);
+}
+
+// 옮기기(BMOVE)가 나가는 단 하나의 길 — 미리 보기의 확인 줄에서만 부른다.
+async function jiraLinkMoveRun(projectKey, jiraKey) {
+  if (jiraLink.moveBusy) return;
+  jiraLink = { ...jiraLink, moveBusy: true };
+  jiraLinkPaint();
+  let result;
+  try {
+    result = await wfProjectMoveSend(projectKey.slice('group:'.length), jiraKey);
+  } catch {
+    if (jiraLink.project !== projectKey) return;
+    jiraLink = { ...jiraLink, moveBusy: false };
+    jiraLinkPaint();
+    return;
+  }
+  jiraLinkReset(false);
+  await wfProjectMoveFinish(result);
 }
 
 // 티켓을 읽어 미리 보기로 넘어간다. 여기서는 읽기만 한다(아무것도 저장하지 않는다).

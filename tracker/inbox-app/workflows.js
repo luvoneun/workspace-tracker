@@ -119,6 +119,95 @@ function wfSearchMatches(query, values) {
   const haystack = values.filter(Boolean).join(' ').normalize('NFKC').toLocaleLowerCase();
   return query.normalize('NFKC').toLocaleLowerCase().trim().split(/\s+/).every(word => haystack.includes(word));
 }
+
+// ---------- BMOVE: 직접 만든 프로젝트 → 지라 에픽으로 옮기기 ----------
+// 서버 groupNameKey와 같은 규칙(밑줄→공백·연속 공백 정리·대소문자 무시)이다 — "같은 이름"인지
+// 여기서도 같은 잣대로 본다(새 프로젝트의 감지 줄·빈 에픽 제안 줄이 함께 쓴다).
+const wfGroupNameKey = value => String(value || '').replace(/_/g, ' ').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+// 별칭이 그룹 이름과 같으면 그 에픽을 짝으로 본다(BJALIAS) — uiGroupLabel이 별칭을 이미 입혀 준다.
+const wfGroupMatchesJira = (groupName, jiraKey) =>
+  wfGroupNameKey(typeof uiGroupLabel === 'function' ? uiGroupLabel(`jira:${jiraKey}`) : jiraKey) === wfGroupNameKey(groupName);
+
+// 그 그룹이 가진 항목·회의·주간요약 문장 수 — 확인 줄의 숫자다(화면이 가진 값으로만 센다).
+// 주간요약은 이번 주(배열 첫 자리, weeks()가 늘 currentWeek()을 포함해 내림차순으로 정렬해 준다)만 본다.
+function wfProjectMoveCounts(groupName) {
+  const key = `group:${groupName}`;
+  const items = workflowData.items.filter(item => wfKey(item) === key).length;
+  const meetings = workflowData.meetings.filter(event => wfMeetingKey(event) === key).length;
+  const week = (typeof latestData === 'object' && latestData && Array.isArray(latestData.weeklyReports)) ? latestData.weeklyReports[0] : null;
+  const head = `group:${groupName}:`;
+  const report = week && week.draft && Array.isArray(week.draft.rows)
+    ? week.draft.rows.filter(row => typeof row.bucket === 'string' && row.bucket.startsWith(head)).length
+    : 0;
+  return { items, meetings, report };
+}
+// 확인 줄 문구 — 숫자가 없는 조각은 생략한다.
+function wfProjectMoveAskText(groupName, jiraKey, counts) {
+  const parts = [];
+  if (counts.items) parts.push(`항목 ${counts.items}`);
+  if (counts.meetings) parts.push(`회의 ${counts.meetings}`);
+  if (counts.report) parts.push(`주간요약 문장 ${counts.report}`);
+  const subject = parts.length ? `${groupName}의 ${parts.join(' · ')}를` : groupName;
+  return `${subject} ${jiraKey}로 옮길까요? 옮기면 ${groupName} 프로젝트는 목록에서 사라져요(기록은 전부 에픽에 남아요).`;
+}
+// 확인 줄 부품 — 새 프로젝트 화면의 확인 줄(.d-jconfirm)과 같은 모양이다. 세 자리(③ 지라 연결
+// 미리 보기 · ③ 띠 카드 ⋯ · ② 빈 에픽 제안 줄)가 이 하나를 함께 쓴다.
+function wfMoveConfirmNode(groupName, jiraKey, { busy = false, onCancel, onConfirm } = {}) {
+  const counts = wfProjectMoveCounts(groupName);
+  const confirm = document.createElement('div');
+  confirm.className = 'd-jconfirm';
+  confirm.setAttribute('tabindex', '-1');
+  confirm.setAttribute('role', 'group');
+  const ask = document.createElement('div');
+  ask.className = 'ask';
+  ask.textContent = wfProjectMoveAskText(groupName, jiraKey, counts);
+  const acts = document.createElement('div');
+  acts.className = 'acts';
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'd-btn sm';
+  cancel.textContent = '취소';
+  cancel.disabled = busy;
+  cancel.addEventListener('click', onCancel);
+  const go = document.createElement('button');
+  go.type = 'button';
+  go.className = 'd-btn sm acc';
+  go.textContent = busy ? '옮기는 중…' : '옮기기';
+  go.disabled = busy;
+  go.addEventListener('click', onConfirm);
+  acts.append(cancel, go);
+  confirm.append(ask, acts);
+  return confirm;
+}
+// 옮기기가 나가는 단 하나의 길. 지라에는 아무것도 쓰지 않고(읽기만 확인한다) 앱 파일만 바뀐다.
+async function wfProjectMoveSend(groupName, jiraKey) {
+  const response = await request('/api/project/move', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project: `group:${groupName}`, to: jiraKey }),
+  });
+  return response.json();
+}
+// 성공 뒤 공통 동작 — 데이터를 먼저 새로 받고 그다음 에픽 프로젝트를 연다(순서 규칙). 되돌리기는
+// 알림의 이 버튼 하나뿐이고(화면에 따로 표시하지 않는다) 앱의 ⌘Z 대상이 아니다(이름 바꾸기와 같은 태도).
+async function wfProjectMoveFinish(result) {
+  await load();
+  openProjectTab(result.project);
+  showNotice(`${result.to}로 옮겼어요 · 항목 ${result.changed.items}`, false, null, {
+    label: '되돌리기',
+    onClick: async (button) => {
+      if (button) button.disabled = true;
+      let undone;
+      try {
+        const response = await request('/api/project/move-undo', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ moveId: result.moveId }),
+        });
+        undone = await response.json();
+      } catch { return; }
+      await load();
+      openProjectTab(undone.project);
+      showNotice(`${result.from} 프로젝트로 되돌렸어요` + (undone.skipped ? ` · 그 사이 바뀐 ${undone.skipped}개는 그대로 두었어요` : ''));
+    },
+  });
+}
 // 행 오른쪽의 상태 칩: 지금 손댈 것(검토할 초안)을 가장 눈에 띄게, 0인 숫자는 보이지 않게.
 function wfMeetingChips(event) {
   const items = wfMeetingItems(event.id);

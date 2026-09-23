@@ -733,6 +733,65 @@ function projectSimpleRow(text, meta, onOpen, id, menuSections, makeCheck, sourc
   return row;
 }
 
+// ---------- 빈 에픽에 그룹 프로젝트 옮기기 제안 (BMOVE ②) ----------
+// 동기화로 막 긁어온(또는 앱에서 막 만든) 빈 에픽을 열었는데 같은 이름의 그룹 프로젝트가 있으면
+// 한 번 묻는다. 앱이 짝을 추측해 자동으로 옮기지는 않는다 — 사람이 눌러야만 옮겨진다.
+const PROJECT_MOVE_DISMISS_KEY = 'projectMoveDismissed';
+function projectMoveDismissedRead() {
+  try { return JSON.parse(localStorage.getItem(PROJECT_MOVE_DISMISS_KEY) || '{}'); } catch { return {}; }
+}
+function projectMoveDismiss(jiraKey, groupName) {
+  const table = projectMoveDismissedRead();
+  table[jiraKey] = groupName;
+  try { localStorage.setItem(PROJECT_MOVE_DISMISS_KEY, JSON.stringify(table)); } catch {}
+}
+// 이 지라 키와 이름이 같은 그룹 프로젝트를 찾는다(wfGroupNameKey 규칙 — 별칭도 함께 본다). 없으면 null.
+function projectMoveCandidateGroup(jiraKey) {
+  const match = wfProjects().find(([key]) => key.startsWith('group:') && wfGroupMatchesJira(key.slice('group:'.length), jiraKey));
+  return match ? match[0].slice('group:'.length) : null;
+}
+// 확인 줄이 떠 있는 동안만 값이 있다 — 프로젝트를 옮기면(또는 탭을 벗어나면) 지운다.
+let projectMoveSuggestConfirm = null; // { jiraKey, groupName, busy }
+function projectMoveSuggestNode(groupName, jiraKey) {
+  if (projectMoveSuggestConfirm && projectMoveSuggestConfirm.jiraKey === jiraKey) {
+    return wfMoveConfirmNode(groupName, jiraKey, {
+      busy: projectMoveSuggestConfirm.busy,
+      onCancel: () => { projectMoveSuggestConfirm = null; renderProjects(); },
+      onConfirm: () => projectMoveSuggestRun(groupName, jiraKey),
+    });
+  }
+  const line = document.createElement('div');
+  line.className = 'd-jline';
+  const words = document.createElement('span');
+  words.textContent = `${groupName} 프로젝트의 항목 ${wfProjectMoveCounts(groupName).items}개를 여기로 옮길까요?`;
+  const sep1 = document.createElement('span'); sep1.className = 'sep'; sep1.textContent = '·';
+  const move = document.createElement('button');
+  move.type = 'button'; move.className = 'd-link'; move.textContent = '옮기기';
+  move.addEventListener('click', () => { projectMoveSuggestConfirm = { jiraKey, groupName, busy: false }; renderProjects(); });
+  const sep2 = document.createElement('span'); sep2.className = 'sep'; sep2.textContent = '·';
+  const no = document.createElement('button');
+  no.type = 'button'; no.className = 'd-link'; no.textContent = '아니요';
+  no.addEventListener('click', () => { projectMoveDismiss(jiraKey, groupName); renderProjects(); });
+  line.append(words, sep1, move, sep2, no);
+  return line;
+}
+async function projectMoveSuggestRun(groupName, jiraKey) {
+  if (!projectMoveSuggestConfirm || projectMoveSuggestConfirm.busy) return;
+  projectMoveSuggestConfirm = { ...projectMoveSuggestConfirm, busy: true };
+  renderProjects();
+  let result;
+  try {
+    result = await wfProjectMoveSend(groupName, jiraKey);
+  } catch {
+    if (!projectMoveSuggestConfirm) return;
+    projectMoveSuggestConfirm = { ...projectMoveSuggestConfirm, busy: false };
+    renderProjects();
+    return;
+  }
+  projectMoveSuggestConfirm = null;
+  await wfProjectMoveFinish(result);
+}
+
 function renderProjectDetail(body, row) {
   body.replaceChildren();
   if (!row) {
@@ -793,6 +852,18 @@ function renderProjectDetail(body, row) {
     body.appendChild(host);
     jiraLinkEnsure(row.key);
     jiraLinkPaint();
+  }
+
+  // 동기화로 막 긁어온(또는 앱에서 막 만든) 빈 에픽 — 같은 이름의 그룹 프로젝트가 있으면 한 번 묻는다(BMOVE ②).
+  // renderProjects()는 왼쪽 목록과 함께 "지금 보는 프로젝트"도 다시 그리는데, 그 프로젝트가 이 지라
+  // 키가 아닐 수도 있다(예: 옮기기 확인 줄의 `옮기기`를 누른 뒤 목록이 다시 계산되며 차례가 바뀌는
+  // 동안) — 그런 무관한 그리기에 휩쓸려 이 값을 지우지 않도록, 지울 때도 반드시 **같은 지라 키**를
+  // 보고 있을 때만(후보가 사라졌을 때만) 지운다.
+  const moveCandidate = key.startsWith('jira:') && !items.length && jiraUsed() ? projectMoveCandidateGroup(jiraKey) : null;
+  if (moveCandidate && projectMoveDismissedRead()[jiraKey] !== moveCandidate) {
+    body.appendChild(projectMoveSuggestNode(moveCandidate, jiraKey));
+  } else if (key.startsWith('jira:') && projectMoveSuggestConfirm && projectMoveSuggestConfirm.jiraKey === jiraKey) {
+    projectMoveSuggestConfirm = null;
   }
 
   const tasks = items.filter(item => ['task', 'bug'].includes(item.type));

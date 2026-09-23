@@ -4312,7 +4312,8 @@ test('BJLINK: 미리 보기를 거치기 전에는 `연결` 요청이 나가지 
   // 지라가 준 글자는 전부 textContent로만 들어간다(새 innerHTML을 쓰지 않는다).
   assert.doesNotMatch(nodeHtml(preview), /게시글 작성하기|진행 중/);
 
-  const connect = (preview.children.find(kid => kid.className === 'acts').children || []).find(kid => kid.textContent === '연결');
+  // 고른 티켓이 에픽이라(BMOVE) 옮기기 버튼도 함께 있고, `연결`은 `연결만`으로 불린다.
+  const connect = (preview.children.find(kid => kid.className === 'acts').children || []).find(kid => kid.textContent === '연결만');
   await connect.listeners.click();
   assert.deepEqual(fixture.posts().map(call => [call.url, call.body]), [
     ['/api/project/jira-link', { project: 'group:가입 개선', jira: 'IO-12345' }],
@@ -4352,7 +4353,8 @@ test('BJLINK: 이미 다른 프로젝트에 걸린 티켓도 막지 않고 조�
   await fixture.app.run("jiraLinkFind('group:가입 개선', 'IO-48394')");
   assert.match(nodeText(fixture.node()), /다른 프로젝트 '운영툴'에도 연결돼 있어요/);
   const acts = fixture.node().children.find(kid => kid.className === 'acts');
-  assert.deepEqual(acts.children.map(kid => kid.textContent), ['취소', '연결'], '막지 않는다 — `연결`이 그대로 있다');
+  // 고른 티켓이 에픽이라(BMOVE) 옮기기 버튼도 함께 있다 — 막지 않는다는 뜻은 `연결만`이 그대로 있다는 것.
+  assert.deepEqual(acts.children.map(kid => kid.textContent), ['취소', '연결만', '이 에픽으로 옮기기'], '막지 않는다 — `연결만`이 그대로 있다');
 });
 
 test('BJLINK: 띠 카드의 ⋯은 손으로 건 그룹 프로젝트에만 있고, 해제는 알림의 `되돌리기`로 되돌린다', async () => {
@@ -4367,7 +4369,8 @@ test('BJLINK: 띠 카드의 ⋯은 손으로 건 그룹 프로젝트에만 있�
   assert.equal(more.getAttribute('aria-label'), '지라 연결 — 더 보기');
   more.listeners.click({ stopPropagation() {} });
   const menu = JSON.parse(fixture.app.run("JSON.stringify(lastMenu.flat().map(one => one.label))"));
-  assert.deepEqual(menu, ['지라 연결 해제']);
+  // 고른 티켓이 에픽이라(BMOVE) 옮기기 항목도 같은 메뉴에 선다.
+  assert.deepEqual(menu, ['지라 연결 해제', 'IO-48394으로 옮기기…']);
 
   await fixture.app.run("lastMenu[0][0].onClick()");
   assert.deepEqual(fixture.posts().map(call => call.body), [{ project: 'group:운영툴', jira: null }]);
@@ -4394,6 +4397,149 @@ test('BJLINK: 연결해도 다른 화면의 프로젝트 이름·키 표기는 �
   ])`));
   assert.deepEqual(names(after.app), names(before.app));
   assert.deepEqual(names(after.app), ['운영툴', '운영툴', '운영툴', '운영툴', '운영툴'], '어느 자리에도 키가 새로 나오지 않는다');
+});
+
+// ---------- BMOVE: 직접 만든 프로젝트 → 지라 에픽으로 옮기기 ----------
+// 실제 지라는 부르지 않는다. `/api/jira/issue`·`/api/project/move`·`/api/project/move-undo`는 전부 가짜 fetch다.
+function bmoveClient({ issue = jiraIssue(), moveAnswer = null, undoAnswer = null } = {}) {
+  const fixture = jiraLinkClient({ issue });
+  const calls = fixture.calls;
+  const baseFetch = fixture.app.context.fetch;
+  fixture.app.context.fetch = async (url, options) => {
+    const method = (options && options.method) || 'GET';
+    if (String(url).includes('/api/project/move-undo')) {
+      calls.push({ url: String(url), method, body: options && options.body ? JSON.parse(options.body) : null });
+      return new Response(JSON.stringify(undoAnswer || {
+        ok: true, project: 'group:결제 리뉴얼', restored: { items: 2, meetings: 1, report: 1 }, skipped: 0,
+      }));
+    }
+    if (String(url).includes('/api/project/move')) {
+      calls.push({ url: String(url), method, body: options && options.body ? JSON.parse(options.body) : null });
+      return new Response(JSON.stringify(moveAnswer || {
+        ok: true, project: 'jira:IO-48501', from: '결제 리뉴얼', to: 'IO-48501', moveId: 'mv_1',
+        changed: { items: 2, meetings: 1, links: 0, report: 1 },
+      }));
+    }
+    return baseFetch(url, options);
+  };
+  // 항목 2 · 회의 1 · 주간요약 문장 1 — 확인 줄 숫자가 이 값과 같은지를 본다.
+  fixture.app.run(`workflowData = { items: [
+    { id: 'a1', type: 'task', status: 'to-do', group: '결제 리뉴얼' },
+    { id: 'a2', type: 'check', status: 'to-do', group: '결제 리뉴얼' },
+    { id: 'a3', type: 'task', status: 'to-do', group: '운영툴' },
+  ], meetings: [
+    { id: 'm1', title: '결제 주간 싱크', project: { type: 'group', value: '결제 리뉴얼', label: '결제 리뉴얼' } },
+  ], projectLinks: {} }; wfIndexData(); itemsById = new Map();`);
+  fixture.app.run(`latestData = { jiraSync: { used: true, connected: true, siteUrl: 'https://example-jira.test' }, weeklyReports: [
+    { weekKey: '2026-09-14', draft: { rows: [
+      { id: 'r1', bucket: 'group:결제 리뉴얼:완료한 일:정산 배치', group: '결제 리뉴얼' },
+      { id: 'r2', bucket: 'group:운영툴:진행중:운영', group: '운영툴' },
+    ] } },
+  ] };`);
+  fixture.app.run('opened = null; openProjectTab = key => { opened = key; };');
+  fixture.app.run('loads = 0; load = async () => { loads += 1; };');
+  return { ...fixture, opened: () => fixture.app.run('opened'), loads: () => fixture.app.run('loads') };
+}
+
+test('BMOVE ③: 고른 티켓이 에픽일 때만 `이 에픽으로 옮기기`가 보이고, 확인 줄 숫자는 화면이 가진 값이다', async () => {
+  const fixture = bmoveClient();
+  fixture.open('group:결제 리뉴얼');
+  await fixture.app.run("jiraLinkFind('group:결제 리뉴얼', 'IO-48501')");
+  const acts = fixture.node().children.find(kid => kid.className === 'acts');
+  assert.deepEqual(acts.children.map(kid => kid.textContent), ['취소', '연결만', '이 에픽으로 옮기기']);
+  const move = acts.children.find(kid => kid.textContent === '이 에픽으로 옮기기');
+  move.listeners.click();
+  const confirm = fixture.node().children.find(kid => kid.className === 'd-jconfirm');
+  assert.equal(confirm.children[0].textContent,
+    '결제 리뉴얼의 항목 2 · 회의 1 · 주간요약 문장 1를 IO-48501로 옮길까요? 옮기면 결제 리뉴얼 프로젝트는 목록에서 사라져요(기록은 전부 에픽에 남아요).');
+});
+
+test('BMOVE ③: 에픽이 아니면 옮기기 버튼이 없다 — `연결`만 그대로다', async () => {
+  const fixture = bmoveClient({ issue: jiraIssue({ type: '스토리' }) });
+  fixture.open('group:결제 리뉴얼');
+  await fixture.app.run("jiraLinkFind('group:결제 리뉴얼', 'IO-9002')");
+  const acts = fixture.node().children.find(kid => kid.className === 'acts');
+  assert.deepEqual(acts.children.map(kid => kid.textContent), ['취소', '연결']);
+});
+
+test('BMOVE ③: 옮기면 데이터를 먼저 받고 에픽 프로젝트를 열며, 알림의 되돌리기는 move-undo로 반대 방향을 연다', async () => {
+  const fixture = bmoveClient();
+  fixture.open('group:결제 리뉴얼');
+  await fixture.app.run("jiraLinkFind('group:결제 리뉴얼', 'IO-48501')");
+  fixture.app.run("jiraLink = { ...jiraLink, moveConfirm: true }; jiraLinkPaint();");
+  const confirm = fixture.node().children.find(kid => kid.className === 'd-jconfirm');
+  const go = confirm.children.find(kid => kid.className === 'acts').children.find(kid => kid.textContent === '옮기기');
+  await go.listeners.click();
+  assert.deepEqual(fixture.posts().map(call => [call.url, call.body]), [
+    ['/api/project/move', { project: 'group:결제 리뉴얼', to: 'IO-48501' }],
+  ]);
+  assert.equal(fixture.loads(), 1, '데이터를 먼저 새로 받는다');
+  assert.equal(fixture.opened(), 'jira:IO-48501');
+  const notice = fixture.app.nodes.get('liveRegion');
+  assert.match(notice.textContent, /IO-48501로 옮겼어요 · 항목 2/);
+  const undo = notice.children.find(kid => kid.textContent === '되돌리기');
+  await undo.listeners.click();
+  assert.deepEqual(fixture.posts().slice(-1).map(call => [call.url, call.body]), [['/api/project/move-undo', { moveId: 'mv_1' }]]);
+  assert.equal(fixture.opened(), 'group:결제 리뉴얼');
+  assert.match(fixture.app.nodes.get('liveRegion').textContent, /결제 리뉴얼 프로젝트로 되돌렸어요/);
+});
+
+test('BMOVE ③: 이미 연결된 그룹은 띠 카드 ⋯에 `IO-…으로 옮기기…`가 더 붙고, 확인 줄에서 그대로 보낸다', async () => {
+  const fixture = bmoveClient();
+  const issue = jiraIssue({ key: 'IO-48501' });
+  const card = fixture.app.run(`jiraStripCard(${JSON.stringify(issue)}, 'group:결제 리뉴얼')`);
+  const more = nodeFind(card, 'd-more');
+  more.listeners.click({ stopPropagation() {} });
+  const menu = JSON.parse(fixture.app.run("JSON.stringify(lastMenu.flat().map(one => one.label))"));
+  assert.deepEqual(menu, ['지라 연결 해제', 'IO-48501으로 옮기기…']);
+  fixture.app.run('lastMenu[0][1].onClick()');
+  const again = fixture.app.run(`jiraStripCard(${JSON.stringify(issue)}, 'group:결제 리뉴얼')`);
+  const confirm = nodeFind(again, 'd-jconfirm');
+  assert.match(confirm.children[0].textContent, /결제 리뉴얼의 항목 2 · 회의 1 · 주간요약 문장 1를 IO-48501로 옮길까요/);
+  const go = confirm.children.find(kid => kid.className === 'acts').children.find(kid => kid.textContent === '옮기기');
+  await go.listeners.click();
+  assert.deepEqual(fixture.posts().map(call => [call.url, call.body]), [
+    ['/api/project/move', { project: 'group:결제 리뉴얼', to: 'IO-48501' }],
+  ]);
+});
+
+test('BMOVE ②: 빈 에픽을 열면 같은 이름의 그룹 프로젝트를 옮기자고 묻고, 아니요는 기억해 다시 묻지 않는다', async () => {
+  const fixture = bmoveClient();
+  fixture.app.run("var saved = {}; localStorage = { getItem: k => (k in saved ? saved[k] : null), setItem: (k, v) => { saved[k] = String(v); } };");
+  // 빈 에픽이라 items를 IO-48501에 건 것은 하나도 없다 — 지금 카드는 조용한 오류 자리로 둬 소음을 없앤다.
+  fixture.app.run("jiraCard = { key: 'IO-48501', state: 'error', issue: null, error: '', at: 0, seq: 0 };");
+  // 이름이 같은지(wfGroupNameKey)는 지라 요약으로 견준다 — 그 요약을 '결제 리뉴얼'로 맞춰 둔다.
+  fixture.app.run(`jiraIssuesCache = [{ key: 'IO-48501', summary: '결제 리뉴얼', extra: false }];
+    jiraIssuesByKey = new Map(jiraIssuesCache.map(one => [one.key, one]));`);
+  const body = () => fixture.app.run(`(() => {
+    const box = document.createElement('div');
+    renderProjectDetail(box, { key: 'jira:IO-48501', label: 'jira:IO-48501', open: 0 });
+    return box;
+  })()`);
+  const suggestLine = box => nodeFindAll(box, 'd-jline').find(kid => /여기로 옮길까요/.test(nodeText(kid)));
+
+  const first = body();
+  const line = suggestLine(first);
+  assert.ok(line, '이름이 같은 그룹(결제 리뉴얼, 항목 2)이 있으면 제안 줄이 선다');
+  assert.equal(nodeText(line), '결제 리뉴얼 프로젝트의 항목 2개를 여기로 옮길까요? · 옮기기 · 아니요');
+
+  const move = line.children.find(kid => kid.textContent === '옮기기');
+  move.listeners.click();
+  const confirm = nodeFind(body(), 'd-jconfirm');
+  assert.match(confirm.children[0].textContent, /결제 리뉴얼의 항목 2 · 회의 1 · 주간요약 문장 1를 IO-48501로 옮길까요/);
+  const go = confirm.children.find(kid => kid.className === 'acts').children.find(kid => kid.textContent === '옮기기');
+  await go.listeners.click();
+  assert.deepEqual(fixture.posts().map(call => [call.url, call.body]), [
+    ['/api/project/move', { project: 'group:결제 리뉴얼', to: 'IO-48501' }],
+  ]);
+
+  // 되돌아와 다시 봤을 때는(옮기지 않고 이번엔 `아니요`를 눌렀다고 가정) 기억한 짝은 다시 묻지 않는다.
+  fixture.app.run("projectMoveSuggestConfirm = null;");
+  const again = body();
+  const no = suggestLine(again).children.find(kid => kid.textContent === '아니요');
+  no.listeners.click();
+  assert.deepEqual(JSON.parse(fixture.app.run("localStorage.getItem('projectMoveDismissed')")), { 'IO-48501': '결제 리뉴얼' });
+  assert.equal(suggestLine(body()), undefined, '아니요 뒤에는 다시 묻지 않는다');
 });
 
 // ---------- BJLIVE: 새로고침이 목록 갱신을 먼저 부른다 ----------
@@ -5710,6 +5856,103 @@ test('BJASSIGN: 에픽 모드에서 첫 할 일을 비워도 확인 줄까지 �
   assert.equal(go.disabled, false, '첫 할 일이 비어 있어도 눌린다');
   go.listeners.click();
   assert.ok(nodeFind(fixture.body(), 'd-jconfirm'), '확인 줄까지 그대로 간다');
+});
+
+// ---------- BMOVE ① — 새 프로젝트 화면의 감지 줄 · 만든 뒤 옮기기 ----------
+// projectListClient의 기본 데이터에 이미 그룹 `살아 있는 것`(항목 1개)이 있다 — 이름을 그대로 쓰면
+// 그 그룹과 짝이 맞는다.
+function bmoveNewFetch(fixture, { moveAnswer = null, undoAnswer = null, created = { key: 'IO-48400', url: 'https://example-jira.test/browse/IO-48400', summary: '살아 있는 것', created: true } } = {}) {
+  fixture.app.context.fetch = async (url, options) => {
+    const body = options && options.body ? JSON.parse(options.body) : null;
+    fixture.sent.push({ url: String(url), body });
+    if (String(url).includes('/api/jira/create-meta')) return new Response(JSON.stringify(BJC_META));
+    if (String(url).includes('/api/project/move-undo')) {
+      return new Response(JSON.stringify(undoAnswer || { ok: true, project: 'group:살아 있는 것', restored: { items: 1, meetings: 0, report: 0 }, skipped: 0 }));
+    }
+    if (String(url).includes('/api/project/move')) {
+      return new Response(JSON.stringify(moveAnswer || { ok: true, project: `jira:${created.key}`, from: '살아 있는 것', to: created.key, moveId: 'mv_9', changed: { items: 1, meetings: 0, links: 0, report: 0 } }));
+    }
+    if (String(url).includes('/api/jira/create')) return new Response(JSON.stringify({ ok: true, connected: true, epic: created, children: [], made: 1, failed: 0 }));
+    return new Response('{"ok":true}');
+  };
+}
+
+test('BMOVE ①: 이름이 같은 그룹 프로젝트가 있으면 이름 칸 아래 감지 줄이 서고, 체크는 기본 켜짐이다', () => {
+  const fixture = projectNewClient();
+  fixture.start();
+  fixture.set("projectNew.name = '아무 이름'; projectNew.project = 'IO'");
+  assert.equal(nodeFind(fixture.body(), 'd-pnewmovebox').children.length, 0, '이름이 다르면 감지 줄이 없다');
+
+  fixture.set("projectNew.name = '살아 있는 것'");
+  const box = nodeFind(fixture.body(), 'd-pnewmovebox');
+  assert.equal(box.children.length, 1);
+  assert.match(bjcWords(box), /살아 있는 것 프로젝트가 이미 있어요\(항목 1\)/);
+  assert.match(bjcWords(box), /만든 뒤 이 에픽으로 옮기기/);
+  const check = nodeFindAll(box, 'd-wcb')[0];
+  assert.equal(check.checked, true, '체크는 기본 켜짐이다');
+  assert.equal(fixture.app.run('projectNew.moveAfter'), true);
+
+  // 체크를 끄면 그 값이 그대로 저장된다(재렌더 없이도 유지).
+  check.checked = false;
+  check.listeners.change();
+  assert.equal(fixture.app.run('projectNew.moveAfter'), false);
+});
+
+test('BMOVE ①: 체크를 켠 채 만들면 만든 에픽으로 곧바로 옮기고, 결과 화면에 옮긴 결과 한 줄과 되돌리기가 선다', async () => {
+  const fixture = projectNewClient();
+  bmoveNewFetch(fixture);
+  fixture.start();
+  fixture.set("projectNew.name = '살아 있는 것'; projectNew.project = 'IO'; projectNew.roles = []");
+  assert.equal(fixture.app.run('projectNew.moveCandidate'), '살아 있는 것');
+  nodeFind(fixture.body(), 'pri').listeners.click();
+  await bjcButton(nodeFind(fixture.body(), 'd-jconfirm'), '만들기').listeners.click();
+
+  assert.deepEqual(fixture.sent.filter(entry => entry.url === '/api/project/move'),
+    [{ url: '/api/project/move', body: { project: 'group:살아 있는 것', to: 'IO-48400' } }]);
+  assert.equal(fixture.app.run('openedProject'), 'jira:IO-48400', '옮긴 뒤에는 그 에픽 프로젝트를 연다');
+
+  const result = nodeFind(fixture.body(), 'd-pnewres');
+  assert.match(bjcWords(result), /항목 1개를 옮겼어요/);
+  const undo = bjcButton(result, '되돌리기') || nodeFindAll(result, 'd-link').find(kid => bjcText(kid) === '되돌리기');
+  await undo.listeners.click();
+  assert.deepEqual(fixture.sent.slice(-1), [{ url: '/api/project/move-undo', body: { moveId: 'mv_9' } }]);
+  assert.match(fixture.app.nodes.get('liveRegion').textContent, /살아 있는 것 프로젝트로 되돌렸어요/);
+  assert.equal(nodeFind(fixture.body(), 'd-pnewres') ? bjcWords(nodeFind(fixture.body(), 'd-pnewres')).includes('항목 1개를 옮겼어요') : false, false,
+    '되돌린 뒤에는 옮긴 결과 줄이 사라진다');
+});
+
+test('BMOVE ①: 체크를 끄면 만들어도 옮기지 않는다', async () => {
+  const fixture = projectNewClient();
+  bmoveNewFetch(fixture);
+  fixture.start();
+  fixture.set("projectNew.name = '살아 있는 것'; projectNew.project = 'IO'; projectNew.roles = []; projectNew.moveAfter = false");
+  nodeFind(fixture.body(), 'pri').listeners.click();
+  await bjcButton(nodeFind(fixture.body(), 'd-jconfirm'), '만들기').listeners.click();
+  assert.deepEqual(fixture.sent.filter(entry => entry.url === '/api/project/move'), []);
+  assert.equal(fixture.app.run('projectNew.moveResult'), null);
+});
+
+test('BMOVE ①: 옮기기가 실패하면 결과 화면에 조용한 회색 줄만 남는다', async () => {
+  const fixture = projectNewClient();
+  bmoveNewFetch(fixture, { moveAnswer: { ok: false, error: '프로젝트를 찾을 수 없어요.' } });
+  fixture.start();
+  fixture.set("projectNew.name = '살아 있는 것'; projectNew.project = 'IO'; projectNew.roles = []");
+  nodeFind(fixture.body(), 'pri').listeners.click();
+  await bjcButton(nodeFind(fixture.body(), 'd-jconfirm'), '만들기').listeners.click();
+  const result = nodeFind(fixture.body(), 'd-pnewres');
+  assert.match(bjcWords(result), /옮기지는 못했어요 — 프로젝트에서 직접 옮길 수 있어요/);
+});
+
+test('BMOVE ①: `있는 에픽에 붙이기`도 같은 감지 줄로, 대상은 고른 에픽이다', async () => {
+  const fixture = projectNewClient();
+  bmoveNewFetch(fixture, { created: { key: 'IO-48394', url: 'x', summary: '살아 있는 것', created: false } });
+  fixture.start();
+  fixture.set(`projectNew.mode = 'attach'; projectNew.roles = ['Web']; projectNew.epic = { key: 'IO-48394', summary: '살아 있는 것', children: { items: [] } }`);
+  assert.equal(fixture.app.run('projectNew.moveCandidate'), '살아 있는 것');
+  nodeFind(fixture.body(), 'pri').listeners.click();
+  await bjcButton(nodeFind(fixture.body(), 'd-jconfirm'), '만들기').listeners.click();
+  assert.deepEqual(fixture.sent.filter(entry => entry.url === '/api/project/move'),
+    [{ url: '/api/project/move', body: { project: 'group:살아 있는 것', to: 'IO-48394' } }]);
 });
 
 // ---------- BWRAP: 오늘 정리 ----------

@@ -1287,6 +1287,136 @@ function setProjectAliasAction({ jira, alias }) {
   return result;
 }
 
+// ---------- 직접 만든(그룹) 프로젝트 → 지라 에픽으로 옮기기 (BMOVE) ----------
+// 지라 없이 그룹으로 시작했다가 나중에 에픽이 생기면 항목·회의·주간요약 소속을 통째로 그 에픽 쪽으로
+// 옮긴다. renameProject와 같은 자리를 건드리되, 그룹 칸을 지우고 지라 칸을 새로 넣는다는 점이 다르다
+// (renameProject는 그룹 칸의 값만 바꾼다). 옮긴 그룹은 항목이 없어져 목록에서 저절로 빠진다.
+// 대상이 실제로 에픽인지(지라 계층 1)는 부르는 쪽(HTTP 라우트)이 지라를 읽어 먼저 확인한다 — 이
+// 함수는 순수하게 파일만 옮긴다(지라에는 아무것도 묻지도 쓰지도 않는다).
+const PROJECT_MOVE_KEY_RE = /^[A-Z][A-Z0-9]*-\d+$/;
+function moveProject({ project, to, label }) {
+  if (typeof project !== 'string' || !project.startsWith('group:')) throw new Error('직접 만든 프로젝트만 옮길 수 있어요.');
+  const from = project.slice('group:'.length).replace(/_/g, ' ').trim();
+  if (!from) throw new Error('프로젝트를 확인해 주세요.');
+  const groups = workflows.groupList();
+  if (!groups.includes(from)) throw new Error('프로젝트를 찾을 수 없어요.');
+  if (typeof to !== 'string' || !PROJECT_MOVE_KEY_RE.test(to)) throw new Error('지라 번호를 확인해 주세요.');
+
+  // ① 업무 파일의 줄 — 지라가 걸린 줄은 이미 지라라 건너뛴다. 아이디어는 `project:` 칸을 쓴다.
+  const items = [];
+  listTrackerFiles().forEach((filePath) => {
+    const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
+    let touched = false;
+    const next = lines.map((line) => {
+      const match = line.match(TRACK_RE);
+      if (!match) return line;
+      const fields = parseFields(match[3]);
+      if (fields.jira) return line;
+      const key = match[2] === 'idea' ? 'project' : 'group';
+      if (!fields[key] || fields[key].replace(/_/g, ' ') !== from) return line;
+      const fieldStr = match[3].split(/\s+/)
+        .filter((part) => { const at = part.indexOf(':'); return at === -1 || part.slice(0, at) !== key; })
+        .concat(`jira:${to}`).join(' ');
+      touched = true;
+      if (fields.id) items.push(fields.id);
+      return `- ${match[1]} #${match[2]}[${fieldStr}]`;
+    });
+    if (touched) fs.writeFileSync(filePath, next.join('\n'));
+  });
+
+  // ②④ 회의 프로젝트 · 수동 지라 연결(옮긴 뒤에는 뜻이 없으므로 지운다)
+  const moved = workflows.moveGroup(from, to);
+
+  // ⑤ 회의 제목 → 프로젝트 표
+  const links = readMeetingLinks();
+  const meetingLinks = [];
+  for (const [title, value] of Object.entries(links)) {
+    if (typeof value !== 'string' || !value.startsWith('group:')) continue;
+    if (value.slice('group:'.length).replace(/_/g, ' ').trim() !== from) continue;
+    links[title] = `jira:${to}`;
+    meetingLinks.push(title);
+  }
+  if (meetingLinks.length) fs.writeFileSync(MEETING_LINKS_PATH, JSON.stringify(links, null, 2));
+
+  // ⑥ 주간요약 저장본 — group:from: 행만 jira:to: 꼴로, 표시 이름은 부르는 쪽이 지은 label로.
+  const reportRows = reportDrafts.moveGroup(from, to, label);
+
+  // 이동 기록 — 되돌리기를 정확하게 하기 위한 서버 저장값일 뿐이라 화면에는 내려보내지 않는다.
+  const moveId = `mv_${ulid()}`;
+  const meetingCount = moved.ids.length + meetingLinks.length;
+  workflows.recordProjectMove({
+    id: moveId, from, to, at: new Date().toISOString(),
+    items, meetings: moved.ids, links: moved.link !== null ? { [from]: moved.link } : null,
+    meetingLinks, reportRows, reportLabel: label,
+    counts: { items: items.length, meetings: meetingCount, report: reportRows.length },
+  });
+
+  return {
+    ok: true, project: `jira:${to}`, from, to, moveId,
+    changed: { items: items.length, meetings: meetingCount, links: moved.link !== null ? 1 : 0, report: reportRows.length },
+  };
+}
+
+// 옮기기의 반대 방향. **이동 기록에 남은 id들만** 되돌린다 — 그 사이 지워졌거나 다른 프로젝트로
+// 다시 옮겨진 것은 건드리지 않고 건너뛴다(skipped로 센다). 한 번 되돌리면 기록은 지워져 다시는
+// 되돌릴 수 없다(이름 바꾸기와 같은 태도).
+function undoMoveProject({ moveId }) {
+  if (typeof moveId !== 'string' || !moveId.trim()) throw new Error('되돌릴 기록을 확인해 주세요.');
+  const entry = workflows.takeProjectMove(moveId);
+  if (!entry) throw new Error('되돌릴 기록이 없어요.');
+  const { from, to, items: itemIds, meetings: meetingIds, links, meetingLinks: meetingLinkTitles, reportRows, reportLabel } = entry;
+
+  // ① 업무 파일 — 기록된 id가 지금도 그 지라 키를 달고 있을 때만 되돌린다.
+  const idSet = new Set(itemIds);
+  let itemsRestored = 0, itemsSkipped = 0;
+  listTrackerFiles().forEach((filePath) => {
+    const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
+    let touched = false;
+    const next = lines.map((line) => {
+      const match = line.match(TRACK_RE);
+      if (!match) return line;
+      const fields = parseFields(match[3]);
+      if (!fields.id || !idSet.has(fields.id)) return line;
+      idSet.delete(fields.id);
+      if (fields.jira !== to) { itemsSkipped += 1; return line; }
+      const key = match[2] === 'idea' ? 'project' : 'group';
+      const fieldStr = match[3].split(/\s+/)
+        .filter((part) => { const at = part.indexOf(':'); return at === -1 || part.slice(0, at) !== 'jira'; })
+        .concat(`${key}:${from.replace(/\s+/g, '_')}`).join(' ');
+      touched = true;
+      itemsRestored += 1;
+      return `- ${match[1]} #${match[2]}[${fieldStr}]`;
+    });
+    if (touched) fs.writeFileSync(filePath, next.join('\n'));
+  });
+  itemsSkipped += idSet.size; // 기록에는 있었지만 지금은 그 id 자체가 없다(그 사이 지워짐).
+
+  // ②④ 회의 프로젝트 · 수동 지라 연결
+  const movedBack = workflows.undoMoveGroup({ from, to, meetingIds, link: links ? links[from] : null });
+
+  // ⑤ 회의 제목 → 프로젝트 표
+  const linkState = readMeetingLinks();
+  let meetingLinksRestored = 0, meetingLinksSkipped = 0;
+  meetingLinkTitles.forEach((title) => {
+    if (linkState[title] === `jira:${to}`) { linkState[title] = `group:${from}`; meetingLinksRestored += 1; }
+    else meetingLinksSkipped += 1;
+  });
+  if (meetingLinksRestored) fs.writeFileSync(MEETING_LINKS_PATH, JSON.stringify(linkState, null, 2));
+
+  // ⑥ 주간요약 저장본
+  const reportUndo = reportDrafts.moveGroupUndo(reportRows, from, to, reportLabel);
+
+  return {
+    ok: true, project: `group:${from}`,
+    restored: {
+      items: itemsRestored,
+      meetings: movedBack.restored + meetingLinksRestored,
+      report: reportUndo.restored,
+    },
+    skipped: itemsSkipped + movedBack.skipped + meetingLinksSkipped + reportUndo.skipped,
+  };
+}
+
 function promoteIdeaToToday(id, due) {
   validateDate(due);
   const isIdea = listTrackerFiles().some(file => fs.readFileSync(file, 'utf-8').split('\n').some(line => {
@@ -1564,6 +1694,9 @@ const handleRequest = (req, res) => {
     // 지라 프로젝트의 앱 안 별칭(BJALIAS) — 지라 요약은 그대로 두고, 주간요약 저장본의 표시 이름만
     // 같은 트랜잭션으로 함께 갱신한다. 지라에는 아무것도 쓰지 않는다.
     '/api/project/alias': setProjectAliasAction,
+    // 옮기기(BMOVE)의 되돌리기 — 이동 기록에 남은 id들만 반대로 돌린다. 지라를 다시 읽지 않는다
+    // (에픽 검사는 옮길 때 한 번으로 충분하다).
+    '/api/project/move-undo': undoMoveProject,
     // 삭제한 항목 완전히 지우기 — `.trash.json`에서 그 줄만 뺀다(업무 파일은 이미 그 줄이 없다).
     '/api/track/trash-purge': ({ id }) => purgeTrashItem(id),
     // 새 프로젝트 화면의 직군 세트. 지라에는 아무것도 묻지 않고 `.workflow.json` 한 칸만 바꾼다.
@@ -1766,6 +1899,34 @@ const handleRequest = (req, res) => {
         if (seen.connected === false) { const error = new Error('지라 연결이 필요해요.'); error.status = 400; throw error; }
       }
       return idempotent(req, body, () => workflows.linkProject(body));
+    }).then((result) => {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify(result));
+    }).catch((error) => {
+      res.writeHead(error.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: error.message, code: error.code }));
+    });
+    return;
+  }
+
+  // 직접 만든(그룹) 프로젝트를 지라 에픽으로 통째로 옮긴다(BMOVE) — jira-link와 같은 순서다:
+  // ① 형식 확인 ② 지라에서 **다시 읽어** 실제로 에픽(계층 1)인지 확인 ③ 그때만 앱의 저장 길로 옮긴다.
+  // 되돌리기는 `/api/project/move-undo`(workflowActions)가 지라를 다시 묻지 않고 기록만으로 한다.
+  if (url.pathname === '/api/project/move' && req.method === 'POST') {
+    if (!USES.jira) { res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ ok: false, error: '지라를 쓰지 않도록 설정돼 있어요.' })); return; }
+    readBody(req).then(async (body) => {
+      const { project, to } = body || {};
+      if (typeof project !== 'string' || !project.startsWith('group:')) { const error = new Error('직접 만든 프로젝트만 옮길 수 있어요.'); error.status = 400; throw error; }
+      if (typeof to !== 'string' || !PROJECT_MOVE_KEY_RE.test(to)) { const error = new Error('지라 번호를 확인해 주세요.'); error.status = 400; throw error; }
+      const check = await jira.checkEpic(to);
+      if (check.ok === false) { const error = new Error('지라에서 이 티켓을 읽지 못했어요.'); error.status = 400; throw error; }
+      if (check.connected === false) { const error = new Error('지라 연결이 필요해요.'); error.status = 400; throw error; }
+      if (!check.epic) { const error = new Error('에픽에만 옮길 수 있어요.'); error.status = 400; throw error; }
+      // 별칭이 있으면 그 이름, 없으면 방금 지라에서 읽은 요약(BJALIAS와 같은 규칙) — 아직 앱의
+      // 지라 캐시(jira_issues.md)에 없는 새 에픽이어도 이 요약으로 표시 이름을 지을 수 있다.
+      const name = projectDisplayName(to, check.summary || '');
+      const label = name ? `${to} · ${name}` : to;
+      return idempotent(req, body, () => moveProject({ project, to, label }));
     }).then((result) => {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify(result));

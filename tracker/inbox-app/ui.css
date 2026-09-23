@@ -1816,6 +1816,12 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-pnew .note, .d-pnewpv .note, .d-pnewacts .note, .d-pnewres .note { font-size: 12.5px; color: var(--dim); }
 .d-pnew .er, .d-pnewacts .er, .d-pnewedit .er, .d-pnewres .er, .d-pnewtype .er { font-size: 12.5px; color: var(--urgent); }
 .d-pnew > .row > .ct > .in { max-width: 520px; min-height: 34px; }
+/* BMOVE ① — 이름 칸 아래 "같은 이름의 프로젝트가 있어요 · ☑ 만든 뒤 이 에픽으로 옮기기" 한 줄.
+   글자·점·체크·이름표가 한 줄에서 6px씩 떨어지고, 좁으면 줄바꿈한다(체크와 글자가 붙어 보이던 것을 고침). */
+.d-pnewmove { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-left: 104px; }
+.d-pnewmove .rl { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: var(--muted); }
+.d-pnewmove .rl .d-wcb { flex: none; }
+@media (max-width: 640px) { .d-pnewmove { padding-left: 0; } }
 /* 고른 에픽 한 줄 — 요약이 먼저, 상태는 뒤, 키는 조용한 글자로만(BKEY) */
 .d-pnewepic {
   display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px;

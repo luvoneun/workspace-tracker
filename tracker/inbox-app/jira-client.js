@@ -946,7 +946,26 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
     };
   }
 
-  return { read, list, listDone, attention, options, change, createMeta, create, connected: !!settings };
+  // 옮기기(BMOVE)가 대상이 실제로 에픽(계층 1)인지 확인할 때만 부른다. create()가 이미 있는 에픽에
+  // 붙일 때 쓰는 대조(요약·종류 id를 다시 읽어 그 프로젝트의 에픽 타입과 견주기)를 그대로 재사용한다.
+  // 조회뿐이라 파일도 캐시도 쓰지 않는다.
+  async function checkEpic(key) {
+    if (typeof key !== 'string' || !JIRA_KEY_RE.test(key)) return { ok: false, error: MESSAGE.key, kind: 'key' };
+    if (!settings) return { ok: true, connected: false };
+    const secret = token();
+    if (!secret) return { ok: true, connected: false };
+    const client = createJiraClient({ settings, request, readToken: () => secret });
+    try {
+      const [brief, types] = await Promise.all([client.getIssueBrief(key), client.getCreateMeta(projectOf(key))]);
+      const epicType = epicTypeOf(types);
+      return { ok: true, connected: true, epic: !!(epicType && brief.typeId === epicType.id), summary: brief.summary };
+    } catch (error) {
+      const kind = MESSAGE[error && error.kind] ? error.kind : 'other';
+      return { ok: false, error: MESSAGE[kind], kind };
+    }
+  }
+
+  return { read, list, listDone, attention, options, change, createMeta, create, checkEpic, connected: !!settings };
 }
 
 module.exports = {

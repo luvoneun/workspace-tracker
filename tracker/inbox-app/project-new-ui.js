@@ -33,6 +33,8 @@ let projectNew = null;
 // 미리 보기와 주 버튼만 따로 다시 그리는 자리 — 이름을 적는 동안 초점이 튀지 않게 한다.
 let projectNewPreviewNode = null;
 let projectNewGoNode = null;
+// BMOVE ① 감지 줄만 따로 다시 그리는 자리 — 위 둘과 같은 이유다.
+let projectNewMoveNode = null;
 
 const projectNewStore = (key, value) => { try { localStorage.setItem(key, value); } catch {} };
 const projectNewRead = (key) => { try { return localStorage.getItem(key) || ''; } catch { return ''; } };
@@ -64,7 +66,48 @@ function projectNewBlank() {
     types: null, typeId: null, typeEpic: null, typeProject: '', typeBusy: false, typeError: '',
     roleEdit: null, roleError: '', roleBusy: false,
     confirm: false, busy: false, error: '', result: null, onEsc: null,
+    // BMOVE ① — 이름(또는 붙일 에픽 요약)과 같은 이름의 그룹 프로젝트 감지. 체크는 기본 켜짐이고
+    // 브라우저에 기억하지 않는다(매번 새로 연다). moveResult는 만든 뒤 옮기기 결과(결과 화면에 쓴다).
+    moveCandidate: null, moveAfter: true, moveResult: null,
   };
+}
+
+// ---------- BMOVE ① — 만들 이름과 같은 그룹 프로젝트가 있으면 만든 뒤 옮기기를 제안 ----------
+// `새 에픽 만들기`는 이름 칸(state.name), `있는 에픽에 붙이기`는 고른 에픽의 요약으로 견준다.
+// wfGroupNameKey(밑줄→공백·연속 공백·대소문자 무시)가 서버 groupNameKey와 같은 잣대다.
+function projectNewMoveCandidate(state) {
+  const name = state.mode === 'attach' ? ((state.epic && state.epic.summary) || '') : state.name.trim();
+  if (!name) return null;
+  const match = wfProjects().find(([key]) => key.startsWith('group:') && wfGroupNameKey(key.slice('group:'.length)) === wfGroupNameKey(name));
+  return match ? match[0].slice('group:'.length) : null;
+}
+// 이름 칸 아래(또는 붙일 에픽 자리 아래)의 조용한 감지 줄. 후보가 없으면 null — 부르는 쪽이 비워 둔다.
+function projectNewMoveLine(state) {
+  const candidate = projectNewMoveCandidate(state);
+  state.moveCandidate = candidate;
+  if (!candidate) return null;
+  const counts = wfProjectMoveCounts(candidate);
+  const line = document.createElement('div');
+  line.className = 'd-quiet d-pnewmove';
+  const text = document.createElement('span');
+  text.textContent = `${candidate} 프로젝트가 이미 있어요(항목 ${counts.items})`;
+  const sep = document.createElement('span');
+  sep.className = 'sep';
+  sep.textContent = '·';
+  const label = document.createElement('label');
+  label.className = 'rl';
+  const check = document.createElement('input');
+  check.type = 'checkbox';
+  check.className = 'd-wcb';
+  check.checked = state.moveAfter;
+  check.setAttribute('aria-label', '만든 뒤 이 에픽으로 옮기기');
+  check.addEventListener('change', () => { state.moveAfter = check.checked; });
+  const name = document.createElement('span');
+  name.className = 'nm';
+  name.textContent = '만든 뒤 이 에픽으로 옮기기';
+  label.append(check, name);
+  line.append(text, sep, label);
+  return line;
 }
 
 // ---------- 열고 닫기 ----------
@@ -612,6 +655,13 @@ function projectNewPreviewPaint() {
   if (!projectNew || !projectNewPreviewNode || !projectNewPreviewNode.isConnected) { projectNewPaint(); return; }
   projectNewPreviewNode.replaceChildren(projectNewPreview(projectNew));
   projectNewGoPaint();
+  projectNewMovePaint();
+}
+// BMOVE ① 감지 줄만 고쳐 준다 — 이름을 적는 동안 초점이 튀지 않게(위 둘과 같은 이유).
+function projectNewMovePaint() {
+  if (!projectNew || !projectNewMoveNode || !projectNewMoveNode.isConnected) return;
+  const line = projectNewMoveLine(projectNew);
+  projectNewMoveNode.replaceChildren(...(line ? [line] : []));
 }
 // 주 버튼의 글자(개수)와 눌릴 수 있는지만 고쳐 준다 — 이름을 적는 동안 초점이 튀지 않게.
 function projectNewGoPaint() {
@@ -773,11 +823,27 @@ async function projectNewSend(state) {
   // 차례가 중요하다: 목록을 **먼저** 새로 받은 뒤 선택해야 한다 — 먼저 선택하면 openProjectTab이
   // 옛 데이터로 곧장 다시 그리면서(setActiveTab → renderActiveTabLists) "없는 프로젝트"로 보고
   // 선택을 첫 줄로 되돌려 버린다.
-  if (data.epic && data.epic.created) {
+  // BMOVE ① — 감지 줄의 체크가 켜져 있었으면 만든(또는 고른) 에픽으로 곧바로 옮긴다. `있는 에픽에
+  // 붙이기`도 같은 동작이라(대상은 고른 에픽) created 여부를 가리지 않는다.
+  const moveGroup = state.moveCandidate;
+  const moveWanted = !!(moveGroup && state.moveAfter);
+  if (data.epic && (data.epic.created || moveWanted)) {
     await refreshJiraListQuietly();
+  }
+  if (moveWanted) {
+    try {
+      state.moveResult = await wfProjectMoveSend(moveGroup, data.epic.key);
+    } catch (error) {
+      if (!projectNew) return;
+      state.moveResult = { ok: false, error: error.message };
+    }
+  }
+  if (!projectNew) return;
+  if (data.epic && (data.epic.created || moveWanted)) {
     await load();
     openProjectTab(`jira:${data.epic.key}`);
   }
+  projectNewPaint();
 }
 
 // ---------- 만든 뒤 ----------
@@ -815,6 +881,44 @@ function projectNewResult(state) {
     epic.appendChild(assignNote);
   }
   box.appendChild(epic);
+
+  // BMOVE ① — 감지 줄의 체크가 켜져 있었을 때만 선다. 성공하면 인라인 되돌리기, 실패하면 조용한 회색.
+  if (state.moveResult) {
+    const moveLine = document.createElement('div');
+    if (state.moveResult.ok) {
+      moveLine.className = 'd-quiet';
+      const text = document.createElement('span');
+      text.textContent = `항목 ${state.moveResult.changed.items}개를 옮겼어요`;
+      const sep = document.createElement('span');
+      sep.className = 'sep';
+      sep.textContent = '·';
+      const undo = document.createElement('button');
+      undo.type = 'button';
+      undo.className = 'd-link';
+      undo.textContent = '되돌리기';
+      undo.addEventListener('click', async () => {
+        undo.disabled = true;
+        const moved = state.moveResult;
+        let undone;
+        try {
+          const response = await request('/api/project/move-undo', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ moveId: moved.moveId }),
+          });
+          undone = await response.json();
+        } catch { undo.disabled = false; return; }
+        await load();
+        showNotice(`${moved.from} 프로젝트로 되돌렸어요` + (undone.skipped ? ` · 그 사이 바뀐 ${undone.skipped}개는 그대로 두었어요` : ''));
+        if (!projectNew) return;
+        state.moveResult = null;
+        projectNewPaint();
+      });
+      moveLine.append(text, sep, undo);
+    } else {
+      moveLine.className = 'note';
+      moveLine.textContent = '옮기지는 못했어요 — 프로젝트에서 직접 옮길 수 있어요';
+    }
+    box.appendChild(moveLine);
+  }
 
   result.children.forEach((child) => {
     const line = document.createElement('div');
@@ -971,6 +1075,14 @@ function projectNewRender(body) {
   }, 200);
   name.classList.add('d-pnewname');
   form.appendChild(projectNewField('이름', name, state.mode === 'epic' ? '이 이름이 에픽 제목이 돼요.' : ''));
+
+  // BMOVE ① — 이름(또는 붙일 에픽 요약)과 같은 이름의 그룹 프로젝트가 있으면 여기 한 줄이 선다.
+  // `있는 에픽에 붙이기`는 에픽을 고르기 전에는 견줄 이름이 없어 빈 자리다.
+  projectNewMoveNode = document.createElement('div');
+  projectNewMoveNode.className = 'd-pnewmovebox';
+  const moveLine = projectNewMoveLine(state);
+  if (moveLine) projectNewMoveNode.appendChild(moveLine);
+  form.appendChild(projectNewMoveNode);
 
   form.appendChild(projectNewField('지라', projectNewModes(state)));
 

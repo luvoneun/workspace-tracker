@@ -270,6 +270,60 @@ module.exports = ({ directory, sources, legacy, currentWeek }) => {
     if (rows) atomicWrite(filename, JSON.stringify(state, null, 2));
     return rows;
   }
+  // 직접 만든 프로젝트를 지라 에픽으로 옮길 때(BMOVE), 저장된 보고에 박혀 있는 그룹 이름을 지라 꼴로
+  // 바꾼다. renameGroup과 같은 세 자리(group·bucket 앞머리·evidence[].label)를 보되, bucket은
+  // `group:from:` → `jira:to:`로 종류까지 바뀌고 group·label은 부르는 쪽이 지은 표시 이름(`label`,
+  // `KEY · 이름` 꼴)으로 바뀐다. renameGroup과 달리 **바뀐 행의 id 목록**을 돌려준다 —
+  // 되돌리기(moveGroupUndo)가 그 id들만 반대로 돌려야 하기 때문이다(옮긴 뒤 이 에픽에 새로 생긴
+  // 행은 건드리면 안 된다).
+  function moveGroup(from, to, label) {
+    const state = read();
+    const head = `group:${from}:`;
+    const ids = [];
+    const fix = (row) => {
+      if (!row || typeof row !== 'object') return false;
+      let touched = false;
+      if (typeof row.bucket === 'string' && row.bucket.startsWith(head)) { row.bucket = `jira:${to}:${row.bucket.slice(head.length)}`; touched = true; }
+      if (row.group === from) { row.group = label; touched = true; }
+      (Array.isArray(row.evidence) ? row.evidence : []).forEach((item) => {
+        if (item && item.label === from) { item.label = label; touched = true; }
+      });
+      const childTouched = (Array.isArray(row.parts) ? row.parts : []).map(fix).some(Boolean);
+      return touched || childTouched;
+    };
+    for (const week of Object.values(state.weeks || {})) {
+      (week?.rows || []).forEach((row) => { if (fix(row)) ids.push(row.id); });
+    }
+    if (ids.length) atomicWrite(filename, JSON.stringify(state, null, 2));
+    return ids;
+  }
+  // moveGroup의 반대 방향. **기록에 있는 그 행 id들만** 되돌린다 — id가 더는 없으면(그 사이 지워짐)
+  // 건너뛴다. 있어도 값이 이미 달라져 있으면(예: 별칭이 다시 바뀜) 그 자리만 조용히 넘어간다.
+  function moveGroupUndo(ids, from, to, label) {
+    const state = read();
+    const set = new Set(Array.isArray(ids) ? ids : []);
+    const head = `jira:${to}:`;
+    let restored = 0;
+    const fix = (row) => {
+      if (!row || typeof row !== 'object') return false;
+      let touched = false;
+      if (typeof row.bucket === 'string' && row.bucket.startsWith(head)) { row.bucket = `group:${from}:${row.bucket.slice(head.length)}`; touched = true; }
+      if (row.group === label) { row.group = from; touched = true; }
+      (Array.isArray(row.evidence) ? row.evidence : []).forEach((item) => {
+        if (item && item.label === label) { item.label = from; touched = true; }
+      });
+      (Array.isArray(row.parts) ? row.parts : []).forEach(fix);
+      return touched;
+    };
+    for (const week of Object.values(state.weeks || {})) {
+      for (const row of (week?.rows || [])) {
+        if (!set.has(row.id)) continue;
+        if (fix(row)) restored += 1;
+      }
+    }
+    if (restored) atomicWrite(filename, JSON.stringify(state, null, 2));
+    return { restored, skipped: set.size - restored };
+  }
   // read는 한 번 읽은 보고 기록을 weeks·view에 함께 넘겨 주 수만큼 다시 읽지 않게 하려고 내보낸다.
-  return {view,change,weeks,read,renameGroup,relabelProject};
+  return {view,change,weeks,read,renameGroup,relabelProject,moveGroup,moveGroupUndo};
 };

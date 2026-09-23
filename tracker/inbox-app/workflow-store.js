@@ -338,6 +338,65 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     return { meetings, links, archive };
   }
 
+  // ---------- 직접 만든(그룹) 프로젝트 → 지라 에픽으로 옮기기 (BMOVE) ----------
+  // 이 저장소가 가진 두 자리(회의 프로젝트·projectLinks 키)만 바꾼다. 업무 파일과 회의 연결 파일·
+  // 주간요약은 부르는 쪽(server.js moveProject)이 같은 트랜잭션 안에서 이어서 바꾼다.
+  // renameGroup과 다른 점: 종류(type)까지 `group`→`jira`로 바뀐다 — 되돌릴 때 정확히 반대로 가려고
+  // 바뀐 회의 id 목록을 돌려준다(renameGroup은 개수만 돌려줬다).
+  function moveGroup(from, to) {
+    const state = read();
+    const ids = [];
+    for (const [id, event] of Object.entries(state.meetings)) {
+      if (!event.project || event.project.type !== 'group' || linkGroupName(event.project.value) !== from) continue;
+      state.meetings[id] = { ...event, project: { type: 'jira', value: to, label: to } };
+      ids.push(id);
+    }
+    let link = null;
+    if (state.projectLinks && Object.prototype.hasOwnProperty.call(state.projectLinks, from)) {
+      link = state.projectLinks[from];
+      const next = { ...state.projectLinks };
+      delete next[from];
+      state.projectLinks = next;
+    }
+    if (ids.length || link !== null) write(state);
+    return { ids, link };
+  }
+  // 되돌리기는 **기록에 있는 그 회의 id들만** 반대로 돌린다. 그 사이 다른 프로젝트로 다시 바뀌었거나
+  // 지워졌으면 건드리지 않고 건너뛴다(skipped로 센다).
+  function undoMoveGroup({ from, to, meetingIds, link }) {
+    const state = read();
+    let restored = 0, skipped = 0;
+    for (const id of meetingIds) {
+      const event = state.meetings[id];
+      if (!event || !event.project || event.project.type !== 'jira' || event.project.value !== to) { skipped += 1; continue; }
+      state.meetings[id] = { ...event, project: { type: 'group', value: from, label: from } };
+      restored += 1;
+    }
+    if (link !== null && link !== undefined) state.projectLinks = { ...(state.projectLinks || {}), [from]: link };
+    write(state);
+    return { restored, skipped };
+  }
+  // 이동 기록(`projectMoves`) — 되돌리기를 정확하게 하기 위한 서버 저장값일 뿐이고 화면에는
+  // 내려보내지 않는다(snapshot()에 넣지 않는다). 최근 20개만 유지한다.
+  const PROJECT_MOVE_MAX = 20;
+  function recordProjectMove(entry) {
+    const state = read();
+    const moves = Array.isArray(state.projectMoves) ? state.projectMoves : [];
+    state.projectMoves = [...moves, entry].slice(-PROJECT_MOVE_MAX);
+    write(state);
+  }
+  // 한 번 되돌리면 기록에서 지운다(한 번만 되돌릴 수 있다).
+  function takeProjectMove(id) {
+    const state = read();
+    const moves = Array.isArray(state.projectMoves) ? state.projectMoves : [];
+    const index = moves.findIndex(entry => entry.id === id);
+    if (index === -1) return null;
+    const entry = moves[index];
+    state.projectMoves = [...moves.slice(0, index), ...moves.slice(index + 1)];
+    write(state);
+    return entry;
+  }
+
   // ---------- 반응 필요에서 치운 줄 (BATTENTION) ----------
   // 저장하는 것은 `줄 id → 치운 시각` 표 하나뿐이다 — 댓글 글자도, 사람 이름도 저장하지 않는다.
   // id는 `출처:키:마지막 다른 사람 댓글 id`라 댓글이 더 달리면 값이 달라져 그 줄이 다시 나타난다.
@@ -422,5 +481,5 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     write(state);
     return { ok: true };
   }
-  return { archive, snapshot, patchItem, saveMeeting, syncProject, capture, review, undoReview, retype, link, checkProjectLink, linkProject, checkProjectAlias, setProjectAlias, projectAliases, checkJiraRoles, saveJiraRoles, groupList, renameGroup, attentionDismissed, dismissAttention, undismissAttention, outcome: id => read().items[id]?.outcome || '' };
+  return { archive, snapshot, patchItem, saveMeeting, syncProject, capture, review, undoReview, retype, link, checkProjectLink, linkProject, checkProjectAlias, setProjectAlias, projectAliases, checkJiraRoles, saveJiraRoles, groupList, renameGroup, moveGroup, undoMoveGroup, recordProjectMove, takeProjectMove, attentionDismissed, dismissAttention, undismissAttention, outcome: id => read().items[id]?.outcome || '' };
 };
