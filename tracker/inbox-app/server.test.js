@@ -5812,3 +5812,596 @@ test('WP-D2.5 update.sh·setup.sh는 설치 위치 판단을 맨 앞에서 부�
   assert.match(command, /bash update\.sh && cd "\$\(pwd -P\)" && bash setup\.sh/);
   for (const text of [update, setup]) assert.ok(!/pkill|killall|xargs kill/.test(text));
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WP-D3 — 앱 안 `업데이트 받기`(+되돌리기) · 팀 전용 설치 파일 · 설치 마무리 문구
+//
+// 실제 원격·실제 launchd·실제 홈 폴더에는 닿지 않는다: 원격은 임시 폴더의 bare 저장소(파일 경로)이고, launchd 등록은
+// 주입한 임시 폴더에서 "있는지만" 보며, 스크립트는 가짜 update.sh/setup.sh/git과 임시 HOME으로만 돌린다.
+
+// 원격(bare) + 내 복사본. 복사본은 v1.0.0에 있고, 원격에는 그 뒤 v1.1.0(main 한 커밋 더)이 올라가 있다 —
+// 복사본은 그 새 커밋을 아직 받지 않았다.
+function remoteFixture(t, { channel = 'stable' } = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-d3-remote-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const origin = path.join(root, 'origin.git');
+  const seed = path.join(root, 'seed');
+  const clone = path.join(root, 'clone');
+  fs.mkdirSync(seed);
+  fs.writeFileSync(path.join(seed, 'VERSION'), '1.0.0\n');
+  fs.writeFileSync(path.join(seed, '.gitignore'), 'workspace.config.json\ntracker/\n');
+  runGit(seed, ['init', '-b', 'main']);
+  runGit(seed, ['add', '-A']);
+  runGit(seed, ['commit', '-m', '첫 버전']);
+  runGit(seed, ['tag', 'v1.0.0']);
+  runGit(root, ['init', '--bare', '-b', 'main', origin]);
+  runGit(seed, ['remote', 'add', 'origin', origin]);
+  runGit(seed, ['push', '-q', 'origin', 'main', '--tags']);
+  runGit(root, ['clone', '-q', origin, clone]);
+  fs.writeFileSync(path.join(seed, 'VERSION'), '1.1.0\n');
+  runGit(seed, ['commit', '-am', '다음 버전']);
+  runGit(seed, ['tag', 'v1.1.0']);
+  runGit(seed, ['push', '-q', 'origin', 'main', '--tags']);
+  fs.mkdirSync(path.join(clone, 'tracker'));
+  const config = path.join(clone, 'workspace.config.json');
+  fs.writeFileSync(config, JSON.stringify({ server: { updateChannel: channel } }));
+  const env = {
+    WORKSPACE_REPO_DIR: clone, WORKSPACE_DATA_DIR: path.join(clone, 'tracker'), WORKSPACE_CONFIG: config,
+    WORKSPACE_NO_REMOTE_CHECK: '', WORKSPACE_AUTOMATION_DIR: path.join(root, 'automation'), WORKSPACE_LAUNCH_AGENTS_DIR: path.join(root, 'agents'),
+  };
+  return { root, clone, env };
+}
+
+test('WP-D3 새 버전 판단: stable은 원격 태그 중 최신 > VERSION, main은 원격 main 커밋이 HEAD와 다르고 아직 받지 않았을 때', { skip: !gitReady }, async (t) => {
+  const stable = remoteFixture(t);
+  const about = await (await fetch((await startAppServer(t, stable.env)).base + '/api/about')).json();
+  assert.equal(about.latest.tag, 'v1.1.0');
+  assert.equal(about.update.available, true, 'v1.1.0 > 1.0.0');
+  assert.equal(about.update.label, 'v1.1.0');
+  assert.equal(about.update.changesUrl, null, '원격이 github.com이 아니면 `무엇이 바뀌었나요`를 숨긴다');
+
+  const main = remoteFixture(t, { channel: 'main' });
+  const mainAbout = await (await fetch((await startAppServer(t, main.env)).base + '/api/about')).json();
+  assert.equal(mainAbout.channel, 'main');
+  assert.equal(mainAbout.update.available, true, '원격 main이 앞서 있고 이 저장소는 그 커밋이 아직 없다');
+  assert.equal(mainAbout.update.label, 'main');
+
+  // 받은 뒤(HEAD = 원격 main)에는 새 버전이 아니다
+  runGit(main.clone, ['pull', '-q', '--ff-only', 'origin', 'main']);
+  const after = await (await fetch((await startAppServer(t, main.env)).base + '/api/about')).json();
+  assert.equal(after.update.available, false);
+  // 내가 앞서 있으면(원격 커밋을 이미 가짐) 역시 새 버전이 아니다
+  fs.writeFileSync(path.join(main.clone, 'VERSION'), '1.2.0\n');
+  runGit(main.clone, ['commit', '-qam', '내가 앞선 커밋']);
+  const ahead = await (await fetch((await startAppServer(t, main.env)).base + '/api/about')).json();
+  assert.equal(ahead.update.available, false, 'HEAD와 달라도 이 저장소가 가진 커밋이면 알리지 않는다');
+});
+
+test('WP-D3 `무엇이 바뀌었나요` 주소는 origin이 github.com일 때만, 소유자/저장소만 뽑아 새로 짓는다', () => {
+  const { changesUrlFrom } = require('./server');
+  const line = url => `origin\t${url} (fetch)\norigin\t${url} (push)\n`;
+  assert.equal(changesUrlFrom(line('https://github.com/luvon/workspace.git'), 'stable'), 'https://github.com/luvon/workspace/releases');
+  assert.equal(changesUrlFrom(line('git@github.com:luvon/workspace.git'), 'main'), 'https://github.com/luvon/workspace/commits/main');
+  assert.equal(changesUrlFrom(line('https://github.com/luvon/workspace'), 'stable'), 'https://github.com/luvon/workspace/releases');
+  assert.equal(changesUrlFrom(line('https://user:ghp_secret@github.com/luvon/workspace.git'), 'stable'), null, '주소에 다른 글자가 섞이면 만들지 않는다');
+  assert.equal(changesUrlFrom(line('https://gitlab.com/luvon/workspace.git'), 'stable'), null);
+  assert.equal(changesUrlFrom(line('/tmp/origin.git'), 'stable'), null);
+  assert.equal(changesUrlFrom(null, 'stable'), null);
+});
+
+// 업데이트 요청 서버 하나 — 원격 확인은 끄고, 자동화·launchd 폴더는 임시 폴더다.
+async function startUpdateServer(t, { repoName = 'repo', outer = null } = {}) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-d3-update-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const parent = outer ? path.join(home, 'outer') : home;
+  if (outer) {
+    fs.mkdirSync(parent);
+    runGit(parent, ['init', '-q', '-b', 'main']);
+    runGit(parent, ['remote', 'add', 'origin', outer]);
+  }
+  const repo = path.join(parent, repoName);
+  const automation = path.join(home, 'automation');
+  const agents = path.join(home, 'agents');
+  const tokens = path.join(home, 'tokens');
+  [path.join(repo, 'tracker'), automation, agents, tokens].forEach(dir => fs.mkdirSync(dir, { recursive: true }));
+  fs.writeFileSync(path.join(repo, 'VERSION'), '1.0.0\n');
+  fs.writeFileSync(path.join(tokens, 'workspace-jira-token'), 'jira-secret-token\n', { mode: 0o600 });
+  const config = path.join(repo, 'workspace.config.json');
+  fs.writeFileSync(config, JSON.stringify({
+    jira: { siteUrl: 'https://jira.example.test', email: 'me@secret.example.test', tokenFile: path.join(tokens, 'workspace-jira-token') },
+    slack: { channels: { todo: { id: 'C0SECRET1', name: '#secret-todo' } } },
+  }));
+  const app = await startAppServer(t, {
+    WORKSPACE_REPO_DIR: repo, WORKSPACE_DATA_DIR: path.join(repo, 'tracker'), WORKSPACE_CONFIG: config,
+    WORKSPACE_AUTOMATION_DIR: automation, WORKSPACE_LAUNCH_AGENTS_DIR: agents, WORKSPACE_TOKEN_DIR: tokens,
+  });
+  // HTTP 상태는 `code`로 싣는다(응답 본문에 `status` 칸이 따로 있다).
+  const post = async (body) => {
+    const response = await fetch(app.base + '/api/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const text = await response.text();
+    return { ...JSON.parse(text), code: response.status, text };
+  };
+  const status = async () => {
+    const response = await fetch(app.base + '/api/update/status');
+    const text = await response.text();
+    return { ...JSON.parse(text), code: response.status, text };
+  };
+  const request = path.join(automation, 'requests', 'update.request');
+  const statusFile = path.join(automation, 'update-status.json');
+  const plist = () => fs.writeFileSync(path.join(agents, 'com.workspace.app.update.plist'), '<plist/>\n');
+  return { home, repo, automation, post, status, request, statusFile, plist };
+}
+const D3_SECRETS = /jira-secret-token|me@secret|C0SECRET1|secret-todo/;
+
+test('WP-D3 POST /api/update: action 두 값만 받고, plist가 있을 때만 요청 파일 하나를 쓰며, 진행 중이면 다시 쓰지 않는다', async (t) => {
+  const app = await startUpdateServer(t);
+  const odd = await app.post({ action: 'rm -rf /' });
+  assert.equal(odd.code, 400, '모르는 action은 400');
+  assert.equal(odd.reason, 'action');
+  assert.equal((await app.post({})).code, 400);
+  assert.equal(fs.existsSync(app.request), false);
+
+  const missing = await app.post({ action: 'update' });
+  assert.equal(missing.code, 200);
+  assert.equal(missing.ok, false);
+  assert.equal(missing.reason, 'not-installed');
+  assert.equal(missing.message, '처음 한 번은 업데이트.command로 받아 주세요');
+  assert.match(missing.updateFile, /업데이트\.command$/, '그 파일 경로를 함께 준다(복사용)');
+  assert.equal(fs.existsSync(app.request), false, '막힐 때는 파일을 쓰지 않는다');
+
+  app.plist();
+  const ok = await app.post({ action: 'update', extra: '$(touch /tmp/pwned)' });
+  assert.equal(ok.code, 200);
+  assert.equal(ok.ok, true);
+  const written = JSON.parse(fs.readFileSync(app.request, 'utf8'));
+  assert.deepEqual(Object.keys(written), ['action', 'requestedAt'], '요청 파일에는 action·requestedAt 두 칸뿐');
+  assert.equal(written.action, 'update');
+  assert.ok(Math.abs(Date.parse(written.requestedAt) - Date.now()) < 60000);
+  assert.match(fs.readFileSync(app.request, 'utf8'), /^\{"action":"update","requestedAt":"[0-9T:.Z-]+"\}\n$/, '실행기가 그대로 알아보는 한 줄');
+
+  // 아직 실행기가 집어 가지 않은 요청이 있으면 진행 중이다 — 덮어쓰지 않는다
+  const again = await app.post({ action: 'rollback' });
+  assert.equal(again.ok, false);
+  assert.equal(again.reason, 'running');
+  assert.equal(JSON.parse(fs.readFileSync(app.request, 'utf8')).action, 'update');
+
+  // 실행기가 요청을 집어 가고 상태 파일에 running(10분 안)을 쓰는 중 → 진행 목록을 그대로 돌려준다
+  fs.unlinkSync(app.request);
+  const now = new Date().toISOString();
+  fs.writeFileSync(app.statusFile, JSON.stringify({ action: 'update', from: '1.0.0', to: '1.1.0', step: 3, state: 'running', startedAt: now, updatedAt: now,
+    steps: [{ name: '고친 파일 확인', state: 'done' }, { name: '데이터 백업', state: 'done' }, { name: '새 버전 받기', state: 'doing' }] }));
+  const busy = await app.post({ action: 'update' });
+  assert.equal(busy.reason, 'running');
+  assert.equal(busy.status.step, 3, '진행 중이면 그 상태를 그대로 싣는다');
+  assert.equal(fs.existsSync(app.request), false);
+
+  // 10분 넘게 running에 머문 상태(실행기가 죽은 흔적)는 막지 않는다
+  const old = new Date(Date.now() - 11 * 60000).toISOString();
+  fs.writeFileSync(app.statusFile, JSON.stringify({ action: 'update', step: 3, state: 'running', startedAt: old, updatedAt: old, steps: [] }));
+  const retry = await app.post({ action: 'rollback' });
+  assert.equal(retry.ok, true);
+  assert.equal(JSON.parse(fs.readFileSync(app.request, 'utf8')).action, 'rollback');
+  for (const one of [odd, missing, ok, again, busy, retry]) assert.doesNotMatch(one.text, D3_SECRETS, '응답에 토큰·이메일·채널이 없다');
+});
+
+test('WP-D3 POST /api/update: 회사(playio) 폴더면 파일을 쓰지 않고 업데이트.command로 안내한다(경로 칸·바깥 저장소 remote)', { skip: !gitReady }, async (t) => {
+  const named = await startUpdateServer(t, { repoName: 'Playio-workspace' });
+  named.plist();
+  const byName = await named.post({ action: 'update' });
+  assert.equal(byName.ok, false);
+  assert.equal(byName.reason, 'relocate');
+  assert.equal(byName.message, '폴더를 옮겨야 하는 업데이트예요 — 업데이트.command를 더블클릭해 주세요');
+  assert.match(byName.updateFile, /Playio-workspace\/업데이트\.command$/);
+  assert.equal(fs.existsSync(named.request), false);
+
+  const nested = await startUpdateServer(t, { outer: 'git@github.com:PlayIO/company-docs.git' });
+  nested.plist();
+  const byRemote = await nested.post({ action: 'rollback' });
+  assert.equal(byRemote.reason, 'relocate', '바깥 저장소의 remote에 playio가 있으면 옮겨야 한다');
+  assert.equal(fs.existsSync(nested.request), false);
+
+  const plain = await startUpdateServer(t, { outer: 'https://github.com/someone/notes.git' });
+  plain.plist();
+  assert.equal((await plain.post({ action: 'update' })).ok, true, '그 밖의 바깥 저장소는 막지 않는다');
+});
+
+test('WP-D3 GET /api/update/status: 파일 없음·진행·실패를 정해 둔 칸만 옮겨 싣는다', async (t) => {
+  const app = await startUpdateServer(t);
+  const none = await app.status();
+  assert.equal(none.code, 200);
+  assert.equal(none.status, null);
+  assert.equal(none.pending, null);
+  assert.equal(none.running, false);
+  assert.match(none.updateFile, /업데이트\.command$/);
+
+  const now = new Date().toISOString();
+  const names = ['고친 파일 확인', '데이터 백업', '새 버전 받기', '데이터 형식 변환', '앱 다시 시작', '잘 떴는지 확인'];
+  fs.writeFileSync(app.statusFile, JSON.stringify({
+    action: 'update', from: '1.0.0', to: '1.1.0', step: 5, state: 'running', startedAt: now, updatedAt: now, secret: 'jira-secret-token',
+    steps: names.map((name, index) => ({ name, state: index < 4 ? 'done' : (index === 4 ? 'doing' : 'weird') })),
+  }));
+  const running = await app.status();
+  assert.equal(running.running, true);
+  assert.equal(running.status.step, 5);
+  assert.deepEqual(running.status.steps.map(step => step.state), ['done', 'done', 'done', 'done', 'doing', 'todo'], '모르는 단계 상태는 todo로');
+  assert.equal(running.status.secret, undefined, '정해 둔 칸 밖은 싣지 않는다');
+  assert.doesNotMatch(running.text, D3_SECRETS);
+
+  fs.writeFileSync(app.statusFile, JSON.stringify({ action: 'update', from: '1.0.0', to: '1.1.0', step: 6, state: 'failed', message: '앱이 응답하지 않아요',
+    startedAt: now, updatedAt: now, finishedAt: now, steps: names.map((name, index) => ({ name, state: index < 5 ? 'done' : 'failed' })) }));
+  const failed = await app.status();
+  assert.equal(failed.running, false);
+  assert.equal(failed.status.state, 'failed');
+  assert.equal(failed.status.message, '앱이 응답하지 않아요');
+  assert.doesNotMatch(failed.text, D3_SECRETS);
+});
+
+// update-runner.sh — 가짜 update.sh/setup.sh가 부른 순서와 받은 인자·환경만 적는다.
+function runnerFixture(t) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-d3-runner-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const workspace = path.join(root, 'workspace');
+  const install = path.join(root, 'install');
+  const trail = path.join(root, 'trail.txt');
+  fs.mkdirSync(workspace);
+  fs.mkdirSync(path.join(install, 'requests'), { recursive: true });
+  const fake = (name, extra = '') => writeExec(path.join(workspace, name),
+    `#!/bin/bash\necho "${name} $* status=\${WORKSPACE_UPDATE_STATUS:-} runner=\${WORKSPACE_UPDATE_RUNNER:-}" >> ${JSON.stringify(trail)}\n${extra}exit 0\n`);
+  fake('update.sh');
+  fake('setup.sh');
+  const request = path.join(install, 'requests', 'update.request');
+  const ask = action => fs.writeFileSync(request, `${JSON.stringify({ action, requestedAt: new Date().toISOString() })}\n`);
+  const run = () => runScript(automationScript('update-runner.sh'), [], { HOME: root, WORKSPACE_DIR: workspace, WORKSPACE_INSTALL_DIR: install });
+  const lines = () => (fs.existsSync(trail) ? fs.readFileSync(trail, 'utf8').trim().split('\n').filter(Boolean) : []);
+  const statusFile = path.join(install, 'update-status.json');
+  return { root, workspace, install, trail, fake, request, ask, run, lines, statusFile };
+}
+
+test('WP-D3 update-runner.sh: update면 update.sh --yes 다음 setup.sh, rollback이면 --rollback --yes만, 모르는 action은 아무것도 안 한다', (t) => {
+  const fix = runnerFixture(t);
+  fix.ask('update');
+  assert.equal(fix.run().status, 0);
+  assert.deepEqual(fix.lines(), ['update.sh --yes status=1 runner=', 'setup.sh  status= runner=1'],
+    'update.sh는 상태 파일을 쓰게, setup.sh는 update 에이전트를 다시 올리지 않게 부른다');
+  assert.equal(fs.existsSync(fix.request), false, '요청은 한 번만 처리한다(읽고 지운다)');
+  assert.equal(fs.existsSync(path.join(fix.install, 'logs', '.update.lock')), false, '잠금은 풀고 끝난다');
+  assert.match(fs.readFileSync(path.join(fix.install, 'logs', 'update.log'), 'utf8'), /update-runner update 종료 \(exit 0\)/);
+
+  fs.writeFileSync(fix.trail, '');
+  fix.ask('rollback');
+  assert.equal(fix.run().status, 0);
+  assert.deepEqual(fix.lines(), ['update.sh --rollback --yes status=1 runner='], '되돌리기는 setup.sh를 부르지 않는다');
+
+  // 모르는 값·다른 모양의 요청은 아무것도 하지 않는다(글자를 명령·경로로 쓰지 않는다)
+  fs.writeFileSync(fix.trail, '');
+  for (const body of ['{"action":"update; touch pwned","requestedAt":"2026-09-24T00:00:00.000Z"}\n', '{"action":"UPDATE","requestedAt":"2026-09-24T00:00:00.000Z"}\n',
+    '{"requestedAt":"2026-09-24T00:00:00.000Z","action":"update","x":1}\n', 'update\n']) {
+    fs.writeFileSync(fix.request, body);
+    assert.equal(fix.run().status, 0);
+  }
+  assert.deepEqual(fix.lines(), []);
+  assert.equal(fs.existsSync(path.join(fix.workspace, 'pwned')), false);
+  fs.unlinkSync(fix.request);
+  assert.equal(fix.run().status, 0, '요청 파일이 없으면(지운 것도 launchd를 깨운다) 조용히 끝난다');
+  assert.deepEqual(fix.lines(), []);
+});
+
+test('WP-D3 update-runner.sh: 한 번에 하나만 돌고(살아 있는 실행기가 쥔 잠금은 건너뜀), 죽은 잠금은 치우며, update.sh가 실패를 못 적고 멈추면 한 줄을 남긴다', async (t) => {
+  const fix = runnerFixture(t);
+  const lock = path.join(fix.install, 'logs', '.update.lock');
+  fs.mkdirSync(lock, { recursive: true });
+  // 명령줄에 update-runner가 보이는 프로세스 하나를 직접 띄워 잠금 주인으로 삼는다(끝날 때 그 자식만 끝낸다).
+  // (`sleep 30; true` — 명령 하나면 bash가 sleep으로 바꿔 끼워 명령줄에서 이름이 사라진다.)
+  const holder = spawn('/bin/bash', ['-c', 'sleep 30; true', 'update-runner'], { stdio: 'ignore' });
+  t.after(() => { if (holder.exitCode === null) holder.kill(); });
+  fs.writeFileSync(path.join(lock, 'pid'), `${holder.pid}\n`);
+  for (let i = 0; i < 40 && !/update-runner/.test(spawnSync('ps', ['-o', 'command=', '-p', String(holder.pid)], { encoding: 'utf8' }).stdout); i += 1) {
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  fix.ask('update');
+  assert.equal(fix.run().status, 0);
+  assert.deepEqual(fix.lines(), [], '도는 실행기가 있으면 건너뛴다');
+  assert.ok(fs.existsSync(fix.request), '건너뛴 요청은 그대로 남는다');
+  holder.kill();
+  await new Promise(resolve => holder.once('exit', resolve));
+
+  // 주인이 이미 없는 잠금 → 치우고 돈다
+  assert.equal(fix.run().status, 0);
+  assert.equal(fix.lines().length, 2);
+  assert.equal(fs.existsSync(lock), false);
+
+  // update.sh가 상태를 못 쓰고 실패 → 실행기가 고정 문구로 실패를 남기고, setup.sh는 부르지 않는다
+  fs.writeFileSync(fix.trail, '');
+  fix.fake('update.sh', 'exit 1\n');
+  fix.ask('update');
+  assert.equal(fix.run().status, 0);
+  assert.deepEqual(fix.lines(), ['update.sh --yes status=1 runner=']);
+  const failed = JSON.parse(fs.readFileSync(fix.statusFile, 'utf8'));
+  assert.equal(failed.state, 'failed');
+  assert.equal(failed.action, 'update');
+  assert.equal(failed.message, '업데이트를 끝내지 못했어요 — 업데이트.command를 더블클릭해 주세요');
+
+  // update.sh가 스스로 실패를 적었으면 그 이유를 덮어쓰지 않는다
+  fix.fake('update.sh', `printf '{"action":"update","state":"failed","message":"새 버전을 받아오지 못했어요","steps":[]}' > ${JSON.stringify(fix.statusFile)}\nexit 1\n`);
+  fix.ask('update');
+  fix.run();
+  assert.equal(JSON.parse(fs.readFileSync(fix.statusFile, 'utf8')).message, '새 버전을 받아오지 못했어요');
+
+  const script = fs.readFileSync(automationScript('update-runner.sh'), 'utf8');
+  assert.ok(!/rm -rf|pkill|killall|xargs kill|\bkill\b/.test(script), '지우기는 파일 하나·잠금은 rmdir, 프로세스는 끝내지 않는다');
+  assert.match(script, /^main "\$@"; exit \$\?$/m, '본문을 통째로 읽고 시작한다(복사본이 바뀌어도 안전)');
+});
+
+test('WP-D3 update.sh: WORKSPACE_UPDATE_STATUS가 있을 때만 단계마다 상태 파일을 쓴다', { skip: !gitReady }, (t) => {
+  const fix = updateFixture(t);
+  const statusFile = path.join(fix.root, 'install', 'update-status.json');
+  assert.equal(fix.run(['--yes']).status, 0);
+  assert.equal(fs.existsSync(statusFile), false, '터미널 실행(환경변수 없음)은 아무것도 쓰지 않는다');
+
+  const again = updateFixture(t);
+  const againStatus = path.join(again.root, 'install', 'update-status.json');
+  const result = again.run(['--yes'], { env: { WORKSPACE_UPDATE_STATUS: '1' } });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const done = JSON.parse(fs.readFileSync(againStatus, 'utf8'));
+  assert.equal(done.action, 'update');
+  assert.equal(done.state, 'done');
+  assert.equal(done.from, '1.0.0');
+  assert.equal(done.to, '1.1.0');
+  assert.equal(done.step, 6);
+  assert.deepEqual(done.steps.map(step => step.name), ['고친 파일 확인', '데이터 백업', '새 버전 받기', '데이터 형식 변환', '앱 다시 시작', '잘 떴는지 확인']);
+  assert.ok(done.steps.every(step => step.state === 'done'));
+  assert.ok(done.finishedAt);
+  assert.deepEqual(fs.readdirSync(path.dirname(againStatus)).filter(name => name.includes('.tmp-')), [], '임시 파일을 남기지 않는다');
+
+  // 되돌리기도 네 단계로 적는다
+  const back = again.run(['--rollback', '--yes'], { env: { WORKSPACE_UPDATE_STATUS: '1' } });
+  assert.equal(back.status, 0, back.stdout + back.stderr);
+  const rolled = JSON.parse(fs.readFileSync(againStatus, 'utf8'));
+  assert.equal(rolled.action, 'rollback');
+  assert.equal(rolled.state, 'done');
+  assert.equal(rolled.from, '1.1.0');
+  assert.equal(rolled.to, '1.0.0');
+  assert.deepEqual(rolled.steps.map(step => step.name), ['코드 되돌리기', '데이터 되돌리기', '앱 다시 시작', '잘 떴는지 확인']);
+});
+
+test('WP-D3 update.sh --yes: 6단계에서 앱이 응답하지 않으면 되돌리지 않고 상태 파일에 실패를 남긴다', { skip: !gitReady }, (t) => {
+  const fix = updateFixture(t);
+  const bin = path.join(fix.root, 'bin-down');
+  fs.mkdirSync(bin);
+  writeExec(path.join(bin, 'curl'), '#!/bin/bash\necho "{}"\n');
+  writeExec(path.join(bin, 'sleep'), '#!/bin/bash\nexit 0\n');
+  const result = fix.run(['--yes'], { env: { WORKSPACE_UPDATE_STATUS: '1', PATH: `${bin}:${path.join(fix.root, 'bin')}:${process.env.PATH}` } });
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /앱이 응답하지 않아요/);
+  assert.doesNotMatch(result.stdout, /이전 버전으로 되돌려요/, '묻지도, 스스로 되돌리지도 않는다');
+  assert.equal(fix.versionOf(), '1.1.0', '받은 버전 그대로 둔다 — 사람이 화면에서 되돌리기를 누른다');
+  assert.ok(fs.existsSync(path.join(fix.clone, '.workspace-last-good')), '되돌릴 자리는 남겨 둔다');
+  const failed = JSON.parse(fs.readFileSync(path.join(fix.root, 'install', 'update-status.json'), 'utf8'));
+  assert.equal(failed.state, 'failed');
+  assert.equal(failed.step, 6);
+  assert.equal(failed.message, '앱이 응답하지 않아요');
+  assert.deepEqual(failed.steps.map(step => step.state), ['done', 'done', 'done', 'done', 'done', 'failed']);
+
+  const script = fs.readFileSync(path.join(REPO_ROOT, 'update.sh'), 'utf8');
+  const tail = script.slice(script.indexOf('echo "[6/6] 잘 떴는지 확인"'));
+  assert.match(tail, /if \[ "\$ASSUME_YES" = "1" \]; then\n  ANSWER="n"/, '--yes는 되돌리기 질문에 n');
+  assert.ok(tail.indexOf('status_write failed "앱이 응답하지 않아요"') < tail.indexOf('ANSWER="n"'));
+  assert.match(script, /status_write\(\) \{\n  \[ -n "\$\{WORKSPACE_UPDATE_STATUS:-\}" \] \|\| return 0/, '환경변수가 없으면 쓰지 않는다');
+  assert.match(script, /cp "\$APP_DIR\/automation\/update-runner\.sh" "\$INSTALL_DIR\/"/, '받은 뒤 실행기 복사본도 갱신한다');
+});
+
+// setup.sh는 실행하지 않는다 — 조각을 문자열로 확인하고, 마무리 세 줄 조각만 가짜 `open`으로 돌려 본다.
+test('WP-D3 setup.sh: update 에이전트를 늘 등록하고(실행기 안에서는 다시 올리지 않음), 끝은 세 줄 + WORKSPACE_OPEN_APP일 때만 앱을 연다', (t) => {
+  const script = fs.readFileSync(path.join(REPO_ROOT, 'setup.sh'), 'utf8');
+  assert.match(script, /<string>\$LABEL\.update<\/string>/);
+  assert.match(script, /<string>\$\(xml_escape "\$INSTALL_DIR\/update-runner\.sh"\)<\/string>/);
+  assert.match(script, /<string>\$\(xml_escape "\$INSTALL_DIR\/requests\/update\.request"\)<\/string>/);
+  const plist = script.slice(script.indexOf('cat > "$AGENTS_DIR/$LABEL.update.plist"'), script.indexOf('# 업무 데이터 백업'));
+  assert.match(plist, /<key>RunAtLoad<\/key>\n  <false\/>/);
+  const intro = script.slice(script.indexOf('# 앱 안 `업데이트 받기`'), script.indexOf('cat > "$AGENTS_DIR/$LABEL.update.plist"'));
+  assert.ok(intro.length > 0 && !/USE_(SLACK|CAL|JIRA|TIRO)/.test(intro), '연동과 무관하게 늘');
+  assert.match(script, /"\$APP_DIR\/automation\/update-runner\.sh" "\$APP_DIR\/automation\/app-refresh\.sh" "\$INSTALL_DIR\/"/, '실행기도 설치 위치로 복사한다');
+  assert.match(script, /if \[ "\$\{WORKSPACE_UPDATE_RUNNER:-\}" = "1" \]; then\n  ok "update 그대로 \(지금 도는 업데이트\)"\nelse\n  launchctl unload "\$UPDATE_PLIST"/);
+  assert.match(script, /\[ "\$f" = "server" \] && \[ "\$\{WORKSPACE_UPDATE_RUNNER:-\}" = "1" \] && \[ "\$OLD_SERVER_PLIST" = "\$\(cat "\$plist"\)" \]/,
+    '실행기 안에서는 내용이 그대로인 서버를 다시 올리지 않는다(update.sh가 이미 새 코드로 다시 띄웠다)');
+  // 남은 일(/mcp)은 Claude 갈래 연동이 켜져 있을 때만 — 지라는 앱이 직접 읽는다
+  const connect = script.slice(script.indexOf('CONNECT=""'), script.indexOf('# 마무리 세 줄'));
+  assert.ok(!connect.includes('USE_JIRA'), '지라는 /mcp가 필요 없다');
+  assert.match(connect, /if \[ -n "\$CONNECT" \]; then/);
+
+  const ending = script.slice(script.indexOf('# 마무리 세 줄'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-d3-setup-end-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const bin = path.join(home, 'bin');
+  fs.mkdirSync(bin);
+  const opened = path.join(home, 'opened.txt');
+  writeExec(path.join(bin, 'open'), `#!/bin/bash\necho "$*" >> ${JSON.stringify(opened)}\n`);
+  const bundle = path.join(home, 'Applications', 'Workspace.app');
+  fs.mkdirSync(bundle, { recursive: true });
+  const end = open => spawnSync('/bin/bash', ['-c', `APP_BUNDLE=${JSON.stringify(bundle)}\n${ending}`], {
+    encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, WORKSPACE_OPEN_APP: open },
+  });
+  const install = end('1');
+  assert.equal(install.stdout, '✓ 설치를 끝냈어요 — 앱이 열려요.\n처음 열 때 "확인되지 않은 개발자"가 뜨면\n우클릭 → 열기 한 번.\n');
+  assert.equal(fs.readFileSync(opened, 'utf8').trim(), bundle, 'Dock 앱 하나만 연다');
+  fs.unlinkSync(opened);
+  const update = end('');
+  assert.equal(update.stdout, '✓ 설치를 끝냈어요.\n처음 열 때 "확인되지 않은 개발자"가 뜨면\n우클릭 → 열기 한 번.\n');
+  assert.equal(fs.existsSync(opened), false, '업데이트 때는 열지 않는다');
+  assert.ok(!/pkill|killall|xargs kill/.test(script));
+});
+
+// make-team-installer.sh — 임시 저장소에 스크립트를 복사해 돌린다(origin 주소는 적어 두기만 하고 받지 않는다).
+const dittoReady = process.platform === 'darwin' && fs.existsSync('/usr/bin/ditto');
+function teamFixture(t, config, { origin = 'https://github.com/someone/workspace.git' } = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-d3-team-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const repo = path.join(root, 'repo');
+  const out = path.join(root, 'out');
+  fs.mkdirSync(repo);
+  fs.mkdirSync(out);
+  fs.copyFileSync(path.join(REPO_ROOT, 'make-team-installer.sh'), path.join(repo, 'make-team-installer.sh'));
+  fs.writeFileSync(path.join(repo, 'workspace.config.json'), JSON.stringify(config, null, 2));
+  runGit(repo, ['init', '-q', '-b', 'main']);
+  if (origin) runGit(repo, ['remote', 'add', 'origin', origin]);
+  const run = () => spawnSync('/bin/bash', [path.join(repo, 'make-team-installer.sh'), out], { encoding: 'utf8', env: { ...process.env, HOME: root } });
+  const zip = path.join(out, '워크스페이스-설치.zip');
+  const unpack = () => {
+    const dir = fs.mkdtempSync(path.join(root, 'unzip-'));
+    assert.equal(spawnSync('/usr/bin/ditto', ['-x', '-k', zip, dir]).status, 0);
+    return path.join(dir, '설치.command');
+  };
+  return { root, repo, out, run, zip, unpack };
+}
+const TEAM_SECRET_CONFIG = {
+  title: '비밀 제목',
+  integrations: { slack: true, jira: true, calendar: true },
+  slack: { workspaceUrl: 'https://myco.slack.com', appUrl: 'https://api.slack.com/apps/A0SECRETAPP', tokenFile: '~/.config/SECRET-slack-token',
+    channels: { todo: { id: 'C0SECRETCH', name: '#secret-todo' } } },
+  jira: { siteUrl: 'https://myco.atlassian.net', email: 'me@secret-mail.test', displayName: '비밀이름', tokenFile: '~/.config/SECRET-jira-token' },
+  calendar: { source: 'ical', icalFile: '/secret/ical-file' },
+  server: { updateChannel: 'main', extraHost: 'secret-host.ts.net', chromeProfile: 'Profile 9', dockName: 'SecretDock', port: 4999 },
+};
+const TEAM_SECRETS = /SECRET|secret|비밀|Profile 9|4999|ical|C0SECRETCH/;
+
+test('WP-D3 make-team-installer.sh: 허용 목록 값만 담고(규칙에 어긋난 값은 빼고 알림), zip 안 설치.command는 실행 권한이 있으며, 이미 있으면 덮어쓰지 않는다', { skip: !(gitReady && dittoReady) }, (t) => {
+  const fix = teamFixture(t, TEAM_SECRET_CONFIG);
+  const made = fix.run();
+  assert.equal(made.status, 0, made.stdout + made.stderr);
+  assert.ok(fs.existsSync(fix.zip));
+  assert.match(made.stdout, /저장소 : https:\/\/github\.com\/someone\/workspace\.git/);
+  assert.match(made.stdout, /slack\.workspaceUrl = https:\/\/myco\.slack\.com/);
+  assert.match(made.stdout, /slack\.appUrl = https:\/\/api\.slack\.com\/apps\/A0SECRETAPP/);
+  assert.match(made.stdout, /jira\.siteUrl = https:\/\/myco\.atlassian\.net/);
+  assert.match(made.stdout, /server\.updateChannel = stable/, '내 설정이 main이어도 팀은 stable');
+  assert.doesNotMatch(made.stdout.replace(/A0SECRETAPP/g, ''), TEAM_SECRETS, '화면에 보여 주는 값도 허용 목록뿐');
+
+  const command = fix.unpack();
+  assert.ok(fs.statSync(command).mode & 0o100, 'zip을 풀어도 실행 권한이 남아 있다');
+  const text = fs.readFileSync(command, 'utf8');
+  assert.equal(spawnSync('/bin/bash', ['-n', command]).status, 0, '생성된 파일은 bash 문법이 맞다');
+  const team = JSON.parse(/^TEAM_CONFIG='(.*)'$/m.exec(text)[1]);
+  assert.deepEqual(team, {
+    slack: { workspaceUrl: 'https://myco.slack.com', appUrl: 'https://api.slack.com/apps/A0SECRETAPP' },
+    jira: { siteUrl: 'https://myco.atlassian.net' },
+    server: { updateChannel: 'stable' },
+  }, '허용 목록 네 칸만');
+  assert.doesNotMatch(text.replace(/A0SECRETAPP/g, ''), TEAM_SECRETS, '토큰·토큰 파일·이메일·이름·채널·extraHost·chromeProfile·제목·Dock 이름·캘린더·포트는 없다');
+  assert.doesNotMatch(text, /me@|tokenFile|displayName|extraHost|chromeProfile|dockName|icalFile|channels/);
+  assert.match(text, /^REPO_URL='https:\/\/github\.com\/someone\/workspace\.git'$/m);
+  assert.match(text, /^CHANNEL='stable'$/m);
+
+  // 같은 이름이 이미 있으면 멈추고 그대로 둔다
+  const before = fs.statSync(fix.zip).mtimeMs;
+  const again = fix.run();
+  assert.equal(again.status, 1);
+  assert.match(again.stdout, /이미 있어요 — 옮기거나 이름을 바꾼 뒤 다시 실행해 주세요\(덮어쓰지 않아요\)/);
+  assert.equal(fs.statSync(fix.zip).mtimeMs, before);
+
+  // 규칙에 어긋난 값은 그 값만 뺀다
+  const odd = teamFixture(t, { slack: { workspaceUrl: 'http://myco.slack.com', appUrl: 'https://evil.test/apps/A1' }, jira: { siteUrl: 'https://myco.atlassian.net.evil.test' }, server: { updateChannel: 'nightly' } });
+  const oddRun = odd.run();
+  assert.equal(oddRun.status, 0, oddRun.stdout + oddRun.stderr);
+  for (const key of ['slack\\.workspaceUrl', 'slack\\.appUrl', 'jira\\.siteUrl']) {
+    assert.match(oddRun.stdout, new RegExp(`! ${key} — 규칙에 맞지 않아 뺐어요`));
+  }
+  const oddText = fs.readFileSync(odd.unpack(), 'utf8');
+  assert.deepEqual(JSON.parse(/^TEAM_CONFIG='(.*)'$/m.exec(oddText)[1]), { server: { updateChannel: 'stable' } }, '갈래가 없거나 이상하면 stable');
+  assert.doesNotMatch(oddText, /evil|http:\/\/myco/);
+
+  // 저장소 주소는 github.com https만
+  const ssh = teamFixture(t, {}, { origin: 'git@github.com:someone/workspace.git' });
+  const sshRun = ssh.run();
+  assert.equal(sshRun.status, 1);
+  assert.match(sshRun.stdout, /origin이 https:\/\/github\.com\/… 주소가 아니에요/);
+  assert.equal(fs.existsSync(ssh.zip), false);
+
+  const script = fs.readFileSync(path.join(REPO_ROOT, 'make-team-installer.sh'), 'utf8');
+  assert.ok(!/rm -rf|pkill|killall|xargs kill/.test(script));
+  assert.match(script, /ditto -c -k --sequesterRsrc/);
+});
+
+test('WP-D3 설치.command: 새로 받기 · 이미 같은 저장소면 이어 가기 · 다른 폴더면 멈춤 · 설정은 빈 팀 칸만 채움 · node가 없으면 안내', { skip: !(gitReady && dittoReady) }, (t) => {
+  const fix = teamFixture(t, { slack: { workspaceUrl: 'https://myco.slack.com' }, jira: { siteUrl: 'https://myco.atlassian.net' }, server: { updateChannel: 'stable' } });
+  assert.equal(fix.run().status, 0);
+  const command = fix.unpack();
+
+  // 가짜 git — clone이면 폴더와 .git, 이 앱의 예시 설정·가짜 setup.sh를 둔다. 네트워크에 닿지 않는다.
+  const bin = path.join(fix.root, 'fakebin');
+  const trail = path.join(fix.root, 'git-trail.txt');
+  const seed = path.join(fix.root, 'seed');
+  fs.mkdirSync(bin);
+  fs.mkdirSync(seed);
+  fs.copyFileSync(path.join(REPO_ROOT, 'workspace.config.example.json'), path.join(seed, 'workspace.config.example.json'));
+  writeExec(path.join(seed, 'setup.sh'), `#!/bin/bash\necho "setup $(pwd -P) open=\${WORKSPACE_OPEN_APP:-}" >> ${JSON.stringify(trail)}\n`);
+  writeExec(path.join(bin, 'git'), `#!/bin/bash
+echo "git $*" >> ${JSON.stringify(trail)}
+case "$1" in
+  --version) echo "git version 2.0-fake" ;;
+  clone) shift; [ "$1" = "--quiet" ] && shift; mkdir -p "$2/.git"; echo "$1" > "$2/.git/origin-url"; cp ${JSON.stringify(seed)}/* "$2/" ;;
+  -C) dir="$2"; shift 2
+      case "$1" in
+        remote) cat "$dir/.git/origin-url" 2>/dev/null || exit 2 ;;
+        tag) printf 'v1.2.0\\nv1.10.0\\nv1.9.3\\n' ;;
+        checkout) : ;;
+        *) exit 1 ;;
+      esac ;;
+  *) exit 1 ;;
+esac
+`);
+  fs.symlinkSync(process.execPath, path.join(bin, 'node'));
+  const install = (home, pathValue = `${bin}:/usr/bin:/bin`) => spawnSync('/bin/bash', [command], { encoding: 'utf8', input: '', env: { HOME: home, PATH: pathValue, TMPDIR: os.tmpdir() } });
+  const log = () => (fs.existsSync(trail) ? fs.readFileSync(trail, 'utf8') : '');
+
+  // 1) 새로 받기 — stable이면 가장 높은 태그(v1.10.0)로, 설정은 예시 + 팀 값, 끝에 WORKSPACE_OPEN_APP=1 setup.sh
+  const home = path.join(fix.root, 'home1');
+  fs.mkdirSync(home);
+  const fresh = install(home);
+  assert.equal(fresh.status, 0, fresh.stdout + fresh.stderr);
+  const target = path.join(home, 'workspace');
+  assert.match(log(), /git clone --quiet https:\/\/github\.com\/someone\/workspace\.git /);
+  assert.match(log(), /checkout --detach --quiet v1\.10\.0/, '숫자로 가장 높은 태그');
+  assert.ok(log().includes(`setup ${fs.realpathSync(target)} open=1`), log());
+  const config = JSON.parse(fs.readFileSync(path.join(target, 'workspace.config.json'), 'utf8'));
+  assert.equal(config.slack.workspaceUrl, 'https://myco.slack.com', '예시의 자리 표시를 팀 값으로');
+  assert.equal(config.jira.siteUrl, 'https://myco.atlassian.net');
+  assert.equal(config.server.updateChannel, 'stable');
+  assert.equal(config.jira.email, '나@내회사.com', '팀 값이 아닌 칸은 예시 그대로');
+  assert.ok(config.title.endsWith('워크스페이스'));
+
+  // 2) 이미 같은 저장소 — 새로 받지 않고, 설정은 비어 있는(또는 자리 표시) 팀 칸만 채운다
+  fs.writeFileSync(trail, '');
+  fs.writeFileSync(path.join(target, 'workspace.config.json'), JSON.stringify({ title: '내 제목', slack: { workspaceUrl: 'https://other.slack.com' }, jira: { siteUrl: '' }, server: { port: 4400 } }));
+  const resume = install(home);
+  assert.equal(resume.status, 0, resume.stdout + resume.stderr);
+  assert.doesNotMatch(log(), /git clone/);
+  assert.match(resume.stdout, /이미 받아 뒀어요 — 그대로 이어서 설치해요/);
+  const kept = JSON.parse(fs.readFileSync(path.join(target, 'workspace.config.json'), 'utf8'));
+  assert.deepEqual(kept, { title: '내 제목', slack: { workspaceUrl: 'https://other.slack.com' }, jira: { siteUrl: 'https://myco.atlassian.net' }, server: { port: 4400, updateChannel: 'stable' } });
+  assert.match(log(), /setup .* open=1/);
+
+  // 3) ~/workspace에 다른 것이 있으면 멈춘다(아무것도 부르지 않는다)
+  fs.writeFileSync(trail, '');
+  const other = path.join(fix.root, 'home2');
+  fs.mkdirSync(path.join(other, 'workspace'), { recursive: true });
+  fs.writeFileSync(path.join(other, 'workspace', 'memo.txt'), '내 파일\n');
+  const blocked = install(other);
+  assert.equal(blocked.status, 1);
+  assert.match(blocked.stdout, /~\/workspace가 이미 있어요 — 이름을 바꾼 뒤 다시 실행해 주세요/);
+  assert.doesNotMatch(log(), /git clone|setup /);
+  assert.deepEqual(fs.readdirSync(path.join(other, 'workspace')), ['memo.txt']);
+
+  // 4) node가 없으면 설치 방법 한 줄을 알리고 멈춘다
+  const bare = path.join(fix.root, 'bare-bin');
+  fs.mkdirSync(bare);
+  fs.symlinkSync(path.join(bin, 'git'), path.join(bare, 'git'));
+  const home3 = path.join(fix.root, 'home3');
+  fs.mkdirSync(home3);
+  const noNode = install(home3, `${bare}:/usr/bin:/bin`);
+  assert.equal(noNode.status, 1);
+  assert.match(noNode.stdout, /Node가 없어요 — https:\/\/nodejs\.org 에서 LTS를 설치한 뒤/);
+  assert.equal(fs.existsSync(path.join(home3, 'workspace')), false);
+  const text = fs.readFileSync(command, 'utf8');
+  assert.match(text, /xcode-select --install/);
+  assert.match(text, /WORKSPACE_OPEN_APP=1 bash setup\.sh/);
+});

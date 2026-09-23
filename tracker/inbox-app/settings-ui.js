@@ -180,7 +180,7 @@ async function renderAutomationStatus() {
 
 // ---------- 설정 > 상태 맨 아래: 앱 정보 · 새 버전 · 문제 보고 ----------
 // 어떤 버전을 쓰고 있는지, 저장소에서 벗어났는지, 새 버전이 나왔는지를 조용한 한 줄로만 말한다.
-// 앱이 스스로 업데이트를 돌리지는 않는다(DECISIONS 2026-09-23) — `업데이트.command`를 안내한다.
+// 새 버전이 있으면 그 자리에서 `업데이트 받기`를 누를 수 있다(요청 파일 + launchd — 아래 "앱 안에서 업데이트 받기").
 let settingsAbout = null;
 let settingsIntegrations = null;
 
@@ -192,10 +192,6 @@ function settingsVersionNewer(current, latest) {
   const next = parse(latest);
   for (let i = 0; i < 3; i += 1) if ((next[i] || 0) !== (now[i] || 0)) return (next[i] || 0) > (now[i] || 0);
   return false;
-}
-
-function settingsHasUpdate() {
-  return !!(settingsAbout && settingsAbout.latest && settingsVersionNewer(settingsAbout.version, settingsAbout.latest.tag));
 }
 
 async function settingsAboutLoad() {
@@ -262,9 +258,7 @@ async function settingsReportCopy(button, { lead = '', done = '복사했어요 �
   button.disabled = false;
 }
 
-const SETTINGS_UPDATE_HOW = ['이 앱 폴더의 업데이트.command를 더블클릭하세요', '처음이면 우클릭 → 열기'];
-
-// 자리만 먼저 세운다(값은 settingsAboutFill이 채운다). 조용한 글자 한 줄 + 문제 보고 버튼.
+// 자리만 먼저 세운다(값은 settingsAboutFill이 채운다). 조용한 글자 한 줄 + (새 버전이면) 업데이트 받기 + 문제 보고 버튼.
 function settingsAboutSection() {
   const section = document.createElement('div');
   section.className = 'd-dsec d-about';
@@ -281,19 +275,9 @@ function settingsAboutSection() {
   files.hidden = true;
 
   const update = document.createElement('div');
-  update.className = 'd-abnew';
-  update.id = 'settingsAboutNew';
+  update.className = 'd-abwrap';
+  update.id = 'settingsAboutUpdate';
   update.hidden = true;
-
-  const how = document.createElement('div');
-  how.className = 'd-abhow';
-  how.id = 'settingsAboutHow';
-  how.hidden = true;
-  SETTINGS_UPDATE_HOW.forEach((text) => {
-    const row = document.createElement('div');
-    row.textContent = text;
-    how.appendChild(row);
-  });
 
   const report = document.createElement('button');
   report.type = 'button';
@@ -306,7 +290,7 @@ function settingsAboutSection() {
   hint.className = 'd-hint';
   hint.textContent = '버전·연동 상태·최근 오류만 복사해요(업무 내용은 들어가지 않아요).';
 
-  section.append(line, files, update, how, report, hint);
+  section.append(line, files, update, report, hint);
   return section;
 }
 
@@ -344,24 +328,280 @@ function settingsAboutFill() {
     });
   }
 
-  const update = document.getElementById('settingsAboutNew');
-  const how = document.getElementById('settingsAboutHow');
-  if (!update || !how) return;
-  update.replaceChildren();
-  update.hidden = !settingsHasUpdate();
-  how.hidden = true;
-  if (!settingsHasUpdate()) return;
-  update.appendChild(document.createTextNode(`새 버전 ${info.latest.tag}이 있어요 · `));
-  const link = document.createElement('button');
-  link.type = 'button';
-  link.className = 'd-ablink';
-  link.textContent = '업데이트 방법';
-  link.setAttribute('aria-expanded', 'false');
-  link.addEventListener('click', () => {
-    how.hidden = !how.hidden;
-    link.setAttribute('aria-expanded', String(!how.hidden));
+  // 도는 업데이트가 있으면(창을 다시 열었거나 상태 탭이 다시 그려졌을 때) 그 진행을 그대로 이어 보여 준다.
+  if (settingsUpdateRun) { settingsUpdatePaint(settingsUpdateRun.view); return; }
+  const offer = settingsUpdateOffer(info);
+  settingsUpdatePaint(offer ? { kind: 'offer', offer } : { kind: 'none' });
+  settingsUpdateResume();
+}
+
+// ---------- 설정 › 상태: 앱 안에서 업데이트 받기(시안 J) ----------
+// 서버는 업데이트를 직접 돌리지 않는다 — `POST /api/update`가 요청 표시 파일 하나를 쓰면 launchd가 실행기를 돌리고,
+// 화면은 `GET /api/update/status`를 2초마다 읽어 진행 목록을 그린다. 5단계(앱 다시 시작) 동안 서버가 잠깐 없으면
+// `다시 켜는 중…`으로 두고 계속 묻다가(최대 3분) 다시 응답하면 상태 파일로 마무리한다. 실패해도 스스로 되돌리지
+// 않는다 — `이전 버전으로 되돌리기`(확인 줄 한 번)를 사람이 누른다(DECISIONS 2026-09-24).
+const SETTINGS_UPDATE_STEPS = {
+  update: ['고친 파일 확인', '데이터 백업', '새 버전 받기', '데이터 형식 변환', '앱 다시 시작', '잘 떴는지 확인'],
+  rollback: ['코드 되돌리기', '데이터 되돌리기', '앱 다시 시작', '잘 떴는지 확인'],
+};
+const SETTINGS_UPDATE_POLL_MS = 2000;
+const SETTINGS_UPDATE_GIVE_UP_MS = 3 * 60 * 1000;
+const SETTINGS_UPDATE_WORDS = {
+  quiet: '데이터는 먼저 백업하고 받아요. 1분쯤 걸려요.',
+  restarting: '다시 켜는 중…',
+  gone: '앱이 응답하지 않아요 — 업데이트.command를 더블클릭해 주세요',
+  confirm: '이전 버전과 업데이트 직전 백업으로 돌아가요',
+  unreachable: '서버에 닿지 못했어요 — 앱이 켜져 있는지 확인해 주세요.',
+};
+const SETTINGS_STEP_MARK = { done: ['done', '✓'], doing: ['now', '⟳'], todo: ['wait', '·'], failed: ['fail', '✕'] };
+// { action, from, to, askedAt, downSince, timer, view } — 한 번에 하나만.
+let settingsUpdateRun = null;
+
+// 새 버전이 있으면 { available, label, changesUrl }. 서버가 판단한 `update`를 먼저 보고, 옛 서버면 태그로 견준다.
+function settingsUpdateOffer(info) {
+  if (!info) return null;
+  if (info.update && typeof info.update === 'object') return info.update.available ? info.update : null;
+  return info.latest && settingsVersionNewer(info.version, info.latest.tag)
+    ? { available: true, label: info.latest.tag, changesUrl: null } : null;
+}
+
+function settingsHasUpdate() {
+  return !!settingsUpdateOffer(settingsAbout);
+}
+
+const settingsBareVersion = value => String(value || '').trim().replace(/^v/, '');
+
+// 진행 목록 한 벌 — 상태 파일의 단계가 있으면 그대로, 아직 없으면(요청만 한 참) 첫 단계를 도는 중으로.
+function settingsUpdateSteps(action, status) {
+  if (status && Array.isArray(status.steps) && status.steps.length) return status.steps;
+  return (SETTINGS_UPDATE_STEPS[action] || SETTINGS_UPDATE_STEPS.update).map((name, index) => ({ name, state: index === 0 ? 'doing' : 'todo' }));
+}
+
+function settingsUpdateList(steps) {
+  const list = document.createElement('ul');
+  list.className = 'd-abprog';
+  steps.forEach((step) => {
+    const [cls, mark] = SETTINGS_STEP_MARK[step.state] || SETTINGS_STEP_MARK.todo;
+    const row = document.createElement('li');
+    row.className = cls;
+    const icon = document.createElement('span');
+    icon.className = 'ic';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.textContent = mark;
+    row.append(icon, document.createTextNode(step.name));
+    list.appendChild(row);
   });
-  update.appendChild(link);
+  return list;
+}
+
+// 경로 한 줄 + 복사(설정 › 꾸미기의 `업데이트 파일`과 같은 값 — GET /api/about의 updateFile).
+function settingsUpdateFileLine(file) {
+  const path = file || (settingsAbout && settingsAbout.updateFile) || '';
+  return path ? settingsCodeLine(path) : null;
+}
+
+// 상자 하나를 그린다. view.kind: none · offer · progress · done · failed · gone · blocked.
+function settingsUpdateNodes(view) {
+  const kind = view && view.kind;
+  if (kind === 'offer') {
+    const box = settingsEl('d-abupd');
+    const text = document.createElement('span');
+    text.className = 'tx';
+    const label = view.offer.label;
+    text.textContent = label && label !== 'main' ? `새 버전 ${label}이 있어요` : '새 버전이 있어요 (main)';
+    box.append(text, settingsButton('업데이트 받기', 'd-btn sm pri', () => settingsUpdateAsk('update')));
+    if (typeof view.offer.changesUrl === 'string' && /^https:\/\/github\.com\//.test(view.offer.changesUrl)) {
+      box.appendChild(settingsOutLink('무엇이 바뀌었나요 ↗', view.offer.changesUrl, 'd-ablink'));
+    }
+    return [box, settingsEl('d-ismall d-abquiet', SETTINGS_UPDATE_WORDS.quiet)];
+  }
+  if (kind === 'progress') {
+    const run = view.run;
+    const head = run.action === 'rollback'
+      ? '이전 버전으로 되돌리는 중이에요'
+      : `v${settingsBareVersion(run.from) || '?'} → ${run.to ? `v${settingsBareVersion(run.to)}` : '새 버전'}`;
+    const nodes = [settingsEl('d-abline d-abhead', head), settingsUpdateList(view.steps)];
+    if (view.down) nodes.push(settingsEl('d-quiet d-abquiet', SETTINGS_UPDATE_WORDS.restarting));
+    return nodes;
+  }
+  if (kind === 'done') {
+    const box = settingsEl('d-abupd');
+    const text = document.createElement('span');
+    text.className = 'tx';
+    const to = settingsBareVersion(view.to);
+    text.textContent = view.action === 'rollback'
+      ? `${to ? `v${to}으로` : '이전 버전으로'} 되돌렸어요`
+      : `${to ? `v${to}으로` : '새 버전으로'} 바꿨어요`;
+    // 화면 파일이 바뀌었으니 눌러서 다시 불러온다.
+    box.append(text, settingsButton('새로고침', 'd-btn sm pri', () => { if (typeof location !== 'undefined') location.reload(); }));
+    return [box];
+  }
+  if (kind === 'failed') {
+    const box = settingsEl('d-abfail');
+    const text = document.createElement('span');
+    text.className = 'tx';
+    const reason = view.message || '이유를 알 수 없어요';
+    if (view.action === 'rollback') {
+      text.textContent = `되돌리지 못했어요 — ${reason}`;
+      box.appendChild(text);
+      const nodes = [box, settingsEl('d-ismall d-abquiet', '업데이트.command를 더블클릭해 주세요')];
+      const file = settingsUpdateFileLine(view.updateFile);
+      if (file) nodes.push(file);
+      return nodes;
+    }
+    text.textContent = `업데이트하지 못했어요 — ${reason}`;
+    box.appendChild(text);
+    if (!view.confirming) {
+      box.appendChild(settingsButton('이전 버전으로 되돌리기', 'd-btn sm dng', () => settingsUpdatePaint({ ...view, confirming: true })));
+      return [box];
+    }
+    const confirm = settingsEl('d-iconfirm');
+    const words = document.createElement('span');
+    words.className = 'tx';
+    words.textContent = SETTINGS_UPDATE_WORDS.confirm;
+    confirm.append(words,
+      settingsButton('취소', 'd-btn sm', () => settingsUpdatePaint({ ...view, confirming: false })),
+      settingsButton('되돌리기', 'd-btn sm dng', () => settingsUpdateAsk('rollback')));
+    return [box, confirm];
+  }
+  if (kind === 'gone' || kind === 'blocked') {
+    const box = settingsEl(kind === 'gone' ? 'd-abfail' : 'd-abupd is-plain');
+    const text = document.createElement('span');
+    text.className = 'tx';
+    text.textContent = kind === 'gone' ? SETTINGS_UPDATE_WORDS.gone : (view.message || SETTINGS_UPDATE_WORDS.unreachable);
+    box.appendChild(text);
+    const file = view.showFile === false ? null : settingsUpdateFileLine(view.updateFile);
+    return file ? [box, file] : [box];
+  }
+  return [];
+}
+
+function settingsUpdatePaint(view) {
+  if (settingsUpdateRun) settingsUpdateRun.view = view;
+  const box = document.getElementById('settingsAboutUpdate');
+  if (!box) return;
+  const nodes = settingsUpdateNodes(view);
+  box.replaceChildren(...nodes);
+  box.hidden = !nodes.length;
+  // 확인 줄이 서면 초점은 `되돌리기`로(키보드로 바로 이어 가게).
+  if (view && view.confirming) {
+    const confirm = nodes[1];
+    const yes = confirm && confirm.children && confirm.children[confirm.children.length - 1];
+    if (yes && typeof yes.focus === 'function') yes.focus();
+  }
+}
+
+function settingsUpdateStop() {
+  if (settingsUpdateRun && settingsUpdateRun.timer) clearTimeout(settingsUpdateRun.timer);
+  settingsUpdateRun = null;
+}
+
+// `업데이트 받기`·`되돌리기` — 서버에 요청 파일 하나를 부탁한다. 막히면 그 이유를, 이미 돌고 있으면 그 진행을 보여 준다.
+async function settingsUpdateAsk(action) {
+  const box = document.getElementById('settingsAboutUpdate');
+  // 두 번 눌리지 않게 상자 안 버튼을 잠근다(HTMLCollection이라 펼쳐서 돈다).
+  [...((box && box.children) || [])].forEach((node) => {
+    [...(node.children || [])].forEach((kid) => { if (kid && kid.tagName === 'BUTTON') kid.disabled = true; });
+  });
+  let data = null;
+  try {
+    const response = await fetch('/api/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ action }),
+    });
+    try { data = await response.json(); } catch { data = null; }
+  } catch { data = null; }
+  if (!data || typeof data !== 'object') { settingsUpdatePaint({ kind: 'blocked', message: SETTINGS_UPDATE_WORDS.unreachable, showFile: false }); return; }
+  if (data.ok) { settingsUpdateFollow(action, null, Date.now()); return; }
+  if (data.reason === 'running') {
+    settingsUpdateFollow((data.status && data.status.action) || (data.pending && data.pending.action) || action, data.status, 0);
+    return;
+  }
+  settingsUpdatePaint({ kind: 'blocked', message: data.message, updateFile: data.updateFile, showFile: !!data.updateFile });
+}
+
+// 진행을 따라가기 시작한다. askedAt(방금 요청했으면 그 시각)보다 앞선 옛 상태 파일은 이번 것이 아니라 무시한다.
+function settingsUpdateFollow(action, status, askedAt) {
+  settingsUpdateStop();
+  const offer = settingsUpdateOffer(settingsAbout);
+  settingsUpdateRun = {
+    action,
+    from: (status && status.from) || (settingsAbout && settingsAbout.version) || '',
+    to: (status && status.to) || (action === 'update' && offer && offer.label !== 'main' ? offer.label : ''),
+    askedAt,
+    downSince: null,
+    timer: null,
+    view: null,
+  };
+  settingsUpdatePaint({ kind: 'progress', run: settingsUpdateRun, steps: settingsUpdateSteps(action, status), down: false });
+  settingsUpdateRun.timer = setTimeout(settingsUpdatePoll, SETTINGS_UPDATE_POLL_MS);
+}
+
+// 이번 실행의 상태인가 — 방금 요청했으면 그 뒤에 시작한 것만(같은 맥의 시계라 5초 여유만 둔다).
+function settingsUpdateFresh(run, status) {
+  if (!status) return false;
+  if (!run.askedAt) return true;
+  const started = Date.parse(status.startedAt || '');
+  return Number.isFinite(started) && started >= run.askedAt - 5000;
+}
+
+async function settingsUpdatePoll() {
+  const run = settingsUpdateRun;
+  if (!run) return;
+  run.timer = null;
+  let data = null;
+  try {
+    const response = await fetch('/api/update/status', { headers: { Accept: 'application/json' } });
+    if (response.ok) data = await response.json();
+  } catch { data = null; }
+  if (settingsUpdateRun !== run) return;
+  const steps = (run.view && run.view.steps) || settingsUpdateSteps(run.action, null);
+  if (!data || typeof data !== 'object') {
+    // 앱이 다시 켜지는 중 — 조용히 기다리다 3분이 넘으면 업데이트.command로 안내한다.
+    run.downSince = run.downSince || Date.now();
+    if (Date.now() - run.downSince > SETTINGS_UPDATE_GIVE_UP_MS) {
+      settingsUpdateStop();
+      settingsUpdatePaint({ kind: 'gone' });
+      return;
+    }
+    settingsUpdatePaint({ kind: 'progress', run, steps, down: true });
+    run.timer = setTimeout(settingsUpdatePoll, SETTINGS_UPDATE_POLL_MS);
+    return;
+  }
+  run.downSince = null;
+  const status = settingsUpdateFresh(run, data.status) ? data.status : null;
+  if (!status && run.askedAt && Date.now() - run.askedAt > SETTINGS_UPDATE_GIVE_UP_MS) {
+    // 요청은 받았는데 3분이 지나도 실행기가 시작하지 않았다 — 업데이트.command로 안내한다.
+    settingsUpdateStop();
+    settingsUpdatePaint({ kind: 'gone', updateFile: data.updateFile });
+    return;
+  }
+  if (status && status.from) run.from = status.from;
+  if (status && status.to) run.to = status.to;
+  if (status && status.state === 'done') {
+    settingsUpdateStop();
+    settingsUpdatePaint({ kind: 'done', action: status.action || run.action, to: status.to || run.to });
+    return;
+  }
+  if (status && status.state === 'failed') {
+    settingsUpdateStop();
+    settingsUpdatePaint({ kind: 'failed', action: status.action || run.action, message: status.message, updateFile: data.updateFile });
+    return;
+  }
+  settingsUpdatePaint({ kind: 'progress', run, steps: settingsUpdateSteps(run.action, status), down: false });
+  run.timer = setTimeout(settingsUpdatePoll, SETTINGS_UPDATE_POLL_MS);
+}
+
+// 상태 탭을 열 때 한 번 — 다른 창에서 시작했거나 창을 닫았다 연 경우에도 도는 업데이트를 이어 보여 준다.
+async function settingsUpdateResume() {
+  let data = null;
+  try {
+    const response = await fetch('/api/update/status', { headers: { Accept: 'application/json' } });
+    if (response.ok) data = await response.json();
+  } catch { data = null; }
+  if (!data || !data.running || settingsUpdateRun) return;
+  settingsUpdateFollow((data.status && data.status.action) || (data.pending && data.pending.action) || 'update', data.status, 0);
 }
 
 // 접히는 기록 묶음 하나(지금 실패 중이면 `최근 기록`, 해결된 과거 실패는 `지난 문제 N건`).
@@ -2044,8 +2284,8 @@ const SETTINGS_FAQ = [
       '<b>삭제한 항목</b> 탭에서 되살려요. 지운 항목은 원문 그대로 남고 저절로 사라지는 건 없어요. <b>완전히 지우기</b>만 되돌릴 수 없어서 한 번 더 물어봐요.'],
     ['앱이 이상하게 동작하면', '없음',
       '<b>상태</b> 탭 맨 아래 <b>문제 보고</b>를 누르면 버전·연동 상태·최근 오류 줄이 클립보드에 복사돼요. 업무 내용은 들어가지 않으니 그대로 슬랙에 붙여 넣어 주세요.'],
-    ['새 버전은 어떻게 받나요', '없음',
-      '새 버전이 나오면 <b>상태</b> 탭 맨 아래에 알려 줘요. 앱 폴더의 <b>업데이트.command</b>를 더블클릭하면 백업 → 받기 → 다시 시작까지 알아서 해요(앱이 스스로 업데이트하지는 않아요).'],
+    ['앱에서 업데이트하기', '없음',
+      '새 버전이 나오면 <b>상태</b> 탭 맨 아래에 <b>업데이트 받기</b>가 떠요. 누르면 데이터 백업 → 받기 → 다시 시작 → 확인까지 1분쯤 걸리고, 진행을 그 자리에서 보여 줘요. 끝나면 <b>새로고침</b>을 눌러 주세요. 실패하면 저절로 되돌리지 않고 <b>이전 버전으로 되돌리기</b>를 보여 줘요. 폴더를 옮겨야 하거나 처음 한 번은 앱 폴더의 <b>업데이트.command</b>를 더블클릭해요.'],
   ]],
 ];
 

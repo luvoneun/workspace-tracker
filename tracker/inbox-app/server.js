@@ -1734,21 +1734,41 @@ function compareVersions(a, b) {
   return 0;
 }
 
-// 새 버전이 나왔는지 원격의 태그만 읽어 본다(설정과 무관하게 돈다 — 연동을 다 끈 사람도 업데이트는 받는다).
-// 실패해도 조용히 지나가고, 파일은 쓰지 않는다.
-async function checkLatestRelease() {
-  if (remoteChecking) return;
+// 새 버전이 나왔는지 원격에 묻는다(설정과 무관하게 돈다 — 연동을 다 끈 사람도 업데이트는 받는다).
+// stable 갈래는 원격 태그 중 가장 높은 것, main 갈래는 원격 main의 커밋이 지금 HEAD와 다르고 이 저장소에
+// 아직 없는 커밋인지를 본다. 쓰는 git은 읽기 전용(`ls-remote`·`rev-parse`)뿐이고, 실패해도 조용히 지나가며 파일은 쓰지 않는다.
+const REMOTE_STALE_MS = 30 * 60 * 1000;   // 상태 탭을 열 때 이보다 묵었으면 한 번 더 묻는다
+let remoteCheckedAt = 0;                  // 마지막으로 원격에 물어본 때(성공·실패 무관)
+let remoteCheckRun = null;                // 지금 도는 확인(같은 때 두 번 묻지 않는다)
+let latestMain = null;                    // { sha, newer, checkedAt } — main 갈래일 때만
+
+const updateChannel = () => (CONFIG.server?.updateChannel === 'main' ? 'main' : 'stable');
+
+async function checkLatestMain() {
+  const out = await git(['ls-remote', 'origin', 'refs/heads/main'], 10000);
+  const match = out && /^([0-9a-f]{40,64})\s+refs\/heads\/main$/m.exec(out);
+  if (!match) return latestMain;
+  const sha = match[1];
+  const head = String((await git(['rev-parse', 'HEAD'])) || '').trim();
+  // 이 저장소가 이미 그 커밋을 갖고 있으면(내가 앞서 있거나 방금 받음) 새 버전이 아니다.
+  const have = await git(['rev-parse', '--verify', '--quiet', `${sha}^{commit}`]);
+  return { sha, newer: !!head && sha !== head && !have, checkedAt: new Date().toISOString() };
+}
+
+function checkLatestRelease() {
+  if (remoteCheckRun) return remoteCheckRun;
   remoteChecking = true;
-  try {
+  remoteCheckedAt = Date.now();
+  remoteCheckRun = (async () => {
     const out = await git(['ls-remote', '--tags', 'origin'], 10000);
-    if (!out) return;
-    const tags = [...out.matchAll(/refs\/tags\/(v\d+\.\d+\.\d+)(?:\^\{\})?$/gm)].map((match) => match[1]);
-    if (!tags.length) return;
-    const tag = tags.sort(compareVersions)[tags.length - 1];
-    latestRelease = { tag, checkedAt: new Date().toISOString() };
-  } finally {
+    const tags = out ? [...out.matchAll(/refs\/tags\/(v\d+\.\d+\.\d+)(?:\^\{\})?$/gm)].map((match) => match[1]) : [];
+    if (tags.length) latestRelease = { tag: tags.sort(compareVersions)[tags.length - 1], checkedAt: new Date().toISOString() };
+    if (updateChannel() === 'main') latestMain = await checkLatestMain();
+  })().catch(() => {}).finally(() => {
     remoteChecking = false;
-  }
+    remoteCheckRun = null;
+  });
+  return remoteCheckRun;
 }
 
 function startRemoteCheck() {
@@ -1758,11 +1778,46 @@ function startRemoteCheck() {
   checkLatestRelease();
 }
 
-async function aboutApp() {
+// 상태 탭을 열 때(= /api/about) 확인이 30분 넘게 묵었으면 한 번 더 묻고, 도는 확인은 5초까지만 기다린다.
+async function freshRemoteCheck() {
+  if (process.env.WORKSPACE_NO_REMOTE_CHECK) return;
   startRemoteCheck();
-  const [modified, ref] = await Promise.all([gitModified(), git(['rev-parse', '--short', 'HEAD'])]);
+  if (Date.now() - remoteCheckedAt > REMOTE_STALE_MS) checkLatestRelease();
+  if (!remoteCheckRun) return;
+  let timer = null;
+  await Promise.race([remoteCheckRun, new Promise((resolve) => { timer = setTimeout(resolve, 5000); })]);
+  clearTimeout(timer);
+}
+
+// `무엇이 바뀌었나요 ↗` — 원격(origin)이 github.com일 때만 주소를 만든다(그 밖이면 null → 화면에서 숨김).
+// 소유자/저장소 이름만 뽑아 주소를 새로 짓는다(원격 주소에 섞인 다른 글자는 싣지 않는다).
+function changesUrlFrom(remotes, channel) {
+  const match = typeof remotes === 'string' && /^origin\s+(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?\s+\(fetch\)$/m.exec(remotes);
+  if (!match) return null;
+  return `https://github.com/${match[1]}/${match[2]}/${channel === 'main' ? 'commits/main' : 'releases'}`;
+}
+async function changesUrl(channel) {
+  return changesUrlFrom(await git(['remote', '-v']), channel);
+}
+
+// 설정 › 상태의 `업데이트 받기`가 쓰는 한 덩어리 — 새 버전이 있는지와 무엇으로 부를지.
+function updateOffer(version, channel) {
+  if (channel === 'main') {
+    return { available: !!(latestMain && latestMain.newer), label: 'main', checkedAt: latestMain ? latestMain.checkedAt : null };
+  }
+  const tag = latestRelease && latestRelease.tag;
+  return { available: !!(tag && version && compareVersions(tag, version) > 0), label: tag || null, checkedAt: latestRelease ? latestRelease.checkedAt : null };
+}
+
+const updateCommandPath = () => personalize.tildePath(path.join(REPO_DIR, '업데이트.command'), os.homedir());
+
+async function aboutApp() {
+  await freshRemoteCheck();
+  const channel = updateChannel();
+  const [modified, ref, changes] = await Promise.all([gitModified(), git(['rev-parse', '--short', 'HEAD']), changesUrl(channel)]);
+  const version = appVersion();
   return {
-    version: appVersion(),
+    version,
     dataFormat: DATA_FORMAT_VERSION,
     channel: CONFIG.server?.updateChannel || 'stable',
     // launchd가 KeepAlive로 띄운 자리에는 setup.sh가 이 표시를 넣어 둔다(개발용 서버·픽스처에는 없다).
@@ -1770,11 +1825,102 @@ async function aboutApp() {
     gitRef: ref ? ref.trim() : null,
     modified,
     latest: latestRelease,
+    update: { ...updateOffer(version, channel), changesUrl: changes },
     // 설정 › 꾸미기 › 앱 위치 — 사람이 Finder의 `폴더로 이동`에 붙여 넣을 경로(홈은 `~`로 줄인다).
     // 서버는 Finder를 열거나 프로세스를 띄우지 않고 글자만 준다.
     appBundle: `~/Applications/${currentDockName()}.app`,
-    updateFile: personalize.tildePath(path.join(REPO_DIR, '업데이트.command'), os.homedir()),
+    updateFile: updateCommandPath(),
   };
+}
+
+// ---------- 앱 안에서 업데이트 받기 (POST /api/update · GET /api/update/status) ----------
+// 서버는 업데이트를 **직접 돌리지 않는다**(프로세스를 띄우지 않는다 — 지금 가져오기와 같은 원칙). 요청 표시 파일
+// `requests/update.request`(action·requestedAt) 하나만 쓰고, 그걸 지켜보던 launchd(`com.workspace.app.update`)가
+// 설치 위치 복사본의 `update-runner.sh`를 돌린다. 진행 상황은 update.sh가 `update-status.json`에 단계마다 쓰고,
+// 서버는 그 파일을 읽어 주기만 한다. 실패해도 자동으로 되돌리지 않는다(사람이 `이전 버전으로 되돌리기`를 누른다).
+const UPDATE_ACTIONS = ['update', 'rollback'];
+const UPDATE_RUNNING_MS = 10 * 60 * 1000;
+const UPDATE_STEP_STATES = ['done', 'doing', 'todo', 'failed'];
+const UPDATE_MESSAGE = {
+  action: '무엇을 할지 확인해 주세요.',
+  relocate: '폴더를 옮겨야 하는 업데이트예요 — 업데이트.command를 더블클릭해 주세요',
+  notInstalled: '처음 한 번은 업데이트.command로 받아 주세요',
+  running: '이미 업데이트하는 중이에요',
+};
+const updateRequestPath = () => path.join(automationDir(), 'requests', 'update.request');
+const updateStatusPath = () => path.join(automationDir(), 'update-status.json');
+
+function readJsonFile(file) {
+  try { return JSON.parse(nativeFs.readFileSync(file, 'utf8')); } catch { return null; }
+}
+const shortText = (value, max = 200) => (typeof value === 'string' && value ? value.slice(0, max) : null);
+
+// 상태 파일은 정해 둔 칸만 옮겨 싣는다(다른 글자가 섞여 있어도 응답으로 나가지 않는다).
+function readUpdateStatus() {
+  const raw = readJsonFile(updateStatusPath());
+  if (!raw || typeof raw !== 'object') return null;
+  let mtime = null;
+  try { mtime = nativeFs.statSync(updateStatusPath()).mtime.toISOString(); } catch { mtime = null; }
+  const steps = Array.isArray(raw.steps) ? raw.steps.slice(0, 8)
+    .filter(step => step && typeof step.name === 'string')
+    .map(step => ({ name: step.name.slice(0, 40), state: UPDATE_STEP_STATES.includes(step.state) ? step.state : 'todo' })) : [];
+  return {
+    action: raw.action === 'rollback' ? 'rollback' : 'update',
+    from: shortText(raw.from, 40),
+    to: shortText(raw.to, 40),
+    step: Number.isInteger(raw.step) ? raw.step : 0,
+    steps,
+    state: ['running', 'done', 'failed'].includes(raw.state) ? raw.state : 'failed',
+    message: shortText(raw.message),
+    startedAt: shortText(raw.startedAt, 40),
+    updatedAt: shortText(raw.updatedAt, 40) || mtime,
+    finishedAt: shortText(raw.finishedAt, 40),
+  };
+}
+
+// 요청했는데 아직 실행기가 집어 가지 않은 것(실행기는 읽자마자 요청 파일을 지운다).
+function readUpdateRequest() {
+  const raw = readJsonFile(updateRequestPath());
+  if (!raw || !UPDATE_ACTIONS.includes(raw.action)) return null;
+  return { action: raw.action, requestedAt: shortText(raw.requestedAt, 40) };
+}
+
+const updateRecent = (iso) => { const at = Date.parse(iso || ''); return Number.isFinite(at) && Date.now() - at < UPDATE_RUNNING_MS; };
+function updateInProgress(status, pending) {
+  if (status && status.state === 'running' && updateRecent(status.updatedAt)) return true;
+  return !!(pending && updateRecent(pending.requestedAt));
+}
+
+function updateStatusView() {
+  const status = readUpdateStatus();
+  const pending = readUpdateRequest();
+  return { ok: true, status, pending, running: updateInProgress(status, pending), updateFile: updateCommandPath() };
+}
+
+// 회사(playio) 폴더 안인가 — install-location.sh와 같은 규칙(실제 경로 칸에 playio, 또는 바깥 저장소 remote에 playio).
+// 바깥 저장소는 읽기 전용 git(`rev-parse --show-toplevel`·`remote -v`)으로만 본다.
+async function installNeedsMove() {
+  let real;
+  try { real = nativeFs.realpathSync(REPO_DIR); } catch { return false; }
+  if (/playio/i.test(real)) return true;
+  const top = String((await git(['-C', path.dirname(real), 'rev-parse', '--show-toplevel'])) || '').trim();
+  if (!top) return false;
+  return /playio/i.test(String((await git(['-C', top, 'remote', '-v'])) || ''));
+}
+
+// 막는 경우는 파일을 쓰지 않고 이유를 200 `ok:false`로 돌려준다(브라우저 콘솔 오류를 남기지 않게).
+// 모르는 action만 400이다.
+async function requestUpdate(action) {
+  if (!UPDATE_ACTIONS.includes(action)) return fetchFail(400, 'action', UPDATE_MESSAGE.action);
+  const view = updateStatusView();
+  if (view.running) return fetchAnswer(200, { ...view, ok: false, reason: 'running', message: UPDATE_MESSAGE.running });
+  if (await installNeedsMove()) return fetchAnswer(200, { ok: false, reason: 'relocate', message: UPDATE_MESSAGE.relocate, updateFile: view.updateFile });
+  if (!launchAgentInstalled('update')) return fetchAnswer(200, { ok: false, reason: 'not-installed', message: UPDATE_MESSAGE.notInstalled, updateFile: view.updateFile });
+  const requestedAt = new Date().toISOString();
+  const file = updateRequestPath();
+  nativeFs.mkdirSync(path.dirname(file), { recursive: true });
+  nativeFs.writeFileSync(file, `${JSON.stringify({ action, requestedAt })}\n`);
+  return fetchAnswer(200, { ok: true, action, requestedAt });
 }
 
 // 지금 Dock 이름(`server.dockName`, 없거나 규칙에 안 맞으면 `Workspace`). 설정을 새로 읽는다.
@@ -2203,6 +2349,26 @@ const handleRequest = (req, res) => {
       res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ ok: false, error: '앱 정보를 읽지 못했어요.' }));
     });
+    return;
+  }
+
+  // 앱 안에서 업데이트 받기 — 서버는 요청 표시 파일 하나만 쓰고(launchd가 실행기를 돌린다), 진행은 상태 파일을 읽어 준다.
+  if (url.pathname === '/api/update' && req.method === 'POST') {
+    readBody(req)
+      .then(body => requestUpdate(body && typeof body === 'object' ? body.action : ''))
+      .then(({ status, body }) => {
+        res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(body));
+      })
+      .catch(() => {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, reason: 'action', message: UPDATE_MESSAGE.action }));
+      });
+    return;
+  }
+  if (url.pathname === '/api/update/status' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify(updateStatusView()));
     return;
   }
 
@@ -2896,4 +3062,4 @@ if (require.main === module) {
 
 // `jiraLive`·`attentionLive`·`calendarLive`는 화면 확인용 픽스처가 "뜰 때 한 번 읽기"를 직접 켜 보려고 함께 내보낸다
 // (테스트·픽스처 밖에서는 쓰지 않는다 — 운영에서는 위의 `start()`가 켠다).
-module.exports = { server, jiraLive, attentionLive, calendarLive, setExitForTests };
+module.exports = { server, jiraLive, attentionLive, calendarLive, setExitForTests, changesUrlFrom };

@@ -182,7 +182,7 @@ mkdir -p "$INSTALL_DIR/logs"
 # 앱이 "미팅 노트 가져오기"를 요청할 때 표시 파일 하나를 남기는 자리. 앱 서버는 프로세스를 띄우지
 # 않고 이 파일만 쓰고, 그걸 지켜보던 launchd 에이전트가 실행한다.
 mkdir -p "$INSTALL_DIR/requests"
-cp "$APP_DIR/automation/run-task.sh" "$APP_DIR/automation/slack-capture.sh" "$APP_DIR/automation/backup-data.sh" "$APP_DIR/automation/install-location.sh" "$APP_DIR/automation/app-refresh.sh" "$INSTALL_DIR/"
+cp "$APP_DIR/automation/run-task.sh" "$APP_DIR/automation/slack-capture.sh" "$APP_DIR/automation/backup-data.sh" "$APP_DIR/automation/install-location.sh" "$APP_DIR/automation/update-runner.sh" "$APP_DIR/automation/app-refresh.sh" "$INSTALL_DIR/"
 chmod +x "$INSTALL_DIR"/*.sh
 ok "$INSTALL_DIR 에 복사"
 # 복사본은 저장소 밖에서 돌기 때문에 "내 워크스페이스가 어디인지"를 따로 알려 줘야 한다.
@@ -402,6 +402,38 @@ cat > "$AGENTS_DIR/$LABEL.app-refresh.plist" << PLIST
 </plist>
 PLIST
 
+# 앱 안 `업데이트 받기` — 일정표가 없다. 설정 › 상태에서 `업데이트 받기`·`이전 버전으로 되돌리기`를 누르면 앱 서버가
+# 요청 표시 파일 하나를 쓰고(프로세스는 띄우지 않는다), launchd가 그걸 보고 update-runner.sh를 한 번 돌린다.
+# 연동과 무관하게 늘 등록한다. 실행기가 도는 중에는(WORKSPACE_UPDATE_RUNNER=1) 이 등록을 다시 올리지 않는다 — 올리면 그 실행이 끊긴다.
+cat > "$AGENTS_DIR/$LABEL.update.plist" << PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>$LABEL.update</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>$(xml_escape "$INSTALL_DIR/update-runner.sh")</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>WORKSPACE_DIR</key>
+    <string>$(xml_escape "$WORKSPACE")</string>
+  </dict>
+  <key>WatchPaths</key>
+  <array>
+    <string>$(xml_escape "$INSTALL_DIR/requests/update.request")</string>
+  </array>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>StandardErrorPath</key>
+  <string>$(xml_escape "$INSTALL_DIR/logs/update.err")</string>
+</dict>
+</plist>
+PLIST
+
 # 업무 데이터 백업 — 하루 한 번(19:30). tracker/의 데이터는 코드 저장소에서 제외돼 있어서
 # 따로 백업한다. 백업 저장 공간($INSTALL_DIR/data-backup.git)을 만들어 둔 경우에만 등록한다
 # (만드는 법은 tracker/inbox-app/README.md의 "업무 데이터 백업").
@@ -435,6 +467,8 @@ PLIST
 fi
 
 # 앱 서버 — 로그인하면 뜨고, 꺼지면 다시 뜬다
+# 앱 안 업데이트(실행기)에서 부를 때는 update.sh가 이미 새 코드로 다시 띄웠으므로, 내용이 그대로면 다시 올리지 않는다.
+OLD_SERVER_PLIST="$(cat "$AGENTS_DIR/$LABEL.server.plist" 2>/dev/null)"
 cat > "$AGENTS_DIR/$LABEL.server.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -501,9 +535,22 @@ for f in server slack-capture calendar-sync tiro-sync data-backup app-refresh sl
   plist="$AGENTS_DIR/$LABEL.$f.plist"
   [ -f "$plist" ] || continue
   plutil -lint "$plist" >/dev/null 2>&1 || die "설정 파일 형식 오류: $f"
+  if [ "$f" = "server" ] && [ "${WORKSPACE_UPDATE_RUNNER:-}" = "1" ] && [ "$OLD_SERVER_PLIST" = "$(cat "$plist")" ]; then
+    ok "server 그대로 (업데이트가 이미 다시 시작했어요)"
+    continue
+  fi
   launchctl unload "$plist" 2>/dev/null
   launchctl load "$plist" 2>/dev/null && ok "$f 등록"
 done
+# 앱 안 업데이트 실행기 — 그 실행기 안에서 부른 setup.sh면 다시 올리지 않는다(올리면 도는 실행이 끊긴다).
+UPDATE_PLIST="$AGENTS_DIR/$LABEL.update.plist"
+plutil -lint "$UPDATE_PLIST" >/dev/null 2>&1 || die "설정 파일 형식 오류: update"
+if [ "${WORKSPACE_UPDATE_RUNNER:-}" = "1" ]; then
+  ok "update 그대로 (지금 도는 업데이트)"
+else
+  launchctl unload "$UPDATE_PLIST" 2>/dev/null
+  launchctl load "$UPDATE_PLIST" 2>/dev/null && ok "update 등록"
+fi
 
 # ─────────────────────────────────────────────
 echo
@@ -520,27 +567,35 @@ fi
 
 # ─────────────────────────────────────────────
 echo
-echo "설치를 끝냈어요"
-echo
 echo "  앱 주소   : $URL"
 [ -n "$EXTRA_HOST" ] && echo "  다른 기기 : http://$EXTRA_HOST:$PORT"
 echo "  Dock 추가 : $APP_BUNDLE 을 Dock으로 끌어다 놓으세요"
-echo "  업데이트  : 이 폴더의 업데이트.command를 더블클릭"
-echo
-echo "  처음 열 때 \"확인되지 않은 개발자\"가 뜨면 앱을 우클릭 → 열기 를 한 번만 해 주세요."
-echo "  연동은 앱의 설정 > 연동에서 켤 수 있어요."
+echo "  업데이트  : 앱의 설정 > 상태에서 받거나, 이 폴더의 업데이트.command를 더블클릭"
+echo "  연동      : 앱의 설정 > 연동에서 켤 수 있어요"
+[ -n "$EXTRA_HOST" ] || echo "  폰에서    : Tailscale 설치 후 workspace.config.json의 server.extraHost에 주소 입력"
 echo
 echo "  자동화 상태 확인 : launchctl list | grep workspace.app"
 echo "  로그             : $INSTALL_DIR/logs/"
 echo
+# /mcp 연결은 Claude Code로 도는 연동(슬랙 수집·캘린더 Claude 갈래·티로)이 켜져 있을 때만 알린다.
+# 지라·캘린더 비밀 주소는 앱이 직접 읽으므로 Claude 연결이 필요 없다.
 CONNECT=""
 [ "$USE_SLACK" = "yes" ] && CONNECT="$CONNECT 슬랙"
 [ "$USE_CAL_SYNC" = "yes" ] && CONNECT="$CONNECT 구글캘린더"
-[ "$USE_JIRA" = "yes" ] && CONNECT="$CONNECT 지라(Atlassian)"
 [ "$USE_TIRO" = "yes" ] && CONNECT="$CONNECT 티로(tiro-mcp)"
-if [ -n "$CONNECT" ] || [ -z "$EXTRA_HOST" ]; then
+if [ -n "$CONNECT" ]; then
   echo "  남은 일:"
-  [ -n "$CONNECT" ] && echo "   · Claude Code에서$CONNECT 를 본인 계정으로 연결 (/mcp)"
-  [ -n "$EXTRA_HOST" ] || echo "   · 폰에서 보려면 Tailscale 설치 후 workspace.config.json의 server.extraHost에 주소 입력"
+  echo "   · Claude Code에서$CONNECT 를 본인 계정으로 연결 (/mcp)"
   echo
 fi
+
+# 마무리 세 줄. 팀 설치 파일(설치.command)은 WORKSPACE_OPEN_APP=1을 줘서 Dock 앱을 바로 연다
+# (업데이트 때는 열지 않는다).
+if [ "${WORKSPACE_OPEN_APP:-}" = "1" ] && [ -d "$APP_BUNDLE" ]; then
+  echo "✓ 설치를 끝냈어요 — 앱이 열려요."
+  open "$APP_BUNDLE" >/dev/null 2>&1 || true
+else
+  echo "✓ 설치를 끝냈어요."
+fi
+echo "처음 열 때 \"확인되지 않은 개발자\"가 뜨면"
+echo "우클릭 → 열기 한 번."

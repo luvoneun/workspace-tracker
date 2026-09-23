@@ -7450,3 +7450,222 @@ test('WP-D2.5 도움말: `지금 바로 새로 가져오고 싶어요` 문답이
   assert.match(found[2], /1분에 한 번/);
   assert.match(found[2], /다시 연결/);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WP-D3 — 설정 › 상태의 `업데이트 받기`(시안 J): 새 버전 줄 · 진행 목록 · 다시 켜는 중 · 성공/실패 · 되돌리기 확인 줄
+
+// 상태 읽기(`/api/update/status`)는 `status()`가 그때그때 주는 값(없으면 서버가 꺼진 것처럼 실패),
+// `POST /api/update`는 꽂아 둔 답을 차례로 쓴다. 타이머는 모아 두기만 한다 — 묻기는 테스트가 직접 부른다.
+function updateClient(about, { status = () => ({ ok: true, status: null, pending: null, running: false, updateFile: '~/workspace/업데이트.command' }), replies = [] } = {}) {
+  const app = settingsClient({});
+  const sent = [];
+  const copied = [];
+  const state = { status };
+  app.context.navigator = { clipboard: { writeText: async (text) => { copied.push(text); } }, platform: 'MacIntel' };
+  app.context.setTimeout = () => 0;
+  app.context.clearTimeout = () => {};
+  app.context.fetch = async (url, options = {}) => {
+    sent.push({ url: String(url), body: options.body ? JSON.parse(options.body) : null });
+    if (String(url) === '/api/update/status') {
+      const body = state.status();
+      if (!body) throw new Error('서버가 꺼져 있다');
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    const next = replies.shift() || { body: { ok: true } };
+    return new Response(JSON.stringify(next.body), { status: next.status || 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  app.run(NODE_SHAPE);
+  app.run(`window.findByClass = (node, cls) => {
+    const hits = [];
+    const walk = (one) => { if (one && String(one.className || '').split(' ').includes(cls)) hits.push(one); ((one && one.children) || []).forEach(walk); };
+    walk(node);
+    return hits;
+  };`);
+  app.run(`settingsAbout = ${JSON.stringify(about)}; settingsUpdateStop();`);
+  const box = () => app.nodes.get('settingsAboutUpdate');
+  const text = () => JSON.parse(app.run("JSON.stringify(window.shapeOf(document.getElementById('settingsAboutUpdate')))")).text;
+  const find = cls => app.run(`window.findByClass(document.getElementById('settingsAboutUpdate'), ${JSON.stringify(cls)})`);
+  const button = label => find('d-btn').concat(find('d-ablink')).find(one => one.textContent === label);
+  const steps = () => JSON.parse(app.run(`JSON.stringify(window.findByClass(document.getElementById('settingsAboutUpdate'), 'd-abprog')[0].children.map(li => [li.className, li.children[0].textContent, li.children[1].textContent]))`));
+  const flush = () => new Promise(resolve => setImmediate(resolve));
+  const poll = async () => { await app.run('settingsUpdatePoll()'); await flush(); };
+  return { app, sent, copied, state, box, text, find, button, steps, flush, poll };
+}
+const D3_ABOUT = {
+  version: '1.0.0', install: 'managed', channel: 'stable', modified: [], latest: { tag: 'v1.1.0' },
+  update: { available: true, label: 'v1.1.0', changesUrl: 'https://github.com/someone/workspace/releases' },
+  updateFile: '~/workspace/업데이트.command',
+};
+const D3_NAMES = ['고친 파일 확인', '데이터 백업', '새 버전 받기', '데이터 형식 변환', '앱 다시 시작', '잘 떴는지 확인'];
+const d3Status = (state, step, extra = {}) => ({
+  ok: true, running: state === 'running', pending: null, updateFile: '~/workspace/업데이트.command',
+  status: {
+    action: 'update', from: '1.0.0', to: '1.1.0', step, state, startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    steps: D3_NAMES.map((name, index) => ({ name, state: index + 1 < step ? 'done' : (index + 1 === step ? (state === 'failed' ? 'failed' : (state === 'done' ? 'done' : 'doing')) : 'todo') })),
+    ...extra,
+  },
+});
+
+test('WP-D3 새 버전 줄: `새 버전 v1.1.0이 있어요` + 업데이트 받기 + 무엇이 바뀌었나요 ↗ + 조용한 줄, 없으면 비운다', async () => {
+  const fx = updateClient(D3_ABOUT);
+  fx.app.run('settingsAboutFill()');
+  await fx.flush();
+  assert.equal(fx.app.nodes.get('settingsAboutLine').children.map(one => one.textContent).join(''), '워크스페이스 v1.0.0 · 설치본');
+  assert.equal(fx.box().hidden, false);
+  assert.equal(fx.text(), '새 버전 v1.1.0이 있어요업데이트 받기무엇이 바뀌었나요 ↗데이터는 먼저 백업하고 받아요. 1분쯤 걸려요.');
+  assert.equal(fx.button('업데이트 받기').className, 'd-btn sm pri', '주 버튼');
+  const link = fx.button('무엇이 바뀌었나요 ↗');
+  assert.equal(link.href, 'https://github.com/someone/workspace/releases');
+  assert.equal(link.target, '_blank');
+  assert.ok(fx.sent.some(one => one.url === '/api/update/status'), '열 때 도는 업데이트가 있는지 한 번 묻는다');
+
+  // main 갈래 · github가 아니면 링크 숨김
+  const main = updateClient({ ...D3_ABOUT, channel: 'main', update: { available: true, label: 'main', changesUrl: null } });
+  main.app.run('settingsAboutFill()');
+  assert.match(main.text(), /^새 버전이 있어요 \(main\)업데이트 받기데이터는/);
+  assert.equal(main.button('무엇이 바뀌었나요 ↗'), undefined);
+
+  // 새 버전이 없으면 지금처럼 조용한 한 줄만(상자는 비고 숨는다)
+  const none = updateClient({ ...D3_ABOUT, update: { available: false, label: 'v1.0.0', changesUrl: null } });
+  none.app.run('settingsAboutFill()');
+  assert.equal(none.box().hidden, true);
+  assert.equal(none.box().children.length, 0);
+  assert.equal(none.app.run('settingsHasUpdate()'), false);
+
+  // 옛 서버(update 칸 없음)는 태그로 견준다
+  const old = updateClient({ version: '1.0.0', install: 'managed', latest: { tag: 'v1.2.0' } });
+  assert.equal(old.app.run('settingsHasUpdate()'), true);
+  old.app.run('settingsAboutFill()');
+  assert.match(old.text(), /^새 버전 v1\.2\.0이 있어요업데이트 받기데이터는/);
+});
+
+test('WP-D3 진행 목록: 누르면 요청하고 ✓/⟳/· 목록을 그리며, 앱이 다시 켜지는 동안은 `다시 켜는 중…`, 끝나면 `v1.1.0으로 바꿨어요` + 새로고침', async () => {
+  const fx = updateClient(D3_ABOUT);
+  fx.app.run('settingsAboutFill()');
+  await fx.flush();
+  fx.button('업데이트 받기').listeners.click();
+  await fx.flush();
+  const post = fx.sent.find(one => one.url === '/api/update');
+  assert.deepEqual(post.body, { action: 'update' });
+  assert.match(fx.text(), /^v1\.0\.0 → v1\.1\.0/);
+  same(fx.steps(), D3_NAMES.map((name, index) => (index === 0 ? ['now', '⟳', name] : ['wait', '·', name])), '요청만 한 참에는 첫 단계를 도는 중');
+
+  fx.state.status = () => d3Status('running', 5);
+  await fx.poll();
+  same(fx.steps().map(([cls, mark]) => `${cls}${mark}`), ['done✓', 'done✓', 'done✓', 'done✓', 'now⟳', 'wait·']);
+  assert.doesNotMatch(fx.text(), /다시 켜는 중/);
+
+  // 5단계 — 서버가 잠깐 없다
+  fx.state.status = () => null;
+  await fx.poll();
+  assert.match(fx.text(), /⟳앱 다시 시작·잘 떴는지 확인다시 켜는 중…$/, '목록은 그대로, 그 아래 한 줄');
+  same(fx.steps().map(([cls]) => cls), ['done', 'done', 'done', 'done', 'now', 'wait']);
+
+  // 다시 응답 → 상태 파일로 마무리
+  fx.state.status = () => d3Status('done', 6);
+  await fx.poll();
+  assert.equal(fx.text(), 'v1.1.0으로 바꿨어요새로고침');
+  assert.equal(fx.button('새로고침').className, 'd-btn sm pri');
+  assert.equal(fx.app.run('settingsUpdateRun'), null, '끝나면 더 묻지 않는다');
+});
+
+test('WP-D3 방금 요청했는데 읽힌 옛 상태 파일(지난 실행의 done)은 이번 것으로 보지 않는다', async () => {
+  const fx = updateClient(D3_ABOUT);
+  fx.app.run('settingsAboutFill()');
+  fx.button('업데이트 받기').listeners.click();
+  await fx.flush();
+  fx.state.status = () => d3Status('done', 6, { startedAt: new Date(Date.now() - 3600000).toISOString() });
+  await fx.poll();
+  assert.match(fx.text(), /^v1\.0\.0 → v1\.1\.0/, '아직 진행 목록');
+  assert.notEqual(fx.app.run('settingsUpdateRun'), null);
+});
+
+test('WP-D3 실패: 빨간 한 줄 + `이전 버전으로 되돌리기` → 확인 줄 한 번 → 되돌리기 요청과 네 단계 진행', async () => {
+  const fx = updateClient(D3_ABOUT);
+  fx.app.run('settingsAboutFill()');
+  fx.button('업데이트 받기').listeners.click();
+  await fx.flush();
+  fx.state.status = () => d3Status('failed', 6, { message: '앱이 응답하지 않아요' });
+  await fx.poll();
+  assert.equal(fx.text(), '업데이트하지 못했어요 — 앱이 응답하지 않아요이전 버전으로 되돌리기');
+  assert.equal(fx.find('d-abfail').length, 1);
+  assert.equal(fx.button('이전 버전으로 되돌리기').className, 'd-btn sm dng');
+  assert.equal(fx.sent.filter(one => one.url === '/api/update').length, 1, '스스로 되돌리지 않는다');
+
+  fx.button('이전 버전으로 되돌리기').listeners.click();
+  assert.equal(fx.text(), '업데이트하지 못했어요 — 앱이 응답하지 않아요이전 버전과 업데이트 직전 백업으로 돌아가요취소되돌리기');
+  assert.equal(fx.button('되돌리기').focused, true, '확인 줄이 서면 초점은 되돌리기로');
+  fx.button('취소').listeners.click();
+  assert.equal(fx.text(), '업데이트하지 못했어요 — 앱이 응답하지 않아요이전 버전으로 되돌리기', '취소하면 그대로');
+
+  fx.button('이전 버전으로 되돌리기').listeners.click();
+  fx.button('되돌리기').listeners.click();
+  await fx.flush();
+  assert.deepEqual(fx.sent.filter(one => one.url === '/api/update').map(one => one.body), [{ action: 'update' }, { action: 'rollback' }]);
+  assert.match(fx.text(), /^이전 버전으로 되돌리는 중이에요/);
+  same(fx.steps().map(([, , name]) => name), ['코드 되돌리기', '데이터 되돌리기', '앱 다시 시작', '잘 떴는지 확인']);
+
+  // 되돌리기도 실패하면 업데이트.command로(경로 복사)
+  fx.state.status = () => ({ ok: true, running: false, updateFile: '~/workspace/업데이트.command',
+    status: { action: 'rollback', state: 'failed', message: '되돌릴 자리를 찾지 못했어요', startedAt: new Date().toISOString(), steps: [] } });
+  await fx.poll();
+  assert.equal(fx.text(), '되돌리지 못했어요 — 되돌릴 자리를 찾지 못했어요업데이트.command를 더블클릭해 주세요~/workspace/업데이트.command복사');
+  assert.equal(fx.button('이전 버전으로 되돌리기'), undefined);
+
+  // 되돌리기가 끝나면 그 버전으로
+  const back = updateClient(D3_ABOUT);
+  back.app.run("settingsUpdateFollow('rollback', null, 0)");
+  back.state.status = () => ({ ok: true, running: false, status: { action: 'rollback', from: '1.1.0', to: '1.0.0', state: 'done', startedAt: new Date().toISOString(), steps: [] } });
+  await back.poll();
+  assert.equal(back.text(), 'v1.0.0으로 되돌렸어요새로고침');
+});
+
+test('WP-D3 3분 넘게 응답이 없으면 `앱이 응답하지 않아요 — 업데이트.command를 더블클릭해 주세요` + 경로 복사', async () => {
+  const fx = updateClient(D3_ABOUT);
+  fx.app.run("settingsUpdateFollow('update', null, Date.now())");
+  fx.state.status = () => null;
+  await fx.poll();
+  assert.match(fx.text(), /다시 켜는 중…$/);
+  fx.app.run('settingsUpdateRun.downSince = Date.now() - 181000');
+  await fx.poll();
+  assert.equal(fx.text(), '앱이 응답하지 않아요 — 업데이트.command를 더블클릭해 주세요~/workspace/업데이트.command복사');
+  fx.button('복사').listeners.click();
+  await fx.flush();
+  same(fx.copied, ['~/workspace/업데이트.command']);
+  assert.equal(fx.app.run('settingsUpdateRun'), null);
+
+  // 요청은 받았는데 3분이 지나도 실행기가 시작하지 않은 경우도 같은 안내
+  const stuck = updateClient(D3_ABOUT);
+  stuck.app.run(`settingsUpdateFollow('update', null, Date.now() - 181000)`);
+  await stuck.poll();
+  assert.match(stuck.text(), /^앱이 응답하지 않아요 — 업데이트\.command를 더블클릭해 주세요/);
+});
+
+test('WP-D3 막는 문구 셋: 폴더 이동 필요 · 처음 한 번 · 이미 진행 중(그 진행 목록)', async () => {
+  const relocate = updateClient(D3_ABOUT, { replies: [{ body: { ok: false, reason: 'relocate', message: '폴더를 옮겨야 하는 업데이트예요 — 업데이트.command를 더블클릭해 주세요', updateFile: '~/playio/workspace/업데이트.command' } }] });
+  relocate.app.run('settingsAboutFill()');
+  relocate.button('업데이트 받기').listeners.click();
+  await relocate.flush();
+  assert.equal(relocate.text(), '폴더를 옮겨야 하는 업데이트예요 — 업데이트.command를 더블클릭해 주세요~/playio/workspace/업데이트.command복사');
+  assert.equal(relocate.app.run('settingsUpdateRun'), null, '진행을 따라가지 않는다');
+
+  const first = updateClient(D3_ABOUT, { replies: [{ body: { ok: false, reason: 'not-installed', message: '처음 한 번은 업데이트.command로 받아 주세요', updateFile: '~/workspace/업데이트.command' } }] });
+  first.app.run('settingsAboutFill()');
+  first.button('업데이트 받기').listeners.click();
+  await first.flush();
+  assert.equal(first.text(), '처음 한 번은 업데이트.command로 받아 주세요~/workspace/업데이트.command복사');
+
+  const busy = updateClient(D3_ABOUT, { replies: [{ body: { ...d3Status('running', 3), ok: false, reason: 'running', message: '이미 업데이트하는 중이에요' } }] });
+  busy.app.run('settingsAboutFill()');
+  busy.button('업데이트 받기').listeners.click();
+  await busy.flush();
+  assert.match(busy.text(), /^v1\.0\.0 → v1\.1\.0/);
+  same(busy.steps().map(([cls]) => cls), ['done', 'done', 'now', 'wait', 'wait', 'wait'], '도는 진행을 그대로 보여 준다');
+
+  // 상태 탭을 다시 열었을 때 도는 업데이트가 있으면 이어 보여 준다
+  const reopen = updateClient(D3_ABOUT, { status: () => d3Status('running', 4) });
+  reopen.app.run('settingsAboutFill()');
+  await reopen.flush();
+  await reopen.flush();
+  same(reopen.steps().map(([cls]) => cls), ['done', 'done', 'done', 'now', 'wait', 'wait']);
+});

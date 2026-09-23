@@ -40,7 +40,12 @@ BACKUP_NAME_RE='^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}$'
 
 ok()   { echo "  ✓ $1"; }
 warn() { echo "  ! $1"; }
-die()  { echo "  ✗ $1"; echo; echo "업데이트를 멈췄어요. 앱과 데이터는 그대로예요."; exit 1; }
+die()  {
+  echo "  ✗ $1"
+  # 앱 안 `업데이트 받기`로 돌고 있으면 화면이 이유를 보여 주게 상태 파일에도 남긴다.
+  declare -F status_write >/dev/null && status_write failed "$1"
+  echo; echo "업데이트를 멈췄어요. 앱과 데이터는 그대로예요."; exit 1
+}
 
 ASSUME_YES=0
 ROLLBACK=0
@@ -78,6 +83,46 @@ PORT="$(printf '%s\n' "$CFG" | sed -n 2p)"
 [ -n "$PORT" ] || PORT=4321
 
 VERSION="$(tr -d '[:space:]' < "$WORKSPACE/VERSION" 2>/dev/null)"
+
+# 진행 상황 파일 — 앱의 설정 › 상태 `업데이트 받기`가 2초마다 읽는다(update-runner.sh가 WORKSPACE_UPDATE_STATUS=1을 준다).
+# 환경변수가 없으면(터미널·업데이트.command) 아무것도 쓰지 않는다. 임시 파일에 쓴 뒤 이름을 바꿔 한 번에 바뀐다.
+STATUS_FILE="$INSTALL_DIR/update-status.json"
+STATUS_ACTION="update"
+[ "$ROLLBACK" = "1" ] && STATUS_ACTION="rollback"
+STATUS_STEP=0
+STATUS_FROM="$VERSION"
+STATUS_TO=""
+STATUS_STARTED="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+UPDATE_STEP_NAMES="고친 파일 확인|데이터 백업|새 버전 받기|데이터 형식 변환|앱 다시 시작|잘 떴는지 확인"
+ROLLBACK_STEP_NAMES="코드 되돌리기|데이터 되돌리기|앱 다시 시작|잘 떴는지 확인"
+STATUS_WRITER='
+const fs = require("fs");
+const [file, action, from, to, stepText, state, message, startedAt, names] = process.argv.slice(1);
+const step = Number(stepText) || 0;
+const steps = names.split("|").map((name, index) => {
+  const n = index + 1;
+  let mark = n < step ? "done" : (n === step ? "doing" : "todo");
+  if (n === step && state === "failed") mark = "failed";
+  if (state === "done") mark = "done";
+  return { name, state: mark };
+});
+const now = new Date().toISOString();
+const body = { action, from: from || null, to: to || null, step, steps, state, startedAt, updatedAt: now };
+if (message) body.message = message;
+if (state !== "running") body.finishedAt = now;
+const temp = `${file}.tmp-${process.pid}`;
+fs.writeFileSync(temp, `${JSON.stringify(body)}\n`);
+fs.renameSync(temp, file);
+'
+# status_write <running|done|failed> [한 줄 이유]
+status_write() {
+  [ -n "${WORKSPACE_UPDATE_STATUS:-}" ] || return 0
+  local names="$UPDATE_STEP_NAMES"
+  [ "$STATUS_ACTION" = "rollback" ] && names="$ROLLBACK_STEP_NAMES"
+  mkdir -p "$(dirname "$STATUS_FILE")" 2>/dev/null
+  node -e "$STATUS_WRITER" "$STATUS_FILE" "$STATUS_ACTION" "$STATUS_FROM" "$STATUS_TO" "$STATUS_STEP" "$1" "${2:-}" "$STATUS_STARTED" "$names" 2>/dev/null || true
+}
+status_step() { STATUS_STEP="$1"; status_write running; }
 
 # 추적 파일 중 고친 것·지운 것만 센다(미추적·gitignore는 빠지므로 업무 데이터는 절대 잡히지 않는다).
 changed_files() {
@@ -147,11 +192,14 @@ if [ "$ROLLBACK" = "1" ]; then
   echo
   echo "이전 버전으로 되돌려요"
   echo
+  status_step 1
   [ -f "$LAST_GOOD" ] || die "되돌릴 자리를 찾지 못했어요 — 업데이트한 기록이 없어요."
   REF="$(tr -d '[:space:]' < "$LAST_GOOD")"
   [ -n "$REF" ] || die "되돌릴 자리를 찾지 못했어요."
   git checkout --detach --quiet "$REF" || die "이전 코드로 되돌리지 못했어요 — 고친 파일이 있는지 확인해 주세요."
   ok "코드를 이전 자리($REF)로 되돌렸어요"
+  STATUS_TO="$(tr -d '[:space:]' < "$WORKSPACE/VERSION" 2>/dev/null)"
+  status_step 2
   LAST_BACKUP="$(backup_dirs | tail -1)"
   if [ -n "$LAST_BACKUP" ]; then
     restore_backup "$BACKUP_ROOT/$LAST_BACKUP"
@@ -159,9 +207,17 @@ if [ "$ROLLBACK" = "1" ]; then
   else
     warn "되돌릴 백업이 없어 데이터는 그대로 뒀어요."
   fi
+  status_step 3
   restart_app
+  status_step 4
   VERSION="$(tr -d '[:space:]' < "$WORKSPACE/VERSION" 2>/dev/null)"
-  if health_check; then ok "v${VERSION}으로 돌아왔어요"; else warn "앱이 아직 응답하지 않아요 — 잠시 뒤 앱을 열어 확인해 주세요."; fi
+  if health_check; then
+    ok "v${VERSION}으로 돌아왔어요"
+    status_write done
+  else
+    warn "앱이 아직 응답하지 않아요 — 잠시 뒤 앱을 열어 확인해 주세요."
+    status_write failed "앱이 아직 응답하지 않아요 — 잠시 뒤 앱을 열어 확인해 주세요"
+  fi
   # 두 번 되돌리지 않는다.
   rm -f "$LAST_GOOD"
   echo
@@ -175,6 +231,7 @@ echo
 
 # ─────────────────────────────────────────────  1. 확인
 echo "[1/6] 고친 파일 확인"
+status_step 1
 CHANGED="$(changed_files)"
 if [ -n "$CHANGED" ]; then
   echo "  고친 파일이 있어요: $(printf '%s' "$CHANGED" | tr '\n' ' ')"
@@ -207,6 +264,7 @@ fi
 
 # ─────────────────────────────────────────────  2. 백업
 echo "[2/6] 데이터 백업"
+status_step 2
 STAMP="$(date '+%Y-%m-%d-%H%M')"
 DEST="$BACKUP_ROOT/$STAMP"
 mkdir -p "$DEST" || die "백업 폴더를 만들지 못했어요: $DEST"
@@ -227,6 +285,7 @@ fi
 
 # ─────────────────────────────────────────────  3. 받기
 echo "[3/6] 새 버전 받기"
+status_step 3
 BEFORE="$(git rev-parse HEAD 2>/dev/null)"
 [ -n "$BEFORE" ] || die "코드 저장소를 찾지 못했어요."
 printf '%s\n' "$BEFORE" > "$LAST_GOOD"
@@ -265,11 +324,17 @@ if [ "$UPDATED" = "1" ]; then
     # Dock 앱 만들기(설정 › 꾸미기가 부른다)도 복사본이 돈다. 이 파일이 없는 옛 버전이면 건너뛴다.
     [ -f "$APP_DIR/automation/app-refresh.sh" ] && cp "$APP_DIR/automation/app-refresh.sh" "$INSTALL_DIR/" 2>/dev/null \
       && chmod +x "$INSTALL_DIR/app-refresh.sh" 2>/dev/null
+    # 앱 안 `업데이트 받기` 실행기도 복사본이 돈다(지금 이 실행기가 돌고 있어도 안전하다 — 실행기는 통째로 읽고 시작한다).
+    [ -f "$APP_DIR/automation/update-runner.sh" ] && cp "$APP_DIR/automation/update-runner.sh" "$INSTALL_DIR/" 2>/dev/null \
+      && chmod +x "$INSTALL_DIR/update-runner.sh" 2>/dev/null
   fi
 fi
 
+STATUS_TO="$VERSION"
+
 # ─────────────────────────────────────────────  4. 변환
 echo "[4/6] 데이터 형식 변환"
+status_step 4
 if [ "$UPDATED" = "0" ]; then
   ok "받은 것이 없어 건너뛰어요"
 else
@@ -280,6 +345,7 @@ else
   elif [ "$CODE" != "0" ]; then
     [ -n "$MIG_OUT" ] && echo "    $MIG_OUT"
     echo "  ✗ 데이터 형식을 바꾸지 못했어요."
+    status_write failed "데이터 형식을 바꾸지 못했어요"
     echo "    이전 버전과 백업 데이터로 되돌리려면:  bash update.sh --rollback"
     exit 1
   fi
@@ -288,6 +354,7 @@ fi
 
 # ─────────────────────────────────────────────  5. 재시작
 echo "[5/6] 앱 다시 시작"
+status_step 5
 if [ "${WORKSPACE_RELOCATED:-}" = "1" ]; then
   # 폴더를 옮겼으면 launchd에 적힌 경로가 옛 자리다 — 다시 시작만 하면 뜨지 않는다. 새 위치의 setup.sh(묻는 것 없음)로
   # launchd 경로·workspace.env·Dock 앱을 다시 적고, 그 등록이 앱을 새 위치에서 띄운다.
@@ -302,12 +369,16 @@ fi
 
 # ─────────────────────────────────────────────  6. 점검
 echo "[6/6] 잘 떴는지 확인"
+status_step 6
 if health_check; then
   if [ "$UPDATED" = "1" ]; then ok "v${VERSION}으로 업데이트했어요"; else ok "이미 최신이에요 · v${VERSION}이 잘 떠 있어요"; fi
+  status_write done
   echo
   exit 0
 fi
 echo "  ! 앱이 응답하지 않아요"
+# 앱 안에서 돌 때(--yes)는 묻지 않고 되돌리지도 않는다 — 상태 파일에 실패를 남기고, 화면에서 사람이 `이전 버전으로 되돌리기`를 누른다.
+status_write failed "앱이 응답하지 않아요"
 if [ "$ASSUME_YES" = "1" ]; then
   ANSWER="n"
 else

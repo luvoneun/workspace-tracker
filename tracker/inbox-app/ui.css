@@ -2239,11 +2239,32 @@ body.batch-open .d-toast { bottom: 76px; }
 }
 .d-ablink:hover { color: var(--text); }
 .d-abfiles { margin-top: 4px; font-size: 12px; line-height: 1.7; color: var(--dim); overflow-wrap: anywhere; }
-.d-abfiles[hidden], .d-abhow[hidden], .d-abnew[hidden] { display: none; }
-.d-abnew { margin-top: 6px; font-size: 12.5px; color: var(--accent-text); }
-.d-abnew .d-ablink { color: var(--accent-text); }
-.d-abhow { margin-top: 4px; font-size: 12.5px; line-height: 1.7; color: var(--muted); }
+.d-abfiles[hidden], .d-abwrap[hidden] { display: none; }
 .d-about .d-btn { margin-top: 10px; }
+/* 업데이트 받기(시안 J) — 새 버전 상자는 선택 판(--sel), 실패 줄은 주의 판(--urgent-bg). 새 색은 쓰지 않는다. */
+.d-abwrap { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.d-abupd, .d-abfail { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; border-radius: var(--r-sm); }
+.d-abupd { padding: 12px 14px; background: var(--sel); }
+.d-abupd .tx { flex: 1 1 100%; font-size: 14px; font-weight: 600; color: var(--accent-text); }
+.d-abupd.is-plain .tx { font-size: 13.5px; font-weight: 500; color: var(--text); }
+.d-abupd .d-ablink { display: inline-flex; align-items: center; min-height: 28px; color: var(--accent-text); }
+.d-abfail { padding: 10px 12px; background: var(--urgent-bg); }
+.d-abfail .tx { flex: 1 1 160px; font-size: 13.5px; font-weight: 600; color: var(--urgent); }
+.d-abfail .d-btn.dng { background: var(--surface); }
+.d-about .d-abwrap .d-btn { margin-top: 0; }
+.d-abwrap .d-iconfirm { margin-top: 0; }
+.d-abquiet { margin: 0; }
+.d-abhead { font-size: 12.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.d-abprog { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.d-abprog li { display: flex; align-items: center; gap: 10px; min-height: 30px; font-size: 13.5px; color: var(--text); }
+.d-abprog .ic { flex: none; width: 18px; text-align: center; font-weight: 700; }
+.d-abprog .done .ic { color: var(--success); }
+.d-abprog .now { font-weight: 600; }
+.d-abprog .now .ic { display: inline-block; color: var(--accent); animation: d-abspin 1s linear infinite; }
+.d-abprog .wait, .d-abprog .wait .ic { color: var(--dim); }
+.d-abprog .fail, .d-abprog .fail .ic { color: var(--urgent); }
+@keyframes d-abspin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .d-abprog .now .ic { animation: none; } }
 
 /* 연동 카드 — 자동화 줄(.d-auto)과 같은 리듬: 이름 · 칩 | 상태 · ⋯ · 버튼 / 한 줄 효용 / 준비물 줄 / 펼치는 자리.
    펼친 자리(.d-intgbody)는 --field 판 위에 한 번에 한 단계만(카드 안 위저드). */
