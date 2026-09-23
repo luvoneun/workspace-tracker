@@ -45,3 +45,8 @@ output/
 
 # impeccable 실행 파일(12MB) — 없으면 실행기가 버전에 맞춰 내려받는다
 .claude/skills/impeccable/scripts/bin/
+
+# 에이전트 임시 복사본·디자인 도구 작업 파일·옛 시안 (올리지 않음)
+.claude/worktrees/
+.impeccable/
+design/mockup/
