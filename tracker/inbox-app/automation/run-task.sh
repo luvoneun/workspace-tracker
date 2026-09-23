@@ -18,7 +18,18 @@ MODE="${4:-acceptEdits}"
 # 여기에 적어야 한다(예: Write,Edit). 비워두면 금지 목록 없이 예전과 같다.
 DENY="${5:-}"
 
-WORKSPACE="${WORKSPACE_DIR:-$HOME/personal}"
+# 설치 위치는 사람마다 다르다. plist가 넘겨주는 WORKSPACE_DIR을 먼저 보고, 없으면 setup.sh가
+# 적어 둔 workspace.env를 읽는다. 둘 다 없으면 어디에서 돌아야 할지 모르므로 멈춘다.
+if [ -z "${WORKSPACE_DIR:-}" ]; then
+  WORKSPACE_ENV="${WORKSPACE_ENV_FILE:-$HOME/.local/share/workspace-automation/workspace.env}"
+  # shellcheck source=/dev/null
+  [ -f "$WORKSPACE_ENV" ] && . "$WORKSPACE_ENV"
+fi
+WORKSPACE="${WORKSPACE_DIR:-}"
+if [ -z "$WORKSPACE" ]; then
+  echo "설치 정보를 찾을 수 없어요 — setup.sh를 먼저 실행해 주세요" >&2
+  exit 1
+fi
 # 로그 폴더는 앱의 상태 탭이 읽는 고정 경로다. 테스트에서만 임시 폴더로 바꿔 끼운다.
 LOG_DIR="${AUTOMATION_LOG_DIR:-$HOME/.local/share/workspace-automation/logs}"
 LOG="$LOG_DIR/$NAME.log"

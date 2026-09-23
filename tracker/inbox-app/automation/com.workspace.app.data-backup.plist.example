@@ -3,22 +3,22 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.luvon.workspace.data-backup</string>
+  <string>com.workspace.app.data-backup</string>
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>/Users/luvon/.local/share/workspace-automation/backup-data.sh</string>
+    <string>/Users/사용자이름/.local/share/workspace-automation/backup-data.sh</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>
     <key>WORKSPACE_DIR</key>
-    <string>/Users/luvon/personal</string>
+    <string>/Users/사용자이름/workspace</string>
   </dict>
   <key>StartCalendarInterval</key>
   <dict><key>Hour</key><integer>19</integer><key>Minute</key><integer>30</integer></dict>
   <key>RunAtLoad</key>
   <false/>
   <key>StandardErrorPath</key>
-  <string>/Users/luvon/.local/share/workspace-automation/logs/data-backup.err</string>
+  <string>/Users/사용자이름/.local/share/workspace-automation/logs/data-backup.err</string>
 </dict>
 </plist>

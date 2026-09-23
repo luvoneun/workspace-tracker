@@ -8,7 +8,17 @@
 
 set -uo pipefail
 
-WORKSPACE="${WORKSPACE_DIR:-$HOME/personal}"
+# 설치 위치는 사람마다 다르다(run-task.sh와 같은 규칙): WORKSPACE_DIR → workspace.env → 멈춤.
+if [ -z "${WORKSPACE_DIR:-}" ]; then
+  WORKSPACE_ENV="${WORKSPACE_ENV_FILE:-$HOME/.local/share/workspace-automation/workspace.env}"
+  # shellcheck source=/dev/null
+  [ -f "$WORKSPACE_ENV" ] && . "$WORKSPACE_ENV"
+fi
+WORKSPACE="${WORKSPACE_DIR:-}"
+if [ -z "$WORKSPACE" ]; then
+  echo "설치 정보를 찾을 수 없어요 — setup.sh를 먼저 실행해 주세요" >&2
+  exit 1
+fi
 BACKUP_GIT="${DATA_BACKUP_GIT_DIR:-$HOME/.local/share/workspace-automation/data-backup.git}"
 LOG_DIR="${AUTOMATION_LOG_DIR:-$HOME/.local/share/workspace-automation/logs}"
 LOG="$LOG_DIR/data-backup.log"

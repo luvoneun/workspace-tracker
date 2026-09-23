@@ -17,6 +17,8 @@ process.env.WORKSPACE_AUTOMATION_DIR = automationHome;
 // 설정도 없는 파일로 끼운다 — 운영 폴더에서 돌릴 때 실제 `workspace.config.json`(지라 주소·토큰 위치)을 읽어
 // 테스트가 실제 지라에 닿는 일이 없게. 설정이 필요한 테스트는 따로 띄운 서버에 자기 설정을 준다.
 process.env.WORKSPACE_CONFIG = path.join(directory, 'absent.config.json');
+// 새 버전이 나왔는지 원격에 묻는 것도 끈다 — 테스트가 네트워크에 닿지 않게.
+process.env.WORKSPACE_NO_REMOTE_CHECK = '1';
 const { server } = require('./server');
 const date = value => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
 const today = date(new Date());
@@ -57,7 +59,7 @@ test('every screen script is served and counted in appVersion, and server files 
     'appVersion은 index.html + 나가는 화면 파일 전부를 센다');
   // 브라우저에 절대 나가면 안 되는 파일들 — 서버·저장소·테스트·픽스처.
   const blocked = ['server.js', 'safe-storage.js', 'jira-client.js', 'jira-live.js', 'attention-live.js', 'report-drafts.js',
-    'task-batch.js', 'slack-history.js', 'import-record.js', 'browser-fixture.js',
+    'task-batch.js', 'slack-history.js', 'import-record.js', 'browser-fixture.js', 'migrate.js',
     'workflow-store.js', 'mutation-store.js', 'server.test.js', 'client.test.js', 'report-drafts.test.js'];
   for (const name of blocked) {
     assert.equal((await fetch(base + '/' + name)).status, 404, `${name}은 화면에 나가면 안 된다`);
@@ -1096,7 +1098,7 @@ const jiraChildBody = { issues: [
       summary: '게임 목록 불러오기',
       status: { name: '진행 중', statusCategory: { key: 'indeterminate' } },
       issuetype: { name: '하위 작업' },
-      assignee: { displayName: '엘리', emailAddress: 'elly@example.test', accountId: '712020:aaaa' },
+      assignee: { displayName: '하늘', emailAddress: 'elly@example.test', accountId: '712020:aaaa' },
       fixVersions: [],
     },
   },
@@ -1105,7 +1107,7 @@ const jiraChildBody = { issues: [
 const jiraChildItems = [
   { key: 'IO-48395', url: `${JIRA_SITE}/browse/IO-48395`, summary: '임베드 카드 붙이기', type: '하위 작업', status: { name: '완료', category: 'done' }, assignee: '루본', version: 'v2.70.0' },
   { key: 'IO-48396', url: `${JIRA_SITE}/browse/IO-48396`, summary: '임베드 미리보기 붙이기', type: '하위 작업', status: { name: '완료', category: 'done' }, assignee: null, version: null },
-  { key: 'IO-48397', url: `${JIRA_SITE}/browse/IO-48397`, summary: '게임 목록 불러오기', type: '하위 작업', status: { name: '진행 중', category: 'doing' }, assignee: '엘리', version: null },
+  { key: 'IO-48397', url: `${JIRA_SITE}/browse/IO-48397`, summary: '게임 목록 불러오기', type: '하위 작업', status: { name: '진행 중', category: 'doing' }, assignee: '하늘', version: null },
 ];
 function jiraFake(routes) {
   const calls = [];
@@ -2122,7 +2124,7 @@ const seedTrash = (home) => {
     { id: 'tr01', file: 'tasks.md', index: 1, deletedAt: '2026-09-21T13:10:00.000Z',
       line: '- 정산 배치 설계 검토하기 #task[id:tr01 status:to-do priority:high created:2026-09-20 group:결제_리뉴얼]' },
     { id: 'tr02', file: 'checks.md', index: 1, deletedAt: '2026-09-22T01:05:00.000Z',
-      line: '- 법무 검토 회신 #check[id:tr02 status:to-do priority:medium created:2026-09-21 who:엘리 jira:IO-12345]' },
+      line: '- 법무 검토 회신 #check[id:tr02 status:to-do priority:medium created:2026-09-21 who:하늘 jira:IO-12345]' },
     { id: 'tr03', file: 'ideas.md', index: 1, deletedAt: '2026-09-20T09:00:00.000Z',
       line: '- 알림 묶어 보내기 #idea[id:tr03 status:to-do priority:low created:2026-09-19 project:알림센터]' },
   ], null, 2));
@@ -2229,7 +2231,7 @@ function seedRename(home, report = RENAME_REPORT) {
     + '- 게임 임베드 검수하기 #task[id:rn02 status:to-do priority:medium created:2026-09-20 jira:IO-12345]\n'
     + '- 대시보드 지표 정리하기 #task[id:rn06 status:to-do priority:medium created:2026-09-20 group:운영툴]\n');
   fs.writeFileSync(path.join(home, 'checks.md'), '# Checks\n'
-    + '- 법무 검토 회신 #check[id:rn03 status:to-do priority:medium created:2026-09-20 who:엘리 group:결제_리뉴얼]\n');
+    + '- 법무 검토 회신 #check[id:rn03 status:to-do priority:medium created:2026-09-20 who:하늘 group:결제_리뉴얼]\n');
   fs.writeFileSync(path.join(home, 'decisions.md'), '# Decisions\n'
     + '- 정산 주기는 주 단위로 한다 #decision[id:rn04 status:to-do priority:medium created:2026-09-20 group:결제_리뉴얼]\n');
   fs.writeFileSync(path.join(home, 'ideas.md'), '# Ideas\n'
@@ -2290,7 +2292,7 @@ test('BRENAME: 이름을 바꾸면 항목·회의·연결·보관·주간요약�
   assert.match(tasks, /정산 배치 설계 검토하기 #task\[id:rn01 status:to-do priority:high created:2026-09-20 group:결제_정산\]/);
   assert.match(tasks, /게임 임베드 검수하기 #task\[id:rn02 status:to-do priority:medium created:2026-09-20 jira:IO-12345\]/);
   assert.match(tasks, /group:운영툴\]/);
-  assert.match(fs.readFileSync(path.join(server.home, 'checks.md'), 'utf8'), /who:엘리 group:결제_정산\]/);
+  assert.match(fs.readFileSync(path.join(server.home, 'checks.md'), 'utf8'), /who:하늘 group:결제_정산\]/);
   assert.match(fs.readFileSync(path.join(server.home, 'decisions.md'), 'utf8'), /group:결제_정산\]/);
   assert.match(fs.readFileSync(path.join(server.home, 'ideas.md'), 'utf8'), /project:결제_정산\]/, '아이디어의 프로젝트 칸도 함께 바뀐다');
 
@@ -2631,7 +2633,7 @@ function seedMove(home, report = MOVE_REPORT) {
     + '- 게임 임베드 검수하기 #task[id:mv03 status:to-do priority:medium created:2026-09-20 jira:IO-9999]\n'
     + '- 대시보드 지표 정리하기 #task[id:mv06 status:to-do priority:medium created:2026-09-20 group:운영툴]\n');
   fs.writeFileSync(path.join(home, 'checks.md'), '# Checks\n'
-    + '- 법무 검토 회신 #check[id:mv04 status:to-do priority:medium created:2026-09-20 who:엘리 group:결제_리뉴얼]\n');
+    + '- 법무 검토 회신 #check[id:mv04 status:to-do priority:medium created:2026-09-20 who:하늘 group:결제_리뉴얼]\n');
   fs.writeFileSync(path.join(home, 'decisions.md'), '# Decisions\n'
     + '- 정산 주기는 주 단위로 한다 #decision[id:mv05 status:to-do priority:medium created:2026-09-20 group:결제_리뉴얼]\n');
   fs.writeFileSync(path.join(home, 'ideas.md'), '# Ideas\n'
@@ -2692,7 +2694,7 @@ test('BMOVE: 옮기면 항목·회의·연결·주간요약이 한 트랜잭션�
   assert.match(tasks, /완료한 정산 작업 #task\[id:mv02 status:done priority:medium created:2026-09-18 completed:2026-09-19 jira:IO-48501\]/);
   assert.match(tasks, /id:mv03 status:to-do priority:medium created:2026-09-20 jira:IO-9999\]/, '이미 지라가 걸린 줄은 그대로다');
   assert.match(tasks, /id:mv06[^\n]*group:운영툴\]/, '다른 그룹은 그대로다');
-  assert.match(fs.readFileSync(path.join(server.home, 'checks.md'), 'utf8'), /id:mv04 status:to-do priority:medium created:2026-09-20 who:엘리 jira:IO-48501\]/);
+  assert.match(fs.readFileSync(path.join(server.home, 'checks.md'), 'utf8'), /id:mv04 status:to-do priority:medium created:2026-09-20 who:하늘 jira:IO-48501\]/);
   assert.match(fs.readFileSync(path.join(server.home, 'decisions.md'), 'utf8'), /id:mv05 status:to-do priority:medium created:2026-09-20 jira:IO-48501\]/);
   assert.match(fs.readFileSync(path.join(server.home, 'ideas.md'), 'utf8'), /id:mv07 status:to-do priority:low created:2026-09-20 jira:IO-48501\]/, '아이디어도 project: 대신 jira:로 옮긴다');
 
@@ -3697,4 +3699,276 @@ test('치운 목록은 200개·30일로 정리하되 지금 화면에 있는 줄
   assert.equal(store.attentionDismissed()['jira:NEW-1:9'], undefined);
   assert.throws(() => store.dismissAttention({ id: 'nope' }), /보낸 값을 확인해 주세요/);
   fs.rmSync(home, { recursive: true, force: true });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 배포·업데이트 (VERSION · /api/about · 데이터 형식 · 자동화 설치 위치 · update.sh)
+//
+// 사람의 데이터가 업데이트로 깨지지 않는 것이 이 묶음의 목적이다. 그래서 여기서는
+// **실제 launchd·실제 홈 폴더·실제 저장소를 절대 건드리지 않고** 임시 폴더 + 로컬 bare 저장소 +
+// PATH 앞에 세운 가짜 `launchctl`·`curl`로만 확인한다(run-task.sh 테스트와 같은 방식).
+const migrateStore = require('./migrate');
+
+test('GET /api/about은 버전·데이터 형식·받는 갈래를 알려 주고 파일을 쓰지 않는다', async () => {
+  const before = fs.readdirSync(directory).sort();
+  const about = await (await fetch(base + '/api/about')).json();
+  assert.equal(about.version, fs.readFileSync(path.join(__dirname, '..', '..', 'VERSION'), 'utf8').trim());
+  assert.equal(about.dataFormat, 1);
+  assert.equal(about.channel, 'stable', '설정이 없으면 배포된 버전만 받는 갈래다');
+  assert.equal(about.install, 'manual', 'launchd가 띄운 자리가 아니면 manual이다');
+  assert.equal(about.latest, null, 'WORKSPACE_NO_REMOTE_CHECK=1이면 원격에 묻지 않는다');
+  assert.ok(about.modified === null || Array.isArray(about.modified));
+  assert.deepEqual(fs.readdirSync(directory).sort(), before, '조회는 어떤 파일도 만들지 않는다');
+});
+
+const gitEnv = { ...process.env, GIT_AUTHOR_NAME: 'test', GIT_AUTHOR_EMAIL: 'test@example.test', GIT_COMMITTER_NAME: 'test', GIT_COMMITTER_EMAIL: 'test@example.test' };
+const runGit = (cwd, args) => spawnSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@example.test', '-c', 'commit.gpgsign=false', ...args], { cwd, encoding: 'utf8', env: gitEnv });
+const gitReady = spawnSync('git', ['--version']).status === 0;
+const writeExec = (file, body) => { fs.writeFileSync(file, body); fs.chmodSync(file, 0o755); };
+
+// 서버를 실제로 띄운다(모듈로 부르면 시작 검사가 돌지 않는다).
+async function startAppServer(t, env) {
+  const port = await freePort();
+  const child = spawn(process.execPath, [path.join(__dirname, 'server.js')], {
+    env: { ...process.env, WORKSPACE_PORT: String(port), WORKSPACE_NO_OPEN: '1', WORKSPACE_HOST: '', WORKSPACE_NO_REMOTE_CHECK: '1', ...env },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let log = '';
+  child.stdout.on('data', chunk => { log += chunk; });
+  child.stderr.on('data', chunk => { log += chunk; });
+  t.after(() => child.kill('SIGKILL'));
+  const address = `http://127.0.0.1:${port}`;
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) throw new Error(`서버가 종료되었습니다 (${child.exitCode}): ${log}`);
+    try { if ((await fetch(address + '/api/storage-status')).ok) return { base: address, log: () => log }; } catch { /* 아직 안 떴다 */ }
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  throw new Error(`서버가 응답하지 않았습니다: ${log}`);
+}
+
+test('/api/about의 `고친 파일`은 추적 파일의 수정·삭제만 세고, git이 없으면 null이다', { skip: !gitReady }, async (t) => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-about-'));
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  const data = path.join(repo, 'tracker');
+  fs.mkdirSync(data);
+  fs.writeFileSync(path.join(repo, 'VERSION'), '9.9.9\n');
+  fs.writeFileSync(path.join(repo, 'ui.css'), 'body{}\n');
+  fs.writeFileSync(path.join(repo, '.gitignore'), 'tracker/\n');
+  runGit(repo, ['init', '-b', 'main']);
+  runGit(repo, ['add', '-A']);
+  runGit(repo, ['commit', '-m', '첫 커밋']);
+  fs.writeFileSync(path.join(repo, 'ui.css'), 'body{color:red}\n');
+  fs.writeFileSync(path.join(data, 'tasks.md'), '# Tasks\n');   // 업무 데이터는 gitignore라 잡히면 안 된다
+
+  const app = await startAppServer(t, { WORKSPACE_REPO_DIR: repo, WORKSPACE_DATA_DIR: data, WORKSPACE_CONFIG: path.join(repo, 'absent.json') });
+  const about = await (await fetch(app.base + '/api/about')).json();
+  assert.equal(about.version, '9.9.9');
+  assert.deepEqual(about.modified, ['ui.css'], '고친 추적 파일만 이름으로 센다 — 업무 데이터는 절대 들어가지 않는다');
+  assert.match(about.gitRef, /^[0-9a-f]{7,}$/);
+
+  // git을 찾을 수 없는 컴퓨터에서도 앱은 그대로 돌고, 모른다는 뜻으로 null을 준다.
+  const blind = await startAppServer(t, { WORKSPACE_REPO_DIR: repo, WORKSPACE_DATA_DIR: data, WORKSPACE_CONFIG: path.join(repo, 'absent.json'), PATH: path.join(repo, 'no-such-bin') });
+  const unknown = await (await fetch(blind.base + '/api/about')).json();
+  assert.equal(unknown.modified, null);
+  assert.equal(unknown.gitRef, null);
+  assert.equal(unknown.version, '9.9.9', 'git이 없어도 버전은 파일에서 읽는다');
+});
+
+test('데이터가 더 새 형식이면 서버는 아예 시작하지 않는다(종료 코드 3)', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-dataver-'));
+  fs.writeFileSync(path.join(home, '.data-version'), '9\n');
+  fs.writeFileSync(path.join(home, 'tasks.md'), '# Tasks\n');
+  const port = await freePort();
+  const child = spawn(process.execPath, [path.join(__dirname, 'server.js')], {
+    env: { ...process.env, WORKSPACE_DATA_DIR: home, WORKSPACE_PORT: String(port), WORKSPACE_NO_OPEN: '1', WORKSPACE_HOST: '', WORKSPACE_NO_REMOTE_CHECK: '1', WORKSPACE_CONFIG: path.join(home, 'absent.config.json') },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let log = '';
+  child.stdout.on('data', chunk => { log += chunk; });
+  child.stderr.on('data', chunk => { log += chunk; });
+  const code = await new Promise(resolve => child.on('exit', resolve));
+  assert.equal(code, 3);
+  assert.match(log, /더 새 버전의 앱이 만든 거예요/);
+  assert.equal(fs.readFileSync(path.join(home, 'tasks.md'), 'utf8'), '# Tasks\n', '데이터는 손대지 않는다');
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('migrate.js는 버전이 없으면 1로 보고, 같으면 아무것도 하지 않고, 더 높으면 멈춘다', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-migrate-'));
+  // 1) 빈 폴더 — 파일이 없으면 지금 형식(1)으로 보고, 조회만으로 파일을 만들지 않는다
+  assert.equal(migrateStore.readDataVersion(home), 1);
+  assert.equal(fs.existsSync(path.join(home, '.data-version')), false);
+
+  // 2) 같은 버전 — 아무 일도 없다
+  const same = migrateStore.migrate(home);
+  assert.deepEqual(same.applied, []);
+  assert.equal(fs.existsSync(path.join(home, '.data-version')), false, '바꿀 것이 없으면 파일도 만들지 않는다');
+
+  // 3) 더 새 형식 — 옛 앱이 새 데이터를 망치지 않게 멈춘다(CLI는 종료 코드 3)
+  fs.writeFileSync(path.join(home, '.data-version'), '9\n');
+  assert.equal(migrateStore.migrate(home).ok, false);
+  const cli = spawnSync(process.execPath, [path.join(__dirname, 'migrate.js'), '--data', home], { encoding: 'utf8' });
+  assert.equal(cli.status, 3);
+  assert.match(cli.stderr, /더 새 버전의 앱이 만든 거예요/);
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('migrate.js는 단계를 번호 순서대로 밟고 .data-version을 갱신하며, --dry-run은 아무것도 바꾸지 않는다', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-migrate-steps-'));
+  const trail = path.join(home, 'trail.txt');
+  const steps = {
+    2: dir => fs.appendFileSync(path.join(dir, 'trail.txt'), '2'),
+    3: dir => fs.appendFileSync(path.join(dir, 'trail.txt'), '3'),
+  };
+  const dry = migrateStore.migrate(home, { to: 3, steps, dryRun: true });
+  assert.deepEqual(dry.applied, [2, 3]);
+  assert.equal(fs.existsSync(trail), false, '확인만 할 때는 파일을 건드리지 않는다');
+  assert.equal(fs.existsSync(path.join(home, '.data-version')), false);
+
+  const done = migrateStore.migrate(home, { to: 3, steps });
+  assert.deepEqual(done.applied, [2, 3]);
+  assert.equal(fs.readFileSync(trail, 'utf8'), '23', '번호가 작은 단계부터 밟는다');
+  assert.equal(migrateStore.readDataVersion(home), 3);
+  assert.deepEqual(migrateStore.migrate(home, { to: 3, steps }).applied, [], '두 번 밟지 않는다');
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('자동화 스크립트는 설치 위치를 workspace.env에서 찾고, 그것도 없으면 안내하고 멈춘다', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-env-'));
+  const claude = path.join(home, 'fake-claude.sh');
+  writeExec(claude, '#!/bin/bash\necho "됐어요"\n');
+  const envFile = path.join(home, 'workspace.env');
+  fs.writeFileSync(envFile, `WORKSPACE_DIR="${home}"\n`);
+  const shared = { WORKSPACE_DIR: '', AUTOMATION_LOG_DIR: path.join(home, 'logs'), CLAUDE_BIN: claude };
+
+  const found = runScript(automationScript('run-task.sh'), ['envok', '프롬프트', 'Read'], { ...shared, WORKSPACE_ENV_FILE: envFile });
+  assert.equal(found.status, 0, 'setup.sh가 적어 둔 파일에서 설치 위치를 찾는다');
+  assert.match(fs.readFileSync(path.join(home, 'logs', 'envok.log'), 'utf8'), /envok 종료 \(exit 0\)/);
+
+  const missing = path.join(home, 'no-such.env');
+  for (const script of ['run-task.sh', 'slack-capture.sh', 'backup-data.sh']) {
+    const args = script === 'run-task.sh' ? ['envfail', '프롬프트', 'Read'] : [];
+    const result = runScript(automationScript(script), args, { ...shared, WORKSPACE_ENV_FILE: missing, SLACK_CAPTURE_IGNORE_HOURS: '1' });
+    assert.equal(result.status, 1, `${script}은 설치 정보가 없으면 멈춘다`);
+    assert.match(result.stderr, /설치 정보를 찾을 수 없어요 — setup.sh를 먼저 실행해 주세요/);
+  }
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+// update.sh — 임시 폴더 안에 "원격 저장소(bare) + 내려받은 복사본"을 통째로 만들어 돌린다.
+// PATH 앞에 가짜 `launchctl`·`curl`을 세우므로 이 테스트는 실제 앱·실제 맥 스케줄러에 닿지 않는다.
+const REPO_ROOT = path.join(__dirname, '..', '..');
+function updateFixture(t, { channel = 'stable' } = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-update-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const origin = path.join(root, 'origin.git');
+  const seed = path.join(root, 'seed');
+  const clone = path.join(root, 'clone');
+  const bin = path.join(root, 'bin');
+  const backups = path.join(root, 'backups');
+  fs.mkdirSync(bin);
+  writeExec(path.join(bin, 'launchctl'), `#!/bin/bash\necho "$@" >> ${JSON.stringify(path.join(root, 'launchctl.log'))}\nexit 0\n`);
+  writeExec(path.join(bin, 'curl'), `#!/bin/bash\nprintf '{"version":"%s","dataFormat":1}' "$(tr -d '[:space:]' < ${JSON.stringify(path.join(clone, 'VERSION'))})"\n`);
+
+  fs.mkdirSync(path.join(seed, 'tracker', 'inbox-app', 'automation'), { recursive: true });
+  for (const rel of ['update.sh', 'tracker/inbox-app/migrate.js', 'tracker/inbox-app/safe-storage.js',
+    'tracker/inbox-app/automation/run-task.sh', 'tracker/inbox-app/automation/slack-capture.sh', 'tracker/inbox-app/automation/backup-data.sh']) {
+    fs.copyFileSync(path.join(REPO_ROOT, rel), path.join(seed, rel));
+  }
+  fs.writeFileSync(path.join(seed, 'VERSION'), '1.0.0\n');
+  fs.writeFileSync(path.join(seed, 'ui.css'), 'body{}\n');
+  fs.writeFileSync(path.join(seed, '.gitignore'), 'workspace.config.json\ntracker/*.md\ntracker/.*\n.workspace-last-good\n');
+  runGit(seed, ['init', '-b', 'main']);
+  runGit(seed, ['add', '-A']);
+  runGit(seed, ['commit', '-m', '첫 버전']);
+  runGit(seed, ['tag', 'v1.0.0']);
+  fs.writeFileSync(path.join(seed, 'VERSION'), '1.1.0\n');
+  fs.writeFileSync(path.join(seed, 'ui.css'), 'body{color:blue}\n');
+  runGit(seed, ['commit', '-am', '다음 버전']);
+  runGit(seed, ['tag', 'v1.1.0']);
+  runGit(root, ['init', '--bare', '-b', 'main', origin]);
+  runGit(seed, ['remote', 'add', 'origin', origin]);
+  runGit(seed, ['push', '-q', 'origin', 'main', '--tags']);
+  runGit(root, ['clone', '-q', origin, clone]);
+  // 동료의 맥은 배포된 태그(stable)에 고정돼 있고, 나는 main 갈래를 따라간다.
+  if (channel === 'main') runGit(clone, ['reset', '--hard', '-q', 'v1.0.0']);
+  else runGit(clone, ['checkout', '--detach', '-q', 'v1.0.0']);
+
+  fs.writeFileSync(path.join(clone, 'workspace.config.json'), JSON.stringify({ server: { updateChannel: channel, port: 4399 } }, null, 2));
+  fs.writeFileSync(path.join(clone, 'tracker', 'tasks.md'), '# Tasks\n- 지켜야 할 업무\n');
+  fs.writeFileSync(path.join(clone, 'tracker', '.workflow.json'), '{"items":{},"meetings":{}}');
+
+  const run = (args = []) => spawnSync('/bin/bash', [path.join(clone, 'update.sh'), ...args], {
+    cwd: clone, encoding: 'utf8', timeout: 120000,
+    // 이 테스트 파일이 쓰는 WORKSPACE_DATA_DIR이 새어 들어가면 안 된다 — 복사본 안의 tracker/를 보게 비운다.
+    env: { ...gitEnv, WORKSPACE_DATA_DIR: '', HOME: root, PATH: `${bin}:${process.env.PATH}`, WORKSPACE_BACKUP_DIR: backups, WORKSPACE_INSTALL_DIR: path.join(root, 'install') },
+  });
+  const dated = () => (fs.existsSync(backups) ? fs.readdirSync(backups) : []).filter(name => /^\d{4}-\d{2}-\d{2}-\d{4}$/.test(name)).sort();
+  const versionOf = () => fs.readFileSync(path.join(clone, 'VERSION'), 'utf8').trim();
+  const tasks = () => fs.readFileSync(path.join(clone, 'tracker', 'tasks.md'), 'utf8');
+  return { root, clone, backups, run, dated, versionOf, tasks };
+}
+
+test('update.sh: 깨끗한 트리에서는 배포된 최신 버전으로 옮기고, 데이터를 먼저 백업하고 최근 5개만 남긴다', { skip: !gitReady }, (t) => {
+  const fix = updateFixture(t);
+  fs.mkdirSync(fix.backups, { recursive: true });
+  for (const day of ['01', '02', '03', '04', '05', '06']) fs.mkdirSync(path.join(fix.backups, `2020-01-${day}-0900`));
+  fs.mkdirSync(path.join(fix.backups, '내가-만든-폴더'));
+
+  const result = fix.run(['--yes']);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  for (const step of ['[1/6]', '[2/6]', '[3/6]', '[4/6]', '[5/6]', '[6/6]']) assert.ok(result.stdout.includes(step), `${step} 줄이 보인다`);
+  assert.match(result.stdout, /v1\.1\.0으로 업데이트했어요/);
+  assert.equal(fix.versionOf(), '1.1.0');
+  assert.match(fix.tasks(), /지켜야 할 업무/, '업무 데이터는 그대로다');
+
+  const dated = fix.dated();
+  assert.equal(dated.length, 5, '이 스크립트가 만든 백업은 최근 5개만 남긴다');
+  assert.ok(fs.existsSync(path.join(fix.backups, '내가-만든-폴더')), '이름 규칙이 다른 폴더는 건드리지 않는다');
+  const newest = path.join(fix.backups, dated[dated.length - 1]);
+  assert.match(fs.readFileSync(path.join(newest, 'tasks.md'), 'utf8'), /지켜야 할 업무/);
+  assert.ok(fs.existsSync(path.join(newest, '.workflow.json')));
+  assert.ok(fs.existsSync(path.join(newest, 'workspace.config.json')));
+
+  const calls = fs.readFileSync(path.join(fix.root, 'launchctl.log'), 'utf8');
+  assert.match(calls, /kickstart -k gui\/\d+\/com\.workspace\.app\.server/, '정확한 이름 하나에만 부탁한다');
+  assert.doesNotMatch(calls, /pkill|killall/);
+});
+
+test('update.sh: 고친 파일을 그대로 두기로 하면 업데이트를 멈추고 데이터를 지킨다', { skip: !gitReady }, (t) => {
+  const fix = updateFixture(t);
+  fs.writeFileSync(path.join(fix.clone, 'ui.css'), '/* 내가 고친 것 */\n');
+
+  const result = fix.run(['--yes']);   // --yes는 "그대로 두기"를 고른다
+  assert.notEqual(result.status, 0);
+  assert.match(result.stdout, /고친 파일이 있어요: ui\.css/);
+  assert.match(result.stdout, /고친 파일 때문에 업데이트를 이어 갈 수 없어요/);
+  assert.equal(fs.readFileSync(path.join(fix.clone, 'ui.css'), 'utf8'), '/* 내가 고친 것 */\n', '고친 파일을 덮어쓰지 않는다');
+  assert.equal(fix.versionOf(), '1.0.0');
+  assert.match(fix.tasks(), /지켜야 할 업무/, '멈춰도 업무 데이터는 그대로다');
+  assert.equal(fix.dated().length, 1, '멈추기 전에 백업은 이미 만들어 둔다');
+});
+
+test('update.sh --rollback은 이전 코드와 백업 데이터를 함께 되돌린다', { skip: !gitReady }, (t) => {
+  const fix = updateFixture(t);
+  assert.equal(fix.run(['--yes']).status, 0);
+  assert.equal(fix.versionOf(), '1.1.0');
+  // 새 버전에서 데이터가 망가진 상황을 흉내 낸다
+  fs.writeFileSync(path.join(fix.clone, 'tracker', 'tasks.md'), '# Tasks\n- 망가진 내용\n');
+
+  const back = fix.run(['--rollback', '--yes']);
+  assert.equal(back.status, 0, back.stdout + back.stderr);
+  assert.equal(fix.versionOf(), '1.0.0', '코드는 이전 자리로 돌아간다');
+  assert.match(fix.tasks(), /지켜야 할 업무/, '데이터도 백업에서 돌아온다');
+  assert.equal(fs.existsSync(path.join(fix.clone, '.workspace-last-good')), false, '두 번 되돌리지 않는다');
+});
+
+test('update.sh: main 갈래는 태그가 아니라 origin/main을 앞으로만 따라간다', { skip: !gitReady }, (t) => {
+  const fix = updateFixture(t, { channel: 'main' });
+  const result = fix.run(['--yes']);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(fix.versionOf(), '1.1.0');
+  assert.equal(runGit(fix.clone, ['rev-parse', '--abbrev-ref', 'HEAD']).stdout.trim(), 'main', '갈래를 떼어 놓지 않는다');
+  assert.equal(runGit(fix.clone, ['rev-parse', 'HEAD']).stdout.trim(), runGit(fix.clone, ['rev-parse', 'origin/main']).stdout.trim());
 });

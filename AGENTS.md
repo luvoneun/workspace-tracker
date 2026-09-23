@@ -14,7 +14,8 @@
 - 검증: `cd tracker/inbox-app && node --test server.test.js client.test.js report-drafts.test.js`. 화면·API 확인은 `node browser-fixture.js`(4322 포트, 임시 데이터)로 한다.
 - 화면·서버 호환성을 확인한 뒤 운영에 반영하고, 운영 반영·재시작 여부를 명확히 알린다.
 - 기능을 바꾸면 README와 관련 스킬 설명도 함께 고친다. README에는 현재 동작만 적는다(변경 이력은 Git 기록).
-- `automation/`의 스크립트는 `~/.local/share/workspace-automation/`의 복사본이 실행된다. 고쳤으면 복사본도 갱신한다.
+- `tracker/inbox-app/automation/`의 스크립트는 `~/.local/share/workspace-automation/`의 복사본이 실행된다. 고쳤으면 복사본도 갱신한다(`setup.sh`·`update.sh`가 다시 복사한다). 복사본은 설치 위치를 `WORKSPACE_DIR` → `workspace.env` 순서로 찾는다.
+- 앱 서버를 다시 시작하는 명령은 `launchctl kickstart -k gui/$(id -u)/com.workspace.app.server`다(launchd 이름은 전부 `com.workspace.app.<작업>`).
 - 프로세스를 끝내는 코드는 직접 띄운 프로세스와 그 그룹에만 신호를 보낸다. 프로세스 목록을 훑어 종료 대상을 고르지 않는다(관계없는 프로그램을 강제 종료한 사고가 있었다). 에이전트가 고친 코드는 실행하기 전에 변경분을 먼저 읽는다.
 - 화면 파일을 여러 곳 고칠 때는 격리된 복사본(worktree)에서 작업하고 검증한 뒤 한 번에 옮긴다. 제품 차원의 결정과 그 이유는 `DECISIONS.md`에 있다 — 기능을 고치기 전에 관련 결정을 확인한다.
 

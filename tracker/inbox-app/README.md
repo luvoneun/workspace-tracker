@@ -201,7 +201,7 @@
 
 ### 하위 티켓 보기
 
-띠 카드 맨 아래 줄이 하위 티켓입니다 — 진행률(`12개 중 7개 완료`) 뒤에 **아직 안 끝난 것의 담당별 개수**(`엘리 2 · 담당 없음 2 · 루본 1`, 많은 순·같으면 가나다·`담당 없음`은 맨 뒤, 최대 4명이고 넘으면 `외 N명`)가 붙고, 줄 오른쪽 끝 꺾쇠로 목록을 폅니다. 다 끝났으면 이름 자리에 `모두 완료`, 하위가 하나도 없으면 줄 자체가 없습니다.
+띠 카드 맨 아래 줄이 하위 티켓입니다 — 진행률(`12개 중 7개 완료`) 뒤에 **아직 안 끝난 것의 담당별 개수**(`하늘 2 · 담당 없음 2 · 루본 1`, 많은 순·같으면 가나다·`담당 없음`은 맨 뒤, 최대 4명이고 넘으면 `외 N명`)가 붙고, 줄 오른쪽 끝 꺾쇠로 목록을 폅니다. 다 끝났으면 이름 자리에 `모두 완료`, 하위가 하나도 없으면 줄 자체가 없습니다.
 
 - 펼치면 티켓마다 한 줄입니다: `지라 상태`(범주로만 색 — 완료는 초록, 할 일은 회색, 진행은 파랑) · **요약**(누르면 지라가 새 탭으로 열립니다, 지라 키는 툴팁에만) · **담당자**(없으면 회색 `담당 없음`) · 조용한 배포 버전. 좁은 화면(≤640px)에서는 담당자가 요약 아래 줄로 내려가고 배포 버전은 숨습니다.
 - 순서는 아직 안 끝난 것 먼저(진행 → 할 일)고 끝난 것은 맨 아래 흐리게 섭니다. 완료가 다섯 개를 넘으면 나머지는 `완료 N개 더 보기` 뒤로 접힙니다. 지라에서 읽어 오는 것은 100개까지고, 다 차면 목록 끝에 `지라에서 전체 보기 ↗`가 붙습니다.
@@ -318,6 +318,20 @@
 
 쓰기에는 임시 파일 교체, `.backups/`의 직전 파일, 변경 파일별 복구 저널을 사용합니다. 복구할 파일이 외부에서 다시 수정됐으면 덮어쓰지 않고 저널을 보존합니다. 이는 장기 백업을 대체하지 않습니다.
 
+### 버전과 업데이트
+
+저장소 뿌리의 `VERSION`(예 `1.0.0`)이 지금 버전이고, `release.sh`만 이 파일을 고칩니다. 앱은 `GET /api/about`으로 `{ version, dataFormat, channel, install, gitRef, modified, latest }`를 알려 줍니다 — `channel`은 `workspace.config.json`의 `server.updateChannel`(`stable`이면 배포된 태그만, `main`이면 만드는 중인 것까지), `install`은 맥 스케줄러가 띄운 자리면 `managed`(서버 plist의 `WORKSPACE_MANAGED=1`), 아니면 `manual`, `gitRef`는 짧은 커밋 해시, `modified`는 **추적 파일 중 고치거나 지운 것의 이름**입니다(미추적·`.gitignore`는 빠지므로 업무 데이터는 절대 들어가지 않고, 내용도 읽지 않습니다). git이 없거나 실패하면 둘 다 `null`입니다. `latest`는 6시간에 한 번 백그라운드에서 `git ls-remote --tags origin`으로 읽은 가장 높은 `vX.Y.Z`이고(실패하면 조용히 `null`, 파일은 쓰지 않습니다, `WORKSPACE_NO_REMOTE_CHECK=1`로 끕니다), 이 조회는 어떤 파일도 쓰지 않습니다.
+
+업데이트는 `update.sh`(또는 `업데이트.command` 더블클릭)가 여섯 단계로 합니다: ① 고친 파일 확인(되돌릴 때도 `local-changes-<시각>` 가지에 담아 둡니다) ② **업무 데이터를 `~/workspace-data-backup/<YYYY-MM-DD-HHMM>/`에 복사**(최근 5개만 남기고, 지우는 대상은 이 이름 규칙에 맞는 폴더뿐입니다) ③ 받기(`stable`은 가장 높은 태그로 `checkout --detach`, `main`은 `merge --ff-only` — 받기 전 자리를 `.workspace-last-good`에 적고, 자동화 복사본도 함께 갱신합니다) ④ `migrate.js`로 데이터 형식 변환 ⑤ `launchctl kickstart -k gui/$(id -u)/com.workspace.app.server` ⑥ `GET /api/about`이 새 `VERSION`을 말하는지 10초까지 확인. `--rollback`은 ③의 자리로 코드를 되돌리고 **가장 최근 백업의 데이터까지 함께** 되돌립니다. 데이터 파일을 지우는 동작은 어디에도 없습니다.
+
+### 데이터 형식 버전
+
+데이터 폴더의 `.data-version`(숫자 한 줄)이 형식 번호이고, 파일이 없으면 **1로 봅니다**(조회만으로 새로 쓰지 않습니다). 지금 형식은 1입니다. `node migrate.js [--data DIR] [--dry-run]`이 현재 번호부터 앱이 아는 번호까지 `steps`를 차례로 밟고 마지막에 `.data-version`을 적습니다(각 단계는 `atomicWrite`만 씁니다). **데이터가 앱보다 새 형식이면** 변환은 종료 코드 3과 `이 데이터는 더 새 버전의 앱이 만든 거예요. 앱을 업데이트해 주세요.`로 멈추고, 서버도 시작할 때 같은 검사를 해서 그때는 아예 뜨지 않습니다(종료 코드 3) — 옛 앱이 새 데이터를 망치지 않게 하려는 장치입니다.
+
+### 이 컴퓨터에만 두는 것 (`local/`)
+
+저장소 뿌리의 `local/` 폴더는 업데이트해도 그대로 남습니다(`.gitignore`, `README.md`만 추적). `icon.png`가 있으면 `setup.sh`가 Dock 앱 아이콘으로 먼저 씁니다. `local.css`(모양 덧씌우기)는 아직 앱이 읽지 않습니다.
+
 ### 업무 데이터 백업
 
 `tracker/`의 업무 데이터는 코드 저장소에서 제외돼 있어서, `automation/backup-data.sh`가 하루 한 번(19:30) 별도의 비공개 Git 저장소에 커밋하고 올립니다. 백업용 저장 공간은 프로젝트 밖 `~/.local/share/workspace-automation/data-backup.git`에 있고, 올릴 파일은 그 안의 `info/exclude` 허용 목록으로 고정합니다(접속 암호·잠금·`.backups`는 제외). 결과는 `logs/data-backup.log`에 남습니다.
@@ -341,7 +355,9 @@ Slack 수집은 모든 페이지를 읽고 `import-record.js`로 앱의 검증·
 
 지라 캐시(`tracker/jira_issues.md`)는 `- 키 | 이슈타입 | 상태 | 요약` 한 줄 형식이고, 기본 조회(내 담당·미완료) 뒤에 `## 업무에 연결된 그 밖의 이슈` 소제목이 올 수 있습니다. 업무에 연결돼 있는데 완료됐거나 담당이 바뀌어 기본 조회에서 빠진 이슈를 동기화가 여기에 적어, 요약이 사라지지 않게 합니다. 그 구역의 이슈는 **요약 표시에만** 쓰이고 프로젝트 고르기 선택지·프로젝트 목록에는 새로 오르지 않습니다(이미 항목이 걸려 있으면 그 항목 때문에 목록에 섭니다). 완료 범주인 이슈는 상태 칸이 정확히 `완료`입니다. 소제목이 없는 옛 파일도 그대로 읽습니다. 이 파일은 이제 **대비책**입니다 — 앱 서버가 지라를 직접 읽을 수 있으면 화면은 그 값을 쓰고 이 파일은 보지 않습니다(지라 설정이 없거나 토큰이 만료됐거나 지라가 답하지 않을 때만 쓰입니다). 동기화 자동화(`jira-sync`)는 그래서 그대로 둡니다 — 끄고 싶으면 `workspace.config.json`의 `integrations`가 아니라 launchd에서 그 작업을 내려야 합니다.
 
-미팅 노트 가져오기는 일정표 없이 **앱의 버튼으로만** 돕니다. 앱 서버는 프로세스를 띄우지 않고 요청 표시 파일 `~/.local/share/workspace-automation/requests/tiro-sync.request`(JSON: `{"requestedAt", "scope": "today"|"meeting", "meeting": {…}}`) 하나만 씁니다. 그 파일을 `WatchPaths`로 지켜보던 launchd 에이전트(`com.luvon.workspace.tiro-sync`)가 기존 `run-task.sh`로 `.claude/skills/tiro-sync.md`를 실행하고, 앱은 `logs/tiro-sync.log`의 시작·종료 줄로 진행 상태를 읽습니다(`GET /api/meeting-notes/status` — 파일을 쓰지 않습니다). 요청에 담기는 회의 값은 **앱이 아는 회의 목록에 실제로 있는 회의**만 통과하고(형식 오류·미래 회의는 거절), 요청 파일의 글자는 자동화가 데이터로만 다룹니다. 60초가 지나도 실행이 시작되지 않으면 `setup.sh를 다시 실행해 주세요`로, 35분이 넘으면 실패로 봅니다. 가져오는 중에 들어온 요청은 409(`지금 가져오는 중이에요`)로 막습니다. 티로 MCP(`tiro-mcp`, user 범위)가 `claude`에 연결돼 있어야 실행이 성공합니다.
+미팅 노트 가져오기는 일정표 없이 **앱의 버튼으로만** 돕니다. 앱 서버는 프로세스를 띄우지 않고 요청 표시 파일 `~/.local/share/workspace-automation/requests/tiro-sync.request`(JSON: `{"requestedAt", "scope": "today"|"meeting", "meeting": {…}}`) 하나만 씁니다. 그 파일을 `WatchPaths`로 지켜보던 launchd 에이전트(`com.workspace.app.tiro-sync`)가 기존 `run-task.sh`로 `.claude/skills/tiro-sync.md`를 실행하고, 앱은 `logs/tiro-sync.log`의 시작·종료 줄로 진행 상태를 읽습니다(`GET /api/meeting-notes/status` — 파일을 쓰지 않습니다). 요청에 담기는 회의 값은 **앱이 아는 회의 목록에 실제로 있는 회의**만 통과하고(형식 오류·미래 회의는 거절), 요청 파일의 글자는 자동화가 데이터로만 다룹니다. 60초가 지나도 실행이 시작되지 않으면 `setup.sh를 다시 실행해 주세요`로, 35분이 넘으면 실패로 봅니다. 가져오는 중에 들어온 요청은 409(`지금 가져오는 중이에요`)로 막습니다. 티로 MCP(`tiro-mcp`, user 범위)가 `claude`에 연결돼 있어야 실행이 성공합니다.
+
+자동화 스크립트 셋(`run-task.sh`·`slack-capture.sh`·`backup-data.sh`)은 저장소 밖 복사본이 돌기 때문에 **설치 위치를 따로 받습니다**: launchd plist가 넘기는 `WORKSPACE_DIR` → 없으면 `setup.sh`가 적어 둔 `~/.local/share/workspace-automation/workspace.env` → 그것도 없으면 `설치 정보를 찾을 수 없어요 — setup.sh를 먼저 실행해 주세요`로 멈춥니다(특정 사람의 폴더를 기본값으로 삼지 않습니다). launchd 이름은 전부 `com.workspace.app.<작업>`이고, 앱 서버를 다시 시작하는 명령은 `launchctl kickstart -k gui/$(id -u)/com.workspace.app.server`입니다.
 
 자동화 실행(`run-task.sh`)은 모델을 **Sonnet으로 고정**해 부릅니다(`--model sonnet`, 바꾸려면 `TASK_MODEL`) — 계정 기본 모델을 따라가면 `/model`을 바꾼 뒤 수집·동기화가 비싼 모델로 돌아 사용량 한도를 먹기 때문입니다. 30분(`TASK_TIMEOUT_SECONDS`, 맥이 깨어 있는 시간 기준)이 넘으면 자식 프로세스까지 정리하고 `exit 124`로 끝냅니다. Slack 수집은 잠금 주인 프로세스가 살아 있는지 확인해서, 살아 있으면 건너뛰고 죽었으면 바로 회수합니다. 수집 실행은 파일 수정 도구 없이(Write·Edit 금지) `import-record.js`와 `fetch_slack_channel.sh` 두 명령만 쓸 수 있습니다.
 

@@ -3742,11 +3742,11 @@ const jiraKid = (key, summary, category, assignee, version = null) => ({
   assignee,
   version,
 });
-// 미완료는 루본 2 · 엘리 1 · 담당 없음 1, 완료는 1개다.
+// 미완료는 루본 2 · 하늘 1 · 담당 없음 1, 완료는 1개다.
 const jiraKids = () => [
   jiraKid('IO-48391', '임베드 카드 붙이기', 'done', '루본'),
   jiraKid('IO-48392', '게임 목록 불러오기', 'doing', '루본', 'v2.70.0'),
-  jiraKid('IO-48393', '미리보기 문구 정리하기', 'todo', '엘리'),
+  jiraKid('IO-48393', '미리보기 문구 정리하기', 'todo', '하늘'),
   jiraKid('IO-48395', '검수 항목 정리하기', 'doing', null),
   jiraKid('IO-48396', '오류 문구 다듬기', 'todo', '루본'),
 ];
@@ -3770,7 +3770,7 @@ test('담당별 요약은 미완료만 세고 많은 순·가나다순으로, �
   const app = pureClient();
   const summary = items => JSON.parse(app.run(`JSON.stringify(jiraChildSummary(${JSON.stringify(items)}))`));
   const basic = summary(jiraKids());
-  assert.deepEqual(basic.names, [{ name: '루본', count: 2 }, { name: '엘리', count: 1 }, { name: '담당 없음', count: 1 }],
+  assert.deepEqual(basic.names, [{ name: '루본', count: 2 }, { name: '하늘', count: 1 }, { name: '담당 없음', count: 1 }],
     '완료한 루본 것은 세지 않는다. 개수가 같으면 가나다이고 `담당 없음`은 이름이 아니라 맨 뒤다');
   assert.equal(basic.extra, 0);
   assert.equal(basic.allDone, false);
@@ -3792,7 +3792,7 @@ test('담당별 요약은 미완료만 세고 많은 순·가나다순으로, �
 test('접힌 줄은 진행률 뒤에 담당별 개수를 적고, 하위가 없으면 줄 자체가 없다', () => {
   const { card } = jiraKidFixture(jiraWithKids());
   const foot = nodeFind(card(), 'foot');
-  assert.match(nodeText(foot), /하위 티켓 .*5개 중 1개 완료 .*루본 2 · 엘리 1 · 담당 없음 1/);
+  assert.match(nodeText(foot), /하위 티켓 .*5개 중 1개 완료 .*루본 2 · 하늘 1 · 담당 없음 1/);
   const caret = nodeFind(foot, 'd-jexp');
   assert.equal(caret.getAttribute('aria-expanded'), 'false');
   assert.equal(caret.getAttribute('aria-label'), '하위 티켓 펼치기');
@@ -3879,7 +3879,7 @@ test('접힌 줄의 이름을 누르면 펼쳐지며 그 담당 것만 보이고
   assert.deepEqual(nodeFindAll(card(), 'd-jkid').map(row => nodeFind(row, 'sm').textContent),
     ['게임 목록 불러오기', '오류 문구 다듬기', '임베드 카드 붙이기'], '그 사람의 완료한 것도 함께 보인다');
   assert.equal(whoButton('루본').getAttribute('aria-pressed'), 'true');
-  assert.equal(whoButton('엘리').getAttribute('aria-pressed'), 'false');
+  assert.equal(whoButton('하늘').getAttribute('aria-pressed'), 'false');
   // 거르는 중에만 `전체`가 붙는다.
   const clear = nodeFindAll(card(), 'd-jwho').find(button => button.textContent === '전체');
   assert.ok(clear);
@@ -3889,15 +3889,15 @@ test('접힌 줄의 이름을 누르면 펼쳐지며 그 담당 것만 보이고
   assert.equal(nodeFindAll(card(), 'd-jwho').find(button => button.textContent === '전체'), undefined);
 
   // 같은 이름을 다시 누르면 해제된다(펼침은 그대로).
-  whoButton('엘리').listeners.click();
+  whoButton('하늘').listeners.click();
   assert.equal(nodeFindAll(card(), 'd-jkid').length, 1);
-  whoButton('엘리').listeners.click();
+  whoButton('하늘').listeners.click();
   assert.equal(app.run('jiraChildPick'), null);
   assert.equal(nodeFindAll(card(), 'd-jkid').length, 5);
 
   // 거르는 중에 그 사람의 티켓이 사라지면 조용한 한 줄만 남는다(빈 칸을 남기지 않는다).
-  whoButton('엘리').listeners.click();
-  app.run(`jiraCard = { ...jiraCard, issue: ${JSON.stringify(jiraWithKids(jiraKids().filter(item => item.assignee !== '엘리')))} }; jiraStripPaint()`);
+  whoButton('하늘').listeners.click();
+  app.run(`jiraCard = { ...jiraCard, issue: ${JSON.stringify(jiraWithKids(jiraKids().filter(item => item.assignee !== '하늘')))} }; jiraStripPaint()`);
   assert.equal(nodeText(nodeFind(card(), 'd-jkids')), '이 담당의 하위 티켓이 없어요');
 });
 

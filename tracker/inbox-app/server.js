@@ -9,7 +9,8 @@ const fs = { ...nativeFs, readFileSync: (file,encoding) => {
 }, writeFileSync: atomicWrite, appendFileSync: (file, data) => atomicWrite(file, (nativeFs.existsSync(file) ? nativeFs.readFileSync(file, 'utf8') : '') + data) };
 const path = require('path');
 const os = require('os');
-const { exec } = require('child_process');
+const { exec, execFile } = require('child_process');
+const { DATA_FORMAT_VERSION, readDataVersion, TOO_NEW_MESSAGE } = require('./migrate');
 const { randomBytes, createHash, timingSafeEqual } = require('node:crypto');
 
 // 사람/회사마다 달라지는 값은 전부 workspace.config.json 한 곳에 모아둔다.
@@ -33,6 +34,8 @@ const PORT = Number(process.env.WORKSPACE_PORT || CONFIG.server?.port || 4321);
 const EXTRA_HOST = process.env.WORKSPACE_HOST || CONFIG.server?.extraHost || '';
 const TRACKER_DIR = process.env.WORKSPACE_DATA_DIR || path.join(__dirname, '..');
 const PUBLIC_DIR = __dirname;
+// 코드 저장소의 뿌리(VERSION·git 기록이 있는 곳). 앱은 이 저장소를 그대로 clone해서 쓴다.
+const REPO_DIR = process.env.WORKSPACE_REPO_DIR || path.join(__dirname, '..', '..');
 const ACCESS_TOKEN_PATH = path.join(TRACKER_DIR, '.access-token');
 function remoteAuthorized(req) {
   const address=req.socket.remoteAddress;
@@ -1569,6 +1572,85 @@ const MIME = {
   '.woff2': 'font/woff2',
 };
 
+// ---------- 앱 정보 (GET /api/about) ----------
+// 지금 버전·데이터 형식·받는 갈래와, 이 설치가 저장소에서 벗어났는지(고친 파일)를 알려 준다.
+// 파일은 하나도 쓰지 않고, git이 없거나 실패하면 조용히 `null`이다.
+const VERSION_PATH = path.join(REPO_DIR, 'VERSION');
+const REMOTE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;   // 6시간에 한 번
+let latestRelease = null;        // { tag, checkedAt } — 메모리에만 둔다
+let remoteCheckTimer = null;
+let remoteChecking = false;
+
+function appVersion() {
+  try { return nativeFs.readFileSync(VERSION_PATH, 'utf8').trim() || null; } catch { return null; }
+}
+
+function git(args, timeout = 3000) {
+  return new Promise((resolve) => {
+    try {
+      execFile('git', args, { cwd: REPO_DIR, timeout, maxBuffer: 1024 * 1024 }, (error, stdout) => resolve(error ? null : String(stdout)));
+    } catch { resolve(null); }
+  });
+}
+
+// 추적 파일의 수정·삭제만 센다 — 미추적·gitignore는 빠지므로 업무 데이터는 여기 잡히지 않는다.
+// 파일 이름만 쓰고 내용은 읽지 않는다.
+async function gitModified() {
+  const out = await git(['status', '--porcelain']);
+  if (out === null) return null;
+  return out.split('\n').filter(Boolean).filter((line) => {
+    const state = line.slice(0, 2);
+    if (state.includes('?') || state.includes('!')) return false;
+    return state.includes('M') || state.includes('D');
+  }).map((line) => line.slice(3).split(' -> ').pop().replace(/^"|"$/g, '')).sort();
+}
+
+function compareVersions(a, b) {
+  const left = a.replace(/^v/, '').split('.').map(Number);
+  const right = b.replace(/^v/, '').split('.').map(Number);
+  for (let i = 0; i < 3; i++) if ((left[i] || 0) !== (right[i] || 0)) return (left[i] || 0) - (right[i] || 0);
+  return 0;
+}
+
+// 새 버전이 나왔는지 원격의 태그만 읽어 본다(설정과 무관하게 돈다 — 연동을 다 끈 사람도 업데이트는 받는다).
+// 실패해도 조용히 지나가고, 파일은 쓰지 않는다.
+async function checkLatestRelease() {
+  if (remoteChecking) return;
+  remoteChecking = true;
+  try {
+    const out = await git(['ls-remote', '--tags', 'origin'], 10000);
+    if (!out) return;
+    const tags = [...out.matchAll(/refs\/tags\/(v\d+\.\d+\.\d+)(?:\^\{\})?$/gm)].map((match) => match[1]);
+    if (!tags.length) return;
+    const tag = tags.sort(compareVersions)[tags.length - 1];
+    latestRelease = { tag, checkedAt: new Date().toISOString() };
+  } finally {
+    remoteChecking = false;
+  }
+}
+
+function startRemoteCheck() {
+  if (remoteCheckTimer || process.env.WORKSPACE_NO_REMOTE_CHECK) return;
+  remoteCheckTimer = setInterval(checkLatestRelease, REMOTE_CHECK_INTERVAL_MS);
+  if (remoteCheckTimer.unref) remoteCheckTimer.unref();
+  checkLatestRelease();
+}
+
+async function aboutApp() {
+  startRemoteCheck();
+  const [modified, ref] = await Promise.all([gitModified(), git(['rev-parse', '--short', 'HEAD'])]);
+  return {
+    version: appVersion(),
+    dataFormat: DATA_FORMAT_VERSION,
+    channel: CONFIG.server?.updateChannel || 'stable',
+    // launchd가 KeepAlive로 띄운 자리에는 setup.sh가 이 표시를 넣어 둔다(개발용 서버·픽스처에는 없다).
+    install: process.env.WORKSPACE_MANAGED ? 'managed' : 'manual',
+    gitRef: ref ? ref.trim() : null,
+    modified,
+    latest: latestRelease,
+  };
+}
+
 // ---------- 브라우저로 나가는 화면 파일 ----------
 // 화면 코드가 여러 파일로 나뉘어 있어서 이름을 하나하나 적지 않는다 — `PUBLIC_DIR`의 `*.js`/`*.css`
 // 가운데 아래 차단 규칙에 걸리지 않는 것만 나간다(파일을 더해도 서버를 고칠 필요가 없다).
@@ -1576,7 +1658,7 @@ const MIME = {
 // 인증 예외(publicAsset)와는 다른 이야기다 — 여기 있는 파일도 원격에서는 인증을 거친다.
 const CLIENT_BLOCKED = new Set([
   'server.js', 'safe-storage.js', 'jira-client.js', 'jira-live.js', 'attention-live.js', 'report-drafts.js',
-  'task-batch.js', 'slack-history.js', 'import-record.js', 'browser-fixture.js',
+  'task-batch.js', 'slack-history.js', 'import-record.js', 'browser-fixture.js', 'migrate.js',
 ]);
 function isClientFile(name) {
   if (!/^[A-Za-z0-9][\w.-]*\.(js|css)$/.test(name)) return false;   // 이름 한 칸짜리(하위 경로 없음)만
@@ -1933,6 +2015,18 @@ const handleRequest = (req, res) => {
     }).catch((error) => {
       res.writeHead(error.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ ok: false, error: error.message, code: error.code }));
+    });
+    return;
+  }
+
+  // 앱 정보 — 조회라 파일을 쓰지 않는다.
+  if (url.pathname === '/api/about' && req.method === 'GET') {
+    aboutApp().then((about) => {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify(about));
+    }).catch(() => {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: '앱 정보를 읽지 못했어요.' }));
     });
     return;
   }
@@ -2372,6 +2466,12 @@ function safeHandle(req, res) {
 const server = http.createServer(safeHandle);
 
 if (require.main === module) {
+  // 데이터가 이 앱보다 새 형식이면 아예 시작하지 않는다 — 옛 앱이 새 데이터를 망치지 않게.
+  const dataVersion = readDataVersion(TRACKER_DIR);
+  if (dataVersion > DATA_FORMAT_VERSION) {
+    console.error(`${TOO_NEW_MESSAGE} (데이터 형식 ${dataVersion}, 이 앱 ${DATA_FORMAT_VERSION})`);
+    process.exit(3);
+  }
   // 복구를 끝내지 못해도 서버는 뜬다. 쓰기는 잠기고, 화면이 이유를 보여 줄 수 있게.
   try { mutations.recover(); } catch (error) { console.error('저장 복구가 필요합니다. 저장을 멈춥니다:', error.message); }
   if(EXTRA_HOST && !nativeFs.existsSync(ACCESS_TOKEN_PATH))atomicWrite(ACCESS_TOKEN_PATH,randomBytes(32).toString('hex'));

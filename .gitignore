@@ -20,6 +20,12 @@ tracker/.mutation-journal.json
 tracker/.mutation.lock
 **/.backups/
 tracker/meeting_drafts.json
+tracker/.data-version
+
+# 이 컴퓨터에만 두는 것 (업데이트해도 그대로 남는다)
+local/*
+!local/README.md
+.workspace-last-good
 
 # 실행 중 생기는 상태/로그
 tracker/inbox-app/.slack_capture_state.json

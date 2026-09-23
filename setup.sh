@@ -3,10 +3,12 @@
 #
 # 새 맥에서 이걸 한 번 실행하면:
 #   1. 필요한 프로그램이 있는지 확인하고
-#   2. 설정 파일을 만들고 (처음이면 채워달라고 안내)
+#   2. 설정 파일을 만들고 (없으면 기본값으로 바로 만든다 — 묻지 않는다)
 #   3. 자동화 스크립트를 실행 위치로 복사하고
 #   4. 맥 스케줄러(launchd)에 등록하고
 #   5. Dock에 올릴 앱을 만든다
+#
+# 묻는 것이 하나도 없다. 이미 있는 설정은 그대로 존중하므로 여러 번 실행해도 안전하다.
 #
 #   실행: bash setup.sh
 
@@ -18,29 +20,53 @@ INSTALL_DIR="$HOME/.local/share/workspace-automation"
 AGENTS_DIR="$HOME/Library/LaunchAgents"
 CONFIG="$WORKSPACE/workspace.config.json"
 APP_BUNDLE="$HOME/Applications/Workspace.app"
+# launchd에 등록할 이름. 사람 이름이 아니라 앱 이름으로 짓는다(누구의 맥에서든 같다).
+LABEL="com.workspace.app"
+# 예전에 내 이름으로 등록해 둔 것들. 새로 등록하기 전에 이름을 하나하나 지정해 내린다.
+OLD_LABEL="com.luvon.workspace"
+AGENT_NAMES="server slack-capture calendar-sync jira-sync tiro-sync data-backup open-at-login"
 
 ok()   { echo "  ✓ $1"; }
 warn() { echo "  ! $1"; }
-die()  { echo "  ✗ $1"; echo; echo "설치를 멈춥니다."; exit 1; }
+die()  { echo "  ✗ $1"; echo; echo "설치를 멈춰요."; exit 1; }
 
 echo
-echo "워크스페이스 설치를 시작합니다"
+echo "워크스페이스 설치를 시작해요"
 echo "  위치: $WORKSPACE"
 echo
+
+# 인터넷에서 받은 파일에 붙는 격리 표시를 떼어 둔다(없으면 조용히 지나간다).
+xattr -d com.apple.quarantine "$WORKSPACE/setup.sh" "$WORKSPACE/update.sh" "$WORKSPACE/업데이트.command" >/dev/null 2>&1
+chmod +x "$WORKSPACE/update.sh" "$WORKSPACE/업데이트.command" >/dev/null 2>&1
 
 # ─────────────────────────────────────────────
 echo "[1/5] 필요한 프로그램 확인"
 
-command -v node >/dev/null 2>&1 || die "node가 없습니다. https://nodejs.org 에서 설치해주세요."
-ok "node $(node -v)"
+need_node() {
+  echo "  ✗ Node가 없어요. https://nodejs.org 에서 LTS를 설치한 뒤 이 창에서 다시 실행해 주세요."
+  # 자동으로 설치하지는 않는다(묻지 않고 남의 맥에 프로그램을 깔지 않는다). 명령만 보여 준다.
+  command -v brew >/dev/null 2>&1 && echo "     Homebrew를 쓰신다면:  brew install node"
+  echo
+  echo "설치를 멈춰요."
+  exit 1
+}
+
+if command -v node >/dev/null 2>&1; then
+  NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null)"
+  case "${NODE_MAJOR:-}" in ''|*[!0-9]*) NODE_MAJOR=0 ;; esac
+  [ "$NODE_MAJOR" -lt 18 ] && need_node
+  ok "node $(node -v)"
+else
+  need_node
+fi
 
 if command -v claude >/dev/null 2>&1; then
   ok "claude $(claude --version 2>/dev/null | head -1)"
 else
-  warn "claude CLI가 없습니다. 앱은 동작하지만 슬랙·캘린더·지라 자동 갱신은 안 됩니다."
+  warn "Claude Code가 없어요 — 앱은 다 되고, 슬랙 고급 분류·티로 가져오기만 안 돼요."
 fi
 
-command -v python3 >/dev/null 2>&1 || die "python3가 없습니다."
+command -v python3 >/dev/null 2>&1 || die "python3가 없어요."
 ok "python3 $(python3 --version 2>&1 | cut -d' ' -f2)"
 
 # ─────────────────────────────────────────────
@@ -48,20 +74,37 @@ echo
 echo "[2/5] 설정 파일"
 
 if [ ! -f "$CONFIG" ]; then
-  cp "$WORKSPACE/workspace.config.example.json" "$CONFIG"
-  echo
-  echo "  설정 파일을 새로 만들었습니다: workspace.config.json"
-  echo "  아래 항목을 채운 뒤 이 스크립트를 다시 실행해주세요."
-  echo
-  echo "    title           — 화면에 표시할 이름"
-  echo "    slack.workspaceUrl — 회사 슬랙 주소 (예: https://회사.slack.com)"
-  echo "    slack.tokenFile — 슬랙 토큰을 저장한 파일 경로"
-  echo "    slack.channels  — 나만 보는 비공개 채널 4개의 ID"
-  echo "                      (슬랙에서 채널 → 세부정보 맨 아래에 있습니다)"
-  echo
-  exit 0
+  cp "$WORKSPACE/workspace.config.example.json" "$CONFIG" || die "설정 파일을 만들지 못했어요."
+  # 제목은 맥 계정 이름에서 가져온다(없으면 그냥 "워크스페이스"). 연동은 전부 꺼진 채로 시작하고,
+  # 슬랙·지라는 나중에 앱의 설정에서 켠다 — 여기서는 아무것도 묻지 않는다.
+  FULL_NAME="$(id -F 2>/dev/null)"
+  TITLE="워크스페이스"
+  [ -n "$FULL_NAME" ] && TITLE="${FULL_NAME}의 워크스페이스"
+  # 4321을 다른 프로그램이 이미 쓰고 있으면 빈 포트를 골라 둔다(처음 만들 때만 고른다).
+  NEW_PORT=4321
+  if command -v lsof >/dev/null 2>&1; then
+    tries=0
+    while [ "$tries" -lt 10 ] && lsof -nP -iTCP:"$NEW_PORT" -sTCP:LISTEN >/dev/null 2>&1; do
+      NEW_PORT=$((NEW_PORT + 1))
+      tries=$((tries + 1))
+    done
+  fi
+  python3 - "$CONFIG" "$TITLE" "$NEW_PORT" << 'PY' || die "설정 파일을 채우지 못했어요."
+import json, sys
+path, title, port = sys.argv[1], sys.argv[2], int(sys.argv[3])
+with open(path) as f:
+    config = json.load(f)
+config['title'] = title
+config.setdefault('server', {})['port'] = port
+with open(path, 'w') as f:
+    json.dump(config, f, ensure_ascii=False, indent=2)
+    f.write('\n')
+PY
+  ok "설정 파일을 만들었어요 — 제목은 \"$TITLE\""
+  [ "$NEW_PORT" = "4321" ] || warn "4321 포트를 이미 쓰고 있어서 $NEW_PORT 포트로 열어요."
+else
+  ok "설정 파일 있음 (그대로 둬요)"
 fi
-ok "설정 파일 있음"
 
 # 안 쓰는 도구는 검사도 등록도 하지 않는다
 uses() {
@@ -81,7 +124,7 @@ USING=""
 ok "연동:${USING:- (없음 — 직접 입력만 사용)}"
 
 if [ "$USE_SLACK" = "yes" ]; then
-  grep -q "여기에_채널ID" "$CONFIG" && die "workspace.config.json의 채널 ID를 아직 채우지 않았습니다."
+  grep -q "여기에_채널ID" "$CONFIG" && die "workspace.config.json의 채널 ID를 아직 채우지 않았어요."
   TOKEN_FILE=$(python3 -c "
 import json, os
 with open('$CONFIG') as f: c = json.load(f)
@@ -90,7 +133,7 @@ print(os.path.expanduser(c.get('slack', {}).get('tokenFile', '')))
   if [ -n "$TOKEN_FILE" ] && [ -f "$TOKEN_FILE" ]; then
     ok "슬랙 토큰 있음"
   else
-    warn "슬랙 토큰 파일이 없습니다: ${TOKEN_FILE:-(설정 안 됨)} — 슬랙 캡처는 동작하지 않습니다."
+    warn "슬랙 토큰 파일이 없어요: ${TOKEN_FILE:-(설정 안 됨)} — 슬랙 캡처는 돌지 않아요."
   fi
 fi
 
@@ -106,6 +149,10 @@ mkdir -p "$INSTALL_DIR/requests"
 cp "$APP_DIR/automation/run-task.sh" "$APP_DIR/automation/slack-capture.sh" "$APP_DIR/automation/backup-data.sh" "$INSTALL_DIR/"
 chmod +x "$INSTALL_DIR"/*.sh
 ok "$INSTALL_DIR 에 복사"
+# 복사본은 저장소 밖에서 돌기 때문에 "내 워크스페이스가 어디인지"를 따로 알려 줘야 한다.
+# plist가 넘기는 값이 먼저이고, 사람이 직접 스크립트를 부를 때는 이 파일이 쓰인다.
+printf 'WORKSPACE_DIR="%s"\n' "$WORKSPACE" > "$INSTALL_DIR/workspace.env"
+ok "설치 위치 기록: $INSTALL_DIR/workspace.env"
 
 # ─────────────────────────────────────────────
 echo
@@ -136,13 +183,13 @@ calendar_intervals() {
 
 write_task_agent() {
   local name="$1" minute="$2" prompt="$3" tools="$4"
-  cat > "$AGENTS_DIR/com.luvon.workspace.$name.plist" << PLIST
+  cat > "$AGENTS_DIR/$LABEL.$name.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.luvon.workspace.$name</string>
+  <string>$LABEL.$name</string>
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
@@ -177,13 +224,13 @@ xml_escape() { python3 -c "import sys, html; print(html.escape(sys.argv[1]), end
 write_watch_agent() {
   local name="$1" watch="$2" prompt tools
   prompt=$(xml_escape "$3"); tools=$(xml_escape "$4"); watch=$(xml_escape "$watch")
-  cat > "$AGENTS_DIR/com.luvon.workspace.$name.plist" << PLIST
+  cat > "$AGENTS_DIR/$LABEL.$name.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.luvon.workspace.$name</string>
+  <string>$LABEL.$name</string>
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
@@ -212,13 +259,13 @@ PLIST
 
 # 슬랙 캡처 — 새 메시지가 있을 때만 Claude를 부른다
 if [ "$USE_SLACK" = "yes" ]; then
-cat > "$AGENTS_DIR/com.luvon.workspace.slack-capture.plist" << PLIST
+cat > "$AGENTS_DIR/$LABEL.slack-capture.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.luvon.workspace.slack-capture</string>
+  <string>$LABEL.slack-capture</string>
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
@@ -257,13 +304,13 @@ fi
 # 따로 백업한다. 백업 저장 공간($INSTALL_DIR/data-backup.git)을 만들어 둔 경우에만 등록한다
 # (만드는 법은 tracker/inbox-app/README.md의 "업무 데이터 백업").
 if [ -d "$INSTALL_DIR/data-backup.git" ]; then
-cat > "$AGENTS_DIR/com.luvon.workspace.data-backup.plist" << PLIST
+cat > "$AGENTS_DIR/$LABEL.data-backup.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.luvon.workspace.data-backup</string>
+  <string>$LABEL.data-backup</string>
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
@@ -286,13 +333,13 @@ PLIST
 fi
 
 # 앱 서버 — 로그인하면 뜨고, 꺼지면 다시 뜬다
-cat > "$AGENTS_DIR/com.luvon.workspace.server.plist" << PLIST
+cat > "$AGENTS_DIR/$LABEL.server.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.luvon.workspace.server</string>
+  <string>$LABEL.server</string>
   <key>ProgramArguments</key>
   <array>
     <string>$NODE_PATH</string>
@@ -303,6 +350,8 @@ cat > "$AGENTS_DIR/com.luvon.workspace.server.plist" << PLIST
   <key>EnvironmentVariables</key>
   <dict>
     <key>WORKSPACE_NO_OPEN</key>
+    <string>1</string>
+    <key>WORKSPACE_MANAGED</key>
     <string>1</string>
   </dict>
   <key>RunAtLoad</key>
@@ -319,7 +368,7 @@ PLIST
 
 # 껐는데 예전에 등록돼 있던 것은 내리고 지운다
 remove_agent() {
-  local plist="$AGENTS_DIR/com.luvon.workspace.$1.plist"
+  local plist="$AGENTS_DIR/$LABEL.$1.plist"
   [ -f "$plist" ] || return 0
   launchctl unload "$plist" 2>/dev/null
   rm -f "$plist"
@@ -332,8 +381,18 @@ remove_agent() {
 # 로그인할 때 앱 창을 자동으로 띄우던 기능은 없앴다(앱은 Dock에서 직접 연다). 예전 등록이 남아 있으면 지운다.
 remove_agent open-at-login
 
+# 예전 이름(com.luvon.workspace.*)으로 등록돼 있던 것을 새 이름으로 바꾼다.
+# 지울 대상은 이름을 하나하나 지정해서만 고른다 — 돌아가는 프로그램 목록을 훑어 고르지 않는다.
+for f in $AGENT_NAMES; do
+  old_plist="$AGENTS_DIR/$OLD_LABEL.$f.plist"
+  [ -f "$old_plist" ] || continue
+  launchctl unload "$old_plist" 2>/dev/null
+  rm -f "$old_plist"
+  ok "옛 이름 정리: $OLD_LABEL.$f"
+done
+
 for f in server slack-capture calendar-sync jira-sync tiro-sync data-backup; do
-  plist="$AGENTS_DIR/com.luvon.workspace.$f.plist"
+  plist="$AGENTS_DIR/$LABEL.$f.plist"
   [ -f "$plist" ] || continue
   plutil -lint "$plist" >/dev/null 2>&1 || die "설정 파일 형식 오류: $f"
   launchctl unload "$plist" 2>/dev/null
@@ -350,12 +409,22 @@ PROFILE_ARG=""
 [ -n "$CHROME_PROFILE" ] && PROFILE_ARG="--profile-directory='$CHROME_PROFILE' "
 rm -rf "$APP_BUNDLE"
 mkdir -p "$HOME/Applications"
+# 크롬이 있으면 창 하나짜리 앱 모양으로, 없으면 기본 브라우저로 연다.
+if [ -d "/Applications/Google Chrome.app" ]; then
 cat > /tmp/ws-launcher.applescript << SCRIPT
 do shell script "URL=$URL; for i in 1 2 3 4 5 6 7 8 9 10; do curl -s -o /dev/null --max-time 1 \$URL && break; sleep 0.5; done; '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' $PROFILE_ARG--app=\$URL > /dev/null 2>&1 &"
 SCRIPT
+else
+cat > /tmp/ws-launcher.applescript << SCRIPT
+do shell script "URL=$URL; for i in 1 2 3 4 5 6 7 8 9 10; do curl -s -o /dev/null --max-time 1 \$URL && break; sleep 0.5; done; open \$URL"
+SCRIPT
+  warn "크롬이 없어 기본 브라우저로 열어요"
+fi
 
 if osacompile -o "$APP_BUNDLE" /tmp/ws-launcher.applescript 2>/dev/null; then
+  # 아이콘은 local/icon.png가 있으면 그것을 먼저 쓴다(업데이트해도 그 폴더는 그대로 남는다).
   ICON_SRC="$APP_DIR/icons/icon-512.png"
+  [ -f "$WORKSPACE/local/icon.png" ] && ICON_SRC="$WORKSPACE/local/icon.png"
   if [ -f "$ICON_SRC" ]; then
     python3 - "$ICON_SRC" << 'PY' 2>/dev/null
 from PIL import Image, ImageDraw
@@ -387,29 +456,37 @@ PY
   fi
   rm -f /tmp/ws-launcher.applescript
   touch "$APP_BUNDLE"
+  # 내려받은 폴더에서 만들면 격리 표시가 따라붙어 "확인되지 않은 개발자"로 막힌다.
+  xattr -dr com.apple.quarantine "$APP_BUNDLE" 2>/dev/null
   /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP_BUNDLE" 2>/dev/null
   ok "$APP_BUNDLE"
 else
-  warn "앱 만들기 실패 — 브라우저에서 $URL 로 직접 여세요."
+  warn "앱을 만들지 못했어요 — 브라우저에서 $URL 로 직접 열어 주세요."
 fi
 
 # ─────────────────────────────────────────────
 echo
-echo "설치 완료"
+echo "설치를 끝냈어요"
 echo
 echo "  앱 주소   : $URL"
 [ -n "$EXTRA_HOST" ] && echo "  다른 기기 : http://$EXTRA_HOST:$PORT"
 echo "  Dock 추가 : $APP_BUNDLE 을 Dock으로 끌어다 놓으세요"
+echo "  업데이트  : 이 폴더의 업데이트.command를 더블클릭"
 echo
-echo "  자동화 상태 확인 : launchctl list | grep luvon.workspace"
+echo "  처음 열 때 \"확인되지 않은 개발자\"가 뜨면 앱을 우클릭 → 열기 를 한 번만 해 주세요."
+echo "  연동은 앱의 설정 > 연동에서 켤 수 있어요."
+echo
+echo "  자동화 상태 확인 : launchctl list | grep workspace.app"
 echo "  로그             : $INSTALL_DIR/logs/"
 echo
-echo "  남은 일:"
 CONNECT=""
 [ "$USE_SLACK" = "yes" ] && CONNECT="$CONNECT 슬랙"
 [ "$USE_CAL" = "yes" ] && CONNECT="$CONNECT 구글캘린더"
 [ "$USE_JIRA" = "yes" ] && CONNECT="$CONNECT 지라(Atlassian)"
 [ "$USE_TIRO" = "yes" ] && CONNECT="$CONNECT 티로(tiro-mcp)"
-[ -n "$CONNECT" ] && echo "   · Claude Code에서$CONNECT 를 본인 계정으로 연결 (/mcp)"
-[ -n "$EXTRA_HOST" ] || echo "   · 폰에서 보려면 Tailscale 설치 후 workspace.config.json의 server.extraHost에 주소 입력"
-echo
+if [ -n "$CONNECT" ] || [ -z "$EXTRA_HOST" ]; then
+  echo "  남은 일:"
+  [ -n "$CONNECT" ] && echo "   · Claude Code에서$CONNECT 를 본인 계정으로 연결 (/mcp)"
+  [ -n "$EXTRA_HOST" ] || echo "   · 폰에서 보려면 Tailscale 설치 후 workspace.config.json의 server.extraHost에 주소 입력"
+  echo
+fi

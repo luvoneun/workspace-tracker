@@ -1,14 +1,14 @@
 {
-  "title": "내 워크스페이스",
+  "title": "워크스페이스",
   "integrations": {
-    "slack": true,
-    "calendar": true,
-    "jira": true,
-    "tiro": true
+    "slack": false,
+    "calendar": false,
+    "jira": false,
+    "tiro": false
   },
   "slack": {
     "workspaceUrl": "https://내회사.slack.com",
-    "tokenFile": "~/personal/.slack_token",
+    "tokenFile": "~/.config/workspace-slack-token",
     "channels": {
       "todo": {
         "id": "여기에_채널ID",
@@ -36,6 +36,7 @@
   "server": {
     "port": 4321,
     "extraHost": "",
-    "chromeProfile": ""
+    "chromeProfile": "",
+    "updateChannel": "stable"
   }
 }
