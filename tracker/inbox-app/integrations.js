@@ -37,9 +37,11 @@ const MESSAGE = {
   slackPublic: '공개 채널이에요 — 나만 보는 채널을 권해요',
   slackName: '채널 이름은 소문자·숫자·-·_만 80자까지 쓸 수 있어요',
   slackAuth: '토큰이 맞지 않아요',
-  slackScope: '이 슬랙 앱에는 채널 만들기 권한이 없어요 — 슬랙에서 직접 만들고 링크를 붙여 주세요',
-  slackTaken: '이미 같은 이름의 채널이 있어요 — 다른 이름을 적거나 그 채널 링크를 붙여 주세요',
+  slackScope: '이 슬랙 앱에는 채널 만들기 권한이 없어요 — 만든 사람에게 권한 추가를 요청해 주세요',
+  slackTaken: '이미 있는 이름이에요 — 다른 이름을 적어 주세요',
   slackCreate: '슬랙에서 채널을 만들지 못했어요',
+  slackBot: '이건 Bot 토큰이에요 — 바로 위의 User OAuth Token(xoxp-)을 복사해 주세요',
+  slackReach: '슬랙에 닿지 못했어요 — 잠시 뒤 다시 해 주세요',
   other: '보낸 값을 확인해 주세요.',
 };
 
@@ -142,7 +144,7 @@ async function slackCall(token, method, payload, request) {
   return response.json();
 }
 
-// 나만 있는 비공개 채널을 대신 만든다(`③ 채널`의 접어 둔 갈래).
+// 나만 있는 비공개 채널을 대신 만든다(슬랙 위저드 `② 채널`의 `고른 채널 N개 만들어 주기` — 채널마다 한 번씩).
 // 만들기 전에 `auth.test`로 **토큰이 맞는지 먼저** 보고, 맞을 때만 만든다 — 틀린 토큰으로
 // 채널부터 만들려 들지 않는다. 설정 파일도 토큰 파일도 여기서는 쓰지 않는다(id만 돌려준다).
 async function slackCreateChannel(token, name, request = (...args) => fetch(...args)) {
@@ -171,20 +173,41 @@ async function slackCreateChannel(token, name, request = (...args) => fetch(...a
   return { id, name: String(channel.name || wanted) };
 }
 
+// 슬랙 위저드 `① 토큰`의 `다음` — 토큰이 맞는지만 `auth.test`로 본다. 파일은 하나도 쓰지 않는다.
+// Bot 토큰(`xoxb-`)은 화면이 먼저 막지만, 여기서도 슬랙에 보내지 않고 같은 문구로 돌려보낸다.
+async function slackTokenCheck(token, request = (...args) => fetch(...args)) {
+  const secret = trimmed(token);
+  if (!secret) throw bad(MESSAGE.slackToken);
+  if (/^xoxb-/.test(secret)) throw bad(MESSAGE.slackBot, 'bot_token');
+  let auth;
+  try { auth = await slackCall(secret, 'auth.test', null, request); } catch { throw bad(MESSAGE.slackReach); }
+  if (!auth || auth.ok !== true) throw bad(MESSAGE.slackAuth, 'invalid_auth');
+  return { ok: true };
+}
+
 // ---------- config 합치기 ----------
 // 아는 칸만 갈아 끼우고 나머지는 들어온 그대로 돌려준다.
 function clone(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? { ...value } : {};
 }
 
-function withJira(config, { enabled, siteUrl, email, tokenFile }) {
+// 이미 저장된 슬랙 토큰(없으면 빈 글자). `채널 고치기`처럼 토큰을 다시 받지 않는 길에서만
+// 서버 안에서 쓴다 — 돌려주는 값·응답에는 절대 싣지 않는다.
+function savedSlackToken(config, tokenDir) {
+  const found = findToken(tokenPaths(tokenDir), 'slack', clone(clone(config).slack).tokenFile);
+  return found ? found.value : '';
+}
+
+function withJira(config, { enabled, siteUrl, email, tokenFile, displayName }) {
   const next = { ...config };
   next.integrations = { ...clone(config.integrations), jira: enabled };
-  if (siteUrl !== undefined || email !== undefined || tokenFile !== undefined) {
+  if (siteUrl !== undefined || email !== undefined || tokenFile !== undefined || displayName !== undefined) {
     const jira = clone(config.jira);
     if (siteUrl !== undefined) jira.siteUrl = siteUrl;
     if (email !== undefined) jira.email = email;
     if (tokenFile !== undefined) jira.tokenFile = tokenFile;
+    // 연결할 때 지라가 알려 준 표시 이름 — 연동 탭의 `○○님 · …` 한 줄에만 쓴다(토큰·이메일이 아니다).
+    if (displayName !== undefined) jira.displayName = displayName;
     next.jira = jira;
   }
   return next;
@@ -244,6 +267,7 @@ function readIntegrations(config, { tokenDir, claude } = {}) {
       enabled: on('jira'),
       siteUrl: trimmed(jira.siteUrl),
       email: trimmed(jira.email),
+      displayName: trimmed(jira.displayName),
       hasToken: !!findToken(paths, 'jira', jira.tokenFile),
     },
     slack: {
@@ -299,8 +323,9 @@ async function saveIntegrations({
       if (token) pending.push([paths.jira.file, token]);
       // 새 토큰은 기본 자리에 쓰고 config도 그쪽으로 적는다. 비워 두고 저장했으면 지금 토큰이
       // 있는 자리를 그대로 적는다(사람이 옮겨 둔 경로를 기본 경로로 덮어쓰지 않는다).
-      config = withJira(config, { enabled: true, siteUrl, email, tokenFile: token ? paths.jira.config : saved.config });
-      result.jira = { displayName: String(account.displayName || '') };
+      const displayName = String(account.displayName || '').trim().slice(0, 80);
+      config = withJira(config, { enabled: true, siteUrl, email, tokenFile: token ? paths.jira.config : saved.config, displayName });
+      result.jira = { displayName };
     }
   }
 
@@ -358,6 +383,80 @@ async function saveIntegrations({
   return { config, result };
 }
 
+// ---------- 채널 이름 따라가기 ----------
+// 사람이 슬랙에서 채널 이름을 바꿔도 수집은 id로 읽으므로 그대로 이어진다 — 화면의 `#이름`만 낡는다.
+// 연동 탭을 열 때(`GET /api/integrations`) 저장된 채널 id마다 `conversations.info`로 지금 이름을 읽어
+// 달라졌으면 config의 그 채널 `name` **한 칸만** 고친다(아는 키만 — 나머지는 그대로).
+// 답은 5분 동안 메모리에 들고 있고(실패도), 실패하면 조용히 옛 이름을 쓴다.
+// 채널이 사라졌으면(`channel_not_found` / 보관됨) `missing`으로 알린다 — config는 건드리지 않는다.
+const SLACK_FOLLOW_MS = 5 * 60 * 1000;
+const SLACK_FOLLOW_TIMEOUT_MS = 4000;
+
+function withSlackNames(config, names) {
+  const slack = clone(config.slack);
+  const channels = clone(slack.channels);
+  Object.entries(names).forEach(([key, name]) => { channels[key] = { ...clone(channels[key]), name }; });
+  return { ...config, slack: { ...slack, channels } };
+}
+
+function createSlackNameFollower({ now = Date.now, ttlMs = SLACK_FOLLOW_MS, request = (...args) => fetch(...args) } = {}) {
+  const cache = new Map();   // 채널 id → { at, info }  (info: { name } | { missing: true } | null)
+
+  async function look(token, id) {
+    const hit = cache.get(id);
+    if (hit && now() - hit.at < ttlMs) return hit.info;
+    let info = null;
+    try {
+      const response = await request(`https://slack.com/api/conversations.info?channel=${encodeURIComponent(id)}`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+        signal: AbortSignal.timeout(SLACK_FOLLOW_TIMEOUT_MS),
+      });
+      const body = await response.json();
+      if (body && body.ok === true && body.channel) {
+        info = body.channel.is_archived === true ? { missing: true } : { name: String(body.channel.name || '') };
+      } else if (body && (body.error === 'channel_not_found' || body.error === 'is_archived')) {
+        info = { missing: true };
+      }
+    } catch { info = null; }
+    cache.set(id, { at: now(), info });
+    return info;
+  }
+
+  // `read`는 지금 config를 새로 읽는 함수다 — 슬랙을 기다리는 사이 다른 저장이 끼어들 수 있어서
+  // 고치기 직전에 한 번 더 읽고 그 위에 이름만 얹는다.
+  async function follow({ read, configPath, tokenDir, write = atomicWrite } = {}) {
+    const config = clone(read());
+    if (clone(config.integrations).slack === false) return { renamed: {}, missing: {} };
+    const token = savedSlackToken(config, tokenDir);
+    if (!token) return { renamed: {}, missing: {} };
+    const channels = clone(clone(config.slack).channels);
+    const keys = SLACK_CHANNEL_KEYS.filter(key => realChannelId(clone(channels[key]).id));
+    const answers = await Promise.all(keys.map(key => look(token, realChannelId(clone(channels[key]).id))));
+    const renamed = {};
+    const missing = {};
+    keys.forEach((key, index) => {
+      const info = answers[index];
+      if (!info) return;
+      if (info.missing) { missing[key] = true; return; }
+      const name = info.name ? `#${info.name}` : '';
+      if (name && name !== trimmed(clone(channels[key]).name)) renamed[key] = name;
+    });
+    if (Object.keys(renamed).length && configPath) {
+      try {
+        const fresh = clone(read());
+        const latest = clone(clone(fresh.slack).channels);
+        // 그 사이 채널이 바뀌었으면(다른 id) 그 칸은 건드리지 않는다.
+        const still = Object.fromEntries(Object.entries(renamed)
+          .filter(([key]) => realChannelId(clone(latest[key]).id) === realChannelId(clone(channels[key]).id)));
+        if (Object.keys(still).length) write(configPath, `${JSON.stringify(withSlackNames(fresh, still), null, 2)}\n`);
+      } catch { /* 이름을 못 고쳐도 조용히 옛 이름을 쓴다 */ }
+    }
+    return { renamed, missing };
+  }
+
+  return { follow, look, clear: () => cache.clear() };
+}
+
 // ---------- 다시 켜기 ----------
 // launchd가 KeepAlive로 띄운 자리(`WORKSPACE_MANAGED`)에서만 스스로 끝낸다 — launchd가 다시 띄운다.
 // 개발용·픽스처 서버는 끝내지 않고 "다시 켜 주세요"라고만 알린다.
@@ -400,4 +499,5 @@ module.exports = {
   SLACK_CHANNEL_KEYS, SLACK_APPS_URL, INTEGRATION_MESSAGE: MESSAGE,
   tokenPaths, parseChannelId, slackCheckChannel, slackCreateChannel, readIntegrations, saveIntegrations,
   scheduleRestart, errorLines, maskLine, claudeInstalled, writeTokenFile,
+  slackTokenCheck, savedSlackToken, createSlackNameFollower, SLACK_FOLLOW_MS,
 };

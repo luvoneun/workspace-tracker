@@ -2226,32 +2226,104 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-abhow { margin-top: 4px; font-size: 12.5px; line-height: 1.7; color: var(--muted); }
 .d-about .d-btn { margin-top: 10px; }
 
-/* 연동 한 줄 — 자동화 줄(.d-auto)과 같은 리듬: 이름 | 상태 | 버튼 / 그 아래 펼쳐지는 자리 */
-.d-intg { padding: 10px 0; }
+/* 연동 카드 — 자동화 줄(.d-auto)과 같은 리듬: 이름 · 칩 | 상태 · ⋯ · 버튼 / 한 줄 효용 / 준비물 줄 / 펼치는 자리.
+   펼친 자리(.d-intgbody)는 --field 판 위에 한 번에 한 단계만(카드 안 위저드). */
+#settingsIntegrationsView [hidden] { display: none !important; }
+.d-intghead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-bottom: 4px; font-size: 13.5px; color: var(--muted); }
+.d-intghead .sp { margin-left: auto; }
+.d-intg { padding: 12px 0; }
 .d-intg + .d-intg { box-shadow: inset 0 1px 0 var(--hair); }
-.d-intgtop { display: flex; align-items: center; gap: 10px; min-height: 38px; }
-.d-intgtop .nm { font-size: 14.5px; font-weight: 500; }
-.d-intgtop .st { margin-left: auto; font-size: 13px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.d-intgtop { display: flex; align-items: center; gap: 8px 10px; min-height: 38px; flex-wrap: wrap; }
+.d-intgtop .nm { font-size: 14.5px; font-weight: 600; }
+.d-intgtop .st { margin-left: auto; min-width: 0; font-size: 13px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.d-intgtop .st .ok { color: var(--success); }
 .d-intgtop .d-btn { flex: none; }
-.d-intgbody { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
-.d-intgbody[hidden] { display: none; }
-.d-intgbody > .d-btn { align-self: flex-start; }
-.d-intgnote, .d-intgfoot { margin-top: 6px; font-size: 12.5px; color: var(--dim); }
+.d-intgtop .d-itag + .d-btn { margin-left: auto; }
+/* 필요한 것 칩 — 회색 글자 칩 하나로 통일한다(주황을 쓰지 않는다) */
+.d-itag { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px; background: var(--neutral-bg); color: var(--muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.d-intguse { margin-top: 2px; font-size: 13.5px; color: var(--muted); }
+.d-intgneed { margin-top: 2px; font-size: 12.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.d-intgneed.k-warn { color: var(--warn); }
+.d-intgneed.k-warn .d-ablink { color: var(--warn); }
+.d-intgnote { margin-top: 6px; font-size: 12.5px; color: var(--dim); }
+.d-intgbody { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; padding: 14px; background: var(--field); border-radius: var(--r-sm); }
+.d-intgbody .d-din { background: var(--surface); }
+.d-intgbody > .d-btn, .d-intgbody > a.d-btn { align-self: flex-start; }
+.d-intgbody .d-derr { margin: 0; }
 .d-ifield { display: block; }
 .d-ifield .lb { display: block; margin-bottom: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
 .d-ifield .d-din { width: 100%; box-sizing: border-box; }
 .d-ifield .d-hint { display: block; margin-top: 4px; }
-/* 단계 제목(①②③) — 입력칸 이름(.d-ifield .lb)과 같은 글자다. */
-.d-istep { font-size: 12px; font-weight: 600; color: var(--muted); }
-.d-intgbody > .d-hint, .d-intgch > .d-hint { margin-top: 0; }
-/* 채널 한 칸의 두 갈래 — 링크 붙여 넣기(기본) + 접어 둔 `만들어 주기` */
-.d-intgch { display: flex; flex-direction: column; gap: 8px; }
-.d-intgch > .d-ablink { align-self: flex-start; }
-.d-dadd .d-intgch + .d-intgch { margin-top: 12px; }
-.d-intgother { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; }
-.d-intgother[hidden] { display: none; }
-.d-intgother .d-ifield { flex: 1 1 180px; }
+a.d-btn { text-decoration: none; }
+.d-btn.xs { height: 28px; padding: 0 10px; font-size: 12.5px; }
+/* 단계 줄 ① 토큰 ─ ② 채널 ─ ③ 확인 — 끝낸 단계는 초록 ✓, 지금 단계만 파랑 */
+.d-isteps { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; font-weight: 600; color: var(--dim); }
+.d-isteps .ln { width: 16px; height: 1px; background: var(--border); }
+.d-isteps .on { color: var(--accent-text); }
+.d-isteps .dn { color: var(--success); }
+.d-ihow { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.7; }
+.d-ihow b, .d-ismall b, .d-isend b, .d-inum b, .d-ich b { color: var(--text); font-weight: 600; }
+.d-ihow code, .d-icode code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
+.d-irow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.d-ismall { margin: 0; font-size: 12.5px; color: var(--dim); }
+.d-ifoot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.d-ifoot .sp { margin-left: auto; }
+/* 쓸 곳 고르기 — 줄마다 체크 · 이름과 들어가는 곳 · 채널 이름 칸(고른 줄만 켜진다) */
+.d-ichwrap { display: flex; flex-direction: column; gap: 12px; }
+.d-ichwrap > .d-btn { align-self: flex-start; }
+.d-ichlist { display: grid; gap: 8px; }
+.d-ich { display: grid; grid-template-columns: 20px minmax(0, 1fr) 180px; align-items: center; gap: 4px 12px; padding: 12px 14px; border-radius: var(--r-sm); background: var(--surface); cursor: pointer; }
+.d-ich.is-on { background: var(--sel); }
+.d-ich input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(--accent-strong); }
+.d-ich input[type=checkbox]:disabled { opacity: 1; }
+.d-ich .t { font-size: 13.5px; line-height: 1.5; }
+.d-ich .t .sub { display: block; }
+.d-ich .need { font-size: 11.5px; font-weight: 600; color: var(--accent-text); }
+.d-ich .nm { min-height: 32px; padding: 6px 10px; font-size: 13px; }
+.d-ich .d-din.nm:disabled { opacity: 0.5; }
+.d-ich .nm.is-done { font-size: 12.5px; font-weight: 600; color: var(--success); }
+.d-ich .d-icherr { grid-column: 2 / -1; }
+/* ③ 확인 · 연결 완료 한 줄 */
+.d-iok { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-radius: var(--r-sm); background: var(--success-bg); color: var(--success); font-size: 14px; font-weight: 600; }
+/* 슬랙에서 이렇게 보내요 — 따뜻한 상자(시작 카드와 같은 --warm) */
+.d-isend { display: grid; gap: 8px; padding: 14px 16px; border-radius: var(--r-sm); background: var(--warm); border: 1px solid var(--warm-line); }
+.d-isend .hd { margin: 0; font-size: 13.5px; font-weight: 700; color: var(--text); }
+.d-isend ol { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 13px; color: var(--muted); line-height: 1.6; }
+/* 붙여 넣을 명령 한 줄 + 복사 */
+.d-icode { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 6px 6px 12px; background: var(--surface); border-radius: var(--r-xs); }
+.d-icode code { flex: 1; min-width: 0; color: var(--text); overflow-wrap: anywhere; }
+.d-icode .d-btn { flex: none; }
+.d-inum { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.d-inum li { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: var(--muted); }
+.d-inum li > .n { flex: none; width: 18px; font-weight: 600; color: var(--dim); }
+.d-inum li > .c { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.d-inum li > .c > .d-icode { align-self: stretch; }
+/* 캘린더 갈래 둘 — `비밀 주소 붙이기`는 이번엔 자리만(곧 돼요, 누를 수 없음) */
+.d-ichoices { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); align-items: start; gap: 12px; }
+.d-ichoice { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 14px; border-radius: var(--r-sm); background: var(--surface); border: 1.5px solid var(--border); }
+.d-ichoice .hd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 14.5px; font-weight: 600; }
+.d-ichoice .soon { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--dim); }
+.d-ichoice.is-off { opacity: 0.55; cursor: default; }
+/* 해제 확인 줄 — 카드 안, 큰 해제 버튼 대신 */
+.d-iconfirm { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; padding: 10px 12px; border-radius: var(--r-sm); background: var(--urgent-bg); }
+.d-iconfirm .tx { flex: 1 1 200px; font-size: 13px; color: var(--text); }
+.d-iconfirm .d-btn.dng { background: var(--surface); }
+.d-iconfirm .d-derr { flex-basis: 100%; margin: 0; }
+.d-itiro { display: flex; flex-direction: column; gap: 10px; }
+/* 목록 맨 아래 조용한 줄 — 다른 도구 요청 · 각자 붙이는 법 · 자동화 등록 안내 */
+.d-intgfoot { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--hair); display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; color: var(--dim); }
+.d-intgask { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; }
+.d-intgask .d-ifield { flex: 1 1 200px; }
+.d-intgask .d-derr { flex-basis: 100%; margin: 0; }
+.d-intgsetup { font-size: 12.5px; color: var(--dim); }
 .d-intg .d-seg { align-self: flex-start; }
+@media (max-width: 520px) {
+  .d-intgtop .st { flex-basis: 100%; order: 4; margin-left: 0; white-space: normal; }
+  .d-intgtop .st ~ .d-btn:not([hidden]), .d-intgtop .st ~ .d-btn[hidden] + .d-more { margin-left: auto; }
+  .d-ich { grid-template-columns: 20px minmax(0, 1fr); }
+  .d-ich .nm { grid-column: 2; }
+  .d-intgbody { padding: 12px; }
+}
 
 .d-faq { max-width: 64ch; }
 .d-faqintro { font-size: 13px; color: var(--muted); line-height: 1.65; }
@@ -2504,10 +2576,6 @@ body.batch-open .d-toast { bottom: 76px; }
   .d-mhd #settingsCloseBtn { order: 2; }
   .d-mhd .d-seg { order: 3; flex-basis: 100%; }
   #settingsDialog .d-mhd .d-seg button { flex: 1 1 0; min-width: 0; padding: 0 6px; }
-  /* 연동 줄도 두 줄로 쌓인다 — 버튼이 상태 글자에 밀려 잘리지 않게 */
-  .d-intgtop { flex-wrap: wrap; row-gap: 6px; }
-  .d-intgtop .st { margin-left: auto; }
-  .d-intgtop .d-btn { order: 3; }
   .d-mbody { padding: 12px 14px 20px; }
   /* 오늘 정리 줄은 두 줄로 쌓인다 — 세그먼트가 줄 폭을 통째로 쓰고 넷이 고르게 나눠 선다 */
   .d-wraprow { flex-wrap: wrap; row-gap: 6px; padding: 8px 0; }

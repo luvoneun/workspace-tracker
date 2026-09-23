@@ -4160,9 +4160,9 @@ test('SLACKEZ: 채널 만들기는 auth.test로 토큰을 먼저 보고 맞을 �
   // 슬랙이 거절한 이유마다 사람 말로 바꾼다
   const refuse = error => slackFake({ 'auth.test': () => ({ ok: true }), 'conversations.create': () => ({ ok: false, error }) });
   await assert.rejects(() => integrationsStore.slackCreateChannel('t', 'my-todo', refuse('missing_scope').request),
-    /이 슬랙 앱에는 채널 만들기 권한이 없어요 — 슬랙에서 직접 만들고 링크를 붙여 주세요/);
+    /이 슬랙 앱에는 채널 만들기 권한이 없어요 — 만든 사람에게 권한 추가를 요청해 주세요/);
   await assert.rejects(() => integrationsStore.slackCreateChannel('t', 'my-todo', refuse('name_taken').request),
-    /이미 같은 이름의 채널이 있어요 — 다른 이름을 적거나 그 채널 링크를 붙여 주세요/);
+    /이미 있는 이름이에요 — 다른 이름을 적어 주세요/);
   await assert.rejects(() => integrationsStore.slackCreateChannel('t', 'my-todo', refuse('not_authed').request), /토큰이 맞지 않아요/);
   await assert.rejects(() => integrationsStore.slackCreateChannel('t', 'my-todo', refuse('ratelimited').request), /슬랙에서 채널을 만들지 못했어요/);
   // 슬랙이 ok라 해도 id가 없으면 만들어진 것으로 보지 않는다
@@ -4443,10 +4443,10 @@ server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => console.log
   assert.equal(noScope.status, 400);
   assert.deepEqual(await noScope.json(), {
     ok: false, code: 'missing_scope',
-    error: '이 슬랙 앱에는 채널 만들기 권한이 없어요 — 슬랙에서 직접 만들고 링크를 붙여 주세요',
-  }, '화면이 링크 붙여 넣기로 되돌릴 수 있게 표지를 함께 준다');
+    error: '이 슬랙 앱에는 채널 만들기 권한이 없어요 — 만든 사람에게 권한 추가를 요청해 주세요',
+  }, '화면이 줄 오류와 전체 안내를 가를 수 있게 표지를 함께 준다');
 
-  assert.match((await (await make({ token: 'good-token', name: 'taken' })).json()).error, /이미 같은 이름의 채널이 있어요/);
+  assert.match((await (await make({ token: 'good-token', name: 'taken' })).json()).error, /이미 있는 이름이에요 — 다른 이름을 적어 주세요/);
   assert.match((await (await make({ token: 'nope', name: 'my-todo' })).json()).error, /토큰이 맞지 않아요/);
   assert.match((await (await make({ token: 'good-token', name: '내 할일' })).json()).error, /채널 이름은 소문자/);
 
@@ -4456,6 +4456,255 @@ server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => console.log
 
   const state = await (await fetch(origin + '/api/integrations')).json();
   assert.equal(state.slack.appUrl, 'https://api.slack.com/apps/A0FAKE11', '적어 둔 팀 슬랙 앱 주소를 그대로 준다');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WP-D1 — 연동 탭 재설계: 슬랙 토큰 먼저 확인 · 채널 여러 개 만들기 · 채널 이름 따라가기 · 지라 표시 이름
+
+test('WP-D1: 슬랙 토큰 확인은 auth.test 하나만 부르고, Bot 토큰·빈 칸은 슬랙에 보내지 않는다(토큰은 어디에도 안 실린다)', async () => {
+  const calls = [];
+  const fake = answer => async (url, options) => { calls.push({ url: String(url), options }); if (answer instanceof Error) throw answer; return json(answer); };
+
+  const ok = await integrationsStore.slackTokenCheck(' xoxp-good ', fake({ ok: true, user: 'me' }));
+  assert.deepEqual(ok, { ok: true });
+  assert.deepEqual(calls.map(call => call.url), ['https://slack.com/api/auth.test']);
+  assert.equal(calls[0].options.headers.Authorization, 'Bearer xoxp-good', '토큰은 헤더로만 나간다');
+  assert.ok(!JSON.stringify(ok).includes('xoxp-good'));
+
+  calls.length = 0;
+  await assert.rejects(() => integrationsStore.slackTokenCheck('xoxp-bad', fake({ ok: false, error: 'invalid_auth' })),
+    error => error.code === 'invalid_auth' && /토큰이 맞지 않아요/.test(error.message) && !error.message.includes('xoxp-bad'));
+  await assert.rejects(() => integrationsStore.slackTokenCheck('xoxp-t', fake(new Error('offline'))), /슬랙에 닿지 못했어요/);
+  const before = calls.length;
+  await assert.rejects(() => integrationsStore.slackTokenCheck('xoxb-bot', fake({ ok: true })),
+    error => error.code === 'bot_token' && /이건 Bot 토큰이에요 — 바로 위의 User OAuth Token\(xoxp-\)을 복사해 주세요/.test(error.message));
+  await assert.rejects(() => integrationsStore.slackTokenCheck('   ', fake({ ok: true })), /슬랙 토큰을 붙여 넣어 주세요/);
+  assert.equal(calls.length, before, 'Bot 토큰·빈 칸은 슬랙에 닿지 않는다');
+});
+
+test('WP-D1: 지라 표시 이름은 연결할 때 config의 jira.displayName에 적고 연동 상태로 돌려준다(토큰·이메일이 아니다)', async (t) => {
+  const fix = integrationsFixture(t, { integrations: { jira: false } });
+  await integrationsStore.saveIntegrations({
+    configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir,
+    body: { jira: { enabled: true, siteUrl: 'https://회사.atlassian.net', email: '나@회사.com', token: 'jira-secret' } },
+    jiraCheck: async () => ({ ok: true, displayName: ' 하늘 ' }),
+  });
+  const saved = fix.read();
+  assert.equal(saved.jira.displayName, '하늘');
+  assert.ok(!JSON.stringify(saved).includes('jira-secret'));
+  const state = integrationsStore.readIntegrations(saved, { tokenDir: fix.tokenDir });
+  assert.equal(state.jira.displayName, '하늘');
+  assert.equal(state.jira.hasToken, true);
+  // 해제해도 표시 이름은 남는다(다시 연결하면 새 값으로 바뀐다)
+  await integrationsStore.saveIntegrations({ configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir, body: { jira: { enabled: false } } });
+  assert.equal(fix.read().jira.displayName, '하늘');
+  assert.equal(integrationsStore.readIntegrations({}, { tokenDir: fix.tokenDir }).jira.displayName, '', '적힌 적이 없으면 빈 글자');
+});
+
+test('WP-D1: 회의록 `다른 것`(옛 설정)은 그대로 읽고 저장도 된다 — 화면에서만 요청하기로 옮겼다', async (t) => {
+  const read = config => integrationsStore.readIntegrations(config, { tokenDir: fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-int-')) });
+  assert.deepEqual(read({ integrations: { tiro: false }, meetingNotes: { other: '노션' } }).meetingNotes, { mode: 'other', name: '노션' });
+  const fix = integrationsFixture(t, {});
+  await integrationsStore.saveIntegrations({ configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir, body: { meetingNotes: { mode: 'other', name: '노션' } } });
+  assert.deepEqual(fix.read().meetingNotes, { other: '노션' });
+  assert.equal(fix.read().integrations.tiro, false);
+});
+
+test('WP-D1: 채널 이름 따라가기 — 바뀐 이름만 config에 고치고, 사라진 채널은 missing, 5분 동안은 다시 묻지 않는다', async (t) => {
+  const fix = integrationsFixture(t, {
+    title: '그대로',
+    integrations: { slack: true },
+    slack: {
+      tokenFile: '~/.config/workspace-slack-token',
+      memo: '지우면 안 됨',
+      channels: {
+        todo: { id: 'C0TODO11', name: '#my-todo' },
+        waiting: { id: 'C0WAIT11', name: '#my-waiting' },
+        align: { id: 'C0GONE11', name: '#my-align' },
+        someday: { id: 'C0ARCH11', name: '#my-someday' },
+      },
+    },
+  });
+  fs.mkdirSync(fix.tokenDir, { recursive: true });
+  fs.writeFileSync(path.join(fix.tokenDir, 'workspace-slack-token'), 'xoxp-follow\n', { mode: 0o600 });
+  let clock = 1000;
+  const calls = [];
+  const request = async (url, options) => {
+    const id = new URL(url).searchParams.get('channel');
+    calls.push({ id, auth: options.headers.Authorization });
+    if (id === 'C0TODO11') return json({ ok: true, channel: { id, name: 'todo-renamed' } });
+    if (id === 'C0WAIT11') return json({ ok: true, channel: { id, name: 'my-waiting' } });
+    if (id === 'C0GONE11') return json({ ok: false, error: 'channel_not_found' });
+    return json({ ok: true, channel: { id, name: 'my-someday', is_archived: true } });
+  };
+  const follower = integrationsStore.createSlackNameFollower({ now: () => clock, request });
+  const run = () => follower.follow({ read: fix.read, configPath: fix.configPath, tokenDir: fix.tokenDir });
+
+  const first = await run();
+  assert.deepEqual(first.renamed, { todo: '#todo-renamed' });
+  assert.deepEqual(first.missing, { align: true, someday: true });
+  const saved = fix.read();
+  assert.deepEqual(saved.slack.channels.todo, { id: 'C0TODO11', name: '#todo-renamed' }, '이름 한 칸만 고친다');
+  assert.deepEqual(saved.slack.channels.align, { id: 'C0GONE11', name: '#my-align' }, '사라진 채널은 config를 건드리지 않는다');
+  assert.equal(saved.title, '그대로');
+  assert.equal(saved.slack.memo, '지우면 안 됨', '모르는 칸은 그대로다');
+  assert.ok(!fs.readFileSync(fix.configPath, 'utf8').includes('xoxp-follow'), '토큰은 config에 적지 않는다');
+  assert.equal(calls.length, 4);
+  assert.ok(calls.every(call => call.auth === 'Bearer xoxp-follow'), '토큰은 헤더로만 나간다');
+
+  // 5분 안에는 다시 묻지 않는다(사라진 채널도 기억한다) — 이름이 이미 같으니 쓰기도 없다
+  const written = fs.readFileSync(fix.configPath, 'utf8');
+  clock += 60 * 1000;
+  const second = await run();
+  assert.equal(calls.length, 4, '캐시 안에서는 슬랙을 부르지 않는다');
+  assert.deepEqual(second.missing, { align: true, someday: true });
+  assert.deepEqual(second.renamed, {});
+  assert.equal(fs.readFileSync(fix.configPath, 'utf8'), written);
+  clock += integrationsStore.SLACK_FOLLOW_MS;
+  await run();
+  assert.equal(calls.length, 8, '5분이 지나면 다시 묻는다');
+
+  // 슬랙이 답하지 않으면 조용히 옛 이름 — 쓰기도 missing도 없다
+  const quiet = integrationsStore.createSlackNameFollower({ now: () => clock, request: async () => { throw new Error('offline'); } });
+  const fallback = await quiet.follow({ read: fix.read, configPath: fix.configPath, tokenDir: fix.tokenDir });
+  assert.deepEqual(fallback, { renamed: {}, missing: {} });
+  assert.equal(fix.read().slack.channels.todo.name, '#todo-renamed');
+
+  // 슬랙을 껐거나 토큰이 없으면 아무 데도 묻지 않는다
+  const never = [];
+  const idle = integrationsStore.createSlackNameFollower({ request: async (...args) => { never.push(args); return json({}); } });
+  await idle.follow({ read: () => ({ ...fix.read(), integrations: { slack: false } }), configPath: fix.configPath, tokenDir: fix.tokenDir });
+  await idle.follow({ read: fix.read, configPath: fix.configPath, tokenDir: path.join(fix.home, 'no-tokens') });
+  assert.equal(never.length, 0);
+});
+
+test('WP-D1 라우트: 토큰 확인·채널 여러 개 만들기(부분 실패)·채널 고치기(저장된 토큰)·이름 따라가기 — 토큰은 응답·파일 어디에도 없다', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-wpd1-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const data = path.join(home, 'tracker');
+  fs.mkdirSync(data);
+  const tokens = path.join(home, 'tokens');
+  fs.mkdirSync(tokens);
+  const config = path.join(home, 'workspace.config.json');
+  const calls = path.join(home, 'slack-calls.log');
+  fs.writeFileSync(config, JSON.stringify({
+    title: '내가 지은 이름',
+    integrations: { slack: false, calendar: false, jira: false, tiro: false },
+  }, null, 2));
+
+  // 슬랙을 흉내 내는 껍데기 — 실제 slack.com에는 한 번도 닿지 않는다. 부른 메서드·이름만 적는다(토큰은 적지 않는다).
+  const wrapper = path.join(home, 'fake-slack-server.js');
+  fs.writeFileSync(wrapper, `'use strict';
+const fs = require('node:fs');
+const realFetch = globalThis.fetch;
+const names = { C0TODO11: 'my-todo' };
+globalThis.fetch = async (input, init = {}) => {
+  const url = String(input && input.url ? input.url : input);
+  if (!url.startsWith('https://slack.com/api/')) return realFetch(input, init);
+  const json = body => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  const auth = (init.headers || {}).Authorization || '';
+  const good = auth === 'Bearer xoxp-good' || auth === 'Bearer xoxp-saved';
+  const method = url.split('/api/')[1].split('?')[0];
+  const body = JSON.parse(init.body || '{}');
+  fs.appendFileSync(${JSON.stringify(calls)}, method + ' ' + (body.name || new URL(url).searchParams.get('channel') || '') + (auth === 'Bearer xoxp-saved' ? ' saved' : '') + '\\n');
+  if (method === 'auth.test') return json(good ? { ok: true, user: 'me' } : { ok: false, error: 'invalid_auth' });
+  if (method === 'conversations.info') {
+    const id = new URL(url).searchParams.get('channel');
+    if (id === 'C0GONE11') return json({ ok: false, error: 'channel_not_found' });
+    return json({ ok: true, channel: { id, name: names[id] || 'renamed-todo', is_private: true } });
+  }
+  if (body.name === 'taken') return json({ ok: false, error: 'name_taken' });
+  if (body.name === 'noscope') return json({ ok: false, error: 'missing_scope' });
+  const id = 'C0' + body.name.replace(/[^a-z0-9]/g, '').toUpperCase().slice(0, 7).padEnd(7, '1');
+  names[id] = body.name;
+  return json({ ok: true, channel: { id, name: body.name, is_private: true } });
+};
+const { server } = require(${JSON.stringify(path.join(__dirname, 'server.js'))});
+server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => console.log('ready'));
+`);
+  const port = await freePort();
+  const child = spawn(process.execPath, [wrapper], {
+    env: {
+      ...process.env, WORKSPACE_PORT: String(port), WORKSPACE_NO_OPEN: '1', WORKSPACE_HOST: '', WORKSPACE_NO_REMOTE_CHECK: '1',
+      WORKSPACE_SLACK_FOLLOW: '1',
+      WORKSPACE_DATA_DIR: data, WORKSPACE_CONFIG: config, WORKSPACE_TOKEN_DIR: tokens,
+      WORKSPACE_AUTOMATION_DIR: path.join(home, 'automation'),
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let log = '';
+  child.stdout.on('data', chunk => { log += chunk; });
+  child.stderr.on('data', chunk => { log += chunk; });
+  t.after(() => child.kill('SIGKILL'));
+  const origin = `http://127.0.0.1:${port}`;
+  const deadline = Date.now() + 10000;
+  for (;;) {
+    if (Date.now() > deadline) throw new Error(`서버가 응답하지 않았습니다: ${log}`);
+    if (child.exitCode !== null) throw new Error(`서버가 종료되었습니다 (${child.exitCode}): ${log}`);
+    try { if ((await fetch(origin + '/api/storage-status')).ok) break; } catch { /* 아직 안 떴다 */ }
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  const post = (route, body) => fetch(origin + route, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const slackLog = () => (fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').trim().split('\n').filter(Boolean) : []);
+
+  // ① 토큰 확인 — 파일은 하나도 쓰지 않는다
+  const before = fs.readFileSync(config, 'utf8');
+  const checked = await post('/api/integrations/slack-token-check', { token: 'xoxp-good' });
+  const checkedText = await checked.text();
+  assert.equal(checked.status, 200);
+  assert.deepEqual(JSON.parse(checkedText), { ok: true });
+  assert.ok(!checkedText.includes('xoxp-good'));
+  const wrong = await post('/api/integrations/slack-token-check', { token: 'xoxp-wrong' });
+  assert.equal(wrong.status, 400);
+  const wrongBody = await wrong.json();
+  assert.deepEqual(wrongBody, { ok: false, error: '토큰이 맞지 않아요', code: 'invalid_auth' });
+  const bot = await (await post('/api/integrations/slack-token-check', { token: 'xoxb-bot' })).json();
+  assert.equal(bot.code, 'bot_token');
+  assert.equal(slackLog().filter(line => line.startsWith('auth.test')).length, 2, 'Bot 토큰은 슬랙에 보내지 않는다');
+  assert.equal(fs.readFileSync(config, 'utf8'), before, '토큰 확인은 설정을 쓰지 않는다');
+  assert.deepEqual(fs.readdirSync(tokens), [], '토큰 파일도 만들지 않는다');
+
+  // ② 고른 채널을 차례로 만든다 — 하나가 name_taken이어도 만든 것은 그대로다(화면이 줄마다 부른다)
+  const made = [];
+  for (const name of ['my-todo', 'taken', 'my-align']) made.push(await (await post('/api/integrations/slack-channel', { token: 'xoxp-good', name })).json());
+  assert.equal(made[0].ok, true);
+  assert.deepEqual(made[1], { ok: false, error: '이미 있는 이름이에요 — 다른 이름을 적어 주세요', code: 'name_taken' });
+  assert.equal(made[2].ok, true);
+  const scope = await (await post('/api/integrations/slack-channel', { token: 'xoxp-good', name: 'noscope' })).json();
+  assert.equal(scope.code, 'missing_scope');
+  assert.equal(fs.readFileSync(config, 'utf8'), before, '채널 만들기도 설정을 쓰지 않는다');
+
+  // ③ 연결 — 저장은 예전 길 하나
+  const saved = await (await post('/api/integrations/save', {
+    slack: { enabled: true, token: 'xoxp-saved', channels: { todo: made[0].id, align: made[2].id } },
+  })).json();
+  assert.equal(saved.ok, true);
+  assert.ok(!JSON.stringify(saved).includes('xoxp-saved'));
+  assert.equal(fs.readFileSync(path.join(tokens, 'workspace-slack-token'), 'utf8').trim(), 'xoxp-saved');
+
+  // 채널 고치기 — 토큰 칸 없이 보내면 서버가 저장된 토큰을 쓴다(응답에는 없다)
+  const fixText = await (await post('/api/integrations/slack-channel', { token: '', name: 'my-waiting' })).text();
+  assert.equal(JSON.parse(fixText).ok, true);
+  assert.ok(!fixText.includes('xoxp-saved'));
+  assert.ok(slackLog().includes('conversations.create my-waiting saved'), '저장된 토큰으로 만들었다');
+
+  // 이름 따라가기 — todo 이름을 슬랙에서 바꾼 셈 치고 연동 상태를 연다
+  const current = JSON.parse(fs.readFileSync(config, 'utf8'));
+  current.slack.channels.waiting = { id: 'C0GONE11', name: '#my-waiting' };
+  current.slack.channels.todo.id = 'C0ZZZZ11';
+  fs.writeFileSync(config, JSON.stringify(current, null, 2));
+  const state = await (await fetch(origin + '/api/integrations')).json();
+  assert.equal(state.slack.channels.todo.name, '#renamed-todo', '바뀐 이름을 돌려준다');
+  assert.equal(state.slack.channels.waiting.missing, true, '사라진 채널은 표시한다');
+  assert.equal(state.slack.channels.align.missing, undefined);
+  assert.equal(JSON.parse(fs.readFileSync(config, 'utf8')).slack.channels.todo.name, '#renamed-todo', 'config의 name만 고쳤다');
+  assert.equal(JSON.parse(fs.readFileSync(config, 'utf8')).title, '내가 지은 이름');
+  assert.equal(state.slack.readAt, null, '수집 기록이 없으면 읽은 때도 없다');
+  assert.equal(state.jira.readAt, null);
+  const infos = slackLog().filter(line => line.startsWith('conversations.info')).length;
+  await (await fetch(origin + '/api/integrations')).json();
+  assert.equal(slackLog().filter(line => line.startsWith('conversations.info')).length, infos, '5분 안에는 다시 묻지 않는다');
+  assert.ok(!JSON.stringify(state).includes('xoxp-'), '토큰 값은 응답에 절대 없다');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

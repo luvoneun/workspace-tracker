@@ -430,28 +430,36 @@ function automationRow(a) {
 }
 
 // ---------- 설정 > 연동 ----------
-// 연결은 한 번에 하나씩, 그 줄에서 그 자리에 펼쳐서 한다. 토큰 칸은 늘 `password`이고
-// 저장한 뒤에는 화면 어디에도 다시 나오지 않는다(서버도 있음/없음만 알려 준다).
-// 저장은 `POST /api/integrations/save` 하나뿐이고, 그 라우트만 workspace.config.json을 쓴다.
+// 카드 넷(슬랙 수집 → 지라 → 캘린더 → 회의록)을 접어 두고, `연결하기`를 누른 카드만 그 자리에서
+// **한 번에 한 단계씩** 펼친다(카드 안 위저드 — 끝낸 단계는 단계 줄에서 `① 토큰 ✓`로 접힌다).
+// 토큰 칸은 늘 `password`이고 저장한 뒤에는 화면 어디에도 다시 나오지 않는다(서버도 있음/없음만).
+// 설정 파일을 쓰는 저장은 `POST /api/integrations/save` 하나뿐이다(토큰 확인·채널 만들기는 파일을 쓰지 않는다).
 const JIRA_TOKEN_URL = 'https://id.atlassian.com/manage-profile/security/api-tokens';
 // 새로 설치하면 `workspace.config.example.json`의 예시값이 그대로 들어 있다. 그 글자를 입력칸에
 // 미리 채우면 사람이 자기 주소를 적은 줄 알고 `연결`을 눌러 실패한다 — 빈 칸으로 보고 예시는
-// placeholder로만 보여 준다.
+// placeholder로만 보여 준다(지라 주소도 예시값이면 "팀 설정이 없다"로 본다).
 const SETTINGS_EXAMPLE_VALUES = ['https://내회사.atlassian.net', '나@내회사.com'];
 const settingsRealValue = value => (SETTINGS_EXAMPLE_VALUES.includes(String(value || '').trim()) ? '' : value);
-// 선택 채널 셋 — 키 · 이름 · 만들어 줄 때의 기본 채널 이름.
-const SETTINGS_SLACK_MORE = [
-  ['align', '맞춰야 할 것', 'my-align'],
-  ['someday', '언젠가 할 것', 'my-someday'],
-  ['waiting', '기다리는 것', 'my-waiting'],
-];
 // 팀 슬랙 앱 주소를 모르면 슬랙 앱 목록 화면으로 보낸다(서버가 주는 값과 같은 기본값).
 const SETTINGS_SLACK_APPS_URL = 'https://api.slack.com/apps';
 const settingsSlackAppUrl = value => (/^https:\/\/\S+$/.test(String(value || '').trim()) ? String(value).trim() : SETTINGS_SLACK_APPS_URL);
 // 슬랙 채널 이름 규칙대로 화면에서 정리한다 — 소문자·숫자·`-`·`_`만 80자, 띄어쓰기는 `-`로.
 const settingsSlackChannelName = value => String(value || '').trim().toLowerCase()
   .replace(/\s+/g, '-').replace(/[^a-z0-9_-]/g, '').slice(0, 80);
-const SETTINGS_NOTES_MODES = [['tiro', '티로'], ['manual', '직접 옮겨서'], ['other', '다른 것']];
+// 슬랙 채널 넷 — 키 · 이름 · 들어가는 곳(굵은 글자 조각) · 만들어 줄 때의 기본 이름. 화면 차례도 이대로다.
+const SETTINGS_SLACK_CHANNELS = [
+  ['todo', '할 일', ['오늘 탭 ', ['b', '새로 들어온 것'], '으로 와요'], 'my-todo'],
+  ['waiting', '기다리는 것', ['누가 답해 줘야 하는 것 → 오늘 탭 ', ['b', '확인 대기']], 'my-waiting'],
+  ['align', '정해진 것', ['정책·결정 → ', ['b', '아이디어·결정'], ' 탭의 ', ['b', '결정']], 'my-align'],
+  ['someday', '언젠가', ['나중에 참고할 거리 → ', ['b', '아이디어·결정'], ' 탭의 ', ['b', '아이디어']], 'my-someday'],
+];
+const SETTINGS_SLACK_BOT = '이건 Bot 토큰이에요 — 바로 위의 User OAuth Token(xoxp-)을 복사해 주세요';
+const SETTINGS_SLACK_ASK = '워크스페이스 슬랙 앱에 저를 Collaborator로 추가해 주세요';
+const SETTINGS_SLACK_TAKEN = '이미 있는 이름이에요 — 다른 이름을 적어 주세요';
+// 목록 맨 아래 `각자 붙이는 법` — 슬랙·구글 캘린더·티로가 아닌 도구를 붙이는 안내(docs/연동.md의 "다른 앱을 쓰면").
+const SETTINGS_OWN_TOOL_URL = 'https://github.com/luvoneun/workspace-tracker/blob/main/docs/%EC%97%B0%EB%8F%99.md#%EB%8B%A4%EB%A5%B8-%EC%95%B1%EC%9D%84-%EC%93%B0%EB%A9%B4';
+const SETTINGS_CLAUDE_CONNECTORS = 'claude.ai/settings/connectors';
+const SETTINGS_TIRO_ADD = 'claude mcp add --transport http tiro-mcp https://mcp.tiro.ooo/mcp';
 
 async function settingsIntegrationsLoad() {
   try { settingsIntegrations = await (await request('/api/integrations')).json(); }
@@ -481,32 +489,111 @@ function settingsField(label, options = {}) {
   return { wrap, input };
 }
 
-// 줄 하나의 뼈대: 이름 · 상태 | 버튼 / 그 아래 펼쳐지는 자리 + 조용한 한 마디.
-function settingsIntegrationShell(kind, name, stateText) {
-  const row = document.createElement('div');
-  row.className = 'd-intg';
-  row.dataset.integration = kind;
-  const top = document.createElement('div');
-  top.className = 'd-intgtop';
-  const title = document.createElement('span');
-  title.className = 'nm';
-  title.textContent = name;
-  const state = document.createElement('span');
-  state.className = 'st';
-  state.textContent = stateText;
-  top.append(title, state);
-  const body = document.createElement('div');
-  body.className = 'd-intgbody';
-  body.hidden = true;
-  row.append(top, body);
-  return { row, top, state, body };
-}
-
 function settingsErrorLine() {
   const error = document.createElement('p');
   error.className = 'd-derr';
   error.setAttribute('role', 'alert');
   return error;
+}
+
+// 굵은 글자·코드가 섞인 **코드에 적힌 고정 문장**을 innerHTML 없이 세운다.
+// 조각은 문자열이거나 `[태그, 글]`(`b`·`code`·`i`) 또는 `['br']`이다.
+function settingsRich(node, parts) {
+  parts.forEach((part) => {
+    if (typeof part === 'string') { node.appendChild(document.createTextNode(part)); return; }
+    const [tag, text] = part;
+    const piece = document.createElement(tag);
+    if (text !== undefined) piece.textContent = text;
+    node.appendChild(piece);
+  });
+  return node;
+}
+
+function settingsEl(className, text) {
+  const node = document.createElement('div');
+  node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function settingsButton(text, className, onClick) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = className;
+  button.textContent = text;
+  if (onClick) button.addEventListener('click', onClick);
+  return button;
+}
+
+// 새 탭으로 여는 링크 — 모양은 버튼(`.d-btn`)이나 조용한 밑줄 글자(`.d-ablink`)다.
+function settingsOutLink(text, href, className) {
+  const link = document.createElement('a');
+  link.className = className;
+  link.href = href;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  link.textContent = text;
+  return link;
+}
+
+// Enter로 다음 단계 — 한글 조합 중의 Enter는 무시한다(빠른 추가 칸과 같은 규칙).
+function settingsOnEnter(input, run) {
+  input.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' || event.isComposing) return;
+    if (typeof event.preventDefault === 'function') event.preventDefault();
+    run();
+  });
+}
+
+async function settingsCopy(text, done = '복사했어요') {
+  try {
+    await navigator.clipboard.writeText(text);
+    showNotice(done);
+  } catch {
+    showNotice('복사하지 못했어요', true);
+  }
+}
+
+// 붙여 넣을 명령·주소 한 줄 + `복사`.
+function settingsCodeLine(text) {
+  const line = settingsEl('d-icode');
+  const code = document.createElement('code');
+  code.textContent = text;
+  line.append(code, settingsButton('복사', 'd-btn xs', () => settingsCopy(text)));
+  return line;
+}
+
+// 번호 매긴 단계 목록(캘린더·티로). 줄마다 `[글 조각들, (있으면) 붙일 노드]`.
+function settingsNumbered(rows) {
+  const list = document.createElement('ol');
+  list.className = 'd-inum';
+  rows.forEach(([parts, extra], index) => {
+    const row = document.createElement('li');
+    const num = document.createElement('span');
+    num.className = 'n';
+    num.textContent = String(index + 1);
+    const body = document.createElement('span');
+    body.className = 'c';
+    // 글 조각은 한 줄로 이어지게 따로 묶는다(칸 자체는 세로로 쌓인다).
+    const words = document.createElement('span');
+    words.className = 'tx';
+    body.appendChild(settingsRich(words, parts));
+    if (extra) body.appendChild(extra);
+    row.append(num, body);
+    list.appendChild(row);
+  });
+  return list;
+}
+
+// ISO 시각 → `방금` / `N분 전` / `N시간 전` / `N일 전`. 못 읽으면 빈 글자.
+function settingsAgo(value, at = Date.now()) {
+  const then = new Date(value || '').getTime();
+  if (!value || Number.isNaN(then)) return '';
+  const minutes = Math.max(0, Math.round((at - then) / 60000));
+  if (minutes < 1) return '방금';
+  if (minutes < 60) return `${minutes}분 전`;
+  const hours = Math.round(minutes / 60);
+  return hours < 24 ? `${hours}시간 전` : `${Math.round(hours / 24)}일 전`;
 }
 
 // 저장 결과를 화면에 옮긴다. 켜고 끄는 값은 서버가 뜰 때 읽으므로 설치본에서는 서버가 스스로
@@ -544,7 +631,8 @@ async function settingsWaitForServer(tries = 20) {
 // 주소 오타·틀린 토큰 같은 "입력 검증"이라, request()가 모든 실패에 띄우는 `저장됐는지 확인하지 못했어요`
 // 알림이 틀린 말이 된다(연결은 아예 시도되지 않았다). 이 저장은 업무 데이터 저장 길(mutation-store·되돌리기·
 // 멱등 키)을 타지 않으므로 request()의 그 처리들도 필요 없다. 네트워크가 끊긴 경우만 알림으로 알린다.
-async function settingsIntegrationSave(body, { error = null, button = null, done = '저장했어요' } = {}) {
+// `saved`는 저장이 성공한 뒤, 탭을 다시 그리기 **전에** 불린다(지라 ③ 확인처럼 다시 그린 카드에 남길 것).
+async function settingsIntegrationSave(body, { error = null, button = null, done = '저장했어요', saved = null } = {}) {
   if (error) error.textContent = '';
   if (button) button.disabled = true;
   let result = null;
@@ -568,69 +656,24 @@ async function settingsIntegrationSave(body, { error = null, button = null, done
     if (button) button.disabled = false;
     return null;
   }
+  if (typeof saved === 'function') saved(result);
   await settingsIntegrationApplied(result, done);
   return result;
 }
 
-// 지라 — ① 주소 ② 이메일 ③ API 토큰. `연결`을 누르면 서버가 지라에 한 번 읽어 보고,
-// 성공하면 표시 이름만 돌려준다(이메일·토큰은 어디에도 다시 나오지 않는다).
-function settingsJiraRow(data) {
-  const jira = data.jira || {};
-  const connected = !!(jira.enabled && jira.hasToken && jira.siteUrl);
-  const host = String(jira.siteUrl || '').replace(/^https?:\/\//, '');
-  const { row, top, body } = settingsIntegrationShell('jira', '지라', connected ? `연결됨 · ${host}` : '연결 안 됨');
-
-  const act = document.createElement('button');
-  act.type = 'button';
-  act.className = 'd-btn sm';
-  act.textContent = connected ? '해제' : '연결하기';
-  top.appendChild(act);
-
-  if (connected) {
-    act.addEventListener('click', () => settingsIntegrationSave({ jira: { enabled: false } },
-      { button: act, done: '연결을 해제했어요 — 토큰 파일은 그대로 있어요' }));
-    return row;
-  }
-
-  const site = settingsField('지라 주소', { placeholder: 'https://회사.atlassian.net', value: settingsRealValue(jira.siteUrl) });
-  const email = settingsField('이메일', { placeholder: '나@회사.com', value: settingsRealValue(jira.email) });
-  const token = settingsField('API 토큰', { type: 'password', placeholder: '붙여 넣기' });
-  const link = document.createElement('a');
-  link.className = 'd-ablink';
-  link.href = JIRA_TOKEN_URL;
-  link.target = '_blank';
-  link.rel = 'noreferrer';
-  link.textContent = 'Atlassian 토큰 만들기 ↗';
-  const error = settingsErrorLine();
-  const go = document.createElement('button');
-  go.type = 'button';
-  go.className = 'd-btn pri sm';
-  go.textContent = '연결';
-  go.addEventListener('click', async () => {
-    const result = await settingsIntegrationSave({
-      jira: { enabled: true, siteUrl: site.input.value, email: email.input.value, token: token.input.value },
-    }, { error, button: go, done: '지라에 연결했어요' });
-    if (result && result.jira) showNotice(`${result.jira.displayName || '내'}님으로 연결됐어요`);
-  });
-  body.append(site.wrap, email.wrap, token.wrap, link, error, go);
-  act.addEventListener('click', () => { body.hidden = !body.hidden; if (!body.hidden) site.input.focus(); });
-  return row;
-}
-
-// 채널 하나를 만들어 달라고 서버에 부탁한다. 저장이 아니라 **묻기만** 하는 길이라
-// `/api/integrations/save`와 따로다 — 여기서는 설정도 토큰 파일도 만들어지지 않는다.
-// 토큰은 요청 본문으로만 나가고(이 맥 안), 응답·오류 문구에는 실리지 않는다.
-async function settingsSlackCreateChannel(token, name) {
+// 파일을 쓰지 않는 "묻기만 하는" 길(토큰 확인·채널 만들기). 토큰은 요청 본문으로만 나가고(이 맥 안),
+// 응답·오류 문구에는 실리지 않는다. 실패는 `{ ok: false, error, code }`로 돌려준다.
+async function settingsIntegrationAsk(url, body, fallback) {
   try {
-    const response = await fetch('/api/integrations/slack-channel', {
+    const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ token, name }),
+      body: JSON.stringify(body),
     });
     let data = null;
     try { data = await response.json(); } catch { data = null; }
     if (!response.ok || !data || data.ok !== true) {
-      return { ok: false, error: (data && typeof data.error === 'string' && data.error) || '슬랙에서 채널을 만들지 못했어요', code: (data && data.code) || '' };
+      return { ok: false, error: (data && typeof data.error === 'string' && data.error) || fallback, code: (data && data.code) || '' };
     }
     return data;
   } catch {
@@ -638,250 +681,745 @@ async function settingsSlackCreateChannel(token, name) {
   }
 }
 
-// 채널 한 칸의 두 갈래. **기본은 링크 붙여 넣기**(이미 만든 채널을 쓰는 길)이고, 앱이 대신
-// 만들어 주는 갈래는 그 아래 조용한 링크로 접어 둔다 — 팀 슬랙 앱에 채널 만들기 권한
-// (`groups:write`)이 없을 수 있어서, 늘 되는 길을 앞에 둔다.
-// `value()`는 `연결`에 실을 값 하나다: 붙여 넣은 링크가 있으면 그것, 없으면 방금 만든 채널의 id.
-function settingsSlackChannelPicker({ label, defaultName, createText, token, error }) {
-  const box = document.createElement('div');
-  box.className = 'd-intgch';
-  const made = { id: '' };
-
-  const link = settingsField(label, { placeholder: 'https://회사.slack.com/archives/C0123…' });
-  const open = document.createElement('button');
-  open.type = 'button';
-  open.className = 'd-ablink';
-  open.textContent = '앱이 대신 만들어 줄 수도 있어요 → 만들어 주기';
-
-  const fold = document.createElement('div');
-  fold.className = 'd-intgother';
-  fold.hidden = true;
-  const name = settingsField('채널 이름', { value: defaultName, placeholder: 'my-todo' });
-  name.input.addEventListener('input', () => {
-    const clean = settingsSlackChannelName(name.input.value);
-    if (clean !== name.input.value) name.input.value = clean;
-  });
-  const create = document.createElement('button');
-  create.type = 'button';
-  create.className = 'd-btn sm';
-  create.textContent = createText;
-  fold.append(name.wrap, create);
-
-  const done = document.createElement('div');
-  done.className = 'd-hint';
-  done.hidden = true;
-
-  open.addEventListener('click', () => {
-    fold.hidden = !fold.hidden;
-    if (!fold.hidden) name.input.focus();
-  });
-
-  create.addEventListener('click', async () => {
-    if (error) error.textContent = '';
-    const wanted = settingsSlackChannelName(name.input.value);
-    name.input.value = wanted;
-    if (!wanted) { if (error) error.textContent = '채널 이름을 적어 주세요'; name.input.focus(); return; }
-    create.disabled = true;
-    const result = await settingsSlackCreateChannel(token.value, wanted);
-    create.disabled = false;
-    if (!result || result.ok !== true) {
-      if (error) error.textContent = result.error;
-      // 권한이 없으면 만들어 줄 길이 아예 없다 — 늘 되는 길(링크 붙여 넣기)로 도로 데려다 놓는다.
-      if (result && result.code === 'missing_scope') { fold.hidden = true; link.wrap.hidden = false; link.input.focus(); }
-      return;
-    }
-    made.id = result.id;
-    link.input.value = '';
-    done.hidden = false;
-    done.textContent = `#${result.name} 채널을 만들었어요 — 아래 연결을 눌러 주세요`;
-    showNotice(`#${result.name} 채널을 만들었어요`);
-  });
-
-  box.append(link.wrap, open, fold, done);
-  return { wrap: box, value: () => String(link.input.value || '').trim() || made.id };
+// 채널 하나를 만들어 달라고 서버에 부탁한다. 토큰을 비워 보내면(`채널 고치기`) 서버가 저장된 토큰을 쓴다.
+async function settingsSlackCreateChannel(token, name) {
+  return settingsIntegrationAsk('/api/integrations/slack-channel', { token, name }, '슬랙에서 채널을 만들지 못했어요');
 }
 
-// 슬랙 수집 — ① 토큰 받기 ② 토큰 붙여 넣기 ③ 채널. 채널 넷 중 `todo` 하나만 이 흐름으로 받고,
-// 나머지 셋은 `더 연결(선택)` 아래 같은 두 갈래다.
-function settingsSlackRow(data) {
+async function settingsSlackTokenCheck(token) {
+  return settingsIntegrationAsk('/api/integrations/slack-token-check', { token }, '토큰을 확인하지 못했어요');
+}
+
+// 단계 줄 `① 토큰 ─ ② 채널 ─ ③ 확인`. 끝낸 단계는 `✓`로 접히고 지금 단계만 파랗다.
+function settingsSteps(names, at) {
+  const wrap = settingsEl('d-isteps');
+  wrap.setAttribute('aria-label', `${names.length}단계 중 ${at + 1}단계`);
+  names.forEach((name, index) => {
+    if (index) {
+      const line = document.createElement('span');
+      line.className = 'ln';
+      line.setAttribute('aria-hidden', 'true');
+      wrap.appendChild(line);
+    }
+    const step = document.createElement('span');
+    step.className = index < at ? 'dn' : (index === at ? 'on' : '');
+    step.textContent = `${'①②③'[index]} ${name}${index < at ? ' ✓' : ''}`;
+    if (index === at) step.setAttribute('aria-current', 'step');
+    wrap.appendChild(step);
+  });
+  return wrap;
+}
+
+// 단계 아래 줄: 왼쪽 `← 이전`, 오른쪽 주 버튼.
+function settingsStepFoot(back, main) {
+  const foot = settingsEl('d-ifoot');
+  if (back) foot.appendChild(back);
+  if (main) { main.className = `${main.className} sp`; foot.appendChild(main); }
+  return foot;
+}
+
+// ---------- 카드 한 장 ----------
+// `이름 · 칩 · (연결됨이면 상태 줄 · ⋯) | 연결하기` / 한 줄 효용 / 준비물 줄 / (해제 확인 줄) / 펼치는 자리.
+// 펼치면 다른 카드는 접힌다 — 한 번에 하나만 연다.
+let settingsIntgCards = new Map();
+// 저장 뒤 다시 그린 카드에 이어서 보일 것(지라 ③ 확인). 한 번 쓰면 비운다.
+let settingsIntgAfter = null;
+
+function settingsIntgCloseOthers(kind) {
+  settingsIntgCards.forEach((card, key) => { if (key !== kind) card.close(); });
+}
+
+function settingsIntgCard({ kind, name, chip, use, need, status = null, openText = '연결하기', openClass = 'd-btn acc', menu = null, extra = [], onOpen }) {
+  const row = settingsEl('d-intg');
+  row.dataset.integration = kind;
+  const top = settingsEl('d-intgtop');
+  const title = document.createElement('span');
+  title.className = 'nm';
+  title.textContent = name;
+  const tag = document.createElement('span');
+  tag.className = 'd-itag';
+  tag.textContent = chip;
+  top.append(title, tag);
+  if (status !== null) {
+    const state = document.createElement('span');
+    state.className = 'st';
+    const dot = document.createElement('span');
+    dot.className = 'ok';
+    dot.setAttribute('aria-hidden', 'true');
+    dot.textContent = '●';
+    state.append(dot, document.createTextNode(` ${status}`));
+    top.appendChild(state);
+  }
+  const toggle = settingsButton(openText, openClass);
+  top.appendChild(toggle);
+  if (menu) top.appendChild(uiMoreButton(`${name} 더 보기`, menu));
+
+  const useLine = settingsEl('d-intguse', use);
+  const needLine = settingsEl('d-intgneed');
+  if (Array.isArray(need)) settingsRich(needLine, need); else needLine.textContent = need || '';
+  const confirmSlot = settingsEl('d-iconfirmslot');
+  const body = settingsEl('d-intgbody');
+  body.hidden = true;
+  row.append(top, useLine, needLine, ...extra, confirmSlot, body);
+
+  const connected = status !== null;
+  const setOpen = (open) => {
+    body.hidden = !open;
+    // 연결된 카드는 평소 ⋯만 두고, 펼쳤을 때만 `접기`가 선다.
+    toggle.hidden = connected && !open;
+    toggle.className = open ? 'd-btn sm' : openClass;
+    toggle.textContent = open ? '접기' : openText;
+    toggle.setAttribute('aria-expanded', String(open));
+  };
+  const card = {
+    row, top, body, needLine, confirmSlot,
+    open(mode, arg) {
+      settingsIntgCloseOthers(kind);
+      confirmSlot.replaceChildren();
+      body.replaceChildren();
+      setOpen(true);
+      onOpen(card, mode, arg);
+    },
+    close() { setOpen(false); body.replaceChildren(); confirmSlot.replaceChildren(); },
+  };
+  toggle.addEventListener('click', () => { if (body.hidden) card.open(); else card.close(); });
+  setOpen(false);
+  settingsIntgCards.set(kind, card);
+  return card;
+}
+
+// 해제는 ⋯ 안의 `해제…` → 카드 안 확인 줄 한 번. 큰 해제 버튼은 두지 않는다.
+function settingsIntgConfirmOff(card, body, words = '해제하면 자동 수집이 멈춰요. 토큰 파일은 남아요.') {
+  settingsIntgCloseOthers(null);
+  const line = settingsEl('d-iconfirm');
+  const text = document.createElement('span');
+  text.className = 'tx';
+  text.textContent = words;
+  const no = settingsButton('취소', 'd-btn sm', () => card.confirmSlot.replaceChildren());
+  const yes = settingsButton('해제', 'd-btn sm dng');
+  const error = settingsErrorLine();
+  yes.addEventListener('click', () => settingsIntegrationSave(body, {
+    error, button: yes,
+    done: words.includes('토큰') ? '연결을 해제했어요 — 토큰 파일은 그대로 있어요' : '연결을 해제했어요',
+  }));
+  line.append(text, no, yes, error);
+  card.confirmSlot.replaceChildren(line);
+  yes.focus();
+  return line;
+}
+
+// ---------- 슬랙 수집 ----------
+// `슬랙에서 이렇게 보내요` 네 줄 — ③ 확인과 연결된 카드의 ⋯ › 보내는 법이 같은 상자를 쓴다.
+function settingsSlackSendHow(todoName = '#my-todo') {
+  const box = settingsEl('d-isend');
+  const head = document.createElement('p');
+  head.className = 'hd';
+  head.textContent = '슬랙에서 이렇게 보내요';
+  const list = document.createElement('ol');
+  [
+    [['b', '남의 메시지'], '는 메시지에 마우스를 올려 ', ['b', '⋯ → 전달'], '(또는 ', ['b', '공유'], ') → 받는 곳에 ', ['b', todoName], '처럼 쓸 채널을 골라 보내요.'],
+    ['전달할 때 ', ['b', '메모 한 줄'], '을 같이 적으면(예: ', ['i', '"금요일까지 답하기"'], ') 할 일 문구에 참고해요.'],
+    [['b', '내 생각'], '은 그 채널에 그냥 적어도 돼요 — 한 메시지가 한 항목이에요.'],
+    ['어디로 보낼지: 해야 할 일 → ', ['b', '할 일'], ' · 누가 답해 줘야 하는 것 → ', ['b', '기다리는 것'], ' · 정해진 정책 → ', ['b', '정해진 것'], ' · 참고거리 → ', ['b', '언젠가']],
+  ].forEach((parts) => { list.appendChild(settingsRich(document.createElement('li'), parts)); });
+  const foot = document.createElement('p');
+  foot.className = 'd-ismall';
+  settingsRich(foot, ['스레드 댓글을 전달하면 스레드 전체를 읽어 맥락을 잡아요. 5분 안에 오늘 탭 ', ['b', '새로 들어온 것'], '에 떠요.']);
+  box.append(head, list, foot);
+  return box;
+}
+
+const settingsSlackLabel = key => (SETTINGS_SLACK_CHANNELS.find(([one]) => one === key) || [key, key])[1];
+
+// 위저드 한 벌. mode: `new`(처음 연결) · `fix`(채널 고치기 — ② 단계만, 추가만) · `token`(다시 연결 — 토큰부터).
+function settingsSlackWizard(card, data, mode = 'new') {
   const slack = data.slack || {};
-  const todo = (slack.channels && slack.channels.todo) || {};
-  const connected = !!(slack.enabled && slack.hasToken && todo.id);
-  // 요약 줄에는 기본 채널 하나만 적되, 선택 채널이 더 걸려 있으면 `외 N개`로 있다는 것만 알린다.
-  const moreChannels = ['align', 'someday', 'waiting'].filter(key => slack.channels && slack.channels[key] && slack.channels[key].id).length;
-  const summary = `${todo.name || '채널'}${moreChannels ? ` 외 ${moreChannels}개` : ''}`;
-  const { row, top, body } = settingsIntegrationShell('slack', '슬랙 수집', connected ? `연결됨 · ${summary}` : '연결 안 됨');
+  const saved = slack.channels || {};
+  // 이미 연결돼 있고 슬랙에서 읽히는 채널 — ②에서 체크된 채 `#이름 연결됨`으로만 보이고 바꿀 수 없다.
+  const linked = key => mode !== 'new' && !!(saved[key] && saved[key].id && !saved[key].missing);
+  const state = {
+    step: mode === 'fix' ? 1 : 0,
+    token: '',
+    picks: Object.fromEntries(SETTINGS_SLACK_CHANNELS.map(([key, , , name]) => [key, {
+      on: linked(key) || (mode === 'new' && (key === 'todo' || key === 'waiting')),
+      name,
+    }])),
+    made: {},
+    rowErrors: {},
+    error: '',
+  };
+  const firstStep = mode === 'fix' ? 1 : 0;
+  const wanted = () => SETTINGS_SLACK_CHANNELS.map(([key]) => key)
+    .filter(key => state.picks[key].on && !linked(key) && !state.made[key]);
 
-  const act = document.createElement('button');
-  act.type = 'button';
-  act.className = 'd-btn sm';
-  act.textContent = connected ? '해제' : '연결하기';
-  top.appendChild(act);
-
-  // 갈래 나누기·스레드 읽기는 Claude Code가 하는 일이라 줄 아래에 사실만 적는다.
-  const note = document.createElement('div');
-  note.className = 'd-intgnote';
-  note.textContent = `메시지 분류·스레드 읽기는 Claude Code가 필요해요 · ${data.claude ? '설치돼 있어요' : '설치 안 됨 — 설치하면 켜져요'}`;
-  row.appendChild(note);
-
-  if (connected) {
-    act.addEventListener('click', () => settingsIntegrationSave({ slack: { enabled: false } },
-      { button: act, done: '연결을 해제했어요 — 토큰 파일은 그대로 있어요' }));
-    return row;
+  function draw() {
+    card.body.replaceChildren();
+    card.body.appendChild(settingsSteps(['토큰', '채널', '확인'], state.step));
+    if (state.step === 0) drawToken();
+    else if (state.step === 1) drawChannels();
+    else drawConfirm();
   }
 
-  const error = settingsErrorLine();
+  // ① 토큰 — 어디 가서 무엇을 복사하는지 세 줄 + 링크, 가려진 칸, `다음`(auth.test로 토큰만 확인).
+  function drawToken() {
+    const how = document.createElement('p');
+    how.className = 'd-ihow';
+    settingsRich(how, [
+      '팀 슬랙 앱 페이지가 열려요(영어 화면이에요).', ['br'],
+      '왼쪽 ', ['b', 'OAuth & Permissions'], ' → ', ['b', 'Install to Workspace'], '(이미 했으면 Reinstall) → 허용', ['br'],
+      '토큰이 두 개 보여요 — ', ['b', 'xoxp-로 시작하는 User OAuth Token'], ' 옆 ', ['b', 'Copy'], '. ',
+      ['code', 'xoxb-'], '로 시작하는 Bot 토큰이 아니에요.',
+    ]);
+    const open = settingsOutLink('토큰 받는 곳 열기 ↗', settingsSlackAppUrl(slack.appUrl), 'd-btn acc');
+    const ask = settingsEl('d-irow d-ismall');
+    ask.append(document.createTextNode('페이지가 안 열리거나 권한이 없다고 하면 → '),
+      settingsButton('만든 사람에게 요청 문구 복사', 'd-btn xs',
+        () => settingsCopy(SETTINGS_SLACK_ASK, '요청 문구를 복사했어요 — 만든 사람에게 보내 주세요')));
+    const token = settingsField('토큰 붙여 넣기', { type: 'password', placeholder: 'xoxp-…', hint: '본인 토큰이에요 — 채팅·메일로 보내지 마세요' });
+    token.input.setAttribute('aria-label', '슬랙 토큰');
+    token.input.value = state.token;
+    const error = settingsErrorLine();
+    const next = settingsButton('다음 →', 'd-btn pri');
+    // Bot 토큰은 서버에 보내지 않고 그 자리에서 알린다.
+    const isBot = () => /^xoxb-/.test(String(token.input.value || '').trim());
+    token.input.addEventListener('input', () => {
+      if (isBot()) error.textContent = SETTINGS_SLACK_BOT;
+      else if (error.textContent === SETTINGS_SLACK_BOT) error.textContent = '';
+    });
+    const go = async () => {
+      const value = String(token.input.value || '').trim();
+      if (!value) { error.textContent = '슬랙 토큰을 붙여 넣어 주세요'; token.input.focus(); return; }
+      if (isBot()) { error.textContent = SETTINGS_SLACK_BOT; token.input.focus(); return; }
+      error.textContent = '';
+      next.disabled = true;
+      const checked = await settingsSlackTokenCheck(value);
+      next.disabled = false;
+      if (!checked || checked.ok !== true) { error.textContent = checked.error; token.input.focus(); return; }
+      state.token = value;
+      state.step = 1;
+      draw();
+    };
+    next.addEventListener('click', go);
+    settingsOnEnter(token.input, go);
+    card.body.append(how, open, ask, token.wrap, error, settingsStepFoot(null, next));
+    token.input.focus();
+  }
 
-  // ① 토큰 받기 — 팀 슬랙 앱 페이지를 새 탭으로 연다(주소는 설정의 `slack.appUrl`, 없으면 목록 화면).
-  const step1 = document.createElement('div');
-  step1.className = 'd-istep';
-  step1.textContent = '① 토큰 받기';
-  const open = document.createElement('a');
-  open.className = 'd-ablink';
-  open.href = settingsSlackAppUrl(slack.appUrl);
-  open.target = '_blank';
-  open.rel = 'noopener noreferrer';
-  open.textContent = '토큰 받는 곳 열기 ↗';
-  const how = document.createElement('div');
-  how.className = 'd-hint';
-  how.textContent = '팀 슬랙 앱 페이지에서 Install to Workspace(또는 Reinstall)를 누르고 User OAuth Token을 복사해요';
-  const who = document.createElement('div');
-  who.className = 'd-hint';
-  who.textContent = '이 앱의 Collaborator로 아직 추가되지 않았으면 만든 사람에게 요청해요';
-
-  // ② 토큰 붙여 넣기 — 늘 password 칸이고, 저장한 뒤에는 화면 어디에도 다시 나오지 않는다.
-  const token = settingsField('② 토큰 붙여 넣기', { type: 'password', placeholder: '붙여 넣기', hint: '팀 슬랙 앱에서 받은 본인 토큰 — 채팅·메일로 보내지 마세요' });
-
-  // ③ 채널 — 기본은 이미 만든 채널의 링크를 붙여 넣는 길이다.
-  const step3 = document.createElement('div');
-  step3.className = 'd-istep';
-  step3.textContent = '③ 채널';
-  const make = document.createElement('div');
-  make.className = 'd-hint';
-  make.textContent = '슬랙에서 나만 있는 비공개 채널을 만들고 채널 이름 우클릭 → 링크 복사';
-  const channel = settingsSlackChannelPicker({
-    label: '채널 링크 붙여 넣기', defaultName: 'my-todo',
-    createText: '나만 있는 비공개 채널 만들어 주기', token: token.input, error,
-  });
-
-  const more = document.createElement('details');
-  more.className = 'd-dsec d-dadd';
-  const moreHead = document.createElement('summary');
-  moreHead.className = 'lbl';
-  // 회의 정리의 `직접 적어 담기`와 같은 접이식 소제목 — 꺾쇠가 있어야 누를 수 있는 줄로 읽힌다.
-  moreHead.innerHTML = uiIcon('chevron');
-  moreHead.append('더 연결(선택)');
-  more.appendChild(moreHead);
-  const extra = SETTINGS_SLACK_MORE.map(([key, label, defaultName]) => {
-    const picker = settingsSlackChannelPicker({ label, defaultName, createText: '만들어 주기', token: token.input, error });
-    more.appendChild(picker.wrap);
-    return [key, picker];
-  });
-  const go = document.createElement('button');
-  go.type = 'button';
-  go.className = 'd-btn pri sm';
-  go.textContent = '연결';
-  go.addEventListener('click', async () => {
-    // 만들어 준 채널도 붙여 넣은 링크와 똑같이 `연결`에서 한 번 읽어 본다(`#이름 · 비공개 · 잘 읽혀요`).
-    const channels = { todo: channel.value() };
-    extra.forEach(([key, picker]) => { const value = picker.value(); if (value) channels[key] = value; });
-    const result = await settingsIntegrationSave({ slack: { enabled: true, token: token.input.value, channels } },
-      { error, button: go, done: '슬랙 채널에 연결했어요' });
-    const info = result && result.slack && result.slack.channels && result.slack.channels.todo;
-    if (info) {
-      showNotice(info.isPrivate
-        ? `${info.name} · 비공개 · 잘 읽혀요`
-        : `${info.name} · 공개 채널이에요 — 나만 보는 채널을 권해요`, !info.isPrivate);
+  // ② 채널 — 쓸 곳을 먼저 고르고, 고른 수만큼 비공개 채널을 차례로 만든다(하나라도 실패하면 만든 것은
+  // 그대로 두고 실패한 줄에 이유를 적는다 — 다시 누르면 남은 것만 만든다).
+  function drawChannels() {
+    const how = document.createElement('p');
+    how.className = 'd-ihow';
+    settingsRich(how, mode === 'fix'
+      ? ['더 받을 곳을 골라요. 이미 연결된 채널은 그대로 두고 ', ['b', '새로 고른 것만'], ' 만들어 드려요.']
+      : ['슬랙에 공유한 메시지를 ', ['b', '어디로 받을지'], ' 골라요. 고른 만큼 나만 있는 비공개 채널을 만들어 드려요. 이름은 바꿔도 돼요 — 나중에 슬랙에서 바꿔도 그대로 이어져요.']);
+    const list = settingsEl('d-ichlist');
+    const error = settingsErrorLine();
+    const make = settingsButton('', 'd-btn pri');
+    const inputs = {};
+    const label = () => {
+      const count = wanted().length;
+      // 다시 연결(토큰만 바꾸기)은 새 채널 없이도 ③으로 넘어갈 수 있다.
+      const canSkip = Object.keys(state.made).length > 0 || mode === 'token';
+      make.textContent = count ? `고른 채널 ${count}개 만들어 주기` : (canSkip ? '다음 →' : '고른 채널 0개 만들어 주기');
+      make.disabled = !count && !canSkip;
+    };
+    SETTINGS_SLACK_CHANNELS.forEach(([key, name, where]) => {
+      const pick = state.picks[key];
+      const locked = linked(key) || !!state.made[key] || key === 'todo';
+      const row = document.createElement('label');
+      row.className = 'd-ich' + (pick.on ? ' is-on' : '');
+      row.dataset.channel = key;
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = pick.on;
+      box.disabled = locked;
+      box.setAttribute('aria-label', `${name} 받기`);
+      const text = document.createElement('span');
+      text.className = 't';
+      const strong = document.createElement('b');
+      strong.textContent = name;
+      text.appendChild(strong);
+      if (key === 'todo') {
+        const need = document.createElement('span');
+        need.className = 'need';
+        need.textContent = '필수';
+        text.append(document.createTextNode(' '), need);
+      }
+      const sub = document.createElement('span');
+      sub.className = 'd-ismall sub';
+      settingsRich(sub, where);
+      text.appendChild(sub);
+      row.append(box, text);
+      if (linked(key)) {
+        const on = document.createElement('span');
+        on.className = 'nm is-done';
+        on.textContent = `${saved[key].name || '채널'} 연결됨`;
+        row.appendChild(on);
+      } else if (state.made[key]) {
+        const on = document.createElement('span');
+        on.className = 'nm is-done';
+        on.textContent = `✓ #${state.made[key].name} 만들었어요`;
+        row.appendChild(on);
+      } else {
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'd-din nm';
+        input.value = pick.name;
+        input.disabled = !pick.on;
+        input.setAttribute('aria-label', `${name} 채널 이름`);
+        input.addEventListener('input', () => {
+          const clean = settingsSlackChannelName(input.value);
+          if (clean !== input.value) input.value = clean;
+          pick.name = input.value;
+          if (state.rowErrors[key]) { state.rowErrors[key] = ''; rowError.textContent = ''; }
+        });
+        settingsOnEnter(input, () => make.click());
+        inputs[key] = input;
+        row.appendChild(input);
+        box.addEventListener('change', () => {
+          pick.on = !!box.checked;
+          input.disabled = !pick.on;
+          row.className = 'd-ich' + (pick.on ? ' is-on' : '');
+          label();
+          if (pick.on) input.focus();
+        });
+      }
+      const rowError = settingsErrorLine();
+      rowError.classList.add('d-icherr');
+      rowError.textContent = state.rowErrors[key] || '';
+      row.appendChild(rowError);
+      list.appendChild(row);
+    });
+    make.addEventListener('click', async () => {
+      const keys = wanted();
+      if (!keys.length) { if (Object.keys(state.made).length || mode === 'token') { state.step = 2; draw(); } return; }
+      state.error = '';
+      // 이름부터 한 번에 본다 — 빈 이름이 있으면 아무것도 만들지 않는다.
+      const blank = keys.filter(key => !settingsSlackChannelName(state.picks[key].name));
+      if (blank.length) {
+        blank.forEach((key) => { state.rowErrors[key] = '채널 이름을 적어 주세요'; });
+        draw();
+        return;
+      }
+      make.disabled = true;
+      let stop = '';
+      for (const key of keys) {
+        const nameWanted = settingsSlackChannelName(state.picks[key].name);
+        const result = await settingsSlackCreateChannel(state.token, nameWanted);
+        if (result && result.ok === true) {
+          state.made[key] = { id: result.id, name: result.name || nameWanted };
+          state.rowErrors[key] = '';
+          continue;
+        }
+        const code = (result && result.code) || '';
+        if (code === 'name_taken') { state.rowErrors[key] = SETTINGS_SLACK_TAKEN; continue; }
+        // 권한·토큰 문제는 남은 줄도 똑같이 실패하므로 여기서 멈추고 ② 맨 아래 한 줄로 적는다.
+        if (code === 'missing_scope' || code === 'invalid_auth') { stop = result.error; break; }
+        state.rowErrors[key] = (result && result.error) || '슬랙에서 채널을 만들지 못했어요';
+      }
+      const made = Object.keys(state.made).length;
+      if (!stop && !wanted().length && made) {
+        showNotice(`채널 ${made}개를 만들었어요`);
+        state.step = 2;
+        draw();
+        return;
+      }
+      state.error = stop;
+      draw();
+    });
+    label();
+    const wrap = settingsEl('d-ichwrap');
+    wrap.append(how, list, make);
+    if (mode === 'new') {
+      const later = document.createElement('p');
+      later.className = 'd-ismall';
+      settingsRich(later, ['나중에 더 고르고 싶으면 설정 › 연동 › 슬랙 ⋯ › ', ['b', '채널 고치기'], '.']);
+      wrap.appendChild(later);
     }
-  });
-  body.append(step1, open, how, who, token.wrap, step3, make, channel.wrap, more, error, go);
-  act.addEventListener('click', () => { body.hidden = !body.hidden; if (!body.hidden) token.input.focus(); });
-  return row;
-}
-
-// 캘린더 — 앱이 직접 연결하지 않는다. Claude Code에서 구글 캘린더를 붙인 뒤 여기서 켜기만 한다.
-function settingsCalendarRow(data) {
-  const on = !!(data.calendar && data.calendar.enabled);
-  const { row, top, body } = settingsIntegrationShell('calendar', '캘린더', on ? '연결됨' : '연결 안 됨');
-  const act = document.createElement('button');
-  act.type = 'button';
-  act.className = 'd-btn sm';
-  act.textContent = on ? '끄기' : '연결하기';
-  if (!on && !data.claude) act.disabled = true;
-  top.appendChild(act);
-
-  const hint = document.createElement('div');
-  hint.className = 'd-hint';
-  hint.textContent = 'Claude Code에서 구글 캘린더를 연결(/mcp)한 뒤 여기서 켜요.';
-  const error = settingsErrorLine();
-  const go = document.createElement('button');
-  go.type = 'button';
-  go.className = 'd-btn pri sm';
-  go.textContent = '켜기';
-  go.addEventListener('click', () => settingsIntegrationSave({ calendar: { enabled: true } },
-    { error, button: go, done: '캘린더를 켰어요' }));
-  body.append(hint, error, go);
-
-  if (!data.claude) {
-    const note = document.createElement('div');
-    note.className = 'd-intgnote';
-    note.textContent = 'Claude Code가 필요해요';
-    row.appendChild(note);
+    error.textContent = state.error || '';
+    wrap.appendChild(error);
+    const back = mode === 'fix' ? null : settingsButton('← 이전', 'd-btn sm', () => { state.step = 0; draw(); });
+    card.body.append(wrap, settingsStepFoot(back, null));
+    // 커서는 이름을 고칠 첫 줄로(없으면 주 버튼으로).
+    const firstTaken = Object.keys(inputs).find(key => state.rowErrors[key]);
+    const firstOpen = firstTaken || Object.keys(inputs).find(key => state.picks[key].on);
+    if (firstOpen) inputs[firstOpen].focus(); else make.focus();
   }
-  if (on) act.addEventListener('click', () => settingsIntegrationSave({ calendar: { enabled: false } }, { button: act, done: '캘린더를 껐어요' }));
-  else act.addEventListener('click', () => { body.hidden = !body.hidden; });
-  return row;
+
+  // ③ 확인 — 채널마다 한 줄, `슬랙에서 이렇게 보내요`, `연결`(기존 저장 길: 토큰 파일 0600 · config · 채널 id).
+  function drawConfirm() {
+    const rows = SETTINGS_SLACK_CHANNELS.map(([key, name]) => {
+      if (state.made[key]) return [`✓ #${state.made[key].name} · ${name} · 잘 읽혀요`];
+      if (linked(key)) return [`✓ ${saved[key].name || '채널'} · ${name} · 연결돼 있어요`];
+      return null;
+    }).filter(Boolean);
+    rows.forEach(([text]) => card.body.appendChild(settingsEl('d-iok', text)));
+    const how = document.createElement('p');
+    how.className = 'd-ihow';
+    how.textContent = '연결하면 5분마다 이 채널들을 읽어 앱에 넣어요.';
+    const todoName = state.made.todo ? `#${state.made.todo.name}` : ((saved.todo && saved.todo.name) || '#my-todo');
+    const error = settingsErrorLine();
+    const go = settingsButton('연결', 'd-btn pri');
+    go.addEventListener('click', () => {
+      const channels = Object.fromEntries(Object.entries(state.made).map(([key, made]) => [key, made.id]));
+      return settingsIntegrationSave({ slack: { enabled: true, token: state.token, channels } },
+        { error, button: go, done: '슬랙 수집을 연결했어요' });
+    });
+    const back = settingsButton('← 이전', 'd-btn sm', () => { state.step = 1; draw(); });
+    card.body.append(how, settingsSlackSendHow(todoName), error, settingsStepFoot(back, go));
+    go.focus();
+  }
+
+  state.step = firstStep;
+  draw();
+  return state;
 }
 
-// 회의록 — 티로로 가져올지, 직접 옮겨 쓸지, 다른 앱을 쓰는지 셋 중 하나를 고른다.
-function settingsNotesRow(data) {
-  const notes = data.meetingNotes || { mode: 'manual', name: '' };
-  const label = notes.mode === 'tiro' ? '티로 연결됨' : (notes.mode === 'other' ? `${notes.name} 쓰는 중` : '직접 옮겨서 사용 중');
-  const { row, body } = settingsIntegrationShell('notes', '회의록', label);
-  body.hidden = false;
+function settingsSlackCard(data) {
+  const slack = data.slack || {};
+  const channels = slack.channels || {};
+  const todo = channels.todo || {};
+  const connected = !!(slack.enabled && slack.hasToken && todo.id);
+  const linkedKeys = SETTINGS_SLACK_CHANNELS.map(([key]) => key).filter(key => channels[key] && channels[key].id);
+  const more = linkedKeys.filter(key => key !== 'todo').length;
+  const ago = settingsAgo(slack.readAt);
+  const status = connected ? `${todo.name || '채널'}${more ? ` 외 ${more}개` : ''}${ago ? ` · ${ago} 읽음` : ''}` : null;
+  let card = null;
+  // 슬랙에서 사라진(지웠거나 보관한) 채널은 그 줄을 따로 알린다 — 누르면 채널 고치기로 간다.
+  const extra = linkedKeys.filter(key => channels[key].missing).map((key) => {
+    const line = settingsEl('d-intgneed k-warn');
+    line.dataset.missing = key;
+    line.append(document.createTextNode(`${channels[key].name || '채널'} 채널을 읽지 못했어요 · `),
+      settingsButton('채널 고치기', 'd-ablink', () => card.open('fix')));
+    return line;
+  });
+  // 메시지를 할 일로 옮기는 일은 지금 Claude Code가 한다 — 이 맥에 없으면 사실만 한 줄 알린다.
+  if (!data.claude) extra.push(settingsEl('d-intgnote', '메시지를 할 일로 옮기는 일은 지금 Claude Code가 해요 · 이 맥에는 설치 안 됨'));
+  const menu = connected ? () => [[
+    { label: '보내는 법', onClick: () => { card.open('how'); } },
+    { label: '채널 고치기', onClick: () => card.open('fix') },
+    { label: '다시 연결(토큰 바꾸기)', onClick: () => card.open('token') },
+  ], [
+    { label: '해제…', danger: true, onClick: () => settingsIntgConfirmOff(card, { slack: { enabled: false } }) },
+  ]] : null;
+  card = settingsIntgCard({
+    kind: 'slack', name: '슬랙 수집', chip: 'Claude Code 필요',
+    use: '나만 보는 채널에 공유한 메시지가 할 일로 들어와요',
+    need: connected
+      ? linkedKeys.map(key => `${channels[key].name || '채널'} ${settingsSlackLabel(key)}`).join(' · ')
+      : '5분 · 팀 슬랙 앱 토큰 하나',
+    status, menu, extra,
+    onOpen: (self, mode) => {
+      if (mode === 'how') { self.body.appendChild(settingsSlackSendHow(todo.name || '#my-todo')); return; }
+      settingsSlackWizard(self, data, connected ? (mode || 'fix') : 'new');
+    },
+  });
+  return card;
+}
 
+// ---------- 지라 ----------
+// ① 토큰 ─ ② 계정 ─ ③ 확인. 지라 주소는 팀 값(config의 `jira.siteUrl`)이 있으면 묻지 않는다.
+function settingsJiraWizard(card, data) {
+  const jira = data.jira || {};
+  const team = String(settingsRealValue(jira.siteUrl) || '').trim();
+  const teamHost = team.replace(/^https?:\/\//, '');
+  const state = { step: 0, token: '', email: String(settingsRealValue(jira.email) || ''), site: team, siteOpen: !team };
+
+  function draw() {
+    card.body.replaceChildren();
+    card.body.appendChild(settingsSteps(['토큰', '계정', '확인'], state.step));
+    if (state.step === 0) drawToken(); else drawAccount();
+  }
+
+  function drawToken() {
+    const make = settingsOutLink('토큰 만들기 ↗', JIRA_TOKEN_URL, 'd-btn acc');
+    const how = document.createElement('p');
+    how.className = 'd-ihow';
+    settingsRich(how, ['Atlassian 계정 보안 페이지 → ', ['b', 'API 토큰 만들기'], ' → 이름은 아무거나 → ', ['b', '복사']]);
+    const token = settingsField('토큰 붙여 넣기', { type: 'password', placeholder: '붙여 넣기', hint: '본인 토큰이에요 — 채팅·메일로 보내지 마세요' });
+    token.input.setAttribute('aria-label', '지라 토큰');
+    token.input.value = state.token;
+    const error = settingsErrorLine();
+    const next = settingsButton('다음 →', 'd-btn pri');
+    const go = () => {
+      const value = String(token.input.value || '').trim();
+      if (!value) { error.textContent = 'API 토큰을 붙여 넣어 주세요'; token.input.focus(); return; }
+      state.token = value;
+      state.step = 1;
+      draw();
+    };
+    next.addEventListener('click', go);
+    settingsOnEnter(token.input, go);
+    card.body.append(make, how, token.wrap, error, settingsStepFoot(null, next));
+    token.input.focus();
+  }
+
+  function drawAccount() {
+    const email = settingsField('지라에 로그인하는 이메일', { placeholder: '나@회사.com', value: state.email });
+    email.input.addEventListener('input', () => { state.email = email.input.value; });
+    const site = settingsField('지라 주소', { placeholder: 'https://회사.atlassian.net', value: state.site });
+    site.input.addEventListener('input', () => { state.site = site.input.value; });
+    site.wrap.hidden = !state.siteOpen;
+    const parts = [email.wrap];
+    if (team) {
+      const note = settingsEl('d-ismall');
+      note.dataset.team = 'site';
+      note.hidden = state.siteOpen;
+      note.append(document.createTextNode(`지라 주소는 팀 설정(${teamHost})을 써요 · `),
+        settingsButton('바꾸기', 'd-ablink', () => {
+          state.siteOpen = true;
+          note.hidden = true;
+          site.wrap.hidden = false;
+          site.input.focus();
+        }));
+      parts.push(note);
+    }
+    parts.push(site.wrap);
+    const error = settingsErrorLine();
+    const go = settingsButton('연결', 'd-btn pri');
+    const connect = () => settingsIntegrationSave({
+      jira: { enabled: true, siteUrl: state.siteOpen ? site.input.value : team, email: email.input.value, token: state.token },
+    }, {
+      error, button: go, done: '지라에 연결했어요',
+      saved: (result) => { settingsIntgAfter = { kind: 'jira', displayName: (result.jira && result.jira.displayName) || '' }; },
+    });
+    go.addEventListener('click', connect);
+    settingsOnEnter(email.input, connect);
+    settingsOnEnter(site.input, connect);
+    const back = settingsButton('← 이전', 'd-btn sm', () => { state.step = 0; draw(); });
+    card.body.append(...parts, error, settingsStepFoot(back, go));
+    (state.siteOpen && !team ? (state.email ? site.input : email.input) : email.input).focus();
+  }
+
+  draw();
+  return state;
+}
+
+// ③ 확인 — 저장이 끝나고 다시 그린 카드에서 이어 보인다.
+function settingsJiraDone(card, data, displayName) {
+  const jira = data.jira || {};
+  card.body.appendChild(settingsSteps(['토큰', '계정', '확인'], 2));
+  card.body.appendChild(settingsEl('d-iok', `✓ ${displayName || jira.displayName || '내'}님으로 연결됐어요`));
+  const how = document.createElement('p');
+  how.className = 'd-ihow';
+  how.textContent = typeof jira.issueCount === 'number'
+    ? `내 티켓 ${jira.issueCount}개를 프로젝트 탭에 띄웠어요. 10분마다 다시 읽어요.`
+    : '내 티켓을 프로젝트 탭에 띄워요. 10분마다 다시 읽어요.';
+  const close = settingsButton('닫기', 'd-btn acc', () => card.close());
+  card.body.append(how, settingsStepFoot(null, close));
+  close.focus();
+}
+
+function settingsJiraCard(data) {
+  const jira = data.jira || {};
+  const connected = !!(jira.enabled && jira.hasToken && jira.siteUrl);
+  const host = String(jira.siteUrl || '').replace(/^https?:\/\//, '');
+  const ago = settingsAgo(jira.readAt);
+  const status = connected
+    ? [jira.displayName ? `${jira.displayName}님` : '', host, ago ? `${ago} 읽음` : ''].filter(Boolean).join(' · ')
+    : null;
+  const counts = [
+    typeof jira.issueCount === 'number' ? `지금 내 티켓 ${jira.issueCount}개` : '',
+    typeof jira.attentionCount === 'number' ? `반응 필요 댓글 ${jira.attentionCount}개` : '',
+  ].filter(Boolean).join(' · ');
+  let card = null;
+  card = settingsIntgCard({
+    kind: 'jira', name: '지라', chip: '누구나',
+    use: '내 티켓이 프로젝트로 뜨고 상태·기한을 여기서 바꿔요',
+    need: connected ? (counts || '앱이 지라를 직접 읽어요') : '3분 · Atlassian API 토큰 하나',
+    status,
+    menu: connected ? () => [[
+      { label: '다시 연결(토큰 바꾸기)', onClick: () => card.open('token') },
+    ], [
+      { label: '해제…', danger: true, onClick: () => settingsIntgConfirmOff(card, { jira: { enabled: false } }) },
+    ]] : null,
+    onOpen: (self, mode, arg) => {
+      if (mode === 'done') { settingsJiraDone(self, data, arg); return; }
+      settingsJiraWizard(self, data);
+    },
+  });
+  return card;
+}
+
+// ---------- 캘린더 ----------
+// 두 갈래 중 이번에는 `Claude Code로`만 동작한다. `비밀 주소 붙이기(누구나)`는 자리만 있다(곧 돼요).
+function settingsCalendarOpen(card, data) {
+  const ask = document.createElement('p');
+  ask.className = 'd-ihow';
+  ask.textContent = '어떤 길로 붙일까요?';
+  const pair = settingsEl('d-ichoices');
+
+  const secret = settingsEl('d-ichoice is-off');
+  secret.setAttribute('aria-disabled', 'true');
+  secret.dataset.choice = 'ical';
+  const secretHead = settingsEl('hd');
+  const secretTag = document.createElement('span');
+  secretTag.className = 'd-itag';
+  secretTag.textContent = '누구나';
+  const soon = document.createElement('span');
+  soon.className = 'soon';
+  soon.textContent = '곧 돼요';
+  secretHead.append(document.createTextNode('비밀 주소 붙이기'), secretTag, soon);
+  const secretHow = document.createElement('p');
+  secretHow.className = 'd-ihow';
+  settingsRich(secretHow, ['구글 캘린더 설정 → ', ['b', '내 캘린더'], ' → ', ['b', '비밀 주소(iCal 형식)'], ' 복사 → 여기에 붙이기']);
+  secret.append(secretHead, secretHow);
+
+  const claude = settingsEl('d-ichoice');
+  claude.dataset.choice = 'claude';
+  const claudeHead = settingsEl('hd');
+  const claudeTag = document.createElement('span');
+  claudeTag.className = 'd-itag';
+  claudeTag.textContent = 'Claude Code 필요';
+  claudeHead.append(document.createTextNode('Claude Code로'), claudeTag);
   const error = settingsErrorLine();
+  const on = settingsButton('켜기', 'd-btn acc', () => settingsIntegrationSave({ calendar: { enabled: true } },
+    { error, button: on, done: '캘린더를 켰어요' }));
+  if (!data.claude) on.disabled = true;
+  const steps = settingsNumbered([
+    [['claude.ai 설정 → 커넥터 → Google Calendar 연결'], settingsCodeLine(SETTINGS_CLAUDE_CONNECTORS)],
+    [['Claude Code에서 ', ['b', '/mcp'], ' → 로그인'], settingsCodeLine('/mcp')],
+    [['여기서 켜기 '], on],
+  ]);
+  const need = settingsEl('d-ismall', data.claude
+    ? 'Claude Code(유료 구독)가 있어야 해요'
+    : 'Claude Code(유료 구독)가 있어야 해요 · 이 맥에는 설치 안 됨 — 설치하면 켤 수 있어요');
+  claude.append(claudeHead, steps, need, error);
+
+  pair.append(secret, claude);
+  card.body.append(ask, pair);
+}
+
+function settingsCalendarCard(data) {
+  const on = !!(data.calendar && data.calendar.enabled);
+  let card = null;
+  card = settingsIntgCard({
+    kind: 'calendar', name: '캘린더', chip: '누구나 · Claude',
+    use: '오늘 회의가 뜨고 회의 정리가 열려요',
+    need: on ? 'Claude Code로 오늘 일정을 읽어요' : '3분 · 비밀 주소 또는 Claude Code',
+    status: on ? 'Claude Code로 읽는 중' : null,
+    menu: on ? () => [[
+      { label: '해제…', danger: true, onClick: () => settingsIntgConfirmOff(card, { calendar: { enabled: false } }, '해제하면 오늘 일정 가져오기가 멈춰요.') },
+    ]] : null,
+    onOpen: self => settingsCalendarOpen(self, data),
+  });
+  return card;
+}
+
+// ---------- 회의록 ----------
+// 세그먼트 `직접 옮기기 | 티로`. 티로 쪽은 세 줄(터미널 명령 복사 → /mcp 로그인 → 여기서 고르기).
+// 예전 설정의 `다른 것`(meetingNotes: { other })은 그대로 읽어 `○○ 쓰는 중`으로만 보인다 — 요청은 목록 맨 아래로 옮겼다.
+function settingsNotesOpen(card, data) {
+  const notes = data.meetingNotes || { mode: 'manual', name: '' };
+  let chosen = notes.mode === 'tiro' ? 'tiro' : 'manual';
+  const error = settingsErrorLine();
+  const head = settingsEl('d-irow');
   const seg = document.createElement('span');
   seg.className = 'd-seg';
   seg.setAttribute('role', 'radiogroup');
   seg.setAttribute('aria-label', '회의록 쓰는 방법');
-  const other = document.createElement('div');
-  other.className = 'd-intgother';
-  other.hidden = notes.mode !== 'other';
-
-  SETTINGS_NOTES_MODES.forEach(([mode, text]) => {
+  const need = document.createElement('span');
+  need.className = 'd-itag';
+  need.textContent = 'Claude Code(유료 구독)가 있어야 해요';
+  const tiro = settingsEl('d-itiro');
+  const buttons = [];
+  const paint = () => {
+    buttons.forEach(([mode, button]) => button.setAttribute('aria-checked', String(mode === chosen)));
+    tiro.hidden = chosen !== 'tiro';
+    need.hidden = chosen !== 'tiro';
+  };
+  [['manual', '직접 옮기기(기본)'], ['tiro', '티로']].forEach(([mode, text]) => {
     const button = document.createElement('button');
     button.type = 'button';
     button.setAttribute('role', 'radio');
-    button.setAttribute('aria-checked', String(mode === notes.mode));
     button.textContent = text;
-    // 티로로 가져오는 일은 Claude Code가 한다 — 없으면 고를 수 없다.
-    if (mode === 'tiro' && !data.claude) { button.disabled = true; button.title = 'Claude Code가 필요해요'; }
     button.addEventListener('click', () => {
-      if (mode === 'other') { other.hidden = false; return; }
-      settingsIntegrationSave({ meetingNotes: { mode } }, { error, button, done: mode === 'tiro' ? '티로로 가져올게요' : '직접 옮겨서 쓸게요' });
+      chosen = mode;
+      paint();
+      // 직접 옮기기는 고르는 순간 저장한다(설치할 것이 없다). 티로는 세 줄을 보고 마지막 버튼으로 저장한다.
+      if (mode === 'manual' && notes.mode !== 'manual') {
+        settingsIntegrationSave({ meetingNotes: { mode: 'manual' } }, { error, button, done: '직접 옮겨서 쓸게요' });
+      }
     });
+    buttons.push([mode, button]);
     seg.appendChild(button);
   });
+  head.append(seg, need);
 
-  const name = settingsField('어떤 앱인가요', { placeholder: '앱 이름', value: notes.name });
-  const ask = document.createElement('button');
-  ask.type = 'button';
-  ask.className = 'd-btn sm';
-  ask.textContent = '요청하기';
-  ask.addEventListener('click', async () => {
-    const wanted = String(name.input.value || '').trim();
-    if (!wanted) { error.textContent = '어떤 앱인지 이름을 적어 주세요'; return; }
-    await settingsIntegrationSave({ meetingNotes: { mode: 'other', name: wanted } }, { error, button: ask, done: '적어 뒀어요' });
-    await settingsReportCopy(ask, { lead: `연동 요청: ${wanted}`, done: '요청 내용을 복사했어요 — 슬랙으로 붙여 넣어 주세요' });
+  const take = settingsButton(notes.mode === 'tiro' ? '지금 티로로 받고 있어요' : '티로로 받기', 'd-btn pri');
+  if (notes.mode === 'tiro' || !data.claude) take.disabled = true;
+  take.addEventListener('click', () => settingsIntegrationSave({ meetingNotes: { mode: 'tiro' } },
+    { error, button: take, done: '티로로 가져올게요' }));
+  tiro.appendChild(settingsNumbered([
+    [['터미널에 붙여 넣기'], settingsCodeLine(SETTINGS_TIRO_ADD)],
+    [['Claude Code에서 ', ['b', '/mcp → tiro-mcp → Authenticate']]],
+    [['여기서 티로 선택 '], take],
+  ]));
+  if (!data.claude) tiro.appendChild(settingsEl('d-ismall', '이 맥에는 Claude Code가 설치돼 있지 않아요 — 설치하면 고를 수 있어요'));
+  const quiet = settingsEl('d-ismall', '직접 옮기기는 회의 정리 화면에 붙여 넣어요 — 아무것도 설치하지 않아요.');
+  card.body.append(head, tiro, quiet, error);
+  paint();
+}
+
+function settingsNotesCard(data) {
+  const notes = data.meetingNotes || { mode: 'manual', name: '' };
+  const need = notes.mode === 'tiro' ? '티로로 받는 중'
+    : (notes.mode === 'other' ? `${notes.name} 쓰는 중 · 요청해 두었어요` : '직접 옮기기 중');
+  return settingsIntgCard({
+    kind: 'notes', name: '회의록', chip: '누구나 · Claude',
+    use: '티로 회의록이 초안으로 들어와요 — 직접 옮기기도 돼요',
+    need,
+    openText: '바꾸기', openClass: 'd-btn sm',
+    onOpen: self => settingsNotesOpen(self, data),
   });
-  other.append(name.wrap, ask);
+}
 
-  const hint = document.createElement('div');
-  hint.className = 'd-hint';
-  hint.textContent = '티로는 회의록을 자동으로 가져오고, 직접 옮겨서 쓰면 회의 정리 화면에 붙여 넣어요.';
-  body.append(seg, other, hint, error);
-  return row;
+// ---------- 목록 ----------
+// 맨 위 한 줄(선택이라는 말 + `연결됨 N · 남은 것 M`) → 카드 넷 → 맨 아래 조용한 줄
+// (`다른 도구를 쓰고 있어요 → 요청하기 · 각자 붙이는 법 ↗`)과 자동화 등록 안내.
+function settingsIntgCounts(data) {
+  const slack = data.slack || {};
+  const jira = data.jira || {};
+  const flags = [
+    !!(slack.enabled && slack.hasToken && slack.channels && slack.channels.todo && slack.channels.todo.id),
+    !!(jira.enabled && jira.hasToken && jira.siteUrl),
+    !!(data.calendar && data.calendar.enabled),
+    !!(data.meetingNotes && data.meetingNotes.mode === 'tiro'),
+  ];
+  const on = flags.filter(Boolean).length;
+  return { on, left: flags.length - on };
+}
+
+function settingsIntgFoot() {
+  const foot = settingsEl('d-intgfoot');
+  const line = settingsEl('d-irow');
+  const ask = settingsEl('d-intgask');
+  ask.hidden = true;
+  const tool = settingsField('어떤 도구인가요', { placeholder: '예: 노션 캘린더' });
+  const error = settingsErrorLine();
+  const copy = settingsButton('요청 문구 복사', 'd-btn sm');
+  const send = async () => {
+    const wanted = String(tool.input.value || '').trim().slice(0, 60);
+    if (!wanted) { error.textContent = '어떤 도구인지 이름을 적어 주세요'; tool.input.focus(); return; }
+    error.textContent = '';
+    await settingsReportCopy(copy, { lead: `연동 요청: ${wanted}`, done: '요청 내용을 복사했어요 — 슬랙으로 붙여 넣어 주세요' });
+  };
+  copy.addEventListener('click', send);
+  settingsOnEnter(tool.input, send);
+  ask.append(tool.wrap, copy, error);
+  const open = settingsButton('요청하기', 'd-ablink', () => {
+    ask.hidden = !ask.hidden;
+    open.setAttribute('aria-expanded', String(!ask.hidden));
+    if (!ask.hidden) tool.input.focus();
+  });
+  open.setAttribute('aria-expanded', 'false');
+  line.append(document.createTextNode('다른 도구를 쓰고 있어요 → '), open, document.createTextNode(' · '),
+    settingsOutLink('각자 붙이는 법 ↗', SETTINGS_OWN_TOOL_URL, 'd-ablink'));
+  // 켠 자동화는 launchd에 따로 등록돼야 실제로 돈다 — 그 한 번은 업데이트.command가 해 준다.
+  const setup = settingsEl('d-intgsetup', '켠 자동화를 등록하려면 앱 폴더의 업데이트.command를 한 번 실행해요.');
+  foot.append(line, ask, setup);
+  return foot;
 }
 
 async function renderSettingsIntegrations() {
@@ -895,12 +1433,25 @@ async function renderSettingsIntegrations() {
     view.insertAdjacentHTML('beforeend', '<div class="d-empty">연동 상태를 불러오지 못했어요.</div>');
     return;
   }
-  [settingsJiraRow, settingsSlackRow, settingsCalendarRow, settingsNotesRow].forEach(make => view.appendChild(make(data)));
-  // 켠 자동화는 launchd에 따로 등록돼야 실제로 돈다 — 그 한 번은 업데이트.command가 해 준다.
-  const foot = document.createElement('div');
-  foot.className = 'd-hint d-intgfoot';
-  foot.textContent = '켠 자동화를 등록하려면 앱 폴더의 업데이트.command를 한 번 실행해요.';
-  view.appendChild(foot);
+  settingsIntgCards = new Map();
+  const counts = settingsIntgCounts(data);
+  const head = settingsEl('d-intghead');
+  const lead = document.createElement('span');
+  lead.textContent = '연동은 선택이에요. 필요할 때 하나씩 켜요.';
+  const tally = document.createElement('span');
+  tally.className = 'd-quiet sp';
+  tally.textContent = `연결됨 ${counts.on} · 남은 것 ${counts.left}`;
+  head.append(lead, tally);
+  view.appendChild(head);
+  [settingsSlackCard, settingsJiraCard, settingsCalendarCard, settingsNotesCard]
+    .forEach(make => view.appendChild(make(data).row));
+  view.appendChild(settingsIntgFoot());
+  // 지라 연결 직후라면 ③ 확인을 그 카드에 이어서 보인다(저장 뒤 다시 그린 화면).
+  const after = settingsIntgAfter;
+  settingsIntgAfter = null;
+  if (after && after.kind === 'jira' && settingsIntgCards.get('jira')) {
+    settingsIntgCards.get('jira').open('done', after.displayName);
+  }
 }
 
 // ---------- 설정 > 도움말 ----------
@@ -968,6 +1519,8 @@ const SETTINGS_FAQ = [
       '제가 답해야 하는 지라 댓글이 모이는 자리예요. <b>지라에 직접 물어봐서 가져와요(설정 &gt; 연동의 지라 연결만 있으면 됩니다). 슬랙 앱이나 다른 설정은 필요 없어요.</b> 제가 담당·보고·지켜보는 티켓 중 제 마지막 댓글 뒤에 남이 댓글을 달았으면 뜨고(최근 14일), 지라에 답글을 달면 다음 갱신에서 저절로 사라져요.'],
     ['`반응 필요`에 안 보이는 것도 있나요', '지라 연결',
       '제가 담당·보고·지켜보지 않는 티켓과 14일보다 오래된 댓글은 아직 못 봐요. <b>피그마 댓글은 여기로 자동으로 오지 않아요</b> — 피그마의 슬랙 알림을 나만 보는 채널(#my-todo)에 공유하면 슬랙 수집을 거쳐 <b>할 일</b>로 들어와요. 잘 읽고 있는지는 <b>상태</b> 탭 맨 아래 <b>반응 필요 · 지라 댓글</b> 줄에서 봐요.'],
+    ['슬랙에서 이렇게 보내요', '슬랙 연결',
+      '<b>남의 메시지</b>는 ⋯ → <b>전달</b>(또는 공유)로 #my-todo 같은 내 채널에 보내요. 메모 한 줄을 같이 적으면 할 일 문구에 참고해요. <b>내 생각</b>은 그 채널에 그냥 적어도 돼요(한 메시지가 한 항목). 해야 할 일 → 할 일 · 답을 기다리는 것 → 기다리는 것 · 정해진 정책 → 정해진 것 · 참고거리 → 언젠가.'],
     ['슬랙에서 수집한 게 잘 들어왔는지 보려면', '슬랙 연결 + Claude Code',
       '<b>상태</b> 탭의 <b>슬랙 캡처</b> 줄 아래에 최근 수집 결과가 요약돼요 — 본 메시지 수와 등록·중복·건너뜀 개수, 건너뛴 문구까지 보여요. 메시지를 갈래로 나누고 스레드를 읽는 일은 Claude Code가 해요.'],
     ['머리줄의 `○일 전 기준`이나 톱니 점은 뭔가요', '없음',

@@ -1662,6 +1662,18 @@ async function aboutApp() {
 function currentConfigFile() {
   try { return JSON.parse(nativeFs.readFileSync(CONFIG_PATH, 'utf8')); } catch { return {}; }
 }
+// 슬랙 채널 이름 따라가기(연동 탭을 열 때). 테스트는 `WORKSPACE_NO_REMOTE_CHECK`로 바깥에 묻지 않게 하므로
+// 그때는 끄고, 가짜 슬랙을 끼운 테스트·픽스처만 `WORKSPACE_SLACK_FOLLOW=1`로 다시 켠다.
+const slackFollower = integrations.createSlackNameFollower();
+const slackFollowOn = () => !process.env.WORKSPACE_NO_REMOTE_CHECK || process.env.WORKSPACE_SLACK_FOLLOW === '1';
+// 슬랙 수집이 마지막으로 성공한 때(ISO) — 상태 파일을 읽기만 한다. 없으면 null.
+function slackSyncSuccessAt() {
+  const statePath = path.join(process.env.WORKSPACE_DATA_DIR || __dirname, '.slack_capture_state.json');
+  try {
+    const at = JSON.parse(nativeFs.readFileSync(statePath, 'utf8')).lastSuccessAt;
+    return typeof at === 'string' && at ? at : null;
+  } catch { return null; }
+}
 // `claude` 실행 파일이 이 맥에 있는지 — 프로세스마다 한 번만 보고(PATH만 훑는다) 들고 있는다.
 let claudeFound = null;
 function claudeReady() {
@@ -2073,13 +2085,45 @@ const handleRequest = (req, res) => {
   }
 
   // 지금 연동 상태 — 토큰 값은 싣지 않고 있음/없음만 알려 준다.
+  // 열 때마다 슬랙 채널 이름을 따라간다(5분 캐시, 이름만 고침 — slackFollower 참고). 카드의 상태 줄에
+  // 쓰는 "언제 읽었나"(지라 직접 읽기·슬랙 수집)와 지라 개수도 함께 싣는다(값은 메모리·상태 파일에서).
   if (url.pathname === '/api/integrations' && req.method === 'GET') {
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({
-      ok: true,
-      ...integrations.readIntegrations(currentConfigFile(), { claude: claudeReady() }),
-      install: process.env.WORKSPACE_MANAGED ? 'managed' : 'manual',
-    }));
+    const followed = slackFollowOn()
+      ? slackFollower.follow({ read: currentConfigFile, configPath: CONFIG_PATH }).catch(() => ({ missing: {} }))
+      : Promise.resolve({ missing: {} });
+    followed.then(({ missing }) => {
+      const state = integrations.readIntegrations(currentConfigFile(), { claude: claudeReady() });
+      Object.keys(missing || {}).forEach((key) => { if (state.slack.channels[key]) state.slack.channels[key].missing = true; });
+      const live = jiraLive.current();
+      const attention = attentionLive.current();
+      const hidden = attention ? workflows.attentionDismissed() : {};
+      state.jira.readAt = live ? new Date(live.at).toISOString() : null;
+      state.jira.issueCount = live ? live.issues.length : null;
+      state.jira.attentionCount = attention && Array.isArray(attention.items)
+        ? attention.items.filter(item => !hidden[item.id]).length : null;
+      const slackSync = getSlackSync();
+      state.slack.readAt = slackSync && slackSync.used !== false ? slackSyncSuccessAt() : null;
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: true, ...state, install: process.env.WORKSPACE_MANAGED ? 'managed' : 'manual' }));
+    }).catch(() => {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: '연동 상태를 읽지 못했어요.' }));
+    });
+    return;
+  }
+
+  // 슬랙 위저드 `① 토큰`의 `다음` — `auth.test`로 토큰만 확인한다. 아무 파일도 쓰지 않고 `{ok}`만 돌려준다.
+  if (url.pathname === '/api/integrations/slack-token-check' && req.method === 'POST') {
+    readBody(req)
+      .then(body => integrations.slackTokenCheck((body || {}).token))
+      .then(() => {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: true }));
+      })
+      .catch((error) => {
+        res.writeHead(error.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: error.message, code: error.code || '' }));
+      });
     return;
   }
 
@@ -2107,12 +2151,17 @@ const handleRequest = (req, res) => {
     return;
   }
 
-  // 슬랙 비공개 채널 대신 만들기 — `설정 > 연동 > 슬랙 수집`의 ③ 채널에서 접어 둔 갈래다.
+  // 슬랙 비공개 채널 대신 만들기 — `설정 > 연동 > 슬랙 수집` 위저드의 ② 채널이 고른 채널마다 한 번씩 부른다.
   // 여기서는 **아무 파일도 쓰지 않는다**: 토큰은 슬랙 헤더로만 나가고, 만든 채널의 id·이름만 돌려준다
-  // (그 id를 화면이 그다음 `연결`에 실어 보내고, 저장은 예전대로 `/api/integrations/save`만 한다).
+  // (그 id를 화면이 ③ 확인의 `연결`에 실어 보내고, 저장은 예전대로 `/api/integrations/save`만 한다).
+  // 토큰 칸이 비어 있으면(`채널 고치기` — 이미 연결된 뒤 채널만 더하는 길) 저장된 토큰을 서버 안에서만 쓴다.
   if (url.pathname === '/api/integrations/slack-channel' && req.method === 'POST') {
     readBody(req)
-      .then(body => integrations.slackCreateChannel((body || {}).token, (body || {}).name))
+      .then((body) => {
+        const given = typeof (body || {}).token === 'string' ? body.token.trim() : '';
+        const token = given || integrations.savedSlackToken(currentConfigFile());
+        return integrations.slackCreateChannel(token, (body || {}).name);
+      })
       .then((channel) => {
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ ok: true, id: channel.id, name: channel.name }));
