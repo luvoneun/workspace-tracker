@@ -4008,6 +4008,22 @@ test('연동: 채널 링크·ID에서 채널만 뽑고, 아니면 null이다', (
   assert.equal(id(''), null);
 });
 
+test('연동: 켜짐/꺼짐은 서버(USES)와 같은 뜻 — 칸이 없으면 켜진 것이고, 회의록은 tiro 칸을 따라간다', () => {
+  const read = (config) => integrationsStore.readIntegrations(config, { tokenDir: fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-int-')) });
+  // 옛 설정: integrations에 tiro 칸이 없고 meetingNotes도 없다 — 서버는 tiro를 켜진 것으로 돌리고 있었다.
+  const legacy = read({ integrations: { slack: true, calendar: true, jira: true } });
+  assert.equal(legacy.meetingNotes.mode, 'tiro', '칸이 없으면 켜진 것 — 화면이 "직접"으로 잘못 보여 주면 누르는 순간 실제로 꺼진다');
+  assert.equal(legacy.jira.enabled, true);
+  // 아무 칸도 없는 설정(예: 빈 파일)도 서버와 같이 전부 켜진 것으로 읽는다.
+  const empty = read({});
+  assert.deepEqual([empty.jira.enabled, empty.slack.enabled, empty.calendar.enabled, empty.meetingNotes.mode], [true, true, true, 'tiro']);
+  // 새 설치의 예시 설정은 전부 false — 그때만 꺼짐·직접이다.
+  const fresh = read({ integrations: { slack: false, calendar: false, jira: false, tiro: false } });
+  assert.deepEqual([fresh.jira.enabled, fresh.slack.enabled, fresh.calendar.enabled, fresh.meetingNotes.mode], [false, false, false, 'manual']);
+  // meetingNotes가 적혀 있으면 그 값이 우선이다.
+  assert.equal(read({ integrations: { tiro: true }, meetingNotes: 'manual' }).meetingNotes.mode, 'manual');
+});
+
 test('연동: 지라 계정 확인은 myself 하나만 부르고 표시 이름만 돌려준다(토큰은 어디에도 안 실린다)', async () => {
   const fake = jiraFake({ '/rest/api/3/myself': () => json({ accountId: 'acc-1', displayName: '하늘' }) });
   const ok = await jiraModule.checkJiraAccount({ siteUrl: 'https://example-jira.test/', email: 'me@example.test', token: 'secret-token', request: fake.request });

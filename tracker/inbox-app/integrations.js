@@ -144,19 +144,23 @@ function readIntegrations(config, { tokenDir, claude } = {}) {
   const slack = clone(config.slack);
   const paths = tokenPaths(tokenDir);
   const notes = config.meetingNotes;
+  // 켜짐/꺼짐은 서버(`USES`)와 같은 뜻으로 읽는다 — **칸이 없으면 켜진 것**이다(옛 설정 파일은 tiro 칸이
+  // 없어도 미팅 노트 가져오기가 돌고 있었다). `=== true`로 읽으면 화면이 "꺼짐"으로 잘못 보여 주고, 그
+  // 상태에서 다른 갈래를 누르면 실제로 꺼 버린다(2026-09-23 사용자 설정에서 실제로 일어남).
+  const on = key => uses[key] !== false;
   const mode = notes && typeof notes === 'object' && typeof notes.other === 'string'
     ? 'other'
-    : (notes === 'tiro' || notes === 'manual' ? notes : (uses.tiro === true ? 'tiro' : 'manual'));
+    : (notes === 'tiro' || notes === 'manual' ? notes : (on('tiro') ? 'tiro' : 'manual'));
   const channels = clone(slack.channels);
   return {
     jira: {
-      enabled: uses.jira === true,
+      enabled: on('jira'),
       siteUrl: trimmed(jira.siteUrl),
       email: trimmed(jira.email),
       hasToken: hasToken(jira.tokenFile || paths.jira.config),
     },
     slack: {
-      enabled: uses.slack === true,
+      enabled: on('slack'),
       workspaceUrl: trimmed(slack.workspaceUrl),
       hasToken: hasToken(slack.tokenFile || paths.slack.config),
       channels: Object.fromEntries(SLACK_CHANNEL_KEYS.map((key) => {
@@ -164,7 +168,7 @@ function readIntegrations(config, { tokenDir, claude } = {}) {
         return [key, { id: trimmed(entry.id), name: trimmed(entry.name) }];
       })),
     },
-    calendar: { enabled: uses.calendar === true },
+    calendar: { enabled: on('calendar') },
     meetingNotes: { mode, name: mode === 'other' ? trimmed(notes.other) : '' },
     claude: claude === true,
   };

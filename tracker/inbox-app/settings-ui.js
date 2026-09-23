@@ -609,7 +609,10 @@ function settingsSlackRow(data) {
   const slack = data.slack || {};
   const todo = (slack.channels && slack.channels.todo) || {};
   const connected = !!(slack.enabled && slack.hasToken && todo.id);
-  const { row, top, body } = settingsIntegrationShell('slack', '슬랙 수집', connected ? `연결됨 · ${todo.name || '채널'}` : '연결 안 됨');
+  // 요약 줄에는 기본 채널 하나만 적되, 선택 채널이 더 걸려 있으면 `외 N개`로 있다는 것만 알린다.
+  const moreChannels = ['align', 'someday', 'waiting'].filter(key => slack.channels && slack.channels[key] && slack.channels[key].id).length;
+  const summary = `${todo.name || '채널'}${moreChannels ? ` 외 ${moreChannels}개` : ''}`;
+  const { row, top, body } = settingsIntegrationShell('slack', '슬랙 수집', connected ? `연결됨 · ${summary}` : '연결 안 됨');
 
   const act = document.createElement('button');
   act.type = 'button';
