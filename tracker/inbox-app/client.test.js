@@ -6515,7 +6515,8 @@ test('도움말: 개념 사전 9개 + 쓰는 순서의 여섯 묶음 + 항목마
   assert.equal(attention[1], '지라 연결');
   assert.match(attention[2], /지라에 직접 물어봐서 가져와요\(설정 &gt; 연동의 지라 연결만 있으면 됩니다\)\. 슬랙 앱이나 다른 설정은 필요 없어요\./);
   const figma = entries.find(([, , answer]) => answer.includes('피그마'));
-  assert.match(figma[2], /피그마 댓글은 가져오지 않아요 — 피그마에서 직접 확인해요/);
+  assert.match(figma[2], /피그마 댓글은 여기로 자동으로 오지 않아요/, '피그마는 지라처럼 직접 읽지 않는다');
+  assert.match(figma[2], /슬랙 알림을 .*공유하면 슬랙 수집을 거쳐/, '피그마는 슬랙 알림을 채널에 공유하는 길로 들어온다(사용자 확인)');
   assert.ok(!entries.some(([, , answer]) => /피그마 댓글은 다음 단계/.test(answer)), '옛 문구는 남아 있지 않다');
 
   // 슬랙이 필요한 것과 아무것도 필요 없는 것이 섞여 있어야 표지가 뜻을 갖는다
