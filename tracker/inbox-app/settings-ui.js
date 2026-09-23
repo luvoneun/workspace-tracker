@@ -352,7 +352,9 @@ const SETTINGS_UPDATE_WORDS = {
   gone: '앱이 응답하지 않아요 — 업데이트.command를 더블클릭해 주세요',
   confirm: '이전 버전과 업데이트 직전 백업으로 돌아가요',
   unreachable: '서버에 닿지 못했어요 — 앱이 켜져 있는지 확인해 주세요.',
+  untouched: '업데이트하지 못했어요 — 앱과 데이터는 그대로예요',
 };
+const SETTINGS_UPDATE_ROLLBACK_FROM_STEP = 3;
 const SETTINGS_STEP_MARK = { done: ['done', '✓'], doing: ['now', '⟳'], todo: ['wait', '·'], failed: ['fail', '✕'] };
 // { action, from, to, askedAt, downSince, timer, view } — 한 번에 하나만.
 let settingsUpdateRun = null;
@@ -448,6 +450,13 @@ function settingsUpdateNodes(view) {
       const file = settingsUpdateFileLine(view.updateFile);
       if (file) nodes.push(file);
       return nodes;
+    }
+    // ①② 단계(고친 파일 확인·데이터 백업)에서 멈췄으면 코드는 그대로다 — 되돌릴 것이 없으니 `다시 시도`만 둔다.
+    // `이전 버전으로 되돌리기`는 ③ 새 버전 받기 이후에서 멈췄을 때만(서버도 같은 기준으로만 받는다).
+    if (!(Number(view.step) >= SETTINGS_UPDATE_ROLLBACK_FROM_STEP)) {
+      text.textContent = SETTINGS_UPDATE_WORDS.untouched;
+      box.append(text, settingsButton('다시 시도', 'd-btn sm pri', () => settingsUpdateAsk('update')));
+      return view.message ? [box, settingsEl('d-ismall d-abquiet', view.message)] : [box];
     }
     text.textContent = `업데이트하지 못했어요 — ${reason}`;
     box.appendChild(text);
@@ -586,7 +595,7 @@ async function settingsUpdatePoll() {
   }
   if (status && status.state === 'failed') {
     settingsUpdateStop();
-    settingsUpdatePaint({ kind: 'failed', action: status.action || run.action, message: status.message, updateFile: data.updateFile });
+    settingsUpdatePaint({ kind: 'failed', action: status.action || run.action, step: status.step, message: status.message, updateFile: data.updateFile });
     return;
   }
   settingsUpdatePaint({ kind: 'progress', run, steps: settingsUpdateSteps(run.action, status), down: false });
@@ -2285,7 +2294,7 @@ const SETTINGS_FAQ = [
     ['앱이 이상하게 동작하면', '없음',
       '<b>상태</b> 탭 맨 아래 <b>문제 보고</b>를 누르면 버전·연동 상태·최근 오류 줄이 클립보드에 복사돼요. 업무 내용은 들어가지 않으니 그대로 슬랙에 붙여 넣어 주세요.'],
     ['앱에서 업데이트하기', '없음',
-      '새 버전이 나오면 <b>상태</b> 탭 맨 아래에 <b>업데이트 받기</b>가 떠요. 누르면 데이터 백업 → 받기 → 다시 시작 → 확인까지 1분쯤 걸리고, 진행을 그 자리에서 보여 줘요. 끝나면 <b>새로고침</b>을 눌러 주세요. 실패하면 저절로 되돌리지 않고 <b>이전 버전으로 되돌리기</b>를 보여 줘요. 폴더를 옮겨야 하거나 처음 한 번은 앱 폴더의 <b>업데이트.command</b>를 더블클릭해요.'],
+      '새 버전이 나오면 <b>상태</b> 탭 맨 아래에 <b>업데이트 받기</b>가 떠요. 누르면 데이터 백업 → 받기 → 다시 시작 → 확인까지 1분쯤 걸리고, 진행을 그 자리에서 보여 줘요. 끝나면 <b>새로고침</b>을 눌러 주세요. 받기 전에 멈추면 <b>다시 시도</b>, 받은 뒤 실패하면 <b>이전 버전으로 되돌리기</b>를 보여 줘요. 폴더를 옮겨야 하거나 처음 한 번은 앱 폴더의 <b>업데이트.command</b>를 더블클릭해요.'],
   ]],
 ];
 

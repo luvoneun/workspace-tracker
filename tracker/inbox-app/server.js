@@ -20,6 +20,81 @@ const { randomBytes, createHash, timingSafeEqual } = require('node:crypto');
 // 사람/회사마다 달라지는 값은 전부 workspace.config.json 한 곳에 모아둔다.
 // 다른 맥이나 다른 회사에서 쓸 때 이 파일만 갈아끼우면 된다.
 const CONFIG_PATH = process.env.WORKSPACE_CONFIG || path.join(__dirname, '../../workspace.config.json');
+const TRACKER_DIR = process.env.WORKSPACE_DATA_DIR || path.join(__dirname, '..');
+// 코드 저장소의 뿌리(VERSION·git 기록이 있는 곳). 앱은 이 저장소를 그대로 clone해서 쓴다.
+const REPO_DIR = process.env.WORKSPACE_REPO_DIR || path.join(__dirname, '..', '..');
+// 이 컴퓨터에만 두는 폴더(`local/` — 업데이트해도 남는다). 테스트·픽스처는 WORKSPACE_LOCAL_DIR(또는 WORKSPACE_REPO_DIR)로 임시 폴더를 끼운다.
+const LOCAL_DIR = process.env.WORKSPACE_LOCAL_DIR || path.join(REPO_DIR, 'local');
+// Dock 앱이 놓이는 폴더(`~/Applications`). 서버는 이름이 겹치는지 **보기만** 한다. 테스트·픽스처는 임시 폴더를 끼운다.
+function applicationsDir() {
+  return process.env.WORKSPACE_APPLICATIONS_DIR || path.join(os.homedir(), 'Applications');
+}
+
+// ---------- 화면 확인용 픽스처의 안전망 ----------
+// `WORKSPACE_FIXTURE=1`(browser-fixture.js가 켠다)이면 서버가 쓰는 자리가 하나라도 실제 설치 위치
+// (`~/.config`·`~/.local/share/workspace-automation`·`~/Library/LaunchAgents`·`~/Applications`·이 저장소의
+// `workspace.config.json`·`local/`·`tracker/`)이거나 그 위(홈 폴더 등)를 가리키면 시작하지 않는다.
+// 아래 판단은 경로 글자만 본다 — 설정 파일도 그 자리가 안전할 때만 읽어 토큰 경로 칸을 확인한다.
+function workspacePaths() {
+  return {
+    config: CONFIG_PATH, data: TRACKER_DIR, repo: REPO_DIR, local: LOCAL_DIR,
+    tokens: integrations.tokenPaths().dir, automation: automationDir(), launchAgents: launchAgentsDir(), applications: applicationsDir(),
+  };
+}
+// 없는 경로도 견줄 수 있게, 있는 데까지 실제 경로(심볼릭 링크를 푼 것)로 바꾸고 나머지를 붙인다.
+function realishPath(value) {
+  let at = path.resolve(String(value || ''));
+  const rest = [];
+  for (;;) {
+    try { return path.join(nativeFs.realpathSync(at), ...rest); } catch { /* 위로 */ }
+    const up = path.dirname(at);
+    if (up === at) return path.join(at, ...rest);
+    rest.unshift(path.basename(at));
+    at = up;
+  }
+}
+const insidePath = (child, parent) => child === parent || child.startsWith(parent.endsWith(path.sep) ? parent : parent + path.sep);
+function fixtureSafetyProblems(paths = workspacePaths(), home = os.homedir()) {
+  // 홈·저장소 뿌리만 실제 경로로 풀고(심볼릭 링크 대비) 그 아래 자리는 글자로 붙인다 — 실제 설치 위치 자체는 열어 보지 않는다.
+  const homeReal = realishPath(home);
+  const repoRoot = realishPath(path.join(__dirname, '..', '..'));
+  const real = [
+    ['~/.config', path.join(homeReal, '.config')],
+    ['~/.local/share/workspace-automation', path.join(homeReal, '.local', 'share', 'workspace-automation')],
+    ['~/Library/LaunchAgents', path.join(homeReal, 'Library', 'LaunchAgents')],
+    ['~/Applications', path.join(homeReal, 'Applications')],
+    ['저장소의 workspace.config.json', path.join(repoRoot, 'workspace.config.json')],
+    ['저장소의 local/', path.join(repoRoot, 'local')],
+    ['저장소의 tracker/', path.join(repoRoot, 'tracker')],
+  ];
+  const problems = [];
+  for (const [name, value] of Object.entries(paths)) {
+    if (!value) { problems.push(`${name}: 경로가 비어 있어요`); continue; }
+    const at = realishPath(value);
+    const hit = real.find(([, where]) => insidePath(at, where) || insidePath(where, at));
+    if (hit) problems.push(`${name}: ${at} — 실제 ${hit[0]} 자리예요`);
+  }
+  // 설정 파일이 안전한 자리일 때만 열어, 토큰·비밀 주소 파일 칸이 실제 ~/.config를 가리키지 않는지 본다.
+  if (paths.config && !problems.some(line => line.startsWith('config:'))) {
+    let config = {};
+    try { config = JSON.parse(nativeFs.readFileSync(paths.config, 'utf8')); } catch { config = {}; }
+    const files = { 'slack.tokenFile': config.slack?.tokenFile, 'jira.tokenFile': config.jira?.tokenFile, 'calendar.icalFile': config.calendar?.icalFile };
+    for (const [key, file] of Object.entries(files)) {
+      if (typeof file !== 'string' || !file.trim()) continue;
+      const at = realishPath(file.trim().replace(/^~(?=\/|$)/, home));
+      if (insidePath(at, real[0][1])) problems.push(`config ${key}: ${at} — 실제 ~/.config 자리예요`);
+    }
+  }
+  return problems;
+}
+if (process.env.WORKSPACE_FIXTURE === '1') {
+  const problems = fixtureSafetyProblems();
+  if (problems.length) {
+    console.error('화면 확인용 픽스처가 실제 설치 위치를 가리켜서 시작하지 않아요:');
+    problems.forEach(line => console.error(`  - ${line}`));
+    process.exit(1);
+  }
+}
 
 function loadConfig() {
   try {
@@ -40,10 +115,7 @@ let APP_TITLE = CONFIG.title || '내 워크스페이스';
 const PORT = Number(process.env.WORKSPACE_PORT || CONFIG.server?.port || 4321);
 // localhost는 항상 열고, extraHost가 있으면 그 주소로도 추가로 연다 (폰·다른 기기용).
 const EXTRA_HOST = process.env.WORKSPACE_HOST || CONFIG.server?.extraHost || '';
-const TRACKER_DIR = process.env.WORKSPACE_DATA_DIR || path.join(__dirname, '..');
 const PUBLIC_DIR = __dirname;
-// 코드 저장소의 뿌리(VERSION·git 기록이 있는 곳). 앱은 이 저장소를 그대로 clone해서 쓴다.
-const REPO_DIR = process.env.WORKSPACE_REPO_DIR || path.join(__dirname, '..', '..');
 const ACCESS_TOKEN_PATH = path.join(TRACKER_DIR, '.access-token');
 function remoteAuthorized(req) {
   const address=req.socket.remoteAddress;
@@ -1846,7 +1918,15 @@ const UPDATE_MESSAGE = {
   relocate: '폴더를 옮겨야 하는 업데이트예요 — 업데이트.command를 더블클릭해 주세요',
   notInstalled: '처음 한 번은 업데이트.command로 받아 주세요',
   running: '이미 업데이트하는 중이에요',
+  nothingToUndo: '되돌릴 것이 없어요 — 앱과 데이터는 그대로예요',
 };
+// `이전 버전으로 되돌리기`는 업데이트가 ③ 새 버전 받기 이후에서 멈췄을 때만 의미가 있다(①② 실패는 코드가 그대로다).
+// 실행기가 죽어 running에 머문 채 10분이 지난 것도 멈춘 것으로 본다.
+const UPDATE_ROLLBACK_FROM_STEP = 3;
+function rollbackAllowed(status) {
+  if (!status || status.action !== 'update' || status.step < UPDATE_ROLLBACK_FROM_STEP) return false;
+  return status.state === 'failed' || (status.state === 'running' && !updateRecent(status.updatedAt));
+}
 const updateRequestPath = () => path.join(automationDir(), 'requests', 'update.request');
 const updateStatusPath = () => path.join(automationDir(), 'update-status.json');
 
@@ -1916,6 +1996,7 @@ async function requestUpdate(action) {
   if (view.running) return fetchAnswer(200, { ...view, ok: false, reason: 'running', message: UPDATE_MESSAGE.running });
   if (await installNeedsMove()) return fetchAnswer(200, { ok: false, reason: 'relocate', message: UPDATE_MESSAGE.relocate, updateFile: view.updateFile });
   if (!launchAgentInstalled('update')) return fetchAnswer(200, { ok: false, reason: 'not-installed', message: UPDATE_MESSAGE.notInstalled, updateFile: view.updateFile });
+  if (action === 'rollback' && !rollbackAllowed(view.status)) return fetchAnswer(200, { ok: false, reason: 'nothing-to-undo', message: UPDATE_MESSAGE.nothingToUndo });
   const requestedAt = new Date().toISOString();
   const file = updateRequestPath();
   nativeFs.mkdirSync(path.dirname(file), { recursive: true });
@@ -1927,8 +2008,6 @@ async function requestUpdate(action) {
 function currentDockName() {
   try { return personalize.checkDockName(((currentConfigFile().server) || {}).dockName); } catch { return personalize.DOCK_NAME_DEFAULT; }
 }
-// 이 컴퓨터에만 두는 폴더(`local/` — 업데이트해도 남는다). 테스트는 WORKSPACE_REPO_DIR로 임시 폴더를 끼운다.
-const LOCAL_DIR = path.join(REPO_DIR, 'local');
 
 // ---------- 설정 > 연동 ----------
 // `workspace.config.json`을 앱이 쓰는 **단 하나의 자리**다(DECISIONS 2026-09-23). 저장할 때마다
@@ -2870,7 +2949,7 @@ const handleRequest = (req, res) => {
   // 다시 만들어 달라는 표시 파일 하나를 쓴다(프로세스는 띄우지 않는다).
   if (url.pathname === '/api/personalize' && req.method === 'POST') {
     readBody(req)
-      .then(body => integrations.savePersonalize({ configPath: CONFIG_PATH, current: currentConfigFile(), body }))
+      .then(body => integrations.savePersonalize({ configPath: CONFIG_PATH, current: currentConfigFile(), body, appsDir: applicationsDir() }))
       .then(({ config, changed }) => {
         if (typeof config.title === 'string' && config.title) APP_TITLE = config.title;
         if (changed.dockName) personalize.writeRefreshRequest(automationDir(), 'dockName');
@@ -2913,7 +2992,7 @@ const handleRequest = (req, res) => {
   // 화면은 늘 같은 한 줄을 읽고, 브라우저 콘솔에 404가 남지 않는다. 허용하는 경로는 이것 하나뿐이다.
   if (url.pathname === '/local/local.css' && req.method === 'GET') {
     let css = '';
-    try { css = nativeFs.readFileSync(path.join(REPO_DIR, 'local', 'local.css'), 'utf8'); } catch { css = ''; }
+    try { css = nativeFs.readFileSync(path.join(LOCAL_DIR, 'local.css'), 'utf8'); } catch { css = ''; }
     res.writeHead(200, { 'Content-Type': 'text/css; charset=utf-8' });
     res.end(css);
     return;
@@ -3062,4 +3141,4 @@ if (require.main === module) {
 
 // `jiraLive`·`attentionLive`·`calendarLive`는 화면 확인용 픽스처가 "뜰 때 한 번 읽기"를 직접 켜 보려고 함께 내보낸다
 // (테스트·픽스처 밖에서는 쓰지 않는다 — 운영에서는 위의 `start()`가 켠다).
-module.exports = { server, jiraLive, attentionLive, calendarLive, setExitForTests, changesUrlFrom };
+module.exports = { server, jiraLive, attentionLive, calendarLive, setExitForTests, changesUrlFrom, workspacePaths, fixtureSafetyProblems };

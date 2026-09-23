@@ -139,7 +139,7 @@ same_repo() {
   [ -d "$TARGET/.git" ] && [ -n "$have" ] && [ "$have" = "$want" ]
 }
 if [ -e "$TARGET" ] || [ -L "$TARGET" ]; then
-  same_repo || stop "$SHOWN가 이미 있어요 — 이름을 바꾼 뒤 다시 실행해 주세요"
+  same_repo || stop "${SHOWN}가 이미 있어요 — 이름을 바꾼 뒤 다시 실행해 주세요"
   ok "$SHOWN 에 이미 받아 뒀어요 — 그대로 이어서 설치해요"
 else
   git clone --quiet "$REPO_URL" "$TARGET" || stop "앱을 받아오지 못했어요 — 인터넷 연결을 확인해 주세요."

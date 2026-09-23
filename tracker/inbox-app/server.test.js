@@ -16,6 +16,8 @@ const automationHome = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-automati
 process.env.WORKSPACE_AUTOMATION_DIR = automationHome;
 // `지금 가져오기`가 "등록돼 있는지" 보는 launchd 폴더도 임시 폴더다 — 실제 ~/Library/LaunchAgents를 보지 않게.
 process.env.WORKSPACE_LAUNCH_AGENTS_DIR = path.join(automationHome, 'LaunchAgents');
+// Dock 이름이 겹치는지 보는 Applications 폴더도 임시 폴더다 — 실제 ~/Applications를 보지 않게.
+process.env.WORKSPACE_APPLICATIONS_DIR = path.join(automationHome, 'Applications');
 // 설정도 없는 파일로 끼운다 — 운영 폴더에서 돌릴 때 실제 `workspace.config.json`(지라 주소·토큰 위치)을 읽어
 // 테스트가 실제 지라에 닿는 일이 없게. 설정이 필요한 테스트는 따로 띄운 서버에 자기 설정을 준다.
 process.env.WORKSPACE_CONFIG = path.join(directory, 'absent.config.json');
@@ -5305,7 +5307,8 @@ test('WP-D2 app-refresh.sh: Dock 앱을 만들고, 이름이 바뀌면 기록된
   fs.mkdirSync(bin);
   fs.mkdirSync(path.join(root, 'tmp'));
   const log = name => `echo "${name} $*" >> ${JSON.stringify(calls)}`;
-  writeExec(path.join(bin, 'osacompile'), `#!/bin/bash\n${log('osacompile')}\nout=""; while [ $# -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done\nmkdir -p "$out/Contents/Resources/Scripts" && touch "$out/Contents/Resources/Scripts/main.scpt" "$out/Contents/Info.plist"\n`);
+  const failFlag = path.join(root, 'fail-osacompile');
+  writeExec(path.join(bin, 'osacompile'), `#!/bin/bash\n${log('osacompile')}\n[ -f ${JSON.stringify(failFlag)} ] && exit 1\nout=""; while [ $# -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done\nmkdir -p "$out/Contents/Resources/Scripts" && touch "$out/Contents/Resources/Scripts/main.scpt" "$out/Contents/Info.plist"\n`);
   writeExec(path.join(bin, 'python3'), `#!/bin/bash\n${log('python3')}\ntouch "$3/ws.icns"\n`);
   for (const name of ['iconutil', 'codesign', 'plutil', 'xattr', 'lsregister']) writeExec(path.join(bin, name), `#!/bin/bash\n${log(name)}\n`);
   const config = path.join(ws, 'workspace.config.json');
@@ -5325,7 +5328,8 @@ test('WP-D2 app-refresh.sh: Dock 앱을 만들고, 이름이 바뀌면 기록된
   assert.equal(first.status, 0, first.stdout + first.stderr);
   assert.ok(fs.existsSync(path.join(apps, 'Workspace.app', 'Contents', 'Resources', 'applet.icns')));
   assert.equal(record(), 'Workspace');
-  assert.match(fs.readFileSync(calls, 'utf8'), /codesign --force --deep -s - .*Workspace\.app/);
+  assert.match(fs.readFileSync(calls, 'utf8'), /codesign --force --deep -s - .*\/new\.app/, '임시 자리에 다 만든 뒤 서명한다');
+  assert.match(fs.readFileSync(calls, 'utf8'), /osacompile -o .*\/new\.app /, '기존 자리에 바로 만들지 않는다');
   assert.deepEqual(fs.readdirSync(path.join(root, 'tmp')), [], '임시 폴더는 남기지 않는다');
 
   // 2) 이름을 바꾸면 새 앱을 만들고 기록된 옛 이름(Workspace) 하나만 지운다 — 다른 앱은 그대로
@@ -5336,6 +5340,22 @@ test('WP-D2 app-refresh.sh: Dock 앱을 만들고, 이름이 바뀌면 기록된
   assert.equal(fs.existsSync(path.join(apps, 'Workspace.app')), false);
   assert.ok(fs.existsSync(path.join(apps, 'Other.app')), '목록을 훑어 지우지 않는다');
   assert.equal(record(), 'My Work');
+
+  // 2-1) osacompile이 실패하면 기존 앱은 그대로 남고 이름 기록도 바뀌지 않는다
+  fs.writeFileSync(path.join(apps, 'My Work.app', 'Contents', 'Resources', 'Scripts', 'main.scpt'), 'before');
+  fs.writeFileSync(failFlag, '');
+  const broken = run('My Work');
+  assert.notEqual(broken.status, 0);
+  assert.match(broken.stdout, /앱을 만들지 못했어요 — 기존 앱은 그대로 뒀어요/);
+  assert.equal(fs.readFileSync(path.join(apps, 'My Work.app', 'Contents', 'Resources', 'Scripts', 'main.scpt'), 'utf8'), 'before', '기존 앱을 먼저 지우지 않는다');
+  assert.equal(record(), 'My Work');
+  assert.deepEqual(fs.readdirSync(path.join(root, 'tmp')), [], '실패해도 임시 폴더는 남기지 않는다');
+  fs.rmSync(failFlag);
+  // 다시 성공하면 새로 만든 앱으로 바뀐다
+  assert.equal(run('My Work').status, 0);
+  assert.equal(fs.readFileSync(path.join(apps, 'My Work.app', 'Contents', 'Resources', 'Scripts', 'main.scpt'), 'utf8'), '', '새로 만든 앱으로 바꿨다');
+  assert.ok(fs.existsSync(path.join(apps, 'My Work.app', 'Contents', 'Resources', 'applet.icns')));
+  assert.equal(fs.existsSync(path.join(apps, 'new.app')), false);
 
   // 3) 기록이 ~/Applications 밖을 가리키면 지우지 않는다
   const outside = path.join(homeDir, 'outside.app');
@@ -6078,10 +6098,11 @@ test('WP-D3 update-runner.sh: update면 update.sh --yes 다음 setup.sh, rollbac
     '{"requestedAt":"2026-09-24T00:00:00.000Z","action":"update","x":1}\n', 'update\n']) {
     fs.writeFileSync(fix.request, body);
     assert.equal(fix.run().status, 0);
+    assert.equal(fs.existsSync(fix.request), false, '모양이 틀린 요청은 그 파일만 지운다');
   }
   assert.deepEqual(fix.lines(), []);
   assert.equal(fs.existsSync(path.join(fix.workspace, 'pwned')), false);
-  fs.unlinkSync(fix.request);
+  assert.equal(fs.existsSync(fix.statusFile), false, '틀린 요청은 상태 파일도 쓰지 않는다');
   assert.equal(fix.run().status, 0, '요청 파일이 없으면(지운 것도 launchd를 깨운다) 조용히 끝난다');
   assert.deepEqual(fix.lines(), []);
 });
@@ -6350,7 +6371,7 @@ case "$1" in
 esac
 `);
   fs.symlinkSync(process.execPath, path.join(bin, 'node'));
-  const install = (home, pathValue = `${bin}:/usr/bin:/bin`) => spawnSync('/bin/bash', [command], { encoding: 'utf8', input: '', env: { HOME: home, PATH: pathValue, TMPDIR: os.tmpdir() } });
+  const install = (home, pathValue = `${bin}:/usr/bin:/bin`, extra = {}) => spawnSync('/bin/bash', [command], { encoding: 'utf8', input: '', env: { HOME: home, PATH: pathValue, TMPDIR: os.tmpdir(), ...extra } });
   const log = () => (fs.existsSync(trail) ? fs.readFileSync(trail, 'utf8') : '');
 
   // 1) 새로 받기 — stable이면 가장 높은 태그(v1.10.0)로, 설정은 예시 + 팀 값, 끝에 WORKSPACE_OPEN_APP=1 setup.sh
@@ -6390,6 +6411,13 @@ esac
   assert.match(blocked.stdout, /~\/workspace가 이미 있어요 — 이름을 바꾼 뒤 다시 실행해 주세요/);
   assert.doesNotMatch(log(), /git clone|setup /);
   assert.deepEqual(fs.readdirSync(path.join(other, 'workspace')), ['memo.txt']);
+  // 한글 로케일(UTF-8)에서도 안내 문구의 경로가 사라지지 않는다(`$SHOWN가`처럼 변수 바로 뒤에 한글을 붙이면 bash가 이름으로 읽는다)
+  for (const locale of ['ko_KR.UTF-8', 'en_US.UTF-8']) {
+    const localized = install(other, `${bin}:/usr/bin:/bin`, { LC_ALL: locale, LANG: locale });
+    assert.equal(localized.status, 1, locale);
+    assert.match(localized.stdout, /~\/workspace가 이미 있어요 — 이름을 바꾼 뒤 다시 실행해 주세요/, `${locale}: ${localized.stdout}`);
+  }
+  assert.doesNotMatch(log(), /git clone|setup /);
 
   // 4) node가 없으면 설치 방법 한 줄을 알리고 멈춘다
   const bare = path.join(fix.root, 'bare-bin');
@@ -6404,4 +6432,190 @@ esac
   const text = fs.readFileSync(command, 'utf8');
   assert.match(text, /xcode-select --install/);
   assert.match(text, /WORKSPACE_OPEN_APP=1 bash setup\.sh/);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// QA v1.1.0 정정 — 픽스처 격리·안전망 · 되돌리기 기준점 · Dock 이름 충돌 · 실행기 작은 것
+
+// 서버 모듈만 읽어 들이는 자식 프로세스(듣지 않는다 — require.main이 아니다). 안전망이 막으면 1로 끝난다.
+const loadServerChild = env => spawnSync(process.execPath, ['-e',
+  "const s=require('./server.js');process.stdout.write(JSON.stringify(s.workspacePaths()));process.exit(0)"],
+{ cwd: __dirname, encoding: 'utf8', timeout: 20000, env });
+const underPath = (child, parent) => child === parent || child.startsWith(parent + path.sep);
+
+test('QA 픽스처: browser-fixture가 서버에 넘기는 경로는 전부 임시 폴더 아래이고, 그 환경으로 뜬 서버도 실제 경로를 하나도 쓰지 않는다', (t) => {
+  const { prepareFixture } = require('./browser-fixture');
+  const { root, env } = prepareFixture();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const rootReal = fs.realpathSync(root);
+  assert.equal(env.WORKSPACE_FIXTURE, '1', '안전망을 켠다');
+  assert.equal(env.WORKSPACE_NO_OPEN, '1');
+  assert.equal(env.WORKSPACE_NO_REMOTE_CHECK, '1');
+  const keys = ['WORKSPACE_DATA_DIR', 'WORKSPACE_CONFIG', 'WORKSPACE_REPO_DIR', 'WORKSPACE_LOCAL_DIR', 'WORKSPACE_TOKEN_DIR',
+    'WORKSPACE_AUTOMATION_DIR', 'WORKSPACE_LAUNCH_AGENTS_DIR', 'WORKSPACE_APPLICATIONS_DIR'];
+  for (const key of keys) {
+    assert.ok(env[key], `${key}를 넘긴다`);
+    assert.ok(underPath(env[key], root), `${key}=${env[key]}`);
+  }
+  // 복사한 예시 설정의 토큰 파일 칸도 임시 토큰 폴더를 가리킨다
+  const config = JSON.parse(fs.readFileSync(env.WORKSPACE_CONFIG, 'utf8'));
+  assert.ok(underPath(config.slack.tokenFile, env.WORKSPACE_TOKEN_DIR));
+  assert.ok(underPath(config.jira.tokenFile, env.WORKSPACE_TOKEN_DIR));
+
+  // 그 환경으로 서버를 읽어 들이면 안전망을 통과하고, 서버가 고른 경로도 전부 임시 폴더 아래다
+  const loaded = loadServerChild({ ...process.env, ...env });
+  assert.equal(loaded.status, 0, loaded.stderr);
+  const used = JSON.parse(loaded.stdout);
+  assert.deepEqual(Object.keys(used).sort(), ['applications', 'automation', 'config', 'data', 'launchAgents', 'local', 'repo', 'tokens']);
+  for (const [name, value] of Object.entries(used)) {
+    const real = fs.existsSync(value) ? fs.realpathSync(value) : value;
+    assert.ok(underPath(value, root) || underPath(real, rootReal), `${name}=${value}`);
+    assert.ok(!underPath(value, os.homedir()), `${name}는 홈 폴더 밖`);
+  }
+});
+
+test('QA 안전망: WORKSPACE_FIXTURE=1인데 경로가 하나라도 실제 설치 위치(또는 그 위)를 가리키면 서버가 시작하지 않고 이유를 알린다', (t) => {
+  const { prepareFixture } = require('./browser-fixture');
+  const { root, env } = prepareFixture();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // 홈은 가짜다 — 이 테스트가 실제 홈 아래를 열어 보지 않게(서버는 os.homedir() = HOME으로 기본 위치를 만든다).
+  const fakeHome = path.join(root, 'home');
+  fs.mkdirSync(fakeHome);
+  const base = { ...process.env, ...env, HOME: fakeHome };
+  const without = key => { const next = { ...base }; delete next[key]; return next; };
+  const repoRoot = path.join(__dirname, '..', '..');
+  const cases = [
+    ['tokens', without('WORKSPACE_TOKEN_DIR'), '~/.config'],
+    ['tokens', { ...base, WORKSPACE_TOKEN_DIR: fakeHome }, '~/.config'],
+    ['automation', without('WORKSPACE_AUTOMATION_DIR'), '~/.local/share/workspace-automation'],
+    ['launchAgents', without('WORKSPACE_LAUNCH_AGENTS_DIR'), '~/Library/LaunchAgents'],
+    ['applications', without('WORKSPACE_APPLICATIONS_DIR'), '~/Applications'],
+    ['config', without('WORKSPACE_CONFIG'), '저장소의 workspace.config.json'],
+    ['local', { ...base, WORKSPACE_LOCAL_DIR: path.join(repoRoot, 'local') }, '저장소의 local/'],
+    ['data', without('WORKSPACE_DATA_DIR'), '저장소의 tracker/'],
+    ['repo', without('WORKSPACE_REPO_DIR'), '저장소의'],
+  ];
+  for (const [name, childEnv, label] of cases) {
+    const refused = loadServerChild(childEnv);
+    assert.equal(refused.status, 1, `${name}: ${refused.stdout}${refused.stderr}`);
+    assert.equal(refused.stdout, '', `${name}: 서버를 읽어 들이기 전에 멈춘다`);
+    assert.match(refused.stderr, /화면 확인용 픽스처가 실제 설치 위치를 가리켜서 시작하지 않아요/);
+    assert.ok(refused.stderr.includes(`- ${name}: `) && refused.stderr.includes(label), `${name}: ${refused.stderr}`);
+  }
+  // 설정의 토큰 파일 칸이 실제 ~/.config를 가리켜도 막는다
+  const config = JSON.parse(fs.readFileSync(env.WORKSPACE_CONFIG, 'utf8'));
+  config.jira.tokenFile = '~/.config/workspace-jira-token';
+  fs.writeFileSync(env.WORKSPACE_CONFIG, JSON.stringify(config));
+  const byConfig = loadServerChild(base);
+  assert.equal(byConfig.status, 1);
+  assert.match(byConfig.stderr, /config jira\.tokenFile: .* — 실제 ~\/\.config 자리예요/);
+  // 안전망은 픽스처 표시가 있을 때만 — 표시가 없으면 테스트·운영은 예전대로 뜬다
+  const plain = without('WORKSPACE_FIXTURE');
+  delete plain.WORKSPACE_TOKEN_DIR;
+  assert.equal(loadServerChild(plain).status, 0);
+});
+
+test('QA 되돌리기 기준점: rollback은 업데이트가 ③ 새 버전 받기 이후에서 멈췄을 때만 받고, 아니면 200 ok:false nothing-to-undo', async (t) => {
+  const app = await startUpdateServer(t);
+  app.plist();
+  const now = new Date().toISOString();
+  const status = (body) => fs.writeFileSync(app.statusFile, JSON.stringify({ from: '1.0.0', to: '1.1.0', startedAt: now, updatedAt: now, steps: [], ...body }));
+  const refuse = async (label) => {
+    const answer = await app.post({ action: 'rollback' });
+    assert.equal(answer.code, 200, label);
+    assert.equal(answer.ok, false, label);
+    assert.equal(answer.reason, 'nothing-to-undo', label);
+    assert.equal(answer.message, '되돌릴 것이 없어요 — 앱과 데이터는 그대로예요');
+    assert.equal(fs.existsSync(app.request), false, `${label}: 요청 파일을 쓰지 않는다`);
+  };
+  await refuse('상태 파일 없음');
+  status({ action: 'update', step: 1, state: 'failed', message: '고친 내용을 보관하지 못해 멈췄어요' });
+  await refuse('① 실패');
+  status({ action: 'update', step: 2, state: 'failed', message: '백업 폴더를 만들지 못했어요' });
+  await refuse('② 실패');
+  status({ action: 'update', step: 0, state: 'failed', message: '업데이트를 끝내지 못했어요' });
+  await refuse('실행기가 시작 전에 멈춤');
+  status({ action: 'update', step: 6, state: 'done' });
+  await refuse('성공으로 끝남(.workspace-last-good은 남아 있어도)');
+  status({ action: 'rollback', step: 4, state: 'failed', message: '앱이 아직 응답하지 않아요' });
+  await refuse('되돌리기 실패 뒤');
+  // ①② 실패여도 다시 시도(같은 update 요청)는 받는다
+  status({ action: 'update', step: 2, state: 'failed' });
+  assert.equal((await app.post({ action: 'update' })).ok, true);
+  fs.unlinkSync(app.request);
+
+  for (const step of [3, 4, 6]) {
+    status({ action: 'update', step, state: 'failed', message: '앱이 응답하지 않아요' });
+    const ok = await app.post({ action: 'rollback' });
+    assert.equal(ok.ok, true, `${step}단계 실패면 되돌린다`);
+    assert.equal(JSON.parse(fs.readFileSync(app.request, 'utf8')).action, 'rollback');
+    fs.unlinkSync(app.request);
+  }
+  // 실행기가 죽어 running에 머문 채 10분이 지난 것(③ 이후)도 멈춘 것으로 본다
+  const old = new Date(Date.now() - 11 * 60000).toISOString();
+  status({ action: 'update', step: 4, state: 'running', startedAt: old, updatedAt: old });
+  assert.equal((await app.post({ action: 'rollback' })).ok, true);
+});
+
+test('QA update-runner.sh: update.sh가 실패를 못 적고 멈추면 멈춘 단계 번호(숫자만)를 이어 적는다', (t) => {
+  const fix = runnerFixture(t);
+  fix.fake('update.sh', `printf '{"action":"update","step":4,"state":"running","steps":[]}' > ${JSON.stringify(fix.statusFile)}\nexit 1\n`);
+  fix.ask('update');
+  assert.equal(fix.run().status, 0);
+  const failed = JSON.parse(fs.readFileSync(fix.statusFile, 'utf8'));
+  assert.equal(failed.state, 'failed');
+  assert.equal(failed.step, 4, '③ 이후에서 멈췄다는 것이 남아야 화면이 되돌리기를 보여 준다');
+  // 상태 파일이 없거나 단계가 이상하면 0
+  fix.fake('update.sh', 'exit 1\n');
+  fix.ask('update');
+  fix.run();
+  assert.equal(JSON.parse(fs.readFileSync(fix.statusFile, 'utf8')).step, 0);
+  fix.fake('update.sh', `printf '{"action":"update","step":"4; touch pwned","state":"running"}' > ${JSON.stringify(fix.statusFile)}\nexit 1\n`);
+  fix.ask('update');
+  fix.run();
+  assert.equal(JSON.parse(fs.readFileSync(fix.statusFile, 'utf8')).step, 0);
+  assert.equal(fs.existsSync(path.join(fix.workspace, 'pwned')), false);
+});
+
+test('QA 꾸미기: 바꾸는 Dock 이름이 Applications의 남의 앱(스크립트 앱 아님)과 같으면 저장하지 않고 400', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-dock-clash-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const repo = path.join(home, 'repo');
+  const data = path.join(repo, 'tracker');
+  const apps = path.join(home, 'Applications');
+  const automation = path.join(home, 'automation');
+  fs.mkdirSync(data, { recursive: true });
+  fs.mkdirSync(path.join(apps, 'Slack.app', 'Contents', 'MacOS'), { recursive: true });
+  fs.mkdirSync(path.join(apps, 'Mine.app', 'Contents', 'Resources', 'Scripts'), { recursive: true });
+  fs.writeFileSync(path.join(apps, 'Mine.app', 'Contents', 'Resources', 'Scripts', 'main.scpt'), '');
+  const config = path.join(home, 'workspace.config.json');
+  fs.writeFileSync(config, JSON.stringify({ title: '제목', server: { port: 1 } }, null, 2));
+  const app = await startAppServer(t, { WORKSPACE_REPO_DIR: repo, WORKSPACE_DATA_DIR: data, WORKSPACE_CONFIG: config,
+    WORKSPACE_AUTOMATION_DIR: automation, WORKSPACE_APPLICATIONS_DIR: apps });
+  const send = body => fetch(app.base + '/api/personalize', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const request = path.join(automation, 'requests', 'app-refresh.request');
+  const before = fs.readFileSync(config, 'utf8');
+
+  const clash = await send({ dockName: ' Slack ' });
+  assert.equal(clash.status, 400);
+  assert.deepEqual(await clash.json(), { ok: false, error: '같은 이름의 앱이 이미 있어요 — 다른 이름을 적어 주세요' });
+  assert.equal(fs.readFileSync(config, 'utf8'), before, '설정을 바꾸지 않는다');
+  assert.equal(fs.existsSync(request), false, 'Dock 앱을 다시 만들라고 하지 않는다');
+  assert.ok(fs.existsSync(path.join(apps, 'Slack.app', 'Contents', 'MacOS')), '그 앱은 건드리지 않는다');
+  // 제목을 함께 보내도 통째로 저장하지 않는다
+  assert.equal((await send({ title: '새 제목', dockName: 'Slack' })).status, 400);
+  assert.equal(fs.readFileSync(config, 'utf8'), before);
+
+  // 이 설치가 만든 스크립트 앱이면(예전 이름) 그 이름으로 바꿀 수 있다 · 없는 이름도 된다
+  const mine = await (await send({ dockName: 'Mine' })).json();
+  assert.equal(mine.ok, true);
+  assert.equal(JSON.parse(fs.readFileSync(config, 'utf8')).server.dockName, 'Mine');
+  assert.equal((await (await send({ dockName: 'Brand New' })).json()).ok, true);
+
+  // 모듈 단위: 있는지 보기만 한다
+  const personalizeStore = require('./personalize');
+  assert.equal(personalizeStore.dockNameTaken(apps, 'Slack'), true);
+  assert.equal(personalizeStore.dockNameTaken(apps, 'Mine'), false);
+  assert.equal(personalizeStore.dockNameTaken(apps, 'Nothing'), false);
+  assert.equal(personalizeStore.dockNameTaken('', 'Slack'), false);
 });

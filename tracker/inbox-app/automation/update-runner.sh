@@ -9,7 +9,7 @@
 #
 # 지키는 것:
 #   - 요청 파일에서는 action 두 값(update·rollback)만 비교한다. 그 밖의 글자는 명령·경로로 쓰지 않는다.
-#     모르는 값이면 아무것도 하지 않는다.
+#     모양이 틀린 요청이면 그 요청 파일 하나만 지우고 아무것도 하지 않는다.
 #   - 한 번에 하나만 돈다(mkdir 잠금 — slack-capture와 같은 방식). 잠금은 rmdir로만 푼다.
 #   - 진행 상황은 update.sh가 update-status.json에 쓴다(WORKSPACE_UPDATE_STATUS=1). 그 전에 멈추면
 #     (옮기기 실패 등) 여기서 실패 한 줄을 남긴다. 실패해도 자동으로 되돌리지 않는다 — 사람이 화면에서 누른다.
@@ -52,6 +52,9 @@ main() {
       action="update"
     elif grep -Eqx "\{\"action\":\"rollback\",$stamp\}" "$request" 2>/dev/null; then
       action="rollback"
+    else
+      # 모양이 틀린 요청은 그 파일 하나만 지운다(남겨 두면 다음에 다시 깨울 뿐이다). 내용은 어디에도 쓰지 않는다.
+      rm -f "$request"
     fi
   fi
   [ -n "$action" ] || return 0
@@ -101,8 +104,11 @@ main() {
   echo "───── $(date '+%Y-%m-%d %H:%M:%S') update-runner $action 종료 (exit $code)" >> "$log"
 
   # update.sh가 실패를 적지 못하고 멈췄으면(상태 파일이 없거나 아직 running이면) 한 줄을 남긴다.
+  # 멈춘 단계 번호(숫자만)는 이어 적는다 — ③ 새 버전 받기 이후에 멈췄으면 화면이 `이전 버전으로 되돌리기`를 보여 줘야 해서.
   if [ "$code" != "0" ] && ! grep -Eq '"state"[[:space:]]*:[[:space:]]*"(failed|done)"' "$status_file" 2>/dev/null; then
-    finish_failed "$status_file" "$action" "$started" "업데이트를 끝내지 못했어요 — 업데이트.command를 더블클릭해 주세요"
+    local stopped
+    stopped="$(grep -Eo '"step":[0-9]{1,2}' "$status_file" 2>/dev/null | head -n 1 | cut -d: -f2)"
+    finish_failed "$status_file" "$action" "$started" "업데이트를 끝내지 못했어요 — 업데이트.command를 더블클릭해 주세요" "${stopped:-0}"
   fi
   release_lock "$lock"
   return 0
@@ -115,11 +121,12 @@ release_lock() {
 
 # 실행기가 직접 남기는 실패 한 줄. 글자는 이 파일에 적힌 고정 문구뿐이다.
 finish_failed() {
-  local file="$1" action="$2" started="$3" message="$4" now temp
+  local file="$1" action="$2" started="$3" message="$4" step="${5:-0}" now temp
+  case "$step" in ''|*[!0-9]*) step=0 ;; esac
   now="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
   temp="$file.tmp-$$"
-  printf '{"action":"%s","from":null,"to":null,"step":0,"steps":[],"state":"failed","message":"%s","startedAt":"%s","updatedAt":"%s","finishedAt":"%s"}\n' \
-    "$action" "$message" "$started" "$now" "$now" > "$temp" && mv -f "$temp" "$file"
+  printf '{"action":"%s","from":null,"to":null,"step":%d,"steps":[],"state":"failed","message":"%s","startedAt":"%s","updatedAt":"%s","finishedAt":"%s"}\n' \
+    "$action" "$((10#$step))" "$message" "$started" "$now" "$now" > "$temp" && mv -f "$temp" "$file"
 }
 
 main "$@"; exit $?

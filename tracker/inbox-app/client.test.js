@@ -7620,6 +7620,37 @@ test('WP-D3 실패: 빨간 한 줄 + `이전 버전으로 되돌리기` → 확�
   assert.equal(back.text(), 'v1.0.0으로 되돌렸어요새로고침');
 });
 
+test('QA 되돌리기 기준점: ①② 단계(또는 실행기가 시작 전)에서 멈추면 되돌리기 대신 `앱과 데이터는 그대로예요` + 다시 시도(같은 update 요청)', async () => {
+  for (const [step, message] of [[1, '고친 내용을 보관하지 못해 멈췄어요'], [2, '백업 폴더를 만들지 못했어요'], [0, '업데이트를 끝내지 못했어요 — 업데이트.command를 더블클릭해 주세요']]) {
+    const fx = updateClient(D3_ABOUT);
+    fx.app.run('settingsAboutFill()');
+    fx.button('업데이트 받기').listeners.click();
+    await fx.flush();
+    fx.state.status = () => d3Status('failed', step, { message });
+    await fx.poll();
+    assert.equal(fx.text(), `업데이트하지 못했어요 — 앱과 데이터는 그대로예요다시 시도${message}`, `${step}단계`);
+    assert.equal(fx.find('d-abfail').length, 1);
+    assert.equal(fx.button('이전 버전으로 되돌리기'), undefined, '되돌릴 것이 없으니 보이지 않는다');
+    assert.equal(fx.button('다시 시도').className, 'd-btn sm pri');
+    fx.button('다시 시도').listeners.click();
+    await fx.flush();
+    assert.deepEqual(fx.sent.filter(one => one.url === '/api/update').map(one => one.body), [{ action: 'update' }, { action: 'update' }]);
+    assert.match(fx.text(), /^v1\.0\.0 → v1\.1\.0/, '다시 진행 목록');
+  }
+  // ③ 이후면 지금처럼 되돌리기
+  const late = updateClient(D3_ABOUT);
+  late.app.run("settingsUpdateFollow('update', null, 0)");
+  late.state.status = () => d3Status('failed', 3, { message: '새 버전을 받아오지 못했어요 — 인터넷 연결을 확인해 주세요.' });
+  await late.poll();
+  assert.equal(late.text(), '업데이트하지 못했어요 — 새 버전을 받아오지 못했어요 — 인터넷 연결을 확인해 주세요.이전 버전으로 되돌리기');
+
+  // 서버가 되돌릴 것이 없다고 하면 그 한 줄(경로 줄 없이)
+  const none = updateClient(D3_ABOUT, { replies: [{ body: { ok: false, reason: 'nothing-to-undo', message: '되돌릴 것이 없어요 — 앱과 데이터는 그대로예요' } }] });
+  none.app.run("settingsUpdateAsk('rollback')");
+  await none.flush();
+  assert.equal(none.text(), '되돌릴 것이 없어요 — 앱과 데이터는 그대로예요');
+});
+
 test('WP-D3 3분 넘게 응답이 없으면 `앱이 응답하지 않아요 — 업데이트.command를 더블클릭해 주세요` + 경로 복사', async () => {
   const fx = updateClient(D3_ABOUT);
   fx.app.run("settingsUpdateFollow('update', null, Date.now())");

@@ -104,14 +104,15 @@ PROFILE_ARG=""
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/ws-app.XXXXXX")" || { warn "임시 폴더를 만들지 못했어요"; exit 1; }
 trap 'rm -rf "$WORK"' EXIT
 
-# 같은 이름의 앱이 이미 있으면 이 스크립트가 만든 앱(스크립트 앱)일 때만 지우고 다시 만든다 —
+# 같은 이름의 앱이 이미 있으면 이 스크립트가 만든 앱(스크립트 앱)일 때만 바꾼다 —
 # Dock 이름을 다른 앱과 같게 지었을 때 그 앱을 지우지 않게.
 if [ -e "$APP_BUNDLE" ] && [ ! -f "$APP_BUNDLE/Contents/Resources/Scripts/main.scpt" ]; then
   warn "$APP_BUNDLE 은 다른 앱이라 그대로 뒀어요 — 설정 › 꾸미기에서 Dock 이름을 바꿔 주세요."
   exit 1
 fi
-rm -rf "$APP_BUNDLE"
-mkdir -p "$APPS_DIR"
+# 새 앱은 임시 폴더에 먼저 다 만든 뒤(osacompile·아이콘·서명) 성공했을 때만 기존 앱과 바꾼다 —
+# 도중에 실패하면 기존 앱은 그대로 남는다.
+NEW_BUNDLE="$WORK/new.app"
 # 크롬이 있으면 창 하나짜리 앱 모양으로, 없으면 기본 브라우저로 연다.
 if [ -d "/Applications/Google Chrome.app" ]; then
 cat > "$WORK/launcher.applescript" << SCRIPT
@@ -124,8 +125,8 @@ SCRIPT
   warn "크롬이 없어 기본 브라우저로 열어요"
 fi
 
-if ! osacompile -o "$APP_BUNDLE" "$WORK/launcher.applescript" 2>/dev/null; then
-  warn "앱을 만들지 못했어요 — 브라우저에서 $URL 로 직접 열어 주세요."
+if ! osacompile -o "$NEW_BUNDLE" "$WORK/launcher.applescript" 2>/dev/null || [ ! -d "$NEW_BUNDLE" ]; then
+  warn "앱을 만들지 못했어요 — 기존 앱은 그대로 뒀어요. 브라우저에서 $URL 로 직접 열어 주세요."
   exit 1
 fi
 
@@ -154,12 +155,20 @@ for s in (16, 32, 128, 256, 512):
 subprocess.run(["iconutil", "-c", "icns", iconset, "-o", os.path.join(work, "ws.icns")], check=False)
 PY
   if [ -f "$WORK/ws.icns" ]; then
-    cp "$WORK/ws.icns" "$APP_BUNDLE/Contents/Resources/applet.icns"
+    cp "$WORK/ws.icns" "$NEW_BUNDLE/Contents/Resources/applet.icns"
     # 에셋 카탈로그를 가리키는 키가 남아있으면 파일 아이콘이 무시된다
-    plutil -remove CFBundleIconName "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null
+    plutil -remove CFBundleIconName "$NEW_BUNDLE/Contents/Info.plist" 2>/dev/null
     # 아이콘을 바꾸면 osacompile이 해둔 서명이 깨져서 macOS가 기본 아이콘으로 떨어뜨린다
-    codesign --force --deep -s - "$APP_BUNDLE" 2>/dev/null
+    codesign --force --deep -s - "$NEW_BUNDLE" 2>/dev/null
   fi
+fi
+
+# 다 만들었으면 바꾼다. 기존 앱은 위에서 이 스크립트가 만든 앱(스크립트 앱)인 것을 확인했다.
+mkdir -p "$APPS_DIR"
+[ -d "$APP_BUNDLE" ] && rm -rf "$APP_BUNDLE"
+if ! mv "$NEW_BUNDLE" "$APP_BUNDLE"; then
+  warn "앱을 옮기지 못했어요 — 브라우저에서 $URL 로 직접 열어 주세요."
+  exit 1
 fi
 touch "$APP_BUNDLE"
 # 내려받은 폴더에서 만들면 격리 표시가 따라붙어 "확인되지 않은 개발자"로 막힌다.

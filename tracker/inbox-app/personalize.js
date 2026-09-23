@@ -19,6 +19,7 @@ const MESSAGE = {
   iconType: 'PNG나 JPG 그림만 쓸 수 있어요',
   iconSide: '가로세로 128px 이상인 그림을 골라 주세요',
   dockName: 'Dock 이름은 1~30자로 적어 주세요 — / : 와 줄바꿈은 쓸 수 없어요',
+  dockTaken: '같은 이름의 앱이 이미 있어요 — 다른 이름을 적어 주세요',
   title: '워크스페이스 제목은 1~40자로 적어 주세요',
   nothing: '바꿀 것이 없어요',
 };
@@ -38,6 +39,15 @@ function checkDockName(value) {
   const name = trimmed(value);
   if (!name || length(name) > 30 || /[/:\r\n\t\0]/.test(name) || name.startsWith('.')) throw bad(MESSAGE.dockName);
   return name;
+}
+
+// `<Applications>/<이름>.app`이 이미 있는데 이 설치가 만든 스크립트 앱(main.scpt가 있는 것)이 아니면 남의 앱이다 —
+// 그 이름으로는 Dock 앱을 만들 수 없다(app-refresh.sh도 남의 앱은 지우지 않고 멈춘다). 있는지 보기만 한다.
+function dockNameTaken(appsDir, name) {
+  if (!appsDir || !name) return false;
+  const bundle = path.join(appsDir, `${name}.app`);
+  if (!fs.existsSync(bundle)) return false;
+  return !fs.existsSync(path.join(bundle, 'Contents', 'Resources', 'Scripts', 'main.scpt'));
 }
 
 // 화면 헤더·탭 제목(config `title`).
@@ -136,6 +146,6 @@ function tildePath(value, home) {
 
 module.exports = {
   ICON_MAX_BYTES, ICON_MIN_SIDE, DOCK_NAME_DEFAULT, PERSONALIZE_MESSAGE: MESSAGE,
-  checkDockName, checkTitle, imageInfo, checkIcon, saveIcon, resetIcon, hasCustomIcon, currentIcon,
+  checkDockName, dockNameTaken, checkTitle, imageInfo, checkIcon, saveIcon, resetIcon, hasCustomIcon, currentIcon,
   writeRefreshRequest, tildePath,
 };

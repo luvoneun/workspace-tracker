@@ -11,7 +11,7 @@
 ## 개발·검증
 
 - 운영 서버(launchd, 4321 포트)는 이 폴더의 코드를 그대로 실행하고, 화면 파일은 저장하는 즉시 열려 있는 브라우저에 반영된다. 실제 업무 데이터로 개발 테스트하지 않는다.
-- 검증: `cd tracker/inbox-app && node --test server.test.js client.test.js report-drafts.test.js`. 화면·API 확인은 `node browser-fixture.js`(4322 포트, 임시 데이터)로 한다.
+- 검증: `cd tracker/inbox-app && node --test server.test.js client.test.js report-drafts.test.js`. 화면·API 확인은 `node browser-fixture.js`(4322 포트, 데이터·설정·토큰·자동화 폴더·LaunchAgents·`local/`까지 전부 임시 폴더 — 실제 설치 위치를 가리키면 서버가 시작하지 않는다)로 한다.
 - 화면·서버 호환성을 확인한 뒤 운영에 반영하고, 운영 반영·재시작 여부를 명확히 알린다.
 - 기능을 바꾸면 README와 관련 스킬 설명도 함께 고친다. README에는 현재 동작만 적는다(변경 이력은 Git 기록).
 - `tracker/inbox-app/automation/`의 스크립트는 `~/.local/share/workspace-automation/`의 복사본이 실행된다. 고쳤으면 복사본도 갱신한다(`setup.sh`·`update.sh`가 다시 복사한다). 복사본은 설치 위치를 `WORKSPACE_DIR` → `workspace.env` 순서로 찾는다.
