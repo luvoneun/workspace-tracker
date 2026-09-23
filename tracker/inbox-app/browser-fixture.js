@@ -1,5 +1,5 @@
 // Manual browser QA server: isolated temporary records, never the personal tracker.
-// 데이터뿐 아니라 설정·토큰·자동화 폴더·LaunchAgents·local/·Applications·저장소 자리까지 전부 임시 폴더 하나 아래로 끼운다.
+// 데이터뿐 아니라 설정·토큰·자동화 폴더·LaunchAgents·local/·Applications·백업 폴더·저장소 자리까지 전부 임시 폴더 하나 아래로 끼운다.
 // WORKSPACE_FIXTURE=1이면 서버가 그중 하나라도 실제 설치 위치를 가리킬 때 시작하지 않는다(server.js의 안전망).
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 
@@ -7,7 +7,7 @@ const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 function prepareFixture() {
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'workspace-browser-'));
   const dir=name=>{const at=path.join(root,name);fs.mkdirSync(at,{recursive:true});return at;};
-  const data=dir('data'),repo=dir('repo'),local=dir('repo/local'),tokens=dir('tokens'),automation=dir('automation'),agents=dir('LaunchAgents'),apps=dir('Applications');
+  const data=dir('data'),repo=dir('repo'),local=dir('repo/local'),tokens=dir('tokens'),automation=dir('automation'),agents=dir('LaunchAgents'),apps=dir('Applications'),backup=dir('workspace-data-backup');
   // 화면의 버전 줄이 비지 않게 VERSION만 복사한다(git 기록은 없다 — 고친 파일·원격 확인은 조용히 비어 있다).
   try{fs.copyFileSync(path.join(__dirname,'..','..','VERSION'),path.join(repo,'VERSION'));}catch{/* 없으면 버전 모름 */}
   // 예시 설정을 복사하되 토큰·비밀 주소 파일 칸은 임시 토큰 폴더를 가리키게 바꾼다.
@@ -31,6 +31,8 @@ function prepareFixture() {
     WORKSPACE_AUTOMATION_DIR:automation,
     WORKSPACE_LAUNCH_AGENTS_DIR:agents,
     WORKSPACE_APPLICATIONS_DIR:apps,
+    // 설정 › 앱의 `데이터 백업` 줄이 읽는 자리 — 실제 ~/workspace-data-backup을 보지 않게.
+    WORKSPACE_BACKUP_DIR:backup,
     WORKSPACE_NO_OPEN:'1',
     WORKSPACE_NO_REMOTE_CHECK:'1',
   };

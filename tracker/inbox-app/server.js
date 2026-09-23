@@ -29,6 +29,11 @@ const LOCAL_DIR = process.env.WORKSPACE_LOCAL_DIR || path.join(REPO_DIR, 'local'
 function applicationsDir() {
   return process.env.WORKSPACE_APPLICATIONS_DIR || path.join(os.homedir(), 'Applications');
 }
+// 업무 데이터 백업 폴더(`~/workspace-data-backup` — update.sh·backup-data.sh와 같은 값). 서버는 **읽기만** 한다
+// (설정 › 앱의 `데이터 백업` 줄). 테스트·픽스처는 WORKSPACE_BACKUP_DIR로 임시 폴더를 끼운다.
+function backupDir() {
+  return process.env.WORKSPACE_BACKUP_DIR || path.join(os.homedir(), 'workspace-data-backup');
+}
 
 // ---------- 화면 확인용 픽스처의 안전망 ----------
 // `WORKSPACE_FIXTURE=1`(browser-fixture.js가 켠다)이면 서버가 쓰는 자리가 하나라도 실제 설치 위치
@@ -39,6 +44,7 @@ function workspacePaths() {
   return {
     config: CONFIG_PATH, data: TRACKER_DIR, repo: REPO_DIR, local: LOCAL_DIR,
     tokens: integrations.tokenPaths().dir, automation: automationDir(), launchAgents: launchAgentsDir(), applications: applicationsDir(),
+    backup: backupDir(),
   };
 }
 // 없는 경로도 견줄 수 있게, 있는 데까지 실제 경로(심볼릭 링크를 푼 것)로 바꾸고 나머지를 붙인다.
@@ -63,6 +69,7 @@ function fixtureSafetyProblems(paths = workspacePaths(), home = os.homedir()) {
     ['~/.local/share/workspace-automation', path.join(homeReal, '.local', 'share', 'workspace-automation')],
     ['~/Library/LaunchAgents', path.join(homeReal, 'Library', 'LaunchAgents')],
     ['~/Applications', path.join(homeReal, 'Applications')],
+    ['~/workspace-data-backup', path.join(homeReal, 'workspace-data-backup')],
     ['저장소의 workspace.config.json', path.join(repoRoot, 'workspace.config.json')],
     ['저장소의 local/', path.join(repoRoot, 'local')],
     ['저장소의 tracker/', path.join(repoRoot, 'tracker')],
@@ -589,16 +596,22 @@ function tailLines(filePath, maxLines) {
   return fs.readFileSync(filePath, 'utf-8').split('\n').slice(-maxLines);
 }
 
-// 설정 > 상태 탭에서 쓴다. run-task.sh가 남기는 "───── 시각 이름 시작/종료(exit N)"
+// 설정 › 연동 카드(상태 줄·최근 기록)가 쓴다. run-task.sh가 남기는 "───── 시각 이름 시작/종료(exit N)"
 // 블록과, slack-capture.sh가 미리보기만 하고 건너뛸 때 남기는 한 줄짜리 기록을 함께 읽어서
 // "마지막으로 뭘 했는지" 사람이 읽을 수 있는 요약과 "최근에 실패한 적 있는지"를 뽑아낸다.
+// 줄 앞에 줄바꿈 없이 붙은 찌꺼기(`{"ok":true}` 같은 JSON 조각 — 예전 slack-capture.sh가 health 응답을 로그에
+// 그대로 남겼다)를 떼어 낸다. 떼고 나서 시각(또는 실행 블록 선)으로 시작할 때만 떼어 낸 줄을 쓴다 — 이미 쌓인 옛 로그도
+// "마지막 실행"을 제대로 읽게.
+const LOG_JUNK_RE = /^(?:\{[^{}\n]*\}\s*)+(?=─|\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} )/;
+const cleanLogLine = line => String(line).replace(LOG_JUNK_RE, '');
+
 function parseAutomationLog(lines) {
   const startRe = /^─+ (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \S+ 시작$/;
   const endRe = /^─+ (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \S+ 종료 \(exit (-?\d+)\)$/;
   const plainRe = /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (.+)$/;
   const events = [];
   let block = null;
-  lines.forEach((line) => {
+  lines.map(cleanLogLine).forEach((line) => {
     const s = startRe.exec(line);
     if (s) { block = { body: [] }; return; }
     const e = endRe.exec(line);
@@ -639,7 +652,9 @@ function getAutomationStatus() {
       lastKind: last ? last.kind : null,
       lastSummary: last ? last.text : null,
       recentFailures,
-      tail: lines.filter((l) => l.trim()).slice(-60),
+      // 연동 카드 ⋯ › 최근 기록 — 최근 10번(새것 먼저). 한 줄은 200자까지만.
+      events: events.slice(-10).reverse().map(e => ({ time: e.time, kind: e.kind, text: String(e.text || '').slice(0, 200) })),
+      tail: lines.map(cleanLogLine).filter((l) => l.trim()).slice(-60),
     };
   });
 }
@@ -663,7 +678,7 @@ function meetingNotesRuns(lines) {
   const endRe = /^─+ (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \S+ 종료 \(exit (-?\d+)\)$/;
   const runs = [];
   let open = null;
-  lines.forEach((line) => {
+  lines.map(cleanLogLine).forEach((line) => {
     const started = startRe.exec(line);
     if (started) { open = { startedAt: started[1], finishedAt: null, exitCode: null }; runs.push(open); return; }
     const ended = endRe.exec(line);
@@ -717,7 +732,7 @@ function meetingNotesStatus() {
   const startedAt = run.startedAt;
   if (!run.finishedAt) {
     return now - meetingNotesTime(startedAt) > MEETING_NOTES_RUN_LIMIT_MS
-      ? { ...base, state: 'failed', startedAt, summary: '35분이 넘도록 끝나지 않았어요. 설정 > 상태에서 로그를 확인해 주세요.' }
+      ? { ...base, state: 'failed', startedAt, summary: '35분이 넘도록 끝나지 않았어요. 설정 › 연동 › 회의록 ⋯ › 최근 기록에서 확인해 주세요.' }
       : { ...base, state: 'running', startedAt };
   }
   const summary = summaryAt(run.finishedAt);
@@ -855,7 +870,7 @@ async function fetchNow(key) {
 }
 
 // 연동 카드 상태 줄에 쓰는 "지금 실패 중인가"(값은 메모리·로그에서만 읽는다).
-// 자동화는 상태 탭과 같은 기준 — **가장 최근 실행이 실패**일 때만 실패 중이다.
+// 자동화는 **가장 최근 실행이 실패**일 때만 실패 중이다(해결된 과거 실패는 알리지 않는다).
 const logTimeIso = text => { const at = meetingNotesTime(text); return Number.isFinite(at) ? new Date(at).toISOString() : null; };
 function fetchStateLive(failure) {
   return { failing: !!failure, auth: !!(failure && failure.auth), failedAt: failure ? new Date(failure.at).toISOString() : null };
@@ -867,7 +882,42 @@ function fetchStateAutomation(automation, authRe = null) {
     auth: failing && !!authRe && authRe.test(automation.lastSummary || ''),
     failedAt: failing ? logTimeIso(automation.lastRunAt) : null,
     lastRunAt: automation && automation.lastRunAt ? logTimeIso(automation.lastRunAt) : null,
+    // 멈춘 카드의 이유 한 줄(화면이 사람 말로 바꾼다). 로그 한 줄이라 200자까지만.
+    summary: failing ? String(automation.lastSummary || '').slice(0, 200) : null,
   };
+}
+
+// 연동마다 "지금 멈췄나" — 연동 탭 맨 위 요약·카드의 빨간 줄·톱니바퀴의 빨간 점이 같은 판단을 쓴다.
+// 슬랙은 수집이 실패 중이거나 **할 일 채널이 사라졌으면** 멈춘 것이다(사라졌는지는 이름 따라가기가 이미 들고 있는
+// 답만 본다 — 여기서 슬랙에 묻지 않는다). 값은 로그·메모리에서만 읽고 파일은 쓰지 않는다.
+function integrationAlerts(config = currentConfigFile(), automations = getAutomationStatus()) {
+  const failingAutomation = key => automations.some(one => one.key === key && one.lastKind === 'fail');
+  const alerts = [];
+  if (USES.slack && (failingAutomation('slack') || slackFollower.knownMissing(config, 'todo'))) alerts.push('slack');
+  if (USES.jira && jira.connected && jiraLive.failure()) alerts.push('jira');
+  if (USES.calendar && (CALENDAR_ICAL ? !!calendarLive.failure() : failingAutomation('calendar'))) alerts.push('calendar');
+  if (USES.tiro && failingAutomation('tiro')) alerts.push('notes');
+  return alerts;
+}
+
+// 로그와 같은 모양의 로컬 시각(`YYYY-MM-DD HH:MM:SS`) — 앱이 직접 읽는 것(지라·캘린더 비밀 주소)의 최근 기록도
+// 자동화 기록과 같은 줄 모양으로 싣는다.
+function localStamp(ms) {
+  const d = new Date(ms);
+  const two = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}`;
+}
+const LIVE_LOG_WORDS = {
+  jira: { ok: n => `읽음 · 내 티켓 ${n}개`, auth: '읽지 못했어요 — 토큰이 만료됐거나 권한이 없어요', fail: '읽지 못했어요 — 지라가 응답하지 않았어요' },
+  calendar: { ok: n => `읽음 · 오늘 ${n}개`, auth: '읽지 못했어요 — 비밀 주소를 읽을 수 없어요', fail: '읽지 못했어요 — 캘린더가 응답하지 않았어요' },
+};
+function liveLog(kind, history) {
+  const words = LIVE_LOG_WORDS[kind];
+  return (history || []).map(entry => ({
+    time: localStamp(entry.at),
+    kind: entry.ok ? 'run' : 'fail',
+    text: entry.ok ? words.ok(Number(entry.count) || 0) : (entry.auth ? words.auth : words.fail),
+  }));
 }
 
 // 업무에 걸려 있는 지라 키를 모은다 — 기본 조회(내 담당·미완료)에서 빠진 것만 한 번 더 물어
@@ -1809,7 +1859,7 @@ function compareVersions(a, b) {
 // 새 버전이 나왔는지 원격에 묻는다(설정과 무관하게 돈다 — 연동을 다 끈 사람도 업데이트는 받는다).
 // stable 갈래는 원격 태그 중 가장 높은 것, main 갈래는 원격 main의 커밋이 지금 HEAD와 다르고 이 저장소에
 // 아직 없는 커밋인지를 본다. 쓰는 git은 읽기 전용(`ls-remote`·`rev-parse`)뿐이고, 실패해도 조용히 지나가며 파일은 쓰지 않는다.
-const REMOTE_STALE_MS = 30 * 60 * 1000;   // 상태 탭을 열 때 이보다 묵었으면 한 번 더 묻는다
+const REMOTE_STALE_MS = 30 * 60 * 1000;   // 설정을 열 때 이보다 묵었으면 한 번 더 묻는다
 let remoteCheckedAt = 0;                  // 마지막으로 원격에 물어본 때(성공·실패 무관)
 let remoteCheckRun = null;                // 지금 도는 확인(같은 때 두 번 묻지 않는다)
 let latestMain = null;                    // { sha, newer, checkedAt } — main 갈래일 때만
@@ -1850,7 +1900,7 @@ function startRemoteCheck() {
   checkLatestRelease();
 }
 
-// 상태 탭을 열 때(= /api/about) 확인이 30분 넘게 묵었으면 한 번 더 묻고, 도는 확인은 5초까지만 기다린다.
+// 설정을 열 때(= /api/about) 확인이 30분 넘게 묵었으면 한 번 더 묻고, 도는 확인은 5초까지만 기다린다.
 async function freshRemoteCheck() {
   if (process.env.WORKSPACE_NO_REMOTE_CHECK) return;
   startRemoteCheck();
@@ -1872,7 +1922,7 @@ async function changesUrl(channel) {
   return changesUrlFrom(await git(['remote', '-v']), channel);
 }
 
-// 설정 › 상태의 `업데이트 받기`가 쓰는 한 덩어리 — 새 버전이 있는지와 무엇으로 부를지.
+// 설정 › 앱의 `업데이트 받기`가 쓰는 한 덩어리 — 새 버전이 있는지와 무엇으로 부를지.
 function updateOffer(version, channel) {
   if (channel === 'main') {
     return { available: !!(latestMain && latestMain.newer), label: 'main', checkedAt: latestMain ? latestMain.checkedAt : null };
@@ -1902,6 +1952,49 @@ async function aboutApp() {
     // 서버는 Finder를 열거나 프로세스를 띄우지 않고 글자만 준다.
     appBundle: `~/Applications/${currentDockName()}.app`,
     updateFile: updateCommandPath(),
+  };
+}
+
+// ---------- 설정 › 앱: 데이터 백업 상태 (GET /api/backup) ----------
+// backup-data.sh(launchd `data-backup`, 매일 19:30)가 남기는 로그 두 갈래를 읽는다:
+//   `YYYY-MM-DD HH:MM:SS 로컬 성공 · 7일치` / `… 로컬 실패 — 이유`
+//   `… GitHub 성공` / `… GitHub 실패 — 이유` / `… GitHub 건너뜀 — 이유`
+// 며칠치인지는 `daily/` 안에서 이름이 정확히 `YYYY-MM-DD`인 폴더만 센다. 읽기만 하고 아무것도 실행하지 않는다.
+const BACKUP_DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+const BACKUP_STATE = { 성공: 'ok', 실패: 'fail', 건너뜀: 'skip' };
+function backupStatus() {
+  const daily = path.join(backupDir(), 'daily');
+  let days = [];
+  try {
+    days = nativeFs.readdirSync(daily, { withFileTypes: true })
+      .filter(entry => entry.isDirectory() && BACKUP_DAY_RE.test(entry.name)).map(entry => entry.name);
+  } catch { days = []; }
+  let local = null;
+  let github = null;
+  const reason = value => (value ? String(value).slice(0, 200) : null);
+  tailLines(path.join(automationLogDir(), 'data-backup.log'), 400).map(cleanLogLine).forEach((line) => {
+    const row = /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (.+)$/.exec(line.trim());
+    if (!row) return;
+    const [, time, text] = row;
+    let hit = /^로컬 (성공|실패)(?: · \d+일치| — (.+))?$/.exec(text);
+    if (hit) { local = { state: BACKUP_STATE[hit[1]], at: time, reason: reason(hit[2]) }; return; }
+    hit = /^GitHub (성공|실패|건너뜀)(?: — (.+))?$/.exec(text);
+    if (hit) { github = { state: BACKUP_STATE[hit[1]], at: time, reason: reason(hit[2]) }; return; }
+    // GitHub 백업만 하던 예전 로그의 줄도 읽는다.
+    if (/^(백업 커밋 완료|변경 없음|원격 업로드 완료)$/.test(text)) { github = { state: 'ok', at: time, reason: null }; return; }
+    hit = /^백업 실패 — (.+)$/.exec(text);
+    if (hit) github = { state: 'fail', at: time, reason: reason(hit[1]) };
+  });
+  // GitHub 백업이 켜진 사람 — 백업용 Git 저장 공간이 있고 원격(비공개 저장소)이 연결돼 있을 때(설정 파일 글자만 본다).
+  let gitConfig = '';
+  try { gitConfig = nativeFs.readFileSync(path.join(automationDir(), 'data-backup.git', 'config'), 'utf8'); } catch { gitConfig = ''; }
+  const localView = local
+    || (days.length ? { state: 'ok', at: null, reason: null } : { state: 'never', at: null, reason: null });
+  return {
+    ok: true,
+    path: personalize.tildePath(daily, os.homedir()),
+    local: { ...localView, days: days.length },
+    github: { on: /\[remote "origin"\]/.test(gitConfig), ...(github || { state: 'never', at: null, reason: null }) },
   };
 }
 
@@ -2468,8 +2561,13 @@ const handleRequest = (req, res) => {
       ? slackFollower.follow({ read: currentConfigFile, configPath: CONFIG_PATH }).catch(() => ({ missing: {} }))
       : Promise.resolve({ missing: {} });
     followed.then(({ missing }) => {
-      const state = integrations.readIntegrations(currentConfigFile(), { claude: claudeReady() });
-      Object.keys(missing || {}).forEach((key) => { if (state.slack.channels[key]) state.slack.channels[key].missing = true; });
+      const config = currentConfigFile();
+      const state = integrations.readIntegrations(config, { claude: claudeReady() });
+      // 사라진 채널 — 뺀 채널이면 그 표시에(다시 체크하면 새로 만든다), 아니면 연결된 채널에 붙인다.
+      Object.keys(missing || {}).forEach((key) => {
+        if (state.slack.off[key]) state.slack.off[key].missing = true;
+        else if (state.slack.channels[key] && state.slack.channels[key].id) state.slack.channels[key].missing = true;
+      });
       const live = jiraLive.current();
       const attention = attentionLive.current();
       const hidden = attention ? workflows.attentionDismissed() : {};
@@ -2477,6 +2575,11 @@ const handleRequest = (req, res) => {
       state.jira.issueCount = live ? live.issues.length : null;
       state.jira.attentionCount = attention && Array.isArray(attention.items)
         ? attention.items.filter(item => !hidden[item.id]).length : null;
+      // 반응 필요(지라 댓글)를 마지막으로 확인한 때와, 다시 읽지 못하고 있는지 — 지라 카드 둘째 줄이 쓴다.
+      const attentionView = attentionLive.view();
+      state.jira.attentionAt = attentionView.updatedAt || null;
+      state.jira.attentionStale = !!attentionView.stale;
+      state.jira.attentionError = !!attentionView.error;
       const slackSync = getSlackSync();
       state.slack.readAt = slackSync && slackSync.used !== false ? slackSyncSuccessAt() : null;
       // 캘린더 비밀 주소 갈래의 상태 줄(`비밀 주소로 읽는 중 · 오늘 3개 · 10분 전`)에 쓰는 값 — 메모리에서만.
@@ -2492,6 +2595,17 @@ const handleRequest = (req, res) => {
       state.slack.fetch = fetchStateAutomation(automation('slack'), SLACK_AUTH_RE);
       state.calendar.fetch = CALENDAR_ICAL ? fetchStateLive(calendarLive.failure()) : fetchStateAutomation(automation('calendar'));
       state.meetingNotes.fetch = fetchStateAutomation(automation('tiro'));
+      // 오늘 슬랙에서 들어온 항목 수(원본 링크가 슬랙이고 오늘 만든 것) — 슬랙 카드 둘째 줄.
+      const today = todayLocal();
+      state.slack.todayCount = slackSync && slackSync.used !== false
+        ? Object.values(getReportRefs()).filter(item => item.permalink && item.created === today).length : null;
+      // 카드 ⋯ › 최근 기록 — 자동화는 로그의 최근 10번, 앱이 직접 읽는 것은 메모리에 있는 만큼.
+      const events = key => (automation(key) || {}).events || [];
+      state.slack.log = events('slack');
+      state.jira.log = liveLog('jira', jiraLive.history());
+      state.calendar.log = CALENDAR_ICAL ? liveLog('calendar', calendarLive.history()) : events('calendar');
+      state.meetingNotes.log = events('tiro');
+      state.alerts = integrationAlerts(config, automations);
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ ok: true, ...state, install: process.env.WORKSPACE_MANAGED ? 'managed' : 'manual' }));
     }).catch(() => {
@@ -2504,10 +2618,14 @@ const handleRequest = (req, res) => {
   // 슬랙 위저드 `① 토큰`의 `다음` — `auth.test`로 토큰만 확인한다. 아무 파일도 쓰지 않고 `{ok}`만 돌려준다.
   if (url.pathname === '/api/integrations/slack-token-check' && req.method === 'POST') {
     readBody(req)
-      .then(body => integrations.slackTokenCheck((body || {}).token))
-      .then(() => {
+      .then((body) => {
+        // 토큰 칸 없이 부르면(채널 고르기 — 새 채널 이름의 앞머리만 알고 싶을 때) 저장된 토큰을 서버 안에서만 쓴다.
+        const given = typeof (body || {}).token === 'string' ? body.token.trim() : '';
+        return integrations.slackTokenCheck(given || integrations.savedSlackToken(currentConfigFile()));
+      })
+      .then((checked) => {
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: true }));
+        res.end(JSON.stringify({ ok: true, prefix: checked.prefix }));
       })
       .catch((error) => {
         res.writeHead(error.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -2537,7 +2655,8 @@ const handleRequest = (req, res) => {
       })
       .catch((error) => {
         res.writeHead(error.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: error.message }));
+        // `code`·`key`는 화면이 갈래를 나눌 때만 쓴다(다시 체크한 채널이 사라졌으면 `channel_gone` + 그 칸).
+        res.end(JSON.stringify({ ok: false, error: error.message, ...(error.code ? { code: error.code } : {}), ...(error.key ? { key: error.key } : {}) }));
       });
     return;
   }
@@ -2545,7 +2664,7 @@ const handleRequest = (req, res) => {
   // 슬랙 비공개 채널 대신 만들기 — `설정 > 연동 > 슬랙 수집` 위저드의 ② 채널이 고른 채널마다 한 번씩 부른다.
   // 여기서는 **아무 파일도 쓰지 않는다**: 토큰은 슬랙 헤더로만 나가고, 만든 채널의 id·이름만 돌려준다
   // (그 id를 화면이 ③ 확인의 `연결`에 실어 보내고, 저장은 예전대로 `/api/integrations/save`만 한다).
-  // 토큰 칸이 비어 있으면(`채널 고치기` — 이미 연결된 뒤 채널만 더하는 길) 저장된 토큰을 서버 안에서만 쓴다.
+  // 토큰 칸이 비어 있으면(`채널 고르기` — 이미 연결된 뒤 채널을 더하는 길) 저장된 토큰을 서버 안에서만 쓴다.
   if (url.pathname === '/api/integrations/slack-channel' && req.method === 'POST') {
     readBody(req)
       .then((body) => {
@@ -2581,8 +2700,17 @@ const handleRequest = (req, res) => {
   }
 
   if (url.pathname === '/api/automation/status' && req.method === 'GET') {
+    const automations = getAutomationStatus();
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ automations: getAutomationStatus() }));
+    // `alerts`는 지금 멈춘 연동(톱니바퀴의 빨간 점) — 연동 탭 요약과 같은 판단이다.
+    res.end(JSON.stringify({ automations, alerts: integrationAlerts(currentConfigFile(), automations) }));
+    return;
+  }
+
+  // 설정 › 앱의 `데이터 백업` 줄 — 백업 로그와 날짜 폴더 목록을 **읽기만** 한다(프로세스·파일 쓰기 없음).
+  if (url.pathname === '/api/backup' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify(backupStatus()));
     return;
   }
 

@@ -42,6 +42,8 @@ const MESSAGE = {
   slackScope: '이 슬랙 앱에는 채널 만들기 권한이 없어요 — 만든 사람에게 권한 추가를 요청해 주세요',
   slackTaken: '이미 있는 이름이에요 — 다른 이름을 적어 주세요',
   slackCreate: '슬랙에서 채널을 만들지 못했어요',
+  slackTodoOff: '할 일 채널은 뺄 수 없어요 — 슬랙 수집 전체를 끄려면 해제해 주세요',
+  slackGone: '을 찾을 수 없어요 — 슬랙에서 지웠거나 보관했어요. 체크한 채로 두면 새로 만들어요',
   slackBot: '이건 Bot 토큰이에요 — 바로 위의 User OAuth Token(xoxp-)을 복사해 주세요',
   slackReach: '슬랙에 닿지 못했어요 — 잠시 뒤 다시 해 주세요',
   icalUrl: '비밀 주소를 붙여 넣어 주세요',
@@ -134,7 +136,13 @@ async function slackCheckChannel(token, id, request = (...args) => fetch(...args
     throw bad(MESSAGE.slackRead);
   }
   if (!body || body.ok !== true || !body.channel) throw bad(MESSAGE.slackRead);
-  return { name: String(body.channel.name || ''), isPrivate: body.channel.is_private === true };
+  // `created`(만든 때, 초)는 새 채널을 "그때부터" 읽게 하는 since에, `archived`는 뺐던 채널을 다시 켤 때 쓴다.
+  const created = Number(body.channel.created);
+  return {
+    name: String(body.channel.name || ''), isPrivate: body.channel.is_private === true,
+    created: Number.isFinite(created) && created > 0 ? Math.floor(created) : null,
+    archived: body.channel.is_archived === true,
+  };
 }
 
 // 슬랙에 한 번 물어보는 길 하나. 토큰은 **헤더로만** 나가고 돌려주는 값에는 남지 않는다.
@@ -181,8 +189,21 @@ async function slackCreateChannel(token, name, request = (...args) => fetch(...a
   return { id, name: String(channel.name || wanted) };
 }
 
+// 새로 만들 채널의 기본 이름 앞머리 — 슬랙 사용자 이름(`auth.test`의 `user`)을 채널 이름 규칙대로 다듬는다
+// (소문자·영숫자·`-`·`_`, 띄어쓰기·점은 `-`). 가장 긴 뒷머리(`-someday`)를 붙여도 80자를 넘지 않게 자르고,
+// 못 받았거나 다듬고 나니 비면 `my`다. 이미 연결된 채널의 이름은 바꾸지 않는다 — 새로 만들 때의 기본값일 뿐이다.
+const SLACK_PREFIX_MAX = 80 - '-someday'.length;
+function slackChannelPrefix(user) {
+  const clean = String(user || '').trim().toLowerCase()
+    .replace(/[\s.]+/g, '-').replace(/[^a-z0-9_-]/g, '')
+    .replace(/-{2,}/g, '-').replace(/^[-_]+|[-_]+$/g, '')
+    .slice(0, SLACK_PREFIX_MAX).replace(/[-_]+$/, '');
+  return clean || 'my';
+}
+
 // 슬랙 위저드 `① 토큰`의 `다음` — 토큰이 맞는지만 `auth.test`로 본다. 파일은 하나도 쓰지 않는다.
 // Bot 토큰(`xoxb-`)은 화면이 먼저 막지만, 여기서도 슬랙에 보내지 않고 같은 문구로 돌려보낸다.
+// 돌려주는 것은 새 채널 이름의 앞머리(`prefix`)뿐이다 — 토큰·팀 정보는 싣지 않는다.
 async function slackTokenCheck(token, request = (...args) => fetch(...args)) {
   const secret = trimmed(token);
   if (!secret) throw bad(MESSAGE.slackToken);
@@ -190,7 +211,7 @@ async function slackTokenCheck(token, request = (...args) => fetch(...args)) {
   let auth;
   try { auth = await slackCall(secret, 'auth.test', null, request); } catch { throw bad(MESSAGE.slackReach); }
   if (!auth || auth.ok !== true) throw bad(MESSAGE.slackAuth, 'invalid_auth');
-  return { ok: true };
+  return { ok: true, prefix: slackChannelPrefix(auth.user) };
 }
 
 // ---------- 캘린더 비밀 주소(iCal) ----------
@@ -248,13 +269,19 @@ function savedIcalUrl(config, tokenDir) {
   return found ? found.value : '';
 }
 
+// 슬랙 메시지 시각(ts) 모양 `초.마이크로초` — 채널을 "이때부터" 읽게 하는 since에 쓴다.
+function slackTsNow(now = Date.now) {
+  const ms = Number(now()) || 0;
+  return `${Math.floor(ms / 1000)}.${String((ms % 1000) * 1000).padStart(6, '0')}`;
+}
+
 // ---------- config 합치기 ----------
 // 아는 칸만 갈아 끼우고 나머지는 들어온 그대로 돌려준다.
 function clone(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? { ...value } : {};
 }
 
-// 이미 저장된 슬랙 토큰(없으면 빈 글자). `채널 고치기`처럼 토큰을 다시 받지 않는 길에서만
+// 이미 저장된 슬랙 토큰(없으면 빈 글자). `채널 고르기`처럼 토큰을 다시 받지 않는 길에서만
 // 서버 안에서 쓴다 — 돌려주는 값·응답에는 절대 싣지 않는다.
 function savedSlackToken(config, tokenDir) {
   const found = findToken(tokenPaths(tokenDir), 'slack', clone(clone(config).slack).tokenFile);
@@ -285,7 +312,12 @@ function withSlack(config, { enabled, workspaceUrl, tokenFile, channels }) {
     if (tokenFile !== undefined) slack.tokenFile = tokenFile;
     if (channels) {
       const merged = clone(slack.channels);
-      Object.entries(channels).forEach(([key, value]) => { merged[key] = { ...clone(merged[key]), ...value }; });
+      // `off: false`는 "뺀 표시를 지운다"는 뜻이다 — 칸 자체를 없앤다(다른 칸은 그대로).
+      Object.entries(channels).forEach(([key, value]) => {
+        const next = { ...clone(merged[key]), ...value };
+        if (next.off !== true) delete next.off;
+        merged[key] = next;
+      });
       // 사람이 채우지 않은 칸(빈 id·예시 자리표시자)은 아예 지운다 — 이미 연결된 진짜 채널만 남는다.
       Object.keys(merged).forEach((key) => { if (!realChannelId(clone(merged[key]).id)) delete merged[key]; });
       slack.channels = merged;
@@ -334,6 +366,13 @@ function readIntegrations(config, { tokenDir, claude } = {}) {
     ? 'other'
     : (notes === 'tiro' || notes === 'manual' ? notes : (on('tiro') ? 'tiro' : 'manual'));
   const channels = clone(slack.channels);
+  // 뺀 채널(`off: true`)은 **없는 것으로** 읽는다 — 연결 수·상태 줄·수집 목록 어디에도 서지 않는다.
+  // 채널 고르기에서 다시 체크하면 새로 만들지 않고 같은 채널을 다시 켜야 하므로 이름만 따로 알려 준다(id는 서버 안에만).
+  const off = {};
+  SLACK_CHANNEL_KEYS.forEach((key) => {
+    const entry = clone(channels[key]);
+    if (entry.off === true && realChannelId(entry.id)) off[key] = { name: trimmed(entry.name) };
+  });
   return {
     jira: {
       enabled: on('jira'),
@@ -350,10 +389,11 @@ function readIntegrations(config, { tokenDir, claude } = {}) {
       hasToken: !!findToken(paths, 'slack', slack.tokenFile),
       channels: Object.fromEntries(SLACK_CHANNEL_KEYS.map((key) => {
         const entry = clone(channels[key]);
-        // 예시 자리표시자가 남아 있으면 "연결 안 된 칸"으로 본다(이름도 같이 비운다).
-        const id = realChannelId(entry.id);
+        // 예시 자리표시자가 남아 있거나 뺀 채널이면 "연결 안 된 칸"으로 본다(이름도 같이 비운다).
+        const id = entry.off === true ? '' : realChannelId(entry.id);
         return [key, { id, name: id ? trimmed(entry.name) : '' }];
       })),
+      off,
     },
     calendar: {
       enabled: on('calendar'),
@@ -372,7 +412,7 @@ function readIntegrations(config, { tokenDir, claude } = {}) {
 // 저장은 config 한 번 + 토큰 파일뿐이고, 실패하면 아무것도 쓰지 않는다.
 async function saveIntegrations({
   configPath, current = {}, body = {}, tokenDir,
-  jiraCheck, slackCheck, calendarCheck, write = atomicWrite, writeToken = writeTokenFile,
+  jiraCheck, slackCheck, calendarCheck, write = atomicWrite, writeToken = writeTokenFile, now = Date.now,
 } = {}) {
   if (!body || typeof body !== 'object') throw bad(MESSAGE.other);
   const paths = tokenPaths(tokenDir);
@@ -412,29 +452,65 @@ async function saveIntegrations({
     if (body.slack.enabled === false) {
       config = withSlack(config, { enabled: false });
     } else {
-      const token = trimmed(body.slack.token);
-      const saved = token ? null : findToken(paths, 'slack', clone(config.slack).tokenFile);
-      if (!token && !saved) throw bad(MESSAGE.slackToken);
-      const secret = token || saved.value;
+      const savedChannels = clone(clone(config.slack).channels);
       const asked = body.slack.channels && typeof body.slack.channels === 'object' ? body.slack.channels : {};
       const wanted = SLACK_CHANNEL_KEYS.filter(key => trimmed(asked[key]));
+      // 채널 고르기의 빼기·다시 켜기. 빼기는 config에서 지우지 않고 `off: true`만 적는다(id·이름은 그대로) —
+      // 슬랙 채널은 건드리지 않는다(보관·삭제·나가기를 부르지 않는다). `할 일`은 수집의 기본 자리라 뺄 수 없다.
+      const keysOf = value => (Array.isArray(value) ? [...new Set(value.map(trimmed))] : []);
+      const offKeys = keysOf(body.slack.off);
+      const onKeys = keysOf(body.slack.on).filter(key => !offKeys.includes(key));
+      if ([...offKeys, ...onKeys].some(key => !SLACK_CHANNEL_KEYS.includes(key))) throw bad(MESSAGE.other);
+      if (offKeys.includes('todo')) throw bad(MESSAGE.slackTodoOff);
+      // 빼기만 하는 저장은 슬랙에 묻지 않는다 — 토큰도 필요 없다.
+      const needsSlack = wanted.length > 0 || onKeys.length > 0 || !offKeys.length;
+      const token = trimmed(body.slack.token);
+      const saved = token || !needsSlack ? null : findToken(paths, 'slack', clone(config.slack).tokenFile);
+      if (needsSlack && !token && !saved) throw bad(MESSAGE.slackToken);
+      const secret = token || (saved ? saved.value : '');
       // `todo` 채널은 슬랙 수집의 기본 자리라 하나는 있어야 한다(이미 저장돼 있으면 그대로 쓴다).
       // 예시 자리표시자는 저장된 것으로 세지 않는다.
-      const savedTodo = realChannelId(clone(clone(clone(config.slack).channels).todo).id);
+      const savedTodo = realChannelId(clone(savedChannels.todo).id);
       if (!wanted.includes('todo') && !savedTodo) throw bad(MESSAGE.slackChannel);
       const channels = {};
+      const at = slackTsNow(now);
       result.slack = { channels: {} };
       for (const key of wanted) {
         const id = parseChannelId(asked[key]);
         if (!id) throw bad(MESSAGE.slackChannel);
         const info = await (slackCheck || (() => { throw bad(MESSAGE.slackRead); }))(secret, id);
-        channels[key] = { id, name: info.name ? `#${info.name}` : '' };
+        // 새로 만든(다시 만든) 채널은 만든 때부터 읽는다 — 슬랙이 만든 때를 모르면 지금부터.
+        const since = info.created ? `${info.created}.000000` : at;
+        channels[key] = { id, name: info.name ? `#${info.name}` : '', since, off: false };
         result.slack.channels[key] = { name: channels[key].name, isPrivate: info.isPrivate === true };
       }
+      // 다시 체크한 뺀 채널 — 새로 만들지 않고 저장된 id가 아직 있는지 슬랙에 한 번 묻는다(읽기만).
+      // 살아 있으면 뺀 표시를 지우고 **지금부터** 읽는다(뺀 동안 온 메시지는 가져오지 않는다).
+      for (const key of onKeys) {
+        if (wanted.includes(key)) continue;
+        const entry = clone(savedChannels[key]);
+        const id = realChannelId(entry.id);
+        if (!id) throw bad(MESSAGE.slackChannel);
+        if (entry.off !== true) continue;
+        let info = null;
+        try { info = await (slackCheck || (() => { throw bad(MESSAGE.slackRead); }))(secret, id); } catch { info = null; }
+        if (!info || info.archived) {
+          const error = bad(`${trimmed(entry.name) || '채널'}${MESSAGE.slackGone}`, 'channel_gone');
+          error.key = key;
+          throw error;
+        }
+        channels[key] = { name: info.name ? `#${info.name}` : trimmed(entry.name), since: at, off: false };
+        result.slack.channels[key] = { name: channels[key].name, isPrivate: info.isPrivate === true, reconnected: true };
+      }
+      offKeys.forEach((key) => {
+        if (wanted.includes(key) || !realChannelId(clone(savedChannels[key]).id)) return;
+        channels[key] = { off: true };
+      });
       if (token) pending.push([paths.slack.file, token]);
       const workspaceUrl = trimmed(body.slack.workspaceUrl);
       config = withSlack(config, {
-        enabled: true, tokenFile: token ? paths.slack.config : saved.config, channels,
+        enabled: true, channels,
+        ...(token ? { tokenFile: paths.slack.config } : (saved ? { tokenFile: saved.config } : {})),
         ...(workspaceUrl ? { workspaceUrl } : {}),
       });
     }
@@ -578,7 +654,17 @@ function createSlackNameFollower({ now = Date.now, ttlMs = SLACK_FOLLOW_MS, requ
     return { renamed, missing };
   }
 
-  return { follow, look, clear: () => cache.clear() };
+  // 슬랙에 묻지 않고 **이미 들고 있는 답만** 본다 — 톱니바퀴의 빨간 점(할 일 채널이 사라졌는지)처럼
+  // 자주 부르는 자리에서 쓴다. 한 번도 묻지 않았으면 모른다(false).
+  function knownMissing(config, key) {
+    const entry = clone(clone(clone(config).slack).channels)[key];
+    const id = realChannelId(clone(entry).id);
+    if (!id || clone(entry).off === true) return false;
+    const hit = cache.get(id);
+    return !!(hit && hit.info && hit.info.missing);
+  }
+
+  return { follow, look, knownMissing, clear: () => cache.clear() };
 }
 
 // ---------- 다시 켜기 ----------
@@ -623,6 +709,6 @@ module.exports = {
   SLACK_CHANNEL_KEYS, SLACK_APPS_URL, INTEGRATION_MESSAGE: MESSAGE,
   tokenPaths, parseChannelId, slackCheckChannel, slackCreateChannel, readIntegrations, saveIntegrations,
   scheduleRestart, errorLines, maskLine, claudeInstalled, writeTokenFile,
-  slackTokenCheck, savedSlackToken, createSlackNameFollower, SLACK_FOLLOW_MS,
+  slackTokenCheck, savedSlackToken, createSlackNameFollower, SLACK_FOLLOW_MS, slackChannelPrefix, slackTsNow,
   normalizeIcalUrl, fetchIcal, icalCheck, savedIcalUrl, ICAL_TIMEOUT_MS, savePersonalize,
 };

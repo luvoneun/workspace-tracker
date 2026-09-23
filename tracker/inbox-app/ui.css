@@ -2201,38 +2201,24 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-mhd .sp { margin-left: auto; }
 .d-mbody { flex: 1; min-height: 0; overflow: auto; padding: 14px 16px 18px; }
 
-/* 자동화 한 줄 — 이름 | 마지막 실행 | 다음 실행. 실패일 때만 빨간 배지가 선다. */
-.d-auto { padding: 8px 0; }
-.d-auto + .d-auto { box-shadow: inset 0 1px 0 var(--hair); }
-.d-auto.is-focus { background: var(--sel); box-shadow: none; border-radius: var(--r-sm); margin: 0 -10px; padding: 8px 10px; }
-.d-autotop { display: flex; align-items: center; gap: 10px; min-height: 38px; }
-.d-autotop .nm { font-size: 14.5px; font-weight: 500; }
-.d-autotop .st { margin-left: auto; font-size: 13px; color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.d-autotop .st.k-neg {
-  display: inline-flex; align-items: center; gap: 4px; height: 23px; padding: 0 8px; border-radius: 6px;
-  background: var(--urgent-bg); color: var(--urgent); font-size: 12.5px; font-weight: 600;
-}
-.d-autotop .st.k-neg .d-dot { margin-right: 0; }
-.d-autotop .nx { font-size: 12.5px; color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.d-autoerr { margin: 2px 0 4px; font-size: 13px; color: var(--urgent); }
-/* 앱이 그 목록을 직접 읽고 있을 때의 조용한 한 마디(지라 줄). 경고가 아니라 사실이라 흐린 글자다. */
-.d-autonote { margin: 0 0 4px; font-size: 12.5px; color: var(--dim); }
-/* 슬랙 줄 아래 처리 대장의 0인 항목(등록·중복·건너뜀·시스템)은 한 단계 더 흐리게. */
+/* 슬랙 처리 대장(연동 › 슬랙 ⋯ › 최근 기록 맨 위) — 경고가 아니라 사실이라 흐린 글자다. */
+.d-autonote { margin: 0; font-size: 12.5px; color: var(--dim); }
+/* 0인 항목(등록·중복·건너뜀·시스템)은 한 단계 더 흐리게. 합이 안 맞으면 주의색. */
 .d-autonote .is-zero { opacity: 0.55; }
-.d-auto details > summary {
-  display: inline-flex; align-items: center; gap: 4px; height: 28px; list-style: none;
-  font-size: 12px; font-weight: 600; color: var(--muted); cursor: pointer;
-}
-.d-auto details > summary::-webkit-details-marker { display: none; }
-.d-auto details > summary:hover { color: var(--text); }
-.d-auto details > summary .d-i { color: var(--dim); transition: transform 130ms var(--ease); }
-.d-auto details[open] > summary .d-i { transform: rotate(90deg); }
-.d-logs { padding: 2px 0 2px 2px; }
-.d-logline { font-size: 12px; line-height: 1.7; color: var(--text); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.d-logline.is-muted { color: var(--muted); }
+.d-autonote.k-warn { color: var(--warn); }
 
-/* 앱 정보 — 상태 탭 맨 아래의 조용한 줄. 경고가 아니라 사실이라 흐린 글자다. */
-.d-about .d-abline { font-size: 12.5px; color: var(--dim); }
+/* 설정 › 앱(시안 D) — 꾸미기 탭과 같은 줄(.d-pset: 이름 | 값). 버전 줄은 14px 본문 글자, 수정된 파일은 조용한 밑줄 글자. */
+#settingsAppView [hidden] { display: none !important; }
+#settingsAppView .d-pset .k { padding-top: 2px; }
+#settingsAppView .d-pset .v > .d-btn { align-self: flex-start; }
+#settingsAppView .d-pplace { margin-top: 0; }
+.d-abline { font-size: 14px; color: var(--text); font-variant-numeric: tabular-nums; }
+/* 데이터 백업 한 줄 — ● 초록(잘 됨) · 빨강(멈춤). 멈추면 이유 한 줄이 그 아래 --urgent로. */
+.d-bkline { font-size: 14px; color: var(--text); font-variant-numeric: tabular-nums; }
+.d-bkline .ok { color: var(--success); }
+.d-bkline .bad { color: var(--urgent); }
+.d-bkline.k-neg { color: var(--urgent); font-weight: 600; }
+.d-ismall.k-neg { color: var(--urgent); }
 .d-ablink {
   padding: 0; border: 0; background: none; font: inherit; color: var(--dim);
   text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
@@ -2240,9 +2226,8 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-ablink:hover { color: var(--text); }
 .d-abfiles { margin-top: 4px; font-size: 12px; line-height: 1.7; color: var(--dim); overflow-wrap: anywhere; }
 .d-abfiles[hidden], .d-abwrap[hidden] { display: none; }
-.d-about .d-btn { margin-top: 10px; }
 /* 업데이트 받기(시안 J) — 새 버전 상자는 선택 판(--sel), 실패 줄은 주의 판(--urgent-bg). 새 색은 쓰지 않는다. */
-.d-abwrap { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.d-abwrap { display: flex; flex-direction: column; gap: 8px; margin-top: 2px; }
 .d-abupd, .d-abfail { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; border-radius: var(--r-sm); }
 .d-abupd { padding: 12px 14px; background: var(--sel); }
 .d-abupd .tx { flex: 1 1 100%; font-size: 14px; font-weight: 600; color: var(--accent-text); }
@@ -2251,7 +2236,6 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-abfail { padding: 10px 12px; background: var(--urgent-bg); }
 .d-abfail .tx { flex: 1 1 160px; font-size: 13.5px; font-weight: 600; color: var(--urgent); }
 .d-abfail .d-btn.dng { background: var(--surface); }
-.d-about .d-abwrap .d-btn { margin-top: 0; }
 .d-abwrap .d-iconfirm { margin-top: 0; }
 .d-abquiet { margin: 0; }
 .d-abhead { font-size: 12.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
@@ -2271,6 +2255,23 @@ body.batch-open .d-toast { bottom: 76px; }
 #settingsIntegrationsView [hidden] { display: none !important; }
 .d-intghead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-bottom: 4px; font-size: 13.5px; color: var(--muted); }
 .d-intghead .sp { margin-left: auto; }
+/* 맨 위 한 줄 요약 — `● 연결 N개 모두 잘 읽고 있어요`(점만 초록) / `● N개가 멈췄어요`(글자까지 빨강 600). */
+.d-intghead .lead .ok { color: var(--success); }
+.d-intghead .lead.k-neg { color: var(--urgent); font-weight: 600; }
+/* 빨간 점을 누르고 들어오면 멈춘 카드가 약 2초 붉은 판(시안 B). 동작 줄이기면 전환 없이 바탕만 바뀐다. */
+.d-intg.is-flash { margin: 0 -10px; padding-left: 10px; padding-right: 10px; border-radius: var(--r-sm); background: var(--urgent-bg); box-shadow: none; animation: none; }
+.d-intg { transition: background 400ms var(--ease); }
+@media (prefers-reduced-motion: reduce) { .d-intg { transition: none; } }
+/* 멈춘 카드의 이유 한 줄 — 상태 줄 바로 아래. */
+.d-intgwhy { margin-top: 2px; font-size: 12.5px; color: var(--urgent); }
+.d-intgwhy .d-ablink { color: var(--urgent); }
+/* ⋯ › 최근 기록 — 시각 · 결과 한 줄(최근 10개), 실패는 빨강. 맨 아래 `오류 전문 복사`. */
+.d-ilog { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.d-ilog li { display: flex; gap: 10px; min-width: 0; }
+.d-ilog .t { flex: none; min-width: 44px; color: var(--dim); }
+.d-ilog .bad { color: var(--urgent); }
+.d-ilog .more { margin-top: 4px; }
+.d-ilog .more .d-ablink { min-height: 28px; }
 .d-intg { padding: 12px 0; }
 .d-intg + .d-intg { box-shadow: inset 0 1px 0 var(--hair); }
 .d-intgtop { display: flex; align-items: center; gap: 8px 10px; min-height: 38px; flex-wrap: wrap; }
@@ -2327,6 +2328,18 @@ a.d-btn { text-decoration: none; }
 .d-ich .nm { min-height: 32px; padding: 6px 10px; font-size: 13px; }
 .d-ich .d-din.nm:disabled { opacity: 0.5; }
 .d-ich .nm.is-done { font-size: 12.5px; font-weight: 600; color: var(--success); }
+/* 채널 고르기(시안 E·F) — 연결된 채널은 고정 글자(`#이름` + 작은 `연결됨`), 새 줄은 칸 위 작은 라벨 `새 채널 이름`.
+   뺄 줄은 --urgent-bg 판 + 이름에 가운데 줄, 사라진 채널(다시 만들기)은 --warn-bg 판. */
+.d-ich .lock { font-size: 13px; font-weight: 600; color: var(--text); padding: 6px 0; overflow-wrap: anywhere; }
+.d-ich .lock small { display: block; font-size: 11.5px; font-weight: 400; color: var(--dim); }
+.d-ich .nmwrap { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.d-ich .nmwrap small { font-size: 11.5px; color: var(--dim); }
+.d-ich.is-off { background: var(--urgent-bg); }
+.d-ich.is-off .lock { color: var(--dim); text-decoration: line-through; }
+.d-ich.is-gone { background: var(--warn-bg); }
+.d-ich .sub.k-neg { color: var(--urgent); }
+.d-inote { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border-radius: var(--r-sm); background: var(--neutral-bg); font-size: 13px; color: var(--muted); line-height: 1.6; }
+.d-inote b { color: var(--text); font-weight: 600; }
 .d-ich .d-icherr { grid-column: 2 / -1; }
 /* ③ 확인 · 연결 완료 한 줄 */
 .d-iok { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-radius: var(--r-sm); background: var(--success-bg); color: var(--success); font-size: 14px; font-weight: 600; }
@@ -2367,7 +2380,8 @@ a.d-btn { text-decoration: none; }
   .d-intgtop .st ~ .d-btn:not([hidden]), .d-intgtop .st ~ .d-btn[hidden] + .d-more { margin-left: auto; }
   .d-intgtop .st ~ .d-btn:not([hidden]) ~ .d-ifetch { margin-left: 0; }
   .d-ich { grid-template-columns: 20px minmax(0, 1fr); }
-  .d-ich .nm { grid-column: 2; }
+  .d-ich .nm, .d-ich .nmwrap, .d-ich .lock { grid-column: 2; }
+  .d-ich .nmwrap .nm { grid-column: auto; }
   .d-intgbody { padding: 12px; }
 }
 

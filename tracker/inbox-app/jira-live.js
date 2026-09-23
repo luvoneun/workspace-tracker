@@ -10,6 +10,7 @@
 const REFRESH_MS = 10 * 60 * 1000; // 뒤에서 도는 갱신 주기
 const SOFT_MS = 5 * 60 * 1000;     // 이보다 묵은 것을 보면 조회가 뒤에서 갱신을 건다(기다리지 않는다)
 const KEEP_MS = 30 * 60 * 1000;    // 갱신이 계속 실패해도 이만큼은 이전 값을 쓴다
+const HISTORY_MAX = 10;            // 최근 기록으로 들고 있는 읽기 수
 
 function createJiraLive({
   list, keys = () => [], connected = () => true, now = Date.now,
@@ -21,6 +22,9 @@ function createJiraLive({
   // 마지막 읽기가 실패했으면 그때와 갈래({ at, auth }) — 연동 탭의 상태 줄·`지금 가져오기`가 쓴다.
   // `auth`는 지라가 401/403으로 답했다는 뜻(토큰 만료·권한 없음). 성공하면 지운다.
   let failure = null;
+  // 최근 읽기 기록(최대 10개, 메모리에만) — 연동 카드 ⋯ › 최근 기록이 쓴다. 이슈 내용은 싣지 않는다(시각·성공·개수·갈래뿐).
+  const log = [];
+  const note = (entry) => { log.unshift({ at: now(), ...entry }); log.length = Math.min(log.length, HISTORY_MAX); };
 
   // 지금 쓸 수 있는 값. 너무 묵은 것은 여기서 버린다(그때부터는 파일 스냅샷이 쓰인다).
   function current() {
@@ -38,13 +42,18 @@ function createJiraLive({
         if (answer && answer.ok && answer.connected && Array.isArray(answer.issues)) {
           held = { at: now(), issues: answer.issues };
           failure = null;
+          note({ ok: true, count: answer.issues.length });
           return true;
         }
         // 실패는 조용히 흘린다 — 이전 값(또는 파일 스냅샷)이 그대로 쓰인다.
-        if (answer && answer.ok === false) failure = { at: now(), auth: answer.kind === 'auth' };
+        if (answer && answer.ok === false) {
+          failure = { at: now(), auth: answer.kind === 'auth' };
+          note({ ok: false, auth: failure.auth });
+        }
         return false;
       } catch {
         failure = { at: now(), auth: false };
+        note({ ok: false, auth: false });
         return false;
       } finally {
         busy = null;
@@ -77,6 +86,7 @@ function createJiraLive({
     current, refresh, nudge, start, stop,
     started: () => !!timer,
     failure: () => failure,
+    history: () => log.map(entry => ({ ...entry })),
     // 테스트가 "이 타이머가 프로세스를 붙잡고 있지 않다"를 확인하는 자리다.
     holdsProcess: () => !!timer && typeof timer.hasRef === 'function' && timer.hasRef(),
   };

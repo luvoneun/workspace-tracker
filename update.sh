@@ -58,7 +58,8 @@ for arg in "$@"; do
 done
 
 # 업무 데이터로 세는 파일들. .gitignore의 "내 개인 업무 데이터"·"실행 중 생기는 상태"와 같은 목록이다.
-# 잠금 파일(.mutation.lock)은 되돌릴 대상이 아니라서 뺀다.
+# 잠금 파일(.mutation.lock)은 되돌릴 대상이 아니라서 뺀다. 매일 백업(automation/backup-data.sh)도 같은 목록을 쓴다
+# (거기서는 접속 암호 .access-token만 뺀다 — 테스트가 두 목록을 견준다).
 DATA_FILES="tasks.md decisions.md checks.md ideas.md weekly_reports.md calendar_today.md jira_issues.md slack_inbox.md meeting_drafts.json .trash.json .workflow.json .report-drafts.json .access-token .request-ledger.json .mutation-journal.json .data-version"
 STATE_FILES=".slack_capture_state.json .weekly_report_state.json .meeting_links.json"
 
@@ -84,7 +85,7 @@ PORT="$(printf '%s\n' "$CFG" | sed -n 2p)"
 
 VERSION="$(tr -d '[:space:]' < "$WORKSPACE/VERSION" 2>/dev/null)"
 
-# 진행 상황 파일 — 앱의 설정 › 상태 `업데이트 받기`가 2초마다 읽는다(update-runner.sh가 WORKSPACE_UPDATE_STATUS=1을 준다).
+# 진행 상황 파일 — 앱의 설정 › 앱 `업데이트 받기`가 2초마다 읽는다(update-runner.sh가 WORKSPACE_UPDATE_STATUS=1을 준다).
 # 환경변수가 없으면(터미널·업데이트.command) 아무것도 쓰지 않는다. 임시 파일에 쓴 뒤 이름을 바꿔 한 번에 바뀐다.
 STATUS_FILE="$INSTALL_DIR/update-status.json"
 STATUS_ACTION="update"
@@ -139,6 +140,8 @@ latest_tag() {
   git tag -l 'v[0-9]*.[0-9]*.[0-9]*' 2>/dev/null | sort -t. -k1.2,1n -k2,2n -k3,3n | tail -1
 }
 
+# 업데이트 직전 백업 목록 — 이 스크립트가 만든 이름(2026-09-23-1930)만 본다. 같은 폴더 안의 `daily/`
+# (backup-data.sh의 매일 백업, 그 안은 YYYY-MM-DD)는 이름이 달라 목록·정리·되돌리기 어디에도 잡히지 않는다.
 backup_dirs() {
   ls -1 "$BACKUP_ROOT" 2>/dev/null | grep -E "$BACKUP_NAME_RE" | sort
 }

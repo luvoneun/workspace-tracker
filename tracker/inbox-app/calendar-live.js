@@ -14,6 +14,7 @@ const { parseCalendar, todayEvents } = require('./ical');
 const REFRESH_MS = 30 * 60 * 1000;  // 뒤에서 도는 갱신 주기
 const SOFT_MS = 5 * 60 * 1000;      // 이보다 묵은 것을 보면 조회가 뒤에서 갱신을 건다(기다리지 않는다)
 const KEEP_MS = 3 * 60 * 60 * 1000; // 갱신이 계속 실패해도 이만큼은 이전 값을 쓴다
+const HISTORY_MAX = 10;             // 최근 기록으로 들고 있는 읽기 수
 
 function createCalendarLive({
   load, connected = () => true, now = Date.now, timeZone,
@@ -25,6 +26,9 @@ function createCalendarLive({
   let timer = null;
   let failedAt = null;
   let failedAuth = false; // 마지막 실패가 "주소를 읽을 권한 없음"(401/403/404 — 주소가 바뀌었거나 지워졌다)인지
+  // 최근 읽기 기록(최대 10개, 메모리에만) — 연동 카드 ⋯ › 최근 기록이 쓴다. 주소·일정 내용은 싣지 않는다.
+  const log = [];
+  const note = (entry) => { log.unshift({ at: now(), ...entry }); log.length = Math.min(log.length, HISTORY_MAX); };
 
   const dayKey = () => {
     const t = new Date(now());
@@ -50,17 +54,19 @@ function createCalendarLive({
       try {
         const text = await load();
         const calendar = parseCalendar(text);
-        if (!calendar.ok) { failedAt = now(); failedAuth = false; return false; }
+        if (!calendar.ok) { failedAt = now(); failedAuth = false; note({ ok: false, auth: false }); return false; }
         held = { at: now(), calendar };
         memo = null;
         failedAt = null;
         failedAuth = false;
+        note({ ok: true, count: (current() || { events: [] }).events.length });
         if (typeof onUpdate === 'function') { try { onUpdate(); } catch { /* 곁들이는 일이다 */ } }
         return true;
       } catch (error) {
         // 실패는 조용히 흘린다 — 이전 값(또는 파일 스냅샷)이 그대로 쓰인다. 주소는 어디에도 남기지 않는다.
         failedAt = now();
         failedAuth = !!(error && error.auth);
+        note({ ok: false, auth: failedAuth });
         return false;
       } finally {
         busy = null;
@@ -95,6 +101,7 @@ function createCalendarLive({
     failed: () => failedAt !== null,
     // 마지막 실패의 때와 갈래({ at, auth }), 없으면 null.
     failure: () => (failedAt === null ? null : { at: failedAt, auth: failedAuth }),
+    history: () => log.map(entry => ({ ...entry })),
     holdsProcess: () => !!timer && typeof timer.hasRef === 'function' && timer.hasRef(),
   };
 }

@@ -1377,7 +1377,7 @@ function renderActiveTabLists() {
 // 그날의 첫 자동 갱신(캘린더 9:13 · 지라 9:17 · 슬랙 9시대)이 끝났을 시각.
 const SYNC_FIRST_RUN_BY = '09:30';
 
-// 지금 낡은 자동 갱신들. 톱니바퀴를 누르면 설정 > 상태의 첫 번째 낡은 줄을 밝힌다.
+// 지금 낡은 자동 갱신들(톱니바퀴의 주황 점과 툴팁). 누르면 설정 › 연동이 열린다.
 let syncStale = [];
 function renderDateBar(data) {
   if (data.title) {
@@ -1411,7 +1411,7 @@ function renderDateBar(data) {
   const stale = found.filter(source => !(beforeFirstRun && !source.error && ageOf(source).days === 1));
 
   // 경고는 머리줄에 글자로 끼어들지 않는다 — 날짜 옆에 칸이 생기면 탭이 밀렸다(한 칸으로 줄여도 마찬가지).
-  // 설정 톱니바퀴의 주황 점으로만 알리고, 무엇이 낡았는지는 톱니바퀴의 툴팁과 설정 > 상태가 말한다.
+  // 설정 톱니바퀴의 주황 점으로만 알리고, 무엇이 낡았는지는 톱니바퀴의 툴팁과 설정 › 연동의 카드가 말한다.
   // 실패(빨간 점, fetchAutomationStatus)가 함께 있으면 빨간 점이 이긴다(ui.css).
   syncStale = stale.map(source => ({ key: source.key, text: `${source.name} ${ageOf(source).text}` }));
   const gear = document.getElementById('settingsBtn');
@@ -3739,7 +3739,7 @@ function guideGoSlackHow() {
   if (typeof settingsOpen === 'function') settingsOpen('guide');
   if (typeof settingsGuideShow === 'function') settingsGuideShow('슬랙에서 이렇게 보내요');
 }
-function guideGoAppPlace() { if (typeof settingsOpen === 'function') settingsOpen('personalize', 'app-place'); }
+function guideGoAppPlace() { if (typeof settingsOpen === 'function') settingsOpen('app', 'app-place'); }
 
 // 굵은 글자가 섞인 **코드에 적힌 고정 문장**을 innerHTML 없이 세운다(조각: 문자열 또는 ['b', 글]).
 function guideRich(node, parts) {
@@ -3779,7 +3779,7 @@ function guideRows() {
   const where = document.createElement('button');
   where.type = 'button';
   where.className = 'd-ablink d-guidewhere';
-  where.textContent = '앱이 어디 있는지 모르겠으면 → 설정 › 꾸미기 › 앱 위치';
+  where.textContent = '앱이 어디 있는지 모르겠으면 → 설정 › 앱 › 앱 위치';
   where.addEventListener('click', guideGoAppPlace);
   dock.words.append(picture, where);
   return [

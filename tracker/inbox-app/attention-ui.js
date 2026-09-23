@@ -1,7 +1,7 @@
 // 오늘 탭 본문 맨 위의 `반응 필요` 구역 (1차: 지라 댓글).
 // "내가 답해야 하는 것"을 한 자리에 모으고, **내가 답하면 스스로 사라진다**(댓글 id가 줄의 id라서
 // 내가 댓글을 달면 다음 갱신에서 그 줄이 없어진다). 0개이거나 연결이 없으면 구역 자체를 그리지 않는다 —
-// 매일 뜨는 `없어요`는 소음이다(작동 여부는 설정 > 상태에서 본다).
+// 매일 뜨는 `없어요`는 소음이다(작동 여부는 설정 › 연동의 지라 카드에서 본다).
 //
 // 값은 서버 메모리에서만 오고(`GET /api/attention`) 화면도 들고 있지 않는다. 저장하는 것은
 // `했어요`로 치운 줄의 id 하나뿐이다(`POST /api/attention/dismiss`).
@@ -24,7 +24,7 @@ const attentionLabel = item => item.summary || item.key || '';
 const ATTENTION_SOURCE_NAME = { jira: '지라', figma: '피그마' };
 const attentionSourceName = item => ATTENTION_SOURCE_NAME[item.source] || '';
 
-// 줄 오른쪽의 `Yosef 외 1명 · 2시간 전`. 시각은 설정 > 상태와 같은 부품(relativeTimeFrom)을 쓴다.
+// 줄 오른쪽의 `Yosef 외 1명 · 2시간 전`. 시각은 설정 창과 같은 부품(relativeTimeFrom)을 쓴다.
 function attentionWhoText(item) {
   const who = `${item.who || ''}${item.others ? ` 외 ${item.others}명` : ''}`.trim();
   const when = item.at ? relativeTimeFrom(item.at) : '';
@@ -32,7 +32,7 @@ function attentionWhoText(item) {
 }
 
 // 머리줄의 조용한 한 마디 — **평소에는 아무것도 적지 않는다**(`새로 들어온 것 4`처럼 제목+개수만
-// 있어야 다른 구역과 리듬이 맞는다. 작동 여부는 이미 설정 > 상태에서 본다). 값이 묵어서 이전 값을
+// 있어야 다른 구역과 리듬이 맞는다. 작동 여부는 이미 설정 › 연동의 지라 카드에서 본다). 값이 묵어서 이전 값을
 // 쓰는 동안에만(`stale`) `… 기준`이라고 밝힌다(주의색 글자) — 이건 알아 둬야 하는 정보라 남긴다.
 function attentionNoteText(state = attentionState) {
   if (!state.updatedAt || !state.stale) return '';
@@ -241,24 +241,4 @@ function attentionRender() {
     nodes.push(more);
   }
   list.replaceChildren(...nodes);
-}
-
-// 설정 > 상태의 마지막 줄. 자동화가 아니라 앱이 직접 읽는 것이라 목록 끝에 조용히 붙는다.
-function attentionStatusRow() {
-  if (!attentionState.connected) return null;
-  const row = document.createElement('div');
-  row.className = 'd-auto';
-  row.dataset.automation = 'attention';
-  const top = document.createElement('div');
-  top.className = 'd-autotop';
-  const name = document.createElement('span');
-  name.className = 'nm';
-  name.textContent = '반응 필요 · 지라 댓글';
-  const state = document.createElement('span');
-  const when = attentionState.updatedAt ? `${relativeTimeFrom(attentionState.updatedAt)} 확인` : '아직 읽지 못했어요';
-  state.className = 'st' + (attentionState.error ? ' k-neg' : attentionState.stale ? ' k-warn' : '');
-  state.textContent = attentionState.error ? attentionState.error : attentionState.stale ? `${when} · 다시 읽지 못했어요` : when;
-  top.append(name, state);
-  row.appendChild(top);
-  return row;
 }

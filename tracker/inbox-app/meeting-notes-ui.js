@@ -200,7 +200,7 @@ function meetingNotesAnnounce(status) {
   if (status.state === 'failed') {
     meetingNotesBeforeToday = null;
     showNotice('미팅 노트를 가져오지 못했어요', true, null,
-      { label: '자세히', onClick: () => { if (typeof settingsOpen === 'function') settingsOpen('status', 'tiro'); } });
+      { label: '자세히', onClick: () => { if (typeof settingsOpen === 'function') settingsOpen('integrations', 'log:notes'); } });
     return;
   }
   if (status.scope === 'meeting') {

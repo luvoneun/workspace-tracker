@@ -137,6 +137,11 @@ if (kind === "uses") {
   // 캘린더를 비밀 주소(iCal)로 앱이 직접 읽으면 "ical" — 그때는 Claude로 읽는 calendar-sync를 등록하지 않는다.
   const calendar = group("calendar");
   process.stdout.write(calendar.source === "ical" ? "ical" : "");
+} else if (kind === "slackPlaceholder") {
+  // 예시 자리표시자가 남은 채널이 있는지 — 채널 고르기에서 뺀 채널(off)은 없는 것으로 본다.
+  const channels = group("slack").channels || {};
+  const left = Object.values(channels).some(one => one && one.off !== true && one.id === "여기에_채널ID");
+  process.stdout.write(left ? "yes" : "no");
 } else if (kind === "slackToken") {
   const file = String(group("slack").tokenFile || "");
   process.stdout.write(file.replace(/^~(?=\/|$)/, require("os").homedir()));
@@ -164,7 +169,8 @@ USING=""
 ok "연동:${USING:- (없음 — 직접 입력만 사용)}"
 
 if [ "$USE_SLACK" = "yes" ]; then
-  grep -q "여기에_채널ID" "$CONFIG" && die "workspace.config.json의 채널 ID를 아직 채우지 않았어요."
+  SLACK_PLACEHOLDER=$(config_read slackPlaceholder) || die "$CONFIG_UNREADABLE"
+  [ "$SLACK_PLACEHOLDER" = "yes" ] && die "workspace.config.json의 채널 ID를 아직 채우지 않았어요."
   TOKEN_FILE=$(config_read slackToken) || die "$CONFIG_UNREADABLE"
   if [ -n "$TOKEN_FILE" ] && [ -f "$TOKEN_FILE" ]; then
     ok "슬랙 토큰 있음"
@@ -402,7 +408,7 @@ cat > "$AGENTS_DIR/$LABEL.app-refresh.plist" << PLIST
 </plist>
 PLIST
 
-# 앱 안 `업데이트 받기` — 일정표가 없다. 설정 › 상태에서 `업데이트 받기`·`이전 버전으로 되돌리기`를 누르면 앱 서버가
+# 앱 안 `업데이트 받기` — 일정표가 없다. 설정 › 앱에서 `업데이트 받기`·`이전 버전으로 되돌리기`를 누르면 앱 서버가
 # 요청 표시 파일 하나를 쓰고(프로세스는 띄우지 않는다), launchd가 그걸 보고 update-runner.sh를 한 번 돌린다.
 # 연동과 무관하게 늘 등록한다. 실행기가 도는 중에는(WORKSPACE_UPDATE_RUNNER=1) 이 등록을 다시 올리지 않는다 — 올리면 그 실행이 끊긴다.
 cat > "$AGENTS_DIR/$LABEL.update.plist" << PLIST
@@ -434,10 +440,10 @@ cat > "$AGENTS_DIR/$LABEL.update.plist" << PLIST
 </plist>
 PLIST
 
-# 업무 데이터 백업 — 하루 한 번(19:30). tracker/의 데이터는 코드 저장소에서 제외돼 있어서
-# 따로 백업한다. 백업 저장 공간($INSTALL_DIR/data-backup.git)을 만들어 둔 경우에만 등록한다
+# 업무 데이터 백업 — 하루 한 번(19:30), **늘 등록한다**(나와 동료가 같은 기본 동작). tracker/의 데이터는
+# 코드 저장소에서 제외돼 있어서 따로 백업한다: 이 맥 안 ~/workspace-data-backup/daily/에 7일치(모두) +
+# 백업 저장 공간($INSTALL_DIR/data-backup.git)을 만들어 둔 사람만 GitHub에도 한 겹 더
 # (만드는 법은 tracker/inbox-app/README.md의 "업무 데이터 백업").
-if [ -d "$INSTALL_DIR/data-backup.git" ]; then
 cat > "$AGENTS_DIR/$LABEL.data-backup.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -464,7 +470,6 @@ cat > "$AGENTS_DIR/$LABEL.data-backup.plist" << PLIST
 </dict>
 </plist>
 PLIST
-fi
 
 # 앱 서버 — 로그인하면 뜨고, 꺼지면 다시 뜬다
 # 앱 안 업데이트(실행기)에서 부를 때는 update.sh가 이미 새 코드로 다시 띄웠으므로, 내용이 그대로면 다시 올리지 않는다.
@@ -570,12 +575,13 @@ echo
 echo "  앱 주소   : $URL"
 [ -n "$EXTRA_HOST" ] && echo "  다른 기기 : http://$EXTRA_HOST:$PORT"
 echo "  Dock 추가 : $APP_BUNDLE 을 Dock으로 끌어다 놓으세요"
-echo "  업데이트  : 앱의 설정 > 상태에서 받거나, 이 폴더의 업데이트.command를 더블클릭"
+echo "  업데이트  : 앱의 설정 > 앱에서 받거나, 이 폴더의 업데이트.command를 더블클릭"
 echo "  연동      : 앱의 설정 > 연동에서 켤 수 있어요"
 [ -n "$EXTRA_HOST" ] || echo "  폰에서    : Tailscale 설치 후 workspace.config.json의 server.extraHost에 주소 입력"
 echo
 echo "  자동화 상태 확인 : launchctl list | grep workspace.app"
 echo "  로그             : $INSTALL_DIR/logs/"
+echo "  데이터 백업      : 매일 19:30 ~/workspace-data-backup/daily/ (7일치)"
 echo
 # /mcp 연결은 Claude Code로 도는 연동(슬랙 수집·캘린더 Claude 갈래·티로)이 켜져 있을 때만 알린다.
 # 지라·캘린더 비밀 주소는 앱이 직접 읽으므로 Claude 연결이 필요 없다.

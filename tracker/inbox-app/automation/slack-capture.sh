@@ -21,7 +21,7 @@ STATE="$APP/.slack_capture_state.json"
 NODE_BIN="$(ls -d "$HOME"/.nvm/versions/node/*/bin 2>/dev/null | tail -1)"
 export PATH="${NODE_BIN:+$NODE_BIN:}/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 NODE="$(command -v node)"
-# 로그·잠금 폴더는 앱 상태 탭이 읽는 고정 경로다. 테스트에서만 임시 폴더로 바꿔 끼운다.
+# 로그·잠금 폴더는 앱의 연동 카드(상태 줄·최근 기록)가 읽는 고정 경로다. 테스트에서만 임시 폴더로 바꿔 끼운다.
 LOG_DIR="${AUTOMATION_LOG_DIR:-$HOME/.local/share/workspace-automation/logs}"
 LOG="$LOG_DIR/slack-capture.log"
 LOCK_DIR="$LOG_DIR/.slack-capture.lock"
@@ -134,12 +134,19 @@ fi
 # "PermissionError: Operation not permitted"로 조용히 막혀서(2>/dev/null에 삼켜짐)
 # CHANNELS가 통째로 비어버리고, 그러면 아무 채널도 확인 안 하고 매번 "새 메시지 없음"으로
 # 끝나버렸다 — 실제로 몇 시간씩 못 가져온 원인이 이거였다. 이미 잘 되던 node로 바꾼다.
-CHANNELS=$("$NODE" -e "
-const fs = require('fs');
-const c = JSON.parse(fs.readFileSync('$CONFIG', 'utf-8'));
+#
+# 채널 고르기에서 뺀 채널(`off: true`)은 없는 것으로 본다 — 읽지도, Claude에게 넘기지도 않는다.
+# `since`(슬랙 ts)가 있으면 "그때부터" 읽는다: 새로 만든 채널은 만든 때, 뺐다가 다시 켠 채널은 다시 켠 때.
+# 한 칸은 `채널ID:my-키:since`(since가 없으면 끝이 비어 있다).
+CHANNELS=$("$NODE" -e '
+const fs = require("fs");
+const c = JSON.parse(fs.readFileSync(process.argv[1], "utf-8"));
 const ch = (c.slack && c.slack.channels) || {};
-process.stdout.write(Object.entries(ch).map(([k, v]) => v.id + ':my-' + k).join(' '));
-" 2>>"$LOG")
+process.stdout.write(Object.entries(ch)
+  .filter(([k, v]) => v && typeof v.id === "string" && /^[^\s:]+$/.test(v.id) && v.off !== true)
+  .map(([k, v]) => v.id + ":my-" + k + ":" + (/^[0-9]+[.][0-9]+$/.test(String(v.since || "")) ? v.since : ""))
+  .join(" "));
+' "$CONFIG" 2>>"$LOG")
 
 # 토큰 파일도 bash의 [ -f ]/cat이 아니라 node로 읽는다 — 같은 Desktop 밑 파일인데도
 # node로 읽은 workspace.config.json은 되고 bash 내장 test/cat으로 읽은 .slack_token은
@@ -170,8 +177,18 @@ fi
 # 아예 Desktop 밑의 실행 파일을 부르지 않는 쪽으로 피해간다.
 for entry in $CHANNELS; do
   id="${entry%%:*}"
-  key="${entry##*:}"
-  cursor=$("$NODE" -e "try{const s=require('$STATE');process.stdout.write(s['$key']||'')}catch(e){}" 2>/dev/null)
+  rest="${entry#*:}"
+  key="${rest%%:*}"
+  since="${rest#*:}"
+  # 어디서부터 볼지 = 수집 커서와 since 중 큰 값(슬랙 ts는 소수라 글자가 아니라 수로 견준다).
+  cursor=$("$NODE" -e '
+const [file, key, since] = process.argv.slice(1);
+let cursor = "";
+try { cursor = String(JSON.parse(require("fs").readFileSync(file, "utf8"))[key] || ""); } catch (e) {}
+const ok = v => /^[0-9]+[.][0-9]+$/.test(v);
+const n = v => { const [s, f] = v.split("."); return BigInt(s) * 1000000n + BigInt((f + "000000").slice(0, 6)); };
+process.stdout.write(!ok(since) ? cursor : (!ok(cursor) || n(since) > n(cursor) ? since : cursor));
+' "$STATE" "$key" "$since" 2>/dev/null)
   if [ -z "$TOKEN" ]; then
     failures=$((failures + 1))
     echo "$(date '+%Y-%m-%d %H:%M:%S') $key 채널 확인 실패 — 슬랙 토큰을 읽을 수 없음" >> "$LOG"
@@ -202,9 +219,11 @@ for entry in $CHANNELS; do
 done
 
 # 상태도 앱의 저장 경로를 사용한다. 수집 전에는 성공으로 기록하지 않는다.
+# 응답(`{"ok":true}`)은 줄바꿈 없이 나오므로 로그에 남기지 않는다 — 남기면 다음 줄이 그 뒤에 붙어
+# 앱이 "마지막 실행"을 못 읽고 옛 실패를 계속 보여 줬다. 오류만 로그로 보낸다.
 record_health() {
   "$NODE" -e 'process.stdout.write(JSON.stringify({success:process.argv[1]==="true",error:process.argv[2]}))' "$1" "${2:-}" |
-    "$NODE" "$APP/import-record.js" health >> "$LOG" 2>&1
+    "$NODE" "$APP/import-record.js" health >/dev/null 2>>"$LOG"
 }
 if [ "$failures" -gt 0 ]; then
   record_health false "일부 채널을 확인하지 못했습니다."
@@ -228,8 +247,15 @@ fi
 #  - 통째로 열어두던 Bash 대신 스킬이 실제로 쓰는 두 명령만 허용한다.
 # 사람이 보는 앞이 아닌 자동 실행에서 실수로 파일을 건드리는 걸 막는 안전장치다
 # (OS 수준의 격리가 아니다 — 같은 계정 권한으로 도는 건 그대로다).
+# Claude에게는 켜 둔(뺀 채널이 아닌) 채널의 지침만 넘긴다.
+SKILLS=""
+for pair in todo:slack-todos.md align:slack-alignments.md someday:slack-someday.md waiting:slack-waiting.md; do
+  case " $CHANNELS" in
+    *":my-${pair%%:*}:"*) SKILLS="${SKILLS:+$SKILLS, }${pair#*:}" ;;
+  esac
+done
 "$HOME/.local/share/workspace-automation/run-task.sh" "slack-capture" \
-  ".claude/skills/ 폴더의 slack-todos.md, slack-alignments.md, slack-someday.md, slack-waiting.md 파일을 차례로 읽고 각 지시대로 실행해라. 새로 캡처된 항목이 있으면 몇 개인지, 어떤 내용인지 간단히 한국어로 보고해라 (원본 스레드를 못 읽은 항목, 중복이라 건너뛴 항목은 반드시 별도로 알려라). 새 항목이 전혀 없으면 \"(새 항목 없음)\" 한 줄만 출력하고 끝내라." \
+  ".claude/skills/ 폴더의 ${SKILLS} 파일을 차례로 읽고 각 지시대로 실행해라. 새로 캡처된 항목이 있으면 몇 개인지, 어떤 내용인지 간단히 한국어로 보고해라 (원본 스레드를 못 읽은 항목, 중복이라 건너뛴 항목은 반드시 별도로 알려라). 새 항목이 전혀 없으면 \"(새 항목 없음)\" 한 줄만 출력하고 끝내라." \
   "mcp__slack,Read,ToolSearch,Bash(node tracker/inbox-app/import-record.js:*),Bash(bash tracker/inbox-app/fetch_slack_channel.sh:*)" \
   "manual" \
   "Write,Edit,NotebookEdit"

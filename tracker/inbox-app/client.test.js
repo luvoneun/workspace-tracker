@@ -4572,46 +4572,10 @@ test('BJLIVE: 목록 갱신이 실패하거나 옛 서버라 없어도 새로고
   assert.equal(old.app.nodes.has('liveRegion'), false);
 });
 
-test('BJLIVE: 설정 > 상태의 지라 한 마디는 앱이 직접 읽고 있을 때만 나온다', () => {
-  const app = pureClient();
-  const note = (sync, at) => app.run(`jiraLiveNote(${JSON.stringify(sync)}, ${at})`);
-  const read = Date.UTC(2026, 8, 25, 1, 0, 0);
-  assert.equal(note({ live: true, liveAt: new Date(read).toISOString() }, read + 3 * 60000), '목록은 앱이 직접 읽어요 · 3분 전');
-  assert.equal(note({ live: true, liveAt: new Date(read).toISOString() }, read + 1000), '목록은 앱이 직접 읽어요 · 방금');
-  assert.equal(note({ live: true, liveAt: new Date(read).toISOString() }, read + 125 * 60000), '목록은 앱이 직접 읽어요 · 2시간 전');
-  // 대비책(스냅샷 파일)을 쓰는 동안에는 한 마디가 없다 — 그 줄은 지금까지처럼 자동화 기록만 말한다.
-  assert.equal(note({ connected: true, lastSync: '2026-09-24', stale: true }, read), '');
-  assert.equal(note({ live: true, liveAt: '어제쯤' }, read), '');
-  assert.equal(note(null, read), '');
-});
+// BJLIVE의 `설정 > 상태` 지라 줄(jiraLiveNote·jiraLiveStatusRow)은 상태 탭과 함께 없앴다 — 같은 사실(연결됨·
+// 앱이 직접 읽는 때·연결 안 됨)은 이제 연동 탭 지라 카드의 상태 줄이 말한다(아래 WP-E 지라 카드 테스트).
 
-// jira-sync 자동화(지라 담당 이슈 캐시 갱신)는 없앴다 — 앱이 지라를 직접 읽는다(DECISIONS 2026-09-24).
-// 예전엔 그 자동화 줄에 jiraLiveNote 한 마디만 덧붙였지만, 지금은 반응 필요(attentionStatusRow)와
-// 같은 자리에 조용한 줄 하나로 따로 선다.
-test('BJLIVE: 설정 > 상태의 지라 직접 읽기 줄은 연결됨·연결 안 됨·꺼짐 세 갈래다', () => {
-  const app = pureClient();
-  const row = (sync, at) => app.run(`jiraLiveStatusRow(${JSON.stringify(sync)}, ${at})`);
-  const read = Date.UTC(2026, 8, 25, 1, 0, 0);
-
-  const connected = row({ used: true, connected: true, live: true, liveAt: new Date(read).toISOString() }, read + 3 * 60000);
-  assert.equal(nodeFind(connected, 'nm').textContent, '지라');
-  assert.equal(nodeFind(connected, 'st').textContent, '앱이 직접 읽는 중 · 3분 전');
-  assert.equal(nodeFind(connected, 'st').className, 'st');
-  assert.equal(connected.dataset.automation, 'jira-live');
-
-  const notLiveYet = row({ used: true, connected: true }, read);
-  assert.equal(nodeFind(notLiveYet, 'st').textContent, '앱이 직접 읽는 중', '아직 읽은 시각이 없어도 연결됐으면 이렇게 말한다');
-
-  const disconnected = row({ used: true, connected: false }, read);
-  assert.equal(nodeFind(disconnected, 'nm').textContent, '지라');
-  assert.equal(nodeFind(disconnected, 'st').textContent, '연결 안 됨');
-  assert.equal(nodeFind(disconnected, 'st').className, 'st k-neg');
-
-  assert.equal(row({ used: false }, read), null, '지라를 끈 설정이면 줄 자체가 없다');
-  assert.equal(row(null, read), null);
-});
-
-// ---------- BNOTES B: 설정 > 상태의 슬랙 처리 대장 ----------
+// ---------- BNOTES B: 슬랙 처리 대장(설정 › 연동 › 슬랙 ⋯ › 최근 기록 맨 위) ----------
 test('slackLedgerFromTail: 처리 대장 문장을 가장 최근 것 하나만 찾고, 그 실행의 건너뛴 것·⚠️ 줄만(각 상한까지) 모은다', () => {
   const app = pureClient();
   const ledger = tail => JSON.parse(app.run(`JSON.stringify(slackLedgerFromTail(${JSON.stringify(tail)}))`));
@@ -4651,7 +4615,7 @@ test('slackLedgerFromTail: 처리 대장 문장을 가장 최근 것 하나만 �
   assert.equal(mismatchResult.counts, null);
 });
 
-test('slackLedgerNotes: 처리 대장을 설정 > 상태의 슬랙 줄 아래 조용한 줄로 그리고 0인 항목은 흐리게, 합이 안 맞으면 주의색, 문장이 없으면 아무것도 안 그린다', () => {
+test('slackLedgerNotes: 처리 대장을 슬랙 최근 기록 위 조용한 줄로 그리고 0인 항목은 흐리게, 합이 안 맞으면 주의색, 문장이 없으면 아무것도 안 그린다', () => {
   const app = pureClient();
   app.context.document.createTextNode = text => ({ textContent: String(text) });
   // 가짜 DOM에는 textContent 자동 합산이 없다 — 자식의 textContent를 이어 붙여 본다(nodeText와 같은 생각).
@@ -5397,7 +5361,8 @@ test('BTRASH: 목록은 종류·문구·프로젝트와 삭제 시각을 한 줄
   const fixture = trashClient();
   await fixture.app.run("settingsTrashLoad().then(() => settingsSetTab('trash'))");
   assert.equal(fixture.app.nodes.get('settingsTrashView').hidden, false);
-  assert.equal(fixture.app.nodes.get('settingsStatusView').hidden, true);
+  assert.equal(fixture.app.nodes.get('settingsIntegrationsView').hidden, true);
+  assert.equal(fixture.app.nodes.get('settingsAppView').hidden, true);
   const rows = fixture.rows();
   assert.equal(rows.length, 3);
   assert.equal(nodeFind(rows[1], 'kd').textContent, '할 일');
@@ -6332,24 +6297,13 @@ test('BATTENTION: 헤더 새로고침은 다음 읽기 한 번만 `fresh=1`로 �
   assert.equal(fixture.sent[fixture.sent.length - 1].url, '/api/attention', '한 번만 쓰인다');
 });
 
-test('BATTENTION: 설정 > 상태에는 `반응 필요 · 지라 댓글` 한 줄이 선다', async () => {
-  const fixture = attentionClient();
-  await fixture.app.run('attentionLoad()');
-  const row = fixture.app.run('attentionStatusRow()');
-  assert.equal(nodeFind(row, 'nm').textContent, '반응 필요 · 지라 댓글');
-  assert.equal(nodeFind(row, 'st').textContent, '3분 전 확인');
-  assert.equal(row.dataset.automation, 'attention');
-
+// BATTENTION의 `설정 > 상태 › 반응 필요 · 지라 댓글` 줄(attentionStatusRow)은 상태 탭과 함께 없앴다 — 같은 값
+// (마지막 확인 시각·읽지 못함·연결 없음)은 연동 탭 지라 카드 둘째 줄이 말한다(아래 WP-E 지라 카드 테스트).
+test('BATTENTION: 읽지 못해도 오늘 탭에 구역은 서지 않는다 — 작동 여부는 설정 › 연동의 지라 카드에서 본다', async () => {
   const broken = attentionClient({ items: [], updatedAt: null, stale: false, error: '지라 댓글을 읽지 못했어요.' });
   await broken.app.run('attentionLoad()');
-  const failed = broken.app.run('attentionStatusRow()');
-  assert.equal(nodeFind(failed, 'st').textContent, '지라 댓글을 읽지 못했어요.');
-  assert.equal(nodeFind(failed, 'st').className, 'st k-neg');
-  assert.equal(broken.zone().hidden, true, '실패해도 구역은 서지 않는다 — 상태는 설정에서 본다');
-
-  const off = attentionClient({ connected: false, items: [] });
-  await off.app.run('attentionLoad()');
-  assert.equal(off.app.run('attentionStatusRow()'), null, '연결이 없으면 줄 자체가 없다');
+  assert.equal(broken.zone().hidden, true, '실패해도 구역은 서지 않는다');
+  assert.equal(broken.app.run("typeof attentionStatusRow"), 'undefined', '상태 탭 줄은 없앴다');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -6510,7 +6464,7 @@ test('WP-D1 A. 목록: 카드 차례는 슬랙 수집 → 지라 → 캘린더 �
   assert.match(own.href, /docs\/%EC%97%B0%EB%8F%99\.md#/, 'docs/연동.md의 "다른 앱을 쓰면" 절');
 });
 
-test('WP-D1 A·H. 연결된 카드는 무엇이 되고 있는지 한 줄 + ⋯(보내는 법·채널 고치기·다시 연결·해제…), 큰 해제 버튼은 없다', async () => {
+test('WP-D1 A·H. 연결된 카드는 무엇이 되고 있는지 한 줄 + ⋯(보내는 법·채널 고르기·다시 연결·해제…), 큰 해제 버튼은 없다', async () => {
   const fx = intgClient({
     jira: { enabled: true, siteUrl: 'https://회사.atlassian.net', email: '나@회사.com', displayName: '하늘', hasToken: true, readAt: ago(3), issueCount: 12, attentionCount: 2 },
     slack: {
@@ -6519,19 +6473,19 @@ test('WP-D1 A·H. 연결된 카드는 무엇이 되고 있는지 한 줄 + ⋯(�
     },
   });
   await fx.app.run('renderSettingsIntegrations()');
-  assert.match(fx.shape("document.getElementById('settingsIntegrationsView').children[0]").text, /연결됨 2 · 남은 것 2$/);
+  assert.equal(fx.shape("document.getElementById('settingsIntegrationsView').children[0]").text, '● 연결 2개 모두 잘 읽고 있어요연결됨 2 · 남은 것 2');
 
   const jiraState = fx.find('jira', 'st')[0];
   assert.equal(fx.shape(`window.findByClass(document.getElementById('settingsIntegrationsView').children[2], 'st')[0]`).text, '● 하늘님 · 회사.atlassian.net · 3분 전 읽음');
   assert.ok(jiraState);
-  assert.match(fx.text('jira'), /지금 내 티켓 12개 · 반응 필요 댓글 2개/);
+  assert.match(fx.text('jira'), /내 티켓 12개 · 반응 필요 댓글 2개/);
   assert.equal(fx.shape(`window.findByClass(document.getElementById('settingsIntegrationsView').children[1], 'st')[0]`).text, '● #my-todo 외 1개 · 5분 전 읽음');
-  assert.match(fx.text('slack'), /#my-todo 할 일 · #my-waiting 기다리는 것/);
+  assert.match(fx.text('slack'), /매일 9–19시, 5분마다/, '둘째 줄은 도는 주기(오늘 수치가 없으면 앞부분만)');
   assert.equal(fx.toggle('slack').hidden, true, '연결된 카드는 평소 ⋯만 둔다');
   assert.ok(!/해제/.test(fx.text('jira')), '큰 해제 버튼은 두지 않는다');
 
   const slackMenu = fx.menu('slack');
-  same(slackMenu.map(section => section.map(entry => entry.label)), [['보내는 법', '채널 고치기', '다시 연결(토큰 바꾸기)'], ['해제…']]);
+  same(slackMenu.map(section => section.map(entry => entry.label)), [['보내는 법', '채널 고르기', '다시 연결(토큰 바꾸기)'], ['해제…']], '기록이 없으면 최근 기록 칸은 숨긴다');
   assert.equal(slackMenu[1][0].danger, true);
   const jiraMenu = fx.menu('jira');
   same(jiraMenu.map(section => section.map(entry => entry.label)), [['다시 연결(토큰 바꾸기)'], ['해제…']]);
@@ -6665,7 +6619,7 @@ test('WP-D1 C. 슬랙 ② 채널: 쓸 곳 네 줄(할 일은 필수), 고른 줄
   // 안내 두 줄
   const text = fx.text('slack');
   assert.match(text, /이름은 바꿔도 돼요 — 나중에 슬랙에서 바꿔도 그대로 이어져요\./);
-  assert.match(text, /나중에 더 고르고 싶으면 설정 › 연동 › 슬랙 ⋯ › 채널 고치기\./);
+  assert.match(text, /나중에 더하거나 빼고 싶으면 설정 › 연동 › 슬랙 ⋯ › 채널 고르기\./);
   assert.ok(!/링크/.test(text), '링크 붙여 넣기 갈래는 없다');
 
   // 빈 이름은 만들지 않고 그 줄에 알린다
@@ -6728,42 +6682,7 @@ test('WP-D1 C. 채널 만들기 권한이 없으면 남은 줄은 부르지 않�
   assert.equal(fx.find('slack', 'd-ich').length, 4, '② 단계에 그대로 머문다');
 });
 
-test('WP-D1 H. 채널 고치기는 ② 단계만 — 연결된 줄은 `#이름 연결됨`으로 잠겨 있고 추가만 되며, 토큰은 저장된 것을 쓴다', async () => {
-  const fx = intgClient({
-    slack: {
-      enabled: true, hasToken: true,
-      channels: { todo: { id: 'C1', name: '#my-todo' }, waiting: { id: 'C2', name: '#기다림', missing: true }, align: { id: '', name: '' }, someday: { id: '', name: '' } },
-    },
-  }, [
-    { body: { ok: true, id: 'C0SOME11', name: 'my-someday' } },
-    { body: { ok: true, restart: false } },
-  ]);
-  await fx.app.run('renderSettingsIntegrations()');
-  // 사라진 채널은 그 줄을 따로 알린다
-  const warn = fx.find('slack', 'k-warn')[0];
-  assert.equal(warn.dataset.missing, 'waiting');
-  assert.match(fx.text('slack'), /#기다림 채널을 읽지 못했어요 · 채널 고치기/);
-
-  fx.menu('slack')[0][1].onClick();
-  const steps = fx.find('slack', 'd-isteps')[0].children.filter(one => one.className !== 'ln').map(one => [one.textContent, one.className]);
-  same(steps, [['① 토큰 ✓', 'dn'], ['② 채널', 'on'], ['③ 확인', '']]);
-  assert.equal(fx.button('slack', '← 이전'), undefined, '토큰 단계로 돌아가지 않는다');
-  const todo = intgRow(fx, 'todo');
-  assert.equal(todo.children[2].textContent, '#my-todo 연결됨');
-  same([todo.children[0].checked, todo.children[0].disabled], [true, true]);
-  assert.equal(intgRow(fx, 'waiting').children[0].checked, false, '사라진 채널은 다시 고를 수 있다');
-  const make = () => fx.find('slack', 'pri')[0];
-  assert.equal(make().textContent, '고른 채널 0개 만들어 주기');
-  assert.equal(make().disabled, true);
-  intgRow(fx, 'someday').children[0].checked = true;
-  intgRow(fx, 'someday').children[0].listeners.change();
-  assert.equal(make().textContent, '고른 채널 1개 만들어 주기');
-  await make().listeners.click();
-  same(fx.sent.find(one => one.url === '/api/integrations/slack-channel').body, { token: '', name: 'my-someday' }, '토큰은 서버가 저장된 것을 쓴다');
-  same(fx.find('slack', 'd-iok').map(one => one.textContent), ['✓ #my-todo · 할 일 · 연결돼 있어요', '✓ #my-someday · 언젠가 · 잘 읽혀요']);
-  await fx.button('slack', '연결').listeners.click();
-  same(fx.sent.find(one => one.url === '/api/integrations/save').body, { slack: { enabled: true, token: '', channels: { someday: 'C0SOME11' } } }, '새로 만든 채널만 더한다');
-});
+// WP-D1 H(채널 고치기 — 더하기만)는 WP-E의 `채널 고르기`(더하기·빼기 한 화면)로 바뀌었다 — 아래 WP-E 테스트.
 
 test('WP-D1 E. 지라: 팀 주소가 있으면 묻지 않고(바꾸기로만 연다), 없으면 ② 계정에 주소 칸이 선다 — 연결하면 ③ ○○님으로 연결됐어요', async () => {
   const fx = intgClient({ jira: { siteUrl: 'https://회사.atlassian.net', email: '' } }, [
@@ -6874,7 +6793,7 @@ test('WP-D2 F. 연결된 캘린더: `비밀 주소로 읽는 중 · 오늘 3개 
     [{ body: { ok: true, restart: false, calendar: { source: 'ical', count: 2 } } }, { body: { ok: true, restart: false } }]);
   await fx.app.run('renderSettingsIntegrations()');
   assert.equal(fx.shape(`window.findByClass(document.getElementById('settingsIntegrationsView').children[3], 'st')[0]`).text, '● 비밀 주소로 읽는 중 · 오늘 3개 · 10분 전');
-  assert.match(fx.text('calendar'), /앱이 비밀 주소를 직접 읽어요 · 30분마다/);
+  assert.match(fx.text('calendar'), /열려요30분마다$/, '둘째 줄은 도는 주기(앱이 30분마다 직접 읽는다)');
   assert.match(fx.shape("document.getElementById('settingsIntegrationsView').children[0]").text, /연결됨 1 · 남은 것 3$/);
   const menu = fx.menu('calendar');
   same(menu.map(section => section.map(entry => entry.label)), [['다시 연결(주소 바꾸기)'], ['해제…']]);
@@ -7000,7 +6919,7 @@ test('WP-D2 I. 사용설명서 카드: 닫기 전까지는 기록이 있어도 �
   same(rows.map(row => row.children[0].textContent), ['Dock에 두기', '할 일 적기', '연동은 나중에', '슬랙에서 보내는 법']);
   same(rows.map(row => String(row.type || '')), ['', 'button', 'button', 'button'], 'Dock 줄만 버튼이 아니다(할 일이 앱 밖에 있다)');
   const text = index => fx.shape(`document.getElementById('startCardZone').children[0].children[${index + 1}]`).text;
-  assert.equal(text(0), 'Dock에 두기지금 Dock의 토끼 아이콘 우클릭 → 옵션 → Dock에 유지앱이 어디 있는지 모르겠으면 → 설정 › 꾸미기 › 앱 위치');
+  assert.equal(text(0), 'Dock에 두기지금 Dock의 토끼 아이콘 우클릭 → 옵션 → Dock에 유지앱이 어디 있는지 모르겠으면 → 설정 › 앱 › 앱 위치');
   assert.equal(text(1), '할 일 적기맨 위 칸에 적고 Enter');
   assert.equal(text(2), '연동은 나중에설정 ⚙ → 연동에서 하나씩');
   assert.equal(text(3), '슬랙에서 보내는 법전달로 채널에 보내요');
@@ -7014,7 +6933,7 @@ test('WP-D2 I. 사용설명서 카드: 닫기 전까지는 기록이 있어도 �
   rows[2].listeners.click();
   rows[3].listeners.click();
   rows[0].children[1].children.find(kid => String(kid.className).includes('d-guidewhere')).listeners.click();
-  same(fx.went(), [['close'], ['integrations', null], ['guide', null], ['show', '슬랙에서 이렇게 보내요'], ['personalize', 'app-place']]);
+  same(fx.went(), [['close'], ['integrations', null], ['guide', null], ['show', '슬랙에서 이렇게 보내요'], ['app', 'app-place']]);
 
   // 새로고침마다 다시 만들지 않는다(누르려던 줄의 초점이 사라지지 않게) — 기록이 있어도 그대로 선다
   fx.app.run('renderGuideCard()');
@@ -7108,11 +7027,12 @@ function personalizeClient(state = {}, replies = []) {
   return { app, sent, copied, view, text, find, inputs, button, posts };
 }
 
-test('WP-D2 L. 꾸미기: Dock 아이콘 · Dock 이름 · 워크스페이스 제목 + 안내 줄 + 저장, 맨 아래 앱 위치(경로 복사)', async () => {
+test('WP-D2 L. 꾸미기: Dock 아이콘 · Dock 이름 · 워크스페이스 제목 + 안내 줄 + 저장(앱 위치는 앱 탭으로 옮겼다)', async () => {
   const fx = personalizeClient();
   await fx.app.run('renderSettingsPersonalize()');
   const kids = fx.view().children;
-  same(kids.map(one => one.className), ['d-pset', 'd-pset', 'd-pset', 'd-derr', 'd-pfoot', 'd-pset d-pplace']);
+  same(kids.map(one => one.className), ['d-pset', 'd-pset', 'd-pset', 'd-derr', 'd-pfoot'], '꾸미기 탭에는 앱 위치 줄이 없다');
+  assert.ok(!fx.sent.some(one => one.url === '/api/about'), '앱 위치를 읽으러 가지도 않는다');
   assert.equal(fx.text("document.getElementById('settingsPersonalizeView').children[0].children[0]"), 'Dock 아이콘');
   assert.equal(fx.text("document.getElementById('settingsPersonalizeView').children[1].children[0]"), 'Dock 이름Dock·앱 전환에 보여요');
   assert.equal(fx.text("document.getElementById('settingsPersonalizeView').children[2].children[0]"), '워크스페이스 제목화면 왼쪽 위에 보여요');
@@ -7123,16 +7043,6 @@ test('WP-D2 L. 꾸미기: Dock 아이콘 · Dock 이름 · 워크스페이스 �
   const file = fx.find('d-piconpv')[0].children.find(kid => kid.type === 'file');
   assert.equal(file.accept, 'image/png,image/jpeg');
   same(fx.inputs().map(one => one.value), ['Workspace', '○○의 워크스페이스']);
-
-  // 앱 위치 — 경로 둘(홈은 ~) + 복사 + Finder 안내
-  assert.equal(fx.text("document.getElementById('settingsPersonalizeView').children[5]"),
-    '앱 위치파일을 찾을 때Dock 앱~/Applications/Workspace.app복사업데이트 파일~/workspace/업데이트.command복사Finder에서 ⇧⌘G(폴더로 이동)에 붙여 넣으면 바로 가요');
-  assert.equal(fx.view().children[5].dataset.focus, 'app-place');
-  const copies = fx.app.run("window.findByClass(document.getElementById('settingsPersonalizeView').children[5], 'd-btn')");
-  await copies[0].listeners.click();
-  await copies[1].listeners.click();
-  same(fx.copied, ['~/Applications/Workspace.app', '~/workspace/업데이트.command']);
-  assert.match(fx.app.nodes.get('liveRegion').textContent, /경로를 복사했어요/);
 
   // 아무것도 안 바꾸고 저장하면 보내지 않는다
   await fx.button('저장').listeners.click();
@@ -7326,9 +7236,13 @@ test('WP-D2.5 지금 가져오기: 연결된 카드에만, 상태 줄 오른쪽 
     if (more >= 0) assert.ok(at < more, '⋯ 왼쪽');
   }
   assert.equal(fx.toggle('slack').hidden, true, '연결된 카드의 여는 버튼은 여전히 숨어 있다');
-  // 회의록(티로)은 ⋯가 없어 `바꾸기`가 늘 서고, 상태 줄은 마지막으로 가져온 때다
-  assert.equal(fx.toggle('notes').hidden, false);
-  assert.equal(fx.toggle('notes').textContent, '바꾸기');
+  // 회의록(티로)도 연결된 카드라 ⋯(최근 기록 · 바꾸기)만 두고, 상태 줄은 마지막으로 가져온 때다
+  assert.equal(fx.toggle('notes').hidden, true);
+  same(fx.menu('notes').map(section => section.map(entry => entry.label)), [['바꾸기']], '기록이 없으면 최근 기록 칸은 숨긴다');
+  fx.menu('notes')[0][0].onClick();
+  assert.ok(fx.find('notes', 'd-seg').length, '바꾸기는 예전 세그먼트를 편다');
+  assert.equal(fx.toggle('notes').textContent, '접기');
+  assert.match(fx.text('notes'), /회의가 끝나면 회의 탭에서 가져오기/);
   assert.equal(stText(fx, 4), '● 아직 가져온 적 없어요');
   const ran = wpd25({ meetingNotes: { mode: 'tiro', name: '', fetch: { failing: false, lastRunAt: ago(20) } } });
   await ran.app.run('renderSettingsIntegrations()');
@@ -7510,7 +7424,11 @@ test('WP-D3 새 버전 줄: `새 버전 v1.1.0이 있어요` + 업데이트 받�
   const fx = updateClient(D3_ABOUT);
   fx.app.run('settingsAboutFill()');
   await fx.flush();
-  assert.equal(fx.app.nodes.get('settingsAboutLine').children.map(one => one.textContent).join(''), '워크스페이스 v1.0.0 · 설치본');
+  assert.equal(fx.app.nodes.get('settingsAboutLine').children.map(one => one.textContent).join(''), 'v1.0.0 · 배포된 버전만 받기', '설치본은 기본이라 말하지 않는다');
+  // 개발용(저장소에서 직접 띄운 것)·main 갈래는 그 말을 붙인다
+  const dev = updateClient({ ...D3_ABOUT, install: 'manual', channel: 'main', update: { available: false } });
+  dev.app.run('settingsAboutFill()');
+  assert.equal(dev.app.nodes.get('settingsAboutLine').children.map(one => one.textContent).join(''), 'v1.0.0 · 만드는 중인 것까지 받기(main) · 개발용');
   assert.equal(fx.box().hidden, false);
   assert.equal(fx.text(), '새 버전 v1.1.0이 있어요업데이트 받기무엇이 바뀌었나요 ↗데이터는 먼저 백업하고 받아요. 1분쯤 걸려요.');
   assert.equal(fx.button('업데이트 받기').className, 'd-btn sm pri', '주 버튼');
@@ -7699,4 +7617,447 @@ test('WP-D3 막는 문구 셋: 폴더 이동 필요 · 처음 한 번 · 이미 
   await reopen.flush();
   await reopen.flush();
   same(reopen.steps().map(([cls]) => cls), ['done', 'done', 'done', 'now', 'wait', 'wait']);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WP-E — 설정 합치기(연동이 유일한 상태 자리 · 앱 탭) · 슬랙 채널 고르기(더하기·빼기) · 매일 백업 줄
+
+test('WP-E 탭: 연동 · 앱 · 꾸미기 · 도움말 · 삭제한 항목 차례, 처음 열면 연동이고 옛 `상태` 탭은 없다', async () => {
+  const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  const tabs = [...html.matchAll(/data-settings-tab="(\w+)" aria-pressed="(true|false)"[^>]*>([^<]+)</g)].map(m => [m[1], m[2], m[3]]);
+  same(tabs, [['integrations', 'true', '연동'], ['app', 'false', '앱'], ['personalize', 'false', '꾸미기'], ['guide', 'false', '도움말'], ['trash', 'false', '삭제한 항목']]);
+  assert.ok(!html.includes('settingsStatusView'), '상태 보기 자리는 없앴다');
+  assert.match(html, /<div id="settingsIntegrationsView"><\/div>\s*<div id="settingsAppView" hidden><\/div>/, '처음 보이는 것은 연동');
+
+  const fx = intgClient();
+  fx.app.run(`settingsDialog.showModal = () => { settingsDialog.open = true; };
+    renderSettingsIntegrations = async () => {}; renderSettingsApp = async () => {}; settingsAboutLoad = async () => null;`);
+  fx.app.run('settingsOpen()');
+  assert.equal(fx.app.nodes.get('settingsIntegrationsView').hidden, false, '인자 없이 열면 연동');
+  assert.equal(fx.app.nodes.get('settingsAppView').hidden, true);
+  assert.equal(fx.app.run("settingsSetTab('status')"), 'integrations', '옛 딥링크(`status`)는 연동으로 연다');
+  assert.equal(fx.app.run("settingsSetTab('app')"), 'app');
+  assert.equal(fx.app.nodes.get('settingsAppView').hidden, false);
+  assert.equal(fx.app.run('typeof renderAutomationStatus'), 'undefined', '상태 탭 그리기는 없앴다');
+});
+
+test('WP-E A·B. 맨 위 요약: 정상이면 `● 연결 N개 모두 잘 읽고 있어요`, 멈춘 게 있으면 빨간 `● N개가 멈췄어요` + 그 카드에 이유 한 줄', async () => {
+  const ok = wpd25();
+  await ok.app.run('renderSettingsIntegrations()');
+  const head = fx => fx.view().children[0];
+  assert.equal(ok.shape("document.getElementById('settingsIntegrationsView').children[0]").text, '● 연결 4개 모두 잘 읽고 있어요연결됨 4 · 남은 것 0');
+  assert.equal(head(ok).children[0].className, 'lead');
+  assert.equal(head(ok).children[0].children[0].className, 'ok', '점만 초록');
+
+  const bad = wpd25({
+    slack: { ...WPD25_CONNECTED.slack, fetch: { failing: true, auth: false, failedAt: ago(12), summary: 'my-todo 채널 확인 실패 — fetch 실패 (exit 28)' } },
+  });
+  await bad.app.run('renderSettingsIntegrations()');
+  assert.equal(bad.shape("document.getElementById('settingsIntegrationsView').children[0]").text, '● 1개가 멈췄어요연결됨 4 · 남은 것 0');
+  assert.equal(head(bad).children[0].className, 'lead k-neg');
+  assert.equal(stText(bad, 1), '● 읽지 못했어요 · 12분 전');
+  const why = bad.find('slack', 'd-intgwhy')[0];
+  assert.equal(why.textContent || why.children.map(one => one.textContent).join(''), '슬랙이 응답하지 않았어요 — 다시 시도해도 안 되면 ⋯ › 최근 기록');
+  assert.equal(bad.card('slack').dataset.failing, 'true');
+  assert.equal(fetchButton(bad, 'slack').textContent, '다시 시도');
+  assert.equal(bad.find('jira', 'd-intgwhy').length, 0, '멈추지 않은 카드에는 이유 줄이 없다');
+
+  // 토큰 문제면 버튼은 `다시 연결`이고 이유 줄도 그 말
+  const auth = wpd25({ jira: { ...WPD25_CONNECTED.jira, fetch: { failing: true, auth: true, failedAt: ago(3) } } });
+  await auth.app.run('renderSettingsIntegrations()');
+  assert.equal(fetchButton(auth, 'jira').textContent, '다시 연결');
+  assert.match(auth.find('jira', 'd-intgwhy')[0].children.map(one => one.textContent).join(''), /^토큰이 만료됐거나 권한이 없어요 — 다시 연결을 누르면 이 카드에서 토큰 단계부터 다시 열려요$/);
+
+  // 셈은 순수 함수로도 — 연결된 카드만, 할 일 채널이 사라졌으면 멈춘 것
+  const failing = state => JSON.parse(ok.app.run(`JSON.stringify(settingsIntgFailing(${JSON.stringify(state)}))`));
+  same(failing({ ...WPD25_CONNECTED, slack: { ...WPD25_CONNECTED.slack, channels: { todo: { id: 'C1', name: '#my-todo', missing: true } } } }), ['slack']);
+  same(failing({ slack: { enabled: true, hasToken: false, fetch: { failing: true }, channels: { todo: { id: 'C1' } } } }), [], '연결 안 된 카드는 세지 않는다');
+  same(failing({ ...WPD25_CONNECTED, calendar: { enabled: true, source: 'ical', readAt: null, failed: true } }), ['calendar'], '비밀 주소를 한 번도 못 읽었으면 멈춘 것');
+});
+
+test('WP-E B. 빨간 점을 누르면 연동 탭으로 열고 멈춘 카드만 약 2초 붉게(is-flash), 파란 점만 있으면 앱 탭', async () => {
+  const fx = wpd25({ calendar: { ...WPD25_CONNECTED.calendar, fetch: { failing: true, failedAt: ago(5) } } });
+  fx.app.run(`settingsAlertKeys = ['calendar'];`);
+  same(fx.app.run('settingsGearTab()'), ['integrations', 'alerts']);
+  fx.app.run(`settingsFocusKey = 'alerts'`);
+  await fx.app.run('renderSettingsIntegrations()');
+  assert.match(fx.card('calendar').className, /\bis-flash\b/, '멈춘 카드만');
+  assert.ok(!/is-flash/.test(fx.card('slack').className));
+  assert.equal(fx.app.run('settingsFocusKey'), null, '표지는 한 번만 쓴다');
+  await new Promise(resolve => setTimeout(resolve, 2100));
+  assert.ok(!/is-flash/.test(fx.card('calendar').className), '약 2초 뒤 거둔다');
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /\.d-intg\.is-flash \{[^}]*background: var\(--urgent-bg\)/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{ \.d-intg \{ transition: none; \} \}/, '동작 줄이기면 전환 없이 바탕만');
+
+  // 빨간 점이 없고 새 버전(파란 점)만 있으면 앱 탭, 아무 점도 없으면 연동
+  fx.app.run(`settingsAlertKeys = []; settingsAbout = { version: '1.0.0', update: { available: true, label: 'v1.1.0' } };`);
+  same(fx.app.run('settingsGearTab()'), ['app', null]);
+  fx.app.run(`settingsAbout = null;`);
+  same(fx.app.run('settingsGearTab()'), ['integrations', null]);
+
+  // 서버의 alerts가 빨간 점의 근거다(옛 서버면 자동화의 가장 최근 실패만)
+  fx.app.context.request = async () => new Response(JSON.stringify({ automations: [{ key: 'tiro', lastKind: 'fail' }], alerts: ['jira'] }));
+  await fx.app.run('fetchAutomationStatus()');
+  same(fx.app.run('settingsAlertKeys'), ['jira']);
+  fx.app.context.request = async () => new Response(JSON.stringify({ automations: [{ key: 'tiro', lastKind: 'fail' }, { key: 'slack', lastKind: 'run' }] }));
+  await fx.app.run('fetchAutomationStatus()');
+  same(fx.app.run('settingsAlertKeys'), ['notes']);
+});
+
+test('WP-E C. ⋯ › 최근 기록: 시각 · 결과 한 줄(최근 10개, 실패는 빨강) + 오류 전문 복사, 기록이 없으면 메뉴 칸을 숨긴다', async () => {
+  const today = new Date();
+  const two = n => String(n).padStart(2, '0');
+  const stamp = (h, m) => `${today.getFullYear()}-${two(today.getMonth() + 1)}-${two(today.getDate())} ${two(h)}:${two(m)}:00`;
+  const slackLog = [
+    { time: stamp(10, 5), kind: 'fail', text: 'my-todo 채널 확인 실패 — fetch 실패 (exit 28)' },
+    { time: stamp(9, 55), kind: 'run', text: '이번에 본 메시지 3개 = 등록 2 · 링크 중복 1 · 비슷한 일이라 건너뜀 0 · 시스템 0 새 항목 2개를 등록했습니다. 자세한 내용은 …' },
+    { time: stamp(9, 50), kind: 'skip', text: '새 메시지 없음 — Claude 호출 생략' },
+    ...Array.from({ length: 9 }, (unused, i) => ({ time: '2026-09-20 09:00:00', kind: 'skip', text: `새 메시지 없음 — Claude 호출 생략 ${i}` })),
+  ];
+  const fx = wpd25({
+    slack: { ...WPD25_CONNECTED.slack, log: slackLog },
+    jira: { ...WPD25_CONNECTED.jira, log: [{ time: stamp(8, 0), kind: 'run', text: '읽음 · 내 티켓 12개' }, { time: stamp(7, 50), kind: 'fail', text: '읽지 못했어요 — 토큰이 만료됐거나 권한이 없어요' }] },
+    calendar: { ...WPD25_CONNECTED.calendar, log: [] },
+  });
+  fx.app.run(`automationStatusCache = [{ key: 'slack', tail: ['───── 2026-09-24 10:05:00 slack-capture 시작', '이번에 본 메시지 3개 = 등록 1 · 링크 중복 2 · 비슷한 일이라 건너뜀 0 · 시스템 0', '───── 2026-09-24 10:05:30 slack-capture 종료 (exit 0)'] }];`);
+  await fx.app.run('renderSettingsIntegrations()');
+  const slackMenu = fx.menu('slack');
+  same(slackMenu.map(section => section.map(entry => entry.label)), [['최근 기록', '보내는 법', '채널 고르기', '다시 연결(토큰 바꾸기)'], ['해제…']]);
+  same(fx.menu('calendar').map(section => section.map(entry => entry.label)), [['다시 연결(주소 바꾸기)'], ['해제…']], '기록이 없으면 칸을 숨긴다');
+  slackMenu[0][0].onClick();
+  const list = fx.find('slack', 'd-ilog')[0];
+  assert.ok(list, '카드 아래 접이식 목록이 펼쳐진다');
+  assert.equal(fx.toggle('slack').textContent, '접기');
+  const rows = list.children.filter(one => one.className !== 'more');
+  assert.equal(rows.length, 10, '최근 10개');
+  same(rows.slice(0, 3).map(one => [one.children[0].textContent, one.children[1].textContent, one.children[1].className || '']), [
+    ['10:05', '읽지 못했어요 — 슬랙이 응답하지 않았어요', 'bad'],
+    ['09:55', '읽음 · 새 항목 2개를 등록했습니다. …', ''], // 처리 대장 문장은 목록 위에 따로 서서 한 줄 결과에서는 뺀다
+    ['09:50', '읽음 · 새 것 없음', ''],
+  ]);
+  assert.equal(rows[3].children[0].textContent, '9/20 09:00', '오늘이 아니면 날짜를 붙인다');
+  // 처리 대장이 맨 위에
+  assert.match(fx.text('slack'), /최근 수집 · 본 메시지 3개 → 등록 1 · 중복 2 · 건너뜀 0 · 시스템 0/);
+  // 오류 전문 복사 — 기록 줄 + 로그 끝 부분
+  await fx.button('slack', '오류 전문 복사').listeners.click();
+  assert.match(fx.copied.at(-1), /^슬랙 수집 최근 기록\n.*10:05:00 · 실패 · my-todo 채널 확인 실패/);
+  assert.match(fx.copied.at(-1), /로그 끝 부분:\n───── 2026-09-24 10:05:00 slack-capture 시작/);
+  assert.match(fx.live(), /오류 전문을 복사했어요/);
+
+  // 지라(앱이 직접 읽는 것)는 메모리에 있는 만큼을 같은 모양으로
+  fx.menu('jira')[0][0].onClick();
+  const jiraRows = fx.find('jira', 'd-ilog')[0].children.filter(one => one.className !== 'more');
+  same(jiraRows.map(one => [one.children[0].textContent, one.children[1].textContent, one.children[1].className || '']), [
+    ['08:00', '읽음 · 내 티켓 12개', ''], ['07:50', '읽지 못했어요 — 토큰이 만료됐거나 권한이 없어요', 'bad'],
+  ]);
+  assert.equal(fx.find('slack', 'd-ilog').length, 0, '다른 카드의 펼침은 접힌다');
+
+  // 알림의 `자세히`(미팅 노트 가져오기 실패)는 회의록 카드의 최근 기록을 편다
+  const notes = wpd25({ meetingNotes: { mode: 'tiro', name: '', log: [{ time: stamp(9, 0), kind: 'fail', text: 'Claude usage: session limit reached (resets 3pm)' }] } });
+  notes.app.run(`settingsFocusKey = 'log:notes'`);
+  await notes.app.run('renderSettingsIntegrations()');
+  const noteRow = notes.find('notes', 'd-ilog')[0].children[0];
+  assert.equal(noteRow.children[1].textContent, '읽지 못했어요 — Claude 사용량 한도에 걸림 · 3pm에 풀림');
+  const meetingUi = fs.readFileSync(path.join(__dirname, 'meeting-notes-ui.js'), 'utf8');
+  assert.match(meetingUi, /settingsOpen\('integrations', 'log:notes'\)/);
+});
+
+test('WP-E A. 둘째 줄은 주기·오늘 수치 — 슬랙 `매일 9–19시, 5분마다 · 오늘 새 항목 N개`, 지라 `내 티켓 · 반응 필요 댓글 · N분 전 확인`, 캘린더 주기, 회의록 안내', async () => {
+  const fx = wpd25({
+    slack: { ...WPD25_CONNECTED.slack, todayCount: 6 },
+    jira: { ...WPD25_CONNECTED.jira, attentionCount: 2, attentionAt: ago(1) },
+  });
+  await fx.app.run('renderSettingsIntegrations()');
+  const need = kind => fx.find(kind, 'd-intgneed')[0];
+  assert.equal(need('slack').textContent, '매일 9–19시, 5분마다 · 오늘 새 항목 6개');
+  assert.equal(need('jira').textContent, '내 티켓 12개 · 반응 필요 댓글 2개 · 1분 전 확인');
+  assert.equal(need('jira').className, 'd-intgneed');
+  assert.equal(need('calendar').textContent, '30분마다');
+  assert.equal(need('notes').textContent, '회의가 끝나면 회의 탭에서 가져오기');
+  const claude = wpd25({ calendar: { enabled: true, source: 'claude', fetch: {} } });
+  await claude.app.run('renderSettingsIntegrations()');
+  assert.equal(claude.find('calendar', 'd-intgneed')[0].textContent, '매일 9–19시, 2시간마다', '실제 등록 값(calendar-sync 9·11·13·15·17·19시)');
+
+  // 반응 필요 댓글을 읽지 못하면 그 말을 주의색으로(예전 상태 탭 줄의 빨간 글자)
+  const broken = wpd25({ jira: { ...WPD25_CONNECTED.jira, attentionCount: null, attentionAt: null, attentionError: true } });
+  await broken.app.run('renderSettingsIntegrations()');
+  assert.equal(broken.find('jira', 'd-intgneed')[0].textContent, '내 티켓 12개 · 반응 필요 댓글을 읽지 못했어요');
+  assert.equal(broken.find('jira', 'd-intgneed')[0].className, 'd-intgneed k-warn');
+  const stale = wpd25({ jira: { ...WPD25_CONNECTED.jira, attentionCount: 1, attentionAt: ago(180), attentionStale: true } });
+  await stale.app.run('renderSettingsIntegrations()');
+  assert.equal(stale.find('jira', 'd-intgneed')[0].textContent, '내 티켓 12개 · 반응 필요 댓글 1개 · 3시간 전 확인 · 다시 읽지 못했어요');
+  // 지라를 켜지 않았으면 준비물 줄 그대로(연결 안 됨)
+  const off = intgClient();
+  await off.app.run('renderSettingsIntegrations()');
+  assert.equal(off.find('jira', 'd-intgneed')[0].textContent, '3분 · Atlassian API 토큰 하나');
+  assert.equal(off.toggle('jira').textContent, '연결하기');
+});
+
+// 채널 고르기용 가짜 창 — 슬랙이 연결돼 있고, 앞머리 묻기(token-check)에 먼저 답한다.
+async function intgPick(slack = {}, replies = [], prefix = 'hana') {
+  const fx = intgClient({
+    slack: {
+      enabled: true, hasToken: true, readAt: ago(5),
+      channels: { todo: { id: 'C1', name: '#my-todo' }, waiting: { id: 'C2', name: '#my-waiting' }, align: { id: '', name: '' }, someday: { id: '', name: '' } },
+      ...slack,
+    },
+  }, [{ body: { ok: true, prefix } }, ...replies]);
+  await fx.app.run('renderSettingsIntegrations()');
+  const menu = fx.menu('slack');
+  await menu[0].find(entry => entry.label === '채널 고르기').onClick();
+  await new Promise(resolve => setImmediate(resolve));
+  return fx;
+}
+const pickRow = (fx, key) => fx.find('slack', 'd-ich').find(one => one.dataset.channel === key);
+const pickText = (fx, key) => fx.shape(`window.findByClass(document.getElementById('settingsIntegrationsView').children[1], 'd-ich').find(one => one.dataset.channel === ${JSON.stringify(key)})`).text;
+const pickGo = fx => fx.find('slack', 'pri')[0];
+const pickToggle = async (fx, key, on) => {
+  const box = pickRow(fx, key).children[0];
+  box.checked = on;
+  await box.listeners.change();
+};
+
+test('WP-E E. 채널 고르기: 연결된 채널은 고정 이름(`#이름` + 연결됨), 새 줄은 `새 채널 이름` 칸(기본 `<슬랙 이름>-키`), 할 일은 뺄 수 없다', async () => {
+  const fx = await intgPick();
+  same(fx.sent.filter(one => one.url === '/api/integrations/slack-token-check').map(one => one.body), [{ token: '' }], '앞머리는 저장된 토큰으로 묻는다(토큰 칸 없음)');
+  assert.match(fx.text('slack'), /받을 곳을 더하거나 빼요\. 새로 고른 곳은 비공개 채널을 만들어 드려요\./);
+  assert.equal(fx.find('slack', 'd-isteps').length, 0, '위저드 단계 줄은 없다');
+  same(['todo', 'waiting', 'align', 'someday'].map(key => pickRow(fx, key).className), ['d-ich is-on', 'd-ich is-on', 'd-ich', 'd-ich']);
+  assert.equal(pickText(fx, 'todo'), '할 일 필수 — 뺄 수 없어요오늘 탭 새로 들어온 것으로 와요#my-todo연결됨');
+  same([pickRow(fx, 'todo').children[0].checked, pickRow(fx, 'todo').children[0].disabled], [true, true]);
+  assert.equal(pickRow(fx, 'waiting').children[2].className, 'lock', '연결된 채널 이름은 고정 글자');
+  assert.equal(pickText(fx, 'align'), '정해진 것정책·결정 → 아이디어·결정 탭의 결정새 채널 이름');
+  const alignName = pickRow(fx, 'align').children[2].children[1];
+  same([alignName.value, alignName.disabled], ['hana-align', true], '기본 이름은 슬랙 사용자 이름 + 키, 고르기 전엔 꺼져 있다');
+  assert.match(fx.text('slack'), /ⓘ연결된 채널의 이름은 여기서 바꿀 수 없어요\. 슬랙에서 채널 이름을 바꾸면 앱이 알아서 새 이름을 따라가요\./);
+  same([pickGo(fx).textContent, pickGo(fx).disabled], ['바꾼 것이 없어요', true]);
+  assert.equal(fx.button('slack', '취소').className, 'd-btn sm');
+
+  // 앞머리를 못 받으면 my-
+  const plain = await intgPick({}, [], null);
+  assert.equal(pickRow(plain, 'someday').children[2].children[1].value, 'my-someday');
+  // 앞머리 다듬기(서버가 못 한 것까지 화면이 한 번 더) — 소문자·영숫자·-·_, 길이 제한
+  assert.equal(fx.app.run("settingsSlackDefaultName('todo', 'Hana.Kim')"), 'hanakim-todo');
+  assert.equal(fx.app.run("settingsSlackDefaultName('someday', '')"), 'my-someday');
+  assert.ok(fx.app.run(`settingsSlackDefaultName('someday', ${JSON.stringify('a'.repeat(200))})`).length <= 80);
+});
+
+test('WP-E E. 채널 고르기 빼기·더하기: 체크를 풀면 그 줄이 붉게 + `빼요`, 버튼 문구가 바뀌고 누르기 전에 확인 줄 — 저장은 off 표시만(슬랙 쓰기 없음)', async () => {
+  const fx = await intgPick({}, [
+    { body: { ok: true, id: 'C0ALIGN1', name: 'hana-align' } },
+    { body: { ok: true, restart: false } },
+  ]);
+  await pickToggle(fx, 'waiting', false);
+  assert.equal(pickRow(fx, 'waiting').className, 'd-ich is-off');
+  assert.match(pickText(fx, 'waiting'), /^기다리는 것빼요#my-waiting연결됨$/);
+  assert.equal(pickGo(fx).textContent, '1개 빼기');
+  assert.equal(pickRow(fx, 'waiting').children[0].focused, true, '다시 그려도 누른 칸에 초점이 남는다');
+  const confirm = fx.find('slack', 'd-iconfirm')[0];
+  assert.equal(confirm.children[0].textContent, '#my-waiting을 빼면 앱이 이 채널을 더 이상 읽지 않아요. 슬랙 채널과 이미 들어온 항목은 그대로예요.');
+
+  await pickToggle(fx, 'align', true);
+  assert.equal(pickGo(fx).textContent, '1개 만들고 1개 빼기');
+  assert.match(pickText(fx, 'align'), /새로 만들어요/);
+  assert.equal(pickRow(fx, 'align').children[2].children[1].disabled, false);
+  await pickToggle(fx, 'waiting', true);
+  assert.equal(pickGo(fx).textContent, '1개 만들기', '다시 체크하면 빼기가 사라진다');
+  assert.equal(fx.find('slack', 'd-iconfirm').length, 0);
+  await pickToggle(fx, 'waiting', false);
+
+  await pickGo(fx).listeners.click();
+  same(fx.sent.filter(one => one.url === '/api/integrations/slack-channel').map(one => one.body), [{ token: '', name: 'hana-align' }], '새 줄만 만든다(저장된 토큰)');
+  const saved = fx.sent.find(one => one.url === '/api/integrations/save');
+  same(saved.body, { slack: { enabled: true, token: '', channels: { align: 'C0ALIGN1' }, off: ['waiting'], on: [] } });
+  assert.match(fx.live(), /채널 1개를 만들었어요 · 채널 1개를 뺐어요/);
+
+  // 빼기만 하면 채널을 만들러 가지 않는다
+  const only = await intgPick({}, [{ body: { ok: true, restart: false } }]);
+  // 할 일은 체크를 풀 수 없다(칸이 꺼져 있다)
+  assert.equal(pickRow(only, 'todo').children[0].disabled, true);
+  await pickToggle(only, 'waiting', false);
+  await pickGo(only).listeners.click();
+  assert.equal(only.sent.filter(one => one.url === '/api/integrations/slack-channel').length, 0);
+  same(only.sent.find(one => one.url === '/api/integrations/save').body, { slack: { enabled: true, token: '', channels: {}, off: ['waiting'], on: [] } });
+  same(JSON.parse(only.app.run(`JSON.stringify(settingsSlackPickLabel({ add: ['a', 'b'], back: ['c'], off: ['d'] }))`)), '2개 만들고 1개 다시 연결하고 1개 빼기');
+});
+
+test('WP-E E·F. 뺐던 채널은 다시 체크하면 새로 만들지 않고 다시 연결(뺀 동안 온 메시지는 안 가져옴), 사라진 채널은 이름 칸(다시 만들기)', async () => {
+  const fx = await intgPick({
+    channels: { todo: { id: 'C1', name: '#my-todo' }, waiting: { id: 'C2', name: '#my-waiting', missing: true }, align: { id: '', name: '' }, someday: { id: '', name: '' } },
+    off: { align: { name: '#my-align' }, someday: { name: '#my-someday', missing: true } },
+  }, [{ body: { ok: true, restart: false } }]);
+  // 카드 둘째 줄 아래: 사라진 채널은 주황 한 줄 + 채널 고르기(할 일이 아니면 멈춘 것으로 세지 않는다)
+  // 사라진(연결된) 채널은 처음부터 체크된 채 — 그대로 두면 다시 만든다
+  assert.equal(pickGo(fx).textContent, '1개 만들기');
+  // 뺀 채널: 체크 풀린 채 고정 글자 + `뺀 채널`
+  assert.equal(pickRow(fx, 'align').children[0].checked, false);
+  assert.match(pickText(fx, 'align'), /#my-align뺀 채널$/);
+  await pickToggle(fx, 'align', true);
+  assert.equal(pickGo(fx).textContent, '1개 만들고 1개 다시 연결하기');
+  assert.match(pickText(fx, 'align'), /다시 연결해요 — 뺀 동안 온 메시지는 가져오지 않아요/);
+  assert.match(fx.text('slack'), /#my-align을 다시 연결해요 — 뺀 동안 온 메시지는 가져오지 않아요/);
+  // 뺀 채널이 슬랙에서도 사라졌으면 다시 체크할 때 새로 만든다(이름 칸)
+  assert.equal(pickRow(fx, 'someday').children[2].className, 'nmwrap');
+  // 사라진(연결된) 채널: 체크된 채 주황 판 + 이름 칸, 두면 다시 만들고 풀면 뺀다
+  assert.equal(pickRow(fx, 'waiting').className, 'd-ich is-on is-gone');
+  assert.match(pickText(fx, 'waiting'), /#my-waiting을 찾을 수 없어요 — 체크한 채로 두면 다시 만들어요새 채널 이름/);
+  await pickToggle(fx, 'waiting', false);
+  assert.equal(pickGo(fx).textContent, '1개 다시 연결하고 1개 빼기');
+  await pickGo(fx).listeners.click();
+  assert.equal(fx.sent.filter(one => one.url === '/api/integrations/slack-channel').length, 0, '다시 연결은 새로 만들지 않는다');
+  same(fx.sent.find(one => one.url === '/api/integrations/save').body, { slack: { enabled: true, token: '', channels: {}, off: ['waiting'], on: ['align'] } });
+  assert.match(fx.live(), /다시 연결했어요 — 뺀 동안 온 메시지는 가져오지 않아요 · 채널 1개를 뺐어요/);
+});
+
+test('WP-E F. 사라진 채널: 카드에 주황 한 줄 + 채널 고르기, 할 일 채널이 사라지면 빨간 상태 줄·요약에 멈춤으로 센다', async () => {
+  const fx = intgClient({
+    slack: {
+      enabled: true, hasToken: true, readAt: ago(5),
+      channels: { todo: { id: 'C1', name: '#my-todo' }, align: { id: 'C3', name: '#my-align', missing: true }, waiting: { id: '', name: '' }, someday: { id: '', name: '' } },
+    },
+  });
+  await fx.app.run('renderSettingsIntegrations()');
+  const warn = fx.find('slack', 'k-warn')[0];
+  assert.equal(warn.dataset.missing, 'align');
+  assert.match(fx.text('slack'), /#my-align을 찾을 수 없어요 — 슬랙에서 지웠거나 보관했어요 · 채널 고르기/);
+  assert.match(fx.shape("document.getElementById('settingsIntegrationsView').children[0]").text, /^● 연결 1개 모두 잘 읽고 있어요/, '할 일이 아닌 채널은 멈춘 것으로 세지 않는다');
+
+  const gone = intgClient({
+    slack: {
+      enabled: true, hasToken: true, readAt: ago(5),
+      channels: { todo: { id: 'C1', name: '#my-todo', missing: true }, align: { id: '', name: '' }, waiting: { id: '', name: '' }, someday: { id: '', name: '' } },
+    },
+  }, [{ body: { ok: true, prefix: 'hana' } }]);
+  await gone.app.run('renderSettingsIntegrations()');
+  assert.match(gone.shape("document.getElementById('settingsIntegrationsView').children[0]").text, /^● 1개가 멈췄어요/);
+  assert.equal(stText(gone, 1), '● #my-todo을 찾을 수 없어요');
+  assert.equal(gone.find('slack', 'st')[0].className, 'st k-neg');
+  const why = gone.find('slack', 'd-intgwhy')[0];
+  assert.equal(why.children.map(one => one.textContent).join(''), '슬랙에서 지웠거나 보관했어요 · 채널 고르기');
+  await why.children[1].listeners.click();
+  await new Promise(resolve => setImmediate(resolve));
+  // 할 일은 뺄 수 없다 — 체크된 채 이름 칸(다시 만들기만)
+  const todo = pickRow(gone, 'todo');
+  same([todo.children[0].checked, todo.children[0].disabled, todo.className], [true, true, 'd-ich is-on is-gone']);
+  assert.equal(todo.children[2].children[1].value, 'hana-todo');
+  assert.equal(pickGo(gone).textContent, '1개 만들기');
+});
+
+test('WP-E ②. 처음 연결 위저드도 새 채널 기본 이름은 `<슬랙 사용자 이름>-키` — 사람이 고친 이름은 그대로', async () => {
+  const fx = intgClient({}, [{ body: { ok: true, prefix: 'hana-kim' } }]);
+  await fx.app.run('renderSettingsIntegrations()');
+  fx.toggle('slack').listeners.click();
+  fx.find('slack', 'd-din')[0].value = 'xoxp-good';
+  await fx.button('slack', '다음 →').listeners.click();
+  same(['todo', 'waiting', 'align', 'someday'].map(key => intgRow(fx, key).children[2].value), ['hana-kim-todo', 'hana-kim-waiting', 'hana-kim-align', 'hana-kim-someday']);
+});
+
+// 앱 탭 가짜 창 — /api/about · /api/backup · /api/update/status에 답한다.
+function appClient({ about = {}, backup = null, now = null } = {}) {
+  const info = { version: '1.1.0', install: 'managed', channel: 'stable', modified: [], update: { available: false }, appBundle: '~/Applications/Workspace.app', updateFile: '~/workspace/업데이트.command', ...about };
+  const app = settingsClient({});
+  const sent = [];
+  const copied = [];
+  app.context.navigator = { clipboard: { writeText: async (text) => { copied.push(text); } }, platform: 'MacIntel' };
+  app.context.request = async url => new Response(JSON.stringify(url === '/api/about' ? info : {}));
+  app.context.fetch = async (url, options = {}) => {
+    sent.push({ url: String(url), body: options.body ? JSON.parse(options.body) : null });
+    let body = { ok: true };
+    if (String(url) === '/api/about') body = info;
+    else if (String(url) === '/api/backup') body = backup;
+    else if (String(url) === '/api/update/status') body = { ok: true, status: null, pending: null, running: false };
+    return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  app.run(NODE_SHAPE);
+  app.run(`window.findByClass = (node, cls) => {
+    const hits = [];
+    const walk = (one) => { if (one && String(one.className || '').split(' ').includes(cls)) hits.push(one); ((one && one.children) || []).forEach(walk); };
+    walk(node);
+    return hits;
+  };`);
+  const view = () => app.nodes.get('settingsAppView');
+  const text = index => JSON.parse(app.run(`JSON.stringify(window.shapeOf(document.getElementById('settingsAppView').children[${index}]))`)).text;
+  const find = cls => app.run(`window.findByClass(document.getElementById('settingsAppView'), ${JSON.stringify(cls)})`);
+  return { app, sent, copied, view, text, find };
+}
+const backupAt = (daysAgo, time = '19:30') => { const d = new Date(); d.setDate(d.getDate() - daysAgo); const two = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${time}:04`; };
+
+test('WP-E D. 앱 탭: 버전 · 데이터 백업 · 앱 위치 · 문제 보고 네 줄(앱 위치는 꾸미기에서 옮김)', async () => {
+  const fx = appClient({
+    about: { update: { available: true, label: 'v1.1.1', changesUrl: null } },
+    backup: { ok: true, path: '~/workspace-data-backup/daily', local: { state: 'ok', at: backupAt(1), days: 7 }, github: { on: false, state: 'never' } },
+  });
+  await fx.app.run('renderSettingsApp()');
+  const kids = fx.view().children;
+  same(kids.map(one => one.dataset.row || one.dataset.focus), ['version', 'backup', 'app-place', 'report']);
+  assert.match(fx.text(0), /^버전워크스페이스v1\.1\.0 · 배포된 버전만 받기새 버전 v1\.1\.1이 있어요업데이트 받기데이터는 먼저 백업하고 받아요\. 1분쯤 걸려요\.$/);
+  assert.equal(fx.text(1), '데이터 백업매일 19:30● 이 맥에 매일 백업 · 어제 19:30 · 7일치~/workspace-data-backup/daily복사Finder에서 ⇧⌘G(폴더로 이동)에 붙여 넣으면 바로 가요');
+  assert.equal(fx.text(2), '앱 위치파일을 찾을 때Dock 앱~/Applications/Workspace.app복사업데이트 파일~/workspace/업데이트.command복사Finder에서 ⇧⌘G(폴더로 이동)에 붙여 넣으면 바로 가요');
+  assert.equal(fx.text(3), '문제 보고진단 내용 복사버전·연동 상태·최근 오류만 복사해요(업무 내용은 들어가지 않아요).');
+  const copies = fx.app.run("window.findByClass(document.getElementById('settingsAppView').children[1], 'd-btn')");
+  await copies[0].listeners.click();
+  same(fx.copied, ['~/workspace-data-backup/daily']);
+  const place = fx.app.run("window.findByClass(document.getElementById('settingsAppView').children[2], 'd-btn')");
+  await place[0].listeners.click();
+  await place[1].listeners.click();
+  same(fx.copied.slice(1), ['~/Applications/Workspace.app', '~/workspace/업데이트.command']);
+  const report = fx.find('d-btn').find(one => one.id === 'settingsReportBtn');
+  same([report.textContent, report.className], ['진단 내용 복사', 'd-btn']);
+
+  // 사용설명서의 `앱이 어디 있는지` → 앱 탭 앱 위치를 밝힌다
+  fx.app.run(`settingsFocusKey = 'app-place'`);
+  await fx.app.run('renderSettingsApp()');
+  assert.match(fx.view().children[2].className, /\bis-focus\b/);
+  assert.equal(fx.app.run('settingsFocusKey'), null);
+});
+
+test('WP-E D. 데이터 백업 줄: 로컬만 · GitHub 포함 · 실패(빨강 + 이유) · 아직 안 돎', async () => {
+  const row = async (backup) => {
+    const fx = appClient({ backup });
+    await fx.app.run('renderSettingsApp()');
+    return { text: fx.text(1), fx };
+  };
+  const both = await row({ ok: true, path: '~/workspace-data-backup/daily', local: { state: 'ok', at: backupAt(0), days: 3 }, github: { on: true, state: 'ok', at: backupAt(0) } });
+  assert.match(both.text, /^데이터 백업매일 19:30● 이 맥에 매일 백업 · 오늘 19:30 · 3일치GitHub 비공개 저장소에도 올려요 · 오늘 19:30~/);
+  const gitFail = await row({ ok: true, path: '~/x/daily', local: { state: 'ok', at: backupAt(1), days: 7 }, github: { on: true, state: 'fail', at: backupAt(1), reason: '원격 업로드 실패 (이 맥의 백업 커밋은 남아 있음)' } });
+  assert.match(gitFail.text, /● GitHub에 올리지 못했어요 · 어제 19:30원격 업로드 실패 \(이 맥의 백업 커밋은 남아 있음\)/);
+  const failed = await row({ ok: true, path: '~/x/daily', local: { state: 'fail', at: backupAt(0), reason: '파일을 복사하지 못함 (tasks.md)', days: 6 }, github: { on: false } });
+  assert.match(failed.text, /^데이터 백업매일 19:30● 이 맥 백업이 멈췄어요 · 오늘 19:30파일을 복사하지 못함 \(tasks\.md\)~/);
+  const line = failed.fx.find('d-bkline')[0];
+  assert.equal(line.className, 'd-bkline k-neg');
+  assert.equal(line.children[0].className, 'bad');
+  assert.equal(failed.fx.find('k-neg').filter(one => one.className === 'd-ismall k-neg')[0].textContent, '파일을 복사하지 못함 (tasks.md)');
+  // 아직 한 번도 안 돌았으면 — 19:30 전이면 오늘, 지났으면 내일
+  const fx = appClient({});
+  const never = { ok: true, path: '~/x/daily', local: { state: 'never', at: null, days: 0 }, github: { on: false } };
+  const morning = JSON.parse(fx.app.run(`JSON.stringify(settingsBackupNodes(${JSON.stringify(never)}, new Date(2026, 8, 24, 9, 0)).map(one => one.textContent || one.children.map(k => k.textContent).join('')))`));
+  assert.equal(morning[0], '오늘 19:30에 처음 백업해요');
+  const night = JSON.parse(fx.app.run(`JSON.stringify(settingsBackupNodes(${JSON.stringify(never)}, new Date(2026, 8, 24, 20, 0)).map(one => one.textContent || one.children.map(k => k.textContent).join('')))`));
+  assert.equal(night[0], '내일 19:30에 처음 백업해요');
+  // 서버가 답하지 않으면 한 줄
+  const none = await row(null);
+  assert.equal(none.text, '데이터 백업매일 19:30백업 상태를 읽지 못했어요.');
+  assert.equal(fx.app.run("settingsBackupWhen('2026-09-20 19:30:04', new Date(2026, 8, 24, 10, 0))"), '9월 20일 19:30');
+});
+
+test('WP-E 도움말: `상태 탭`을 가리키는 문구가 없고, 새 문답(채널 초대·채널 고르기·백업)이 있다', () => {
+  const app = settingsClient({});
+  app.run(NODE_SHAPE);
+  app.run(`location = { hostname: 'example.com' };`);
+  app.run('renderSettingsGuide()');
+  const text = JSON.stringify(JSON.parse(app.run("JSON.stringify(window.shapeOf(document.getElementById('settingsGuideView')))")));
+  const faq = app.run('JSON.stringify(SETTINGS_FAQ)');
+  for (const where of [text, faq]) {
+    assert.ok(!/상태<\/b> 탭|상태 탭|설정 &gt; 상태|설정 > 상태|설정 › 상태/.test(where), '옛 상태 탭을 가리키지 않는다');
+  }
+  assert.ok(faq.includes('이 채널들은 나만 있는 채널로 써요 — 다른 사람을 초대하면 그 사람이 쓴 메시지도 할 일로 들어와요.'));
+  assert.match(faq, /⋯ › 채널 고르기/);
+  assert.match(faq, /~\/workspace-data-backup\/daily/);
+  assert.match(faq, /설정 &gt; 앱<\/b>의 <b>버전<\/b> 줄에 <b>업데이트 받기<\/b>/);
+  // 화면 코드 어디에도 상태 탭으로 여는 길이 없다
+  for (const file of ['settings-ui.js', 'app.js', 'meeting-notes-ui.js', 'attention-ui.js', 'jira-ui.js', 'index.html']) {
+    const source = fs.readFileSync(path.join(__dirname, file), 'utf8');
+    assert.ok(!/settingsOpen\('status'|data-settings-tab="status"|settingsStatusView/.test(source), `${file}`);
+  }
 });

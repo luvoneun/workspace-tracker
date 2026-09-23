@@ -18,6 +18,8 @@ process.env.WORKSPACE_AUTOMATION_DIR = automationHome;
 process.env.WORKSPACE_LAUNCH_AGENTS_DIR = path.join(automationHome, 'LaunchAgents');
 // Dock 이름이 겹치는지 보는 Applications 폴더도 임시 폴더다 — 실제 ~/Applications를 보지 않게.
 process.env.WORKSPACE_APPLICATIONS_DIR = path.join(automationHome, 'Applications');
+// 설정 › 앱의 `데이터 백업` 줄이 읽는 백업 폴더도 임시 폴더다 — 실제 ~/workspace-data-backup을 보지 않게.
+process.env.WORKSPACE_BACKUP_DIR = path.join(automationHome, 'workspace-data-backup');
 // 설정도 없는 파일로 끼운다 — 운영 폴더에서 돌릴 때 실제 `workspace.config.json`(지라 주소·토큰 위치)을 읽어
 // 테스트가 실제 지라에 닿는 일이 없게. 설정이 필요한 테스트는 따로 띄운 서버에 자기 설정을 준다.
 process.env.WORKSPACE_CONFIG = path.join(directory, 'absent.config.json');
@@ -4125,7 +4127,10 @@ test('연동: 슬랙 채널 확인은 이름과 비공개 여부만 읽고, 실�
   const calls = [];
   const okFetch = async (url, options) => { calls.push({ url, options }); return json({ ok: true, channel: { name: 'my-todo', is_private: true, topic: '비밀 이야기' } }); };
   const info = await integrationsStore.slackCheckChannel('slack-secret', 'C0123ABCD', okFetch);
-  assert.deepEqual(info, { name: 'my-todo', isPrivate: true });
+  assert.deepEqual(info, { name: 'my-todo', isPrivate: true, created: null, archived: false }, '주제 같은 다른 값은 싣지 않는다');
+  // 만든 때(초)와 보관 여부는 새 채널의 since·뺐던 채널 다시 켜기에 쓴다
+  const made = await integrationsStore.slackCheckChannel('t', 'C0123ABCD', async () => json({ ok: true, channel: { name: 'x', created: 1790000000, is_archived: true } }));
+  assert.deepEqual(made, { name: 'x', isPrivate: false, created: 1790000000, archived: true });
   assert.match(calls[0].url, /conversations\.info\?channel=C0123ABCD$/);
   assert.equal(calls[0].options.headers.Authorization, 'Bearer slack-secret');
 
@@ -4249,12 +4254,14 @@ test('연동 저장: 슬랙은 todo 하나만 필수이고 나머지 셋은 선�
         channels: { todo: 'https://회사.slack.com/archives/C0TODO11', waiting: 'C0WAIT11' },
       },
     },
-    slackCheck: async (token, id) => { asked.push([token, id]); return { name: id === 'C0TODO11' ? 'my-todo' : 'my-waiting', isPrivate: id === 'C0TODO11' }; },
+    slackCheck: async (token, id) => { asked.push([token, id]); return { name: id === 'C0TODO11' ? 'my-todo' : 'my-waiting', isPrivate: id === 'C0TODO11', created: id === 'C0TODO11' ? 1790000000 : null }; },
+    now: () => 1790000123456,
   });
   const saved = fix.read();
   assert.deepEqual(asked, [['slack-secret', 'C0TODO11'], ['slack-secret', 'C0WAIT11']]);
-  assert.deepEqual(saved.slack.channels.todo, { id: 'C0TODO11', name: '#my-todo' });
-  assert.deepEqual(saved.slack.channels.waiting, { id: 'C0WAIT11', name: '#my-waiting' });
+  // 새로 연결한 채널은 만든 때부터 읽는다(since, 슬랙 ts 모양) — 슬랙이 만든 때를 안 알려 주면 저장한 때부터.
+  assert.deepEqual(saved.slack.channels.todo, { id: 'C0TODO11', name: '#my-todo', since: '1790000000.000000' });
+  assert.deepEqual(saved.slack.channels.waiting, { id: 'C0WAIT11', name: '#my-waiting', since: '1790000123.456000' });
   assert.equal(saved.integrations.slack, true);
   assert.equal(result.slack.channels.todo.isPrivate, true);
   assert.equal(result.slack.channels.waiting.isPrivate, false, '공개 채널도 막지는 않고 알려만 준다');
@@ -4470,8 +4477,8 @@ test('WP-D1: 슬랙 토큰 확인은 auth.test 하나만 부르고, Bot 토큰·
   const calls = [];
   const fake = answer => async (url, options) => { calls.push({ url: String(url), options }); if (answer instanceof Error) throw answer; return json(answer); };
 
-  const ok = await integrationsStore.slackTokenCheck(' xoxp-good ', fake({ ok: true, user: 'me' }));
-  assert.deepEqual(ok, { ok: true });
+  const ok = await integrationsStore.slackTokenCheck(' xoxp-good ', fake({ ok: true, user: 'me', team: '회사', user_id: 'U1' }));
+  assert.deepEqual(ok, { ok: true, prefix: 'me' }, '새 채널 이름의 앞머리만 돌려준다(팀·사용자 id는 싣지 않는다)');
   assert.deepEqual(calls.map(call => call.url), ['https://slack.com/api/auth.test']);
   assert.equal(calls[0].options.headers.Authorization, 'Bearer xoxp-good', '토큰은 헤더로만 나간다');
   assert.ok(!JSON.stringify(ok).includes('xoxp-good'));
@@ -4657,7 +4664,7 @@ server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => console.log
   const checked = await post('/api/integrations/slack-token-check', { token: 'xoxp-good' });
   const checkedText = await checked.text();
   assert.equal(checked.status, 200);
-  assert.deepEqual(JSON.parse(checkedText), { ok: true });
+  assert.deepEqual(JSON.parse(checkedText), { ok: true, prefix: 'me' });
   assert.ok(!checkedText.includes('xoxp-good'));
   const wrong = await post('/api/integrations/slack-token-check', { token: 'xoxp-wrong' });
   assert.equal(wrong.status, 400);
@@ -4726,11 +4733,11 @@ test('연동 저장: 사람이 채우지 않은 예시 채널 칸은 config에�
   await integrationsStore.saveIntegrations({
     configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir,
     body: { slack: { enabled: true, token: 'slack-secret', channels: { todo: 'C0TODO11' } } },
-    slackCheck: async () => ({ name: 'my-todo', isPrivate: true }),
+    slackCheck: async () => ({ name: 'my-todo', isPrivate: true, created: 1790000000 }),
   });
   const saved = fix.read();
   assert.deepEqual(Object.keys(saved.slack.channels), ['todo'], '채우지 않은 세 칸은 사라진다');
-  assert.deepEqual(saved.slack.channels.todo, { id: 'C0TODO11', name: '#my-todo' });
+  assert.deepEqual(saved.slack.channels.todo, { id: 'C0TODO11', name: '#my-todo', since: '1790000000.000000' });
   // setup.sh는 이 글자를 찾으면 설치를 멈춘다 — 이제 아무것도 찾지 못한다.
   assert.ok(!fs.readFileSync(fix.configPath, 'utf8').includes('여기에_채널ID'));
 
@@ -6452,7 +6459,7 @@ test('QA 픽스처: browser-fixture가 서버에 넘기는 경로는 전부 임�
   assert.equal(env.WORKSPACE_NO_OPEN, '1');
   assert.equal(env.WORKSPACE_NO_REMOTE_CHECK, '1');
   const keys = ['WORKSPACE_DATA_DIR', 'WORKSPACE_CONFIG', 'WORKSPACE_REPO_DIR', 'WORKSPACE_LOCAL_DIR', 'WORKSPACE_TOKEN_DIR',
-    'WORKSPACE_AUTOMATION_DIR', 'WORKSPACE_LAUNCH_AGENTS_DIR', 'WORKSPACE_APPLICATIONS_DIR'];
+    'WORKSPACE_AUTOMATION_DIR', 'WORKSPACE_LAUNCH_AGENTS_DIR', 'WORKSPACE_APPLICATIONS_DIR', 'WORKSPACE_BACKUP_DIR'];
   for (const key of keys) {
     assert.ok(env[key], `${key}를 넘긴다`);
     assert.ok(underPath(env[key], root), `${key}=${env[key]}`);
@@ -6466,7 +6473,7 @@ test('QA 픽스처: browser-fixture가 서버에 넘기는 경로는 전부 임�
   const loaded = loadServerChild({ ...process.env, ...env });
   assert.equal(loaded.status, 0, loaded.stderr);
   const used = JSON.parse(loaded.stdout);
-  assert.deepEqual(Object.keys(used).sort(), ['applications', 'automation', 'config', 'data', 'launchAgents', 'local', 'repo', 'tokens']);
+  assert.deepEqual(Object.keys(used).sort(), ['applications', 'automation', 'backup', 'config', 'data', 'launchAgents', 'local', 'repo', 'tokens']);
   for (const [name, value] of Object.entries(used)) {
     const real = fs.existsSync(value) ? fs.realpathSync(value) : value;
     assert.ok(underPath(value, root) || underPath(real, rootReal), `${name}=${value}`);
@@ -6490,6 +6497,7 @@ test('QA 안전망: WORKSPACE_FIXTURE=1인데 경로가 하나라도 실제 설�
     ['automation', without('WORKSPACE_AUTOMATION_DIR'), '~/.local/share/workspace-automation'],
     ['launchAgents', without('WORKSPACE_LAUNCH_AGENTS_DIR'), '~/Library/LaunchAgents'],
     ['applications', without('WORKSPACE_APPLICATIONS_DIR'), '~/Applications'],
+    ['backup', without('WORKSPACE_BACKUP_DIR'), '~/workspace-data-backup'],
     ['config', without('WORKSPACE_CONFIG'), '저장소의 workspace.config.json'],
     ['local', { ...base, WORKSPACE_LOCAL_DIR: path.join(repoRoot, 'local') }, '저장소의 local/'],
     ['data', without('WORKSPACE_DATA_DIR'), '저장소의 tracker/'],
@@ -6618,4 +6626,522 @@ test('QA 꾸미기: 바꾸는 Dock 이름이 Applications의 남의 앱(스크�
   assert.equal(personalizeStore.dockNameTaken(apps, 'Mine'), false);
   assert.equal(personalizeStore.dockNameTaken(apps, 'Nothing'), false);
   assert.equal(personalizeStore.dockNameTaken('', 'Slack'), false);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WP-E — 설정 합치기(연동이 유일한 상태 자리) · 슬랙 채널 고르기(빼기 = off 표시, 다시 켜기 = 그때부터) · 매일 백업
+//
+// 여기서도 실제 슬랙·실제 설정·실제 홈 폴더(~/workspace-data-backup·~/.local/share)에는 닿지 않는다: 슬랙은 가짜
+// fetch가 전부 가로채고, 스크립트는 임시 HOME·가짜 curl·가짜 run-task.sh·가짜 import-record.js로만 돈다.
+
+test('WP-E 연동 상태: 뺀 채널(off)은 없는 것으로 읽고(연결 수·상태 줄), 이름만 따로 알려 준다', () => {
+  const state = integrationsStore.readIntegrations({
+    slack: {
+      channels: {
+        todo: { id: 'C0TODO11', name: '#my-todo' },
+        waiting: { id: 'C0WAIT11', name: '#my-waiting', off: true, since: '1790000000.000000' },
+        align: { id: 'C0ALIGN1', name: '#my-align' },
+      },
+    },
+  }, { tokenDir: fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-wpe-read-')) });
+  assert.deepEqual(state.slack.channels.waiting, { id: '', name: '' }, '뺀 채널은 연결 안 된 칸과 같다');
+  assert.deepEqual(state.slack.channels.align, { id: 'C0ALIGN1', name: '#my-align' });
+  assert.deepEqual(state.slack.off, { waiting: { name: '#my-waiting' } }, 'id는 싣지 않고 이름만');
+  assert.ok(!JSON.stringify(state).includes('since'), 'since는 화면에 나가지 않는다');
+});
+
+test('WP-E 채널 고르기 저장: 빼기는 off만 적고(id·이름 유지) 슬랙에 묻지 않으며, 할 일은 뺄 수 없다', async (t) => {
+  const fix = integrationsFixture(t, {
+    title: '그대로',
+    integrations: { slack: true },
+    slack: { tokenFile: '/어딘가/토큰', channels: { todo: { id: 'C0TODO11', name: '#my-todo' }, waiting: { id: 'C0WAIT11', name: '#my-waiting' } } },
+  });
+  let asked = 0;
+  const slackCheck = async () => { asked += 1; return { name: 'x', isPrivate: true }; };
+  const save = body => integrationsStore.saveIntegrations({ configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir, body, slackCheck });
+  await save({ slack: { enabled: true, token: '', channels: {}, off: ['waiting'], on: [] } });
+  assert.equal(asked, 0, '빼기만 하는 저장은 슬랙에 묻지 않는다(토큰도 필요 없다)');
+  const saved = fix.read();
+  assert.deepEqual(saved.slack.channels.waiting, { id: 'C0WAIT11', name: '#my-waiting', off: true }, '지우지 않고 off 표시만');
+  assert.deepEqual(saved.slack.channels.todo, { id: 'C0TODO11', name: '#my-todo' });
+  assert.equal(saved.slack.tokenFile, '/어딘가/토큰', '토큰 경로는 건드리지 않는다');
+  assert.equal(saved.title, '그대로');
+
+  const before = fs.readFileSync(fix.configPath, 'utf8');
+  await assert.rejects(() => save({ slack: { enabled: true, token: '', off: ['todo'] } }), /할 일 채널은 뺄 수 없어요/);
+  await assert.rejects(() => save({ slack: { enabled: true, token: '', off: ['아무거나'] } }), /보낸 값을 확인해 주세요/);
+  assert.equal(fs.readFileSync(fix.configPath, 'utf8'), before, '거절하면 한 글자도 바뀌지 않는다');
+});
+
+test('WP-E 채널 고르기 저장: 뺐던 채널을 다시 켜면 같은 id로(새로 만들지 않고) 지금부터 읽고, 사라졌으면 channel_gone으로 거절한다', async (t) => {
+  const fix = integrationsFixture(t, {
+    slack: { channels: {
+      todo: { id: 'C0TODO11', name: '#my-todo' },
+      align: { id: 'C0ALIGN1', name: '#my-align', off: true },
+      someday: { id: 'C0GONE11', name: '#my-someday', off: true },
+    } },
+  });
+  fs.mkdirSync(fix.tokenDir, { recursive: true });
+  fs.writeFileSync(path.join(fix.tokenDir, 'workspace-slack-token'), 'xoxp-saved\n', { mode: 0o600 });
+  const asked = [];
+  const slackCheck = async (token, id) => {
+    asked.push([token, id]);
+    if (id === 'C0GONE11') throw Object.assign(new Error('슬랙에서 이 채널을 읽지 못했어요'), { status: 400 });
+    return { name: 'my-align-renamed', isPrivate: true, created: 1700000000 };
+  };
+  const save = body => integrationsStore.saveIntegrations({
+    configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir, body, slackCheck, now: () => 1790000123456,
+  });
+  const { result } = await save({ slack: { enabled: true, token: '', channels: {}, off: [], on: ['align'] } });
+  assert.deepEqual(asked, [['xoxp-saved', 'C0ALIGN1']], '저장된 id로 읽어 보기만 한다(만들지 않는다)');
+  assert.deepEqual(fix.read().slack.channels.align, { id: 'C0ALIGN1', name: '#my-align-renamed', since: '1790000123.456000' },
+    'off를 지우고 다시 켠 때부터 읽는다(만든 때가 아니다 — 뺀 동안 온 메시지는 가져오지 않는다)');
+  assert.equal(result.slack.channels.align.reconnected, true);
+
+  const before = fs.readFileSync(fix.configPath, 'utf8');
+  await assert.rejects(() => save({ slack: { enabled: true, token: '', on: ['someday'] } }),
+    error => error.code === 'channel_gone' && error.key === 'someday' && /#my-someday을 찾을 수 없어요/.test(error.message));
+  assert.equal(fs.readFileSync(fix.configPath, 'utf8'), before, '사라진 채널을 켜려 하면 아무것도 쓰지 않는다');
+  // 보관된 채널도 사라진 것과 같다
+  const archived = integrationsStore.saveIntegrations({
+    configPath: fix.configPath, current: { slack: { channels: { todo: { id: 'C0TODO11' }, align: { id: 'C0ALIGN1', off: true } } } },
+    tokenDir: fix.tokenDir, body: { slack: { enabled: true, token: '', on: ['align'] } },
+    slackCheck: async () => ({ name: 'my-align', archived: true }),
+  });
+  await assert.rejects(() => archived, error => error.code === 'channel_gone');
+
+  // 사라진 뺀 채널을 다시 체크하면 화면은 새로 만든다 — 새 id는 channels로 오고, off는 지워지고 만든 때부터 읽는다
+  await integrationsStore.saveIntegrations({
+    configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir,
+    body: { slack: { enabled: true, token: '', channels: { someday: 'C0NEWSOM1' } } },
+    slackCheck: async () => ({ name: 'hana-someday', isPrivate: true, created: 1790000200 }),
+  });
+  assert.deepEqual(fix.read().slack.channels.someday, { id: 'C0NEWSOM1', name: '#hana-someday', since: '1790000200.000000' });
+});
+
+test('WP-E 기본 채널 이름: 슬랙 사용자 이름을 채널 이름 규칙으로 다듬고, 없거나 비면 my', () => {
+  const prefix = integrationsStore.slackChannelPrefix;
+  assert.equal(prefix('hana'), 'hana');
+  assert.equal(prefix('Hana.Kim'), 'hana-kim', '점·띄어쓰기는 -');
+  assert.equal(prefix('  Hana  Kim  '), 'hana-kim');
+  assert.equal(prefix('하나'), 'my', '쓸 수 없는 글자만이면 my');
+  assert.equal(prefix(''), 'my');
+  assert.equal(prefix(undefined), 'my');
+  assert.equal(prefix('--a__b--'), 'a__b', '앞뒤의 -·_는 뗀다');
+  const long = prefix('a'.repeat(200));
+  assert.ok(`${long}-someday`.length <= 80, '가장 긴 뒷머리를 붙여도 80자 이하');
+  assert.match(integrationsStore.slackTsNow(() => 1790000000001), /^1790000000\.001000$/);
+});
+
+test('WP-E 라우트: 빼기 저장은 슬랙에 한 번도 묻지 않고, 다시 켜기는 conversations.info만(만들기 없음), 할 일 채널이 사라지면 빨간 점(alerts)에 센다', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-wpe-route-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const data = path.join(home, 'tracker');
+  fs.mkdirSync(data);
+  const tokens = path.join(home, 'tokens');
+  fs.mkdirSync(tokens);
+  fs.writeFileSync(path.join(tokens, 'workspace-slack-token'), 'xoxp-saved\n', { mode: 0o600 });
+  const config = path.join(home, 'workspace.config.json');
+  const calls = path.join(home, 'slack-calls.log');
+  fs.writeFileSync(config, JSON.stringify({
+    integrations: { slack: true, calendar: false, jira: false, tiro: false },
+    slack: { tokenFile: path.join(tokens, 'workspace-slack-token'), channels: {
+      todo: { id: 'C0TODO11', name: '#my-todo' },
+      waiting: { id: 'C0WAIT11', name: '#my-waiting' },
+      align: { id: 'C0ALIGN1', name: '#my-align', off: true },
+      someday: { id: 'C0GONE11', name: '#my-someday', off: true },
+    } },
+  }, null, 2));
+  const wrapper = path.join(home, 'fake-slack-server.js');
+  fs.writeFileSync(wrapper, `'use strict';
+const fs = require('node:fs');
+const realFetch = globalThis.fetch;
+globalThis.fetch = async (input, init = {}) => {
+  const url = String(input && input.url ? input.url : input);
+  if (!url.startsWith('https://slack.com/api/')) return realFetch(input, init);
+  const json = body => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  const method = url.split('/api/')[1].split('?')[0];
+  const id = new URL(url).searchParams.get('channel') || '';
+  fs.appendFileSync(${JSON.stringify(calls)}, method + ' ' + id + '\\n');
+  if (method === 'auth.test') return json({ ok: true, user: 'Hana.Kim' });
+  if (method === 'conversations.info') {
+    if (id === 'C0GONE11') return json({ ok: false, error: 'channel_not_found' });
+    return json({ ok: true, channel: { id, name: { C0TODO11: 'my-todo', C0WAIT11: 'my-waiting', C0ALIGN1: 'my-align' }[id] || 'x', is_private: true } });
+  }
+  return json({ ok: false, error: 'unexpected_' + method });
+};
+const { server } = require(${JSON.stringify(path.join(__dirname, 'server.js'))});
+server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => console.log('ready'));
+`);
+  const port = await freePort();
+  const child = spawn(process.execPath, [wrapper], {
+    env: {
+      ...process.env, WORKSPACE_PORT: String(port), WORKSPACE_NO_OPEN: '1', WORKSPACE_HOST: '', WORKSPACE_NO_REMOTE_CHECK: '1',
+      WORKSPACE_SLACK_FOLLOW: '1', WORKSPACE_DATA_DIR: data, WORKSPACE_CONFIG: config, WORKSPACE_TOKEN_DIR: tokens,
+      WORKSPACE_AUTOMATION_DIR: path.join(home, 'automation'), WORKSPACE_BACKUP_DIR: path.join(home, 'backup'),
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let log = '';
+  child.stdout.on('data', chunk => { log += chunk; });
+  child.stderr.on('data', chunk => { log += chunk; });
+  t.after(() => child.kill('SIGKILL'));
+  const origin = `http://127.0.0.1:${port}`;
+  const deadline = Date.now() + 10000;
+  for (;;) {
+    if (Date.now() > deadline) throw new Error(`서버가 응답하지 않았습니다: ${log}`);
+    if (child.exitCode !== null) throw new Error(`서버가 종료되었습니다 (${child.exitCode}): ${log}`);
+    try { if ((await fetch(origin + '/api/storage-status')).ok) break; } catch { /* 아직 안 떴다 */ }
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  const post = (route, body) => fetch(origin + route, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const slackLog = () => (fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').trim().split('\n').filter(Boolean) : []);
+  const channels = () => JSON.parse(fs.readFileSync(config, 'utf8')).slack.channels;
+
+  // 지금 상태 — 뺀 채널은 없는 칸, 이름·사라짐만 off로
+  const state = await (await fetch(origin + '/api/integrations')).json();
+  assert.equal(state.slack.channels.align.id, '');
+  assert.deepEqual(state.slack.off, { align: { name: '#my-align' }, someday: { name: '#my-someday', missing: true } });
+  assert.equal(state.slack.channels.someday.missing, undefined, '뺀 채널의 사라짐은 연결된 칸에 붙이지 않는다');
+  assert.deepEqual(state.alerts, [], '할 일 채널이 있으면 멈춘 것이 아니다');
+  assert.ok(Array.isArray(state.slack.log) && Array.isArray(state.jira.log), '카드 최근 기록 자리');
+
+  // 새 채널 이름의 앞머리 — 토큰 칸 없이(저장된 토큰)
+  const prefix = await (await post('/api/integrations/slack-token-check', { token: '' })).json();
+  assert.deepEqual(prefix, { ok: true, prefix: 'hana-kim' });
+
+  // 빼기 — 슬랙 호출 0번
+  const count = slackLog().length;
+  const off = await (await post('/api/integrations/save', { slack: { enabled: true, token: '', channels: {}, off: ['waiting'], on: [] } })).json();
+  assert.equal(off.ok, true);
+  assert.equal(slackLog().length, count, '빼기 저장은 슬랙에 한 번도 묻지 않는다(보관·삭제·나가기 없음)');
+  assert.deepEqual(channels().waiting, { id: 'C0WAIT11', name: '#my-waiting', off: true });
+
+  // 다시 켜기 — conversations.info 하나, 만들기 없음
+  const on = await (await post('/api/integrations/save', { slack: { enabled: true, token: '', channels: {}, off: [], on: ['align'] } })).json();
+  assert.equal(on.ok, true);
+  assert.deepEqual(slackLog().slice(count), ['conversations.info C0ALIGN1']);
+  assert.equal(channels().align.id, 'C0ALIGN1', '같은 채널');
+  assert.equal(channels().align.off, undefined);
+  const since = Number(channels().align.since);
+  assert.ok(Math.abs(since * 1000 - Date.now()) < 60000, '다시 켠 때부터 읽는다');
+  const gone = await post('/api/integrations/save', { slack: { enabled: true, token: '', on: ['someday'] } });
+  assert.equal(gone.status, 400);
+  const goneBody = await gone.json();
+  assert.equal(goneBody.code, 'channel_gone');
+  assert.equal(goneBody.key, 'someday');
+  assert.ok(!slackLog().some(line => /^conversations\.(create|archive|leave|kick)|^channels\./.test(line)), '슬랙 쓰기 API는 한 번도 부르지 않았다');
+  assert.ok(!JSON.stringify(state).includes('xoxp-') && !JSON.stringify(goneBody).includes('xoxp-'), '토큰은 응답에 없다');
+
+  // 할 일 채널이 사라지면 — 연동 탭을 열 때(이름 따라가기) 알게 되고, 톱니바퀴 빨간 점의 근거(alerts)에 센다
+  const moved = JSON.parse(fs.readFileSync(config, 'utf8'));
+  moved.slack.channels.todo = { id: 'C0GONE11', name: '#my-todo' };
+  fs.writeFileSync(config, JSON.stringify(moved, null, 2));
+  const broken = await (await fetch(origin + '/api/integrations')).json();
+  assert.equal(broken.slack.channels.todo.missing, true);
+  assert.deepEqual(broken.alerts, ['slack']);
+  const status = await (await fetch(origin + '/api/automation/status')).json();
+  assert.deepEqual(status.alerts, ['slack'], '빨간 점도 같은 판단(슬랙에 다시 묻지 않고 들고 있는 답만 본다)');
+});
+
+test('WP-E 앱 탭 백업 상태(GET /api/backup): 처음 · 로컬만 · GitHub 포함 · 실패 — 로그와 날짜 폴더만 읽는다', async () => {
+  const logs = path.join(automationHome, 'logs');
+  const logFile = path.join(logs, 'data-backup.log');
+  const root = process.env.WORKSPACE_BACKUP_DIR;
+  const gitDir = path.join(automationHome, 'data-backup.git');
+  fs.mkdirSync(logs, { recursive: true });
+  const backup = async () => (await fetch(base + '/api/backup')).json();
+  try {
+    const never = await backup();
+    assert.equal(never.ok, true);
+    assert.deepEqual(never.local, { state: 'never', at: null, reason: null, days: 0 });
+    assert.deepEqual(never.github, { on: false, state: 'never', at: null, reason: null });
+    assert.match(never.path, /workspace-data-backup\/daily$/);
+
+    for (const day of ['2026-09-18', '2026-09-19', '2026-09-20']) fs.mkdirSync(path.join(root, 'daily', day), { recursive: true });
+    fs.mkdirSync(path.join(root, 'daily', '.tmp-2026-09-21-1'), { recursive: true });
+    fs.mkdirSync(path.join(root, 'daily', '메모'), { recursive: true });
+    fs.mkdirSync(path.join(root, '2026-09-20-1930'), { recursive: true });
+    fs.writeFileSync(logFile, [
+      '2026-09-19 19:30:02 로컬 실패 — 파일을 복사하지 못함 (tasks.md)',
+      '2026-09-19 19:30:03 GitHub 건너뜀 — 백업 저장 공간을 만들지 않음',
+      '{"ok":true}2026-09-20 19:30:04 로컬 성공 · 3일치',
+      '2026-09-20 19:30:05 GitHub 건너뜀 — 백업 저장 공간을 만들지 않음',
+      '',
+    ].join('\n'));
+    const local = await backup();
+    assert.deepEqual(local.local, { state: 'ok', at: '2026-09-20 19:30:04', reason: null, days: 3 }, '정확히 날짜 이름인 폴더만 센다(임시·다른 이름·업데이트 백업은 빼고)');
+    assert.equal(local.github.on, false, 'GitHub 저장 공간이 없으면 둘째 줄은 없다');
+
+    fs.mkdirSync(gitDir, { recursive: true });
+    fs.writeFileSync(path.join(gitDir, 'config'), '[core]\n\tbare = true\n[remote "origin"]\n\turl = git@github.com:someone/data.git\n');
+    fs.appendFileSync(logFile, '2026-09-21 19:30:04 로컬 성공 · 3일치\n2026-09-21 19:30:09 GitHub 성공\n');
+    const both = await backup();
+    assert.deepEqual(both.github, { on: true, state: 'ok', at: '2026-09-21 19:30:09', reason: null });
+    assert.ok(!JSON.stringify(both).includes('github.com'), '원격 주소는 싣지 않는다');
+
+    fs.appendFileSync(logFile, '2026-09-22 19:30:01 로컬 실패 — 백업 폴더를 만들지 못함 (/x)\n2026-09-22 19:30:03 GitHub 실패 — 원격 업로드 실패 (이 맥의 백업 커밋은 남아 있음)\n');
+    const failed = await backup();
+    assert.deepEqual(failed.local, { state: 'fail', at: '2026-09-22 19:30:01', reason: '백업 폴더를 만들지 못함 (/x)', days: 3 });
+    assert.equal(failed.github.state, 'fail');
+    assert.equal(failed.github.reason, '원격 업로드 실패 (이 맥의 백업 커밋은 남아 있음)');
+
+    // 예전(GitHub만 하던) 로그도 읽는다
+    fs.writeFileSync(logFile, '2026-09-10 19:30:04 백업 커밋 완료\n2026-09-10 19:30:06 원격 업로드 완료\n');
+    const legacy = await backup();
+    assert.equal(legacy.github.state, 'ok');
+    assert.equal(legacy.local.state, 'ok', '날짜 폴더가 있으면 로그가 없어도 백업은 있는 것');
+  } finally {
+    fs.rmSync(logFile, { force: true });
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(gitDir, { recursive: true, force: true });
+  }
+});
+
+test('WP-E 자동화 기록: 줄 앞에 `{"ok":true}`가 붙은 옛 로그도 시각을 찾아 읽어서, 마지막 실행이 성공이면 멈춘 것이 아니다', async () => {
+  const logs = path.join(automationHome, 'logs');
+  const file = path.join(logs, 'slack-capture.log');
+  fs.mkdirSync(logs, { recursive: true });
+  const before = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+  try {
+    fs.writeFileSync(file, [
+      '2026-09-23 18:22:00 my-todo 채널 확인 실패 — fetch 실패 (exit 28)',
+      '{"ok":true}2026-09-24 06:34:07 새 메시지 없음 — Claude 호출 생략',
+      '',
+    ].join('\n'));
+    const status = await (await fetch(base + '/api/automation/status')).json();
+    const slack = status.automations.find(one => one.key === 'slack');
+    assert.equal(slack.lastKind, 'skip', '붙은 줄의 성공(건너뜀)을 읽는다');
+    assert.equal(slack.lastRunAt, '2026-09-24 06:34:07');
+    assert.ok(!status.alerts.includes('slack'), '빨간 점이 켜지지 않는다');
+    assert.deepEqual(slack.events.map(one => [one.time, one.kind]), [['2026-09-24 06:34:07', 'skip'], ['2026-09-23 18:22:00', 'fail']], '최근 기록(새것 먼저)도 같은 파서');
+
+    // 실행 블록 선 앞에 붙은 찌꺼기도
+    fs.appendFileSync(file, '{"ok":true}───── 2026-09-24 07:00:00 slack-capture 시작\n새 항목 1개\n───── 2026-09-24 07:00:30 slack-capture 종료 (exit 0)\n');
+    const again = (await (await fetch(base + '/api/automation/status')).json()).automations.find(one => one.key === 'slack');
+    assert.equal(again.lastKind, 'run');
+    assert.equal(again.lastSummary, '새 항목 1개');
+    const intg = await (await fetch(base + '/api/integrations')).json();
+    assert.equal(intg.slack.fetch.failing, false);
+    assert.equal(intg.slack.log[0].kind, 'run');
+    const refs = Object.values((await items()).reportRefs);
+    assert.equal(intg.slack.todayCount, refs.filter(ref => ref.permalink && ref.created === today).length, '오늘 슬랙에서 들어온 항목(원본 링크가 슬랙이고 오늘 만든 것)');
+    assert.ok(intg.slack.todayCount >= 1, '오늘 만든 슬랙 항목(unseen)을 센다');
+
+    // 지금 실패 중이면 이유 한 줄(summary)과 빨간 점
+    fs.appendFileSync(file, '2026-09-24 07:05:00 my-todo 채널 확인 실패 — ERR:invalid_auth\n');
+    const failing = await (await fetch(base + '/api/integrations')).json();
+    assert.equal(failing.slack.fetch.failing, true);
+    assert.equal(failing.slack.fetch.auth, true);
+    assert.match(failing.slack.fetch.summary, /ERR:invalid_auth/);
+    assert.ok(failing.alerts.includes('slack'));
+  } finally {
+    if (before === null) fs.rmSync(file, { force: true }); else fs.writeFileSync(file, before);
+  }
+});
+
+// slack-capture.sh를 임시 HOME에서 돌린다 — PATH 맨 앞(HOME/.nvm/…/bin)에 가짜 curl, 앱 자리에 가짜 import-record.js,
+// 설치 위치 자리에 가짜 run-task.sh를 둔다. 슬랙·앱 서버·Claude 어디에도 닿지 않는다.
+function captureFixture(t, config, stateJson) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-wpe-capture-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const bin = path.join(home, '.nvm', 'versions', 'node', 'v0', 'bin');
+  fs.mkdirSync(bin, { recursive: true });
+  fs.symlinkSync(process.execPath, path.join(bin, 'node'));
+  const curlLog = path.join(home, 'curl.log');
+  writeExec(path.join(bin, 'curl'), `#!/bin/bash\nfor a in "$@"; do case "$a" in https://*) echo "$a" >> ${JSON.stringify(curlLog)} ;; esac; done\nif [ -n "\${FAKE_FOUND:-}" ]; then printf '{"ok":true,"messages":[{"ts":"1"}]}'; else printf '{"ok":true,"messages":[]}'; fi\n`);
+  const app = path.join(home, 'tracker', 'inbox-app');
+  fs.mkdirSync(app, { recursive: true });
+  // 앱 API 흉내 — 진짜처럼 줄바꿈 없이 {"ok":true}를 낸다
+  fs.writeFileSync(path.join(app, 'import-record.js'), "process.stdin.resume();process.stdin.on('end',()=>process.stdout.write('{\"ok\":true}'));");
+  if (stateJson) fs.writeFileSync(path.join(app, '.slack_capture_state.json'), JSON.stringify(stateJson));
+  const install = path.join(home, '.local', 'share', 'workspace-automation');
+  fs.mkdirSync(install, { recursive: true });
+  const prompt = path.join(home, 'prompt.txt');
+  writeExec(path.join(install, 'run-task.sh'), `#!/bin/bash\nprintf '%s' "$2" > ${JSON.stringify(prompt)}\nexit 0\n`);
+  fs.writeFileSync(path.join(home, 'token'), 'xoxp-t\n');
+  const configPath = path.join(home, 'workspace.config.json');
+  fs.writeFileSync(configPath, JSON.stringify({ ...config, slack: { tokenFile: path.join(home, 'token'), ...config.slack } }));
+  const logs = path.join(home, 'logs');
+  const run = (env = {}) => runScript(automationScript('slack-capture.sh'), [], {
+    HOME: home, WORKSPACE_DIR: home, WORKSPACE_CONFIG: configPath, AUTOMATION_LOG_DIR: logs, SLACK_CAPTURE_IGNORE_HOURS: '1', ...env,
+  });
+  const urls = () => (fs.existsSync(curlLog) ? fs.readFileSync(curlLog, 'utf8').trim().split('\n').filter(Boolean) : []);
+  const logText = () => fs.readFileSync(path.join(logs, 'slack-capture.log'), 'utf8');
+  return { home, run, urls, logText, prompt };
+}
+
+test('WP-E slack-capture.sh: 뺀 채널(off)은 읽지도 Claude에 넘기지도 않고, 어디서부터는 커서와 since 중 큰 값이다', (t) => {
+  const fix = captureFixture(t, { slack: { channels: {
+    todo: { id: 'C0TODO11', name: '#my-todo', since: '1790000000.000000' },
+    align: { id: 'C0ALIGN1', name: '#my-align', off: true },
+    waiting: { id: 'C0WAIT11', name: '#my-waiting', since: '1780000000.000000' },
+    someday: { id: 'C0SOME11', name: '#my-someday' },
+  } } }, { 'my-todo': '1789999999.999999', 'my-waiting': '1790000500.000100' });
+  const quiet = fix.run();
+  assert.equal(quiet.status, 0, quiet.stderr + fix.logText());
+  const urls = fix.urls();
+  assert.equal(urls.length, 3, '뺀 채널은 부르지 않는다');
+  assert.ok(!urls.some(url => url.includes('C0ALIGN1')));
+  assert.ok(urls.includes('https://slack.com/api/conversations.history?channel=C0TODO11&limit=100&oldest=1790000000.000000'), 'since가 커서보다 뒤면 since부터');
+  assert.ok(urls.includes('https://slack.com/api/conversations.history?channel=C0WAIT11&limit=100&oldest=1790000500.000100'), '커서가 뒤면 커서부터');
+  assert.ok(urls.includes('https://slack.com/api/conversations.history?channel=C0SOME11&limit=100'), 'since도 커서도 없으면 예전처럼');
+
+  // 앱 API의 응답({"ok":true})은 로그에 남지 않는다 — 다음 줄이 그 뒤에 붙어 "마지막 실행"을 못 읽던 원인
+  const log = fix.logText();
+  assert.ok(!log.includes('{"ok":true}'), log);
+  assert.match(log, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} 새 메시지 없음 — Claude 호출 생략$/m);
+
+  // 새 메시지가 있으면 Claude에게 켜 둔 채널의 지침만 넘긴다
+  const busy = fix.run({ FAKE_FOUND: '1' });
+  assert.equal(busy.status, 0, busy.stderr + fix.logText());
+  const prompt = fs.readFileSync(fix.prompt, 'utf8');
+  assert.match(prompt, /^\.claude\/skills\/ 폴더의 slack-todos\.md, slack-someday\.md, slack-waiting\.md 파일을 차례로 읽고/);
+  assert.ok(!prompt.includes('slack-alignments.md'), '뺀 채널의 지침은 넘기지 않는다');
+  assert.ok(!fix.logText().includes('{"ok":true}'));
+});
+
+// backup-data.sh를 임시 HOME에서 돌린다 — 데이터·백업 폴더·로그·Git 저장 공간 모두 임시 폴더.
+function backupFixture(t) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-wpe-backup-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const ws = path.join(home, 'ws');
+  const tracker = path.join(ws, 'tracker');
+  const app = path.join(tracker, 'inbox-app');
+  fs.mkdirSync(app, { recursive: true });
+  fs.writeFileSync(path.join(tracker, 'tasks.md'), '# Tasks\n- 오늘 업무\n');
+  fs.writeFileSync(path.join(tracker, '.workflow.json'), '{"items":{}}');
+  fs.writeFileSync(path.join(tracker, '.access-token'), 'secret-password\n');
+  fs.writeFileSync(path.join(tracker, '메모.txt'), '목록에 없는 파일\n');
+  fs.writeFileSync(path.join(app, '.slack_capture_state.json'), '{"my-todo":"1.0"}');
+  const backup = path.join(home, 'workspace-data-backup');
+  const logs = path.join(home, 'logs');
+  const run = (env = {}) => runScript(automationScript('backup-data.sh'), [], {
+    ...gitEnv, HOME: home, WORKSPACE_DIR: ws, WORKSPACE_DATA_DIR: '', WORKSPACE_BACKUP_DIR: backup, AUTOMATION_LOG_DIR: logs,
+    DATA_BACKUP_GIT_DIR: path.join(home, 'data-backup.git'), ...env,
+  });
+  const daily = () => (fs.existsSync(path.join(backup, 'daily')) ? fs.readdirSync(path.join(backup, 'daily')) : []).sort();
+  const logText = () => fs.readFileSync(path.join(logs, 'data-backup.log'), 'utf8');
+  const two = n => String(n).padStart(2, '0');
+  const now = new Date();
+  const today = `${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())}`;
+  return { home, ws, tracker, backup, run, daily, logText, today };
+}
+
+test('WP-E backup-data.sh: 이 맥 안 daily/YYYY-MM-DD에 복사(접속 암호 제외)하고 7개만 남기며, 다른 폴더·업데이트 백업은 건드리지 않는다', (t) => {
+  const fix = backupFixture(t);
+  for (let day = 1; day <= 8; day += 1) {
+    const dir = path.join(fix.backup, 'daily', `2020-01-0${day}`);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'tasks.md'), `옛 ${day}`);
+  }
+  fs.mkdirSync(path.join(fix.backup, 'daily', '내 메모'), { recursive: true });
+  fs.mkdirSync(path.join(fix.backup, 'daily', '2020-01-01-extra'), { recursive: true });
+  fs.mkdirSync(path.join(fix.backup, '2020-01-01-0900'), { recursive: true });
+  fs.writeFileSync(path.join(fix.backup, '2020-01-01-0900', 'tasks.md'), '업데이트 직전 백업');
+
+  const result = fix.run();
+  assert.equal(result.status, 0, result.stderr + fix.logText());
+  const dated = fix.daily().filter(name => /^\d{4}-\d{2}-\d{2}$/.test(name));
+  assert.equal(dated.length, 7, '7일치만 남긴다');
+  assert.deepEqual(dated, ['2020-01-03', '2020-01-04', '2020-01-05', '2020-01-06', '2020-01-07', '2020-01-08', fix.today], '가장 오래된 것부터 지운다');
+  assert.ok(fix.daily().includes('내 메모') && fix.daily().includes('2020-01-01-extra'), '이름이 정확히 날짜가 아닌 폴더는 건드리지 않는다');
+  assert.equal(fs.readFileSync(path.join(fix.backup, '2020-01-01-0900', 'tasks.md'), 'utf8'), '업데이트 직전 백업', 'update.sh의 백업은 그대로');
+  assert.ok(!fix.daily().some(name => name.startsWith('.tmp-')), '임시 폴더는 남지 않는다');
+
+  const todayDir = path.join(fix.backup, 'daily', fix.today);
+  assert.deepEqual(fs.readdirSync(todayDir).sort(), ['.slack_capture_state.json', '.workflow.json', 'tasks.md'], '목록에 있는 데이터 파일만, 접속 암호는 빼고');
+  assert.match(fs.readFileSync(path.join(todayDir, 'tasks.md'), 'utf8'), /오늘 업무/);
+  assert.match(fix.logText(), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} 로컬 성공 · 7일치$/m);
+  assert.match(fix.logText(), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} GitHub 건너뜀 — 백업 저장 공간을 만들지 않음$/m, 'GitHub 저장 공간이 없으면 로컬만');
+
+  // 같은 날 다시 돌면 그날 것을 바꿔 넣는다
+  fs.writeFileSync(path.join(fix.tracker, 'tasks.md'), '# Tasks\n- 저녁에 고친 업무\n');
+  assert.equal(fix.run().status, 0);
+  assert.match(fs.readFileSync(path.join(todayDir, 'tasks.md'), 'utf8'), /저녁에 고친 업무/);
+  assert.equal(fix.daily().filter(name => /^\d{4}-\d{2}-\d{2}$/.test(name)).length, 7);
+
+  // 백업 자리에 폴더를 만들 수 없으면 실패를 이유와 함께 남기고 1로 끝난다(데이터는 그대로)
+  const blocked = path.join(fix.home, 'blocked');
+  fs.writeFileSync(blocked, '폴더가 아니라 파일');
+  const failed = fix.run({ WORKSPACE_BACKUP_DIR: blocked });
+  assert.equal(failed.status, 1);
+  assert.match(fix.logText(), /로컬 실패 — 백업 폴더를 만들지 못함/);
+  assert.match(fs.readFileSync(path.join(fix.tracker, 'tasks.md'), 'utf8'), /저녁에 고친 업무/);
+
+  // 스크립트의 지우기는 날짜 폴더 하나씩만(글자 검사 후) — 다른 rm -rf는 없다
+  const script = fs.readFileSync(automationScript('backup-data.sh'), 'utf8');
+  const removes = script.split('\n').filter(line => /\brm -rf\b/.test(line) && !/^\s*#/.test(line));
+  assert.deepEqual(removes.map(line => line.trim()), ['rm -rf -- "$DAILY/$name"']);
+  assert.match(script, /\[\[ "\$name" =~ \^\[0-9\]\{4\}-\[0-9\]\{2\}-\[0-9\]\{2\}\$ \]\] \|\| return 1/);
+});
+
+test('WP-E backup-data.sh: 데이터 목록은 update.sh와 같고(접속 암호만 뺌), GitHub 저장 공간이 있으면 한 겹 더 올린다', { skip: !gitReady }, (t) => {
+  const listOf = (text, name) => (new RegExp(`^${name}="([^"]*)"$`, 'm').exec(text) || [])[1].split(' ');
+  const update = fs.readFileSync(path.join(REPO_ROOT, 'update.sh'), 'utf8');
+  const backupScript = fs.readFileSync(automationScript('backup-data.sh'), 'utf8');
+  assert.deepEqual(listOf(backupScript, 'DATA_FILES'), listOf(update, 'DATA_FILES').filter(name => name !== '.access-token'));
+  assert.deepEqual(listOf(backupScript, 'STATE_FILES'), listOf(update, 'STATE_FILES'));
+
+  const fix = backupFixture(t);
+  const gitDir = path.join(fix.home, 'data-backup.git');
+  runGit(fix.home, ['init', '-q', '--bare', '-b', 'main', gitDir]);
+  fs.mkdirSync(path.join(gitDir, 'info'), { recursive: true });
+  fs.writeFileSync(path.join(gitDir, 'info', 'exclude'), '*\n!tasks.md\n');
+  assert.equal(fix.run().status, 0, fix.logText());
+  assert.match(fix.logText(), /로컬 성공 · 1일치/);
+  assert.match(fix.logText(), /GitHub 건너뜀 — 원격 저장소가 연결되지 않음 \(이 맥에만 커밋함\)/);
+  const remote = path.join(fix.home, 'remote.git');
+  runGit(fix.home, ['init', '-q', '--bare', '-b', 'main', remote]);
+  runGit(fix.home, [`--git-dir=${gitDir}`, 'remote', 'add', 'origin', remote]);
+  fs.writeFileSync(path.join(fix.tracker, 'tasks.md'), '# Tasks\n- 올릴 업무\n');
+  assert.equal(fix.run().status, 0, fix.logText());
+  assert.match(fix.logText(), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} GitHub 성공$/m);
+  assert.match(runGit(fix.home, [`--git-dir=${remote}`, 'show', 'main:tasks.md']).stdout, /올릴 업무/);
+});
+
+test('WP-E setup.sh: data-backup을 늘 등록하고(저장 공간 조건 없음), 채널 자리표시자 검사는 뺀 채널을 없는 것으로 본다', () => {
+  const script = fs.readFileSync(path.join(REPO_ROOT, 'setup.sh'), 'utf8');
+  assert.ok(!script.includes('if [ -d "$INSTALL_DIR/data-backup.git" ]'), 'GitHub 저장 공간이 있을 때만 등록하던 조건은 없다');
+  const at = script.indexOf('cat > "$AGENTS_DIR/$LABEL.data-backup.plist"');
+  assert.ok(at > 0);
+  const before = script.slice(Math.max(0, script.lastIndexOf('\n\n', at)), at);
+  assert.ok(!/^\s*if /m.test(before), '등록 앞에 조건문이 없다');
+  assert.match(script, /<dict><key>Hour<\/key><integer>19<\/integer><key>Minute<\/key><integer>30<\/integer><\/dict>/);
+  assert.ok(!/grep -q "여기에_채널ID" "\$CONFIG"/.test(script), '파일 글자 검사 대신 설정을 읽는다');
+
+  // 설정 읽기 조각만 꺼내 돌린다 — 뺀 채널의 자리표시자는 세지 않는다
+  const reader = /CONFIG_READER='\n([\s\S]*?)\n'/.exec(script)[1];
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-wpe-setup-'));
+  const config = path.join(home, 'workspace.config.json');
+  const read = () => spawnSync(process.execPath, ['-e', reader, config, 'slackPlaceholder'], { encoding: 'utf8' }).stdout;
+  fs.writeFileSync(config, JSON.stringify({ slack: { channels: { todo: { id: 'C0TODO11' }, align: { id: '여기에_채널ID', off: true } } } }));
+  assert.equal(read(), 'no');
+  fs.writeFileSync(config, JSON.stringify({ slack: { channels: { todo: { id: '여기에_채널ID' } } } }));
+  assert.equal(read(), 'yes');
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('WP-E update.sh: 매일 백업(daily/)은 업데이트 백업의 목록·정리·되돌리기에 절대 잡히지 않는다', { skip: !gitReady }, (t) => {
+  const fix = updateFixture(t);
+  const daily = path.join(fix.backups, 'daily');
+  for (const day of ['2099-01-01', '2099-01-02']) {
+    fs.mkdirSync(path.join(daily, day), { recursive: true });
+    fs.writeFileSync(path.join(daily, day, 'tasks.md'), '# Tasks\n- 매일 백업의 내용\n');
+  }
+  for (const day of ['01', '02', '03', '04', '05', '06']) fs.mkdirSync(path.join(fix.backups, `2020-01-${day}-0900`));
+  const snapshot = () => fs.readdirSync(daily).sort().map(day => [day, fs.readFileSync(path.join(daily, day, 'tasks.md'), 'utf8')]);
+  const before = snapshot();
+
+  assert.equal(fix.run(['--yes']).status, 0);
+  assert.equal(fix.dated().length, 5, '업데이트 백업은 최근 5개');
+  assert.deepEqual(snapshot(), before, 'daily/는 그대로(정리 대상이 아니다)');
+
+  fs.writeFileSync(path.join(fix.clone, 'tracker', 'tasks.md'), '# Tasks\n- 망가진 내용\n');
+  const back = fix.run(['--rollback', '--yes']);
+  assert.equal(back.status, 0, back.stdout + back.stderr);
+  assert.match(fix.tasks(), /지켜야 할 업무/, '되돌리기는 업데이트 직전 백업에서(날짜가 더 늦은 daily/가 아니라)');
+  assert.deepEqual(snapshot(), before);
+  const script = fs.readFileSync(path.join(REPO_ROOT, 'update.sh'), 'utf8');
+  assert.match(script, /^BACKUP_NAME_RE='\^\[0-9\]\{4\}-\[0-9\]\{2\}-\[0-9\]\{2\}-\[0-9\]\{4\}\$'$/m, 'daily는 이 이름 규칙에 맞지 않는다');
 });

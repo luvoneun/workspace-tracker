@@ -226,13 +226,13 @@
     <div class="d-mbody" id="wrapBody"></div>
   </dialog>
 
-  <!-- 설정 — 드물게 여는 창이라 모달 그대로 둔다(상태 / 연동 / 꾸미기 / 도움말 / 삭제한 항목 다섯 칸) -->
+  <!-- 설정 — 드물게 여는 창이라 모달 그대로 둔다(연동 / 앱 / 꾸미기 / 도움말 / 삭제한 항목 다섯 칸, 처음은 연동) -->
   <dialog id="settingsDialog" class="d-modal" aria-label="설정">
     <div class="d-mhd">
       <h2>설정</h2>
       <span class="d-seg" role="group" aria-label="설정 보기">
-        <button type="button" data-settings-tab="status" aria-pressed="true">상태</button>
-        <button type="button" data-settings-tab="integrations" aria-pressed="false">연동</button>
+        <button type="button" data-settings-tab="integrations" aria-pressed="true">연동</button>
+        <button type="button" data-settings-tab="app" aria-pressed="false">앱</button>
         <button type="button" data-settings-tab="personalize" aria-pressed="false">꾸미기</button>
         <button type="button" data-settings-tab="guide" aria-pressed="false">도움말</button>
         <button type="button" data-settings-tab="trash" aria-pressed="false" id="settingsTrashTab">삭제한 항목</button>
@@ -241,8 +241,8 @@
       <button type="button" class="d-iconbtn" id="settingsCloseBtn" aria-label="닫기"><svg class="d-i" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
     </div>
     <div class="d-mbody">
-      <div id="settingsStatusView"></div>
-      <div id="settingsIntegrationsView" hidden></div>
+      <div id="settingsIntegrationsView"></div>
+      <div id="settingsAppView" hidden></div>
       <div id="settingsPersonalizeView" hidden></div>
       <!-- 오늘 탭의 사용설명서 카드를 닫았으면 도움말 맨 위에 같은 네 줄이 남는다 -->
       <div id="settingsManualView" hidden></div>

@@ -7,13 +7,14 @@
 ## 채널 정보
 
 - 채널 ID와 슬랙 주소는 **`workspace.config.json`의 `slack.channels.waiting.id`와 `slack.workspaceUrl`에서 읽는다** (하드코딩하지 말 것)
+- 그 채널 칸에 `off: true`가 있으면(설정 › 연동 › 슬랙 ⋯ › 채널 고르기로 뺀 채널) 이 지침은 **아무것도 하지 않고 끝낸다** — 읽지도, 커서를 옮기지도 않는다
 - 이 채널은 비공개, 사용자 1인 멤버 — 작성자 필터링 불필요
 
 ## 작업 지시
 
 1. **상태 파일 확인**
 
-   `tracker/inbox-app/.slack_capture_state.json`을 읽는다 (없으면 `{}`로 취급). `my-waiting` 키에 마지막으로 처리한 메시지 ts가 있으면 그 값을 `oldest`로 사용한다.
+   `tracker/inbox-app/.slack_capture_state.json`을 읽는다 (없으면 `{}`로 취급). `my-waiting` 키에 마지막으로 처리한 메시지 ts가 있으면 그 값을 `oldest`로 사용한다. 단 `workspace.config.json`의 그 채널 칸에 `since`(슬랙 ts 모양, 새로 만들었거나 다시 켠 때)가 있으면 **커서와 `since` 중 큰 값**(소수로 비교)을 `oldest`로 쓴다 — 그 전 메시지는 가져오지 않는다.
 
 2. **채널 원본 데이터 조회**
 

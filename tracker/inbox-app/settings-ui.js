@@ -1,10 +1,9 @@
-// 설정 창 한 벌 — 상태 탭(자동화 줄·로그 묶음·슬랙 처리 대장·앱 정보·문제 보고), 연동 탭(지라·슬랙·
-// 캘린더·회의록을 하나씩 켜기), 도움말 탭(개념 사전 + 문답), 삭제한 항목 탭, 창 열고 닫기.
-// app.js에서 그대로 옮긴 코드다. app.js의 공용 부품(request·showNotice·uiIcon·escPush·escDrop·
-// uiMenuClose·syncStale·latestData)과 jira-ui.js(jiraLiveNote·jiraLiveStatusRow)에 기댄다.
+// 설정 창 한 벌 — 연동 탭(연결 상태를 보는 유일한 곳: 맨 위 요약 · 카드 넷 · 카드마다 ⋯ › 최근 기록 · 슬랙 채널 고르기),
+// 앱 탭(버전·업데이트 · 데이터 백업 · 앱 위치 · 문제 보고), 꾸미기 탭, 도움말 탭(개념 사전 + 문답), 삭제한 항목 탭, 창 열고 닫기.
+// app.js의 공용 부품(request·showNotice·uiIcon·escPush·escDrop·uiMenuClose·latestData)에 기댄다.
 // 맨 아래 몇 줄은 화면 요소를 바로 잡아 쓰므로 index.html의 <body> 끝(app.js 바로 앞)에서 읽힌다.
 
-// 설정 > 상태의 슬랙 줄 아래 처리 대장 한 줄(BNOTES). 슬랙 수집 지침이 실행마다 로그 맨 앞에 남기는
+// 설정 › 연동 › 슬랙 ⋯ › 최근 기록 맨 위의 처리 대장 한 줄(BNOTES). 슬랙 수집 지침이 실행마다 로그 맨 앞에 남기는
 // `이번에 본 메시지 N개 = 등록 a · 링크 중복 b · 비슷한 일이라 건너뜀 c · 시스템 d`(또는 합이 안 맞을
 // 때의 `합이 안 맞습니다 …`) 문장을 tail(최근 60줄)에서 가장 최근 것 하나만 찾는다. 그 실행(같은
 // 시작~종료 블록) 안의 `🔁 이미 있는 '…'랑 중복돼서 안 가져왔어요`(건너뛴 것, 최대 3개)와 `⚠️`로
@@ -14,8 +13,8 @@ const SLACK_LEDGER_RE = /^이번에 본 메시지 (\d+)개 = 등록 (\d+) · 링
 const SLACK_MISMATCH_RE = /^합이 안 맞습니다.*$/;
 const SLACK_SKIP_RE = /^🔁\s*이미 있는\s*'(.+)'\s*랑 중복돼서 안 가져왔어요/;
 const SLACK_WARN_RE = /^⚠️/;
-const SLACK_BLOCK_START_RE = /^─+ \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \S+ 시작$/;
-const SLACK_BLOCK_END_RE = /^─+ \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \S+ 종료 \(exit -?\d+\)$/;
+const SLACK_BLOCK_START_RE = /^(?:\{[^{}]*\}\s*)*─+ \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \S+ 시작$/;
+const SLACK_BLOCK_END_RE = /^(?:\{[^{}]*\}\s*)*─+ \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \S+ 종료 \(exit -?\d+\)$/;
 
 function slackLedgerFromTail(tail) {
   const lines = (Array.isArray(tail) ? tail : []).map(line => String(line).trim()).filter(Boolean);
@@ -40,7 +39,7 @@ function slackLedgerFromTail(tail) {
   };
 }
 
-// 위 결과를 설정 > 상태의 슬랙 줄 아래 조용한 줄(들)로 만든다 — 합이 안 맞으면 그 문장을 주의색으로
+// 위 결과를 슬랙 카드의 최근 기록 위 조용한 줄(들)로 만든다 — 합이 안 맞으면 그 문장을 주의색으로
 // 그대로, 아니면 넷의 셈을 한 줄로(0인 항목은 흐리게). 건너뛴 것·원문 못 읽은 줄은 그 아래 따로 한 줄씩.
 function slackLedgerNotes(tail) {
   const ledger = slackLedgerFromTail(tail);
@@ -79,7 +78,7 @@ function slackLedgerNotes(tail) {
   return nodes;
 }
 
-// ---------- 설정 (상태 / 사용법) ----------
+// ---------- 설정 공용: 시각 · 실패 문구 ----------
 
 function relativeTimeFrom(timeStr) {
   // "YYYY-MM-DD HH:MM:SS" (로컬 시각) 기준으로 몇 분/시간 전인지
@@ -115,70 +114,33 @@ function trimSummaryText(text) {
 }
 
 let automationStatusCache = [];
+// 지금 멈춘 연동(`slack`·`jira`·`calendar`·`notes`) — 서버가 연동 탭 요약과 같은 판단으로 준다(톱니바퀴의 빨간 점).
+let settingsAlertKeys = [];
 
 async function fetchAutomationStatus() {
+  let alerts = null;
   try {
     const data = await request('/api/automation/status').then(r => r.json());
     automationStatusCache = data.automations || [];
+    alerts = Array.isArray(data.alerts) ? data.alerts : null;
   } catch {
     automationStatusCache = [];
   }
+  // 옛 서버(alerts 없음)면 예전처럼 자동화의 가장 최근 실행이 실패인 것만 본다.
+  settingsAlertKeys = alerts || automationStatusCache.filter(a => a.lastKind === 'fail').map(a => (a.key === 'tiro' ? 'notes' : a.key));
   // 안 열어봐도 톱니바퀴만 보고 "확인할 게 있다"를 알 수 있게 점을 켠다
   // 지금 실제로 실패 중인 게 있을 때만 — 예전에 있었다가 해결된 건 알림이 아니다
-  const hasAlert = automationStatusCache.some(a => a.lastKind === 'fail');
-  document.getElementById('settingsBtn')?.classList.toggle('has-alert', hasAlert);
+  document.getElementById('settingsBtn')?.classList.toggle('has-alert', settingsAlertKeys.length > 0);
   return automationStatusCache;
 }
 
-// 상태 탭은 자동화마다 한 줄이다: 이름 | 마지막 실행 | (있으면) 다음 실행.
-// 헤더의 동기화 지연 경고에서 들어오면 그 줄을 잠깐 밝힌다(settingsFocusKey).
+// 설정을 연 뒤 한 번만 쓰는 표지 — `alerts`(빨간 점을 눌렀다: 멈춘 카드를 잠깐 붉게) · `log:<카드>`(그 카드의
+// 최근 기록을 편다) · `app-place`(앱 탭의 앱 위치를 밝힌다).
 let settingsFocusKey = null;
 
 const AUTOMATION_STATE_WORD = { run: '성공', fail: '실패', skip: '건너뜀' };
 
-async function renderAutomationStatus() {
-  const view = document.getElementById('settingsStatusView');
-  view.replaceChildren();
-  view.insertAdjacentHTML('beforeend', '<div class="d-empty">불러오는 중이에요…</div>');
-  const automations = await fetchAutomationStatus();
-  view.replaceChildren();
-  // 지라 캐시 자동화(jira-sync)는 없앴다 — 지금은 자동화 목록이 아니라 이 조용한 줄 하나로만
-  // 지라 직접 읽기 상태를 말한다(꺼져 있으면 줄 자체가 없다). 자동화가 하나도 없어도 이 줄만으로
-  // "아직 안 켰다" 화면을 건너뛸 수 있어 자동화 개수와 별도로 먼저 계산해 둔다.
-  const jiraLive = typeof jiraLiveStatusRow === 'function'
-    ? jiraLiveStatusRow(latestData && latestData.jiraSync) : null;
-  // 연동을 하나도 켜지 않은 설치에는 줄이 아예 없다 — 그때는 "고장"이 아니라 "아직 안 켰다"이다.
-  if (!automations.length && !jiraLive) {
-    view.insertAdjacentHTML('beforeend', '<div class="d-empty">켜 둔 자동화가 없어요 — 설정의 연동에서 켜요.</div>');
-  } else {
-    // "최근 실패 기록이 있음"과 "지금 문제임"은 다르다 — 예전엔 둘을 구분 안 해서,
-    // 벌써 고쳐져서 마지막 실행이 정상이었는데도 몇 시간 전 실패 이력 때문에 계속
-    // 빨간 점이 떠 있었다("이게 지금도 그런 건지 예전 건지 모르겠다"는 혼란의 원인).
-    // 가장 최근 실행 자체가 실패였을 때만 "지금 문제"로 본다.
-    [...automations]
-      .sort((a, b) => (b.lastKind === 'fail' ? 1 : 0) - (a.lastKind === 'fail' ? 1 : 0))
-      .forEach(a => view.appendChild(automationRow(a)));
-
-    if (jiraLive) view.appendChild(jiraLive);
-
-    // 반응 필요(지라 댓글)는 자동화가 아니라 앱이 직접 읽는 것이라 목록 끝에 한 줄로 붙인다
-    // (연결이 없으면 줄 자체가 없다 — 화면의 구역도 그때는 없다).
-    const attention = typeof attentionStatusRow === 'function' ? attentionStatusRow() : null;
-    if (attention) view.appendChild(attention);
-  }
-
-  // 맨 아래 조용한 앱 정보 줄 + 문제 보고. 값은 따로 읽어 오므로 자리를 먼저 세우고 나중에 채운다.
-  view.appendChild(settingsAboutSection());
-  settingsAboutLoad().then(() => { if (settingsDialog.open) settingsAboutFill(); });
-
-  const focused = settingsFocusKey
-    ? view.querySelector(`[data-automation="${CSS.escape(String(settingsFocusKey))}"]`)
-    : null;
-  settingsFocusKey = null;
-  if (focused) { focused.classList.add('is-focus'); focused.scrollIntoView({ block: 'nearest' }); }
-}
-
-// ---------- 설정 > 상태 맨 아래: 앱 정보 · 새 버전 · 문제 보고 ----------
+// ---------- 설정 › 앱: 버전 · 새 버전 · 문제 보고 ----------
 // 어떤 버전을 쓰고 있는지, 저장소에서 벗어났는지, 새 버전이 나왔는지를 조용한 한 줄로만 말한다.
 // 새 버전이 있으면 그 자리에서 `업데이트 받기`를 누를 수 있다(요청 파일 + launchd — 아래 "앱 안에서 업데이트 받기").
 let settingsAbout = null;
@@ -258,40 +220,139 @@ async function settingsReportCopy(button, { lead = '', done = '복사했어요 �
   button.disabled = false;
 }
 
-// 자리만 먼저 세운다(값은 settingsAboutFill이 채운다). 조용한 글자 한 줄 + (새 버전이면) 업데이트 받기 + 문제 보고 버튼.
-function settingsAboutSection() {
-  const section = document.createElement('div');
-  section.className = 'd-dsec d-about';
-  section.id = 'settingsAboutSec';
+// ---------- 설정 › 앱 탭(시안 D) ----------
+// 앱 자체의 일만 네 줄 — `버전`(새 버전·진행·다시 시도·되돌리기·막는 경우는 아래 "앱 안에서 업데이트 받기") ·
+// `데이터 백업` · `앱 위치`(파일을 찾을 때) · `문제 보고`. 줄 모양은 꾸미기 탭과 같은 `.d-pset`(이름 | 값)이다.
+const SETTINGS_CHANNEL_WORD = { stable: '배포된 버전만 받기', main: '만드는 중인 것까지 받기(main)' };
 
-  const line = document.createElement('div');
-  line.className = 'd-abline';
-  line.id = 'settingsAboutLine';
+// id로 다시 찾는 자리(settingsAboutFill·settingsUpdatePaint가 쓴다) — 이미 그려 둔 것이 있으면 비워서 다시 쓴다.
+function settingsSlot(id, className) {
+  const node = document.getElementById(id) || document.createElement('div');
+  node.id = id;
+  node.className = className;
+  node.replaceChildren();
+  node.hidden = false;
+  return node;
+}
+
+// 버전 줄의 자리만 먼저 세운다(값은 settingsAboutFill이 채운다).
+function settingsVersionRow() {
+  const line = settingsSlot('settingsAboutLine', 'd-abline');
   line.textContent = '앱 정보를 읽는 중이에요…';
-
-  const files = document.createElement('div');
-  files.className = 'd-abfiles';
-  files.id = 'settingsAboutFiles';
+  const files = settingsSlot('settingsAboutFiles', 'd-abfiles');
   files.hidden = true;
-
-  const update = document.createElement('div');
-  update.className = 'd-abwrap';
-  update.id = 'settingsAboutUpdate';
+  const update = settingsSlot('settingsAboutUpdate', 'd-abwrap');
   update.hidden = true;
+  const row = personalizeRow('버전', '워크스페이스', line, files, update);
+  row.dataset.row = 'version';
+  return row;
+}
 
-  const report = document.createElement('button');
-  report.type = 'button';
-  report.className = 'd-btn sm';
+function settingsReportRow() {
+  const report = settingsButton('진단 내용 복사', 'd-btn', null);
   report.id = 'settingsReportBtn';
-  report.textContent = '문제 보고';
   report.addEventListener('click', () => settingsReportCopy(report));
+  const row = personalizeRow('문제 보고', '', report,
+    settingsEl('d-ismall', '버전·연동 상태·최근 오류만 복사해요(업무 내용은 들어가지 않아요).'));
+  row.dataset.row = 'report';
+  return row;
+}
 
-  const hint = document.createElement('div');
-  hint.className = 'd-hint';
-  hint.textContent = '버전·연동 상태·최근 오류만 복사해요(업무 내용은 들어가지 않아요).';
+// ---------- 설정 › 앱 › 데이터 백업 ----------
+// 매일 19:30 이 맥 안(`~/workspace-data-backup/daily`)에 7일치 + GitHub 백업을 켠 사람은 비공개 저장소에도 한 겹 더.
+// 서버(GET /api/backup)는 백업 로그와 날짜 폴더 목록만 읽어 준다 — 아무것도 실행하지 않는다.
+let settingsBackup = null;
 
-  section.append(line, files, update, report, hint);
-  return section;
+async function settingsBackupLoad() {
+  try {
+    const response = await fetch('/api/backup', { headers: { Accept: 'application/json' } });
+    settingsBackup = response.ok ? await response.json() : null;
+  } catch { settingsBackup = null; }
+  return settingsBackup;
+}
+
+// 로그 시각(`YYYY-MM-DD HH:MM:SS`, 이 맥의 시각) → `오늘 19:30` · `어제 19:30` · `9월 20일 19:30`.
+function settingsBackupWhen(stamp, now = new Date()) {
+  const hit = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/.exec(String(stamp || ''));
+  if (!hit) return '';
+  const day = new Date(Number(hit[1]), Number(hit[2]) - 1, Number(hit[3]));
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diff = Math.round((today - day) / 86400000);
+  const time = `${hit[4]}:${hit[5]}`;
+  if (diff === 0) return `오늘 ${time}`;
+  if (diff === 1) return `어제 ${time}`;
+  return `${Number(hit[2])}월 ${Number(hit[3])}일 ${time}`;
+}
+
+// 한 줄 — 앞에 색 점(● 초록 = 잘 됨, 빨강 = 멈춤)을 붙인다.
+function settingsBackupLine(text, state) {
+  const line = settingsEl('d-bkline' + (state === 'bad' ? ' k-neg' : ''));
+  if (state) {
+    const dot = document.createElement('span');
+    dot.className = state === 'bad' ? 'bad' : 'ok';
+    dot.setAttribute('aria-hidden', 'true');
+    dot.textContent = '●';
+    line.append(dot, document.createTextNode(` ${text}`));
+  } else {
+    line.textContent = text;
+  }
+  return line;
+}
+
+function settingsBackupNodes(data, now = new Date()) {
+  if (!data || data.ok === false || !data.local) return [settingsEl('d-ismall', '백업 상태를 읽지 못했어요.')];
+  const nodes = [];
+  const local = data.local;
+  const when = settingsBackupWhen(local.at, now);
+  if (local.state === 'fail') {
+    nodes.push(settingsBackupLine(['이 맥 백업이 멈췄어요', when].filter(Boolean).join(' · '), 'bad'));
+    nodes.push(settingsEl('d-ismall k-neg', local.reason || '이유를 알 수 없어요'));
+  } else if (local.state === 'never') {
+    // 매일 19:30에 돈다 — 오늘 그 시각이 지났으면 내일이 처음이다.
+    const late = now.getHours() * 60 + now.getMinutes() >= 19 * 60 + 30;
+    nodes.push(settingsBackupLine(`${late ? '내일' : '오늘'} 19:30에 처음 백업해요`, null));
+  } else {
+    nodes.push(settingsBackupLine(['이 맥에 매일 백업', when, `${Number(local.days) || 0}일치`].filter(Boolean).join(' · '), 'ok'));
+  }
+  if (data.github && data.github.on) {
+    const github = data.github;
+    const at = settingsBackupWhen(github.at, now);
+    if (github.state === 'fail') {
+      nodes.push(settingsBackupLine(['GitHub에 올리지 못했어요', at].filter(Boolean).join(' · '), 'bad'));
+      nodes.push(settingsEl('d-ismall k-neg', github.reason || '이유를 알 수 없어요'));
+    } else {
+      nodes.push(settingsEl('d-ismall', ['GitHub 비공개 저장소에도 올려요', github.state === 'ok' ? at : ''].filter(Boolean).join(' · ')));
+    }
+  }
+  if (typeof data.path === 'string' && data.path) {
+    const code = settingsEl('d-icode');
+    const text = document.createElement('code');
+    text.textContent = data.path;
+    code.append(text, settingsButton('복사', 'd-btn xs', () => settingsCopy(data.path, '경로를 복사했어요')));
+    nodes.push(code, settingsEl('d-ismall', 'Finder에서 ⇧⌘G(폴더로 이동)에 붙여 넣으면 바로 가요'));
+  }
+  return nodes;
+}
+
+function settingsBackupRow(data) {
+  const row = personalizeRow('데이터 백업', '매일 19:30', ...settingsBackupNodes(data));
+  row.dataset.row = 'backup';
+  return row;
+}
+
+async function renderSettingsApp() {
+  const view = document.getElementById('settingsAppView');
+  if (!view) return;
+  view.replaceChildren(settingsEl('d-empty', '불러오는 중이에요…'));
+  const [about, backup] = await Promise.all([settingsAboutLoad(), settingsBackupLoad()]);
+  const place = personalizePlace(about);
+  view.replaceChildren(settingsVersionRow(), settingsBackupRow(backup), place, settingsReportRow());
+  settingsAboutFill();
+  if (settingsFocusKey === 'app-place') {
+    settingsFocusKey = null;
+    place.className = `${place.className} is-focus`;
+    if (typeof place.scrollIntoView === 'function') place.scrollIntoView({ block: 'center' });
+  }
 }
 
 function settingsAboutFill() {
@@ -300,9 +361,9 @@ function settingsAboutFill() {
   const info = settingsAbout;
   line.replaceChildren();
   if (!info) { line.textContent = '앱 정보를 읽지 못했어요.'; return; }
-  const parts = [`워크스페이스 ${info.version ? `v${info.version}` : '버전 모름'}`, info.install === 'managed' ? '설치본' : '개발용'];
-  // 갈래는 main일 때만 적는다(stable은 기본이라 말할 것이 없다).
-  if (info.channel === 'main') parts.push('main');
+  const parts = [info.version ? `v${info.version}` : '버전 모름', SETTINGS_CHANNEL_WORD[info.channel === 'main' ? 'main' : 'stable']];
+  // 개발용(저장소에서 직접 띄운 것)일 때만 적는다 — 설치본은 기본이라 말할 것이 없다.
+  if (info.install !== 'managed') parts.push('개발용');
   line.appendChild(document.createTextNode(parts.join(' · ')));
 
   const changed = Array.isArray(info.modified) ? info.modified : [];
@@ -328,14 +389,14 @@ function settingsAboutFill() {
     });
   }
 
-  // 도는 업데이트가 있으면(창을 다시 열었거나 상태 탭이 다시 그려졌을 때) 그 진행을 그대로 이어 보여 준다.
+  // 도는 업데이트가 있으면(창을 다시 열었거나 앱 탭이 다시 그려졌을 때) 그 진행을 그대로 이어 보여 준다.
   if (settingsUpdateRun) { settingsUpdatePaint(settingsUpdateRun.view); return; }
   const offer = settingsUpdateOffer(info);
   settingsUpdatePaint(offer ? { kind: 'offer', offer } : { kind: 'none' });
   settingsUpdateResume();
 }
 
-// ---------- 설정 › 상태: 앱 안에서 업데이트 받기(시안 J) ----------
+// ---------- 설정 › 앱: 앱 안에서 업데이트 받기(시안 J) ----------
 // 서버는 업데이트를 직접 돌리지 않는다 — `POST /api/update`가 요청 표시 파일 하나를 쓰면 launchd가 실행기를 돌리고,
 // 화면은 `GET /api/update/status`를 2초마다 읽어 진행 목록을 그린다. 5단계(앱 다시 시작) 동안 서버가 잠깐 없으면
 // `다시 켜는 중…`으로 두고 계속 묻다가(최대 3분) 다시 응답하면 상태 파일로 마무리한다. 실패해도 스스로 되돌리지
@@ -602,7 +663,7 @@ async function settingsUpdatePoll() {
   run.timer = setTimeout(settingsUpdatePoll, SETTINGS_UPDATE_POLL_MS);
 }
 
-// 상태 탭을 열 때 한 번 — 다른 창에서 시작했거나 창을 닫았다 연 경우에도 도는 업데이트를 이어 보여 준다.
+// 앱 탭을 열 때 한 번 — 다른 창에서 시작했거나 창을 닫았다 연 경우에도 도는 업데이트를 이어 보여 준다.
 async function settingsUpdateResume() {
   let data = null;
   try {
@@ -611,71 +672,6 @@ async function settingsUpdateResume() {
   } catch { data = null; }
   if (!data || !data.running || settingsUpdateRun) return;
   settingsUpdateFollow((data.status && data.status.action) || (data.pending && data.pending.action) || 'update', data.status, 0);
-}
-
-// 접히는 기록 묶음 하나(지금 실패 중이면 `최근 기록`, 해결된 과거 실패는 `지난 문제 N건`).
-function automationLogBlock(label, lines, muted) {
-  const box = document.createElement('details');
-  const head = document.createElement('summary');
-  head.innerHTML = uiIcon('chevron');
-  head.appendChild(document.createTextNode(label));
-  box.appendChild(head);
-  const body = document.createElement('div');
-  body.className = 'd-logs';
-  lines.forEach((text) => {
-    const line = document.createElement('div');
-    line.className = 'd-logline' + (muted ? ' is-muted' : '');
-    line.textContent = text;
-    body.appendChild(line);
-  });
-  box.appendChild(body);
-  return box;
-}
-
-function automationRow(a) {
-  const failingNow = a.lastKind === 'fail';
-  const row = document.createElement('div');
-  row.className = 'd-auto';
-  row.dataset.automation = a.key;
-
-  const top = document.createElement('div');
-  top.className = 'd-autotop';
-  const name = document.createElement('span');
-  name.className = 'nm';
-  name.textContent = a.name;
-  const state = document.createElement('span');
-  state.className = 'st' + (failingNow ? ' k-neg' : '');
-  state.textContent = a.lastRunAt
-    ? `${relativeTimeFrom(a.lastRunAt)} ${AUTOMATION_STATE_WORD[a.lastKind] || '실행'}`
-    : '기록 없음';
-  // 잘 돌고 있을 때의 보고문은 줄을 차지하지 않고 마우스를 올리면 보이게 둔다.
-  if (!failingNow && a.lastSummary) state.title = trimSummaryText(a.lastSummary);
-  if (failingNow) state.insertAdjacentHTML('afterbegin', '<i class="d-dot" aria-hidden="true"></i>');
-  top.append(name, state);
-  if (a.nextRunAt) {
-    const next = document.createElement('span');
-    next.className = 'nx';
-    next.textContent = `다음 실행 ${a.nextRunAt}`;
-    top.appendChild(next);
-  }
-  row.appendChild(top);
-  // 슬랙 줄 아래 최근 수집의 처리 대장(BNOTES) — 로그를 열지 않고도 뭐가 왜 안 들어왔는지 본다.
-  if (a.key === 'slack') slackLedgerNotes(a.tail).forEach(line => row.appendChild(line));
-
-  if (failingNow) {
-    const error = document.createElement('div');
-    error.className = 'd-autoerr';
-    error.textContent = trimSummaryText(translateFailureText(a.lastSummary || '실패했어요.'));
-    row.appendChild(error);
-    const lines = a.recentFailures.map(f => `${f.time} · ${translateFailureText(f.text)}`)
-      .concat(a.tail && a.tail.length ? a.tail.slice(-20) : []);
-    if (lines.length) row.appendChild(automationLogBlock('최근 기록', lines, false));
-  } else if (a.recentFailures.length) {
-    // 지금은 정상 — 예전 실패는 경고가 아니라 참고용으로만, 접어서 조용히 둔다
-    row.appendChild(automationLogBlock(`지난 문제 ${a.recentFailures.length}건 · 지금은 정상`,
-      a.recentFailures.map(f => `${f.time} · ${translateFailureText(f.text)}`), true));
-  }
-  return row;
 }
 
 // ---------- 설정 > 연동 ----------
@@ -932,14 +928,20 @@ async function settingsIntegrationAsk(url, body, fallback) {
   }
 }
 
-// 채널 하나를 만들어 달라고 서버에 부탁한다. 토큰을 비워 보내면(`채널 고치기`) 서버가 저장된 토큰을 쓴다.
+// 채널 하나를 만들어 달라고 서버에 부탁한다. 토큰을 비워 보내면(`채널 고르기`) 서버가 저장된 토큰을 쓴다.
 async function settingsSlackCreateChannel(token, name) {
   return settingsIntegrationAsk('/api/integrations/slack-channel', { token, name }, '슬랙에서 채널을 만들지 못했어요');
 }
 
+// 토큰이 맞는지 본다 — 맞으면 새 채널 이름의 앞머리(`prefix`, 슬랙 사용자 이름을 채널 이름 규칙대로 다듬은 것)도 온다.
+// 토큰을 비워 보내면(채널 고르기) 서버가 저장된 토큰으로 앞머리만 알려 준다.
 async function settingsSlackTokenCheck(token) {
   return settingsIntegrationAsk('/api/integrations/slack-token-check', { token }, '토큰을 확인하지 못했어요');
 }
+
+// 새 채널 이름의 기본값 — `<앞머리>-todo`처럼. 앞머리를 모르면 `my`다(이미 연결된 채널의 이름은 바꾸지 않는다).
+const settingsSlackPrefix = value => settingsSlackChannelName(value).replace(/^[-_]+|[-_]+$/g, '').slice(0, 72) || 'my';
+const settingsSlackDefaultName = (key, prefix = 'my') => `${settingsSlackPrefix(prefix)}-${key}`;
 
 // 단계 줄 `① 토큰 ─ ② 채널 ─ ③ 확인`. 끝낸 단계는 `✓`로 접히고 지금 단계만 파랗다.
 function settingsSteps(names, at) {
@@ -1099,7 +1101,100 @@ function settingsFetchButton(spec, paint) {
   return button;
 }
 
-function settingsIntgCard({ kind, name, chip, use, need, status = null, openText = '연결하기', openClass = 'd-btn acc', menu = null, extra = [], fetch: fetchSpec = null, onOpen }) {
+// `alert`는 지금 멈춘 카드의 { status(상태 줄을 이 말로 빨갛게 — 없으면 `읽지 못했어요 · N분 전`), why(그 아래 이유 한 줄의 글 조각) }.
+// ---------- 멈춤 이유 · 최근 기록 ----------
+// 로그 한 줄(영어·기계 말)을 사람 말 한 마디로. 모르는 것은 억지로 번역하지 않고 줄여서 그대로 둔다.
+function settingsFailWords(text) {
+  const raw = String(text || '');
+  if (/invalid_auth|token_revoked|account_inactive/.test(raw)) return '토큰이 만료됐거나 권한이 없어요';
+  if (/channel_not_found|is_archived/.test(raw)) return '채널을 찾을 수 없어요';
+  if (/슬랙 토큰을 읽을 수 없음/.test(raw)) return '토큰 파일을 읽지 못했어요';
+  if (/설정된 채널을 읽을 수 없음/.test(raw)) return '설정에서 채널을 읽지 못했어요';
+  if (/fetch 실패|ERR:/.test(raw)) return '슬랙이 응답하지 않았어요';
+  if (/35분이 넘도록|timed? ?out/i.test(raw)) return '너무 오래 걸려 멈췄어요';
+  const plain = trimSummaryText(translateFailureText(raw));
+  return plain || '이유를 알 수 없어요';
+}
+
+// 멈춘 카드의 이유 한 줄. 토큰 문제면 버튼이 이미 `다시 연결`이라 그 말을, 아니면 최근 기록으로 안내한다.
+function settingsFailWhy(kind, state = {}) {
+  if (state.auth) {
+    return [kind === 'calendar'
+      ? '비밀 주소를 읽을 수 없어요 — 다시 연결을 누르면 주소를 다시 붙여요'
+      : '토큰이 만료됐거나 권한이 없어요 — 다시 연결을 누르면 이 카드에서 토큰 단계부터 다시 열려요'];
+  }
+  const words = { jira: '지라가 응답하지 않았어요', calendar: '캘린더를 읽지 못했어요' };
+  const reason = state.summary ? settingsFailWords(state.summary) : (words[kind] || '읽지 못했어요');
+  return [`${reason} — 다시 시도해도 안 되면 ⋯ › 최근 기록`];
+}
+
+// 로그 시각(`YYYY-MM-DD HH:MM:SS`) → 오늘이면 `10:05`, 아니면 `9/23 10:05`.
+function settingsLogTime(stamp, now = new Date()) {
+  const hit = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/.exec(String(stamp || ''));
+  if (!hit) return '';
+  const same = Number(hit[1]) === now.getFullYear() && Number(hit[2]) === now.getMonth() + 1 && Number(hit[3]) === now.getDate();
+  return same ? `${hit[4]}:${hit[5]}` : `${Number(hit[2])}/${Number(hit[3])} ${hit[4]}:${hit[5]}`;
+}
+
+// 기록 한 줄의 결과 말. 앱이 직접 읽는 것(지라·비밀 주소)은 서버가 이미 사람 말로 준다.
+function settingsLogText(kind, entry) {
+  const text = String(entry.text || '');
+  if (entry.kind === 'fail') return /^읽지 못했어요/.test(text) ? text : `읽지 못했어요 — ${settingsFailWords(text)}`;
+  if (/^읽음/.test(text)) return text;
+  if (entry.kind === 'skip') {
+    if (/새 메시지 없음/.test(text)) return '읽음 · 새 것 없음';
+    return trimSummaryText(text) || '건너뜀';
+  }
+  const done = kind === 'notes' ? '가져옴' : '읽음';
+  // 슬랙 실행 블록 맨 앞의 처리 대장 문장은 목록 위에 따로 서므로 한 줄 결과에서는 뺀다.
+  const summary = trimSummaryText(text.replace(/이번에 본 메시지 \d+개 = 등록 \d+ · 링크 중복 \d+ · 비슷한 일이라 건너뜀 \d+ · 시스템 \d+\s*/, '')
+    .replace(/합이 안 맞습니다[^\n]*?\)\s*/, '').trim());
+  return summary && summary !== '완료' ? `${done} · ${summary}` : done;
+}
+
+// `오류 전문 복사`에 넣을 글 — 최근 기록 줄 + (자동화면) 로그 끝 60줄. 토큰은 로그에 없다(수집이 싣지 않는다).
+function settingsLogFull(kind, name, entries) {
+  const key = { slack: 'slack', calendar: 'calendar', notes: 'tiro' }[kind];
+  const automation = key ? (automationStatusCache || []).find(a => a.key === key) : null;
+  const lines = entries.map(entry => `${entry.time} · ${AUTOMATION_STATE_WORD[entry.kind] || '실행'} · ${entry.text}`);
+  const tail = automation && Array.isArray(automation.tail) ? automation.tail : [];
+  return [`${name} 최근 기록`, ...lines, ...(tail.length ? ['', '로그 끝 부분:', ...tail] : [])].join('\n');
+}
+
+// ⋯ › 최근 기록 — 카드 아래 접이식 목록(시각 · 결과 한 줄, 최근 10개, 실패는 빨강) + `오류 전문 복사`.
+// 슬랙은 맨 위에 최근 수집의 처리 대장(본 메시지·등록·중복·건너뜀)을 먼저 보인다.
+function settingsIntgLog(card, kind, name, entries = [], lead = []) {
+  const list = document.createElement('ul');
+  list.className = 'd-ilog';
+  list.setAttribute('aria-label', `${name} 최근 기록`);
+  entries.slice(0, 10).forEach((entry) => {
+    const row = document.createElement('li');
+    const time = document.createElement('span');
+    time.className = 't';
+    time.textContent = settingsLogTime(entry.time);
+    const text = document.createElement('span');
+    if (entry.kind === 'fail') text.className = 'bad';
+    text.textContent = settingsLogText(kind, entry);
+    row.append(time, text);
+    list.appendChild(row);
+  });
+  if (!entries.length) {
+    const row = document.createElement('li');
+    row.textContent = '아직 기록이 없어요';
+    list.appendChild(row);
+  }
+  const more = document.createElement('li');
+  more.className = 'more';
+  more.appendChild(settingsButton('오류 전문 복사', 'd-ablink',
+    () => settingsCopy(settingsLogFull(kind, name, entries.slice(0, 10)), '오류 전문을 복사했어요')));
+  list.appendChild(more);
+  card.body.append(...lead, list);
+}
+
+// 메뉴의 `최근 기록` 한 칸(기록이 하나도 없으면 칸 자체를 숨긴다).
+const settingsLogItem = (card, log) => (Array.isArray(log) && log.length ? [{ label: '최근 기록', onClick: () => card.open('log') }] : []);
+
+function settingsIntgCard({ kind, name, chip, use, need, needClass = '', status = null, openText = '연결하기', openClass = 'd-btn acc', menu = null, extra = [], fetch: fetchSpec = null, alert = null, onOpen }) {
   const row = settingsEl('d-intg');
   row.dataset.integration = kind;
   const top = settingsEl('d-intgtop');
@@ -1135,6 +1230,7 @@ function settingsIntgCard({ kind, name, chip, use, need, status = null, openText
         paint(`읽지 못했어요${ago ? ` · ${ago}` : ''}`, true);
       }
     }
+    if (alert && alert.status) paint(alert.status, true);
   }
   const toggle = settingsButton(openText, openClass);
   top.appendChild(toggle);
@@ -1142,13 +1238,22 @@ function settingsIntgCard({ kind, name, chip, use, need, status = null, openText
   if (fetchSpec && paint) top.appendChild(settingsFetchButton(fetchSpec, paint));
   if (menu) top.appendChild(uiMoreButton(`${name} 더 보기`, menu));
 
+  // 멈춘 카드는 상태 줄 아래 이유 한 줄(빨강)이 먼저 선다(시안 B).
+  const why = [];
+  if (alert && alert.why) {
+    row.dataset.failing = 'true';
+    const line = settingsEl('d-intgwhy');
+    line.setAttribute('role', 'status');
+    alert.why.forEach(part => line.appendChild(typeof part === 'string' ? document.createTextNode(part) : part));
+    why.push(line);
+  }
   const useLine = settingsEl('d-intguse', use);
-  const needLine = settingsEl('d-intgneed');
+  const needLine = settingsEl(`d-intgneed${needClass ? ` ${needClass}` : ''}`);
   if (Array.isArray(need)) settingsRich(needLine, need); else needLine.textContent = need || '';
   const confirmSlot = settingsEl('d-iconfirmslot');
   const body = settingsEl('d-intgbody');
   body.hidden = true;
-  row.append(top, useLine, needLine, ...extra, confirmSlot, body);
+  row.append(top, ...why, useLine, needLine, ...extra, confirmSlot, body);
 
   // 연결된 카드는 평소 ⋯만 둔다(펼칠 때만 `접기`). ⋯가 없는 카드(회의록)는 여는 버튼을 늘 둔다.
   const connected = status !== null && !!menu;
@@ -1221,24 +1326,25 @@ function settingsSlackSendHow(todoName = '#my-todo') {
 
 const settingsSlackLabel = key => (SETTINGS_SLACK_CHANNELS.find(([one]) => one === key) || [key, key])[1];
 
-// 위저드 한 벌. mode: `new`(처음 연결) · `fix`(채널 고치기 — ② 단계만, 추가만) · `token`(다시 연결 — 토큰부터).
+// 위저드 한 벌. mode: `new`(처음 연결) · `token`(다시 연결 — 토큰부터). 채널 더하기·빼기는 따로(settingsSlackPick).
 function settingsSlackWizard(card, data, mode = 'new') {
   const slack = data.slack || {};
   const saved = slack.channels || {};
   // 이미 연결돼 있고 슬랙에서 읽히는 채널 — ②에서 체크된 채 `#이름 연결됨`으로만 보이고 바꿀 수 없다.
   const linked = key => mode !== 'new' && !!(saved[key] && saved[key].id && !saved[key].missing);
   const state = {
-    step: mode === 'fix' ? 1 : 0,
+    step: 0,
     token: '',
-    picks: Object.fromEntries(SETTINGS_SLACK_CHANNELS.map(([key, , , name]) => [key, {
+    prefix: 'my',
+    picks: Object.fromEntries(SETTINGS_SLACK_CHANNELS.map(([key]) => [key, {
       on: linked(key) || (mode === 'new' && (key === 'todo' || key === 'waiting')),
-      name,
+      name: settingsSlackDefaultName(key),
+      touched: false,
     }])),
     made: {},
     rowErrors: {},
     error: '',
   };
-  const firstStep = mode === 'fix' ? 1 : 0;
   const wanted = () => SETTINGS_SLACK_CHANNELS.map(([key]) => key)
     .filter(key => state.picks[key].on && !linked(key) && !state.made[key]);
 
@@ -1286,6 +1392,9 @@ function settingsSlackWizard(card, data, mode = 'new') {
       next.disabled = false;
       if (!checked || checked.ok !== true) { error.textContent = checked.error; token.input.focus(); return; }
       state.token = value;
+      // 새 채널의 기본 이름은 `<슬랙 사용자 이름>-todo`처럼 — 사람이 이미 고친 이름은 그대로 둔다.
+      state.prefix = settingsSlackPrefix(checked.prefix);
+      Object.entries(state.picks).forEach(([key, pick]) => { if (!pick.touched) pick.name = settingsSlackDefaultName(key, state.prefix); });
       state.step = 1;
       draw();
     };
@@ -1300,9 +1409,7 @@ function settingsSlackWizard(card, data, mode = 'new') {
   function drawChannels() {
     const how = document.createElement('p');
     how.className = 'd-ihow';
-    settingsRich(how, mode === 'fix'
-      ? ['더 받을 곳을 골라요. 이미 연결된 채널은 그대로 두고 ', ['b', '새로 고른 것만'], ' 만들어 드려요.']
-      : ['슬랙에 공유한 메시지를 ', ['b', '어디로 받을지'], ' 골라요. 고른 만큼 나만 있는 비공개 채널을 만들어 드려요. 이름은 바꿔도 돼요 — 나중에 슬랙에서 바꿔도 그대로 이어져요.']);
+    settingsRich(how, ['슬랙에 공유한 메시지를 ', ['b', '어디로 받을지'], ' 골라요. 고른 만큼 나만 있는 비공개 채널을 만들어 드려요. 이름은 바꿔도 돼요 — 나중에 슬랙에서 바꿔도 그대로 이어져요.']);
     const list = settingsEl('d-ichlist');
     const error = settingsErrorLine();
     const make = settingsButton('', 'd-btn pri');
@@ -1362,6 +1469,7 @@ function settingsSlackWizard(card, data, mode = 'new') {
           const clean = settingsSlackChannelName(input.value);
           if (clean !== input.value) input.value = clean;
           pick.name = input.value;
+          pick.touched = true;
           if (state.rowErrors[key]) { state.rowErrors[key] = ''; rowError.textContent = ''; }
         });
         settingsOnEnter(input, () => make.click());
@@ -1393,22 +1501,7 @@ function settingsSlackWizard(card, data, mode = 'new') {
         return;
       }
       make.disabled = true;
-      let stop = '';
-      for (const key of keys) {
-        const nameWanted = settingsSlackChannelName(state.picks[key].name);
-        const result = await settingsSlackCreateChannel(state.token, nameWanted);
-        if (result && result.ok === true) {
-          state.made[key] = { id: result.id, name: result.name || nameWanted };
-          state.rowErrors[key] = '';
-          continue;
-        }
-        const code = (result && result.code) || '';
-        if (code === 'name_taken') { state.rowErrors[key] = SETTINGS_SLACK_TAKEN; continue; }
-        // 권한·토큰 문제는 남은 줄도 똑같이 실패하므로 여기서 멈추고 ② 맨 아래 한 줄로 적는다.
-        if (code === 'missing_scope' || code === 'invalid_auth') { stop = result.error; break; }
-        state.rowErrors[key] = (result && result.error) || '슬랙에서 채널을 만들지 못했어요';
-      }
-      const made = Object.keys(state.made).length;
+      const { made, stop } = await settingsSlackMakeChannels(state.token, keys, state);
       if (!stop && !wanted().length && made) {
         showNotice(`채널 ${made}개를 만들었어요`);
         state.step = 2;
@@ -1424,12 +1517,12 @@ function settingsSlackWizard(card, data, mode = 'new') {
     if (mode === 'new') {
       const later = document.createElement('p');
       later.className = 'd-ismall';
-      settingsRich(later, ['나중에 더 고르고 싶으면 설정 › 연동 › 슬랙 ⋯ › ', ['b', '채널 고치기'], '.']);
+      settingsRich(later, ['나중에 더하거나 빼고 싶으면 설정 › 연동 › 슬랙 ⋯ › ', ['b', '채널 고르기'], '.']);
       wrap.appendChild(later);
     }
     error.textContent = state.error || '';
     wrap.appendChild(error);
-    const back = mode === 'fix' ? null : settingsButton('← 이전', 'd-btn sm', () => { state.step = 0; draw(); });
+    const back = settingsButton('← 이전', 'd-btn sm', () => { state.step = 0; draw(); });
     card.body.append(wrap, settingsStepFoot(back, null));
     // 커서는 이름을 고칠 첫 줄로(없으면 주 버튼으로).
     const firstTaken = Object.keys(inputs).find(key => state.rowErrors[key]);
@@ -1461,9 +1554,248 @@ function settingsSlackWizard(card, data, mode = 'new') {
     go.focus();
   }
 
-  state.step = firstStep;
   draw();
   return state;
+}
+
+// 고른 줄마다 채널을 차례로 만든다(위저드 ②와 채널 고르기가 같이 쓴다). 만든 것은 `state.made`에 남고,
+// 이름이 겹치면 그 줄에, 권한·토큰 문제는 남은 줄도 똑같이 실패하므로 멈추고 한 줄(`stop`)로 돌려준다.
+async function settingsSlackMakeChannels(token, keys, state) {
+  let stop = '';
+  for (const key of keys) {
+    const nameWanted = settingsSlackChannelName(state.picks[key].name);
+    const result = await settingsSlackCreateChannel(token, nameWanted);
+    if (result && result.ok === true) {
+      state.made[key] = { id: result.id, name: result.name || nameWanted };
+      state.rowErrors[key] = '';
+      continue;
+    }
+    const code = (result && result.code) || '';
+    if (code === 'name_taken') { state.rowErrors[key] = SETTINGS_SLACK_TAKEN; continue; }
+    if (code === 'missing_scope' || code === 'invalid_auth') { stop = result.error; break; }
+    state.rowErrors[key] = (result && result.error) || '슬랙에서 채널을 만들지 못했어요';
+  }
+  return { made: Object.keys(state.made).length, stop };
+}
+
+// ---------- 슬랙 ⋯ › 채널 고르기(시안 E·F) ----------
+// 한 화면에서 **더하기·빼기**. 연결된 채널은 체크된 줄에 이름을 고정 글자(`#이름` + `연결됨`)로만 보이고
+// (이름은 슬랙에서 바꾼다 — 앱이 따라간다), 새로 고른 줄에만 이름 칸이 선다. `할 일`은 뺄 수 없다.
+// - 빼기: 설정에서 지우지 않고 `off`로 표시만 한다(슬랙 채널·이미 들어온 항목은 그대로). 누르기 전에 확인 줄이 선다.
+// - 뺐던 채널을 다시 체크: 새로 만들지 않고 같은 채널을 다시 켠다 — 그때부터 읽는다(뺀 동안 온 메시지는 가져오지 않는다).
+// - 사라진 채널(슬랙에서 지웠거나 보관): 체크한 채로 두면 다시 만들고, 풀면 뺀다(할 일은 다시 만들기만).
+const SETTINGS_SLACK_BACK = '다시 연결했어요 — 뺀 동안 온 메시지는 가져오지 않아요';
+
+// 줄마다 지금 할 일 — `keep`(그대로) · `add`(새로·다시 만들기) · `back`(뺐던 채널 다시 켜기) · `off`(빼기) · `none`.
+function settingsSlackPickAction(pick) {
+  if (pick.linked) return pick.on ? 'keep' : 'off';
+  if (pick.gone) return pick.on ? 'add' : 'off';
+  if (pick.back) return pick.on ? 'back' : 'none';
+  return pick.on ? 'add' : 'none';
+}
+
+// 주 버튼 문구 — `1개 만들기` · `1개 빼기` · `1개 만들고 1개 빼기`(다시 켜기는 `1개 다시 연결하기`).
+function settingsSlackPickLabel(plan) {
+  const parts = [[plan.add.length, '만들'], [plan.back.length, '다시 연결하'], [plan.off.length, '빼']].filter(([count]) => count);
+  if (!parts.length) return '';
+  return parts.map(([count, stem], index) => `${count}개 ${stem}${index === parts.length - 1 ? '기' : '고'}`).join(' ');
+}
+
+function settingsSlackPick(card, data) {
+  const slack = data.slack || {};
+  const saved = slack.channels || {};
+  const offs = slack.off || {};
+  const state = { prefix: 'my', picks: {}, made: {}, rowErrors: {}, error: '', focus: null };
+  SETTINGS_SLACK_CHANNELS.forEach(([key]) => {
+    const one = saved[key] || {};
+    const off = offs[key] || null;
+    state.picks[key] = {
+      on: !!one.id,
+      linked: !!one.id && !one.missing,
+      gone: !!one.id && !!one.missing,
+      back: !one.id && !!off && !off.missing,
+      label: one.name || (off && off.name) || '',
+      name: settingsSlackDefaultName(key),
+      touched: false,
+    };
+  });
+  const plan = () => {
+    const out = { add: [], back: [], off: [] };
+    SETTINGS_SLACK_CHANNELS.forEach(([key]) => {
+      const act = settingsSlackPickAction(state.picks[key]);
+      if (act === 'add' || act === 'back' || act === 'off') out[act].push(key);
+    });
+    return out;
+  };
+
+  function draw() {
+    card.body.replaceChildren();
+    const how = document.createElement('p');
+    how.className = 'd-ihow';
+    settingsRich(how, ['받을 곳을 ', ['b', '더하거나 빼요'], '. 새로 고른 곳은 비공개 채널을 만들어 드려요.']);
+    const list = settingsEl('d-ichlist');
+    const boxes = {};
+    const inputs = {};
+    SETTINGS_SLACK_CHANNELS.forEach(([key, name, where]) => {
+      const pick = state.picks[key];
+      const act = settingsSlackPickAction(pick);
+      const made = state.made[key];
+      const row = document.createElement('label');
+      row.className = 'd-ich' + (act === 'off' ? ' is-off' : (pick.on ? ' is-on' : '')) + (pick.gone && pick.on ? ' is-gone' : '');
+      row.dataset.channel = key;
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = pick.on;
+      box.disabled = key === 'todo';
+      box.setAttribute('aria-label', `${name} 받기`);
+      boxes[key] = box;
+      const text = document.createElement('span');
+      text.className = 't';
+      const strong = document.createElement('b');
+      strong.textContent = name;
+      text.appendChild(strong);
+      if (key === 'todo') {
+        const need = document.createElement('span');
+        need.className = 'need';
+        need.textContent = '필수 — 뺄 수 없어요';
+        text.append(document.createTextNode(' '), need);
+      }
+      const sub = document.createElement('span');
+      sub.className = 'd-ismall sub';
+      if (act === 'off') { sub.className = 'd-ismall sub k-neg'; sub.textContent = '빼요'; }
+      else if (act === 'add' && pick.gone) sub.textContent = `${pick.label || '채널'}을 찾을 수 없어요 — 체크한 채로 두면 다시 만들어요`;
+      else if (act === 'add') sub.textContent = '새로 만들어요';
+      else if (act === 'back') sub.textContent = '다시 연결해요 — 뺀 동안 온 메시지는 가져오지 않아요';
+      else settingsRich(sub, where);
+      text.appendChild(sub);
+      row.append(box, text);
+      if (made) {
+        const done = document.createElement('span');
+        done.className = 'nm is-done';
+        done.textContent = `✓ #${made.name} 만들었어요`;
+        row.appendChild(done);
+      } else if (pick.linked || pick.back) {
+        // 연결된(또는 뺐던) 채널의 이름은 여기서 바꾸지 않는다 — 고정 글자로만.
+        const lock = document.createElement('span');
+        lock.className = 'lock';
+        lock.appendChild(document.createTextNode(pick.label || '채널'));
+        const small = document.createElement('small');
+        small.textContent = pick.linked ? '연결됨' : '뺀 채널';
+        lock.appendChild(small);
+        row.appendChild(lock);
+      } else {
+        const field = document.createElement('span');
+        field.className = 'nmwrap';
+        const small = document.createElement('small');
+        small.textContent = '새 채널 이름';
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'd-din nm';
+        input.value = pick.name;
+        input.disabled = !pick.on;
+        input.setAttribute('aria-label', `${name} 새 채널 이름`);
+        input.addEventListener('input', () => {
+          const clean = settingsSlackChannelName(input.value);
+          if (clean !== input.value) input.value = clean;
+          pick.name = input.value;
+          pick.touched = true;
+          if (state.rowErrors[key]) { state.rowErrors[key] = ''; rowError.textContent = ''; }
+        });
+        settingsOnEnter(input, () => go.click());
+        inputs[key] = input;
+        field.append(small, input);
+        row.appendChild(field);
+      }
+      box.addEventListener('change', () => {
+        pick.on = !!box.checked;
+        state.focus = key;
+        draw();
+      });
+      const rowError = settingsErrorLine();
+      rowError.classList.add('d-icherr');
+      rowError.textContent = state.rowErrors[key] || '';
+      row.appendChild(rowError);
+      list.appendChild(row);
+    });
+
+    const note = settingsEl('d-inote');
+    const mark = document.createElement('span');
+    mark.setAttribute('aria-hidden', 'true');
+    mark.textContent = 'ⓘ';
+    note.append(mark, settingsRich(document.createElement('span'), [
+      '연결된 채널의 ', ['b', '이름은 여기서 바꿀 수 없어요.'], ' 슬랙에서 채널 이름을 바꾸면 앱이 알아서 새 이름을 따라가요.',
+    ]));
+
+    const now = plan();
+    const nodes = [how, list, note];
+    // 누르기 전에 확인 줄 — 빼는 채널이 있으면(슬랙 채널·들어온 항목은 그대로라는 말과 함께).
+    if (now.off.length) {
+      const confirm = settingsEl('d-iconfirm');
+      const words = document.createElement('span');
+      words.className = 'tx';
+      const names = now.off.map(key => state.picks[key].label || settingsSlackLabel(key)).join(', ');
+      words.textContent = `${names}을 빼면 앱이 이 채널을 더 이상 읽지 않아요. 슬랙 채널과 이미 들어온 항목은 그대로예요.`;
+      confirm.appendChild(words);
+      nodes.push(confirm);
+    }
+    if (now.back.length) {
+      const names = now.back.map(key => state.picks[key].label || settingsSlackLabel(key)).join(', ');
+      nodes.push(settingsEl('d-ismall', `${names}을 다시 연결해요 — 뺀 동안 온 메시지는 가져오지 않아요`));
+    }
+    const error = settingsErrorLine();
+    error.textContent = state.error || '';
+    nodes.push(error);
+    const words = settingsSlackPickLabel(now);
+    const go = settingsButton(words || '바꾼 것이 없어요', 'd-btn pri');
+    go.disabled = !words;
+    go.addEventListener('click', () => run(go, error));
+    const cancel = settingsButton('취소', 'd-btn sm', () => card.close());
+    nodes.push(settingsStepFoot(cancel, go));
+    card.body.append(...nodes);
+    // 초점 — 방금 누른 체크 칸(다시 그려도 제자리), 이름을 고칠 줄, 그 밖엔 주 버튼.
+    const taken = Object.keys(inputs).find(key => state.rowErrors[key]);
+    if (taken) inputs[taken].focus();
+    else if (state.focus && boxes[state.focus]) boxes[state.focus].focus();
+    else go.focus();
+    state.focus = null;
+  }
+
+  async function run(go, error) {
+    const now = plan();
+    if (!settingsSlackPickLabel(now)) return;
+    state.error = '';
+    const toMake = now.add.filter(key => !state.made[key]);
+    const blank = toMake.filter(key => !settingsSlackChannelName(state.picks[key].name));
+    if (blank.length) {
+      blank.forEach((key) => { state.rowErrors[key] = '채널 이름을 적어 주세요'; });
+      draw();
+      return;
+    }
+    go.disabled = true;
+    if (toMake.length) {
+      // 토큰 칸이 없다 — 서버가 저장된 토큰을 쓴다(응답에는 싣지 않는다).
+      const { stop } = await settingsSlackMakeChannels('', toMake, state);
+      if (stop || toMake.some(key => !state.made[key])) { state.error = stop; draw(); return; }
+    }
+    const channels = Object.fromEntries(now.add.filter(key => state.made[key]).map(key => [key, state.made[key].id]));
+    const done = [
+      now.add.length ? `채널 ${now.add.length}개를 만들었어요` : '',
+      now.back.length ? SETTINGS_SLACK_BACK : '',
+      now.off.length ? `채널 ${now.off.length}개를 뺐어요` : '',
+    ].filter(Boolean).join(' · ');
+    await settingsIntegrationSave({ slack: { enabled: true, token: '', channels, off: now.off, on: now.back } },
+      { error, button: go, done });
+  }
+
+  // 새 채널 이름의 앞머리(슬랙 사용자 이름)를 저장된 토큰으로 한 번 묻는다 — 못 받으면 `my`로 둔다.
+  card.body.replaceChildren(settingsEl('d-ismall', '채널을 불러오는 중이에요…'));
+  return settingsSlackTokenCheck('').then((checked) => {
+    if (checked && checked.ok === true) state.prefix = settingsSlackPrefix(checked.prefix);
+    Object.entries(state.picks).forEach(([key, pick]) => { if (!pick.touched) pick.name = settingsSlackDefaultName(key, state.prefix); });
+    if (card.body.hidden) return state;
+    draw();
+    return state;
+  });
 }
 
 function settingsSlackCard(data) {
@@ -1475,20 +1807,27 @@ function settingsSlackCard(data) {
   const more = linkedKeys.filter(key => key !== 'todo').length;
   const ago = settingsAgo(slack.readAt);
   const status = connected ? `${todo.name || '채널'}${more ? ` 외 ${more}개` : ''}${ago ? ` · ${ago} 읽음` : ''}` : null;
+  const fetchState = slack.fetch || {};
   let card = null;
-  // 슬랙에서 사라진(지웠거나 보관한) 채널은 그 줄을 따로 알린다 — 누르면 채널 고치기로 간다.
-  const extra = linkedKeys.filter(key => channels[key].missing).map((key) => {
+  const pickLink = () => settingsButton('채널 고르기', 'd-ablink', () => card.open('pick'));
+  // 할 일 채널이 사라졌으면 수집이 멈춘 것과 같은 급이다 — 빨간 상태 줄 + 이유 한 줄(시안 F).
+  const todoGone = connected && !!todo.missing;
+  let alert = null;
+  if (todoGone) alert = { status: `${todo.name || '할 일 채널'}을 찾을 수 없어요`, why: ['슬랙에서 지웠거나 보관했어요 · ', pickLink()] };
+  else if (connected && fetchState.failing) alert = { why: settingsFailWhy('slack', fetchState) };
+  // 그 밖의 사라진 채널은 둘째 줄 아래 주의색 한 줄 — 누르면 채널 고르기로 간다.
+  const extra = linkedKeys.filter(key => key !== 'todo' && channels[key].missing).map((key) => {
     const line = settingsEl('d-intgneed k-warn');
     line.dataset.missing = key;
-    line.append(document.createTextNode(`${channels[key].name || '채널'} 채널을 읽지 못했어요 · `),
-      settingsButton('채널 고치기', 'd-ablink', () => card.open('fix')));
+    line.append(document.createTextNode(`${channels[key].name || '채널'}을 찾을 수 없어요 — 슬랙에서 지웠거나 보관했어요 · `), pickLink());
     return line;
   });
   // 메시지를 할 일로 옮기는 일은 지금 Claude Code가 한다 — 이 맥에 없으면 사실만 한 줄 알린다.
   if (!data.claude) extra.push(settingsEl('d-intgnote', '메시지를 할 일로 옮기는 일은 지금 Claude Code가 해요 · 이 맥에는 설치 안 됨'));
   const menu = connected ? () => [[
+    ...settingsLogItem(card, slack.log),
     { label: '보내는 법', onClick: () => { card.open('how'); } },
-    { label: '채널 고치기', onClick: () => card.open('fix') },
+    { label: '채널 고르기', onClick: () => card.open('pick') },
     { label: '다시 연결(토큰 바꾸기)', onClick: () => card.open('token') },
   ], [
     { label: '해제…', danger: true, onClick: () => settingsIntgConfirmOff(card, { slack: { enabled: false } }) },
@@ -1496,14 +1835,21 @@ function settingsSlackCard(data) {
   card = settingsIntgCard({
     kind: 'slack', name: '슬랙 수집', chip: 'Claude Code 필요',
     use: '나만 보는 채널에 공유한 메시지가 할 일로 들어와요',
+    // 주기는 실제 등록 값(launchd 5분 간격, 매일 9–19시 — slack-capture.sh가 시간대를 본다).
     need: connected
-      ? linkedKeys.map(key => `${channels[key].name || '채널'} ${settingsSlackLabel(key)}`).join(' · ')
+      ? `매일 9–19시, 5분마다${typeof slack.todayCount === 'number' ? ` · 오늘 새 항목 ${slack.todayCount}개` : ''}`
       : '5분 · 팀 슬랙 앱 토큰 하나',
-    status, menu, extra,
-    fetch: connected ? { key: 'slack', state: slack.fetch || {}, reconnect: () => card.open('token') } : null,
+    status, menu, extra, alert,
+    fetch: connected ? { key: 'slack', state: fetchState, reconnect: () => card.open('token') } : null,
     onOpen: (self, mode) => {
       if (mode === 'how') { self.body.appendChild(settingsSlackSendHow(todo.name || '#my-todo')); return; }
-      settingsSlackWizard(self, data, connected ? (mode || 'fix') : 'new');
+      if (mode === 'log') {
+        const automation = (automationStatusCache || []).find(a => a.key === 'slack');
+        settingsIntgLog(self, 'slack', '슬랙 수집', slack.log || [], slackLedgerNotes(automation ? automation.tail : []));
+        return;
+      }
+      if (!connected || mode === 'token') { settingsSlackWizard(self, data, connected ? 'token' : 'new'); return; }
+      settingsSlackPick(self, data);
     },
   });
   return card;
@@ -1610,24 +1956,35 @@ function settingsJiraCard(data) {
   const status = connected
     ? [jira.displayName ? `${jira.displayName}님` : '', host, ago ? `${ago} 읽음` : ''].filter(Boolean).join(' · ')
     : null;
+  // 둘째 줄: `내 티켓 12개 · 반응 필요 댓글 2개 · 1분 전 확인` — 반응 필요(지라 댓글)를 마지막으로 확인한 때까지
+  // 여기서 말한다(예전 상태 탭의 `반응 필요 · 지라 댓글` 줄). 다시 읽지 못하고 있으면 주의색으로 그 말을 붙인다.
+  const checked = settingsAgo(jira.attentionAt);
+  const attentionBad = !!(jira.attentionError || jira.attentionStale);
   const counts = [
-    typeof jira.issueCount === 'number' ? `지금 내 티켓 ${jira.issueCount}개` : '',
+    typeof jira.issueCount === 'number' ? `내 티켓 ${jira.issueCount}개` : '',
     typeof jira.attentionCount === 'number' ? `반응 필요 댓글 ${jira.attentionCount}개` : '',
+    checked ? `${checked} 확인` : '',
+    jira.attentionError && !checked ? '반응 필요 댓글을 읽지 못했어요' : (jira.attentionStale ? '다시 읽지 못했어요' : ''),
   ].filter(Boolean).join(' · ');
+  const fetchState = jira.fetch || {};
   let card = null;
   card = settingsIntgCard({
     kind: 'jira', name: '지라', chip: '누구나',
     use: '내 티켓이 프로젝트로 뜨고 상태·기한을 여기서 바꿔요',
     need: connected ? (counts || '앱이 지라를 직접 읽어요') : '3분 · Atlassian API 토큰 하나',
+    needClass: connected && attentionBad ? 'k-warn' : '',
     status,
-    fetch: connected ? { key: 'jira', state: jira.fetch || {}, reconnect: () => card.open('token') } : null,
+    alert: connected && fetchState.failing ? { why: settingsFailWhy('jira', fetchState) } : null,
+    fetch: connected ? { key: 'jira', state: fetchState, reconnect: () => card.open('token') } : null,
     menu: connected ? () => [[
+      ...settingsLogItem(card, jira.log),
       { label: '다시 연결(토큰 바꾸기)', onClick: () => card.open('token') },
     ], [
       { label: '해제…', danger: true, onClick: () => settingsIntgConfirmOff(card, { jira: { enabled: false } }) },
     ]] : null,
     onOpen: (self, mode, arg) => {
       if (mode === 'done') { settingsJiraDone(self, data, arg); return; }
+      if (mode === 'log') { settingsIntgLog(self, 'jira', '지라', jira.log || []); return; }
       settingsJiraWizard(self, data);
     },
   });
@@ -1747,27 +2104,36 @@ function settingsCalendarCard(data) {
   const calendar = data.calendar || {};
   const on = !!calendar.enabled;
   const ical = on && calendar.source === 'ical';
+  const fetchState = calendar.fetch || {};
+  const failing = on && (!!fetchState.failing || (ical && !calendar.readAt && !!calendar.failed));
   let card = null;
   card = settingsIntgCard({
     kind: 'calendar', name: '캘린더', chip: '누구나 · Claude',
     use: '오늘 회의가 뜨고 회의 정리가 열려요',
+    // 주기는 실제 등록 값 — 비밀 주소는 앱이 30분마다, Claude 갈래는 launchd `calendar-sync`(매일 9·11·13·15·17·19시).
     need: on
-      ? (ical ? '앱이 비밀 주소를 직접 읽어요 · 30분마다' : 'Claude Code로 오늘 일정을 읽어요')
+      ? (ical ? '30분마다' : '매일 9–19시, 2시간마다')
       : '3분 · 비밀 주소 또는 Claude Code',
     status: on ? settingsCalendarStatus(calendar) : null,
+    alert: failing ? { why: settingsFailWhy('calendar', fetchState) } : null,
     // 비밀 주소면 앱이 곧바로 다시 읽고(`오늘 N개`), Claude 갈래면 요청만 남긴다. 주소 문제면 `다시 연결`.
     fetch: on ? {
       key: 'calendar', state: calendar.fetch || {}, unit: ical ? '오늘' : '',
       reconnect: ical ? () => card.open('again') : null,
     } : null,
     menu: on ? () => [
-      ...(ical ? [[{ label: '다시 연결(주소 바꾸기)', onClick: () => card.open('again') }]] : []),
+      ...((settingsLogItem(card, calendar.log).length || ical)
+        ? [[...settingsLogItem(card, calendar.log), ...(ical ? [{ label: '다시 연결(주소 바꾸기)', onClick: () => card.open('again') }] : [])]]
+        : []),
       [{
         label: '해제…', danger: true,
         onClick: () => settingsIntgConfirmOff(card, { calendar: { enabled: false } }, ical ? SETTINGS_ICAL_OFF : '해제하면 오늘 일정 가져오기가 멈춰요.'),
       }],
     ] : null,
-    onOpen: (self, mode) => settingsCalendarOpen(self, data, mode),
+    onOpen: (self, mode) => {
+      if (mode === 'log') { settingsIntgLog(self, 'calendar', '캘린더', calendar.log || []); return; }
+      settingsCalendarOpen(self, data, mode);
+    },
   });
   if (ical && !calendar.readAt && calendar.failed) {
     const dot = card.top.querySelector('.ok');
@@ -1839,15 +2205,26 @@ function settingsNotesCard(data) {
   const tiro = notes.mode === 'tiro';
   const state = notes.fetch || {};
   const ran = settingsAgo(state.lastRunAt);
-  return settingsIntgCard({
+  let card = null;
+  card = settingsIntgCard({
     kind: 'notes', name: '회의록', chip: '누구나 · Claude',
     use: '티로 회의록이 초안으로 들어와요 — 직접 옮기기도 돼요',
-    need,
+    need: tiro ? '회의가 끝나면 회의 탭에서 가져오기' : need,
     status: tiro ? (ran ? `${ran} 가져옴` : '아직 가져온 적 없어요') : null,
+    alert: tiro && state.failing ? { why: settingsFailWhy('notes', state) } : null,
     fetch: tiro ? { key: 'tiro', state } : null,
     openText: '바꾸기', openClass: 'd-btn sm',
-    onOpen: self => settingsNotesOpen(self, data),
+    // 티로로 받는 중이면 다른 연결된 카드처럼 ⋯(최근 기록 · 바꾸기)만 둔다.
+    menu: tiro ? () => [[
+      ...settingsLogItem(card, notes.log),
+      { label: '바꾸기', onClick: () => card.open() },
+    ]] : null,
+    onOpen: (self, mode) => {
+      if (mode === 'log') { settingsIntgLog(self, 'notes', '회의록', notes.log || []); return; }
+      settingsNotesOpen(self, data);
+    },
   });
+  return card;
 }
 
 // ---------- 목록 ----------
@@ -1864,6 +2241,36 @@ function settingsIntgCounts(data) {
   ];
   const on = flags.filter(Boolean).length;
   return { on, left: flags.length - on };
+}
+
+// 지금 멈춘 카드(연결된 것만) — 요약 줄의 `N개가 멈췄어요`와 빨간 점을 눌렀을 때 잠깐 붉힐 카드.
+// 슬랙은 수집이 실패 중이거나 할 일 채널이 사라졌을 때, 캘린더(비밀 주소)는 한 번도 못 읽었을 때도 멈춘 것이다.
+function settingsIntgFailing(data) {
+  const slack = data.slack || {};
+  const jira = data.jira || {};
+  const calendar = data.calendar || {};
+  const notes = data.meetingNotes || {};
+  const todo = (slack.channels && slack.channels.todo) || {};
+  const failing = (state) => !!(state && state.failing);
+  const out = [];
+  if (slack.enabled && slack.hasToken && todo.id && (failing(slack.fetch) || todo.missing)) out.push('slack');
+  if (jira.enabled && jira.hasToken && jira.siteUrl && failing(jira.fetch)) out.push('jira');
+  if (calendar.enabled && (failing(calendar.fetch) || (calendar.source === 'ical' && !calendar.readAt && calendar.failed))) out.push('calendar');
+  if (notes.mode === 'tiro' && failing(notes.fetch)) out.push('notes');
+  return out;
+}
+
+// 빨간 점을 누르고 들어왔으면 멈춘 카드를 약 2초 붉게 밝힌다(동작 줄이기면 ui.css가 전환 없이 바탕만 바꾼다).
+const SETTINGS_FLASH_MS = 2000;
+function settingsIntgFlash(kinds) {
+  const cards = kinds.map(kind => settingsIntgCards.get(kind)).filter(Boolean);
+  if (!cards.length) return [];
+  cards.forEach((card) => { card.row.className = `${card.row.className} is-flash`; });
+  if (typeof cards[0].row.scrollIntoView === 'function') cards[0].row.scrollIntoView({ block: 'nearest' });
+  setTimeout(() => cards.forEach((card) => {
+    card.row.className = String(card.row.className).split(' ').filter(one => one !== 'is-flash').join(' ');
+  }), SETTINGS_FLASH_MS);
+  return cards.map(card => card.row);
 }
 
 function settingsIntgFoot() {
@@ -1914,9 +2321,26 @@ async function renderSettingsIntegrations({ quiet = false } = {}) {
   }
   settingsIntgCards = new Map();
   const counts = settingsIntgCounts(data);
+  const failing = settingsIntgFailing(data);
+  // 맨 위 한 줄 요약(시안 A·B) — 연결 상태를 보는 곳은 이 탭 하나다.
   const head = settingsEl('d-intghead');
   const lead = document.createElement('span');
-  lead.textContent = '연동은 선택이에요. 필요할 때 하나씩 켜요.';
+  lead.className = 'lead';
+  const dot = (cls) => {
+    const mark = document.createElement('span');
+    mark.className = cls;
+    mark.setAttribute('aria-hidden', 'true');
+    mark.textContent = '●';
+    return mark;
+  };
+  if (failing.length) {
+    lead.className = 'lead k-neg';
+    lead.append(dot('bad'), document.createTextNode(` ${failing.length}개가 멈췄어요`));
+  } else if (counts.on) {
+    lead.append(dot('ok'), document.createTextNode(` 연결 ${counts.on}개 모두 잘 읽고 있어요`));
+  } else {
+    lead.textContent = '연동은 선택이에요. 필요할 때 하나씩 켜요.';
+  }
   const tally = document.createElement('span');
   tally.className = 'd-quiet sp';
   tally.textContent = `연결됨 ${counts.on} · 남은 것 ${counts.left}`;
@@ -1925,6 +2349,11 @@ async function renderSettingsIntegrations({ quiet = false } = {}) {
   [settingsSlackCard, settingsJiraCard, settingsCalendarCard, settingsNotesCard]
     .forEach(make => view.appendChild(make(data).row));
   view.appendChild(settingsIntgFoot());
+  // 설정을 연 표지 — 빨간 점을 눌렀으면 멈춘 카드를 잠깐 붉게, `log:<카드>`면 그 카드의 최근 기록을 편다.
+  const focus = settingsFocusKey;
+  if (focus === 'alerts' || (typeof focus === 'string' && focus.startsWith('log:'))) settingsFocusKey = null;
+  if (focus === 'alerts') settingsIntgFlash(failing);
+  if (typeof focus === 'string' && focus.startsWith('log:') && settingsIntgCards.get(focus.slice(4))) settingsIntgCards.get(focus.slice(4)).open('log');
   // 지라 연결 직후라면 ③ 확인을 그 카드에 이어서 보인다(저장 뒤 다시 그린 화면).
   const after = settingsIntgAfter;
   settingsIntgAfter = null;
@@ -1934,7 +2363,7 @@ async function renderSettingsIntegrations({ quiet = false } = {}) {
 }
 
 // ---------- 설정 > 꾸미기 (이 맥에만) ----------
-// 세 줄(Dock 아이콘 · Dock 이름 · 워크스페이스 제목) + 저장, 맨 아래 `앱 위치`. 프리셋은 두지 않는다.
+// 세 줄(Dock 아이콘 · Dock 이름 · 워크스페이스 제목) + 저장. 프리셋은 두지 않는다(`앱 위치`는 앱 탭으로 옮겼다).
 // 아이콘은 고르는 순간 화면에서 정사각형 가운데로 잘라(캔버스) 미리 보여 주고, `저장`을 눌러야 서버로 간다.
 // Dock 앱은 서버가 아니라 launchd 에이전트(app-refresh)가 다시 만든다 — Dock을 다시 시작하지 않으므로
 // 저장 뒤 한 줄로 `Dock은 앱을 닫고 다시 열면 보여요`를 알린다.
@@ -2021,7 +2450,7 @@ function personalizeApply({ title, icon } = {}) {
   }
 }
 
-// `앱 위치` — Dock 앱과 업데이트 파일의 경로(홈은 `~`). Finder의 `폴더로 이동`에 붙여 넣으라고만 알린다.
+// 설정 › 앱의 `앱 위치` — Dock 앱과 업데이트 파일의 경로(홈은 `~`). Finder의 `폴더로 이동`에 붙여 넣으라고만 알린다.
 // 서버는 Finder를 열지 않는다 — 경로 글자만 준다(GET /api/about의 appBundle·updateFile).
 function personalizePlace(about) {
   const lines = [['Dock 앱', about && about.appBundle], ['업데이트 파일', about && about.updateFile]]
@@ -2052,9 +2481,7 @@ async function renderSettingsPersonalize() {
   if (!view) return;
   view.replaceChildren(settingsEl('d-empty', '불러오는 중이에요…'));
   let state = null;
-  let about = null;
   try { state = await (await request('/api/personalize')).json(); } catch { state = null; }
-  try { about = await (await fetch('/api/about', { headers: { Accept: 'application/json' } })).json(); } catch { about = null; }
   view.replaceChildren();
   if (!state || state.ok !== true) {
     view.appendChild(settingsEl('d-empty', '꾸미기 값을 불러오지 못했어요.'));
@@ -2171,13 +2598,6 @@ async function renderSettingsPersonalize() {
     view.appendChild(done);
     personalizeSavedNote = null;
   }
-  const place = personalizePlace(about);
-  view.appendChild(place);
-  if (settingsFocusKey === 'app-place') {
-    settingsFocusKey = null;
-    place.classList.add('is-focus');
-    if (typeof place.scrollIntoView === 'function') place.scrollIntoView({ block: 'center' });
-  }
 }
 
 // ---------- 설정 > 도움말 맨 위의 사용설명서 ----------
@@ -2276,25 +2696,31 @@ const SETTINGS_FAQ = [
     ['오늘 탭 맨 위의 `반응 필요`는 뭔가요', '지라 연결',
       '제가 답해야 하는 지라 댓글이 모이는 자리예요. <b>지라에 직접 물어봐서 가져와요(설정 &gt; 연동의 지라 연결만 있으면 됩니다). 슬랙 앱이나 다른 설정은 필요 없어요.</b> 제가 담당·보고·지켜보는 티켓 중 제 마지막 댓글 뒤에 남이 댓글을 달았으면 뜨고(최근 14일), 지라에 답글을 달면 다음 갱신에서 저절로 사라져요.'],
     ['`반응 필요`에 안 보이는 것도 있나요', '지라 연결',
-      '제가 담당·보고·지켜보지 않는 티켓과 14일보다 오래된 댓글은 아직 못 봐요. <b>피그마 댓글은 여기로 자동으로 오지 않아요</b> — 피그마의 슬랙 알림을 나만 보는 채널(#my-todo)에 공유하면 슬랙 수집을 거쳐 <b>할 일</b>로 들어와요. 잘 읽고 있는지는 <b>상태</b> 탭 맨 아래 <b>반응 필요 · 지라 댓글</b> 줄에서 봐요.'],
+      '제가 담당·보고·지켜보지 않는 티켓과 14일보다 오래된 댓글은 아직 못 봐요. <b>피그마 댓글은 여기로 자동으로 오지 않아요</b> — 피그마의 슬랙 알림을 나만 보는 채널(#my-todo)에 공유하면 슬랙 수집을 거쳐 <b>할 일</b>로 들어와요. 잘 읽고 있는지는 <b>설정 &gt; 연동</b>의 지라 카드 둘째 줄(<b>반응 필요 댓글 N개 · N분 전 확인</b>)에서 봐요.'],
     ['Claude 없이 캘린더를 붙이려면', '구글 캘린더',
       '<b>설정 &gt; 연동 &gt; 캘린더</b>의 <b>비밀 주소 붙이기</b>예요. 구글 캘린더 설정 → 내 캘린더의 설정 → 캘린더 통합 → <b>iCal 형식의 비공개 주소</b>를 복사해 붙이면 앱이 30분마다 직접 읽어요. 이 주소는 비밀번호처럼 다뤄요.'],
     ['슬랙에서 이렇게 보내요', '슬랙 연결',
       '<b>남의 메시지</b>는 ⋯ → <b>전달</b>(또는 공유)로 #my-todo 같은 내 채널에 보내요. 메모 한 줄을 같이 적으면 할 일 문구에 참고해요. <b>내 생각</b>은 그 채널에 그냥 적어도 돼요(한 메시지가 한 항목). 해야 할 일 → 할 일 · 답을 기다리는 것 → 기다리는 것 · 정해진 정책 → 정해진 것 · 참고거리 → 언젠가.'],
     ['슬랙에서 수집한 게 잘 들어왔는지 보려면', '슬랙 연결 + Claude Code',
-      '<b>상태</b> 탭의 <b>슬랙 캡처</b> 줄 아래에 최근 수집 결과가 요약돼요 — 본 메시지 수와 등록·중복·건너뜀 개수, 건너뛴 문구까지 보여요. 메시지를 갈래로 나누고 스레드를 읽는 일은 Claude Code가 해요.'],
+      '<b>설정 &gt; 연동</b>의 슬랙 카드 <b>⋯ › 최근 기록</b>을 열면 맨 위에 최근 수집 결과가 요약돼요 — 본 메시지 수와 등록·중복·건너뜀 개수, 건너뛴 문구까지 보여요. 그 아래는 최근 10번의 시각과 결과예요. 메시지를 갈래로 나누고 스레드를 읽는 일은 Claude Code가 해요.'],
+    ['슬랙 채널에 다른 사람을 초대해도 되나요', '슬랙 연결',
+      '이 채널들은 나만 있는 채널로 써요 — 다른 사람을 초대하면 그 사람이 쓴 메시지도 할 일로 들어와요.'],
+    ['받을 채널을 더하거나 빼려면', '슬랙 연결',
+      '슬랙 카드 <b>⋯ › 채널 고르기</b>예요. 새로 고른 곳은 비공개 채널을 만들어 주고, 체크를 풀면 앱이 그 채널을 더 이상 읽지 않아요(슬랙 채널과 이미 들어온 항목은 그대로예요). 뺐던 채널을 다시 체크하면 <b>그때부터</b> 읽어요 — 뺀 동안 온 메시지는 가져오지 않아요. <b>할 일</b>은 뺄 수 없고, 채널 이름은 슬랙에서 바꾸면 앱이 따라가요.'],
     ['지금 바로 새로 가져오고 싶어요', '그 연동 연결',
       '<b>설정 &gt; 연동</b>에서 연결된 카드의 <b>지금 가져오기</b>를 눌러요. 지라·캘린더(비밀 주소)는 곧바로 다시 읽고, 슬랙·캘린더(Claude)·티로는 요청을 남겨 1~2분 뒤 반영돼요. 같은 연동은 1분에 한 번이에요. 지금 못 읽고 있으면 버튼이 <b>다시 시도</b>로, 토큰·주소 문제면 <b>다시 연결</b>로 바뀌어요.'],
     ['머리줄의 `○일 전 기준`이나 톱니 점은 뭔가요', '없음',
-      '자동 동기화가 최근에 못 돌았다는 뜻이에요. <b>주황 점</b>은 낡음, <b>빨간 점</b>은 지금 실패 중, <b>파란 점</b>은 새 버전이 나왔다는 뜻이에요. 눌러서 <b>상태</b> 탭에서 그 줄을 바로 봐요.'],
+      '자동 동기화가 최근에 못 돌았다는 뜻이에요. <b>주황 점</b>은 낡음, <b>빨간 점</b>은 지금 멈춘 연동이 있음, <b>파란 점</b>은 새 버전이 나왔다는 뜻이에요. 빨간 점을 누르면 <b>연동</b> 탭에서 멈춘 카드가 잠깐 붉게 보이고, 파란 점이면 <b>앱</b> 탭이 열려요.'],
   ]],
   ['문제가 생기면', [
     ['실수로 지웠는데 알림이 이미 사라졌으면', '없음',
       '<b>삭제한 항목</b> 탭에서 되살려요. 지운 항목은 원문 그대로 남고 저절로 사라지는 건 없어요. <b>완전히 지우기</b>만 되돌릴 수 없어서 한 번 더 물어봐요.'],
     ['앱이 이상하게 동작하면', '없음',
-      '<b>상태</b> 탭 맨 아래 <b>문제 보고</b>를 누르면 버전·연동 상태·최근 오류 줄이 클립보드에 복사돼요. 업무 내용은 들어가지 않으니 그대로 슬랙에 붙여 넣어 주세요.'],
+      '<b>설정 &gt; 앱</b>의 <b>문제 보고 › 진단 내용 복사</b>를 누르면 버전·연동 상태·최근 오류 줄이 클립보드에 복사돼요. 업무 내용은 들어가지 않으니 그대로 슬랙에 붙여 넣어 주세요.'],
+    ['업무 데이터는 어디에 백업되나요', '없음',
+      '매일 19:30 이 맥의 <b>~/workspace-data-backup/daily</b>에 그날 데이터를 복사해 <b>7일치</b>를 남겨요(누구나 똑같아요). 업데이트 직전과 저장할 때마다의 직전 한 벌도 따로 있어요. 잘 됐는지는 <b>설정 &gt; 앱</b>의 <b>데이터 백업</b> 줄에서 보고, GitHub 비공개 저장소에도 올리고 싶으면 앱 README의 "업무 데이터 백업"대로 한 번 설정해요.'],
     ['앱에서 업데이트하기', '없음',
-      '새 버전이 나오면 <b>상태</b> 탭 맨 아래에 <b>업데이트 받기</b>가 떠요. 누르면 데이터 백업 → 받기 → 다시 시작 → 확인까지 1분쯤 걸리고, 진행을 그 자리에서 보여 줘요. 끝나면 <b>새로고침</b>을 눌러 주세요. 받기 전에 멈추면 <b>다시 시도</b>, 받은 뒤 실패하면 <b>이전 버전으로 되돌리기</b>를 보여 줘요. 폴더를 옮겨야 하거나 처음 한 번은 앱 폴더의 <b>업데이트.command</b>를 더블클릭해요.'],
+      '새 버전이 나오면 <b>설정 &gt; 앱</b>의 <b>버전</b> 줄에 <b>업데이트 받기</b>가 떠요. 누르면 데이터 백업 → 받기 → 다시 시작 → 확인까지 1분쯤 걸리고, 진행을 그 자리에서 보여 줘요. 끝나면 <b>새로고침</b>을 눌러 주세요. 받기 전에 멈추면 <b>다시 시도</b>, 받은 뒤 실패하면 <b>이전 버전으로 되돌리기</b>를 보여 줘요. 폴더를 옮겨야 하거나 처음 한 번은 앱 폴더의 <b>업데이트.command</b>를 더블클릭해요.'],
   ]],
 ];
 
@@ -2517,25 +2943,31 @@ const settingsDialog = document.getElementById('settingsDialog');
 let settingsReturnFocus = null;
 let settingsEsc = null;
 
+// 탭 차례 — 연동 · 앱 · 꾸미기 · 도움말 · 삭제한 항목. 설정을 열면 연동이 먼저다(예전 `상태` 탭은 없앴다 —
+// 연결 상태는 연동 카드, 앱 자체의 일은 앱 탭). 모르는 이름(옛 `status` 등)은 연동으로 연다.
+const SETTINGS_TABS = ['integrations', 'app', 'personalize', 'guide', 'trash'];
+
 function settingsSetTab(tab) {
+  const want = SETTINGS_TABS.includes(tab) ? tab : 'integrations';
   settingsDialog.querySelectorAll('[data-settings-tab]').forEach((button) => {
-    button.setAttribute('aria-pressed', String(button.dataset.settingsTab === tab));
+    button.setAttribute('aria-pressed', String(button.dataset.settingsTab === want));
   });
-  document.getElementById('settingsStatusView').hidden = tab !== 'status';
-  document.getElementById('settingsIntegrationsView').hidden = tab !== 'integrations';
-  document.getElementById('settingsPersonalizeView').hidden = tab !== 'personalize';
-  document.getElementById('settingsManualView').hidden = tab !== 'guide';
-  document.getElementById('settingsGuideView').hidden = tab !== 'guide';
-  document.getElementById('settingsTrashView').hidden = tab !== 'trash';
-  if (tab === 'guide') { renderSettingsManual(); renderSettingsGuide(); }
-  if (tab === 'personalize') renderSettingsPersonalize();
-  if (tab === 'status') renderAutomationStatus();
-  if (tab === 'integrations') renderSettingsIntegrations();
-  if (tab === 'trash') renderSettingsTrash();
+  document.getElementById('settingsIntegrationsView').hidden = want !== 'integrations';
+  document.getElementById('settingsAppView').hidden = want !== 'app';
+  document.getElementById('settingsPersonalizeView').hidden = want !== 'personalize';
+  document.getElementById('settingsManualView').hidden = want !== 'guide';
+  document.getElementById('settingsGuideView').hidden = want !== 'guide';
+  document.getElementById('settingsTrashView').hidden = want !== 'trash';
+  if (want === 'guide') { renderSettingsManual(); renderSettingsGuide(); }
+  if (want === 'personalize') renderSettingsPersonalize();
+  if (want === 'app') renderSettingsApp();
+  if (want === 'integrations') renderSettingsIntegrations();
+  if (want === 'trash') renderSettingsTrash();
+  return want;
 }
 
-// 헤더의 톱니바퀴와 동기화 지연 경고가 함께 쓰는 한 길.
-function settingsOpen(tab = 'status', focusKey = null) {
+// 헤더의 톱니바퀴·사용설명서·알림의 `자세히`가 함께 쓰는 한 길. 표지(focusKey)는 settingsFocusKey 참고.
+function settingsOpen(tab = 'integrations', focusKey = null) {
   settingsFocusKey = focusKey;
   if (settingsDialog.open) { settingsSetTab(tab); return; }
   settingsReturnFocus = document.activeElement;
@@ -2546,6 +2978,8 @@ function settingsOpen(tab = 'status', focusKey = null) {
   settingsTrash = null;
   settingsTrashLabel();
   settingsSetTab(tab);
+  // 새 버전이 나왔는지(톱니바퀴의 파란 점)는 어느 탭으로 열든 한 번 새로 묻는다 — 예전엔 상태 탭이 이 일을 했다.
+  if (tab !== 'app') settingsAboutLoad();
   settingsTrashLoad().then(() => {
     if (settingsDialog.open && document.getElementById('settingsTrashView')?.hidden === false) renderSettingsTrash();
   });
@@ -2562,7 +2996,15 @@ function settingsClose() {
 
 // 브라우저가 스스로 닫으려 할 때(Esc)도 우리 길로 모은다 — 스택과 포커스 복귀가 어긋나지 않게.
 settingsDialog.addEventListener('cancel', (event) => { event.preventDefault(); settingsClose(); });
-document.getElementById('settingsBtn').addEventListener('click', () => settingsOpen('status', syncStale.length ? syncStale[0].key : null));
+// 톱니바퀴: 빨간 점(지금 멈춘 연동)이면 연동 탭 + 멈춘 카드를 잠깐 붉게, 파란 점(새 버전)만 있으면 앱 탭, 그 밖엔 연동 탭.
+function settingsGearTab() {
+  if (settingsAlertKeys.length) return ['integrations', 'alerts'];
+  const gear = document.getElementById('settingsBtn');
+  const stale = !!(gear && gear.classList && gear.classList.contains('has-stale'));
+  if (!stale && settingsHasUpdate()) return ['app', null];
+  return ['integrations', null];
+}
+document.getElementById('settingsBtn').addEventListener('click', () => settingsOpen(...settingsGearTab()));
 document.getElementById('settingsCloseBtn').addEventListener('click', settingsClose);
 settingsDialog.querySelectorAll('[data-settings-tab]').forEach((button) => {
   button.addEventListener('click', () => settingsSetTab(button.dataset.settingsTab));
