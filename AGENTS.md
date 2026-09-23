@@ -5,7 +5,7 @@
 ## 데이터
 
 - 업무 데이터(`tracker/`의 `tasks.md`, `checks.md`, `decisions.md`, `ideas.md`, `.workflow.json`, `.report-drafts.json` 등)는 직접 편집하지 않는다. 추가·수정은 앱 API로 한다(Slack 수집은 `import-record.js`, 수동 등록은 `/track`). 서버가 꺼져 있으면 파일 수정으로 우회하지 말고 실패를 알린다.
-- 예외는 앱이 읽기만 하는 스냅샷이다. `calendar_today.md`, `jira_issues.md`, `slack_inbox.md`는 해당 스킬이 덮어쓰고, `meeting_drafts.json`은 끝에 추가만 한다.
+- 예외는 앱이 읽기만 하는 스냅샷이다. `calendar_today.md`, `slack_inbox.md`는 해당 스킬이 덮어쓰고, `meeting_drafts.json`은 끝에 추가만 한다. `jira_issues.md`는 옛 설치의 대비책일 뿐이다 — 새로 쓰는 곳이 없다(앱 서버가 지라를 직접 읽는다).
 - 코드와 문서는 평소처럼 직접 수정한다.
 
 ## 개발·검증

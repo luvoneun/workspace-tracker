@@ -1,7 +1,7 @@
 // 설정 창 한 벌 — 상태 탭(자동화 줄·로그 묶음·슬랙 처리 대장·앱 정보·문제 보고), 연동 탭(지라·슬랙·
 // 캘린더·회의록을 하나씩 켜기), 도움말 탭(개념 사전 + 문답), 삭제한 항목 탭, 창 열고 닫기.
 // app.js에서 그대로 옮긴 코드다. app.js의 공용 부품(request·showNotice·uiIcon·escPush·escDrop·
-// uiMenuClose·syncStale·latestData)과 jira-ui.js(jiraLiveNote)에 기댄다.
+// uiMenuClose·syncStale·latestData)과 jira-ui.js(jiraLiveNote·jiraLiveStatusRow)에 기댄다.
 // 맨 아래 몇 줄은 화면 요소를 바로 잡아 쓰므로 index.html의 <body> 끝(app.js 바로 앞)에서 읽힌다.
 
 // 설정 > 상태의 슬랙 줄 아래 처리 대장 한 줄(BNOTES). 슬랙 수집 지침이 실행마다 로그 맨 앞에 남기는
@@ -142,8 +142,13 @@ async function renderAutomationStatus() {
   view.insertAdjacentHTML('beforeend', '<div class="d-empty">불러오는 중이에요…</div>');
   const automations = await fetchAutomationStatus();
   view.replaceChildren();
-  // 연동을 하나도 켜지 않은 설치에는 자동화 줄이 아예 없다 — 그때는 "고장"이 아니라 "아직 안 켰다"이다.
-  if (!automations.length) {
+  // 지라 캐시 자동화(jira-sync)는 없앴다 — 지금은 자동화 목록이 아니라 이 조용한 줄 하나로만
+  // 지라 직접 읽기 상태를 말한다(꺼져 있으면 줄 자체가 없다). 자동화가 하나도 없어도 이 줄만으로
+  // "아직 안 켰다" 화면을 건너뛸 수 있어 자동화 개수와 별도로 먼저 계산해 둔다.
+  const jiraLive = typeof jiraLiveStatusRow === 'function'
+    ? jiraLiveStatusRow(latestData && latestData.jiraSync) : null;
+  // 연동을 하나도 켜지 않은 설치에는 줄이 아예 없다 — 그때는 "고장"이 아니라 "아직 안 켰다"이다.
+  if (!automations.length && !jiraLive) {
     view.insertAdjacentHTML('beforeend', '<div class="d-empty">켜 둔 자동화가 없어요 — 설정의 연동에서 켜요.</div>');
   } else {
     // "최근 실패 기록이 있음"과 "지금 문제임"은 다르다 — 예전엔 둘을 구분 안 해서,
@@ -153,6 +158,8 @@ async function renderAutomationStatus() {
     [...automations]
       .sort((a, b) => (b.lastKind === 'fail' ? 1 : 0) - (a.lastKind === 'fail' ? 1 : 0))
       .forEach(a => view.appendChild(automationRow(a)));
+
+    if (jiraLive) view.appendChild(jiraLive);
 
     // 반응 필요(지라 댓글)는 자동화가 아니라 앱이 직접 읽는 것이라 목록 끝에 한 줄로 붙인다
     // (연결이 없으면 줄 자체가 없다 — 화면의 구역도 그때는 없다).
@@ -403,15 +410,6 @@ function automationRow(a) {
     top.appendChild(next);
   }
   row.appendChild(top);
-
-  // 지라 목록은 앱이 직접 읽는다 — 그때는 이 자동화가 대비책이라는 뜻이라 한 마디만 조용히 덧붙인다.
-  const note = a.key === 'jira' ? jiraLiveNote(latestData && latestData.jiraSync) : '';
-  if (note) {
-    const line = document.createElement('div');
-    line.className = 'd-autonote';
-    line.textContent = note;
-    row.appendChild(line);
-  }
   // 슬랙 줄 아래 최근 수집의 처리 대장(BNOTES) — 로그를 열지 않고도 뭐가 왜 안 들어왔는지 본다.
   if (a.key === 'slack') slackLedgerNotes(a.tail).forEach(line => row.appendChild(line));
 

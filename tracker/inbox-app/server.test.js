@@ -831,8 +831,9 @@ test('연동을 끄면 run-task.sh·slack-capture.sh는 claude를 부르지 않�
   const task = name => runScript(automationScript('run-task.sh'), [name, '프롬프트', 'Read'], env);
 
   // 1) 껐으면 곧바로 끝난다 — 시작 줄도 남기지 않고 claude도 부르지 않는다
+  // jira-sync는 없앴다(앱이 지라를 직접 읽는다) — run-task.sh의 연동 칸 매핑에서도 빠졌다.
   fs.writeFileSync(config, JSON.stringify({ integrations: { jira: false, calendar: false, tiro: false, slack: false } }));
-  for (const name of ['jira-sync', 'calendar-sync', 'tiro-sync']) {
+  for (const name of ['calendar-sync', 'tiro-sync']) {
     assert.equal(task(name).status, 0, `${name}은 꺼져 있으면 조용히 끝난다`);
     assert.match(logOf(name), new RegExp(`${name} 연동이 꺼져 있어 건너뛰어요`));
     assert.doesNotMatch(logOf(name), /시작$/m);
@@ -1089,6 +1090,15 @@ test('미팅 노트 가져오기를 끄면 조회·요청이 막히고 상태 �
   })).status, 404);
   assert.deepEqual((await (await fetch(origin + '/api/items')).json()).jiraSync, { used: false });
   assert.deepEqual((await (await fetch(origin + '/api/items')).json()).meetingNotes, { used: false, state: 'off' });
+});
+
+// jira-sync 자동화(지라 담당 이슈 캐시 갱신)는 없앴다 — 앱이 지라를 직접 읽는다(DECISIONS 2026-09-24).
+// 지라를 켜 둔 설정이어도(이 테스트가 쓰는 기본 서버는 설정 파일이 없어 켜진 것으로 본다) 상태 목록에는
+// 다시는 나오지 않는다. 화면은 jiraSync(/api/items)로 직접 읽기 상태를 따로 그린다.
+test('설정 > 상태의 자동화 목록에는 지라를 켜도 지라 동기화가 없다', async () => {
+  const automations = (await (await fetch(base + '/api/automation/status')).json()).automations;
+  assert.equal(automations.some(entry => entry.key === 'jira'), false, '지라 자동화는 목록에서 없앴다');
+  assert.notDeepEqual((await items()).jiraSync, { used: false }, '이 서버는 지라를 켜 둔 것이다(대조군)');
 });
 
 // ---------- 지라 직접 읽기 (BJR 1단계 — 보기만) ----------
@@ -4612,4 +4622,20 @@ test('setup.sh: 설정은 python3가 아니라 node로 읽고, 못 읽으면 에
   assert.notEqual(read('uses', 'slack').status, 0);
   assert.equal(read('uses', 'slack').stdout, '');
   fs.rmSync(home, { recursive: true, force: true });
+});
+
+// jira-sync(지라 담당 이슈 캐시 갱신) 자동화는 없앴다 — 앱이 지라를 직접 읽는다(DECISIONS 2026-09-24).
+// setup.sh는 실행하지 않는다 — 등록·해제 조각을 문자열로만 확인한다.
+test('setup.sh는 jira-sync를 등록하지 않고, 지라 켬/끔과 무관하게 등록을 내린다', () => {
+  const script = fs.readFileSync(path.join(REPO_ROOT, 'setup.sh'), 'utf8');
+  assert.ok(!script.includes('write_task_agent "jira-sync"'), 'jira-sync를 새로 등록하는 자리는 없다');
+  assert.ok(!/\[\s*"\$USE_JIRA"\s*=\s*"yes"\s*\]\s*\|\|\s*remove_agent jira-sync/.test(script),
+    '지라를 켰을 때만 내리던 예전 조건문은 없다');
+  assert.match(script, /\nremove_agent jira-sync\n/, '켬/끔과 무관하게 무조건 내린다');
+  // 등록 루프(launchctl load)에는 이제 jira-sync가 없다 — 나머지는 그대로다.
+  const loadLoop = script.split('for f in server slack-capture calendar-sync')[1].split('\n')[0];
+  assert.ok(!loadLoop.includes('jira-sync'), '등록 루프 목록에서 jira-sync를 뺐다');
+  assert.ok(loadLoop.includes('tiro-sync') && loadLoop.includes('data-backup'), '나머지 자동화는 그대로 등록한다');
+  // 옛 이름(com.luvon.workspace.jira-sync) 정리용 목록에는 남겨 둔다 — 옛 설치가 지운다.
+  assert.match(script, /AGENT_NAMES="[^"]*\bjira-sync\b[^"]*"/, '옛 라벨 정리용 이름 목록은 그대로 남긴다');
 });

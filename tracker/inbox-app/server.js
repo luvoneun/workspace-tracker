@@ -540,7 +540,8 @@ function getAutomationStatus() {
   const specs = [
     { key: 'slack', name: '슬랙 캡처', log: 'slack-capture.log', used: USES.slack },
     { key: 'calendar', name: '캘린더 동기화', log: 'calendar-sync.log', used: USES.calendar },
-    { key: 'jira', name: '지라 동기화', log: 'jira-sync.log', used: USES.jira },
+    // 지라 캐시 자동화(jira-sync)는 없앴다 — 앱이 지라를 직접 읽는다(DECISIONS 2026-09-24). 상태는
+    // 이 자동화 목록이 아니라 화면(jira-ui.js의 jiraLiveStatusRow)이 자동화 목록 끝에 조용한 줄로 따로 그린다.
     // 일정표 없이 앱의 버튼을 눌렀을 때만 도는 자동화다(DECISIONS 2026-09-24). 상태·로그는 나머지와 같은 자리에서 본다.
     { key: 'tiro', name: '미팅 노트 가져오기', log: 'tiro-sync.log', used: USES.tiro },
   ];

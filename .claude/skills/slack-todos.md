@@ -97,4 +97,4 @@
 ## Related Commands
 
 - `/slack-alignments` — 슬랙에서 결정/합의된 정책·얼라인 캡처 (PRD 반영용)
-- `/jira-sync`, `/calendar-sync` — 다른 데이터 소스 갱신
+- `/calendar-sync` — 다른 데이터 소스 갱신

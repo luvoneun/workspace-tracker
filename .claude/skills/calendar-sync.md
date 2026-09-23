@@ -46,5 +46,4 @@
 
 ## Related Commands
 
-- `/jira-sync` — 지라 담당 이슈 캐시 갱신
 - `/slack-inbox` — 슬랙 미답변 인박스 갱신

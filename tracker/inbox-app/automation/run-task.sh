@@ -77,7 +77,6 @@ try {
 # 작업 이름 → 연동 칸. 여기 없는 이름은 검사하지 않고 예전 그대로 돈다.
 case "$NAME" in
   calendar-sync) INTEGRATION_KEY="calendar" ;;
-  jira-sync)     INTEGRATION_KEY="jira" ;;
   tiro-sync)     INTEGRATION_KEY="tiro" ;;
   *)             INTEGRATION_KEY="" ;;
 esac

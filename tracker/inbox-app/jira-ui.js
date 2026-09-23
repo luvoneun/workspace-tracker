@@ -883,6 +883,33 @@ function jiraLiveNote(sync, at = Date.now()) {
   return `목록은 앱이 직접 읽어요 · ${when}`;
 }
 
+// 설정 > 상태의 지라 직접 읽기 한 줄. 예전엔 `jira-sync` 자동화 목록 줄에 한 마디로 붙었지만
+// 그 자동화를 없앤 뒤로는(DECISIONS 2026-09-24) 여기서 자동화와 같은 자리에 따로 그린다
+// (attentionStatusRow와 같은 조용한 줄 부품). 지라를 켜지 않은 설정이면 줄 자체가 없다.
+function jiraLiveStatusRow(sync, at = Date.now()) {
+  if (!sync || sync.used === false) return null;
+  const row = document.createElement('div');
+  row.className = 'd-auto';
+  row.dataset.automation = 'jira-live';
+  const top = document.createElement('div');
+  top.className = 'd-autotop';
+  const name = document.createElement('span');
+  name.className = 'nm';
+  name.textContent = '지라';
+  const state = document.createElement('span');
+  if (!sync.connected) {
+    state.className = 'st k-neg';
+    state.textContent = '연결 안 됨';
+  } else {
+    state.className = 'st';
+    const note = jiraLiveNote(sync, at);
+    state.textContent = note ? note.replace('목록은 앱이 직접 읽어요', '앱이 직접 읽는 중') : '앱이 직접 읽는 중';
+  }
+  top.append(name, state);
+  row.appendChild(top);
+  return row;
+}
+
 // 지라 직접 읽기 설정이 있는지와 그 주소 — 목록과 함께 온다(`jiraSync`). 토큰·이메일은 오지 않는다.
 const jiraLinkUsable = () => !!(latestData && latestData.jiraSync && latestData.jiraSync.connected);
 const jiraLinkSite = () => (latestData && latestData.jiraSync && latestData.jiraSync.siteUrl) || '';

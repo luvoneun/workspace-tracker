@@ -4585,6 +4585,32 @@ test('BJLIVE: 설정 > 상태의 지라 한 마디는 앱이 직접 읽고 있�
   assert.equal(note(null, read), '');
 });
 
+// jira-sync 자동화(지라 담당 이슈 캐시 갱신)는 없앴다 — 앱이 지라를 직접 읽는다(DECISIONS 2026-09-24).
+// 예전엔 그 자동화 줄에 jiraLiveNote 한 마디만 덧붙였지만, 지금은 반응 필요(attentionStatusRow)와
+// 같은 자리에 조용한 줄 하나로 따로 선다.
+test('BJLIVE: 설정 > 상태의 지라 직접 읽기 줄은 연결됨·연결 안 됨·꺼짐 세 갈래다', () => {
+  const app = pureClient();
+  const row = (sync, at) => app.run(`jiraLiveStatusRow(${JSON.stringify(sync)}, ${at})`);
+  const read = Date.UTC(2026, 8, 25, 1, 0, 0);
+
+  const connected = row({ used: true, connected: true, live: true, liveAt: new Date(read).toISOString() }, read + 3 * 60000);
+  assert.equal(nodeFind(connected, 'nm').textContent, '지라');
+  assert.equal(nodeFind(connected, 'st').textContent, '앱이 직접 읽는 중 · 3분 전');
+  assert.equal(nodeFind(connected, 'st').className, 'st');
+  assert.equal(connected.dataset.automation, 'jira-live');
+
+  const notLiveYet = row({ used: true, connected: true }, read);
+  assert.equal(nodeFind(notLiveYet, 'st').textContent, '앱이 직접 읽는 중', '아직 읽은 시각이 없어도 연결됐으면 이렇게 말한다');
+
+  const disconnected = row({ used: true, connected: false }, read);
+  assert.equal(nodeFind(disconnected, 'nm').textContent, '지라');
+  assert.equal(nodeFind(disconnected, 'st').textContent, '연결 안 됨');
+  assert.equal(nodeFind(disconnected, 'st').className, 'st k-neg');
+
+  assert.equal(row({ used: false }, read), null, '지라를 끈 설정이면 줄 자체가 없다');
+  assert.equal(row(null, read), null);
+});
+
 // ---------- BNOTES B: 설정 > 상태의 슬랙 처리 대장 ----------
 test('slackLedgerFromTail: 처리 대장 문장을 가장 최근 것 하나만 찾고, 그 실행의 건너뛴 것·⚠️ 줄만(각 상한까지) 모은다', () => {
   const app = pureClient();
