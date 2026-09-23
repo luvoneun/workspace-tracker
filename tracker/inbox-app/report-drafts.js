@@ -298,19 +298,29 @@ module.exports = ({ directory, sources, legacy, currentWeek }) => {
     return ids;
   }
   // moveGroup의 반대 방향. **기록에 있는 그 행 id들만** 되돌린다 — id가 더는 없으면(그 사이 지워짐)
-  // 건너뛴다. 있어도 값이 이미 달라져 있으면(예: 별칭이 다시 바뀜) 그 자리만 조용히 넘어간다.
+  // 건너뛴다.
+  //
+  // 짝은 **bucket**으로 찾는다(표시 이름이 아니라). 옮긴 뒤에 그 에픽의 별칭을 바꾸거나 지우면
+  // 표시 이름이 `KEY · 새 이름`·`KEY`로 다시 지어지는데(relabelProject), 예전처럼 "옮길 때의 이름과
+  // 같을 때만" 되돌리면 bucket만 돌아오고 프로젝트 이름은 지라 쪽 이름으로 남아 되돌리기가 반만 됐다.
+  // 그래서 bucket이 그 에픽을 가리키는 행은 `group`을 지금 값이 무엇이든 원래 이름으로 돌린다.
+  // 근거 줄의 이름은 `KEY · `로 시작하거나 옮길 때의 이름과 같을 때 돌린다(우연히 같은 글자를 쓰는
+  // 다른 근거는 건드리지 않는다). bucket이 없는 행(여러 프로젝트를 묶은 문장 등)은 예전처럼 이름으로만 본다.
   function moveGroupUndo(ids, from, to, label) {
     const state = read();
     const set = new Set(Array.isArray(ids) ? ids : []);
     const head = `jira:${to}:`;
+    const aliasHead = `${to} · `;
+    const fromJira = value => typeof value === 'string' && (value === label || value === to || value.startsWith(aliasHead));
     let restored = 0;
     const fix = (row) => {
       if (!row || typeof row !== 'object') return false;
       let touched = false;
-      if (typeof row.bucket === 'string' && row.bucket.startsWith(head)) { row.bucket = `group:${from}:${row.bucket.slice(head.length)}`; touched = true; }
-      if (row.group === label) { row.group = from; touched = true; }
+      const moved = typeof row.bucket === 'string' && row.bucket.startsWith(head);
+      if (moved) { row.bucket = `group:${from}:${row.bucket.slice(head.length)}`; touched = true; }
+      if (moved ? row.group !== from : fromJira(row.group)) { row.group = from; touched = true; }
       (Array.isArray(row.evidence) ? row.evidence : []).forEach((item) => {
-        if (item && item.label === label) { item.label = from; touched = true; }
+        if (item && fromJira(item.label)) { item.label = from; touched = true; }
       });
       (Array.isArray(row.parts) ? row.parts : []).forEach(fix);
       return touched;

@@ -31,6 +31,21 @@ LOCK_OWNED=0
 mkdir -p "$LOG_DIR"
 cd "$WORKSPACE" || exit 1
 
+CONFIG="${WORKSPACE_CONFIG:-$WORKSPACE/workspace.config.json}"
+# 앱의 연동 탭에서 슬랙 수집을 껐으면 여기서 멈춘다 — 껐는데 5분마다 계속 도는 일이 없게.
+# 칸이 없으면 켜진 것으로 본다(서버 USES·setup.sh와 같은 규칙). 설정을 읽지 못하면 예전처럼 진행한다.
+if [ "$("$NODE" -e '
+const fs = require("fs");
+try {
+  const config = JSON.parse(fs.readFileSync(process.argv[1], "utf-8"));
+  const uses = (config && config.integrations) || {};
+  process.stdout.write(uses.slack === false ? "off" : "on");
+} catch (error) { process.stdout.write("on"); }
+' "$CONFIG" 2>/dev/null)" = "off" ]; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S') 슬랙 수집이 꺼져 있어 건너뛰어요" >> "$LOG"
+  exit 0
+fi
+
 # 5분마다 깨어나는 방식이라, 여기서 시간대(9~19시)인지 직접 판단해서 아니면 조용히 빠진다.
 # 평일만 도는 줄 알았는데 주말에도 돌게 해달라고 하셔서 요일 제한은 뺐다 — 시간대만 본다.
 # (테스트에서만 SLACK_CAPTURE_IGNORE_HOURS=1로 이 판단을 끈다)
@@ -112,7 +127,6 @@ if ! acquire_lock; then
   exit 0
 fi
 
-CONFIG="${WORKSPACE_CONFIG:-$WORKSPACE/workspace.config.json}"
 # launchd가 백그라운드로 부를 때 이 컴퓨터의 python3가 가끔
 # "PermissionError: Operation not permitted"로 조용히 막혀서(2>/dev/null에 삼켜짐)
 # CHANNELS가 통째로 비어버리고, 그러면 아무 채널도 확인 안 하고 매번 "새 메시지 없음"으로

@@ -106,15 +106,39 @@ else
   ok "설정 파일 있음 (그대로 둬요)"
 fi
 
-# 안 쓰는 도구는 검사도 등록도 하지 않는다
-uses() {
-  python3 -c "
-import json
-c = json.load(open('$CONFIG')).get('integrations', {})
-print('yes' if c.get('$1', True) else 'no')
-"
+# 설정 파일에서 값 하나를 읽는다.
+#
+# 예전에는 python3로 읽었는데, 이 맥의 python3는 보호 폴더 밑에서 가끔 조용히 막힌다
+# (`Operation not permitted`). 그러면 출력이 비어 **연동이 전부 꺼진 것으로 읽히고**, 아래에서
+# 등록해 둔 자동화를 하나씩 내려 버린다. 이미 잘 되던 node로 읽고, 읽기에 실패하면
+# (에이전트를 내리기 전에) 멈춘다.
+CONFIG_READER='
+const fs = require("fs");
+const config = JSON.parse(fs.readFileSync(process.argv[1], "utf-8"));
+const group = (name) => { const value = config[name]; return value && typeof value === "object" ? value : {}; };
+const [kind, key] = process.argv.slice(2);
+if (kind === "uses") {
+  // 칸이 없으면 켜진 것으로 본다(앱 서버 USES와 같은 규칙).
+  process.stdout.write(group("integrations")[key] === false ? "no" : "yes");
+} else if (kind === "server") {
+  process.stdout.write(String(group("server")[key] === undefined || group("server")[key] === null ? "" : group("server")[key]));
+} else if (kind === "chromeProfile") {
+  // 이 값은 쉘 명령에 들어간다 — 폴더 이름에 쓰이는 글자만 받는다.
+  const value = String(group("server").chromeProfile || "");
+  process.stdout.write(/^[A-Za-z0-9 _-]{1,40}$/.test(value) ? value : "");
+} else if (kind === "slackToken") {
+  const file = String(group("slack").tokenFile || "");
+  process.stdout.write(file.replace(/^~(?=\/|$)/, require("os").homedir()));
 }
-USE_SLACK=$(uses slack); USE_CAL=$(uses calendar); USE_JIRA=$(uses jira); USE_TIRO=$(uses tiro)
+'
+CONFIG_UNREADABLE="설정 파일을 읽지 못했어요: workspace.config.json"
+config_read() { node -e "$CONFIG_READER" "$CONFIG" "$@"; }
+
+# 안 쓰는 도구는 검사도 등록도 하지 않는다
+USE_SLACK=$(config_read uses slack) || die "$CONFIG_UNREADABLE"
+USE_CAL=$(config_read uses calendar)  || die "$CONFIG_UNREADABLE"
+USE_JIRA=$(config_read uses jira)     || die "$CONFIG_UNREADABLE"
+USE_TIRO=$(config_read uses tiro)     || die "$CONFIG_UNREADABLE"
 
 USING=""
 [ "$USE_SLACK" = "yes" ] && USING="$USING 슬랙"
@@ -125,11 +149,7 @@ ok "연동:${USING:- (없음 — 직접 입력만 사용)}"
 
 if [ "$USE_SLACK" = "yes" ]; then
   grep -q "여기에_채널ID" "$CONFIG" && die "workspace.config.json의 채널 ID를 아직 채우지 않았어요."
-  TOKEN_FILE=$(python3 -c "
-import json, os
-with open('$CONFIG') as f: c = json.load(f)
-print(os.path.expanduser(c.get('slack', {}).get('tokenFile', '')))
-")
+  TOKEN_FILE=$(config_read slackToken) || die "$CONFIG_UNREADABLE"
   if [ -n "$TOKEN_FILE" ] && [ -f "$TOKEN_FILE" ]; then
     ok "슬랙 토큰 있음"
   else
@@ -159,15 +179,12 @@ echo
 echo "[4/5] 맥 스케줄러(launchd) 등록"
 
 NODE_PATH="$(command -v node)"
-PORT=$(python3 -c "import json;print(json.load(open('$CONFIG')).get('server',{}).get('port',4321))")
-EXTRA_HOST=$(python3 -c "import json;print(json.load(open('$CONFIG')).get('server',{}).get('extraHost','') or '')")
+PORT=$(config_read server port) || die "$CONFIG_UNREADABLE"
+[ -n "$PORT" ] || PORT=4321
+EXTRA_HOST=$(config_read server extraHost) || die "$CONFIG_UNREADABLE"
 # Dock 앱을 열 크롬 프로필(예: Default, Profile 1). 비우면 크롬이 마지막에 쓴 프로필로 연다 — 그러면 `지라에서 열기`·슬랙 원문 같은
-# 링크가 회사 계정이 아닌 프로필에서 열릴 수 있다. 글자는 폴더 이름에 쓰이는 것만 받는다(쉘 명령에 들어간다).
-CHROME_PROFILE=$(python3 -c "
-import json, re
-v = json.load(open('$CONFIG')).get('server', {}).get('chromeProfile', '') or ''
-print(v if re.fullmatch(r'[A-Za-z0-9 _-]{1,40}', v) else '')
-")
+# 링크가 회사 계정이 아닌 프로필에서 열릴 수 있다.
+CHROME_PROFILE=$(config_read chromeProfile) || die "$CONFIG_UNREADABLE"
 
 mkdir -p "$AGENTS_DIR"
 

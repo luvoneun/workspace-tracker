@@ -6532,6 +6532,43 @@ test('도움말: 개념 사전 9개 + 쓰는 순서의 여섯 묶음 + 항목마
   assert.equal(doc.children[1].children.length, 9);
 });
 
+// 최종 QA: 캘린더를 아예 끈 사람에게 `오늘 일정을 가져오지 못했어요`는 고장난 것처럼 읽힌다.
+test('오늘 미팅 카드: 캘린더를 껐으면 "켜면 보여요", 켰는데 못 가져왔으면 예전 문구다', () => {
+  const app = pureClient();
+  const empty = (calendar) => {
+    app.run(`workflowData = { items: [], meetings: [] }; renderCalendar(${JSON.stringify(calendar)})`);
+    return app.nodes.get('calendarList').children[0].textContent;
+  };
+  assert.equal(empty({ used: false, events: [], lastSync: null }), '캘린더를 켜면 오늘 일정이 보여요(설정 > 연동).');
+  assert.equal(empty({ events: [], lastSync: null }), '오늘 일정을 가져오지 못했어요.', '켜져 있는데 기록이 없으면 못 가져온 것이다');
+  assert.equal(empty({ events: [], lastSync: '2026-09-23T09:00:00.000Z', stale: true }), '오늘 일정을 가져오지 못했어요.');
+  assert.equal(empty({ events: [], lastSync: '2026-09-23T09:00:00.000Z' }), '오늘은 미팅이 없어요.');
+});
+
+// 최종 QA: 새로 설치하면 예시 설정의 값이 그대로 들어 있다 — 그 글자를 입력칸에 채우면
+// 자기 주소를 적은 줄 알고 `연결`을 눌러 실패한다.
+test('연동 탭 지라 폼은 예시값을 미리 채우지 않는다(예시는 placeholder로만)', async () => {
+  const app = settingsClient({
+    ok: true,
+    jira: { enabled: false, siteUrl: 'https://내회사.atlassian.net', email: '나@내회사.com', hasToken: false },
+    slack: { enabled: false, workspaceUrl: '', hasToken: false, channels: { todo: { id: '', name: '' }, align: { id: '', name: '' }, someday: { id: '', name: '' }, waiting: { id: '', name: '' } } },
+    calendar: { enabled: false },
+    meetingNotes: { mode: 'manual', name: '' },
+    claude: true,
+    install: 'manual',
+  });
+  app.run(NODE_SHAPE);
+  await app.run('renderSettingsIntegrations()');
+  const dump = app.run("JSON.stringify(window.shapeOf(document.getElementById('settingsIntegrationsView')))");
+  assert.ok(!dump.includes('내회사'), '예시 주소·이메일은 입력칸에 들어가지 않는다');
+
+  // 사람이 실제로 적어 둔 값은 그대로 다시 보여 준다
+  assert.equal(app.run("settingsRealValue('https://회사.atlassian.net')"), 'https://회사.atlassian.net');
+  assert.equal(app.run("settingsRealValue('https://내회사.atlassian.net')"), '');
+  assert.equal(app.run("settingsRealValue(' 나@내회사.com ')"), '');
+  assert.equal(app.run('settingsRealValue(undefined)'), undefined);
+});
+
 test('빈 화면 문구는 "무엇이 없다"가 아니라 "여기서 뭘 하면 되는지"를 말한다', () => {
   const app = pureClient();
   const html = app.run("(() => { const box = document.createElement('div'); renderProjectDetail(box, null); return box.html || ''; })()");

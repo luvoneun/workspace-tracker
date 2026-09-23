@@ -572,6 +572,43 @@ test('BMOVE: moveGroupUndo는 기록에 있는 id들만 되돌리고, 그 사이
   const skip=f.store.moveGroupUndo(['u1','없는-id'],'결제 리뉴얼','IO-48501','IO-48501 · 결제 리뉴얼');
   assert.deepEqual(skip,{restored:0,skipped:2});
 });
+// 최종 QA에서 나온 반쪽 되돌리기: 옮긴 뒤 그 에픽의 별칭을 바꾸면 표시 이름이 다시 지어지는데,
+// 예전 undo는 "옮길 때의 이름과 같을 때만" 되돌려서 bucket만 돌아오고 이름은 지라 쪽으로 남았다.
+test('BMOVE: 옮긴 뒤 별칭을 바꿔도(지웠어도) 되돌리기는 group·evidence·bucket을 전부 원래 이름으로 돌린다',t=>{
+  const f=fixture(t);
+  const file=path.join(f.directory,'.report-drafts.json');
+  const state={schema:1,weeks:{'2026-09-14':{rows:[
+    {id:'v1',heading:'완료한 일',group:'결제 리뉴얼',bucket:'group:결제 리뉴얼:완료한 일:정산',text:'정산 배치 검토함',sourceIds:['x1'],
+      evidence:[{id:'x1',label:'결제 리뉴얼'}],locked:true,excluded:false},
+    {id:'v2',heading:'진행중',group:'결제 리뉴얼',bucket:'group:결제 리뉴얼:진행중:API',text:'API 작업\nAPI 검토',sourceIds:['x3','x4'],
+      evidence:[{id:'x3',label:'결제 리뉴얼'}],locked:true,excluded:false,
+      parts:[
+        {id:'q1',heading:'진행중',group:'결제 리뉴얼',bucket:'group:결제 리뉴얼:진행중:API',text:'API 작업',sourceIds:['x3'],evidence:[{id:'x3',label:'결제 리뉴얼'}],locked:true,excluded:false},
+      ]},
+  ],updatedAt:'2026-09-20T00:00:00.000Z'}}};
+  fs.writeFileSync(file,JSON.stringify(state,null,2));
+
+  const ids=f.store.moveGroup('결제 리뉴얼','IO-48501','IO-48501 · 결제 리뉴얼');
+  assert.deepEqual(ids,['v1','v2']);
+  // 옮긴 뒤 별칭을 지었다가 다시 지웠다 — 표시 이름은 그때마다 `IO-48501 · …`로 다시 지어진다.
+  assert.equal(f.store.relabelProject('jira:IO-48501:','IO-48501 · 결제 리뉴얼','IO-48501 · 새 별칭'),3,'묶기 전 문장까지 센다');
+  assert.equal(f.store.relabelProject('jira:IO-48501:','IO-48501 · 새 별칭','IO-48501 · 지라가 준 요약'),3);
+
+  const result=f.store.moveGroupUndo(ids,'결제 리뉴얼','IO-48501','IO-48501 · 결제 리뉴얼');
+  assert.deepEqual(result,{restored:2,skipped:0});
+  const rows=JSON.parse(fs.readFileSync(file,'utf8')).weeks['2026-09-14'].rows;
+  const v1=rows.find(row=>row.id==='v1');
+  assert.equal(v1.group,'결제 리뉴얼','이름이 그 사이 바뀌었어도 bucket으로 짝을 찾아 되돌린다');
+  assert.equal(v1.bucket,'group:결제 리뉴얼:완료한 일:정산');
+  assert.equal(v1.evidence[0].label,'결제 리뉴얼');
+  const v2=rows.find(row=>row.id==='v2');
+  assert.equal(v2.group,'결제 리뉴얼');
+  assert.equal(v2.bucket,'group:결제 리뉴얼:진행중:API');
+  assert.equal(v2.parts[0].group,'결제 리뉴얼','묶기 전 문장도 같은 규칙으로 따라간다');
+  assert.equal(v2.parts[0].bucket,'group:결제 리뉴얼:진행중:API');
+  assert.equal(v2.parts[0].evidence[0].label,'결제 리뉴얼');
+  assert.equal(v1.text,'정산 배치 검토함','문장은 손대지 않는다');
+});
 // BFOLD — 여러 문장을 골라 사람이 지은 요약 한 줄(`manual`) 아래로 모으고(`fold`), 그 부모를 접고
 // 펼치고(`setFolded`) 풀 수 있다(`unfold`). 글자는 합치지 않는다 — nest처럼 각 문장은 독립으로 남는다.
 test('한 줄로 모으기 검증: 최소 개수·같은 상태·제외 안 함·중첩 금지·요약 글 길이',t=>{

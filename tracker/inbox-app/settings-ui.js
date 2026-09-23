@@ -436,6 +436,11 @@ function automationRow(a) {
 // 저장한 뒤에는 화면 어디에도 다시 나오지 않는다(서버도 있음/없음만 알려 준다).
 // 저장은 `POST /api/integrations/save` 하나뿐이고, 그 라우트만 workspace.config.json을 쓴다.
 const JIRA_TOKEN_URL = 'https://id.atlassian.com/manage-profile/security/api-tokens';
+// 새로 설치하면 `workspace.config.example.json`의 예시값이 그대로 들어 있다. 그 글자를 입력칸에
+// 미리 채우면 사람이 자기 주소를 적은 줄 알고 `연결`을 눌러 실패한다 — 빈 칸으로 보고 예시는
+// placeholder로만 보여 준다.
+const SETTINGS_EXAMPLE_VALUES = ['https://내회사.atlassian.net', '나@내회사.com'];
+const settingsRealValue = value => (SETTINGS_EXAMPLE_VALUES.includes(String(value || '').trim()) ? '' : value);
 const SETTINGS_SLACK_MORE = [['align', '맞춰야 할 것'], ['someday', '언젠가 할 것'], ['waiting', '기다리는 것']];
 const SETTINGS_NOTES_MODES = [['tiro', '티로'], ['manual', '직접 옮겨서'], ['other', '다른 것']];
 
@@ -578,8 +583,8 @@ function settingsJiraRow(data) {
     return row;
   }
 
-  const site = settingsField('지라 주소', { placeholder: 'https://회사.atlassian.net', value: jira.siteUrl });
-  const email = settingsField('이메일', { placeholder: '나@회사.com', value: jira.email });
+  const site = settingsField('지라 주소', { placeholder: 'https://회사.atlassian.net', value: settingsRealValue(jira.siteUrl) });
+  const email = settingsField('이메일', { placeholder: '나@회사.com', value: settingsRealValue(jira.email) });
   const token = settingsField('API 토큰', { type: 'password', placeholder: '붙여 넣기' });
   const link = document.createElement('a');
   link.className = 'd-ablink';

@@ -1443,7 +1443,10 @@ function renderCalendar(calendar) {
   if (!events.length) {
     const empty = document.createElement('div');
     empty.className = 'd-rempty';
-    empty.textContent = calendar?.stale || !calendar?.lastSync ? '오늘 일정을 가져오지 못했어요.' : '오늘은 미팅이 없어요.';
+    // 캘린더를 아예 끈 사람에게 "가져오지 못했어요"는 고장난 것처럼 읽힌다 — 켜는 자리를 알려 준다.
+    empty.textContent = calendar?.used === false
+      ? '캘린더를 켜면 오늘 일정이 보여요(설정 > 연동).'
+      : calendar?.stale || !calendar?.lastSync ? '오늘 일정을 가져오지 못했어요.' : '오늘은 미팅이 없어요.';
     list.appendChild(empty);
     return;
   }

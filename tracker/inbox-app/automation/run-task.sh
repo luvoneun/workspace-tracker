@@ -53,6 +53,39 @@ CLAUDE="${CLAUDE_BIN:-$(command -v claude || echo "$HOME/.local/bin/claude")}"
 mkdir -p "$LOG_DIR"
 cd "$WORKSPACE" || exit 1
 
+# 앱의 연동 탭에서 끈 연동은 여기서 멈춘다 — 껐는데 자동화가 계속 도는 일이 없게.
+# 칸이 없으면 켜진 것으로 본다(서버 USES·setup.sh와 같은 규칙).
+# 설정을 읽지 못하면 예전처럼 그냥 진행한다 — 설정 파일 하나를 못 읽는다고 수집이 통째로 멎으면 안 된다.
+# 읽기는 python3가 아니라 node로 한다(slack-capture.sh와 같은 이유: 보호 폴더 밑에서 python3가
+# 조용히 막히는 경우가 있었다).
+NODE="$(command -v node)"
+CONFIG="${WORKSPACE_CONFIG:-$WORKSPACE/workspace.config.json}"
+integration_off() {
+  local key="$1"
+  [ -n "$key" ] || return 1
+  [ -n "$NODE" ] || return 1
+  [ "$("$NODE" -e '
+const fs = require("fs");
+try {
+  const config = JSON.parse(fs.readFileSync(process.argv[1], "utf-8"));
+  const uses = (config && config.integrations) || {};
+  process.stdout.write(uses[process.argv[2]] === false ? "off" : "on");
+} catch (error) { process.stdout.write("on"); }
+' "$CONFIG" "$key" 2>/dev/null)" = "off" ]
+}
+
+# 작업 이름 → 연동 칸. 여기 없는 이름은 검사하지 않고 예전 그대로 돈다.
+case "$NAME" in
+  calendar-sync) INTEGRATION_KEY="calendar" ;;
+  jira-sync)     INTEGRATION_KEY="jira" ;;
+  tiro-sync)     INTEGRATION_KEY="tiro" ;;
+  *)             INTEGRATION_KEY="" ;;
+esac
+if integration_off "$INTEGRATION_KEY"; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S') $NAME 연동이 꺼져 있어 건너뛰어요" >> "$LOG"
+  exit 0
+fi
+
 # 프로세스 그룹에 좀비가 아닌 프로세스가 아직 남아 있는지 본다.
 # (죽은 뒤 아직 수거되지 않은 좀비는 "살아 있음"으로 세면 안 된다)
 group_alive() {

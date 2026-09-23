@@ -16,6 +16,10 @@ const { atomicWrite } = require('./safe-storage');
 
 const SLACK_CHANNEL_KEYS = ['todo', 'align', 'someday', 'waiting'];
 const SLACK_TIMEOUT_MS = 8000;
+// 예시 설정(`workspace.config.example.json`)이 채널 칸에 넣어 둔 자리표시자. 사람이 채우지 않은
+// 자리라 **채널이 없는 것과 같이 본다** — 남겨 두면 setup.sh가 `채널 ID를 아직 채우지 않았어요`로
+// 멈추고, 연동 탭 요약도 있지도 않은 채널을 `외 N개`로 센다.
+const PLACEHOLDER_CHANNEL_ID = '여기에_채널ID';
 
 const MESSAGE = {
   jiraSite: '지라 주소는 https://로 시작해야 해요',
@@ -37,22 +41,43 @@ function bad(message) {
 
 const trimmed = value => (typeof value === 'string' ? value.trim() : '');
 const expandHome = value => String(value || '').replace(/^~(?=\/|$)/, os.homedir());
+// 자리표시자는 "빈 칸"으로 읽는다.
+const realChannelId = value => (trimmed(value) === PLACEHOLDER_CHANNEL_ID ? '' : trimmed(value));
 
 // 토큰을 둘 자리. 테스트·픽스처는 `WORKSPACE_TOKEN_DIR`로 임시 폴더를 끼워 실제 `~/.config`를
 // 건드리지 않는다. 기본 자리일 때만 config에 `~/…` 꼴로 적는다(사람이 읽기 좋게).
+// 임시 폴더를 끼웠으면(`custom`) config에 적힌 경로가 어디를 가리키든 **그 폴더 안만** 본다 —
+// 픽스처·테스트가 실제 `~/.config`의 토큰에 닿지 않게 하는 울타리다.
 function tokenPaths(tokenDir) {
   const custom = trimmed(tokenDir || process.env.WORKSPACE_TOKEN_DIR);
   const dir = custom || path.join(os.homedir(), '.config');
   const shape = name => (custom ? path.join(dir, name) : `~/.config/${name}`);
   return {
-    dir,
+    dir, custom: !!custom,
     jira: { file: path.join(dir, 'workspace-jira-token'), config: shape('workspace-jira-token') },
     slack: { file: path.join(dir, 'workspace-slack-token'), config: shape('workspace-slack-token') },
   };
 }
 
-function hasToken(file) {
-  try { return String(fs.readFileSync(expandHome(file), 'utf8') || '').trim().length > 0; } catch { return false; }
+function readToken(file) {
+  if (!trimmed(file)) return '';
+  try { return String(fs.readFileSync(expandHome(file), 'utf8') || '').trim(); } catch { return ''; }
+}
+
+// 토큰을 찾을 자리를 차례대로: config에 적힌 경로(사람이 옮겨 둔 자리) → 기본 자리.
+// 임시 폴더를 끼웠으면 그 폴더 안 파일 하나만 본다.
+function tokenPlaces(paths, key, configured) {
+  if (paths.custom) return [paths[key].file];
+  return [...new Set([trimmed(configured), paths[key].file].filter(Boolean))];
+}
+
+// 이미 있는 토큰과 "config에 적어 둘 경로"를 함께 돌려준다. 없으면 null.
+function findToken(paths, key, configured) {
+  for (const place of tokenPlaces(paths, key, configured)) {
+    const value = readToken(place);
+    if (value) return { value, config: place === paths[key].file ? paths[key].config : place };
+  }
+  return null;
 }
 
 // 토큰 파일은 사람만 읽을 수 있게 둔다(0600). 이미 있던 파일의 권한도 다시 조인다.
@@ -119,6 +144,8 @@ function withSlack(config, { enabled, workspaceUrl, tokenFile, channels }) {
     if (channels) {
       const merged = clone(slack.channels);
       Object.entries(channels).forEach(([key, value]) => { merged[key] = { ...clone(merged[key]), ...value }; });
+      // 사람이 채우지 않은 칸(빈 id·예시 자리표시자)은 아예 지운다 — 이미 연결된 진짜 채널만 남는다.
+      Object.keys(merged).forEach((key) => { if (!realChannelId(clone(merged[key]).id)) delete merged[key]; });
       slack.channels = merged;
     }
     next.slack = slack;
@@ -157,15 +184,17 @@ function readIntegrations(config, { tokenDir, claude } = {}) {
       enabled: on('jira'),
       siteUrl: trimmed(jira.siteUrl),
       email: trimmed(jira.email),
-      hasToken: hasToken(jira.tokenFile || paths.jira.config),
+      hasToken: !!findToken(paths, 'jira', jira.tokenFile),
     },
     slack: {
       enabled: on('slack'),
       workspaceUrl: trimmed(slack.workspaceUrl),
-      hasToken: hasToken(slack.tokenFile || paths.slack.config),
+      hasToken: !!findToken(paths, 'slack', slack.tokenFile),
       channels: Object.fromEntries(SLACK_CHANNEL_KEYS.map((key) => {
         const entry = clone(channels[key]);
-        return [key, { id: trimmed(entry.id), name: trimmed(entry.name) }];
+        // 예시 자리표시자가 남아 있으면 "연결 안 된 칸"으로 본다(이름도 같이 비운다).
+        const id = realChannelId(entry.id);
+        return [key, { id, name: id ? trimmed(entry.name) : '' }];
       })),
     },
     calendar: { enabled: on('calendar') },
@@ -198,12 +227,17 @@ async function saveIntegrations({
       const token = trimmed(body.jira.token);
       if (!/^https:\/\/[^\s/?#]+$/.test(siteUrl)) throw bad(MESSAGE.jiraSite);
       if (!email) throw bad(MESSAGE.jiraEmail);
-      if (!token && !hasToken(paths.jira.file)) throw bad(MESSAGE.jiraToken);
-      const secret = token || String(fs.readFileSync(paths.jira.file, 'utf8')).trim();
+      // 토큰 칸을 비워 두고 저장하면 이미 있는 토큰을 그대로 쓴다 — config에 적힌 경로(사람이 옮겨
+      // 둔 자리)를 먼저 보고, 없으면 기본 자리를 본다(readIntegrations의 hasToken과 같은 규칙).
+      const saved = token ? null : findToken(paths, 'jira', clone(config.jira).tokenFile);
+      if (!token && !saved) throw bad(MESSAGE.jiraToken);
+      const secret = token || saved.value;
       const account = await (jiraCheck || (() => { throw bad(MESSAGE.jiraAuth); }))({ siteUrl, email, token: secret });
       if (!account || !account.ok) throw bad(MESSAGE.jiraAuth);
       if (token) pending.push([paths.jira.file, token]);
-      config = withJira(config, { enabled: true, siteUrl, email, tokenFile: paths.jira.config });
+      // 새 토큰은 기본 자리에 쓰고 config도 그쪽으로 적는다. 비워 두고 저장했으면 지금 토큰이
+      // 있는 자리를 그대로 적는다(사람이 옮겨 둔 경로를 기본 경로로 덮어쓰지 않는다).
+      config = withJira(config, { enabled: true, siteUrl, email, tokenFile: token ? paths.jira.config : saved.config });
       result.jira = { displayName: String(account.displayName || '') };
     }
   }
@@ -214,12 +248,14 @@ async function saveIntegrations({
       config = withSlack(config, { enabled: false });
     } else {
       const token = trimmed(body.slack.token);
-      if (!token && !hasToken(paths.slack.file)) throw bad(MESSAGE.slackToken);
-      const secret = token || String(fs.readFileSync(paths.slack.file, 'utf8')).trim();
+      const saved = token ? null : findToken(paths, 'slack', clone(config.slack).tokenFile);
+      if (!token && !saved) throw bad(MESSAGE.slackToken);
+      const secret = token || saved.value;
       const asked = body.slack.channels && typeof body.slack.channels === 'object' ? body.slack.channels : {};
       const wanted = SLACK_CHANNEL_KEYS.filter(key => trimmed(asked[key]));
       // `todo` 채널은 슬랙 수집의 기본 자리라 하나는 있어야 한다(이미 저장돼 있으면 그대로 쓴다).
-      const savedTodo = trimmed(clone(clone(clone(config.slack).channels).todo).id);
+      // 예시 자리표시자는 저장된 것으로 세지 않는다.
+      const savedTodo = realChannelId(clone(clone(clone(config.slack).channels).todo).id);
       if (!wanted.includes('todo') && !savedTodo) throw bad(MESSAGE.slackChannel);
       const channels = {};
       result.slack = { channels: {} };
@@ -233,7 +269,7 @@ async function saveIntegrations({
       if (token) pending.push([paths.slack.file, token]);
       const workspaceUrl = trimmed(body.slack.workspaceUrl);
       config = withSlack(config, {
-        enabled: true, tokenFile: paths.slack.config, channels,
+        enabled: true, tokenFile: token ? paths.slack.config : saved.config, channels,
         ...(workspaceUrl ? { workspaceUrl } : {}),
       });
     }

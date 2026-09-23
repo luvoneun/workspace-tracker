@@ -177,10 +177,13 @@ if [ -n "$CHANGED" ]; then
     y|Y)
       STAMP="$(date '+%Y-%m-%d-%H%M%S')"
       # 지금 고친 내용을 커밋 하나로 만들어 가지로 남긴다(작업 폴더는 건드리지 않는 방법).
-      SAVED="$(git stash create 2>/dev/null)"
-      if [ -n "$SAVED" ]; then
-        git branch "local-changes-$STAMP" "$SAVED" >/dev/null 2>&1 && ok "고친 내용을 local-changes-$STAMP 가지에 담아 뒀어요"
-      fi
+      # 이게 실패하면(빈 값) 고친 내용이 어디에도 남아 있지 않다 — 그 상태로 되돌리면 그대로 사라지므로
+      # 지우지 않고 멈춘다. 명령은 테스트에서만 바꿔 끼운다(빈 값이 나오는 상황을 흉내 내려고).
+      SAVED="$(${WORKSPACE_STASH_CREATE:-git stash create} 2>/dev/null)"
+      [ -n "$SAVED" ] || die "고친 내용을 보관하지 못해 멈췄어요 — 고친 파일을 직접 정리한 뒤 다시 실행해 주세요"
+      git branch "local-changes-$STAMP" "$SAVED" >/dev/null 2>&1 \
+        || die "고친 내용을 보관하지 못해 멈췄어요 — 고친 파일을 직접 정리한 뒤 다시 실행해 주세요"
+      ok "고친 내용을 local-changes-$STAMP 가지에 담아 뒀어요"
       git checkout -- . || die "고친 파일을 되돌리지 못했어요."
       ok "고친 파일을 원래대로 돌렸어요"
       ;;

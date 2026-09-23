@@ -814,6 +814,48 @@ test('slack-capture.sh 잠금은 살아 있는 실행만 존중하고 죽은 잠
   fs.rmSync(home, { recursive: true, force: true });
 });
 
+// 앱의 연동 탭에서 껐는데 자동화가 계속 도는 문제(최종 QA). 두 스크립트 모두 **시작하자마자**
+// 설정(`integrations.<키>`)을 node로 읽고, 꺼져 있으면 로그 한 줄만 남기고 끝낸다.
+test('연동을 끄면 run-task.sh·slack-capture.sh는 claude를 부르지 않고 건너뛴다', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-intg-off-'));
+  const logs = path.join(home, 'logs');
+  const called = path.join(home, 'called.txt');
+  const claude = path.join(home, 'fake-claude.sh');
+  writeExec(claude, `#!/bin/bash\necho "불렸음" >> ${JSON.stringify(called)}\n`);
+  const config = path.join(home, 'workspace.config.json');
+  const env = {
+    WORKSPACE_DIR: home, WORKSPACE_CONFIG: config, AUTOMATION_LOG_DIR: logs,
+    CLAUDE_BIN: claude, SLACK_CAPTURE_IGNORE_HOURS: '1',
+  };
+  const logOf = name => fs.readFileSync(path.join(logs, `${name}.log`), 'utf8');
+  const task = name => runScript(automationScript('run-task.sh'), [name, '프롬프트', 'Read'], env);
+
+  // 1) 껐으면 곧바로 끝난다 — 시작 줄도 남기지 않고 claude도 부르지 않는다
+  fs.writeFileSync(config, JSON.stringify({ integrations: { jira: false, calendar: false, tiro: false, slack: false } }));
+  for (const name of ['jira-sync', 'calendar-sync', 'tiro-sync']) {
+    assert.equal(task(name).status, 0, `${name}은 꺼져 있으면 조용히 끝난다`);
+    assert.match(logOf(name), new RegExp(`${name} 연동이 꺼져 있어 건너뛰어요`));
+    assert.doesNotMatch(logOf(name), /시작$/m);
+  }
+  assert.equal(runScript(automationScript('slack-capture.sh'), [], env).status, 0);
+  assert.match(logOf('slack-capture'), /슬랙 수집이 꺼져 있어 건너뛰어요/);
+  assert.equal(fs.existsSync(called), false, '꺼진 자동화는 claude를 부르지 않는다');
+
+  // 2) 표에 없는 작업 이름은 검사하지 않고 예전 그대로 돈다
+  assert.equal(task('envok').status, 0);
+  assert.match(logOf('envok'), /envok 종료 \(exit 0\)/);
+  assert.equal(fs.readFileSync(called, 'utf8').trim(), '불렸음');
+
+  // 3) 칸이 없으면 켜진 것이다(옛 설정 파일) — 설정이 아예 없어도 같다
+  fs.writeFileSync(config, JSON.stringify({ integrations: { slack: true } }));
+  assert.equal(task('jira-sync').status, 0);
+  assert.match(logOf('jira-sync'), /jira-sync 종료 \(exit 0\)/);
+  fs.rmSync(config, { force: true });
+  assert.equal(task('calendar-sync').status, 0);
+  assert.match(logOf('calendar-sync'), /calendar-sync 종료 \(exit 0\)/, '설정을 못 읽으면 예전처럼 그냥 돈다');
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
 test('import-record.js는 JSON을 명령줄 인자로도, 표준 입력으로도 받는다', async () => {
   const script = path.join(__dirname, 'import-record.js');
   const env = { ...process.env, WORKSPACE_PORT: String(server.address().port), WORKSPACE_CONFIG: path.join(directory, 'absent.config.json') };
@@ -3899,10 +3941,11 @@ function updateFixture(t, { channel = 'stable' } = {}) {
   fs.writeFileSync(path.join(clone, 'tracker', 'tasks.md'), '# Tasks\n- 지켜야 할 업무\n');
   fs.writeFileSync(path.join(clone, 'tracker', '.workflow.json'), '{"items":{},"meetings":{}}');
 
-  const run = (args = []) => spawnSync('/bin/bash', [path.join(clone, 'update.sh'), ...args], {
-    cwd: clone, encoding: 'utf8', timeout: 120000,
+  // `extra`는 물음에 답을 넣거나(input) 환경을 하나 더 끼울 때만 쓴다 — 주지 않으면 예전 그대로다.
+  const run = (args = [], extra = {}) => spawnSync('/bin/bash', [path.join(clone, 'update.sh'), ...args], {
+    cwd: clone, encoding: 'utf8', timeout: 120000, input: extra.input,
     // 이 테스트 파일이 쓰는 WORKSPACE_DATA_DIR이 새어 들어가면 안 된다 — 복사본 안의 tracker/를 보게 비운다.
-    env: { ...gitEnv, WORKSPACE_DATA_DIR: '', HOME: root, PATH: `${bin}:${process.env.PATH}`, WORKSPACE_BACKUP_DIR: backups, WORKSPACE_INSTALL_DIR: path.join(root, 'install') },
+    env: { ...gitEnv, WORKSPACE_DATA_DIR: '', HOME: root, PATH: `${bin}:${process.env.PATH}`, WORKSPACE_BACKUP_DIR: backups, WORKSPACE_INSTALL_DIR: path.join(root, 'install'), ...(extra.env || {}) },
   });
   const dated = () => (fs.existsSync(backups) ? fs.readdirSync(backups) : []).filter(name => /^\d{4}-\d{2}-\d{2}-\d{4}$/.test(name)).sort();
   const versionOf = () => fs.readFileSync(path.join(clone, 'VERSION'), 'utf8').trim();
@@ -3962,6 +4005,29 @@ test('update.sh --rollback은 이전 코드와 백업 데이터를 함께 되돌
   assert.equal(fix.versionOf(), '1.0.0', '코드는 이전 자리로 돌아간다');
   assert.match(fix.tasks(), /지켜야 할 업무/, '데이터도 백업에서 돌아온다');
   assert.equal(fs.existsSync(path.join(fix.clone, '.workspace-last-good')), false, '두 번 되돌리지 않는다');
+});
+
+// 고친 내용을 보관하지 못했는데 되돌리면 그 내용이 그대로 사라진다(최종 QA). 보관에 실패하면
+// 지우지 않고 멈춘다. `git stash create`가 빈 값을 주는 상황은 명령을 바꿔 끼워 흉내 낸다.
+test('update.sh: 고친 내용을 보관하지 못하면 되돌리지 않고 멈춘다', { skip: !gitReady }, (t) => {
+  const fix = updateFixture(t);
+  fs.writeFileSync(path.join(fix.clone, 'ui.css'), '/* 내가 고친 것 */\n');
+
+  // `되돌리고 받을까요? [y]`에 y라고 답하는데, 보관이 실패한다
+  const result = fix.run([], { input: 'y\n', env: { WORKSPACE_STASH_CREATE: 'true' } });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stdout, /고친 내용을 보관하지 못해 멈췄어요/);
+  assert.equal(fs.readFileSync(path.join(fix.clone, 'ui.css'), 'utf8'), '/* 내가 고친 것 */\n', '고친 내용은 지워지지 않는다');
+  assert.equal(fix.versionOf(), '1.0.0', '멈췄으니 새 버전을 받지도 않는다');
+  assert.match(fix.tasks(), /지켜야 할 업무/);
+
+  // 보관이 되면 예전처럼 가지에 담고 되돌린 뒤 이어 간다
+  const ok = fix.run([], { input: 'y\n' });
+  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+  assert.match(ok.stdout, /고친 내용을 local-changes-[0-9-]+ 가지에 담아 뒀어요/);
+  assert.equal(fix.versionOf(), '1.1.0');
+  assert.doesNotMatch(fs.readFileSync(path.join(fix.clone, 'ui.css'), 'utf8'), /내가 고친 것/);
+  assert.match(runGit(fix.clone, ['branch', '--list', 'local-changes-*']).stdout, /local-changes-/, '고친 내용은 가지로 남아 있다');
 });
 
 test('update.sh: main 갈래는 태그가 아니라 origin/main을 앞으로만 따라간다', { skip: !gitReady }, (t) => {
@@ -4235,4 +4301,170 @@ test('연동 라우트: 지금 상태는 토큰 값을 싣지 않고, 저장은 
   const diagnostics = await (await fetch(app.base + '/api/about/diagnostics')).json();
   assert.equal(diagnostics.found, false);
   assert.deepEqual(diagnostics.lines, []);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 최종 QA에서 나온 것들 — 예시 자리표시자 채널 · 토큰 경로 · 토큰 폴더 울타리 · setup.sh의 설정 읽기
+
+test('연동 저장: 사람이 채우지 않은 예시 채널 칸은 config에서 지우고, 진짜 채널은 지킨다', async (t) => {
+  const example = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'workspace.config.example.json'), 'utf8'));
+  // 예시 설정은 네 채널이 모두 자리표시자다 — 화면에서는 "연결 안 된 칸"으로 읽힌다.
+  const fresh = integrationsStore.readIntegrations(example, { tokenDir: fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-int-')) });
+  assert.deepEqual(fresh.slack.channels.todo, { id: '', name: '' }, '자리표시자는 채널이 없는 것과 같다');
+  assert.equal(Object.values(fresh.slack.channels).filter(channel => channel.id).length, 0, '연동 탭의 `외 N개`가 거짓말하지 않는다');
+
+  const fix = integrationsFixture(t, example);
+  await integrationsStore.saveIntegrations({
+    configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir,
+    body: { slack: { enabled: true, token: 'slack-secret', channels: { todo: 'C0TODO11' } } },
+    slackCheck: async () => ({ name: 'my-todo', isPrivate: true }),
+  });
+  const saved = fix.read();
+  assert.deepEqual(Object.keys(saved.slack.channels), ['todo'], '채우지 않은 세 칸은 사라진다');
+  assert.deepEqual(saved.slack.channels.todo, { id: 'C0TODO11', name: '#my-todo' });
+  // setup.sh는 이 글자를 찾으면 설치를 멈춘다 — 이제 아무것도 찾지 못한다.
+  assert.ok(!fs.readFileSync(fix.configPath, 'utf8').includes('여기에_채널ID'));
+
+  // 이미 연결된 진짜 채널은 그대로 남는다
+  const kept = integrationsFixture(t, {
+    slack: {
+      channels: {
+        todo: { id: 'C0TODO11', name: '#my-todo' },
+        align: { id: 'C0ALIGN1', name: '#my-align' },
+        someday: { id: 'C0SOME11', name: '#my-someday' },
+      },
+    },
+  });
+  await integrationsStore.saveIntegrations({
+    configPath: kept.configPath, current: kept.read(), tokenDir: kept.tokenDir,
+    body: { slack: { enabled: true, token: 'slack-secret', channels: { waiting: 'C0WAIT11' } } },
+    slackCheck: async () => ({ name: 'my-waiting', isPrivate: true }),
+  });
+  assert.deepEqual(Object.keys(kept.read().slack.channels).sort(), ['align', 'someday', 'todo', 'waiting']);
+});
+
+test('연동 저장: 토큰 칸을 비우면 config에 적힌 경로의 토큰을 쓰고 그 경로를 그대로 둔다', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-token-path-'));
+  // `~`가 이 임시 폴더를 가리키게 해서 실제 `~/.config`에는 닿지 않는다.
+  const realHome = process.env.HOME;
+  const realTokenDir = process.env.WORKSPACE_TOKEN_DIR;
+  process.env.HOME = home;
+  delete process.env.WORKSPACE_TOKEN_DIR;
+  t.after(() => {
+    process.env.HOME = realHome;
+    if (realTokenDir === undefined) delete process.env.WORKSPACE_TOKEN_DIR;
+    else process.env.WORKSPACE_TOKEN_DIR = realTokenDir;
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  const moved = path.join(home, '내가-옮겨둔', 'jira-token');
+  fs.mkdirSync(path.dirname(moved), { recursive: true });
+  fs.writeFileSync(moved, '옮겨둔-토큰\n', { mode: 0o600 });
+  const configPath = path.join(home, 'workspace.config.json');
+  const current = {
+    integrations: { jira: false },
+    jira: { siteUrl: 'https://회사.atlassian.net', email: '나@회사.com', tokenFile: '~/내가-옮겨둔/jira-token' },
+  };
+  fs.writeFileSync(configPath, JSON.stringify(current, null, 2));
+
+  const seen = [];
+  await integrationsStore.saveIntegrations({
+    configPath, current,
+    body: { jira: { enabled: true, siteUrl: 'https://회사.atlassian.net', email: '나@회사.com', token: '' } },
+    jiraCheck: async ({ token }) => { seen.push(token); return { ok: true, displayName: '하늘' }; },
+  });
+  assert.deepEqual(seen, ['옮겨둔-토큰'], '토큰 칸이 비면 config에 적힌 자리에서 찾는다');
+  const saved = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  assert.equal(saved.jira.tokenFile, '~/내가-옮겨둔/jira-token', '사람이 옮겨 둔 경로를 기본 경로로 덮어쓰지 않는다');
+  assert.equal(saved.integrations.jira, true);
+  assert.equal(fs.existsSync(path.join(home, '.config', 'workspace-jira-token')), false, '기본 자리에 빈 파일을 만들지 않는다');
+  assert.equal(integrationsStore.readIntegrations(saved).jira.hasToken, true, '화면도 같은 규칙으로 본다');
+
+  // 새 토큰을 붙였을 때는 지금처럼 기본 자리에 쓰고 config도 그쪽으로 바꾼다
+  await integrationsStore.saveIntegrations({
+    configPath, current: saved,
+    body: { jira: { enabled: true, siteUrl: 'https://회사.atlassian.net', email: '나@회사.com', token: '새-토큰' } },
+    jiraCheck: async () => ({ ok: true, displayName: '하늘' }),
+  });
+  const again = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  assert.equal(again.jira.tokenFile, '~/.config/workspace-jira-token');
+  assert.equal(fs.readFileSync(path.join(home, '.config', 'workspace-jira-token'), 'utf8').trim(), '새-토큰');
+});
+
+test('연동: 토큰 폴더를 끼우면 config가 어디를 가리키든 그 폴더 안만 본다', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-token-fence-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const outside = path.join(home, 'outside-token');
+  fs.writeFileSync(outside, '바깥-토큰\n');
+  const tokenDir = path.join(home, 'tokens');
+  fs.mkdirSync(tokenDir);
+  const config = {
+    integrations: { jira: true, slack: true },
+    jira: { siteUrl: 'https://회사.atlassian.net', email: '나@회사.com', tokenFile: outside },
+    slack: { tokenFile: outside, channels: { todo: { id: 'C0TODO11', name: '#my-todo' } } },
+  };
+
+  const fenced = integrationsStore.readIntegrations(config, { tokenDir });
+  assert.equal(fenced.jira.hasToken, false, '끼운 폴더 밖의 파일은 보지 않는다');
+  assert.equal(fenced.slack.hasToken, false);
+  fs.writeFileSync(path.join(tokenDir, 'workspace-jira-token'), '안쪽-토큰\n', { mode: 0o600 });
+  assert.equal(integrationsStore.readIntegrations(config, { tokenDir }).jira.hasToken, true, '그 폴더 안 파일은 본다');
+
+  // 저장도 같은 울타리를 쓴다
+  const configPath = path.join(home, 'workspace.config.json');
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+  const seen = [];
+  await integrationsStore.saveIntegrations({
+    configPath, current: config, tokenDir,
+    body: { jira: { enabled: true, siteUrl: 'https://회사.atlassian.net', email: '나@회사.com', token: '' } },
+    jiraCheck: async ({ token }) => { seen.push(token); return { ok: true, displayName: '하늘' }; },
+  });
+  assert.deepEqual(seen, ['안쪽-토큰']);
+  assert.equal(JSON.parse(fs.readFileSync(configPath, 'utf8')).jira.tokenFile, path.join(tokenDir, 'workspace-jira-token'));
+
+  // 그 폴더가 비면 바깥에 토큰이 있어도 "붙여 넣어 주세요"다
+  fs.rmSync(path.join(tokenDir, 'workspace-jira-token'));
+  await assert.rejects(() => integrationsStore.saveIntegrations({
+    configPath, current: config, tokenDir,
+    body: { jira: { enabled: true, siteUrl: 'https://회사.atlassian.net', email: '나@회사.com', token: '' } },
+    jiraCheck: async () => ({ ok: true, displayName: '하늘' }),
+  }), /API 토큰을 붙여 넣어 주세요/);
+});
+
+// setup.sh는 실행하지 않는다(실제 launchd·홈 폴더를 건드린다) — 설정을 읽는 그 조각만 꺼내 돌린다.
+test('setup.sh: 설정은 python3가 아니라 node로 읽고, 못 읽으면 에이전트를 내리기 전에 멈춘다', () => {
+  const script = fs.readFileSync(path.join(REPO_ROOT, 'setup.sh'), 'utf8');
+  assert.ok(!script.includes('json.load(open('), '설정을 python3로 읽던 자리는 남아 있지 않다');
+  for (const key of ['slack', 'calendar', 'jira', 'tiro']) {
+    assert.ok(script.includes(`config_read uses ${key})`) && script.includes('|| die "$CONFIG_UNREADABLE"'),
+      `${key}는 읽기에 실패하면 멈춘다(꺼진 것으로 읽지 않는다)`);
+  }
+  const reader = script.split("CONFIG_READER='")[1].split("\n'\n")[0];
+
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-setup-read-'));
+  const config = path.join(home, 'workspace.config.json');
+  const read = (...args) => spawnSync(process.execPath, ['-e', reader, config, ...args], { encoding: 'utf8' });
+
+  fs.writeFileSync(config, JSON.stringify({
+    integrations: { slack: false, calendar: true },
+    server: { port: 4399, chromeProfile: 'Profile 1' },
+    slack: { tokenFile: '~/.config/workspace-slack-token' },
+  }));
+  assert.equal(read('uses', 'slack').stdout, 'no');
+  assert.equal(read('uses', 'calendar').stdout, 'yes');
+  assert.equal(read('uses', 'jira').stdout, 'yes', '칸이 없으면 켜진 것이다(서버 USES와 같은 규칙)');
+  assert.equal(read('server', 'port').stdout, '4399');
+  assert.equal(read('server', 'extraHost').stdout, '', '없는 칸은 빈 값이다');
+  assert.equal(read('chromeProfile').stdout, 'Profile 1');
+  assert.equal(read('slackToken').stdout, path.join(os.homedir(), '.config', 'workspace-slack-token'));
+
+  // 이 값은 쉘 명령에 들어간다 — 폴더 이름에 쓰이는 글자만 통과한다
+  fs.writeFileSync(config, JSON.stringify({ server: { chromeProfile: "'; rm -rf ~" } }));
+  assert.equal(read('chromeProfile').stdout, '');
+
+  // 깨진 설정은 "빈 값"이 아니라 오류다 — setup.sh는 여기서 멈춘다
+  fs.writeFileSync(config, '{망가짐');
+  assert.notEqual(read('uses', 'slack').status, 0);
+  assert.equal(read('uses', 'slack').stdout, '');
+  fs.rmSync(home, { recursive: true, force: true });
 });
