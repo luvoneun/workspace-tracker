@@ -105,7 +105,7 @@ docs/연동.md  docs/원칙.md   동료용 상세 문서
 ### 검증
 
 ```sh
-cd tracker/inbox-app && node --test server.test.js client.test.js report-drafts.test.js
+cd tracker/inbox-app && node --test --test-concurrency=1 *.test.js
 ```
 
 화면 확인은 `node browser-fixture.js`(4322 포트, 임시 데이터·임시 설정·임시 설치 위치)로 한다.

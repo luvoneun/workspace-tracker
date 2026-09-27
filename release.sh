@@ -45,7 +45,7 @@ ok "작업 폴더 깨끗함"
 git rev-parse "v$NEW" >/dev/null 2>&1 && die "v$NEW 태그가 이미 있어요."
 
 echo "  테스트를 돌려요 (조금 걸려요)"
-( cd "$WORKSPACE/tracker/inbox-app" && node --test server.test.js client.test.js report-drafts.test.js ) || die "테스트가 통과하지 않았어요."
+( cd "$WORKSPACE/tracker/inbox-app" && node --test --test-concurrency=1 *.test.js ) || die "테스트가 통과하지 않았어요."
 ok "테스트 통과"
 
 # VERSION이 이미 그 값이면(첫 릴리스처럼) 커밋할 것이 없다 — 그때는 태그만 단다.

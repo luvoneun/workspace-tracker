@@ -2222,12 +2222,14 @@ function aboutDiagnostics() {
 // ---------- 브라우저로 나가는 화면 파일 ----------
 // 화면 코드가 여러 파일로 나뉘어 있어서 이름을 하나하나 적지 않는다 — `PUBLIC_DIR`의 `*.js`/`*.css`
 // 가운데 아래 차단 규칙에 걸리지 않는 것만 나간다(파일을 더해도 서버를 고칠 필요가 없다).
-// 서버 파일·테스트·픽스처·저장소 코드는 **절대 나가면 안 되므로** 여기서 못 박는다(server.test.js가 고정).
+// 서버 파일·테스트·픽스처·저장소 코드는 **절대 나가면 안 되므로** 여기서 못 박는다(server.core.test.js가 이 목록을 그대로 가져와
+// 확인하고, 화면이 읽지 않는 `*.js`가 목록·패턴에서 빠지면 실패한다 — 새 서버 파일은 여기에 적는다).
 // 인증 예외(publicAsset)와는 다른 이야기다 — 여기 있는 파일도 원격에서는 인증을 거친다.
 const CLIENT_BLOCKED = new Set([
   'server.js', 'safe-storage.js', 'jira-client.js', 'jira-live.js', 'attention-live.js', 'report-drafts.js',
   'task-batch.js', 'slack-history.js', 'import-record.js', 'browser-fixture.js', 'migrate.js',
-  'integrations.js', 'ical.js', 'calendar-live.js', 'personalize.js',
+  'integrations.js', 'ical.js', 'calendar-live.js', 'personalize.js', 'test-support.js',
+  'routes-jira.js', 'routes-integrations.js', 'routes-app.js', 'routes-personalize.js',
 ]);
 function isClientFile(name) {
   if (!/^[A-Za-z0-9][\w.-]*\.(js|css)$/.test(name)) return false;   // 이름 한 칸짜리(하위 경로 없음)만
@@ -2269,6 +2271,10 @@ const handleRequest = (req, res) => {
     res.end(JSON.stringify({ ok: false, code: 'RECOVERY_NEEDED', error: storage.message }));
     return;
   }
+
+  // 떼어 낸 경로 묶음(routes-*.js)에 차례로 묻는다 — 위 가드를 거친 뒤다. 경로가 전부 완전일치라
+  // 묻는 차례는 결과를 바꾸지 않는다. 어느 묶음도 맡지 않은 경로는 아래(항목·보고서·가져오기 등)로 내려간다.
+  if (ROUTE_MODULES.some(route => route(req, res, url, routeCtx))) return;
 
   if (url.pathname === '/api/storage-status' && req.method === 'GET') {
     // 업무 파일을 읽지 않는다. 목록이 안 열리는 상황에서도 이유를 볼 수 있어야 한다.
@@ -2360,459 +2366,6 @@ const handleRequest = (req, res) => {
   if (req.method === 'POST' && workflowActions[url.pathname]) {
     readBody(req).then(body => {
       const result = idempotent(req, body, () => workflowActions[url.pathname](body));
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify(result));
-    }).catch(error => {
-      res.writeHead(error.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: false, error: error.message, code: error.code }));
-    });
-    return;
-  }
-
-  // 지라 직접 읽기 — 프로젝트 탭의 띠 카드가 열릴 때만 부른다. 파일은 쓰지 않고(조회),
-  // 키별 60초 메모리 캐시를 둔다(`fresh=1`이면 건너뛴다). 인증 예외에는 넣지 않는다.
-  if (url.pathname === '/api/jira/issue' && req.method === 'GET') {
-    if (!USES.jira) { res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ ok: false, error: '지라를 쓰지 않도록 설정돼 있어요.', kind: 'other' })); return; }
-    jira.read(url.searchParams.get('key'), { fresh: url.searchParams.get('fresh') === '1' })
-      .then((payload) => {
-        // 지라 쪽 실패는 200 + `ok:false`로 답한다 — 우리 서버가 제대로 답한 것이고,
-        // 화면은 그 문구를 카드 자리에 조용히 적는다(브라우저 콘솔에 붉은 줄을 남기지 않는다).
-        // 형식이 틀린 키만 400이다(보낸 쪽 잘못).
-        res.writeHead(payload.kind === 'key' ? 400 : 200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify(payload));
-      })
-      .catch(() => {
-        // 여기 오는 것은 우리 쪽 잘못이다 — 지라가 준 글자는 이미 위에서 우리 문구로 바뀌어 있다.
-        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: '지라에 연결하지 못했어요.', kind: 'other' }));
-      });
-    return;
-  }
-
-  // 내 담당 목록을 **지금** 다시 읽어 메모리만 바꾼다(파일은 쓰지 않는다). 헤더의 새로고침이
-  // 목록을 다시 받기 전에 조용히 부른다 — 돌려주는 것은 결과 한 줄뿐이고 티켓은 싣지 않는다.
-  if (url.pathname === '/api/jira/list' && req.method === 'GET') {
-    if (!USES.jira) { res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ ok: false, error: '지라를 쓰지 않도록 설정돼 있어요.', kind: 'other' })); return; }
-    const done = () => {
-      const live = jiraLive.current();
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({
-        ok: true,
-        connected: !!jira.connected,
-        count: live ? live.issues.length : 0,
-        liveAt: live ? new Date(live.at).toISOString() : null,
-      }));
-    };
-    const asked = url.searchParams.get('fresh') === '1' || !jiraLive.current();
-    (asked && jira.connected ? jiraLive.refresh() : Promise.resolve()).then(done, done);
-    return;
-  }
-
-  // 반응 필요(1차: 지라 댓글) — 내 마지막 댓글 뒤에 다른 사람 댓글이 있는 이슈 목록이다.
-  // 조회라 어떤 파일도 쓰지 않고, 값은 서버 메모리(attention-live)에만 있다. 인증 예외도 아니다.
-  // 지라를 쓰지 않거나 설정이 없으면 `connected:false`로만 답한다(화면은 구역 자체를 그리지 않는다).
-  if (url.pathname === '/api/attention' && req.method === 'GET') {
-    if (!USES.jira || !jira.connected) {
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: true, connected: false, items: [] }));
-      return;
-    }
-    const done = () => {
-      const view = attentionLive.view();
-      const hidden = workflows.attentionDismissed();
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({
-        ok: true,
-        connected: true,
-        items: view.items.filter(item => !hidden[item.id]),
-        updatedAt: view.updatedAt,
-        stale: view.stale,
-        ...(view.error ? { error: view.error } : {}),
-      }));
-    };
-    // 아직 값이 없거나 `fresh=1`이면 지금 읽는다(그 밖에는 10분마다 도는 값을 그대로 쓴다).
-    // 지라가 죽어 있는 동안 화면을 열 때마다 다시 묻지 않게, 스스로 읽는 쪽은 1분을 바닥으로 둔다.
-    const asked = url.searchParams.get('fresh') === '1' || attentionLive.needsRead();
-    (asked ? attentionLive.refresh() : Promise.resolve()).then(done, done);
-    return;
-  }
-
-  // 연결 입력칸에서 `완료한 티켓도 보기`를 눌렀을 때만 부른다 — 최근 며칠 안에 완료된 내 담당 티켓이다.
-  // 조회라 파일은 하나도 쓰지 않고, 서버 메모리에 60초만 들고 있는다. 인증 예외에는 넣지 않는다.
-  if (url.pathname === '/api/jira/done' && req.method === 'GET') {
-    if (!USES.jira) { res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ ok: false, error: '지라를 쓰지 않도록 설정돼 있어요.', kind: 'other' })); return; }
-    const asked = url.searchParams.get('days');
-    const days = asked === null || asked === '' ? JIRA_DONE_DAYS : Number(asked);
-    if (!Number.isInteger(days) || days < 1 || days > JIRA_DONE_MAX_DAYS) {
-      res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: false, error: '보낸 값을 확인해 주세요.', kind: 'value' }));
-      return;
-    }
-    jira.listDone(days)
-      .then((payload) => {
-        // 지라 쪽 실패는 200 + `ok:false`다(화면이 그 문구를 그 자리에 조용히 적는다).
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify(payload));
-      })
-      .catch(() => {
-        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: '지라에 연결하지 못했어요.', kind: 'other' }));
-      });
-    return;
-  }
-
-  // 고르개가 열릴 때 지라가 허용하는 전환·버전 목록을 읽는다. 파일도 캐시도 없다(조회).
-  if (url.pathname === '/api/jira/options' && req.method === 'GET') {
-    if (!USES.jira) { res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ ok: false, error: '지라를 쓰지 않도록 설정돼 있어요.', kind: 'other' })); return; }
-    jira.options(url.searchParams.get('key'))
-      .then((payload) => {
-        res.writeHead(payload.kind === 'key' ? 400 : 200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify(payload));
-      })
-      .catch(() => {
-        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: '지라에 연결하지 못했어요.', kind: 'other' }));
-      });
-    return;
-  }
-
-  // 지라에 쓰는 단 하나의 주소. 화면이 확인 절차를 거친 뒤에만 부르고, 서버는 보낸 값을 다시
-  // 검증한 뒤 id를 쓰기 직전에 지라에서 다시 조회해 대조한다. 앱 파일은 하나도 건드리지 않으므로
-  // `idempotent()`·mutation-store를 타지 않는다(그것들은 앱 데이터용이다) — 다만 복구 필요 상태의
-  // POST 차단은 맨 위 전역 분기를 그대로 탄다(앱 저장소가 아픈 동안 바깥에 쓰지 않는 쪽이 안전하다).
-  // 요청 본문은 어디에도 기록하지 않는다.
-  if (url.pathname === '/api/jira/change' && req.method === 'POST') {
-    if (!USES.jira) { res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ ok: false, error: '지라를 쓰지 않도록 설정돼 있어요.', kind: 'other' })); return; }
-    readBody(req)
-      .then(body => jira.change(body))
-      .then((payload) => {
-        // 보낸 쪽 잘못(키·값 형식)만 400이다. 지라 쪽 실패는 200 + `ok:false`로 문구를 실어 보낸다.
-        res.writeHead(payload.kind === 'key' || payload.kind === 'value' ? 400 : 200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify(payload));
-      })
-      .catch(() => {
-        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: '보낸 값을 확인해 주세요.', kind: 'value' }));
-      });
-    return;
-  }
-
-  // 새 프로젝트 화면이 하위 티켓 종류를 고를 때 부른다 — 그 지라 프로젝트에서 만들 수 있는 이슈
-  // 종류다. 조회라 파일은 하나도 쓰지 않고, 서버 메모리에 프로젝트마다 60초만 담아 둔다.
-  if (url.pathname === '/api/jira/create-meta' && req.method === 'GET') {
-    if (!USES.jira) { res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ ok: false, error: '지라를 쓰지 않도록 설정돼 있어요.', kind: 'other' })); return; }
-    jira.createMeta(url.searchParams.get('project'))
-      .then((payload) => {
-        // 형식이 틀린 프로젝트 키만 400이다(보낸 쪽 잘못). 지라 쪽 실패는 200 + `ok:false`다.
-        res.writeHead(payload.kind === 'key' ? 400 : 200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify(payload));
-      })
-      .catch(() => {
-        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: '지라에 연결하지 못했어요.', kind: 'other' }));
-      });
-    return;
-  }
-
-  // 지라에 **여러 이슈를 만드는** 단 하나의 주소(에픽 하나 + 직군별 하위). 화면이 만들 목록 전체를
-  // 보여 주고 확인을 받은 뒤에만 부른다. 서버는 보낸 값을 다시 검증하고, 만들 수 있는 이슈 종류를
-  // 쓰기 직전에 지라에서 다시 읽어 대조하며, 같은 계획을 60초 안에 두 번 받으면 거절한다.
-  // 앱 파일은 하나도 건드리지 않으므로 `idempotent()`·mutation-store를 타지 않는다(그것들은 앱
-  // 데이터용이다) — 다만 복구 필요 상태의 POST 차단은 맨 위 전역 분기를 그대로 탄다.
-  // 요청 본문은 어디에도 기록하지 않는다.
-  if (url.pathname === '/api/jira/create' && req.method === 'POST') {
-    if (!USES.jira) { res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ ok: false, error: '지라를 쓰지 않도록 설정돼 있어요.', kind: 'other' })); return; }
-    readBody(req)
-      .then(body => jira.create(body))
-      .then((payload) => {
-        // 보낸 쪽 잘못(키·값 형식·개수)만 400이다. 지라 쪽 실패는 200 + `ok:false`로 문구를 실어 보낸다.
-        res.writeHead(['key', 'value', 'tooMany'].includes(payload.kind) ? 400 : 200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify(payload));
-      })
-      .catch(() => {
-        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: '보낸 값을 확인해 주세요.', kind: 'value' }));
-      });
-    return;
-  }
-
-  // 직접 만든(그룹) 프로젝트에 지라 티켓 **하나**를 손으로 건다(`jira:KEY` 프로젝트에는 걸지 않는다 —
-  // 이미 지라다). 순서가 안전장치다: ① 보낸 값과 그 그룹이 앱에 실제로 있는지 먼저 보고
-  // ② 지라에서 그 티켓을 **읽을 수 있을 때만** ③ 앱의 기존 저장 길(idempotent → mutations.run)로 저장한다.
-  // `jira: null`이면 해제다 — 지라에는 아무것도 묻지 않는다. 업무·기록은 하나도 바뀌지 않는다.
-  if (url.pathname === '/api/project/jira-link' && req.method === 'POST') {
-    if (!USES.jira) { res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ ok: false, error: '지라를 쓰지 않도록 설정돼 있어요.' })); return; }
-    readBody(req).then(async (body) => {
-      const { key } = workflows.checkProjectLink(body || {});
-      if (key) {
-        const seen = await jira.read(key);
-        if (seen.ok === false) { const error = new Error(seen.error); error.status = 400; throw error; }
-        if (seen.connected === false) { const error = new Error('지라 연결이 필요해요.'); error.status = 400; throw error; }
-      }
-      return idempotent(req, body, () => workflows.linkProject(body));
-    }).then((result) => {
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify(result));
-    }).catch((error) => {
-      res.writeHead(error.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: false, error: error.message, code: error.code }));
-    });
-    return;
-  }
-
-  // 직접 만든(그룹) 프로젝트를 지라 에픽으로 통째로 옮긴다(BMOVE) — jira-link와 같은 순서다:
-  // ① 형식 확인 ② 지라에서 **다시 읽어** 실제로 에픽(계층 1)인지 확인 ③ 그때만 앱의 저장 길로 옮긴다.
-  // 되돌리기는 `/api/project/move-undo`(workflowActions)가 지라를 다시 묻지 않고 기록만으로 한다.
-  if (url.pathname === '/api/project/move' && req.method === 'POST') {
-    if (!USES.jira) { res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ ok: false, error: '지라를 쓰지 않도록 설정돼 있어요.' })); return; }
-    readBody(req).then(async (body) => {
-      const { project, to } = body || {};
-      if (typeof project !== 'string' || !project.startsWith('group:')) { const error = new Error('직접 만든 프로젝트만 옮길 수 있어요.'); error.status = 400; throw error; }
-      if (typeof to !== 'string' || !PROJECT_MOVE_KEY_RE.test(to)) { const error = new Error('지라 번호를 확인해 주세요.'); error.status = 400; throw error; }
-      const check = await jira.checkEpic(to);
-      if (check.ok === false) { const error = new Error('지라에서 이 티켓을 읽지 못했어요.'); error.status = 400; throw error; }
-      if (check.connected === false) { const error = new Error('지라 연결이 필요해요.'); error.status = 400; throw error; }
-      if (!check.epic) { const error = new Error('에픽에만 옮길 수 있어요.'); error.status = 400; throw error; }
-      // 별칭이 있으면 그 이름, 없으면 방금 지라에서 읽은 요약(BJALIAS와 같은 규칙) — 아직 앱의
-      // 지라 캐시(jira_issues.md)에 없는 새 에픽이어도 이 요약으로 표시 이름을 지을 수 있다.
-      const name = projectDisplayName(to, check.summary || '');
-      const label = name ? `${to} · ${name}` : to;
-      return idempotent(req, body, () => moveProject({ project, to, label }));
-    }).then((result) => {
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify(result));
-    }).catch((error) => {
-      res.writeHead(error.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: false, error: error.message, code: error.code }));
-    });
-    return;
-  }
-
-  // 앱 정보 — 조회라 파일을 쓰지 않는다.
-  if (url.pathname === '/api/about' && req.method === 'GET') {
-    aboutApp({ cached: url.searchParams.get('cached') === '1' }).then((about) => {
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify(about));
-    }).catch(() => {
-      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: false, error: '앱 정보를 읽지 못했어요.' }));
-    });
-    return;
-  }
-
-  // 앱 안에서 업데이트 받기 — 서버는 요청 표시 파일 하나만 쓰고(launchd가 실행기를 돌린다), 진행은 상태 파일을 읽어 준다.
-  if (url.pathname === '/api/update' && req.method === 'POST') {
-    readBody(req)
-      .then(body => requestUpdate(body && typeof body === 'object' ? body.action : ''))
-      .then(({ status, body }) => {
-        res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify(body));
-      })
-      .catch(() => {
-        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, reason: 'action', message: UPDATE_MESSAGE.action }));
-      });
-    return;
-  }
-  if (url.pathname === '/api/update/status' && req.method === 'GET') {
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify(updateStatusView()));
-    return;
-  }
-
-  // 문제 보고에 붙일 최근 오류 줄 — 조회라 파일을 쓰지 않는다.
-  if (url.pathname === '/api/about/diagnostics' && req.method === 'GET') {
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify(aboutDiagnostics()));
-    return;
-  }
-
-  // 지금 연동 상태 — 토큰 값은 싣지 않고 있음/없음만 알려 준다.
-  // 열 때마다 슬랙 채널 이름을 따라간다(5분 캐시, 이름만 고침 — slackFollower 참고). 카드의 상태 줄에
-  // 쓰는 "언제 읽었나"(지라 직접 읽기·슬랙 수집)와 지라 개수도 함께 싣는다(값은 메모리·상태 파일에서).
-  if (url.pathname === '/api/integrations' && req.method === 'GET') {
-    // 캘린더 비밀 주소가 묵었으면 뒤에서 한 번 더 읽게만 걸어 둔다(이 응답은 기다리지 않는다).
-    if (CALENDAR_ICAL) calendarLive.nudge();
-    const followed = slackFollowOn()
-      ? slackFollower.follow({ read: currentConfigFile, configPath: CONFIG_PATH }).catch(() => ({ missing: {} }))
-      : Promise.resolve({ missing: {} });
-    followed.then(({ missing }) => {
-      const config = currentConfigFile();
-      const state = integrations.readIntegrations(config, { claude: claudeReady() });
-      // 사라진 채널 — 뺀 채널이면 그 표시에(다시 체크하면 새로 만든다), 아니면 연결된 채널에 붙인다.
-      Object.keys(missing || {}).forEach((key) => {
-        if (state.slack.off[key]) state.slack.off[key].missing = true;
-        else if (state.slack.channels[key] && state.slack.channels[key].id) state.slack.channels[key].missing = true;
-      });
-      const live = jiraLive.current();
-      const attention = attentionLive.current();
-      const hidden = attention ? workflows.attentionDismissed() : {};
-      state.jira.readAt = live ? new Date(live.at).toISOString() : null;
-      state.jira.issueCount = live ? live.issues.length : null;
-      state.jira.attentionCount = attention && Array.isArray(attention.items)
-        ? attention.items.filter(item => !hidden[item.id]).length : null;
-      // 반응 필요(지라 댓글)를 마지막으로 확인한 때와, 다시 읽지 못하고 있는지 — 지라 카드 둘째 줄이 쓴다.
-      const attentionView = attentionLive.view();
-      state.jira.attentionAt = attentionView.updatedAt || null;
-      state.jira.attentionStale = !!attentionView.stale;
-      state.jira.attentionError = !!attentionView.error;
-      const slackSync = getSlackSync();
-      state.slack.readAt = slackSync && slackSync.used !== false ? slackSyncSuccessAt() : null;
-      // 캘린더 비밀 주소 갈래의 상태 줄(`비밀 주소로 읽는 중 · 오늘 3개 · 10분 전`)에 쓰는 값 — 메모리에서만.
-      const calendar = CALENDAR_ICAL ? calendarLive.current() : null;
-      state.calendar.live = CALENDAR_ICAL;
-      state.calendar.readAt = calendar ? new Date(calendar.at).toISOString() : null;
-      state.calendar.eventCount = calendar ? calendar.events.length : null;
-      state.calendar.failed = CALENDAR_ICAL ? calendarLive.failed() : false;
-      // `지금 가져오기` 버튼과 빨간 상태 줄이 쓰는 "지금 실패 중인가"(토큰 문제면 auth).
-      const automations = getAutomationStatus();
-      const automation = key => automations.find(one => one.key === key) || null;
-      state.jira.fetch = fetchStateLive(jiraLive.failure());
-      state.slack.fetch = fetchStateAutomation(automation('slack'), SLACK_AUTH_RE);
-      state.calendar.fetch = CALENDAR_ICAL ? fetchStateLive(calendarLive.failure()) : fetchStateAutomation(automation('calendar'));
-      state.meetingNotes.fetch = fetchStateAutomation(automation('tiro'));
-      // 오늘 슬랙에서 들어온 항목 수(원본 링크가 슬랙이고 오늘 만든 것) — 슬랙 카드 둘째 줄.
-      const today = todayLocal();
-      state.slack.todayCount = slackSync && slackSync.used !== false
-        ? Object.values(getReportRefs()).filter(item => item.permalink && item.created === today).length : null;
-      // 카드 ⋯ › 최근 기록 — 자동화는 로그의 최근 10번, 앱이 직접 읽는 것은 메모리에 있는 만큼.
-      const events = key => (automation(key) || {}).events || [];
-      // 켠 연동 자동 등록이 마지막에 실패했으면 launchd에 기대는 카드(슬랙·캘린더 Claude·회의록)의 기록에 한 줄.
-      state.slack.log = withApplyFailure(events('slack'));
-      state.jira.log = liveLog('jira', jiraLive.history());
-      state.calendar.log = CALENDAR_ICAL ? liveLog('calendar', calendarLive.history()) : withApplyFailure(events('calendar'));
-      state.meetingNotes.log = withApplyFailure(events('tiro'));
-      state.alerts = integrationAlerts(config, automations);
-      // 늦음·첫 읽기 전 판단의 재료 — /api/items(톱니바퀴의 주황 점)와 같은 값이라 둘이 같은 말을 한다.
-      const calendarSync = { ...getCalendarToday() };
-      delete calendarSync.events;
-      state.sync = { slackSync, jiraSync: getJiraSync(), calendar: calendarSync };
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: true, ...state, install: process.env.WORKSPACE_MANAGED ? 'managed' : 'manual' }));
-    }).catch(() => {
-      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: false, error: '연동 상태를 읽지 못했어요.' }));
-    });
-    return;
-  }
-
-  // 슬랙 위저드 `① 토큰`의 `다음` — `auth.test`로 토큰만 확인한다. 아무 파일도 쓰지 않고 `{ok}`만 돌려준다.
-  if (url.pathname === '/api/integrations/slack-token-check' && req.method === 'POST') {
-    readBody(req)
-      .then((body) => {
-        // 토큰 칸 없이 부르면(채널 고르기 — 새 채널 이름의 앞머리만 알고 싶을 때) 저장된 토큰을 서버 안에서만 쓴다.
-        const given = typeof (body || {}).token === 'string' ? body.token.trim() : '';
-        return integrations.slackTokenCheck(given || integrations.savedSlackToken(currentConfigFile()));
-      })
-      .then((checked) => {
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: true, prefix: checked.prefix }));
-      })
-      .catch((error) => {
-        res.writeHead(error.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: error.message, code: error.code || '' }));
-      });
-    return;
-  }
-
-  // 연동 저장 — 켜는 쪽은 먼저 지라·슬랙에 읽어 보고 성공했을 때만 쓴다.
-  // `USES`·지라 설정은 서버가 뜰 때 읽으므로, launchd가 띄운 자리면 응답 뒤 스스로 끝낸다(다시 떠 준다).
-  if (url.pathname === '/api/integrations/save' && req.method === 'POST') {
-    let before = {};
-    readBody(req)
-      .then(body => integrations.saveIntegrations({
-        configPath: CONFIG_PATH,
-        current: (before = currentConfigFile()),
-        body,
-        jiraCheck: settings => require('./jira-client').checkJiraAccount(settings),
-        slackCheck: (token, id) => integrations.slackCheckChannel(token, id),
-        // 비밀 주소는 한 번 읽어 오늘 일정 수만 센다(10초 제한). 주소는 응답·로그에 남지 않는다.
-        calendarCheck: address => integrations.icalCheck(address),
-      }))
-      .then(({ result, config }) => {
-        const managed = !!process.env.WORKSPACE_MANAGED;
-        // 등록에 영향을 주는 값이 바뀌었을 때만 켠 연동 자동 등록을 요청한다(요청 파일만 — 실패해도 저장은 끝났다).
-        let apply = null;
-        if (integrations.registrationKey(before) !== integrations.registrationKey(config)) {
-          try { apply = requestApply(); } catch { apply = 'failed'; }
-        }
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ...result, restart: managed, ...(apply ? { apply } : {}) }));
-        integrations.scheduleRestart({ managed, exit: exitApp });
-      })
-      .catch((error) => {
-        res.writeHead(error.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
-        // `code`·`key`는 화면이 갈래를 나눌 때만 쓴다(다시 체크한 채널이 사라졌으면 `channel_gone` + 그 칸).
-        res.end(JSON.stringify({ ok: false, error: error.message, ...(error.code ? { code: error.code } : {}), ...(error.key ? { key: error.key } : {}) }));
-      });
-    return;
-  }
-
-  // 슬랙 비공개 채널 대신 만들기 — `설정 > 연동 > 슬랙 수집` 위저드의 ② 채널이 고른 채널마다 한 번씩 부른다.
-  // 여기서는 **아무 파일도 쓰지 않는다**: 토큰은 슬랙 헤더로만 나가고, 만든 채널의 id·이름만 돌려준다
-  // (그 id를 화면이 ③ 확인의 `연결`에 실어 보내고, 저장은 예전대로 `/api/integrations/save`만 한다).
-  // 토큰 칸이 비어 있으면(`채널 고르기` — 이미 연결된 뒤 채널을 더하는 길) 저장된 토큰을 서버 안에서만 쓴다.
-  if (url.pathname === '/api/integrations/slack-channel' && req.method === 'POST') {
-    readBody(req)
-      .then((body) => {
-        const given = typeof (body || {}).token === 'string' ? body.token.trim() : '';
-        const token = given || integrations.savedSlackToken(currentConfigFile());
-        return integrations.slackCreateChannel(token, (body || {}).name);
-      })
-      .then((channel) => {
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: true, id: channel.id, name: channel.name }));
-      })
-      .catch((error) => {
-        res.writeHead(error.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: error.message, code: error.code || '' }));
-      });
-    return;
-  }
-
-  // 지금 가져오기 — 지라·캘린더(비밀 주소)는 곧바로 다시 읽어 결과를, 나머지는 요청 표시 파일만 쓴다.
-  // 토큰·비밀 주소는 응답에 싣지 않는다(결과는 개수·시각·갈래뿐).
-  if (url.pathname === '/api/integrations/fetch' && req.method === 'POST') {
-    readBody(req)
-      .then(body => fetchNow(body && typeof body === 'object' ? body.key : ''))
-      .then(({ status, body }) => {
-        res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify(body));
-      })
-      .catch(() => {
-        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, reason: 'failed', message: FETCH_MESSAGE.key }));
-      });
-    return;
-  }
-
-  if (url.pathname === '/api/automation/status' && req.method === 'GET') {
-    const automations = getAutomationStatus();
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    // `alerts`는 지금 멈춘 연동(톱니바퀴의 빨간 점) — 연동 탭 요약과 같은 판단이다.
-    res.end(JSON.stringify({ automations, alerts: integrationAlerts(currentConfigFile(), automations) }));
-    return;
-  }
-
-  // 설정 › 앱의 `데이터 백업` 줄 — 백업 로그와 날짜 폴더 목록을 **읽기만** 한다(프로세스·파일 쓰기 없음).
-  if (url.pathname === '/api/backup' && req.method === 'GET') {
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify(backupStatus()));
-    return;
-  }
-
-  // 미팅 노트 가져오기 — 조회는 파일을 쓰지 않고(로그·요청 표시 파일을 읽기만),
-  // 요청은 표시 파일 하나만 쓴다. 프로세스는 띄우지 않는다.
-  if (url.pathname === '/api/meeting-notes/status' && req.method === 'GET') {
-    if (!USES.tiro) { res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ ok: false, error: '미팅 노트 가져오기를 쓰지 않도록 설정돼 있어요.' })); return; }
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify(meetingNotesStatus()));
-    return;
-  }
-
-  if (url.pathname === '/api/meeting-notes/request' && req.method === 'POST') {
-    readBody(req).then(body => {
-      const result = writeMeetingNotesRequest(body);
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify(result));
     }).catch(error => {
@@ -3136,83 +2689,6 @@ const handleRequest = (req, res) => {
     return;
   }
 
-  // ---------- 설정 › 꾸미기 (이 맥에만) ----------
-  // Dock 아이콘 — 내 그림(`local/icon.png`)이 있으면 그것, 없으면 기본 토끼. 탭 아이콘(favicon)도 이 주소다.
-  if (url.pathname === '/app-icon.png' && req.method === 'GET') {
-    try {
-      const icon = personalize.currentIcon(LOCAL_DIR, PUBLIC_DIR);
-      res.writeHead(200, { 'Content-Type': icon.type });
-      res.end(icon.data);
-    } catch {
-      res.writeHead(404); res.end('Not found');
-    }
-    return;
-  }
-
-  // 지금 값 — 조회라 파일을 쓰지 않는다.
-  if (url.pathname === '/api/personalize' && req.method === 'GET') {
-    const config = currentConfigFile();
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({
-      ok: true, title: APP_TITLE, dockName: currentDockName(), customIcon: personalize.hasCustomIcon(LOCAL_DIR),
-      titleSaved: typeof config.title === 'string' ? config.title : '',
-    }));
-    return;
-  }
-
-  // 이름 저장(`title`·`server.dockName`만). 제목은 곧바로 화면에 쓰이고, Dock 이름이 바뀌면 Dock 앱을
-  // 다시 만들어 달라는 표시 파일 하나를 쓴다(프로세스는 띄우지 않는다).
-  if (url.pathname === '/api/personalize' && req.method === 'POST') {
-    readBody(req)
-      .then(body => integrations.savePersonalize({ configPath: CONFIG_PATH, current: currentConfigFile(), body, appsDir: applicationsDir() }))
-      .then(({ config, changed }) => {
-        if (typeof config.title === 'string' && config.title) APP_TITLE = config.title;
-        if (changed.dockName) personalize.writeRefreshRequest(automationDir(), 'dockName');
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: true, title: APP_TITLE, dockName: currentDockName(), refresh: changed.dockName }));
-      })
-      .catch((error) => {
-        res.writeHead(error.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: error.status ? error.message : '저장하지 못했어요.' }));
-      });
-    return;
-  }
-
-  // Dock 아이콘 그림 저장·되돌리기. 그림은 `{ image: base64 }`(화면이 정사각형으로 잘라 PNG로 보낸다),
-  // 되돌리기는 `{ reset: true }` — `local/icon.png` 한 파일만 쓰거나 지운다. 5MB 그림의 base64가 들어오도록
-  // 이 길만 본문 한도를 8MB로 둔다.
-  if (url.pathname === '/api/personalize/icon' && req.method === 'POST') {
-    readBody(req, 8 * 1024 * 1024)
-      .then((body) => {
-        const data = body && typeof body === 'object' ? body : {};
-        if (data.reset === true) {
-          personalize.resetIcon(LOCAL_DIR);
-        } else {
-          const text = typeof data.image === 'string' ? data.image.replace(/^data:image\/(?:png|jpeg);base64,/, '') : '';
-          if (!text || !/^[A-Za-z0-9+/=\s]+$/.test(text)) throw Object.assign(new Error(personalize.PERSONALIZE_MESSAGE.iconType), { status: 400 });
-          personalize.saveIcon(LOCAL_DIR, Buffer.from(text, 'base64'));
-        }
-        personalize.writeRefreshRequest(automationDir(), data.reset === true ? 'icon-reset' : 'icon');
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: true, customIcon: personalize.hasCustomIcon(LOCAL_DIR), refresh: true }));
-      })
-      .catch((error) => {
-        res.writeHead(error.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: error.status ? error.message : '그림을 저장하지 못했어요.' }));
-      });
-    return;
-  }
-
-  // 이 컴퓨터에만 두는 꾸밈(`local/local.css`). 저장소에 없는 파일이라 **없어도 빈 200**으로 준다 —
-  // 화면은 늘 같은 한 줄을 읽고, 브라우저 콘솔에 404가 남지 않는다. 허용하는 경로는 이것 하나뿐이다.
-  if (url.pathname === '/local/local.css' && req.method === 'GET') {
-    let css = '';
-    try { css = nativeFs.readFileSync(path.join(LOCAL_DIR, 'local.css'), 'utf8'); } catch { css = ''; }
-    res.writeHead(200, { 'Content-Type': 'text/css; charset=utf-8' });
-    res.end(css);
-    return;
-  }
-
   let filePath = url.pathname === '/' ? '/index.html' : url.pathname;
   // 앱에 내장한 글꼴(Pretendard)도 화면 파일과 같은 길로 나간다. 인증 예외(publicAsset)에는 넣지 않는다.
   // 화면 코드(`*.js`/`*.css`)는 isClientFile이 정한다 — 서버 파일·테스트·픽스처는 거기서 막힌다.
@@ -3295,6 +2771,32 @@ removeTrackItem = transactional(removeTrackItem);
 restoreTrackItem = transactional(restoreTrackItem);
 promoteIdeaToToday = transactional(promoteIdeaToToday);
 setMeetingLink = transactional(setMeetingLink);
+// 떼어 낸 경로 묶음과, 그 묶음들이 받는 값·함수(ctx). 묶음 파일은 server.js를 require하지 않고 여기서 받은 것만 쓴다.
+// 바뀔 수 있는 값(`APP_TITLE`·`exitApp`)은 요청 때의 값을 읽도록 getter로 둔다.
+const ROUTE_MODULES = [
+  require('./routes-jira'),
+  require('./routes-integrations'),
+  require('./routes-app'),
+  require('./routes-personalize'),
+];
+const routeCtx = {
+  get APP_TITLE() { return APP_TITLE; },
+  set APP_TITLE(value) { APP_TITLE = value; },
+  get exitApp() { return exitApp; },
+  USES, CALENDAR_ICAL, CONFIG_PATH, LOCAL_DIR, PUBLIC_DIR,
+  readBody, idempotent, integrations, personalize, workflows,
+  // 지라
+  jira, jiraLive, attentionLive, JIRA_DONE_DAYS, JIRA_DONE_MAX_DAYS, PROJECT_MOVE_KEY_RE, projectDisplayName, moveProject,
+  // 앱 정보·업데이트
+  aboutApp, aboutDiagnostics, requestUpdate, updateStatusView, UPDATE_MESSAGE,
+  // 연동·자동화·백업·미팅 노트
+  calendarLive, slackFollower, slackFollowOn, currentConfigFile, claudeReady, getSlackSync, slackSyncSuccessAt,
+  getAutomationStatus, fetchStateLive, fetchStateAutomation, SLACK_AUTH_RE, todayLocal, getReportRefs, withApplyFailure,
+  liveLog, integrationAlerts, getCalendarToday, getJiraSync, requestApply, fetchNow, FETCH_MESSAGE, backupStatus,
+  meetingNotesStatus, writeMeetingNotesRequest,
+  // 꾸미기
+  applicationsDir, automationDir, currentDockName,
+};
 function safeHandle(req, res) {
   try {
     if(req.method==='GET')readScope={files:new Map()};
@@ -3356,4 +2858,5 @@ if (require.main === module) {
 
 // `jiraLive`·`attentionLive`·`calendarLive`는 화면 확인용 픽스처가 "뜰 때 한 번 읽기"를 직접 켜 보려고 함께 내보낸다
 // (테스트·픽스처 밖에서는 쓰지 않는다 — 운영에서는 위의 `start()`가 켠다).
-module.exports = { server, jiraLive, attentionLive, calendarLive, setExitForTests, changesUrlFrom, workspacePaths, fixtureSafetyProblems };
+// `CLIENT_BLOCKED`·`isClientFile`은 테스트가 차단 목록을 따로 적지 않고 이것을 그대로 확인하려고 내보낸다.
+module.exports = { server, jiraLive, attentionLive, calendarLive, setExitForTests, changesUrlFrom, workspacePaths, fixtureSafetyProblems, CLIENT_BLOCKED, isClientFile };

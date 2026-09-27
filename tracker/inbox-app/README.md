@@ -486,17 +486,17 @@ Slack 수집은 모든 페이지를 읽고 `import-record.js`로 앱의 검증·
 | `report-ui.js` | 주간요약 문서·슬랙 복사 |
 | `app.js` | 공용 부품(`ui*`), 오늘 탭(사용설명서 카드 포함), 상세 카드, 검색 팔레트, 되돌리기, 저장 안전장치(`request`·`showNotice`·`pushUndo`·`fadeOutAndRun`), 화면을 켜는 실행 코드 |
 
-서버 쪽에는 연동 설정 한 벌(`integrations.js` — 값 확인·`workspace.config.json` 합치기·토큰 파일·문제 보고의 오류 줄·다시 켜기), 캘린더 비밀 주소 풀이(`ical.js`)와 메모리 보관함(`calendar-live.js`), 꾸미기(`personalize.js` — 그림 확인·`local/icon.png`·요청 표시 파일)가 따로 있습니다. 화면에는 나가지 않습니다.
+서버 쪽에는 연동 설정 한 벌(`integrations.js` — 값 확인·`workspace.config.json` 합치기·토큰 파일·문제 보고의 오류 줄·다시 켜기), 캘린더 비밀 주소 풀이(`ical.js`)와 메모리 보관함(`calendar-live.js`), 꾸미기(`personalize.js` — 그림 확인·`local/icon.png`·요청 표시 파일)가 따로 있습니다. 요청 경로 가운데 지라(`routes-jira.js`)·연동·자동화 상태·백업·미팅 노트(`routes-integrations.js`)·앱 정보·업데이트(`routes-app.js`)·꾸미기(`routes-personalize.js`)는 묶음 파일로 나뉘어 있고, `server.js`가 인증·복구 필요 가드를 거친 뒤 차례로 묻습니다(묶음 파일은 필요한 값을 `server.js`에서 넘겨받기만 합니다). 나머지 경로(항목 추가·수정·보고서·가져오기)와 정적 파일은 `server.js`에 있습니다. 화면에는 나가지 않습니다.
 
-서버는 파일 이름을 하나하나 적지 않고 이 폴더의 `*.js`/`*.css` 가운데 서버 파일·저장소 코드·테스트·픽스처를 뺀 것만 내보냅니다(`server.js`의 `isClientFile`). 브라우저가 스스로 새로고침할지 판단하는 값(`appVersion`)도 같은 목록을 씁니다. 화면 파일을 더할 때는 `index.html`에 `<script>` 한 줄만 넣으면 됩니다.
+서버는 파일 이름을 하나하나 적지 않고 이 폴더의 `*.js`/`*.css` 가운데 서버 파일·저장소 코드·테스트·픽스처를 뺀 것만 내보냅니다(`server.js`의 `isClientFile`). 브라우저가 스스로 새로고침할지 판단하는 값(`appVersion`)도 같은 목록을 씁니다. 화면 파일을 더할 때는 `index.html`에 `<script>` 한 줄만 넣으면 됩니다. 서버 파일을 더할 때는 `server.js`의 차단 목록(`CLIENT_BLOCKED`)에 이름을 적어야 합니다 — `index.html`이 읽지 않는 `*.js`가 목록·패턴에서 빠지면 테스트가 실패합니다.
 
 ## 검증
 
 ```sh
-node --test server.test.js client.test.js report-drafts.test.js
+node --test --test-concurrency=1 *.test.js
 ```
 
-`tracker/inbox-app`에서 실행합니다. 임시 디렉터리와 임시 포트를 사용하며 실제 업무 데이터는 변경하지 않습니다.
+`tracker/inbox-app`에서 실행합니다. 임시 디렉터리와 임시 포트를 사용하며 실제 업무 데이터는 변경하지 않습니다. 서버 테스트는 기능별 파일(`server.core`·`server.jira`·`server.app`·`server.integrations`·`server.calendar`·`server.update`·`server.channels`)로, 자동화 셸 스크립트 테스트는 `automation.test.js` 하나로 나뉘어 있고 각각 따로 돌릴 수 있습니다(`node --test server.jira.test.js`). 함께 쓰는 준비는 `test-support.js`입니다.
 클라이언트 테스트는 `app.js`와 위 화면 파일들을 같은 차례로 가짜 화면 환경에 올려 입력 보존, 실패 처리, 한글 조합 중 Enter, 복구 필요 안내 표시, 업무 카드의 배지·프로젝트 라벨·그룹 선택지를 검증합니다.
 
 테스트·별도 실행 시 `WORKSPACE_DATA_DIR`, `WORKSPACE_PORT`, `WORKSPACE_NO_OPEN=1`을 사용할 수 있습니다.

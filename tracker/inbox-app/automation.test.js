@@ -1,0 +1,1635 @@
+// 자동화 셸 스크립트(`automation/*.sh`·setup.sh·update.sh·설치 스크립트). 공용 준비는 test-support.js.
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { spawn, spawnSync } = require('node:child_process');
+const support = require('./test-support');
+const { today, deadPid, gitEnv, runGit, gitReady } = support;
+
+// launchd가 부르는 자동화 스크립트. 앱과 따로 돌지만 여기가 멈추면 수집이 통째로 멎기 때문에,
+// 실제 스크립트를 임시 폴더·가짜 claude로 돌려서 "멈춤 방지" 장치만 확인한다.
+// (슬랙 API나 운영 서버는 건드리지 않는다 — 채널이 없는 설정이라 곧바로 실패하고 끝난다)
+const automationScript = name => path.join(__dirname, 'automation', name);
+const runScript = (script, args, env) => spawnSync('/bin/bash', [script, ...args], {
+  env: { ...process.env, ...env }, encoding: 'utf8', timeout: 60000,
+});
+const gone = pid => { try { process.kill(pid, 0); return false; } catch { return true; } };
+
+test('run-task.sh는 매달린 실행을 시간 제한으로 끊고 자식 프로세스까지 정리한다', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-run-task-'));
+  const claude = path.join(home, 'fake-claude.sh');
+  fs.writeFileSync(claude, '#!/bin/bash\nsleep 60 &\necho "child=$!"\necho "parent=$$"\nsleep 60\n');
+  fs.chmodSync(claude, 0o755);
+  const result = runScript(automationScript('run-task.sh'), ['hang', '프롬프트', 'Read'], {
+    WORKSPACE_DIR: home, AUTOMATION_LOG_DIR: path.join(home, 'logs'), CLAUDE_BIN: claude,
+    TASK_TIMEOUT_SECONDS: '2', TASK_KILL_GRACE_SECONDS: '1',
+  });
+  assert.equal(result.status, 124);
+  const log = fs.readFileSync(path.join(home, 'logs', 'hang.log'), 'utf8');
+  assert.match(log, /hang 시간 초과 \(2초\)/);
+  // 상태 탭이 읽는 시작/종료 줄 형식은 그대로여야 한다
+  assert.match(log, /^───── \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} hang 시작$/m);
+  assert.match(log, /^───── \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} hang 종료 \(exit 124\)$/m);
+  const pids = [...log.matchAll(/(?:child|parent)=(\d+)/g)].map(match => Number(match[1]));
+  assert.equal(pids.length, 2);
+  assert.deepEqual(pids.map(gone), [true, true]); // MCP 자식 흉내까지 남지 않는다
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('run-task.sh는 정상 실행의 인자·종료 코드·로그 형식을 그대로 넘긴다', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-run-task-'));
+  const claude = path.join(home, 'fake-claude.sh');
+  fs.writeFileSync(claude, `#!/bin/bash\nprintf '%s\\n' "$*" > "${path.join(home, 'args.txt')}"\necho "수집 결과 요약"\nexit \${FAKE_EXIT:-0}\n`);
+  fs.chmodSync(claude, 0o755);
+  const env = { WORKSPACE_DIR: home, AUTOMATION_LOG_DIR: path.join(home, 'logs'), CLAUDE_BIN: claude };
+  assert.equal(runScript(automationScript('run-task.sh'), ['ok', '프롬프트', 'Read,Write'], env).status, 0);
+  assert.equal(fs.readFileSync(path.join(home, 'args.txt'), 'utf8').trim(), '-p 프롬프트 --model sonnet --permission-mode acceptEdits --allowedTools Read,Write');
+  assert.equal(runScript(automationScript('run-task.sh'), ['ok', '프롬프트', 'Read,Write'], { ...env, FAKE_EXIT: '7' }).status, 7);
+  // 권한 모드·금지 도구는 선택 인자다(슬랙 캡처만 쓴다). 안 주면 위처럼 예전 그대로다.
+  assert.equal(runScript(automationScript('run-task.sh'), ['ok', '프롬프트', 'Read', 'manual', 'Write,Edit'], env).status, 0);
+  assert.equal(fs.readFileSync(path.join(home, 'args.txt'), 'utf8').trim(), '-p 프롬프트 --model sonnet --permission-mode manual --allowedTools Read --disallowedTools Write,Edit');
+  // 모델은 TASK_MODEL로 바꿀 수 있다(계정 기본 모델과 무관하게 자동화 비용을 고정하려는 장치).
+  // 로그 문구 개수 단언을 건드리지 않게 다른 이름(ok2)으로 실행한다.
+  assert.equal(runScript(automationScript('run-task.sh'), ['ok2', '프롬프트', 'Read,Write'], { ...env, TASK_MODEL: 'opus' }).status, 0);
+  assert.equal(fs.readFileSync(path.join(home, 'args.txt'), 'utf8').trim(), '-p 프롬프트 --model opus --permission-mode acceptEdits --allowedTools Read,Write');
+  const log = fs.readFileSync(path.join(home, 'logs', 'ok.log'), 'utf8');
+  assert.doesNotMatch(log, /시간 초과/);
+  assert.match(log, /^───── \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} ok 종료 \(exit 0\)$/m);
+  assert.match(log, /^───── \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} ok 종료 \(exit 7\)$/m);
+  assert.equal(log.split('수집 결과 요약').length - 1, 3);
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('slack-capture.sh 잠금은 살아 있는 실행만 존중하고 죽은 잠금은 회수한다', (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-slack-lock-'));
+  const logs = path.join(home, 'logs');
+  const lock = path.join(logs, '.slack-capture.lock');
+  const config = path.join(home, 'workspace.config.json');
+  fs.writeFileSync(config, '{}'); // 켜진 채널이 없으니 잠금만 잡고 곧바로 "건너뛰어요"로 끝난다
+  const logText = () => fs.readFileSync(path.join(logs, 'slack-capture.log'), 'utf8');
+  const capture = () => runScript(automationScript('slack-capture.sh'), [], {
+    WORKSPACE_DIR: home, WORKSPACE_CONFIG: config, AUTOMATION_LOG_DIR: logs,
+    SLACK_CAPTURE_IGNORE_HOURS: '1', WORKSPACE_PORT: '4322',
+  });
+  const holdLock = pid => { fs.mkdirSync(lock, { recursive: true }); fs.writeFileSync(path.join(lock, 'pid'), `${pid}\n`); };
+  const longRunning = name => {
+    const script = path.join(home, name);
+    fs.writeFileSync(script, '#!/bin/bash\nsleep 60\n');
+    fs.chmodSync(script, 0o755);
+    const child = spawn('/bin/bash', [script], { stdio: 'ignore' });
+    t.after(() => child.kill('SIGKILL'));
+    return child.pid;
+  };
+
+  // 1) 진짜 캡처가 아직 돌고 있으면 건너뛰고, 남의 잠금은 풀지 않는다
+  const holder = longRunning('slack-capture-holder.sh');
+  holdLock(holder);
+  assert.equal(capture().status, 0);
+  assert.match(logText(), /이전 실행이 아직 진행 중/);
+  assert.equal(fs.readFileSync(path.join(lock, 'pid'), 'utf8').trim(), String(holder));
+
+  // 2) 잠금 폴더만 있고 pid를 아직 못 쓴 찰나도 "진행 중"으로 본다
+  fs.rmSync(lock, { recursive: true, force: true });
+  fs.mkdirSync(lock, { recursive: true });
+  assert.equal(capture().status, 0);
+  assert.equal(fs.existsSync(lock), true);
+
+  // 3) 주인이 죽은 잠금은 회수한다(예전 30분 규칙 없이 즉시)
+  fs.rmSync(lock, { recursive: true, force: true });
+  holdLock(deadPid());
+  fs.writeFileSync(path.join(logs, 'slack-capture.log'), '');
+  assert.equal(capture().status, 0);
+  assert.match(logText(), /켜진 채널이 없어 건너뛰어요/);
+  assert.equal(fs.existsSync(lock), false); // 잡았다가 스스로 풀었다
+
+  // 4) 번호만 같고 다른 프로그램이 쓰고 있는 PID도 회수한다
+  holdLock(longRunning('other-program.sh'));
+  fs.writeFileSync(path.join(logs, 'slack-capture.log'), '');
+  assert.equal(capture().status, 0);
+  assert.doesNotMatch(logText(), /이전 실행이 아직 진행 중/);
+  assert.match(logText(), /켜진 채널이 없어 건너뛰어요/);
+  assert.equal(fs.existsSync(lock), false);
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+// 앱의 연동 탭에서 껐는데 자동화가 계속 도는 문제(최종 QA). 두 스크립트 모두 **시작하자마자**
+// 설정(`integrations.<키>`)을 node로 읽고, 꺼져 있으면 로그 한 줄만 남기고 끝낸다.
+test('연동을 끄면 run-task.sh·slack-capture.sh는 claude를 부르지 않고 건너뛴다', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-intg-off-'));
+  const logs = path.join(home, 'logs');
+  const called = path.join(home, 'called.txt');
+  const claude = path.join(home, 'fake-claude.sh');
+  writeExec(claude, `#!/bin/bash\necho "불렸음" >> ${JSON.stringify(called)}\n`);
+  const config = path.join(home, 'workspace.config.json');
+  const env = {
+    WORKSPACE_DIR: home, WORKSPACE_CONFIG: config, AUTOMATION_LOG_DIR: logs,
+    CLAUDE_BIN: claude, SLACK_CAPTURE_IGNORE_HOURS: '1',
+  };
+  const logOf = name => fs.readFileSync(path.join(logs, `${name}.log`), 'utf8');
+  const task = name => runScript(automationScript('run-task.sh'), [name, '프롬프트', 'Read'], env);
+
+  // 1) 껐으면 곧바로 끝난다 — 시작 줄도 남기지 않고 claude도 부르지 않는다
+  // jira-sync는 없앴다(앱이 지라를 직접 읽는다) — run-task.sh의 연동 칸 매핑에서도 빠졌다.
+  fs.writeFileSync(config, JSON.stringify({ integrations: { jira: false, calendar: false, tiro: false, slack: false } }));
+  for (const name of ['calendar-sync', 'tiro-sync']) {
+    assert.equal(task(name).status, 0, `${name}은 꺼져 있으면 조용히 끝난다`);
+    assert.match(logOf(name), new RegExp(`${name} 연동이 꺼져 있어 건너뛰어요`));
+    assert.doesNotMatch(logOf(name), /시작$/m);
+  }
+  assert.equal(runScript(automationScript('slack-capture.sh'), [], env).status, 0);
+  assert.match(logOf('slack-capture'), /슬랙 수집이 꺼져 있어 건너뛰어요/);
+  assert.equal(fs.existsSync(called), false, '꺼진 자동화는 claude를 부르지 않는다');
+
+  // 2) 표에 없는 작업 이름은 검사하지 않고 예전 그대로 돈다
+  assert.equal(task('envok').status, 0);
+  assert.match(logOf('envok'), /envok 종료 \(exit 0\)/);
+  assert.equal(fs.readFileSync(called, 'utf8').trim(), '불렸음');
+
+  // 3) 칸이 없으면 켜진 것이다(옛 설정 파일) — 설정이 아예 없어도 같다
+  fs.writeFileSync(config, JSON.stringify({ integrations: { slack: true } }));
+  assert.equal(task('jira-sync').status, 0);
+  assert.match(logOf('jira-sync'), /jira-sync 종료 \(exit 0\)/);
+  fs.rmSync(config, { force: true });
+  assert.equal(task('calendar-sync').status, 0);
+  assert.match(logOf('calendar-sync'), /calendar-sync 종료 \(exit 0\)/, '설정을 못 읽으면 예전처럼 그냥 돈다');
+  fs.rmSync(home, { recursive: true, force: true });
+});
+const writeExec = (file, body) => { fs.writeFileSync(file, body); fs.chmodSync(file, 0o755); };
+
+test('자동화 스크립트는 설치 위치를 workspace.env에서 찾고, 그것도 없으면 안내하고 멈춘다', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-env-'));
+  const claude = path.join(home, 'fake-claude.sh');
+  writeExec(claude, '#!/bin/bash\necho "됐어요"\n');
+  const envFile = path.join(home, 'workspace.env');
+  fs.writeFileSync(envFile, `WORKSPACE_DIR="${home}"\n`);
+  const shared = { WORKSPACE_DIR: '', AUTOMATION_LOG_DIR: path.join(home, 'logs'), CLAUDE_BIN: claude };
+
+  const found = runScript(automationScript('run-task.sh'), ['envok', '프롬프트', 'Read'], { ...shared, WORKSPACE_ENV_FILE: envFile });
+  assert.equal(found.status, 0, 'setup.sh가 적어 둔 파일에서 설치 위치를 찾는다');
+  assert.match(fs.readFileSync(path.join(home, 'logs', 'envok.log'), 'utf8'), /envok 종료 \(exit 0\)/);
+
+  const missing = path.join(home, 'no-such.env');
+  for (const script of ['run-task.sh', 'slack-capture.sh', 'backup-data.sh']) {
+    const args = script === 'run-task.sh' ? ['envfail', '프롬프트', 'Read'] : [];
+    const result = runScript(automationScript(script), args, { ...shared, WORKSPACE_ENV_FILE: missing, SLACK_CAPTURE_IGNORE_HOURS: '1' });
+    assert.equal(result.status, 1, `${script}은 설치 정보가 없으면 멈춘다`);
+    assert.match(result.stderr, /설치 정보를 찾을 수 없어요 — setup.sh를 먼저 실행해 주세요/);
+  }
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+// update.sh — 임시 폴더 안에 "원격 저장소(bare) + 내려받은 복사본"을 통째로 만들어 돌린다.
+// PATH 앞에 가짜 `launchctl`·`curl`을 세우므로 이 테스트는 실제 앱·실제 맥 스케줄러에 닿지 않는다.
+const REPO_ROOT = path.join(__dirname, '..', '..');
+function updateFixture(t, { channel = 'stable' } = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-update-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const origin = path.join(root, 'origin.git');
+  const seed = path.join(root, 'seed');
+  const clone = path.join(root, 'clone');
+  const bin = path.join(root, 'bin');
+  const backups = path.join(root, 'backups');
+  fs.mkdirSync(bin);
+  writeExec(path.join(bin, 'launchctl'), `#!/bin/bash\necho "$@" >> ${JSON.stringify(path.join(root, 'launchctl.log'))}\nexit 0\n`);
+  writeExec(path.join(bin, 'curl'), `#!/bin/bash\nprintf '{"version":"%s","dataFormat":1}' "$(tr -d '[:space:]' < ${JSON.stringify(path.join(clone, 'VERSION'))})"\n`);
+
+  fs.mkdirSync(path.join(seed, 'tracker', 'inbox-app', 'automation'), { recursive: true });
+  for (const rel of ['update.sh', 'tracker/inbox-app/migrate.js', 'tracker/inbox-app/safe-storage.js',
+    'tracker/inbox-app/automation/run-task.sh', 'tracker/inbox-app/automation/slack-capture.sh', 'tracker/inbox-app/automation/backup-data.sh']) {
+    fs.copyFileSync(path.join(REPO_ROOT, rel), path.join(seed, rel));
+  }
+  fs.writeFileSync(path.join(seed, 'VERSION'), '1.0.0\n');
+  fs.writeFileSync(path.join(seed, 'ui.css'), 'body{}\n');
+  fs.writeFileSync(path.join(seed, '.gitignore'), 'workspace.config.json\ntracker/*.md\ntracker/.*\n.workspace-last-good\n');
+  runGit(seed, ['init', '-b', 'main']);
+  runGit(seed, ['add', '-A']);
+  runGit(seed, ['commit', '-m', '첫 버전']);
+  runGit(seed, ['tag', 'v1.0.0']);
+  fs.writeFileSync(path.join(seed, 'VERSION'), '1.1.0\n');
+  fs.writeFileSync(path.join(seed, 'ui.css'), 'body{color:blue}\n');
+  runGit(seed, ['commit', '-am', '다음 버전']);
+  runGit(seed, ['tag', 'v1.1.0']);
+  runGit(root, ['init', '--bare', '-b', 'main', origin]);
+  runGit(seed, ['remote', 'add', 'origin', origin]);
+  runGit(seed, ['push', '-q', 'origin', 'main', '--tags']);
+  runGit(root, ['clone', '-q', origin, clone]);
+  // 동료의 맥은 배포된 태그(stable)에 고정돼 있고, 나는 main 갈래를 따라간다.
+  if (channel === 'main') runGit(clone, ['reset', '--hard', '-q', 'v1.0.0']);
+  else runGit(clone, ['checkout', '--detach', '-q', 'v1.0.0']);
+
+  fs.writeFileSync(path.join(clone, 'workspace.config.json'), JSON.stringify({ server: { updateChannel: channel, port: 4399 } }, null, 2));
+  fs.writeFileSync(path.join(clone, 'tracker', 'tasks.md'), '# Tasks\n- 지켜야 할 업무\n');
+  fs.writeFileSync(path.join(clone, 'tracker', '.workflow.json'), '{"items":{},"meetings":{}}');
+
+  // `extra`는 물음에 답을 넣거나(input) 환경을 하나 더 끼울 때만 쓴다 — 주지 않으면 예전 그대로다.
+  const run = (args = [], extra = {}) => spawnSync('/bin/bash', [path.join(clone, 'update.sh'), ...args], {
+    cwd: clone, encoding: 'utf8', timeout: 120000, input: extra.input,
+    // 이 테스트 파일이 쓰는 WORKSPACE_DATA_DIR이 새어 들어가면 안 된다 — 복사본 안의 tracker/를 보게 비운다.
+    env: { ...gitEnv, WORKSPACE_DATA_DIR: '', HOME: root, PATH: `${bin}:${process.env.PATH}`, WORKSPACE_BACKUP_DIR: backups, WORKSPACE_INSTALL_DIR: path.join(root, 'install'), ...(extra.env || {}) },
+  });
+  const dated = () => (fs.existsSync(backups) ? fs.readdirSync(backups) : []).filter(name => /^\d{4}-\d{2}-\d{2}-\d{4}$/.test(name)).sort();
+  const versionOf = () => fs.readFileSync(path.join(clone, 'VERSION'), 'utf8').trim();
+  const tasks = () => fs.readFileSync(path.join(clone, 'tracker', 'tasks.md'), 'utf8');
+  return { root, clone, backups, run, dated, versionOf, tasks };
+}
+
+test('update.sh: 깨끗한 트리에서는 배포된 최신 버전으로 옮기고, 데이터를 먼저 백업하고 최근 5개만 남긴다', { skip: !gitReady }, (t) => {
+  const fix = updateFixture(t);
+  fs.mkdirSync(fix.backups, { recursive: true });
+  for (const day of ['01', '02', '03', '04', '05', '06']) fs.mkdirSync(path.join(fix.backups, `2020-01-${day}-0900`));
+  fs.mkdirSync(path.join(fix.backups, '내가-만든-폴더'));
+
+  const result = fix.run(['--yes']);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  for (const step of ['[1/6]', '[2/6]', '[3/6]', '[4/6]', '[5/6]', '[6/6]']) assert.ok(result.stdout.includes(step), `${step} 줄이 보인다`);
+  assert.match(result.stdout, /v1\.1\.0으로 업데이트했어요/);
+  assert.equal(fix.versionOf(), '1.1.0');
+  assert.match(fix.tasks(), /지켜야 할 업무/, '업무 데이터는 그대로다');
+
+  const dated = fix.dated();
+  assert.equal(dated.length, 5, '이 스크립트가 만든 백업은 최근 5개만 남긴다');
+  assert.ok(fs.existsSync(path.join(fix.backups, '내가-만든-폴더')), '이름 규칙이 다른 폴더는 건드리지 않는다');
+  const newest = path.join(fix.backups, dated[dated.length - 1]);
+  assert.match(fs.readFileSync(path.join(newest, 'tasks.md'), 'utf8'), /지켜야 할 업무/);
+  assert.ok(fs.existsSync(path.join(newest, '.workflow.json')));
+  assert.ok(fs.existsSync(path.join(newest, 'workspace.config.json')));
+
+  const calls = fs.readFileSync(path.join(fix.root, 'launchctl.log'), 'utf8');
+  assert.match(calls, /kickstart -k gui\/\d+\/com\.workspace\.app\.server/, '정확한 이름 하나에만 부탁한다');
+  assert.doesNotMatch(calls, /pkill|killall/);
+});
+
+test('update.sh: 고친 파일을 그대로 두기로 하면 업데이트를 멈추고 데이터를 지킨다', { skip: !gitReady }, (t) => {
+  const fix = updateFixture(t);
+  fs.writeFileSync(path.join(fix.clone, 'ui.css'), '/* 내가 고친 것 */\n');
+
+  const result = fix.run(['--yes']);   // --yes는 "그대로 두기"를 고른다
+  assert.notEqual(result.status, 0);
+  assert.match(result.stdout, /고친 파일이 있어요: ui\.css/);
+  assert.match(result.stdout, /고친 파일 때문에 업데이트를 이어 갈 수 없어요/);
+  assert.equal(fs.readFileSync(path.join(fix.clone, 'ui.css'), 'utf8'), '/* 내가 고친 것 */\n', '고친 파일을 덮어쓰지 않는다');
+  assert.equal(fix.versionOf(), '1.0.0');
+  assert.match(fix.tasks(), /지켜야 할 업무/, '멈춰도 업무 데이터는 그대로다');
+  assert.equal(fix.dated().length, 1, '멈추기 전에 백업은 이미 만들어 둔다');
+});
+
+test('update.sh --rollback은 이전 코드와 백업 데이터를 함께 되돌린다', { skip: !gitReady }, (t) => {
+  const fix = updateFixture(t);
+  assert.equal(fix.run(['--yes']).status, 0);
+  assert.equal(fix.versionOf(), '1.1.0');
+  // 새 버전에서 데이터가 망가진 상황을 흉내 낸다
+  fs.writeFileSync(path.join(fix.clone, 'tracker', 'tasks.md'), '# Tasks\n- 망가진 내용\n');
+
+  const back = fix.run(['--rollback', '--yes']);
+  assert.equal(back.status, 0, back.stdout + back.stderr);
+  assert.equal(fix.versionOf(), '1.0.0', '코드는 이전 자리로 돌아간다');
+  assert.match(fix.tasks(), /지켜야 할 업무/, '데이터도 백업에서 돌아온다');
+  assert.equal(fs.existsSync(path.join(fix.clone, '.workspace-last-good')), false, '두 번 되돌리지 않는다');
+});
+
+// 고친 내용을 보관하지 못했는데 되돌리면 그 내용이 그대로 사라진다(최종 QA). 보관에 실패하면
+// 지우지 않고 멈춘다. `git stash create`가 빈 값을 주는 상황은 명령을 바꿔 끼워 흉내 낸다.
+test('update.sh: 고친 내용을 보관하지 못하면 되돌리지 않고 멈춘다', { skip: !gitReady }, (t) => {
+  const fix = updateFixture(t);
+  fs.writeFileSync(path.join(fix.clone, 'ui.css'), '/* 내가 고친 것 */\n');
+
+  // `되돌리고 받을까요? [y]`에 y라고 답하는데, 보관이 실패한다
+  const result = fix.run([], { input: 'y\n', env: { WORKSPACE_STASH_CREATE: 'true' } });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stdout, /고친 내용을 보관하지 못해 멈췄어요/);
+  assert.equal(fs.readFileSync(path.join(fix.clone, 'ui.css'), 'utf8'), '/* 내가 고친 것 */\n', '고친 내용은 지워지지 않는다');
+  assert.equal(fix.versionOf(), '1.0.0', '멈췄으니 새 버전을 받지도 않는다');
+  assert.match(fix.tasks(), /지켜야 할 업무/);
+
+  // 보관이 되면 예전처럼 가지에 담고 되돌린 뒤 이어 간다
+  const ok = fix.run([], { input: 'y\n' });
+  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+  assert.match(ok.stdout, /고친 내용을 local-changes-[0-9-]+ 가지에 담아 뒀어요/);
+  assert.equal(fix.versionOf(), '1.1.0');
+  assert.doesNotMatch(fs.readFileSync(path.join(fix.clone, 'ui.css'), 'utf8'), /내가 고친 것/);
+  assert.match(runGit(fix.clone, ['branch', '--list', 'local-changes-*']).stdout, /local-changes-/, '고친 내용은 가지로 남아 있다');
+});
+
+test('update.sh: main 갈래는 태그가 아니라 origin/main을 앞으로만 따라간다', { skip: !gitReady }, (t) => {
+  const fix = updateFixture(t, { channel: 'main' });
+  const result = fix.run(['--yes']);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(fix.versionOf(), '1.1.0');
+  assert.equal(runGit(fix.clone, ['rev-parse', '--abbrev-ref', 'HEAD']).stdout.trim(), 'main', '갈래를 떼어 놓지 않는다');
+  assert.equal(runGit(fix.clone, ['rev-parse', 'HEAD']).stdout.trim(), runGit(fix.clone, ['rev-parse', 'origin/main']).stdout.trim());
+});
+
+// setup.sh는 실행하지 않는다(실제 launchd·홈 폴더를 건드린다) — 설정을 읽는 그 조각만 꺼내 돌린다.
+test('setup.sh: 설정은 python3가 아니라 node로 읽고, 못 읽으면 에이전트를 내리기 전에 멈춘다', () => {
+  const script = fs.readFileSync(path.join(REPO_ROOT, 'setup.sh'), 'utf8');
+  assert.ok(!script.includes('json.load(open('), '설정을 python3로 읽던 자리는 남아 있지 않다');
+  for (const key of ['slack', 'calendar', 'jira', 'tiro']) {
+    assert.ok(script.includes(`config_read uses ${key})`) && script.includes('|| die "$CONFIG_UNREADABLE"'),
+      `${key}는 읽기에 실패하면 멈춘다(꺼진 것으로 읽지 않는다)`);
+  }
+  const reader = script.split("CONFIG_READER='")[1].split("\n'\n")[0];
+
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-setup-read-'));
+  const config = path.join(home, 'workspace.config.json');
+  const read = (...args) => spawnSync(process.execPath, ['-e', reader, config, ...args], { encoding: 'utf8' });
+
+  fs.writeFileSync(config, JSON.stringify({
+    integrations: { slack: false, calendar: true },
+    server: { port: 4399, chromeProfile: 'Profile 1' },
+    slack: { tokenFile: '~/.config/workspace-slack-token' },
+  }));
+  assert.equal(read('uses', 'slack').stdout, 'no');
+  assert.equal(read('uses', 'calendar').stdout, 'yes');
+  assert.equal(read('uses', 'jira').stdout, 'yes', '칸이 없으면 켜진 것이다(서버 USES와 같은 규칙)');
+  assert.equal(read('server', 'port').stdout, '4399');
+  assert.equal(read('server', 'extraHost').stdout, '', '없는 칸은 빈 값이다');
+  assert.equal(read('chromeProfile').stdout, 'Profile 1');
+  assert.equal(read('slackToken').stdout, path.join(os.homedir(), '.config', 'workspace-slack-token'));
+
+  // 이 값은 쉘 명령에 들어간다 — 폴더 이름에 쓰이는 글자만 통과한다
+  fs.writeFileSync(config, JSON.stringify({ server: { chromeProfile: "'; rm -rf ~" } }));
+  assert.equal(read('chromeProfile').stdout, '');
+
+  // 깨진 설정은 "빈 값"이 아니라 오류다 — setup.sh는 여기서 멈춘다
+  fs.writeFileSync(config, '{망가짐');
+  assert.notEqual(read('uses', 'slack').status, 0);
+  assert.equal(read('uses', 'slack').stdout, '');
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+// jira-sync(지라 담당 이슈 캐시 갱신) 자동화는 없앴다 — 앱이 지라를 직접 읽는다(DECISIONS 2026-09-24).
+// setup.sh는 실행하지 않는다 — 등록·해제 조각을 문자열로만 확인한다.
+test('setup.sh는 jira-sync를 등록하지 않고, 지라 켬/끔과 무관하게 등록을 내린다', () => {
+  const script = fs.readFileSync(path.join(REPO_ROOT, 'setup.sh'), 'utf8');
+  assert.ok(!script.includes('write_task_agent "jira-sync"'), 'jira-sync를 새로 등록하는 자리는 없다');
+  assert.ok(!/\[\s*"\$USE_JIRA"\s*=\s*"yes"\s*\]\s*\|\|\s*remove_agent jira-sync/.test(script),
+    '지라를 켰을 때만 내리던 예전 조건문은 없다');
+  assert.match(script, /\nremove_agent jira-sync\n/, '켬/끔과 무관하게 무조건 내린다');
+  // 등록 루프(launchctl load)에는 이제 jira-sync가 없다 — 나머지는 그대로다.
+  const loadLoop = script.split('for f in server slack-capture calendar-sync')[1].split('\n')[0];
+  assert.ok(!loadLoop.includes('jira-sync'), '등록 루프 목록에서 jira-sync를 뺐다');
+  assert.ok(loadLoop.includes('tiro-sync') && loadLoop.includes('data-backup'), '나머지 자동화는 그대로 등록한다');
+  // 옛 이름(com.luvon.workspace.jira-sync) 정리용 목록에는 남겨 둔다 — 옛 설치가 지운다.
+  assert.match(script, /AGENT_NAMES="[^"]*\bjira-sync\b[^"]*"/, '옛 라벨 정리용 이름 목록은 그대로 남긴다');
+});
+
+// app-refresh.sh는 실제 ~/Applications·실제 osacompile에 닿지 않는다 — 임시 HOME과 PATH 앞의 가짜 명령만 쓴다.
+test('WP-D2 app-refresh.sh: Dock 앱을 만들고, 이름이 바뀌면 기록된 옛 이름 하나만 지우며 ~/Applications 밖·남의 앱은 건드리지 않는다', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-app-refresh-'));
+  const homeDir = path.join(root, 'home');
+  const apps = path.join(homeDir, 'Applications');
+  const ws = path.join(root, 'ws');
+  const install = path.join(root, 'install');
+  const bin = path.join(root, 'bin');
+  const calls = path.join(root, 'calls.log');
+  fs.mkdirSync(path.join(ws, 'tracker', 'inbox-app', 'icons'), { recursive: true });
+  fs.copyFileSync(path.join(__dirname, 'icons', 'icon-512.png'), path.join(ws, 'tracker', 'inbox-app', 'icons', 'icon-512.png'));
+  fs.mkdirSync(bin);
+  fs.mkdirSync(path.join(root, 'tmp'));
+  const log = name => `echo "${name} $*" >> ${JSON.stringify(calls)}`;
+  const failFlag = path.join(root, 'fail-osacompile');
+  writeExec(path.join(bin, 'osacompile'), `#!/bin/bash\n${log('osacompile')}\n[ -f ${JSON.stringify(failFlag)} ] && exit 1\nout=""; while [ $# -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done\nmkdir -p "$out/Contents/Resources/Scripts" && touch "$out/Contents/Resources/Scripts/main.scpt" "$out/Contents/Info.plist"\n`);
+  writeExec(path.join(bin, 'python3'), `#!/bin/bash\n${log('python3')}\ntouch "$3/ws.icns"\n`);
+  for (const name of ['iconutil', 'codesign', 'plutil', 'xattr', 'lsregister']) writeExec(path.join(bin, name), `#!/bin/bash\n${log(name)}\n`);
+  const config = path.join(ws, 'workspace.config.json');
+  const run = (dockName) => {
+    fs.writeFileSync(config, JSON.stringify({ server: { port: 4399, ...(dockName ? { dockName } : {}) } }));
+    return spawnSync('/bin/bash', [automationScript('app-refresh.sh')], {
+      encoding: 'utf8', timeout: 60000,
+      env: { ...process.env, HOME: homeDir, PATH: `${bin}:${process.env.PATH}`, TMPDIR: path.join(root, 'tmp'),
+        WORKSPACE_DIR: ws, WORKSPACE_CONFIG: config, WORKSPACE_INSTALL_DIR: install, LSREGISTER_BIN: path.join(bin, 'lsregister') },
+    });
+  };
+  const record = () => fs.readFileSync(path.join(install, 'app-bundle-name'), 'utf8').trim();
+  const ours = name => { const dir = path.join(apps, `${name}.app`, 'Contents', 'Resources', 'Scripts'); fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, 'main.scpt'), ''); };
+
+  // 1) 처음 — 기본 이름 Workspace, 아이콘까지 넣고 이름을 적어 둔다
+  const first = run('');
+  assert.equal(first.status, 0, first.stdout + first.stderr);
+  assert.ok(fs.existsSync(path.join(apps, 'Workspace.app', 'Contents', 'Resources', 'applet.icns')));
+  assert.equal(record(), 'Workspace');
+  assert.match(fs.readFileSync(calls, 'utf8'), /codesign --force --deep -s - .*\/new\.app/, '임시 자리에 다 만든 뒤 서명한다');
+  assert.match(fs.readFileSync(calls, 'utf8'), /osacompile -o .*\/new\.app /, '기존 자리에 바로 만들지 않는다');
+  assert.deepEqual(fs.readdirSync(path.join(root, 'tmp')), [], '임시 폴더는 남기지 않는다');
+
+  // 2) 이름을 바꾸면 새 앱을 만들고 기록된 옛 이름(Workspace) 하나만 지운다 — 다른 앱은 그대로
+  ours('Other');
+  const renamed = run('My Work');
+  assert.equal(renamed.status, 0, renamed.stdout + renamed.stderr);
+  assert.ok(fs.existsSync(path.join(apps, 'My Work.app')), renamed.stdout + renamed.stderr + fs.readdirSync(apps).join(','));
+  assert.equal(fs.existsSync(path.join(apps, 'Workspace.app')), false);
+  assert.ok(fs.existsSync(path.join(apps, 'Other.app')), '목록을 훑어 지우지 않는다');
+  assert.equal(record(), 'My Work');
+
+  // 2-1) osacompile이 실패하면 기존 앱은 그대로 남고 이름 기록도 바뀌지 않는다
+  fs.writeFileSync(path.join(apps, 'My Work.app', 'Contents', 'Resources', 'Scripts', 'main.scpt'), 'before');
+  fs.writeFileSync(failFlag, '');
+  const broken = run('My Work');
+  assert.notEqual(broken.status, 0);
+  assert.match(broken.stdout, /앱을 만들지 못했어요 — 기존 앱은 그대로 뒀어요/);
+  assert.equal(fs.readFileSync(path.join(apps, 'My Work.app', 'Contents', 'Resources', 'Scripts', 'main.scpt'), 'utf8'), 'before', '기존 앱을 먼저 지우지 않는다');
+  assert.equal(record(), 'My Work');
+  assert.deepEqual(fs.readdirSync(path.join(root, 'tmp')), [], '실패해도 임시 폴더는 남기지 않는다');
+  fs.rmSync(failFlag);
+  // 다시 성공하면 새로 만든 앱으로 바뀐다
+  assert.equal(run('My Work').status, 0);
+  assert.equal(fs.readFileSync(path.join(apps, 'My Work.app', 'Contents', 'Resources', 'Scripts', 'main.scpt'), 'utf8'), '', '새로 만든 앱으로 바꿨다');
+  assert.ok(fs.existsSync(path.join(apps, 'My Work.app', 'Contents', 'Resources', 'applet.icns')));
+  assert.equal(fs.existsSync(path.join(apps, 'new.app')), false);
+
+  // 3) 기록이 ~/Applications 밖을 가리키면 지우지 않는다
+  const outside = path.join(homeDir, 'outside.app');
+  fs.mkdirSync(path.join(outside, 'Contents', 'Resources', 'Scripts'), { recursive: true });
+  fs.writeFileSync(path.join(outside, 'Contents', 'Resources', 'Scripts', 'main.scpt'), '');
+  fs.writeFileSync(path.join(install, 'app-bundle-name'), '../outside\n');
+  const refused = run('My Work');
+  assert.equal(refused.status, 0);
+  assert.ok(fs.existsSync(outside), '~/Applications 밖은 절대 지우지 않는다');
+  assert.match(refused.stdout, /이전 이름 기록이 이상해서 옛 앱은 지우지 않았어요/);
+
+  // 4) 이 설치가 만든 앱(스크립트 앱)이 아니면 이름이 기록돼 있어도 두고 간다
+  fs.mkdirSync(path.join(apps, 'Notes.app', 'Contents'), { recursive: true });
+  fs.writeFileSync(path.join(install, 'app-bundle-name'), 'Notes\n');
+  const kept = run('My Work');
+  assert.equal(kept.status, 0);
+  assert.ok(fs.existsSync(path.join(apps, 'Notes.app')));
+  assert.match(kept.stdout, /이 설치가 만든 앱이 아니라서 그대로 뒀어요/);
+
+  // 5) 규칙에 안 맞는 이름(경로 글자)은 기본 이름으로 만든다
+  const odd = run('../evil');
+  assert.equal(odd.status, 0);
+  assert.ok(fs.existsSync(path.join(apps, 'Workspace.app')));
+  assert.equal(fs.existsSync(path.join(homeDir, 'evil.app')), false);
+
+  // 6) Dock 이름이 이미 있는 다른 앱(스크립트 앱 아님)과 같으면 그 앱을 지우지 않고 멈춘다
+  fs.mkdirSync(path.join(apps, 'Slack.app', 'Contents', 'MacOS'), { recursive: true });
+  fs.writeFileSync(path.join(apps, 'Slack.app', 'Contents', 'MacOS', 'Slack'), 'real');
+  const clash = run('Slack');
+  assert.notEqual(clash.status, 0);
+  assert.equal(fs.readFileSync(path.join(apps, 'Slack.app', 'Contents', 'MacOS', 'Slack'), 'utf8'), 'real');
+  assert.match(clash.stdout, /다른 앱이라 그대로 뒀어요/);
+  assert.equal(record(), 'Workspace', '실패하면 이름 기록을 바꾸지 않는다');
+
+  const script = fs.readFileSync(automationScript('app-refresh.sh'), 'utf8');
+  assert.ok(!/killall|pkill|kill -9/.test(script), 'Dock을 다시 시작하지 않는다');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('WP-D2 run-task.sh: 캘린더가 비밀 주소 갈래면 calendar-sync는 claude를 부르지 않고 건너뛴다', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-ical-skip-'));
+  const logs = path.join(home, 'logs');
+  const called = path.join(home, 'called.txt');
+  const claude = path.join(home, 'fake-claude.sh');
+  writeExec(claude, `#!/bin/bash\necho "불렸음" >> ${JSON.stringify(called)}\n`);
+  const config = path.join(home, 'workspace.config.json');
+  fs.writeFileSync(config, JSON.stringify({ integrations: { calendar: true, tiro: true }, calendar: { source: 'ical' } }));
+  const env = { WORKSPACE_DIR: home, WORKSPACE_CONFIG: config, AUTOMATION_LOG_DIR: logs, CLAUDE_BIN: claude };
+  assert.equal(runScript(automationScript('run-task.sh'), ['calendar-sync', '프롬프트', 'Read'], env).status, 0);
+  assert.match(fs.readFileSync(path.join(logs, 'calendar-sync.log'), 'utf8'), /calendar-sync 비밀 주소로 앱이 직접 읽고 있어 건너뛰어요/);
+  assert.equal(fs.existsSync(called), false);
+  // 다른 작업은 그대로 돈다
+  assert.equal(runScript(automationScript('run-task.sh'), ['tiro-sync', '프롬프트', 'Read'], env).status, 0);
+  assert.equal(fs.readFileSync(called, 'utf8').trim(), '불렸음');
+  // Claude Code 갈래로 돌아가면 예전처럼 돈다
+  fs.writeFileSync(config, JSON.stringify({ integrations: { calendar: true }, calendar: { source: 'claude' } }));
+  fs.rmSync(called);
+  assert.equal(runScript(automationScript('run-task.sh'), ['calendar-sync', '프롬프트', 'Read'], env).status, 0);
+  assert.equal(fs.readFileSync(called, 'utf8').trim(), '불렸음');
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+// setup.sh는 실행하지 않는다 — 조각을 문자열로 확인하고, 설정 읽기 조각만 돌려 본다.
+test('WP-D2 setup.sh: app-refresh를 늘 등록하고(요청 파일 WatchPaths), 캘린더가 비밀 주소면 calendar-sync를 내리며, Dock 앱은 app-refresh.sh가 만든다', () => {
+  const script = fs.readFileSync(path.join(REPO_ROOT, 'setup.sh'), 'utf8');
+  assert.match(script, /<string>\$LABEL\.app-refresh<\/string>/);
+  assert.match(script, /<string>\$\(xml_escape "\$INSTALL_DIR\/requests\/app-refresh\.request"\)<\/string>/);
+  // WP-D2.5에서 `지금 가져오기` 에이전트 둘(slack-capture-now·calendar-sync-now)이 뒤에 붙었다.
+  assert.match(script, /for f in server slack-capture calendar-sync tiro-sync data-backup app-refresh slack-capture-now calendar-sync-now; do/);
+  assert.match(script, /"\$APP_DIR\/automation\/app-refresh\.sh" "\$INSTALL_DIR\/"/, '설치 위치로 복사한다');
+  assert.match(script, /bash "\$INSTALL_DIR\/app-refresh\.sh"/, '5단계는 app-refresh.sh 하나가 한다');
+  assert.ok(!script.includes('osacompile'), 'Dock 앱 만드는 코드는 setup.sh에 두 벌 두지 않는다');
+  assert.match(script, /\[ "\$USE_CAL_SYNC" = "yes" \] && write_task_agent "calendar-sync"/);
+  assert.match(script, /\[ "\$USE_CAL_SYNC" = "yes" \] \|\| remove_agent calendar-sync/);
+  assert.match(script, /\[ "\$CAL_SOURCE" = "ical" \] && USE_CAL_SYNC="no"/);
+  assert.ok(!/killall|pkill/.test(script), 'Dock·프로세스를 이름으로 끝내지 않는다');
+
+  const reader = script.split("CONFIG_READER='")[1].split("\n'\n")[0];
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-setup-ical-'));
+  const config = path.join(home, 'workspace.config.json');
+  const read = (...args) => spawnSync(process.execPath, ['-e', reader, config, ...args], { encoding: 'utf8' }).stdout;
+  fs.writeFileSync(config, JSON.stringify({ integrations: { calendar: true }, calendar: { source: 'ical' } }));
+  assert.equal(read('calendarSource'), 'ical');
+  fs.writeFileSync(config, JSON.stringify({ integrations: { calendar: true }, calendar: { source: 'claude' } }));
+  assert.equal(read('calendarSource'), '');
+  fs.writeFileSync(config, JSON.stringify({}));
+  assert.equal(read('calendarSource'), '');
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('WP-D2.5 slack-capture.sh: SLACK_CAPTURE_MANUAL=1이면 시간대 판단을 건너뛰고, 연동을 껐으면 여전히 멈춘다', () => {
+  const script = fs.readFileSync(automationScript('slack-capture.sh'), 'utf8');
+  assert.match(script, /if \[ "\$\{SLACK_CAPTURE_IGNORE_HOURS:-0\}" != "1" \] && \[ "\$\{SLACK_CAPTURE_MANUAL:-0\}" != "1" \]; then/);
+  // 연동 끔 검사가 시간 판단보다 먼저다
+  assert.ok(script.indexOf('슬랙 수집이 꺼져 있어 건너뛰어요') < script.indexOf('SLACK_CAPTURE_MANUAL:-0'));
+
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-slack-manual-'));
+  const logs = path.join(home, 'logs');
+  const config = path.join(home, 'workspace.config.json');
+  const env = { WORKSPACE_DIR: home, WORKSPACE_CONFIG: config, AUTOMATION_LOG_DIR: logs };
+  fs.writeFileSync(config, '{}');
+  // 스크립트가 PATH를 새로 잡아 시계를 바꿔 끼울 수 없다 — 지금 시각이 9~19시 밖일 때만 "주기 실행은 조용히 빠진다"를 본다.
+  const hour = new Date().getHours();
+  if (hour < 9 || hour >= 19) {
+    assert.equal(runScript(automationScript('slack-capture.sh'), [], env).status, 0, '5분 주기 실행은 시간대 밖이면 조용히 빠진다');
+    assert.equal(fs.existsSync(path.join(logs, 'slack-capture.log')), false);
+  }
+  // 수동 실행은 몇 시든 채널 확인까지 간다(켜진 채널이 없어 수집하지 않고 한 줄 남긴다)
+  const manual = runScript(automationScript('slack-capture.sh'), [], { ...env, SLACK_CAPTURE_MANUAL: '1' });
+  assert.equal(manual.status, 0);
+  assert.match(fs.readFileSync(path.join(logs, 'slack-capture.log'), 'utf8'), /켜진 채널이 없어 건너뛰어요/);
+  fs.writeFileSync(config, JSON.stringify({ integrations: { slack: false } }));
+  assert.equal(runScript(automationScript('slack-capture.sh'), [], { ...env, SLACK_CAPTURE_MANUAL: '1' }).status, 0);
+  assert.match(fs.readFileSync(path.join(logs, 'slack-capture.log'), 'utf8'), /슬랙 수집이 꺼져 있어 건너뛰어요/);
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('WP-D2.5 setup.sh: 지금 가져오기 에이전트 둘을 등록하고(ical이면 calendar-sync-now 없음), 티로 프롬프트는 calendar.source로 고른다', () => {
+  const script = fs.readFileSync(path.join(REPO_ROOT, 'setup.sh'), 'utf8');
+  // 슬랙: 같은 slack-capture.sh를 SLACK_CAPTURE_MANUAL=1로, 요청 파일을 지켜본다(슬랙을 켰을 때만)
+  const slackBlock = script.split('if [ "$USE_SLACK" = "yes" ]; then\ncat > "$AGENTS_DIR/$LABEL.slack-capture.plist"')[1].split('\nfi\n')[0];
+  assert.match(slackBlock, /<string>\$LABEL\.slack-capture-now<\/string>/);
+  assert.match(slackBlock, /<key>SLACK_CAPTURE_MANUAL<\/key>\n\s*<string>1<\/string>/);
+  assert.match(slackBlock, /<string>\$\(xml_escape "\$INSTALL_DIR\/requests\/slack-capture\.request"\)<\/string>/);
+  assert.match(slackBlock, /<key>WatchPaths<\/key>/);
+  assert.match(slackBlock, /<key>RunAtLoad<\/key>\n\s*<false\/>/);
+  // 캘린더(Claude): calendar-sync-now는 USE_CAL_SYNC일 때만(ical이면 no) — run-task.sh에는 calendar-sync 이름으로
+  assert.match(script, /\[ "\$USE_CAL_SYNC" = "yes" \] && write_watch_agent "calendar-sync-now" "\$INSTALL_DIR\/requests\/calendar-sync\.request" \\\n\s*"\$CAL_SYNC_PROMPT" "\$CAL_SYNC_TOOLS" "calendar-sync"/);
+  assert.match(script, /\[ "\$CAL_SOURCE" = "ical" \] && USE_CAL_SYNC="no"/);
+  assert.match(script, /\[ "\$USE_SLACK" = "yes" \] \|\| remove_agent slack-capture-now/);
+  assert.match(script, /\[ "\$USE_CAL_SYNC" = "yes" \] \|\| remove_agent calendar-sync-now/);
+  assert.match(script, /local name="\$1" watch="\$2" prompt tools task/);
+  assert.match(script, /<string>\$task<\/string>/);
+
+  // write_watch_agent 조각만 꺼내 임시 폴더에 plist를 써 본다(launchctl은 부르지 않는다)
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-setup-watch-'));
+  const piece = script.split('xml_escape() {')[1].split('\n# 슬랙 캡처 — 새 메시지가 있을 때만')[0];
+  const runner = `AGENTS_DIR=${JSON.stringify(home)}; LABEL=com.workspace.app; INSTALL_DIR=/x/inst; WORKSPACE=/x/ws\nxml_escape() {${piece}\nwrite_watch_agent "calendar-sync-now" "/x/inst/requests/calendar-sync.request" "프롬프트 <&>" "Read" "calendar-sync"\nwrite_watch_agent "tiro-sync" "/x/inst/requests/tiro-sync.request" "p" "t"\n`;
+  const ran = spawnSync('/bin/bash', ['-c', runner], { encoding: 'utf8' });
+  assert.equal(ran.status, 0, ran.stderr);
+  const now = fs.readFileSync(path.join(home, 'com.workspace.app.calendar-sync-now.plist'), 'utf8');
+  assert.match(now, /<string>com\.workspace\.app\.calendar-sync-now<\/string>/);
+  assert.match(now, /<string>\/x\/inst\/run-task\.sh<\/string>\n\s*<string>calendar-sync<\/string>/, '실행 이름은 calendar-sync(로그·상태를 한 줄로)');
+  assert.match(now, /프롬프트 &lt;&amp;&gt;/);
+  assert.match(now, /logs\/calendar-sync\.err/);
+  const tiro = fs.readFileSync(path.join(home, 'com.workspace.app.tiro-sync.plist'), 'utf8');
+  assert.match(tiro, /<string>\/x\/inst\/run-task\.sh<\/string>\n\s*<string>tiro-sync<\/string>/, '다섯째 값이 없으면 예전 그대로');
+  fs.rmSync(home, { recursive: true, force: true });
+
+  // 티로 프롬프트: calendar.source를 보고 고른다 — ical이면 calendar-sync를 시도하지 않고 앱의 오늘 미팅을
+  const tiroPrompt = script.split('write_watch_agent "tiro-sync"')[1].split('\n\n')[0];
+  assert.match(tiroPrompt, /calendar\.source를 보고 골라라/);
+  assert.match(tiroPrompt, /캘린더 갱신\(calendar-sync\)을 시도하지 말고 앱의 GET \/api\/items가 주는 오늘 미팅/);
+  const skill = fs.readFileSync(path.join(REPO_ROOT, '.claude', 'skills', 'tiro-sync.md'), 'utf8');
+  assert.match(skill, /`calendar\.source`가 `"ical"`/);
+  assert.match(skill, /\/api\/items`를 불러 응답의 `calendar\.events`/);
+});
+
+// 설치 위치 지키기 — 함수 조각만 source해서 임시 HOME·임시 폴더·가짜 git 저장소로만 시험한다.
+test('WP-D2.5 install-location: playio 폴더면 ~/workspace로 옮겨 새 위치의 스크립트로 이어 가고, 못 옮기면 멈추며, 그 밖은 그대로(바탕화면은 경고만)', { skip: !gitReady }, () => {
+  const lib = path.join(__dirname, 'automation', 'install-location.sh');
+  const script = fs.readFileSync(lib, 'utf8');
+  assert.ok(!/rm -rf|rm -r /.test(script), '옮기기 코드는 지우지 않는다');
+  assert.ok(!/pkill|killall|xargs kill/.test(script));
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-relocate-')));
+  const home = path.join(root, 'home');
+  fs.mkdirSync(home);
+  const target = path.join(home, 'workspace');
+  // 설치 폴더 하나를 흉내 낸다 — 옮긴 뒤 이어서 돌 `setup.sh`는 받은 인자와 표시를 적기만 한다
+  const makeInstall = (dir) => {
+    fs.mkdirSync(dir, { recursive: true });
+    writeExec(path.join(dir, 'setup.sh'), '#!/bin/bash\necho "continued:$(cd "$(dirname "$0")" && pwd -P):${WORKSPACE_RELOCATED:-}:$*"\n');
+    fs.writeFileSync(path.join(dir, 'marker.txt'), 'data\n');
+    return dir;
+  };
+  const guard = (dir, extra = '') => spawnSync('/bin/bash', ['-c',
+    `. ${JSON.stringify(lib)}\n${extra}\ncd ${JSON.stringify(root)}\ninstall_location_guard ${JSON.stringify(dir)} setup.sh --one two\necho "stayed:$?"`], {
+    encoding: 'utf8', env: { ...process.env, HOME: home, WORKSPACE_RELOCATE_TARGET: target, WORKSPACE_RELOCATED: '' },
+  });
+
+  // 1) 경로에 PlayIO(대소문자 무시) → 옮기고 새 위치의 같은 스크립트로 이어 간다(인자·표시 그대로)
+  const company = makeInstall(path.join(root, 'PlayIO-docs', 'tools', 'workspace-tracker'));
+  const moved = guard(company);
+  assert.equal(moved.status, 0, moved.stderr);
+  assert.match(moved.stdout, new RegExp(`continued:${target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:1:--one two`));
+  assert.ok(!moved.stdout.includes('stayed:'), 'exec로 넘어가 돌아오지 않는다');
+  assert.equal(fs.readFileSync(path.join(target, 'marker.txt'), 'utf8'), 'data\n');
+  assert.equal(fs.existsSync(company), false, '옛 자리에 링크·폴더를 새로 만들지 않는다');
+  assert.ok(fs.existsSync(path.join(root, 'PlayIO-docs', 'tools')), '회사 쪽 다른 폴더는 그대로다');
+
+  // 2) 대상이 이미 있으면(무엇이든) 멈추고 아무것도 바꾸지 않는다
+  const second = makeInstall(path.join(root, 'playio', 'workspace-tracker'));
+  const blocked = guard(second);
+  assert.match(blocked.stdout, /회사\(playio\) 폴더 안에 설치돼 있어서 ~\/workspace로 옮겨야 하는데, ~\/workspace가 이미 있어요\. 그 폴더 이름을 바꾼 뒤 다시 실행해 주세요\./);
+  assert.match(blocked.stdout, /stayed:1/);
+  assert.ok(fs.existsSync(path.join(second, 'marker.txt')));
+  fs.rmSync(target, { recursive: true, force: true });
+  fs.symlinkSync(path.join(root, 'nowhere'), target);
+  assert.match(guard(second).stdout, /이미 있어요[\s\S]*stayed:1/, '깨진 링크도 "있음"이다');
+  fs.unlinkSync(target);
+
+  // 3) 다른 디스크(장치 번호가 다름 — 주입) → 복사하지 않고 멈춘다
+  const otherDisk = guard(second, 'install_location_device() { case "$1" in *playio*) echo 1 ;; *) echo 2 ;; esac; }');
+  assert.match(otherDisk.stdout, /다른 디스크라 한 번에 옮길 수 없어요[\s\S]*stayed:1/);
+  assert.ok(fs.existsSync(path.join(second, 'marker.txt')) && !fs.existsSync(target));
+
+  // 4) 바깥쪽 git 저장소의 remote에 playio → 옮긴다(설치 폴더 자신의 .git은 보지 않는다)
+  const outer = path.join(root, 'company-repo');
+  fs.mkdirSync(outer);
+  runGit(outer, ['init', '-q']);
+  runGit(outer, ['remote', 'add', 'origin', 'git@github.com:PlayIO-Corp/docs.git']);
+  const nested = makeInstall(path.join(outer, 'sub', 'tracker-copy'));
+  runGit(nested, ['init', '-q']);
+  runGit(nested, ['remote', 'add', 'origin', 'https://github.com/luvoneun/workspace-tracker.git']);
+  const viaRemote = guard(nested);
+  assert.match(viaRemote.stdout, /continued:.*\/home\/workspace:1:/);
+  fs.rmSync(target, { recursive: true, force: true });
+
+  // 5) 일반 폴더·이름을 바꾼 폴더 → 그대로(자기 저장소 remote는 보지 않는다)
+  const plain = makeInstall(path.join(root, 'elsewhere', 'my-renamed-tracker'));
+  runGit(plain, ['init', '-q']);
+  runGit(plain, ['remote', 'add', 'origin', 'https://github.com/playio-mirror/workspace-tracker.git']);
+  const stay = guard(plain);
+  assert.equal(stay.stdout.trim(), 'stayed:0');
+  assert.ok(fs.existsSync(path.join(plain, 'marker.txt')) && !fs.existsSync(target));
+
+  // 6) 바탕화면 아래 → 경고 한 줄만, 그대로
+  const desk = makeInstall(path.join(home, 'Desktop', 'workspace-tracker'));
+  const warned = guard(desk);
+  assert.match(warned.stdout, /바탕화면·문서·iCloud 폴더는 동기화 때문에 느리거나 파일이 꼬일 수 있어요 — 권장 위치는 ~\/workspace예요\.\nstayed:0/);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('WP-D2.5 update.sh·setup.sh는 설치 위치 판단을 맨 앞에서 부르고, 옮겼으면 0단계 한 줄 + 새 위치에서 setup.sh를 다시 돌린다', () => {
+  const update = fs.readFileSync(path.join(REPO_ROOT, 'update.sh'), 'utf8');
+  const setup = fs.readFileSync(path.join(REPO_ROOT, 'setup.sh'), 'utf8');
+  const command = fs.readFileSync(path.join(REPO_ROOT, '업데이트.command'), 'utf8');
+  const guardAt = text => text.indexOf('install_location_guard "$WORKSPACE"');
+  assert.ok(guardAt(update) > 0 && guardAt(update) < update.indexOf('cd "$WORKSPACE" || exit 1'), 'update.sh: 폴더에 들어가기 전에');
+  assert.ok(guardAt(update) < update.indexOf('[1/6]') && guardAt(update) < update.indexOf('ROLLBACK" = "1"'));
+  assert.match(update, /install_location_guard "\$WORKSPACE" "update\.sh" "\$@"/);
+  assert.ok(guardAt(setup) > 0 && guardAt(setup) < setup.indexOf('[1/5]') && guardAt(setup) < setup.indexOf('xattr -d'), 'setup.sh: 맨 앞에서');
+  assert.match(setup, /install_location_guard "\$WORKSPACE" "setup\.sh" "\$@"/);
+  for (const text of [update, setup]) {
+    assert.match(text, /\. "\$WORKSPACE\/tracker\/inbox-app\/automation\/install-location\.sh"/);
+    assert.match(text, /echo "0\. 설치 위치 옮기기 — 회사 폴더 밖 ~\/workspace로 옮겼어요"/);
+  }
+  assert.match(update, /if \[ "\$\{WORKSPACE_RELOCATED:-\}" = "1" \]; then\n[\s\S]*?WORKSPACE_RELOCATED= bash "\$WORKSPACE\/setup\.sh"/);
+  // 복사본 규칙: 두 스크립트 모두 install-location.sh를 설치 폴더로 복사한다
+  assert.match(setup, /\ncp "\$APP_DIR\/automation\/run-task\.sh" [^\n]*"\$APP_DIR\/automation\/install-location\.sh" [^\n]*"\$INSTALL_DIR\/"\n/);
+  assert.match(update, /cp "\$APP_DIR\/automation\/install-location\.sh" "\$INSTALL_DIR\/"/);
+  assert.match(command, /bash update\.sh && cd "\$\(pwd -P\)" && bash setup\.sh/);
+  for (const text of [update, setup]) assert.ok(!/pkill|killall|xargs kill/.test(text));
+});
+
+// update-runner.sh — 가짜 update.sh/setup.sh가 부른 순서와 받은 인자·환경만 적는다.
+function runnerFixture(t) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-d3-runner-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const workspace = path.join(root, 'workspace');
+  const install = path.join(root, 'install');
+  const trail = path.join(root, 'trail.txt');
+  fs.mkdirSync(workspace);
+  fs.mkdirSync(path.join(install, 'requests'), { recursive: true });
+  const fake = (name, extra = '') => writeExec(path.join(workspace, name),
+    `#!/bin/bash\necho "${name} $* status=\${WORKSPACE_UPDATE_STATUS:-} runner=\${WORKSPACE_UPDATE_RUNNER:-}" >> ${JSON.stringify(trail)}\n${extra}exit 0\n`);
+  fake('update.sh');
+  fake('setup.sh');
+  const request = path.join(install, 'requests', 'update.request');
+  const ask = action => fs.writeFileSync(request, `${JSON.stringify({ action, requestedAt: new Date().toISOString() })}\n`);
+  const run = () => runScript(automationScript('update-runner.sh'), [], { HOME: root, WORKSPACE_DIR: workspace, WORKSPACE_INSTALL_DIR: install });
+  const lines = () => (fs.existsSync(trail) ? fs.readFileSync(trail, 'utf8').trim().split('\n').filter(Boolean) : []);
+  const statusFile = path.join(install, 'update-status.json');
+  return { root, workspace, install, trail, fake, request, ask, run, lines, statusFile };
+}
+
+test('WP-D3 update-runner.sh: update면 update.sh --yes 다음 setup.sh, rollback이면 --rollback --yes만, 모르는 action은 아무것도 안 한다', (t) => {
+  const fix = runnerFixture(t);
+  fix.ask('update');
+  assert.equal(fix.run().status, 0);
+  assert.deepEqual(fix.lines(), ['update.sh --yes status=1 runner=', 'setup.sh  status= runner=1'],
+    'update.sh는 상태 파일을 쓰게, setup.sh는 update 에이전트를 다시 올리지 않게 부른다');
+  assert.equal(fs.existsSync(fix.request), false, '요청은 한 번만 처리한다(읽고 지운다)');
+  assert.equal(fs.existsSync(path.join(fix.install, 'logs', '.update.lock')), false, '잠금은 풀고 끝난다');
+  assert.match(fs.readFileSync(path.join(fix.install, 'logs', 'update.log'), 'utf8'), /update-runner update 종료 \(exit 0\)/);
+
+  fs.writeFileSync(fix.trail, '');
+  fix.ask('rollback');
+  assert.equal(fix.run().status, 0);
+  assert.deepEqual(fix.lines(), ['update.sh --rollback --yes status=1 runner='], '되돌리기는 setup.sh를 부르지 않는다');
+
+  // 모르는 값·다른 모양의 요청은 아무것도 하지 않는다(글자를 명령·경로로 쓰지 않는다)
+  fs.writeFileSync(fix.trail, '');
+  for (const body of ['{"action":"update; touch pwned","requestedAt":"2026-09-24T00:00:00.000Z"}\n', '{"action":"UPDATE","requestedAt":"2026-09-24T00:00:00.000Z"}\n',
+    '{"requestedAt":"2026-09-24T00:00:00.000Z","action":"update","x":1}\n', 'update\n']) {
+    fs.writeFileSync(fix.request, body);
+    assert.equal(fix.run().status, 0);
+    assert.equal(fs.existsSync(fix.request), false, '모양이 틀린 요청은 그 파일만 지운다');
+  }
+  assert.deepEqual(fix.lines(), []);
+  assert.equal(fs.existsSync(path.join(fix.workspace, 'pwned')), false);
+  assert.equal(fs.existsSync(fix.statusFile), false, '틀린 요청은 상태 파일도 쓰지 않는다');
+  assert.equal(fix.run().status, 0, '요청 파일이 없으면(지운 것도 launchd를 깨운다) 조용히 끝난다');
+  assert.deepEqual(fix.lines(), []);
+});
+
+test('WP-D3 update-runner.sh: 한 번에 하나만 돌고(살아 있는 실행기가 쥔 잠금은 건너뜀), 죽은 잠금은 치우며, update.sh가 실패를 못 적고 멈추면 한 줄을 남긴다', async (t) => {
+  const fix = runnerFixture(t);
+  const lock = path.join(fix.install, 'logs', '.update.lock');
+  fs.mkdirSync(lock, { recursive: true });
+  // 명령줄에 update-runner가 보이는 프로세스 하나를 직접 띄워 잠금 주인으로 삼는다(끝날 때 그 자식만 끝낸다).
+  // (`sleep 30; true` — 명령 하나면 bash가 sleep으로 바꿔 끼워 명령줄에서 이름이 사라진다.)
+  const holder = spawn('/bin/bash', ['-c', 'sleep 30; true', 'update-runner'], { stdio: 'ignore' });
+  t.after(() => { if (holder.exitCode === null) holder.kill(); });
+  fs.writeFileSync(path.join(lock, 'pid'), `${holder.pid}\n`);
+  for (let i = 0; i < 40 && !/update-runner/.test(spawnSync('ps', ['-o', 'command=', '-p', String(holder.pid)], { encoding: 'utf8' }).stdout); i += 1) {
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  fix.ask('update');
+  assert.equal(fix.run().status, 0);
+  assert.deepEqual(fix.lines(), [], '도는 실행기가 있으면 건너뛴다');
+  assert.ok(fs.existsSync(fix.request), '건너뛴 요청은 그대로 남는다');
+  holder.kill();
+  await new Promise(resolve => holder.once('exit', resolve));
+
+  // 주인이 이미 없는 잠금 → 치우고 돈다
+  assert.equal(fix.run().status, 0);
+  assert.equal(fix.lines().length, 2);
+  assert.equal(fs.existsSync(lock), false);
+
+  // update.sh가 상태를 못 쓰고 실패 → 실행기가 고정 문구로 실패를 남기고, setup.sh는 부르지 않는다
+  fs.writeFileSync(fix.trail, '');
+  fix.fake('update.sh', 'exit 1\n');
+  fix.ask('update');
+  assert.equal(fix.run().status, 0);
+  assert.deepEqual(fix.lines(), ['update.sh --yes status=1 runner=']);
+  const failed = JSON.parse(fs.readFileSync(fix.statusFile, 'utf8'));
+  assert.equal(failed.state, 'failed');
+  assert.equal(failed.action, 'update');
+  assert.equal(failed.message, '업데이트를 끝내지 못했어요 — 업데이트.command를 더블클릭해 주세요');
+
+  // update.sh가 스스로 실패를 적었으면 그 이유를 덮어쓰지 않는다
+  fix.fake('update.sh', `printf '{"action":"update","state":"failed","message":"새 버전을 받아오지 못했어요","steps":[]}' > ${JSON.stringify(fix.statusFile)}\nexit 1\n`);
+  fix.ask('update');
+  fix.run();
+  assert.equal(JSON.parse(fs.readFileSync(fix.statusFile, 'utf8')).message, '새 버전을 받아오지 못했어요');
+
+  const script = fs.readFileSync(automationScript('update-runner.sh'), 'utf8');
+  assert.ok(!/rm -rf|pkill|killall|xargs kill|\bkill\b/.test(script), '지우기는 파일 하나·잠금은 rmdir, 프로세스는 끝내지 않는다');
+  assert.match(script, /^main "\$@"; exit \$\?$/m, '본문을 통째로 읽고 시작한다(복사본이 바뀌어도 안전)');
+});
+
+test('WP-D3 update.sh: WORKSPACE_UPDATE_STATUS가 있을 때만 단계마다 상태 파일을 쓴다', { skip: !gitReady }, (t) => {
+  const fix = updateFixture(t);
+  const statusFile = path.join(fix.root, 'install', 'update-status.json');
+  assert.equal(fix.run(['--yes']).status, 0);
+  assert.equal(fs.existsSync(statusFile), false, '터미널 실행(환경변수 없음)은 아무것도 쓰지 않는다');
+
+  const again = updateFixture(t);
+  const againStatus = path.join(again.root, 'install', 'update-status.json');
+  const result = again.run(['--yes'], { env: { WORKSPACE_UPDATE_STATUS: '1' } });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const done = JSON.parse(fs.readFileSync(againStatus, 'utf8'));
+  assert.equal(done.action, 'update');
+  assert.equal(done.state, 'done');
+  assert.equal(done.from, '1.0.0');
+  assert.equal(done.to, '1.1.0');
+  assert.equal(done.step, 6);
+  assert.deepEqual(done.steps.map(step => step.name), ['고친 파일 확인', '데이터 백업', '새 버전 받기', '데이터 형식 변환', '앱 다시 시작', '잘 떴는지 확인']);
+  assert.ok(done.steps.every(step => step.state === 'done'));
+  assert.ok(done.finishedAt);
+  assert.deepEqual(fs.readdirSync(path.dirname(againStatus)).filter(name => name.includes('.tmp-')), [], '임시 파일을 남기지 않는다');
+
+  // 되돌리기도 네 단계로 적는다
+  const back = again.run(['--rollback', '--yes'], { env: { WORKSPACE_UPDATE_STATUS: '1' } });
+  assert.equal(back.status, 0, back.stdout + back.stderr);
+  const rolled = JSON.parse(fs.readFileSync(againStatus, 'utf8'));
+  assert.equal(rolled.action, 'rollback');
+  assert.equal(rolled.state, 'done');
+  assert.equal(rolled.from, '1.1.0');
+  assert.equal(rolled.to, '1.0.0');
+  assert.deepEqual(rolled.steps.map(step => step.name), ['코드 되돌리기', '데이터 되돌리기', '앱 다시 시작', '잘 떴는지 확인']);
+});
+
+test('WP-D3 update.sh --yes: 6단계에서 앱이 응답하지 않으면 되돌리지 않고 상태 파일에 실패를 남긴다', { skip: !gitReady }, (t) => {
+  const fix = updateFixture(t);
+  const bin = path.join(fix.root, 'bin-down');
+  fs.mkdirSync(bin);
+  writeExec(path.join(bin, 'curl'), '#!/bin/bash\necho "{}"\n');
+  writeExec(path.join(bin, 'sleep'), '#!/bin/bash\nexit 0\n');
+  const result = fix.run(['--yes'], { env: { WORKSPACE_UPDATE_STATUS: '1', PATH: `${bin}:${path.join(fix.root, 'bin')}:${process.env.PATH}` } });
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /앱이 응답하지 않아요/);
+  assert.doesNotMatch(result.stdout, /이전 버전으로 되돌려요/, '묻지도, 스스로 되돌리지도 않는다');
+  assert.equal(fix.versionOf(), '1.1.0', '받은 버전 그대로 둔다 — 사람이 화면에서 되돌리기를 누른다');
+  assert.ok(fs.existsSync(path.join(fix.clone, '.workspace-last-good')), '되돌릴 자리는 남겨 둔다');
+  const failed = JSON.parse(fs.readFileSync(path.join(fix.root, 'install', 'update-status.json'), 'utf8'));
+  assert.equal(failed.state, 'failed');
+  assert.equal(failed.step, 6);
+  assert.equal(failed.message, '앱이 응답하지 않아요');
+  assert.deepEqual(failed.steps.map(step => step.state), ['done', 'done', 'done', 'done', 'done', 'failed']);
+
+  const script = fs.readFileSync(path.join(REPO_ROOT, 'update.sh'), 'utf8');
+  const tail = script.slice(script.indexOf('echo "[6/6] 잘 떴는지 확인"'));
+  assert.match(tail, /if \[ "\$ASSUME_YES" = "1" \]; then\n  ANSWER="n"/, '--yes는 되돌리기 질문에 n');
+  assert.ok(tail.indexOf('status_write failed "앱이 응답하지 않아요"') < tail.indexOf('ANSWER="n"'));
+  assert.match(script, /status_write\(\) \{\n  \[ -n "\$\{WORKSPACE_UPDATE_STATUS:-\}" \] \|\| return 0/, '환경변수가 없으면 쓰지 않는다');
+  assert.match(script, /cp "\$APP_DIR\/automation\/update-runner\.sh" "\$INSTALL_DIR\/"/, '받은 뒤 실행기 복사본도 갱신한다');
+});
+
+// setup.sh는 실행하지 않는다 — 조각을 문자열로 확인하고, 마무리 세 줄 조각만 가짜 `open`으로 돌려 본다.
+test('WP-D3 setup.sh: update 에이전트를 늘 등록하고(실행기 안에서는 다시 올리지 않음), 끝은 세 줄 + WORKSPACE_OPEN_APP일 때만 앱을 연다', (t) => {
+  const script = fs.readFileSync(path.join(REPO_ROOT, 'setup.sh'), 'utf8');
+  assert.match(script, /<string>\$LABEL\.update<\/string>/);
+  assert.match(script, /<string>\$\(xml_escape "\$INSTALL_DIR\/update-runner\.sh"\)<\/string>/);
+  assert.match(script, /<string>\$\(xml_escape "\$INSTALL_DIR\/requests\/update\.request"\)<\/string>/);
+  const plist = script.slice(script.indexOf('cat > "$AGENTS_DIR/$LABEL.update.plist"'), script.indexOf('# 업무 데이터 백업'));
+  assert.match(plist, /<key>RunAtLoad<\/key>\n  <false\/>/);
+  const intro = script.slice(script.indexOf('# 앱 안 `업데이트 받기`'), script.indexOf('cat > "$AGENTS_DIR/$LABEL.update.plist"'));
+  assert.ok(intro.length > 0 && !/USE_(SLACK|CAL|JIRA|TIRO)/.test(intro), '연동과 무관하게 늘');
+  assert.match(script, /"\$APP_DIR\/automation\/update-runner\.sh" "\$APP_DIR\/automation\/app-refresh\.sh" "\$INSTALL_DIR\/"/, '실행기도 설치 위치로 복사한다');
+  assert.match(script, /\[ "\$\{WORKSPACE_UPDATE_RUNNER:-\}" = "1" \] && IN_RUNNER="update"/);
+  assert.match(script, /if \[ "\$IN_RUNNER" = "update" \]; then\n  ok "update 그대로 \(지금 도는 업데이트\)"\nelif/);
+  assert.match(script, /\[ "\$f" = "server" \] && \[ -n "\$IN_RUNNER" \] && \[ "\$OLD_SERVER_PLIST" = "\$\(cat "\$plist"\)" \]/,
+    '실행기 안에서는 내용이 그대로인 서버를 다시 올리지 않는다(update.sh가 이미 새 코드로 다시 띄웠다)');
+  // 남은 일(/mcp)은 Claude 갈래 연동이 켜져 있을 때만 — 지라는 앱이 직접 읽는다
+  const connect = script.slice(script.indexOf('CONNECT=""'), script.indexOf('# 마무리 세 줄'));
+  assert.ok(!connect.includes('USE_JIRA'), '지라는 /mcp가 필요 없다');
+  assert.match(connect, /if \[ -n "\$CONNECT" \]; then/);
+
+  const ending = script.slice(script.indexOf('# 마무리 세 줄'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-d3-setup-end-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const bin = path.join(home, 'bin');
+  fs.mkdirSync(bin);
+  const opened = path.join(home, 'opened.txt');
+  writeExec(path.join(bin, 'open'), `#!/bin/bash\necho "$*" >> ${JSON.stringify(opened)}\n`);
+  const bundle = path.join(home, 'Applications', 'Workspace.app');
+  fs.mkdirSync(bundle, { recursive: true });
+  const end = open => spawnSync('/bin/bash', ['-c', `APP_BUNDLE=${JSON.stringify(bundle)}\n${ending}`], {
+    encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, WORKSPACE_OPEN_APP: open },
+  });
+  const install = end('1');
+  assert.equal(install.stdout, '✓ 설치를 끝냈어요 — 앱이 열려요.\n처음 열 때 "확인되지 않은 개발자"가 뜨면\n우클릭 → 열기 한 번.\n');
+  assert.equal(fs.readFileSync(opened, 'utf8').trim(), bundle, 'Dock 앱 하나만 연다');
+  fs.unlinkSync(opened);
+  const update = end('');
+  assert.equal(update.stdout, '✓ 설치를 끝냈어요.\n처음 열 때 "확인되지 않은 개발자"가 뜨면\n우클릭 → 열기 한 번.\n');
+  assert.equal(fs.existsSync(opened), false, '업데이트 때는 열지 않는다');
+  assert.ok(!/pkill|killall|xargs kill/.test(script));
+});
+
+// make-team-installer.sh — 임시 저장소에 스크립트를 복사해 돌린다(origin 주소는 적어 두기만 하고 받지 않는다).
+const dittoReady = process.platform === 'darwin' && fs.existsSync('/usr/bin/ditto');
+function teamFixture(t, config, { origin = 'https://github.com/someone/workspace.git' } = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-d3-team-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const repo = path.join(root, 'repo');
+  const out = path.join(root, 'out');
+  fs.mkdirSync(repo);
+  fs.mkdirSync(out);
+  fs.copyFileSync(path.join(REPO_ROOT, 'make-team-installer.sh'), path.join(repo, 'make-team-installer.sh'));
+  fs.writeFileSync(path.join(repo, 'workspace.config.json'), JSON.stringify(config, null, 2));
+  runGit(repo, ['init', '-q', '-b', 'main']);
+  if (origin) runGit(repo, ['remote', 'add', 'origin', origin]);
+  const run = () => spawnSync('/bin/bash', [path.join(repo, 'make-team-installer.sh'), out], { encoding: 'utf8', env: { ...process.env, HOME: root } });
+  const zip = path.join(out, '워크스페이스-설치.zip');
+  const unpack = () => {
+    const dir = fs.mkdtempSync(path.join(root, 'unzip-'));
+    assert.equal(spawnSync('/usr/bin/ditto', ['-x', '-k', zip, dir]).status, 0);
+    const folder = path.join(dir, '워크스페이스-설치');
+    return { dir, folder, command: path.join(folder, '설치.command'), readme: path.join(folder, '먼저 읽어 주세요.txt') };
+  };
+  return { root, repo, out, run, zip, unpack };
+}
+const TEAM_SECRET_CONFIG = {
+  title: '비밀 제목',
+  integrations: { slack: true, jira: true, calendar: true },
+  slack: { workspaceUrl: 'https://myco.slack.com', appUrl: 'https://api.slack.com/apps/A0SECRETAPP', tokenFile: '~/.config/SECRET-slack-token',
+    channels: { todo: { id: 'C0SECRETCH', name: '#secret-todo' } } },
+  jira: { siteUrl: 'https://myco.atlassian.net', email: 'me@secret-mail.test', displayName: '비밀이름', tokenFile: '~/.config/SECRET-jira-token' },
+  calendar: { source: 'ical', icalFile: '/secret/ical-file' },
+  server: { updateChannel: 'main', extraHost: 'secret-host.ts.net', chromeProfile: 'Profile 9', dockName: 'SecretDock', port: 4999 },
+};
+const TEAM_SECRETS = /SECRET|secret|비밀|Profile 9|4999|ical|C0SECRETCH/;
+
+test('WP-D3 make-team-installer.sh: 허용 목록 값만 담고(규칙에 어긋난 값은 빼고 알림), zip 안 설치.command는 실행 권한이 있으며, 이미 있으면 덮어쓰지 않는다', { skip: !(gitReady && dittoReady) }, (t) => {
+  const fix = teamFixture(t, TEAM_SECRET_CONFIG);
+  const tmpBase = process.env.TMPDIR || '/tmp';
+  const tmpBefore = new Set(fs.readdirSync(tmpBase).filter(n => n.startsWith('workspace-team-installer.')));
+  const made = fix.run();
+  assert.equal(made.status, 0, made.stdout + made.stderr);
+  assert.ok(fs.existsSync(fix.zip));
+  const tmpLeftover = fs.readdirSync(tmpBase).filter(n => n.startsWith('workspace-team-installer.') && !tmpBefore.has(n));
+  assert.deepEqual(tmpLeftover, [], '임시 폴더는 rm -rf 없이도 남지 않는다');
+  assert.match(made.stdout, /저장소 : https:\/\/github\.com\/someone\/workspace\.git/);
+  assert.match(made.stdout, /slack\.workspaceUrl = https:\/\/myco\.slack\.com/);
+  assert.match(made.stdout, /slack\.appUrl = https:\/\/api\.slack\.com\/apps\/A0SECRETAPP/);
+  assert.match(made.stdout, /jira\.siteUrl = https:\/\/myco\.atlassian\.net/);
+  assert.match(made.stdout, /server\.updateChannel = stable/, '내 설정이 main이어도 팀은 stable');
+  assert.doesNotMatch(made.stdout.replace(/A0SECRETAPP/g, ''), TEAM_SECRETS, '화면에 보여 주는 값도 허용 목록뿐');
+
+  const { command, readme } = fix.unpack();
+  assert.ok(fs.statSync(command).mode & 0o100, 'zip을 풀어도 실행 권한이 남아 있다');
+  assert.ok(fs.existsSync(readme), '같은 폴더에 설명서가 있다');
+  const readmeText = fs.readFileSync(readme, 'utf8');
+  assert.doesNotMatch(readmeText.replace(/A0SECRETAPP/g, ''), TEAM_SECRETS, '설명서에는 개인 값이 없다');
+  assert.doesNotMatch(readmeText, /myco|atlassian|github\.com\/someone|workspaceUrl|siteUrl|appUrl|updateChannel/, '설명서에는 config 값도 없다');
+  const text = fs.readFileSync(command, 'utf8');
+  assert.equal(spawnSync('/bin/bash', ['-n', command]).status, 0, '생성된 파일은 bash 문법이 맞다');
+  const team = JSON.parse(/^TEAM_CONFIG='(.*)'$/m.exec(text)[1]);
+  assert.deepEqual(team, {
+    slack: { workspaceUrl: 'https://myco.slack.com', appUrl: 'https://api.slack.com/apps/A0SECRETAPP' },
+    jira: { siteUrl: 'https://myco.atlassian.net' },
+    server: { updateChannel: 'stable' },
+  }, '허용 목록 네 칸만');
+  assert.doesNotMatch(text.replace(/A0SECRETAPP/g, ''), TEAM_SECRETS, '토큰·토큰 파일·이메일·이름·채널·extraHost·chromeProfile·제목·Dock 이름·캘린더·포트는 없다');
+  assert.doesNotMatch(text, /me@|tokenFile|displayName|extraHost|chromeProfile|dockName|icalFile|channels/);
+  assert.match(text, /^REPO_URL='https:\/\/github\.com\/someone\/workspace\.git'$/m);
+  assert.match(text, /^CHANNEL='stable'$/m);
+
+  // 같은 이름이 이미 있으면 멈추고 그대로 둔다
+  const before = fs.statSync(fix.zip).mtimeMs;
+  const again = fix.run();
+  assert.equal(again.status, 1);
+  assert.match(again.stdout, /이미 있어요 — 옮기거나 이름을 바꾼 뒤 다시 실행해 주세요\(덮어쓰지 않아요\)/);
+  assert.equal(fs.statSync(fix.zip).mtimeMs, before);
+
+  // 규칙에 어긋난 값은 그 값만 뺀다
+  const odd = teamFixture(t, { slack: { workspaceUrl: 'http://myco.slack.com', appUrl: 'https://evil.test/apps/A1' }, jira: { siteUrl: 'https://myco.atlassian.net.evil.test' }, server: { updateChannel: 'nightly' } });
+  const oddRun = odd.run();
+  assert.equal(oddRun.status, 0, oddRun.stdout + oddRun.stderr);
+  for (const key of ['slack\\.workspaceUrl', 'slack\\.appUrl', 'jira\\.siteUrl']) {
+    assert.match(oddRun.stdout, new RegExp(`! ${key} — 규칙에 맞지 않아 뺐어요`));
+  }
+  const oddText = fs.readFileSync(odd.unpack().command, 'utf8');
+  assert.deepEqual(JSON.parse(/^TEAM_CONFIG='(.*)'$/m.exec(oddText)[1]), { server: { updateChannel: 'stable' } }, '갈래가 없거나 이상하면 stable');
+  assert.doesNotMatch(oddText, /evil|http:\/\/myco/);
+
+  // 저장소 주소는 github.com https만
+  const ssh = teamFixture(t, {}, { origin: 'git@github.com:someone/workspace.git' });
+  const sshRun = ssh.run();
+  assert.equal(sshRun.status, 1);
+  assert.match(sshRun.stdout, /origin이 https:\/\/github\.com\/… 주소가 아니에요/);
+  assert.equal(fs.existsSync(ssh.zip), false);
+
+  const script = fs.readFileSync(path.join(REPO_ROOT, 'make-team-installer.sh'), 'utf8');
+  assert.ok(!/rm -rf|pkill|killall|xargs kill/.test(script));
+  assert.match(script, /ditto -c -k --sequesterRsrc --keepParent/);
+});
+
+test('WP-D3 설치.command: 새로 받기 · 이미 같은 저장소면 이어 가기 · 다른 폴더면 멈춤 · 설정은 빈 팀 칸만 채움 · node가 없으면 안내', { skip: !(gitReady && dittoReady) }, (t) => {
+  const fix = teamFixture(t, { slack: { workspaceUrl: 'https://myco.slack.com' }, jira: { siteUrl: 'https://myco.atlassian.net' }, server: { updateChannel: 'stable' } });
+  assert.equal(fix.run().status, 0);
+  const { command } = fix.unpack();
+
+  // 가짜 git — clone이면 폴더와 .git, 이 앱의 예시 설정·가짜 setup.sh를 둔다. 네트워크에 닿지 않는다.
+  const bin = path.join(fix.root, 'fakebin');
+  const trail = path.join(fix.root, 'git-trail.txt');
+  const seed = path.join(fix.root, 'seed');
+  fs.mkdirSync(bin);
+  fs.mkdirSync(seed);
+  fs.copyFileSync(path.join(REPO_ROOT, 'workspace.config.example.json'), path.join(seed, 'workspace.config.example.json'));
+  writeExec(path.join(seed, 'setup.sh'), `#!/bin/bash\necho "setup $(pwd -P) open=\${WORKSPACE_OPEN_APP:-}" >> ${JSON.stringify(trail)}\n`);
+  writeExec(path.join(seed, 'update.sh'), `#!/bin/bash\necho "update $(pwd -P)" >> ${JSON.stringify(trail)}\n`);
+  writeExec(path.join(bin, 'git'), `#!/bin/bash
+echo "git $*" >> ${JSON.stringify(trail)}
+case "$1" in
+  --version) echo "git version 2.0-fake" ;;
+  clone) shift; [ "$1" = "--quiet" ] && shift; mkdir -p "$2/.git"; echo "$1" > "$2/.git/origin-url"; cp ${JSON.stringify(seed)}/* "$2/" ;;
+  -C) dir="$2"; shift 2
+      case "$1" in
+        remote) cat "$dir/.git/origin-url" 2>/dev/null || exit 2 ;;
+        tag) printf 'v1.2.0\\nv1.10.0\\nv1.9.3\\n' ;;
+        checkout) : ;;
+        *) exit 1 ;;
+      esac ;;
+  *) exit 1 ;;
+esac
+`);
+  fs.symlinkSync(process.execPath, path.join(bin, 'node'));
+  const install = (home, pathValue = `${bin}:/usr/bin:/bin`, extra = {}) => spawnSync('/bin/bash', [command], { encoding: 'utf8', input: '', env: { HOME: home, PATH: pathValue, TMPDIR: os.tmpdir(), ...extra } });
+  const log = () => (fs.existsSync(trail) ? fs.readFileSync(trail, 'utf8') : '');
+
+  // 1) 새로 받기 — stable이면 가장 높은 태그(v1.10.0)로, 설정은 예시 + 팀 값, 끝에 WORKSPACE_OPEN_APP=1 setup.sh
+  const home = path.join(fix.root, 'home1');
+  fs.mkdirSync(home);
+  const fresh = install(home);
+  assert.equal(fresh.status, 0, fresh.stdout + fresh.stderr);
+  const target = path.join(home, 'workspace');
+  assert.match(log(), /git clone --quiet https:\/\/github\.com\/someone\/workspace\.git /);
+  assert.match(log(), /checkout --detach --quiet v1\.10\.0/, '숫자로 가장 높은 태그');
+  assert.ok(log().includes(`setup ${fs.realpathSync(target)} open=1`), log());
+  assert.doesNotMatch(log(), /^update /m, '새로 받은 것은 업데이트하지 않는다');
+  const config = JSON.parse(fs.readFileSync(path.join(target, 'workspace.config.json'), 'utf8'));
+  assert.equal(config.slack.workspaceUrl, 'https://myco.slack.com', '예시의 자리 표시를 팀 값으로');
+  assert.equal(config.jira.siteUrl, 'https://myco.atlassian.net');
+  assert.equal(config.server.updateChannel, 'stable');
+  assert.equal(config.jira.email, '나@내회사.com', '팀 값이 아닌 칸은 예시 그대로');
+  assert.ok(config.title.endsWith('워크스페이스'));
+
+  // 2) 이미 같은 저장소 — 새로 받지 않고, 설정은 비어 있는(또는 자리 표시) 팀 칸만 채운다
+  fs.writeFileSync(trail, '');
+  fs.writeFileSync(path.join(target, 'workspace.config.json'), JSON.stringify({ title: '내 제목', slack: { workspaceUrl: 'https://other.slack.com' }, jira: { siteUrl: '' }, server: { port: 4400 } }));
+  const resume = install(home);
+  assert.equal(resume.status, 0, resume.stdout + resume.stderr);
+  assert.doesNotMatch(log(), /git clone/);
+  assert.match(resume.stdout, /이미 받아 뒀어요 — 그대로 이어서 설치해요/);
+  const kept = JSON.parse(fs.readFileSync(path.join(target, 'workspace.config.json'), 'utf8'));
+  assert.deepEqual(kept, { title: '내 제목', slack: { workspaceUrl: 'https://other.slack.com' }, jira: { siteUrl: 'https://myco.atlassian.net' }, server: { port: 4400, updateChannel: 'stable' } });
+  assert.match(log(), /^setup .* open=1/m, '설치가 덜 끝난 폴더면 setup.sh만 마저 한다');
+  assert.doesNotMatch(log(), /^update /m, 'workspace.env가 없으면(설치 미완) 업데이트부터 하지 않는다');
+
+  // 3) ~/workspace에 다른 것이 있으면 멈춘다(아무것도 부르지 않는다)
+  fs.writeFileSync(trail, '');
+  const other = path.join(fix.root, 'home2');
+  fs.mkdirSync(path.join(other, 'workspace'), { recursive: true });
+  fs.writeFileSync(path.join(other, 'workspace', 'memo.txt'), '내 파일\n');
+  const blocked = install(other);
+  assert.equal(blocked.status, 1);
+  assert.match(blocked.stdout, /~\/workspace가 이미 있어요 — 이름을 바꾼 뒤 다시 실행해 주세요/);
+  assert.doesNotMatch(log(), /git clone|setup /);
+  assert.deepEqual(fs.readdirSync(path.join(other, 'workspace')), ['memo.txt']);
+  // 한글 로케일(UTF-8)에서도 안내 문구의 경로가 사라지지 않는다(`$SHOWN가`처럼 변수 바로 뒤에 한글을 붙이면 bash가 이름으로 읽는다)
+  for (const locale of ['ko_KR.UTF-8', 'en_US.UTF-8']) {
+    const localized = install(other, `${bin}:/usr/bin:/bin`, { LC_ALL: locale, LANG: locale });
+    assert.equal(localized.status, 1, locale);
+    assert.match(localized.stdout, /~\/workspace가 이미 있어요 — 이름을 바꾼 뒤 다시 실행해 주세요/, `${locale}: ${localized.stdout}`);
+  }
+  assert.doesNotMatch(log(), /git clone|setup /);
+
+  // 4) node가 없으면 설치 방법 한 줄을 알리고 멈춘다
+  const bare = path.join(fix.root, 'bare-bin');
+  fs.mkdirSync(bare);
+  fs.symlinkSync(path.join(bin, 'git'), path.join(bare, 'git'));
+  const home3 = path.join(fix.root, 'home3');
+  fs.mkdirSync(home3);
+  const noNode = install(home3, `${bare}:/usr/bin:/bin`);
+  assert.equal(noNode.status, 1);
+  assert.match(noNode.stdout, /Node가 없어요 — https:\/\/nodejs\.org 에서 LTS를 설치한 뒤/);
+  assert.equal(fs.existsSync(path.join(home3, 'workspace')), false);
+  const text = fs.readFileSync(command, 'utf8');
+  assert.match(text, /xcode-select --install/);
+  assert.match(text, /WORKSPACE_OPEN_APP=1 bash setup\.sh/);
+});
+
+test('WP-H 설치.command: 기존 설치(workspace.env)가 있으면 새로 받지 않고 그 폴더에서 update.sh → setup.sh · ~/workspace에 한 벌 더 있으면 멈춤 · env가 없는 폴더면 새 설치', { skip: !(gitReady && dittoReady) }, (t) => {
+  const fix = teamFixture(t, { slack: { workspaceUrl: 'https://myco.slack.com' }, jira: { siteUrl: 'https://myco.atlassian.net' }, server: { updateChannel: 'stable' } });
+  assert.equal(fix.run().status, 0);
+  const { command, readme } = fix.unpack();
+  const readmeText = fs.readFileSync(readme, 'utf8');
+  assert.match(readmeText, /이미 설치해 쓰고 있다면 이 파일을 열어도 괜찮아요 — 새로 설치하지 않고 업데이트로 진행해요\./);
+  assert.match(readmeText, /한 벌이 더 있어요/);
+
+  // 가짜 git(네트워크 없음)·가짜 update.sh/setup.sh — 부른 순서와 위치만 적는다.
+  const bin = path.join(fix.root, 'fakebin');
+  const trail = path.join(fix.root, 'trail.txt');
+  const seed = path.join(fix.root, 'seed');
+  fs.mkdirSync(bin);
+  fs.mkdirSync(seed);
+  fs.copyFileSync(path.join(REPO_ROOT, 'workspace.config.example.json'), path.join(seed, 'workspace.config.example.json'));
+  writeExec(path.join(seed, 'setup.sh'), `#!/bin/bash\necho "setup $(pwd -P) open=\${WORKSPACE_OPEN_APP:-}" >> ${JSON.stringify(trail)}\n`);
+  writeExec(path.join(seed, 'update.sh'), `#!/bin/bash\necho "update $(pwd -P)" >> ${JSON.stringify(trail)}\n`);
+  writeExec(path.join(bin, 'git'), `#!/bin/bash
+echo "git $*" >> ${JSON.stringify(trail)}
+case "$1" in
+  --version) echo "git version 2.0-fake" ;;
+  clone) shift; [ "$1" = "--quiet" ] && shift; mkdir -p "$2/.git"; echo "$1" > "$2/.git/origin-url"; cp ${JSON.stringify(seed)}/* "$2/" ;;
+  -C) dir="$2"; shift 2
+      case "$1" in
+        remote) cat "$dir/.git/origin-url" 2>/dev/null || exit 2 ;;
+        tag) printf 'v1.2.0\\n' ;;
+        checkout) : ;;
+        *) exit 1 ;;
+      esac ;;
+  *) exit 1 ;;
+esac
+`);
+  fs.symlinkSync(process.execPath, path.join(bin, 'node'));
+  const install = (home, extra = {}) => spawnSync('/bin/bash', [command], { encoding: 'utf8', input: '', env: { HOME: home, PATH: `${bin}:/usr/bin:/bin`, TMPDIR: os.tmpdir(), ...extra } });
+  const log = () => (fs.existsSync(trail) ? fs.readFileSync(trail, 'utf8') : '');
+  const lines = (prefix) => log().split('\n').filter(l => /^(update|setup) /.test(l)).map(l => l.replace(prefix, '<>'));
+  // 이 저장소를 받아 둔 폴더(clone과 같은 모양)를 만든다.
+  const makeCopy = (dir, origin = 'https://github.com/someone/workspace') => {
+    fs.mkdirSync(path.join(dir, '.git'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.git', 'origin-url'), origin + '\n');
+    for (const f of fs.readdirSync(seed)) fs.copyFileSync(path.join(seed, f), path.join(dir, f));
+    fs.writeFileSync(path.join(dir, 'workspace.config.json'), JSON.stringify({ title: '쓰던 제목', jira: { siteUrl: '' } }));
+    fs.writeFileSync(path.join(dir, 'tasks.md'), '쓰던 데이터\n');
+  };
+  const newHome = (name, envDir) => {
+    const home = path.join(fix.root, name);
+    fs.mkdirSync(home);
+    if (envDir !== undefined) {
+      const envDirPath = path.join(home, '.local', 'share', 'workspace-automation');
+      fs.mkdirSync(envDirPath, { recursive: true });
+      fs.writeFileSync(path.join(envDirPath, 'workspace.env'), `WORKSPACE_DIR="${envDir}"\n`);
+    }
+    return fs.realpathSync(home);
+  };
+
+  // (a) 다른 폴더에 설치돼 있음 → clone 없음, 그 폴더에서 update.sh → setup.sh, 빈 팀 칸만 채움
+  fs.writeFileSync(trail, '');
+  let home = newHome('home-a', '');
+  const elsewhere = path.join(home, 'Projects', 'my-app');
+  makeCopy(elsewhere);
+  fs.writeFileSync(path.join(home, '.local/share/workspace-automation/workspace.env'), `WORKSPACE_DIR="${elsewhere}"\n`);
+  let run = install(home);
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.match(run.stdout, /✓ 이미 설치돼 있어요\(~\/Projects\/my-app\) — 업데이트로 진행할게요/);
+  assert.doesNotMatch(log(), /git clone/);
+  assert.equal(fs.existsSync(path.join(home, 'workspace')), false, '~/workspace를 새로 만들지 않는다');
+  assert.deepEqual(lines(elsewhere), ['update <>', 'setup <> open=1']);
+  const filled = JSON.parse(fs.readFileSync(path.join(elsewhere, 'workspace.config.json'), 'utf8'));
+  assert.equal(filled.title, '쓰던 제목');
+  assert.equal(filled.jira.siteUrl, 'https://myco.atlassian.net', '빈 팀 칸은 채운다');
+  assert.equal(fs.readFileSync(path.join(elsewhere, 'tasks.md'), 'utf8'), '쓰던 데이터\n');
+
+  // (b) ~/workspace에 설치돼 있음 → update.sh → setup.sh
+  fs.writeFileSync(trail, '');
+  home = newHome('home-b', '');
+  const ws = path.join(home, 'workspace');
+  makeCopy(ws);
+  fs.writeFileSync(path.join(home, '.local/share/workspace-automation/workspace.env'), `WORKSPACE_DIR="${ws}"\n`);
+  run = install(home);
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.match(run.stdout, /이미 설치돼 있어요\(~\/workspace\) — 업데이트로 진행할게요/);
+  assert.doesNotMatch(log(), /git clone/);
+  assert.deepEqual(lines(ws), ['update <>', 'setup <> open=1']);
+
+  // (c) 기존 설치 + ~/workspace에 이 앱이 한 벌 더 → 아무것도 부르지 않고 안내, 종료 코드 1(한글 로케일 포함)
+  home = newHome('home-c', '');
+  const old = path.join(home, 'playio', 'workspace');
+  makeCopy(old);
+  makeCopy(path.join(home, 'workspace'));
+  fs.writeFileSync(path.join(home, '.local/share/workspace-automation/workspace.env'), `WORKSPACE_DIR="${old}"\n`);
+  const configBefore = fs.readFileSync(path.join(old, 'workspace.config.json'), 'utf8');
+  for (const locale of [null, 'ko_KR.UTF-8', 'en_US.UTF-8']) {
+    fs.writeFileSync(trail, '');
+    run = install(home, locale ? { LC_ALL: locale, LANG: locale } : {});
+    assert.equal(run.status, 1, `${locale}: ${run.stdout}`);
+    assert.match(run.stdout, /✗ 이미 설치된 앱\(~\/playio\/workspace\)과 ~\/workspace에 한 벌이 더 있어요\. 쓰던 데이터는 ~\/playio\/workspace에 있어요\. ~\/workspace 폴더 이름을 바꾼 뒤\(예: workspace-old\) 다시 열어 주세요\./, `${locale}: ${run.stdout}`);
+    assert.doesNotMatch(run.stdout, /업데이트로 진행할게요/);
+    assert.doesNotMatch(log(), /git clone|^update |^setup /m);
+  }
+  assert.equal(fs.readFileSync(path.join(old, 'workspace.config.json'), 'utf8'), configBefore, '설정도 건드리지 않는다');
+
+  // (b') ~/workspace가 기존 설치를 가리키는 링크면 같은 폴더로 본다
+  fs.writeFileSync(trail, '');
+  home = newHome('home-link', '');
+  const real = path.join(home, 'real-app');
+  makeCopy(real);
+  fs.symlinkSync(real, path.join(home, 'workspace'));
+  fs.writeFileSync(path.join(home, '.local/share/workspace-automation/workspace.env'), `WORKSPACE_DIR="${real}"\n`);
+  run = install(home);
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.deepEqual(lines(real), ['update <>', 'setup <> open=1']);
+
+  // (e) workspace.env가 없는 폴더를 가리킴 → 새 설치(update.sh 없음)
+  fs.writeFileSync(trail, '');
+  home = newHome('home-e', path.join(fix.root, 'gone'));
+  run = install(home);
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.match(log(), /git clone --quiet /);
+  assert.deepEqual(lines(path.join(home, 'workspace')), ['setup <> open=1']);
+
+  // (e') 가리키는 폴더가 다른 저장소면 기존 설치로 보지 않는다 → 새 설치
+  fs.writeFileSync(trail, '');
+  home = newHome('home-e2', '');
+  const foreign = path.join(home, 'other-repo');
+  makeCopy(foreign, 'https://github.com/else/thing');
+  fs.writeFileSync(path.join(home, '.local/share/workspace-automation/workspace.env'), `WORKSPACE_DIR="${foreign}"\n`);
+  run = install(home);
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.match(log(), /git clone --quiet /);
+  assert.doesNotMatch(log(), /^update /m);
+
+  // workspace.env는 실행하지 않는다(글자로 한 줄만 읽는다)
+  fs.writeFileSync(trail, '');
+  home = newHome('home-inject', '');
+  const marker = path.join(fix.root, 'injected');
+  fs.writeFileSync(path.join(home, '.local/share/workspace-automation/workspace.env'), `WORKSPACE_DIR="$(touch ${marker})"\ntouch ${marker}\n`);
+  run = install(home);
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.equal(fs.existsSync(marker), false, 'workspace.env 안의 명령은 돌지 않는다');
+
+  const text = fs.readFileSync(command, 'utf8');
+  assert.ok(!/rm -rf|pkill|killall|xargs kill|\. "\$ENV_FILE"|^\s*(source|\.) /m.test(text));
+});
+
+test('QA update-runner.sh: update.sh가 실패를 못 적고 멈추면 멈춘 단계 번호(숫자만)를 이어 적는다', (t) => {
+  const fix = runnerFixture(t);
+  fix.fake('update.sh', `printf '{"action":"update","step":4,"state":"running","steps":[]}' > ${JSON.stringify(fix.statusFile)}\nexit 1\n`);
+  fix.ask('update');
+  assert.equal(fix.run().status, 0);
+  const failed = JSON.parse(fs.readFileSync(fix.statusFile, 'utf8'));
+  assert.equal(failed.state, 'failed');
+  assert.equal(failed.step, 4, '③ 이후에서 멈췄다는 것이 남아야 화면이 되돌리기를 보여 준다');
+  // 상태 파일이 없거나 단계가 이상하면 0
+  fix.fake('update.sh', 'exit 1\n');
+  fix.ask('update');
+  fix.run();
+  assert.equal(JSON.parse(fs.readFileSync(fix.statusFile, 'utf8')).step, 0);
+  fix.fake('update.sh', `printf '{"action":"update","step":"4; touch pwned","state":"running"}' > ${JSON.stringify(fix.statusFile)}\nexit 1\n`);
+  fix.ask('update');
+  fix.run();
+  assert.equal(JSON.parse(fs.readFileSync(fix.statusFile, 'utf8')).step, 0);
+  assert.equal(fs.existsSync(path.join(fix.workspace, 'pwned')), false);
+});
+
+// slack-capture.sh를 임시 HOME에서 돌린다 — PATH 맨 앞(HOME/.nvm/…/bin)에 가짜 curl, 앱 자리에 가짜 import-record.js,
+// 설치 위치 자리에 가짜 run-task.sh를 둔다. 슬랙·앱 서버·Claude 어디에도 닿지 않는다.
+function captureFixture(t, config, stateJson) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-wpe-capture-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const bin = path.join(home, '.nvm', 'versions', 'node', 'v0', 'bin');
+  fs.mkdirSync(bin, { recursive: true });
+  fs.symlinkSync(process.execPath, path.join(bin, 'node'));
+  const curlLog = path.join(home, 'curl.log');
+  writeExec(path.join(bin, 'curl'), `#!/bin/bash\nfor a in "$@"; do case "$a" in https://*) echo "$a" >> ${JSON.stringify(curlLog)} ;; esac; done\nif [ -n "\${FAKE_FOUND:-}" ]; then printf '{"ok":true,"messages":[{"ts":"1"}]}'; else printf '{"ok":true,"messages":[]}'; fi\n`);
+  const app = path.join(home, 'tracker', 'inbox-app');
+  fs.mkdirSync(app, { recursive: true });
+  // 앱 API 흉내 — 진짜처럼 줄바꿈 없이 {"ok":true}를 낸다
+  fs.writeFileSync(path.join(app, 'import-record.js'), "process.stdin.resume();process.stdin.on('end',()=>process.stdout.write('{\"ok\":true}'));");
+  if (stateJson) fs.writeFileSync(path.join(app, '.slack_capture_state.json'), JSON.stringify(stateJson));
+  const install = path.join(home, '.local', 'share', 'workspace-automation');
+  fs.mkdirSync(install, { recursive: true });
+  const prompt = path.join(home, 'prompt.txt');
+  writeExec(path.join(install, 'run-task.sh'), `#!/bin/bash\nprintf '%s' "$2" > ${JSON.stringify(prompt)}\nexit 0\n`);
+  fs.writeFileSync(path.join(home, 'token'), 'xoxp-t\n');
+  const configPath = path.join(home, 'workspace.config.json');
+  fs.writeFileSync(configPath, JSON.stringify({ ...config, slack: { tokenFile: path.join(home, 'token'), ...config.slack } }));
+  const logs = path.join(home, 'logs');
+  const run = (env = {}) => runScript(automationScript('slack-capture.sh'), [], {
+    HOME: home, WORKSPACE_DIR: home, WORKSPACE_CONFIG: configPath, AUTOMATION_LOG_DIR: logs, SLACK_CAPTURE_IGNORE_HOURS: '1', ...env,
+  });
+  const urls = () => (fs.existsSync(curlLog) ? fs.readFileSync(curlLog, 'utf8').trim().split('\n').filter(Boolean) : []);
+  const logText = () => fs.readFileSync(path.join(logs, 'slack-capture.log'), 'utf8');
+  return { home, run, urls, logText, prompt };
+}
+
+test('WP-E slack-capture.sh: 뺀 채널(off)은 읽지도 Claude에 넘기지도 않고, 어디서부터는 커서와 since 중 큰 값이다', (t) => {
+  const fix = captureFixture(t, { slack: { channels: {
+    todo: { id: 'C0TODO11', name: '#my-todo', since: '1790000000.000000' },
+    align: { id: 'C0ALIGN1', name: '#my-align', off: true },
+    waiting: { id: 'C0WAIT11', name: '#my-waiting', since: '1780000000.000000' },
+    someday: { id: 'C0SOME11', name: '#my-someday' },
+  } } }, { 'my-todo': '1789999999.999999', 'my-waiting': '1790000500.000100' });
+  const quiet = fix.run();
+  assert.equal(quiet.status, 0, quiet.stderr + fix.logText());
+  const urls = fix.urls();
+  assert.equal(urls.length, 3, '뺀 채널은 부르지 않는다');
+  assert.ok(!urls.some(url => url.includes('C0ALIGN1')));
+  assert.ok(urls.includes('https://slack.com/api/conversations.history?channel=C0TODO11&limit=100&oldest=1790000000.000000'), 'since가 커서보다 뒤면 since부터');
+  assert.ok(urls.includes('https://slack.com/api/conversations.history?channel=C0WAIT11&limit=100&oldest=1790000500.000100'), '커서가 뒤면 커서부터');
+  assert.ok(urls.includes('https://slack.com/api/conversations.history?channel=C0SOME11&limit=100'), 'since도 커서도 없으면 예전처럼');
+
+  // 앱 API의 응답({"ok":true})은 로그에 남지 않는다 — 다음 줄이 그 뒤에 붙어 "마지막 실행"을 못 읽던 원인
+  const log = fix.logText();
+  assert.ok(!log.includes('{"ok":true}'), log);
+  assert.match(log, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} 새 메시지 없음 — Claude 호출 생략$/m);
+
+  // 새 메시지가 있으면 Claude에게 켜 둔 채널의 지침만 넘긴다
+  const busy = fix.run({ FAKE_FOUND: '1' });
+  assert.equal(busy.status, 0, busy.stderr + fix.logText());
+  const prompt = fs.readFileSync(fix.prompt, 'utf8');
+  assert.match(prompt, /^\.claude\/skills\/ 폴더의 slack-todos\.md, slack-someday\.md, slack-waiting\.md 파일을 차례로 읽고/);
+  assert.ok(!prompt.includes('slack-alignments.md'), '뺀 채널의 지침은 넘기지 않는다');
+  assert.ok(!fix.logText().includes('{"ok":true}'));
+});
+
+// backup-data.sh를 임시 HOME에서 돌린다 — 데이터·백업 폴더·로그·Git 저장 공간 모두 임시 폴더.
+function backupFixture(t) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-wpe-backup-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const ws = path.join(home, 'ws');
+  const tracker = path.join(ws, 'tracker');
+  const app = path.join(tracker, 'inbox-app');
+  fs.mkdirSync(app, { recursive: true });
+  fs.writeFileSync(path.join(tracker, 'tasks.md'), '# Tasks\n- 오늘 업무\n');
+  fs.writeFileSync(path.join(tracker, '.workflow.json'), '{"items":{}}');
+  fs.writeFileSync(path.join(tracker, '.access-token'), 'secret-password\n');
+  fs.writeFileSync(path.join(tracker, '메모.txt'), '목록에 없는 파일\n');
+  fs.writeFileSync(path.join(app, '.slack_capture_state.json'), '{"my-todo":"1.0"}');
+  const backup = path.join(home, 'workspace-data-backup');
+  const logs = path.join(home, 'logs');
+  const run = (env = {}) => runScript(automationScript('backup-data.sh'), [], {
+    ...gitEnv, HOME: home, WORKSPACE_DIR: ws, WORKSPACE_DATA_DIR: '', WORKSPACE_BACKUP_DIR: backup, AUTOMATION_LOG_DIR: logs,
+    DATA_BACKUP_GIT_DIR: path.join(home, 'data-backup.git'), ...env,
+  });
+  const daily = () => (fs.existsSync(path.join(backup, 'daily')) ? fs.readdirSync(path.join(backup, 'daily')) : []).sort();
+  const logText = () => fs.readFileSync(path.join(logs, 'data-backup.log'), 'utf8');
+  const two = n => String(n).padStart(2, '0');
+  const now = new Date();
+  const today = `${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())}`;
+  return { home, ws, tracker, backup, run, daily, logText, today };
+}
+
+test('WP-E backup-data.sh: 이 맥 안 daily/YYYY-MM-DD에 복사(접속 암호 제외)하고 7개만 남기며, 다른 폴더·업데이트 백업은 건드리지 않는다', (t) => {
+  const fix = backupFixture(t);
+  for (let day = 1; day <= 8; day += 1) {
+    const dir = path.join(fix.backup, 'daily', `2020-01-0${day}`);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'tasks.md'), `옛 ${day}`);
+  }
+  fs.mkdirSync(path.join(fix.backup, 'daily', '내 메모'), { recursive: true });
+  fs.mkdirSync(path.join(fix.backup, 'daily', '2020-01-01-extra'), { recursive: true });
+  fs.mkdirSync(path.join(fix.backup, '2020-01-01-0900'), { recursive: true });
+  fs.writeFileSync(path.join(fix.backup, '2020-01-01-0900', 'tasks.md'), '업데이트 직전 백업');
+
+  const result = fix.run();
+  assert.equal(result.status, 0, result.stderr + fix.logText());
+  const dated = fix.daily().filter(name => /^\d{4}-\d{2}-\d{2}$/.test(name));
+  assert.equal(dated.length, 7, '7일치만 남긴다');
+  assert.deepEqual(dated, ['2020-01-03', '2020-01-04', '2020-01-05', '2020-01-06', '2020-01-07', '2020-01-08', fix.today], '가장 오래된 것부터 지운다');
+  assert.ok(fix.daily().includes('내 메모') && fix.daily().includes('2020-01-01-extra'), '이름이 정확히 날짜가 아닌 폴더는 건드리지 않는다');
+  assert.equal(fs.readFileSync(path.join(fix.backup, '2020-01-01-0900', 'tasks.md'), 'utf8'), '업데이트 직전 백업', 'update.sh의 백업은 그대로');
+  assert.ok(!fix.daily().some(name => name.startsWith('.tmp-')), '임시 폴더는 남지 않는다');
+
+  const todayDir = path.join(fix.backup, 'daily', fix.today);
+  assert.deepEqual(fs.readdirSync(todayDir).sort(), ['.slack_capture_state.json', '.workflow.json', 'tasks.md'], '목록에 있는 데이터 파일만, 접속 암호는 빼고');
+  assert.match(fs.readFileSync(path.join(todayDir, 'tasks.md'), 'utf8'), /오늘 업무/);
+  assert.match(fix.logText(), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} 로컬 성공 · 7일치$/m);
+  assert.match(fix.logText(), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} GitHub 건너뜀 — 백업 저장 공간을 만들지 않음$/m, 'GitHub 저장 공간이 없으면 로컬만');
+
+  // 같은 날 다시 돌면 그날 것을 바꿔 넣는다
+  fs.writeFileSync(path.join(fix.tracker, 'tasks.md'), '# Tasks\n- 저녁에 고친 업무\n');
+  assert.equal(fix.run().status, 0);
+  assert.match(fs.readFileSync(path.join(todayDir, 'tasks.md'), 'utf8'), /저녁에 고친 업무/);
+  assert.equal(fix.daily().filter(name => /^\d{4}-\d{2}-\d{2}$/.test(name)).length, 7);
+
+  // 백업 자리에 폴더를 만들 수 없으면 실패를 이유와 함께 남기고 1로 끝난다(데이터는 그대로)
+  const blocked = path.join(fix.home, 'blocked');
+  fs.writeFileSync(blocked, '폴더가 아니라 파일');
+  const failed = fix.run({ WORKSPACE_BACKUP_DIR: blocked });
+  assert.equal(failed.status, 1);
+  assert.match(fix.logText(), /로컬 실패 — 백업 폴더를 만들지 못함/);
+  assert.match(fs.readFileSync(path.join(fix.tracker, 'tasks.md'), 'utf8'), /저녁에 고친 업무/);
+
+  // 스크립트의 지우기는 날짜 폴더 하나씩만(글자 검사 후) — 다른 rm -rf는 없다
+  const script = fs.readFileSync(automationScript('backup-data.sh'), 'utf8');
+  const removes = script.split('\n').filter(line => /\brm -rf\b/.test(line) && !/^\s*#/.test(line));
+  assert.deepEqual(removes.map(line => line.trim()), ['rm -rf -- "$DAILY/$name"', 'rm -rf -- "$DAILY/$name"'], '날짜 폴더 하나 · 남은 임시/옛 폴더 하나 — 둘 다 이름 검사 뒤');
+  assert.match(script, /\[\[ "\$name" =~ \^\[0-9\]\{4\}-\[0-9\]\{2\}-\[0-9\]\{2\}\$ \]\] \|\| return 1/);
+  assert.match(script, /\[\[ "\$name" =~ \^\\\.\(tmp\|old\)-\[0-9\]\{4\}-\[0-9\]\{2\}-\[0-9\]\{2\}-\[0-9\]\+\$ \]\] \|\| return 1/);
+});
+
+test('WP-E backup-data.sh: 데이터 목록은 update.sh와 같고(접속 암호만 뺌), GitHub 저장 공간이 있으면 한 겹 더 올린다', { skip: !gitReady }, (t) => {
+  const listOf = (text, name) => (new RegExp(`^${name}="([^"]*)"$`, 'm').exec(text) || [])[1].split(' ');
+  const update = fs.readFileSync(path.join(REPO_ROOT, 'update.sh'), 'utf8');
+  const backupScript = fs.readFileSync(automationScript('backup-data.sh'), 'utf8');
+  assert.deepEqual(listOf(backupScript, 'DATA_FILES'), listOf(update, 'DATA_FILES').filter(name => name !== '.access-token'));
+  assert.deepEqual(listOf(backupScript, 'STATE_FILES'), listOf(update, 'STATE_FILES'));
+
+  const fix = backupFixture(t);
+  const gitDir = path.join(fix.home, 'data-backup.git');
+  runGit(fix.home, ['init', '-q', '--bare', '-b', 'main', gitDir]);
+  fs.mkdirSync(path.join(gitDir, 'info'), { recursive: true });
+  fs.writeFileSync(path.join(gitDir, 'info', 'exclude'), '*\n!tasks.md\n');
+  assert.equal(fix.run().status, 0, fix.logText());
+  assert.match(fix.logText(), /로컬 성공 · 1일치/);
+  assert.match(fix.logText(), /GitHub 건너뜀 — 원격 저장소가 연결되지 않음 \(이 맥에만 커밋함\)/);
+  const remote = path.join(fix.home, 'remote.git');
+  runGit(fix.home, ['init', '-q', '--bare', '-b', 'main', remote]);
+  runGit(fix.home, [`--git-dir=${gitDir}`, 'remote', 'add', 'origin', remote]);
+  fs.writeFileSync(path.join(fix.tracker, 'tasks.md'), '# Tasks\n- 올릴 업무\n');
+  assert.equal(fix.run().status, 0, fix.logText());
+  assert.match(fix.logText(), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} GitHub 성공$/m);
+  assert.match(runGit(fix.home, [`--git-dir=${remote}`, 'show', 'main:tasks.md']).stdout, /올릴 업무/);
+});
+
+test('WP-E setup.sh: data-backup을 늘 등록하고(저장 공간 조건 없음), 채널 자리표시자 검사는 뺀 채널을 없는 것으로 본다', () => {
+  const script = fs.readFileSync(path.join(REPO_ROOT, 'setup.sh'), 'utf8');
+  assert.ok(!script.includes('if [ -d "$INSTALL_DIR/data-backup.git" ]'), 'GitHub 저장 공간이 있을 때만 등록하던 조건은 없다');
+  const at = script.indexOf('cat > "$AGENTS_DIR/$LABEL.data-backup.plist"');
+  assert.ok(at > 0);
+  const before = script.slice(Math.max(0, script.lastIndexOf('\n\n', at)), at);
+  assert.ok(!/^\s*if /m.test(before), '등록 앞에 조건문이 없다');
+  assert.match(script, /<dict><key>Hour<\/key><integer>19<\/integer><key>Minute<\/key><integer>30<\/integer><\/dict>/);
+  assert.ok(!/grep -q "여기에_채널ID" "\$CONFIG"/.test(script), '파일 글자 검사 대신 설정을 읽는다');
+
+  // 설정 읽기 조각만 꺼내 돌린다 — 뺀 채널의 자리표시자는 세지 않는다
+  const reader = /CONFIG_READER='\n([\s\S]*?)\n'/.exec(script)[1];
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-wpe-setup-'));
+  const config = path.join(home, 'workspace.config.json');
+  const read = () => spawnSync(process.execPath, ['-e', reader, config, 'slackPlaceholder'], { encoding: 'utf8' }).stdout;
+  fs.writeFileSync(config, JSON.stringify({ slack: { channels: { todo: { id: 'C0TODO11' }, align: { id: '여기에_채널ID', off: true } } } }));
+  assert.equal(read(), 'no');
+  fs.writeFileSync(config, JSON.stringify({ slack: { channels: { todo: { id: '여기에_채널ID' } } } }));
+  assert.equal(read(), 'yes');
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('WP-E update.sh: 매일 백업(daily/)은 업데이트 백업의 목록·정리·되돌리기에 절대 잡히지 않는다', { skip: !gitReady }, (t) => {
+  const fix = updateFixture(t);
+  const daily = path.join(fix.backups, 'daily');
+  for (const day of ['2099-01-01', '2099-01-02']) {
+    fs.mkdirSync(path.join(daily, day), { recursive: true });
+    fs.writeFileSync(path.join(daily, day, 'tasks.md'), '# Tasks\n- 매일 백업의 내용\n');
+  }
+  for (const day of ['01', '02', '03', '04', '05', '06']) fs.mkdirSync(path.join(fix.backups, `2020-01-${day}-0900`));
+  const snapshot = () => fs.readdirSync(daily).sort().map(day => [day, fs.readFileSync(path.join(daily, day, 'tasks.md'), 'utf8')]);
+  const before = snapshot();
+
+  assert.equal(fix.run(['--yes']).status, 0);
+  assert.equal(fix.dated().length, 5, '업데이트 백업은 최근 5개');
+  assert.deepEqual(snapshot(), before, 'daily/는 그대로(정리 대상이 아니다)');
+
+  fs.writeFileSync(path.join(fix.clone, 'tracker', 'tasks.md'), '# Tasks\n- 망가진 내용\n');
+  const back = fix.run(['--rollback', '--yes']);
+  assert.equal(back.status, 0, back.stdout + back.stderr);
+  assert.match(fix.tasks(), /지켜야 할 업무/, '되돌리기는 업데이트 직전 백업에서(날짜가 더 늦은 daily/가 아니라)');
+  assert.deepEqual(snapshot(), before);
+  const script = fs.readFileSync(path.join(REPO_ROOT, 'update.sh'), 'utf8');
+  assert.match(script, /^BACKUP_NAME_RE='\^\[0-9\]\{4\}-\[0-9\]\{2\}-\[0-9\]\{2\}-\[0-9\]\{4\}\$'$/m, 'daily는 이 이름 규칙에 맞지 않는다');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// QA 1.1.0 정정 2
+
+test('QA2 backup-data.sh: 같은 날 다시 돌면 옛 것을 먼저 지우지 않고(옆 이름으로 비켜 둔 뒤) 새 것이 자리 잡으면 지운다', (t) => {
+  const fix = backupFixture(t);
+  assert.equal(fix.run().status, 0, fix.logText());
+  const todayDir = path.join(fix.backup, 'daily', fix.today);
+  fs.writeFileSync(path.join(fix.tracker, 'tasks.md'), '# Tasks\n- 두 번째\n');
+  assert.equal(fix.run().status, 0, fix.logText());
+  assert.match(fs.readFileSync(path.join(todayDir, 'tasks.md'), 'utf8'), /두 번째/);
+  assert.deepEqual(fix.daily().filter(name => name.startsWith('.')), [], '옆 이름(.old-)·임시(.tmp-) 폴더가 남지 않는다');
+  const script = fs.readFileSync(automationScript('backup-data.sh'), 'utf8');
+  const swap = script.slice(script.indexOf('# 다 복사한 뒤에만'), script.indexOf('# 7일치만 남긴다'));
+  assert.ok(!/drop_day "\$DAY"/.test(swap), '옛 날짜 폴더를 먼저 지우지 않는다');
+  assert.ok(swap.indexOf('mv "$DAILY/$DAY" "$OLD"') < swap.indexOf('mv "$TMP" "$DAILY/$DAY"'), '옛 것을 비켜 둔 뒤 새 것을 옮긴다');
+  assert.match(swap, /if ! mv "\$TMP" "\$DAILY\/\$DAY"; then\n\s+\[ -d "\$OLD" \] && mv "\$OLD" "\$DAILY\/\$DAY"/, '실패하면 옛 것을 원래 이름으로 되돌린다');
+  assert.ok(swap.indexOf('drop_leftover "${OLD##*/}"') > swap.indexOf('mv "$TMP" "$DAILY/$DAY"'), '옛 것은 성공한 뒤에만 지운다');
+});
+
+test('QA2 backup-data.sh: 시작할 때 daily/의 `.tmp-`·`.old-` 중 이름 규칙에 정확히 맞고 하루가 넘은 것만 정리한다', (t) => {
+  const fix = backupFixture(t);
+  const daily = path.join(fix.backup, 'daily');
+  fs.mkdirSync(daily, { recursive: true });
+  const old = new Date(Date.now() - 2 * 86400000);
+  const make = (name, aged, file = 'tasks.md') => {
+    const dir = path.join(daily, name);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, file), name);
+    if (aged) fs.utimesSync(dir, old, old);
+    return dir;
+  };
+  make('.tmp-2020-01-01-123', true);
+  make('.old-2020-01-01-456', true);
+  make('.tmp-2020-01-02-789', false);          // 하루가 안 됨 — 지금 도는 다른 실행일 수 있다
+  make('.tmp-notes', true);                     // 이름 규칙이 아님
+  make('.old-2020-01-01-12x', true);            // 이름 규칙이 아님
+  make('.old-2020-01-01', true);                // 번호가 없음
+  const outside = path.join(fix.home, 'outside');
+  fs.mkdirSync(outside);
+  fs.writeFileSync(path.join(outside, 'keep.txt'), '밖의 파일');
+  fs.symlinkSync(outside, path.join(daily, '.old-2020-01-01-999'));
+  assert.equal(fix.run().status, 0, fix.logText());
+  const left = fix.daily().filter(name => name.startsWith('.'));
+  assert.deepEqual(left, ['.old-2020-01-01', '.old-2020-01-01-12x', '.old-2020-01-01-999', '.tmp-2020-01-02-789', '.tmp-notes']);
+  assert.equal(fs.readFileSync(path.join(outside, 'keep.txt'), 'utf8'), '밖의 파일', '바로가기는 따라가지 않는다');
+  assert.ok(fs.lstatSync(path.join(daily, '.old-2020-01-01-999')).isSymbolicLink());
+});
+
+// apply-runner.sh — 가짜 setup.sh가 받은 환경만 적는다(실제 setup.sh·launchctl은 부르지 않는다).
+function applyRunnerFixture(t) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-wpf-apply-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const workspace = path.join(root, 'workspace');
+  const install = path.join(root, 'install');
+  const trail = path.join(root, 'trail.txt');
+  fs.mkdirSync(workspace);
+  fs.mkdirSync(path.join(install, 'requests'), { recursive: true });
+  const request = path.join(install, 'requests', 'apply.request');
+  const fakeSetup = (extra = '', code = 0) => writeExec(path.join(workspace, 'setup.sh'),
+    `#!/bin/bash\necho "setup $* apply=\${WORKSPACE_APPLY_RUNNER:-} update=\${WORKSPACE_UPDATE_RUNNER:-}" >> ${JSON.stringify(trail)}\n${extra}exit ${code}\n`);
+  fakeSetup();
+  const ask = () => fs.writeFileSync(request, `${JSON.stringify({ action: 'apply', requestedAt: new Date().toISOString() })}\n`);
+  const run = () => runScript(automationScript('apply-runner.sh'), [], { HOME: root, WORKSPACE_DIR: workspace, WORKSPACE_INSTALL_DIR: install });
+  const lines = () => (fs.existsSync(trail) ? fs.readFileSync(trail, 'utf8').trim().split('\n').filter(Boolean) : []);
+  const logFile = path.join(install, 'logs', 'apply.log');
+  const log = () => (fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8') : '');
+  const lock = path.join(install, 'logs', '.apply.lock');
+  return { root, workspace, install, trail, request, fakeSetup, ask, run, lines, log, lock };
+}
+
+test('WP-F apply-runner.sh: 모양이 맞는 요청만 setup.sh를 WORKSPACE_APPLY_RUNNER=1로 한 번 돌리고, 결과 한 줄을 apply.log에 남긴다', (t) => {
+  const fix = applyRunnerFixture(t);
+  fix.ask();
+  assert.equal(fix.run().status, 0);
+  assert.deepEqual(fix.lines(), ['setup  apply=1 update='], 'apply·update 에이전트를 다시 올리지 않게 표시를 준다');
+  assert.equal(fs.existsSync(fix.request), false, '요청은 한 번만 처리한다');
+  assert.equal(fs.existsSync(fix.lock), false, '잠금은 풀고 끝난다');
+  assert.match(fix.log(), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} 자동화 등록 완료\n$/);
+  assert.match(fs.readFileSync(path.join(fix.install, 'logs', 'apply-setup.log'), 'utf8'), /apply-runner 종료 \(exit 0\)/);
+
+  // 모양이 틀린 요청은 그 파일만 지우고 아무것도 하지 않는다(글자를 명령·경로로 쓰지 않는다)
+  fs.writeFileSync(fix.trail, '');
+  for (const body of ['{"action":"apply; touch pwned","requestedAt":"2026-09-24T00:00:00.000Z"}\n', '{"action":"update","requestedAt":"2026-09-24T00:00:00.000Z"}\n',
+    '{"requestedAt":"2026-09-24T00:00:00.000Z","action":"apply"}\n', 'apply\n',
+    '{"action":"apply","requestedAt":"2026-09-24T00:00:00.000Z"}\n{"action":"apply","requestedAt":"$(touch pwned)"}\n']) {
+    fs.writeFileSync(fix.request, body);
+    assert.equal(fix.run().status, 0);
+    assert.equal(fs.existsSync(fix.request), false, '모양이 틀린 요청은 그 파일만 지운다');
+  }
+  assert.deepEqual(fix.lines(), []);
+  assert.equal(fs.existsSync(path.join(fix.workspace, 'pwned')), false);
+  assert.equal(fix.run().status, 0, '요청 파일이 없으면(지운 것도 launchd를 깨운다) 조용히 끝난다');
+  assert.deepEqual(fix.lines(), []);
+
+  // setup.sh가 실패하면 고정 문구 한 줄
+  fix.fakeSetup('', 1);
+  fix.ask();
+  assert.equal(fix.run().status, 0);
+  assert.match(fix.log().trim().split('\n').pop(), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} 자동화 등록 실패 — 업데이트\.command를 한 번 실행해 주세요$/);
+
+  // 도는 사이에 새 요청이 오면 끝난 뒤 한 번 더
+  fs.writeFileSync(fix.trail, '');
+  const once = path.join(fix.root, 'once');
+  fix.fakeSetup(`if [ ! -f ${JSON.stringify(once)} ]; then touch ${JSON.stringify(once)}; printf '{"action":"apply","requestedAt":"2026-09-24T00:00:01.000Z"}\\n' > ${JSON.stringify(fix.request)}; fi\n`);
+  fix.ask();
+  assert.equal(fix.run().status, 0);
+  assert.equal(fix.lines().length, 2);
+  assert.equal(fs.existsSync(fix.request), false);
+
+  const script = fs.readFileSync(automationScript('apply-runner.sh'), 'utf8');
+  assert.ok(!/rm -rf|pkill|killall|xargs kill|\bkill\b/.test(script), '지우기는 파일 하나·잠금은 rmdir, 프로세스는 끝내지 않는다');
+  assert.match(script, /^main "\$@"; exit \$\?$/m, '본문을 통째로 읽고 시작한다(복사본이 바뀌어도 안전)');
+  assert.match(script, /rmdir "\$lock"/);
+});
+
+test('WP-F apply-runner.sh: 살아 있는 실행기가 쥔 잠금이면 건너뛰고(요청은 남김), 주인이 없는 잠금은 치우고 돈다', async (t) => {
+  const fix = applyRunnerFixture(t);
+  fs.mkdirSync(fix.lock, { recursive: true });
+  // 명령줄에 apply-runner가 보이는 프로세스 하나를 직접 띄워 잠금 주인으로 삼는다(끝날 때 그 자식만 끝낸다).
+  const holder = spawn('/bin/bash', ['-c', 'sleep 30; true', 'apply-runner'], { stdio: 'ignore' });
+  t.after(() => { if (holder.exitCode === null) holder.kill(); });
+  fs.writeFileSync(path.join(fix.lock, 'pid'), `${holder.pid}\n`);
+  for (let i = 0; i < 40 && !/apply-runner/.test(spawnSync('ps', ['-o', 'command=', '-p', String(holder.pid)], { encoding: 'utf8' }).stdout); i += 1) {
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  fix.ask();
+  assert.equal(fix.run().status, 0);
+  assert.deepEqual(fix.lines(), [], '도는 실행기가 있으면 건너뛴다');
+  assert.ok(fs.existsSync(fix.request), '건너뛴 요청은 그대로 남는다(도는 실행기가 이어서 처리한다)');
+  holder.kill();
+  await new Promise(resolve => holder.once('exit', resolve));
+  assert.equal(fix.run().status, 0);
+  assert.deepEqual(fix.lines(), ['setup  apply=1 update=']);
+  assert.equal(fs.existsSync(fix.lock), false);
+});
+
+test('WP-F setup.sh: apply 에이전트를 늘 등록하고, 실행기 표시일 때 apply·update·(내용 같으면) server를 다시 올리지 않는다', () => {
+  const script = fs.readFileSync(path.join(REPO_ROOT, 'setup.sh'), 'utf8');
+  assert.match(script, /<string>\$LABEL\.apply<\/string>/);
+  assert.match(script, /<string>\$\(xml_escape "\$INSTALL_DIR\/apply-runner\.sh"\)<\/string>/);
+  assert.match(script, /<string>\$\(xml_escape "\$INSTALL_DIR\/requests\/apply\.request"\)<\/string>/);
+  const plist = script.slice(script.indexOf('cat > "$AGENTS_DIR/$LABEL.apply.plist"'), script.indexOf('# 업무 데이터 백업'));
+  assert.match(plist, /<key>WatchPaths<\/key>/);
+  assert.match(plist, /<key>RunAtLoad<\/key>\n  <false\/>/);
+  const intro = script.slice(script.indexOf('# 켠 연동 자동 등록 — 일정표가 없다'), script.indexOf('cat > "$AGENTS_DIR/$LABEL.apply.plist"'));
+  assert.ok(intro.length > 0 && !/USE_(SLACK|CAL|JIRA|TIRO)/.test(intro), '연동과 무관하게 늘');
+  assert.match(script, /"\$APP_DIR\/automation\/apply-runner\.sh" "\$APP_DIR\/automation\/update-runner\.sh"/, '실행기도 설치 위치로 복사한다');
+  assert.match(script, /\[ "\$\{WORKSPACE_APPLY_RUNNER:-\}" = "1" \] && IN_RUNNER="apply"/);
+  assert.match(script, /if \[ "\$IN_RUNNER" = "apply" \]; then\n  ok "apply 그대로 \(지금 도는 등록\)"\nelif/, 'apply 실행기 안에서는 apply를 다시 올리지 않는다');
+  assert.match(script, /elif \[ "\$IN_RUNNER" = "apply" \] && \[ "\$OLD_UPDATE_PLIST" = "\$\(cat "\$UPDATE_PLIST"\)" \]; then\n  ok "update 그대로"/, 'apply 실행기 안에서는 내용이 그대로인 update도 다시 올리지 않는다');
+  assert.match(script, /\[ "\$f" = "server" \] && \[ -n "\$IN_RUNNER" \] && \[ "\$OLD_SERVER_PLIST" = "\$\(cat "\$plist"\)" \]/);
+  // 요청 파일로 돈 setup은 폴더를 옮기지 않는다(회사 폴더면 멈추고 업데이트.command로)
+  const guard = script.indexOf('install_location_guard "$WORKSPACE"');
+  const stop = script.indexOf('if [ "${WORKSPACE_APPLY_RUNNER:-}" = "1" ] && install_location_is_playio "$WORKSPACE"; then');
+  assert.ok(stop > 0 && stop < guard);
+  const update = fs.readFileSync(path.join(REPO_ROOT, 'update.sh'), 'utf8');
+  assert.match(update, /cp "\$APP_DIR\/automation\/apply-runner\.sh" "\$INSTALL_DIR\/"/, '업데이트 뒤 실행기 복사본도 갱신한다');
+});
+
+test('WP-F slack-capture.sh: 할 일 채널 없이도 켜진 채널만 읽고 그 지침만 넘긴다', (t) => {
+  const fix = captureFixture(t, { slack: { channels: {
+    waiting: { id: 'C0WAIT11', name: '#hana-waiting' },
+    someday: { id: 'C0SOME11', name: '#hana-someday' },
+  } } });
+  const busy = fix.run({ FAKE_FOUND: '1' });
+  assert.equal(busy.status, 0, busy.stderr + fix.logText());
+  assert.equal(fix.urls().length, 2);
+  const prompt = fs.readFileSync(fix.prompt, 'utf8');
+  assert.match(prompt, /^\.claude\/skills\/ 폴더의 slack-someday\.md, slack-waiting\.md 파일을 차례로 읽고/);
+  assert.ok(!prompt.includes('slack-todos.md'));
+
+  // 모두 뺐으면(손으로 고친 설정) 수집하지 않고 한 줄만 — 실패로 세지 않는다
+  const none = captureFixture(t, { slack: { channels: { todo: { id: 'C0TODO11', off: true } } } });
+  assert.equal(none.run().status, 0);
+  assert.deepEqual(none.urls(), []);
+  assert.match(none.logText(), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} 켜진 채널이 없어 건너뛰어요$/m);
+  assert.doesNotMatch(none.logText(), /채널 확인 실패/);
+});
