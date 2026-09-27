@@ -50,3 +50,6 @@ output/
 .claude/worktrees/
 .impeccable/
 design/mockup/
+
+# graphify 결과(코드 구조 지도 — 이 맥에서만)
+graphify-out/
