@@ -6373,6 +6373,7 @@ test('WP-D3 설치.command: 새로 받기 · 이미 같은 저장소면 이어 �
   fs.mkdirSync(seed);
   fs.copyFileSync(path.join(REPO_ROOT, 'workspace.config.example.json'), path.join(seed, 'workspace.config.example.json'));
   writeExec(path.join(seed, 'setup.sh'), `#!/bin/bash\necho "setup $(pwd -P) open=\${WORKSPACE_OPEN_APP:-}" >> ${JSON.stringify(trail)}\n`);
+  writeExec(path.join(seed, 'update.sh'), `#!/bin/bash\necho "update $(pwd -P)" >> ${JSON.stringify(trail)}\n`);
   writeExec(path.join(bin, 'git'), `#!/bin/bash
 echo "git $*" >> ${JSON.stringify(trail)}
 case "$1" in
@@ -6401,6 +6402,7 @@ esac
   assert.match(log(), /git clone --quiet https:\/\/github\.com\/someone\/workspace\.git /);
   assert.match(log(), /checkout --detach --quiet v1\.10\.0/, '숫자로 가장 높은 태그');
   assert.ok(log().includes(`setup ${fs.realpathSync(target)} open=1`), log());
+  assert.doesNotMatch(log(), /^update /m, '새로 받은 것은 업데이트하지 않는다');
   const config = JSON.parse(fs.readFileSync(path.join(target, 'workspace.config.json'), 'utf8'));
   assert.equal(config.slack.workspaceUrl, 'https://myco.slack.com', '예시의 자리 표시를 팀 값으로');
   assert.equal(config.jira.siteUrl, 'https://myco.atlassian.net');
@@ -6417,7 +6419,8 @@ esac
   assert.match(resume.stdout, /이미 받아 뒀어요 — 그대로 이어서 설치해요/);
   const kept = JSON.parse(fs.readFileSync(path.join(target, 'workspace.config.json'), 'utf8'));
   assert.deepEqual(kept, { title: '내 제목', slack: { workspaceUrl: 'https://other.slack.com' }, jira: { siteUrl: 'https://myco.atlassian.net' }, server: { port: 4400, updateChannel: 'stable' } });
-  assert.match(log(), /setup .* open=1/);
+  assert.match(log(), /^setup .* open=1/m, '설치가 덜 끝난 폴더면 setup.sh만 마저 한다');
+  assert.doesNotMatch(log(), /^update /m, 'workspace.env가 없으면(설치 미완) 업데이트부터 하지 않는다');
 
   // 3) ~/workspace에 다른 것이 있으면 멈춘다(아무것도 부르지 않는다)
   fs.writeFileSync(trail, '');
@@ -6450,6 +6453,150 @@ esac
   const text = fs.readFileSync(command, 'utf8');
   assert.match(text, /xcode-select --install/);
   assert.match(text, /WORKSPACE_OPEN_APP=1 bash setup\.sh/);
+});
+
+test('WP-H 설치.command: 기존 설치(workspace.env)가 있으면 새로 받지 않고 그 폴더에서 update.sh → setup.sh · ~/workspace에 한 벌 더 있으면 멈춤 · env가 없는 폴더면 새 설치', { skip: !(gitReady && dittoReady) }, (t) => {
+  const fix = teamFixture(t, { slack: { workspaceUrl: 'https://myco.slack.com' }, jira: { siteUrl: 'https://myco.atlassian.net' }, server: { updateChannel: 'stable' } });
+  assert.equal(fix.run().status, 0);
+  const { command, readme } = fix.unpack();
+  const readmeText = fs.readFileSync(readme, 'utf8');
+  assert.match(readmeText, /이미 설치해 쓰고 있다면 이 파일을 열어도 괜찮아요 — 새로 설치하지 않고 업데이트로 진행해요\./);
+  assert.match(readmeText, /한 벌이 더 있어요/);
+
+  // 가짜 git(네트워크 없음)·가짜 update.sh/setup.sh — 부른 순서와 위치만 적는다.
+  const bin = path.join(fix.root, 'fakebin');
+  const trail = path.join(fix.root, 'trail.txt');
+  const seed = path.join(fix.root, 'seed');
+  fs.mkdirSync(bin);
+  fs.mkdirSync(seed);
+  fs.copyFileSync(path.join(REPO_ROOT, 'workspace.config.example.json'), path.join(seed, 'workspace.config.example.json'));
+  writeExec(path.join(seed, 'setup.sh'), `#!/bin/bash\necho "setup $(pwd -P) open=\${WORKSPACE_OPEN_APP:-}" >> ${JSON.stringify(trail)}\n`);
+  writeExec(path.join(seed, 'update.sh'), `#!/bin/bash\necho "update $(pwd -P)" >> ${JSON.stringify(trail)}\n`);
+  writeExec(path.join(bin, 'git'), `#!/bin/bash
+echo "git $*" >> ${JSON.stringify(trail)}
+case "$1" in
+  --version) echo "git version 2.0-fake" ;;
+  clone) shift; [ "$1" = "--quiet" ] && shift; mkdir -p "$2/.git"; echo "$1" > "$2/.git/origin-url"; cp ${JSON.stringify(seed)}/* "$2/" ;;
+  -C) dir="$2"; shift 2
+      case "$1" in
+        remote) cat "$dir/.git/origin-url" 2>/dev/null || exit 2 ;;
+        tag) printf 'v1.2.0\\n' ;;
+        checkout) : ;;
+        *) exit 1 ;;
+      esac ;;
+  *) exit 1 ;;
+esac
+`);
+  fs.symlinkSync(process.execPath, path.join(bin, 'node'));
+  const install = (home, extra = {}) => spawnSync('/bin/bash', [command], { encoding: 'utf8', input: '', env: { HOME: home, PATH: `${bin}:/usr/bin:/bin`, TMPDIR: os.tmpdir(), ...extra } });
+  const log = () => (fs.existsSync(trail) ? fs.readFileSync(trail, 'utf8') : '');
+  const lines = (prefix) => log().split('\n').filter(l => /^(update|setup) /.test(l)).map(l => l.replace(prefix, '<>'));
+  // 이 저장소를 받아 둔 폴더(clone과 같은 모양)를 만든다.
+  const makeCopy = (dir, origin = 'https://github.com/someone/workspace') => {
+    fs.mkdirSync(path.join(dir, '.git'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.git', 'origin-url'), origin + '\n');
+    for (const f of fs.readdirSync(seed)) fs.copyFileSync(path.join(seed, f), path.join(dir, f));
+    fs.writeFileSync(path.join(dir, 'workspace.config.json'), JSON.stringify({ title: '쓰던 제목', jira: { siteUrl: '' } }));
+    fs.writeFileSync(path.join(dir, 'tasks.md'), '쓰던 데이터\n');
+  };
+  const newHome = (name, envDir) => {
+    const home = path.join(fix.root, name);
+    fs.mkdirSync(home);
+    if (envDir !== undefined) {
+      const envDirPath = path.join(home, '.local', 'share', 'workspace-automation');
+      fs.mkdirSync(envDirPath, { recursive: true });
+      fs.writeFileSync(path.join(envDirPath, 'workspace.env'), `WORKSPACE_DIR="${envDir}"\n`);
+    }
+    return fs.realpathSync(home);
+  };
+
+  // (a) 다른 폴더에 설치돼 있음 → clone 없음, 그 폴더에서 update.sh → setup.sh, 빈 팀 칸만 채움
+  fs.writeFileSync(trail, '');
+  let home = newHome('home-a', '');
+  const elsewhere = path.join(home, 'Projects', 'my-app');
+  makeCopy(elsewhere);
+  fs.writeFileSync(path.join(home, '.local/share/workspace-automation/workspace.env'), `WORKSPACE_DIR="${elsewhere}"\n`);
+  let run = install(home);
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.match(run.stdout, /✓ 이미 설치돼 있어요\(~\/Projects\/my-app\) — 업데이트로 진행할게요/);
+  assert.doesNotMatch(log(), /git clone/);
+  assert.equal(fs.existsSync(path.join(home, 'workspace')), false, '~/workspace를 새로 만들지 않는다');
+  assert.deepEqual(lines(elsewhere), ['update <>', 'setup <> open=1']);
+  const filled = JSON.parse(fs.readFileSync(path.join(elsewhere, 'workspace.config.json'), 'utf8'));
+  assert.equal(filled.title, '쓰던 제목');
+  assert.equal(filled.jira.siteUrl, 'https://myco.atlassian.net', '빈 팀 칸은 채운다');
+  assert.equal(fs.readFileSync(path.join(elsewhere, 'tasks.md'), 'utf8'), '쓰던 데이터\n');
+
+  // (b) ~/workspace에 설치돼 있음 → update.sh → setup.sh
+  fs.writeFileSync(trail, '');
+  home = newHome('home-b', '');
+  const ws = path.join(home, 'workspace');
+  makeCopy(ws);
+  fs.writeFileSync(path.join(home, '.local/share/workspace-automation/workspace.env'), `WORKSPACE_DIR="${ws}"\n`);
+  run = install(home);
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.match(run.stdout, /이미 설치돼 있어요\(~\/workspace\) — 업데이트로 진행할게요/);
+  assert.doesNotMatch(log(), /git clone/);
+  assert.deepEqual(lines(ws), ['update <>', 'setup <> open=1']);
+
+  // (c) 기존 설치 + ~/workspace에 이 앱이 한 벌 더 → 아무것도 부르지 않고 안내, 종료 코드 1(한글 로케일 포함)
+  home = newHome('home-c', '');
+  const old = path.join(home, 'playio', 'workspace');
+  makeCopy(old);
+  makeCopy(path.join(home, 'workspace'));
+  fs.writeFileSync(path.join(home, '.local/share/workspace-automation/workspace.env'), `WORKSPACE_DIR="${old}"\n`);
+  const configBefore = fs.readFileSync(path.join(old, 'workspace.config.json'), 'utf8');
+  for (const locale of [null, 'ko_KR.UTF-8', 'en_US.UTF-8']) {
+    fs.writeFileSync(trail, '');
+    run = install(home, locale ? { LC_ALL: locale, LANG: locale } : {});
+    assert.equal(run.status, 1, `${locale}: ${run.stdout}`);
+    assert.match(run.stdout, /✗ 이미 설치된 앱\(~\/playio\/workspace\)과 ~\/workspace에 한 벌이 더 있어요\. 쓰던 데이터는 ~\/playio\/workspace에 있어요\. ~\/workspace 폴더 이름을 바꾼 뒤\(예: workspace-old\) 다시 열어 주세요\./, `${locale}: ${run.stdout}`);
+    assert.doesNotMatch(run.stdout, /업데이트로 진행할게요/);
+    assert.doesNotMatch(log(), /git clone|^update |^setup /m);
+  }
+  assert.equal(fs.readFileSync(path.join(old, 'workspace.config.json'), 'utf8'), configBefore, '설정도 건드리지 않는다');
+
+  // (b') ~/workspace가 기존 설치를 가리키는 링크면 같은 폴더로 본다
+  fs.writeFileSync(trail, '');
+  home = newHome('home-link', '');
+  const real = path.join(home, 'real-app');
+  makeCopy(real);
+  fs.symlinkSync(real, path.join(home, 'workspace'));
+  fs.writeFileSync(path.join(home, '.local/share/workspace-automation/workspace.env'), `WORKSPACE_DIR="${real}"\n`);
+  run = install(home);
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.deepEqual(lines(real), ['update <>', 'setup <> open=1']);
+
+  // (e) workspace.env가 없는 폴더를 가리킴 → 새 설치(update.sh 없음)
+  fs.writeFileSync(trail, '');
+  home = newHome('home-e', path.join(fix.root, 'gone'));
+  run = install(home);
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.match(log(), /git clone --quiet /);
+  assert.deepEqual(lines(path.join(home, 'workspace')), ['setup <> open=1']);
+
+  // (e') 가리키는 폴더가 다른 저장소면 기존 설치로 보지 않는다 → 새 설치
+  fs.writeFileSync(trail, '');
+  home = newHome('home-e2', '');
+  const foreign = path.join(home, 'other-repo');
+  makeCopy(foreign, 'https://github.com/else/thing');
+  fs.writeFileSync(path.join(home, '.local/share/workspace-automation/workspace.env'), `WORKSPACE_DIR="${foreign}"\n`);
+  run = install(home);
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.match(log(), /git clone --quiet /);
+  assert.doesNotMatch(log(), /^update /m);
+
+  // workspace.env는 실행하지 않는다(글자로 한 줄만 읽는다)
+  fs.writeFileSync(trail, '');
+  home = newHome('home-inject', '');
+  const marker = path.join(fix.root, 'injected');
+  fs.writeFileSync(path.join(home, '.local/share/workspace-automation/workspace.env'), `WORKSPACE_DIR="$(touch ${marker})"\ntouch ${marker}\n`);
+  run = install(home);
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.equal(fs.existsSync(marker), false, 'workspace.env 안의 명령은 돌지 않는다');
+
+  const text = fs.readFileSync(command, 'utf8');
+  assert.ok(!/rm -rf|pkill|killall|xargs kill|\. "\$ENV_FILE"|^\s*(source|\.) /m.test(text));
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

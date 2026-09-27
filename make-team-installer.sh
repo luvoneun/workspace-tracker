@@ -5,7 +5,8 @@
 #   bash make-team-installer.sh <폴더>      그 폴더에 만든다
 #
 # 만든 zip을 동료에게 DM으로 보내면, 동료는 zip을 풀고 `설치.command`를 우클릭 → 열기 한 번으로 끝난다
-# (git·node 확인 → ~/workspace에 받기 → 팀 값 채우기 → setup.sh). 메신저로 보내면 실행 권한이 빠지는데
+# (git·node 확인 → ~/workspace에 받기 → 팀 값 채우기 → setup.sh). 이미 설치한 사람이 열면(workspace.env가 이 저장소
+# 폴더를 가리키면) 새로 받지 않고 그 폴더에서 update.sh → setup.sh로 업데이트한다. 메신저로 보내면 실행 권한이 빠지는데
 # zip이 그걸 지켜 준다.
 #
 # 지키는 것:
@@ -96,7 +97,7 @@ trap cleanup EXIT
 
 {
   echo '#!/bin/bash'
-  echo "# 워크스페이스 설치 파일 — $(date '+%Y-%m-%d') 에 만들었어요. 묻는 것 없이 ~/workspace에 설치해요."
+  echo "# 워크스페이스 설치 파일 — $(date '+%Y-%m-%d') 에 만들었어요. 묻는 것 없이 ~/workspace에 설치해요(이미 설치돼 있으면 업데이트)."
   echo '# 처음 열 때 "확인되지 않은 개발자"가 뜨면 우클릭 → 열기 한 번.'
   echo
   echo "REPO_URL='$REPO_URL'"
@@ -135,16 +136,54 @@ fi
 if [ "$MISSING" = "1" ]; then echo; echo "설치를 멈춰요."; finish 1; fi
 ok "git·node 있음"
 
-# 2. ~/workspace에 받기 — 없으면 새로 받고(stable이면 배포된 최신 버전으로), 이미 이 앱이면 그대로 이어 간다.
-same_repo() {
-  local have want
-  have="$(git -C "$TARGET" remote get-url origin 2>/dev/null)"
+# 2. 기존 설치 찾기 → ~/workspace에 받기.
+# 이 앱이 이미 설치돼 있으면(setup.sh가 적어 둔 workspace.env가 이 저장소 폴더를 가리키면) 새로 받지 않고 그 폴더를
+# 업데이트한다 — 다른 폴더에 설치한 사람이 열어도 빈 데이터로 새로 설치되지 않게.
+# 없으면 ~/workspace에 새로 받고(stable이면 배포된 최신 버전으로), 이미 이 앱이면 그대로 이어 간다.
+repo_at() {
+  local dir="$1" have want
+  have="$(git -C "$dir" remote get-url origin 2>/dev/null)"
+  # SSH 주소(git@github.com:소유자/저장소)로 받은 설치도 같은 저장소로 알아본다.
+  case "$have" in git@github.com:*) have="https://github.com/${have#git@github.com:}" ;; esac
   have="${have%/}"; have="${have%.git}"
   want="${REPO_URL%/}"; want="${want%.git}"
-  [ -d "$TARGET/.git" ] && [ -n "$have" ] && [ "$have" = "$want" ]
+  [ -d "$dir/.git" ] && [ -n "$have" ] && [ "$have" = "$want" ]
 }
-if [ -e "$TARGET" ] || [ -L "$TARGET" ]; then
+same_repo() { repo_at "$TARGET"; }
+real_dir() { (cd "$1" 2>/dev/null && pwd -P); }
+shown_path() {
+  case "$1" in
+    "$HOME"/*) printf '%s' "~${1#"$HOME"}" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+# workspace.env는 실행하지 않고 WORKSPACE_DIR="…" 한 줄만 글자로 읽는다(setup.sh가 쓰는 형식).
+EXISTING=""
+ENV_FILE="$HOME/.local/share/workspace-automation/workspace.env"
+if [ -f "$ENV_FILE" ]; then
+  ENV_LINE="$(grep -m 1 '^WORKSPACE_DIR=' "$ENV_FILE" 2>/dev/null)"
+  ENV_DIR="${ENV_LINE#WORKSPACE_DIR=}"
+  ENV_DIR="${ENV_DIR#\"}"; ENV_DIR="${ENV_DIR%\"}"
+  case "$ENV_DIR" in
+    /*) [ -d "$ENV_DIR" ] && repo_at "$ENV_DIR" && EXISTING="$ENV_DIR" ;;
+  esac
+fi
+MODE="install"
+if [ -n "$EXISTING" ]; then
+  EXISTING_SHOWN="$(shown_path "$EXISTING")"
+  # ~/workspace에 이 앱이 한 벌 더 있으면 어느 쪽이 진짜인지 고르지 않고 멈춘다(아무것도 바꾸지 않는다).
+  if [ -e "$TARGET" ] || [ -L "$TARGET" ]; then
+    if same_repo && [ "$(real_dir "$TARGET")" != "$(real_dir "$EXISTING")" ]; then
+      stop "이미 설치된 앱(${EXISTING_SHOWN})과 ${SHOWN}에 한 벌이 더 있어요. 쓰던 데이터는 ${EXISTING_SHOWN}에 있어요. ${SHOWN} 폴더 이름을 바꾼 뒤(예: workspace-old) 다시 열어 주세요."
+    fi
+  fi
+  ok "이미 설치돼 있어요(${EXISTING_SHOWN}) — 업데이트로 진행할게요"
+  TARGET="$EXISTING"
+  SHOWN="$EXISTING_SHOWN"
+  MODE="update"
+elif [ -e "$TARGET" ] || [ -L "$TARGET" ]; then
   same_repo || stop "${SHOWN}가 이미 있어요 — 이름을 바꾼 뒤 다시 실행해 주세요"
+  # workspace.env가 없는데 받아 둔 폴더만 있으면 설치가 끝나지 않은 것 — 업데이트 말고 설치(setup)만 마저 한다.
   ok "$SHOWN 에 이미 받아 뒀어요 — 그대로 이어서 설치해요"
 else
   git clone --quiet "$REPO_URL" "$TARGET" || stop "앱을 받아오지 못했어요 — 인터넷 연결을 확인해 주세요."
@@ -208,9 +247,15 @@ case "$CONFIG_RESULT" in
   *)      ok "설정 파일 있음 (그대로 둬요)" ;;
 esac
 
-# 4. 설치 — 끝나면 Dock 앱을 연다.
+# 4. 설치 — 끝나면 Dock 앱을 연다. 이미 받아 둔 폴더면 먼저 update.sh로 코드를 새 버전으로 바꾼다
+# (업데이트.command와 같은 순서 — update.sh가 폴더를 ~/workspace로 옮겼을 수 있어서 setup.sh는 실제 위치에서 부른다).
 echo
 cd "$TARGET" || stop "$SHOWN 로 들어가지 못했어요."
+if [ "$MODE" = "update" ]; then
+  bash update.sh || finish 1
+  cd "$(pwd -P)" || finish 1
+  echo
+fi
 WORKSPACE_OPEN_APP=1 bash setup.sh
 finish $?
 INSTALLER
@@ -229,11 +274,13 @@ cat > "$README" << 'TXT' || die "설명서를 쓰지 못했어요."
 2. 터미널 창이 뜨고 설치가 진행돼요. 끝나면 앱이 저절로 열려요.
 3. Dock에 뜬 앱 아이콘을 우클릭 → 옵션 → Dock에 유지 를 눌러 두세요.
    앱은 홈 폴더의 workspace 폴더(~/workspace)에 설치돼요.
+   이미 설치해 쓰고 있다면 이 파일을 열어도 괜찮아요 — 새로 설치하지 않고 업데이트로 진행해요.
 
 ■ 중간에 멈췄다면
 - "node가 없어요" → https://nodejs.org 에서 LTS 버전을 받아 설치한 뒤, 「설치.command」를 다시 우클릭 → 열기.
 - "개발자 도구를 설치할까요?" 창이 뜨면 → 설치를 누르고, 끝나면 「설치.command」를 다시 열기.
-- "~/workspace가 이미 있어요" → 그 폴더 이름을 바꾼 뒤 다시 열기.
+- "~/workspace가 이미 있어요" · "~/workspace에 한 벌이 더 있어요" → ~/workspace 폴더 이름을 바꾼 뒤(예: workspace-old) 다시 열기.
+  이미 쓰던 앱이 있으면 쓰던 데이터는 안내에 나온 그 폴더에 있어요.
 - 그래도 안 되면 터미널 화면을 캡처해서 이 파일을 보낸 사람에게 보내 주세요.
 
 ■ 처음 쓰기
