@@ -84,9 +84,14 @@ CHANNEL="$(printf '%s\n' "$PICKED" | sed -n 2p)"
 # 쉘 글자 안에 그대로 넣으므로, 규칙을 통과한 값에는 작은따옴표·역슬래시가 없다는 것을 한 번 더 확인한다.
 case "$TEAM_CONFIG$REPO_URL$CHANNEL" in *"'"*|*'\'*) die "담을 값에 쓸 수 없는 글자가 있어요." ;; esac
 
+FOLDER_NAME="워크스페이스-설치"
+README_NAME="먼저 읽어 주세요.txt"
 STAGE="$(mktemp -d "${TMPDIR:-/tmp}/workspace-team-installer.XXXXXX")" || die "임시 폴더를 만들지 못했어요."
-COMMAND="$STAGE/$COMMAND_NAME"
-cleanup() { rm -f "$COMMAND"; rmdir "$STAGE" 2>/dev/null; }
+FOLDER="$STAGE/$FOLDER_NAME"
+mkdir "$FOLDER" || die "임시 폴더를 만들지 못했어요."
+COMMAND="$FOLDER/$COMMAND_NAME"
+README="$FOLDER/$README_NAME"
+cleanup() { rm -f "$COMMAND" "$README"; rmdir "$FOLDER" 2>/dev/null; rmdir "$STAGE" 2>/dev/null; }
 trap cleanup EXIT
 
 {
@@ -212,7 +217,39 @@ INSTALLER
 } > "$COMMAND" || die "설치 파일을 쓰지 못했어요."
 chmod 755 "$COMMAND"
 
-ditto -c -k --sequesterRsrc "$COMMAND" "$ZIP" || die "zip으로 묶지 못했어요."
+cat > "$README" << 'TXT' || die "설명서를 쓰지 못했어요."
+워크스페이스 설치 안내
+
+이 앱은 내 할 일·확인 대기·회의·지라를 한 화면에서 정리하는 맥 앱이에요.
+업무 데이터는 이 맥 안에만 저장되고, 다른 사람에게 보내지지 않아요.
+
+■ 설치 (5분)
+1. 이 폴더의 「설치.command」를 우클릭 → 열기 를 눌러요.
+   (그냥 더블클릭하면 "확인되지 않은 개발자"로 막혀요. 우클릭 → 열기는 처음 한 번만.)
+2. 터미널 창이 뜨고 설치가 진행돼요. 끝나면 앱이 저절로 열려요.
+3. Dock에 뜬 앱 아이콘을 우클릭 → 옵션 → Dock에 유지 를 눌러 두세요.
+   앱은 홈 폴더의 workspace 폴더(~/workspace)에 설치돼요.
+
+■ 중간에 멈췄다면
+- "node가 없어요" → https://nodejs.org 에서 LTS 버전을 받아 설치한 뒤, 「설치.command」를 다시 우클릭 → 열기.
+- "개발자 도구를 설치할까요?" 창이 뜨면 → 설치를 누르고, 끝나면 「설치.command」를 다시 열기.
+- "~/workspace가 이미 있어요" → 그 폴더 이름을 바꾼 뒤 다시 열기.
+- 그래도 안 되면 터미널 화면을 캡처해서 이 파일을 보낸 사람에게 보내 주세요.
+
+■ 처음 쓰기
+- 맨 위 칸에 할 일을 적고 Enter.
+- 오늘 탭의 「사용설명서」 카드에 기본 사용법이 있어요.
+- 슬랙·지라·캘린더 연결은 선택이에요. 필요할 때 설정(톱니바퀴) → 연동 에서 하나씩.
+  슬랙 토큰 페이지에서 "권한이 없어요"가 뜨면, 그 화면의 「요청 문구 복사」를 이 파일을 보낸 사람에게 보내 주세요.
+
+■ 업데이트
+새 버전이 나오면 설정 버튼에 파란 점이 떠요. 설정 → 앱 → 「업데이트 받기」를 누르면 돼요.
+
+■ 설치 파일은 다시 필요 없어요
+설치가 끝나면 이 폴더와 zip은 지워도 돼요.
+TXT
+
+ditto -c -k --sequesterRsrc --keepParent "$FOLDER" "$ZIP" || die "zip으로 묶지 못했어요."
 ok "$ZIP 를 만들었어요"
 echo
 echo "  담은 값"
@@ -226,4 +263,5 @@ done
 echo
 echo "  토큰·이메일·채널 같은 개인 값은 담지 않았어요."
 echo "  이 zip을 동료에게 DM으로 보내 주세요 — 풀고 설치.command를 우클릭 → 열기 한 번이면 돼요."
+echo "  (안에 「먼저 읽어 주세요.txt」 설명서가 들어 있어요)"
 echo

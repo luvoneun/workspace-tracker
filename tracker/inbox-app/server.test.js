@@ -6279,7 +6279,8 @@ function teamFixture(t, config, { origin = 'https://github.com/someone/workspace
   const unpack = () => {
     const dir = fs.mkdtempSync(path.join(root, 'unzip-'));
     assert.equal(spawnSync('/usr/bin/ditto', ['-x', '-k', zip, dir]).status, 0);
-    return path.join(dir, '설치.command');
+    const folder = path.join(dir, '워크스페이스-설치');
+    return { dir, folder, command: path.join(folder, '설치.command'), readme: path.join(folder, '먼저 읽어 주세요.txt') };
   };
   return { root, repo, out, run, zip, unpack };
 }
@@ -6296,9 +6297,13 @@ const TEAM_SECRETS = /SECRET|secret|비밀|Profile 9|4999|ical|C0SECRETCH/;
 
 test('WP-D3 make-team-installer.sh: 허용 목록 값만 담고(규칙에 어긋난 값은 빼고 알림), zip 안 설치.command는 실행 권한이 있으며, 이미 있으면 덮어쓰지 않는다', { skip: !(gitReady && dittoReady) }, (t) => {
   const fix = teamFixture(t, TEAM_SECRET_CONFIG);
+  const tmpBase = process.env.TMPDIR || '/tmp';
+  const tmpBefore = new Set(fs.readdirSync(tmpBase).filter(n => n.startsWith('workspace-team-installer.')));
   const made = fix.run();
   assert.equal(made.status, 0, made.stdout + made.stderr);
   assert.ok(fs.existsSync(fix.zip));
+  const tmpLeftover = fs.readdirSync(tmpBase).filter(n => n.startsWith('workspace-team-installer.') && !tmpBefore.has(n));
+  assert.deepEqual(tmpLeftover, [], '임시 폴더는 rm -rf 없이도 남지 않는다');
   assert.match(made.stdout, /저장소 : https:\/\/github\.com\/someone\/workspace\.git/);
   assert.match(made.stdout, /slack\.workspaceUrl = https:\/\/myco\.slack\.com/);
   assert.match(made.stdout, /slack\.appUrl = https:\/\/api\.slack\.com\/apps\/A0SECRETAPP/);
@@ -6306,8 +6311,12 @@ test('WP-D3 make-team-installer.sh: 허용 목록 값만 담고(규칙에 어긋
   assert.match(made.stdout, /server\.updateChannel = stable/, '내 설정이 main이어도 팀은 stable');
   assert.doesNotMatch(made.stdout.replace(/A0SECRETAPP/g, ''), TEAM_SECRETS, '화면에 보여 주는 값도 허용 목록뿐');
 
-  const command = fix.unpack();
+  const { command, readme } = fix.unpack();
   assert.ok(fs.statSync(command).mode & 0o100, 'zip을 풀어도 실행 권한이 남아 있다');
+  assert.ok(fs.existsSync(readme), '같은 폴더에 설명서가 있다');
+  const readmeText = fs.readFileSync(readme, 'utf8');
+  assert.doesNotMatch(readmeText.replace(/A0SECRETAPP/g, ''), TEAM_SECRETS, '설명서에는 개인 값이 없다');
+  assert.doesNotMatch(readmeText, /myco|atlassian|github\.com\/someone|workspaceUrl|siteUrl|appUrl|updateChannel/, '설명서에는 config 값도 없다');
   const text = fs.readFileSync(command, 'utf8');
   assert.equal(spawnSync('/bin/bash', ['-n', command]).status, 0, '생성된 파일은 bash 문법이 맞다');
   const team = JSON.parse(/^TEAM_CONFIG='(.*)'$/m.exec(text)[1]);
@@ -6335,7 +6344,7 @@ test('WP-D3 make-team-installer.sh: 허용 목록 값만 담고(규칙에 어긋
   for (const key of ['slack\\.workspaceUrl', 'slack\\.appUrl', 'jira\\.siteUrl']) {
     assert.match(oddRun.stdout, new RegExp(`! ${key} — 규칙에 맞지 않아 뺐어요`));
   }
-  const oddText = fs.readFileSync(odd.unpack(), 'utf8');
+  const oddText = fs.readFileSync(odd.unpack().command, 'utf8');
   assert.deepEqual(JSON.parse(/^TEAM_CONFIG='(.*)'$/m.exec(oddText)[1]), { server: { updateChannel: 'stable' } }, '갈래가 없거나 이상하면 stable');
   assert.doesNotMatch(oddText, /evil|http:\/\/myco/);
 
@@ -6348,13 +6357,13 @@ test('WP-D3 make-team-installer.sh: 허용 목록 값만 담고(규칙에 어긋
 
   const script = fs.readFileSync(path.join(REPO_ROOT, 'make-team-installer.sh'), 'utf8');
   assert.ok(!/rm -rf|pkill|killall|xargs kill/.test(script));
-  assert.match(script, /ditto -c -k --sequesterRsrc/);
+  assert.match(script, /ditto -c -k --sequesterRsrc --keepParent/);
 });
 
 test('WP-D3 설치.command: 새로 받기 · 이미 같은 저장소면 이어 가기 · 다른 폴더면 멈춤 · 설정은 빈 팀 칸만 채움 · node가 없으면 안내', { skip: !(gitReady && dittoReady) }, (t) => {
   const fix = teamFixture(t, { slack: { workspaceUrl: 'https://myco.slack.com' }, jira: { siteUrl: 'https://myco.atlassian.net' }, server: { updateChannel: 'stable' } });
   assert.equal(fix.run().status, 0);
-  const command = fix.unpack();
+  const { command } = fix.unpack();
 
   // 가짜 git — clone이면 폴더와 .git, 이 앱의 예시 설정·가짜 setup.sh를 둔다. 네트워크에 닿지 않는다.
   const bin = path.join(fix.root, 'fakebin');
