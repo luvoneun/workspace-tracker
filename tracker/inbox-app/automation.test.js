@@ -393,7 +393,7 @@ test('WP-D2 app-refresh.sh: Dock 앱을 만들고, 이름이 바뀌면 기록된
   const bin = path.join(root, 'bin');
   const calls = path.join(root, 'calls.log');
   fs.mkdirSync(path.join(ws, 'tracker', 'inbox-app', 'icons'), { recursive: true });
-  fs.copyFileSync(path.join(__dirname, 'icons', 'icon-512.png'), path.join(ws, 'tracker', 'inbox-app', 'icons', 'icon-512.png'));
+  fs.copyFileSync(path.join(__dirname, 'icons', 'app.icns'), path.join(ws, 'tracker', 'inbox-app', 'icons', 'app.icns'));
   fs.mkdirSync(bin);
   fs.mkdirSync(path.join(root, 'tmp'));
   const log = name => `echo "${name} $*" >> ${JSON.stringify(calls)}`;
@@ -421,6 +421,8 @@ test('WP-D2 app-refresh.sh: Dock 앱을 만들고, 이름이 바뀌면 기록된
   assert.match(fs.readFileSync(calls, 'utf8'), /codesign --force --deep -s - .*\/new\.app/, '임시 자리에 다 만든 뒤 서명한다');
   assert.match(fs.readFileSync(calls, 'utf8'), /osacompile -o .*\/new\.app /, '기존 자리에 바로 만들지 않는다');
   assert.deepEqual(fs.readdirSync(path.join(root, 'tmp')), [], '임시 폴더는 남기지 않는다');
+  assert.ok(fs.readFileSync(path.join(apps, 'Workspace.app', 'Contents', 'Resources', 'applet.icns')).equals(fs.readFileSync(path.join(__dirname, 'icons', 'app.icns'))), '내 그림이 없으면 저장소의 기본 토끼 icns를 그대로 쓴다');
+  assert.doesNotMatch(fs.readFileSync(calls, 'utf8'), /^python3 /m, '기본 아이콘에는 python3를 부르지 않는다(맥 기본 python3에는 Pillow가 없다)');
 
   // 2) 이름을 바꾸면 새 앱을 만들고 기록된 옛 이름(Workspace) 하나만 지운다 — 다른 앱은 그대로
   ours('Other');
@@ -483,6 +485,154 @@ test('WP-D2 app-refresh.sh: Dock 앱을 만들고, 이름이 바뀌면 기록된
   const script = fs.readFileSync(automationScript('app-refresh.sh'), 'utf8');
   assert.ok(!/killall|pkill|kill -9/.test(script), 'Dock을 다시 시작하지 않는다');
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+// 테스트용 RGBA PNG(한 변 size) — 왼쪽 위 픽셀의 알파만 `cornerAlpha`, 나머지는 불투명.
+function testPng(size, cornerAlpha) {
+  const zlib = require('node:zlib');
+  const rows = [];
+  for (let y = 0; y < size; y += 1) {
+    const row = Buffer.alloc(1 + size * 4, 200);
+    row[0] = y === 0 ? 1 : 0;   // 첫 줄은 Sub 필터 — 첫 픽셀은 필터와 무관하게 원래 값이다
+    if (y === 0) { row.fill(0, 5); row[4] = cornerAlpha; row[1] = 200; row[2] = 200; row[3] = 200; }
+    rows.push(row);
+  }
+  const chunk = (type, data) => {
+    const head = Buffer.alloc(4);
+    head.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(zlib.crc32(body));
+    return Buffer.concat([head, body, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(size, 0);
+  ihdr.writeUInt32BE(size, 4);
+  ihdr[8] = 8; ihdr[9] = 6;
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr),
+    chunk('IDAT', zlib.deflateSync(Buffer.concat(rows))), chunk('IEND', Buffer.alloc(0))]);
+}
+
+test('iconRounded: 꾸미기가 둥글게 깎아 저장한 그림(왼쪽 위가 투명)만 둥근 그림으로 본다', () => {
+  const { iconRounded } = require('./personalize');
+  assert.equal(iconRounded(testPng(128, 0)), true);
+  assert.equal(iconRounded(testPng(128, 255)), false, '각진 옛 그림');
+  assert.equal(iconRounded(fs.readFileSync(path.join(__dirname, 'icons', 'icon-512.png'))), false);
+  assert.equal(iconRounded(Buffer.from([0xff, 0xd8, 0xff, 0xe0, ...new Array(40).fill(0)])), false, 'JPEG는 각진 그림');
+  assert.equal(iconRounded(Buffer.from('not a picture at all, just words')), false);
+});
+
+// Pillow 없는 맥 재현 — python3는 늘 실패하고, sips·iconutil은 PATH 앞의 가짜다(실제 ~/Applications·osacompile에 닿지 않는다).
+test('app-refresh.sh: Pillow가 없어도 둥근 내 그림은 sips로 크기만 바꾸고, 각진 옛 그림은 한 줄 남기고, 둘 다 못 하면 기본 토끼로 둔다', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-app-icon-'));
+  const homeDir = path.join(root, 'home');
+  const apps = path.join(homeDir, 'Applications');
+  const ws = path.join(root, 'ws');
+  const appDir = path.join(ws, 'tracker', 'inbox-app');
+  const bin = path.join(root, 'bin');
+  const calls = path.join(root, 'calls.log');
+  const sipsFail = path.join(root, 'fail-sips');
+  fs.mkdirSync(path.join(appDir, 'icons'), { recursive: true });
+  fs.mkdirSync(path.join(ws, 'local'), { recursive: true });
+  fs.copyFileSync(path.join(__dirname, 'icons', 'app.icns'), path.join(appDir, 'icons', 'app.icns'));
+  fs.copyFileSync(path.join(__dirname, 'personalize.js'), path.join(appDir, 'personalize.js'));
+  fs.mkdirSync(bin);
+  fs.mkdirSync(path.join(root, 'tmp'));
+  const log = name => `echo "${name} $*" >> ${JSON.stringify(calls)}`;
+  writeExec(path.join(bin, 'osacompile'), `#!/bin/bash\n${log('osacompile')}\nout=""; while [ $# -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done\nmkdir -p "$out/Contents/Resources/Scripts" && touch "$out/Contents/Resources/Scripts/main.scpt" "$out/Contents/Info.plist"\n`);
+  writeExec(path.join(bin, 'python3'), `#!/bin/bash\n${log('python3')}\ncat > /dev/null\necho "ModuleNotFoundError: No module named 'PIL'" >&2\nexit 1\n`);
+  writeExec(path.join(bin, 'sips'), `#!/bin/bash\n${log('sips')}\n[ -f ${JSON.stringify(sipsFail)} ] && exit 1\nout=""; while [ $# -gt 0 ]; do [ "$1" = "--out" ] && out="$2"; shift; done\necho png > "$out"\n`);
+  writeExec(path.join(bin, 'iconutil'), `#!/bin/bash\n${log('iconutil')}\nout=""; while [ $# -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done\necho made-by-sips > "$out"\n`);
+  for (const name of ['codesign', 'plutil', 'xattr', 'lsregister']) writeExec(path.join(bin, name), `#!/bin/bash\n${log(name)}\n`);
+  const config = path.join(ws, 'workspace.config.json');
+  fs.writeFileSync(config, JSON.stringify({ server: { port: 4399 } }));
+  const icon = path.join(ws, 'local', 'icon.png');
+  const applet = () => fs.readFileSync(path.join(apps, 'Workspace.app', 'Contents', 'Resources', 'applet.icns'));
+  const run = () => {
+    fs.rmSync(calls, { force: true });
+    return spawnSync('/bin/bash', [automationScript('app-refresh.sh')], {
+      encoding: 'utf8', timeout: 60000,
+      env: { ...process.env, HOME: homeDir, PATH: `${bin}:${process.env.PATH}`, TMPDIR: path.join(root, 'tmp'),
+        WORKSPACE_DIR: ws, WORKSPACE_CONFIG: config, WORKSPACE_INSTALL_DIR: path.join(root, 'install'), LSREGISTER_BIN: path.join(bin, 'lsregister') },
+    });
+  };
+  const called = () => (fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8') : '');
+
+  // 1) 꾸미기가 둥글게 깎아 저장한 그림 → python3를 부르지 않고 sips로 크기만(10장) → iconutil
+  fs.writeFileSync(icon, testPng(256, 0));
+  const rounded = run();
+  assert.equal(rounded.status, 0, rounded.stdout + rounded.stderr);
+  assert.doesNotMatch(called(), /^python3 /m, '둥근 그림에는 Pillow가 필요 없다');
+  assert.equal((called().match(/^sips -s format png -z /gm) || []).length, 10, '16~512와 그 2배, 크기만 바꾼다');
+  assert.equal(applet().toString().trim(), 'made-by-sips');
+  assert.doesNotMatch(rounded.stdout, /아이콘을 만들지 못했어요|둥근 모서리 없이/);
+  assert.deepEqual(fs.readdirSync(path.join(root, 'tmp')), [], '임시 폴더는 남기지 않는다');
+
+  // 2) 각진 옛 그림 + Pillow 없음 → python3가 실패하면 sips로 각진 채 넣고 한 줄
+  fs.writeFileSync(icon, testPng(256, 255));
+  const square = run();
+  assert.equal(square.status, 0, square.stdout + square.stderr);
+  assert.match(called(), /^python3 /m, '옛 그림은 먼저 Pillow로 둥글게 해 본다');
+  assert.equal(applet().toString().trim(), 'made-by-sips');
+  assert.match(square.stdout, /내 그림을 둥근 모서리 없이 넣었어요 — 설정 › 꾸미기에서 그림을 다시 저장하면 둥글게 돼요/);
+
+  // 3) JPEG로 저장된 그림도 sips가 PNG로 바꿔 쓴다
+  fs.writeFileSync(icon, Buffer.from([0xff, 0xd8, 0xff, 0xe0, ...new Array(40).fill(0)]));
+  assert.equal(run().status, 0);
+  assert.match(called(), /^sips -s format png -z 16 16 .*local\/icon\.png --out /m);
+
+  // 4) sips도 실패하면 조용히 넘어가지 않고 한 줄 남긴 뒤 기본 토끼로 둔다
+  fs.writeFileSync(sipsFail, '');
+  fs.writeFileSync(icon, testPng(256, 255));
+  const neither = run();
+  assert.equal(neither.status, 0, neither.stdout + neither.stderr);
+  assert.match(neither.stdout, /! 아이콘을 만들지 못했어요 — 기본 아이콘으로 둬요/);
+  assert.ok(applet().equals(fs.readFileSync(path.join(__dirname, 'icons', 'app.icns'))), '기본 토끼 icns');
+
+  // 5) 내 그림이 없으면 sips도 python3도 부르지 않고 기본 토끼를 복사한다
+  fs.rmSync(icon);
+  const plain = run();
+  assert.equal(plain.status, 0);
+  assert.doesNotMatch(called(), /^(python3|sips|iconutil) /m);
+  assert.ok(applet().equals(fs.readFileSync(path.join(__dirname, 'icons', 'app.icns'))));
+  assert.doesNotMatch(plain.stdout, /아이콘을 만들지 못했어요/);
+
+  const script = fs.readFileSync(automationScript('app-refresh.sh'), 'utf8');
+  assert.equal((script.match(/rm -rf/g) || []).length, 3, 'rm -rf는 예전 세 자리(임시 폴더·검사한 옛 앱·검사한 기존 앱)뿐이다');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+// 화면의 "Claude Code 설치됨"과 자동화가 claude를 찾는 자리가 어긋나면, 스크립트는 claude를 돌리는데 화면은 "설치 안 됨"이 된다.
+test('claude 찾는 자리: integrations.js의 claudeCandidateDirs가 run-task.sh의 PATH 줄에 있는 자리를 모두 본다', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-claude-dirs-'));
+  fs.mkdirSync(path.join(home, '.nvm', 'versions', 'node', 'v18.0.0', 'bin'), { recursive: true });
+  fs.mkdirSync(path.join(home, '.nvm', 'versions', 'node', 'v20.1.0', 'bin'), { recursive: true });
+  const script = fs.readFileSync(automationScript('run-task.sh'), 'utf8');
+  const nodeLine = script.split('\n').find(line => line.startsWith('NODE_BIN='));
+  const pathLine = script.split('\n').find(line => line.startsWith('export PATH='));
+  assert.ok(nodeLine && pathLine);
+  // 스크립트의 두 줄만 떼어 돌린다(claude는 부르지 않는다)
+  const shown = spawnSync('/bin/bash', ['-c', `${nodeLine}\n${pathLine}\nprintf %s "$PATH"`], { encoding: 'utf8', env: { HOME: home, PATH: '/usr/bin:/bin' } });
+  const { claudeCandidateDirs, claudeInstalled } = require('./integrations');
+  const seen = claudeCandidateDirs('', home);
+  for (const dir of shown.stdout.split(':').filter(d => d && !['/usr/bin', '/bin'].includes(d))) {
+    assert.ok(seen.includes(dir), `run-task.sh가 보는 ${dir}을 화면도 본다`);
+  }
+  assert.match(script, /CLAUDE="\$\{CLAUDE_BIN:-\$\(command -v claude \|\| echo "\$HOME\/\.local\/bin\/claude"\)\}"/, '못 찾을 때의 자리도 ~/.local/bin');
+
+  // PATH에 없어도 그 자리들 중 하나에 있으면 설치됨 — 여러 자리에 있어도 마찬가지
+  const empty = path.join(home, 'empty');
+  fs.mkdirSync(empty);
+  assert.equal(claudeInstalled(empty, home), fs.existsSync('/opt/homebrew/bin/claude') || fs.existsSync('/usr/local/bin/claude') || fs.existsSync('/usr/bin/claude'));
+  fs.mkdirSync(path.join(home, '.local', 'bin'), { recursive: true });
+  writeExec(path.join(home, '.local', 'bin', 'claude'), '#!/bin/bash\nexit 0\n');
+  assert.equal(claudeInstalled(empty, home), true, '~/.local/bin/claude');
+  fs.rmSync(path.join(home, '.local', 'bin', 'claude'));
+  writeExec(path.join(home, '.nvm', 'versions', 'node', 'v20.1.0', 'bin', 'claude'), '#!/bin/bash\nexit 0\n');
+  assert.equal(claudeInstalled(empty, home), true, 'nvm의 가장 뒤 버전 bin');
+  writeExec(path.join(empty, 'claude'), '#!/bin/bash\nexit 0\n');
+  assert.equal(claudeInstalled(empty, home), true, 'PATH에도 있고 nvm에도 있으면 설치됨');
+  fs.rmSync(home, { recursive: true, force: true });
 });
 
 test('WP-D2 run-task.sh: 캘린더가 비밀 주소 갈래면 calendar-sync는 claude를 부르지 않고 건너뛴다', () => {

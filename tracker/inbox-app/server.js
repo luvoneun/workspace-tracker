@@ -235,32 +235,6 @@ function plannedDay(fields) {
   return fields.scheduled === 'none' ? null : fields.scheduled || fields.due || null;
 }
 
-// "새로 들어온 것" — 슬랙에서 캡처됐지만 오늘 할지 나중에 할지 아직 안 정한 것.
-// 오늘/나중에 목록에 섞여 묻히는 걸 막으려고 따로 모아둔다. 사람이 분류하면 inbox가 지워진다.
-function getInboxTasks() {
-  const items = [];
-  listTrackerFiles().forEach((filePath) => {
-    fs.readFileSync(filePath, 'utf-8').split('\n').forEach((line) => {
-      const m = line.match(TRACK_RE);
-      if (!m || m[2] !== 'task') return;
-      const fields = parseFields(m[3]);
-      if (fields.status === 'done' || fields.inbox !== 'true') return;
-      items.push({
-        description: m[1],
-        id: fields.id,
-        status: fields.status || 'to-do',
-        priority: fields.priority || 'medium',
-        created: fields.created,
-        due: fields.due || null,
-        permalink: fields.source && fields.source.startsWith('slack:') ? fields.source.slice('slack:'.length) : null,
-        jira: fields.jira || null,
-        group: fields.group ? fields.group.replace(/_/g, ' ') : null,
-      });
-    });
-  });
-  return items;
-}
-
 // "나중에 할 일" — committed tasks with no due date, or a due date in the future (not today/overdue)
 function getLaterTasks() {
   const today = todayLocal();
@@ -295,63 +269,6 @@ function getLaterTasks() {
   return items;
 }
 
-// "정책/얼라인" — 결정/합의된 내용 (#decision 타입). 슬랙 캡처분과 직접 쓴 것 모두 포함.
-// PRD 반영 여부는 status(to-do/done)로 관리
-function getDecisions() {
-  const items = [];
-  listTrackerFiles().forEach((filePath) => {
-    const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
-    lines.forEach((line) => {
-      const m = line.match(TRACK_RE);
-      if (!m || m[2] !== 'decision') return;
-      const fields = parseFields(m[3]);
-      items.push({
-        file: path.basename(filePath),
-        description: m[1],
-        id: fields.id,
-        status: fields.status || 'to-do',
-        priority: fields.priority || 'medium',
-        created: fields.created,
-        completed: fields.status === 'done' ? fields.completed || (fields.updated ? localDateOf(fields.updated) : null) : null,
-        permalink: fields.source && fields.source.startsWith('slack:') ? fields.source.slice('slack:'.length) : null,
-        isNew: isNewSlack(fields),
-        jira: fields.jira || null,
-        group: fields.group ? fields.group.replace(/_/g, ' ') : null,
-      });
-    });
-  });
-  return items;
-}
-
-// "확인 대기중" — waiting on someone else to check/confirm something (#check 타입, source:slack:)
-function getWaitingItems() {
-  const items = [];
-  listTrackerFiles().forEach((filePath) => {
-    const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
-    lines.forEach((line) => {
-      const m = line.match(TRACK_RE);
-      if (!m || m[2] !== 'check') return;
-      const fields = parseFields(m[3]);
-      if (fields.status === 'done') return;
-      items.push({
-        file: path.basename(filePath),
-        description: m[1],
-        id: fields.id,
-        status: fields.status || 'to-do',
-        priority: fields.priority || 'medium',
-        created: fields.created,
-        due: fields.due || null,
-        who: fields.who ? fields.who.replace(/_/g, ' ') : null,
-        permalink: fields.source && fields.source.startsWith('slack:') ? fields.source.slice('slack:'.length) : null,
-        isNew: isNewSlack(fields),
-        jira: fields.jira || null,
-        group: fields.group ? fields.group.replace(/_/g, ' ') : null,
-      });
-    });
-  });
-  return items;
-}
-
 // "오늘 할 일" — merges manual + slack-sourced tasks due today or overdue (unfinished tasks roll forward automatically)
 function getTodayTasks() {
   const today = todayLocal();
@@ -380,30 +297,6 @@ function getTodayTasks() {
         permalink: fields.source && fields.source.startsWith('slack:') ? fields.source.slice('slack:'.length) : null,
         jira: fields.jira || null,
         group: fields.group ? fields.group.replace(/_/g, ' ') : null,
-        isNew: isNewSlack(fields),
-      });
-    });
-  });
-  return items;
-}
-
-function getIdeas() {
-  const items = [];
-  listTrackerFiles().forEach((filePath) => {
-    const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
-    lines.forEach((line) => {
-      const m = line.match(TRACK_RE);
-      if (!m || m[2] !== 'idea') return;
-      const fields = parseFields(m[3]);
-      if (fields.status === 'done') return;
-      items.push({
-        file: path.basename(filePath),
-        description: m[1],
-        id: fields.id,
-        status: fields.status || 'to-do',
-        priority: fields.priority || 'medium',
-        created: fields.created,
-        project: fields.project ? fields.project.replace(/_/g, ' ') : null,
         isNew: isNewSlack(fields),
       });
     });
@@ -832,6 +725,11 @@ const FETCH_MESSAGE = {
 };
 // 슬랙이 준 오류 이름 중 "토큰을 다시 받아야 하는 것"(수집 로그의 `채널 확인 실패 — ERR:<이름>`).
 const SLACK_AUTH_RE = /\b(invalid_auth|token_revoked|account_inactive)\b/;
+// 이 맥의 Claude Code 로그인이 풀렸을 때 claude가 남기는 말(자동화 로그). 토큰 문제가 아니라서 버튼은 `다시 시도` 그대로고,
+// 카드의 이유 한 줄만 `터미널에서 claude → /login` 안내로 바뀐다(원문은 ⋯ › 최근 기록에 그대로).
+// 실패한 실행의 로그 전체를 보므로, 작업 중 부른 커넥터(MCP)·API의 흔한 인증 오류(authentication_error 등)에 걸리지 않게
+// claude 명령이 자기 로그인에 대해 내는 말만 잡는다.
+const CLAUDE_AUTH_RE = /Failed to authenticate\. API Error: 401|OAuth session expired and could not be refreshed|Invalid API key · Please run \/login/i;
 const fetchLastAt = new Map();
 
 function launchAgentsDir() {
@@ -938,9 +836,12 @@ function fetchStateLive(failure) {
 }
 function fetchStateAutomation(automation, authRe = null) {
   const failing = !!automation && automation.lastKind === 'fail';
+  const auth = failing && !!authRe && authRe.test(automation.lastSummary || '');
   return {
     failing,
-    auth: failing && !!authRe && authRe.test(automation.lastSummary || ''),
+    auth,
+    // 가장 최근 실패가 Claude 로그인 풀림이면 true(연동 토큰 문제가 먼저면 그쪽을 말한다).
+    claudeAuth: failing && !auth && CLAUDE_AUTH_RE.test(automation.lastSummary || ''),
     failedAt: failing ? logTimeIso(automation.lastRunAt) : null,
     lastRunAt: automation && automation.lastRunAt ? logTimeIso(automation.lastRunAt) : null,
     // 멈춘 카드의 이유 한 줄(화면이 사람 말로 바꾼다). 로그 한 줄이라 200자까지만.
@@ -1103,120 +1004,12 @@ function getCalendarWithLinks() {
   return { ...calendar, events };
 }
 
-// 오늘 미팅에 연결된 프로젝트들 — 제안이 "오늘 미팅 있는 일"을 건드리지 않도록 쓰인다
-function meetingProjectKeys() {
-  const links = readMeetingLinks();
-  const keys = new Set();
-  getCalendarToday().events.forEach((event) => {
-    const key = links[String(event.title).trim()];
-    if (key) keys.add(key);
-  });
-  return keys;
-}
-
 // ---------- 오늘 할 일 제안 ----------
 
 function projectKeyOf(item) {
   if (item.jira) return `jira:${item.jira}`;
   if (item.group) return `group:${item.group}`;
   return null;
-}
-
-function daysBetween(fromDate, toDate) {
-  return Math.round((new Date(`${toDate}T00:00:00`) - new Date(`${fromDate}T00:00:00`)) / 86400000);
-}
-
-// 오늘 목록 상태에 따라 방향이 갈린다.
-// 여유 있으면 "이거 가져올까요?", 과부하면 "이건 미룰까요?", 적당하면 아무 말도 안 한다.
-function getTodaySuggestions() {
-  const openToday = getTodayTasks().filter((t) => t.status !== 'done');
-  if (openToday.length >= 8) return { mode: 'defer', total: openToday.length, items: suggestDeferrals(openToday) };
-  if (openToday.length < 5) return { mode: 'pull', total: openToday.length, items: suggestPulls() };
-  return { mode: 'none', total: openToday.length, items: [] };
-}
-
-// 오늘 하기 좋은 후보 — 나중에 할 일 중에서
-function suggestPulls() {
-  const today = todayLocal();
-  const meetingKeys = meetingProjectKeys();
-  return getLaterTasks()
-    .map((task) => {
-      const reasons = [];
-      let score = 0;
-      const key = projectKeyOf(task);
-      if (key && meetingKeys.has(key)) {
-        score += 10;
-        reasons.push('오늘 미팅 관련');
-      }
-      if (task.due) {
-        const left = daysBetween(today, task.due);
-        if (left <= 1) {
-          score += 9;
-          reasons.push(left < 0 ? '마감 지남' : '마감 임박');
-        } else if (left <= 3) {
-          score += 6;
-          reasons.push(`마감 ${left}일 전`);
-        } else if (left <= 7) {
-          score += 3;
-          reasons.push('이번 주 마감');
-        }
-      }
-      if (task.priority === 'critical') {
-        score += 6;
-        reasons.push('긴급');
-      } else if (task.priority === 'high') {
-        score += 4;
-        reasons.push('중요');
-      }
-      const waited = task.created ? daysBetween(task.created, today) : 0;
-      if (waited >= 7) {
-        score += 3;
-        reasons.push(`${waited}일째 대기`);
-      } else if (waited >= 3) {
-        score += 1;
-        reasons.push(`${waited}일째 대기`);
-      }
-      return { ...task, score, reasons };
-    })
-    .filter((task) => task.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 3);
-}
-
-// 오늘 미뤄도 괜찮아 보이는 후보 — 오늘 미팅과 무관하고, 마감도 급하지 않고, 우선순위도 높지 않은 것
-function suggestDeferrals(openToday) {
-  const today = todayLocal();
-  const meetingKeys = meetingProjectKeys();
-  return openToday
-    .map((task) => {
-      const key = projectKeyOf(task);
-      if (key && meetingKeys.has(key)) return null;
-      if (task.priority === 'high' || task.priority === 'critical') return null;
-
-      const reasons = [];
-      let score = 0;
-      if (task.due) {
-        const left = daysBetween(today, task.due);
-        if (left <= 3) return null;
-        score += 2;
-        reasons.push(`마감 ${left}일 남음`);
-      } else {
-        score += 3;
-        reasons.push('마감 없음');
-      }
-      if (task.priority === 'low') {
-        score += 4;
-        reasons.push('우선순위 낮음');
-      }
-      if (!key) {
-        score += 1;
-        reasons.push('프로젝트 미지정');
-      }
-      return { ...task, score, reasons };
-    })
-    .filter(Boolean)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 3);
 }
 
 function toggleTrackStatus(id, desired) {
@@ -1756,30 +1549,12 @@ function currentWeekKey() {
   return fmtDate(mondayOf(new Date()));
 }
 
-function weekLabel(weekKey) {
-  const monday = new Date(weekKey + 'T00:00:00');
-  const sunday = new Date(monday);
-  sunday.setDate(sunday.getDate() + 6);
-  const rangeStr = `${monday.getMonth() + 1}/${monday.getDate()}~${sunday.getMonth() + 1}/${sunday.getDate()}`;
-  return `${monday.getFullYear()}년 ${rangeStr}`;
-}
-
 function weeklyReportsPath() {
   return path.join(TRACKER_DIR, 'weekly_reports.md');
 }
 
 function weeklyReportStatePath() {
   return path.join(process.env.WORKSPACE_DATA_DIR || __dirname, '.weekly_report_state.json');
-}
-
-function readWeeklyReportState() {
-  const p = weeklyReportStatePath();
-  if (!fs.existsSync(p)) return {};
-  try {
-    return JSON.parse(fs.readFileSync(p, 'utf-8'));
-  } catch {
-    return {};
-  }
 }
 
 function parseWeeklyReports() {
@@ -1793,30 +1568,6 @@ function parseWeeklyReports() {
     const body = part.slice(newlineIdx + 1).replace(/\n+$/, '');
     return { weekKey, body };
   });
-}
-
-function getWeeklyReports() {
-  const state = readWeeklyReportState();
-  const old = parseWeeklyReports();
-  const sources = workflows.snapshot().items;
-  // 보고 기록 파일은 한 번만 읽어서 주마다 돌려 쓴다 — view()가 주 수만큼 다시 읽지 않게.
-  const drafts = reportDrafts.read();
-  return reportDrafts.weeks(sources, drafts).map(weekKey => ({ weekKey, label: weekLabel(weekKey), body: old.find(r=>r.weekKey===weekKey)?.body || '', generatedAt: state[weekKey]?.generatedAt || null, draft: reportDrafts.view(weekKey, drafts, sources) }));
-}
-
-// 오늘 새로 생긴 항목 수 / 오늘 완료한 항목 수 — 상단 통계용
-function getTodayActivityCounts() {
-  const today = todayLocal();
-  let createdToday = 0;
-  listTrackerFiles().forEach((filePath) => {
-    fs.readFileSync(filePath, 'utf-8').split('\n').forEach((line) => {
-      const m = line.match(TRACK_RE);
-      if (!m) return;
-      const fields = parseFields(m[3]);
-      if (fields.created === today) createdToday += 1;
-    });
-  });
-  return { createdToday };
 }
 
 // 자동 row의 group·evidence[].label이 이 값을 그대로 쓴다(report-drafts.js의 getReportRefs 연결) —
@@ -2233,7 +1984,8 @@ const CLIENT_BLOCKED = new Set([
   'server.js', 'safe-storage.js', 'jira-client.js', 'jira-live.js', 'attention-live.js', 'report-drafts.js',
   'task-batch.js', 'slack-history.js', 'slack-collect.js', 'import-record.js', 'browser-fixture.js', 'migrate.js',
   'integrations.js', 'ical.js', 'calendar-live.js', 'personalize.js', 'test-support.js',
-  'routes-jira.js', 'routes-integrations.js', 'routes-app.js', 'routes-personalize.js',
+  'routes-jira.js', 'routes-integrations.js', 'routes-app.js', 'routes-personalize.js', 'routes-items.js',
+  'routes-track.js',
 ]);
 function isClientFile(name) {
   if (!/^[A-Za-z0-9][\w.-]*\.(js|css)$/.test(name)) return false;   // 이름 한 칸짜리(하위 경로 없음)만
@@ -2277,8 +2029,10 @@ const handleRequest = (req, res) => {
   }
 
   // 떼어 낸 경로 묶음(routes-*.js)에 차례로 묻는다 — 위 가드를 거친 뒤다. 경로가 전부 완전일치라
-  // 묻는 차례는 결과를 바꾸지 않는다. 어느 묶음도 맡지 않은 경로는 아래(항목·보고서·가져오기 등)로 내려간다.
-  if (ROUTE_MODULES.some(route => route(req, res, url, routeCtx))) return;
+  // 묻는 차례는 결과를 바꾸지 않는다. 어느 묶음도 맡지 않은 경로는 아래(보고서·가져오기·워크플로 등)로 내려간다.
+  // 이 요청에서 읽은 저장 상태(`storage`)는 요청마다 달라서 공용 ctx 위에 한 겹 얹어 넘긴다(getter·setter는 그대로 공용 ctx의 것).
+  const ctx = Object.create(routeCtx, { storage: { value: storage } });
+  if (ROUTE_MODULES.some(route => route(req, res, url, ctx))) return;
 
   if (url.pathname === '/api/storage-status' && req.method === 'GET') {
     // 업무 파일을 읽지 않는다. 목록이 안 열리는 상황에서도 이유를 볼 수 있어야 한다.
@@ -2379,311 +2133,11 @@ const handleRequest = (req, res) => {
     return;
   }
 
-  if (url.pathname === '/api/items' && req.method === 'GET') {
-    // 지라 목록이 묵었으면 갱신만 걸어 둔다 — 이 응답은 기다리지 않는다(지라 때문에 목록이 늦지 않게).
-    if (USES.jira) jiraLive.nudge();
-    // 캘린더 비밀 주소도 같다 — 묵었으면 뒤에서 다시 읽게만 걸어 둔다.
-    if (CALENDAR_ICAL) calendarLive.nudge();
-    // Automatic drafts are a read-only projection. Edited reports are saved explicitly.
-    const allDecisions = getDecisions();
-    const payload = {
-      inboxTasks: getInboxTasks(),
-      laterTasks: getLaterTasks(),
-      waiting: getWaitingItems(),
-      todayTasks: getTodayTasks(),
-      ideas: getIdeas(),
-      decisions: allDecisions.filter((d) => d.status !== 'done'),
-      decisionArchive: allDecisions
-        .filter((d) => d.status === 'done')
-        .sort((a, b) => (b.completed || '').localeCompare(a.completed || '')),
-      weeklyReports: getWeeklyReports(),
-      jiraIssues: getJiraIssueCache(),
-      jiraSync: getJiraSync(),
-      slackSync: getSlackSync(),
-      title: APP_TITLE,
-      // 앱 화면 파일이 바뀌면 이 값이 달라진다. 브라우저가 이걸 보고 스스로 새로고침한다.
-      appVersion: (() => {
-        try {
-          return ['index.html', ...clientFiles()].map(file => fs.statSync(path.join(PUBLIC_DIR, file)).mtimeMs).join(':');
-        } catch {
-          return '0';
-        }
-      })(),
-      customGroups: getCustomGroups(),
-      calendar: getCalendarWithLinks(),
-      suggestions: getTodaySuggestions(),
-      reportRefs: getReportRefs(),
-      workflows: workflows.snapshot(),
-      // 미팅 노트 가져오기의 지금 상태 — 페이지를 새로 열어도 진행 중인 가져오기가 이어지게 첫 조회에 함께 싣는다.
-      meetingNotes: meetingNotesStatus(),
-      storage,
-      today: todayLocal(),
-      ...getTodayActivityCounts(),
-    };
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify(payload));
-    return;
-  }
-
-  // 설정 > `삭제한 항목`이 창을 열 때마다 읽는 목록. 조회라 어떤 파일도 쓰지 않고,
-  // 인증 예외(publicAsset)에도 넣지 않는다. 되살리기는 기존 `/api/track/restore`가 맡는다.
-  if (url.pathname === '/api/track/trash' && req.method === 'GET') {
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ ok: true, items: listTrash() }));
-    return;
-  }
-
-  if (req.method === 'POST' && ['/api/track/set-scheduled', '/api/track/seen', '/api/track/restore'].includes(url.pathname)) {
-    readBody(req).then(({ id, scheduled }) => {
-      if (url.pathname.endsWith('set-scheduled')) validateDate(scheduled);
-      let ok;
-      if (url.pathname.endsWith('/restore')) ok = restoreTrackItem(id);
-      else if (url.pathname.endsWith('/seen')) ok = setTrackField(id, 'seen', 'true', null);
-      else {
-        ok = mutations.run(() => {
-          const changed = setTrackField(id, 'scheduled', scheduled || 'none', 'task');
-          if(changed)setTrackField(id, 'inbox', null, 'task');
-          return changed;
-        });
-      }
-      res.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok }));
-    }).catch(error => {
-      res.writeHead(error.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: false, error: error.message || String(error), code: error.code }));
-    });
-    return;
-  }
-
   if (url.pathname === '/api/meeting/set-project' && req.method === 'POST') {
     readBody(req)
       .then(({ title, project }) => {
         const ok = setMeetingLink(title, project || null);
         res.writeHead(ok ? 200 : 400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok }));
-      })
-      .catch((e) => {
-        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
-      });
-    return;
-  }
-
-  if (url.pathname === '/api/today-task/create' && req.method === 'POST') {
-    readBody(req)
-      .then((payload) => {
-        const result = idempotent(req, payload, () => createManualTask(payload));
-        res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify(result));
-      })
-      .catch((e) => {
-        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
-      });
-    return;
-  }
-
-  if (url.pathname === '/api/later-task/create' && req.method === 'POST') {
-    readBody(req)
-      .then((payload) => {
-        const result = idempotent(req, payload, () => createLaterTask(payload));
-        res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify(result));
-      })
-      .catch((e) => {
-        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
-      });
-    return;
-  }
-
-  if (url.pathname === '/api/waiting/create' && req.method === 'POST') {
-    readBody(req)
-      .then((payload) => {
-        const result = idempotent(req, payload, () => createWaitingItem(payload));
-        res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify(result));
-      })
-      .catch((e) => {
-        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
-      });
-    return;
-  }
-
-  if (url.pathname === '/api/decision/create' && req.method === 'POST') {
-    readBody(req)
-      .then((payload) => {
-        const result = idempotent(req, payload, () => createDecision(payload));
-        res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify(result));
-      })
-      .catch((e) => {
-        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
-      });
-    return;
-  }
-
-  if (url.pathname === '/api/idea/create' && req.method === 'POST') {
-    readBody(req)
-      .then((payload) => {
-        const result = idempotent(req, payload, () => createIdea(payload));
-        res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify(result));
-      })
-      .catch((e) => {
-        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
-      });
-    return;
-  }
-
-  if (url.pathname === '/api/idea/promote' && req.method === 'POST') {
-    readBody(req)
-      .then(({ id, due }) => {
-        const result = promoteIdeaToToday(id, due);
-        res.writeHead(result.ok ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify(result));
-      })
-      .catch((e) => {
-        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
-      });
-    return;
-  }
-
-  if (url.pathname === '/api/track/set-jira' && req.method === 'POST') {
-    readBody(req)
-      .then(({ id, jiraKey }) => {
-        const ok = setTrackJira(id, jiraKey || null);
-        res.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok }));
-      })
-      .catch((e) => {
-        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
-      });
-    return;
-  }
-
-  if (url.pathname === '/api/track/set-group' && req.method === 'POST') {
-    readBody(req)
-      .then(({ id, group }) => {
-        const ok = setTrackGroup(id, group || null);
-        res.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok }));
-      })
-      .catch((e) => {
-        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
-      });
-    return;
-  }
-
-  if (url.pathname === '/api/idea/set-project' && req.method === 'POST') {
-    readBody(req)
-      .then(({ id, project }) => {
-        const ok = setIdeaProject(id, project || null);
-        res.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok }));
-      })
-      .catch((e) => {
-        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
-      });
-    return;
-  }
-
-  if (url.pathname === '/api/track/set-due' && req.method === 'POST') {
-    readBody(req)
-      .then(({ id, due }) => {
-        const ok = setTrackDue(id, due || null);
-        res.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok }));
-      })
-      .catch((e) => {
-        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
-      });
-    return;
-  }
-
-  if (url.pathname === '/api/track/set-doing' && req.method === 'POST') {
-    readBody(req)
-      .then(({ id, doing }) => {
-        const ok = setTrackDoing(id, !!doing);
-        res.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok }));
-      })
-      .catch((e) => {
-        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
-      });
-    return;
-  }
-
-  if (url.pathname === '/api/track/set-who' && req.method === 'POST') {
-    readBody(req)
-      .then(({ id, who }) => {
-        const ok = setTrackWho(id, who || null);
-        res.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok }));
-      })
-      .catch((e) => {
-        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
-      });
-    return;
-  }
-
-  if (url.pathname === '/api/track/set-priority' && req.method === 'POST') {
-    readBody(req)
-      .then(({ id, priority }) => {
-        const ok = setTrackPriority(id, priority || 'medium');
-        res.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok }));
-      })
-      .catch((e) => {
-        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
-      });
-    return;
-  }
-
-  if (url.pathname === '/api/track/set-description' && req.method === 'POST') {
-    readBody(req)
-      .then(({ id, description }) => {
-        const ok = setTrackDescription(id, description);
-        res.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok }));
-      })
-      .catch((e) => {
-        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
-      });
-    return;
-  }
-
-  if (url.pathname === '/api/track/remove' && req.method === 'POST') {
-    readBody(req)
-      .then(({ id }) => {
-        const removed = removeTrackItem(id);
-        res.writeHead(removed ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: !!removed }));
-      })
-      .catch((e) => {
-        res.writeHead(e.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: false, error: e.message || String(e), code: e.code }));
-      });
-    return;
-  }
-
-  if (url.pathname === '/api/track/toggle' && req.method === 'POST') {
-    readBody(req)
-      .then(({ id, status }) => {
-        const ok = toggleTrackStatus(id, status);
-        res.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ ok }));
       })
       .catch((e) => {
@@ -2776,8 +2230,13 @@ restoreTrackItem = transactional(restoreTrackItem);
 promoteIdeaToToday = transactional(promoteIdeaToToday);
 setMeetingLink = transactional(setMeetingLink);
 // 떼어 낸 경로 묶음과, 그 묶음들이 받는 값·함수(ctx). 묶음 파일은 server.js를 require하지 않고 여기서 받은 것만 쓴다.
-// 바뀔 수 있는 값(`APP_TITLE`·`exitApp`)은 요청 때의 값을 읽도록 getter로 둔다.
+// 바뀔 수 있는 값(`APP_TITLE`·`exitApp`)은 요청 때의 값을 읽도록 getter로 둔다. 요청마다 달라지는 `storage`는
+// handleRequest가 한 겹 얹어 넘긴다. 파일 읽기 묶음(`readScope`)은 ctx에 값으로 넣지 않는다 — 넘기는 `fs`가 부를 때마다
+// 지금 요청의 묶음을 확인한다(값을 복사해 넘기면 지난 요청의 묶음이나 null이 남는다).
+// 이 ctx는 위의 `transactional(...)` 감싸기 **뒤에** 만든다 — 감싼 뒤의 함수(저장 잠금 포함)가 들어가게.
 const ROUTE_MODULES = [
+  require('./routes-items'),
+  require('./routes-track'),
   require('./routes-jira'),
   require('./routes-integrations'),
   require('./routes-app'),
@@ -2800,6 +2259,14 @@ const routeCtx = {
   meetingNotesStatus, writeMeetingNotesRequest,
   // 꾸미기
   applicationsDir, automationDir, currentDockName,
+  // 목록 읽기(routes-items.js) — `fs`는 읽기 묶음(readScope)을 거치는 이 파일의 fs다.
+  fs, TRACK_RE, parseFields, listTrackerFiles, isNewSlack, localDateOf, readMeetingLinks, projectKeyOf, reportDrafts,
+  parseWeeklyReports, weeklyReportStatePath, getLaterTasks, getTodayTasks, getJiraIssueCache, getCustomGroups, getCalendarWithLinks,
+  clientFiles,
+  // 항목 추가·수정·삭제·되돌리기(routes-track.js) — 감싸기(transactional) 뒤의 함수들이다.
+  mutations, validateDate, listTrash, restoreTrackItem, setTrackField, createManualTask, createLaterTask, createWaitingItem,
+  createDecision, createIdea, promoteIdeaToToday, setTrackJira, setTrackGroup, setIdeaProject, setTrackDue, setTrackDoing,
+  setTrackWho, setTrackPriority, setTrackDescription, removeTrackItem, toggleTrackStatus,
 };
 function safeHandle(req, res) {
   try {
@@ -2863,4 +2330,4 @@ if (require.main === module) {
 // `jiraLive`·`attentionLive`·`calendarLive`는 화면 확인용 픽스처가 "뜰 때 한 번 읽기"를 직접 켜 보려고 함께 내보낸다
 // (테스트·픽스처 밖에서는 쓰지 않는다 — 운영에서는 위의 `start()`가 켠다).
 // `CLIENT_BLOCKED`·`isClientFile`은 테스트가 차단 목록을 따로 적지 않고 이것을 그대로 확인하려고 내보낸다.
-module.exports = { server, jiraLive, attentionLive, calendarLive, setExitForTests, changesUrlFrom, workspacePaths, fixtureSafetyProblems, CLIENT_BLOCKED, isClientFile };
+module.exports = { server, jiraLive, attentionLive, calendarLive, setExitForTests, changesUrlFrom, workspacePaths, fixtureSafetyProblems, CLIENT_BLOCKED, isClientFile, CLAUDE_AUTH_RE };

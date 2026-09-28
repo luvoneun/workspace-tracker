@@ -2422,7 +2422,7 @@ a.d-btn { text-decoration: none; }
 .d-pset .v .d-din { width: 100%; box-sizing: border-box; }
 .d-piconpv { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .d-piconslot { flex: none; width: 56px; height: 56px; }
-.d-piconimg { display: block; width: 56px; height: 56px; border-radius: 14px; box-shadow: var(--shadow); object-fit: cover; }
+.d-piconimg { display: block; width: 56px; height: 56px; border-radius: 22%; box-shadow: var(--shadow); object-fit: cover; }
 .d-piconpv .d-ablink { min-height: 28px; }
 .d-pfoot { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; padding-top: 6px; }
 .d-pfoot .d-ismall { flex: 1 1 220px; }

@@ -47,6 +47,8 @@ TIMEOUT_SECONDS="${TASK_TIMEOUT_SECONDS:-1800}"
 GRACE_SECONDS="${TASK_KILL_GRACE_SECONDS:-10}"
 
 # launchd는 PATH가 거의 비어 있다. 실행 파일을 찾기 전에 먼저 채워준다.
+# 이 목록이 claude를 찾는 자리다 — 앱 화면의 "Claude Code 설치됨" 판단(integrations.js의 claudeCandidateDirs)이 이 자리들을 모두 본다.
+# 바꾸면 그쪽도 함께 바꾼다(automation.test.js가 둘을 맞춰 본다).
 NODE_BIN="$(ls -d "$HOME"/.nvm/versions/node/*/bin 2>/dev/null | tail -1)"
 export PATH="$HOME/.local/bin:${NODE_BIN:+$NODE_BIN:}/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
