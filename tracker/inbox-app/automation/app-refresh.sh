@@ -130,11 +130,38 @@ if ! osacompile -o "$NEW_BUNDLE" "$WORK/launcher.applescript" 2>/dev/null || [ !
   exit 1
 fi
 
-# 아이콘은 local/icon.png가 있으면 그것을 먼저 쓴다(업데이트해도 그 폴더는 그대로 남는다).
-ICON_SRC="$APP_DIR/icons/icon-512.png"
-[ -f "$WORKSPACE/local/icon.png" ] && ICON_SRC="$WORKSPACE/local/icon.png"
-if [ -f "$ICON_SRC" ]; then
-  python3 - "$ICON_SRC" "$WORK" << 'PY' 2>/dev/null
+# 아이콘(icns)은 $WORK/ws.icns 하나로 만든다.
+#   - 내 그림(local/icon.png — 업데이트해도 그 폴더는 그대로 남는다)이 없으면 저장소에 미리 만들어 둔 기본 토끼
+#     `icons/app.icns`를 그대로 복사한다. python3를 부르지 않는다 — 맥 기본 python3에는 Pillow가 없다.
+#   - 내 그림이 있으면: 꾸미기 화면이 둥근 모서리를 깎아 저장한 그림(모서리가 투명)은 맥 기본 `sips`로 크기만
+#     바꾼다. 모서리가 투명하지 않은 옛 그림은 Pillow가 있으면 지금처럼 둥글게, 없으면 sips로 각진 채 넣고 한 줄 남긴다.
+#   - 어느 쪽도 못 만들면 조용히 넘어가지 않고 한 줄 남긴 뒤 기본 토끼로 둔다.
+ICON_USER="$WORKSPACE/local/icon.png"
+ICON_DEFAULT="$APP_DIR/icons/app.icns"
+
+# 꾸미기 화면이 둥글게 깎아 저장한 그림인가(왼쪽 위 픽셀이 투명한가) — personalize.js의 iconRounded와 같은 판단.
+icon_rounded() {
+  node -e 'process.exit(require(process.argv[1]).iconRounded(require("fs").readFileSync(process.argv[2])) ? 0 : 1)' \
+    "$APP_DIR/personalize.js" "$1" 2>/dev/null
+}
+
+# sips로 크기만 바꿔 iconset → icns. JPEG도 PNG로 바꿔 쓴다. 새로 만든 폴더(sips.iconset)에만 쓴다.
+icns_by_sips() {
+  local src="$1" set="$WORK/sips.iconset" s
+  command -v sips >/dev/null 2>&1 && command -v iconutil >/dev/null 2>&1 || return 1
+  mkdir "$set" 2>/dev/null || return 1
+  for s in 16 32 128 256 512; do
+    sips -s format png -z "$s" "$s" "$src" --out "$set/icon_${s}x${s}.png" >/dev/null 2>&1 || return 1
+    sips -s format png -z "$((s * 2))" "$((s * 2))" "$src" --out "$set/icon_${s}x${s}@2x.png" >/dev/null 2>&1 || return 1
+  done
+  iconutil -c icns "$set" -o "$WORK/ws.icns" 2>/dev/null
+  [ -f "$WORK/ws.icns" ]
+}
+
+# Pillow로 둥근 모서리까지(옛 그림용). Pillow가 없으면 파이썬이 실패하고 ws.icns가 생기지 않는다.
+icns_by_pillow() {
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 - "$1" "$WORK" << 'PY' 2>/dev/null
 from PIL import Image, ImageDraw
 import subprocess, sys, os, shutil
 src, work = sys.argv[1], sys.argv[2]
@@ -154,13 +181,30 @@ for s in (16, 32, 128, 256, 512):
         shutil.copy(os.path.join(work, f"ws_{s*2}.png"), os.path.join(iconset, f"icon_{s}x{s}@2x.png"))
 subprocess.run(["iconutil", "-c", "icns", iconset, "-o", os.path.join(work, "ws.icns")], check=False)
 PY
-  if [ -f "$WORK/ws.icns" ]; then
-    cp "$WORK/ws.icns" "$NEW_BUNDLE/Contents/Resources/applet.icns"
-    # 에셋 카탈로그를 가리키는 키가 남아있으면 파일 아이콘이 무시된다
-    plutil -remove CFBundleIconName "$NEW_BUNDLE/Contents/Info.plist" 2>/dev/null
-    # 아이콘을 바꾸면 osacompile이 해둔 서명이 깨져서 macOS가 기본 아이콘으로 떨어뜨린다
-    codesign --force --deep -s - "$NEW_BUNDLE" 2>/dev/null
+  [ -f "$WORK/ws.icns" ]
+}
+
+if [ -f "$ICON_USER" ]; then
+  if icon_rounded "$ICON_USER"; then
+    icns_by_sips "$ICON_USER"
+  elif icns_by_pillow "$ICON_USER"; then
+    :
+  elif icns_by_sips "$ICON_USER"; then
+    ok "내 그림을 둥근 모서리 없이 넣었어요 — 설정 › 꾸미기에서 그림을 다시 저장하면 둥글게 돼요"
   fi
+  if [ ! -f "$WORK/ws.icns" ]; then
+    warn "아이콘을 만들지 못했어요 — 기본 아이콘으로 둬요"
+    [ -f "$ICON_DEFAULT" ] && cp "$ICON_DEFAULT" "$WORK/ws.icns"
+  fi
+elif [ -f "$ICON_DEFAULT" ]; then
+  cp "$ICON_DEFAULT" "$WORK/ws.icns"
+fi
+if [ -f "$WORK/ws.icns" ]; then
+  cp "$WORK/ws.icns" "$NEW_BUNDLE/Contents/Resources/applet.icns"
+  # 에셋 카탈로그를 가리키는 키가 남아있으면 파일 아이콘이 무시된다
+  plutil -remove CFBundleIconName "$NEW_BUNDLE/Contents/Info.plist" 2>/dev/null
+  # 아이콘을 바꾸면 osacompile이 해둔 서명이 깨져서 macOS가 기본 아이콘으로 떨어뜨린다
+  codesign --force --deep -s - "$NEW_BUNDLE" 2>/dev/null
 fi
 
 # 다 만들었으면 바꾼다. 기존 앱은 위에서 이 스크립트가 만든 앱(스크립트 앱)인 것을 확인했다.

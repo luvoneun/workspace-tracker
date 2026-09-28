@@ -7136,6 +7136,17 @@ test('WP-D2 L. 꾸미기 아이콘: 형식·크기는 화면에서 먼저 거르
   await fx.app.run('renderSettingsPersonalize()');
   same(fx.app.run('personalizeCropBox(1200, 800)'), { sx: 200, sy: 0, size: 800 });
   same(fx.app.run('personalizeCropBox(800, 1200)'), { sx: 0, sy: 200, size: 800 });
+  // 저장하는 그림은 둥근 모서리(한 변의 22%)까지 깎은 모양이다 — 네 모서리 픽셀은 투명, 가운데·변의 가운데는 그대로
+  const alpha = JSON.parse(fx.app.run(`(() => {
+    const size = 100, pixels = new Array(size * size * 4).fill(255);
+    personalizeRoundCorners(pixels, size);
+    const at = (x, y) => pixels[(y * size + x) * 4 + 3];
+    return JSON.stringify([at(0, 0), at(99, 0), at(0, 99), at(99, 99), at(5, 5), at(50, 50), at(50, 0), at(0, 50), at(22, 0), at(10, 1)]);
+  })()`));
+  same(alpha.slice(0, 5), [0, 0, 0, 0, 0], '네 모서리(와 모서리 가까이)는 투명');
+  same(alpha.slice(5, 9), [255, 255, 255, 255], '가운데와 변의 가운데는 그대로');
+  assert.equal(alpha[9], 0, '모서리 둥근 곡선 바깥(10,1)은 깎인다(22px 반지름)');
+  assert.match(fx.app.run('personalizeCrop.toString()'), /personalizeRoundCorners\(pixels\.data, out\)/, '자르기 캔버스가 저장 전에 모서리를 깎는다');
   assert.equal(fx.app.run("personalizeFileError({ type: 'image/gif', size: 10 })"), 'PNG나 JPG 그림만 쓸 수 있어요');
   assert.equal(fx.app.run("personalizeFileError({ type: 'image/png', size: 5 * 1024 * 1024 + 1 })"), '그림은 5MB까지 쓸 수 있어요');
   assert.equal(fx.app.run("personalizeFileError({ type: 'image/jpeg', size: 1000 })"), '');
@@ -7408,6 +7419,10 @@ test('WP-D2.5 도움말: `지금 바로 새로 가져오고 싶어요` 문답이
   assert.match(found[2], /지금 가져오기/);
   assert.match(found[2], /1분에 한 번/);
   assert.match(found[2], /다시 연결/);
+  const login = faq.flatMap(([, rows]) => rows).find(([question]) => question === 'Claude Code 로그인이 풀렸다고 나와요');
+  assert.ok(login, 'Claude 로그인 풀림 문답도 있다');
+  assert.match(login[2], /claude.*\/login/);
+  assert.match(login[2], /claude setup-token/, '반복되면 오래 가는 토큰(1.1.1의 workspace-claude-token)으로 안내한다');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -7720,6 +7735,26 @@ test('WP-E A·B. 맨 위 요약: 정상이면 `● 연결 N개 모두 잘 읽고
   same(failing({ ...WPD25_CONNECTED, slack: { ...WPD25_CONNECTED.slack, fetch: {}, channels: { align: { id: 'C3', missing: true }, someday: { id: 'C4', missing: true } } } }), ['slack'], '할 일 없이도 켜진 채널이 모두 사라지면 멈춘 것');
   same(failing({ slack: { enabled: true, hasToken: false, fetch: { failing: true }, channels: { todo: { id: 'C1' } } } }), [], '연결 안 된 카드는 세지 않는다');
   same(failing({ ...WPD25_CONNECTED, calendar: { enabled: true, source: 'ical', readAt: null, failed: true } }), ['calendar'], '비밀 주소를 한 번도 못 읽었으면 멈춘 것');
+});
+
+test('Claude 로그인 풀림: 슬랙·캘린더(Claude)·회의록 카드의 이유 한 줄은 `터미널에서 claude → /login` 안내, 버튼은 `다시 시도` 그대로', async () => {
+  const expired = 'Failed to authenticate. API Error: 401 OAuth session expired and could not be refreshed';
+  const fetch = { failing: true, auth: false, claudeAuth: true, failedAt: ago(7), summary: expired };
+  const fx = wpd25({
+    slack: { ...WPD25_CONNECTED.slack, fetch },
+    calendar: { enabled: true, source: 'claude', live: false, readAt: null, fetch },
+    meetingNotes: { mode: 'tiro', name: '', fetch },
+  });
+  await fx.app.run('renderSettingsIntegrations()');
+  const why = kind => fx.find(kind, 'd-intgwhy')[0].children.map(one => one.textContent).join('');
+  for (const kind of ['slack', 'calendar', 'notes']) {
+    assert.equal(why(kind), '자동 수집이 쓰는 Claude Code 로그인이 풀렸어요 — 도움말 “Claude Code 로그인이 풀렸다고 나와요”대로 다시 로그인해 주세요', kind);
+    assert.equal(fetchButton(fx, kind).textContent, '다시 시도', `${kind}: 토큰 문제가 아니라 다시 연결로 바꾸지 않는다`);
+  }
+  // 서버가 claudeAuth를 주지 않으면(가장 최근 실패가 다른 이유) 예전처럼 최근 기록으로 안내한다
+  const other = wpd25({ slack: { ...WPD25_CONNECTED.slack, fetch: { ...fetch, claudeAuth: false, summary: 'my-todo 채널 확인 실패 — fetch 실패 (exit 28)' } } });
+  await other.app.run('renderSettingsIntegrations()');
+  assert.equal(other.find('slack', 'd-intgwhy')[0].children.map(one => one.textContent).join(''), '슬랙이 응답하지 않았어요 — 다시 시도해도 안 되면 ⋯ › 최근 기록');
 });
 
 test('WP-E B. 빨간 점을 누르면 연동 탭으로 열고 멈춘 카드만 약 2초 붉게(is-flash), 파란 점만 있으면 앱 탭', async () => {
