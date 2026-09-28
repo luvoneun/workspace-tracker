@@ -486,7 +486,7 @@ Slack 수집은 모든 페이지를 읽고 `import-record.js`로 앱의 검증·
 | `report-ui.js` | 주간요약 문서·슬랙 복사 |
 | `app.js` | 공용 부품(`ui*`), 오늘 탭(사용설명서 카드 포함), 상세 카드, 검색 팔레트, 되돌리기, 저장 안전장치(`request`·`showNotice`·`pushUndo`·`fadeOutAndRun`), 화면을 켜는 실행 코드 |
 
-서버 쪽에는 연동 설정 한 벌(`integrations.js` — 값 확인·`workspace.config.json` 합치기·토큰 파일·문제 보고의 오류 줄·다시 켜기), 캘린더 비밀 주소 풀이(`ical.js`)와 메모리 보관함(`calendar-live.js`), 꾸미기(`personalize.js` — 그림 확인·`local/icon.png`·요청 표시 파일)가 따로 있습니다. 요청 경로 가운데 지라(`routes-jira.js`)·연동·자동화 상태·백업·미팅 노트(`routes-integrations.js`)·앱 정보·업데이트(`routes-app.js`)·꾸미기(`routes-personalize.js`)는 묶음 파일로 나뉘어 있고, `server.js`가 인증·복구 필요 가드를 거친 뒤 차례로 묻습니다(묶음 파일은 필요한 값을 `server.js`에서 넘겨받기만 합니다). 나머지 경로(항목 추가·수정·보고서·가져오기)와 정적 파일은 `server.js`에 있습니다. 화면에는 나가지 않습니다.
+서버 쪽에는 연동 설정 한 벌(`integrations.js` — 값 확인·`workspace.config.json` 합치기·토큰 파일·문제 보고의 오류 줄·다시 켜기), 캘린더 비밀 주소 풀이(`ical.js`)와 메모리 보관함(`calendar-live.js`), 꾸미기(`personalize.js` — 그림 확인·`local/icon.png`·요청 표시 파일)가 따로 있습니다. 요청 경로 가운데 목록 읽기(`routes-items.js` — `GET /api/items`)·항목 추가·수정·삭제·되살리기(`routes-track.js`)·지라(`routes-jira.js`)·연동·자동화 상태·백업·미팅 노트(`routes-integrations.js`)·앱 정보·업데이트(`routes-app.js`)·꾸미기(`routes-personalize.js`)는 묶음 파일로 나뉘어 있고, `server.js`가 인증·복구 필요 가드를 거친 뒤 차례로 묻습니다(묶음 파일은 필요한 값을 `server.js`에서 넘겨받기만 합니다). 나머지 경로(워크플로·프로젝트·보고서·가져오기·회의 연결)와 정적 파일은 `server.js`에 있습니다. 화면에는 나가지 않습니다.
 
 서버는 파일 이름을 하나하나 적지 않고 이 폴더의 `*.js`/`*.css` 가운데 서버 파일·저장소 코드·테스트·픽스처를 뺀 것만 내보냅니다(`server.js`의 `isClientFile`). 브라우저가 스스로 새로고침할지 판단하는 값(`appVersion`)도 같은 목록을 씁니다. 화면 파일을 더할 때는 `index.html`에 `<script>` 한 줄만 넣으면 됩니다. 서버 파일을 더할 때는 `server.js`의 차단 목록(`CLIENT_BLOCKED`)에 이름을 적어야 합니다 — `index.html`이 읽지 않는 `*.js`가 목록·패턴에서 빠지면 테스트가 실패합니다.
 
