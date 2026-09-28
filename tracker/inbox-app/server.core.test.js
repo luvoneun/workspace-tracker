@@ -109,6 +109,11 @@ test('automation import validates, deduplicates source links, and uses inbox',as
   assert.equal(a.ok,true);assert.equal(a.id,b.id);assert.equal(b.duplicate,true);assert.ok((await items()).inboxTasks.some(item=>item.id===a.id));
   const before=readTasks();assert.equal((await post('/api/import',{kind:'item',payload:{...payload,description:'줄\n바꿈'}})).status,400);assert.equal(readTasks(),before);
 });
+test('Slack에서 가져온 아이디어는 원문 링크를 들고 있다(아이디어 줄의 원문)',async()=>{
+  const permalink='https://example.test/idea-fixture';
+  const a=await post('/api/import',{kind:'item',payload:{type:'idea',description:'슬랙 아이디어',permalink}});
+  assert.equal(a.ok,true);const ref=(await items()).reportRefs[a.id];assert.equal(ref.type,'idea');assert.equal(ref.permalink,permalink);
+});
 test('a successful Slack channel cannot conceal another channel failure',async()=>{
   await post('/api/import',{kind:'health',payload:{channel:'my-todo',success:false,error:'fixture failure'}});
   await post('/api/import',{kind:'health',payload:{channel:'my-align',success:true}});

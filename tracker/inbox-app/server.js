@@ -1791,7 +1791,8 @@ const updateCommandPath = () => personalize.tildePath(path.join(REPO_DIR, '업�
 
 // `cached`면(페이지를 열 때·6시간마다 톱니바퀴의 파란 점) 원격에 새로 묻지 않고 가진 값만 준다 —
 // 6시간 주기 확인이 아직 안 걸려 있으면 그 주기만 건다(설정을 열 때와 같은 한 번).
-// `check`면(설정 › 앱의 `새 버전 확인` 버튼) 1분 안에 물어본 적이 없을 때 원격에 곧바로 묻고 12초까지 기다린다 —
+// `check`면(설정 › 앱의 `새 버전 확인` 버튼) 1분 안에 물어본 적이 없을 때 원격에 곧바로 묻고 10초까지 기다린다
+// (화면 요청의 15초 제한 안에 끝나게) —
 // 배포 직후 6시간·30분 주기를 기다리지 않게.
 const REMOTE_MANUAL_MIN_MS = 60 * 1000;
 async function manualRemoteCheck() {
@@ -1800,7 +1801,7 @@ async function manualRemoteCheck() {
   if (Date.now() - remoteCheckedAt > REMOTE_MANUAL_MIN_MS) checkLatestRelease();
   if (!remoteCheckRun) return;
   let timer = null;
-  await Promise.race([remoteCheckRun, new Promise((resolve) => { timer = setTimeout(resolve, 12000); })]);
+  await Promise.race([remoteCheckRun, new Promise((resolve) => { timer = setTimeout(resolve, 10000); })]);
   clearTimeout(timer);
 }
 async function aboutApp({ cached = false, check = false } = {}) {
@@ -1819,6 +1820,8 @@ async function aboutApp({ cached = false, check = false } = {}) {
     gitRef: ref ? ref.trim() : null,
     modified,
     latest: latestRelease,
+    // `새 버전 확인`을 눌렀을 때 최근 90초 안에 원격 태그를 실제로 받았는지 — 못 받았으면 화면이 "최신이에요" 대신 "확인하지 못했어요"라고 한다.
+    ...(check ? { checkReached: !!(latestRelease && Date.now() - Date.parse(latestRelease.checkedAt) < 90 * 1000) } : {}),
     update: { ...updateOffer(version, channel), changesUrl: changes },
     // 설정 › 앱의 `지난 소식 전체`(WP-J) — 저장소 소식.md의 최근 10개 버전. 파일이 없으면 빈 목록이다.
     news: localNews(),
@@ -2011,10 +2014,11 @@ function slackSyncSuccessAt() {
     return typeof at === 'string' && at ? at : null;
   } catch { return null; }
 }
-// `claude` 실행 파일이 이 맥에 있는지 — 프로세스마다 한 번만 보고(PATH만 훑는다) 들고 있는다.
+// `claude` 실행 파일이 이 맥에 있는지(PATH만 훑는다).
 let claudeFound = null;
 function claudeReady() {
-  if (claudeFound === null) claudeFound = integrations.claudeInstalled();
+  // 찾았을 때만 들고 있는다 — 안내대로 설치한 뒤 다시 점검하면 서버를 다시 켜지 않아도 보이게.
+  if (!claudeFound) claudeFound = integrations.claudeInstalled();
   return claudeFound;
 }
 // ---------- 설정 › 앱 › 점검하기 (GET /api/selfcheck, WP-K) ----------
