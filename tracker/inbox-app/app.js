@@ -3906,6 +3906,7 @@ let appInstallEvent = null;       // 잡아 둔 beforeinstallprompt(한 번 쓰�
 let appInstallDone = false;       // 이 창에서 설치를 마쳤다(accepted 또는 appinstalled)
 let appInstallNoticed = false;    // appinstalled 알림은 한 번만
 let appInstallSlots = [];         // [{ node, paint }] — 다시 채울 줄
+let appIconSrc = '/app-icon.png'; // 작은 Dock 그림 주소 — 꾸미기에서 아이콘을 저장하면 `?v=`가 붙는다(settings-ui.js)
 
 function appInstallStandalone() {
   try {
@@ -3956,6 +3957,7 @@ function appInstallRefresh() {
 }
 
 function appInstallRemember(node, paint) {
+  appInstallSlots = appInstallSlots.filter(slot => slot.node && slot.node.isConnected !== false);
   appInstallSlots.push({ node, paint });
   paint();
   return node;
@@ -4007,7 +4009,7 @@ function guideRows() {
     picture.setAttribute('aria-hidden', 'true');
     const me = document.createElement('img');
     me.className = 'me';
-    me.src = '/app-icon.png';
+    me.src = appIconSrc;
     me.alt = '';
     picture.append(document.createElement('i'), document.createElement('i'), me, document.createElement('i'));
     if (state === 'standalone') {

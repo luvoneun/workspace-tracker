@@ -623,8 +623,9 @@ async function settingsUpdateCheckNow() {
   if (info) settingsAbout = info;
   document.getElementById('settingsBtn')?.classList.toggle('has-update', settingsHasUpdate());
   const offer = info ? settingsUpdateOffer(info) : null;
-  settingsUpdatePaint(offer ? { kind: 'offer', offer } : { kind: 'none', checked: !!info });
-  if (!info) showNotice('새 버전을 확인하지 못했어요 — 잠시 뒤 다시 눌러 주세요');
+  const reached = !!info && info.checkReached !== false;
+  settingsUpdatePaint(offer ? { kind: 'offer', offer } : { kind: 'none', checked: reached });
+  if (!offer && !reached) showNotice('새 버전을 확인하지 못했어요 — 인터넷 연결을 확인하고 잠시 뒤 다시 눌러 주세요');
 }
 
 function settingsUpdatePaint(view) {
@@ -2714,6 +2715,7 @@ function personalizeApply({ title, icon } = {}) {
     const favicon = document.getElementById('appFavicon');
     const src = `/app-icon.png?v=${Date.now()}`;
     if (favicon) favicon.href = src;
+    if (typeof appIconSrc !== 'undefined') appIconSrc = src;
     // 사용설명서 카드의 작은 Dock 그림도 새로고침 없이 바꾼다.
     if (typeof document.querySelectorAll === 'function') document.querySelectorAll('.d-guidedock img').forEach(img => { img.src = src; });
   }

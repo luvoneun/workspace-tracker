@@ -147,3 +147,15 @@ test('새 버전이 없으면 원격에 묻지 않는다(가짜 fetch가 불리�
   assert.equal(called, false);
   assert.equal(updateOffer('1.0.0', 'stable').news, null);
 });
+
+test('새 버전 확인(check=1)은 원격 태그를 최근 90초 안에 받았는지 checkReached로 알린다 — 못 받았으면 화면이 "최신이에요"라고 하지 않게', async (t) => {
+  t.after(() => setLatestReleaseForTests(null));
+  const about = async (query) => (await fetch(base + '/api/about' + query)).json();
+  setLatestReleaseForTests(null);
+  assert.equal((await about('?check=1')).checkReached, false, '한 번도 못 받음');
+  setLatestReleaseForTests({ tag: 'v1.0.0', checkedAt: new Date(Date.now() - 10 * 60 * 1000).toISOString() });
+  assert.equal((await about('?check=1')).checkReached, false, '오래전에 받은 것');
+  setLatestReleaseForTests({ tag: 'v1.0.0', checkedAt: new Date().toISOString() });
+  assert.equal((await about('?check=1')).checkReached, true, '방금 받음');
+  assert.equal('checkReached' in (await about('')), false, '버튼이 아닐 때는 싣지 않는다');
+});
