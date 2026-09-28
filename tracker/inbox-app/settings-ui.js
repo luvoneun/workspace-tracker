@@ -1442,7 +1442,7 @@ function settingsSlackWizard(card, data, mode = 'new') {
     how.className = 'd-ihow';
     settingsRich(how, [
       '팀 슬랙 앱의 ', ['b', 'OAuth & Permissions'], ' 화면이 열려요(영어 화면이에요 — 다른 화면이면 왼쪽 메뉴에서 골라요).', ['br'],
-      ['b', 'Install to Workspace'], '(이미 했으면 Reinstall) → 허용', ['br'],
+      ['b', 'Install to (회사 슬랙 이름)'], ' 버튼(이미 했으면 ', ['b', 'Reinstall to …'], ') → ', ['b', '허용(Allow)'], ['br'],
       '토큰이 두 개 보여요 — ', ['b', 'xoxp-로 시작하는 User OAuth Token'], ' 옆 ', ['b', 'Copy'], '. ',
       ['code', 'xoxb-'], '로 시작하는 Bot 토큰이 아니에요.',
     ]);
