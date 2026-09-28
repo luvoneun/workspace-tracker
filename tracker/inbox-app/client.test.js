@@ -8946,3 +8946,28 @@ test('WP-K 화면 파일 규칙: selfcheck-ui.js는 새 innerHTML을 uiIcon 아�
   assert.ok(uses.length >= 1);
   assert.ok(uses.every(line => /\.innerHTML = uiIcon\('chevron'\);/.test(line)), uses.join('\n'));
 });
+
+test('아이디어 줄: 평소 두 줄, 문구를 누르거나 Enter면 그 자리에서 펼치고 다시 누르면 접힘, 원문은 제목 옆이 아니라 아래 정보 줄에', () => {
+  const app = workflowsClient();
+  const row = app.run(`(() => {
+    const row = recordIdeaRow({ id: 'i1', type: 'idea', description: '긴 아이디어 문구', created: '2026-09-24', permalink: 'https://example.slack.com/archives/C1/p1' });
+    window.__ideaRow = row;
+    return row;
+  })()`);
+  const kids = row.children;
+  const title = kids.find(kid => String(kid.className) === 'ti');
+  assert.ok(title, '제목은 줄 바로 아래(원문을 옆에 붙이지 않음)');
+  assert.equal(title.getAttribute('role'), 'button');
+  const info = kids.find(kid => String(kid.className) === 'd-recinfo');
+  assert.ok(info, '아래 정보 줄');
+  assert.ok(info.children.some(kid => String(kid.className) === 'd-src'), '원문 링크가 아래 줄에 늘 있다');
+  const parts = JSON.parse(app.run(`JSON.stringify(recordInfoParts({ id: 'i1', created: '2026-09-24', permalink: 'https://x' }, '적음').map(p => p.text))`));
+  assert.match(parts[0], /적음$/);
+  title.listeners.click();
+  assert.match(String(row.className), /is-open/);
+  assert.equal(title.getAttribute('aria-expanded'), 'true');
+  title.listeners.click();
+  assert.doesNotMatch(String(row.className), /is-open/);
+  title.listeners.keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+  assert.match(String(row.className), /is-open/);
+});
