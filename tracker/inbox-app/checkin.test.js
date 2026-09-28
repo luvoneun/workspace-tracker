@@ -292,6 +292,25 @@ test('WP-N 폼이 닫혔으면(404·410·"응답을 더 이상 받지 않음") c
   assert.equal(page.read().closed, true);
 });
 
+test('WP-N 보냄 판정: "응답이 기록됨" 페이지는 다른 글자가 섞여도 보냄, formResponse가 아닌 곳의 200(사내 차단·로그인)은 실패로 대기', async (t) => {
+  const ok = harness(t);
+  ok.seed(seedState(ago(3), [ago(3), ago(1)]));
+  ok.reply = async () => new Response('<div>Your response has been recorded.</div><script>"no longer accepting responses"</script>', { status: 200 });
+  await ok.checkin.act({ round: 'd3', action: 'send' });
+  assert.equal(ok.read().closed, undefined, '정상 페이지 글자로 영구 중지되지 않는다');
+  assert.equal(ok.read().rounds.d3.state, 'sent');
+
+  const proxy = harness(t);
+  proxy.seed(seedState(ago(3), [ago(3), ago(1)]));
+  proxy.reply = async () => {
+    const response = new Response('<html>사내 보안 정책으로 차단된 사이트</html>', { status: 200 });
+    Object.defineProperty(response, 'url', { value: 'https://proxy.example.test/blocked' });
+    return response;
+  };
+  await proxy.checkin.act({ round: 'd3', action: 'send' });
+  assert.equal(proxy.read().rounds.d3.state, 'queued', '차단 페이지는 보낸 것이 아니다 — 대기');
+});
+
 test('WP-N checkin.json이 깨졌으면 새로 만든다(새 익명 번호, firstDay=오늘) — 죽지 않는다', (t) => {
   const h = harness(t);
   h.seed('{ 깨진 json');

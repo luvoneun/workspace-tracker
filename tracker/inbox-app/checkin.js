@@ -53,6 +53,7 @@ const CHECKIN_AUTO_ENTRIES = {
 };
 const INTEGRATION_NAMES = [['slack', '슬랙'], ['jira', '지라'], ['calendar', '캘린더'], ['notes', '회의록']];
 // 폼이 닫혔을 때 구글이 돌려주는 페이지(주소 `…/closedform` 또는 "응답을 더 이상 받지 않음" 문구).
+const RECORDED_RE = /응답이 기록되었습니다|Your response has been recorded/i;
 const CLOSED_RE = /closedform|no longer accepting responses|더 이상 응답을 받지 않|응답을 더 이상 받지 않/i;
 
 const questionsFor = round => CHECKIN_QUESTIONS.filter(q => q.round === round || q.round === 'both');
@@ -193,10 +194,16 @@ function createCheckin(deps) {
             signal: controller.signal,
           });
           if (response.status === 404 || response.status === 410) return 'closed';
+          const finalUrl = String(response.url || '');
+          if (/\/closedform/.test(finalUrl)) return 'closed';
           let text = '';
           try { text = await response.text(); } catch { text = ''; }
-          if (CLOSED_RE.test(String(response.url || '')) || CLOSED_RE.test(text)) return 'closed';
-          return response.ok ? 'sent' : 'failed';
+          // "응답이 기록됨" 문구가 있으면 무엇이 섞여 있든 보낸 것 — 정상 페이지의 글자로 영구 중지되지 않게.
+          if (response.ok && RECORDED_RE.test(text)) return 'sent';
+          if (CLOSED_RE.test(text)) return 'closed';
+          // 그 밖의 성공은 구글 formResponse 자리의 정상 응답만 — 사내 차단·로그인 페이지(200)는 보낸 것으로 치지 않는다.
+          if (response.ok && (!finalUrl || /^https:\/\/docs\.google\.com\/forms\/.*\/formResponse/.test(finalUrl))) return 'sent';
+          return 'failed';
         } finally { clearTimeout(stop); }
       })();
       return await Promise.race([run, late]);

@@ -199,6 +199,14 @@ function checkinShow(data) {
   // 브라우저가 스스로 닫으려 할 때(Esc) — `나중에`가 있을 때만 `나중에`, 보낸 뒤면 닫기, 그 밖엔 무시.
   dialog.addEventListener('cancel', (event) => { event.preventDefault(); checkinEscape(current); });
   dialog.addEventListener('keydown', (event) => checkinKeydown(current, event));
+  // 브라우저가 cancel을 막지 못하고 창을 닫아 버린 경우(Esc 연타 등) — 보낸 뒤면 정리, `나중에`가 있으면 나중에,
+  // 없으면 다시 띄운다(우리 길로 닫을 때는 checkinClose가 먼저 checkinCurrent를 비우므로 여기를 타지 않는다).
+  dialog.addEventListener('close', () => {
+    if (checkinCurrent !== current) return;
+    if (current.done) { checkinClose(current); return; }
+    if (current.canSnooze && !current.busy) { checkinSnooze(current); return; }
+    try { dialog.showModal(); } catch { checkinClose(current); }
+  });
   // 바깥(배경) 클릭 — 창 판 밖을 누르면 대상이 dialog 자신이다.
   dialog.addEventListener('click', (event) => {
     if (event.target !== dialog) return;
