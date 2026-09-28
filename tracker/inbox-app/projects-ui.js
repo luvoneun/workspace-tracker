@@ -31,7 +31,8 @@ let projectDoneOpen = false;
 // 기억하는 값이라 localStorage에 넣지 않는다(projectPastOpen도 같다).
 let projectOrderKeys = null;
 let projectOrderResort = true;
-let projectPastOpen = false;
+// `지난 프로젝트` 접힘 — null이면 손대기 전(보고 있는 프로젝트가 거기 있으면 펼쳐 보인다), true/false는 사람이 누른 값.
+let projectPastOpen = null;
 function projectKeyRestore() {
   try { projectKey = localStorage.getItem(PROJECT_KEY_STORE) || null; } catch { projectKey = null; }
 }
@@ -376,8 +377,8 @@ function projectListPaintStatusTail(listEl, { doingRows, todoRows, pastRows, lab
     if (open) (filtering ? todoF : todoRows).forEach(row => listEl.appendChild(projectRowButton(row, false, labels)));
   }
   if (pastRows.length && (!filtering || pastF.length)) {
-    const open = filtering || projectPastOpen;
-    listEl.appendChild(projectToggleButton('지난 프로젝트', filtering ? pastF.length : pastRows.length, open, () => { projectPastOpen = !projectPastOpen; renderProjects(); }, { locked: filtering }));
+    const open = filtering || (projectPastOpen === null ? pastRows.some(row => row.key === projectKey) : projectPastOpen);
+    listEl.appendChild(projectToggleButton('지난 프로젝트', filtering ? pastF.length : pastRows.length, open, () => { projectPastOpen = !open; renderProjects(); }, { locked: filtering }));
     if (open) (filtering ? pastF : pastRows).forEach(row => listEl.appendChild(projectRowButton(row, true, labels)));
   }
 }
@@ -400,8 +401,8 @@ function projectListPaintDeployTail(listEl, { visibleRows, pastRows, labels, que
     if (open) bucket.rows.forEach(row => listEl.appendChild(projectRowButton(row, false, labels)));
   });
   if (pastRows.length && (!filtering || pastF.length)) {
-    const open = filtering || projectPastOpen;
-    listEl.appendChild(projectToggleButton('지난 프로젝트', filtering ? pastF.length : pastRows.length, open, () => { projectPastOpen = !projectPastOpen; renderProjects(); }, { locked: filtering }));
+    const open = filtering || (projectPastOpen === null ? pastRows.some(row => row.key === projectKey) : projectPastOpen);
+    listEl.appendChild(projectToggleButton('지난 프로젝트', filtering ? pastF.length : pastRows.length, open, () => { projectPastOpen = !open; renderProjects(); }, { locked: filtering }));
     if (open) (filtering ? pastF : pastRows).forEach(row => listEl.appendChild(projectRowButton(row, true, labels)));
   }
 }
@@ -425,7 +426,9 @@ function renderProjects(opts = {}) {
   const quietKeys = new Set(rows
     .filter(row => projectQuiet(row, projectLastDay(row.key, workflowData.items, workflowData.meetings), today))
     .map(row => row.key));
-  const { active: visibleRows, past: pastRows } = projectPastRows(rows, { quietKeys, selectedKey: projectKey });
+  // 보고 있는 프로젝트도 조용하면 `지난 프로젝트` 안에 그대로 둔다(그 묶음을 펼쳐 보인다) — 예전에는 위로 끌어올려
+  // 지라 상태에 따라 `시작 전`에 섞여 보여서, 누를 때마다 자리가 왔다 갔다 했다(사용자 보고).
+  const { active: visibleRows, past: pastRows } = projectPastRows(rows, { quietKeys });
   const { doing: doingRows, todo: todoRows } = projectStatusGroups(visibleRows);
   // 화면에 보이는 이름은 요약만(같은 요약이 둘 이상이면 그때만 키로 구분) — row.label은 정렬용 원본 그대로 둔다.
   const labels = uiGroupLabels(rows.map(row => row.key));
