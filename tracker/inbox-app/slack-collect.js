@@ -326,6 +326,8 @@ function rawItem(channel, message, names) {
   // 원래 메시지 글도 파일도 없는 공유면 내 메모가 곧 문구다.
   const memoOnly = !body && !!memo;
   if (memoOnly) body = memo;
+  // 공유도 파일도 없이 이모지·기호만 남은 메시지(예: `:+1:`)는 할 일로 넣지 않는다 — 건너뜀으로 기록한다.
+  if (!body && !share) return { ts: message.ts, empty: true };
   if (!body) body = '(글 없는 메시지)';
   const description = rawClip(memo && !memoOnly ? `${body} — ${memo}` : body);
   const source = share ? shareSource(share) : null;
@@ -340,7 +342,8 @@ function rawItem(channel, message, names) {
 }
 
 function rawAnswer(channel, messages, names) {
-  return { items: messages.map(message => rawItem(channel, message, names)), skipped: [] };
+  const all = messages.map(message => rawItem(channel, message, names));
+  return { items: all.filter(one => !one.empty), skipped: all.filter(one => one.empty).map(() => ({ reason: '글 없음' })) };
 }
 
 function buildPrompt(skillText, input) {

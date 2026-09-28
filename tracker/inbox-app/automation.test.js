@@ -2261,3 +2261,11 @@ test('원문 모드 슬랙 표기 정리는 단어 경계에서만 — 범위 �
   const { firstLine } = require('./slack-collect');
   assert.equal(firstLine(slackPlain('*중요* ~취소~ 확인 :smile: 좋아요 :+1:')), '중요 취소 확인 좋아요');
 });
+
+test('원문 모드: 이모지만 있는 메시지는 할 일로 넣지 않고 건너뜀(글 없음)으로 남긴다 — 공유는 글이 없어도 링크로 넣는다', () => {
+  const { rawItem } = require('./slack-collect');
+  const channel = { workspaceUrl: 'https://x.slack.com', id: 'C1', type: 'task' };
+  assert.equal(rawItem(channel, { ts: '1.1', user: 'U9', text: ':fire: :+1:' }, {}).empty, true);
+  const shared = rawItem(channel, { ts: '1.2', user: 'U9', text: '', attachments: [{ is_share: true, text: '', from_url: 'https://x.slack.com/archives/C2/p1' }] }, {});
+  assert.equal(shared.payload.description, '(글 없는 메시지)');
+});
