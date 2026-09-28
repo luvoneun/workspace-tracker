@@ -6770,10 +6770,12 @@ test('WP-D1·D2 F. 캘린더: `비밀 주소 붙이기`(누구나)가 먼저 —
   assert.equal(secret[0].type, 'password', '비밀 주소는 토큰처럼 가린다');
   const text = fx.text('calendar');
   assert.ok(!/곧 돼요/.test(text));
-  assert.match(text, /비밀 주소 붙이기누구나1구글 캘린더 → 설정 → 내 캘린더의 설정\(내 이름\)2캘린더 통합 → iCal 형식의 비공개 주소3복사 → 아래 칸에 붙여 넣기/);
-  assert.match(text, /1claude\.ai 설정 → 커넥터 → Google Calendar 연결claude\.ai\/settings\/connectors복사/);
-  assert.match(text, /2Claude Code에서 \/mcp → 로그인\/mcp복사/);
-  assert.match(text, /3여기서 켜기 켜기/);
+  assert.match(text, /비밀 주소 붙이기누구나1컴퓨터에서 calendar\.google\.com 열기\(폰 앱은 안 돼요\)2오른쪽 위 톱니바퀴 → 설정3왼쪽 내 캘린더의 설정에서 내 이름4아래로 내려 캘린더 통합 → iCal 형식의 비공개 주소 옆 복사5아래 칸에 붙여 넣고 연결/);
+  assert.match(text, /먼저 비밀 주소를 시도해 보세요/);
+  assert.match(text, /이 칸이 안 보이면 회사에서 막아 둔 거예요/);
+  assert.match(text, /1claude\.ai → 설정 → 커넥터에서 Google Calendar → 연결 → 구글 로그인 → 허용 \(이 맥의 Claude Code와 같은 계정이어야 해요\)claude\.ai\/settings\/connectors복사/);
+  assert.match(text, /2확인: 터미널에서 claude를 켠 뒤 \/mcp → 목록에 claude\.ai Google Calendar가 연결됨이면 끝\/mcp복사/);
+  assert.match(text, /3여기서 켜기 — 매일 9~19시 2시간마다 읽어요\. 바로 보려면 연결 뒤 지금 가져오기 켜기/);
   assert.match(text, /Claude Code\(유료 구독\)가 있어야 해요/);
   await fx.find('calendar', 'd-icode')[1].children[1].listeners.click();
   same(fx.copied, ['/mcp']);

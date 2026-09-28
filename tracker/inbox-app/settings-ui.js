@@ -2126,9 +2126,11 @@ function settingsIcalChoice(card, data, mode) {
   tag.textContent = '누구나';
   head.append(document.createTextNode('비밀 주소 붙이기'), tag);
   const steps = settingsNumbered([
-    [['구글 캘린더 → ', ['b', '설정'], ' → ', ['b', '내 캘린더의 설정'], '(내 이름)']],
-    [[['b', '캘린더 통합'], ' → ', ['b', 'iCal 형식의 비공개 주소']]],
-    [[['b', '복사'], ' → 아래 칸에 붙여 넣기']],
+    [['컴퓨터에서 ', ['b', 'calendar.google.com'], ' 열기(폰 앱은 안 돼요)']],
+    [['오른쪽 위 ', ['b', '톱니바퀴 → 설정']]],
+    [['왼쪽 ', ['b', '내 캘린더의 설정'], '에서 ', ['b', '내 이름']]],
+    [['아래로 내려 ', ['b', '캘린더 통합'], ' → ', ['b', 'iCal 형식의 비공개 주소'], ' 옆 ', ['b', '복사']]],
+    [['아래 칸에 붙여 넣고 ', ['b', '연결']]],
   ]);
   const field = settingsField('비밀 주소', {
     type: 'password',
@@ -2156,7 +2158,7 @@ function settingsIcalChoice(card, data, mode) {
   settingsOnEnter(field.input, connect);
   const note = settingsEl('d-ismall', mode === 'again' && data.calendar && data.calendar.hasIcal
     ? '칸을 비워 두고 연결하면 지금 주소로 다시 읽어요.'
-    : '앱이 30분마다 이 주소를 직접 읽어요 — Claude는 필요 없어요.');
+    : '이 칸이 안 보이면 회사에서 막아 둔 거예요 → 오른쪽 Claude Code로. 내 기본 캘린더만 읽고, 앱이 30분마다 직접 읽어요(Claude 필요 없음).');
   const foot = settingsEl('d-irow');
   foot.appendChild(go);
   box.append(head, steps, field.wrap, error, foot, note);
@@ -2172,7 +2174,8 @@ function settingsIcalDone(result) {
 function settingsCalendarOpen(card, data, mode) {
   const ask = document.createElement('p');
   ask.className = 'd-ihow';
-  ask.textContent = mode === 'again' ? '비밀 주소를 바꿔 붙여요' : '어떤 길로 붙일까요?';
+  ask.textContent = mode === 'again' ? '비밀 주소를 바꿔 붙여요'
+    : '먼저 비밀 주소를 시도해 보세요(1분). 회사 계정이라 그 칸이 없으면 Claude Code로 연결해요.';
   const pair = settingsEl('d-ichoices');
   const ical = settingsIcalChoice(card, data, mode);
 
@@ -2194,12 +2197,12 @@ function settingsCalendarOpen(card, data, mode) {
     { error, button: on, done: '캘린더를 켰어요' }));
   if (!data.claude) on.disabled = true;
   const steps = settingsNumbered([
-    [['claude.ai 설정 → 커넥터 → Google Calendar 연결'], settingsCodeLine(SETTINGS_CLAUDE_CONNECTORS)],
-    [['Claude Code에서 ', ['b', '/mcp'], ' → 로그인'], settingsCodeLine('/mcp')],
-    [['여기서 켜기 '], on],
+    [[['b', 'claude.ai → 설정 → 커넥터'], '에서 Google Calendar → ', ['b', '연결'], ' → 구글 로그인 → ', ['b', '허용'], ' (이 맥의 Claude Code와 ', ['b', '같은 계정'], '이어야 해요)'], settingsCodeLine(SETTINGS_CLAUDE_CONNECTORS)],
+    [['확인: 터미널에서 ', ['b', 'claude'], '를 켠 뒤 ', ['b', '/mcp'], ' → 목록에 ', ['b', 'claude.ai Google Calendar'], '가 연결됨이면 끝'], settingsCodeLine('/mcp')],
+    [['여기서 켜기 — 매일 9~19시 2시간마다 읽어요. 바로 보려면 연결 뒤 ', ['b', '지금 가져오기'], ' '], on],
   ]);
   const need = settingsEl('d-ismall', data.claude
-    ? 'Claude Code(유료 구독)가 있어야 해요'
+    ? 'Claude Code(유료 구독)가 있어야 해요 · "관리자 승인 필요"가 뜨면 회사에서 막아 둔 거예요 — 관리자에게 요청하거나 캘린더 없이 써도 돼요'
     : 'Claude Code(유료 구독)가 있어야 해요 · 이 맥에는 설치 안 됨 — 설치하면 켤 수 있어요');
   claude.append(claudeHead, steps, need, error);
 
@@ -2846,7 +2849,7 @@ const SETTINGS_FAQ = [
     ['`반응 필요`에 안 보이는 것도 있나요', '지라 연결',
       '제가 담당·보고·지켜보지 않는 티켓과 14일보다 오래된 댓글은 아직 못 봐요. <b>피그마 댓글은 여기로 자동으로 오지 않아요</b> — 피그마의 슬랙 알림을 나만 보는 채널({todo})에 공유하면 슬랙 수집을 거쳐 <b>할 일</b>로 들어와요. 잘 읽고 있는지는 <b>설정 &gt; 연동</b>의 지라 카드 둘째 줄(<b>반응 필요 댓글 N개 · N분 전 확인</b>)에서 봐요.'],
     ['Claude 없이 캘린더를 붙이려면', '구글 캘린더',
-      '<b>설정 &gt; 연동 &gt; 캘린더</b>의 <b>비밀 주소 붙이기</b>예요. 구글 캘린더 설정 → 내 캘린더의 설정 → 캘린더 통합 → <b>iCal 형식의 비공개 주소</b>를 복사해 붙이면 앱이 30분마다 직접 읽어요. 이 주소는 비밀번호처럼 다뤄요.'],
+      '<b>설정 &gt; 연동 &gt; 캘린더</b>의 <b>비밀 주소 붙이기</b>예요. 컴퓨터에서 calendar.google.com → 톱니바퀴 → 설정 → 왼쪽 내 캘린더의 설정(내 이름) → 캘린더 통합 → <b>iCal 형식의 비공개 주소</b>를 복사해 붙이면 앱이 30분마다 직접 읽어요. 이 주소는 비밀번호처럼 다뤄요. 그 칸이 없으면 회사에서 막아 둔 거라 <b>Claude Code로</b> 연결해요.'],
     ['슬랙에서 이렇게 보내요', '슬랙 연결',
       '<b>남의 메시지</b>는 ⋯ → <b>전달</b>(또는 공유)로 {todo} 같은 내 채널에 보내요. 메모 한 줄을 같이 적으면 할 일 문구에 참고해요. <b>내 생각</b>은 그 채널에 그냥 적어도 돼요(한 메시지가 한 항목). 해야 할 일 → 할 일 · 답을 기다리는 것 → 기다리는 것 · 정해진 정책 → 정해진 것 · 참고거리 → 언젠가.'],
     ['슬랙에서 수집한 게 잘 들어왔는지 보려면', '슬랙 연결 + Claude Code',
