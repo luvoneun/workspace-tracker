@@ -7401,7 +7401,7 @@ test('WP-D2.5 도움말: `지금 바로 새로 가져오고 싶어요` 문답이
   const login = faq.flatMap(([, rows]) => rows).find(([question]) => question === 'Claude Code 로그인이 풀렸다고 나와요');
   assert.ok(login, 'Claude 로그인 풀림 문답도 있다');
   assert.match(login[2], /claude.*\/login/);
-  assert.match(login[2], /env -i HOME=\$HOME PATH=/, '터미널과 다른 자동 수집 쪽 로그인을 여는 방법도 안내한다');
+  assert.match(login[2], /claude setup-token/, '반복되면 오래 가는 토큰(1.1.1의 workspace-claude-token)으로 안내한다');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
