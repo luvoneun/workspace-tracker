@@ -632,20 +632,24 @@ function tailLines(filePath, maxLines) {
 const LOG_JUNK_RE = /^(?:\{[^{}\n]*\}\s*)+(?=─|\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} )/;
 const cleanLogLine = line => String(line).replace(LOG_JUNK_RE, '');
 
+// 실행 블록의 시작 줄 — 끝의 `(v1.1.2)`는 그 회차를 돌린 앱 버전(VERSION 파일)이다. 옛 로그에는 없다.
+const AUTOMATION_START_RE = /^─+ (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \S+ 시작(?: \(v([0-9A-Za-z.+-]{1,20})\))?$/;
 function parseAutomationLog(lines) {
-  const startRe = /^─+ (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \S+ 시작$/;
+  const startRe = AUTOMATION_START_RE;
   const endRe = /^─+ (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \S+ 종료 \(exit (-?\d+)\)$/;
   const plainRe = /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (.+)$/;
   const events = [];
   let block = null;
   lines.map(cleanLogLine).forEach((line) => {
     const s = startRe.exec(line);
-    if (s) { block = { body: [] }; return; }
+    if (s) { block = { body: [], version: s[2] || null }; return; }
     const e = endRe.exec(line);
     if (e) {
       const exitCode = Number(e[2]);
       const text = block ? block.body.join(' ').replace(/\s+/g, ' ').trim() : '';
-      events.push({ time: e[1], kind: exitCode === 0 ? 'run' : 'fail', text: text || (exitCode === 0 ? '완료' : `실패 (exit ${exitCode})`) });
+      const event = { time: e[1], kind: exitCode === 0 ? 'run' : 'fail', text: text || (exitCode === 0 ? '완료' : `실패 (exit ${exitCode})`) };
+      if (block && block.version) event.version = block.version;
+      events.push(event);
       block = null;
       return;
     }
@@ -680,7 +684,7 @@ function getAutomationStatus() {
       lastSummary: last ? last.text : null,
       recentFailures,
       // 연동 카드 ⋯ › 최근 기록 — 최근 10번(새것 먼저). 한 줄은 200자까지만.
-      events: events.slice(-10).reverse().map(e => ({ time: e.time, kind: e.kind, text: String(e.text || '').slice(0, 200) })),
+      events: events.slice(-10).reverse().map(e => ({ time: e.time, kind: e.kind, text: String(e.text || '').slice(0, 200), ...(e.version ? { version: e.version } : {}) })),
       tail: lines.map(cleanLogLine).filter((l) => l.trim()).slice(-60),
     };
   });
@@ -701,7 +705,7 @@ function meetingNotesRequestFile() {
 // 로그의 실행 블록을 시각과 함께 늘어놓는다. parseAutomationLog은 "끝난 블록"만 돌려주므로
 // (형식은 그대로 둔다) 여기서 "시작 시각"과 "아직 끝나지 않은 블록"만 최소로 보탠다.
 function meetingNotesRuns(lines) {
-  const startRe = /^─+ (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \S+ 시작$/;
+  const startRe = AUTOMATION_START_RE;
   const endRe = /^─+ (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \S+ 종료 \(exit (-?\d+)\)$/;
   const runs = [];
   let open = null;
@@ -2227,7 +2231,7 @@ function aboutDiagnostics() {
 // 인증 예외(publicAsset)와는 다른 이야기다 — 여기 있는 파일도 원격에서는 인증을 거친다.
 const CLIENT_BLOCKED = new Set([
   'server.js', 'safe-storage.js', 'jira-client.js', 'jira-live.js', 'attention-live.js', 'report-drafts.js',
-  'task-batch.js', 'slack-history.js', 'import-record.js', 'browser-fixture.js', 'migrate.js',
+  'task-batch.js', 'slack-history.js', 'slack-collect.js', 'import-record.js', 'browser-fixture.js', 'migrate.js',
   'integrations.js', 'ical.js', 'calendar-live.js', 'personalize.js', 'test-support.js',
   'routes-jira.js', 'routes-integrations.js', 'routes-app.js', 'routes-personalize.js',
 ]);

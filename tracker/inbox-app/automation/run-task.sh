@@ -5,6 +5,9 @@
 #   run-task.sh <작업이름> <프롬프트> <허용도구> [권한모드] [금지도구]
 #
 # 4·5번째는 선택이다. 안 주면 예전과 똑같이 동작하므로 캘린더·지라 plist는 고칠 게 없다.
+# 허용도구를 빈 값으로 주면 `--allowedTools`를 아예 넘기지 않는다 — 도구를 쓰지 않는 호출(슬랙 분류)용.
+# TASK_OUTPUT_FILE을 주면 Claude의 답(표준 출력)을 로그 대신 그 파일에 쓴다(부른 쪽이 답을 읽어 검증한다).
+# 오류 출력과 시작/종료 줄은 그대로 로그에 남는다.
 
 set -uo pipefail
 
@@ -117,7 +120,15 @@ group_alive() {
   ps -o state= -g "$1" 2>/dev/null | grep -qv '^[[:space:]]*Z'
 }
 
-echo "───── $(date '+%Y-%m-%d %H:%M:%S') $NAME 시작" >> "$LOG"
+# 시작 줄 끝의 `(v1.1.2)`는 이 회차를 돌린 앱 버전(설치 폴더의 VERSION)이다 — 설정 › 연동 › 최근 기록에 함께 보인다.
+# 모양이 이상하거나 못 읽으면 붙이지 않는다(옛 로그와 같은 모양).
+APP_VERSION="$(head -c 40 "$WORKSPACE/VERSION" 2>/dev/null | tr -d '[:space:]')"
+case "$APP_VERSION" in
+  ''|*[!0-9A-Za-z.+-]*) VERSION_TAG="" ;;
+  *) VERSION_TAG=" (v$APP_VERSION)" ;;
+esac
+[ "${#APP_VERSION}" -le 20 ] || VERSION_TAG=""
+echo "───── $(date '+%Y-%m-%d %H:%M:%S') $NAME 시작$VERSION_TAG" >> "$LOG"
 
 # claude는 MCP 서버 등을 자식 프로세스로 띄운다. 시간이 넘쳤을 때 부모만 죽이면 자식이 남아
 # 같은 문제가 반복되므로, set -m(잡 제어)으로 claude를 자기만의 프로세스 그룹에 넣고
@@ -129,11 +140,17 @@ echo "───── $(date '+%Y-%m-%d %H:%M:%S') $NAME 시작" >> "$LOG"
 # 모델은 여기서 못 박는다 — 계정 기본 모델(`/model`로 바뀜)을 따라가면 자동화가 비싼 모델로 돌아
 # 사용량 한도를 먹는다. 수집·동기화는 Sonnet으로 충분하다. 바꾸려면 TASK_MODEL만 준다.
 CLAUDE_MODEL="${TASK_MODEL:-sonnet}"
-CLAUDE_ARGS=(-p "$PROMPT" --model "$CLAUDE_MODEL" --permission-mode "$MODE" --allowedTools "$TOOLS")
+CLAUDE_ARGS=(-p "$PROMPT" --model "$CLAUDE_MODEL" --permission-mode "$MODE")
+[ -n "$TOOLS" ] && CLAUDE_ARGS+=(--allowedTools "$TOOLS")
 [ -n "$DENY" ] && CLAUDE_ARGS+=(--disallowedTools "$DENY")
+OUTPUT_FILE="${TASK_OUTPUT_FILE:-}"
 
 set -m
-"$CLAUDE" "${CLAUDE_ARGS[@]}" >> "$LOG" 2>&1 </dev/null &
+if [ -n "$OUTPUT_FILE" ]; then
+  "$CLAUDE" "${CLAUDE_ARGS[@]}" > "$OUTPUT_FILE" 2>> "$LOG" </dev/null &
+else
+  "$CLAUDE" "${CLAUDE_ARGS[@]}" >> "$LOG" 2>&1 </dev/null &
+fi
 TASK_PID=$!
 set +m
 

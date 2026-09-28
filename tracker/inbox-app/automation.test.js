@@ -16,6 +16,13 @@ const runScript = (script, args, env) => spawnSync('/bin/bash', [script, ...args
   env: { ...process.env, ...env }, encoding: 'utf8', timeout: 60000,
 });
 const gone = pid => { try { process.kill(pid, 0); return false; } catch { return true; } };
+// slack-capture.sh는 설치 폴더의 tracker/inbox-app/slack-collect.js를 부른다 — 임시 설치 폴더에 진짜 파일을 둔다.
+function placeCollector(home) {
+  const app = path.join(home, 'tracker', 'inbox-app');
+  fs.mkdirSync(app, { recursive: true });
+  for (const name of ['slack-collect.js', 'slack-history.js', 'import-record.js']) fs.copyFileSync(path.join(__dirname, name), path.join(app, name));
+  return app;
+}
 
 test('run-task.sh는 매달린 실행을 시간 제한으로 끊고 자식 프로세스까지 정리한다', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-run-task-'));
@@ -68,6 +75,7 @@ test('slack-capture.sh 잠금은 살아 있는 실행만 존중하고 죽은 잠
   const lock = path.join(logs, '.slack-capture.lock');
   const config = path.join(home, 'workspace.config.json');
   fs.writeFileSync(config, '{}'); // 켜진 채널이 없으니 잠금만 잡고 곧바로 "건너뛰어요"로 끝난다
+  placeCollector(home);
   const logText = () => fs.readFileSync(path.join(logs, 'slack-capture.log'), 'utf8');
   const capture = () => runScript(automationScript('slack-capture.sh'), [], {
     WORKSPACE_DIR: home, WORKSPACE_CONFIG: config, AUTOMATION_LOG_DIR: logs,
@@ -539,6 +547,7 @@ test('WP-D2.5 slack-capture.sh: SLACK_CAPTURE_MANUAL=1이면 시간대 판단을
   const config = path.join(home, 'workspace.config.json');
   const env = { WORKSPACE_DIR: home, WORKSPACE_CONFIG: config, AUTOMATION_LOG_DIR: logs };
   fs.writeFileSync(config, '{}');
+  placeCollector(home);
   // 스크립트가 PATH를 새로 잡아 시계를 바꿔 끼울 수 없다 — 지금 시각이 9~19시 밖일 때만 "주기 실행은 조용히 빠진다"를 본다.
   const hour = new Date().getHours();
   if (hour < 9 || hour >= 19) {
@@ -1248,36 +1257,136 @@ test('QA update-runner.sh: update.sh가 실패를 못 적고 멈추면 멈춘 �
   assert.equal(fs.existsSync(path.join(fix.workspace, 'pwned')), false);
 });
 
-// slack-capture.sh를 임시 HOME에서 돌린다 — PATH 맨 앞(HOME/.nvm/…/bin)에 가짜 curl, 앱 자리에 가짜 import-record.js,
-// 설치 위치 자리에 가짜 run-task.sh를 둔다. 슬랙·앱 서버·Claude 어디에도 닿지 않는다.
+// slack-capture.sh를 임시 HOME에서 끝까지 돌린다. 슬랙·앱 서버·Claude 어디에도 닿지 않는다:
+//  - `NODE_OPTIONS=--require 가짜-fetch.js`로 node의 fetch를 바꿔 끼운다(slack-collect.js와 import-record.js 둘 다).
+//    슬랙 응답·앱 응답은 spec 파일에서 읽고, 요청은 전부 기록한다. 그 밖의 주소는 곧바로 오류다(네트워크 없음).
+//  - Claude는 가짜 실행 파일(CLAUDE_BIN)이다 — 받은 인자를 적어 두고, 입력 JSON을 보고 정해진 답을 낸다.
+//  - 진짜 slack-collect.js·slack-history.js·import-record.js·지침 파일·run-task.sh를 임시 폴더에 복사해 쓴다.
+const SLACK_TOKEN = 'xoxp-SECRET-FIXTURE-TOKEN';
 function captureFixture(t, config, stateJson) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-wpe-capture-'));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const bin = path.join(home, '.nvm', 'versions', 'node', 'v0', 'bin');
   fs.mkdirSync(bin, { recursive: true });
   fs.symlinkSync(process.execPath, path.join(bin, 'node'));
-  const curlLog = path.join(home, 'curl.log');
-  writeExec(path.join(bin, 'curl'), `#!/bin/bash\nfor a in "$@"; do case "$a" in https://*) echo "$a" >> ${JSON.stringify(curlLog)} ;; esac; done\nif [ -n "\${FAKE_FOUND:-}" ]; then printf '{"ok":true,"messages":[{"ts":"1"}]}'; else printf '{"ok":true,"messages":[]}'; fi\n`);
-  const app = path.join(home, 'tracker', 'inbox-app');
-  fs.mkdirSync(app, { recursive: true });
-  // 앱 API 흉내 — 진짜처럼 줄바꿈 없이 {"ok":true}를 낸다
-  fs.writeFileSync(path.join(app, 'import-record.js'), "process.stdin.resume();process.stdin.on('end',()=>process.stdout.write('{\"ok\":true}'));");
+  const app = placeCollector(home);
+  const skills = path.join(home, '.claude', 'skills');
+  fs.mkdirSync(skills, { recursive: true });
+  for (const name of ['slack-todos.md', 'slack-alignments.md', 'slack-someday.md', 'slack-waiting.md']) fs.copyFileSync(path.join(REPO_ROOT, '.claude', 'skills', name), path.join(skills, name));
   if (stateJson) fs.writeFileSync(path.join(app, '.slack_capture_state.json'), JSON.stringify(stateJson));
+  fs.writeFileSync(path.join(home, 'VERSION'), '9.9.9\n');
   const install = path.join(home, '.local', 'share', 'workspace-automation');
   fs.mkdirSync(install, { recursive: true });
-  const prompt = path.join(home, 'prompt.txt');
-  writeExec(path.join(install, 'run-task.sh'), `#!/bin/bash\nprintf '%s' "$2" > ${JSON.stringify(prompt)}\nexit 0\n`);
-  fs.writeFileSync(path.join(home, 'token'), 'xoxp-t\n');
-  const configPath = path.join(home, 'workspace.config.json');
-  fs.writeFileSync(configPath, JSON.stringify({ ...config, slack: { tokenFile: path.join(home, 'token'), ...config.slack } }));
-  const logs = path.join(home, 'logs');
-  const run = (env = {}) => runScript(automationScript('slack-capture.sh'), [], {
-    HOME: home, WORKSPACE_DIR: home, WORKSPACE_CONFIG: configPath, AUTOMATION_LOG_DIR: logs, SLACK_CAPTURE_IGNORE_HOURS: '1', ...env,
-  });
-  const urls = () => (fs.existsSync(curlLog) ? fs.readFileSync(curlLog, 'utf8').trim().split('\n').filter(Boolean) : []);
-  const logText = () => fs.readFileSync(path.join(logs, 'slack-capture.log'), 'utf8');
-  return { home, run, urls, logText, prompt };
+  fs.copyFileSync(automationScript('run-task.sh'), path.join(install, 'run-task.sh'));
+
+  const specFile = path.join(home, 'fake-spec.json');
+  const requestLog = path.join(home, 'requests.log');
+  const preload = path.join(home, 'fake-fetch.js');
+  fs.writeFileSync(preload, `
+const fs = require('fs');
+globalThis.fetch = async (input, init = {}) => {
+  const url = new URL(String(input));
+  const spec = JSON.parse(fs.readFileSync(process.env.FAKE_FETCH_SPEC, 'utf8'));
+  const headers = init.headers || {};
+  fs.appendFileSync(process.env.FAKE_FETCH_LOG, JSON.stringify({ url: String(input), auth: headers.Authorization === 'Bearer ' + process.env.FAKE_SLACK_TOKEN, body: init.body ? JSON.parse(init.body) : null }) + '\\n');
+  const reply = (body, status = 200) => ({ ok: status < 400, status, json: async () => body });
+  if (url.hostname === 'slack.com') {
+    const method = url.pathname.replace('/api/', '');
+    if (method === 'conversations.history') {
+      const found = (spec.history || {})[url.searchParams.get('channel')] || [];
+      return Array.isArray(found) ? reply({ ok: true, messages: found, has_more: false }) : reply({ ok: false, error: found.error });
+    }
+    if (method === 'conversations.replies') {
+      const found = (spec.replies || {})[url.searchParams.get('channel') + ':' + url.searchParams.get('ts')];
+      return found ? reply({ ok: true, messages: found }) : reply({ ok: false, error: 'channel_not_found' });
+    }
+    if (method === 'users.info') {
+      const name = (spec.users || {})[url.searchParams.get('user')];
+      return name ? reply({ ok: true, user: { name, profile: { display_name: name } } }) : reply({ ok: false, error: 'user_not_found' });
+    }
+  }
+  if (url.hostname === '127.0.0.1') {
+    if (url.pathname === '/api/items') return reply(spec.items || { reportRefs: {}, jiraIssues: [] });
+    if (url.pathname === '/api/import') {
+      const body = JSON.parse(init.body);
+      if (body.kind === 'item' && (spec.failItems || []).includes(body.payload.description)) return reply({ ok: false, error: '저장 실패' }, 400);
+      if (body.kind === 'item' && (spec.dupLinks || []).includes(body.payload.permalink)) return reply({ ok: true, duplicate: true, id: 'old' });
+      return reply({ ok: true, id: 'new' });
+    }
+  }
+  throw new Error('네트워크 금지: ' + url.hostname);
+};
+`);
+  const calls = path.join(home, 'claude-calls.log');
+  const claude = path.join(home, 'fake-claude');
+  // 가짜 Claude: 메시지마다 한 줄 — 원본을 못 읽은 공유는 표시를 붙이고, 글이 'SKIP'이면 비슷한 일로 건너뛴다.
+  writeExec(claude, `#!${process.execPath}
+const fs = require('fs');
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.FAKE_CLAUDE_CALLS, JSON.stringify(args) + '\\n');
+const mode = process.env.FAKE_CLAUDE_MODE || '';
+if (mode === 'garbage') { process.stdout.write('할 일 2개를 저장했어요!'); process.exit(0); }
+if (mode === 'exit') { process.stderr.write('로그인 만료'); process.exit(3); }
+const prompt = args[args.indexOf('-p') + 1];
+const input = JSON.parse(prompt.slice(prompt.indexOf('## 입력 JSON\\n') + '## 입력 JSON\\n'.length));
+const items = [], skipped = [];
+for (const m of input.messages) {
+  if (m.text === 'SKIP') { skipped.push({ ts: m.ts, reason: '비슷한 일', existing: '이미 있는 일' }); continue; }
+  if (m.kind === 'share') {
+    for (const s of m.shares) items.push(s.threadError
+      ? { ts: m.ts, description: '원본 못 읽은 일 ' + m.ts, permalink: s.permalink, notes: ['원본 못 읽음'] }
+      : { ts: m.ts, description: '공유된 일 ' + m.ts, permalink: s.permalink });
+  } else items.push({ ts: m.ts, description: '할 일 ' + m.ts, permalink: m.permalink });
 }
+const answer = JSON.stringify({ items: mode === 'badlink' ? items.map(one => ({ ...one, permalink: 'https://evil.example/x' })) : items, skipped });
+process.stdout.write(mode === 'fence' ? '\`\`\`json\\n' + answer + '\\n\`\`\`\\n' : answer + '\\n');
+`);
+  fs.writeFileSync(path.join(home, 'token'), `${SLACK_TOKEN}\n`);
+  const configPath = path.join(home, 'workspace.config.json');
+  fs.writeFileSync(configPath, JSON.stringify({ ...config, slack: { tokenFile: path.join(home, 'token'), workspaceUrl: 'https://team.slack.com', ...config.slack } }));
+  const logs = path.join(home, 'logs');
+  let spec = {};
+  const setSlack = next => { spec = next; fs.writeFileSync(specFile, JSON.stringify(spec)); };
+  setSlack({});
+  const run = (env = {}) => {
+    for (const file of [requestLog, calls]) fs.rmSync(file, { force: true });
+    return runScript(automationScript('slack-capture.sh'), [], {
+      HOME: home, WORKSPACE_DIR: home, WORKSPACE_CONFIG: configPath, AUTOMATION_LOG_DIR: logs, SLACK_CAPTURE_IGNORE_HOURS: '1',
+      WORKSPACE_PORT: '4322', CLAUDE_BIN: claude, WORKSPACE_CLAUDE_TOKEN_FILE: path.join(home, 'no-claude-token'),
+      NODE_OPTIONS: `--require ${preload}`, FAKE_FETCH_SPEC: specFile, FAKE_FETCH_LOG: requestLog, FAKE_CLAUDE_CALLS: calls, FAKE_SLACK_TOKEN: SLACK_TOKEN,
+      ...env,
+    });
+  };
+  const lines = file => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line)) : []);
+  const requests = () => lines(requestLog);
+  const urls = () => requests().filter(one => one.url.includes('conversations.history')).map(one => one.url);
+  const imports = kind => requests().filter(one => one.url.endsWith('/api/import') && one.body.kind === kind).map(one => one.body.payload);
+  const claudeCalls = () => lines(calls);
+  const promptOf = call => call[call.indexOf('-p') + 1];
+  const inputOf = call => { const prompt = promptOf(call); return JSON.parse(prompt.slice(prompt.indexOf('## 입력 JSON\n') + '## 입력 JSON\n'.length)); };
+  const logText = () => fs.readFileSync(path.join(logs, 'slack-capture.log'), 'utf8');
+  const allLogs = () => (fs.existsSync(logs) ? fs.readdirSync(logs).filter(name => name.endsWith('.log')).map(name => fs.readFileSync(path.join(logs, name), 'utf8')).join('\n') : '');
+  return { home, run, urls, requests, imports, claudeCalls, promptOf, inputOf, logText, allLogs, setSlack };
+}
+// 서버 parseAutomationLog과 같은 규칙(시작/종료 줄 사이 = 한 실행, 밖의 시각 줄 = 한 줄 기록)으로 마지막 기록을 읽는다.
+function lastLogEvent(text) {
+  const startRe = /^─+ (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \S+ 시작(?: \(v[0-9A-Za-z.+-]{1,20}\))?$/;
+  const endRe = /^─+ (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \S+ 종료 \(exit (-?\d+)\)$/;
+  const plainRe = /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (.+)$/;
+  const events = [];
+  let block = null;
+  text.split('\n').forEach(line => {
+    if (startRe.test(line)) { block = []; return; }
+    const end = endRe.exec(line);
+    if (end) { events.push({ kind: Number(end[2]) === 0 ? 'run' : 'fail', text: (block || []).join(' ').replace(/\s+/g, ' ').trim() }); block = null; return; }
+    if (block) { block.push(line); return; }
+    const plain = plainRe.exec(line);
+    if (plain) events.push({ kind: plain[2].includes('채널 확인 실패') ? 'fail' : 'skip', text: plain[2] });
+  });
+  return events[events.length - 1];
+}
+const TODO_ONLY = { slack: { channels: { todo: { id: 'C0TODO11', name: '#my-todo' } } } };
+const memo = (ts, text) => ({ type: 'message', user: 'U0ME', ts, text });
 
 test('WP-E slack-capture.sh: 뺀 채널(off)은 읽지도 Claude에 넘기지도 않고, 어디서부터는 커서와 since 중 큰 값이다', (t) => {
   const fix = captureFixture(t, { slack: { channels: {
@@ -1294,18 +1403,25 @@ test('WP-E slack-capture.sh: 뺀 채널(off)은 읽지도 Claude에 넘기지도
   assert.ok(urls.includes('https://slack.com/api/conversations.history?channel=C0TODO11&limit=100&oldest=1790000000.000000'), 'since가 커서보다 뒤면 since부터');
   assert.ok(urls.includes('https://slack.com/api/conversations.history?channel=C0WAIT11&limit=100&oldest=1790000500.000100'), '커서가 뒤면 커서부터');
   assert.ok(urls.includes('https://slack.com/api/conversations.history?channel=C0SOME11&limit=100'), 'since도 커서도 없으면 예전처럼');
+  assert.ok(fix.requests().filter(one => one.url.startsWith('https://slack.com/')).every(one => one.auth), '슬랙 요청은 토큰을 머리글로만 보낸다');
+  assert.deepEqual(fix.claudeCalls(), [], '새 메시지가 없으면 Claude를 부르지 않는다');
+  assert.deepEqual(fix.imports('health'), [{ success: true }]);
 
   // 앱 API의 응답({"ok":true})은 로그에 남지 않는다 — 다음 줄이 그 뒤에 붙어 "마지막 실행"을 못 읽던 원인
   const log = fix.logText();
   assert.ok(!log.includes('{"ok":true}'), log);
   assert.match(log, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} 새 메시지 없음 — Claude 호출 생략$/m);
 
-  // 새 메시지가 있으면 Claude에게 켜 둔 채널의 지침만 넘긴다
-  const busy = fix.run({ FAKE_FOUND: '1' });
+  // 새 메시지가 있으면 켜 둔 채널마다 그 채널의 지침만 넣어 부른다(뺀 채널의 지침은 넘기지 않는다)
+  fix.setSlack({ history: { C0TODO11: [memo('1790000600.000100', '가')], C0WAIT11: [memo('1790000600.000200', '나')], C0SOME11: [memo('1790000600.000300', '다')] } });
+  const busy = fix.run();
   assert.equal(busy.status, 0, busy.stderr + fix.logText());
-  const prompt = fs.readFileSync(fix.prompt, 'utf8');
-  assert.match(prompt, /^\.claude\/skills\/ 폴더의 slack-todos\.md, slack-someday\.md, slack-waiting\.md 파일을 차례로 읽고/);
-  assert.ok(!prompt.includes('slack-alignments.md'), '뺀 채널의 지침은 넘기지 않는다');
+  const prompts = fix.claudeCalls().map(fix.promptOf);
+  assert.equal(prompts.length, 3);
+  assert.match(prompts[0], /# 슬랙발 할 일 캡처/);
+  assert.match(prompts[1], /# 슬랙발 언젠가\(참고용\) 캡처/);
+  assert.match(prompts[2], /# 슬랙발 확인 대기 캡처/);
+  assert.ok(!prompts.some(prompt => prompt.includes('# 슬랙발 정책/얼라인 캡처')), '뺀 채널의 지침은 넘기지 않는다');
   assert.ok(!fix.logText().includes('{"ok":true}'));
 });
 
@@ -1619,12 +1735,13 @@ test('WP-F slack-capture.sh: 할 일 채널 없이도 켜진 채널만 읽고 �
     waiting: { id: 'C0WAIT11', name: '#hana-waiting' },
     someday: { id: 'C0SOME11', name: '#hana-someday' },
   } } });
-  const busy = fix.run({ FAKE_FOUND: '1' });
+  fix.setSlack({ history: { C0WAIT11: [memo('1790000600.000200', '나')], C0SOME11: [memo('1790000600.000300', '다')] } });
+  const busy = fix.run();
   assert.equal(busy.status, 0, busy.stderr + fix.logText());
   assert.equal(fix.urls().length, 2);
-  const prompt = fs.readFileSync(fix.prompt, 'utf8');
-  assert.match(prompt, /^\.claude\/skills\/ 폴더의 slack-someday\.md, slack-waiting\.md 파일을 차례로 읽고/);
-  assert.ok(!prompt.includes('slack-todos.md'));
+  const prompts = fix.claudeCalls().map(fix.promptOf);
+  assert.equal(prompts.length, 2);
+  assert.ok(prompts.every(prompt => !prompt.includes('# 슬랙발 할 일 캡처')));
 
   // 모두 뺐으면(손으로 고친 설정) 수집하지 않고 한 줄만 — 실패로 세지 않는다
   const none = captureFixture(t, { slack: { channels: { todo: { id: 'C0TODO11', off: true } } } });
@@ -1632,6 +1749,186 @@ test('WP-F slack-capture.sh: 할 일 채널 없이도 켜진 채널만 읽고 �
   assert.deepEqual(none.urls(), []);
   assert.match(none.logText(), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} 켜진 채널이 없어 건너뛰어요$/m);
   assert.doesNotMatch(none.logText(), /채널 확인 실패/);
+});
+
+test('WP-I 슬랙 수집: 할 일 채널 새 메시지 2개 → Claude는 도구 없이 분류만, 스크립트가 2개 저장하고 커서를 올린다', (t) => {
+  const fix = captureFixture(t, TODO_ONLY, { 'my-todo': '1790000000.000000' });
+  fix.setSlack({ history: { C0TODO11: [memo('1790000002.000200', 'RAWMEMO-둘째 메모'), memo('1790000001.000100', 'RAWMEMO-첫 메모')] } });
+  const result = fix.run();
+  assert.equal(result.status, 0, result.stderr + fix.logText());
+
+  // Claude 호출: 허용 도구 없음(Bash 없음) · 도구를 쓰지 않는 권한 모드 · 막는 목록에 Bash
+  const calls = fix.claudeCalls();
+  assert.equal(calls.length, 1);
+  const args = calls[0];
+  assert.ok(!args.includes('--allowedTools'), '허용 도구 칸을 넘기지 않는다');
+  assert.ok(!args.some(arg => /Bash\(/.test(arg)), 'Bash 명령 허용이 없다');
+  assert.equal(args[args.indexOf('--permission-mode') + 1], 'dontAsk');
+  assert.match(args[args.indexOf('--disallowedTools') + 1], /(^|,)Bash(,|$)/);
+  assert.equal(args[args.indexOf('--model') + 1], 'sonnet');
+  const prompt = fix.promptOf(args);
+  assert.ok(!prompt.includes(SLACK_TOKEN), '프롬프트에 토큰이 없다');
+  assert.match(prompt, /# 슬랙발 할 일 캡처/, '지침 파일을 스크립트가 읽어 붙인다');
+  const input = fix.inputOf(args);
+  assert.equal(input.channel, 'my-todo');
+  assert.equal(input.type, 'task');
+  assert.deepEqual(input.messages.map(one => one.ts), ['1790000001.000100', '1790000002.000200'], '오래된 것부터');
+  assert.equal(input.messages[0].permalink, 'https://team.slack.com/archives/C0TODO11/p1790000001000100');
+  assert.equal(input.messages[0].kind, 'memo');
+
+  // 저장은 스크립트가 import-record.js로 — 받는 형식 그대로
+  assert.deepEqual(fix.imports('item'), [
+    { type: 'task', description: '할 일 1790000001.000100', permalink: 'https://team.slack.com/archives/C0TODO11/p1790000001000100' },
+    { type: 'task', description: '할 일 1790000002.000200', permalink: 'https://team.slack.com/archives/C0TODO11/p1790000002000200' },
+  ]);
+  assert.deepEqual(fix.imports('cursor'), [{ channel: 'my-todo', ts: '1790000002.000200' }], '모두 저장한 뒤 최신 ts로 커서');
+  assert.deepEqual(fix.imports('health'), [{ channel: 'my-todo', success: true }]);
+
+  // 로그: 한 회차 = 시작/종료 블록 하나, 채널마다 `채널 · 새 N개 · 저장 N · 건너뜀 N` — 연동 카드의 파서가 그대로 읽는다
+  const log = fix.logText();
+  assert.match(log, /^───── \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} slack-capture 시작 \(v9\.9\.9\)$/m, '시작 줄에 이 회차의 앱 버전');
+  assert.match(log, /^이번에 본 메시지 2개 = 등록 2 · 링크 중복 0 · 비슷한 일이라 건너뜀 0 · 시스템 0$/m, '연동 카드가 읽는 처리 대장 문장');
+  assert.match(log, /^my-todo · 새 2개 · 저장 2 · 건너뜀 0$/m);
+  const last = lastLogEvent(log);
+  assert.equal(last.kind, 'run');
+  assert.match(last.text, /my-todo · 새 2개 · 저장 2 · 건너뜀 0/);
+  assert.match(fix.allLogs(), /^───── \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} slack-classify 시작 \(v9\.9\.9\)$/m, 'run-task.sh 시작 줄에도 버전');
+  // 로그에는 토큰·메시지 원문이 없다(수치와 항목 문구만)
+  assert.ok(!fix.allLogs().includes(SLACK_TOKEN));
+  assert.ok(!fix.allLogs().includes('RAWMEMO'), '메시지 원문은 로그에 없다');
+  assert.ok(!fix.allLogs().includes('"items"'), 'Claude의 답(JSON)은 로그가 아니라 임시 파일로 받는다');
+});
+
+test('WP-I 슬랙 수집: 공유 메시지는 원본 스레드 전체(댓글이면 그 스레드)가 입력에 들어가고, 못 읽은 원본은 표시되어 넘어간다', (t) => {
+  const fix = captureFixture(t, TODO_ONLY);
+  const share = (ts, fromUrl, extra = {}) => ({ type: 'message', user: 'U0ME', ts, text: '더블체크 필요할듯',
+    attachments: [{ is_share: true, from_url: fromUrl, channel_id: extra.channel || 'C0SRC', ts: extra.ts || '1700000000.000100', text: '공유 당시 글', author_name: '가나' }] });
+  fix.setSlack({
+    history: { C0TODO11: [
+      share('1790000001.000100', 'https://team.slack.com/archives/C0SRC/p1700000000000200?thread_ts=1700000000.000100&cid=C0SRC', { ts: '1700000000.000200' }),
+      share('1790000002.000100', 'https://team.slack.com/archives/C0LOCK/p1700000009000100', { channel: 'C0LOCK', ts: '1700000009.000100' }),
+    ] },
+    replies: { 'C0SRC:1700000000.000100': [
+      { user: 'U0KIM', ts: '1700000000.000100', text: '비밀스레드원문 <@U0LEE> 금요일까지 부탁해요' },
+      { user: 'U0LEE', ts: '1700000000.000200', text: '넵 확인할게요' },
+    ] },
+    users: { U0KIM: '김하나', U0LEE: '이두리' },
+  });
+  const result = fix.run();
+  assert.equal(result.status, 0, result.stderr + fix.logText());
+  const input = fix.inputOf(fix.claudeCalls()[0]);
+  const [readable, locked] = input.messages;
+  assert.equal(readable.kind, 'share');
+  assert.equal(readable.text, '더블체크 필요할듯', '공유하며 같이 적은 메모');
+  assert.equal(readable.shares[0].permalink, 'https://team.slack.com/archives/C0SRC/p1700000000000200', '쿼리를 뗀 원본 링크');
+  assert.deepEqual(readable.shares[0].thread.map(one => [one.user, one.text]), [
+    ['김하나', '비밀스레드원문 @이두리 금요일까지 부탁해요'], ['이두리', '넵 확인할게요'],
+  ], '댓글을 공유했으면 thread_ts로 스레드 전체, 사람 이름은 스크립트가 찾아 둔다');
+  assert.ok(fix.requests().some(one => one.url.includes('conversations.replies?channel=C0SRC&ts=1700000000.000100')));
+  assert.equal(locked.shares[0].thread, undefined);
+  assert.match(locked.shares[0].threadError, /원본 스레드를 못 읽음\(channel_not_found\)/);
+  assert.equal(locked.shares[0].text, '공유 당시 글');
+
+  assert.deepEqual(fix.imports('item').map(one => [one.description, one.permalink]), [
+    ['공유된 일 1790000001.000100', 'https://team.slack.com/archives/C0SRC/p1700000000000200'],
+    ['원본 못 읽은 일 1790000002.000100', 'https://team.slack.com/archives/C0LOCK/p1700000009000100'],
+  ]);
+  assert.deepEqual(fix.imports('cursor'), [{ channel: 'my-todo', ts: '1790000002.000100' }]);
+  const log = fix.logText();
+  assert.match(log, /^my-todo · 새 2개 · 저장 2 · 건너뜀 0 · 표시 1$/m);
+  assert.match(log, /\+ 원본 못 읽은 일 1790000002\.000100 \(원본 못 읽음\)/);
+  assert.match(log, /^⚠️ 원본 스레드를 못 읽어서 공유 당시 텍스트만 사용함: 원본 못 읽은 일/m, '연동 카드가 뽑아 보이는 ⚠️ 줄');
+  assert.ok(!fix.allLogs().includes('비밀스레드원문'), '원본 스레드 원문은 로그에 없다');
+  assert.ok(!fix.allLogs().includes(SLACK_TOKEN));
+});
+
+test('WP-I 슬랙 수집: Claude가 이상한 답을 내거나 실패하면 그 채널은 실패 — 저장 없음·커서 그대로', (t) => {
+  const fix = captureFixture(t, TODO_ONLY);
+  fix.setSlack({ history: { C0TODO11: [memo('1790000001.000100', '가'), memo('1790000002.000200', '나')] } });
+  for (const [mode, reason] of [['garbage', /분류 답을 쓸 수 없음 — 답이 JSON이 아니에요/], ['badlink', /permalink가 입력의 링크가 아니에요/], ['exit', /분류 실패\(exit 3\)/]]) {
+    const result = fix.run({ FAKE_CLAUDE_MODE: mode });
+    assert.equal(result.status, 1, mode);
+    assert.equal(fix.claudeCalls().length, 1);
+    assert.deepEqual(fix.imports('item'), [], `${mode}: 저장 없음`);
+    assert.deepEqual(fix.imports('cursor'), [], `${mode}: 커서 그대로`);
+    assert.equal(fix.imports('health')[0].success, false);
+    const last = lastLogEvent(fix.logText());
+    assert.equal(last.kind, 'fail', mode);
+    assert.match(last.text, reason);
+    assert.match(last.text, /my-todo · 새 2개 · 저장 0 · 건너뜀 0 · 실패: .* — 커서 그대로/);
+  }
+  // 코드 블록 하나로 감싼 답은 받아 준다(내용 검증은 같다)
+  const fenced = fix.run({ FAKE_CLAUDE_MODE: 'fence' });
+  assert.equal(fenced.status, 0, fix.logText());
+  assert.equal(fix.imports('item').length, 2);
+});
+
+test('WP-I 슬랙 수집: 저장이 하나라도 실패하면 그 채널만 커서를 그대로 두고, 다른 채널은 올린다', (t) => {
+  const fix = captureFixture(t, { slack: { channels: { todo: { id: 'C0TODO11' }, waiting: { id: 'C0WAIT11' } } } });
+  fix.setSlack({
+    history: { C0TODO11: [memo('1790000001.000100', '가'), memo('1790000002.000200', '나'), memo('1790000003.000300', 'SKIP')], C0WAIT11: [memo('1790000004.000100', '다')] },
+    failItems: ['할 일 1790000001.000100'],
+    items: { reportRefs: { a: { id: 'a', type: 'task', description: '이미 있는 일', status: 'to-do', created: '2026-09-01', permalink: null } }, jiraIssues: [] },
+  });
+  const result = fix.run();
+  assert.equal(result.status, 1);
+  assert.equal(fix.imports('item').length, 3, '실패한 것 뒤의 항목도 저장을 시도한다(다음 회차에 원본 링크로 중복이 걸러진다)');
+  assert.deepEqual(fix.imports('cursor'), [{ channel: 'my-waiting', ts: '1790000004.000100' }]);
+  assert.deepEqual(fix.imports('health'), [{ channel: 'my-todo', success: false, error: '저장 1건 실패' }, { channel: 'my-waiting', success: true }]);
+  const [todoInput] = fix.claudeCalls().map(fix.inputOf);
+  assert.deepEqual(todoInput.existing, [{ type: 'task', description: '이미 있는 일', status: 'to-do', created: '2026-09-01' }], '중복 판단용 기존 항목을 앱 API에서 읽어 넣는다');
+  const log = fix.logText();
+  assert.match(log, /^my-todo · 새 3개 · 저장 1 · 건너뜀 1 \(비슷한 일 1\) · 실패: 저장 1건 실패 — 커서 그대로$/m);
+  assert.match(log, /^my-waiting · 새 1개 · 저장 1 · 건너뜀 0$/m);
+  assert.match(log, /^🔁 이미 있는 '이미 있는 일'랑 중복돼서 안 가져왔어요$/m);
+  assert.match(log, /^이번에 본 메시지 4개 = 등록 2 · 링크 중복 0 · 비슷한 일이라 건너뜀 1 · 시스템 0$/m);
+  assert.equal(lastLogEvent(log).kind, 'fail');
+});
+
+test('WP-I 슬랙 수집: 시스템 메시지만 있으면 Claude 없이 커서만 올리고, 한 번에 넣는 수를 넘치면 나머지는 다음 회차로', (t) => {
+  const fix = captureFixture(t, TODO_ONLY);
+  fix.setSlack({ history: { C0TODO11: [{ type: 'message', subtype: 'channel_join', user: 'U0ME', ts: '1790000001.000100', text: '들어옴' }, { type: 'message', bot_id: 'B1', ts: '1790000002.000100', text: '봇' }] } });
+  assert.equal(fix.run().status, 0, fix.logText());
+  assert.deepEqual(fix.claudeCalls(), []);
+  assert.deepEqual(fix.imports('cursor'), [{ channel: 'my-todo', ts: '1790000002.000100' }]);
+  assert.match(fix.logText(), /^my-todo · 새 2개 · 저장 0 · 건너뜀 2 \(시스템 2\)$/m);
+
+  fix.setSlack({ history: { C0TODO11: [memo('1790000011.000100', '가'), memo('1790000012.000100', '나'), memo('1790000013.000100', '다')] } });
+  assert.equal(fix.run({ SLACK_COLLECT_MAX_MESSAGES: '2' }).status, 0, fix.logText());
+  assert.equal(fix.inputOf(fix.claudeCalls()[0]).messages.length, 2);
+  assert.deepEqual(fix.imports('cursor'), [{ channel: 'my-todo', ts: '1790000012.000100' }], '넣은 데까지만 커서');
+  assert.match(fix.logText(), /^my-todo · 새 2개 · 저장 2 · 건너뜀 0 · 남은 1개는 다음 회차$/m);
+});
+
+test('WP-I 슬랙 수집: 앱 서버가 꺼져 있으면(기존 항목을 못 읽음) Claude를 부르지 않고 실패, 커서 그대로', (t) => {
+  const fix = captureFixture(t, TODO_ONLY);
+  fix.setSlack({ history: { C0TODO11: [memo('1790000001.000100', '가')] }, items: null });
+  const preloadDown = path.join(fix.home, 'app-down.js');
+  fs.writeFileSync(preloadDown, "const real=globalThis.fetch;globalThis.fetch=async(input,init)=>{if(String(input).startsWith('http://127.0.0.1'))throw new Error('ECONNREFUSED');return real(input,init);};");
+  const result = fix.run({ NODE_OPTIONS: `--require ${path.join(fix.home, 'fake-fetch.js')} --require ${preloadDown}` });
+  assert.equal(result.status, 1);
+  assert.deepEqual(fix.claudeCalls(), []);
+  assert.match(fix.logText(), /my-todo · 새 1개 · 저장 0 · 건너뜀 0 · 실패: ECONNREFUSED — 커서 그대로/);
+});
+
+test('WP-I slack-collect.js 검증: 모양·필수 칸·길이·링크·처리 대장이 어긋나면 받지 않는다', () => {
+  const { validate } = require('./slack-collect');
+  const entries = [{ ts: '1.1', permalink: 'https://team.slack.com/archives/C/p11', shares: [{ permalink: 'https://team.slack.com/archives/S/p22' }] }];
+  const ok = validate(JSON.stringify({ items: [{ ts: '1.1', description: '할 일', permalink: 'https://team.slack.com/archives/S/p22', due: '2026-10-01', who: '버려짐' }], skipped: [] }), entries, 'task');
+  assert.deepEqual(ok.items[0].payload, { type: 'task', description: '할 일', permalink: 'https://team.slack.com/archives/S/p22', due: '2026-10-01' }, '종류에 없는 칸(할 일의 who)은 버린다');
+  const bad = [
+    ['', /JSON이 아니에요/],
+    ['[]', /모양이 달라요/],
+    ['{"items":[]}', /items·skipped/],
+    ['{"items":[],"skipped":[]}', /처리 대장이 모자라요/],
+    ['{"items":[{"ts":"9.9","description":"x","permalink":"https://team.slack.com/archives/C/p11"}],"skipped":[]}', /ts가 입력에 없어요/],
+    ['{"items":[{"ts":"1.1","description":"두\\n줄","permalink":"https://team.slack.com/archives/C/p11"}],"skipped":[]}', /한 줄/],
+    [JSON.stringify({ items: [{ ts: '1.1', description: '가'.repeat(1001), permalink: 'https://team.slack.com/archives/C/p11' }], skipped: [] }), /1,000자/],
+    ['{"items":[{"ts":"1.1","description":"x","permalink":"https://team.slack.com/archives/C/p11","due":"다음주"}],"skipped":[]}', /due/],
+    ['{"items":[{"ts":"1.1","description":"x","permalink":"https://team.slack.com/archives/C/p11","type":"idea"}],"skipped":[]}', /type/],
+    ['{"items":[],"skipped":[{"ts":"1.1","reason":""}]}', /reason/],
+  ];
+  for (const [text, reason] of bad) assert.throws(() => validate(text, entries, 'task'), reason, text);
 });
 
 test('run-task.sh: 오래 가는 Claude 토큰 파일이 있으면 그 값을 CLAUDE_CODE_OAUTH_TOKEN으로 넘기고, 로그에는 남기지 않는다', () => {
@@ -1650,15 +1947,18 @@ test('run-task.sh: 오래 가는 Claude 토큰 파일이 있으면 그 값을 CL
   fs.rmSync(home, { recursive: true, force: true });
 });
 
-test('fetch_slack_channel.sh: nvm이 없는 맥에서도 말없이 멈추지 않고 PATH의 node로 실행한다', () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-nonvm-'));
-  const bin = path.join(home, 'bin');
-  fs.mkdirSync(bin);
-  fs.writeFileSync(path.join(bin, 'node'), '#!/bin/bash\necho "node 불림 $2"\n');
-  fs.chmodSync(path.join(bin, 'node'), 0o755);
-  const result = spawnSync('/bin/bash', [path.join(__dirname, 'fetch_slack_channel.sh'), 'C123', '1'],
-    { encoding: 'utf8', env: { ...process.env, HOME: home, PATH: `${bin}:/usr/bin:/bin` } });
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /node 불림 C123/);
+test('WP-I run-task.sh: 허용 도구를 비우면 --allowedTools를 넘기지 않고, TASK_OUTPUT_FILE이면 답은 그 파일로·오류와 시작/종료 줄은 로그로', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-run-task-'));
+  const claude = path.join(home, 'fake-claude.sh');
+  writeExec(claude, `#!/bin/bash\nprintf '%s\\n' "$*" > "${path.join(home, 'args.txt')}"\necho '{"items":[],"skipped":[]}'\necho "경고 한 줄" >&2\n`);
+  const env = { WORKSPACE_DIR: home, AUTOMATION_LOG_DIR: path.join(home, 'logs'), CLAUDE_BIN: claude, WORKSPACE_CLAUDE_TOKEN_FILE: path.join(home, 'none') };
+  const answer = path.join(home, 'answer.txt');
+  assert.equal(runScript(automationScript('run-task.sh'), ['slack-classify', '프롬프트', '', 'dontAsk', 'Bash,Write'], { ...env, TASK_OUTPUT_FILE: answer }).status, 0);
+  assert.equal(fs.readFileSync(path.join(home, 'args.txt'), 'utf8').trim(), '-p 프롬프트 --model sonnet --permission-mode dontAsk --disallowedTools Bash,Write');
+  assert.equal(fs.readFileSync(answer, 'utf8'), '{"items":[],"skipped":[]}\n');
+  const log = fs.readFileSync(path.join(home, 'logs', 'slack-classify.log'), 'utf8');
+  assert.doesNotMatch(log, /items/, '답은 로그에 없다');
+  assert.match(log, /경고 한 줄/);
+  assert.match(log, /^───── \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} slack-classify 종료 \(exit 0\)$/m);
   fs.rmSync(home, { recursive: true, force: true });
 });

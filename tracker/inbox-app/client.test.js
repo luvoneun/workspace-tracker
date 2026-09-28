@@ -7796,6 +7796,27 @@ test('WP-E C. ⋯ › 최근 기록: 시각 · 결과 한 줄(최근 10개, 실�
   assert.match(meetingUi, /settingsOpen\('integrations', 'log:notes'\)/);
 });
 
+test('WP-I ⋯ › 최근 기록: 그 회차의 앱 버전(v1.1.2)을 시각 다음에 보이고(옛 기록은 없이), 버전이 붙은 시작 줄도 한 실행으로 읽는다', async () => {
+  const fx = wpd25({
+    slack: { ...WPD25_CONNECTED.slack, log: [
+      { time: '2026-09-20 10:05:00', kind: 'run', version: '1.1.2', text: 'my-todo · 새 2개 · 저장 2 · 건너뜀 0' },
+      { time: '2026-09-20 09:55:00', kind: 'run', text: '옛 회차' },
+    ] },
+  });
+  fx.app.run(`automationStatusCache = [{ key: 'slack', tail: ['───── 2026-09-20 10:05:00 slack-capture 시작 (v1.1.2)', '이번에 본 메시지 2개 = 등록 2 · 링크 중복 0 · 비슷한 일이라 건너뜀 0 · 시스템 0', "🔁 이미 있는 '예전 일'랑 중복돼서 안 가져왔어요", '───── 2026-09-20 10:05:30 slack-capture 종료 (exit 0)'] }];`);
+  await fx.app.run('renderSettingsIntegrations()');
+  fx.menu('slack')[0][0].onClick();
+  const rows = fx.find('slack', 'd-ilog')[0].children.filter(one => one.className !== 'more');
+  same(rows.map(one => one.children.map(kid => kid.textContent)), [
+    ['9/20 10:05', 'v1.1.2', '읽음 · my-todo · 새 2개 · 저장 2 · 건너뜀 0'],
+    ['9/20 09:55', '읽음 · 옛 회차'],
+  ]);
+  assert.match(fx.text('slack'), /최근 수집 · 본 메시지 2개 → 등록 2/);
+  assert.match(fx.text('slack'), /건너뛴 것: 예전 일/, '버전이 붙은 시작 줄도 실행 블록의 경계로 읽는다');
+  await fx.button('slack', '오류 전문 복사').listeners.click();
+  assert.match(fx.copied.at(-1), /2026-09-20 10:05:00 · v1\.1\.2 · 성공 · my-todo/);
+});
+
 test('WP-E A. 둘째 줄은 주기·오늘 수치 — 슬랙 `매일 9–19시, 5분마다 · 오늘 새 항목 N개`, 지라 `내 티켓 · 반응 필요 댓글 · N분 전 확인`, 캘린더 주기, 회의록 안내', async () => {
   const fx = wpd25({
     slack: { ...WPD25_CONNECTED.slack, todayCount: 6 },

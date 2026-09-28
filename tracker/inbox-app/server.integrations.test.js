@@ -1001,6 +1001,34 @@ test('WP-E 자동화 기록: 줄 앞에 `{"ok":true}`가 붙은 옛 로그도 �
   }
 });
 
+test('WP-I 자동화 기록: 시작 줄의 `(v1.1.2)`를 그 회차의 버전으로 읽어 최근 기록에 싣고, 옛 시작 줄(버전 없음)도 그대로 읽는다', async () => {
+  const logs = path.join(automationHome, 'logs');
+  const file = path.join(logs, 'slack-capture.log');
+  fs.mkdirSync(logs, { recursive: true });
+  const before = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+  try {
+    fs.writeFileSync(file, [
+      '───── 2026-09-27 10:00:00 slack-capture 시작',
+      '옛 회차',
+      '───── 2026-09-27 10:00:30 slack-capture 종료 (exit 0)',
+      '───── 2026-09-28 10:00:00 slack-capture 시작 (v1.1.2)',
+      '이번에 본 메시지 2개 = 등록 1 · 링크 중복 0 · 비슷한 일이라 건너뜀 0 · 시스템 0',
+      'my-todo · 새 2개 · 저장 1 · 건너뜀 0 · 실패: 저장 1건 실패 — 커서 그대로',
+      '───── 2026-09-28 10:00:30 slack-capture 종료 (exit 1)',
+      '',
+    ].join('\n'));
+    const slack = (await (await fetch(base + '/api/automation/status')).json()).automations.find(one => one.key === 'slack');
+    assert.deepEqual(slack.events.map(one => [one.time, one.kind, one.version || null]), [['2026-09-28 10:00:30', 'fail', '1.1.2'], ['2026-09-27 10:00:30', 'run', null]]);
+    assert.match(slack.events[0].text, /my-todo · 새 2개 · 저장 1 · 건너뜀 0 · 실패/);
+    const intg = await (await fetch(base + '/api/integrations')).json();
+    assert.equal(intg.slack.log[0].version, '1.1.2', '연동 카드 ⋯ › 최근 기록 줄에도 버전');
+    assert.equal(intg.slack.log[1].version, undefined);
+    assert.equal(intg.slack.fetch.failing, true, '저장 실패 회차는 실패로 읽힌다');
+  } finally {
+    if (before === null) fs.rmSync(file, { force: true }); else fs.writeFileSync(file, before);
+  }
+});
+
 test('claudeInstalled: launchd의 짧은 PATH여도 기본 설치 자리(~/.local/bin)·nvm 등의 claude를 찾는다', () => {
   const integrations = require('./integrations');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-claude-find-'));

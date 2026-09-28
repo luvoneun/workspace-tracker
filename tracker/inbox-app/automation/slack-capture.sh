@@ -1,6 +1,6 @@
 #!/bin/bash
 # 슬랙 캡처는 5분마다 도는데(launchd StartInterval 300초) 대부분은 가져올 게 없다.
-# curl로 먼저 새 메시지가 있는지만 확인하고, 있을 때만 Claude를 부른다.
+# 먼저 새 메시지가 있는지 확인하고(slack-collect.js), 있을 때만 Claude를 부른다 — 분류만, 도구 없이.
 # (확인만 한 경우에도 checkedAt은 남겨서, 캡처가 멈추면 앱이 알아챌 수 있게 한다)
 
 set -uo pipefail
@@ -130,145 +130,15 @@ if ! acquire_lock; then
   exit 0
 fi
 
-# launchd가 백그라운드로 부를 때 이 컴퓨터의 python3가 가끔
-# "PermissionError: Operation not permitted"로 조용히 막혀서(2>/dev/null에 삼켜짐)
-# CHANNELS가 통째로 비어버리고, 그러면 아무 채널도 확인 안 하고 매번 "새 메시지 없음"으로
-# 끝나버렸다 — 실제로 몇 시간씩 못 가져온 원인이 이거였다. 이미 잘 되던 node로 바꾼다.
-#
-# 채널 고르기에서 뺀 채널(`off: true`)은 없는 것으로 본다 — 읽지도, Claude에게 넘기지도 않는다.
-# `since`(슬랙 ts)가 있으면 "그때부터" 읽는다: 새로 만든 채널은 만든 때, 뺐다가 다시 켠 채널은 다시 켠 때.
-# 한 칸은 `채널ID:my-키:since`(since가 없으면 끝이 비어 있다).
-CHANNELS=$("$NODE" -e '
-const fs = require("fs");
-const c = JSON.parse(fs.readFileSync(process.argv[1], "utf-8"));
-const ch = (c.slack && c.slack.channels) || {};
-const on = Object.entries(ch)
-  .filter(([k, v]) => v && typeof v.id === "string" && /^[^\s:]+$/.test(v.id) && v.off !== true)
-  .map(([k, v]) => v.id + ":my-" + k + ":" + (/^[0-9]+[.][0-9]+$/.test(String(v.since || "")) ? v.since : ""));
-// 켜진 채널이 하나도 없으면(설정을 읽기는 했다) 표시 하나만 — 아래에서 "수집 안 함"으로 한 줄 남긴다.
-process.stdout.write(on.length ? on.join(" ") : "NONE");
-' "$CONFIG" 2>>"$LOG")
-
-# 토큰 파일도 bash의 [ -f ]/cat이 아니라 node로 읽는다 — 같은 Desktop 밑 파일인데도
-# node로 읽은 workspace.config.json은 되고 bash 내장 test/cat으로 읽은 .slack_token은
-# launchd 밑에서 "파일 없음"으로 막히는 게 실제로 관찰됐다(바이너리별로 TCC 권한 상태가
-# 다른 것으로 추정). 토큰 파일 경로 계산과 읽기를 전부 node 한 번으로 묶는다.
-TOKEN=$("$NODE" -e "
-const fs = require('fs');
-const c = JSON.parse(fs.readFileSync('$CONFIG', 'utf-8'));
-const p = (c.slack && c.slack.tokenFile) || '';
-const file = p.replace(/^~(?=\/|\$)/, require('os').homedir());
-try { process.stdout.write(fs.readFileSync(file, 'utf-8').trim()); } catch (e) {}
-" 2>>"$LOG")
-
-found=0
-successes=0
-failures=0
-if [ -z "$CHANNELS" ]; then
-  echo "$(date '+%Y-%m-%d %H:%M:%S') 채널 확인 실패 — 설정된 채널을 읽을 수 없음" >> "$LOG"
-  exit 1
-fi
-# 받을 채널은 넷 중 켜진 것 아무거나다(할 일 채널이 꼭 있어야 하는 것은 아니다). 하나도 없으면 수집하지 않는다.
-if [ "$CHANNELS" = "NONE" ]; then
-  echo "$(date '+%Y-%m-%d %H:%M:%S') 켜진 채널이 없어 건너뛰어요" >> "$LOG"
-  exit 0
-fi
-# 예전엔 fetch가 실패해도(네트워크 오류, 슬랙 API 오류 등) 전부 "새 메시지 0개"로
-# 뭉뚱그려져서 로그에 아무 흔적도 안 남았다 — 그래서 몇 시간씩 못 가져와도 몰랐다.
-# 이제는 실패와 "진짜 0개"를 구분해서, 실패는 로그에 채널명과 이유를 남긴다.
-#
-# fetch_slack_channel.sh를 따로 실행(bash .../fetch_slack_channel.sh)하지 않고 curl을 직접
-# 여기서 부른다 — 그 스크립트는 ~/Desktop 아래에 있는데, launchd가 부른 프로세스가 그 밑의
-# 실행 파일을 "Operation not permitted"로 막는 경우가 있어서(읽기는 되는데 실행이 막힘),
-# 아예 Desktop 밑의 실행 파일을 부르지 않는 쪽으로 피해간다.
-for entry in $CHANNELS; do
-  id="${entry%%:*}"
-  rest="${entry#*:}"
-  key="${rest%%:*}"
-  since="${rest#*:}"
-  # 어디서부터 볼지 = 수집 커서와 since 중 큰 값(슬랙 ts는 소수라 글자가 아니라 수로 견준다).
-  cursor=$("$NODE" -e '
-const [file, key, since] = process.argv.slice(1);
-let cursor = "";
-try { cursor = String(JSON.parse(require("fs").readFileSync(file, "utf8"))[key] || ""); } catch (e) {}
-const ok = v => /^[0-9]+[.][0-9]+$/.test(v);
-const n = v => { const [s, f] = v.split("."); return BigInt(s) * 1000000n + BigInt((f + "000000").slice(0, 6)); };
-process.stdout.write(!ok(since) ? cursor : (!ok(cursor) || n(since) > n(cursor) ? since : cursor));
-' "$STATE" "$key" "$since" 2>/dev/null)
-  if [ -z "$TOKEN" ]; then
-    failures=$((failures + 1))
-    echo "$(date '+%Y-%m-%d %H:%M:%S') $key 채널 확인 실패 — 슬랙 토큰을 읽을 수 없음" >> "$LOG"
-    continue
-  fi
-  url="https://slack.com/api/conversations.history?channel=${id}&limit=100"
-  [ -n "$cursor" ] && url="${url}&oldest=${cursor}"
-  raw=$(curl --connect-timeout 10 --max-time 25 -s -H "Authorization: Bearer $TOKEN" "$url" 2>>"$LOG")
-  fetch_status=$?
-  result=$(echo "$raw" | "$NODE" -e "
-    let d = '';
-    process.stdin.on('data', c => d += c);
-    process.stdin.on('end', () => {
-      try {
-        const j = JSON.parse(d);
-        if (j.ok === false) { process.stdout.write('ERR:' + (j.error || 'unknown')); return; }
-        process.stdout.write(String((j.messages || []).length));
-      } catch (e) { process.stdout.write('ERR:parse_failed'); }
-    });
-  " 2>/dev/null)
-  if [ "$fetch_status" -ne 0 ] || [ "${result#ERR:}" != "$result" ]; then
-    failures=$((failures + 1))
-    echo "$(date '+%Y-%m-%d %H:%M:%S') $key 채널 확인 실패 — ${result:-fetch 실패 (exit $fetch_status)}" >> "$LOG"
-    continue
-  fi
-  successes=$((successes + 1))
-  [ -n "$result" ] && [ "$result" -gt 0 ] 2>/dev/null && found=$((found + result))
-done
-
-# 상태도 앱의 저장 경로를 사용한다. 수집 전에는 성공으로 기록하지 않는다.
-# 응답(`{"ok":true}`)은 줄바꿈 없이 나오므로 로그에 남기지 않는다 — 남기면 다음 줄이 그 뒤에 붙어
-# 앱이 "마지막 실행"을 못 읽고 옛 실패를 계속 보여 줬다. 오류만 로그로 보낸다.
-record_health() {
-  "$NODE" -e 'process.stdout.write(JSON.stringify({success:process.argv[1]==="true",error:process.argv[2]}))' "$1" "${2:-}" |
-    "$NODE" "$APP/import-record.js" health >/dev/null 2>>"$LOG"
-}
-if [ "$failures" -gt 0 ]; then
-  record_health false "일부 채널을 확인하지 못했습니다."
-elif [ "$found" -eq 0 ]; then
-  record_health true || exit 1
-fi
-
-if [ "$found" -eq 0 ]; then
-  if [ "$failures" -gt 0 ]; then exit 1; fi
-  echo "$(date '+%Y-%m-%d %H:%M:%S') 새 메시지 없음 — Claude 호출 생략" >> "$LOG"
-  tail -n 2000 "$LOG" > "$LOG.tmp" && mv "$LOG.tmp" "$LOG"
-  exit 0
-fi
-
-# exec로 넘기면 이 프로세스 자체가 대체되어 위에서 건 EXIT trap(잠금 해제)이 실행되지 않는다.
-# 그래서 실제로 캡처가 일어날 때마다 잠금이 안 풀려서, 다음 최대 30분치 실행이 전부
-# "이전 실행이 아직 진행 중"으로 건너뛰어지는 문제가 있었다 — 그냥 호출해서 trap이 돌게 둔다.
-# 이 실행은 파일을 고칠 일이 없다 — 슬랙을 읽고 앱 API로 등록만 한다. 그래서
-#  - acceptEdits(허용 목록과 무관하게 파일 수정을 전부 자동 승인)를 쓰지 않고,
-#  - Write·Edit·NotebookEdit는 아예 금지 목록에 넣고,
-#  - 통째로 열어두던 Bash 대신 스킬이 실제로 쓰는 두 명령만 허용한다.
-# 사람이 보는 앞이 아닌 자동 실행에서 실수로 파일을 건드리는 걸 막는 안전장치다
-# (OS 수준의 격리가 아니다 — 같은 계정 권한으로 도는 건 그대로다).
-# Claude에게는 켜 둔(뺀 채널이 아닌) 채널의 지침만 넘긴다.
-SKILLS=""
-for pair in todo:slack-todos.md align:slack-alignments.md someday:slack-someday.md waiting:slack-waiting.md; do
-  case " $CHANNELS" in
-    *":my-${pair%%:*}:"*) SKILLS="${SKILLS:+$SKILLS, }${pair#*:}" ;;
-  esac
-done
-"$HOME/.local/share/workspace-automation/run-task.sh" "slack-capture" \
-  ".claude/skills/ 폴더의 ${SKILLS} 파일을 차례로 읽고 각 지시대로 실행해라. 새로 캡처된 항목이 있으면 몇 개인지, 어떤 내용인지 간단히 한국어로 보고해라 (원본 스레드를 못 읽은 항목, 중복이라 건너뛴 항목은 반드시 별도로 알려라). 새 항목이 전혀 없으면 \"(새 항목 없음)\" 한 줄만 출력하고 끝내라." \
-  "mcp__slack,Read,ToolSearch,Bash(node tracker/inbox-app/import-record.js:*),Bash(bash tracker/inbox-app/fetch_slack_channel.sh:*)" \
-  "manual" \
-  "Write,Edit,NotebookEdit"
-capture_status=$?
-if [ "$capture_status" -ne 0 ] || [ "$failures" -gt 0 ]; then
-  record_health false "Slack 수집을 완료하지 못했습니다."
-  exit 1
-fi
-# 각 채널의 저장 성공 여부는 해당 수집 단계가 health API로 남긴다.
-exit 0
+# 여기부터는 slack-collect.js 한 번이다(Node 기본 모듈만). 가져오기·원본 스레드 읽기·저장·커서·상태 기록은
+# 그 스크립트가 하고, Claude는 도구 없이 분류만 한다 — Claude가 Bash로 조회·등록 명령을 부르던 예전 방식은
+# Claude Code 버전과 명령 모양에 따라 허용 목록 검사("자동 분류기")에 막혀 수집이 통째로 멈췄다.
+#  - 새 메시지가 없으면 Claude를 부르지 않는다("새 메시지 없음 — Claude 호출 생략" 한 줄).
+#  - 뺀 채널(`off: true`)은 읽지 않고, 어디서부터는 커서와 `since` 중 큰 값이다.
+#  - 채널 확인 실패는 "<my-키> 채널 확인 실패 — 이유" 한 줄, 처리한 회차는 시작/종료 블록 하나로 남긴다.
+# 토큰은 설정의 tokenFile을 node가 읽는다(bash의 [ -f ]/cat이 launchd 밑에서 막히는 맥이 있었다).
+# Claude 호출은 이 스크립트 옆(설치 위치)의 run-task.sh로 한다 — 시간 제한·로그인 토큰·모델 고정을 그대로 쓴다.
+"$NODE" "$APP/slack-collect.js" "$CONFIG" "$STATE" "$LOG" "$HOME/.local/share/workspace-automation/run-task.sh"
+status=$?
+tail -n 2000 "$LOG" > "$LOG.tmp" && mv "$LOG.tmp" "$LOG"
+exit "$status"

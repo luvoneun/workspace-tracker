@@ -13,7 +13,7 @@ const SLACK_LEDGER_RE = /^이번에 본 메시지 (\d+)개 = 등록 (\d+) · 링
 const SLACK_MISMATCH_RE = /^합이 안 맞습니다.*$/;
 const SLACK_SKIP_RE = /^🔁\s*이미 있는\s*'(.+)'\s*랑 중복돼서 안 가져왔어요/;
 const SLACK_WARN_RE = /^⚠️/;
-const SLACK_BLOCK_START_RE = /^(?:\{[^{}]*\}\s*)*─+ \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \S+ 시작$/;
+const SLACK_BLOCK_START_RE = /^(?:\{[^{}]*\}\s*)*─+ \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \S+ 시작(?: \(v[^)]*\))?$/;
 const SLACK_BLOCK_END_RE = /^(?:\{[^{}]*\}\s*)*─+ \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \S+ 종료 \(exit -?\d+\)$/;
 
 function slackLedgerFromTail(tail) {
@@ -1210,7 +1210,7 @@ function settingsLogText(kind, entry) {
 function settingsLogFull(kind, name, entries) {
   const key = { slack: 'slack', calendar: 'calendar', notes: 'tiro' }[kind];
   const automation = key ? (automationStatusCache || []).find(a => a.key === key) : null;
-  const lines = entries.map(entry => `${entry.time} · ${AUTOMATION_STATE_WORD[entry.kind] || '실행'} · ${entry.text}`);
+  const lines = entries.map(entry => `${entry.time}${entry.version ? ` · v${entry.version}` : ''} · ${AUTOMATION_STATE_WORD[entry.kind] || '실행'} · ${entry.text}`);
   const tail = automation && Array.isArray(automation.tail) ? automation.tail : [];
   return [`${name} 최근 기록`, ...lines, ...(tail.length ? ['', '로그 끝 부분:', ...tail] : [])].join('\n');
 }
@@ -1226,10 +1226,13 @@ function settingsIntgLog(card, kind, name, entries = [], lead = []) {
     const time = document.createElement('span');
     time.className = 't';
     time.textContent = settingsLogTime(entry.time);
+    // 그 회차를 돌린 앱 버전(자동화 로그의 시작 줄 `(v1.1.2)`) — 옛 기록·앱이 직접 읽은 기록에는 없다.
+    const version = entry.version ? document.createElement('span') : null;
+    if (version) { version.className = 't'; version.textContent = `v${entry.version}`; }
     const text = document.createElement('span');
     if (entry.kind === 'fail') text.className = 'bad';
     text.textContent = settingsLogText(kind, entry);
-    row.append(time, text);
+    row.append(...(version ? [time, version, text] : [time, text]));
     list.appendChild(row);
   });
   if (!entries.length) {
