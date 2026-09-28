@@ -2956,7 +2956,7 @@ test('renderProjects: 왼쪽 목록은 요약만, title 툴팁엔 키가 남는�
     workflowData = { meetings: [], items: [
       { id: 't1', type: 'task', status: 'to-do', jira: 'IO-1', label: 'IO-1 · 게시글 작성하기' },
     ] }; wfIndexData(); itemsById = new Map();
-    projectKey = null; projectOrderKeys = null; projectOrderResort = true; projectPastOpen = false;
+    projectKey = null; projectOrderKeys = null; projectOrderResort = true; projectPastOpen = null;
     renderProjects();`);
   const list = app.nodes.get('projectList');
   const row = list.children.find(child => String(child.className || '').startsWith('d-prow'));
@@ -3090,7 +3090,7 @@ test('왼쪽 프로젝트 목록은 배포가 2주 안일 때만 조용한 날�
     .map(row => (row.children.find(kid => String(kid.className || '') === 'rt') || { children: [] })
       .children.find(kid => String(kid.className || '').startsWith('dp')))
     .filter(Boolean);
-  app.run('projectKey = null; projectOrderKeys = null; projectOrderResort = true; projectPastOpen = false; renderProjects();');
+  app.run('projectKey = null; projectOrderKeys = null; projectOrderResort = true; projectPastOpen = null; renderProjects();');
   const days = cells();
   assert.deepEqual(days.map(day => day.className).sort(), ['dp', 'dp k-neg', 'dp k-warn', 'dp k-warn'],
     '열린 항목이 있는 네 프로젝트에만 배포일이 붙는다(이미 배포된 가입 퍼널은 빠진다)');
@@ -4767,7 +4767,7 @@ function projectListClient({ posts = new Response('{"ok":true}') } = {}) {
     { id: 'c1', type: 'task', status: 'done', group: '오래 조용한 것', created: dayAgo(60), completed: dayAgo(30) },
     { id: 'd1', type: 'idea', status: 'to-do', project: '날짜 없는 것' },
   ] }; wfIndexData(); itemsById = new Map();
-    projectKey = null; projectOrderKeys = null; projectOrderResort = true; projectPastOpen = false;`);
+    projectKey = null; projectOrderKeys = null; projectOrderResort = true; projectPastOpen = null;`);
   const render = () => app.run('renderProjects();');
   const list = () => app.nodes.get('projectList');
   const rowsOf = () => list().children.filter(kid => String(kid.className || '').startsWith('d-prow'))
@@ -4965,7 +4965,7 @@ function bpviewClient() {
       { id: 't7', type: 'task', status: 'to-do', group: '운영툴 정비', created: dayAgo(1) },
       { id: 't8', type: 'task', status: 'done', group: '오래된 실험', created: dayAgo(90), completed: dayAgo(40) },
     ] }; wfIndexData(); itemsById = new Map();
-    projectKey = null; projectOrderKeys = null; projectOrderResort = true; projectPastOpen = false;
+    projectKey = null; projectOrderKeys = null; projectOrderResort = true; projectPastOpen = null;
     projectListView = 'status'; projectTodoOpen = null; projectFindQuery = ''; projectDeployClosed.clear();`);
   const render = () => app.run('renderProjects();');
   const list = () => app.nodes.get('projectList');
@@ -5011,6 +5011,20 @@ test('BPVIEW: 지금 보는 프로젝트가 `시작 전`에 있으면 그 덩어
   assert.ok(!fixture.rowsOf().some(row => row.name === '리포트 개편'));
   again.listeners.click();
   assert.equal(fixture.toggles().find(t => t.textContent.startsWith('시작 전')).getAttribute('aria-expanded'), 'true', '다시 누르면 펼쳐진다');
+});
+
+test('BPVIEW: 지난 프로젝트를 누르면 위로 끌어올리지 않고 `지난 프로젝트` 안에 두고 그 묶음을 펼친다', () => {
+  const fixture = bpviewClient();
+  fixture.app.run("projectKey = 'jira:IO-6';");
+  fixture.render();
+  const pastToggle = fixture.toggles().find(t => t.textContent.startsWith('지난 프로젝트'));
+  assert.equal(pastToggle.getAttribute('aria-expanded'), 'true', '보고 있는 게 거기 있으면 펼친다');
+  const row = fixture.rowsOf().find(r => r.name === '끝난 캠페인');
+  assert.ok(row && row.past, '흐린 지난 프로젝트 줄로 그 자리에 있다');
+  const todoToggle = fixture.toggles().find(t => t.textContent.startsWith('시작 전'));
+  assert.equal(todoToggle.getAttribute('aria-expanded'), 'false', '`시작 전`으로 올라가 펼치지 않는다');
+  pastToggle.listeners.click();
+  assert.equal(fixture.toggles().find(t => t.textContent.startsWith('지난 프로젝트')).getAttribute('aria-expanded'), 'false', '누르면 접힌다');
 });
 
 test('BPVIEW: 배포별 보기 — 버전으로 묶어 배포일 이른 순 → 날짜 없는 버전 → 배포 미정 순, 머리 수는 지난 프로젝트만 뺀다', () => {
