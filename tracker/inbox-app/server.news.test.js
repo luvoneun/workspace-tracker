@@ -19,7 +19,11 @@ test('GET /api/about의 news는 저장소 소식.md를 파싱해 준다(형식·
   const about = await (await fetch(base + '/api/about')).json();
   assert.ok(Array.isArray(about.news) && about.news.length > 0, '이 저장소의 소식.md를 읽는다');
   const first = about.news[0];
-  assert.equal(first.version, about.version, '맨 위는 지금 버전의 소식이다');
+  // 배포 직전에는 소식.md가 VERSION보다 한 버전 앞선다(release.sh는 소식을 확인하고 테스트한 뒤 VERSION을 올린다).
+  const parts = v => String(v).split('.').map(Number);
+  const [a, b] = [parts(first.version), parts(about.version)];
+  const notOlder = a[0] !== b[0] ? a[0] > b[0] : a[1] !== b[1] ? a[1] > b[1] : a[2] >= b[2];
+  assert.ok(notOlder, `맨 위는 지금 버전이거나 곧 낼 버전의 소식이다(${first.version} / ${about.version})`);
   assert.match(first.date, /^\d{4}-\d{2}-\d{2}$/);
   assert.ok(Array.isArray(first.lines) && first.lines.length > 0);
   // 최신이 위 — 버전 내림차순
