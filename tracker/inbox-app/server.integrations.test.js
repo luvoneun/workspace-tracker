@@ -1000,3 +1000,17 @@ test('WP-E 자동화 기록: 줄 앞에 `{"ok":true}`가 붙은 옛 로그도 �
     if (before === null) fs.rmSync(file, { force: true }); else fs.writeFileSync(file, before);
   }
 });
+
+test('claudeInstalled: launchd의 짧은 PATH여도 기본 설치 자리(~/.local/bin)·nvm 등의 claude를 찾는다', () => {
+  const integrations = require('./integrations');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-claude-find-'));
+  assert.equal(integrations.claudeInstalled('/usr/bin:/bin', home), false, '없으면 없다');
+  fs.mkdirSync(path.join(home, '.local', 'bin'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.local', 'bin', 'claude'), '');
+  assert.equal(integrations.claudeInstalled('/usr/bin:/bin', home), true, '~/.local/bin');
+  fs.rmSync(path.join(home, '.local'), { recursive: true, force: true });
+  fs.mkdirSync(path.join(home, '.nvm', 'versions', 'node', 'v22.1.0', 'bin'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.nvm', 'versions', 'node', 'v22.1.0', 'bin', 'claude'), '');
+  assert.equal(integrations.claudeInstalled('/usr/bin:/bin', home), true, 'nvm');
+  fs.rmSync(home, { recursive: true, force: true });
+});

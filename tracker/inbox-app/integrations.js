@@ -738,9 +738,22 @@ function errorLines(text, { max = 20, width = 200 } = {}) {
     .map(line => maskLine(line.slice(0, width)));
 }
 
-// `claude` 실행 파일이 이 맥에 있는지 — PATH만 훑어보고 아무것도 실행하지 않는다.
-function claudeInstalled(pathValue = process.env.PATH) {
-  return String(pathValue || '').split(path.delimiter).filter(Boolean)
+// `claude` 실행 파일이 이 맥에 있는지 — 아무것도 실행하지 않고 파일이 있는지만 본다.
+// 앱 서버는 launchd로 떠서 PATH가 거의 비어 있다(/usr/bin:/bin…). 그래서 PATH만 보면 기본 설치 자리
+// (~/.local/bin)의 claude를 못 찾아 "설치 안 됨"으로 잘못 알렸다 — 자동화(run-task.sh)가 claude를 찾는
+// 자리들도 같이 본다.
+function claudeCandidateDirs(pathValue = process.env.PATH, home = os.homedir()) {
+  const dirs = String(pathValue || '').split(path.delimiter).filter(Boolean);
+  dirs.push(path.join(home, '.local', 'bin'), path.join(home, '.claude', 'local'), path.join(home, '.npm-global', 'bin'),
+    '/opt/homebrew/bin', '/usr/local/bin');
+  try {
+    const nvm = path.join(home, '.nvm', 'versions', 'node');
+    fs.readdirSync(nvm).forEach(version => dirs.push(path.join(nvm, version, 'bin')));
+  } catch { /* nvm 없음 */ }
+  return [...new Set(dirs)];
+}
+function claudeInstalled(pathValue = process.env.PATH, home = os.homedir()) {
+  return claudeCandidateDirs(pathValue, home)
     .some((dir) => { try { return fs.statSync(path.join(dir, 'claude')).isFile(); } catch { return false; } });
 }
 
