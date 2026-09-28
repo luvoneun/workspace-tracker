@@ -9,7 +9,7 @@ module.exports = function appRoutes(req, res, url, ctx) {
 
   // 앱 정보 — 조회라 파일을 쓰지 않는다.
   if (url.pathname === '/api/about' && req.method === 'GET') {
-    aboutApp({ cached: url.searchParams.get('cached') === '1' }).then((about) => {
+    aboutApp({ cached: url.searchParams.get('cached') === '1', check: url.searchParams.get('check') === '1' }).then((about) => {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify(about));
     }).catch(() => {

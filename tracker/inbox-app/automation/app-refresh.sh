@@ -113,10 +113,33 @@ fi
 # 새 앱은 임시 폴더에 먼저 다 만든 뒤(osacompile·아이콘·서명) 성공했을 때만 기존 앱과 바꾼다 —
 # 도중에 실패하면 기존 앱은 그대로 남는다.
 NEW_BUNDLE="$WORK/new.app"
-# 크롬이 있으면 창 하나짜리 앱 모양으로, 없으면 기본 브라우저로 연다.
-if [ -d "/Applications/Google Chrome.app" ]; then
+# 크롬이 있으면 창 하나짜리 앱 모양으로, 없으면 기본 브라우저로 연다. 크롬이 사용자 폴더(~/Applications)에
+# 깔린 맥도 있다(동료 사례) — 두 자리를 다 본다.
+CHROME_APP=""
+for candidate in "/Applications/Google Chrome.app" "$HOME/Applications/Google Chrome.app"; do
+  [ -d "$candidate" ] && { CHROME_APP="$candidate"; break; }
+done
+if [ -n "$CHROME_APP" ]; then
+# 이미 열려 있는 앱 창이 있으면 새 창을 띄우지 않고 그 창을 앞으로 가져온다(Dock을 누를 때마다 창이 늘던 것).
+# 처음 한 번 맥이 "크롬을 제어하도록 허용할까요?"를 묻는다 — 거절해도 try로 넘어가 예전처럼 새 창을 연다.
 cat > "$WORK/launcher.applescript" << SCRIPT
-do shell script "URL=$URL; for i in 1 2 3 4 5 6 7 8 9 10; do curl -s -o /dev/null --max-time 1 \$URL && break; sleep 0.5; done; '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' $PROFILE_ARG--app=\$URL > /dev/null 2>&1 &"
+set theURL to "$URL"
+try
+  if application "Google Chrome" is running then
+    tell application "Google Chrome"
+      repeat with w in windows
+        repeat with t in tabs of w
+          if (URL of t) starts with theURL then
+            set index of w to 1
+            activate
+            return
+          end if
+        end repeat
+      end repeat
+    end tell
+  end if
+end try
+do shell script "URL=$URL; for i in 1 2 3 4 5 6 7 8 9 10; do curl -s -o /dev/null --max-time 1 \$URL && break; sleep 0.5; done; '$CHROME_APP/Contents/MacOS/Google Chrome' $PROFILE_ARG--app=\$URL > /dev/null 2>&1 &"
 SCRIPT
 else
 cat > "$WORK/launcher.applescript" << SCRIPT

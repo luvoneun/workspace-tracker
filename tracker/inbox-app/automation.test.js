@@ -2121,3 +2121,11 @@ test('slack-collect: Claude 로그인이 풀려 분류가 실패하면 그 말�
   assert.ok(CLAUDE_AUTH_RE.test(`my-todo 채널 확인 실패 — 분류 실패(exit 1) — ${phrase}`), '서버 안내 규칙이 이 줄을 잡는다');
   assert.equal(claudeAuthPhrase('authentication_error from connector'), '', '다른 인증 오류는 아니다');
 });
+
+test('app-refresh.sh: Dock 앱은 이미 열린 앱 창을 앞으로 가져오고(창이 늘지 않게), 크롬이 ~/Applications에 있어도 찾는다', () => {
+  const script = fs.readFileSync(automationScript('app-refresh.sh'), 'utf8');
+  assert.match(script, /if application "Google Chrome" is running then/);
+  assert.match(script, /if \(URL of t\) starts with theURL then[\s\S]*set index of w to 1[\s\S]*activate[\s\S]*return/);
+  assert.match(script, /end try\s*\ndo shell script/, '제어를 거절하거나 오류면 예전처럼 새 창을 연다');
+  assert.match(script, /"\$HOME\/Applications\/Google Chrome\.app"/);
+});

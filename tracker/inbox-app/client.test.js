@@ -5027,6 +5027,19 @@ test('BPVIEW: 지난 프로젝트를 누르면 위로 끌어올리지 않고 `�
   assert.equal(fixture.toggles().find(t => t.textContent.startsWith('지난 프로젝트')).getAttribute('aria-expanded'), 'false', '누르면 접힌다');
 });
 
+test('프로젝트 상세: 진행할 업무 맨 아래에 이 프로젝트로 바로 추가하는 칸이 있다(업무가 0개여도)', () => {
+  const fixture = bpviewClient();
+  fixture.app.run("projectKey = 'jira:IO-6';");
+  fixture.render();
+  const walk = (node, out) => { if (!node) return out; if (String(node.className || '').includes('d-padd')) out.push(node); (node.children || []).forEach(kid => walk(kid, out)); return out; };
+  const rows = walk(fixture.app.nodes.get('projectBody'), []);
+  assert.equal(rows.length, 1);
+  assert.equal(!!rows[0].hidden, false, '늘 보인다');
+  const input = rows[0].children.find(kid => String(kid.className).includes('d-addinput'));
+  assert.equal(input.placeholder, '+ 이 프로젝트에 할 일 추가 — Enter');
+  assert.equal(rows[0].dataset.addKey, '/api/today-task/create::jira:IO-6::project', '오늘 목록의 같은 그룹 입력줄과 구분된다');
+});
+
 test('BPVIEW: 배포별 보기 — 버전으로 묶어 배포일 이른 순 → 날짜 없는 버전 → 배포 미정 순, 머리 수는 지난 프로젝트만 뺀다', () => {
   const fixture = bpviewClient();
   fixture.app.run("setProjectListView('deploy');");
@@ -7503,11 +7516,11 @@ test('WP-D3 새 버전 줄: `새 버전 v1.1.0이 있어요` + 업데이트 받�
   assert.match(main.text(), /^새 버전이 있어요 \(main\)업데이트 받기데이터는/);
   assert.equal(main.button('무엇이 바뀌었나요 ↗'), undefined);
 
-  // 새 버전이 없으면 지금처럼 조용한 한 줄만(상자는 비고 숨는다)
+  // 새 버전이 없으면 `새 버전 확인` 버튼 하나만(배포 직후 주기를 기다리지 않게 지금 물어본다)
   const none = updateClient({ ...D3_ABOUT, update: { available: false, label: 'v1.0.0', changesUrl: null } });
   none.app.run('settingsAboutFill()');
-  assert.equal(none.box().hidden, true);
-  assert.equal(none.box().children.length, 0);
+  assert.equal(none.box().hidden, false);
+  assert.equal(none.text(), '새 버전 확인');
   assert.equal(none.app.run('settingsHasUpdate()'), false);
 
   // 옛 서버(update 칸 없음)는 태그로 견준다

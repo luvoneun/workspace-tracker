@@ -543,6 +543,16 @@ function settingsUpdateNodes(view) {
       settingsButton('되돌리기', 'd-btn sm dng', () => settingsUpdateAsk('rollback')));
     return [box, confirm];
   }
+  if (kind === 'none') {
+    // 새 버전이 없을 때 — 배포 직후 기다리지 않고 지금 물어보는 버튼. 결과는 같은 자리에 다시 그린다.
+    const row = settingsEl('d-irow');
+    const words = settingsEl('d-quiet', view.checked ? '최신 버전이에요 · 방금 확인했어요' : '');
+    const check = settingsButton(view.checking ? '확인 중…' : '새 버전 확인', 'd-btn xs', () => settingsUpdateCheckNow());
+    check.disabled = !!view.checking;
+    row.append(check);
+    if (words.textContent) row.append(words);
+    return [row];
+  }
   if (kind === 'gone' || kind === 'blocked') {
     const box = settingsEl(kind === 'gone' ? 'd-abfail' : 'd-abupd is-plain');
     const text = document.createElement('span');
@@ -553,6 +563,18 @@ function settingsUpdateNodes(view) {
     return file ? [box, file] : [box];
   }
   return [];
+}
+
+// `새 버전 확인` — 서버가 원격에 곧바로 물어보게 하고(GET /api/about?check=1) 결과로 다시 그린다.
+async function settingsUpdateCheckNow() {
+  settingsUpdatePaint({ kind: 'none', checking: true });
+  let info = null;
+  try { info = await (await request('/api/about?check=1')).json(); } catch { info = null; }
+  if (info) settingsAbout = info;
+  document.getElementById('settingsBtn')?.classList.toggle('has-update', settingsHasUpdate());
+  const offer = info ? settingsUpdateOffer(info) : null;
+  settingsUpdatePaint(offer ? { kind: 'offer', offer } : { kind: 'none', checked: !!info });
+  if (!info) showNotice('새 버전을 확인하지 못했어요 — 잠시 뒤 다시 눌러 주세요');
 }
 
 function settingsUpdatePaint(view) {

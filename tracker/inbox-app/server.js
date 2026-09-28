@@ -1747,8 +1747,21 @@ const updateCommandPath = () => personalize.tildePath(path.join(REPO_DIR, '업�
 
 // `cached`면(페이지를 열 때·6시간마다 톱니바퀴의 파란 점) 원격에 새로 묻지 않고 가진 값만 준다 —
 // 6시간 주기 확인이 아직 안 걸려 있으면 그 주기만 건다(설정을 열 때와 같은 한 번).
-async function aboutApp({ cached = false } = {}) {
-  if (cached) startRemoteCheck();
+// `check`면(설정 › 앱의 `새 버전 확인` 버튼) 1분 안에 물어본 적이 없을 때 원격에 곧바로 묻고 12초까지 기다린다 —
+// 배포 직후 6시간·30분 주기를 기다리지 않게.
+const REMOTE_MANUAL_MIN_MS = 60 * 1000;
+async function manualRemoteCheck() {
+  if (process.env.WORKSPACE_NO_REMOTE_CHECK) return;
+  startRemoteCheck();
+  if (Date.now() - remoteCheckedAt > REMOTE_MANUAL_MIN_MS) checkLatestRelease();
+  if (!remoteCheckRun) return;
+  let timer = null;
+  await Promise.race([remoteCheckRun, new Promise((resolve) => { timer = setTimeout(resolve, 12000); })]);
+  clearTimeout(timer);
+}
+async function aboutApp({ cached = false, check = false } = {}) {
+  if (check) await manualRemoteCheck();
+  else if (cached) startRemoteCheck();
   else await freshRemoteCheck();
   const channel = updateChannel();
   const [modified, ref, changes] = await Promise.all([gitModified(), git(['rev-parse', '--short', 'HEAD']), changesUrl(channel)]);

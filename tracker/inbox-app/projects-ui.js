@@ -875,14 +875,25 @@ function renderProjectDetail(body, row) {
   const open = tasks.filter(item => item.status !== 'done').sort(compareTasks);
   const done = tasks.filter(item => item.status === 'done').sort((a, b) => (b.completed || '').localeCompare(a.completed || ''));
 
-  if (open.length) {
+  // 진행할 업무 — 업무가 없어도 구역은 세우고 맨 아래에 이 프로젝트로 바로 추가하는 칸을 둔다(오늘 할 일로 들어간다).
+  {
     const section = projectSection('진행할 업무', open.length);
     const surface = document.createElement('div');
     surface.className = 'd-psurf';
-    // 조용한 열 이름 줄 — 무슨 값이 어느 칸에 있는지 한 번만 적는다.
-    surface.insertAdjacentHTML('beforeend',
-      '<div class="d-colhd"><span></span><span>언제 할지</span><span>업무</span><span class="r">기한</span></div>');
-    open.forEach(item => surface.appendChild(projectTaskRow(item)));
+    if (open.length) {
+      // 조용한 열 이름 줄 — 무슨 값이 어느 칸에 있는지 한 번만 적는다.
+      surface.insertAdjacentHTML('beforeend',
+        '<div class="d-colhd"><span></span><span>언제 할지</span><span>업무</span><span class="r">기한</span></div>');
+      open.forEach(item => surface.appendChild(projectTaskRow(item)));
+    }
+    // 오늘 목록의 그룹 `+` 입력줄과 같은 부품. 오늘 목록의 같은 그룹 줄과 헷갈리지 않게 자리 표시를 따로 붙인다.
+    const add = uiGroupAddRow(key, '/api/today-task/create', '이 프로젝트에 할 일을 추가했어요 · 오늘 할 일에도 보여요');
+    add.dataset.addKey += '::project';
+    add.hidden = false;
+    add.className += ' d-padd';
+    const input = add.querySelector('.d-addinput');
+    if (input) { input.placeholder = '+ 이 프로젝트에 할 일 추가 — Enter'; input.setAttribute('aria-label', '이 프로젝트에 할 일 추가'); }
+    surface.appendChild(add);
     section.appendChild(surface);
     body.appendChild(section);
   }
