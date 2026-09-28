@@ -2706,6 +2706,7 @@ function personalizeRow(name, small, ...value) {
 }
 
 // 헤더 제목·탭 제목·탭 아이콘·제목 숨김을 곧바로 바꾼다(서버를 다시 켜지 않는다).
+let personalizeTitlePreviewUndo = null; // 꾸미기 `화면에 보이기`를 눌러 미리 본 헤더를, 저장 없이 닫을 때 되돌리는 함수
 function personalizeApply({ title, icon, titleHidden } = {}) {
   if (title) {
     const head = document.getElementById('workspaceTitle');
@@ -2853,12 +2854,19 @@ async function renderSettingsPersonalize() {
   shownLabel.textContent = '화면에 보이기';
   const shownNote = document.createElement('span');
   shownNote.className = 'd-ismall sub';
-  shownNote.textContent = '끄면 왼쪽 위 제목만 숨겨요 — 창 이름에는 그대로 쓰여요';
+  shownNote.textContent = '끄면 왼쪽 위 제목만 숨겨요(누르면 바로 보여요 · 저장해야 남아요) — 창 이름에는 그대로 쓰여요';
   shownText.append(shownLabel, shownNote);
   const shownRow = document.createElement('label');
   shownRow.className = 'd-ich' + (shown.checked ? ' is-on' : '');
   shownRow.append(shown, shownText);
-  shown.addEventListener('change', () => shownRow.classList.toggle('is-on', shown.checked));
+  // 누르면 뒤의 헤더에 바로 미리 보여 준다. 저장하지 않고 닫으면 저장된 대로 되돌린다(settingsClose).
+  shown.addEventListener('change', () => {
+    shownRow.classList.toggle('is-on', shown.checked);
+    const head = document.getElementById('workspaceTitle');
+    if (!head) return;
+    head.hidden = !shown.checked;
+    personalizeTitlePreviewUndo = () => { head.hidden = wasHidden; };
+  });
 
   const save = settingsButton('저장', 'd-btn pri');
   const run = async () => {
@@ -2884,6 +2892,7 @@ async function renderSettingsPersonalize() {
       const answer = await settingsIntegrationAsk('/api/personalize', names, '저장하지 못했어요');
       if (!answer.ok) { error.textContent = answer.error; save.disabled = false; return; }
       personalizeApply({ title: answer.title, titleHidden: answer.titleHidden });
+      personalizeTitlePreviewUndo = null;
       dockTouched = dockTouched || answer.refresh === true;
     }
     personalizeSavedNote = { dock: dockTouched };
@@ -3318,6 +3327,7 @@ function settingsOpen(tab = 'integrations', focusKey = null) {
 }
 
 function settingsClose() {
+  if (personalizeTitlePreviewUndo) { personalizeTitlePreviewUndo(); personalizeTitlePreviewUndo = null; }
   if (settingsEsc) { escDrop(settingsEsc); settingsEsc = null; }
   if (!settingsDialog.open) return;
   settingsDialog.close();

@@ -3391,8 +3391,8 @@ test('meetingNotesPendingToday: 오늘 이미 시작했고 아직 노트가 없�
 
 // ---------- BNOTES A: 안 가져온 미팅 노트 알림 ----------
 test('meetingNotesMissingToday: 끝난 오늘 회의 중 아직 노트가 없는 회의만 센다(end 없으면 start+1시간, 시작 전·진행 중·지난 날짜·이미 가져온 회의는 뺀다), tiro를 안 쓰면 없다', () => {
-  // 자정 근처 35분은 아래 고정 시각(00:00대)이 아직 "끝난" 것이 아닐 수 있어 건너뛴다.
-  if (new Date().getHours() === 0 && new Date().getMinutes() < 35) return;
+  // 0시대에는 아래 고정 시각(00:00 시작, end 없으면 01:00까지로 추정)이 아직 "끝난" 것이 아닐 수 있어 건너뛴다.
+  if (new Date().getHours() === 0) return;
   const { app } = meetingNotesClient([]);
   app.run("meetingNotesApply({ used: true, state: 'idle' })");
   const today = meetingNotesDay(0);
@@ -7335,12 +7335,16 @@ test('WP-M 꾸미기: `화면에 보이기` 스위치는 기존 연동 탭 체�
   assert.equal(row().children[0].checked, true, '설정에 값이 없으면(옛 설치 포함) 기본은 보이기');
   assert.equal(row().children[0].getAttribute('aria-label'), '워크스페이스 제목 화면에 보이기');
   assert.equal(fx.text("window.findByClass(document.getElementById('settingsPersonalizeView'), 'd-ich')[0]"),
-    '화면에 보이기끄면 왼쪽 위 제목만 숨겨요 — 창 이름에는 그대로 쓰여요');
+    '화면에 보이기끄면 왼쪽 위 제목만 숨겨요(누르면 바로 보여요 · 저장해야 남아요) — 창 이름에는 그대로 쓰여요');
   assert.equal(fx.app.run("document.getElementById('workspaceTitle').hidden"), false);
 
   // 스위치만 끄고 제목 칸은 그대로 두어도 `바꾼 것이 없어요`가 아니라 정상 저장된다
   row().children[0].checked = false;
   row().children[0].listeners.change();
+  assert.equal(fx.app.nodes.get('workspaceTitle').hidden, true, '누르면 저장 전에도 뒤의 헤더에 바로 미리 보인다');
+  fx.app.run('settingsClose()');
+  assert.equal(fx.app.nodes.get('workspaceTitle').hidden, false, '저장하지 않고 닫으면 저장된 대로 되돌린다');
+  fx.app.nodes.get('workspaceTitle').hidden = true; // 다시 눌러 미리 본 상태에서 저장
   await fx.button('저장').listeners.click();
   same(fx.posts()[0], { url: '/api/personalize', method: 'POST', body: { titleHidden: true } }, '바뀐 칸(스위치)만 보낸다');
   assert.equal(fx.find('d-derr')[0].textContent, '');

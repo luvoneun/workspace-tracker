@@ -1647,8 +1647,14 @@ function appVersion() {
 }
 
 // 저장소 뿌리의 소식.md(WP-J) — 최근 10개 버전만. 파일이 없거나 못 읽으면 조용히 빈 목록이다.
+// 지금 버전보다 새 버전의 소식은 빼고 준다(배포 직전이거나 main 갈래라 소식.md가 앞서 있어도 `지난 소식`에는 받은 것만).
 function localNews() {
-  try { return parseNews(nativeFs.readFileSync(NEWS_PATH, 'utf8')).slice(0, NEWS_MAX_VERSIONS); } catch { return []; }
+  const version = appVersion();
+  try {
+    return parseNews(nativeFs.readFileSync(NEWS_PATH, 'utf8'))
+      .filter(entry => !version || compareVersions(entry.version, version) <= 0)
+      .slice(0, NEWS_MAX_VERSIONS);
+  } catch { return []; }
 }
 
 function git(args, timeout = 3000) {
