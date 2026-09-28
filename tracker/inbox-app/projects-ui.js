@@ -53,7 +53,9 @@ function setProjectListView(value) {
 // 찾기 칸의 값 — 저장하지 않는다(탭을 떠나면 setActiveTab이 비운다).
 let projectFindQuery = '';
 const PROJECT_FIND_MIN = 8; // 전체 프로젝트(지난 프로젝트 포함)가 이보다 적으면 찾기 칸 자체가 없다.
-let projectTodoOpen = false; // `시작 전` 접힘 — 지난 프로젝트(projectPastOpen)와 같은 방식(세션 동안만 기억).
+// `시작 전` 접힘 — null이면 아직 손대지 않은 것(보고 있는 프로젝트가 거기 있으면 펼쳐 보인다), true/false는 사람이 누른 값.
+// 예전에는 보고 있는 프로젝트가 `시작 전`에 있으면 `숨기기`를 눌러도 다시 펼쳐져 버튼이 안 먹는 것처럼 보였다.
+let projectTodoOpen = null;
 const projectDeployClosed = new Set(); // 배포별 보기에서 접어 둔 버전 키 — 기본은 전부 펼침.
 
 // 판정 함수 — quiet(지난 프로젝트)가 가장 먼저다. 그다음은 지라 상태(category)·열린 업무로
@@ -369,8 +371,8 @@ function projectListPaintStatusTail(listEl, { doingRows, todoRows, pastRows, lab
   doingF.forEach(row => listEl.appendChild(projectRowButton(row, false, labels)));
   if (todoRows.length && (!filtering || todoF.length)) {
     // 지금 보는 프로젝트가 `시작 전`에 있으면 그 덩어리를 자동으로 펼친 채로 그린다.
-    const open = filtering || projectTodoOpen || todoRows.some(row => row.key === projectKey);
-    listEl.appendChild(projectToggleButton('시작 전', filtering ? todoF.length : todoRows.length, open, () => { projectTodoOpen = !projectTodoOpen; renderProjects(); }, { locked: filtering }));
+    const open = filtering || (projectTodoOpen === null ? todoRows.some(row => row.key === projectKey) : projectTodoOpen);
+    listEl.appendChild(projectToggleButton('시작 전', filtering ? todoF.length : todoRows.length, open, () => { projectTodoOpen = !open; renderProjects(); }, { locked: filtering }));
     if (open) (filtering ? todoF : todoRows).forEach(row => listEl.appendChild(projectRowButton(row, false, labels)));
   }
   if (pastRows.length && (!filtering || pastF.length)) {

@@ -4966,7 +4966,7 @@ function bpviewClient() {
       { id: 't8', type: 'task', status: 'done', group: '오래된 실험', created: dayAgo(90), completed: dayAgo(40) },
     ] }; wfIndexData(); itemsById = new Map();
     projectKey = null; projectOrderKeys = null; projectOrderResort = true; projectPastOpen = false;
-    projectListView = 'status'; projectTodoOpen = false; projectFindQuery = ''; projectDeployClosed.clear();`);
+    projectListView = 'status'; projectTodoOpen = null; projectFindQuery = ''; projectDeployClosed.clear();`);
   const render = () => app.run('renderProjects();');
   const list = () => app.nodes.get('projectList');
   const rowsOf = () => list().children.filter(kid => String(kid.className || '').startsWith('d-prow'))
@@ -5004,6 +5004,13 @@ test('BPVIEW: 지금 보는 프로젝트가 `시작 전`에 있으면 그 덩어
   const todoToggle = fixture.toggles().find(t => t.textContent.startsWith('시작 전'));
   assert.equal(todoToggle.getAttribute('aria-expanded'), 'true');
   assert.ok(fixture.rowsOf().some(row => row.name === '리포트 개편'));
+  // 그 상태에서 `숨기기`를 누르면 정말 접힌다(예전에는 보고 있는 프로젝트 때문에 다시 펼쳐져 버튼이 안 먹었다).
+  todoToggle.listeners.click();
+  const again = fixture.toggles().find(t => t.textContent.startsWith('시작 전'));
+  assert.equal(again.getAttribute('aria-expanded'), 'false', '누른 대로 접힌다');
+  assert.ok(!fixture.rowsOf().some(row => row.name === '리포트 개편'));
+  again.listeners.click();
+  assert.equal(fixture.toggles().find(t => t.textContent.startsWith('시작 전')).getAttribute('aria-expanded'), 'true', '다시 누르면 펼쳐진다');
 });
 
 test('BPVIEW: 배포별 보기 — 버전으로 묶어 배포일 이른 순 → 날짜 없는 버전 → 배포 미정 순, 머리 수는 지난 프로젝트만 뺀다', () => {
