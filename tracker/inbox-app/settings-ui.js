@@ -2712,7 +2712,10 @@ function personalizeApply({ title, icon } = {}) {
   }
   if (icon) {
     const favicon = document.getElementById('appFavicon');
-    if (favicon) favicon.href = `/app-icon.png?v=${Date.now()}`;
+    const src = `/app-icon.png?v=${Date.now()}`;
+    if (favicon) favicon.href = src;
+    // 사용설명서 카드의 작은 Dock 그림도 새로고침 없이 바꾼다.
+    if (typeof document.querySelectorAll === 'function') document.querySelectorAll('.d-guidedock img').forEach(img => { img.src = src; });
   }
 }
 
