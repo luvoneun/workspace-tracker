@@ -15,6 +15,8 @@ const { DATA_FORMAT_VERSION, readDataVersion, TOO_NEW_MESSAGE } = require('./mig
 const integrations = require('./integrations');
 // 설정 › 꾸미기(Dock 아이콘·이름·제목 — 이 맥에만).
 const personalize = require('./personalize');
+// 쉬운 말 소식(WP-J) — 소식.md 파서 + 원격(태그) 소식.md 읽기.
+const { parseNews, fetchRemoteNewsText, NEWS_MAX_VERSIONS } = require('./news');
 const { randomBytes, createHash, timingSafeEqual } = require('node:crypto');
 
 // 사람/회사마다 달라지는 값은 전부 workspace.config.json 한 곳에 모아둔다.
@@ -1631,6 +1633,7 @@ const MIME = {
 // 지금 버전·데이터 형식·받는 갈래와, 이 설치가 저장소에서 벗어났는지(고친 파일)를 알려 준다.
 // 파일은 하나도 쓰지 않고, git이 없거나 실패하면 조용히 `null`이다.
 const VERSION_PATH = path.join(REPO_DIR, 'VERSION');
+const NEWS_PATH = path.join(REPO_DIR, '소식.md');
 const REMOTE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;   // 6시간에 한 번
 let latestRelease = null;        // { tag, checkedAt } — 메모리에만 둔다
 let remoteCheckTimer = null;
@@ -1638,6 +1641,11 @@ let remoteChecking = false;
 
 function appVersion() {
   try { return nativeFs.readFileSync(VERSION_PATH, 'utf8').trim() || null; } catch { return null; }
+}
+
+// 저장소 뿌리의 소식.md(WP-J) — 최근 10개 버전만. 파일이 없거나 못 읽으면 조용히 빈 목록이다.
+function localNews() {
+  try { return parseNews(nativeFs.readFileSync(NEWS_PATH, 'utf8')).slice(0, NEWS_MAX_VERSIONS); } catch { return []; }
 }
 
 function git(args, timeout = 3000) {
@@ -1689,6 +1697,28 @@ async function checkLatestMain() {
   return { sha, newer: !!head && sha !== head && !have, checkedAt: new Date().toISOString() };
 }
 
+// 원격 소식(WP-J) — 새 버전이 있을 때만, 그 태그(main 갈래는 main) 소식.md를 읽어 둔다.
+// 실제 fetch는 테스트가 `setRemoteFetchForTests`로 갈아끼운다(기본은 전역 fetch, 네트워크 하나뿐).
+let remoteFetch = (...args) => fetch(...args);
+function setRemoteFetchForTests(fn) { remoteFetch = typeof fn === 'function' ? fn : ((...args) => fetch(...args)); }
+// 테스트 전용 — 진짜 `git ls-remote`(네트워크) 없이 "새 버전이 있다"를 가정하려고 쓴다.
+function setLatestReleaseForTests(value) { latestRelease = value; }
+let remoteNews = null; // { channel, ref, version, lines } — 지금 제안 중인 버전과 정확히 맞을 때만 쓴다
+
+async function refreshRemoteNews(channel) {
+  const version = appVersion();
+  const offer = updateOffer(version, channel);
+  if (!offer.available) { remoteNews = null; return; }
+  const repo = githubRepoFrom(await git(['remote', '-v']));
+  const ref = channel === 'main' ? 'main' : offer.label;
+  if (!repo || !ref) { remoteNews = null; return; }
+  const text = await fetchRemoteNewsText({ owner: repo.owner, repo: repo.repo, ref, request: remoteFetch });
+  if (!text) { remoteNews = null; return; }
+  const entries = parseNews(text);
+  const entry = channel === 'main' ? entries[0] : entries.find((item) => `v${item.version}` === ref);
+  remoteNews = entry ? { channel, ref, version: entry.version, lines: entry.lines } : null;
+}
+
 function checkLatestRelease() {
   if (remoteCheckRun) return remoteCheckRun;
   remoteChecking = true;
@@ -1697,7 +1727,9 @@ function checkLatestRelease() {
     const out = await git(['ls-remote', '--tags', 'origin'], 10000);
     const tags = out ? [...out.matchAll(/refs\/tags\/(v\d+\.\d+\.\d+)(?:\^\{\})?$/gm)].map((match) => match[1]) : [];
     if (tags.length) latestRelease = { tag: tags.sort(compareVersions)[tags.length - 1], checkedAt: new Date().toISOString() };
-    if (updateChannel() === 'main') latestMain = await checkLatestMain();
+    const channel = updateChannel();
+    if (channel === 'main') latestMain = await checkLatestMain();
+    await refreshRemoteNews(channel);
   })().catch(() => {}).finally(() => {
     remoteChecking = false;
     remoteCheckRun = null;
@@ -1723,24 +1755,33 @@ async function freshRemoteCheck() {
   clearTimeout(timer);
 }
 
-// `무엇이 바뀌었나요 ↗` — 원격(origin)이 github.com일 때만 주소를 만든다(그 밖이면 null → 화면에서 숨김).
-// 소유자/저장소 이름만 뽑아 주소를 새로 짓는다(원격 주소에 섞인 다른 글자는 싣지 않는다).
-function changesUrlFrom(remotes, channel) {
+// origin이 github.com일 때만 소유자/저장소 이름을 뽑는다(원격 주소에 섞인 다른 글자는 담지 않는다).
+// `무엇이 바뀌었나요 ↗`와 원격 소식(WP-J) 읽기가 함께 쓴다.
+function githubRepoFrom(remotes) {
   const match = typeof remotes === 'string' && /^origin\s+(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?\s+\(fetch\)$/m.exec(remotes);
-  if (!match) return null;
-  return `https://github.com/${match[1]}/${match[2]}/${channel === 'main' ? 'commits/main' : 'releases'}`;
+  return match ? { owner: match[1], repo: match[2] } : null;
+}
+function changesUrlFrom(remotes, channel) {
+  const repo = githubRepoFrom(remotes);
+  if (!repo) return null;
+  return `https://github.com/${repo.owner}/${repo.repo}/${channel === 'main' ? 'commits/main' : 'releases'}`;
 }
 async function changesUrl(channel) {
   return changesUrlFrom(await git(['remote', '-v']), channel);
 }
 
 // 설정 › 앱의 `업데이트 받기`가 쓰는 한 덩어리 — 새 버전이 있는지와 무엇으로 부를지.
+// `news`는 원격에서 읽은 그 버전의 쉬운 말 줄(WP-J) — 갈래·태그가 지금 제안과 정확히 같을 때만 싣고, 그 밖엔 null이다.
 function updateOffer(version, channel) {
   if (channel === 'main') {
-    return { available: !!(latestMain && latestMain.newer), label: 'main', checkedAt: latestMain ? latestMain.checkedAt : null };
+    const available = !!(latestMain && latestMain.newer);
+    const news = available && remoteNews && remoteNews.channel === 'main' ? remoteNews.lines : null;
+    return { available, label: 'main', checkedAt: latestMain ? latestMain.checkedAt : null, news };
   }
   const tag = latestRelease && latestRelease.tag;
-  return { available: !!(tag && version && compareVersions(tag, version) > 0), label: tag || null, checkedAt: latestRelease ? latestRelease.checkedAt : null };
+  const available = !!(tag && version && compareVersions(tag, version) > 0);
+  const news = available && remoteNews && remoteNews.channel === 'stable' && remoteNews.ref === tag ? remoteNews.lines : null;
+  return { available, label: tag || null, checkedAt: latestRelease ? latestRelease.checkedAt : null, news };
 }
 
 const updateCommandPath = () => personalize.tildePath(path.join(REPO_DIR, '업데이트.command'), os.homedir());
@@ -1776,6 +1817,8 @@ async function aboutApp({ cached = false, check = false } = {}) {
     modified,
     latest: latestRelease,
     update: { ...updateOffer(version, channel), changesUrl: changes },
+    // 설정 › 앱의 `지난 소식 전체`(WP-J) — 저장소 소식.md의 최근 10개 버전. 파일이 없으면 빈 목록이다.
+    news: localNews(),
     // 설정 › 꾸미기 › 앱 위치 — 사람이 Finder의 `폴더로 이동`에 붙여 넣을 경로(홈은 `~`로 줄인다).
     // 서버는 Finder를 열거나 프로세스를 띄우지 않고 글자만 준다.
     appBundle: `~/Applications/${currentDockName()}.app`,
@@ -1996,7 +2039,7 @@ function aboutDiagnostics() {
 const CLIENT_BLOCKED = new Set([
   'server.js', 'safe-storage.js', 'jira-client.js', 'jira-live.js', 'attention-live.js', 'report-drafts.js',
   'task-batch.js', 'slack-history.js', 'slack-collect.js', 'import-record.js', 'browser-fixture.js', 'migrate.js',
-  'integrations.js', 'ical.js', 'calendar-live.js', 'personalize.js', 'test-support.js',
+  'integrations.js', 'ical.js', 'calendar-live.js', 'personalize.js', 'news.js', 'test-support.js',
   'routes-jira.js', 'routes-integrations.js', 'routes-app.js', 'routes-personalize.js', 'routes-items.js',
   'routes-track.js',
 ]);
@@ -2343,4 +2386,8 @@ if (require.main === module) {
 // `jiraLive`·`attentionLive`·`calendarLive`는 화면 확인용 픽스처가 "뜰 때 한 번 읽기"를 직접 켜 보려고 함께 내보낸다
 // (테스트·픽스처 밖에서는 쓰지 않는다 — 운영에서는 위의 `start()`가 켠다).
 // `CLIENT_BLOCKED`·`isClientFile`은 테스트가 차단 목록을 따로 적지 않고 이것을 그대로 확인하려고 내보낸다.
-module.exports = { server, jiraLive, attentionLive, calendarLive, setExitForTests, changesUrlFrom, workspacePaths, fixtureSafetyProblems, CLIENT_BLOCKED, isClientFile, CLAUDE_AUTH_RE };
+module.exports = {
+  server, jiraLive, attentionLive, calendarLive, setExitForTests, changesUrlFrom, workspacePaths, fixtureSafetyProblems, CLIENT_BLOCKED, isClientFile, CLAUDE_AUTH_RE,
+  // WP-J 원격 소식 — 네트워크 없이 배선을 확인하려는 테스트 전용(진짜 fetch는 기본값 그대로 쓴다).
+  setRemoteFetchForTests, setLatestReleaseForTests, refreshRemoteNews, updateOffer,
+};

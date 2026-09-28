@@ -252,9 +252,50 @@ function settingsVersionRow() {
   files.hidden = true;
   const update = settingsSlot('settingsAboutUpdate', 'd-abwrap');
   update.hidden = true;
-  const row = personalizeRow('버전', '워크스페이스', line, files, update);
+  const history = settingsNewsHistorySkeleton();
+  const row = personalizeRow('버전', '워크스페이스', line, files, update, history);
   row.dataset.row = 'version';
   return row;
+}
+
+// ---------- 지난 소식 전체 (WP-J, 시안 C) ----------
+// 버전 줄 아래 접이식(`.d-dadd`, 기본 접힘) — GET /api/about의 `news`(최근 10개 버전)를 그대로 보여 준다.
+function settingsNewsHistorySkeleton() {
+  // `settingsSlot`과 같은 이유로 id를 먼저 찾는다 — 이미 그려 둔 것이 있으면 그대로 다시 쓴다(자리 표시를
+  // 채우는 settingsAboutFill이 같은 노드를 다시 찾아가도록).
+  const history = document.getElementById('settingsAboutHistory') || document.createElement('details');
+  history.id = 'settingsAboutHistory';
+  history.className = 'd-dsec d-dadd';
+  history.replaceChildren();
+  history.hidden = true;
+  const summary = document.createElement('summary');
+  summary.className = 'lbl';
+  summary.innerHTML = uiIcon('chevron');
+  summary.appendChild(document.createTextNode('지난 소식 전체'));
+  const body = settingsSlot('settingsAboutHistoryBody', 'inner d-newshist');
+  history.append(summary, body);
+  return history;
+}
+
+function settingsNewsVersionBlock(entry) {
+  const wrap = document.createElement('div');
+  wrap.className = 'd-newsver';
+  const head = document.createElement('div');
+  head.className = 'hd';
+  head.appendChild(document.createTextNode(`v${entry.version}`));
+  const small = document.createElement('small');
+  small.textContent = uiKoDateShort(entry.date);
+  head.appendChild(small);
+  wrap.append(head, newsListNode(entry.lines));
+  return wrap;
+}
+
+// 새 버전 상자의 `지난 소식 전체`가 누른다 — 이 접이식을 펼치고 눈에 보이게 한다.
+function settingsOpenNewsHistory() {
+  const history = document.getElementById('settingsAboutHistory');
+  if (!history) return;
+  history.open = true;
+  if (typeof history.scrollIntoView === 'function') history.scrollIntoView({ block: 'nearest' });
 }
 
 function settingsReportRow() {
@@ -398,6 +439,15 @@ function settingsAboutFill() {
     });
   }
 
+  // 지난 소식 전체(WP-J) — 소식이 있을 때만 접이식을 보여 준다(기본은 접힘).
+  const history = document.getElementById('settingsAboutHistory');
+  const historyBody = document.getElementById('settingsAboutHistoryBody');
+  if (history && historyBody) {
+    const news = Array.isArray(info.news) ? info.news : [];
+    historyBody.replaceChildren(...news.map(settingsNewsVersionBlock));
+    history.hidden = !news.length;
+  }
+
   // 도는 업데이트가 있으면(창을 다시 열었거나 앱 탭이 다시 그려졌을 때) 그 진행을 그대로 이어 보여 준다.
   if (settingsUpdateRun) { settingsUpdatePaint(settingsUpdateRun.view); return; }
   const offer = settingsUpdateOffer(info);
@@ -481,10 +531,13 @@ function settingsUpdateNodes(view) {
     text.className = 'tx';
     const label = view.offer.label;
     text.textContent = label && label !== 'main' ? `새 버전 ${label}이 있어요` : '새 버전이 있어요 (main)';
-    box.append(text, settingsButton('업데이트 받기', 'd-btn sm pri', () => settingsUpdateAsk('update')));
-    if (typeof view.offer.changesUrl === 'string' && /^https:\/\/github\.com\//.test(view.offer.changesUrl)) {
-      box.appendChild(settingsOutLink('무엇이 바뀌었나요 ↗', view.offer.changesUrl, 'd-ablink'));
-    }
+    box.appendChild(text);
+    // 원격(그 태그)의 소식.md에서 읽은 줄(WP-J) — 못 읽었으면 줄 없이 지금처럼.
+    if (Array.isArray(view.offer.news) && view.offer.news.length) box.appendChild(newsListNode(view.offer.news));
+    box.append(
+      settingsButton('업데이트 받기', 'd-btn sm pri', () => settingsUpdateAsk('update')),
+      settingsButton('지난 소식 전체', 'd-ablink', settingsOpenNewsHistory),
+    );
     return [box, settingsEl('d-ismall d-abquiet', SETTINGS_UPDATE_WORDS.quiet)];
   }
   if (kind === 'progress') {

@@ -44,6 +44,13 @@ ok "작업 폴더 깨끗함"
 
 git rev-parse "v$NEW" >/dev/null 2>&1 && die "v$NEW 태그가 이미 있어요."
 
+# 쉬운 말 소식(WP-J) — 소식.md에 이 버전 절이 없으면 배포를 막는다. `## v1.2.0`으로 시작하는 줄만 본다
+# (날짜·줄 내용은 보지 않는다. 점은 정규식 특수문자라 이스케이프한다).
+NEWS_FILE="$WORKSPACE/소식.md"
+NEWS_HEAD="^## v${NEW//./\\.}([[:space:]]|$)"
+grep -Eq "$NEWS_HEAD" "$NEWS_FILE" 2>/dev/null || die "소식.md에 v$NEW 소식을 먼저 적어 주세요 — 3~5줄"
+ok "소식.md에 v$NEW 있음"
+
 echo "  테스트를 돌려요 (조금 걸려요)"
 ( cd "$WORKSPACE/tracker/inbox-app" && node --test --test-concurrency=1 *.test.js ) || die "테스트가 통과하지 않았어요."
 ok "테스트 통과"

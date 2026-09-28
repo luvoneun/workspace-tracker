@@ -7029,6 +7029,79 @@ test('WP-D2 I. 사용설명서 닫기: 이 브라우저에 기억하고(config �
   assert.equal(blocked.app.nodes.get('startCardZone').hidden, true);
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// WP-J B. 쉬운 말 소식 카드(오늘 탭) — 받은 뒤 앱을 처음 열 때 한 번만.
+
+test('WP-J B. 처음 쓰는 사람(newsSeen 없음)은 카드를 보지 않고, 지금 버전으로 적어만 둔다', () => {
+  const fx = guideClient();
+  fx.app.run(`settingsAbout = { version: '1.2.0', news: [{ version: '1.2.0', date: '2026-09-28', lines: ['첫 줄'] }] };`);
+  fx.app.run('renderNewsCard()');
+  const zone = fx.app.nodes.get('newsCardZone');
+  assert.equal(zone.hidden, true);
+  assert.equal(zone.children.length, 0);
+  assert.equal(fx.store.get('newsSeen'), '1.2.0', '다음 버전부터 알아보도록 지금 버전을 적어 둔다');
+});
+
+test('WP-J B. 이미 본 버전이면 다시 뜨지 않고, 버전이 올라가면 한 번 뜬다(닫기 → 기억)', () => {
+  const fx = guideClient();
+  fx.store.set('newsSeen', '1.2.0');
+  fx.app.run(`settingsAbout = { version: '1.2.0', news: [{ version: '1.2.0', date: '2026-09-28', lines: ['첫 줄'] }] };`);
+  fx.app.run('renderNewsCard()');
+  assert.equal(fx.app.nodes.get('newsCardZone').hidden, true, '같은 버전은 다시 뜨지 않는다');
+
+  fx.store.set('newsSeen', '1.1.0');
+  fx.app.run(`settingsAbout = { version: '1.2.0', news: [
+    { version: '1.2.0', date: '2026-09-28', lines: ['Dock 아이콘을 눌러도 창이 하나만 떠요', '**굵게**도 돼요'] },
+    { version: '1.1.0', date: '2026-09-24', lines: ['지난 줄'] },
+  ] };`);
+  fx.app.run('renderNewsCard()');
+  const zone = fx.app.nodes.get('newsCardZone');
+  assert.equal(zone.hidden, false);
+  const card = zone.children[0];
+  assert.equal(card.className, 'd-start d-newscard');
+  assert.equal(fx.shape("document.getElementById('newsCardZone').children[0].children[0]").text, 'v1.2.0로 바뀌었어요닫기');
+  assert.equal(fx.shape("document.getElementById('newsCardZone').children[0].children[1]").text, 'Dock 아이콘을 눌러도 창이 하나만 떠요굵게도 돼요');
+  const list = card.children[1];
+  assert.equal(list.className, 'd-newslist');
+  assert.equal(list.children[1].children[0].textContent, '굵게', '굵게는 <b> 요소다');
+
+  // 새로고침마다 다시 만들지 않는다(닫으려던 초점이 사라지지 않게)
+  fx.app.run('renderNewsCard()');
+  assert.equal(fx.app.nodes.get('newsCardZone').children[0], card);
+
+  const close = card.children[0].children[1];
+  assert.equal(close.getAttribute('aria-label'), '새 소식 닫기');
+  close.listeners.click();
+  assert.equal(fx.store.get('newsSeen'), '1.2.0');
+  assert.equal(fx.app.nodes.get('newsCardZone').hidden, true);
+  assert.equal(fx.app.nodes.get('newsCardZone').children.length, 0);
+  fx.app.run('renderNewsCard()');
+  assert.equal(fx.app.nodes.get('newsCardZone').hidden, true, '다시 그려도 닫힌 채다');
+});
+
+test('WP-J B. 지금 버전의 소식이 소식.md에 없으면 카드가 없다(버전이 올라갔어도)', () => {
+  const fx = guideClient();
+  fx.store.set('newsSeen', '1.1.0');
+  fx.app.run(`settingsAbout = { version: '1.2.0', news: [{ version: '1.1.0', date: '2026-09-24', lines: ['지난 줄'] }] };`);
+  fx.app.run('renderNewsCard()');
+  assert.equal(fx.app.nodes.get('newsCardZone').hidden, true);
+  assert.equal(fx.store.get('newsSeen'), '1.1.0', '보여줄 소식이 없으니 본 것으로 적지도 않는다');
+});
+
+test('WP-J B. 저장이 막힌 브라우저에서는 닫은 뒤에도 이 창이 열려 있는 동안만 기억한다', () => {
+  const fx = guideClient({ blocked: true });
+  fx.app.run(`newsMarkSeen('1.1.0'); settingsAbout = { version: '1.2.0', news: [{ version: '1.2.0', date: '2026-09-28', lines: ['새 줄'] }] };`);
+  fx.app.run('renderNewsCard()');
+  assert.equal(fx.app.nodes.get('newsCardZone').hidden, false);
+  fx.app.nodes.get('newsCardZone').children[0].children[0].children[1].listeners.click();
+  assert.equal(fx.app.nodes.get('newsCardZone').hidden, true, '저장은 막혀도 이 창에서는 닫힌 채다');
+});
+
+test('WP-J A·B. 소식 카드는 사용설명서 카드보다 화면 위쪽에 선다(index.html 자리 순서)', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  assert.ok(html.indexOf('id="newsCardZone"') < html.indexOf('id="startCardZone"'), '둘 다 있으면 소식이 위');
+});
+
 test('WP-D2 I. 도움말: 문답마다 찾아갈 표지가 있고, `슬랙에서 보내는 법`은 그 문답을 밝힌다', () => {
   const app = pureClient();
   app.context.document.createTextNode = text => ({ textContent: String(text) });
@@ -7493,7 +7566,7 @@ const d3Status = (state, step, extra = {}) => ({
   },
 });
 
-test('WP-D3 새 버전 줄: `새 버전 v1.1.0이 있어요` + 업데이트 받기 + 무엇이 바뀌었나요 ↗ + 조용한 줄, 없으면 비운다', async () => {
+test('WP-D3/WP-J 새 버전 줄: `새 버전 v1.1.0이 있어요` + (있으면) 원격 소식 줄 + 업데이트 받기 + 지난 소식 전체 + 조용한 줄, 없으면 비운다', async () => {
   const fx = updateClient(D3_ABOUT);
   fx.app.run('settingsAboutFill()');
   await fx.flush();
@@ -7503,18 +7576,29 @@ test('WP-D3 새 버전 줄: `새 버전 v1.1.0이 있어요` + 업데이트 받�
   dev.app.run('settingsAboutFill()');
   assert.equal(dev.app.nodes.get('settingsAboutLine').children.map(one => one.textContent).join(''), 'v1.0.0 · 만드는 중인 것까지 받기(main) · 개발용');
   assert.equal(fx.box().hidden, false);
-  assert.equal(fx.text(), '새 버전 v1.1.0이 있어요업데이트 받기무엇이 바뀌었나요 ↗데이터는 먼저 백업하고 받아요. 1분쯤 걸려요.');
+  // `무엇이 바뀌었나요 ↗`(원격 링크)는 `지난 소식 전체`(내부 접이식을 여는 버튼)로 대체됐다(WP-J).
+  assert.equal(fx.text(), '새 버전 v1.1.0이 있어요업데이트 받기지난 소식 전체데이터는 먼저 백업하고 받아요. 1분쯤 걸려요.');
   assert.equal(fx.button('업데이트 받기').className, 'd-btn sm pri', '주 버튼');
-  const link = fx.button('무엇이 바뀌었나요 ↗');
-  assert.equal(link.href, 'https://github.com/someone/workspace/releases');
-  assert.equal(link.target, '_blank');
+  assert.equal(fx.button('무엇이 바뀌었나요 ↗'), undefined, 'github 바깥 링크는 더 이상 두지 않는다');
+  const openHistory = fx.button('지난 소식 전체');
+  assert.equal(openHistory.className, 'd-ablink');
   assert.ok(fx.sent.some(one => one.url === '/api/update/status'), '열 때 도는 업데이트가 있는지 한 번 묻는다');
+  // 누르면 버전 줄 아래 접이식(`settingsAboutHistory`)을 편다.
+  fx.app.nodes.set('settingsAboutHistory', { open: false });
+  openHistory.listeners.click();
+  assert.equal(fx.app.nodes.get('settingsAboutHistory').open, true);
 
-  // main 갈래 · github가 아니면 링크 숨김
+  // 원격의 그 태그에서 읽은 소식 줄(WP-J)이 있으면 상자 안에 굵게 포함 목록으로 선다.
+  const withNews = updateClient({ ...D3_ABOUT, update: { ...D3_ABOUT.update, news: ['새 소식 한 줄', '**굵은** 소식 줄'] } });
+  withNews.app.run('settingsAboutFill()');
+  assert.equal(withNews.text(), '새 버전 v1.1.0이 있어요새 소식 한 줄굵은 소식 줄업데이트 받기지난 소식 전체데이터는 먼저 백업하고 받아요. 1분쯤 걸려요.');
+  const list = withNews.find('d-newslist')[0];
+  assert.equal(list.children[1].children[0].textContent, '굵은', '굵게는 <b> 요소다');
+
+  // main 갈래 · 못 읽었으면(news 없음) 줄이 없을 뿐 상자는 그대로다
   const main = updateClient({ ...D3_ABOUT, channel: 'main', update: { available: true, label: 'main', changesUrl: null } });
   main.app.run('settingsAboutFill()');
-  assert.match(main.text(), /^새 버전이 있어요 \(main\)업데이트 받기데이터는/);
-  assert.equal(main.button('무엇이 바뀌었나요 ↗'), undefined);
+  assert.match(main.text(), /^새 버전이 있어요 \(main\)업데이트 받기지난 소식 전체데이터는/);
 
   // 새 버전이 없으면 `새 버전 확인` 버튼 하나만(배포 직후 주기를 기다리지 않게 지금 물어본다)
   const none = updateClient({ ...D3_ABOUT, update: { available: false, label: 'v1.0.0', changesUrl: null } });
@@ -7527,7 +7611,7 @@ test('WP-D3 새 버전 줄: `새 버전 v1.1.0이 있어요` + 업데이트 받�
   const old = updateClient({ version: '1.0.0', install: 'managed', latest: { tag: 'v1.2.0' } });
   assert.equal(old.app.run('settingsHasUpdate()'), true);
   old.app.run('settingsAboutFill()');
-  assert.match(old.text(), /^새 버전 v1\.2\.0이 있어요업데이트 받기데이터는/);
+  assert.match(old.text(), /^새 버전 v1\.2\.0이 있어요업데이트 받기지난 소식 전체데이터는/);
 });
 
 test('WP-D3 진행 목록: 누르면 요청하고 ✓/⟳/· 목록을 그리며, 앱이 다시 켜지는 동안은 `다시 켜는 중…`, 끝나면 `v1.1.0으로 바꿨어요` + 새로고침', async () => {
@@ -8155,7 +8239,8 @@ test('WP-E D. 앱 탭: 버전 · 데이터 백업 · 앱 위치 · 문제 보고
   await fx.app.run('renderSettingsApp()');
   const kids = fx.view().children;
   same(kids.map(one => one.dataset.row || one.dataset.focus), ['version', 'backup', 'app-place', 'report']);
-  assert.match(fx.text(0), /^버전워크스페이스v1\.1\.0 · 배포된 버전만 받기새 버전 v1\.1\.1이 있어요업데이트 받기데이터는 먼저 백업하고 받아요\. 1분쯤 걸려요\.$/);
+  // 버전 줄 맨 끝의 `지난 소식 전체`는 접이식 자체의 표지(summary) 글자다 — hidden이어도 textContent에는 남는다(실제 DOM과 같다).
+  assert.match(fx.text(0), /^버전워크스페이스v1\.1\.0 · 배포된 버전만 받기새 버전 v1\.1\.1이 있어요업데이트 받기지난 소식 전체데이터는 먼저 백업하고 받아요\. 1분쯤 걸려요\.지난 소식 전체$/);
   assert.equal(fx.text(1), '데이터 백업매일 19:30● 이 맥에 매일 백업 · 어제 19:30 · 7일치~/workspace-data-backup/daily복사Finder에서 ⇧⌘G(폴더로 이동)에 붙여 넣으면 바로 가요');
   assert.equal(fx.text(2), '앱 위치파일을 찾을 때Dock 앱~/Applications/Workspace.app복사업데이트 파일~/workspace/업데이트.command복사Finder에서 ⇧⌘G(폴더로 이동)에 붙여 넣으면 바로 가요');
   assert.equal(fx.text(3), '문제 보고진단 내용 복사버전·연동 상태·최근 오류만 복사해요(업무 내용은 들어가지 않아요).');
@@ -8174,6 +8259,39 @@ test('WP-E D. 앱 탭: 버전 · 데이터 백업 · 앱 위치 · 문제 보고
   await fx.app.run('renderSettingsApp()');
   assert.match(fx.view().children[2].className, /\bis-focus\b/);
   assert.equal(fx.app.run('settingsFocusKey'), null);
+});
+
+test('WP-J C. 지난 소식 전체: 버전 줄 아래 접이식(기본 접힘) — 소식이 있을 때만, 버전마다 이름·날짜·줄', async () => {
+  const withNews = appClient({
+    about: {
+      update: { available: false },
+      news: [
+        { version: '1.1.4', date: '2026-09-28', lines: ['Dock 아이콘을 눌러도 창이 하나만 떠요', '**굵게**도 돼요'] },
+        { version: '1.1.0', date: '2026-09-24', lines: ['설정이 정리됐어요'] },
+      ],
+    },
+  });
+  await withNews.app.run('renderSettingsApp()');
+  const history = withNews.app.nodes.get('settingsAboutHistory');
+  assert.equal(history.hidden, false);
+  assert.equal(history.className, 'd-dsec d-dadd');
+  const summary = history.children[0];
+  assert.equal(summary.className, 'lbl');
+  const body = withNews.app.nodes.get('settingsAboutHistoryBody');
+  assert.equal(body.className, 'inner d-newshist');
+  assert.equal(body.children.length, 2);
+  const first = body.children[0];
+  const shapeText = expr => JSON.parse(withNews.app.run(`JSON.stringify(window.shapeOf(${expr}))`)).text;
+  assert.equal(shapeText("document.getElementById('settingsAboutHistoryBody').children[0]"), 'v1.1.49월 28일Dock 아이콘을 눌러도 창이 하나만 떠요굵게도 돼요');
+  assert.equal(first.children[0].className, 'hd');
+  assert.equal(first.children[1].className, 'd-newslist');
+  assert.equal(first.children[1].children[1].children[0].textContent, '굵게', '굵게는 <b> 요소다');
+  assert.equal(body.children[1].children[0].children[0].textContent, 'v1.1.0', '두 번째 버전도 담긴다');
+
+  // 소식이 없으면(옛 서버·소식.md 없음) 접이식 자체를 숨긴다
+  const noNews = appClient({ about: { update: { available: false } } });
+  await noNews.app.run('renderSettingsApp()');
+  assert.equal(noNews.app.nodes.get('settingsAboutHistory').hidden, true);
 });
 
 test('WP-E D. 데이터 백업 줄: 로컬만 · GitHub 포함 · 실패(빨강 + 이유) · 아직 안 돎', async () => {

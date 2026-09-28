@@ -1282,6 +1282,7 @@ async function load() {
   renderCalendar(data.calendar);
   renderSuggestions(data.suggestions);
   renderInbox(data.inboxTasks || []);
+  renderNewsCard();
   renderGuideCard();
   renderLaterTasks(data.laterTasks || []);
   renderWaiting(data.waiting || []);
@@ -3745,6 +3746,93 @@ function renderInboxHeadCount(count) {
   if (button) button.hidden = !count;
 }
 
+// ---------- 쉬운 말 소식 (WP-J) ----------
+// `소식.md`의 줄은 굵게(`**…**`)만 허용하고 그 밖의 마크다운·HTML은 글자 그대로다. 여기서 그 줄 하나를
+// innerHTML 없이 조각(굵은 글자만 <b> 요소)으로 바꾼다 — 설정 › 앱(새 버전 상자·지난 소식 전체)과
+// 오늘 탭 소식 카드가 같은 두 함수를 쓴다.
+function newsBoldParts(line) {
+  const text = String(line == null ? '' : line);
+  const parts = [];
+  let rest = text;
+  const re = /\*\*(.+?)\*\*/;
+  for (;;) {
+    const match = re.exec(rest);
+    if (!match) { if (rest) parts.push({ bold: false, text: rest }); break; }
+    if (match.index > 0) parts.push({ bold: false, text: rest.slice(0, match.index) });
+    if (match[1]) parts.push({ bold: true, text: match[1] });
+    rest = rest.slice(match.index + match[0].length);
+  }
+  return parts;
+}
+function newsLineNode(line, tag = 'li') {
+  const node = document.createElement(tag);
+  newsBoldParts(line).forEach((part) => {
+    if (part.bold) {
+      const strong = document.createElement('b');
+      strong.textContent = part.text;
+      node.appendChild(strong);
+    } else {
+      node.appendChild(document.createTextNode(part.text));
+    }
+  });
+  return node;
+}
+function newsListNode(lines, className = 'd-newslist') {
+  const list = document.createElement('ul');
+  list.className = className;
+  (lines || []).forEach((line) => list.appendChild(newsLineNode(line)));
+  return list;
+}
+
+// ---------- 쉬운 말 소식 카드 (WP-J, 오늘 탭) ----------
+// 받은 뒤 앱을 처음 열 때 한 번만 — 버전이 바뀌었고 그 버전의 소식이 있을 때만 선다. 처음 쓰는 사람은
+// (localStorage `newsSeen` 값이 아예 없음) 보지 않고 지금 버전으로 적어 둔다. 닫으면 그 버전을 기억하고
+// (막혀 있으면 이 창이 열려 있는 동안만) 다시 뜨지 않는다. 사용설명서 카드와 같은 자리 규칙 — 둘 다 있으면
+// 이 카드가 위(index.html의 `newsCardZone`이 `startCardZone`보다 앞선다).
+const NEWS_SEEN_KEY = 'newsSeen';
+let newsSeenHere = null;
+function newsSeenVersion() {
+  if (newsSeenHere !== null) return newsSeenHere;
+  try { return localStorage.getItem(NEWS_SEEN_KEY); } catch { return null; }
+}
+function newsMarkSeen(version) {
+  newsSeenHere = version;
+  try { localStorage.setItem(NEWS_SEEN_KEY, version); } catch { /* 막혀 있으면 이 창이 열려 있는 동안만 기억한다 */ }
+}
+function renderNewsCard() {
+  const zone = document.getElementById('newsCardZone');
+  if (!zone) return;
+  const info = typeof settingsAbout === 'object' ? settingsAbout : null;
+  const version = info && info.version;
+  const entry = version && Array.isArray(info.news) ? info.news.find(item => item.version === version) : null;
+  const seen = newsSeenVersion();
+  if (seen === null && version) newsMarkSeen(version); // 처음 쓰는 사람 — 지금 버전으로 적어 두기만 한다
+  if (!version || !entry || seen === null || seen === version) {
+    zone.hidden = true;
+    zone.replaceChildren();
+    return;
+  }
+  zone.hidden = false;
+  if (zone.children.length) return; // 이미 떠 있으면 다시 만들지 않는다(닫기를 누르려던 초점이 사라지지 않게)
+  const card = document.createElement('div');
+  card.className = 'd-start d-newscard';
+  card.setAttribute('role', 'region');
+  card.setAttribute('aria-label', `v${version}로 바뀌었어요`);
+  const head = document.createElement('div');
+  head.className = 'hd';
+  const title = document.createElement('span');
+  title.textContent = `v${version}로 바뀌었어요`;
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'd-btn sm sp';
+  close.textContent = '닫기';
+  close.setAttribute('aria-label', '새 소식 닫기');
+  close.addEventListener('click', () => { newsMarkSeen(version); renderNewsCard(); document.getElementById('todayTaskZone')?.focus?.(); });
+  head.append(title, close);
+  card.append(head, newsListNode(entry.lines));
+  zone.appendChild(card);
+}
+
 // ---------- 사용설명서 카드 (오늘 탭) ----------
 // 닫기 전까지는 **늘** `새로 들어온 것` 자리에 선다(기록이 있든 없든). 닫으면 config가 아니라 이 브라우저에
 // 기억하고(localStorage `guideCardClosed` — 막혀 있으면 이 창이 열려 있는 동안만), 같은 네 줄은
@@ -4690,5 +4778,6 @@ settingsAboutLoad({ cached: true }).then((about) => {
   // 서버가 막 떠서 첫 확인이 아직 돌고 있었으면 1분 뒤 한 번만 더 읽는다.
   const update = about && about.update;
   if (update && !update.available && !update.checkedAt) setTimeout(() => settingsAboutLoad({ cached: true }), 60 * 1000);
+  renderNewsCard(); // load()는 이 값이 오기 전에 먼저 돌 수 있어 여기서도 한 번 더 그린다(WP-J).
 });
 setInterval(() => settingsAboutLoad({ cached: true }), 6 * 60 * 60 * 1000);

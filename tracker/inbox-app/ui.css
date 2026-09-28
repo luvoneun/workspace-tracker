@@ -2250,6 +2250,19 @@ body.batch-open .d-toast { bottom: 76px; }
 @keyframes d-abspin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .d-abprog .now .ic { animation: none; } }
 
+/* 쉬운 말 소식(WP-J) — 줄 목록 하나를 새 버전 상자·오늘 탭 카드·지난 소식 전체가 함께 쓴다.
+   굵게(**…**)만 <b>로 오고, 그 밖의 글자는 그대로다(화면에서도 해석하지 않는다). */
+.d-newslist { margin: 4px 0 0; padding: 0 0 0 18px; list-style: disc; display: grid; gap: 4px; font-size: 13.5px; color: var(--text); line-height: 1.6; }
+.d-newslist li::marker { color: var(--dim); }
+.d-newslist b { font-weight: 600; color: var(--text); }
+.d-abupd .d-newslist { flex: 1 1 100%; }
+/* 지난 소식 전체(설정 › 앱, 버전 줄 아래 접이식) — 기본 접힘, 버전마다 이름 + 날짜 + 줄 목록. */
+.d-newshist { display: flex; flex-direction: column; gap: 14px; }
+.d-newsver .hd { font-size: 13.5px; font-weight: 700; }
+.d-newsver .hd small { margin-left: 6px; font-weight: 400; color: var(--dim); }
+/* 오늘 탭 소식 카드 — 사용설명서 카드와 같은 따뜻한 판(.d-start)을 그대로 쓴다. */
+.d-newscard { margin-bottom: 18px; }
+
 /* 연동 카드 — 자동화 줄(.d-auto)과 같은 리듬: 이름 · 칩 | 상태 · ⋯ · 버튼 / 한 줄 효용 / 준비물 줄 / 펼치는 자리.
    펼친 자리(.d-intgbody)는 --field 판 위에 한 번에 한 단계만(카드 안 위저드). */
 #settingsIntegrationsView [hidden] { display: none !important; }
