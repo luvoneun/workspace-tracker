@@ -8322,3 +8322,12 @@ test('QA2 할 일 채널 예시: 도움말은 저장된 이름, 모르면 `#이�
   assert.equal(app.run(`settingsChannelObject('#hana-todo')`), '#hana-todo 채널을');
   assert.equal(app.run(`settingsChannelObject('')`), '채널을');
 });
+
+test('슬랙 토큰 모양: xapp-·엉뚱한 토큰은 그 자리에서 알리고, xoxp- 입력 중에는 조용하다', () => {
+  const fx = intgClient({});
+  assert.match(fx.app.run("settingsSlackTokenShape('xapp-1-A0-1')"), /앱 수준 토큰/);
+  assert.match(fx.app.run("settingsSlackTokenShape('xoxb-1')"), /Bot 토큰/);
+  assert.match(fx.app.run("settingsSlackTokenShape('abc')"), /xoxp-로 시작해요/);
+  assert.equal(fx.app.run("settingsSlackTokenShape('xox')"), '', '치는 중인 앞부분은 기다린다');
+  assert.equal(fx.app.run("settingsSlackTokenShape('xoxp-1-2')"), '');
+});

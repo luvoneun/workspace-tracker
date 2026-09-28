@@ -1014,3 +1014,12 @@ test('claudeInstalled: launchd의 짧은 PATH여도 기본 설치 자리(~/.loca
   assert.equal(integrations.claudeInstalled('/usr/bin:/bin', home), true, 'nvm');
   fs.rmSync(home, { recursive: true, force: true });
 });
+
+test('slackTokenCheck: 앱 수준 토큰(xapp-)·xoxp-가 아닌 토큰은 슬랙에 보내지 않고 알린다', async () => {
+  const integrations = require('./integrations');
+  let called = 0;
+  const request = async () => { called += 1; return { ok: true, json: async () => ({ ok: true, user: 'me' }) }; };
+  await assert.rejects(integrations.slackTokenCheck('xapp-1-A0-123-abc', request), /앱 수준 토큰\(xapp-\)/);
+  await assert.rejects(integrations.slackTokenCheck('xoxe.xoxp-1-abc', request), /xoxp-로 시작해요/);
+  assert.equal(called, 0, '슬랙에 보내지 않는다');
+});

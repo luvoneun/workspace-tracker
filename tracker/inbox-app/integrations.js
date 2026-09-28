@@ -47,6 +47,8 @@ const MESSAGE = {
   slackGone: '을 찾을 수 없어요 — 슬랙에서 지웠거나 보관했어요. 체크한 채로 두면 새로 만들어요',
   slackOffline: '슬랙에 연결하지 못했어요 — 잠시 뒤 다시 눌러 주세요',
   slackBot: '이건 Bot 토큰이에요 — 바로 위의 User OAuth Token(xoxp-)을 복사해 주세요',
+  slackAppLevel: '이건 앱 수준 토큰(xapp-)이에요 — OAuth & Permissions 화면의 User OAuth Token(xoxp-)을 복사해 주세요',
+  slackNotUser: 'User OAuth Token은 xoxp-로 시작해요 — OAuth & Permissions 화면에서 복사해 주세요',
   slackReach: '슬랙에 닿지 못했어요 — 잠시 뒤 다시 해 주세요',
   icalUrl: '비밀 주소를 붙여 넣어 주세요',
   icalHttps: '주소는 https://로 시작해야 해요',
@@ -212,6 +214,9 @@ async function slackTokenCheck(token, request = (...args) => fetch(...args)) {
   const secret = trimmed(token);
   if (!secret) throw bad(MESSAGE.slackToken);
   if (/^xoxb-/.test(secret)) throw bad(MESSAGE.slackBot, 'bot_token');
+  // 앱 수준 토큰(xapp-, Basic Information 화면)·그 밖의 토큰은 채널을 읽지 못한다(not_allowed_token_type).
+  if (/^xapp-/.test(secret)) throw bad(MESSAGE.slackAppLevel, 'app_token');
+  if (!/^xoxp-/.test(secret)) throw bad(MESSAGE.slackNotUser, 'not_user_token');
   let auth;
   try { auth = await slackCall(secret, 'auth.test', null, request); } catch { throw bad(MESSAGE.slackReach); }
   if (!auth || auth.ok !== true) throw bad(MESSAGE.slackAuth, 'invalid_auth');

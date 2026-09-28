@@ -732,6 +732,16 @@ const SETTINGS_SLACK_CHANNELS = [
   ['someday', '언젠가', ['나중에 참고할 거리 → ', ['b', '아이디어·결정'], ' 탭의 ', ['b', '아이디어']], 'my-someday'],
 ];
 const SETTINGS_SLACK_BOT = '이건 Bot 토큰이에요 — 바로 위의 User OAuth Token(xoxp-)을 복사해 주세요';
+const SETTINGS_SLACK_APPLEVEL = '이건 앱 수준 토큰(xapp-)이에요 — OAuth & Permissions 화면의 User OAuth Token(xoxp-)을 복사해 주세요';
+const SETTINGS_SLACK_NOTUSER = 'User OAuth Token은 xoxp-로 시작해요 — OAuth & Permissions 화면에서 복사해 주세요';
+// 붙인 토큰 모양만 보고 그 자리에서 알릴 말(서버에 보내기 전). 맞는 모양이면 빈 문자열.
+const settingsSlackTokenShape = (value) => {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  if (/^xoxb-/.test(text)) return SETTINGS_SLACK_BOT;
+  if (/^xapp-/.test(text)) return SETTINGS_SLACK_APPLEVEL;
+  return /^xoxp-/.test(text) || 'xoxp-'.startsWith(text) ? '' : SETTINGS_SLACK_NOTUSER;
+};
 const SETTINGS_SLACK_ASK = '워크스페이스 슬랙 앱에 저를 Collaborator로 추가해 주세요';
 const SETTINGS_SLACK_TAKEN = '이미 있는 이름이에요 — 다른 이름을 적어 주세요';
 // 목록 맨 아래 `각자 붙이는 법` — 슬랙·구글 캘린더·티로가 아닌 도구를 붙이는 안내(docs/연동.md의 "다른 앱을 쓰면").
@@ -1457,15 +1467,18 @@ function settingsSlackWizard(card, data, mode = 'new') {
     const error = settingsErrorLine();
     const next = settingsButton('다음 →', 'd-btn pri');
     // Bot 토큰은 서버에 보내지 않고 그 자리에서 알린다.
-    const isBot = () => /^xoxb-/.test(String(token.input.value || '').trim());
+    // Bot(xoxb-)·앱 수준(xapp-) 등 채널을 못 읽는 토큰도 그 자리에서 알린다.
+    const shapeWords = [SETTINGS_SLACK_BOT, SETTINGS_SLACK_APPLEVEL, SETTINGS_SLACK_NOTUSER];
+    const isBot = () => settingsSlackTokenShape(token.input.value) !== '';
     token.input.addEventListener('input', () => {
-      if (isBot()) error.textContent = SETTINGS_SLACK_BOT;
-      else if (error.textContent === SETTINGS_SLACK_BOT) error.textContent = '';
+      const word = settingsSlackTokenShape(token.input.value);
+      if (word) error.textContent = word;
+      else if (shapeWords.includes(error.textContent)) error.textContent = '';
     });
     const go = async () => {
       const value = String(token.input.value || '').trim();
       if (!value) { error.textContent = '슬랙 토큰을 붙여 넣어 주세요'; token.input.focus(); return; }
-      if (isBot()) { error.textContent = SETTINGS_SLACK_BOT; token.input.focus(); return; }
+      if (isBot()) { error.textContent = settingsSlackTokenShape(value); token.input.focus(); return; }
       error.textContent = '';
       next.disabled = true;
       const checked = await settingsSlackTokenCheck(value);
