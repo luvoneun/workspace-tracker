@@ -2661,7 +2661,7 @@ function personalizeRoundCorners(pixels, size) {
   return pixels;
 }
 
-// 고른 그림을 가운데 정사각형으로 잘라 둥근 모서리의 PNG(최대 1024px)로 만든다. 미리보기도 이 캔버스다.
+// 고른 그림을 가운데 정사각형으로 잘라 둥근 모서리의 PNG(512~1024px)로 만든다. 미리보기도 이 캔버스다.
 function personalizeCrop(file) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
@@ -2672,7 +2672,8 @@ function personalizeCrop(file) {
       const height = image.naturalHeight;
       if (Math.min(width, height) < PERSONALIZE_ICON_MIN) { reject(new Error('가로세로 128px 이상인 그림을 골라 주세요')); return; }
       const box = personalizeCropBox(width, height);
-      const out = Math.min(box.size, PERSONALIZE_ICON_OUT);
+      // 작은 그림도 512px까지는 키운다 — 크롬이 `앱으로 설치`를 권하려면 큰 아이콘(192·512)이 있어야 해서(Codex 검토).
+      const out = Math.max(512, Math.min(box.size, PERSONALIZE_ICON_OUT));
       const canvas = document.createElement('canvas');
       canvas.width = out;
       canvas.height = out;
