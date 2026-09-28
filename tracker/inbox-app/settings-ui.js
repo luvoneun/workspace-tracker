@@ -1171,7 +1171,10 @@ function settingsFailWords(text) {
 }
 
 // 멈춘 카드의 이유 한 줄. 토큰 문제면 버튼이 이미 `다시 연결`이라 그 말을, 아니면 최근 기록으로 안내한다.
+// 가장 최근 실패가 이 맥의 Claude Code 로그인 풀림(서버의 `claudeAuth`)이면 할 일 한 줄 — 버튼은 `다시 시도` 그대로다.
+const SETTINGS_CLAUDE_LOGIN = '자동 수집이 쓰는 Claude Code 로그인이 풀렸어요 — 도움말 “Claude Code 로그인이 풀렸다고 나와요”대로 다시 로그인해 주세요';
 function settingsFailWhy(kind, state = {}) {
+  if (state.claudeAuth && !state.auth) return [SETTINGS_CLAUDE_LOGIN];
   if (state.auth) {
     return [kind === 'calendar'
       ? '비밀 주소를 읽을 수 없어요 — 다시 연결을 누르면 주소를 다시 붙여요'
@@ -2563,7 +2566,24 @@ function personalizeFileError(file) {
   return '';
 }
 
-// 고른 그림을 가운데 정사각형으로 잘라 PNG(최대 1024px)로 만든다. 미리보기도 이 캔버스다.
+// 네 모서리를 둥글게 깎는다(바깥 픽셀을 투명하게) — 반지름은 한 변의 22%로, 예전 Dock 아이콘(app-refresh.sh의 Pillow)과
+// 같은 모양이다. 저장하는 그림에 모양이 이미 들어 있어서 Dock 앱은 Pillow 없이 크기만 바꾸면 되고, 미리보기와 Dock이 같다.
+// `pixels`는 캔버스 getImageData의 RGBA 배열(한 변 `size`), 그 자리에서 고친다.
+function personalizeRoundCorners(pixels, size) {
+  const radius = Math.floor(size * 0.22);
+  for (let y = 0; y < radius; y += 1) {
+    for (let x = 0; x < radius; x += 1) {
+      const dx = radius - (x + 0.5);
+      const dy = radius - (y + 0.5);
+      if (dx * dx + dy * dy <= radius * radius) continue;
+      [[x, y], [size - 1 - x, y], [x, size - 1 - y], [size - 1 - x, size - 1 - y]]
+        .forEach(([px, py]) => { pixels[(py * size + px) * 4 + 3] = 0; });
+    }
+  }
+  return pixels;
+}
+
+// 고른 그림을 가운데 정사각형으로 잘라 둥근 모서리의 PNG(최대 1024px)로 만든다. 미리보기도 이 캔버스다.
 function personalizeCrop(file) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
@@ -2578,7 +2598,11 @@ function personalizeCrop(file) {
       const canvas = document.createElement('canvas');
       canvas.width = out;
       canvas.height = out;
-      canvas.getContext('2d').drawImage(image, box.sx, box.sy, box.size, box.size, 0, 0, out, out);
+      const context = canvas.getContext('2d');
+      context.drawImage(image, box.sx, box.sy, box.size, box.size, 0, 0, out, out);
+      const pixels = context.getImageData(0, 0, out, out);
+      personalizeRoundCorners(pixels.data, out);
+      context.putImageData(pixels, 0, 0);
       resolve({ canvas, data: canvas.toDataURL('image/png').split(',')[1] || '' });
     };
     image.onerror = () => { URL.revokeObjectURL(url); reject(new Error('그림을 열지 못했어요')); };
@@ -2882,6 +2906,8 @@ const SETTINGS_FAQ = [
       '<b>삭제한 항목</b> 탭에서 되살려요. 지운 항목은 원문 그대로 남고 저절로 사라지는 건 없어요. <b>완전히 지우기</b>만 되돌릴 수 없어서 한 번 더 물어봐요.'],
     ['앱이 이상하게 동작하면', '없음',
       '<b>설정 &gt; 앱</b>의 <b>문제 보고 › 진단 내용 복사</b>를 누르면 버전·연동 상태·최근 오류 줄이 클립보드에 복사돼요. 업무 내용은 들어가지 않으니 그대로 슬랙에 붙여 넣어 주세요.'],
+    ['Claude Code 로그인이 풀렸다고 나와요', 'Claude Code',
+      '자동 수집은 터미널 설정(.zshrc 등)을 읽지 않아서 자동 수집 쪽 로그인만 풀릴 수 있어요. 터미널에 <b>env -i HOME=$HOME PATH=/usr/bin:/bin:$HOME/.local/bin claude</b> 로 연 뒤 <b>/login</b> 하고 카드의 <b>다시 시도</b>를 눌러요(새 토큰은 필요 없어요).'],
     ['업무 데이터는 어디에 백업되나요', '없음',
       '매일 19:30 이 맥의 <b>~/workspace-data-backup/daily</b>에 그날 데이터를 복사해 <b>7일치</b>를 남겨요(누구나 똑같아요). 업데이트 직전과 저장할 때마다의 직전 한 벌도 따로 있어요. 잘 됐는지는 <b>설정 &gt; 앱</b>의 <b>데이터 백업</b> 줄에서 보고, GitHub 비공개 저장소에도 올리고 싶으면 앱 README의 "업무 데이터 백업"대로 한 번 설정해요.'],
     ['앱에서 업데이트하기', '없음',

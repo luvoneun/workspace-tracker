@@ -721,6 +721,9 @@ const FETCH_MESSAGE = {
 };
 // 슬랙이 준 오류 이름 중 "토큰을 다시 받아야 하는 것"(수집 로그의 `채널 확인 실패 — ERR:<이름>`).
 const SLACK_AUTH_RE = /\b(invalid_auth|token_revoked|account_inactive)\b/;
+// 이 맥의 Claude Code 로그인이 풀렸을 때 claude가 남기는 말(자동화 로그). 토큰 문제가 아니라서 버튼은 `다시 시도` 그대로고,
+// 카드의 이유 한 줄만 `터미널에서 claude → /login` 안내로 바뀐다(원문은 ⋯ › 최근 기록에 그대로).
+const CLAUDE_AUTH_RE = /Failed to authenticate|OAuth (?:session|token) (?:has )?expired|Invalid API key|Please run \/login|Not logged in|authentication_error/i;
 const fetchLastAt = new Map();
 
 function launchAgentsDir() {
@@ -827,9 +830,12 @@ function fetchStateLive(failure) {
 }
 function fetchStateAutomation(automation, authRe = null) {
   const failing = !!automation && automation.lastKind === 'fail';
+  const auth = failing && !!authRe && authRe.test(automation.lastSummary || '');
   return {
     failing,
-    auth: failing && !!authRe && authRe.test(automation.lastSummary || ''),
+    auth,
+    // 가장 최근 실패가 Claude 로그인 풀림이면 true(연동 토큰 문제가 먼저면 그쪽을 말한다).
+    claudeAuth: failing && !auth && CLAUDE_AUTH_RE.test(automation.lastSummary || ''),
     failedAt: failing ? logTimeIso(automation.lastRunAt) : null,
     lastRunAt: automation && automation.lastRunAt ? logTimeIso(automation.lastRunAt) : null,
     // 멈춘 카드의 이유 한 줄(화면이 사람 말로 바꾼다). 로그 한 줄이라 200자까지만.

@@ -8,6 +8,7 @@
 //   Dock 프로세스도 다시 시작하지 않는다.
 const fs = require('node:fs');
 const path = require('node:path');
+const zlib = require('node:zlib');
 const { randomUUID } = require('node:crypto');
 
 const ICON_MAX_BYTES = 5 * 1024 * 1024;
@@ -82,6 +83,32 @@ function imageInfo(buffer) {
   return null;
 }
 
+// 꾸미기 화면이 둥근 모서리를 깎아 저장한 그림인가 — 왼쪽 위 픽셀이 투명하면 그렇다고 본다(app-refresh.sh가 부른다:
+// 둥글면 sips로 크기만 바꾸고, 아니면 옛 그림이라 Pillow로 둥글게 한다). 8비트·비월식이 아닌 PNG의 RGBA·회색+알파만 읽고,
+// 그 밖(JPEG·알파 없음·읽지 못함)은 각진 그림으로 본다. 첫 줄의 첫 픽셀은 어느 필터여도 원래 값 그대로다.
+function iconRounded(buffer) {
+  const info = imageInfo(buffer);
+  if (!info || info.type !== 'png') return false;
+  const depth = buffer[24];
+  const color = buffer[25];
+  const interlace = buffer[28];
+  if (depth !== 8 || interlace !== 0 || (color !== 6 && color !== 4)) return false;
+  const parts = [];
+  let at = 8;
+  while (at + 8 <= buffer.length) {
+    const size = buffer.readUInt32BE(at);
+    const type = buffer.toString('ascii', at + 4, at + 8);
+    if (type === 'IDAT') parts.push(buffer.subarray(at + 8, at + 8 + size));
+    if (type === 'IEND') break;
+    at += 12 + size;
+  }
+  try {
+    const raw = zlib.inflateSync(Buffer.concat(parts));
+    const alpha = raw[color === 6 ? 4 : 2];
+    return alpha === 0;
+  } catch { return false; }
+}
+
 function checkIcon(buffer) {
   if (!Buffer.isBuffer(buffer) || !buffer.length) throw bad(MESSAGE.iconType);
   if (buffer.length > ICON_MAX_BYTES) throw bad(MESSAGE.iconSize);
@@ -146,6 +173,6 @@ function tildePath(value, home) {
 
 module.exports = {
   ICON_MAX_BYTES, ICON_MIN_SIDE, DOCK_NAME_DEFAULT, PERSONALIZE_MESSAGE: MESSAGE,
-  checkDockName, dockNameTaken, checkTitle, imageInfo, checkIcon, saveIcon, resetIcon, hasCustomIcon, currentIcon,
+  checkDockName, dockNameTaken, checkTitle, imageInfo, iconRounded, checkIcon, saveIcon, resetIcon, hasCustomIcon, currentIcon,
   writeRefreshRequest, tildePath,
 };

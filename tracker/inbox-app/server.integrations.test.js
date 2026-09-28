@@ -995,7 +995,29 @@ test('WP-E 자동화 기록: 줄 앞에 `{"ok":true}`가 붙은 옛 로그도 �
     assert.equal(failing.slack.fetch.failing, true);
     assert.equal(failing.slack.fetch.auth, true);
     assert.match(failing.slack.fetch.summary, /ERR:invalid_auth/);
+    assert.equal(failing.slack.fetch.claudeAuth, false, '슬랙 토큰 문제는 Claude 로그인 안내가 아니다');
     assert.ok(failing.alerts.includes('slack'));
+
+    // 가장 최근 실패가 Claude 로그인 풀림이면 claudeAuth — 토큰 문제가 아니라 auth는 false(버튼은 다시 시도)
+    fs.appendFileSync(file, '───── 2026-09-24 07:10:00 slack-capture 시작\nFailed to authenticate. API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth session expired and could not be refreshed"}}\n───── 2026-09-24 07:10:20 slack-capture 종료 (exit 1)\n');
+    const expired = await (await fetch(base + '/api/integrations')).json();
+    assert.equal(expired.slack.fetch.failing, true);
+    assert.equal(expired.slack.fetch.claudeAuth, true);
+    assert.equal(expired.slack.fetch.auth, false);
+    assert.match(expired.slack.log[0].text, /Failed to authenticate/, '최근 기록에는 원문이 그대로 남는다');
+    // 다른 말투(`Invalid API key · Please run /login`)도 같은 판단
+    fs.appendFileSync(file, '───── 2026-09-24 07:15:00 slack-capture 시작\nInvalid API key · Please run /login\n───── 2026-09-24 07:15:20 slack-capture 종료 (exit 1)\n');
+    assert.equal((await (await fetch(base + '/api/integrations')).json()).slack.fetch.claudeAuth, true);
+    // 그 뒤에 다른 이유로 실패했으면 가장 최근 실패만 본다 — 안내하지 않는다
+    fs.appendFileSync(file, '2026-09-24 07:20:00 my-todo 채널 확인 실패 — fetch 실패 (exit 28)\n');
+    const other = await (await fetch(base + '/api/integrations')).json();
+    assert.equal(other.slack.fetch.failing, true);
+    assert.equal(other.slack.fetch.claudeAuth, false);
+    // 성공하면 풀린다
+    fs.appendFileSync(file, '───── 2026-09-24 07:25:00 slack-capture 시작\n(새 항목 없음)\n───── 2026-09-24 07:25:20 slack-capture 종료 (exit 0)\n');
+    const fine = await (await fetch(base + '/api/integrations')).json();
+    assert.equal(fine.slack.fetch.failing, false);
+    assert.equal(fine.slack.fetch.claudeAuth, false);
   } finally {
     if (before === null) fs.rmSync(file, { force: true }); else fs.writeFileSync(file, before);
   }
