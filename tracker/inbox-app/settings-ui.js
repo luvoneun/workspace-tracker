@@ -2883,7 +2883,7 @@ async function renderSettingsPersonalize() {
     view.appendChild(done);
     // 크롬 앱으로 설치했으면 — 크롬은 manifest를 곧바로 다시 읽지 않는다(사실대로 알린다).
     if (personalizeSavedNote.dock) {
-      view.appendChild(settingsEl('d-ismall d-pinstallnote', '설치한 앱에는 크롬이 다음에 확인할 때 반영돼요(바로 바꾸려면 설치한 앱을 지우고 다시 설치)'));
+      view.appendChild(settingsEl('d-ismall d-pinstallnote', '크롬 앱에는: 크롬을 다시 켜고(주소창에 about://restart) 앱을 열면 오른쪽 위 「앱 업데이트 있음」 → 업데이트 → 앱을 ⌘Q로 끄고 다시 열기'));
     }
     personalizeSavedNote = null;
   }
@@ -2943,7 +2943,7 @@ const SETTINGS_FAQ = [
     ['연동은 꼭 켜야 하나요', '없음',
       '아니요. 지라·슬랙·캘린더·회의록은 전부 선택이에요. <b>설정 &gt; 연동</b>에서 하나씩 켜고, 켠 것만 자동으로 모아 와요. 하나도 켜지 않아도 직접 적는 기능은 전부 돼요.'],
     ['Dock 아이콘·이름을 바꾸려면', '없음',
-      '<b>설정 &gt; 꾸미기</b>에서 내 그림을 고르고(가운데를 정사각형으로 잘라요) Dock 이름·워크스페이스 제목을 적은 뒤 <b>저장</b>해요. 이 맥에만 적용되고 업데이트해도 남아요. Dock은 앱을 닫고 다시 열면 바뀌어 보여요. 크롬 앱으로 설치했으면 크롬이 다음에 확인할 때 바뀌어요.'],
+      '<b>설정 &gt; 꾸미기</b>에서 내 그림을 고르고(가운데를 정사각형으로 잘라요) Dock 이름·워크스페이스 제목을 적은 뒤 <b>저장</b>해요. 이 맥에만 적용되고 업데이트해도 남아요. Dock 앱은 닫고 다시 열면 바뀌어요. 크롬 앱은 크롬을 다시 켠 뒤(<b>about://restart</b>) 앱 오른쪽 위 <b>앱 업데이트 있음</b> → 업데이트 → <b>⌘Q</b> 뒤 다시 열어요.'],
   ]],
   ['매일', [
     ['오늘 하기 버거운 업무는 어떻게 미루나요', '없음',

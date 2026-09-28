@@ -7301,7 +7301,7 @@ test('WP-D2 L. 꾸미기 저장: 바뀐 칸만 보내고, 제목은 헤더·탭 
   same(fx.posts()[1].body, { dockName: '내 일터' });
   assert.equal(fx.text("window.findByClass(document.getElementById('settingsPersonalizeView'), 'd-psaved')[0]"), '✓ 바뀌었어요 · Dock은 앱을 닫고 다시 열면 보여요');
   // WP-L: 크롬은 manifest를 곧바로 다시 읽지 않는다 — 사실대로 한 줄
-  same(fx.find('d-pinstallnote').map(one => one.textContent), ['설치한 앱에는 크롬이 다음에 확인할 때 반영돼요(바로 바꾸려면 설치한 앱을 지우고 다시 설치)']);
+  same(fx.find('d-pinstallnote').map(one => one.textContent), ['크롬 앱에는: 크롬을 다시 켜고(주소창에 about://restart) 앱을 열면 오른쪽 위 「앱 업데이트 있음」 → 업데이트 → 앱을 ⌘Q로 끄고 다시 열기']);
 });
 
 test('WP-D2 L. 꾸미기 아이콘: 형식·크기는 화면에서 먼저 거르고, 자른 그림은 저장을 눌러야 보내며, 되돌리기는 reset 한 번', async () => {
@@ -7384,7 +7384,7 @@ test('WP-L 문구: 도움말 `Dock을 누르면 창이 여러 개 떠요`는 앱
     'Dock 앱을 계속 쓰면 → 시스템 설정 › 개인정보 보호 및 보안 › 자동화 › Workspace 아래 Google Chrome을 켜요',
   ]);
   const faq = JSON.parse(app.run('JSON.stringify(SETTINGS_FAQ)')).flatMap(([, rows]) => rows);
-  assert.match(faq.find(([question]) => question === 'Dock 아이콘·이름을 바꾸려면')[2], /크롬 앱으로 설치했으면 크롬이 다음에 확인할 때 바뀌어요/);
+  assert.match(faq.find(([question]) => question === 'Dock 아이콘·이름을 바꾸려면')[2], /크롬 앱은 크롬을 다시 켠 뒤.*앱 업데이트 있음.*⌘Q/);
 });
 
 test('도움말: 개념 사전 9개 + 쓰는 순서의 여섯 묶음 + 항목마다 `필요한 것` 표지', () => {
