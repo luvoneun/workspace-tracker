@@ -277,7 +277,7 @@ function slackPlain(text, names = {}) {
     .replace(/```/g, '')
     .replace(/`/g, '')
     // 그림 글자·굵게·취소선은 슬랙처럼 앞뒤가 단어 경계일 때만 — `3~5명`, `2*3*4`, `api:v2:x` 같은 글자를 망가뜨리지 않게.
-    .replace(/(^|\s):[a-z0-9_+'-]+:(?=$|\s)/gm, '$1')
+    .replace(/(^|\s)(?::[a-z0-9_+'-]+:)+(?=$|\s)/gm, '$1')
     .replace(/(^|[\s(])\*(\S(?:[^*\n]*\S)?)\*(?=$|[\s).,!?])/gm, '$1$2')
     .replace(/(^|[\s(])~(\S(?:[^~\n]*\S)?)~(?=$|[\s).,!?])/gm, '$1$2')
     .replace(/(^|[\s(])_([^_\n]+)_(?=$|[\s).,!?])/gm, '$1$2')
@@ -331,13 +331,10 @@ function rawItem(channel, message, names) {
   if (!body) body = '(글 없는 메시지)';
   const description = rawClip(memo && !memoOnly ? `${body} — ${memo}` : body);
   const source = share ? shareSource(share) : null;
-  const payload = { type: channel.type, description, permalink: (source && source.permalink) || ownLink };
-  // 확인 대기: 전달한 원래 메시지를 쓴 사람이 담당자다(내가 쓴 것이면 비운다). 기한·지라는 넣지 않는다.
-  if (channel.type === 'check' && share) {
-    const mine = share.author_id ? share.author_id === message.user : false;
-    const who = mine ? '' : String(share.author_name || share.author_subname || '').replace(/[\r\n[\]]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
-    if (who) payload.who = who;
-  }
+  // 링크: 공유할 때 메모를 적었으면 내가 보낸 메시지 링크 — 같은 원본을 다른 메모로 다시 공유해도 따로 남게(링크 중복으로
+  // 버려지지 않게). 메모 없는 공유는 원본 링크 — 같은 원본을 또 보내면 링크 중복으로 한 번만 들어간다.
+  const payload = { type: channel.type, description, permalink: (memo ? ownLink : (source && source.permalink)) || ownLink };
+  // 확인 대기의 담당자(who)는 넣지 않는다 — 원래 글쓴이가 답할 사람인지 답을 기다리는 사람인지 규칙으로는 알 수 없다(추측 금지).
   return { ts: message.ts, payload, notes };
 }
 
@@ -498,7 +495,7 @@ async function processChannel(ctx, channel, messages) {
     if (systemCount) addReason('시스템', systemCount);
     answer.skipped.forEach(skip => {
       addReason(skip.reason);
-      if (/링크/.test(skip.reason)) ledger.duplicate += 1; else ledger.similar += 1;
+      if (/링크/.test(skip.reason)) ledger.duplicate += 1; else if (skip.reason === '글 없음') ledger.system += 1; else ledger.similar += 1;
       // 설정 › 연동 › 슬랙 ⋯ › 최근 기록이 뽑아 보이는 모양(`🔁 이미 있는 '…'랑 …`) 그대로 남긴다.
       detail.push(skip.existing
         ? `🔁 이미 있는 '${oneLine(skip.existing)}'랑 중복돼서 안 가져왔어요`

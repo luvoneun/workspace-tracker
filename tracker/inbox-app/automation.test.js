@@ -2173,7 +2173,7 @@ test('원문 모드: Claude 없이 할 일 채널 메시지를 규칙대로 저�
     { type: 'task', description: `${'가'.repeat(200)}…`, permalink: own('1790000004.000100') },
     { type: 'task', description: '(파일) 화면.png', permalink: own('1790000005.000100') },
     { type: 'task', description: '결제 화면 오류 캡처', permalink: own('1790000006.000100') },
-    { type: 'task', description: '금요일까지 @이두리 검토 부탁해요 — 내가 챙기기', permalink: 'https://team.slack.com/archives/C0SRC/p1700000000000100' },
+    { type: 'task', description: '금요일까지 @이두리 검토 부탁해요 — 내가 챙기기', permalink: own('1790000007.000100') },
     { type: 'task', description: 'https://x.example/b', permalink: own('1790000008.000100') },
   ]);
   assert.ok(fix.imports('item').every(one => !/[\r\n]/.test(one.description) && one.description.length <= 201), '한 줄 · 200자(+…)');
@@ -2185,7 +2185,7 @@ test('원문 모드: Claude 없이 할 일 채널 메시지를 규칙대로 저�
   assert.equal(lastLogEvent(log).kind, 'run');
 });
 
-test('원문 모드: 확인 대기는 원래 작성자가 담당자(내 메시지면 비움), 날짜가 있어도 기한 없음, 결정은 지라 연결 없음 (예외 6·7)', (t) => {
+test('원문 모드: 확인 대기에도 담당자를 넣지 않음(추측 금지), 날짜가 있어도 기한 없음, 결정은 지라 연결 없음 (예외 6·7)', (t) => {
   const fix = captureFixture(t, { slack: { tidy: 'raw', channels: {
     waiting: { id: 'C0WAIT11', name: '#my-waiting' }, align: { id: 'C0ALIGN1', name: '#my-align' }, someday: { id: 'C0SOME11', name: '#my-someday' },
   } } });
@@ -2203,13 +2203,13 @@ test('원문 모드: 확인 대기는 원래 작성자가 담당자(내 메시�
   assert.deepEqual(fix.claudeCalls(), []);
   const items = fix.imports('item');
   assert.deepEqual(items.filter(one => one.type === 'check'), [
-    { type: 'check', description: '10/3까지 시안 회신 드릴게요', permalink: 'https://team.slack.com/archives/C0SRC/p1700000000000100', who: '김하나' },
+    { type: 'check', description: '10/3까지 시안 회신 드릴게요', permalink: 'https://team.slack.com/archives/C0SRC/p1700000000000100' },
     { type: 'check', description: '내일까지 답 주세요', permalink: 'https://team.slack.com/archives/C0SRC/p1700000000000200' },
     { type: 'check', description: '2026-10-05까지 법무 검토 받기', permalink: 'https://team.slack.com/archives/C0WAIT11/p1790000003000100' },
-  ], '담당자는 원래 작성자, 내 메시지면 비움 · 기한은 넣지 않는다');
+  ], '담당자·기한은 넣지 않는다');
   assert.deepEqual(items.find(one => one.type === 'decision'), { type: 'decision', description: 'PROJ-12 환불 정책: 7일 안이면 전액', permalink: 'https://team.slack.com/archives/C0ALIGN1/p1790000004000100' }, '지라 키가 보여도 연결하지 않는다');
   assert.deepEqual(items.find(one => one.type === 'idea'), { type: 'idea', description: '온보딩 영상 만들어 보기', permalink: 'https://team.slack.com/archives/C0SOME11/p1790000005000100' });
-  assert.ok(items.every(one => one.due === undefined && one.jira === undefined && one.priority === undefined));
+  assert.ok(items.every(one => one.due === undefined && one.jira === undefined && one.priority === undefined && one.who === undefined));
 });
 
 test('원문 모드: 링크 중복은 지금처럼 건너뛰고, 밀린 메시지는 한 회차 최대 개수까지만 — 나머지는 다음 회차 (예외 11·12)', (t) => {
@@ -2268,4 +2268,15 @@ test('원문 모드: 이모지만 있는 메시지는 할 일로 넣지 않고 �
   assert.equal(rawItem(channel, { ts: '1.1', user: 'U9', text: ':fire: :+1:' }, {}).empty, true);
   const shared = rawItem(channel, { ts: '1.2', user: 'U9', text: '', attachments: [{ is_share: true, text: '', from_url: 'https://x.slack.com/archives/C2/p1' }] }, {});
   assert.equal(shared.payload.description, '(글 없는 메시지)');
+});
+
+test('원문 모드: 같은 원본을 다른 메모로 다시 공유하면 내 메시지 링크로 따로 남고, 붙은 이모지만 있는 메시지도 건너뛴다', () => {
+  const { rawItem } = require('./slack-collect');
+  const channel = { workspaceUrl: 'https://x.slack.com', id: 'C1', type: 'task' };
+  const share = { is_share: true, text: '배포 일정 공유', from_url: 'https://x.slack.com/archives/C2/p100' };
+  const first = rawItem(channel, { ts: '1.1', user: 'U9', text: '', attachments: [share] }, {});
+  const again = rawItem(channel, { ts: '1.2', user: 'U9', text: '금요일까지 답하기', attachments: [share] }, {});
+  assert.equal(first.payload.permalink, 'https://x.slack.com/archives/C2/p100', '메모 없는 공유는 원본 링크');
+  assert.equal(again.payload.permalink, 'https://x.slack.com/archives/C1/p12', '메모가 있으면 내 메시지 링크');
+  assert.equal(rawItem(channel, { ts: '1.3', user: 'U9', text: ':fire::+1:' }, {}).empty, true);
 });
