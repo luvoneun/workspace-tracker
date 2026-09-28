@@ -103,7 +103,10 @@ function iconRounded(buffer) {
     at += 12 + size;
   }
   try {
-    const raw = zlib.inflateSync(Buffer.concat(parts));
+    // 첫 줄의 첫 픽셀만 보면 되므로 압축 데이터의 앞부분만 풀어 본다(비정상 PNG가 메모리를 과하게 쓰지 않게 —
+    // 1KB는 아무리 잘 눌려 있어도 약 1MB 이상으로 풀리지 않는다).
+    const raw = zlib.inflateSync(Buffer.concat(parts).subarray(0, 1024),
+      { finishFlush: zlib.constants.Z_SYNC_FLUSH, maxOutputLength: 1 << 21 });
     const alpha = raw[color === 6 ? 4 : 2];
     return alpha === 0;
   } catch { return false; }

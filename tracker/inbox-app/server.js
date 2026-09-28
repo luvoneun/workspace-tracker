@@ -725,7 +725,7 @@ const SLACK_AUTH_RE = /\b(invalid_auth|token_revoked|account_inactive)\b/;
 // 카드의 이유 한 줄만 `터미널에서 claude → /login` 안내로 바뀐다(원문은 ⋯ › 최근 기록에 그대로).
 // 실패한 실행의 로그 전체를 보므로, 작업 중 부른 커넥터(MCP)·API의 흔한 인증 오류(authentication_error 등)에 걸리지 않게
 // claude 명령이 자기 로그인에 대해 내는 말만 잡는다.
-const CLAUDE_AUTH_RE = /OAuth (?:session|token) (?:has )?expired|could not be refreshed|Please run \/login/i;
+const CLAUDE_AUTH_RE = /Failed to authenticate\. API Error: 401|OAuth session expired and could not be refreshed|Invalid API key · Please run \/login/i;
 const fetchLastAt = new Map();
 
 function launchAgentsDir() {

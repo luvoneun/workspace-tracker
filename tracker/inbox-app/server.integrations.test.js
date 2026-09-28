@@ -1050,7 +1050,7 @@ test('Claude 로그인 풀림 판단은 claude 자신의 로그인 문구만 —
   const { CLAUDE_AUTH_RE } = require('./server');
   assert.ok(CLAUDE_AUTH_RE.test('Failed to authenticate. API Error: 401 OAuth session expired and could not be refreshed'));
   assert.ok(CLAUDE_AUTH_RE.test('Invalid API key · Please run /login'));
-  for (const other of ['tiro-mcp: authentication_error (token expired)', 'Failed to authenticate with Jira', 'Not logged in to tiro']) {
+  for (const other of ['tiro-mcp: authentication_error (token expired)', 'Failed to authenticate with Jira', 'Not logged in to tiro', 'tiro-mcp: OAuth token could not be refreshed']) {
     assert.equal(CLAUDE_AUTH_RE.test(other), false, other);
   }
 });
