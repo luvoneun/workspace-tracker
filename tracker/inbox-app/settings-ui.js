@@ -2703,12 +2703,16 @@ function personalizeRow(name, small, ...value) {
   return row;
 }
 
-// 헤더 제목·탭 제목·탭 아이콘을 곧바로 바꾼다(서버를 다시 켜지 않는다).
-function personalizeApply({ title, icon } = {}) {
+// 헤더 제목·탭 제목·탭 아이콘·제목 숨김을 곧바로 바꾼다(서버를 다시 켜지 않는다).
+function personalizeApply({ title, icon, titleHidden } = {}) {
   if (title) {
     const head = document.getElementById('workspaceTitle');
     if (head) head.textContent = title;
     document.title = title;
+  }
+  if (titleHidden !== undefined) {
+    const head = document.getElementById('workspaceTitle');
+    if (head) head.hidden = titleHidden === true;
   }
   if (icon) {
     const favicon = document.getElementById('appFavicon');
@@ -2833,6 +2837,26 @@ async function renderSettingsPersonalize() {
   title.maxLength = 40;
   title.setAttribute('aria-label', '워크스페이스 제목');
 
+  // 화면에 보이기 — 끄면 헤더의 제목만 감춘다(값은 남고 창 이름에는 계속 쓴다). 기존 연동 탭의
+  // 채널 고르기와 같은 부품(`.d-ich` — label로 체크박스를 감싸 키보드·스크린리더가 그대로 된다)을 재사용한다.
+  const wasHidden = state.titleHidden === true;
+  const shown = document.createElement('input');
+  shown.type = 'checkbox';
+  shown.checked = !wasHidden;
+  shown.setAttribute('aria-label', '워크스페이스 제목 화면에 보이기');
+  const shownText = document.createElement('span');
+  shownText.className = 't';
+  const shownLabel = document.createElement('b');
+  shownLabel.textContent = '화면에 보이기';
+  const shownNote = document.createElement('span');
+  shownNote.className = 'd-ismall sub';
+  shownNote.textContent = '끄면 왼쪽 위 제목만 숨겨요 — 창 이름에는 그대로 쓰여요';
+  shownText.append(shownLabel, shownNote);
+  const shownRow = document.createElement('label');
+  shownRow.className = 'd-ich' + (shown.checked ? ' is-on' : '');
+  shownRow.append(shown, shownText);
+  shown.addEventListener('change', () => shownRow.classList.toggle('is-on', shown.checked));
+
   const save = settingsButton('저장', 'd-btn pri');
   const run = async () => {
     error.textContent = '';
@@ -2841,6 +2865,8 @@ async function renderSettingsPersonalize() {
     const names = {};
     if (dock.value.trim() !== state.dockName) names.dockName = dock.value.trim();
     if (title.value.trim() !== state.title) names.title = title.value.trim();
+    const wantHidden = !shown.checked;
+    if (wantHidden !== wasHidden) names.titleHidden = wantHidden;
     if (!picked && !Object.keys(names).length) { error.textContent = '바꾼 것이 없어요'; return; }
     save.disabled = true;
     let dockTouched = false;
@@ -2854,7 +2880,7 @@ async function renderSettingsPersonalize() {
     if (Object.keys(names).length) {
       const answer = await settingsIntegrationAsk('/api/personalize', names, '저장하지 못했어요');
       if (!answer.ok) { error.textContent = answer.error; save.disabled = false; return; }
-      personalizeApply({ title: answer.title });
+      personalizeApply({ title: answer.title, titleHidden: answer.titleHidden });
       dockTouched = dockTouched || answer.refresh === true;
     }
     personalizeSavedNote = { dock: dockTouched };
@@ -2871,7 +2897,7 @@ async function renderSettingsPersonalize() {
   view.append(
     personalizeRow('Dock 아이콘', '', iconLine, iconNote),
     personalizeRow('Dock 이름', 'Dock·앱 전환에 보여요', dock),
-    personalizeRow('워크스페이스 제목', '화면 왼쪽 위에 보여요', title),
+    personalizeRow('워크스페이스 제목', '화면 왼쪽 위에 보여요', title, shownRow),
     error, foot,
   );
   if (personalizeSavedNote) {

@@ -120,6 +120,9 @@ const USES = { slack: true, calendar: true, jira: true, tiro: true, ...(CONFIG.i
 const CALENDAR_ICAL = USES.calendar !== false && !!CONFIG.calendar && CONFIG.calendar.source === 'ical';
 // 화면 헤더·탭 제목. 설정 › 꾸미기에서 바꾸면 이 값도 곧바로 바꾼다(서버를 다시 켜지 않아도 된다).
 let APP_TITLE = CONFIG.title || '내 워크스페이스';
+// 헤더의 제목만 숨기는 스위치(설정 › 꾸미기 `화면에 보이기`). 제목 값 자체(APP_TITLE)는 그대로 두고
+// 화면·탭 이름(document.title)에는 계속 쓴다 — 감추는 건 `#workspaceTitle` 하나뿐이다. 값이 없으면(옛 설치) 보이기.
+let TITLE_HIDDEN = CONFIG.titleHidden === true;
 
 const PORT = Number(process.env.WORKSPACE_PORT || CONFIG.server?.port || 4321);
 // localhost는 항상 열고, extraHost가 있으면 그 주소로도 추가로 연다 (폰·다른 기기용).
@@ -2365,6 +2368,8 @@ const ROUTE_MODULES = [
 const routeCtx = {
   get APP_TITLE() { return APP_TITLE; },
   set APP_TITLE(value) { APP_TITLE = value; },
+  get TITLE_HIDDEN() { return TITLE_HIDDEN; },
+  set TITLE_HIDDEN(value) { TITLE_HIDDEN = value; },
   get exitApp() { return exitApp; },
   USES, CALENDAR_ICAL, CONFIG_PATH, LOCAL_DIR, PUBLIC_DIR,
   readBody, idempotent, integrations, personalize, workflows,

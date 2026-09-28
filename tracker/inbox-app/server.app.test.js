@@ -242,7 +242,7 @@ test('WP-D2 꾸미기 라우트: local/icon.png 한 파일만 쓰고 지우며, 
   assert.equal(plain.headers.get('content-type'), 'image/png');
   assert.ok(Buffer.from(await plain.arrayBuffer()).equals(fs.readFileSync(path.join(__dirname, 'icons', 'icon-512.png'))));
   const first = await (await fetch(app.base + '/api/personalize')).json();
-  assert.deepEqual([first.title, first.dockName, first.customIcon], ['처음 제목', 'Workspace', false]);
+  assert.deepEqual([first.title, first.dockName, first.customIcon, first.titleHidden], ['처음 제목', 'Workspace', false, false], '설정에 값이 없으면 보이기');
 
   // 틀린 그림은 아무것도 쓰지 않는다
   for (const [image, words] of [[fakePng(100, 100), /128px/], [Buffer.from('GIF89a' + 'x'.repeat(40)), /PNG나 JPG/], [fakePng(512, 512, 5 * 1024 * 1024), /5MB/]]) {
@@ -272,12 +272,29 @@ test('WP-D2 꾸미기 라우트: local/icon.png 한 파일만 쓰고 지우며, 
   // 제목만 바꾸면 곧바로 목록 응답에 쓰이고, Dock은 다시 만들지 않는다
   fs.rmSync(request);
   const titled = await (await send('/api/personalize', { title: '  새 제목 ' })).json();
-  assert.deepEqual(titled, { ok: true, title: '새 제목', dockName: 'Workspace', refresh: false });
+  assert.deepEqual(titled, { ok: true, title: '새 제목', dockName: 'Workspace', titleHidden: false, refresh: false });
   assert.equal((await (await fetch(app.base + '/api/items')).json()).title, '새 제목', '서버를 다시 켜지 않아도 된다');
   assert.equal(fs.existsSync(request), false);
   let written = JSON.parse(fs.readFileSync(config, 'utf8'));
   assert.equal(written.title, '새 제목');
   assert.deepEqual(written.server, { port: 1 }, '아는 키만 바꾼다');
+
+  // 헤더의 제목만 숨기는 스위치 — 제목 칸은 안 건드려도 정상 저장되고, 곧바로 목록 응답에 실리며
+  // 요청 표시 파일은 쓰지 않는다(Dock은 그대로라서).
+  fs.rmSync(request, { force: true });
+  const hidden = await (await send('/api/personalize', { titleHidden: true })).json();
+  assert.deepEqual(hidden, { ok: true, title: '새 제목', dockName: 'Workspace', titleHidden: true, refresh: false });
+  assert.equal((await (await fetch(app.base + '/api/items')).json()).titleHidden, true);
+  assert.equal(fs.existsSync(request), false, '제목 숨김은 Dock을 다시 만들라고 하지 않는다');
+  written = JSON.parse(fs.readFileSync(config, 'utf8'));
+  assert.equal(written.titleHidden, true);
+  const unwrong = await send('/api/personalize', { titleHidden: 'yes' });
+  assert.equal(unwrong.status, 400, '불린이 아니면 400');
+  written = JSON.parse(fs.readFileSync(config, 'utf8'));
+  assert.equal(written.titleHidden, true, '틀린 값은 설정을 바꾸지 않는다');
+  const shownAgain = await (await send('/api/personalize', { titleHidden: false })).json();
+  assert.equal(shownAgain.titleHidden, false);
+  assert.equal((await (await fetch(app.base + '/api/personalize')).json()).titleHidden, false, 'GET도 같은 값');
 
   // Dock 이름 — config의 server.dockName, 요청 표시 파일, 앱 위치 경로
   const docked = await (await send('/api/personalize', { dockName: 'My Work' })).json();

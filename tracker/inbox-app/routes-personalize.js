@@ -38,21 +38,26 @@ module.exports = function personalizeRoutes(req, res, url, ctx) {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({
       ok: true, title: ctx.APP_TITLE, dockName: currentDockName(), customIcon: personalize.hasCustomIcon(LOCAL_DIR),
+      titleHidden: ctx.TITLE_HIDDEN,
       titleSaved: typeof config.title === 'string' ? config.title : '',
     }));
     return true;
   }
 
-  // 이름 저장(`title`·`server.dockName`만). 제목은 곧바로 화면에 쓰이고, Dock 이름이 바뀌면 Dock 앱을
-  // 다시 만들어 달라는 표시 파일 하나를 쓴다(프로세스는 띄우지 않는다).
+  // 이름 저장(`title`·`server.dockName`·`titleHidden`만). 제목은 곧바로 화면에 쓰이고, Dock 이름이 바뀌면 Dock 앱을
+  // 다시 만들어 달라는 표시 파일 하나를 쓴다(프로세스는 띄우지 않는다). `titleHidden`은 헤더의 제목만 감추고
+  // 값 자체·Dock은 그대로라 요청 표시 파일을 쓰지 않는다.
   if (url.pathname === '/api/personalize' && req.method === 'POST') {
     readBody(req)
       .then(body => integrations.savePersonalize({ configPath: CONFIG_PATH, current: currentConfigFile(), body, appsDir: applicationsDir() }))
       .then(({ config, changed }) => {
         if (typeof config.title === 'string' && config.title) ctx.APP_TITLE = config.title;
+        if (typeof config.titleHidden === 'boolean') ctx.TITLE_HIDDEN = config.titleHidden;
         if (changed.dockName) personalize.writeRefreshRequest(automationDir(), 'dockName');
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: true, title: ctx.APP_TITLE, dockName: currentDockName(), refresh: changed.dockName }));
+        res.end(JSON.stringify({
+          ok: true, title: ctx.APP_TITLE, dockName: currentDockName(), titleHidden: ctx.TITLE_HIDDEN, refresh: changed.dockName,
+        }));
       })
       .catch((error) => {
         res.writeHead(error.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });

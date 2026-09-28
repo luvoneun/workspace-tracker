@@ -8,7 +8,7 @@
 const path = require('path');
 
 module.exports = function itemsRoutes(req, res, url, ctx) {
-  const { APP_TITLE, CALENDAR_ICAL, PUBLIC_DIR, USES, calendarLive, clientFiles, fs, getCalendarWithLinks, getCustomGroups,
+  const { APP_TITLE, CALENDAR_ICAL, PUBLIC_DIR, TITLE_HIDDEN, USES, calendarLive, clientFiles, fs, getCalendarWithLinks, getCustomGroups,
     getJiraIssueCache, getJiraSync, getLaterTasks, getReportRefs, getSlackSync, getTodayTasks, jiraLive, meetingNotesStatus,
     storage, todayLocal, workflows } = ctx;
 
@@ -35,6 +35,7 @@ module.exports = function itemsRoutes(req, res, url, ctx) {
       jiraSync: getJiraSync(),
       slackSync: getSlackSync(),
       title: APP_TITLE,
+      titleHidden: TITLE_HIDDEN,
       // 앱 화면 파일이 바뀌면 이 값이 달라진다. 브라우저가 이걸 보고 스스로 새로고침한다.
       appVersion: (() => {
         try {

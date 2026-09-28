@@ -1444,10 +1444,13 @@ function paintSyncGear(late) {
 }
 
 function renderDateBar(data) {
+  const head = document.getElementById('workspaceTitle');
   if (data.title) {
-    document.getElementById('workspaceTitle').textContent = data.title;
+    head.textContent = data.title;
     document.title = data.title;
   }
+  // 헤더의 제목만 숨긴다(설정 › 꾸미기 `화면에 보이기`) — document.title은 위에서 그대로 쓴다.
+  head.hidden = data.titleHidden === true;
   const bar = document.getElementById('dateBar');
   bar.replaceChildren();
   const date = document.createElement('span');

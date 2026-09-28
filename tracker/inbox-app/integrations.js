@@ -592,13 +592,14 @@ function registrationKey(config) {
 }
 
 // ---------- 설정 › 꾸미기(이 맥에만) ----------
-// 여기서도 **아는 키만** 바꾼다: `title`(화면 헤더·탭 제목)과 `server.dockName`(Dock 앱 이름).
+// 여기서도 **아는 키만** 바꾼다: `title`(화면 헤더·탭 제목)·`server.dockName`(Dock 앱 이름)·
+// `titleHidden`(헤더의 제목만 숨기는 스위치 — 값·Dock은 그대로 둔다).
 // 저장 방식은 연동 저장과 같다(파일을 새로 읽어 그 위에 얹고, 원자적 교체).
 async function savePersonalize({ configPath, current = {}, body = {}, write = atomicWrite, appsDir = '' } = {}) {
   const personalize = require('./personalize');
   if (!body || typeof body !== 'object') throw bad(MESSAGE.other);
   const next = { ...current };
-  const changed = { title: false, dockName: false };
+  const changed = { title: false, dockName: false, titleHidden: false };
   let touched = false;
   if (body.title !== undefined) {
     const title = personalize.checkTitle(body.title);
@@ -613,6 +614,12 @@ async function savePersonalize({ configPath, current = {}, body = {}, write = at
     // 바꾸는 이름이 이미 있는 남의 앱과 같으면 저장하지 않는다(Dock 앱을 만들 수 없고, 그 앱을 지우지도 않는다).
     if (changed.dockName && personalize.dockNameTaken(appsDir, dockName)) throw bad(personalize.PERSONALIZE_MESSAGE.dockTaken);
     next.server = { ...clone(current.server), dockName };
+    touched = true;
+  }
+  if (body.titleHidden !== undefined) {
+    if (typeof body.titleHidden !== 'boolean') throw bad(MESSAGE.other);
+    changed.titleHidden = body.titleHidden !== (current.titleHidden === true);
+    next.titleHidden = body.titleHidden;
     touched = true;
   }
   if (!touched) throw bad(personalize.PERSONALIZE_MESSAGE.nothing);

@@ -3558,6 +3558,24 @@ test('renderDateBar: 낡음 경고는 톱니바퀴의 점·툴팁으로만 알�
   assert.equal(gear('10:00', { today, calendar: { stale: false, lastSync: today }, slackSync: { stale: false, lastSync: today }, jiraSync: { stale: false, lastSync: today } }).label, '설정', '다 최신이면 점도 말도 없다(점은 낡은 것이 있을 때만 켜진다)');
 });
 
+// WP-M: renderDateBar가 헤더의 제목(`#workspaceTitle`)만 숨긴다 — 값·document.title은 그대로 쓴다.
+test('WP-M renderDateBar: titleHidden이면 헤더 제목만 감추고 값·document.title은 그대로 쓰며, 없으면(옛 설치) 보인다', () => {
+  const app = pureClient();
+  const today = app.run('todayStr()');
+  app.context.document.title = '';
+  app.run(`renderDateBar(${JSON.stringify({ today, title: '내 워크스페이스' })})`);
+  assert.equal(app.nodes.get('workspaceTitle').hidden, false, '값이 없으면(옛 설치) 보이기');
+  assert.equal(app.context.document.title, '내 워크스페이스');
+
+  app.run(`renderDateBar(${JSON.stringify({ today, title: '내 워크스페이스', titleHidden: true })})`);
+  assert.equal(app.nodes.get('workspaceTitle').hidden, true);
+  assert.equal(app.nodes.get('workspaceTitle').textContent, '내 워크스페이스', '제목 값은 그대로 남는다');
+  assert.equal(app.context.document.title, '내 워크스페이스', '창·탭 이름에는 계속 쓰인다');
+
+  app.run(`renderDateBar(${JSON.stringify({ today, title: '내 워크스페이스', titleHidden: false })})`);
+  assert.equal(app.nodes.get('workspaceTitle').hidden, false, '다시 켜면 원래대로 보인다');
+});
+
 // ---------- 지라 띠 카드 (BJR 1단계 — 보기만) ----------
 // 실제 지라는 부르지 않는다. 화면이 받는 모양(`/api/jira/issue`의 응답)만 가짜로 만들어 쓴다.
 const jiraDay = days => {
@@ -7302,6 +7320,47 @@ test('WP-D2 L. 꾸미기 저장: 바뀐 칸만 보내고, 제목은 헤더·탭 
   assert.equal(fx.text("window.findByClass(document.getElementById('settingsPersonalizeView'), 'd-psaved')[0]"), '✓ 바뀌었어요 · Dock은 앱을 닫고 다시 열면 보여요');
   // WP-L: 크롬은 manifest를 곧바로 다시 읽지 않는다 — 사실대로 한 줄
   same(fx.find('d-pinstallnote').map(one => one.textContent), ['크롬 앱에는: 크롬을 다시 켜고(주소창에 about://restart) 앱을 열면 오른쪽 위 「앱 업데이트 있음」 → 업데이트 → 앱을 ⌘Q로 끄고 다시 열기']);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WP-M — 꾸미기: 워크스페이스 제목 `화면에 보이기` 스위치(헤더 `#workspaceTitle`만 숨긴다)
+
+test('WP-M 꾸미기: `화면에 보이기` 스위치는 기존 연동 탭 체크박스 부품(.d-ich)을 재사용하고, 기본은 켜짐(보이기)이며, 제목 칸을 안 건드려도 스위치만으로 저장되고 저장 즉시 헤더가 숨는다', async () => {
+  const fx = personalizeClient({}, [
+    { body: { ok: true, title: '○○의 워크스페이스', dockName: 'Workspace', titleHidden: true, refresh: false } },
+  ]);
+  await fx.app.run('renderSettingsPersonalize()');
+  const row = () => fx.find('d-ich')[0];
+  assert.equal(row().children[0].type, 'checkbox');
+  assert.equal(row().children[0].checked, true, '설정에 값이 없으면(옛 설치 포함) 기본은 보이기');
+  assert.equal(row().children[0].getAttribute('aria-label'), '워크스페이스 제목 화면에 보이기');
+  assert.equal(fx.text("window.findByClass(document.getElementById('settingsPersonalizeView'), 'd-ich')[0]"),
+    '화면에 보이기끄면 왼쪽 위 제목만 숨겨요 — 창 이름에는 그대로 쓰여요');
+  assert.equal(fx.app.run("document.getElementById('workspaceTitle').hidden"), false);
+
+  // 스위치만 끄고 제목 칸은 그대로 두어도 `바꾼 것이 없어요`가 아니라 정상 저장된다
+  row().children[0].checked = false;
+  row().children[0].listeners.change();
+  await fx.button('저장').listeners.click();
+  same(fx.posts()[0], { url: '/api/personalize', method: 'POST', body: { titleHidden: true } }, '바뀐 칸(스위치)만 보낸다');
+  assert.equal(fx.find('d-derr')[0].textContent, '');
+  assert.equal(fx.app.nodes.get('workspaceTitle').hidden, true, '새로고침 없이 곧바로 헤더 제목이 숨는다');
+  assert.equal(fx.app.context.document.title, '○○의 워크스페이스', '창·탭 이름에는 계속 쓰인다');
+});
+
+test('WP-M 꾸미기: 저장된 값이 숨김이면 스위치도 꺼져 있고, 다시 켜서 저장하면 헤더가 즉시 되돌아온다', async () => {
+  const fx = personalizeClient({ titleHidden: true }, [
+    { body: { ok: true, title: '○○의 워크스페이스', dockName: 'Workspace', titleHidden: false, refresh: false } },
+  ]);
+  fx.app.run("document.getElementById('workspaceTitle').hidden = true"); // 새로고침 뒤(GET /api/items 반영) 이미 숨어 있는 상황을 흉내
+  await fx.app.run('renderSettingsPersonalize()');
+  assert.equal(fx.find('d-ich')[0].children[0].checked, false, '저장된 값이 숨김이면 스위치도 꺼져 있다');
+
+  fx.find('d-ich')[0].children[0].checked = true;
+  fx.find('d-ich')[0].children[0].listeners.change();
+  await fx.button('저장').listeners.click();
+  same(fx.posts()[0], { url: '/api/personalize', method: 'POST', body: { titleHidden: false } });
+  assert.equal(fx.app.nodes.get('workspaceTitle').hidden, false, '켜면 원래 제목으로 돌아간다');
 });
 
 test('WP-D2 L. 꾸미기 아이콘: 형식·크기는 화면에서 먼저 거르고, 자른 그림은 저장을 눌러야 보내며, 되돌리기는 reset 한 번', async () => {
