@@ -2112,3 +2112,12 @@ test('WP-I run-task.sh: 허용 도구를 비우면 --allowedTools를 넘기지 �
   assert.match(log, /^───── \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} slack-classify 종료 \(exit 0\)$/m);
   fs.rmSync(home, { recursive: true, force: true });
 });
+
+test('slack-collect: Claude 로그인이 풀려 분류가 실패하면 그 말을 수집 기록으로 옮겨 앱의 로그인 안내가 잡는다', () => {
+  const { claudeAuthPhrase } = require('./slack-collect');
+  const { CLAUDE_AUTH_RE } = require('./server');
+  const phrase = claudeAuthPhrase('…\nFailed to authenticate: OAuth session expired and could not be refreshed\n');
+  assert.equal(phrase, 'OAuth session expired and could not be refreshed');
+  assert.ok(CLAUDE_AUTH_RE.test(`my-todo 채널 확인 실패 — 분류 실패(exit 1) — ${phrase}`), '서버 안내 규칙이 이 줄을 잡는다');
+  assert.equal(claudeAuthPhrase('authentication_error from connector'), '', '다른 인증 오류는 아니다');
+});

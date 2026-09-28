@@ -270,6 +270,18 @@ function buildPrompt(skillText, input) {
   ].join('\n');
 }
 
+// claude가 자기 로그인에 대해 남기는 말(server.js의 CLAUDE_AUTH_RE와 같은 목록). 찾으면 그 말, 없으면 ''.
+const CLAUDE_AUTH_PHRASES = [/Failed to authenticate\. API Error: 401/i, /OAuth session expired and could not be refreshed/i, /Invalid API key · Please run \/login/i];
+function claudeAuthPhrase(text) {
+  for (const re of CLAUDE_AUTH_PHRASES) { const hit = String(text || '').match(re); if (hit) return hit[0]; }
+  return '';
+}
+// run-task.sh가 slack-classify 실행의 오류 출력을 쌓는 로그의 끝부분(없으면 '').
+function classifyLogTail() {
+  const dir = process.env.AUTOMATION_LOG_DIR || path.join(os.homedir(), '.local', 'share', 'workspace-automation', 'logs');
+  try { const text = fs.readFileSync(path.join(dir, 'slack-classify.log'), 'utf8'); return text.slice(-4000); } catch { return ''; }
+}
+
 function runClassifier(runTask, prompt) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slack-classify-'));
   const outFile = path.join(dir, 'answer.txt');
@@ -368,7 +380,12 @@ async function processChannel(ctx, channel, messages) {
       }
       const skillText = fs.readFileSync(path.join(WORKSPACE_DIR, '.claude', 'skills', channel.skill), 'utf8');
       const run = await runClassifier(ctx.runTask, buildPrompt(skillText, makeInput(entries)));
-      if (run.status !== 0) throw new Error(`분류 실패(exit ${run.status})`);
+      if (run.status !== 0) {
+        // Claude 로그인이 풀려 실패했으면 claude가 남긴 그 말을 이 기록에 그대로 옮긴다 — 앱의 "로그인이 풀렸어요"
+        // 안내(server.js CLAUDE_AUTH_RE)가 슬랙 수집 기록에서 이 말을 찾기 때문이다(Claude 출력은 slack-classify.log에 따로 쌓인다).
+        const auth = claudeAuthPhrase(`${run.text || ''}\n${classifyLogTail()}`);
+        throw new Error(`분류 실패(exit ${run.status})${auth ? ` — ${auth}` : ''}`);
+      }
       try { answer = validate(run.text, entries, channel.type); }
       catch (error) { throw new Error(`분류 답을 쓸 수 없음 — ${error.message}`); }
     }
@@ -494,4 +511,4 @@ if (require.main === module) {
     process.exitCode = 1;
   });
 }
-module.exports = { validate, isSystem, buildPrompt, shareSource };
+module.exports = { claudeAuthPhrase, validate, isSystem, buildPrompt, shareSource };
