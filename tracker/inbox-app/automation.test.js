@@ -2251,3 +2251,13 @@ test('원문 규칙(slackPlain·firstLine): 모르는 사람은 표시 이름·i
   assert.equal(firstLine('> 인용한 글입니다 길게 적어 둠\n메모'), '인용한 글입니다 길게 적어 둠');
   assert.equal(firstLine(''), '');
 });
+
+test('원문 모드 슬랙 표기 정리는 단어 경계에서만 — 범위 표기(3~5명)·곱셈(2*3*4)·주소 속 콜론은 망가뜨리지 않는다', () => {
+  const { slackPlain } = require('./slack-collect');
+  assert.equal(slackPlain('3~5명, 7~9명'), '3~5명, 7~9명');
+  assert.equal(slackPlain('9/1~9/5, 9/8~9/12'), '9/1~9/5, 9/8~9/12');
+  assert.equal(slackPlain('2*3*4 와 a*b'), '2*3*4 와 a*b');
+  assert.equal(slackPlain('status:done:ok http://localhost:3000/api:v2:x'), 'status:done:ok http://localhost:3000/api:v2:x');
+  const { firstLine } = require('./slack-collect');
+  assert.equal(firstLine(slackPlain('*중요* ~취소~ 확인 :smile: 좋아요 :+1:')), '중요 취소 확인 좋아요');
+});

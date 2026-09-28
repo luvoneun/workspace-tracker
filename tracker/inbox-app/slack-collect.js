@@ -276,9 +276,10 @@ function slackPlain(text, names = {}) {
     .replace(/<((?:https?|mailto):[^<>\s]+)>/g, (whole, url) => url.replace(/^mailto:/, ''))
     .replace(/```/g, '')
     .replace(/`/g, '')
-    .replace(/:(?=[a-z0-9_+'-]*[a-z])[a-z0-9_+'-]+:/g, '')
-    .replace(/\*([^*\n]+)\*/g, '$1')
-    .replace(/~([^~\n]+)~/g, '$1')
+    // 그림 글자·굵게·취소선은 슬랙처럼 앞뒤가 단어 경계일 때만 — `3~5명`, `2*3*4`, `api:v2:x` 같은 글자를 망가뜨리지 않게.
+    .replace(/(^|\s):[a-z0-9_+'-]+:(?=$|\s)/gm, '$1')
+    .replace(/(^|[\s(])\*(\S(?:[^*\n]*\S)?)\*(?=$|[\s).,!?])/gm, '$1$2')
+    .replace(/(^|[\s(])~(\S(?:[^~\n]*\S)?)~(?=$|[\s).,!?])/gm, '$1$2')
     .replace(/(^|[\s(])_([^_\n]+)_(?=$|[\s).,!?])/gm, '$1$2')
     .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 }

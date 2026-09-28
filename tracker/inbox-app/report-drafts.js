@@ -11,12 +11,16 @@ const bucket = item => `${project(item)}:${heading(item)}:${topic(item)}`;
 const evidence = item => ({ id: item.id, description: item.description, status: item.status, type: item.type, outcome: item.outcome || '', label: item.label || item.group || item.project || '그룹 없음', permalink: /^https?:\/\//.test(item.permalink || '') ? item.permalink : null });
 // 사람이 직접 쓰는 유일한 구역 — 자동 초안은 이 소제목을 만들지 않는다.
 const PLAN_HEADING = '다음 주 계획';
-// 할 일 문구는 첫 문장(마침표·물음표·느낌표 뒤 빈칸이나 끝)까지, 그래도 80자가 넘으면 80자 + … — 슬랙 원문처럼
-// 긴 문구가 보고 한 줄을 통째로 차지하지 않게. 짧은 문구는 그대로다(근거 `evidence`에는 전문이 남는다).
+// 할 일 문구가 80자를 넘을 때만 줄인다(슬랙 원문처럼 긴 문구가 보고 한 줄을 통째로 차지하지 않게) — 20자 넘게 간 뒤의
+// 첫 문장 끝(마침표·물음표·느낌표 뒤 빈칸이나 끝)까지, 그런 끝이 없으면 80자 + …. 80자 이하 문구는 그대로다(기존 보고 불변,
+// `1. 정리 2. 공유`·`Mr. Kim` 같은 짧은 문구가 조각나지 않게). 근거 `evidence`에는 전문이 남는다.
 const firstSentence = text => {
   const value = String(text || '').trim();
-  const end = /[.?!。？！](?=\s|$)/.exec(value);
-  const cut = end ? value.slice(0, end.index + 1) : value;
+  if (value.length <= 80) return value;
+  const end = /[.?!。？！](?=\s|$)/g;
+  let match;
+  while ((match = end.exec(value)) && match.index < 20);
+  const cut = match && match.index + 1 <= 80 ? value.slice(0, match.index + 1) : value;
   return cut.length > 80 ? `${cut.slice(0, 80).trimEnd()}…` : cut;
 };
 const taskText = item => (['task', 'bug'].includes(item.type) ? firstSentence(item.description) : item.description);
