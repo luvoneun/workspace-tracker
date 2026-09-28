@@ -49,6 +49,14 @@ export PATH="$HOME/.local/bin:${NODE_BIN:+$NODE_BIN:}/opt/homebrew/bin:/usr/loca
 
 # 테스트에서 가짜 실행 파일로 바꿔 끼울 수 있게 해둔다. 지정하지 않으면 예전과 같다.
 CLAUDE="${CLAUDE_BIN:-$(command -v claude || echo "$HOME/.local/bin/claude")}"
+# 백그라운드(launchd)에서는 터미널에서 로그인해 둔 Claude Code가 로그인 갱신을 못 해
+# "OAuth session expired and could not be refreshed"로 실패하는 맥이 있다. 그럴 때 쓰는 오래 가는 토큰
+# (`claude setup-token`으로 만든 것)을 이 파일에 두면 그걸로 부른다. 값은 로그·화면에 남기지 않는다.
+CLAUDE_TOKEN_FILE="${WORKSPACE_CLAUDE_TOKEN_FILE:-$HOME/.config/workspace-claude-token}"
+if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -r "$CLAUDE_TOKEN_FILE" ]; then
+  CLAUDE_CODE_OAUTH_TOKEN="$(tr -d '[:space:]' < "$CLAUDE_TOKEN_FILE")"
+  [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ] && export CLAUDE_CODE_OAUTH_TOKEN || unset CLAUDE_CODE_OAUTH_TOKEN
+fi
 
 mkdir -p "$LOG_DIR"
 cd "$WORKSPACE" || exit 1

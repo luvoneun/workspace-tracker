@@ -1633,3 +1633,19 @@ test('WP-F slack-capture.sh: 할 일 채널 없이도 켜진 채널만 읽고 �
   assert.match(none.logText(), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} 켜진 채널이 없어 건너뛰어요$/m);
   assert.doesNotMatch(none.logText(), /채널 확인 실패/);
 });
+
+test('run-task.sh: 오래 가는 Claude 토큰 파일이 있으면 그 값을 CLAUDE_CODE_OAUTH_TOKEN으로 넘기고, 로그에는 남기지 않는다', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-claude-token-'));
+  const claude = path.join(home, 'fake-claude.sh');
+  fs.writeFileSync(claude, `#!/bin/bash\nprintf '%s' "\${CLAUDE_CODE_OAUTH_TOKEN:-없음}" > "${path.join(home, 'seen.txt')}"\necho ok\n`);
+  fs.chmodSync(claude, 0o755);
+  const tokenFile = path.join(home, 'claude-token');
+  const env = { WORKSPACE_DIR: home, AUTOMATION_LOG_DIR: path.join(home, 'logs'), CLAUDE_BIN: claude, WORKSPACE_CLAUDE_TOKEN_FILE: tokenFile };
+  assert.equal(runScript(automationScript('run-task.sh'), ['ok', '프롬프트', 'Read'], env).status, 0);
+  assert.equal(fs.readFileSync(path.join(home, 'seen.txt'), 'utf8'), '없음', '파일이 없으면 넘기지 않는다');
+  fs.writeFileSync(tokenFile, 'sk-ant-oat01-TESTTOKEN\n', { mode: 0o600 });
+  assert.equal(runScript(automationScript('run-task.sh'), ['ok', '프롬프트', 'Read'], env).status, 0);
+  assert.equal(fs.readFileSync(path.join(home, 'seen.txt'), 'utf8'), 'sk-ant-oat01-TESTTOKEN');
+  assert.doesNotMatch(fs.readFileSync(path.join(home, 'logs', 'ok.log'), 'utf8'), /TESTTOKEN/, '토큰 값은 로그에 없다');
+  fs.rmSync(home, { recursive: true, force: true });
+});
