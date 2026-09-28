@@ -1045,3 +1045,12 @@ test('slackTokenCheck: 앱 수준 토큰(xapp-)·xoxp-가 아닌 토큰은 슬�
   await assert.rejects(integrations.slackTokenCheck('xoxe-1-abc', request), /xoxp-로 시작해요/, '교체용 새로고침 토큰(xoxe-)은 아니다');
   assert.equal(called, 0, '슬랙에 보내지 않는다');
 });
+
+test('Claude 로그인 풀림 판단은 claude 자신의 로그인 문구만 — 커넥터·API의 흔한 인증 오류는 로그인 안내로 바꾸지 않는다', () => {
+  const { CLAUDE_AUTH_RE } = require('./server');
+  assert.ok(CLAUDE_AUTH_RE.test('Failed to authenticate. API Error: 401 OAuth session expired and could not be refreshed'));
+  assert.ok(CLAUDE_AUTH_RE.test('Invalid API key · Please run /login'));
+  for (const other of ['tiro-mcp: authentication_error (token expired)', 'Failed to authenticate with Jira', 'Not logged in to tiro']) {
+    assert.equal(CLAUDE_AUTH_RE.test(other), false, other);
+  }
+});
