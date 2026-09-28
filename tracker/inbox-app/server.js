@@ -2090,6 +2090,45 @@ const selfcheck = require('./selfcheck').createSelfcheck({
   },
 });
 
+// ---------- 체크인 (GET·POST /api/checkin, WP-N) ----------
+// 설치 3일째·8일째에 앱 안의 작은 창으로 묻고 답을 구글 폼으로 익명 제출한다(판단·전송은 checkin.js, 상태는 `local/checkin.json`).
+// 만든 사람의 설치(업데이트 갈래 `main`)에서는 띄우지도 보내지도 않는다. launchd로 띄운 설치본(WORKSPACE_MANAGED)에서만 켜지고,
+// 개발용 서버·테스트·픽스처는 기본 꺼짐이다(`WORKSPACE_CHECKIN=1`로 켤 수 있다 — 그래도 main 갈래면 꺼짐).
+// 테스트·픽스처(`WORKSPACE_NO_REMOTE_CHECK`·`WORKSPACE_FIXTURE`)에서는 실제 구글에 닿지 않는다 — `setCheckinFetchForTests`로 가짜만 끼운다.
+let checkinFetch = null;
+const checkinTest = { localDir: null, today: null, enabled: null, timeoutMs: null };
+function setCheckinFetchForTests(fn) { checkinFetch = typeof fn === 'function' ? fn : null; }
+// 테스트 전용 — 임시 `local/`·오늘 날짜·켜짐 여부·시간 제한을 끼운다(값을 안 주면 원래대로).
+function setCheckinForTests(options = {}) {
+  checkinTest.localDir = options.localDir || null;
+  checkinTest.today = options.today || null;
+  checkinTest.enabled = typeof options.enabled === 'boolean' ? options.enabled : null;
+  checkinTest.timeoutMs = options.timeoutMs || null;
+  if ('fetch' in options) setCheckinFetchForTests(options.fetch);
+}
+function checkinRequest(...args) {
+  if (checkinFetch) return checkinFetch(...args);
+  if (process.env.WORKSPACE_NO_REMOTE_CHECK || process.env.WORKSPACE_FIXTURE) return Promise.reject(new Error('바깥 전송을 끈 자리예요'));
+  return fetch(...args);
+}
+function checkinEnabled() {
+  if (checkinTest.enabled !== null) return checkinTest.enabled && updateChannel() !== 'main';
+  if (updateChannel() === 'main') return false;
+  if (process.env.WORKSPACE_CHECKIN === '1') return true;
+  if (process.env.WORKSPACE_CHECKIN === '0') return false;
+  return !!process.env.WORKSPACE_MANAGED && !process.env.WORKSPACE_NO_REMOTE_CHECK && !process.env.WORKSPACE_FIXTURE;
+}
+const checkin = require('./checkin').createCheckin({
+  localDir: () => checkinTest.localDir || LOCAL_DIR,
+  today: () => checkinTest.today || todayLocal(),
+  enabled: checkinEnabled,
+  version: appVersion,
+  // 켠 연동 — 연동 탭·점검하기와 같은 기준(selfcheck.connectedFlags). 이름만 쓰고 토큰·주소는 싣지 않는다.
+  integrations: () => require('./selfcheck').connectedFlags(integrations.readIntegrations(currentConfigFile(), { claude: false })),
+  request: checkinRequest,
+  timeoutMs: () => checkinTest.timeoutMs,
+});
+
 // 앱을 끝내는 길은 이 하나뿐이다 — 테스트는 여기를 갈아 끼워 실제 종료가 절대 일어나지 않게 한다.
 let exitApp = code => process.exit(code);
 function setExitForTests(fn) { exitApp = typeof fn === 'function' ? fn : (code => process.exit(code)); }
@@ -2117,7 +2156,7 @@ const CLIENT_BLOCKED = new Set([
   'task-batch.js', 'slack-history.js', 'slack-collect.js', 'import-record.js', 'browser-fixture.js', 'migrate.js',
   'integrations.js', 'ical.js', 'calendar-live.js', 'personalize.js', 'news.js', 'test-support.js',
   'routes-jira.js', 'routes-integrations.js', 'routes-app.js', 'routes-personalize.js', 'routes-items.js',
-  'routes-track.js', 'selfcheck.js',
+  'routes-track.js', 'selfcheck.js', 'checkin.js',
 ]);
 function isClientFile(name) {
   if (!/^[A-Za-z0-9][\w.-]*\.(js|css)$/.test(name)) return false;   // 이름 한 칸짜리(하위 경로 없음)만
@@ -2374,6 +2413,7 @@ const ROUTE_MODULES = [
   require('./routes-integrations'),
   require('./routes-app'),
   require('./routes-personalize'),
+  checkin.route,
 ];
 const routeCtx = {
   get APP_TITLE() { return APP_TITLE; },
@@ -2476,4 +2516,6 @@ module.exports = {
   setSelfcheckFetchForTests, selfcheck,
   // WP-L 인증 없이 여는 경로(아이콘·manifest) — 목록이 늘지 않았는지 테스트가 본다.
   publicAssetRequest,
+  // WP-N 체크인 — 가짜 전송·임시 local/·오늘 날짜를 끼우는 테스트·픽스처 전용 길.
+  setCheckinFetchForTests, setCheckinForTests, checkin,
 };

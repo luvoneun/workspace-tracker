@@ -43,7 +43,20 @@ if(require.main===module){
   const {root,env}=prepareFixture();
   Object.assign(process.env,env);
   const port=Number(process.env.WORKSPACE_FIXTURE_PORT||4322);
-  const {server}=require('./server');server.listen(port,'127.0.0.1',()=>console.log(`Isolated browser QA: http://localhost:${port}`));
+  const serverModule=require('./server');const {server}=serverModule;
+  // 체크인 창(WP-N)은 픽스처에서 기본 꺼짐이다. `WORKSPACE_CHECKIN=1`이면 켜고, 실제 구글 대신 가짜 전송을 끼운다
+  // (`WORKSPACE_CHECKIN_FAKE=fail`이면 보내기가 실패해 대기로 남는다). `WORKSPACE_CHECKIN_DAYS=3`(또는 8)이면 그만큼 전에 설치한 것처럼 시작한다.
+  if(process.env.WORKSPACE_CHECKIN==='1'){
+    const fail=process.env.WORKSPACE_CHECKIN_FAKE==='fail';
+    serverModule.setCheckinFetchForTests(async()=>{if(fail)throw new Error('가짜 오프라인');return new Response('ok',{status:200});});
+    const days=Number(process.env.WORKSPACE_CHECKIN_DAYS||0);
+    if(days>0){
+      const day=n=>{const d=new Date();d.setDate(d.getDate()-n);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
+      const openDays=[...Array(days>=8?5:2).keys()].map(n=>day(n+1)).reverse();
+      fs.writeFileSync(path.join(env.WORKSPACE_LOCAL_DIR,'checkin.json'),JSON.stringify({id:'fixture-anon',firstDay:day(days),openDays,rounds:{d3:{state:'pending'},d8:{state:'pending'}}},null,2));
+    }
+  }
+  server.listen(port,'127.0.0.1',()=>console.log(`Isolated browser QA: http://localhost:${port}`));
   // Ctrl+C(SIGINT)·kill <PID>(SIGTERM) 모두 임시 폴더를 치우고 끝난다.
   const stop=()=>{if(server.closeAllConnections)server.closeAllConnections();server.close(()=>{fs.rmSync(root,{recursive:true,force:true});process.exit(0);});};
   process.on('SIGINT',stop);process.on('SIGTERM',stop);

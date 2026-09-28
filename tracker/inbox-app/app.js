@@ -4897,7 +4897,8 @@ setInterval(() => {
   if (!document.hidden && !isTyping()) { load(); fetchAutomationStatus(); }
 }, 5 * 60 * 1000);
 
-load();
+// 첫 목록을 그린 뒤 체크인(설치 3일째·8일째 질문)을 한 번 묻는다(checkin-ui.js — 방해될 때는 미룬다).
+load().finally(() => { if (typeof checkinStart === 'function') checkinStart(); });
 refreshStorageStatus(); // 목록을 못 불러오는 상황에서도 저장이 멈춘 이유는 보이게
 fetchAutomationStatus(); // 설정을 열어보지 않아도 톱니바퀴에 실패 여부가 바로 보이게
 // 새 버전(톱니바퀴의 파란 점)도 설정을 열지 않고 보이게 — 페이지를 열 때 한 번, 그 뒤 6시간마다 서버가 이미 가진
