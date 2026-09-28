@@ -6528,9 +6528,10 @@ test('WP-D1 B. 슬랙 ① 토큰: 세 줄 안내 + 토큰 받는 곳 + 요청 �
   same(steps.children.filter(one => one.className !== 'ln').map(one => [one.textContent, one.className]),
     [['① 토큰', 'on'], ['② 채널', ''], ['③ 확인', '']]);
   const how = fx.shape("window.findByClass(document.getElementById('settingsIntegrationsView').children[1], 'd-ihow')[0]").text;
-  assert.equal(how, '팀 슬랙 앱 페이지가 열려요(영어 화면이에요).왼쪽 OAuth & Permissions → Install to Workspace(이미 했으면 Reinstall) → 허용토큰이 두 개 보여요 — xoxp-로 시작하는 User OAuth Token 옆 Copy. xoxb-로 시작하는 Bot 토큰이 아니에요.');
+  assert.equal(how, '팀 슬랙 앱의 OAuth & Permissions 화면이 열려요(영어 화면이에요 — 다른 화면이면 왼쪽 메뉴에서 골라요).Install to Workspace(이미 했으면 Reinstall) → 허용토큰이 두 개 보여요 — xoxp-로 시작하는 User OAuth Token 옆 Copy. xoxb-로 시작하는 Bot 토큰이 아니에요.');
   const open = fx.button('slack', '토큰 받는 곳 열기 ↗');
-  assert.equal(open.href, 'https://api.slack.com/apps/A0XXXX');
+  assert.equal(open.href, 'https://api.slack.com/apps/A0XXXX/oauth', '토큰이 있는 OAuth & Permissions 화면으로 바로');
+  assert.equal(fx.app.run("settingsSlackAppUrl('https://api.slack.com/apps/A0XXXX/oauth')"), 'https://api.slack.com/apps/A0XXXX/oauth', '이미 하위 화면이면 그대로');
   assert.equal(open.target, '_blank');
   assert.equal(open.rel, 'noopener noreferrer');
 

@@ -714,7 +714,13 @@ const SETTINGS_EXAMPLE_VALUES = ['https://내회사.atlassian.net', '나@내회�
 const settingsRealValue = value => (SETTINGS_EXAMPLE_VALUES.includes(String(value || '').trim()) ? '' : value);
 // 팀 슬랙 앱 주소를 모르면 슬랙 앱 목록 화면으로 보낸다(서버가 주는 값과 같은 기본값).
 const SETTINGS_SLACK_APPS_URL = 'https://api.slack.com/apps';
-const settingsSlackAppUrl = value => (/^https:\/\/\S+$/.test(String(value || '').trim()) ? String(value).trim() : SETTINGS_SLACK_APPS_URL);
+// 팀 앱 주소만 적혀 있으면(`…/apps/A0XXXX`) 토큰이 있는 OAuth & Permissions 화면(`/oauth`)으로 바로 보낸다 —
+// 앱 첫 화면(Basic Information)에서는 토큰이 안 보여 헷갈렸다.
+const settingsSlackAppUrl = (value) => {
+  const url = String(value || '').trim();
+  if (!/^https:\/\/\S+$/.test(url)) return SETTINGS_SLACK_APPS_URL;
+  return /^https:\/\/api\.slack\.com\/apps\/[A-Za-z0-9]+\/?$/.test(url) ? `${url.replace(/\/$/, '')}/oauth` : url;
+};
 // 슬랙 채널 이름 규칙대로 화면에서 정리한다 — 소문자·숫자·`-`·`_`만 80자, 띄어쓰기는 `-`로.
 const settingsSlackChannelName = value => String(value || '').trim().toLowerCase()
   .replace(/\s+/g, '-').replace(/[^a-z0-9_-]/g, '').slice(0, 80);
@@ -1435,8 +1441,8 @@ function settingsSlackWizard(card, data, mode = 'new') {
     const how = document.createElement('p');
     how.className = 'd-ihow';
     settingsRich(how, [
-      '팀 슬랙 앱 페이지가 열려요(영어 화면이에요).', ['br'],
-      '왼쪽 ', ['b', 'OAuth & Permissions'], ' → ', ['b', 'Install to Workspace'], '(이미 했으면 Reinstall) → 허용', ['br'],
+      '팀 슬랙 앱의 ', ['b', 'OAuth & Permissions'], ' 화면이 열려요(영어 화면이에요 — 다른 화면이면 왼쪽 메뉴에서 골라요).', ['br'],
+      ['b', 'Install to Workspace'], '(이미 했으면 Reinstall) → 허용', ['br'],
       '토큰이 두 개 보여요 — ', ['b', 'xoxp-로 시작하는 User OAuth Token'], ' 옆 ', ['b', 'Copy'], '. ',
       ['code', 'xoxb-'], '로 시작하는 Bot 토큰이 아니에요.',
     ]);
