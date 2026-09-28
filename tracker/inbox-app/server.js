@@ -2269,7 +2269,8 @@ const handleRequest = (req, res) => {
   let filePath = url.pathname === '/' ? '/index.html' : url.pathname;
   // 앱에 내장한 글꼴(Pretendard)도 화면 파일과 같은 길로 나간다. 인증 예외(publicAsset)에는 넣지 않는다.
   // 화면 코드(`*.js`/`*.css`)는 isClientFile이 정한다 — 서버 파일·테스트·픽스처는 거기서 막힌다.
-  if (!['/index.html','/manifest.webmanifest'].includes(filePath)
+  // manifest는 파일이 아니라 꾸미기를 따라 만든다(routes-personalize.js).
+  if (filePath !== '/index.html'
     && !(filePath.startsWith('/') && !filePath.slice(1).includes('/') && isClientFile(filePath.slice(1)))
     && !/^\/icons\/[\w-]+\.(png|svg)$/.test(filePath) && !/^\/fonts\/[\w-]+\.woff2$/.test(filePath)) {
     res.writeHead(404); res.end('Not found'); return;
@@ -2387,12 +2388,15 @@ const routeCtx = {
   createDecision, createIdea, promoteIdeaToToday, setTrackJira, setTrackGroup, setIdeaProject, setTrackDue, setTrackDoing,
   setTrackWho, setTrackPriority, setTrackDescription, removeTrackItem, toggleTrackStatus,
 };
+// 홈 화면 추가 때 브라우저가 로그인 정보 없이 가져가는 앱 아이콘·manifest만 인증 없이 연다(DECISIONS 2026-09-20).
+function publicAssetRequest(req) {
+  return req.method==='GET' && /^\/(icons\/[\w-]+\.png|manifest\.webmanifest)(\?.*)?$/.test(req.url||'');
+}
 function safeHandle(req, res) {
   try {
     if(req.method==='GET')readScope={files:new Map()};
     const host = req.headers.host || '';
-    // 홈 화면 추가 때 브라우저가 로그인 정보 없이 가져가는 앱 아이콘·manifest만 인증 없이 연다.
-    const publicAsset=req.method==='GET' && /^\/(icons\/[\w-]+\.png|manifest\.webmanifest)(\?.*)?$/.test(req.url||'');
+    const publicAsset=publicAssetRequest(req);
     if(!publicAsset && !remoteAuthorized(req)) {res.writeHead(401,{'WWW-Authenticate':'Basic realm="Workspace"'});res.end('Authentication required');return;}
     const hostname = host.split(':')[0];
     if (!['localhost','127.0.0.1',EXTRA_HOST].filter(Boolean).includes(hostname)) { res.writeHead(403); res.end('Forbidden host'); return; }
@@ -2455,4 +2459,6 @@ module.exports = {
   setRemoteFetchForTests, setLatestReleaseForTests, refreshRemoteNews, updateOffer,
   // WP-K 점검하기 — 바깥 확인을 가짜로 끼우는 테스트·픽스처 전용 길(끼우면 30초 캐시도 비운다).
   setSelfcheckFetchForTests, selfcheck,
+  // WP-L 인증 없이 여는 경로(아이콘·manifest) — 목록이 늘지 않았는지 테스트가 본다.
+  publicAssetRequest,
 };

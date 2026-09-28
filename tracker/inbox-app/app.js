@@ -3876,8 +3876,99 @@ function guideRich(node, parts) {
   return node;
 }
 
+// ---------- 앱으로 설치 (크롬 PWA — WP-L) ----------
+// 기본 창은 크롬의 `앱으로 설치`다(DECISIONS 2026-09-28) — 창의 주인이 워크스페이스가 되어 Dock·⌘Tab에 아이콘이
+// 따로 뜨고 창이 하나로 모인다. Dock 앱(실행기)은 크롬이 없거나 설치하지 않은 사람을 위한 예비 길로 남는다.
+// - 설치된 창(standalone)에서는 권하지 않는다.
+// - 크롬이 `beforeinstallprompt`를 주면 잡아 두고 `설치하기` 버튼을 보인다(누르면 크롬의 설치 창).
+// - 이벤트가 없으면(이미 설치했거나 크롬이 아님) 크롬 메뉴 길을 글로 알린다.
+// - `appinstalled`가 오면 권유를 치우고 한 번 알린다.
+// 권유 줄은 두 군데(사용설명서의 첫 줄 · 설정 › 꾸미기)라, 만든 줄을 기억해 두고 상태가 바뀌면 그 자리에서 다시 채운다.
+const APP_INSTALL_DONE_WORDS = '설치했어요 · 새 창의 아이콘을 Dock에 유지해 주세요';
+let appInstallEvent = null;       // 잡아 둔 beforeinstallprompt(한 번 쓰면 비운다)
+let appInstallDone = false;       // 이 창에서 설치를 마쳤다(accepted 또는 appinstalled)
+let appInstallNoticed = false;    // appinstalled 알림은 한 번만
+let appInstallSlots = [];         // [{ node, paint }] — 다시 채울 줄
+
+function appInstallStandalone() {
+  try {
+    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      && window.matchMedia('(display-mode: standalone)').matches) return true;
+  } catch { /* 모르면 일반 탭으로 본다 */ }
+  return typeof navigator !== 'undefined' && navigator.standalone === true;
+}
+
+// 'standalone'(설치된 창) · 'done'(방금 설치) · 'prompt'(버튼) · 'manual'(글 안내)
+function appInstallState() {
+  if (appInstallStandalone()) return 'standalone';
+  if (appInstallDone) return 'done';
+  return appInstallEvent ? 'prompt' : 'manual';
+}
+
+function appInstallOnPrompt(event) {
+  if (appInstallStandalone()) return;
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  appInstallEvent = event || null;
+  appInstallRefresh();
+}
+
+function appInstallOnInstalled() {
+  appInstallEvent = null;
+  appInstallDone = true;
+  appInstallRefresh();
+  if (appInstallNoticed) return;
+  appInstallNoticed = true;
+  if (typeof showNotice === 'function') showNotice(`앱으로 ${APP_INSTALL_DONE_WORDS}`);
+}
+
+async function appInstallRun() {
+  const event = appInstallEvent;
+  if (!event || typeof event.prompt !== 'function') { appInstallEvent = null; appInstallRefresh(); return; }
+  appInstallEvent = null; // 크롬의 설치 창은 이벤트 하나에 한 번만 뜬다
+  try {
+    await event.prompt();
+    const choice = event.userChoice ? await event.userChoice : null;
+    if (choice && choice.outcome === 'accepted') appInstallDone = true;
+  } catch { /* 창이 뜨지 않았으면 글 안내로 돌아간다 */ }
+  appInstallRefresh();
+}
+
+function appInstallRefresh() {
+  appInstallSlots = appInstallSlots.filter(slot => slot.node && slot.node.isConnected !== false);
+  appInstallSlots.forEach(slot => slot.paint());
+}
+
+function appInstallRemember(node, paint) {
+  appInstallSlots.push({ node, paint });
+  paint();
+  return node;
+}
+
+// 권유의 몸통(설치된 창에서는 빈 배열) — 사용설명서와 꾸미기가 같은 말을 쓴다.
+function appInstallWords(state) {
+  if (state === 'done') return [document.createTextNode(APP_INSTALL_DONE_WORDS)];
+  if (state === 'prompt') {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'd-btn sm acc d-installbtn';
+    button.textContent = '설치하기';
+    button.addEventListener('click', appInstallRun);
+    return [button, document.createTextNode(' Dock·⌘Tab에 워크스페이스 아이콘이 따로 떠요')];
+  }
+  if (state === 'manual') {
+    const how = guideRich(document.createElement('span'),
+      ['크롬 ', ['b', '⋮'], ' → ', ['b', '전송, 저장, 공유'], ' → ', ['b', '페이지를 앱으로 설치']]);
+    const installed = guideRich(document.createElement('span'),
+      ['이미 설치했으면 주소창 오른쪽 ', ['b', '앱 열기']]);
+    installed.className = 'd-installsub';
+    return [how, installed];
+  }
+  return [];
+}
+
 // 네 줄 — 오늘 탭 카드와 도움말의 사용설명서가 같은 줄을 쓴다. 누르면 데려가는 줄은 버튼이고,
-// `Dock에 두기`는 할 일이 이 앱 밖(Dock)에 있어 버튼이 아니다(작은 Dock 그림 + 앱 위치 링크).
+// 첫 줄은 할 일이 이 앱 밖(크롬·Dock)에 있어 줄 자체는 버튼이 아니다(작은 Dock 그림 + 안의 버튼·링크).
+// 일반 탭이면 `앱으로 설치`(버튼 또는 크롬 메뉴 길), 설치된 창이면 `Dock에 두기`(아이콘을 Dock에 유지).
 function guideRows() {
   const row = (tag, title, parts, run) => {
     const node = document.createElement(tag);
@@ -3889,23 +3980,35 @@ function guideRows() {
     const words = guideRich(document.createElement('span'), parts);
     words.className = 'd';
     node.append(name, words);
-    return { node, words };
+    return { node, name, words };
   };
-  const dock = row('div', 'Dock에 두기', ['지금 Dock의 토끼 아이콘 우클릭 → ', ['b', '옵션'], ' → ', ['b', 'Dock에 유지']]);
-  const picture = document.createElement('span');
-  picture.className = 'd-guidedock';
-  picture.setAttribute('aria-hidden', 'true');
-  const me = document.createElement('img');
-  me.className = 'me';
-  me.src = '/app-icon.png';
-  me.alt = '';
-  picture.append(document.createElement('i'), document.createElement('i'), me, document.createElement('i'));
-  const where = document.createElement('button');
-  where.type = 'button';
-  where.className = 'd-ablink d-guidewhere';
-  where.textContent = '앱이 어디 있는지 모르겠으면 → 설정 › 앱 › 앱 위치';
-  where.addEventListener('click', guideGoAppPlace);
-  dock.words.append(picture, where);
+  const dock = row('div', '앱으로 설치', []);
+  const paint = () => {
+    const state = appInstallState();
+    const picture = document.createElement('span');
+    picture.className = 'd-guidedock';
+    picture.setAttribute('aria-hidden', 'true');
+    const me = document.createElement('img');
+    me.className = 'me';
+    me.src = '/app-icon.png';
+    me.alt = '';
+    picture.append(document.createElement('i'), document.createElement('i'), me, document.createElement('i'));
+    if (state === 'standalone') {
+      dock.name.textContent = 'Dock에 두기';
+      dock.words.replaceChildren(
+        guideRich(document.createElement('span'), ['Dock의 이 앱 아이콘 우클릭 → ', ['b', '옵션'], ' → ', ['b', 'Dock에 유지']]),
+        picture);
+      return;
+    }
+    dock.name.textContent = '앱으로 설치';
+    const where = document.createElement('button');
+    where.type = 'button';
+    where.className = 'd-ablink d-guidewhere';
+    where.textContent = '크롬 앱 대신 Dock 앱을 쓰려면 → 설정 › 앱 › 앱 위치';
+    where.addEventListener('click', guideGoAppPlace);
+    dock.words.replaceChildren(...appInstallWords(state), picture, ...(state === 'done' ? [] : [where]));
+  };
+  appInstallRemember(dock.node, paint);
   return [
     dock.node,
     row('button', '할 일 적기', ['맨 위 칸에 적고 ', ['b', 'Enter']], guideGoTodayInput).node,
@@ -4489,6 +4592,9 @@ function tabToRestore(savedTab, picked, focusedTab) {
 }
 
 // ---- client.test.js는 이 줄 위까지만 읽는다 (아래는 화면을 실제로 켜는 실행 코드) ----
+// 크롬 `앱으로 설치` — 설치 창을 띄울 수 있다는 신호와 설치를 마친 신호(위 appInstall*).
+window.addEventListener('beforeinstallprompt', appInstallOnPrompt);
+window.addEventListener('appinstalled', appInstallOnInstalled);
 setupQuickAdd('todayTaskInput', '/api/today-task/create', '오늘 할 일에 추가했어요');
 setupQuickAdd('laterTaskInput', '/api/later-task/create', '나중에 할 일에 추가했어요');
 setupQuickAdd('waitingInput', '/api/waiting/create', '확인 대기에 추가했어요');

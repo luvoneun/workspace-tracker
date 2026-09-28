@@ -1040,7 +1040,8 @@ test('WP-D3 setup.sh: update 에이전트를 늘 등록하고(실행기 안에�
     encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, WORKSPACE_OPEN_APP: open },
   });
   const install = end('1');
-  assert.equal(install.stdout, '✓ 설치를 끝냈어요 — 앱이 열려요.\n처음 열 때 "확인되지 않은 개발자"가 뜨면\n우클릭 → 열기 한 번.\n');
+  // WP-L: 기본 창은 크롬 `앱으로 설치` — 앱이 열리면 그것부터 권한다(업데이트 때는 말하지 않는다).
+  assert.equal(install.stdout, '✓ 설치를 끝냈어요 — 앱이 열려요.\n앱이 열리면 사용설명서의 「앱으로 설치」를 눌러요(크롬 앱으로 창이 따로 떠요).\n처음 열 때 "확인되지 않은 개발자"가 뜨면\n우클릭 → 열기 한 번.\n');
   assert.equal(fs.readFileSync(opened, 'utf8').trim(), bundle, 'Dock 앱 하나만 연다');
   fs.unlinkSync(opened);
   const update = end('');
@@ -1250,6 +1251,11 @@ test('WP-H 설치.command: 기존 설치(workspace.env)가 있으면 새로 받�
   const readmeText = fs.readFileSync(readme, 'utf8');
   assert.match(readmeText, /이미 설치해 쓰고 있다면 이 파일을 열어도 괜찮아요 — 새로 설치하지 않고 업데이트로 진행해요\./);
   assert.match(readmeText, /한 벌이 더 있어요/);
+  // WP-L: Dock 부분은 크롬 `앱으로 설치`가 먼저, Dock 앱은 예비 길
+  assert.match(readmeText, /앱이 열리면 오늘 탭 「사용설명서」의 「앱으로 설치」 → 「설치하기」를 눌러요\./);
+  assert.match(readmeText, /크롬 ⋮ → 전송, 저장, 공유 → 페이지를 앱으로 설치/);
+  assert.match(readmeText, /크롬 앱으로 설치하지 않아도 설치 때 만든 Dock 앱으로 열 수 있어요\./);
+  assert.doesNotMatch(readmeText, /Dock에 뜬 앱 아이콘을 우클릭/, '예전 Dock 안내는 없앴다');
 
   // 가짜 git(네트워크 없음)·가짜 update.sh/setup.sh — 부른 순서와 위치만 적는다.
   const bin = path.join(fix.root, 'fakebin');

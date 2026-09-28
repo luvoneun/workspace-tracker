@@ -23,6 +23,15 @@ module.exports = function personalizeRoutes(req, res, url, ctx) {
     return true;
   }
 
+  // 크롬 `앱으로 설치`가 읽는 manifest — 꾸미기의 Dock 이름·아이콘을 따른다(personalize.manifestFor).
+  // 아이폰 홈 화면 추가 때문에 인증 없이 열리는 경로다(server.js의 publicAsset) — 이름·아이콘 주소만 담는다.
+  if (url.pathname === '/manifest.webmanifest' && req.method === 'GET') {
+    const configured = ((currentConfigFile().server) || {}).dockName;
+    res.writeHead(200, { 'Content-Type': 'application/manifest+json; charset=utf-8' });
+    res.end(JSON.stringify(personalize.manifestFor(configured, LOCAL_DIR)));
+    return true;
+  }
+
   // 지금 값 — 조회라 파일을 쓰지 않는다.
   if (url.pathname === '/api/personalize' && req.method === 'GET') {
     const config = currentConfigFile();

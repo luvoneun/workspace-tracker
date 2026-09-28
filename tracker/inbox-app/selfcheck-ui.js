@@ -346,7 +346,8 @@ const SELFCHECK_TROUBLE = [
     [['그 버튼이 없으면(1.1.3 이하) ', ['b', SELFCHECK_UPDATE_WORDS[0]], SELFCHECK_UPDATE_WORDS[1], '을 실행해요'], 'update'],
   ]],
   ['Dock을 누르면 창이 여러 개 떠요', [
-    [['시스템 설정 › 개인정보 보호 및 보안 › ', ['b', '자동화'], ' › Workspace 아래 ', ['b', 'Google Chrome'], '을 켜요']],
+    [['설정 › 꾸미기 › ', ['b', '앱으로 설치'], '로 크롬 앱을 설치하면 해결돼요 — 창이 하나로 모이고 Dock·⌘Tab에 아이콘이 따로 떠요']],
+    [['Dock 앱을 계속 쓰면 → 시스템 설정 › 개인정보 보호 및 보안 › ', ['b', '자동화'], ' › Workspace 아래 ', ['b', 'Google Chrome'], '을 켜요']],
   ]],
   ['설치 파일이 “열지 않음”으로 막혀요', [
     [['터미널에 ', ['b', 'bash '], '(띄어쓰기까지) 적고 → 설치.command를 끌어다 놓고 → Enter']],

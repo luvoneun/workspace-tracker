@@ -653,9 +653,11 @@ if [ -n "$CONNECT" ]; then
 fi
 
 # 마무리 세 줄. 팀 설치 파일(설치.command)은 WORKSPACE_OPEN_APP=1을 줘서 Dock 앱을 바로 연다
-# (업데이트 때는 열지 않는다).
+# (업데이트 때는 열지 않는다). 기본 창은 크롬 `앱으로 설치`라(DECISIONS 2026-09-28) 앱이 열리면 그것부터 권한다 —
+# Dock 앱(실행기)은 크롬이 없거나 설치하지 않은 사람을 위한 예비 길이다.
 if [ "${WORKSPACE_OPEN_APP:-}" = "1" ] && [ -d "$APP_BUNDLE" ]; then
   echo "✓ 설치를 끝냈어요 — 앱이 열려요."
+  echo "앱이 열리면 사용설명서의 「앱으로 설치」를 눌러요(크롬 앱으로 창이 따로 떠요)."
   open "$APP_BUNDLE" >/dev/null 2>&1 || true
 else
   echo "✓ 설치를 끝냈어요."

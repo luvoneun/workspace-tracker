@@ -2742,6 +2742,23 @@ function personalizePlace(about) {
   return place;
 }
 
+// 꾸미기 맨 위의 `앱으로 설치` — 사용설명서를 닫은 사람도 찾을 수 있게 같은 권유(app.js의 appInstallWords)를 둔다.
+// 설치된 창에서는 숨는다. 크롬이 설치 창을 줄 수 있게 되거나 설치를 마치면 그 자리에서 다시 채운다.
+function personalizeInstallRow() {
+  if (typeof appInstallState !== 'function' || typeof appInstallWords !== 'function') return null;
+  const body = settingsEl('d-installline');
+  const row = personalizeRow('앱으로 설치', '크롬 앱으로 창을 따로 띄워요', body);
+  row.dataset.row = 'app-install';
+  const paint = () => {
+    const state = appInstallState();
+    row.hidden = state === 'standalone';
+    body.replaceChildren(...appInstallWords(state));
+  };
+  if (typeof appInstallRemember === 'function') return appInstallRemember(row, paint);
+  paint();
+  return row;
+}
+
 async function renderSettingsPersonalize() {
   const view = document.getElementById('settingsPersonalizeView');
   if (!view) return;
@@ -2846,6 +2863,8 @@ async function renderSettingsPersonalize() {
 
   const foot = settingsEl('d-pfoot');
   foot.append(settingsEl('d-ismall', '이 맥에만 적용돼요 — 다른 사람 앱에는 영향이 없어요(업데이트해도 남아요)'), save);
+  const install = personalizeInstallRow();
+  if (install) view.appendChild(install);
   view.append(
     personalizeRow('Dock 아이콘', '', iconLine, iconNote),
     personalizeRow('Dock 이름', 'Dock·앱 전환에 보여요', dock),
@@ -2862,6 +2881,10 @@ async function renderSettingsPersonalize() {
       done.appendChild(more);
     }
     view.appendChild(done);
+    // 크롬 앱으로 설치했으면 — 크롬은 manifest를 곧바로 다시 읽지 않는다(사실대로 알린다).
+    if (personalizeSavedNote.dock) {
+      view.appendChild(settingsEl('d-ismall d-pinstallnote', '설치한 앱에는 크롬이 다음에 확인할 때 반영돼요(바로 바꾸려면 설치한 앱을 지우고 다시 설치)'));
+    }
     personalizeSavedNote = null;
   }
 }
@@ -2920,7 +2943,7 @@ const SETTINGS_FAQ = [
     ['연동은 꼭 켜야 하나요', '없음',
       '아니요. 지라·슬랙·캘린더·회의록은 전부 선택이에요. <b>설정 &gt; 연동</b>에서 하나씩 켜고, 켠 것만 자동으로 모아 와요. 하나도 켜지 않아도 직접 적는 기능은 전부 돼요.'],
     ['Dock 아이콘·이름을 바꾸려면', '없음',
-      '<b>설정 &gt; 꾸미기</b>에서 내 그림을 고르고(가운데를 정사각형으로 잘라요) Dock 이름·워크스페이스 제목을 적은 뒤 <b>저장</b>해요. 이 맥에만 적용되고 업데이트해도 남아요. Dock은 앱을 닫고 다시 열면 바뀌어 보여요.'],
+      '<b>설정 &gt; 꾸미기</b>에서 내 그림을 고르고(가운데를 정사각형으로 잘라요) Dock 이름·워크스페이스 제목을 적은 뒤 <b>저장</b>해요. 이 맥에만 적용되고 업데이트해도 남아요. Dock은 앱을 닫고 다시 열면 바뀌어 보여요. 크롬 앱으로 설치했으면 크롬이 다음에 확인할 때 바뀌어요.'],
   ]],
   ['매일', [
     ['오늘 하기 버거운 업무는 어떻게 미루나요', '없음',

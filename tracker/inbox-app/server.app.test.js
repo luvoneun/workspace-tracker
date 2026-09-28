@@ -154,6 +154,71 @@ test('WP-D2 꾸미기: 그림은 형식·크기·치수를 확인하고, Dock �
   assert.equal(personalizeStore.tildePath('/opt/work/업데이트.command', '/Users/someone'), '/opt/work/업데이트.command');
 });
 
+// WP-L 크롬 `앱으로 설치`가 읽는 manifest — 파일이 아니라 꾸미기(Dock 이름·아이콘)를 따라 서버가 만든다.
+test('WP-L manifest: 이름·아이콘이 꾸미기를 따르고(없으면 워크스페이스·기본 토끼), 인증 없이 여는 목록은 그대로다', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-manifest-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const repo = path.join(home, 'repo');
+  const data = path.join(repo, 'tracker');
+  fs.mkdirSync(path.join(repo, 'local'), { recursive: true });
+  fs.mkdirSync(data);
+  fs.writeFileSync(path.join(repo, 'VERSION'), '1.0.0\n');
+  const config = path.join(home, 'workspace.config.json');
+  const writeConfig = server => fs.writeFileSync(config, JSON.stringify({ title: '제목', integrations: { slack: false, calendar: false, jira: false, tiro: false }, server }, null, 2));
+  writeConfig({ port: 1 });
+  const app = await startAppServer(t, { WORKSPACE_REPO_DIR: repo, WORKSPACE_DATA_DIR: data, WORKSPACE_CONFIG: config, WORKSPACE_AUTOMATION_DIR: path.join(home, 'automation') });
+  const read = async () => {
+    const response = await fetch(app.base + '/manifest.webmanifest');
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type'), /^application\/manifest\+json/);
+    return response.json();
+  };
+
+  // 기본 — 이름은 워크스페이스, 아이콘은 /app-icon.png(512) + 앱에 든 192
+  const plain = await read();
+  assert.deepEqual(Object.keys(plain).sort(), ['background_color', 'display', 'icons', 'id', 'name', 'short_name', 'start_url', 'theme_color'], '이름·아이콘 말고 다른 정보는 없다');
+  assert.equal(plain.name, '워크스페이스');
+  assert.equal(plain.short_name, '워크스페이스');
+  assert.equal(plain.id, '/');
+  assert.equal(plain.start_url, '/');
+  assert.equal(plain.display, 'standalone');
+  assert.deepEqual(plain.icons, [
+    { src: '/app-icon.png?v=default', sizes: '512x512', type: 'image/png', purpose: 'any' },
+    { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+  ]);
+  assert.equal((await fetch(app.base + plain.icons[0].src)).status, 200, '아이콘 주소가 실제로 열린다');
+  assert.equal((await fetch(app.base + plain.icons[1].src)).status, 200);
+
+  // 꾸미기 — Dock 이름과 내 그림(실제 크기 한 벌)을 따른다. 설정을 새로 읽어 서버를 다시 켤 필요가 없다
+  writeConfig({ port: 1, dockName: '  내 일터 ' });
+  fs.writeFileSync(path.join(repo, 'local', 'icon.png'), fakePng(1024, 1024, 64));
+  const custom = await read();
+  assert.equal(custom.name, '내 일터');
+  assert.equal(custom.short_name, '내 일터');
+  assert.equal(custom.icons.length, 1, '내 그림이면 기본 192는 적지 않는다');
+  assert.match(custom.icons[0].src, /^\/app-icon\.png\?v=\d+$/, '그림이 바뀌면 주소가 달라진다');
+  assert.equal(custom.icons[0].sizes, '1024x1024');
+  assert.equal(custom.icons[0].purpose, 'any');
+
+  // 규칙에 안 맞는 이름은 기본으로
+  writeConfig({ port: 1, dockName: 'a/b' });
+  assert.equal((await read()).name, '워크스페이스');
+  // 파일로 두던 manifest는 없앴다 — 이 경로 하나만 서버가 만든다
+  assert.equal(fs.existsSync(path.join(__dirname, 'manifest.webmanifest')), false);
+});
+
+test('WP-L 인증 없이 여는 경로는 아이콘(/icons/*.png)과 manifest뿐이다(아이폰 홈 화면 추가) — /app-icon.png·화면은 넣지 않는다', () => {
+  const { publicAssetRequest } = require('./server');
+  const open = (url, method = 'GET') => publicAssetRequest({ method, url });
+  assert.equal(open('/manifest.webmanifest'), true);
+  assert.equal(open('/manifest.webmanifest?v=1'), true);
+  assert.equal(open('/icons/icon-192.png'), true);
+  assert.equal(open('/manifest.webmanifest', 'POST'), false);
+  for (const url of ['/', '/index.html', '/app-icon.png', '/app.js', '/api/items', '/api/personalize', '/icons/../server.js', '/fonts/a.woff2']) {
+    assert.equal(open(url), false, url);
+  }
+});
+
 test('WP-D2 꾸미기 라우트: local/icon.png 한 파일만 쓰고 지우며, 제목은 곧바로 반영되고, Dock이 바뀌면 요청 표시 파일 하나만 쓴다', async (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-personalize-'));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));

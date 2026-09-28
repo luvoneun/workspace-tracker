@@ -157,6 +157,40 @@ function currentIcon(localDir, appDir) {
   return { data, type: info && info.type === 'jpeg' ? 'image/jpeg' : 'image/png', custom: file === custom };
 }
 
+// 크롬 `앱으로 설치`(PWA)가 읽는 manifest(`/manifest.webmanifest`). 이름은 꾸미기의 Dock 이름(설정에 없거나
+// 규칙에 안 맞으면 `워크스페이스`), 아이콘은 `/app-icon.png`(내 그림이 있으면 그것 — 서버가 크기별로 줄이지
+// 않으므로 그림의 실제 크기 한 벌만 적는다). 기본 토끼일 때만 앱에 든 192px 그림을 함께 적는다. 주소 끝의 `v`는
+// 그림이 바뀌면 달라져서, 크롬이 다음에 manifest를 확인할 때 새 아이콘을 받아 간다. 이름·아이콘 말고는 담지 않는다.
+const MANIFEST_NAME_DEFAULT = '워크스페이스';
+function manifestFor(configured, localDir) {
+  let name = MANIFEST_NAME_DEFAULT;
+  try { if (configured !== undefined && configured !== null && configured !== '') name = checkDockName(configured); } catch { name = MANIFEST_NAME_DEFAULT; }
+  const custom = iconPath(localDir);
+  let icons;
+  if (fs.existsSync(custom)) {
+    let size = '512x512';
+    let type = 'image/png';
+    let version = 'custom';
+    try {
+      const data = fs.readFileSync(custom);
+      const info = imageInfo(data);
+      if (info && info.width && info.height) size = `${info.width}x${info.height}`;
+      if (info && info.type === 'jpeg') type = 'image/jpeg';
+      version = String(Math.round(fs.statSync(custom).mtimeMs));
+    } catch { /* 읽지 못하면 512 한 벌로 적는다 */ }
+    icons = [{ src: `/app-icon.png?v=${version}`, sizes: size, type, purpose: 'any' }];
+  } else {
+    icons = [
+      { src: '/app-icon.png?v=default', sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+    ];
+  }
+  return {
+    id: '/', name, short_name: name, start_url: '/', display: 'standalone',
+    background_color: '#f0efe9', theme_color: '#f0efe9', icons,
+  };
+}
+
 // Dock 앱을 다시 만들어 달라는 표시 파일. launchd 에이전트 `com.workspace.app.app-refresh`가 이 파일이
 // 바뀌는 것을 보고 `app-refresh.sh`를 한 번 돌린다(미팅 노트 가져오기와 같은 방식). 내용은 기록용일 뿐이다.
 function writeRefreshRequest(automationDir, reason) {
@@ -177,5 +211,5 @@ function tildePath(value, home) {
 module.exports = {
   ICON_MAX_BYTES, ICON_MIN_SIDE, DOCK_NAME_DEFAULT, PERSONALIZE_MESSAGE: MESSAGE,
   checkDockName, dockNameTaken, checkTitle, imageInfo, iconRounded, checkIcon, saveIcon, resetIcon, hasCustomIcon, currentIcon,
-  writeRefreshRequest, tildePath,
+  writeRefreshRequest, tildePath, manifestFor, MANIFEST_NAME_DEFAULT,
 };
