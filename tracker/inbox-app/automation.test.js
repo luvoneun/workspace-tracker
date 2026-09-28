@@ -1649,3 +1649,16 @@ test('run-task.sh: 오래 가는 Claude 토큰 파일이 있으면 그 값을 CL
   assert.doesNotMatch(fs.readFileSync(path.join(home, 'logs', 'ok.log'), 'utf8'), /TESTTOKEN/, '토큰 값은 로그에 없다');
   fs.rmSync(home, { recursive: true, force: true });
 });
+
+test('fetch_slack_channel.sh: nvm이 없는 맥에서도 말없이 멈추지 않고 PATH의 node로 실행한다', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-nonvm-'));
+  const bin = path.join(home, 'bin');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'node'), '#!/bin/bash\necho "node 불림 $2"\n');
+  fs.chmodSync(path.join(bin, 'node'), 0o755);
+  const result = spawnSync('/bin/bash', [path.join(__dirname, 'fetch_slack_channel.sh'), 'C123', '1'],
+    { encoding: 'utf8', env: { ...process.env, HOME: home, PATH: `${bin}:/usr/bin:/bin` } });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /node 불림 C123/);
+  fs.rmSync(home, { recursive: true, force: true });
+});
