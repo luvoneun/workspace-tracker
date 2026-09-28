@@ -135,7 +135,7 @@ async function fetchAutomationStatus() {
 }
 
 // 설정을 연 뒤 한 번만 쓰는 표지 — `alerts`(빨간 점을 눌렀다: 멈춘 카드를 잠깐 붉게) · `log:<카드>`(그 카드의
-// 최근 기록을 편다) · `app-place`(앱 탭의 앱 위치를 밝힌다).
+// 최근 기록을 편다) · `app-place`(앱 탭의 앱 위치를 밝힌다) · `selfcheck`(앱 탭의 `점검하기`에 초점).
 let settingsFocusKey = null;
 
 const AUTOMATION_STATE_WORD = { run: '성공', fail: '실패', skip: '건너뜀' };
@@ -231,7 +231,7 @@ async function settingsReportCopy(button, { lead = '', done = '복사했어요 �
 
 // ---------- 설정 › 앱 탭(시안 D) ----------
 // 앱 자체의 일만 네 줄 — `버전`(새 버전·진행·다시 시도·되돌리기·막는 경우는 아래 "앱 안에서 업데이트 받기") ·
-// `데이터 백업` · `앱 위치`(파일을 찾을 때) · `문제 보고`. 줄 모양은 꾸미기 탭과 같은 `.d-pset`(이름 | 값)이다.
+// `데이터 백업` · `앱 위치`(파일을 찾을 때) · `점검`(점검하기 + 문제 보고 복사 — selfcheck-ui.js). 줄 모양은 꾸미기 탭과 같은 `.d-pset`(이름 | 값)이다.
 const SETTINGS_CHANNEL_WORD = { stable: '배포된 버전만 받기', main: '만드는 중인 것까지 받기(main)' };
 
 // id로 다시 찾는 자리(settingsAboutFill·settingsUpdatePaint가 쓴다) — 이미 그려 둔 것이 있으면 비워서 다시 쓴다.
@@ -298,15 +298,7 @@ function settingsOpenNewsHistory() {
   if (typeof history.scrollIntoView === 'function') history.scrollIntoView({ block: 'nearest' });
 }
 
-function settingsReportRow() {
-  const report = settingsButton('진단 내용 복사', 'd-btn', null);
-  report.id = 'settingsReportBtn';
-  report.addEventListener('click', () => settingsReportCopy(report));
-  const row = personalizeRow('문제 보고', '', report,
-    settingsEl('d-ismall', '버전·연동 상태·최근 오류만 복사해요(업무 내용은 들어가지 않아요).'));
-  row.dataset.row = 'report';
-  return row;
-}
+// `문제 보고 복사`는 설정 › 앱 › 점검 줄(selfcheck-ui.js의 selfcheckRow)에 `점검하기`와 나란히 선다.
 
 // ---------- 설정 › 앱 › 데이터 백업 ----------
 // 매일 19:30 이 맥 안(`~/workspace-data-backup/daily`)에 7일치 + GitHub 백업을 켠 사람은 비공개 저장소에도 한 겹 더.
@@ -396,12 +388,17 @@ async function renderSettingsApp() {
   view.replaceChildren(settingsEl('d-empty', '불러오는 중이에요…'));
   const [about, backup] = await Promise.all([settingsAboutLoad(), settingsBackupLoad()]);
   const place = personalizePlace(about);
-  view.replaceChildren(settingsVersionRow(), settingsBackupRow(backup), place, settingsReportRow());
+  view.replaceChildren(settingsVersionRow(), settingsBackupRow(backup), place, selfcheckRow());
   settingsAboutFill();
   if (settingsFocusKey === 'app-place') {
     settingsFocusKey = null;
     place.className = `${place.className} is-focus`;
     if (typeof place.scrollIntoView === 'function') place.scrollIntoView({ block: 'center' });
+  }
+  // 도움말 `문제가 생겼어요`의 `점검하기`로 들어왔으면 그 버튼에 초점(selfcheck-ui.js).
+  if (settingsFocusKey === 'selfcheck') {
+    settingsFocusKey = null;
+    if (selfcheckMainButton && typeof selfcheckMainButton.focus === 'function') selfcheckMainButton.focus();
   }
 }
 
@@ -632,6 +629,8 @@ async function settingsUpdateCheckNow() {
 
 function settingsUpdatePaint(view) {
   if (settingsUpdateRun) settingsUpdateRun.view = view;
+  // 업데이트가 도는 동안 `점검하기`를 잠그고, 끝나면 푼다(selfcheck-ui.js).
+  if (typeof selfcheckPaintButtons === 'function') selfcheckPaintButtons();
   const box = document.getElementById('settingsAboutUpdate');
   if (!box) return;
   const nodes = settingsUpdateNodes(view);
@@ -2983,7 +2982,7 @@ const SETTINGS_FAQ = [
     ['실수로 지웠는데 알림이 이미 사라졌으면', '없음',
       '<b>삭제한 항목</b> 탭에서 되살려요. 지운 항목은 원문 그대로 남고 저절로 사라지는 건 없어요. <b>완전히 지우기</b>만 되돌릴 수 없어서 한 번 더 물어봐요.'],
     ['앱이 이상하게 동작하면', '없음',
-      '<b>설정 &gt; 앱</b>의 <b>문제 보고 › 진단 내용 복사</b>를 누르면 버전·연동 상태·최근 오류 줄이 클립보드에 복사돼요. 업무 내용은 들어가지 않으니 그대로 슬랙에 붙여 넣어 주세요.'],
+      '먼저 <b>설정 &gt; 앱</b>의 <b>점검하기</b>로 무엇이 안 되는지와 고치는 법을 봐요. 그래도 안 되면 같은 줄의 <b>문제 보고 복사</b>를 누르면 버전·연동 상태·최근 오류 줄이 클립보드에 복사돼요. 업무 내용은 들어가지 않으니 그대로 슬랙에 붙여 넣어 주세요.'],
     ['Claude Code 로그인이 풀렸다고 나와요', 'Claude Code',
       '자동 수집은 터미널 설정을 읽지 않아 그쪽 로그인만 풀릴 수 있어요. 먼저 터미널에서 <b>claude</b> → <b>/login</b> 후 카드의 <b>다시 시도</b>. 그래도 반복되면 <b>claude setup-token</b>으로 오래 가는 토큰을 만들어 <b>~/.config/workspace-claude-token</b>에 저장해요(방법: docs/연동.md).'],
     ['업무 데이터는 어디에 백업되나요', '없음',
@@ -3007,6 +3006,8 @@ function renderSettingsGuide() {
   view.dataset.rendered = 'true';
   const doc = document.createElement('div');
   doc.className = 'd-faq';
+  // 맨 위 `문제가 생겼어요` — 증상으로 찾는 접이식 여섯(selfcheck-ui.js).
+  if (typeof selfcheckTroubleNode === 'function') doc.appendChild(selfcheckTroubleNode());
 
   const intro = document.createElement('div');
   intro.className = 'd-faqintro';

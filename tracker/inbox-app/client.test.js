@@ -140,7 +140,7 @@ test('a save refused for recovery shows the server message and keeps the banner 
 // 같은 결과를 내는 함수를 넣어, 화면 문자열을 만드는 나머지 로직을 검증한다.
 // 화면 코드는 여러 파일로 나뉘어 있고, 브라우저에서는 index.html의 <script> 차례대로
 // 같은 전역 공간에서 돈다. 테스트도 같은 가짜 창에 같은 차례로 이어 붙인다.
-const CLIENT_PARTS = ['jira-ui.js', 'meeting-notes-ui.js', 'project-new-ui.js', 'projects-ui.js', 'meetings-ui.js', 'waiting-ui.js', 'settings-ui.js', 'wrap-ui.js', 'attention-ui.js'];
+const CLIENT_PARTS = ['jira-ui.js', 'meeting-notes-ui.js', 'project-new-ui.js', 'projects-ui.js', 'meetings-ui.js', 'waiting-ui.js', 'settings-ui.js', 'selfcheck-ui.js', 'wrap-ui.js', 'attention-ui.js'];
 function pureClient() {
   const app = client(new Response('{}'));
   CLIENT_PARTS.forEach(file => app.run(fs.readFileSync(path.join(__dirname, file), 'utf8')));
@@ -7290,13 +7290,14 @@ test('도움말: 개념 사전 9개 + 쓰는 순서의 여섯 묶음 + 항목마
   const needs = new Set(entries.map(([, need]) => need));
   assert.ok(needs.has('없음') && needs.has('지라 연결') && needs.has('슬랙 연결 + Claude Code'));
 
-  // 첫 문단은 "처음 한 주는 할 일만"이다
+  // 맨 위는 `문제가 생겼어요`(WP-K 시안 D), 그다음 첫 문단은 "처음 한 주는 할 일만"이다
   app.run('renderSettingsGuide()');
   const doc = app.nodes.get('settingsGuideView').children[0];
-  assert.equal(doc.children[0].className, 'd-faqintro');
-  assert.match(doc.children[0].textContent, /처음 한 주는 할 일만 써도 충분해요/);
-  assert.equal(doc.children[1].className, 'd-words');
-  assert.equal(doc.children[1].children.length, 9);
+  assert.equal(doc.children[0].className, 'd-trouble');
+  assert.equal(doc.children[1].className, 'd-faqintro');
+  assert.match(doc.children[1].textContent, /처음 한 주는 할 일만 써도 충분해요/);
+  assert.equal(doc.children[2].className, 'd-words');
+  assert.equal(doc.children[2].children.length, 9);
 });
 
 // 최종 QA: 캘린더를 아예 끈 사람에게 `오늘 일정을 가져오지 못했어요`는 고장난 것처럼 읽힌다.
@@ -8231,19 +8232,19 @@ function appClient({ about = {}, backup = null, now = null } = {}) {
 }
 const backupAt = (daysAgo, time = '19:30') => { const d = new Date(); d.setDate(d.getDate() - daysAgo); const two = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${time}:04`; };
 
-test('WP-E D. 앱 탭: 버전 · 데이터 백업 · 앱 위치 · 문제 보고 네 줄(앱 위치는 꾸미기에서 옮김)', async () => {
+test('WP-E D. 앱 탭: 버전 · 데이터 백업 · 앱 위치 · 점검(점검하기 + 문제 보고 복사) 네 줄(앱 위치는 꾸미기에서 옮김)', async () => {
   const fx = appClient({
     about: { update: { available: true, label: 'v1.1.1', changesUrl: null } },
     backup: { ok: true, path: '~/workspace-data-backup/daily', local: { state: 'ok', at: backupAt(1), days: 7 }, github: { on: false, state: 'never' } },
   });
   await fx.app.run('renderSettingsApp()');
   const kids = fx.view().children;
-  same(kids.map(one => one.dataset.row || one.dataset.focus), ['version', 'backup', 'app-place', 'report']);
+  same(kids.map(one => one.dataset.row || one.dataset.focus), ['version', 'backup', 'app-place', 'check']);
   // 버전 줄 맨 끝의 `지난 소식 전체`는 접이식 자체의 표지(summary) 글자다 — hidden이어도 textContent에는 남는다(실제 DOM과 같다).
   assert.match(fx.text(0), /^버전워크스페이스v1\.1\.0 · 배포된 버전만 받기새 버전 v1\.1\.1이 있어요업데이트 받기지난 소식 전체데이터는 먼저 백업하고 받아요\. 1분쯤 걸려요\.지난 소식 전체$/);
   assert.equal(fx.text(1), '데이터 백업매일 19:30● 이 맥에 매일 백업 · 어제 19:30 · 7일치~/workspace-data-backup/daily복사Finder에서 ⇧⌘G(폴더로 이동)에 붙여 넣으면 바로 가요');
   assert.equal(fx.text(2), '앱 위치파일을 찾을 때Dock 앱~/Applications/Workspace.app복사업데이트 파일~/workspace/업데이트.command복사Finder에서 ⇧⌘G(폴더로 이동)에 붙여 넣으면 바로 가요');
-  assert.equal(fx.text(3), '문제 보고진단 내용 복사버전·연동 상태·최근 오류만 복사해요(업무 내용은 들어가지 않아요).');
+  assert.equal(fx.text(3), '점검문제가 있을 때점검하기문제 보고 복사설치·연동·자동화를 한 번에 확인하고, 고치는 법을 알려 줘요.');
   const copies = fx.app.run("window.findByClass(document.getElementById('settingsAppView').children[1], 'd-btn')");
   await copies[0].listeners.click();
   same(fx.copied, ['~/workspace-data-backup/daily']);
@@ -8252,7 +8253,7 @@ test('WP-E D. 앱 탭: 버전 · 데이터 백업 · 앱 위치 · 문제 보고
   await place[1].listeners.click();
   same(fx.copied.slice(1), ['~/Applications/Workspace.app', '~/workspace/업데이트.command']);
   const report = fx.find('d-btn').find(one => one.id === 'settingsReportBtn');
-  same([report.textContent, report.className], ['진단 내용 복사', 'd-btn']);
+  same([report.textContent, report.className], ['문제 보고 복사', 'd-btn']);
 
   // 사용설명서의 `앱이 어디 있는지` → 앱 탭 앱 위치를 밝힌다
   fx.app.run(`settingsFocusKey = 'app-place'`);
@@ -8538,4 +8539,281 @@ test('슬랙 토큰 모양: xapp-·엉뚱한 토큰은 그 자리에서 알리�
   assert.match(fx.app.run("settingsSlackTokenShape('abc')"), /xoxp-로 시작해요/);
   assert.equal(fx.app.run("settingsSlackTokenShape('xox')"), '', '치는 중인 앞부분은 기다린다');
   assert.equal(fx.app.run("settingsSlackTokenShape('xoxp-1-2')"), '');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WP-K 설정 › 앱 › 점검하기(시안 A~C) · 도움말 `문제가 생겼어요`(시안 D)
+
+const SC_BAD = {
+  ok: true, at: '2026-09-28T05:05:00.000Z', version: '1.1.5', offline: false,
+  skipped: ['회의록', '캘린더'],
+  items: [
+    { key: 'version', label: '앱 버전', state: 'ok', detail: 'v1.1.5 · 최신이에요' },
+    { key: 'install', label: '설치 위치', state: 'ok', detail: '~/workspace' },
+    { key: 'claude', label: 'Claude Code 로그인', state: 'bad', detail: '최근 슬랙 수집이 "로그인이 풀렸어요"로 실패했어요 · 오늘 10:05 기준', fix: { text: '① 터미널에서 claude setup-token', command: 'mkdir -p ~/.config && read -s "T?토큰" && echo 저장' } },
+    { key: 'slack_channels', label: '슬랙 채널', state: 'ok', detail: '#hana-todo 외 1개 · 모두 읽혀요', copy: '켜진 채널 2개 · 모두 읽혀요' },
+    { key: 'slack', label: '슬랙 수집', state: 'bad', sameAs: 'claude', detail: 'Claude Code 로그인이 풀려서 멈췄어요', lag: 'slack' },
+    { key: 'jira', label: '지라', state: 'ok', detail: '하나님 · 방금 확인', copy: '연결돼요 · 방금 확인', lag: 'jira' },
+    { key: 'agents', label: '자동 실행 등록', state: 'warn', detail: '/Users/hana/x someone@example.test', fix: { text: '업데이트 파일(앱을 새로 받고 다시 켜 주는 파일)을 한 번 실행해 주세요', command: 'bash ~/workspace/업데이트.command', finder: '~/workspace/업데이트.command' } },
+  ],
+  sync: { slackSync: { used: false }, jiraSync: { used: false }, calendar: { used: false } },
+};
+const SC_GOOD = {
+  ok: true, at: '2026-09-28T05:05:00.000Z', version: '1.1.5', offline: false, skipped: [],
+  items: [
+    { key: 'version', label: '앱 버전', state: 'ok', detail: 'v1.1.5 · 최신이에요' },
+    { key: 'backup', label: '데이터 백업', state: 'unknown', detail: '오늘 19:30에 처음 해요' },
+  ],
+  sync: { slackSync: { used: false }, jiraSync: { used: false }, calendar: { used: false } },
+};
+
+// 앱 탭 가짜 창 + GET /api/selfcheck 답(부를 때마다 차례로 줄 수 있다).
+function scClient(answers, { blocked = false } = {}) {
+  const fx = appClient({});
+  const list = Array.isArray(answers) ? answers : [answers];
+  let asked = 0;
+  const base = fx.app.context.fetch;
+  fx.app.context.fetch = async (url, options) => {
+    if (String(url) === '/api/selfcheck') {
+      const body = list[Math.min(asked, list.length - 1)];
+      asked += 1;
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    return base(url, options);
+  };
+  if (blocked) fx.app.context.navigator = { clipboard: { writeText: async () => { throw new Error('denied'); } } };
+  const slot = () => fx.app.nodes.get('selfcheckResult');
+  const slotText = () => JSON.parse(fx.app.run("JSON.stringify(window.shapeOf(document.getElementById('selfcheckResult')))")).text;
+  const button = () => fx.app.run('selfcheckMainButton');
+  return { ...fx, asked: () => asked, slot, slotText, button };
+}
+const scKid = (fx, cls) => fx.slot().children.find(one => String(one.className).split(' ').includes(cls));
+
+test('WP-K A. 앱 탭 `점검` 줄: 점검하기 + 문제 보고 복사, 결과 자리는 비어 있다가 누르면 같은 자리 아래 펼친다', async () => {
+  const fx = scClient(SC_BAD);
+  await fx.app.run('renderSettingsApp()');
+  const row = fx.view().children[3];
+  assert.equal(row.dataset.row, 'check');
+  assert.equal(fx.button().textContent, '점검하기');
+  assert.equal(fx.slot().hidden, true);
+  assert.equal(fx.slot().getAttribute('aria-live'), 'polite');
+  await fx.button().listeners.click();
+  assert.equal(fx.asked(), 1);
+  assert.equal(fx.slot().hidden, false);
+});
+
+test('WP-K B. 문제가 있을 때: 요약은 ✗만 센다(같은 원인은 한 번) + warn은 따로 · 고치는 법은 문제 줄에만 · 명령 복사 · 연결 안 한 것 한 줄', async () => {
+  const fx = scClient(SC_BAD);
+  await fx.app.run('renderSettingsApp()');
+  await fx.button().listeners.click();
+  const kids = fx.slot().children;
+  assert.equal(kids[0].className, 'd-scsum');
+  assert.equal(kids[0].children[0].textContent, '● 1개를 고치면 돼요', 'Claude 로그인과 그 때문에 멈춘 수집은 한 번만 센다');
+  assert.equal(kids[0].children[1].textContent, '방금 점검 · v1.1.5');
+  assert.equal(kids[1].textContent, '확인해 보면 좋아요 1개');
+  const rows = scKid(fx, 'd-sclist').children;
+  same(rows.map(one => [one.dataset.key, one.className, one.children.length]), [
+    ['version', 'ok', 3], ['install', 'ok', 3], ['claude', 'bad', 4], ['slack_channels', 'ok', 3], ['slack', 'bad', 3], ['jira', 'ok', 3], ['agents', 'warn', 4],
+  ]);
+  assert.equal(rows[2].children[0].textContent, '✗');
+  assert.equal(rows[2].children[1].className, 'sr-only');
+  const fix = rows[2].children[3];
+  assert.equal(fix.className, 'fix');
+  assert.equal(fix.children[0].textContent, '고치는 법');
+  const command = fix.children[2];
+  assert.equal(command.className, 'd-icode');
+  assert.equal(command.children[1].textContent, '명령 복사');
+  await command.children[1].listeners.click();
+  same(fx.copied, ['mkdir -p ~/.config && read -s "T?토큰" && echo 저장']);
+  // 업데이트 파일은 무엇인지 + 한 줄 명령 + Finder 길
+  const upd = rows[6].children[3];
+  assert.match(upd.children[1].textContent, /업데이트 파일\(앱을 새로 받고 다시 켜 주는 파일\)/);
+  assert.equal(upd.children[2].children[0].textContent, 'bash ~/workspace/업데이트.command');
+  assert.equal(upd.children[3].textContent, 'Finder: ⇧⌘G → 경로 붙여 넣기 → 더블클릭 (~/workspace/업데이트.command)');
+  assert.equal(scKid(fx, 'd-scskip').textContent, '연결 안 한 것: 회의록 · 캘린더 — 필요하면 설정 › 연동에서 켜요');
+  same(scKid(fx, 'd-scfoot').children.map(one => one.textContent), ['다시 점검', '결과 복사 → 만든 사람에게 보내기']);
+});
+
+test('WP-K C. 모두 정상: `✓ 모두 정상이에요` + 목록은 `자세히 보기` 접이식(? 줄은 문제로 세지 않는다) · 확인해 볼 것만 있으면 주황 요약', async () => {
+  const fx = scClient(SC_GOOD);
+  await fx.app.run('renderSettingsApp()');
+  await fx.button().listeners.click();
+  const kids = fx.slot().children;
+  assert.equal(kids[0].className, 'd-scsum is-good');
+  assert.equal(kids[0].children[0].textContent, '✓ 모두 정상이에요');
+  const more = kids[1];
+  assert.equal(more.className, 'd-dsec d-dadd d-scall');
+  assert.ok(!more.open, '기본은 접혀 있다');
+  assert.equal(more.children[0].children[0].textContent, '2개 항목을 확인했어요 · 자세히 보기');
+  assert.equal(more.children[1].children[1].className, 'unknown');
+  const warnOnly = { ...SC_GOOD, items: [...SC_GOOD.items, { key: 'install', label: '설치 위치', state: 'warn', detail: '바탕화면', fix: { text: '옮겨 주세요' } }] };
+  const fx2 = scClient(warnOnly);
+  await fx2.app.run('renderSettingsApp()');
+  await fx2.button().listeners.click();
+  assert.equal(fx2.slot().children[0].className, 'd-scsum is-warn');
+  assert.equal(fx2.slot().children[0].children[0].textContent, '확인해 보면 좋아요 1개');
+});
+
+test('WP-K 오프라인: 맨 위 한 줄 `인터넷 연결을 확인해 주세요`, 그 줄들은 – (문제로 세지 않는다)', async () => {
+  const off = { ...SC_GOOD, offline: true, items: [{ key: 'jira', label: '지라', state: 'offline', detail: '닿지 못했어요' }, { key: 'slack_token', label: '슬랙 토큰', state: 'offline', detail: '닿지 못했어요' }] };
+  const fx = scClient(off);
+  await fx.app.run('renderSettingsApp()');
+  await fx.button().listeners.click();
+  const kids = fx.slot().children;
+  assert.equal(kids[0].className, 'd-scoff');
+  assert.equal(kids[0].children[0].textContent, '인터넷 연결을 확인해 주세요');
+  assert.equal(kids[0].getAttribute('role'), 'alert');
+  assert.equal(kids[1].children[0].textContent, '✓ 인터넷 말고는 모두 정상이에요', '닿지 못한 줄이 있으면 "모두 정상"이라 하지 않는다');
+  assert.equal(fx.app.run(`selfcheckCopyText(${JSON.stringify(off)}, ${JSON.stringify(off.items)})`).split('\n')[1], '인터넷 연결을 확인해 주세요 · 인터넷 말고는 모두 정상이에요');
+});
+
+test('WP-K 잠금: 점검 중·앱 안 업데이트 중·30초 안에는 버튼이 잠기고 서버에 다시 묻지 않는다 — 다시 점검해도 같은 ✗면 보내기 안내', async () => {
+  const fx = scClient([SC_BAD, SC_BAD]);
+  await fx.app.run('renderSettingsApp()');
+  fx.app.run('settingsUpdateRun = { action: "update" }; selfcheckPaintButtons()');
+  assert.equal(fx.button().disabled, true);
+  assert.equal(fx.button().title, '업데이트하는 동안에는 점검할 수 없어요');
+  assert.equal(await fx.app.run('selfcheckStart()'), false);
+  assert.equal(fx.asked(), 0);
+  fx.app.run('settingsUpdateRun = null; selfcheckPaintButtons()');
+  assert.equal(fx.button().disabled, false);
+  const running = fx.app.run('selfcheckStart()');
+  assert.equal(fx.button().disabled, true, '점검 중에는 잠긴다');
+  assert.equal(fx.button().textContent, '점검하는 중…');
+  await running;
+  assert.equal(fx.button().disabled, true, '30초 안에는 다시 점검할 수 없다');
+  assert.equal(fx.button().title, '30초에 한 번 다시 점검할 수 있어요');
+  assert.equal(scKid(fx, 'd-scfoot').children[0].disabled, true);
+  assert.equal(await fx.app.run('selfcheckStart()'), false);
+  assert.equal(fx.asked(), 1);
+  assert.ok(!fx.slotText().includes('그래도 안 되면'), '첫 점검에는 보내기 안내가 없다');
+  fx.app.run('selfcheckState.doneAt = Date.now() - 31000; selfcheckPaintButtons()');
+  assert.equal(fx.button().disabled, false);
+  assert.equal(await fx.app.run('selfcheckStart()'), true);
+  assert.equal(fx.asked(), 2);
+  assert.equal(scKid(fx, 'd-scagain').textContent, '그래도 안 되면 결과를 복사해 만든 사람에게 보내 주세요');
+});
+
+test('WP-K 결과 복사: 이름·상태·문구·버전·시각만 — 채널·지라 이름은 개수·고정 문구, 경로는 ~, 이메일은 가림 · 클립보드가 막히면 골라진 글 상자', async () => {
+  const fx = scClient(SC_BAD);
+  await fx.app.run('renderSettingsApp()');
+  await fx.button().listeners.click();
+  await scKid(fx, 'd-scfoot').children[1].listeners.click();
+  assert.equal(fx.copied.length, 1);
+  const text = fx.copied[0];
+  const lines = text.split('\n');
+  assert.match(lines[0], /^워크스페이스 점검 · v1\.1\.5 · 2026-09-2\d \d{2}:05$/);
+  assert.equal(lines[1], '1개를 고치면 돼요 · 확인해 보면 좋아요 1개');
+  assert.ok(lines.includes('✓ 슬랙 채널 (정상) — 켜진 채널 2개 · 모두 읽혀요'));
+  assert.ok(lines.includes('✓ 지라 (정상) — 연결돼요 · 방금 확인'));
+  assert.ok(lines.includes('! 자동 실행 등록 (확인해 보면 좋아요) — ~/x …'));
+  assert.equal(lines[lines.length - 1], '연결 안 한 것: 회의록 · 캘린더');
+  for (const secret of ['#hana-todo', '하나님', 'hana', 'someone@', 'mkdir', 'bash ~/', '고치는 법']) assert.ok(!text.includes(secret), secret);
+
+  const blocked = scClient(SC_BAD, { blocked: true });
+  await blocked.app.run('renderSettingsApp()');
+  await blocked.button().listeners.click();
+  assert.equal(await blocked.app.run('selfcheckCopy()'), false);
+  const kids = blocked.slot().children;
+  const area = kids[kids.length - 1];
+  assert.equal(area.className, 'd-din d-scfallback');
+  assert.equal(area.readOnly, true);
+  assert.equal(area.selected, true, '글이 골라진 채로 보인다');
+  assert.equal(area.value, blocked.app.run('selfcheckCopyText(selfcheckState.result, selfcheckState.items)'));
+  assert.equal(kids[kids.length - 2].textContent, '복사가 막혀 있어요 — 아래 글이 골라져 있으니 ⌘C로 복사해 주세요');
+});
+
+test('WP-K 판단 일치: 늦음은 syncLag(톱니바퀴 주황 점·연동 탭)와 같은 답 — ✓ 줄만 !로, 첫 읽기 전은 ?, ✗는 그대로', () => {
+  const app = pureClient();
+  const two = n => String(n).padStart(2, '0');
+  const day = d => { const t = new Date(Date.now() - d * 86400000); return `${t.getFullYear()}-${two(t.getMonth() + 1)}-${two(t.getDate())}`; };
+  const sync = {
+    slackSync: { stale: true, lastSync: day(2), connected: true, scheduled: true },
+    jiraSync: { stale: true, lastSync: null, neverRead: true, connected: true },
+    calendar: { stale: true, lastSync: day(3) },
+  };
+  const result = { items: [
+    { key: 'slack', label: '슬랙 수집', state: 'ok', detail: '마지막 수집', lag: 'slack' },
+    { key: 'jira', label: '지라', state: 'ok', detail: '하나님 · 방금 확인', copy: '연결돼요', lag: 'jira' },
+    { key: 'calendar', label: '캘린더', state: 'bad', detail: '비밀 주소를 읽을 수 없어요', lag: 'calendar' },
+    { key: 'node', label: 'Node', state: 'ok', detail: 'v22' },
+  ], sync };
+  const merged = JSON.parse(app.run(`JSON.stringify(selfcheckApplyLag(${JSON.stringify(result)}, { clock: '10:00' }))`));
+  const lag = JSON.parse(app.run(`JSON.stringify(syncLag(${JSON.stringify(sync)}, { clock: '10:00' }))`));
+  same(merged.filter(item => item.state === 'warn').map(item => item.lag), lag.late.map(one => one.key).filter(key => key !== 'calendar'));
+  assert.equal(merged[0].detail, lag.late.find(one => one.key === 'slack').text, '문구도 연동 탭 카드와 같다');
+  assert.match(merged[0].fix.text, /지금 가져오기/);
+  same([merged[1].state, merged[1].detail, 'copy' in merged[1]], ['unknown', '아직 알 수 없어요 — 첫 읽기를 기다려요', false]);
+  assert.ok(lag.waiting.includes('jira'));
+  assert.equal(merged[2].state, 'bad', '멈춘 줄은 빨강이 이긴다(연동 탭과 같다)');
+  assert.equal(merged[3].state, 'ok');
+  // 연동 탭의 늦음(settingsIntgLagFrom — 멈춘 카드는 뺀다)과도 같은 답
+  app.run(`nowHHMM = () => '10:00'`);
+  const tab = JSON.parse(app.run(`JSON.stringify(settingsIntgLagFrom({ sync: ${JSON.stringify(sync)}, slack: { enabled: true, hasToken: true, channels: { todo: { id: 'C1' } } }, jira: { enabled: true, hasToken: true, siteUrl: 'https://x' }, calendar: { enabled: true }, meetingNotes: { mode: 'manual' } }, ['calendar']))`));
+  assert.deepEqual(tab.late.map(one => one.key), ['slack']);
+  assert.deepEqual(tab.waiting, ['jira']);
+});
+
+test('WP-K 판단 일치: "연결했나"는 연동 탭 settingsIntgConnected와 서버 connectedFlags가 같은 입력에 같은 답', () => {
+  const app = pureClient();
+  const { connectedFlags } = require('./selfcheck');
+  const cases = [
+    {},
+    { slack: { enabled: true, hasToken: true, channels: { todo: { id: '' }, waiting: { id: 'C2' } } }, jira: { enabled: true, hasToken: false, siteUrl: 'https://x' }, calendar: { enabled: false }, meetingNotes: { mode: 'tiro' } },
+    { slack: { enabled: true, hasToken: false, channels: { todo: { id: 'C1' } } }, jira: { enabled: true, hasToken: true, siteUrl: 'https://x' }, calendar: { enabled: true, source: 'ical' }, meetingNotes: { mode: 'manual' } },
+    { slack: { enabled: false, hasToken: true, channels: { todo: { id: 'C1' } } }, jira: { enabled: true, hasToken: true, siteUrl: '' }, calendar: { enabled: true }, meetingNotes: { mode: 'other' } },
+  ];
+  cases.forEach((data) => {
+    same(JSON.parse(app.run(`JSON.stringify(settingsIntgConnected(${JSON.stringify(data)}))`)), connectedFlags(data));
+  });
+});
+
+test('WP-K D. 도움말 맨 위 `문제가 생겼어요`: 첫 줄은 점검하기로 데려가고, 증상 접이식 여섯 · 업데이트 파일은 무엇인지 + 한 줄 명령 + Finder 길', async () => {
+  const app = settingsClient({});
+  app.run(NODE_SHAPE);
+  app.run(`location = { hostname: 'example.com' };`);
+  app.run(`settingsAbout = { updateFile: '~/workspace/업데이트.command' }`);
+  const copied = [];
+  app.context.navigator = { clipboard: { writeText: async (text) => { copied.push(text); } } };
+  app.run('renderSettingsGuide()');
+  const box = app.nodes.get('settingsGuideView').children[0].children[0];
+  assert.equal(box.className, 'd-trouble');
+  assert.equal(box.getAttribute('aria-label'), '문제가 생겼어요');
+  assert.equal(box.children[0].textContent, '문제가 생겼어요');
+  const lead = box.children[1];
+  assert.equal(lead.children.map(one => one.textContent).join(''), '먼저 설정 › 앱 › 점검하기 — 무엇이 안 되는지와 고치는 법을 한 번에 보여 줘요');
+  const questions = box.children.slice(2);
+  same(questions.map(one => one.children[0].children[0].textContent), [
+    '슬랙 메시지가 할 일로 안 들어와요', '앱이 안 열려요 / 흰 화면이에요', '새 버전이 안 떠요',
+    'Dock을 누르면 창이 여러 개 떠요', '설치 파일이 “열지 않음”으로 막혀요', '캘린더 일정이 안 보여요',
+  ]);
+  assert.equal(questions[0].open, true, '첫 증상만 펼쳐 둔다');
+  assert.equal(questions[0].className, 'd-dadd d-trq');
+  const text = node => JSON.parse(app.run(`JSON.stringify(window.shapeOf(${node}))`)).text;
+  const first = text("document.getElementById('settingsGuideView').children[0].children[0].children[2].children[1]");
+  assert.match(first, /“로그인이 풀렸어요” → 설정 › 앱 › 점검하기가 고치는 법을 보여 줘요/);
+  assert.match(first, /User OAuth Token\(xoxp-\)/);
+  const open = text("document.getElementById('settingsGuideView').children[0].children[0].children[3].children[1]");
+  assert.match(open, /그래도 안 되면 업데이트 파일\(앱을 새로 받고 다시 켜 주는 파일\)을 실행해요 — 앱을 다시 켜 줘요bash ~\/workspace\/업데이트\.command명령 복사Finder: ⇧⌘G → 경로 붙여 넣기 → 더블클릭 \(~\/workspace\/업데이트\.command\)/);
+  assert.doesNotMatch(open, /업데이트\.command를 더블클릭/, '파일 이름만 던지지 않는다');
+  const upd = questions[1].children[1].children[1].children.find(one => String(one.className).includes('d-trupd'));
+  await upd.children[0].children[1].listeners.click();
+  same(copied, ['bash ~/workspace/업데이트.command']);
+  // `점검하기`는 앱 탭으로 가서 그 버튼에 초점
+  app.run(`settingsSetTab = tab => { window.wentTo = tab; }`);
+  lead.children[1].listeners.click();
+  assert.equal(app.run('window.wentTo'), 'app');
+  assert.equal(app.run('settingsFocusKey'), 'selfcheck');
+  // 경로에 띄어쓰기가 있으면 따옴표로
+  assert.equal(app.run(`selfcheckShellPath('~/내 폴더/업데이트.command')`), "~/'내 폴더/업데이트.command'");
+  // 기존 문답도 새 버튼 이름을 쓴다
+  assert.match(app.run('JSON.stringify(SETTINGS_FAQ)'), /점검하기<\/b>로 무엇이 안 되는지와 고치는 법을 봐요/);
+  assert.doesNotMatch(app.run('JSON.stringify(SETTINGS_FAQ)'), /진단 내용 복사/);
+});
+
+test('WP-K 화면 파일 규칙: selfcheck-ui.js는 새 innerHTML을 uiIcon 아이콘에만 쓴다', () => {
+  const source = fs.readFileSync(path.join(__dirname, 'selfcheck-ui.js'), 'utf8');
+  const uses = source.split('\n').filter(line => /innerHTML/.test(line) && !/^\s*\/\//.test(line));
+  assert.ok(uses.length >= 1);
+  assert.ok(uses.every(line => /\.innerHTML = uiIcon\('chevron'\);/.test(line)), uses.join('\n'));
 });

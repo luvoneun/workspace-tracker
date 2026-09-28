@@ -2238,6 +2238,43 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-abfail .d-btn.dng { background: var(--surface); }
 .d-abwrap .d-iconfirm { margin-top: 0; }
 .d-abquiet { margin: 0; }
+/* 설정 › 앱 › 점검(WP-K 시안 A~C) — 요약 판 · 항목 줄(✓ ✗ ! ? –) · 문제 줄 아래 고치는 법 판. 새 색 없이 기존 상태 판만 쓴다
+   (고칠 것 --urgent-bg · 확인해 볼 것 --warn-bg · 모두 정상 --success-bg · 인터넷 --neutral-bg). */
+.d-scwrap { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.d-scsum { display: flex; align-items: center; gap: 4px 8px; flex-wrap: wrap; padding: 10px 12px; border-radius: var(--r-sm); background: var(--urgent-bg); color: var(--urgent); font-size: 14px; font-weight: 600; }
+.d-scsum.is-warn { background: var(--warn-bg); color: var(--warn); }
+.d-scsum.is-good { background: var(--success-bg); color: var(--success); }
+.d-scsum .at { margin-left: auto; font-size: 12.5px; font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
+.d-scoff { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: var(--r-sm); background: var(--neutral-bg); }
+.d-scoff .tx { font-size: 14px; font-weight: 600; color: var(--text); }
+.d-sclist { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.d-sclist li { position: relative; display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 4px 10px; align-items: start; padding: 10px 4px; box-shadow: inset 0 -1px 0 var(--hair); }
+.d-sclist .ic { font-weight: 800; text-align: center; line-height: 1.5; color: var(--dim); }
+.d-sclist .ok .ic { color: var(--success); }
+.d-sclist .bad .ic { color: var(--urgent); }
+.d-sclist .warn .ic { color: var(--warn); }
+.d-sclist .t { min-width: 0; font-size: 14px; font-weight: 600; color: var(--text); }
+.d-sclist .t small { display: block; font-size: 12.5px; font-weight: 400; color: var(--muted); overflow-wrap: anywhere; }
+.d-sclist .fix { grid-column: 2; padding: 8px 10px; border-radius: var(--r-xs); font-size: 13px; line-height: 1.6; color: var(--text); }
+.d-sclist .bad .fix { background: var(--urgent-bg); }
+.d-sclist .warn .fix { background: var(--warn-bg); }
+.d-sclist .fix .d-icode { margin-top: 6px; }
+.d-sclist .fix .d-ismall { margin-top: 4px; overflow-wrap: anywhere; }
+.d-scwrap .d-scall { margin-top: 0; padding-top: 0; border-top: 0; }
+.d-scall .d-sclist { margin-top: 4px; }
+.d-scfoot { margin-top: 4px; }
+.d-scfallback { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; resize: vertical; }
+/* 도움말 맨 위 `문제가 생겼어요`(시안 D) — 증상 접이식(.d-dadd 꺾쇠) 여섯. 첫 줄은 점검하기로 데려가는 밑줄 글자. */
+.d-trouble { display: flex; flex-direction: column; gap: 8px; margin-bottom: 22px; }
+.d-trouble .hd { font-size: 14px; font-weight: 700; }
+.d-trouble .d-trlead { margin-bottom: 2px; }
+.d-trq { padding: 8px 14px; border-radius: var(--r-sm); background: var(--field); }
+.d-trq > summary { display: flex; align-items: center; gap: 6px; min-height: 32px; list-style: none; cursor: pointer; font-size: 14px; font-weight: 600; color: var(--text); }
+.d-trq ol { margin: 6px 0 4px; padding-left: 22px; display: grid; gap: 6px; font-size: 13.5px; line-height: 1.6; color: var(--muted); }
+.d-trq b { color: var(--text); font-weight: 600; }
+.d-trq .d-icode { background: var(--surface); }
+.d-trupd { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.d-trupd[hidden] { display: none; }
 .d-abhead { font-size: 12.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
 .d-abprog { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .d-abprog li { display: flex; align-items: center; gap: 10px; min-height: 30px; font-size: 13.5px; color: var(--text); }

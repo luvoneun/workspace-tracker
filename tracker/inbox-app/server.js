@@ -2014,6 +2014,69 @@ function claudeReady() {
   if (claudeFound === null) claudeFound = integrations.claudeInstalled();
   return claudeFound;
 }
+// ---------- 설정 › 앱 › 점검하기 (GET /api/selfcheck, WP-K) ----------
+// 판단은 selfcheck.js가 하고, 여기서는 **이미 있는 함수**(연동 탭·톱니바퀴 점이 쓰는 integrationAlerts·fetchState*·
+// getSlackSync/getJiraSync/getCalendarToday·launchAgentInstalled·claudeReady·backupStatus)를 그대로 넘긴다.
+// 바깥 확인(슬랙 auth.test·conversations.info, 지라 myself, 캘린더 비밀 주소 한 번 읽기)은 읽기뿐이고, 프로세스는 띄우지 않는다.
+// 테스트·픽스처(`WORKSPACE_NO_REMOTE_CHECK`)에서는 바깥에 닿지 않는다 — `setSelfcheckFetchForTests`로 가짜만 끼운다.
+let selfcheckFetch = null;
+function setSelfcheckFetchForTests(fn) { selfcheckFetch = typeof fn === 'function' ? fn : null; selfcheck.clear(); }
+function selfcheckRequest(...args) {
+  if (selfcheckFetch) return selfcheckFetch(...args);
+  if (process.env.WORKSPACE_NO_REMOTE_CHECK) return Promise.reject(new Error('바깥 확인을 끈 자리예요'));
+  return fetch(...args);
+}
+const selfcheck = require('./selfcheck').createSelfcheck({
+  home: os.homedir(),
+  nodeVersion: process.version,
+  managed: !!process.env.WORKSPACE_MANAGED,
+  messages: integrations.INTEGRATION_MESSAGE,
+  slackAuthRe: SLACK_AUTH_RE,
+  updateFile: updateCommandPath,
+  version: appVersion,
+  updateOffer: () => updateOffer(appVersion(), updateChannel()),
+  installPlace: () => require('./selfcheck').installPlace({ repoDir: REPO_DIR, home: os.homedir(), envFile: path.join(automationDir(), 'workspace.env') }),
+  agentInstalled: launchAgentInstalled,
+  applyFailing: () => !!applyLastFailure(),
+  config: currentConfigFile,
+  readIntegrations: config => integrations.readIntegrations(config, { claude: false }),
+  automations: getAutomationStatus,
+  alerts: (config, automations) => integrationAlerts(config, automations),
+  fetchStateAutomation, fetchStateLive,
+  calendarFailure: () => calendarLive.failure(),
+  jiraFailure: () => jiraLive.failure(),
+  claudeInstalled: claudeReady,
+  slackSuccessAt: slackSyncSuccessAt,
+  slackToken: config => integrations.savedSlackToken(config),
+  slackTokenCheck: token => integrations.slackTokenCheck(token, selfcheckRequest),
+  slackCheckChannel: (token, id) => integrations.slackCheckChannel(token, id, selfcheckRequest),
+  // 비밀 주소 읽기가 네트워크에서 막혔는지 가르려고 요청 길만 한 겹 감싼다(주소는 어디에도 남기지 않는다).
+  icalCheck: async (config) => {
+    let net = false;
+    const request = (...args) => Promise.resolve().then(() => selfcheckRequest(...args)).catch((error) => { net = true; throw error; });
+    try { return await integrations.icalCheck(integrations.savedIcalUrl(config), { request }); } catch (error) {
+      if (net && error && typeof error === 'object') error.net = true;
+      throw error;
+    }
+  },
+  // 지라는 연동 저장과 같은 확인(myself) 한 번 — 토큰은 설정의 토큰 파일에서 읽어 헤더로만 보낸다.
+  jiraCheck: async (config) => {
+    const jiraClient = require('./jira-client');
+    const settings = jiraClient.jiraSettings(config);
+    if (!settings) return { ok: false, kind: 'auth' };
+    let token = '';
+    try { token = String(nativeFs.readFileSync(settings.tokenFile, 'utf8') || '').trim(); } catch { token = ''; }
+    return jiraClient.checkJiraAccount({ siteUrl: settings.siteUrl, email: settings.email, token, request: selfcheckRequest });
+  },
+  backup: backupStatus,
+  // 늦음(주황)의 재료 — /api/integrations의 `sync`와 같은 값.
+  sync: () => {
+    const calendar = { ...getCalendarToday() };
+    delete calendar.events;
+    return { slackSync: getSlackSync(), jiraSync: getJiraSync(), calendar };
+  },
+});
+
 // 앱을 끝내는 길은 이 하나뿐이다 — 테스트는 여기를 갈아 끼워 실제 종료가 절대 일어나지 않게 한다.
 let exitApp = code => process.exit(code);
 function setExitForTests(fn) { exitApp = typeof fn === 'function' ? fn : (code => process.exit(code)); }
@@ -2041,7 +2104,7 @@ const CLIENT_BLOCKED = new Set([
   'task-batch.js', 'slack-history.js', 'slack-collect.js', 'import-record.js', 'browser-fixture.js', 'migrate.js',
   'integrations.js', 'ical.js', 'calendar-live.js', 'personalize.js', 'news.js', 'test-support.js',
   'routes-jira.js', 'routes-integrations.js', 'routes-app.js', 'routes-personalize.js', 'routes-items.js',
-  'routes-track.js',
+  'routes-track.js', 'selfcheck.js',
 ]);
 function isClientFile(name) {
   if (!/^[A-Za-z0-9][\w.-]*\.(js|css)$/.test(name)) return false;   // 이름 한 칸짜리(하위 경로 없음)만
@@ -2307,7 +2370,7 @@ const routeCtx = {
   // 지라
   jira, jiraLive, attentionLive, JIRA_DONE_DAYS, JIRA_DONE_MAX_DAYS, PROJECT_MOVE_KEY_RE, projectDisplayName, moveProject,
   // 앱 정보·업데이트
-  aboutApp, aboutDiagnostics, requestUpdate, updateStatusView, UPDATE_MESSAGE,
+  aboutApp, aboutDiagnostics, requestUpdate, updateStatusView, UPDATE_MESSAGE, selfcheck,
   // 연동·자동화·백업·미팅 노트
   calendarLive, slackFollower, slackFollowOn, currentConfigFile, claudeReady, getSlackSync, slackSyncSuccessAt,
   getAutomationStatus, fetchStateLive, fetchStateAutomation, SLACK_AUTH_RE, todayLocal, getReportRefs, withApplyFailure,
@@ -2390,4 +2453,6 @@ module.exports = {
   server, jiraLive, attentionLive, calendarLive, setExitForTests, changesUrlFrom, workspacePaths, fixtureSafetyProblems, CLIENT_BLOCKED, isClientFile, CLAUDE_AUTH_RE,
   // WP-J 원격 소식 — 네트워크 없이 배선을 확인하려는 테스트 전용(진짜 fetch는 기본값 그대로 쓴다).
   setRemoteFetchForTests, setLatestReleaseForTests, refreshRemoteNews, updateOffer,
+  // WP-K 점검하기 — 바깥 확인을 가짜로 끼우는 테스트·픽스처 전용 길(끼우면 30초 캐시도 비운다).
+  setSelfcheckFetchForTests, selfcheck,
 };
