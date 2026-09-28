@@ -2012,6 +2012,11 @@ body.batch-open .d-toast { bottom: 76px; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .d-rec.is-sel .ti { font-weight: 600; color: var(--accent-text); }
+/* 아이디어·결정은 문장 자체가 내용이라 한 줄로 자르지 않고 줄바꿈해 다 보여 준다(사용자 보고: 잘려서 답답함).
+   여러 줄이 되면 날짜·버튼은 첫 줄에 맞춘다. */
+.d-rec.is-idea, .d-rec.is-dec { align-items: start; }
+.d-rec.is-idea .ti, .d-rec.is-dec .ti { white-space: normal; overflow-wrap: anywhere; line-height: 1.5; padding-block: 3px; }
+.d-rec.is-idea .mt, .d-rec.is-dec .mt { padding-top: 5px; }
 .d-rec .mt { font-size: 12.5px; color: var(--dim); text-align: right; white-space: nowrap; }
 /* 프로젝트 탭의 확인 대기·결정 줄만 맨 앞에 체크 칸이 붙는다(아이디어·회의는 그대로).
    확인 대기(.d-wcb, 20px)·결정(.d-check, 30px) 크기가 달라도 이 칸 가운데 놓인다. */
