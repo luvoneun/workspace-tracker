@@ -1961,9 +1961,9 @@ function recordNoteMark(item) {
 
 // 결정 아래 정보 줄에 넣을 부분들 — 날짜(created)·나온 회의(meetingId → 회의 제목)·원문 가운데
 // 실제로 있는 값만, 이 순서로. DOM 없이도 조립 규칙을 확인할 수 있게 데이터만 뽑아 둔다.
-function recordInfoParts(item) {
+function recordInfoParts(item, dateWord = '결정') {
   const parts = [];
-  if (item.created) parts.push({ kind: 'date', text: `${uiKoDateShort(item.created)} 결정` });
+  if (item.created) parts.push({ kind: 'date', text: `${uiKoDateShort(item.created)} ${dateWord}` });
   const meetingId = (typeof wfItemsById !== 'undefined' ? wfItemsById.get(item.id) : null)?.meetingId;
   const meeting = meetingId && typeof workflowData !== 'undefined'
     ? workflowData.meetings.find(event => event.id === meetingId) : null;
@@ -1973,8 +1973,8 @@ function recordInfoParts(item) {
 }
 
 // 위 부분들을 실제 줄로 그린다 — 회의는 눌러서 회의 탭으로, 원문은 uiSourceLink 그대로.
-function recordInfoLine(item) {
-  const parts = recordInfoParts(item);
+function recordInfoLine(item, dateWord) {
+  const parts = recordInfoParts(item, dateWord);
   if (!parts.length) return null;
   const line = document.createElement('div');
   line.className = 'd-recinfo';
@@ -2162,17 +2162,34 @@ function recordIdeaRow(item) {
   row.className = 'd-rec is-idea';
   row.dataset.itemId = item.id;
 
+  // 평소 두 줄, 누르면 그 자리에서 전문(다시 누르면 접힘). 원문은 제목 옆이 아니라 아래 정보 줄에 —
+  // 제목과 같이 잘려 사라지던 것(사용자 보고: 잘림·클릭 안 됨·원문 안 보임).
   const title = document.createElement('span');
   title.className = 'ti';
   title.textContent = item.description;
   title.title = item.description;
+  title.setAttribute('role', 'button');
+  title.tabIndex = 0;
+  title.setAttribute('aria-expanded', 'false');
+  const toggleOpen = () => {
+    const open = !String(row.className).includes(' is-open');
+    row.className = open ? `${row.className} is-open` : String(row.className).replace(' is-open', '');
+    title.setAttribute('aria-expanded', String(open));
+  };
+  title.addEventListener('click', toggleOpen);
+  title.addEventListener('keydown', (event) => {
+    if ((event.key === 'Enter' || event.key === ' ') && !event.isComposing) { event.preventDefault(); toggleOpen(); }
+  });
   if (item.isNew) { title.prepend(renderNewDot(item)); observeNewItem(row, item); }
-  recordTitleCell(row, title, item, '');
+  recordTitleCell(row, title, item, '', false);
 
   const meta = document.createElement('span');
   meta.className = 'mt';
   meta.textContent = ideaChanceText(item);
   row.appendChild(meta);
+
+  const info = recordInfoLine(item, '적음');
+  if (info) row.appendChild(info);
 
   const acts = document.createElement('span');
   acts.className = 'ac';

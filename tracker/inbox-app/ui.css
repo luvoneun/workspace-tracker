@@ -2138,9 +2138,10 @@ body.batch-open .d-toast { bottom: 76px; }
 }
 .d-rec.is-idea { grid-template-columns: minmax(0, 1fr) auto; }
 .d-rec .d-check { width: 30px; height: 24px; }
-/* 아이디어는 좁은 칸에서 세 줄까지만(그 이상은 말줄임 + title) — 두 줄은 잘려서 답답하다는 말이 있어 한 줄 늘림 */
+/* 아이디어는 평소 두 줄까지(말줄임), 누르면(.is-open) 그 자리에서 전문 — 원문·날짜는 아래 정보 줄 */
 .d-rec.is-idea .ti {
-  white-space: normal; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  cursor: pointer;
+  white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
   overflow: hidden; line-height: 22px; padding: 2px 0;
 }
 /* 결정은 말줄임 없이 전문을 줄바꿈한다 — 글줄 폭은 읽기 좋은 약 760px까지만 넓어진다 */
@@ -2149,6 +2150,9 @@ body.batch-open .d-toast { bottom: 76px; }
   font-size: 15px; line-height: 1.55; padding: 3px 0; max-width: 760px;
 }
 .d-rec.is-dec .mt, .d-rec.is-idea .mt { padding-top: 5px; }
+.d-rec.is-idea.is-open .ti { -webkit-line-clamp: unset; display: block; }
+.d-rec.is-idea .d-recinfo { grid-column: 1 / -1; }
+.d-rec.is-idea .ti:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 .d-rec.is-dec .d-check { align-self: start; height: 26px; }
 .d-rec.is-done .ti { color: var(--muted); }
 /* 결정 아래 조용한 정보 한 줄 — 날짜 · 나온 회의(눌러서 회의 탭으로) · 원문(있는 것만) */
