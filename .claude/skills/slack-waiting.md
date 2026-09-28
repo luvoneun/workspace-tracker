@@ -13,7 +13,7 @@
 - `channel`(`my-waiting`) · `type`(`check`) · `today`(오늘 날짜와 요일 — 마감일 계산용)
 - `messages`: 이번에 분류할 메시지(오래된 것부터). 시스템·봇 메시지(갈래 ①)는 스크립트가 미리 걸러 여기 없다.
   - `ts`, `date`(YYYY-MM-DD), `kind`(`share` = 공유, `memo` = 직접 적은 메모), `permalink`(이 개인 채널의 그 메시지 링크), `text`(메시지 글 — 공유면 같이 적은 메모), `files`(파일 이름), `attachments`(링크 미리보기 등의 `title`·`text`·`fallback`), `edited`, `subtype`
-  - `shares`(공유일 때): `permalink`(원본 링크 — `from_url`에서 쿼리를 뗀 것), `author`, `channelName`, `text`(공유 당시 텍스트), `thread`(원본 스레드 전체 `[{"user","ts","text"}]` — 댓글을 공유했으면 그 댓글이 속한 스레드, 길면 앞 20·뒤 40개와 `threadOmitted`). 원본을 못 읽었으면 `thread` 대신 `threadError`
+  - `shares`(공유일 때): `permalink`(원본 링크 — `from_url`에서 쿼리를 뗀 것), `author`, `channelName`, `text`(공유 당시 텍스트), `thread`(원본 스레드 전체 `[{"user","ts","text"}]` — 댓글을 공유했으면 그 댓글이 속한 스레드, 길면 앞 20·뒤 40개와 `threadOmitted`, 1,000개를 넘으면 `threadIncomplete`(뒷부분을 못 읽음 — 앞부분만으로 판단하고 notes에 `스레드 일부만 읽음`)). 원본을 못 읽었으면 `thread` 대신 `threadError`
   - 사람 멘션(`<@U…>`)은 이름을 알면 스크립트가 `@이름`으로 바꿔 둔다
 - `existing`: 중복 판단용 기존 확인 대기(`check`)·할 일(`task`)·결정(`decision`) 항목 `[{"type","description","status","created","permalink"}]` (최근 것부터)
 

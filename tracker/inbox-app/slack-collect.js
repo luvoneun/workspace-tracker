@@ -104,10 +104,11 @@ async function readThread(token, channel, threadTs) {
     catch (error) { if (error.retry || !/^Slack: /.test(error.message)) throw error; return { error: error.message.slice(7) }; }
     if (Array.isArray(body.messages)) messages.push(...body.messages);
     cursor = (body.response_metadata && body.response_metadata.next_cursor) || '';
-    if (!cursor || seen.has(cursor)) break;
+    if (!cursor || seen.has(cursor)) { cursor = ''; break; }
     seen.add(cursor);
   }
-  return { messages };
+  // 5쪽(1,000개)을 넘는 스레드는 앞부분만 읽었다 — 전부 읽은 것처럼 넘기지 않고 표시한다(Codex 검토).
+  return { messages, truncated: !!cursor };
 }
 
 function shareSource(attachment) {
@@ -183,6 +184,7 @@ async function gather(token, channel, message) {
             kept = [...all.slice(0, THREAD_HEAD), ...all.slice(-THREAD_TAIL)];
             share.threadOmitted = all.length - kept.length;
           }
+          if (thread.truncated) share.threadIncomplete = '스레드가 너무 길어 앞 1,000개까지만 읽었어요 — 뒷부분은 없어요';
           share.thread = kept;
           kept.forEach(reply => { if (/^[UW][A-Z0-9]+$/.test(reply.user)) users.push(reply.user); users.push(...mentionIds(reply.text)); });
         }
