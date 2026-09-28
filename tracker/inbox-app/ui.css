@@ -1088,6 +1088,9 @@ body.batch-open .d-row { grid-template-columns: 22px 30px minmax(0, 1fr) var(--w
   font-size: 16px; font-weight: 500; line-height: 25px; letter-spacing: -0.012em; color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* 업무 줄의 긴 문구(슬랙 원문 등)는 한 줄에서 자르지 않고 두 줄까지(말줄임) — 아이디어 줄과 같은 규칙이다.
+   두 줄(25px × 2)이 줄 높이(--row 54px) 안에 들어가 짧은 줄의 모양은 그대로다. 전문은 누르면 열리는 상세에 있다. */
+.d-row .d-title { white-space: normal; text-overflow: clip; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .d-row.is-doing .d-title { font-weight: 600; }
 .d-title .new-dot {
   position: static; display: inline-block; width: 5px; height: 5px;
@@ -2448,6 +2451,9 @@ a.d-btn { text-decoration: none; }
 .d-intgask .d-derr { flex-basis: 100%; margin: 0; }
 .d-intgsetup { font-size: 12.5px; color: var(--dim); }
 .d-intg .d-seg { align-self: flex-start; }
+/* 고를 수 없는 칸(이 맥에 Claude Code가 없을 때의 `Claude로 다듬기`)은 흐리게 — 옆 칩이 이유를 말한다 */
+.d-intg .d-seg button:disabled { opacity: 0.45; cursor: default; }
+.d-intg .d-seg button:disabled:hover { color: var(--muted); }
 @media (max-width: 520px) {
   .d-intgtop .st { flex-basis: 100%; order: 4; margin-left: 0; white-space: normal; }
   .d-intgtop .st ~ .d-btn:not([hidden]), .d-intgtop .st ~ .d-btn[hidden] + .d-more { margin-left: auto; }

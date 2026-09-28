@@ -966,6 +966,12 @@ async function settingsIntegrationApplied(result, done) {
   const view = document.getElementById('settingsIntegrationsView');
   // `done`은 글자이거나, 저장 결과를 받아 글자를 돌려주는 함수다(캘린더: 오늘 일정 수).
   if (typeof done === 'function') done = done(result);
+  // 다시 켤 필요가 없는 저장(슬랙 정리 방식)은 알림만 띄우고 탭을 다시 그린다.
+  if (result && result.quiet === true) {
+    showNotice(done);
+    await renderSettingsIntegrations();
+    return;
+  }
   if (!result || result.restart !== true) {
     showNotice(`${done} · 서버를 다시 켜면 적용돼요`);
     await renderSettingsIntegrations();
@@ -2010,6 +2016,61 @@ function settingsSlackPick(card, data) {
   });
 }
 
+// ---------- 슬랙 정리 방식 ----------
+// 세그먼트 `원문 그대로 | Claude로 다듬기`(회의록 카드와 같은 모양). 고르는 순간 저장하고, 이미 들어온 항목은 그대로 둔다.
+const SETTINGS_SLACK_RAW_NOTE = '요약하지 않고 메시지 첫 줄을 그대로 넣어요. 문구가 길거나 정확하지 않을 수 있으니, 필요하면 앱에서 고쳐 주세요.';
+const SETTINGS_SLACK_TIDY_DONE = { raw: '이제 원문 그대로 받아요', claude: '이제 Claude로 다듬어서 받아요' };
+function settingsSlackTidy(card, data) {
+  const slack = data.slack || {};
+  const saved = slack.tidy === 'raw' ? 'raw' : 'claude';
+  let chosen = saved;
+  const error = settingsErrorLine();
+  const head = settingsEl('d-irow');
+  const seg = document.createElement('span');
+  seg.className = 'd-seg';
+  seg.setAttribute('role', 'radiogroup');
+  seg.setAttribute('aria-label', '슬랙 메시지 정리 방식');
+  const note = settingsEl('d-ismall', SETTINGS_SLACK_RAW_NOTE);
+  const buttons = [];
+  const paint = () => {
+    buttons.forEach(([mode, button]) => {
+      button.setAttribute('aria-checked', String(mode === chosen));
+      button.tabIndex = mode === chosen ? 0 : -1;
+    });
+    // `원문 그대로`가 무엇인지 고르기 전에 읽히게 늘 세운다 — 이미 원문으로 받는 중이면 같은 줄이 카드 둘째 줄
+    // 아래에 늘 서 있으므로 여기서는 겹쳐 적지 않는다.
+    note.hidden = saved === 'raw';
+  };
+  [['raw', '원문 그대로'], ['claude', 'Claude로 다듬기']].forEach(([mode, text]) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.setAttribute('role', 'radio');
+    button.dataset.tidy = mode;
+    button.textContent = text;
+    if (mode === 'claude' && !data.claude) button.disabled = true;
+    button.addEventListener('click', async () => {
+      if (button.disabled || mode === chosen) return;
+      const before = chosen;
+      chosen = mode;
+      paint();
+      const result = await settingsIntegrationSave({ slack: { tidy: mode } }, { error, done: SETTINGS_SLACK_TIDY_DONE[mode] });
+      if (!result) { chosen = before; paint(); }
+    });
+    buttons.push([mode, button]);
+    seg.appendChild(button);
+  });
+  head.appendChild(seg);
+  if (!data.claude) {
+    const need = document.createElement('span');
+    need.className = 'd-itag';
+    need.textContent = 'Claude Code가 있어야 해요';
+    head.appendChild(need);
+  }
+  const quiet = settingsEl('d-ismall', '방식을 바꿔도 이미 들어온 항목은 그대로예요 — 다음에 들어오는 것부터 바뀌어요.');
+  card.body.append(head, note, quiet, error);
+  paint();
+}
+
 function settingsSlackCard(data) {
   const slack = data.slack || {};
   const channels = slack.channels || {};
@@ -2019,7 +2080,8 @@ function settingsSlackCard(data) {
   const connected = !!(slack.enabled && slack.hasToken && linkedKeys.length);
   const more = linkedKeys.length - 1;
   const ago = settingsAgo(slack.readAt);
-  const status = connected ? `${main.name || '채널'}${more ? ` 외 ${more}개` : ''}${ago ? ` · ${ago} 읽음` : ''}` : null;
+  // 원문 그대로 받는 중이면 상태 줄 맨 앞에 그 방식을 적는다(Claude로 다듬는 중은 예전 그대로).
+  const status = connected ? `${slack.tidy === 'raw' ? '원문 그대로 받는 중 · ' : ''}${main.name || '채널'}${more ? ` 외 ${more}개` : ''}${ago ? ` · ${ago} 읽음` : ''}` : null;
   const fetchState = slack.fetch || {};
   let card = null;
   const pickLink = () => settingsButton('채널 고르기', 'd-ablink', () => card.open('pick'));
@@ -2038,18 +2100,40 @@ function settingsSlackCard(data) {
     line.append(document.createTextNode(`${settingsChannelObject(channels[key].name)} 찾을 수 없어요 — 슬랙에서 지웠거나 보관했어요 · `), pickLink());
     return line;
   });
-  // 메시지를 할 일로 옮기는 일은 지금 Claude Code가 한다 — 이 맥에 없으면 사실만 한 줄 알린다.
-  if (!data.claude) extra.push(settingsEl('d-intgnote', '메시지를 할 일로 옮기는 일은 지금 Claude Code가 해요 · 이 맥에는 설치 안 됨'));
+  // 정리 방식(원문 그대로 / Claude로 다듬기). 원문이면 주의 한 줄이 늘 서고, Claude가 생겼으면 조용히 알린다.
+  // Claude로 다듬는 중인데 이 맥에 Claude가 없거나 로그인이 풀려 멈췄으면 `원문 그대로로 바꾸기`(자동 전환은 없다).
+  const raw = slack.tidy === 'raw';
+  if (connected && raw) {
+    extra.push(settingsEl('d-intgnote', SETTINGS_SLACK_RAW_NOTE));
+    if (data.claude) {
+      const line = settingsEl('d-intgnote');
+      line.append(document.createTextNode('이제 Claude로 다듬을 수 있어요 · '), settingsButton('정리 방식', 'd-ablink', () => card.open('tidy')));
+      extra.push(line);
+    }
+  } else if (connected && (!data.claude || fetchState.claudeAuth)) {
+    const line = settingsEl('d-intgneed k-warn');
+    line.dataset.tidy = 'stuck';
+    const error = settingsErrorLine();
+    const swap = settingsButton('원문 그대로로 바꾸기', 'd-ablink');
+    swap.addEventListener('click', () => settingsIntegrationSave({ slack: { tidy: 'raw' } }, { error, button: swap, done: SETTINGS_SLACK_TIDY_DONE.raw }));
+    line.append(document.createTextNode(data.claude
+      ? 'Claude Code 로그인이 풀려 메시지를 다듬지 못하고 있어요 · '
+      : '이 맥에 Claude Code가 없어 메시지를 다듬지 못해요 · '), swap, error);
+    extra.push(line);
+  } else if (!connected && !data.claude) {
+    extra.push(settingsEl('d-intgnote', '이 맥에는 Claude Code가 없어서 요약하지 않고 메시지 첫 줄을 그대로 받아요'));
+  }
   const menu = connected ? () => [[
     ...settingsLogItem(card, slack.log),
     { label: '보내는 법', onClick: () => { card.open('how'); } },
     { label: '채널 고르기', onClick: () => card.open('pick') },
     { label: '다시 연결(토큰 바꾸기)', onClick: () => card.open('token') },
+    { label: '정리 방식', onClick: () => { card.open('tidy'); } },
   ], [
     { label: '해제…', danger: true, onClick: () => settingsIntgConfirmOff(card, { slack: { enabled: false } }) },
   ]] : null;
   card = settingsIntgCard({
-    kind: 'slack', name: '슬랙 수집', chip: 'Claude Code 필요',
+    kind: 'slack', name: '슬랙 수집', chip: '누구나 · Claude',
     use: '나만 보는 채널에 공유한 메시지가 할 일로 들어와요',
     // 주기는 실제 등록 값(launchd 5분 간격, 매일 9–19시 — slack-capture.sh가 시간대를 본다).
     need: connected
@@ -2059,6 +2143,7 @@ function settingsSlackCard(data) {
     fetch: connected ? { key: 'slack', state: fetchState, reconnect: () => card.open('token') } : null,
     onOpen: (self, mode) => {
       if (mode === 'how') { self.body.appendChild(settingsSlackSendHow(settingsSlackMainName(channels))); return; }
+      if (mode === 'tidy') { settingsSlackTidy(self, data); return; }
       if (mode === 'log') {
         const automation = (automationStatusCache || []).find(a => a.key === 'slack');
         settingsIntgLog(self, 'slack', '슬랙 수집', slack.log || [], slackLedgerNotes(automation ? automation.tail : []));
@@ -3031,8 +3116,10 @@ const SETTINGS_FAQ = [
       '<b>설정 &gt; 연동 &gt; 캘린더</b>의 <b>비밀 주소 붙이기</b>예요. 컴퓨터에서 calendar.google.com → 톱니바퀴 → 설정 → 왼쪽 내 캘린더의 설정(내 이름) → 캘린더 통합 → <b>iCal 형식의 비공개 주소</b>를 복사해 붙이면 앱이 30분마다 직접 읽어요. 이 주소는 비밀번호처럼 다뤄요. 그 칸이 없으면 회사에서 막아 둔 거라 <b>Claude Code로</b> 연결해요.'],
     ['슬랙에서 이렇게 보내요', '슬랙 연결',
       '<b>남의 메시지</b>는 ⋯ → <b>전달</b>(또는 공유)로 {todo} 같은 내 채널에 보내요. 메모 한 줄을 같이 적으면 할 일 문구에 참고해요. <b>내 생각</b>은 그 채널에 그냥 적어도 돼요(한 메시지가 한 항목). 해야 할 일 → 할 일 · 답을 기다리는 것 → 기다리는 것 · 정해진 정책 → 정해진 것 · 참고거리 → 언젠가.'],
-    ['슬랙에서 수집한 게 잘 들어왔는지 보려면', '슬랙 연결 + Claude Code',
-      '<b>설정 &gt; 연동</b>의 슬랙 카드 <b>⋯ › 최근 기록</b>을 열면 맨 위에 최근 수집 결과가 요약돼요 — 본 메시지 수와 등록·중복·건너뜀 개수, 건너뛴 문구까지 보여요. 그 아래는 최근 10번의 시각과 결과예요. 메시지를 갈래로 나누고 스레드를 읽는 일은 Claude Code가 해요.'],
+    ['슬랙에서 수집한 게 잘 들어왔는지 보려면', '슬랙 연결',
+      '<b>설정 &gt; 연동</b>의 슬랙 카드 <b>⋯ › 최근 기록</b>을 열면 맨 위에 최근 수집 결과가 요약돼요 — 본 메시지 수와 등록·중복·건너뜀 개수, 건너뛴 문구까지 보여요. 그 아래는 최근 10번의 시각과 결과예요. 문구를 다듬는 일은 Claude로 다듬기일 때만 Claude Code가 해요.'],
+    ['슬랙에서 온 할 일이 요약되지 않고 길게 들어와요', '슬랙 연결',
+      '<b>원문 그대로</b> 방식이라 그래요 — 요약하지 않고 메시지 첫 줄을 그대로 넣어서 문구가 길거나 정확하지 않을 수 있어요. 줄을 눌러 고쳐 주세요. 이 맥에 <b>Claude Code</b>(유료 구독)가 있으면 슬랙 카드 <b>⋯ › 정리 방식</b>에서 <b>Claude로 다듬기</b>로 바꿀 수 있어요(다음 것부터).'],
     ['슬랙 채널에 다른 사람을 초대해도 되나요', '슬랙 연결',
       '이 채널들은 나만 있는 채널로 써요 — 다른 사람을 초대하면 그 사람이 쓴 메시지도 할 일로 들어와요.'],
     ['받을 채널을 더하거나 빼려면', '슬랙 연결',

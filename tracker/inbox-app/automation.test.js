@@ -2135,3 +2135,119 @@ test('app-refresh.sh: Dock 앱은 이미 열린 앱 창을 앞으로 가져오�
   assert.match(script, /end try\s*\ndo shell script/, '제어를 거절하거나 오류면 예전처럼 새 창을 연다');
   assert.match(script, /"\$HOME\/Applications\/Google Chrome\.app"/);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 슬랙 수집 원문 그대로 모드(`slack.tidy: 'raw'`) — 2026-09-29. Claude가 없는 맥(CLAUDE_BIN이 없는 파일)에서 돈다.
+
+const NO_CLAUDE = home => ({ CLAUDE_BIN: path.join(home, 'claude-없음') });
+const shareMsg = (ts, { text = '', memoText = '', author = '김하나', authorId = 'U0KIM', link = 'https://team.slack.com/archives/C0SRC/p1700000000000100', files } = {}) => ({
+  type: 'message', user: 'U0ME', ts, text: memoText,
+  attachments: [{ is_share: true, from_url: link, channel_id: 'C0SRC', ts: '1700000000.000100', text, author_name: author, author_id: authorId, ...(files ? { files } : {}) }],
+});
+
+test('원문 모드: Claude 없이 할 일 채널 메시지를 규칙대로 저장한다 — 슬랙 표기·인사말·목록·긴 글·파일만·공유+메모 (예외 1~5)', (t) => {
+  const fix = captureFixture(t, { slack: { tidy: 'raw', channels: { todo: { id: 'C0TODO11', name: '#my-todo' } } } });
+  const long = '가'.repeat(250);
+  fix.setSlack({
+    history: { C0TODO11: [
+      memo('1790000001.000100', '*<@U0KIM>* 님께 <#C0AB12|design> 채널 <https://x.example/a|기획서> 확인 &amp; 공유 :pray: `v2` ~옛 안~ _급함_ &lt;필수&gt;'),
+      memo('1790000002.000100', '안녕하세요!\n다음 주 배포 일정 공유 부탁드려요\n감사합니다'),
+      memo('1790000003.000100', '• 로그인 오류 확인\n• 결제 문구 수정\n• QA 요청'),
+      memo('1790000004.000100', long),
+      { type: 'message', user: 'U0ME', ts: '1790000005.000100', text: '', files: [{ name: '화면.png', title: '화면.png' }] },
+      { type: 'message', user: 'U0ME', ts: '1790000006.000100', text: '', files: [{ name: 'IMG_1.png', title: 'IMG_1.png', alt_txt: '결제 화면 오류 캡처' }] },
+      shareMsg('1790000007.000100', { text: '금요일까지 <@U0LEE> 검토 부탁해요\n자세한 건 스레드에', memoText: '내가 챙기기\n둘째 줄' }),
+      memo('1790000008.000100', '<https://x.example/b>'),
+    ] },
+    users: { U0KIM: '김하나', U0LEE: '이두리' },
+  });
+  const result = fix.run(NO_CLAUDE(fix.home));
+  assert.equal(result.status, 0, result.stderr + fix.logText());
+  assert.deepEqual(fix.claudeCalls(), [], 'Claude를 부르지 않는다');
+  assert.ok(!fix.requests().some(one => one.url.includes('conversations.replies') || one.url.endsWith('/api/items')), '원본 스레드·기존 항목을 읽지 않는다');
+  const own = ts => `https://team.slack.com/archives/C0TODO11/p${ts.replace('.', '')}`;
+  assert.deepEqual(fix.imports('item'), [
+    { type: 'task', description: '@김하나 님께 #design 채널 기획서 확인 & 공유 v2 옛 안 급함 <필수>', permalink: own('1790000001.000100') },
+    { type: 'task', description: '안녕하세요! 다음 주 배포 일정 공유 부탁드려요', permalink: own('1790000002.000100') },
+    { type: 'task', description: '로그인 오류 확인', permalink: own('1790000003.000100') },
+    { type: 'task', description: `${'가'.repeat(200)}…`, permalink: own('1790000004.000100') },
+    { type: 'task', description: '(파일) 화면.png', permalink: own('1790000005.000100') },
+    { type: 'task', description: '결제 화면 오류 캡처', permalink: own('1790000006.000100') },
+    { type: 'task', description: '금요일까지 @이두리 검토 부탁해요 — 내가 챙기기', permalink: 'https://team.slack.com/archives/C0SRC/p1700000000000100' },
+    { type: 'task', description: 'https://x.example/b', permalink: own('1790000008.000100') },
+  ]);
+  assert.ok(fix.imports('item').every(one => !/[\r\n]/.test(one.description) && one.description.length <= 201), '한 줄 · 200자(+…)');
+  assert.deepEqual(fix.imports('cursor'), [{ channel: 'my-todo', ts: '1790000008.000100' }]);
+  const log = fix.logText();
+  assert.match(log, /^이번에 본 메시지 8개 = 등록 8 · 링크 중복 0 · 비슷한 일이라 건너뜀 0 · 시스템 0$/m);
+  assert.match(log, /^my-todo · 새 8개 · 저장 8 · 건너뜀 0 · 표시 2 · 원문 그대로$/m);
+  assert.match(log, /^⚠️ 글 없이 파일만 있는 메시지: \(파일\) 화면\.png$/m);
+  assert.equal(lastLogEvent(log).kind, 'run');
+});
+
+test('원문 모드: 확인 대기는 원래 작성자가 담당자(내 메시지면 비움), 날짜가 있어도 기한 없음, 결정은 지라 연결 없음 (예외 6·7)', (t) => {
+  const fix = captureFixture(t, { slack: { tidy: 'raw', channels: {
+    waiting: { id: 'C0WAIT11', name: '#my-waiting' }, align: { id: 'C0ALIGN1', name: '#my-align' }, someday: { id: 'C0SOME11', name: '#my-someday' },
+  } } });
+  fix.setSlack({ history: {
+    C0WAIT11: [
+      shareMsg('1790000001.000100', { text: '10/3까지 시안 회신 드릴게요', author: '김하나', authorId: 'U0KIM' }),
+      shareMsg('1790000002.000100', { text: '내일까지 답 주세요', author: '나', authorId: 'U0ME', link: 'https://team.slack.com/archives/C0SRC/p1700000000000200' }),
+      memo('1790000003.000100', '2026-10-05까지 법무 검토 받기'),
+    ],
+    C0ALIGN1: [memo('1790000004.000100', 'PROJ-12 환불 정책: 7일 안이면 전액')],
+    C0SOME11: [memo('1790000005.000100', '온보딩 영상 만들어 보기')],
+  } });
+  const result = fix.run(NO_CLAUDE(fix.home));
+  assert.equal(result.status, 0, result.stderr + fix.logText());
+  assert.deepEqual(fix.claudeCalls(), []);
+  const items = fix.imports('item');
+  assert.deepEqual(items.filter(one => one.type === 'check'), [
+    { type: 'check', description: '10/3까지 시안 회신 드릴게요', permalink: 'https://team.slack.com/archives/C0SRC/p1700000000000100', who: '김하나' },
+    { type: 'check', description: '내일까지 답 주세요', permalink: 'https://team.slack.com/archives/C0SRC/p1700000000000200' },
+    { type: 'check', description: '2026-10-05까지 법무 검토 받기', permalink: 'https://team.slack.com/archives/C0WAIT11/p1790000003000100' },
+  ], '담당자는 원래 작성자, 내 메시지면 비움 · 기한은 넣지 않는다');
+  assert.deepEqual(items.find(one => one.type === 'decision'), { type: 'decision', description: 'PROJ-12 환불 정책: 7일 안이면 전액', permalink: 'https://team.slack.com/archives/C0ALIGN1/p1790000004000100' }, '지라 키가 보여도 연결하지 않는다');
+  assert.deepEqual(items.find(one => one.type === 'idea'), { type: 'idea', description: '온보딩 영상 만들어 보기', permalink: 'https://team.slack.com/archives/C0SOME11/p1790000005000100' });
+  assert.ok(items.every(one => one.due === undefined && one.jira === undefined && one.priority === undefined));
+});
+
+test('원문 모드: 링크 중복은 지금처럼 건너뛰고, 밀린 메시지는 한 회차 최대 개수까지만 — 나머지는 다음 회차 (예외 11·12)', (t) => {
+  const fix = captureFixture(t, { slack: { tidy: 'raw', channels: { todo: { id: 'C0TODO11', name: '#my-todo' } } } });
+  fix.setSlack({
+    history: { C0TODO11: [memo('1790000001.000100', '가'), memo('1790000002.000100', '나'), memo('1790000003.000100', '다'), { type: 'message', subtype: 'channel_join', user: 'U0ME', ts: '1790000000.000100', text: '들어옴' }] },
+    dupLinks: ['https://team.slack.com/archives/C0TODO11/p1790000001000100'],
+  });
+  assert.equal(fix.run({ ...NO_CLAUDE(fix.home), SLACK_COLLECT_MAX_MESSAGES: '3' }).status, 0, fix.logText());
+  assert.deepEqual(fix.imports('item').map(one => one.description), ['가', '나'], '시스템 메시지는 거르고, 넣은 데까지만');
+  assert.deepEqual(fix.imports('cursor'), [{ channel: 'my-todo', ts: '1790000002.000100' }], '넣은 데까지만 커서');
+  const log = fix.logText();
+  assert.match(log, /^my-todo · 새 3개 · 저장 1 · 건너뜀 2 \(시스템 1 · 링크 중복 1\) · 원문 그대로 · 남은 1개는 다음 회차$/m);
+  assert.match(log, /^이번에 본 메시지 3개 = 등록 1 · 링크 중복 1 · 비슷한 일이라 건너뜀 0 · 시스템 1$/m);
+});
+
+test('원문 모드가 아니면(칸 없음·claude) 예전처럼 Claude로 다듬고, Claude가 실패하면 원문으로 대신 넣지 않는다 (예외 8·9)', (t) => {
+  for (const tidy of [undefined, 'claude']) {
+    const fix = captureFixture(t, { slack: { ...(tidy ? { tidy } : {}), channels: { todo: { id: 'C0TODO11', name: '#my-todo' } } } });
+    fix.setSlack({ history: { C0TODO11: [memo('1790000001.000100', '원문 문구')] } });
+    assert.equal(fix.run().status, 0, fix.logText());
+    assert.equal(fix.claudeCalls().length, 1, `${tidy || '칸 없음'}: Claude를 부른다`);
+    assert.deepEqual(fix.imports('item').map(one => one.description), ['할 일 1790000001.000100'], 'Claude의 문구로 저장');
+    assert.doesNotMatch(fix.logText(), /원문 그대로/);
+    const failed = fix.run({ FAKE_CLAUDE_MODE: 'exit' });
+    assert.equal(failed.status, 1);
+    assert.deepEqual(fix.imports('item'), [], 'Claude가 실패해도 원문으로 대신 넣지 않는다');
+    assert.deepEqual(fix.imports('cursor'), [], '커서 그대로 — 다음 회차에 다시');
+    assert.match(lastLogEvent(fix.logText()).text, /분류 실패\(exit 3\).* — 커서 그대로/);
+  }
+});
+
+test('원문 규칙(slackPlain·firstLine): 모르는 사람은 표시 이름·id로, @here·그룹 멘션, 짧은 첫 줄 한 번만 이어 붙임', () => {
+  const { slackPlain, firstLine } = require('./slack-collect');
+  assert.equal(slackPlain('<@U0NOPE> <@U0X|하늘> <!here> <!subteam^S01|@디자인팀> <mailto:a@b.c|a@b.c>'), '@U0NOPE @하늘 @here @디자인팀 a@b.c');
+  assert.equal(slackPlain('snake_case_name 10:30:00 3.5'), 'snake_case_name 10:30:00 3.5', '글자 속 밑줄·시각은 건드리지 않는다');
+  assert.equal(firstLine('네\n좋아요\n그럼 진행해요'), '네 좋아요', '한 번만 이어 붙인다');
+  assert.equal(firstLine('1. 첫째\n2. 둘째'), '첫째', '목록 첫 항목은 짧아도 다음 항목을 붙이지 않는다');
+  assert.equal(firstLine('> 인용한 글입니다 길게 적어 둠\n메모'), '인용한 글입니다 길게 적어 둠');
+  assert.equal(firstLine(''), '');
+});

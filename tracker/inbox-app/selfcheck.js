@@ -199,7 +199,8 @@ function createSelfcheck(deps) {
 
     // ---------- Claude Code(Claude가 필요한 연동을 켰을 때만) — 설치는 파일이 있는지, 로그인은 최근 기록 기준 ----------
     const claudeUsers = [
-      on.slack ? { key: 'slack', name: '슬랙 수집' } : null,
+      // 원문 그대로(slack.tidy='raw')는 Claude 없이 수집하므로 Claude가 필요한 연동으로 세지 않는다.
+      on.slack && ((config && config.slack) || {}).tidy !== 'raw' ? { key: 'slack', name: '슬랙 수집' } : null,
       on.calendar && !calendarIcal ? { key: 'calendar', name: '캘린더 동기화' } : null,
       on.notes ? { key: 'tiro', name: '미팅 노트 가져오기', stateKey: 'notes' } : null,
     ].filter(Boolean);

@@ -50,6 +50,7 @@ const MESSAGE = {
   slackAppLevel: '이건 앱 수준 토큰(xapp-)이에요 — OAuth & Permissions 화면의 User OAuth Token(xoxp-)을 복사해 주세요',
   slackNotUser: 'User OAuth Token은 xoxp-로 시작해요 — OAuth & Permissions 화면에서 복사해 주세요',
   slackReach: '슬랙에 닿지 못했어요 — 잠시 뒤 다시 해 주세요',
+  slackTidyClaude: 'Claude로 다듬으려면 이 맥에 Claude Code가 있어야 해요',
   icalUrl: '비밀 주소를 붙여 넣어 주세요',
   icalHttps: '주소는 https://로 시작해야 해요',
   icalRead: '이 주소를 읽지 못했어요 — 비밀 주소를 다시 복사해 주세요',
@@ -337,6 +338,12 @@ function withSlack(config, { enabled, workspaceUrl, tokenFile, channels }) {
   return next;
 }
 
+// 슬랙 정리 방식(`slack.tidy`: `claude` | `raw`) 한 칸만 바꾼다 — 다른 칸은 그대로.
+const SLACK_TIDY = ['claude', 'raw'];
+function withSlackTidy(config, tidy) {
+  return { ...config, slack: { ...clone(config.slack), tidy } };
+}
+
 // 캘린더는 켜고 끄는 값(`integrations.calendar`)과 "어느 갈래로 읽는지"(`calendar.source`: `ical` | `claude`,
 // 비밀 주소 갈래면 `calendar.icalFile` 경로)를 함께 적는다. 끌 때는 갈래·경로를 그대로 둔다(주소 파일은 사람 것).
 function withCalendar(config, enabled, { source, icalFile } = {}) {
@@ -397,6 +404,8 @@ function readIntegrations(config, { tokenDir, claude } = {}) {
       // 토큰을 받으러 갈 주소(토큰이 아니다). 사람이 적어 둔 값이 https가 아니면 목록 화면으로 보낸다.
       appUrl: slackAppUrl(slack.appUrl),
       hasToken: !!findToken(paths, 'slack', slack.tokenFile),
+      // 정리 방식 — `raw`(원문 그대로)만 따로 읽고, 칸이 없거나 다른 값이면 `claude`(예전 그대로).
+      tidy: slack.tidy === 'raw' ? 'raw' : 'claude',
       channels: Object.fromEntries(SLACK_CHANNEL_KEYS.map((key) => {
         const entry = clone(channels[key]);
         // 예시 자리표시자가 남아 있거나 뺀 채널이면 "연결 안 된 칸"으로 본다(이름도 같이 비운다).
@@ -421,7 +430,7 @@ function readIntegrations(config, { tokenDir, claude } = {}) {
 // 한 번에 하나(또는 여럿)를 켜고 끈다. 켜는 쪽은 먼저 **읽어 보고** 성공했을 때만 저장한다.
 // 저장은 config 한 번 + 토큰 파일뿐이고, 실패하면 아무것도 쓰지 않는다.
 async function saveIntegrations({
-  configPath, current = {}, body = {}, tokenDir,
+  configPath, current = {}, body = {}, tokenDir, claude,
   jiraCheck, slackCheck, calendarCheck, write = atomicWrite, writeToken = writeTokenFile, now = Date.now,
 } = {}) {
   if (!body || typeof body !== 'object') throw bad(MESSAGE.other);
@@ -457,7 +466,19 @@ async function saveIntegrations({
     }
   }
 
-  if (body.slack && typeof body.slack === 'object') {
+  // 슬랙 정리 방식만 바꾸는 저장(`{ slack: { tidy } }`) — 슬랙에 묻지 않고 그 칸 하나만 쓴다. 이미 들어온 항목은 그대로다.
+  // `claude`는 이 맥에 Claude Code가 있을 때만 받는다(`claude: false`를 받았을 때만 막는다).
+  const slackKeys = body.slack && typeof body.slack === 'object' ? Object.keys(body.slack) : [];
+  const tidyOnly = slackKeys.length === 1 && slackKeys[0] === 'tidy';
+  if (body.slack && body.slack.tidy !== undefined) {
+    if (!SLACK_TIDY.includes(body.slack.tidy)) throw bad(MESSAGE.other);
+    if (body.slack.tidy === 'claude' && claude === false) throw bad(MESSAGE.slackTidyClaude);
+  }
+  if (tidyOnly) {
+    touched = true;
+    config = withSlackTidy(config, body.slack.tidy);
+    result.slack = { tidy: body.slack.tidy };
+  } else if (body.slack && typeof body.slack === 'object') {
     touched = true;
     if (body.slack.enabled === false) {
       config = withSlack(config, { enabled: false });
@@ -529,11 +550,19 @@ async function saveIntegrations({
       });
       if (token) pending.push([paths.slack.file, token]);
       const workspaceUrl = trimmed(body.slack.workspaceUrl);
+      // 처음 연결(저장된 채널이 하나도 없고 정리 방식 칸도 없음)이면 이 맥에 Claude Code가 있는지로 정한다 —
+      // 없으면 `raw`(원문 그대로), 있으면 `claude`. 이미 연결했던 사람은 칸이 없어도 그대로 `claude`다(동작 변화 없음).
+      const firstTime = !SLACK_CHANNEL_KEYS.some(key => realChannelId(clone(savedChannels[key]).id)) && clone(config.slack).tidy === undefined;
+      const tidy = body.slack.tidy !== undefined ? body.slack.tidy : (firstTime ? (claude === false ? 'raw' : 'claude') : undefined);
       config = withSlack(config, {
         enabled: true, channels,
         ...(token ? { tokenFile: paths.slack.config } : (saved ? { tokenFile: saved.config } : {})),
         ...(workspaceUrl ? { workspaceUrl } : {}),
       });
+      if (tidy !== undefined) {
+        config = withSlackTidy(config, tidy);
+        result.slack.tidy = tidy;
+      }
     }
   }
 
@@ -572,7 +601,9 @@ async function saveIntegrations({
   // 여기까지 왔으면 전부 확인됐다 — 이제야 파일을 쓴다.
   pending.forEach(([file, value]) => writeToken(file, value));
   write(configPath, `${JSON.stringify(config, null, 2)}\n`);
-  return { config, result };
+  // 정리 방식만 바꾼 저장은 서버를 다시 켤 필요가 없다(수집 스크립트가 회차마다 설정을 읽는다).
+  const quiet = tidyOnly && !body.jira && !body.calendar && !body.meetingNotes;
+  return { config, result, quiet };
 }
 
 // ---------- 켠 연동 자동 등록 ----------
