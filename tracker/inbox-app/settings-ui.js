@@ -740,7 +740,8 @@ const settingsSlackTokenShape = (value) => {
   if (!text) return '';
   if (/^xoxb-/.test(text)) return SETTINGS_SLACK_BOT;
   if (/^xapp-/.test(text)) return SETTINGS_SLACK_APPLEVEL;
-  return /^xoxp-/.test(text) || 'xoxp-'.startsWith(text) ? '' : SETTINGS_SLACK_NOTUSER;
+  // `xoxe.xoxp-`(토큰 교체를 켠 앱의 사용자 토큰)도 맞는 모양이다. 치는 중인 앞부분은 기다린다.
+  return /^(xoxe\.)?xoxp-/.test(text) || 'xoxp-'.startsWith(text) || 'xoxe.xoxp-'.startsWith(text) ? '' : SETTINGS_SLACK_NOTUSER;
 };
 const SETTINGS_SLACK_ASK = '워크스페이스 슬랙 앱에 저를 Collaborator로 추가해 주세요';
 const SETTINGS_SLACK_TAKEN = '이미 있는 이름이에요 — 다른 이름을 적어 주세요';

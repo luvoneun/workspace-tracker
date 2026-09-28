@@ -216,7 +216,8 @@ async function slackTokenCheck(token, request = (...args) => fetch(...args)) {
   if (/^xoxb-/.test(secret)) throw bad(MESSAGE.slackBot, 'bot_token');
   // 앱 수준 토큰(xapp-, Basic Information 화면)·그 밖의 토큰은 채널을 읽지 못한다(not_allowed_token_type).
   if (/^xapp-/.test(secret)) throw bad(MESSAGE.slackAppLevel, 'app_token');
-  if (!/^xoxp-/.test(secret)) throw bad(MESSAGE.slackNotUser, 'not_user_token');
+  // 토큰 교체(rotation)를 켠 앱의 사용자 토큰은 `xoxe.xoxp-`로 시작한다 — 이것도 사용자 토큰이다.
+  if (!/^(xoxe\.)?xoxp-/.test(secret)) throw bad(MESSAGE.slackNotUser, 'not_user_token');
   let auth;
   try { auth = await slackCall(secret, 'auth.test', null, request); } catch { throw bad(MESSAGE.slackReach); }
   if (!auth || auth.ok !== true) throw bad(MESSAGE.slackAuth, 'invalid_auth');

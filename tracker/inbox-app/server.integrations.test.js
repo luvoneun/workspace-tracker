@@ -1020,6 +1020,6 @@ test('slackTokenCheck: 앱 수준 토큰(xapp-)·xoxp-가 아닌 토큰은 슬�
   let called = 0;
   const request = async () => { called += 1; return { ok: true, json: async () => ({ ok: true, user: 'me' }) }; };
   await assert.rejects(integrations.slackTokenCheck('xapp-1-A0-123-abc', request), /앱 수준 토큰\(xapp-\)/);
-  await assert.rejects(integrations.slackTokenCheck('xoxe.xoxp-1-abc', request), /xoxp-로 시작해요/);
+  await assert.rejects(integrations.slackTokenCheck('xoxe-1-abc', request), /xoxp-로 시작해요/, '교체용 새로고침 토큰(xoxe-)은 아니다');
   assert.equal(called, 0, '슬랙에 보내지 않는다');
 });
