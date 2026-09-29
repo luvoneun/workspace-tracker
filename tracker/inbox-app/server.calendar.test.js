@@ -650,15 +650,22 @@ test('WP-V 맥 캘린더: 허용하고 확인은 plist가 있을 때만 요청 �
   assert.match(state.calendar.fetch.summary, /^⚠️ 맥이 캘린더 접근을 막았어요/);
   assert.equal(state.calendar.log[0].kind, 'fail');
   assert.equal(state.calendar.log[1].text, '캘린더 1개 · 오늘 일정 3개를 읽었어요');
-  // 한 번 실패는 늦어요(멈춤 아님) — 계속 실패(회차 단위, failStuck)부터 멈춤이다(다른 연동과 같은 규칙)
-  assert.equal(state.calendar.fetch.stuck, false);
-  assert.ok(!state.alerts.includes('calendar'));
+  // 허용 막힘(77)은 사람이 고쳐야 풀린다 — 토큰 문제처럼 한 번에 멈춤(빨간 점)이다
+  assert.equal(state.calendar.fetch.stuck, true);
+  assert.ok(state.alerts.includes('calendar'));
   assert.ok(!state.calendar.log.some(one => /옛 갈래 기록/.test(one.text)), 'Claude 갈래 기록은 보지 않는다');
-  const denied = n => [`───── ${stamp(n)} mac-calendar 시작`, '⚠️ 맥이 캘린더 접근을 막았어요 — 시스템 설정 → 개인정보 보호 및 보안 → 캘린더에서 허용해 주세요', '', `───── ${stamp(n)} mac-calendar 종료 (exit 77)`].join('\n');
-  fs.appendFileSync(path.join(app.automation, 'logs', 'mac-calendar.log'), `${denied(8)}\n${denied(6)}\n`);
+  // 시간 초과(124) 한 번은 일시 실패 — 다른 자동화와 같은 회차 규칙이라 늦어요(멈춤 아님), 세 번 이어지면 멈춤
+  const slow = n => [`───── ${stamp(n)} mac-calendar 시작`, '⚠️ 맥 캘린더가 60초 안에 답하지 않았어요 — 캘린더가 많으면 잠시 뒤 다시 시도해 주세요', '', `───── ${stamp(n)} mac-calendar 종료 (exit 124)`].join('\n');
+  fs.appendFileSync(path.join(app.automation, 'logs', 'mac-calendar.log'), `${[
+    `───── ${stamp(2)} mac-calendar 시작`, '캘린더 1개 · 오늘 일정 3개를 읽었어요', '', `───── ${stamp(2)} mac-calendar 종료 (exit 0)`].join('\n')}\n${slow(1)}\n`);
+  const late = await (await fetch(app.base + '/api/integrations')).json();
+  assert.equal(late.calendar.fetch.failing, true);
+  assert.equal(late.calendar.fetch.stuck, false, '124 한 번은 늦어요');
+  assert.ok(!late.alerts.includes('calendar'));
+  fs.appendFileSync(path.join(app.automation, 'logs', 'mac-calendar.log'), `${slow(0.5)}\n${slow(0.2)}\n`);
   const stuck = await (await fetch(app.base + '/api/integrations')).json();
   assert.equal(stuck.calendar.fetch.stuck, true);
-  assert.ok(stuck.alerts.includes('calendar'), '맥 캘린더도 같은 회차 단위로 멈춤이 된다');
+  assert.ok(stuck.alerts.includes('calendar'), '일시 실패도 세 번 이어지면 멈춤');
 
   // 서버는 프로세스를 띄우지 않는다 — 맥 캘린더 경로(route)와 지금 가져오기 어디에도 child_process가 없다
   const source = fs.readFileSync(path.join(__dirname, 'calendar-mac.js'), 'utf8');

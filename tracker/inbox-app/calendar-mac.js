@@ -40,6 +40,9 @@ const WORDS = {
 };
 // 종료 코드 — 0이 아니면 서버·화면이 실패로 읽는다(이유는 ⚠️ 줄).
 const EXIT = { denied: 77, noAccount: 78, missing: 79, none: 79, timeout: 124, failed: 1 };
+// 저절로 풀리지 않고 사람이 고쳐야 하는 실패(허용 막힘 77·계정 없음 78·고른 캘린더 없음 79)의 ⚠️ 줄 — 서버가 한 번에 멈춤으로 본다
+// (토큰 문제와 같은 급). 시간 초과·그 밖의 일시 실패는 다른 자동화와 같은 회차 규칙이다.
+const NEEDS_PERSON_RE = new RegExp(`^⚠️ (?:${['denied', 'noAccount', 'missing', 'none'].map(key => WORDS[key].split(' — ')[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`);
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const looksLikeEmail = value => EMAIL_RE.test(String(value || '').trim());
@@ -370,7 +373,7 @@ function route(req, res, url, ctx) {
 
 module.exports = {
   suggestCalendars, hasAccount, resolveChosen, todayFromRows, snapshotText, runOsascript, readMac, main,
-  route, stateView, looksLikeEmail, WORDS, EXIT, STATE_FILE, REQUEST_FILE, LOG_FILE, NOW_AGENT, TIMEOUT_MS,
+  route, stateView, looksLikeEmail, WORDS, EXIT, NEEDS_PERSON_RE, STATE_FILE, REQUEST_FILE, LOG_FILE, NOW_AGENT, TIMEOUT_MS,
 };
 
 if (require.main === module) {

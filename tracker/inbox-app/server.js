@@ -894,7 +894,8 @@ function fetchStateAutomation(automation, authRe = null) {
   return {
     failing,
     auth,
-    stuck: failing && (auth || failStuck(automation.failTimes || [])),
+    // 맥 캘린더의 허용 막힘·계정 없음·고른 캘린더 없음(사람이 고쳐야 풀림)은 토큰 문제처럼 한 번에 멈춤이다(WP-V).
+    stuck: failing && (auth || calendarMac.NEEDS_PERSON_RE.test(automation.lastSummary || '') || failStuck(automation.failTimes || [])),
     // 가장 최근 실패가 Claude 로그인 풀림이면 true(연동 토큰 문제가 먼저면 그쪽을 말한다).
     claudeAuth: failing && !auth && CLAUDE_AUTH_RE.test(automation.lastSummary || ''),
     failedAt: failing ? logTimeIso(automation.lastRunAt) : null,
