@@ -559,26 +559,24 @@ test('BJALIAS: wfProjects의 지라 라벨도 같은 헬퍼(uiProjectName)를 �
   assert.deepEqual(JSON.parse(app.run("JSON.stringify(wfProjects().find(([key]) => key === 'jira:AB-1'))")), ['jira:AB-1', 'AB-1 · 결제 리뉴얼'], '별칭이 있으면 그 이름이 붙는다');
 });
 
-// BKEY: 프로젝트를 고르는 목록은 `요약 · 키`이고, 정렬은 요약 기준이다.
-test('group select options offer clearing only when there is something to clear, and jira options read "요약 · 키" sorted by summary', () => {
+// BKEY: 프로젝트를 고르는 목록은 `요약 · 키`이고, 정렬은 요약 기준이다(BBUNDLE 덩어리 2부터 <select> 대신 uiPickList).
+test('프로젝트 고르기 선택지: 해제는 지울 것이 있을 때만, 지라는 요약 + 조용한 키이고 요약 기준 정렬이다', () => {
   const app = pureClient();
   app.run("jiraIssuesCache = [{ key: 'AB-1', summary: '나중 요약' }, { key: 'ZZ-9', summary: '가입' }]; customGroupsCache = ['운영툴', '<b>x</b>']");
-  const options = code => JSON.parse(app.run(`JSON.stringify(groupSelectOptions(${code}))`));
-  const empty = options('null, false');
-  assert.equal(empty.head.length, 1);
-  assert.doesNotMatch(empty.head.join(''), /__clear__/);
-  assert.equal(options('null, true').head.length, 2, 'bulk move can clear even without a current group');
-  const current = options("{ type: 'group', value: '운영툴' }, false");
-  assert.equal(current.head.length, 2);
-  assert.match(current.rest.join(''), /value="group:운영툴" selected/);
-  assert.doesNotMatch(current.rest.join(''), /value="jira:AB-1" selected/);
-  assert.match(current.rest.join(''), /&lt;b&gt;x&lt;\/b&gt;/, 'group names are escaped');
-  assert.match(current.rest.at(-1), /__custom__/);
-  // 지라 옵션은 `요약 · 키`고, 요약 기준으로 정렬된다(값은 그대로 jira:KEY).
-  const jiraOptions = current.rest.filter(html => html.includes('value="jira:'));
-  assert.deepEqual(jiraOptions, [
-    `<option value="jira:ZZ-9">가입 · ZZ-9</option>`,
-    `<option value="jira:AB-1">나중 요약 · AB-1</option>`,
+  const entries = code => JSON.parse(app.run(`JSON.stringify(projectPickEntries(${code}))`));
+  const clear = list => list.filter(entry => entry.value === '__clear__').length;
+  assert.equal(clear(entries('null, false')), 0);
+  assert.equal(clear(entries('null, true')), 1, 'bulk move can clear even without a current group');
+  const current = entries("{ type: 'group', value: '운영툴' }, false");
+  assert.equal(clear(current), 1);
+  assert.equal(current.find(entry => entry.value === 'group:운영툴').selected, true);
+  assert.equal(current.find(entry => entry.value === 'jira:AB-1').selected, false);
+  assert.equal(current.find(entry => entry.value === 'group:<b>x</b>').text, '<b>x</b>', '글자는 textContent로만 들어간다');
+  assert.equal(current.at(-1).value, '__custom__');
+  // 지라 선택지는 요약이 앞(text), 키는 오른쪽 조용한 글자(key)이고, 요약 기준으로 정렬된다(값은 그대로 jira:KEY).
+  assert.deepEqual(current.filter(entry => String(entry.value || '').startsWith('jira:')).map(entry => [entry.value, entry.text, entry.key]), [
+    ['jira:ZZ-9', '가입', 'ZZ-9'],
+    ['jira:AB-1', '나중 요약', 'AB-1'],
   ], '요약이 앞, 키가 뒤 — 정렬은 요약(가입 → 나중 요약) 기준');
 });
 
@@ -1968,12 +1966,13 @@ test('계획 문장의 ⋯에만 프로젝트 바꾸기 고르개가 붙는다',
 
 // BKEY: 프로젝트를 고르는 <select>는 옵션 글자만 `요약 · 키`(요약 기준 정렬)이고, 저장되는 값(option.value)은
 // 그대로 원래 이름(`키 · 요약`)이라 예전에 저장된 문장과 같은 프로젝트로 묶인다.
-test('다음 주 계획 프로젝트 고르개(select)는 옵션 글자만 "요약 · 키"이고 값은 그대로다', () => {
+test('다음 주 계획 프로젝트 고르개는 보이는 글자만 "요약 · 키"이고 값은 그대로다', () => {
   const app = reportClient();
   app.run("customGroupsCache = ['운영툴']; jiraIssuesCache = [{ key: 'PAY-77', summary: '정산 배치' }]");
   const optionsOf = code => JSON.parse(app.run(
     `JSON.stringify(${code}.children.map(option => [option.value, option.textContent]))`));
-  assert.deepEqual(optionsOf('reportPlanProjectPicker()'), [
+  // 입력줄 앞의 고르개는 찾기 칸이 있는 목록(uiPickList)이다 — 선택지는 reportPlanPickEntries(요약 + 조용한 키).
+  assert.deepEqual(JSON.parse(app.run("JSON.stringify(reportPlanPickEntries('').map(e => [e.value, e.key ? `${e.text} · ${e.key}` : e.text]))")), [
     ['', '프로젝트 없음'],
     ['운영툴', '운영툴'],
     ['PAY-77 · 정산 배치', '정산 배치 · PAY-77'],
@@ -2959,12 +2958,12 @@ test('그 밖의 이슈는 프로젝트 고르기 선택지에서 빠지고, 지
     { key: 'AB-1', summary: '가입', extra: false },
     { key: 'ZZ-9', summary: '끝난 이슈', status: '완료', extra: true },
   ]; customGroupsCache = [];`);
-  const options = code => JSON.parse(app.run(`JSON.stringify(groupSelectOptions(${code}))`));
-  const fresh = options('null, false').rest.join('');
-  assert.match(fresh, /value="jira:AB-1"/);
-  assert.doesNotMatch(fresh, /value="jira:ZZ-9"/, '완료된 이슈는 새로 고를 선택지로 내놓지 않는다');
-  const current = options("{ type: 'jira', value: 'ZZ-9' }, false").rest.join('');
-  assert.match(current, /value="jira:ZZ-9" selected/, '이미 걸려 있는 값은 골라진 채로 보여야 한다');
+  const values = code => JSON.parse(app.run(`JSON.stringify(projectPickEntries(${code}).filter(e => e.type === 'option').map(e => [e.value, !!e.selected]))`));
+  const fresh = values('null, false');
+  assert.ok(fresh.some(([value]) => value === 'jira:AB-1'));
+  assert.ok(!fresh.some(([value]) => value === 'jira:ZZ-9'), '완료된 이슈는 새로 고를 선택지로 내놓지 않는다');
+  assert.deepEqual(values("{ type: 'jira', value: 'ZZ-9' }, false").find(([value]) => value === 'jira:ZZ-9'), ['jira:ZZ-9', true],
+    '이미 걸려 있는 값은 골라진 채로 보여야 한다');
 });
 
 test('wfProjects: 그 밖의 이슈는 항목이 걸려 있을 때만 프로젝트 목록에 선다', () => {
@@ -3938,7 +3937,7 @@ test('펼치면 티켓마다 지라 상태·요약·담당자·배포 버전이 
   // 다시 누르면 접힌다.
   nodeFind(card(), 'd-jexp').listeners.click();
   assert.equal(nodeFind(card(), 'd-jkids'), null);
-  assert.equal(app.run('jiraChildPick'), null);
+  assert.equal(app.run("jiraChildPicks.get('IO-48394') ?? null"), null);
 });
 
 test('완료가 다섯을 넘으면 나머지는 `완료 N개 더 보기` 뒤로 접는다', () => {
@@ -3966,7 +3965,7 @@ test('접힌 줄의 이름을 누르면 펼쳐지며 그 담당 것만 보이고
   const whoButton = name => nodeFindAll(card(), 'd-jwho').find(button => button.textContent.startsWith(name));
   assert.equal(nodeFind(card(), 'd-jkids'), null);
   whoButton('루본').listeners.click();
-  assert.equal(app.run('jiraChildPick'), '루본');
+  assert.equal(app.run("jiraChildPicks.get('IO-48394') ?? null"), '루본');
   assert.equal(nodeFind(card(), 'd-jexp').getAttribute('aria-expanded'), 'true', '이름을 누르면 함께 펼쳐진다');
   assert.deepEqual(nodeFindAll(card(), 'd-jkid').map(row => nodeFind(row, 'sm').textContent),
     ['게임 목록 불러오기', '오류 문구 다듬기', '임베드 카드 붙이기'], '그 사람의 완료한 것도 함께 보인다');
@@ -3976,7 +3975,7 @@ test('접힌 줄의 이름을 누르면 펼쳐지며 그 담당 것만 보이고
   const clear = nodeFindAll(card(), 'd-jwho').find(button => button.textContent === '전체');
   assert.ok(clear);
   clear.listeners.click();
-  assert.equal(app.run('jiraChildPick'), null);
+  assert.equal(app.run("jiraChildPicks.get('IO-48394') ?? null"), null);
   assert.equal(nodeFindAll(card(), 'd-jkid').length, 5);
   assert.equal(nodeFindAll(card(), 'd-jwho').find(button => button.textContent === '전체'), undefined);
 
@@ -3984,7 +3983,7 @@ test('접힌 줄의 이름을 누르면 펼쳐지며 그 담당 것만 보이고
   whoButton('하늘').listeners.click();
   assert.equal(nodeFindAll(card(), 'd-jkid').length, 1);
   whoButton('하늘').listeners.click();
-  assert.equal(app.run('jiraChildPick'), null);
+  assert.equal(app.run("jiraChildPicks.get('IO-48394') ?? null"), null);
   assert.equal(nodeFindAll(card(), 'd-jkid').length, 5);
 
   // 거르는 중에 그 사람의 티켓이 사라지면 조용한 한 줄만 남는다(빈 칸을 남기지 않는다).
@@ -4001,16 +4000,16 @@ test('펼침은 프로젝트별로 기억하고, 쓰기 뒤 `fresh` 재조회로
   assert.deepEqual(JSON.parse(store.get('jiraChildrenOpen')), ['jira:IO-48394']);
 
   // 2단계의 쓰기가 끝나고 `fresh=1`로 다시 읽어 그려도 펼침·거르기는 그대로다.
-  first.app.run("jiraChildPick = '루본'");
+  first.app.run("jiraChildPicks.set('IO-48394', '루본')");
   first.app.run(`jiraCard = { ...jiraCard, issue: ${JSON.stringify(jiraWithKids())}, at: Date.now() }; jiraStripPaint()`);
   assert.equal(nodeFind(first.card(), 'd-jexp').getAttribute('aria-expanded'), 'true');
   assert.equal(nodeFindAll(first.card(), 'd-jkid').length, 3, '거르기도 살아 있다');
   // 같은 프로젝트를 다시 그리는 것(jiraCardEnsure)으로는 거르기가 풀리지 않는다.
   first.app.run("jiraCardEnsure('IO-48394')");
-  assert.equal(first.app.run('jiraChildPick'), '루본');
+  assert.equal(first.app.run("jiraChildPicks.get('IO-48394') ?? null"), '루본');
   // 다른 프로젝트로 옮기면 거르기만 풀린다(펼침은 프로젝트마다 기억한 대로다).
   first.app.run("jiraCardEnsure('AB-9')");
-  assert.equal(first.app.run('jiraChildPick'), null);
+  assert.equal(first.app.run("jiraChildPicks.get('IO-48394') ?? null"), null);
 
   // 다음에 같은 프로젝트를 열면 기억한 대로 펼쳐져 있다.
   const again = jiraKidFixture(jiraWithKids(), 'jira:IO-48394', storage);
@@ -4940,15 +4939,14 @@ test('BNOARCHIVE: 지난 프로젝트도 고르기 목록에 그대로 있고, `
       { id: 'g2', type: 'task', status: 'done', group: '끝난 팀', created: dayAgo(60), completed: dayAgo(30) },
     ] };
     wfIndexData();`);
-  const rest = JSON.parse(app.run("JSON.stringify(groupSelectOptions(null, false).rest)"));
+  const rest = JSON.parse(app.run("JSON.stringify(projectPickEntries(null, false).map(e => e.type === 'heading' ? `# ${e.text}` : e.value))"));
   assert.deepEqual(rest, [
-    '<option value="jira:IO-1">가 · IO-1</option>',
-    '<option value="group:운영툴">운영툴</option>',
-    '<optgroup label="지난 프로젝트">',
-    '<option value="jira:IO-2">나 · IO-2</option>',
-    '<option value="group:끝난 팀">끝난 팀</option>',
-    '</optgroup>',
-    '<option value="__custom__">직접 입력…</option>',
+    'jira:IO-1',
+    'group:운영툴',
+    '# 지난 프로젝트',
+    'jira:IO-2',
+    'group:끝난 팀',
+    '__custom__',
   ], '조용한 것도 그대로 고를 수 있고, 목록 끝의 소제목 아래로 갈 뿐이다');
 
   // 조용한 것들에 열린 업무가 생기면 — 저장된 값이 없으니 — 자동으로 위 목록에 합류하고 소제목도 사라진다.
@@ -4956,7 +4954,7 @@ test('BNOARCHIVE: 지난 프로젝트도 고르기 목록에 그대로 있고, `
     { id: 'j3', type: 'task', status: 'to-do', jira: 'IO-2', created: dayAgo(0) },
     { id: 'g3', type: 'task', status: 'to-do', group: '끝난 팀', created: dayAgo(0) },
   ); wfIndexData();`);
-  assert.equal(app.run("groupSelectOptions(null, false).rest.join('')").includes('optgroup'), false,
+  assert.equal(app.run("projectPickEntries(null, false).some(e => e.type === 'heading')"), false,
     '조용한 것이 없으면 소제목도 없다(옛 파일과 같은 모습)');
 });
 
@@ -10416,7 +10414,7 @@ test('BBUNDLE 상세: 두 티켓의 업무를 모아 줄마다 작은 KEY, 옆 �
   const menu = app.run(`(() => { const body = document.createElement('div'); renderProjectDetail(body, ${BUNDLE_ROW}); return body.children[0].children.find(kid => String(kid.className || '').includes('d-more')); })()`);
   menu.listeners.click({ stopPropagation() {} });
   const labels = app.run('lastMenu').flat().map(entry => entry.label);
-  assert.ok(labels.includes('다른 티켓과 묶기…') && labels.includes('「정기결제 재시도」를 대표로') && labels.includes('묶음 풀기'));
+  assert.ok(labels.includes('다른 티켓과 묶기…') && labels.includes('「정기결제 재시도」 대표로') && labels.includes('묶음 풀기'));
 });
 
 test('BBUNDLE 옆 카드: 새로고침·지라 바꾸기 확인 줄은 그 티켓 자리로만 가고, 대표 카드(jiraCard)는 그대로', async () => {
@@ -10466,7 +10464,7 @@ test('BBUNDLE 묶기: ⋯ `다른 티켓과 묶기…` → 이미 다른 묶음�
   choices.find(entry => entry.label === '알림 서버 · IO-9').onClick();
   const body = bundleDetail(app, row);
   const ask = nodeFind(body, 'd-pbask');
-  assert.match(nodeText(ask), /「알림 서버」를 이 프로젝트와 함께 볼까요\?/);
+  assert.match(nodeText(ask), /「알림 서버」도 이 프로젝트와 함께 볼까요\?/);
   assert.match(nodeText(ask), /지라 티켓은 그대로예요/);
   assert.equal(sent.filter(call => call.url.startsWith('/api/project/')).length, 0, '확인 줄을 거치기 전에는 아무것도 보내지 않는다');
   await ask.children.find(kid => kid.className === 'acts').children[1].listeners.click();
@@ -10478,4 +10476,172 @@ test('BBUNDLE 묶기: ⋯ `다른 티켓과 묶기…` → 이미 다른 묶음�
   assert.match(app.nodes.get('liveRegion').textContent, /묶었어요/);
   await app.run('undoStack[undoStack.length - 1].undo()');
   assert.deepEqual(sent.find(call => call.url === '/api/project/bundle-restore').body, { id: 'bd_9', before: null, after }, '되돌리기는 "지금이 after일 때만 before로"');
+});
+
+// ---------- BBUNDLE 덩어리 2: 고르기 검색 칸 + 다른 화면에서 묶음 알아보기 ----------
+// bundleClient(위): IO-1(대표)·IO-2가 한 묶음, AL-9는 따로.
+test('BBUNDLE 2 오늘 탭: 묶음은 대표 키 한 그룹(이름·+는 대표), 줄마다 작은 KEY — 풀면 곧바로 두 그룹, 옛 데이터는 그대로', () => {
+  const app = bundleClient();
+  const groups = () => JSON.parse(app.run("JSON.stringify(uiGroupTasks(workflowData.items.filter(i => i.type === 'task')).map(([key, list]) => [key, list.map(i => i.id)]))"));
+  assert.deepEqual(groups(), [['jira:AL-9', ['c1']], ['jira:IO-1', ['a1', 'a2', 'b1']]]);
+  assert.equal(app.run("uiGroupFromKey('jira:IO-1', wfItem('b1'))"), 'IO-2', '묶음 그룹의 줄에는 제 티켓 번호');
+  assert.equal(app.run("uiGroupFromKey('jira:AL-9', wfItem('c1'))"), '', '묶음이 아니면 붙이지 않는다');
+  assert.equal(app.run("uiGroupLabels(['jira:IO-1']).get('jira:IO-1')"), '결제 리뉴얼', '그룹 이름은 대표 티켓');
+  // 대표 티켓의 업무가 다 끝나 목록에서 빠져도 그룹 이름·열쇠는 대표 기준이다.
+  assert.deepEqual(JSON.parse(app.run("JSON.stringify(uiGroupTasks([wfItem('b1')]).map(([key]) => key))")), ['jira:IO-1']);
+  // 확인 대기(waitingGroups — uiGroupTasks의 복제본)도 같은 규칙.
+  assert.deepEqual(JSON.parse(app.run("JSON.stringify(waitingGroups(workflowData.items.filter(i => i.type === 'check')).map(([key]) => key))")), ['jira:IO-1']);
+  // 확인 대기 줄은 둘째 줄 맨 앞에 작은 번호(.d-pfrom), `+ 이 그룹에 추가` 줄은 그룹 열쇠(대표 티켓)로 붙는다.
+  assert.equal(nodeFind(app.run("renderWaitingRow(wfItem('b2'), { fromKey: 'IO-2' })"), 'd-pfrom').textContent, 'IO-2');
+  assert.equal(nodeFind(app.run("renderWaitingRow(wfItem('b2'))"), 'd-pfrom'), null);
+  assert.equal(app.run("uiGroupAddRow('jira:IO-1', '/api/today-task/create', '').dataset.addKey"), '/api/today-task/create::jira:IO-1');
+  // 풀기 직후(칸이 비면) 곧바로 두 그룹, 줄 번호도 사라진다. 옛 데이터(칸 없음)도 같다.
+  app.run('workflowData.projectBundles = []');
+  assert.deepEqual(groups().map(([key]) => key), ['jira:AL-9', 'jira:IO-1', 'jira:IO-2']);
+  app.run('delete workflowData.projectBundles');
+  assert.deepEqual(groups().map(([key]) => key), ['jira:AL-9', 'jira:IO-1', 'jira:IO-2']);
+  assert.equal(app.run("uiGroupFromKey('jira:IO-1', wfItem('a1'))"), '');
+});
+
+test('BBUNDLE 2 고르기 선택지: 묶음 한 줄(굵게·대표로 저장) + 들여쓴 나머지 티켓, 나머지 티켓을 직접 골라도 된다', () => {
+  const app = bundleClient();
+  const entries = code => JSON.parse(app.run(`JSON.stringify(projectPickEntries(${code}))`));
+  const options = entries('null, false').filter(entry => entry.type === 'option');
+  assert.deepEqual(options.map(entry => [entry.value, entry.text, entry.level, !!entry.strong]), [
+    ['jira:IO-1', '결제 리뉴얼', 0, true],
+    ['jira:IO-2', '정기결제 재시도', 1, false],
+    ['jira:AL-9', '알림센터', 0, false],
+  ], '묶음 줄 바로 아래 들여쓴 티켓, 대표 티켓은 따로 한 줄을 더 만들지 않는다');
+  assert.match(options[0].label, /묶음 · 티켓 2개 — 대표 IO-1로 지정/);
+  const picked = entries("{ type: 'jira', value: 'IO-2' }, false").filter(entry => entry.selected).map(entry => entry.value);
+  assert.deepEqual(picked, ['jira:IO-2'], '나머지 티켓이 지금 값이면 그 들여쓴 줄이 골라져 있다');
+  // 별칭이 있으면 묶음 이름도 별칭이다.
+  app.run("projectAliasesCache = { 'IO-1': '결제 개편' }");
+  assert.equal(entries('null, false').find(entry => entry.value === 'jira:IO-1').text, '결제 개편');
+  // 옛 데이터(묶음 칸 없음)는 전부 한 줄씩, 들여쓰기 없음.
+  app.run("projectAliasesCache = {}; delete workflowData.projectBundles");
+  assert.deepEqual(entries('null, false').filter(entry => entry.type === 'option').map(entry => entry.level), [0, 0, 0]);
+});
+
+test('BBUNDLE 2 고르기 찾기: 이름·키·별칭·한글 부분 일치, 묶음은 티켓 하나만 맞아도 묶음 줄과 함께, 0개면 동작 줄만', () => {
+  const app = bundleClient();
+  app.run("projectAliasesCache = { 'AL-9': '푸시' }");
+  const shown = query => JSON.parse(app.run(`JSON.stringify(uiPickFilter(projectPickEntries(null, true), ${JSON.stringify(query)}).map(e => e.value || '# ' + e.text))`));
+  assert.deepEqual(shown('정기'), ['__clear__', 'jira:IO-1', 'jira:IO-2', '__custom__'], '나머지 티켓만 맞아도 묶음 줄이 함께 선다');
+  assert.deepEqual(shown('리뉴얼'), ['__clear__', 'jira:IO-1', 'jira:IO-2', '__custom__'], '묶음 이름이 맞으면 티켓 전부');
+  assert.deepEqual(shown('io-2'), ['__clear__', 'jira:IO-1', 'jira:IO-2', '__custom__'], '키는 대소문자 무시');
+  assert.deepEqual(shown('푸시'), ['__clear__', 'jira:AL-9', '__custom__'], '별칭으로도');
+  assert.deepEqual(shown('알림'), ['__clear__', 'jira:AL-9', '__custom__'], '별칭이 있어도 지라 원래 요약으로도');
+  assert.deepEqual(shown('없는 이름'), ['__clear__', '__custom__'], '0개면 해제·직접 입력만 남는다');
+  assert.deepEqual(shown(''), shown('   '), '빈 말은 거르지 않는다');
+  // 찾기 칸은 선택지가 PROJECT_FIND_MIN(8)개 이상일 때만.
+  assert.equal(app.run('uiPickSearchable(projectPickEntries(null, false))'), false);
+  app.run("customGroupsCache = ['가', '나', '다', '라', '마']");
+  assert.equal(app.run('uiPickSearchable(projectPickEntries(null, false))'), true);
+});
+
+test('BBUNDLE 2 고르기 목록: 찾기 칸(type=search·aria) + listbox, 0개면 `찾는 프로젝트가 없어요`, Enter는 맨 위, Esc는 닫기', () => {
+  const app = bundleClient();
+  app.run(`picks = []; closes = [];
+    pickNode = uiPickList({ entries: projectPickEntries(null, false), label: '프로젝트 고르기', search: true,
+      onPick: (value, query) => picks.push([value, query]), onClose: byKey => closes.push(byKey) });`);
+  const root = app.run('pickNode');
+  const [input, none, list] = root.children;
+  assert.equal(input.type, 'search');
+  assert.equal(input.getAttribute('aria-label'), '프로젝트 고르기 — 찾기');
+  assert.equal(input.getAttribute('aria-controls'), list.id);
+  assert.equal(list.getAttribute('role'), 'listbox');
+  const options = list.children.filter(kid => kid.getAttribute && kid.getAttribute('role') === 'option');
+  assert.deepEqual(options.map(kid => kid.className), ['d-mitem d-gpopt is-bundle', 'd-mitem d-gpopt is-sub', 'd-mitem d-gpopt', 'd-mitem d-gpopt is-act']);
+  assert.equal(nodeFind(options[0], 'nm').title, '결제 리뉴얼', '긴 이름은 말줄임 + title');
+  assert.equal(none.hidden, true);
+  input.value = '없는 이름';
+  input.listeners.input();
+  assert.equal(none.textContent, '찾는 프로젝트가 없어요');
+  assert.equal(none.hidden, false);
+  assert.equal(none.getAttribute('role'), 'status');
+  // 찾던 글자로 Enter면 맨 위(맞는) 선택지를 고른다.
+  input.value = '정기';
+  input.listeners.input();
+  const stop = { preventDefault() {}, stopPropagation() { this.stopped = true; } };
+  root.listeners.keydown({ ...stop, key: 'Enter', target: input });
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(picks)')), [['jira:IO-1', '정기']], '묶음 줄(대표)이 맨 위');
+  // Esc는 목록만 닫고 바깥(⋯ 메뉴의 Esc)으로 올라가지 않는다.
+  app.run(`closes = []; pickNode = uiPickList({ entries: projectPickEntries(null, false), label: '프로젝트 고르기', onPick() {}, onClose: byKey => closes.push(byKey) });`);
+  const esc = { preventDefault() {}, stopPropagation() { esc.stopped = true; }, key: 'Escape' };
+  app.run('pickNode').listeners.keydown(esc);
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(closes)')), [true]);
+  assert.equal(esc.stopped, true);
+  // 찾기 칸이 없으면 첫 줄이 Tab으로 들어오는 자리다.
+  assert.equal(app.run('pickNode').children.at(-1).children[0].tabIndex, 0);
+});
+
+test('BBUNDLE 2 배포 리마인드: 묶음도 티켓별로, 같은 묶음에서 버전·날짜가 같으면 한 줄, 그룹에 건 같은 티켓은 한 줄로', () => {
+  const app = bundleClient();
+  const soon = app.run('todayStr()');
+  app.run(`const version = (name, releaseDate) => [{ name, releaseDate, released: false }];
+    jiraIssuesByKey.get('IO-1').versions = version('v2.70.0', ${JSON.stringify(soon)});
+    jiraIssuesByKey.get('IO-2').versions = version('v2.70.0', ${JSON.stringify(soon)});
+    jiraIssuesByKey.get('AL-9').versions = version('v2.71.0', ${JSON.stringify(soon)});
+    workflowData.projectLinks = { '알림 운영': 'AL-9' };`);
+  const rows = "[{ key: 'jira:IO-1', open: 2 }, { key: 'jira:IO-2', open: 1 }, { key: 'jira:AL-9', open: 1 }, { key: 'group:알림 운영', open: 3 }]";
+  const reminders = () => JSON.parse(app.run(`JSON.stringify(deployReminders(${rows}).map(e => [e.key, e.label, e.name, e.open]))`));
+  assert.deepEqual(reminders().sort(), [
+    ['jira:AL-9', '알림센터', 'v2.71.0', 4],
+    ['jira:IO-1', '결제 리뉴얼', 'v2.70.0', 3],
+  ].sort(), '같은 묶음·같은 버전은 대표 이름 한 줄(열린 업무 합), 그룹에 건 AL-9는 지라 줄 하나로');
+  app.run(`jiraIssuesByKey.get('IO-2').versions = [{ name: 'v2.69.1', releaseDate: ${JSON.stringify(soon)}, released: false }]`);
+  assert.deepEqual(reminders().map(([key]) => key).sort(), ['jira:AL-9', 'jira:IO-1', 'jira:IO-2'], '버전이 다르면 티켓별로 따로');
+});
+
+test('BBUNDLE 2 회의: 연결 뒤 옮기기 후보·다른 프로젝트 수는 목적지 묶음 전체를 같은 프로젝트로 보고, 프로젝트별 보기는 한 소제목', () => {
+  const app = bundleClient();
+  const items = `[
+    { id: 'x1', type: 'task', status: 'to-do', jira: 'IO-2' },
+    { id: 'x2', type: 'task', status: 'to-do' },
+    { id: 'x3', type: 'task', status: 'to-do', jira: 'AL-9' },
+  ]`;
+  const moved = JSON.parse(app.run(`JSON.stringify(meetingMoveCandidates(${items}, null, 'jira:IO-1'))`));
+  assert.deepEqual(moved, { ids: ['x2'], done: 0, other: 1 }, 'IO-2(같은 묶음)는 옮기지도 `다른 프로젝트`로 세지도 않는다');
+  const groups = JSON.parse(app.run(`JSON.stringify(meetingsTabGroups([
+    { id: 'm1', date: '2026-09-20', project: { type: 'jira', value: 'IO-1' } },
+    { id: 'm2', date: '2026-09-21', project: { type: 'jira', value: 'IO-2' } },
+    { id: 'm3', date: '2026-09-22', project: null },
+  ], () => []).map(group => [group.key, group.list.map(event => event.id)]))`));
+  assert.deepEqual(groups, [['jira:IO-1', ['m1', 'm2']], ['__misc__', ['m3']]]);
+  assert.deepEqual(JSON.parse(app.run("JSON.stringify(meetingCaptureProject({ type: 'jira', value: 'IO-2', label: 'IO-2' }))")),
+    { type: 'jira', value: 'IO-1', label: 'IO-2' }, '기록 안 된 회의에서 담아도 대표 티켓');
+  assert.deepEqual(JSON.parse(app.run("JSON.stringify(meetingCaptureProject({ type: 'group', value: '운영툴' }))")), { type: 'group', value: '운영툴' });
+});
+
+test('BBUNDLE 2 반응 필요 색·하위 티켓 거르기: 묶인 티켓은 대표 색, 거르기는 카드(티켓)별이라 다른 카드로 번지지 않는다', () => {
+  const app = bundleClient();
+  assert.equal(app.run("projectGroupKey('jira:IO-2')"), 'jira:IO-1');
+  assert.equal(app.run("projectGroupKey('jira:AL-9')"), 'jira:AL-9');
+  assert.equal(app.run("projectGroupKey('group:운영툴')"), 'group:운영툴');
+  assert.equal(app.run('projectGroupKey(null)'), null);
+  const kids = [{ key: 'K-1', summary: '가', status: { name: '진행 중', category: 'doing' }, assignee: '루본' }, { key: 'K-2', summary: '나', status: { name: '할 일', category: 'todo' }, assignee: '하늘' }];
+  app.run(`jiraChildPicks.set('IO-1', '루본')`);
+  const rows = key => app.run(`jiraChildList({ key: '${key}', url: 'https://example-jira.test/browse/${key}' }, ${JSON.stringify(kids)})`).children.length;
+  assert.equal(rows('IO-1'), 1, '거른 카드만 걸러진다');
+  assert.equal(rows('IO-2'), 2, '옆 카드는 그대로');
+});
+
+test('BBUNDLE 2 좁은 폭 옆 카드: 접힌 한 줄은 `KEY · 이름 · 상태` 글자 + 꺾쇠, 줄 전체가 aria-expanded 버튼', () => {
+  const app = bundleClient();
+  app.run(`jiraSide = { project: 'jira:IO-1', keys: ['IO-2'], cards: { 'IO-2': { key: 'IO-2', state: 'ok', issue: { key: 'IO-2', summary: '정기결제 재시도', status: { name: '기획', category: 'todo' } }, at: 1, seq: 1 } } };
+    jiraCard = { key: 'IO-1', state: 'loading', issue: null, error: '', at: 0, seq: 1 };`);
+  const fold = app.run("jiraSideFold('IO-2')");
+  assert.equal(fold.className, 'd-jfold');
+  assert.equal(fold.getAttribute('aria-expanded'), 'false');
+  assert.deepEqual(fold.children.map(kid => kid.textContent), ['IO-2', '·', '정기결제 재시도', '·', '기획']);
+  assert.equal(fold.children[4].className, 'st k-dim', '상태는 색과 함께 글자로');
+  assert.match(fold.html, /d-i/, '꺾쇠는 uiIcon');
+  assert.equal(fold.getAttribute('aria-label'), 'IO-2 · 정기결제 재시도 · 기획 — 지라 카드 펼치기');
+  fold.listeners.click();
+  assert.equal(app.run("jiraSideOpen.has('IO-2')"), true);
+  assert.equal(app.run("jiraSideFold('IO-2')").getAttribute('aria-expanded'), 'true');
+  // 아직 읽는 중이면 상태 자리에 `읽는 중`.
+  app.run("jiraSide.cards['IO-2'] = { key: 'IO-2', state: 'loading', issue: null, at: 0, seq: 2 }");
+  assert.equal(app.run("jiraSideFold('IO-2')").children.at(-1).textContent, '읽는 중');
 });

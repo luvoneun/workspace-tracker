@@ -165,7 +165,8 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     if (!validItem({ type, description })) throw new Error('종류와 내용을 확인해 주세요.');
     const state = read();
     const event = resolveMeeting(id, state);
-    const selected = project === undefined ? event.project : project;
+    // 고르지 않았으면 회의의 프로젝트 — 그 티켓이 묶음에 들어 있으면 대표 티켓으로 담는다(BBUNDLE 덩어리 2).
+    const selected = project === undefined ? bundleLeadProject(event.project, state) : project;
     if (selected && (!['jira', 'group'].includes(selected.type) || typeof selected.value !== 'string' || !selected.value.trim() || /[\r\n\[\]]/.test(selected.value))) throw new Error('프로젝트를 확인해 주세요.');
     const result = create[type]({ description, ...extra, ...(selected ? { [selected.type]: selected.value } : {}) });
     if (!result.ok) throw new Error('항목을 저장하지 못했어요.');
@@ -305,6 +306,9 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
   const BUNDLE_KEY_RE = /^jira:[A-Z][A-Z0-9]*-\d+$/;
   const BUNDLE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
   const BUNDLE_MAX_KEYS = 10;
+  // 묶음 수 상한 — 묶인 키는 전부 지라 목록의 추가 조회(`key in (…)`, jira-client.js listMyIssues)에 실리는데
+  // 그 조회는 한 번에 100개까지라, 묶음이 끝없이 늘면 이름을 못 읽는 티켓이 생긴다(한 묶음 2개 × 100 = 200은 넉넉한 위 한계).
+  const BUNDLE_MAX_BUNDLES = 100;
   const bundleIdOf = keys => `bd_${createHash('sha256').update(keys.join('|')).digest('hex').slice(0, 12)}`;
   // 깨진 값은 조용히 정리한다: 형식이 틀린 키·중복 키·이미 앞 묶음에 있는 키는 빼고, 남은 키가 2개
   // 미만이면 그 묶음을 버리고, lead가 keys 밖이면 첫 키로, id가 없으면 키로 지은 id로 채운다.
@@ -332,6 +336,12 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     }
     return out;
   }
+  // 회의 담기 기본값 — `{ type: 'jira', value: 'B' }`가 묶음에 들어 있으면 대표 키로 바꿔 준다. 나머지는 그대로.
+  function bundleLeadProject(project, state) {
+    if (!project || project.type !== 'jira' || typeof project.value !== 'string') return project;
+    const home = cleanBundles(state.projectBundles).find(bundle => bundle.keys.includes(`jira:${project.value}`));
+    return home && home.lead !== `jira:${project.value}` ? { ...project, value: home.lead.slice('jira:'.length) } : project;
+  }
   const bundleCopy = bundle => (bundle ? { id: bundle.id, lead: bundle.lead, keys: [...bundle.keys], at: bundle.at || null } : null);
   const bundleSame = (a, b) => (!a && !b) || (!!a && !!b && a.id === b.id && a.lead === b.lead && a.keys.join('|') === b.keys.join('|'));
   function bundleKey(value) {
@@ -343,7 +353,7 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     write(state);
   }
   // 묶기 — project가 이미 묶음에 있으면 그 묶음에 더하고, 없으면 project를 대표로 새 묶음을 만든다.
-  // 더하는 키가 이미 (다른 또는 같은) 묶음에 있으면 거절한다(한 키는 한 묶음에만).
+  // 더하는 키가 이미 (다른 또는 같은) 묶음에 있으면 거절한다(한 키는 한 묶음에만) — 같은 묶음이면 그렇다고 말한다.
   // 돌려주는 before/after는 되돌리기(restoreBundle)가 그대로 쓰는 값이다.
   function bundleProjects(body) {
     const project = bundleKey(body && body.project);
@@ -356,8 +366,10 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     const home = bundles.find(bundle => bundle.keys.includes(project)) || null;
     for (const key of add) {
       const taken = bundles.find(bundle => bundle.keys.includes(key));
+      if (taken && taken === home) throw new Error(`이미 이 묶음에 들어 있어요 — ${key.slice('jira:'.length)}`);
       if (taken) throw new Error(`${key.slice('jira:'.length)}는 이미 다른 묶음에 있어요. 그 묶음을 먼저 풀어 주세요.`);
     }
+    if (!home && bundles.length >= BUNDLE_MAX_BUNDLES) throw new Error(`묶음은 ${BUNDLE_MAX_BUNDLES}개까지 만들 수 있어요. 안 쓰는 묶음을 먼저 풀어 주세요.`);
     const before = bundleCopy(home);
     const keys = [...(home ? home.keys : [project]), ...add];
     if (keys.length > BUNDLE_MAX_KEYS) throw new Error(`한 묶음에는 ${BUNDLE_MAX_KEYS}개까지 넣을 수 있어요.`);

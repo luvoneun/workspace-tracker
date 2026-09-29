@@ -87,8 +87,14 @@ const JIRA_CHILD_OPEN_KEY = 'jiraChildrenOpen';
 // 곁들이는 기억이다 — 저장이 막혀 있어도(사생활 보호 창 등) 펼치기는 그대로 동작한다.
 let jiraChildOpen = null;
 // 거르기는 기억하지 않는다(프로젝트를 옮기면 풀린다). 접어 둔 완료도 마찬가지다.
-let jiraChildPick = null;
-let jiraChildDoneOpen = false;
+// 둘 다 **티켓 키별**이다 — 묶음 상세에서 카드가 여럿이어도 한 카드의 거르기가 다른 카드로 번지지 않는다.
+const jiraChildPicks = new Map();     // 티켓 키 → 거른 담당 이름
+const jiraChildDoneOpen = new Set();  // `완료 N개 더 보기`를 편 티켓 키
+const jiraChildReset = (key) => {
+  if (key === undefined) { jiraChildPicks.clear(); jiraChildDoneOpen.clear(); return; }
+  jiraChildPicks.delete(key);
+  jiraChildDoneOpen.delete(key);
+};
 
 function jiraChildOpenSet() {
   if (jiraChildOpen) return jiraChildOpen;
@@ -635,14 +641,14 @@ function jiraStripCard(issue, projectKey = '', bundle = null) {
     const seat = projectKey || `jira:${issue.key}`;
     const items = (issue.children && Array.isArray(issue.children.items) ? issue.children.items : []).filter(Boolean);
     const open = !!items.length && jiraChildOpened(seat);
-    card.appendChild(jiraChildFoot(seat, children, items, open));
+    card.appendChild(jiraChildFoot(seat, children, items, open, issue.key));
     if (open) card.appendChild(jiraChildList(issue, items));
   }
   return card;
 }
 
 // 접힌 줄: 진행률 + 미완료의 담당별 개수(누르면 그 사람 것만) + 줄 끝 꺾쇠.
-function jiraChildFoot(seat, children, items, open) {
+function jiraChildFoot(seat, children, items, open, issueKey = '') {
   const foot = document.createElement('div');
   foot.className = 'foot';
   const label = document.createElement('span');
@@ -658,7 +664,7 @@ function jiraChildFoot(seat, children, items, open) {
   count.textContent = children.text;
   foot.append(label, bar, count);
   if (!items.length) return foot;
-  foot.appendChild(jiraChildWho(seat, items));
+  foot.appendChild(jiraChildWho(seat, items, issueKey));
   const spacer = document.createElement('span');
   spacer.className = 'sp';
   const caret = document.createElement('button');
@@ -672,7 +678,7 @@ function jiraChildFoot(seat, children, items, open) {
   caret.addEventListener('click', () => {
     jiraChildRemember(seat, !open);
     // 접으면 거르기도 함께 푼다 — 다시 폈을 때 왜 몇 줄뿐인지 모를 일이 없게.
-    if (open) { jiraChildPick = null; jiraChildDoneOpen = false; }
+    if (open) jiraChildReset(issueKey);
     jiraStripPaint();
   });
   foot.append(spacer, caret);
@@ -680,7 +686,7 @@ function jiraChildFoot(seat, children, items, open) {
 }
 
 // 담당별 요약. 이름은 누르는 글자다(별도 토글·드롭다운을 만들지 않는다) — 거르는 중이면 굵어지고 `전체`가 붙는다.
-function jiraChildWho(seat, items) {
+function jiraChildWho(seat, items, issueKey = '') {
   const box = document.createElement('span');
   box.className = 'who';
   const summary = jiraChildSummary(items);
@@ -698,7 +704,7 @@ function jiraChildWho(seat, items) {
       sep.textContent = '·';
       box.appendChild(sep);
     }
-    const on = jiraChildPick === entry.name;
+    const on = jiraChildPicks.get(issueKey) === entry.name;
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'd-jwho';
@@ -707,10 +713,10 @@ function jiraChildWho(seat, items) {
     button.title = on ? '눌러서 전체를 다시 봐요' : `${entry.name}가 맡은 하위 티켓만 봐요`;
     button.textContent = `${entry.name} ${entry.count}`;
     button.addEventListener('click', () => {
-      jiraChildPick = on ? null : entry.name;
-      jiraChildDoneOpen = false;
+      jiraChildReset(issueKey);
+      if (!on) jiraChildPicks.set(issueKey, entry.name);
       // 접혀 있을 때 이름을 누르면 펼쳐지며 그 사람 것만 보인다.
-      if (jiraChildPick) jiraChildRemember(seat, true);
+      if (!on) jiraChildRemember(seat, true);
       jiraStripPaint();
     });
     box.appendChild(button);
@@ -721,13 +727,13 @@ function jiraChildWho(seat, items) {
     more.textContent = `외 ${summary.extra}명`;
     box.appendChild(more);
   }
-  if (jiraChildPick) {
+  if (jiraChildPicks.has(issueKey)) {
     const clear = document.createElement('button');
     clear.type = 'button';
     clear.className = 'd-jwho clear';
     clear.textContent = '전체';
     clear.title = '담당자 거르기를 풀어요';
-    clear.addEventListener('click', () => { jiraChildPick = null; jiraChildDoneOpen = false; jiraStripPaint(); });
+    clear.addEventListener('click', () => { jiraChildReset(issueKey); jiraStripPaint(); });
     box.appendChild(clear);
   }
   return box;
@@ -737,10 +743,11 @@ function jiraChildWho(seat, items) {
 function jiraChildList(issue, items) {
   const list = document.createElement('div');
   list.className = 'd-jkids';
-  const picked = jiraChildPick ? items.filter(item => jiraChildWhoOf(item) === jiraChildPick) : items;
+  const pick = jiraChildPicks.get(issue.key);
+  const picked = pick ? items.filter(item => jiraChildWhoOf(item) === pick) : items;
   const ordered = jiraChildOrder(picked);
   const done = ordered.filter(item => item.status && item.status.category === 'done');
-  const folded = jiraChildDoneOpen ? 0 : Math.max(done.length - JIRA_CHILD_DONE_FOLD, 0);
+  const folded = jiraChildDoneOpen.has(issue.key) ? 0 : Math.max(done.length - JIRA_CHILD_DONE_FOLD, 0);
   const shown = folded ? ordered.slice(0, ordered.length - folded) : ordered;
   if (!shown.length) {
     const none = document.createElement('div');
@@ -757,7 +764,7 @@ function jiraChildList(issue, items) {
     more.type = 'button';
     more.className = 'd-link more';
     more.textContent = `완료 ${folded}개 더 보기`;
-    more.addEventListener('click', () => { jiraChildDoneOpen = true; jiraStripPaint(); });
+    more.addEventListener('click', () => { jiraChildDoneOpen.add(issue.key); jiraStripPaint(); });
     list.appendChild(more);
   }
   // 지라에서 100개까지만 읽어 온다 — 다 찼으면 나머지는 지라에서 본다.
@@ -820,8 +827,53 @@ function jiraStripPaint() {
     const seat = document.getElementById(jiraSideHostId(side));
     if (!seat) return;
     const card = jiraStripBody(side, seat.dataset.project || '', { lead: false });
-    seat.replaceChildren(...(card ? [card] : []));
+    // 좁은 폭(≤520)에서는 접힌 한 줄(.d-jfold)이 먼저 서고 카드는 펼쳤을 때만 보인다 — 넓은 폭은 CSS가 줄을 숨겨 예전 그대로다.
+    seat.classList.add('d-jside');
+    seat.classList.toggle('is-open', jiraSideOpen.has(side));
+    seat.replaceChildren(jiraSideFold(side), ...(card ? [card] : []));
   });
+}
+
+// 묶음 상세 옆 카드의 접힌 한 줄: `KEY · 이름 · 상태` + 꺾쇠(줄 전체가 버튼). 펼침은 이 화면에 있는 동안만 기억한다.
+// 상태는 색만이 아니라 글자로도 말한다(읽는 중·못 읽음도 글자).
+const jiraSideOpen = new Set();
+function jiraSideFold(key) {
+  const card = jiraCardFor(key);
+  const issue = card.key === key && card.state === 'ok' ? card.issue : null;
+  const listed = typeof jiraIssuesByKey === 'object' && jiraIssuesByKey ? jiraIssuesByKey.get(key) : null;
+  const name = (issue && issue.summary) || (listed && listed.summary) || '';
+  const status = issue && issue.status ? issue.status.name || ''
+    : card.key === key && card.state === 'error' ? '못 읽음'
+      : card.key === key && card.state === 'off' ? '연결 필요' : '읽는 중';
+  const open = jiraSideOpen.has(key);
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'd-jfold';
+  button.setAttribute('aria-expanded', open ? 'true' : 'false');
+  button.setAttribute('aria-label', `${[key, name, status].filter(Boolean).join(' · ')} — 지라 카드 ${open ? '접기' : '펼치기'}`);
+  const parts = [['ky', key], ['nm', name], ['st', status]].filter(([, text]) => text);
+  parts.forEach(([cls, text], at) => {
+    if (at) {
+      const sep = document.createElement('span');
+      sep.className = 'sep';
+      sep.textContent = '·';
+      button.appendChild(sep);
+    }
+    const part = document.createElement('span');
+    const tone = cls === 'st' && issue && issue.status ? jiraStatusTone(issue.status.category) : '';
+    part.className = cls + (tone ? ` ${tone}` : '');
+    part.textContent = text;
+    if (cls === 'nm') part.title = text;
+    button.appendChild(part);
+  });
+  // 고정 마크업(꺾쇠 아이콘)만 붙는 자리다 — 지라가 준 글자는 전부 textContent로만 들어간다.
+  button.insertAdjacentHTML('beforeend', uiIcon('chevron'));
+  button.addEventListener('click', () => {
+    if (jiraSideOpen.has(key)) jiraSideOpen.delete(key); else jiraSideOpen.add(key);
+    jiraStripPaint();
+    document.getElementById(jiraSideHostId(key))?.querySelector?.('.d-jfold')?.focus?.();
+  });
+  return button;
 }
 
 // 지라에서 티켓 하나를 읽어 카드 상태로 바꾼다 — 대표 카드(jiraCardLoad)와 옆 카드(jiraSideLoad)가 함께 쓴다.
@@ -866,6 +918,7 @@ function jiraSideEnsure(projectKey, keys) {
     // 떠 있던 확인 줄이 사라지는 옆 카드의 것이면 함께 닫는다(무엇을 확인 중인지 안 보이면 안 된다).
     if (jiraConfirm && jiraSide.keys.includes(jiraConfirm.key) && (jiraSide.project !== projectKey || !list.includes(jiraConfirm.key))) jiraConfirmClose(false);
     const kept = {};
+    if (jiraSide.project !== projectKey) jiraSideOpen.clear();
     if (jiraSide.project === projectKey) list.forEach((key) => { if (jiraSide.cards[key]) kept[key] = jiraSide.cards[key]; });
     jiraSide = { project: projectKey, keys: [...list], cards: kept };
   }
@@ -899,7 +952,7 @@ async function jiraCardLoad(key, { fresh = false, quiet = false } = {}) {
 function jiraCardEnsure(key) {
   // 다른 프로젝트로 옮기면 거르기는 푼다(펼침만 기억한다). 2단계의 조용한 재조회(`quiet`)나
   // 쓰기 뒤의 `fresh` 재조회에서는 여기를 지나지 않으므로 펼침·거르기가 그대로 남는다.
-  if (jiraCard.key !== key) { jiraConfirmClose(false); jiraChildPick = null; jiraChildDoneOpen = false; jiraStripMoveConfirm = null; jiraCardLoad(key); return; }
+  if (jiraCard.key !== key) { jiraConfirmClose(false); jiraChildReset(); jiraStripMoveConfirm = null; jiraCardLoad(key); return; }
   // 확인 줄이 떠 있거나 쓰는 중이면 뒤에서 값을 갈아 끼우지 않는다(무엇을 확인 중인지가 바뀌면 안 된다).
   if (jiraBusy || jiraConfirm || jiraStripMoveConfirm) return;
   if (jiraCard.state === 'ok' && Date.now() - jiraCard.at > JIRA_REFRESH_MS) jiraCardLoad(key, { quiet: true });
@@ -1331,13 +1384,29 @@ function projectDeployNote(key) {
 
 // 리마인드 카드에 설 배포 임박 줄. 대상은 **열린 항목이 있는** 프로젝트 중, 가장 이른 미배포 버전의
 // 배포일이 오늘 기준 3일 안(지났는데 미배포인 것 포함)인 것이다. 급한 순(지남 → 오늘 → …)으로 세운다.
+// 한 줄은 지라 티켓 하나다: 같은 티켓이 두 줄(지라 프로젝트 줄 + 그 티켓을 손으로 건 그룹 줄)로 오면 한 줄로
+// 합치고 열린 업무는 더한다(이름·여는 곳은 지라 프로젝트 줄). 묶음(BBUNDLE)은 티켓별로 따로 서되, 같은 묶음 안에서
+// 버전 이름·배포일이 같은 줄은 한 줄로 합친다(이름·여는 곳은 대표 티켓 — 대표가 없으면 먼저 온 티켓).
 function deployReminders(rows) {
   const picked = (rows || []).filter(row => row && row.open).map((row) => {
     const deploy = projectDeploy(row.key);
     return deploy && deploy.left <= 3 ? { ...deploy, key: row.key, open: row.open } : null;
   }).filter(Boolean);
-  const labels = uiGroupLabels(picked.map(entry => entry.key));
-  return picked
+  const merged = [];
+  picked.forEach((entry) => {
+    const ticket = jiraKeyOf(entry.key);
+    const bundle = typeof projectBundleOf === 'function' ? projectBundleOf(`jira:${ticket}`) : null;
+    const same = merged.find(other => other.ticket === ticket
+      || (!!bundle && other.bundle === bundle.id && other.name === entry.name && other.date === entry.date));
+    if (!same) { merged.push({ ...entry, ticket, bundle: bundle ? bundle.id : null, keys: [entry.key] }); return; }
+    same.open += entry.open;
+    same.keys.push(entry.key);
+    const lead = bundle ? bundle.lead : `jira:${ticket}`;
+    same.key = same.keys.includes(lead) ? lead : same.keys.find(key => key.startsWith('jira:')) || same.keys[0];
+  });
+  const list = merged.map(({ ticket, bundle, keys, ...entry }) => entry);
+  const labels = uiGroupLabels(list.map(entry => entry.key));
+  return list
     .map(entry => ({ ...entry, label: labels.get(entry.key) }))
     .sort((a, b) => a.left - b.left || a.label.localeCompare(b.label));
 }

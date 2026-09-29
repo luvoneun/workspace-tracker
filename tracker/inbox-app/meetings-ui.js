@@ -733,7 +733,8 @@ function panelMeetingCapture(event, box, linked, host = MEETING_HOST_CARD) {
       if (linked) await wfPost('capture', { meetingId: event.id, type, description, ...(type !== 'decision' && due ? { due } : {}) });
       else {
         // 기록되지 않은 회의: 회의에 연결하지 않고 목록에 바로 담는다(프로젝트는 회의에 연결된 것을 쓴다).
-        const project = event.project;
+        // 묶음(BBUNDLE)에 든 티켓이면 대표 티켓으로 담는다(서버 addToMeeting의 기본값과 같은 규칙).
+        const project = meetingCaptureProject(event.project);
         const body = {
           description,
           ...(type !== 'decision' && due ? { due } : {}),
@@ -782,14 +783,17 @@ function meetingMoveCandidates(items, from, to) {
   const was = meetingMoveNormKey(from), want = meetingMoveNormKey(to);
   const kinds = (items || []).filter(item => MEETING_MOVE_KINDS.includes(item.type));
   const keyOf = item => meetingMoveNormKey(wfKey(item));
+  // 목적지 묶음(BBUNDLE)에 이미 든 티켓의 항목은 "이미 그 프로젝트"로 본다 — 옮기지도, `다른 프로젝트`로 세지도 않는다.
+  // 옮기는 대상은 예전 그대로 없음·이전 키 정확 일치뿐이다(서버 move-items가 from을 정확히 다시 확인한다).
+  const inWant = key => !!want && !!key && (key === want || (typeof projectGroupKey === 'function' && projectGroupKey(key) === projectGroupKey(want)));
   const eligible = kinds.filter((item) => {
     const key = keyOf(item);
-    if (key === want) return false;
+    if (key === want || inWant(key)) return false;
     return want ? (!key || (!!was && key === was)) : (!!was && key === was);
   });
   const open = eligible.filter(item => item.status !== 'done');
   // 다른 프로젝트(C)에 있어 그대로 두는 것 — 끝내지 않은 것만 센다(끝낸 것은 어차피 그대로다). 해제에는 말하지 않는다.
-  const other = want ? kinds.filter((item) => { const key = keyOf(item); return item.status !== 'done' && key && key !== want && key !== was; }).length : 0;
+  const other = want ? kinds.filter((item) => { const key = keyOf(item); return item.status !== 'done' && key && !inWant(key) && key !== was; }).length : 0;
   return { ids: open.map(item => item.id), done: eligible.length - open.length, other };
 }
 // 프로젝트 열쇠 → 화면 이름(지라는 요약·별칭).
@@ -907,11 +911,20 @@ function meetingMoveOffer(meetingId, from, to) {
   });
 }
 
+// 담기 기본 프로젝트 — `{ type: 'jira', value }`가 묶음에 들어 있으면 대표 티켓으로 바꾼다. 그 밖은 그대로.
+function meetingCaptureProject(project) {
+  if (!project || project.type !== 'jira' || typeof projectGroupKey !== 'function') return project;
+  const lead = projectGroupKey(`jira:${project.value}`);
+  return lead === `jira:${project.value}` ? project : { ...project, value: lead.slice('jira:'.length) };
+}
+
 // 이미 적어 둔 항목을 이 회의에서 나온 것으로 연결한다(같은 프로젝트의 항목만 후보로).
 function panelMeetingLink(event, box, host = MEETING_HOST_CARD) {
   const key = typeof wfMeetingKey === 'function' ? wfMeetingKey(event) : null;
   const items = (typeof workflowData === 'object' && workflowData ? workflowData.items : null) || [];
-  const candidates = items.filter(item => !item.meetingId && (!key || wfKey(item) === key));
+  // 묶음(BBUNDLE)이면 묶인 티켓 전부가 같은 프로젝트다.
+  const same = typeof projectGroupKey === 'function' ? (a, b) => projectGroupKey(a) === projectGroupKey(b) : (a, b) => a === b;
+  const candidates = items.filter(item => !item.meetingId && (!key || same(wfKey(item), key)));
   if (!candidates.length) return;
   const section = document.createElement('details');
   section.className = 'd-dsec d-dadd';
@@ -1036,13 +1049,19 @@ function meetingsTabList(meetings, state, itemsOf) {
     .sort(wfMeetingOrder);
 }
 
+// 회의 탭 프로젝트별 보기의 소제목 열쇠 — 묶음(BBUNDLE)에 든 지라 티켓이면 대표 키 하나로 모인다(projectGroupKey).
+function meetingGroupKey(event) {
+  const key = wfMeetingKey(event);
+  return (key && typeof projectGroupKey === 'function' ? projectGroupKey(key) : key) || '__misc__';
+}
+
 // 프로젝트별 보기의 묶음(순수 함수). 목록은 이미 날짜 내림차순이라 묶음 안의 차례는 그대로 두고,
 // 묶음끼리의 차례만 정한다: **미완료 항목이 남은 프로젝트가 먼저**, 그 안에서는 가장 최근 회의 날짜순.
 // `프로젝트 없음`은 언제나 맨 끝이다.
 function meetingsTabGroups(rows, itemsOf) {
   const groups = new Map();
   (rows || []).forEach((event) => {
-    const key = wfMeetingKey(event) || '__misc__';
+    const key = meetingGroupKey(event);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(event);
   });
@@ -1087,7 +1106,7 @@ function meetingsTabRevealIfNeeded(id) {
   if (meetingsTabState.reviewOnly && !(event.drafts && event.drafts.length)) meetingsTabState.reviewOnly = false;
   if (meetingsTabState.unresolved && meetingUnresolvedCount(event, itemsOf) === 0) meetingsTabState.unresolved = false;
   // 프로젝트별 보기에서 그 프로젝트를 접어 뒀으면 펼친다 — 고른 회의 줄은 반드시 보여야 한다.
-  meetingsTabClosed.delete(wfMeetingKey(event) || '__misc__');
+  meetingsTabClosed.delete(meetingGroupKey(event));
   const today = todayStr();
   const windowDays = meetingsTabState.windowDays || MEETINGS_TAB_WINDOW_DAYS;
   if (meetingInBaseScope(event, { today, windowDays, showNoRecord: meetingsTabState.showNoRecord, itemsOf })) return;
@@ -1215,15 +1234,15 @@ function meetingsTabProjectRows(listEl, rows, beyond, itemsOf) {
     if (meetingsScrollTo === key) { meetingsScrollTo = null; heading.scrollIntoView?.({ block: 'nearest' }); }
     if (!open) return;
     list.forEach(event => listEl.appendChild(meetingsTabRow(event, { withDate: true })));
-    const more = beyond.filter(event => (wfMeetingKey(event) || '__misc__') === key).length;
+    const more = beyond.filter(event => meetingGroupKey(event) === key).length;
     if (more) listEl.appendChild(meetingsMoreRow(`더 보기 ${more}`, 'd-mmore is-in'));
   });
 }
 
 // 프로젝트별 보기에서 어느 소제목 아래에도 붙지 않는 `더 보기`가 남았는지(지금 목록에 줄이 하나도 없는 프로젝트).
 function meetingsTabBeyondRest(rows, beyond) {
-  const listed = new Set((rows || []).map(event => wfMeetingKey(event) || '__misc__'));
-  return beyond.some(event => !listed.has(wfMeetingKey(event) || '__misc__'));
+  const listed = new Set((rows || []).map(event => meetingGroupKey(event)));
+  return beyond.some(event => !listed.has(meetingGroupKey(event)));
 }
 
 // 보이는 기간을 14일씩 넓히는 조용한 글자 줄 — 목록 끝과 프로젝트 소제목 아래가 같은 부품을 쓴다.
@@ -1262,11 +1281,13 @@ function meetingsProjectStatus(key) {
 // 회의 정리 화면 부제목의 프로젝트 이름을 누르면 오는 길 — 왼쪽 목록을 `프로젝트별`로 바꾸고
 // 그 프로젝트만 펼친 뒤(다른 프로젝트는 접는다) 그 소제목으로 스크롤한다. 드롭다운으로 하던
 // "한 프로젝트만 보기"를 대신하는 자리다.
-function meetingsShowProject(key) {
+function meetingsShowProject(raw) {
+  // 부제목 링크는 회의에 걸린 원래 키를 준다 — 묶음이면 소제목 열쇠(대표 키)로 옮겨 찾는다.
+  const key = typeof projectGroupKey === 'function' ? projectGroupKey(raw) : raw;
   const meetings = (workflowData && workflowData.meetings) || [];
   meetingsTabClosed.clear();
   meetings.forEach((event) => {
-    const other = wfMeetingKey(event) || '__misc__';
+    const other = meetingGroupKey(event);
     if (other !== key) meetingsTabClosed.add(other);
   });
   meetingsTabView = 'project';

@@ -1016,21 +1016,49 @@ function reportPlanProjectNames() {
   return names;
 }
 
-// 고르는 목록이라 옵션 글자만 `요약 · 키`로 바꾸고(BKEY 결정, 정렬도 그 글자 기준), 저장되는 값
-// (option.value)은 그대로 원래 이름이다 — 이전에 저장된 문장의 프로젝트와 같은 꼴로 묶이게 한다.
-function reportPlanProjectPicker() {
-  const pick = reportNode('select', undefined, 'd-msel rp-pick');
-  pick.setAttribute('aria-label', '다음 주 계획 프로젝트');
+// 고르는 목록이라 보이는 글자만 `요약 · 키`(요약 + 오른쪽 조용한 키)로 바꾸고(BKEY 결정, 정렬도 그 글자 기준),
+// 저장되는 값은 그대로 원래 이름이다 — 이전에 저장된 문장의 프로젝트와 같은 꼴로 묶이게 한다.
+// 앱의 프로젝트 고르기 목록(app.js uiPickList) 모양의 선택지다(순수 함수). 여기는 찾기만 하고 묶음은 없다
+// (다음 주 계획은 저장된 이름 문자열 단위라 묶음을 모른다 — 주간요약 묶기는 다른 작업).
+function reportPlanPickEntries(current) {
   const names = reportPlanProjectNames();
-  if (reportPlanGroup && !names.includes(reportPlanGroup)) names.unshift(reportPlanGroup);
+  if (current && !names.includes(current)) names.unshift(current);
   const sorted = [...names].sort((a, b) => reportPickerLabel(a).localeCompare(reportPickerLabel(b)));
-  for (const [value, text] of [['', REPORT_NO_PROJECT], ...sorted.map(name => [name, reportPickerLabel(name)])]) {
-    const option = reportNode('option', text);
-    option.value = value;
-    if (value === reportPlanGroup) option.selected = true;
-    pick.appendChild(option);
-  }
-  pick.addEventListener('change', () => { reportPlanGroup = pick.value; });
+  return [
+    { type: 'action', value: '', text: REPORT_NO_PROJECT, selected: !current },
+    ...sorted.map((name) => {
+      const match = REPORT_JIRA_LABEL.exec(String(name));
+      return {
+        type: 'option', value: name, text: match ? match[2] : name, key: match ? match[1] : '', level: 0,
+        selected: name === current, find: [name, reportPickerLabel(name)],
+      };
+    }),
+  ];
+}
+
+// 입력줄 앞의 조용한 고르개 — 누르면 떠 있는 메뉴 안에 찾기 칸 + 목록이 펼쳐진다(프로젝트가 많을 때만 찾기 칸).
+function reportPlanProjectPicker() {
+  const pick = reportNode('button', undefined, 'd-msel rp-pick');
+  pick.type = 'button';
+  pick.setAttribute('aria-haspopup', 'listbox');
+  const paint = () => {
+    pick.textContent = reportPlanGroup ? reportPickerLabel(reportPlanGroup) : REPORT_NO_PROJECT;
+    pick.title = pick.textContent;
+    pick.setAttribute('aria-label', `다음 주 계획 프로젝트: ${pick.textContent} — 바꾸기`);
+  };
+  paint();
+  pick.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const entries = reportPlanPickEntries(reportPlanGroup);
+    const list = uiPickList({
+      entries,
+      label: '다음 주 계획 프로젝트',
+      search: uiPickSearchable(entries),
+      onPick: (value) => { reportPlanGroup = value; paint(); uiMenuClose(); pick.focus(); },
+      onClose: (byKeyboard) => { uiMenuClose(); if (byKeyboard) pick.focus(); },
+    });
+    if (uiMenu(pick, [[{ field: '프로젝트', control: list }]])) list.focusStart();
+  });
   return pick;
 }
 

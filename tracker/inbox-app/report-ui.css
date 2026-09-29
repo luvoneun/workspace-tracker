@@ -163,6 +163,8 @@
 .rp-add .rp-pick {
   flex: 0 0 auto; max-width: 150px; height: 30px; background: none; color: var(--dim);
   font-weight: 500; cursor: pointer;
+  /* 고르개는 버튼이다(누르면 찾기 칸 + 목록 메뉴) — 긴 이름은 한 줄 말줄임, 전체는 title */
+  text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .rp-add:focus-within .rp-pick, .rp-add .rp-pick:hover { background: var(--field); color: var(--text); }
 .rp-add input {

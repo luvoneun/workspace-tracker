@@ -674,12 +674,15 @@ function uiTaskRow(item, opts = {}) {
 
   // 그룹 제목이 프로젝트를 말해 주지 않는 자리(진행 중·마감순·서랍)에서는 제목 바로 뒤에 `· ● 프로젝트`.
   // 원문이 있으면 그 뒤에 조용한 `원문` 링크가 늘 따라온다.
+  // 묶음(BBUNDLE) 그룹 아래 줄이면 제목 바로 뒤에 어느 티켓 것인지 작은 번호(opts.fromKey, 프로젝트 탭과 같은 .d-pfrom).
   const inlineProject = project;
   const source = uiSourceLink(item);
-  if (inlineProject || source) {
+  const fromTag = opts.fromKey && typeof projectFromTag === 'function' ? projectFromTag(opts.fromKey) : null;
+  if (inlineProject || source || fromTag) {
     const wrap = document.createElement('span');
     wrap.className = 'd-titlewrap';
     wrap.appendChild(title);
+    if (fromTag) wrap.appendChild(fromTag);
     if (inlineProject) wrap.appendChild(uiInlineProject(item));
     if (source) wrap.appendChild(source);
     row.appendChild(wrap);
@@ -765,16 +768,25 @@ function uiGroupLabels(keys) {
 
 // 프로젝트별로 묶고, 프로젝트 없는 것은 맨 뒤에 둔다.
 // 아이디어는 프로젝트를 `project`에 담는다 — 흐름 기록의 `wfKey`와 같은 규칙으로 맞춘다.
+// 묶음(BBUNDLE)에 든 지라 티켓은 대표 키 하나로 모인다(projectGroupKey) — 이름·색·`+`도 대표 티켓 것이다.
+// waiting-ui.js:waitingGroups가 같은 규칙의 복제본이다 — 함께 고친다.
 function uiGroupTasks(items) {
   const groups = new Map();
   items.forEach((item) => {
     const named = item.group || item.project;
-    const key = item.jira ? `jira:${item.jira}` : named ? `group:${named}` : '__misc__';
+    const raw = item.jira ? `jira:${item.jira}` : named ? `group:${named}` : '__misc__';
+    const key = typeof projectGroupKey === 'function' ? projectGroupKey(raw) : raw;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(item);
   });
   const named = [...groups.keys()].filter(key => key !== '__misc__').sort();
   return (groups.has('__misc__') ? [...named, '__misc__'] : named).map(key => [key, groups.get(key)]);
+}
+
+// 묶음 그룹 아래 줄에만 붙이는 작은 티켓 번호(프로젝트 탭 묶음 상세의 .d-pfrom과 같은 모양) — 묶음이 아니면 ''.
+function uiGroupFromKey(groupKey, item) {
+  if (!item || !item.jira || typeof projectBundleOf !== 'function' || !projectBundleOf(groupKey)) return '';
+  return item.jira;
 }
 
 // 레일 한 줄(확인 대기·리마인드·후속 알림). 제목은 한 줄 말줄임(title에 전체), 오른쪽은 조용한 글자.
@@ -2468,7 +2480,7 @@ function renderLaterTasks(items) {
         if (b.due) return 1;
         return 0;
       })
-      .forEach(item => list.appendChild(uiTaskRow(item, { mode: 'later', grouped: key !== '__misc__' })));
+      .forEach(item => list.appendChild(uiTaskRow(item, { mode: 'later', grouped: key !== '__misc__', fromKey: uiGroupFromKey(key, item) })));
   });
 }
 
@@ -4539,7 +4551,7 @@ function renderTodayTasks(items) {
         onOpenProject: key === '__misc__' ? null : () => openProjectTab(key),
       });
       list.append(heading, addRow);
-      [...groupItems].sort(compareTasks).forEach(item => list.appendChild(uiTaskRow(item, { mode: 'today', grouped: key !== '__misc__' })));
+      [...groupItems].sort(compareTasks).forEach(item => list.appendChild(uiTaskRow(item, { mode: 'today', grouped: key !== '__misc__', fromKey: uiGroupFromKey(key, item) })));
     });
   }
 
@@ -4741,131 +4753,360 @@ async function toggleTask(id) {
   await load();
 }
 
-// 그룹 선택 목록의 <option> HTML. head는 처음부터 보이는 항목, rest는 지라·그룹·직접 입력.
-function groupSelectOptions(current, forceClearable) {
-  const head = [`<option value="">그룹 지정…</option>`];
+// ---------- 프로젝트 고르기 한 벌 (BBUNDLE 덩어리 2) ----------
+// 프로젝트를 고르는 자리(업무 ⋯·상세·받은 것·확인 대기·결정·여러 개 선택·회의 연결)는 모두 renderGroupControl
+// 하나를 쓰고, 목록은 옛 <select> 대신 uiPickList다 — 목록 위 검색 칸(프로젝트가 PROJECT_FIND_MIN개 이상일 때만,
+// 프로젝트 탭 찾기 칸과 같은 기준)과 묶음(묶음 한 줄 + 그 아래 들여쓴 티켓)을 그릴 수 있어서다.
+// 선택지는 projectPickEntries(순수 함수)가 만든다:
+//   { type: 'option', value, text, key, dot, level: 0|1, strong, selected, find: [찾을 글자…], label }
+//   { type: 'heading', text } — `지난 프로젝트` 소제목
+//   { type: 'action', value: '__clear__' | '__custom__', text } — 찾는 중에도 늘 선다
+const PICK_CLEAR = '__clear__';
+const PICK_CUSTOM = '__custom__';
+
+function projectPickEntries(current, forceClearable) {
+  const out = [];
   // 여러 개를 한 번에 옮길 땐 "현재 그룹"이라는 게 없어도(current === null) 해제를 고를 수 있어야 한다.
-  if (current || forceClearable) head.push(`<option value="__clear__">— 그룹 해제 —</option>`);
-  const rest = [];
+  if (current || forceClearable) out.push({ type: 'action', value: PICK_CLEAR, text: '그룹 해제' });
   // 지난 프로젝트도 고를 수 있다 — 목록 끝의 `지난 프로젝트` 소제목 아래로 내려갈 뿐이다.
   // 왼쪽 목록과 같은 자동 판정(projectQuiet)을 쓴다 — 저장된 값이 아니라 매번 다시 계산한다.
+  const rest = [];
   const past = [];
   const quietToday = todayStr();
   const wfItems = (typeof workflowData === 'object' && workflowData && workflowData.items) || [];
   const wfMeetings = (typeof workflowData === 'object' && workflowData && workflowData.meetings) || [];
-  const put = (key, line) => {
-    const open = wfItems.filter(item => uiProjectOpenItem(item) && wfKey(item) === key).length;
-    const quiet = projectQuiet({ open }, projectLastDay(key, wfItems, wfMeetings), quietToday);
-    (quiet ? past : rest).push(line);
+  const put = (keys, lines) => {
+    const open = wfItems.filter(item => uiProjectOpenItem(item) && keys.includes(wfKey(item))).length;
+    const last = keys.map(key => projectLastDay(key, wfItems, wfMeetings)).sort().pop() || '';
+    (projectQuiet({ open }, last, quietToday) ? past : rest).push(...lines);
   };
+  const isCurrentJira = key => !!current && current.type === 'jira' && current.value === key;
+  // 지라 한 줄 — 고르는 자리라 `요약 · 키`(BKEY 결정): 눈이 먼저 가는 앞자리는 요약, 키는 오른쪽 조용한 글자.
+  const jiraLine = (issue, extra = {}) => ({
+    type: 'option',
+    value: `jira:${issue.key}`,
+    text: issue.summary || issue.key,
+    key: issue.summary ? issue.key : '',
+    dot: `jira:${issue.key}`,
+    level: 0,
+    selected: isCurrentJira(issue.key),
+    // 별칭(BJALIAS)으로도, 지라 원래 요약·키로도 찾힌다.
+    find: [issue.summary, issue.key, uiGroupLabel(`jira:${issue.key}`)],
+    ...extra,
+  });
   // `그 밖의 이슈`(extra = 지라에서 완료됐거나 담당이 바뀐 것)는 새로 고를 수 있는 선택지로 내놓지
   // 않는다 — 요약을 보여 주려고 들고 있을 뿐이다. 다만 지금 걸려 있는 값이면 골라진 채로 보여야 한다.
-  // 고르는 자리라 `요약 · 키`(BKEY 결정) — 눈이 먼저 가는 앞자리는 요약이고, 정렬도 요약 기준이다.
-  jiraIssuesCache
-    .filter(i => !i.extra || (current && current.type === 'jira' && current.value === i.key))
+  const usable = jiraIssuesCache.filter(issue => !issue.extra || isCurrentJira(issue.key));
+  const byKey = new Map(usable.map(issue => [issue.key, issue]));
+  const bundles = typeof projectBundles === 'function' ? projectBundles() : [];
+  const seen = new Set();
+  usable
     .slice()
     .sort((a, b) => String(a.summary || a.key).localeCompare(String(b.summary || b.key)))
-    .forEach(i => {
-      const selected = current && current.type === 'jira' && current.value === i.key;
-      const text = i.summary ? `${i.summary} · ${i.key}` : i.key;
-      put(`jira:${i.key}`, `<option value="jira:${escapeAttr(i.key)}"${selected ? ' selected' : ''}>${escapeHtml(text)}</option>`);
+    .forEach((issue) => {
+      const bundle = bundles.find(entry => entry.keys.includes(`jira:${issue.key}`));
+      if (!bundle) { put([`jira:${issue.key}`], [jiraLine(issue)]); return; }
+      if (seen.has(bundle.id)) return;
+      seen.add(bundle.id);
+      // 묶음은 한 줄(대표 티켓으로 저장) + 그 아래 들여쓴 나머지 티켓(그 티켓으로 저장 — 직접 골라도 된다).
+      const leadKey = bundle.lead.slice('jira:'.length);
+      const lead = byKey.get(leadKey) || jiraIssuesByKey.get(leadKey) || { key: leadKey, summary: '' };
+      const kids = bundle.keys.filter(key => key !== bundle.lead).map(key => byKey.get(key.slice('jira:'.length))).filter(Boolean);
+      const name = uiGroupLabel(bundle.lead);
+      const head = jiraLine(lead, {
+        text: name,
+        key: leadKey,
+        strong: true,
+        find: bundle.keys.flatMap((key) => {
+          const one = byKey.get(key.slice('jira:'.length)) || jiraIssuesByKey.get(key.slice('jira:'.length));
+          return [key.slice('jira:'.length), one && one.summary, uiGroupLabel(key)];
+        }),
+        label: `${name} 묶음 · 티켓 ${bundle.keys.length}개 — 대표 ${leadKey}로 지정`,
+        own: [lead.summary, leadKey, name],
+      });
+      put(bundle.keys, [head, ...kids.map(kid => jiraLine(kid, { level: 1 }))]);
     });
-  customGroupsCache.forEach(g => {
-    const selected = current && current.type === 'group' && current.value === g;
-    put(`group:${g}`, `<option value="group:${escapeAttr(g)}"${selected ? ' selected' : ''}>${escapeHtml(g)}</option>`);
+  customGroupsCache.forEach((group) => {
+    const selected = !!current && current.type === 'group' && current.value === group;
+    put([`group:${group}`], [{ type: 'option', value: `group:${group}`, text: group, key: '', dot: `group:${group}`, level: 0, selected, find: [group] }]);
   });
-  if (past.length) rest.push(`<optgroup label="지난 프로젝트">`, ...past, `</optgroup>`);
-  rest.push(`<option value="__custom__">직접 입력…</option>`);
-  return { head, rest };
+  out.push(...rest);
+  if (past.length) out.push({ type: 'heading', text: '지난 프로젝트' }, ...past);
+  out.push({ type: 'action', value: PICK_CUSTOM, text: '직접 입력…' });
+  return out;
+}
+
+// 찾기 칸은 선택지가 많을 때만 선다 — 프로젝트 탭 찾기 칸(PROJECT_FIND_MIN)과 같은 기준.
+function uiPickSearchable(entries) {
+  const min = typeof PROJECT_FIND_MIN === 'number' ? PROJECT_FIND_MIN : 8;
+  return entries.filter(entry => entry.type === 'option').length >= min;
+}
+
+// 찾는 말로 거른다(팔레트·프로젝트 찾기와 같은 wfSearchMatches 규칙 — NFKC·대소문자 무시·모든 낱말 포함).
+// 묶음 줄은 제 이름이 맞으면 들여쓴 티켓까지 전부, 티켓 하나만 맞으면 묶음 줄 + 맞은 티켓만 선다.
+// 해제·직접 입력은 늘 서고, 아래에 선택지가 하나도 안 남은 소제목은 뺀다.
+function uiPickFilter(entries, query) {
+  const needle = String(query || '').trim();
+  if (!needle) return entries;
+  const matches = typeof wfSearchMatches === 'function'
+    ? wfSearchMatches
+    : (word, values) => values.filter(Boolean).join(' ').toLocaleLowerCase().includes(word.toLocaleLowerCase());
+  const hit = (entry, own = false) => matches(needle, (own && entry.own) || entry.find || [entry.text]);
+  const kept = [];
+  let headHit = false;
+  entries.forEach((entry, index) => {
+    if (entry.type !== 'option') { kept.push(entry); return; }
+    if (entry.level === 1) { if (headHit || hit(entry)) kept.push(entry); return; }
+    headHit = hit(entry, true);
+    let kidHit = false;
+    for (let at = index + 1; at < entries.length && entries[at].type === 'option' && entries[at].level === 1; at += 1) {
+      if (hit(entries[at])) { kidHit = true; break; }
+    }
+    // 묶음 줄은 목록에 없는 티켓(지라에서 끝난 것 등)의 이름·키로도 찾힌다(entry.find는 묶음 전체).
+    if (headHit || kidHit || (entry.own && hit(entry))) kept.push(entry);
+  });
+  return kept.filter((entry, index) => entry.type !== 'heading' || (kept[index + 1] && kept[index + 1].type === 'option'));
+}
+
+// 목록 한 벌: (찾기 칸) + role=listbox 안의 선택지 버튼들. 키보드는 ⋯ 메뉴(.d-menulist)와 같다 — ↑↓가 찾기 칸과
+// 선택지 사이를 돌고(찾기 칸에서 ↓면 첫 선택지), Enter는 그 선택지, Esc는 목록을 닫는다(메뉴 안이면 메뉴는 남는다).
+// 찾기 칸에서 Enter면 맨 위 선택지를 고른다. onPick(value, query), onClose(byKeyboard).
+let uiPickSeq = 0;
+function uiPickList({ entries, label, onPick, onClose, search = false, placeholder = '이름이나 지라 번호로 찾기', emptyText = '찾는 프로젝트가 없어요' }) {
+  uiPickSeq += 1;
+  const root = document.createElement('div');
+  root.className = 'd-gpick';
+  const list = document.createElement('div');
+  list.className = 'd-gplist';
+  list.id = `gplist-${uiPickSeq}`;
+  list.setAttribute('role', 'listbox');
+  list.setAttribute('aria-label', label);
+  const none = document.createElement('div');
+  none.className = 'd-gpnone';
+  none.setAttribute('role', 'status');
+  let query = '';
+  let input = null;
+  let closed = false;
+  let shown = [];    // 지금 보이는 선택지(거른 뒤)
+  let buttons = [];  // 그 버튼들 — 키보드 이동·Enter가 쓴다
+  const close = (byKeyboard) => { if (closed) return; closed = true; onClose(byKeyboard); };
+  const pick = (value) => { if (closed) return; closed = true; onPick(value, query); };
+
+  const draw = () => {
+    list.replaceChildren();
+    shown = uiPickFilter(entries, query);
+    buttons = [];
+    const found = shown.some(entry => entry.type === 'option');
+    none.textContent = query.trim() && !found ? emptyText : '';
+    none.hidden = !none.textContent;
+    shown.forEach((entry) => {
+      if (entry.type === 'heading') {
+        const head = document.createElement('div');
+        head.className = 'd-gphead';
+        head.setAttribute('role', 'presentation');
+        head.textContent = entry.text;
+        list.appendChild(head);
+        return;
+      }
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'd-mitem d-gpopt'
+        + (entry.level === 1 ? ' is-sub' : '') + (entry.strong ? ' is-bundle' : '') + (entry.type === 'action' ? ' is-act' : '');
+      button.setAttribute('role', 'option');
+      button.setAttribute('aria-selected', entry.selected ? 'true' : 'false');
+      button.tabIndex = -1;
+      button.dataset.value = entry.value;
+      if (entry.dot) button.appendChild(uiProjectDot(entry.dot));
+      const name = document.createElement('span');
+      name.className = 'nm';
+      name.textContent = entry.text;
+      name.title = entry.text;
+      button.appendChild(name);
+      if (entry.key) {
+        const key = document.createElement('span');
+        key.className = 'ky';
+        key.textContent = entry.key;
+        button.appendChild(key);
+      }
+      if (entry.label) button.setAttribute('aria-label', entry.label);
+      // 누르는 동안 찾기 칸의 초점을 뺏지 않는다 — 초점이 빠지면 목록이 닫히는 판정과 부딪힌다.
+      button.addEventListener('mousedown', event => event.preventDefault());
+      button.addEventListener('click', (event) => { event.stopPropagation(); pick(entry.value); });
+      list.appendChild(button);
+      buttons.push(button);
+    });
+    // 찾기 칸이 없으면(선택지가 적을 때) 지금 값(없으면 첫 줄)이 Tab으로 들어오는 자리다.
+    if (!input) {
+      const home = buttons.find(button => button.getAttribute('aria-selected') === 'true') || buttons[0];
+      if (home) home.tabIndex = 0;
+    }
+  };
+
+  if (search) {
+    input = document.createElement('input');
+    input.type = 'search';
+    input.className = 'd-din d-pfind d-gpfind';
+    input.placeholder = placeholder;
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    input.setAttribute('aria-label', `${label} — 찾기`);
+    input.setAttribute('aria-controls', list.id);
+    input.addEventListener('input', () => { query = input.value; draw(); });
+    root.appendChild(input);
+  }
+  root.append(none, list);
+  draw();
+
+  root.addEventListener('click', event => event.stopPropagation());
+  root.addEventListener('keydown', (event) => {
+    if (event.isComposing) return; // 한글을 조합하는 중의 Enter·Esc는 글자를 확정하는 것이다
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      close(true);
+      return;
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      const focusable = [...(input ? [input] : []), ...buttons];
+      if (!focusable.length) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const step = event.key === 'ArrowDown' ? 1 : -1;
+      const at = focusable.indexOf(document.activeElement);
+      const next = focusable[at < 0 ? (step > 0 ? 0 : focusable.length - 1) : (at + step + focusable.length) % focusable.length];
+      next.focus();
+      next.scrollIntoView?.({ block: 'nearest' });
+      return;
+    }
+    if (event.key === 'Enter' && input && event.target === input) {
+      event.preventDefault();
+      if (!query.trim()) return;
+      const first = shown.find(entry => entry.type === 'option');
+      if (first) { pick(first.value); return; }
+      if (shown.some(entry => entry.value === PICK_CUSTOM)) pick(PICK_CUSTOM);
+    }
+  });
+  // 목록 밖으로 초점이 나가면 닫는다(다시 그리는 동안 잠깐 비는 초점은 한 박자 기다려 본다).
+  root.addEventListener('focusout', (event) => {
+    if (event.relatedTarget && root.contains(event.relatedTarget)) return;
+    setTimeout(() => {
+      if (closed || !root.isConnected) return;
+      if (!root.contains(document.activeElement)) close(false);
+    }, 0);
+  });
+  root.focusStart = () => {
+    const current = buttons.find(button => button.getAttribute('aria-selected') === 'true');
+    const target = input || current || buttons[0];
+    if (!target) return;
+    target.focus();
+    (current || target).scrollIntoView?.({ block: 'nearest' });
+  };
+  return root;
+}
+
+// 메뉴(.d-menulist, 떠 있는 층) 안에서 목록을 펼쳐 메뉴가 화면 아래로 넘치면 넘친 만큼 위로 올린다.
+function uiPickFit(node) {
+  const menu = node && typeof node.closest === 'function' ? node.closest('.d-menulist') : null;
+  if (!menu || typeof menu.getBoundingClientRect !== 'function') return;
+  const box = menu.getBoundingClientRect();
+  const over = box.bottom - (window.innerHeight - 8);
+  if (over > 0) menu.style.top = `${Math.max(8, Math.round(box.top - over))}px`;
 }
 
 function renderGroupControl({ jira, group, onSetJira, onSetGroup, forceClearable = false, silent = false }) {
   const wrap = document.createElement('div');
   wrap.className = 'jira-control';
+  const saved = (text) => { if (!silent) { announce(text); load(); } };
 
-  function buildSelect(current, revertTo, defer = false) {
-    const select = document.createElement('select');
-    select.className = 'jira-select';
-    select.setAttribute('aria-label', '그룹 지정');
-    const { head, rest } = groupSelectOptions(current, forceClearable);
-    select.innerHTML = defer ? head.join('') : head.concat(rest).join('');
-    // 그룹이 있는 카드는 뱃지를 눌러야 목록을 만든다 — 그룹 없는 카드도 같게, 처음 건드릴 때
-    // 지라·그룹 항목을 채운다. 접혀 있을 때 보이는 "그룹 지정…"과 차례·동작은 그대로다.
-    if (defer) {
-      let filled = false;
-      const fill = () => {
-        if (filled) return;
-        filled = true;
-        const parsed = document.createElement('select');
-        parsed.innerHTML = rest.join('');
-        const anchor = select.children[head.length] || null;
-        while (parsed.firstChild) select.insertBefore(parsed.firstChild, anchor);
-      };
-      ['mousedown', 'focus', 'keydown'].forEach((name) => select.addEventListener(name, fill));
-    }
-    select.addEventListener('click', (e) => e.stopPropagation());
-    let committed = false;
-    select.addEventListener('change', () => {
-      committed = true;
-      if (select.value === '__clear__') {
-        (async () => {
-          await onSetJira(null);
-          await onSetGroup(null);
-          if (!silent) { announce('그룹을 지웠어요'); load(); }
-        })();
+  // 직접 입력 — 찾던 글자를 미리 채운 칸. Enter면 그 이름의 그룹, Esc·바깥 누름이면 원래 자리로.
+  const customInput = (revertTo, draft) => {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'group-input';
+    input.placeholder = '그룹명 입력 후 Enter';
+    input.setAttribute('aria-label', '새 그룹 이름');
+    input.value = draft || '';
+    let inputCommitted = false;
+    input.addEventListener('click', (e) => e.stopPropagation());
+    input.addEventListener('keydown', async (e2) => {
+      if (e2.isComposing) return;
+      if (e2.key === 'Escape') {
+        e2.preventDefault();
+        e2.stopPropagation();
+        inputCommitted = true;
+        if (revertTo && wrap.contains(input)) { wrap.replaceChild(revertTo, input); revertTo.focus(); }
         return;
       }
-      if (select.value === '__custom__') {
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.className = 'group-input';
-        input.placeholder = '그룹명 입력 후 Enter';
-        let inputCommitted = false;
-        input.addEventListener('click', (e) => e.stopPropagation());
-        input.addEventListener('keydown', async (e2) => {
-          if (e2.key === 'Escape') {
-            inputCommitted = true;
-            if (revertTo && wrap.contains(input)) wrap.replaceChild(revertTo, input);
-            return;
-          }
-          if (e2.key !== 'Enter') return;
-          const v = input.value.trim();
-          if (!v) return;
-          inputCommitted = true;
-          await onSetGroup(v);
-          if (!silent) { announce('그룹을 지정했어요'); load(); }
-        });
-        input.addEventListener('blur', () => {
-          if (inputCommitted) return;
-          if (revertTo && wrap.contains(input)) wrap.replaceChild(revertTo, input);
-        });
-        wrap.replaceChild(input, select);
-        input.focus();
-        return;
-      }
-      if (!select.value) { committed = false; return; }
-      if (select.value.startsWith('group:')) {
-        const g = select.value.slice('group:'.length);
-        (async () => {
-          await onSetGroup(g);
-          if (!silent) { announce('그룹을 지정했어요'); load(); }
-        })();
-        return;
-      }
-      const key = select.value.replace(/^jira:/, '');
+      if (e2.key !== 'Enter') return;
+      const v = input.value.trim();
+      if (!v) return;
+      inputCommitted = true;
+      await onSetGroup(v);
+      saved('그룹을 지정했어요');
+    });
+    input.addEventListener('blur', () => {
+      if (inputCommitted) return;
+      if (revertTo && wrap.contains(input)) wrap.replaceChild(revertTo, input);
+    });
+    return input;
+  };
+
+  // 고른 값 하나를 저장한다 — 해제·직접 입력·그룹·지라 네 갈래(옛 <select>의 change와 같은 길).
+  const commit = (value) => {
+    if (value === PICK_CLEAR) {
       (async () => {
-        await onSetJira(key);
-        if (!silent) { announce('지라 이슈를 연결했어요'); load(); }
+        await onSetJira(null);
+        await onSetGroup(null);
+        saved('그룹을 지웠어요');
       })();
-    });
-    select.addEventListener('blur', () => {
-      if (committed) return;
-      if (revertTo && wrap.contains(select)) wrap.replaceChild(revertTo, select);
-    });
-    return select;
-  }
+      return;
+    }
+    if (value.startsWith('group:')) {
+      const g = value.slice('group:'.length);
+      (async () => { await onSetGroup(g); saved('그룹을 지정했어요'); })();
+      return;
+    }
+    const key = value.replace(/^jira:/, '');
+    (async () => { await onSetJira(key); saved('지라 이슈를 연결했어요'); })();
+  };
 
-  // 이미 지정된 지라·그룹은 배지로 보이고, 누르면 같은 자리에서 선택 목록으로 바뀐다.
+  // 배지(또는 `그룹 지정…`)를 누르면 같은 자리에서 목록이 펼쳐진다. 고르면 저장하고, 메뉴 안이었으면 메뉴도 닫는다.
+  const openPicker = (current, revertTo) => {
+    const entries = projectPickEntries(current, forceClearable);
+    const restore = (focus) => {
+      wrap.classList.remove('is-picking');
+      if (wrap.contains(picker)) wrap.replaceChild(revertTo, picker);
+      if (focus) revertTo.focus();
+    };
+    const picker = uiPickList({
+      entries,
+      label: '프로젝트 고르기',
+      search: uiPickSearchable(entries),
+      onClose: byKeyboard => restore(byKeyboard),
+      onPick: (value, query) => {
+        if (value === PICK_CUSTOM) {
+          wrap.classList.remove('is-picking');
+          const input = customInput(revertTo, query.trim());
+          wrap.replaceChild(input, picker);
+          input.focus();
+          return;
+        }
+        restore(false);
+        if (wrap.closest && wrap.closest('.d-menulist') && typeof uiMenuOpen === 'object' && uiMenuOpen) {
+          const anchor = uiMenuOpen.anchor;
+          uiMenuClose();
+          anchor?.focus?.();
+        }
+        commit(value);
+      },
+    });
+    wrap.replaceChild(picker, revertTo);
+    wrap.classList.add('is-picking');
+    uiPickFit(picker);
+    picker.focusStart();
+  };
+
+  // 이미 지정된 지라·그룹은 배지로 보이고, 누르면 같은 자리에서 고르는 목록으로 바뀐다.
   // keyText가 있으면(지라뿐) 요약 뒤에 조용한 회색 글자로 키를 덧붙인다(BKEY 결정 — 상세 카드의 값 표시).
   const appendBadge = (className, label, current, keyText) => {
     const badge = document.createElement('button');
@@ -4879,11 +5120,10 @@ function renderGroupControl({ jira, group, onSetJira, onSetGroup, forceClearable
       badge.appendChild(key);
     }
     badge.setAttribute('aria-label', `${label}${keyText ? ` ${keyText}` : ''} — 클릭해서 변경/해제`);
+    badge.setAttribute('aria-haspopup', 'listbox');
     badge.addEventListener('click', (e) => {
       e.stopPropagation();
-      const select = buildSelect(current, badge);
-      wrap.replaceChild(select, badge);
-      select.focus();
+      openPicker(current, badge);
     });
     wrap.appendChild(badge);
     return wrap;
@@ -4897,7 +5137,21 @@ function renderGroupControl({ jira, group, onSetJira, onSetGroup, forceClearable
 
   if (group) return appendBadge('badge group-badge', group, { type: 'group', value: group });
 
-  wrap.appendChild(buildSelect(null, undefined, true));
+  // 아직 프로젝트가 없으면 `그룹 지정…` 한 칸 — 누르면(또는 Enter·Space·↓) 같은 자리에서 목록이 펼쳐진다.
+  const start = document.createElement('button');
+  start.type = 'button';
+  start.className = 'jira-select jira-pick';
+  start.textContent = '그룹 지정…';
+  start.setAttribute('aria-label', '그룹 지정');
+  start.setAttribute('aria-haspopup', 'listbox');
+  start.addEventListener('click', (e) => { e.stopPropagation(); openPicker(null, start); });
+  start.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowDown') return;
+    e.preventDefault();
+    e.stopPropagation();
+    openPicker(null, start);
+  });
+  wrap.appendChild(start);
   return wrap;
 }
 

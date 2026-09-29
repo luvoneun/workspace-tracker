@@ -1355,3 +1355,36 @@ test('BBUNDLE: 옛 파일·깨진 값은 안전하게 거르고, 관련 없는 �
   fs.writeFileSync(file, JSON.stringify({ items: {}, meetings: {}, projectBundles: 'x' }));
   assert.deepEqual((await items()).workflows.projectBundles, [], '배열이 아니면 묶음 없음');
 });
+
+// ---------- BBUNDLE 덩어리 2 ----------
+test('BBUNDLE 2: 같은 묶음에 이미 든 키는 맞는 문구로 거절하고, 새 묶음은 100개까지(지라 추가 조회 한도)', async () => {
+  const file = path.join(directory, '.workflow.json');
+  fs.writeFileSync(file, JSON.stringify({ items: {}, meetings: {}, projectBundles: [] }));
+  await post('/api/project/bundle', { project: 'jira:IO-1', add: ['jira:IO-2'] });
+  const again = await post('/api/project/bundle', { project: 'jira:IO-1', add: ['jira:IO-2'] });
+  assert.equal(again.status, 400);
+  assert.match(again.error, /이미 이 묶음에 들어 있어요 — IO-2/, '같은 묶음이면 "다른 묶음"이라고 하지 않는다');
+  assert.doesNotMatch(again.error, /다른 묶음/);
+  // 100개가 차면 새 묶음은 거절하고, 있는 묶음에 더하는 것은 된다.
+  const many = Array.from({ length: 100 }, (unused, at) => ({ id: `bd_c${at}`, lead: `jira:CAP-${at * 2 + 1}`, keys: [`jira:CAP-${at * 2 + 1}`, `jira:CAP-${at * 2 + 2}`] }));
+  fs.writeFileSync(file, JSON.stringify({ items: {}, meetings: {}, projectBundles: many }));
+  const full = await post('/api/project/bundle', { project: 'jira:IO-8', add: ['jira:IO-9'] });
+  assert.equal(full.status, 400);
+  assert.match(full.error, /100개까지/);
+  assert.equal((await post('/api/project/bundle', { project: 'jira:CAP-1', add: ['jira:IO-9'] })).ok, true, '있는 묶음에 더하기는 그대로');
+  fs.writeFileSync(file, JSON.stringify({ items: {}, meetings: {} }));
+});
+
+test('BBUNDLE 2: 회의에서 담을 때 회의가 묶음의 다른 티켓에 걸려 있어도 기본 프로젝트는 대표 티켓이다', async (t) => {
+  const file = path.join(directory, '.workflow.json');
+  const before = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+  t.after(() => { if (before === null) fs.rmSync(file, { force: true }); else fs.writeFileSync(file, before); });
+  const meeting = { id: 'bb2m', date: today, start: '10:00', end: '11:00', title: 'BB2 결제 싱크', series: 'BB2 결제 싱크', link: null, project: { type: 'jira', value: 'IO-2', label: 'IO-2' } };
+  fs.writeFileSync(file, JSON.stringify({ items: {}, meetings: { bb2m: meeting },
+    projectBundles: [{ id: 'bd_bb2', lead: 'jira:IO-1', keys: ['jira:IO-1', 'jira:IO-2'] }] }));
+  const lead = await post('/api/workflow/capture', { meetingId: 'bb2m', type: 'task', description: 'BB2 대표로 담기' });
+  assert.equal(lead.ok, true);
+  const data = (await items()).workflows.items;
+  assert.equal(data.find(item => item.id === lead.id).jira, 'IO-1', '고르지 않았으면 대표 티켓');
+  await post('/api/track/remove', { id: lead.id });
+});

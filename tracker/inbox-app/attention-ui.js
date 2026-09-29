@@ -164,7 +164,9 @@ function attentionRow(item) {
     source.textContent = sourceName;
     lead.appendChild(source);
   }
-  lead.appendChild(uiProjectDot(`jira:${item.key}`));
+  // 묶음(BBUNDLE)에 든 티켓이면 묶음(대표) 색 — 단위는 그대로 티켓 하나다.
+  const dotKey = typeof projectGroupKey === 'function' ? projectGroupKey(`jira:${item.key}`) : `jira:${item.key}`;
+  lead.appendChild(uiProjectDot(dotKey));
   card.appendChild(lead);
 
   const top = document.createElement('div');
