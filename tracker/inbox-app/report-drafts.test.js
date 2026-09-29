@@ -848,7 +848,7 @@ test('다듬기 A: 프로젝트 이름 바꾸기(renameGroup)·에픽으로 옮�
   Object.assign(f.items[0],{group:undefined,jira:'IO-9',label:'IO-9 · 가입 에픽'});f.labels['jira:IO-9']='IO-9 · 가입 에픽';
   row=f.row('가입 문구 다듬음');
   assert.deepEqual([row.groupKey,row.shownGroup,row.groupOrigin],['jira:IO-9','가입 개편 1차','IO-9 · 가입 에픽']);
-  f.store.moveGroupUndo(ids,'가입 개선','IO-9','IO-9 · 가입 에픽');
+  f.store.moveGroupUndo(ids,'가입 개선','IO-9','IO-9 · 가입 에픽',ids.names);
   Object.assign(f.items[0],{group:'가입 개선',jira:undefined,label:'가입 개선'});
   row=f.row('가입 문구 다듬음');
   assert.deepEqual([row.groupKey,row.shownGroup],['group:가입 개선','가입 개편 1차']);
@@ -957,4 +957,49 @@ test('다듬기 A: 옛 앱(1.2.1)이 보고를 저장해도 파일 맨 위의 �
   assert.equal(view.title,'결제 보고');
   assert.equal(view.rows.find(row=>row.text==='가입 문구 다듬음').shownGroup,'가입 개편 1차');
   assert.equal(view.rows.find(row=>row.text==='서버 로그 정리함').excluded,true,'옛 앱에서 한 변경도 남는다');
+});
+test('다듬기 A(99 리뷰①): 에픽 옮기기를 되돌리면 옮길 때 가져간 소제목 이름만 돌아가고, 에픽이 원래 갖고 있던 이름은 남는다',t=>{
+  const f=polishFixture(t,{labels:{'group:가입':'가입'}});
+  f.change({action:'rename',heading:'완료한 일',groupKey:'group:가입',text:'가입 개편 1차'});
+  // 에픽(IO-9)이 원래 다른 소제목(진행중)에 이름을 갖고 있었다.
+  const state=f.saved();state.weekPolish['2026-09-14'].names['진행중|jira:IO-9']='에픽 원래 이름';fs.writeFileSync(f.file,JSON.stringify(state,null,2));
+  const ids=f.store.moveGroup('가입','IO-9','IO-9 · 가입 에픽');
+  assert.deepEqual(ids.names,[['2026-09-14','완료한 일|group:가입','완료한 일|jira:IO-9']],'옮긴 이름 열쇠를 함께 돌려준다');
+  assert.deepEqual(JSON.parse(JSON.stringify(ids)),[...ids],'행 id 배열 모양은 그대로(숨은 칸은 JSON에 실리지 않는다)');
+  f.store.moveGroupUndo([...ids],'가입','IO-9','IO-9 · 가입 에픽',ids.names);
+  const names=f.saved().weekPolish['2026-09-14'].names;
+  assert.deepEqual(names,{'진행중|jira:IO-9':'에픽 원래 이름','완료한 일|group:가입':'가입 개편 1차'},'에픽 원래 이름은 그룹으로 넘어가지 않는다');
+  // 이름 기록 없이(옛 이동 기록) 되돌리면 이름은 손대지 않는다.
+  const again=f.store.moveGroup('가입','IO-9','IO-9 · 가입 에픽');
+  f.store.moveGroupUndo([...again],'가입','IO-9','IO-9 · 가입 에픽');
+  assert.equal(f.saved().weekPolish['2026-09-14'].names['완료한 일|jira:IO-9'],'가입 개편 1차');
+});
+test('다듬기 A(99 리뷰②): 다듬기 칸(맨 위·주 칸·이름표)이 배열로 깨져 있어도 저장할 때 새 값이 사라지지 않는다',t=>{
+  const f=polishFixture(t);
+  fs.writeFileSync(f.file,JSON.stringify({schema:1,weeks:{},weekPolish:[]}));
+  f.change({action:'retitle',text:'결제 보고'});
+  assert.equal(f.saved().weekPolish['2026-09-14'].title,'결제 보고','맨 위 칸이 배열이면 객체로 새로 쓴다');
+  const state=f.saved();state.weekPolish['2026-09-14']=[];fs.writeFileSync(f.file,JSON.stringify(state));
+  assert.equal(f.view().title,null,'깨진 주 칸은 없는 것으로 본다');
+  f.change({action:'rename',heading:'완료한 일',groupKey:'group:가입',text:'가입 개편'});
+  assert.equal(f.saved().weekPolish['2026-09-14'].names['완료한 일|group:가입'],'가입 개편');
+  const broken=f.saved();broken.weekPolish['2026-09-14'].names=['x'];broken.weekPolish['2026-09-14'].seen={at:'x',ids:[]};fs.writeFileSync(f.file,JSON.stringify(broken));
+  assert.equal(f.view().since,null,'깨진 새로 기록은 없는 것으로 본다');
+  f.change({action:'rename',heading:'완료한 일',groupKey:'group:가입',text:'가입 개편 2차'});
+  assert.deepEqual(f.saved().weekPolish['2026-09-14'].names,{'완료한 일|group:가입':'가입 개편 2차'});
+  assert.equal(typeof f.saved().weekPolish['2026-09-14'].seen.ids.a,'string');
+});
+test('다듬기 A(v3): `원래 문장으로`는 고친 문장을 원본에서 다시 지은 문장으로 돌리고, 원본이 없거나 고치지 않은 문장은 거절한다',t=>{
+  const f=polishFixture(t);
+  const id=f.row('문구 검토함').id;
+  assert.throws(()=>f.change({action:'revert',id}),/원래 문장으로 돌릴 수 없어요/,'고치지 않은 문장');
+  f.change({action:'edit',id,text:'가입 문구 다듬음'});
+  f.change({action:'revert',id});
+  const row=f.view().rows.find(entry=>entry.id===id);
+  assert.deepEqual([row.text,row.locked],['문구 검토함',false]);
+  f.items[0].description='문구 검토하기(최종)';
+  assert.equal(f.view().rows.find(entry=>entry.id===id).text,'문구 검토하기(최종)'.replace(/하기$/,'함'),'다시 자동으로 따라간다');
+  f.change({action:'edit',id,text:'다시 고침'});
+  f.items.splice(0,1);
+  assert.throws(()=>f.change({action:'revert',id}),/원래 문장으로 돌릴 수 없어요/,'원본이 지워졌으면 거절');
 });

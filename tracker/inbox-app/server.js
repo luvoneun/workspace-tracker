@@ -1600,7 +1600,8 @@ function moveProject({ project, to, label }) {
   workflows.recordProjectMove({
     id: moveId, from, to, at: new Date().toISOString(),
     items, meetings: moved.ids, links: moved.link !== null ? { [from]: moved.link } : null,
-    meetingLinks, reportRows, reportLabel: label,
+    // reportNames: 옮긴 소제목 이름 열쇠(`[주, 옛 열쇠, 새 열쇠]`) — 되돌리기가 자기가 옮긴 이름만 되돌리게.
+    meetingLinks, reportRows, reportNames: reportRows.names || [], reportLabel: label,
     counts: { items: items.length, meetings: meetingCount, report: reportRows.length },
   });
 
@@ -1617,7 +1618,7 @@ function undoMoveProject({ moveId }) {
   if (typeof moveId !== 'string' || !moveId.trim()) throw new Error('되돌릴 기록을 확인해 주세요.');
   const entry = workflows.takeProjectMove(moveId);
   if (!entry) throw new Error('되돌릴 기록이 없어요.');
-  const { from, to, items: itemIds, meetings: meetingIds, links, meetingLinks: meetingLinkTitles, reportRows, reportLabel } = entry;
+  const { from, to, items: itemIds, meetings: meetingIds, links, meetingLinks: meetingLinkTitles, reportRows, reportNames, reportLabel } = entry;
 
   // ① 업무 파일 — 기록된 id가 지금도 그 지라 키를 달고 있을 때만 되돌린다.
   const idSet = new Set(itemIds);
@@ -1657,7 +1658,7 @@ function undoMoveProject({ moveId }) {
   if (meetingLinksRestored) fs.writeFileSync(MEETING_LINKS_PATH, JSON.stringify(linkState, null, 2));
 
   // ⑥ 주간요약 저장본
-  const reportUndo = reportDrafts.moveGroupUndo(reportRows, from, to, reportLabel);
+  const reportUndo = reportDrafts.moveGroupUndo(reportRows, from, to, reportLabel, reportNames);
 
   return {
     ok: true, project: `group:${from}`,
