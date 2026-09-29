@@ -12108,3 +12108,15 @@ test('다듬기 B: 초록 알약은 --success-bg·--success(상태 점 --success
   const added = ui.slice(ui.indexOf('// ---------- 칸마다 `+ 한 줄 추가`(다듬기 B)'), ui.indexOf('// 제외한 문장은 문서 끝'));
   assert.doesNotMatch(added, /innerHTML/);
 });
+test('다듬기 B 검수②③: 추가 입력칸은 크기 조절 없음, `+ 한 줄 추가`는 묶음 hover·focus-within에서만(opacity — Tab은 늘 닿는다), 빈 묶음·열린 칸·손가락 화면은 늘', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'report-ui.css'), 'utf8');
+  assert.match(css, /\.rp-s\.is-add \.rp-ta \{[^}]*resize: none/);
+  assert.match(css, /\.rp-grp \.rp-s\.is-add \{ opacity: 0;/);
+  assert.match(css, /\.rp-grp:hover \.rp-s\.is-add, \.rp-grp:focus-within \.rp-s\.is-add, \.rp-grp\.is-empty \.rp-s\.is-add, \.rp-s\.is-add\.is-open \{ opacity: 1; \}/);
+  assert.match(css, /@media \(hover: none\) \{ \.rp-grp \.rp-s\.is-add \{ opacity: 1; \} \}/);
+  assert.doesNotMatch(css.slice(css.indexOf('.rp-grp .rp-s.is-add')), /^[^\n]*is-add[^\n]*display: none/m, 'display:none으로 숨기지 않는다');
+  const app = reportClient();
+  app.run(`renderReportDraft = () => {}; item = { weekKey: '2026-09-14', draft: { rows: [] } }; reportEdits.set('2026-09-14:addline:완료한 일|group:가입', '');`);
+  const open = app.run(`(() => { const host = document.createElement('div'); reportAddLineRow(item, '완료한 일', { key: 'group:가입' }, '가입', host); return host.children[0].className; })()`);
+  assert.equal(open, 'rp-s is-add is-open');
+});

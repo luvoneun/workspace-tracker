@@ -111,7 +111,12 @@
 /* 소제목 묶음 맨 아래 `+ 한 줄 추가`(다듬기 B) — 문장 줄과 같은 칸에 조용한 --dim 글자. 누르면 그 자리가 문장 고치기와 같은 입력칸. */
 .rp-s.is-add .bu { color: var(--dim); font-weight: 600; }
 .rp-s.is-add .rp-pjadd { opacity: 1; min-height: 28px; font-size: 13.5px; padding: 0 4px; margin-left: -4px; }
-.rp-s.is-add .rp-ta { font-size: 15px; }
+.rp-s.is-add .rp-ta { font-size: 15px; resize: none; }
+/* 평소에는 숨고(자리는 그대로 — Tab으로 늘 닿는다) 소제목 묶음(.rp-grp)에 손이 닿거나 초점이 들어올 때만 보인다.
+   입력칸이 열려 있거나, 문장이 0개인 묶음이거나, hover가 없는 화면(손가락)에서는 늘 보인다. */
+.rp-grp .rp-s.is-add { opacity: 0; transition: opacity 130ms var(--ease); }
+.rp-grp:hover .rp-s.is-add, .rp-grp:focus-within .rp-s.is-add, .rp-grp.is-empty .rp-s.is-add, .rp-s.is-add.is-open { opacity: 1; }
+@media (hover: none) { .rp-grp .rp-s.is-add { opacity: 1; } }
 
 /* 다른 문장 아래로 들어간 문장 — 한 단계 들여 쓴 `◦` 줄. 여러 줄 글자의 부연(.rp-s .sub)과 같은 가족이다. */
 .rp-s.is-sub { margin-left: 18px; }

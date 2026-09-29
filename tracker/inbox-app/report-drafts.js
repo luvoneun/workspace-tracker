@@ -150,6 +150,8 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
     let fresh = 0, changed = 0;
     rows.forEach((row) => {
       if (row.excluded || row.heading === PLAN_HEADING) return;
+      // 줄 끝 알약(원본 바뀜·새 업무·끝났어요 등 — 제안이 있는 줄)이 이미 알리는 변화는 상태 줄에서 다시 세지 않는다.
+      if (row.suggestion) return;
       const own = row.sourceIds || [];
       const all = [...new Set([...own, ...(row.suggestion?.sourceIds || [])])];
       if (!all.length) return;

@@ -873,10 +873,10 @@ test('다듬기 A: 옛 데이터(다듬기 칸 없음)는 지금과 같고 새�
   const by=id=>now.rows.find(row=>row.sourceIds.includes(id));
   assert.equal(by('n2').fresh,true);
   assert.equal(by('n1').changed,true,'자동 문장이 새 업무를 더 품었다');
-  assert.equal(by('a').changed,true,'고친 문장은 그대로 두고 제안으로 알린다');
+  assert.equal(by('a').changed,undefined,'고친 문장은 그대로 두고 알약(제안)으로만 알린다 — 상태 줄에서 다시 세지 않는다(다듬기 B 검수)');
   assert.equal(by('a').text,'가입 문구 다듬음');
   assert.equal(by('a').suggestion.added,1);
-  assert.deepEqual([now.since.fresh,now.since.changed],[1,2]);
+  assert.deepEqual([now.since.fresh,now.since.changed],[1,1]);
   assert.equal(now.rows.find(row=>row.excluded).fresh,undefined,'제외한 문장은 세지 않는다');
   // 한 줄을 고치면 그 줄만 걷히고 다른 줄의 새로는 남는다.
   f.change({action:'edit',id:by('n1').id,text:'알림 배너 정리·문구 확인함'});
@@ -902,7 +902,7 @@ test('다듬기 A: 다듬은 뒤 같은 업무가 되돌렸다 다시 완료되�
   f.items.splice(0,1);
   const row=f.row('가입 문구 다듬음');
   assert.equal(row.suggestion.missing,true);
-  assert.equal(row.changed,true);
+  assert.equal(row.changed,undefined,'알약(원본 확인)이 알리므로 상태 줄에서는 세지 않는다');
   assert.equal(row.text,'가입 문구 다듬음');
 });
 test('다듬기 A: 묶음은 그 묶음이 생긴 주의 보고부터 대표 이름 소제목 하나이고, 그 전 주 보고는 티켓별 그대로다',t=>{
@@ -1275,4 +1275,17 @@ test('다듬기 B(99 ③): 옛 앱(1.2.1)이 저장해도 확정(맨 위 칸)과
   const line=back.rows.find(row=>row.sourceIds.includes('w1'));
   assert.deepEqual([line.text,line.heading,back.rows.filter(row=>row.sourceIds.includes('w1')).length],['가입 카피 전달함','완료한 일',1]);
   assert.ok(f.items.some(item=>item.id==='w1'),'업무는 그대로 남는다');
+});
+test('다듬기 B 검수①: 줄 끝 알약(제안)이 선 줄은 상태 줄의 새로·바뀜 개수에서 빠진다',t=>{
+  const f=lineFixture(t);
+  const id=f.row('영수증 메일 발송 시점 정리하기').id;
+  f.change({action:'edit',id,text:'정리 중'});
+  f.change({action:'ackNew'});
+  const task=f.items.find(item=>item.id==='p');
+  Object.assign(task,{status:'done',completed:'2026-09-17'});delete task.doing;
+  const view=f.view();
+  assert.equal(view.rows.find(row=>row.id===id).completable,true,'알약은 선다');
+  assert.deepEqual([view.since.fresh,view.since.changed],[0,0],'같은 변화를 상태 줄에서 다시 세지 않는다');
+  f.items.push({id:'n',type:'task',description:'새 업무 끝내기',status:'done',created:'2026-09-16',completed:'2026-09-16',group:'운영',label:'운영'});
+  assert.deepEqual([f.view().since.fresh,f.view().since.changed],[1,0],'알약 없는 새 줄은 그대로 센다');
 });

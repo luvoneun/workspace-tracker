@@ -1366,7 +1366,7 @@ async function reportAddLineSubmit(item, heading, group, editKey, text) {
 }
 function reportAddLineRow(item, heading, group, title, host) {
   const editKey = reportAddLineKey(item.weekKey, heading, group.key);
-  const line = reportNode('div', undefined, 'rp-s is-add');
+  const line = reportNode('div', undefined, 'rp-s is-add' + (reportEdits.has(editKey) ? ' is-open' : ''));
   const mark = reportNode('span', '+', 'bu');
   mark.setAttribute('aria-hidden', 'true');
   line.appendChild(mark);
@@ -2173,13 +2173,19 @@ function renderReportDraft(item) {
       body.appendChild(reportNode('div', reportHeadingText(section.heading), 'rp-h'));
       const titles = reportGroupTitles(section.groups.map(group => group.group));
       for (const group of section.groups) {
-        body.appendChild(reportGroupHead(item, section.heading, group, titles.get(group.group)));
+        // 소제목 묶음 하나(`.rp-grp`) — `+ 한 줄 추가`는 이 묶음에 손이 닿거나 초점이 들어올 때만 보인다(CSS).
+        const box = reportNode('div', undefined, 'rp-grp');
+        body.appendChild(box);
+        box.appendChild(reportGroupHead(item, section.heading, group, titles.get(group.group)));
+        let shown = 0;
         for (const row of group.rows) {
           // `reportDocSections`는 그대로 두고(순수 함수) 이 그리기 단계에서만 접힌 부모의 아래를 거른다.
           if (reportRowHiddenByFold(report.rows, row)) continue;
-          reportSentenceRow(item, row, { host: body, newIds });
+          reportSentenceRow(item, row, { host: box, newIds });
+          shown += 1;
         }
-        if (reportCanAddLine(item, section.heading, group)) reportAddLineRow(item, section.heading, group, titles.get(group.group), body);
+        if (!shown) box.classList.add('is-empty');
+        if (reportCanAddLine(item, section.heading, group)) reportAddLineRow(item, section.heading, group, titles.get(group.group), box);
       }
     }
     reportExcludedBlock(item, body);
