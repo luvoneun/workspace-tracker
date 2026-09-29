@@ -2574,7 +2574,10 @@ test('접힌 부모는 문장 뒤에 조용한 `· N건 ▸`이 붙고, 눌러 �
   let line = draw();
   const toggle = line.children.find(kid => kid.className && kid.className.split(' ').includes('tx'))
     .children.find(kid => kid.className === 'rp-foldtoggle');
-  assert.equal(toggle.textContent, '· 2건 ▸', '접혀 있을 때는 개수와 ▸');
+  // 글자 기호(▸/▾) 대신 앱의 꺾쇠 아이콘 + 개수 — 펼침은 aria-expanded(=CSS 회전)로 말한다(디자인 검수).
+  assert.equal(toggle.innerHTML, app.run("uiIcon('chevron')"));
+  assert.equal(toggle.children.map(kid => kid.textContent).join(''), '· 2건', '접혀 있을 때는 꺾쇠와 개수');
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false');
   assert.equal(toggle.getAttribute('aria-label'), '아래 문장 2개 보기');
   toggle.listeners.click({ stopPropagation() {} });
   assert.equal(app.run('reportFoldOpen.has("p1")'), true, '펼쳐 본 것은 화면 상태로 남는다');
@@ -2582,7 +2585,7 @@ test('접힌 부모는 문장 뒤에 조용한 `· N건 ▸`이 붙고, 눌러 �
   line = draw();
   const toggle2 = line.children.find(kid => kid.className && kid.className.split(' ').includes('tx'))
     .children.find(kid => kid.className === 'rp-foldtoggle');
-  assert.equal(toggle2.textContent, '· 2건 ▾', '다시 그리면 펼친 상태(▾)로 보인다');
+  assert.equal(toggle2.getAttribute('aria-expanded'), 'true', '다시 그리면 펼친 상태(꺾쇠가 아래로)로 보인다');
 });
 test('setFolded 메뉴 항목은 아래에 문장이 있는 부모에만 붙고, 접힘·펼침을 그대로 부른다', () => {
   const app = reportClient();

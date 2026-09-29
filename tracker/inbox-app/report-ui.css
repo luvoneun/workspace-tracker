@@ -48,7 +48,8 @@
 .rp-ren .d-btn { height: 32px; }
 .rp-title { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
 .rp-hd .sub { color: var(--dim); font-size: 13.5px; font-weight: 500; font-variant-numeric: tabular-nums; }
-.rp-sum { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; font-size: 13px; color: var(--dim); }
+.rp-sum { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 6px 0 10px; font-size: 13px; color: var(--dim); }
+/* 2줄 오른쪽 묶음(`다듬은 뒤 새로 N` + `모두 확인`) — .d-headnum의 margin-left:auto가 오른쪽 끝으로 민다 */
 .rp-hint { font-size: 13px; color: var(--dim); }
 .rp-h + .rp-hint { margin-top: 8px; }
 
@@ -119,6 +120,9 @@
   color: var(--dim); font-family: inherit; font-size: 12.5px; font-weight: 600;
   white-space: nowrap; cursor: pointer;
 }
+.rp-s .rp-foldtoggle { gap: 2px; }
+.rp-s .rp-foldtoggle .d-i { transition: transform 130ms var(--ease); }
+.rp-s .rp-foldtoggle[aria-expanded="true"] .d-i { transform: rotate(90deg); }
 .rp-s .rp-foldtoggle:hover { background: var(--hover); color: var(--text); }
 .rp-s .rp-foldtoggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .rp-s .rv { color: var(--warn); }
@@ -126,6 +130,9 @@
 /* 모으기·고르기 모드의 과녁 표시 — 누를 수 있는 줄 오른쪽의 읽기 전용 한 마디(버튼 모양만 빌린다, 누르는 것은 줄 전체). */
 .rp-s .rp-aim { display: flex; align-items: center; padding-top: 2px; pointer-events: none; }
 .rp-s .rp-aim .d-btn { height: 28px; }
+/* 과녁 표시는 그 줄에 손이 닿거나 초점이 올 때만 — 줄 자체는 늘 눌리는 자리(Tab으로 닿는다). 기준 줄의 `여기 아래로`는 늘 보인다. */
+.rp-s .rp-aim { opacity: 0; transition: opacity 130ms var(--ease); }
+.rp-s.is-pick:hover .rp-aim, .rp-s.is-pick:focus-within .rp-aim, .rp-s.is-pick:focus-visible .rp-aim { opacity: 1; }
 .rp-s .ac {
   display: flex; align-items: center; gap: 2px; padding-top: 2px;
   opacity: 0; pointer-events: none; transition: opacity 130ms var(--ease);

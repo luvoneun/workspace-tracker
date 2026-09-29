@@ -815,15 +815,8 @@ function reportDocHead(item, host) {
   const thisYear = typeof todayStr === 'function' ? todayStr().slice(0, 4) : '';
   head.appendChild(reportNode('span', thisYear && item.weekKey.startsWith(thisYear) ? label.range.replace(/^\d{4}년\s*/, '') : label.range, 'sub'));
 
-  const seg = reportNode('span', undefined, 'd-seg');
-  seg.setAttribute('role', 'group');
-  seg.setAttribute('aria-label', '주간요약 보기');
-  for (const [mode, text] of [['draft', '보고'], ['records', '전체 업무 기록']]) {
-    const button = reportButton(text, () => { reportMode = mode; renderReportDraft(item); }, '');
-    button.setAttribute('aria-pressed', String(reportMode === mode));
-    seg.appendChild(button);
-  }
-  head.append(seg, reportNode('span', undefined, 'sp'));
+  // 머리는 두 줄이고 줄마다 역할이 있다 — 1줄은 제목·기간 + 오른쪽 동작(계획 쓰기·복사), 2줄(reportDocSummary)은
+  // 보기 전환 · 개수 + 오른쪽 `다듬은 뒤 새로 N`·`모두 확인`. 좁아지면 각 줄 안에서 자연스럽게 줄바꿈된다.
   // 머리줄의 동작 버튼은 한 묶음이다 — 자리가 모자라면 묶음째 다음 줄 오른쪽으로 내려간다(하나만 떨어져 나가지 않게).
   const acts = reportNode('span', undefined, 'rp-acts');
 
@@ -864,6 +857,15 @@ function reportDocHead(item, host) {
 function reportDocSummary(item, host, newIds) {
   const report = item.draft;
   const line = reportNode('div', undefined, 'rp-sum');
+  const seg = reportNode('span', undefined, 'd-seg');
+  seg.setAttribute('role', 'group');
+  seg.setAttribute('aria-label', '주간요약 보기');
+  for (const [mode, text] of [['draft', '보고'], ['records', '전체 업무 기록']]) {
+    const button = reportButton(text, () => { reportMode = mode; renderReportDraft(item); }, '');
+    button.setAttribute('aria-pressed', String(reportMode === mode));
+    seg.appendChild(button);
+  }
+  line.appendChild(seg);
   const kept = report.rows.filter(row => !row.excluded).length;
   const pending = report.rows.filter(row => row.needsReview).length;
   // 다듬은 기록(서버의 `since`)이 있는 주는 그 기록이 "새로"를 말한다 — 브라우저마다 다른 옛 `새 기록 N`은 그때 숨긴다.
@@ -1073,8 +1075,11 @@ function reportSentenceRow(item, row, context) {
   const childCount = rows.filter(entry => entry.parent === row.id).length;
   if (row.folded && childCount) {
     const peek = reportFoldOpen.has(row.id);
-    const toggle = reportNode('button', `· ${childCount}건 ${peek ? '▾' : '▸'}`, 'rp-foldtoggle');
+    // 펼침 표시는 앱의 꺾쇠(uiIcon) — 접힘은 오른쪽, 펼쳐 보면 90° 돌아 아래를 본다(CSS가 aria-expanded로 돌린다).
+    const toggle = reportNode('button', undefined, 'rp-foldtoggle');
     toggle.type = 'button';
+    toggle.innerHTML = uiIcon('chevron');
+    toggle.appendChild(reportNode('span', `· ${childCount}건`));
     toggle.setAttribute('aria-label', `아래 문장 ${childCount}개 보기`);
     toggle.setAttribute('aria-expanded', String(peek));
     toggle.addEventListener('click', (event) => {
@@ -1890,9 +1895,9 @@ function renderReportDraft(item) {
 
   const newIds = reportMarkSeen(item);
   reportDocHead(item, host);
+  reportDocSummary(item, host, newIds);
   const body = reportNode('div', undefined, 'rp-body');
   host.appendChild(body);
-  reportDocSummary(item, body, newIds);
 
   if (reportMode === 'records') {
     reportRecordsView(item, body);
