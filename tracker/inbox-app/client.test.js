@@ -10479,3 +10479,225 @@ test('BBUNDLE 묶기: ⋯ `다른 티켓과 묶기…` → 이미 다른 묶음�
   await app.run('undoStack[undoStack.length - 1].undo()');
   assert.deepEqual(sent.find(call => call.url === '/api/project/bundle-restore').body, { id: 'bd_9', before: null, after }, '되돌리기는 "지금이 after일 때만 before로"');
 });
+
+// ─── WP-W 내 일 기록 — usage-ui.js의 순수 계산(usageWorkStats)과 그리기 ───
+function usageWorkClient() {
+  const app = client(new Response('{"ok":true}'));
+  app.run(fs.readFileSync(path.join(__dirname, 'usage-ui.js'), 'utf8'));
+  return app;
+}
+function usageStats(app, history, today, range) {
+  return JSON.parse(app.run(`JSON.stringify(usageWorkStats(${JSON.stringify(history)}, ${JSON.stringify(today)}, ${JSON.stringify(range)}))`));
+}
+const usagePartsText = parts => parts.map(part => (typeof part === 'string' ? part : part.b)).join('');
+const usageDay = (day, n) => { const at = new Date(`${day}T00:00:00Z`); at.setUTCDate(at.getUTCDate() + n); return at.toISOString().slice(0, 10); };
+// from부터 count일 동안 fill(day, 요일 0=월)이 주는 칸으로 채운다(빈 값이면 그날은 기록 없음).
+function usageFill(from, count, fill) {
+  const history = {};
+  for (let i = 0; i < count; i += 1) {
+    const day = usageDay(from, i);
+    const counts = fill(day, (new Date(`${day}T00:00:00Z`).getUTCDay() + 6) % 7);
+    if (counts) history[day] = counts;
+  }
+  return history;
+}
+
+test('WP-W 기간 경계 — 주는 월요일 시작, 이번 달 1일부터, 90일은 월요일로 끊은 주(첫 주는 덜 참)', () => {
+  const app = usageWorkClient();
+  const history = { '2026-09-28': { task_done: 1 } };
+  const monday = usageStats(app, history, '2026-09-28', 'week');
+  assert.equal(monday.from, '2026-09-28');
+  assert.equal(monday.periodLabel, '9월 28일(월) – 오늘');
+  assert.deepEqual(monday.bars.map(bar => bar.label), ['월', '화', '수', '목', '금', '토', '일']);
+  assert.deepEqual(monday.bars.map(bar => bar.future), [false, true, true, true, true, true, true], '오늘 뒤는 빈 칸');
+  assert.equal(monday.bars[0].today, true);
+  const sunday = usageStats(app, history, '2026-10-04', 'week');
+  assert.equal(sunday.from, '2026-09-28', '일요일은 그 주 월요일부터');
+  const month = usageStats(app, history, '2026-09-30', 'month');
+  assert.equal(month.periodLabel, '9월 1일 – 오늘');
+  assert.deepEqual(month.bars.map(bar => [bar.from, bar.to]), [['2026-09-01', '2026-09-06'], ['2026-09-07', '2026-09-13'], ['2026-09-14', '2026-09-20'], ['2026-09-21', '2026-09-27'], ['2026-09-28', '2026-09-30']]);
+  const d90 = usageStats(app, history, '2026-09-30', '90');
+  assert.equal(d90.periodLabel, '최근 90일');
+  assert.equal(d90.from, '2026-07-03');
+  assert.equal(d90.bars.length, 14);
+  assert.deepEqual([d90.bars[0].from, d90.bars[0].to, d90.bars[0].partial], ['2026-07-03', '2026-07-05', true]);
+  assert.equal(d90.compare, null, '90일은 비교 없음');
+});
+
+test('WP-W 숫자 정의 — 들어온·끝낸·남긴 기록, 하루 평균(기록 있는 날 기준·소수 한 자리·.0 뗌), 미래·모르는 키·음수는 무시', () => {
+  const app = usageWorkClient();
+  const history = {
+    '2026-09-28': { slack_in: 4, task_add: 1, task_done: 2, slack_done: 1, decision_add: 1, tab_today: 3 },
+    '2026-09-29': { task_add: 2, idea_add: 2, jira_create: 1, mystery: 50, task_done: -3 },
+    '2026-09-30': { search: 1 },
+    '2026-10-01': { task_done: 99 },
+    'nope': { task_done: 5 },
+  };
+  const stats = usageStats(app, history, '2026-09-30', 'week');
+  assert.deepEqual(stats.in, { total: 7, slack: 4, direct: 3 });
+  assert.deepEqual(stats.done, { total: 3, task: 2, slack: 1 });
+  assert.deepEqual(stats.record, { total: 4, parts: [{ label: '결정', count: 1 }, { label: '아이디어', count: 2 }, { label: '지라', count: 1 }] }, '0인 칸은 빼고');
+  assert.equal(stats.recordedDays, 3);
+  assert.equal(stats.average, '1', '3 ÷ 3 = 1(.0 뗌)');
+  assert.equal(usagePartsText(stats.headline), '이번 주 일 3개를 끝냈어요');
+  assert.equal(usageStats(app, { '2026-09-28': { task_done: 3 }, '2026-09-29': { task_done: 0, search: 1 } }, '2026-09-30', 'week').average, '1.5');
+  const none = usageStats(app, { '2026-09-29': { tab_today: 2, task_add: 1 } }, '2026-09-30', 'week');
+  assert.equal(usagePartsText(none.headline), '이번 주는 아직 끝낸 일이 없어요');
+  assert.equal(none.average, null, '끝낸 일이 0이면 하루 평균을 쓰지 않는다');
+  assert.equal(usagePartsText(usageStats(app, { '2026-09-29': { task_done: 2 } }, '2026-09-30', 'month').headline), '이번 달 일 2개를 끝냈어요');
+  assert.equal(usagePartsText(usageStats(app, { '2026-09-29': { task_done: 2 } }, '2026-09-30', '90').headline), '최근 90일 동안 일 2개를 끝냈어요');
+  assert.equal(usageStats(app, history, '2026-09-30', 'bogus').range, 'week');
+});
+
+test('WP-W 빈 상태 — 90일 안에 기록이 없으면(설치 직후·옛 날만·미래만) empty', () => {
+  const app = usageWorkClient();
+  for (const history of [{}, null, { '2026-05-01': { task_done: 3 } }, { '2026-10-02': { task_done: 1 } }, { '2026-09-29': { task_done: 0, mystery: 3 } }]) {
+    const stats = usageStats(app, history, '2026-09-30', 'week');
+    assert.equal(stats.empty, true, JSON.stringify(history));
+    assert.equal(stats.periodLabel, '9월 28일(월) – 오늘');
+    assert.equal(stats.bars, undefined);
+  }
+  assert.equal(usageStats(app, { '2026-09-29': { task_done: 1 } }, 'not-a-day', 'week').empty, true, 'today가 이상하면 계산하지 않는다');
+});
+
+test('WP-W 같은 길이 비교 — 이번 주 월~오늘 ↔ 지난주 월~같은 요일, ±10%는 비슷, 비교 기간 0·기록 7일 미만이면 생략', () => {
+  const app = usageWorkClient();
+  // 9/14~9/25 평일에 기록(10일) — 지난주 월~수(9/21~23) 들어온 일 10개.
+  const base = usageFill('2026-09-14', 12, (day, dow) => (dow < 5 ? { task_add: day >= '2026-09-21' && day <= '2026-09-23' ? (day === '2026-09-21' ? 4 : 3) : 1 } : null));
+  const run = inToday => usageStats(app, { ...base, '2026-09-28': { task_add: 5 }, '2026-09-29': { task_add: 3 }, '2026-09-30': { task_add: inToday } }, '2026-09-30', 'week');
+  const same = run(3);   // 11 vs 10 → +10%
+  assert.deepEqual([same.compare.from, same.compare.to], ['2026-09-21', '2026-09-23']);
+  assert.equal(same.compare.tone, 'same');
+  assert.equal(same.compare.text, '지난주와 비슷했어요');
+  const more = run(7);   // 15 vs 10
+  assert.equal(more.compare.text, '지난주보다 50% 더 바빴어요');
+  const less = usageStats(app, { ...base, '2026-09-28': { task_add: 1 } }, '2026-09-30', 'week');
+  assert.equal(less.compare.text, '지난주보다 조금 여유로웠어요');
+  // 월요일 아침 — 지난주 월요일 하루와.
+  const monday = usageStats(app, { ...base, '2026-09-28': { task_add: 4 } }, '2026-09-28', 'week');
+  assert.deepEqual([monday.compare.from, monday.compare.to, monday.compare.tone], ['2026-09-21', '2026-09-21', 'same']);
+  // 비교 기간 들어온 일 0 → 생략.
+  const quiet = usageStats(app, { ...usageFill('2026-09-10', 10, () => ({ task_done: 1 })), '2026-09-28': { task_add: 5 } }, '2026-09-28', 'week');
+  assert.equal(quiet.compare, null);
+  // 기록 7일 미만 → 생략.
+  const young = usageStats(app, { '2026-09-21': { task_add: 3 }, '2026-09-28': { task_add: 9 } }, '2026-09-28', 'week');
+  assert.equal(young.compare, null);
+});
+
+test('WP-W 달 비교 — 1일~오늘 ↔ 지난달 1일~같은 날, 지난달이 짧으면 말일까지, 1일은 지난달 1일 하루와', () => {
+  const app = usageWorkClient();
+  const history = usageFill('2026-02-01', 59, () => ({ task_add: 1 }));
+  const endOfMarch = usageStats(app, history, '2026-03-31', 'month');
+  assert.deepEqual([endOfMarch.compare.from, endOfMarch.compare.to], ['2026-02-01', '2026-02-28']);
+  assert.equal(endOfMarch.compare.text, '지난달보다 11% 더 바빴어요', '31 vs 28');
+  const first = usageStats(app, history, '2026-03-01', 'month');
+  assert.deepEqual([first.compare.from, first.compare.to], ['2026-02-01', '2026-02-01']);
+  assert.equal(first.compare.text, '지난달과 비슷했어요');
+  const january = usageStats(app, usageFill('2025-12-01', 45, () => ({ task_add: 1 })), '2026-01-10', 'month');
+  assert.deepEqual([january.compare.from, january.compare.to], ['2025-12-01', '2025-12-10'], '해 넘김');
+});
+
+test('WP-W 막대 해설 — 몰린 날 뒤에 더 끝내 따라잡았으면 그 문장, 아니면 가장 많이 끝낸 날', () => {
+  const app = usageWorkClient();
+  const caught = usageStats(app, { '2026-09-28': { slack_in: 11, task_done: 2 }, '2026-09-29': { task_add: 1, task_done: 5 }, '2026-09-30': { task_done: 3 } }, '2026-09-30', 'week');
+  assert.equal(caught.barNote, '월요일에 11개가 몰렸고, 화·수에 들어온 것보다 더 끝내서 따라잡았어요');
+  const simple = usageStats(app, { '2026-09-28': { task_add: 3, task_done: 1 }, '2026-09-29': { task_add: 2, task_done: 2 }, '2026-09-30': { task_add: 1 } }, '2026-09-30', 'week');
+  assert.equal(simple.barNote, '가장 많이 끝낸 날은 화요일(2개)예요');
+  const onlyIn = usageStats(app, { '2026-09-29': { task_add: 4 } }, '2026-09-30', 'week');
+  assert.equal(onlyIn.barNote, '가장 많이 들어온 날은 화요일(4개)예요');
+  // 90일 — 덜 찬 첫 주는 후보가 아니다.
+  const d90 = usageStats(app, { '2026-07-03': { task_done: 30 }, '2026-09-29': { task_done: 2 } }, '2026-09-30', '90');
+  assert.equal(d90.barNote, '가장 많이 끝낸 주는 9월 28일 주(2개)예요');
+});
+
+test('WP-W 알게 된 것 — a 요일 몰림 → b 최고 기록 → d 잘 끝내는 요일(우선순위·최대 3개)', () => {
+  const app = usageWorkClient();
+  // 8/24(월)~9/29(화) 평일마다 기록 — 월요일에 들어온 일 10개, 다른 평일 2개. 끝낸 일은 금요일 6개, 다른 평일 2개.
+  const history = usageFill('2026-08-24', 37, (day, dow) => (dow < 5 ? { task_add: dow === 0 ? 10 : 2, task_done: dow === 4 ? 6 : 2 } : null));
+  history['2026-09-30'] = { task_done: 20 };
+  const stats = usageStats(app, history, '2026-09-30', 'week');
+  assert.deepEqual(stats.insights.map(item => item.kind), ['crowd', 'best', 'finish']);
+  assert.equal(usagePartsText(stats.insights[0].parts), '일은 월요일에 몰려요 — 최근 5주 월요일 평균 10개, 다른 날의 5배예요.');
+  assert.deepEqual(stats.insights[0].parts[1], { b: '월요일에 몰려요' }, '강조는 조각으로');
+  assert.equal(usagePartsText(stats.insights[1].parts), '이번 주가 최근 6주 중 가장 많이 끝낸 주예요.');
+  assert.equal(usagePartsText(stats.insights[2].parts), '금요일에 가장 많이 끝내요 — 평균 6개.');
+  // 1.5배 미만이면 a 없음.
+  const flat = usageFill('2026-08-24', 37, (day, dow) => (dow < 5 ? { task_add: dow === 0 ? 5 : 4, task_done: 1 } : null));
+  assert.equal(usageStats(app, flat, '2026-09-30', 'week').insights.some(item => item.kind === 'crowd'), false);
+  // 기록 4주 미만이면 a·d 없음.
+  const short = usageFill('2026-09-08', 21, (day, dow) => (dow < 5 ? { task_add: dow === 0 ? 10 : 2, task_done: 2 } : null));
+  assert.deepEqual(usageStats(app, short, '2026-09-30', 'week').insights.filter(item => item.kind === 'crowd' || item.kind === 'finish'), []);
+  // 동점이면 최고 기록이 아니다.
+  const tie = usageFill('2026-09-14', 16, () => ({ task_done: 1 }));
+  assert.equal(usageStats(app, tie, '2026-09-29', 'week').insights.some(item => item.kind === 'best'), false);
+  // 90일 보기는 하루 최고 기록.
+  assert.equal(usagePartsText(usageStats(app, history, '2026-09-30', '90').insights.find(item => item.kind === 'best').parts), '하루 최고 기록은 9월 30일의 20개예요.');
+  // 조건이 하나도 안 맞으면 빈 목록(칸째 숨김).
+  assert.deepEqual(usageStats(app, { '2026-09-29': { task_done: 1 } }, '2026-09-30', 'week').insights, []);
+});
+
+test('WP-W 알게 된 것 c — 들어온 일 20% 이상 늘고 끝낸 비율이 5%p 넘게 떨어지지 않으면 `바빠도 유지`', () => {
+  const app = usageWorkClient();
+  const base = usageFill('2026-09-21', 5, () => ({ search: 1 }));
+  const run = doneNow => usageStats(app, {
+    ...base,
+    '2026-09-21': { task_add: 5, task_done: 4 },
+    '2026-09-28': { task_add: 6, task_done: doneNow },
+    '2026-09-29': { task_add: 4 },
+    '2026-09-30': { search: 1 },
+  }, '2026-09-30', 'week');
+  const kept = run(8);   // 10 vs 5(+100%), 80% ↔ 80%
+  assert.deepEqual(kept.insights.map(item => item.kind), ['steady']);
+  assert.equal(usagePartsText(kept.insights[0].parts), '들어온 일이 100% 늘었는데 끝낸 비율은 80%로 유지했어요. 바빠도 밀리지 않았어요.');
+  assert.equal(run(7).insights.length, 0, '70%는 80%보다 5%p 넘게 떨어짐');
+  assert.equal(run(8).compare.text, '지난주보다 100% 더 바빴어요');
+});
+
+test('WP-W 그리기 — 세그먼트(aria-pressed)·타일 3개·막대는 aria-hidden + 숨긴 목록, 빈 상태 한 줄, 기능별 전체 보기 표', () => {
+  const app = usageWorkClient();
+  app.run(`const __make = document.createElement;
+    document.createElement = tag => Object.assign(__make(tag), { tagName: String(tag).toUpperCase(), style: {} });
+    document.createElementNS = (ns, tag) => document.createElement(tag);
+    document.createTextNode = value => ({ textContent: String(value), children: [] });`);
+  const find = (node, match) => { if (!node || typeof node !== 'object') return null; if (match(node)) return node; for (const kid of node.children || []) { const hit = find(kid, match); if (hit) return hit; } return null; };
+  const all = (node, match, out = []) => { if (!node || typeof node !== 'object') return out; if (match(node)) out.push(node); (node.children || []).forEach(kid => all(kid, match, out)); return out; };
+  const text = node => (node && typeof node === 'object' ? (node.children && node.children.length ? node.children.map(text).join('') : (node.textContent || '')) : '');
+  const rows = JSON.stringify(Array.from({ length: 17 }, (_, i) => ({ key: `k${i}`, label: `기능 ${i}`, count: i })));
+  app.run(`usageSettingsNode = document.createElement('div');
+    usageInfo = { ok: true, send: true, canSend: true, days: 30, rows: ${rows}, today: '2026-09-30',
+      history: { '2026-09-28': { slack_in: 11, task_done: 2 }, '2026-09-29': { task_add: 1, task_done: 5 }, '2026-09-30': { task_done: 3 } } };
+    usageSettingsPaint();`);
+  const cell = app.run('usageSettingsNode');
+  const work = find(cell, node => String(node.className).includes('d-usagework'));
+  assert.ok(work);
+  assert.equal(text(find(work, node => node.tagName === 'SUMMARY')), '내 일 기록');
+  const seg = all(work, node => node.dataset && node.dataset.range);
+  assert.deepEqual(seg.map(button => [button.textContent, button.getAttribute('aria-pressed')]), [['이번 주', 'true'], ['이번 달', 'false'], ['90일', 'false']]);
+  assert.equal(text(find(work, node => node.className === 'd-uwbig')), '이번 주 일 10개를 끝냈어요');
+  assert.equal(find(work, node => node.className === 'd-uwbig').children[1].tagName, 'B');
+  const tiles = all(work, node => /^d-uwtile( |$)/.test(String(node.className)));
+  assert.deepEqual(tiles.map(tile => text(tile)), ['들어온 일12개슬랙 11 · 직접 1', '끝낸 일10개할 일 10 · 슬랙 0', '남긴 기록0개']);
+  assert.equal(tiles[1].className, 'd-uwtile is-done');
+  const bars = find(work, node => String(node.className).startsWith('d-uwbars'));
+  assert.equal(bars.getAttribute('aria-hidden'), 'true');
+  assert.equal(bars.children.length, 7);
+  const list = find(work, node => node.className === 'sr-only');
+  assert.deepEqual(list.children.map(item => item.textContent), ['월요일: 들어옴 11개, 끝냄 2개', '화요일: 들어옴 1개, 끝냄 5개', '수요일(오늘): 들어옴 0개, 끝냄 3개']);
+  assert.equal(text(find(work, node => node.className === 'd-uwnote')), '월요일에 11개가 몰렸고, 화·수에 들어온 것보다 더 끝내서 따라잡았어요');
+  assert.equal(find(work, node => node.className === 'd-uwins'), null, '알게 된 것이 없으면 칸째 숨김');
+  const table = find(work, node => String(node.className).includes('d-usagehist'));
+  assert.equal(text(find(table, node => node.tagName === 'SUMMARY')), '기능별 전체 보기 (17개)');
+  assert.equal(text(find(table, node => node.tagName === 'CAPTION')), '최근 30일 합계 · 이 맥에만 있어요');
+  // 기간 바꾸기 — 다시 그린다.
+  seg[1].listeners.click();
+  const month = find(app.run('usageSettingsNode'), node => node.dataset && node.dataset.range === 'month');
+  assert.equal(month.getAttribute('aria-pressed'), 'true');
+  // 빈 상태.
+  app.run('usageInfo = { ...usageInfo, history: {} }; usageSettingsPaint();');
+  const empty = app.run('usageSettingsNode');
+  assert.equal(text(find(empty, node => String(node.className).includes('d-uwempty'))), '아직 기록이 없어요. 할 일을 끝내면 여기에 쌓여요.');
+  assert.equal(find(empty, node => node.className === 'd-uwtiles'), null);
+  // 응답 실패.
+  app.run('usageInfo = null; usageSettingsPaint();');
+  assert.equal(text(app.run('usageSettingsNode')), '사용 기록을 읽지 못했어요.');
+});

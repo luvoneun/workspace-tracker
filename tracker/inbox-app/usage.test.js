@@ -9,7 +9,7 @@ const path = require('node:path');
 const support = require('./test-support');
 const serverModule = require('./server');
 const { createCheckin, CHECKIN_AUTO_ENTRIES } = require('./checkin');
-const { createUsage, USAGE_ENTRIES } = require('./usage');
+const { createUsage, USAGE_ENTRIES, USAGE_KEYS } = require('./usage');
 
 let base;
 before(async () => { base = await support.ready(); });
@@ -409,12 +409,12 @@ test('WP-R 서버 파일 usage.js는 화면으로 나가지 않고, usage-ui.js�
   assert.match(html, /href="\/usage-ui\.css"/);
 });
 
-test('WP-R 화면 파일 규칙 — innerHTML 없음, 알림 줄·끄기·다시 켜기·스위치·내 사용 기록·체크인 안내 문구', () => {
+test('WP-R 화면 파일 규칙 — innerHTML 없음, 알림 줄·끄기·다시 켜기·스위치·내 일 기록·체크인 안내 문구', () => {
   const read = name => fs.readFileSync(path.join(__dirname, name), 'utf8').split('\n').filter(line => !/^\s*\/\//.test(line)).join('\n');
   const ui = read('usage-ui.js');
   assert.equal(/innerHTML|insertAdjacentHTML|outerHTML/.test(ui), false);
   for (const words of ['어떤 기능을 많이 쓰는지 익명으로 모아 앱을 고치는 데 써요 · ', '끄기', '모으지 않아요 · ', '다시 켜기', '익명 사용 횟수 보내기',
-    '어떤 기능이 쓸모 있는지 보고 앱을 고치는 데 써요 — 기능별 횟수만, 이름·업무 내용은 보내지 않아요', '내 사용 기록', "'switch'"]) assert.ok(ui.includes(words), words);
+    '어떤 기능이 쓸모 있는지 보고 앱을 고치는 데 써요 — 기능별 횟수만, 이름·업무 내용은 보내지 않아요', '내 일 기록', "'switch'"]) assert.ok(ui.includes(words), words);
   assert.match(read('checkin-ui.js'), /이름과 업무 내용은 보내지 않아요\. 앱을 고치는 데 쓰려고 기능별 사용 횟수는 함께 보내요/);
   // 부르는 자리 — 탭·검색·주간요약 복사·사용설명서 두 곳·설정 › 앱.
   assert.match(read('app.js'), /usageTabOpened\(tab, activeTabKey\)/);
@@ -423,4 +423,53 @@ test('WP-R 화면 파일 규칙 — innerHTML 없음, 알림 줄·끄기·다시
   assert.equal((read('app.js').match(/usageGuideLine\(\)/g) || []).length, 1);
   assert.equal((read('settings-ui.js').match(/usageGuideLine\(\)/g) || []).length, 1);
   assert.match(read('settings-ui.js'), /usageSettingsRow\(\)/);
+});
+
+test('WP-W GET /api/usage — 기존 칸은 그대로, today와 보관 중인 날의 history(알려진 키만·90일 안)를 더한다', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-usage-history-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  serverModule.setUsageForTests({ localDir: dir });
+  serverModule.setCheckinForTests({ localDir: dir, today: TODAY, enabled: false });
+  t.after(() => serverModule.setCheckinForTests({}));
+  fs.writeFileSync(path.join(dir, 'usage.json'), JSON.stringify(usageDays({
+    [TODAY]: { task_done: 3, slack_in: 2, mystery: 9 },
+    [ago(5)]: { task_add: 1, decision_add: -2 },
+    [ago(95)]: { task_done: 7 },
+    'not-a-day': { task_done: 1 },
+  })));
+  const info = await (await fetch(base + '/api/usage')).json();
+  assert.equal(info.ok, true);
+  assert.equal(info.today, TODAY);
+  assert.deepEqual(info.history, { [TODAY]: { task_done: 3, slack_in: 2 }, [ago(5)]: { task_add: 1 } });
+  assert.equal(info.days, 30);
+  assert.equal(info.rows.length, 17);
+  assert.equal(info.rows.find(row => row.key === 'task_done').count, 3);
+  assert.equal(typeof info.send, 'boolean');
+  assert.equal(typeof info.canSend, 'boolean');
+});
+
+test('WP-W GET /api/usage — 세지 않는 설치(폴더 없음)면 history는 빈 값', async () => {
+  serverModule.setUsageForTests({});
+  const info = await (await fetch(base + '/api/usage')).json();
+  assert.equal(info.ok, true);
+  assert.deepEqual(info.history, {});
+  assert.match(info.today, /^\d{4}-\d{2}-\d{2}$/);
+});
+
+test('WP-W 화면이 아는 키 목록(USAGE_KNOWN_KEYS)은 서버의 USAGE_KEYS와 같다', () => {
+  const vm = require('node:vm');
+  const source = fs.readFileSync(path.join(__dirname, 'usage-ui.js'), 'utf8');
+  const keys = vm.runInNewContext(`${source}\n;JSON.stringify(USAGE_KNOWN_KEYS)`, {});
+  assert.deepEqual(JSON.parse(keys), USAGE_KEYS.map(([key]) => key));
+});
+
+test('WP-W 화면 파일 규칙 — `내 일 기록`·`끝낸`, `쳐`·`내 사용 기록` 없음, 새 innerHTML 없음, 새 색 없음', () => {
+  const read = name => fs.readFileSync(path.join(__dirname, name), 'utf8').split('\n').filter(line => !/^\s*\/\//.test(line)).join('\n');
+  const ui = read('usage-ui.js');
+  for (const words of ['내 일 기록', '끝낸 일', '알게 된 것', '기능별 전체 보기', '아직 기록이 없어요. 할 일을 끝내면 여기에 쌓여요.', "'aria-pressed'", '사용 기록을 읽지 못했어요.']) assert.ok(ui.includes(words), words);
+  assert.equal(/쳐/.test(fs.readFileSync(path.join(__dirname, 'usage-ui.js'), 'utf8')), false);
+  assert.equal(ui.includes('내 사용 기록'), false);
+  assert.equal(/innerHTML|insertAdjacentHTML|outerHTML/.test(ui), false);
+  const css = fs.readFileSync(path.join(__dirname, 'usage-ui.css'), 'utf8');
+  assert.equal(/#[0-9a-f]{3,8}\b|rgba?\(|--warn/i.test(css), false, '새 색·주황 없음 — 기존 토큰만');
 });

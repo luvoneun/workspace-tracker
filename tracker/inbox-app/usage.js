@@ -2,7 +2,7 @@
 // 상태는 이 맥에만 두는 `local/usage.json` 하나다(업무 데이터가 아니다 — 백업·저장 트랜잭션 대상이 아니다).
 //   { days: { 'YYYY-MM-DD': { 키: 횟수 } }, sent: { lastRound, lastDay, installSent, queue: [{ round, fields, queuedOn, lastTry }] } }
 // 끄기는 따로 둔 표시 파일 `local/usage-off` 하나다 — 있으면 보내지 않는다(usage.json이 깨져 새로 만들어도 끈 것이 풀리지 않게).
-// 세기는 끄든 켜든 계속한다(본인이 설정 › 앱 › `내 사용 기록`에서 본다).
+// 세기는 끄든 켜든 계속한다(본인이 설정 › 앱 › `내 일 기록`에서 본다).
 //
 // 세는 자리는 서버가 우선이다 — 해당 API가 성공했을 때 +1(화면을 몇 개 열어도 한 번). 세기는 저장 트랜잭션 밖이다:
 // 요청 안에서 센 것은 모아 두었다가 응답이 2xx로 끝난 뒤에 적는다(되돌린 저장은 세지 않는다). 세기가 실패해도 저장은 그대로다.
@@ -24,7 +24,7 @@ const QUEUE_KEEP_DAYS = 7;
 const PERIOD_DAYS = 3;
 const VIEW_DAYS = 30;
 
-// 세는 키와 `내 사용 기록`에 보이는 이름 — 이 목록 밖의 키는 세지 않는다.
+// 세는 키와 `기능별 전체 보기`(내 일 기록 맨 아래)에 보이는 이름 — 이 목록 밖의 키는 세지 않는다.
 const USAGE_KEYS = [
   ['tab_today', '오늘 탭 열기'], ['tab_projects', '프로젝트 탭 열기'], ['tab_meetings', '회의 탭 열기'],
   ['tab_records', '아이디어·결정 탭 열기'], ['tab_weekly', '주간요약 탭 열기'],
@@ -323,7 +323,7 @@ function createUsage(deps) {
     }
   }
 
-  // `내 사용 기록` — 최근 30일 합계(오늘 포함).
+  // `기능별 전체 보기` — 최근 30일 합계(오늘 포함).
   function recent(today) {
     const total = dir() ? sumRange(load(), addDays(today, -(VIEW_DAYS - 1)), today) : {};
     return USAGE_KEYS.map(([key, label]) => ({ key, label, count: total[key] || 0 }));
@@ -341,7 +341,16 @@ function createUsage(deps) {
     if (url.pathname === '/api/usage' && req.method === 'GET') {
       let canSend = false;
       try { canSend = !!deps.canSend(); } catch { canSend = false; }
-      json(res, 200, { ok: true, send: sendOn(), canSend, days: VIEW_DAYS, rows: recent(deps.today()) });
+      // today·history는 `내 일 기록`(화면이 계산)용 — 보관 중인 날 전부(최대 90일, 알려진 키만 · normalizeUsage 결과 그대로).
+      const today = deps.today();
+      let history = {};
+      if (dir()) {
+        try {
+          const oldest = addDays(today, -KEEP_DAYS);
+          history = Object.fromEntries(Object.entries(load().days).filter(([day]) => day >= oldest));
+        } catch { history = {}; }
+      }
+      json(res, 200, { ok: true, send: sendOn(), canSend, days: VIEW_DAYS, rows: recent(today), today, history });
       return true;
     }
     if (url.pathname === '/api/usage/tick' && req.method === 'POST') {

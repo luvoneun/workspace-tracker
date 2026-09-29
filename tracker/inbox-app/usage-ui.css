@@ -1,4 +1,4 @@
-/* 사용 횟수(WP-R) — 사용설명서 맨 아래 작은 알림 한 줄과 설정 › 앱의 스위치·내 사용 기록 표. 새 색·새 토큰은 없다.
+/* 사용 횟수(WP-R) — 사용설명서 맨 아래 작은 알림 한 줄과 설정 › 앱의 스위치·내 일 기록(WP-W). 새 색·새 토큰은 없다.
    알림 줄은 12px --dim 글자, `끄기`·`다시 켜기`는 버전 줄의 조용한 밑줄 글자(.d-ablink)와 같다.
    스위치는 연동 탭의 체크 줄(.d-ich)을 그대로 쓰고 오른쪽 칸만 없앤다. */
 .d-usagenote { margin: 6px 0 0; padding: 0 10px; font-size: 12px; line-height: 1.5; color: var(--dim); }
@@ -11,3 +11,50 @@
 .d-usagetable thead th { font-size: 12px; font-weight: 600; color: var(--dim); }
 .d-usagetable td { text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
 .d-usagetable thead th:last-child { text-align: right; }
+
+/* 내 일 기록(WP-W) — 기간 전환은 기존 세그먼트(.d-seg) 그대로. 타일 3개만 판(끝낸 일은 --accent-soft 바탕 · --accent-text 글자),
+   `알게 된 것`은 판 없이 아이콘 + 글 한 줄씩(줄 사이 --hair). 막대: 들어옴 --check-line(흰 바탕 3:1 이상) · 끝냄 --accent · 미래 날 2px --hair.
+   좁은 폭(칸 360px 이하)에서는 타일을 한 줄씩 가로형으로. */
+.d-uw { display: flex; flex-direction: column; gap: 12px; min-width: 0; container-type: inline-size; }
+.d-uwhead { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; }
+.d-uwperiod { margin: 0; font-size: 12px; color: var(--dim); }
+.d-uwempty { margin: 0; }
+.d-uwbig { margin: 0; font-size: 17px; font-weight: 600; line-height: 1.4; color: var(--text); word-break: keep-all; }
+.d-uwbig b { font-weight: 800; color: var(--accent-text); font-variant-numeric: tabular-nums; }
+.d-uwsub { margin: -6px 0 0; font-size: 13px; line-height: 1.5; color: var(--muted); word-break: keep-all; }
+.d-uwcmp { color: var(--text); font-weight: 600; }
+.d-uwtiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.d-uwtile { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 10px 12px; border-radius: var(--r-sm); background: var(--neutral-bg); }
+.d-uwtile .d-uwk { font-size: 12px; color: var(--muted); }
+.d-uwtile .d-uwv { font-size: 20px; font-weight: 700; line-height: 1.3; color: var(--text); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.d-uwtile .d-uws { font-size: 11.5px; line-height: 1.4; color: var(--dim); overflow-wrap: anywhere; }
+.d-uwtile.is-done { background: var(--accent-soft); }
+.d-uwtile.is-done .d-uwk, .d-uwtile.is-done .d-uwv, .d-uwtile.is-done .d-uws { color: var(--accent-text); }
+@container (max-width: 360px) {
+  .d-uwtiles { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .d-uwtile { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "k v" "s s"; align-items: baseline; column-gap: 8px; padding: 8px 12px; }
+  .d-uwtile .d-uwk { grid-area: k; font-size: 13px; }
+  .d-uwtile .d-uwv { grid-area: v; font-size: 17px; text-align: right; }
+  .d-uwtile .d-uws { grid-area: s; }
+  .d-uwtile .d-uws:empty { display: none; }
+}
+.d-uwchart { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.d-uwlegend { display: flex; gap: 12px; font-size: 12px; color: var(--dim); }
+.d-uwkey::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 5px; border-radius: 2px; background: var(--check-line); }
+.d-uwkey.done::before { background: var(--accent); }
+.d-uwbars { display: flex; align-items: stretch; gap: 4px; height: 112px; }
+.d-uwbars.is-d90 { gap: 2px; }
+.d-uwcol { display: flex; flex: 1 1 0; flex-direction: column; gap: 4px; min-width: 0; }
+.d-uwpair { display: flex; flex: 1 1 0; align-items: flex-end; justify-content: center; gap: 2px; min-height: 0; box-shadow: inset 0 -1px 0 var(--hair); }
+.d-uwbar { width: min(12px, 40%); border-radius: 3px 3px 0 0; background: var(--check-line); }
+.d-uwbar.done { background: var(--accent); }
+.d-uwcol.is-future .d-uwbar { height: 2px; background: var(--hair); }
+.d-uwlab { min-height: 14px; font-size: 11px; line-height: 14px; text-align: center; white-space: nowrap; color: var(--dim); font-variant-numeric: tabular-nums; }
+.d-uwcol.is-today .d-uwlab { color: var(--accent-text); font-weight: 700; }
+.d-uwnote { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--muted); word-break: keep-all; }
+.d-uwinshd { margin: 0; font-size: 12px; font-weight: 600; color: var(--dim); }
+.d-uwins ul { margin: 0; padding: 0; list-style: none; }
+.d-uwins li { display: flex; align-items: flex-start; gap: 8px; padding: 8px 0; font-size: 13px; line-height: 1.5; color: var(--muted); word-break: keep-all; }
+.d-uwins li + li { border-top: 1px solid var(--hair); }
+.d-uwins li b { font-weight: 700; color: var(--text); }
+.d-uwins li .d-i { width: 16px; height: 16px; margin-top: 2px; color: var(--accent-text); }
