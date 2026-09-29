@@ -2000,6 +2000,10 @@ body.batch-open .d-toast { bottom: 76px; }
   background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r);
   box-shadow: var(--soft); overflow: visible; margin-top: 8px; padding: 10px;
 }
+/* 프로젝트가 하나도 없을 때 오른쪽의 한 판 — 같은 흰 카드에 제목 · 한 줄 · 2차 버튼 하나 */
+.d-pempty { margin-top: 0; padding: 22px 24px; }
+.d-pempty h2 { margin: 0 0 4px; font-size: 16px; font-weight: 700; letter-spacing: -0.01em; color: var(--text); }
+.d-pempty p { margin: 0 0 14px; font-size: 13.5px; line-height: 1.6; color: var(--muted); max-width: 52ch; }
 /* 구역 제목은 카드 밖에 굵게 선다(카드 안에 카드를 만들지 않는다) */
 .d-psec > .d-grp {
   padding: 0; height: 30px; min-height: 0;

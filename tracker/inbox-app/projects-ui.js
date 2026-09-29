@@ -533,10 +533,22 @@ function renderProjects(opts = {}) {
   const headCount = visibleRows.length;
 
   const rowsOnly = !!opts.rowsOnly && showFind && listEl.querySelector('.d-pfind');
+  // 프로젝트가 하나도 없으면(찾기로 거른 0개가 아니라 정말 0개) 개수 `0`과 `상태별 | 배포별`을 숨긴다 —
+  // 정렬할 것이 없다. 하나가 생기면 다음 그리기에서 그대로 다시 선다.
+  const noProjects = !rows.length;
   if (!rowsOnly) {
+    const oldSeg = listEl.querySelector('.d-pfseg');
+    const segHadFocus = !!(oldSeg && typeof oldSeg.contains === 'function' && oldSeg.contains(document.activeElement));
     listEl.replaceChildren();
-    listEl.appendChild(projectListHead(headCount));
-    listEl.appendChild(projectViewSegment());
+    const head = projectListHead(headCount);
+    const headNumber = head.querySelector('.n');
+    if (headNumber) headNumber.hidden = noProjects;
+    listEl.appendChild(head);
+    const seg = projectViewSegment();
+    seg.hidden = noProjects;
+    listEl.appendChild(seg);
+    // 세그먼트에 초점이 있다가 숨으면 초점을 잃지 않게 머리의 `+`로 옮긴다.
+    if (noProjects && segHadFocus) head.querySelector('.d-pnewgo')?.focus?.();
     if (showFind) listEl.appendChild(projectFindInput());
   } else {
     // 찾기 칸 뒤에 이어 붙은 소제목·줄만 지운다 — 칸 자체(anchor)는 children 배열 안 자리만 확인하고 건드리지 않는다.
@@ -552,7 +564,31 @@ function renderProjects(opts = {}) {
   if (rowsOnly) return;
   // 새 프로젝트 화면이 열려 있으면 오른쪽 면은 그것 하나다(왼쪽 목록은 그대로 보인다).
   if (projectNew) projectNewRender(body);
+  else if (noProjects) projectEmptyBoard(body);
   else renderProjectDetail(body, rows.find(row => row.key === projectKey) || null);
+}
+
+// 프로젝트가 하나도 없을 때 오른쪽 자리 — 한 문장 대신 흰 카드 한 판(프로젝트 구역과 같은 `.d-psurf`):
+// 무엇이 여기 오는지 · 어떻게 생기는지 · 버튼 하나. 버튼은 머리의 `+`와 같은 함수(projectNewStart)다.
+function projectEmptyBoard(body) {
+  body.replaceChildren();
+  const card = document.createElement('section');
+  card.className = 'd-psurf d-pempty';
+  card.setAttribute('aria-labelledby', 'projectEmptyTitle');
+  const title = document.createElement('h2');
+  title.id = 'projectEmptyTitle';
+  title.textContent = '아직 프로젝트가 없어요';
+  const text = document.createElement('p');
+  // 메뉴 길(`⋯ › 프로젝트`)은 줄이 바뀌어도 쪼개지지 않게 사이를 붙는 빈칸(\u00a0)으로 잇는다.
+  text.textContent = '업무·결정·회의를 프로젝트로 묶으면 여기서 한 번에 봐요. 업무의 ⋯\u00a0›\u00a0프로젝트를 정해도 저절로 생겨요.';
+  const make = document.createElement('button');
+  make.type = 'button';
+  make.className = 'd-btn acc d-pemptygo';
+  make.insertAdjacentHTML('beforeend', uiIcon('plus'));
+  make.append('프로젝트 만들기');
+  make.addEventListener('click', () => projectNewStart());
+  card.append(title, text, make);
+  body.appendChild(card);
 }
 
 // ---------- 직접 만든 프로젝트 이름 바꾸기 ----------
