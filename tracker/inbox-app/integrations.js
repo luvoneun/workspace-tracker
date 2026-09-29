@@ -62,6 +62,7 @@ const MESSAGE = {
   icalRead: '이 주소를 읽지 못했어요 — 비밀 주소를 다시 복사해 주세요',
   icalPublic: '공개 주소를 붙였어요 — 같은 화면 조금 아래 「iCal 형식의 비공개 주소」를 복사해 주세요(공개 주소는 캘린더를 공개해야만 열려요)',
   icalNotCalendar: '캘린더 주소가 아니에요 — iCal 형식의 비공개 주소를 복사해 주세요',
+  macPick: '읽을 캘린더를 하나 이상 골라 주세요',
   other: '보낸 값을 확인해 주세요.',
 };
 
@@ -420,17 +421,38 @@ function withSlackTidy(config, tidy) {
   return { ...config, slack: { ...clone(config.slack), tidy } };
 }
 
-// 캘린더는 켜고 끄는 값(`integrations.calendar`)과 "어느 갈래로 읽는지"(`calendar.source`: `ical` | `claude`,
-// 비밀 주소 갈래면 `calendar.icalFile` 경로)를 함께 적는다. 끌 때는 갈래·경로를 그대로 둔다(주소 파일은 사람 것).
-function withCalendar(config, enabled, { source, icalFile } = {}) {
+// 캘린더는 켜고 끄는 값(`integrations.calendar`)과 "어느 갈래로 읽는지"(`calendar.source`: `mac` | `ical` | `claude`,
+// 비밀 주소 갈래면 `calendar.icalFile` 경로, 맥 캘린더 갈래면 고른 캘린더 `calendar.macCalendars`)를 함께 적는다.
+// 끌 때는 갈래·경로·고른 캘린더를 그대로 둔다(주소 파일은 사람 것).
+function withCalendar(config, enabled, { source, icalFile, macCalendars } = {}) {
   const next = { ...config, integrations: { ...clone(config.integrations), calendar: enabled } };
-  if (source !== undefined || icalFile !== undefined) {
+  if (source !== undefined || icalFile !== undefined || macCalendars !== undefined) {
     const calendar = clone(config.calendar);
     if (source !== undefined) calendar.source = source;
     if (icalFile !== undefined) calendar.icalFile = icalFile;
+    if (macCalendars !== undefined) calendar.macCalendars = macCalendars;
     next.calendar = calendar;
   }
   return next;
+}
+
+// 맥 캘린더 갈래에서 고른 캘린더 — `[{ id, name }]`(id로 따라가고, 이름은 보여 주기·id가 바뀌었을 때만). 50개까지.
+const MAC_CALENDARS_MAX = 50;
+function macCalendarsOf(value) {
+  const seen = new Set();
+  return (Array.isArray(value) ? value : []).map(one => ({
+    id: trimmed(clone(one).id).slice(0, 300),
+    name: trimmed(clone(one).name).replace(/\s+/g, ' ').slice(0, 200),
+  })).filter((one) => {
+    if (!one.id || /[\u0000-\u001f]/.test(one.id) || seen.has(one.id)) return false;
+    seen.add(one.id);
+    return true;
+  }).slice(0, MAC_CALENDARS_MAX);
+}
+// 설정의 갈래 이름 — 아는 둘(`ical`·`mac`)만, 나머지는 예전처럼 Claude Code(`claude`).
+function calendarSourceOf(config) {
+  const source = trimmed(clone(clone(config).calendar).source);
+  return source === 'ical' || source === 'mac' ? source : 'claude';
 }
 
 // 회의록은 켜고 끄는 값(`integrations.tiro`)과 "무엇으로 쓰는지"(`meetingNotes`) 둘을 함께 적는다.
@@ -492,8 +514,10 @@ function readIntegrations(config, { tokenDir, claude } = {}) {
     },
     calendar: {
       enabled: on('calendar'),
-      // 어느 갈래로 읽는지 — 비밀 주소면 `ical`, 아니면 예전처럼 Claude Code(`claude`).
-      source: trimmed(clone(config.calendar).source) === 'ical' ? 'ical' : 'claude',
+      // 어느 갈래로 읽는지 — 맥 캘린더면 `mac`, 비밀 주소면 `ical`, 아니면 예전처럼 Claude Code(`claude`).
+      source: calendarSourceOf(config),
+      // 맥 캘린더 갈래에서 고른 캘린더(id·이름 — 이 맥 안의 이름이다).
+      macCalendars: macCalendarsOf(clone(config.calendar).macCalendars),
       // 주소가 저장돼 있는지만(주소 자체는 싣지 않는다).
       hasIcal: !!findToken(paths, 'calendar', clone(config.calendar).icalFile),
     },
@@ -676,6 +700,13 @@ async function saveIntegrations({
       if (url) pending.push([paths.calendar.file, address]);
       config = withCalendar(config, true, { source: 'ical', icalFile: url ? paths.calendar.config : saved.config });
       result.calendar = { source: 'ical', count: Number(checked.count) || 0 };
+    } else if (body.calendar.source === 'mac') {
+      // 맥 캘린더 갈래 — 서버는 맥 캘린더를 읽지 않는다(프로세스를 띄우지 않는다). 화면이 `허용하고 확인`으로 이미 읽어 본
+      // 목록에서 고른 캘린더만 적고, 읽기는 launchd `mac-calendar`가 등록되자마자 한 번, 그 뒤 30분마다 한다.
+      const macCalendars = macCalendarsOf(body.calendar.macCalendars);
+      if (!macCalendars.length) throw bad(MESSAGE.macPick);
+      config = withCalendar(config, true, { source: 'mac', macCalendars });
+      result.calendar = { source: 'mac', calendars: macCalendars.length };
     } else {
       // `Claude Code로` 갈래 — 예전 동작 그대로 켜고, 갈래만 `claude`로 적는다(비밀 주소 파일·경로는 그대로 둔다).
       config = withCalendar(config, true, { source: 'claude' });
@@ -709,7 +740,7 @@ function registrationKey(config) {
   const channels = clone(clone(clone(config).slack).channels);
   return JSON.stringify({
     uses: ['slack', 'calendar', 'jira', 'tiro'].map(key => uses[key] !== false),
-    calendar: trimmed(clone(clone(config).calendar).source) === 'ical' ? 'ical' : '',
+    calendar: calendarSourceOf(config) === 'claude' ? '' : calendarSourceOf(config),
     slack: SLACK_CHANNEL_KEYS.map((key) => {
       const entry = clone(channels[key]);
       return [trimmed(entry.id), entry.off === true];
