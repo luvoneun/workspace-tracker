@@ -52,6 +52,8 @@ module.exports = function itemsRoutes(req, res, url, ctx) {
       // 미팅 노트 가져오기의 지금 상태 — 페이지를 새로 열어도 진행 중인 가져오기가 이어지게 첫 조회에 함께 싣는다.
       meetingNotes: meetingNotesStatus(),
       storage,
+      // 업데이트가 도는 중인가(WP-U) — 서버가 잠깐 꺼지는 동안 화면이 `연결 실패` 대신 `바꾸는 중이에요`를 말하려고 기억해 둔다.
+      updating: (() => { try { return !!ctx.updateStatusView().running; } catch { return false; } })(),
       today: todayLocal(),
       ...getTodayActivityCounts(),
     };

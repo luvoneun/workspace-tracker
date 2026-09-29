@@ -8723,11 +8723,11 @@ test('QA2 새로고침 뒤 업데이트 실패: 앱 탭을 열면 상태 파일�
   assert.match(fx.text(), /이전 버전으로 되돌리기/);
 });
 
-test('QA2 파란 점: 페이지를 열 때 `?cached=1`로 한 번, 그 뒤 6시간마다 — 설정을 열지 않아도 켜진다', async () => {
+test('QA2 파란 점: 페이지를 열 때 `?cached=1`로 한 번, 그 뒤 1시간마다(WP-U) — 설정을 열지 않아도 켜진다', async () => {
   const script = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
   const boot = script.slice(script.indexOf(DEFINITIONS_MARKER));
   assert.match(boot, /settingsAboutLoad\(\{ cached: true \}\)/);
-  assert.match(boot, /setInterval\(\(\) => settingsAboutLoad\(\{ cached: true \}\), 6 \* 60 \* 60 \* 1000\)/);
+  assert.match(boot, /setInterval\(\(\) => settingsAboutLoad\(\{ cached: true \}\)\.then\(renderUpdateNotice\), 60 \* 60 \* 1000\)/);
   const fx = intgClient();
   const asked = [];
   fx.app.context.fetch = async (url) => { asked.push(String(url)); return new Response(JSON.stringify({ version: '1.0.0', update: { available: true, label: 'v1.1.0' } }), { status: 200 }); };
@@ -9239,4 +9239,144 @@ test('이미 있는 채널 ⋯ 채널 고르기: 같은 규칙 — 이미 있는
   assert.match(fx.live(), /이미 있는 채널 1개를 쓸게요/);
   same(fx.app.run(`settingsSlackMadeText({ name: 'a', existing: true })`), '✓ 이미 있는 #a 채널을 쓸게요');
   same(fx.app.run(`settingsSlackMadeText({ name: 'a' })`), '✓ #a 만들었어요');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WP-U — 쉬는 틈에 자동 업데이트: 오늘 탭 한 줄 · 설정 › 앱 스위치 · 받는 동안 한 줄
+
+const WPU_ABOUT = (notice, extra = {}) => ({ version: '1.2.1', update: { available: true, label: 'v1.2.2', auto: { eligible: true, on: notice !== 'off', notice } }, ...extra });
+
+test('WP-U 오늘 탭 한 줄: 자동이 안 될 때(꺼짐·옮기기·고친 파일·에이전트 없음)만 `새 버전 v1.2.2가 있어요` + 업데이트 받기(설정 › 앱) + 닫기', () => {
+  for (const notice of ['off', 'relocate', 'modified', 'not-installed']) {
+    const fx = guideClient();
+    fx.app.run(`settingsAbout = ${JSON.stringify(WPU_ABOUT(notice))}; renderUpdateNotice();`);
+    const zone = fx.app.nodes.get('updateNoticeZone');
+    assert.equal(zone.hidden, false, notice);
+    const line = zone.children[0];
+    assert.equal(line.className, 'd-abupd d-updnote');
+    assert.equal(fx.shape("document.getElementById('updateNoticeZone').children[0]").text, '새 버전 v1.2.2가 있어요업데이트 받기닫기');
+    line.children[1].listeners.click();
+    same(fx.went(), [['app', null]], '누르면 설정 › 앱의 기존 흐름');
+  }
+});
+
+test('WP-U 오늘 탭 한 줄: 자동이 잘 되는 중이거나(notice 없음)·이미 최신·main이면 없다', () => {
+  const fx = guideClient();
+  for (const about of [WPU_ABOUT(null), { version: '1.2.1', update: { available: false, label: 'v1.2.1', auto: { eligible: true, on: true, notice: null } } },
+    { version: '1.2.1', update: { available: true, label: 'main', auto: { eligible: false, on: true, notice: null } } }, { version: '1.2.1', update: { available: true, label: 'v1.2.2' } }]) {
+    fx.app.run(`settingsAbout = ${JSON.stringify(about)}; renderUpdateNotice();`);
+    assert.equal(fx.app.nodes.get('updateNoticeZone').hidden, true);
+    assert.equal(fx.app.nodes.get('updateNoticeZone').children.length, 0);
+  }
+});
+
+test('WP-U 오늘 탭 한 줄: 자동 실패면 `자동 업데이트가 멈췄어요` 빨간 줄 — 닫으면 그 버전 동안 다시 뜨지 않고, 새 버전이면 다시 뜬다', () => {
+  const fx = guideClient();
+  fx.app.run(`settingsAbout = ${JSON.stringify(WPU_ABOUT('failed'))}; renderUpdateNotice();`);
+  const line = fx.app.nodes.get('updateNoticeZone').children[0];
+  assert.equal(line.className, 'd-abfail d-updnote');
+  assert.equal(fx.shape("document.getElementById('updateNoticeZone').children[0]").text, '자동 업데이트가 멈췄어요 — 설정 › 앱에서 확인해 주세요설정 › 앱 열기닫기');
+  // 다시 그려도 같은 줄(초점이 사라지지 않게)
+  fx.app.run('renderUpdateNotice()');
+  assert.equal(fx.app.nodes.get('updateNoticeZone').children[0], line);
+  assert.equal(line.children[2].getAttribute('aria-label'), '새 버전 알림 닫기');
+  line.children[2].listeners.click();
+  assert.equal(fx.app.nodes.get('updateNoticeZone').hidden, true);
+  assert.equal(fx.store.get('updateNoticeClosed'), 'v1.2.2:failed');
+  fx.app.run('renderUpdateNotice()');
+  assert.equal(fx.app.nodes.get('updateNoticeZone').hidden, true, '같은 버전 동안은 닫힌 채');
+  fx.app.run(`settingsAbout = ${JSON.stringify({ ...WPU_ABOUT('off'), update: { ...WPU_ABOUT('off').update, label: 'v1.2.3' } })}; renderUpdateNotice();`);
+  assert.equal(fx.shape("document.getElementById('updateNoticeZone').children[0]").text, '새 버전 v1.2.3이 있어요업데이트 받기닫기', '새 버전은 다시 알리고 조사도 맞춘다');
+});
+
+test('WP-U 설정 › 앱 `자동으로 업데이트` 스위치: 자격 있는 자리에서만 보이고, 누르면 곧바로 autoUpdate 한 키를 저장한다', async () => {
+  const fx = updateClient({ ...D3_ABOUT, update: { ...D3_ABOUT.update, auto: { eligible: true, on: true, notice: null } } }, { replies: [{ body: { ok: true, autoUpdate: false } }] });
+  fx.app.run('settingsAboutFill()');
+  await fx.flush();
+  const slot = fx.app.nodes.get('settingsAutoUpdate');
+  assert.equal(slot.hidden, false);
+  const row = slot.children[0];
+  assert.equal(row.className, 'd-ich is-on');
+  const box = row.children[0];
+  assert.equal(box.type, 'checkbox');
+  assert.equal(box.checked, true, '기본 켜짐');
+  assert.equal(row.children[1].children[0].textContent, '자동으로 업데이트');
+  box.checked = false;
+  await box.listeners.change();
+  const saved = fx.sent.find(one => one.url === '/api/personalize');
+  same(saved.body, { autoUpdate: false });
+
+  // main 갈래·개발용(eligible false)이면 스위치가 없다
+  const main = updateClient({ ...D3_ABOUT, channel: 'main', update: { available: true, label: 'main', auto: { eligible: false, on: true, notice: null } } });
+  main.app.run('settingsAboutFill()');
+  assert.equal(main.app.nodes.get('settingsAutoUpdate').hidden, true);
+  assert.equal(main.app.nodes.get('settingsAutoUpdate').children.length, 0);
+});
+
+test('WP-U 오늘 탭 한 줄: 하루 넘게 안 깔림(stale)은 새 버전 판 + 업데이트 받기, 요청이 처리되지 않음(stuck)은 빨간 판 + 설정 › 앱 열기', () => {
+  const fx = guideClient();
+  fx.app.run(`settingsAbout = ${JSON.stringify(WPU_ABOUT('stale'))}; renderUpdateNotice();`);
+  assert.equal(fx.app.nodes.get('updateNoticeZone').children[0].className, 'd-abupd d-updnote');
+  assert.equal(fx.shape("document.getElementById('updateNoticeZone').children[0]").text, '새 버전 v1.2.2가 하루 넘게 설치되지 않았어요업데이트 받기닫기');
+  fx.app.nodes.get('updateNoticeZone').children[0].children[2].listeners.click();
+  assert.equal(fx.store.get('updateNoticeClosed'), 'v1.2.2:stale');
+  fx.app.run(`settingsAbout = ${JSON.stringify(WPU_ABOUT('stuck'))}; renderUpdateNotice();`);
+  const line = fx.app.nodes.get('updateNoticeZone').children[0];
+  assert.equal(line.className, 'd-abfail d-updnote', '다른 이유는 닫은 것과 따로 뜬다');
+  assert.equal(fx.shape("document.getElementById('updateNoticeZone').children[0]").text, '업데이트 요청이 처리되지 않았어요 — 설정 › 앱에서 확인해 주세요설정 › 앱 열기닫기');
+  line.children[1].listeners.click();
+  same(fx.went(), [['app', null]]);
+});
+
+test('WP-U 설정 › 앱 새 버전 상자도 오늘 탭 한 줄과 같은 조사(끝 숫자 2·4·5·9는 `가`)', () => {
+  for (const [label, want] of [['v1.2.2', '새 버전 v1.2.2가 있어요'], ['v1.2.4', '새 버전 v1.2.4가 있어요'], ['v1.3.0', '새 버전 v1.3.0이 있어요'], ['v2.0.1', '새 버전 v2.0.1이 있어요']]) {
+    const fx = updateClient({ ...D3_ABOUT, update: { available: true, label } });
+    fx.app.run('settingsAboutFill()');
+    assert.ok(fx.text().startsWith(`${want}업데이트 받기`), `${label}: ${fx.text()}`);
+  }
+});
+
+test('WP-U 설정 › 앱 스위치: 저장이 실패하면 체크를 되돌리고 이유를 알린다', async () => {
+  const fx = updateClient({ ...D3_ABOUT, update: { ...D3_ABOUT.update, auto: { eligible: true, on: false, notice: 'off' } } }, { replies: [{ status: 400, body: { ok: false, error: '저장하지 못했어요.' } }] });
+  fx.app.run('settingsAboutFill()');
+  const row = fx.app.nodes.get('settingsAutoUpdate').children[0];
+  const box = row.children[0];
+  assert.equal(box.checked, false);
+  box.checked = true;
+  await box.listeners.change();
+  assert.equal(box.checked, false, '실패하면 원래대로');
+  assert.equal(box.disabled, false);
+  assert.match(fx.app.nodes.get('liveRegion').textContent, /저장하지 못했어요/);
+});
+
+test('WP-U 받는 동안: 목록을 못 받았는데 업데이트 중이면(상태 응답 running, 또는 서버가 없고 방금 updating을 봤으면) `바꾸는 중이에요` 한 줄', async () => {
+  const app = pureClient();
+  app.context.AbortSignal = AbortSignal;
+  const timers = [];
+  app.context.setTimeout = (fn, delay) => { timers.push(delay); return 0; };
+  app.context.fetch = async () => new Response(JSON.stringify({ running: true }), { status: 200 });
+  await app.run('updateBusyCheck()');
+  assert.equal(app.nodes.get('liveRegion').textContent, '새 버전으로 바꾸는 중이에요 — 1분쯤 걸려요');
+  assert.ok(timers.includes(15000), '15초 뒤 다시 받는다');
+
+  // 서버가 아예 없으면 — 방금 목록이 updating을 알려 줬을 때만
+  const gone = pureClient();
+  gone.context.AbortSignal = AbortSignal;
+  gone.context.setTimeout = () => 0;
+  gone.context.fetch = async () => { throw new TypeError('offline'); };
+  gone.run("document.getElementById('liveRegion').textContent = '목록을 불러오지 못했어요'");
+  await gone.run('updateBusyCheck()');
+  assert.equal(gone.nodes.get('liveRegion').textContent, '목록을 불러오지 못했어요', '업데이트를 본 적이 없으면 기존 연결 실패 그대로');
+  gone.run('updatingSeenAt = Date.now()');
+  await gone.run('updateBusyCheck()');
+  assert.equal(gone.nodes.get('liveRegion').textContent, '새 버전으로 바꾸는 중이에요 — 1분쯤 걸려요');
+
+  // 서버가 답하는데 업데이트 중이 아니면 기존 안내 그대로
+  const plain = pureClient();
+  plain.context.AbortSignal = AbortSignal;
+  plain.context.fetch = async () => new Response(JSON.stringify({ running: false }), { status: 200 });
+  plain.run("document.getElementById('liveRegion').textContent = '목록을 불러오지 못했어요'");
+  plain.run('updatingSeenAt = Date.now()');
+  await plain.run('updateBusyCheck()');
+  assert.equal(plain.nodes.get('liveRegion').textContent, '목록을 불러오지 못했어요');
 });

@@ -1649,7 +1649,7 @@ const MIME = {
 // 파일은 하나도 쓰지 않고, git이 없거나 실패하면 조용히 `null`이다.
 const VERSION_PATH = path.join(REPO_DIR, 'VERSION');
 const NEWS_PATH = path.join(REPO_DIR, '소식.md');
-const REMOTE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;   // 6시간에 한 번
+const REMOTE_CHECK_INTERVAL_MS = 60 * 60 * 1000;   // 1시간에 한 번(WP-U — 배포가 잦아 하루 안에 받게)
 let latestRelease = null;        // { tag, checkedAt } — 메모리에만 둔다
 let remoteCheckTimer = null;
 let remoteChecking = false;
@@ -1807,11 +1807,11 @@ function updateOffer(version, channel) {
 
 const updateCommandPath = () => personalize.tildePath(path.join(REPO_DIR, '업데이트.command'), os.homedir());
 
-// `cached`면(페이지를 열 때·6시간마다 톱니바퀴의 파란 점) 원격에 새로 묻지 않고 가진 값만 준다 —
-// 6시간 주기 확인이 아직 안 걸려 있으면 그 주기만 건다(설정을 열 때와 같은 한 번).
+// `cached`면(페이지를 열 때·1시간마다 톱니바퀴의 파란 점) 원격에 새로 묻지 않고 가진 값만 준다 —
+// 1시간 주기 확인이 아직 안 걸려 있으면 그 주기만 건다(설정을 열 때와 같은 한 번).
 // `check`면(설정 › 앱의 `새 버전 확인` 버튼) 1분 안에 물어본 적이 없을 때 원격에 곧바로 묻고 10초까지 기다린다
 // (화면 요청의 15초 제한 안에 끝나게) —
-// 배포 직후 6시간·30분 주기를 기다리지 않게.
+// 배포 직후 1시간·30분 주기를 기다리지 않게.
 const REMOTE_MANUAL_MIN_MS = 60 * 1000;
 async function manualRemoteCheck() {
   if (process.env.WORKSPACE_NO_REMOTE_CHECK) return;
@@ -1829,6 +1829,9 @@ async function aboutApp({ cached = false, check = false } = {}) {
   const channel = updateChannel();
   const [modified, ref, changes] = await Promise.all([gitModified(), git(['rev-parse', '--short', 'HEAD']), changesUrl(channel)]);
   const version = appVersion();
+  const offer = updateOffer(version, channel);
+  // 쉬는 틈에 자동 업데이트(WP-U) — 스위치·오늘 탭 한 줄의 재료. 자격 없는 자리(main·개발용)면 notice는 늘 null이다.
+  const auto = await autoUpdateView(offer, modified);
   return {
     version,
     dataFormat: DATA_FORMAT_VERSION,
@@ -1840,7 +1843,7 @@ async function aboutApp({ cached = false, check = false } = {}) {
     latest: latestRelease,
     // `새 버전 확인`을 눌렀을 때 최근 90초 안에 원격 태그를 실제로 받았는지 — 못 받았으면 화면이 "최신이에요" 대신 "확인하지 못했어요"라고 한다.
     ...(check ? { checkReached: !!(latestRelease && Date.now() - Date.parse(latestRelease.checkedAt) < 90 * 1000) } : {}),
-    update: { ...updateOffer(version, channel), changesUrl: changes },
+    update: { ...offer, changesUrl: changes, auto },
     // 설정 › 앱의 `지난 소식 전체`(WP-J) — 저장소 소식.md의 최근 10개 버전. 파일이 없으면 빈 목록이다.
     news: localNews(),
     // 설정 › 앱 › 앱 위치 — 사람이 Finder의 `폴더로 이동`에 붙여 넣을 업데이트 파일 경로(홈은 `~`로 줄인다).
@@ -2005,6 +2008,76 @@ async function requestUpdate(action) {
   nativeFs.mkdirSync(path.dirname(file), { recursive: true });
   nativeFs.writeFileSync(file, `${JSON.stringify({ action, requestedAt })}\n`);
   return fetchAnswer(200, { ok: true, action, requestedAt });
+}
+
+// ---------- 쉬는 틈에 자동 업데이트 (WP-U, auto-update.js) ----------
+// 판단은 auto-update.js, 요청은 위 requestUpdate('update')와 같은 길(요청 표시 파일 하나)이다 — 프로세스를 띄우지 않는다.
+// **main 갈래면 절대 요청하지 않는다**(뜰 때 읽은 설정과 지금 설정 파일 둘 중 하나라도 main이면 main으로 본다).
+// launchd로 띄운 설치본(WORKSPACE_MANAGED)에서만 켜지고, 개발용 서버·테스트·픽스처는 꺼짐이다.
+// 쉬는 중 = 마지막 쓰기 요청(POST, 슬랙 수집의 `/api/import` 제외)으로부터 10분 — 화면의 5분 목록 새로 받기(GET)는 세지 않는다.
+const autoUpdateModule = require('./auto-update');
+const autoUpdateTest = { environment: null, localDir: null, idleMs: null, today: null };
+// 테스트·픽스처 전용 — 환경 판단·임시 local/·쉬는 시간·오늘 날짜를 끼운다(값을 안 주면 원래대로). main 갈래 판단은 끼울 수 없다.
+function setAutoUpdateForTests(options = {}) {
+  autoUpdateTest.environment = typeof options.environment === 'boolean' ? options.environment : null;
+  autoUpdateTest.localDir = options.localDir || null;
+  autoUpdateTest.idleMs = Number.isFinite(options.idleMs) ? options.idleMs : null;
+  autoUpdateTest.today = options.today || null;
+}
+const autoUpdateChannel = () => {
+  const onDisk = ((currentConfigFile().server) || {}).updateChannel;
+  return updateChannel() === 'main' || onDisk === 'main' ? 'main' : 'stable';
+};
+function autoUpdateEnvironment() {
+  if (autoUpdateTest.environment !== null) return autoUpdateTest.environment;
+  return !!process.env.WORKSPACE_MANAGED && !process.env.WORKSPACE_NO_REMOTE_CHECK && !process.env.WORKSPACE_FIXTURE;
+}
+// 설정 › 앱의 `자동으로 업데이트` 스위치 — 기본 켜짐, `server.autoUpdate: false`일 때만 꺼짐.
+const autoUpdateOn = () => ((currentConfigFile().server) || {}).autoUpdate !== false;
+// 쉬는 시간은 테스트에서만 줄인다(`WORKSPACE_AUTO_UPDATE_IDLE_MS` — 실제 서버를 띄우는 테스트용).
+function autoUpdateIdleMs() {
+  if (autoUpdateTest.idleMs !== null) return autoUpdateTest.idleMs;
+  const fromEnv = Number(process.env.WORKSPACE_AUTO_UPDATE_IDLE_MS);
+  return process.env.WORKSPACE_AUTO_UPDATE_IDLE_MS && Number.isFinite(fromEnv) && fromEnv >= 0 ? fromEnv : autoUpdateModule.AUTO_UPDATE_IDLE_MS;
+}
+const autoUpdate = autoUpdateModule.createAutoUpdate({
+  channel: autoUpdateChannel,
+  environment: autoUpdateEnvironment,
+  enabled: autoUpdateOn,
+  offer: () => updateOffer(appVersion(), autoUpdateChannel()),
+  status: () => updateStatusView(),
+  recoveryNeeded: () => !!mutations.status().recoveryNeeded,
+  agentInstalled: () => launchAgentInstalled('update'),
+  automationBusy: () => autoUpdateModule.automationBusy({ automationDir: automationDir(), logDir: automationLogDir() }),
+  needsMove: () => installNeedsMove(),
+  modified: () => gitModified(),
+  localDir: () => autoUpdateTest.localDir || LOCAL_DIR,
+  idleMs: autoUpdateIdleMs,
+  today: () => autoUpdateTest.today || todayLocal(),
+  request: () => requestUpdate('update'),
+  devRepo: () => repoHasManyWorktrees(),
+});
+// git worktree가 둘 이상이면 만든 사람의 개발 저장소로 보고 자동 업데이트에서 뺀다(읽기 전용 git, 실패하면 뺀다).
+async function repoHasManyWorktrees() {
+  const out = await git(['worktree', 'list', '--porcelain']);
+  if (out === null) return true;
+  return out.split('\n').filter(line => line.startsWith('worktree ')).length > 1;
+}
+// 뜰 때 한 번 건다(require.main 자리) — 자격이 없는 자리(개발용·main·테스트)면 타이머도 원격 확인도 걸지 않는다.
+function startAutoUpdate() {
+  if (autoUpdateChannel() === 'main' || !autoUpdateEnvironment()) return;
+  startRemoteCheck();
+  const tickMs = Number(process.env.WORKSPACE_AUTO_UPDATE_TICK_MS);
+  autoUpdate.start(process.env.WORKSPACE_AUTO_UPDATE_TICK_MS && Number.isFinite(tickMs) && tickMs >= 200 ? tickMs : undefined);
+}
+// GET /api/about에 싣는 한 덩어리 — 스위치를 보일지(`eligible`), 켜져 있는지(`on`), 오늘 탭 한 줄의 이유(`notice`).
+async function autoUpdateView(offer, modified) {
+  const eligible = autoUpdateChannel() !== 'main' && autoUpdateEnvironment() && !(await autoUpdate.devRepo());
+  let notice = null;
+  if (eligible && offer && offer.available) {
+    try { notice = await autoUpdate.noticeReason({ modified }); } catch { notice = null; }
+  }
+  return { eligible, on: autoUpdateOn(), notice };
 }
 
 // 지금 앱 이름(`server.dockName`, 없거나 규칙에 안 맞으면 `워크스페이스` — manifest와 같은 기본값). 설정을 새로 읽는다.
@@ -2187,7 +2260,7 @@ const CLIENT_BLOCKED = new Set([
   'task-batch.js', 'slack-history.js', 'slack-collect.js', 'import-record.js', 'browser-fixture.js', 'migrate.js',
   'integrations.js', 'ical.js', 'calendar-live.js', 'personalize.js', 'news.js', 'test-support.js',
   'routes-jira.js', 'routes-integrations.js', 'routes-app.js', 'routes-personalize.js', 'routes-items.js',
-  'routes-track.js', 'selfcheck.js', 'checkin.js', 'usage.js',
+  'routes-track.js', 'selfcheck.js', 'checkin.js', 'usage.js', 'auto-update.js',
 ]);
 function isClientFile(name) {
   if (!/^[A-Za-z0-9][\w.-]*\.(js|css)$/.test(name)) return false;   // 이름 한 칸짜리(하위 경로 없음)만
@@ -2495,6 +2568,8 @@ function safeHandle(req, res) {
     const hostname = host.split(':')[0];
     if (!['localhost','127.0.0.1',EXTRA_HOST].filter(Boolean).includes(hostname)) { res.writeHead(403); res.end('Forbidden host'); return; }
     if (req.method === 'POST' && (req.headers['content-type']?.split(';')[0] !== 'application/json' || (req.headers.origin && req.headers.origin !== `http://${host}`) || req.headers['sec-fetch-site'] === 'cross-site')) { res.writeHead(403); res.end('Forbidden request'); return; }
+    // 쉬는 틈에 자동 업데이트(WP-U) — 사람이 한 쓰기(POST)만 센다. 슬랙 수집이 넣는 `/api/import`는 사람의 동작이 아니다.
+    if (req.method === 'POST' && !/^\/api\/import(?:[?#]|$)/.test(req.url || '')) autoUpdate.touch();
     res.setHeader('X-Content-Type-Options','nosniff');
     res.setHeader('Referrer-Policy','no-referrer');
     res.setHeader('Cache-Control','no-store');
@@ -2527,6 +2602,8 @@ if (require.main === module) {
   calendarAfterRead = archiveMeetings;
   calendarLive.start();
   fs.watchFile(path.join(TRACKER_DIR, 'calendar_today.md'), { interval: 1000, persistent: false }, archiveMeetings);
+  // 쉬는 틈에 자동 업데이트(WP-U) — launchd 설치본이고 main 갈래가 아닐 때만 1분 판단·1시간 원격 확인을 건다.
+  startAutoUpdate();
   server.listen(PORT, '127.0.0.1', () => {
     console.log(`슬랙 인박스 앱: http://localhost:${PORT}`);
     if (!process.env.WORKSPACE_NO_OPEN) exec(`open http://localhost:${PORT}`);
@@ -2557,4 +2634,6 @@ module.exports = {
   publicAssetRequest,
   // WP-N 체크인 — 가짜 전송·임시 local/·오늘 날짜를 끼우는 테스트·픽스처 전용 길.
   setCheckinFetchForTests, setCheckinForTests, checkin, setUsageForTests, usage,
+  // WP-U 쉬는 틈에 자동 업데이트 — 판단 한 번(tick)·임시 local/·환경 끼우기(테스트·픽스처 전용, main 갈래 판단은 못 끼운다).
+  autoUpdate, setAutoUpdateForTests,
 };

@@ -293,3 +293,134 @@ test('QA2 update 상태: 새로고침 뒤 화면이 되돌리기를 다시 보�
   fs.utimesSync(path.join(app.repo, '.workspace-last-good'), past, past);
   assert.equal((await app.status()).rollback, true);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WP-U — 쉬는 틈에 자동 업데이트: 실제 서버(launchd 설치본처럼 WORKSPACE_MANAGED)를 띄워 배선을 본다.
+// 원격은 임시 bare 저장소(파일 경로)라 바깥 네트워크에 닿지 않고, 체크인 전송은 끈다. 판단 주기·쉬는 시간만 줄인다.
+async function startAutoServer(t, { channel = 'stable', idleMs = 0, plist = true } = {}) {
+  const fx = remoteFixture(t, { channel });
+  const agents = fx.env.WORKSPACE_LAUNCH_AGENTS_DIR;
+  fs.mkdirSync(agents, { recursive: true });
+  if (plist) fs.writeFileSync(path.join(agents, 'com.workspace.app.update.plist'), '<plist/>\n');
+  const app = await startAppServer(t, {
+    ...fx.env, WORKSPACE_MANAGED: '1', WORKSPACE_CHECKIN: '0', WORKSPACE_LOCAL_DIR: path.join(fx.clone, 'local'),
+    WORKSPACE_AUTO_UPDATE_TICK_MS: '200', WORKSPACE_AUTO_UPDATE_IDLE_MS: String(idleMs),
+  });
+  const request = path.join(fx.env.WORKSPACE_AUTOMATION_DIR, 'requests', 'update.request');
+  const record = path.join(fx.clone, 'local', 'auto-update.json');
+  return { ...fx, app, request, record };
+}
+const waitFor = async (check, ms) => {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) { if (check()) return true; await new Promise(resolve => setTimeout(resolve, 100)); }
+  return check();
+};
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const sameJson = (actual, expected, message) => assert.deepEqual(JSON.parse(JSON.stringify(actual)), expected, message);
+
+test('WP-U 자동 업데이트: launchd 설치본 · stable · 새 버전 · 쉬는 중이면 `업데이트 받기`와 같은 요청 파일 한 줄 + local/auto-update.json', { skip: !gitReady }, async (t) => {
+  const fx = await startAutoServer(t);
+  assert.equal(await waitFor(() => fs.existsSync(fx.request), 8000), true, '요청 파일을 쓴다');
+  assert.match(fs.readFileSync(fx.request, 'utf8'), /^\{"action":"update","requestedAt":"[0-9T:.Z-]+"\}\n$/, '실행기가 알아보는 그 한 줄');
+  const record = JSON.parse(fs.readFileSync(fx.record, 'utf8'));
+  assert.equal(record.version, 'v1.1.0');
+  assert.match(record.triedOn, /^\d{4}-\d{2}-\d{2}$/);
+  // 실행기가 집어 간 뒤에도(요청 파일이 지워짐) 같은 날 같은 버전은 다시 쓰지 않는다
+  fs.unlinkSync(fx.request);
+  await sleep(1200);
+  assert.equal(fs.existsSync(fx.request), false, '하루 한 번만');
+  const about = await (await fetch(fx.app.base + '/api/about?cached=1')).json();
+  sameJson(about.update.auto, { eligible: true, on: true, notice: null });
+});
+
+test('WP-U 자동 업데이트: 갈래가 main이면(만든 사람의 저장소) 새 버전·쉬는 중·에이전트가 다 있어도 **절대** 요청하지 않는다', { skip: !gitReady }, async (t) => {
+  const fx = await startAutoServer(t, { channel: 'main' });
+  const about = await (await fetch(fx.app.base + '/api/about')).json();
+  assert.equal(about.update.available, true, '원격 main이 앞서 있다(새 버전은 보인다 — 파란 점은 그대로)');
+  await sleep(2500);
+  assert.equal(fs.existsSync(fx.request), false, '요청 파일이 없다');
+  assert.equal(fs.existsSync(fx.record), false, '기록도 없다');
+  sameJson(about.update.auto, { eligible: false, on: true, notice: null }, '스위치도 오늘 탭 한 줄도 없다');
+
+  // 뜰 때는 stable이었는데 그 뒤 설정 파일만 main으로 바뀐 자리도 main으로 본다
+  const later = await startAutoServer(t, { idleMs: 60 * 60 * 1000 });
+  fs.writeFileSync(path.join(later.clone, 'workspace.config.json'), JSON.stringify({ server: { updateChannel: 'main' } }));
+  const view = await (await fetch(later.app.base + '/api/about?cached=1')).json();
+  sameJson(view.update.auto, { eligible: false, on: true, notice: null });
+});
+
+test('WP-U 자동 업데이트: git worktree가 둘이면(만든 사람의 개발 저장소) stable이어도 요청하지 않고 스위치·한 줄도 없다', { skip: !gitReady }, async (t) => {
+  const fx = remoteFixture(t);
+  runGit(fx.clone, ['worktree', 'add', '-q', '--detach', path.join(fx.root, 'second')]);
+  const agents = fx.env.WORKSPACE_LAUNCH_AGENTS_DIR;
+  fs.mkdirSync(agents, { recursive: true });
+  fs.writeFileSync(path.join(agents, 'com.workspace.app.update.plist'), '<plist/>\n');
+  const app = await startAppServer(t, {
+    ...fx.env, WORKSPACE_MANAGED: '1', WORKSPACE_CHECKIN: '0', WORKSPACE_LOCAL_DIR: path.join(fx.clone, 'local'),
+    WORKSPACE_AUTO_UPDATE_TICK_MS: '200', WORKSPACE_AUTO_UPDATE_IDLE_MS: '0',
+  });
+  const about = await (await fetch(app.base + '/api/about')).json();
+  assert.equal(about.update.available, true);
+  await sleep(2500);
+  assert.equal(fs.existsSync(path.join(fx.env.WORKSPACE_AUTOMATION_DIR, 'requests', 'update.request')), false, '요청 파일이 없다');
+  assert.equal(fs.existsSync(path.join(fx.clone, 'local', 'auto-update.json')), false);
+  sameJson(about.update.auto, { eligible: false, on: true, notice: null });
+});
+
+test('WP-U 쉬는 중: 사람의 쓰기(POST)가 이어지면 기다리고, 목록 새로 받기(GET)·슬랙 수집(/api/import)은 사람의 동작으로 세지 않는다', { skip: !gitReady }, async (t) => {
+  const fx = await startAutoServer(t, { idleMs: 2500 });
+  const send = (route, body) => fetch(fx.app.base + route, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  // 3.5초 동안 0.4초마다 사람의 쓰기(바꿀 것이 없는 꾸미기 저장 — 400이고 아무것도 쓰지 않는다)
+  const until = Date.now() + 3500;
+  while (Date.now() < until) {
+    await send('/api/personalize', {});
+    await sleep(400);
+  }
+  assert.equal(fs.existsSync(fx.request), false, '쓰는 동안은 요청하지 않는다');
+  // 이제 GET과 슬랙 수집만 계속 온다 — 그래도 쉬는 중이다
+  let seen = false;
+  const deadline = Date.now() + 8000;
+  while (Date.now() < deadline && !seen) {
+    await fetch(fx.app.base + '/api/items');
+    await send('/api/import', {});
+    await sleep(300);
+    seen = fs.existsSync(fx.request);
+  }
+  assert.equal(seen, true, 'GET·/api/import만 오면 쉬는 중으로 보고 요청한다');
+});
+
+test('WP-U 자동이 안 될 때 오늘 탭 한 줄의 이유: 에이전트 없음 → not-installed, 꺼짐 → off (둘 다 요청 없음)', { skip: !gitReady }, async (t) => {
+  const missing = await startAutoServer(t, { plist: false });
+  await sleep(1000);
+  assert.equal(fs.existsSync(missing.request), false);
+  const aboutMissing = await (await fetch(missing.app.base + '/api/about')).json();
+  sameJson(aboutMissing.update.auto, { eligible: true, on: true, notice: 'not-installed' });
+
+  const off = await startAutoServer(t, { idleMs: 60 * 60 * 1000 });
+  const config = () => JSON.parse(fs.readFileSync(path.join(off.clone, 'workspace.config.json'), 'utf8'));
+  const save = body => fetch(off.app.base + '/api/personalize', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const saved = await (await save({ autoUpdate: false })).json();
+  assert.equal(saved.ok, true);
+  assert.equal(config().server.autoUpdate, false, '끄면 server.autoUpdate: false');
+  assert.equal(config().server.updateChannel, 'stable', '다른 키는 그대로');
+  const aboutOff = await (await fetch(off.app.base + '/api/about?cached=1')).json();
+  sameJson(aboutOff.update.auto, { eligible: true, on: false, notice: 'off' });
+  // 다시 켜면 그 칸을 지운다(기본 켜짐)
+  await save({ autoUpdate: true });
+  assert.equal('autoUpdate' in config().server, false);
+  assert.equal((await save({ autoUpdate: 'no' })).status, 400, '참/거짓만 받는다');
+  assert.equal(fs.existsSync(off.request), false);
+});
+
+test('WP-U 개발용 서버(WORKSPACE_MANAGED 없음)는 자동으로 요청하지 않고 스위치·한 줄도 없다', { skip: !gitReady }, async (t) => {
+  const fx = remoteFixture(t);
+  const agents = fx.env.WORKSPACE_LAUNCH_AGENTS_DIR;
+  fs.mkdirSync(agents, { recursive: true });
+  fs.writeFileSync(path.join(agents, 'com.workspace.app.update.plist'), '<plist/>\n');
+  const app = await startAppServer(t, { ...fx.env, WORKSPACE_CHECKIN: '0', WORKSPACE_LOCAL_DIR: path.join(fx.clone, 'local'), WORKSPACE_AUTO_UPDATE_TICK_MS: '200', WORKSPACE_AUTO_UPDATE_IDLE_MS: '0' });
+  const about = await (await fetch(app.base + '/api/about')).json();
+  assert.equal(about.update.available, true);
+  await sleep(1500);
+  assert.equal(fs.existsSync(path.join(fx.env.WORKSPACE_AUTOMATION_DIR, 'requests', 'update.request')), false);
+  sameJson(about.update.auto, { eligible: false, on: true, notice: null });
+});

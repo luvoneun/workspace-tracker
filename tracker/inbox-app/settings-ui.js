@@ -156,7 +156,7 @@ function settingsVersionNewer(current, latest) {
   return false;
 }
 
-// `cached`면 서버가 원격에 새로 묻지 않고 가진 값만 준다(페이지를 열 때·6시간마다 파란 점을 켜는 길) — 뒤에서
+// `cached`면 서버가 원격에 새로 묻지 않고 가진 값만 준다(페이지를 열 때·1시간마다 파란 점을 켜는 길) — 뒤에서
 // 조용히 도는 길이라 못 읽어도 알림을 띄우지 않고 가진 값을 그대로 둔다.
 async function settingsAboutLoad({ cached = false } = {}) {
   if (cached) {
@@ -252,8 +252,10 @@ function settingsVersionRow() {
   files.hidden = true;
   const update = settingsSlot('settingsAboutUpdate', 'd-abwrap');
   update.hidden = true;
+  const auto = settingsSlot('settingsAutoUpdate', 'd-abauto');
+  auto.hidden = true;
   const history = settingsNewsHistorySkeleton();
-  const row = personalizeRow('버전', '워크스페이스', line, files, update, history);
+  const row = personalizeRow('버전', '워크스페이스', line, files, auto, update, history);
   row.dataset.row = 'version';
   return row;
 }
@@ -440,11 +442,57 @@ function settingsAboutFill() {
     history.hidden = !news.length;
   }
 
+  settingsAutoUpdateFill(info);
+
   // 도는 업데이트가 있으면(창을 다시 열었거나 앱 탭이 다시 그려졌을 때) 그 진행을 그대로 이어 보여 준다.
   if (settingsUpdateRun) { settingsUpdatePaint(settingsUpdateRun.view); return; }
   const offer = settingsUpdateOffer(info);
   settingsUpdatePaint(offer ? { kind: 'offer', offer } : { kind: 'none' });
   settingsUpdateResume();
+}
+
+// ---------- 설정 › 앱: 자동으로 업데이트 스위치(WP-U) ----------
+// 버전 줄 아래 한 칸. 서버가 자격을 준 자리(launchd 설치본 · main 갈래가 아님 — `update.auto.eligible`)에서만 보인다.
+// 기본 켜짐이고, 누르면 곧바로 `POST /api/personalize`(`autoUpdate` 한 키)로 저장한다. 부품은 꾸미기의 `화면에 보이기`와
+// 같은 `.d-ich`(label로 체크박스를 감싼다 — 키보드·스크린리더가 그대로 된다)를 재사용한다.
+function settingsAutoUpdateFill(info) {
+  const slot = document.getElementById('settingsAutoUpdate');
+  if (!slot) return;
+  const auto = info && info.update && info.update.auto;
+  slot.replaceChildren();
+  slot.hidden = !(auto && auto.eligible);
+  if (slot.hidden) return;
+  const box = document.createElement('input');
+  box.type = 'checkbox';
+  box.checked = auto.on !== false;
+  const text = document.createElement('span');
+  text.className = 't';
+  const label = document.createElement('b');
+  label.textContent = '자동으로 업데이트';
+  const note = document.createElement('span');
+  note.className = 'd-ismall sub';
+  note.textContent = '새 버전이 나오면 앱을 쓰지 않는 틈(10분 넘게 조용할 때)에 알아서 받아요 — 끄면 알림만 해요';
+  text.append(label, note);
+  const row = document.createElement('label');
+  row.className = 'd-ich' + (box.checked ? ' is-on' : '');
+  row.append(box, text);
+  box.addEventListener('change', async () => {
+    const want = box.checked;
+    row.classList.toggle('is-on', want);
+    box.disabled = true;
+    const answer = await settingsIntegrationAsk('/api/personalize', { autoUpdate: want }, '저장하지 못했어요');
+    box.disabled = false;
+    if (!answer.ok) {
+      box.checked = !want;
+      row.classList.toggle('is-on', !want);
+      showNotice(answer.error, true);
+      return;
+    }
+    showNotice(want ? '자동으로 업데이트해요' : '자동 업데이트를 껐어요 — 새 버전이 나오면 알려만 드려요');
+    await settingsAboutLoad({ cached: true });
+    if (typeof renderUpdateNotice === 'function') renderUpdateNotice();
+  });
+  slot.appendChild(row);
 }
 
 // ---------- 설정 › 앱: 앱 안에서 업데이트 받기(시안 J) ----------
@@ -522,7 +570,7 @@ function settingsUpdateNodes(view) {
     const text = document.createElement('span');
     text.className = 'tx';
     const label = view.offer.label;
-    text.textContent = label && label !== 'main' ? `새 버전 ${label}이 있어요` : '새 버전이 있어요 (main)';
+    text.textContent = label && label !== 'main' ? `새 버전 ${typeof updateNoticeLabel === 'function' ? updateNoticeLabel(label) : `${label}이`} 있어요` : '새 버전이 있어요 (main)';
     box.appendChild(text);
     // 원격(그 태그)의 소식.md에서 읽은 줄(WP-J) — 못 읽었으면 줄 없이 지금처럼.
     if (Array.isArray(view.offer.news) && view.offer.news.length) box.appendChild(newsListNode(view.offer.news));

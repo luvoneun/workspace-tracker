@@ -44,7 +44,7 @@ module.exports = function personalizeRoutes(req, res, url, ctx) {
     return true;
   }
 
-  // 이름 저장(`title`·`server.dockName`·`titleHidden`만). 제목은 곧바로 화면에 쓰이고, 앱 이름은 manifest가
+  // 이름 저장(`title`·`server.dockName`·`titleHidden`, 그리고 설정 › 앱의 `server.autoUpdate` 스위치만). 제목은 곧바로 화면에 쓰이고, 앱 이름은 manifest가
   // 다음에 읽을 때 쓰인다. 파일을 따로 만들지 않는다(요청 표시 파일도 없다).
   if (url.pathname === '/api/personalize' && req.method === 'POST') {
     readBody(req)

@@ -1285,8 +1285,10 @@ document.addEventListener('keydown', (event) => {
 
 async function load() {
   let res;
-  try { res = await request('/api/items'); } catch { refreshStorageStatus(); return; }
+  try { res = await request('/api/items'); } catch { refreshStorageStatus(); updateBusyCheck(); return; }
   const data = await res.json();
+  updatingSeenAt = data.updating ? Date.now() : 0;
+  updateBusySince = 0;
   renderStorageBanner(data.storage);
   itemsById = new Map(['todayTasks', 'laterTasks', 'waiting', 'decisions', 'decisionArchive', 'ideas']
     .flatMap(key => data[key] || []).map(item => [item.id, item]));
@@ -1311,6 +1313,7 @@ async function load() {
   renderCalendar(data.calendar);
   renderSuggestions(data.suggestions);
   renderInbox(data.inboxTasks || []);
+  renderUpdateNotice();
   renderNewsCard();
   renderGuideCard();
   renderLaterTasks(data.laterTasks || []);
@@ -3886,6 +3889,90 @@ function renderNewsCard() {
   zone.appendChild(card);
 }
 
+// ---------- 새 버전 한 줄 (WP-U, 오늘 탭 맨 위) ----------
+// 새 버전은 보통 서버가 쉬는 틈에 알아서 받는다. 자동이 안 되는 때(스위치 꺼짐·지난 자동 업데이트 실패·폴더 옮기기 필요·
+// 고친 파일·update 에이전트 없음·요청이 10분 넘게 처리되지 않음·처음 본 뒤 하루 넘게 안 깔림 — 서버가 `update.auto.notice`로
+// 알린다)에만 소식 카드 자리 규칙대로 맨 위에 한 줄을 세운다.
+// 닫으면 그 버전 동안 이 브라우저에 기억한다(localStorage `updateNoticeClosed` — 막혀 있으면 이 창이 열려 있는 동안만).
+const UPDATE_NOTICE_KEY = 'updateNoticeClosed';
+let updateNoticeClosedHere = null;
+function updateNoticeClosed() {
+  if (updateNoticeClosedHere !== null) return updateNoticeClosedHere;
+  try { return localStorage.getItem(UPDATE_NOTICE_KEY); } catch { return null; }
+}
+function updateNoticeClose(key) {
+  updateNoticeClosedHere = key;
+  try { localStorage.setItem(UPDATE_NOTICE_KEY, key); } catch { /* 막혀 있으면 이 창이 열려 있는 동안만 기억한다 */ }
+}
+// `v1.2.2가`·`v1.2.1이` — 끝 숫자를 읽는 소리로 조사를 고른다(2·4·5·9는 받침이 없다).
+const updateNoticeLabel = label => `${label}${/[2459]$/.test(label) ? '가' : '이'}`;
+function renderUpdateNotice() {
+  const zone = document.getElementById('updateNoticeZone');
+  if (!zone) return;
+  const info = typeof settingsAbout === 'object' ? settingsAbout : null;
+  const update = info && info.update;
+  const reason = update && update.available && update.auto ? update.auto.notice : null;
+  const label = update && typeof update.label === 'string' && update.label !== 'main' ? update.label : '';
+  const kind = ['failed', 'stuck', 'stale'].includes(reason) ? reason : 'offer';
+  const key = `${label}:${kind}`;
+  if (!reason || !label || updateNoticeClosed() === key) {
+    zone.hidden = true;
+    zone.replaceChildren();
+    return;
+  }
+  zone.hidden = false;
+  if (zone.dataset.key === key && zone.children.length) return; // 이미 떠 있으면 다시 만들지 않는다(누르려던 초점이 사라지지 않게)
+  zone.dataset.key = key;
+  // 실패·요청이 처리되지 않음은 빨간 판 + 설정 › 앱 열기, 그 밖(꺼짐·옮기기·고친 파일·에이전트 없음·하루 넘게)은 새 버전 판 + 업데이트 받기.
+  const failed = kind === 'failed' || kind === 'stuck';
+  const line = document.createElement('div');
+  line.className = `${failed ? 'd-abfail' : 'd-abupd'} d-updnote`;
+  line.setAttribute('role', 'region');
+  line.setAttribute('aria-label', '새 버전 알림');
+  const text = document.createElement('span');
+  text.className = 'tx';
+  text.textContent = {
+    failed: '자동 업데이트가 멈췄어요 — 설정 › 앱에서 확인해 주세요',
+    stuck: '업데이트 요청이 처리되지 않았어요 — 설정 › 앱에서 확인해 주세요',
+    stale: `새 버전 ${updateNoticeLabel(label)} 하루 넘게 설치되지 않았어요`,
+  }[kind] || `새 버전 ${updateNoticeLabel(label)} 있어요`;
+  const go = document.createElement('button');
+  go.type = 'button';
+  go.className = failed ? 'd-btn sm' : 'd-btn sm pri';
+  go.textContent = failed ? '설정 › 앱 열기' : '업데이트 받기';
+  go.addEventListener('click', () => { if (typeof settingsOpen === 'function') settingsOpen('app'); });
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'd-btn sm';
+  close.textContent = '닫기';
+  close.setAttribute('aria-label', '새 버전 알림 닫기');
+  close.addEventListener('click', () => { updateNoticeClose(key); renderUpdateNotice(); document.getElementById('todayTaskZone')?.focus?.(); });
+  line.append(text, go, close);
+  zone.replaceChildren(line);
+}
+
+// ---------- 받는 동안 (WP-U) ----------
+// 업데이트 끝에 서버가 1분쯤 다시 켜진다. 그 사이 목록을 못 받으면 `목록을 불러오지 못했어요` 대신 바꾸는 중이라고 말하고,
+// 15초마다 다시 받는다(최대 3분). 서버가 돌아오면 load()의 appVersion 비교가 입력 중이 아닐 때 새로고침한다 → 소식 카드.
+// 업데이트 중인지는 `/api/update/status`로 묻고, 서버가 아예 없으면 마지막 목록이 알려 준 `updating`(10분 안)을 믿는다.
+const UPDATE_BUSY_TEXT = '새 버전으로 바꾸는 중이에요 — 1분쯤 걸려요';
+let updatingSeenAt = 0;
+let updateBusySince = 0;
+let updateBusyTimer = null;
+async function updateBusyCheck() {
+  let running = null;
+  try {
+    const response = await fetch('/api/update/status', { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(3000) });
+    if (response.ok) running = !!(await response.json()).running;
+  } catch { running = null; }
+  const busy = running === true || (running === null && updatingSeenAt && Date.now() - updatingSeenAt < 10 * 60 * 1000);
+  if (!busy) { updateBusySince = 0; return; }
+  updateBusySince = updateBusySince || Date.now();
+  showNotice(UPDATE_BUSY_TEXT);
+  if (updateBusyTimer || Date.now() - updateBusySince > 3 * 60 * 1000) return;
+  updateBusyTimer = setTimeout(() => { updateBusyTimer = null; load(); }, 15 * 1000);
+}
+
 // ---------- 사용설명서 카드 (오늘 탭) ----------
 // 닫기 전까지는 **늘** `새로 들어온 것` 자리에 선다(기록이 있든 없든). 닫으면 config가 아니라 이 브라우저에
 // 기억하고(localStorage `guideCardClosed` — 막혀 있으면 이 창이 열려 있는 동안만), 같은 네 줄은
@@ -4929,12 +5016,13 @@ setInterval(() => {
 load().finally(() => { if (typeof checkinStart === 'function') checkinStart(); });
 refreshStorageStatus(); // 목록을 못 불러오는 상황에서도 저장이 멈춘 이유는 보이게
 fetchAutomationStatus(); // 설정을 열어보지 않아도 톱니바퀴에 실패 여부가 바로 보이게
-// 새 버전(톱니바퀴의 파란 점)도 설정을 열지 않고 보이게 — 페이지를 열 때 한 번, 그 뒤 6시간마다 서버가 이미 가진
-// 값만 읽는다(`?cached=1` — 원격에 새로 묻는 것은 서버의 6시간 주기 그대로).
+// 새 버전(톱니바퀴의 파란 점)도 설정을 열지 않고 보이게 — 페이지를 열 때 한 번, 그 뒤 1시간마다 서버가 이미 가진
+// 값만 읽는다(`?cached=1` — 원격에 새로 묻는 것은 서버의 1시간 주기 그대로). 읽을 때마다 오늘 탭 한 줄(WP-U)도 다시 그린다.
 settingsAboutLoad({ cached: true }).then((about) => {
   // 서버가 막 떠서 첫 확인이 아직 돌고 있었으면 1분 뒤 한 번만 더 읽는다.
   const update = about && about.update;
-  if (update && !update.available && !update.checkedAt) setTimeout(() => settingsAboutLoad({ cached: true }), 60 * 1000);
+  if (update && !update.available && !update.checkedAt) setTimeout(() => settingsAboutLoad({ cached: true }).then(renderUpdateNotice), 60 * 1000);
   renderNewsCard(); // load()는 이 값이 오기 전에 먼저 돌 수 있어 여기서도 한 번 더 그린다(WP-J).
+  renderUpdateNotice();
 });
-setInterval(() => settingsAboutLoad({ cached: true }), 6 * 60 * 60 * 1000);
+setInterval(() => settingsAboutLoad({ cached: true }).then(renderUpdateNotice), 60 * 60 * 1000);

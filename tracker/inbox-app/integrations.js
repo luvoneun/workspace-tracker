@@ -719,13 +719,13 @@ function registrationKey(config) {
 
 // ---------- 설정 › 꾸미기(이 맥에만) ----------
 // 여기서도 **아는 키만** 바꾼다: `title`(화면 헤더·탭 제목)·`server.dockName`(앱 이름 — 크롬 앱 manifest, 키 이름은 옛 설정 호환)·
-// `titleHidden`(헤더의 제목만 숨기는 스위치 — 값·앱 이름은 그대로 둔다).
+// `titleHidden`(헤더의 제목만 숨기는 스위치 — 값·앱 이름은 그대로 둔다) · `server.autoUpdate`(설정 › 앱의 자동 업데이트 스위치, WP-U).
 // 저장 방식은 연동 저장과 같다(파일을 새로 읽어 그 위에 얹고, 원자적 교체).
 async function savePersonalize({ configPath, current = {}, body = {}, write = atomicWrite } = {}) {
   const personalize = require('./personalize');
   if (!body || typeof body !== 'object') throw bad(MESSAGE.other);
   const next = { ...current };
-  const changed = { title: false, dockName: false, titleHidden: false };
+  const changed = { title: false, dockName: false, titleHidden: false, autoUpdate: false };
   let touched = false;
   if (body.title !== undefined) {
     const title = personalize.checkTitle(body.title);
@@ -744,6 +744,15 @@ async function savePersonalize({ configPath, current = {}, body = {}, write = at
     if (typeof body.titleHidden !== 'boolean') throw bad(MESSAGE.other);
     changed.titleHidden = body.titleHidden !== (current.titleHidden === true);
     next.titleHidden = body.titleHidden;
+    touched = true;
+  }
+  // 설정 › 앱의 `자동으로 업데이트`(WP-U) — 끄면 `server.autoUpdate: false`, 켜면 그 칸을 지운다(기본 켜짐).
+  if (body.autoUpdate !== undefined) {
+    if (typeof body.autoUpdate !== 'boolean') throw bad(MESSAGE.other);
+    const server = { ...clone(next.server) };
+    changed.autoUpdate = body.autoUpdate !== (server.autoUpdate !== false);
+    if (body.autoUpdate) delete server.autoUpdate; else server.autoUpdate = false;
+    next.server = server;
     touched = true;
   }
   if (!touched) throw bad(personalize.PERSONALIZE_MESSAGE.nothing);

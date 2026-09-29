@@ -2332,6 +2332,13 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-newsver .hd small { margin-left: 6px; font-weight: 400; color: var(--dim); }
 /* 오늘 탭 소식 카드 — 사용설명서 카드와 같은 따뜻한 판(.d-start)을 그대로 쓴다. */
 .d-newscard { margin-bottom: 18px; }
+/* 오늘 탭 새 버전 한 줄(WP-U) — 설정 › 앱의 새 버전 상자(.d-abupd)·실패 상자(.d-abfail)를 그대로 쓰고 한 줄로만 눕힌다. */
+.d-updnote { margin-bottom: 18px; }
+.d-updnote .tx { flex: 1 1 200px; }
+@media (max-width: 520px) { .d-updnote .tx { flex-basis: 100%; } }
+/* 설정 › 앱 버전 줄 아래 `자동으로 업데이트` 스위치(WP-U) — 꾸미기의 `.d-ich` 그대로, 위아래 숨만 둔다. */
+.d-abauto { margin: 8px 0; }
+.d-abauto .d-ich { grid-template-columns: 20px minmax(0, 1fr); }
 
 /* 연동 카드 — 자동화 줄(.d-auto)과 같은 리듬: 이름 · 칩 | 상태 · ⋯ · 버튼 / 한 줄 효용 / 준비물 줄 / 펼치는 자리.
    펼친 자리(.d-intgbody)는 --field 판 위에 한 번에 한 단계만(카드 안 위저드). */
