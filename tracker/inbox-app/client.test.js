@@ -6493,10 +6493,11 @@ test('WP-D1 A. 목록: 카드 차례는 슬랙 수집 → 지라 → 캘린더 �
   same(kids.slice(1, 5).map(one => one.dataset.integration), ['slack', 'jira', 'calendar', 'notes']);
 
   const chips = ['slack', 'jira', 'calendar', 'notes'].map(kind => fx.find(kind, 'd-itag')[0]);
-  same(chips.map(chip => chip.textContent), ['Claude Code 필요', '누구나', '누구나 · Claude', '누구나 · Claude']);
+  // 슬랙은 원문 그대로 모드가 생겨 Claude 없이도 쓴다(2026-09-29) — 캘린더·회의록과 같은 `누구나 · Claude`.
+  same(chips.map(chip => chip.textContent), ['누구나 · Claude', '누구나', '누구나 · Claude', '누구나 · Claude']);
   assert.ok(chips.every(chip => chip.className === 'd-itag'), '칩 색은 하나로 통일한다(주황 칩 없음)');
 
-  assert.match(fx.text('slack'), /^슬랙 수집Claude Code 필요연결하기나만 보는 채널에 공유한 메시지가 할 일로 들어와요5분 · 팀 슬랙 앱 토큰 하나/);
+  assert.match(fx.text('slack'), /^슬랙 수집누구나 · Claude연결하기나만 보는 채널에 공유한 메시지가 할 일로 들어와요5분 · 팀 슬랙 앱 토큰 하나/);
   assert.match(fx.text('jira'), /^지라누구나연결하기내 티켓이 프로젝트로 뜨고 상태·기한을 여기서 바꿔요3분 · Atlassian API 토큰 하나/);
   assert.match(fx.text('calendar'), /^캘린더누구나 · Claude연결하기오늘 회의가 뜨고 회의 정리가 열려요3분 · 비밀 주소 또는 Claude Code/);
   assert.match(fx.text('notes'), /^회의록누구나 · Claude바꾸기티로 회의록이 초안으로 들어와요 — 직접 옮기기도 돼요직접 옮기기 중/);
@@ -6538,7 +6539,7 @@ test('WP-D1 A·H. 연결된 카드는 무엇이 되고 있는지 한 줄 + ⋯(�
   assert.ok(!/해제/.test(fx.text('jira')), '큰 해제 버튼은 두지 않는다');
 
   const slackMenu = fx.menu('slack');
-  same(slackMenu.map(section => section.map(entry => entry.label)), [['보내는 법', '채널 고르기', '다시 연결(토큰 바꾸기)'], ['해제…']], '기록이 없으면 최근 기록 칸은 숨긴다');
+  same(slackMenu.map(section => section.map(entry => entry.label)), [['보내는 법', '채널 고르기', '다시 연결(토큰 바꾸기)', '정리 방식'], ['해제…']], '기록이 없으면 최근 기록 칸은 숨긴다');
   assert.equal(slackMenu[1][0].danger, true);
   const jiraMenu = fx.menu('jira');
   same(jiraMenu.map(section => section.map(entry => entry.label)), [['다시 연결(토큰 바꾸기)'], ['해제…']]);
@@ -7486,7 +7487,7 @@ test('도움말: 개념 사전 9개 + 쓰는 순서의 여섯 묶음 + 항목마
 
   // 슬랙이 필요한 것과 아무것도 필요 없는 것이 섞여 있어야 표지가 뜻을 갖는다
   const needs = new Set(entries.map(([, need]) => need));
-  assert.ok(needs.has('없음') && needs.has('지라 연결') && needs.has('슬랙 연결 + Claude Code'));
+  assert.ok(needs.has('없음') && needs.has('지라 연결') && needs.has('슬랙 연결'));
 
   // 맨 위는 `문제가 생겼어요`(WP-K 시안 D), 그다음 첫 문단은 "처음 한 주는 할 일만"이다
   app.run('renderSettingsGuide()');
@@ -8101,7 +8102,7 @@ test('WP-E C. ⋯ › 최근 기록: 시각 · 결과 한 줄(최근 10개, 실�
   fx.app.run(`automationStatusCache = [{ key: 'slack', tail: ['───── 2026-09-24 10:05:00 slack-capture 시작', '이번에 본 메시지 3개 = 등록 1 · 링크 중복 2 · 비슷한 일이라 건너뜀 0 · 시스템 0', '───── 2026-09-24 10:05:30 slack-capture 종료 (exit 0)'] }];`);
   await fx.app.run('renderSettingsIntegrations()');
   const slackMenu = fx.menu('slack');
-  same(slackMenu.map(section => section.map(entry => entry.label)), [['최근 기록', '보내는 법', '채널 고르기', '다시 연결(토큰 바꾸기)'], ['해제…']]);
+  same(slackMenu.map(section => section.map(entry => entry.label)), [['최근 기록', '보내는 법', '채널 고르기', '다시 연결(토큰 바꾸기)', '정리 방식'], ['해제…']]);
   same(fx.menu('calendar').map(section => section.map(entry => entry.label)), [['다시 연결(주소 바꾸기)'], ['해제…']], '기록이 없으면 칸을 숨긴다');
   slackMenu[0][0].onClick();
   const list = fx.find('slack', 'd-ilog')[0];
@@ -9039,4 +9040,82 @@ test('아이디어 줄: 평소 두 줄, 문구를 누르거나 Enter면 그 자�
   assert.doesNotMatch(String(row.className), /is-open/);
   title.listeners.keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
   assert.match(String(row.className), /is-open/);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 슬랙 원문 그대로 모드 — 설정 › 연동 › 슬랙 카드의 정리 방식 (2026-09-29)
+
+const RAW_SLACK = {
+  enabled: true, hasToken: true, readAt: ago(5), tidy: 'raw',
+  channels: { todo: { id: 'C1', name: '#my-todo' }, waiting: { id: 'C2', name: '#my-waiting' }, align: { id: '', name: '' }, someday: { id: '', name: '' } },
+};
+
+test('원문 모드 카드: 상태 줄에 방식, 주의 한 줄, ⋯ › 정리 방식은 세그먼트(Claude 없으면 흐리게 + 필요 표시)', async () => {
+  const fx = intgClient({ slack: RAW_SLACK, claude: false });
+  await fx.app.run('renderSettingsIntegrations()');
+  assert.equal(stText(fx, 1), '● 원문 그대로 받는 중 · #my-todo 외 1개 · 5분 전 읽음');
+  assert.match(fx.text('slack'), /요약하지 않고 메시지 첫 줄을 그대로 넣어요\. 문구가 길거나 정확하지 않을 수 있으니, 필요하면 앱에서 고쳐 주세요\./);
+  assert.doesNotMatch(fx.text('slack'), /이제 Claude로 다듬을 수 있어요|원문 그대로로 바꾸기/);
+
+  await fx.menu('slack')[0].find(entry => entry.label === '정리 방식').onClick();
+  const seg = fx.app.run("window.findByClass(document.getElementById('settingsIntegrationsView').children[1], 'd-seg')[0]");
+  assert.equal(seg.getAttribute('role'), 'radiogroup');
+  const [raw, claude] = seg.children;
+  same([raw.textContent, raw.getAttribute('aria-checked'), claude.textContent, claude.getAttribute('aria-checked'), !!claude.disabled],
+    ['원문 그대로', 'true', 'Claude로 다듬기', 'false', true]);
+  assert.match(fx.text('slack'), /Claude Code가 있어야 해요/);
+  assert.match(fx.text('slack'), /방식을 바꿔도 이미 들어온 항목은 그대로예요/);
+  const before = fx.sent.length;
+  await claude.listeners.click();
+  assert.equal(fx.sent.length, before, '흐린 칸은 눌러도 저장하지 않는다');
+});
+
+test('원문 모드 카드: Claude가 생기면 조용히 알리고, 정리 방식을 바꾸면 그 칸만 저장·다시 켜지 않고 알림만', async () => {
+  const fx = intgClient({ slack: RAW_SLACK, claude: true }, [{ body: { ok: true, slack: { tidy: 'claude' }, restart: false, quiet: true } }]);
+  await fx.app.run('renderSettingsIntegrations()');
+  assert.match(fx.text('slack'), /이제 Claude로 다듬을 수 있어요 · 정리 방식/);
+  await fx.button('slack', '정리 방식').listeners.click();
+  const seg = fx.app.run("window.findByClass(document.getElementById('settingsIntegrationsView').children[1], 'd-seg')[0]");
+  assert.equal(!!seg.children[1].disabled, false);
+  await seg.children[1].listeners.click();
+  const saved = fx.sent.find(one => one.url === '/api/integrations/save');
+  same(saved.body, { slack: { tidy: 'claude' } });
+  assert.equal(fx.live(), '이제 Claude로 다듬어서 받아요', '다시 켜지 않는 저장이라 "서버를 다시 켜면" 말이 붙지 않는다');
+});
+
+test('Claude로 다듬는 중인데 Claude가 없거나 로그인이 풀려 멈췄으면 `원문 그대로로 바꾸기`(자동 전환 없음), 평소에는 예전 그대로', async () => {
+  const base = { ...RAW_SLACK, tidy: 'claude' };
+  const calm = intgClient({ slack: base, claude: true });
+  await calm.app.run('renderSettingsIntegrations()');
+  assert.equal(stText(calm, 1), '● #my-todo 외 1개 · 5분 전 읽음', 'Claude로 다듬는 중이면 상태 줄은 예전 그대로');
+  assert.doesNotMatch(calm.text('slack'), /원문 그대로|요약하지 않고/);
+
+  const missing = intgClient({ slack: base, claude: false }, [{ body: { ok: true, slack: { tidy: 'raw' }, restart: false, quiet: true } }]);
+  await missing.app.run('renderSettingsIntegrations()');
+  assert.match(missing.text('slack'), /이 맥에 Claude Code가 없어 메시지를 다듬지 못해요 · 원문 그대로로 바꾸기/);
+  assert.equal(missing.sent.filter(one => one.url === '/api/integrations/save').length, 0, '저절로 바꾸지 않는다');
+  await missing.button('slack', '원문 그대로로 바꾸기').listeners.click();
+  same(missing.sent.find(one => one.url === '/api/integrations/save').body, { slack: { tidy: 'raw' } });
+  assert.equal(missing.live(), '이제 원문 그대로 받아요');
+
+  const expired = intgClient({ slack: { ...base, fetch: { failing: true, auth: false, claudeAuth: true, failedAt: ago(7) } }, claude: true });
+  await expired.app.run('renderSettingsIntegrations()');
+  assert.match(expired.text('slack'), /Claude Code 로그인이 풀려 메시지를 다듬지 못하고 있어요 · 원문 그대로로 바꾸기/);
+
+  // 아직 연결 전이고 Claude가 없으면 원문으로 받는다는 사실만 한 줄
+  const fresh = intgClient({ claude: false });
+  await fresh.app.run('renderSettingsIntegrations()');
+  assert.match(fresh.text('slack'), /이 맥에는 Claude Code가 없어서 요약하지 않고 메시지 첫 줄을 그대로 받아요/);
+});
+
+test('긴 문구: 업무 줄 제목은 두 줄까지(말줄임) — 줄 높이 안에 들어가고, 도움말에 원문 모드 문답', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /\.d-row \.d-title \{ white-space: normal; text-overflow: clip; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; \}/);
+  assert.match(css, /--row: 54px;/, '두 줄(25px × 2)이 줄 높이 안에 들어간다');
+  const app = pureClient();
+  const faq = JSON.parse(app.run('JSON.stringify(SETTINGS_FAQ)')).flatMap(([, rows]) => rows);
+  const entry = faq.find(([question]) => question === '슬랙에서 온 할 일이 요약되지 않고 길게 들어와요');
+  assert.ok(entry);
+  assert.match(entry[2], /원문 그대로.*정확하지 않을 수 있어요.*Claude Code.*Claude로 다듬기/);
+  assert.ok(entry[2].length <= 260);
 });

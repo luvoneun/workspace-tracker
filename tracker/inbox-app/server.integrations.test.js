@@ -1082,3 +1082,64 @@ test('Claude 로그인 풀림 판단은 claude 자신의 로그인 문구만 —
     assert.equal(CLAUDE_AUTH_RE.test(other), false, other);
   }
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 슬랙 정리 방식(`slack.tidy`: claude | raw) — 2026-09-29 원문 그대로 모드
+
+test('슬랙 정리 방식: 처음 연결할 때만 이 맥의 Claude Code로 기본을 정하고, 이미 연결했던 설정(칸 없음)은 claude 그대로다', async (t) => {
+  const connect = async (seed, claude) => {
+    const fix = integrationsFixture(t, seed);
+    const { result } = await integrationsStore.saveIntegrations({
+      configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir, claude,
+      body: { slack: { enabled: true, token: 'slack-secret', channels: { todo: 'C0TODO11' } } },
+      slackCheck: async () => ({ name: 'my-todo', isPrivate: true }),
+    });
+    return { saved: fix.read(), result, read: integrationsStore.readIntegrations(fix.read(), { tokenDir: fix.tokenDir }) };
+  };
+  const noClaude = await connect({}, false);
+  assert.equal(noClaude.saved.slack.tidy, 'raw', 'Claude가 없으면 원문 그대로로 시작한다');
+  assert.equal(noClaude.result.slack.tidy, 'raw');
+  assert.equal(noClaude.read.slack.tidy, 'raw');
+  const withClaude = await connect({ slack: { channels: { todo: { id: '여기에_채널ID' } } } }, true);
+  assert.equal(withClaude.saved.slack.tidy, 'claude', 'Claude가 있으면 예전처럼 다듬는다(예시 자리표시자만 있으면 처음 연결)');
+  // 예외 9: 이미 연결했던 사람(채널 있음·tidy 칸 없음)은 Claude가 없어도 칸을 적지 않는다 — 읽으면 claude(동작 변화 0)
+  const old = await connect({ slack: { channels: { todo: { id: 'C0OLD111', name: '#옛' } } } }, false);
+  assert.equal(old.saved.slack.tidy, undefined, '칸을 새로 적지 않는다');
+  assert.equal(old.read.slack.tidy, 'claude');
+  assert.equal(old.result.slack.tidy, undefined);
+  // 이미 고른 값은 다시 연결해도 그대로
+  const kept = await connect({ slack: { tidy: 'raw', channels: {} } }, true);
+  assert.equal(kept.saved.slack.tidy, 'raw');
+  assert.equal(integrationsStore.readIntegrations({}, {}).slack.tidy, 'claude', '칸이 없으면 claude로 읽는다');
+  assert.equal(integrationsStore.readIntegrations({ slack: { tidy: '이상한 값' } }, {}).slack.tidy, 'claude');
+});
+
+test('슬랙 정리 방식만 바꾸는 저장: 그 칸 하나만 쓰고(슬랙에 묻지 않음·다시 켜지 않음), claude는 Claude Code가 있을 때만 받는다', async (t) => {
+  const seed = {
+    title: '그대로', integrations: { slack: true },
+    slack: { tokenFile: '~/.config/workspace-slack-token', workspaceUrl: 'https://team.slack.com', channels: { todo: { id: 'C0TODO11', name: '#my-todo', since: '1.000000' } } },
+  };
+  const fix = integrationsFixture(t, seed);
+  const asked = [];
+  const save = (body, claude) => integrationsStore.saveIntegrations({
+    configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir, body, claude,
+    slackCheck: async () => { asked.push('slack'); return { name: 'x' }; },
+  });
+  const raw = await save({ slack: { tidy: 'raw' } }, false);
+  assert.equal(raw.quiet, true, '정리 방식만 바꾸면 서버를 다시 켜지 않는다');
+  assert.deepEqual(raw.result.slack, { tidy: 'raw' });
+  // 예외 10: 방식 전환은 설정의 그 칸만 바꾼다 — 채널·토큰 경로·다른 값은 그대로(이미 들어온 항목은 업무 데이터라 건드릴 길이 없다)
+  assert.deepEqual(fix.read(), { ...seed, slack: { ...seed.slack, tidy: 'raw' } });
+  assert.equal(integrationsStore.registrationKey(fix.read()), integrationsStore.registrationKey(seed), 'launchd 등록 값과 무관하다');
+  assert.deepEqual(asked, [], '슬랙에 묻지 않는다');
+  const before = fs.readFileSync(fix.configPath, 'utf8');
+  await assert.rejects(() => save({ slack: { tidy: 'claude' } }, false), /Claude Code가 있어야 해요/);
+  await assert.rejects(() => save({ slack: { tidy: 'summary' } }, true), /보낸 값을 확인해 주세요/);
+  assert.equal(fs.readFileSync(fix.configPath, 'utf8'), before, '거절하면 한 글자도 바꾸지 않는다');
+  const back = await save({ slack: { tidy: 'claude' } }, true);
+  assert.equal(fix.read().slack.tidy, 'claude');
+  assert.equal(back.quiet, true);
+  // 다른 연동과 함께 저장하면 예전처럼 다시 켠다
+  const mixed = await save({ slack: { tidy: 'raw' }, meetingNotes: { mode: 'manual' } }, true);
+  assert.equal(mixed.quiet, false);
+});

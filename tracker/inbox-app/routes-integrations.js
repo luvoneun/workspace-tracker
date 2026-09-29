@@ -108,20 +108,23 @@ module.exports = function integrationsRoutes(req, res, url, ctx) {
         configPath: CONFIG_PATH,
         current: (before = currentConfigFile()),
         body,
+        // 슬랙 정리 방식: 처음 연결할 때 Claude Code가 없으면 원문 그대로, `Claude로 다듬기`는 있을 때만 받는다.
+        claude: claudeReady(),
         jiraCheck: settings => require('./jira-client').checkJiraAccount(settings),
         slackCheck: (token, id) => integrations.slackCheckChannel(token, id),
         // 비밀 주소는 한 번 읽어 오늘 일정 수만 센다(10초 제한). 주소는 응답·로그에 남지 않는다.
         calendarCheck: address => integrations.icalCheck(address),
       }))
-      .then(({ result, config }) => {
-        const managed = !!process.env.WORKSPACE_MANAGED;
+      .then(({ result, config, quiet }) => {
+        // 정리 방식만 바꾼 저장(`quiet`)은 다시 켜지 않는다 — 수집이 회차마다 설정을 읽는다.
+        const managed = !!process.env.WORKSPACE_MANAGED && !quiet;
         // 등록에 영향을 주는 값이 바뀌었을 때만 켠 연동 자동 등록을 요청한다(요청 파일만 — 실패해도 저장은 끝났다).
         let apply = null;
         if (integrations.registrationKey(before) !== integrations.registrationKey(config)) {
           try { apply = requestApply(); } catch { apply = 'failed'; }
         }
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ...result, restart: managed, ...(apply ? { apply } : {}) }));
+        res.end(JSON.stringify({ ...result, restart: managed, ...(quiet ? { quiet: true } : {}), ...(apply ? { apply } : {}) }));
         integrations.scheduleRestart({ managed, exit: ctx.exitApp });
       })
       .catch((error) => {

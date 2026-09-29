@@ -19,6 +19,22 @@ test('edited sentences survive new evidence; proposal is explicit',t=>{
   const row=f.view().rows[0];assert.equal(row.text,'가입 문구 검토 완료');assert.equal(row.suggestion.added,1);
   f.change({action:'acknowledge',id});assert.equal(f.view().rows[0].text,'가입 문구 검토 완료');assert.equal(f.view().rows[0].suggestion,undefined);assert.equal(f.view().rows[0].sourceIds.length,2);
 });
+test('슬랙 원문처럼 긴 할 일 문구는 첫 문장(또는 80자)까지만 보고 문장이 되고, 짧은 문구·근거는 그대로다',t=>{
+  const f=fixture(t);
+  const long='결제 화면 오류 문의 대응하기. 고객센터에서 받은 스크린샷 세 장과 재현 절차를 정리해 두었어요! 다음 주 배포 전에 꼭 확인하고 담당자에게 다시 알려 주세요';
+  f.items[0]={...f.items[0],description:long,status:'to-do',doing:'2026-09-15',completed:undefined};
+  f.items.push({id:'v',type:'task',description:'v2.1 배포 확인하기',status:'done',created:'2026-09-14',completed:'2026-09-15',group:'배포'});
+  f.items.push({id:'n',type:'task',description:'가'.repeat(120),status:'to-do',doing:'2026-09-15',created:'2026-09-14',group:'긴 글'});
+  f.items.push({id:'s',type:'task',description:'1. 기획서 정리 2. 공유하기',status:'to-do',doing:'2026-09-15',created:'2026-09-14',group:'짧은 글'});
+  f.items.push({id:'d',type:'decision',description:'환불은 7일. 그 뒤는 부분 환불',created:'2026-09-15',status:'to-do',group:'정책'});
+  const rows=f.view().rows,byId=id=>rows.find(row=>row.sourceIds.includes(id));
+  assert.equal(byId('a').text,'결제 화면 오류 문의 대응하기. 고객센터에서 받은 스크린샷 세 장과 재현 절차를 정리해 두었어요!','80자가 넘으면 20자 넘게 간 뒤 첫 문장 끝까지');
+  assert.equal(byId('a').evidence[0].description,long,'근거에는 전문이 남는다');
+  assert.equal(byId('v').text,'v2.1 배포 확인함','버전 번호 속 점에서 자르지 않는다 · 짧은 문구는 예전 그대로');
+  assert.equal(byId('n').text,`${'가'.repeat(80)}…`);
+  assert.equal(byId('s').text,'1. 기획서 정리 2. 공유하기','80자 이하는 마침표가 있어도 자르지 않는다(기존 보고 불변)');
+  assert.equal(byId('d').text,'환불은 7일. 그 뒤는 부분 환불','할 일이 아닌 것은 그대로');
+});
 test('stale revision cannot erase newly collected work',t=>{
   const f=fixture(t),old=f.view();f.items.push({...f.items[0],id:'b'});
   assert.throws(()=>f.store.change({weekKey:old.weekKey,revision:old.revision,action:'edit',id:old.rows[0].id,text:'old'}),error=>error.status===409);

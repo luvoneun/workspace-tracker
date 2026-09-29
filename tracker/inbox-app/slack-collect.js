@@ -9,6 +9,8 @@
 //  2) 공유(포워드)된 메시지는 원본 스레드 전체를 사용자 토큰으로 읽어 붙인다(못 읽으면 `threadError`).
 //  3) 채널별 입력 JSON + 지침 파일을 프롬프트에 넣어 run-task.sh로 Claude를 부른다(허용 도구 없음).
 //  4) Claude가 낸 JSON을 검증하고, 맞으면 import-record.js로 하나씩 저장한다. 모두 성공한 채널만 커서를 올린다.
+// 설정 `slack.tidy`가 'raw'(원문 그대로)면 2)·3)을 건너뛰고 규칙으로 답을 만든다(rawAnswer) — Claude가 없어도 돈다.
+// 칸이 없으면 'claude'다. Claude 모드에서 분류가 실패하면 원문으로 대신 넣지 않는다(실패 기록·커서 그대로).
 // 토큰은 슬랙 요청 머리글에만 쓴다 — 프롬프트·로그에 싣지 않는다. 로그에는 채널별 수치와 항목 문구만 남긴다.
 'use strict';
 const fs = require('node:fs');
@@ -257,6 +259,90 @@ function validate(text, entries, type) {
   return { items, skipped };
 }
 
+// ---------- 원문 그대로 모드(`slack.tidy: 'raw'`) ----------
+// Claude 없이 규칙으로 답(`validate`가 내는 모양과 같은 `{ items, skipped }`)을 만든다. 갈래는 채널이 정하고,
+// 요약·중요도 판단·기한·지라 연결은 하지 않는다(DECISIONS: 마감일 추측 금지·슬랙 포함 판단 안 함).
+const RAW_LIMIT = 200;
+const RAW_SHORT = 12;
+// 슬랙 표기를 읽는 글로 — 사람·채널·링크·굵게/기울임/취소/코드 기호·그림 글자(:emoji:)는 지운다, &amp; 등은 되돌린다.
+function slackPlain(text, names = {}) {
+  return String(text || '')
+    .replace(/<@([UW][A-Z0-9]+)(?:\|([^>]*))?>/g, (whole, id, label) => `@${names[id] || label || id}`)
+    .replace(/<#[A-Z0-9]+\|([^>]*)>/g, (whole, name) => `#${name}`)
+    .replace(/<#([A-Z0-9]+)>/g, (whole, id) => `#${id}`)
+    .replace(/<!subteam\^[A-Z0-9]+(?:\|([^>]*))?>/g, (whole, label) => label || '@그룹')
+    .replace(/<!([a-z]+)(?:\|([^>]*))?>/g, (whole, word, label) => label || `@${word}`)
+    .replace(/<([^<>|\s]+)\|([^<>]+)>/g, (whole, url, label) => label)
+    .replace(/<((?:https?|mailto):[^<>\s]+)>/g, (whole, url) => url.replace(/^mailto:/, ''))
+    .replace(/```/g, '')
+    .replace(/`/g, '')
+    // 그림 글자·굵게·취소선은 슬랙처럼 앞뒤가 단어 경계일 때만 — `3~5명`, `2*3*4`, `api:v2:x` 같은 글자를 망가뜨리지 않게.
+    .replace(/(^|\s)(?::[a-z0-9_+'-]+:)+(?=$|\s)/gm, '$1')
+    .replace(/(^|[\s(])\*(\S(?:[^*\n]*\S)?)\*(?=$|[\s).,!?])/gm, '$1$2')
+    .replace(/(^|[\s(])~(\S(?:[^~\n]*\S)?)~(?=$|[\s).,!?])/gm, '$1$2')
+    .replace(/(^|[\s(])_([^_\n]+)_(?=$|[\s).,!?])/gm, '$1$2')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+}
+// 비어 있지 않은 줄들(앞 인용 기호·목록 기호를 떼고 공백을 한 칸으로). `list`는 목록 기호가 붙어 있던 줄인지.
+const LIST_MARK = /^\s*(?:[-•*·◦▪]|\d+[.)])\s+/;
+const plainLines = text => String(text || '').split(/\r?\n/)
+  .map(line => line.replace(/^\s*>\s?/, ''))
+  .map(line => ({ list: LIST_MARK.test(line), text: line.replace(LIST_MARK, '').replace(/\s+/g, ' ').trim() }))
+  .filter(line => line.text);
+// 첫 줄 — 12자 이하면(인사말 등) 다음 줄을 한 번 이어 붙인다. 한 메시지는 항목 하나다(목록이어도 나누지 않고,
+// 목록의 첫 항목은 짧아도 다음 항목을 붙이지 않는다 — 두 일이 한 문구로 섞이지 않게).
+function firstLine(text) {
+  const lines = plainLines(text);
+  if (!lines.length) return '';
+  const [first, next] = lines;
+  return first.text.length <= RAW_SHORT && next && !first.list ? `${first.text} ${next.text}` : first.text;
+}
+// 글이 없고 파일만 있으면: 설명(alt·파일 이름과 다른 제목)이 있으면 그것, 없으면 `(파일) 이름`.
+function fileLine(files) {
+  const file = (Array.isArray(files) ? files : []).find(one => one && (one.alt_txt || one.title || one.name));
+  if (!file) return '';
+  const alt = String(file.alt_txt || (file.title && file.title !== file.name ? file.title : '')).replace(/\s+/g, ' ').trim();
+  return alt || `(파일) ${String(file.name || file.title).replace(/\s+/g, ' ').trim()}`;
+}
+const rawClip = text => (text.length > RAW_LIMIT ? `${text.slice(0, RAW_LIMIT).trimEnd()}…` : text);
+
+// 메시지 하나 → 저장할 항목 하나. 링크는 원래 메시지(공유면 원본) 우선.
+function rawItem(channel, message, names) {
+  const ownLink = `${channel.workspaceUrl}/archives/${channel.id}/p${String(message.ts).replace('.', '')}`;
+  const attachments = Array.isArray(message.attachments) ? message.attachments : [];
+  const share = attachments.find(one => one && one.is_share === true) || null;
+  // 공유하며 적은 메모는 딱 첫 줄만 뒤에 붙인다(짧아도 이어 붙이지 않는다). 공유가 아니면 메시지 글이 곧 문구다.
+  const memo = share ? ((plainLines(slackPlain(message.text, names))[0] || {}).text || '') : '';
+  let body = firstLine(slackPlain(share ? (share.text || share.fallback) : message.text, names));
+  const notes = [];
+  if (!body) {
+    body = fileLine(share && Array.isArray(share.files) && share.files.length ? share.files : message.files);
+    if (body) notes.push('파일만');
+  }
+  if (!body && !share) {
+    const preview = attachments.find(one => one && (one.title || one.fallback));
+    body = preview ? firstLine(slackPlain(preview.title || preview.fallback, names)) : '';
+  }
+  // 원래 메시지 글도 파일도 없는 공유면 내 메모가 곧 문구다.
+  const memoOnly = !body && !!memo;
+  if (memoOnly) body = memo;
+  // 공유도 파일도 없이 이모지·기호만 남은 메시지(예: `:+1:`)는 할 일로 넣지 않는다 — 건너뜀으로 기록한다.
+  if (!body && !share) return { ts: message.ts, empty: true };
+  if (!body) body = '(글 없는 메시지)';
+  const description = rawClip(memo && !memoOnly ? `${body} — ${memo}` : body);
+  const source = share ? shareSource(share) : null;
+  // 링크: 공유할 때 메모를 적었으면 내가 보낸 메시지 링크 — 같은 원본을 다른 메모로 다시 공유해도 따로 남게(링크 중복으로
+  // 버려지지 않게). 메모 없는 공유는 원본 링크 — 같은 원본을 또 보내면 링크 중복으로 한 번만 들어간다.
+  const payload = { type: channel.type, description, permalink: (memo ? ownLink : (source && source.permalink)) || ownLink };
+  // 확인 대기의 담당자(who)는 넣지 않는다 — 원래 글쓴이가 답할 사람인지 답을 기다리는 사람인지 규칙으로는 알 수 없다(추측 금지).
+  return { ts: message.ts, payload, notes };
+}
+
+function rawAnswer(channel, messages, names) {
+  const all = messages.map(message => rawItem(channel, message, names));
+  return { items: all.filter(one => !one.empty), skipped: all.filter(one => one.empty).map(() => ({ reason: '글 없음' })) };
+}
+
 function buildPrompt(skillText, input) {
   return [
     '너는 슬랙 수집의 분류 단계다. 도구는 쓰지 않는다 — 필요한 재료(메시지·원본 스레드·기존 항목)는 모두 아래 입력 JSON에 들어 있다.',
@@ -346,7 +432,17 @@ async function processChannel(ctx, channel, messages) {
   let notes = 0;
 
   try {
-    if (human.length) {
+    if (human.length && ctx.tidy === 'raw') {
+      // 원문 그대로: Claude를 부르지 않는다(원본 스레드·기존 항목도 읽지 않는다 — 요약·중복 판단을 안 하므로).
+      // 이름표만 찾아 `<@U…>`를 이름으로 바꾸고, 저장·링크 중복·커서는 아래 공통 길을 그대로 탄다.
+      const users = [];
+      human.forEach(message => {
+        users.push(...mentionIds(message.text));
+        (Array.isArray(message.attachments) ? message.attachments : []).forEach(one => { if (one && one.is_share === true) users.push(...mentionIds(one.text)); });
+      });
+      const names = await lookupNames(ctx.token, users);
+      answer = rawAnswer(channel, human, names);
+    } else if (human.length) {
       const gathered = [];
       const users = [];
       for (const message of human) {
@@ -399,7 +495,7 @@ async function processChannel(ctx, channel, messages) {
     if (systemCount) addReason('시스템', systemCount);
     answer.skipped.forEach(skip => {
       addReason(skip.reason);
-      if (/링크/.test(skip.reason)) ledger.duplicate += 1; else ledger.similar += 1;
+      if (/링크/.test(skip.reason)) ledger.duplicate += 1; else if (skip.reason === '글 없음') ledger.system += 1; else ledger.similar += 1;
       // 설정 › 연동 › 슬랙 ⋯ › 최근 기록이 뽑아 보이는 모양(`🔁 이미 있는 '…'랑 …`) 그대로 남긴다.
       detail.push(skip.existing
         ? `🔁 이미 있는 '${oneLine(skip.existing)}'랑 중복돼서 안 가져왔어요`
@@ -415,7 +511,7 @@ async function processChannel(ctx, channel, messages) {
       detail.push(`  + ${oneLine(item.payload.description)}${item.notes.length ? ` (${item.notes.map(note => oneLine(note, 40)).join(' · ')})` : ''}`);
       if (item.notes.some(note => /원본/.test(note))) detail.push(`⚠️ 원본 스레드를 못 읽어서 공유 당시 텍스트만 사용함: ${oneLine(item.payload.description, 60)}`);
       if (item.notes.some(note => /파일만/.test(note))) detail.push(`⚠️ 글 없이 파일만 있는 메시지: ${oneLine(item.payload.description, 60)}`);
-      ctx.app.items.unshift({ type: item.payload.type, description: oneLine(item.payload.description, 200), status: 'to-do', created: stamp().slice(0, 10), permalink: item.payload.permalink });
+      if (ctx.app) ctx.app.items.unshift({ type: item.payload.type, description: oneLine(item.payload.description, 200), status: 'to-do', created: stamp().slice(0, 10), permalink: item.payload.permalink });
     }
     if (saveFailed) failure = `저장 ${saveFailed}건 실패`;
   }
@@ -433,6 +529,7 @@ async function processChannel(ctx, channel, messages) {
   let line = `${channel.cursor} · 새 ${counts.seen}개 · 저장 ${counts.saved} · 건너뜀 ${counts.skipped}`;
   if (reasonText) line += ` (${reasonText})`;
   if (notes) line += ` · 표시 ${notes}`;
+  if (ctx.tidy === 'raw') line += ' · 원문 그대로';
   if (sorted.length > batch.length) line += ` · 남은 ${sorted.length - batch.length}개는 다음 회차`;
   if (failure) line += ` · 실패: ${oneLine(failure, 120)} — 커서 그대로`;
   Object.assign(ledger, { seen: counts.seen, saved: counts.saved, system: failure ? ledger.system : systemCount });
@@ -480,7 +577,8 @@ async function main() {
   }
 
   const started = stamp();
-  const ctx = { token, config: configFile, runTask, app: null };
+  // 정리 방식 — `raw`만 원문 그대로이고, 칸이 없거나 다른 값이면 예전처럼 Claude로 다듬는다.
+  const ctx = { token, config: configFile, runTask, app: null, tidy: slack.tidy === 'raw' ? 'raw' : 'claude' };
   const lines = [], details = [];
   const total = { seen: 0, saved: 0, duplicate: 0, similar: 0, system: 0 };
   let failed = false;
@@ -511,4 +609,4 @@ if (require.main === module) {
     process.exitCode = 1;
   });
 }
-module.exports = { claudeAuthPhrase, validate, isSystem, buildPrompt, shareSource };
+module.exports = { claudeAuthPhrase, validate, isSystem, buildPrompt, shareSource, slackPlain, firstLine, rawItem };
