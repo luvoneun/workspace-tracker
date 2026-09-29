@@ -1,4 +1,4 @@
-// 캘린더 `맥 캘린더` 갈래 — 맥 기본 캘린더 앱에 추가해 둔 계정(회사 구글 계정 등)의 오늘 일정을 읽는다(Claude·비밀 주소 없이).
+// 캘린더 `맥 캘린더` 갈래 — 맥에 추가해 둔 캘린더 계정(회사 구글 계정 등)의 오늘 일정을 EventKit으로 읽는다(Claude·비밀 주소 없이).
 //
 // 두 얼굴이 한 파일에 있다.
 //  1. 실행 스크립트(`node calendar-mac.js run|now`) — launchd가 설치 위치 복사본 `mac-calendar.sh`로 부른다.
@@ -10,14 +10,14 @@
 //     (`requests/mac-calendar.request`, `{"mode":"check"}`)만 쓰고, launchd `mac-calendar-now`가 위 스크립트를 한 번 돌린다.
 //     화면은 `mac-calendar.json`을 읽어 결과를 기다린다.
 //
-// 오늘 일정 뽑기는 비밀 주소 갈래의 `ical.js`를 그대로 쓴다 — JXA가 준 일정을 iCal 글자로 옮겨 같은 함수에 넣는다
-// (반복 일정 펼치기·취소 빼기·종일 일정 빼기·일정 id 모양이 비밀 주소 갈래와 같아진다).
+// 읽기는 JXA의 ObjC 다리로 **EventKit**을 쓴다 — 캘린더 앱을 켜지 않고, 반복 일정도 EventKit이 오늘 회차로 펼쳐 준다.
+// 여기서는 오늘 시작하는 일정 중 종일·취소·내가 거절한 것을 빼고 같은 회차의 중복을 지운다(비밀 주소 갈래와 같은 규칙).
 // 장소·참석자·메모는 읽지 않는다(참석 상태는 "내가 거절했나"에만 쓰고 남기지 않는다).
 
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { parseCalendar, todayEvents, wallOf } = require('./ical');
+const { wallOf, instantOf } = require('./ical');
 
 const TIMEOUT_MS = 60 * 1000;        // 목록·읽기를 합친 제한 시간
 const KILL_GRACE_MS = 2000;          // TERM 뒤 KILL까지
@@ -31,7 +31,7 @@ const NOW_AGENT = 'mac-calendar-now';
 
 // 사람에게 보이는 말(해요체). 실패 말은 로그의 ⚠️ 줄에 그대로 들어가고, 연동 카드의 멈춤 이유로 쓰인다.
 const WORDS = {
-  denied: '맥이 캘린더 접근을 막았어요 — 시스템 설정 → 개인정보 보호 및 보안 → 자동화에서 허용해 주세요',
+  denied: '맥이 캘린더 접근을 막았어요 — 시스템 설정 → 개인정보 보호 및 보안 → 캘린더에서 허용해 주세요',
   noAccount: '맥 캘린더에 구글 계정이 없어요 — 1단계를 먼저 해 주세요',
   missing: '고른 캘린더를 찾지 못했어요 — 다시 골라 주세요',
   none: '읽을 캘린더를 아직 고르지 않았어요 — 설정 › 연동 › 캘린더에서 골라 주세요',
@@ -46,20 +46,21 @@ const looksLikeEmail = value => EMAIL_RE.test(String(value || '').trim());
 const clean = (value, max = 200) => String(value == null ? '' : value).replace(/\s+/g, ' ').trim().slice(0, max);
 
 // ---------- 고르기 ----------
-// 기본으로 켤 캘린더 하나 — 내 이메일 이름의 캘린더(구글 계정의 기본 캘린더 이름이 메일 주소다), 없으면 메일 주소 이름의
-// 첫 캘린더(쓰기 가능한 것 먼저). 휴일·구독·다른 사람 캘린더는 기본으로 켜지 않는다.
+// 기본으로 켤 캘린더 하나 — 내 이메일 이름의 캘린더(구글 계정의 기본 캘린더 이름·계정 이름이 메일 주소다), 없으면 이름이
+// 계정 이름과 같은 캘린더, 없으면 메일 주소 이름의 첫 캘린더(쓰기 가능한 것 먼저). 휴일·구독·다른 사람 캘린더는 기본으로 켜지 않는다.
 function suggestCalendars(calendars, email) {
   const list = Array.isArray(calendars) ? calendars : [];
-  const mine = String(email || '').trim().toLowerCase();
-  const exact = mine ? list.find(one => String(one.name || '').trim().toLowerCase() === mine) : null;
-  const pick = exact
+  const low = value => String(value || '').trim().toLowerCase();
+  const mine = low(email);
+  const pick = (mine ? list.find(one => low(one.name) === mine) : null)
+    || list.find(one => looksLikeEmail(one.name) && low(one.name) === low(one.account))
     || list.find(one => looksLikeEmail(one.name) && one.writable !== false)
     || list.find(one => looksLikeEmail(one.name));
   return pick ? [String(pick.id)] : [];
 }
 
-// 구글(메일 주소 이름) 캘린더가 하나라도 있으면 계정이 있는 것으로 본다.
-const hasAccount = calendars => (Array.isArray(calendars) ? calendars : []).some(one => looksLikeEmail(one.name));
+// 구글처럼 메일 주소로 붙인 계정(캘린더 이름이나 계정 이름이 메일 주소)이 하나라도 있으면 계정이 있는 것으로 본다.
+const hasAccount = calendars => (Array.isArray(calendars) ? calendars : []).some(one => looksLikeEmail(one.name) || looksLikeEmail(one.account));
 
 // 고른 캘린더를 지금 목록에서 찾는다 — ID로 따라가고(이름이 바뀌어도), ID가 없어졌으면 같은 이름이 하나뿐일 때만 이름으로.
 function resolveChosen(calendars, chosen) {
@@ -80,51 +81,42 @@ function resolveChosen(calendars, chosen) {
   return { ids, missing };
 }
 
-// ---------- 일정 → iCal 글자 ----------
+// ---------- 오늘 미팅 고르기 ----------
 const two = n => String(n).padStart(2, '0');
-const icsText = value => String(value || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
-const icsWall = (ms, zone) => { const w = wallOf(ms, zone); return `${w.y}${two(w.m)}${two(w.d)}T${two(w.h)}${two(w.mi)}${two(w.s)}`; };
-const icsDay = (ms, zone) => { const w = wallOf(ms, zone); return `${w.y}${two(w.m)}${two(w.d)}`; };
-// 반복 규칙은 `FREQ=…` 한 줄만 받는다(앞의 `RRULE:`는 떼고, 줄바꿈·이상한 글자가 있으면 버린다).
-const icsRule = (value) => {
-  const rule = String(value || '').trim().replace(/^RRULE:/i, '');
-  return /^FREQ=[A-Z0-9=;,:+\-]+$/i.test(rule) ? rule : '';
-};
+const hhmm = (ms, zone) => { const w = wallOf(ms, zone); return `${two(w.h)}:${two(w.mi)}`; };
 
-function buildIcs(rows, zone) {
-  const out = ['BEGIN:VCALENDAR', 'VERSION:2.0'];
-  (Array.isArray(rows) ? rows : []).forEach((row, index) => {
-    if (!row || !Number.isFinite(row.start)) return;
-    const uid = clean(row.uid, 300).replace(/\s+/g, '') || `mac-${index}`;
-    out.push('BEGIN:VEVENT', `UID:${uid.replace(/[\r\n]/g, '')}`, `SUMMARY:${icsText(clean(row.title).replace(/\s*\|\s*/g, ' / '))}`);
-    if (row.allDay) {
-      out.push(`DTSTART;VALUE=DATE:${icsDay(row.start, zone)}`);
-      if (Number.isFinite(row.end) && row.end > row.start) out.push(`DTEND;VALUE=DATE:${icsDay(row.end, zone)}`);
-    } else {
-      out.push(`DTSTART;TZID=${zone}:${icsWall(row.start, zone)}`);
-      if (Number.isFinite(row.end) && row.end >= row.start) out.push(`DTEND;TZID=${zone}:${icsWall(row.end, zone)}`);
-    }
-    const rule = icsRule(row.recurrence);
-    if (rule) {
-      out.push(`RRULE:${rule}`);
-      (Array.isArray(row.excluded) ? row.excluded : []).filter(Number.isFinite).forEach((ms) => {
-        out.push(row.allDay ? `EXDATE;VALUE=DATE:${icsDay(ms, zone)}` : `EXDATE;TZID=${zone}:${icsWall(ms, zone)}`);
-      });
-    }
-    if (/cancel/i.test(String(row.status || ''))) out.push('STATUS:CANCELLED');
-    out.push('END:VEVENT');
-  });
-  out.push('END:VCALENDAR');
-  return out.join('\r\n');
+// 구글 캘린더가 쓰는 일정 id 꼴(`@google.com` 앞, 반복 회차는 `_20260924T010000Z`)로 맞춘다 — 비밀 주소·Claude 갈래와 같은 회의로 이어지게.
+function externalIdOf(row) {
+  const base = clean(row.externalId, 300).replace(/@google\.com$/i, '').replace(/\s+/g, '');
+  if (!base) return '';
+  if (!row.recurring) return base;
+  return `${base}_${new Date(row.start).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')}`;
 }
 
-// JXA가 준 줄들 → 오늘 미팅(시작 시각이 있는 것만 — 비밀 주소 갈래와 같은 규칙). 내가 거절한 초대는 뺀다.
-// 반복 일정의 한 회차만 옮긴 것(같은 uid의 한 번짜리 일정이 오늘 있음)이 있으면 원래 반복 회차는 뺀다 — 둘 다 보이지 않게.
+// EventKit이 준 줄들(반복은 이미 회차로 펼쳐져 있다) → 오늘 미팅. 오늘(timeZone 기준) **시작하는** 것만, 종일·취소(EKEventStatus 3)·
+// 내가 거절한 초대는 뺀다. 같은 일정이 두 번 오면(`id`+시작 시각이 같으면) 하나만. 끝이 내일로 넘어가면 `23:59`.
 function todayFromRows(rows, { now = Date.now(), timeZone } = {}) {
-  const kept = (Array.isArray(rows) ? rows : []).filter(row => row && row.declined !== true);
-  const detached = new Set(kept.filter(row => !icsRule(row.recurrence) && row.uid).map(row => clean(row.uid, 300).replace(/\s+/g, '')));
-  const usable = kept.filter(row => !(icsRule(row.recurrence) && detached.has(clean(row.uid, 300).replace(/\s+/g, ''))));
-  return todayEvents(parseCalendar(buildIcs(usable, timeZone)), { now, timeZone });
+  const today = wallOf(now, timeZone);
+  const dayStart = instantOf({ y: today.y, m: today.m, d: today.d }, timeZone);
+  const next = new Date(Date.UTC(today.y, today.m - 1, today.d + 1));
+  const dayEnd = instantOf({ y: next.getUTCFullYear(), m: next.getUTCMonth() + 1, d: next.getUTCDate() }, timeZone);
+  const seen = new Set();
+  return (Array.isArray(rows) ? rows : [])
+    .filter(row => row && !row.allDay && row.declined !== true && Number(row.status) !== 3 && !/cancel/i.test(String(row.status)))
+    .filter(row => Number.isFinite(row.start) && row.start >= dayStart && row.start < dayEnd)
+    .filter((row) => {
+      const key = `${row.id || row.externalId || row.title}|${row.start}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => a.start - b.start || String(a.title).localeCompare(String(b.title)))
+    .map((row) => {
+      const start = hhmm(row.start, timeZone);
+      const end = !Number.isFinite(row.end) || row.end <= row.start ? start : (row.end >= dayEnd ? '23:59' : hhmm(row.end, timeZone));
+      const externalId = externalIdOf(row);
+      return { start, end, title: clean(row.title).replace(/\s*\|\s*/g, ' / ') || '(제목 없음)', ...(externalId ? { externalId } : {}) };
+    });
 }
 
 // `tracker/calendar_today.md` — calendar-sync 스킬이 쓰는 모양 그대로(서버의 CALENDAR_ITEM_RE가 읽는다).
@@ -186,7 +178,7 @@ async function readMac({ kind, chosen, source, email, now = Date.now(), timeZone
   const list = await osa({ mode: 'list' }, left());
   if (!list || list.ok !== true) return { ok: false, reason: (list && list.error) === 'denied' ? 'denied' : (list && list.error) === 'timeout' ? 'timeout' : 'failed', calendars: [] };
   const calendars = (Array.isArray(list.calendars) ? list.calendars : []).slice(0, MAX_CALENDARS)
-    .map(one => ({ id: clean(one && one.id, 300), name: clean(one && one.name), writable: !(one && one.writable === false) }))
+    .map(one => ({ id: clean(one && one.id, 300), name: clean(one && one.name), writable: !(one && one.writable === false), account: clean(one && one.account) }))
     .filter(one => one.id);
   const suggested = suggestCalendars(calendars, email);
   const base = { calendars, suggested };
@@ -205,20 +197,14 @@ async function readMac({ kind, chosen, source, email, now = Date.now(), timeZone
   const day = new Date(now);
   const start = new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
   const end = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime();
-  const me = {};
-  ids.forEach((id) => {
-    const one = calendars.find(cal => cal.id === id);
-    const mail = one && looksLikeEmail(one.name) ? one.name : (looksLikeEmail(email) ? String(email).trim() : '');
-    if (mail) me[id] = mail.toLowerCase();
-  });
-  const read = await osa({ mode: 'read', ids, start, end, me }, left());
+  const read = await osa({ mode: 'read', ids, start, end }, left());
   if (!read || read.ok !== true) return { ...base, ok: false, reason: (read && read.error) === 'denied' ? 'denied' : (read && read.error) === 'timeout' ? 'timeout' : 'failed', read: ids, missing };
   const failed = Array.isArray(read.failed) ? read.failed.map(String) : [];
   const good = ids.filter(id => !failed.includes(id));
   if (!good.length) return { ...base, ok: false, reason: 'failed', read: ids, missing };
   const rows = (Array.isArray(read.events) ? read.events : []).filter(row => row && good.includes(String(row.calendarId)));
   const events = todayFromRows(rows, { now, timeZone });
-  return { ...base, ok: true, read: good, failed, missing, events, declinedChecked: read.declinedChecked !== false };
+  return { ...base, ok: true, read: good, failed, missing, events };
 }
 
 // ---------- 파일 ----------
@@ -322,7 +308,6 @@ async function main({ mode = 'run', env = process.env, now = Date.now, osa = nul
     read: result.read || [],
     missing: result.missing || [],
     eventCount: result.ok ? events.length : null,
-    declinedChecked: result.ok ? result.declinedChecked !== false : null,
   };
   try { writeAtomic(statePath(p.automation), `${JSON.stringify(state, null, 2)}\n`); } catch { /* 상태 파일은 화면용이다 — 기록은 로그에 남는다 */ }
   appendLog(log, [`───── ${started} ${TASK} 시작${versionTag(p.version)}`, line, '', `───── ${stamp(now())} ${TASK} 종료 (exit ${code})`]);
@@ -344,7 +329,7 @@ function stateView(dir) {
     requestedAt: typeof raw.requestedAt === 'string' ? raw.requestedAt.slice(0, 40) : null,
     ok: raw.ok === true,
     reason: typeof raw.reason === 'string' && Object.prototype.hasOwnProperty.call(WORDS, raw.reason) ? raw.reason : (raw.ok === true ? null : 'failed'),
-    calendars: list.map(one => ({ id: clean(one && one.id, 300), name: clean(one && one.name), writable: !(one && one.writable === false) })).filter(one => one.id),
+    calendars: list.map(one => ({ id: clean(one && one.id, 300), name: clean(one && one.name), writable: !(one && one.writable === false), account: clean(one && one.account) })).filter(one => one.id),
     suggested: ids(raw.suggested),
     read: ids(raw.read),
     missing: Array.isArray(raw.missing) ? raw.missing.map(v => clean(v)).slice(0, 20) : [],
@@ -384,7 +369,7 @@ function route(req, res, url, ctx) {
 }
 
 module.exports = {
-  suggestCalendars, hasAccount, resolveChosen, buildIcs, todayFromRows, snapshotText, runOsascript, readMac, main,
+  suggestCalendars, hasAccount, resolveChosen, todayFromRows, snapshotText, runOsascript, readMac, main,
   route, stateView, looksLikeEmail, WORDS, EXIT, STATE_FILE, REQUEST_FILE, LOG_FILE, NOW_AGENT, TIMEOUT_MS,
 };
 

@@ -9484,9 +9484,9 @@ test('WP-V F. 맥 캘린더 확인 실패: 막힘은 이유 + 시스템 설정 �
     return { fx, error, help };
   };
   const denied = await run({ ok: true, installed: true, state: macState({ ok: false, reason: 'denied', calendars: [], eventCount: null }) });
-  assert.equal(denied.error, '맥이 캘린더 접근을 막았어요 — 시스템 설정 → 개인정보 보호 및 보안 → 자동화에서 허용해 주세요');
+  assert.equal(denied.error, '맥이 캘린더 접근을 막았어요 — 시스템 설정 → 개인정보 보호 및 보안 → 캘린더에서 허용해 주세요');
   assert.equal(denied.help.hidden, false);
-  assert.match(denied.help.textContent, /애플 메뉴 → 시스템 설정 → 개인정보 보호 및 보안 → 맨 아래 자동화/);
+  assert.match(denied.help.textContent, /애플 메뉴 → 시스템 설정 → 개인정보 보호 및 보안 → 캘린더/);
   assert.equal(denied.fx.find('calendar', 'd-ich').length, 0);
 
   const noAccount = await run({ ok: true, installed: true, state: macState({ ok: false, reason: 'noAccount', calendars: [{ id: 'L', name: '캘린더', writable: true }], suggested: [], read: [] }) });

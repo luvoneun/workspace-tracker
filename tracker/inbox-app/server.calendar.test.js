@@ -575,14 +575,14 @@ test('WP-V 맥 캘린더: 허용하고 확인은 plist가 있을 때만 요청 �
   fs.writeFileSync(path.join(app.automation, 'mac-calendar.json'), JSON.stringify({
     at: '2026-09-29T01:00:05.000Z', kind: 'check', requestedAt: asked.requestedAt, ok: true, reason: null,
     calendars: [{ id: 'CAL-ME', name: 'me@example.test', writable: true }, { id: 'H', name: '휴일', writable: false }],
-    suggested: ['CAL-ME'], read: ['CAL-ME'], missing: [], eventCount: 3, declinedChecked: true, secretField: 'x',
+    suggested: ['CAL-ME'], read: ['CAL-ME'], missing: [], eventCount: 3, secretField: 'x',
   }));
   const seen = await view();
   assert.equal(seen.installed, true);
   assert.equal(seen.requestedAt, asked.requestedAt);
   assert.deepEqual(seen.state, {
     at: '2026-09-29T01:00:05.000Z', kind: 'check', requestedAt: asked.requestedAt, ok: true, reason: null,
-    calendars: [{ id: 'CAL-ME', name: 'me@example.test', writable: true }, { id: 'H', name: '휴일', writable: false }],
+    calendars: [{ id: 'CAL-ME', name: 'me@example.test', writable: true, account: '' }, { id: 'H', name: '휴일', writable: false, account: '' }],
     suggested: ['CAL-ME'], read: ['CAL-ME'], missing: [], eventCount: 3,
   });
 
@@ -596,7 +596,7 @@ test('WP-V 맥 캘린더: 허용하고 확인은 plist가 있을 때만 요청 �
   const stamp = offset => { const d = new Date(Date.now() - offset * 60000); const p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; };
   fs.writeFileSync(path.join(app.automation, 'logs', 'mac-calendar.log'), [
     `───── ${stamp(40)} mac-calendar 시작 (v1.2.1)`, '캘린더 1개 · 오늘 일정 3개를 읽었어요', '', `───── ${stamp(40)} mac-calendar 종료 (exit 0)`,
-    `───── ${stamp(10)} mac-calendar 시작 (v1.2.1)`, '⚠️ 맥이 캘린더 접근을 막았어요 — 시스템 설정 → 개인정보 보호 및 보안 → 자동화에서 허용해 주세요', '', `───── ${stamp(10)} mac-calendar 종료 (exit 77)`, '',
+    `───── ${stamp(10)} mac-calendar 시작 (v1.2.1)`, '⚠️ 맥이 캘린더 접근을 막았어요 — 시스템 설정 → 개인정보 보호 및 보안 → 캘린더에서 허용해 주세요', '', `───── ${stamp(10)} mac-calendar 종료 (exit 77)`, '',
   ].join('\n'));
   fs.writeFileSync(path.join(app.automation, 'logs', 'calendar-sync.log'), `───── ${stamp(5)} calendar-sync 시작\n옛 갈래 기록\n───── ${stamp(5)} calendar-sync 종료 (exit 0)\n`);
   const state = await (await fetch(app.base + '/api/integrations')).json();
