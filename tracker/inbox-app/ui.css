@@ -459,6 +459,8 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 .d-toast.error { border-color: var(--urgent); }
 .d-toast .d-btn { flex-shrink: 0; }
 .d-tnote { font-size: 12.5px; color: var(--muted); flex-shrink: 0; }
+/* 누르는 화면에는 키보드가 없다 — ⌘Z 안내 글자 대신 알림의 `되돌리기` 버튼(app.js uiUndoNotice)이 선다 */
+@media (hover: none) and (pointer: coarse) { .d-tnote { display: none; } }
 @keyframes d-rise { from { transform: translateY(6px); opacity: 0; } to { transform: none; opacity: 1; } }
 
 /* ---------- 더보기 메뉴 (한 벌) ---------- */
@@ -1194,6 +1196,8 @@ body.batch-open .d-row { grid-template-columns: 22px 30px minmax(0, 1fr) var(--w
 .task-content-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; align-items: stretch; }
 .d-side { display: none; }
 .d-side[hidden] { display: none; }
+/* 시트 뒤 가림막 — 아주 좁은 화면(≤520)에서만 보인다(아래 반응형) */
+.d-scrim { display: none; }
 
 .d-detail {
   display: flex; flex-direction: column; gap: 18px;
@@ -2640,6 +2644,9 @@ a.d-btn { text-decoration: none; }
     border: 0; border-radius: var(--r) var(--r) 0 0; box-shadow: none; padding: 20px 16px;
   }
   .d-side .d-dbar { bottom: -20px; margin: -6px -16px -20px; padding: 12px 16px; }
+  /* 시트 뒤에는 설정 창과 같은 가림막 — 선택 막대(46)와 같은 층, 문서에서 뒤에 붙어 그 위에 눕고 시트(47) 아래.
+     뒤 목록이 눌리지 않고, 누르면 시트가 닫힌다(app.js panelScrim) */
+  .d-scrim:not([hidden]) { display: block; position: fixed; inset: 0; z-index: 46; background: var(--scrim); }
 }
 @media (max-width: 900px) {
   .page { padding: 14px 16px 80px; }
@@ -2750,12 +2757,21 @@ a.d-btn { text-decoration: none; }
   .d-proj { display: none; }
   /* 두 줄 행에서도 같은 순서로 이어 붙는다(상태 → 기한) — 왼쪽 정렬만 다르다 */
   .d-meta { grid-area: mt; justify-content: flex-start; flex-wrap: wrap; row-gap: 5px; }
-  .d-meta .m-proj { display: inline-flex; }
+  /* 프로젝트 이름은 제목 뒤 `· ● 이름`(.d-inproj)이 이미 말한다 — 상태 줄의 .m-proj는 좁은 폭에서도 숨긴 채 둔다(두 번 찍히지 않게) */
   .d-acts, .d-row.is-sug .d-acts {
     grid-area: ac; position: static; flex-direction: column; align-items: stretch;
     opacity: 1; pointer-events: auto; background: none; padding-left: 0;
   }
   .d-acts .d-btn, .d-ibacts .d-btn { height: 32px; padding: 0 11px; }
+  /* 업무 줄에는 ⋯ 하나만 — 내일·나중에·오늘로·오늘 할게요는 줄을 누르면 열리는 시트 발에 있다.
+     미루기 제안 줄(.is-sug)은 시트가 없는 줄이라 그대로 둔다. 프로젝트 면의 줄은 아래 .d-prow2 */
+  .d-row:not(.is-sug) .d-acts > .d-btn { display: none; }
+  /* 누르는 자리는 38px — 모양(체크 22px · ⋯ 32px)은 그대로, 투명한 ::after만 넓힌다 */
+  .d-row .d-cb::after, .d-prow2 .d-cb::after { inset: -10px; border-radius: 12px; }
+  /* 체크 칸은 줄 높이만큼 선다(체크박스는 가운데 그대로) — 칸의 빈 여백 누름이 줄 누름(시트 열기)으로 번지지 않게 */
+  .d-row .d-check, .d-prow2 .d-check { align-self: stretch; }
+  .d-row .d-acts .d-more, .d-prow2 .ac .d-more { position: relative; }
+  .d-row .d-acts .d-more::after, .d-prow2 .ac .d-more::after { content: ''; position: absolute; inset: -3px; border-radius: 50%; }
   /* 서랍 안의 두 줄 행도 같은 규칙을 따른다 — 동작 칸을 따로 잡아 주지 않으면 줄이 세로로 늘어난다 */
   .d-dbody .d-row { grid-template-columns: 30px minmax(0, 1fr) auto; grid-template-areas: "ck ti ac" "ck mt ac"; }
   /* 반응 필요 줄은 쌓인다: 앞머리+제목 / `누가 · 언제` / 미리보기 / 동작(늘 보인다) — 둘째 줄부터는 제목 아래 정렬 */
@@ -2797,6 +2813,7 @@ a.d-btn { text-decoration: none; }
   .d-prow2.is-done .res { grid-area: a; }
   .d-prow2.is-done .dd { grid-area: c; justify-self: end; }
   .d-prow2 .ac { grid-area: ac; position: static; flex-direction: column; align-items: stretch; opacity: 1; pointer-events: auto; background: none; padding-left: 0; }
+  .d-prow2 .ac > .d-btn { display: none; }
   .d-selbar { padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px)); }
   .d-selbar .bar { gap: 2px; }
 

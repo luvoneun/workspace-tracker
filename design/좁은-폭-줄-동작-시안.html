@@ -1,0 +1,779 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>좁은 폭 줄 동작 시안</title>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f2f4f6; --surface: #ffffff; --surface-line: transparent; --field: #f2f4f6;
+  --hover: #f4f6f8; --border: #e3e7eb; --hair: #eef1f4; --check-line: #8b95a1;
+  --text: #191f28; --muted: #4e5968; --dim: #636c78;
+  --accent: #3182f6; --accent-strong: #1b64da; --accent-text: #1b64da; --accent-soft: #e8f3ff;
+  --on-fill: #ffffff; --sel: #eef5ff; --sel-hover: #e6f1ff;
+  --urgent: #c9252d; --urgent-bg: #ffeceb; --warn: #b0560a; --warn-bg: #fff4e5;
+  --success: #0d7a4a; --success-bg: #e6f6ee; --neutral-bg: #eef1f4; --prog-track: #e9edf2;
+  --pj-0: #4f83e8; --pj-1: #2f9b87; --pj-4: #cd6579; --pj-5: #5d9b47;
+  --soft: 0 1px 3px rgba(25,31,40,.04), 0 8px 24px rgba(25,31,40,.06);
+  --pop: 0 12px 36px rgba(25,31,40,.14), 0 2px 8px rgba(25,31,40,.06);
+  --scrim: rgba(25,31,40,.16);
+  --r: 20px; --r-sm: 12px; --r-xs: 10px;
+  --ease: cubic-bezier(.22,.8,.3,1);
+  --font: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', 'Segoe UI', sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #15181e; --surface: #1e222a; --surface-line: #2b313b; --field: #262b34;
+    --hover: #272c35; --border: #333a45; --hair: #2b313b; --check-line: #636e7d;
+    --text: #eaedf1; --muted: #a8b1bd; --dim: #8b95a1;
+    --accent: #4b91f1; --accent-strong: #4b91f1; --accent-text: #7aa9ff; --accent-soft: #1b2a44;
+    --on-fill: #0b1020; --sel: #1c2533; --sel-hover: #212c3d;
+    --urgent: #ff8f8f; --urgent-bg: #3a2022; --warn: #ffbe6b; --warn-bg: #3a2e1b;
+    --success: #6ddba0; --success-bg: #1c3729; --neutral-bg: #2a2f38; --prog-track: #2b313b;
+    --pj-0: #7aa2ff; --pj-1: #57c6ad; --pj-4: #ef92a0; --pj-5: #8ccb72;
+    --soft: 0 1px 3px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+    --pop: 0 12px 36px rgba(0,0,0,.55), 0 2px 8px rgba(0,0,0,.35);
+    --scrim: rgba(0,0,0,.5);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #15181e; --surface: #1e222a; --surface-line: #2b313b; --field: #262b34;
+  --hover: #272c35; --border: #333a45; --hair: #2b313b; --check-line: #636e7d;
+  --text: #eaedf1; --muted: #a8b1bd; --dim: #8b95a1;
+  --accent: #4b91f1; --accent-strong: #4b91f1; --accent-text: #7aa9ff; --accent-soft: #1b2a44;
+  --on-fill: #0b1020; --sel: #1c2533; --sel-hover: #212c3d;
+  --urgent: #ff8f8f; --urgent-bg: #3a2022; --warn: #ffbe6b; --warn-bg: #3a2e1b;
+  --success: #6ddba0; --success-bg: #1c3729; --neutral-bg: #2a2f38; --prog-track: #2b313b;
+  --pj-0: #7aa2ff; --pj-1: #57c6ad; --pj-4: #ef92a0; --pj-5: #8ccb72;
+  --soft: 0 1px 3px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+  --pop: 0 12px 36px rgba(0,0,0,.55), 0 2px 8px rgba(0,0,0,.35);
+    --scrim: rgba(0,0,0,.5);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; line-height: 1.55; word-break: keep-all; -webkit-font-smoothing: antialiased; }
+::selection { background: var(--accent-soft); color: var(--text); }
+button, input { font-family: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+svg.i { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ---------- 시안 판 ---------- */
+.board { max-width: 1320px; margin: 0 auto; padding: 28px 20px 64px; }
+.top { display: flex; align-items: flex-end; gap: 12px 20px; flex-wrap: wrap; }
+.top h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+.top p { margin: 4px 0 0; color: var(--muted); font-size: 13.5px; max-width: 64ch; }
+.tools { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+.seg { display: inline-flex; padding: 3px; gap: 2px; background: var(--neutral-bg); border-radius: var(--r-sm); }
+.seg button { height: 30px; padding: 0 12px; border: 0; border-radius: 9px; background: none; color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(25,31,40,.08); }
+
+.change { margin: 20px 0 0; padding: 14px 18px; background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r); box-shadow: var(--soft); font-size: 13.5px; color: var(--muted); }
+.change b { color: var(--text); font-weight: 600; }
+.change ol { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+
+.sec { margin-top: 44px; }
+.sec > h2 { margin: 0 0 4px; font-size: 18px; font-weight: 700; letter-spacing: -0.015em; }
+.sec > .why { margin: 0 0 16px; color: var(--dim); font-size: 13px; max-width: 72ch; }
+.cols { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+.col { flex: 0 0 auto; width: 390px; max-width: 100%; }
+.col > h3 { margin: 0 0 2px; display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 700; letter-spacing: -0.012em; }
+.col > .note { margin: 0 0 10px; min-height: 40px; color: var(--dim); font-size: 12.5px; line-height: 1.55; }
+.rec { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px; background: var(--accent-soft); color: var(--accent-text); font-size: 12px; font-weight: 600; }
+.tag0 { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px; background: var(--neutral-bg); color: var(--muted); font-size: 12px; font-weight: 600; }
+.meas { margin-top: 8px; font-size: 12.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.meas b { color: var(--text); font-weight: 600; }
+
+/* 넓은 폭 보기: 틀이 넓어지고, 모든 줄은 지금 규칙(hover에 겹쳐 뜨는 동작) 그대로 */
+.board.wide .cols { flex-direction: column; }
+.board.wide .col { width: 100%; max-width: 1120px; }
+.board.wide .col > .note { min-height: 0; }
+.wideonly { display: none; }
+.board.wide .wideonly { display: block; }
+.board.wide .narrowonly { display: none; }
+.widebar { margin: 16px 0 0; padding: 10px 14px; border-radius: var(--r-sm); background: var(--sel); color: var(--text); font-size: 13.5px; }
+
+/* 폰 틀 — 안쪽 폭이 컨테이너 질의의 기준(앱의 ≤520px 규칙을 여기서 그대로 흉내 낸다) */
+.ph { container: ph / inline-size; width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 28px; padding: 14px 16px 20px; overflow: hidden; position: relative; }
+.ph.tall { height: 780px; padding-top: 0; }
+
+/* ---------- 앱 부품 (ui.css에서 옮김) ---------- */
+.lhd { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 34px; margin: 0 0 2px; }
+.lhd h4 { margin: 0; font-size: 19px; font-weight: 700; letter-spacing: -0.015em; }
+.lhd .cnt { height: 22px; display: inline-flex; align-items: center; padding: 0 9px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-text); font-size: 12.5px; font-weight: 600; }
+.lhd .sub { color: var(--dim); font-size: 13.5px; font-weight: 500; }
+
+.list { position: relative; background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r); box-shadow: var(--soft); padding: 10px; margin-top: 6px; }
+.prog { position: absolute; inset: 0; border-radius: var(--r); overflow: hidden; pointer-events: none; }
+.prog::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--prog-track); }
+.prog > i { position: absolute; top: 0; left: 0; height: 3px; width: 29%; background: var(--accent); }
+.qa { display: flex; align-items: center; gap: 8px; height: 48px; padding: 0 20px; color: var(--dim); font-size: 15px; }
+.grp { display: flex; align-items: center; gap: 8px; height: 50px; padding: 14px 20px 0; color: var(--muted); font-size: 14.5px; font-weight: 600; }
+.grp.doing { color: var(--text); }
+.grp .n { font-size: 13px; font-weight: 500; color: var(--dim); }
+.grp .chev { transform: none; color: var(--dim); }
+.dot { width: 7px; height: 7px; border-radius: 50%; flex: none; display: inline-block; }
+.c0 { background: var(--pj-0); } .c1 { background: var(--pj-1); } .c4 { background: var(--pj-4); } .c5 { background: var(--pj-5); }
+
+/* 체크박스 한 가족 */
+.ck { position: relative; display: grid; place-items: center; width: 30px; }
+.cb { appearance: none; -webkit-appearance: none; margin: 0; position: relative; width: 22px; height: 22px; border: 1.5px solid var(--check-line); border-radius: 6px; background: var(--surface); cursor: pointer; transition: border-color 120ms var(--ease), background 120ms var(--ease); }
+.cb::after { content: ''; position: absolute; inset: -4.5px; border-radius: 9px; }
+.cb:hover { border-color: var(--accent); }
+.cb:checked { background: var(--accent); border-color: var(--accent); }
+.cb:checked::before { content: ''; position: absolute; left: 6.5px; top: 2.5px; width: 5px; height: 10px; border: solid var(--on-fill); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.cb.hi { border-color: var(--warn); background: var(--warn-bg); }
+.cb.hi:hover, .cb.hi:focus-visible { border-color: var(--accent); background: var(--surface); }
+.cb.hi:checked { background: var(--accent); border-color: var(--accent); }
+.pri { position: absolute; width: 13px; height: 13px; pointer-events: none; fill: none; stroke: var(--warn); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; transition: opacity 120ms var(--ease); }
+.cb:hover ~ .pri, .cb:focus-visible ~ .pri, .cb:checked ~ .pri { opacity: 0; }
+.cb.doing { border-color: var(--accent); }
+.cb.doing:not(:checked)::before { content: ''; position: absolute; inset: 2px; border-radius: 3px; background: linear-gradient(90deg, var(--accent) 50%, transparent 50%); }
+
+/* 버튼 세 등급 */
+.btn { display: inline-flex; align-items: center; justify-content: center; height: 34px; padding: 0 13px; border: 0; border-radius: var(--r-xs); background: var(--neutral-bg); color: var(--muted); font-size: 13.5px; font-weight: 600; white-space: nowrap; cursor: pointer; transition: background 170ms var(--ease), color 170ms var(--ease), transform 120ms var(--ease); }
+.btn:hover { background: var(--hover); color: var(--text); }
+.btn:active { transform: scale(.98); }
+.btn.sm { height: 32px; padding: 0 12px; font-size: 13px; }
+.btn.acc { background: var(--accent-soft); color: var(--accent-text); }
+.btn.acc:hover { background: var(--accent-strong); color: var(--on-fill); }
+.btn.pri1 { height: 42px; padding: 0 20px; border-radius: var(--r-sm); background: var(--accent-strong); color: var(--on-fill); font-size: 14.5px; }
+.btn.pri1:hover { filter: brightness(1.08); }
+.ib { width: 32px; height: 32px; display: grid; place-items: center; flex: none; border: 0; border-radius: 50%; background: none; color: var(--muted); cursor: pointer; padding: 0; transition: background 170ms var(--ease), color 170ms var(--ease); }
+.ib:hover { background: var(--hover); color: var(--text); }
+.ib.quiet { color: var(--dim); }
+.ib.open { background: var(--hover); color: var(--text); }
+
+/* ---------- 오늘 목록 업무 줄 (넓은 폭 = 지금 규칙) ---------- */
+.row { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; column-gap: 12px; height: 54px; padding: 0 20px; position: relative; border-radius: 14px; --rowbg: var(--surface); background: var(--rowbg); transition: background 170ms var(--ease); }
+.row:hover, .row:focus-within { --rowbg: var(--hover); }
+.row.is-sel { --rowbg: var(--sel); }
+.row.is-sel:hover, .row.is-sel:focus-within { --rowbg: var(--sel-hover); }
+.row.is-sel .ti { font-weight: 600; color: var(--accent-text); }
+.row.is-doing .ti { font-weight: 600; }
+.tw { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.ti { flex: 0 1 auto; min-width: 0; font-size: 16px; font-weight: 500; line-height: 25px; letter-spacing: -0.012em; color: var(--text); cursor: pointer; border-radius: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.inproj { display: inline-flex; align-items: center; gap: 4px; flex: none; font-size: 13px; color: var(--dim); white-space: nowrap; }
+.src { flex: none; font-size: 12.5px; font-weight: 500; color: var(--dim); text-decoration: none; border-radius: 4px; }
+.src:hover { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; }
+.mt { display: flex; justify-content: flex-end; align-items: center; gap: 8px; font-size: 13px; color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.mt > span { display: inline-flex; align-items: center; gap: 4px; font-weight: 500; }
+.mt .proj { display: none; }
+.bd { height: 23px; padding: 0 8px; border-radius: 6px; font-size: 12.5px; font-weight: 600 !important; }
+.bd.neg { background: var(--urgent-bg); color: var(--urgent); }
+.bd.warn { background: var(--warn-bg); color: var(--warn); }
+.acts { position: absolute; right: 10px; top: 1px; bottom: 1px; display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding-left: 24px; background: linear-gradient(90deg, transparent 0, var(--rowbg) 24px); border-radius: 0 13px 13px 0; opacity: 0; pointer-events: none; transition: opacity 130ms var(--ease); }
+.row:hover .acts, .row:focus-within .acts, .row.is-sel .acts { opacity: 1; pointer-events: auto; }
+.acts .btn { background: var(--accent-soft); color: var(--accent-text); }
+.acts .btn:hover { background: var(--accent-strong); color: var(--on-fill); }
+@container ph (min-width: 521px) {
+  .row.is-hot { --rowbg: var(--hover); }
+  .row.is-hot .acts { opacity: 1; pointer-events: auto; }
+}
+
+/* ---------- 프로젝트 상세 업무 줄 ---------- */
+.pjhd { display: flex; align-items: center; gap: 4px; margin: 14px 0 0; }
+.pjhd h4 { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.025em; }
+.pjsub { margin: 2px 0 0; font-size: 13px; color: var(--dim); }
+.pjsec { display: flex; align-items: center; gap: 8px; margin: 22px 0 8px; font-size: 18px; font-weight: 700; letter-spacing: -0.015em; }
+.pjsec .n { height: 22px; display: inline-flex; align-items: center; padding: 0 9px; border-radius: 999px; background: var(--neutral-bg); color: var(--muted); font-size: 12.5px; font-weight: 600; }
+.prow { display: grid; grid-template-columns: 30px 60px minmax(0, 1fr) 116px; align-items: center; column-gap: 10px; height: 54px; padding: 0 20px; position: relative; border-radius: 14px; --rowbg: var(--surface); background: var(--rowbg); transition: background 170ms var(--ease); }
+.prow:hover, .prow:focus-within { --rowbg: var(--hover); }
+.prow.is-sel { --rowbg: var(--sel); }
+.prow .pl { font-size: 13px; color: var(--dim); white-space: nowrap; }
+.prow .pti { border: 0; background: none; padding: 0; text-align: left; font-size: 16px; font-weight: 500; color: var(--text); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-radius: 4px; }
+.prow .dd { justify-self: end; display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 500; color: var(--dim); white-space: nowrap; }
+.prow .ac { position: absolute; right: 10px; top: 1px; bottom: 1px; display: flex; align-items: center; gap: 6px; padding-left: 24px; background: linear-gradient(90deg, transparent 0, var(--rowbg) 24px); border-radius: 0 13px 13px 0; opacity: 0; pointer-events: none; transition: opacity 130ms var(--ease); }
+.prow:hover .ac, .prow:focus-within .ac { opacity: 1; pointer-events: auto; }
+.prow .ac .btn { background: var(--accent-soft); color: var(--accent-text); }
+/* 확인 대기 한 줄(지금도 ⋯만 늘 보이는 줄) */
+.srow { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto 28px; align-items: center; column-gap: 10px; min-height: 54px; padding: 0 12px 0 20px; border-radius: 14px; }
+.srow .st { font-size: 16px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.srow .sm { font-size: 13px; color: var(--dim); white-space: nowrap; }
+.srow .ib { width: 28px; height: 28px; color: var(--dim); }
+.qa2 { padding: 10px 20px 4px; font-size: 14px; color: var(--dim); }
+@container ph (min-width: 521px) {
+  .prow.is-hot { --rowbg: var(--hover); }
+  .prow.is-hot .ac { opacity: 1; pointer-events: auto; }
+}
+
+/* ---------- 주간요약 문장 줄 ---------- */
+.doc { background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r); box-shadow: var(--soft); padding: 28px 32px 32px; }
+.doc h4 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+.doc h4 small { margin-left: 8px; font-size: 13px; font-weight: 500; color: var(--dim); }
+.doc .qs { margin: 6px 0 0; font-size: 13px; color: var(--dim); }
+.doc .stt { margin: 18px 0 0; padding-top: 14px; border-top: 1px solid var(--hair); font-size: 12.5px; font-weight: 600; color: var(--dim); }
+.doc .pjt { margin: 12px 0 4px; font-size: 16px; font-weight: 700; color: var(--text); }
+.rs { position: relative; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: start; gap: 4px 8px; padding: 4px 8px 4px 4px; margin-left: -4px; border-radius: var(--r-xs); transition: background 170ms var(--ease); }
+.rs .bu { justify-self: center; color: var(--dim); font-size: 15.5px; line-height: 1.65; }
+.rs .tx { font-size: 15.5px; line-height: 1.65; overflow-wrap: anywhere; }
+.rs .edt { margin-left: 8px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.rs .ac { display: flex; align-items: center; gap: 2px; padding-top: 2px; opacity: 0; pointer-events: none; transition: opacity 130ms var(--ease); }
+.rs:hover .ac, .rs:focus-within .ac { opacity: 1; pointer-events: auto; }
+.rs .ac .ib { width: 32px; height: 32px; }
+.rs.is-sel { background: var(--sel); }
+@container ph (min-width: 521px) {
+  .rs.is-hot .ac { opacity: 1; pointer-events: auto; }
+}
+
+/* 더보기 메뉴 (한 벌) */
+.menu { position: absolute; z-index: 5; width: 304px; max-width: calc(100% - 24px); background: var(--surface); border: 1px solid var(--surface-line); border-radius: 18px; box-shadow: var(--pop); padding: 6px; }
+.menu .mi { display: flex; align-items: center; width: 100%; height: 38px; padding: 0 12px; border: 0; border-radius: var(--r-xs); background: none; color: var(--text); font-size: 14px; font-weight: 500; text-align: left; cursor: pointer; }
+.menu .mi:hover, .menu .mi.focus { background: var(--hover); }
+.menu hr { border: 0; border-top: 1px solid var(--hair); margin: 6px 4px; }
+.menu .new { margin-left: auto; font-size: 11.5px; font-weight: 600; color: var(--accent-text); }
+
+/* ---------- 좁은 폭(≤520) — 앱의 @media (max-width: 520px) 자리 ---------- */
+@container ph (max-width: 520px) {
+  .list { padding: 6px; }
+  .qa { padding: 0 12px; }
+  .grp { padding: 14px 12px 0; }
+  /* 오늘 목록: 두 줄 격자 */
+  .row { grid-template-columns: 30px minmax(0, 1fr) auto; grid-template-areas: "ck ti ac" "ck mt ac"; height: auto; min-height: 60px; padding: 10px 12px; row-gap: 2px; column-gap: 10px; }
+  .row .ck { grid-area: ck; }
+  .row .tw { grid-area: ti; flex-wrap: wrap; }
+  .row .mt { grid-area: mt; justify-content: flex-start; flex-wrap: wrap; row-gap: 5px; }
+  .row .mt .proj { display: inline-flex; }
+  .row .acts { grid-area: ac; position: static; flex-direction: column; align-items: stretch; opacity: 1; pointer-events: auto; background: none; padding-left: 0; }
+  .row .acts .btn { height: 32px; padding: 0 11px; }
+
+  /* 프로젝트 상세 줄 */
+  .prow { grid-template-columns: 30px auto minmax(0, 1fr) auto; grid-template-areas: "ck ti ti ac" "ck a c ac"; height: auto; min-height: 60px; padding: 10px 12px; row-gap: 2px; column-gap: 8px; }
+  .prow .ck { grid-area: ck; }
+  .prow .pti { grid-area: ti; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 25px; }
+  .prow .pl { grid-area: a; font-size: 11.5px; }
+  .prow .dd { grid-area: c; justify-self: start; }
+  .prow .ac { grid-area: ac; position: static; flex-direction: column; align-items: stretch; opacity: 1; pointer-events: auto; background: none; padding-left: 0; }
+  .srow { padding: 0 6px 0 12px; }
+  .qa2 { padding: 10px 12px 4px; }
+  .pjsec { margin-top: 18px; }
+
+  /* 주간요약 문장: 지금은 동작이 늘 보이고 문장 아래로 내려간다 */
+  .doc { padding: 16px 14px 28px; }
+  .doc h4 { font-size: 19px; }
+  .rs { grid-template-columns: 22px minmax(0, 1fr); }
+  .rs .tx { font-size: 15px; }
+  .rs .ac { grid-column: 2; opacity: 1; pointer-events: auto; padding-top: 4px; }
+
+  /* ===== 제안 A — 줄에는 ⋯ 하나, 줄 전체를 누르면 아래 시트 ===== */
+  .v-a .row, .v-b .row, .v-a .prow { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  .v-a .row:active, .v-b .row:active, .v-a .prow:active { --rowbg: var(--hover); }
+  .v-a .row .acts .btn, .v-a .prow .ac .btn { display: none; }
+  .v-a .row .acts, .v-a .prow .ac { align-self: center; margin-right: -4px; }
+  .v-a .row .acts .ib, .v-a .prow .ac .ib { width: 32px; height: 32px; color: var(--dim); }
+  /* 주간요약: 수정·제외는 ⋯ 메뉴 맨 위로. 줄 오른쪽 위에 ⋯ 하나 */
+  .v-a .rs { grid-template-columns: 22px minmax(0, 1fr) 32px; }
+  .v-a .rs .ac { grid-column: 3; padding-top: 0; margin-top: 1px; }
+  .v-a .rs .ac .btn { display: none; }
+  .v-a .rs .ac .ib { color: var(--dim); }
+
+  /* ===== 제안 B — 줄에는 아무것도 ===== */
+  .v-b .row { grid-template-columns: 30px minmax(0, 1fr); grid-template-areas: "ck ti" "ck mt"; }
+  .v-b .row .acts { display: none; }
+  .v-b .rs .ac { display: none; }
+  .v-b .rs.is-sel .ac { display: flex; }
+}
+
+/* ---------- 아래 시트 (≤520의 상세) ---------- */
+.apphd { margin: 0 -16px; padding: 12px 16px 0; background: var(--surface); box-shadow: 0 1px 0 var(--hair); }
+.apphd .r1 { display: flex; align-items: center; gap: 8px; height: 40px; }
+.apphd .date { height: 26px; display: inline-flex; align-items: center; padding: 0 10px; border-radius: 999px; background: var(--neutral-bg); color: var(--muted); font-size: 13px; font-weight: 600; }
+.apphd .sp { margin-left: auto; }
+.apphd .tabs { display: flex; gap: 18px; height: 48px; align-items: center; font-size: 15px; font-weight: 500; color: var(--muted); white-space: nowrap; overflow: hidden; }
+.apphd .tabs .on { color: var(--text); font-weight: 700; box-shadow: 0 2.5px 0 var(--accent); padding: 12px 0; }
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; max-height: 86%; background: var(--surface); border: 1px solid var(--surface-line); border-radius: 20px 20px 0 0; box-shadow: var(--pop); display: flex; flex-direction: column; z-index: 4; }
+.sheet .sh { display: flex; align-items: flex-start; gap: 4px; padding: 18px 12px 6px 18px; }
+.sheet .sh h5 { flex: 1; margin: 0; font-size: 20px; font-weight: 700; line-height: 29px; letter-spacing: -0.02em; }
+.sheet .sb { padding: 4px 18px 18px; overflow: auto; }
+.sheet dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px 14px; margin: 6px 0 0; align-items: center; }
+.sheet dt { font-size: 12.5px; color: var(--muted); }
+.sheet dd { margin: 0; font-size: 14px; color: var(--text); display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.pick { display: inline-flex; align-items: center; gap: 2px; min-height: 28px; padding: 0 6px; margin-left: -6px; border-radius: 8px; }
+.pick svg { transform: rotate(90deg); color: var(--dim); }
+.pick.warn { color: var(--warn); font-weight: 600; }
+.neg { color: var(--urgent); }
+.chip { height: 28px; display: inline-flex; align-items: center; padding: 0 10px; border-radius: 999px; background: var(--neutral-bg); color: var(--muted); font-size: 13px; font-weight: 600; }
+.field { height: 30px; display: inline-flex; align-items: center; padding: 0 10px; border-radius: var(--r-sm); background: var(--field); font-size: 13px; color: var(--text); }
+.sheet .foot { display: flex; gap: 6px; margin: 18px 0 4px; }
+.sheet .sect { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--hair); font-size: 12.5px; color: var(--muted); }
+.sheet .ta { margin-top: 8px; height: 64px; border-radius: var(--r-sm); background: var(--field); padding: 10px 12px; color: var(--dim); font-size: 14px; }
+.sheet .asn { margin-top: 12px; font-size: 12.5px; color: var(--dim); }
+
+.scrim { position: absolute; inset: 0; background: var(--scrim); z-index: 3; }
+.sheet .foot { flex-wrap: wrap; }
+/* 좁은 폭: 누르는 자리 38px 이상(모양은 그대로, 투명한 ::after만 넓힌다) */
+@container ph (max-width: 520px) {
+  .cb::after { inset: -8px; border-radius: 12px; }
+  .row .acts .ib, .prow .ac .ib, .rs .ac .ib { position: relative; }
+  .row .acts .ib::after, .prow .ac .ib::after, .rs .ac .ib::after { content: ''; position: absolute; inset: -3px; border-radius: 50%; }
+  /* 주간요약 A: 수정 + ⋯ 는 오른쪽 칸에, 제외는 메뉴 맨 위 */
+  .v-a .rs { grid-template-columns: 22px minmax(0, 1fr) auto; }
+  .v-a .rs .ac .btn.keep { display: inline-flex; height: 32px; padding: 0 11px; }
+}
+/* 알림(toast) — 앱 .d-toast 모양 그대로 */
+.toastph { min-height: 120px; display: flex; flex-direction: column; justify-content: flex-end; gap: 10px; }
+.toast { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; padding: 12px 12px 12px 18px; background: var(--surface); color: var(--text); border: 1px solid var(--surface-line); border-radius: 16px; box-shadow: var(--pop); font-size: 14px; }
+.toast .msg { flex: 1 1 auto; min-width: 0; }
+.toast .tnote { font-size: 12.5px; color: var(--muted); flex-shrink: 0; }
+.toast .bs { display: flex; gap: 6px; margin-left: auto; }
+.cmp { margin: 12px 0 0; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.cmp th, .cmp td { padding: 5px 14px 5px 0; text-align: left; border-bottom: 1px solid var(--hair); }
+.cmp th { font-weight: 600; color: var(--dim); font-size: 12.5px; }
+.cmp td:first-child { color: var(--text); }
+.cmp td.up { color: var(--warn); font-weight: 600; }
+.change .tip { margin: 10px 0 0; font-size: 13px; }
+
+/* 메모 */
+.memo { flex: 1 1 360px; min-width: 0; max-width: 560px; background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r); box-shadow: var(--soft); padding: 18px 20px; font-size: 13.5px; color: var(--muted); }
+.memo h4 { margin: 0 0 8px; font-size: 15px; font-weight: 700; color: var(--text); }
+.memo h4 + ul { margin-top: 0; }
+.memo ul { margin: 0 0 16px; padding-left: 18px; display: grid; gap: 5px; }
+.memo li b { color: var(--text); font-weight: 600; }
+.memo code { font-size: 12.5px; padding: 1px 5px; border-radius: 5px; background: var(--neutral-bg); color: var(--text); }
+.hitmap { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 12px; margin: 0 0 16px; font-size: 13px; }
+.hitmap dt { color: var(--text); font-weight: 600; }
+.hitmap dd { margin: 0; }
+
+.rules { margin-top: 44px; padding: 16px 20px; border-radius: var(--r); background: var(--surface); box-shadow: var(--soft); font-size: 13.5px; color: var(--muted); }
+.rules b { color: var(--text); }
+.rules ol { margin: 8px 0 0; padding-left: 20px; display: grid; gap: 4px; }
+
+@media (max-width: 520px) {
+  .board { padding: 20px 16px 48px; }
+  .tools { margin-left: 0; }
+  .col > .note { min-height: 0; }
+}
+/* 캡처용: ?vw=390이면 판을 390px 창처럼 그린다(헤드리스 창은 500px보다 좁아지지 않는다) */
+html.vw390 body { width: 390px; overflow-x: hidden; }
+html.vw390 .board { padding: 20px 16px 48px; }
+html.vw390 .tools { margin-left: 0; }
+html.vw390 .col > .note { min-height: 0; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="more" viewBox="0 0 16 16"><circle cx="8" cy="3.2" r="1.05"/><circle cx="8" cy="8" r="1.05"/><circle cx="8" cy="12.8" r="1.05"/></symbol>
+  <symbol id="close" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></symbol>
+  <symbol id="plus" viewBox="0 0 16 16"><path d="M8 3.2v9.6M3.2 8h9.6"/></symbol>
+  <symbol id="chevron" viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.5"/></symbol>
+  <symbol id="calendar" viewBox="0 0 16 16"><rect x="2.4" y="3.4" width="11.2" height="10.2" rx="2.2"/><path d="M2.4 6.6h11.2M5.6 2.2v2.4M10.4 2.2v2.4"/></symbol>
+  <symbol id="clock" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.8"/><path d="M8 4.8V8l2.2 1.5"/></symbol>
+  <symbol id="refresh" viewBox="0 0 16 16"><path d="M14 8a6 6 0 1 1-2-4.47L14 5.2"/><path d="M14 2v3.4h-3.4"/></symbol>
+  <symbol id="search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.25"/><path d="M10.2 10.2 14 14"/></symbol>
+  <symbol id="priHigh" viewBox="0 0 16 16"><path d="M3.5 10.5 8 6l4.5 4.5"/></symbol>
+</svg>
+
+<div class="board" id="board">
+  <div class="top">
+    <div>
+      <h1>좁은 폭 줄 동작 시안</h1>
+      <p>520px 이하에서 줄마다 쌓이던 <b>내일·나중에·수정·제외</b> 버튼을 걷어 내고, 줄에는 ⋯ 하나만 남긴 안이에요. 줄 아무 데나 누르면 아래 시트가 열리고, 시트에는 이미 완료로 표시·내일·나중에가 있어요. 넓은 폭은 지금 그대로예요.</p>
+    </div>
+    <div class="tools">
+      <div class="seg" role="group" aria-label="테마">
+        <button type="button" data-theme-set="" aria-pressed="true">시스템</button>
+        <button type="button" data-theme-set="light" aria-pressed="false">밝게</button>
+        <button type="button" data-theme-set="dark" aria-pressed="false">어둡게</button>
+      </div>
+      <div class="seg" role="group" aria-label="폭">
+        <button type="button" data-width="narrow" aria-pressed="true">좁은 폭 390</button>
+        <button type="button" data-width="wide" aria-pressed="false">넓은 폭</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="change">
+    <ol>
+      <li><b>줄 오른쪽의 버튼 기둥이 사라져요.</b> 오늘 목록·프로젝트 상세는 ⋯ 하나, 주간요약 문장도 ⋯ 하나만 남아요.</li>
+      <li><b>줄 아무 데나 누르면 상세가 아래 시트로 열려요.</b> 지금은 제목 글자를 정확히 눌러야 열려요.</li>
+      <li><b>체크박스·원문 링크·⋯는 제 할 일만 해요.</b> 줄 누름으로 번지지 않아요.</li>
+    </ol>
+    <table class="cmp" aria-label="누름 수 비교 (좁은 폭)">
+      <thead><tr><th scope="col">하려는 일</th><th scope="col">지금</th><th scope="col">제안 A</th></tr></thead>
+      <tbody>
+        <tr><td>완료</td><td>1</td><td>1</td></tr>
+        <tr><td>상세 열기</td><td>1</td><td>1</td></tr>
+        <tr><td>내일 / 나중에</td><td>1</td><td class="up">2</td></tr>
+        <tr><td>밀린 업무 오늘로</td><td>1</td><td class="up">2</td></tr>
+        <tr><td>주간요약 수정</td><td>1</td><td>1</td></tr>
+        <tr><td>주간요약 제외</td><td>1</td><td class="up">2</td></tr>
+      </tbody>
+    </table>
+    <p class="tip">아침에 여러 개를 한꺼번에 내일로 넘길 땐 줄마다 누르지 말고 <b>오늘 정리</b>(오늘 할 일 머리의 ⋯)로 해요.</p>
+  </div>
+  <p class="widebar wideonly">넓은 폭에서는 세 목록 모두 <b>지금과 똑같아요</b> — 동작은 줄에 손이 닿을 때 오른쪽 끝에 겹쳐 뜨고, 상세는 줄 옆 카드예요. 아래 각 목록의 한 줄은 손이 닿은 모습으로 그려 두었어요.</p>
+
+  <!-- ============ 1. 오늘 목록 ============ -->
+  <section class="sec" aria-labelledby="s1">
+    <h2 id="s1">오늘 목록</h2>
+    <p class="why">할 일 5개와 그룹 제목·빠른 추가·완료 묶음까지 같은 내용이에요. 지금은 줄마다 내일·나중에·⋯(밀린 줄은 오늘 할게요까지)가 세로로 서서 줄 하나가 100px을 넘어요.</p>
+    <div class="cols" id="todayCols"></div>
+  </section>
+
+  <!-- ============ 2. 아래 시트 ============ -->
+  <section class="sec narrowonly" aria-labelledby="s2">
+    <h2 id="s2">줄을 누르면 — 아래 시트</h2>
+    <p class="why">지금 있는 좁은 폭 상세 시트 그대로예요(새 부품 없음). 시트 뒤에는 설정 창과 같은 가림막(<code>--scrim</code>)이 깔리고, 시트 밖을 누르면 닫혀요. 발의 <b>내일·나중에·오늘로</b>(밀린 업무면 <b>오늘 할게요</b>)를 누르면 옮기고 시트도 닫혀요.</p>
+    <div class="cols">
+      <div class="col">
+        <h3>제안 A · 결제 실패 알림 문구 정리를 누름</h3>
+        <p class="note">줄에서 사라진 내일·나중에는 시트 발에 그대로 있어요. 누르면 옮기고 시트가 닫혀요. 줄의 ⋯과 시트 머리의 ⋯는 같은 메뉴예요.</p>
+        <div class="ph tall v-a" id="sheetPhone"></div>
+      </div>
+      <div class="col">
+        <h3>제안 A · 밀린 업무를 누름</h3>
+        <p class="note">주간 지표 대시보드 확인(어제에서 밀림). 줄에 있던 <b>오늘 할게요</b>가 시트 발로 와서 오늘 할게요 · 내일 · 나중에가 서요.</p>
+        <div class="ph tall v-a" id="sheetPhone2"></div>
+      </div>
+      <div class="memo">
+        <h4>무엇을 누르면 무엇이 되나</h4>
+        <dl class="hitmap">
+          <dt>체크박스</dt><dd>완료. 좁은 폭에서는 누르는 자리를 <b>38px</b>로 넓혀요(모양 22px은 그대로, 투명한 <code>::after</code>만 넓힘). 줄 누름으로 번지지 않아요. 체크박스 칸(30px)의 빈 여백은 줄 누름으로 치지 않고 아무 일도 없어요 — 완료하려다 시트가 열리는 일이 없게.</dd>
+          <dt>제목 · 빈 자리 · 상태말</dt><dd>아래 시트 열기. 시트 밖(가림막)을 누르면 닫혀요. <b>여러 개 선택 중에는 줄 누름 = 선택</b>이에요(시트는 열리지 않아요).</dd>
+          <dt>원문</dt><dd>새 탭으로 원문 열기(지금 그대로).</dd>
+          <dt>⋯</dt><dd>더보기 메뉴(지금 그대로 — 언제 할지·우선순위·프로젝트·삭제…). 누르는 자리 <b>38px</b>(아이콘 32px 그대로, <code>::after</code>로 넓힘).</dd>
+          <dt>시트 발 버튼</dt><dd>내일·나중에·오늘로·오늘 할게요 = 옮기고 시트 닫힘, 알림에 되돌리기. 완료로 표시도 닫혀요.</dd>
+        </dl>
+        <h4>키보드로 찾는 길</h4>
+        <ul>
+          <li><b>Tab 차례는 줄마다 셋:</b> 체크박스 → 제목 → ⋯. 지금은 체크박스 → 제목 → 내일 → 나중에 → ⋯ 다섯이었어요.</li>
+          <li>제목에서 <b>Enter·Space</b> = 시트 열기(지금과 같음). 시트는 제목으로 초점이 가고, <b>Esc</b>나 ✕로 닫으면 연 줄 제목으로 돌아와요.</li>
+          <li>줄 전체 누름은 손가락·마우스용 보조일 뿐이라 <b>Tab 정지를 새로 만들지 않아요</b>(줄에 tabindex를 주지 않음).</li>
+          <li>주간요약 문장은 Tab 정지가 둘: <b>수정 → ⋯</b>. 메뉴가 열리면 첫 항목 <b>제외</b>에 초점, ↑↓ 이동, Esc는 ⋯로 되돌아가요.</li>
+          <li>시트가 닫히면 초점은 연 줄 제목으로 가요. 줄이 옮겨져 사라졌으면 그 다음 줄 제목으로(없으면 목록 머리로).</li>
+        </ul>
+        <h4>스크린리더로 찾는 길</h4>
+        <ul>
+          <li>제목은 지금처럼 <code>role="button"</code> + <code>결제 실패 알림 문구 정리 상세 보기</code>. 줄은 <code>role="group"</code> 그대로.</li>
+          <li>⋯은 <code>… — 더 보기</code> + <code>aria-haspopup</code>. 주간요약은 <code>가입 개선 문장 더보기</code> 그대로.</li>
+          <li>체크박스 이름은 <code>결제 실패 알림 문구 정리 — 중요 · 완료로 표시</code> 그대로라, 줄 안의 첫 정지에서 완료할 수 있다는 걸 알 수 있어요.</li>
+          <li>시트의 동작 줄 버튼 이름(완료로 표시·내일·나중에)은 줄에 있던 이름과 같아요 — 배운 말이 바뀌지 않아요.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 3. 프로젝트 상세 ============ -->
+  <section class="sec" aria-labelledby="s3">
+    <h2 id="s3">프로젝트 상세 업무 줄</h2>
+    <p class="why">지금은 진행할 업무 줄마다 나중에 + ⋯이 오른쪽에 쌓여요. 바로 아래 확인 대기·결정 줄은 원래 ⋯ 하나만 늘 보이는 줄이라, 제안에서는 같은 화면의 줄들이 한 모양이 돼요.</p>
+    <div class="cols" id="projCols"></div>
+  </section>
+
+  <!-- ============ 4. 주간요약 ============ -->
+  <section class="sec" aria-labelledby="s4">
+    <h2 id="s4">주간요약 문장 줄</h2>
+    <p class="why">문장은 상세 시트가 없는 줄이라 “누르면 시트”가 없어요. 가장 자주 쓰는 <b>수정</b>은 줄에 남기고, <b>제외</b>만 ⋯ 메뉴 맨 위로 올려요(아래로 들어간 문장이면 맨 위가 <b>따로 빼기</b>, 그다음 제외). 넓은 폭에서는 지금처럼 수정·제외·⋯이 hover에 떠요.</p>
+    <div class="cols" id="repCols"></div>
+  </section>
+
+  <section class="sec" aria-labelledby="s5">
+    <h2 id="s5">알림 — 누르는 화면에서는 되돌리기 버튼</h2>
+    <p class="why">휴대폰에는 키보드가 없어서 <b>⌘Z/Ctrl+Z로 되돌리기</b> 글자가 쓸모없어요. 누르는 화면(<code>(hover: none) and (pointer: coarse)</code> — 폭이 아니라 입력 방식으로 가려요)에서는 그 글자 대신 <b>되돌리기</b>·<b>닫기</b> 버튼을 세워요. 완료·옮기기·주간요약 제외 모두 같아요. 알림 모양(<code>.d-toast</code>)과 버튼 등급은 그대로예요.</p>
+    <div class="cols">
+      <div class="col">
+        <h3>지금 <span class="tag0">지금</span></h3>
+        <p class="note">키보드 단축키 안내가 휴대폰에도 떠요.</p>
+        <div class="ph toastph">
+          <div class="toast" role="status"><span class="msg">내일로 미뤘어요</span><span class="tnote">⌘Z로 되돌리기</span></div>
+        </div>
+      </div>
+      <div class="col">
+        <h3>제안 · 누르는 화면 <span class="rec">추천</span></h3>
+        <p class="note">되돌리기는 2차(연파랑), 닫기는 3차. 문구는 지금 쓰는 말 그대로(제외 문구만 예시).</p>
+        <div class="ph toastph">
+          <div class="toast" role="status"><span class="msg">내일로 미뤘어요</span><span class="bs"><button class="btn sm acc" type="button">되돌리기</button><button class="btn sm" type="button">닫기</button></span></div>
+          <div class="toast" role="status"><span class="msg">완료했어요</span><span class="bs"><button class="btn sm acc" type="button">되돌리기</button><button class="btn sm" type="button">닫기</button></span></div>
+          <div class="toast" role="status"><span class="msg">나중에 할 일로 옮겼어요 · 기한은 그대로예요</span><span class="bs"><button class="btn sm acc" type="button">되돌리기</button><button class="btn sm" type="button">닫기</button></span></div>
+          <div class="toast" role="status"><span class="msg">보고에서 뺐어요</span><span class="bs"><button class="btn sm acc" type="button">되돌리기</button><button class="btn sm" type="button">닫기</button></span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="rules">
+    <b>이 시안의 규칙</b>
+    <ol>
+      <li>520px 이하에서만 바뀌어요. 넓은 폭의 hover 동작·줄 옆 상세 카드는 그대로예요.</li>
+      <li>좁은 폭의 줄에는 버튼을 세우지 않아요 — 업무 줄은 ⋯ 하나, 동작은 시트나 메뉴에서.</li>
+      <li>줄 누름이 시트를 여는 건 업무 줄(오늘 목록·서랍·프로젝트 상세)뿐이에요. 체크박스·원문·⋯·그룹 제목은 제 동작만.</li>
+      <li>새 색·새 부품 없음: 선택 바탕 <code>--sel</code>, 누르는 순간 <code>--hover</code>, 시트·메뉴는 있는 것 그대로.</li>
+      <li>줄 높이는 좁은 폭 규칙 그대로(최소 60px, 제목 두 줄까지). 체크박스·⋯ 누르는 자리는 좁은 폭에서 38px 이상.</li>
+      <li>시트는 가림막 위에 서고, 밖을 누르거나 발의 옮기기 버튼을 누르면 닫혀요.</li>
+      <li>누르는 화면의 알림은 단축키 글자 대신 되돌리기·닫기 버튼.</li>
+    </ol>
+  </div>
+</div>
+
+<template id="t-today">
+  <div class="lhd"><h4>오늘 할 일</h4><span class="cnt">5</span><span class="sub">7개 중 2개 끝냈어요</span></div>
+  <div class="list">
+    <div class="prog" aria-hidden="true"><i></i></div>
+    <div class="qa"><svg class="i"><use href="#plus"/></svg>오늘 할 일 추가 — Enter</div>
+    <div class="grp doing">진행 중 <span class="n">1</span></div>
+    <div class="row is-doing" role="group">
+      <span class="ck"><input type="checkbox" class="cb doing" aria-label="운영 권한 정리하기 — 진행 중 · 완료로 표시"></span>
+      <span class="tw"><span class="ti" role="button" tabindex="0" aria-label="운영 권한 정리하기 상세 보기">운영 권한 정리하기</span><span class="inproj">· <i class="dot c1"></i> 운영툴</span></span>
+      <span class="mt"><span class="proj">운영툴</span><span title="9월 27일 (일)부터 진행 중이에요">3일째</span></span>
+      <span class="acts"><button class="btn sm" type="button">내일</button><button class="btn sm" type="button">나중에</button><button class="ib" type="button" aria-label="운영 권한 정리하기 — 더 보기" aria-haspopup="true"><svg class="i"><use href="#more"/></svg></button></span>
+    </div>
+    <div class="grp"><i class="dot c5"></i>가입 개선 <span class="n">1</span></div>
+    <div class="row" role="group">
+      <span class="ck"><input type="checkbox" class="cb" aria-label="온보딩 화면 QA 요청 — 완료로 표시"></span>
+      <span class="tw"><span class="ti" role="button" tabindex="0" aria-label="온보딩 화면 QA 요청 상세 보기">온보딩 화면 QA 요청</span></span>
+      <span class="mt"><span class="bd warn"><svg class="i"><use href="#calendar"/></svg>오늘까지</span></span>
+      <span class="acts"><button class="btn sm" type="button">내일</button><button class="btn sm" type="button">나중에</button><button class="ib" type="button" aria-label="온보딩 화면 QA 요청 — 더 보기" aria-haspopup="true"><svg class="i"><use href="#more"/></svg></button></span>
+    </div>
+    <div class="grp"><i class="dot c4"></i>결제 리뉴얼 <span class="n">2</span></div>
+    <div class="row" role="group" data-key="pay">
+      <span class="ck"><input type="checkbox" class="cb hi" aria-label="결제 실패 알림 문구 정리 — 중요 · 완료로 표시" title="중요한 업무예요"><svg class="pri" aria-hidden="true"><use href="#priHigh"/></svg></span>
+      <span class="tw"><span class="ti" role="button" tabindex="0" aria-label="결제 실패 알림 문구 정리 상세 보기">결제 실패 알림 문구 정리</span><a class="src" href="#" onclick="return false" title="슬랙 원문을 새 탭에서 열어요">원문</a></span>
+      <span class="mt"><span class="bd neg"><svg class="i"><use href="#calendar"/></svg>기한 1일 지남</span></span>
+      <span class="acts"><button class="btn sm" type="button">내일</button><button class="btn sm" type="button">나중에</button><button class="ib" type="button" aria-label="결제 실패 알림 문구 정리 — 더 보기" aria-haspopup="true"><svg class="i"><use href="#more"/></svg></button></span>
+    </div>
+    <div class="row" role="group">
+      <span class="ck"><input type="checkbox" class="cb" aria-label="디자인 리뷰 피드백 반영하기 — 완료로 표시"></span>
+      <span class="tw"><span class="ti" role="button" tabindex="0" aria-label="디자인 리뷰 피드백 반영하기 상세 보기">디자인 리뷰 피드백 반영하기 — 버튼 위치와 문구, 에러 상태 세부 조정</span></span>
+      <span class="mt"></span>
+      <span class="acts"><button class="btn sm" type="button">내일</button><button class="btn sm" type="button">나중에</button><button class="ib" type="button" aria-label="디자인 리뷰 피드백 반영하기 — 더 보기" aria-haspopup="true"><svg class="i"><use href="#more"/></svg></button></span>
+    </div>
+    <div class="grp"><i class="dot c0"></i>지표 <span class="n">1</span></div>
+    <div class="row" role="group" data-key="carry">
+      <span class="ck"><input type="checkbox" class="cb" aria-label="주간 지표 대시보드 확인 — 완료로 표시"></span>
+      <span class="tw"><span class="ti" role="button" tabindex="0" aria-label="주간 지표 대시보드 확인 상세 보기">주간 지표 대시보드 확인</span></span>
+      <span class="mt"><span title="오늘 하려다 넘어온 업무예요"><svg class="i"><use href="#clock"/></svg>어제에서 밀림</span></span>
+      <span class="acts"><button class="btn sm" type="button">오늘 할게요</button><button class="btn sm" type="button">내일</button><button class="btn sm" type="button">나중에</button><button class="ib" type="button" aria-label="주간 지표 대시보드 확인 — 더 보기" aria-haspopup="true"><svg class="i"><use href="#more"/></svg></button></span>
+    </div>
+    <div class="grp"><svg class="i chev"><use href="#chevron"/></svg>완료 <span class="n">2</span></div>
+  </div>
+</template>
+
+<template id="t-proj">
+  <div class="pjhd"><h4>결제 리뉴얼</h4><button class="ib" type="button" aria-label="프로젝트 메뉴"><svg class="i"><use href="#more"/></svg></button></div>
+  <p class="pjsub">열린 항목 4</p>
+  <div class="pjsec">진행할 업무 <span class="n">2</span></div>
+  <div class="list">
+    <div class="prow" role="group">
+      <span class="ck"><input type="checkbox" class="cb hi" aria-label="결제 실패 알림 문구 정리 — 중요 · 완료로 표시"><svg class="pri" aria-hidden="true"><use href="#priHigh"/></svg></span>
+      <span class="pl">오늘</span>
+      <button class="pti" type="button" aria-label="결제 실패 알림 문구 정리 상세 보기">결제 실패 알림 문구 정리</button>
+      <span class="dd bd neg"><svg class="i"><use href="#calendar"/></svg>기한 1일 지남</span>
+      <span class="ac"><button class="btn sm" type="button">나중에</button><button class="ib" type="button" aria-label="결제 실패 알림 문구 정리 — 더 보기" aria-haspopup="true"><svg class="i"><use href="#more"/></svg></button></span>
+    </div>
+    <div class="prow" role="group">
+      <span class="ck"><input type="checkbox" class="cb" aria-label="디자인 리뷰 피드백 반영하기 — 완료로 표시"></span>
+      <span class="pl">오늘</span>
+      <button class="pti" type="button" aria-label="디자인 리뷰 피드백 반영하기 상세 보기">디자인 리뷰 피드백 반영하기 — 버튼 위치와 문구, 에러 상태 세부 조정</button>
+      <span class="dd"></span>
+      <span class="ac"><button class="btn sm" type="button">나중에</button><button class="ib" type="button" aria-label="디자인 리뷰 피드백 반영하기 — 더 보기" aria-haspopup="true"><svg class="i"><use href="#more"/></svg></button></span>
+    </div>
+    <div class="prow" role="group">
+      <span class="ck"><input type="checkbox" class="cb" aria-label="환불 안내 화면 문구 확인 — 완료로 표시"></span>
+      <span class="pl">나중</span>
+      <button class="pti" type="button" aria-label="환불 안내 화면 문구 확인 상세 보기">환불 안내 화면 문구 확인</button>
+      <span class="dd"><svg class="i"><use href="#calendar"/></svg>10월 2일까지</span>
+      <span class="ac"><button class="btn sm" type="button">오늘로</button><button class="ib" type="button" aria-label="환불 안내 화면 문구 확인 — 더 보기" aria-haspopup="true"><svg class="i"><use href="#more"/></svg></button></span>
+    </div>
+    <div class="qa2">+ 이 프로젝트에 할 일 추가 — Enter</div>
+  </div>
+  <div class="pjsec">확인 대기 <span class="n">1</span></div>
+  <div class="list">
+    <div class="srow">
+      <span class="ck"><input type="checkbox" class="cb" aria-label="약관 검토 회신 받기 — 확인됨으로 표시"></span>
+      <span class="st">약관 검토 회신 받기</span>
+      <span class="sm">2일 늦음</span>
+      <button class="ib" type="button" aria-label="약관 검토 회신 받기 — 더 보기"><svg class="i"><use href="#more"/></svg></button>
+    </div>
+  </div>
+</template>
+
+<template id="t-rep">
+  <div class="doc">
+    <h4>이번 주<small>9/28 ~ 10/4</small></h4>
+    <p class="qs">보고 6문장 · 근거 업무 6개</p>
+    <div class="stt">완료한 일</div>
+    <div class="pjt">가입 개선</div>
+    <div class="rs"><span class="bu">•</span><div class="tx"><span>가입 오류 문구 검토함</span></div>
+      <span class="ac"><button class="btn sm keep" type="button">수정</button><button class="btn sm" type="button">제외</button><button class="ib" type="button" aria-label="가입 개선 문장 더보기" aria-haspopup="true"><svg class="i"><use href="#more"/></svg></button></span></div>
+    <div class="rs"><span class="bu">•</span><div class="tx"><span>빈 화면 안내 확인함</span></div>
+      <span class="ac"><button class="btn sm keep" type="button">수정</button><button class="btn sm" type="button">제외</button><button class="ib" type="button" aria-label="가입 개선 문장 더보기" aria-haspopup="true"><svg class="i"><use href="#more"/></svg></button></span></div>
+    <div class="stt">진행중</div>
+    <div class="pjt">운영툴</div>
+    <div class="rs"><span class="bu">•</span><div class="tx"><span>운영 권한 정리하기</span></div>
+      <span class="ac"><button class="btn sm keep" type="button">수정</button><button class="btn sm" type="button">제외</button><button class="ib" type="button" aria-label="운영툴 문장 더보기" aria-haspopup="true"><svg class="i"><use href="#more"/></svg></button></span></div>
+    <div class="stt">새로 정해진 것</div>
+    <div class="pjt">가입 개선</div>
+    <div class="rs" data-key="rs-menu"><span class="bu">•</span><div class="tx"><span>가입 단계는 3단계로 줄이고 약관 동의는 한 화면에서 받는다</span></div>
+      <span class="ac"><button class="btn sm keep" type="button">수정</button><button class="btn sm" type="button">제외</button><button class="ib" type="button" aria-label="가입 개선 문장 더보기" aria-haspopup="true"><svg class="i"><use href="#more"/></svg></button></span></div>
+    <div class="pjt">결제 리뉴얼</div>
+    <div class="rs"><span class="bu">•</span><div class="tx"><span>결제 실패 재시도는 최대 2번까지만</span><span class="edt">직접 수정</span></div>
+      <span class="ac"><button class="btn sm keep" type="button">수정</button><button class="btn sm" type="button">제외</button><button class="ib" type="button" aria-label="결제 리뉴얼 문장 더보기" aria-haspopup="true"><svg class="i"><use href="#more"/></svg></button></span></div>
+    <div class="stt">확인 대기</div>
+    <div class="pjt">결제 리뉴얼</div>
+    <div class="rs"><span class="bu">•</span><div class="tx"><span>약관 검토 회신 받기</span></div>
+      <span class="ac"><button class="btn sm keep" type="button">수정</button><button class="btn sm" type="button">제외</button><button class="ib" type="button" aria-label="결제 리뉴얼 문장 더보기" aria-haspopup="true"><svg class="i"><use href="#more"/></svg></button></span></div>
+  </div>
+</template>
+
+<script>
+(function () {
+  var root = document.documentElement, board = document.getElementById('board');
+  function col(host, variant, title, badge, note, tpl, extra) {
+    var c = document.createElement('div');
+    c.className = 'col';
+    c.innerHTML = '<h3>' + title + (badge || '') + '</h3><p class="note">' + note + '</p>';
+    var ph = document.createElement('div');
+    ph.className = 'ph ' + variant;
+    ph.appendChild(document.getElementById(tpl).content.cloneNode(true));
+    c.appendChild(ph);
+    var m = document.createElement('div');
+    m.className = 'meas';
+    c.appendChild(m);
+    host.appendChild(c);
+    if (extra) extra(ph);
+    return c;
+  }
+  var REC = ' <span class="rec">추천</span>';
+  var NOW = ' <span class="tag0">지금</span>';
+
+  // 넓은 폭에서 손이 닿은 모습으로 보여 줄 줄(좁은 폭에서는 아무 효과 없음)
+  function hot(sel) { return function (ph) { var el = ph.querySelector(sel); if (el) el.classList.add('is-hot'); }; }
+
+  var today = document.getElementById('todayCols');
+  col(today, 'v-now', '지금', NOW, '줄마다 2차 버튼 2~3개 + ⋯이 세로로 서요. 제목 글자를 정확히 눌러야 상세가 열려요.', 't-today', hot('[data-key="pay"]'));
+  col(today, 'v-a', '제안 A · ⋯ 하나', REC, '줄 오른쪽에는 ⋯만. 줄 아무 데나 누르면 아래 시트. 메뉴로 바로 가는 길(삭제·우선순위)이 줄에 남아요.', 't-today', hot('[data-key="pay"]'));
+  col(today, 'v-b', '제안 B · 아무것도 없음', '', '제목이 가장 넓어요. 대신 ⋯ 메뉴는 시트 머리에서만 열려요(한 번 더 누름).', 't-today', hot('[data-key="pay"]'));
+
+  var proj = document.getElementById('projCols');
+  col(proj, 'v-now', '지금', NOW, '진행할 업무 줄은 나중에 + ⋯, 확인 대기 줄은 ⋯ 하나 — 같은 화면에서 줄 모양이 둘이에요.', 't-proj', hot('.prow'));
+  col(proj, 'v-a', '제안 A · ⋯ 하나', REC, '진행할 업무 줄도 ⋯ 하나. 나중에·오늘로는 시트의 동작 줄에 있어요.', 't-proj', hot('.prow'));
+
+  var rep = document.getElementById('repCols');
+  col(rep, 'v-now', '지금', NOW, '문장마다 수정·제외·⋯이 늘 보여서 문서가 버튼 줄로 끊겨요.', 't-rep', hot('[data-key="rs-menu"]'));
+  col(rep, 'v-a', '제안 A · 수정 + ⋯, 메뉴 맨 위에 제외', REC, '⋯을 누른 모습. 줄에는 수정과 ⋯, 메뉴 맨 위에 제외(아래로 들어간 문장이면 따로 빼기 · 제외), 그 아래는 지금 메뉴 그대로.', 't-rep', function (ph) {
+    var line = ph.querySelector('[data-key="rs-menu"]');
+    line.classList.add('is-hot');
+    var btn = line.querySelector('.ib');
+    btn.classList.add('open');
+    btn.setAttribute('aria-expanded', 'true');
+    var menu = document.createElement('div');
+    menu.className = 'menu narrowonly';
+    menu.setAttribute('role', 'menu');
+    menu.innerHTML = '<button class="mi focus" role="menuitem" type="button">제외</button><hr>'
+      + '<button class="mi" role="menuitem" type="button">근거 업무 보기</button>'
+      + '<button class="mi" role="menuitem" type="button">이 아래로 문장 모으기</button>'
+      + '<button class="mi" role="menuitem" type="button">한 줄로 모으기…</button>';
+    ph.appendChild(menu);
+    requestAnimationFrame(function place() {
+      var pr = ph.getBoundingClientRect(), br = btn.getBoundingClientRect();
+      menu.style.top = (br.bottom - pr.top + 4) + 'px';
+      menu.style.right = Math.max(12, pr.right - br.right) + 'px';
+    });
+  });
+  col(rep, 'v-b', '제안 B · 문장을 누르면 그 문장만', '', '두 번째 새로 정해진 것 문장을 누른 모습. 누른 문장 아래에만 수정·제외·⋯이 펴져요. 문장이 눌리는 과녁이 되어 모으기 모드와 헷갈릴 수 있어요.', 't-rep', function (ph) {
+    ph.querySelector('[data-key="rs-menu"]').classList.add('is-sel');
+  });
+
+  // 시트 폰: 앱 머리 + 제안 A 목록(누른 줄 선택) + 가림막 + 아래 시트
+  function sheetPhone(id, key, title, dl, foot, lift) {
+    var sp = document.getElementById(id);
+    sp.innerHTML = '<div class="apphd"><div class="r1"><span class="date">9월 29일 (화)</span><span class="sp"></span>'
+      + '<button class="ib" type="button" aria-label="새로고침"><svg class="i"><use href="#refresh"/></svg></button>'
+      + '<button class="ib" type="button" aria-label="검색"><svg class="i"><use href="#search"/></svg></button></div>'
+      + '<div class="tabs" role="tablist"><span class="on">오늘</span><span>프로젝트</span><span>회의 1</span><span>아이디어·결정 3</span><span>주간요약</span></div></div>'
+      + '<div style="height:14px"></div>';
+    var wrap = document.createElement('div');
+    wrap.appendChild(document.getElementById('t-today').content.cloneNode(true));
+    if (lift) wrap.style.marginTop = '-' + lift + 'px';
+    sp.appendChild(wrap);
+    sp.querySelector('[data-key="' + key + '"]').classList.add('is-sel');
+    var scrim = document.createElement('div');
+    scrim.className = 'scrim';
+    scrim.setAttribute('aria-hidden', 'true');
+    sp.appendChild(scrim);
+    var sheet = document.createElement('div');
+    sheet.className = 'sheet';
+    sheet.setAttribute('role', 'dialog');
+    sheet.setAttribute('aria-label', title + ' 상세');
+    sheet.innerHTML = '<div class="sh"><h5 tabindex="-1">' + title + '</h5>'
+      + '<button class="ib" type="button" aria-label="더 보기" aria-haspopup="true"><svg class="i"><use href="#more"/></svg></button>'
+      + '<button class="ib" type="button" aria-label="닫기"><svg class="i"><use href="#close"/></svg></button></div>'
+      + '<div class="sb"><dl>' + dl + '</dl>'
+      + '<div class="foot">' + foot + '</div>'
+      + '<div class="sect">결과 한 줄<div class="ta">끝나고 한 줄로 남기면 주간요약에 그대로 올라가요</div></div>'
+      + '<p class="asn">고치면 바로 저장돼요</p></div>';
+    sp.appendChild(sheet);
+  }
+  var CHEV = ' <svg class="i"><use href="#chevron"/></svg>';
+  sheetPhone('sheetPhone', 'pay', '결제 실패 알림 문구 정리',
+    '<dt>언제 할지</dt><dd><span class="pick">오늘' + CHEV + '</span></dd>'
+    + '<dt>기한</dt><dd><span class="neg">9월 28일 (월) · 기한 1일 지남</span></dd>'
+    + '<dt></dt><dd><span class="field">9월 28일</span><button class="ib" type="button" aria-label="기한 지우기" style="width:28px;height:28px"><svg class="i"><use href="#close"/></svg></button></dd>'
+    + '<dt>우선순위</dt><dd><span class="pick warn">중요' + CHEV + '</span></dd>'
+    + '<dt>프로젝트</dt><dd><span class="chip">결제 리뉴얼</span></dd>',
+    '<button class="btn pri1" type="button">완료로 표시</button><button class="btn" type="button">내일</button><button class="btn" type="button">나중에</button>', 0);
+  sheetPhone('sheetPhone2', 'carry', '주간 지표 대시보드 확인',
+    '<dt>언제 할지</dt><dd><span class="pick">어제부터 · 9월 28일 (월)' + CHEV + '</span></dd>'
+    + '<dt>기한</dt><dd><span class="field">없음</span></dd>'
+    + '<dt>우선순위</dt><dd><span class="pick">보통' + CHEV + '</span></dd>'
+    + '<dt>프로젝트</dt><dd><span class="chip">지표</span></dd>',
+    '<button class="btn pri1" type="button">완료로 표시</button><button class="btn" type="button">오늘 할게요</button><button class="btn" type="button">내일</button><button class="btn" type="button">나중에</button>', 360);
+
+  // 제안 A·B: 줄 아무 데나 누르면 선택(= 시트 열림 자리). 체크박스·링크·버튼은 제 동작만.
+  document.querySelectorAll('.ph.v-a .row, .ph.v-b .row, .ph.v-a .prow').forEach(function (row) {
+    row.addEventListener('click', function (e) {
+      if (e.target.closest('input, a, button:not(.pti), .ck')) return;
+      var was = row.classList.contains('is-sel');
+      row.closest('.ph').querySelectorAll('.is-sel').forEach(function (x) { x.classList.remove('is-sel'); });
+      if (!was) row.classList.add('is-sel');
+    });
+  });
+  document.querySelectorAll('.ph.v-b .rs').forEach(function (line) {
+    line.addEventListener('click', function (e) {
+      if (e.target.closest('button')) return;
+      var was = line.classList.contains('is-sel');
+      line.closest('.ph').querySelectorAll('.rs.is-sel').forEach(function (x) { x.classList.remove('is-sel'); });
+      if (!was) line.classList.add('is-sel');
+    });
+  });
+
+  function measure() {
+    document.querySelectorAll('.col').forEach(function (c) {
+      var m = c.querySelector('.meas'); if (!m) return;
+      var list = c.querySelector('.ph .list, .ph .doc');
+      if (!list) return;
+      var rows = c.querySelectorAll('.ph .row, .ph .prow, .ph .rs');
+      var h = Math.round(list.getBoundingClientRect().height);
+      var avg = rows.length ? Math.round([].reduce.call(rows, function (s, r) { return s + r.getBoundingClientRect().height; }, 0) / rows.length) : 0;
+      m.innerHTML = (c.querySelector('.doc') ? '문서 카드 높이 ' : '첫 목록 카드 높이 ') + '<b>' + h + 'px</b> · 줄 평균 <b>' + avg + 'px</b>';
+    });
+  }
+
+  document.querySelectorAll('[data-theme-set]').forEach(function (b, _, all) {
+    b.addEventListener('click', function () {
+      var v = b.getAttribute('data-theme-set');
+      if (v) root.setAttribute('data-theme', v); else root.removeAttribute('data-theme');
+      all.forEach(function (x) { x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
+    });
+  });
+  document.querySelectorAll('[data-width]').forEach(function (b, _, all) {
+    b.addEventListener('click', function () {
+      board.classList.toggle('wide', b.getAttribute('data-width') === 'wide');
+      all.forEach(function (x) { x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
+      requestAnimationFrame(measure);
+    });
+  });
+  var q = new URLSearchParams(location.search);
+  if (q.get('vw') === '390') root.classList.add('vw390');
+  if (q.get('theme')) document.querySelector('[data-theme-set="' + q.get('theme') + '"]').click();
+  if (q.get('w') === 'wide') document.querySelector('[data-width="wide"]').click();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(measure); else measure();
+  window.addEventListener('resize', measure);
+})();
+</script>
+</body>
+</html>

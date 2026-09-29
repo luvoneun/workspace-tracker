@@ -232,8 +232,9 @@ async function wfReview(body) {
   if (!result.ok) throw new Error(result.error || '검토 결과를 저장하지 못했어요.');
   return result;
 }
-function workflowOutcome(item) {
-  showNotice('완료했어요', false, null, { label: '결과 한 줄 남기기', onClick: () => panelOpen({ id: item.id }) });
+function workflowOutcome(item, undoEntry = null) {
+  // 누르는 화면에서는 `되돌리기` 버튼도 함께 선다(app.js uiUndoNotice — showNotice 정의는 그대로). undoEntry는 이 완료가 남긴 기록.
+  uiUndoNotice('완료했어요', { label: '결과 한 줄 남기기', onClick: () => panelOpen({ id: item.id }) }, undoEntry);
 }
 function workflowRender(data) {
   workflowData = data.workflows || { items: [], meetings: [] };

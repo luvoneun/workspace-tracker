@@ -666,6 +666,9 @@ function uiTaskRow(item, opts = {}) {
   title.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); }
   });
+  // 좁은 폭(시트로 여는 폭)에서는 줄 아무 데나 눌러도 제목을 누른 것과 같다(여러 개 선택 중이면 선택).
+  // 줄에 tabindex는 주지 않는다 — 키보드는 지금처럼 제목에서 Enter.
+  row.addEventListener('click', (event) => { if (uiRowTapOpens(event, '.d-title')) open(); });
   // NEW는 누르는 버튼이 아니라 표시다 — 화면에 잠깐 머물면 조용히 사라진다(observeNewItem).
   if (item.isNew && !done) { title.prepend(renderNewDot(item)); observeNewItem(row, item); }
 
@@ -715,7 +718,7 @@ function uiTaskRow(item, opts = {}) {
       button.setAttribute('aria-label', `${item.description} — ${label}`);
       button.addEventListener('click', async () => {
         button.disabled = true;
-        await fadeOutAndRun(row, () => setTaskScheduled(item.id, scheduled), uiMoveNotice(message, [item], scheduled));
+        await uiMoveRun(row, () => setTaskScheduled(item.id, scheduled), uiMoveNotice(message, [item], scheduled));
         button.disabled = false;
       });
       acts.appendChild(button);
@@ -2535,7 +2538,8 @@ function taskCompletionCheckbox(item, card, done) {
     // 끝내는 순간을 눈으로 보여 준다: 체크가 그려지고 → 제목에 줄이 그어지고 → 옅어진다.
     // 저장·되돌리기 쪽은 그대로다(클래스 하나만 붙인다. 움직임 줄이기에서는 ui.css가 끈다).
     if (!done) card.classList.add('is-completing');
-    fadeOutAndRun(card, async () => { await toggleTask(item.id); if (!done) workflowOutcome(item); }, done ? '미완료로 되돌렸어요' : null);
+    const mark = uiUndoMark();
+    fadeOutAndRun(card, async () => { await toggleTask(item.id); if (!done) workflowOutcome(item, uiUndoOwn(mark)); }, done ? '미완료로 되돌렸어요' : null);
   });
   return checkbox;
 }
@@ -2546,7 +2550,7 @@ function taskWhenControl(item, mode, card) {
   wrap.className = 'd-chips';
   const move = async (scheduled, message) => {
     uiMenuClose();
-    await fadeOutAndRun(card || wrap, () => setTaskScheduled(item.id, scheduled), uiMoveNotice(message, [item], scheduled));
+    await uiMoveRun(card || wrap, () => setTaskScheduled(item.id, scheduled), uiMoveNotice(message, [item], scheduled));
   };
   const options = [['오늘', todayStr(), '오늘 할 일로 옮겼어요'], ['내일', tomorrowStr(), '내일로 미뤘어요']];
   // 이미 나중에 있는 업무에 `나중에`를 또 보여 주지 않는다.
@@ -2608,7 +2612,7 @@ function taskMenuSections({ item, mode, card }) {
   }];
   if (mode === 'later') actions.push({
     label: '완료로 표시',
-    onClick: () => fadeOutAndRun(card, () => toggleTask(item.id), '완료했어요'),
+    onClick: () => uiMoveRun(card, () => toggleTask(item.id), '완료했어요'),
   });
   return [
     actions,
@@ -2697,6 +2701,9 @@ function panelOpen(view) {
     // 회의에서 연 항목이면 { kind: 'meeting', … }이 들어와 맨 위에 `← 회의로`가 붙는다.
     back: view.back || null,
     returnFocus: opener && opener !== document.body && opener.focus ? opener : null,
+    // 좁은 폭 시트를 닫으면 초점이 돌아갈 줄(연 줄이 옮겨져 사라졌으면 다음 줄, 없으면 목록 머리).
+    sheetReturn: detailSheet() && kind === 'item'
+      ? panelSheetSpot(detailRowMatches(detailLastRow, view, kind) ? detailLastRow : opener?.closest?.('[data-task-id]')) : null,
     // 누른 줄이 어느 목록에 있었는지 — 같은 항목이 여러 목록에 보일 때 그 자리에 카드를 붙인다.
     anchorHost: detailRowHostId(detailRowMatches(detailLastRow, view, kind) ? detailLastRow : null),
   };
@@ -2710,12 +2717,14 @@ function panelOpen(view) {
 function panelClose() {
   const side = panelSide();
   const back = panelState?.returnFocus;
+  const sheetReturn = panelState?.sheetReturn;
   let reopen = panelState?.back;
   panelState = null;
   escDrop(panelClose);
   detailUnmount(); // 떠 있는 카드와 거기 붙은 스크롤·크기 감시를 함께 거둔다
   document.querySelectorAll('.is-sel[data-task-id], .d-wrow.is-sel, .d-mrow.is-sel').forEach(row => row.classList.remove('is-sel'));
   if (side) { side.hidden = true; side.replaceChildren(); }
+  panelScrim(false);
   // 방금 `답변 왔어요`를 확인한 업무의 상세를 닫으면 리마인드 카드를 다시 그려 그 줄을 뺀다
   // (열려 있는 동안은 카드가 붙어 있는 줄이라 남겨 두었다).
   if (answerSeenClosePending) {
@@ -2728,8 +2737,59 @@ function panelClose() {
   // 팔레트 → 회의 → 항목처럼 거쳐 왔어도 처음 찾던 자리로 돌아간다.
   while (reopen && reopen.kind === 'meeting') reopen = reopen.back;
   if (reopen && reopen.kind === 'palette') { palOpen(reopen.state); return; }
+  // 좁은 폭 시트를 줄에서 열었으면 그 줄 제목으로 — 줄의 빈 자리를 누르면 초점이 목록 칸(todayTaskZone)에 가 있어 back으로는 모자란다.
+  if (sheetReturn && panelSheetFocus(sheetReturn)) return;
   if (back && back.isConnected) back.focus();
 }
+
+// 시트를 연 줄을 다시 찾을 표식 — 항목 번호, 바로 다음 업무 줄의 번호, 들어 있던 목록.
+function panelSheetSpot(row) {
+  if (!row || !row.dataset || row.dataset.taskId === undefined) return null;
+  let next = row.nextElementSibling;
+  while (next && (!next.dataset || next.dataset.taskId === undefined)) next = next.nextElementSibling;
+  return { id: row.dataset.taskId, nextId: next ? next.dataset.taskId : null, host: detailRowHostId(row) };
+}
+
+// 시트가 닫히면 초점은 연 줄 제목으로 — 줄이 옮겨져 사라졌으면 다음 줄 제목, 그것도 없으면 목록 머리(제목 글자).
+function panelSheetFocus(spot) {
+  const host = spot.host ? document.getElementById(spot.host) : null;
+  if (!host) return false;
+  const rowOf = id => (id === null || id === undefined ? null : host.querySelector(`[data-task-id="${CSS.escape(String(id))}"]`));
+  const row = rowOf(spot.id) || rowOf(spot.nextId);
+  const title = row && row.querySelector('.d-title, .ti');
+  if (title) { title.focus(); return true; }
+  const head = host.closest ? host.closest('.d-drawer, .d-pwrap, main')?.querySelector('h2') : null;
+  if (!head) return false;
+  if (!head.hasAttribute('tabindex')) head.setAttribute('tabindex', '-1');
+  head.focus();
+  return true;
+}
+
+// 좁은 폭 시트 뒤의 가림막(설정 창과 같은 --scrim) — 시트 뒤 목록이 눌리지 않게 막고, 누르면 시트를 닫는다.
+// 회의 정리만은 빈 자리를 눌러도 닫히지 않는 규칙 그대로다(✕·Esc로 닫는다).
+let panelScrimEl = null;
+function panelScrim(show) {
+  if (!panelScrimEl) {
+    if (!show || !document.body) return;
+    panelScrimEl = document.createElement('div');
+    panelScrimEl.className = 'd-scrim';
+    panelScrimEl.setAttribute('aria-hidden', 'true');
+    panelScrimEl.addEventListener('click', () => { if (panelState && panelState.kind !== 'meeting') panelClose(); });
+    document.body.appendChild(panelScrimEl);
+  }
+  panelScrimEl.hidden = !show;
+}
+
+// 시트를 연 채 창이 넓어지면(휴대폰 가로 돌리기 등) 시트 자리는 숨는다 — 같은 내용을 줄 옆 카드로 옮겨 그린다
+// (붙을 줄이 없으면 panelRender가 닫는다). 가림막도 함께 걷는다.
+function panelSheetResize() {
+  if (!panelState || !panelScrimEl || panelScrimEl.hidden || detailSheet()) return;
+  const side = panelSide();
+  if (side) { side.hidden = true; side.replaceChildren(); }
+  panelScrim(false);
+  panelRender();
+}
+window.addEventListener('resize', panelSheetResize);
 
 // 지금 보고 있는 줄을 찾는 표식 — 업무·확인 대기는 항목 번호, 회의는 레일의 미팅 줄.
 function panelAnchorSelector() {
@@ -2766,6 +2826,7 @@ function panelSheetMount(box, focusFirst) {
   detailUnmount();
   side.hidden = false;
   side.replaceChildren(box);
+  panelScrim(true);
   if (focusFirst) panelFocusFirst(box);
   return true;
 }
@@ -3035,24 +3096,25 @@ function panelTask({ item, detail, type }, box) {
   const finishLabel = type === 'decision' ? 'PRD 반영 완료' : '완료로 표시';
   if (done) foot.appendChild(panelQuietButton('완료 취소', async () => { await toggleTask(item.id); }));
   else foot.appendChild(panelQuietButton(finishLabel, async () => {
+    const mark = uiUndoMark();
     await toggleTask(item.id);
     panelClose();
-    if (isTask) workflowOutcome(item);
+    if (isTask) workflowOutcome(item, uiUndoOwn(mark));
   }, 'd-btn pri'));
   if (!done && isTask) {
-    if (mode === 'later') foot.appendChild(panelQuietButton('오늘로', async () => {
-      await setTaskScheduled(item.id, todayStr());
-      announce('오늘 할 일로 옮겼어요');
+    // 좁은 폭 시트에서는 옮기면 시트도 닫는다(완료로 표시처럼). 넓은 폭의 줄 옆 카드는 그대로 — 줄이 사라지면 카드가 따라 닫힌다.
+    const move = (label, scheduled, message) => foot.appendChild(panelQuietButton(label, async () => {
+      const mark = uiUndoMark();
+      await setTaskScheduled(item.id, scheduled);
+      if (detailSheet() && panelState) panelClose();
+      uiUndoNotice(message, null, uiUndoOwn(mark));
     }));
+    if (mode === 'later') move('오늘로', todayStr(), '오늘 할 일로 옮겼어요');
     else {
-      foot.appendChild(panelQuietButton('내일', async () => {
-        await setTaskScheduled(item.id, tomorrowStr());
-        announce(uiMoveNotice('내일로 미뤘어요', [item], tomorrowStr()));
-      }));
-      foot.appendChild(panelQuietButton('나중에', async () => {
-        await setTaskScheduled(item.id, null);
-        announce(uiMoveNotice('나중에 할 일로 옮겼어요 · 기한은 그대로예요', [item], null));
-      }));
+      // 줄에 `오늘 할게요`가 뜨던 업무(밀렸고 진행 중이 아님)는 좁은 폭에서 줄 대신 시트 발에 그 버튼이 선다.
+      if (detailSheet() && mode === 'today' && uiCarryText(item.scheduled) && !item.doing) move('오늘 할게요', todayStr(), '오늘 할 일로 옮겼어요');
+      move('내일', tomorrowStr(), uiMoveNotice('내일로 미뤘어요', [item], tomorrowStr()));
+      move('나중에', null, uiMoveNotice('나중에 할 일로 옮겼어요 · 기한은 그대로예요', [item], null));
     }
   }
   box.appendChild(foot);
@@ -4614,6 +4676,61 @@ function announce(text) {
   showNotice(text);
 }
 
+// 누르는 화면(키보드가 없는 휴대폰)인지 — 폭이 아니라 입력 방식으로 가린다.
+function uiTouchScreen() {
+  try { return window.matchMedia('(hover: none) and (pointer: coarse)').matches; } catch { return false; }
+}
+
+// 완료·옮기기 알림. 누르는 화면에서는 `⌘Z로 되돌리기` 글자(ui.css가 숨긴다) 대신 `되돌리기` 버튼을 단다 — ⌘Z와 같은 replayUndo.
+// showNotice는 안전장치라 정의를 고치지 않는다: 버튼은 action 인자로 넘기고, 동작이 이미 하나 있으면
+// (완료 뒤 `결과 한 줄 남기기`) 그 알림의 `닫기` 앞에 하나를 더 세운다.
+// 버튼은 이 작업이 남긴 기록(entry — uiUndoOwn)만 되돌린다. 그 사이 다른 작업이 겹쳐 기록을 알 수 없으면 버튼을 달지 않고,
+// 누를 때 그 기록이 맨 위가 아니면 다른 것을 되돌리지 않고 순서를 알린다(일괄 작업의 되돌리기와 같은 말).
+function uiUndoNotice(message, action = null, entry = null) {
+  const undoable = entry && uiTouchScreen() && !undoReplaying && Date.now() - lastUndoRecordedAt < 3000;
+  if (!undoable) { showNotice(message, false, null, action); return; }
+  const undo = { label: '되돌리기', onClick: (button) => {
+    if (undoStack[undoStack.length - 1] !== entry) { showNotice('최근 작업부터 순서대로 실행 취소해 주세요', true); return; }
+    button.disabled = true;
+    replayUndo('undo');
+  } };
+  if (!action) { showNotice(message, false, null, undo); return; }
+  showNotice(message, false, null, action);
+  const region = document.getElementById('liveRegion');
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'd-btn sm';
+  button.textContent = undo.label;
+  button.addEventListener('click', () => undo.onClick(button));
+  region.insertBefore(button, region.lastChild);
+}
+
+// 작업 전 되돌리기 기록 맨 위(uiUndoMark)와 비교해, 그 뒤로 새 기록이 딱 하나면 그것이 이 작업의 것이다.
+// 둘 이상이면(다른 줄의 저장이 겹침) 어느 것인지 알 수 없어 null — 알림에 버튼을 달지 않는다(⌘Z는 그대로).
+function uiUndoMark() { return undoStack[undoStack.length - 1] || null; }
+function uiUndoOwn(mark) {
+  const start = mark ? undoStack.lastIndexOf(mark) + 1 : 0;
+  if (mark && start === 0) return null;
+  return undoStack.length - start === 1 ? undoStack[start] : null;
+}
+
+// fadeOutAndRun(안전장치, 정의 그대로)을 쓰되 끝난 알림만 uiUndoNotice로 — 성공했을 때만 알린다(실패는 request가 이미 알렸다).
+async function uiMoveRun(card, action, message) {
+  let finished = false;
+  const mark = uiUndoMark();
+  await fadeOutAndRun(card, async () => { await action(); finished = true; }, null);
+  if (finished && message) uiUndoNotice(message, null, uiUndoOwn(mark));
+}
+
+// 좁은 폭에서 업무 줄 아무 데나 누르면 그 업무 시트를 연다. 체크 칸(빈 여백 포함)·선택 칸·원문·버튼·입력칸에서 온 누름과
+// 제 누름이 따로 있는 자리(own — 제목)는 제 할 일만 한다. 넓은 폭은 지금 그대로(아무 일도 없다).
+function uiRowTapOpens(event, own = '') {
+  if (!detailSheet()) return false;
+  const target = event && event.target;
+  if (!target || typeof target.closest !== 'function') return false;
+  return !target.closest(`input, textarea, select, a, button, label, .d-check, .d-sel${own ? `, ${own}` : ''}`);
+}
+
 async function toggleTask(id) {
   const source = itemsById.get(id) || wfItem(id);
   await request('/api/track/toggle', {
@@ -5010,6 +5127,8 @@ function setActiveTab(tab) {
   if (!TABS[tab]) tab = 'today';
   // 확인 대기의 `다음은?` 줄은 그 자리의 제안이다 — 탭을 떠나면 함께 내린다.
   if (tab !== activeTabKey) waitingNextClose();
+  // 좁은 폭 시트는 탭에 붙어 있지 않다 — 탭을 옮기면 닫아 가림막이 새 탭을 막지 않게 한다.
+  if (tab !== activeTabKey && panelScrimEl && !panelScrimEl.hidden) panelClose();
   // 프로젝트 탭에 새로 들어올 때만 왼쪽 목록 차례를 다시 정렬한다(체크 등으로 이미 그 탭에 있는 동안
   // 다시 그리는 것은 고정된 차례를 그대로 쓴다 — projectOrderResort).
   if (tab === 'projects' && activeTabKey !== 'projects') projectOrderResort = true;
