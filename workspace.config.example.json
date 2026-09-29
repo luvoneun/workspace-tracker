@@ -37,7 +37,6 @@
   "server": {
     "port": 4321,
     "extraHost": "",
-    "chromeProfile": "",
     "updateChannel": "stable"
   }
 }

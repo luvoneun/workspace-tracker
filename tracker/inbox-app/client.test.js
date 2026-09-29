@@ -7289,7 +7289,7 @@ test('WP-D2 L. 꾸미기: 앱 아이콘 · 앱 이름 · 워크스페이스 제�
   assert.equal(fx.posts().length, 0);
 });
 
-test('WP-D2 L. 꾸미기 저장: 바뀐 칸만 보내고, 제목은 헤더·탭 제목에 곧바로, 앱 이름이 바뀌면 크롬 앱 안내 + `예전 Dock 앱에는 바뀌지 않아요`', async () => {
+test('WP-D2 L. 꾸미기 저장: 바뀐 칸만 보내고, 제목은 헤더·탭 제목에 곧바로, 앱 이름이 바뀌면 크롬 앱 안내 + `예전 버전이 만든 Dock 앱` 안내', async () => {
   const fx = personalizeClient({}, [
     { body: { ok: true, title: '새 제목', dockName: '워크스페이스' } },
     { body: { ok: true, title: '새 제목', dockName: '내 일터' } },
@@ -7323,7 +7323,7 @@ test('WP-D2 L. 꾸미기 저장: 바뀐 칸만 보내고, 제목은 헤더·탭 
   // WP-L: 크롬은 manifest를 곧바로 다시 읽지 않는다 — 사실대로 한 줄. WP-O: 예전 Dock 앱은 바뀌지 않는다 — 사실대로 한 줄.
   same(fx.find('d-pinstallnote').map(one => one.textContent), [
     '크롬 앱에는: 크롬을 다시 켜고(주소창에 about://restart) 앱을 열면 오른쪽 위 「앱 업데이트 있음」 → 업데이트 → 앱을 ⌘Q로 끄고 다시 열기',
-    '예전 Dock 앱에는 바뀌지 않아요 — 크롬 앱으로 설치하면 돼요',
+    '예전 버전이 만든 Dock 앱이 있다면 거기엔 바뀌지 않아요 — 크롬 앱으로 설치하면 돼요',
   ]);
 });
 
@@ -7453,7 +7453,7 @@ test('WP-L 문구: 도움말 `Dock을 누르면 창이 여러 개 떠요`는 앱
   const faq = JSON.parse(app.run('JSON.stringify(SETTINGS_FAQ)')).flatMap(([, rows]) => rows);
   const answer = faq.find(([question]) => question === '앱 아이콘·이름을 바꾸려면')[2];
   assert.match(answer, /크롬 앱은 크롬을 다시 켠 뒤.*앱 업데이트 있음.*⌘Q/);
-  assert.match(answer, /예전 Dock 앱에는 바뀌지 않아요 — 크롬 앱으로 설치하면 돼요\./);
+  assert.match(answer, /예전 버전이 만든 Dock 앱이 있다면 거기엔 바뀌지 않아요 — 크롬 앱으로 설치하면 돼요\./);
   assert.doesNotMatch(answer, /Dock 앱은 닫고 다시 열면/);
 });
 

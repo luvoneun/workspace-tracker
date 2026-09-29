@@ -65,6 +65,7 @@ STATE_FILES=".slack_capture_state.json .weekly_report_state.json .meeting_links.
 
 # 설정에서 받는 갈래(stable=배포된 버전만 / main=만드는 중인 것까지)와 포트를 읽는다.
 # python3 없이 node로 읽는다(node는 이미 필수). 못 읽거나 칸이 없으면 기본값(stable · 4321)이다.
+command -v node >/dev/null 2>&1 || die "Node를 찾지 못했어요 — 설치 위치의 업데이트 파일(업데이트.command)로 다시 실행해 주세요"
 read_config() {
   node -e '
 const fs = require("fs");

@@ -3006,7 +3006,7 @@ async function renderSettingsPersonalize() {
     // 예전 Dock 앱(~/Applications)은 더 만들지 않아 바뀌지 않는다 — 그것도 사실대로 한 줄.
     if (personalizeSavedNote.dock) {
       view.appendChild(settingsEl('d-ismall d-pinstallnote', '크롬 앱에는: 크롬을 다시 켜고(주소창에 about://restart) 앱을 열면 오른쪽 위 「앱 업데이트 있음」 → 업데이트 → 앱을 ⌘Q로 끄고 다시 열기'));
-      view.appendChild(settingsEl('d-ismall d-pinstallnote', '예전 Dock 앱에는 바뀌지 않아요 — 크롬 앱으로 설치하면 돼요'));
+      view.appendChild(settingsEl('d-ismall d-pinstallnote', '예전 버전이 만든 Dock 앱이 있다면 거기엔 바뀌지 않아요 — 크롬 앱으로 설치하면 돼요'));
     }
     personalizeSavedNote = null;
   }
@@ -3066,7 +3066,7 @@ const SETTINGS_FAQ = [
     ['연동은 꼭 켜야 하나요', '없음',
       '아니요. 지라·슬랙·캘린더·회의록은 전부 선택이에요. <b>설정 &gt; 연동</b>에서 하나씩 켜고, 켠 것만 자동으로 모아 와요. 하나도 켜지 않아도 직접 적는 기능은 전부 돼요.'],
     ['앱 아이콘·이름을 바꾸려면', '없음',
-      '<b>설정 &gt; 꾸미기</b>에서 내 그림을 고르고(가운데를 정사각형으로 잘라요) 앱 이름·워크스페이스 제목을 적은 뒤 <b>저장</b>해요. 이 맥에만 적용되고 업데이트해도 남아요. 크롬 앱은 크롬을 다시 켠 뒤(<b>about://restart</b>) 앱 오른쪽 위 <b>앱 업데이트 있음</b> → 업데이트 → <b>⌘Q</b> 뒤 다시 열어요. 예전 Dock 앱에는 바뀌지 않아요 — 크롬 앱으로 설치하면 돼요.'],
+      '<b>설정 &gt; 꾸미기</b>에서 내 그림을 고르고(가운데를 정사각형으로 잘라요) 앱 이름·워크스페이스 제목을 적은 뒤 <b>저장</b>해요. 이 맥에만 적용되고 업데이트해도 남아요. 크롬 앱은 크롬을 다시 켠 뒤(<b>about://restart</b>) 앱 오른쪽 위 <b>앱 업데이트 있음</b> → 업데이트 → <b>⌘Q</b> 뒤 다시 열어요. 예전 버전이 만든 Dock 앱이 있다면 거기엔 바뀌지 않아요 — 크롬 앱으로 설치하면 돼요.'],
   ]],
   ['매일', [
     ['오늘 하기 버거운 업무는 어떻게 미루나요', '없음',
