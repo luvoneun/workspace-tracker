@@ -1154,8 +1154,7 @@ function settingsStepFoot(back, main) {
   return foot;
 }
 
-// ---------- 카드 한 장 ----------
-// `이름 · 칩 · (연결됨이면 상태 줄 · ⋯) | 연결하기` / 한 줄 효용 / 준비물 줄 / (해제 확인 줄) / 펼치는 자리.
+// ---------- 카드 목록의 상태 ----------
 // 펼치면 다른 카드는 접힌다 — 한 번에 하나만 연다.
 let settingsIntgCards = new Map();
 // 지금 그리는 연동 탭의 늦음·첫 읽기 전(syncLag의 결과, 연결된 카드 몫만) — 카드가 자기 몫을 읽는다.
@@ -1172,11 +1171,12 @@ function settingsIntgCloseOthers(kind) {
   settingsIntgCards.forEach((card, key) => { if (key !== kind) card.close(); });
 }
 
-// ---------- 지금 가져오기 ----------
-// 연결된 카드의 상태 줄 오른쪽 작은 보조 버튼. 지라·캘린더(비밀 주소)는 서버가 곧바로 다시 읽어 결과를 주고
-// (`방금 읽음 · N개`), 슬랙·캘린더(Claude)·티로는 요청만 남긴다(`요청했어요 · 1~2분 뒤 반영돼요`).
-// 같은 연동은 1분에 한 번 — 서버가 세고, 화면도 그동안 버튼을 흐리게 둔다. 지금 실패 중이면 상태 줄이
-// 빨간 한 줄(`읽지 못했어요 · 10분 전`)이 되고 버튼은 `다시 시도`, 토큰 문제면 `다시 연결`(그 카드의 위저드).
+// ---------- 새로 받기 · 다시 시도 ----------
+// 잘 될 때는 버튼이 없고 ⋯ › `새로 받기`로만 부른다. 지라·캘린더(비밀 주소)는 서버가 곧바로 다시 읽어 결과를 주고
+// (`방금 읽음 · N개`), 슬랙·캘린더(Claude)·티로는 요청만 남긴다(`요청했어요 · 1~2분 뒤 반영돼요`) — 그 말은 카드의
+// 지금 상황 줄에 잠깐 선다. 같은 연동은 1분에 한 번 — 서버가 세고, 화면도 그동안 버튼을 흐리게 둔다.
+// 막혔을 때만 상태 점 오른쪽에 버튼 하나: 한 번 실패·늦음은 `다시 시도`(새로 받기와 같은 동작),
+// 계속 실패·토큰 문제는 `다시 연결`(그 카드의 위저드 — 다시 연결할 위저드가 없는 카드는 `다시 시도`).
 const SETTINGS_FETCH_WAIT_MS = 60 * 1000;
 const SETTINGS_FETCH_THROTTLED = '방금 가져왔어요 — 1분 뒤에 다시 할 수 있어요';
 const SETTINGS_FETCH_REQUESTED = '요청했어요 · 1~2분 뒤 반영돼요';
@@ -1235,13 +1235,19 @@ async function settingsFetchAsk(key) {
   }
 }
 
-// 버튼 하나. `spec`은 { key, state: { failing, auth, failedAt, lastRunAt }, unit, reconnect }이고
-// `paint(글자, 실패 중)`은 그 카드의 상태 줄을 고친다.
-function settingsFetchButton(spec, paint) {
-  const { key, state = {} } = spec;
-  const button = settingsButton('지금 가져오기', 'd-btn sm d-ifetch');
-  let mode = state.failing ? (state.auth && spec.reconnect ? 'auth' : 'retry') : 'fetch';
-  const label = () => { button.textContent = mode === 'auth' ? '다시 연결' : (mode === 'retry' ? '다시 시도' : '지금 가져오기'); };
+// 버튼 하나 + 새로 받기. `spec`은 { key, state: { failing, auth, failedAt, lastRunAt }, unit, reconnect, mode }이고
+// mode는 처음 버튼 — `none`(잘 될 때, 버튼 없음) · `retry`(다시 시도) · `auth`(다시 연결).
+// `paint(글자, tone)`은 그 카드의 상태 점과 지금 상황 줄을 고치고, `toneNow()`는 지금 점의 tone이다.
+function settingsFetchRunner(spec, paint, toneNow = () => 'ok') {
+  const { key } = spec;
+  const button = settingsButton('다시 시도', 'd-btn sm d-ifetch');
+  let mode = spec.mode || 'none';
+  let busy = false;
+  const label = () => {
+    button.hidden = mode === 'none';
+    button.textContent = mode === 'auth' ? '다시 연결' : '다시 시도';
+    button.className = mode === 'auth' ? 'd-btn sm pri d-ifetch' : 'd-btn sm d-ifetch';
+  };
   const dim = () => {
     const left = SETTINGS_FETCH_WAIT_MS - (Date.now() - (settingsFetchLast.get(key) || 0));
     if (left <= 0) { button.removeAttribute('aria-disabled'); return; }
@@ -1250,12 +1256,13 @@ function settingsFetchButton(spec, paint) {
   };
   label();
   if (mode !== 'auth') dim();
-  button.addEventListener('click', async () => {
-    if (mode === 'auth') { spec.reconnect(); return; }
-    if (button.disabled) return;
+  const fetchNow = async () => {
+    if (busy) return;
     if (Date.now() - (settingsFetchLast.get(key) || 0) < SETTINGS_FETCH_WAIT_MS) { showNotice(SETTINGS_FETCH_THROTTLED); return; }
+    busy = true;
     button.disabled = true;
     const result = await settingsFetchAsk(key);
+    busy = false;
     button.disabled = false;
     if (result.ok && (result.mode === 'done' || result.mode === 'requested')) {
       settingsFetchLast.set(key, Date.now());
@@ -1263,9 +1270,10 @@ function settingsFetchButton(spec, paint) {
         ? `방금 읽음 · ${spec.unit ? `${spec.unit} ` : ''}${Number(result.count) || 0}개`
         : SETTINGS_FETCH_REQUESTED;
       settingsFetchNotes.set(key, { text, at: Date.now(), mode: result.mode });
-      mode = 'fetch';
+      // 곧바로 읽었으면 잘 되는 것 — 버튼을 거둔다. 요청만 남겼으면 점과 버튼은 그대로 두고 말만 바꾼다.
+      if (result.mode === 'done') mode = 'none';
       label();
-      paint(text, false);
+      paint(text, result.mode === 'done' ? 'ok' : toneNow());
       dim();
       if (result.mode === 'requested') settingsFetchPollStart();
       // 캘린더를 곧바로 다시 읽었으면 오늘 미팅 카드도 한 번 새로 그린다.
@@ -1280,18 +1288,21 @@ function settingsFetchButton(spec, paint) {
       return;
     }
     if (result.reason === 'not-installed') { showNotice(message, true); return; }
-    // 지금 실패 — 빨간 한 줄 + 다시 시도(토큰 문제면 다시 연결)
+    // 지금 실패 — 토큰 문제면 멈췄어요 + 다시 연결, 아니면 늦어요 + 다시 시도(이미 멈춘 카드는 멈췄어요 그대로)
     settingsFetchLast.set(key, Date.now());
     mode = result.reason === 'auth' && spec.reconnect ? 'auth' : 'retry';
     label();
     if (mode === 'auth') button.removeAttribute('aria-disabled'); else dim();
-    paint('읽지 못했어요 · 방금', true);
+    paint('읽지 못했어요 · 방금', mode === 'auth' || toneNow() === 'stop' ? 'stop' : 'late');
     showNotice(message, true);
+  };
+  button.addEventListener('click', async () => {
+    if (mode === 'auth') { spec.reconnect(); return; }
+    await fetchNow();
   });
-  return button;
+  return { button, fetchNow };
 }
 
-// `alert`는 지금 멈춘 카드의 { status(상태 줄을 이 말로 빨갛게 — 없으면 `읽지 못했어요 · N분 전`), why(그 아래 이유 한 줄의 글 조각) }.
 // ---------- 멈춤 이유 · 최근 기록 ----------
 // 로그 한 줄(영어·기계 말)을 사람 말 한 마디로. 모르는 것은 억지로 번역하지 않고 줄여서 그대로 둔다.
 function settingsFailWords(text) {
@@ -1307,10 +1318,11 @@ function settingsFailWords(text) {
   return plain || '이유를 알 수 없어요';
 }
 
-// 멈춘 카드의 이유 한 줄. 토큰 문제면 버튼이 이미 `다시 연결`이라 그 말을, 아니면 최근 기록으로 안내한다.
+// 막힌 카드의 이유 한 줄. 토큰 문제면 버튼이 이미 `다시 연결`이라 그 말을, 계속 실패(서버의 `stuck`)라 버튼이
+// `다시 연결`이면(`reconnect` — 그 카드에 다시 연결 위저드가 있을 때) 그 말로 끝맺고, 아니면 최근 기록으로 안내한다.
 // 가장 최근 실패가 이 맥의 Claude Code 로그인 풀림(서버의 `claudeAuth`)이면 할 일 한 줄 — 버튼은 `다시 시도` 그대로다.
 const SETTINGS_CLAUDE_LOGIN = '자동 수집이 쓰는 Claude Code 로그인이 풀렸어요 — 도움말 “Claude Code 로그인이 풀렸다고 나와요”대로 다시 로그인해 주세요';
-function settingsFailWhy(kind, state = {}) {
+function settingsFailWhy(kind, state = {}, { reconnect = false } = {}) {
   if (state.claudeAuth && !state.auth) return [SETTINGS_CLAUDE_LOGIN];
   if (state.auth) {
     return [kind === 'calendar'
@@ -1319,6 +1331,7 @@ function settingsFailWhy(kind, state = {}) {
   }
   const words = { jira: '지라가 응답하지 않았어요', calendar: '캘린더를 읽지 못했어요' };
   const reason = state.summary ? settingsFailWords(state.summary) : (words[kind] || '읽지 못했어요');
+  if (state.stuck && reconnect) return [`${reason} — 계속 안 돼요. 다시 연결을 눌러 주세요(원래 오류는 ⋯ › 최근 기록)`];
   return [`${reason} — 다시 시도해도 안 되면 ⋯ › 최근 기록`];
 }
 
@@ -1391,72 +1404,117 @@ function settingsIntgLog(card, kind, name, entries = [], lead = []) {
 // 메뉴의 `최근 기록` 한 칸(기록이 하나도 없으면 칸 자체를 숨긴다).
 const settingsLogItem = (card, log) => (Array.isArray(log) && log.length ? [{ label: '최근 기록', onClick: () => card.open('log') }] : []);
 
-function settingsIntgCard({ kind, name, chip, use, need, needClass = '', status = null, openText = '연결하기', openClass = 'd-btn acc', menu = null, extra = [], fetch: fetchSpec = null, alert = null, onOpen }) {
+// ---------- 상태 점 + 짧은 말 ----------
+// 카드 넷과 맨 위 요약이 같은 부품이다. tone: ok 연결됨(초록) · soon 연결됨 · 곧 읽어요(흐린 초록, 천천히 숨 쉼) ·
+// late 늦어요(주황) · stop 멈췄어요(빨강) · off 연결 안 됨(회색 빈 원, 말 없음). 점은 장식이라 읽히지 않고 말이 읽힌다.
+const SETTINGS_STAT_WORD = { ok: '연결됨', soon: '연결됨', late: '늦어요', stop: '멈췄어요', off: '' };
+function settingsIntgStat(tone, word, sub) {
+  const node = document.createElement('span');
+  const dot = document.createElement('span');
+  dot.className = 'dot';
+  dot.setAttribute('aria-hidden', 'true');
+  const words = document.createElement('span');
+  words.className = 'w';
+  node.append(dot, words);
+  const set = (next, text = SETTINGS_STAT_WORD[next], more = next === 'soon' ? '· 곧 읽어요' : '') => {
+    node.className = `d-istat k-${next}`;
+    node.dataset.tone = next;
+    words.replaceChildren();
+    if (text) words.appendChild(document.createTextNode(text));
+    if (more) {
+      const small = document.createElement('span');
+      small.className = 'sub';
+      small.textContent = ` ${more}`;
+      words.appendChild(small);
+    }
+  };
+  set(tone, word, sub);
+  return { node, set };
+}
+
+// 멈췄나 — 토큰·주소 문제거나 계속 실패. 판단은 서버가 한다(`fetch.stuck` — 이어진 실패 3번 이상 또는 1시간 넘게,
+// 톱니바퀴 빨간 점·점검과 같은 failStuck). 화면은 읽기만 한다.
+const settingsFailStop = (state = {}) => !!(state.auth || state.stuck);
+
+// ---------- 카드 한 장 ----------
+// 왼쪽 `이름 · 칩` / 한 줄 효용 / 지금 상황 · 준비물 줄, 오른쪽 `상태 점 + 말 · (막혔을 때만) 다시 시도|다시 연결 · ⋯`
+// (연결 안 된 카드는 빈 원 + `연결하기`) / (막혔으면 이유 한 줄) / (해제 확인 줄) / 펼치는 자리.
+// `status`는 연결된 카드의 지금 상황(`#채널 외 1개 · 3분 전 읽음`) — null이면 연결 안 된 카드이고, 그때 `mark`
+// ({ tone, word })가 있으면 그 점을 쓴다(회의록 직접 옮기기 = 초록 `직접 옮기기`).
+// `alert`는 지금 막힌 카드의 { stop(멈췄어요 — 없으면 늦어요), fix(`none`이면 버튼 없음), status(지금 상황 줄을 이 말로),
+// why(이유 한 줄의 글 조각) }.
+function settingsIntgCard({ kind, name, chip, use, need, needClass = '', status = null, mark = null, openText = '연결하기', openClass = 'd-btn acc', menu = null, extra = [], fetch: fetchSpec = null, alert = null, onOpen }) {
   // 늦음·첫 읽기 전(톱니바퀴의 주황 점과 같은 기준 — syncLag)은 렌더가 정해 둔 값을 그 카드 몫만 읽는다.
   const lag = settingsIntgLagOf(kind);
   const row = settingsEl('d-intg');
   row.dataset.integration = kind;
-  const top = settingsEl('d-intgtop');
+  const head = settingsEl('d-intghd');
   const title = document.createElement('span');
   title.className = 'nm';
   title.textContent = name;
   const tag = document.createElement('span');
   tag.className = 'd-itag';
   tag.textContent = chip;
-  top.append(title, tag);
-  let paint = null;
-  if (status !== null) {
-    const state = document.createElement('span');
-    state.className = 'st';
-    const dot = document.createElement('span');
-    dot.className = 'ok';
-    dot.setAttribute('aria-hidden', 'true');
-    dot.textContent = '●';
-    const words = document.createTextNode(` ${status}`);
-    state.append(dot, words);
-    top.appendChild(state);
-    // 상태 줄의 글자와 색만 바꾼다(`지금 가져오기`의 결과 · 지금 실패 중 · 늦음 · 첫 읽기 전).
-    // tone: true(또는 'bad') 빨강 · 'warn' 주황 · 'wait' 조용한 회색 · 그 밖엔 초록 점.
-    paint = (text, tone) => {
-      const kindOf = tone === true ? 'bad' : (tone || 'ok');
-      words.textContent = ` ${text}`;
-      state.className = kindOf === 'bad' ? 'st k-neg' : (kindOf === 'warn' ? 'st k-warn' : 'st');
-      dot.className = ['bad', 'warn', 'wait'].includes(kindOf) ? kindOf : 'ok';
-    };
-    let painted = false;
-    if (fetchSpec) {
-      const note = settingsFetchNote(fetchSpec.key, fetchSpec.state);
-      if (note) { paint(note, false); painted = true; }
-      else if (fetchSpec.state && fetchSpec.state.failing) {
-        const ago = settingsAgo(fetchSpec.state.failedAt);
-        paint(`읽지 못했어요${ago ? ` · ${ago}` : ''}`, true);
-        painted = true;
-      }
-    }
-    if (alert && alert.status) { paint(alert.status, true); painted = true; }
-    // 멈춘 것(빨강)이 먼저고, 그다음 늦음(주황) · 첫 읽기 전(회색) 차례다.
-    if (!painted && !alert && lag.late) {
-      paint(lag.late.text, 'warn');
-      row.dataset.late = 'true';
-    } else if (!painted && !alert && lag.waiting) {
-      paint('아직 읽기 전이에요', 'wait');
-    }
-  }
-  const toggle = settingsButton(openText, openClass);
-  top.appendChild(toggle);
-  // 지금 가져오기 — 연결된 카드에만, 상태 줄 오른쪽 · ⋯ 왼쪽.
-  if (fetchSpec && paint) top.appendChild(settingsFetchButton(fetchSpec, paint));
-  if (menu) top.appendChild(uiMoreButton(`${name} 더 보기`, menu));
+  head.append(title, tag);
 
-  // 멈춘 카드는 상태 줄 아래 이유 한 줄(빨강)이 먼저 선다(시안 B).
+  const connectedLook = status !== null;
+  const state = (fetchSpec && fetchSpec.state) || {};
+  let tone = connectedLook ? 'ok' : ((mark && mark.tone) || 'off');
+  let detail = connectedLook ? status : '';
+  // 막힌 것(멈췄어요·늦어요)이 먼저고, 그다음 예정보다 늦음 · 첫 읽기 전 차례다.
+  if (connectedLook && alert) {
+    tone = alert.stop ? 'stop' : 'late';
+    if (alert.status) detail = alert.status;
+    else if (state.failing) {
+      const ago = settingsAgo(state.failedAt);
+      detail = `읽지 못했어요${ago ? ` · ${ago}` : ''}`;
+    }
+  } else if (connectedLook && lag.late) {
+    tone = 'late';
+    detail = lag.late.text;
+    row.dataset.late = 'true';
+  } else if (connectedLook && lag.waiting) {
+    tone = 'soon';
+  }
+  // 방금 누른 새로 받기의 결과는 잠깐 지금 상황 줄에 선다(곧바로 읽었으면 점도 초록).
+  const note = connectedLook && fetchSpec && !(alert && alert.status) ? settingsFetchNote(fetchSpec.key, state) : null;
+  if (note) {
+    detail = note;
+    if ((settingsFetchNotes.get(fetchSpec.key) || {}).mode === 'done') tone = 'ok';
+  }
+
+  const stat = settingsIntgStat(tone, connectedLook ? undefined : (mark && mark.word) || '');
+  const now = document.createElement('span');
+  now.className = 'now';
+  now.textContent = detail;
+  // 점과 지금 상황 줄만 바꾼다(새로 받기·다시 시도의 결과).
+  const paint = (text, next) => {
+    tone = next;
+    stat.set(next);
+    now.textContent = text;
+  };
+  const side = settingsEl('d-intgside');
+  const toggle = settingsButton(openText, openClass);
+  side.append(stat.node, toggle);
+  let runner = null;
+  if (connectedLook && fetchSpec) {
+    const reconnect = !!fetchSpec.reconnect && !state.claudeAuth;
+    const first = tone === 'late' ? 'retry'
+      : (tone === 'stop' ? (alert && alert.fix === 'none' ? 'none' : (reconnect ? 'auth' : 'retry')) : 'none');
+    runner = settingsFetchRunner({ ...fetchSpec, mode: first }, paint, () => tone);
+    side.appendChild(runner.button);
+  }
+  if (menu) side.appendChild(uiMoreButton(`${name} 더 보기`, menu));
+
+  // 막힌 카드는 이유 한 줄이 카드 안 옅은 판으로 선다(멈췄어요 빨강 · 늦어요 주황).
   const why = [];
   if (alert && alert.why) {
     row.dataset.failing = 'true';
-    const line = settingsEl('d-intgwhy');
+    const line = settingsEl(alert.stop ? 'd-intgwhy' : 'd-intgwhy k-warn');
     line.setAttribute('role', 'status');
     alert.why.forEach(part => line.appendChild(typeof part === 'string' ? document.createTextNode(part) : part));
     why.push(line);
-  } else if (status !== null && lag.late && lag.late.setup) {
+  } else if (connectedLook && lag.late && lag.late.setup) {
     // 수집이 launchd에 등록돼 있지 않다 — 기다려도 읽지 않으니 할 일을 주황 한 줄로 분명히 말한다.
     const line = settingsEl('d-intgwhy k-warn', SETTINGS_LAG_SETUP);
     line.setAttribute('role', 'status');
@@ -1465,23 +1523,27 @@ function settingsIntgCard({ kind, name, chip, use, need, needClass = '', status 
   const useLine = settingsEl('d-intguse', use);
   const needLine = settingsEl(`d-intgneed${needClass ? ` ${needClass}` : ''}`);
   if (Array.isArray(need)) settingsRich(needLine, need); else needLine.textContent = need || '';
+  const meta = settingsEl('d-intgmeta');
+  meta.append(now, needLine);
   const confirmSlot = settingsEl('d-iconfirmslot');
   const body = settingsEl('d-intgbody');
   body.hidden = true;
-  row.append(top, ...why, useLine, needLine, ...extra, confirmSlot, body);
+  row.append(head, side, useLine, meta, ...why, ...extra, confirmSlot, body);
 
-  // 연결된 카드는 평소 ⋯만 둔다(펼칠 때만 `접기`). ⋯가 없는 카드(회의록)는 여는 버튼을 늘 둔다.
-  const connected = status !== null && !!menu;
+  // 연결된 카드는 평소 점 · ⋯만 둔다(펼칠 때만 `접기`). ⋯가 없는 카드(회의록 직접 옮기기)는 여는 버튼을 늘 둔다.
+  const connected = connectedLook && !!menu;
   const setOpen = (open) => {
     body.hidden = !open;
-    // 연결된 카드는 평소 ⋯만 두고, 펼쳤을 때만 `접기`가 선다.
     toggle.hidden = connected && !open;
     toggle.className = open ? 'd-btn sm' : openClass;
     toggle.textContent = open ? '접기' : openText;
     toggle.setAttribute('aria-expanded', String(open));
   };
   const card = {
-    row, top, body, needLine, confirmSlot, paint,
+    row, side, body, needLine, confirmSlot, paint,
+    toneNow: () => tone,
+    // ⋯ › 새로 받기 — 버튼의 `다시 시도`와 같은 길이다.
+    fetchNow: () => (runner ? runner.fetchNow() : null),
     open(mode, arg) {
       settingsIntgCloseOthers(kind);
       confirmSlot.replaceChildren();
@@ -1496,6 +1558,9 @@ function settingsIntgCard({ kind, name, chip, use, need, needClass = '', status 
   settingsIntgCards.set(kind, card);
   return card;
 }
+
+// ⋯의 `새로 받기` 한 칸 — 연결된 카드의 첫 칸.
+const settingsFetchItem = card => ({ label: '새로 받기', onClick: () => card.fetchNow() });
 
 // 해제는 ⋯ 안의 `해제…` → 카드 안 확인 줄 한 번. 큰 해제 버튼은 두지 않는다.
 function settingsIntgConfirmOff(card, body, words = '해제하면 자동 수집이 멈춰요. 토큰 파일은 남아요.') {
@@ -2151,14 +2216,16 @@ function settingsSlackCard(data) {
   const fetchState = slack.fetch || {};
   let card = null;
   const pickLink = () => settingsButton('채널 고르기', 'd-ablink', () => card.open('pick'));
-  // 켜진 채널이 **모두** 사라졌으면 수집이 멈춘 것과 같은 급이다 — 빨간 상태 줄 + 이유 한 줄(시안 F).
-  // 일부만 사라졌으면 그 채널마다 주황 한 줄(아래 extra).
+  // 켜진 채널이 **모두** 사라졌으면 수집이 멈춘 것과 같은 급이다 — 멈췄어요 + 이유 한 줄(시안 F). 고칠 곳은 이유 줄의
+  // `채널 고르기`라 오른쪽 버튼은 두지 않는다. 일부만 사라졌으면 그 채널마다 주황 한 줄(아래 extra).
   const allGone = connected && linkedKeys.every(key => channels[key].missing);
   let alert = null;
   if (allGone) {
     const gone = linkedKeys.length === 1 ? settingsChannelObject(channels[linkedKeys[0]].name) : '켜진 채널을 모두';
-    alert = { status: `${gone} 찾을 수 없어요`, why: ['슬랙에서 지웠거나 보관했어요 · ', pickLink()] };
-  } else if (connected && fetchState.failing) alert = { why: settingsFailWhy('slack', fetchState) };
+    alert = { stop: true, fix: 'none', status: `${gone} 찾을 수 없어요`, why: ['슬랙에서 지웠거나 보관했어요 · ', pickLink()] };
+  } else if (connected && fetchState.failing) {
+    alert = { stop: settingsFailStop(fetchState), why: settingsFailWhy('slack', fetchState, { reconnect: !fetchState.claudeAuth }) };
+  }
   // 일부만 사라진 채널은 둘째 줄 아래 주의색 한 줄 — 누르면 채널 고르기로 간다.
   const extra = (allGone ? [] : linkedKeys.filter(key => channels[key].missing)).map((key) => {
     const line = settingsEl('d-intgneed k-warn');
@@ -2173,7 +2240,7 @@ function settingsSlackCard(data) {
     extra.push(settingsEl('d-intgnote', SETTINGS_SLACK_RAW_NOTE));
     if (data.claude) {
       const line = settingsEl('d-intgnote');
-      line.append(document.createTextNode('이제 Claude로 다듬을 수 있어요 · '), settingsButton('정리 방식', 'd-ablink', () => card.open('tidy')));
+      line.append(document.createTextNode('이제 Claude로 다듬을 수 있어요 · '), settingsButton('슬랙 정리 방식', 'd-ablink', () => card.open('tidy')));
       extra.push(line);
     }
   } else if (connected && (!data.claude || fetchState.claudeAuth)) {
@@ -2190,11 +2257,12 @@ function settingsSlackCard(data) {
     extra.push(settingsEl('d-intgnote', '이 맥에는 Claude Code가 없어서 요약하지 않고 메시지 첫 줄을 그대로 받아요'));
   }
   const menu = connected ? () => [[
+    settingsFetchItem(card),
     ...settingsLogItem(card, slack.log),
     { label: '보내는 법', onClick: () => { card.open('how'); } },
     { label: '채널 고르기', onClick: () => card.open('pick') },
+    { label: '슬랙 정리 방식', onClick: () => { card.open('tidy'); } },
     { label: '다시 연결(토큰 바꾸기)', onClick: () => card.open('token') },
-    { label: '정리 방식', onClick: () => { card.open('tidy'); } },
   ], [
     { label: '해제…', danger: true, onClick: () => settingsIntgConfirmOff(card, { slack: { enabled: false } }) },
   ]] : null;
@@ -2341,9 +2409,10 @@ function settingsJiraCard(data) {
     need: connected ? (counts || '앱이 지라를 직접 읽어요') : '3분 · Atlassian API 토큰 하나',
     needClass: connected && attentionBad ? 'k-warn' : '',
     status,
-    alert: connected && fetchState.failing ? { why: settingsFailWhy('jira', fetchState) } : null,
+    alert: connected && fetchState.failing ? { stop: settingsFailStop(fetchState), why: settingsFailWhy('jira', fetchState, { reconnect: true }) } : null,
     fetch: connected ? { key: 'jira', state: fetchState, reconnect: () => card.open('token') } : null,
     menu: connected ? () => [[
+      settingsFetchItem(card),
       ...settingsLogItem(card, jira.log),
       { label: '다시 연결(토큰 바꾸기)', onClick: () => card.open('token') },
     ], [
@@ -2427,7 +2496,7 @@ function settingsMacList(ui, calendars, chosen, mode) {
     return settingsIntegrationSave({ calendar: { enabled: true, source: 'mac', macCalendars: picked } }, {
       error, button: save,
       done: mode === 'again'
-        ? `읽을 캘린더를 ${picked.length}개로 바꿨어요 · 바로 보려면 지금 가져오기를 눌러 주세요`
+        ? `읽을 캘린더를 ${picked.length}개로 바꿨어요 · 바로 보려면 ⋯ › 새로 받기를 눌러 주세요`
         : `맥 캘린더를 연결했어요 · 캘린더 ${picked.length}개 — 1분 안에 오늘 일정이 채워져요`,
     });
   });
@@ -2606,7 +2675,7 @@ function settingsCalendarOpen(card, data, mode) {
   if (!data.claude) on.disabled = true;
   const steps = settingsNumbered([
     [[['b', 'claude.ai → 설정 → 커넥터'], '에서 Google Calendar → ', ['b', '연결'], ' → 구글 로그인 → ', ['b', '허용'], ' (이 맥의 Claude Code와 ', ['b', '같은 계정'], '이어야 해요)'], settingsCodeLine(SETTINGS_CLAUDE_CONNECTORS)],
-    [['여기서 켜기 — 매일 9~19시 2시간마다 읽어요. 바로 보려면 연결 뒤 ', ['b', '지금 가져오기'], ' '], on],
+    [['여기서 켜기 — 매일 9~19시 2시간마다 읽어요. 바로 보려면 연결 뒤 ', ['b', '⋯ › 새로 받기'], ' '], on],
     [['안 되면: 터미널에서 ', ['b', 'claude'], '를 켠 뒤 ', ['b', '/mcp'], ' → 목록에 ', ['b', 'claude.ai Google Calendar'], '가 연결됨인지 확인해요'], settingsCodeLine('/mcp')],
   ]);
   const need = settingsEl('d-ismall', data.claude
@@ -2648,8 +2717,10 @@ function settingsCalendarCard(data) {
   const ical = on && calendar.source === 'ical';
   const mac = on && calendar.source === 'mac';
   const fetchState = calendar.fetch || {};
-  const failing = on && (!!fetchState.failing || (ical && !calendar.readAt && !!calendar.failed));
-  // 맥 캘린더 읽기의 실패 줄(`⚠️ 이유 — 고치는 법`)은 그대로 한 줄로 보인다(허용 막힘·계정 없음·고른 캘린더 없음).
+  // 비밀 주소를 한 번도 못 읽었으면 주소 문제로 보고 곧바로 멈췄어요 + 다시 연결이다.
+  const neverRead = ical && !calendar.readAt && !!calendar.failed;
+  const failing = on && (!!fetchState.failing || neverRead);
+  // 맥 캘린더 읽기의 실패 줄(`⚠️ 이유 — 고치는 법`)은 그대로 이유 한 줄로 보인다(늦어요·멈췄어요는 다른 연동과 같은 규칙).
   const macWhy = mac && /^⚠️\s*/.test(String(fetchState.summary || '')) ? String(fetchState.summary).replace(/^⚠️\s*/, '') : '';
   let card = null;
   card = settingsIntgCard({
@@ -2660,18 +2731,19 @@ function settingsCalendarCard(data) {
       ? (ical ? '30분마다' : mac ? '매일 8–20시, 30분마다' : '매일 9–19시, 2시간마다')
       : '3분 · 맥 캘린더·Claude Code·비밀 주소',
     status: on ? settingsCalendarStatus(calendar) : null,
-    alert: failing ? { why: macWhy ? [macWhy] : settingsFailWhy('calendar', fetchState) } : null,
+    alert: failing ? { stop: neverRead || settingsFailStop(fetchState), why: macWhy ? [macWhy] : settingsFailWhy('calendar', fetchState, { reconnect: ical }) } : null,
     // 비밀 주소면 앱이 곧바로 다시 읽고(`오늘 N개`), Claude 갈래면 요청만 남긴다. 주소 문제면 `다시 연결`.
     fetch: on ? {
       key: 'calendar', state: calendar.fetch || {}, unit: ical ? '오늘' : '',
       reconnect: ical ? () => card.open('again') : null,
     } : null,
     menu: on ? () => [
-      ...((settingsLogItem(card, calendar.log).length || ical || mac)
-        ? [[...settingsLogItem(card, calendar.log),
-          ...(ical ? [{ label: '다시 연결(주소 바꾸기)', onClick: () => card.open('again') }] : []),
-          ...(mac ? [{ label: '캘린더 다시 고르기', onClick: () => card.open('again') }] : [])]]
-        : []),
+      [
+        settingsFetchItem(card),
+        ...settingsLogItem(card, calendar.log),
+        ...(ical ? [{ label: '다시 연결(주소 바꾸기)', onClick: () => card.open('again') }] : []),
+        ...(mac ? [{ label: '캘린더 다시 고르기', onClick: () => card.open('again') }] : []),
+      ],
       [{
         label: '해제…', danger: true,
         onClick: () => settingsIntgConfirmOff(card, { calendar: { enabled: false } }, ical ? SETTINGS_ICAL_OFF : '해제하면 오늘 일정 가져오기가 멈춰요.'),
@@ -2682,10 +2754,6 @@ function settingsCalendarCard(data) {
       settingsCalendarOpen(self, data, mode);
     },
   });
-  if (ical && !calendar.readAt && calendar.failed) {
-    const dot = card.top.querySelector('.ok');
-    if (dot) dot.className = 'bad';
-  }
   return card;
 }
 
@@ -2747,8 +2815,9 @@ function settingsNotesOpen(card, data) {
 function settingsNotesCard(data) {
   const notes = data.meetingNotes || { mode: 'manual', name: '' };
   const need = notes.mode === 'tiro' ? '티로로 받는 중'
-    : (notes.mode === 'other' ? `${notes.name} 쓰는 중 · 요청해 두었어요` : '직접 옮기기 중');
-  // 티로로 받는 중이면 연결된 카드다 — 마지막으로 가져온 때 한 줄 + `지금 가져오기`(미팅 노트 가져오기의 오늘 모드와 같은 길).
+    : (notes.mode === 'other' ? `${notes.name} 쓰는 중 · 요청해 두었어요` : '회의 정리 화면에 붙여 넣어요');
+  // 티로로 받는 중이면 연결된 카드다 — 마지막으로 가져온 때 한 줄 + ⋯ › `새로 받기`(미팅 노트 가져오기의 오늘 모드와 같은 길).
+  // 직접 옮기기는 설치할 것이 없어 초록 `직접 옮기기` + `바꾸기`(연결된 셈이다).
   const tiro = notes.mode === 'tiro';
   const state = notes.fetch || {};
   const ran = settingsAgo(state.lastRunAt);
@@ -2758,11 +2827,13 @@ function settingsNotesCard(data) {
     use: '티로 회의록이 초안으로 들어와요 — 직접 옮기기도 돼요',
     need: tiro ? '회의가 끝나면 회의 탭에서 가져오기' : need,
     status: tiro ? (ran ? `${ran} 가져옴` : '아직 가져온 적 없어요') : null,
-    alert: tiro && state.failing ? { why: settingsFailWhy('notes', state) } : null,
+    mark: notes.mode === 'manual' ? { tone: 'ok', word: '직접 옮기기' } : null,
+    alert: tiro && state.failing ? { stop: settingsFailStop(state), why: settingsFailWhy('notes', state) } : null,
     fetch: tiro ? { key: 'tiro', state } : null,
     openText: '바꾸기', openClass: 'd-btn sm',
-    // 티로로 받는 중이면 다른 연결된 카드처럼 ⋯(최근 기록 · 바꾸기)만 둔다.
+    // 티로로 받는 중이면 다른 연결된 카드처럼 ⋯(새로 받기 · 최근 기록 · 바꾸기)만 둔다.
     menu: tiro ? () => [[
+      settingsFetchItem(card),
       ...settingsLogItem(card, notes.log),
       { label: '바꾸기', onClick: () => card.open() },
     ]] : null,
@@ -2789,10 +2860,23 @@ function settingsIntgConnected(data) {
   };
 }
 
+// 셈에서는 회의록 직접 옮기기도 연결된 것으로 센다 — 설치할 것이 없어 카드도 초록 `직접 옮기기`다.
 function settingsIntgCounts(data) {
-  const flags = Object.values(settingsIntgConnected(data));
-  const on = flags.filter(Boolean).length;
-  return { on, left: flags.length - on };
+  const flags = { ...settingsIntgConnected(data) };
+  if ((data.meetingNotes || { mode: 'manual' }).mode === 'manual') flags.notes = true;
+  const values = Object.values(flags);
+  const on = values.filter(Boolean).length;
+  return { on, left: values.length - on };
+}
+
+// 맨 위 요약의 `· 캘린더는 곧 읽어요` — 이름 끝 글자의 받침으로 은/는을 고른다.
+const SETTINGS_INTG_NAMES = { slack: '슬랙', jira: '지라', calendar: '캘린더', notes: '회의록' };
+function settingsSoonWords(kinds) {
+  const names = kinds.map(kind => SETTINGS_INTG_NAMES[kind] || kind);
+  const last = names[names.length - 1] || '';
+  const code = last.charCodeAt(last.length - 1) - 0xac00;
+  const topic = code >= 0 && code < 11172 && code % 28 ? '은' : '는';
+  return `· ${names.join('·')}${topic} 곧 읽어요`;
 }
 
 // 연동 탭의 늦음·첫 읽기 전 — 톱니바퀴의 주황 점과 같은 함수(syncLag)에 서버가 준 `sync`를 넣고,
@@ -2890,42 +2974,31 @@ async function renderSettingsIntegrations({ quiet = false } = {}) {
   settingsIntgLag = lag;
   // 톱니바퀴의 주황 점도 방금 읽은 같은 값으로 맞춘다(목록을 다시 읽기 전에도 점과 탭이 같은 말을 하게).
   if (lag.all && typeof paintSyncGear === 'function') paintSyncGear(lag.all.late);
-  // 맨 위 한 줄 요약(시안 A·B) — 연결 상태를 보는 곳은 이 탭 하나다.
+  const cards = [settingsSlackCard, settingsJiraCard, settingsCalendarCard, settingsNotesCard].map(make => make(data));
+  // 맨 위 한 줄 요약 — 카드와 같은 점·말. 멈춘 것(빨강) → 늦은 것(주황) → 연결됨(초록, 첫 읽기 전이면 `· 캘린더는 곧 읽어요`).
   const head = settingsEl('d-intghead');
-  const lead = document.createElement('span');
-  lead.className = 'lead';
-  const dot = (cls) => {
-    const mark = document.createElement('span');
-    mark.className = cls;
-    mark.setAttribute('aria-hidden', 'true');
-    mark.textContent = '●';
-    return mark;
-  };
-  if (failing.length) {
-    lead.className = 'lead k-neg';
-    lead.append(dot('bad'), document.createTextNode(` ${failing.length}개가 멈췄어요`));
-  } else if (lag.late.length) {
-    lead.className = 'lead k-warn';
-    lead.append(dot('warn'), document.createTextNode(` ${lag.late.length}개가 늦어요`));
-  } else if (counts.on && lag.waiting.length) {
-    lead.append(dot('wait'), document.createTextNode(` 연결 ${counts.on}개 · 첫 읽기를 기다리는 중 ${lag.waiting.length}개`));
-  } else if (counts.on) {
-    lead.append(dot('ok'), document.createTextNode(` 연결 ${counts.on}개 모두 잘 읽고 있어요`));
-  } else {
-    lead.textContent = '연동은 선택이에요. 필요할 때 하나씩 켜요.';
-  }
+  const tones = cards.map(card => card.toneNow());
+  const stop = tones.filter(tone => tone === 'stop').length;
+  const late = tones.filter(tone => tone === 'late').length;
+  const soon = cards.filter(card => card.toneNow() === 'soon').map(card => card.row.dataset.integration);
+  let lead = null;
+  if (stop) lead = settingsIntgStat('stop', `${stop}개가 멈췄어요`).node;
+  else if (late) lead = settingsIntgStat('late', `${late}개가 늦어요`).node;
+  // 회의록 직접 옮기기만 있으면(처음 설치) 아직 켠 연동이 없는 것 — 선택이라는 말을 그대로 둔다.
+  else if (Object.values(settingsIntgConnected(data)).some(Boolean)) lead = settingsIntgStat('ok', `${counts.on}개 연결됨`, soon.length ? settingsSoonWords(soon) : '').node;
+  else lead = settingsEl('lead', '연동은 선택이에요. 필요할 때 하나씩 켜요.');
   const tally = document.createElement('span');
   tally.className = 'd-quiet sp';
   tally.textContent = `연결됨 ${counts.on} · 남은 것 ${counts.left}`;
   head.append(lead, tally);
   view.appendChild(head);
-  [settingsSlackCard, settingsJiraCard, settingsCalendarCard, settingsNotesCard]
-    .forEach(make => view.appendChild(make(data).row));
+  cards.forEach(card => view.appendChild(card.row));
   view.appendChild(settingsIntgFoot());
   // 설정을 연 표지 — 빨간 점을 눌렀으면 멈춘 카드를 잠깐 붉게, `log:<카드>`면 그 카드의 최근 기록을 편다.
   const focus = settingsFocusKey;
   if (focus === 'alerts' || focus === 'stale' || (typeof focus === 'string' && focus.startsWith('log:'))) settingsFocusKey = null;
-  if (focus === 'alerts') settingsIntgFlash(failing);
+  // 빨간 점은 멈춘 카드만 센다(한 번 실패는 늦어요) — 밝히는 것도 멈췄어요 카드만.
+  if (focus === 'alerts') settingsIntgFlash(cards.filter(card => card.toneNow() === 'stop').map(card => card.row.dataset.integration));
   if (focus === 'stale') settingsIntgFlash(lag.late.map(one => one.key), 'warn');
   if (typeof focus === 'string' && focus.startsWith('log:') && settingsIntgCards.get(focus.slice(4))) settingsIntgCards.get(focus.slice(4)).open('log');
   // 지라 연결 직후라면 ③ 확인을 그 카드에 이어서 보인다(저장 뒤 다시 그린 화면).
@@ -3356,7 +3429,7 @@ const SETTINGS_FAQ = [
     ['슬랙에서 수집한 게 잘 들어왔는지 보려면', '슬랙 연결',
       '<b>설정 &gt; 연동</b>의 슬랙 카드 <b>⋯ › 최근 기록</b>을 열면 맨 위에 최근 수집 결과가 요약돼요 — 본 메시지 수와 등록·중복·건너뜀 개수, 건너뛴 문구까지 보여요. 그 아래는 최근 10번의 시각과 결과예요. 문구를 다듬는 일은 Claude로 다듬기일 때만 Claude Code가 해요.'],
     ['슬랙에서 온 할 일이 요약되지 않고 길게 들어와요', '슬랙 연결',
-      '<b>원문 그대로</b> 방식이라 그래요 — 요약하지 않고 메시지 첫 줄을 그대로 넣어서 문구가 길거나 정확하지 않을 수 있어요. 줄을 눌러 고쳐 주세요. 이 맥에 <b>Claude Code</b>(유료 구독)가 있으면 슬랙 카드 <b>⋯ › 정리 방식</b>에서 <b>Claude로 다듬기</b>로 바꿀 수 있어요(다음 것부터).'],
+      '<b>원문 그대로</b> 방식이라 그래요 — 요약하지 않고 메시지 첫 줄을 그대로 넣어서 문구가 길거나 정확하지 않을 수 있어요. 줄을 눌러 고쳐 주세요. 이 맥에 <b>Claude Code</b>(유료 구독)가 있으면 슬랙 카드 <b>⋯ › 슬랙 정리 방식</b>에서 <b>Claude로 다듬기</b>로 바꿀 수 있어요(다음 것부터).'],
     ['슬랙 채널에 다른 사람을 초대해도 되나요', '슬랙 연결',
       '이 채널들은 나만 있는 채널로 써요 — 다른 사람을 초대하면 그 사람이 쓴 메시지도 할 일로 들어와요.'],
     ['받을 채널을 더하거나 빼려면', '슬랙 연결',
@@ -3364,7 +3437,7 @@ const SETTINGS_FAQ = [
     ['채널을 만들 때 이미 있는 이름이라고 나와요', '슬랙 연결',
       '예전에 만든 <b>내 채널</b>(내가 들어가 있는 채널)이면 새로 만들지 않고 그 채널을 그대로 써요 — <b>연결한 때부터</b> 읽어요. <b>다른 사람이 쓰는 이름</b>이거나 <b>보관된 채널</b>이면 그 줄에 이유가 나오니 이름을 바꿔 다시 눌러 주세요. 한 채널은 한 칸에만 연결돼요.'],
     ['지금 바로 새로 가져오고 싶어요', '그 연동 연결',
-      '<b>설정 &gt; 연동</b>에서 연결된 카드의 <b>지금 가져오기</b>를 눌러요. 지라·캘린더(비밀 주소)는 곧바로 다시 읽고, 슬랙·캘린더(맥 캘린더·Claude)·티로는 요청을 남겨 1~2분 뒤 반영돼요. 같은 연동은 1분에 한 번이에요. 지금 못 읽고 있으면 버튼이 <b>다시 시도</b>로, 토큰·주소 문제면 <b>다시 연결</b>로 바뀌어요.'],
+      '<b>설정 &gt; 연동</b>에서 연결된 카드의 <b>⋯ › 새로 받기</b>를 눌러요. 지라·캘린더(비밀 주소)는 곧바로 다시 읽고, 슬랙·캘린더(맥 캘린더·Claude)·티로는 요청을 남겨 1~2분 뒤 반영돼요. 같은 연동은 1분에 한 번이에요. 막히면 카드에 <b>다시 시도</b>가, 토큰·주소 문제나 계속 실패면 <b>다시 연결</b>이 떠요.'],
     ['머리줄의 `○일 전 기준`이나 톱니 점은 뭔가요', '없음',
       '자동 동기화가 최근에 못 돌았다는 뜻이에요. <b>주황 점</b>은 낡음, <b>빨간 점</b>은 지금 멈춘 연동이 있음, <b>파란 점</b>은 새 버전이 나왔다는 뜻이에요. 빨간 점을 누르면 <b>연동</b> 탭에서 멈춘 카드가 잠깐 붉게 보이고, 파란 점이면 <b>앱</b> 탭이 열려요.'],
   ]],

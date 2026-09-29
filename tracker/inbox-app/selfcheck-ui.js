@@ -27,9 +27,9 @@ const SELFCHECK_WORDS = {
 };
 // 늦은 연동 줄의 고치는 법(연동 탭 카드와 같은 길로 안내한다).
 const SELFCHECK_LAG_FIX = {
-  slack: '설정 › 연동 › 슬랙의 지금 가져오기를 눌러 보고, 그래도 늦으면 ⋯ › 최근 기록을 봐요',
-  calendar: '설정 › 연동 › 캘린더의 지금 가져오기를 눌러 보고, 그래도 늦으면 ⋯ › 최근 기록을 봐요',
-  jira: '설정 › 연동 › 지라의 지금 가져오기를 눌러 주세요',
+  slack: '설정 › 연동 › 슬랙의 ⋯ › 새로 받기를 눌러 보고, 그래도 늦으면 ⋯ › 최근 기록을 봐요',
+  calendar: '설정 › 연동 › 캘린더의 ⋯ › 새로 받기를 눌러 보고, 그래도 늦으면 ⋯ › 최근 기록을 봐요',
+  jira: '설정 › 연동 › 지라의 ⋯ › 새로 받기를 눌러 주세요',
 };
 
 // { busy, result, items, doneAt, badBefore, repeat, error, fallback }

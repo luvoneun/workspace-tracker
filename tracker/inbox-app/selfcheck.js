@@ -202,9 +202,9 @@ function createSelfcheck(deps) {
     const automation = key => automations.find(one => one.key === key) || null;
     const fetchState = {
       slack: deps.fetchStateAutomation(automation('slack'), deps.slackAuthRe),
-      calendar: calendarIcal ? deps.fetchStateLive(deps.calendarFailure()) : deps.fetchStateAutomation(automation('calendar')),
+      calendar: calendarIcal ? deps.fetchStateLive(deps.calendarFailure(), deps.calendarHistory ? deps.calendarHistory() : []) : deps.fetchStateAutomation(automation('calendar')),
       notes: deps.fetchStateAutomation(automation('tiro')),
-      jira: deps.fetchStateLive(deps.jiraFailure()),
+      jira: deps.fetchStateLive(deps.jiraFailure(), deps.jiraHistory ? deps.jiraHistory() : []),
     };
 
     // ---------- Claude Code(Claude가 필요한 연동을 켰을 때만) — 설치는 파일이 있는지, 로그인은 최근 기록 기준 ----------
@@ -302,7 +302,7 @@ function createSelfcheck(deps) {
         }
       }
 
-      // 슬랙 수집 — 연동 탭 카드의 빨간 줄과 같은 판단. 늦음(주황)은 화면이 syncLag로 더한다(`lag`).
+      // 슬랙 수집 — 연동 탭 카드의 `멈췄어요`와 같은 판단(계속 실패·토큰 문제·켜진 채널이 모두 사라짐). 늦음(주황)은 화면이 syncLag로 더한다(`lag`).
       const collect = { key: 'slack', label: '슬랙 수집', lag: 'slack' };
       if (alerts.includes('slack')) {
         const allGone = !(fetchState.slack && fetchState.slack.failing);
@@ -332,7 +332,7 @@ function createSelfcheck(deps) {
       }
       if (item.state !== 'bad' && alerts.includes('calendar')) {
         const found = stopped('calendar', '캘린더');
-        Object.assign(item, found, calendarIcal && found.detail && !found.sameAs ? { detail: `${found.detail} — 지금 확인해 보니 주소는 읽혀요, 카드의 지금 가져오기로 다시 읽어 주세요` } : {});
+        Object.assign(item, found, calendarIcal && found.detail && !found.sameAs ? { detail: `${found.detail} — 지금 확인해 보니 주소는 읽혀요, 카드의 ⋯ › 새로 받기로 다시 읽어 주세요` } : {});
       }
       // 맥 캘린더 갈래는 멈춘 이유(⚠️ 줄 — 허용 막힘·계정 없음·고른 캘린더 없음·시간 초과)를 그대로 한 줄로 보인다.
       const macWhy = calendarMac && item.state === 'bad' && !item.sameAs ? macCalendarWhy((fetchState.calendar || {}).summary) : null;
@@ -360,7 +360,7 @@ function createSelfcheck(deps) {
       }
       if (item.state !== 'bad' && alerts.includes('jira')) {
         const found = stopped('jira', '지라');
-        Object.assign(item, found, item.state === 'ok' && !found.sameAs ? { detail: `${found.detail} — 지금 확인해 보니 토큰은 맞아요, 카드의 지금 가져오기로 다시 읽어 주세요`, copy: undefined } : {});
+        Object.assign(item, found, item.state === 'ok' && !found.sameAs ? { detail: `${found.detail} — 지금 확인해 보니 토큰은 맞아요, 카드의 ⋯ › 새로 받기로 다시 읽어 주세요`, copy: undefined } : {});
       }
     }
 
