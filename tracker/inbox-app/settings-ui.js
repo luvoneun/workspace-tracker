@@ -372,13 +372,7 @@ function settingsBackupNodes(data, now = new Date()) {
       nodes.push(settingsEl('d-ismall', ['GitHub 비공개 저장소에도 올려요', github.state === 'ok' ? at : ''].filter(Boolean).join(' · ')));
     }
   }
-  if (typeof data.path === 'string' && data.path) {
-    const code = settingsEl('d-icode');
-    const text = document.createElement('code');
-    text.textContent = data.path;
-    code.append(text, settingsButton('복사', 'd-btn xs', () => settingsCopy(data.path, '경로를 복사했어요')));
-    nodes.push(code, settingsEl('d-ismall', 'Finder에서 ⇧⌘G(폴더로 이동)에 붙여 넣으면 바로 가요'));
-  }
+  // 백업 폴더 경로(`data.path`)는 이 줄에 두지 않는다 — 맨 아래 `파일 위치` 접이식에 업데이트 파일과 함께 있다(personalizePlace).
   return nodes;
 }
 
@@ -393,8 +387,11 @@ async function renderSettingsApp() {
   if (!view) return;
   view.replaceChildren(settingsEl('d-empty', '불러오는 중이에요…'));
   const [about, backup] = await Promise.all([settingsAboutLoad(), settingsBackupLoad()]);
-  const place = personalizePlace(about);
-  view.replaceChildren(settingsVersionRow(), settingsBackupRow(backup), place, selfcheckRow(), ...(typeof usageSettingsRow === 'function' ? [usageSettingsRow()] : []));
+  // 쓰는 빈도 차례 — 버전 → 점검 → 데이터 백업 → 사용 통계 → 다른 기기(이 맥에서 열었을 때만) → 파일 위치(찾을 때만, 접힘).
+  const usage = typeof usageSettingsRow === 'function' ? usageSettingsRow() : null;
+  const access = settingsAccessRow();
+  view.replaceChildren(settingsVersionRow(), selfcheckRow(), settingsBackupRow(backup),
+    ...(usage ? [usage] : []), ...(access ? [access] : []), personalizePlace(about, backup));
   settingsAboutFill();
   // 도움말 `문제가 생겼어요`의 `점검하기`로 들어왔으면 그 버튼에 초점(selfcheck-ui.js).
   if (settingsFocusKey === 'selfcheck') {
@@ -3133,10 +3130,11 @@ function personalizeApply({ title, icon, titleHidden } = {}) {
   }
 }
 
-// 설정 › 앱의 `앱 위치` — 업데이트 파일의 경로(홈은 `~`). Finder의 `폴더로 이동`에 붙여 넣으라고만 알린다.
-// 서버는 Finder를 열지 않는다 — 경로 글자만 준다(GET /api/about의 updateFile).
-function personalizePlace(about) {
-  const lines = [['업데이트 파일', about && about.updateFile]]
+// 설정 › 앱 맨 아래 `파일 위치` — 업데이트 파일(GET /api/about의 updateFile)과 백업 폴더(GET /api/backup의 path)의
+// 경로(홈은 `~`)를 접이식 하나(기본 접힘)에 모은다. 거의 안 보는 긴 글자라 요약 한 줄만 두고, Finder 안내도 한 번만.
+// 서버는 Finder를 열지 않는다 — 경로 글자만 준다. 둘 다 모르면(옛 서버·읽기 실패) 접이식 대신 한 줄.
+function personalizePlace(about, backup) {
+  const lines = [['업데이트 파일', about && about.updateFile], ['백업 폴더', backup && backup.path]]
     .filter(([, value]) => typeof value === 'string' && value)
     .map(([label, value]) => {
       const line = settingsEl('d-pplaceline');
@@ -3148,15 +3146,62 @@ function personalizePlace(about) {
       text.textContent = value;
       code.append(text, settingsButton('복사', 'd-btn xs', () => settingsCopy(value, '경로를 복사했어요')));
       line.append(name, code);
-      return line;
+      return { label, line };
     });
-  const body = lines.length
-    ? [...lines, settingsEl('d-ismall', 'Finder에서 ⇧⌘G(폴더로 이동)에 붙여 넣으면 바로 가요')]
-    : [settingsEl('d-ismall', '앱 위치를 읽지 못했어요.')];
-  const place = personalizeRow('앱 위치', '파일을 찾을 때', ...body);
+  let body;
+  if (lines.length) {
+    const fold = document.createElement('details');
+    fold.className = 'd-dsec d-dadd d-pplacefold';
+    const summary = document.createElement('summary');
+    summary.className = 'lbl';
+    const count = document.createElement('span');
+    count.className = 'cnt';
+    count.textContent = `· ${lines.map(one => one.label).join(' · ')}`;
+    summary.append(settingsChevron(), document.createTextNode('경로 보기'), count);
+    const inner = settingsEl('inner d-pplacebody');
+    inner.append(...lines.map(one => one.line), settingsEl('d-ismall', 'Finder에서 ⇧⌘G(폴더로 이동)에 붙여 넣으면 바로 가요'));
+    fold.append(summary, inner);
+    body = fold;
+  } else {
+    body = settingsEl('d-ismall', '파일 위치를 읽지 못했어요.');
+  }
+  const place = personalizeRow('파일 위치', '찾을 때만', body);
   place.className = 'd-pset d-pplace';
   place.dataset.row = 'place';
   return place;
+}
+
+// 접이식 요약의 꺾쇠 — 새 코드라 마크업 글자(innerHTML) 없이 그린다(usage-ui.js의 usageChevron과 같은 모양).
+function settingsChevron() {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'd-i');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('aria-hidden', 'true');
+  const shape = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  shape.setAttribute('d', 'M6 3.5 10.5 8 6 12.5');
+  svg.appendChild(shape);
+  return svg;
+}
+
+// 설정 › 앱 `다른 기기` — 접속 암호는 이 맥에서 열었을 때만 꺼낼 수 있다(다른 기기에서는 줄 자체를 두지 않는다).
+function settingsAccessRow() {
+  if (!['localhost', '127.0.0.1'].includes(location.hostname)) return null;
+  const access = document.createElement('button');
+  access.type = 'button';
+  access.className = 'd-btn';
+  access.textContent = '접속 암호 복사';
+  access.addEventListener('click', async () => {
+    try {
+      const result = await (await request('/api/access-token')).json();
+      if (!result.token) { showNotice('다른 기기 접속이 아직 설정되지 않았어요'); return; }
+      await navigator.clipboard.writeText(result.token);
+      showNotice('암호를 복사했어요 · 다른 기기에서 사용자 이름은 workspace를 넣어 주세요');
+    } catch { showNotice('암호를 복사하지 못했어요', true); }
+  });
+  const hint = settingsEl('d-ismall', '같은 와이파이·Tailscale에서 이 주소를 열고, 사용자 이름은 workspace를 넣으면 돼요.');
+  const row = personalizeRow('다른 기기', '같은 와이파이에서', access, hint);
+  row.dataset.row = 'access';
+  return row;
 }
 
 // 꾸미기 맨 위의 `앱으로 설치` — 사용설명서를 닫은 사람도 찾을 수 있게 같은 권유(app.js의 appInstallWords)를 둔다.
@@ -3353,6 +3398,9 @@ function settingsGuideShow(question) {
   if (!view || typeof view.querySelectorAll !== 'function') return null;
   const hit = [...view.querySelectorAll('[data-faq]')].find(node => node.dataset.faq === question) || null;
   if (!hit) return null;
+  // 문답은 묶음 접이식 안에 있다 — 사람이 접어 둔 묶음이어도 먼저 펼친다.
+  const group = typeof hit.closest === 'function' ? hit.closest('details') : null;
+  if (group) group.open = true;
   hit.classList.add('is-hit');
   hit.tabIndex = -1;
   if (typeof hit.scrollIntoView === 'function') hit.scrollIntoView({ block: 'start' });
@@ -3376,7 +3424,7 @@ const SETTINGS_GLOSSARY = [
 ];
 
 // 문답은 **쓰는 순서**로 묶는다: 시작하기 → 매일 → 프로젝트·지라 → 주간요약 → 연동·자동화 → 문제가 생기면.
-// 항목마다 `필요한 것`을 앞에 달아, 무엇이 무엇을 요구하는지 한눈에 보이게 한다(연동 탭과 같은 말).
+// 항목마다 `필요한 것`을 달아, 무엇이 무엇을 요구하는지 한눈에 보이게 한다(연동 탭과 같은 말) — 화면에는 '없음'이 아닐 때만 선다.
 // 답은 3~4문장을 넘기지 않는다 — 길면 아무도 안 읽는다.
 const SETTINGS_FAQ = [
   ['시작하기', [
@@ -3477,15 +3525,55 @@ function renderSettingsGuide() {
   view.dataset.rendered = 'true';
   const doc = document.createElement('div');
   doc.className = 'd-faq';
+  // 차례: (사용설명서 — 따로 그린다) → `문제가 생겼어요` → `자주 묻는 것` 머리 + 첫 문장 → 묶음 여섯(접이식) → `말 뜻`(접이식).
+  // `다른 기기에서 열기`는 읽을거리가 아니라 동작이라 설정 › 앱으로 옮겼다(settingsAccessRow).
   // 맨 위 `문제가 생겼어요` — 증상으로 찾는 접이식 여섯(selfcheck-ui.js).
   if (typeof selfcheckTroubleNode === 'function') doc.appendChild(selfcheckTroubleNode());
 
+  doc.appendChild(settingsEl('d-faqhd', '자주 묻는 것'));
   const intro = document.createElement('div');
   intro.className = 'd-faqintro';
   intro.textContent = '처음 한 주는 할 일만 써도 충분해요 — 나머지는 필요할 때 켜요.';
   doc.appendChild(intro);
 
-  // 개념 한 줄 사전 — 앱이 쓰는 말부터 한 문장씩 푼다.
+  // 문답은 묶음마다 접는다(요약: 이름 + 개수) — 전부 펼치면 창 안 글이 5,000px을 넘는다. 첫 묶음 `시작하기`만 펼친다.
+  // 크롬의 ⌘F는 접힌 묶음 안 글자도 찾아 펼친다.
+  SETTINGS_FAQ.forEach(([group, entries], index) => {
+    const fold = document.createElement('details');
+    fold.className = 'd-dsec d-dadd d-faqgrp';
+    if (index === 0) fold.open = true;
+    const summary = document.createElement('summary');
+    summary.className = 'lbl';
+    const count = document.createElement('span');
+    count.className = 'cnt';
+    count.textContent = String(entries.length);
+    summary.append(settingsChevron(), document.createTextNode(group), count);
+    const inner = settingsEl('inner');
+    entries.forEach(([question, need, answer]) => {
+      const q = document.createElement('div');
+      q.className = 'q';
+      q.textContent = question;
+      // 사용설명서의 `슬랙에서 보내는 법`이 이 표지로 문답을 찾아간다(settingsGuideShow).
+      q.dataset.faq = question;
+      inner.appendChild(q);
+      // `필요한 것`은 필요한 게 있을 때만 적는다(데이터의 '없음'은 그대로 두고 줄만 만들지 않는다).
+      if (need !== '없음') {
+        const tag = document.createElement('div');
+        tag.className = 'need';
+        tag.textContent = `필요한 것: ${need}`;
+        inner.appendChild(tag);
+      }
+      const a = document.createElement('div');
+      a.className = 'a';
+      // 문답은 코드에 적힌 고정 문장이다. 끼워 넣는 것은 저장된 채널 이름 하나뿐이고 글자로 바꿔(escape) 넣는다.
+      a.innerHTML = answer.split('{todo}').join(escapeHtml(settingsTodoName()));
+      inner.appendChild(a);
+    });
+    fold.append(summary, inner);
+    doc.appendChild(fold);
+  });
+
+  // 개념 한 줄 사전 — 앱이 쓰는 말을 한 문장씩 푼다(접힘, 요약에 앞의 말 셋 + 나머지 개수).
   const words = document.createElement('div');
   words.className = 'd-words';
   SETTINGS_GLOSSARY.forEach(([term, meaning]) => {
@@ -3497,56 +3585,19 @@ function renderSettingsGuide() {
     row.append(name, document.createTextNode(` — ${meaning}`));
     words.appendChild(row);
   });
-  doc.appendChild(words);
-
-  SETTINGS_FAQ.forEach(([group, entries]) => {
-    const head = document.createElement('div');
-    head.className = 'grp';
-    head.textContent = group;
-    doc.appendChild(head);
-    entries.forEach(([question, need, answer]) => {
-      const q = document.createElement('div');
-      q.className = 'q';
-      q.textContent = question;
-      // 사용설명서의 `슬랙에서 보내는 법`이 이 표지로 문답을 찾아간다(settingsGuideShow).
-      q.dataset.faq = question;
-      const tag = document.createElement('div');
-      tag.className = 'need';
-      tag.textContent = `필요한 것: ${need}`;
-      const a = document.createElement('div');
-      a.className = 'a';
-      // 문답은 코드에 적힌 고정 문장이다. 끼워 넣는 것은 저장된 채널 이름 하나뿐이고 글자로 바꿔(escape) 넣는다.
-      a.innerHTML = answer.split('{todo}').join(escapeHtml(settingsTodoName()));
-      doc.append(q, tag, a);
-    });
-  });
+  const wordsFold = document.createElement('details');
+  wordsFold.className = 'd-dsec d-dadd d-wordsfold';
+  const wordsSummary = document.createElement('summary');
+  wordsSummary.className = 'lbl';
+  const wordsCount = document.createElement('span');
+  wordsCount.className = 'cnt';
+  const shown = SETTINGS_GLOSSARY.slice(0, 3).map(([term]) => term);
+  const rest = SETTINGS_GLOSSARY.length - shown.length;
+  wordsCount.textContent = `· ${shown.join(' · ')}${rest > 0 ? ` 외 ${rest}개` : ''}`;
+  wordsSummary.append(settingsChevron(), document.createTextNode('말 뜻'), wordsCount);
+  wordsFold.append(wordsSummary, words);
+  doc.appendChild(wordsFold);
   view.appendChild(doc);
-
-  // 접속 암호는 이 맥에서 열었을 때만 꺼낼 수 있다(다른 기기에서는 버튼 자체를 두지 않는다).
-  if (['localhost', '127.0.0.1'].includes(location.hostname)) {
-    const section = document.createElement('div');
-    section.className = 'd-dsec';
-    const label = document.createElement('span');
-    label.className = 'lbl';
-    label.textContent = '다른 기기에서 열기';
-    const access = document.createElement('button');
-    access.type = 'button';
-    access.className = 'd-btn';
-    access.textContent = '접속 암호 복사';
-    access.addEventListener('click', async () => {
-      try {
-        const result = await (await request('/api/access-token')).json();
-        if (!result.token) { showNotice('다른 기기 접속이 아직 설정되지 않았어요'); return; }
-        await navigator.clipboard.writeText(result.token);
-        showNotice('암호를 복사했어요 · 다른 기기에서 사용자 이름은 workspace를 넣어 주세요');
-      } catch { showNotice('암호를 복사하지 못했어요', true); }
-    });
-    const hint = document.createElement('div');
-    hint.className = 'd-hint';
-    hint.textContent = '같은 와이파이·Tailscale에서 이 주소를 열고, 사용자 이름은 workspace를 넣으면 돼요.';
-    section.append(label, access, hint);
-    view.appendChild(section);
-  }
 }
 
 // ---------- 설정 > 삭제한 항목 ----------
@@ -3691,12 +3742,25 @@ const settingsDialog = document.getElementById('settingsDialog');
 let settingsReturnFocus = null;
 let settingsEsc = null;
 
+// 창 머리(제목·탭 줄)는 창 맨 위에 붙어 있고 본문(.d-mbody)만 스크롤한다. 본문이 내려가 있으면 머리 아래에
+// 옅은 그림자 한 겹(`.is-scrolled`) — 위에 더 있다는 표시. 맨 위면 지금의 가는 선만.
+const settingsBody = typeof settingsDialog.querySelector === 'function' ? settingsDialog.querySelector('.d-mbody') : null;
+function settingsHeadShade() {
+  if (!settingsBody || !settingsDialog.classList) return;
+  settingsDialog.classList.toggle('is-scrolled', settingsBody.scrollTop > 0);
+}
+if (settingsBody) settingsBody.addEventListener('scroll', settingsHeadShade, { passive: true });
+
 // 탭 차례 — 연동 · 앱 · 꾸미기 · 도움말 · 삭제한 항목. 설정을 열면 연동이 먼저다(예전 `상태` 탭은 없앴다 —
 // 연결 상태는 연동 카드, 앱 자체의 일은 앱 탭). 모르는 이름(옛 `status` 등)은 연동으로 연다.
 const SETTINGS_TABS = ['integrations', 'app', 'personalize', 'guide', 'trash'];
 
 function settingsSetTab(tab) {
   const want = SETTINGS_TABS.includes(tab) ? tab : 'integrations';
+  // 모든 탭이 본문(.d-mbody) 하나를 같이 쓴다 — 다른 탭으로 바뀔 때만 맨 위에서 시작한다(같은 탭 다시 그리기는 자리 그대로).
+  const before = settingsDialog.querySelector('[data-settings-tab][aria-pressed="true"]')?.dataset.settingsTab;
+  const body = settingsDialog.querySelector('.d-mbody');
+  if (body && before && before !== want) body.scrollTop = 0;
   settingsDialog.querySelectorAll('[data-settings-tab]').forEach((button) => {
     button.setAttribute('aria-pressed', String(button.dataset.settingsTab === want));
   });
@@ -3711,6 +3775,7 @@ function settingsSetTab(tab) {
   if (want === 'app') renderSettingsApp();
   if (want === 'integrations') renderSettingsIntegrations();
   if (want === 'trash') renderSettingsTrash();
+  settingsHeadShade();
   return want;
 }
 
@@ -3721,6 +3786,9 @@ function settingsOpen(tab = 'integrations', focusKey = null) {
   settingsReturnFocus = document.activeElement;
   uiMenuClose();
   settingsDialog.showModal();
+  // 초점은 창 자체에(테 없음) — 눌린 탭과 초점이 다른 버튼에 떨어지지 않게. Tab 한 번이면 `연동` 탭이다.
+  // 갈 곳이 정해진 표지(`selfcheck`)는 그 탭이 그린 뒤 그 버튼으로 옮긴다(renderSettingsApp).
+  if (typeof settingsDialog.focus === 'function') settingsDialog.focus({ preventScroll: true });
   settingsEsc = escPush(settingsClose);
   // 삭제한 항목은 열 때마다 새로 읽는다 — 탭 이름의 개수(`삭제한 항목 3`)도 이 값이다.
   settingsTrash = null;

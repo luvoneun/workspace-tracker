@@ -2327,6 +2327,15 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-mhd h2::before { display: none; }
 .d-mhd .sp { margin-left: auto; }
 .d-mbody { flex: 1; min-height: 0; overflow: auto; padding: 14px 16px 18px; }
+/* 설정 창만: 윗변을 한 자리에 둔다(화면 높이의 8%, 최소 32px) — 탭마다 높이가 달라 가운데 정렬이면 탭 줄이 위아래로 뛴다.
+   아래만 늘고 준다. 창 자체는 스크롤하지 않고(dialog 기본 overflow: auto를 막는다) 본문만 — 머리는 늘 창 맨 위.
+   최대 높이(100dvh - 120px)는 .d-modal 그대로라 아래 여백이 늘 남는다(아주 긴 화면에서도 넘치지 않게 윗변은 120px까지만).
+   초점은 창 자체가 받는다(settingsOpen) — 창에는 테를 그리지 않고, 안쪽 컨트롤의 :focus-visible 테는 그대로. */
+#settingsDialog { margin: min(max(32px, 8vh), 120px) auto auto; overflow: hidden; }
+#settingsDialog:focus { outline: none; }
+/* 본문이 내려가 있을 때만 머리 아래 옅은 그림자 한 겹(맨 위면 가는 선만) */
+#settingsDialog .d-mhd { position: relative; z-index: 1; transition: box-shadow 130ms var(--ease); }
+#settingsDialog.is-scrolled .d-mhd { box-shadow: var(--shadow); }
 
 /* 슬랙 처리 대장(연동 › 슬랙 ⋯ › 최근 기록 맨 위) — 경고가 아니라 사실이라 흐린 글자다. */
 .d-autonote { margin: 0; font-size: 12.5px; color: var(--dim); }
@@ -2339,6 +2348,12 @@ body.batch-open .d-toast { bottom: 76px; }
 #settingsAppView .d-pset .k { padding-top: 2px; }
 #settingsAppView .d-pset .v > .d-btn { align-self: flex-start; }
 #settingsAppView .d-pplace { margin-top: 0; }
+/* 파일 위치 — 경로 둘은 접이식 안(기본 접힘). 줄 안이라 구역 선·위 여백은 없고, 펼치면 요약의 이름 목록은 숨는다. */
+#settingsAppView .d-pplacefold { margin-top: 0; padding-top: 6px; border-top: 0; }
+.d-pplacefold[open] > summary .cnt { display: none; }
+.d-pplacebody { display: flex; flex-direction: column; gap: 8px; }
+/* 설정 안 접이식 요약의 조용한 덧말(개수·이름 목록) */
+#settingsDialog .d-dadd > summary .cnt { font-weight: 500; color: var(--dim); font-variant-numeric: tabular-nums; }
 .d-abline { font-size: 14px; color: var(--text); font-variant-numeric: tabular-nums; }
 /* 데이터 백업 한 줄 — 점(연동 카드와 같은 .d-istat 부품)은 초록(잘 됨) · 빨강(멈춤). 멈추면 이유 한 줄이 그 아래 --urgent로. */
 .d-bkline { font-size: 14px; color: var(--text); font-variant-numeric: tabular-nums; }
@@ -2606,16 +2621,20 @@ a.d-btn { text-decoration: none; }
   .d-intgbody { padding: 12px; }
 }
 
-.d-faq { max-width: 64ch; }
-.d-faqintro { font-size: 13px; color: var(--muted); line-height: 1.65; }
-/* 개념 한 줄 사전 — 문답 앞에서 말뜻부터 푼다 */
+/* 도움말 — 글 폭 제한(64ch)은 문답 글에만. `문제가 생겼어요` 상자·묶음 줄은 창 폭 가득. */
+.d-faq .q, .d-faq .need, .d-faq .a { max-width: 64ch; }
+.d-faqhd { margin-bottom: 6px; font-size: 14px; font-weight: 700; color: var(--text); }
+.d-faqintro { margin-bottom: 8px; font-size: 13px; color: var(--muted); line-height: 1.65; }
+/* 문답 묶음 접이식(요약: 이름 + 개수, 첫 묶음만 펼침) — 묶음 사이 가는 선 */
+.d-faq .d-faqgrp { margin-top: 0; padding: 6px 0; }
+.d-faq .d-faqgrp > summary.lbl { min-height: 40px; font-size: 14px; font-weight: 600; color: var(--text); }
+.d-faq .d-faqgrp[open] > summary.lbl { margin-bottom: 2px; }
+.d-faq .d-faqgrp > .inner { padding: 0 0 10px 18px; }
+/* 개념 한 줄 사전 — 맨 아래 `말 뜻` 접이식 안 */
 .d-words { margin-top: 12px; padding: 12px 14px; background: var(--neutral-bg); border-radius: var(--r-sm); }
+.d-wordsfold .d-words { margin-top: 0; }
 .d-word { font-size: 12.5px; color: var(--muted); line-height: 1.7; }
 .d-word .w { font-weight: 600; color: var(--text); }
-.d-faq .grp {
-  margin-top: 24px; font-size: 12px; font-weight: 600; color: var(--dim);
-  padding-top: 10px; border-top: 1px solid var(--hair);
-}
 .d-faq .q { margin-top: 18px; font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
 .d-faq .q:first-child { margin-top: 0; }
 /* 사용설명서의 `슬랙에서 보내는 법`으로 찾아온 문답 — 잠깐 밝힌다 */
@@ -2890,7 +2909,8 @@ a.d-btn { text-decoration: none; }
   .d-selbar .bar { gap: 2px; }
 
   /* 설정 창은 화면을 거의 다 쓰는 판이 된다 */
-  #settingsDialog { width: calc(100vw - 16px); max-height: calc(100dvh - 48px); }
+  /* 좁은 화면은 윗변 고정 대신 지금처럼 가운데(높이를 거의 다 쓰는 판이라 뛸 자리가 없다) */
+  #settingsDialog { width: calc(100vw - 16px); max-height: calc(100dvh - 48px); margin: auto; }
   .d-mhd { padding: 10px 10px 10px 14px; gap: 8px; }
   /* 칸이 다섯(상태·연동·꾸미기·도움말·삭제한 항목)이라 좁은 폭에서는 제목 줄 아래로 통째로 내려오고,
      글자 길이만큼 나눠 선다(삭제한 항목 N이 잘리지 않게) */

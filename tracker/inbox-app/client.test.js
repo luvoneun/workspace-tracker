@@ -60,7 +60,11 @@ function client(response) {
       getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); },
       // 조각(fragment)도 아이를 모아 한 번에 붙이는 그릇이라 같은 가짜 노드로 충분하다.
       createElement: element, createDocumentFragment: element, addEventListener() {},
+      // 새 꺾쇠 아이콘(settingsChevron)은 innerHTML 없이 SVG 요소로 만든다 — 가짜 창에서는 같은 가짜 노드다.
+      createElementNS: (ns, tag) => element(),
     },
+    // 기본은 다른 기기에서 연 주소 — `다른 기기` 줄(이 맥에서만)이 필요한 테스트는 localhost로 바꿔 끼운다.
+    location: { hostname: 'example.test' },
     window: { addEventListener() {} },
     fetch: async () => { calls++; return typeof response === 'function' ? response() : response.clone(); },
     AbortController, structuredClone,
@@ -7323,15 +7327,29 @@ test('WP-D2 I. 도움말: 문답마다 찾아갈 표지가 있고, `슬랙에서
   app.context.location = { hostname: 'example.test' };
   app.run('renderSettingsGuide()');
   const doc = app.nodes.get('settingsGuideView').children[0];
-  const q = doc.children.find(kid => kid.className === 'q' && kid.dataset.faq === '슬랙에서 이렇게 보내요');
+  // 문답은 묶음 접이식(<details>) 안 `.inner`에 있다.
+  const groups = doc.children.filter(kid => String(kid.className).split(' ').includes('d-faqgrp'));
+  const questions = groups.flatMap(group => group.children[1].children).filter(kid => kid.className === 'q');
+  const q = questions.find(kid => kid.dataset.faq === '슬랙에서 이렇게 보내요');
   assert.ok(q, '문답 제목에 data-faq 표지');
+  const home = groups.find(group => group.children[1].children.includes(q));
+  assert.equal(home.children[0].children[1].textContent, '연동·자동화');
+  assert.ok(!home.open, '연동·자동화 묶음은 처음엔 접혀 있다');
   const added = [];
   q.classList = { add: name => added.push(name), remove() {} };
-  app.nodes.get('settingsGuideView').querySelectorAll = () => doc.children.filter(kid => kid.dataset && kid.dataset.faq);
+  q.closest = selector => (selector === 'details' ? home : null);
+  app.nodes.get('settingsGuideView').querySelectorAll = () => questions;
   assert.equal(app.run("settingsGuideShow('슬랙에서 이렇게 보내요')"), q);
   same(added, ['is-hit']);
   assert.equal(q.focused, true);
+  assert.equal(home.open, true, '찾아온 문답의 묶음을 펼친다');
+  // 사람이 다시 접어 두었어도 또 찾아오면 연다.
+  home.open = false;
+  app.run("settingsGuideShow('슬랙에서 이렇게 보내요')");
+  assert.equal(home.open, true);
+  const before = groups.map(group => !!group.open);
   assert.equal(app.run("settingsGuideShow('없는 문답')"), null);
+  same(groups.map(group => !!group.open), before, '못 찾으면 묶음은 건드리지 않는다');
 
   const faq = JSON.parse(app.run('JSON.stringify(SETTINGS_FAQ)')).flatMap(([, rows]) => rows);
   assert.ok(faq.some(([question]) => question === '앱 아이콘·이름을 바꾸려면'));
@@ -7598,14 +7616,33 @@ test('도움말: 개념 사전 9개 + 쓰는 순서의 여섯 묶음 + 항목마
   const needs = new Set(entries.map(([, need]) => need));
   assert.ok(needs.has('없음') && needs.has('지라 연결') && needs.has('슬랙 연결'));
 
-  // 맨 위는 `문제가 생겼어요`(WP-K 시안 D), 그다음 첫 문단은 "처음 한 주는 할 일만"이다
+  // 차례: `문제가 생겼어요`(WP-K 시안 D) → `자주 묻는 것` 머리 + "처음 한 주는 할 일만" → 묶음 여섯(접이식) → `말 뜻`(접이식)
   app.run('renderSettingsGuide()');
-  const doc = app.nodes.get('settingsGuideView').children[0];
-  assert.equal(doc.children[0].className, 'd-trouble');
-  assert.equal(doc.children[1].className, 'd-faqintro');
-  assert.match(doc.children[1].textContent, /처음 한 주는 할 일만 써도 충분해요/);
-  assert.equal(doc.children[2].className, 'd-words');
-  assert.equal(doc.children[2].children.length, 9);
+  const view = app.nodes.get('settingsGuideView');
+  same(view.children.map(kid => kid.className), ['d-faq'], '`다른 기기에서 열기`는 이 맥에서 열어도 도움말에 없다(앱 탭으로 옮겼다)');
+  const doc = view.children[0];
+  same(doc.children.map(kid => kid.className), ['d-trouble', 'd-faqhd', 'd-faqintro',
+    ...faq.map(() => 'd-dsec d-dadd d-faqgrp'), 'd-dsec d-dadd d-wordsfold']);
+  assert.equal(doc.children[1].textContent, '자주 묻는 것');
+  assert.match(doc.children[2].textContent, /처음 한 주는 할 일만 써도 충분해요/);
+  const groups = doc.children.slice(3, 3 + faq.length);
+  // 요약은 꺾쇠(마크업 글자 없이 만든 SVG) + 이름 + 개수, 첫 묶음 `시작하기`만 펼친다
+  same(groups.map(group => [group.children[0].children[1].textContent, group.children[0].children[2].textContent]),
+    faq.map(([name, rows]) => [name, String(rows.length)]));
+  same(groups.map(group => !!group.open), faq.map((_, index) => index === 0));
+  assert.equal(groups[0].children[0].className, 'lbl');
+  assert.equal(groups[0].children[0].children[0].getAttribute('aria-hidden'), 'true');
+  // `필요한 것`은 필요한 게 있을 때만 줄이 선다(데이터의 '없음'은 그대로)
+  const inner = groups.flatMap(group => group.children[1].children);
+  const needLines = inner.filter(kid => kid.className === 'need');
+  same(needLines.map(kid => kid.textContent), entries.filter(([, need]) => need !== '없음').map(([, need]) => `필요한 것: ${need}`));
+  assert.ok(!needLines.some(kid => /없음$/.test(kid.textContent)), '`필요한 것: 없음` 줄은 없다');
+  assert.equal(inner.filter(kid => kid.className === 'q').length, entries.length, '문답은 하나도 빠지지 않는다');
+  const words = doc.children[3 + faq.length];
+  assert.ok(!words.open, '말 뜻은 접혀 있다');
+  same(words.children[0].children.slice(1).map(kid => kid.textContent), ['말 뜻', '· 할 일 · 나중에 할 일 · 확인 대기 외 6개']);
+  assert.equal(words.children[1].className, 'd-words');
+  assert.equal(words.children[1].children.length, 9);
 });
 
 // 최종 QA: 캘린더를 아예 끈 사람에게 `오늘 일정을 가져오지 못했어요`는 고장난 것처럼 읽힌다.
@@ -8666,28 +8703,100 @@ function appClient({ about = {}, backup = null, now = null } = {}) {
 }
 const backupAt = (daysAgo, time = '19:30') => { const d = new Date(); d.setDate(d.getDate() - daysAgo); const two = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${time}:04`; };
 
-test('WP-E D. 앱 탭: 버전 · 데이터 백업 · 앱 위치 · 점검(점검하기 + 문제 보고 복사) 네 줄(앱 위치는 꾸미기에서 옮김)', async () => {
+test('설정 정리: 앱 탭 차례는 버전 · 점검 · 데이터 백업 · (사용 통계) · (다른 기기) · 파일 위치 — 경로 둘은 맨 아래 접이식에 한 번씩', async () => {
   const fx = appClient({
     about: { update: { available: true, label: 'v1.1.1', changesUrl: null } },
     backup: { ok: true, path: '~/workspace-data-backup/daily', local: { state: 'ok', at: backupAt(1), days: 7 }, github: { on: false, state: 'never' } },
   });
   await fx.app.run('renderSettingsApp()');
   const kids = fx.view().children;
-  same(kids.map(one => one.dataset.row), ['version', 'backup', 'place', 'check']);
+  same(kids.map(one => one.dataset.row), ['version', 'check', 'backup', 'place'], '사용 통계(usage-ui.js)가 없고 다른 기기에서 연 창이면 그 두 줄은 빠진다');
   // 버전 줄 맨 끝의 `지난 소식 전체`는 접이식 자체의 표지(summary) 글자다 — hidden이어도 textContent에는 남는다(실제 DOM과 같다).
   assert.match(fx.text(0), /^버전워크스페이스v1\.1\.0 · 배포된 버전만 받기새 버전 v1\.1\.1이 있어요업데이트 받기지난 소식 전체데이터는 먼저 백업하고 받아요\. 1분쯤 걸려요\.지난 소식 전체$/);
-  assert.equal(fx.text(1), '데이터 백업매일 19:30 이 맥에 매일 백업 · 어제 19:30 · 7일치~/workspace-data-backup/daily복사Finder에서 ⇧⌘G(폴더로 이동)에 붙여 넣으면 바로 가요');
-  assert.equal(fx.text(2), '앱 위치파일을 찾을 때업데이트 파일~/workspace/업데이트.command복사Finder에서 ⇧⌘G(폴더로 이동)에 붙여 넣으면 바로 가요', 'Dock 앱 경로 줄은 없다(WP-O)');
-  assert.equal(fx.text(3), '점검문제가 있을 때점검하기문제 보고 복사설치·연동·자동화를 한 번에 확인하고, 고치는 법을 알려 줘요.');
-  const copies = fx.app.run("window.findByClass(document.getElementById('settingsAppView').children[1], 'd-btn')");
+  assert.equal(fx.text(1), '점검문제가 있을 때점검하기문제 보고 복사설치·연동·자동화를 한 번에 확인하고, 고치는 법을 알려 줘요.');
+  assert.equal(fx.text(2), '데이터 백업매일 19:30 이 맥에 매일 백업 · 어제 19:30 · 7일치', '백업 줄에는 경로·Finder 안내가 없다');
+  assert.equal(fx.app.run("window.findByClass(document.getElementById('settingsAppView').children[2], 'd-btn')").length, 0);
+  assert.equal(fx.text(3), '파일 위치찾을 때만경로 보기· 업데이트 파일 · 백업 폴더업데이트 파일~/workspace/업데이트.command복사백업 폴더~/workspace-data-backup/daily복사Finder에서 ⇧⌘G(폴더로 이동)에 붙여 넣으면 바로 가요', 'Dock 앱 경로 줄은 없다(WP-O)');
+  const place = kids[3];
+  assert.equal(place.className, 'd-pset d-pplace');
+  const fold = place.children[1].children[0];
+  assert.equal(fold.className, 'd-dsec d-dadd d-pplacefold');
+  assert.ok(!fold.open, '파일 위치는 기본으로 접혀 있다');
+  const all = [0, 1, 2, 3].map(index => fx.text(index)).join('\n');
+  assert.equal(all.split('Finder에서 ⇧⌘G').length - 1, 1, 'Finder 안내는 한 번만');
+  assert.equal(all.split('~/workspace-data-backup/daily').length - 1, 1, '백업 폴더 경로는 한 번만');
+  const copies = fx.app.run("window.findByClass(document.getElementById('settingsAppView').children[3], 'd-btn')");
+  assert.equal(copies.length, 2);
   await copies[0].listeners.click();
-  same(fx.copied, ['~/workspace-data-backup/daily']);
-  const place = fx.app.run("window.findByClass(document.getElementById('settingsAppView').children[2], 'd-btn')");
-  assert.equal(place.length, 1);
-  await place[0].listeners.click();
-  same(fx.copied.slice(1), ['~/workspace/업데이트.command']);
+  await copies[1].listeners.click();
+  same(fx.copied, ['~/workspace/업데이트.command', '~/workspace-data-backup/daily']);
   const report = fx.find('d-btn').find(one => one.id === 'settingsReportBtn');
   same([report.textContent, report.className], ['문제 보고 복사', 'd-btn']);
+});
+
+test('설정 정리: 사용 통계 줄은 자리만 옮긴다(한 번만 그린다) · 이 맥에서 열면 `다른 기기` 줄이 파일 위치 앞에 선다', async () => {
+  const fx = appClient({ backup: { ok: true, path: '~/b/daily', local: { state: 'ok', at: backupAt(0), days: 1 }, github: { on: false } } });
+  fx.app.run(`window.usageCalls = 0;
+    usageSettingsRow = () => { window.usageCalls += 1; const row = document.createElement('div'); row.dataset.row = 'usage'; return row; };
+    location = { hostname: 'localhost' };`);
+  await fx.app.run('renderSettingsApp()');
+  same(fx.view().children.map(one => one.dataset.row), ['version', 'check', 'backup', 'usage', 'access', 'place']);
+  assert.equal(fx.app.run('window.usageCalls'), 1, '사용 통계 줄은 한 번만 만든다');
+  assert.equal(fx.text(4), '다른 기기같은 와이파이에서접속 암호 복사같은 와이파이·Tailscale에서 이 주소를 열고, 사용자 이름은 workspace를 넣으면 돼요.');
+  // 다시 그려도 줄이 둘이 되지 않는다
+  await fx.app.run('renderSettingsApp()');
+  assert.equal(fx.view().children.filter(one => one.dataset.row === 'usage').length, 1);
+  // 버튼은 예전 도움말의 것과 같은 요청 · 같은 알림
+  fx.app.run(`showNotice = (text, bad) => { window.lastNotice = [text, !!bad]; };`);
+  fx.app.context.request = async url => new Response(JSON.stringify(url === '/api/access-token' ? { token: 'tok-1' } : {}));
+  await fx.app.run("window.findByClass(document.getElementById('settingsAppView').children[4], 'd-btn')")[0].listeners.click();
+  same(fx.copied.slice(-1), ['tok-1']);
+  same(fx.app.run('window.lastNotice'), ['암호를 복사했어요 · 다른 기기에서 사용자 이름은 workspace를 넣어 주세요', false]);
+  // 127.0.0.1도 이 맥이다
+  fx.app.run(`location = { hostname: '127.0.0.1' };`);
+  await fx.app.run('renderSettingsApp()');
+  assert.ok(fx.view().children.some(one => one.dataset.row === 'access'));
+});
+
+test('설정 정리: 파일 위치 — 경로가 하나만 있으면 그것만, 둘 다 없으면 접이식 대신 한 줄', async () => {
+  const onlyBackup = appClient({ about: { updateFile: undefined }, backup: { ok: true, path: '~/b/daily', local: { state: 'ok', at: backupAt(0), days: 1 }, github: { on: false } } });
+  await onlyBackup.app.run('renderSettingsApp()');
+  assert.equal(onlyBackup.text(3), '파일 위치찾을 때만경로 보기· 백업 폴더백업 폴더~/b/daily복사Finder에서 ⇧⌘G(폴더로 이동)에 붙여 넣으면 바로 가요');
+  const onlyUpdate = appClient({ backup: null });
+  await onlyUpdate.app.run('renderSettingsApp()');
+  assert.equal(onlyUpdate.text(2), '데이터 백업매일 19:30백업 상태를 읽지 못했어요.');
+  assert.match(onlyUpdate.text(3), /^파일 위치찾을 때만경로 보기· 업데이트 파일업데이트 파일~\/workspace\/업데이트\.command복사Finder/);
+  const none = appClient({ about: { updateFile: '' }, backup: { ok: false } });
+  await none.app.run('renderSettingsApp()');
+  assert.equal(none.text(3), '파일 위치찾을 때만파일 위치를 읽지 못했어요.');
+  assert.equal(none.view().children[3].dataset.row, 'place');
+});
+
+test('설정 정리: 창을 열면 초점은 창 자체(테 없음) · 이미 열린 창은 초점을 옮기지 않는다 · `점검하기` 표지면 그 버튼', async () => {
+  const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  assert.match(html, /<dialog id="settingsDialog" class="d-modal" aria-label="설정" tabindex="-1" autofocus>/);
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /#settingsDialog:focus \{ outline: none; \}/, '창 자체에만 테를 지운다');
+  assert.match(css, /#settingsDialog \{ margin: min\(max\(32px, 8vh\), 120px\) auto auto; overflow: hidden; \}/, '윗변 고정 · 창은 스크롤하지 않는다');
+
+  const fx = appClient({});
+  fx.app.run(`settingsDialog.showModal = () => { settingsDialog.open = true; };
+    window.dialogFocus = [];
+    settingsDialog.focus = (options) => { settingsDialog.focused = true; window.dialogFocus.push(options); };
+    renderSettingsIntegrations = async () => {}; escPush = () => 1;
+    window.realRender = renderSettingsApp; renderSettingsApp = async () => {};`);
+  fx.app.run("settingsOpen('app')");
+  assert.equal(fx.app.run('settingsDialog.focused'), true, '창 자체가 초점을 받는다');
+  same(fx.app.run('window.dialogFocus'), [{ preventScroll: true }]);
+  fx.app.run("settingsOpen('guide')");
+  assert.equal(fx.app.run('window.dialogFocus.length'), 1, '이미 열려 있으면 초점을 다시 옮기지 않는다(탭만 바꾼다)');
+  // 도움말 `점검하기`처럼 갈 곳이 정해진 표지면 앱 탭이 그린 뒤 그 버튼으로 간다
+  fx.app.run('settingsDialog.open = false');
+  fx.app.run('renderSettingsApp = () => (window.appDone = window.realRender());');
+  fx.app.run("settingsOpen('app', 'selfcheck')");
+  await fx.app.run('window.appDone');
+  assert.equal(fx.app.run('selfcheckMainButton.focused'), true);
+  assert.equal(fx.app.run('settingsFocusKey'), null, '표지는 한 번만 쓴다');
 });
 
 test('WP-J C. 지난 소식 전체: 버전 줄 아래 접이식(기본 접힘) — 소식이 있을 때만, 버전마다 이름·날짜·줄', async () => {
@@ -8727,15 +8836,15 @@ test('WP-E D. 데이터 백업 줄: 로컬만 · GitHub 포함 · 실패(빨강 
   const row = async (backup) => {
     const fx = appClient({ backup });
     await fx.app.run('renderSettingsApp()');
-    return { text: fx.text(1), fx };
+    return { text: fx.text(2), fx };
   };
   const both = await row({ ok: true, path: '~/workspace-data-backup/daily', local: { state: 'ok', at: backupAt(0), days: 3 }, github: { on: true, state: 'ok', at: backupAt(0) } });
-  assert.match(both.text, /^데이터 백업매일 19:30 이 맥에 매일 백업 · 오늘 19:30 · 3일치GitHub 비공개 저장소에도 올려요 · 오늘 19:30~/);
+  assert.match(both.text, /^데이터 백업매일 19:30 이 맥에 매일 백업 · 오늘 19:30 · 3일치GitHub 비공개 저장소에도 올려요 · 오늘 19:30$/, '경로는 이 줄이 아니라 파일 위치에');
   assert.equal(both.fx.find('d-bkline')[0].children[0].className, 'd-istat k-ok', '잘 되면 연동 카드와 같은 초록 점 부품');
   const gitFail = await row({ ok: true, path: '~/x/daily', local: { state: 'ok', at: backupAt(1), days: 7 }, github: { on: true, state: 'fail', at: backupAt(1), reason: '원격 업로드 실패 (이 맥의 백업 커밋은 남아 있음)' } });
   assert.match(gitFail.text, / GitHub에 올리지 못했어요 · 어제 19:30원격 업로드 실패 \(이 맥의 백업 커밋은 남아 있음\)/);
   const failed = await row({ ok: true, path: '~/x/daily', local: { state: 'fail', at: backupAt(0), reason: '파일을 복사하지 못함 (tasks.md)', days: 6 }, github: { on: false } });
-  assert.match(failed.text, /^데이터 백업매일 19:30 이 맥 백업이 멈췄어요 · 오늘 19:30파일을 복사하지 못함 \(tasks\.md\)~/);
+  assert.match(failed.text, /^데이터 백업매일 19:30 이 맥 백업이 멈췄어요 · 오늘 19:30파일을 복사하지 못함 \(tasks\.md\)$/, '멈춰도 빨간 줄 + 이유는 백업 줄에 그대로, 경로만 파일 위치로');
   const line = failed.fx.find('d-bkline')[0];
   assert.equal(line.className, 'd-bkline k-neg');
   // 점은 연동 카드와 같은 부품(`.d-istat`의 점) — 10px 원 + 옅은 링, aria-hidden.
@@ -9044,8 +9153,8 @@ const scKid = (fx, cls) => fx.slot().children.find(one => String(one.className).
 test('WP-K A. 앱 탭 `점검` 줄: 점검하기 + 문제 보고 복사, 결과 자리는 비어 있다가 누르면 같은 자리 아래 펼친다', async () => {
   const fx = scClient(SC_BAD);
   await fx.app.run('renderSettingsApp()');
-  const row = fx.view().children[3];
-  assert.equal(row.dataset.row, 'check');
+  const row = fx.view().children[1];
+  assert.equal(row.dataset.row, 'check', '점검은 버전 바로 아래 둘째 줄');
   assert.equal(fx.button().textContent, '점검하기');
   assert.equal(fx.slot().hidden, true);
   assert.equal(fx.slot().getAttribute('aria-live'), 'polite');
