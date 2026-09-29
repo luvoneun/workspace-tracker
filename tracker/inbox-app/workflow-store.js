@@ -205,6 +205,22 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     }).id);
     return { ok: true, created };
   }
+  // 뺀 초안 되살리기(알림의 `되돌리기`·⌘Z) — review의 dismiss를 거꾸로 한다. "뺀 직후 모양"일 때만 받는다:
+  // 검토 기록이 정확히 'dismissed'이고, 기록을 지우면 그 초안이 이 회의의 초안으로 다시 올라올 때.
+  // 이미 담았거나(항목 번호) 살아 있거나(기록 없음) 모양이 다른 옛 기록이면 하나도 쓰지 않고 거절한다.
+  // meeting_drafts.json은 여기서도 고치지 않는다(검토 기록 한 칸만 지운다).
+  function restoreDismissed({ meetingId: id, drafts } = {}) {
+    if (typeof id !== 'string' || !id || !Array.isArray(drafts) || !drafts.length || drafts.some(draftId => typeof draftId !== 'string' || !draftId) || new Set(drafts).size !== drafts.length) throw new Error('되살릴 초안을 확인해 주세요.');
+    const state = read();
+    const reviewed = { ...(state.reviewed || {}) };
+    if (drafts.some(draftId => !Object.prototype.hasOwnProperty.call(reviewed, draftId) || reviewed[draftId] !== 'dismissed')) throw new Error('이미 담았거나 되살릴 수 없는 초안이에요.');
+    drafts.forEach(draftId => { delete reviewed[draftId]; });
+    const back = new Set((draftsByMeeting({ ...state, reviewed })[id]?.drafts || []).map(draft => draft.id));
+    if (drafts.some(draftId => !back.has(draftId))) throw new Error('이 회의에서 뺀 초안을 찾을 수 없어요.');
+    state.reviewed = reviewed;
+    write(state);
+    return { ok: true, restored: drafts.length };
+  }
   // 방금 담은 것을 되돌린다: 항목은 삭제 휴지통(원문 보존)으로 옮기고, 초안은 다시 검토 대기로 올린다.
   // review가 돌려준 created 목록 그대로만 받는다(이 회의에서 초안으로 만든 항목이 아니면 거절).
   function undoReview({ meetingId: id, created }) {
@@ -676,5 +692,5 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     write(state);
     return { ok: true };
   }
-  return { archive, snapshot, patchItem, saveMeeting, syncProject, meetingItemIds, markAnswerSeen, unmarkAnswerSeen, capture, review, undoReview, retype, link, checkProjectLink, linkProject, checkProjectAlias, setProjectAlias, projectAliases, checkJiraRoles, saveJiraRoles, bundleProjects, unbundleProjects, setBundleLead, restoreBundle, groupList, renameGroup, moveGroup, undoMoveGroup, recordProjectMove, takeProjectMove, attentionDismissed, dismissAttention, undismissAttention, outcome: id => read().items[id]?.outcome || '' };
+  return { archive, snapshot, patchItem, saveMeeting, syncProject, meetingItemIds, markAnswerSeen, unmarkAnswerSeen, capture, review, restoreDismissed, undoReview, retype, link, checkProjectLink, linkProject, checkProjectAlias, setProjectAlias, projectAliases, checkJiraRoles, saveJiraRoles, bundleProjects, unbundleProjects, setBundleLead, restoreBundle, groupList, renameGroup, moveGroup, undoMoveGroup, recordProjectMove, takeProjectMove, attentionDismissed, dismissAttention, undismissAttention, outcome: id => read().items[id]?.outcome || '' };
 };

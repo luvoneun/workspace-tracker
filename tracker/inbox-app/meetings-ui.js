@@ -276,12 +276,20 @@ async function panelPromoteTasks(result, ids, host = MEETING_HOST_CARD) {
 
 // AI가 분류한 초안. 읽는 순서대로 문구(주인공) → 고르는 것들(종류·시점·날짜),
 // 담기 바는 패널 아래에 붙어 있다. 고친 문구·종류는 wfDraftEdits에 남아 다시 그려도 유지된다.
+// 초안 빼기는 문구 오른쪽의 조용한 글자 버튼 `빼기`다(✕는 날짜 칸의 `날짜 지우기` 하나만 남는다).
+let meetingDraftBarSeq = 0;
 function panelMeetingDrafts(event, box, host = MEETING_HOST_CARD) {
   const section = panelSection(`AI가 분류한 초안 ${event.drafts.length}`);
   section.classList.add('d-drafts');
 
   const summary = document.createElement('span');
   summary.className = 'sm';
+  // 담기 바의 오류 자리 — 요약 글자 자리에 대신 선다(빈 초안·저장 실패). 카드 머리까지 올라가 보지 않아도 되게.
+  const message = document.createElement('span');
+  message.className = 'er';
+  message.id = `meetingDraftBarError${++meetingDraftBarSeq}`;
+  message.setAttribute('role', 'alert');
+  const texts = new Map(); // 초안 번호 → 문구 칸(빈 칸으로 초점을 보내고 표시하려고)
   const refreshSummary = () => {
     const counts = {};
     let today = 0;
@@ -293,8 +301,16 @@ function panelMeetingDrafts(event, box, host = MEETING_HOST_CARD) {
     summary.textContent = WF_TYPES.filter(([key]) => counts[key])
       .map(([key, label]) => `${label} ${counts[key]}${key === 'task' && today ? `(오늘 ${today})` : ''}`).join(' · ');
   };
+  const showBarError = (text) => {
+    message.textContent = text || '';
+    summary.hidden = !!text;
+  };
+  const markEmpty = (text, empty) => {
+    if (empty) { text.setAttribute('aria-invalid', 'true'); text.setAttribute('aria-describedby', message.id); }
+    else { text.removeAttribute('aria-invalid'); text.removeAttribute('aria-describedby'); }
+  };
 
-  event.drafts.forEach((draft) => {
+  event.drafts.forEach((draft, index) => {
     const edit = wfDraftEdits.get(draft.id) || { type: draft.type, description: wfCleanDraftText(draft.description), when: 'later', due: draft.due || '' };
     wfDraftEdits.set(draft.id, edit);
     const card = document.createElement('div');
@@ -308,26 +324,34 @@ function panelMeetingDrafts(event, box, host = MEETING_HOST_CARD) {
     text.maxLength = 1000;
     text.value = edit.description;
     text.setAttribute('aria-label', '초안 문구');
+    texts.set(draft.id, text);
     const fit = () => { text.style.height = 'auto'; text.style.height = `${text.scrollHeight + text.offsetHeight - text.clientHeight}px`; };
+
+    const dismiss = panelQuietButton('빼기', () => meetingDraftDismiss(event, draft, edit, index, host), 'd-headnum d-dpull');
+    const labelDismiss = () => dismiss.setAttribute('aria-label', meetingDraftDismissLabel(edit.description));
+    labelDismiss();
+    dismiss.title = '이 초안 빼기';
+
     text.addEventListener('input', () => {
       // 문구는 한 줄이다: 붙여넣은 줄바꿈은 공백으로
       if (text.value.includes('\n')) text.value = text.value.replace(/\s*\n\s*/g, ' ');
       edit.description = text.value;
+      labelDismiss();
+      // 빈 칸 표시는 채우는 즉시 걷고, 빈 칸이 하나도 안 남으면 담기 바의 오류도 걷는다.
+      if (text.getAttribute('aria-invalid') === 'true' && text.value.trim()) {
+        markEmpty(text, false);
+        const left = [...texts.values()].filter(other => other.getAttribute('aria-invalid') === 'true').length;
+        showBarError(left ? meetingDraftEmptyText(left) : '');
+      }
       fit();
     });
     text.addEventListener('keydown', (keyEvent) => {
       if (keyEvent.key === 'Enter' && !keyEvent.isComposing) keyEvent.preventDefault(); // 조합 중의 Enter는 글자를 확정하는 것이다
     });
 
-    const dismiss = panelRunButton('', async () => {
-      await wfReview({ meetingId: event.id, dismiss: [draft.id] });
-      wfDraftEdits.delete(draft.id);
-      await load();
-      host.redraw();
-    }, 'd-iconbtn sm x', host);
-    dismiss.innerHTML = uiIcon('close');
-    dismiss.setAttribute('aria-label', `빼기: ${edit.description}`);
-    dismiss.title = '이 초안 빼기';
+    const top = document.createElement('div');
+    top.className = 'tp';
+    top.append(text, dismiss);
 
     const controls = document.createElement('div');
     controls.className = 'ct';
@@ -338,7 +362,8 @@ function panelMeetingDrafts(event, box, host = MEETING_HOST_CARD) {
     const syncDate = () => {
       dateSlot.replaceChildren();
       const label = wfDateLabel(edit.type); // 할 일 → 기한 · 확인 대기 → 답변 받을 날 · 결정 → 날짜 없음
-      if (label) dateSlot.appendChild(uiDateField({ value: edit.due || '', label, onChange: (value) => { edit.due = value || ''; } }));
+      // 고른 날짜는 앱의 날짜 글자(`10월 2일 (금)`)로 보인다 — 누르면 그 자리에서 날짜 입력칸으로 바뀐다.
+      if (label) dateSlot.appendChild(uiDateField({ value: edit.due || '', label, onChange: (value) => { edit.due = value || ''; }, shown: true }));
     };
     controls.append(wfTypeSegment(edit.type, (key) => {
       edit.type = key;
@@ -350,7 +375,7 @@ function panelMeetingDrafts(event, box, host = MEETING_HOST_CARD) {
     syncWhen();
     syncDate();
 
-    card.append(text, controls, dismiss);
+    card.append(top, controls);
     section.appendChild(card);
     requestAnimationFrame(fit);
   });
@@ -358,18 +383,77 @@ function panelMeetingDrafts(event, box, host = MEETING_HOST_CARD) {
 
   const bar = document.createElement('div');
   bar.className = 'd-dbar';
-  bar.appendChild(summary);
-  bar.appendChild(panelRunButton(`${event.drafts.length}개 담기`, async () => {
+  bar.append(summary, message);
+  bar.appendChild(panelQuietButton(`${event.drafts.length}개 담기`, async () => {
+    showBarError('');
     const accept = event.drafts.map(draft => wfAcceptItem(draft.id, wfDraftEdits.get(draft.id)));
-    if (accept.some(item => !item.description)) { panelSetError('비어 있는 문구가 있어요. 채우거나 ✕로 빼 주세요', host); return; }
-    const result = await wfReview({ meetingId: event.id, accept });
+    const empty = accept.filter(item => !item.description);
+    texts.forEach((text, id) => markEmpty(text, empty.some(item => item.id === id)));
+    if (empty.length) {
+      showBarError(meetingDraftEmptyText(empty.length));
+      texts.get(empty[0].id)?.focus();
+      return;
+    }
+    let result;
+    try { result = await wfReview({ meetingId: event.id, accept }); } catch (error) {
+      showBarError((typeof error?.message === 'string' && error.message) || '저장하지 못했어요. 내용을 확인한 뒤 다시 시도해 주세요.');
+      return;
+    }
     host.setResult({ meetingId: event.id, created: result.created, accepted: accept });
     accept.forEach(item => wfDraftEdits.delete(item.id));
     await load();
     host.redraw(); // 결과 카드(role=status)가 담은 결과를 알려 주므로 따로 알림을 띄우지 않는다
-  }, 'd-btn pri', host));
+  }, 'd-btn pri'));
   box.appendChild(bar);
   refreshSummary();
+}
+
+const meetingDraftEmptyText = count => `빈 초안이 ${count}개 있어요. 채우거나 빼 주세요`;
+// `빼기` 버튼의 이름 — 어느 초안인지 앞부분만(길면 줄여서). 비어 있으면 빈 초안이라고.
+const meetingDraftShort = description => {
+  const text = String(description || '').trim();
+  return text.length > 30 ? `${text.slice(0, 30)}…` : text;
+};
+const meetingDraftDismissLabel = description => (meetingDraftShort(description) ? `초안 빼기: ${meetingDraftShort(description)}` : '빈 초안 빼기');
+
+// 초안 빼기 — 서버는 검토 기록에 'dismissed'만 남긴다(meeting_drafts.json은 그대로).
+// 되돌리기는 알림의 `되돌리기`와 ⌘Z가 같은 기록을 쓴다: review-restore가 "뺀 직후 모양일 때만" 되살리고,
+// 되살아난 초안에는 빼기 전에 고쳐 둔 문구·종류·날짜가 그대로 돌아온다. 판을 닫았다 열어도 ⌘Z는 그대로 된다
+// (기록은 회의 번호·초안 번호만 들고 있고 화면 조각을 붙잡지 않는다).
+async function meetingDraftDismiss(event, draft, edit, index, host = MEETING_HOST_CARD) {
+  const kept = { ...edit };
+  const send = async () => {
+    await wfReview({ meetingId: event.id, dismiss: [draft.id] });
+    wfDraftEdits.delete(draft.id);
+  };
+  try { await send(); } catch { return; } // request()가 이미 알렸다 — 초안은 그 자리에 그대로 있다
+  const entry = {
+    label: `${meetingDraftShort(kept.description) || '빈 초안'} (초안 빼기)`,
+    undo: async () => {
+      await request('/api/workflow/review-restore', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, quiet: true,
+        body: JSON.stringify({ meetingId: event.id, drafts: [draft.id] }),
+      });
+      wfDraftEdits.set(draft.id, { ...kept });
+    },
+    redo: send,
+  };
+  pushUndo(entry);
+  await load();
+  host.redraw();
+  // 빠진 자리 다음 초안(없으면 앞 초안)의 `빼기`로 초점을 옮긴다 — 누른 버튼이 사라져 초점을 잃지 않게.
+  // 문구 칸이 아니라 버튼인 까닭: 입력칸에 초점이 있으면 되살린 뒤 판을 다시 그리지 않는다(쓰던 글 보호 장치).
+  const left = host.box()?.querySelectorAll('.d-draft .d-dpull') || [];
+  const next = left[Math.min(index, left.length - 1)];
+  if (next) next.focus();
+  showNotice('초안 하나를 뺐어요', false, null, {
+    label: '되돌리기',
+    onClick: async (button) => {
+      if (undoStack[undoStack.length - 1] !== entry) { showNotice('최근 작업부터 순서대로 실행 취소해 주세요', true); return; }
+      if (button) button.disabled = true;
+      await replayUndo('undo');
+    },
+  });
 }
 
 // 항목 한 줄: 종류 | 문구 | 기한·상태. 기본 상태(미완료)는 모든 줄에 반복되니 적지 않는다.
