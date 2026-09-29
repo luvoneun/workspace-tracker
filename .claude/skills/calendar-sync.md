@@ -3,6 +3,7 @@
 구글 캘린더에서 오늘 일정을 가져와 `tracker/calendar_today.md`에 저장합니다. 인박스 앱 오늘 탭 왼쪽 레일의 "오늘 미팅" 카드가 이 파일을 읽어요.
 
 설정 › 연동 › 캘린더에서 **비밀 주소 붙이기** 갈래(`workspace.config.json`의 `calendar.source: "ical"`)를 고른 사람은 앱 서버가 캘린더를 직접 읽어요 — 그때는 이 파일을 보지 않고, 자동 실행(`run-task.sh`)도 이 스킬을 건너뛰어요.
+**맥 캘린더** 갈래(`calendar.source: "mac"`)를 고른 사람은 launchd `mac-calendar`가 맥 캘린더 앱에서 읽어 이 파일을 같은 모양으로 써요 — 자동 실행(`run-task.sh`)은 이 스킬을 건너뛰고, 대화에서 부르더라도 이 파일을 덮어쓰지 말고 그대로 두세요.
 
 ## 입력
 

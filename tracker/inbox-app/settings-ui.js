@@ -2433,9 +2433,162 @@ function settingsJiraCard(data) {
 }
 
 // ---------- 캘린더 ----------
-// 갈래 둘 — `비밀 주소 붙이기`(누구나, Claude 없이 앱이 직접 읽는다)가 먼저, `Claude Code로`가 다음.
+// 갈래 셋 — `맥 캘린더`(추천 — 맥 캘린더 앱에 추가한 계정을 Claude·비밀 주소 없이 읽는다)가 맨 위, `Claude Code로`가 다음,
+// `비밀 주소 붙이기`는 `다른 방법` 접이식 안.
 // 비밀 주소는 토큰과 같은 급이라 칸은 가려져 있고(password), 저장한 뒤에는 화면·응답 어디에도 다시 나오지 않는다.
 const SETTINGS_ICAL_OFF = '해제하면 오늘 일정 가져오기가 멈춰요. 주소 파일은 남아요.';
+
+// 맥 캘린더 — 서버는 맥 캘린더를 읽지 않는다. `허용하고 확인`은 요청만 남기고(launchd가 한 번 읽는다) 결과를 2초마다 90초까지 기다린다.
+const SETTINGS_MAC_WAIT_MS = 90000;
+const SETTINGS_MAC_POLL_MS = 2000;
+const SETTINGS_MAC_WORDS = {
+  denied: '맥이 캘린더 접근을 막았어요 — 시스템 설정 › 개인정보 보호 및 보안 › 캘린더(전체 접근)와 자동화에서 허용해 주세요',
+  unanswered: '허용 창에 답하지 않았어요 — 허용하고 확인을 다시 눌러 주세요',
+  noAccount: '맥 캘린더에 구글 계정이 없어요 — 1단계를 먼저 해 주세요',
+  missing: '고른 캘린더를 찾지 못했어요 — 다시 골라 주세요',
+  none: '읽을 캘린더를 아직 고르지 않았어요 — 아래에서 골라 주세요',
+  timeout: '맥 캘린더가 1분 안에 답하지 않았어요 — 캘린더가 많으면 잠시 뒤 다시 눌러 주세요',
+  failed: '맥 캘린더를 읽지 못했어요 — 잠시 뒤 다시 눌러 주세요',
+};
+// 앱이 시스템 설정 화면을 직접 열 수는 없다 — 가는 길만 글자로 알려 준다.
+const SETTINGS_MAC_DENIED_HELP = '가는 길: 화면 왼쪽 위 애플 메뉴 › 시스템 설정 › 개인정보 보호 및 보안 › 캘린더에서 이 앱(node·osascript 등 — 맥에 따라 이름이 달라요)을 「전체 접근」으로, 같은 화면의 자동화에서도 캘린더를 켜고 다시 눌러 주세요';
+
+async function settingsMacLoad() {
+  try {
+    const response = await fetch('/api/integrations/calendar/mac', { headers: { Accept: 'application/json' } });
+    return response.ok ? await response.json() : null;
+  } catch { return null; }
+}
+
+// 읽을 캘린더 체크 목록 + 연결 버튼. 기본은 확인 때 고른 캘린더(내 이메일 이름) 하나, 이미 연결했으면 고른 것들.
+function settingsMacList(ui, calendars, chosen, mode) {
+  ui.pick.replaceChildren();
+  const lead = settingsEl('d-ismall', '읽을 캘린더를 골라요 — 내 이메일 이름의 캘린더가 기본이에요. 휴일·구독·다른 사람 캘린더는 꺼 두는 걸 권해요.');
+  const list = settingsEl('d-ichlist');
+  const rows = [];
+  const error = settingsErrorLine();
+  const save = settingsButton(mode === 'again' ? '고른 캘린더로 바꾸기' : '이 캘린더로 연결', 'd-btn pri');
+  const update = () => { save.disabled = !rows.some(one => one.box.checked); };
+  calendars.forEach((cal) => {
+    const row = document.createElement('label');
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = chosen.includes(cal.id);
+    box.setAttribute('aria-label', `${cal.name || '이름 없는 캘린더'} 읽기`);
+    row.className = 'd-ich is-cal' + (box.checked ? ' is-on' : '');
+    row.dataset.calendar = cal.id;
+    const text = document.createElement('span');
+    text.className = 't';
+    const name = document.createElement('b');
+    name.textContent = cal.name || '이름 없는 캘린더';
+    text.appendChild(name);
+    // 계정 이름(EventKit의 source.title — 구글이면 계정 메일)이 캘린더 이름과 다를 때만 붙인다.
+    const account = cal.account && cal.account !== cal.name ? cal.account : '';
+    const notes = [account, cal.writable === false ? '읽기 전용 — 휴일·구독·다른 사람 캘린더일 수 있어요' : ''].filter(Boolean);
+    if (notes.length) {
+      const sub = document.createElement('span');
+      sub.className = 'd-ismall sub';
+      sub.textContent = notes.join(' · ');
+      text.appendChild(sub);
+    }
+    box.addEventListener('change', () => { row.classList.toggle('is-on', box.checked); update(); });
+    row.append(box, text);
+    list.appendChild(row);
+    rows.push({ box, cal });
+  });
+  save.addEventListener('click', () => {
+    const picked = rows.filter(one => one.box.checked).map(one => ({ id: one.cal.id, name: one.cal.name }));
+    if (!picked.length) { error.textContent = '읽을 캘린더를 하나 이상 골라 주세요'; return; }
+    return settingsIntegrationSave({ calendar: { enabled: true, source: 'mac', macCalendars: picked } }, {
+      error, button: save,
+      done: mode === 'again'
+        ? `읽을 캘린더를 ${picked.length}개로 바꿨어요 · 바로 보려면 ⋯ › 새로 받기를 눌러 주세요`
+        : `맥 캘린더를 연결했어요 · 캘린더 ${picked.length}개 — 1분 안에 오늘 일정이 채워져요`,
+    });
+  });
+  const foot = settingsEl('d-irow');
+  foot.appendChild(save);
+  update();
+  ui.pick.append(lead, list, foot, error);
+  ui.pick.hidden = false;
+}
+
+// 확인 결과를 그 자리에 — 성공이면 `캘린더 N개 · 오늘 일정 M개를 읽었어요` + 목록, 아니면 이유 한 줄(막힘이면 가는 길까지).
+function settingsMacShow(ui, state, chosen, mode) {
+  ui.go.disabled = false;
+  ui.go.textContent = '허용하고 확인';
+  ui.help.hidden = true;
+  const calendars = Array.isArray(state.calendars) ? state.calendars : [];
+  if (state.ok) {
+    ui.result.textContent = `캘린더 ${calendars.length}개 · 오늘 일정 ${Number(state.eventCount) || 0}개를 읽었어요`;
+    ui.error.textContent = '';
+  } else {
+    ui.result.textContent = '';
+    ui.error.textContent = SETTINGS_MAC_WORDS[state.reason] || SETTINGS_MAC_WORDS.failed;
+    if (state.reason === 'denied') { ui.help.textContent = SETTINGS_MAC_DENIED_HELP; ui.help.hidden = false; }
+  }
+  if (calendars.length) settingsMacList(ui, calendars, chosen && chosen.length ? chosen : (state.read && state.read.length ? state.read : state.suggested || []), mode);
+}
+
+async function settingsMacCheck(ui, data, mode) {
+  ui.error.textContent = '';
+  ui.help.hidden = true;
+  ui.go.disabled = true;
+  ui.go.textContent = '확인하는 중…';
+  ui.result.textContent = '맥 캘린더에 묻고 있어요 — 허용 창이 뜨면 허용을 눌러 주세요(최대 1분)';
+  const done = (message) => {
+    ui.go.disabled = false;
+    ui.go.textContent = '허용하고 확인';
+    ui.result.textContent = '';
+    ui.error.textContent = message;
+  };
+  const asked = await settingsIntegrationAsk('/api/integrations/calendar/mac-check', {}, '확인을 요청하지 못했어요 — 잠시 뒤 다시 눌러 주세요');
+  if (!asked.ok) { done(asked.error); return; }
+  const since = String(asked.requestedAt || '');
+  const until = Date.now() + SETTINGS_MAC_WAIT_MS;
+  while (Date.now() < until) {
+    await new Promise(resolve => setTimeout(resolve, SETTINGS_MAC_POLL_MS));
+    if (ui.box.isConnected === false) return;   // 카드를 닫았다
+    const view = await settingsMacLoad();
+    const state = view && view.state;
+    if (state && state.kind === 'check' && state.requestedAt && state.requestedAt >= since) {
+      const configured = data.calendar && data.calendar.source === 'mac' ? (data.calendar.macCalendars || []).map(one => one.id) : [];
+      settingsMacShow(ui, state, configured, mode);
+      return;
+    }
+  }
+  done('확인 결과가 오지 않았어요 — 잠시 뒤 다시 눌러 주세요');
+}
+
+function settingsMacChoice(card, data, mode) {
+  const box = settingsEl('d-ichoice');
+  box.dataset.choice = 'mac';
+  const head = settingsEl('hd');
+  const tag = document.createElement('span');
+  tag.className = 'd-itag';
+  tag.textContent = '추천';
+  head.append(document.createTextNode('맥 캘린더'), tag);
+  const ui = { box, result: settingsEl('d-ismall'), error: settingsErrorLine(), help: settingsEl('d-ismall'), pick: settingsEl('d-ichwrap') };
+  ui.result.setAttribute('role', 'status');
+  ui.help.hidden = true;
+  ui.pick.hidden = true;
+  ui.go = settingsButton('허용하고 확인', 'd-btn pri', () => settingsMacCheck(ui, data, mode));
+  const steps = settingsNumbered([
+    [['맥 ', ['b', '시스템 설정 → 인터넷 계정 → Google'], '에서 회사 계정을 추가하고 ', ['b', '캘린더'], '를 켜요']],
+    [[['b', '허용하고 확인'], ' — 맥이 캘린더 접근을 물으면 ', ['b', '허용'], '을 눌러요'], ui.go],
+    [['읽을 캘린더 고르기 — 확인이 끝나면 아래에 목록이 떠요']],
+  ]);
+  const note = settingsEl('d-ismall', 'Claude·비밀 주소 없이 맥 캘린더 앱에서 매일 8–20시 30분마다 읽어요. 고른 캘린더의 제목·시간만 읽어요.');
+  box.append(head, steps, ui.result, ui.error, ui.help, ui.pick, note);
+  // 전에 확인한 목록이 있으면 바로 고를 수 있게 보여 준다(다시 확인하지 않아도).
+  settingsMacLoad().then((view) => {
+    const state = view && view.state;
+    if (!state || !Array.isArray(state.calendars) || !state.calendars.length || box.isConnected === false || !ui.pick.hidden) return;
+    const configured = data.calendar && data.calendar.source === 'mac' ? (data.calendar.macCalendars || []).map(one => one.id) : [];
+    settingsMacList(ui, state.calendars, configured.length ? configured : (state.suggested || []), mode);
+  });
+  return { box, go: ui.go };
+}
 
 function settingsIcalChoice(card, data, mode) {
   const box = settingsEl('d-ichoice');
@@ -2478,7 +2631,7 @@ function settingsIcalChoice(card, data, mode) {
   settingsOnEnter(field.input, connect);
   const note = settingsEl('d-ismall', mode === 'again' && data.calendar && data.calendar.hasIcal
     ? '칸을 비워 두고 연결하면 지금 주소로 다시 읽어요.'
-    : '이 칸이 안 보이면 회사에서 막아 둔 거예요 → 오른쪽 Claude Code로. 내 기본 캘린더만 읽고, 앱이 30분마다 직접 읽어요(Claude 필요 없음).');
+    : '이 칸이 안 보이면 회사에서 막아 둔 거예요 → 위의 맥 캘린더나 Claude Code로. 내 기본 캘린더만 읽고, 앱이 30분마다 직접 읽어요(Claude 필요 없음).');
   const foot = settingsEl('d-irow');
   foot.appendChild(go);
   box.append(head, steps, field.wrap, error, foot, note);
@@ -2494,9 +2647,18 @@ function settingsIcalDone(result) {
 function settingsCalendarOpen(card, data, mode) {
   const ask = document.createElement('p');
   ask.className = 'd-ihow';
+  const macNow = !!(data.calendar && data.calendar.source === 'mac');
+  // 다시 연결: 맥 캘린더면 캘린더 다시 고르기, 비밀 주소면 주소 바꿔 붙이기.
+  if (mode === 'again' && macNow) {
+    ask.textContent = '읽을 캘린더를 다시 골라요. 목록이 없거나 바뀌었으면 허용하고 확인을 한 번 더 눌러요.';
+    const mac = settingsMacChoice(card, data, mode);
+    card.body.append(ask, mac.box);
+    mac.go.focus();
+    return;
+  }
   ask.textContent = mode === 'again' ? '비밀 주소를 바꿔 붙여요'
-    : '먼저 비밀 주소를 시도해 보세요(1분). 회사 계정이라 그 칸이 없으면 Claude Code로 연결해요.';
-  const pair = settingsEl('d-ichoices');
+    : '맥 캘린더가 가장 쉬워요 — 회사 구글 계정을 맥 캘린더 앱에 추가해 두면 Claude·비밀 주소 없이 읽어요.';
+  const pair = settingsEl('d-ichoices is-stack');
   const ical = settingsIcalChoice(card, data, mode);
 
   if (mode === 'again') {
@@ -2504,6 +2666,7 @@ function settingsCalendarOpen(card, data, mode) {
     ical.input.focus();
     return;
   }
+  const mac = settingsMacChoice(card, data, mode);
 
   const claude = settingsEl('d-ichoice');
   claude.dataset.choice = 'claude';
@@ -2518,21 +2681,31 @@ function settingsCalendarOpen(card, data, mode) {
   if (!data.claude) on.disabled = true;
   const steps = settingsNumbered([
     [[['b', 'claude.ai → 설정 → 커넥터'], '에서 Google Calendar → ', ['b', '연결'], ' → 구글 로그인 → ', ['b', '허용'], ' (이 맥의 Claude Code와 ', ['b', '같은 계정'], '이어야 해요)'], settingsCodeLine(SETTINGS_CLAUDE_CONNECTORS)],
-    [['확인: 터미널에서 ', ['b', 'claude'], '를 켠 뒤 ', ['b', '/mcp'], ' → 목록에 ', ['b', 'claude.ai Google Calendar'], '가 연결됨이면 끝'], settingsCodeLine('/mcp')],
     [['여기서 켜기 — 매일 9~19시 2시간마다 읽어요. 바로 보려면 연결 뒤 ', ['b', '⋯ › 새로 받기'], ' '], on],
+    [['안 되면: 터미널에서 ', ['b', 'claude'], '를 켠 뒤 ', ['b', '/mcp'], ' → 목록에 ', ['b', 'claude.ai Google Calendar'], '가 연결됨인지 확인해요'], settingsCodeLine('/mcp')],
   ]);
   const need = settingsEl('d-ismall', data.claude
     ? 'Claude Code(유료 구독)가 있어야 해요 · "관리자 승인 필요"가 뜨면 회사에서 막아 둔 거예요 — 관리자에게 요청하거나 캘린더 없이 써도 돼요'
     : 'Claude Code(유료 구독)가 있어야 해요 · 이 맥에는 설치 안 됨 — 설치하면 켤 수 있어요');
   claude.append(claudeHead, steps, need, error);
 
-  pair.append(ical.box, claude);
+  // 비밀 주소는 `다른 방법` 접이식 안 — 기존 흐름·공개 주소 안내 그대로.
+  const more = document.createElement('details');
+  more.className = 'd-imore';
+  const moreHead = document.createElement('summary');
+  moreHead.textContent = '다른 방법: 비밀 주소 붙이기';
+  more.append(moreHead, ical.box);
+  pair.append(mac.box, claude, more);
   card.body.append(ask, pair);
-  ical.input.focus();
+  mac.go.focus();
 }
 
 // 연결된 카드의 한 줄. 비밀 주소면 `비밀 주소로 읽는 중 · 오늘 3개 · 10분 전`, 못 읽고 있으면 그 말.
 function settingsCalendarStatus(calendar) {
+  if (calendar.source === 'mac') {
+    const ran = settingsAgo(calendar.fetch && calendar.fetch.lastRunAt);
+    return `맥 캘린더에서 읽는 중${ran ? ` · ${ran}` : ''}`;
+  }
   if (calendar.source !== 'ical') {
     const ran = settingsAgo(calendar.fetch && calendar.fetch.lastRunAt);
     return `Claude Code로 읽는 중${ran ? ` · ${ran}` : ''}`;
@@ -2548,20 +2721,23 @@ function settingsCalendarCard(data) {
   const calendar = data.calendar || {};
   const on = !!calendar.enabled;
   const ical = on && calendar.source === 'ical';
+  const mac = on && calendar.source === 'mac';
   const fetchState = calendar.fetch || {};
   // 비밀 주소를 한 번도 못 읽었으면 주소 문제로 보고 곧바로 멈췄어요 + 다시 연결이다.
   const neverRead = ical && !calendar.readAt && !!calendar.failed;
   const failing = on && (!!fetchState.failing || neverRead);
+  // 맥 캘린더 읽기의 실패 줄(`⚠️ 이유 — 고치는 법`)은 그대로 이유 한 줄로 보인다(늦어요·멈췄어요는 다른 연동과 같은 규칙).
+  const macWhy = mac && /^⚠️\s*/.test(String(fetchState.summary || '')) ? String(fetchState.summary).replace(/^⚠️\s*/, '') : '';
   let card = null;
   card = settingsIntgCard({
     kind: 'calendar', name: '캘린더', chip: '누구나 · Claude',
     use: '오늘 회의가 뜨고 회의 정리가 열려요',
     // 주기는 실제 등록 값 — 비밀 주소는 앱이 30분마다, Claude 갈래는 launchd `calendar-sync`(매일 9·11·13·15·17·19시).
     need: on
-      ? (ical ? '30분마다' : '매일 9–19시, 2시간마다')
-      : '3분 · 비밀 주소 또는 Claude Code',
+      ? (ical ? '30분마다' : mac ? '매일 8–20시, 30분마다' : '매일 9–19시, 2시간마다')
+      : '3분 · 맥 캘린더·Claude Code·비밀 주소',
     status: on ? settingsCalendarStatus(calendar) : null,
-    alert: failing ? { stop: neverRead || settingsFailStop(fetchState), why: settingsFailWhy('calendar', fetchState, { reconnect: ical }) } : null,
+    alert: failing ? { stop: neverRead || settingsFailStop(fetchState), why: macWhy ? [macWhy] : settingsFailWhy('calendar', fetchState, { reconnect: ical }) } : null,
     // 비밀 주소면 앱이 곧바로 다시 읽고(`오늘 N개`), Claude 갈래면 요청만 남긴다. 주소 문제면 `다시 연결`.
     fetch: on ? {
       key: 'calendar', state: calendar.fetch || {}, unit: ical ? '오늘' : '',
@@ -2572,6 +2748,7 @@ function settingsCalendarCard(data) {
         settingsFetchItem(card),
         ...settingsLogItem(card, calendar.log),
         ...(ical ? [{ label: '다시 연결(주소 바꾸기)', onClick: () => card.open('again') }] : []),
+        ...(mac ? [{ label: '캘린더 다시 고르기', onClick: () => card.open('again') }] : []),
       ],
       [{
         label: '해제…', danger: true,
@@ -3252,7 +3429,7 @@ const SETTINGS_FAQ = [
     ['`반응 필요`에 안 보이는 것도 있나요', '지라 연결',
       '제가 담당·보고·지켜보지 않는 티켓과 14일보다 오래된 댓글은 아직 못 봐요. <b>피그마 댓글은 여기로 자동으로 오지 않아요</b> — 피그마의 슬랙 알림을 나만 보는 채널({todo})에 공유하면 슬랙 수집을 거쳐 <b>할 일</b>로 들어와요. 잘 읽고 있는지는 <b>설정 &gt; 연동</b>의 지라 카드 둘째 줄(<b>반응 필요 댓글 N개 · N분 전 확인</b>)에서 봐요.'],
     ['Claude 없이 캘린더를 붙이려면', '구글 캘린더',
-      '<b>설정 &gt; 연동 &gt; 캘린더</b>의 <b>비밀 주소 붙이기</b>예요. 컴퓨터에서 calendar.google.com → 톱니바퀴 → 설정 → 왼쪽 내 캘린더의 설정(내 이름) → 캘린더 통합 → <b>iCal 형식의 비공개 주소</b>를 복사해 붙이면 앱이 30분마다 직접 읽어요. 이 주소는 비밀번호처럼 다뤄요. 그 칸이 없으면 회사에서 막아 둔 거라 <b>Claude Code로</b> 연결해요.'],
+      '<b>설정 &gt; 연동 &gt; 캘린더</b>의 <b>맥 캘린더</b>가 가장 쉬워요. 맥 시스템 설정 → 인터넷 계정에 회사 구글 계정을 추가하고 <b>허용하고 확인</b> → 읽을 캘린더를 고르면 30분마다 읽어요. 안 되면 <b>다른 방법</b>에서 비밀 주소(calendar.google.com 설정 → 캘린더 통합 → iCal 형식의 비공개 주소)를 붙여요.'],
     ['슬랙에서 이렇게 보내요', '슬랙 연결',
       '<b>남의 메시지</b>는 ⋯ → <b>전달</b>(또는 공유)로 {todo} 같은 내 채널에 보내요. 메모 한 줄을 같이 적으면 할 일 문구에 참고해요. <b>내 생각</b>은 그 채널에 그냥 적어도 돼요(한 메시지가 한 항목). 해야 할 일 → 할 일 · 답을 기다리는 것 → 기다리는 것 · 정해진 정책 → 정해진 것 · 참고거리 → 언젠가.'],
     ['슬랙에서 수집한 게 잘 들어왔는지 보려면', '슬랙 연결',
@@ -3266,7 +3443,7 @@ const SETTINGS_FAQ = [
     ['채널을 만들 때 이미 있는 이름이라고 나와요', '슬랙 연결',
       '예전에 만든 <b>내 채널</b>(내가 들어가 있는 채널)이면 새로 만들지 않고 그 채널을 그대로 써요 — <b>연결한 때부터</b> 읽어요. <b>다른 사람이 쓰는 이름</b>이거나 <b>보관된 채널</b>이면 그 줄에 이유가 나오니 이름을 바꿔 다시 눌러 주세요. 한 채널은 한 칸에만 연결돼요.'],
     ['지금 바로 새로 가져오고 싶어요', '그 연동 연결',
-      '<b>설정 &gt; 연동</b>에서 연결된 카드의 <b>⋯ › 새로 받기</b>를 눌러요. 지라·캘린더(비밀 주소)는 곧바로 다시 읽고, 슬랙·캘린더(Claude)·티로는 요청을 남겨 1~2분 뒤 반영돼요. 같은 연동은 1분에 한 번이에요. 막히면 카드에 <b>다시 시도</b>가, 토큰·주소 문제나 계속 실패면 <b>다시 연결</b>이 떠요.'],
+      '<b>설정 &gt; 연동</b>에서 연결된 카드의 <b>⋯ › 새로 받기</b>를 눌러요. 지라·캘린더(비밀 주소)는 곧바로 다시 읽고, 슬랙·캘린더(맥 캘린더·Claude)·티로는 요청을 남겨 1~2분 뒤 반영돼요. 같은 연동은 1분에 한 번이에요. 막히면 카드에 <b>다시 시도</b>가, 토큰·주소 문제나 계속 실패면 <b>다시 연결</b>이 떠요.'],
     ['머리줄의 `○일 전 기준`이나 톱니 점은 뭔가요', '없음',
       '자동 동기화가 최근에 못 돌았다는 뜻이에요. <b>주황 점</b>은 낡음, <b>빨간 점</b>은 지금 멈춘 연동이 있음, <b>파란 점</b>은 새 버전이 나왔다는 뜻이에요. 빨간 점을 누르면 <b>연동</b> 탭에서 멈춘 카드가 잠깐 붉게 보이고, 파란 점이면 <b>앱</b> 탭이 열려요.'],
   ]],

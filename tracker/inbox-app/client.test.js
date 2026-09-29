@@ -6531,9 +6531,13 @@ function intgClient(state = {}, replies = []) {
   const sent = [];
   const copied = [];
   app.context.navigator = { clipboard: { writeText: async (text) => { copied.push(text); } }, platform: 'MacIntel' };
+  // 맥 캘린더 결과 읽기(GET)는 줄 선 답을 쓰지 않는다 — 테스트가 `mac.view`를 바꿔 끼운다(WP-V).
+  const mac = { view: state.macView || { ok: true, installed: true, requestedAt: null, chosen: [], state: null } };
   app.context.fetch = async (url, options = {}) => {
     sent.push({ url: String(url), body: options.body ? JSON.parse(options.body) : null });
-    const next = String(url) === '/api/integrations' ? { body: payload } : (replies.shift() || { body: { ok: true } });
+    const next = String(url) === '/api/integrations' ? { body: payload }
+      : String(url) === '/api/integrations/calendar/mac' ? { body: typeof mac.view === 'function' ? mac.view() : mac.view }
+        : (replies.shift() || { body: { ok: true } });
     return new Response(JSON.stringify(next.body), { status: next.status || 200, headers: { 'Content-Type': 'application/json' } });
   };
   app.run(NODE_SHAPE);
@@ -6560,7 +6564,7 @@ function intgClient(state = {}, replies = []) {
     return app.run('window.lastMenu');
   };
   const live = () => app.nodes.get('liveRegion').textContent;
-  return { app, payload, sent, copied, view, card, find, shape, text, button, top, toggle, menu, live };
+  return { app, payload, sent, copied, view, card, find, shape, text, button, top, toggle, menu, live, mac };
 }
 // 가짜 창(vm)의 배열은 다른 realm이라 deepEqual이 참조까지 본다 — 값만 견준다.
 const same = (actual, expected, message) => assert.deepEqual(JSON.parse(JSON.stringify(actual)), expected, message);
@@ -6581,7 +6585,7 @@ test('WP-D1 A. 목록: 카드 차례는 슬랙 수집 → 지라 → 캘린더 �
 
   assert.match(fx.text('slack'), /^슬랙 수집누구나 · Claude연결하기나만 보는 채널에 공유한 메시지가 할 일로 들어와요5분 · 팀 슬랙 앱 토큰 하나/);
   assert.match(fx.text('jira'), /^지라누구나연결하기내 티켓이 프로젝트로 뜨고 상태·기한을 여기서 바꿔요3분 · Atlassian API 토큰 하나/);
-  assert.match(fx.text('calendar'), /^캘린더누구나 · Claude연결하기오늘 회의가 뜨고 회의 정리가 열려요3분 · 비밀 주소 또는 Claude Code/);
+  assert.match(fx.text('calendar'), /^캘린더누구나 · Claude연결하기오늘 회의가 뜨고 회의 정리가 열려요3분 · 맥 캘린더·Claude Code·비밀 주소/);
   assert.match(fx.text('notes'), /^회의록누구나 · Claude직접 옮기기바꾸기티로 회의록이 초안으로 들어와요 — 직접 옮기기도 돼요회의 정리 화면에 붙여 넣어요/);
   same(['slack', 'jira', 'calendar', 'notes'].map(kind => statOf(fx, kind)), [['d-istat k-off', ''], ['d-istat k-off', ''], ['d-istat k-off', ''], ['d-istat k-ok', '직접 옮기기']], '연결 안 됨은 빈 원(말 없음), 직접 옮기기는 초록');
   same(['slack', 'jira', 'calendar'].map(kind => fx.toggle(kind).className), ['d-btn acc', 'd-btn acc', 'd-btn acc']);
@@ -6894,25 +6898,33 @@ test('WP-D1 E. 지라: 팀 주소가 있으면 묻지 않고(바꾸기로만 연
 
 // WP-D2에서 바뀜: `비밀 주소 붙이기`는 이제 자리만이 아니라 실제 갈래다(곧 돼요·is-off·aria-disabled 단언을 새 동작으로 바꿈).
 // `Claude Code로` 갈래의 세 줄·복사·켜기(본문 `{ calendar: { enabled: true } }`)는 그대로다.
-test('WP-D1·D2 F. 캘린더: `비밀 주소 붙이기`(누구나)가 먼저 — 세 줄 + 가려진 칸 + 연결, `Claude Code로` 세 줄 + 복사 + 켜기', async () => {
+test('WP-D1·D2·V F. 캘린더: `맥 캘린더`(추천)가 맨 위 → `Claude Code로` 세 줄 + 복사 + 켜기 → 접힌 `다른 방법: 비밀 주소 붙이기`', async () => {
   const fx = intgClient({}, [{ body: { ok: true, restart: false } }]);
   await fx.app.run('renderSettingsIntegrations()');
   fx.toggle('calendar').listeners.click();
   const choices = fx.find('calendar', 'd-ichoice');
-  same(choices.map(one => one.dataset.choice), ['ical', 'claude'], '누구나 갈래가 먼저다');
-  same(choices.map(one => one.className), ['d-ichoice', 'd-ichoice'], '둘 다 누를 수 있다');
+  same(choices.map(one => one.dataset.choice), ['mac', 'claude', 'ical'], '맥 캘린더가 맨 위, 비밀 주소는 마지막');
+  same(choices.map(one => one.className), ['d-ichoice', 'd-ichoice', 'd-ichoice'], '셋 다 누를 수 있다');
   assert.equal(choices[0].getAttribute('aria-disabled'), undefined);
+  same(fx.find('calendar', 'd-ichoices').map(one => one.className), ['d-ichoices is-stack'], '세로로 쌓는다');
+  const more = fx.find('calendar', 'd-imore');
+  assert.equal(more.length, 1, '비밀 주소는 접이식 안');
+  assert.equal(more[0].children[0].textContent, '다른 방법: 비밀 주소 붙이기');
+  assert.equal(more[0].children[1].dataset.choice, 'ical');
   const secret = fx.find('calendar', 'd-din');
   assert.equal(secret.length, 1, '칸은 비밀 주소 하나');
   assert.equal(secret[0].type, 'password', '비밀 주소는 토큰처럼 가린다');
   const text = fx.text('calendar');
   assert.ok(!/곧 돼요/.test(text));
+  assert.match(text, /맥 캘린더가 가장 쉬워요/);
+  assert.match(text, /맥 캘린더추천1맥 시스템 설정 → 인터넷 계정 → Google에서 회사 계정을 추가하고 캘린더를 켜요2허용하고 확인 — 맥이 캘린더 접근을 물으면 허용을 눌러요허용하고 확인3읽을 캘린더 고르기/);
+  assert.match(text, /Claude·비밀 주소 없이 맥 캘린더 앱에서 매일 8–20시 30분마다 읽어요/);
   assert.match(text, /비밀 주소 붙이기누구나1컴퓨터에서 calendar\.google\.com 열기\(폰 앱은 안 돼요\)2오른쪽 위 톱니바퀴 → 설정3왼쪽 내 캘린더의 설정에서 내 이름4아래로 내려 캘린더 통합 → iCal 형식의 비공개 주소 옆 복사\(위의 공개 주소 말고\)5아래 칸에 붙여 넣고 연결/);
-  assert.match(text, /먼저 비밀 주소를 시도해 보세요/);
-  assert.match(text, /이 칸이 안 보이면 회사에서 막아 둔 거예요/);
+  assert.match(text, /이 칸이 안 보이면 회사에서 막아 둔 거예요 → 위의 맥 캘린더나 Claude Code로/);
+  assert.ok(text.indexOf('맥 캘린더추천') < text.indexOf('Claude Code로') && text.indexOf('Claude Code로') < text.indexOf('다른 방법: 비밀 주소 붙이기'), '차례: 맥 → Claude → 다른 방법');
   assert.match(text, /1claude\.ai → 설정 → 커넥터에서 Google Calendar → 연결 → 구글 로그인 → 허용 \(이 맥의 Claude Code와 같은 계정이어야 해요\)claude\.ai\/settings\/connectors복사/);
-  assert.match(text, /2확인: 터미널에서 claude를 켠 뒤 \/mcp → 목록에 claude\.ai Google Calendar가 연결됨이면 끝\/mcp복사/);
-  assert.match(text, /3여기서 켜기 — 매일 9~19시 2시간마다 읽어요\. 바로 보려면 연결 뒤 ⋯ › 새로 받기 켜기/);
+  assert.match(text, /2여기서 켜기 — 매일 9~19시 2시간마다 읽어요\. 바로 보려면 연결 뒤 ⋯ › 새로 받기 켜기/);
+  assert.match(text, /3안 되면: 터미널에서 claude를 켠 뒤 \/mcp → 목록에 claude\.ai Google Calendar가 연결됨인지 확인해요\/mcp복사/);
   assert.match(text, /Claude Code\(유료 구독\)가 있어야 해요/);
   await fx.find('calendar', 'd-icode')[1].children[1].listeners.click();
   same(fx.copied, ['/mcp']);
@@ -6934,7 +6946,8 @@ test('WP-D2 F. 비밀 주소 연결: 빈 칸은 보내지 않고, 붙이면 `{ s
   ]);
   await fx.app.run('renderSettingsIntegrations()');
   fx.toggle('calendar').listeners.click();
-  const error = () => fx.find('calendar', 'd-derr')[0].textContent;
+  // 오류 줄은 갈래마다 따로다 — 비밀 주소 갈래(접이식 안)의 것.
+  const error = () => fx.find('calendar', 'd-imore')[0].children[1].children.find(one => one.className === 'd-derr').textContent;
   await fx.button('calendar', '연결').listeners.click();
   assert.equal(error(), '비밀 주소를 붙여 넣어 주세요');
   assert.equal(fx.sent.filter(one => one.url === '/api/integrations/save').length, 0, '빈 칸은 서버에 보내지 않는다');
@@ -9893,4 +9906,144 @@ test('WP-W 옮기기 알림: 서버가 건너뛴 항목이 있으면 「M개는 
   sent.length = 0;
   await app.run('undoStack[undoStack.length - 1].redo()');
   assert.deepEqual(sent[0].body, { meetingId: 'm1', project: 'group:결제 리뉴얼', from: 'group:가입 개선', ids: ['a'] });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WP-V — 캘린더 `맥 캘린더` 갈래. 화면은 요청(POST mac-check)만 하고 결과(GET calendar/mac)를 2초마다 기다린다 —
+// 여기서는 기다림(setTimeout)을 곧바로 넘기고, 결과는 가짜 답(fx.mac.view)으로 바꿔 끼운다.
+const MAC_CALS = [
+  { id: 'CAL-HOLIDAY', name: '대한민국의 휴일', writable: false },
+  { id: 'CAL-ME', name: 'me@example.test', writable: true },
+];
+const macState = (extra = {}) => ({ at: '2026-09-29T01:00:05.000Z', kind: 'check', requestedAt: '2026-09-29T01:00:00.000Z', ok: true, reason: null, calendars: MAC_CALS, suggested: ['CAL-ME'], read: ['CAL-ME'], missing: [], eventCount: 3, ...extra });
+const tick = () => new Promise(resolve => setImmediate(resolve));
+
+test('WP-V F. 맥 캘린더: 허용하고 확인 → 요청만 보내고 결과를 기다려 `캘린더 N개 · 오늘 일정 M개를 읽었어요` + 체크 목록(기본은 내 이메일 캘린더) → 이 캘린더로 연결', async () => {
+  const fx = intgClient({}, [
+    { body: { ok: true, requestedAt: '2026-09-29T01:00:00.000Z' } },
+    { body: { ok: true, restart: false, calendar: { source: 'mac', calendars: 1 } } },
+  ]);
+  await fx.app.run('renderSettingsIntegrations()');
+  fx.toggle('calendar').listeners.click();
+  await tick();
+  const pick = () => fx.find('calendar', 'd-ichwrap')[0];
+  assert.equal(pick().hidden, true, '확인 전에는 목록이 없다');
+  fx.app.context.setTimeout = (fn) => { fn(); return 0; };
+  // 기다리는 동안 처음 두 번은 아직 옛 결과(다른 요청) — 세 번째에 이번 요청의 결과가 온다
+  let polls = 0;
+  fx.mac.view = () => {
+    polls += 1;
+    return { ok: true, installed: true, requestedAt: '2026-09-29T01:00:00.000Z', chosen: [], state: polls < 3 ? macState({ requestedAt: '2026-09-28T01:00:00.000Z' }) : macState() };
+  };
+  const go = fx.button('calendar', '허용하고 확인');
+  const waiting = go.listeners.click();
+  assert.equal(go.disabled, true);
+  assert.equal(go.textContent, '확인하는 중…');
+  await waiting;
+  assert.equal(polls, 3, '이번 요청의 결과가 올 때까지 기다린다');
+  const asked = fx.sent.filter(one => one.url === '/api/integrations/calendar/mac-check');
+  assert.equal(asked.length, 1, '요청은 한 번');
+  assert.ok(fx.sent.filter(one => one.url === '/api/integrations/calendar/mac').length >= 2, '결과를 기다린다');
+  assert.equal(go.disabled, false);
+  assert.match(fx.text('calendar'), /캘린더 2개 · 오늘 일정 3개를 읽었어요/);
+  const rows = fx.find('calendar', 'd-ich');
+  same(rows.map(row => row.dataset.calendar), ['CAL-HOLIDAY', 'CAL-ME']);
+  same(rows.map(row => row.children[0].checked), [false, true], '기본은 내 이메일 이름의 캘린더 하나');
+  same(rows.map(row => row.className), ['d-ich is-cal', 'd-ich is-cal is-on']);
+  assert.match(fx.text('calendar'), /대한민국의 휴일읽기 전용 — 휴일·구독·다른 사람 캘린더일 수 있어요/);
+  assert.equal(rows[1].children[0].getAttribute('aria-label'), 'me@example.test 읽기');
+  // 다 끄면 연결할 수 없다
+  rows[1].children[0].checked = false;
+  rows[1].children[0].listeners.change();
+  const save = fx.button('calendar', '이 캘린더로 연결');
+  assert.equal(save.disabled, true);
+  rows[1].children[0].checked = true;
+  rows[1].children[0].listeners.change();
+  assert.equal(save.disabled, false);
+  await save.listeners.click();
+  same(fx.sent.find(one => one.url === '/api/integrations/save').body, { calendar: { enabled: true, source: 'mac', macCalendars: [{ id: 'CAL-ME', name: 'me@example.test' }] } });
+  assert.match(fx.live(), /맥 캘린더를 연결했어요 · 캘린더 1개 — 1분 안에 오늘 일정이 채워져요/);
+});
+
+test('WP-V F. 맥 캘린더 확인 실패: 막힘은 이유 + 시스템 설정 가는 길, 계정 없음은 1단계 안내, 옛 설치는 업데이트 안내, 결과가 안 오면 다시 누르라고', async () => {
+  const run = async (view, replies = [{ body: { ok: true, requestedAt: '2026-09-29T01:00:00.000Z' } }]) => {
+    const fx = intgClient({}, replies);
+    await fx.app.run('renderSettingsIntegrations()');
+    fx.toggle('calendar').listeners.click();
+    await tick();
+    fx.app.context.setTimeout = (fn) => { fn(); return 0; };
+    if (view) fx.mac.view = view;
+    await fx.button('calendar', '허용하고 확인').listeners.click();
+    const box = fx.find('calendar', 'd-ichoice').find(one => one.dataset.choice === 'mac');
+    const error = box.children.find(one => one.className === 'd-derr').textContent;
+    const help = box.children.filter(one => one.className === 'd-ismall')[1];
+    return { fx, error, help };
+  };
+  const denied = await run({ ok: true, installed: true, state: macState({ ok: false, reason: 'denied', calendars: [], eventCount: null }) });
+  assert.equal(denied.error, '맥이 캘린더 접근을 막았어요 — 시스템 설정 › 개인정보 보호 및 보안 › 캘린더(전체 접근)와 자동화에서 허용해 주세요');
+  assert.equal(denied.help.hidden, false);
+  assert.match(denied.help.textContent, /애플 메뉴 › 시스템 설정 › 개인정보 보호 및 보안 › 캘린더에서 .*「전체 접근」으로, 같은 화면의 자동화에서도/);
+  assert.equal(denied.fx.find('calendar', 'd-ich').length, 0);
+
+  const noAccount = await run({ ok: true, installed: true, state: macState({ ok: false, reason: 'noAccount', calendars: [{ id: 'L', name: '캘린더', writable: true }], suggested: [], read: [] }) });
+  assert.equal(noAccount.error, '맥 캘린더에 구글 계정이 없어요 — 1단계를 먼저 해 주세요');
+  assert.equal(noAccount.help.hidden, true);
+  same(noAccount.fx.find('calendar', 'd-ich').map(row => row.children[0].checked), [false], '목록은 보여 주되 아무것도 켜지 않는다');
+
+  const old = await run(null, [{ body: { ok: false, reason: 'not-installed', error: '업데이트.command를 한 번 실행하면 쓸 수 있어요' } }]);
+  assert.equal(old.error, '업데이트.command를 한 번 실행하면 쓸 수 있어요');
+  assert.equal(old.fx.sent.filter(one => one.url === '/api/integrations/calendar/mac').length, 1, '요청을 못 했으면 기다리지 않는다(처음 열 때 한 번만)');
+
+  // 결과가 끝내 안 오면(launchd가 안 돎) — 시계를 90초 넘게 돌린다
+  const fx = intgClient({}, [{ body: { ok: true, requestedAt: '2026-09-29T01:00:00.000Z' } }]);
+  await fx.app.run('renderSettingsIntegrations()');
+  fx.toggle('calendar').listeners.click();
+  await tick();
+  let clock = Date.now();
+  fx.app.context.Date = class extends Date { static now() { clock += 5000; return clock; } };
+  fx.app.context.setTimeout = (fn) => { fn(); return 0; };
+  await fx.button('calendar', '허용하고 확인').listeners.click();
+  const box = fx.find('calendar', 'd-ichoice').find(one => one.dataset.choice === 'mac');
+  assert.equal(box.children.find(one => one.className === 'd-derr').textContent, '확인 결과가 오지 않았어요 — 잠시 뒤 다시 눌러 주세요');
+});
+
+test('WP-V F. 연결된 맥 캘린더: `맥 캘린더에서 읽는 중 · 10분 전` + 매일 8–20시 30분마다, 멈추면 ⚠️ 줄이 이유, ⋯ 캘린더 다시 고르기는 맥 갈래만', async () => {
+  const fx = intgClient({
+    calendar: { enabled: true, source: 'mac', macCalendars: [{ id: 'CAL-ME', name: 'me@example.test' }], fetch: { failing: false, lastRunAt: ago(10) }, log: [{ time: '2026-09-29 10:00:00', kind: 'run', text: '캘린더 1개 · 오늘 일정 3개를 읽었어요' }] },
+    macView: { ok: true, installed: true, requestedAt: null, chosen: ['CAL-ME'], state: macState({ kind: 'run', calendars: [...MAC_CALS, { id: 'CAL-NEW', name: 'new@example.test', writable: true }] }) },
+  }, [{ body: { ok: true, restart: false, calendar: { source: 'mac', calendars: 2 } } }]);
+  await fx.app.run('renderSettingsIntegrations()');
+  assert.match(fx.text('calendar'), /맥 캘린더에서 읽는 중 · 10분 전/);
+  assert.match(fx.text('calendar'), /매일 8–20시, 30분마다$/);
+  const menu = fx.menu('calendar');
+  same(menu.map(section => section.map(entry => entry.label)), [['새로 받기', '최근 기록', '캘린더 다시 고르기'], ['해제…']]);
+  menu[0][2].onClick();
+  await tick();
+  same(fx.find('calendar', 'd-ichoice').map(one => one.dataset.choice), ['mac'], '다시 고르기는 맥 캘린더 갈래 하나');
+  assert.match(fx.text('calendar'), /읽을 캘린더를 다시 골라요/);
+  const rows = fx.find('calendar', 'd-ich');
+  same(rows.map(row => row.children[0].checked), [false, true, false], '전에 확인한 목록에 지금 고른 것이 켜져 있다');
+  rows[2].children[0].checked = true;
+  rows[2].children[0].listeners.change();
+  await fx.button('calendar', '고른 캘린더로 바꾸기').listeners.click();
+  same(fx.sent.find(one => one.url === '/api/integrations/save').body.calendar.macCalendars, [{ id: 'CAL-ME', name: 'me@example.test' }, { id: 'CAL-NEW', name: 'new@example.test' }]);
+  assert.match(fx.live(), /읽을 캘린더를 2개로 바꿨어요 · 바로 보려면 ⋯ › 새로 받기를 눌러 주세요/);
+
+  const stopped = intgClient({ calendar: { enabled: true, source: 'mac', macCalendars: [{ id: 'CAL-ME', name: 'me@example.test' }], fetch: { failing: true, lastRunAt: ago(5), summary: '⚠️ 고른 캘린더를 찾지 못했어요 — 다시 골라 주세요' } } });
+  await stopped.app.run('renderSettingsIntegrations()');
+  assert.match(stopped.text('calendar'), /고른 캘린더를 찾지 못했어요 — 다시 골라 주세요/);
+  assert.doesNotMatch(stopped.text('calendar'), /⚠️|최근 기록에서/, '이유 한 줄만');
+});
+
+test('WP-V F. 허용 창에 답하지 않음(0)은 다시 누르라는 말만 — 막힘 안내(시스템 설정 가는 길)는 거부일 때만', async () => {
+  const fx = intgClient({}, [{ body: { ok: true, requestedAt: '2026-09-29T01:00:00.000Z' } }]);
+  await fx.app.run('renderSettingsIntegrations()');
+  fx.toggle('calendar').listeners.click();
+  await tick();
+  fx.app.context.setTimeout = (fn) => { fn(); return 0; };
+  fx.mac.view = { ok: true, installed: true, state: macState({ ok: false, reason: 'unanswered', calendars: [], eventCount: null }) };
+  await fx.button('calendar', '허용하고 확인').listeners.click();
+  const box = fx.find('calendar', 'd-ichoice').find(one => one.dataset.choice === 'mac');
+  assert.equal(box.children.find(one => one.className === 'd-derr').textContent, '허용 창에 답하지 않았어요 — 허용하고 확인을 다시 눌러 주세요');
+  assert.equal(box.children.filter(one => one.className === 'd-ismall')[1].hidden, true, '가는 길은 보이지 않는다');
 });

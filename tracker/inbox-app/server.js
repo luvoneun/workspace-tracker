@@ -17,6 +17,8 @@ const integrations = require('./integrations');
 const personalize = require('./personalize');
 // 쉬운 말 소식(WP-J) — 소식.md 파서 + 원격(태그) 소식.md 읽기.
 const { parseNews, fetchRemoteNewsText, NEWS_MAX_VERSIONS } = require('./news');
+// 캘린더 `맥 캘린더` 갈래 — 서버는 `허용하고 확인`·지금 가져오기의 요청 표시 파일과 결과 읽기(route)만 쓴다(읽기는 launchd).
+const calendarMac = require('./calendar-mac');
 const { randomBytes, createHash, timingSafeEqual } = require('node:crypto');
 
 // 사람/회사마다 달라지는 값은 전부 workspace.config.json 한 곳에 모아둔다.
@@ -118,6 +120,8 @@ const CONFIG = loadConfig();
 const USES = { slack: true, calendar: true, jira: true, tiro: true, ...(CONFIG.integrations || {}) };
 // 캘린더를 비밀 주소(iCal)로 앱이 직접 읽는지(설정 > 연동 > 캘린더). 켜고 끄는 값처럼 서버가 뜰 때 읽는다.
 const CALENDAR_ICAL = USES.calendar !== false && !!CONFIG.calendar && CONFIG.calendar.source === 'ical';
+// 맥 캘린더 앱에서 읽는 갈래인지 — launchd `mac-calendar`가 calendar_today.md를 쓰고, 기록은 `mac-calendar.log`다(calendar-mac.js).
+const CALENDAR_MAC = USES.calendar !== false && !!CONFIG.calendar && CONFIG.calendar.source === 'mac';
 // 화면 헤더·탭 제목. 설정 › 꾸미기에서 바꾸면 이 값도 곧바로 바꾼다(서버를 다시 켜지 않아도 된다).
 let APP_TITLE = CONFIG.title || '내 워크스페이스';
 // 헤더의 제목만 숨기는 스위치(설정 › 꾸미기 `화면에 보이기`). 제목 값 자체(APP_TITLE)는 그대로 두고
@@ -577,7 +581,7 @@ function getAutomationStatus() {
   const specs = [
     { key: 'slack', name: '슬랙 캡처', log: 'slack-capture.log', used: USES.slack },
     // 비밀 주소 갈래는 앱이 직접 읽으므로 이 자동화(calendar-sync)가 없다 — 목록에서 뺀다.
-    { key: 'calendar', name: '캘린더 동기화', log: 'calendar-sync.log', used: USES.calendar && !CALENDAR_ICAL },
+    { key: 'calendar', name: '캘린더 동기화', log: CALENDAR_MAC ? 'mac-calendar.log' : 'calendar-sync.log', used: USES.calendar && !CALENDAR_ICAL },
     // 지라 캐시 자동화(jira-sync)는 없앴다 — 앱이 지라를 직접 읽는다(DECISIONS 2026-09-24). 상태는
     // 이 자동화 목록이 아니라 화면(jira-ui.js의 jiraLiveStatusRow)이 자동화 목록 끝에 조용한 줄로 따로 그린다.
     // 일정표 없이 앱의 버튼을 눌렀을 때만 도는 자동화다(DECISIONS 2026-09-24). 상태·로그는 나머지와 같은 자리에서 본다.
@@ -826,7 +830,9 @@ async function fetchNow(key) {
   const last = fetchLastAt.get(key);
   if (last && Date.now() - last < FETCH_THROTTLE_MS) return fetchFail(200, 'throttled', FETCH_MESSAGE.throttled);
   const direct = key === 'jira' || (key === 'calendar' && CALENDAR_ICAL);
-  if (!direct && !launchAgentInstalled(FETCH_AGENT[key])) return fetchFail(200, 'not-installed', FETCH_MESSAGE.notInstalled);
+  // 맥 캘린더 갈래는 `허용하고 확인`과 같은 요청 파일·launchd(`mac-calendar-now`)로 한 번 읽는다.
+  const agent = key === 'calendar' && CALENDAR_MAC ? calendarMac.NOW_AGENT : FETCH_AGENT[key];
+  if (!direct && !launchAgentInstalled(agent)) return fetchFail(200, 'not-installed', FETCH_MESSAGE.notInstalled);
   fetchLastAt.set(key, Date.now());
 
   if (key === 'jira') {
@@ -853,7 +859,7 @@ async function fetchNow(key) {
     }
     return fetchAnswer(200, { ok: true, mode: 'requested' });
   }
-  const file = path.join(automationDir(), 'requests', FETCH_REQUEST_FILE[key]);
+  const file = path.join(automationDir(), 'requests', key === 'calendar' && CALENDAR_MAC ? calendarMac.REQUEST_FILE : FETCH_REQUEST_FILE[key]);
   nativeFs.mkdirSync(path.dirname(file), { recursive: true });
   nativeFs.writeFileSync(file, `${JSON.stringify({ requestedAt: new Date().toISOString() })}\n`);
   return fetchAnswer(200, { ok: true, mode: 'requested' });
@@ -888,7 +894,8 @@ function fetchStateAutomation(automation, authRe = null) {
   return {
     failing,
     auth,
-    stuck: failing && (auth || failStuck(automation.failTimes || [])),
+    // 맥 캘린더의 허용 막힘·계정 없음·고른 캘린더 없음(사람이 고쳐야 풀림)은 토큰 문제처럼 한 번에 멈춤이다(WP-V).
+    stuck: failing && (auth || calendarMac.NEEDS_PERSON_RE.test(automation.lastSummary || '') || failStuck(automation.failTimes || [])),
     // 가장 최근 실패가 Claude 로그인 풀림이면 true(연동 토큰 문제가 먼저면 그쪽을 말한다).
     claudeAuth: failing && !auth && CLAUDE_AUTH_RE.test(automation.lastSummary || ''),
     failedAt: failing ? logTimeIso(automation.lastRunAt) : null,
@@ -2398,7 +2405,7 @@ const CLIENT_BLOCKED = new Set([
   'task-batch.js', 'slack-history.js', 'slack-collect.js', 'import-record.js', 'browser-fixture.js', 'migrate.js',
   'integrations.js', 'ical.js', 'calendar-live.js', 'personalize.js', 'news.js', 'test-support.js',
   'routes-jira.js', 'routes-integrations.js', 'routes-app.js', 'routes-personalize.js', 'routes-items.js',
-  'routes-track.js', 'selfcheck.js', 'checkin.js', 'usage.js', 'auto-update.js',
+  'routes-track.js', 'selfcheck.js', 'checkin.js', 'usage.js', 'auto-update.js', 'calendar-mac.js',
 ]);
 function isClientFile(name) {
   if (!/^[A-Za-z0-9][\w.-]*\.(js|css)$/.test(name)) return false;   // 이름 한 칸짜리(하위 경로 없음)만
@@ -2663,6 +2670,7 @@ const ROUTE_MODULES = [
   require('./routes-personalize'),
   checkin.route,
   usage.route,
+  calendarMac.route,
 ];
 const routeCtx = {
   get APP_TITLE() { return APP_TITLE; },
@@ -2692,6 +2700,8 @@ const routeCtx = {
   createDecision, createIdea, promoteIdeaToToday, setTrackJira, setTrackGroup, setIdeaProject, setTrackDue, setTrackDoing,
   setTrackWho, setTrackPriority, setTrackDescription, removeTrackItem, toggleTrackStatus,
 };
+// 맥 캘린더 `허용하고 확인`(calendar-mac.js의 route) — 요청 표시 파일 자리와 launchd 등록 여부만 받는다.
+Object.assign(routeCtx, { automationDir, launchAgentInstalled });
 // 사용 횟수(WP-R) — 화면 경로가 부르는 저장 함수에만 세기를 씌운다(가져오기·워크플로가 부르는 같은 함수는 세지 않는다).
 Object.assign(routeCtx, {
   createManualTask: usage.countCreate(createManualTask, 'task_add'), createLaterTask: usage.countCreate(createLaterTask, 'task_add'),
