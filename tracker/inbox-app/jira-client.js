@@ -439,7 +439,17 @@ function createJiraClient({ settings, request = (...args) => fetch(...args), rea
     const wanted = [...new Set((Array.isArray(linkedKeys) ? linkedKeys : [])
       .filter(key => typeof key === 'string' && JIRA_KEY_RE.test(key) && !have.has(key)))].slice(0, JIRA_LIST_LIMIT);
     if (!wanted.length) return mine;
-    const rest = (((await search(`key in (${wanted.join(',')})`, secret)) || {}).issues || [])
+    // 지라에서 지워졌거나 없는 키가 섞이면 이 조회만 400으로 실패한다 — 그때는 추가분만 빼고 내 담당 목록은 돌려준다
+    // (인증 실패 401·403, 너무 잦은 요청 429, 상태 없는 네트워크 오류·5xx는 예전처럼 그대로 던진다).
+    let found;
+    try {
+      found = (await search(`key in (${wanted.join(',')})`, secret)) || {};
+    } catch (error) {
+      const status = error && error.status;
+      if (!(status >= 400 && status < 500) || status === 401 || status === 403 || status === 429) throw error;
+      return mine;
+    }
+    const rest = (found.issues || [])
       .map(entry => shapeListIssue(entry, true)).filter(Boolean)
       .filter(issue => !have.has(issue.key)).slice(0, JIRA_LIST_LIMIT);
     return [...mine, ...rest];
