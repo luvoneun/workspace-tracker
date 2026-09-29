@@ -431,7 +431,8 @@ function createJiraClient({ settings, request = (...args) => fetch(...args), rea
   // 프로젝트 고르기 목록·요약의 원천. ① 내 담당·미완료를 읽고,
   // ② 업무에 걸려 있는 키 중 ①에 없는 것만 `key in (…)`로 한 번 더 읽어 `extra:true`로 붙인다
   // (완료됐거나 담당이 바뀐 티켓의 요약이 사라지지 않게 — 파일 스냅샷의 `그 밖의 이슈`와 같은 규칙).
-  const EXTRA_SEARCH_LIMIT = 12;
+  // 16번이면 추가 조회 키 100개(JIRA_LIST_LIMIT) 가운데 지워진 키가 하나일 때 반씩 나눠 끝까지 찾아갈 수 있다(1 + 2×7 = 15).
+  const EXTRA_SEARCH_LIMIT = 16;
   async function listMyIssues(linkedKeys = []) {
     const secret = token();
     const mine = (((await search(MY_ISSUES_JQL, secret)) || {}).issues || [])

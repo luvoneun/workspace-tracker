@@ -2302,7 +2302,7 @@ test('추가 조회에 지워진 키 1개가 섞여도 살아 있는 5개는 받
   const fake = extraFake(['IO-99']);
   const issues = await jiraListClient(fake).listMyIssues([...live, 'IO-99']);
   assert.deepEqual(issues.filter(issue => issue.extra).map(issue => issue.key).sort(), live);
-  assert.ok(fake.calls.length - 1 <= 12, `추가 조회 ${fake.calls.length - 1}번`);
+  assert.ok(fake.calls.length - 1 <= 16, `추가 조회 ${fake.calls.length - 1}번`);
 });
 
 test('지워진 키가 여러 개여도 살아 있는 키만 남는다', async () => {
@@ -2310,7 +2310,7 @@ test('지워진 키가 여러 개여도 살아 있는 키만 남는다', async (
   const fake = extraFake(['IO-90', 'IO-91', 'IO-92']);
   const issues = await jiraListClient(fake).listMyIssues(['IO-90', 'IO-1', 'IO-2', 'IO-91', 'IO-3', 'IO-92', 'IO-4']);
   assert.deepEqual(issues.filter(issue => issue.extra).map(issue => issue.key).sort(), live);
-  assert.ok(fake.calls.length - 1 <= 12);
+  assert.ok(fake.calls.length - 1 <= 16);
 });
 
 test('나눠 묻는 도중 401이 나오면 그대로 던진다', async () => {
@@ -2319,10 +2319,19 @@ test('나눠 묻는 도중 401이 나오면 그대로 던진다', async () => {
   await assert.rejects(() => jiraListClient(fake).listMyIssues(['IO-1', 'IO-2', 'IO-99', 'IO-3']), error => error.status === 401);
 });
 
-test('전부 지워진 키가 많아도 추가 조회는 12번을 넘지 않고 남은 것은 뺀다', async () => {
+test('전부 지워진 키가 많아도 추가 조회는 16번을 넘지 않고 남은 것은 뺀다', async () => {
   const keys = Array.from({ length: 40 }, (_, index) => `IO-${index + 1}`);
   const fake = extraFake(keys);
   const issues = await jiraListClient(fake).listMyIssues(keys);
   assert.deepEqual(issues.map(issue => issue.key), ['MINE-1']);
-  assert.equal(fake.calls.length - 1, 12, '상한에서 멈춘다');
+  assert.equal(fake.calls.length - 1, 16, '상한에서 멈춘다');
+});
+
+test('추가 조회 키 100개 가운데 지워진 키 하나면 상한 안에서 끝까지 찾아 나머지 99개를 받는다', async () => {
+  const keys = Array.from({ length: 100 }, (_, index) => `IO-${index + 1}`);
+  const fake = extraFake(['IO-77']);
+  const issues = await jiraListClient(fake).listMyIssues(keys);
+  assert.equal(issues.filter(issue => issue.extra).length, 99);
+  assert.ok(!issues.some(issue => issue.key === 'IO-77'));
+  assert.ok(fake.calls.length - 1 <= 16, `추가 조회 ${fake.calls.length - 1}번`);
 });
