@@ -507,7 +507,8 @@ function getSlackSync() {
   }
 }
 
-// 슬랙 수집이 연결됐는가 — 연동 탭 카드(`settingsIntgCounts`)와 같은 기준: 켜짐 · 토큰 파일 · 켜진 채널 하나 이상(어느 채널이든).
+// 슬랙 수집이 연결됐는가 — 연동 탭의 `settingsIntgConnected`(슬랙 카드)와 같은 기준: 켜짐 · 토큰 파일 · 켜진 채널 하나 이상(어느 채널이든).
+// (`settingsIntgCounts`의 개수는 여기에 회의록 직접 옮기기를 더 센다 — 이 함수와는 상관없다.)
 function slackConnectedNow() {
   try {
     const slack = integrations.readIntegrations(currentConfigFile(), { claude: false }).slack;
@@ -586,6 +587,9 @@ function getAutomationStatus() {
     const events = parseAutomationLog(lines);
     const last = events[events.length - 1] || null;
     const recentFailures = events.filter((e) => e.kind === 'fail').slice(-5).reverse();
+    // 가장 최근부터 이어진 실패의 시각(ms, 최근 것이 앞) — "계속 실패"(failStuck)의 재료.
+    const failTimes = [];
+    for (let i = events.length - 1; i >= 0 && events[i].kind === 'fail'; i -= 1) failTimes.push(meetingNotesTime(events[i].time));
     return {
       key: spec.key,
       name: spec.name,
@@ -593,6 +597,7 @@ function getAutomationStatus() {
       lastKind: last ? last.kind : null,
       lastSummary: last ? last.text : null,
       recentFailures,
+      failTimes,
       // 연동 카드 ⋯ › 최근 기록 — 최근 10번(새것 먼저). 한 줄은 200자까지만.
       events: events.slice(-10).reverse().map(e => ({ time: e.time, kind: e.kind, text: String(e.text || '').slice(0, 200), ...(e.version ? { version: e.version } : {}) })),
       tail: lines.map(cleanLogLine).filter((l) => l.trim()).slice(-60),
@@ -848,8 +853,25 @@ async function fetchNow(key) {
 // 연동 카드 상태 줄에 쓰는 "지금 실패 중인가"(값은 메모리·로그에서만 읽는다).
 // 자동화는 **가장 최근 실행이 실패**일 때만 실패 중이다(해결된 과거 실패는 알리지 않는다).
 const logTimeIso = text => { const at = meetingNotesTime(text); return Number.isFinite(at) ? new Date(at).toISOString() : null; };
-function fetchStateLive(failure) {
-  return { failing: !!failure, auth: !!(failure && failure.auth), failedAt: failure ? new Date(failure.at).toISOString() : null };
+// 계속 실패인가 — 가장 최근부터 이어진 실패가 3번 이상이거나, 그 첫 실패가 1시간 넘게 전이면. `stuck`(= 계속 실패 또는
+// 토큰 문제)이 연동 탭의 `멈췄어요`·톱니바퀴 빨간 점·점검의 멈춤(integrationAlerts)이 함께 쓰는 한 기준이고, 한 번 실패는
+// 연동 탭의 주황 `늦어요`일 뿐 빨간 점이 아니다. 화면은 이 값(`fetch.stuck`)을 읽기만 한다.
+const FAIL_STUCK = { times: 3, ms: 60 * 60 * 1000 };
+function failStuck(times = [], now = Date.now()) {
+  const at = times.filter(Number.isFinite);
+  return times.length >= FAIL_STUCK.times || (at.length > 0 && now - Math.min(...at) > FAIL_STUCK.ms);
+}
+// `history`는 앱이 직접 읽은 기록(최근 것이 앞, { at, ok, auth }) — 맨 앞부터 이어진 실패를 센다.
+function fetchStateLive(failure, history = []) {
+  const failing = !!failure;
+  const auth = !!(failure && failure.auth);
+  const times = [];
+  for (const entry of Array.isArray(history) ? history : []) {
+    if (!entry || entry.ok) break;
+    times.push(Number(entry.at));
+  }
+  if (failing && !times.length) times.push(Number(failure.at));
+  return { failing, auth, stuck: failing && (auth || failStuck(times)), failedAt: failure ? new Date(failure.at).toISOString() : null };
 }
 function fetchStateAutomation(automation, authRe = null) {
   const failing = !!automation && automation.lastKind === 'fail';
@@ -857,6 +879,7 @@ function fetchStateAutomation(automation, authRe = null) {
   return {
     failing,
     auth,
+    stuck: failing && (auth || failStuck(automation.failTimes || [])),
     // 가장 최근 실패가 Claude 로그인 풀림이면 true(연동 토큰 문제가 먼저면 그쪽을 말한다).
     claudeAuth: failing && !auth && CLAUDE_AUTH_RE.test(automation.lastSummary || ''),
     failedAt: failing ? logTimeIso(automation.lastRunAt) : null,
@@ -866,16 +889,19 @@ function fetchStateAutomation(automation, authRe = null) {
   };
 }
 
-// 연동마다 "지금 멈췄나" — 연동 탭 맨 위 요약·카드의 빨간 줄·톱니바퀴의 빨간 점이 같은 판단을 쓴다.
-// 슬랙은 수집이 실패 중이거나 **켜진 채널이 모두 사라졌으면** 멈춘 것이다(일부만 사라졌으면 카드의 주황 줄일 뿐이다.
+// 연동마다 "지금 멈췄나" — 연동 탭의 `멈췄어요`·톱니바퀴의 빨간 점·점검이 같은 판단(`stuck` — 계속 실패 또는 토큰 문제)을 쓴다.
+// 한 번 실패는 멈춘 것이 아니다(연동 탭의 주황 `늦어요`). 비밀 주소를 한 번도 못 읽었으면 주소 문제로 보고 멈춘 것이다.
+// 슬랙은 수집이 계속 실패하거나 **켜진 채널이 모두 사라졌으면** 멈춘 것이다(일부만 사라졌으면 카드의 주황 줄일 뿐이다.
 // 사라졌는지는 이름 따라가기가 이미 들고 있는 답만 본다 — 여기서 슬랙에 묻지 않는다). 값은 로그·메모리에서만 읽고 파일은 쓰지 않는다.
 function integrationAlerts(config = currentConfigFile(), automations = getAutomationStatus()) {
-  const failingAutomation = key => automations.some(one => one.key === key && one.lastKind === 'fail');
+  const stuckAutomation = (key, authRe = null) => fetchStateAutomation(automations.find(one => one.key === key) || null, authRe).stuck;
+  const icalStuck = () => fetchStateLive(calendarLive.failure(), calendarLive.history()).stuck
+    || (!calendarLive.current() && calendarLive.failed());
   const alerts = [];
-  if (USES.slack && (failingAutomation('slack') || slackFollower.allKnownMissing(config))) alerts.push('slack');
-  if (USES.jira && jira.connected && jiraLive.failure()) alerts.push('jira');
-  if (USES.calendar && (CALENDAR_ICAL ? !!calendarLive.failure() : failingAutomation('calendar'))) alerts.push('calendar');
-  if (USES.tiro && failingAutomation('tiro')) alerts.push('notes');
+  if (USES.slack && (stuckAutomation('slack', SLACK_AUTH_RE) || slackFollower.allKnownMissing(config))) alerts.push('slack');
+  if (USES.jira && jira.connected && fetchStateLive(jiraLive.failure(), jiraLive.history()).stuck) alerts.push('jira');
+  if (USES.calendar && (CALENDAR_ICAL ? icalStuck() : stuckAutomation('calendar'))) alerts.push('calendar');
+  if (USES.tiro && stuckAutomation('tiro')) alerts.push('notes');
   return alerts;
 }
 
@@ -2645,4 +2671,6 @@ module.exports = {
   setCheckinFetchForTests, setCheckinForTests, checkin, setUsageForTests, usage,
   // WP-U 쉬는 틈에 자동 업데이트 — 판단 한 번(tick)·임시 local/·환경 끼우기(테스트·픽스처 전용, main 갈래 판단은 못 끼운다).
   autoUpdate, setAutoUpdateForTests,
+  // 계속 실패(멈췄어요·빨간 점) 판단 — 같은 수치를 테스트가 고정한다.
+  failStuck, fetchStateLive, fetchStateAutomation,
 };

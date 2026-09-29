@@ -441,7 +441,7 @@ test('WP-D2.5 지금 가져오기: 지라·캘린더(비밀 주소)는 곧바로
   for (const one of [jira, again, calendar, missing, slack, tiro]) assert.ok(!SECRETS.test(one.text), one.text);
   const state = await (await fetch(app.base + '/api/integrations')).text();
   assert.ok(!SECRETS.test(state), '연동 상태에도 없다');
-  assert.deepEqual(JSON.parse(state).jira.fetch, { failing: false, auth: false, failedAt: null });
+  assert.deepEqual(JSON.parse(state).jira.fetch, { failing: false, auth: false, stuck: false, failedAt: null });
   assert.ok(!SECRETS.test(app.log()), '서버 로그에도 없다');
   // 서버는 프로세스를 띄우지 않는다 — 이 경로 어디에도 child_process가 없다
   const route = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8').split('async function fetchNow(key) {')[1].split('\n}\n')[0];
@@ -483,6 +483,43 @@ test('WP-D2.5 지금 가져오기 실패: 지라 401·비밀 주소 404는 auth,
   fs.appendFileSync(slackLog, `${stamp(1)} 새 메시지 없음 — Claude 호출 생략\n`);
   const healed = await (await fetch(app.base + '/api/integrations')).json();
   assert.equal(healed.slack.fetch.failing, false);
+});
+
+test('계속 실패만 멈춤: 한 번 실패는 fetch.stuck=false·빨간 점(alerts) 없음, 이어진 실패 3번·1시간 넘게·토큰 문제면 stuck + alerts — 연동 탭·톱니바퀴·점검이 같은 판단', async (t) => {
+  const { failStuck, fetchStateLive, fetchStateAutomation } = require('./server');
+  // 같은 수치(3번 · 1시간)
+  const now = Date.now();
+  assert.equal(failStuck([now - 60000], now), false, '한 번 실패');
+  assert.equal(failStuck([now - 60000, now - 120000], now), false);
+  assert.equal(failStuck([now - 60000, now - 120000, now - 180000], now), true, '이어진 실패 3번');
+  assert.equal(failStuck([now - 61 * 60000], now), true, '한 번이어도 1시간 넘게');
+  // 앱이 직접 읽는 것(지라·비밀 주소) — 기록의 맨 앞부터 이어진 실패만 센다
+  const fail = at => ({ at, ok: false });
+  assert.equal(fetchStateLive({ at: now - 60000 }, [fail(now - 60000)]).stuck, false);
+  assert.equal(fetchStateLive({ at: now - 60000 }, [fail(now - 60000), fail(now - 70000), fail(now - 80000)]).stuck, true);
+  assert.equal(fetchStateLive({ at: now - 60000 }, [fail(now - 60000), { at: now - 70000, ok: true }, fail(now - 80000), fail(now - 90000)]).stuck, false, '성공 뒤의 옛 실패는 세지 않는다');
+  assert.equal(fetchStateLive({ at: now - 60000, auth: true }, [fail(now - 60000)]).stuck, true, '토큰 문제는 한 번이어도');
+  assert.equal(fetchStateLive({ at: now - 90 * 60000 }, []).stuck, true, '기록이 없으면 그 실패 시각으로');
+  assert.equal(fetchStateLive(null, []).stuck, false);
+  assert.equal(fetchStateAutomation({ lastKind: 'fail', lastSummary: 'x', failTimes: [now - 60000] }).stuck, false);
+
+  // 서버 전체: 슬랙 로그로 한 번 실패 → 연속 셋
+  const app = await startFetchServer(t);
+  const slackLog = path.join(app.automation, 'logs', 'slack-capture.log');
+  const stamp = offset => { const d = new Date(Date.now() - offset * 60000); const p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; };
+  const alerts = async () => (await (await fetch(app.base + '/api/automation/status')).json()).alerts;
+  const slackFetch = async () => (await (await fetch(app.base + '/api/integrations')).json()).slack.fetch;
+  fs.writeFileSync(slackLog, `${stamp(20)} 새 메시지 없음 — Claude 호출 생략\n${stamp(5)} todo 채널 확인 실패 — ERR:ratelimited\n`);
+  assert.deepEqual([(await slackFetch()).failing, (await slackFetch()).stuck], [true, false]);
+  assert.ok(!(await alerts()).includes('slack'), '한 번 실패는 빨간 점이 없다(연동 탭의 늦어요)');
+  fs.writeFileSync(slackLog, `${stamp(20)} 새 메시지 없음 — Claude 호출 생략\n${stamp(15)} todo 채널 확인 실패 — ERR:ratelimited\n${stamp(10)} todo 채널 확인 실패 — ERR:ratelimited\n${stamp(5)} todo 채널 확인 실패 — ERR:ratelimited\n`);
+  assert.equal((await slackFetch()).stuck, true, '이어진 실패 3번');
+  assert.ok((await alerts()).includes('slack'));
+  fs.writeFileSync(slackLog, `${stamp(90)} todo 채널 확인 실패 — ERR:ratelimited\n`);
+  assert.equal((await slackFetch()).stuck, true, '1시간 넘게 이어진 실패');
+  fs.writeFileSync(slackLog, `${stamp(5)} todo 채널 확인 실패 — ERR:invalid_auth\n`);
+  assert.equal((await slackFetch()).stuck, true, '토큰 문제는 한 번이어도');
+  assert.ok((await alerts()).includes('slack'));
 });
 
 test('WP-D2.5 지금 가져오기(캘린더 Claude 갈래): calendar-sync-now plist가 있을 때만 calendar-sync.request를 쓰고, 상태 줄 시각은 calendar-sync 로그에서', async (t) => {

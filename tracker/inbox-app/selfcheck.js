@@ -292,7 +292,7 @@ function createSelfcheck(deps) {
         }
       }
 
-      // 슬랙 수집 — 연동 탭 카드의 빨간 줄과 같은 판단. 늦음(주황)은 화면이 syncLag로 더한다(`lag`).
+      // 슬랙 수집 — 연동 탭 카드의 `멈췄어요`와 같은 판단(계속 실패·토큰 문제·켜진 채널이 모두 사라짐). 늦음(주황)은 화면이 syncLag로 더한다(`lag`).
       const collect = { key: 'slack', label: '슬랙 수집', lag: 'slack' };
       if (alerts.includes('slack')) {
         const allGone = !(fetchState.slack && fetchState.slack.failing);
@@ -322,7 +322,7 @@ function createSelfcheck(deps) {
       }
       if (item.state !== 'bad' && alerts.includes('calendar')) {
         const found = stopped('calendar', '캘린더');
-        Object.assign(item, found, calendarIcal && found.detail && !found.sameAs ? { detail: `${found.detail} — 지금 확인해 보니 주소는 읽혀요, 카드의 지금 가져오기로 다시 읽어 주세요` } : {});
+        Object.assign(item, found, calendarIcal && found.detail && !found.sameAs ? { detail: `${found.detail} — 지금 확인해 보니 주소는 읽혀요, 카드의 ⋯ › 새로 받기로 다시 읽어 주세요` } : {});
       }
       if (!item.detail) {
         const at = whenText((fetchState.calendar || {}).lastRunAt, now());
@@ -346,7 +346,7 @@ function createSelfcheck(deps) {
       }
       if (item.state !== 'bad' && alerts.includes('jira')) {
         const found = stopped('jira', '지라');
-        Object.assign(item, found, item.state === 'ok' && !found.sameAs ? { detail: `${found.detail} — 지금 확인해 보니 토큰은 맞아요, 카드의 지금 가져오기로 다시 읽어 주세요`, copy: undefined } : {});
+        Object.assign(item, found, item.state === 'ok' && !found.sameAs ? { detail: `${found.detail} — 지금 확인해 보니 토큰은 맞아요, 카드의 ⋯ › 새로 받기로 다시 읽어 주세요`, copy: undefined } : {});
       }
     }
 

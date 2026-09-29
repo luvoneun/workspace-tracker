@@ -51,9 +51,9 @@ module.exports = function integrationsRoutes(req, res, url, ctx) {
       // `지금 가져오기` 버튼과 빨간 상태 줄이 쓰는 "지금 실패 중인가"(토큰 문제면 auth).
       const automations = getAutomationStatus();
       const automation = key => automations.find(one => one.key === key) || null;
-      state.jira.fetch = fetchStateLive(jiraLive.failure());
+      state.jira.fetch = fetchStateLive(jiraLive.failure(), jiraLive.history());
       state.slack.fetch = fetchStateAutomation(automation('slack'), SLACK_AUTH_RE);
-      state.calendar.fetch = CALENDAR_ICAL ? fetchStateLive(calendarLive.failure()) : fetchStateAutomation(automation('calendar'));
+      state.calendar.fetch = CALENDAR_ICAL ? fetchStateLive(calendarLive.failure(), calendarLive.history()) : fetchStateAutomation(automation('calendar'));
       state.meetingNotes.fetch = fetchStateAutomation(automation('tiro'));
       // 오늘 슬랙에서 들어온 항목 수(원본 링크가 슬랙이고 오늘 만든 것) — 슬랙 카드 둘째 줄.
       const today = todayLocal();
