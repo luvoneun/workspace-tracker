@@ -240,7 +240,9 @@ document.addEventListener('click', (event) => {
 });
 
 // 날짜 칸 한 벌. 비어 있으면 `+ 기한`, 누르면 그 자리에서 고르고 ✕로 지운다.
-function uiDateField({ value, label = '기한', onChange, clearable = true }) {
+// shown: 고른 날짜를 브라우저 기본 표기(10/02/2026) 대신 앱의 날짜 글자(`10월 2일 (금)`)로 보인다 —
+// 누르면 그 자리에서 날짜 입력칸으로 바뀌고(되는 브라우저면 달력까지 연다), 고르면 다시 글자로 돌아온다.
+function uiDateField({ value, label = '기한', onChange, clearable = true, shown = false }) {
   const wrap = document.createElement('span');
   wrap.className = 'd-datefield';
   let current = value || '';
@@ -257,18 +259,34 @@ function uiDateField({ value, label = '기한', onChange, clearable = true }) {
       wrap.appendChild(open);
       return;
     }
-    const input = document.createElement('input');
-    input.type = 'date';
-    input.className = 'd-dateinput';
-    input.value = current;
-    input.setAttribute('aria-label', label);
-    input.addEventListener('change', () => {
-      current = input.value;
-      editing = false;
-      onChange(current || null);
-      draw();
-    });
-    wrap.appendChild(input);
+    if (shown && current && !editing) {
+      const face = document.createElement('button');
+      face.type = 'button';
+      face.className = 'd-dateinput is-shown';
+      face.textContent = uiKoDate(current);
+      face.setAttribute('aria-label', `${label} ${uiKoDate(current)} — 바꾸기`);
+      face.addEventListener('click', () => {
+        editing = true;
+        draw();
+        const input = wrap.querySelector('input');
+        try { input?.showPicker?.(); } catch { /* 달력을 못 열면 입력칸에 초점만 둔다 */ }
+      });
+      wrap.appendChild(face);
+    }
+    const input = shown && current && !editing ? null : document.createElement('input');
+    if (input) {
+      input.type = 'date';
+      input.className = 'd-dateinput';
+      input.value = current;
+      input.setAttribute('aria-label', label);
+      input.addEventListener('change', () => {
+        current = input.value;
+        editing = false;
+        onChange(current || null);
+        draw();
+      });
+      wrap.appendChild(input);
+    }
     if (current && clearable) {
       const clear = document.createElement('button');
       clear.type = 'button';
@@ -278,7 +296,7 @@ function uiDateField({ value, label = '기한', onChange, clearable = true }) {
       clear.addEventListener('click', () => { current = ''; editing = false; onChange(null); draw(); });
       wrap.appendChild(clear);
     }
-    if (editing) input.focus();
+    if (editing && input) input.focus();
   };
   draw();
   return wrap;

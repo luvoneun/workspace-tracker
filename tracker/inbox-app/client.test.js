@@ -11275,3 +11275,176 @@ test('찾기로 거른 결과가 0이면 프로젝트 0개가 아니다 — 세�
   assert.equal(nodeFind(fixture.list().children[0], 'n').hidden, false);
   assert.equal(nodeFind(fixture.app.nodes.get('projectBody'), 'd-pempty'), null);
 });
+
+// ---------- 회의 정리 판 다듬기: 초안 `빼기`(되돌리기·⌘Z) · 담기 바의 빈 초안 오류 · 앱 날짜 글자 ----------
+function meetingBoardClient() {
+  const app = workflowsClient();
+  const sent = [];
+  app.context.fetch = async (url, init) => {
+    sent.push({ url, body: init && init.body ? JSON.parse(init.body) : null });
+    return new Response('{"ok":true,"created":[]}', { status: 200 });
+  };
+  app.run('requestAnimationFrame = () => 0;');
+  app.run("var loaded = 0; load = async () => { loaded += 1; };");
+  const meeting = {
+    id: 'mb1', date: meetingNotesDay(0), start: '10:00', end: '10:30', title: '데일리 스크럼',
+    drafts: [
+      { id: 'mb1:stable:a', type: 'task', description: '백엔드 담당자에게 결제 스펙 요청하기', due: '2026-10-02' },
+      { id: 'mb1:stable:b', type: 'check', description: '디자인 일정 회신 받기' },
+      { id: 'mb1:stable:c', type: 'decision', description: '실패 알림은 푸시 대신 앱 안 배너로' },
+    ],
+  };
+  app.context.__meeting = meeting;
+  app.run('workflowData = { items: [], meetings: [__meeting] }; wfIndexData(); wfDraftEdits.clear();');
+  const draw = () => app.run(`(() => {
+    const box = document.createElement('div');
+    const host = { kind: 'card', closable: false, getResult: () => null, setResult() {}, redraw() {}, box: () => box, openItem() {}, openMeeting() {} };
+    panelMeetingDrafts(__meeting, box, host);
+    return box;
+  })()`);
+  return { app, sent, meeting, draw };
+}
+
+test('회의 초안: 빼기는 조용한 글자 버튼 `빼기`(초안 앞부분이 이름)이고, 초안 카드의 ✕는 날짜 칸의 `날짜 지우기`뿐이다', () => {
+  const { draw } = meetingBoardClient();
+  const box = draw();
+  const cards = nodeFindAll(box, 'd-draft');
+  assert.equal(cards.length, 3);
+  const pull = nodeFind(cards[0], 'd-dpull');
+  assert.equal(pull.textContent, '빼기');
+  assert.equal(pull.className, 'd-headnum d-dpull', '기존 조용한 글자 버튼 부품(28px)');
+  assert.equal(pull.getAttribute('aria-label'), '초안 빼기: 백엔드 담당자에게 결제 스펙 요청하기');
+  assert.equal(nodeFind(cards[0], 'x'), null, '예전 ✕(d-iconbtn x)는 없다');
+  const closes = nodeFindAll(cards[0], 'd-iconbtn');
+  assert.equal(closes.length, 1, '✕는 날짜 칸 하나');
+  assert.equal(closes[0].getAttribute('aria-label'), '기한 지우기');
+  // 날짜는 브라우저 기본 표기 대신 앱 날짜 글자, 누르면 입력칸
+  const face = nodeFind(cards[0], 'is-shown');
+  assert.equal(face.textContent, '10월 2일 (금)');
+  assert.match(face.getAttribute('aria-label'), /^기한 10월 2일 \(금\) — 바꾸기$/);
+  face.listeners.click();
+  const field = nodeFind(cards[0], 'd-datefield');
+  assert.equal(field.children[0].type, 'date', '누르면 그 자리에서 날짜 입력칸');
+  assert.equal(field.children[0].value, '2026-10-02');
+  // 긴 문구는 앞부분만, 빈 문구는 빈 초안이라고
+  const text = nodeFind(cards[1], 'd-dtxt');
+  text.style = {};
+  text.value = '';
+  text.listeners.input();
+  assert.equal(nodeFind(cards[1], 'd-dpull').getAttribute('aria-label'), '빈 초안 빼기');
+  text.value = '가'.repeat(40);
+  text.listeners.input();
+  assert.equal(nodeFind(cards[1], 'd-dpull').getAttribute('aria-label'), `초안 빼기: ${'가'.repeat(30)}…`);
+});
+
+test('회의 초안: 빈 문구로 담으면 담기 바의 요약 자리에 오류, 첫 빈 칸으로 초점·표시, 채우면 걷힌다(아무것도 보내지 않는다)', async () => {
+  const { app, sent, draw } = meetingBoardClient();
+  const box = draw();
+  const cards = nodeFindAll(box, 'd-draft');
+  const texts = cards.map(card => nodeFind(card, 'd-dtxt'));
+  texts.forEach(text => { text.style = {}; });
+  texts[1].value = ' '; texts[1].listeners.input();
+  texts[2].value = ''; texts[2].listeners.input();
+  const bar = nodeFind(box, 'd-dbar');
+  const summary = nodeFind(bar, 'sm');
+  const message = nodeFind(bar, 'er');
+  assert.equal(message.getAttribute('role'), 'alert');
+  const go = bar.children[bar.children.length - 1];
+  assert.equal(go.textContent, '3개 담기');
+  await go.listeners.click();
+  assert.equal(sent.length, 0, '서버에 보내지 않는다');
+  assert.equal(message.textContent, '빈 초안이 2개 있어요. 채우거나 빼 주세요');
+  assert.equal(summary.hidden, true, '요약 글자 자리에 대신 선다');
+  assert.equal(texts[1].getAttribute('aria-invalid'), 'true');
+  assert.equal(texts[2].getAttribute('aria-invalid'), 'true');
+  assert.equal(texts[1].getAttribute('aria-describedby'), message.id);
+  assert.equal(texts[0].getAttribute('aria-invalid'), undefined);
+  assert.equal(texts[1].focused, true, '첫 빈 칸으로 초점');
+  assert.equal(nodeFind(box, 'd-derr'), null, '카드 머리 오류 줄에는 적지 않는다');
+  texts[1].value = '채운 문구'; texts[1].listeners.input();
+  assert.equal(texts[1].getAttribute('aria-invalid'), undefined);
+  assert.equal(message.textContent, '빈 초안이 1개 있어요. 채우거나 빼 주세요');
+  texts[2].value = '또 채운 문구'; texts[2].listeners.input();
+  assert.equal(message.textContent, '');
+  assert.equal(summary.hidden, false);
+  await go.listeners.click();
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].url, '/api/workflow/review');
+  app.run('undoStack.length = 0;');
+});
+
+test('회의 초안: 빼면 `초안 하나를 뺐어요 · 되돌리기`, ⌘Z는 여러 번 역순으로 하나씩 되살리고 고쳐 둔 문구도 돌아온다', async () => {
+  const { app, sent, draw, meeting } = meetingBoardClient();
+  app.run('undoStack.length = 0; redoStack.length = 0;');
+  let box = draw();
+  const first = nodeFindAll(box, 'd-draft')[0];
+  const text = nodeFind(first, 'd-dtxt');
+  text.style = {};
+  text.value = '고쳐 둔 첫 문구'; text.listeners.input();
+  await nodeFind(first, 'd-dpull').listeners.click();
+  assert.deepEqual(sent.map(call => call.url), ['/api/workflow/review']);
+  assert.deepEqual(sent[0].body, { meetingId: 'mb1', dismiss: ['mb1:stable:a'] });
+  assert.equal(app.run('loaded'), 1, '빼면 목록을 다시 읽는다');
+  const notice = app.nodes.get('liveRegion');
+  assert.match(notice.textContent, /^초안 하나를 뺐어요/);
+  assert.ok(notice.children.some(kid => kid.textContent === '되돌리기'), '알림에 되돌리기');
+  assert.equal(app.run("wfDraftEdits.has('mb1:stable:a')"), false);
+
+  // 판을 닫았다 다시 연 것처럼 새로 그린 뒤 둘째도 뺀다
+  app.run("__meeting.drafts = __meeting.drafts.slice(1);");
+  box = draw();
+  await nodeFind(nodeFindAll(box, 'd-draft')[0], 'd-dpull').listeners.click();
+  assert.equal(app.run('undoStack.length'), 2);
+
+  await app.run("replayUndo('undo')");
+  assert.equal(sent[2].url, '/api/workflow/review-restore');
+  assert.deepEqual(sent[2].body, { meetingId: 'mb1', drafts: ['mb1:stable:b'] }, '나중에 뺀 것부터');
+  await app.run("replayUndo('undo')");
+  assert.deepEqual(sent[3].body, { meetingId: 'mb1', drafts: ['mb1:stable:a'] });
+  assert.equal(app.run("wfDraftEdits.get('mb1:stable:a').description"), '고쳐 둔 첫 문구', '고쳐 둔 문구가 그대로 돌아온다');
+  assert.doesNotMatch(notice.textContent, /저장했어요/, '되살리기는 조용히 저장하고 결과만 알린다');
+  // 다시 실행(⇧⌘Z)은 다시 뺀다
+  await app.run("replayUndo('redo')");
+  assert.equal(sent[4].url, '/api/workflow/review');
+  assert.deepEqual(sent[4].body, { meetingId: 'mb1', dismiss: ['mb1:stable:a'] });
+  assert.ok(meeting);
+});
+
+test('회의 초안: 알림의 `되돌리기`는 맨 위 기록일 때만 되살린다(아니면 순서대로 하라고 알린다)', async () => {
+  const { app, sent, draw } = meetingBoardClient();
+  app.run('undoStack.length = 0; redoStack.length = 0;');
+  const box = draw();
+  await nodeFind(nodeFindAll(box, 'd-draft')[2], 'd-dpull').listeners.click();
+  const notice = app.nodes.get('liveRegion');
+  const undo = notice.children.find(kid => kid.textContent === '되돌리기');
+  app.run("pushUndo({ label: '다른 작업', undo: async () => {}, redo: async () => {} });");
+  await undo.listeners.click();
+  assert.equal(sent.filter(call => call.url === '/api/workflow/review-restore').length, 0);
+  assert.match(notice.textContent, /최근 작업부터 순서대로/);
+  app.run('undoStack.pop();');
+  await undo.listeners.click();
+  assert.deepEqual(sent[sent.length - 1], { url: '/api/workflow/review-restore', body: { meetingId: 'mb1', drafts: ['mb1:stable:c'] } });
+});
+
+test('회의 초안: 빼기가 실패하면 초안은 그대로(되돌리기 기록·알림 `뺐어요` 없음)', async () => {
+  const { app, draw } = meetingBoardClient();
+  app.run('undoStack.length = 0;');
+  app.context.fetch = async () => new Response('{"ok":false,"error":"이미 처리했거나 찾을 수 없는 항목이에요."}', { status: 400 });
+  const box = draw();
+  await nodeFind(nodeFindAll(box, 'd-draft')[0], 'd-dpull').listeners.click();
+  assert.equal(app.run('undoStack.length'), 0);
+  assert.doesNotMatch(app.nodes.get('liveRegion').textContent, /뺐어요/);
+  assert.equal(app.run("wfDraftEdits.has('mb1:stable:a')"), true);
+});
+
+test('회의 정리 판 화면 규칙: 초안·결과 줄 사이 실선 없음, 세그먼트 사이 넓힘, 새 innerHTML 없음, 빈 칸 오류는 기존 오류 토큰', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.doesNotMatch(css, /\.d-draft \+ \.d-draft \{[^}]*border-top/);
+  assert.doesNotMatch(css, /\.d-mrow2 \+ \.d-mrow2 \{[^}]*border-top/);
+  assert.match(css, /\.d-draft \.ct \{[^}]*gap: 6px 14px/);
+  assert.match(css, /\.d-dtxt\[aria-invalid="true"\] \{ background: var\(--urgent-bg\); box-shadow: 0 0 0 1\.5px var\(--urgent\); \}/);
+  const ui = fs.readFileSync(path.join(__dirname, 'meetings-ui.js'), 'utf8');
+  const drafts = ui.slice(ui.indexOf('function panelMeetingDrafts'), ui.indexOf('// 항목 한 줄: 종류 | 문구 | 기한·상태.'));
+  assert.doesNotMatch(drafts, /innerHTML/, '초안 판에는 innerHTML이 없다');
+  assert.doesNotMatch(drafts, /비어 있는 문구가 있어요/, '옛 머리 오류 문구는 없다');
+});

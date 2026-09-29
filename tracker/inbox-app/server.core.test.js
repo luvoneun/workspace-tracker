@@ -1388,3 +1388,100 @@ test('BBUNDLE 2: 회의에서 담을 때 회의가 묶음의 다른 티켓에 �
   assert.equal(data.find(item => item.id === lead.id).jira, 'IO-1', '고르지 않았으면 대표 티켓');
   await post('/api/track/remove', { id: lead.id });
 });
+
+// 회의 정리 판 다듬기 — 뺀 초안 되살리기(review-restore). "뺀 직후 모양"일 때만 되살리고, 거절하면 아무것도 쓰지 않는다.
+test('회의 초안: 뺀 초안은 review-restore로 되살아나고, 여러 개는 하나씩 · 담은 것은 그대로다', async () => {
+  const draftsPath = path.join(directory, 'meeting_drafts.json');
+  const wf = path.join(directory, '.workflow.json');
+  fs.writeFileSync(path.join(directory, 'calendar_today.md'), `마지막 갱신: ${today}\n- 15:00-15:30 | 빼기 되돌리기 싱크\n`);
+  fs.writeFileSync(draftsPath, JSON.stringify({ notes: [{
+    noteGuid: 'rs1', webUrl: 'https://tiro.ooo/n/rs1', date: today, start: '15:00', end: '15:30', title: '빼기 되돌리기 싱크',
+    items: [
+      { type: 'task', description: '되돌리기 첫 초안' },
+      { type: 'check', description: '되돌리기 둘째 초안' },
+      { type: 'decision', description: '되돌리기 셋째 초안' },
+    ],
+  }] }));
+  try {
+    const meeting = (await items()).workflows.meetings.find(event => event.title === '빼기 되돌리기 싱크');
+    const [first, second, third] = meeting.drafts;
+    const draftsNow = async () => (await items()).workflows.meetings.find(event => event.id === meeting.id).drafts.map(draft => draft.id);
+
+    // 연달아 둘을 빼고, 되돌리기는 역순으로 하나씩
+    assert.equal((await post('/api/workflow/review', { meetingId: meeting.id, dismiss: [first.id] })).ok, true);
+    assert.equal((await post('/api/workflow/review', { meetingId: meeting.id, dismiss: [second.id] })).ok, true);
+    assert.deepEqual(await draftsNow(), [third.id]);
+    const back2 = await post('/api/workflow/review-restore', { meetingId: meeting.id, drafts: [second.id] });
+    assert.equal(back2.ok, true);
+    assert.equal(back2.restored, 1);
+    assert.deepEqual((await draftsNow()).sort(), [second.id, third.id].sort());
+    assert.equal((await post('/api/workflow/review-restore', { meetingId: meeting.id, drafts: [first.id] })).ok, true);
+    assert.deepEqual((await draftsNow()).sort(), [first.id, second.id, third.id].sort());
+
+    // 하나를 빼고 나머지를 담은 뒤 되돌리면 뺀 것만 돌아오고 담은 것은 그대로
+    assert.equal((await post('/api/workflow/review', { meetingId: meeting.id, dismiss: [first.id] })).ok, true);
+    const accepted = await post('/api/workflow/review', { meetingId: meeting.id, accept: [second, third] });
+    assert.equal(accepted.created.length, 2);
+    assert.equal((await post('/api/workflow/review-restore', { meetingId: meeting.id, drafts: [first.id] })).ok, true);
+    assert.deepEqual(await draftsNow(), [first.id]);
+    const linked = (await items()).workflows.items.filter(item => item.meetingId === meeting.id).map(item => item.id).sort();
+    assert.deepEqual(linked, [...accepted.created].sort(), '담은 항목은 회의에 그대로 걸려 있다');
+    assert.match(fs.readFileSync(path.join(directory, 'checks.md'), 'utf8'), /되돌리기 둘째 초안/);
+
+    // 거절: 살아 있는 초안 · 이미 담은 초안 · 없는 초안 · 다른 회의 · 빈 목록 · 같은 초안 두 번 — 파일은 한 글자도 안 바뀐다
+    const before = fs.readFileSync(wf, 'utf8');
+    for (const body of [
+      { meetingId: meeting.id, drafts: [first.id] },
+      { meetingId: meeting.id, drafts: [second.id] },
+      { meetingId: meeting.id, drafts: ['rs1:stable:nope'] },
+      { meetingId: 'other-meeting', drafts: [first.id] },
+      { meetingId: meeting.id, drafts: [] },
+      { meetingId: meeting.id },
+      { meetingId: meeting.id, drafts: [second.id, second.id] },
+      { meetingId: meeting.id, drafts: ['__proto__'] },
+    ]) {
+      const refused = await post('/api/workflow/review-restore', body);
+      assert.equal(refused.status, 400, JSON.stringify(body));
+      assert.equal(refused.ok, false);
+    }
+    assert.equal(fs.readFileSync(wf, 'utf8'), before);
+    // 여럿 중 하나라도 안 되면 전부 거절(반쯤 되살리지 않는다)
+    assert.equal((await post('/api/workflow/review', { meetingId: meeting.id, dismiss: [first.id] })).ok, true);
+    const mixed = fs.readFileSync(wf, 'utf8');
+    assert.equal((await post('/api/workflow/review-restore', { meetingId: meeting.id, drafts: [first.id, second.id] })).status, 400);
+    assert.equal(fs.readFileSync(wf, 'utf8'), mixed);
+  } finally {
+    fs.rmSync(draftsPath, { force: true });
+  }
+});
+
+test('회의 초안: 뺀 기록이 옛 모양이면 되살리기를 거절하고, 목록은 그대로 읽힌다', async () => {
+  const draftsPath = path.join(directory, 'meeting_drafts.json');
+  const wf = path.join(directory, '.workflow.json');
+  fs.writeFileSync(path.join(directory, 'calendar_today.md'), `마지막 갱신: ${today}\n- 16:00-16:30 | 옛 기록 싱크\n`);
+  fs.writeFileSync(draftsPath, JSON.stringify({ notes: [{
+    noteGuid: 'rs2', date: today, start: '16:00', end: '16:30', title: '옛 기록 싱크',
+    items: [{ type: 'task', description: '옛 기록 첫 초안' }, { type: 'task', description: '옛 기록 둘째 초안' }],
+  }] }));
+  try {
+    const meeting = (await items()).workflows.meetings.find(event => event.title === '옛 기록 싱크');
+    const [first, second] = meeting.drafts;
+    // 옛 설치가 남긴 모양: 값이 'dismissed'가 아닌 표시(true) · 예전 번호 꼴(noteGuid:순번)
+    const state = JSON.parse(fs.readFileSync(wf, 'utf8'));
+    state.reviewed = { [first.id]: true, 'rs2:1': 'dismissed' };
+    fs.writeFileSync(wf, JSON.stringify(state));
+    const before = fs.readFileSync(wf, 'utf8');
+    assert.equal((await post('/api/workflow/review-restore', { meetingId: meeting.id, drafts: [first.id] })).status, 400);
+    assert.equal((await post('/api/workflow/review-restore', { meetingId: meeting.id, drafts: ['rs2:1'] })).status, 400);
+    assert.equal(fs.readFileSync(wf, 'utf8'), before);
+    const data = (await items()).workflows.meetings.find(event => event.id === meeting.id);
+    assert.ok(Array.isArray(data.drafts), '목록은 깨지지 않는다');
+    assert.ok(!data.drafts.some(draft => draft.id === first.id), '옛 표시가 붙은 초안은 그대로 빠져 있다');
+    assert.ok(data.drafts.some(draft => draft.id === second.id));
+    // reviewed 칸이 아예 없는 옛 파일도 거절만 한다
+    fs.writeFileSync(wf, JSON.stringify({ items: {}, meetings: {} }));
+    assert.equal((await post('/api/workflow/review-restore', { meetingId: meeting.id, drafts: [first.id] })).status, 400);
+  } finally {
+    fs.rmSync(draftsPath, { force: true });
+  }
+});

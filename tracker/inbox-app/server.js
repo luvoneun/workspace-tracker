@@ -2523,6 +2523,8 @@ const handleRequest = (req, res) => {
     '/api/workflow/capture': workflows.capture,
     '/api/workflow/review': workflows.review,
     '/api/workflow/review-undo': workflows.undoReview,
+    // 뺀 초안 되살리기(알림의 `되돌리기`·⌘Z) — 뺀 직후 모양(검토 기록 'dismissed')일 때만, 검토 기록 한 칸만 지운다.
+    '/api/workflow/review-restore': workflows.restoreDismissed,
     '/api/workflow/link': workflows.link,
     // 리마인드의 `답변 왔어요`를 한 번 열어 봤다는 표시(업무의 흐름 기록 칸 하나)와 그 되돌리기(알림·⌘Z).
     '/api/workflow/answer-seen': workflows.markAnswerSeen,
