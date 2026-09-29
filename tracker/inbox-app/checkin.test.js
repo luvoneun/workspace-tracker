@@ -406,6 +406,12 @@ test('WP-N 만든 사람의 설치(업데이트 갈래 main)는 WORKSPACE_CHECKI
   // 대조: 같은 상태에 stable 갈래면 뜬다(위 결과가 우연이 아니게). 보내기는 하지 않는다 — 가짜 전송이 없는 자식 서버다.
   const stable = await start('stable');
   assert.equal((await (await fetch(stable.base + '/api/checkin')).json()).show, 'd3');
+  // 응답 뒤에 따로 가는 사용 횟수 설치 신호(WP-R)가 끝나기를 기다린다 — 바깥 전송이 막힌 자식이라 대기로 남는다.
+  // 기다리지 않으면 뒷정리(임시 폴더 지우기)와 그 쓰기가 겹친다.
+  const usageFile = path.join(local, 'usage.json');
+  const queued = () => { try { return JSON.parse(fs.readFileSync(usageFile, 'utf8')).sent.queue.length === 1; } catch { return false; } };
+  for (let i = 0; i < 100 && !queued(); i++) await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(queued(), true, '실제 구글에 닿지 않고 대기로 남는다');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

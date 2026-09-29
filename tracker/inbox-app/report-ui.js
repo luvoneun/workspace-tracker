@@ -738,6 +738,7 @@ function reportDocHead(item, host) {
     try {
       await reportSlackCopy(reportSlackModel(report, { sections: [...reportSlackSections], jira: reportJiraInfo }));
       announce('슬랙에 붙여 넣을 수 있게 복사했어요');
+      if (typeof usageTick === 'function') usageTick('weekly_copy');   // 사용 횟수(WP-R)
     } catch {
       reportSelectPreview();
       throw new Error('복사 미리보기의 내용을 직접 선택해 복사해 주세요.');

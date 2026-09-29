@@ -3661,6 +3661,7 @@ function palOpen(state) {
   if (palState) palClose(true);
 
   palState = palDefaults(state);
+  if (!reopening && typeof usageTick === 'function') usageTick('search');   // 사용 횟수(WP-R)
   if (!palState.returnFocus) {
     palState.returnFocus = !reopening && opener && opener !== document.body && opener.focus
       ? opener
@@ -4055,7 +4056,7 @@ function renderGuideCard() {
   close.setAttribute('aria-label', '사용설명서 닫기 — 도움말에 남아요');
   close.addEventListener('click', guideCardClose);
   head.append(title, close);
-  card.append(head, ...guideRows());
+  card.append(head, ...guideRows(), ...(typeof usageGuideLine === 'function' ? usageGuideLine() : []));
   zone.appendChild(card);
 }
 
@@ -4743,6 +4744,7 @@ function setActiveTab(tab) {
     document.getElementById(cfg.grid).setAttribute('role', 'tabpanel');
     document.getElementById(cfg.grid).setAttribute('aria-labelledby', cfg.btn);
   });
+  if (typeof usageTabOpened === 'function') usageTabOpened(tab, activeTabKey);   // 사용 횟수(WP-R, usage-ui.js)
   activeTabKey = tab;
   // 주간요약을 떠나면 문장 모으기 막대도 함께 내린다(떠 있는 막대가 다른 탭에 남지 않게).
   if (tab !== 'weekly' && typeof reportNestEnd === 'function') reportNestEnd();

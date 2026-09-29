@@ -2117,7 +2117,26 @@ function checkinEnabled() {
   if (process.env.WORKSPACE_CHECKIN === '0') return false;
   return !!process.env.WORKSPACE_MANAGED && !process.env.WORKSPACE_NO_REMOTE_CHECK && !process.env.WORKSPACE_FIXTURE;
 }
+// ---------- 사용 횟수 (WP-R, usage.js) ----------
+// 기능별 사용 횟수를 `local/usage.json`에 날짜별 숫자만 센다(세기·보기는 모든 설치). 보내기는 위 체크인과 같은 조건·같은 길이다.
+// 테스트(WORKSPACE_NO_REMOTE_CHECK)에서 `WORKSPACE_LOCAL_DIR`를 따로 주지 않았으면 세지 않는다 — 실제 `local/`에 쓰지 않게.
+// 테스트는 `setUsageForTests({ localDir })`로 임시 폴더를 끼운다.
+const usageTest = { localDir: null };
+function setUsageForTests(options = {}) { usageTest.localDir = options.localDir || null; }
+function usageDir() {
+  if (usageTest.localDir) return usageTest.localDir;
+  if (process.env.WORKSPACE_NO_REMOTE_CHECK && !process.env.WORKSPACE_LOCAL_DIR) return null;
+  return LOCAL_DIR;
+}
+const usage = require('./usage').createUsage({
+  localDir: usageDir,
+  today: () => checkinTest.today || todayLocal(),
+  canSend: () => checkin.canSend(),
+});
 const checkin = require('./checkin').createCheckin({
+  usageFields: (label, today) => usage.formFields(label, today),
+  onOpen: (state, today, tools) => usage.opened(state, today, tools),
+  usageOn: () => usage.sendOn(),
   localDir: () => checkinTest.localDir || LOCAL_DIR,
   today: () => checkinTest.today || todayLocal(),
   enabled: checkinEnabled,
@@ -2155,7 +2174,7 @@ const CLIENT_BLOCKED = new Set([
   'task-batch.js', 'slack-history.js', 'slack-collect.js', 'import-record.js', 'browser-fixture.js', 'migrate.js',
   'integrations.js', 'ical.js', 'calendar-live.js', 'personalize.js', 'news.js', 'test-support.js',
   'routes-jira.js', 'routes-integrations.js', 'routes-app.js', 'routes-personalize.js', 'routes-items.js',
-  'routes-track.js', 'selfcheck.js', 'checkin.js',
+  'routes-track.js', 'selfcheck.js', 'checkin.js', 'usage.js',
 ]);
 function isClientFile(name) {
   if (!/^[A-Za-z0-9][\w.-]*\.(js|css)$/.test(name)) return false;   // 이름 한 칸짜리(하위 경로 없음)만
@@ -2224,7 +2243,7 @@ const handleRequest = (req, res) => {
           if(existing)return {ok:true,id:existing.id,duplicate:true};
           const create={task:createLaterTask,check:createWaitingItem,decision:createDecision,idea:createIdea}[type];
           const result=create({...payload,permalink:undefined});
-          setTrackField(result.id,'source',`slack:${permalink}`,null);
+          setTrackField(result.id,'source',`slack:${permalink}`,null);usage.add('slack_in');
           if(type==='task'){setTrackField(result.id,'inbox','true','task');if(payload.due)setTrackDue(result.id,payload.due);}
           return result;
         }
@@ -2352,7 +2371,7 @@ const workflows = require('./workflow-store')({
   // 종류 바꾸기: 같은 id로 업무 파일의 줄만 옮긴다(위 retypeTrackItem).
   move: retypeTrackItem,
 });
-const batchTasks = require('./task-batch')({ files: listTrackerFiles, pattern: TRACK_RE, parse: parseFields, validateDate, today: todayLocal });
+const batchTasks = usage.countBatch(require('./task-batch')({ files: listTrackerFiles, pattern: TRACK_RE, parse: parseFields, validateDate, today: todayLocal }), id => getReportRefs()[id]);
 const reportDrafts = require('./report-drafts')({ directory: TRACKER_DIR, sources: () => workflows.snapshot().items, legacy: parseWeeklyReports, currentWeek: currentWeekKey });
 const mutations = require('./mutation-store')(TRACKER_DIR, [MEETING_LINKS_PATH, weeklyReportStatePath()]);
 // 지라 직접 읽기. 설정이 없으면 `connected:false`만 돌려주고 아무 데도 접속하지 않는다.
@@ -2413,6 +2432,7 @@ const ROUTE_MODULES = [
   require('./routes-app'),
   require('./routes-personalize'),
   checkin.route,
+  usage.route,
 ];
 const routeCtx = {
   get APP_TITLE() { return APP_TITLE; },
@@ -2442,6 +2462,13 @@ const routeCtx = {
   createDecision, createIdea, promoteIdeaToToday, setTrackJira, setTrackGroup, setIdeaProject, setTrackDue, setTrackDoing,
   setTrackWho, setTrackPriority, setTrackDescription, removeTrackItem, toggleTrackStatus,
 };
+// 사용 횟수(WP-R) — 화면 경로가 부르는 저장 함수에만 세기를 씌운다(가져오기·워크플로가 부르는 같은 함수는 세지 않는다).
+Object.assign(routeCtx, {
+  createManualTask: usage.countCreate(createManualTask, 'task_add'), createLaterTask: usage.countCreate(createLaterTask, 'task_add'),
+  createWaitingItem: usage.countCreate(createWaitingItem, 'check_add'), createDecision: usage.countCreate(createDecision, 'decision_add'),
+  createIdea: usage.countCreate(createIdea, 'idea_add'), toggleTrackStatus: usage.countToggle(toggleTrackStatus, id => getReportRefs()[id]),
+  removeTrackItem: usage.countRemove(removeTrackItem), jira: usage.countJira(jira),
+});
 // 홈 화면 추가 때 브라우저가 로그인 정보 없이 가져가는 앱 아이콘·manifest만 인증 없이 연다(DECISIONS 2026-09-20).
 function publicAssetRequest(req) {
   return req.method==='GET' && /^\/(icons\/[\w-]+\.png|manifest\.webmanifest)(\?.*)?$/.test(req.url||'');
@@ -2458,7 +2485,7 @@ function safeHandle(req, res) {
     res.setHeader('X-Content-Type-Options','nosniff');
     res.setHeader('Referrer-Policy','no-referrer');
     res.setHeader('Cache-Control','no-store');
-    handleRequest(req,res);
+    usage.observe(res,()=>handleRequest(req,res));
   } catch(error) {
     console.error('요청 처리 실패:', error.message);
     if (!res.headersSent) res.writeHead(500, {'Content-Type':'application/json; charset=utf-8'});
@@ -2516,5 +2543,5 @@ module.exports = {
   // WP-L 인증 없이 여는 경로(아이콘·manifest) — 목록이 늘지 않았는지 테스트가 본다.
   publicAssetRequest,
   // WP-N 체크인 — 가짜 전송·임시 local/·오늘 날짜를 끼우는 테스트·픽스처 전용 길.
-  setCheckinFetchForTests, setCheckinForTests, checkin,
+  setCheckinFetchForTests, setCheckinForTests, checkin, setUsageForTests, usage,
 };

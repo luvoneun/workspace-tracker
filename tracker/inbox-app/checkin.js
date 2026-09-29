@@ -139,6 +139,8 @@ function normalizeState(raw, today) {
 
 // deps: localDir() · today() · enabled() · version() · integrations() → { slack, jira, calendar, notes }
 //       · request(url, options) → Response(가짜 fetch를 끼울 수 있다) · timeoutMs(테스트용)
+//       · usageFields(label, today) → 사용 횟수 칸(WP-R, 없으면 없음) · onOpen(state, today, tools) → 앱을 연 날의 사용 횟수 신호(WP-R)
+//       · usageOn() → 사용 횟수를 함께 보내는지(창 안내 문구)
 function createCheckin(deps) {
   const inflight = new Set();   // 지금 보내는 중인 회차 — 두 창이 같은 회차를 동시에 보내도 한 번만.
   const timeoutMs = () => (deps.timeoutMs && deps.timeoutMs()) || CHECKIN_TIMEOUT_MS;
@@ -246,13 +248,17 @@ function createCheckin(deps) {
   }
 
   function autoPairs(state, key) {
+    return autoFields(state, CHECKIN_ROUNDS[key].label);
+  }
+  // 회차 글자를 받는 자동 칸 — 사용 횟수의 `설치`·`정기` 신호(usage.js)도 같은 칸을 쓴다.
+  function autoFields(state, label) {
     let on = {};
     try { on = deps.integrations() || {}; } catch { on = {}; }
     const names = INTEGRATION_NAMES.filter(([flag]) => on[flag]).map(([, name]) => name);
     let version = '';
     try { version = String(deps.version() || ''); } catch { version = ''; }
     return [
-      [CHECKIN_AUTO_ENTRIES.round, CHECKIN_ROUNDS[key].label],
+      [CHECKIN_AUTO_ENTRIES.round, label],
       [CHECKIN_AUTO_ENTRIES.id, state.id],
       [CHECKIN_AUTO_ENTRIES.openDays, String(state.openDays.length)],
       [CHECKIN_AUTO_ENTRIES.integrations, names.join(', ')],
@@ -266,7 +272,7 @@ function createCheckin(deps) {
     if (!deps.enabled()) return { result: { show: null }, retry: Promise.resolve() };
     const today = deps.today();
     const { state, created, changed: fixed } = load(today);
-    if (created) { save(state); return { result: { show: null }, retry: Promise.resolve() }; }
+    if (created) { save(state); return { result: { show: null }, retry: usageOpened(state, today) }; }
     let changed = fixed;
     if (state.closed) {
       if (changed) save(state);
@@ -299,11 +305,12 @@ function createCheckin(deps) {
         show: pick,
         canSnooze: state.rounds[pick].state !== 'snoozed',
         eyebrow: CHECKIN_ROUNDS[pick].eyebrow,
+        usageOn: !!(deps.usageOn && deps.usageOn()),
         questions: questionsFor(pick).map(({ entry, round, ...question }) => question),
       };
     }
     if (changed) save(state);
-    const retry = Promise.all(retries.map(([key, fields]) => send(key, fields, today).catch(() => 'failed')));
+    const retry = Promise.all([...retries.map(([key, fields]) => send(key, fields, today).catch(() => 'failed')), usageOpened(state, today)]);
     return { result, retry };
   }
 
@@ -327,9 +334,37 @@ function createCheckin(deps) {
       save(state);
       return { snoozed: true };
     }
-    const pairs = [...autoPairs(state, key), ...cleanAnswers(key, answers)];
+    const answered = cleanAnswers(key, answers);
+    const pairs = [...autoPairs(state, key), ...usagePairs(key, today), ...answered];
     const outcome = await send(key, pairs, today);
     return outcome === 'sent' ? { sent: true } : outcome === 'closed' ? { closed: true } : { queued: true };
+  }
+
+  // 사용 횟수(WP-R) — 칸과 신호는 usage.js가 만들고, 보내는 길(deliver)·폼 닫힘은 여기 것을 그대로 쓴다.
+  function usagePairs(key, today) {
+    if (!deps.usageFields) return [];
+    try { return deps.usageFields(CHECKIN_ROUNDS[key].label, today) || []; } catch { return []; }
+  }
+  function usageOpened(state, today) {
+    if (!deps.onOpen) return Promise.resolve();
+    const tools = { deliver, autoFields: label => autoFields(state, label), markClosed: () => markClosed(today) };
+    return Promise.resolve().then(() => deps.onOpen({ openDays: [...state.openDays], rounds: { ...state.rounds } }, today, tools)).catch(() => {});
+  }
+  // 폼이 닫혔다(사용 횟수 신호가 알아냄) — settle의 `closed`와 같게 적는다.
+  function markClosed(today) {
+    const { state } = load(today);
+    state.closed = true;
+    for (const name of Object.keys(state.rounds)) {
+      if (state.rounds[name].state === 'queued') state.rounds[name] = { state: 'dropped' };
+    }
+    save(state);
+  }
+  // 이 설치가 지금 보낼 수 있나(켜져 있고 폼이 닫히지 않음) — 사용설명서·설정의 알림 줄을 보일지 정한다. 파일을 쓰지 않는다.
+  function canSend() {
+    if (!deps.enabled()) return false;
+    let raw = null;
+    try { raw = JSON.parse(nativeFs.readFileSync(file(), 'utf8')); } catch { raw = null; }
+    return !(raw && raw.closed === true);
   }
 
   function json(res, status, body) {
@@ -362,7 +397,7 @@ function createCheckin(deps) {
     return true;
   }
 
-  return { poll, act, route, inflight };
+  return { poll, act, route, inflight, canSend };
 }
 
 module.exports = {

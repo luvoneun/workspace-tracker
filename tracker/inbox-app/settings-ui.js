@@ -388,7 +388,7 @@ async function renderSettingsApp() {
   view.replaceChildren(settingsEl('d-empty', '불러오는 중이에요…'));
   const [about, backup] = await Promise.all([settingsAboutLoad(), settingsBackupLoad()]);
   const place = personalizePlace(about);
-  view.replaceChildren(settingsVersionRow(), settingsBackupRow(backup), place, selfcheckRow());
+  view.replaceChildren(settingsVersionRow(), settingsBackupRow(backup), place, selfcheckRow(), ...(typeof usageSettingsRow === 'function' ? [usageSettingsRow()] : []));
   settingsAboutFill();
   // 도움말 `문제가 생겼어요`의 `점검하기`로 들어왔으면 그 버튼에 초점(selfcheck-ui.js).
   if (settingsFocusKey === 'selfcheck') {
@@ -3016,7 +3016,7 @@ function renderSettingsManual() {
   const box = settingsEl('d-manual');
   box.setAttribute('role', 'region');
   box.setAttribute('aria-label', '사용설명서');
-  box.append(settingsEl('hd', '사용설명서'), ...guideRows());
+  box.append(settingsEl('hd', '사용설명서'), ...guideRows(), ...(typeof usageGuideLine === 'function' ? usageGuideLine() : []));
   view.appendChild(box);
 }
 
