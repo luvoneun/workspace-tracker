@@ -140,7 +140,7 @@ function normalizeState(raw, today) {
 // deps: localDir() · today() · enabled() · version() · integrations() → { slack, jira, calendar, notes }
 //       · request(url, options) → Response(가짜 fetch를 끼울 수 있다) · timeoutMs(테스트용)
 //       · usageFields(label, today) → 사용 횟수 칸(WP-R, 없으면 없음) · onOpen(state, today, tools) → 앱을 연 날의 사용 횟수 신호(WP-R)
-//       · usageOn() → 사용 횟수를 함께 보내는지(창 안내 문구)
+//       · usageOn() → 사용 횟수를 함께 보내는지(창 안내 문구·대기 답 재전송) · usageEntries → 사용 횟수 칸 번호 목록
 function createCheckin(deps) {
   const inflight = new Set();   // 지금 보내는 중인 회차 — 두 창이 같은 회차를 동시에 보내도 한 번만.
   const timeoutMs = () => (deps.timeoutMs && deps.timeoutMs()) || CHECKIN_TIMEOUT_MS;
@@ -292,7 +292,7 @@ function createCheckin(deps) {
       } else if (round.lastTry !== today && !inflight.has(key)) {
         round.lastTry = today;
         changed = true;
-        retries.push([key, round.queued.fields]);
+        retries.push([key, withoutUsage(round.queued.fields)]);
       }
     }
     const { pick, changed: skipped } = choose(state, today);
@@ -349,6 +349,12 @@ function createCheckin(deps) {
     if (!deps.onOpen) return Promise.resolve();
     const tools = { deliver, autoFields: label => autoFields(state, label), markClosed: () => markClosed(today) };
     return Promise.resolve().then(() => deps.onOpen({ openDays: [...state.openDays], rounds: { ...state.rounds } }, today, tools)).catch(() => {});
+  }
+  // 끄기 전에 제출해 대기로 남은 답 — 다시 보낼 때 지금 꺼져 있으면 사용 횟수 칸을 뺀다(질문 답·자동 칸은 그대로).
+  function withoutUsage(fields) {
+    if (!deps.usageEntries || (deps.usageOn && deps.usageOn())) return fields;
+    const drop = new Set(deps.usageEntries);
+    return fields.filter(([entry]) => !drop.has(entry));
   }
   // 폼이 닫혔다(사용 횟수 신호가 알아냄) — settle의 `closed`와 같게 적는다.
   function markClosed(today) {

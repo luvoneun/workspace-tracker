@@ -193,10 +193,11 @@ function createUsage(deps) {
     return removed;
   };
   // 여러 개 완료(일괄) — 되돌리기(undoToken)는 세지 않는다.
-  const countBatch = (fn, lookup) => (body, ...rest) => {
+  // lookupAll() → { id: 항목 } — 업무 목록을 요청마다 한 번만 읽는다.
+  const countBatch = (fn, lookupAll) => (body, ...rest) => {
     const done = body && !body.undoToken && body.change && body.change.status === 'done' && Array.isArray(body.ids);
     let before = [];
-    if (done) { try { before = body.ids.map(id => lookup(id)).filter(Boolean); } catch { before = []; } }
+    if (done) { try { const all = lookupAll(); before = body.ids.map(id => all[id]).filter(Boolean); } catch { before = []; } }
     const result = fn(body, ...rest);
     if (done && result && result.ok) {
       const total = {};

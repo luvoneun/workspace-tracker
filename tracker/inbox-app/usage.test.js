@@ -42,6 +42,7 @@ function harness(t, options = {}) {
     usageFields: (label, today) => h.usage.formFields(label, today),
     onOpen: (state, today, tools) => h.usage.opened(state, today, tools),
     usageOn: () => h.usage.sendOn(),
+    usageEntries: Object.values(USAGE_ENTRIES),
   });
   h.checkinFile = path.join(dir, 'checkin.json');
   h.usageFile = path.join(dir, 'usage.json');
@@ -312,6 +313,29 @@ test('WP-R 끄면 설치·정기를 보내지 않고 체크인 답의 사용 횟
   p.today = addDays(TODAY, 1);
   await p.open();
   assert.deepEqual(p.calls.map((_, i) => p.round(i)), ['설치']);
+});
+
+test('WP-R 끄기 전에 제출해 대기로 남은 체크인 답 — 끈 뒤 다시 보낼 때 사용 횟수 9칸을 빼고, 질문 답·자동 칸은 그대로', async (t) => {
+  const h = harness(t);
+  h.seed(seedState(ago(3), [ago(3), ago(1)]));
+  h.seedUsage(usageDays({ [ago(2)]: { task_add: 4 } }));
+  h.reply = async () => { throw new TypeError('fetch failed'); };
+  assert.deepEqual(await h.checkin.act({ round: 'd3', action: 'send', answers: { setup: '쉬웠어요', helped: ['지라'] } }), { queued: true });
+  assert.equal([...h.body(0).keys()].filter(key => USAGE_ENTRY_SET.has(key)).length, 9, '제출 때는 9칸이 있었다');
+  h.usage.setSend(false);
+  h.today = addDays(TODAY, 1);
+  h.reply = async () => new Response('ok', { status: 200 });
+  h.calls.length = 0;
+  await h.open();
+  assert.equal(h.calls.length, 1, '대기 답 재전송만(끈 사람은 설치 신호 없음)');
+  const body = h.body(0);
+  assert.equal([...body.keys()].some(key => USAGE_ENTRY_SET.has(key)), false, '사용 횟수 칸 없음');
+  assert.equal(body.get('entry.2037894728'), '쉬웠어요');
+  assert.deepEqual(body.getAll('entry.1269347696'), ['지라']);
+  assert.equal(body.get(CHECKIN_AUTO_ENTRIES.round), '3일째');
+  assert.equal(body.get(CHECKIN_AUTO_ENTRIES.id), 'anon-1');
+  assert.equal(body.get(CHECKIN_AUTO_ENTRIES.version), '1.3.0');
+  assert.equal(h.readCheckin().rounds.d3.state, 'sent');
 });
 
 test('WP-R 만든 사람 설치(main 갈래 등 꺼진 체크인)는 세기는 하되 아무것도 보내지 않는다', async (t) => {

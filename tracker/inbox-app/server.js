@@ -2141,6 +2141,7 @@ const checkin = require('./checkin').createCheckin({
   usageFields: (label, today) => usage.formFields(label, today),
   onOpen: (state, today, tools) => usage.opened(state, today, tools),
   usageOn: () => usage.sendOn(),
+  usageEntries: Object.values(require('./usage').USAGE_ENTRIES),
   localDir: () => checkinTest.localDir || LOCAL_DIR,
   today: () => checkinTest.today || todayLocal(),
   enabled: checkinEnabled,
@@ -2375,7 +2376,7 @@ const workflows = require('./workflow-store')({
   // 종류 바꾸기: 같은 id로 업무 파일의 줄만 옮긴다(위 retypeTrackItem).
   move: retypeTrackItem,
 });
-const batchTasks = usage.countBatch(require('./task-batch')({ files: listTrackerFiles, pattern: TRACK_RE, parse: parseFields, validateDate, today: todayLocal }), id => getReportRefs()[id]);
+const batchTasks = usage.countBatch(require('./task-batch')({ files: listTrackerFiles, pattern: TRACK_RE, parse: parseFields, validateDate, today: todayLocal }), () => getReportRefs());
 const reportDrafts = require('./report-drafts')({ directory: TRACKER_DIR, sources: () => workflows.snapshot().items, legacy: parseWeeklyReports, currentWeek: currentWeekKey });
 const mutations = require('./mutation-store')(TRACKER_DIR, [MEETING_LINKS_PATH, weeklyReportStatePath()]);
 // 지라 직접 읽기. 설정이 없으면 `connected:false`만 돌려주고 아무 데도 접속하지 않는다.
