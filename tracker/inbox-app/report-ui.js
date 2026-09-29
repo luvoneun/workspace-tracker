@@ -2215,8 +2215,8 @@ function renderReportDraft(item) {
   reportPreview(report);
 }
 
-// ---------- 주차 목록에 끼울 자리(다음 버전 '내 일 기록') ----------
-// app.js의 renderWeeklyReports가 부른다 — 지금은 둘 다 아무것도 그리지 않는다(null). ① 주차 한 줄의 오른쪽 끝 칸
+// ---------- 주차 목록에 끼울 자리('내 일 기록', 그리기는 usage-ui.js) ----------
+// app.js의 renderWeeklyReports가 부른다 — usage-ui.js가 없거나 기록이 없으면 null. ① 주차 한 줄의 오른쪽 끝 칸
 // (끝낸 일 막대·숫자 자리) ② 주차 목록 칸 맨 아래 한 덩어리. 요소를 돌려주면 그 자리에 붙는다.
 function reportWeekRowEnd(item) { return typeof usageWeekRowEnd === 'function' ? usageWeekRowEnd(item) : null; }
 function reportWeeksFoot(items) { return typeof usageWeeksFoot === 'function' ? usageWeeksFoot(items) : null; }
