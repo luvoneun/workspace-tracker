@@ -10527,7 +10527,7 @@ test('WP-W 기간 경계 — 주는 월요일 시작, 이번 달 1일부터, 90�
 test('WP-W 숫자 정의 — 들어온·끝낸·남긴 기록, 하루 평균(기록 있는 날 기준·소수 한 자리·.0 뗌), 미래·모르는 키·음수는 무시', () => {
   const app = usageWorkClient();
   const history = {
-    '2026-09-28': { slack_in: 4, task_add: 1, task_done: 2, slack_done: 1, decision_add: 1, tab_today: 3 },
+    '2026-09-28': { slack_in: 4, task_add: 1, task_done: 3, slack_done: 1, decision_add: 1, tab_today: 3 },
     '2026-09-29': { task_add: 2, idea_add: 2, jira_create: 1, mystery: 50, task_done: -3 },
     '2026-09-30': { search: 1 },
     '2026-10-01': { task_done: 99 },
@@ -10535,7 +10535,8 @@ test('WP-W 숫자 정의 — 들어온·끝낸·남긴 기록, 하루 평균(기
   };
   const stats = usageStats(app, history, '2026-09-30', 'week');
   assert.deepEqual(stats.in, { total: 7, slack: 4, direct: 3 });
-  assert.deepEqual(stats.done, { total: 3, task: 2, slack: 1 });
+  assert.deepEqual(stats.done, { total: 3, slack: 1 }, '끝낸 일 = 할 일 끝냄만(슬랙 출처 할 일은 한 번), slack은 그중 슬랙');
+  assert.deepEqual(usageStats(app, { '2026-09-29': { task_done: 1, slack_done: 4 } }, '2026-09-30', 'week').done, { total: 1, slack: 1 }, '그중 슬랙은 끝낸 일을 넘지 않는다');
   assert.deepEqual(stats.record, { total: 4, parts: [{ label: '결정', count: 1 }, { label: '아이디어', count: 2 }, { label: '지라', count: 1 }] }, '0인 칸은 빼고');
   assert.equal(stats.recordedDays, 3);
   assert.equal(stats.average, '1', '3 ÷ 3 = 1(.0 뗌)');
@@ -10579,6 +10580,11 @@ test('WP-W 같은 길이 비교 — 이번 주 월~오늘 ↔ 지난주 월~같�
   // 비교 기간 들어온 일 0 → 생략.
   const quiet = usageStats(app, { ...usageFill('2026-09-10', 10, () => ({ task_done: 1 })), '2026-09-28': { task_add: 5 } }, '2026-09-28', 'week');
   assert.equal(quiet.compare, null);
+  // 첫 기록 날이 비교 기간 시작보다 뒤(지난주 수요일부터 기록) → 비교 기간이 덜 차서 생략.
+  const late = usageStats(app, { ...usageFill('2026-09-23', 8, () => ({ task_add: 2 })), '2026-09-28': { task_add: 9 } }, '2026-09-30', 'week');
+  assert.equal(late.compare, null);
+  const lateMonth = usageStats(app, usageFill('2026-08-20', 41, () => ({ task_add: 1 })), '2026-09-30', 'month');
+  assert.equal(lateMonth.compare, null, '지난달 중간부터 기록이면 달 비교도 생략');
   // 기록 7일 미만 → 생략.
   const young = usageStats(app, { '2026-09-21': { task_add: 3 }, '2026-09-28': { task_add: 9 } }, '2026-09-28', 'week');
   assert.equal(young.compare, null);
@@ -10651,6 +10657,17 @@ test('WP-W 알게 된 것 c — 들어온 일 20% 이상 늘고 끝낸 비율이
   assert.equal(usagePartsText(kept.insights[0].parts), '들어온 일이 100% 늘었는데 끝낸 비율은 80%로 유지했어요. 바빠도 밀리지 않았어요.');
   assert.equal(run(7).insights.length, 0, '70%는 80%보다 5%p 넘게 떨어짐');
   assert.equal(run(8).compare.text, '지난주보다 100% 더 바빴어요');
+  // 첫 기록이 비교 기간 시작(9/21)보다 뒤면 c도 없다.
+  const late = usageStats(app, {
+    ...usageFill('2026-09-22', 4, () => ({ search: 1 })),
+    '2026-09-22': { task_add: 5, task_done: 4 },
+    '2026-09-28': { task_add: 6, task_done: 8 },
+    '2026-09-29': { task_add: 4 },
+    '2026-09-30': { search: 1 },
+    '2026-09-27': { search: 1 },
+  }, '2026-09-30', 'week');
+  assert.equal(late.compare, null);
+  assert.deepEqual(late.insights.filter(item => item.kind === 'steady'), []);
 });
 
 test('WP-W 그리기 — 세그먼트(aria-pressed)·타일 3개·막대는 aria-hidden + 숨긴 목록, 빈 상태 한 줄, 기능별 전체 보기 표', () => {
@@ -10676,7 +10693,7 @@ test('WP-W 그리기 — 세그먼트(aria-pressed)·타일 3개·막대는 aria
   assert.equal(text(find(work, node => node.className === 'd-uwbig')), '이번 주 일 10개를 끝냈어요');
   assert.equal(find(work, node => node.className === 'd-uwbig').children[1].tagName, 'B');
   const tiles = all(work, node => /^d-uwtile( |$)/.test(String(node.className)));
-  assert.deepEqual(tiles.map(tile => text(tile)), ['들어온 일12개슬랙 11 · 직접 1', '끝낸 일10개할 일 10 · 슬랙 0', '남긴 기록0개']);
+  assert.deepEqual(tiles.map(tile => text(tile)), ['들어온 일12개슬랙 11 · 직접 1', '끝낸 일10개', '남긴 기록0개']);
   assert.equal(tiles[1].className, 'd-uwtile is-done');
   const bars = find(work, node => String(node.className).startsWith('d-uwbars'));
   assert.equal(bars.getAttribute('aria-hidden'), 'true');

@@ -102,7 +102,8 @@ const USAGE_DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 const USAGE_KNOWN_KEYS = ['tab_today', 'tab_projects', 'tab_meetings', 'tab_records', 'tab_weekly', 'task_add', 'task_done', 'task_remove',
   'slack_in', 'slack_done', 'slack_remove', 'check_add', 'idea_add', 'decision_add', 'search', 'weekly_copy', 'jira_create'];
 const USAGE_IN_KEYS = ['slack_in', 'task_add'];
-const USAGE_DONE_KEYS = ['task_done', 'slack_done'];
+// 끝낸 일은 할 일 끝냄만 — 슬랙 출처 할 일은 서버가 task_done·slack_done을 둘 다 올리므로 할 일로 한 번만 센다.
+const USAGE_DONE_KEYS = ['task_done'];
 const USAGE_RECORD_PARTS = [['decision_add', '결정'], ['idea_add', '아이디어'], ['jira_create', '지라'], ['check_add', '확인 대기']];
 const USAGE_DOW = ['월', '화', '수', '목', '금', '토', '일'];
 const USAGE_RANGES = [['week', '이번 주'], ['month', '이번 달'], ['90', '90일']];
@@ -295,7 +296,7 @@ function usageInsights(clean, today, range, period, current, before, recordedDay
 
 // 화면에 필요한 숫자·문장 재료를 한 번에. range: 'week' | 'month' | '90'(그 밖은 'week').
 // → { range, today, from, to, periodLabel, empty,
-//     headline: 조각[], in: { total, slack, direct }, done: { total, task, slack }, record: { total, parts: [{ label, count }] },
+//     headline: 조각[], in: { total, slack, direct }, done: { total, slack(그중 슬랙) }, record: { total, parts: [{ label, count }] },
 //     recordedDays, average: '1.5'|null, compare: null|{ from, to, in, done, change, tone: 'more'|'same'|'less', text },
 //     bars: [{ label, name, from, to, in, done, future, today, partial }], barNote: 글자|null, insights: [{ kind, parts }] }
 // 빈 상태(90일 안에 기록이 하나도 없음)면 range·today·from·to·periodLabel·empty만.
@@ -314,14 +315,16 @@ function usageWorkStats(history, today, range) {
     ? [`${view === '90' ? `${title} 동안` : title} 일 `, { b: `${current.done}개` }, '를 끝냈어요']
     : [`${title}${view === '90' ? '은' : '는'} 아직 끝낸 일이 없어요`];
   result.in = { total: current.in, slack: n('slack_in'), direct: n('task_add') };
-  result.done = { total: current.done, task: n('task_done'), slack: n('slack_done') };
+  result.done = { total: current.done, slack: Math.min(n('slack_done'), n('task_done')) };   // slack = 그중 슬랙에서 온 것
   result.record = { total: current.record, parts: USAGE_RECORD_PARTS.filter(([key]) => n(key) > 0).map(([key, label]) => ({ label, count: n(key) })) };
   result.recordedDays = current.days;
   result.average = current.days > 0 && current.done > 0 ? usageOneDecimal(current.done / current.days) : null;
-  // 같은 길이 비교 — 기록 7일 미만이거나 비교 기간 들어온 일이 0이면 생략. ±10% 안이면 비슷. 90일은 비교 없음.
+  // 같은 길이 비교 — 기록 7일 미만·비교 기간 들어온 일 0·비교 기간 중간부터 기록이면 생략. ±10% 안이면 비슷. 90일은 비교 없음.
   let before = null;
   result.compare = null;
-  if (period.prev && recordedDays >= 7) {
+  // 첫 기록 날이 비교 기간 시작보다 뒤면(비교 기간 기록이 덜 참) 비교와 인사이트 c도 생략한다.
+  const firstDay = Object.keys(clean).sort()[0];
+  if (period.prev && recordedDays >= 7 && firstDay <= period.prev.from) {
     const prev = usageTotals(clean, period.prev.from, period.prev.to);
     if (prev.in > 0) {
       before = prev;
@@ -524,7 +527,7 @@ function usageWorkBody(info, cell) {
     const tiles = usageEl('div', 'd-uwtiles');
     tiles.append(
       usageTile('들어온 일', stats.in.total, `슬랙 ${stats.in.slack} · 직접 ${stats.in.direct}`),
-      usageTile('끝낸 일', stats.done.total, `할 일 ${stats.done.task} · 슬랙 ${stats.done.slack}`, true),
+      usageTile('끝낸 일', stats.done.total, stats.done.slack > 0 ? `그중 슬랙 ${stats.done.slack}` : '', true),
       usageTile('남긴 기록', stats.record.total, stats.record.parts.map(part => `${part.label} ${part.count}`).join(' · ')),
     );
     body.appendChild(tiles);
