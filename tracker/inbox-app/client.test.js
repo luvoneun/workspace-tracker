@@ -10868,7 +10868,7 @@ test('WP-W 그리기 — 세그먼트(aria-pressed)·타일 3개·막대는 aria
   assert.equal(text(find(work, node => node.className === 'd-uwbig')), '이번 주 일 10개를 끝냈어요');
   assert.equal(find(work, node => node.className === 'd-uwbig').children[1].tagName, 'B');
   const tiles = all(work, node => /^d-uwtile( |$)/.test(String(node.className)));
-  assert.deepEqual(tiles.map(tile => text(tile)), ['들어온 일12개슬랙 11 · 직접 1', '끝낸 일10개', '남긴 기록0개']);
+  assert.deepEqual(tiles.map(tile => text(tile)), ['들어온 일12개슬랙\u00a011 · 직접\u00a01', '끝낸 일10개', '남긴 기록0개'], '항목 안은 붙는 빈칸 — `확인 대기 8`이 낱말 중간에서 안 끊긴다');
   assert.equal(tiles[1].className, 'd-uwtile is-done');
   const bars = find(work, node => String(node.className).startsWith('d-uwbars'));
   assert.equal(bars.getAttribute('aria-hidden'), 'true');
@@ -10889,6 +10889,7 @@ test('WP-W 그리기 — 세그먼트(aria-pressed)·타일 3개·막대는 aria
   const empty = app.run('usageSettingsNode');
   assert.equal(text(find(empty, node => String(node.className).includes('d-uwempty'))), '아직 기록이 없어요. 할 일을 끝내면 여기에 쌓여요.');
   assert.equal(find(empty, node => node.className === 'd-uwtiles'), null);
+  assert.equal(find(empty, node => node.className === 'd-uwhead'), null, '기록이 없으면 기간 전환·기간 글자를 숨긴다');
   // 응답 실패.
   app.run('usageInfo = null; usageSettingsPaint();');
   assert.equal(text(app.run('usageSettingsNode')), '사용 기록을 읽지 못했어요.');

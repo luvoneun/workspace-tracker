@@ -470,6 +470,11 @@ function usageEl(tag, className, text) {
   return node;
 }
 
+// 타일 작은 글자 — 항목(`확인 대기 8`) 안에서는 줄이 바뀌지 않게 붙는 빈칸으로 잇고, 항목 사이 ` · `에서만 바뀐다.
+function usageKeepTogether(pairs) {
+  return pairs.map(([label, count]) => `${label} ${count}`.replace(/ /g, '\u00a0')).join(' · ');
+}
+
 function usageTile(name, total, sub, strong) {
   const tile = usageEl('div', strong ? 'd-uwtile is-done' : 'd-uwtile');
   tile.append(usageEl('span', 'd-uwk', name), usageEl('b', 'd-uwv', `${total}개`), usageEl('span', 'd-uws', sub || ''));
@@ -504,7 +509,8 @@ function usageWorkBody(info, cell) {
     seg.appendChild(button);
   }
   head.append(seg, usageEl('p', 'd-uwperiod', stats.periodLabel));
-  body.appendChild(head);
+  // 90일 안에 기록이 하나도 없으면 기간을 바꿔도 같은 한 줄이라 세그먼트·기간 글자를 숨긴다(빈 화면엔 할 수 있는 것만).
+  if (!stats.empty) body.appendChild(head);
 
   if (stats.empty) {
     body.appendChild(usageEl('p', 'd-ismall d-uwempty', '아직 기록이 없어요. 할 일을 끝내면 여기에 쌓여요.'));
@@ -526,9 +532,9 @@ function usageWorkBody(info, cell) {
     // 타일 3개 — 끝낸 일만 강조.
     const tiles = usageEl('div', 'd-uwtiles');
     tiles.append(
-      usageTile('들어온 일', stats.in.total, `슬랙 ${stats.in.slack} · 직접 ${stats.in.direct}`),
-      usageTile('끝낸 일', stats.done.total, stats.done.slack > 0 ? `그중 슬랙 ${stats.done.slack}` : '', true),
-      usageTile('남긴 기록', stats.record.total, stats.record.parts.map(part => `${part.label} ${part.count}`).join(' · ')),
+      usageTile('들어온 일', stats.in.total, usageKeepTogether([['슬랙', stats.in.slack], ['직접', stats.in.direct]])),
+      usageTile('끝낸 일', stats.done.total, stats.done.slack > 0 ? usageKeepTogether([['그중 슬랙', stats.done.slack]]) : '', true),
+      usageTile('남긴 기록', stats.record.total, usageKeepTogether(stats.record.parts.map(part => [part.label, part.count]))),
     );
     body.appendChild(tiles);
 
