@@ -632,6 +632,8 @@ function projectTaskRow(item) {
   title.setAttribute('aria-label', `${item.description} 상세 보기`);
   title.addEventListener('click', () => panelOpen({ id: item.id }));
   row.appendChild(title);
+  // 좁은 폭에서는 줄 아무 데나 눌러도 상세 시트가 열린다(오늘 목록 줄과 같은 규칙 — app.js uiRowTapOpens).
+  row.addEventListener('click', (event) => { if (uiRowTapOpens(event)) panelOpen({ id: item.id }); });
 
   // 우선순위 열은 없앴다 — 왼쪽 체크박스 안의 꺾쇠가 같은 말을 한다(한 줄에서 두 번 말하지 않는다).
   // 정렬은 그대로 `마감·중요도순`(compareTasks)이다.
@@ -650,7 +652,7 @@ function projectTaskRow(item) {
   move.setAttribute('aria-label', `${item.description} — ${move.textContent}`);
   move.addEventListener('click', async () => {
     move.disabled = true;
-    await fadeOutAndRun(row, () => setTaskScheduled(item.id, mode === 'later' ? todayStr() : null),
+    await uiMoveRun(row, () => setTaskScheduled(item.id, mode === 'later' ? todayStr() : null),
       mode === 'later' ? '오늘 할 일로 옮겼어요' : uiMoveNotice('나중에 할 일로 옮겼어요 · 기한은 그대로예요', [item], null));
     move.disabled = false;
   });

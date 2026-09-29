@@ -9868,3 +9868,212 @@ test('WP-W 옮기기 알림: 서버가 건너뛴 항목이 있으면 「M개는 
   await app.run('undoStack[undoStack.length - 1].redo()');
   assert.deepEqual(sent[0].body, { meetingId: 'm1', project: 'group:결제 리뉴얼', from: 'group:가입 개선', ids: ['a'] });
 });
+
+// ---- 좁은 폭(≤520) 줄 동작: 줄에는 ⋯ 하나, 줄 누름 = 시트, 시트 발에서 옮기면 닫힘, 누르는 화면의 되돌리기 버튼 ----
+function narrowClient(width = 390) {
+  const app = workflowsClient();
+  app.run(`window.innerWidth = ${width}; var opened = []; panelOpen = view => opened.push(view);`);
+  return app;
+}
+// 누른 자리: kind가 있으면 그 선택자 안에서 온 누름이다(closest가 그 선택자를 포함하면 찾았다고 답한다).
+const narrowTap = kind => ({ target: { closest: sel => (kind && sel.split(', ').includes(kind) ? {} : null) } });
+const NARROW_TASK = "{ id: 't1', description: '결제 실패 알림 문구 정리', status: 'to-do', scheduled: todayStr(), priority: 'medium' }";
+
+test('좁은 폭: 업무 줄 아무 데나 누르면 그 업무 시트가 열리고, 체크 칸·선택 칸·원문·버튼·입력칸·제목에서 온 누름은 제 할 일만 한다', () => {
+  const app = narrowClient(390);
+  const row = app.run(`uiTaskRow(${NARROW_TASK}, { mode: 'today' })`);
+  assert.equal(row.getAttribute('tabindex'), undefined, '줄에 tabindex를 새로 주지 않는다');
+  row.listeners.click(narrowTap(null));
+  same(app.run('opened'), [{ id: 't1' }], '빈 자리·상태말 = 시트 열기');
+  for (const kind of ['.d-check', '.d-sel', 'input', 'a', 'button', 'textarea', '.d-title']) row.listeners.click(narrowTap(kind));
+  assert.equal(app.run('opened.length'), 1, '체크 칸 여백·원문·⋯·제목(제 누름이 따로 있다)은 시트를 열지 않는다');
+  // 프로젝트 상세의 진행할 업무 줄도 같은 규칙
+  const prow = app.run(`projectTaskRow(${NARROW_TASK})`);
+  prow.listeners.click(narrowTap(null));
+  prow.listeners.click(narrowTap('.d-check'));
+  prow.listeners.click(narrowTap('button'));
+  same(app.run('opened'), [{ id: 't1' }, { id: 't1' }]);
+});
+
+test('넓은 폭: 줄 누름은 아무 일도 하지 않고(제목만 연다), 줄의 내일·나중에 버튼은 그대로다', () => {
+  const app = narrowClient(1280);
+  const row = app.run(`uiTaskRow(${NARROW_TASK}, { mode: 'today' })`);
+  row.listeners.click(narrowTap(null));
+  app.run(`projectTaskRow(${NARROW_TASK})`).listeners.click(narrowTap(null));
+  assert.equal(app.run('opened.length'), 0);
+  const acts = row.children.find(kid => kid.className === 'd-acts');
+  assert.deepEqual(acts.children.map(kid => kid.textContent || kid.getAttribute('aria-label')), ['내일', '나중에', '결제 실패 알림 문구 정리 — 더 보기'],
+    '버튼은 그대로 그려지고, 좁은 폭에서 숨기는 것은 CSS 몫이다');
+  const title = row.children.find(kid => kid.className === 'd-title');
+  title.listeners.click();
+  same(app.run('opened'), [{ id: 't1' }]);
+});
+
+test('좁은 폭: 여러 개 선택 중에는 줄 누름 = 선택(시트는 열리지 않는다)', () => {
+  const app = narrowClient(390);
+  app.run('taskSelectionMode = true;');
+  const row = app.run(`uiTaskRow(${NARROW_TASK}, { mode: 'today' })`);
+  const box = row.children.find(kid => kid.className === 'd-sel').children[0];
+  let clicks = 0;
+  box.click = () => { clicks += 1; };
+  row.listeners.click(narrowTap(null));
+  assert.equal(clicks, 1);
+  assert.equal(app.run('opened.length'), 0);
+});
+
+function narrowSheet(app, item) {
+  return app.run(`(() => { const box = document.createElement('div'); panelTask({ item: ${item}, detail: null, type: 'task' }, box); return box; })()`)
+    .children.find(kid => kid.className === 'd-dfoot');
+}
+
+test('시트 발: 밀린 업무(줄에 `오늘 할게요`가 뜨던 조건)면 좁은 폭에서 `오늘 할게요`가 더 서고, 아닌 업무·넓은 폭·진행 중이면 없다', () => {
+  const carried = "{ id: 'c1', description: '주간 지표 대시보드 확인', status: 'to-do', scheduled: '2020-01-01', priority: 'medium' }";
+  const app = narrowClient(390);
+  app.run(`taskListsCache = { todayTasks: [${carried}], laterTasks: [] };`);
+  assert.deepEqual(narrowSheet(app, carried).children.map(kid => kid.textContent), ['완료로 표시', '오늘 할게요', '내일', '나중에']);
+  assert.deepEqual(narrowSheet(app, NARROW_TASK).children.map(kid => kid.textContent), ['완료로 표시', '내일', '나중에']);
+  assert.deepEqual(narrowSheet(app, carried.replace("priority: 'medium'", "priority: 'medium', doing: todayStr()")).children.map(kid => kid.textContent),
+    ['완료로 표시', '내일', '나중에'], '진행 중인 업무는 줄에서처럼 `오늘 할게요`가 없다');
+  const wide = narrowClient(1280);
+  wide.run(`taskListsCache = { todayTasks: [${carried}], laterTasks: [] };`);
+  assert.deepEqual(narrowSheet(wide, carried).children.map(kid => kid.textContent), ['완료로 표시', '내일', '나중에'], '넓은 폭 카드는 그대로');
+});
+
+test('시트 발: 좁은 폭에서 내일·나중에·오늘로·오늘 할게요는 옮긴 뒤 시트를 닫고, 넓은 폭 카드는 닫지 않는다(줄이 사라지면 따라 닫힌다)', async () => {
+  for (const [width, label, scheduled, closes] of [[390, '내일', 'tomorrow', 1], [390, '나중에', null, 1], [390, '오늘로', 'today', 1], [390, '오늘 할게요', 'today', 1], [1280, '내일', 'tomorrow', 0]]) {
+    const app = narrowClient(width);
+    const sent = [];
+    app.context.fetch = async (url, init) => { sent.push({ url, body: init && init.body ? JSON.parse(init.body) : null }); return new Response('{"ok":true}'); };
+    const item = label === '오늘로' ? "{ id: 'l1', description: '나중 일', status: 'to-do', scheduled: null, priority: 'medium' }"
+      : label === '오늘 할게요' ? "{ id: 'c1', description: '밀린 일', status: 'to-do', scheduled: '2020-01-01', priority: 'medium' }" : NARROW_TASK;
+    app.run(`taskListsCache = { todayTasks: [${label === '오늘로' ? '' : item}], laterTasks: [${label === '오늘로' ? item : ''}] };`);
+    app.run("var closed = 0; panelClose = () => { closed += 1; }; panelState = { kind: 'item', id: 'x' };");
+    const button = narrowSheet(app, item).children.find(kid => kid.textContent === label);
+    await button.listeners.click();
+    const want = scheduled === 'tomorrow' ? app.run('tomorrowStr()') : scheduled === 'today' ? app.run('todayStr()') : null;
+    assert.deepEqual(sent.find(call => call.url === '/api/track/set-scheduled').body.scheduled, want, `${width} ${label}`);
+    assert.equal(app.run('closed'), closes, `${width} ${label}`);
+  }
+});
+
+test('시트 발 `완료로 표시`는 지금처럼 완료하고 닫는다', async () => {
+  const app = narrowClient(390);
+  app.context.fetch = async () => new Response('{"ok":true}');
+  app.run("var closed = 0; panelClose = () => { closed += 1; }; panelState = { kind: 'item', id: 't1' };");
+  await narrowSheet(app, NARROW_TASK).children[0].listeners.click();
+  assert.equal(app.run('closed'), 1);
+  assert.equal(app.nodes.get('liveRegion').textContent, '완료했어요');
+});
+
+test('시트 가림막: 열면 서고, 누르면 닫히며(회의 정리는 빈 자리로 닫히지 않는 규칙 그대로), 닫히면 걷힌다', () => {
+  const app = narrowClient(390);
+  app.run('document.body = document.createElement("div");');
+  app.run('panelScrim(true)');
+  const scrim = app.run('panelScrimEl');
+  assert.equal(scrim.className, 'd-scrim');
+  assert.equal(scrim.hidden, false);
+  assert.equal(scrim.getAttribute('aria-hidden'), 'true');
+  assert.equal(app.run('document.body.children[0] === panelScrimEl'), true, '문서 끝(선택 막대 뒤)에 붙는다');
+  app.run("var closed = 0; var realClose = panelClose; panelClose = () => { closed += 1; };");
+  app.run("panelState = { kind: 'meeting', id: 'm1' };");
+  scrim.listeners.click();
+  assert.equal(app.run('closed'), 0, '회의 정리 시트는 가림막으로 닫히지 않는다');
+  app.run("panelState = { kind: 'item', id: 't1' };");
+  scrim.listeners.click();
+  assert.equal(app.run('closed'), 1);
+  app.run('document.removeEventListener = () => {}; window.removeEventListener = () => {}; document.querySelectorAll = () => [];');
+  app.run('panelClose = realClose; panelState = null; panelClose();');
+  assert.equal(scrim.hidden, true, 'panelClose가 가림막도 걷는다');
+});
+
+test('시트가 닫히면 초점은 연 줄 제목 → 그 줄이 옮겨져 사라졌으면 다음 줄 제목 → 둘 다 없으면 목록 머리(h2, tabindex -1)', () => {
+  const app = narrowClient(390);
+  app.run('CSS = { escape: s => s };');
+  // 줄 표식: 같은 목록 안의 다음 업무 줄(그룹 제목 등은 건너뛴다)
+  const spot = app.run(`(() => {
+    const next = { dataset: { taskId: 't3' } };
+    const heading = { dataset: {}, nextElementSibling: next };
+    const row = { dataset: { taskId: 't1' }, nextElementSibling: heading, closest: () => ({ id: 'todayTaskList' }) };
+    return panelSheetSpot(row);
+  })()`);
+  same(spot, { id: 't1', nextId: 't3', host: 'todayTaskList' });
+  const focusWith = (rows) => app.run(`(() => {
+    const focused = [];
+    const title = id => ({ focus: () => focused.push(id) });
+    const rows = ${JSON.stringify(rows)};
+    const h2 = { attrs: {}, hasAttribute(n) { return n in this.attrs; }, setAttribute(n, v) { this.attrs[n] = v; }, focus: () => focused.push('h2') };
+    const host = {
+      querySelector: sel => { const id = sel.match(/"(.+)"/)[1]; return rows.includes(id) ? { querySelector: () => title(id) } : null; },
+      closest: () => ({ querySelector: () => h2 }),
+    };
+    document.getElementById = () => host;
+    const ok = panelSheetFocus(${JSON.stringify(spot)});
+    return { ok, focused, tabindex: h2.attrs.tabindex };
+  })()`);
+  same(focusWith(['t1', 't3']), { ok: true, focused: ['t1'] });
+  same(focusWith(['t3']), { ok: true, focused: ['t3'] });
+  same(focusWith([]), { ok: true, focused: ['h2'], tabindex: '-1' });
+});
+
+test('누르는 화면: 완료·옮기기 알림은 `⌘Z로 되돌리기` 글자 대신 `되돌리기` 버튼(→ replayUndo), 마우스 화면은 지금 글자 그대로', () => {
+  const notice = (touch, action = false) => {
+    const app = narrowClient(390);
+    app.run(`window.matchMedia = q => ({ matches: ${touch} && q === '(hover: none) and (pointer: coarse)' }); navigator = { platform: 'MacIntel' };`);
+    app.run("var replayed = []; replayUndo = dir => replayed.push(dir);");
+    const region = app.run("document.getElementById('liveRegion')");
+    region.insertBefore = (node, ref) => { const at = region.children.indexOf(ref); region.children.splice(at < 0 ? region.children.length : at, 0, node); };
+    Object.defineProperty(region, 'lastChild', { get() { return region.children[region.children.length - 1]; } });
+    app.run("pushUndo({ label: 'x', undo() {}, redo() {} });");
+    app.run(action ? "workflowOutcome({ id: 't1' })" : "uiUndoNotice('내일로 미뤘어요')");
+    return { app, region, labels: region.children.map(kid => kid.textContent) };
+  };
+  const touch = notice(true);
+  assert.deepEqual(touch.labels, ['⌘Z로 되돌리기', '되돌리기', '닫기'], '글자 안내는 ui.css가 누르는 화면에서 숨긴다');
+  touch.region.children[1].listeners.click();
+  same(touch.app.run('replayed'), ['undo']);
+  assert.equal(touch.region.children[1].disabled, true, '두 번 눌리지 않게');
+  assert.deepEqual(notice(false).labels, ['⌘Z로 되돌리기', '닫기'], '마우스 화면은 지금 그대로');
+  assert.deepEqual(notice(true, true).labels, ['⌘Z로 되돌리기', '결과 한 줄 남기기', '되돌리기', '닫기'], '완료 알림은 결과 한 줄 남기기 옆에 되돌리기');
+  assert.deepEqual(notice(false, true).labels, ['⌘Z로 되돌리기', '결과 한 줄 남기기', '닫기']);
+  // 되돌릴 기록이 없으면(3초가 지났으면) 버튼을 달지 않는다
+  const stale = narrowClient(390);
+  stale.run("window.matchMedia = () => ({ matches: true }); lastUndoRecordedAt = 0; uiUndoNotice('내일로 미뤘어요');");
+  assert.deepEqual(stale.nodes.get('liveRegion').children.map(kid => kid.textContent), ['닫기']);
+});
+
+test('좁은 폭 CSS: 업무 줄에는 ⋯만(제안 줄은 그대로), 체크·⋯ 누르는 자리 38px, 가림막, 누르는 화면의 ⌘Z 글자 숨김 — 넓은 폭 규칙은 없다', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  const narrow = [...css.matchAll(/@media \(max-width: 520px\) \{([\s\S]*?)\n\}/g)].map(m => m[1]).join('\n');
+  assert.match(narrow, /\.d-row:not\(\.is-sug\) \.d-acts > \.d-btn \{ display: none; \}/);
+  assert.match(narrow, /\.d-prow2 \.ac > \.d-btn \{ display: none; \}/);
+  assert.match(narrow, /\.d-row \.d-cb::after, \.d-prow2 \.d-cb::after \{ inset: -10px;/, '::after는 테두리 안쪽(19px)에서 재므로 19 + 10 × 2 = 39px');
+  assert.match(narrow, /\.d-row \.d-acts \.d-more::after, \.d-prow2 \.ac \.d-more::after \{ content: ''; position: absolute; inset: -3px;/, '32 + 3 × 2 = 38px');
+  assert.match(narrow, /\.d-scrim:not\(\[hidden\]\) \{ display: block; position: fixed; inset: 0; z-index: 46; background: var\(--scrim\); \}/);
+  const wide = css.replace(/@media \(max-width: 520px\) \{[\s\S]*?\n\}/g, '');
+  assert.doesNotMatch(wide, /\.d-acts > \.d-btn \{ display: none|\.ac > \.d-btn \{ display: none|\.d-scrim:not/, '넓은 폭에는 새 규칙이 없다');
+  assert.match(wide, /\.d-scrim \{ display: none; \}/);
+  assert.match(css, /@media \(hover: none\) and \(pointer: coarse\) \{ \.d-tnote \{ display: none; \} \}/);
+});
+
+test('안전장치 정의 불변: request·showNotice·pushUndo·recordUndoFor·toggleTask·fadeOutAndRun·isClientFile은 한 글자도 바뀌지 않았다', () => {
+  // 바꿔야 할 일이 생기면 이 값도 함께 바꾼다 — 검토에서 눈에 띄게 하려는 자물쇠다.
+  const crypto = require('node:crypto');
+  const fnSource = (file, name) => {
+    const source = fs.readFileSync(path.join(__dirname, file), 'utf8');
+    const at = source.indexOf(`function ${name}(`);
+    const from = source.lastIndexOf('\n', at) + 1;
+    let depth = 0;
+    for (let i = source.indexOf('{', at); i < source.length; i += 1) {
+      if (source[i] === '{') depth += 1;
+      else if (source[i] === '}' && --depth === 0) return source.slice(from, i + 1);
+    }
+    return '';
+  };
+  const hash = (file, name) => crypto.createHash('sha256').update(fnSource(file, name)).digest('hex').slice(0, 16);
+  same(Object.fromEntries(['request', 'showNotice', 'pushUndo', 'recordUndoFor', 'toggleTask', 'fadeOutAndRun'].map(name => [name, hash('app.js', name)])), {
+    request: 'f5330efee721c1be', showNotice: '27900565f62632d7', pushUndo: '9c58100ac7b9fe14',
+    recordUndoFor: 'e4ace20da15f22d4', toggleTask: '56730551bbbf4bc4', fadeOutAndRun: '7863e32aa6abda7c',
+  });
+  assert.equal(hash('server.js', 'isClientFile'), 'c0879ada26c72b01');
+  assert.match(fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8'), /if \(error\.code === 'RECOVERY_NEEDED'\) \{/);
+});

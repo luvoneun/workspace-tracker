@@ -233,7 +233,8 @@ async function wfReview(body) {
   return result;
 }
 function workflowOutcome(item) {
-  showNotice('완료했어요', false, null, { label: '결과 한 줄 남기기', onClick: () => panelOpen({ id: item.id }) });
+  // 누르는 화면에서는 `되돌리기` 버튼도 함께 선다(app.js uiUndoNotice — showNotice 정의는 그대로).
+  uiUndoNotice('완료했어요', { label: '결과 한 줄 남기기', onClick: () => panelOpen({ id: item.id }) });
 }
 function workflowRender(data) {
   workflowData = data.workflows || { items: [], meetings: [] };
