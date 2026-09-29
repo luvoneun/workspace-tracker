@@ -1,6 +1,6 @@
 // 사용 횟수(WP-R) 화면 — 세기·보내기는 서버(usage.js)가 한다. 여기서는
 //  ① 화면에서만 아는 것(탭 열기·검색·주간요약 복사)을 `POST /api/usage/tick`으로 알리고
-//  ② 사용설명서 카드 맨 아래 알림 한 줄(`… 보내요 · 끄기` ↔ `보내지 않아요 · 다시 켜기`)과
+//  ② 사용설명서 카드 맨 아래 알림 한 줄(`… 보내요 · 끄기` ↔ `모으지 않아요 · 다시 켜기`)과
 //  ③ 설정 › 앱의 `익명 사용 횟수 보내기` 스위치·`내 사용 기록`(최근 30일 합계 표)을 그린다.
 // 알림 줄은 이 설치가 실제로 보낼 수 있을 때(`canSend` — 만든 사람·개발용·폼 닫힘이 아님)만 보인다.
 // 새 innerHTML은 쓰지 않는다(요소를 만들어 붙인다). 알리기가 실패해도 조용히 넘어간다.
@@ -86,7 +86,7 @@ function usageGuidePaint(line) {
       if (typeof showNotice === 'function') showNotice(error.message, true);
     }
   });
-  line.replaceChildren(document.createTextNode(on ? '앱 개선을 위해 익명 사용 횟수를 보내요 · ' : '보내지 않아요 · '), button);
+  line.replaceChildren(document.createTextNode(on ? '어떤 기능을 많이 쓰는지 익명으로 모아 앱을 고치는 데 써요 · ' : '모으지 않아요 · '), button);
 }
 
 function usageGuidePaintAll() {
@@ -142,8 +142,8 @@ function usageSettingsPaint() {
   const sub = document.createElement('span');
   sub.className = 'd-ismall sub';
   sub.textContent = info.canSend
-    ? '기능별 사용 횟수만 보내요 — 이름·업무 내용은 보내지 않아요'
-    : '기능별 사용 횟수만 보내요 — 이름·업무 내용은 보내지 않아요 · 이 설치에서는 지금 보내지 않아요';
+    ? '어떤 기능이 쓸모 있는지 보고 앱을 고치는 데 써요 — 기능별 횟수만, 이름·업무 내용은 보내지 않아요'
+    : '어떤 기능이 쓸모 있는지 보고 앱을 고치는 데 써요 — 기능별 횟수만, 이름·업무 내용은 보내지 않아요 · 이 설치에서는 지금 보내지 않아요';
   text.append(strong, sub);
   const label = document.createElement('label');
   label.className = 'd-ich d-usageswitch' + (box.checked ? ' is-on' : '');
