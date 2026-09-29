@@ -4840,8 +4840,6 @@ const PICK_CUSTOM = '__custom__';
 
 function projectPickEntries(current, forceClearable) {
   const out = [];
-  // 여러 개를 한 번에 옮길 땐 "현재 그룹"이라는 게 없어도(current === null) 해제를 고를 수 있어야 한다.
-  if (current || forceClearable) out.push({ type: 'action', value: PICK_CLEAR, text: '그룹 해제' });
   // 지난 프로젝트도 고를 수 있다 — 목록 끝의 `지난 프로젝트` 소제목 아래로 내려갈 뿐이다.
   // 왼쪽 목록과 같은 자동 판정(projectQuiet)을 쓴다 — 저장된 값이 아니라 매번 다시 계산한다.
   const rest = [];
@@ -4898,7 +4896,7 @@ function projectPickEntries(current, forceClearable) {
         label: `${name} 묶음 · 티켓 ${bundle.keys.length}개 — 대표 ${leadKey}로 지정`,
         own: [lead.summary, leadKey, name],
       });
-      put(bundle.keys, [head, ...kids.map(kid => jiraLine(kid, { level: 1 }))]);
+      put(bundle.keys, [head, ...kids.map(kid => jiraLine(kid, { level: 1, dot: bundle.lead }))]);
     });
   customGroupsCache.forEach((group) => {
     const selected = !!current && current.type === 'group' && current.value === group;
@@ -4907,6 +4905,9 @@ function projectPickEntries(current, forceClearable) {
   out.push(...rest);
   if (past.length) out.push({ type: 'heading', text: '지난 프로젝트' }, ...past);
   out.push({ type: 'action', value: PICK_CUSTOM, text: '직접 입력…' });
+  // 해제는 맨 끝 — 찾기 칸에서 ↓의 첫 도착이 '해제'면 Enter 한 번에 프로젝트가 풀린다(디자인 검수).
+  // 여러 개를 한 번에 옮길 땐 "현재 그룹"이라는 게 없어도(current === null) 해제를 고를 수 있어야 한다.
+  if (current || forceClearable) out.push({ type: 'action', value: PICK_CLEAR, text: '그룹 해제' });
   return out;
 }
 

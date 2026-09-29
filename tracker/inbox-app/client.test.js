@@ -572,7 +572,7 @@ test('프로젝트 고르기 선택지: 해제는 지울 것이 있을 때만, �
   assert.equal(current.find(entry => entry.value === 'group:운영툴').selected, true);
   assert.equal(current.find(entry => entry.value === 'jira:AB-1').selected, false);
   assert.equal(current.find(entry => entry.value === 'group:<b>x</b>').text, '<b>x</b>', '글자는 textContent로만 들어간다');
-  assert.equal(current.at(-1).value, '__custom__');
+  assert.deepEqual(current.slice(-2).map(entry => entry.value), ['__custom__', '__clear__'], '해제는 맨 끝 — 찾기 칸 ↓의 첫 도착이 해제가 되지 않게');
   // 지라 선택지는 요약이 앞(text), 키는 오른쪽 조용한 글자(key)이고, 요약 기준으로 정렬된다(값은 그대로 jira:KEY).
   assert.deepEqual(current.filter(entry => String(entry.value || '').startsWith('jira:')).map(entry => [entry.value, entry.text, entry.key]), [
     ['jira:ZZ-9', '가입', 'ZZ-9'],
@@ -10688,6 +10688,7 @@ test('BBUNDLE 2 고르기 선택지: 묶음 한 줄(굵게·대표로 저장) + 
     ['jira:AL-9', '알림센터', 0, false],
   ], '묶음 줄 바로 아래 들여쓴 티켓, 대표 티켓은 따로 한 줄을 더 만들지 않는다');
   assert.match(options[0].label, /묶음 · 티켓 2개 — 대표 IO-1로 지정/);
+  assert.deepEqual(options.slice(0, 2).map(entry => entry.dot), ['jira:IO-1', 'jira:IO-1'], '들여쓴 티켓 색 점도 묶음(대표) 색 — 같은 프로젝트가 두 색으로 읽히지 않게');
   const picked = entries("{ type: 'jira', value: 'IO-2' }, false").filter(entry => entry.selected).map(entry => entry.value);
   assert.deepEqual(picked, ['jira:IO-2'], '나머지 티켓이 지금 값이면 그 들여쓴 줄이 골라져 있다');
   // 별칭이 있으면 묶음 이름도 별칭이다.
@@ -10702,12 +10703,12 @@ test('BBUNDLE 2 고르기 찾기: 이름·키·별칭·한글 부분 일치, 묶
   const app = bundleClient();
   app.run("projectAliasesCache = { 'AL-9': '푸시' }");
   const shown = query => JSON.parse(app.run(`JSON.stringify(uiPickFilter(projectPickEntries(null, true), ${JSON.stringify(query)}).map(e => e.value || '# ' + e.text))`));
-  assert.deepEqual(shown('정기'), ['__clear__', 'jira:IO-1', 'jira:IO-2', '__custom__'], '나머지 티켓만 맞아도 묶음 줄이 함께 선다');
-  assert.deepEqual(shown('리뉴얼'), ['__clear__', 'jira:IO-1', 'jira:IO-2', '__custom__'], '묶음 이름이 맞으면 티켓 전부');
-  assert.deepEqual(shown('io-2'), ['__clear__', 'jira:IO-1', 'jira:IO-2', '__custom__'], '키는 대소문자 무시');
-  assert.deepEqual(shown('푸시'), ['__clear__', 'jira:AL-9', '__custom__'], '별칭으로도');
-  assert.deepEqual(shown('알림'), ['__clear__', 'jira:AL-9', '__custom__'], '별칭이 있어도 지라 원래 요약으로도');
-  assert.deepEqual(shown('없는 이름'), ['__clear__', '__custom__'], '0개면 해제·직접 입력만 남는다');
+  assert.deepEqual(shown('정기'), ['jira:IO-1', 'jira:IO-2', '__custom__', '__clear__'], '나머지 티켓만 맞아도 묶음 줄이 함께 선다');
+  assert.deepEqual(shown('리뉴얼'), ['jira:IO-1', 'jira:IO-2', '__custom__', '__clear__'], '묶음 이름이 맞으면 티켓 전부');
+  assert.deepEqual(shown('io-2'), ['jira:IO-1', 'jira:IO-2', '__custom__', '__clear__'], '키는 대소문자 무시');
+  assert.deepEqual(shown('푸시'), ['jira:AL-9', '__custom__', '__clear__'], '별칭으로도');
+  assert.deepEqual(shown('알림'), ['jira:AL-9', '__custom__', '__clear__'], '별칭이 있어도 지라 원래 요약으로도');
+  assert.deepEqual(shown('없는 이름'), ['__custom__', '__clear__'], '0개면 직접 입력·해제만 남는다');
   assert.deepEqual(shown(''), shown('   '), '빈 말은 거르지 않는다');
   // 찾기 칸은 선택지가 PROJECT_FIND_MIN(8)개 이상일 때만.
   assert.equal(app.run('uiPickSearchable(projectPickEntries(null, false))'), false);
