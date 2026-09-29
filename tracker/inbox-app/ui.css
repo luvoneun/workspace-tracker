@@ -1460,6 +1460,7 @@ textarea.d-dtitle {
 .d-dcap { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .d-dcap .d-din { flex: 1; min-width: 140px; min-height: 30px; padding: 5px 9px; }
 .d-dcap .d-dpickslot { flex: 1; min-width: 140px; }
+.d-dcap .d-dpickslot:has(.d-gpick) { flex-basis: 100%; } /* 목록이 펼쳐지면 `회의에 연결`은 그 아래 줄로 */
 .d-dcap .d-msel { flex: 1; }
 
 /* ---------- 줄 옆 카드 (상세가 서는 자리) ----------
