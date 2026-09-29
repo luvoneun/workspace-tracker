@@ -117,7 +117,7 @@ test('WP-E 채널 고르기 저장: 뺐던 채널을 다시 켜면 같은 id로(
   await integrationsStore.saveIntegrations({
     configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir,
     body: { slack: { enabled: true, token: '', channels: { someday: 'C0NEWSOM1' } } },
-    slackCheck: async () => ({ name: 'hana-someday', isPrivate: true, created: 1790000200 }),
+    slackCheck: async () => ({ name: 'hana-someday', isPrivate: true, created: 1790000200 }), now: () => 1790000300000,
   });
   assert.deepEqual(fix.read().slack.channels.someday, { id: 'C0NEWSOM1', name: '#hana-someday', since: '1790000200.000000' });
 });
@@ -352,7 +352,7 @@ test('QA2 슬랙 채널 확인: 닿지 못한 것(slack_unreachable)과 사라�
 test('WP-F 연동 저장: 할 일 없이 다른 채널 하나로 연결할 수 있고, 하나도 없으면 거절한다', async (t) => {
   const fix = integrationsFixture(t, {});
   const slackCheck = async (token, id) => ({ name: id === 'C0WAIT11' ? 'hana-waiting' : 'x', isPrivate: true, created: 1790000000 });
-  const save = body => integrationsStore.saveIntegrations({ configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir, body, slackCheck });
+  const save = body => integrationsStore.saveIntegrations({ configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir, body, slackCheck, now: () => 1790000060000 });
   const before = fs.readFileSync(fix.configPath, 'utf8');
   await assert.rejects(() => save({ slack: { enabled: true, token: 'xoxp-new', channels: {} } }), /슬랙 채널 링크나 ID를 붙여 넣어 주세요/);
   assert.equal(fs.readFileSync(fix.configPath, 'utf8'), before, '채널이 하나도 없으면 아무것도 쓰지 않는다');
