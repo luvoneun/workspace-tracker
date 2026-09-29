@@ -859,10 +859,8 @@ test('WP-D3 make-team-installer.sh: 허용 목록 값만 담고(규칙에 어긋
 
   const { command, readme } = fix.unpack();
   assert.ok(fs.statSync(command).mode & 0o100, 'zip을 풀어도 실행 권한이 남아 있다');
-  assert.ok(fs.existsSync(readme), '같은 폴더에 설명서가 있다');
-  const readmeText = fs.readFileSync(readme, 'utf8');
-  assert.doesNotMatch(readmeText.replace(/A0SECRETAPP/g, ''), TEAM_SECRETS, '설명서에는 개인 값이 없다');
-  assert.doesNotMatch(readmeText, /myco|atlassian|github\.com\/someone|workspaceUrl|siteUrl|appUrl|updateChannel/, '설명서에는 config 값도 없다');
+  assert.deepEqual(fs.readdirSync(path.dirname(command)), ['설치.command'], 'zip에는 설치 파일 하나뿐 — 설명서 파일은 넣지 않는다(앱이 바뀌어도 다시 만들지 않게)');
+  assert.match(made.stdout, /보낼 문구[\s\S]*bash 를 치고[\s\S]*「설치하기」/, '여는 법은 같이 보낼 문구로 보여 준다');
   const text = fs.readFileSync(command, 'utf8');
   assert.equal(spawnSync('/bin/bash', ['-n', command]).status, 0, '생성된 파일은 bash 문법이 맞다');
   const team = JSON.parse(/^TEAM_CONFIG='(.*)'$/m.exec(text)[1]);
@@ -1004,15 +1002,7 @@ esac
 test('WP-H 설치.command: 기존 설치(workspace.env)가 있으면 새로 받지 않고 그 폴더에서 update.sh → setup.sh · ~/workspace에 한 벌 더 있으면 멈춤 · env가 없는 폴더면 새 설치', { skip: !(gitReady && dittoReady) }, (t) => {
   const fix = teamFixture(t, { slack: { workspaceUrl: 'https://myco.slack.com' }, jira: { siteUrl: 'https://myco.atlassian.net' }, server: { updateChannel: 'stable' } });
   assert.equal(fix.run().status, 0);
-  const { command, readme } = fix.unpack();
-  const readmeText = fs.readFileSync(readme, 'utf8');
-  assert.match(readmeText, /이미 설치해 쓰고 있다면 이 파일을 열어도 괜찮아요 — 새로 설치하지 않고 업데이트로 진행해요\./);
-  assert.match(readmeText, /한 벌이 더 있어요/);
-  // WP-O: 크롬 `앱으로 설치`만 — Dock 앱 예비 문단은 없앴다
-  assert.match(readmeText, /앱이 열리면 오늘 탭 「사용설명서」의 「앱으로 설치」 → 「설치하기」를 눌러요\./);
-  assert.match(readmeText, /크롬 ⋮ → 전송, 저장, 공유 → 페이지를 앱으로 설치/);
-  assert.doesNotMatch(readmeText, /Dock 앱으로 열 수 있어요/, 'Dock 앱 예비 길은 안내하지 않는다');
-  assert.doesNotMatch(readmeText, /Dock에 뜬 앱 아이콘을 우클릭/, '예전 Dock 안내는 없앴다');
+  const { command } = fix.unpack();
 
   // 가짜 git(네트워크 없음)·가짜 update.sh/setup.sh — 부른 순서와 위치만 적는다.
   const bin = path.join(fix.root, 'fakebin');
