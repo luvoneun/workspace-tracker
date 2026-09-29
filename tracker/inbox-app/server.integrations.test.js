@@ -1305,7 +1305,22 @@ test('이미 있는 채널 저장: 같은 채널을 두 칸에 두지 않는다(
 
 test('이미 있는 채널: 내가 들어가 있어도 공개 채널이거나 다른 사람이 만든 채널이면 쓰지 않는다(나만 있는 채널만)', async () => {
   const pub = takenSlack({ '': { ok: true, channels: [{ id: 'C0TEAM11', name: 'todo', is_private: false, is_member: true }] } });
-  await assert.rejects(() => integrationsStore.slackCreateChannel('t', 'todo', pub.request), error => error.code === 'name_taken');
+  await assert.rejects(() => integrationsStore.slackCreateChannel('t', 'todo', pub.request), error => error.code === 'name_taken', '만든 사람을 모르는 공개 채널은 쓰지 않는다');
+  // 내가 만든 공개 채널: 나 혼자면 쓰고, 여러 명이면(팀 채널) 쓰지 않는다 — 인원은 conversations.info로 읽기만
+  const solo = (members) => {
+    const base = takenSlack({ '': { ok: true, channels: [{ id: 'C0PUBME1', name: 'my-todo', is_private: false, is_member: true, creator: 'U0ME' }] } });
+    return async (url, options) => {
+      const text = String(url);
+      if (text.includes('/auth.test')) return new Response(JSON.stringify({ ok: true, user: 'me', user_id: 'U0ME' }), { status: 200 });
+      if (text.includes('/conversations.info')) {
+        assert.equal(new URL(text).searchParams.get('include_num_members'), 'true');
+        return new Response(JSON.stringify({ ok: true, channel: { id: 'C0PUBME1', num_members: members } }), { status: 200 });
+      }
+      return base.request(url, options);
+    };
+  };
+  assert.equal((await integrationsStore.slackCreateChannel('t', 'my-todo', solo(1), { key: 'todo', channels: {} })).id, 'C0PUBME1', '혼자 쓰는 내 공개 채널은 쓴다');
+  await assert.rejects(() => integrationsStore.slackCreateChannel('t', 'my-todo', solo(5), { key: 'todo', channels: {} }), error => error.code === 'name_taken', '여러 명 있는 공개 채널은 쓰지 않는다');
   const others = takenSlack({ '': { ok: true, channels: [{ id: 'C0SHARE1', name: 'my-todo', is_private: true, is_member: true, creator: 'U0OTHER' }] } });
   const request = async (url, options) => (String(url).includes('/auth.test')
     ? new Response(JSON.stringify({ ok: true, user: 'me', user_id: 'U0ME' }), { status: 200 })

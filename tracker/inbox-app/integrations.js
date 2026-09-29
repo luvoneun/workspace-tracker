@@ -216,7 +216,22 @@ async function slackUseExisting(secret, wanted, request, { key = '', channels = 
   if (found && found.is_archived === true) throw bad(MESSAGE.slackArchived, 'archived');
   // 내가 들어가 있는 채널만 목록에 온다(users.conversations). 그래도 공개 채널이거나 다른 사람이 만든 채널이면
   // "나만 있는 채널"이 아니므로 쓰지 않는다 — 팀이 같이 쓰는 #todo 같은 채널의 메시지가 할 일로 쏟아지지 않게.
-  if (!found || found.is_private !== true || (found.creator && me && found.creator !== me)) throw bad(MESSAGE.slackTaken, 'name_taken');
+  if (!found || (found.creator && me && found.creator !== me)) throw bad(MESSAGE.slackTaken, 'name_taken');
+  // 공개 채널은 내가 만들었고 나 혼자 있을 때만 쓴다(인원은 conversations.info로 읽기만) — 비공개 내 채널은 그대로.
+  if (found.is_private !== true) {
+    if (!found.creator || !me) throw bad(MESSAGE.slackTaken, 'name_taken');
+    let info;
+    try {
+      const query = new URLSearchParams({ channel: String(found.id || ''), include_num_members: 'true' });
+      const response = await request(`https://slack.com/api/conversations.info?${query}`, {
+        headers: { Authorization: `Bearer ${secret}`, Accept: 'application/json' }, signal: AbortSignal.timeout(SLACK_TIMEOUT_MS),
+      });
+      info = await response.json();
+    } catch { throw bad(MESSAGE.slackListIncomplete, 'slack_unreachable'); }
+    const members = info && info.ok === true && info.channel ? Number(info.channel.num_members) : NaN;
+    if (!Number.isFinite(members)) throw bad(MESSAGE.slackListIncomplete, 'slack_unreachable');
+    if (members !== 1) throw bad(MESSAGE.slackTaken, 'name_taken');
+  }
   const id = String(found.id || '');
   if (!id) throw bad(MESSAGE.slackListIncomplete, 'slack_unreachable');
   // 다른 칸(뺀 칸 포함)에 이미 연결된 채널이면 막는다 — 같은 칸이면 그대로 쓴다.
