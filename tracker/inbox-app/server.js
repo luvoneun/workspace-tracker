@@ -552,7 +552,7 @@ function parseAutomationLog(lines) {
   let block = null;
   lines.map(cleanLogLine).forEach((line) => {
     const s = startRe.exec(line);
-    if (s) { block = { body: [], version: s[2] || null }; return; }
+    if (s) { block = { body: [], version: s[2] || null, start: s[1] }; return; }
     const e = endRe.exec(line);
     if (e) {
       const exitCode = Number(e[2]);
@@ -560,13 +560,14 @@ function parseAutomationLog(lines) {
       const text = stale || (block ? block.body.join(' ').replace(/\s+/g, ' ').trim() : '');
       const event = { time: e[1], kind: exitCode === 0 ? 'run' : 'fail', text: text || (exitCode === 0 ? '완료' : `실패 (exit ${exitCode})`) };
       if (block && block.version) event.version = block.version;
+      if (block) event.start = block.start;
       events.push(event);
       block = null;
       return;
     }
     if (block) { block.body.push(line); return; }
     const p = plainRe.exec(line);
-    if (p) events.push({ time: p[1], kind: p[2].includes('채널 확인 실패') ? 'fail' : 'skip', text: p[2] });
+    if (p) events.push({ time: p[1], kind: p[2].includes('채널 확인 실패') ? 'fail' : 'skip', text: p[2], plain: true });
   });
   return events;
 }
@@ -588,8 +589,16 @@ function getAutomationStatus() {
     const last = events[events.length - 1] || null;
     const recentFailures = events.filter((e) => e.kind === 'fail').slice(-5).reverse();
     // 가장 최근부터 이어진 실패의 시각(ms, 최근 것이 앞) — "계속 실패"(failStuck)의 재료.
+    // **회차 단위로** 센다 — 슬랙 수집은 채널마다 `채널 확인 실패` 한 줄을 블록 앞에 따로 남기므로, 뒤따르는 실패 블록이
+    // 시작된 뒤에 적힌 한 줄은 그 회차에 속한 것으로 보고 한 번만 센다(채널 둘이 한 회차에 실패해도 1번).
     const failTimes = [];
-    for (let i = events.length - 1; i >= 0 && events[i].kind === 'fail'; i -= 1) failTimes.push(meetingNotesTime(events[i].time));
+    let runStart = null;
+    for (let i = events.length - 1; i >= 0 && events[i].kind === 'fail'; i -= 1) {
+      const event = events[i];
+      if (event.plain && runStart && event.time >= runStart) continue;
+      runStart = event.plain ? null : (event.start || null);
+      failTimes.push(meetingNotesTime(event.time));
+    }
     return {
       key: spec.key,
       name: spec.name,
@@ -859,7 +868,7 @@ const logTimeIso = text => { const at = meetingNotesTime(text); return Number.is
 const FAIL_STUCK = { times: 3, ms: 60 * 60 * 1000 };
 function failStuck(times = [], now = Date.now()) {
   const at = times.filter(Number.isFinite);
-  return times.length >= FAIL_STUCK.times || (at.length > 0 && now - Math.min(...at) > FAIL_STUCK.ms);
+  return times.length >= FAIL_STUCK.times || (at.length > 0 && now - Math.min(...at) >= FAIL_STUCK.ms);
 }
 // `history`는 앱이 직접 읽은 기록(최근 것이 앞, { at, ok, auth }) — 맨 앞부터 이어진 실패를 센다.
 function fetchStateLive(failure, history = []) {
@@ -2176,7 +2185,9 @@ const selfcheck = require('./selfcheck').createSelfcheck({
   alerts: (config, automations) => integrationAlerts(config, automations),
   fetchStateAutomation, fetchStateLive,
   calendarFailure: () => calendarLive.failure(),
+  calendarHistory: () => calendarLive.history(),
   jiraFailure: () => jiraLive.failure(),
+  jiraHistory: () => jiraLive.history(),
   claudeInstalled: claudeReady,
   slackSuccessAt: slackSyncSuccessAt,
   slackToken: config => integrations.savedSlackToken(config),

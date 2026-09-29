@@ -493,6 +493,8 @@ test('계속 실패만 멈춤: 한 번 실패는 fetch.stuck=false·빨간 점(a
   assert.equal(failStuck([now - 60000, now - 120000], now), false);
   assert.equal(failStuck([now - 60000, now - 120000, now - 180000], now), true, '이어진 실패 3번');
   assert.equal(failStuck([now - 61 * 60000], now), true, '한 번이어도 1시간 넘게');
+  assert.equal(failStuck([now - 60 * 60000], now), true, '정확히 1시간이면 멈춤');
+  assert.equal(failStuck([now - 59 * 60000], now), false);
   // 앱이 직접 읽는 것(지라·비밀 주소) — 기록의 맨 앞부터 이어진 실패만 센다
   const fail = at => ({ at, ok: false });
   assert.equal(fetchStateLive({ at: now - 60000 }, [fail(now - 60000)]).stuck, false);
@@ -515,6 +517,11 @@ test('계속 실패만 멈춤: 한 번 실패는 fetch.stuck=false·빨간 점(a
   fs.writeFileSync(slackLog, `${stamp(20)} 새 메시지 없음 — Claude 호출 생략\n${stamp(15)} todo 채널 확인 실패 — ERR:ratelimited\n${stamp(10)} todo 채널 확인 실패 — ERR:ratelimited\n${stamp(5)} todo 채널 확인 실패 — ERR:ratelimited\n`);
   assert.equal((await slackFetch()).stuck, true, '이어진 실패 3번');
   assert.ok((await alerts()).includes('slack'));
+  // 한 회차에 채널 둘이 실패(채널마다 한 줄 + 그 회차의 실패 블록)는 한 번이다 — 3줄이어도 멈춤이 아니다
+  fs.writeFileSync(slackLog, [`${stamp(20)} 새 메시지 없음 — Claude 호출 생략`, `${stamp(5)} todo 채널 확인 실패 — ERR:ratelimited`,
+    `${stamp(5)} waiting 채널 확인 실패 — ERR:ratelimited`, `───── ${stamp(5)} slack-capture 시작`, 'x', '', `───── ${stamp(4)} slack-capture 종료 (exit 1)`, ''].join('\n'));
+  assert.deepEqual([(await slackFetch()).failing, (await slackFetch()).stuck], [true, false], '한 회차 = 1번');
+  assert.ok(!(await alerts()).includes('slack'));
   fs.writeFileSync(slackLog, `${stamp(90)} todo 채널 확인 실패 — ERR:ratelimited\n`);
   assert.equal((await slackFetch()).stuck, true, '1시간 넘게 이어진 실패');
   fs.writeFileSync(slackLog, `${stamp(5)} todo 채널 확인 실패 — ERR:invalid_auth\n`);
