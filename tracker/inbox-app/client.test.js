@@ -2315,7 +2315,7 @@ test('슬랙 복사 글자는 구역 → 프로젝트 → 글머리 형식으로
   const app = reportClient();
   const text = app.run(`reportSlackText(reportSlackModel(${REPORT_SLACK_REPORT}))`);
   assert.equal(text, [
-    '9월 3주차 (9/21~9/27)',
+    '9월 4주차 (9/21~9/27)',
     '',
     '[완료]',
     '',
@@ -2358,7 +2358,7 @@ test('넣을 구역을 고르면 미리보기·일반 글자·서식 있는 복�
   assert.deepEqual(names(['완료', '진행 중', '예정']), ['완료', '진행 중', '예정'], '기본값은 완료 · 진행 중 · 예정이다');
   assert.deepEqual(names(['결정', '확인 대기', '완료']), ['완료', '결정', '확인 대기'], '고른 차례와 상관없이 구역 차례는 하나로 정해져 있다');
   assert.deepEqual(names([]), [], '아무 구역도 고르지 않으면 복사할 것이 없다');
-  assert.equal(app.run(`reportSlackText(${model(['결정'])})`), ['9월 3주차 (9/21~9/27)', '', '[결정]', '', '운영툴', '• 접근 로그는 90일 보존'].join('\n'));
+  assert.equal(app.run(`reportSlackText(${model(['결정'])})`), ['9월 4주차 (9/21~9/27)', '', '[결정]', '', '운영툴', '• 접근 로그는 90일 보존'].join('\n'));
   assert.deepEqual(names(['완료', '진행 중', '결정', '확인 대기', '예정']).length, 5, '내용이 있는 구역만 세어도 다섯 구역이 모두 찬 자료다');
   assert.deepEqual(JSON.parse(app.run(`JSON.stringify(reportSlackModel({ weekKey: '2026-09-21', rows: ${REPORT_SLACK_ROWS} }, { sections: ['확인 대기'] }).sections)`)),
     [{ name: '확인 대기', projects: [{ name: '운영툴', items: [{ text: '큐 지연 원인 회신 대기', notes: [] }] }], memos: [] }]);
@@ -2376,7 +2376,7 @@ test('미리보기 줄·일반 글자·서식 있는 복사는 한 구조에서 
   assert.ok(lines.some(line => line.kind === 'memo' && line.text === '* 과금 기획은 차차주 진행 예정'));
 
   const html = app.run(`reportSlackHtml(${model})`);
-  assert.match(html, /^<p><b>9월 3주차 \(9\/21~9\/27\)<\/b><\/p><p><br><\/p><p><b>\[완료\]<\/b><\/p><p><br><\/p><p><b>가입 개선<\/b><\/p><ul><li>가입 실패율 급증 원인 파악<\/li>/,
+  assert.match(html, /^<p><b>9월 4주차 \(9\/21~9\/27\)<\/b><\/p><p><br><\/p><p><b>\[완료\]<\/b><\/p><p><br><\/p><p><b>가입 개선<\/b><\/p><ul><li>가입 실패율 급증 원인 파악<\/li>/,
     '서식 있는 복사도 같은 자리에 빈 단락을 넣어 일반 글자와 간격이 같다');
   assert.match(html, /<li>퍼널 데이터 정리해 대시보드 반영<ul><li>이슈: 집계 지연<\/li><\/ul><\/li>/, '부연은 한 단계 들여 쓴 목록이 된다');
   assert.match(html, /<\/ul><p><br><\/p><p><b>결제 리뉴얼<\/b><\/p>/, '프로젝트 묶음 사이에도 빈 단락 하나');
@@ -2413,7 +2413,7 @@ test('아래로 넣은 문장은 부모의 프로젝트 아래에 서고, 슬랙
   ], '자식은 자기 프로젝트(결제 리뉴얼)가 아니라 부모의 프로젝트 아래에 서고, 제외한 자식은 빠진다');
   // 슬랙: 부모 항목 아래 `◦` 줄. 자식이 여러 줄이면 줄마다 한 `◦`.
   assert.equal(app.run(`reportSlackText(reportSlackModel(${report}, { sections: ['완료'] }))`), [
-    '9월 3주차 (9/21~9/27)',
+    '9월 4주차 (9/21~9/27)',
     '',
     '[완료]',
     '',
@@ -2434,7 +2434,7 @@ test('아래로 넣은 문장은 부모의 프로젝트 아래에 서고, 슬랙
     { id: 'a2', heading: '완료한 일', group: '결제 리뉴얼', text: '혼자 남은 문장', sourceIds: [], excluded: false }
   ] }`;
   assert.equal(app.run(`reportSlackText(reportSlackModel(${orphaned}, { sections: ['완료'] }))`), [
-    '9월 3주차 (9/21~9/27)', '', '[완료]', '', '결제 리뉴얼', '• 혼자 남은 문장',
+    '9월 4주차 (9/21~9/27)', '', '[완료]', '', '결제 리뉴얼', '• 혼자 남은 문장',
   ].join('\n'));
   assert.deepEqual(JSON.parse(app.run(`JSON.stringify(reportChildRows([]).size)`)), 0);
 });
@@ -2645,13 +2645,13 @@ test('세 형식(일반 글자·서식 있는 복사·미리보기)은 접힌 �
   const folded = `{ weekKey: '2026-09-21', rows: ${REPORT_FOLD_ROWS} }`;
   const textFolded = app.run(`reportSlackText(reportSlackModel(${folded}, { sections: ['완료'] }))`);
   assert.equal(textFolded, [
-    '9월 3주차 (9/21~9/27)', '', '[완료]', '', '여러 프로젝트', '• 소소한 작업 2건',
+    '9월 4주차 (9/21~9/27)', '', '[완료]', '', '여러 프로젝트', '• 소소한 작업 2건',
   ].join('\n'), '접힌 부모는 부모 한 줄만 나가고 아래 문장·◦ 부연이 없다');
   assert.doesNotMatch(textFolded, /가입 배너|정산 배치/);
   const unfolded = `{ weekKey: '2026-09-21', rows: ${REPORT_FOLD_ROWS.replace('folded: true', 'folded: false')} }`;
   const textUnfolded = app.run(`reportSlackText(reportSlackModel(${unfolded}, { sections: ['완료'] }))`);
   assert.equal(textUnfolded, [
-    '9월 3주차 (9/21~9/27)', '', '[완료]', '', '여러 프로젝트', '• 소소한 작업 2건',
+    '9월 4주차 (9/21~9/27)', '', '[완료]', '', '여러 프로젝트', '• 소소한 작업 2건',
     '    ◦ 가입 배너 문구 확인', '    ◦ 정산 배치 재처리 로그 확인',
   ].join('\n'), '펼친 부모는 부모 + 들여쓴 아래 문장이 그대로 나간다');
   // 미리보기(reportSlackLines)를 이어 붙이면 일반 글자와 정확히 같다 — 한 구조에서 나온다.
@@ -2699,7 +2699,7 @@ test('다음 주 계획은 프로젝트로 묶이고, 프로젝트 없는 문장
     [['알림센터', ['p2', 'p3']], [null, ['p1', 'p4']]], '문서에서도 프로젝트 소제목 아래로 묶고, 프로젝트 없는 문장은 끝으로 내린다');
   assert.deepEqual(JSON.parse(app.run(`JSON.stringify(reportPlanGroups([]))`)), [], '계획 문장이 없으면 묶음도 없다');
   assert.equal(app.run(`reportSlackText(reportSlackModel({ weekKey: '2026-09-21', rows: ${rows} }, { sections: ['예정'] }))`), [
-    '9월 3주차 (9/21~9/27)',
+    '9월 4주차 (9/21~9/27)',
     '',
     '[예정]',
     '',
@@ -2829,7 +2829,7 @@ test('모르는 소제목은 그 이름 그대로의 구역이 되고, 차례는
   assert.deepEqual(JSON.parse(app.run(`JSON.stringify(reportSlackSectionNames(${report}))`)),
     ['완료', '진행 중', '결정', '확인 대기', '리스크', '예정'], '모르는 구역은 아는 구역들 뒤, `예정` 앞에 선다');
   assert.equal(app.run(`reportSlackText(reportSlackModel(${report}, { sections: reportSlackSectionNames(${report}) }))`), [
-    '9월 3주차 (9/21~9/27)',
+    '9월 4주차 (9/21~9/27)',
     '',
     '[완료]',
     '',
@@ -11480,7 +11480,7 @@ test('다듬기 A: 문서·슬랙은 보이는 소제목 이름(shownGroup)으�
   assert.equal(model.title, '결제 보고 (9/14~9/20)', '바꾼 제목 뒤에 기간이 붙는다');
   assert.deepEqual(model.sections[0].projects.map(p => [p.name, p.source, p.items.map(i => i.text)]),
     [['결제 개편 1차', 'PAY-1 · 결제 리뉴얼', ['정산 배치 점검함', '서버 로그 정리함']]]);
-  assert.equal(JSON.parse(app.run(`JSON.stringify(reportSlackModel({ weekKey: '2026-09-14', rows: ${POLISH_ROWS} }))`)).title, '9월 2주차 (9/14~9/20)', '제목을 바꾸지 않았으면 예전 그대로');
+  assert.equal(JSON.parse(app.run(`JSON.stringify(reportSlackModel({ weekKey: '2026-09-14', rows: ${POLISH_ROWS} }))`)).title, '9월 3주차 (9/14~9/20)', '제목을 바꾸지 않았으면 예전 그대로');
   // 지라 정보: 보이는 이름이 아니라 원래 이름(`PAY-1 · …`)으로 찾는다.
   app.run(`jiraIssuesByKey = new Map([['PAY-1', { key: 'PAY-1', status: 'QA 대기', versions: [] }]]);`);
   const annotated = JSON.parse(app.run(`JSON.stringify(reportSlackModel({ weekKey: '2026-09-14', rows: ${POLISH_ROWS} }, { jira: true }).sections[0].projects[0].note)`));
@@ -12119,4 +12119,17 @@ test('다듬기 B 검수②③: 추가 입력칸은 크기 조절 없음, `+ 한
   app.run(`renderReportDraft = () => {}; item = { weekKey: '2026-09-14', draft: { rows: [] } }; reportEdits.set('2026-09-14:addline:완료한 일|group:가입', '');`);
   const open = app.run(`(() => { const host = document.createElement('div'); reportAddLineRow(item, '완료한 일', { key: 'group:가입' }, '가입', host); return host.children[0].className; })()`);
   assert.equal(open, 'rp-s is-add is-open');
+});
+test('주차 번호는 목요일 기준 — 목요일이 속한 달·연도의 N주차(N = 그 달에서 목요일이 몇 번째), 바꾼 제목은 그대로', () => {
+  const app = reportClient();
+  const week = key => app.run(`formatWeekLabel('${key}').week`);
+  assert.equal(week('2026-09-28'), '10월 1주차', '9/28~10/4: 목요일 10/1');
+  assert.equal(week('2026-09-21'), '9월 4주차', '9/21~9/27: 목요일 9/24');
+  assert.equal(week('2026-10-26'), '10월 5주차', '10/26~11/1: 목요일 10/29 — 다섯째 주');
+  assert.equal(week('2026-06-01'), '6월 1주차', '달 첫날이 월요일인 주');
+  assert.equal(week('2026-06-29'), '7월 1주차', '6/29~7/5: 목요일 7/2');
+  assert.equal(week('2025-12-29'), '1월 1주차', '12/29~1/4: 목요일이 이듬해 1/1');
+  assert.equal(week('2026-12-28'), '12월 5주차', '12/28~1/3: 목요일 12/31 — 그해 12월');
+  assert.equal(app.run(`reportSlackTitle('2025-12-29')`), '1월 1주차 (12/29~1/4)');
+  assert.equal(app.run(`reportSlackTitle('2026-09-28', '결제 보고')`), '결제 보고 (9/28~10/4)', '사람이 바꾼 제목은 그대로');
 });

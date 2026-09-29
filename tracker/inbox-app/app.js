@@ -2057,15 +2057,18 @@ function renderReminders(reminders, answered = [], deploys = []) {
 }
 
 // weekKey(월요일, 'YYYY-MM-DD')를 "9월 3주차" + "9/14 ~ 9/20" 두 줄로 보여줄 조각으로 쪼갠다.
-// 몇째 주인지는 그 달 안에서 월요일이 몇 번째로 나오는지로 센다(흔히 쓰는 방식).
+// 몇째 주인지는 **목요일 기준**(사용자 결정 2026-09-30): 월~일 주를 그 주 목요일이 속한 달(연도도)의 N주차로 부르고,
+// N은 그 달에서 목요일이 몇 번째인지다 — 9/28~10/4는 `10월 1주차`, 12/29~1/4는 이듬해 `1월 1주차`.
 function formatWeekLabel(weekKey) {
   const monday = new Date(`${weekKey}T00:00:00`);
   const sunday = new Date(monday);
   sunday.setDate(sunday.getDate() + 6);
-  const weekOfMonth = Math.ceil(monday.getDate() / 7);
+  const thursday = new Date(monday);
+  thursday.setDate(thursday.getDate() + 3);
+  const weekOfMonth = Math.ceil(thursday.getDate() / 7);
   const fmt = (d) => `${d.getMonth() + 1}/${d.getDate()}`;
   return {
-    week: `${monday.getMonth() + 1}월 ${weekOfMonth}주차`,
+    week: `${thursday.getMonth() + 1}월 ${weekOfMonth}주차`,
     range: `${monday.getFullYear()}년 ${fmt(monday)} ~ ${fmt(sunday)}`,
   };
 }
