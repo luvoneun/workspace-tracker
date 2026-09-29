@@ -10097,6 +10097,173 @@ test('좁은 폭: 여러 개 선택 중에는 줄 누름 = 선택(시트는 열�
   assert.equal(app.run('opened.length'), 0);
 });
 
+// ---- 여러 개 선택(C안): 완료 체크 자리에 선택 칸 하나, 우선순위·진행 중은 오른쪽 글자, 줄 누름 = 선택(폭 무관) ----
+const kidOf = (node, cls) => node.children.find(kid => String(kid?.className || '').split(' ').includes(cls));
+const SEL_TASK = "{ id: 's1', description: '결제 실패 알림 문구 정리', status: 'to-do', scheduled: todayStr(), priority: 'high', doing: todayStr() }";
+
+test('여러 개 선택: 줄에 누를 네모는 선택 칸 하나뿐이고(완료 체크 없음), 완료한 줄은 빈 자리만 — 모드를 끝내면 원래대로', () => {
+  const app = narrowClient(1280);
+  app.run('taskSelectionMode = true;');
+  const row = app.run(`uiTaskRow(${SEL_TASK}, { mode: 'today' })`);
+  assert.equal(kidOf(row, 'd-check'), undefined, '완료 체크 칸을 그리지 않는다');
+  assert.equal(row.children[0].className, 'd-sel', '선택 칸이 첫 칸(완료 체크 자리)에 선다');
+  assert.equal(row.children[0].children.length, 1);
+  assert.equal(row.children[0].children[0].className, 'd-selcb');
+  const done = app.run(`uiTaskRow({ id: 'd1', description: '끝난 일', status: 'done', priority: 'high' }, { mode: 'today' })`);
+  assert.equal(kidOf(done, 'd-check'), undefined, '완료한 줄도 모드 중에는 완료 취소 체크가 없다');
+  assert.equal(done.children[0].className, 'd-sel');
+  assert.equal(done.children[0].children.length, 0, '완료한 줄은 고를 수 없다 — 자리만 지킨다');
+  // 모드를 끝내면 완료 체크(꺾쇠·반쯤 참 포함)로 돌아온다.
+  app.run('taskSelectionMode = false;');
+  const back = app.run(`uiTaskRow(${SEL_TASK}, { mode: 'today' })`);
+  assert.equal(kidOf(back, 'd-sel'), undefined);
+  assert.equal(back.children[0].className, 'd-check');
+  assert.equal(back.children[0].children[0].className, 'd-cb is-pri-high is-doing');
+});
+
+test('여러 개 선택: 체크박스가 말하던 우선순위·진행 중은 오른쪽 상태 글자로 옮겨 가고(진행 중 그룹 안은 제외), 모드 밖에서는 글자가 없다', () => {
+  const app = narrowClient(1280);
+  const meta = row => kidOf(row, 'd-meta').innerHTML;
+  assert.doesNotMatch(meta(app.run(`uiTaskRow(${SEL_TASK}, { mode: 'today' })`)), /m-pri|m-doing/, '모드 밖: 체크박스가 말한다');
+  app.run('taskSelectionMode = true;');
+  const html = meta(app.run(`uiTaskRow(${SEL_TASK}, { mode: 'today' })`));
+  assert.match(html, /m-pri k-warn"[^>]*>중요/);
+  assert.match(html, /m-doing"[^>]*>.*진행 중/s);
+  const critical = meta(app.run(`uiTaskRow(${SEL_TASK.replace("'high'", "'critical'")}, { mode: 'later' })`));
+  assert.match(critical, /m-pri k-neg"[^>]*>긴급/, '서랍 줄도 같다');
+  const grouped = meta(app.run(`uiTaskRow(${SEL_TASK}, { mode: 'today', inDoingGroup: true })`));
+  assert.match(grouped, /중요/);
+  assert.doesNotMatch(grouped, /m-doing/, '진행 중 그룹 안에서는 그룹 제목이 말한다');
+});
+
+test('여러 개 선택: 넓은 폭에서도 줄 빈 곳 누름 = 선택(제목·입력칸·링크·버튼은 제 할 일), 저장 중·완료한 줄은 무시', () => {
+  const app = narrowClient(1280);
+  app.run('taskSelectionMode = true;');
+  const row = app.run(`uiTaskRow(${SEL_TASK}, { mode: 'today' })`);
+  const box = row.children[0].children[0];
+  let clicks = 0;
+  box.click = () => { clicks += 1; };
+  row.listeners.click(narrowTap(null));
+  assert.equal(clicks, 1, '빈 자리·상태말 = 선택');
+  row.listeners.click(narrowTap('.d-sel'));
+  assert.equal(clicks, 2, '선택 칸의 빈 여백도 선택');
+  for (const kind of ['input', 'a', 'button', 'textarea', 'select', 'label', '.d-title']) row.listeners.click(narrowTap(kind));
+  assert.equal(clicks, 2, '선택 칸 자신·원문·제목(자기 클릭이 이미 선택)은 두 번 바꾸지 않는다');
+  kidOf(row, 'd-title').listeners.click();
+  assert.equal(clicks, 3, '제목 누름은 그대로 선택');
+  app.run('taskBatchBusy = true;');
+  row.listeners.click(narrowTap(null));
+  assert.equal(clicks, 3, '저장 중에는 줄 누름을 무시한다');
+  app.run('taskBatchBusy = false;');
+  const done = app.run(`uiTaskRow({ id: 'd1', description: '끝난 일', status: 'done' }, { mode: 'today' })`);
+  done.listeners.click(narrowTap(null));
+  assert.equal(app.run('opened.length'), 0, '넓은 폭·선택 중에는 상세를 열지 않는다');
+});
+
+test('여러 개 선택: 키보드는 선택 칸에서만 멈추고(제목 tabIndex -1), 이름표가 우선순위·진행 중을 함께 읽는다', () => {
+  const app = narrowClient(1280);
+  const title = row => kidOf(row, 'd-title');
+  assert.equal(title(app.run(`uiTaskRow(${SEL_TASK}, { mode: 'today' })`)).tabIndex, 0);
+  app.run('taskSelectionMode = true;');
+  const row = app.run(`uiTaskRow(${SEL_TASK}, { mode: 'today' })`);
+  assert.equal(title(row).tabIndex, -1);
+  assert.equal(row.children[0].children[0].getAttribute('aria-label'), '결제 실패 알림 문구 정리 — 중요 · 진행 중 · 선택');
+  const plain = app.run("uiTaskRow({ id: 'p1', description: '보통 일', status: 'to-do', priority: 'medium' }, { mode: 'today' })");
+  assert.equal(plain.children[0].children[0].getAttribute('aria-label'), '보통 일 — 선택');
+  const critical = app.run("uiTaskRow({ id: 'c1', description: '급한 일', status: 'to-do', priority: 'critical' }, { mode: 'later' })");
+  assert.equal(critical.children[0].children[0].getAttribute('aria-label'), '급한 일 — 긴급 · 선택');
+  app.run('taskSelectionMode = false;');
+  assert.equal(title(app.run(`uiTaskRow(${SEL_TASK}, { mode: 'today' })`)).tabIndex, 0, '끝내면 제목이 다시 탭 차례에 선다');
+});
+
+test('여러 개 선택 CSS: 열을 더하지 않고(줄이 밀리지 않는다) 선택 칸이 30px 첫 칸 가운데에 선다 — 좁은 폭·서랍도 같은 칸', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.doesNotMatch(css, /body\.batch-open \.d-row[^{]*\{[^}]*grid-template-columns/, '선택 모드용 격자가 따로 없다');
+  assert.doesNotMatch(css, /grid-area: sl|"sl /, '좁은 폭의 sl 칸도 없다');
+  assert.match(css, /\n\.d-sel \{ width: 30px; height: var\(--row\); display: grid; place-items: center; \}/);
+  assert.match(css, /\.d-row \.d-check, \.d-row \.d-sel \{ grid-area: ck;/);
+  assert.match(css, /\.d-dbody \.d-check, \.d-dbody \.d-sel \{ grid-area: ck;/);
+  assert.match(css, /\.d-selcb \{[^}]*width: 17px; height: 17px;[^}]*border-radius: 4px;/, '선택 칸 모양은 그대로');
+  assert.match(css, /\.d-selbar \.hint \{ font-size: 13\.5px; font-weight: 500; color: var\(--dim\);/);
+  assert.match(css, /\.d-selbar \.is-group \{ margin-left: 10px; \}/);
+});
+
+function selectBarClient() {
+  const app = narrowClient(1280);
+  const sent = [];
+  app.context.fetch = async (url, init) => {
+    sent.push({ url, body: init && init.body ? JSON.parse(init.body) : null });
+    return new Response(JSON.stringify({ ok: true, count: 1, undoToken: 'u1' }));
+  };
+  app.run(`document.body = document.createElement('div'); document.querySelectorAll = () => [];
+    taskListsCache = { todayTasks: [${SEL_TASK}, { id: 's2', description: '두 번째', status: 'to-do', scheduled: todayStr() }], laterTasks: [] };
+    var menus = []; uiMenu = (anchor, sections) => menus.push({ anchor, sections });
+    var groupOpts = null; renderGroupControl = (opts) => { groupOpts = opts; return document.createElement('div'); };
+    taskSelectionMode = true;`);
+  const bar = () => app.nodes.get('taskSelectBar').children[0];
+  return { app, sent, bar };
+}
+
+test('선택 막대: 0개면 `줄을 눌러 골라요`(조용한 글자), 고르면 `N개 선택` — 프로젝트…와 완료로 표시 앞에 묶음 간격', () => {
+  const { app, bar } = selectBarClient();
+  app.run('taskSelectionRefresh()');
+  const lead = bar().children[0];
+  assert.equal(lead.className, 'hint');
+  assert.equal(lead.textContent, '줄을 눌러 골라요');
+  const buttons = bar().children.filter(kid => kid.type === 'button');
+  const byText = text => buttons.find(button => button.textContent === text);
+  assert.deepEqual(buttons.map(button => button.textContent),
+    ['전체 선택', '오늘로', '내일', '나중에', '날짜…', '프로젝트…', '완료로 표시', '삭제', '선택 끝내기'], '동작 목록·차례는 그대로');
+  assert.equal(byText('프로젝트…').className, 'd-btn is-group');
+  assert.equal(byText('완료로 표시').className, 'd-btn acc is-group');
+  assert.equal(byText('삭제').className, 'd-btn dng is-group', '삭제는 완료와 떨어져 선다(잘못 누르지 않게)');
+  assert.equal(byText('오늘로').className, 'd-btn');
+  assert.ok(['오늘로', '프로젝트…', '완료로 표시', '삭제'].every(text => byText(text).disabled), '0개면 바꾸는 버튼은 눌리지 않는다');
+  assert.equal(byText('선택 끝내기').disabled, false);
+  app.run("taskSelection.add('s1'); taskSelectionRefresh()");
+  assert.equal(bar().children[0].className, 'ct num');
+  assert.equal(bar().children[0].textContent, '1개 선택');
+});
+
+test('선택 막대: `프로젝트…`는 그 자리에서 프로젝트 고르기를 열고, 고른 값을 기존 일괄 저장 길(task-batch)로 보낸다', async () => {
+  const { app, sent, bar } = selectBarClient();
+  app.run("taskSelection.add('s1'); taskSelection.add('s2'); taskSelectionRefresh()");
+  const project = bar().children.find(kid => kid.textContent === '프로젝트…');
+  assert.equal(project.getAttribute('aria-haspopup'), 'true');
+  let stopped = false;
+  project.listeners.click({ stopPropagation() { stopped = true; } });
+  assert.ok(stopped);
+  assert.equal(app.run('menus.length'), 1);
+  assert.equal(app.run('menus[0].anchor') , project, '누른 버튼 자리에 붙는다');
+  assert.equal(app.run('menus[0].sections[0][0].field'), '프로젝트');
+  same(app.run('({ silent: groupOpts.silent, forceClearable: groupOpts.forceClearable, jira: groupOpts.jira, group: groupOpts.group })'),
+    { silent: true, forceClearable: true, jira: null, group: null });
+  await app.run('groupOpts.onSetGroup(null)');
+  assert.equal(sent.length, 0, '`— 그룹 해제 —`는 지라 해제 한 번으로 끝난다(두 번 보내지 않는다)');
+  await app.run("groupOpts.onSetJira('AB-1')");
+  same(sent.map(call => call.url), ['/api/workflow/task-batch']);
+  same(sent[0].body, { ids: ['s1', 's2'], change: { project: 'jira:AB-1' } });
+  app.run("taskSelection.add('s1')");
+  await app.run("groupOpts.onSetGroup('가입 개선')");
+  same(sent[1].body, { ids: ['s1'], change: { project: 'group:가입 개선' } });
+});
+
+test('여러 개 선택: 다른 탭으로 가면 선택 모드와 막대가 끝난다(오늘 탭 안에서는 그대로)', () => {
+  // setActiveTab은 화면을 켜는 실행 코드 쪽이라 가짜 창에 올라오지 않는다 — 그 한 줄을 글자로 확인하고, 부르는 끝내기를 직접 돌린다.
+  const source = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const start = source.indexOf('function setActiveTab(');
+  const tab = source.slice(start, source.indexOf('\n}\n', start));
+  assert.match(tab, /if \(tab !== 'today' && taskSelectionMode\) taskSelectEnd\(\);/);
+  assert.match(tab, /usageTabOpened\(tab, activeTabKey\)/, '사용 횟수 호출은 그대로');
+  const { app } = selectBarClient();
+  app.run("renderTodayTasks = () => {}; renderLaterTasks = () => {}; escStack.push(taskSelectEnd); taskSelection.add('s1'); taskSelectionRefresh()");
+  assert.equal(app.nodes.get('taskSelectBar').hidden, false);
+  app.run('taskSelectEnd()');
+  assert.equal(app.run('taskSelectionMode'), false);
+  assert.equal(app.run('taskSelection.size'), 0);
+  assert.equal(app.nodes.get('taskSelectBar').hidden, true, '막대도 내려간다');
+});
+
 function narrowSheet(app, item) {
   return app.run(`(() => { const box = document.createElement('div'); panelTask({ item: ${item}, detail: null, type: 'task' }, box); return box; })()`)
     .children.find(kid => kid.className === 'd-dfoot');
