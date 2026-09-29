@@ -532,6 +532,9 @@ const cleanLogLine = line => String(line).replace(LOG_JUNK_RE, '');
 
 // 실행 블록의 시작 줄 — 끝의 `(v1.1.2)`는 그 회차를 돌린 앱 버전(VERSION 파일)이다. 옛 로그에는 없다.
 const AUTOMATION_START_RE = /^─+ (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \S+ 시작(?: \(v([0-9A-Za-z.+-]{1,20})\))?$/;
+// run-task.sh가 calendar-sync를 실패로 바꿀 때(0으로 끝났는데 캘린더 파일이 그대로) 남기는 줄. Claude의 답 뒤에 붙어
+// 요약(200자)에서 잘리지 않게, 실패 블록에 이 줄이 있으면 이 줄을 요약으로 쓴다.
+const CALENDAR_STALE_RE = /^⚠️ 캘린더 파일이 갱신되지 않았어요/;
 function parseAutomationLog(lines) {
   const startRe = AUTOMATION_START_RE;
   const endRe = /^─+ (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \S+ 종료 \(exit (-?\d+)\)$/;
@@ -544,7 +547,8 @@ function parseAutomationLog(lines) {
     const e = endRe.exec(line);
     if (e) {
       const exitCode = Number(e[2]);
-      const text = block ? block.body.join(' ').replace(/\s+/g, ' ').trim() : '';
+      const stale = exitCode !== 0 && block ? block.body.find(body => CALENDAR_STALE_RE.test(body)) : null;
+      const text = stale || (block ? block.body.join(' ').replace(/\s+/g, ' ').trim() : '');
       const event = { time: e[1], kind: exitCode === 0 ? 'run' : 'fail', text: text || (exitCode === 0 ? '완료' : `실패 (exit ${exitCode})`) };
       if (block && block.version) event.version = block.version;
       events.push(event);

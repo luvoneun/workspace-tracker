@@ -1242,6 +1242,7 @@ function settingsFailWords(text) {
   if (/설정된 채널을 읽을 수 없음/.test(raw)) return '설정에서 채널을 읽지 못했어요';
   if (/fetch 실패|ERR:/.test(raw)) return '슬랙이 응답하지 않았어요';
   if (/35분이 넘도록|timed? ?out/i.test(raw)) return '너무 오래 걸려 멈췄어요';
+  if (/캘린더 파일이 갱신되지 않았어요/.test(raw)) return '캘린더가 갱신되지 않았어요 — Claude에 구글 캘린더가 연결돼 있지 않으면 비밀 주소로 바꾸거나 Claude 커넥터에서 연결해 주세요';
   const plain = trimSummaryText(translateFailureText(raw));
   return plain || '이유를 알 수 없어요';
 }

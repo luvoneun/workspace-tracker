@@ -9108,3 +9108,12 @@ test('긴 문구: 업무 줄 제목은 두 줄까지(말줄임) — 줄 높이 �
   assert.match(entry[2], /원문 그대로.*정확하지 않을 수 있어요.*Claude Code.*Claude로 다듬기/);
   assert.ok(entry[2].length <= 260);
 });
+
+test('WP-S 캘린더 카드: 캘린더 파일이 갱신되지 않은 실패는 비밀 주소·커넥터 안내를 이유로 보인다', () => {
+  const app = pureClient();
+  const warn = '⚠️ 캘린더 파일이 갱신되지 않았어요 — Claude에 구글 캘린더가 연결돼 있지 않으면 설정 › 연동 › 캘린더에서 비밀 주소로 바꾸거나 Claude 커넥터에서 연결해 주세요';
+  const why = app.run(`settingsFailWhy('calendar', { failing: true, summary: ${JSON.stringify(warn)} })`);
+  assert.equal(why.length, 1);
+  assert.match(why[0], /^캘린더가 갱신되지 않았어요 — Claude에 구글 캘린더가 연결돼 있지 않으면 비밀 주소로 바꾸거나 Claude 커넥터에서 연결해 주세요/);
+  assert.match(app.run(`settingsLogText('calendar', { kind: 'fail', text: ${JSON.stringify(warn)} })`), /^읽지 못했어요 — 캘린더가 갱신되지 않았어요 — .*비밀 주소로 바꾸거나/);
+});

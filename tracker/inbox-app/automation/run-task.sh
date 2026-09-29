@@ -147,6 +147,13 @@ CLAUDE_ARGS=(-p "$PROMPT" --model "$CLAUDE_MODEL" --permission-mode "$MODE")
 [ -n "$DENY" ] && CLAUDE_ARGS+=(--disallowedTools "$DENY")
 OUTPUT_FILE="${TASK_OUTPUT_FILE:-}"
 
+# calendar-sync는 Claude에 구글 캘린더 도구가 없어도 "못 했어요"라고 답하고 0으로 끝난다 — 그러면 기록은 성공인데
+# 일정은 그대로다. 그래서 실행 전 캘린더 파일(스킬이 쓰는 자리)의 수정 시각을 적어 두고, 0으로 끝났는데 파일이
+# 그대로면 실패로 바꾼다. 시각은 나노초까지 본다(같은 초 안에 다시 써도 알아채게). 파일이 없으면 빈 값이다.
+CALENDAR_FILE="$WORKSPACE/tracker/calendar_today.md"
+calendar_stamp() { stat -f '%Fm' "$CALENDAR_FILE" 2>/dev/null || true; }
+[ "$NAME" = "calendar-sync" ] && CALENDAR_BEFORE="$(calendar_stamp)"
+
 set -m
 if [ -n "$OUTPUT_FILE" ]; then
   "$CLAUDE" "${CLAUDE_ARGS[@]}" > "$OUTPUT_FILE" 2>> "$LOG" </dev/null &
@@ -198,6 +205,14 @@ else
   STATUS=$?
 fi
 } 2>/dev/null
+
+# 종료 코드 65: claude는 0으로 끝났지만 캘린더 파일이 바뀌지 않았다(시간 초과 124·claude 자체 실패 코드와 구분).
+# 서버·화면은 0이 아닌 종료를 모두 실패로 읽고, 이 ⚠️ 줄을 멈춤 이유로 쓴다.
+if [ "$STATUS" -eq 0 ] && [ "$NAME" = "calendar-sync" ] && [ "$(calendar_stamp)" = "${CALENDAR_BEFORE:-}" ]; then
+  echo "" >> "$LOG"
+  echo "⚠️ 캘린더 파일이 갱신되지 않았어요 — Claude에 구글 캘린더가 연결돼 있지 않으면 설정 › 연동 › 캘린더에서 비밀 주소로 바꾸거나 Claude 커넥터에서 연결해 주세요" >> "$LOG"
+  STATUS=65
+fi
 
 echo "" >> "$LOG"
 echo "───── $(date '+%Y-%m-%d %H:%M:%S') $NAME 종료 (exit $STATUS)" >> "$LOG"
