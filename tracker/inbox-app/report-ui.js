@@ -1546,7 +1546,7 @@ function reportPlanRegroupPicker(item, row) {
   pick.setAttribute('aria-label', `계획 문장 프로젝트: ${pick.textContent} — 바꾸기`);
   let open = false;
   const restore = (focus) => {
-    if (open) { open = false; wrap.replaceChildren(pick); }
+    if (open) { open = false; wrap.classList.remove('is-picking'); wrap.replaceChildren(pick); }
     if (focus) pick.focus();
   };
   pick.addEventListener('click', (event) => {
@@ -1565,6 +1565,7 @@ function reportPlanRegroupPicker(item, row) {
       onClose: byKeyboard => restore(byKeyboard),
     });
     open = true;
+    wrap.classList.add('is-picking');
     wrap.replaceChildren(list);
     if (typeof uiPickFit === 'function') uiPickFit(list);
     list.focusStart();

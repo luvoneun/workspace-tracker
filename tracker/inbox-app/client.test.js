@@ -12838,12 +12838,30 @@ test('작은 버튼 8: `오늘 신규` 대신 `오늘 들어온 것 N` — 낭�
   assert.equal(app.nodes.get('createdTodayBtn').hidden, true);
 });
 
-test('작은 버튼 9: 연동 요약 개수 — 회의록 직접 옮기기는 연결로 세지 않고, 캘린더는 켠 갈래 어느 것이든 연결(끔이면 남은 것)', () => {
+test('작은 버튼 9: 연동 요약 개수 — 회의록 직접 옮기기는 연결에도 남은 것에도 세지 않고, 캘린더는 켠 갈래 어느 것이든 연결(끔이면 남은 것)', () => {
   const app = workflowsClient();
   const count = data => JSON.parse(app.run(`JSON.stringify(settingsIntgCounts(${JSON.stringify(data)}))`));
-  same(count({}), { on: 0, left: 4 }, '처음 설치(회의록 기본 = 직접 옮기기)는 연결 0');
-  same(count({ meetingNotes: { mode: 'manual' } }), { on: 0, left: 4 });
+  same(count({}), { on: 0, left: 3 }, '처음 설치(회의록 기본 = 직접 옮기기)는 연결 0 · 남은 것 3');
+  same(count({ meetingNotes: { mode: 'manual' } }), { on: 0, left: 3 });
   same(count({ meetingNotes: { mode: 'tiro' } }), { on: 1, left: 3 }, '티로로 받으면 연결');
-  ['mac', 'ical', undefined].forEach(source => same(count({ calendar: { enabled: true, source } }), { on: 1, left: 3 }, `캘린더 ${source || 'Claude'} 갈래`));
-  same(count({ calendar: { enabled: false, source: 'mac' } }), { on: 0, left: 4 }, '캘린더 끔');
+  ['mac', 'ical', undefined].forEach(source => same(count({ calendar: { enabled: true, source } }), { on: 1, left: 2 }, `캘린더 ${source || 'Claude'} 갈래`));
+  same(count({ calendar: { enabled: false, source: 'mac' } }), { on: 0, left: 3 }, '캘린더 끔');
+});
+
+// 디자인 사후 확인: 계획 문장 ⋯ › `프로젝트 바꾸기` 목록이 펼쳐진 동안만 is-picking — 라벨은 목록 위 한 줄, 목록은 왼쪽 정렬.
+test('계획 문장 프로젝트 바꾸기: 목록을 펼치면 is-picking, 고르면 풀린다 · CSS 규칙', () => {
+  const app = reportClient();
+  app.run("customGroupsCache = ['운영툴']; jiraIssuesCache = []; reportChange = async () => {}; uiMenuClose = () => {};");
+  const wrap = app.run(`reportPlanRegroupPicker(${REPORT_ITEM}, { id: 'p1', heading: '다음 주 계획', group: '운영툴' })`);
+  const log = [];
+  // 가짜 DOM의 classList는 아무 일도 하지 않으므로 부른 기록으로 확인한다.
+  wrap.classList = { add: name => log.push(`+${name}`), remove: name => log.push(`-${name}`), contains: () => false, toggle() {} };
+  wrap.children[0].listeners.click({ stopPropagation() {} });
+  assert.deepEqual(log, ['+is-picking'], '펼치면 is-picking');
+  const list = wrap.children[0].children.find(kid => kid.getAttribute && kid.getAttribute('role') === 'listbox');
+  list.children.find(kid => kid.dataset.value === '').listeners.click({ stopPropagation() {} });
+  assert.deepEqual(log, ['+is-picking', '-is-picking'], '고르면 풀린다');
+  const css = require('node:fs').readFileSync(require('node:path').join(__dirname, 'report-ui.css'), 'utf8');
+  assert.match(css, /\.d-mfield:has\(\.rp-regroup\.is-picking\) > \.ml \{[^}]*font-size: 12px; font-weight: 600; color: var\(--muted\)/);
+  assert.match(css, /\.rp-regroup \.d-gplist \{ padding: 2px; \}/);
 });

@@ -395,3 +395,11 @@ body.nest-open .d-toast { bottom: 104px; }
   .rp-rec .mt { text-align: left; }
   .rp-slack { padding: 14px 16px 16px; }
 }
+
+/* 계획 문장 ⋯ › `프로젝트 바꾸기` 목록이 펼쳐지면: 라벨은 목록 위 한 줄(메뉴 소제목과 같은 12/600 --muted),
+   목록은 메뉴 폭 가득 왼쪽 정렬, 첫 항목 초점 테가 목록 칸에 잘리지 않게 안쪽 여백 2px(디자인 사후 확인). */
+.d-mfield:has(.rp-regroup.is-picking) { flex-direction: column; align-items: stretch; gap: 4px; }
+.d-mfield:has(.rp-regroup.is-picking) > .ml { font-size: 12px; font-weight: 600; color: var(--muted); padding-top: 6px; }
+.d-mfield > .mc:has(.rp-regroup.is-picking) { justify-content: flex-start; }
+.rp-regroup.is-picking { flex: 1 1 100%; min-width: 0; }
+.rp-regroup .d-gplist { padding: 2px; }
