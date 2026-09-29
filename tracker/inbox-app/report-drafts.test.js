@@ -1084,13 +1084,13 @@ test('다듬기 B: 묶음이면 `+ 한 줄 추가`의 업무는 대표 티켓에
   assert.equal(f.made[0].jira,'PAY-1');
   assert.equal(f.row('정산 알림 켬').groupKey,'jira:PAY-1');
 });
-test('다듬기 B: `+ 한 줄 추가`를 되돌리면 줄과 업무가 함께 사라지고(고친 업무는 지운 항목에 남긴다), 그 되돌리기는 다시 되돌리지 않는다',t=>{
+test('다듬기 B: `+ 한 줄 추가`를 되돌리면 줄과 업무가 함께 사라지고(업무는 늘 지운 항목에 남긴다), 그 되돌리기는 다시 되돌리지 않는다',t=>{
   const f=lineFixture(t);
   const first=f.change({action:'addLine',heading:'완료한 일',groupKey:'group:가입',text:'약관 링크 고침'});
   const undone=f.change({action:'undo',token:first.undoToken});
   assert.equal(f.row('약관 링크 고침'),undefined);
   assert.equal(f.items.some(item=>item.id==='w1'),false);
-  assert.deepEqual(f.removed,[['w1',false]],'만든 그대로면 흔적 없이 지운다');
+  assert.deepEqual(f.removed,[['w1',true]],'늘 지운 항목에 남긴다(마감·일정 등을 더했을 수 있다 — 99 리뷰)');
   assert.equal(undone.undoToken,null);
   assert.equal(undone.tasksChanged,true);
   const second=f.change({action:'addLine',heading:'완료한 일',groupKey:'group:가입',text:'약관 링크 다시 고침'});

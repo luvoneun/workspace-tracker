@@ -285,11 +285,12 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
       const prior=undo.get(token); if(!prior || prior.weekKey!==weekKey)throw new Error('되돌리기 기록이 만료됐어요.');
       if(hash({rows:state.weeks[weekKey]?.rows,polish:polishOf(state,weekKey)})!==prior.after)throw new Error('그 뒤에 다른 변경이 있어 되돌릴 수 없어요. 최신 보고를 확인해 주세요.');
       rows=prior.rows; polish=structuredClone(prior.polish||{});
-      // `+ 한 줄 추가`를 되돌리면 그때 만든 업무도 지운다. 그 뒤 업무를 고쳤으면(문구·상태) 지운 항목(설정 › 삭제한 항목)에
-      // 남겨 되살릴 수 있게 하고, 그대로면 흔적 없이 지운다. 이 되돌리기는 다시 되돌리지 않는다(업무가 없는 줄만 돌아오므로).
+      // `+ 한 줄 추가`를 되돌리면 그때 만든 업무도 지운다 — 늘 지운 항목(설정 › 삭제한 항목, `.trash.json`)에 남긴다.
+      // 그 사이 오늘 탭에서 마감·우선순위·일정·진행 중 같은 칸을 더했을 수 있고, 지문(sourceMark)은 그 칸들을 보지 않아서다.
+      // 이 되돌리기는 다시 되돌리지 않는다(업무가 없는 줄만 돌아오므로).
       if(prior.createdTask&&tasks){
         const made=current.byId.get(prior.createdTask.id);
-        if(made)tasks.remove(prior.createdTask.id,sourceMark(made)!==prior.createdTask.mark);
+        if(made)tasks.remove(prior.createdTask.id,true);
         tasksChanged=true; keepUndo=false;
       }
     } else if(action==='retitle') {

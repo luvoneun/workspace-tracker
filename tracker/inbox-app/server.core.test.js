@@ -1516,14 +1516,14 @@ test('다듬기 B: `+ 한 줄 추가`는 출처 `weekly`의 끝낸 업무와 사
   const rows = (await weeklyNow()).draft.rows.filter(row => row.text === '가입 완료 화면 카피 최종본 전달함');
   assert.equal(rows.length, 1, '보고 줄도 하나');
   assert.deepEqual([rows[0].heading, rows[0].groupKey, rows[0].origin], ['완료한 일', 'group:가입 개편', 'weekly']);
-  // 되돌리면 업무 줄도 함께 사라진다(만든 그대로라 지운 항목에도 남기지 않는다).
+  // 되돌리면 업무 줄도 함께 사라진다(업무는 늘 지운 항목에 남는다).
   const now = await weeklyNow();
   const undone = await weeklyLine({ weekKey: now.weekKey, revision: now.draft.revision, action: 'undo', token: first.undoToken });
   assert.equal(undone.status, 200);
   assert.equal(readTasks().includes('가입 완료 화면 카피 최종본 전달함'), false);
   assert.equal((await weeklyNow()).draft.rows.some(row => row.text === '가입 완료 화면 카피 최종본 전달함'), false);
   const trash = path.join(directory, '.trash.json');
-  assert.equal(fs.existsSync(trash) && fs.readFileSync(trash, 'utf8').includes('가입 완료 화면 카피 최종본 전달함'), false);
+  assert.equal(fs.existsSync(trash) && fs.readFileSync(trash, 'utf8').includes('가입 완료 화면 카피 최종본 전달함'), true);
 });
 test('다듬기 B: `+ 한 줄 추가`에서 보고 저장이 실패하면 만든 업무도 되돌아가고(반쯤 된 상태 없음), 같은 요청 id로 다시 보내면 한 번만 된다', async t => {
   const drafts = weeklySeed(t);
@@ -1562,4 +1562,32 @@ test('다듬기 B: 진행 중 칸의 `+ 한 줄 추가`는 오늘 진행 중 업
   const line = readTasks().split('\n').find(entry => entry.startsWith('- 환불 규칙 정리 중 #task['));
   assert.match(line, new RegExp(`status:to-do .*scheduled:${today}.*group:가입_개편.*source:weekly.*doing:${today}`));
   assert.equal((await weeklyNow()).draft.rows.find(row => row.text === '환불 규칙 정리 중').heading, '진행중');
+});
+test('다듬기 B(99 리뷰): `+ 한 줄 추가`로 만든 업무에 마감을 더한 뒤 되돌리면 업무는 .trash.json에 남는다', async t => {
+  weeklySeed(t);
+  const week = await weeklyNow();
+  const added = await weeklyLine({ weekKey: week.weekKey, revision: week.draft.revision, action: 'addLine', heading: '완료한 일', groupKey: 'group:가입 개편', text: '마감 더할 업무' }, 'weekly-addline-000004');
+  assert.equal(added.status, 200);
+  const id = readTasks().split('\n').find(line => line.startsWith('- 마감 더할 업무 #task[')).match(/id:(\S+)/)[1];
+  assert.equal((await post('/api/track/set-due', { id, due: '2026-12-31' })).status, 200);
+  assert.match(readTasks(), /- 마감 더할 업무 #task\[[^\]]*due:2026-12-31/);
+  const now = await weeklyNow();
+  assert.equal((await weeklyLine({ weekKey: now.weekKey, revision: now.draft.revision, action: 'undo', token: added.undoToken })).status, 200);
+  assert.equal(readTasks().includes('마감 더할 업무'), false, '업무 목록에서는 사라진다');
+  const trash = JSON.parse(fs.readFileSync(path.join(directory, '.trash.json'), 'utf8'));
+  const kept = trash.find(entry => entry.id === id);
+  assert.ok(kept, '지운 항목에 남는다');
+  assert.match(kept.line, /due:2026-12-31/, '더한 마감까지 그대로');
+});
+test('다듬기 B(99 리뷰): 저장된 요청과 같은 id를 보고가 바뀐 뒤(다른 revision) 다시 보내면 거절되고 줄·업무는 하나다', async t => {
+  weeklySeed(t);
+  const week = await weeklyNow();
+  const body = { weekKey: week.weekKey, revision: week.draft.revision, action: 'addLine', heading: '완료한 일', groupKey: 'group:가입 개편', text: '응답 잃은 줄' };
+  assert.equal((await weeklyLine(body, 'weekly-addline-000005')).status, 200);
+  const later = await weeklyNow();
+  const again = await weeklyLine({ ...body, revision: later.draft.revision }, 'weekly-addline-000005');
+  assert.equal(again.status, 400);
+  assert.match(again.error, /다른 내용으로 같은 요청/);
+  assert.equal(readTasks().split('\n').filter(line => line.startsWith('- 응답 잃은 줄 #task[')).length, 1);
+  assert.equal((await weeklyNow()).draft.rows.filter(row => row.text === '응답 잃은 줄').length, 1);
 });

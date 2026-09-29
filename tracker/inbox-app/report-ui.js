@@ -1358,10 +1358,29 @@ function reportAddLineFocus(editKey) {
   const find = attr => [...host.querySelectorAll(`[${attr}]`)].find(el => (attr === 'data-addline' ? el.dataset.addline : el.dataset.addlineInput) === editKey);
   (find('data-addline-input') || find('data-addline'))?.focus();
 }
+// 요청 id — `crypto.randomUUID`는 보안 연결(localhost·https)에서만 있어 휴대폰의 http://IP 접속에서는 없다. 그때는 시간 +
+// 무작위 글자로 짓는다(서버가 받는 모양 `[a-zA-Z0-9-]{16,100}`).
+function reportRequestId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const part = () => Math.random().toString(36).slice(2, 10).padEnd(8, '0');
+  return `${Date.now().toString(36)}-${part()}-${part()}`;
+}
 async function reportAddLineSubmit(item, heading, group, editKey, text) {
   const memo = `${editKey}|${text}`;
-  if (!reportAddLineIds.has(memo) && typeof crypto !== 'undefined' && crypto.randomUUID) reportAddLineIds.set(memo, crypto.randomUUID());
-  await reportChange(item, { action: 'addLine', heading, groupKey: group.key, text }, undefined, { key: reportAddLineIds.get(memo) });
+  if (!reportAddLineIds.has(memo)) reportAddLineIds.set(memo, reportRequestId());
+  try {
+    await reportChange(item, { action: 'addLine', heading, groupKey: group.key, text }, undefined, { key: reportAddLineIds.get(memo) });
+  } catch (error) {
+    // 같은 id의 앞 요청은 이미 저장됐는데(응답만 잃음) 그 뒤 보고가 바뀌어 본문이 달라진 경우 — 서버가 같은 id를 다른 내용으로
+    // 받지 않는다. 이미 더해진 것이므로 id와 적던 글을 버리고 최신 보고를 받아 온다(다시 보내면 같은 줄이 두 번 생긴다).
+    if (/다른 내용으로 같은 요청/.test(String(error && error.message))) {
+      reportAddLineIds.delete(memo);
+      reportEdits.delete(editKey);
+      if (typeof load === 'function') await Promise.resolve(load()).catch(() => {});
+      throw new Error('이미 더해 둔 줄이에요. 최신 보고를 불러왔어요.');
+    }
+    throw error;
+  }
   reportAddLineIds.delete(memo);
 }
 function reportAddLineRow(item, heading, group, title, host) {

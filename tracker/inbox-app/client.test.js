@@ -12300,3 +12300,24 @@ test('주차 번호는 목요일 기준 — 목요일이 속한 달·연도의 N
   assert.equal(app.run(`reportSlackTitle('2025-12-29')`), '1월 1주차 (12/29~1/4)');
   assert.equal(app.run(`reportSlackTitle('2026-09-28', '결제 보고')`), '결제 보고 (9/28~10/4)', '사람이 바꾼 제목은 그대로');
 });
+test('다듬기 B(99 리뷰): 같은 id가 다른 내용이라 거절되면 id·적던 글을 버리고 목록을 다시 받는다(다시 보내지 않아 두 줄이 되지 않는다)', async () => {
+  const app = reportClient();
+  app.context.crypto = globalThis.crypto;
+  app.run(`keys = []; loads = 0; load = async () => { loads += 1; };
+    reportChange = async (target, action, notice, options) => { keys.push(options.key); throw new Error('다른 내용으로 같은 요청을 다시 쓸 수 없어요.'); };
+    reportEdits.set('W:addline:완료한 일|group:가입', '같은 글');`);
+  const send = () => app.run(`reportAddLineSubmit({ weekKey: 'W' }, '완료한 일', { key: 'group:가입' }, 'W:addline:완료한 일|group:가입', '같은 글')`);
+  await assert.rejects(send(), /이미 더해 둔 줄이에요/);
+  assert.equal(app.run('loads'), 1, '최신 보고를 받아 온다');
+  assert.equal(app.run("reportEdits.has('W:addline:완료한 일|group:가입')"), false, '적던 글을 버려 다시 Enter로 보내지 않는다');
+  assert.equal(app.run('reportAddLineIds.size'), 0, '그 id는 버린다');
+});
+test('다듬기 B(99 리뷰): crypto.randomUUID가 없는 곳(휴대폰 http 접속)에서도 서버가 받는 모양의 요청 id를 짓는다', () => {
+  const app = reportClient();
+  app.context.crypto = undefined;
+  const a = app.run('reportRequestId()'), b = app.run('reportRequestId()');
+  assert.match(a, /^[a-zA-Z0-9-]{16,100}$/);
+  assert.notEqual(a, b);
+  app.context.crypto = globalThis.crypto;
+  assert.match(app.run('reportRequestId()'), /^[0-9a-f-]{36}$/);
+});

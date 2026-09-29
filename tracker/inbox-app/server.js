@@ -2641,7 +2641,7 @@ const reportDrafts = require('./report-drafts')({
       usage.add('task_add');
       return result.id;
     },
-    // keep: 만든 뒤 고친 업무면 지운 항목(.trash.json)에 남긴다.
+    // keep: 지운 항목(.trash.json)에 남긴다(report-drafts는 늘 true로 부른다).
     remove: (id, keep) => removeTrackItem(id, !!keep),
   },
 });
