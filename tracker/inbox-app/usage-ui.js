@@ -397,7 +397,7 @@ function usageWeekRecord(index, weekKey) {
 
 // 주차 목록 요약 — weekKeys: 목록에 보이는 주(월요일)들, selected: 고른 주, nameOf(weekKey): `이번 주`/`지난 주`/`10월 1주차`,
 // labelOf(weekKey): `9월 3주차`(최고 기록 줄). → 90일 안에 기록이 없으면 { empty: true }, 아니면
-// { empty: false, weeks: { weekKey: { done, days, full } | null }, max, selected: 기록|null, line: 조각[], best: 조각[]|null }.
+// { empty: false, weeks: { weekKey: { done, days, full } | null }, max, selected: 기록|null, line: 조각[], average: '하루 평균 3.7개'|null, best: 조각[]|null }.
 function usageWeeksSummary(history, today, weekKeys, selected, nameOf, labelOf) {
   const index = usageWeekIndex(history, today);
   if (!index.first) return { empty: true };
@@ -409,13 +409,14 @@ function usageWeeksSummary(history, today, weekKeys, selected, nameOf, labelOf) 
   const max = Math.max(0, ...keys.map(key => (weeks[key] ? weeks[key].done : 0)));
   const pick = Object.prototype.hasOwnProperty.call(weeks, selected) ? weeks[selected] : usageWeekRecord(index, selected);
   let line;
+  let average = null;
   if (!pick) line = ['이 주는 기록이 없어요'];
   else {
     const word = name(selected);
     const now = word === '이번 주';
     if (pick.done > 0) {
       line = [now ? '이번 주 일 ' : `${word}에 일 `, { b: `${pick.done}개` }, '를 끝냈어요'];
-      if (pick.days > 0) line.push(` · ${usageKeepTogether([['하루 평균', `${usageOneDecimal(pick.done / pick.days)}개`]])}`);   // `하루 평균 3.7개`는 한 덩어리로 줄바꿈
+      if (pick.days > 0) average = `하루 평균 ${usageOneDecimal(pick.done / pick.days)}개`;   // 기록이 있는 날 기준, 제 줄에 따로
     } else line = [now ? '이번 주는 아직 끝낸 일이 없어요' : `${word}엔 끝낸 일이 없어요`];
   }
   // 최고 기록 — 목록 안 기록 있는 온전한 주가 3개 이상이고 최고가 하나일 때만.
@@ -426,7 +427,7 @@ function usageWeeksSummary(history, today, weekKeys, selected, nameOf, labelOf) 
     const tops = full.filter(key => weeks[key].done === top);
     if (top > 0 && tops.length === 1) best = name(tops[0]) === '이번 주' ? ['이번 주가 최고 기록이에요'] : ['최고 기록: ', `${label(tops[0])} `, { b: `${top}개` }];
   }
-  return { empty: false, weeks, max, selected: pick, line, best };
+  return { empty: false, weeks, max, selected: pick, line, average, best };
 }
 
 // ---------- 주간요약 주차 목록 — 그리기(report-ui.js의 reportWeekRowEnd·reportWeeksFoot이 넘긴다) ----------
@@ -493,8 +494,12 @@ function usageWeeksFoot(items) {
   const summary = usageWeeksNow(items);
   if (!summary || summary.empty) return null;
   const foot = usageEl('div', 'd-uwfoot');
-  foot.appendChild(usageParts(usageEl('p', 'd-uwfline'), summary.line));
-  if (summary.best) foot.appendChild(usageParts(usageEl('p', 'd-uwfline'), summary.best));
+  // 요약은 가운뎃점 없이 한 줄씩 — 끝낸 일 / 하루 평균 / 최고 기록. 좁은 폭에서는 왼쪽 요약·오른쪽 링크.
+  const sum = usageEl('div', 'd-uwfsum');
+  sum.appendChild(usageParts(usageEl('p', 'd-uwfline'), summary.line));
+  if (summary.average) sum.appendChild(usageEl('p', 'd-uwfline', summary.average));
+  if (summary.best) sum.appendChild(usageParts(usageEl('p', 'd-uwfline'), summary.best));
+  foot.appendChild(sum);
   const link = usageEl('button', 'd-link d-uwmore', '내 일 기록 자세히');
   link.type = 'button';
   link.setAttribute('aria-haspopup', 'dialog');

@@ -79,16 +79,25 @@
   margin: 8px 0 0; padding: 12px 10px 4px; border-top: 1px solid var(--hair);
   font-size: 12.5px; line-height: 1.5; color: var(--muted); word-break: keep-all;
 }
+.d-uwfsum { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .d-uwfline { margin: 0; }
 .d-uwfline b { font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
 .d-uwfoot .d-link { margin-top: 2px; min-height: 28px; font-size: 12.5px; }
 @media (max-width: 900px) {
   /* 가로 한 줄의 좁은 주차 칸(128px)에서는 이름이 잘리지 않게 막대·숫자를 날짜 아래 셋째 줄로 */
   .rp-wk > .d-uwend, .rp-wk > .nw ~ .d-uwend { grid-column: 1 / -1; grid-row: 3; justify-self: start; margin-top: 2px; }
+  /* 요약 덩어리는 가로 스크롤 끝에 숨지 않게 주차 줄 **아래 한 줄**(보이는 폭 전체, 왼쪽 요약·오른쪽 자세히).
+     주차 목록(nav)을 그 폭에서만 두 줄 격자로 — 윗줄은 주차 칸들(가로 스크롤 그대로), 아랫줄은 덩어리 하나.
+     덩어리는 목록 칸(.rp-weeks)의 보이는 폭(100cqw)만큼이고 같은 만큼의 음수 오른쪽 여백으로 첫 칸 폭을 늘리지 않으며, 스크롤해도 왼쪽에 붙어 있다. */
+  .rp-weeks:has(.d-uwfoot) { container-type: inline-size; }
+  #weeklyReportNav:has(> .d-uwfoot) { display: grid; grid-auto-flow: column; grid-auto-columns: max-content; grid-template-rows: auto auto; gap: 4px; }
+  #weeklyReportNav > .rp-wk { grid-row: 1; }
   .d-uwfoot {
-    flex: 0 0 232px; justify-content: center; margin: 0 0 0 4px; padding: 2px 10px;
-    border-top: 0; border-left: 1px solid var(--hair); white-space: normal;
+    grid-row: 2; grid-column: 1; justify-self: start; position: sticky; left: 8px; z-index: 1;
+    width: 100cqw; margin-right: -100cqw; box-sizing: border-box; flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 16px;
+    margin-top: 4px; margin-left: 0; padding: 10px 10px 2px; white-space: normal;
   }
+  .d-uwfoot .d-link { margin-top: 0; }
 }
 
 /* 설정 › 앱 `사용 통계` 줄의 `내 일 기록은 주간요약 탭에서 볼 수 있어요 · 보기` */

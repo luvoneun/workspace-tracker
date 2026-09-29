@@ -12373,15 +12373,19 @@ test('WP-X 맨 아래 첫 줄 — 이번 주·지난 주·그 밖·0개·기록 
   const app = usageWorkClient();
   const history = { '2026-09-01': { tab_today: 1 }, '2026-09-14': { task_done: 6 }, '2026-09-15': { task_done: 1 }, '2026-09-28': { task_done: 11 }, '2026-09-29': { search: 1 } };
   const line = selected => usagePartsText(wpxSummary(app, history, ['2026-09-28', '2026-09-21', '2026-09-14'], selected).line);
-  assert.equal(line('2026-09-28'), '이번 주 일 11개를 끝냈어요 · 하루\u00a0평균\u00a05.5개');
+  assert.equal(line('2026-09-28'), '이번 주 일 11개를 끝냈어요');
+  assert.equal(wpxSummary(app, history, ['2026-09-28'], '2026-09-28').average, '하루 평균 5.5개', '하루 평균은 제 줄(가운뎃점 없음)');
   assert.equal(wpxSummary(app, history, ['2026-09-28'], '2026-09-28').line[1].b, '11개', '숫자만 굵게');
-  assert.equal(line('2026-09-14'), '주2026-09-14에 일 7개를 끝냈어요 · 하루\u00a0평균\u00a03.5개');
+  assert.equal(line('2026-09-14'), '주2026-09-14에 일 7개를 끝냈어요');
+  assert.equal(wpxSummary(app, history, ['2026-09-14'], '2026-09-14').average, '하루 평균 3.5개');
+  assert.equal(wpxSummary(app, history, ['2026-09-21'], '2026-09-21').average, null, '0개면 평균 줄 없음');
   assert.equal(line('2026-09-21'), '지난 주엔 끝낸 일이 없어요');
   assert.equal(usagePartsText(wpxSummary(app, { '2026-09-01': { tab_today: 1 }, '2026-09-29': { search: 1 } }, ['2026-09-28'], '2026-09-28').line), '이번 주는 아직 끝낸 일이 없어요');
   assert.equal(usagePartsText(wpxSummary(app, history, ['2026-08-24'], '2026-08-24').line), '이 주는 기록이 없어요');
   // 지난 주에 끝낸 일이 있으면.
   const real = wpxSummary(app, { '2026-09-01': { tab_today: 1 }, '2026-09-22': { task_done: 31 }, '2026-09-23': { task_done: 0, search: 1 } }, ['2026-09-21'], '2026-09-21');
-  assert.equal(usagePartsText(real.line), '지난 주에 일 31개를 끝냈어요 · 하루\u00a0평균\u00a015.5개');
+  assert.equal(usagePartsText(real.line), '지난 주에 일 31개를 끝냈어요');
+  assert.equal(real.average, '하루 평균 15.5개');
 });
 
 test('WP-X 최고 기록 줄 — 목록 안 온전한 주 3개 이상·최고가 하나일 때만, 이번 주면 `이번 주가 최고 기록이에요`', () => {
@@ -12467,14 +12471,14 @@ test('WP-X report-ui.js의 두 자리가 usage-ui.js로 넘기고, 주차 줄 ar
   // 맨 아래 덩어리 — 고른 주(이번 주) 문장 + 링크.
   const foot = nav.children[nav.children.length - 1];
   assert.equal(foot.className, 'd-uwfoot');
-  assert.equal(wpxText(foot.children[0]), '이번 주 일 2개를 끝냈어요 · 하루\u00a0평균\u00a02개');
+  assert.deepEqual(foot.children[0].children.map(wpxText), ['이번 주 일 2개를 끝냈어요', '하루 평균 2개'], '요약은 한 줄씩');
   const link = foot.children[foot.children.length - 1];
   assert.equal(link.textContent, '내 일 기록 자세히');
   assert.equal(link.className, 'd-link d-uwmore');
   // 8월 주를 고르면 `이 주는 기록이 없어요`, 링크는 그대로.
   app.run(`selectedWeekKey = '2026-08-17'; renderWeeklyReports(weeklyReportsCache);`);
   const foot2 = nav.children[nav.children.length - 1];
-  assert.equal(wpxText(foot2.children[0]), '이 주는 기록이 없어요');
+  assert.deepEqual(foot2.children[0].children.map(wpxText), ['이 주는 기록이 없어요']);
   assert.equal(foot2.children[foot2.children.length - 1].textContent, '내 일 기록 자세히');
   // 90일 전체에 기록이 없으면 칸·덩어리 모두 없음.
   app.run(`usageInfo = { ok: true, today: '${WPX_TODAY}', rows: [], history: {} }; renderWeeklyReports(weeklyReportsCache);`);
