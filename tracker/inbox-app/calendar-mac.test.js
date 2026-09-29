@@ -58,6 +58,14 @@ test('WP-V 고르기: 기본은 내 이메일 이름의 캘린더 하나(없으�
   assert.deepEqual(mac.suggestCalendars(CALENDARS, 'ME@example.test'), ['CAL-ME'], '내 이메일과 같은 이름(대소문자 무시)');
   assert.deepEqual(mac.suggestCalendars(CALENDARS, ''), ['CAL-ME'], '메일 이름 중 쓰기 가능한 첫 캘린더 — 읽기 전용 다른 사람 캘린더는 건너뛴다');
   assert.deepEqual(mac.suggestCalendars([{ id: 'A', name: '대한민국의 휴일', writable: false }, { id: 'B', name: '캘린더' }], ''), [], '구글 캘린더가 없으면 고르지 않는다');
+  // 캘린더 계정의 기본 캘린더(이름 = 계정 = 메일)를 먼저 믿고, 지라 메일은 그런 캘린더가 여럿일 때만 고르는 데 쓴다(Codex 검토).
+  const twoAccounts = [
+    { id: 'SHARED', name: 'team@corp.test', account: 'me@corp.test', writable: true },
+    { id: 'WORK', name: 'me@corp.test', account: 'me@corp.test', writable: true },
+    { id: 'HOME', name: 'me@home.test', account: 'me@home.test', writable: true },
+  ];
+  assert.deepEqual(mac.suggestCalendars(twoAccounts, 'me@home.test'), ['HOME'], '계정 기본 캘린더가 여럿이면 지라 메일과 같은 쪽');
+  assert.deepEqual(mac.suggestCalendars(twoAccounts, 'other@jira.test'), ['WORK'], '지라 메일이 달라도 남의 공유 캘린더가 아니라 계정 기본 캘린더');
   assert.equal(mac.hasAccount(CALENDARS), true);
   assert.equal(mac.hasAccount([{ id: 'B', name: '캘린더' }]), false);
   // EventKit의 계정 이름(source.title) — 이름이 계정 메일과 같은 캘린더가 내 기본 캘린더다

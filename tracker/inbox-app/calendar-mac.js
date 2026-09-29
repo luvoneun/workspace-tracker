@@ -55,8 +55,12 @@ function suggestCalendars(calendars, email) {
   const list = Array.isArray(calendars) ? calendars : [];
   const low = value => String(value || '').trim().toLowerCase();
   const mine = low(email);
-  const pick = (mine ? list.find(one => low(one.name) === mine) : null)
-    || list.find(one => looksLikeEmail(one.name) && low(one.name) === low(one.account))
+  // 캘린더 쪽 신호(이름 = 계정 이름 = 메일 주소 → 그 계정의 기본 캘린더)를 먼저 믿는다. 지라 메일(`email`)은 그런 캘린더가
+  // 여럿일 때 고르는 데만 쓴다 — 지라 계정이 캘린더 계정과 다를 수 있다(Codex 검토).
+  const own = list.filter(one => looksLikeEmail(one.name) && low(one.name) === low(one.account));
+  const pick = (mine ? own.find(one => low(one.name) === mine) : null)
+    || own[0]
+    || (mine ? list.find(one => low(one.name) === mine) : null)
     || list.find(one => looksLikeEmail(one.name) && one.writable !== false)
     || list.find(one => looksLikeEmail(one.name));
   return pick ? [String(pick.id)] : [];
