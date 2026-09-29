@@ -10820,3 +10820,108 @@ test('BBUNDLE 2 좁은 폭 옆 카드: 접힌 한 줄은 `KEY · 이름 · 상�
   app.run("jiraSide.cards['IO-2'] = { key: 'IO-2', state: 'loading', issue: null, at: 0, seq: 2 }");
   assert.equal(app.run("jiraSideFold('IO-2')").children.at(-1).textContent, '읽는 중');
 });
+
+// ---------- 프로젝트 0개 빈 화면(첫 사용) ----------
+// 정말 0개일 때만 머리의 개수와 `상태별 | 배포별`을 숨기고, 오른쪽에 한 판 + `프로젝트 만들기`를 세운다.
+// 찾기로 거른 0개는 여기에 해당하지 않는다(BPVIEW 규칙 그대로).
+function projectEmptyClient() {
+  const fixture = projectListClient();
+  fixture.app.run(`workflowData = { meetings: [], projectLinks: {}, items: [] }; wfIndexData(); itemsById = new Map();
+    projectKey = null; projectOrderKeys = null; projectOrderResort = true; projectNew = null;
+    projectListView = 'status'; projectFindQuery = '';
+    newStarts = 0; projectNewStart = () => { newStarts += 1; };`);
+  const head = () => fixture.list().children.find(kid => String(kid.className || '') === 'd-rhd');
+  const count = () => nodeFind(head(), 'n');
+  const seg = () => fixture.list().children.find(kid => String(kid.className || '').includes('d-pfseg'));
+  const board = () => nodeFind(fixture.app.nodes.get('projectBody'), 'd-pempty');
+  const addOne = () => fixture.app.run(`workflowData.items.push({ id: 'n1', type: 'task', status: 'to-do', group: '새 일', created: dayAgo(0) });
+    wfIndexData(); projectOrderResort = true;`);
+  return { ...fixture, head, count, seg, board, addOne };
+}
+
+test('프로젝트 0개: 개수·`상태별 | 배포별`이 숨고 오른쪽은 제목·한 줄·`프로젝트 만들기` 한 판이다', () => {
+  const fx = projectEmptyClient();
+  fx.render();
+  assert.equal(fx.count().hidden, true, '개수 0은 적지 않는다');
+  assert.equal(fx.seg().hidden, true, '정렬할 것이 없으니 세그먼트도 숨는다');
+  assert.ok(nodeFind(fx.head(), 'd-pnewgo'), '머리의 `+`는 그대로 선다');
+  const board = fx.board();
+  assert.ok(board, '빈 판이 선다');
+  assert.ok(String(board.className).split(' ').includes('d-psurf'), '기존 흰 카드 부품이다');
+  const [title, text, button] = board.children;
+  assert.equal(title.textContent, '아직 프로젝트가 없어요');
+  assert.equal(title.id, board.getAttribute('aria-labelledby'), '판의 이름은 제목이다');
+  assert.equal(text.textContent, '업무·결정·회의를 프로젝트로 묶으면 여기서 한 번에 봐요. 업무의 ⋯\u00a0›\u00a0프로젝트를 정해도 저절로 생겨요.',
+    '메뉴 길은 붙는 빈칸으로 이어 한 덩어리로 줄바꿈된다');
+  assert.ok(String(button.className).split(' ').includes('d-btn'), '기존 버튼 부품');
+  assert.ok(String(button.className).split(' ').includes('acc'), '2차(연파랑) 버튼');
+  assert.equal(button.html, fx.app.run("uiIcon('plus')"), '앞의 더하기는 앱 아이콘이다(유니코드 ＋가 아니다)');
+  assert.deepEqual(button.children, ['프로젝트 만들기']);
+  assert.equal(fx.app.nodes.get('projectBody').children.some(kid => String(kid.className || '') === 'd-empty'), false,
+    '예전 한 문장은 없다');
+  // 제목은 h2(프로젝트 화면 제목과 같은 층), 새 innerHTML은 없다(아이콘만 insertAdjacentHTML).
+  const source = fs.readFileSync(path.join(__dirname, 'projects-ui.js'), 'utf8');
+  const fn = source.slice(source.indexOf('function projectEmptyBoard('), source.indexOf('\n}\n', source.indexOf('function projectEmptyBoard(')));
+  assert.match(fn, /createElement\('h2'\)/);
+  assert.equal(/innerHTML/.test(fn), false);
+});
+
+test('프로젝트 0개: `프로젝트 만들기`는 머리의 `+`와 같은 함수(projectNewStart)를 부른다', () => {
+  const fx = projectEmptyClient();
+  fx.render();
+  nodeFind(fx.head(), 'd-pnewgo').listeners.click();
+  assert.equal(fx.app.run('newStarts'), 1);
+  fx.board().children[2].listeners.click();
+  assert.equal(fx.app.run('newStarts'), 2, '새 동작 없이 같은 길');
+});
+
+test('프로젝트 1개 이상이면 머리·세그먼트·오른쪽 화면이 그대로다', () => {
+  const fixture = projectListClient();
+  fixture.render();
+  const head = fixture.list().children[0];
+  assert.equal(nodeFind(head, 'n').hidden, false);
+  assert.equal(fixture.list().children.find(kid => String(kid.className || '').includes('d-pfseg')).hidden, false);
+  assert.equal(nodeFind(fixture.app.nodes.get('projectBody'), 'd-pempty'), null, '빈 판은 없다');
+  assert.ok(nodeFind(fixture.app.nodes.get('projectBody'), 'd-ptitle'), '고른 프로젝트 화면이 그대로 선다');
+});
+
+test('프로젝트 0 → 1 → 0: 개수·세그먼트·빈 판이 나타났다 사라진다', () => {
+  const fx = projectEmptyClient();
+  fx.render();
+  assert.equal(fx.seg().hidden, true);
+  fx.addOne();
+  fx.render();
+  assert.equal(fx.count().hidden, false);
+  assert.equal(fx.count().textContent, 1);
+  assert.equal(fx.seg().hidden, false);
+  assert.equal(fx.board(), null);
+  fx.app.run('workflowData.items = []; wfIndexData(); projectOrderResort = true;');
+  fx.render();
+  assert.equal(fx.count().hidden, true);
+  assert.equal(fx.seg().hidden, true);
+  assert.ok(fx.board());
+});
+
+test('프로젝트 0개가 되며 세그먼트가 숨으면 거기 있던 초점은 머리의 `+`로 간다', () => {
+  const fx = projectEmptyClient();
+  fx.addOne();
+  fx.render();
+  const seg = fx.seg();
+  fx.app.run("document.activeElement = { id: 'segButton' };");
+  seg.contains = node => !!node && node.id === 'segButton';
+  fx.app.run('workflowData.items = []; wfIndexData(); projectOrderResort = true;');
+  fx.render();
+  assert.equal(nodeFind(fx.head(), 'd-pnewgo').focused, true);
+});
+
+test('찾기로 거른 결과가 0이면 프로젝트 0개가 아니다 — 세그먼트·개수는 그대로, 오른쪽 빈 판도 없다', () => {
+  const fixture = bpviewClient();
+  fixture.render();
+  const input = fixture.findInput();
+  input.value = '존재하지않는프로젝트이름';
+  input.listeners.input();
+  assert.equal(fixture.list().children.find(kid => String(kid.className || '') === 'd-empty').textContent, '맞는 프로젝트가 없어요.');
+  assert.equal(fixture.list().children.find(kid => String(kid.className || '').includes('d-pfseg')).hidden, false);
+  assert.equal(nodeFind(fixture.list().children[0], 'n').hidden, false);
+  assert.equal(nodeFind(fixture.app.nodes.get('projectBody'), 'd-pempty'), null);
+});
