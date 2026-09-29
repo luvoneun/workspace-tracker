@@ -27,7 +27,7 @@ function uiProjectRows(entries, items) {
 // 한 가지 일이 지라 티켓 둘 이상으로 나뉜 것을 한 덩어리로 본다. 서버는 `.workflow.json`의
 // 표시 정보(`projectBundles: [{ id, lead, keys }]`)만 준다 — 항목의 jira 칸은 그대로다.
 // 프로젝트 탭(덩어리 1)에 더해 오늘 탭·나중에 할 일·확인 대기·회의 탭 프로젝트별 보기·고르기 목록이
-// projectGroupKey로 한 그룹이 된다(덩어리 2). 주간요약·배포 리마인드는 티켓별 그대로다.
+// projectGroupKey로 한 그룹이 된다(덩어리 2). 배포 리마인드는 티켓별 그대로이고, 주간요약은 묶음이 생긴 주부터 한 소제목이다(report-drafts.js dress).
 // 이 조회 함수들은 여러 화면이 쓴다 — index.html에서 app.js보다 먼저 읽히는 이 파일에 둔다.
 // 묶음 줄의 키는 대표 티켓의 키(`lead`)이고, 이름·색도 대표 티켓 것이다(uiGroupLabel·uiProjectDot).
 function projectBundles() {
@@ -1023,7 +1023,7 @@ function projectBundleAskNode(row) {
     `「${leadName}」에서 함께 보여요${what ? ` — ${what}` : ''}`,
     '지라 티켓은 그대로예요 — 상태·배포일도 티켓마다 따로',
     `이름은 대표 티켓 「${leadName}」 기준이에요(⋯에서 대표를 바꿀 수 있어요)`,
-    '오늘 탭·확인 대기·회의에서도 한 그룹으로 보여요 · 주간요약은 지금처럼 티켓별로',
+    '오늘 탭·확인 대기·회의에서도 한 그룹으로 보여요 · 주간요약은 이번 주 보고부터 한 소제목으로(지난 주는 그대로)',
   ].map((text) => { const line = document.createElement('div'); line.textContent = text; return line; });
   const acts = document.createElement('div');
   acts.className = 'acts';

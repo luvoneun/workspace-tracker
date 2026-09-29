@@ -42,13 +42,41 @@
   box-shadow: var(--soft); padding: 28px 32px 48px;
 }
 .rp-body { max-width: 720px; }
-.rp-hd { gap: 10px; margin-bottom: 2px; flex-wrap: wrap; }
-.rp-hd .rp-acts { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.rp-hd { gap: 8px; margin-bottom: 2px; flex-wrap: wrap; }
+.rp-hd .rp-acts { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.rp-hd .rp-acts .d-headnum { margin-left: 0; }
 .rp-title { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
 .rp-hd .sub { color: var(--dim); font-size: 13.5px; font-weight: 500; font-variant-numeric: tabular-nums; }
-.rp-sum { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; font-size: 13px; color: var(--dim); }
 .rp-hint { font-size: 13px; color: var(--dim); }
 .rp-h + .rp-hint { margin-top: 8px; }
+
+/* v3 — 제목·소제목·문장 모두 글자가 곧 고치는 자리다. 평소에는 글자 그대로, 손이 닿거나 초점이 오면 옅은 `--hover`
+   판 + 밑줄로 "누를 수 있음"을 보여 준다. 누르면 그 자리가 입력칸(.d-din / .rp-ta)과 `Enter 저장 · Esc 취소` 한 줄이 된다. */
+.rp-rename {
+  border: 0; background: none; padding: 0 4px; margin: 0 0 0 -4px; border-radius: var(--r-xs);
+  color: inherit; font: inherit; letter-spacing: inherit; text-align: left; cursor: text;
+  overflow-wrap: anywhere; transition: background 130ms var(--ease);
+}
+.rp-rename:hover, .rp-rename:focus-visible, .rp-s .rp-edit:hover, .rp-s .rp-edit:focus-visible {
+  background: var(--hover); text-decoration: underline; text-decoration-color: var(--border); text-underline-offset: 4px;
+}
+.rp-rename:focus-visible, .rp-s .rp-edit:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.rp-s .rp-edit { border-radius: var(--r-xs); cursor: text; padding: 0 2px; margin: 0 -2px; }
+.rp-s .rp-edit:focus { outline: none; }
+.rp-s .rp-edit:focus-visible { outline: 2px solid var(--accent); }
+/* 제목·소제목의 입력칸 — 글자 크기는 그 자리를 이어받는다(버튼이 없어 아래 안내 한 줄이 저장·취소를 알려 준다). */
+.rp-ren { display: grid; gap: 4px; flex: 1 1 auto; max-width: 520px; }
+.rp-ren .d-din { min-height: 36px; font-size: inherit; font-weight: inherit; letter-spacing: inherit; }
+.rp-ren .rp-help, .rp-s .rp-help { margin-top: 4px; font-size: 12.5px; font-weight: 400; letter-spacing: 0; color: var(--dim); }
+/* 머리 아래 상태 줄 — 다듬은 뒤 새로 들어온 게 있을 때만(옅은 파란 판, 고른 줄과 같은 --sel). 이 묶음(.rp-top) 아래가
+   '내 일 기록' 한 줄 자리다. */
+.rp-top { display: grid; gap: 6px; margin: 12px 0 4px; }
+.rp-status {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 8px 12px;
+  border-radius: var(--r-sm); background: var(--sel); color: var(--text); font-size: 13.5px;
+}
+.rp-status.is-quiet { background: var(--field); color: var(--muted); }
+.rp-status .d-link { margin-left: auto; min-height: 28px; }
 
 /* 상태 제목(작고 조용하게) → 프로젝트 제목(굵게) → 문장(가장 큰 본문) */
 .rp-h {
@@ -62,10 +90,15 @@
 
 /* 문장 한 줄 — 글머리 | 문장 | 동작(hover·focus에서만) */
 .rp-s {
-  position: relative; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto;
+  position: relative; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto auto;
   align-items: start; gap: 4px 8px; padding: 4px 8px 4px 4px; margin-left: -4px; border-radius: var(--r-xs);
 }
 .rp-s .bu { justify-self: center; color: var(--dim); font-size: 15.5px; line-height: 1.65; }
+/* 다듬은 뒤 새로 들어온 줄 — `새로` 글자 대신 앞 점만 파랗고 굵게(이름표 `새로 들어옴`이 같은 말을 한다) */
+.rp-s .bu.is-fresh { color: var(--accent); font-weight: 800; }
+/* 원본이 바뀐 고친 줄 끝의 작은 알약 — 기존 칩(.d-chip) 그대로, 조금 작게 */
+.rp-s .rp-pill { align-self: start; height: 24px; margin-top: 2px; padding: 0 9px; font-size: 12px; background: var(--neutral-bg); }
+.rp-s .rp-pill.is-note { cursor: default; background: none; color: var(--dim); }
 
 /* 다른 문장 아래로 들어간 문장 — 한 단계 들여 쓴 `◦` 줄. 여러 줄 글자의 부연(.rp-s .sub)과 같은 가족이다. */
 .rp-s.is-sub { margin-left: 18px; }
@@ -93,8 +126,6 @@
   margin-top: 2px; padding-left: 12px; border-left: 1px solid var(--hair);
   font-size: 13.5px; line-height: 1.6; color: var(--muted); white-space: pre-wrap;
 }
-.rp-s .edt, .rp-s .rv, .rp-s .nw { margin-left: 8px; font-size: 12px; white-space: nowrap; }
-.rp-s .edt { color: var(--muted); }
 /* 접힌 부모(한 줄로 모으기) 뒤의 조용한 `· N건 ▸` — 눌러서 화면에서만 펼쳐 본다(저장 안 함). */
 .rp-s .rp-foldtoggle {
   display: inline-flex; align-items: center; height: 28px; margin-left: 6px; padding: 0 6px;
@@ -102,10 +133,17 @@
   color: var(--dim); font-family: inherit; font-size: 12.5px; font-weight: 600;
   white-space: nowrap; cursor: pointer;
 }
+.rp-s .rp-foldtoggle { gap: 2px; }
+.rp-s .rp-foldtoggle .d-i { transition: transform 130ms var(--ease); }
+.rp-s .rp-foldtoggle[aria-expanded="true"] .d-i { transform: rotate(90deg); }
 .rp-s .rp-foldtoggle:hover { background: var(--hover); color: var(--text); }
 .rp-s .rp-foldtoggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.rp-s .rv { color: var(--warn); }
-.rp-s .nw { color: var(--accent-text); }
+/* 모으기·고르기 모드의 과녁 표시 — 누를 수 있는 줄 오른쪽의 읽기 전용 한 마디(버튼 모양만 빌린다, 누르는 것은 줄 전체). */
+.rp-s .rp-aim { display: flex; align-items: center; padding-top: 2px; pointer-events: none; }
+.rp-s .rp-aim .d-btn { height: 28px; }
+/* 과녁 표시는 그 줄에 손이 닿거나 초점이 올 때만 — 줄 자체는 늘 눌리는 자리(Tab으로 닿는다). 기준 줄의 `여기 아래로`는 늘 보인다. */
+.rp-s .rp-aim { opacity: 0; transition: opacity 130ms var(--ease); }
+.rp-s.is-pick:hover .rp-aim, .rp-s.is-pick:focus-within .rp-aim, .rp-s.is-pick:focus-visible .rp-aim { opacity: 1; }
 .rp-s .ac {
   display: flex; align-items: center; gap: 2px; padding-top: 2px;
   opacity: 0; pointer-events: none; transition: opacity 130ms var(--ease);
@@ -120,8 +158,7 @@
   box-shadow: 0 0 0 2px var(--accent);
 }
 .rp-ta:focus { outline: none; background: var(--surface); box-shadow: 0 0 0 2px var(--accent); }
-.rp-s .ed { display: flex; gap: 4px; margin-top: 6px; }
-.rp-s .rp-help { margin-top: 5px; font-size: 12.5px; color: var(--dim); }
+
 
 /* 근거 업무 — 문장 아래로 들여쓴 목록(색 띠가 아니라 1px 선 하나) */
 .rp-ev { margin: 2px 0 8px 20px; padding-left: 14px; border-left: 1px solid var(--border); }
@@ -135,16 +172,17 @@
 .rp-ev .ev .o { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
 .rp-ev .none { padding: 5px 8px; font-size: 12.5px; color: var(--dim); }
 
-/* 수정 제안 — 조용한 블록, 지금 문장은 덮어쓰지 않는다 */
-.rp-sg { margin: 4px 0 10px 20px; padding: 12px 14px; background: var(--field); border-radius: var(--r-sm); }
-.rp-sg .hd { font-size: 12.5px; font-weight: 600; color: var(--muted); }
-.rp-sg .tx { margin-top: 4px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-break: keep-all; }
-.rp-sg .ac { display: flex; gap: 4px; margin-top: 8px; }
-.rp-sg .hint { margin-top: 6px; font-size: 12px; color: var(--dim); }
 
-/* 제외한 문장 — 문서 끝(다음 주 계획 위)에 접어 둔다 */
+/* 제외한 문장 — 문서 끝(다음 주 계획 위)에 접어 둔다. 접힘 표시는 브라우저 삼각형 대신 앱의 꺾쇠(펼치면 아래로). */
 .rp-ex { margin-top: 30px; padding-top: 12px; border-top: 1px solid var(--hair); }
-.rp-ex summary { font-size: 12.5px; font-weight: 600; color: var(--dim); cursor: pointer; padding: 4px 0; min-height: 28px; }
+.rp-ex summary {
+  display: flex; align-items: center; gap: 4px; list-style: none;
+  font-size: 12.5px; font-weight: 600; color: var(--dim); cursor: pointer; padding: 4px 0; min-height: 28px;
+}
+.rp-ex summary::-webkit-details-marker { display: none; }
+.rp-ex summary .d-i { transition: transform 130ms var(--ease); }
+.rp-ex[open] summary .d-i { transform: rotate(90deg); }
+.rp-ex summary:hover { color: var(--text); }
 .rp-ex .row {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center;
   padding: 4px 0; color: var(--muted); font-size: 13.5px; line-height: 1.6;
@@ -326,6 +364,7 @@ body.nest-open .d-toast { bottom: 104px; }
   .rp-doc { padding: 16px 14px 28px; }
   .rp-title { font-size: 19px; }
   .rp-s { grid-template-columns: 22px minmax(0, 1fr); }
+  .rp-s .rp-pill { grid-column: 2; justify-self: start; }
   /* 좁은 화면에서는 동작이 늘 보이고 문장 아래로 내려간다 */
   .rp-s .ac { grid-column: 2; opacity: 1; pointer-events: auto; padding-top: 4px; }
   /* 손가락으로 쓰는 폭에는 hover가 없다 — 소제목의 `+ 추가`도 늘 보인다 */

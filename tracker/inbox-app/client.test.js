@@ -1930,16 +1930,25 @@ test('주간요약 문장의 더보기는 모으기·따로 빼기·묶음 풀�
   const app = reportClient();
   const labels = row => JSON.parse(app.run(`JSON.stringify(
     reportSentenceMenuSections(${REPORT_ITEM}, ${JSON.stringify(row)}).map(section => section.map(entry => entry.label)))`));
-  assert.deepEqual(labels({ id: 'r1', group: '가입 개선', sourceIds: ['s1'] }), [['근거 업무 보기', '이 아래로 문장 모으기', '한 줄로 모으기…']]);
-  assert.deepEqual(labels({ id: 'r2', group: '가입 개선', sourceIds: [] }), [['이 아래로 문장 모으기', '한 줄로 모으기…']], '근거가 없으면 근거 항목도 없다');
-  assert.deepEqual(labels({ id: 'r5', group: '가입 개선', sourceIds: [], parent: 'r1' }), [['따로 빼기']],
+  // v3: 첫 묶음 `보고에서 빼기`(+ 넣을 곳이 있으면 `다른 문장 아래로 넣기` · 고친 줄이면 `원래 문장으로`), 둘째 묶음 자리 옮기기, 끝에 근거.
+  assert.deepEqual(labels({ id: 'r1', group: '가입 개선', sourceIds: ['s1'] }), [['보고에서 빼기'], ['이 아래로 문장 모으기', '한 줄로 모으기…'], ['근거 업무 보기']]);
+  assert.deepEqual(labels({ id: 'r2', group: '가입 개선', sourceIds: [] }), [['보고에서 빼기'], ['이 아래로 문장 모으기', '한 줄로 모으기…']], '근거가 없으면 근거 항목도 없다');
+  assert.deepEqual(labels({ id: 'r5', group: '가입 개선', sourceIds: [], parent: 'r1' }), [['보고에서 빼기'], ['따로 빼기']],
     '이미 다른 문장 아래에 있는 문장은 더 모을 수 없고 빼기만 한다(한 단계까지만)');
-  assert.deepEqual(labels({ id: 'r6', group: '가입 개선', sourceIds: [], excluded: true }), [],
-    '제외한 문장 아래로는 모으지 않는다 — 보여 줄 것이 없으면 빈 묶음도 만들지 않는다');
+  assert.deepEqual(labels({ id: 'r6', group: '가입 개선', sourceIds: [], excluded: true }), [['보고에 되살리기']],
+    '제외한 문장 아래로는 모으지 않는다 — 되살리기만');
   assert.deepEqual(labels({ id: 'r3', group: '여러 프로젝트', sourceIds: ['s1', 's2'], canSplit: true, partCount: 2 }),
-    [['근거 업무 보기', '이 아래로 문장 모으기', '한 줄로 모으기…', '묶음 풀기']]);
+    [['보고에서 빼기'], ['이 아래로 문장 모으기', '한 줄로 모으기…', '묶음 풀기'], ['근거 업무 보기']]);
   // 옛 저장 데이터로 만든 묶음 문장에는 `parts`가 없어 `canSplit`도 오지 않는다 — 풀기만 보이지 않는다.
-  assert.deepEqual(labels({ id: 'r4', group: '여러 프로젝트', sourceIds: ['s1', 's2'] }), [['근거 업무 보기', '이 아래로 문장 모으기', '한 줄로 모으기…']]);
+  assert.deepEqual(labels({ id: 'r4', group: '여러 프로젝트', sourceIds: ['s1', 's2'] }), [['보고에서 빼기'], ['이 아래로 문장 모으기', '한 줄로 모으기…'], ['근거 업무 보기']]);
+  // 손으로 고친 줄은 `원래 문장으로`, 그 밖의 문장이 있어 받을 곳이 있으면 `다른 문장 아래로 넣기`.
+  const withRows = JSON.parse(app.run(`JSON.stringify(reportSentenceMenuSections({ weekKey: 'W', draft: { rows: [
+    { id: 'x', heading: '완료한 일', sourceIds: ['s1'], locked: true, excluded: false, evidence: [{ id: 's1', description: '정산 배치 점검' }, { id: 's2', description: '로그' }] },
+    { id: 'y', heading: '완료한 일', sourceIds: [], excluded: false } ] } },
+    { id: 'x', heading: '완료한 일', sourceIds: ['s1'], locked: true, excluded: false, evidence: [{ id: 's1', description: '정산 배치 점검' }, { id: 's2', description: '로그' }] })
+    .map(section => section.map(entry => entry.label)))`));
+  assert.deepEqual(withRows[0], ['보고에서 빼기', '다른 문장 아래로 넣기', '원래 문장으로']);
+  assert.deepEqual(withRows[2], ['근거: 정산 배치 점검 외 1개']);
 });
 
 // `프로젝트 바꾸기`는 다음 주 계획 문장에만 붙는다(다른 구역의 프로젝트는 원본 업무가 정한다).
@@ -1949,9 +1958,9 @@ test('계획 문장의 ⋯에만 프로젝트 바꾸기 고르개가 붙는다',
     reportSentenceMenuSections(${REPORT_ITEM}, ${JSON.stringify(row)})
       .map(section => section.map(entry => entry.field || entry.label)))`));
   assert.deepEqual(fields({ id: 'p1', heading: '다음 주 계획', group: '결제 리뉴얼', sourceIds: [] }),
-    [['이 아래로 문장 모으기', '한 줄로 모으기…'], ['프로젝트 바꾸기']]);
+    [['보고에서 빼기'], ['이 아래로 문장 모으기', '한 줄로 모으기…'], ['프로젝트 바꾸기']]);
   assert.deepEqual(fields({ id: 'a1', heading: '완료한 일', group: '결제 리뉴얼', sourceIds: [] }),
-    [['이 아래로 문장 모으기', '한 줄로 모으기…']], '자동 문장에는 프로젝트 바꾸기가 없다');
+    [['보고에서 빼기'], ['이 아래로 문장 모으기', '한 줄로 모으기…']], '자동 문장에는 프로젝트 바꾸기가 없다');
   // 고르개는 서버의 `regroup` 하나만 부른다(빈 값이면 프로젝트 없음).
   const sent = JSON.parse(app.run(`(() => {
     const calls = [];
@@ -2248,7 +2257,8 @@ test('자리를 옮긴 변경(넣기·빼기·묶기·풀기)의 알림은 무�
   assert.deepEqual(notice(`{ action: 'undo', token: 'tok' }`), ['되돌렸어요', ['닫기']]);
   // 나머지 변경의 알림은 예전 그대로다.
   assert.deepEqual(notice(`{ action: 'edit', id: 'r1', text: '고친 문장' }`), ['보고 내용을 저장했어요', ['닫기']]);
-  assert.deepEqual(notice(`{ action: 'exclude', id: 'r1' }`), ['보고 내용을 저장했어요', ['닫기']]);
+  // 제외는 (다듬기 A부터) 무엇을 했는지 적고 되돌리기를 준다 — 아래 다듬기 A 테스트가 자세히 본다.
+  assert.deepEqual(notice(`{ action: 'exclude', id: 'r1' }`), ['보고에 되살렸어요', ['되돌리기', '닫기']]);
   // 되돌릴 토큰을 못 받았으면 버튼 없이 알림만 뜬다.
   assert.deepEqual(notice(`{ action: 'merge', ids: ['a', 'b'] }`, 'undefined'), ['문장 2개를 묶었어요', ['닫기']]);
 });
@@ -2573,7 +2583,10 @@ test('접힌 부모는 문장 뒤에 조용한 `· N건 ▸`이 붙고, 눌러 �
   let line = draw();
   const toggle = line.children.find(kid => kid.className && kid.className.split(' ').includes('tx'))
     .children.find(kid => kid.className === 'rp-foldtoggle');
-  assert.equal(toggle.textContent, '· 2건 ▸', '접혀 있을 때는 개수와 ▸');
+  // 글자 기호(▸/▾) 대신 앱의 꺾쇠 아이콘 + 개수 — 펼침은 aria-expanded(=CSS 회전)로 말한다(디자인 검수).
+  assert.equal(toggle.innerHTML, app.run("uiIcon('chevron')"));
+  assert.equal(toggle.children.map(kid => kid.textContent).join(''), '· 2건', '접혀 있을 때는 꺾쇠와 개수');
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false');
   assert.equal(toggle.getAttribute('aria-label'), '아래 문장 2개 보기');
   toggle.listeners.click({ stopPropagation() {} });
   assert.equal(app.run('reportFoldOpen.has("p1")'), true, '펼쳐 본 것은 화면 상태로 남는다');
@@ -2581,7 +2594,7 @@ test('접힌 부모는 문장 뒤에 조용한 `· N건 ▸`이 붙고, 눌러 �
   line = draw();
   const toggle2 = line.children.find(kid => kid.className && kid.className.split(' ').includes('tx'))
     .children.find(kid => kid.className === 'rp-foldtoggle');
-  assert.equal(toggle2.textContent, '· 2건 ▾', '다시 그리면 펼친 상태(▾)로 보인다');
+  assert.equal(toggle2.getAttribute('aria-expanded'), 'true', '다시 그리면 펼친 상태(꺾쇠가 아래로)로 보인다');
 });
 test('setFolded 메뉴 항목은 아래에 문장이 있는 부모에만 붙고, 접힘·펼침을 그대로 부른다', () => {
   const app = reportClient();
@@ -2598,7 +2611,7 @@ test('setFolded 메뉴 항목은 아래에 문장이 있는 부모에만 붙고,
     reportSentenceMenuSections(${item}, ${row}).map(section => section.map(entry => entry.label)))`));
   // 기존 항목(이 아래로 문장 모으기·한 줄로 모으기…)의 붙는 조건은 그대로다(최상위·제외 안 됨) —
   // 아래에 문장이 있는 부모에도 함께 붙는다(잘못 누르면 서버가 막고 알린다).
-  assert.deepEqual(labels(withChild), [['근거 업무 보기', '이 아래로 문장 모으기', '펼쳐서 보이기', '풀기']],
+  assert.deepEqual(labels(withChild), [['보고에서 빼기'], ['이 아래로 문장 모으기', '펼쳐서 보이기', '풀기'], ['근거: 아래 문장들의 업무']],
     '접힌 부모에는 펼쳐서 보이기 · 풀기가 더해진다');
   app.run(`
     pick = (target, row, label) => reportSentenceMenuSections(target, row).flat().find(entry => entry.label === label).onClick();
@@ -2606,7 +2619,7 @@ test('setFolded 메뉴 항목은 아래에 문장이 있는 부모에만 붙고,
   `);
   assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls[0])')), { action: 'setFolded', id: 'p1', folded: false });
   const unfolded = withChild.replace('folded: true', 'folded: false');
-  assert.deepEqual(labels(unfolded), [['근거 업무 보기', '이 아래로 문장 모으기', '접어서 한 줄로 보이기', '풀기']], '부모 줄에는 `한 줄로 모으기…`가 붙지 않는다(아래 문장을 가진 문장은 새 요약 아래로 못 들어간다) — `이 아래로 문장 모으기`는 더 넣는 길이라 남는다');
+  assert.deepEqual(labels(unfolded), [['보고에서 빼기'], ['이 아래로 문장 모으기', '접어서 한 줄로 보이기', '풀기'], ['근거: 아래 문장들의 업무']], '부모 줄에는 `한 줄로 모으기…`가 붙지 않는다(아래 문장을 가진 문장은 새 요약 아래로 못 들어간다) — `이 아래로 문장 모으기`는 더 넣는 길이라 남는다');
 });
 test('풀기(unfold) 메뉴는 서버의 unfold를 그대로 부른다', () => {
   const app = reportClient();
@@ -11616,6 +11629,215 @@ test('회의 정리 판 화면 규칙: 초안·결과 줄 사이 실선 없음, 
   assert.doesNotMatch(drafts, /비어 있는 문구가 있어요/, '옛 머리 오류 문구는 없다');
 });
 
+// ---------- 주간요약 다듬기 A(화면): 바꾼 소제목·제목, 새로 표시, 버튼 등급 ----------
+const POLISH_ROWS = `[
+  { id: 'a1', heading: '완료한 일', group: 'PAY-1 · 결제 리뉴얼', groupKey: 'jira:PAY-1', shownGroup: '결제 개편 1차', groupOrigin: 'PAY-1 · 결제 리뉴얼', text: '정산 배치 점검함', sourceIds: ['s1'], excluded: false },
+  { id: 'a2', heading: '완료한 일', group: 'PAY-2 · 결제 서버', groupKey: 'jira:PAY-1', shownGroup: '결제 개편 1차', groupOrigin: 'PAY-1 · 결제 리뉴얼', text: '서버 로그 정리함', sourceIds: ['s2'], excluded: false, fresh: true },
+  { id: 'b1', heading: '진행중', group: '운영툴', groupKey: 'group:운영툴', text: '권한 재정리', sourceIds: ['s3'], excluded: false, changed: true },
+  { id: 'p1', heading: '다음 주 계획', group: '직접 작성', text: '합의하기', sourceIds: [], excluded: false }
+]`;
+test('다듬기 A: 문서·슬랙은 보이는 소제목 이름(shownGroup)으로 묶고, 지라 정보는 원래 티켓 이름에서 찾는다', () => {
+  const app = reportClient();
+  const sections = JSON.parse(app.run(`JSON.stringify(reportDocSections(${POLISH_ROWS}).map(s => [s.heading, s.groups.map(g => [g.group, g.key, g.origin, g.rows.map(r => r.id)])]))`));
+  assert.deepEqual(sections, [
+    ['완료한 일', [['결제 개편 1차', 'jira:PAY-1', 'PAY-1 · 결제 리뉴얼', ['a1', 'a2']]]],
+    ['진행중', [['운영툴', 'group:운영툴', null, ['b1']]]],
+  ], '묶음의 두 티켓이 바꾼 소제목 하나로 모이고, 저장된 이름(group)은 쓰지 않는다');
+  const model = JSON.parse(app.run(`JSON.stringify(reportSlackModel({ weekKey: '2026-09-14', title: '결제 보고', rows: ${POLISH_ROWS} }))`));
+  assert.equal(model.title, '결제 보고 (9/14~9/20)', '바꾼 제목 뒤에 기간이 붙는다');
+  assert.deepEqual(model.sections[0].projects.map(p => [p.name, p.source, p.items.map(i => i.text)]),
+    [['결제 개편 1차', 'PAY-1 · 결제 리뉴얼', ['정산 배치 점검함', '서버 로그 정리함']]]);
+  assert.equal(JSON.parse(app.run(`JSON.stringify(reportSlackModel({ weekKey: '2026-09-14', rows: ${POLISH_ROWS} }))`)).title, '9월 2주차 (9/14~9/20)', '제목을 바꾸지 않았으면 예전 그대로');
+  // 지라 정보: 보이는 이름이 아니라 원래 이름(`PAY-1 · …`)으로 찾는다.
+  app.run(`jiraIssuesByKey = new Map([['PAY-1', { key: 'PAY-1', status: 'QA 대기', versions: [] }]]);`);
+  const annotated = JSON.parse(app.run(`JSON.stringify(reportSlackModel({ weekKey: '2026-09-14', rows: ${POLISH_ROWS} }, { jira: true }).sections[0].projects[0].note)`));
+  assert.equal(annotated, ' (QA 대기)');
+  assert.equal(app.run("reportHeadingText('진행중')"), '진행 중', '문서의 상태 소제목은 띄어 쓴다');
+  assert.equal(app.run("reportHeadingText('완료한 일')"), '완료한 일');
+  assert.equal(app.run("reportSlackSectionLabel('진행 중')"), '[진행중]', '슬랙 글의 구역 제목은 사용자가 올리던 모양 그대로');
+});
+test('다듬기 A: 제외·이름 바꾸기·모두 확인의 알림은 무엇을 했는지 적고 되돌리기를 준다', () => {
+  const notice = (rows, action) => {
+    const app = reportClient();
+    app.run("reportUndo.set('2026-09-14', 'tok')");
+    app.run(`reportSavedNotice({ weekKey: '2026-09-14', draft: { revision: 1, rows: ${rows} } }, ${action})`);
+    const region = app.nodes.get('liveRegion');
+    return [region.textContent, region.children.map(kid => kid.textContent)];
+  };
+  assert.deepEqual(notice("[{ id: 'r1', excluded: true }]", "{ action: 'exclude', id: 'r1' }"), ['보고에서 뺐어요', ['되돌리기', '닫기']]);
+  assert.deepEqual(notice("[{ id: 'r1', excluded: false }]", "{ action: 'exclude', id: 'r1' }"), ['보고에 되살렸어요', ['되돌리기', '닫기']]);
+  assert.deepEqual(notice('[]', "{ action: 'rename', heading: '완료한 일', groupKey: 'jira:PAY-1', text: 'x' }"), ['소제목 이름을 바꿨어요', ['되돌리기', '닫기']]);
+  assert.deepEqual(notice('[]', "{ action: 'retitle', text: 'x' }"), ['제목을 바꿨어요', ['되돌리기', '닫기']]);
+  assert.deepEqual(notice('[]', "{ action: 'ackNew' }"), ['새로 들어온 것을 모두 확인했어요', ['되돌리기', '닫기']]);
+});
+test('다듬기 A: 모으기 모드에서 넣을 수 있는 줄에는 오른쪽에 읽기 전용 과녁 표시가 선다', () => {
+  const app = reportClient();
+  app.run(`
+    renderReportDraft = () => {};
+    item = { weekKey: '2026-09-14', draft: { revision: 1, rows: [
+      { id: 'a', heading: '완료한 일', group: '가입 개선', text: '퍼널 정리', sourceIds: [], excluded: false },
+      { id: 'b', heading: '완료한 일', group: '가입 개선', text: '문구 정리', sourceIds: [], excluded: false },
+    ] } };
+    reportNestParentId = 'a';
+    host = document.createElement('div');
+    reportSentenceRow(item, item.draft.rows[1], { host });
+    reportSentenceRow(item, item.draft.rows[0], { host });
+  `);
+  const aim = JSON.parse(app.run(`JSON.stringify(host.children.map(line => {
+    const mark = line.children.find(kid => kid.className === 'rp-aim');
+    return mark ? [mark.children[0].textContent, mark.children[0].getAttribute('aria-hidden')] : null;
+  }))`));
+  assert.deepEqual(aim, [['아래로 넣기', 'true'], null], '기준 문장 자신에게는 과녁이 없다');
+});
+
+// ---------- 주간요약 v3(화면): 글자를 누르면 고치기 · ⋯ 하나 · 점만 파랗게 · 머리 한 줄 · 상태 줄 ----------
+const V3_ITEM = `{ weekKey: '2026-09-14', draft: { revision: 1, since: { at: '2026-09-16T00:00:00Z', fresh: 1, changed: 1 }, rows: ${POLISH_ROWS} } }`;
+function v3Line(app, index, itemCode = V3_ITEM) {
+  return app.run(`(() => {
+    renderReportDraft = () => {};
+    item = ${itemCode};
+    const host = document.createElement('div');
+    reportSentenceRow(item, item.draft.rows[${index}], { host, newIds: new Set() });
+    return host.children[0];
+  })()`);
+}
+const v3Kid = (node, cls) => node.children.find(kid => String(kid && kid.className).split(' ').includes(cls));
+test('v3: 상태 줄 글은 다듬은 뒤 새로·바뀐 줄이 있을 때만이고, 없으면 빈 글자(줄 자체가 없다)', () => {
+  const app = reportClient();
+  assert.equal(app.run('reportStatusText(null)'), '');
+  assert.equal(app.run("reportStatusText({ at: 'x', fresh: 0, changed: 0 })"), '');
+  assert.equal(app.run("reportStatusText({ at: 'x', fresh: 2, changed: 0 })"), '지난번 다듬은 뒤 2줄이 새로 들어왔어요');
+  assert.equal(app.run("reportStatusText({ at: 'x', fresh: 2, changed: 1 })"), '지난번 다듬은 뒤 2줄이 새로 들어왔어요 · 1줄이 바뀌었어요');
+  const top = app.run(`(() => { renderReportDraft = () => {}; const host = document.createElement('div'); reportTopBlock(${V3_ITEM}, host); return host; })()`);
+  const line = top.children[0].children[0];
+  assert.deepEqual([line.className, line.children[0].textContent, line.children[1].textContent, line.children[1].className],
+    ['rp-status', '지난번 다듬은 뒤 1줄이 새로 들어왔어요 · 1줄이 바뀌었어요', '확인했어요', 'd-link']);
+  const none = app.run(`(() => { const host = document.createElement('div'); reportTopBlock({ weekKey: 'W', draft: { rows: [], since: null } }, host); return host; })()`);
+  assert.equal(none.children.length, 0, '새로 들어온 게 없으면 줄이 없다');
+});
+test('v3: 문장 줄은 글자가 곧 고치는 자리(Tab·Enter·Space)이고, 끝에는 ⋯ 하나뿐이며, 새로 들어온 줄은 점만 파랗다', () => {
+  const app = reportClient();
+  const line = v3Line(app, 1);
+  const bullet = line.children[0];
+  assert.deepEqual([bullet.className, bullet.getAttribute('aria-label'), bullet.title, bullet.getAttribute('role')], ['bu is-fresh', '새로 들어옴', '새로 들어옴', 'img']);
+  const text = v3Kid(line, 'tx');
+  const first = text.children[0];
+  assert.deepEqual([first.className, first.tabIndex, first.getAttribute('role'), first.getAttribute('aria-label')], ['ln rp-edit', 0, 'button', '문장 고치기: 서버 로그 정리함']);
+  assert.equal(text.children.some(kid => ['nw', 'edt', 'rv'].includes(kid.className)), false, '`새로`·`직접 수정`·`원본 확인 필요` 글자 표시는 없다');
+  const acts = v3Kid(line, 'ac');
+  assert.equal(acts.children.length, 1, '줄 끝 동작은 ⋯ 하나');
+  assert.match(acts.children[0].className, /d-more/);
+  assert.equal(line.children.some(kid => /d-btn/.test(String(kid.className))), false, '수정·제외 버튼이 없다');
+  // Space로 편집 시작 → 입력칸 + `Enter 저장 · Esc 취소` 한 줄, 저장·취소 버튼 없음.
+  first.listeners.keydown({ key: ' ', preventDefault() {} });
+  assert.equal(app.run("reportEdits.get('2026-09-14:a2')"), '서버 로그 정리함');
+  const editing = v3Line(app, 1);
+  const box = v3Kid(editing, 'tx');
+  assert.deepEqual(box.children.map(kid => kid.className), ['rp-ta', 'rp-help']);
+  assert.match(box.children[1].textContent, /^Enter 저장 · Esc 취소/);
+});
+test('v3: 편집 중 Enter는 저장(Shift+Enter·한글 조합 중은 아님), Esc는 취소, 글이 그대로면 저장하지 않는다', async () => {
+  const app = reportClient();
+  app.run(`calls = []; reportChange = async (target, action) => { calls.push(action); }; reportEdits.set('2026-09-14:a1', '정산 배치 점검 끝냄');`);
+  const input = v3Kid(v3Line(app, 0), 'tx').children[0];
+  input.value = '정산 배치 점검 끝냄';
+  const key = (k, extra = {}) => input.listeners.keydown({ key: k, preventDefault() {}, stopPropagation() {}, ...extra });
+  key('Enter', { isComposing: true });
+  key('Enter', { shiftKey: true });
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), [], '조합 중·Shift+Enter는 저장하지 않는다');
+  key('Enter');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), [{ action: 'edit', id: 'a1', text: '정산 배치 점검 끝냄' }]);
+  const again = v3Kid(v3Line(app, 0), 'tx').children[0];
+  again.listeners.keydown({ key: 'Escape', preventDefault() {}, stopPropagation() {} });
+  assert.equal(app.run("reportEdits.has('2026-09-14:a1')"), false, 'Esc는 적던 글을 버리고 닫는다');
+  app.run("reportEdits.set('2026-09-14:a1', '정산 배치 점검함')");
+  v3Kid(v3Line(app, 0), 'tx').children[0].listeners.keydown({ key: 'Enter', preventDefault() {}, stopPropagation() {} });
+  assert.equal(JSON.parse(app.run('JSON.stringify(calls)')).length, 1, '글이 그대로면 저장하지 않고 닫는다');
+});
+test('v3: 원본이 바뀐 줄은 끝에 작은 알약(기존 칩) 하나 — 누르면 제안과 두 선택지가 메뉴로 뜬다', () => {
+  const app = reportClient();
+  const item = `{ weekKey: '2026-09-14', draft: { revision: 1, rows: [
+    { id: 'l1', heading: '완료한 일', group: '가입', text: '가입 문구 다듬음', sourceIds: ['s1'], excluded: false, locked: true, needsReview: true,
+      suggestion: { text: '문구 검토함\\n후속 확인함', added: 1, missing: false, mixed: false } },
+    { id: 'l2', heading: '완료한 일', group: '가입', text: '지워진 업무', sourceIds: ['s9'], excluded: false, locked: true, needsReview: true,
+      suggestion: { text: '', added: 0, missing: true, mixed: false } } ] } }`;
+  const pill = v3Kid(v3Line(app, 0, item), 'rp-pill');
+  assert.deepEqual([pill.className, pill.textContent], ['d-chip rp-pill', '새 업무 1개']);
+  const menu = JSON.parse(app.run(`JSON.stringify(reportSuggestionMenuSections(${item}, (${item}).draft.rows[0]).map(s => s.map(e => [e.label, !!e.disabled])))`));
+  assert.deepEqual(menu, [[['제안: 문구 검토함', true]], [['제안대로 바꾸기', false], ['지금 문장 그대로 두기', false]]]);
+  assert.equal(v3Kid(v3Line(app, 1, item), 'rp-pill').textContent, '원본 확인');
+  const missing = JSON.parse(app.run(`JSON.stringify(reportSuggestionMenuSections(${item}, (${item}).draft.rows[1]).flat().map(e => e.label))`));
+  assert.equal(missing.includes('제안대로 바꾸기'), false, '원본이 지워졌으면 제안대로 바꿀 수 없다');
+});
+test('v3: 소제목은 색 점 + 이름 글자(버튼)이고 원래 프로젝트는 풍선(title)으로만 — 고치는 중이면 입력칸과 안내 한 줄', () => {
+  const app = reportClient();
+  app.run(`calls = []; reportChange = async (target, action) => { calls.push(action); }; renderReportDraft = () => {};
+    item = ${V3_ITEM}; groups = reportDocSections(item.draft.rows);`);
+  const head = app.run(`reportGroupHead(item, '완료한 일', groups[0].groups[0], '결제 개편 1차')`);
+  assert.deepEqual(head.children.map(kid => kid.className), ['d-pjdot', 'rp-rename']);
+  assert.equal(head.children[1].title, '원래 프로젝트: 결제 리뉴얼 · 누르면 이름을 고쳐요');
+  assert.equal(app.run(`reportGroupHead(item, '진행중', groups[1].groups[0], '운영툴').children[1].title`), '누르면 이름을 고쳐요');
+  assert.deepEqual(app.run(`reportGroupHead(item, '진행중', { group: '운영툴', rows: [] }, '운영툴').children.map(kid => kid.className)`), ['nm'], '열쇠가 없는 옛 응답은 글자만');
+  head.children[1].listeners.click();
+  const box = app.run(`reportGroupHead(item, '완료한 일', groups[0].groups[0], '결제 개편 1차').children[1]`);
+  assert.deepEqual([box.className, box.children.map(kid => kid.className), box.children[1].textContent], ['rp-ren', ['d-din', 'rp-help'], 'Enter 저장 · Esc 취소']);
+  assert.equal(box.children[0].placeholder, '결제 리뉴얼');
+  box.children[0].value = '결제 개편';
+  box.children[0].listeners.keydown({ key: 'Enter', preventDefault() {}, stopPropagation() {} });
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), [{ action: 'rename', heading: '완료한 일', groupKey: 'jira:PAY-1', text: '결제 개편' }]);
+});
+test('v3(99 리뷰③): 소제목은 보이는 이름이 아니라 프로젝트 열쇠로 묶는다 — 같은 이름의 다른 프로젝트는 따로 선다', () => {
+  const app = reportClient();
+  const rows = `[
+    { id: 'x1', heading: '완료한 일', group: '운영', groupKey: 'group:운영', text: '가', sourceIds: [], excluded: false },
+    { id: 'x2', heading: '완료한 일', group: 'OPS-1 · 운영', groupKey: 'jira:OPS-1', shownGroup: '운영', groupOrigin: 'OPS-1 · 운영툴', text: '나', sourceIds: [], excluded: false },
+    { id: 'x3', heading: '완료한 일', group: '운영', groupKey: 'group:운영', text: '다', sourceIds: [], excluded: false }
+  ]`;
+  const groups = JSON.parse(app.run(`JSON.stringify(reportDocSections(${rows})[0].groups.map(g => [g.group, g.key, g.rows.map(r => r.id)]))`));
+  assert.deepEqual(groups, [['운영', 'group:운영', ['x1', 'x3']], ['운영', 'jira:OPS-1', ['x2']]]);
+  const slack = JSON.parse(app.run(`JSON.stringify(reportSlackModel({ weekKey: '2026-09-14', rows: ${rows} }).sections[0].projects.map(p => [p.name, p.items.map(i => i.text)]))`));
+  assert.deepEqual(slack, [['운영', ['가', '다']], ['운영', ['나']]], '슬랙 글도 같은 규칙');
+});
+test('v3: 머리 ⋯에는 전체 업무 기록·제외한 문장·되돌리기·개수 한 줄이 들어가고, 고치는 중·모으기 중에는 복사가 3차다', () => {
+  const app = reportClient();
+  const labels = JSON.parse(app.run(`(() => {
+    reportUndo.set('2026-09-14', 'tok');
+    const item = { weekKey: '2026-09-14', draft: { rows: [ { id: 'a', excluded: false, sourceIds: ['s1'] }, { id: 'b', excluded: true, sourceIds: [] } ] } };
+    return JSON.stringify(reportHeadMenuSections(item).map(s => s.map(e => [e.label, !!e.disabled])));
+  })()`));
+  assert.deepEqual(labels, [[['전체 업무 기록 보기', false], ['제외한 문장 보기 · 1개', false], ['직전 변경 되돌리기', false]], [['보고 1문장 · 근거 업무 1개', true]]]);
+  app.run("reportMode = 'records'");
+  assert.equal(app.run("reportHeadMenuSections({ weekKey: 'W', draft: { rows: [] } })[0][0].label"), '보고로 돌아가기');
+  app.run("reportMode = 'draft'");
+  app.run("reportEdits.set('2026-09-14:a1', '고치는 중')");
+  assert.equal(app.run("reportEditing('2026-09-14')"), true);
+  app.run("reportEdits.clear(); reportEdits.set('2026-09-14:new', '계획 적는 중'); reportEdits.set('2026-09-14:plan-add:가입', '또')");
+  assert.equal(app.run("reportEditing('2026-09-14')"), false, '다음 주 계획 입력칸에 적던 글은 고치는 중이 아니다');
+});
+test('v3: `다른 문장 아래로 넣기` — 옮길 문장에서 시작해 받을 문장을 한 번 누르면 nest 하나로 끝난다', () => {
+  const app = reportClient();
+  app.run(`
+    calls = [];
+    reportChange = async (target, action) => { calls.push(action); };
+    renderReportDraft = () => {};
+    escPush = () => {}; escDrop = () => {};
+    item = { weekKey: '2026-09-14', draft: { revision: 1, rows: [
+      { id: 'a', heading: '완료한 일', group: '가입 개선', text: '퍼널 정리', sourceIds: [], excluded: false },
+      { id: 'b', heading: '완료한 일', group: '가입 개선', text: '문구 정리', sourceIds: [], excluded: false },
+      { id: 'c', heading: '진행중', group: '가입 개선', text: '다른 상태', sourceIds: [], excluded: false },
+    ] } };
+    reportRenderedItem = item;
+    reportPlaceStart(item, item.draft.rows[1]);
+    host = document.createElement('div');
+    item.draft.rows.forEach(row => reportSentenceRow(item, row, { host }));
+  `);
+  const lines = app.run('host.children');
+  assert.deepEqual(lines.map(line => line.getAttribute('role') || null), ['button', null, null], '같은 상태의 받을 수 있는 문장만 눌린다');
+  lines[0].listeners.click();
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), [{ action: 'nest', id: 'b', parentId: 'a' }]);
+  assert.equal(app.run('reportPlaceId'), null, '한 번 넣으면 모드가 끝난다');
+});
 // ---------- 상세 카드 입력 다듬기: 날짜 값 = 누르는 자리 · 빈 날짜 한 조각 · 기다리는 답변 목록 · 빈 값 change 막기 ----------
 function detailInputClient() {
   const app = workflowsClient();

@@ -1600,7 +1600,8 @@ function moveProject({ project, to, label }) {
   workflows.recordProjectMove({
     id: moveId, from, to, at: new Date().toISOString(),
     items, meetings: moved.ids, links: moved.link !== null ? { [from]: moved.link } : null,
-    meetingLinks, reportRows, reportLabel: label,
+    // reportNames: 옮긴 소제목 이름 열쇠(`[주, 옛 열쇠, 새 열쇠]`) — 되돌리기가 자기가 옮긴 이름만 되돌리게.
+    meetingLinks, reportRows, reportNames: reportRows.names || [], reportLabel: label,
     counts: { items: items.length, meetings: meetingCount, report: reportRows.length },
   });
 
@@ -1617,7 +1618,7 @@ function undoMoveProject({ moveId }) {
   if (typeof moveId !== 'string' || !moveId.trim()) throw new Error('되돌릴 기록을 확인해 주세요.');
   const entry = workflows.takeProjectMove(moveId);
   if (!entry) throw new Error('되돌릴 기록이 없어요.');
-  const { from, to, items: itemIds, meetings: meetingIds, links, meetingLinks: meetingLinkTitles, reportRows, reportLabel } = entry;
+  const { from, to, items: itemIds, meetings: meetingIds, links, meetingLinks: meetingLinkTitles, reportRows, reportNames, reportLabel } = entry;
 
   // ① 업무 파일 — 기록된 id가 지금도 그 지라 키를 달고 있을 때만 되돌린다.
   const idSet = new Set(itemIds);
@@ -1657,7 +1658,7 @@ function undoMoveProject({ moveId }) {
   if (meetingLinksRestored) fs.writeFileSync(MEETING_LINKS_PATH, JSON.stringify(linkState, null, 2));
 
   // ⑥ 주간요약 저장본
-  const reportUndo = reportDrafts.moveGroupUndo(reportRows, from, to, reportLabel);
+  const reportUndo = reportDrafts.moveGroupUndo(reportRows, from, to, reportLabel, reportNames);
 
   return {
     ok: true, project: `group:${from}`,
@@ -2619,7 +2620,13 @@ const workflows = require('./workflow-store')({
   move: retypeTrackItem,
 });
 const batchTasks = usage.countBatch(require('./task-batch')({ files: listTrackerFiles, pattern: TRACK_RE, parse: parseFields, validateDate, today: todayLocal }), () => getReportRefs());
-const reportDrafts = require('./report-drafts')({ directory: TRACKER_DIR, sources: () => workflows.snapshot().items, legacy: parseWeeklyReports, currentWeek: currentWeekKey });
+// 주간요약 소제목: 묶음(projectBundles)은 그 묶음이 생긴 주부터 대표 이름 하나로 서고, 사람이 바꾼 소제목 옆의
+// 원래 프로젝트 이름은 지금 이름(별칭·지라 요약)으로 적는다 — 두 값 다 읽기만 한다.
+const reportDrafts = require('./report-drafts')({
+  directory: TRACKER_DIR, sources: () => workflows.snapshot().items, legacy: parseWeeklyReports, currentWeek: currentWeekKey,
+  bundles: () => workflows.snapshot().projectBundles,
+  projectLabel: key => (key.startsWith('jira:') ? projectLabelOf({ jira: key.slice('jira:'.length) }) : key.startsWith('group:') ? key.slice('group:'.length) : null),
+});
 const mutations = require('./mutation-store')(TRACKER_DIR, [MEETING_LINKS_PATH, weeklyReportStatePath()]);
 // 지라 직접 읽기. 설정이 없으면 `connected:false`만 돌려주고 아무 데도 접속하지 않는다.
 // 토큰 파일은 서버의 읽기 묶음(readScope)을 쓰지 않는다 — 요청마다 새로 읽고 들고 있지 않으려고.

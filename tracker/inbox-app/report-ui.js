@@ -34,6 +34,12 @@ const reportProjectText = (name) => {
 const REPORT_PLAN_NO_PROJECT = '직접 작성';
 // 옛 합치기 행(서로 다른 프로젝트의 문장을 한 문장으로 합친 것)에만 남는 그룹 이름.
 const REPORT_MULTI_PROJECT = '여러 프로젝트';
+// 문장이 설 소제목 이름. 서버가 보이는 이름이 저장된 이름과 다를 때만 `shownGroup`을 준다 — 사람이 바꾼 소제목 이름이거나,
+// 묶음(projectBundles)에 든 티켓이라 대표 이름 아래로 서는 경우다. 저장된 `group`은 그대로다(문서·슬랙이 같은 이름을 쓴다).
+const reportRowGroup = row => (row && row.shownGroup) || (row ? row.group : '');
+// 문서의 상태 소제목 글자. 서버·저장 값은 `진행중` 그대로 두고 문서에만 띄어 쓴다(슬랙 글의 `[진행중]`은 사용자가 올리는 모양 그대로).
+const REPORT_HEADING_TEXT = { '진행중': '진행 중' };
+const reportHeadingText = heading => REPORT_HEADING_TEXT[heading] || heading;
 
 // 슬랙에 붙일 구역 — 화면·서버의 상태 이름을 슬랙 글의 구역 이름으로 옮긴다.
 // `확인 완료`는 따로 세우지 않고 `완료` 안으로 들어간다.
@@ -105,13 +111,86 @@ function reportButton(text, action, className = 'd-btn') {
   return el;
 }
 
+// ---------- 제목·소제목 이름을 그 자리에서 고치기 ----------
+// 적던 글은 문장 수정과 같은 `reportEdits`에 둔다 — 문서를 다시 그려도(새 기록·다른 창) 입력칸과 글이 그대로 남고,
+// 수정 중에는 복사가 막히고 창을 닫을 때 묻는다. 서버는 `/api/report/change`의 `retitle`·`rename` 하나다.
+const reportTitleEditKey = weekKey => `${weekKey}:title`;
+const reportNameEditKey = (weekKey, heading, key) => `${weekKey}:name:${heading}|${key}`;
+// 문장·제목·소제목을 고치는 중인지(다음 주 계획 입력칸에 적던 글은 뺀다) — 머리의 `슬랙용으로 복사`를 3차로 내린다.
+function reportEditing(weekKey) {
+  const head = `${weekKey}:`;
+  return [...reportEdits.keys()].some(key => key.startsWith(head)
+    && key !== `${head}${REPORT_PLAN_BOTTOM_KEY}` && !key.startsWith(`${head}plan-add:`));
+}
+
+// 편집 중 입력칸 아래의 단서 한 줄 — 버튼이 없으므로 이것이 저장·취소를 알려 주는 유일한 글자다(v3).
+const REPORT_EDIT_HINT = 'Enter 저장 · Esc 취소';
+
+// 제목·소제목 자리의 입력칸 — 글자를 누르면 그 자리가 입력칸(`.d-din`)이 되고 아래에 `Enter 저장 · Esc 취소` 한 줄이 선다.
+// 저장·취소 버튼은 없다(v3 — 고치는 법은 하나). 한글 조합 중 Enter는 넘긴다. 원래 이름과 같으면 저장하지 않고 닫고,
+// 비우고 저장하면 원래 이름으로 돌아간다(placeholder가 원래 이름이다).
+function reportRenameBox(item, { editKey, label, original, current, save }) {
+  const box = reportNode('div', undefined, 'rp-ren');
+  const input = reportNode('input', undefined, 'd-din');
+  input.type = 'text';
+  input.maxLength = 60;
+  input.value = reportEdits.get(editKey) ?? current;
+  input.placeholder = original;
+  input.dataset.renameInput = editKey;
+  input.setAttribute('aria-label', `${label} — ${REPORT_EDIT_HINT}`);
+  input.addEventListener('input', () => reportEdits.set(editKey, input.value));
+  const close = () => { reportEdits.delete(editKey); renderReportDraft(item); reportRenameFocus(editKey); };
+  const commit = async () => {
+    const value = input.value.trim();
+    if (value === current) { close(); return; }
+    await save(value);
+    reportRenameFocus(editKey);
+  };
+  input.addEventListener('keydown', (event) => {
+    if (event.isComposing) return;
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); return; }
+    if (event.key !== 'Enter' || input.disabled) return;
+    event.preventDefault();
+    input.disabled = true;
+    commit().catch(error => showNotice(error.message || '저장하지 못했어요. 적은 내용은 그대로 있어요', true))
+      .finally(() => { input.disabled = false; });
+  });
+  box.append(input, reportNode('div', REPORT_EDIT_HINT, 'rp-help'));
+  return box;
+}
+// 다시 그린 뒤 제목·소제목 자리(버튼)로 초점을 돌려놓는다 — 입력칸이 아직 열려 있으면(저장 실패) 입력칸으로.
+function reportRenameFocus(editKey) {
+  const host = document.getElementById('weeklyReportDetail');
+  if (!host || typeof host.querySelectorAll !== 'function') return;
+  const find = attr => [...host.querySelectorAll(`[${attr}]`)].find(el => (attr === 'data-rename' ? el.dataset.rename : el.dataset.renameInput) === editKey);
+  (find('data-rename-input') || find('data-rename'))?.focus();
+}
+// 제목·소제목 글자 자체가 누르는 자리다 — 진짜 button이라 Tab으로 닿고 Enter·Space로 편집을 시작한다.
+// 손이 닿거나 초점이 오면 옅은 `--hover` 판 + 밑줄로 "누를 수 있음"을 보여 준다(CSS `.rp-rename`).
+function reportRenameButton(item, { editKey, text, label, current, tip }) {
+  const button = reportNode('button', text, 'rp-rename');
+  button.type = 'button';
+  button.dataset.rename = editKey;
+  button.title = tip || '누르면 이름을 고쳐요';
+  button.setAttribute('aria-label', label);
+  button.addEventListener('click', () => {
+    reportEdits.set(editKey, current);
+    renderReportDraft(item);
+    const input = [...(document.getElementById('weeklyReportDetail')?.querySelectorAll('[data-rename-input]') || [])]
+      .find(el => el.dataset.renameInput === editKey);
+    if (input) { input.focus(); input.select?.(); }
+  });
+  return button;
+}
+
 // ---------- 순수 함수: 문서 뼈대와 복사 글자 ----------
 
 // 슬랙 글의 첫 줄. 슬랙에 올라간 글은 나중에 읽히므로 `이번 주` 같은 상대 표현은 쓰지 않는다.
-function reportSlackTitle(weekKey) {
+// 사람이 제목을 바꿨으면 그 제목 뒤에 같은 기간 괄호를 붙인다(나중에 읽어도 어느 주인지 알 수 있게).
+function reportSlackTitle(weekKey, title) {
   if (!weekKey || typeof formatWeekLabel !== 'function') return '';
   const label = formatWeekLabel(weekKey);
-  return `${label.week} (${label.range.replace(/^\d{4}년\s*/, '').replace(/\s*~\s*/, '~')})`;
+  return `${title || label.week} (${label.range.replace(/^\d{4}년\s*/, '').replace(/\s*~\s*/, '~')})`;
 }
 
 // 모르는 소제목은 버리지 않는다 — 그 이름 그대로의 구역이 된다(조용히 빠지는 문장이 없게).
@@ -134,7 +213,7 @@ function reportSlackSectionNames(report) {
 
 // 문장이 설 프로젝트 이름. `예정`에서 프로젝트가 없는 문장은 묶지 않고 구역 끝 메모로 보낸다(null).
 function reportSlackProjectOf(row, sectionName) {
-  const group = String(row.group || '').trim();
+  const group = String(reportRowGroup(row) || '').trim();
   const none = !group || group === REPORT_NO_PROJECT_LABEL || group === REPORT_NO_PROJECT;
   if (sectionName === '예정') return none || group === REPORT_PLAN_NO_PROJECT ? null : group;
   return none ? REPORT_SLACK_OTHER : group;
@@ -195,7 +274,7 @@ function reportCanFold(rows, row) {
 
 // 초기 요약 문장 — 프로젝트가 하나면 이름을 앞에 붙이고, 여럿이면 개수만(BKEY: 지라는 요약만).
 function reportFoldSeedText(selected) {
-  const names = new Set((selected || []).map(row => reportProjectText(row.group)));
+  const names = new Set((selected || []).map(row => reportProjectText(reportRowGroup(row))));
   const count = (selected || []).length;
   return names.size === 1 ? `${[...names][0]} 소소한 작업 ${count}건` : `소소한 작업 ${count}건`;
 }
@@ -223,6 +302,7 @@ function reportSlackModel(report, options = {}) {
   const linesOf = row => String(row.text ?? '').split('\n').map(line => line.trim()).filter(Boolean);
   // 접힌 부모만 있는 프로젝트 블록(근거 없음)은 지라 정보를 붙이지 않는다 — reportJiraAnnotate가 읽는다.
   const foldedOnly = new Set();
+  const projectIds = new Map();
   for (const row of rows) {
     if (row.excluded || reportParentRow(rows, row)) continue;
     const name = reportSlackSectionOf(row.heading);
@@ -236,8 +316,17 @@ function reportSlackModel(report, options = {}) {
     const item = { text: lines[0], notes: [...lines.slice(1), ...(row.folded ? [] : (children.get(row.id) || []).flatMap(linesOf))] };
     const projectName = reportSlackProjectOf(row, name);
     if (projectName === null) { section.memos.push(item); continue; }
-    let project = section.projects.find(entry => entry.name === projectName);
-    if (!project) { project = { name: projectName, items: [] }; section.projects.push(project); foldedOnly.add(project); }
+    // 같은 프로젝트(열쇠)끼리 묶는다 — 이름이 같아도 다른 프로젝트면 따로 선다(문서 소제목과 같은 규칙).
+    const projectId = row.groupKey && projectName !== REPORT_SLACK_OTHER ? `key:${row.groupKey}` : `name:${projectName}`;
+    let project = section.projects.find(entry => (projectIds.get(entry) || `name:${entry.name}`) === projectId);
+    // `source`는 지라 정보를 찾을 원래 이름(`KEY · 요약`)이다 — 소제목 이름을 바꿨거나 묶음 대표 아래로 섰어도 지라 정보는 그 티켓 것이다.
+    // 원래 이름이 보이는 이름과 같으면 싣지 않는다(예전 모양 그대로).
+    if (!project) {
+      project = { name: projectName, items: [] };
+      if (row.groupOrigin && row.groupOrigin !== projectName) project.source = row.groupOrigin;
+      projectIds.set(project, projectId);
+      section.projects.push(project); foldedOnly.add(project);
+    }
     project.items.push(item);
     if (!row.folded) foldedOnly.delete(project);
   }
@@ -248,7 +337,7 @@ function reportSlackModel(report, options = {}) {
   }
   const list = order.map(name => sections.get(name)).filter(section => section && (section.projects.length || section.memos.length));
   return {
-    title: reportSlackTitle(report && report.weekKey),
+    title: reportSlackTitle(report && report.weekKey, report && report.title),
     // `지라 정보` 토글이 켜졌을 때만 프로젝트 줄에 괄호 한 마디가 붙는다(기본 꺼짐).
     sections: options.jira ? reportJiraAnnotate(list, foldedOnly) : list,
   };
@@ -321,9 +410,10 @@ function reportJiraAnnotate(sections, foldedOnly = new Set()) {
   const seen = new Set();
   for (const section of sections) {
     for (const project of section.projects) {
-      if (seen.has(project.name) || foldedOnly.has(project)) continue;
-      seen.add(project.name);
-      const note = reportJiraNote(project.name);
+      const source = project.source || project.name;
+      if (seen.has(source) || foldedOnly.has(project)) continue;
+      seen.add(source);
+      const note = reportJiraNote(source);
       if (note) project.note = note;
     }
   }
@@ -426,8 +516,17 @@ function reportDocSections(rows) {
       sections.push(section);
     }
     const section = byHeading.get(row.heading);
-    let group = section.groups.find(entry => entry.group === row.group);
-    if (!group) { group = { group: row.group, rows: [] }; section.groups.push(group); }
+    const name = reportRowGroup(row);
+    // 소제목은 보이는 이름이 아니라 프로젝트 열쇠(groupKey)로 묶는다 — 같은 이름의 다른 프로젝트가 한 소제목으로
+    // 합쳐지지 않게. 열쇠가 없는 옛 응답만 이름으로 묶는다.
+    const groupId = row.groupKey ? `key:${row.groupKey}` : `name:${name}`;
+    let group = section.groups.find(entry => entry.id === groupId);
+    // `key`·`origin`은 소제목 이름 바꾸기가 쓴다(서버가 준 프로젝트 열쇠와 원래 이름 — 첫 문장 것).
+    if (!group) {
+      group = { group: name, key: row.groupKey || null, origin: row.groupOrigin || null, rows: [] };
+      Object.defineProperty(group, 'id', { value: groupId, enumerable: false });
+      section.groups.push(group);
+    }
     group.rows.push(row, ...(children.get(row.id) || []));
   }
   for (const section of sections) {
@@ -523,6 +622,8 @@ async function reportChange(item, action, notice) {
       throw new Error(result.error || '저장됐는지 확인하지 못했어요. 적은 내용은 그대로 있어요');
     }
     if (action.action === 'edit') reportEdits.delete(`${item.weekKey}:${action.id}`);
+    if (action.action === 'retitle') reportEdits.delete(reportTitleEditKey(item.weekKey));
+    if (action.action === 'rename') reportEdits.delete(reportNameEditKey(item.weekKey, action.heading, action.groupKey));
     // `add`로 적던 글을 비우는 것은 입력칸을 들고 있는 쪽(reportPlanAddLines)이 한다 —
     // 다른 입력줄(프로젝트 소제목의 `+ 추가`)에서 담았는데 맨 아래 줄의 글이 날아가면 안 된다.
     reportUndo.set(item.weekKey, result.undoToken);
@@ -541,6 +642,9 @@ const REPORT_MOVE_NOTICE = {
   unnest: '따로 뺐어요',
   split: '묶음을 풀었어요',
   regroup: '프로젝트를 바꿨어요',
+  retitle: '제목을 바꿨어요',
+  rename: '소제목 이름을 바꿨어요',
+  ackNew: '새로 들어온 것을 모두 확인했어요',
 };
 // `notice`를 주면 그 문구만 조용히 알린다(다음 주 계획 담기처럼 무엇을 했는지 문구가 이미 다 말하는 자리).
 function reportSavedNotice(item, action, notice) {
@@ -550,6 +654,9 @@ function reportSavedNotice(item, action, notice) {
     ? `문장 ${action.ids.length}개를 묶었어요`
     : action.action === 'fold'
     ? `한 줄로 모았어요 · ${action.ids.length}건`
+    // 제외는 문장이 문서에서 사라지는 변경이라 무엇을 했는지 적고 되돌리기를 준다(⌘Z도 같은 길).
+    : action.action === 'exclude'
+    ? (((item.draft && item.draft.rows) || []).find(row => row.id === action.id)?.excluded ? '보고에서 뺐어요' : '보고에 되살렸어요')
     : REPORT_MOVE_NOTICE[action.action];
   if (!message) { announce('보고 내용을 저장했어요'); return; }
   const token = reportUndo.get(item.weekKey);
@@ -597,7 +704,8 @@ function reportNestParent(report) {
 }
 
 function reportNestStart(item, row) {
-  reportFoldEnd(); // 두 고르기 모드는 함께 열리지 않는다.
+  reportFoldEnd(); // 고르기 모드는 함께 열리지 않는다.
+  reportPlaceEnd();
   reportNestParentId = row.id;
   escDrop(reportNestEnd);
   escPush(reportNestEnd);
@@ -619,12 +727,35 @@ function reportNestLabel(text) {
   return line.length > 24 ? `${line.slice(0, 24)}…` : line;
 }
 
+// ---------- 넣을 곳 고르기(`다른 문장 아래로 넣기`) ----------
+// 모으기(nest)의 반대 방향 — 옮길 문장에서 시작해 그 문장을 받을 문장을 한 번 누르면 끝난다(서버는 같은 `nest`).
+let reportPlaceId = null;
+function reportPlaceRow(report) {
+  if (reportPlaceId === null) return null;
+  return (report && report.rows ? report.rows : []).find(row => row.id === reportPlaceId && !row.excluded && !row.parent) || null;
+}
+function reportPlaceStart(item, row) {
+  reportNestEnd();
+  reportFoldEnd();
+  reportPlaceId = row.id;
+  escDrop(reportPlaceEnd);
+  escPush(reportPlaceEnd);
+  renderReportDraft(item);
+}
+function reportPlaceEnd() {
+  if (reportPlaceId === null) return;
+  reportPlaceId = null;
+  escDrop(reportPlaceEnd);
+  if (reportRenderedItem) renderReportDraft(reportRenderedItem);
+}
+
 // ---------- 한 줄로 모으기 고르기 모드 ----------
 // nest처럼 기준 문장에서 시작하지만, 여러 문장을 골라 두었다가 확인을 눌러야(fold) 저장된다.
 // 시작한 문장은 이미 골라진 상태이고, 같은 소제목의 문장만 고르고 뺄 수 있다.
 
 function reportFoldStart(item, row) {
-  reportNestEnd(); // 두 고르기 모드는 함께 열리지 않는다.
+  reportNestEnd(); // 고르기 모드는 함께 열리지 않는다.
+  reportPlaceEnd();
   reportFoldIds = new Set([row.id]);
   reportFoldHeading = row.heading;
   escDrop(reportFoldEnd);
@@ -672,15 +803,22 @@ function reportPickBar(item) {
   const nestParent = reportNestParent(item.draft);
   const nesting = !!nestParent && reportMode === 'draft';
   const folding = reportFoldIds !== null && reportMode === 'draft';
-  const open = nesting || folding;
+  const placeRow = reportPlaceRow(item.draft);
+  const placing = !!placeRow && reportMode === 'draft';
+  const open = nesting || folding || placing;
   document.body.classList.toggle('nest-open', open);
   bar.hidden = !open;
   bar.replaceChildren();
   if (!open) return;
-  // 같은 막대를 두 모드가 나눠 쓴다 — 지금 모드에 맞게 이름표를 바꿔 단다.
-  bar.setAttribute('aria-label', folding ? '한 줄로 모으기 고르기' : '문장 아래로 모으기');
+  // 같은 막대를 세 모드가 나눠 쓴다 — 지금 모드에 맞게 이름표를 바꿔 단다.
+  bar.setAttribute('aria-label', folding ? '한 줄로 모으기 고르기' : placing ? '넣을 곳 고르기' : '문장 아래로 모으기');
   const inner = reportNode('div', undefined, 'bar');
-  if (nesting) {
+  if (placing) {
+    inner.appendChild(reportNode('span', `「${reportNestLabel(placeRow.text)}」`, 'ct'));
+    inner.appendChild(reportNode('span', '을 넣을 문장을 눌러 주세요', 'rp-hint'));
+    inner.appendChild(reportNode('span', undefined, 'sp'));
+    inner.appendChild(reportButton('취소', () => reportPlaceEnd()));
+  } else if (nesting) {
     inner.appendChild(reportNode('span', `「${reportNestLabel(nestParent.text)}」 아래로`, 'ct'));
     inner.appendChild(reportNode('span', '넣을 문장을 눌러 주세요', 'rp-hint'));
     inner.appendChild(reportNode('span', undefined, 'sp'));
@@ -699,41 +837,49 @@ function reportPickBar(item) {
 
 // ---------- 문서의 부품 ----------
 
+// 머리 한 줄(v3): 제목 · 기간 ··· `다음 주 계획`(조용한 글자 버튼) · `슬랙용으로 복사`(1차) · ⋯.
+// ⋯ 안: `전체 업무 기록 보기`(↔ `보고로 돌아가기`) · `제외한 문장 보기` · 직전 변경 되돌리기 · 개수 한 줄.
+// (B에서 ⋯ 맨 위에 `이 보고 확정하기`가 더해진다 — reportHeadMenuSections 첫 묶음 자리.)
 function reportDocHead(item, host) {
   const report = item.draft;
   const label = formatWeekLabel(item.weekKey);
   const head = reportNode('div', undefined, 'd-lhd rp-hd');
-  head.appendChild(reportNode('h2', reportWeekName(item.weekKey), 'rp-title'));
-  head.appendChild(reportNode('span', label.range, 'sub'));
-
-  const seg = reportNode('span', undefined, 'd-seg');
-  seg.setAttribute('role', 'group');
-  seg.setAttribute('aria-label', '주간요약 보기');
-  for (const [mode, text] of [['draft', '보고'], ['records', '전체 업무 기록']]) {
-    const button = reportButton(text, () => { reportMode = mode; renderReportDraft(item); }, '');
-    button.setAttribute('aria-pressed', String(reportMode === mode));
-    seg.appendChild(button);
+  // 제목은 사람이 바꿀 수 있다(`retitle`, 비우면 원래 이름). 제목 글자가 곧 누르는 자리다.
+  const original = reportWeekName(item.weekKey);
+  const current = report.title || original;
+  const titleKey = reportTitleEditKey(item.weekKey);
+  const title = reportNode('h2', undefined, 'rp-title');
+  if (reportEdits.has(titleKey)) {
+    title.appendChild(reportRenameBox(item, {
+      editKey: titleKey, label: '보고 제목', original, current,
+      save: text => reportChange(item, { action: 'retitle', text }),
+    }));
+  } else {
+    title.appendChild(reportRenameButton(item, { editKey: titleKey, text: current, label: `보고 제목: ${current} — 고치기`, current, tip: '누르면 제목을 고쳐요' }));
   }
-  head.append(seg, reportNode('span', undefined, 'sp'));
-  // 머리줄의 동작 버튼은 한 묶음이다 — 자리가 모자라면 묶음째 다음 줄 오른쪽으로 내려간다(하나만 떨어져 나가지 않게).
+  head.appendChild(title);
+  // 기간은 올해면 연도를 뺀다(다른 해의 주만 연도가 붙는다).
+  const thisYear = typeof todayStr === 'function' ? todayStr().slice(0, 4) : '';
+  head.appendChild(reportNode('span', thisYear && item.weekKey.startsWith(thisYear) ? label.range.replace(/^\d{4}년\s*/, '') : label.range, 'sub'));
+
+  // 오른쪽 동작은 한 묶음이다 — 자리가 모자라면 묶음째 다음 줄 오른쪽으로 내려간다.
   const acts = reportNode('span', undefined, 'rp-acts');
-
-  if (reportUndo.has(item.weekKey)) {
-    acts.appendChild(reportButton('되돌리기', () => reportChange(item, { action: 'undo', token: reportUndo.get(item.weekKey) })));
-  }
   // 금요일에 가장 먼저 하는 일이 계획 쓰기다 — 긴 문서를 훑지 않고 바로 그 자리로 데려간다(이번 주만).
   if (reportPlanIsCurrentWeek(item.weekKey)) {
-    acts.appendChild(reportButton('다음 주 계획 쓰기', () => {
+    acts.appendChild(reportButton('다음 주 계획', () => {
+      reportMode = 'draft';
+      renderReportDraft(item);
       const input = document.getElementById('reportPlanInput');
       if (!input) return;
       input.scrollIntoView({ block: 'center', behavior: 'smooth' });
       input.focus();
-    }));
+    }, 'd-headnum'));
   }
-  // 한 화면에 채운 버튼은 이것 하나다.
+  // 한 화면에 채운 버튼은 이것 하나다 — 고치는 중이거나 모으기 모드일 때는 복사가 3차로 내려선다.
+  const busyMode = reportEditing(item.weekKey) || (reportMode === 'draft' && (reportNestParentId !== null || reportFoldIds !== null || reportPlaceId !== null));
   acts.appendChild(reportButton('슬랙용으로 복사', async () => {
     if ([...reportEdits.keys()].some(key => key.startsWith(item.weekKey + ':'))) {
-      throw new Error('수정 중인 문장을 저장하거나 취소한 뒤 복사해 주세요.');
+      throw new Error('고치는 중인 글이 있어요. Enter로 저장하거나 Esc로 취소한 뒤 복사해 주세요.');
     }
     try {
       await reportSlackCopy(reportSlackModel(report, { sections: [...reportSlackSections], jira: reportJiraInfo }));
@@ -741,29 +887,69 @@ function reportDocHead(item, host) {
       if (typeof usageTick === 'function') usageTick('weekly_copy');   // 사용 횟수(WP-R)
     } catch {
       reportSelectPreview();
-      throw new Error('복사 미리보기의 내용을 직접 선택해 복사해 주세요.');
+      throw new Error('이 브라우저가 복사를 막았어요. 슬랙 미리보기 글을 골라 두었으니 ⌘C로 복사해 주세요.');
     }
-  }, 'd-btn pri'));
+  }, busyMode ? 'd-btn' : 'd-btn pri'));
+  acts.appendChild(uiMoreButton('주간요약 더 보기', () => reportHeadMenuSections(item)));
   head.appendChild(acts);
   host.appendChild(head);
 }
 
-// 머리줄 아래 조용한 한 줄. 확인이 필요한 문장이 있으면 그 자리로 데려간다.
-function reportDocSummary(item, host, newIds) {
+// 머리 ⋯ 메뉴(순수에 가까움 — 테스트가 이름표를 본다). 개수 줄은 누를 수 없는 조용한 항목이다.
+function reportHeadMenuSections(item) {
   const report = item.draft;
-  const line = reportNode('div', undefined, 'rp-sum');
-  const kept = report.rows.filter(row => !row.excluded).length;
-  const pending = report.rows.filter(row => row.needsReview).length;
-  line.appendChild(reportNode('span', `보고 ${kept}문장 · 근거 업무 ${reportSourceIds(report).length}개${newIds.size ? ` · 새 기록 ${newIds.size}개` : ''}`));
-  if (pending) {
-    const jump = reportButton(`확인 필요 ${pending}개`, () => {
-      reportMode = 'draft';
-      renderReportDraft(item);
-      document.getElementById('weeklyReportDetail')?.querySelector('[data-review="true"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    }, 'd-link');
-    line.appendChild(jump);
+  const rows = report.rows || [];
+  const excluded = reportExcludedRows(rows).length;
+  return [
+    [
+      reportMode === 'records'
+        ? { label: '보고로 돌아가기', onClick: () => { reportMode = 'draft'; renderReportDraft(item); } }
+        : { label: '전체 업무 기록 보기', onClick: () => { reportMode = 'records'; renderReportDraft(item); } },
+      excluded ? {
+        label: `제외한 문장 보기 · ${excluded}개`,
+        onClick: () => {
+          reportMode = 'draft';
+          reportExcludedOpen = true;
+          renderReportDraft(item);
+          document.getElementById('weeklyReportDetail')?.querySelector('.rp-ex')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        },
+      } : null,
+      reportUndo.has(item.weekKey) ? { label: '직전 변경 되돌리기', onClick: () => reportUndoNow(item) } : null,
+    ].filter(Boolean),
+    [{ label: `보고 ${rows.filter(row => !row.excluded).length}문장 · 근거 업무 ${reportSourceIds(report).length}개`, disabled: true, onClick() {} }],
+  ];
+}
+
+// 머리 아래 상태 줄(v3) — 다듬은 뒤 새로 들어온(또는 바뀐) 줄이 있을 때만 옅은 파란 한 줄이 서고, 없으면 줄 자체가 없다.
+// `전체 업무 기록`을 보는 중에는 돌아가는 길을 같은 자리에 둔다. 이 줄 아래가 '내 일 기록'(usage-ui.js) 한 줄이
+// 들어올 자리다(`.rp-top` 묶음 안 — 다음 버전).
+function reportTopBlock(item, host) {
+  const top = reportNode('div', undefined, 'rp-top');
+  if (reportMode === 'records') {
+    const line = reportNode('div', undefined, 'rp-status is-quiet');
+    line.appendChild(reportNode('span', '전체 업무 기록을 보고 있어요'));
+    line.appendChild(reportButton('보고로 돌아가기', () => { reportMode = 'draft'; renderReportDraft(item); }, 'd-link'));
+    top.appendChild(line);
+  } else {
+    const text = reportStatusText(item.draft.since);
+    if (text) {
+      const line = reportNode('div', undefined, 'rp-status');
+      line.setAttribute('role', 'status');
+      line.appendChild(reportNode('span', text));
+      line.appendChild(reportButton('확인했어요', () => reportChange(item, { action: 'ackNew' }), 'd-link'));
+      top.appendChild(line);
+    }
   }
-  host.appendChild(line);
+  if (top.children.length) host.appendChild(top);
+}
+
+// `지난번 다듬은 뒤 N줄이 새로 들어왔어요`(+ ` · M줄이 바뀌었어요`) — 둘 다 0이거나 기록이 없으면 빈 글자.
+function reportStatusText(since) {
+  if (!since) return '';
+  const parts = [];
+  if (since.fresh) parts.push(`${since.fresh}줄이 새로 들어왔어요`);
+  if (since.changed) parts.push(`${since.changed}줄이 바뀌었어요`);
+  return parts.length ? `지난번 다듬은 뒤 ${parts.join(' · ')}` : '';
 }
 
 // 근거 업무: 문장 아래 들여 쓴 목록. 줄을 누르면 그 줄 옆에 상세 카드가 열린다.
@@ -789,40 +975,56 @@ function reportEvidenceBlock(row, rows) {
   return list;
 }
 
-// 원본이 바뀌었을 때의 수정 제안. 지금 문장은 덮어쓰지 않고 사람이 고른다(DECISIONS).
-function reportSuggestionBlock(item, row) {
+// 원본이 바뀌었을 때의 수정 제안 — v3에서는 줄 끝 작은 알약 하나(기존 칩 부품 `.d-chip`)이고, 누르면 제안 글과
+// `적용`·`그대로 두기`가 메뉴로 뜬다. 지금 문장은 덮어쓰지 않고 사람이 고른다(DECISIONS). B의 `끝났어요 · 완료로`도 이 자리다.
+function reportSuggestionLabel(suggestion) {
+  if (suggestion.missing || suggestion.mixed) return '원본 확인';
+  return suggestion.added ? `새 업무 ${suggestion.added}개` : '원본 바뀜';
+}
+function reportSuggestionMenuSections(item, row) {
   const suggestion = row.suggestion;
-  const box = reportNode('div', undefined, 'rp-sg');
-  box.appendChild(reportNode('div', suggestion.added ? `원본이 바뀌었어요 · 새 관련 업무 ${suggestion.added}개` : '원본이 바뀌었어요', 'hd'));
-  box.appendChild(reportNode('div', suggestion.text || '연결된 원본을 찾지 못했어요.', 'tx'));
-  const actions = reportNode('div', undefined, 'ac');
-  if (!suggestion.missing && !suggestion.mixed) {
-    actions.appendChild(reportButton('적용', () => reportChange(item, { action: 'accept', id: row.id }), 'd-btn sm'));
+  const text = String(suggestion.text || '연결된 원본을 찾지 못했어요.').split('\n')[0];
+  return [
+    [{ label: `제안: ${text.length > 40 ? `${text.slice(0, 40)}…` : text}`, disabled: true, onClick() {} }],
+    [
+      !suggestion.missing && !suggestion.mixed ? { label: '제안대로 바꾸기', onClick: () => reportChange(item, { action: 'accept', id: row.id }) } : null,
+      { label: '지금 문장 그대로 두기', onClick: () => reportChange(item, { action: 'acknowledge', id: row.id }) },
+    ].filter(Boolean),
+    suggestion.missing || suggestion.mixed ? [{ label: '원본 상태가 다르거나 지워진 업무가 있어요', disabled: true, onClick() {} }] : null,
+  ].filter(Boolean);
+}
+function reportRowPill(item, row) {
+  if (row.suggestion) {
+    const pill = reportNode('button', reportSuggestionLabel(row.suggestion), 'd-chip rp-pill');
+    pill.type = 'button';
+    pill.setAttribute('aria-haspopup', 'true');
+    pill.setAttribute('aria-label', `${reportSuggestionLabel(row.suggestion)} — 제안 보기`);
+    pill.addEventListener('click', (event) => { event.stopPropagation(); uiMenu(pill, reportSuggestionMenuSections(item, row)); });
+    return pill;
   }
-  actions.appendChild(reportButton('그대로 두기', () => reportChange(item, { action: 'acknowledge', id: row.id }), 'd-btn sm'));
-  box.appendChild(actions);
-  box.appendChild(reportNode('div', suggestion.mixed || suggestion.missing
-    ? '원본 상태가 다르거나 삭제된 업무가 있어요. 문장을 직접 확인해 주세요.'
-    : '지금 문장은 그대로 둬요.', 'hint'));
-  return box;
+  if (row.needsReview) return reportNode('span', '확인 필요', 'd-chip rp-pill is-note');
+  return null;
 }
 
-// 문장 줄의 ⋯ 메뉴. `이 아래로 문장 모으기`는 최상위·제외되지 않은 문장에, `한 줄로 모으기…`는 그중 아래 문장이
-// 없는 문장에만 붙는다(아래로 들어간 문장은 `따로 빼기`로 먼저 나와야 한다 — 한 단계까지만 들어간다).
-// `묶음 풀기`는 서버가 묶기 전 문장을 들고 있는 옛 합치기 행에만 붙는다(`canSplit`).
-// 아래에 문장이 있는 부모(nest든 fold든)에는 `접어서 한 줄로 보이기`/`펼쳐서 보이기`·`풀기`가 붙는다.
+// 문장 줄의 ⋯ 메뉴(v3). 첫 묶음이 자주 쓰는 셋 — `보고에서 빼기` · `다른 문장 아래로 넣기`(넣을 곳이 있을 때) ·
+// `원래 문장으로`(손으로 고친 줄만). 그다음 묶음은 자리 옮기기(모으기·한 줄로 모으기·따로 빼기·묶음 풀기·접기·풀기),
+// 마지막이 근거 한 줄(누르면 근거 업무 목록을 펼친다). 계획 문장은 끝에 `프로젝트 바꾸기`.
 function reportSentenceMenuSections(item, row) {
   const rows = item.draft.rows || [];
   const hasChildren = rows.some(entry => entry.parent === row.id);
+  const canPlace = !row.parent && !row.excluded && !hasChildren && rows.some(entry => reportCanNest(rows, row, entry));
+  const sources = row.currentEvidence || row.evidence || [];
+  const evidenceLabel = sources.length
+    ? `근거: ${sources[0].description}${sources.length > 1 ? ` 외 ${sources.length - 1}개` : ''}`
+    : row.manual && hasChildren ? '근거: 아래 문장들의 업무' : (row.sourceIds || []).length ? '근거 업무 보기' : '';
   return [
     [
-      row.sourceIds.length || (row.manual && hasChildren) ? {
-        label: reportEvidenceOpen.has(row.id) ? '근거 업무 숨기기' : '근거 업무 보기',
-        onClick: () => {
-          if (reportEvidenceOpen.has(row.id)) reportEvidenceOpen.delete(row.id); else reportEvidenceOpen.add(row.id);
-          renderReportDraft(item);
-        },
-      } : null,
+      { label: row.excluded ? '보고에 되살리기' : '보고에서 빼기', onClick: () => reportChange(item, { action: 'exclude', id: row.id }) },
+      canPlace ? { label: '다른 문장 아래로 넣기', onClick: () => reportPlaceStart(item, row) } : null,
+      row.locked && !row.manual && row.heading !== REPORT_PLAN_HEADING && (row.sourceIds || []).length
+        ? { label: '원래 문장으로', onClick: () => reportChange(item, { action: 'revert', id: row.id }) } : null,
+    ].filter(Boolean),
+    [
       // `이 아래로 문장 모으기`는 이미 아래에 문장이 있는 부모에도 붙는다(더 넣는 길). `한 줄로 모으기…`는
       // 붙지 않는다 — 아래 문장을 가진 문장은 새 요약 아래로 들어갈 수 없어(서버가 거절) 늘 실패하는 항목이 된다.
       !row.parent && !row.excluded ? { label: '이 아래로 문장 모으기', onClick: () => reportNestStart(item, row) } : null,
@@ -835,6 +1037,13 @@ function reportSentenceMenuSections(item, row) {
       } : null,
       hasChildren ? { label: '풀기', onClick: () => reportChange(item, { action: 'unfold', id: row.id }) } : null,
     ].filter(Boolean),
+    evidenceLabel ? [{
+      label: reportEvidenceOpen.has(row.id) ? `${evidenceLabel} · 숨기기` : evidenceLabel,
+      onClick: () => {
+        if (reportEvidenceOpen.has(row.id)) reportEvidenceOpen.delete(row.id); else reportEvidenceOpen.add(row.id);
+        renderReportDraft(item);
+      },
+    }] : null,
     // 계획 문장만 프로젝트를 나중에 바꾼다(다른 구역의 프로젝트는 원본 업무가 정한다).
     row.heading === REPORT_PLAN_HEADING
       ? [{ field: '프로젝트 바꾸기', control: reportPlanRegroupPicker(item, row) }]
@@ -842,9 +1051,19 @@ function reportSentenceMenuSections(item, row) {
   ].filter(section => section && section.length);
 }
 
-// 문장 한 줄. 동작(수정·제외·따로 빼기·더보기)은 hover·focus에서만 보인다.
-// 다른 문장 아래로 들어간 문장은 한 단계 들여 쓴 `◦` 줄이고, 모으기 모드에서는 넣을 수 있는 문장만
-// 밝게 서서 눌리는 과녁이 된다(누르는 즉시 들어간다).
+// 문장 편집을 시작한다 — 글자를 누르거나(마우스) 초점에서 Enter·Space(키보드).
+function reportEditStart(item, row) {
+  const key = `${item.weekKey}:${row.id}`;
+  reportEdits.set(key, row.text);
+  renderReportDraft(item);
+  const input = document.getElementById('weeklyReportDetail')?.querySelector(`[data-edit-row="${row.id}"]`);
+  if (input) { input.focus(); if (typeof input.setSelectionRange === 'function') input.setSelectionRange(input.value.length, input.value.length); }
+}
+
+// 문장 한 줄(v3). 평소에는 글만 보인다 — 글자가 곧 고치는 자리(초점이 가는 버튼 역할, Enter·Space로도 시작)이고,
+// 줄에 손이 닿거나 초점이 오면 끝에 ⋯ 하나만 나온다. 다듬은 뒤 새로 들어온 줄은 앞 점이 파랗다(`새로 들어옴`).
+// 원본이 바뀐 고친 줄은 끝에 작은 알약 하나. 다른 문장 아래로 들어간 문장은 한 단계 들여 쓴 `◦` 줄이고,
+// 모으기·고르기·넣을 곳 고르기 모드에서는 줄 전체가 눌리는 과녁이 된다.
 function reportSentenceRow(item, row, context) {
   const host = context.host;
   const newIds = context.newIds || new Set();
@@ -860,16 +1079,36 @@ function reportSentenceRow(item, row, context) {
   const canNest = nesting && !reportEdits.has(key) && reportCanNest(rows, row, nestParent);
   if (isNestParent) line.classList.add('is-nest');
   else if (nesting && !canNest) line.classList.add('is-off');
-  if (canNest) {
+  const pick = (labelText, run) => {
     line.classList.add('is-pick');
     line.tabIndex = 0;
     line.setAttribute('role', 'button');
-    line.setAttribute('aria-label', `${row.text} — 「${reportNestLabel(nestParent.text)}」 아래로 넣기`);
-    const nest = () => reportChange(item, { action: 'nest', id: row.id, parentId: nestParent.id })
-      .catch(error => showNotice(error.message || '저장하지 못했어요. 적은 내용은 그대로 있어요', true));
-    line.addEventListener('click', nest);
+    line.setAttribute('aria-label', labelText);
+    line.addEventListener('click', run);
     line.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); nest(); }
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); run(); }
+    });
+  };
+  if (canNest) {
+    pick(`${row.text} — 「${reportNestLabel(nestParent.text)}」 아래로 넣기`, () => reportChange(item, { action: 'nest', id: row.id, parentId: nestParent.id })
+      .catch(error => showNotice(error.message || '저장하지 못했어요. 적은 내용은 그대로 있어요', true)));
+  }
+
+  // 넣을 곳 고르기(`다른 문장 아래로 넣기`) — 옮길 문장은 선택 톤, 그 문장을 받을 수 있는 문장만 눌린다(한 번 넣으면 끝).
+  const placeRow = reportPlaceRow(item.draft);
+  const placing = !!placeRow && reportMode === 'draft';
+  const isPlaceRow = placing && row.id === placeRow.id;
+  const canPlace = placing && !isPlaceRow && reportCanNest(rows, placeRow, row);
+  if (placing) {
+    if (isPlaceRow) line.classList.add('is-nest');
+    else if (!canPlace) line.classList.add('is-off');
+  }
+  if (canPlace) {
+    pick(`「${reportNestLabel(placeRow.text)}」을 ${row.text} 아래로 넣기`, () => {
+      const child = placeRow.id;
+      reportPlaceEnd();
+      reportChange(item, { action: 'nest', id: child, parentId: row.id })
+        .catch(error => showNotice(error.message || '저장하지 못했어요. 적은 내용은 그대로 있어요', true));
     });
   }
 
@@ -883,61 +1122,86 @@ function reportSentenceRow(item, row, context) {
     else if (!foldCandidate) line.classList.add('is-off');
   }
   if (foldSelected || foldCandidate) {
-    line.classList.add('is-pick');
-    line.tabIndex = 0;
-    line.setAttribute('role', 'button');
-    line.setAttribute('aria-label', `${row.text} — ${foldSelected ? '고르기 해제' : '한 줄로 모으기에 담기'}`);
-    const toggle = () => {
+    pick(`${row.text} — ${foldSelected ? '고르기 해제' : '한 줄로 모으기에 담기'}`, () => {
       if (reportFoldIds.has(row.id)) reportFoldIds.delete(row.id); else reportFoldIds.add(row.id);
       renderReportDraft(item);
-    };
-    line.addEventListener('click', toggle);
-    line.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggle(); }
     });
   }
-  line.appendChild(reportNode('span', parentRow ? '◦' : '•', 'bu'));
+  const modal = nesting || folding || placing;
+
+  // 글머리 점 — 다듬은 뒤 새로 들어온 줄(기록이 없는 주는 브라우저별 새 기록)은 파란 점이고, 색만으로 말하지 않게
+  // `새로 들어옴` 이름표를 붙인다.
+  const fresh = item.draft.since ? !!row.fresh : (row.sourceIds || []).some(id => newIds.has(id));
+  const bullet = reportNode('span', parentRow ? '◦' : '•', 'bu' + (fresh ? ' is-fresh' : ''));
+  if (fresh) {
+    bullet.setAttribute('role', 'img');
+    bullet.setAttribute('aria-label', '새로 들어옴');
+    bullet.title = '새로 들어옴';
+    line.dataset.since = 'true';
+  }
+  line.appendChild(bullet);
 
   const text = reportNode('div', undefined, 'tx');
   line.appendChild(text);
 
   if (reportEdits.has(key)) {
-    // 그 자리에서 고친다. 저장이 실패해도 적은 글자는 reportEdits에 남는다.
+    // 그 자리에서 고친다(v3 — 버튼 없음). Enter 저장 · Esc 취소 · Shift+Enter 줄바꿈. 한글 조합 중 Enter는 넘긴다.
+    // 저장이 실패해도 적은 글자는 reportEdits에 남는다.
     const input = reportNode('textarea', undefined, 'rp-ta');
     input.value = reportEdits.get(key);
-    input.rows = Math.max(2, Math.min(10, input.value.split('\n').length + 1));
+    input.rows = Math.max(1, Math.min(10, input.value.split('\n').length));
     input.maxLength = 10000;
     input.dataset.editRow = row.id;
-    input.setAttribute('aria-label', '보고 문장 수정');
+    input.setAttribute('aria-label', `보고 문장 고치기 — ${REPORT_EDIT_HINT}`);
     input.addEventListener('input', () => reportEdits.set(key, input.value));
+    const cancel = () => { reportEdits.delete(key); renderReportDraft(item); reportEditFocus(row.id); };
+    input.addEventListener('keydown', (event) => {
+      if (event.isComposing) return;
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancel(); return; }
+      if (event.key !== 'Enter' || event.shiftKey || input.disabled) return;
+      event.preventDefault();
+      if (input.value.trim() === String(row.text ?? '').trim()) { cancel(); return; }
+      input.disabled = true;
+      reportChange(item, { action: 'edit', id: row.id, text: input.value })
+        .then(() => reportEditFocus(row.id))
+        .catch(error => showNotice(error.message || '저장하지 못했어요. 적은 내용은 그대로 있어요', true))
+        .finally(() => { input.disabled = false; });
+    });
     text.appendChild(input);
-    // Enter는 줄바꿈이다(저장은 아래 버튼) — 둘째 줄이 슬랙에서 어떻게 보이는지 조용히 알려 준다.
-    text.appendChild(reportNode('div', '둘째 줄부터는 슬랙에서 들여 쓴 부연으로 들어가요', 'rp-help'));
-    const actions = reportNode('div', undefined, 'ed');
-    actions.append(
-      reportButton('저장', () => reportChange(item, { action: 'edit', id: row.id, text: input.value }), 'd-btn pri'),
-      reportButton('취소', () => { reportEdits.delete(key); renderReportDraft(item); }),
-    );
-    text.appendChild(actions);
+    text.appendChild(reportNode('div', `${REPORT_EDIT_HINT} · Shift+Enter 줄바꿈(둘째 줄부터 슬랙에서 부연)`, 'rp-help'));
     host.appendChild(line);
     return;
   }
 
   // 첫 줄이 문장이고, 둘째 줄부터는 부연이다 — 슬랙에서 들여 쓴 작은 글머리로 들어간다.
   const lines = String(row.text ?? '').split('\n');
-  text.appendChild(reportNode('span', lines[0], 'ln'));
+  const first = reportNode('span', lines[0], modal ? 'ln' : 'ln rp-edit');
+  if (!modal) {
+    first.tabIndex = 0;
+    first.setAttribute('role', 'button');
+    first.setAttribute('aria-label', `문장 고치기: ${lines[0]}`);
+    first.dataset.editText = row.id;
+    first.addEventListener('click', () => reportEditStart(item, row));
+    first.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); reportEditStart(item, row); }
+    });
+  }
+  text.appendChild(first);
   // 아래로 들어간 문장의 프로젝트가 부모와 다르면 그 이름을 조용히 적는다(문서에서만 — 슬랙에는 안 나간다).
-  if (parentRow && row.group !== parentRow.group) {
-    text.appendChild(reportNode('span', `· ${reportProjectText(row.group)}`, 'pj'));
+  if (parentRow && reportRowGroup(row) !== reportRowGroup(parentRow)) {
+    text.appendChild(reportNode('span', `· ${reportProjectText(reportRowGroup(row))}`, 'pj'));
   }
   if (isNestParent) text.appendChild(reportNode('span', '여기 아래로', 'here'));
-  // 접힌 부모는 문장 뒤에 조용한 `· N건 ▸` 버튼이 붙는다 — 누르면 아래 문장이 화면에서만(저장 안 함)
-  // 흐린 글자로 펼쳐 보인다. 다시 누르면 접힌다(`▾` → `▸`).
+  if (isPlaceRow) text.appendChild(reportNode('span', '옮길 문장', 'here'));
+  // 접힌 부모는 문장 뒤에 꺾쇠 + `· N건` 버튼이 붙는다 — 누르면 아래 문장이 화면에서만(저장 안 함) 흐린 글자로 펼쳐 보인다.
   const childCount = rows.filter(entry => entry.parent === row.id).length;
   if (row.folded && childCount) {
     const peek = reportFoldOpen.has(row.id);
-    const toggle = reportNode('button', `· ${childCount}건 ${peek ? '▾' : '▸'}`, 'rp-foldtoggle');
+    // 펼침 표시는 앱의 꺾쇠(uiIcon) — 접힘은 오른쪽, 펼쳐 보면 90° 돌아 아래를 본다(CSS가 aria-expanded로 돌린다).
+    const toggle = reportNode('button', undefined, 'rp-foldtoggle');
     toggle.type = 'button';
+    toggle.innerHTML = uiIcon('chevron');
+    toggle.appendChild(reportNode('span', `· ${childCount}건`));
     toggle.setAttribute('aria-label', `아래 문장 ${childCount}개 보기`);
     toggle.setAttribute('aria-expanded', String(peek));
     toggle.addEventListener('click', (event) => {
@@ -947,33 +1211,58 @@ function reportSentenceRow(item, row, context) {
     });
     text.appendChild(toggle);
   }
-  // 손으로 고친 문장에만 조용한 이름표를 붙인다. `자동 초안`은 찍지 않는다.
-  if (row.locked && !context.plan) text.appendChild(reportNode('span', '직접 수정', 'edt'));
-  if (row.needsReview && !row.suggestion) text.appendChild(reportNode('span', '원본 확인 필요', 'rv'));
-  const rowNew = row.sourceIds.filter(id => newIds.has(id)).length;
-  if (rowNew) text.appendChild(reportNode('span', `새 기록 ${rowNew}`, 'nw'));
-  if (lines.length > 1) text.appendChild(reportNode('div', lines.slice(1).join('\n'), 'sub'));
+  if (lines.length > 1) {
+    const sub = reportNode('div', lines.slice(1).join('\n'), 'sub');
+    if (!modal) sub.addEventListener('click', () => reportEditStart(item, row));
+    text.appendChild(sub);
+  }
 
-  // 모으기·한 줄로 모으기 고르기 모드에서는 줄을 누르는 것이 곧 "고르기/넣기"다 — 수정·제외·⋯과
-  // 헷갈리지 않게 그동안은 감춘다.
-  if (!nesting && !folding) {
+  if (!modal) {
+    // 줄 끝: (있으면) 알약 하나 + ⋯ 하나. ⋯는 줄에 손이 닿거나 초점이 올 때만 보인다(`.ac`).
+    const pill = reportRowPill(item, row);
+    if (pill) line.appendChild(pill);
     const actions = reportNode('span', undefined, 'ac');
-    actions.appendChild(reportButton('수정', () => {
-      reportEdits.set(key, row.text);
-      renderReportDraft(item);
-      document.getElementById('weeklyReportDetail')?.querySelector(`[data-edit-row="${row.id}"]`)?.focus();
-    }, 'd-btn sm'));
-    actions.appendChild(reportButton('제외', () => reportChange(item, { action: 'exclude', id: row.id }), 'd-btn sm'));
-    if (parentRow) {
-      actions.appendChild(reportButton('따로 빼기', () => reportChange(item, { action: 'unnest', id: row.id }), 'd-btn sm'));
-    }
-    actions.appendChild(uiMoreButton(`${reportProjectText(row.group)} 문장 더보기`, () => reportSentenceMenuSections(item, row)));
+    actions.appendChild(uiMoreButton(`${lines[0]} — 문장 더 보기`, () => reportSentenceMenuSections(item, row)));
     line.appendChild(actions);
+  } else if (canNest || canPlace || foldSelected || foldCandidate) {
+    // 모드의 과녁 표시 — 누를 수 있는 줄에 손이 닿거나 초점이 올 때만(줄 전체가 버튼이고 읽기 전용 한 마디다).
+    const target = reportNode('span', undefined, 'rp-aim');
+    const word = reportNode('span', canNest || canPlace ? '아래로 넣기' : foldSelected ? '고름' : '고르기', foldSelected ? 'd-btn sm acc' : 'd-btn sm');
+    word.setAttribute('aria-hidden', 'true');
+    target.appendChild(word);
+    line.appendChild(target);
   }
   host.appendChild(line);
 
   if (reportEvidenceOpen.has(row.id)) host.appendChild(reportEvidenceBlock(row, rows));
-  if (row.suggestion) host.appendChild(reportSuggestionBlock(item, row));
+}
+
+// 저장·취소 뒤 그 문장의 글자로 초점을 돌려놓는다(키보드로 이어서 고치기).
+function reportEditFocus(rowId) {
+  const host = document.getElementById('weeklyReportDetail');
+  if (!host || typeof host.querySelector !== 'function') return;
+  (host.querySelector(`[data-edit-row="${rowId}"]`) || host.querySelector(`[data-edit-text="${rowId}"]`))?.focus();
+}
+
+// 문서의 프로젝트 소제목(v3). 색 점 + 이름 글자이고, 글자가 곧 이름 바꾸기 자리다(`rename`, 소제목|프로젝트 열쇠에
+// 묶인다). 원래 프로젝트 이름은 늘 보이지 않고 손을 올렸을 때의 풍선(title)으로만 — `원래 프로젝트: X · 누르면 이름을 고쳐요`.
+// 서버가 열쇠를 주지 않은 옛 응답이면 예전처럼 이름 글자만 선다. (B의 `+ 한 줄 추가`는 이 묶음의 문장들 맨 아래 자리다.)
+function reportGroupHead(item, heading, group, text) {
+  const head = reportNode('div', undefined, 'rp-pj');
+  if (!group.key) { head.appendChild(reportNode('span', text, 'nm')); return head; }
+  const editKey = reportNameEditKey(item.weekKey, heading, group.key);
+  const original = reportProjectText(group.origin || group.group);
+  if (typeof uiProjectDot === 'function' && /^(jira|group):/.test(group.key)) head.appendChild(uiProjectDot(group.key));
+  if (reportEdits.has(editKey)) {
+    head.appendChild(reportRenameBox(item, {
+      editKey, label: `${reportHeadingText(heading)} 소제목 이름`, original, current: text,
+      save: value => reportChange(item, { action: 'rename', heading, groupKey: group.key, text: value }),
+    }));
+    return head;
+  }
+  const tip = group.origin ? `원래 프로젝트: ${original} · 누르면 이름을 고쳐요` : '누르면 이름을 고쳐요';
+  head.appendChild(reportRenameButton(item, { editKey, text, label: group.origin ? `소제목 ${text}(원래 프로젝트 ${original}) — 이름 고치기` : `소제목 ${text} — 이름 고치기`, current: text, tip }));
+  return head;
 }
 
 // 제외한 문장은 문서 끝(다음 주 계획 위)에 접어 둔다 — 복사에서는 빠진다.
@@ -983,7 +1272,11 @@ function reportExcludedBlock(item, host) {
   const box = reportNode('details', undefined, 'rp-ex');
   box.open = reportExcludedOpen;
   box.addEventListener('toggle', () => { reportExcludedOpen = box.open; });
-  box.appendChild(reportNode('summary', `제외한 문장 ${rows.length}개`));
+  // 접힘 표시는 브라우저 기본 삼각형 대신 앱의 꺾쇠(설정·회의의 접는 줄과 같은 모양)다.
+  const summary = reportNode('summary');
+  summary.innerHTML = uiIcon('chevron');
+  summary.appendChild(reportNode('span', `제외한 문장 ${rows.length}개`));
+  box.appendChild(summary);
   for (const row of rows) {
     const line = reportNode('div', undefined, 'row');
     line.append(
@@ -1475,7 +1768,8 @@ function reportPlanSection(item, host, newIds) {
   add.appendChild(reportPlanProjectPicker());
   const input = reportPlanInput(item, {
     key: REPORT_PLAN_BOTTOM_KEY, id: 'reportPlanInput',
-    placeholder: '다음 주에 할 일을 한 문장씩 추가 — Enter', label: '다음 주 계획 문장 추가',
+    // 안내는 짧게 — 앞의 프로젝트 고르개와 한 줄을 나눠 써서 좁은 폭에서 잘리지 않게(구역 제목이 `다음 주 계획`이다).
+    placeholder: '한 문장씩 추가 — Enter', label: '다음 주 계획 문장 추가',
     groupOf: () => reportPlanGroup, alsoTaskOf: () => current && reportPlanAlsoTask,
   });
   if (String(input.className).includes('rp-addmulti')) add.className += ' is-multi';
@@ -1673,6 +1967,8 @@ function renderReportDraft(item) {
   if (reportRenderedWeek !== item.weekKey) {
     reportNestParentId = null;
     escDrop(reportNestEnd);
+    reportPlaceId = null;
+    escDrop(reportPlaceEnd);
     reportFoldIds = null;
     reportFoldHeading = null;
     escDrop(reportFoldEnd);
@@ -1687,6 +1983,10 @@ function renderReportDraft(item) {
   if (reportNestParentId !== null && (reportMode !== 'draft' || !reportNestParent(report))) {
     reportNestParentId = null;
     escDrop(reportNestEnd);
+  }
+  if (reportPlaceId !== null && (reportMode !== 'draft' || !reportPlaceRow(report))) {
+    reportPlaceId = null;
+    escDrop(reportPlaceEnd);
   }
   // 한 줄로 모으기 고르기 모드도 같은 이유로 다시 확인한다 — 고른 문장 중 사라졌거나 더 이상
   // 고를 수 없게 된 것은 조용히 뺀다. `전체 업무 기록`으로 옮기면 모드는 끝난다.
@@ -1705,9 +2005,9 @@ function renderReportDraft(item) {
 
   const newIds = reportMarkSeen(item);
   reportDocHead(item, host);
+  reportTopBlock(item, host);
   const body = reportNode('div', undefined, 'rp-body');
   host.appendChild(body);
-  reportDocSummary(item, body, newIds);
 
   if (reportMode === 'records') {
     reportRecordsView(item, body);
@@ -1715,10 +2015,10 @@ function renderReportDraft(item) {
     const sections = reportDocSections(report.rows);
     if (!sections.length) body.appendChild(reportNode('div', '이번 주 기록이 생기면 여기에 나타나요.', 'rp-hint'));
     for (const section of sections) {
-      body.appendChild(reportNode('div', section.heading, 'rp-h'));
+      body.appendChild(reportNode('div', reportHeadingText(section.heading), 'rp-h'));
       const titles = reportGroupTitles(section.groups.map(group => group.group));
       for (const group of section.groups) {
-        body.appendChild(reportNode('div', titles.get(group.group), 'rp-pj'));
+        body.appendChild(reportGroupHead(item, section.heading, group, titles.get(group.group)));
         for (const row of group.rows) {
           // `reportDocSections`는 그대로 두고(순수 함수) 이 그리기 단계에서만 접힌 부모의 아래를 거른다.
           if (reportRowHiddenByFold(report.rows, row)) continue;
