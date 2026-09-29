@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>첫 사용 빈 화면 시안</title>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f2f4f6; --surface: #ffffff; --surface-line: transparent; --field: #f2f4f6;
+  --hover: #f4f6f8; --border: #e3e7eb; --hair: #eef1f4; --check-line: #8b95a1;
+  --text: #191f28; --muted: #4e5968; --dim: #636c78;
+  --accent: #3182f6; --accent-strong: #1b64da; --accent-text: #1b64da; --accent-soft: #e8f3ff;
+  --on-fill: #ffffff; --sel: #eef5ff; --sel-hover: #e6f1ff;
+  --urgent: #c9252d; --urgent-bg: #ffeceb; --warn: #b0560a; --warn-bg: #fff4e5;
+  --success: #0d7a4a; --success-bg: #e6f6ee; --neutral-bg: #eef1f4; --prog-track: #e9edf2;
+  --pj-0: #4f83e8; --pj-1: #2f9b87; --pj-4: #cd6579; --pj-5: #5d9b47;
+  --soft: 0 1px 3px rgba(25,31,40,.04), 0 8px 24px rgba(25,31,40,.06);
+  --pop: 0 12px 36px rgba(25,31,40,.14), 0 2px 8px rgba(25,31,40,.06);
+  --scrim: rgba(25,31,40,.16);
+  --r: 20px; --r-sm: 12px; --r-xs: 10px;
+  --ease: cubic-bezier(.22,.8,.3,1);
+  --font: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', 'Segoe UI', sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #15181e; --surface: #1e222a; --surface-line: #2b313b; --field: #262b34;
+    --hover: #272c35; --border: #333a45; --hair: #2b313b; --check-line: #636e7d;
+    --text: #eaedf1; --muted: #a8b1bd; --dim: #8b95a1;
+    --accent: #4b91f1; --accent-strong: #4b91f1; --accent-text: #7aa9ff; --accent-soft: #1b2a44;
+    --on-fill: #0b1020; --sel: #1c2533; --sel-hover: #212c3d;
+    --urgent: #ff8f8f; --urgent-bg: #3a2022; --warn: #ffbe6b; --warn-bg: #3a2e1b;
+    --success: #6ddba0; --success-bg: #1c3729; --neutral-bg: #2a2f38; --prog-track: #2b313b;
+    --pj-0: #7aa2ff; --pj-1: #57c6ad; --pj-4: #ef92a0; --pj-5: #8ccb72;
+    --soft: 0 1px 3px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+    --pop: 0 12px 36px rgba(0,0,0,.55), 0 2px 8px rgba(0,0,0,.35);
+    --scrim: rgba(0,0,0,.5);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #15181e; --surface: #1e222a; --surface-line: #2b313b; --field: #262b34;
+  --hover: #272c35; --border: #333a45; --hair: #2b313b; --check-line: #636e7d;
+  --text: #eaedf1; --muted: #a8b1bd; --dim: #8b95a1;
+  --accent: #4b91f1; --accent-strong: #4b91f1; --accent-text: #7aa9ff; --accent-soft: #1b2a44;
+  --on-fill: #0b1020; --sel: #1c2533; --sel-hover: #212c3d;
+  --urgent: #ff8f8f; --urgent-bg: #3a2022; --warn: #ffbe6b; --warn-bg: #3a2e1b;
+  --success: #6ddba0; --success-bg: #1c3729; --neutral-bg: #2a2f38; --prog-track: #2b313b;
+  --pj-0: #7aa2ff; --pj-1: #57c6ad; --pj-4: #ef92a0; --pj-5: #8ccb72;
+  --soft: 0 1px 3px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+  --pop: 0 12px 36px rgba(0,0,0,.55), 0 2px 8px rgba(0,0,0,.35);
+    --scrim: rgba(0,0,0,.5);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; line-height: 1.55; word-break: keep-all; -webkit-font-smoothing: antialiased; }
+<style>
+:root { --warm: #fffaf2; --warm-line: transparent; --warm-hover: #fff4e4; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --warm: #26221b; --warm-line: #332c22; --warm-hover: #2e2820; } }
+:root[data-theme="dark"] { --warm: #26221b; --warm-line: #332c22; --warm-hover: #2e2820; }
+.board { max-width: 1320px; margin: 0 auto; padding: 28px 16px 64px; }
+.top { display: flex; align-items: flex-end; gap: 12px 20px; flex-wrap: wrap; }
+.top h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+.top p { margin: 4px 0 0; color: var(--muted); font-size: 13.5px; max-width: 66ch; }
+.tools { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+.seg { display: inline-flex; padding: 3px; gap: 2px; background: var(--neutral-bg); border-radius: var(--r-sm); }
+.seg button { height: 30px; padding: 0 12px; border: 0; border-radius: 9px; background: none; color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(25,31,40,.08); }
+.change { margin: 20px 0 0; padding: 14px 18px; background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r); box-shadow: var(--soft); font-size: 13.5px; color: var(--muted); }
+.change b { color: var(--text); font-weight: 600; }
+.change ol { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+.sec { margin-top: 44px; }
+.sec > h2 { margin: 0 0 4px; font-size: 18px; font-weight: 700; letter-spacing: -0.015em; }
+.sec > .why { margin: 0 0 16px; color: var(--dim); font-size: 13px; max-width: 76ch; }
+.pair { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; }
+.lab { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }
+.lab .t { display: inline-flex; height: 22px; align-items: center; padding: 0 8px; border-radius: 6px; font-size: 12px; font-weight: 600; background: var(--neutral-bg); color: var(--muted); }
+.lab .t.new { background: var(--accent-soft); color: var(--accent-text); }
+.meas { margin-top: 8px; font-size: 12.5px; color: var(--dim); max-width: 90ch; }
+.meas b { color: var(--text); font-weight: 600; }
+.phones { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
+.phones > div { width: 390px; max-width: 100%; }
+.fr { background: var(--bg); border: 1px solid var(--border); border-radius: 18px; overflow: hidden; }
+.fr.ph { border-radius: 28px; }
+.bar { display: flex; align-items: center; gap: 18px; height: 52px; padding: 0 20px; background: var(--surface); border-bottom: 1px solid var(--hair); font-size: 14px; color: var(--muted); overflow: hidden; white-space: nowrap; }
+.bar b { color: var(--text); font-weight: 700; }
+.bar .on { color: var(--text); font-weight: 700; box-shadow: inset 0 -2px 0 var(--accent); height: 52px; display: inline-flex; align-items: center; }
+.ph .bar { gap: 14px; padding: 0 16px; font-size: 13.5px; }
+.in { padding: 18px 20px 24px; }
+.ph .in { padding: 14px 16px 22px; }
+.today { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 20px; align-items: start; }
+.ph .today { display: flex; flex-direction: column; gap: 16px; }
+.ph .today > .side { order: 2; }
+.card { background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r); box-shadow: var(--soft); }
+.side { display: grid; gap: 14px; }
+.sc { padding: 16px 18px; }
+.sc h5 { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 700; }
+.sc h5 .more { margin-left: auto; font-size: 12.5px; font-weight: 500; color: var(--muted); }
+.sc p { margin: 8px 0 0; font-size: 12.5px; color: var(--muted); }
+.sc .add { margin-top: 10px; height: 36px; display: flex; align-items: center; padding: 0 14px; border-radius: 12px; background: var(--field); font-size: 13px; color: var(--muted); }
+.cnt { height: 22px; display: inline-flex; align-items: center; padding: 0 8px; border-radius: 999px; background: var(--neutral-bg); color: var(--muted); font-size: 12px; font-weight: 600; }
+.cnt.a { background: var(--accent-soft); color: var(--accent-text); }
+.cnt.w { background: var(--warn-bg); color: var(--warn); }
+.lhd { display: flex; align-items: center; gap: 10px; min-height: 34px; margin: 0 0 6px; }
+.lhd h4 { margin: 0; font-size: 19px; font-weight: 700; letter-spacing: -0.015em; }
+.lhd .r { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+.btn { display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border-radius: var(--r-xs); background: var(--neutral-bg); color: var(--muted); font-size: 13px; font-weight: 600; white-space: nowrap; }
+.kb { width: 28px; height: 28px; display: grid; place-items: center; color: var(--muted); font-weight: 700; }
+.list { padding: 8px 10px 10px; }
+.qa { display: flex; align-items: center; gap: 8px; height: 48px; padding: 0 10px; color: var(--dim); font-size: 15px; }
+.empty { font-size: 15px; font-weight: 500; color: var(--muted); padding: 34px 10px; }
+.empty.s { padding: 4px 10px 14px; font-size: 14px; color: var(--dim); }
+/* 사용설명서 — 지금 */
+.start { background: var(--warm); border: 1px solid var(--warm-line); border-radius: var(--r); box-shadow: var(--soft); padding: 14px 10px 10px; margin-bottom: 18px; }
+.start .hd { display: flex; align-items: center; padding: 0 10px 6px 20px; font-size: 15px; font-weight: 700; }
+.start .hd .x { margin-left: auto; font-size: 13px; font-weight: 600; color: var(--muted); padding: 6px 10px; }
+.g { display: flex; gap: 12px; padding: 10px 20px; min-height: 44px; border-radius: 14px; }
+.g .t { flex: none; width: 112px; font-size: 14px; font-weight: 600; }
+.g .t.a { color: var(--accent-text); }
+.g .d { font-size: 13.5px; color: var(--muted); }
+.g .d b { color: var(--text); font-weight: 600; }
+.g .sub { display: block; margin-top: 2px; font-size: 12.5px; color: var(--dim); }
+.dock { display: flex; align-items: flex-end; gap: 6px; width: max-content; margin-top: 8px; padding: 6px 10px; border-radius: 14px; background: var(--neutral-bg); }
+.dock i { width: 22px; height: 22px; border-radius: 6px; background: var(--border); display: block; }
+.dock .me { width: 28px; height: 28px; border-radius: 8px; background: #8a2b2b; display: block; }
+.ph .g { flex-direction: column; gap: 2px; }
+.ph .g .t { width: auto; }
+.usage { padding: 8px 20px 4px; font-size: 12.5px; color: var(--dim); }
+.usage u, .usage2 u { color: var(--muted); text-underline-offset: 3px; }
+/* 사용설명서 — 바꾼 뒤: 네 칸 판 */
+.start2 { background: var(--warm); border: 1px solid var(--warm-line); border-radius: var(--r); box-shadow: var(--soft); padding: 12px 10px 8px; margin-bottom: 18px; }
+.start2 .hd { display: flex; align-items: center; padding: 0 6px 4px 14px; font-size: 15px; font-weight: 700; }
+.start2 .hd .x { margin-left: auto; font-size: 13px; font-weight: 600; color: var(--muted); padding: 6px 10px; }
+.gg { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 6px; }
+.g2 { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 8px 14px; border-radius: 14px; font-size: 13.5px; }
+.g2.btnrow:hover { background: var(--warm-hover); }
+.g2 .t { flex: none; font-weight: 600; font-size: 14px; }
+.g2 .t.a { color: var(--accent-text); }
+.g2 .d { min-width: 0; color: var(--muted); }
+.g2 .d b { color: var(--text); font-weight: 600; }
+.g2 .me { width: 22px; height: 22px; border-radius: 6px; background: #8a2b2b; flex: none; }
+.g2 .go { margin-left: auto; color: var(--dim); flex: none; }
+.ph .gg { grid-template-columns: 1fr; }
+.ph .g2 { flex-wrap: wrap; row-gap: 0; min-height: 40px; }
+.usage2 { padding: 6px 14px 2px; font-size: 12px; color: var(--dim); }
+/* 프로젝트·기록 */
+.pj { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 24px; align-items: start; }
+.pjl { padding: 16px 12px 12px; }
+.pjl .h { display: flex; align-items: center; gap: 8px; padding: 0 8px 10px; font-size: 16px; font-weight: 700; }
+.pjl .h .plus { color: var(--muted); font-weight: 500; font-size: 18px; }
+.sg { display: inline-flex; padding: 3px; gap: 2px; background: var(--neutral-bg); border-radius: var(--r-sm); font-size: 12.5px; font-weight: 600; }
+.sg span { padding: 5px 12px; border-radius: 9px; color: var(--muted); }
+.sg span.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(25,31,40,.08); }
+.pjr { padding: 30px 4px; font-size: 14.5px; color: var(--muted); }
+.pjr2 { padding: 22px 24px; }
+.pjr2 h6 { margin: 0 0 4px; font-size: 16px; font-weight: 700; color: var(--text); }
+.pjr2 p { margin: 0 0 14px; font-size: 13.5px; color: var(--muted); max-width: 52ch; }
+.pbtn { display: inline-flex; align-items: center; height: 34px; padding: 0 14px; border-radius: var(--r-xs); background: var(--accent-soft); color: var(--accent-text); font-size: 13.5px; font-weight: 600; }
+.rec { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 28px; align-items: start; }
+.find { margin-left: auto; width: 220px; height: 32px; border-radius: 999px; background: var(--surface); display: flex; align-items: center; padding: 0 14px; font-size: 12.5px; color: var(--dim); }
+.fold { display: flex; align-items: center; gap: 8px; padding: 14px 20px 0; font-size: 14px; font-weight: 600; color: var(--muted); }
+.fold .n { font-weight: 500; color: var(--dim); }
+.gone { outline: 2px dashed var(--urgent); outline-offset: 2px; border-radius: 10px; }
+.board.nomark .gone { outline: 0; }
+@media (max-width: 760px) {
+  .today, .pj, .rec { grid-template-columns: 1fr; }
+  .gg { grid-template-columns: 1fr; }
+  .find { width: 140px; }
+}
+</style>
+</head>
+<body>
+<div class="board" id="board">
+  <div class="top">
+    <div>
+      <h1>첫 사용·빈 화면 정리 — 시안</h1>
+      <p>처음 쓰는 사람이 여는 빈 화면에서 "0"과 쓸 일이 없는 조절 장치를 걷고, 사용설명서 카드를 절반 높이로 줄여요. 기존 색·간격·부품 그대로예요. 회의·주간요약은 다른 세션이 맡아 빠졌어요.</p>
+    </div>
+    <div class="tools">
+      <div class="seg" role="group" aria-label="테마">
+        <button type="button" data-theme-set="light" aria-pressed="true">밝게</button>
+        <button type="button" data-theme-set="dark" aria-pressed="false">어둡게</button>
+      </div>
+      <div class="seg" role="group" aria-label="표시">
+        <button type="button" data-mark="on" aria-pressed="true">빠지는 것 표시</button>
+        <button type="button" data-mark="off" aria-pressed="false">표시 끄기</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="change">
+    <ol>
+      <li><b>0은 적지 않아요</b> — 오늘 할 일·오늘 미팅·확인 대기·아이디어·결정·프로젝트 옆 숫자는 1 이상일 때만. 생기면 그 자리에 바로 나타나요.</li>
+      <li><b>`나중에 할 일 0` 버튼은 0이면 없어요</b> — 서랍이 비어 열어도 볼 게 없어요. 1개가 되면 다시 나타나요.</li>
+      <li><b>사용설명서는 네 칸 판</b> — 넓은 화면 2×2, 휴대폰은 한 줄씩. 설치 그림은 아이콘 하나로, 설명은 한 줄로. 높이 약 305 → 150px(넓게), 약 390 → 250px(휴대폰).</li>
+      <li><b>빈 목록 문장은 짧게</b> — 바로 위에 입력 칸이 있으니 "맨 위 줄에서 바로 추가할 수 있어요"는 빼고 여백도 줄여요.</li>
+      <li><b>프로젝트 0개면 `상태별·배포별`을 숨기고</b> 오른쪽에 무엇을 하면 되는지 한 판 + `프로젝트 만들기`(왼쪽 ＋와 같은 동작).</li>
+      <li><b>결정 0개면 `결정 찾기` 칸과 `반영 완료 0` 접힘을 숨겨요</b> — 찾을 것도 펼칠 것도 없어요.</li>
+    </ol>
+  </div>
+
+  <section class="sec" aria-labelledby="s1">
+    <h2 id="s1">오늘 탭 — 넓은 화면</h2>
+    <p class="why">빨간 점선이 이번에 빠지는 것이에요(위 "표시 끄기"로 끌 수 있어요).</p>
+    <div class="pair">
+      <div>
+        <div class="lab"><span class="t">지금</span></div>
+        <div class="fr">
+          <div class="bar"><b>워크스페이스</b><span class="on">오늘</span><span>프로젝트</span><span>회의</span><span>아이디어·결정</span><span>주간요약</span></div>
+          <div class="in today">
+            <div class="side">
+              <div class="card sc"><h5>오늘 미팅 <span class="cnt gone">0</span><span class="more">전체 보기</span></h5><p>캘린더를 켜면 오늘 일정이 보여요(설정 &gt; 연동).</p></div>
+              <div class="card sc"><h5>확인 대기 <span class="cnt w gone">0</span><span class="more">⋮</span></h5><p>기다리는 답변이 없어요.</p><div class="add">+ 확인 대기 추가</div></div>
+            </div>
+            <div class="main">
+              <div class="start">
+                <div class="hd">사용설명서<span class="x">닫기</span></div>
+                <div class="g"><span class="t">앱으로 설치</span><span class="d">크롬 ⋮ → <b>전송, 저장, 공유</b> → <b>페이지를 앱으로 설치</b><span class="sub">이미 설치했으면 주소창 오른쪽 <b>앱 열기</b></span><span class="dock"><i></i><i></i><span class="me"></span><i></i></span></span></div>
+                <div class="g"><span class="t a">할 일 적기</span><span class="d">맨 위 칸에 적고 <b>Enter</b></span></div>
+                <div class="g"><span class="t a">연동은 나중에</span><span class="d">설정 ⚙ → <b>연동</b>에서 하나씩</span></div>
+                <div class="g"><span class="t a">슬랙에서 보내는 법</span><span class="d"><b>전달</b>로 채널에 보내요</span></div>
+                <div class="usage">어떤 기능을 많이 쓰는지 익명으로 모아 앱을 고치는 데 써요 · <u>끄기</u></div>
+              </div>
+              <div class="lhd"><h4>오늘 할 일</h4><span class="cnt a gone">0</span><span class="r"><span class="btn gone">나중에 할 일 0</span><span class="kb">⋮</span></span></div>
+              <div class="card list"><div class="qa">＋ 오늘 할 일 추가 — Enter</div><div class="empty">오늘 할 일이 비었어요. <span class="gone">맨 위 줄에서 바로 추가할 수 있어요.</span></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="lab"><span class="t new">바꾼 뒤</span></div>
+        <div class="fr">
+          <div class="bar"><b>워크스페이스</b><span class="on">오늘</span><span>프로젝트</span><span>회의</span><span>아이디어·결정</span><span>주간요약</span></div>
+          <div class="in today">
+            <div class="side">
+              <div class="card sc"><h5>오늘 미팅<span class="more">전체 보기</span></h5><p>캘린더를 켜면 오늘 일정이 보여요(설정 &gt; 연동).</p></div>
+              <div class="card sc"><h5>확인 대기<span class="more">⋮</span></h5><p>기다리는 답변이 없어요.</p><div class="add">+ 확인 대기 추가</div></div>
+            </div>
+            <div class="main">
+              <div class="start2">
+                <div class="hd">사용설명서<span class="x">닫기</span></div>
+                <div class="gg">
+                  <div class="g2"><span class="me" aria-hidden="true"></span><span class="t">앱으로 설치</span><span class="d">크롬 ⋮ → <b>페이지를 앱으로 설치</b></span></div>
+                  <div class="g2 btnrow"><span class="t a">할 일 적기</span><span class="d">맨 위 칸에 적고 <b>Enter</b></span><span class="go">›</span></div>
+                  <div class="g2 btnrow"><span class="t a">연동은 나중에</span><span class="d">설정 ⚙ → <b>연동</b>에서 하나씩</span><span class="go">›</span></div>
+                  <div class="g2 btnrow"><span class="t a">슬랙에서 보내는 법</span><span class="d"><b>전달</b>로 채널에 보내요</span><span class="go">›</span></div>
+                </div>
+                <div class="usage2">어떤 기능을 많이 쓰는지 익명으로 모아 앱을 고치는 데 써요 · <u>끄기</u></div>
+              </div>
+              <div class="lhd"><h4>오늘 할 일</h4><span class="r"><span class="kb">⋮</span></span></div>
+              <div class="card list"><div class="qa">＋ 오늘 할 일 추가 — Enter</div><div class="empty s">오늘 할 일이 비었어요.</div></div>
+            </div>
+          </div>
+        </div>
+        <p class="meas">설치 줄의 "이미 설치했으면 주소창 오른쪽 <b>앱 열기</b>"와 <b>전송, 저장, 공유</b> 단계는 설정 › 도움말의 사용설명서에 온전히 남아요. 설치 버튼이 뜨는 크롬에서는 설명 대신 <b>설치</b> 버튼 하나.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec" aria-labelledby="s2">
+    <h2 id="s2">오늘 탭 — 휴대폰 폭(390)</h2>
+    <p class="why">첫 화면에서 할 일 칸이 사용설명서에 밀려 한 화면 아래로 내려가던 것이 위로 올라와요.</p>
+    <div class="phones">
+      <div>
+        <div class="lab"><span class="t">지금</span></div>
+        <div class="fr ph">
+          <div class="bar"><span class="on">오늘</span><span>프로젝트</span><span>회의</span><span>아이디어·결정</span><span>주간요약</span></div>
+          <div class="in today">
+            <div class="side">
+              <div class="card sc"><h5>오늘 미팅 <span class="cnt gone">0</span><span class="more">전체 보기</span></h5><p>캘린더를 켜면 오늘 일정이 보여요(설정 &gt; 연동).</p></div>
+            </div>
+            <div class="main">
+              <div class="start">
+                <div class="hd">사용설명서<span class="x">닫기</span></div>
+                <div class="g"><span class="t">앱으로 설치</span><span class="d">크롬 ⋮ → <b>전송, 저장, 공유</b> → <b>페이지를 앱으로 설치</b><span class="sub">이미 설치했으면 주소창 오른쪽 <b>앱 열기</b></span><span class="dock"><i></i><i></i><span class="me"></span><i></i></span></span></div>
+                <div class="g"><span class="t a">할 일 적기</span><span class="d">맨 위 칸에 적고 <b>Enter</b></span></div>
+                <div class="g"><span class="t a">연동은 나중에</span><span class="d">설정 ⚙ → <b>연동</b>에서 하나씩</span></div>
+                <div class="g"><span class="t a">슬랙에서 보내는 법</span><span class="d"><b>전달</b>로 채널에 보내요</span></div>
+                <div class="usage">어떤 기능을 많이 쓰는지 익명으로 모아 앱을 고치는 데 써요 · <u>끄기</u></div>
+              </div>
+              <div class="lhd"><h4>오늘 할 일</h4><span class="cnt a gone">0</span><span class="r"><span class="btn gone">나중에 할 일 0</span><span class="kb">⋮</span></span></div>
+              <div class="card list"><div class="qa">＋ 오늘 할 일 추가 — Enter</div><div class="empty">오늘 할 일이 비었어요. <span class="gone">맨 위 줄에서 바로 추가할 수 있어요.</span></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="lab"><span class="t new">바꾼 뒤</span></div>
+        <div class="fr ph">
+          <div class="bar"><span class="on">오늘</span><span>프로젝트</span><span>회의</span><span>아이디어·결정</span><span>주간요약</span></div>
+          <div class="in today">
+            <div class="side">
+              <div class="card sc"><h5>오늘 미팅<span class="more">전체 보기</span></h5><p>캘린더를 켜면 오늘 일정이 보여요(설정 &gt; 연동).</p></div>
+            </div>
+            <div class="main">
+              <div class="start2">
+                <div class="hd">사용설명서<span class="x">닫기</span></div>
+                <div class="gg">
+                  <div class="g2"><span class="me" aria-hidden="true"></span><span class="t">앱으로 설치</span><span class="d">크롬 ⋮ → <b>페이지를 앱으로 설치</b></span></div>
+                  <div class="g2 btnrow"><span class="t a">할 일 적기</span><span class="d">맨 위 칸에 적고 <b>Enter</b></span><span class="go">›</span></div>
+                  <div class="g2 btnrow"><span class="t a">연동은 나중에</span><span class="d">설정 ⚙ → <b>연동</b>에서</span><span class="go">›</span></div>
+                  <div class="g2 btnrow"><span class="t a">슬랙에서 보내는 법</span><span class="d"><b>전달</b>로 채널에</span><span class="go">›</span></div>
+                </div>
+                <div class="usage2">기능 사용 횟수를 익명으로 모아요 · <u>끄기</u></div>
+              </div>
+              <div class="lhd"><h4>오늘 할 일</h4><span class="r"><span class="kb">⋮</span></span></div>
+              <div class="card list"><div class="qa">＋ 오늘 할 일 추가 — Enter</div><div class="empty s">오늘 할 일이 비었어요.</div></div>
+            </div>
+          </div>
+        </div>
+        <p class="meas">휴대폰에서는 설명을 조금 더 줄여 한 칸이 한두 줄에 들어가요. 온전한 문장은 설정 › 도움말에 그대로.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec" aria-labelledby="s3">
+    <h2 id="s3">프로젝트 탭 — 프로젝트가 하나도 없을 때</h2>
+    <p class="why">정렬할 것이 없는데 `상태별·배포별`이 먼저 보이고, 오른쪽 넓은 자리에는 한 문장만 떠 있었어요.</p>
+    <div class="pair">
+      <div>
+        <div class="lab"><span class="t">지금</span></div>
+        <div class="fr"><div class="in pj">
+          <div class="card pjl"><div class="h">프로젝트 <span class="cnt gone">0</span><span class="plus">＋</span></div><span class="sg gone"><span class="on">상태별</span><span>배포별</span></span></div>
+          <div class="pjr">아직 프로젝트가 없어요. 위의 +로 만들거나 업무에 프로젝트를 지정하면 여기 모여요.</div>
+        </div></div>
+      </div>
+      <div>
+        <div class="lab"><span class="t new">바꾼 뒤</span></div>
+        <div class="fr"><div class="in pj">
+          <div class="card pjl"><div class="h">프로젝트<span class="plus">＋</span></div></div>
+          <div class="card pjr2">
+            <h6>아직 프로젝트가 없어요</h6>
+            <p>업무·결정·회의를 프로젝트로 묶으면 여기서 한 번에 봐요. 업무의 ⋯ › 프로젝트를 정해도 저절로 생겨요.</p>
+            <span class="pbtn">＋ 프로젝트 만들기</span>
+          </div>
+        </div></div>
+        <p class="meas">`프로젝트 만들기`는 왼쪽 ＋와 같은 입력 줄을 열어요(새 동작 없음). 프로젝트가 하나라도 생기면 지금 화면 그대로.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec" aria-labelledby="s4">
+    <h2 id="s4">아이디어·결정 탭 — 비어 있을 때</h2>
+    <div class="pair">
+      <div>
+        <div class="lab"><span class="t">지금</span></div>
+        <div class="fr"><div class="in rec">
+          <div><div class="lhd"><h4>아이디어</h4><span class="cnt gone">0</span></div><div class="card list"><div class="qa">＋ 아이디어 추가 — Enter</div><div class="empty">아이디어가 아직 없어요. <span class="gone">맨 위 줄에서 바로 적어 둘 수 있어요.</span></div></div></div>
+          <div><div class="lhd"><h4>결정</h4><span class="cnt gone">0</span><span class="find gone">결정 찾기</span></div><div class="card list"><div class="qa">＋ 결정 추가 — Enter</div><div class="empty">정해진 내용이 아직 없어요. <span class="gone">맨 위 줄에서 바로 적을 수 있어요.</span></div></div><div class="fold gone">› 반영 완료 <span class="n">0</span></div></div>
+        </div></div>
+      </div>
+      <div>
+        <div class="lab"><span class="t new">바꾼 뒤</span></div>
+        <div class="fr"><div class="in rec">
+          <div><div class="lhd"><h4>아이디어</h4></div><div class="card list"><div class="qa">＋ 아이디어 추가 — Enter</div><div class="empty s">아이디어가 아직 없어요.</div></div></div>
+          <div><div class="lhd"><h4>결정</h4></div><div class="card list"><div class="qa">＋ 결정 추가 — Enter</div><div class="empty s">정해진 내용이 아직 없어요.</div></div></div>
+        </div></div>
+        <p class="meas">반영 완료가 1개라도 있으면 찾기 칸과 접힘은 지금처럼 보여요(미반영 결정이 0이어도).</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec" aria-labelledby="s5">
+    <h2 id="s5">바꾸지 않는 것</h2>
+    <div class="change"><ol>
+      <li>사용설명서 규칙(닫기 전까지 늘, 닫으면 이 브라우저에 기억, 도움말에 같은 네 줄) — 모양만 줄여요.</li>
+      <li>오늘 미팅 `전체 보기`, 확인 대기 `+ 확인 대기 추가` — 빈 상태에서도 할 일이 있는 자리라 그대로.</li>
+      <li>회의 탭과 주간요약 빈 화면 — 다른 세션 담당이라 이번에 안 건드려요.</li>
+      <li>데이터가 1개 이상일 때의 모든 화면.</li>
+    </ol></div>
+  </section>
+</div>
+<script>
+(() => {
+  const root = document.documentElement, board = document.getElementById('board');
+  document.querySelectorAll('[data-theme-set]').forEach(b => b.addEventListener('click', () => {
+    root.dataset.theme = b.dataset.themeSet;
+    document.querySelectorAll('[data-theme-set]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  }));
+  document.querySelectorAll('[data-mark]').forEach(b => b.addEventListener('click', () => {
+    board.classList.toggle('nomark', b.dataset.mark === 'off');
+    document.querySelectorAll('[data-mark]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  }));
+})();
+</script>
+</body>
+</html>

@@ -434,7 +434,9 @@ function setWaitingView(value) {
 function renderWaiting(items) {
   waitingItemsCache = items;
   document.getElementById('waitingCount').textContent = items.length;
-  document.getElementById('waitingSectionCount').textContent = items.length;
+  const sectionCount = document.getElementById('waitingSectionCount');
+  sectionCount.textContent = items.length;
+  sectionCount.hidden = !items.length; // 0은 적지 않는다 — 생기면 그 자리에 나타난다
   const list = document.getElementById('waitingList');
   list.replaceChildren();
 

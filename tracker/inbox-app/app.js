@@ -1529,7 +1529,9 @@ function renderCalendar(calendar) {
     const saved = workflowData.meetings.find(meeting => meeting.date === todayStr() && meeting.start === event.start && meeting.title === event.title);
     return saved ? { ...event, project: saved.project, workflowId: saved.id, draftCount: saved.drafts?.length || 0 } : event;
   });
-  document.getElementById('calendarSectionCount').textContent = events.length;
+  const calendarCount = document.getElementById('calendarSectionCount');
+  calendarCount.textContent = events.length;
+  calendarCount.hidden = !events.length; // 0은 적지 않는다 — 생기면 그 자리에 나타난다
   const list = document.getElementById('calendarList');
   list.replaceChildren();
   if (!events.length) {
@@ -2048,10 +2050,11 @@ function decisionJiraSummary(item) {
 // 결정·아이디어 열 하나를 그린다: 프로젝트 그룹 제목(오늘 목록과 같은 부품 — 색 점 + 이름 + 회색 숫자,
 // 누르면 프로젝트 탭) + 그 아래 줄들. 그룹 제목이 이미 프로젝트를 말해 주므로 줄에는 되풀이하지 않는다.
 // `프로젝트 없음` 묶음만 색 점 없이 맨 아래에 선다(uiGroupTasks가 순서를 맡는다).
-function renderRecordColumn(list, items, row, emptyText) {
+// 빈 문장은 고정 문구뿐이다(사용자 값을 넣지 않는다). 입력 칸 바로 아래의 짧은 빈 문장은 `is-short`.
+function renderRecordColumn(list, items, row, emptyText, emptyTone = '') {
   list.replaceChildren();
   if (!items.length) {
-    list.insertAdjacentHTML('beforeend', `<div class="d-empty">${emptyText}</div>`);
+    list.insertAdjacentHTML('beforeend', `<div class="d-empty${emptyTone ? ` ${emptyTone}` : ''}">${emptyText}</div>`);
     return;
   }
   const groups = uiGroupTasks(items);
@@ -2166,20 +2169,40 @@ function renderDecisions(items) {
   decisionCache = items;
   const countEl = document.getElementById('decisionSectionCount');
   countEl.textContent = items.length;
+  countEl.hidden = !items.length;
   countEl.title = decisionPendingTitle(items.length);
   const segBtn = document.getElementById('recordViewDecisionBtn');
   if (segBtn) segBtn.textContent = `결정 ${items.length}`;
+  decisionToolsSync();
   renderRecordColumn(document.getElementById('decisionList'), items.filter(decisionMatches),
     item => recordDecisionRow(item, false),
-    decisionQuery ? '찾는 결정이 없어요.' : '정해진 내용이 아직 없어요. 맨 위 줄에서 바로 적을 수 있어요.');
+    decisionQuery ? '찾는 결정이 없어요.' : '정해진 내용이 아직 없어요. 적어 두면 PRD 반영까지 여기서 챙겨요.',
+    decisionQuery ? '' : 'is-short');
+}
+
+// 결정이 하나도 없으면(미반영 0 · 반영 완료 0) 찾을 것도 펼칠 것도 없다 — `결정 찾기` 칸과 `반영 완료` 접힘을 숨긴다.
+// 반영 완료가 하나라도 있으면 그대로 둔다. 숨길 때 찾기 칸에 남은 글자는 비운다(다음 결정이 생겼을 때 안 보이는 거름망이 되지 않게),
+// 초점이 찾기 칸에 있었으면 바로 아래 `결정 추가` 칸으로 옮긴다.
+function decisionToolsSync() {
+  const none = !decisionCache.length && !decisionArchiveCache.length;
+  const search = document.getElementById('decisionSearch');
+  const zone = document.getElementById('decisionArchiveZone');
+  if (search) {
+    if (none && document.activeElement === search) document.getElementById('decisionInput')?.focus();
+    if (none && (search.value || decisionQuery)) { search.value = ''; decisionQuery = ''; }
+    search.hidden = none;
+  }
+  if (zone) zone.hidden = none;
 }
 
 function renderIdeas(items) {
-  document.getElementById('ideaCount').textContent = items.length;
+  const countEl = document.getElementById('ideaCount');
+  countEl.textContent = items.length;
+  countEl.hidden = !items.length;
   const segBtn = document.getElementById('recordViewIdeaBtn');
   if (segBtn) segBtn.textContent = `아이디어 ${items.length}`;
   renderRecordColumn(document.getElementById('ideaList'), items,
-    recordIdeaRow, '아이디어가 아직 없어요. 맨 위 줄에서 바로 적어 둘 수 있어요.');
+    recordIdeaRow, '아이디어가 아직 없어요. 떠오를 때 적어 두는 자리예요.', 'is-short');
 }
 
 // 결정 열 아래 접힌 구역. 결정 찾기로 찾는 중에는 자동으로 펼쳐져 결과를 보여 주고,
@@ -2192,6 +2215,7 @@ function renderDecisionArchive() {
   const items = decisionArchiveCache.filter(decisionMatches);
   const open = decisionArchiveOpen || !!decisionQuery;
   document.getElementById('decisionArchiveCount').textContent = items.length;
+  decisionToolsSync();
   toggle.setAttribute('aria-expanded', String(open));
   body.hidden = !open;
   list.replaceChildren();
@@ -2443,6 +2467,7 @@ function removeTracked(item, card, message = '삭제했어요') {
 function renderLaterTasks(items) {
   document.getElementById('laterTaskSectionCount').textContent = items.length;
   document.getElementById('laterDrawerCount').textContent = items.length;
+  laterToggleSync(items.length);
   const list = document.getElementById('laterTaskList');
   list.replaceChildren();
   list.classList.toggle('d-list', items.length > 0);
@@ -2470,6 +2495,16 @@ function renderLaterTasks(items) {
       })
       .forEach(item => list.appendChild(uiTaskRow(item, { mode: 'later', grouped: key !== '__misc__' })));
   });
+}
+
+// 머리줄의 `나중에 할 일 N` 버튼은 1개 이상일 때만 선다(0이면 열어도 볼 게 없다). 서랍이 열린 채 0이 되면
+// 서랍은 그대로 두고(서랍의 닫기 버튼이 있다) 버튼만 숨긴다 — 초점이 버튼에 있었으면 서랍 닫기(닫혀 있으면 할 일 입력칸)로 옮긴다.
+function laterToggleSync(count) {
+  const toggle = document.getElementById('laterTaskToggle');
+  if (!toggle) return;
+  const hadFocus = !count && document.activeElement === toggle;
+  toggle.hidden = !count;
+  if (hadFocus) document.getElementById(laterDrawerOpen ? 'laterTaskClose' : 'todayTaskInput')?.focus();
 }
 
 // ---------- 나중에 할 일 서랍 ----------
@@ -2504,7 +2539,9 @@ function drawerClose() {
   try { localStorage.setItem(LATER_DRAWER_KEY, '0'); } catch {}
   drawerSync();
   escDrop(drawerClose);
-  document.getElementById('laterTaskToggle')?.focus();
+  // 버튼이 숨어 있으면(나중에 할 일 0) 오늘 할 일 입력칸으로 — 사라진 자리에 초점을 두지 않는다.
+  const toggle = document.getElementById('laterTaskToggle');
+  document.getElementById(toggle && !toggle.hidden ? 'laterTaskToggle' : 'todayTaskInput')?.focus();
 }
 
 // 새로고침해도 열려 있던 서랍은 그대로 열어 둔다(포커스는 옮기지 않는다).
@@ -4333,7 +4370,9 @@ function appInstallWords(state) {
 // 네 줄 — 오늘 탭 카드와 도움말의 사용설명서가 같은 줄을 쓴다. 누르면 데려가는 줄은 버튼이고,
 // 첫 줄은 할 일이 이 앱 밖(크롬·Dock)에 있어 줄 자체는 버튼이 아니다(작은 Dock 그림 + 안의 버튼·링크).
 // 일반 탭이면 `앱으로 설치`(버튼 또는 크롬 메뉴 길), 설치된 창이면 `Dock에 두기`(아이콘을 Dock에 유지).
-function guideRows() {
+// compact(오늘 탭 카드): 한 칸 한 줄 — 설치 줄은 Dock 그림 대신 앱 아이콘 하나를 이름 앞에 두고 설명을 줄이며
+// (`이미 설치했으면…`·`전송, 저장, 공유`·Dock 그림은 도움말에만), 버튼 줄은 끝에 오른쪽 꺾쇠를 단다.
+function guideRows({ compact = false } = {}) {
   const row = (tag, title, parts, run) => {
     const node = document.createElement(tag);
     node.className = 'd-guide';
@@ -4344,19 +4383,48 @@ function guideRows() {
     const words = guideRich(document.createElement('span'), parts);
     words.className = 'd';
     node.append(name, words);
+    if (compact && tag === 'button') {
+      const go = document.createElement('span');
+      go.className = 'go';
+      go.insertAdjacentHTML('beforeend', uiIcon('chevron'));
+      node.appendChild(go);
+    }
     return { node, name, words };
   };
-  const dock = row('div', '앱으로 설치', []);
-  const paint = () => {
-    const state = appInstallState();
-    const picture = document.createElement('span');
-    picture.className = 'd-guidedock';
-    picture.setAttribute('aria-hidden', 'true');
+  const appIcon = () => {
     const me = document.createElement('img');
     me.className = 'me';
     me.src = appIconSrc;
     me.alt = '';
-    picture.append(document.createElement('i'), document.createElement('i'), me, document.createElement('i'));
+    return me;
+  };
+  const dock = row('div', '앱으로 설치', []);
+  if (compact) {
+    dock.node.className = 'd-guide is-install';
+    dock.node.replaceChildren(appIcon(), dock.name, dock.words);
+  }
+  const paintCompact = (state) => {
+    if (state === 'standalone') {
+      dock.name.textContent = 'Dock에 두기';
+      dock.words.replaceChildren(
+        guideRich(document.createElement('span'), ['Dock의 이 앱 아이콘 우클릭 → ', ['b', '옵션'], ' → ', ['b', 'Dock에 유지']]));
+      return;
+    }
+    dock.name.textContent = '앱으로 설치';
+    if (state === 'manual') {
+      dock.words.replaceChildren(guideRich(document.createElement('span'), ['크롬 ⋮ → ', ['b', '페이지를 앱으로 설치']]));
+      return;
+    }
+    // 설치 창을 줄 수 있으면 `설치하기` 버튼 하나, 방금 설치했으면 그 한 줄 — 꾸미기와 같은 부품이다.
+    dock.words.replaceChildren(...appInstallWords(state).slice(0, 1));
+  };
+  const paint = () => {
+    const state = appInstallState();
+    if (compact) { paintCompact(state); return; }
+    const picture = document.createElement('span');
+    picture.className = 'd-guidedock';
+    picture.setAttribute('aria-hidden', 'true');
+    picture.append(document.createElement('i'), document.createElement('i'), appIcon(), document.createElement('i'));
     if (state === 'standalone') {
       dock.name.textContent = 'Dock에 두기';
       dock.words.replaceChildren(
@@ -4398,7 +4466,11 @@ function renderGuideCard() {
   close.setAttribute('aria-label', '사용설명서 닫기 — 도움말에 남아요');
   close.addEventListener('click', guideCardClose);
   head.append(title, close);
-  card.append(head, ...guideRows(), ...(typeof usageGuideLine === 'function' ? usageGuideLine() : []));
+  // 오늘 탭은 네 칸 판(넓게 2×2, ≤520은 한 줄씩) — 도움말(renderSettingsManual)은 지금 모양 그대로 한 줄씩.
+  const grid = document.createElement('div');
+  grid.className = 'd-guidegrid';
+  grid.append(...guideRows({ compact: true }));
+  card.append(head, grid, ...(typeof usageGuideLine === 'function' ? usageGuideLine() : []));
   zone.appendChild(card);
 }
 
@@ -4506,7 +4578,9 @@ function renderTodayProgress(done, total) {
 
 function renderTodayTasks(items) {
   const doneItems = items.filter(item => item.status === 'done');
-  document.getElementById('todayTaskCount').textContent = items.length - doneItems.length;
+  const todayCount = document.getElementById('todayTaskCount');
+  todayCount.textContent = items.length - doneItems.length;
+  todayCount.hidden = items.length === doneItems.length; // 남은 것이 0이면 적지 않는다
   // 한 마디로 오늘의 진행을 알려 준다. 아직 아무것도 없으면 아무 말도 하지 않는다.
   document.getElementById('todayDoneSummary').textContent = items.length ? `${items.length}개 중 ${doneItems.length}개 끝냈어요` : '';
   renderTodayProgress(doneItems.length, items.length);
@@ -4546,7 +4620,7 @@ function renderTodayTasks(items) {
   if (!active.length && !doing.length) {
     list.insertAdjacentHTML('beforeend', doneItems.length
       ? '<div class="d-empty">오늘 할 일을 모두 끝냈어요.</div>'
-      : '<div class="d-empty">오늘 할 일이 비었어요. 맨 위 줄에서 바로 추가할 수 있어요.</div>');
+      : '<div class="d-empty is-short">오늘 할 일이 비었어요.</div>');
   }
 
   if (doneItems.length) {
