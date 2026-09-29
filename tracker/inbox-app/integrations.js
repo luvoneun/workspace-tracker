@@ -216,10 +216,10 @@ async function slackUseExisting(secret, wanted, request, { key = '', channels = 
   if (found && found.is_archived === true) throw bad(MESSAGE.slackArchived, 'archived');
   // 내가 들어가 있는 채널만 목록에 온다(users.conversations). 그래도 공개 채널이거나 다른 사람이 만든 채널이면
   // "나만 있는 채널"이 아니므로 쓰지 않는다 — 팀이 같이 쓰는 #todo 같은 채널의 메시지가 할 일로 쏟아지지 않게.
-  if (!found || (found.creator && me && found.creator !== me)) throw bad(MESSAGE.slackTaken, 'name_taken');
+  // 만든 사람이 확인되지 않으면(응답에 creator가 없음) 내 채널이라고 보지 않는다.
+  if (!found || !found.creator || !me || found.creator !== me) throw bad(MESSAGE.slackTaken, 'name_taken');
   // 공개 채널은 내가 만들었고 나 혼자 있을 때만 쓴다(인원은 conversations.info로 읽기만) — 비공개 내 채널은 그대로.
   if (found.is_private !== true) {
-    if (!found.creator || !me) throw bad(MESSAGE.slackTaken, 'name_taken');
     let info;
     try {
       const query = new URLSearchParams({ channel: String(found.id || ''), include_num_members: 'true' });
@@ -602,7 +602,9 @@ async function saveIntegrations({
         const info = await (slackCheck || (() => { throw bad(MESSAGE.slackRead); }))(secret, id);
         // 새로 만든(다시 만든) 채널은 만든 때부터 읽는다 — 슬랙이 만든 때를 모르면 지금부터.
         // 이미 있던 채널을 쓰는 칸은 **지금부터** 읽는다(예전에 쌓인 메시지를 한꺼번에 가져오지 않게).
-        const since = !existingKeys.includes(key) && info.created ? `${info.created}.000000` : at;
+        // 화면의 표시만 믿지 않는다 — 만든 지 한 시간이 넘은 채널이면 표시가 없어도 지금부터 읽는다.
+        const fresh = info.created && Number(at) - Number(info.created) <= 3600;
+        const since = !existingKeys.includes(key) && fresh ? `${info.created}.000000` : at;
         channels[key] = { id, name: info.name ? `#${info.name}` : '', since, off: false };
         result.slack.channels[key] = { name: channels[key].name, isPrivate: info.isPrivate === true };
       }

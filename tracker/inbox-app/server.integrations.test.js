@@ -524,8 +524,8 @@ globalThis.fetch = async (input, init) => {
   if (!url.startsWith('https://slack.com/api/')) return realFetch(input, init);
   const json = body => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
   const good = (init.headers || {}).Authorization === 'Bearer good-token';
-  if (url.endsWith('/auth.test')) return json(good ? { ok: true, user: 'me' } : { ok: false, error: 'invalid_auth' });
-  if (url.includes('/users.conversations')) return json({ ok: true, channels: [{ id: 'C0MINE11', name: 'mine', is_private: true, is_member: true }] });
+  if (url.endsWith('/auth.test')) return json(good ? { ok: true, user: 'me', user_id: 'U0ME' } : { ok: false, error: 'invalid_auth' });
+  if (url.includes('/users.conversations')) return json({ ok: true, channels: [{ id: 'C0MINE11', name: 'mine', is_private: true, is_member: true, creator: 'U0ME' }] });
   const name = JSON.parse(init.body || '{}').name;
   if (name === 'noscope') return json({ ok: false, error: 'missing_scope' });
   if (name === 'taken' || name === 'mine') return json({ ok: false, error: 'name_taken' });
@@ -859,7 +859,7 @@ test('연동 저장: 사람이 채우지 않은 예시 채널 칸은 config에�
   await integrationsStore.saveIntegrations({
     configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir,
     body: { slack: { enabled: true, token: 'slack-secret', channels: { todo: 'C0TODO11' } } },
-    slackCheck: async () => ({ name: 'my-todo', isPrivate: true, created: 1790000000 }),
+    slackCheck: async () => ({ name: 'my-todo', isPrivate: true, created: 1790000000 }), now: () => 1790000123456,
   });
   const saved = fix.read();
   assert.deepEqual(Object.keys(saved.slack.channels), ['todo'], '채우지 않은 세 칸은 사라진다');
@@ -1170,7 +1170,7 @@ function takenSlack(pages, { create = { ok: false, error: 'name_taken' }, fail =
     const method = text.split('/api/')[1].split('?')[0];
     calls.push({ method, url: text, options });
     if (fail && fail[method]) throw fail[method];
-    if (method === 'auth.test') return reply({ ok: true, user: 'me' });
+    if (method === 'auth.test') return reply({ ok: true, user: 'me', user_id: 'U0ME' });
     if (method === 'conversations.create') return reply(create);
     if (method === 'users.conversations') {
       const cursor = new URL(text).searchParams.get('cursor') || '';
@@ -1185,7 +1185,7 @@ function takenSlack(pages, { create = { ok: false, error: 'name_taken' }, fail =
 test('이미 있는 채널: 이름이 겹쳐도 내가 들어가 있는 내 비공개 채널이면 새로 만들지 않고 그 채널을 쓴다(읽기만)', async () => {
   const fake = takenSlack({ '': { ok: true, channels: [
     { id: 'C0OTHER1', name: 'general', is_member: true },
-    { id: 'C0MINE11', name: 'Eren-Jang-Todo', is_private: true, is_member: true, is_archived: false },
+    { id: 'C0MINE11', name: 'Eren-Jang-Todo', is_private: true, is_member: true, is_archived: false, creator: 'U0ME' },
   ] } });
   const made = await integrationsStore.slackCreateChannel('slack-secret', 'eren-jang-todo', fake.request, { key: 'todo', channels: {} });
   assert.deepEqual(made, { id: 'C0MINE11', name: 'Eren-Jang-Todo', existing: true }, '대소문자는 무시하고 같은 이름을 찾는다');
@@ -1213,11 +1213,16 @@ test('이미 있는 채널: 남의 채널(목록에 없음·멤버 아님)은 na
   assert.deepEqual(archived.calls.map(one => one.method), ['auth.test', 'conversations.create', 'users.conversations'], '보관을 풀어 주지도 않는다');
 });
 
+test('이미 있는 채널: 만든 사람을 알 수 없는 비공개 채널(초대받은 채널 등)은 내 채널로 보지 않는다', async () => {
+  const unknown = takenSlack({ '': { ok: true, channels: [{ id: 'C0INVITE', name: 'my-todo', is_private: true, is_member: true }] } });
+  await assert.rejects(() => integrationsStore.slackCreateChannel('t', 'my-todo', unknown.request), error => error.code === 'name_taken');
+});
+
 test('이미 있는 채널: 목록이 여러 쪽이면 cursor로 끝까지(최대 10쪽), 상한·시간 초과·슬랙 오류는 "다 찾지 못했어요"(이름 중복과 구분)', async () => {
   const paged = takenSlack({
     '': { ok: true, channels: [{ id: 'C1', name: 'a' }], response_metadata: { next_cursor: 'p2' } },
     p2: { ok: true, channels: [{ id: 'C2', name: 'b' }], response_metadata: { next_cursor: 'p3' } },
-    p3: { ok: true, channels: [{ id: 'C0MINE11', name: 'my-todo', is_private: true, is_member: true }], response_metadata: { next_cursor: 'p4' } },
+    p3: { ok: true, channels: [{ id: 'C0MINE11', name: 'my-todo', is_private: true, is_member: true, creator: 'U0ME' }], response_metadata: { next_cursor: 'p4' } },
   });
   const found = await integrationsStore.slackCreateChannel('t', 'my-todo', paged.request);
   assert.equal(found.id, 'C0MINE11');
@@ -1249,7 +1254,7 @@ test('이미 있는 채널: 목록이 여러 쪽이면 cursor로 끝까지(최�
 });
 
 test('이미 있는 채널: 다른 칸(뺀 칸 포함)에 이미 연결된 채널이면 막고, 같은 칸이면 그대로 쓴다', async () => {
-  const mine = () => takenSlack({ '': { ok: true, channels: [{ id: 'C0MINE11', name: 'my-todo', is_private: true, is_member: true }] } });
+  const mine = () => takenSlack({ '': { ok: true, channels: [{ id: 'C0MINE11', name: 'my-todo', is_private: true, is_member: true, creator: 'U0ME' }] } });
   const channels = { todo: { id: 'C0TODO99', name: '#x' }, align: { id: 'C0MINE11', name: '#my-todo', off: true } };
   await assert.rejects(() => integrationsStore.slackCreateChannel('t', 'my-todo', mine().request, { key: 'todo', channels }),
     error => error.code === 'channel_in_use' && error.message === '이미 정해진 것 칸에 연결된 채널이에요 — 다른 이름을 적어 주세요');
@@ -1335,4 +1340,14 @@ test('이미 있는 채널: 내가 들어가 있어도 공개 채널이거나 �
   // 칸 값 없이 부르면(예전 화면) 겹침 확인은 건너뛴다 — 같은 칸에 저장된 채널이어도 막지 않는다
   const again = await integrationsStore.slackCreateChannel('t', 'my-todo', request2, { channels: { todo: { id: 'C0MINE22' } } });
   assert.equal(again.id, 'C0MINE22');
+});
+
+test('이미 있는 채널 저장: existing 표시가 없어도 만든 지 한 시간이 넘은 채널은 지금부터 읽는다(예전 화면·직접 호출 대비)', async (t) => {
+  const fix = integrationsFixture(t, {});
+  await integrationsStore.saveIntegrations({
+    configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir,
+    body: { slack: { enabled: true, token: 'slack-secret', channels: { todo: 'C0OLD111' } } },
+    slackCheck: async () => ({ name: 'old-todo', isPrivate: true, created: 1600000000 }), now: () => 1790000123456,
+  });
+  assert.equal(fix.read().slack.channels.todo.since, '1790000123.456000', '예전 메시지를 한꺼번에 가져오지 않는다');
 });
