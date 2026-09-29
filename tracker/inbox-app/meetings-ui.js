@@ -1244,12 +1244,14 @@ function meetingsMoreRow(text, className = 'd-mmore') {
 
 // 프로젝트 소제목 옆의 조용한 글자 — 지라 프로젝트(또는 손으로 연결한 그룹)의 지금 상태 이름을
 // 범주 색으로 적는다(BJCOLOR 규칙). 앱이 그 티켓을 들고 있지 않으면 아무것도 붙이지 않는다.
+// jiraIssuesByKey는 **목록 모양**이다 — 상태는 글자(`status: '진행 중'`), 범주는 맨 위 칸(`category`).
+// 범주가 없으면(대비책 파일에서 온 목록) 색을 정할 수 없어 붙이지 않는다.
 function meetingsProjectStatus(key) {
   if (key === '__misc__') return null;
   const issue = jiraIssuesByKey.get(jiraKeyOf(key));
-  const name = issue && issue.status ? issue.status.name : '';
-  if (!name) return null;
-  const tone = jiraStatusTone(issue.status.category);
+  const name = issue && typeof issue.status === 'string' ? issue.status : '';
+  if (!name || !issue.category) return null;
+  const tone = jiraStatusTone(issue.category);
   const note = document.createElement('span');
   note.className = 'js' + (tone ? ` ${tone}` : '');
   note.title = '지라에 적힌 지금 상태예요';

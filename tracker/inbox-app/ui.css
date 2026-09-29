@@ -1633,6 +1633,9 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-prow .dp.k-neg { color: var(--urgent); }
 /* 열린 항목 수는 오른쪽 끝의 조용한 회색 숫자다(칩으로 세우지 않는다) */
 .d-prow .n { font-size: 13px; font-weight: 500; color: var(--dim); font-variant-numeric: tabular-nums; }
+/* 묶음 줄(BBUNDLE)의 `티켓 2개` — 배포일과 같은 조용한 글자(배지로 세우지 않는다) */
+.d-prow .bd { font-size: 12px; font-weight: 500; color: var(--dim); white-space: nowrap; }
+.d-prow[aria-current="true"] .bd { color: var(--accent-text); }
 .d-prow:hover { background: var(--hover); }
 .d-prow[aria-current="true"] { background: var(--sel); color: var(--accent-text); font-weight: 600; }
 .d-prow[aria-current="true"] .n { color: var(--accent-text); }
@@ -2016,6 +2019,12 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-prow2.is-sel .ti { font-weight: 600; color: var(--accent-text); }
 /* 진행 중인 업무는 오늘 목록(`.d-row.is-doing`)과 같게 제목 600 */
 .d-prow2.is-doing .ti { font-weight: 600; }
+/* 묶음 상세(BBUNDLE)의 줄 — 제목 바로 뒤에 어느 티켓 것인지 작은 번호(.d-pfrom). 제목은 내용만큼만 */
+.d-prow2 .d-titlewrap { min-width: 0; }
+.d-prow2 .d-titlewrap .ti { flex: 0 1 auto; width: auto; min-width: 0; }
+.d-pfrom { flex: none; font-size: 12px; font-weight: 500; color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* 묶음 상세의 `+ 할 일 추가` 끝 `→ KEY` — 할 일이 붙을 티켓, 누르면 바꾼다 */
+.d-paddto { flex: none; margin-left: 8px; font-size: 12.5px; color: var(--dim); white-space: nowrap; }
 /* 상태말은 오늘 목록과 같은 규칙이다 — 아이콘 + 회색 글자, 급한 말만 6px 배지.
    우선순위 열은 없앴다(체크박스 안의 꺾쇠가 말한다) — 줄에는 기한만 남는다. */
 /* 격자 칸은 안의 것을 칸 너비만큼 늘린다 — 배지 바탕이 116px 전체로 퍼졌다. 내용 너비만 차지하고 오른쪽에 붙인다. */
@@ -2807,6 +2816,7 @@ a.d-btn { text-decoration: none; }
   .d-prow2.is-done { grid-template-areas: "ck ti ti c" "ck a a a"; }
   .d-prow2 .d-check { grid-area: ck; width: 30px; height: auto; }
   .d-prow2 .ti { grid-area: ti; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .d-prow2 .d-titlewrap { grid-area: ti; flex-wrap: wrap; }
   .d-prow2 .pl, .d-prow2 .dd, .d-prow2 .res { justify-self: start; text-align: left; font-size: 11.5px; }
   .d-prow2 .pl { grid-area: a; }
   .d-prow2 .dd { grid-area: c; }

@@ -14,6 +14,14 @@
 // seq는 "늦게 온 응답"을 버리는 표다 — 다른 프로젝트로 빨리 옮기면 먼저 보낸 응답이 새 화면을 덮지 않는다.
 let jiraCard = { key: null, state: 'idle', issue: null, error: '', at: 0, seq: 0 };
 const JIRA_REFRESH_MS = 60 * 1000;
+// 묶음(BBUNDLE)의 나머지 티켓 카드 — 대표 티켓은 위 jiraCard 그대로 쓰고(단일 프로젝트와 같은 길),
+// 나머지 티켓만 키별로 여기 둔다. 보고 있는 묶음 하나 분량만 기억한다(다른 프로젝트로 옮기면 비운다).
+// seq는 모든 옆 카드가 함께 쓰는 번호다 — 묶음을 오가도 늦게 온 응답이 새 카드를 덮지 않는다.
+let jiraSide = { project: null, keys: [], cards: {} };
+let jiraSideSeq = 0;
+const jiraSideHostId = key => `jiraStrip-${key}`;
+// 이 키의 카드 상태 — 대표(jiraCard)가 아니고 옆 카드에 있으면 그것, 아니면 jiraCard(예전 그대로).
+const jiraCardFor = key => (jiraCard.key !== key && jiraSide.cards[key]) || jiraCard;
 
 // 이 화면에서 지라 구역을 아예 그리지 않는 때: `integrations.jira`를 꺼 둔 설정.
 function jiraUsed() {
@@ -161,7 +169,7 @@ function jiraCell(label, text, tone, hint, pick) {
   button.append(value, caret);
   button.addEventListener('click', (event) => {
     if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
-    jiraPickOpen(button, pick.sections);
+    jiraPickOpen(button, pick.sections, pick.key);
   });
   cell.appendChild(button);
   return cell;
@@ -255,17 +263,21 @@ async function jiraChangeSend(body) {
 }
 
 // 카드 안에서 무언가를 찾는 자리 하나(가짜 창에서도 안전하게 흘러가게 물음표로 잇는다).
-const jiraCardNode = () => document.getElementById('jiraStrip')?.querySelector?.('.d-jira') || null;
+// key를 주면 그 티켓의 카드(묶음의 옆 카드일 수 있다), 없으면 예전처럼 대표 자리(#jiraStrip)다.
+const jiraCardNode = (key) => {
+  const side = key && jiraCard.key !== key && jiraSide.keys.includes(key);
+  return document.getElementById(side ? jiraSideHostId(key) : 'jiraStrip')?.querySelector?.('.d-jira') || null;
+};
 
 function jiraConfirmClose(repaint = true) {
   if (!jiraConfirm) return;
-  const { onEsc, pickLabel } = jiraConfirm;
+  const { onEsc, pickLabel, key } = jiraConfirm;
   escDrop(onEsc);
   jiraConfirm = null;
   if (!repaint) return;
   jiraStripPaint();
   // 닫으면 값을 고르던 그 고르개로 초점이 돌아간다(메뉴에서 값을 고른 뒤 초점이 머리로 튀지 않게).
-  jiraCardNode()?.querySelector?.(`.d-dpick[aria-label^="${pickLabel}"]`)?.focus?.();
+  jiraCardNode(key)?.querySelector?.(`.d-dpick[aria-label^="${pickLabel}"]`)?.focus?.();
 }
 // 고른 값은 곧바로 나가지 않는다 — 카드 안에 확인 줄을 세우고 거기서만 보낸다.
 function jiraConfirmOpen(plan) {
@@ -275,31 +287,34 @@ function jiraConfirmOpen(plan) {
   jiraConfirm = plan;
   jiraStripPaint();
   // 그려 붙인 뒤에 초점을 옮긴다 — 읽는 프로그램이 묻는 말부터 읽고, Tab이 `취소`·`바꾸기`로 이어진다.
-  jiraCardNode()?.querySelector?.('.d-jconfirm')?.focus?.();
+  jiraCardNode(plan.key)?.querySelector?.('.d-jconfirm')?.focus?.();
 }
 // 바깥을 누르면 취소다(메뉴 안 클릭은 메뉴가 전파를 막으므로 여기 오지 않는다).
 document.addEventListener('click', (event) => {
   if (!jiraConfirm) return;
-  const row = jiraCardNode()?.querySelector?.('.d-jconfirm');
+  const row = jiraCardNode(jiraConfirm.key)?.querySelector?.('.d-jconfirm');
   if (row && typeof row.contains === 'function' && row.contains(event.target)) return;
   jiraConfirmClose();
 });
 
 // 쓰는 동안 카드의 고르개·새로고침을 그 자리에서 잠근다(다시 그리지 않는다 — 확인 줄이 살아 있어야 한다).
+// 묶음이면 옆 카드들도 함께 잠근다 — 쓰는 동안(jiraBusy) 어느 카드에서도 두 번째 쓰기를 시작하지 않게.
 function jiraLockPicks(locked) {
-  const card = jiraCardNode();
-  if (!card || typeof card.querySelectorAll !== 'function') return;
-  card.querySelectorAll('.d-dpick, .d-jref, .d-more').forEach((node) => { node.disabled = locked; });
+  [jiraCardNode(), ...jiraSide.keys.map(key => jiraCardNode(key))].forEach((card) => {
+    if (!card || typeof card.querySelectorAll !== 'function') return;
+    card.querySelectorAll('.d-dpick, .d-jref, .d-more').forEach((node) => { node.disabled = locked; });
+  });
 }
 
 // 고르개를 여는 길 하나. 선택지를 못 읽으면 알림만 띄우고 메뉴를 열지 않는다.
-async function jiraPickOpen(button, sections) {
+// key는 그 고르개가 선 카드의 티켓이다(묶음의 옆 카드에서 다시 찾을 때만 쓴다 — 없으면 대표 자리).
+async function jiraPickOpen(button, sections, key) {
   if (jiraBusy) return;
   if (uiMenuOpen && uiMenuOpen.anchor === button) { uiMenuClose(); return; }
   // 떠 있던 확인 줄은 먼저 닫는다(다시 그린다) — 그러면 이 버튼이 떨어져 나가므로 같은 고르개를 다시 찾는다.
   const label = button.getAttribute('aria-label') || '';
   if (jiraConfirm) jiraConfirmClose();
-  const anchor = (button.isConnected === false && jiraCardNode()?.querySelector?.(`.d-dpick[aria-label="${label}"]`)) || button;
+  const anchor = (button.isConnected === false && jiraCardNode(key)?.querySelector?.(`.d-dpick[aria-label="${label}"]`)) || button;
   anchor.disabled = true;
   let built;
   try {
@@ -518,21 +533,25 @@ function jiraConfirmRow(issue, plan) {
 }
 
 // projectKey는 이 카드가 서 있는 프로젝트다 — `group:…`이면 손으로 건 연결이라 카드에 ⋯(해제)가 붙는다.
-function jiraStripBody(key, projectKey = '') {
+// bundle이 있으면(묶음 상세) 카드 첫 줄에 티켓 번호·대표·끝남을 덧붙인다 — `{ lead: true|false }`.
+function jiraStripBody(key, projectKey = '', bundle = null) {
   if (!key) return null;
-  if (jiraCard.key !== key || jiraCard.state === 'loading' || jiraCard.state === 'idle') return jiraSkeleton();
-  if (jiraCard.state === 'off') {
+  const card = jiraCardFor(key);
+  if (card.key !== key || card.state === 'loading' || card.state === 'idle') return jiraSkeleton();
+  if (card.state === 'off') {
     return jiraQuietLine('지라 연결이 필요해요', '설정 방법', () => showNotice(JIRA_SETUP_HINT), JIRA_SETUP_HINT);
   }
-  if (jiraCard.state === 'error') {
-    return jiraQuietLine(jiraCard.error || '지라에 연결하지 못했어요.', '다시 시도', () => jiraCardLoad(key, { fresh: true }));
+  if (card.state === 'error') {
+    return jiraQuietLine(card.error || '지라에 연결하지 못했어요.', '다시 시도', () => jiraCardLoad(key, { fresh: true }));
   }
-  return jiraStripCard(jiraCard.issue, projectKey);
+  return jiraStripCard(card.issue, projectKey, bundle);
 }
 
 // B 띠 카드: 첫 줄(지라 표시 · 요약 · 종류/담당 · 지라에서 열기 · 새로고침),
 // 둘째 줄(지라 상태 · 배포 버전 · 기한), 셋째 줄(하위 티켓 진행률).
-function jiraStripCard(issue, projectKey = '') {
+// bundle(묶음 상세의 카드만): 첫 줄 종류·담당 앞에 티켓 번호(묶음 안에서 어느 티켓인지 가르는 말)와
+// `대표`, 지라에서 끝난 티켓이면 `끝남`을 붙인다. 단일 프로젝트 카드는 예전 그대로다.
+function jiraStripCard(issue, projectKey = '', bundle = null) {
   const card = document.createElement('div');
   card.className = 'd-jira';
   card.setAttribute('aria-label', '지라에서 읽어 온 지금 상태');
@@ -548,7 +567,9 @@ function jiraStripCard(issue, projectKey = '') {
   name.title = issue.summary || issue.key;
   const sub = document.createElement('span');
   sub.className = 'sub';
-  sub.textContent = [issue.type, `담당 ${issue.assignee || '없음'}`].filter(Boolean).join(' · ');
+  const ended = !!bundle && !!issue.status && issue.status.category === 'done';
+  sub.textContent = [bundle ? issue.key : '', bundle && bundle.lead ? '대표' : '', ended ? '끝남' : '',
+    issue.type, `담당 ${issue.assignee || '없음'}`].filter(Boolean).join(' · ');
   const spacer = document.createElement('span');
   spacer.className = 'sp';
   const link = document.createElement('a');
@@ -587,13 +608,13 @@ function jiraStripCard(issue, projectKey = '') {
   const locked = jiraBusy;
   cells.append(
     jiraCell('지라 상태', issue.status?.name, jiraStatusTone(issue.status?.category), '지라에 적힌 지금 상태예요 — 눌러서 바꿔요',
-      { disabled: locked, sections: () => jiraStatusSections(issue) }),
+      { disabled: locked, key: issue.key, sections: () => jiraStatusSections(issue) }),
     jiraCell('배포 버전', version ? `${version.name} ${version.note}`.trim() : '', version ? version.tone : '',
       version ? version.hint : '지라의 배포 버전이 아직 없어요',
-      { disabled: locked, sections: () => jiraVersionSections(issue) }),
+      { disabled: locked, key: issue.key, sections: () => jiraVersionSections(issue) }),
     jiraCell('기한', issue.due ? uiKoDateShort(issue.due) : '', '',
       issue.due ? `지라에 적힌 기한은 ${uiKoDate(issue.due)}이에요` : '지라에 적힌 기한이 없어요',
-      { disabled: locked, sections: () => jiraDueSections(issue) }),
+      { disabled: locked, key: issue.key, sections: () => jiraDueSections(issue) }),
   );
   card.append(top, cells);
 
@@ -786,36 +807,85 @@ function jiraChildRow(item) {
 }
 
 // 카드 자리만 다시 그린다 — 늦게 온 응답 때문에 프로젝트 화면 전체를 다시 만들지 않는다.
+// 묶음이면 대표 자리(#jiraStrip)와 옆 카드 자리(#jiraStrip-KEY)를 함께 다시 그린다.
 function jiraStripPaint() {
   const host = document.getElementById('jiraStrip');
   if (!host) return;
   const key = host.dataset.jiraKey || '';
-  const body = jiraStripBody(key, host.dataset.project || '');
+  const inBundle = host.dataset.bundle === '1';
+  const body = jiraStripBody(key, host.dataset.project || '', inBundle ? { lead: true } : null);
   host.replaceChildren(...(body ? [body] : []));
+  if (!inBundle) return;
+  jiraSide.keys.forEach((side) => {
+    const seat = document.getElementById(jiraSideHostId(side));
+    if (!seat) return;
+    const card = jiraStripBody(side, seat.dataset.project || '', { lead: false });
+    seat.replaceChildren(...(card ? [card] : []));
+  });
 }
 
-async function jiraCardLoad(key, { fresh = false, quiet = false } = {}) {
-  const seq = jiraCard.seq + 1;
-  jiraCard = quiet && jiraCard.key === key
-    ? { ...jiraCard, seq }
-    : { key, state: 'loading', issue: null, error: '', at: 0, seq };
-  jiraStripPaint();
+// 지라에서 티켓 하나를 읽어 카드 상태로 바꾼다 — 대표 카드(jiraCardLoad)와 옆 카드(jiraSideLoad)가 함께 쓴다.
+async function jiraIssueRead(key, fresh, seq) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
-  let next;
   try {
     const response = await fetch(`/api/jira/issue?key=${encodeURIComponent(key)}${fresh ? '&fresh=1' : ''}`, { signal: controller.signal });
     const data = await response.json();
-    next = data.ok === false
+    return data.ok === false
       ? { key, state: 'error', issue: null, error: data.error || '지라에 연결하지 못했어요.', at: Date.now(), seq }
       : data.connected === false
         ? { key, state: 'off', issue: null, error: '', at: Date.now(), seq }
         : { key, state: 'ok', issue: data.issue, error: '', at: Date.now(), seq };
   } catch {
-    next = { key, state: 'error', issue: null, error: '지라에 연결하지 못했어요.', at: Date.now(), seq };
+    return { key, state: 'error', issue: null, error: '지라에 연결하지 못했어요.', at: Date.now(), seq };
   } finally {
     clearTimeout(timer);
   }
+}
+
+// 묶음의 옆 카드를 읽는다 — jiraCardLoad와 같은 규칙(늦은 응답 버림·조용한 재조회 실패는 알리지 않음).
+async function jiraSideLoad(key, { fresh = false, quiet = false } = {}) {
+  jiraSideSeq += 1;
+  const seq = jiraSideSeq;
+  const prev = jiraSide.cards[key];
+  jiraSide.cards[key] = quiet && prev ? { ...prev, seq } : { key, state: 'loading', issue: null, error: '', at: 0, seq };
+  jiraStripPaint();
+  const next = await jiraIssueRead(key, fresh, seq);
+  const now = jiraSide.cards[key];
+  if (!now || now.seq !== seq) return;
+  if (quiet && next.state === 'error' && now.state === 'ok') { jiraSide.cards[key] = { ...now, at: Date.now() }; return; }
+  jiraSide.cards[key] = next;
+  jiraStripPaint();
+}
+
+// 묶음 상세를 그릴 때마다 부른다(keys는 대표를 뺀 나머지 티켓). 묶음이 아니면 (null, [])로 불러 비운다.
+// 다른 묶음으로 옮기면 옆 카드를 전부 버리고, 같은 묶음이면 60초 지난 것만 조용히 새로 읽는다.
+function jiraSideEnsure(projectKey, keys) {
+  const list = Array.isArray(keys) ? keys : [];
+  if (jiraSide.project !== projectKey || jiraSide.keys.join('|') !== list.join('|')) {
+    // 떠 있던 확인 줄이 사라지는 옆 카드의 것이면 함께 닫는다(무엇을 확인 중인지 안 보이면 안 된다).
+    if (jiraConfirm && jiraSide.keys.includes(jiraConfirm.key) && (jiraSide.project !== projectKey || !list.includes(jiraConfirm.key))) jiraConfirmClose(false);
+    const kept = {};
+    if (jiraSide.project === projectKey) list.forEach((key) => { if (jiraSide.cards[key]) kept[key] = jiraSide.cards[key]; });
+    jiraSide = { project: projectKey, keys: [...list], cards: kept };
+  }
+  list.forEach((key) => {
+    const card = jiraSide.cards[key];
+    if (!card) { jiraSideLoad(key); return; }
+    if (jiraBusy || jiraConfirm) return;
+    if (card.state === 'ok' && Date.now() - card.at > JIRA_REFRESH_MS) jiraSideLoad(key, { quiet: true });
+  });
+}
+
+async function jiraCardLoad(key, { fresh = false, quiet = false } = {}) {
+  // 묶음의 옆 카드(새로고침·다시 시도·지라 쓰기 뒤 재조회)는 그 카드 자리로 보낸다 — 대표 카드는 그대로.
+  if (jiraCard.key !== key && jiraSide.keys.includes(key)) return jiraSideLoad(key, { fresh, quiet });
+  const seq = jiraCard.seq + 1;
+  jiraCard = quiet && jiraCard.key === key
+    ? { ...jiraCard, seq }
+    : { key, state: 'loading', issue: null, error: '', at: 0, seq };
+  jiraStripPaint();
+  const next = await jiraIssueRead(key, fresh, seq);
   // 다른 프로젝트로 옮겼거나 더 나중 요청이 이미 나갔으면 이 응답은 버린다.
   if (jiraCard.seq !== seq) return;
   // 뒤에서 조용히 새로 읽다가 실패한 것은 알리지 않는다 — 보고 있던 값이 오류 줄로 바뀌면 안 된다.
