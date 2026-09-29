@@ -12680,3 +12680,21 @@ test('회의 `기존 항목 연결` 목록은 8개 이상이면 찾기 칸이 �
   assert.doesNotMatch(css, /\.d-msel\.wide/);
   assert.doesNotMatch(fs.readFileSync(path.join(__dirname, 'meetings-ui.js'), 'utf8'), /d-msel wide/);
 });
+
+// 디자인 사후 확인: 계획 문장 ⋯ › `프로젝트 바꾸기` 목록이 펼쳐진 동안만 is-picking — 라벨은 목록 위 한 줄, 목록은 왼쪽 정렬.
+test('계획 문장 프로젝트 바꾸기: 목록을 펼치면 is-picking, 고르면 풀린다 · CSS 규칙', () => {
+  const app = reportClient();
+  app.run("customGroupsCache = ['운영툴']; jiraIssuesCache = []; reportChange = async () => {}; uiMenuClose = () => {};");
+  const wrap = app.run(`reportPlanRegroupPicker(${REPORT_ITEM}, { id: 'p1', heading: '다음 주 계획', group: '운영툴' })`);
+  const log = [];
+  // 가짜 DOM의 classList는 아무 일도 하지 않으므로 부른 기록으로 확인한다.
+  wrap.classList = { add: name => log.push(`+${name}`), remove: name => log.push(`-${name}`), contains: () => false, toggle() {} };
+  wrap.children[0].listeners.click({ stopPropagation() {} });
+  assert.deepEqual(log, ['+is-picking'], '펼치면 is-picking');
+  const list = wrap.children[0].children.find(kid => kid.getAttribute && kid.getAttribute('role') === 'listbox');
+  list.children.find(kid => kid.dataset.value === '').listeners.click({ stopPropagation() {} });
+  assert.deepEqual(log, ['+is-picking', '-is-picking'], '고르면 풀린다');
+  const css = require('node:fs').readFileSync(require('node:path').join(__dirname, 'report-ui.css'), 'utf8');
+  assert.match(css, /\.d-mfield:has\(\.rp-regroup\.is-picking\) > \.ml \{[^}]*font-size: 12px; font-weight: 600; color: var\(--muted\)/);
+  assert.match(css, /\.rp-regroup \.d-gplist \{ padding: 2px; \}/);
+});
