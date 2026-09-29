@@ -2151,7 +2151,7 @@ function renderWeeklyReports(items) {
     // 줄 오른쪽 끝에 끼울 자리(다음 버전 '내 일 기록'의 끝낸 일 막대·숫자 — report-ui.js의 reportWeekRowEnd, 지금은 비어 있다).
     const end = typeof reportWeekRowEnd === 'function' ? reportWeekRowEnd(item) : null;
     if (end) btn.appendChild(end);
-    btn.setAttribute('aria-label', `${name}, ${label.range}${fresh ? `, 새 기록 ${fresh}개` : ''}`);
+    btn.setAttribute('aria-label', `${name}, ${label.range}${fresh ? `, 새 기록 ${fresh}개` : ''}${end && end.dataset && end.dataset.label ? `, ${end.dataset.label}` : ''}`);
     btn.addEventListener('click', () => {
       selectedWeekKey = item.weekKey;
       renderWeeklyReports(weeklyReportsCache);

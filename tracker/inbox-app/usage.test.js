@@ -473,3 +473,22 @@ test('WP-W 화면 파일 규칙 — `내 일 기록`·`끝낸`, `쳐`·`내 사�
   const css = fs.readFileSync(path.join(__dirname, 'usage-ui.css'), 'utf8');
   assert.equal(/#[0-9a-f]{3,8}\b|rgba?\(|--warn/i.test(css), false, '새 색·주황 없음 — 기존 토큰만');
 });
+
+test('WP-X 화면 파일 규칙 — 주간요약 줄 끝·맨 아래·자세히 창·설정 안내 문구, report-ui.js는 두 자리만 넘김, 새 innerHTML·새 색·새 그림자·새 토큰 없음', () => {
+  const read = name => fs.readFileSync(path.join(__dirname, name), 'utf8').split('\n').filter(line => !/^\s*\/\//.test(line)).join('\n');
+  const ui = read('usage-ui.js');
+  for (const words of ['내 일 기록 자세히', '이 주는 기록이 없어요', '이번 주는 아직 끝낸 일이 없어요', '엔 끝낸 일이 없어요', '이번 주가 최고 기록이에요', '최고 기록: ',
+    '내 일 기록은 주간요약 탭에서 볼 수 있어요 · ', "'d-modal d-uwdlg'", "'aria-haspopup', 'dialog'", '끝낸 일 ${record.done}개']) assert.ok(ui.includes(words), words);
+  assert.equal(/innerHTML|insertAdjacentHTML|outerHTML/.test(ui), false);
+  assert.equal(/쳐/.test(fs.readFileSync(path.join(__dirname, 'usage-ui.js'), 'utf8')), false);
+  const report = read('report-ui.js');
+  assert.match(report, /function reportWeekRowEnd\(item\) \{ return typeof usageWeekRowEnd === 'function' \? usageWeekRowEnd\(item\) : null; \}/);
+  assert.match(report, /function reportWeeksFoot\(items\) \{ return typeof usageWeeksFoot === 'function' \? usageWeeksFoot\(items\) : null; \}/);
+  const css = fs.readFileSync(path.join(__dirname, 'usage-ui.css'), 'utf8');
+  const added = css.slice(css.indexOf('/* 주간요약 주차 목록(WP-X)'));
+  assert.ok(added.length > 100);
+  assert.equal(/#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(|box-shadow|--warn|--[a-z-]+\s*:/i.test(added), false, '새 색·그림자·토큰 정의 없음');
+  for (const token of ['--hair', '--check-line', '--accent', '--muted']) assert.ok(added.includes(`var(${token})`), token);
+  // 자세히 창은 설정과 같은 판 — 새 틀(.d-modal 재정의) 없음.
+  assert.equal(/\.d-modal\s*[{,]/.test(added), false);
+});

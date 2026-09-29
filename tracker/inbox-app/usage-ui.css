@@ -58,3 +58,46 @@
 .d-uwins li + li { border-top: 1px solid var(--hair); }
 .d-uwins li b { font-weight: 700; color: var(--text); }
 .d-uwins li .d-i { width: 16px; height: 16px; margin-top: 2px; color: var(--accent-text); }
+
+/* 주간요약 주차 목록(WP-X) — 줄 끝 칸은 48px 막대(트랙 --hair, 채움 --check-line, 고른 주 --accent) + 숫자(tabular-nums).
+   `새 기록 N` 칩과 함께 있으면 칩이 윗줄, 막대가 아랫줄로 나눠 선다. 맨 아래 덩어리는 판 없이 --muted 글자, 위에 --hair 선.
+   좁은 폭(≤900, 주차 목록이 가로 한 줄)에서는 덩어리가 줄 끝의 한 칸이 되고 선은 왼쪽으로. */
+.rp-wk > .d-uwend {
+  grid-column: 2; grid-row: 1 / span 2; justify-self: end;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.rp-wk:has(> .d-uwend) > .nw { grid-row: 1; }
+.rp-wk > .nw ~ .d-uwend { grid-row: 2; }
+.rp-wk[aria-current="true"] > .d-uwend { color: var(--accent-text); }
+.d-uwtrack { position: relative; flex: none; width: 48px; height: 4px; border-radius: 2px; background: var(--hair); overflow: hidden; }
+.d-uwfill { position: absolute; top: 0; bottom: 0; left: 0; border-radius: inherit; background: var(--check-line); }
+.rp-wk[aria-current="true"] .d-uwfill { background: var(--accent); }
+.d-uwnum { min-width: 2ch; text-align: right; }
+.d-uwfoot {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  margin: 8px 0 0; padding: 12px 10px 4px; border-top: 1px solid var(--hair);
+  font-size: 12.5px; line-height: 1.5; color: var(--muted); word-break: keep-all;
+}
+.d-uwfline { margin: 0; }
+.d-uwfline b { font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.d-uwfoot .d-link { margin-top: 2px; min-height: 28px; font-size: 12.5px; }
+@media (max-width: 900px) {
+  /* 가로 한 줄의 좁은 주차 칸(128px)에서는 이름이 잘리지 않게 막대·숫자를 날짜 아래 셋째 줄로 */
+  .rp-wk > .d-uwend, .rp-wk > .nw ~ .d-uwend { grid-column: 1 / -1; grid-row: 3; justify-self: start; margin-top: 2px; }
+  .d-uwfoot {
+    flex: 0 0 232px; justify-content: center; margin: 0 0 0 4px; padding: 2px 10px;
+    border-top: 0; border-left: 1px solid var(--hair); white-space: normal;
+  }
+}
+
+/* 설정 › 앱 `사용 통계` 줄의 `내 일 기록은 주간요약 탭에서 볼 수 있어요 · 보기` */
+.d-uwgo { line-height: 1.5; }
+
+/* 내 일 기록 자세히 창 — 설정과 같은 .d-modal 판, 폭만 560px. 윗변은 설정 창처럼 한 자리(기간을 바꿔도 머리가 뛰지 않게),
+   창 자체는 스크롤하지 않고 본문만. 열면 초점은 창 자체라 창에는 테를 그리지 않는다(안쪽 :focus-visible 테는 그대로). */
+.d-uwdlg { width: min(560px, calc(100vw - 32px)); margin: min(max(32px, 8vh), 120px) auto auto; overflow: hidden; }
+.d-uwdlg:focus { outline: none; }
+@media (max-width: 520px) {
+  .d-uwdlg { width: calc(100vw - 16px); max-height: calc(100dvh - 48px); margin: auto; }
+}

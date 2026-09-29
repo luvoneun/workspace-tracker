@@ -1,7 +1,9 @@
 // 사용 횟수(WP-R) 화면 — 세기·보내기는 서버(usage.js)가 한다. 여기서는
 //  ① 화면에서만 아는 것(탭 열기·검색·주간요약 복사)을 `POST /api/usage/tick`으로 알리고
 //  ② 사용설명서 카드 맨 아래 알림 한 줄(`… 보내요 · 끄기` ↔ `모으지 않아요 · 다시 켜기`)과
-//  ③ 설정 › 앱의 `익명 사용 횟수 보내기` 스위치·`내 일 기록`(이번 주·이번 달·90일 일 통계 + 맨 아래 `기능별 전체 보기` 표)을 그린다.
+//  ③ 설정 › 앱의 `익명 사용 횟수 보내기` 스위치와 `내 일 기록은 주간요약 탭에서 볼 수 있어요 · 보기` 한 줄,
+//  ④ 주간요약 탭 주차 목록의 줄 끝 칸(그 주 끝낸 일 막대·숫자)과 목록 맨 아래 한 덩어리(report-ui.js의 reportWeekRowEnd·reportWeeksFoot이 넘긴다),
+//  ⑤ `내 일 기록` 자세히 창(설정과 같은 .d-modal — 이번 주·이번 달·90일 일 통계 + 맨 아래 `기능별 전체 보기` 표)을 그린다.
 // 알림 줄은 이 설치가 실제로 보낼 수 있을 때(`canSend` — 만든 사람·개발용·폼 닫힘이 아님)만 보인다.
 // 새 innerHTML은 쓰지 않는다(요소를 만들어 붙인다). 알리기가 실패해도 조용히 넘어간다.
 
@@ -225,7 +227,7 @@ function usageWeekdayStats(clean, from, to) {
 // `알게 된 것` — 조건이 맞는 것만, 우선순위 a 요일 몰림 → b 최고 기록 → c 바빠도 유지 → d 잘 끝내는 요일, 최대 3개.
 // 문구는 [글자, { b: 굵은 글자 }, 글자] 조각으로 돌려준다(그리기가 <b> 요소로 만든다).
 // 요일 통계(a·d)의 창은 첫 기록 날 ~ 어제(오늘은 아직 덜 끝나서 뺀다) — 4주(28일) 이상·기록 있는 날 12일 이상일 때만.
-function usageInsights(clean, today, range, period, current, before, recordedDays) {
+function usageInsights(clean, today, range, period, current, before, recordedDays, past) {
   const found = [];
   const days = Object.keys(clean).sort();
   const firstDay = days[0];
@@ -257,6 +259,8 @@ function usageInsights(clean, today, range, period, current, before, recordedDay
     const others = [];
     if (range === 'week') {
       for (let start = usageAddDays(period.from, -7); start >= floor; start = usageAddDays(start, -7)) others.push(usageTotals(clean, start, usageAddDays(start, 6)).done);
+      // 지난 주를 기준으로 열었으면 그 뒤의 온전한 주(이번 주 앞까지)도 비교 대상이다.
+      if (past) for (let start = usageAddDays(period.from, 7); start < usageMonday(today); start = usageAddDays(start, 7)) others.push(usageTotals(clean, start, usageAddDays(start, 6)).done);
     } else {
       for (let start = usageMonthStart(usageAddDays(period.from, -1)); start >= floor; start = usageMonthStart(usageAddDays(start, -1))) {
         others.push(usageTotals(clean, start, usageAddDays(usageMonthStart(usageAddDays(start, 31)), -1)).done);
@@ -264,7 +268,7 @@ function usageInsights(clean, today, range, period, current, before, recordedDay
     }
     if (others.length >= 2 && current.done > 0 && current.done > Math.max(...others)) {
       found.push(range === 'week'
-        ? { kind: 'best', parts: ['이번 주가 ', { b: `최근 ${others.length + 1}주 중 가장 많이 끝낸 주` }, '예요.'] }
+        ? { kind: 'best', parts: [`${past ? past.name : '이번 주'}가 `, { b: `최근 ${others.length + 1}주 중 가장 많이 끝낸 주` }, '예요.'] }
         : { kind: 'best', parts: ['이번 달이 ', { b: `최근 ${others.length + 1}달 중 가장 많이 끝낸 달` }, '이에요.'] });
     }
   } else {
@@ -294,26 +298,47 @@ function usageInsights(clean, today, range, period, current, before, recordedDay
   return found.slice(0, 3);
 }
 
+// 지난 주를 기준으로 열기(⑂ 4) — options.week가 이번 주보다 앞선 월요일이면 { week, name }, 아니면 null.
+// 이름은 부르는 쪽(app.js의 reportWeekName — 목요일 기준 주차)이 options.name으로 주고, 없으면 `지난 주`/`9월 21일 주`.
+function usagePastWeek(today, options) {
+  const week = options && typeof options === 'object' ? String(options.week || '') : '';
+  if (!USAGE_DAY_RE.test(week) || !USAGE_DAY_RE.test(String(today || '')) || usageDowOf(week) !== 0 || week >= usageMonday(today)) return null;
+  const given = typeof options.name === 'string' ? options.name.trim() : '';
+  return { week, name: given || (week === usageAddDays(usageMonday(today), -7) ? '지난 주' : `${usageMonthDay(week)} 주`) };
+}
+
 // 화면에 필요한 숫자·문장 재료를 한 번에. range: 'week' | 'month' | '90'(그 밖은 'week').
+// options(선택): { week: 'YYYY-MM-DD'(기준 주 월요일), name: '지난 주' } — range가 'week'이고 week가 이번 주보다 앞이면
+//   그 주 월~일 전체를 보고(비교는 그 앞 주 전체, 막대 7칸 모두 과거, 큰 한 줄은 `지난 주에 일 N개를 끝냈어요`),
+//   결과에 week·weekName이 더 붙는다. 'month'·'90'은 늘 오늘 기준. 없으면 예전과 같다.
 // → { range, today, from, to, periodLabel, empty,
 //     headline: 조각[], in: { total, slack, direct }, done: { total, slack(그중 슬랙) }, record: { total, parts: [{ label, count }] },
 //     recordedDays, average: '1.5'|null, compare: null|{ from, to, in, done, change, tone: 'more'|'same'|'less', text },
 //     bars: [{ label, name, from, to, in, done, future, today, partial }], barNote: 글자|null, insights: [{ kind, parts }] }
 // 빈 상태(90일 안에 기록이 하나도 없음)면 range·today·from·to·periodLabel·empty만.
-function usageWorkStats(history, today, range) {
+function usageWorkStats(history, today, range, options) {
   const view = USAGE_RANGES.some(([key]) => key === range) ? range : 'week';
   if (!USAGE_DAY_RE.test(String(today || ''))) return { range: view, empty: true, periodLabel: '' };
   const clean = usageCleanHistory(history, today);
   const recordedDays = Object.keys(clean).length;
-  const period = usagePeriod(today, view);
+  const past = view === 'week' ? usagePastWeek(today, options) : null;
+  const period = past
+    ? { from: past.week, to: usageAddDays(past.week, 6), label: `${usageMonthDay(past.week)}(월) – ${usageMonthDay(usageAddDays(past.week, 6))}(일)`,
+      prev: { from: usageAddDays(past.week, -7), to: usageAddDays(past.week, -1), name: '그 전 주' } }
+    : usagePeriod(today, view);
   const result = { range: view, today, from: period.from, to: period.to, periodLabel: period.label, empty: recordedDays === 0 };
+  if (past) { result.week = past.week; result.weekName = past.name; }
   if (result.empty) return result;
   const current = usageTotals(clean, period.from, period.to);
   const n = key => current.keys[key] || 0;
   const title = view === 'week' ? '이번 주' : view === 'month' ? '이번 달' : `최근 ${USAGE_VIEW_DAYS}일`;
-  result.headline = current.done > 0
-    ? [`${view === '90' ? `${title} 동안` : title} 일 `, { b: `${current.done}개` }, '를 끝냈어요']
-    : [`${title}${view === '90' ? '은' : '는'} 아직 끝낸 일이 없어요`];
+  if (past) {
+    result.headline = current.done > 0 ? [`${past.name}에 일 `, { b: `${current.done}개` }, '를 끝냈어요'] : [`${past.name}엔 끝낸 일이 없어요`];
+  } else {
+    result.headline = current.done > 0
+      ? [`${view === '90' ? `${title} 동안` : title} 일 `, { b: `${current.done}개` }, '를 끝냈어요']
+      : [`${title}${view === '90' ? '은' : '는'} 아직 끝낸 일이 없어요`];
+  }
   result.in = { total: current.in, slack: n('slack_in'), direct: n('task_add') };
   result.done = { total: current.done, slack: Math.min(n('slack_done'), n('task_done')) };   // slack = 그중 슬랙에서 온 것
   result.record = { total: current.record, parts: USAGE_RECORD_PARTS.filter(([key]) => n(key) > 0).map(([key, label]) => ({ label, count: n(key) })) };
@@ -337,11 +362,250 @@ function usageWorkStats(history, today, range) {
   }
   result.bars = usageBuckets(clean, today, view, period.from);
   result.barNote = usageBarNote(result.bars, view);
-  result.insights = usageInsights(clean, today, view, period, current, before, recordedDays);
+  result.insights = usageInsights(clean, today, view, period, current, before, recordedDays, past);
   return result;
 }
 
-// ---------- 설정 › 앱: 스위치와 내 일 기록 ----------
+// ---------- 주간요약 주차 목록 — 계산(순수 함수, client.test.js가 직접 시험한다) ----------
+// history를 한 번만 훑어 주(월요일)별로 끝낸 일·기록 있는 날 수를 모아 둔다(같은 history·today면 다시 훑지 않는다).
+let usageWeekMemo = null;
+function usageWeekIndex(history, today) {
+  if (usageWeekMemo && usageWeekMemo.history === history && usageWeekMemo.today === today) return usageWeekMemo;
+  const clean = usageCleanHistory(history, today);
+  const days = Object.keys(clean).sort();
+  const weeks = new Map();
+  for (const day of days) {
+    const monday = usageMonday(day);
+    const week = weeks.get(monday) || { done: 0, days: 0 };
+    week.done += usageSumKeys(clean[day], USAGE_DONE_KEYS);
+    week.days += 1;
+    weeks.set(monday, week);
+  }
+  usageWeekMemo = { history, today, first: days[0] || null, weeks };
+  return usageWeekMemo;
+}
+
+// 그 주(월요일)의 끝낸 일 — 기록이 닿지 않는 주(90일·첫 기록 날보다 앞, 오늘보다 뒤)는 null(0으로 보이지 않게).
+// 첫 기록 날이 그 주 중간이면 그대로 센다(full: false — 최고 기록 비교에서만 뺀다).
+function usageWeekRecord(index, weekKey) {
+  if (!index || !index.first || !USAGE_DAY_RE.test(String(weekKey || '')) || !USAGE_DAY_RE.test(String(index.today || ''))) return null;
+  const monday = usageMonday(weekKey);
+  if (usageAddDays(monday, 6) < index.first || monday > index.today) return null;
+  const week = index.weeks.get(monday);
+  return { done: week ? week.done : 0, days: week ? week.days : 0, full: monday >= index.first };
+}
+
+// 주차 목록 요약 — weekKeys: 목록에 보이는 주(월요일)들, selected: 고른 주, nameOf(weekKey): `이번 주`/`지난 주`/`10월 1주차`,
+// labelOf(weekKey): `9월 3주차`(최고 기록 줄). → 90일 안에 기록이 없으면 { empty: true }, 아니면
+// { empty: false, weeks: { weekKey: { done, days, full } | null }, max, selected: 기록|null, line: 조각[], best: 조각[]|null }.
+function usageWeeksSummary(history, today, weekKeys, selected, nameOf, labelOf) {
+  const index = usageWeekIndex(history, today);
+  if (!index.first) return { empty: true };
+  const name = typeof nameOf === 'function' ? nameOf : (key => `${usageMonthDay(key)} 주`);
+  const label = typeof labelOf === 'function' ? labelOf : name;
+  const keys = Array.isArray(weekKeys) ? weekKeys : [];
+  const weeks = {};
+  for (const key of keys) weeks[key] = usageWeekRecord(index, key);
+  const max = Math.max(0, ...keys.map(key => (weeks[key] ? weeks[key].done : 0)));
+  const pick = Object.prototype.hasOwnProperty.call(weeks, selected) ? weeks[selected] : usageWeekRecord(index, selected);
+  let line;
+  if (!pick) line = ['이 주는 기록이 없어요'];
+  else {
+    const word = name(selected);
+    const now = word === '이번 주';
+    if (pick.done > 0) {
+      line = [now ? '이번 주 일 ' : `${word}에 일 `, { b: `${pick.done}개` }, '를 끝냈어요'];
+      if (pick.days > 0) line.push(` · ${usageKeepTogether([['하루 평균', `${usageOneDecimal(pick.done / pick.days)}개`]])}`);   // `하루 평균 3.7개`는 한 덩어리로 줄바꿈
+    } else line = [now ? '이번 주는 아직 끝낸 일이 없어요' : `${word}엔 끝낸 일이 없어요`];
+  }
+  // 최고 기록 — 목록 안 기록 있는 온전한 주가 3개 이상이고 최고가 하나일 때만.
+  let best = null;
+  const full = keys.filter(key => weeks[key] && weeks[key].full);
+  if (full.length >= 3) {
+    const top = Math.max(...full.map(key => weeks[key].done));
+    const tops = full.filter(key => weeks[key].done === top);
+    if (top > 0 && tops.length === 1) best = name(tops[0]) === '이번 주' ? ['이번 주가 최고 기록이에요'] : ['최고 기록: ', `${label(tops[0])} `, { b: `${top}개` }];
+  }
+  return { empty: false, weeks, max, selected: pick, line, best };
+}
+
+// ---------- 주간요약 주차 목록 — 그리기(report-ui.js의 reportWeekRowEnd·reportWeeksFoot이 넘긴다) ----------
+let usageWeekAsked = false;
+let usageWeeksMemo = null;
+
+// 아직 사용 기록을 못 불렀으면 한 번만 부르고, 오면 주간요약 탭이 보이는 중일 때만 목록을 다시 그린다.
+function usageWeekEnsure() {
+  if (usageInfo || usageWeekAsked) return;
+  usageWeekAsked = true;
+  usageLoad().then(() => { if (usageInfo) usageWeekRefresh(); });
+}
+
+function usageWeekRefresh() {
+  if (typeof renderWeeklyReports !== 'function' || typeof weeklyReportsCache === 'undefined') return;
+  if (typeof activeTabKey === 'undefined' || activeTabKey !== 'weekly') {
+    // 다른 탭에 있으면 다음에 주간요약을 열 때 다시 그리게 표시만 해 둔다.
+    if (typeof tabStale === 'object' && tabStale) tabStale.weekly = true;
+    return;
+  }
+  // 주차 목록 안의 버튼에 초점이 있었으면 다시 그린 뒤 같은 차례의 버튼으로 돌려놓는다.
+  const nav = document.getElementById('weeklyReportNav');
+  const kids = nav && nav.children ? [...nav.children] : [];
+  const at = kids.findIndex(kid => kid === document.activeElement || (kid && typeof kid.contains === 'function' && kid.contains(document.activeElement)));
+  renderWeeklyReports(weeklyReportsCache);
+  if (at >= 0 && nav.children[at] && typeof nav.children[at].focus === 'function') nav.children[at].focus();
+}
+
+// 지금 목록(weeklyReportsCache)·고른 주(selectedWeekKey)·기록(usageInfo) 기준 요약 — 한 번 그릴 때 줄마다 다시 계산하지 않는다.
+function usageWeeksNow(items) {
+  if (!usageInfo) { usageWeekEnsure(); return null; }
+  const list = Array.isArray(items) ? items : (typeof weeklyReportsCache !== 'undefined' && Array.isArray(weeklyReportsCache) ? weeklyReportsCache : []);
+  const selected = typeof selectedWeekKey !== 'undefined' ? selectedWeekKey : null;
+  const keys = list.map(item => item && item.weekKey).filter(Boolean);
+  const sign = `${keys.join(',')}|${selected}`;
+  if (usageWeeksMemo && usageWeeksMemo.info === usageInfo && usageWeeksMemo.sign === sign) return usageWeeksMemo.summary;
+  const nameOf = typeof reportWeekName === 'function' ? reportWeekName : null;
+  const labelOf = typeof formatWeekLabel === 'function' ? (key => formatWeekLabel(key).week) : null;
+  const summary = usageWeeksSummary(usageInfo.history, usageInfo.today, keys, selected, nameOf, labelOf);
+  usageWeeksMemo = { info: usageInfo, sign, summary };
+  return summary;
+}
+
+// 주차 한 줄의 오른쪽 끝 — 48px 막대(aria-hidden) + 숫자. 채움 = 그 주 끝낸 일 ÷ 목록 안 최대. 기록이 없는 주는 null.
+// 버튼의 aria-label 끝에 붙일 말은 dataset.label(`끝낸 일 N개`) — app.js가 덧붙인다.
+function usageWeekRowEnd(item) {
+  const summary = usageWeeksNow();
+  if (!summary || summary.empty || !item) return null;
+  const record = summary.weeks[item.weekKey];
+  if (!record) return null;
+  const end = usageEl('span', 'd-uwend');
+  const track = usageEl('span', 'd-uwtrack');
+  track.setAttribute('aria-hidden', 'true');
+  const fill = usageEl('span', 'd-uwfill');
+  fill.style.width = summary.max > 0 && record.done > 0 ? `${Math.max(4, Math.round(record.done / summary.max * 100))}%` : '0';
+  track.appendChild(fill);
+  end.append(track, usageEl('span', 'd-uwnum', String(record.done)));
+  end.dataset.label = `끝낸 일 ${record.done}개`;
+  return end;
+}
+
+// 주차 목록 맨 아래 — 고른 주 한 문장 + (조건이 맞으면) 최고 기록 줄 + `내 일 기록 자세히`. 90일 안에 기록이 없으면 null.
+function usageWeeksFoot(items) {
+  const summary = usageWeeksNow(items);
+  if (!summary || summary.empty) return null;
+  const foot = usageEl('div', 'd-uwfoot');
+  foot.appendChild(usageParts(usageEl('p', 'd-uwfline'), summary.line));
+  if (summary.best) foot.appendChild(usageParts(usageEl('p', 'd-uwfline'), summary.best));
+  const link = usageEl('button', 'd-link d-uwmore', '내 일 기록 자세히');
+  link.type = 'button';
+  link.setAttribute('aria-haspopup', 'dialog');
+  const selected = typeof selectedWeekKey !== 'undefined' ? selectedWeekKey : null;
+  link.addEventListener('click', () => usageWorkOpen(link, summary.selected ? selected : null));
+  foot.appendChild(link);
+  return foot;
+}
+
+// ---------- 내 일 기록 자세히 창 — 설정과 같은 .d-modal 판(새 틀 없음) ----------
+// 열면 초점은 창 자체(테 없음), Esc·바깥 누름·✕로 닫히고, 닫으면 누른 링크로 초점이 돌아간다.
+let usageWorkDlg = null;   // { dialog, body, opener, week, name, esc }
+
+function usageCloseIcon() {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'd-i');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('aria-hidden', 'true');
+  const shape = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  shape.setAttribute('d', 'M4 4l8 8M12 4l-8 8');
+  svg.appendChild(shape);
+  return svg;
+}
+
+function usageWorkDialog() {
+  if (usageWorkDlg) return usageWorkDlg;
+  const dialog = usageEl('dialog', 'd-modal d-uwdlg');
+  dialog.setAttribute('aria-labelledby', 'usageWorkTitle');
+  dialog.tabIndex = -1;
+  const head = usageEl('div', 'd-mhd');
+  const title = usageEl('h2', '', '내 일 기록');
+  title.id = 'usageWorkTitle';
+  const close = usageEl('button', 'd-iconbtn');
+  close.type = 'button';
+  close.setAttribute('aria-label', '닫기');
+  close.appendChild(usageCloseIcon());
+  head.append(title, usageEl('span', 'sp'), close);
+  const body = usageEl('div', 'd-mbody');
+  dialog.append(head, body);
+  const dlg = { dialog, body, opener: null, week: null, name: null, esc: null };
+  close.addEventListener('click', () => usageWorkClose());
+  // 브라우저가 스스로 닫으려 할 때(Esc)도 같은 길로 — 초점 복귀가 어긋나지 않게.
+  dialog.addEventListener('cancel', (event) => { event.preventDefault(); usageWorkClose(); });
+  // 바깥(배경) 누름 — 창 판 밖을 누르면 대상이 dialog 자신이고 좌표가 판 밖이다.
+  dialog.addEventListener('click', (event) => {
+    if (event.target !== dialog) return;
+    const box = typeof dialog.getBoundingClientRect === 'function' ? dialog.getBoundingClientRect() : null;
+    if (box && event.clientX >= box.left && event.clientX <= box.right && event.clientY >= box.top && event.clientY <= box.bottom) return;
+    usageWorkClose();
+  });
+  if (document.body) document.body.appendChild(dialog);
+  usageWorkDlg = dlg;
+  return dlg;
+}
+
+function usageWorkPaint() {
+  const dlg = usageWorkDlg;
+  if (!dlg) return;
+  if (!usageInfo) {
+    dlg.body.replaceChildren(usageEl('div', usageLoading ? 'd-empty' : 'd-ismall', usageLoading ? '불러오는 중이에요…' : '사용 기록을 읽지 못했어요.'));
+    return;
+  }
+  dlg.body.replaceChildren(usageWorkBody(usageInfo, dlg.body, { week: dlg.week, name: dlg.name }));
+}
+
+// opener: 닫으면 초점이 돌아갈 버튼. week: 주차 목록에서 고른 주(월요일) — 이번 주보다 앞이면 그 주 기준으로 연다.
+function usageWorkOpen(opener, week) {
+  const dlg = usageWorkDialog();
+  dlg.opener = opener || null;
+  dlg.week = week || null;
+  dlg.name = week && typeof reportWeekName === 'function' ? reportWeekName(week) : null;
+  if (!usageInfo) usageLoad().then(() => { if (usageWorkDlg && usageWorkDlg.dialog.open) usageWorkPaint(); });
+  usageWorkPaint();
+  if (!dlg.dialog.open) {
+    if (typeof uiMenuClose === 'function') uiMenuClose();
+    if (typeof dlg.dialog.showModal === 'function') dlg.dialog.showModal();
+    else dlg.dialog.open = true;
+    if (typeof escPush === 'function') dlg.esc = escPush(usageWorkClose);
+  }
+  dlg.body.scrollTop = 0;
+  if (typeof dlg.dialog.focus === 'function') dlg.dialog.focus({ preventScroll: true });
+}
+
+function usageWorkClose() {
+  const dlg = usageWorkDlg;
+  if (!dlg) return;
+  if (dlg.esc && typeof escDrop === 'function') escDrop(dlg.esc);
+  dlg.esc = null;
+  if (!dlg.dialog.open) return;
+  if (typeof dlg.dialog.close === 'function') dlg.dialog.close();
+  else dlg.dialog.open = false;
+  let back = dlg.opener;
+  dlg.opener = null;
+  // 열려 있는 동안 주차 목록이 다시 그려졌으면(새 데이터) 같은 자리의 새 링크로, 그것도 없으면 주간요약 탭 버튼으로.
+  if (!back || back.isConnected === false) {
+    back = (typeof document.querySelector === 'function' && document.querySelector('#weeklyReportNav .d-uwmore')) || document.getElementById('tabBtnWeekly');
+  }
+  if (back && typeof back.focus === 'function') back.focus();
+}
+
+// 설정 › 앱의 `보기` — 설정을 닫고 주간요약 탭으로 옮긴 뒤 자세히 창을 연다(닫으면 초점은 목록 맨 아래 링크로).
+function usageWorkFromSettings() {
+  if (typeof settingsClose === 'function') settingsClose();
+  if (typeof setActiveTab === 'function') setActiveTab('weekly');
+  const selected = typeof selectedWeekKey !== 'undefined' ? selectedWeekKey : null;
+  const summary = usageWeeksNow();
+  const link = typeof document.querySelector === 'function' ? document.querySelector('#weeklyReportNav .d-uwmore') : null;
+  usageWorkOpen(link || document.getElementById('tabBtnWeekly'), summary && summary.selected ? selected : null);
+}
+
+// ---------- 설정 › 앱: 스위치와 `주간요약 탭에서 볼 수 있어요` 한 줄 ----------
 let usageSettingsNode = null;
 
 function usageSettingsRow() {
@@ -408,16 +672,14 @@ function usageSettingsPaint() {
     label.classList.toggle('is-on', box.checked);
   });
 
-  // 내 일 기록 — 기본 접힘. 일 통계 + 맨 아래 `기능별 전체 보기`(최근 30일 합계 표).
-  const work = document.createElement('details');
-  work.className = 'd-dsec d-dadd d-usagework';
-  const summary = document.createElement('summary');
-  summary.className = 'lbl';
-  summary.append(usageChevron(), document.createTextNode('내 일 기록'));
-  const wasOpen = cell.querySelector('.d-usagework')?.open;
-  if (wasOpen) work.open = true;
-  work.append(summary, usageWorkBody(info, cell));
-  cell.replaceChildren(label, work);
+  // 내 일 기록은 주간요약 탭에 있다 — 여기에는 가는 길 한 줄만.
+  const go = usageEl('button', 'd-ablink', '보기');
+  go.type = 'button';
+  go.setAttribute('aria-label', '내 일 기록 보기 — 주간요약 탭으로 가요');
+  go.addEventListener('click', () => usageWorkFromSettings());
+  const where = usageEl('p', 'd-ismall d-uwgo');
+  where.append(document.createTextNode('내 일 기록은 주간요약 탭에서 볼 수 있어요 · '), go);
+  cell.replaceChildren(label, where);
 }
 
 // ---------- 내 일 기록 — 그리기(계산은 usageWorkStats가 한다) ----------
@@ -481,9 +743,11 @@ function usageTile(name, total, sub, strong) {
   return tile;
 }
 
-function usageWorkBody(info, cell) {
+// options: { week, name } — 주차 목록에서 고른 지난 주(usageWorkStats의 options 그대로). 첫 칸 글자가 그 주 이름이 된다.
+function usageWorkBody(info, cell, options) {
   const range = usageRangeNow();
-  const stats = usageWorkStats(info.history, info.today, range);
+  const stats = usageWorkStats(info.history, info.today, range, options);
+  const past = usagePastWeek(info.today, options);
   const body = usageEl('div', 'd-uw');
 
   // 머리 — 기간 전환(기존 세그먼트 부품, 보기 전환이라 aria-pressed) + 기간 글자.
@@ -492,7 +756,7 @@ function usageWorkBody(info, cell) {
   seg.setAttribute('role', 'group');
   seg.setAttribute('aria-label', '기간');
   for (const [key, word] of USAGE_RANGES) {
-    const button = usageEl('button', '', word);
+    const button = usageEl('button', '', key === 'week' && past ? past.name : word);
     button.type = 'button';
     button.dataset.range = key;
     button.setAttribute('aria-pressed', String(key === stats.range));
@@ -500,10 +764,11 @@ function usageWorkBody(info, cell) {
       if (usageWorkRange === key) return;
       usageWorkRange = key;
       try { localStorage.setItem(USAGE_RANGE_STORE, key); } catch { /* 기억 못 해도 괜찮다 */ }
-      usageSettingsPaint();
+      usageWorkPaint();
       // 다시 그린 같은 버튼으로 초점을 옮긴다(키보드로 누른 사람이 자리를 잃지 않게).
-      const again = usageSettingsNode && typeof usageSettingsNode.querySelectorAll === 'function'
-        ? [...usageSettingsNode.querySelectorAll('.d-uwhead button')].find(item => item.dataset.range === key) : null;
+      const host = usageWorkDlg && usageWorkDlg.body;
+      const again = host && typeof host.querySelectorAll === 'function'
+        ? [...host.querySelectorAll('.d-uwhead button')].find(item => item.dataset.range === key) : null;
       if (again) again.focus();
     });
     seg.appendChild(button);
