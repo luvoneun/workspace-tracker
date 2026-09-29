@@ -196,7 +196,7 @@ async function slackCreateChannel(token, name, request = (...args) => fetch(...a
   if (!body || body.ok !== true) {
     const kind = String((body && body.error) || '');
     if (kind === 'missing_scope') throw bad(MESSAGE.slackScope, 'missing_scope');
-    if (kind === 'name_taken') return slackUseExisting(secret, wanted, request, options);
+    if (kind === 'name_taken') return slackUseExisting(secret, wanted, request, { ...options, me: String(auth.user_id || '') });
     if (kind === 'invalid_auth' || kind === 'not_authed') throw bad(MESSAGE.slackAuth, 'invalid_auth');
     throw bad(MESSAGE.slackCreate);
   }
@@ -207,34 +207,38 @@ async function slackCreateChannel(token, name, request = (...args) => fetch(...a
 }
 
 // 이름이 이미 있을 때(`name_taken`) — 예전 시도로 만들어 둔 **내 채널**이면 새로 만들지 않고 그 채널을 쓴다.
-// `conversations.list`로 읽기만 한다(보관·삭제·나가기·보관 풀기는 부르지 않는다 — DECISIONS 2026-09-24).
-// 내가 볼 수 없는 남의 비공개 채널은 목록에 없으므로 멤버가 아닌 공개 채널과 함께 `name_taken`이다.
+// `users.conversations`로 읽기만 한다(보관·삭제·나가기·보관 풀기는 부르지 않는다 — DECISIONS 2026-09-24).
+// 목록에 없음(남의 채널)·공개 채널·다른 사람이 만든 채널은 모두 `name_taken`이다.
 // 목록을 끝까지 못 읽었으면(쪽·시간 상한, 슬랙 오류) 이름 중복이라고 하지 않는다 — 다시 누르게 한다.
 const SLACK_LIST_PAGES = 10;
-async function slackUseExisting(secret, wanted, request, { key = '', channels = {} } = {}) {
+async function slackUseExisting(secret, wanted, request, { key = '', channels = {}, me = '' } = {}) {
   const found = await slackFindChannel(secret, wanted, request);
   if (found && found.is_archived === true) throw bad(MESSAGE.slackArchived, 'archived');
-  if (!found || found.is_member !== true) throw bad(MESSAGE.slackTaken, 'name_taken');
+  // 내가 들어가 있는 채널만 목록에 온다(users.conversations). 그래도 공개 채널이거나 다른 사람이 만든 채널이면
+  // "나만 있는 채널"이 아니므로 쓰지 않는다 — 팀이 같이 쓰는 #todo 같은 채널의 메시지가 할 일로 쏟아지지 않게.
+  if (!found || found.is_private !== true || (found.creator && me && found.creator !== me)) throw bad(MESSAGE.slackTaken, 'name_taken');
   const id = String(found.id || '');
   if (!id) throw bad(MESSAGE.slackListIncomplete, 'slack_unreachable');
   // 다른 칸(뺀 칸 포함)에 이미 연결된 채널이면 막는다 — 같은 칸이면 그대로 쓴다.
-  const other = SLACK_CHANNEL_KEYS.find(one => one !== key && realChannelId(clone(clone(channels)[one]).id) === id);
+  // 칸 값이 네 칸 중 하나가 아니면(예전 화면이 key 없이 부름) 겹침 확인을 건너뛴다 — 저장할 때 한 번 더 막는다.
+  const other = SLACK_CHANNEL_KEYS.includes(key) ? SLACK_CHANNEL_KEYS.find(one => one !== key && realChannelId(clone(clone(channels)[one]).id) === id) : null;
   if (other) throw bad(`이미 ${SLACK_CHANNEL_LABELS[other]}${MESSAGE.slackInUse}`, 'channel_in_use');
   return { id, name: String(found.name || wanted), existing: true };
 }
 
-// 같은 이름의 채널 하나를 찾는다(대소문자·앞 `#` 무시). 보관된 채널도 본다(`exclude_archived=false`).
+// 내가 들어가 있는 채널 중 같은 이름 하나를 찾는다(대소문자·앞 `#` 무시). 보관된 채널도 본다(`exclude_archived=false`).
 // 최대 10쪽·전체 8초 — 넘기면 "다 찾지 못했어요". 토큰은 헤더로만 나간다.
 async function slackFindChannel(secret, wanted, request) {
   const same = value => String(value || '').replace(/^#/, '').toLowerCase() === wanted.replace(/^#/, '').toLowerCase();
   const signal = AbortSignal.timeout(SLACK_TIMEOUT_MS);
   let cursor = '';
   for (let page = 0; page < SLACK_LIST_PAGES; page += 1) {
+    // 내가 들어가 있는 채널만(users.conversations) — 워크스페이스 전체 목록보다 훨씬 적어 상한·조회 제한에 덜 걸린다.
     const query = new URLSearchParams({ types: 'public_channel,private_channel', exclude_archived: 'false', limit: '200' });
     if (cursor) query.set('cursor', cursor);
     let body;
     try {
-      const response = await request(`https://slack.com/api/conversations.list?${query}`, {
+      const response = await request(`https://slack.com/api/users.conversations?${query}`, {
         headers: { Authorization: `Bearer ${secret}`, Accept: 'application/json' }, signal,
       });
       body = await response.json();
