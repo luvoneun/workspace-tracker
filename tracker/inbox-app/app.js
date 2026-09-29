@@ -765,23 +765,26 @@ function uiTaskRow(item, opts = {}) {
   row.dataset.taskId = item.id;
   row.setAttribute('role', 'group');
 
-  // 여러 개 선택 중에는 완료 체크 왼쪽에 선택 칸이 한 칸 더 생긴다(네모 하나, 모양이 다르다).
-  // 완료 체크는 선택 모드에서도 그대로 눌러 한 건만 끝낼 수 있다.
+  // 여러 개 선택 중에는 완료 체크 자리(첫 칸, 30px)에 선택 칸 하나만 선다 — 누를 네모가 하나뿐이라
+  // 고르려다 완료하는 일이 없다. 한 건을 끝내려면 막대의 `완료로 표시`(또는 모드를 끝내고 체크).
+  // 체크박스가 말하던 우선순위·진행 중은 그동안 오른쪽 상태 글자로 옮겨 간다(아래 meta).
   let selectBox = null;
   if (taskSelectionMode) {
     const cell = document.createElement('span');
     cell.className = 'd-sel';
-    // 완료한 줄은 고를 수 없다 — 칸은 자리만 지킨다.
+    // 완료한 줄은 고를 수 없고 완료 취소도 모드를 끝낸 뒤에 한다 — 칸은 자리만 지킨다.
     if (!done) { selectBox = taskSelectionCheckbox(item, row); cell.appendChild(selectBox); }
     row.appendChild(cell);
+  } else {
+    row.appendChild(uiCheckCell(item, row, done));
   }
-  row.appendChild(uiCheckCell(item, row, done));
 
   const title = document.createElement('span');
   title.className = 'd-title';
   title.title = item.description;
   title.textContent = item.description;
-  title.tabIndex = 0;
+  // 선택 중에는 키보드가 줄마다 선택 칸 한 곳에서만 멈춘다(Space로 고른다). 끝내면 다시 그려 0으로 돌아온다.
+  title.tabIndex = taskSelectionMode ? -1 : 0;
   title.setAttribute('role', 'button');
   title.setAttribute('aria-label', taskSelectionMode && !done ? `${item.description} 선택` : `${item.description} 상세 보기`);
   const open = () => {
@@ -792,9 +795,19 @@ function uiTaskRow(item, opts = {}) {
   title.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); }
   });
-  // 좁은 폭(시트로 여는 폭)에서는 줄 아무 데나 눌러도 제목을 누른 것과 같다(여러 개 선택 중이면 선택).
-  // 줄에 tabindex는 주지 않는다 — 키보드는 지금처럼 제목에서 Enter.
-  row.addEventListener('click', (event) => { if (uiRowTapOpens(event, '.d-title')) open(); });
+  // 여러 개 선택 중에는 폭과 상관없이 줄 아무 데나 누르면 선택이다(제목은 자기 클릭이 이미 선택 —
+  // 한 누름이 두 번 바뀌지 않게 뺀다). 그 밖의 좁은 폭(시트로 여는 폭)에서는 줄 누름 = 제목 누름(시트 열기).
+  // 줄에 tabindex는 주지 않는다 — 키보드는 제목(선택 중이면 선택 칸)에서.
+  row.addEventListener('click', (event) => {
+    if (taskSelectionMode) {
+      const target = event && event.target;
+      if (!selectBox || taskBatchBusy || !target || typeof target.closest !== 'function') return;
+      if (target.closest('input, a, button, textarea, select, label, .d-title')) return;
+      selectBox.click();
+      return;
+    }
+    if (uiRowTapOpens(event, '.d-title')) open();
+  });
   // NEW는 누르는 버튼이 아니라 표시다 — 화면에 잠깐 머물면 조용히 사라진다(observeNewItem).
   if (item.isNew && !done) { title.prepend(renderNewDot(item)); observeNewItem(row, item); }
 
@@ -829,8 +842,9 @@ function uiTaskRow(item, opts = {}) {
     // 답변을 기다리는 업무는 그 사실도 글자로 적는다(밀림·진행과 같은 상태에 이어 선다).
     const blocker = typeof wfItem === 'function' ? wfItem(wfItem(item.id)?.blockedBy) : null;
     // 우선순위는 왼쪽 체크박스가 말한다 — 이 줄의 오른쪽에는 날짜 성격의 말만 오른쪽 끝에 붙는다.
+    // 여러 개 선택 중에는 체크박스가 없으므로 체크박스가 없는 줄처럼 우선순위·진행 중을 글자로 적는다.
     meta.innerHTML = uiMetaCells(item, {
-      where: mode === 'later' ? 'full' : 'row', inDoingGroup: opts.inDoingGroup, project, noPriority: true,
+      where: mode === 'later' ? 'full' : 'row', inDoingGroup: opts.inDoingGroup, project, noPriority: !taskSelectionMode,
       waiting: blocker ? (blocker.status === 'done' ? 'answered' : 'waiting') : null,
     });
   }
@@ -981,7 +995,7 @@ function uiRailRow(opts) {
 }
 
 // ---------- 여러 개 선택 (일괄 정리) ----------
-// 머리줄의 조용한 `여러 개 선택`을 누르면 줄마다 선택 칸이 한 칸 더 생기고(완료 체크는 그대로),
+// 머리줄 ⋯의 `여러 개 선택`을 누르면 줄마다 완료 체크 자리에 선택 칸이 서고(완료 체크는 모드 동안 숨는다),
 // 화면 아래에 고정 막대가 뜬다. 오늘 목록과 나중에 할 일 서랍이 함께 대상이다.
 // 저장은 전부 기존 API로 간다: 날짜·프로젝트·완료는 `/api/workflow/task-batch`,
 // 삭제만 한 건씩 `/api/track/remove`를 보내고 알림 하나로 되돌린다(DECISIONS: 원문 보존 그대로).
@@ -1004,13 +1018,17 @@ function taskSelectAllState(items, selected) {
 const taskSelectPool = () => [...taskListsCache.todayTasks, ...taskListsCache.laterTasks];
 
 // 줄 왼쪽의 선택 칸(네모). 완료 체크와 달리 줄을 사라지게 하지 않는다.
+// 이름표에 체크박스가 말하던 우선순위·진행 중을 함께 읽힌다(`… — 중요 · 진행 중 · 선택`).
 function taskSelectionCheckbox(item, row) {
   const input = document.createElement('input');
   input.type = 'checkbox';
   input.className = 'd-selcb';
   input.checked = taskSelection.has(item.id);
   input.disabled = taskBatchBusy;
-  input.setAttribute('aria-label', `${item.description} — 일괄 정리 선택`);
+  const done = item.status === 'done';
+  const priority = uiPriorityMark(item, done);
+  const states = [priority ? priority.text : '', item.doing && !done ? '진행 중' : '', '선택'].filter(Boolean);
+  input.setAttribute('aria-label', `${item.description} — ${states.join(' · ')}`);
   row.classList.toggle('batch-selected', input.checked);
   input.addEventListener('change', () => {
     if (input.checked) taskSelection.add(item.id); else taskSelection.delete(item.id);
@@ -1073,9 +1091,10 @@ function taskSelectionRefresh() {
   const inner = document.createElement('div');
   inner.className = 'bar';
 
+  // 막 켰을 때(0개)는 개수 대신 무엇을 하면 되는지 조용히 말한다.
   const count = document.createElement('span');
-  count.className = 'ct num';
-  count.textContent = `${state.count}개 선택`;
+  count.className = state.count ? 'ct num' : 'hint';
+  count.textContent = state.count ? `${state.count}개 선택` : '줄을 눌러 골라요';
   inner.appendChild(count);
   inner.appendChild(taskSelectBarButton(state.all ? '전체 선택 해제' : '전체 선택', () => {
     if (state.all) taskSelection.clear();
@@ -1118,15 +1137,16 @@ function taskSelectionRefresh() {
         onSetGroup: group => group === null ? Promise.resolve() : taskBatchApply({ project: `group:${group}` }),
       }),
     }]]);
-  });
+  }, 'd-btn is-group');
+  // 옮기기 · 프로젝트 · 완료 · 삭제 묶음 사이만 조금 더 띄운다(is-group) — 삭제가 완료 바로 옆에 붙어 잘못 눌리지 않게.
   project.setAttribute('aria-haspopup', 'true');
   project.setAttribute('aria-expanded', 'false');
   actions.push(project);
   inner.appendChild(project);
 
   // 완료로 표시는 이 막대에서 가장 많이 누르는 동작이라 2차(연파랑)로 한 단계 올린다.
-  apply('완료로 표시', { status: 'done' }, 'd-btn acc');
-  const remove = taskSelectBarButton('삭제', () => taskBatchRemove(), 'd-btn dng');
+  apply('완료로 표시', { status: 'done' }, 'd-btn acc is-group');
+  const remove = taskSelectBarButton('삭제', () => taskBatchRemove(), 'd-btn dng is-group');
   actions.push(remove);
   inner.appendChild(remove);
 
@@ -5655,6 +5675,8 @@ function setActiveTab(tab) {
   activeTabKey = tab;
   // 주간요약을 떠나면 문장 모으기 막대도 함께 내린다(떠 있는 막대가 다른 탭에 남지 않게).
   if (tab !== 'weekly' && typeof reportNestEnd === 'function') reportNestEnd();
+  // 여러 개 선택은 오늘 탭(목록·서랍)의 것이다 — 다른 탭으로 가면 끝낸다(보이지 않는 업무를 막대로 바꾸지 않게).
+  if (tab !== 'today' && taskSelectionMode) taskSelectEnd();
   document.getElementById('skipLink').hidden = tab !== 'today';
   renderActiveTabLists();
   // 숨은 탭에서 그려진 두 줄 말줄임 제목은 잴 수 없었다(크기 0) — 보이게 된 뒤 다시 잰다.
