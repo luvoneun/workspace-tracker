@@ -8644,7 +8644,7 @@ test('WP-E D. 앱 탭: 버전 · 데이터 백업 · 앱 위치 · 점검(점검
   same(kids.map(one => one.dataset.row), ['version', 'backup', 'place', 'check']);
   // 버전 줄 맨 끝의 `지난 소식 전체`는 접이식 자체의 표지(summary) 글자다 — hidden이어도 textContent에는 남는다(실제 DOM과 같다).
   assert.match(fx.text(0), /^버전워크스페이스v1\.1\.0 · 배포된 버전만 받기새 버전 v1\.1\.1이 있어요업데이트 받기지난 소식 전체데이터는 먼저 백업하고 받아요\. 1분쯤 걸려요\.지난 소식 전체$/);
-  assert.equal(fx.text(1), '데이터 백업매일 19:30● 이 맥에 매일 백업 · 어제 19:30 · 7일치~/workspace-data-backup/daily복사Finder에서 ⇧⌘G(폴더로 이동)에 붙여 넣으면 바로 가요');
+  assert.equal(fx.text(1), '데이터 백업매일 19:30 이 맥에 매일 백업 · 어제 19:30 · 7일치~/workspace-data-backup/daily복사Finder에서 ⇧⌘G(폴더로 이동)에 붙여 넣으면 바로 가요');
   assert.equal(fx.text(2), '앱 위치파일을 찾을 때업데이트 파일~/workspace/업데이트.command복사Finder에서 ⇧⌘G(폴더로 이동)에 붙여 넣으면 바로 가요', 'Dock 앱 경로 줄은 없다(WP-O)');
   assert.equal(fx.text(3), '점검문제가 있을 때점검하기문제 보고 복사설치·연동·자동화를 한 번에 확인하고, 고치는 법을 알려 줘요.');
   const copies = fx.app.run("window.findByClass(document.getElementById('settingsAppView').children[1], 'd-btn')");
@@ -8698,14 +8698,18 @@ test('WP-E D. 데이터 백업 줄: 로컬만 · GitHub 포함 · 실패(빨강 
     return { text: fx.text(1), fx };
   };
   const both = await row({ ok: true, path: '~/workspace-data-backup/daily', local: { state: 'ok', at: backupAt(0), days: 3 }, github: { on: true, state: 'ok', at: backupAt(0) } });
-  assert.match(both.text, /^데이터 백업매일 19:30● 이 맥에 매일 백업 · 오늘 19:30 · 3일치GitHub 비공개 저장소에도 올려요 · 오늘 19:30~/);
+  assert.match(both.text, /^데이터 백업매일 19:30 이 맥에 매일 백업 · 오늘 19:30 · 3일치GitHub 비공개 저장소에도 올려요 · 오늘 19:30~/);
+  assert.equal(both.fx.find('d-bkline')[0].children[0].className, 'd-istat k-ok', '잘 되면 연동 카드와 같은 초록 점 부품');
   const gitFail = await row({ ok: true, path: '~/x/daily', local: { state: 'ok', at: backupAt(1), days: 7 }, github: { on: true, state: 'fail', at: backupAt(1), reason: '원격 업로드 실패 (이 맥의 백업 커밋은 남아 있음)' } });
-  assert.match(gitFail.text, /● GitHub에 올리지 못했어요 · 어제 19:30원격 업로드 실패 \(이 맥의 백업 커밋은 남아 있음\)/);
+  assert.match(gitFail.text, / GitHub에 올리지 못했어요 · 어제 19:30원격 업로드 실패 \(이 맥의 백업 커밋은 남아 있음\)/);
   const failed = await row({ ok: true, path: '~/x/daily', local: { state: 'fail', at: backupAt(0), reason: '파일을 복사하지 못함 (tasks.md)', days: 6 }, github: { on: false } });
-  assert.match(failed.text, /^데이터 백업매일 19:30● 이 맥 백업이 멈췄어요 · 오늘 19:30파일을 복사하지 못함 \(tasks\.md\)~/);
+  assert.match(failed.text, /^데이터 백업매일 19:30 이 맥 백업이 멈췄어요 · 오늘 19:30파일을 복사하지 못함 \(tasks\.md\)~/);
   const line = failed.fx.find('d-bkline')[0];
   assert.equal(line.className, 'd-bkline k-neg');
-  assert.equal(line.children[0].className, 'bad');
+  // 점은 연동 카드와 같은 부품(`.d-istat`의 점) — 10px 원 + 옅은 링, aria-hidden.
+  assert.equal(line.children[0].className, 'd-istat k-stop');
+  assert.equal(line.children[0].children[0].className, 'dot');
+  assert.equal(line.children[0].children[0].getAttribute('aria-hidden'), 'true');
   assert.equal(failed.fx.find('k-neg').filter(one => one.className === 'd-ismall k-neg')[0].textContent, '파일을 복사하지 못함 (tasks.md)');
   // 아직 한 번도 안 돌았으면 — 19:30 전이면 오늘, 지났으면 내일
   const fx = appClient({});
@@ -8770,6 +8774,28 @@ test('QA2 늦음 한 기준: syncLag가 톱니바퀴 주황 점과 연동 탭 �
   const stale = gear({ calendar: { stale: true, lastSync: day(1) }, slackSync: { stale: false, lastSync: today }, jiraSync: { stale: false, lastSync: today } });
   assert.equal(stale.title, '설정 — 캘린더 어제 기준. 목록이 최신이 아닐 수 있어요. 누르면 연동 탭에서 봐요.');
   assert.doesNotMatch(stale.title, /슬랙 캡처|자세한 상태/);
+});
+
+test('paintGearBadge: 톱니바퀴 title·aria-label은 빨강(멈춘 연동) > 주황(낡음) > 파랑(새 버전) 한 우선순위로 한 곳에서 정하고, 다 풀리면 `설정`으로 돌아간다', () => {
+  const app = pureClient();
+  const gear = () => JSON.parse(app.run(`(() => { const b = document.getElementById('settingsBtn'); return JSON.stringify({ label: b.getAttribute('aria-label'), title: b.title }); })()`));
+  // 아무 것도 없으면 평소 `설정`
+  app.run(`settingsAlertKeys = []; syncStale = []; syncStaleSummary = ''; settingsAbout = null; paintGearBadge();`);
+  same(gear(), { label: '설정', title: '설정' });
+  // 파랑(새 버전)만
+  app.run(`settingsAbout = { update: { available: true, label: 'v1.1.0' } }; paintGearBadge();`);
+  same(gear(), { label: '설정 — 새 버전이 있어요', title: '설정 — 새 버전이 있어요' });
+  // 주황(낡음)이 겹치면 파랑을 이긴다
+  app.run(`syncStale = [{ key: 'calendar', text: '캘린더 어제 기준' }]; syncStaleSummary = '캘린더 어제 기준'; paintGearBadge();`);
+  const orange = gear();
+  assert.equal(orange.label, '설정 — 캘린더 어제 기준');
+  assert.equal(orange.title, '설정 — 캘린더 어제 기준. 목록이 최신이 아닐 수 있어요. 누르면 연동 탭에서 봐요.');
+  // 빨강(지금 멈춘 연동)이 겹치면 주황·파랑을 다 이긴다
+  app.run(`settingsAlertKeys = ['slack', 'jira']; paintGearBadge();`);
+  same(gear(), { label: '설정 — 연동 2개가 멈췄어요', title: '설정 — 연동 2개가 멈췄어요. 누르면 연동 탭에서 봐요.' });
+  // 다 풀리면 다시 평소 `설정`
+  app.run(`settingsAlertKeys = []; syncStale = []; syncStaleSummary = ''; settingsAbout = null; paintGearBadge();`);
+  same(gear(), { label: '설정', title: '설정' });
 });
 
 test('QA2 연동 탭: 늦은 카드는 주황 `늦어요` + `다시 시도` + 요약 `N개가 늦어요`, 주황 점을 누르면 그 카드가 주황 판으로 잠깐 밝아진다', async () => {

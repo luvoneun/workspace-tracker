@@ -131,6 +131,7 @@ async function fetchAutomationStatus() {
   // 안 열어봐도 톱니바퀴만 보고 "확인할 게 있다"를 알 수 있게 점을 켠다
   // 지금 실제로 실패 중인 게 있을 때만 — 예전에 있었다가 해결된 건 알림이 아니다
   document.getElementById('settingsBtn')?.classList.toggle('has-alert', settingsAlertKeys.length > 0);
+  if (typeof paintGearBadge === 'function') paintGearBadge();
   return automationStatusCache;
 }
 
@@ -169,6 +170,7 @@ async function settingsAboutLoad({ cached = false } = {}) {
   }
   // 톱니바퀴의 점은 실패(빨강) > 낡음(주황) > 새 버전(파랑) 차례다 — 규칙은 ui.css가 정한다.
   document.getElementById('settingsBtn')?.classList.toggle('has-update', settingsHasUpdate());
+  if (typeof paintGearBadge === 'function') paintGearBadge();
   return settingsAbout;
 }
 
@@ -328,15 +330,17 @@ function settingsBackupWhen(stamp, now = new Date()) {
   return `${Number(hit[2])}월 ${Number(hit[3])}일 ${time}`;
 }
 
-// 한 줄 — 앞에 색 점(● 초록 = 잘 됨, 빨강 = 멈춤)을 붙인다.
+// 한 줄 — 앞에 상태 점(연동 카드의 `.d-istat` 점과 같은 부품: 10px 원 + 옅은 링, aria-hidden — 초록 = 잘 됨, 빨강 = 멈춤)을 붙인다.
 function settingsBackupLine(text, state) {
   const line = settingsEl('d-bkline' + (state === 'bad' ? ' k-neg' : ''));
   if (state) {
+    const stat = document.createElement('span');
+    stat.className = `d-istat k-${state === 'bad' ? 'stop' : 'ok'}`;
     const dot = document.createElement('span');
-    dot.className = state === 'bad' ? 'bad' : 'ok';
+    dot.className = 'dot';
     dot.setAttribute('aria-hidden', 'true');
-    dot.textContent = '●';
-    line.append(dot, document.createTextNode(` ${text}`));
+    stat.appendChild(dot);
+    line.append(stat, document.createTextNode(` ${text}`));
   } else {
     line.textContent = text;
   }
@@ -665,6 +669,7 @@ async function settingsUpdateCheckNow() {
   try { info = await (await request('/api/about?check=1')).json(); } catch { info = null; }
   if (info) settingsAbout = info;
   document.getElementById('settingsBtn')?.classList.toggle('has-update', settingsHasUpdate());
+  if (typeof paintGearBadge === 'function') paintGearBadge();
   const offer = info ? settingsUpdateOffer(info) : null;
   const reached = !!info && info.checkReached !== false;
   settingsUpdatePaint(offer ? { kind: 'offer', offer } : { kind: 'none', checked: reached });

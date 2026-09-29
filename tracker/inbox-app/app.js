@@ -1466,17 +1466,41 @@ function syncLagText(lastAt, days, now = Date.now()) {
 }
 
 // 지금 늦은 연동들(톱니바퀴의 주황 점과 툴팁). 누르면 설정 › 연동이 열리고 그 카드가 잠깐 밝아진다.
+// 짧은 말(syncStaleSummary)은 aria-label에, 긴 문장은 paintGearBadge가 title에 쓴다.
 let syncStale = [];
+let syncStaleSummary = '';
 function paintSyncGear(late) {
   syncStale = late.map(source => ({ key: source.key, text: `${source.name} ${source.age}` }));
+  const ages = late.map(source => source.age);
+  syncStaleSummary = !late.length ? ''
+    : late.length === 1 ? syncStale[0].text
+    : `자동 갱신 ${late.length}개 ${ages.every(age => age === ages[0]) ? ages[0] : '확인 필요'}`;
   const gear = document.getElementById('settingsBtn');
   if (!gear) return;
   gear.classList.toggle('has-stale', syncStale.length > 0);
-  const ages = late.map(source => source.age);
-  const summary = !late.length ? ''
-    : late.length === 1 ? syncStale[0].text
-    : `자동 갱신 ${late.length}개 ${ages.every(age => age === ages[0]) ? ages[0] : '확인 필요'}`;
-  gear.title = summary ? `설정 — ${summary}. 목록이 최신이 아닐 수 있어요. 누르면 연동 탭에서 봐요.` : '설정';
+  paintGearBadge();
+}
+
+// 톱니바퀴 점의 말 — 우선순위는 빨강(지금 멈춘 연동) > 주황(낡음) > 파랑(새 버전) > 없음(그냥 `설정`).
+// has-alert·has-stale·has-update 클래스가 바뀌는 모든 자리에서 이 함수를 불러 title·aria-label을 한 곳에서 정한다.
+function paintGearBadge() {
+  const gear = document.getElementById('settingsBtn');
+  if (!gear) return;
+  const alertCount = typeof settingsAlertKeys !== 'undefined' ? settingsAlertKeys.length : 0;
+  const hasUpdate = typeof settingsHasUpdate === 'function' && settingsHasUpdate();
+  let summary = '';
+  let title = '설정';
+  if (alertCount > 0) {
+    summary = `연동 ${alertCount}개가 멈췄어요`;
+    title = `설정 — ${summary}. 누르면 연동 탭에서 봐요.`;
+  } else if (syncStale.length > 0) {
+    summary = syncStaleSummary;
+    title = `설정 — ${summary}. 목록이 최신이 아닐 수 있어요. 누르면 연동 탭에서 봐요.`;
+  } else if (hasUpdate) {
+    summary = '새 버전이 있어요';
+    title = `설정 — ${summary}`;
+  }
+  gear.title = title;
   gear.setAttribute('aria-label', summary ? `설정 — ${summary}` : '설정');
 }
 
