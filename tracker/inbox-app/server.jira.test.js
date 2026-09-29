@@ -2257,3 +2257,30 @@ test('치운 목록은 200개·30일로 정리하되 지금 화면에 있는 줄
   assert.throws(() => store.dismissAttention({ id: 'nope' }), /보낸 값을 확인해 주세요/);
   fs.rmSync(home, { recursive: true, force: true });
 });
+
+test('추가 조회(key in)만 400이면 추가분만 빠지고 내 담당 목록은 새로 받는다', async () => {
+  const fake = jiraFake({
+    '/rest/api/3/search/jql': (url) => {
+      const jql = decodeURIComponent(String(url).split('jql=')[1].split('&')[0]);
+      if (jql.startsWith('key in')) return json({ errorMessages: ["An issue with key 'IO-99999' does not exist for field 'key'."] }, 400);
+      return json(jiraListBody([jiraListIssue('IO-48394')]));
+    },
+  });
+  const issues = await jiraListClient(fake).listMyIssues(['IO-48394', 'IO-99999']);
+  assert.deepEqual(issues.map(issue => [issue.key, issue.extra]), [['IO-48394', false]]);
+  assert.equal(fake.calls.length, 2, '기본 목록 한 번 + 추가 조회 한 번(다시 묻지 않는다)');
+});
+
+test('내 담당 목록 조회가 401이면 예전처럼 실패하고, 추가 조회가 403이어도 실패한다', async () => {
+  const mineDenied = jiraFake({ '/rest/api/3/search/jql': () => json({}, 401) });
+  await assert.rejects(() => jiraListClient(mineDenied).listMyIssues(['IO-1']), error => error.status === 401);
+  assert.equal(mineDenied.calls.length, 1);
+
+  const mineBad = jiraFake({ '/rest/api/3/search/jql': () => json({}, 400) });
+  await assert.rejects(() => jiraListClient(mineBad).listMyIssues(), error => error.status === 400, '내 담당 목록 자체의 400은 그대로 실패');
+
+  const extraDenied = jiraFake({
+    '/rest/api/3/search/jql': (url) => String(url).includes('key%20in') ? json({}, 403) : json(jiraListBody([jiraListIssue('IO-48394')])),
+  });
+  await assert.rejects(() => jiraListClient(extraDenied).listMyIssues(['IO-1']), error => error.status === 403);
+});
