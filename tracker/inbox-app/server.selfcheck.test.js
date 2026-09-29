@@ -328,3 +328,31 @@ test('WP-K GET /api/selfcheck: 연동 탭·톱니바퀴 빨간 점과 같은 판
   assert.ok(serverModule.CLIENT_BLOCKED.has('selfcheck.js'), '서버 파일은 화면으로 나가지 않는다');
   assert.equal((await fetch(`${base}/selfcheck.js`)).status, 404);
 });
+
+test('WP-V 점검: 맥 캘린더 갈래는 mac-calendar 등록 둘을 보고, Claude는 필요 없으며, 멈춤 이유는 ⚠️ 줄(허용 막힘 → 고치는 법)', async (t) => {
+  const h = home(t, { slack: false, jira: false, calendar: 'mac', notes: 'manual' });
+  h.config.calendar = { source: 'mac', macCalendars: [{ id: 'CAL-ME', name: 'me@example.test' }] };
+  const net = fakeNet(okRoutes);
+  ['server', 'update', 'apply', 'data-backup', 'mac-calendar'].forEach(name => fs.writeFileSync(path.join(h.agents, `com.workspace.app.${name}.plist`), '<plist/>'));
+  // 등록 실행기가 실패 중이면 빠진 이름을 그대로 보인다(아니면 `등록하는 중`).
+  const missing = await createSelfcheck(depsFor(h, net, { claude: false, override: { applyFailing: () => true } })).run();
+  assert.match(byKey(missing, 'agents').detail, /mac-calendar-now/, '확인용 등록도 있어야 한다');
+  assert.ok(!missing.items.some(item => item.key === 'claude'), '맥 캘린더는 Claude가 필요 없다');
+  assert.ok(!net.calls.some(call => /calendar\.example/.test(call.url)), '비밀 주소에 묻지 않는다');
+  assert.equal(byKey(missing, 'calendar').state, 'ok');
+  assert.equal(byKey(missing, 'calendar').detail, '맥 캘린더에서 읽어요');
+
+  fs.writeFileSync(path.join(h.agents, 'com.workspace.app.mac-calendar-now.plist'), '<plist/>');
+  const summary = '⚠️ 맥이 캘린더 접근을 막았어요 — 시스템 설정 → 개인정보 보호 및 보안 → 자동화에서 허용해 주세요';
+  const stopped = await createSelfcheck(depsFor(h, net, {
+    claude: false,
+    alerts: ['calendar'],
+    automations: [{ key: 'calendar', lastKind: 'fail', lastSummary: summary, events: [] }],
+    override: { fetchStateAutomation: automation => ({ failing: !!automation && automation.lastKind === 'fail', auth: false, claudeAuth: false, failedAt: null, lastRunAt: null, summary: automation ? automation.lastSummary : null }) },
+  })).run();
+  assert.equal(byKey(stopped, 'agents').state, 'ok');
+  const item = byKey(stopped, 'calendar');
+  assert.equal(item.state, 'bad');
+  assert.equal(item.detail, '맥이 캘린더 접근을 막았어요');
+  assert.deepEqual(item.fix, { text: '시스템 설정 → 개인정보 보호 및 보안 → 자동화에서 허용해 주세요' });
+});

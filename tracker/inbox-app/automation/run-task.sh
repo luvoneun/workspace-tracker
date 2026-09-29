@@ -115,6 +115,22 @@ if [ "$NAME" = "calendar-sync" ] && calendar_ical; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') $NAME 비밀 주소로 앱이 직접 읽고 있어 건너뛰어요" >> "$LOG"
   exit 0
 fi
+# 맥 캘린더 갈래(`calendar.source: "mac"`)도 같다 — mac-calendar가 맥 캘린더 앱에서 읽는다. 설정을 못 읽으면 예전처럼 돈다.
+calendar_mac() {
+  [ -n "$NODE" ] || return 1
+  [ "$("$NODE" -e '
+const fs = require("fs");
+try {
+  const config = JSON.parse(fs.readFileSync(process.argv[1], "utf-8"));
+  const calendar = (config && config.calendar) || {};
+  process.stdout.write(calendar.source === "mac" ? "mac" : "");
+} catch (error) { process.stdout.write(""); }
+' "$CONFIG" 2>/dev/null)" = "mac" ]
+}
+if [ "$NAME" = "calendar-sync" ] && calendar_mac; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S') $NAME 맥 캘린더에서 읽고 있어 건너뛰어요" >> "$LOG"
+  exit 0
+fi
 
 # 프로세스 그룹에 좀비가 아닌 프로세스가 아직 남아 있는지 본다.
 # (죽은 뒤 아직 수거되지 않은 좀비는 "살아 있음"으로 세면 안 된다)

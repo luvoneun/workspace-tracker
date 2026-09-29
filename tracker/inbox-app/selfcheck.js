@@ -26,8 +26,17 @@ const BASE_AGENTS = ['server', 'update', 'apply', 'data-backup'];
 const INTEGRATION_AGENTS = {
   slack: ['slack-capture', 'slack-capture-now'],
   calendarClaude: ['calendar-sync', 'calendar-sync-now'],
+  calendarMac: ['mac-calendar', 'mac-calendar-now'],
   notes: ['tiro-sync'],
 };
+
+// 맥 캘린더 읽기의 실패 한 줄(`⚠️ 이유 — 고치는 법`, calendar-mac.js의 WORDS) → 점검 줄의 이유·고치는 법.
+function macCalendarWhy(summary) {
+  const text = String(summary || '').replace(/^⚠️\s*/, '');
+  const at = text.indexOf(' — ');
+  if (!/^⚠️/.test(String(summary || '')) || at < 0) return null;
+  return { detail: text.slice(0, at), fix: text.slice(at + 3) };
+}
 
 const SKIP_NAMES = { slack: '슬랙', jira: '지라', calendar: '캘린더', notes: '회의록' };
 
@@ -172,12 +181,13 @@ function createSelfcheck(deps) {
     const state = deps.readIntegrations(config);
     const on = connectedFlags(state);
     const calendarIcal = on.calendar && state.calendar && state.calendar.source === 'ical';
+    const calendarMac = on.calendar && state.calendar && state.calendar.source === 'mac';
     const skipped = Object.keys(SKIP_NAMES).filter(key => !on[key]).map(key => SKIP_NAMES[key]);
 
     // ---------- 자동 실행 등록(plist가 있는지만) ----------
     const wanted = [...BASE_AGENTS,
       ...(on.slack ? INTEGRATION_AGENTS.slack : []),
-      ...(on.calendar && !calendarIcal ? INTEGRATION_AGENTS.calendarClaude : []),
+      ...(on.calendar && !calendarIcal ? (calendarMac ? INTEGRATION_AGENTS.calendarMac : INTEGRATION_AGENTS.calendarClaude) : []),
       ...(on.notes ? INTEGRATION_AGENTS.notes : [])];
     const missing = wanted.filter(name => !deps.agentInstalled(name));
     const integrationOnly = missing.every(name => !BASE_AGENTS.includes(name));
@@ -201,7 +211,7 @@ function createSelfcheck(deps) {
     const claudeUsers = [
       // 원문 그대로(slack.tidy='raw')는 Claude 없이 수집하므로 Claude가 필요한 연동으로 세지 않는다.
       on.slack && ((config && config.slack) || {}).tidy !== 'raw' ? { key: 'slack', name: '슬랙 수집' } : null,
-      on.calendar && !calendarIcal ? { key: 'calendar', name: '캘린더 동기화' } : null,
+      on.calendar && !calendarIcal && !calendarMac ? { key: 'calendar', name: '캘린더 동기화' } : null,
       on.notes ? { key: 'tiro', name: '미팅 노트 가져오기', stateKey: 'notes' } : null,
     ].filter(Boolean);
     let claudeBad = false;
@@ -324,9 +334,13 @@ function createSelfcheck(deps) {
         const found = stopped('calendar', '캘린더');
         Object.assign(item, found, calendarIcal && found.detail && !found.sameAs ? { detail: `${found.detail} — 지금 확인해 보니 주소는 읽혀요, 카드의 지금 가져오기로 다시 읽어 주세요` } : {});
       }
+      // 맥 캘린더 갈래는 멈춘 이유(⚠️ 줄 — 허용 막힘·계정 없음·고른 캘린더 없음·시간 초과)를 그대로 한 줄로 보인다.
+      const macWhy = calendarMac && item.state === 'bad' && !item.sameAs ? macCalendarWhy((fetchState.calendar || {}).summary) : null;
+      if (macWhy) Object.assign(item, { detail: macWhy.detail, fix: { text: macWhy.fix } });
       if (!item.detail) {
         const at = whenText((fetchState.calendar || {}).lastRunAt, now());
-        item.detail = at ? `Claude로 읽어요 · 마지막 ${at}` : 'Claude로 읽어요';
+        const how = calendarMac ? '맥 캘린더에서 읽어요' : 'Claude로 읽어요';
+        item.detail = at ? `${how} · 마지막 ${at}` : how;
       }
     }
 

@@ -2463,6 +2463,16 @@ a.d-btn { text-decoration: none; }
 .d-ichoice .hd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 14.5px; font-weight: 600; }
 .d-ichoice .soon { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--dim); }
 .d-ichoice.is-off { opacity: 0.55; cursor: default; }
+/* 캘린더 갈래 셋(WP-V) — `맥 캘린더`(추천)가 맨 위, `Claude Code로`, 접힌 `다른 방법: 비밀 주소 붙이기`를 세로로 쌓는다.
+   읽을 캘린더 목록은 쓸 곳 고르기(.d-ich)와 같은 줄 — 이름 칸이 없어 두 칸이다. */
+.d-ichoices.is-stack { grid-template-columns: minmax(0, 1fr); }
+.d-ich.is-cal { grid-template-columns: 20px minmax(0, 1fr); }
+.d-imore > summary { display: flex; align-items: center; gap: 6px; min-height: 32px; list-style: none; cursor: pointer; font-size: 13.5px; font-weight: 600; color: var(--muted); }
+.d-imore > summary::-webkit-details-marker { display: none; }
+.d-imore > summary::before { content: "›"; display: inline-block; width: 12px; color: var(--dim); transition: transform 130ms var(--ease); }
+.d-imore[open] > summary::before { transform: rotate(90deg); }
+.d-imore > summary:hover { color: var(--text); }
+.d-imore > .d-ichoice { margin-top: 6px; }
 /* 해제 확인 줄 — 카드 안, 큰 해제 버튼 대신 */
 .d-iconfirm { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; padding: 10px 12px; border-radius: var(--r-sm); background: var(--urgent-bg); }
 .d-iconfirm .tx { flex: 1 1 200px; font-size: 13px; color: var(--text); }

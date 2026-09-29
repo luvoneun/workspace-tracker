@@ -192,7 +192,7 @@ test('WP-D2 연동 저장: 비밀 주소는 한 번 읽어 센 뒤 0600 파일�
   assert.equal(fs.statSync(file).mode & 0o777, 0o600);
   assert.ok(!JSON.stringify({ config, result }).includes('private-0123456789abcdef'), '주소는 config·결과 어디에도 없다');
   const state = integrationsStore.readIntegrations(config, { tokenDir });
-  assert.deepEqual(state.calendar, { enabled: true, source: 'ical', hasIcal: true });
+  assert.deepEqual(state.calendar, { enabled: true, source: 'ical', macCalendars: [], hasIcal: true });
   assert.ok(!JSON.stringify(state).includes('private-'), '지금 상태에도 주소는 없다(있음/없음만)');
   assert.equal(integrationsStore.savedIcalUrl(config, tokenDir), secret, '서버 안에서만 꺼내 쓴다');
 
@@ -329,7 +329,8 @@ async function startFetchServer(t, { calendarSource = 'ical', mode = 'ok' } = {}
     integrations: { slack: true, calendar: true, jira: true, tiro: true },
     jira: { siteUrl: 'https://jira.example.test', email: 'me@example.test', tokenFile: path.join(tokens, 'workspace-jira-token') },
     slack: { tokenFile: path.join(tokens, 'workspace-slack-token'), channels: { todo: { id: 'C0TODO11', name: '#my-todo' } } },
-    calendar: calendarSource === 'ical' ? { source: 'ical', icalFile: path.join(tokens, 'workspace-calendar-ical') } : { source: 'claude' },
+    calendar: calendarSource === 'ical' ? { source: 'ical', icalFile: path.join(tokens, 'workspace-calendar-ical') }
+      : calendarSource === 'mac' ? { source: 'mac', macCalendars: [{ id: 'CAL-ME', name: 'me@example.test' }] } : { source: 'claude' },
     meetingNotes: 'tiro',
   }, null, 2));
   const wrapper = path.join(home, 'fake-remote-server.js');
@@ -545,4 +546,105 @@ test('WP-D2.5 지라·캘린더 보관함은 마지막 실패의 갈래(auth)를
   assert.deepEqual(calendar.failure(), { at: 2000, auth: false });
   await assert.rejects(integrationsStore.fetchIcal('https://calendar.example.test/x.ics', async () => new Response('no', { status: 404 })),
     error => error.auth === true && !/calendar\.example\.test/.test(error.message));
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WP-V — 캘린더 `맥 캘린더` 갈래. 서버는 맥 캘린더를 읽지 않는다(프로세스를 띄우지 않는다) — 요청 표시 파일과
+// launchd가 남긴 결과(mac-calendar.json·mac-calendar.log)만 본다. 여기서도 osascript는 한 번도 불리지 않는다.
+test('WP-V 맥 캘린더: 허용하고 확인은 plist가 있을 때만 요청 파일({mode:check}) · 결과는 상태 파일에서 · 지금 가져오기는 mac-calendar-now · 실패 줄은 카드 이유로', async (t) => {
+  const app = await startFetchServer(t, { calendarSource: 'mac' });
+  const check = () => fetch(app.base + '/api/integrations/calendar/mac-check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(r => r.json());
+  const view = () => fetch(app.base + '/api/integrations/calendar/mac').then(r => r.json());
+
+  // 옛 설치(plist 없음) — 쓰지 않고 업데이트.command 안내
+  const missing = await check();
+  assert.deepEqual(missing, { ok: false, reason: 'not-installed', error: '업데이트.command를 한 번 실행하면 쓸 수 있어요' });
+  assert.equal(fs.existsSync(app.request('mac-calendar.request')), false);
+  const empty = await view();
+  assert.deepEqual(empty, { ok: true, installed: false, requestedAt: null, chosen: ['CAL-ME'], state: null });
+
+  app.plist('mac-calendar-now');
+  const asked = await check();
+  assert.equal(asked.ok, true);
+  const written = JSON.parse(fs.readFileSync(app.request('mac-calendar.request'), 'utf8'));
+  assert.deepEqual(Object.keys(written).sort(), ['mode', 'requestedAt']);
+  assert.equal(written.mode, 'check');
+  assert.equal(written.requestedAt, asked.requestedAt);
+
+  // launchd가 남긴 결과(가짜) — 화면에 필요한 값만 돌려준다
+  fs.writeFileSync(path.join(app.automation, 'mac-calendar.json'), JSON.stringify({
+    at: '2026-09-29T01:00:05.000Z', kind: 'check', requestedAt: asked.requestedAt, ok: true, reason: null,
+    calendars: [{ id: 'CAL-ME', name: 'me@example.test', writable: true }, { id: 'H', name: '휴일', writable: false }],
+    suggested: ['CAL-ME'], read: ['CAL-ME'], missing: [], eventCount: 3, declinedChecked: true, secretField: 'x',
+  }));
+  const seen = await view();
+  assert.equal(seen.installed, true);
+  assert.equal(seen.requestedAt, asked.requestedAt);
+  assert.deepEqual(seen.state, {
+    at: '2026-09-29T01:00:05.000Z', kind: 'check', requestedAt: asked.requestedAt, ok: true, reason: null,
+    calendars: [{ id: 'CAL-ME', name: 'me@example.test', writable: true }, { id: 'H', name: '휴일', writable: false }],
+    suggested: ['CAL-ME'], read: ['CAL-ME'], missing: [], eventCount: 3,
+  });
+
+  // 지금 가져오기 — 맥 캘린더 갈래는 같은 요청 파일(모드 없음 = 읽기)과 mac-calendar-now로
+  const fetched = await app.ask('calendar');
+  assert.equal(fetched.mode, 'requested');
+  assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(app.request('mac-calendar.request'), 'utf8'))), ['requestedAt']);
+  assert.equal(fs.existsSync(app.request('calendar-sync.request')), false, 'Claude 갈래 요청 파일은 쓰지 않는다');
+
+  // 카드: 기록은 mac-calendar.log에서, 마지막이 ⚠️ 실패면 멈춤(이유는 그 줄)
+  const stamp = offset => { const d = new Date(Date.now() - offset * 60000); const p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; };
+  fs.writeFileSync(path.join(app.automation, 'logs', 'mac-calendar.log'), [
+    `───── ${stamp(40)} mac-calendar 시작 (v1.2.1)`, '캘린더 1개 · 오늘 일정 3개를 읽었어요', '', `───── ${stamp(40)} mac-calendar 종료 (exit 0)`,
+    `───── ${stamp(10)} mac-calendar 시작 (v1.2.1)`, '⚠️ 맥이 캘린더 접근을 막았어요 — 시스템 설정 → 개인정보 보호 및 보안 → 자동화에서 허용해 주세요', '', `───── ${stamp(10)} mac-calendar 종료 (exit 77)`, '',
+  ].join('\n'));
+  fs.writeFileSync(path.join(app.automation, 'logs', 'calendar-sync.log'), `───── ${stamp(5)} calendar-sync 시작\n옛 갈래 기록\n───── ${stamp(5)} calendar-sync 종료 (exit 0)\n`);
+  const state = await (await fetch(app.base + '/api/integrations')).json();
+  assert.equal(state.calendar.source, 'mac');
+  assert.deepEqual(state.calendar.macCalendars, [{ id: 'CAL-ME', name: 'me@example.test' }]);
+  assert.equal(state.calendar.fetch.failing, true);
+  assert.match(state.calendar.fetch.summary, /^⚠️ 맥이 캘린더 접근을 막았어요/);
+  assert.equal(state.calendar.log[0].kind, 'fail');
+  assert.equal(state.calendar.log[1].text, '캘린더 1개 · 오늘 일정 3개를 읽었어요');
+  assert.ok(state.alerts.includes('calendar'));
+  assert.ok(!state.calendar.log.some(one => /옛 갈래 기록/.test(one.text)), 'Claude 갈래 기록은 보지 않는다');
+
+  // 서버는 프로세스를 띄우지 않는다 — 맥 캘린더 경로(route)와 지금 가져오기 어디에도 child_process가 없다
+  const source = fs.readFileSync(path.join(__dirname, 'calendar-mac.js'), 'utf8');
+  const route = source.split('function route(req, res, url, ctx) {')[1].split('\n}\n')[0];
+  assert.ok(!/exec|spawn|runOsascript|require\('child_process'\)/.test(route), '확인 경로는 요청 파일만 쓴다');
+  assert.ok(!/^const .*require\('child_process'\)/m.test(source), '서버가 불러도 child_process를 읽지 않는다(실행 스크립트 안에서만)');
+});
+
+test('WP-V 연동 저장: 맥 캘린더는 고른 캘린더([{id,name}])만 적고(서버가 읽어 보지 않는다), 하나도 없으면 거절 · 갈래가 바뀌면 등록 요청 대상', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-mac-save-'));
+  try {
+    const configPath = path.join(home, 'workspace.config.json');
+    const writes = [];
+    const write = (file, text) => { writes.push(file); fs.writeFileSync(file, text); };
+    const base = { integrations: { calendar: true }, calendar: { source: 'ical', icalFile: '~/.config/workspace-calendar-ical' } };
+    await assert.rejects(integrationsStore.saveIntegrations({ configPath, current: base, body: { calendar: { enabled: true, source: 'mac', macCalendars: [] } }, write }), /읽을 캘린더를 하나 이상 골라 주세요/);
+    await assert.rejects(integrationsStore.saveIntegrations({ configPath, current: base, body: { calendar: { enabled: true, source: 'mac', macCalendars: [{ id: '' }, 'x'] } }, write }), /하나 이상/);
+    assert.equal(writes.length, 0, '거절하면 아무것도 쓰지 않는다');
+    const { config, result } = await integrationsStore.saveIntegrations({
+      configPath, current: base, write,
+      body: { calendar: { enabled: true, source: 'mac', macCalendars: [{ id: 'CAL-ME', name: '  me@example.test ' }, { id: 'CAL-ME', name: '중복' }, { id: 'H', name: '휴일', extra: 1 }] } },
+      calendarCheck: () => { throw new Error('맥 캘린더는 서버가 읽어 보지 않는다'); },
+    });
+    assert.deepEqual(result.calendar, { source: 'mac', calendars: 2 });
+    assert.deepEqual(config.calendar, { source: 'mac', icalFile: '~/.config/workspace-calendar-ical', macCalendars: [{ id: 'CAL-ME', name: 'me@example.test' }, { id: 'H', name: '휴일' }] }, '비밀 주소 경로는 그대로 둔다');
+    assert.equal(config.integrations.calendar, true);
+    assert.notEqual(integrationsStore.registrationKey(base), integrationsStore.registrationKey(config), '갈래가 바뀌면 launchd 등록을 다시 한다');
+    const repicked = { ...config, calendar: { ...config.calendar, macCalendars: [{ id: 'H', name: '휴일' }] } };
+    assert.equal(integrationsStore.registrationKey(config), integrationsStore.registrationKey(repicked), '고른 캘린더만 바꾸면 등록은 그대로(스크립트가 회차마다 설정을 읽는다)');
+    // 끄면 고른 캘린더는 남는다
+    const off = await integrationsStore.saveIntegrations({ configPath, current: config, body: { calendar: { enabled: false } }, write });
+    assert.deepEqual(off.config.calendar.macCalendars, [{ id: 'CAL-ME', name: 'me@example.test' }, { id: 'H', name: '휴일' }]);
+    const view = integrationsStore.readIntegrations(config, { tokenDir: home });
+    assert.equal(view.calendar.source, 'mac');
+    assert.deepEqual(view.calendar.macCalendars, [{ id: 'CAL-ME', name: 'me@example.test' }, { id: 'H', name: '휴일' }]);
+    assert.equal(integrationsStore.readIntegrations({ calendar: { source: 'weird' } }, { tokenDir: home }).calendar.source, 'claude', '모르는 갈래는 예전처럼 Claude');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
