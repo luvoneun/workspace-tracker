@@ -1003,3 +1003,27 @@ test('다듬기 A(v3): `원래 문장으로`는 고친 문장을 원본에서 �
   f.items.splice(0,1);
   assert.throws(()=>f.change({action:'revert',id}),/원래 문장으로 돌릴 수 없어요/,'원본이 지워졌으면 거절');
 });
+test('다듬기 A(Codex P2): 묶음 소제목 이름을 바꾼 뒤 대표를 바꿔도 이름이 남고, 다시 바꾸거나 되돌리면 옛 자리도 치우며, 묶음을 풀면 저장된 티켓 소제목에만 남는다',t=>{
+  const bundles=[{id:'bd_1',lead:'jira:PAY-1',keys:['jira:PAY-1','jira:PAY-2'],at:'2026-09-15T03:00:00.000Z'}];
+  const f=polishFixture(t,{bundles,labels:{'jira:PAY-1':'PAY-1 · 결제 리뉴얼','jira:PAY-2':'PAY-2 · 결제 서버'}});
+  f.change({action:'rename',heading:'완료한 일',groupKey:'jira:PAY-1',text:'결제 개편'});
+  // 대표를 PAY-2로 바꿈 — 열쇠는 새 대표, 저장된 이름은 옛 대표 자리에 있다.
+  f.bundles[0].lead='jira:PAY-2';
+  const one=f.row('정산 배치 점검함'),two=f.row('서버 로그 정리함');
+  assert.deepEqual([one.groupKey,one.shownGroup,two.shownGroup],['jira:PAY-2','결제 개편','결제 개편'],'대표를 바꿔도 바꾼 이름이 그대로');
+  assert.equal(one.groupOrigin,'PAY-2 · 결제 서버','원래 이름 풍선은 지금 대표');
+  assert.deepEqual(Object.keys(f.saved().weekPolish['2026-09-14'].names),['완료한 일|jira:PAY-1'],'읽기만으로는 저장을 바꾸지 않는다');
+  // 새 대표 자리에서 다시 바꾸면 옛 자리는 치우고 새 자리에 쓴다.
+  f.change({action:'rename',heading:'완료한 일',groupKey:'jira:PAY-2',text:'결제 개편 2차'});
+  assert.deepEqual(f.saved().weekPolish['2026-09-14'].names,{'완료한 일|jira:PAY-2':'결제 개편 2차'});
+  // 원래 이름으로 되돌리기(빈 값) — 옛 자리에서 찾은 이름도 남지 않는다.
+  f.bundles[0].lead='jira:PAY-1';
+  assert.equal(f.row('정산 배치 점검함').shownGroup,'결제 개편 2차');
+  f.change({action:'rename',heading:'완료한 일',groupKey:'jira:PAY-1',text:''});
+  assert.equal(f.row('정산 배치 점검함').shownGroup,undefined);
+  assert.equal(f.saved().weekPolish['2026-09-14'].names,undefined,'되돌리면 옛 대표 자리의 이름도 지운다');
+  // 묶음 풀기 — 이름은 저장된(바꿀 때의 대표) 티켓 소제목에만 남는다.
+  f.change({action:'rename',heading:'완료한 일',groupKey:'jira:PAY-1',text:'결제 개편'});
+  f.bundles.length=0;
+  assert.deepEqual([f.row('정산 배치 점검함').shownGroup,f.row('서버 로그 정리함').shownGroup],['결제 개편',undefined]);
+});

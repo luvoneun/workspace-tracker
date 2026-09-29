@@ -121,8 +121,14 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
       const key = bundle ? bundle.lead : own;
       const natural = bundle ? leadName(bundle.lead) : row.group;
       row.groupKey = key;
-      const custom = Object.prototype.hasOwnProperty.call(names, `${row.heading}|${key}`) ? names[`${row.heading}|${key}`] : null;
-      if (typeof custom === 'string' && custom) { row.shownGroup = custom; row.groupOrigin = projectLabel(key) || natural; }
+      // 바꾼 이름은 대표 열쇠에서 먼저 찾고, 없으면 묶음의 다른 열쇠를 차례로 본다 — 이름을 바꾼 뒤 대표를 바꿔도
+      // (저장된 이름은 옛 대표 열쇠에 있다) 이름이 사라지지 않게. 찾은 열쇠는 `nameKey`로 알려 rename이 그 자리를 치운다.
+      // 묶음을 풀면 각 티켓은 자기 열쇠만 보므로 이름은 그 이름이 저장된(바꿀 때의 대표) 티켓 소제목에만 남는다.
+      const tries = bundle ? [bundle.lead, ...bundle.keys.filter(entry => entry !== bundle.lead)] : [key];
+      const found = tries.find(entry => typeof names[`${row.heading}|${entry}`] === 'string' && names[`${row.heading}|${entry}`]
+        && Object.prototype.hasOwnProperty.call(names, `${row.heading}|${entry}`));
+      const custom = found ? names[`${row.heading}|${found}`] : null;
+      if (custom) { row.shownGroup = custom; row.groupOrigin = projectLabel(key) || natural; row.nameKey = found; }
       else if (natural !== row.group) row.shownGroup = natural;
     });
   }
@@ -211,7 +217,7 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
     return { weekKey, rows: visible, revision, updatedAt: stored?.updatedAt || null, title: typeof polish.title === 'string' && polish.title ? polish.title : null, since,
       ...(opts.raw ? { byId } : {}) };
   }
-  function clean(row) { const { suggestion, needsReview, currentEvidence, canSplit, partCount, groupKey, shownGroup, groupOrigin, fresh, changed, ...rest } = row; return rest; }
+  function clean(row) { const { suggestion, needsReview, currentEvidence, canSplit, partCount, groupKey, shownGroup, groupOrigin, nameKey, fresh, changed, ...rest } = row; return rest; }
   // 계획 문장에 붙이는 프로젝트 이름. 없으면 기존처럼 `직접 작성`으로 담는다.
   function planGroup(group) {
     if (group === undefined || group === null || group === '') return '직접 작성';
@@ -263,6 +269,8 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
       const natural=sample.groupOrigin||sample.shownGroup||sample.group;
       const plain=String(natural).replace(/^[A-Z][A-Z0-9]*-\d+ · /,'');
       const names={...(isPlain(polish.names)?polish.names:{})};
+      // 이름이 옛 대표 열쇠에서 찾아진 것이면(대표를 바꾼 뒤) 그 자리도 함께 치우고 지금 대표 열쇠에 쓴다.
+      if(sample.nameKey&&sample.nameKey!==groupKey)delete names[`${groupHeading}|${sample.nameKey}`];
       if(!name||name===natural||name===plain)delete names[`${groupHeading}|${groupKey}`]; else names[`${groupHeading}|${groupKey}`]=name;
       if(Object.keys(names).length)polish.names=names; else delete polish.names;
     } else if(action==='ackNew') {
