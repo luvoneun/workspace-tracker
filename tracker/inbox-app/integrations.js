@@ -54,6 +54,7 @@ const MESSAGE = {
   icalUrl: '비밀 주소를 붙여 넣어 주세요',
   icalHttps: '주소는 https://로 시작해야 해요',
   icalRead: '이 주소를 읽지 못했어요 — 비밀 주소를 다시 복사해 주세요',
+  icalPublic: '공개 주소를 붙였어요 — 같은 화면 조금 아래 「iCal 형식의 비공개 주소」를 복사해 주세요(공개 주소는 캘린더를 공개해야만 열려요)',
   icalNotCalendar: '캘린더 주소가 아니에요 — iCal 형식의 비공개 주소를 복사해 주세요',
   other: '보낸 값을 확인해 주세요.',
 };
@@ -575,6 +576,8 @@ async function saveIntegrations({
       const url = trimmed(body.calendar.url);
       const saved = url ? null : findToken(paths, 'calendar', clone(config.calendar).icalFile);
       if (!url && !saved) throw bad(MESSAGE.icalUrl);
+      // 구글의 `공개 주소`(…/public/basic.ics)는 캘린더를 공개하지 않으면 열리지 않는다 — 읽어 보기 전에 알려 준다.
+      if (url && /\/public\/basic\.ics(\?|$)/.test(url)) throw bad(MESSAGE.icalPublic);
       const address = url ? normalizeIcalUrl(url) : saved.value;
       const checked = await (calendarCheck || (() => { throw bad(MESSAGE.icalRead); }))(address);
       if (!checked || !checked.ok) throw bad(MESSAGE.icalRead);

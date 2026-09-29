@@ -160,6 +160,16 @@ test('WP-D2 연동 저장: 비밀 주소는 한 번 읽어 센 뒤 0600 파일�
   }), /이 주소를 읽지 못했어요 — 비밀 주소를 다시 복사해 주세요/);
   assert.deepEqual(writes, []);
   assert.equal(fs.existsSync(path.join(tokenDir, 'workspace-calendar-ical')), false);
+
+  // 1-1) 구글의 공개 주소(…/public/basic.ics)는 읽어 보기 전에 비공개 주소를 쓰라고 알려 준다
+  let checkedPublic = false;
+  await assert.rejects(() => integrationsStore.saveIntegrations({
+    configPath, current, tokenDir, write,
+    body: { calendar: { enabled: true, source: 'ical', url: 'https://calendar.google.com/calendar/ical/me%40example.test/public/basic.ics' } },
+    calendarCheck: async () => { checkedPublic = true; return { ok: true, count: 0 }; },
+  }), /공개 주소를 붙였어요 — 같은 화면 조금 아래 「iCal 형식의 비공개 주소」를 복사해 주세요/);
+  assert.equal(checkedPublic, false, '공개 주소는 읽으러 가지 않는다');
+  assert.deepEqual(writes, []);
   const okCheck = async () => ({ ok: true, count: 1 });
   await assert.rejects(() => integrationsStore.saveIntegrations({ configPath, current, tokenDir, write, body: { calendar: { enabled: true, source: 'ical', url: 'http://calendar.google.com/x.ics' } }, calendarCheck: okCheck }), /https:\/\/로 시작해야/);
   await assert.rejects(() => integrationsStore.saveIntegrations({ configPath, current, tokenDir, write, body: { calendar: { enabled: true, source: 'ical', url: '' } }, calendarCheck: okCheck }), /비밀 주소를 붙여 넣어 주세요/);

@@ -6823,7 +6823,7 @@ test('WP-D1·D2 F. 캘린더: `비밀 주소 붙이기`(누구나)가 먼저 —
   assert.equal(secret[0].type, 'password', '비밀 주소는 토큰처럼 가린다');
   const text = fx.text('calendar');
   assert.ok(!/곧 돼요/.test(text));
-  assert.match(text, /비밀 주소 붙이기누구나1컴퓨터에서 calendar\.google\.com 열기\(폰 앱은 안 돼요\)2오른쪽 위 톱니바퀴 → 설정3왼쪽 내 캘린더의 설정에서 내 이름4아래로 내려 캘린더 통합 → iCal 형식의 비공개 주소 옆 복사5아래 칸에 붙여 넣고 연결/);
+  assert.match(text, /비밀 주소 붙이기누구나1컴퓨터에서 calendar\.google\.com 열기\(폰 앱은 안 돼요\)2오른쪽 위 톱니바퀴 → 설정3왼쪽 내 캘린더의 설정에서 내 이름4아래로 내려 캘린더 통합 → iCal 형식의 비공개 주소 옆 복사\(위의 공개 주소 말고\)5아래 칸에 붙여 넣고 연결/);
   assert.match(text, /먼저 비밀 주소를 시도해 보세요/);
   assert.match(text, /이 칸이 안 보이면 회사에서 막아 둔 거예요/);
   assert.match(text, /1claude\.ai → 설정 → 커넥터에서 Google Calendar → 연결 → 구글 로그인 → 허용 \(이 맥의 Claude Code와 같은 계정이어야 해요\)claude\.ai\/settings\/connectors복사/);
