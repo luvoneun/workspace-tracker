@@ -93,6 +93,9 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
       // 그때는 **화면이** 기본 세트를 쓴다 — 여기서 기본값을 파일에 써 넣지 않는다.
       // 사람이 전부 지우면 빈 배열이 저장되고, 그때는 빈 목록이 그대로 보인다.
       jiraRoles: Array.isArray(state.jiraRoles) ? state.jiraRoles.map(role => ({ label: role.label, prefix: role.prefix })) : null,
+      // 프로젝트 묶어 보기(BBUNDLE) — 화면에서만 묶는 표시 정보. 칸이 없거나 깨진 값은 걸러서 보낸다
+      // (파일은 고쳐 쓰지 않는다 — 다음 묶기·풀기 저장 때 정리된 모양으로 쓴다).
+      projectBundles: cleanBundles(state.projectBundles),
     };
   }
   function patchItem({ id, ...patch }) {
@@ -289,6 +292,134 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
   // 새로 읽는다(스냅샷 캐시가 아니다).
   function projectAliases() {
     return { ...(read().projectAliases || {}) };
+  }
+
+  // ---------- 프로젝트 묶어 보기 (BBUNDLE) ----------
+  // 한 가지 일이 지라 티켓 둘 이상으로 나뉜 것을 프로젝트 탭에서 한 줄로 본다. **화면에서만** 묶는다 —
+  // 항목의 `jira:KEY`·지라 쪽은 하나도 바꾸지 않고, `.workflow.json`의 `projectBundles` 칸에 표시 정보만
+  // 둔다: `[{ id, lead: 'jira:A', keys: ['jira:A', 'jira:B'], at }]`. 한 키는 한 묶음에만, 묶음은 키 2개
+  // 이상, lead는 keys 안에 있다. 지금은 지라 키끼리만 묶는다(그룹 프로젝트는 이름 바꾸기·에픽으로
+  // 옮기기가 키를 바꾸는데, 그 길까지 묶음을 따라가게 하는 것은 다음 덩어리로 미룬다).
+  // 저장 길은 다른 기능과 같다(idempotent → mutations.run → 원자적 쓰기). 옛 앱은 이 칸을 모르지만
+  // 모든 저장이 "읽고 → 고치고 → 통째로 쓰기"라 칸을 지우지 않는다(데이터 형식 번호를 올리지 않는다).
+  const BUNDLE_KEY_RE = /^jira:[A-Z][A-Z0-9]*-\d+$/;
+  const BUNDLE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+  const BUNDLE_MAX_KEYS = 10;
+  const bundleIdOf = keys => `bd_${createHash('sha256').update(keys.join('|')).digest('hex').slice(0, 12)}`;
+  // 깨진 값은 조용히 정리한다: 형식이 틀린 키·중복 키·이미 앞 묶음에 있는 키는 빼고, 남은 키가 2개
+  // 미만이면 그 묶음을 버리고, lead가 keys 밖이면 첫 키로, id가 없으면 키로 지은 id로 채운다.
+  function cleanBundles(raw) {
+    if (!Array.isArray(raw)) return [];
+    const claimed = new Set();
+    const ids = new Set();
+    const out = [];
+    for (const entry of raw) {
+      if (!entry || typeof entry !== 'object' || !Array.isArray(entry.keys)) continue;
+      const keys = [];
+      for (const key of entry.keys) {
+        if (typeof key !== 'string' || !BUNDLE_KEY_RE.test(key) || claimed.has(key) || keys.includes(key)) continue;
+        keys.push(key);
+      }
+      if (keys.length < 2) continue;
+      const trimmed = keys.slice(0, BUNDLE_MAX_KEYS);
+      let id = typeof entry.id === 'string' && BUNDLE_ID_RE.test(entry.id) ? entry.id : bundleIdOf(trimmed);
+      if (ids.has(id)) id = bundleIdOf(trimmed);
+      if (ids.has(id)) continue;
+      trimmed.forEach(key => claimed.add(key));
+      ids.add(id);
+      const lead = trimmed.includes(entry.lead) ? entry.lead : trimmed[0];
+      out.push({ id, lead, keys: trimmed, at: typeof entry.at === 'string' ? entry.at : null });
+    }
+    return out;
+  }
+  const bundleCopy = bundle => (bundle ? { id: bundle.id, lead: bundle.lead, keys: [...bundle.keys], at: bundle.at || null } : null);
+  const bundleSame = (a, b) => (!a && !b) || (!!a && !!b && a.id === b.id && a.lead === b.lead && a.keys.join('|') === b.keys.join('|'));
+  function bundleKey(value) {
+    if (typeof value !== 'string' || !BUNDLE_KEY_RE.test(value)) throw new Error('지라 프로젝트끼리만 묶을 수 있어요.');
+    return value;
+  }
+  function writeBundles(state, bundles) {
+    state.projectBundles = bundles;
+    write(state);
+  }
+  // 묶기 — project가 이미 묶음에 있으면 그 묶음에 더하고, 없으면 project를 대표로 새 묶음을 만든다.
+  // 더하는 키가 이미 (다른 또는 같은) 묶음에 있으면 거절한다(한 키는 한 묶음에만).
+  // 돌려주는 before/after는 되돌리기(restoreBundle)가 그대로 쓰는 값이다.
+  function bundleProjects(body) {
+    const project = bundleKey(body && body.project);
+    const add = Array.isArray(body && body.add) ? body.add : null;
+    if (!add || !add.length) throw new Error('함께 묶을 프로젝트를 골라 주세요.');
+    add.forEach(bundleKey);
+    if (new Set(add).size !== add.length || add.includes(project)) throw new Error('같은 프로젝트를 두 번 묶을 수 없어요.');
+    const state = read();
+    const bundles = cleanBundles(state.projectBundles);
+    const home = bundles.find(bundle => bundle.keys.includes(project)) || null;
+    for (const key of add) {
+      const taken = bundles.find(bundle => bundle.keys.includes(key));
+      if (taken) throw new Error(`${key.slice('jira:'.length)}는 이미 다른 묶음에 있어요. 그 묶음을 먼저 풀어 주세요.`);
+    }
+    const before = bundleCopy(home);
+    const keys = [...(home ? home.keys : [project]), ...add];
+    if (keys.length > BUNDLE_MAX_KEYS) throw new Error(`한 묶음에는 ${BUNDLE_MAX_KEYS}개까지 넣을 수 있어요.`);
+    const after = home
+      ? { ...home, keys }
+      : { id: `bd_${createHash('sha256').update(`${keys.join('|')}:${Date.now()}:${Math.random()}`).digest('hex').slice(0, 12)}`, lead: project, keys, at: new Date().toISOString() };
+    writeBundles(state, home ? bundles.map(bundle => (bundle === home ? after : bundle)) : [...bundles, after]);
+    return { ok: true, before, after: bundleCopy(after) };
+  }
+  function bundleById(bundles, id) {
+    if (typeof id !== 'string' || !BUNDLE_ID_RE.test(id)) throw new Error('묶음을 확인해 주세요.');
+    const found = bundles.find(bundle => bundle.id === id);
+    if (!found) throw new Error('묶음을 찾을 수 없어요.');
+    return found;
+  }
+  // 풀기 — 표시 정보만 지운다. 업무는 원래 티켓(`jira:KEY`)에 그대로 있다.
+  function unbundleProjects(body) {
+    const state = read();
+    const bundles = cleanBundles(state.projectBundles);
+    const found = bundleById(bundles, body && body.id);
+    writeBundles(state, bundles.filter(bundle => bundle !== found));
+    return { ok: true, before: bundleCopy(found), after: null };
+  }
+  // 대표 바꾸기 — 이름·색은 대표 티켓의 것이라(저장하지 않는다) lead만 바꾼다.
+  function setBundleLead(body) {
+    const lead = bundleKey(body && body.lead);
+    const state = read();
+    const bundles = cleanBundles(state.projectBundles);
+    const found = bundleById(bundles, body && body.id);
+    if (!found.keys.includes(lead)) throw new Error('이 묶음에 있는 프로젝트만 대표로 고를 수 있어요.');
+    if (found.lead === lead) throw new Error('이미 대표예요.');
+    const after = { ...found, lead };
+    writeBundles(state, bundles.map(bundle => (bundle === found ? after : bundle)));
+    return { ok: true, before: bundleCopy(found), after: bundleCopy(after) };
+  }
+  // 되돌리기·다시 실행(⌘Z와 알림의 `되돌리기`) — "지금이 after와 같을 때만" before로 되돌린다. 그 사이
+  // 다른 곳에서 묶음이 바뀌었으면 덮지 않고 거절한다. before를 넣을 때도 한 키 한 묶음 규칙을 다시 본다.
+  function restoreBundle(body) {
+    const id = body && body.id;
+    if (typeof id !== 'string' || !BUNDLE_ID_RE.test(id)) throw new Error('묶음을 확인해 주세요.');
+    const shape = (value) => {
+      if (value === null || value === undefined) return null;
+      const [clean] = cleanBundles([value]);
+      if (!clean || clean.id !== id || clean.keys.length !== (Array.isArray(value.keys) ? value.keys.length : -1) || clean.lead !== value.lead) throw new Error('되돌릴 묶음을 확인해 주세요.');
+      return clean;
+    };
+    const before = shape(body.before);
+    const after = shape(body.after);
+    const state = read();
+    const bundles = cleanBundles(state.projectBundles);
+    const current = bundles.find(bundle => bundle.id === id) || null;
+    if (!bundleSame(current, after)) throw new Error('그 사이 묶음이 바뀌어서 되돌리지 못했어요.');
+    const rest = bundles.filter(bundle => bundle !== current);
+    if (before) {
+      const clash = before.keys.find(key => rest.some(bundle => bundle.keys.includes(key)));
+      if (clash) throw new Error(`${clash.slice('jira:'.length)}가 다른 묶음에 들어가 있어서 되돌리지 못했어요.`);
+    }
+    const index = current ? bundles.indexOf(current) : bundles.length;
+    const next = [...rest];
+    if (before) next.splice(Math.min(index, next.length), 0, before);
+    writeBundles(state, next);
+    return { ok: true, before: bundleCopy(current), after: bundleCopy(before) };
   }
 
   // ---------- 새 프로젝트 화면의 직군 세트 ----------
@@ -533,5 +664,5 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     write(state);
     return { ok: true };
   }
-  return { archive, snapshot, patchItem, saveMeeting, syncProject, meetingItemIds, markAnswerSeen, unmarkAnswerSeen, capture, review, undoReview, retype, link, checkProjectLink, linkProject, checkProjectAlias, setProjectAlias, projectAliases, checkJiraRoles, saveJiraRoles, groupList, renameGroup, moveGroup, undoMoveGroup, recordProjectMove, takeProjectMove, attentionDismissed, dismissAttention, undismissAttention, outcome: id => read().items[id]?.outcome || '' };
+  return { archive, snapshot, patchItem, saveMeeting, syncProject, meetingItemIds, markAnswerSeen, unmarkAnswerSeen, capture, review, undoReview, retype, link, checkProjectLink, linkProject, checkProjectAlias, setProjectAlias, projectAliases, checkJiraRoles, saveJiraRoles, bundleProjects, unbundleProjects, setBundleLead, restoreBundle, groupList, renameGroup, moveGroup, undoMoveGroup, recordProjectMove, takeProjectMove, attentionDismissed, dismissAttention, undismissAttention, outcome: id => read().items[id]?.outcome || '' };
 };

@@ -1293,3 +1293,65 @@ test('WP-W 회의 번호 없이 연결하면(오늘 미팅 줄) 예전처럼 오
   assert.equal((await items()).workflows.meetings.find(event => event.id === 'old').project, null, '지난 회차는 그때의 기록 그대로');
   await post('/api/meeting/set-project', { title, project: null });
 });
+
+// ---------- BBUNDLE: 프로젝트 묶어 보기 ----------
+// 화면에서만 묶는다 — `.workflow.json`의 `projectBundles` 표시 정보만 바뀌고 업무 파일(jira 칸)은 그대로다.
+test('BBUNDLE: 묶기·더하기·대표 바꾸기·풀기·되돌리기는 projectBundles만 바꾸고 업무 파일은 그대로', async () => {
+  const tasksBefore = readTasks();
+  assert.deepEqual((await items()).workflows.projectBundles, [], '칸이 없으면 묶음 없음');
+  const made = await post('/api/project/bundle', { project: 'jira:IO-1', add: ['jira:IO-2'] });
+  assert.equal(made.ok, true);
+  assert.equal(made.before, null);
+  assert.deepEqual({ lead: made.after.lead, keys: made.after.keys }, { lead: 'jira:IO-1', keys: ['jira:IO-1', 'jira:IO-2'] });
+  const id = made.after.id;
+  assert.match(id, /^bd_/);
+  // 한 키는 한 묶음에만 — 이미 묶음에 든 키를 또 묶으면 400.
+  const taken = await post('/api/project/bundle', { project: 'jira:IO-3', add: ['jira:IO-2'] });
+  assert.equal(taken.status, 400);
+  assert.match(taken.error, /이미 다른 묶음/);
+  assert.equal((await post('/api/project/bundle', { project: 'group:운영툴', add: ['jira:IO-9'] })).status, 400, '지금은 지라끼리만');
+  assert.equal((await post('/api/project/bundle', { project: 'jira:IO-5', add: ['jira:IO-5'] })).status, 400, '자기 자신과는 못 묶는다');
+  // 묶음 안의 키에서 더하면 그 묶음에 더해진다(id 그대로).
+  const grown = await post('/api/project/bundle', { project: 'jira:IO-2', add: ['jira:IO-3'] });
+  assert.deepEqual(grown.after.keys, ['jira:IO-1', 'jira:IO-2', 'jira:IO-3']);
+  assert.equal(grown.after.id, id);
+  // 대표 바꾸기 → 되돌리기(⌘Z) → 같은 되돌리기를 또 보내면 "그 사이 바뀜"으로 거절.
+  const lead = await post('/api/project/bundle-lead', { id, lead: 'jira:IO-3' });
+  assert.equal(lead.after.lead, 'jira:IO-3');
+  assert.equal((await post('/api/project/bundle-lead', { id, lead: 'jira:IO-8' })).status, 400, '묶음 밖 키는 대표가 될 수 없다');
+  assert.equal((await post('/api/project/bundle-restore', { id, before: lead.before, after: lead.after })).ok, true);
+  assert.equal((await items()).workflows.projectBundles[0].lead, 'jira:IO-1');
+  assert.equal((await post('/api/project/bundle-restore', { id, before: lead.before, after: lead.after })).status, 400, '지금이 after가 아니면 덮지 않는다');
+  // 풀기 → 되돌리기로 다시 묶임 → 다시 실행(redo)으로 다시 풀림.
+  const gone = await post('/api/project/unbundle', { id });
+  assert.deepEqual((await items()).workflows.projectBundles, []);
+  assert.equal((await post('/api/project/bundle-restore', { id, before: gone.before, after: null })).ok, true);
+  assert.deepEqual((await items()).workflows.projectBundles.map(bundle => bundle.keys.length), [3]);
+  assert.equal((await post('/api/project/bundle-restore', { id, before: null, after: gone.before })).ok, true);
+  assert.deepEqual((await items()).workflows.projectBundles, []);
+  // 되돌리는 사이 그 키가 다른 묶음에 들어갔으면 되돌리지 않는다(한 키 한 묶음).
+  await post('/api/project/bundle', { project: 'jira:IO-2', add: ['jira:IO-7'] });
+  assert.equal((await post('/api/project/bundle-restore', { id, before: gone.before, after: null })).status, 400);
+  assert.equal(readTasks(), tasksBefore, '업무 파일(jira 칸)은 하나도 바뀌지 않는다');
+});
+
+test('BBUNDLE: 옛 파일·깨진 값은 안전하게 거르고, 관련 없는 저장(옛 앱과 같은 "읽고 고쳐 통째로 쓰기")이 그 칸을 지우지 않는다', async () => {
+  const file = path.join(directory, '.workflow.json');
+  fs.writeFileSync(file, JSON.stringify({ items: {}, meetings: {}, projectBundles: [
+    { id: 'one', lead: 'jira:IO-1', keys: ['jira:IO-1'] },                                   // 키 1개 → 버림
+    { lead: 'jira:NO-1', keys: ['jira:IO-5', 'jira:IO-5', 'jira:IO-6'] },                  // lead 없음·중복 키 → 정리
+    { id: 'late', lead: 'jira:IO-7', keys: ['jira:IO-6', 'jira:IO-7', 'group:운영툴', 7] }, // IO-6은 앞 묶음 것 → 1개 → 버림
+    'garbage', null,
+  ] }));
+  const bundles = (await items()).workflows.projectBundles;
+  assert.equal(bundles.length, 1);
+  assert.deepEqual({ lead: bundles[0].lead, keys: bundles[0].keys }, { lead: 'jira:IO-5', keys: ['jira:IO-5', 'jira:IO-6'] });
+  assert.match(bundles[0].id, /^bd_/, 'id가 없으면 키로 지은 id');
+  await post('/api/workflow/item', { id: 'legacy', note: '관련 없는 저장' });
+  assert.equal(readJson(file).projectBundles.length, 5, '읽기만으로는 파일을 고쳐 쓰지 않고, 다른 저장도 칸을 그대로 둔다');
+  // 묶기 저장 때는 정리된 모양으로 쓴다.
+  await post('/api/project/bundle', { project: 'jira:IO-5', add: ['jira:IO-8'] });
+  assert.deepEqual(readJson(file).projectBundles.map(bundle => bundle.keys), [['jira:IO-5', 'jira:IO-6', 'jira:IO-8']]);
+  fs.writeFileSync(file, JSON.stringify({ items: {}, meetings: {}, projectBundles: 'x' }));
+  assert.deepEqual((await items()).workflows.projectBundles, [], '배열이 아니면 묶음 없음');
+});

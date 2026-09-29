@@ -950,6 +950,8 @@ function linkedJiraKeys() {
     const snapshot = workflows.snapshot();
     snapshot.items.forEach(item => add(item.jira));
     Object.values(snapshot.projectLinks || {}).forEach(add);
+    // 묶음(BBUNDLE)에 든 티켓도 — 대표 티켓이 끝나 내 담당 목록에서 빠져도 묶음 이름(요약)이 남게.
+    (snapshot.projectBundles || []).forEach(bundle => bundle.keys.forEach(key => add(key.slice('jira:'.length))));
   } catch { /* 목록은 곁들이는 값이다 — 못 모으면 기본 조회만 한다 */ }
   try {
     Object.values(readMeetingLinks()).forEach((value) => {
@@ -2538,6 +2540,12 @@ const handleRequest = (req, res) => {
     // 옮기기(BMOVE)의 되돌리기 — 이동 기록에 남은 id들만 반대로 돌린다. 지라를 다시 읽지 않는다
     // (에픽 검사는 옮길 때 한 번으로 충분하다).
     '/api/project/move-undo': undoMoveProject,
+    // 프로젝트 묶어 보기(BBUNDLE) — `.workflow.json`의 표시 정보(projectBundles)만 바꾼다. 항목의 jira 칸과
+    // 지라에는 아무것도 쓰지 않는다. 되돌리기(⌘Z·알림)는 bundle-restore가 "지금이 after일 때만" before로.
+    '/api/project/bundle': workflows.bundleProjects,
+    '/api/project/unbundle': workflows.unbundleProjects,
+    '/api/project/bundle-lead': workflows.setBundleLead,
+    '/api/project/bundle-restore': workflows.restoreBundle,
     // 삭제한 항목 완전히 지우기 — `.trash.json`에서 그 줄만 뺀다(업무 파일은 이미 그 줄이 없다).
     '/api/track/trash-purge': ({ id }) => purgeTrashItem(id),
     // 새 프로젝트 화면의 직군 세트. 지라에는 아무것도 묻지 않고 `.workflow.json` 한 칸만 바꾼다.
