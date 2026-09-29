@@ -2619,7 +2619,13 @@ const workflows = require('./workflow-store')({
   move: retypeTrackItem,
 });
 const batchTasks = usage.countBatch(require('./task-batch')({ files: listTrackerFiles, pattern: TRACK_RE, parse: parseFields, validateDate, today: todayLocal }), () => getReportRefs());
-const reportDrafts = require('./report-drafts')({ directory: TRACKER_DIR, sources: () => workflows.snapshot().items, legacy: parseWeeklyReports, currentWeek: currentWeekKey });
+// 주간요약 소제목: 묶음(projectBundles)은 그 묶음이 생긴 주부터 대표 이름 하나로 서고, 사람이 바꾼 소제목 옆의
+// 원래 프로젝트 이름은 지금 이름(별칭·지라 요약)으로 적는다 — 두 값 다 읽기만 한다.
+const reportDrafts = require('./report-drafts')({
+  directory: TRACKER_DIR, sources: () => workflows.snapshot().items, legacy: parseWeeklyReports, currentWeek: currentWeekKey,
+  bundles: () => workflows.snapshot().projectBundles,
+  projectLabel: key => (key.startsWith('jira:') ? projectLabelOf({ jira: key.slice('jira:'.length) }) : key.startsWith('group:') ? key.slice('group:'.length) : null),
+});
 const mutations = require('./mutation-store')(TRACKER_DIR, [MEETING_LINKS_PATH, weeklyReportStatePath()]);
 // 지라 직접 읽기. 설정이 없으면 `connected:false`만 돌려주고 아무 데도 접속하지 않는다.
 // 토큰 파일은 서버의 읽기 묶음(readScope)을 쓰지 않는다 — 요청마다 새로 읽고 들고 있지 않으려고.

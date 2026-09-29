@@ -42,13 +42,30 @@
   box-shadow: var(--soft); padding: 28px 32px 48px;
 }
 .rp-body { max-width: 720px; }
-.rp-hd { gap: 10px; margin-bottom: 2px; flex-wrap: wrap; }
-.rp-hd .rp-acts { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.rp-hd { gap: 8px; margin-bottom: 2px; flex-wrap: wrap; }
+.rp-hd .rp-acts { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.rp-hd .rp-acts .d-headnum { margin-left: 0; }
+.rp-ren .d-btn { height: 32px; }
 .rp-title { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
 .rp-hd .sub { color: var(--dim); font-size: 13.5px; font-weight: 500; font-variant-numeric: tabular-nums; }
 .rp-sum { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; font-size: 13px; color: var(--dim); }
 .rp-hint { font-size: 13px; color: var(--dim); }
 .rp-h + .rp-hint { margin-top: 8px; }
+
+/* 제목·소제목 글자가 곧 이름 바꾸기 자리다 — 평소에는 글자 그대로, 손이 닿으면 문장 줄과 같은 옅은 회색 판.
+   누르면 그 자리가 프로젝트 이름 바꾸기와 같은 부품(.d-pren)이 된다. */
+.rp-rename {
+  border: 0; background: none; padding: 0 4px; margin: 0 0 0 -4px; border-radius: var(--r-xs);
+  color: inherit; font: inherit; letter-spacing: inherit; text-align: left; cursor: text;
+  overflow-wrap: anywhere; transition: background 130ms var(--ease);
+}
+.rp-rename:hover { background: var(--hover); }
+.rp-rename:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.rp-title .d-pren, .rp-pj .d-pren { flex: 1 1 auto; margin: 0; }
+/* 바꾼 소제목 옆의 원래 프로젝트 — 색 점 + 조용한 이름(문장 줄의 `· 프로젝트`와 같은 크기·색) */
+.rp-pj .og { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 500; color: var(--dim); letter-spacing: 0; }
+/* `다듬은 뒤 새로 N`(조용한 글자 버튼)과 `모두 확인`은 요약 줄 오른쪽 끝에 선다 */
+.rp-sum .rp-since { color: var(--accent-text); font-weight: 600; }
 
 /* 상태 제목(작고 조용하게) → 프로젝트 제목(굵게) → 문장(가장 큰 본문) */
 .rp-h {
@@ -105,7 +122,10 @@
 .rp-s .rp-foldtoggle:hover { background: var(--hover); color: var(--text); }
 .rp-s .rp-foldtoggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .rp-s .rv { color: var(--warn); }
-.rp-s .nw { color: var(--accent-text); }
+.rp-s .nw { color: var(--accent-text); font-weight: 600; }
+/* 모으기·고르기 모드의 과녁 표시 — 누를 수 있는 줄 오른쪽의 읽기 전용 한 마디(버튼 모양만 빌린다, 누르는 것은 줄 전체). */
+.rp-s .rp-aim { display: flex; align-items: center; padding-top: 2px; pointer-events: none; }
+.rp-s .rp-aim .d-btn { height: 28px; }
 .rp-s .ac {
   display: flex; align-items: center; gap: 2px; padding-top: 2px;
   opacity: 0; pointer-events: none; transition: opacity 130ms var(--ease);
@@ -121,6 +141,8 @@
 }
 .rp-ta:focus { outline: none; background: var(--surface); box-shadow: 0 0 0 2px var(--accent); }
 .rp-s .ed { display: flex; gap: 4px; margin-top: 6px; }
+/* 줄 안의 `저장`(2차)과 `취소`(3차)는 같은 작은 높이로 선다(2차 기본 33px과 작은 형 32px이 어긋나지 않게). */
+.rp-s .ed .d-btn { height: 32px; }
 .rp-s .rp-help { margin-top: 5px; font-size: 12.5px; color: var(--dim); }
 
 /* 근거 업무 — 문장 아래로 들여쓴 목록(색 띠가 아니라 1px 선 하나) */
@@ -142,9 +164,16 @@
 .rp-sg .ac { display: flex; gap: 4px; margin-top: 8px; }
 .rp-sg .hint { margin-top: 6px; font-size: 12px; color: var(--dim); }
 
-/* 제외한 문장 — 문서 끝(다음 주 계획 위)에 접어 둔다 */
+/* 제외한 문장 — 문서 끝(다음 주 계획 위)에 접어 둔다. 접힘 표시는 브라우저 삼각형 대신 앱의 꺾쇠(펼치면 아래로). */
 .rp-ex { margin-top: 30px; padding-top: 12px; border-top: 1px solid var(--hair); }
-.rp-ex summary { font-size: 12.5px; font-weight: 600; color: var(--dim); cursor: pointer; padding: 4px 0; min-height: 28px; }
+.rp-ex summary {
+  display: flex; align-items: center; gap: 4px; list-style: none;
+  font-size: 12.5px; font-weight: 600; color: var(--dim); cursor: pointer; padding: 4px 0; min-height: 28px;
+}
+.rp-ex summary::-webkit-details-marker { display: none; }
+.rp-ex summary .d-i { transition: transform 130ms var(--ease); }
+.rp-ex[open] summary .d-i { transform: rotate(90deg); }
+.rp-ex summary:hover { color: var(--text); }
 .rp-ex .row {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center;
   padding: 4px 0; color: var(--muted); font-size: 13.5px; line-height: 1.6;

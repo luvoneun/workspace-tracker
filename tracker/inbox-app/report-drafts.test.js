@@ -768,3 +768,193 @@ test('한 줄로 모으기는 되돌릴 수 있고, 저장 파일을 새로 읽�
   const parent=fresh.view('2026-09-14').rows.find(row=>row.manual);
   assert.equal(parent.text,'소소한 작업 2건');
 });
+// ---------- 주간요약 다듬기 A: 고친 제목·소제목은 그대로, 새로 표시, 묶음 소제목 ----------
+// 소제목 이름은 프로젝트 열쇠(`jira:KEY`·`group:이름`)에 묶인다 — 이름을 바꾼 뒤 그 프로젝트에 새 업무가 들어와도
+// 바뀐 소제목 아래로 선다. 저장은 파일 맨 위 `weekPolish` 칸이고 문장 행에는 새 칸을 더하지 않는다.
+function polishFixture(t,{labels={},bundles=[],week='2026-09-14'}={}) {
+  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'report-polish-'));t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
+  const items=[
+    {id:'a',type:'task',description:'문구 검토하기',status:'done',created:'2026-09-14',completed:'2026-09-15',group:'가입',label:'가입'},
+    {id:'j1',type:'task',description:'정산 배치 점검하기',status:'done',created:'2026-09-14',completed:'2026-09-15',jira:'PAY-1',label:'PAY-1 · 결제 리뉴얼'},
+    {id:'j2',type:'task',description:'서버 로그 정리하기',status:'done',created:'2026-09-14',completed:'2026-09-15',jira:'PAY-2',label:'PAY-2 · 결제 서버'},
+  ];
+  const opts={directory,sources:()=>items,legacy:()=>[],currentWeek:()=>week,bundles:()=>bundles,projectLabel:key=>labels[key]||null};
+  const store=factory(opts);
+  const view=(key=week)=>store.view(key);
+  const change=(action,key=week)=>store.change({weekKey:key,revision:view(key).revision,...action});
+  const row=(text,key=week)=>view(key).rows.find(entry=>entry.text===text);
+  const file=path.join(directory,'.report-drafts.json');
+  const saved=()=>JSON.parse(fs.readFileSync(file,'utf8'));
+  return {directory,items,store,view,change,row,file,saved,labels,bundles,opts};
+}
+test('다듬기 A: 보고 제목은 저장되고 비우면 원래대로, 60자 넘거나 여러 줄이면 거절한다',t=>{
+  const f=polishFixture(t);
+  assert.equal(f.view().title,null,'고치기 전에는 제목이 없다(화면이 원래 이름을 쓴다)');
+  f.change({action:'retitle',text:'  9월 3주차 결제·가입 보고 '});
+  assert.equal(f.view().title,'9월 3주차 결제·가입 보고');
+  assert.equal(f.saved().weekPolish['2026-09-14'].title,'9월 3주차 결제·가입 보고','주 칸이 아니라 파일 맨 위 칸에 둔다');
+  assert.throws(()=>f.change({action:'retitle',text:'가'.repeat(61)}),/60자 이내 한 줄/);
+  assert.throws(()=>f.change({action:'retitle',text:'두\n줄'}),/60자 이내 한 줄/);
+  f.change({action:'retitle',text:''});
+  assert.equal(f.view().title,null);
+});
+test('다듬기 A: 소제목 이름은 그 소제목의 프로젝트에 묶이고, 새 업무도 바뀐 소제목 아래로 들어가며 원래 이름이 함께 온다',t=>{
+  const f=polishFixture(t,{labels:{'group:가입':'가입'}});
+  const a=f.row('문구 검토함');
+  assert.equal(a.groupKey,'group:가입');
+  assert.equal(a.shownGroup,undefined,'바꾸기 전에는 저장된 이름 그대로(따로 싣지 않는다)');
+  f.change({action:'rename',heading:'완료한 일',groupKey:'group:가입',text:'가입 개편 1차'});
+  const after=f.row('문구 검토함');
+  assert.deepEqual([after.shownGroup,after.groupOrigin,after.group],['가입 개편 1차','가입','가입'],'저장된 프로젝트 이름은 그대로, 보이는 이름만 바뀐다');
+  // 같은 프로젝트의 새 완료 업무(다른 주제) — 새 문장이 바뀐 소제목 아래로 선다.
+  f.items.push({id:'a2',type:'task',description:'약관 동의 화면 확인하기',status:'done',created:'2026-09-15',completed:'2026-09-16',group:'가입',label:'가입'});
+  assert.equal(f.row('약관 동의 화면 확인함').shownGroup,'가입 개편 1차');
+  // 같은 프로젝트라도 다른 소제목(진행중)은 따로다.
+  f.items.push({id:'a3',type:'task',description:'가입 퍼널 분석하기',status:'to-do',doing:'2026-09-15',created:'2026-09-15',group:'가입',label:'가입'});
+  assert.equal(f.row('가입 퍼널 분석하기').shownGroup,undefined);
+  // 문장·연결·프로젝트는 손대지 않았다.
+  assert.equal(f.saved().weeks['2026-09-14'].rows.every(row=>row.shownGroup===undefined&&row.groupKey===undefined&&row.groupOrigin===undefined),true,'계산한 칸은 행에 저장하지 않는다');
+  assert.throws(()=>f.change({action:'rename',heading:'완료한 일',groupKey:'group:없음',text:'x'}),/소제목을 찾을 수 없어요/);
+  assert.throws(()=>f.change({action:'rename',heading:'다음 주 계획',groupKey:'group:가입',text:'x'}),/소제목을 찾을 수 없어요/);
+  // 원래 이름과 같게 적거나 비우면 원래대로.
+  f.change({action:'rename',heading:'완료한 일',groupKey:'group:가입',text:'가입'});
+  assert.equal(f.row('문구 검토함').shownGroup,undefined);
+  assert.equal(f.saved().weekPolish['2026-09-14'].names,undefined);
+});
+test('다듬기 A: 소제목 이름을 바꾼 뒤 지라 요약이 바뀌어도 바꾼 이름은 그대로이고 원래 이름 표시는 새 이름이다',t=>{
+  const f=polishFixture(t,{labels:{'jira:PAY-1':'PAY-1 · 결제 리뉴얼'}});
+  f.change({action:'rename',heading:'완료한 일',groupKey:'jira:PAY-1',text:'결제 개편 1차'});
+  const locked=f.row('정산 배치 점검함');
+  f.change({action:'edit',id:locked.id,text:'정산 배치 점검 끝냄'});
+  // 지라에서 요약이 바뀜 — 서버가 입히는 label·projectLabel이 새 이름이 된다.
+  f.labels['jira:PAY-1']='PAY-1 · 결제 개편';
+  f.items[1].label='PAY-1 · 결제 개편';
+  f.items.push({id:'j3',type:'task',description:'환불 정책 반영하기',status:'done',created:'2026-09-15',completed:'2026-09-16',jira:'PAY-1',label:'PAY-1 · 결제 개편'});
+  const old=f.row('정산 배치 점검 끝냄'),fresh=f.row('환불 정책 반영함');
+  assert.deepEqual([old.shownGroup,old.groupOrigin],['결제 개편 1차','PAY-1 · 결제 개편']);
+  assert.deepEqual([fresh.shownGroup,fresh.groupOrigin],['결제 개편 1차','PAY-1 · 결제 개편'],'옛 이름으로 저장된 문장과 새 문장이 한 소제목으로 모인다');
+  assert.equal(old.text,'정산 배치 점검 끝냄','고친 문장은 그대로다');
+});
+test('다듬기 A: 프로젝트 이름 바꾸기(renameGroup)·에픽으로 옮기기(moveGroup)와 되돌리기 뒤에도 바꾼 소제목 이름이 따라간다',t=>{
+  const f=polishFixture(t,{labels:{'group:가입':'가입'}});
+  f.change({action:'rename',heading:'완료한 일',groupKey:'group:가입',text:'가입 개편 1차'});
+  f.change({action:'edit',id:f.row('문구 검토함').id,text:'가입 문구 다듬음'});
+  f.store.renameGroup('가입','가입 개선');
+  Object.assign(f.items[0],{group:'가입 개선',label:'가입 개선'});f.labels['group:가입 개선']='가입 개선';
+  let row=f.row('가입 문구 다듬음');
+  assert.deepEqual([row.groupKey,row.shownGroup,row.groupOrigin],['group:가입 개선','가입 개편 1차','가입 개선']);
+  assert.deepEqual(Object.keys(f.saved().weekPolish['2026-09-14'].names),['완료한 일|group:가입 개선']);
+  const ids=f.store.moveGroup('가입 개선','IO-9','IO-9 · 가입 에픽');
+  Object.assign(f.items[0],{group:undefined,jira:'IO-9',label:'IO-9 · 가입 에픽'});f.labels['jira:IO-9']='IO-9 · 가입 에픽';
+  row=f.row('가입 문구 다듬음');
+  assert.deepEqual([row.groupKey,row.shownGroup,row.groupOrigin],['jira:IO-9','가입 개편 1차','IO-9 · 가입 에픽']);
+  f.store.moveGroupUndo(ids,'가입 개선','IO-9','IO-9 · 가입 에픽');
+  Object.assign(f.items[0],{group:'가입 개선',jira:undefined,label:'가입 개선'});
+  row=f.row('가입 문구 다듬음');
+  assert.deepEqual([row.groupKey,row.shownGroup],['group:가입 개선','가입 개편 1차']);
+});
+test('다듬기 A: 옛 데이터(다듬기 칸 없음)는 지금과 같고 새로 표시가 없으며, 처음 다듬은 뒤 새로 들어온 줄만 새로다',t=>{
+  const f=polishFixture(t);
+  f.store.change({weekKey:'2026-09-14',revision:f.view().revision,action:'exclude',id:f.row('서버 로그 정리함').id});
+  // 옛 앱이 남긴 것처럼 다듬기 칸을 지운다.
+  const state=f.saved();delete state.weekPolish;fs.writeFileSync(f.file,JSON.stringify(state,null,2));
+  f.items.push({id:'n1',type:'task',description:'알림 배너 정리하기',status:'done',created:'2026-09-15',completed:'2026-09-16',group:'알림',label:'알림'});
+  const old=f.view();
+  assert.equal(old.since,null,'기록이 없으면 요약 줄도 없다');
+  assert.equal(old.rows.some(row=>row.fresh||row.changed),false);
+  // 처음 다듬기(문장 하나 고치기) — 지금 보이는 업무를 전부 본 것으로 적는다.
+  f.change({action:'edit',id:f.row('문구 검토함').id,text:'가입 문구 다듬음'});
+  assert.deepEqual(f.view().since&&[f.view().since.fresh,f.view().since.changed],[0,0]);
+  // 다듬은 뒤: 새 주제의 업무 → 새로, 기존 자동 문장에 붙는 업무 → 바뀜, 고친 문장에 붙는 업무 → 바뀜(제안).
+  f.items.push({id:'n2',type:'task',description:'운영툴 권한 재정리하기',status:'done',created:'2026-09-16',completed:'2026-09-17',group:'운영툴',label:'운영툴'});
+  f.items.push({id:'n3',type:'task',description:'알림 배너 문구 확인하기',status:'done',created:'2026-09-16',completed:'2026-09-17',group:'알림',label:'알림'});
+  f.items.push({id:'n4',type:'task',description:'문구 검토하기 후속',status:'done',created:'2026-09-16',completed:'2026-09-17',group:'가입',label:'가입'});
+  const now=f.view();
+  const by=id=>now.rows.find(row=>row.sourceIds.includes(id));
+  assert.equal(by('n2').fresh,true);
+  assert.equal(by('n1').changed,true,'자동 문장이 새 업무를 더 품었다');
+  assert.equal(by('a').changed,true,'고친 문장은 그대로 두고 제안으로 알린다');
+  assert.equal(by('a').text,'가입 문구 다듬음');
+  assert.equal(by('a').suggestion.added,1);
+  assert.deepEqual([now.since.fresh,now.since.changed],[1,2]);
+  assert.equal(now.rows.find(row=>row.excluded).fresh,undefined,'제외한 문장은 세지 않는다');
+  // 한 줄을 고치면 그 줄만 걷히고 다른 줄의 새로는 남는다.
+  f.change({action:'edit',id:by('n1').id,text:'알림 배너 정리·문구 확인함'});
+  assert.equal(f.view().rows.find(row=>row.sourceIds.includes('n2')).fresh,true);
+  assert.equal(f.view().rows.find(row=>row.sourceIds.includes('n1')).changed,undefined);
+  // 모두 확인 — 전부 걷힌다. 되돌리면 다시 선다.
+  const ack=f.change({action:'ackNew'});
+  assert.deepEqual([f.view().since.fresh,f.view().since.changed],[0,0]);
+  f.store.change({weekKey:'2026-09-14',revision:f.view().revision,action:'undo',token:ack.undoToken});
+  assert.equal(f.view().since.fresh,1);
+});
+test('다듬기 A: 다듬은 뒤 같은 업무가 되돌렸다 다시 완료되면 줄이 겹치지 않고, 원본이 지워진 고친 문장은 그대로 둔 채 표시만 한다',t=>{
+  const f=polishFixture(t);
+  f.change({action:'edit',id:f.row('문구 검토함').id,text:'가입 문구 다듬음'});
+  f.change({action:'ackNew'});
+  Object.assign(f.items[0],{status:'to-do',doing:'2026-09-16',completed:undefined});
+  Object.assign(f.items[0],{status:'done',completed:'2026-09-17',doing:undefined});
+  const rows=f.view().rows.filter(row=>row.sourceIds.includes('a')||row.suggestion?.sourceIds.includes('a'));
+  assert.equal(rows.length,1,'같은 업무의 줄은 하나다');
+  assert.equal(rows[0].fresh,undefined);
+  assert.equal(f.view().since.fresh,0);
+  // 원본 업무가 지워짐 — 문장은 그대로, 제안(원본 확인)과 바뀜 표시만.
+  f.items.splice(0,1);
+  const row=f.row('가입 문구 다듬음');
+  assert.equal(row.suggestion.missing,true);
+  assert.equal(row.changed,true);
+  assert.equal(row.text,'가입 문구 다듬음');
+});
+test('다듬기 A: 묶음은 그 묶음이 생긴 주의 보고부터 대표 이름 소제목 하나이고, 그 전 주 보고는 티켓별 그대로다',t=>{
+  const bundles=[{id:'bd_1',lead:'jira:PAY-1',keys:['jira:PAY-1','jira:PAY-2'],at:'2026-09-16T03:00:00.000Z'}];
+  const f=polishFixture(t,{bundles,labels:{'jira:PAY-1':'PAY-1 · 결제 리뉴얼'}});
+  const one=f.row('정산 배치 점검함'),two=f.row('서버 로그 정리함');
+  assert.deepEqual([one.groupKey,two.groupKey],['jira:PAY-1','jira:PAY-1']);
+  assert.deepEqual([one.shownGroup,two.shownGroup],[undefined,'PAY-1 · 결제 리뉴얼'],'묶인 티켓의 문장은 대표 이름 아래로');
+  assert.equal(two.group,'PAY-2 · 결제 서버','저장된 이름은 그대로다');
+  // 묶음 소제목도 이름을 바꿀 수 있다(열쇠는 대표).
+  f.change({action:'rename',heading:'완료한 일',groupKey:'jira:PAY-1',text:'결제 개편'});
+  assert.deepEqual([f.row('정산 배치 점검함').shownGroup,f.row('서버 로그 정리함').shownGroup],['결제 개편','결제 개편']);
+  // 묶음이 생기기 전 주 — 소급하지 않는다.
+  f.items.push({id:'p1',type:'task',description:'지난주 서버 점검하기',status:'done',created:'2026-09-07',completed:'2026-09-08',jira:'PAY-2',label:'PAY-2 · 결제 서버'});
+  const past=f.store.view('2026-09-07').rows.find(row=>row.sourceIds.includes('p1'));
+  assert.deepEqual([past.groupKey,past.shownGroup],['jira:PAY-2',undefined]);
+  // 생긴 때를 모르는 묶음은 이번 주부터만.
+  f.bundles[0].at=null;
+  assert.equal(f.store.view('2026-09-07').rows.find(row=>row.sourceIds.includes('p1')).shownGroup,undefined);
+  assert.equal(f.row('서버 로그 정리함').shownGroup,'결제 개편');
+});
+test('다듬기 A: 제목·소제목 이름 바꾸기는 되돌릴 수 있고, 다른 창의 변경과 겹치면 저장하지 않는다',t=>{
+  const f=polishFixture(t);
+  const stale=f.view().revision;
+  const done=f.change({action:'retitle',text:'결제 보고'});
+  assert.throws(()=>f.store.change({weekKey:'2026-09-14',revision:stale,action:'rename',heading:'완료한 일',groupKey:'group:가입',text:'x'}),error=>error.status===409);
+  f.store.change({weekKey:'2026-09-14',revision:f.view().revision,action:'undo',token:done.undoToken});
+  assert.equal(f.view().title,null);
+});
+test('다듬기 A: 옛 앱(1.2.1)이 보고를 저장해도 파일 맨 위의 다듬기 칸(제목·소제목 이름·새로 기록)은 남는다',t=>{
+  // 옛 앱의 report-drafts.js를 태그에서 꺼내 같은 파일에 실제로 저장시켜 본다(태그가 없는 복사본에서는 건너뛴다).
+  let source='';
+  try { source=require('node:child_process').execFileSync('git',['show','v1.2.1:tracker/inbox-app/report-drafts.js'],{cwd:__dirname,encoding:'utf8',stdio:['ignore','pipe','ignore']}); } catch {}
+  if(!source){t.skip('v1.2.1 태그를 읽을 수 없어요');return;}
+  const f=polishFixture(t);
+  f.change({action:'retitle',text:'결제 보고'});
+  f.change({action:'rename',heading:'완료한 일',groupKey:'group:가입',text:'가입 개편 1차'});
+  f.change({action:'edit',id:f.row('문구 검토함').id,text:'가입 문구 다듬음'});
+  const oldFile=path.join(f.directory,'old-report-drafts.js');
+  fs.writeFileSync(oldFile,source.replace("require('./safe-storage')",`require(${JSON.stringify(path.join(__dirname,'safe-storage'))})`));
+  const oldStore=require(oldFile)({directory:f.directory,sources:()=>f.items,legacy:()=>[],currentWeek:()=>'2026-09-14'});
+  const oldView=oldStore.view('2026-09-14');
+  oldStore.change({weekKey:'2026-09-14',revision:oldView.revision,action:'exclude',id:oldView.rows.find(row=>row.text==='서버 로그 정리함').id});
+  oldStore.renameGroup('운영툴','운영 도구');
+  const state=f.saved();
+  assert.equal(state.weekPolish['2026-09-14'].title,'결제 보고');
+  assert.equal(state.weekPolish['2026-09-14'].names['완료한 일|group:가입'],'가입 개편 1차');
+  assert.ok(state.weekPolish['2026-09-14'].seen.ids.a);
+  // 다시 새 앱으로 올라오면 고친 것이 그대로 보인다.
+  const back=factory(f.opts);
+  const view=back.view('2026-09-14');
+  assert.equal(view.title,'결제 보고');
+  assert.equal(view.rows.find(row=>row.text==='가입 문구 다듬음').shownGroup,'가입 개편 1차');
+  assert.equal(view.rows.find(row=>row.text==='서버 로그 정리함').excluded,true,'옛 앱에서 한 변경도 남는다');
+});
