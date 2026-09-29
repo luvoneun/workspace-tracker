@@ -334,6 +334,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 }
 .d-iconbtn:hover { background: var(--hover); color: var(--text); }
 .d-iconbtn.sm { width: 32px; height: 32px; }
+.d-iconbtn.xs { width: 28px; height: 28px; }
 .d-iconbtn.spinning { transform: rotate(360deg); color: var(--accent); }
 
 /* 세그먼트 — 회색 트랙 위 흰 손잡이. 보기 전환 전용이라 동작 버튼과 모양이 다르다. */
@@ -1275,8 +1276,23 @@ textarea.d-dtitle {
 .d-dpick .v > * { display: inline-flex; align-items: center; gap: 4px; }
 .d-dpick .cv { display: inline-flex; color: var(--dim); }
 .d-dpick .cv .d-i { transform: rotate(90deg); }
+/* 날짜 값의 아이콘은 달력이다(꺾쇠처럼 돌리지 않는다) */
+.d-dpick .cv.cal .d-i { transform: none; }
 .d-fields dd { margin: 0; min-width: 0; font-size: 14px; color: var(--text); font-variant-numeric: tabular-nums; }
-.d-dvalue { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* 날짜 값 한 줄: 값 글자(누르는 자리) + 바로 옆 작은 ✕. 길면 값 글자만 말줄임 */
+.d-dvalue { display: flex; align-items: center; gap: 4px; flex-wrap: nowrap; min-width: 0; }
+.d-dvalue > .d-dpick, .d-wait > .d-dpick { flex: 0 1 auto; min-width: 0; max-width: calc(100% + 12px); }
+.d-dvalue > .d-dpick .v, .d-wait > .d-dpick .v { display: block; overflow: hidden; text-overflow: ellipsis; }
+.d-dpick .cv { flex: none; }
+.d-dvalue > .d-iconbtn { margin: -2px 0 -2px 2px; color: var(--dim); }
+.d-dvalue > .d-iconbtn:hover { color: var(--text); }
+/* 기다리는 답변: 값 한 줄(+ 사라진 연결 안내). 누르면 같은 자리가 고르는 목록이 된다 */
+.d-wait { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
+.d-wait.is-picking { align-items: stretch; }
+/* 누구에게: 평소엔 값 글자처럼(바탕 없음), 올리면 옅은 면, 초점에서만 채움 + 파란 테 */
+.d-fields .d-mtext { width: calc(100% + 12px); height: 28px; margin: -2px -6px; padding: 0 6px; border-radius: var(--r-xs); background: none; font-size: 14px; }
+.d-fields .d-mtext:hover { background: var(--hover); }
+.d-fields .d-mtext:focus { background: var(--surface); }
 .d-fields .jira-control { display: flex; margin: 0; min-width: 0; flex-wrap: wrap; }
 .d-fields .jira-select, .d-fields .group-input {
   height: 32px; max-width: 100%; padding: 0 10px; border-radius: var(--r-sm);
@@ -1299,6 +1315,8 @@ textarea.d-dtitle {
   transition: box-shadow 170ms var(--ease), background 170ms var(--ease);
 }
 .d-din::placeholder { color: var(--dim); }
+/* 결정의 `내용`은 안내글이 두 줄이다 — 한 줄로 줄여 잡는 자동 높이(detailAutoGrow)에서도 비어 있을 때 두 줄은 보인다 */
+.d-dsec[data-sec="내용"] .d-din { min-height: 62px; }
 .d-din:focus { outline: none; background: var(--surface); box-shadow: 0 0 0 2px var(--accent); }
 .d-logline { font-size: 13px; line-height: 1.7; color: var(--muted); font-variant-numeric: tabular-nums; }
 .d-hint { font-size: 12.5px; color: var(--muted); }

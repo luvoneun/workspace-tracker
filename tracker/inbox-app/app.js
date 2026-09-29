@@ -242,15 +242,70 @@ document.addEventListener('click', (event) => {
 // 날짜 칸 한 벌. 비어 있으면 `+ 기한`, 누르면 그 자리에서 고르고 ✕로 지운다.
 // shown: 고른 날짜를 브라우저 기본 표기(10/02/2026) 대신 앱의 날짜 글자(`10월 2일 (금)`)로 보인다 —
 // 누르면 그 자리에서 날짜 입력칸으로 바뀌고(되는 브라우저면 달력까지 연다), 고르면 다시 글자로 돌아온다.
-function uiDateField({ value, label = '기한', onChange, clearable = true, shown = false }) {
+// describe(value) → { text, tone }: 얼굴 글자(말투 포함, `9월 29일 (화) · 기한 1일 지남`). 없으면 uiKoDate.
+// face: 'pick'이면 상세 카드의 값 모양(.d-dpick — 값 + 달력 아이콘)이다. 빈 칸도 `+ 기한` 대신 회색 `없음` 한 조각,
+//   ✕는 값 바로 옆의 작은 버튼. 입력칸은 Enter·Tab·바깥 누름·달력에서 고르기로 확정하고, Esc는 입력칸만 닫는다.
+//   기본(face 없음)은 회의 정리 초안의 모양(.d-dateinput.is-shown) 그대로다.
+// 어느 모양이든 입력칸을 비운 change(편집 중 지움·일부만 남김)는 저장하지 않는다 — 지우기는 ✕만 한다.
+function uiDateField({ value, label = '기한', onChange, clearable = true, shown = false, describe = null, face: faceKind = '' }) {
+  const pick = faceKind === 'pick';
   const wrap = document.createElement('span');
-  wrap.className = 'd-datefield';
+  wrap.className = pick ? 'd-datefield d-dvalue' : 'd-datefield';
   let current = value || '';
   let editing = false;
+  // 입력칸 밖을 누르면 확정하는 감시(pick만). 다시 그릴 때마다 걷는다.
+  let stopOutside = null;
+  const quitOutside = () => { if (stopOutside) { stopOutside(); stopOutside = null; } };
+  const focusFace = () => { wrap.querySelector('.d-dpick')?.focus?.(); };
+  // 확정: 빈 값은 무시하고(입력칸이 그대로 남는다), 같은 날짜면 저장하지 않고 글자로만 돌아간다.
+  const commit = (next, refocus) => {
+    if (!next) return;
+    editing = false;
+    const changed = next !== current;
+    current = next;
+    if (changed) onChange(current);
+    draw();
+    if (refocus) focusFace();
+  };
+  const revert = (refocus) => {
+    editing = false;
+    draw();
+    if (refocus) focusFace();
+  };
+
+  // 입력칸을 떠날 때(pick): 고친 날짜가 있으면 확정, 비었거나 그대로면 원래 글자로.
+  const leave = () => {
+    if (!editing) return;
+    const input = wrap.querySelector('.d-dateinput');
+    const next = input ? input.value : '';
+    if (next && next !== current) commit(next, false);
+    else revert(false);
+  };
+  if (pick) {
+    // 초점이 이 칸(입력칸·✕) 밖의 다른 곳으로 갔을 때만 떠난 것으로 본다 — 입력칸에서 ✕로 Tab한 뒤 더 나가도 잡힌다.
+    // 달력이 열리며 잠깐 비는 초점(relatedTarget 없음)은 기다린다(바깥 누름은 아래 mousedown 감시가 맡는다).
+    wrap.addEventListener('focusout', (event) => {
+      const to = event && event.relatedTarget;
+      if (!to || (typeof wrap.contains === 'function' && wrap.contains(to))) return;
+      leave();
+    });
+  }
+
+  const faceText = () => {
+    const described = typeof describe === 'function' ? describe(current) : null;
+    return described && described.text ? described : { text: uiKoDate(current), tone: '' };
+  };
+  const openInput = () => {
+    editing = true;
+    draw();
+    const input = wrap.querySelector(pick ? '.d-dateinput' : 'input');
+    try { input?.showPicker?.(); } catch { /* 달력을 못 열면 입력칸에 초점만 둔다 */ }
+  };
 
   const draw = () => {
+    quitOutside();
     wrap.replaceChildren();
-    if (!current && !editing) {
+    if (!current && !editing && !pick) {
       const open = document.createElement('button');
       open.type = 'button';
       open.className = 'd-btn sm';
@@ -259,41 +314,94 @@ function uiDateField({ value, label = '기한', onChange, clearable = true, show
       wrap.appendChild(open);
       return;
     }
-    if (shown && current && !editing) {
+    if (pick && !editing) {
+      // 값 글자가 곧 누르는 자리 — 급함 색은 글자에만, 오른쪽에 달력 아이콘.
+      const { text, tone } = current ? faceText() : { text: '없음', tone: '' };
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'd-dpick';
+      button.setAttribute('aria-label', current ? `${label} ${text} — 바꾸기` : `${label} 없음 — 정하기`);
+      const shownText = document.createElement('span');
+      shownText.className = 'v' + (current ? uiTone(tone) : ' k-mute');
+      shownText.textContent = text;
+      shownText.title = text;
+      const icon = document.createElement('span');
+      icon.className = 'cv cal';
+      icon.innerHTML = uiIcon('calendar');
+      button.append(shownText, icon);
+      button.addEventListener('click', openInput);
+      wrap.appendChild(button);
+    } else if (shown && current && !editing) {
+      const { text, tone } = faceText();
       const face = document.createElement('button');
       face.type = 'button';
-      face.className = 'd-dateinput is-shown';
-      face.textContent = uiKoDate(current);
-      face.setAttribute('aria-label', `${label} ${uiKoDate(current)} — 바꾸기`);
-      face.addEventListener('click', () => {
-        editing = true;
-        draw();
-        const input = wrap.querySelector('input');
-        try { input?.showPicker?.(); } catch { /* 달력을 못 열면 입력칸에 초점만 둔다 */ }
-      });
+      face.className = 'd-dateinput is-shown' + uiTone(tone);
+      face.textContent = text;
+      face.setAttribute('aria-label', `${label} ${text} — 바꾸기`);
+      face.addEventListener('click', openInput);
       wrap.appendChild(face);
     }
-    const input = shown && current && !editing ? null : document.createElement('input');
+    const input = (pick || shown) && !editing && (pick || current) ? null : document.createElement('input');
     if (input) {
       input.type = 'date';
       input.className = 'd-dateinput';
       input.value = current;
       input.setAttribute('aria-label', label);
-      input.addEventListener('change', () => {
-        current = input.value;
-        editing = false;
-        onChange(current || null);
-        draw();
-      });
+      if (pick) {
+        // 숫자를 치는 동안에도 브라우저가 change를 보낸다(크롬) — 그때는 확정하지 않고 Enter·Tab·바깥 누름을 기다린다.
+        // 달력에서 고른 change는 키 입력과 떨어져 오므로 곧바로 확정한다.
+        let keyAt = 0;
+        input.addEventListener('keydown', (event) => {
+          if (event.isComposing) return; // 한글 조합 중의 Esc·Enter는 넘긴다
+          if (event.key === 'Escape') {
+            // 입력칸만 닫는다 — 문서의 Esc 스택(카드 닫기)까지 가지 않게 여기서 멈춘다.
+            event.preventDefault();
+            event.stopPropagation();
+            revert(true);
+            return;
+          }
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            // 빈 칸의 Enter는 무시한다(저장하지 않고 칸도 그대로). 같은 날짜면 commit이 글자로만 돌려놓는다.
+            commit(input.value, true);
+            return;
+          }
+          if (event.key !== 'Tab') keyAt = Date.now();
+        });
+        input.addEventListener('change', () => {
+          if (!input.value) return;
+          if (Date.now() - keyAt < 250) return;
+          commit(input.value, true);
+        });
+        if (editing && typeof document.addEventListener === 'function') {
+          const outside = (event) => {
+            if (!wrap.isConnected) { quitOutside(); return; }
+            if (typeof wrap.contains === 'function' && wrap.contains(event.target)) return;
+            leave();
+          };
+          document.addEventListener('mousedown', outside, true);
+          stopOutside = () => document.removeEventListener?.('mousedown', outside, true);
+        }
+      } else {
+        input.addEventListener('change', () => {
+          if (!input.value) return; // 비운 칸은 저장하지 않는다 — 지우기는 ✕
+          current = input.value;
+          editing = false;
+          onChange(current);
+          draw();
+        });
+        // 비운 채 떠나면 원래 날짜를 다시 보인다(다시 그리지 않는다 — 열린 달력을 닫지 않게).
+        input.addEventListener('blur', () => { if (!input.value && current) input.value = current; });
+      }
       wrap.appendChild(input);
     }
     if (current && clearable) {
       const clear = document.createElement('button');
       clear.type = 'button';
-      clear.className = 'd-iconbtn sm';
+      clear.className = pick ? 'd-iconbtn xs' : 'd-iconbtn sm';
       clear.setAttribute('aria-label', `${label} 지우기`);
       clear.innerHTML = uiIcon('close');
-      clear.addEventListener('click', () => { current = ''; editing = false; onChange(null); draw(); });
+      clear.addEventListener('click', () => { current = ''; editing = false; onChange(null); draw(); if (pick) focusFace(); });
       wrap.appendChild(clear);
     }
     if (editing && input) input.focus();
@@ -3018,27 +3126,10 @@ function panelField(dl, label, value) {
   return cell;
 }
 
-// 날짜 한 칸: 값이 있으면 `오늘까지` 같은 말투를 같이 적고, 비어 있으면 `없음` + `+ 기한`.
+// 날짜 한 칸: 값 글자(`9월 29일 (화) · 기한 1일 지남`)가 곧 누르는 자리다. 비어 있으면 회색 `없음` 한 조각.
 // `까지`는 기한에만 쓴다 — 다시 확인할 날짜처럼 기한이 아닌 날짜는 날짜만 적는다.
 function panelDateCell(label, value, onChange, deadline = true) {
-  const wrap = document.createElement('span');
-  wrap.className = 'd-dvalue';
-  const detail = deadline ? uiDueDetail(value) : value ? { text: uiKoDate(value), tone: '' } : null;
-  if (detail) {
-    // 날짜 입력칸은 브라우저 말투로 날짜를 적는다 — 한국어 날짜와 의미는 옆에 글자로 따로 적는다.
-    const note = document.createElement('span');
-    note.className = uiTone(detail.tone).trim() || 'k-mute';
-    note.textContent = detail.text;
-    wrap.appendChild(note);
-  }
-  if (!value) {
-    const none = document.createElement('span');
-    none.className = 'k-mute';
-    none.textContent = '없음';
-    wrap.appendChild(none);
-  }
-  wrap.appendChild(uiDateField({ value, label, onChange }));
-  return wrap;
+  return uiDateField({ value, label, onChange, shown: true, face: 'pick', describe: deadline ? uiDueDetail : v => ({ text: uiKoDate(v), tone: '' }) });
 }
 
 // 상세의 값은 읽기만 하는 글자가 아니다 — 눌러서 그 자리에서 고친다.
@@ -3156,6 +3247,7 @@ function panelTask({ item, detail, type }, box) {
   if (isTask) panelField(fields, '우선순위', panelPickCell('우선순위', panelPriorityCell(item),
     () => [[{ field: '우선순위', control: taskPriorityControl(item) }]]));
   panelField(fields, '프로젝트', taskProjectControl(item));
+  if (isTask) panelField(fields, '기다리는 답변', panelWaitingCell(item, detail));
   box.appendChild(fields);
 
   const foot = document.createElement('div');
@@ -3239,41 +3331,105 @@ function panelCopyLink(permalink) {
   } catch { announce('복사하지 못했어요. 링크를 길게 눌러 복사해 주세요'); }
 }
 
-// `기다리는 답변`과 `결과 한 줄`은 기본으로 펼쳐 둔다(접어 두면 아무도 적지 않았다).
+// `결과 한 줄`은 기본으로 펼쳐 둔다(접어 두면 아무도 적지 않았다).
 function panelTaskNotes(item, detail, box) {
-  const current = { blockedBy: detail?.blockedBy || '', outcome: detail?.outcome || '' };
+  const current = { outcome: detail?.outcome || '' };
   const initial = { ...current };
   const save = async () => {
     try {
       if (await panelFieldSave(item.id, initial, current)) await load();
     } catch { /* 저장 실패는 request()가 알린다 — 적은 내용은 그대로 둔다 */ }
   };
+  box.appendChild(panelOutcomeSection('결과 한 줄', '끝나고 한 줄로 남기면 주간요약에 그대로 올라가요', current, save));
+}
 
-  const waiting = panelSection('기다리는 답변');
+// 기다리는 답변(필드 격자의 한 줄): 값 `설명 · 누구에게`(없으면 회색 `연결 없음`) + 꺾쇠.
+// 누르면 그 자리에서 프로젝트 고르기와 같은 목록(uiPickList)이 펼쳐진다 — 열린 확인 대기 + 맨 끝 `연결 끊기`.
+// 저장 길은 예전 선택 상자와 같다(blockedBy → /api/workflow/item, 알림 없음).
+function panelWaitingCell(item, detail) {
+  const current = { blockedBy: detail?.blockedBy || '' };
+  const initial = { ...current };
+  const save = async () => {
+    try {
+      if (await panelFieldSave(item.id, initial, current)) await load();
+    } catch { /* 저장 실패는 request()가 알린다 */ }
+  };
   const checks = (typeof workflowData === 'object' && workflowData ? workflowData.items : [])
     .filter(check => check.type === 'check' && (check.status !== 'done' || check.id === current.blockedBy));
-  const select = document.createElement('select');
-  select.className = 'd-msel wide';
-  select.setAttribute('aria-label', '기다리는 답변');
-  [['', '연결 없음'], ...checks.map(check => [check.id, `${check.status === 'done' ? '해결됨 · ' : ''}${check.description}`])]
-    .forEach(([value, text]) => {
-      const option = document.createElement('option');
-      option.value = value;
-      option.textContent = text;
-      if (value === current.blockedBy) option.selected = true;
-      select.appendChild(option);
-    });
-  select.addEventListener('change', () => { current.blockedBy = select.value; save(); });
-  waiting.appendChild(select);
+  const name = check => `${check.status === 'done' ? '해결됨 · ' : ''}${check.description}`;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'd-wait';
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'd-dpick';
+  button.setAttribute('aria-haspopup', 'listbox');
+  button.setAttribute('aria-expanded', 'false');
+  const value = document.createElement('span');
+  const caret = document.createElement('span');
+  caret.className = 'cv';
+  caret.innerHTML = uiIcon('chevron');
+  button.append(value, caret);
+  const paint = () => {
+    const linked = checks.find(check => check.id === current.blockedBy);
+    // 연결은 남았는데 대상이 없으면(삭제됨) `연결 없음`이 아니라 사라졌다고 적는다 — 목록에서 `연결 끊기`로 정리한다.
+    const text = linked ? `${name(linked)}${linked.who ? ` · ${linked.who}` : ''}`
+      : current.blockedBy ? '삭제된 확인 대기' : '연결 없음';
+    value.className = linked ? 'v' : 'v k-mute';
+    value.textContent = text;
+    value.title = text;
+    button.setAttribute('aria-label', `기다리는 답변 ${text} — 눌러서 바꾸기`);
+  };
+  paint();
+  wrap.appendChild(button);
   if (current.blockedBy && !checks.some(check => check.id === current.blockedBy)) {
     const gone = document.createElement('div');
     gone.className = 'd-hint';
     gone.textContent = '연결했던 확인 대기가 삭제됐어요.';
-    waiting.appendChild(gone);
+    wrap.appendChild(gone);
   }
-  box.appendChild(waiting);
 
-  box.appendChild(panelOutcomeSection('결과 한 줄', '끝나고 한 줄로 남기면 주간요약에 그대로 올라가요', current, save));
+  // 펼치는 방식은 프로젝트 고르기(renderGroupControl의 openPicker)와 같다 — 값 자리를 목록으로 바꿔 끼운다.
+  const openPicker = () => {
+    const entries = checks.map(check => ({
+      type: 'option', value: check.id, text: name(check), key: check.who || '',
+      selected: check.id === current.blockedBy, find: [check.description, check.who],
+    }));
+    if (current.blockedBy) entries.push({ type: 'action', value: PICK_CLEAR, text: '연결 끊기' });
+    const restore = (focus) => {
+      wrap.classList.remove('is-picking');
+      button.setAttribute('aria-expanded', 'false');
+      if (wrap.contains(picker)) wrap.replaceChild(button, picker);
+      if (focus) button.focus();
+    };
+    const picker = uiPickList({
+      entries,
+      label: '기다리는 답변 고르기',
+      search: uiPickSearchable(entries),
+      placeholder: '확인 대기 찾기',
+      emptyText: '찾는 확인 대기가 없어요',
+      onClose: byKeyboard => restore(byKeyboard),
+      onPick: (picked) => {
+        restore(true);
+        current.blockedBy = picked === PICK_CLEAR ? '' : picked;
+        paint();
+        save();
+      },
+    });
+    if (!checks.length) {
+      // 고를 확인 대기가 하나도 없으면 빈 목록 대신 한 줄로 말한다(찾기 칸의 `없어요` 자리를 빌린다).
+      const none = picker.querySelector('.d-gpnone');
+      if (none) { none.textContent = '열린 확인 대기가 없어요'; none.hidden = false; }
+    }
+    wrap.replaceChild(picker, button);
+    wrap.classList.add('is-picking');
+    button.setAttribute('aria-expanded', 'true');
+    picker.focusStart();
+    // 고를 줄이 없어도 Esc·바깥 누름으로 닫히게 목록 자체에 초점을 둔다.
+    if (!entries.length) { picker.tabIndex = -1; picker.focus(); }
+  };
+  button.addEventListener('click', (event) => { event.stopPropagation(); openPicker(); });
+  return wrap;
 }
 
 // 결정의 `내용` — 정책 결정은 제목 한 줄로 끝나지 않는다. 여러 줄로 적고, 저장은 앱 파일
