@@ -482,6 +482,19 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     write(state);
     return { ok: true, id, answerSeen };
   }
+  // 되돌리기(알림의 `되돌리기`·⌘Z): 그 업무의 확인 표시만 지운다 — 줄이 리마인드에 다시 선다.
+  function unmarkAnswerSeen(body) {
+    const id = body && body.id;
+    if (typeof id !== 'string' || !refs()[id]) throw new Error('항목을 찾을 수 없어요.');
+    const state = read();
+    const entry = state.items[id];
+    if (!entry || !entry.answerSeen) return { ok: true, id, changed: false };
+    const next = { ...entry };
+    delete next.answerSeen;
+    state.items[id] = next;
+    write(state);
+    return { ok: true, id, changed: true };
+  }
 
   // ---------- 담은 항목의 종류 바꾸기 ----------
   // 새 항목을 만들지 않는다 — 같은 id로 업무 파일의 줄만 옮긴다(move). 회의 연결(state.items[id].meetingId)과
@@ -520,5 +533,5 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     write(state);
     return { ok: true };
   }
-  return { archive, snapshot, patchItem, saveMeeting, syncProject, meetingItemIds, markAnswerSeen, capture, review, undoReview, retype, link, checkProjectLink, linkProject, checkProjectAlias, setProjectAlias, projectAliases, checkJiraRoles, saveJiraRoles, groupList, renameGroup, moveGroup, undoMoveGroup, recordProjectMove, takeProjectMove, attentionDismissed, dismissAttention, undismissAttention, outcome: id => read().items[id]?.outcome || '' };
+  return { archive, snapshot, patchItem, saveMeeting, syncProject, meetingItemIds, markAnswerSeen, unmarkAnswerSeen, capture, review, undoReview, retype, link, checkProjectLink, linkProject, checkProjectAlias, setProjectAlias, projectAliases, checkJiraRoles, saveJiraRoles, groupList, renameGroup, moveGroup, undoMoveGroup, recordProjectMove, takeProjectMove, attentionDismissed, dismissAttention, undismissAttention, outcome: id => read().items[id]?.outcome || '' };
 };

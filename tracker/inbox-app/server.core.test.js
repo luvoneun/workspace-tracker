@@ -1169,11 +1169,12 @@ test('WP-W 답변 확인: 답이 온 업무에만 적고(흐름 기록 칸 하�
   assert.equal(moved.answerSeen, undefined);
 });
 
-test('WP-W 지난 회의에서 프로젝트를 연결하면 그 회의도 바뀌고, 이미 담은 항목은 `옮기기`로만 옮겨지며 한 번에 되돌린다', async (t) => {
+test('WP-W 지난 회의에서 프로젝트를 연결하면 그 회의도 바뀌고, 이미 담은 항목은 `옮기기`로만 옮겨지며(아이디어 포함·끝낸 것 거절) 한 번에 되돌린다, 해제는 `빼기`', async (t) => {
   const checksPath = path.join(directory, 'checks.md');
   const decisionsPath = path.join(directory, 'decisions.md');
+  const ideasPath = path.join(directory, 'ideas.md');
   const calendarPath = path.join(directory, 'calendar_today.md');
-  const keep = [checksPath, decisionsPath, calendarPath].map(file => [file, fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null]);
+  const keep = [checksPath, decisionsPath, ideasPath, calendarPath].map(file => [file, fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null]);
   const linksPath = path.join(directory, '.meeting_links.json');
   const linksBefore = fs.existsSync(linksPath) ? fs.readFileSync(linksPath, 'utf8') : null;
   t.after(() => {
@@ -1182,10 +1183,11 @@ test('WP-W 지난 회의에서 프로젝트를 연결하면 그 회의도 바뀌
   });
   const title = 'WP-W 결제 주간';
   fs.writeFileSync(checksPath, `# Checks\n- 법무 회신 #check[id:wpw-c status:to-do priority:medium created:${today} group:가입_개선]\n`);
-  fs.writeFileSync(decisionsPath, `# Decisions\n- 정산은 매주 #decision[id:wpw-d status:done priority:medium created:${today} completed:${today} jira:IO-9]\n`);
+  fs.writeFileSync(decisionsPath, `# Decisions\n- 정산은 매주 #decision[id:wpw-d status:to-do priority:medium created:${today} jira:IO-9]\n- 끝낸 결정 #decision[id:wpw-done status:done priority:medium created:${today} completed:${today}]\n`);
+  fs.writeFileSync(ideasPath, `# Ideas\n- 결제 화면 개선 아이디어 #idea[id:wpw-i status:to-do created:${today}]\n`);
   fs.appendFileSync(tasksPath, `- 이미 그 프로젝트 #task[id:wpw-same status:to-do priority:medium created:${today} group:결제_리뉴얼]\n- 다른 회의 #task[id:wpw-other status:to-do priority:medium created:${today}]\n`);
   fs.writeFileSync(path.join(directory, '.workflow.json'), JSON.stringify({
-    items: { legacy: { meetingId: 'wpw-past' }, 'wpw-c': { meetingId: 'wpw-past' }, 'wpw-d': { meetingId: 'wpw-past' }, 'wpw-same': { meetingId: 'wpw-past' } },
+    items: { legacy: { meetingId: 'wpw-past' }, 'wpw-c': { meetingId: 'wpw-past' }, 'wpw-d': { meetingId: 'wpw-past' }, 'wpw-same': { meetingId: 'wpw-past' }, 'wpw-i': { meetingId: 'wpw-past' }, 'wpw-done': { meetingId: 'wpw-past' } },
     meetings: { 'wpw-past': { id: 'wpw-past', date: shifted(-7), start: '10:00', end: '11:00', title, series: title, project: null } },
   }));
 
@@ -1197,30 +1199,40 @@ test('WP-W 지난 회의에서 프로젝트를 연결하면 그 회의도 바뀌
   assert.equal(readTasks(), tasksBefore, '연결만으로는 이미 담은 항목이 옮겨지지 않는다');
   assert.equal(readJson(linksPath)[title], 'group:결제 리뉴얼');
 
-  // ② 옮기기: 보여 준 번호만, 이미 그 프로젝트인 것은 세지 않는다. 다른 회의 항목·아이디어는 거절(아무것도 안 바뀜).
+  // ② 거절: 다른 회의 항목·끝낸 항목·틀린 프로젝트 — 하나라도 틀리면 전부 그대로(한 트랜잭션).
   assert.equal((await post('/api/meeting/move-items', { meetingId: 'wpw-past', project: 'group:결제 리뉴얼', ids: ['legacy', 'wpw-other'] })).status, 400);
-  assert.equal(readTasks(), tasksBefore, '하나라도 틀리면 전부 그대로다(한 트랜잭션)');
+  assert.equal((await post('/api/meeting/move-items', { meetingId: 'wpw-past', project: 'group:결제 리뉴얼', ids: ['legacy', 'wpw-done'] })).status, 400, '끝낸 항목은 옮기지 않는다');
+  assert.equal(readTasks(), tasksBefore);
   assert.equal((await post('/api/meeting/move-items', { meetingId: 'wpw-past', project: 'nope', ids: ['legacy'] })).status, 400);
-  const moved = await post('/api/meeting/move-items', { meetingId: 'wpw-past', project: 'group:결제 리뉴얼', ids: ['legacy', 'wpw-c', 'wpw-d', 'wpw-same'] });
+  // ③ 옮기기: 보여 준 번호만, 이미 그 프로젝트인 것은 세지 않는다. 아이디어는 제 프로젝트 칸으로.
+  const moved = await post('/api/meeting/move-items', { meetingId: 'wpw-past', project: 'group:결제 리뉴얼', ids: ['legacy', 'wpw-c', 'wpw-d', 'wpw-same', 'wpw-i'] });
   assert.equal(moved.ok, true);
-  assert.equal(moved.count, 3);
-  assert.deepEqual(moved.moved, [{ id: 'legacy', from: null }, { id: 'wpw-c', from: 'group:가입 개선' }, { id: 'wpw-d', from: 'jira:IO-9' }]);
-  const after = (await items()).workflows.items;
-  const keyOf = id => { const item = after.find(entry => entry.id === id); return item.jira ? `jira:${item.jira}` : item.group ? `group:${item.group}` : null; };
-  assert.deepEqual(['legacy', 'wpw-c', 'wpw-d', 'wpw-same', 'wpw-other'].map(keyOf),
-    ['group:결제 리뉴얼', 'group:결제 리뉴얼', 'group:결제 리뉴얼', 'group:결제 리뉴얼', null], '지라에 있던 결정도 옮겨지고(지라 칸은 빠진다), 다른 회의 항목은 그대로');
-  assert.match(fs.readFileSync(decisionsPath, 'utf8'), /id:wpw-d [^\]]*group:결제_리뉴얼/);
+  assert.equal(moved.count, 4);
+  assert.deepEqual(moved.moved, [{ id: 'legacy', from: null }, { id: 'wpw-c', from: 'group:가입 개선' }, { id: 'wpw-d', from: 'jira:IO-9' }, { id: 'wpw-i', from: null }]);
+  const keyAll = async () => { const list = (await items()).workflows.items; return id => { const item = list.find(entry => entry.id === id); return item.jira ? `jira:${item.jira}` : (item.group || item.project) ? `group:${item.group || item.project}` : null; }; };
+  let keyOf = await keyAll();
+  assert.deepEqual(['legacy', 'wpw-c', 'wpw-d', 'wpw-same', 'wpw-i', 'wpw-other', 'wpw-done'].map(keyOf),
+    ['group:결제 리뉴얼', 'group:결제 리뉴얼', 'group:결제 리뉴얼', 'group:결제 리뉴얼', 'group:결제 리뉴얼', null, null]);
+  assert.match(fs.readFileSync(ideasPath, 'utf8'), /id:wpw-i [^\]]*project:결제_리뉴얼/, '아이디어는 project 칸(아이디어의 프로젝트 규칙)');
   assert.doesNotMatch(fs.readFileSync(decisionsPath, 'utf8'), /jira:IO-9/);
 
-  // ③ 되돌리기: 그 사이 사람이 다른 프로젝트로 바꾼 것은 건너뛴다.
+  // ④ 되돌리기: 그 사이 사람이 다른 프로젝트로 바꾼 것은 건너뛴다.
   await post('/api/track/set-group', { id: 'wpw-c', group: '운영툴' });
   const undo = await post('/api/meeting/move-items-undo', { meetingId: 'wpw-past', project: 'group:결제 리뉴얼', moved: moved.moved });
-  assert.deepEqual({ restored: undo.restored, skipped: undo.skipped }, { restored: 2, skipped: 1 });
-  const back = (await items()).workflows.items;
-  const keyBack = id => { const item = back.find(entry => entry.id === id); return item.jira ? `jira:${item.jira}` : item.group ? `group:${item.group}` : null; };
-  assert.deepEqual(['legacy', 'wpw-c', 'wpw-d', 'wpw-same'].map(keyBack), [null, 'group:운영툴', 'jira:IO-9', 'group:결제 리뉴얼']);
+  assert.deepEqual({ restored: undo.restored, skipped: undo.skipped }, { restored: 3, skipped: 1 });
+  keyOf = await keyAll();
+  assert.deepEqual(['legacy', 'wpw-c', 'wpw-d', 'wpw-same', 'wpw-i'].map(keyOf), [null, 'group:운영툴', 'jira:IO-9', 'group:결제 리뉴얼', null]);
 
-  // ④ 같은 제목의 앞으로 회의(오늘 캘린더)에 새로 담는 항목은 연결된 프로젝트로 간다.
+  // ⑤ 빼기(해제 뒤): project null이면 그 항목들의 프로젝트를 비운다 — 아이디어도. 되돌리면 돌아온다.
+  const removed = await post('/api/meeting/move-items', { meetingId: 'wpw-past', project: null, ids: ['wpw-same'] });
+  assert.deepEqual(removed.moved, [{ id: 'wpw-same', from: 'group:결제 리뉴얼' }]);
+  keyOf = await keyAll();
+  assert.equal(keyOf('wpw-same'), null);
+  assert.deepEqual((await post('/api/meeting/move-items-undo', { meetingId: 'wpw-past', project: null, moved: removed.moved })).restored, 1);
+  keyOf = await keyAll();
+  assert.equal(keyOf('wpw-same'), 'group:결제 리뉴얼');
+
+  // ⑥ 같은 제목의 앞으로 회의(오늘 캘린더)에 새로 담는 항목은 연결된 프로젝트로 간다.
   fs.writeFileSync(calendarPath, `마지막 갱신: ${today}\n- 15:00-16:00 | ${title}\n`);
   const next = (await items()).workflows.meetings.find(event => event.title === title && event.date === today);
   assert.equal(next.project.value, '결제 리뉴얼');
@@ -1228,11 +1240,25 @@ test('WP-W 지난 회의에서 프로젝트를 연결하면 그 회의도 바뀌
   assert.equal(captured.ok, true);
   assert.equal((await items()).workflows.items.find(entry => entry.id === captured.id).group, '결제 리뉴얼');
 
-  // ⑤ 연결 해제는 항목을 옮기지 않는다(묻지도 않는다 — 화면 몫). 지난 회의의 프로젝트만 풀린다.
+  // ⑦ 연결 해제 자체는 항목을 옮기지 않는다(빼기는 화면의 확인 줄이 따로 묻는다). 지난 회의의 프로젝트만 풀린다.
   const beforeUnlink = readTasks();
   assert.equal((await post('/api/meeting/set-project', { title, project: null, meetingId: 'wpw-past' })).ok, true);
   assert.equal(readTasks(), beforeUnlink);
   assert.equal((await items()).workflows.meetings.find(event => event.id === 'wpw-past').project, null);
+});
+
+test('WP-W 답변 확인 되돌리기: answerSeen만 지우고, 없으면 조용히 넘어간다', async () => {
+  const check = await post('/api/waiting/create', { description: 'WP-W 되돌릴 답' });
+  await post('/api/workflow/item', { id: 'legacy', blockedBy: check.id });
+  await post('/api/track/toggle', { id: check.id, status: 'done' });
+  assert.equal((await post('/api/workflow/answer-seen', { id: 'legacy' })).ok, true);
+  const undo = await post('/api/workflow/answer-seen-undo', { id: 'legacy' });
+  assert.deepEqual({ ok: undo.ok, changed: undo.changed }, { ok: true, changed: true });
+  const item = (await items()).workflows.items.find(entry => entry.id === 'legacy');
+  assert.equal(item.answerSeen, undefined);
+  assert.equal(item.blockedBy, check.id, '기다리던 답변 연결은 그대로');
+  assert.equal((await post('/api/workflow/answer-seen-undo', { id: 'legacy' })).changed, false);
+  assert.equal((await post('/api/workflow/answer-seen-undo', { id: 'missing' })).status, 400);
 });
 
 test('WP-W 회의 번호 없이 연결하면(오늘 미팅 줄) 예전처럼 오늘 그 제목의 회의만 바뀐다', async (t) => {

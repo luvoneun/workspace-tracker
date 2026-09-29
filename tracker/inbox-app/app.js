@@ -1579,20 +1579,25 @@ function renderCalendar(calendar) {
 // 회의 탭은 거기에 더해 `회의 탭에서 열기`를(toTab: false) 빼고 연다.
 // `fetchAll`은 오늘 탭 레일의 오늘 미팅 줄에서만 켠다 — `오늘 것 모두 가져오기`를 레일에서도 누를 수 있게
 // (회의 탭 머리의 버튼과 같은 함수를 쓴다).
-// `onLinked`는 회의 정리 카드·회의 탭 머리의 ⋯에서만 넘긴다 — 프로젝트를 연결(또는 바꿈)한 뒤 그 자리에
-// `이미 담은 N개도 옮길까요?`를 세운다(meetings-ui.js). 연결 해제에는 부르지 않는다(묻지 않는다).
-// 보내는 meetingId는 연결을 고른 그 회의다 — 지난 회의에서 연결해도 그 회의의 프로젝트가 함께 바뀐다.
+// `onLinked(새 열쇠, 이전 열쇠)`는 회의 정리 카드·회의 탭 머리의 ⋯에서만 넘긴다 — 프로젝트를 연결·변경·해제한 뒤
+// 그 자리에 `이미 담은 N개도 옮길까요?`(해제면 `뺄까요?`)를 세운다(meetings-ui.js). 넘기지 않은 자리(오늘 탭 레일)는
+// 알림의 버튼으로 묻는다(meetingMoveOffer). 보내는 meetingId는 연결을 고른 그 회의다 — 지난 회의에서 연결해도
+// 그 회의의 프로젝트가 함께 바뀐다.
 function meetingMenuSections(event, { open = true, toTab = true, fetchAll = false, onLinked = null } = {}) {
   // 레일의 캘린더 줄에는 번호가 `workflowId`로 온다 — 흐름 기록에 있는 회의만 탭에서 고를 수 있다.
   const tabId = event.id || event.workflowId || null;
   const setProject = async (projectKey) => {
+    const previous = typeof wfMeetingKey === 'function' ? wfMeetingKey(event) : null;
     await request('/api/meeting/set-project', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: event.title, project: projectKey, ...(event.id ? { meetingId: event.id } : {}) }),
     });
     await load();
-    if (projectKey && typeof onLinked === 'function') onLinked(projectKey);
+    const norm = key => (typeof meetingMoveNormKey === 'function' ? meetingMoveNormKey(key) : (key || null));
+    if (norm(projectKey) === norm(previous)) return;
+    if (typeof onLinked === 'function') onLinked(projectKey || null, previous || null);
+    else if (typeof meetingMoveOffer === 'function') meetingMoveOffer(event.id || event.workflowId || null, previous || null, projectKey || null);
   };
   const actions = [];
   if (open) actions.push({ label: '회의 정리 열기', onClick: () => openMeetingPanel(event) });
@@ -1830,6 +1835,25 @@ async function answerSeenMark(id) {
     entry.answerSeen = previous;
     if (answerSeenClosePending === id) answerSeenClosePending = null;
   }
+}
+
+// 리마인드에서 빠지는 순간 알린다 — `답변 확인했어요 · 되돌리기`. 되돌리면 서버의 확인 표시를 지우고 줄이 다시 선다.
+// ⌘Z도 같은 기록 하나를 쓴다(기존 pushUndo·replayUndo를 부르기만 한다).
+function answerSeenNotice(id) {
+  const item = itemsById.get(id) || (typeof wfItem === 'function' ? wfItem(id) : null);
+  const entry = {
+    label: item && item.description ? `${item.description} (답변 확인)` : '답변 확인',
+    undo: () => postJson('/api/workflow/answer-seen-undo', { id }),
+    redo: () => postJson('/api/workflow/answer-seen', { id }),
+  };
+  pushUndo(entry);
+  showNotice('답변 확인했어요', false, null, {
+    label: '되돌리기',
+    onClick: async () => {
+      if (undoStack[undoStack.length - 1] !== entry) { showNotice('최근 작업부터 순서대로 실행 취소해 주세요', true); return; }
+      await replayUndo('undo');
+    },
+  });
 }
 
 function renderReminders(reminders, answered = [], deploys = []) {
@@ -2243,29 +2267,66 @@ function ideaMenuSections(item, row) {
   ];
 }
 
+// ---------- 두 줄 말줄임 제목: 실제로 잘렸을 때만 펼치기 ----------
+// 아이디어 줄·회의에서 나온 줄의 제목은 평소 두 줄까지 보인다. **정말 잘렸을 때만**(내용이 두 줄을 넘을 때)
+// 제목이 펼치기 버튼이 되고(`.is-clamp` · aria-expanded · 손가락 커서), 누르면 그 자리에서 전문(`.is-open`),
+// 다시 누르면 접힌다. 잘리지 않은 제목은 펼칠 것이 없으니 원래 동작(회의 줄은 상세 열기·문구 고치기,
+// 아이디어는 누를 수 없는 글자)을 한다. 그릴 때(다음 화면 갱신)와 창 크기가 바뀔 때 다시 잰다.
+// 잘렸는지 재는 함수 — 가짜 DOM 테스트는 이것을 바꿔 끼운다.
+let uiTitleClamped = el => !!el && el.scrollHeight > el.clientHeight + 1;
+function uiClampMark(row, title, onMode) {
+  const open = String(row.className).includes(' is-open');
+  // 펼친 뒤에는 잘림이 없어도 접을 수 있어야 한다 — 펼침 모드를 유지한다.
+  const clamp = open || !!uiTitleClamped(title);
+  const had = String(row.className).includes(' is-clamp');
+  if (clamp && !had) row.className = `${row.className} is-clamp`;
+  if (!clamp && had) row.className = String(row.className).replace(' is-clamp', '');
+  if (clamp) title.setAttribute('aria-expanded', String(open));
+  else title.removeAttribute('aria-expanded');
+  if (typeof onMode === 'function') onMode(clamp);
+  return clamp;
+}
+// 제목 하나에 잘림 판단을 건다. onMode(clamp)는 모드가 정해질 때마다 불린다(이름표·역할을 맞추는 자리).
+// 창 크기가 바뀌면 화면에 있는 제목(`.js-clamp`)을 다시 잰다(아래 실행 코드의 resize 리스너).
+function uiClampWatch(row, title, onMode) {
+  const sync = () => uiClampMark(row, title, onMode);
+  title.clampSync = sync;
+  title.classList.add('js-clamp');
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(sync);
+  else sync();
+  return sync;
+}
+// 펼침 ↔ 접힘. 잘리지 않은 제목이면 false(부르는 쪽이 원래 동작을 한다).
+function uiClampToggle(row, title) {
+  if (!String(row.className).includes(' is-clamp')) return false;
+  const open = !String(row.className).includes(' is-open');
+  row.className = open ? `${row.className} is-open` : String(row.className).replace(' is-open', '');
+  title.setAttribute('aria-expanded', String(open));
+  return true;
+}
+function uiClampResync() {
+  document.querySelectorAll('.js-clamp').forEach((title) => { if (typeof title.clampSync === 'function') title.clampSync(); });
+}
+
 // 아이디어 한 줄: 체크박스 없이 문구 + 원문 | `가능성 높음` | 늘 보이는 더보기.
 function recordIdeaRow(item) {
   const row = document.createElement('div');
   row.className = 'd-rec is-idea';
   row.dataset.itemId = item.id;
 
-  // 평소 두 줄, 누르면 그 자리에서 전문(다시 누르면 접힘). 원문은 제목 옆이 아니라 아래 정보 줄에 —
-  // 제목과 같이 잘려 사라지던 것(사용자 보고: 잘림·클릭 안 됨·원문 안 보임).
+  // 평소 두 줄, **잘렸을 때만** 누르면 그 자리에서 전문(다시 누르면 접힘) — 잘리지 않은 아이디어는 누를 수 없는
+  // 평범한 글자다(uiClampWatch). 원문은 제목 옆이 아니라 아래 정보 줄에 — 제목과 같이 잘려 사라지던 것.
   const title = document.createElement('span');
   title.className = 'ti';
   title.textContent = item.description;
   title.title = item.description;
-  title.setAttribute('role', 'button');
-  title.tabIndex = 0;
-  title.setAttribute('aria-expanded', 'false');
-  const toggleOpen = () => {
-    const open = !String(row.className).includes(' is-open');
-    row.className = open ? `${row.className} is-open` : String(row.className).replace(' is-open', '');
-    title.setAttribute('aria-expanded', String(open));
-  };
-  title.addEventListener('click', toggleOpen);
+  uiClampWatch(row, title, (clamp) => {
+    if (clamp) { title.setAttribute('role', 'button'); title.tabIndex = 0; }
+    else { title.removeAttribute('role'); title.removeAttribute('tabindex'); title.tabIndex = -1; }
+  });
+  title.addEventListener('click', () => uiClampToggle(row, title));
   title.addEventListener('keydown', (event) => {
-    if ((event.key === 'Enter' || event.key === ' ') && !event.isComposing) { event.preventDefault(); toggleOpen(); }
+    if ((event.key === 'Enter' || event.key === ' ') && !event.isComposing && uiClampToggle(row, title)) event.preventDefault();
   });
   if (item.isNew) { title.prepend(renderNewDot(item)); observeNewItem(row, item); }
   recordTitleCell(row, title, item, '', false);
@@ -2633,7 +2694,12 @@ function panelClose() {
   if (side) { side.hidden = true; side.replaceChildren(); }
   // 방금 `답변 왔어요`를 확인한 업무의 상세를 닫으면 리마인드 카드를 다시 그려 그 줄을 뺀다
   // (열려 있는 동안은 카드가 붙어 있는 줄이라 남겨 두었다).
-  if (answerSeenClosePending) { answerSeenClosePending = null; remindersRender(); }
+  if (answerSeenClosePending) {
+    const seenId = answerSeenClosePending;
+    answerSeenClosePending = null;
+    remindersRender();
+    answerSeenNotice(seenId);
+  }
   // 팔레트에서 열었던 항목이면 찾던 자리로 돌려 놓는다(포커스도 검색 입력으로).
   // 팔레트 → 회의 → 항목처럼 거쳐 왔어도 처음 찾던 자리로 돌아간다.
   while (reopen && reopen.kind === 'meeting') reopen = reopen.back;
@@ -4801,6 +4867,9 @@ function tabToRestore(savedTab, picked, focusedTab) {
 // ---- client.test.js는 이 줄 위까지만 읽는다 (아래는 화면을 실제로 켜는 실행 코드) ----
 // 크롬 `앱으로 설치` — 설치 창을 띄울 수 있다는 신호와 설치를 마친 신호(위 appInstall*).
 window.addEventListener('beforeinstallprompt', appInstallOnPrompt);
+// 창 크기가 바뀌면 두 줄 말줄임 제목(아이디어·회의 줄)이 잘렸는지 다시 잰다 — 멎은 뒤 한 번만.
+let uiClampResizeTimer = null;
+window.addEventListener('resize', () => { clearTimeout(uiClampResizeTimer); uiClampResizeTimer = setTimeout(uiClampResync, 150); });
 window.addEventListener('appinstalled', appInstallOnInstalled);
 setupQuickAdd('todayTaskInput', '/api/today-task/create', '오늘 할 일에 추가했어요');
 setupQuickAdd('laterTaskInput', '/api/later-task/create', '나중에 할 일에 추가했어요');
