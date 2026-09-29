@@ -13,6 +13,7 @@
 1. **Google Calendar MCP 도구 로드 확인**
    - `ToolSearch`로 `mcp__*Google_Calendar__list_events` (서버 프리픽스는 세션마다 다를 수 있음, `calendar` 키워드로 검색) 로드
    - 도구가 안 보이면 인증이 안 되어 있는 것 — 세션에서 인증 안내 후 중단 (구글 캘린더는 `/mcp`만으로 완전히 인증되지 않을 수 있어, 대화 중 `authenticate`/`complete_authentication` 도구 쌍이 뜨면 그 플로우를 따른다)
+   - 자동 실행(`run-task.sh`)에서는 이렇게 중단해 `calendar_today.md`가 바뀌지 않으면 실행이 실패로 기록된다(`exit 65`, 연동 탭 캘린더 카드에 비밀 주소·커넥터 안내가 뜬다)
 
 2. **오늘 하루 범위로 조회**
    - `list_events`에 `startTime`: 오늘 00:00:00+09:00, `endTime`: 내일 00:00:00+09:00, `timeZone: Asia/Seoul`, `orderBy: startTime`

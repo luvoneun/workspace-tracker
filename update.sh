@@ -163,11 +163,13 @@ restart_app() {
   return 1
 }
 
-# 앱이 새 버전으로 떴는지 10초까지 기다려 본다.
+# 앱이 새 버전으로 떴는지 20번(1초 간격, 한 번에 5초까지 — 합해 최대 약 2분) 물어본다.
+# `?cached=1`은 원격(새 버전 확인)을 기다리지 않는 길이다 — 갓 켜진 서버가 원격을 기다리는 동안
+# 회사망이 느리면 매번 시간 초과가 나서, 멀쩡한 앱에 "되돌릴까요?"를 묻는 일이 있었다.
 health_check() {
   local i body
-  for i in 1 2 3 4 5 6 7 8 9 10; do
-    body="$(curl -s --max-time 2 "http://127.0.0.1:$PORT/api/about" 2>/dev/null)"
+  for i in $(seq 1 20); do
+    body="$(curl -s --max-time 5 "http://127.0.0.1:$PORT/api/about?cached=1" 2>/dev/null)"
     case "$body" in
       *"\"version\":\"$VERSION\""*) return 0 ;;
     esac
@@ -393,6 +395,7 @@ status_write failed "앱이 응답하지 않아요"
 if [ "$ASSUME_YES" = "1" ]; then
   ANSWER="n"
 else
+  echo "    앱이 1~2분 안에 뜨지 않았어요."
   read -r -p "  이전 버전으로 되돌릴까요? [y/n] " ANSWER
 fi
 case "$ANSWER" in

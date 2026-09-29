@@ -6823,7 +6823,7 @@ test('WP-D1·D2 F. 캘린더: `비밀 주소 붙이기`(누구나)가 먼저 —
   assert.equal(secret[0].type, 'password', '비밀 주소는 토큰처럼 가린다');
   const text = fx.text('calendar');
   assert.ok(!/곧 돼요/.test(text));
-  assert.match(text, /비밀 주소 붙이기누구나1컴퓨터에서 calendar\.google\.com 열기\(폰 앱은 안 돼요\)2오른쪽 위 톱니바퀴 → 설정3왼쪽 내 캘린더의 설정에서 내 이름4아래로 내려 캘린더 통합 → iCal 형식의 비공개 주소 옆 복사5아래 칸에 붙여 넣고 연결/);
+  assert.match(text, /비밀 주소 붙이기누구나1컴퓨터에서 calendar\.google\.com 열기\(폰 앱은 안 돼요\)2오른쪽 위 톱니바퀴 → 설정3왼쪽 내 캘린더의 설정에서 내 이름4아래로 내려 캘린더 통합 → iCal 형식의 비공개 주소 옆 복사\(위의 공개 주소 말고\)5아래 칸에 붙여 넣고 연결/);
   assert.match(text, /먼저 비밀 주소를 시도해 보세요/);
   assert.match(text, /이 칸이 안 보이면 회사에서 막아 둔 거예요/);
   assert.match(text, /1claude\.ai → 설정 → 커넥터에서 Google Calendar → 연결 → 구글 로그인 → 허용 \(이 맥의 Claude Code와 같은 계정이어야 해요\)claude\.ai\/settings\/connectors복사/);
@@ -9107,4 +9107,13 @@ test('긴 문구: 업무 줄 제목은 두 줄까지(말줄임) — 줄 높이 �
   assert.ok(entry);
   assert.match(entry[2], /원문 그대로.*정확하지 않을 수 있어요.*Claude Code.*Claude로 다듬기/);
   assert.ok(entry[2].length <= 260);
+});
+
+test('WP-S 캘린더 카드: 캘린더 파일이 갱신되지 않은 실패는 비밀 주소·커넥터 안내를 이유로 보인다', () => {
+  const app = pureClient();
+  const warn = '⚠️ 캘린더 파일이 갱신되지 않았어요 — Claude에 구글 캘린더가 연결돼 있지 않으면 설정 › 연동 › 캘린더에서 비밀 주소로 바꾸거나 Claude 커넥터에서 연결해 주세요';
+  const why = app.run(`settingsFailWhy('calendar', { failing: true, summary: ${JSON.stringify(warn)} })`);
+  assert.equal(why.length, 1);
+  assert.match(why[0], /^캘린더가 갱신되지 않았어요 — Claude에 구글 캘린더가 연결돼 있지 않으면 비밀 주소로 바꾸거나 Claude 커넥터에서 연결해 주세요/);
+  assert.match(app.run(`settingsLogText('calendar', { kind: 'fail', text: ${JSON.stringify(warn)} })`), /^읽지 못했어요 — 캘린더가 갱신되지 않았어요 — .*비밀 주소로 바꾸거나/);
 });

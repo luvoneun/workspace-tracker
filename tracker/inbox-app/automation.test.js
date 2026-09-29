@@ -129,7 +129,8 @@ test('연동을 끄면 run-task.sh·slack-capture.sh는 claude를 부르지 않�
   const logs = path.join(home, 'logs');
   const called = path.join(home, 'called.txt');
   const claude = path.join(home, 'fake-claude.sh');
-  writeExec(claude, `#!/bin/bash\necho "불렸음" >> ${JSON.stringify(called)}\n`);
+  // 캘린더 파일도 스킬처럼 새로 쓴다 — 안 쓰면 calendar-sync는 WP-S 규칙대로 실패(65)로 끝난다.
+  writeExec(claude, `#!/bin/bash\necho "불렸음" >> ${JSON.stringify(called)}\nmkdir -p tracker && date > tracker/calendar_today.md\n`);
   const config = path.join(home, 'workspace.config.json');
   const env = {
     WORKSPACE_DIR: home, WORKSPACE_CONFIG: config, AUTOMATION_LOG_DIR: logs,
@@ -429,11 +430,50 @@ test('WP-D2 run-task.sh: 캘린더가 비밀 주소 갈래면 calendar-sync는 c
   // 다른 작업은 그대로 돈다
   assert.equal(runScript(automationScript('run-task.sh'), ['tiro-sync', '프롬프트', 'Read'], env).status, 0);
   assert.equal(fs.readFileSync(called, 'utf8').trim(), '불렸음');
-  // Claude Code 갈래로 돌아가면 예전처럼 돈다
+  // Claude Code 갈래로 돌아가면 예전처럼 돈다(이 가짜는 캘린더 파일을 쓰지 않으므로 WP-S 규칙대로 65로 끝난다)
   fs.writeFileSync(config, JSON.stringify({ integrations: { calendar: true }, calendar: { source: 'claude' } }));
   fs.rmSync(called);
-  assert.equal(runScript(automationScript('run-task.sh'), ['calendar-sync', '프롬프트', 'Read'], env).status, 0);
+  assert.equal(runScript(automationScript('run-task.sh'), ['calendar-sync', '프롬프트', 'Read'], env).status, 65);
   assert.equal(fs.readFileSync(called, 'utf8').trim(), '불렸음');
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+// 동료 맥에서 Claude에 구글 캘린더 도구가 없어 calendar-sync가 "못 했어요"라고 답하고 0으로 끝났는데 기록은 성공이었다.
+test('WP-S run-task.sh: calendar-sync가 0으로 끝났는데 캘린더 파일이 그대로면 ⚠️ 한 줄 + exit 65, 바뀌었으면 0', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-cal-stale-'));
+  const logs = path.join(home, 'logs');
+  const claude = path.join(home, 'fake-claude.sh');
+  // FAKE_WRITE가 있으면 스킬처럼 캘린더 파일을 새로 쓴다(같은 내용이어도). FAKE_EXIT로 claude 자체의 실패를 흉내 낸다.
+  writeExec(claude, '#!/bin/bash\necho "Google Calendar 도구를 찾지 못했어요. 인증이 필요해요."\n'
+    + 'if [ -n "${FAKE_WRITE:-}" ]; then mkdir -p tracker && printf \'# 오늘 캘린더 일정\\n\' > tracker/calendar_today.md; fi\nexit ${FAKE_EXIT:-0}\n');
+  const config = path.join(home, 'workspace.config.json');
+  fs.writeFileSync(config, JSON.stringify({ integrations: { calendar: true }, calendar: { source: 'claude' } }));
+  const env = { WORKSPACE_DIR: home, WORKSPACE_CONFIG: config, AUTOMATION_LOG_DIR: logs, CLAUDE_BIN: claude };
+  const run = (name, extra = {}) => runScript(automationScript('run-task.sh'), [name, '프롬프트', 'Read'], { ...env, ...extra }).status;
+  const log = name => fs.readFileSync(path.join(logs, `${name}.log`), 'utf8');
+  const WARN = '⚠️ 캘린더 파일이 갱신되지 않았어요 — Claude에 구글 캘린더가 연결돼 있지 않으면 설정 › 연동 › 캘린더에서 비밀 주소로 바꾸거나 Claude 커넥터에서 연결해 주세요';
+  const warnings = name => log(name).split(WARN).length - 1;
+
+  // (1) 파일이 없고 claude도 만들지 않음 → 실패
+  assert.equal(run('calendar-sync'), 65);
+  assert.equal(warnings('calendar-sync'), 1);
+  assert.match(log('calendar-sync'), /^───── \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} calendar-sync 종료 \(exit 65\)$/m);
+  // 경고 줄은 종료 줄 바로 앞(같은 실행 블록 안)에 있다
+  assert.match(log('calendar-sync'), new RegExp(`${WARN}\\n\\n───── [^\\n]+ calendar-sync 종료 \\(exit 65\\)`));
+  // (2) claude가 파일을 새로 만듦 → 성공
+  assert.equal(run('calendar-sync', { FAKE_WRITE: '1' }), 0);
+  // (3) 파일이 있는데 이번에도 다시 씀(같은 초 안이라도 나노초로 구분) → 성공
+  assert.equal(run('calendar-sync', { FAKE_WRITE: '1' }), 0);
+  // (4) 파일이 있는데 건드리지 않음 → 실패
+  assert.equal(run('calendar-sync'), 65);
+  assert.equal(warnings('calendar-sync'), 2);
+  // (5) claude 자체가 실패하면 그 코드 그대로(경고 줄을 덧붙이지 않는다)
+  assert.equal(run('calendar-sync', { FAKE_EXIT: '3' }), 3);
+  assert.equal(warnings('calendar-sync'), 2);
+  // (6) 다른 작업은 캘린더 파일을 보지 않는다
+  assert.equal(run('tiro-sync'), 0);
+  assert.equal(warnings('tiro-sync'), 0);
+  assert.equal(fs.readFileSync(path.join(home, 'tracker', 'calendar_today.md'), 'utf8'), '# 오늘 캘린더 일정\n', '스크립트는 캘린더 파일을 쓰지 않는다');
   fs.rmSync(home, { recursive: true, force: true });
 });
 
@@ -782,6 +822,37 @@ test('WP-D3 update.sh --yes: 6단계에서 앱이 응답하지 않으면 되돌�
   assert.ok(tail.indexOf('status_write failed "앱이 응답하지 않아요"') < tail.indexOf('ANSWER="n"'));
   assert.match(script, /status_write\(\) \{\n  \[ -n "\$\{WORKSPACE_UPDATE_STATUS:-\}" \] \|\| return 0/, '환경변수가 없으면 쓰지 않는다');
   assert.match(script, /cp "\$APP_DIR\/automation\/update-runner\.sh" "\$INSTALL_DIR\/"/, '받은 뒤 실행기 복사본도 갱신한다');
+});
+
+// 갓 켜진 서버의 /api/about은 원격(새 버전 확인)을 최대 5초 기다린다 — 회사망이 느리면 2초 제한 10번이 모두 시간 초과였다.
+test('WP-S update.sh: ⑥ 점검은 /api/about?cached=1을 5초 제한으로 20번 묻고, 끝내 안 뜨면 사실 한 줄 뒤에 되돌릴지 묻는다', { skip: !gitReady }, (t) => {
+  const fix = updateFixture(t);
+  const bin = path.join(fix.root, 'bin-slow');
+  fs.mkdirSync(bin);
+  const calls = path.join(fix.root, 'curl-calls.txt');
+  writeExec(path.join(bin, 'curl'), `#!/bin/bash\necho "$*" >> ${JSON.stringify(calls)}\necho "{}"\n`);
+  writeExec(path.join(bin, 'sleep'), '#!/bin/bash\nexit 0\n');
+  const result = fix.run([], { input: 'n\n', env: { PATH: `${bin}:${path.join(fix.root, 'bin')}:${process.env.PATH}` } });
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  const lines = fs.readFileSync(calls, 'utf8').trim().split('\n');
+  assert.equal(lines.length, 20, '20번 묻는다');
+  lines.forEach(line => assert.equal(line, '-s --max-time 5 http://127.0.0.1:4399/api/about?cached=1'));
+  const out = result.stdout;
+  assert.ok(out.indexOf('앱이 1~2분 안에 뜨지 않았어요.') > out.indexOf('! 앱이 응답하지 않아요'), '사실 한 줄이 먼저');
+  // `read -p`의 물음은 터미널일 때만 찍히므로 순서는 스크립트 글자로 본다
+  const script = fs.readFileSync(path.join(REPO_ROOT, 'update.sh'), 'utf8');
+  assert.match(script, /echo "    앱이 1~2분 안에 뜨지 않았어요\."\n  read -r -p "  이전 버전으로 되돌릴까요\? \[y\/n\] " ANSWER/, '그다음 되돌리기 질문');
+  assert.match(out, /그대로 뒀어요\. 되돌리려면:  bash update\.sh --rollback/);
+  assert.equal(fix.versionOf(), '1.1.0', 'n이면 받은 버전 그대로');
+
+  // 몇 번 만에 새 버전을 말하면 곧바로 성공(버전 비교는 그대로)
+  fs.rmSync(calls);
+  writeExec(path.join(bin, 'curl'), `#!/bin/bash\necho "$*" >> ${JSON.stringify(calls)}\n`
+    + `[ "$(wc -l < ${JSON.stringify(calls)})" -ge 3 ] && printf '{"version":"%s"}' "$(tr -d '[:space:]' < ${JSON.stringify(path.join(fix.clone, 'VERSION'))})" || echo "{}"\n`);
+  const ok = fix.run(['--yes'], { env: { PATH: `${bin}:${path.join(fix.root, 'bin')}:${process.env.PATH}` } });
+  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+  assert.equal(fs.readFileSync(calls, 'utf8').trim().split('\n').length, 3);
+  assert.doesNotMatch(ok.stdout, /1~2분 안에 뜨지 않았어요/);
 });
 
 // setup.sh는 실행하지 않는다 — 조각을 문자열로 확인하고, 마무리 세 줄 조각만 가짜 `open`으로 돌려 본다.

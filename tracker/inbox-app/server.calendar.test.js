@@ -160,6 +160,16 @@ test('WP-D2 연동 저장: 비밀 주소는 한 번 읽어 센 뒤 0600 파일�
   }), /이 주소를 읽지 못했어요 — 비밀 주소를 다시 복사해 주세요/);
   assert.deepEqual(writes, []);
   assert.equal(fs.existsSync(path.join(tokenDir, 'workspace-calendar-ical')), false);
+
+  // 1-1) 구글의 공개 주소(…/public/basic.ics)는 읽어 보기 전에 비공개 주소를 쓰라고 알려 준다
+  let checkedPublic = false;
+  await assert.rejects(() => integrationsStore.saveIntegrations({
+    configPath, current, tokenDir, write,
+    body: { calendar: { enabled: true, source: 'ical', url: 'https://calendar.google.com/calendar/ical/me%40example.test/public/basic.ics' } },
+    calendarCheck: async () => { checkedPublic = true; return { ok: true, count: 0 }; },
+  }), /공개 주소를 붙였어요 — 같은 화면 조금 아래 「iCal 형식의 비공개 주소」를 복사해 주세요/);
+  assert.equal(checkedPublic, false, '공개 주소는 읽으러 가지 않는다');
+  assert.deepEqual(writes, []);
   const okCheck = async () => ({ ok: true, count: 1 });
   await assert.rejects(() => integrationsStore.saveIntegrations({ configPath, current, tokenDir, write, body: { calendar: { enabled: true, source: 'ical', url: 'http://calendar.google.com/x.ics' } }, calendarCheck: okCheck }), /https:\/\/로 시작해야/);
   await assert.rejects(() => integrationsStore.saveIntegrations({ configPath, current, tokenDir, write, body: { calendar: { enabled: true, source: 'ical', url: '' } }, calendarCheck: okCheck }), /비밀 주소를 붙여 넣어 주세요/);
@@ -487,6 +497,27 @@ test('WP-D2.5 지금 가져오기(캘린더 Claude 갈래): calendar-sync-now pl
   const state = await (await fetch(app.base + '/api/integrations')).json();
   assert.equal(state.calendar.fetch.failing, false);
   assert.equal(state.calendar.fetch.lastRunAt, new Date('2026-09-24T10:14:00').toISOString());
+});
+
+// run-task.sh가 calendar-sync를 실패로 바꾸며 남긴 ⚠️ 줄은 Claude의 긴 답 뒤에 붙는다 — 200자 자르기에 잘리지 않고 요약이 된다.
+test('WP-S 캘린더(Claude 갈래): 캘린더 파일이 갱신되지 않아 exit 65로 끝난 실행은 실패 중이고, 멈춤 이유는 ⚠️ 줄이다', async (t) => {
+  const app = await startFetchServer(t, { calendarSource: 'claude' });
+  const warn = '⚠️ 캘린더 파일이 갱신되지 않았어요 — Claude에 구글 캘린더가 연결돼 있지 않으면 설정 › 연동 › 캘린더에서 비밀 주소로 바꾸거나 Claude 커넥터에서 연결해 주세요';
+  const answer = 'Google Calendar MCP 도구를 찾지 못했어요. '.repeat(10);
+  const logFile = path.join(app.automation, 'logs', 'calendar-sync.log');
+  fs.writeFileSync(logFile, '───── 2026-09-24 10:13:00 calendar-sync 시작 (v1.2.1)\n' + answer + '\n\n' + warn + '\n\n───── 2026-09-24 10:14:00 calendar-sync 종료 (exit 65)\n');
+  const state = await (await fetch(app.base + '/api/integrations')).json();
+  assert.equal(state.calendar.fetch.failing, true);
+  assert.equal(state.calendar.fetch.claudeAuth, false);
+  assert.equal(state.calendar.fetch.summary, warn);
+  assert.equal(state.calendar.log[0].kind, 'fail');
+  assert.equal(state.calendar.log[0].text, warn);
+  assert.ok(state.alerts.includes('calendar'), '톱니바퀴의 빨간 점·연동 탭 요약도 멈춤으로 본다');
+  // 다음 실행이 파일을 갱신해 0으로 끝나면 실패 중이 아니다
+  fs.appendFileSync(logFile, '───── 2026-09-24 11:13:00 calendar-sync 시작\n일정 3개\n───── 2026-09-24 11:14:00 calendar-sync 종료 (exit 0)\n');
+  const healed = await (await fetch(app.base + '/api/integrations')).json();
+  assert.equal(healed.calendar.fetch.failing, false);
+  assert.equal(healed.alerts.includes('calendar'), false);
 });
 
 test('WP-D2.5 지라·캘린더 보관함은 마지막 실패의 갈래(auth)를 들고 있다가 성공하면 지운다', async () => {
