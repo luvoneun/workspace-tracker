@@ -389,7 +389,7 @@ function usageSettingsPaint() {
   const sub = document.createElement('span');
   sub.className = 'd-ismall sub';
   sub.textContent = info.canSend
-    ? '어떤 기능이 쓸모 있는지 보고 앱을 고치는 데 써요 — 기능별 횟수만, 이름·업무 내용은 보내지 않아요'
+    ? '어떤 기능이 쓸모 있는지 보고 앱을 고치는 데 써요 — 기능별 횟수만, 이름·업무 내용은 보내지 않아요 · 꺼도 내 일 기록은 이 맥에 계속 쌓여요'
     : '어떤 기능이 쓸모 있는지 보고 앱을 고치는 데 써요 — 기능별 횟수만, 이름·업무 내용은 보내지 않아요 · 이 설치에서는 지금 보내지 않아요';
   text.append(strong, sub);
   const label = document.createElement('label');

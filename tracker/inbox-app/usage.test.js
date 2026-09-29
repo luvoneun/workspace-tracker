@@ -414,7 +414,7 @@ test('WP-R 화면 파일 규칙 — innerHTML 없음, 알림 줄·끄기·다시
   const ui = read('usage-ui.js');
   assert.equal(/innerHTML|insertAdjacentHTML|outerHTML/.test(ui), false);
   for (const words of ['어떤 기능을 많이 쓰는지 익명으로 모아 앱을 고치는 데 써요 · ', '끄기', '모으지 않아요 · ', '다시 켜기', '익명 사용 횟수 보내기',
-    '어떤 기능이 쓸모 있는지 보고 앱을 고치는 데 써요 — 기능별 횟수만, 이름·업무 내용은 보내지 않아요', '내 일 기록', "'switch'"]) assert.ok(ui.includes(words), words);
+    '어떤 기능이 쓸모 있는지 보고 앱을 고치는 데 써요 — 기능별 횟수만, 이름·업무 내용은 보내지 않아요', '내 일 기록', '꺼도 내 일 기록은 이 맥에 계속 쌓여요', "'switch'"]) assert.ok(ui.includes(words), words);
   assert.match(read('checkin-ui.js'), /이름과 업무 내용은 보내지 않아요\. 앱을 고치는 데 쓰려고 기능별 사용 횟수는 함께 보내요/);
   // 부르는 자리 — 탭·검색·주간요약 복사·사용설명서 두 곳·설정 › 앱.
   assert.match(read('app.js'), /usageTabOpened\(tab, activeTabKey\)/);
