@@ -513,6 +513,11 @@ function uiGroupAddRow(key, endpoint, announceText) {
     } catch { /* Keep the draft for retry. */ }
     finally { input.disabled = false; if (input.isConnected) input.focus(); }
   });
+  // 다른 곳을 누르면 닫는다 — 적던 글이 있으면 잃지 않게 그대로 둔다. 늘 보이는 프로젝트 상세 줄(d-padd)은 닫지 않는다.
+  input.addEventListener('blur', () => {
+    if (input.disabled || input.value.trim() || String(row.className).includes('d-padd')) return;
+    row.hidden = true;
+  });
   row.appendChild(input);
   return row;
 }

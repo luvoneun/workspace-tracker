@@ -5124,6 +5124,17 @@ test('프로젝트 상세: 진행할 업무 맨 아래에 이 프로젝트로 �
   assert.equal(rows[0].dataset.addKey, '/api/today-task/create::jira:IO-6::project', '오늘 목록의 같은 그룹 입력줄과 구분된다');
 });
 
+test('그룹 + 입력줄: 다른 곳을 누르면(포커스가 빠지면) 닫히고, 적던 글이 있거나 늘 보이는 프로젝트 줄이면 그대로 둔다', () => {
+  const app = pureClient();
+  app.run("var __row = uiGroupAddRow('group:게임', '/api/today-task/create', 'x'); __row.hidden = false; var __input = __row.children[0];");
+  app.run("__input.value = '적는 중'; __input.listeners.blur();");
+  assert.equal(app.run('__row.hidden'), false, '적던 글은 잃지 않는다');
+  app.run("__input.value = ''; __input.listeners.blur();");
+  assert.equal(app.run('__row.hidden'), true, '빈 칸이면 닫힌다');
+  app.run("var __keep = uiGroupAddRow('group:게임', '/api/today-task/create', 'x'); __keep.hidden = false; __keep.className += ' d-padd'; __keep.children[0].listeners.blur();");
+  assert.equal(app.run('__keep.hidden'), false, '프로젝트 상세의 늘 보이는 줄은 닫지 않는다');
+});
+
 test('BPVIEW: 배포별 보기 — 버전으로 묶어 배포일 이른 순 → 날짜 없는 버전 → 배포 미정 순, 머리 수는 지난 프로젝트만 뺀다', () => {
   const fixture = bpviewClient();
   fixture.app.run("setProjectListView('deploy');");
