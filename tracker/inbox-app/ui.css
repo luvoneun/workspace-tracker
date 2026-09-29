@@ -2265,10 +2265,8 @@ body.batch-open .d-toast { bottom: 76px; }
 #settingsAppView .d-pset .v > .d-btn { align-self: flex-start; }
 #settingsAppView .d-pplace { margin-top: 0; }
 .d-abline { font-size: 14px; color: var(--text); font-variant-numeric: tabular-nums; }
-/* 데이터 백업 한 줄 — ● 초록(잘 됨) · 빨강(멈춤). 멈추면 이유 한 줄이 그 아래 --urgent로. */
+/* 데이터 백업 한 줄 — 점(연동 카드와 같은 .d-istat 부품)은 초록(잘 됨) · 빨강(멈춤). 멈추면 이유 한 줄이 그 아래 --urgent로. */
 .d-bkline { font-size: 14px; color: var(--text); font-variant-numeric: tabular-nums; }
-.d-bkline .ok { color: var(--success); }
-.d-bkline .bad { color: var(--urgent); }
 .d-bkline.k-neg { color: var(--urgent); font-weight: 600; }
 .d-ismall.k-neg { color: var(--urgent); }
 .d-ablink {
