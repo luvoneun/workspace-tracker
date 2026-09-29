@@ -10063,7 +10063,7 @@ test('누르는 화면: 완료·옮기기 알림은 `⌘Z로 되돌리기` 글�
     region.insertBefore = (node, ref) => { const at = region.children.indexOf(ref); region.children.splice(at < 0 ? region.children.length : at, 0, node); };
     Object.defineProperty(region, 'lastChild', { get() { return region.children[region.children.length - 1]; } });
     app.run("pushUndo({ label: 'x', undo() {}, redo() {} });");
-    app.run(action ? "workflowOutcome({ id: 't1' })" : "uiUndoNotice('내일로 미뤘어요')");
+    app.run(action ? "workflowOutcome({ id: 't1' }, undoStack[undoStack.length - 1])" : "uiUndoNotice('내일로 미뤘어요', null, undoStack[undoStack.length - 1])");
     return { app, region, labels: region.children.map(kid => kid.textContent) };
   };
   const touch = notice(true);
@@ -10076,8 +10076,57 @@ test('누르는 화면: 완료·옮기기 알림은 `⌘Z로 되돌리기` 글�
   assert.deepEqual(notice(false, true).labels, ['⌘Z로 되돌리기', '결과 한 줄 남기기', '닫기']);
   // 되돌릴 기록이 없으면(3초가 지났으면) 버튼을 달지 않는다
   const stale = narrowClient(390);
-  stale.run("window.matchMedia = () => ({ matches: true }); lastUndoRecordedAt = 0; uiUndoNotice('내일로 미뤘어요');");
+  stale.run("window.matchMedia = () => ({ matches: true }); pushUndo({ label: 'x', undo() {}, redo() {} }); lastUndoRecordedAt = 0; uiUndoNotice('내일로 미뤘어요', null, undoStack[0]);");
   assert.deepEqual(stale.nodes.get('liveRegion').children.map(kid => kid.textContent), ['닫기']);
+});
+
+test('누르는 화면 되돌리기 버튼은 그 작업의 기록만 — 저장이 겹쳐 어느 기록인지 모르면 버튼 없음, 맨 위가 아니면 되돌리지 않음', () => {
+  const app = narrowClient(390);
+  app.run("window.matchMedia = () => ({ matches: true }); var replayed = []; replayUndo = dir => replayed.push(dir);");
+  // 작업 하나가 기록 하나를 남기면 그 기록, 둘 이상 겹치면 null, 기록이 없어도 null
+  same(app.run(`(() => {
+    const mark0 = uiUndoMark();
+    pushUndo({ label: 'A', undo() {}, redo() {} });
+    const one = uiUndoOwn(mark0)?.label || null;
+    const mark1 = uiUndoMark();
+    pushUndo({ label: 'B', undo() {}, redo() {} });
+    pushUndo({ label: 'C', undo() {}, redo() {} });
+    const many = uiUndoOwn(mark1);
+    const none = uiUndoOwn(uiUndoMark());
+    return { one, many, none };
+  })()`), { one: 'A', many: null, none: null });
+  // 알림은 A의 것인데 그 뒤에 B가 쌓였다 → 누르면 B를 되돌리지 않고 순서를 알린다
+  const region = app.run("document.getElementById('liveRegion')");
+  app.run("var entryA = { label: 'A', undo() {}, redo() {} }; pushUndo(entryA); uiUndoNotice('내일로 미뤘어요', null, entryA); pushUndo({ label: 'B', undo() {}, redo() {} });");
+  const button = region.children.find(kid => kid.textContent === '되돌리기');
+  app.run("var realNotice = showNotice; var said = []; showNotice = (text, error) => said.push([text, error]);");
+  button.listeners.click();
+  app.run('showNotice = realNotice');
+  same(app.run('replayed'), []);
+  same(app.run('said'), [['최근 작업부터 순서대로 실행 취소해 주세요', true]]);
+  // 기록을 모르면(null) 버튼 없이 글자 안내만
+  const blind = narrowClient(390);
+  blind.run("window.matchMedia = () => ({ matches: true }); pushUndo({ label: 'D', undo() {}, redo() {} }); uiUndoNotice('내일로 미뤘어요', null, null);");
+  assert.ok(!blind.run("document.getElementById('liveRegion')").children.some(kid => kid.textContent === '되돌리기'));
+});
+
+test('좁은 폭 시트: 탭을 옮기면 닫혀 가림막이 남지 않고, 창이 넓어지면 가림막을 걷고 줄 옆 카드로 옮겨 그린다', () => {
+  const source = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const tab = source.slice(source.indexOf('function setActiveTab('), source.indexOf('Object.entries(TABS).forEach', source.indexOf('function setActiveTab(')));
+  assert.match(tab, /if \(tab !== activeTabKey && panelScrimEl && !panelScrimEl\.hidden\) panelClose\(\);/);
+  assert.match(source, /window\.addEventListener\('resize', panelSheetResize\);/);
+  const app = narrowClient(390);
+  same(app.run(`(() => {
+    const calls = [];
+    panelState = { id: 't1' };
+    panelScrimEl = { hidden: false };
+    const side = { hidden: false, replaceChildren: () => calls.push('clear') };
+    panelSide = () => side;
+    panelRender = () => calls.push('render');
+    window.innerWidth = 800;
+    panelSheetResize();
+    return { calls, scrimHidden: panelScrimEl.hidden, sideHidden: side.hidden };
+  })()`), { calls: ['clear', 'render'], scrimHidden: true, sideHidden: true });
 });
 
 test('좁은 폭 CSS: 업무 줄에는 ⋯만(제안 줄은 그대로), 체크·⋯ 누르는 자리 38px, 가림막, 누르는 화면의 ⌘Z 글자 숨김 — 넓은 폭 규칙은 없다', () => {
@@ -10088,6 +10137,7 @@ test('좁은 폭 CSS: 업무 줄에는 ⋯만(제안 줄은 그대로), 체크·
   assert.match(narrow, /\.d-row \.d-cb::after, \.d-prow2 \.d-cb::after \{ inset: -10px;/, '::after는 테두리 안쪽(19px)에서 재므로 19 + 10 × 2 = 39px');
   assert.match(narrow, /\.d-row \.d-acts \.d-more::after, \.d-prow2 \.ac \.d-more::after \{ content: ''; position: absolute; inset: -3px;/, '32 + 3 × 2 = 38px');
   assert.match(narrow, /\.d-scrim:not\(\[hidden\]\) \{ display: block; position: fixed; inset: 0; z-index: 46; background: var\(--scrim\); \}/);
+  assert.doesNotMatch(narrow, /\.m-proj \{ display: inline/, '프로젝트 이름은 제목 뒤 .d-inproj 하나만 — 상태 줄에 또 찍지 않는다');
   const wide = css.replace(/@media \(max-width: 520px\) \{[\s\S]*?\n\}/g, '');
   assert.doesNotMatch(wide, /\.d-acts > \.d-btn \{ display: none|\.ac > \.d-btn \{ display: none|\.d-scrim:not/, '넓은 폭에는 새 규칙이 없다');
   assert.match(wide, /\.d-scrim \{ display: none; \}/);

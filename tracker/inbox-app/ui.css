@@ -2757,7 +2757,7 @@ a.d-btn { text-decoration: none; }
   .d-proj { display: none; }
   /* 두 줄 행에서도 같은 순서로 이어 붙는다(상태 → 기한) — 왼쪽 정렬만 다르다 */
   .d-meta { grid-area: mt; justify-content: flex-start; flex-wrap: wrap; row-gap: 5px; }
-  .d-meta .m-proj { display: inline-flex; }
+  /* 프로젝트 이름은 제목 뒤 `· ● 이름`(.d-inproj)이 이미 말한다 — 상태 줄의 .m-proj는 좁은 폭에서도 숨긴 채 둔다(두 번 찍히지 않게) */
   .d-acts, .d-row.is-sug .d-acts {
     grid-area: ac; position: static; flex-direction: column; align-items: stretch;
     opacity: 1; pointer-events: auto; background: none; padding-left: 0;
