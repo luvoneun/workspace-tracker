@@ -27,7 +27,7 @@ const TRACKER_DIR = process.env.WORKSPACE_DATA_DIR || path.join(__dirname, '..')
 const REPO_DIR = process.env.WORKSPACE_REPO_DIR || path.join(__dirname, '..', '..');
 // 이 컴퓨터에만 두는 폴더(`local/` — 업데이트해도 남는다). 테스트·픽스처는 WORKSPACE_LOCAL_DIR(또는 WORKSPACE_REPO_DIR)로 임시 폴더를 끼운다.
 const LOCAL_DIR = process.env.WORKSPACE_LOCAL_DIR || path.join(REPO_DIR, 'local');
-// 예전 Dock 앱이 놓이던 폴더(`~/Applications`). 서버는 이 폴더를 읽지도 쓰지도 않는다 — 픽스처 안전망(아래 workspacePaths)이 실제 자리를 가리키지 않는지만 본다.
+// 사용자의 앱 폴더(`~/Applications`). 서버는 이 폴더를 읽지도 쓰지도 않는다 — 픽스처 안전망(아래 workspacePaths)이 실제 자리를 가리키지 않는지만 본다.
 function applicationsDir() {
   return process.env.WORKSPACE_APPLICATIONS_DIR || path.join(os.homedir(), 'Applications');
 }

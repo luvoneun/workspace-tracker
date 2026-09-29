@@ -45,7 +45,7 @@ module.exports = function personalizeRoutes(req, res, url, ctx) {
   }
 
   // 이름 저장(`title`·`server.dockName`·`titleHidden`만). 제목은 곧바로 화면에 쓰이고, 앱 이름은 manifest가
-  // 다음에 읽을 때 쓰인다. 예전 Dock 앱(~/Applications)은 만들지도 고치지도 않는다 — 요청 표시 파일도 쓰지 않는다.
+  // 다음에 읽을 때 쓰인다. 파일을 따로 만들지 않는다(요청 표시 파일도 없다).
   if (url.pathname === '/api/personalize' && req.method === 'POST') {
     readBody(req)
       .then(body => integrations.savePersonalize({ configPath: CONFIG_PATH, current: currentConfigFile(), body }))

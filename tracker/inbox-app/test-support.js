@@ -20,7 +20,7 @@ const automationHome = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-automati
 process.env.WORKSPACE_AUTOMATION_DIR = automationHome;
 // `지금 가져오기`가 "등록돼 있는지" 보는 launchd 폴더도 임시 폴더다 — 실제 ~/Library/LaunchAgents를 보지 않게.
 process.env.WORKSPACE_LAUNCH_AGENTS_DIR = path.join(automationHome, 'LaunchAgents');
-// Dock 이름이 겹치는지 보는 Applications 폴더도 임시 폴더다 — 실제 ~/Applications를 보지 않게.
+// Applications 폴더도 임시 폴더다 — 서버의 픽스처 안전망이 실제 ~/Applications를 가리키지 않게.
 process.env.WORKSPACE_APPLICATIONS_DIR = path.join(automationHome, 'Applications');
 // 설정 › 앱의 `데이터 백업` 줄이 읽는 백업 폴더도 임시 폴더다 — 실제 ~/workspace-data-backup을 보지 않게.
 process.env.WORKSPACE_BACKUP_DIR = path.join(automationHome, 'workspace-data-backup');

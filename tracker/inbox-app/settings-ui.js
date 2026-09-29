@@ -135,7 +135,7 @@ async function fetchAutomationStatus() {
 }
 
 // 설정을 연 뒤 한 번만 쓰는 표지 — `alerts`(빨간 점을 눌렀다: 멈춘 카드를 잠깐 붉게) · `log:<카드>`(그 카드의
-// 최근 기록을 편다) · `app-place`(앱 탭의 앱 위치를 밝힌다) · `selfcheck`(앱 탭의 `점검하기`에 초점).
+// 최근 기록을 편다) · `selfcheck`(앱 탭의 `점검하기`에 초점).
 let settingsFocusKey = null;
 
 const AUTOMATION_STATE_WORD = { run: '성공', fail: '실패', skip: '건너뜀' };
@@ -390,11 +390,6 @@ async function renderSettingsApp() {
   const place = personalizePlace(about);
   view.replaceChildren(settingsVersionRow(), settingsBackupRow(backup), place, selfcheckRow());
   settingsAboutFill();
-  if (settingsFocusKey === 'app-place') {
-    settingsFocusKey = null;
-    place.className = `${place.className} is-focus`;
-    if (typeof place.scrollIntoView === 'function') place.scrollIntoView({ block: 'center' });
-  }
   // 도움말 `문제가 생겼어요`의 `점검하기`로 들어왔으면 그 버튼에 초점(selfcheck-ui.js).
   if (settingsFocusKey === 'selfcheck') {
     settingsFocusKey = null;
@@ -2696,8 +2691,7 @@ async function renderSettingsIntegrations({ quiet = false } = {}) {
 // ---------- 설정 > 꾸미기 (이 맥에만) ----------
 // 세 줄(앱 아이콘 · 앱 이름 · 워크스페이스 제목) + 저장. 프리셋은 두지 않는다(`앱 위치`는 앱 탭으로 옮겼다).
 // 아이콘은 고르는 순간 화면에서 정사각형 가운데로 잘라(캔버스) 미리 보여 주고, `저장`을 눌러야 서버로 간다.
-// 아이콘·앱 이름은 크롬 앱(manifest)과 탭 아이콘에만 쓰인다 — 예전 Dock 앱(~/Applications)은 바뀌지 않으므로
-// 저장 뒤 그 사실을 한 줄로 알린다(DECISIONS 2026-09-29).
+// 아이콘·앱 이름은 크롬 앱(manifest)과 탭 아이콘에만 쓰인다 — 저장 뒤 크롬 앱에 반영하는 법을 한 줄로 알린다.
 const PERSONALIZE_ICON_MAX = 5 * 1024 * 1024;
 const PERSONALIZE_ICON_MIN = 128;
 const PERSONALIZE_ICON_OUT = 1024;
@@ -2813,7 +2807,7 @@ function personalizeApply({ title, icon, titleHidden } = {}) {
 }
 
 // 설정 › 앱의 `앱 위치` — 업데이트 파일의 경로(홈은 `~`). Finder의 `폴더로 이동`에 붙여 넣으라고만 알린다.
-// 서버는 Finder를 열지 않는다 — 경로 글자만 준다(GET /api/about의 updateFile). 예전 Dock 앱 줄은 없앴다(더 만들지 않는다).
+// 서버는 Finder를 열지 않는다 — 경로 글자만 준다(GET /api/about의 updateFile).
 function personalizePlace(about) {
   const lines = [['업데이트 파일', about && about.updateFile]]
     .filter(([, value]) => typeof value === 'string' && value)
@@ -2834,7 +2828,7 @@ function personalizePlace(about) {
     : [settingsEl('d-ismall', '앱 위치를 읽지 못했어요.')];
   const place = personalizeRow('앱 위치', '파일을 찾을 때', ...body);
   place.className = 'd-pset d-pplace';
-  place.dataset.focus = 'app-place';
+  place.dataset.row = 'place';
   return place;
 }
 
@@ -3003,10 +2997,8 @@ async function renderSettingsPersonalize() {
     done.appendChild(document.createTextNode('✓ 바뀌었어요'));
     view.appendChild(done);
     // 크롬 앱으로 설치했으면 — 크롬은 manifest를 곧바로 다시 읽지 않는다(사실대로 알린다).
-    // 예전 Dock 앱(~/Applications)은 더 만들지 않아 바뀌지 않는다 — 그것도 사실대로 한 줄.
     if (personalizeSavedNote.dock) {
       view.appendChild(settingsEl('d-ismall d-pinstallnote', '크롬 앱에는: 크롬을 다시 켜고(주소창에 about://restart) 앱을 열면 오른쪽 위 「앱 업데이트 있음」 → 업데이트 → 앱을 ⌘Q로 끄고 다시 열기'));
-      view.appendChild(settingsEl('d-ismall d-pinstallnote', '예전 버전이 만든 Dock 앱이 있다면 거기엔 바뀌지 않아요 — 크롬 앱으로 설치하면 돼요'));
     }
     personalizeSavedNote = null;
   }
@@ -3066,7 +3058,7 @@ const SETTINGS_FAQ = [
     ['연동은 꼭 켜야 하나요', '없음',
       '아니요. 지라·슬랙·캘린더·회의록은 전부 선택이에요. <b>설정 &gt; 연동</b>에서 하나씩 켜고, 켠 것만 자동으로 모아 와요. 하나도 켜지 않아도 직접 적는 기능은 전부 돼요.'],
     ['앱 아이콘·이름을 바꾸려면', '없음',
-      '<b>설정 &gt; 꾸미기</b>에서 내 그림을 고르고(가운데를 정사각형으로 잘라요) 앱 이름·워크스페이스 제목을 적은 뒤 <b>저장</b>해요. 이 맥에만 적용되고 업데이트해도 남아요. 크롬 앱은 크롬을 다시 켠 뒤(<b>about://restart</b>) 앱 오른쪽 위 <b>앱 업데이트 있음</b> → 업데이트 → <b>⌘Q</b> 뒤 다시 열어요. 예전 버전이 만든 Dock 앱이 있다면 거기엔 바뀌지 않아요 — 크롬 앱으로 설치하면 돼요.'],
+      '<b>설정 &gt; 꾸미기</b>에서 내 그림을 고르고(가운데를 정사각형으로 잘라요) 앱 이름·워크스페이스 제목을 적은 뒤 <b>저장</b>해요. 이 맥에만 적용되고 업데이트해도 남아요. 크롬 앱은 크롬을 다시 켠 뒤(<b>about://restart</b>) 앱 오른쪽 위 <b>앱 업데이트 있음</b> → 업데이트 → <b>⌘Q</b> 뒤 다시 열어요.'],
   ]],
   ['매일', [
     ['오늘 하기 버거운 업무는 어떻게 미루나요', '없음',

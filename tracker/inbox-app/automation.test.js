@@ -1984,7 +1984,7 @@ test('WP-O setup.sh: 크롬이 없으면 기본 브라우저로 열고 크롬 �
   assert.match(result.stdout, /✓ 설치를 끝냈어요 — 브라우저에서 앱이 열려요\.\n크롬을 설치하면 앱으로 설치할 수 있어요\(지금은 브라우저 탭으로 써요\)\.\n$/);
 });
 
-test('WP-O setup.sh: 옛 설치의 app-refresh는 그 라벨 하나만 bootout하고 plist·복사본·요청 파일 하나씩만 지우며, ~/Applications의 앱은 그대로 둔다', (t) => {
+test('WP-O setup.sh: 옛 설치의 app-refresh는 그 라벨 하나만 bootout하고 plist·복사본·요청 파일·옛 이름 기록 하나씩만 지우며, ~/Applications의 앱은 그대로 둔다', (t) => {
   const fix = setupRunFixture(t);
   // 옛 설치(1.1.x)의 흔적
   fs.mkdirSync(path.join(fix.install, 'requests'), { recursive: true });
@@ -2013,7 +2013,7 @@ test('WP-O setup.sh: 옛 설치의 app-refresh는 그 라벨 하나만 bootout�
   assert.equal(fs.existsSync(path.join(fix.install, 'app-refresh.sh')), false);
   assert.equal(fs.existsSync(path.join(fix.install, 'requests', 'app-refresh.request')), false);
   assert.ok(fs.existsSync(path.join(fix.agents, 'com.someone.else.plist')), '다른 plist는 그대로');
-  assert.ok(fs.existsSync(path.join(fix.install, 'app-bundle-name')), '그 밖의 설치 위치 파일은 그대로');
+  assert.equal(fs.existsSync(path.join(fix.install, 'app-bundle-name')), false, '옛 이름 기록 파일도 지운다');
   assert.ok(fs.existsSync(path.join(fix.install, 'requests', 'tiro-sync.request')), '다른 요청 파일은 그대로');
   assert.deepEqual(fix.listAll(fix.apps), appsBefore, '~/Applications는 하나도 건드리지 않는다');
   assert.ok(!fix.calls().split('\n').some(line => line.startsWith('open ')), '설정이 있던 설치(업데이트)는 열지 않는다');
@@ -2040,6 +2040,7 @@ test('WP-O update.sh: python3 없이 설정을 읽고, 옛 app-refresh는 그 �
   fs.writeFileSync(path.join(agents, 'com.workspace.app.server.plist'), '<plist/>');
   fs.writeFileSync(path.join(install, 'app-refresh.sh'), '#!/bin/bash\n');
   fs.writeFileSync(path.join(install, 'requests', 'app-refresh.request'), '{}\n');
+  fs.writeFileSync(path.join(install, 'app-bundle-name'), 'Workspace\n');
   fs.writeFileSync(path.join(install, 'workspace.env'), 'WORKSPACE_DIR="/nowhere"\n');
   fs.writeFileSync(path.join(apps, 'Workspace.app', 'Contents', 'Info.plist'), 'old');
 
@@ -2054,6 +2055,7 @@ test('WP-O update.sh: python3 없이 설정을 읽고, 옛 app-refresh는 그 �
   assert.equal(fs.existsSync(path.join(agents, 'com.workspace.app.app-refresh.plist')), false);
   assert.equal(fs.existsSync(path.join(install, 'app-refresh.sh')), false);
   assert.equal(fs.existsSync(path.join(install, 'requests', 'app-refresh.request')), false);
+  assert.equal(fs.existsSync(path.join(install, 'app-bundle-name')), false, '옛 이름 기록 파일도 지운다');
   assert.ok(fs.existsSync(path.join(agents, 'com.workspace.app.server.plist')), '다른 등록은 그대로');
   assert.ok(fs.existsSync(path.join(install, 'workspace.env')));
   assert.equal(fs.readFileSync(path.join(apps, 'Workspace.app', 'Contents', 'Info.plist'), 'utf8'), 'old', '~/Applications의 옛 앱은 그대로');

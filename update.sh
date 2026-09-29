@@ -332,14 +332,14 @@ if [ "$UPDATED" = "1" ]; then
 fi
 
 # 예전 Dock 앱 다시 만들기(app-refresh)는 없앴다 — 이 라벨 하나만 이름으로 내리고, 그 plist와 설치 위치의 복사본·
-# 요청 표시 파일 하나씩만 지운다(setup.sh와 같은 정리). 이미 만들어 둔 ~/Applications의 앱은 지우지 않는다.
+# 요청 표시 파일·옛 이름 기록(app-bundle-name) 하나씩만 지운다(setup.sh와 같은 정리). 이미 만들어 둔 ~/Applications의 앱은 지우지 않는다.
 OLD_REFRESH_PLIST="$HOME/Library/LaunchAgents/com.workspace.app.app-refresh.plist"
 if [ -f "$OLD_REFRESH_PLIST" ]; then
   launchctl bootout "gui/$(id -u)/com.workspace.app.app-refresh" 2>/dev/null
   rm -f "$OLD_REFRESH_PLIST"
   ok "예전 Dock 앱 다시 만들기 등록을 내렸어요 (Dock 앱은 그대로 둬요)"
 fi
-rm -f "$INSTALL_DIR/app-refresh.sh" "$INSTALL_DIR/requests/app-refresh.request"
+rm -f "$INSTALL_DIR/app-refresh.sh" "$INSTALL_DIR/requests/app-refresh.request" "$INSTALL_DIR/app-bundle-name"
 
 STATUS_TO="$VERSION"
 

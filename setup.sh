@@ -8,8 +8,6 @@
 #   4. 맥 스케줄러(launchd)에 등록한 뒤
 #   새로 설치했으면 앱 주소를 연다(크롬이 있으면 크롬으로 — 사용설명서의 「설치하기」로 크롬 앱이 된다)
 #
-# Dock 앱(~/Applications/<이름>.app)은 더 이상 만들지 않는다. 예전에 만든 앱은 지우지 않고 그대로 둔다(누르면 전처럼 열린다).
-#
 # 묻는 것이 하나도 없다. 이미 있는 설정은 그대로 존중하므로 여러 번 실행해도 안전하다.
 #
 #   실행: bash setup.sh
@@ -529,17 +527,17 @@ remove_agent() {
 # 지라 캐시 자동화는 없앴다(앱이 지라를 직접 읽는다) — 켬/끔과 무관하게 등록을 내린다.
 remove_agent jira-sync
 [ "$USE_TIRO" = "yes" ] || remove_agent tiro-sync
-# 로그인할 때 앱 창을 자동으로 띄우던 기능은 없앴다(앱은 Dock에서 직접 연다). 예전 등록이 남아 있으면 지운다.
+# 로그인할 때 앱 창을 자동으로 띄우던 기능은 없앴다(앱 창은 사람이 직접 연다). 예전 등록이 남아 있으면 지운다.
 remove_agent open-at-login
 
 # 예전 Dock 앱 다시 만들기(app-refresh) 등록은 없앴다 — 이 라벨 하나만 이름으로 내리고, 그 plist와 설치 위치의
-# 복사본(app-refresh.sh)·요청 표시 파일 하나씩만 지운다. 이미 만들어 둔 ~/Applications의 앱은 지우지 않는다.
+# 복사본(app-refresh.sh)·요청 표시 파일·옛 이름 기록(app-bundle-name) 하나씩만 지운다. 이미 만들어 둔 ~/Applications의 앱은 지우지 않는다.
 if [ -f "$AGENTS_DIR/$LABEL.app-refresh.plist" ]; then
   launchctl bootout "gui/$(id -u)/$LABEL.app-refresh" 2>/dev/null
   rm -f "$AGENTS_DIR/$LABEL.app-refresh.plist"
   ok "예전 Dock 앱 다시 만들기 등록을 내렸어요 (Dock 앱은 그대로 둬요)"
 fi
-rm -f "$INSTALL_DIR/app-refresh.sh" "$INSTALL_DIR/requests/app-refresh.request"
+rm -f "$INSTALL_DIR/app-refresh.sh" "$INSTALL_DIR/requests/app-refresh.request" "$INSTALL_DIR/app-bundle-name"
 
 # 예전 이름(com.luvon.workspace.*)으로 등록돼 있던 것을 새 이름으로 바꾼다.
 # 지울 대상은 이름을 하나하나 지정해서만 고른다 — 돌아가는 프로그램 목록을 훑어 고르지 않는다.

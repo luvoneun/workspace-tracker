@@ -2496,7 +2496,6 @@ a.d-btn { text-decoration: none; }
 .d-psaved { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; margin-top: 12px; padding: 10px 12px; border-radius: var(--r-sm); background: var(--success-bg); color: var(--success); font-size: 13px; font-weight: 600; }
 .d-psaved span { font-weight: 400; color: var(--muted); }
 .d-pplace { margin-top: 12px; box-shadow: inset 0 1px 0 var(--hair); }
-.d-pplace.is-focus { background: var(--sel); border-radius: var(--r-sm); box-shadow: none; padding-left: 10px; padding-right: 10px; }
 .d-pplaceline { display: flex; flex-direction: column; gap: 4px; }
 .d-pplaceline .lb { font-size: 12px; font-weight: 600; color: var(--muted); }
 #settingsPersonalizeView > .d-derr:empty { display: none; }

@@ -4,7 +4,7 @@
 // 지키는 것:
 // - 그림은 **저장소의 `local/icon.png` 한 파일에만** 쓴다(업데이트해도 남는 자리). 되돌리기도 그 파일만 지운다.
 // - 받은 바이트는 시그니처(PNG/JPEG)·크기(5MB 이하)·가로세로(128px 이상)를 확인한 뒤에만 쓴다.
-// - 서버는 프로세스를 띄우지 않는다. 예전 Dock 앱(~/Applications)은 만들지도 고치지도 않는다 — 꾸미기는 크롬 앱에만 쓰인다.
+// - 서버는 프로세스를 띄우지 않는다. 꾸미기는 크롬 앱(manifest)과 탭 아이콘에만 쓰인다.
 const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
@@ -32,7 +32,7 @@ function bad(message) {
 const trimmed = value => (typeof value === 'string' ? value.trim() : '');
 const length = value => [...value].length;
 
-// 앱 이름(크롬 앱의 이름 — 설정 `server.dockName`). 예전 Dock 앱 파일 이름 규칙 그대로 `/`·`:`·줄바꿈과
+// 앱 이름(크롬 앱의 이름 — 설정 `server.dockName`). `/`·`:`·줄바꿈과
 // 점으로 시작하는 이름은 받지 않는다(옛 설정 값과 어긋나지 않게).
 function checkDockName(value) {
   const name = trimmed(value);
