@@ -1013,7 +1013,8 @@ function readMeetingLinks() {
   }
 }
 
-function setMeetingLink(title, project) {
+// meetingId(있으면): 사람이 연결을 고른 그 회의 — 지난 회의에서 연결해도 그 회의의 프로젝트가 함께 바뀐다.
+function setMeetingLink(title, project, meetingId) {
   const key = String(title || '').trim();
   if (!key) return false;
   if(project && !resolveProject(project))throw new Error('프로젝트를 확인해 주세요.');
@@ -1021,8 +1022,73 @@ function setMeetingLink(title, project) {
   if (project) links[key] = project;
   else delete links[key];
   fs.writeFileSync(MEETING_LINKS_PATH, JSON.stringify(links, null, 2));
-  workflows.syncProject(key, resolveProject(project));
+  workflows.syncProject(key, resolveProject(project), meetingId);
   return true;
+}
+
+// ---------- 회의에 연결한 프로젝트로 이미 담은 항목도 옮기기 ----------
+// 회의 상세에서 프로젝트를 연결(또는 바꿈)한 뒤 확인 줄의 `옮기기`만 부른다. 항목의 jira/group 칸을
+// set-jira/set-group과 같은 규칙(setTrackField)으로 바꾸고, 한 트랜잭션(idempotent → mutations.run)이라 하나라도
+// 실패하면 전부 되돌아간다. 화면이 보여 준 그 번호들(ids)만 받는다 — 확인 줄을 띄운 뒤 새로 담긴 것은 옮기지 않는다.
+// 아이디어는 프로젝트 칸이 달라(project) 대상이 아니다. 되돌리기는 돌려준 moved(원래 프로젝트)로 한다.
+const MEETING_MOVE_TYPES = ['task', 'bug', 'check', 'decision'];
+const MEETING_MOVE_MAX = 500;
+const meetingMoveKey = project => (project.type === 'group' ? `group:${project.value.replace(/_/g, ' ').trim()}` : `jira:${project.value}`);
+function meetingMoveTarget(project) {
+  if (typeof project !== 'string' || !/^(jira|group):\S/.test(project) || project.length > 250 || /[\r\n\[\]]/.test(project)) throw new Error('프로젝트를 확인해 주세요.');
+  const target = resolveProject(project);
+  if (!target) throw new Error('프로젝트를 확인해 주세요.');
+  return target;
+}
+function meetingMoveCheckIds(ids) {
+  if (!Array.isArray(ids) || !ids.length || ids.length > MEETING_MOVE_MAX || ids.some(id => typeof id !== 'string' || !id) || new Set(ids).size !== ids.length) {
+    throw new Error('옮길 항목을 확인해 주세요.');
+  }
+}
+function moveMeetingItems({ meetingId, project, ids } = {}) {
+  if (typeof meetingId !== 'string' || !meetingId) throw new Error('회의를 찾을 수 없어요.');
+  const target = meetingMoveTarget(project);
+  meetingMoveCheckIds(ids);
+  const linked = workflows.meetingItemIds(meetingId);
+  const refs = getReportRefs();
+  const key = meetingMoveKey(target);
+  const moved = [];
+  ids.forEach((id) => {
+    const ref = refs[id];
+    if (!ref || !linked.has(id) || !MEETING_MOVE_TYPES.includes(ref.type)) throw new Error('이 회의에서 나온 항목이 아니에요. 새로고침한 뒤 다시 시도해 주세요.');
+    const from = projectKeyOf(ref);
+    if (from === key) return; // 이미 그 프로젝트다 — 세지도 않는다
+    if (!setTrackField(id, target.type, target.value, null)) throw new Error('항목을 찾을 수 없어요.');
+    moved.push({ id, from });
+  });
+  return { ok: true, meetingId, project: key, count: moved.length, moved };
+}
+// 되돌리기: 기록(moved)의 번호가 지금도 이 회의의 항목이고 아직 옮긴 그 프로젝트에 있을 때만 원래대로 돌린다.
+// 그 사이 사람이 다른 프로젝트로 바꿨으면 건드리지 않고 건너뛴다(skipped로 센다) — BMOVE 되돌리기와 같은 규칙.
+function undoMoveMeetingItems({ meetingId, project, moved } = {}) {
+  if (typeof meetingId !== 'string' || !meetingId) throw new Error('회의를 찾을 수 없어요.');
+  const target = meetingMoveTarget(project);
+  if (!Array.isArray(moved)) throw new Error('되돌릴 항목이 없어요.');
+  meetingMoveCheckIds(moved.map(entry => entry && entry.id));
+  moved.forEach((entry) => {
+    const from = entry.from;
+    if (from !== null && (typeof from !== 'string' || !/^(jira|group):\S/.test(from) || from.length > 250 || /[\r\n\[\]]/.test(from))) throw new Error('되돌릴 프로젝트를 확인해 주세요.');
+  });
+  const linked = workflows.meetingItemIds(meetingId);
+  const refs = getReportRefs();
+  const key = meetingMoveKey(target);
+  let restored = 0, skipped = 0;
+  moved.forEach(({ id, from }) => {
+    const ref = refs[id];
+    if (!ref || !linked.has(id) || projectKeyOf(ref) !== key) { skipped += 1; return; }
+    if (from === null) setTrackField(id, target.type, null, null);
+    else {
+      const at = from.indexOf(':');
+      setTrackField(id, from.slice(0, at), from.slice(at + 1), null);
+    }
+    restored += 1;
+  });
+  return { ok: true, restored, skipped };
 }
 
 function resolveProject(projectKey) {
@@ -2423,6 +2489,11 @@ const handleRequest = (req, res) => {
     '/api/workflow/review': workflows.review,
     '/api/workflow/review-undo': workflows.undoReview,
     '/api/workflow/link': workflows.link,
+    // 리마인드의 `답변 왔어요`를 한 번 열어 봤다는 표시(업무의 흐름 기록 칸 하나). 되돌리기 대상이 아니다.
+    '/api/workflow/answer-seen': workflows.markAnswerSeen,
+    // 회의에 연결한 프로젝트로 이 회의에서 이미 담은 항목도 옮기기 · 그 되돌리기(한 트랜잭션).
+    '/api/meeting/move-items': moveMeetingItems,
+    '/api/meeting/move-items-undo': undoMoveMeetingItems,
     // 담은 항목의 종류 바꾸기. 같은 id로 파일만 옮기므로 회의 연결·검토 기록이 그대로 남는다.
     '/api/workflow/retype': workflows.retype,
     // 직접 만든 프로젝트의 이름 바꾸기 — 그 프로젝트에 속한 모든 기록을 한 트랜잭션으로 함께 바꾼다.
@@ -2456,8 +2527,8 @@ const handleRequest = (req, res) => {
 
   if (url.pathname === '/api/meeting/set-project' && req.method === 'POST') {
     readBody(req)
-      .then(({ title, project }) => {
-        const ok = setMeetingLink(title, project || null);
+      .then(({ title, project, meetingId }) => {
+        const ok = setMeetingLink(title, project || null, typeof meetingId === 'string' ? meetingId : null);
         res.writeHead(ok ? 200 : 400, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ ok }));
       })

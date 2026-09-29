@@ -778,7 +778,7 @@ function uiGroupTasks(items) {
 }
 
 // 레일 한 줄(확인 대기·리마인드·후속 알림). 제목은 한 줄 말줄임(title에 전체), 오른쪽은 조용한 글자.
-// opts: { text, onOpen, wrap(2줄 허용), check(체크박스), badge(NEW 점), meta[{text,tone,strong}], sub, more, selected }
+// opts: { text, onOpen, wrap(2줄 허용), check(체크박스), badge(NEW 점), project(제목 뒤 `· ● 이름`), source, meta[{text,tone,strong}], sub, more, selected }
 function uiRailRow(opts) {
   const row = document.createElement('div');
   row.className = 'd-wrow'
@@ -804,11 +804,12 @@ function uiRailRow(opts) {
     title.addEventListener('click', opts.onOpen);
   }
   if (opts.badge) title.prepend(opts.badge);
-  // 원문이 있으면 제목 바로 뒤에 조용한 `원문` 링크(줄 열기로 번지지 않는다)
-  if (opts.source) {
+  // 원문이 있으면 제목 바로 뒤에 조용한 `원문` 링크(줄 열기로 번지지 않는다).
+  // opts.project(`· ● 이름`, 리마인드)도 같은 묶음에서 제목 바로 뒤에 선다 — 원문보다 앞.
+  if (opts.source || opts.project) {
     const wrap = document.createElement('span');
     wrap.className = 'tiwrap';
-    wrap.append(title, opts.source);
+    wrap.append(...[title, opts.project, opts.source].filter(Boolean));
     row.appendChild(wrap);
   } else {
     row.appendChild(title);
@@ -1345,17 +1346,7 @@ async function load() {
   }
   renderInboxHeadCount(data.createdToday || 0);
 
-  const todayIds = new Set((data.todayTasks || []).map(t => t.id));
-  const reminders = [...(data.todayTasks || []), ...(data.laterTasks || [])]
-    .filter(t => !todayIds.has(t.id) && t.status !== 'done' && t.due && diffDays(t.due) <= 1 && (t.priority === 'high' || t.priority === 'critical'))
-    .sort((a, b) => diffDays(a.due) - diffDays(b.due));
-  // 기다리던 답변이 온 업무도 리마인드 카드에 함께 올린다(옛 `답변이 해결된 업무` 묶음 자리).
-  const answered = (workflowData?.items || [])
-    .filter(item => ['task', 'bug'].includes(item.type) && item.status !== 'done' && item.blockedBy && wfItem(item.blockedBy)?.status === 'done')
-    .map(item => itemsById.get(item.id) || item);
-  // 배포가 코앞인 프로젝트도 같은 카드에 올린다 — 프로젝트를 열어야만 배포일이 보여 놓치기 쉬웠다.
-  // 프로젝트 목록은 프로젝트 탭과 같은 함수로 만든다(열린 항목 수도 그 값 그대로다).
-  renderReminders(reminders, answered, deployReminders(uiProjectRows(wfProjects(), workflowData.items)));
+  remindersRender(data);
   // 반응 필요(오늘 탭 맨 위)는 서버 메모리에서 따로 읽는다 — 목록 응답을 그것 때문에 늦추지 않는다.
   if (typeof attentionLoad === 'function') attentionLoad();
   syncTaskDetail();
@@ -1588,16 +1579,20 @@ function renderCalendar(calendar) {
 // 회의 탭은 거기에 더해 `회의 탭에서 열기`를(toTab: false) 빼고 연다.
 // `fetchAll`은 오늘 탭 레일의 오늘 미팅 줄에서만 켠다 — `오늘 것 모두 가져오기`를 레일에서도 누를 수 있게
 // (회의 탭 머리의 버튼과 같은 함수를 쓴다).
-function meetingMenuSections(event, { open = true, toTab = true, fetchAll = false } = {}) {
+// `onLinked`는 회의 정리 카드·회의 탭 머리의 ⋯에서만 넘긴다 — 프로젝트를 연결(또는 바꿈)한 뒤 그 자리에
+// `이미 담은 N개도 옮길까요?`를 세운다(meetings-ui.js). 연결 해제에는 부르지 않는다(묻지 않는다).
+// 보내는 meetingId는 연결을 고른 그 회의다 — 지난 회의에서 연결해도 그 회의의 프로젝트가 함께 바뀐다.
+function meetingMenuSections(event, { open = true, toTab = true, fetchAll = false, onLinked = null } = {}) {
   // 레일의 캘린더 줄에는 번호가 `workflowId`로 온다 — 흐름 기록에 있는 회의만 탭에서 고를 수 있다.
   const tabId = event.id || event.workflowId || null;
   const setProject = async (projectKey) => {
     await request('/api/meeting/set-project', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: event.title, project: projectKey }),
+      body: JSON.stringify({ title: event.title, project: projectKey, ...(event.id ? { meetingId: event.id } : {}) }),
     });
     await load();
+    if (projectKey && typeof onLinked === 'function') onLinked(projectKey);
   };
   const actions = [];
   if (open) actions.push({ label: '회의 정리 열기', onClick: () => openMeetingPanel(event) });
@@ -1787,6 +1782,56 @@ function deployReminderRow(entry) {
 // 가장 앞) → 답변 왔어요 → 기한. 제목은 2줄까지 허용한다. 안 가져온 미팅 노트는 여기 오르지 않는다 —
 // 노트를 안 쓰는 회의도 많아 매번 알리면 소음이었다. 회의 탭이 그 회의에서 알린다.
 const DEPLOY_REMINDER_MAX = 4;
+
+// `답변 왔어요`를 이미 열어 본 업무인지 — 서버가 적어 둔 answerSeen.answer가 지금의 답(기다리던 확인 대기 번호 +
+// 그 완료일)과 같을 때만 본 것으로 친다. 다른 확인 대기에 다시 걸렸다가 답이 오면 값이 달라져 다시 뜬다.
+function answerSeenFor(item) {
+  const entry = item && typeof wfItem === 'function' ? wfItem(item.id) : null;
+  const blockerId = (entry && entry.blockedBy) || (item && item.blockedBy);
+  const blocker = blockerId && typeof wfItem === 'function' ? wfItem(blockerId) : null;
+  if (!entry || !blocker || blocker.status !== 'done' || !entry.answerSeen) return false;
+  return entry.answerSeen.answer === `${blockerId}:${blocker.completed || ''}`;
+}
+
+// 리마인드 카드에 올릴 것을 지금 가진 값으로 골라 그린다 — load()와, 답변을 확인한 상세를 닫을 때 함께 쓴다.
+function remindersRender(data = latestData) {
+  if (!data) return;
+  const todayIds = new Set((data.todayTasks || []).map(t => t.id));
+  const reminders = [...(data.todayTasks || []), ...(data.laterTasks || [])]
+    .filter(t => !todayIds.has(t.id) && t.status !== 'done' && t.due && diffDays(t.due) <= 1 && (t.priority === 'high' || t.priority === 'critical'))
+    .sort((a, b) => diffDays(a.due) - diffDays(b.due));
+  // 기다리던 답변이 온 업무도 리마인드 카드에 함께 올린다(옛 `답변이 해결된 업무` 묶음 자리).
+  // 한 번 열어 본 것(answerSeenFor)은 뺀다 — 다만 지금 그 업무의 상세가 열려 있으면 닫을 때까지 둔다
+  // (상세 카드가 붙어 있는 줄이 사라지면 카드도 함께 닫힌다).
+  const answered = (workflowData?.items || [])
+    .filter(item => ['task', 'bug'].includes(item.type) && item.status !== 'done' && item.blockedBy && wfItem(item.blockedBy)?.status === 'done')
+    .filter(item => !answerSeenFor(item) || (panelState && panelState.kind !== 'meeting' && panelState.id === item.id))
+    .map(item => itemsById.get(item.id) || item);
+  // 배포가 코앞인 프로젝트도 같은 카드에 올린다 — 프로젝트를 열어야만 배포일이 보여 놓치기 쉬웠다.
+  // 프로젝트 목록은 프로젝트 탭과 같은 함수로 만든다(열린 항목 수도 그 값 그대로다).
+  renderReminders(reminders, answered, deployReminders(uiProjectRows(wfProjects(), workflowData.items)));
+}
+
+// 업무 상세를 열면 `답변 왔어요`를 확인한 것으로 서버에 적는다(어디서 열든 — 리마인드 줄이든 오늘 목록이든).
+// 화면의 값은 먼저 바꿔 두고(다음에 그릴 때 리마인드에서 빠진다), 보내기가 실패하면 되돌린다. 알림은 띄우지 않는다
+// (NEW가 사라질 때처럼 조용한 표시다). 되돌리기(⌘Z) 대상이 아니다.
+let answerSeenClosePending = null;
+async function answerSeenMark(id) {
+  const entry = typeof wfItem === 'function' ? wfItem(id) : null;
+  if (!entry || !['task', 'bug'].includes(entry.type) || entry.status === 'done' || !entry.blockedBy) return;
+  const blocker = wfItem(entry.blockedBy);
+  if (!blocker || blocker.status !== 'done' || answerSeenFor(entry)) return;
+  const previous = entry.answerSeen;
+  entry.answerSeen = { at: new Date().toISOString(), answer: `${entry.blockedBy}:${blocker.completed || ''}` };
+  answerSeenClosePending = id;
+  try {
+    await request('/api/workflow/answer-seen', { method: 'POST', quiet: true, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+  } catch {
+    entry.answerSeen = previous;
+    if (answerSeenClosePending === id) answerSeenClosePending = null;
+  }
+}
+
 function renderReminders(reminders, answered = [], deploys = []) {
   const zone = document.getElementById('reminderZone');
   const list = document.getElementById('reminderList');
@@ -1796,11 +1841,13 @@ function renderReminders(reminders, answered = [], deploys = []) {
   zone.hidden = total === 0;
 
   list.replaceChildren();
+  // 제목 뒤에 오늘 목록과 같은 `· ● 프로젝트`(별칭 반영, 없으면 아무것도 붙이지 않는다).
   const row = (item, meta) => uiRailRow({
     id: item.id,
     text: item.description,
     wrap: true,
     selected: !!panelState && panelState.id === item.id,
+    project: uiProjectColorKey(item) ? uiInlineProject(item) : null,
     source: uiSourceLink(item),
     meta,
     onOpen: () => panelOpen({ id: item.id }),
@@ -2572,6 +2619,7 @@ function panelOpen(view) {
   escDrop(panelClose);
   escPush(panelClose);
   panelRender(true);
+  if (kind === 'item') answerSeenMark(view.id);
 }
 
 function panelClose() {
@@ -2583,6 +2631,9 @@ function panelClose() {
   detailUnmount(); // 떠 있는 카드와 거기 붙은 스크롤·크기 감시를 함께 거둔다
   document.querySelectorAll('.is-sel[data-task-id], .d-wrow.is-sel, .d-mrow.is-sel').forEach(row => row.classList.remove('is-sel'));
   if (side) { side.hidden = true; side.replaceChildren(); }
+  // 방금 `답변 왔어요`를 확인한 업무의 상세를 닫으면 리마인드 카드를 다시 그려 그 줄을 뺀다
+  // (열려 있는 동안은 카드가 붙어 있는 줄이라 남겨 두었다).
+  if (answerSeenClosePending) { answerSeenClosePending = null; remindersRender(); }
   // 팔레트에서 열었던 항목이면 찾던 자리로 돌려 놓는다(포커스도 검색 입력으로).
   // 팔레트 → 회의 → 항목처럼 거쳐 왔어도 처음 찾던 자리로 돌아간다.
   while (reopen && reopen.kind === 'meeting') reopen = reopen.back;

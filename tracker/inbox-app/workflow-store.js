@@ -131,13 +131,26 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     write(state);
     return { ok: true };
   }
-  function syncProject(title, project) {
+  // 제목별 연결을 바꾸면 오늘 그 제목의 회의 + (있으면) 사람이 연결을 고른 그 회의의 프로젝트를 함께 맞춘다.
+  // 지난 회의 상세에서 연결했을 때 그 회의 머리·새로 담는 항목이 옛 프로젝트에 남지 않게(오늘만 보던 빈틈).
+  // 같은 제목의 다른 지난 회의는 건드리지 않는다 — 그 회차는 그때의 프로젝트가 기록이다.
+  function syncProject(title, project, meetingId) {
     const state=read();let changed=false;
     for(const event of [...Object.values(state.meetings),...currentMeetings()]) {
       if(event.title!==title || event.date!==today())continue;
       state.meetings[event.id]={...event,project};changed=true;
     }
+    if(typeof meetingId==='string' && meetingId) {
+      let event=null;
+      try { event=resolveMeeting(meetingId,state); } catch { event=null; }
+      if(event && String(event.title||'').trim()===title) { state.meetings[meetingId]={...event,project};changed=true; }
+    }
     if(changed)write(state);
+  }
+  // 이 회의(번호)에 담긴 항목 번호들 — 회의에 프로젝트를 연결한 뒤 `이미 담은 것도 옮기기`가 쓴다.
+  function meetingItemIds(meetingId) {
+    const state=read();
+    return new Set(Object.entries(state.items).filter(([, entry]) => entry && entry.meetingId===meetingId).map(([id]) => id));
   }
   // due: 할 일의 마감일, 확인 대기의 회신 기한. 결정에는 마감일이 없다.
   function capture({ meetingId: id, type, description, project, due }) {
@@ -444,14 +457,40 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     return { ok: true, id };
   }
 
+  // ---------- `답변 왔어요` 확인함 (리마인드 카드에서 빼기) ----------
+  // 기다리던 답변이 온 업무를 한 번 열어 보면 리마인드 카드에서 뺀다. 기기마다 다르면 안 되므로 여기(.workflow.json)에
+  // 둔다 — 그 업무의 흐름 기록 칸 하나(`answerSeen`)라 업무가 사라지면 함께 뜻을 잃고, 표가 따로 불어나지 않는다.
+  // 값은 `{ at: 확인 시각, answer: '확인 대기 번호:완료일' }`이다. 화면은 지금의 `답변`(blockedBy + 그 확인 대기의 완료일)이
+  // 적어 둔 answer와 다를 때만 다시 올린다 — 다른 확인 대기에 다시 걸렸다가 답이 오면(또는 같은 확인 대기를 풀었다가
+  // 다른 날 다시 끝내면) 다시 뜬다. 같은 날 풀었다 다시 끝낸 것은 같은 답으로 본다(완료일이 날짜뿐이다).
+  // 되돌리기(⌘Z) 대상이 아니다 — 가벼운 표시다. 업무 줄의 `답변 왔어요` 상태 글자는 그대로 남는다.
+  const answerMark = (blockerId, blocker) => `${blockerId}:${(blocker && blocker.completed) || ''}`;
+  function markAnswerSeen(body) {
+    const id = body && body.id;
+    const all = refs();
+    const source = typeof id === 'string' ? all[id] : null;
+    if (!source) throw new Error('항목을 찾을 수 없어요.');
+    if (!['task', 'bug'].includes(source.type)) throw new Error('업무에서만 표시할 수 있어요.');
+    const state = read();
+    const entry = state.items[id] || {};
+    const blocker = entry.blockedBy ? all[entry.blockedBy] : null;
+    if (!blocker || blocker.status !== 'done') throw new Error('아직 답변이 오지 않은 업무예요.');
+    const answer = answerMark(entry.blockedBy, blocker);
+    if (entry.answerSeen && entry.answerSeen.answer === answer) return { ok: true, id, answerSeen: entry.answerSeen };
+    const answerSeen = { at: new Date().toISOString(), answer };
+    state.items[id] = { ...entry, answerSeen };
+    write(state);
+    return { ok: true, id, answerSeen };
+  }
+
   // ---------- 담은 항목의 종류 바꾸기 ----------
   // 새 항목을 만들지 않는다 — 같은 id로 업무 파일의 줄만 옮긴다(move). 회의 연결(state.items[id].meetingId)과
   // 검토 기록(state.reviewed)은 항목 번호로 이어져 있어서 그대로 남는다.
   // 여기서 손보는 것은 새 종류에 없는 흐름 기록 칸을 지우는 것 하나뿐이다.
   const RETYPE_DROP = {
     task: ['followUp', 'contacted'],            // 다시 확인할 날짜·확인 요청 기록은 확인 대기의 것이다
-    check: ['blockedBy'],                        // 기다리는 답변 연결은 할 일의 것이다
-    decision: ['blockedBy', 'followUp', 'contacted', 'outcome'], // 결정에는 결과 한 줄이 없다
+    check: ['blockedBy', 'answerSeen'],          // 기다리는 답변 연결(과 그 답을 확인한 표시)은 할 일의 것이다
+    decision: ['blockedBy', 'answerSeen', 'followUp', 'contacted', 'outcome'], // 결정에는 결과 한 줄이 없다
   };
   function retype({ id, type }) {
     if (!['task', 'check', 'decision'].includes(type)) throw new Error('바꿀 종류를 확인해 주세요.');
@@ -481,5 +520,5 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     write(state);
     return { ok: true };
   }
-  return { archive, snapshot, patchItem, saveMeeting, syncProject, capture, review, undoReview, retype, link, checkProjectLink, linkProject, checkProjectAlias, setProjectAlias, projectAliases, checkJiraRoles, saveJiraRoles, groupList, renameGroup, moveGroup, undoMoveGroup, recordProjectMove, takeProjectMove, attentionDismissed, dismissAttention, undismissAttention, outcome: id => read().items[id]?.outcome || '' };
+  return { archive, snapshot, patchItem, saveMeeting, syncProject, meetingItemIds, markAnswerSeen, capture, review, undoReview, retype, link, checkProjectLink, linkProject, checkProjectAlias, setProjectAlias, projectAliases, checkJiraRoles, saveJiraRoles, groupList, renameGroup, moveGroup, undoMoveGroup, recordProjectMove, takeProjectMove, attentionDismissed, dismissAttention, undismissAttention, outcome: id => read().items[id]?.outcome || '' };
 };

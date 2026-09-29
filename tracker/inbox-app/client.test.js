@@ -1616,9 +1616,13 @@ test('회의 줄에서 문구를 고치는 동안은 체크박스를 잠그고, 
   const { app } = meetingRowClient(new Response('{"ok":true}'));
   const row = app.run(`panelMeetingRow({ id: 'd1', type: 'decision', description: '결정 문구', status: 'to-do' }, { id: 'm1' }, null)`);
   const box = firstCheckbox(row.children[0]);
-  const title = row.children[2];
   assert.equal(box.disabled, false);
-  title.listeners.click(); // 결정은 상세가 없어 제목을 누르는 것이 곧 문구 고치기다
+  // 제목은 누르면 펼치는 자리다(WP-W) — 문구 고치기는 ⋯의 `문구 고치기`로 연다.
+  app.run('uiMenu = (anchor, sections) => { window.__menu = sections; };');
+  const more = row.children[row.children.length - 1].children[0];
+  more.listeners.click({ stopPropagation() {} });
+  const editItem = app.run('window.__menu')[0].find(entry => entry.label === '문구 고치기');
+  editItem.onClick();
   assert.equal(box.disabled, true, '고치는 동안은 체크할 수 없다');
   app.run('escStack[escStack.length - 1]()'); // Esc는 입력만 되돌린다
   assert.equal(box.disabled, false, '되돌리면 다시 누를 수 있다');
@@ -9537,4 +9541,186 @@ test('WP-U 받는 동안: 목록을 못 받았는데 업데이트 중이면(상�
   plain.run('updatingSeenAt = Date.now()');
   await plain.run('updateBusyCheck()');
   assert.equal(plain.nodes.get('liveRegion').textContent, '목록을 불러오지 못했어요');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WP-W — 리마인드 줄의 프로젝트 · `답변 왔어요` 한 번 보면 빠짐 · 회의 줄 두 줄/펼침 · 회의 연결 뒤 옮기기 묻기
+
+function reminderClient(extraItems = []) {
+  const { app, sent } = meetingRowClient(new Response('{"ok":true}'));
+  app.context.extraItems = extraItems;
+  app.run(`jiraIssuesByKey = new Map([['IO-1', { key: 'IO-1', summary: '결제 리뉴얼' }]]);
+    projectAliasesCache = { 'IO-2': '알림 센터' };
+    workflowData = { meetings: [], projectLinks: {}, items: [
+      { id: 'c1', type: 'check', status: 'done', completed: '2026-09-28' },
+      { id: 't1', type: 'task', status: 'to-do', description: '지라 업무', jira: 'IO-1', blockedBy: 'c1' },
+      { id: 't2', type: 'task', status: 'to-do', description: '별칭 업무', jira: 'IO-2', blockedBy: 'c1' },
+      { id: 't3', type: 'task', status: 'to-do', description: '프로젝트 없는 업무', blockedBy: 'c1' },
+      { id: 't4', type: 'task', status: 'to-do', description: '그룹 업무', group: '가입 개선', blockedBy: 'c1',
+        answerSeen: { at: '2026-09-28T10:00:00.000Z', answer: 'c1:2026-09-28' } },
+      ...extraItems,
+    ] }; wfIndexData(); itemsById = new Map(); latestData = { todayTasks: [], laterTasks: [] };`);
+  return { app, sent };
+}
+const reminderRows = app => app.nodes.get('reminderList').children;
+const reminderTitle = row => nodeFind(row, 'ti').textContent;
+
+test('WP-W 리마인드 줄: 제목 뒤에 오늘 목록과 같은 `· ● 프로젝트`(지라는 요약, 별칭 반영), 없으면 아무것도 붙이지 않는다', () => {
+  const { app } = reminderClient();
+  app.run('remindersRender()');
+  const rows = reminderRows(app);
+  assert.deepEqual(rows.map(reminderTitle), ['지라 업무', '별칭 업무', '프로젝트 없는 업무'], '열어 본 답변(t4)은 빠진다');
+  const project = row => nodeFind(row, 'd-inproj');
+  assert.deepEqual(project(rows[0]).children.map(kid => typeof kid === 'string' ? kid : kid.className), ['· ', 'd-pjdot', '결제 리뉴얼']);
+  assert.equal(project(rows[1]).children[2], '알림 센터', '별칭이 있으면 별칭');
+  assert.equal(project(rows[2]), null, '프로젝트가 없으면 아무것도 붙이지 않는다');
+  const wrap = nodeFind(rows[0], 'tiwrap');
+  assert.equal(wrap.children[0].className, 'ti', '제목이 먼저, 그 바로 뒤에 프로젝트');
+  assert.equal(wrap.children[1].className, 'd-inproj');
+});
+
+test('WP-W `답변 왔어요`: 적어 둔 답과 지금의 답이 같을 때만 본 것으로 친다 — 다시 걸렸다가 새 답이 오면 다시 뜬다', () => {
+  const { app } = reminderClient([
+    { id: 'c2', type: 'check', status: 'done', completed: '2026-09-29' },
+    { id: 't5', type: 'task', status: 'to-do', description: '다시 걸린 업무', blockedBy: 'c2',
+      answerSeen: { at: '2026-09-28T10:00:00.000Z', answer: 'c1:2026-09-28' } },
+    { id: 'c3', type: 'check', status: 'done', completed: '2026-09-29' },
+    { id: 't6', type: 'task', status: 'to-do', description: '같은 확인 대기가 다른 날 다시 끝남', blockedBy: 'c3',
+      answerSeen: { at: '2026-09-28T10:00:00.000Z', answer: 'c3:2026-09-28' } },
+  ]);
+  assert.equal(app.run("answerSeenFor(wfItem('t4'))"), true);
+  assert.equal(app.run("answerSeenFor(wfItem('t5'))"), false, '다른 확인 대기의 새 답');
+  assert.equal(app.run("answerSeenFor(wfItem('t6'))"), false, '같은 확인 대기라도 완료일이 달라졌다');
+  app.run('remindersRender()');
+  assert.ok(reminderRows(app).map(reminderTitle).includes('다시 걸린 업무'));
+  assert.ok(!reminderRows(app).map(reminderTitle).includes('그룹 업무'));
+});
+
+test('WP-W 업무 상세를 열면 답변 확인을 서버에 조용히 적고, 상세가 열린 동안은 줄을 남겼다가 닫으면 뺀다', async () => {
+  const { app, sent } = reminderClient();
+  app.run('remindersRender()');
+  assert.ok(reminderRows(app).map(reminderTitle).includes('지라 업무'));
+  // 상세가 열려 있다고 치고(panelState) 확인 표시만 부른다 — 카드 그리기는 이 가짜 DOM의 몫이 아니다.
+  app.run("panelState = { kind: 'item', id: 't1' }");
+  await app.run("answerSeenMark('t1')");
+  assert.deepEqual(sent.map(call => call.url), ['/api/workflow/answer-seen']);
+  assert.deepEqual(sent[0].body, { id: 't1' });
+  assert.equal(app.run("wfItem('t1').answerSeen.answer"), 'c1:2026-09-28');
+  app.run('remindersRender()');
+  assert.ok(reminderRows(app).map(reminderTitle).includes('지라 업무'), '상세 카드가 붙어 있는 동안은 줄을 남긴다');
+  app.run('panelState = null; answerSeenClosePending = null; remindersRender()');
+  assert.ok(!reminderRows(app).map(reminderTitle).includes('지라 업무'), '닫으면 빠진다');
+  // 이미 본 것·답이 아직 없는 것·완료한 것은 보내지 않는다.
+  sent.length = 0;
+  await app.run("answerSeenMark('t1')");
+  await app.run("answerSeenMark('t4')");
+  await app.run("answerSeenMark('c1')");
+  assert.deepEqual(sent, []);
+});
+
+test('WP-W 답변 확인 보내기가 실패하면 화면 값을 되돌린다(리마인드에 다시 남는다)', async () => {
+  const { app } = reminderClient();
+  app.context.fetch = async () => new Response('{"ok":false,"error":"x"}', { status: 400 });
+  await app.run("answerSeenMark('t2')");
+  assert.equal(app.run("wfItem('t2').answerSeen"), undefined);
+  assert.equal(app.run('answerSeenClosePending'), null);
+});
+
+test('WP-W 회의 줄: 제목은 누르면 그 자리에서 펼치고 다시 누르면 접힌다(aria-expanded), 상세는 ⋯의 `상세 열기`', () => {
+  const { app } = meetingRowClient(new Response('{"ok":true}'));
+  app.run("opened = []; window.__host = { ...MEETING_HOST_CARD, openItem: item => opened.push(item.id) };");
+  app.run('uiMenu = (anchor, sections) => { window.__menu = sections; };');
+  const row = app.run("panelMeetingRow({ id: 't1', type: 'task', description: '아주 긴 회의 항목 문구', status: 'to-do' }, { id: 'm1' }, null, window.__host)");
+  const title = nodeFind(row, 'ti');
+  assert.equal(title.getAttribute('aria-expanded'), 'false');
+  assert.equal(title.getAttribute('aria-label'), undefined, '이름은 문구 그대로다(상세 보기라고 부르지 않는다)');
+  title.listeners.click();
+  assert.match(row.className, / is-open$/);
+  assert.equal(title.getAttribute('aria-expanded'), 'true');
+  assert.equal(app.run('JSON.stringify(opened)'), '[]', '제목을 눌러도 상세는 열리지 않는다');
+  title.listeners.click();
+  assert.doesNotMatch(row.className, /is-open/);
+  assert.equal(title.getAttribute('aria-expanded'), 'false');
+  const more = row.children[row.children.length - 1].children[0];
+  more.listeners.click({ stopPropagation() {} });
+  const head = app.run('window.__menu')[0];
+  assert.equal(head[0].label, '상세 열기');
+  head[0].onClick();
+  assert.equal(app.run('JSON.stringify(opened)'), '["t1"]');
+  // 결정은 상세가 없다 — `상세 열기`도 없다.
+  const decision = app.run("panelMeetingRow({ id: 'd1', type: 'decision', description: '결정 문구', status: 'to-do' }, { id: 'm1' }, null, window.__host)");
+  decision.children[decision.children.length - 1].children[0].listeners.click({ stopPropagation() {} });
+  assert.equal(app.run('window.__menu')[0][0].label, '문구 고치기');
+});
+
+test('WP-W 회의 연결 뒤 옮길 후보: 대상 종류만, 이미 그 프로젝트인 것은 빼고, 다른 프로젝트에 있던 수를 따로 센다', () => {
+  const app = workflowsClient();
+  const pick = (items, target) => JSON.parse(app.run(`JSON.stringify(meetingMoveCandidates(${JSON.stringify(items)}, ${JSON.stringify(target)}))`));
+  const items = [
+    { id: 'a', type: 'task' },
+    { id: 'b', type: 'check', group: '결제 리뉴얼' },
+    { id: 'c', type: 'decision', jira: 'IO-9' },
+    { id: 'd', type: 'bug', group: '가입 개선' },
+    { id: 'e', type: 'idea' },
+  ];
+  assert.deepEqual(pick(items, 'group:결제_리뉴얼'), { ids: ['a', 'c', 'd'], other: 2 }, '밑줄·공백은 같은 이름이고, 아이디어는 대상이 아니다');
+  assert.deepEqual(pick(items, 'jira:IO-9'), { ids: ['a', 'b', 'd'], other: 2 });
+  assert.deepEqual(pick([{ id: 'x', type: 'task', jira: 'IO-9' }], 'jira:IO-9'), { ids: [], other: 0 });
+});
+
+test('WP-W 회의 연결 뒤 확인 줄: 문구·`옮기기`/`그대로`, 프로젝트가 또 바뀌면 사라지고, 옮기면 ⌘Z 한 번에 되돌린다', async () => {
+  const { app, sent } = meetingRowClient(new Response(JSON.stringify({ ok: true, count: 2, moved: [{ id: 'a', from: null }, { id: 'b', from: 'group:가입 개선' }] })));
+  app.run(`workflowData = { meetings: [{ id: 'm1', title: '결제 주간', date: '2026-09-20', project: { type: 'group', value: '결제_리뉴얼', label: '결제_리뉴얼' } }],
+    items: [
+      { id: 'a', type: 'task', meetingId: 'm1', description: 'A' },
+      { id: 'b', type: 'check', meetingId: 'm1', description: 'B', group: '가입 개선' },
+      { id: 'c', type: 'task', meetingId: 'm1', description: 'C', group: '결제 리뉴얼' },
+    ] }; wfIndexData(); itemsById = new Map();
+    redraws = 0; window.__host = { ...MEETING_HOST_CARD, redraw: () => { redraws += 1; } };`);
+  const event = 'workflowData.meetings[0]';
+  assert.equal(app.run(`meetingMoveAskNode(${event}, window.__host)`), null, '연결하기 전에는 줄이 없다');
+  app.run("meetingMoveAskOpen('m1', 'group:결제 리뉴얼', window.__host)");
+  const line = app.run(`meetingMoveAskNode(${event}, window.__host)`);
+  assert.equal(line.className, 'd-jline d-mmove');
+  assert.equal(line.children[0].textContent, '이 회의에서 이미 담은 2개도 「결제 리뉴얼」로 옮길까요? (그중 1개는 다른 프로젝트에 있어요)');
+  assert.deepEqual(line.children.filter(kid => kid.className === 'd-link').map(kid => kid.textContent), ['옮기기', '그대로']);
+  // `그대로`는 아무것도 보내지 않는다.
+  line.children[4].listeners.click();
+  assert.equal(app.run(`meetingMoveAskNode(${event}, window.__host)`), null);
+  assert.deepEqual(sent, []);
+  // `옮기기`는 보여 준 번호만 한 번 보내고, ⌘Z 기록을 하나 남긴다.
+  app.run("meetingMoveAskOpen('m1', 'group:결제 리뉴얼', window.__host)");
+  const again = app.run(`meetingMoveAskNode(${event}, window.__host)`);
+  await again.children[2].listeners.click();
+  assert.deepEqual(sent.map(call => call.url), ['/api/meeting/move-items']);
+  assert.deepEqual(sent[0].body, { meetingId: 'm1', project: 'group:결제 리뉴얼', ids: ['a', 'b'] });
+  assert.equal(app.run('undoStack[undoStack.length - 1].label'), '회의 항목 2개 옮기기');
+  sent.length = 0;
+  await app.run('undoStack[undoStack.length - 1].undo()');
+  assert.deepEqual(sent[0], { url: '/api/meeting/move-items-undo', body: { meetingId: 'm1', project: 'group:결제 리뉴얼', moved: [{ id: 'a', from: null }, { id: 'b', from: 'group:가입 개선' }] } });
+  // 프로젝트가 그 사이 또 바뀌었으면 묻던 줄은 사라진다.
+  app.run("meetingMoveAskOpen('m1', 'jira:IO-7', window.__host)");
+  assert.equal(app.run(`meetingMoveAskNode(${event}, window.__host)`), null);
+});
+
+test('WP-W 회의 ⋯의 프로젝트 연결: 고르면 회의 번호를 함께 보내고 onLinked를 부르며, 해제에는 부르지 않는다', async () => {
+  const { app, sent } = meetingRowClient(new Response('{"ok":true}'));
+  app.run("linkedWith = []; renderGroupControl = opts => ({ opts }); window.__sections = meetingMenuSections({ id: 'm1', title: '결제 주간', project: null }, { open: false, toTab: false, onLinked: key => linkedWith.push(key) });");
+  const control = app.run('window.__sections[window.__sections.length - 1][0].control.opts');
+  await control.onSetGroup('결제 리뉴얼');
+  assert.deepEqual(sent[0], { url: '/api/meeting/set-project', body: { title: '결제 주간', project: 'group:결제 리뉴얼', meetingId: 'm1' } });
+  assert.equal(app.run('JSON.stringify(linkedWith)'), '["group:결제 리뉴얼"]');
+  await control.onSetGroup(null);
+  assert.deepEqual(sent[1].body, { title: '결제 주간', project: null, meetingId: 'm1' });
+  assert.equal(app.run('JSON.stringify(linkedWith)'), '["group:결제 리뉴얼"]', '연결 해제에는 묻지 않는다');
+});
+
+test('WP-W 화면 파일 규칙: 회의 줄에 새 innerHTML이 없고, 두 줄/펼침 CSS가 아이디어 줄과 같은 규칙이다', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /\.d-mrow2 \.ti \{[^}]*-webkit-line-clamp: 2/);
+  assert.match(css, /\.d-mrow2\.is-open \.ti \{ -webkit-line-clamp: unset; display: block; \}/);
+  assert.match(css, /\.d-wrow\.is-wrap \.tiwrap \{ grid-area: ti; display: flex; flex-wrap: wrap;/);
+  const meetings = fs.readFileSync(path.join(__dirname, 'meetings-ui.js'), 'utf8');
+  const uses = meetings.split('\n').filter(line => /innerHTML/.test(line) && !/^\s*\/\//.test(line));
+  assert.ok(uses.every(line => /innerHTML = uiIcon\(/.test(line)), uses.join('\n'));
 });

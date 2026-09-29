@@ -120,8 +120,12 @@ function panelMeeting(event, box, host = MEETING_HOST_CARD) {
   // 업무 상세 카드 머리(panelHead)와 같은 자리·같은 모양 — ✕ 왼쪽에 더보기.
   // 메뉴는 레일의 회의 줄 ⋯가 여는 메뉴 그대로다(회의용으로 새로 만들지 않는다).
   // 이미 열려 있는 자리라 `회의 정리 열기`는 빼고, 회의 탭에서는 `회의 탭에서 열기`도 뺀다.
+  // 여기서 프로젝트를 연결(또는 바꿈)하면 그 자리에 `이미 담은 N개도 옮길까요?`가 선다(기록된 회의만).
   const more = uiMoreButton(`${event.title} — 더 보기`,
-    () => meetingMenuSections(event, { open: false, toTab: host.kind !== 'tab' }), 'd-iconbtn');
+    () => meetingMenuSections(event, {
+      open: false, toTab: host.kind !== 'tab',
+      onLinked: linked ? projectKey => meetingMoveAskOpen(event.id, projectKey, host) : null,
+    }), 'd-iconbtn');
   top.append(head, more);
   // 회의 탭의 자리에는 닫기가 없다 — 닫을 것이 아니라 그 탭의 본문이다.
   if (host.closable) {
@@ -139,6 +143,10 @@ function panelMeeting(event, box, host = MEETING_HOST_CARD) {
   error.className = 'd-derr';
   error.setAttribute('role', 'alert');
   box.appendChild(error);
+  if (linked) {
+    const ask = meetingMoveAskNode(event, host);
+    if (ask) box.appendChild(ask);
+  }
 
   // 머리 아래의 조용한 한 줄: 아직 안 가져왔으면 버튼(지난 회의에서도 된다), 이미 가져왔으면
   // `미팅 노트 가져옴` + (링크가 있으면) `티로에서 열기` — 초안을 다 검토해 0개가 되어도 남는다.
@@ -472,7 +480,8 @@ async function retypeMeetingItem(item, type) {
 }
 
 // 회의 줄의 ⋯ — 앱의 다른 목록이 쓰는 메뉴를 그대로 쓰고, 맨 위에 `문구 고치기`와 `종류 바꾸기`를 얹는다.
-function panelMeetingRowMenu(item, row, onEdit) {
+// onOpen(업무·확인 대기)이 있으면 그 위에 `상세 열기` — 제목은 누르면 펼치는 자리라 상세는 여기서 연다.
+function panelMeetingRowMenu(item, row, onEdit, onOpen = null) {
   const base = item.type === 'check' ? waitingMenuSections(item, row)
     : item.type === 'decision' ? decisionMenuSections(item, row)
     : taskMenuSections({ item, mode: panelMode(item), card: row });
@@ -487,7 +496,11 @@ function panelMeetingRowMenu(item, row, onEdit) {
     chips.title = RETYPE_DISABLED_HINT;
     chips.setAttribute('aria-description', RETYPE_DISABLED_HINT);
   }
-  return [[{ label: '문구 고치기', onClick: onEdit }, { field: '종류 바꾸기', control: chips }], ...base];
+  const head = [
+    ...(typeof onOpen === 'function' ? [{ label: '상세 열기', onClick: onOpen }] : []),
+    { label: '문구 고치기', onClick: onEdit }, { field: '종류 바꾸기', control: chips },
+  ];
+  return [head, ...base];
 }
 
 // 회의 줄 맨 앞의 체크 칸: 할 일·버그는 완료 체크, 확인 대기는 확인 완료, 결정은 `PRD 반영함` —
@@ -543,16 +556,22 @@ function panelMeetingRow(item, event, stateText, host = MEETING_HOST_CARD, opts 
   const tag = document.createElement('span');
   tag.className = 'tg';
   tag.textContent = wfType(item.type);
-  // 업무·확인 대기는 같은 패널에서 상세를 연다. 결정은 상세가 없으니 제목이 곧 `문구 고치기`다.
+  // 제목은 평소 두 줄까지(말줄임), 누르면(Enter·Space도 — 진짜 버튼이다) 그 자리에서 전문, 다시 누르면 접힌다 —
+  // 아이디어 줄(recordIdeaRow)과 같은 규칙. 상세 열기(업무·확인 대기)는 ⋯의 맨 위 `상세 열기`로 옮겼다
+  // (한 자리에 두 동작을 겹치지 않는다). 결정의 `문구 고치기`도 ⋯에 그대로 있다.
   const openable = ['task', 'bug', 'check'].includes(item.type);
   const title = document.createElement('button');
   title.type = 'button';
   title.className = 'ti';
   title.title = item.description;
   title.textContent = item.description;
+  title.setAttribute('aria-expanded', 'false');
   const edit = () => panelMeetingRowEdit(row, title, item, checkbox);
-  title.setAttribute('aria-label', openable ? `${item.description} 상세 보기` : `${item.description} — 문구 고치기`);
-  title.addEventListener('click', openable ? () => host.openItem(item, event) : edit);
+  title.addEventListener('click', () => {
+    const open = !String(row.className).includes(' is-open');
+    row.className = open ? `${row.className} is-open` : String(row.className).replace(' is-open', '');
+    title.setAttribute('aria-expanded', String(open));
+  });
   const state = document.createElement('span');
   state.className = 'st';
   if (stateText) state.textContent = stateText;
@@ -563,7 +582,8 @@ function panelMeetingRow(item, event, stateText, host = MEETING_HOST_CARD, opts 
   // 이 줄에서 할 수 있는 일이 더보기뿐이라 ⋯은 늘 보인다(평소 흐리게, 손이 닿으면 진하게).
   const acts = document.createElement('span');
   acts.className = 'ac';
-  acts.appendChild(uiMoreButton(`${item.description} — 더 보기`, () => panelMeetingRowMenu(item, row, edit)));
+  acts.appendChild(uiMoreButton(`${item.description} — 더 보기`,
+    () => panelMeetingRowMenu(item, row, edit, openable ? () => host.openItem(item, event) : null)));
   if (opts.type !== false) row.appendChild(tag);
   // 프로젝트 표기가 있을 때만 제목과 한 칸에 묶는다(`제목 · ● 이름`) — 없으면 줄 모양은 예전 그대로다.
   if (project) {
@@ -740,6 +760,93 @@ function panelMeetingCapture(event, box, linked, host = MEETING_HOST_CARD) {
   syncDate();
   section.appendChild(form);
   box.appendChild(section);
+}
+
+// ---------- 회의에 프로젝트를 연결한 뒤: 이미 담은 것도 옮길까요? ----------
+// 회의 상세(카드·회의 탭)의 ⋯에서 프로젝트를 연결하거나 바꾸면, 이 회의에서 이미 담은 항목 중 프로젝트가 없거나
+// 다른 것이 있을 때만 머리 아래에 조용한 확인 줄(`.d-jline` — 빈 에픽 옮기기 제안과 같은 부품)이 선다.
+// `옮기기`만 서버에 보내고(한 트랜잭션), `그대로`는 아무것도 보내지 않는다. 연결 해제에는 서지 않는다.
+// 아이디어는 프로젝트 칸이 달라 대상이 아니다. 줄은 세션 동안만(다른 회의를 보거나 프로젝트가 또 바뀌면 사라진다).
+const MEETING_MOVE_KINDS = ['task', 'bug', 'check', 'decision'];
+let meetingMoveAsk = null; // { meetingId, project, busy }
+const meetingMoveNormKey = key => (String(key || '').startsWith('group:') ? `group:${wfGroupName(key.slice('group:'.length)).trim()}` : String(key || ''));
+// 옮길 후보(순수 함수): 이 회의 항목 중 대상 종류이고 프로젝트가 target과 다른 것. other = 그중 다른 프로젝트에 있던 수.
+function meetingMoveCandidates(items, target) {
+  const want = meetingMoveNormKey(target);
+  const picked = (items || []).filter(item => MEETING_MOVE_KINDS.includes(item.type) && meetingMoveNormKey(wfKey(item)) !== want);
+  return { ids: picked.map(item => item.id), other: picked.filter(item => wfKey(item)).length };
+}
+function meetingMoveAskOpen(meetingId, projectKey, host = MEETING_HOST_CARD) {
+  meetingMoveAsk = { meetingId, project: meetingMoveNormKey(projectKey), busy: false };
+  host.redraw();
+}
+function meetingMoveAskNode(event, host = MEETING_HOST_CARD) {
+  const ask = meetingMoveAsk;
+  if (!ask || ask.meetingId !== event.id) return null;
+  // 그 사이 프로젝트가 또 바뀌었으면(다른 기기·해제) 묻던 것이 뜻을 잃는다.
+  if (meetingMoveNormKey(wfMeetingKey(event)) !== ask.project) { meetingMoveAsk = null; return null; }
+  const { ids, other } = meetingMoveCandidates(wfMeetingItems(event.id), ask.project);
+  if (!ids.length) { if (!ask.busy) meetingMoveAsk = null; return null; }
+  const name = wfMeetingProjectName(event) || ask.project.slice(ask.project.indexOf(':') + 1);
+  const line = document.createElement('div');
+  line.className = 'd-jline d-mmove';
+  line.setAttribute('role', 'status');
+  const words = document.createElement('span');
+  words.textContent = `이 회의에서 이미 담은 ${ids.length}개도 「${name}」${uiRoParticle(name)} 옮길까요?`
+    + (other ? ` (그중 ${other}개는 다른 프로젝트에 있어요)` : '');
+  const sep1 = document.createElement('span'); sep1.className = 'sep'; sep1.textContent = '·';
+  const move = document.createElement('button');
+  move.type = 'button'; move.className = 'd-link';
+  move.textContent = ask.busy ? '옮기는 중…' : '옮기기';
+  move.disabled = !!ask.busy;
+  move.addEventListener('click', () => meetingMoveRun(event, ids, name, host));
+  const sep2 = document.createElement('span'); sep2.className = 'sep'; sep2.textContent = '·';
+  const keep = document.createElement('button');
+  keep.type = 'button'; keep.className = 'd-link';
+  keep.textContent = '그대로';
+  keep.disabled = !!ask.busy;
+  keep.addEventListener('click', () => { meetingMoveAsk = null; host.redraw(); });
+  line.append(words, sep1, move, sep2, keep);
+  return line;
+}
+async function meetingMoveSend(route, body) {
+  const response = await postJson(route, body);
+  return response.json();
+}
+async function meetingMoveRun(event, ids, name, host = MEETING_HOST_CARD) {
+  if (!meetingMoveAsk || meetingMoveAsk.busy) return;
+  const project = meetingMoveAsk.project;
+  meetingMoveAsk = { ...meetingMoveAsk, busy: true };
+  host.redraw();
+  let result;
+  try {
+    result = await meetingMoveSend('/api/meeting/move-items', { meetingId: event.id, project, ids });
+  } catch {
+    // request()가 이미 알렸다 — 줄은 그대로 두고 다시 누를 수 있게 한다.
+    if (meetingMoveAsk) meetingMoveAsk = { ...meetingMoveAsk, busy: false };
+    host.redraw();
+    return;
+  }
+  meetingMoveAsk = null;
+  await load();
+  host.redraw();
+  const moved = result.moved || [];
+  if (!moved.length) return;
+  const target = `「${name}」${uiRoParticle(name)}`;
+  // 되돌리기는 옮긴 기록(moved: 원래 프로젝트) 그대로 서버가 돌린다. 그 사이 다른 프로젝트로 바꾼 것은 건너뛴다.
+  const entry = {
+    label: `회의 항목 ${moved.length}개 옮기기`,
+    undo: () => meetingMoveSend('/api/meeting/move-items-undo', { meetingId: event.id, project, moved }),
+    redo: () => meetingMoveSend('/api/meeting/move-items', { meetingId: event.id, project, ids: moved.map(entry => entry.id) }),
+  };
+  pushUndo(entry);
+  showNotice(`${moved.length}개를 ${target} 옮겼어요`, false, null, {
+    label: '되돌리기',
+    onClick: async () => {
+      if (undoStack[undoStack.length - 1] !== entry) { showNotice('최근 작업부터 순서대로 실행 취소해 주세요', true); return; }
+      await replayUndo('undo');
+    },
+  });
 }
 
 // 이미 적어 둔 항목을 이 회의에서 나온 것으로 연결한다(같은 프로젝트의 항목만 후보로).
