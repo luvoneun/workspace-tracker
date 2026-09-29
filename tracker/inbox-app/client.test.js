@@ -6775,22 +6775,22 @@ test('WP-D1 C. 슬랙 ② 채널: 쓸 곳 네 줄(할 일은 기본 체크·해�
 test('WP-D1 C·D. 여러 채널은 차례로 만들고, 하나가 실패해도 만든 것은 그대로 — 다시 누르면 남은 것만, 다 되면 ③ 확인', async () => {
   const fx = await intgSlackAtChannels({}, [
     { body: { ok: true, id: 'C0TODO11', name: 'my-todo' } },
-    { status: 400, body: { ok: false, code: 'name_taken', error: '이미 있는 이름이에요 — 다른 이름을 적어 주세요' } },
+    { status: 400, body: { ok: false, code: 'name_taken', error: '다른 사람이 쓰는 이름이에요 — 다른 이름을 적어 주세요' } },
     { body: { ok: true, id: 'C0WAIT22', name: 'my-wait2' } },
     { body: { ok: true, restart: false, slack: { channels: {} } } },
   ]);
   await fx.find('slack', 'pri')[0].listeners.click();
   const creates = () => fx.sent.filter(one => one.url === '/api/integrations/slack-channel').map(one => one.body);
-  same(creates(), [{ token: 'xoxp-good', name: 'my-todo' }, { token: 'xoxp-good', name: 'my-waiting' }]);
+  same(creates(), [{ token: 'xoxp-good', name: 'my-todo', key: 'todo' }, { token: 'xoxp-good', name: 'my-waiting', key: 'waiting' }]);
   assert.equal(intgRow(fx, 'todo').children[2].textContent, '✓ #my-todo 만들었어요');
-  assert.equal(intgRow(fx, 'waiting').children.at(-1).textContent, '이미 있는 이름이에요 — 다른 이름을 적어 주세요', '그 줄 이름 칸 아래에 알린다');
+  assert.equal(intgRow(fx, 'waiting').children.at(-1).textContent, '다른 사람이 쓰는 이름이에요 — 다른 이름을 적어 주세요', '그 줄 이름 칸 아래에 알린다');
   assert.equal(fx.find('slack', 'pri')[0].textContent, '고른 채널 1개 만들어 주기');
   assert.equal(intgRow(fx, 'waiting').children[2].focused, true, '커서는 고칠 줄로 간다');
 
   intgRow(fx, 'waiting').children[2].value = 'my-wait2';
   intgRow(fx, 'waiting').children[2].listeners.input();
   await fx.find('slack', 'pri')[0].listeners.click();
-  same(creates().at(-1), { token: 'xoxp-good', name: 'my-wait2' });
+  same(creates().at(-1), { token: 'xoxp-good', name: 'my-wait2', key: 'waiting' });
   assert.equal(creates().length, 3, '이미 만든 할 일은 다시 만들지 않는다');
 
   // ③ 확인
@@ -8327,7 +8327,7 @@ test('WP-E E. 채널 고르기 빼기·더하기: 체크를 풀면 그 줄이 �
   await pickToggle(fx, 'waiting', false);
 
   await pickGo(fx).listeners.click();
-  same(fx.sent.filter(one => one.url === '/api/integrations/slack-channel').map(one => one.body), [{ token: '', name: 'hana-align' }], '새 줄만 만든다(저장된 토큰)');
+  same(fx.sent.filter(one => one.url === '/api/integrations/slack-channel').map(one => one.body), [{ token: '', name: 'hana-align', key: 'align' }], '새 줄만 만든다(저장된 토큰)');
   const saved = fx.sent.find(one => one.url === '/api/integrations/save');
   same(saved.body, { slack: { enabled: true, token: '', channels: { align: 'C0ALIGN1' }, off: ['waiting'], on: [] } });
   assert.match(fx.live(), /채널 1개를 만들었어요 · 채널 1개를 뺐어요/);
@@ -9182,4 +9182,61 @@ test('WP-S 캘린더 카드: 캘린더 파일이 갱신되지 않은 실패는 �
   assert.equal(why.length, 1);
   assert.match(why[0], /^캘린더가 갱신되지 않았어요 — Claude에 구글 캘린더가 연결돼 있지 않으면 비밀 주소로 바꾸거나 Claude 커넥터에서 연결해 주세요/);
   assert.match(app.run(`settingsLogText('calendar', { kind: 'fail', text: ${JSON.stringify(warn)} })`), /^읽지 못했어요 — 캘린더가 갱신되지 않았어요 — .*비밀 주소로 바꾸거나/);
+});
+
+// 슬랙 연결: 이미 있는 채널 이름이면 그 채널을 쓰기(2026-09-29)
+test('이미 있는 채널 ②: 내 채널로 풀린 줄은 초록 `✓ 이미 있는 #이름 채널을 쓸게요`, 남의 채널은 그 줄에 이유 — 같은 채널을 두 줄에 두지 않고, 저장은 existing 칸을 알린다', async () => {
+  const fx = await intgSlackAtChannels({}, [
+    { body: { ok: true, id: 'C0MINE11', name: 'eren-todo', existing: true } },
+    { status: 400, body: { ok: false, code: 'name_taken', error: '다른 사람이 쓰는 이름이에요 — 다른 이름을 적어 주세요' } },
+    { body: { ok: true, id: 'C0MINE11', name: 'eren-todo', existing: true } },
+    { body: { ok: true, id: 'C0WAIT22', name: 'my-wait2' } },
+    { body: { ok: true, restart: false, slack: { channels: {} } } },
+  ]);
+  await fx.find('slack', 'pri')[0].listeners.click();
+  const done = intgRow(fx, 'todo').children[2];
+  assert.equal(done.textContent, '✓ 이미 있는 #eren-todo 채널을 쓸게요');
+  assert.equal(done.className, 'nm is-done', '만든 줄과 같은 초록 글자');
+  assert.equal(intgRow(fx, 'todo').children.at(-1).textContent, '', '이미 있는 내 채널은 오류가 아니다');
+  assert.equal(intgRow(fx, 'waiting').children.at(-1).textContent, '다른 사람이 쓰는 이름이에요 — 다른 이름을 적어 주세요');
+  assert.equal(fx.find('slack', 'pri')[0].textContent, '고른 채널 1개 만들어 주기', '찾은 것은 그대로, 실패 줄만 다시');
+
+  // 기다리는 것에 같은 채널 이름을 적으면 — 할 일 줄이 이미 가져간 채널이라 막는다
+  intgRow(fx, 'waiting').children[2].value = 'eren-todo';
+  intgRow(fx, 'waiting').children[2].listeners.input();
+  await fx.find('slack', 'pri')[0].listeners.click();
+  assert.equal(intgRow(fx, 'waiting').children.at(-1).textContent, '이미 할 일 칸에 연결된 채널이에요 — 다른 이름을 적어 주세요');
+  assert.equal(fx.find('slack', 'd-ich').length, 4, '② 단계에 머문다');
+
+  intgRow(fx, 'waiting').children[2].value = 'my-wait2';
+  intgRow(fx, 'waiting').children[2].listeners.input();
+  await fx.find('slack', 'pri')[0].listeners.click();
+  same(fx.sent.filter(one => one.url === '/api/integrations/slack-channel').map(one => one.body.key), ['todo', 'waiting', 'waiting', 'waiting'], '칸을 함께 보낸다');
+  assert.match(fx.live(), /채널 1개를 만들고 이미 있는 채널 1개를 쓸게요/);
+  // ③ 확인 — 채널마다 같은 줄
+  same(fx.find('slack', 'd-iok').map(one => one.textContent), ['✓ #eren-todo · 할 일 · 잘 읽혀요', '✓ #my-wait2 · 기다리는 것 · 잘 읽혀요']);
+  await fx.button('slack', '연결').listeners.click();
+  same(fx.sent.find(one => one.url === '/api/integrations/save').body,
+    { slack: { enabled: true, token: 'xoxp-good', channels: { todo: 'C0MINE11', waiting: 'C0WAIT22' }, existing: ['todo'] } });
+});
+
+test('이미 있는 채널 ⋯ 채널 고르기: 같은 규칙 — 이미 있는 내 채널을 쓰고 저장에 existing, 다른 칸 채널·보관 채널은 그 줄에 서버 문구', async () => {
+  const fx = await intgPick({}, [
+    { status: 400, body: { ok: false, code: 'channel_in_use', error: '이미 할 일 칸에 연결된 채널이에요 — 다른 이름을 적어 주세요' } },
+    { body: { ok: true, id: 'C0ALIGN1', name: 'hana-align', existing: true } },
+    { body: { ok: true, restart: false } },
+  ]);
+  await pickToggle(fx, 'align', true);
+  await pickGo(fx).listeners.click();
+  assert.equal(pickRow(fx, 'align').children.at(-1).textContent, '이미 할 일 칸에 연결된 채널이에요 — 다른 이름을 적어 주세요');
+  assert.equal(fx.sent.filter(one => one.url === '/api/integrations/save').length, 0, '막히면 저장하지 않는다');
+  await pickGo(fx).listeners.click();
+  same(fx.sent.filter(one => one.url === '/api/integrations/slack-channel').map(one => one.body), [
+    { token: '', name: 'hana-align', key: 'align' }, { token: '', name: 'hana-align', key: 'align' },
+  ]);
+  same(fx.sent.find(one => one.url === '/api/integrations/save').body,
+    { slack: { enabled: true, token: '', channels: { align: 'C0ALIGN1' }, off: [], on: [], existing: ['align'] } });
+  assert.match(fx.live(), /이미 있는 채널 1개를 쓸게요/);
+  same(fx.app.run(`settingsSlackMadeText({ name: 'a', existing: true })`), '✓ 이미 있는 #a 채널을 쓸게요');
+  same(fx.app.run(`settingsSlackMadeText({ name: 'a' })`), '✓ #a 만들었어요');
 });

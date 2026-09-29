@@ -814,7 +814,18 @@ const settingsSlackTokenShape = (value) => {
   return /^(xoxe\.)?xoxp-/.test(text) || 'xoxp-'.startsWith(text) || 'xoxe.xoxp-'.startsWith(text) ? '' : SETTINGS_SLACK_NOTUSER;
 };
 const SETTINGS_SLACK_ASK = '워크스페이스 슬랙 앱에 저를 Collaborator로 추가해 주세요';
-const SETTINGS_SLACK_TAKEN = '이미 있는 이름이에요 — 다른 이름을 적어 주세요';
+const SETTINGS_SLACK_TAKEN = '다른 사람이 쓰는 이름이에요 — 다른 이름을 적어 주세요';
+// 이름이 이미 있어도 내가 들어가 있는 내 채널이면 새로 만들지 않고 그 채널을 쓴다(서버가 `existing: true`로 알려 준다).
+const settingsSlackMadeText = made => (made.existing ? `✓ 이미 있는 #${made.name} 채널을 쓸게요` : `✓ #${made.name} 만들었어요`);
+// 만든 것·이미 있던 것을 나눠 센 알림 — 이미 있던 것이 없으면 예전 그대로 `채널 N개를 만들었어요`.
+function settingsSlackMadeNotice(list) {
+  const reused = list.filter(one => one && one.existing).length;
+  const fresh = list.length - reused;
+  if (!reused) return `채널 ${fresh}개를 만들었어요`;
+  return fresh ? `채널 ${fresh}개를 만들고 이미 있는 채널 ${reused}개를 쓸게요` : `이미 있는 채널 ${reused}개를 쓸게요`;
+}
+// 저장 본문의 `existing` — 이미 있던 채널을 쓰는 칸(서버가 그 칸은 **지금부터** 읽는다). 없으면 칸째 뺀다.
+const settingsSlackExisting = (made, keys) => keys.filter(key => made[key] && made[key].existing);
 // 목록 맨 아래 `각자 붙이는 법` — 슬랙·구글 캘린더·티로가 아닌 도구를 붙이는 안내(docs/연동.md의 "다른 앱을 쓰면").
 const SETTINGS_OWN_TOOL_URL = 'https://github.com/luvoneun/workspace-tracker/blob/main/docs/%EC%97%B0%EB%8F%99.md#%EB%8B%A4%EB%A5%B8-%EC%95%B1%EC%9D%84-%EC%93%B0%EB%A9%B4';
 const SETTINGS_CLAUDE_CONNECTORS = 'claude.ai/settings/connectors';
@@ -1052,8 +1063,9 @@ async function settingsIntegrationAsk(url, body, fallback) {
 }
 
 // 채널 하나를 만들어 달라고 서버에 부탁한다. 토큰을 비워 보내면(`채널 고르기`) 서버가 저장된 토큰을 쓴다.
-async function settingsSlackCreateChannel(token, name) {
-  return settingsIntegrationAsk('/api/integrations/slack-channel', { token, name }, '슬랙에서 채널을 만들지 못했어요');
+// `key`는 이 채널을 둘 칸 — 이름이 이미 있는 내 채널이면 서버가 다른 칸에 연결된 채널인지 볼 때 쓴다.
+async function settingsSlackCreateChannel(token, name, key) {
+  return settingsIntegrationAsk('/api/integrations/slack-channel', { token, name, key }, '슬랙에서 채널을 만들지 못했어요');
 }
 
 // 토큰이 맞는지 본다 — 맞으면 새 채널 이름의 앞머리(`prefix`, 슬랙 사용자 이름을 채널 이름 규칙대로 다듬은 것)도 온다.
@@ -1586,7 +1598,7 @@ function settingsSlackWizard(card, data, mode = 'new') {
   function drawChannels() {
     const how = document.createElement('p');
     how.className = 'd-ihow';
-    settingsRich(how, ['슬랙에 공유한 메시지를 ', ['b', '어디로 받을지'], ' 골라요. 고른 만큼 나만 있는 비공개 채널을 만들어 드려요. 이름은 바꿔도 돼요 — 나중에 슬랙에서 바꿔도 그대로 이어져요.']);
+    settingsRich(how, ['슬랙에 공유한 메시지를 ', ['b', '어디로 받을지'], ' 골라요. 고른 만큼 나만 있는 비공개 채널을 만들어 드려요(같은 이름의 내 채널이 이미 있으면 그 채널을 써요). 이름은 바꿔도 돼요 — 나중에 슬랙에서 바꿔도 그대로 이어져요.']);
     const list = settingsEl('d-ichlist');
     const error = settingsErrorLine();
     const make = settingsButton('', 'd-btn pri');
@@ -1631,7 +1643,7 @@ function settingsSlackWizard(card, data, mode = 'new') {
       } else if (state.made[key]) {
         const on = document.createElement('span');
         on.className = 'nm is-done';
-        on.textContent = `✓ #${state.made[key].name} 만들었어요`;
+        on.textContent = settingsSlackMadeText(state.made[key]);
         row.appendChild(on);
       } else {
         const input = document.createElement('input');
@@ -1682,7 +1694,7 @@ function settingsSlackWizard(card, data, mode = 'new') {
       make.disabled = true;
       const { made, stop } = await settingsSlackMakeChannels(state.token, keys, state);
       if (!stop && !wanted().length && made) {
-        showNotice(`채널 ${made}개를 만들었어요`);
+        showNotice(settingsSlackMadeNotice(Object.values(state.made)));
         state.step = 2;
         draw();
         return;
@@ -1728,7 +1740,8 @@ function settingsSlackWizard(card, data, mode = 'new') {
     const go = settingsButton('연결', 'd-btn pri');
     go.addEventListener('click', () => {
       const channels = Object.fromEntries(Object.entries(state.made).map(([key, made]) => [key, made.id]));
-      return settingsIntegrationSave({ slack: { enabled: true, token: state.token, channels } },
+      const existing = settingsSlackExisting(state.made, Object.keys(channels));
+      return settingsIntegrationSave({ slack: { enabled: true, token: state.token, channels, ...(existing.length ? { existing } : {}) } },
         { error, button: go, done: '슬랙 수집을 연결했어요' });
     });
     const back = settingsButton('← 이전', 'd-btn sm', () => { state.step = 1; draw(); });
@@ -1742,14 +1755,22 @@ function settingsSlackWizard(card, data, mode = 'new') {
 
 // 고른 줄마다 채널을 차례로 만든다(위저드 ②와 채널 고르기가 같이 쓴다). 만든 것은 `state.made`에 남고,
 // 이름이 겹치면 그 줄에, 권한·토큰 문제는 남은 줄도 똑같이 실패하므로 멈추고 한 줄(`stop`)로 돌려준다.
+// 이미 있던 내 채널로 풀린 줄은 `existing`을 달고 남는다. 이번에 이미 다른 줄이 가져간 채널이면 그 줄에 알린다
+// (저장된 다른 칸과 겹치는지는 서버가 본다 — 뺀 칸의 id는 화면에 오지 않는다).
 async function settingsSlackMakeChannels(token, keys, state) {
   let stop = '';
   for (const key of keys) {
     const nameWanted = settingsSlackChannelName(state.picks[key].name);
     state.picks[key].name = nameWanted;
-    const result = await settingsSlackCreateChannel(token, nameWanted);
+    const result = await settingsSlackCreateChannel(token, nameWanted, key);
+    const twin = result && result.ok === true
+      ? Object.keys(state.made).find(one => one !== key && state.made[one].id === result.id) : '';
+    if (twin) {
+      state.rowErrors[key] = `이미 ${settingsSlackLabel(twin)} 칸에 연결된 채널이에요 — 다른 이름을 적어 주세요`;
+      continue;
+    }
     if (result && result.ok === true) {
-      state.made[key] = { id: result.id, name: result.name || nameWanted };
+      state.made[key] = { id: result.id, name: result.name || nameWanted, ...(result.existing ? { existing: true } : {}) };
       state.rowErrors[key] = '';
       continue;
     }
@@ -1855,7 +1876,7 @@ function settingsSlackPick(card, data) {
       if (made) {
         const done = document.createElement('span');
         done.className = 'nm is-done';
-        done.textContent = `✓ #${made.name} 만들었어요`;
+        done.textContent = settingsSlackMadeText(made);
         row.appendChild(done);
       } else if (pick.linked || pick.back) {
         // 연결된(또는 뺐던) 채널의 이름은 여기서 바꾸지 않는다 — 고정 글자로만.
@@ -1974,12 +1995,13 @@ function settingsSlackPick(card, data) {
       if (stop || toMake.some(key => !state.made[key])) { state.error = stop; draw(); return; }
     }
     const channels = Object.fromEntries(now.add.filter(key => state.made[key]).map(key => [key, state.made[key].id]));
+    const existing = settingsSlackExisting(state.made, Object.keys(channels));
     const done = [
-      now.add.length ? `채널 ${now.add.length}개를 만들었어요` : '',
+      now.add.length ? settingsSlackMadeNotice(now.add.map(key => state.made[key])) : '',
       now.back.length ? SETTINGS_SLACK_BACK : '',
       now.off.length ? `채널 ${now.off.length}개를 뺐어요` : '',
     ].filter(Boolean).join(' · ');
-    await settingsIntegrationSave({ slack: { enabled: true, token: '', channels, off: now.off, on: now.back } },
+    await settingsIntegrationSave({ slack: { enabled: true, token: '', channels, off: now.off, on: now.back, ...(existing.length ? { existing } : {}) } },
       { error, button: go, done, failed: gone });
   }
 
@@ -3114,6 +3136,8 @@ const SETTINGS_FAQ = [
       '이 채널들은 나만 있는 채널로 써요 — 다른 사람을 초대하면 그 사람이 쓴 메시지도 할 일로 들어와요.'],
     ['받을 채널을 더하거나 빼려면', '슬랙 연결',
       '슬랙 카드 <b>⋯ › 채널 고르기</b>예요. 새로 고른 곳은 비공개 채널을 만들어 주고, 체크를 풀면 앱이 더 이상 읽지 않아요(슬랙 채널과 들어온 항목은 그대로). 다시 체크하면 <b>그때부터</b> 읽어요. 받을 곳은 <b>하나 이상</b>이면 되고(할 일도 선택), 마지막 하나까지 끄려면 <b>⋯ › 해제</b>예요.'],
+    ['채널을 만들 때 이미 있는 이름이라고 나와요', '슬랙 연결',
+      '예전에 만든 <b>내 채널</b>(내가 들어가 있는 채널)이면 새로 만들지 않고 그 채널을 그대로 써요 — <b>연결한 때부터</b> 읽어요. <b>다른 사람이 쓰는 이름</b>이거나 <b>보관된 채널</b>이면 그 줄에 이유가 나오니 이름을 바꿔 다시 눌러 주세요. 한 채널은 한 칸에만 연결돼요.'],
     ['지금 바로 새로 가져오고 싶어요', '그 연동 연결',
       '<b>설정 &gt; 연동</b>에서 연결된 카드의 <b>지금 가져오기</b>를 눌러요. 지라·캘린더(비밀 주소)는 곧바로 다시 읽고, 슬랙·캘린더(Claude)·티로는 요청을 남겨 1~2분 뒤 반영돼요. 같은 연동은 1분에 한 번이에요. 지금 못 읽고 있으면 버튼이 <b>다시 시도</b>로, 토큰·주소 문제면 <b>다시 연결</b>로 바뀌어요.'],
     ['머리줄의 `○일 전 기준`이나 톱니 점은 뭔가요', '없음',

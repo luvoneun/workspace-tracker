@@ -17,6 +17,8 @@ const { atomicWrite } = require('./safe-storage');
 const { parseCalendar, todayEvents } = require('./ical');
 
 const SLACK_CHANNEL_KEYS = ['todo', 'align', 'someday', 'waiting'];
+// 칸 이름(화면의 SETTINGS_SLACK_CHANNELS와 같은 말) — `이미 ○○ 칸에 연결된 채널이에요`에만 쓴다.
+const SLACK_CHANNEL_LABELS = { todo: '할 일', waiting: '기다리는 것', align: '정해진 것', someday: '언젠가' };
 const SLACK_TIMEOUT_MS = 8000;
 // 예시 설정(`workspace.config.example.json`)이 채널 칸에 넣어 둔 자리표시자. 사람이 채우지 않은
 // 자리라 **채널이 없는 것과 같이 본다** — 남겨 두면 setup.sh가 `채널 ID를 아직 채우지 않았어요`로
@@ -40,7 +42,11 @@ const MESSAGE = {
   slackName: '채널 이름은 소문자·숫자·-·_만 80자까지 쓸 수 있어요',
   slackAuth: '토큰이 맞지 않아요',
   slackScope: '이 슬랙 앱에는 채널 만들기 권한이 없어요 — 만든 사람에게 권한 추가를 요청해 주세요',
-  slackTaken: '이미 있는 이름이에요 — 다른 이름을 적어 주세요',
+  slackTaken: '다른 사람이 쓰는 이름이에요 — 다른 이름을 적어 주세요',
+  slackArchived: '보관된 채널이에요 — 슬랙에서 보관을 풀거나 다른 이름을 적어 주세요',
+  slackListIncomplete: '슬랙에서 채널을 다 찾지 못했어요 — 잠시 뒤 다시 눌러 주세요',
+  // 같은 채널을 두 칸에 둘 수 없다(한 메시지가 두 곳에 들어간다) — 앞은 칸 이름(`할 일` 등).
+  slackInUse: ' 칸에 연결된 채널이에요 — 다른 이름을 적어 주세요',
   slackCreate: '슬랙에서 채널을 만들지 못했어요',
   // 받을 채널은 넷 중 하나 이상이면 된다(할 일도 선택) — 마지막 하나만 뺄 수 없다.
   slackLastOff: '마지막 채널은 뺄 수 없어요 — 슬랙 수집을 끄려면 ⋯ › 해제',
@@ -171,23 +177,26 @@ async function slackCall(token, method, payload, request) {
 // 나만 있는 비공개 채널을 대신 만든다(슬랙 위저드 `② 채널`의 `고른 채널 N개 만들어 주기` — 채널마다 한 번씩).
 // 만들기 전에 `auth.test`로 **토큰이 맞는지 먼저** 보고, 맞을 때만 만든다 — 틀린 토큰으로
 // 채널부터 만들려 들지 않는다. 설정 파일도 토큰 파일도 여기서는 쓰지 않는다(id만 돌려준다).
-async function slackCreateChannel(token, name, request = (...args) => fetch(...args)) {
+// 이름이 이미 있으면 내 채널인지 찾아 그 채널을 돌려준다(`existing: true` — slackUseExisting).
+// `options`: 이 채널을 둘 칸(`key`)과 저장된 채널들(`channels`, 뺀 칸 포함) — 다른 칸에 이미 연결된 채널을 막는 데만 쓴다.
+// 슬랙에 닿지 못했으면(네트워크·시간 초과) 표지 `slack_unreachable`로 이름 문제와 가른다.
+async function slackCreateChannel(token, name, request = (...args) => fetch(...args), options = {}) {
   const secret = trimmed(token);
   const wanted = trimmed(name).toLowerCase();
   if (!secret) throw bad(MESSAGE.slackToken);
   if (!SLACK_CHANNEL_NAME_RE.test(wanted)) throw bad(MESSAGE.slackName);
 
   let auth;
-  try { auth = await slackCall(secret, 'auth.test', null, request); } catch { throw bad(MESSAGE.slackCreate); }
+  try { auth = await slackCall(secret, 'auth.test', null, request); } catch { throw bad(MESSAGE.slackOffline, 'slack_unreachable'); }
   if (!auth || auth.ok !== true) throw bad(MESSAGE.slackAuth, 'invalid_auth');
 
   let body;
   try { body = await slackCall(secret, 'conversations.create', { name: wanted, is_private: true }, request); }
-  catch { throw bad(MESSAGE.slackCreate); }
+  catch { throw bad(MESSAGE.slackOffline, 'slack_unreachable'); }
   if (!body || body.ok !== true) {
     const kind = String((body && body.error) || '');
     if (kind === 'missing_scope') throw bad(MESSAGE.slackScope, 'missing_scope');
-    if (kind === 'name_taken') throw bad(MESSAGE.slackTaken, 'name_taken');
+    if (kind === 'name_taken') return slackUseExisting(secret, wanted, request, options);
     if (kind === 'invalid_auth' || kind === 'not_authed') throw bad(MESSAGE.slackAuth, 'invalid_auth');
     throw bad(MESSAGE.slackCreate);
   }
@@ -195,6 +204,53 @@ async function slackCreateChannel(token, name, request = (...args) => fetch(...a
   const id = String(channel.id || '');
   if (!id) throw bad(MESSAGE.slackCreate);
   return { id, name: String(channel.name || wanted) };
+}
+
+// 이름이 이미 있을 때(`name_taken`) — 예전 시도로 만들어 둔 **내 채널**이면 새로 만들지 않고 그 채널을 쓴다.
+// `conversations.list`로 읽기만 한다(보관·삭제·나가기·보관 풀기는 부르지 않는다 — DECISIONS 2026-09-24).
+// 내가 볼 수 없는 남의 비공개 채널은 목록에 없으므로 멤버가 아닌 공개 채널과 함께 `name_taken`이다.
+// 목록을 끝까지 못 읽었으면(쪽·시간 상한, 슬랙 오류) 이름 중복이라고 하지 않는다 — 다시 누르게 한다.
+const SLACK_LIST_PAGES = 10;
+async function slackUseExisting(secret, wanted, request, { key = '', channels = {} } = {}) {
+  const found = await slackFindChannel(secret, wanted, request);
+  if (found && found.is_archived === true) throw bad(MESSAGE.slackArchived, 'archived');
+  if (!found || found.is_member !== true) throw bad(MESSAGE.slackTaken, 'name_taken');
+  const id = String(found.id || '');
+  if (!id) throw bad(MESSAGE.slackListIncomplete, 'slack_unreachable');
+  // 다른 칸(뺀 칸 포함)에 이미 연결된 채널이면 막는다 — 같은 칸이면 그대로 쓴다.
+  const other = SLACK_CHANNEL_KEYS.find(one => one !== key && realChannelId(clone(clone(channels)[one]).id) === id);
+  if (other) throw bad(`이미 ${SLACK_CHANNEL_LABELS[other]}${MESSAGE.slackInUse}`, 'channel_in_use');
+  return { id, name: String(found.name || wanted), existing: true };
+}
+
+// 같은 이름의 채널 하나를 찾는다(대소문자·앞 `#` 무시). 보관된 채널도 본다(`exclude_archived=false`).
+// 최대 10쪽·전체 8초 — 넘기면 "다 찾지 못했어요". 토큰은 헤더로만 나간다.
+async function slackFindChannel(secret, wanted, request) {
+  const same = value => String(value || '').replace(/^#/, '').toLowerCase() === wanted.replace(/^#/, '').toLowerCase();
+  const signal = AbortSignal.timeout(SLACK_TIMEOUT_MS);
+  let cursor = '';
+  for (let page = 0; page < SLACK_LIST_PAGES; page += 1) {
+    const query = new URLSearchParams({ types: 'public_channel,private_channel', exclude_archived: 'false', limit: '200' });
+    if (cursor) query.set('cursor', cursor);
+    let body;
+    try {
+      const response = await request(`https://slack.com/api/conversations.list?${query}`, {
+        headers: { Authorization: `Bearer ${secret}`, Accept: 'application/json' }, signal,
+      });
+      body = await response.json();
+    } catch { throw bad(MESSAGE.slackListIncomplete, 'slack_unreachable'); }
+    if (!body || body.ok !== true) {
+      const kind = String((body && body.error) || '');
+      if (kind === 'missing_scope') throw bad(MESSAGE.slackScope, 'missing_scope');
+      if (kind === 'invalid_auth' || kind === 'not_authed') throw bad(MESSAGE.slackAuth, 'invalid_auth');
+      throw bad(MESSAGE.slackListIncomplete, 'slack_unreachable');
+    }
+    const hit = (Array.isArray(body.channels) ? body.channels : []).find(one => one && same(one.name));
+    if (hit) return hit;
+    cursor = String((body.response_metadata && body.response_metadata.next_cursor) || '');
+    if (!cursor) return null;
+  }
+  throw bad(MESSAGE.slackListIncomplete, 'slack_unreachable');
 }
 
 // 새로 만들 채널의 기본 이름 앞머리 — 슬랙 사용자 이름(`auth.test`의 `user`)을 채널 이름 규칙대로 다듬는다
@@ -492,7 +548,9 @@ async function saveIntegrations({
       const keysOf = value => (Array.isArray(value) ? [...new Set(value.map(trimmed))] : []);
       const offKeys = keysOf(body.slack.off);
       const onKeys = keysOf(body.slack.on).filter(key => !offKeys.includes(key));
-      if ([...offKeys, ...onKeys].some(key => !SLACK_CHANNEL_KEYS.includes(key))) throw bad(MESSAGE.other);
+      // 새로 만들지 않고 이미 있던 내 채널을 쓰는 칸(채널 만들기가 `existing: true`로 돌려준 것) — 그때부터 읽는다.
+      const existingKeys = keysOf(body.slack.existing);
+      if ([...offKeys, ...onKeys, ...existingKeys].some(key => !SLACK_CHANNEL_KEYS.includes(key))) throw bad(MESSAGE.other);
       // 빼기만 하는 저장은 슬랙에 묻지 않는다 — 토큰도 필요 없다.
       const needsSlack = wanted.length > 0 || onKeys.length > 0 || !offKeys.length;
       const token = trimmed(body.slack.token);
@@ -507,12 +565,25 @@ async function saveIntegrations({
       const channels = {};
       const at = slackTsNow(now);
       result.slack = { channels: {} };
+      const wantedIds = Object.fromEntries(wanted.map(key => [key, parseChannelId(asked[key])]));
       for (const key of wanted) {
-        const id = parseChannelId(asked[key]);
+        const id = wantedIds[key];
         if (!id) throw bad(MESSAGE.slackChannel);
+        // 같은 채널을 두 칸에 두지 않는다 — 이번에 같이 붙이는 칸, 또는 그대로 남는 다른 칸(뺀 칸 포함)과 겹치면 막는다.
+        const other = SLACK_CHANNEL_KEYS.find(one => one !== key
+          && (wanted.includes(one) ? wantedIds[one] === id : realChannelId(clone(savedChannels[one]).id) === id));
+        if (other) {
+          const error = bad(`이미 ${SLACK_CHANNEL_LABELS[other]}${MESSAGE.slackInUse}`, 'channel_in_use');
+          error.key = key;
+          throw error;
+        }
+      }
+      for (const key of wanted) {
+        const id = wantedIds[key];
         const info = await (slackCheck || (() => { throw bad(MESSAGE.slackRead); }))(secret, id);
         // 새로 만든(다시 만든) 채널은 만든 때부터 읽는다 — 슬랙이 만든 때를 모르면 지금부터.
-        const since = info.created ? `${info.created}.000000` : at;
+        // 이미 있던 채널을 쓰는 칸은 **지금부터** 읽는다(예전에 쌓인 메시지를 한꺼번에 가져오지 않게).
+        const since = !existingKeys.includes(key) && info.created ? `${info.created}.000000` : at;
         channels[key] = { id, name: info.name ? `#${info.name}` : '', since, off: false };
         result.slack.channels[key] = { name: channels[key].name, isPrivate: info.isPrivate === true };
       }

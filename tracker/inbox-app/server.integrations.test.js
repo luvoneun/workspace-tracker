@@ -267,8 +267,8 @@ test('SLACKEZ: 채널 만들기는 auth.test로 토큰을 먼저 보고 맞을 �
     const calls = [];
     const request = async (url, options) => {
       calls.push({ url: String(url), options });
-      const method = String(url).split('/api/')[1];
-      return json(steps[method] ? steps[method](options) : { ok: false, error: 'unknown_method' });
+      const method = String(url).split('/api/')[1].split('?')[0];
+      return json(steps[method] ? steps[method](options, String(url)) : { ok: false, error: 'unknown_method' });
     };
     return { calls, request };
   };
@@ -291,11 +291,14 @@ test('SLACKEZ: 채널 만들기는 auth.test로 토큰을 먼저 보고 맞을 �
   assert.deepEqual(denied.calls.map(call => call.url), ['https://slack.com/api/auth.test'], '틀린 토큰으로는 만들기를 부르지 않는다');
 
   // 슬랙이 거절한 이유마다 사람 말로 바꾼다
-  const refuse = error => slackFake({ 'auth.test': () => ({ ok: true }), 'conversations.create': () => ({ ok: false, error }) });
+  const refuse = error => slackFake({
+    'auth.test': () => ({ ok: true }), 'conversations.create': () => ({ ok: false, error }),
+    'conversations.list': () => ({ ok: true, channels: [] }),
+  });
   await assert.rejects(() => integrationsStore.slackCreateChannel('t', 'my-todo', refuse('missing_scope').request),
     /이 슬랙 앱에는 채널 만들기 권한이 없어요 — 만든 사람에게 권한 추가를 요청해 주세요/);
   await assert.rejects(() => integrationsStore.slackCreateChannel('t', 'my-todo', refuse('name_taken').request),
-    /이미 있는 이름이에요 — 다른 이름을 적어 주세요/);
+    /다른 사람이 쓰는 이름이에요 — 다른 이름을 적어 주세요/);
   await assert.rejects(() => integrationsStore.slackCreateChannel('t', 'my-todo', refuse('not_authed').request), /토큰이 맞지 않아요/);
   await assert.rejects(() => integrationsStore.slackCreateChannel('t', 'my-todo', refuse('ratelimited').request), /슬랙에서 채널을 만들지 못했어요/);
   // 슬랙이 ok라 해도 id가 없으면 만들어진 것으로 보지 않는다
@@ -522,9 +525,10 @@ globalThis.fetch = async (input, init) => {
   const json = body => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
   const good = (init.headers || {}).Authorization === 'Bearer good-token';
   if (url.endsWith('/auth.test')) return json(good ? { ok: true, user: 'me' } : { ok: false, error: 'invalid_auth' });
+  if (url.includes('/conversations.list')) return json({ ok: true, channels: [{ id: 'C0MINE11', name: 'mine', is_member: true }] });
   const name = JSON.parse(init.body || '{}').name;
   if (name === 'noscope') return json({ ok: false, error: 'missing_scope' });
-  if (name === 'taken') return json({ ok: false, error: 'name_taken' });
+  if (name === 'taken' || name === 'mine') return json({ ok: false, error: 'name_taken' });
   return json({ ok: true, channel: { id: 'C0NEW111', name, is_private: true } });
 };
 const { server } = require(${JSON.stringify(path.join(__dirname, 'server.js'))});
@@ -570,13 +574,22 @@ server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => console.log
     error: '이 슬랙 앱에는 채널 만들기 권한이 없어요 — 만든 사람에게 권한 추가를 요청해 주세요',
   }, '화면이 줄 오류와 전체 안내를 가를 수 있게 표지를 함께 준다');
 
-  assert.match((await (await make({ token: 'good-token', name: 'taken' })).json()).error, /이미 있는 이름이에요 — 다른 이름을 적어 주세요/);
+  assert.match((await (await make({ token: 'good-token', name: 'taken' })).json()).error, /다른 사람이 쓰는 이름이에요 — 다른 이름을 적어 주세요/);
+  // 이미 있는 내 채널이면 새로 만들지 않고 그 채널을 돌려준다(`existing`) — 이것도 설정은 쓰지 않는다
+  assert.deepEqual(await (await make({ token: 'good-token', name: 'mine', key: 'todo' })).json(), { ok: true, id: 'C0MINE11', name: 'mine', existing: true });
   assert.match((await (await make({ token: 'nope', name: 'my-todo' })).json()).error, /토큰이 맞지 않아요/);
   assert.match((await (await make({ token: 'good-token', name: '내 할일' })).json()).error, /채널 이름은 소문자/);
 
   // 만들기는 조회와 같다 — 설정도 토큰 파일도 만들어지지 않는다(저장은 `연결`이 따로 한다).
   assert.equal(fs.readFileSync(config, 'utf8'), before, '설정은 한 글자도 바뀌지 않는다');
   assert.deepEqual(fs.readdirSync(tokens), [], '토큰 파일도 만들지 않는다');
+
+  // 이미 있는 내 채널이 다른 칸(뺀 칸 포함)에 연결돼 있으면 저장된 설정을 보고 막는다
+  fs.writeFileSync(config, JSON.stringify({ ...JSON.parse(before), slack: { ...JSON.parse(before).slack, channels: { align: { id: 'C0MINE11', name: '#mine', off: true } } } }, null, 2));
+  assert.deepEqual(await (await make({ token: 'good-token', name: 'mine', key: 'todo' })).json(),
+    { ok: false, code: 'channel_in_use', error: '이미 정해진 것 칸에 연결된 채널이에요 — 다른 이름을 적어 주세요' });
+  assert.equal((await (await make({ token: 'good-token', name: 'mine', key: 'align' })).json()).existing, true, '같은 칸이면 그대로 쓴다');
+  fs.writeFileSync(config, before);
 
   const state = await (await fetch(origin + '/api/integrations')).json();
   assert.equal(state.slack.appUrl, 'https://api.slack.com/apps/A0FAKE11', '적어 둔 팀 슬랙 앱 주소를 그대로 준다');
@@ -737,6 +750,7 @@ globalThis.fetch = async (input, init = {}) => {
     if (id === 'C0GONE11') return json({ ok: false, error: 'channel_not_found' });
     return json({ ok: true, channel: { id, name: names[id] || 'renamed-todo', is_private: true } });
   }
+  if (method === 'conversations.list') return json({ ok: true, channels: [] });
   if (body.name === 'taken') return json({ ok: false, error: 'name_taken' });
   if (body.name === 'noscope') return json({ ok: false, error: 'missing_scope' });
   const id = 'C0' + body.name.replace(/[^a-z0-9]/g, '').toUpperCase().slice(0, 7).padEnd(7, '1');
@@ -792,7 +806,7 @@ server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => console.log
   const made = [];
   for (const name of ['my-todo', 'taken', 'my-align']) made.push(await (await post('/api/integrations/slack-channel', { token: 'xoxp-good', name })).json());
   assert.equal(made[0].ok, true);
-  assert.deepEqual(made[1], { ok: false, error: '이미 있는 이름이에요 — 다른 이름을 적어 주세요', code: 'name_taken' });
+  assert.deepEqual(made[1], { ok: false, error: '다른 사람이 쓰는 이름이에요 — 다른 이름을 적어 주세요', code: 'name_taken' });
   assert.equal(made[2].ok, true);
   const scope = await (await post('/api/integrations/slack-channel', { token: 'xoxp-good', name: 'noscope' })).json();
   assert.equal(scope.code, 'missing_scope');
@@ -1142,4 +1156,149 @@ test('슬랙 정리 방식만 바꾸는 저장: 그 칸 하나만 쓰고(슬랙�
   // 다른 연동과 함께 저장하면 예전처럼 다시 켠다
   const mixed = await save({ slack: { tidy: 'raw' }, meetingNotes: { mode: 'manual' } }, true);
   assert.equal(mixed.quiet, false);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 슬랙 연결: 이미 있는 채널 이름이면 그 채널을 쓰기(2026-09-29 동료 제보 — 예전 시도로 만든 채널 때문에 막다른 길)
+
+// 가짜 슬랙 — 만들기는 늘 `name_taken`, 목록은 쪽마다 `pages`에서 준다. 실제 slack.com에는 닿지 않는다.
+function takenSlack(pages, { create = { ok: false, error: 'name_taken' }, fail = null } = {}) {
+  const calls = [];
+  const reply = body => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  const request = async (url, options = {}) => {
+    const text = String(url);
+    const method = text.split('/api/')[1].split('?')[0];
+    calls.push({ method, url: text, options });
+    if (fail && fail[method]) throw fail[method];
+    if (method === 'auth.test') return reply({ ok: true, user: 'me' });
+    if (method === 'conversations.create') return reply(create);
+    if (method === 'conversations.list') {
+      const cursor = new URL(text).searchParams.get('cursor') || '';
+      const page = typeof pages === 'function' ? pages(cursor) : pages[cursor];
+      return reply(page || { ok: false, error: 'invalid_cursor' });
+    }
+    return reply({ ok: false, error: 'unknown_method' });
+  };
+  return { calls, request, lists: () => calls.filter(one => one.method === 'conversations.list') };
+}
+
+test('이미 있는 채널: 이름이 겹쳐도 내가 들어가 있는 내 비공개 채널이면 새로 만들지 않고 그 채널을 쓴다(읽기만)', async () => {
+  const fake = takenSlack({ '': { ok: true, channels: [
+    { id: 'C0OTHER1', name: 'general', is_member: true },
+    { id: 'C0MINE11', name: 'Eren-Jang-Todo', is_private: true, is_member: true, is_archived: false },
+  ] } });
+  const made = await integrationsStore.slackCreateChannel('slack-secret', 'eren-jang-todo', fake.request, { key: 'todo', channels: {} });
+  assert.deepEqual(made, { id: 'C0MINE11', name: 'Eren-Jang-Todo', existing: true }, '대소문자는 무시하고 같은 이름을 찾는다');
+  assert.deepEqual(fake.calls.map(one => one.method), ['auth.test', 'conversations.create', 'conversations.list'], '만들기는 한 번뿐 — 찾기만 더한다');
+  const query = new URL(fake.lists()[0].url).searchParams;
+  assert.equal(query.get('types'), 'public_channel,private_channel');
+  assert.equal(query.get('exclude_archived'), 'false', '보관된 채널도 본다(보관이라고 알려 주려고)');
+  assert.equal(query.get('limit'), '200');
+  assert.equal(fake.lists()[0].options.method || 'GET', 'GET', '목록은 읽기만 한다');
+  assert.equal(fake.lists()[0].options.headers.Authorization, 'Bearer slack-secret', '토큰은 헤더로만');
+  assert.ok(!JSON.stringify(made).includes('slack-secret'));
+  assert.deepEqual([...new Set(fake.calls.map(one => one.method))].sort(), ['auth.test', 'conversations.create', 'conversations.list'], '보관·삭제·나가기는 부르지 않는다');
+});
+
+test('이미 있는 채널: 남의 채널(목록에 없음·멤버 아님)은 name_taken, 보관된 같은 이름은 archived 문구', async () => {
+  const hidden = takenSlack({ '': { ok: true, channels: [{ id: 'C0X', name: 'someone-else', is_member: true }] } });
+  await assert.rejects(() => integrationsStore.slackCreateChannel('t', 'my-todo', hidden.request),
+    error => error.code === 'name_taken' && error.message === '다른 사람이 쓰는 이름이에요 — 다른 이름을 적어 주세요');
+  const notMember = takenSlack({ '': { ok: true, channels: [{ id: 'C0PUB111', name: 'my-todo', is_member: false }] } });
+  await assert.rejects(() => integrationsStore.slackCreateChannel('t', 'my-todo', notMember.request),
+    error => error.code === 'name_taken' && /다른 사람이 쓰는 이름이에요/.test(error.message));
+  const archived = takenSlack({ '': { ok: true, channels: [{ id: 'C0OLD111', name: 'my-todo', is_member: true, is_archived: true }] } });
+  await assert.rejects(() => integrationsStore.slackCreateChannel('t', 'my-todo', archived.request),
+    error => error.code === 'archived' && error.message === '보관된 채널이에요 — 슬랙에서 보관을 풀거나 다른 이름을 적어 주세요');
+  assert.deepEqual(archived.calls.map(one => one.method), ['auth.test', 'conversations.create', 'conversations.list'], '보관을 풀어 주지도 않는다');
+});
+
+test('이미 있는 채널: 목록이 여러 쪽이면 cursor로 끝까지(최대 10쪽), 상한·시간 초과·슬랙 오류는 "다 찾지 못했어요"(이름 중복과 구분)', async () => {
+  const paged = takenSlack({
+    '': { ok: true, channels: [{ id: 'C1', name: 'a' }], response_metadata: { next_cursor: 'p2' } },
+    p2: { ok: true, channels: [{ id: 'C2', name: 'b' }], response_metadata: { next_cursor: 'p3' } },
+    p3: { ok: true, channels: [{ id: 'C0MINE11', name: 'my-todo', is_member: true }], response_metadata: { next_cursor: 'p4' } },
+  });
+  const found = await integrationsStore.slackCreateChannel('t', 'my-todo', paged.request);
+  assert.equal(found.id, 'C0MINE11');
+  assert.deepEqual(paged.lists().map(one => new URL(one.url).searchParams.get('cursor')), [null, 'p2', 'p3'], '찾으면 더 넘기지 않는다');
+  assert.ok(paged.lists().every(one => one.options.signal === paged.lists()[0].options.signal), '시간 제한은 전체에 한 번(8초)');
+
+  // 끝까지 봤는데 없으면 남의 채널
+  const done = takenSlack({ '': { ok: true, channels: [], response_metadata: { next_cursor: '' } } });
+  await assert.rejects(() => integrationsStore.slackCreateChannel('t', 'my-todo', done.request), error => error.code === 'name_taken');
+
+  // 10쪽을 넘기면 멈추고 이름 중복이라고 하지 않는다
+  const endless = takenSlack(cursor => ({ ok: true, channels: [], response_metadata: { next_cursor: `n${Number(cursor.slice(1) || 0) + 1}` } }));
+  await assert.rejects(() => integrationsStore.slackCreateChannel('t', 'my-todo', endless.request),
+    error => error.code === 'slack_unreachable' && error.message === '슬랙에서 채널을 다 찾지 못했어요 — 잠시 뒤 다시 눌러 주세요');
+  assert.equal(endless.lists().length, 10, '최대 10쪽');
+
+  // 시간 초과(신호가 끊음)·슬랙 오류도 같은 문구
+  const timeout = new Error('The operation was aborted due to timeout');
+  timeout.name = 'TimeoutError';
+  const slow = takenSlack({}, { fail: { 'conversations.list': timeout } });
+  await assert.rejects(() => integrationsStore.slackCreateChannel('t', 'my-todo', slow.request),
+    error => error.code === 'slack_unreachable' && /다 찾지 못했어요/.test(error.message));
+  const limited = takenSlack({ '': { ok: false, error: 'ratelimited' } });
+  await assert.rejects(() => integrationsStore.slackCreateChannel('t', 'my-todo', limited.request),
+    error => error.code === 'slack_unreachable' && /다 찾지 못했어요/.test(error.message));
+  // 목록 권한이 없으면 권한 안내(기존 문구)
+  const noScope = takenSlack({ '': { ok: false, error: 'missing_scope' } });
+  await assert.rejects(() => integrationsStore.slackCreateChannel('t', 'my-todo', noScope.request), error => error.code === 'missing_scope');
+});
+
+test('이미 있는 채널: 다른 칸(뺀 칸 포함)에 이미 연결된 채널이면 막고, 같은 칸이면 그대로 쓴다', async () => {
+  const mine = () => takenSlack({ '': { ok: true, channels: [{ id: 'C0MINE11', name: 'my-todo', is_member: true }] } });
+  const channels = { todo: { id: 'C0TODO99', name: '#x' }, align: { id: 'C0MINE11', name: '#my-todo', off: true } };
+  await assert.rejects(() => integrationsStore.slackCreateChannel('t', 'my-todo', mine().request, { key: 'todo', channels }),
+    error => error.code === 'channel_in_use' && error.message === '이미 정해진 것 칸에 연결된 채널이에요 — 다른 이름을 적어 주세요');
+  const same = await integrationsStore.slackCreateChannel('t', 'my-todo', mine().request, { key: 'align', channels });
+  assert.equal(same.id, 'C0MINE11', '같은 칸이면 막지 않는다');
+  // 예시 자리표시자는 연결된 것으로 보지 않는다
+  const placeholder = await integrationsStore.slackCreateChannel('t', 'my-todo', mine().request, { key: 'todo', channels: { align: { id: '여기에_채널ID' } } });
+  assert.equal(placeholder.existing, true);
+});
+
+test('이미 있는 채널: 슬랙에 닿지 못하면(토큰 확인·만들기) slack_unreachable — 이름 문제와 가른다', async () => {
+  const offline = new TypeError('fetch failed');
+  for (const method of ['auth.test', 'conversations.create']) {
+    const fake = takenSlack({}, { fail: { [method]: offline } });
+    await assert.rejects(() => integrationsStore.slackCreateChannel('t', 'my-todo', fake.request),
+      error => error.code === 'slack_unreachable' && error.message === '슬랙에 연결하지 못했어요 — 잠시 뒤 다시 눌러 주세요');
+  }
+});
+
+test('이미 있는 채널 저장: existing 칸은 since가 지금(예전 메시지를 한꺼번에 가져오지 않음), 새로 만든 칸은 예전처럼 만든 때부터', async (t) => {
+  const fix = integrationsFixture(t, {});
+  const check = async (token, id) => ({ name: id === 'C0MINE11' ? 'eren-jang-todo' : 'my-waiting', isPrivate: true, created: id === 'C0MINE11' ? 1600000000 : 1790000100 });
+  await integrationsStore.saveIntegrations({
+    configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir,
+    body: { slack: { enabled: true, token: 'xoxp-t', channels: { todo: 'C0MINE11', waiting: 'C0NEW111' }, existing: ['todo'] } },
+    slackCheck: check, now: () => 1790000123456,
+  });
+  const saved = fix.read().slack.channels;
+  assert.deepEqual(saved.todo, { id: 'C0MINE11', name: '#eren-jang-todo', since: '1790000123.456000' }, '이미 있던 채널은 연결하는 지금부터');
+  assert.deepEqual(saved.waiting, { id: 'C0NEW111', name: '#my-waiting', since: '1790000100.000000' }, '새로 만든 채널은 그대로 만든 때부터');
+  await assert.rejects(() => integrationsStore.saveIntegrations({
+    configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir,
+    body: { slack: { enabled: true, token: 'xoxp-t', channels: { todo: 'C0MINE11' }, existing: ['nope'] } }, slackCheck: check,
+  }), /보낸 값을 확인해 주세요/, '모르는 칸은 받지 않는다');
+});
+
+test('이미 있는 채널 저장: 같은 채널을 두 칸에 두지 않는다(이번에 같이 붙이는 칸·그대로 남는 다른 칸·뺀 칸)', async (t) => {
+  const fix = integrationsFixture(t, { slack: { channels: { align: { id: 'C0ALIGN1', name: '#a', off: true } } } });
+  const before = JSON.stringify(fix.read());
+  const check = async () => ({ name: 'x', isPrivate: true, created: 1 });
+  const save = channels => integrationsStore.saveIntegrations({
+    configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir,
+    body: { slack: { enabled: true, token: 'xoxp-t', channels } }, slackCheck: check,
+  });
+  await assert.rejects(() => save({ todo: 'C0SAME11', waiting: 'C0SAME11' }),
+    error => error.code === 'channel_in_use' && error.key === 'todo' && error.message === '이미 기다리는 것 칸에 연결된 채널이에요 — 다른 이름을 적어 주세요');
+  await assert.rejects(() => save({ todo: 'C0ALIGN1' }),
+    error => error.code === 'channel_in_use' && error.key === 'todo' && /이미 정해진 것 칸에 연결된 채널이에요/.test(error.message));
+  assert.equal(JSON.stringify(fix.read()), before, '막히면 설정은 그대로');
+  await save({ align: 'C0ALIGN1' });
+  assert.equal(fix.read().slack.channels.align.id, 'C0ALIGN1', '같은 칸에 같은 채널은 된다');
 });

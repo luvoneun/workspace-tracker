@@ -143,12 +143,16 @@ module.exports = function integrationsRoutes(req, res, url, ctx) {
     readBody(req)
       .then((body) => {
         const given = typeof (body || {}).token === 'string' ? body.token.trim() : '';
-        const token = given || integrations.savedSlackToken(currentConfigFile());
-        return integrations.slackCreateChannel(token, (body || {}).name);
+        const config = currentConfigFile();
+        const token = given || integrations.savedSlackToken(config);
+        // 이름이 이미 있으면 내 채널인지 찾아 쓴다 — 다른 칸(뺀 칸 포함)에 연결된 채널인지는 저장된 설정으로 본다(읽기만).
+        const key = typeof (body || {}).key === 'string' ? body.key.trim() : '';
+        const slack = config && typeof config.slack === 'object' && config.slack ? config.slack : {};
+        return integrations.slackCreateChannel(token, (body || {}).name, undefined, { key, channels: slack.channels || {} });
       })
       .then((channel) => {
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: true, id: channel.id, name: channel.name }));
+        res.end(JSON.stringify({ ok: true, id: channel.id, name: channel.name, ...(channel.existing ? { existing: true } : {}) }));
       })
       .catch((error) => {
         res.writeHead(error.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });
