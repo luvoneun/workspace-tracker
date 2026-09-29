@@ -571,7 +571,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 
 /* 제목 아래의 조용한 한 줄(프로젝트 탭의 `열린 항목 8`) */
 .d-quiet { font-size: 13.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
-/* ---------- 레일 한 줄 요약 — 자리를 옮겼다(`오늘 신규 N`은 새로 들어온 것 제목 오른쪽 끝) ---------- */
+/* ---------- 레일 한 줄 요약 — 자리를 옮겼다(`오늘 들어온 것 N`은 새로 들어온 것 제목 오른쪽 끝) ---------- */
 #railSummary { display: none; }
 
 /* ---------- 오늘 레이아웃 (레일 296px + 본문) ---------- */
@@ -777,7 +777,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   border-radius: 999px; background: var(--warn-bg); color: var(--warn);
   font-size: 12.5px; font-weight: 600;
 }
-/* 제목 오른쪽 끝의 조용한 글자 버튼(`오늘 신규 N` — 누르면 팔레트가 오늘 들어온 것만 모아 준다) */
+/* 제목 오른쪽 끝의 조용한 글자 버튼(`오늘 들어온 것 N` — 누르면 팔레트가 오늘 들어온 것만 모아 준다) */
 .d-headnum {
   margin-left: auto; height: 28px; padding: 0 6px; border: 0; border-radius: var(--r-xs);
   background: none; color: var(--dim); font: inherit; font-size: 13px; font-weight: 500;
@@ -1001,6 +1001,8 @@ button.d-guide .t { color: var(--accent-text); }
 }
 .d-grp .gl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .d-grp button.gl { border: 0; background: none; padding: 0; color: inherit; font: inherit; cursor: pointer; border-radius: 4px; }
+/* 그룹 이름(프로젝트로 가기)은 말줄임(overflow: hidden)이라 ::after가 잘린다 — 위아래 여백으로 누르는 자리만 28px, 줄 높이는 그대로 */
+.d-grp button.gl { padding-block: 3px; margin-block: -3px; }
 .d-grp button.gl:hover { color: var(--accent-text); }
 /* 그룹 제목의 개수는 칩이 아니라 조용한 회색 숫자다(칩은 구역·카드 제목에만) */
 .d-grp .n { font-weight: 500; color: var(--dim); font-size: 13px; }
@@ -2407,6 +2409,17 @@ body.batch-open .d-toast { bottom: 76px; }
   text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
 }
 .d-ablink:hover { color: var(--text); }
+/* 작은 글자 링크·버튼도 넓은 화면에서 누르는 자리 28px — 모양은 그대로, 투명 ::after만 넓힌다.
+   0과 (칸 − 28px)/2 중 작은 값이라 이미 28px 이상인 칸(.d-abupd 등)은 늘지 않는다.
+   대상: 설정의 밑줄 글자(`요청하기`·`각자 붙이는 법`·`점검하기`·`보기`), 선택 막대 `전체 선택`, 줄의 `원문`, 머리줄 `N개 미룰까요?` */
+.d-ablink, .d-selbar .d-link, .d-src, .d-sug { position: relative; }
+.d-ablink::after, .d-selbar .d-link::after, .d-src::after, .d-sug::after {
+  content: ''; position: absolute;
+  top: min(0px, calc(50% - 14px)); bottom: min(0px, calc(50% - 14px));
+  left: min(0px, calc(50% - 14px)); right: min(0px, calc(50% - 14px));
+}
+/* 레일 확인 대기 줄은 `원문`이 제목 바로 아래 제 줄에 선다(사이 3px) — 위로는 2px만 넓혀 제목을 덮지 않고, 모자란 만큼 아래(글자뿐인 줄)로 */
+.d-wrow .tiwrap .d-src::after { top: -2px; bottom: min(0px, calc(100% - 26px)); }
 .d-abfiles { margin-top: 4px; font-size: 12px; line-height: 1.7; color: var(--dim); overflow-wrap: anywhere; }
 .d-abfiles[hidden], .d-abwrap[hidden] { display: none; }
 /* 업데이트 받기(시안 J) — 새 버전 상자는 선택 판(--sel), 실패 줄은 주의 판(--urgent-bg). 새 색은 쓰지 않는다. */

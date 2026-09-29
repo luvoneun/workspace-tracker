@@ -120,11 +120,14 @@ function selfcheckBlocked(at = Date.now()) {
 }
 
 // 명령 한 줄 + `명령 복사`(설정의 d-icode 줄과 같은 모양).
-function selfcheckCommandLine(command) {
+// name: 낭독기가 듣는 이름 — 같은 `명령 복사`가 여럿 서는 자리(도움말)에서 무슨 명령인지 말한다.
+function selfcheckCommandLine(command, name = '') {
   const line = settingsEl('d-icode');
   const code = document.createElement('code');
   code.textContent = command;
-  line.append(code, settingsButton('명령 복사', 'd-btn xs', () => settingsCopy(command, '명령을 복사했어요 — 터미널에 붙여 넣어 주세요')));
+  const copy = settingsButton('명령 복사', 'd-btn xs', () => settingsCopy(command, '명령을 복사했어요 — 터미널에 붙여 넣어 주세요'));
+  if (name) copy.setAttribute('aria-label', name);
+  line.append(code, copy);
   return line;
 }
 
@@ -362,7 +365,7 @@ function selfcheckUpdateLines(file) {
   wrap.hidden = !file;
   if (file) {
     const command = `bash ${selfcheckShellPath(file)}`;
-    wrap.append(selfcheckCommandLine(command), settingsEl('d-ismall', `${SELFCHECK_WORDS.finder} (${file})`));
+    wrap.append(selfcheckCommandLine(command, '업데이트 파일 실행 명령 복사'), settingsEl('d-ismall', `${SELFCHECK_WORDS.finder} (${file})`));
   }
   return wrap;
 }

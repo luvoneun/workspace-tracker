@@ -670,7 +670,9 @@ function uiMenuChips(options, current, onPick, disableCurrent = false) {
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'd-chip' + (value === current ? ' is-on' : '');
-    chip.setAttribute('role', 'menuitem');
+    // 지금 값(파란 칩)을 낭독기도 알게 — 메뉴 안에서 하나를 고르는 칸이라 menuitemradio + aria-checked.
+    chip.setAttribute('role', 'menuitemradio');
+    chip.setAttribute('aria-checked', String(value === current));
     chip.textContent = text;
     if (disableCurrent && value === current) chip.disabled = true;
     chip.addEventListener('click', () => onPick(value, wrap));
@@ -785,8 +787,14 @@ function uiTaskRow(item, opts = {}) {
   title.textContent = item.description;
   // 선택 중에는 키보드가 줄마다 선택 칸 한 곳에서만 멈춘다(Space로 고른다). 끝내면 다시 그려 0으로 돌아온다.
   title.tabIndex = taskSelectionMode ? -1 : 0;
-  title.setAttribute('role', 'button');
-  title.setAttribute('aria-label', taskSelectionMode && !done ? `${item.description} 선택` : `${item.description} 상세 보기`);
+  // 선택 중에는 선택 칸의 이름표(`제목 — 선택`)가 같은 말을 한다 — 제목은 낭독기에서 한 번 더 읽히지 않게 숨긴다
+  // (누르면 고르는 것은 그대로, 키보드는 선택 칸에서만 멈춘다).
+  if (taskSelectionMode && !done) {
+    title.setAttribute('aria-hidden', 'true');
+  } else {
+    title.setAttribute('role', 'button');
+    title.setAttribute('aria-label', `${item.description} 상세 보기`);
+  }
   const open = () => {
     if (taskSelectionMode) { if (selectBox && !taskBatchBusy) selectBox.click(); return; }
     panelOpen({ id: item.id });
@@ -1084,18 +1092,28 @@ function taskSelectionRefresh() {
   const bar = document.getElementById('taskSelectBar');
   if (!bar) return;
   bar.hidden = !taskSelectionMode;
-  bar.replaceChildren();
-  if (!taskSelectionMode) return;
+  if (!taskSelectionMode) { bar.replaceChildren(); return; }
 
   const state = taskSelectAllState(taskSelectPool(), [...taskSelection]);
-  const inner = document.createElement('div');
-  inner.className = 'bar';
+  // 개수 칸은 낭독기가 바뀔 때마다 읽는 자리(aria-live)라 모드 동안 같은 요소를 그대로 둔다 —
+  // 새로 만들어 끼우면 바뀐 것이 아니라 새로 생긴 것이 되어 읽히지 않는다. 나머지 버튼만 다시 그린다.
+  let inner = bar.querySelector('.bar');
+  let count = inner && inner.children[0];
+  if (!inner || !count || count.getAttribute('aria-live') !== 'polite') {
+    bar.replaceChildren();
+    inner = document.createElement('div');
+    inner.className = 'bar';
+    count = document.createElement('span');
+    count.setAttribute('aria-live', 'polite');
+    count.setAttribute('aria-atomic', 'true');
+    inner.appendChild(count);
+    bar.appendChild(inner);
+  }
+  [...inner.children].forEach((kid) => { if (kid !== count) inner.removeChild(kid); });
 
   // 막 켰을 때(0개)는 개수 대신 무엇을 하면 되는지 조용히 말한다.
-  const count = document.createElement('span');
   count.className = state.count ? 'ct num' : 'hint';
   count.textContent = state.count ? `${state.count}개 선택` : '줄을 눌러 골라요';
-  inner.appendChild(count);
   inner.appendChild(taskSelectBarButton(state.all ? '전체 선택 해제' : '전체 선택', () => {
     if (state.all) taskSelection.clear();
     else state.candidates.forEach(id => taskSelection.add(id));
@@ -1159,7 +1177,6 @@ function taskSelectionRefresh() {
 
   // 아무것도 고르지 않았으면 바꾸는 버튼은 눌리지 않는다(끝내기·전체 선택은 그대로).
   actions.forEach((button) => { button.disabled = taskBatchBusy || !state.count; });
-  bar.appendChild(inner);
 }
 
 // 날짜·프로젝트·완료 — 기존 일괄 저장 API 한 곳으로 간다. 되돌리기는 서버가 준 undoToken으로.
@@ -2762,8 +2779,10 @@ function taskWhenControl(item, mode, card) {
   options.forEach(([text, scheduled, message]) => {
     const chip = document.createElement('button');
     chip.type = 'button';
-    chip.className = 'd-chip' + ((scheduled && item.scheduled === scheduled) || (!scheduled && mode === 'later') ? ' is-on' : '');
-    chip.setAttribute('role', 'menuitem');
+    const on = (scheduled && item.scheduled === scheduled) || (!scheduled && mode === 'later');
+    chip.className = 'd-chip' + (on ? ' is-on' : '');
+    chip.setAttribute('role', 'menuitemradio');
+    chip.setAttribute('aria-checked', String(!!on));
     chip.textContent = text;
     chip.addEventListener('click', () => move(scheduled, message));
     wrap.appendChild(chip);
@@ -2924,6 +2943,7 @@ function panelClose() {
   const sheetReturn = panelState?.sheetReturn;
   let reopen = panelState?.back;
   panelState = null;
+  panelFocusField = null;
   escDrop(panelClose);
   detailUnmount(); // 떠 있는 카드와 거기 붙은 스크롤·크기 감시를 함께 거둔다
   document.querySelectorAll('.is-sel[data-task-id], .d-wrow.is-sel, .d-mrow.is-sel').forEach(row => row.classList.remove('is-sel'));
@@ -3014,8 +3034,13 @@ function panelRender(focusFirst = false) {
   if (meeting) panelMeeting(meeting, box);
   else if (found.kind === 'check') panelCheck(found, box);
   else panelTask(found, box);
+  // 갈아 끼우기 전에 초점이 옛 카드 안에 있었는지 본다 — 있었으면 카드와 함께 사라지므로 새 카드에서 되돌린다.
+  const before = panelDetailBox();
+  const focusFrom = before && document.activeElement && before.contains(document.activeElement) ? document.activeElement : null;
   if (detailSheet()) { if (!panelSheetMount(box, focusFirst)) return; }
   else if (!detailPopMount(box, focusFirst)) { panelClose(); return; }
+  if (!meeting) panelFocusTrack(box);
+  if (!meeting && !focusFirst) panelFocusRestore(box, focusFrom);
   const marked = panelState.kind === 'meeting'
     ? panelAnchorSelector()
     : `[data-task-id="${CSS.escape(String(panelState.id))}"], .d-wrow[data-rail-id="${CSS.escape(String(panelState.id))}"]`;
@@ -3039,6 +3064,38 @@ function panelSheetMount(box, focusFirst) {
 function panelFocusFirst(box) {
   const first = panelState?.kind === 'meeting' ? (box.querySelector('.d-dcap input') || box) : box.querySelector('.d-dtitle');
   first?.focus?.();
+}
+
+// 저장하면 load()가 카드를 새로 그려 초점이 문서 전체(<body>)로 빠진다 — 방금 고친 필드의 누르는 자리로 돌려준다.
+// 필드는 dd의 이름표(data-field — panelField가 붙인다)로 찾고, 없어졌으면 카드 제목으로 간다.
+// 우선순위·언제 할지·프로젝트·기다리는 답변·날짜 칸이 모두 이 한 길을 쓴다(고르개가 카드 밖 메뉴여도 필드는 기억한다).
+// 사람이 이미 다른 곳(다른 줄·입력칸)에 초점을 두었으면 건드리지 않는다. 프로그램 초점이라 마우스로 고른 뒤에는
+// :focus-visible 테가 뜨지 않고(브라우저 규칙), 키보드로 고른 뒤에는 뜬다.
+let panelFocusField = null; // { id, field } — 마지막으로 만진 필드
+function panelFocusTrack(box) {
+  const remember = (event) => {
+    if (!panelState || panelState.kind === 'meeting') return;
+    const target = event && event.target;
+    const cell = target && typeof target.closest === 'function' ? target.closest('dd[data-field]') : null;
+    panelFocusField = cell ? { id: panelState.id, field: cell.dataset.field } : null;
+  };
+  box.addEventListener('focusin', remember);
+  box.addEventListener('pointerdown', remember);
+}
+const PANEL_FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]';
+function panelFocusRestore(box, focusFrom) {
+  if (!panelState) return;
+  const active = document.activeElement;
+  const lost = !!focusFrom || !active || active === document.body;
+  const field = panelFocusField && panelFocusField.id === panelState.id ? panelFocusField.field : null;
+  // 초점이 카드에 있지 않았고 필드를 만진 적도 없으면(자동 새로고침 등) 가만히 둔다.
+  if (!lost || (!focusFrom && !field)) return;
+  const cell = field ? [...box.querySelectorAll('dd[data-field]')].find(one => one.dataset.field === field) : null;
+  // 필드 밖(구역의 버튼·입력칸)에 있던 초점은 같은 이름의 조작으로 — 없으면 카드 제목.
+  const name = el => `${el.tagName}|${el.getAttribute('aria-label') || ''}|${String(el.textContent || '').trim()}`;
+  const same = !cell && focusFrom ? [...box.querySelectorAll(PANEL_FOCUSABLE)].find(el => name(el) === name(focusFrom)) : null;
+  const spot = (cell && cell.querySelector(PANEL_FOCUSABLE)) || same || box.querySelector('.d-dtitle');
+  spot?.focus?.({ preventScroll: true });
 }
 
 // 지금 떠 있는 상세 안에서 찾는다(카드 또는 좁은 화면의 시트).
@@ -3149,6 +3206,7 @@ function panelField(dl, label, value) {
   const term = document.createElement('dt');
   term.textContent = label;
   const cell = document.createElement('dd');
+  cell.dataset.field = label; // 저장 뒤 다시 그려도 초점을 이 칸으로 돌려주는 이름표(panelFocusRestore)
   if (typeof value === 'string') cell.textContent = value;
   else if (value) cell.appendChild(value);
   dl.append(term, cell);
@@ -4041,11 +4099,11 @@ function palFilterChips() {
   if (palState.newOnly) {
     const pill = document.createElement('span');
     pill.className = 'd-chip is-on d-palnew';
-    pill.append('오늘 신규');
+    pill.append('오늘 들어온 것');
     const clear = document.createElement('button');
     clear.type = 'button';
     clear.className = 'd-iconbtn sm';
-    clear.setAttribute('aria-label', '오늘 신규 필터 지우기');
+    clear.setAttribute('aria-label', '오늘 들어온 것 필터 지우기');
     clear.innerHTML = uiIcon('close');
     clear.addEventListener('click', () => { palState.newOnly = false; palState.active = 0; palRender(); palNodes.input.focus(); });
     pill.appendChild(clear);
@@ -4253,13 +4311,17 @@ function palClose(silent) {
   if (!silent && back && back.isConnected) back.focus();
 }
 
-// `새로 들어온 것` 제목 오른쪽 끝의 조용한 글자 버튼 — 오늘 들어온 것만 팔레트로 모아 본다.
+// `새로 들어온 것` 제목 오른쪽 끝의 조용한 글자 버튼(`오늘 들어온 것 N`) — 오늘 들어온 것만 팔레트로 모아 본다.
 // 0이면 아예 보이지 않는다.
 function renderInboxHeadCount(count) {
   const button = document.getElementById('createdTodayBtn');
   const cell = document.getElementById('createdTodayCount');
   if (cell) cell.textContent = count;
-  if (button) button.hidden = !count;
+  if (button) {
+    button.hidden = !count;
+    // 낭독기 이름은 보이는 글자(`오늘 들어온 것 N`)로 시작한다 — 음성으로 부를 때도 같은 말로 찾게.
+    button.setAttribute('aria-label', `오늘 들어온 것 ${count} — 모아 보기`);
+  }
 }
 
 // ---------- 쉬운 말 소식 (WP-J) ----------
@@ -5630,7 +5692,7 @@ if (waitingHeadMoreSlot) {
   ], 'd-iconbtn sm d-headmore'));
 }
 
-// 검색 팔레트를 여는 두 자리: 헤더의 `검색 ⌘K` 버튼, `새로 들어온 것` 제목 옆 `오늘 신규 N`.
+// 검색 팔레트를 여는 두 자리: 헤더의 `검색 ⌘K` 버튼, `새로 들어온 것` 제목 옆 `오늘 들어온 것 N`.
 document.getElementById('searchEntryBtn')?.addEventListener('click', () => palOpen({}));
 document.getElementById('createdTodayBtn')?.addEventListener('click', () => palOpen({ newOnly: true }));
 

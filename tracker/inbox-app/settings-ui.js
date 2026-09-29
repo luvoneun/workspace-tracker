@@ -226,7 +226,7 @@ async function settingsReportCopy(button, { lead = '', done = '복사했어요 �
     }));
     showNotice(done);
   } catch {
-    showNotice('복사하지 못했어요', true);
+    showNotice('복사하지 못했어요 · 이 맥의 앱 창에서 다시 눌러 주세요', true);
   }
   button.disabled = false;
 }
@@ -481,7 +481,7 @@ function settingsAutoUpdateFill(info) {
     const want = box.checked;
     row.classList.toggle('is-on', want);
     box.disabled = true;
-    const answer = await settingsIntegrationAsk('/api/personalize', { autoUpdate: want }, '저장하지 못했어요');
+    const answer = await settingsIntegrationAsk('/api/personalize', { autoUpdate: want }, '자동 업데이트 설정을 저장하지 못했어요 · 잠시 뒤 다시 눌러 주세요');
     box.disabled = false;
     if (!answer.ok) {
       box.checked = !want;
@@ -970,7 +970,7 @@ async function settingsCopy(text, done = '복사했어요') {
     await navigator.clipboard.writeText(text);
     showNotice(done);
   } catch {
-    showNotice('복사하지 못했어요', true);
+    showNotice('복사하지 못했어요 · 이 맥의 앱 창에서 다시 눌러 주세요', true);
   }
 }
 
@@ -2863,10 +2863,13 @@ function settingsIntgConnected(data) {
   };
 }
 
-// 셈에서는 회의록 직접 옮기기도 연결된 것으로 센다 — 설치할 것이 없어 카드도 초록 `직접 옮기기`다.
+// 셈(`연결됨 N · 남은 것 M`)은 실제로 이어 둔 것만 센다 — 회의록 직접 옮기기는 받아 오는 연결이 아니라
+// `연결됨`에도 `남은 것`에도 넣지 않는다(처음 설치에 `연결됨 1`로 보이던 것). 카드의 초록 `직접 옮기기` 점과 톱니바퀴 점·점검은 그대로다.
+// 캘린더는 켠 갈래(맥 캘린더·Claude·비밀 주소)면 연결, 끔이면 남은 것(calendar.enabled 하나로 — 갈래 규칙은 바꾸지 않는다).
 function settingsIntgCounts(data) {
   const flags = { ...settingsIntgConnected(data) };
-  if ((data.meetingNotes || { mode: 'manual' }).mode === 'manual') flags.notes = true;
+  // 회의록을 직접 옮기기로 쓰면 그건 고른 방식이지 남은 일이 아니다 — 연결에도 남은 것에도 세지 않는다.
+  if (!flags.notes) delete flags.notes;
   const values = Object.values(flags);
   const on = values.filter(Boolean).length;
   return { on, left: values.length - on };
@@ -3196,7 +3199,7 @@ function settingsAccessRow() {
       if (!result.token) { showNotice('다른 기기 접속이 아직 설정되지 않았어요'); return; }
       await navigator.clipboard.writeText(result.token);
       showNotice('암호를 복사했어요 · 다른 기기에서 사용자 이름은 workspace를 넣어 주세요');
-    } catch { showNotice('암호를 복사하지 못했어요', true); }
+    } catch { showNotice('암호를 복사하지 못했어요 · 이 맥의 앱 창에서 다시 눌러 주세요', true); }
   });
   const hint = settingsEl('d-ismall', '같은 와이파이·Tailscale에서 이 주소를 열고, 사용자 이름은 workspace를 넣으면 돼요.');
   const row = personalizeRow('다른 기기', '같은 와이파이에서', access, hint);

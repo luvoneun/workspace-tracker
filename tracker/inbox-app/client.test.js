@@ -6607,7 +6607,7 @@ test('WP-D1 A. 목록: 카드 차례는 슬랙 수집 → 지라 → 캘린더 �
   await fx.app.run('renderSettingsIntegrations()');
   const kids = fx.view().children;
   assert.equal(kids[0].className, 'd-intghead');
-  assert.equal(fx.shape("document.getElementById('settingsIntegrationsView').children[0]").text, '연동은 선택이에요. 필요할 때 하나씩 켜요.연결됨 1 · 남은 것 3', '회의록 직접 옮기기는 연결된 셈으로 세지만 켠 연동이 없으면 선택이라는 말을 둔다');
+  assert.equal(fx.shape("document.getElementById('settingsIntegrationsView').children[0]").text, '연동은 선택이에요. 필요할 때 하나씩 켜요.연결됨 0 · 남은 것 3', '회의록 직접 옮기기는 연결에도 남은 것에도 세지 않는다 — 켠 연동이 없으면 선택이라는 말과 `연결됨 0`');
   same(kids.slice(1, 5).map(one => one.dataset.integration), ['slack', 'jira', 'calendar', 'notes']);
 
   const chips = ['slack', 'jira', 'calendar', 'notes'].map(kind => fx.find(kind, 'd-itag')[0]);
@@ -6646,7 +6646,7 @@ test('WP-D1 A·H. 연결된 카드는 무엇이 되고 있는지 한 줄 + ⋯(�
     },
   });
   await fx.app.run('renderSettingsIntegrations()');
-  assert.equal(fx.shape("document.getElementById('settingsIntegrationsView').children[0]").text, '3개 연결됨연결됨 3 · 남은 것 1', '회의록 직접 옮기기도 연결된 셈');
+  assert.equal(fx.shape("document.getElementById('settingsIntegrationsView').children[0]").text, '2개 연결됨연결됨 2 · 남은 것 1', '회의록 직접 옮기기는 연결에도 남은 것에도 세지 않는다');
   same(['slack', 'jira'].map(kind => statOf(fx, kind)), [['d-istat k-ok', '연결됨'], ['d-istat k-ok', '연결됨']]);
 
   const jiraState = fx.find('jira', 'd-istat')[0];
@@ -7000,7 +7000,7 @@ test('WP-D2 F. 연결된 캘린더: `비밀 주소로 읽는 중 · 오늘 3개 
   await fx.app.run('renderSettingsIntegrations()');
   assert.equal(fx.shape(`window.findByClass(document.getElementById('settingsIntegrationsView').children[3], 'now')[0]`).text, '비밀 주소로 읽는 중 · 오늘 3개 · 10분 전');
   assert.match(fx.text('calendar'), /열려요비밀 주소로 읽는 중 · 오늘 3개 · 10분 전30분마다$/, '지금 상황 · 도는 주기(앱이 30분마다 직접 읽는다)가 한 줄');
-  assert.match(fx.shape("document.getElementById('settingsIntegrationsView').children[0]").text, /연결됨 2 · 남은 것 2$/);
+  assert.match(fx.shape("document.getElementById('settingsIntegrationsView').children[0]").text, /연결됨 1 · 남은 것 2$/, '직접 옮기기는 세지 않는다');
   const menu = fx.menu('calendar');
   same(menu.map(section => section.map(entry => entry.label)), [['새로 받기', '다시 연결(주소 바꾸기)'], ['해제…']]);
 
@@ -8629,7 +8629,7 @@ test('WP-E F. 사라진 채널: 일부면 카드에 주황 한 줄 + 채널 고�
   const warn = fx.find('slack', 'k-warn')[0];
   assert.equal(warn.dataset.missing, 'align');
   assert.match(fx.text('slack'), /#my-align 채널을 찾을 수 없어요 — 슬랙에서 지웠거나 보관했어요 · 채널 고르기/);
-  assert.match(fx.shape("document.getElementById('settingsIntegrationsView').children[0]").text, /^2개 연결됨연결됨/, '일부만 사라지면 멈춘 것으로 세지 않는다');
+  assert.match(fx.shape("document.getElementById('settingsIntegrationsView').children[0]").text, /^1개 연결됨연결됨/, '일부만 사라지면 멈춘 것으로 세지 않는다(직접 옮기기는 셈에서 빠짐)');
 
   // 할 일 채널이 사라져도 다른 켜진 채널이 살아 있으면 주황(할 일 특별 취급 없음)
   const part = intgClient({
@@ -8641,7 +8641,7 @@ test('WP-E F. 사라진 채널: 일부면 카드에 주황 한 줄 + 채널 고�
   await part.app.run('renderSettingsIntegrations()');
   assert.equal(part.find('slack', 'k-warn')[0].dataset.missing, 'todo');
   assert.equal(part.find('slack', 'd-intgwhy').length, 0);
-  assert.match(part.shape("document.getElementById('settingsIntegrationsView').children[0]").text, /^2개 연결됨연결됨/);
+  assert.match(part.shape("document.getElementById('settingsIntegrationsView').children[0]").text, /^1개 연결됨연결됨/);
 
   // 켜진 채널 둘이 모두 사라지면 빨강 — 주황 줄 대신 상태 줄 하나
   const both = intgClient({
@@ -12679,4 +12679,171 @@ test('회의 `기존 항목 연결` 목록은 8개 이상이면 찾기 칸이 �
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
   assert.doesNotMatch(css, /\.d-msel\.wide/);
   assert.doesNotMatch(fs.readFileSync(path.join(__dirname, 'meetings-ui.js'), 'utf8'), /d-msel wide/);
+});
+
+// ---------- 작은 버튼 누르는 자리 · 문구 · 접근성 묶음 ----------
+
+test('작은 버튼 1: 넓은 화면의 작은 글자 링크·버튼은 투명 ::after로 누르는 자리 28px(이미 28 이상이면 그대로), 그룹 이름은 여백으로', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /\n\.d-ablink, \.d-selbar \.d-link, \.d-src, \.d-sug \{ position: relative; \}/);
+  const rule = css.slice(css.indexOf('.d-ablink::after, .d-selbar .d-link::after, .d-src::after, .d-sug::after {'));
+  const body = rule.slice(0, rule.indexOf('}'));
+  assert.match(body, /content: ''; position: absolute;/);
+  ['top', 'bottom', 'left', 'right'].forEach(side => assert.match(body, new RegExp(`${side}: min\\(0px, calc\\(50% - 14px\\)\\)`), side));
+  assert.match(css, /\.d-grp button\.gl \{ padding-block: 3px; margin-block: -3px; \}/, '말줄임이라 ::after가 잘리는 그룹 이름은 여백으로');
+  assert.match(css, /\.d-wrow \.tiwrap \.d-src::after \{ top: -2px; bottom: min\(0px, calc\(100% - 26px\)\); \}/, '레일의 `원문`은 바로 위 제목을 덮지 않는다');
+  assert.doesNotMatch(body, /background|border|color/, '모양은 그대로(투명)');
+});
+
+test('작은 버튼 2: 도움말의 `명령 복사`는 무슨 명령인지 이름을 말한다(보이는 글자는 그대로)', () => {
+  const app = workflowsClient();
+  const line = app.run("selfcheckCommandLine('bash ~/업데이트.command', '업데이트 파일 실행 명령 복사')");
+  const button = line.children.find(kid => kid.textContent === '명령 복사');
+  assert.ok(button);
+  assert.equal(button.getAttribute('aria-label'), '업데이트 파일 실행 명령 복사');
+  const plain = app.run("selfcheckCommandLine('npm test')").children.find(kid => kid.textContent === '명령 복사');
+  assert.equal(plain.getAttribute('aria-label'), undefined, '이름을 주지 않으면 보이는 글자가 이름');
+  const updateLines = app.run("selfcheckUpdateLines('~/업데이트.command')");
+  const copy = updateLines.children[0].children.find(kid => kid.textContent === '명령 복사');
+  assert.equal(copy.getAttribute('aria-label'), '업데이트 파일 실행 명령 복사');
+});
+
+// 가짜 상세 카드 한 벌: dd[data-field] 칸마다 누르는 자리 하나 + 카드 제목. focus()가 불린 곳을 모은다.
+function focusBox(app, fields) {
+  return app.run(`(() => {
+    const hit = [];
+    const node = (name) => ({ name, tagName: 'BUTTON', textContent: name, getAttribute: () => null, focus() { hit.push(name); } });
+    const cells = ${JSON.stringify(fields)}.map(field => ({ dataset: { field }, querySelector: () => node(field + ' 값') }));
+    const title = node('제목');
+    const extra = node('오늘 확인 요청함');
+    return {
+      hit,
+      querySelectorAll: sel => sel === 'dd[data-field]' ? cells : [extra],
+      querySelector: sel => sel === '.d-dtitle' ? title : null,
+    };
+  })()`);
+}
+
+test('작은 버튼 3: 저장 뒤 다시 그린 카드에서 초점은 방금 고친 필드의 누르는 자리로(없으면 카드 제목), 다른 곳에 두었으면 건드리지 않는다', () => {
+  const app = workflowsClient();
+  // 필드 이름표: panelField가 dd에 붙인다
+  const dl = app.run("(() => { const dl = document.createElement('dl'); panelField(dl, '우선순위', '보통'); return dl; })()");
+  assert.equal(dl.children[1].dataset.field, '우선순위');
+  const restore = app.run('(box, from) => panelFocusRestore(box, from)');
+
+  app.run("panelState = { id: 't1', kind: 'item' }; panelFocusField = { id: 't1', field: '우선순위' }; document.activeElement = null;");
+  let box = focusBox(app, ['언제 할지', '우선순위', '기한']);
+  restore(box, null);
+  same(box.hit, ['우선순위 값'], '초점이 빠졌고(문서 전체) 만진 필드가 있으면 그 칸으로');
+
+  box = focusBox(app, ['언제 할지', '기한']);
+  restore(box, null);
+  same(box.hit, ['제목'], '그 필드가 없어졌으면 카드 제목');
+
+  app.run("panelFocusField = { id: 'other', field: '우선순위' };");
+  box = focusBox(app, ['우선순위']);
+  restore(box, null);
+  same(box.hit, [], '다른 항목에서 만진 필드이고 초점도 카드에 없었으면(자동 새로고침) 가만히');
+
+  app.run("panelFocusField = { id: 't1', field: '우선순위' }; document.activeElement = { id: 'todayTaskInput' };");
+  box = focusBox(app, ['우선순위']);
+  restore(box, null);
+  same(box.hit, [], '사람이 이미 다른 곳에 초점을 두었으면 빼앗지 않는다');
+
+  app.run('panelFocusField = null; document.activeElement = null;');
+  box = focusBox(app, ['우선순위']);
+  restore(box, { tagName: 'BUTTON', textContent: '오늘 확인 요청함', getAttribute: () => null });
+  same(box.hit, ['오늘 확인 요청함'], '필드 밖 버튼에 있던 초점은 새 카드의 같은 이름 버튼으로');
+
+  const source = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const render = source.slice(source.indexOf('function panelRender('), source.indexOf('function panelSheetMount('));
+  assert.match(render, /const before = panelDetailBox\(\);[\s\S]*if \(detailSheet\(\)\)/, '갈아 끼우기 전에 옛 카드의 초점을 본다');
+  assert.match(render, /if \(!meeting && !focusFirst\) panelFocusRestore\(box, focusFrom\);/, '처음 열 때(focusFirst)·회의는 제외');
+  assert.match(source, /panelState = null;\n  panelFocusField = null;/, '닫으면 기억도 지운다');
+});
+
+test('작은 버튼 4: 선택 막대의 개수 칸은 aria-live 칸 하나를 모드 동안 그대로 두고 글자만 바꾼다, 선택 중 제목은 낭독기에서 숨는다', () => {
+  const { app, bar } = selectBarClient();
+  app.run('taskSelectionRefresh()');
+  const count = bar().children[0];
+  assert.equal(count.getAttribute('aria-live'), 'polite');
+  assert.equal(count.getAttribute('aria-atomic'), 'true');
+  assert.equal(count.textContent, '줄을 눌러 골라요');
+  app.run("taskSelection.add('s1'); taskSelectionRefresh()");
+  assert.equal(bar().children[0], count, '같은 요소(새로 만들면 바뀐 것으로 읽히지 않는다)');
+  assert.equal(count.textContent, '1개 선택');
+  assert.equal(bar().children.filter(kid => kid === count).length, 1, '개수 칸은 하나');
+  assert.equal(bar().children.filter(kid => kid.textContent === '전체 선택').length, 1, '버튼은 겹쳐 쌓이지 않는다');
+  app.run('taskSelectionMode = false; taskSelectionRefresh()');
+  assert.equal(app.nodes.get('taskSelectBar').children.length, 0, '끝내면 막대를 비운다');
+
+  const rows = narrowClient(1280);
+  rows.run('taskSelectionMode = true;');
+  const title = nodeFind(rows.run(`uiTaskRow(${SEL_TASK}, { mode: 'today' })`), 'd-title');
+  assert.equal(title.getAttribute('aria-hidden'), 'true', '선택 칸이 `제목 — 선택`을 말하므로 제목은 한 번 더 읽히지 않는다');
+  assert.equal(title.getAttribute('aria-label'), undefined);
+  rows.run('taskSelectionMode = false;');
+  const back = nodeFind(rows.run(`uiTaskRow(${SEL_TASK}, { mode: 'today' })`), 'd-title');
+  assert.equal(back.getAttribute('aria-hidden'), undefined);
+  assert.equal(back.getAttribute('role'), 'button');
+  assert.equal(back.getAttribute('aria-label'), '결제 실패 알림 문구 정리 상세 보기');
+});
+
+test('작은 버튼 5: 결정 줄 체크박스는 PRD 반영이라는 뜻을 툴팁·이름표로 말한다(확인)', () => {
+  const app = workflowsClient();
+  const check = app.run("decisionCheckbox({ id: 'd1', description: '가입은 3단계' }, document.createElement('div'), false)");
+  const box = check.children[0];
+  assert.equal(box.title, 'PRD 반영함으로 표시');
+  assert.equal(box.getAttribute('aria-label'), '가입은 3단계 — PRD 반영함으로 표시');
+});
+
+test('작은 버튼 6: 메뉴 안에서 값을 고르는 칩은 지금 값을 menuitemradio + aria-checked로 말한다', () => {
+  const app = workflowsClient();
+  const chips = app.run("uiMenuChips([['a', '보통'], ['b', '중요']], 'b', () => {})");
+  same(chips.children.map(chip => [chip.textContent, chip.getAttribute('role'), chip.getAttribute('aria-checked')]),
+    [['보통', 'menuitemradio', 'false'], ['중요', 'menuitemradio', 'true']]);
+  const when = app.run("taskWhenControl({ id: 't1', description: '일', scheduled: todayStr() }, 'today', null)");
+  same(when.children.map(chip => [chip.textContent, chip.getAttribute('role'), chip.getAttribute('aria-checked') ?? null]),
+    [['오늘', 'menuitemradio', 'true'], ['내일', 'menuitemradio', 'false'], ['나중에', 'menuitemradio', 'false'], ['날짜…', 'menuitem', null]]);
+  const later = app.run("taskWhenControl({ id: 't2', description: '일', scheduled: null }, 'later', null)");
+  same(later.children.map(chip => chip.getAttribute('aria-checked') ?? null), ['false', 'false', null], '나중에 있는 업무에는 `나중에` 칩이 없다');
+  // 나중에 할 일 버튼은 서랍 열림을 aria-expanded로(확인)
+  const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  assert.match(html, /id="laterTaskToggle" aria-expanded="false" aria-controls="laterTaskDrawer"/);
+});
+
+test('작은 버튼 7: 오류 알림은 무엇이 안 됐는지 + 다음에 할 일 한 줄(showNotice 정의는 그대로)', () => {
+  const settings = fs.readFileSync(path.join(__dirname, 'settings-ui.js'), 'utf8');
+  assert.doesNotMatch(settings, /showNotice\('복사하지 못했어요', true\)/);
+  assert.doesNotMatch(settings, /showNotice\('암호를 복사하지 못했어요', true\)/);
+  assert.equal(settings.split("showNotice('복사하지 못했어요 · 이 맥의 앱 창에서 다시 눌러 주세요', true)").length - 1, 2);
+  assert.match(settings, /showNotice\('암호를 복사하지 못했어요 · 이 맥의 앱 창에서 다시 눌러 주세요', true\)/);
+  assert.match(settings, /\{ autoUpdate: want \}, '자동 업데이트 설정을 저장하지 못했어요 · 잠시 뒤 다시 눌러 주세요'\)/);
+  const app = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const start = app.indexOf('function showNotice(');
+  const notice = app.slice(start, app.indexOf('\n}\n', start));
+  assert.match(notice, /'⌘Z로 되돌리기' : 'Ctrl\+Z로 되돌리기'/, 'showNotice 안은 그대로');
+});
+
+test('작은 버튼 8: `오늘 신규` 대신 `오늘 들어온 것 N` — 낭독기 이름도 보이는 글자로 시작한다', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  assert.match(html, /id="createdTodayBtn" aria-label="오늘 들어온 것 0 — 모아 보기" hidden>오늘 들어온 것 <span class="num" id="createdTodayCount">0<\/span><\/button>/);
+  assert.doesNotMatch(html, /오늘 신규/);
+  const app = workflowsClient();
+  app.run('renderInboxHeadCount(3)');
+  assert.equal(app.nodes.get('createdTodayBtn').getAttribute('aria-label'), '오늘 들어온 것 3 — 모아 보기');
+  assert.equal(app.nodes.get('createdTodayBtn').hidden, false);
+  assert.equal(app.nodes.get('createdTodayCount').textContent, 3);
+  app.run('renderInboxHeadCount(0)');
+  assert.equal(app.nodes.get('createdTodayBtn').hidden, true);
+});
+
+test('작은 버튼 9: 연동 요약 개수 — 회의록 직접 옮기기는 연결로 세지 않고, 캘린더는 켠 갈래 어느 것이든 연결(끔이면 남은 것)', () => {
+  const app = workflowsClient();
+  const count = data => JSON.parse(app.run(`JSON.stringify(settingsIntgCounts(${JSON.stringify(data)}))`));
+  same(count({}), { on: 0, left: 4 }, '처음 설치(회의록 기본 = 직접 옮기기)는 연결 0');
+  same(count({ meetingNotes: { mode: 'manual' } }), { on: 0, left: 4 });
+  same(count({ meetingNotes: { mode: 'tiro' } }), { on: 1, left: 3 }, '티로로 받으면 연결');
+  ['mac', 'ical', undefined].forEach(source => same(count({ calendar: { enabled: true, source } }), { on: 1, left: 3 }, `캘린더 ${source || 'Claude'} 갈래`));
+  same(count({ calendar: { enabled: false, source: 'mac' } }), { on: 0, left: 4 }, '캘린더 끔');
 });
