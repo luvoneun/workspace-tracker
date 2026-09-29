@@ -196,7 +196,9 @@ test('업무 줄의 줄 태그는 우선순위 없이 상태 → 기한 차례�
   assert.doesNotMatch(full, /m-pri|class="m-c /, 'BC의 세 칸 자리 표시는 남아 있지 않다');
   assert.match(full, /m-wait.*답변 기다리는 중.*m-carry.*일째 밀림.*m-due.*기한 \d+일 지남/s,
     '상태(답변 · 밀림) → 기한 차례이고 기한이 맨 오른쪽이다');
-  assert.match(row("{ doing: '2000-01-01' }", ", waiting: 'answered'"), /답변 왔어요.*m-doing[^>]*>\d+일째</s, '상태가 겹치면 이어 쓴다');
+  const both = row("{ doing: '2000-01-01', scheduled: '2000-01-01' }", ", waiting: 'answered'");
+  assert.match(both, /답변 왔어요/, '진행 중이어도 답변 상태는 선다');
+  assert.doesNotMatch(both, /m-doing|일째/, '진행 중 줄에는 며칠째·밀림이 없다');
   assert.equal(row("{ due: todayStr() }"), '<span class="m-due k-warn" title="기한은 ' + app.run('uiKoDate(todayStr())')
     + '이에요"><svg class="d-i" viewBox="0 0 16 16" aria-hidden="true">' + app.run('UI_ICONS.calendar') + '</svg>오늘까지</span>',
     '기한만 있으면 기한 한 칸뿐이다');
@@ -275,25 +277,26 @@ test('진행 중인 업무는 체크박스가 반쯤 차고 이름표에 진행 
   assert.equal(plain.cls, 'd-cb', '진행 중을 풀면 평소 체크박스로 돌아온다');
 });
 
-test('진행 중인 업무 줄에는 밀림이 없고 조용한 N일째만 선다 — 풀면 밀림이 돌아온다', () => {
+test('진행 중인 업무 줄에는 밀림도 며칠째도 없다(체크박스가 말함) — 풀면 밀림이 돌아온다', () => {
   const app = pureClient();
   const row = (item, extra = '') => app.run(`uiMetaCells(${item}, { noPriority: true${extra} })`);
   const doing = row("{ scheduled: '2000-01-01', doing: '2000-01-02' }");
   assert.doesNotMatch(doing, /m-carry|밀림/, '진행 중이면 밀림을 붙이지 않는다');
-  assert.match(doing, /<span class="m-doing" title="[^"]*부터 진행 중이에요">\d+일째<\/span>/, '아이콘 없는 회색 N일째');
-  assert.doesNotMatch(doing, /진행 중<\/span>|<svg/, '말은 체크박스가 하므로 `진행 중` 글자는 없다');
-  assert.equal(row('{ doing: todayStr(), scheduled: todayStr() }'), '', '첫날은 비운다');
-  assert.equal(row("{ scheduled: '2000-01-01', doing: '2000-01-02' }", ', inDoingGroup: true'), doing, '진행 중 묶음 안에서도 같다');
+  assert.equal(doing, '', '체크박스 줄은 며칠째도 `진행 중` 글자도 없다(사용자 요청)');
+  assert.equal(row("{ scheduled: '2000-01-01', doing: '2000-01-02' }", ', inDoingGroup: true'), '', '진행 중 묶음 안에서도 같다');
   assert.match(row("{ scheduled: '2000-01-01' }"), /m-carry.*\d+일째 밀림/s, '진행 중을 풀면 밀림이 돌아온다');
   // 기한 지남 + 진행 중: 기한 배지는 그대로, 밀림은 없다.
   const late = row("{ scheduled: '2000-01-01', doing: '2000-01-02', due: '2000-01-03' }", ', inDoingGroup: true');
-  assert.match(late, /m-doing.*m-due k-neg.*기한 \d+일 지남/s);
+  assert.match(late, /m-due k-neg.*기한 \d+일 지남/s);
+  assert.doesNotMatch(late, /m-doing|일째/);
   assert.doesNotMatch(late, /밀림/);
   // 기한 때문에 들어온 업무(예정일 없음·미래)는 밀림이 아니다.
   assert.doesNotMatch(row("{ due: '2000-01-03' }"), /밀림/);
   assert.doesNotMatch(row("{ scheduled: '2999-01-01', due: todayStr() }"), /밀림/);
-  // 체크박스가 없는 자리(미루기 제안 줄)는 예전처럼 글자로 다 쓴다.
-  assert.match(app.run("uiMetaCells({ doing: '2000-01-02' })"), /m-doing.*\d+일째 진행 중/s);
+  // 체크박스가 없는 자리(미루기 제안 줄)는 `진행 중` 글자만(며칠째 없음).
+  const plainRow = app.run("uiMetaCells({ doing: '2000-01-02' })");
+  assert.match(plainRow, /m-doing.*진행 중/s);
+  assert.doesNotMatch(plainRow, /일째/);
 });
 
 // WP-T: 기한 때문에 오늘 목록에 선 업무는 예정일만 미뤄도 목록에 남는다 — 미루기 알림이 사실대로 말한다.

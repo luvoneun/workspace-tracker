@@ -164,7 +164,7 @@ function checkinShow(data) {
   title.tabIndex = -1;
   // 사용 횟수를 함께 보내는지는 서버가 알려 준다(WP-R — 설정에서 끈 사람에게는 앞 문장만).
   const lead = checkinEl('p', 'd-cklead', data.usageOn
-    ? '이름과 업무 내용은 보내지 않아요. 기능별 사용 횟수는 함께 보내요.'
+    ? '이름과 업무 내용은 보내지 않아요. 앱을 고치는 데 쓰려고 기능별 사용 횟수는 함께 보내요.'
     : '답은 만든 사람에게만 가요. 이름과 업무 내용은 보내지 않아요.');
   lead.id = 'ckLead';
   head.append(checkinEl('div', 'd-ckeye', data.eyebrow || ''), title, lead);

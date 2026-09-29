@@ -356,12 +356,9 @@ function uiMetaCells(item, opts = {}) {
   const carry = where === 'row' && !done && !doing ? uiCarryText(item.scheduled) : null;
   if (carry) status.push(cell('m-carry', 'clock', carry, '오늘 하려다 넘어온 업무예요'));
   if (doing) {
-    const days = -diffDays(item.doing) + 1;
-    const since = `${uiKoDate(item.doing)}부터 진행 중이에요`;
-    // 체크박스가 있는 줄(noPriority)은 반쯤 찬 체크박스가 `진행 중`을 말한다 — 오른쪽에는 조용한 `N일째`만(첫날은 비움).
-    // 체크박스가 없는 자리(미루기 제안 줄)는 예전처럼 글자로 다 쓴다.
-    if (opts.noPriority) { if (days > 1) status.push(cellPlain('m-doing', `${days}일째`, since)); }
-    else if (!opts.inDoingGroup) status.push(cell('m-doing', 'clock', days > 1 ? `${days}일째 진행 중` : '진행 중', '이미 손을 댄 업무예요'));
+    // 체크박스가 있는 줄(noPriority)은 반쯤 찬 체크박스가 `진행 중`을 말한다 — 오른쪽에 며칠째인지 적지 않는다(사용자 요청: 날짜 표시가 거슬림).
+    // 체크박스가 없는 자리(미루기 제안 줄)는 `진행 중` 글자만.
+    if (!opts.noPriority && !opts.inDoingGroup) status.push(cell('m-doing', 'clock', '진행 중', `${uiKoDate(item.doing)}부터 진행 중이에요`));
   }
   const due = done ? null : uiDueText(item.due, where);
   const dueCell = due ? cell(`m-due${uiTone(due.tone)}`, 'calendar', due.text, item.due ? `기한은 ${uiKoDate(item.due)}이에요` : '') : '';
