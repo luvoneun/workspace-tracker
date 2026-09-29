@@ -2609,14 +2609,14 @@ async function renderSettingsIntegrations({ quiet = false } = {}) {
 }
 
 // ---------- 설정 > 꾸미기 (이 맥에만) ----------
-// 세 줄(Dock 아이콘 · Dock 이름 · 워크스페이스 제목) + 저장. 프리셋은 두지 않는다(`앱 위치`는 앱 탭으로 옮겼다).
+// 세 줄(앱 아이콘 · 앱 이름 · 워크스페이스 제목) + 저장. 프리셋은 두지 않는다(`앱 위치`는 앱 탭으로 옮겼다).
 // 아이콘은 고르는 순간 화면에서 정사각형 가운데로 잘라(캔버스) 미리 보여 주고, `저장`을 눌러야 서버로 간다.
-// Dock 앱은 서버가 아니라 launchd 에이전트(app-refresh)가 다시 만든다 — Dock을 다시 시작하지 않으므로
-// 저장 뒤 한 줄로 `Dock은 앱을 닫고 다시 열면 보여요`를 알린다.
+// 아이콘·앱 이름은 크롬 앱(manifest)과 탭 아이콘에만 쓰인다 — 예전 Dock 앱(~/Applications)은 바뀌지 않으므로
+// 저장 뒤 그 사실을 한 줄로 알린다(DECISIONS 2026-09-29).
 const PERSONALIZE_ICON_MAX = 5 * 1024 * 1024;
 const PERSONALIZE_ICON_MIN = 128;
 const PERSONALIZE_ICON_OUT = 1024;
-let personalizeSavedNote = null;   // 저장 뒤 다시 그린 화면에 한 번 보일 `✓ 바뀌었어요` 줄({ dock })
+let personalizeSavedNote = null;   // 저장 뒤 다시 그린 화면에 한 번 보일 `✓ 바뀌었어요` 줄({ dock } — 아이콘·앱 이름이 바뀌었나)
 
 // 가운데 정사각형 — 긴 쪽의 양 끝을 똑같이 잘라 낸다.
 function personalizeCropBox(width, height) {
@@ -2631,7 +2631,7 @@ function personalizeNameError(dockName, title) {
   const name = String(dockName || '').trim();
   const head = String(title || '').trim();
   if (!name || [...name].length > 30 || /[/:\r\n\t]/.test(name) || name.startsWith('.')) {
-    return 'Dock 이름은 1~30자로 적어 주세요 — / : 와 줄바꿈은 쓸 수 없어요';
+    return '앱 이름은 1~30자로 적어 주세요 — / : 와 줄바꿈은 쓸 수 없어요';
   }
   if (!head || [...head].length > 40 || /[\r\n]/.test(head)) return '워크스페이스 제목은 1~40자로 적어 주세요';
   return '';
@@ -2644,8 +2644,8 @@ function personalizeFileError(file) {
   return '';
 }
 
-// 네 모서리를 둥글게 깎는다(바깥 픽셀을 투명하게) — 반지름은 한 변의 22%로, 예전 Dock 아이콘(app-refresh.sh의 Pillow)과
-// 같은 모양이다. 저장하는 그림에 모양이 이미 들어 있어서 Dock 앱은 Pillow 없이 크기만 바꾸면 되고, 미리보기와 Dock이 같다.
+// 네 모서리를 둥글게 깎는다(바깥 픽셀을 투명하게) — 반지름은 한 변의 22%로, 맥 앱 아이콘과 비슷한 모양이다.
+// 저장하는 그림에 모양이 이미 들어 있어서 크롬 앱·탭 아이콘이 미리보기와 같다.
 // `pixels`는 캔버스 getImageData의 RGBA 배열(한 변 `size`), 그 자리에서 고친다.
 function personalizeRoundCorners(pixels, size) {
   const radius = Math.floor(size * 0.22);
@@ -2727,10 +2727,10 @@ function personalizeApply({ title, icon, titleHidden } = {}) {
   }
 }
 
-// 설정 › 앱의 `앱 위치` — Dock 앱과 업데이트 파일의 경로(홈은 `~`). Finder의 `폴더로 이동`에 붙여 넣으라고만 알린다.
-// 서버는 Finder를 열지 않는다 — 경로 글자만 준다(GET /api/about의 appBundle·updateFile).
+// 설정 › 앱의 `앱 위치` — 업데이트 파일의 경로(홈은 `~`). Finder의 `폴더로 이동`에 붙여 넣으라고만 알린다.
+// 서버는 Finder를 열지 않는다 — 경로 글자만 준다(GET /api/about의 updateFile). 예전 Dock 앱 줄은 없앴다(더 만들지 않는다).
 function personalizePlace(about) {
-  const lines = [['Dock 앱', about && about.appBundle], ['업데이트 파일', about && about.updateFile]]
+  const lines = [['업데이트 파일', about && about.updateFile]]
     .filter(([, value]) => typeof value === 'string' && value)
     .map(([label, value]) => {
       const line = settingsEl('d-pplaceline');
@@ -2783,7 +2783,7 @@ async function renderSettingsPersonalize() {
   }
   let picked = null;   // 잘라 둔 PNG(base64) — 저장을 눌러야 서버로 간다
 
-  // 1) Dock 아이콘
+  // 1) 앱 아이콘
   const preview = settingsEl('d-piconslot');
   const current = document.createElement('img');
   current.className = 'd-piconimg';
@@ -2794,7 +2794,7 @@ async function renderSettingsPersonalize() {
   file.type = 'file';
   file.accept = 'image/png,image/jpeg';
   file.hidden = true;
-  file.setAttribute('aria-label', 'Dock 아이콘 그림 고르기');
+  file.setAttribute('aria-label', '앱 아이콘 그림 고르기');
   const choose = settingsButton('내 그림 고르기', 'd-btn acc', () => file.click());
   const error = settingsErrorLine();
   const reset = settingsButton('기본으로 되돌리기', 'd-ablink', async () => {
@@ -2822,19 +2822,19 @@ async function renderSettingsPersonalize() {
       cropped.canvas.setAttribute('role', 'img');
       cropped.canvas.setAttribute('aria-label', '고른 그림(가운데를 정사각형으로 잘랐어요)');
       preview.replaceChildren(cropped.canvas);
-      iconNote.textContent = '가운데를 정사각형으로 잘랐어요 — 저장하면 Dock 아이콘이 돼요';
+      iconNote.textContent = '가운데를 정사각형으로 잘랐어요 — 저장하면 앱 아이콘이 돼요';
     } catch (problem) {
       error.textContent = (problem && problem.message) || '그림을 열지 못했어요';
     }
     file.value = '';
   });
 
-  // 2) Dock 이름 · 3) 워크스페이스 제목
+  // 2) 앱 이름(설정 키는 옛 설정 호환으로 `dockName` 그대로) · 3) 워크스페이스 제목
   const dock = document.createElement('input');
   dock.className = 'd-din';
-  dock.value = state.dockName || 'Workspace';
+  dock.value = state.dockName || '워크스페이스';
   dock.maxLength = 30;
-  dock.setAttribute('aria-label', 'Dock 이름');
+  dock.setAttribute('aria-label', '앱 이름');
   const title = document.createElement('input');
   title.className = 'd-din';
   title.value = state.title || '';
@@ -2893,7 +2893,7 @@ async function renderSettingsPersonalize() {
       if (!answer.ok) { error.textContent = answer.error; save.disabled = false; return; }
       personalizeApply({ title: answer.title, titleHidden: answer.titleHidden });
       personalizeTitlePreviewUndo = null;
-      dockTouched = dockTouched || answer.refresh === true;
+      dockTouched = dockTouched || names.dockName !== undefined;
     }
     personalizeSavedNote = { dock: dockTouched };
     await renderSettingsPersonalize();
@@ -2907,8 +2907,8 @@ async function renderSettingsPersonalize() {
   const install = personalizeInstallRow();
   if (install) view.appendChild(install);
   view.append(
-    personalizeRow('Dock 아이콘', '', iconLine, iconNote),
-    personalizeRow('Dock 이름', 'Dock·앱 전환에 보여요', dock),
+    personalizeRow('앱 아이콘', '', iconLine, iconNote),
+    personalizeRow('앱 이름', '크롬 앱의 이름 — Dock·⌘Tab에 보여요', dock),
     personalizeRow('워크스페이스 제목', '화면 왼쪽 위에 보여요', title, shownRow),
     error, foot,
   );
@@ -2916,15 +2916,12 @@ async function renderSettingsPersonalize() {
     const done = settingsEl('d-psaved');
     done.setAttribute('role', 'status');
     done.appendChild(document.createTextNode('✓ 바뀌었어요'));
-    if (personalizeSavedNote.dock) {
-      const more = document.createElement('span');
-      more.textContent = ' · Dock은 앱을 닫고 다시 열면 보여요';
-      done.appendChild(more);
-    }
     view.appendChild(done);
     // 크롬 앱으로 설치했으면 — 크롬은 manifest를 곧바로 다시 읽지 않는다(사실대로 알린다).
+    // 예전 Dock 앱(~/Applications)은 더 만들지 않아 바뀌지 않는다 — 그것도 사실대로 한 줄.
     if (personalizeSavedNote.dock) {
       view.appendChild(settingsEl('d-ismall d-pinstallnote', '크롬 앱에는: 크롬을 다시 켜고(주소창에 about://restart) 앱을 열면 오른쪽 위 「앱 업데이트 있음」 → 업데이트 → 앱을 ⌘Q로 끄고 다시 열기'));
+      view.appendChild(settingsEl('d-ismall d-pinstallnote', '예전 Dock 앱에는 바뀌지 않아요 — 크롬 앱으로 설치하면 돼요'));
     }
     personalizeSavedNote = null;
   }
@@ -2983,8 +2980,8 @@ const SETTINGS_FAQ = [
       '맨 위 <b>오늘 할 일</b> 칸에 한 줄 적고 Enter를 누르면 끝이에요. 프로젝트·회의·주간요약은 필요해질 때 쓰면 돼요.'],
     ['연동은 꼭 켜야 하나요', '없음',
       '아니요. 지라·슬랙·캘린더·회의록은 전부 선택이에요. <b>설정 &gt; 연동</b>에서 하나씩 켜고, 켠 것만 자동으로 모아 와요. 하나도 켜지 않아도 직접 적는 기능은 전부 돼요.'],
-    ['Dock 아이콘·이름을 바꾸려면', '없음',
-      '<b>설정 &gt; 꾸미기</b>에서 내 그림을 고르고(가운데를 정사각형으로 잘라요) Dock 이름·워크스페이스 제목을 적은 뒤 <b>저장</b>해요. 이 맥에만 적용되고 업데이트해도 남아요. Dock 앱은 닫고 다시 열면 바뀌어요. 크롬 앱은 크롬을 다시 켠 뒤(<b>about://restart</b>) 앱 오른쪽 위 <b>앱 업데이트 있음</b> → 업데이트 → <b>⌘Q</b> 뒤 다시 열어요.'],
+    ['앱 아이콘·이름을 바꾸려면', '없음',
+      '<b>설정 &gt; 꾸미기</b>에서 내 그림을 고르고(가운데를 정사각형으로 잘라요) 앱 이름·워크스페이스 제목을 적은 뒤 <b>저장</b>해요. 이 맥에만 적용되고 업데이트해도 남아요. 크롬 앱은 크롬을 다시 켠 뒤(<b>about://restart</b>) 앱 오른쪽 위 <b>앱 업데이트 있음</b> → 업데이트 → <b>⌘Q</b> 뒤 다시 열어요. 예전 Dock 앱에는 바뀌지 않아요 — 크롬 앱으로 설치하면 돼요.'],
   ]],
   ['매일', [
     ['오늘 하기 버거운 업무는 어떻게 미루나요', '없음',

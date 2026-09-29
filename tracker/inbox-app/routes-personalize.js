@@ -1,4 +1,4 @@
-// 설정 › 꾸미기 경로(이 맥에만) — Dock 아이콘·이름/제목·아이콘 그림·local.css.
+// 설정 › 꾸미기 경로(이 맥에만) — 앱 아이콘·앱 이름/제목·아이콘 그림·local.css.
 // server.js의 handleRequest가 공통 가드(인증·호스트·출처는 safeHandle, 복구 필요 중 쓰기 차단은 handleRequest 맨 위)를
 // 거친 뒤 이 함수에 묻는다. 처리했으면 true, 내 경로가 아니면 false. 필요한 값·함수는 모두 `ctx`로 받는다 —
 // 여기서 server.js를 require하지 않는다(서로 부르는 고리가 생기지 않게). 파일 읽기 캐시(readScope)를 쓰는 함수도
@@ -7,11 +7,11 @@ const path = require('path');
 const nativeFs = require('fs');
 
 module.exports = function personalizeRoutes(req, res, url, ctx) {
-  const { CONFIG_PATH, LOCAL_DIR, PUBLIC_DIR, applicationsDir, automationDir, currentConfigFile, currentDockName,
+  const { CONFIG_PATH, LOCAL_DIR, PUBLIC_DIR, currentConfigFile, currentDockName,
     integrations, personalize, readBody } = ctx;
 
   // ---------- 설정 › 꾸미기 (이 맥에만) ----------
-  // Dock 아이콘 — 내 그림(`local/icon.png`)이 있으면 그것, 없으면 기본 토끼. 탭 아이콘(favicon)도 이 주소다.
+  // 앱 아이콘 — 내 그림(`local/icon.png`)이 있으면 그것, 없으면 기본 토끼. 탭 아이콘(favicon)도 이 주소다.
   if (url.pathname === '/app-icon.png' && req.method === 'GET') {
     try {
       const icon = personalize.currentIcon(LOCAL_DIR, PUBLIC_DIR);
@@ -23,7 +23,7 @@ module.exports = function personalizeRoutes(req, res, url, ctx) {
     return true;
   }
 
-  // 크롬 `앱으로 설치`가 읽는 manifest — 꾸미기의 Dock 이름·아이콘을 따른다(personalize.manifestFor).
+  // 크롬 `앱으로 설치`가 읽는 manifest — 꾸미기의 앱 이름·아이콘을 따른다(personalize.manifestFor).
   // 아이폰 홈 화면 추가 때문에 인증 없이 열리는 경로다(server.js의 publicAsset) — 이름·아이콘 주소만 담는다.
   if (url.pathname === '/manifest.webmanifest' && req.method === 'GET') {
     const configured = ((currentConfigFile().server) || {}).dockName;
@@ -44,19 +44,17 @@ module.exports = function personalizeRoutes(req, res, url, ctx) {
     return true;
   }
 
-  // 이름 저장(`title`·`server.dockName`·`titleHidden`만). 제목은 곧바로 화면에 쓰이고, Dock 이름이 바뀌면 Dock 앱을
-  // 다시 만들어 달라는 표시 파일 하나를 쓴다(프로세스는 띄우지 않는다). `titleHidden`은 헤더의 제목만 감추고
-  // 값 자체·Dock은 그대로라 요청 표시 파일을 쓰지 않는다.
+  // 이름 저장(`title`·`server.dockName`·`titleHidden`만). 제목은 곧바로 화면에 쓰이고, 앱 이름은 manifest가
+  // 다음에 읽을 때 쓰인다. 예전 Dock 앱(~/Applications)은 만들지도 고치지도 않는다 — 요청 표시 파일도 쓰지 않는다.
   if (url.pathname === '/api/personalize' && req.method === 'POST') {
     readBody(req)
-      .then(body => integrations.savePersonalize({ configPath: CONFIG_PATH, current: currentConfigFile(), body, appsDir: applicationsDir() }))
-      .then(({ config, changed }) => {
+      .then(body => integrations.savePersonalize({ configPath: CONFIG_PATH, current: currentConfigFile(), body }))
+      .then(({ config }) => {
         if (typeof config.title === 'string' && config.title) ctx.APP_TITLE = config.title;
         if (typeof config.titleHidden === 'boolean') ctx.TITLE_HIDDEN = config.titleHidden;
-        if (changed.dockName) personalize.writeRefreshRequest(automationDir(), 'dockName');
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({
-          ok: true, title: ctx.APP_TITLE, dockName: currentDockName(), titleHidden: ctx.TITLE_HIDDEN, refresh: changed.dockName,
+          ok: true, title: ctx.APP_TITLE, dockName: currentDockName(), titleHidden: ctx.TITLE_HIDDEN,
         }));
       })
       .catch((error) => {
@@ -66,7 +64,7 @@ module.exports = function personalizeRoutes(req, res, url, ctx) {
     return true;
   }
 
-  // Dock 아이콘 그림 저장·되돌리기. 그림은 `{ image: base64 }`(화면이 정사각형으로 잘라 PNG로 보낸다),
+  // 앱 아이콘 그림 저장·되돌리기. 그림은 `{ image: base64 }`(화면이 정사각형으로 잘라 PNG로 보낸다),
   // 되돌리기는 `{ reset: true }` — `local/icon.png` 한 파일만 쓰거나 지운다. 5MB 그림의 base64가 들어오도록
   // 이 길만 본문 한도를 8MB로 둔다.
   if (url.pathname === '/api/personalize/icon' && req.method === 'POST') {
@@ -80,9 +78,8 @@ module.exports = function personalizeRoutes(req, res, url, ctx) {
           if (!text || !/^[A-Za-z0-9+/=\s]+$/.test(text)) throw Object.assign(new Error(personalize.PERSONALIZE_MESSAGE.iconType), { status: 400 });
           personalize.saveIcon(LOCAL_DIR, Buffer.from(text, 'base64'));
         }
-        personalize.writeRefreshRequest(automationDir(), data.reset === true ? 'icon-reset' : 'icon');
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: true, customIcon: personalize.hasCustomIcon(LOCAL_DIR), refresh: true }));
+        res.end(JSON.stringify({ ok: true, customIcon: personalize.hasCustomIcon(LOCAL_DIR) }));
       })
       .catch((error) => {
         res.writeHead(error.status || 400, { 'Content-Type': 'application/json; charset=utf-8' });

@@ -6996,7 +6996,7 @@ test('WP-D2 I. 사용설명서 카드: 닫기 전까지는 기록이 있어도 �
   same(rows.map(row => row.children[0].textContent), ['앱으로 설치', '할 일 적기', '연동은 나중에', '슬랙에서 보내는 법']);
   same(rows.map(row => String(row.type || '')), ['', 'button', 'button', 'button'], '첫 줄만 버튼이 아니다(할 일이 앱 밖에 있다)');
   const text = index => fx.shape(`document.getElementById('startCardZone').children[0].children[${index + 1}]`).text;
-  assert.equal(text(0), '앱으로 설치크롬 ⋮ → 전송, 저장, 공유 → 페이지를 앱으로 설치이미 설치했으면 주소창 오른쪽 앱 열기크롬 앱 대신 Dock 앱을 쓰려면 → 설정 › 앱 › 앱 위치');
+  assert.equal(text(0), '앱으로 설치크롬 ⋮ → 전송, 저장, 공유 → 페이지를 앱으로 설치이미 설치했으면 주소창 오른쪽 앱 열기', 'Dock 앱 예비 길 링크는 없다(WP-O)');
   assert.equal(text(1), '할 일 적기맨 위 칸에 적고 Enter');
   assert.equal(text(2), '연동은 나중에설정 ⚙ → 연동에서 하나씩');
   assert.equal(text(3), '슬랙에서 보내는 법전달로 채널에 보내요');
@@ -7009,8 +7009,8 @@ test('WP-D2 I. 사용설명서 카드: 닫기 전까지는 기록이 있어도 �
   assert.equal(fx.app.nodes.get('todayTaskInput').focused, true, '할 일 입력칸으로 초점');
   rows[2].listeners.click();
   rows[3].listeners.click();
-  rows[0].children[1].children.find(kid => String(kid.className).includes('d-guidewhere')).listeners.click();
-  same(fx.went(), [['close'], ['integrations', null], ['guide', null], ['show', '슬랙에서 이렇게 보내요'], ['app', 'app-place']]);
+  assert.ok(!rows[0].children[1].children.some(kid => String(kid.className).includes('d-guidewhere')), '앱 위치로 데려가는 링크가 없다');
+  same(fx.went(), [['close'], ['integrations', null], ['guide', null], ['show', '슬랙에서 이렇게 보내요']]);
 
   // 새로고침마다 다시 만들지 않는다(누르려던 줄의 초점이 사라지지 않게) — 기록이 있어도 그대로 선다
   fx.app.run('renderGuideCard()');
@@ -7075,12 +7075,12 @@ test('WP-L 앱으로 설치: 크롬이 설치 창을 주지 않으면(이미 설
   fx.app.run('renderGuideCard()');
   assert.equal(fx.first().children[0].textContent, '앱으로 설치');
   assert.equal(String(fx.first().type || ''), '', '줄 자체는 버튼이 아니다(할 일이 크롬에 있다)');
-  assert.equal(fx.text(), '앱으로 설치크롬 ⋮ → 전송, 저장, 공유 → 페이지를 앱으로 설치이미 설치했으면 주소창 오른쪽 앱 열기크롬 앱 대신 Dock 앱을 쓰려면 → 설정 › 앱 › 앱 위치');
+  assert.equal(fx.text(), '앱으로 설치크롬 ⋮ → 전송, 저장, 공유 → 페이지를 앱으로 설치이미 설치했으면 주소창 오른쪽 앱 열기');
   assert.equal(fx.installButton(), undefined, '설치 창을 줄 수 없으면 버튼도 없다');
   const words = fx.first().children[1].children;
   assert.ok(words.some(kid => kid.className === 'd-guidedock'), 'Dock 그림은 그대로');
-  words.find(kid => String(kid.className).includes('d-guidewhere')).listeners.click();
-  same(fx.went(), [['app', 'app-place']], 'Dock 앱(예비 길)은 앱 위치로 데려간다');
+  assert.ok(!words.some(kid => String(kid.className).includes('d-guidewhere')), 'Dock 앱 예비 길 링크는 없앴다(WP-O)');
+  same(fx.went(), []);
 });
 
 test('WP-L 앱으로 설치: beforeinstallprompt를 잡아 두고 `설치하기` → prompt(), accepted면 `설치했어요 · 새 창의 아이콘을 Dock에 유지해 주세요`', async () => {
@@ -7091,7 +7091,7 @@ test('WP-L 앱으로 설치: beforeinstallprompt를 잡아 두고 `설치하기`
   assert.equal(fx.app.run('window.ev.prevented'), 1, '크롬이 스스로 띄우지 않게 잡아 둔다');
   // 이미 떠 있는 카드를 다시 만들지 않고 그 줄만 다시 채운다
   assert.equal(fx.installButton().textContent, '설치하기');
-  assert.equal(fx.text(), '앱으로 설치설치하기 Dock·⌘Tab에 워크스페이스 아이콘이 따로 떠요크롬 앱 대신 Dock 앱을 쓰려면 → 설정 › 앱 › 앱 위치');
+  assert.equal(fx.text(), '앱으로 설치설치하기 Dock·⌘Tab에 워크스페이스 아이콘이 따로 떠요');
   await fx.installButton().listeners.click();
   assert.equal(fx.app.run('window.ev.prompted'), 1, '누르면 크롬의 설치 창');
   assert.equal(fx.text(), '앱으로 설치설치했어요 · 새 창의 아이콘을 Dock에 유지해 주세요');
@@ -7222,7 +7222,7 @@ test('WP-D2 I. 도움말: 문답마다 찾아갈 표지가 있고, `슬랙에서
   assert.equal(app.run("settingsGuideShow('없는 문답')"), null);
 
   const faq = JSON.parse(app.run('JSON.stringify(SETTINGS_FAQ)')).flatMap(([, rows]) => rows);
-  assert.ok(faq.some(([question]) => question === 'Dock 아이콘·이름을 바꾸려면'));
+  assert.ok(faq.some(([question]) => question === '앱 아이콘·이름을 바꾸려면'));
   assert.match(faq.find(([question]) => question === 'Claude 없이 캘린더를 붙이려면')[2], /iCal 형식의 비공개 주소/);
 });
 
@@ -7230,8 +7230,8 @@ test('WP-D2 I. 도움말: 문답마다 찾아갈 표지가 있고, `슬랙에서
 // WP-D2 L — 설정 › 꾸미기(이 맥에만): 세 줄 + 저장 + 앱 위치
 
 function personalizeClient(state = {}, replies = []) {
-  const payload = { ok: true, title: '○○의 워크스페이스', dockName: 'Workspace', customIcon: false, ...state };
-  const about = { version: '1.0.0', appBundle: '~/Applications/Workspace.app', updateFile: '~/workspace/업데이트.command' };
+  const payload = { ok: true, title: '○○의 워크스페이스', dockName: '워크스페이스', customIcon: false, ...state };
+  const about = { version: '1.0.0', updateFile: '~/workspace/업데이트.command' };
   const app = settingsClient(payload);
   const sent = [];
   const copied = [];
@@ -7261,7 +7261,7 @@ function personalizeClient(state = {}, replies = []) {
   return { app, sent, copied, view, text, find, inputs, button, posts };
 }
 
-test('WP-D2 L. 꾸미기: Dock 아이콘 · Dock 이름 · 워크스페이스 제목 + 안내 줄 + 저장(앱 위치는 앱 탭으로 옮겼다)', async () => {
+test('WP-D2 L. 꾸미기: 앱 아이콘 · 앱 이름 · 워크스페이스 제목 + 안내 줄 + 저장(앱 위치는 앱 탭으로 옮겼다)', async () => {
   const fx = personalizeClient();
   await fx.app.run('renderSettingsPersonalize()');
   const kids = fx.view().children;
@@ -7270,8 +7270,9 @@ test('WP-D2 L. 꾸미기: Dock 아이콘 · Dock 이름 · 워크스페이스 �
   // WP-L: 맨 위는 `앱으로 설치`(사용설명서를 닫은 사람도 찾게)
   assert.equal(kids[0].dataset.row, 'app-install');
   assert.equal(fx.text("document.getElementById('settingsPersonalizeView').children[0]"), '앱으로 설치크롬 앱으로 창을 따로 띄워요크롬 ⋮ → 전송, 저장, 공유 → 페이지를 앱으로 설치이미 설치했으면 주소창 오른쪽 앱 열기');
-  assert.equal(fx.text("document.getElementById('settingsPersonalizeView').children[1].children[0]"), 'Dock 아이콘');
-  assert.equal(fx.text("document.getElementById('settingsPersonalizeView').children[2].children[0]"), 'Dock 이름Dock·앱 전환에 보여요');
+  assert.equal(fx.text("document.getElementById('settingsPersonalizeView').children[1].children[0]"), '앱 아이콘');
+  assert.equal(fx.text("document.getElementById('settingsPersonalizeView').children[2].children[0]"), '앱 이름크롬 앱의 이름 — Dock·⌘Tab에 보여요', 'Dock 이름이 아니라 앱 이름 하나(WP-O)');
+  assert.equal(fx.inputs()[0].getAttribute('aria-label'), '앱 이름');
   assert.equal(fx.text("document.getElementById('settingsPersonalizeView').children[3].children[0]"), '워크스페이스 제목화면 왼쪽 위에 보여요');
   assert.equal(fx.text("document.getElementById('settingsPersonalizeView').children[5]"), '이 맥에만 적용돼요 — 다른 사람 앱에는 영향이 없어요(업데이트해도 남아요)저장');
   const preview = fx.find('d-piconimg')[0];
@@ -7279,7 +7280,7 @@ test('WP-D2 L. 꾸미기: Dock 아이콘 · Dock 이름 · 워크스페이스 �
   assert.equal(fx.button('기본으로 되돌리기').hidden, true, '내 그림이 없으면 되돌릴 것도 없다');
   const file = fx.find('d-piconpv')[0].children.find(kid => kid.type === 'file');
   assert.equal(file.accept, 'image/png,image/jpeg');
-  same(fx.inputs().map(one => one.value), ['Workspace', '○○의 워크스페이스']);
+  same(fx.inputs().map(one => one.value), ['워크스페이스', '○○의 워크스페이스']);
 
   // 아무것도 안 바꾸고 저장하면 보내지 않는다
   await fx.button('저장').listeners.click();
@@ -7287,18 +7288,18 @@ test('WP-D2 L. 꾸미기: Dock 아이콘 · Dock 이름 · 워크스페이스 �
   assert.equal(fx.posts().length, 0);
 });
 
-test('WP-D2 L. 꾸미기 저장: 바뀐 칸만 보내고, 제목은 헤더·탭 제목에 곧바로, Dock이 바뀌면 `Dock은 앱을 닫고 다시 열면 보여요`', async () => {
+test('WP-D2 L. 꾸미기 저장: 바뀐 칸만 보내고, 제목은 헤더·탭 제목에 곧바로, 앱 이름이 바뀌면 크롬 앱 안내 + `예전 Dock 앱에는 바뀌지 않아요`', async () => {
   const fx = personalizeClient({}, [
-    { body: { ok: true, title: '새 제목', dockName: 'Workspace', refresh: false } },
-    { body: { ok: true, title: '새 제목', dockName: '내 일터', refresh: true } },
+    { body: { ok: true, title: '새 제목', dockName: '워크스페이스' } },
+    { body: { ok: true, title: '새 제목', dockName: '내 일터' } },
   ]);
   fx.app.context.document.title = '';
   await fx.app.run('renderSettingsPersonalize()');
   // 규칙에 안 맞으면 보내지 않는다
   fx.inputs()[0].value = 'a/b';
   await fx.button('저장').listeners.click();
-  assert.equal(fx.find('d-derr')[0].textContent, 'Dock 이름은 1~30자로 적어 주세요 — / : 와 줄바꿈은 쓸 수 없어요');
-  fx.inputs()[0].value = 'Workspace';
+  assert.equal(fx.find('d-derr')[0].textContent, '앱 이름은 1~30자로 적어 주세요 — / : 와 줄바꿈은 쓸 수 없어요');
+  fx.inputs()[0].value = '워크스페이스';
   fx.inputs()[1].value = ' ';
   await fx.button('저장').listeners.click();
   assert.equal(fx.find('d-derr')[0].textContent, '워크스페이스 제목은 1~40자로 적어 주세요');
@@ -7310,16 +7311,19 @@ test('WP-D2 L. 꾸미기 저장: 바뀐 칸만 보내고, 제목은 헤더·탭 
   assert.equal(fx.app.nodes.get('workspaceTitle').textContent, '새 제목', '서버를 다시 켜지 않고 헤더에 반영');
   assert.equal(fx.app.context.document.title, '새 제목');
   const saved = () => fx.find('d-psaved')[0];
-  assert.equal(fx.text("window.findByClass(document.getElementById('settingsPersonalizeView'), 'd-psaved')[0]"), '✓ 바뀌었어요', '제목만 바꾸면 Dock 말은 없다');
+  assert.equal(fx.text("window.findByClass(document.getElementById('settingsPersonalizeView'), 'd-psaved')[0]"), '✓ 바뀌었어요', '제목만 바꾸면 앱 안내는 없다');
   assert.equal(fx.find('d-pinstallnote').length, 0, '제목만 바꾸면 설치한 앱 안내도 없다');
   assert.equal(saved().getAttribute('role'), 'status');
 
   fx.inputs()[0].value = '내 일터';
   await fx.button('저장').listeners.click();
   same(fx.posts()[1].body, { dockName: '내 일터' });
-  assert.equal(fx.text("window.findByClass(document.getElementById('settingsPersonalizeView'), 'd-psaved')[0]"), '✓ 바뀌었어요 · Dock은 앱을 닫고 다시 열면 보여요');
-  // WP-L: 크롬은 manifest를 곧바로 다시 읽지 않는다 — 사실대로 한 줄
-  same(fx.find('d-pinstallnote').map(one => one.textContent), ['크롬 앱에는: 크롬을 다시 켜고(주소창에 about://restart) 앱을 열면 오른쪽 위 「앱 업데이트 있음」 → 업데이트 → 앱을 ⌘Q로 끄고 다시 열기']);
+  assert.equal(fx.text("window.findByClass(document.getElementById('settingsPersonalizeView'), 'd-psaved')[0]"), '✓ 바뀌었어요', 'Dock 앱을 다시 만들지 않으므로 `닫고 다시 열면` 말은 없다');
+  // WP-L: 크롬은 manifest를 곧바로 다시 읽지 않는다 — 사실대로 한 줄. WP-O: 예전 Dock 앱은 바뀌지 않는다 — 사실대로 한 줄.
+  same(fx.find('d-pinstallnote').map(one => one.textContent), [
+    '크롬 앱에는: 크롬을 다시 켜고(주소창에 about://restart) 앱을 열면 오른쪽 위 「앱 업데이트 있음」 → 업데이트 → 앱을 ⌘Q로 끄고 다시 열기',
+    '예전 Dock 앱에는 바뀌지 않아요 — 크롬 앱으로 설치하면 돼요',
+  ]);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -7327,7 +7331,7 @@ test('WP-D2 L. 꾸미기 저장: 바뀐 칸만 보내고, 제목은 헤더·탭 
 
 test('WP-M 꾸미기: `화면에 보이기` 스위치는 기존 연동 탭 체크박스 부품(.d-ich)을 재사용하고, 기본은 켜짐(보이기)이며, 제목 칸을 안 건드려도 스위치만으로 저장되고 저장 즉시 헤더가 숨는다', async () => {
   const fx = personalizeClient({}, [
-    { body: { ok: true, title: '○○의 워크스페이스', dockName: 'Workspace', titleHidden: true, refresh: false } },
+    { body: { ok: true, title: '○○의 워크스페이스', dockName: '워크스페이스', titleHidden: true } },
   ]);
   await fx.app.run('renderSettingsPersonalize()');
   const row = () => fx.find('d-ich')[0];
@@ -7354,7 +7358,7 @@ test('WP-M 꾸미기: `화면에 보이기` 스위치는 기존 연동 탭 체�
 
 test('WP-M 꾸미기: 저장된 값이 숨김이면 스위치도 꺼져 있고, 다시 켜서 저장하면 헤더가 즉시 되돌아온다', async () => {
   const fx = personalizeClient({ titleHidden: true }, [
-    { body: { ok: true, title: '○○의 워크스페이스', dockName: 'Workspace', titleHidden: false, refresh: false } },
+    { body: { ok: true, title: '○○의 워크스페이스', dockName: '워크스페이스', titleHidden: false } },
   ]);
   fx.app.run("document.getElementById('workspaceTitle').hidden = true"); // 새로고침 뒤(GET /api/items 반영) 이미 숨어 있는 상황을 흉내
   await fx.app.run('renderSettingsPersonalize()');
@@ -7369,8 +7373,8 @@ test('WP-M 꾸미기: 저장된 값이 숨김이면 스위치도 꺼져 있고, 
 
 test('WP-D2 L. 꾸미기 아이콘: 형식·크기는 화면에서 먼저 거르고, 자른 그림은 저장을 눌러야 보내며, 되돌리기는 reset 한 번', async () => {
   const fx = personalizeClient({ customIcon: true }, [
-    { body: { ok: true, customIcon: true, refresh: true } },
-    { body: { ok: true, customIcon: false, refresh: true } },
+    { body: { ok: true, customIcon: true } },
+    { body: { ok: true, customIcon: false } },
   ]);
   fx.app.context.document.getElementById('appFavicon').href = '/app-icon.png';
   await fx.app.run('renderSettingsPersonalize()');
@@ -7405,8 +7409,8 @@ test('WP-D2 L. 꾸미기 아이콘: 형식·크기는 화면에서 먼저 거르
   await fx.button('저장').listeners.click();
   same(fx.posts()[0], { url: '/api/personalize/icon', method: 'POST', body: { image: 'iVBORw0KGgo=' } });
   assert.match(fx.app.nodes.get('appFavicon').href, /^\/app-icon\.png\?v=\d+$/, '탭 아이콘도 새로 읽는다');
-  assert.equal(fx.text("window.findByClass(document.getElementById('settingsPersonalizeView'), 'd-psaved')[0]"), '✓ 바뀌었어요 · Dock은 앱을 닫고 다시 열면 보여요');
-  assert.equal(fx.find('d-pinstallnote').length, 1, '아이콘을 바꿔도 설치한 앱 안내 한 줄');
+  assert.equal(fx.text("window.findByClass(document.getElementById('settingsPersonalizeView'), 'd-psaved')[0]"), '✓ 바뀌었어요');
+  assert.equal(fx.find('d-pinstallnote').length, 2, '아이콘을 바꿔도 크롬 앱 안내 + 예전 Dock 앱 한 줄');
 
   assert.equal(fx.button('기본으로 되돌리기').hidden, false);
   await fx.button('기본으로 되돌리기').listeners.click();
@@ -7437,17 +7441,19 @@ test('WP-L 꾸미기의 `앱으로 설치` 줄: 설치 창을 줄 수 있게 되
   assert.equal(installed.view().children[0].hidden, true, '설치된 창에서는 권하지 않는다');
 });
 
-test('WP-L 문구: 도움말 `Dock을 누르면 창이 여러 개 떠요`는 앱으로 설치가 먼저, 꾸미기 문답은 설치한 앱 반영 시점을 말한다', () => {
+test('WP-L 문구: 도움말 `Dock을 누르면 창이 여러 개 떠요`는 앱으로 설치 한 가지 길만(WP-O), 꾸미기 문답은 설치한 앱 반영 시점을 말한다', () => {
   const app = pureClient();
   const trouble = JSON.parse(app.run('JSON.stringify(SELFCHECK_TROUBLE)'));
   const steps = trouble.find(([question]) => question === 'Dock을 누르면 창이 여러 개 떠요')[1];
   const flat = step => step[0].map(part => (typeof part === 'string' ? part : part[1])).join('');
   same(steps.map(flat), [
     '설정 › 꾸미기 › 앱으로 설치로 크롬 앱을 설치하면 해결돼요 — 창이 하나로 모이고 Dock·⌘Tab에 아이콘이 따로 떠요',
-    'Dock 앱을 계속 쓰면 → 시스템 설정 › 개인정보 보호 및 보안 › 자동화 › Workspace 아래 Google Chrome을 켜요',
   ]);
   const faq = JSON.parse(app.run('JSON.stringify(SETTINGS_FAQ)')).flatMap(([, rows]) => rows);
-  assert.match(faq.find(([question]) => question === 'Dock 아이콘·이름을 바꾸려면')[2], /크롬 앱은 크롬을 다시 켠 뒤.*앱 업데이트 있음.*⌘Q/);
+  const answer = faq.find(([question]) => question === '앱 아이콘·이름을 바꾸려면')[2];
+  assert.match(answer, /크롬 앱은 크롬을 다시 켠 뒤.*앱 업데이트 있음.*⌘Q/);
+  assert.match(answer, /예전 Dock 앱에는 바뀌지 않아요 — 크롬 앱으로 설치하면 돼요\./);
+  assert.doesNotMatch(answer, /Dock 앱은 닫고 다시 열면/);
 });
 
 test('도움말: 개념 사전 9개 + 쓰는 순서의 여섯 묶음 + 항목마다 `필요한 것` 표지', () => {
@@ -8396,7 +8402,7 @@ test('WP-E ②. 처음 연결 위저드도 새 채널 기본 이름은 `<슬랙 
 
 // 앱 탭 가짜 창 — /api/about · /api/backup · /api/update/status에 답한다.
 function appClient({ about = {}, backup = null, now = null } = {}) {
-  const info = { version: '1.1.0', install: 'managed', channel: 'stable', modified: [], update: { available: false }, appBundle: '~/Applications/Workspace.app', updateFile: '~/workspace/업데이트.command', ...about };
+  const info = { version: '1.1.0', install: 'managed', channel: 'stable', modified: [], update: { available: false }, updateFile: '~/workspace/업데이트.command', ...about };
   const app = settingsClient({});
   const sent = [];
   const copied = [];
@@ -8435,15 +8441,15 @@ test('WP-E D. 앱 탭: 버전 · 데이터 백업 · 앱 위치 · 점검(점검
   // 버전 줄 맨 끝의 `지난 소식 전체`는 접이식 자체의 표지(summary) 글자다 — hidden이어도 textContent에는 남는다(실제 DOM과 같다).
   assert.match(fx.text(0), /^버전워크스페이스v1\.1\.0 · 배포된 버전만 받기새 버전 v1\.1\.1이 있어요업데이트 받기지난 소식 전체데이터는 먼저 백업하고 받아요\. 1분쯤 걸려요\.지난 소식 전체$/);
   assert.equal(fx.text(1), '데이터 백업매일 19:30● 이 맥에 매일 백업 · 어제 19:30 · 7일치~/workspace-data-backup/daily복사Finder에서 ⇧⌘G(폴더로 이동)에 붙여 넣으면 바로 가요');
-  assert.equal(fx.text(2), '앱 위치파일을 찾을 때Dock 앱~/Applications/Workspace.app복사업데이트 파일~/workspace/업데이트.command복사Finder에서 ⇧⌘G(폴더로 이동)에 붙여 넣으면 바로 가요');
+  assert.equal(fx.text(2), '앱 위치파일을 찾을 때업데이트 파일~/workspace/업데이트.command복사Finder에서 ⇧⌘G(폴더로 이동)에 붙여 넣으면 바로 가요', 'Dock 앱 경로 줄은 없다(WP-O)');
   assert.equal(fx.text(3), '점검문제가 있을 때점검하기문제 보고 복사설치·연동·자동화를 한 번에 확인하고, 고치는 법을 알려 줘요.');
   const copies = fx.app.run("window.findByClass(document.getElementById('settingsAppView').children[1], 'd-btn')");
   await copies[0].listeners.click();
   same(fx.copied, ['~/workspace-data-backup/daily']);
   const place = fx.app.run("window.findByClass(document.getElementById('settingsAppView').children[2], 'd-btn')");
+  assert.equal(place.length, 1);
   await place[0].listeners.click();
-  await place[1].listeners.click();
-  same(fx.copied.slice(1), ['~/Applications/Workspace.app', '~/workspace/업데이트.command']);
+  same(fx.copied.slice(1), ['~/workspace/업데이트.command']);
   const report = fx.find('d-btn').find(one => one.id === 'settingsReportBtn');
   same([report.textContent, report.className], ['문제 보고 복사', 'd-btn']);
 

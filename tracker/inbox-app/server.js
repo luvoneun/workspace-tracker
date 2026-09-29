@@ -13,7 +13,7 @@ const { exec, execFile } = require('child_process');
 const { DATA_FORMAT_VERSION, readDataVersion, TOO_NEW_MESSAGE } = require('./migrate');
 // 설정 > 연동이 쓰는 한 벌(값 확인·config 합치기·토큰 파일·문제 보고의 오류 줄).
 const integrations = require('./integrations');
-// 설정 › 꾸미기(Dock 아이콘·이름·제목 — 이 맥에만).
+// 설정 › 꾸미기(앱 아이콘·앱 이름·제목 — 이 맥에만).
 const personalize = require('./personalize');
 // 쉬운 말 소식(WP-J) — 소식.md 파서 + 원격(태그) 소식.md 읽기.
 const { parseNews, fetchRemoteNewsText, NEWS_MAX_VERSIONS } = require('./news');
@@ -27,7 +27,7 @@ const TRACKER_DIR = process.env.WORKSPACE_DATA_DIR || path.join(__dirname, '..')
 const REPO_DIR = process.env.WORKSPACE_REPO_DIR || path.join(__dirname, '..', '..');
 // 이 컴퓨터에만 두는 폴더(`local/` — 업데이트해도 남는다). 테스트·픽스처는 WORKSPACE_LOCAL_DIR(또는 WORKSPACE_REPO_DIR)로 임시 폴더를 끼운다.
 const LOCAL_DIR = process.env.WORKSPACE_LOCAL_DIR || path.join(REPO_DIR, 'local');
-// Dock 앱이 놓이는 폴더(`~/Applications`). 서버는 이름이 겹치는지 **보기만** 한다. 테스트·픽스처는 임시 폴더를 끼운다.
+// 예전 Dock 앱이 놓이던 폴더(`~/Applications`). 서버는 이 폴더를 읽지도 쓰지도 않는다 — 픽스처 안전망(아래 workspacePaths)이 실제 자리를 가리키지 않는지만 본다.
 function applicationsDir() {
   return process.env.WORKSPACE_APPLICATIONS_DIR || path.join(os.homedir(), 'Applications');
 }
@@ -1831,9 +1831,8 @@ async function aboutApp({ cached = false, check = false } = {}) {
     update: { ...updateOffer(version, channel), changesUrl: changes },
     // 설정 › 앱의 `지난 소식 전체`(WP-J) — 저장소 소식.md의 최근 10개 버전. 파일이 없으면 빈 목록이다.
     news: localNews(),
-    // 설정 › 꾸미기 › 앱 위치 — 사람이 Finder의 `폴더로 이동`에 붙여 넣을 경로(홈은 `~`로 줄인다).
+    // 설정 › 앱 › 앱 위치 — 사람이 Finder의 `폴더로 이동`에 붙여 넣을 업데이트 파일 경로(홈은 `~`로 줄인다).
     // 서버는 Finder를 열거나 프로세스를 띄우지 않고 글자만 준다.
-    appBundle: `~/Applications/${currentDockName()}.app`,
     updateFile: updateCommandPath(),
   };
 }
@@ -1996,7 +1995,7 @@ async function requestUpdate(action) {
   return fetchAnswer(200, { ok: true, action, requestedAt });
 }
 
-// 지금 Dock 이름(`server.dockName`, 없거나 규칙에 안 맞으면 `Workspace`). 설정을 새로 읽는다.
+// 지금 앱 이름(`server.dockName`, 없거나 규칙에 안 맞으면 `워크스페이스` — manifest와 같은 기본값). 설정을 새로 읽는다.
 function currentDockName() {
   try { return personalize.checkDockName(((currentConfigFile().server) || {}).dockName); } catch { return personalize.DOCK_NAME_DEFAULT; }
 }
@@ -2433,7 +2432,7 @@ const routeCtx = {
   liveLog, integrationAlerts, getCalendarToday, getJiraSync, requestApply, fetchNow, FETCH_MESSAGE, backupStatus,
   meetingNotesStatus, writeMeetingNotesRequest,
   // 꾸미기
-  applicationsDir, automationDir, currentDockName,
+  currentDockName,
   // 목록 읽기(routes-items.js) — `fs`는 읽기 묶음(readScope)을 거치는 이 파일의 fs다.
   fs, TRACK_RE, parseFields, listTrackerFiles, isNewSlack, localDateOf, readMeetingLinks, projectKeyOf, reportDrafts,
   parseWeeklyReports, weeklyReportStatePath, getLaterTasks, getTodayTasks, getJiraIssueCache, getCustomGroups, getCalendarWithLinks,

@@ -134,7 +134,7 @@ const fakeJpeg = (width, height) => Buffer.from([
   0xff, 0xd9,
 ]);
 
-test('WP-D2 꾸미기: 그림은 형식·크기·치수를 확인하고, Dock 이름·제목은 규칙대로만 받는다', () => {
+test('WP-D2 꾸미기: 그림은 형식·크기·치수를 확인하고, 앱 이름·제목은 규칙대로만 받는다', () => {
   assert.deepEqual(personalizeStore.imageInfo(fakePng(512, 256)), { type: 'png', width: 512, height: 256 });
   assert.deepEqual(personalizeStore.imageInfo(fakeJpeg(300, 200)), { type: 'jpeg', width: 300, height: 200 });
   assert.equal(personalizeStore.imageInfo(Buffer.from('GIF89a' + 'x'.repeat(40))), null);
@@ -145,7 +145,7 @@ test('WP-D2 꾸미기: 그림은 형식·크기·치수를 확인하고, Dock �
 
   assert.equal(personalizeStore.checkDockName('  내 일터 '), '내 일터');
   for (const wrong of ['', ' ', 'a/b', 'a:b', '줄\n바꿈', '.숨김', 'x'.repeat(31)]) {
-    assert.throws(() => personalizeStore.checkDockName(wrong), /Dock 이름은 1~30자로/, JSON.stringify(wrong));
+    assert.throws(() => personalizeStore.checkDockName(wrong), /앱 이름은 1~30자로/, JSON.stringify(wrong));
   }
   assert.equal(personalizeStore.checkDockName('가'.repeat(30)).length, 30, '한글 30자까지');
   assert.throws(() => personalizeStore.checkTitle(''), /워크스페이스 제목은 1~40자로/);
@@ -154,7 +154,7 @@ test('WP-D2 꾸미기: 그림은 형식·크기·치수를 확인하고, Dock �
   assert.equal(personalizeStore.tildePath('/opt/work/업데이트.command', '/Users/someone'), '/opt/work/업데이트.command');
 });
 
-// WP-L 크롬 `앱으로 설치`가 읽는 manifest — 파일이 아니라 꾸미기(Dock 이름·아이콘)를 따라 서버가 만든다.
+// WP-L 크롬 `앱으로 설치`가 읽는 manifest — 파일이 아니라 꾸미기(앱 이름·아이콘)를 따라 서버가 만든다.
 test('WP-L manifest: 이름·아이콘이 꾸미기를 따르고(없으면 워크스페이스·기본 토끼), 인증 없이 여는 목록은 그대로다', async (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-manifest-'));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
@@ -189,7 +189,7 @@ test('WP-L manifest: 이름·아이콘이 꾸미기를 따르고(없으면 워�
   assert.equal((await fetch(app.base + plain.icons[0].src)).status, 200, '아이콘 주소가 실제로 열린다');
   assert.equal((await fetch(app.base + plain.icons[1].src)).status, 200);
 
-  // 꾸미기 — Dock 이름과 내 그림(실제 크기 한 벌)을 따른다. 설정을 새로 읽어 서버를 다시 켤 필요가 없다
+  // 꾸미기 — 앱 이름과 내 그림(실제 크기 한 벌)을 따른다. 설정을 새로 읽어 서버를 다시 켤 필요가 없다
   writeConfig({ port: 1, dockName: '  내 일터 ' });
   fs.writeFileSync(path.join(repo, 'local', 'icon.png'), fakePng(1024, 1024, 64));
   const custom = await read();
@@ -219,7 +219,7 @@ test('WP-L 인증 없이 여는 경로는 아이콘(/icons/*.png)과 manifest뿐
   }
 });
 
-test('WP-D2 꾸미기 라우트: local/icon.png 한 파일만 쓰고 지우며, 제목은 곧바로 반영되고, Dock이 바뀌면 요청 표시 파일 하나만 쓴다', async (t) => {
+test('WP-D2 꾸미기 라우트: local/icon.png 한 파일만 쓰고 지우며, 제목은 곧바로 반영되고, Dock 앱 요청 표시 파일은 쓰지 않는다(WP-O)', async (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-personalize-'));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const repo = path.join(home, 'repo');
@@ -242,7 +242,9 @@ test('WP-D2 꾸미기 라우트: local/icon.png 한 파일만 쓰고 지우며, 
   assert.equal(plain.headers.get('content-type'), 'image/png');
   assert.ok(Buffer.from(await plain.arrayBuffer()).equals(fs.readFileSync(path.join(__dirname, 'icons', 'icon-512.png'))));
   const first = await (await fetch(app.base + '/api/personalize')).json();
-  assert.deepEqual([first.title, first.dockName, first.customIcon, first.titleHidden], ['처음 제목', 'Workspace', false, false], '설정에 값이 없으면 보이기');
+  assert.deepEqual([first.title, first.dockName, first.customIcon, first.titleHidden], ['처음 제목', '워크스페이스', false, false], '설정에 값이 없으면 보이기');
+  // 앱 이름 기본값은 manifest와 같은 하나(WP-O)
+  assert.equal(first.dockName, (await (await fetch(app.base + '/manifest.webmanifest')).json()).name);
 
   // 틀린 그림은 아무것도 쓰지 않는다
   for (const [image, words] of [[fakePng(100, 100), /128px/], [Buffer.from('GIF89a' + 'x'.repeat(40)), /PNG나 JPG/], [fakePng(512, 512, 5 * 1024 * 1024), /5MB/]]) {
@@ -251,41 +253,37 @@ test('WP-D2 꾸미기 라우트: local/icon.png 한 파일만 쓰고 지우며, 
     assert.match((await refused.json()).error, words);
   }
   assert.equal(fs.existsSync(icon), false);
-  assert.equal(fs.existsSync(request), false, '실패하면 Dock을 다시 만들라고 하지 않는다');
+  assert.equal(fs.existsSync(request), false);
 
-  // 맞는 그림 — local/icon.png에만 쓰고, 요청 표시 파일 하나를 남긴다(프로세스는 띄우지 않는다)
+  // 맞는 그림 — local/icon.png에만 쓴다. Dock 앱은 더 만들지 않으므로 요청 표시 파일도 없다(WP-O).
   const good = fakePng(256, 256, 64);
   const saved = await (await send('/api/personalize/icon', { image: `data:image/png;base64,${good.toString('base64')}` })).json();
-  assert.deepEqual(saved, { ok: true, customIcon: true, refresh: true });
+  assert.deepEqual(saved, { ok: true, customIcon: true });
   assert.ok(fs.readFileSync(icon).equals(good));
   assert.deepEqual(fs.readdirSync(path.join(repo, 'local')).sort(), ['icon.png', 'local.css'], '임시 파일이 남지 않는다');
-  assert.equal(JSON.parse(fs.readFileSync(request, 'utf8')).reason, 'icon');
-  assert.ok(Buffer.from(await (await fetch(app.base + '/app-icon.png')).arrayBuffer()).equals(good), '탭·Dock 아이콘 주소가 내 그림을 준다');
+  assert.equal(fs.existsSync(request), false, '그림을 바꿔도 Dock 앱을 다시 만들라고 하지 않는다');
+  assert.ok(Buffer.from(await (await fetch(app.base + '/app-icon.png')).arrayBuffer()).equals(good), '탭·앱 아이콘 주소가 내 그림을 준다');
 
   // 되돌리기는 icon.png 한 파일만 지운다
-  fs.rmSync(request);
-  assert.deepEqual(await (await send('/api/personalize/icon', { reset: true })).json(), { ok: true, customIcon: false, refresh: true });
+  assert.deepEqual(await (await send('/api/personalize/icon', { reset: true })).json(), { ok: true, customIcon: false });
   assert.equal(fs.existsSync(icon), false);
   assert.equal(fs.readFileSync(path.join(repo, 'local', 'local.css'), 'utf8'), 'body{}\n', '다른 파일은 그대로');
-  assert.ok(fs.existsSync(request));
+  assert.equal(fs.existsSync(request), false);
 
-  // 제목만 바꾸면 곧바로 목록 응답에 쓰이고, Dock은 다시 만들지 않는다
-  fs.rmSync(request);
+  // 제목만 바꾸면 곧바로 목록 응답에 쓰인다
   const titled = await (await send('/api/personalize', { title: '  새 제목 ' })).json();
-  assert.deepEqual(titled, { ok: true, title: '새 제목', dockName: 'Workspace', titleHidden: false, refresh: false });
+  assert.deepEqual(titled, { ok: true, title: '새 제목', dockName: '워크스페이스', titleHidden: false });
   assert.equal((await (await fetch(app.base + '/api/items')).json()).title, '새 제목', '서버를 다시 켜지 않아도 된다');
   assert.equal(fs.existsSync(request), false);
   let written = JSON.parse(fs.readFileSync(config, 'utf8'));
   assert.equal(written.title, '새 제목');
   assert.deepEqual(written.server, { port: 1 }, '아는 키만 바꾼다');
 
-  // 헤더의 제목만 숨기는 스위치 — 제목 칸은 안 건드려도 정상 저장되고, 곧바로 목록 응답에 실리며
-  // 요청 표시 파일은 쓰지 않는다(Dock은 그대로라서).
-  fs.rmSync(request, { force: true });
+  // 헤더의 제목만 숨기는 스위치 — 제목 칸은 안 건드려도 정상 저장되고, 곧바로 목록 응답에 실린다.
   const hidden = await (await send('/api/personalize', { titleHidden: true })).json();
-  assert.deepEqual(hidden, { ok: true, title: '새 제목', dockName: 'Workspace', titleHidden: true, refresh: false });
+  assert.deepEqual(hidden, { ok: true, title: '새 제목', dockName: '워크스페이스', titleHidden: true });
   assert.equal((await (await fetch(app.base + '/api/items')).json()).titleHidden, true);
-  assert.equal(fs.existsSync(request), false, '제목 숨김은 Dock을 다시 만들라고 하지 않는다');
+  assert.equal(fs.existsSync(request), false);
   written = JSON.parse(fs.readFileSync(config, 'utf8'));
   assert.equal(written.titleHidden, true);
   const unwrong = await send('/api/personalize', { titleHidden: 'yes' });
@@ -296,20 +294,22 @@ test('WP-D2 꾸미기 라우트: local/icon.png 한 파일만 쓰고 지우며, 
   assert.equal(shownAgain.titleHidden, false);
   assert.equal((await (await fetch(app.base + '/api/personalize')).json()).titleHidden, false, 'GET도 같은 값');
 
-  // Dock 이름 — config의 server.dockName, 요청 표시 파일, 앱 위치 경로
+  // 앱 이름 — config의 server.dockName(키 이름은 옛 설정 호환), manifest가 곧바로 따른다. 요청 표시 파일·Dock 앱 경로는 없다.
   const docked = await (await send('/api/personalize', { dockName: 'My Work' })).json();
-  assert.equal(docked.refresh, true);
+  assert.deepEqual(docked, { ok: true, title: '새 제목', dockName: 'My Work', titleHidden: false });
   written = JSON.parse(fs.readFileSync(config, 'utf8'));
   assert.deepEqual(written.server, { port: 1, dockName: 'My Work' });
-  assert.equal(JSON.parse(fs.readFileSync(request, 'utf8')).reason, 'dockName');
+  assert.equal((await (await fetch(app.base + '/manifest.webmanifest')).json()).name, 'My Work');
+  assert.equal(fs.existsSync(request), false, '앱 이름을 바꿔도 Dock 앱을 다시 만들라고 하지 않는다');
+  assert.equal(fs.existsSync(path.join(automation, 'requests')), false, '요청 폴더도 만들지 않는다');
   const about = await (await fetch(app.base + '/api/about')).json();
-  assert.equal(about.appBundle, '~/Applications/My Work.app');
+  assert.equal('appBundle' in about, false, '앱 위치에 Dock 앱 경로는 없다');
   assert.ok(about.updateFile.endsWith('/업데이트.command'));
   // 틀린 이름은 설정을 바꾸지 않는다
   const before = fs.readFileSync(config, 'utf8');
   const wrong = await send('/api/personalize', { dockName: '../밖' });
   assert.equal(wrong.status, 400);
-  assert.match((await wrong.json()).error, /Dock 이름은 1~30자로/);
+  assert.match((await wrong.json()).error, /앱 이름은 1~30자로/);
   assert.equal((await send('/api/personalize', {})).status, 400);
   assert.equal(fs.readFileSync(config, 'utf8'), before);
 });
@@ -396,7 +396,7 @@ test('QA 안전망: WORKSPACE_FIXTURE=1인데 경로가 하나라도 실제 설�
   assert.equal(loadServerChild(plain).status, 0);
 });
 
-test('QA 꾸미기: 바꾸는 Dock 이름이 Applications의 남의 앱(스크립트 앱 아님)과 같으면 저장하지 않고 400', async (t) => {
+test('WP-O 꾸미기: 앱 이름은 ~/Applications를 보지 않는다 — 같은 이름의 앱이 있어도 저장하고, 그 폴더는 건드리지 않는다', async (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-dock-clash-'));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const repo = path.join(home, 'repo');
@@ -405,38 +405,28 @@ test('QA 꾸미기: 바꾸는 Dock 이름이 Applications의 남의 앱(스크�
   const automation = path.join(home, 'automation');
   fs.mkdirSync(data, { recursive: true });
   fs.mkdirSync(path.join(apps, 'Slack.app', 'Contents', 'MacOS'), { recursive: true });
-  fs.mkdirSync(path.join(apps, 'Mine.app', 'Contents', 'Resources', 'Scripts'), { recursive: true });
-  fs.writeFileSync(path.join(apps, 'Mine.app', 'Contents', 'Resources', 'Scripts', 'main.scpt'), '');
+  fs.mkdirSync(path.join(apps, 'Workspace.app', 'Contents', 'Resources', 'Scripts'), { recursive: true });
+  fs.writeFileSync(path.join(apps, 'Workspace.app', 'Contents', 'Resources', 'Scripts', 'main.scpt'), 'old launcher');
+  const listApps = () => fs.readdirSync(apps, { recursive: true }).map(String).sort();
+  const appsBefore = listApps();
   const config = path.join(home, 'workspace.config.json');
   fs.writeFileSync(config, JSON.stringify({ title: '제목', server: { port: 1 } }, null, 2));
   const app = await startAppServer(t, { WORKSPACE_REPO_DIR: repo, WORKSPACE_DATA_DIR: data, WORKSPACE_CONFIG: config,
     WORKSPACE_AUTOMATION_DIR: automation, WORKSPACE_APPLICATIONS_DIR: apps });
   const send = body => fetch(app.base + '/api/personalize', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  const request = path.join(automation, 'requests', 'app-refresh.request');
-  const before = fs.readFileSync(config, 'utf8');
 
-  const clash = await send({ dockName: ' Slack ' });
-  assert.equal(clash.status, 400);
-  assert.deepEqual(await clash.json(), { ok: false, error: '같은 이름의 앱이 이미 있어요 — 다른 이름을 적어 주세요' });
-  assert.equal(fs.readFileSync(config, 'utf8'), before, '설정을 바꾸지 않는다');
-  assert.equal(fs.existsSync(request), false, 'Dock 앱을 다시 만들라고 하지 않는다');
-  assert.ok(fs.existsSync(path.join(apps, 'Slack.app', 'Contents', 'MacOS')), '그 앱은 건드리지 않는다');
-  // 제목을 함께 보내도 통째로 저장하지 않는다
-  assert.equal((await send({ title: '새 제목', dockName: 'Slack' })).status, 400);
-  assert.equal(fs.readFileSync(config, 'utf8'), before);
-
-  // 이 설치가 만든 스크립트 앱이면(예전 이름) 그 이름으로 바꿀 수 있다 · 없는 이름도 된다
-  const mine = await (await send({ dockName: 'Mine' })).json();
-  assert.equal(mine.ok, true);
-  assert.equal(JSON.parse(fs.readFileSync(config, 'utf8')).server.dockName, 'Mine');
+  const same = await (await send({ dockName: ' Slack ' })).json();
+  assert.deepEqual([same.ok, same.dockName], [true, 'Slack'], '충돌 검사는 없다(더 이상 파일을 만들지 않는다)');
+  assert.equal(JSON.parse(fs.readFileSync(config, 'utf8')).server.dockName, 'Slack');
   assert.equal((await (await send({ dockName: 'Brand New' })).json()).ok, true);
+  assert.deepEqual(listApps(), appsBefore, '~/Applications는 읽지도 바꾸지도 않는다');
+  assert.equal(fs.existsSync(path.join(automation, 'requests', 'app-refresh.request')), false);
 
-  // 모듈 단위: 있는지 보기만 한다
+  // 없앤 것: 충돌 검사·요청 표시 파일 함수
   const personalizeStore = require('./personalize');
-  assert.equal(personalizeStore.dockNameTaken(apps, 'Slack'), true);
-  assert.equal(personalizeStore.dockNameTaken(apps, 'Mine'), false);
-  assert.equal(personalizeStore.dockNameTaken(apps, 'Nothing'), false);
-  assert.equal(personalizeStore.dockNameTaken('', 'Slack'), false);
+  assert.equal(personalizeStore.dockNameTaken, undefined);
+  assert.equal(personalizeStore.writeRefreshRequest, undefined);
+  assert.equal(personalizeStore.DOCK_NAME_DEFAULT, '워크스페이스');
 });
 
 test('QA2 GET /api/about?cached=1은 원격 확인을 기다리지 않고 가진 값만 준다', async () => {

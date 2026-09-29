@@ -22,7 +22,7 @@ const CACHE_MS = 30 * 1000;
 const NODE_MIN_MAJOR = 18;
 
 // 항상 있어야 하는 launchd 등록(setup.sh가 늘 쓴다)과, 켠 연동에 따라 더 있어야 하는 것.
-const BASE_AGENTS = ['server', 'update', 'apply', 'data-backup', 'app-refresh'];
+const BASE_AGENTS = ['server', 'update', 'apply', 'data-backup'];
 const INTEGRATION_AGENTS = {
   slack: ['slack-capture', 'slack-capture-now'],
   calendarClaude: ['calendar-sync', 'calendar-sync-now'],

@@ -3883,7 +3883,6 @@ function guideGoSlackHow() {
   if (typeof settingsOpen === 'function') settingsOpen('guide');
   if (typeof settingsGuideShow === 'function') settingsGuideShow('슬랙에서 이렇게 보내요');
 }
-function guideGoAppPlace() { if (typeof settingsOpen === 'function') settingsOpen('app', 'app-place'); }
 
 // 굵은 글자가 섞인 **코드에 적힌 고정 문장**을 innerHTML 없이 세운다(조각: 문자열 또는 ['b', 글]).
 function guideRich(node, parts) {
@@ -3898,7 +3897,7 @@ function guideRich(node, parts) {
 
 // ---------- 앱으로 설치 (크롬 PWA — WP-L) ----------
 // 기본 창은 크롬의 `앱으로 설치`다(DECISIONS 2026-09-28) — 창의 주인이 워크스페이스가 되어 Dock·⌘Tab에 아이콘이
-// 따로 뜨고 창이 하나로 모인다. Dock 앱(실행기)은 크롬이 없거나 설치하지 않은 사람을 위한 예비 길로 남는다.
+// 따로 뜨고 창이 하나로 모인다. 예전 Dock 앱(실행기)은 더 만들지 않는다 — 이미 있는 것만 전처럼 열린다(DECISIONS 2026-09-29).
 // - 설치된 창(standalone)에서는 권하지 않는다.
 // - 크롬이 `beforeinstallprompt`를 주면 잡아 두고 `설치하기` 버튼을 보인다(누르면 크롬의 설치 창).
 // - 이벤트가 없으면(이미 설치했거나 크롬이 아님) 크롬 메뉴 길을 글로 알린다.
@@ -4023,12 +4022,7 @@ function guideRows() {
       return;
     }
     dock.name.textContent = '앱으로 설치';
-    const where = document.createElement('button');
-    where.type = 'button';
-    where.className = 'd-ablink d-guidewhere';
-    where.textContent = '크롬 앱 대신 Dock 앱을 쓰려면 → 설정 › 앱 › 앱 위치';
-    where.addEventListener('click', guideGoAppPlace);
-    dock.words.replaceChildren(...appInstallWords(state), picture, ...(state === 'done' ? [] : [where]));
+    dock.words.replaceChildren(...appInstallWords(state), picture);
   };
   appInstallRemember(dock.node, paint);
   return [

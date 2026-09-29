@@ -64,18 +64,15 @@ DATA_FILES="tasks.md decisions.md checks.md ideas.md weekly_reports.md calendar_
 STATE_FILES=".slack_capture_state.json .weekly_report_state.json .meeting_links.json"
 
 # 설정에서 받는 갈래(stable=배포된 버전만 / main=만드는 중인 것까지)와 포트를 읽는다.
+# python3 없이 node로 읽는다(node는 이미 필수). 못 읽거나 칸이 없으면 기본값(stable · 4321)이다.
 read_config() {
-  python3 - "$CONFIG" << 'PY' 2>/dev/null
-import json, sys
-try:
-    with open(sys.argv[1]) as f:
-        config = json.load(f)
-except Exception:
-    config = {}
-server = config.get('server') or {}
-print(server.get('updateChannel') or 'stable')
-print(server.get('port') or 4321)
-PY
+  node -e '
+const fs = require("fs");
+let config = {};
+try { config = JSON.parse(fs.readFileSync(process.argv[1], "utf-8")); } catch { config = {}; }
+const server = config && typeof config.server === "object" && config.server ? config.server : {};
+process.stdout.write(`${server.updateChannel || "stable"}\n${server.port || 4321}\n`);
+' "$CONFIG" 2>/dev/null
 }
 CFG="$(read_config)"
 CHANNEL="$(printf '%s\n' "$CFG" | sed -n 1p)"
@@ -324,9 +321,6 @@ if [ "$UPDATED" = "1" ]; then
       && ok "자동화 스크립트 복사본도 갱신했어요"
     # 설치 위치 판단(setup.sh·update.sh가 같이 쓰는 것)도 복사본 규칙대로 함께 둔다. 없는 옛 버전이면 건너뛴다.
     [ -f "$APP_DIR/automation/install-location.sh" ] && cp "$APP_DIR/automation/install-location.sh" "$INSTALL_DIR/" 2>/dev/null
-    # Dock 앱 만들기(설정 › 꾸미기가 부른다)도 복사본이 돈다. 이 파일이 없는 옛 버전이면 건너뛴다.
-    [ -f "$APP_DIR/automation/app-refresh.sh" ] && cp "$APP_DIR/automation/app-refresh.sh" "$INSTALL_DIR/" 2>/dev/null \
-      && chmod +x "$INSTALL_DIR/app-refresh.sh" 2>/dev/null
     # 앱 안 `업데이트 받기` 실행기도 복사본이 돈다(지금 이 실행기가 돌고 있어도 안전하다 — 실행기는 통째로 읽고 시작한다).
     [ -f "$APP_DIR/automation/update-runner.sh" ] && cp "$APP_DIR/automation/update-runner.sh" "$INSTALL_DIR/" 2>/dev/null \
       && chmod +x "$INSTALL_DIR/update-runner.sh" 2>/dev/null
@@ -335,6 +329,16 @@ if [ "$UPDATED" = "1" ]; then
       && chmod +x "$INSTALL_DIR/apply-runner.sh" 2>/dev/null
   fi
 fi
+
+# 예전 Dock 앱 다시 만들기(app-refresh)는 없앴다 — 이 라벨 하나만 이름으로 내리고, 그 plist와 설치 위치의 복사본·
+# 요청 표시 파일 하나씩만 지운다(setup.sh와 같은 정리). 이미 만들어 둔 ~/Applications의 앱은 지우지 않는다.
+OLD_REFRESH_PLIST="$HOME/Library/LaunchAgents/com.workspace.app.app-refresh.plist"
+if [ -f "$OLD_REFRESH_PLIST" ]; then
+  launchctl bootout "gui/$(id -u)/com.workspace.app.app-refresh" 2>/dev/null
+  rm -f "$OLD_REFRESH_PLIST"
+  ok "예전 Dock 앱 다시 만들기 등록을 내렸어요 (Dock 앱은 그대로 둬요)"
+fi
+rm -f "$INSTALL_DIR/app-refresh.sh" "$INSTALL_DIR/requests/app-refresh.request"
 
 STATUS_TO="$VERSION"
 
@@ -363,7 +367,7 @@ echo "[5/6] 앱 다시 시작"
 status_step 5
 if [ "${WORKSPACE_RELOCATED:-}" = "1" ]; then
   # 폴더를 옮겼으면 launchd에 적힌 경로가 옛 자리다 — 다시 시작만 하면 뜨지 않는다. 새 위치의 setup.sh(묻는 것 없음)로
-  # launchd 경로·workspace.env·Dock 앱을 다시 적고, 그 등록이 앱을 새 위치에서 띄운다.
+  # launchd 경로·workspace.env를 다시 적고, 그 등록이 앱을 새 위치에서 띄운다.
   if WORKSPACE_RELOCATED= bash "$WORKSPACE/setup.sh"; then
     ok "새 위치($WORKSPACE)로 자동화·앱을 다시 등록했어요"
   else

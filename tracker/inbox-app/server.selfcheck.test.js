@@ -133,14 +133,14 @@ test('WP-K 점검: 연결한 것만 본다 — 연결 안 한 연동은 결과�
 
 test('WP-K 점검: 모두 정상 — 슬랙 토큰·채널(이름은 화면에만)·캘린더 비밀 주소·지라·자동 실행 등록·백업', async (t) => {
   const h = home(t);
-  ['server', 'update', 'apply', 'data-backup', 'app-refresh', 'slack-capture', 'slack-capture-now'].forEach(name => fs.writeFileSync(path.join(h.agents, `com.workspace.app.${name}.plist`), ''));
+  ['server', 'update', 'apply', 'data-backup', 'slack-capture', 'slack-capture-now'].forEach(name => fs.writeFileSync(path.join(h.agents, `com.workspace.app.${name}.plist`), ''));
   const net = fakeNet(okRoutes);
   const result = await createSelfcheck(depsFor(h, net, { automations: [{ key: 'slack', lastKind: 'run', lastRunAt: '2026-09-28 10:05:00', events: [{ time: '2026-09-28 10:05:00', kind: 'run', text: '완료' }] }] })).run();
   assert.equal(result.offline, false);
   assert.deepEqual(result.skipped, ['회의록']);
   const states = Object.fromEntries(result.items.map(item => [item.key, item.state]));
   assert.deepEqual(states, { version: 'ok', install: 'ok', node: 'ok', agents: 'ok', claude: 'ok', slack_token: 'ok', slack_channels: 'ok', slack: 'ok', calendar: 'ok', jira: 'ok', backup: 'ok' });
-  assert.equal(byKey(result, 'agents').detail, '7개 모두 등록돼 있어요');
+  assert.equal(byKey(result, 'agents').detail, '6개 모두 등록돼 있어요', '예전 Dock 앱 다시 만들기(app-refresh)는 기대하지 않는다(WP-O)');
   assert.equal(byKey(result, 'slack_channels').detail, '#hana-todo 외 1개 · 모두 읽혀요');
   assert.equal(byKey(result, 'slack_channels').copy, '켜진 채널 2개 · 모두 읽혀요');
   assert.equal(byKey(result, 'calendar').detail, '비밀 주소로 읽혀요 · 오늘 0개');
@@ -227,7 +227,7 @@ test('WP-K 점검: 같은 결과를 30초 들고 있는다(다시 불러도 바�
 
 test('WP-K 점검: 고치는 법 — 토큰 만료·Claude 로그인(명령)·자동 실행 빠짐(업데이트 파일 한 줄 명령)·같은 원인은 한 번만 센다', async (t) => {
   const h = home(t, { calendar: false, jira: false });
-  ['server', 'update', 'apply', 'app-refresh', 'slack-capture', 'slack-capture-now'].forEach(name => fs.writeFileSync(path.join(h.agents, `com.workspace.app.${name}.plist`), ''));
+  ['server', 'update', 'apply', 'slack-capture', 'slack-capture-now'].forEach(name => fs.writeFileSync(path.join(h.agents, `com.workspace.app.${name}.plist`), ''));
   const net = fakeNet({ ...okRoutes, 'auth.test': () => json({ ok: false, error: 'invalid_auth' }) });
   const automations = [{ key: 'slack', lastKind: 'fail', lastRunAt: '2026-09-28 10:05:00', lastSummary: 'OAuth session expired and could not be refreshed', events: [] }];
   const result = await createSelfcheck(depsFor(h, net, { automations, alerts: ['slack'] })).run();
@@ -243,7 +243,7 @@ test('WP-K 점검: 고치는 법 — 토큰 만료·Claude 로그인(명령)·�
   assert.deepEqual([collect.state, collect.sameAs], ['bad', 'claude'], '수집이 멈춘 원인이 Claude 로그인이면 그 줄을 가리킨다');
   const agents = byKey(result, 'agents');
   assert.equal(agents.state, 'bad');
-  assert.match(agents.detail, /7개 중 1개가 등록돼 있지 않아요 \(data-backup\)/);
+  assert.match(agents.detail, /6개 중 1개가 등록돼 있지 않아요 \(data-backup\)/);
   assert.deepEqual(agents.fix, { text: '업데이트 파일(앱을 새로 받고 다시 켜 주는 파일)을 한 번 실행해 주세요', command: 'bash ~/workspace/업데이트.command', finder: '~/workspace/업데이트.command' });
   assert.equal(byKey(result, 'slack_channels').detail, '토큰을 고친 뒤 확인할 수 있어요');
 });

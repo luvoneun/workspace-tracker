@@ -1,26 +1,24 @@
-// 설정 › 꾸미기(개인별 — 이 맥에만)의 서버 쪽 한 벌: Dock 아이콘 그림 확인·저장·되돌리기, 이름 확인,
-// Dock 앱을 다시 만들어 달라는 요청 표시 파일 쓰기.
+// 설정 › 꾸미기(개인별 — 이 맥에만)의 서버 쪽 한 벌: 앱 아이콘 그림 확인·저장·되돌리기, 이름 확인,
+// 크롬 앱(PWA) manifest 만들기.
 //
 // 지키는 것:
 // - 그림은 **저장소의 `local/icon.png` 한 파일에만** 쓴다(업데이트해도 남는 자리). 되돌리기도 그 파일만 지운다.
 // - 받은 바이트는 시그니처(PNG/JPEG)·크기(5MB 이하)·가로세로(128px 이상)를 확인한 뒤에만 쓴다.
-// - 서버는 프로세스를 띄우지 않는다 — Dock 앱은 요청 표시 파일을 본 launchd 에이전트(app-refresh)가 다시 만든다.
-//   Dock 프로세스도 다시 시작하지 않는다.
+// - 서버는 프로세스를 띄우지 않는다. 예전 Dock 앱(~/Applications)은 만들지도 고치지도 않는다 — 꾸미기는 크롬 앱에만 쓰인다.
 const fs = require('node:fs');
 const path = require('node:path');
-const zlib = require('node:zlib');
 const { randomUUID } = require('node:crypto');
 
 const ICON_MAX_BYTES = 5 * 1024 * 1024;
 const ICON_MIN_SIDE = 128;
-const DOCK_NAME_DEFAULT = 'Workspace';
+// 앱 이름의 기본값 하나 — 꾸미기 화면·manifest가 같이 쓴다(설정 키 이름은 옛 설정 호환으로 `server.dockName` 그대로).
+const DOCK_NAME_DEFAULT = '워크스페이스';
 
 const MESSAGE = {
   iconSize: '그림은 5MB까지 쓸 수 있어요',
   iconType: 'PNG나 JPG 그림만 쓸 수 있어요',
   iconSide: '가로세로 128px 이상인 그림을 골라 주세요',
-  dockName: 'Dock 이름은 1~30자로 적어 주세요 — / : 와 줄바꿈은 쓸 수 없어요',
-  dockTaken: '같은 이름의 앱이 이미 있어요 — 다른 이름을 적어 주세요',
+  dockName: '앱 이름은 1~30자로 적어 주세요 — / : 와 줄바꿈은 쓸 수 없어요',
   title: '워크스페이스 제목은 1~40자로 적어 주세요',
   nothing: '바꿀 것이 없어요',
 };
@@ -34,21 +32,12 @@ function bad(message) {
 const trimmed = value => (typeof value === 'string' ? value.trim() : '');
 const length = value => [...value].length;
 
-// Dock 이름(`~/Applications/<이름>.app`이 된다). 경로를 만들 수 없는 글자(`/`·`:`·줄바꿈)와
-// 점으로 시작하는 이름(숨은 파일)은 받지 않는다.
+// 앱 이름(크롬 앱의 이름 — 설정 `server.dockName`). 예전 Dock 앱 파일 이름 규칙 그대로 `/`·`:`·줄바꿈과
+// 점으로 시작하는 이름은 받지 않는다(옛 설정 값과 어긋나지 않게).
 function checkDockName(value) {
   const name = trimmed(value);
   if (!name || length(name) > 30 || /[/:\r\n\t\0]/.test(name) || name.startsWith('.')) throw bad(MESSAGE.dockName);
   return name;
-}
-
-// `<Applications>/<이름>.app`이 이미 있는데 이 설치가 만든 스크립트 앱(main.scpt가 있는 것)이 아니면 남의 앱이다 —
-// 그 이름으로는 Dock 앱을 만들 수 없다(app-refresh.sh도 남의 앱은 지우지 않고 멈춘다). 있는지 보기만 한다.
-function dockNameTaken(appsDir, name) {
-  if (!appsDir || !name) return false;
-  const bundle = path.join(appsDir, `${name}.app`);
-  if (!fs.existsSync(bundle)) return false;
-  return !fs.existsSync(path.join(bundle, 'Contents', 'Resources', 'Scripts', 'main.scpt'));
 }
 
 // 화면 헤더·탭 제목(config `title`).
@@ -81,35 +70,6 @@ function imageInfo(buffer) {
     return null;
   }
   return null;
-}
-
-// 꾸미기 화면이 둥근 모서리를 깎아 저장한 그림인가 — 왼쪽 위 픽셀이 투명하면 그렇다고 본다(app-refresh.sh가 부른다:
-// 둥글면 sips로 크기만 바꾸고, 아니면 옛 그림이라 Pillow로 둥글게 한다). 8비트·비월식이 아닌 PNG의 RGBA·회색+알파만 읽고,
-// 그 밖(JPEG·알파 없음·읽지 못함)은 각진 그림으로 본다. 첫 줄의 첫 픽셀은 어느 필터여도 원래 값 그대로다.
-function iconRounded(buffer) {
-  const info = imageInfo(buffer);
-  if (!info || info.type !== 'png') return false;
-  const depth = buffer[24];
-  const color = buffer[25];
-  const interlace = buffer[28];
-  if (depth !== 8 || interlace !== 0 || (color !== 6 && color !== 4)) return false;
-  const parts = [];
-  let at = 8;
-  while (at + 8 <= buffer.length) {
-    const size = buffer.readUInt32BE(at);
-    const type = buffer.toString('ascii', at + 4, at + 8);
-    if (type === 'IDAT') parts.push(buffer.subarray(at + 8, at + 8 + size));
-    if (type === 'IEND') break;
-    at += 12 + size;
-  }
-  try {
-    // 첫 줄의 첫 픽셀만 보면 되므로 압축 데이터의 앞부분만 풀어 본다(비정상 PNG가 메모리를 과하게 쓰지 않게 —
-    // 1KB는 아무리 잘 눌려 있어도 약 1MB 이상으로 풀리지 않는다).
-    const raw = zlib.inflateSync(Buffer.concat(parts).subarray(0, 1024),
-      { finishFlush: zlib.constants.Z_SYNC_FLUSH, maxOutputLength: 1 << 21 });
-    const alpha = raw[color === 6 ? 4 : 2];
-    return alpha === 0;
-  } catch { return false; }
 }
 
 function checkIcon(buffer) {
@@ -157,14 +117,13 @@ function currentIcon(localDir, appDir) {
   return { data, type: info && info.type === 'jpeg' ? 'image/jpeg' : 'image/png', custom: file === custom };
 }
 
-// 크롬 `앱으로 설치`(PWA)가 읽는 manifest(`/manifest.webmanifest`). 이름은 꾸미기의 Dock 이름(설정에 없거나
-// 규칙에 안 맞으면 `워크스페이스`), 아이콘은 `/app-icon.png`(내 그림이 있으면 그것 — 서버가 크기별로 줄이지
+// 크롬 `앱으로 설치`(PWA)가 읽는 manifest(`/manifest.webmanifest`). 이름은 꾸미기의 앱 이름(설정에 없거나
+// 규칙에 안 맞으면 기본값 `워크스페이스`), 아이콘은 `/app-icon.png`(내 그림이 있으면 그것 — 서버가 크기별로 줄이지
 // 않으므로 그림의 실제 크기 한 벌만 적는다). 기본 토끼일 때만 앱에 든 192px 그림을 함께 적는다. 주소 끝의 `v`는
 // 그림이 바뀌면 달라져서, 크롬이 다음에 manifest를 확인할 때 새 아이콘을 받아 간다. 이름·아이콘 말고는 담지 않는다.
-const MANIFEST_NAME_DEFAULT = '워크스페이스';
 function manifestFor(configured, localDir) {
-  let name = MANIFEST_NAME_DEFAULT;
-  try { if (configured !== undefined && configured !== null && configured !== '') name = checkDockName(configured); } catch { name = MANIFEST_NAME_DEFAULT; }
+  let name = DOCK_NAME_DEFAULT;
+  try { if (configured !== undefined && configured !== null && configured !== '') name = checkDockName(configured); } catch { name = DOCK_NAME_DEFAULT; }
   const custom = iconPath(localDir);
   let icons;
   if (fs.existsSync(custom)) {
@@ -191,15 +150,6 @@ function manifestFor(configured, localDir) {
   };
 }
 
-// Dock 앱을 다시 만들어 달라는 표시 파일. launchd 에이전트 `com.workspace.app.app-refresh`가 이 파일이
-// 바뀌는 것을 보고 `app-refresh.sh`를 한 번 돌린다(미팅 노트 가져오기와 같은 방식). 내용은 기록용일 뿐이다.
-function writeRefreshRequest(automationDir, reason) {
-  const file = path.join(automationDir, 'requests', 'app-refresh.request');
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, `${JSON.stringify({ requestedAt: new Date().toISOString(), reason: String(reason || '') })}\n`);
-  return file;
-}
-
 // 홈 폴더를 `~`로 줄인 경로(화면에 보여 줄 때). 사람 이름이 든 홈 경로를 그대로 내보내지 않는다.
 function tildePath(value, home) {
   const text = String(value || '');
@@ -210,6 +160,6 @@ function tildePath(value, home) {
 
 module.exports = {
   ICON_MAX_BYTES, ICON_MIN_SIDE, DOCK_NAME_DEFAULT, PERSONALIZE_MESSAGE: MESSAGE,
-  checkDockName, dockNameTaken, checkTitle, imageInfo, iconRounded, checkIcon, saveIcon, resetIcon, hasCustomIcon, currentIcon,
-  writeRefreshRequest, tildePath, manifestFor, MANIFEST_NAME_DEFAULT,
+  checkDockName, checkTitle, imageInfo, checkIcon, saveIcon, resetIcon, hasCustomIcon, currentIcon,
+  tildePath, manifestFor,
 };

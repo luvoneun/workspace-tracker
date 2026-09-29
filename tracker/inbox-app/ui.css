@@ -842,7 +842,6 @@ button.d-guide .t { color: var(--accent-text); }
 .d-guidedock { display: flex; align-items: flex-end; gap: 6px; width: max-content; margin-top: 8px; padding: 6px 10px; border-radius: 14px; background: var(--neutral-bg); }
 .d-guidedock i { display: block; width: 22px; height: 22px; border-radius: 6px; background: var(--border); }
 .d-guidedock .me { display: block; width: 28px; height: 28px; border-radius: 8px; }
-.d-guide .d-guidewhere { display: inline-flex; align-items: center; min-height: 28px; margin-top: 6px; font-size: 12.5px; }
 /* 앱으로 설치(크롬 PWA) — 사용설명서 첫 줄과 설정 › 꾸미기 맨 위가 같은 말을 쓴다. 버튼 옆 설명은 같은 줄에 잇고,
    크롬 메뉴 길 아래의 `이미 설치했으면`은 한 줄 내려 조용히 둔다. */
 .d-installbtn { margin-right: 6px; vertical-align: middle; }

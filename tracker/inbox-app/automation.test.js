@@ -353,12 +353,10 @@ test('setup.sh: 설정은 python3가 아니라 node로 읽고, 못 읽으면 에
   assert.equal(read('uses', 'jira').stdout, 'yes', '칸이 없으면 켜진 것이다(서버 USES와 같은 규칙)');
   assert.equal(read('server', 'port').stdout, '4399');
   assert.equal(read('server', 'extraHost').stdout, '', '없는 칸은 빈 값이다');
-  assert.equal(read('chromeProfile').stdout, 'Profile 1');
   assert.equal(read('slackToken').stdout, path.join(os.homedir(), '.config', 'workspace-slack-token'));
-
-  // 이 값은 쉘 명령에 들어간다 — 폴더 이름에 쓰이는 글자만 통과한다
-  fs.writeFileSync(config, JSON.stringify({ server: { chromeProfile: "'; rm -rf ~" } }));
+  // 크롬 프로필은 예전 Dock 앱만 썼다 — 이제 읽지 않는다(값은 쉘 명령 어디에도 들어가지 않는다)
   assert.equal(read('chromeProfile').stdout, '');
+  assert.ok(!script.includes('CHROME_PROFILE'), 'setup.sh는 크롬 프로필을 읽지 않는다');
 
   // 깨진 설정은 "빈 값"이 아니라 오류다 — setup.sh는 여기서 멈춘다
   fs.writeFileSync(config, '{망가짐');
@@ -381,225 +379,6 @@ test('setup.sh는 jira-sync를 등록하지 않고, 지라 켬/끔과 무관하�
   assert.ok(loadLoop.includes('tiro-sync') && loadLoop.includes('data-backup'), '나머지 자동화는 그대로 등록한다');
   // 옛 이름(com.luvon.workspace.jira-sync) 정리용 목록에는 남겨 둔다 — 옛 설치가 지운다.
   assert.match(script, /AGENT_NAMES="[^"]*\bjira-sync\b[^"]*"/, '옛 라벨 정리용 이름 목록은 그대로 남긴다');
-});
-
-// app-refresh.sh는 실제 ~/Applications·실제 osacompile에 닿지 않는다 — 임시 HOME과 PATH 앞의 가짜 명령만 쓴다.
-test('WP-D2 app-refresh.sh: Dock 앱을 만들고, 이름이 바뀌면 기록된 옛 이름 하나만 지우며 ~/Applications 밖·남의 앱은 건드리지 않는다', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-app-refresh-'));
-  const homeDir = path.join(root, 'home');
-  const apps = path.join(homeDir, 'Applications');
-  const ws = path.join(root, 'ws');
-  const install = path.join(root, 'install');
-  const bin = path.join(root, 'bin');
-  const calls = path.join(root, 'calls.log');
-  fs.mkdirSync(path.join(ws, 'tracker', 'inbox-app', 'icons'), { recursive: true });
-  fs.copyFileSync(path.join(__dirname, 'icons', 'app.icns'), path.join(ws, 'tracker', 'inbox-app', 'icons', 'app.icns'));
-  fs.mkdirSync(bin);
-  fs.mkdirSync(path.join(root, 'tmp'));
-  const log = name => `echo "${name} $*" >> ${JSON.stringify(calls)}`;
-  const failFlag = path.join(root, 'fail-osacompile');
-  writeExec(path.join(bin, 'osacompile'), `#!/bin/bash\n${log('osacompile')}\n[ -f ${JSON.stringify(failFlag)} ] && exit 1\nout=""; while [ $# -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done\nmkdir -p "$out/Contents/Resources/Scripts" && touch "$out/Contents/Resources/Scripts/main.scpt" "$out/Contents/Info.plist"\n`);
-  writeExec(path.join(bin, 'python3'), `#!/bin/bash\n${log('python3')}\ntouch "$3/ws.icns"\n`);
-  for (const name of ['iconutil', 'codesign', 'plutil', 'xattr', 'lsregister']) writeExec(path.join(bin, name), `#!/bin/bash\n${log(name)}\n`);
-  const config = path.join(ws, 'workspace.config.json');
-  const run = (dockName) => {
-    fs.writeFileSync(config, JSON.stringify({ server: { port: 4399, ...(dockName ? { dockName } : {}) } }));
-    return spawnSync('/bin/bash', [automationScript('app-refresh.sh')], {
-      encoding: 'utf8', timeout: 60000,
-      env: { ...process.env, HOME: homeDir, PATH: `${bin}:${process.env.PATH}`, TMPDIR: path.join(root, 'tmp'),
-        WORKSPACE_DIR: ws, WORKSPACE_CONFIG: config, WORKSPACE_INSTALL_DIR: install, LSREGISTER_BIN: path.join(bin, 'lsregister') },
-    });
-  };
-  const record = () => fs.readFileSync(path.join(install, 'app-bundle-name'), 'utf8').trim();
-  const ours = name => { const dir = path.join(apps, `${name}.app`, 'Contents', 'Resources', 'Scripts'); fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, 'main.scpt'), ''); };
-
-  // 1) 처음 — 기본 이름 Workspace, 아이콘까지 넣고 이름을 적어 둔다
-  const first = run('');
-  assert.equal(first.status, 0, first.stdout + first.stderr);
-  assert.ok(fs.existsSync(path.join(apps, 'Workspace.app', 'Contents', 'Resources', 'applet.icns')));
-  assert.equal(record(), 'Workspace');
-  assert.match(fs.readFileSync(calls, 'utf8'), /codesign --force --deep -s - .*\/new\.app/, '임시 자리에 다 만든 뒤 서명한다');
-  assert.match(fs.readFileSync(calls, 'utf8'), /osacompile -o .*\/new\.app /, '기존 자리에 바로 만들지 않는다');
-  assert.deepEqual(fs.readdirSync(path.join(root, 'tmp')), [], '임시 폴더는 남기지 않는다');
-  assert.ok(fs.readFileSync(path.join(apps, 'Workspace.app', 'Contents', 'Resources', 'applet.icns')).equals(fs.readFileSync(path.join(__dirname, 'icons', 'app.icns'))), '내 그림이 없으면 저장소의 기본 토끼 icns를 그대로 쓴다');
-  assert.doesNotMatch(fs.readFileSync(calls, 'utf8'), /^python3 /m, '기본 아이콘에는 python3를 부르지 않는다(맥 기본 python3에는 Pillow가 없다)');
-
-  // 2) 이름을 바꾸면 새 앱을 만들고 기록된 옛 이름(Workspace) 하나만 지운다 — 다른 앱은 그대로
-  ours('Other');
-  const renamed = run('My Work');
-  assert.equal(renamed.status, 0, renamed.stdout + renamed.stderr);
-  assert.ok(fs.existsSync(path.join(apps, 'My Work.app')), renamed.stdout + renamed.stderr + fs.readdirSync(apps).join(','));
-  assert.equal(fs.existsSync(path.join(apps, 'Workspace.app')), false);
-  assert.ok(fs.existsSync(path.join(apps, 'Other.app')), '목록을 훑어 지우지 않는다');
-  assert.equal(record(), 'My Work');
-
-  // 2-1) osacompile이 실패하면 기존 앱은 그대로 남고 이름 기록도 바뀌지 않는다
-  fs.writeFileSync(path.join(apps, 'My Work.app', 'Contents', 'Resources', 'Scripts', 'main.scpt'), 'before');
-  fs.writeFileSync(failFlag, '');
-  const broken = run('My Work');
-  assert.notEqual(broken.status, 0);
-  assert.match(broken.stdout, /앱을 만들지 못했어요 — 기존 앱은 그대로 뒀어요/);
-  assert.equal(fs.readFileSync(path.join(apps, 'My Work.app', 'Contents', 'Resources', 'Scripts', 'main.scpt'), 'utf8'), 'before', '기존 앱을 먼저 지우지 않는다');
-  assert.equal(record(), 'My Work');
-  assert.deepEqual(fs.readdirSync(path.join(root, 'tmp')), [], '실패해도 임시 폴더는 남기지 않는다');
-  fs.rmSync(failFlag);
-  // 다시 성공하면 새로 만든 앱으로 바뀐다
-  assert.equal(run('My Work').status, 0);
-  assert.equal(fs.readFileSync(path.join(apps, 'My Work.app', 'Contents', 'Resources', 'Scripts', 'main.scpt'), 'utf8'), '', '새로 만든 앱으로 바꿨다');
-  assert.ok(fs.existsSync(path.join(apps, 'My Work.app', 'Contents', 'Resources', 'applet.icns')));
-  assert.equal(fs.existsSync(path.join(apps, 'new.app')), false);
-
-  // 3) 기록이 ~/Applications 밖을 가리키면 지우지 않는다
-  const outside = path.join(homeDir, 'outside.app');
-  fs.mkdirSync(path.join(outside, 'Contents', 'Resources', 'Scripts'), { recursive: true });
-  fs.writeFileSync(path.join(outside, 'Contents', 'Resources', 'Scripts', 'main.scpt'), '');
-  fs.writeFileSync(path.join(install, 'app-bundle-name'), '../outside\n');
-  const refused = run('My Work');
-  assert.equal(refused.status, 0);
-  assert.ok(fs.existsSync(outside), '~/Applications 밖은 절대 지우지 않는다');
-  assert.match(refused.stdout, /이전 이름 기록이 이상해서 옛 앱은 지우지 않았어요/);
-
-  // 4) 이 설치가 만든 앱(스크립트 앱)이 아니면 이름이 기록돼 있어도 두고 간다
-  fs.mkdirSync(path.join(apps, 'Notes.app', 'Contents'), { recursive: true });
-  fs.writeFileSync(path.join(install, 'app-bundle-name'), 'Notes\n');
-  const kept = run('My Work');
-  assert.equal(kept.status, 0);
-  assert.ok(fs.existsSync(path.join(apps, 'Notes.app')));
-  assert.match(kept.stdout, /이 설치가 만든 앱이 아니라서 그대로 뒀어요/);
-
-  // 5) 규칙에 안 맞는 이름(경로 글자)은 기본 이름으로 만든다
-  const odd = run('../evil');
-  assert.equal(odd.status, 0);
-  assert.ok(fs.existsSync(path.join(apps, 'Workspace.app')));
-  assert.equal(fs.existsSync(path.join(homeDir, 'evil.app')), false);
-
-  // 6) Dock 이름이 이미 있는 다른 앱(스크립트 앱 아님)과 같으면 그 앱을 지우지 않고 멈춘다
-  fs.mkdirSync(path.join(apps, 'Slack.app', 'Contents', 'MacOS'), { recursive: true });
-  fs.writeFileSync(path.join(apps, 'Slack.app', 'Contents', 'MacOS', 'Slack'), 'real');
-  const clash = run('Slack');
-  assert.notEqual(clash.status, 0);
-  assert.equal(fs.readFileSync(path.join(apps, 'Slack.app', 'Contents', 'MacOS', 'Slack'), 'utf8'), 'real');
-  assert.match(clash.stdout, /다른 앱이라 그대로 뒀어요/);
-  assert.equal(record(), 'Workspace', '실패하면 이름 기록을 바꾸지 않는다');
-
-  const script = fs.readFileSync(automationScript('app-refresh.sh'), 'utf8');
-  assert.ok(!/killall|pkill|kill -9/.test(script), 'Dock을 다시 시작하지 않는다');
-  fs.rmSync(root, { recursive: true, force: true });
-});
-
-// 테스트용 RGBA PNG(한 변 size) — 왼쪽 위 픽셀의 알파만 `cornerAlpha`, 나머지는 불투명.
-function testPng(size, cornerAlpha) {
-  const zlib = require('node:zlib');
-  const rows = [];
-  for (let y = 0; y < size; y += 1) {
-    const row = Buffer.alloc(1 + size * 4, 200);
-    row[0] = y === 0 ? 1 : 0;   // 첫 줄은 Sub 필터 — 첫 픽셀은 필터와 무관하게 원래 값이다
-    if (y === 0) { row.fill(0, 5); row[4] = cornerAlpha; row[1] = 200; row[2] = 200; row[3] = 200; }
-    rows.push(row);
-  }
-  const chunk = (type, data) => {
-    const head = Buffer.alloc(4);
-    head.writeUInt32BE(data.length);
-    const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
-    const crc = Buffer.alloc(4);
-    crc.writeUInt32BE(zlib.crc32(body));
-    return Buffer.concat([head, body, crc]);
-  };
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(size, 0);
-  ihdr.writeUInt32BE(size, 4);
-  ihdr[8] = 8; ihdr[9] = 6;
-  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr),
-    chunk('IDAT', zlib.deflateSync(Buffer.concat(rows))), chunk('IEND', Buffer.alloc(0))]);
-}
-
-test('iconRounded: 꾸미기가 둥글게 깎아 저장한 그림(왼쪽 위가 투명)만 둥근 그림으로 본다', () => {
-  const { iconRounded } = require('./personalize');
-  assert.equal(iconRounded(testPng(128, 0)), true);
-  assert.equal(iconRounded(testPng(128, 255)), false, '각진 옛 그림');
-  assert.equal(iconRounded(fs.readFileSync(path.join(__dirname, 'icons', 'icon-512.png'))), false);
-  assert.equal(iconRounded(Buffer.from([0xff, 0xd8, 0xff, 0xe0, ...new Array(40).fill(0)])), false, 'JPEG는 각진 그림');
-  assert.equal(iconRounded(Buffer.from('not a picture at all, just words')), false);
-});
-
-// Pillow 없는 맥 재현 — python3는 늘 실패하고, sips·iconutil은 PATH 앞의 가짜다(실제 ~/Applications·osacompile에 닿지 않는다).
-test('app-refresh.sh: Pillow가 없어도 둥근 내 그림은 sips로 크기만 바꾸고, 각진 옛 그림은 한 줄 남기고, 둘 다 못 하면 기본 토끼로 둔다', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-app-icon-'));
-  const homeDir = path.join(root, 'home');
-  const apps = path.join(homeDir, 'Applications');
-  const ws = path.join(root, 'ws');
-  const appDir = path.join(ws, 'tracker', 'inbox-app');
-  const bin = path.join(root, 'bin');
-  const calls = path.join(root, 'calls.log');
-  const sipsFail = path.join(root, 'fail-sips');
-  fs.mkdirSync(path.join(appDir, 'icons'), { recursive: true });
-  fs.mkdirSync(path.join(ws, 'local'), { recursive: true });
-  fs.copyFileSync(path.join(__dirname, 'icons', 'app.icns'), path.join(appDir, 'icons', 'app.icns'));
-  fs.copyFileSync(path.join(__dirname, 'personalize.js'), path.join(appDir, 'personalize.js'));
-  fs.mkdirSync(bin);
-  fs.mkdirSync(path.join(root, 'tmp'));
-  const log = name => `echo "${name} $*" >> ${JSON.stringify(calls)}`;
-  writeExec(path.join(bin, 'osacompile'), `#!/bin/bash\n${log('osacompile')}\nout=""; while [ $# -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done\nmkdir -p "$out/Contents/Resources/Scripts" && touch "$out/Contents/Resources/Scripts/main.scpt" "$out/Contents/Info.plist"\n`);
-  writeExec(path.join(bin, 'python3'), `#!/bin/bash\n${log('python3')}\ncat > /dev/null\necho "ModuleNotFoundError: No module named 'PIL'" >&2\nexit 1\n`);
-  writeExec(path.join(bin, 'sips'), `#!/bin/bash\n${log('sips')}\n[ -f ${JSON.stringify(sipsFail)} ] && exit 1\nout=""; while [ $# -gt 0 ]; do [ "$1" = "--out" ] && out="$2"; shift; done\necho png > "$out"\n`);
-  writeExec(path.join(bin, 'iconutil'), `#!/bin/bash\n${log('iconutil')}\nout=""; while [ $# -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done\necho made-by-sips > "$out"\n`);
-  for (const name of ['codesign', 'plutil', 'xattr', 'lsregister']) writeExec(path.join(bin, name), `#!/bin/bash\n${log(name)}\n`);
-  const config = path.join(ws, 'workspace.config.json');
-  fs.writeFileSync(config, JSON.stringify({ server: { port: 4399 } }));
-  const icon = path.join(ws, 'local', 'icon.png');
-  const applet = () => fs.readFileSync(path.join(apps, 'Workspace.app', 'Contents', 'Resources', 'applet.icns'));
-  const run = () => {
-    fs.rmSync(calls, { force: true });
-    return spawnSync('/bin/bash', [automationScript('app-refresh.sh')], {
-      encoding: 'utf8', timeout: 60000,
-      env: { ...process.env, HOME: homeDir, PATH: `${bin}:${process.env.PATH}`, TMPDIR: path.join(root, 'tmp'),
-        WORKSPACE_DIR: ws, WORKSPACE_CONFIG: config, WORKSPACE_INSTALL_DIR: path.join(root, 'install'), LSREGISTER_BIN: path.join(bin, 'lsregister') },
-    });
-  };
-  const called = () => (fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8') : '');
-
-  // 1) 꾸미기가 둥글게 깎아 저장한 그림 → python3를 부르지 않고 sips로 크기만(10장) → iconutil
-  fs.writeFileSync(icon, testPng(256, 0));
-  const rounded = run();
-  assert.equal(rounded.status, 0, rounded.stdout + rounded.stderr);
-  assert.doesNotMatch(called(), /^python3 /m, '둥근 그림에는 Pillow가 필요 없다');
-  assert.equal((called().match(/^sips -s format png -z /gm) || []).length, 10, '16~512와 그 2배, 크기만 바꾼다');
-  assert.equal(applet().toString().trim(), 'made-by-sips');
-  assert.doesNotMatch(rounded.stdout, /아이콘을 만들지 못했어요|둥근 모서리 없이/);
-  assert.deepEqual(fs.readdirSync(path.join(root, 'tmp')), [], '임시 폴더는 남기지 않는다');
-
-  // 2) 각진 옛 그림 + Pillow 없음 → python3가 실패하면 sips로 각진 채 넣고 한 줄
-  fs.writeFileSync(icon, testPng(256, 255));
-  const square = run();
-  assert.equal(square.status, 0, square.stdout + square.stderr);
-  assert.match(called(), /^python3 /m, '옛 그림은 먼저 Pillow로 둥글게 해 본다');
-  assert.equal(applet().toString().trim(), 'made-by-sips');
-  assert.match(square.stdout, /내 그림을 둥근 모서리 없이 넣었어요 — 설정 › 꾸미기에서 그림을 다시 저장하면 둥글게 돼요/);
-
-  // 3) JPEG로 저장된 그림도 sips가 PNG로 바꿔 쓴다
-  fs.writeFileSync(icon, Buffer.from([0xff, 0xd8, 0xff, 0xe0, ...new Array(40).fill(0)]));
-  assert.equal(run().status, 0);
-  assert.match(called(), /^sips -s format png -z 16 16 .*local\/icon\.png --out /m);
-
-  // 4) sips도 실패하면 조용히 넘어가지 않고 한 줄 남긴 뒤 기본 토끼로 둔다
-  fs.writeFileSync(sipsFail, '');
-  fs.writeFileSync(icon, testPng(256, 255));
-  const neither = run();
-  assert.equal(neither.status, 0, neither.stdout + neither.stderr);
-  assert.match(neither.stdout, /! 아이콘을 만들지 못했어요 — 기본 아이콘으로 둬요/);
-  assert.ok(applet().equals(fs.readFileSync(path.join(__dirname, 'icons', 'app.icns'))), '기본 토끼 icns');
-
-  // 5) 내 그림이 없으면 sips도 python3도 부르지 않고 기본 토끼를 복사한다
-  fs.rmSync(icon);
-  const plain = run();
-  assert.equal(plain.status, 0);
-  assert.doesNotMatch(called(), /^(python3|sips|iconutil) /m);
-  assert.ok(applet().equals(fs.readFileSync(path.join(__dirname, 'icons', 'app.icns'))));
-  assert.doesNotMatch(plain.stdout, /아이콘을 만들지 못했어요/);
-
-  const script = fs.readFileSync(automationScript('app-refresh.sh'), 'utf8');
-  assert.equal((script.match(/rm -rf/g) || []).length, 3, 'rm -rf는 예전 세 자리(임시 폴더·검사한 옛 앱·검사한 기존 앱)뿐이다');
-  fs.rmSync(root, { recursive: true, force: true });
 });
 
 // 화면의 "Claude Code 설치됨"과 자동화가 claude를 찾는 자리가 어긋나면, 스크립트는 claude를 돌리는데 화면은 "설치 안 됨"이 된다.
@@ -659,15 +438,13 @@ test('WP-D2 run-task.sh: 캘린더가 비밀 주소 갈래면 calendar-sync는 c
 });
 
 // setup.sh는 실행하지 않는다 — 조각을 문자열로 확인하고, 설정 읽기 조각만 돌려 본다.
-test('WP-D2 setup.sh: app-refresh를 늘 등록하고(요청 파일 WatchPaths), 캘린더가 비밀 주소면 calendar-sync를 내리며, Dock 앱은 app-refresh.sh가 만든다', () => {
+test('WP-D2 setup.sh: 캘린더가 비밀 주소면 calendar-sync를 내리고, app-refresh는 더 등록하지 않는다(WP-O)', () => {
   const script = fs.readFileSync(path.join(REPO_ROOT, 'setup.sh'), 'utf8');
-  assert.match(script, /<string>\$LABEL\.app-refresh<\/string>/);
-  assert.match(script, /<string>\$\(xml_escape "\$INSTALL_DIR\/requests\/app-refresh\.request"\)<\/string>/);
+  assert.doesNotMatch(script, /<string>\$LABEL\.app-refresh<\/string>/, 'app-refresh plist를 새로 쓰지 않는다');
   // WP-D2.5에서 `지금 가져오기` 에이전트 둘(slack-capture-now·calendar-sync-now)이 뒤에 붙었다.
-  assert.match(script, /for f in server slack-capture calendar-sync tiro-sync data-backup app-refresh slack-capture-now calendar-sync-now; do/);
-  assert.match(script, /"\$APP_DIR\/automation\/app-refresh\.sh" "\$INSTALL_DIR\/"/, '설치 위치로 복사한다');
-  assert.match(script, /bash "\$INSTALL_DIR\/app-refresh\.sh"/, '5단계는 app-refresh.sh 하나가 한다');
-  assert.ok(!script.includes('osacompile'), 'Dock 앱 만드는 코드는 setup.sh에 두 벌 두지 않는다');
+  assert.match(script, /for f in server slack-capture calendar-sync tiro-sync data-backup slack-capture-now calendar-sync-now; do/);
+  assert.doesNotMatch(script, /"\$APP_DIR\/automation\/app-refresh\.sh"/, 'app-refresh.sh를 복사하지 않는다');
+  assert.ok(!/osacompile|iconutil|sips |lsregister|codesign/.test(script), 'Dock 앱 만드는 코드가 없다');
   assert.match(script, /\[ "\$USE_CAL_SYNC" = "yes" \] && write_task_agent "calendar-sync"/);
   assert.match(script, /\[ "\$USE_CAL_SYNC" = "yes" \] \|\| remove_agent calendar-sync/);
   assert.match(script, /\[ "\$CAL_SOURCE" = "ical" \] && USE_CAL_SYNC="no"/);
@@ -838,7 +615,7 @@ test('WP-D2.5 update.sh·setup.sh는 설치 위치 판단을 맨 앞에서 부�
   assert.ok(guardAt(update) > 0 && guardAt(update) < update.indexOf('cd "$WORKSPACE" || exit 1'), 'update.sh: 폴더에 들어가기 전에');
   assert.ok(guardAt(update) < update.indexOf('[1/6]') && guardAt(update) < update.indexOf('ROLLBACK" = "1"'));
   assert.match(update, /install_location_guard "\$WORKSPACE" "update\.sh" "\$@"/);
-  assert.ok(guardAt(setup) > 0 && guardAt(setup) < setup.indexOf('[1/5]') && guardAt(setup) < setup.indexOf('xattr -d'), 'setup.sh: 맨 앞에서');
+  assert.ok(guardAt(setup) > 0 && guardAt(setup) < setup.indexOf('[1/4]') && guardAt(setup) < setup.indexOf('xattr -d'), 'setup.sh: 맨 앞에서');
   assert.match(setup, /install_location_guard "\$WORKSPACE" "setup\.sh" "\$@"/);
   for (const text of [update, setup]) {
     assert.match(text, /\. "\$WORKSPACE\/tracker\/inbox-app\/automation\/install-location\.sh"/);
@@ -1008,7 +785,7 @@ test('WP-D3 update.sh --yes: 6단계에서 앱이 응답하지 않으면 되돌�
 });
 
 // setup.sh는 실행하지 않는다 — 조각을 문자열로 확인하고, 마무리 세 줄 조각만 가짜 `open`으로 돌려 본다.
-test('WP-D3 setup.sh: update 에이전트를 늘 등록하고(실행기 안에서는 다시 올리지 않음), 끝은 세 줄 + WORKSPACE_OPEN_APP일 때만 앱을 연다', (t) => {
+test('WP-D3 setup.sh: update 에이전트를 늘 등록하고(실행기 안에서는 다시 올리지 않음), 남은 일(/mcp)은 Claude 갈래일 때만', (t) => {
   const script = fs.readFileSync(path.join(REPO_ROOT, 'setup.sh'), 'utf8');
   assert.match(script, /<string>\$LABEL\.update<\/string>/);
   assert.match(script, /<string>\$\(xml_escape "\$INSTALL_DIR\/update-runner\.sh"\)<\/string>/);
@@ -1017,36 +794,16 @@ test('WP-D3 setup.sh: update 에이전트를 늘 등록하고(실행기 안에�
   assert.match(plist, /<key>RunAtLoad<\/key>\n  <false\/>/);
   const intro = script.slice(script.indexOf('# 앱 안 `업데이트 받기`'), script.indexOf('cat > "$AGENTS_DIR/$LABEL.update.plist"'));
   assert.ok(intro.length > 0 && !/USE_(SLACK|CAL|JIRA|TIRO)/.test(intro), '연동과 무관하게 늘');
-  assert.match(script, /"\$APP_DIR\/automation\/update-runner\.sh" "\$APP_DIR\/automation\/app-refresh\.sh" "\$INSTALL_DIR\/"/, '실행기도 설치 위치로 복사한다');
+  assert.match(script, /"\$APP_DIR\/automation\/update-runner\.sh" "\$INSTALL_DIR\/"/, '실행기도 설치 위치로 복사한다');
   assert.match(script, /\[ "\$\{WORKSPACE_UPDATE_RUNNER:-\}" = "1" \] && IN_RUNNER="update"/);
   assert.match(script, /if \[ "\$IN_RUNNER" = "update" \]; then\n  ok "update 그대로 \(지금 도는 업데이트\)"\nelif/);
   assert.match(script, /\[ "\$f" = "server" \] && \[ -n "\$IN_RUNNER" \] && \[ "\$OLD_SERVER_PLIST" = "\$\(cat "\$plist"\)" \]/,
     '실행기 안에서는 내용이 그대로인 서버를 다시 올리지 않는다(update.sh가 이미 새 코드로 다시 띄웠다)');
   // 남은 일(/mcp)은 Claude 갈래 연동이 켜져 있을 때만 — 지라는 앱이 직접 읽는다
-  const connect = script.slice(script.indexOf('CONNECT=""'), script.indexOf('# 마무리 세 줄'));
+  const connect = script.slice(script.indexOf('CONNECT=""'), script.indexOf('# 마무리.'));
   assert.ok(!connect.includes('USE_JIRA'), '지라는 /mcp가 필요 없다');
   assert.match(connect, /if \[ -n "\$CONNECT" \]; then/);
 
-  const ending = script.slice(script.indexOf('# 마무리 세 줄'));
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-d3-setup-end-'));
-  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
-  const bin = path.join(home, 'bin');
-  fs.mkdirSync(bin);
-  const opened = path.join(home, 'opened.txt');
-  writeExec(path.join(bin, 'open'), `#!/bin/bash\necho "$*" >> ${JSON.stringify(opened)}\n`);
-  const bundle = path.join(home, 'Applications', 'Workspace.app');
-  fs.mkdirSync(bundle, { recursive: true });
-  const end = open => spawnSync('/bin/bash', ['-c', `APP_BUNDLE=${JSON.stringify(bundle)}\n${ending}`], {
-    encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, WORKSPACE_OPEN_APP: open },
-  });
-  const install = end('1');
-  // WP-L: 기본 창은 크롬 `앱으로 설치` — 앱이 열리면 그것부터 권한다(업데이트 때는 말하지 않는다).
-  assert.equal(install.stdout, '✓ 설치를 끝냈어요 — 앱이 열려요.\n앱이 열리면 사용설명서의 「앱으로 설치」를 눌러요(크롬 앱으로 창이 따로 떠요).\n처음 열 때 "확인되지 않은 개발자"가 뜨면\n우클릭 → 열기 한 번.\n');
-  assert.equal(fs.readFileSync(opened, 'utf8').trim(), bundle, 'Dock 앱 하나만 연다');
-  fs.unlinkSync(opened);
-  const update = end('');
-  assert.equal(update.stdout, '✓ 설치를 끝냈어요.\n처음 열 때 "확인되지 않은 개발자"가 뜨면\n우클릭 → 열기 한 번.\n');
-  assert.equal(fs.existsSync(opened), false, '업데이트 때는 열지 않는다');
   assert.ok(!/pkill|killall|xargs kill/.test(script));
 });
 
@@ -1251,10 +1008,10 @@ test('WP-H 설치.command: 기존 설치(workspace.env)가 있으면 새로 받�
   const readmeText = fs.readFileSync(readme, 'utf8');
   assert.match(readmeText, /이미 설치해 쓰고 있다면 이 파일을 열어도 괜찮아요 — 새로 설치하지 않고 업데이트로 진행해요\./);
   assert.match(readmeText, /한 벌이 더 있어요/);
-  // WP-L: Dock 부분은 크롬 `앱으로 설치`가 먼저, Dock 앱은 예비 길
+  // WP-O: 크롬 `앱으로 설치`만 — Dock 앱 예비 문단은 없앴다
   assert.match(readmeText, /앱이 열리면 오늘 탭 「사용설명서」의 「앱으로 설치」 → 「설치하기」를 눌러요\./);
   assert.match(readmeText, /크롬 ⋮ → 전송, 저장, 공유 → 페이지를 앱으로 설치/);
-  assert.match(readmeText, /크롬 앱으로 설치하지 않아도 설치 때 만든 Dock 앱으로 열 수 있어요\./);
+  assert.doesNotMatch(readmeText, /Dock 앱으로 열 수 있어요/, 'Dock 앱 예비 길은 안내하지 않는다');
   assert.doesNotMatch(readmeText, /Dock에 뜬 앱 아이콘을 우클릭/, '예전 Dock 안내는 없앴다');
 
   // 가짜 git(네트워크 없음)·가짜 update.sh/setup.sh — 부른 순서와 위치만 적는다.
@@ -2128,10 +1885,197 @@ test('slack-collect: Claude 로그인이 풀려 분류가 실패하면 그 말�
   assert.equal(claudeAuthPhrase('authentication_error from connector'), '', '다른 인증 오류는 아니다');
 });
 
-test('app-refresh.sh: Dock 앱은 이미 열린 앱 창을 앞으로 가져오고(창이 늘지 않게), 크롬이 ~/Applications에 있어도 찾는다', () => {
-  const script = fs.readFileSync(automationScript('app-refresh.sh'), 'utf8');
-  assert.match(script, /if application "Google Chrome" is running then/);
-  assert.match(script, /if \(URL of t\) starts with theURL then[\s\S]*set index of w to 1[\s\S]*activate[\s\S]*return/);
-  assert.match(script, /end try\s*\ndo shell script/, '제어를 거절하거나 오류면 예전처럼 새 창을 연다');
-  assert.match(script, /"\$HOME\/Applications\/Google Chrome\.app"/);
+// ---------- WP-O: 예전 Dock 앱 만드는 장치 정리 ----------
+// setup.sh를 **통째로** 임시 HOME에서 돌린다 — 저장소는 필요한 파일만 임시 폴더로 복사하고, launchctl·lsof·open·curl·id는
+// PATH 앞의 가짜다(실제 launchd·~/Applications·~/Library·~/.local/share에 닿지 않는다). python3·osacompile·sips·iconutil·
+// codesign·killall·pkill도 가짜로 두어 **불리면 기록만 남기고 실패**한다 — python3 없는 맥과 같고, 부르지 않았는지 기록으로 본다.
+function setupRunFixture(t) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-wpo-setup-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const home = path.join(root, 'home');
+  const ws = path.join(root, 'ws');
+  const bin = path.join(root, 'bin');
+  const log = path.join(root, 'calls.log');
+  fs.mkdirSync(path.join(ws, 'tracker', 'inbox-app', 'automation'), { recursive: true });
+  fs.mkdirSync(home);
+  fs.mkdirSync(bin);
+  fs.copyFileSync(path.join(REPO_ROOT, 'setup.sh'), path.join(ws, 'setup.sh'));
+  fs.copyFileSync(path.join(REPO_ROOT, 'workspace.config.example.json'), path.join(ws, 'workspace.config.example.json'));
+  for (const name of fs.readdirSync(path.join(__dirname, 'automation'))) {
+    fs.copyFileSync(automationScript(name), path.join(ws, 'tracker', 'inbox-app', 'automation', name));
+  }
+  const fake = (name, body) => writeExec(path.join(bin, name), `#!/bin/bash\necho "${name} $*" >> ${JSON.stringify(log)}\n${body}\n`);
+  fake('launchctl', 'exit 0');
+  fake('lsof', 'exit 1');   // 4321을 쓰는 프로그램이 없다
+  fake('curl', 'exit 0');   // 방금 올린 앱 서버가 곧바로 응답한다
+  fake('open', '[ "$1" = "-a" ] && [ -n "${FAKE_NO_CHROME:-}" ] && exit 1\nexit 0');
+  fake('id', '[ "$1" = "-F" ] && { echo "테스트 사람"; exit 0; }\n[ "$1" = "-u" ] && { echo 501; exit 0; }\nexec /usr/bin/id "$@"');
+  fake('claude', 'echo 1.0.0');
+  for (const name of ['python3', 'python', 'osacompile', 'sips', 'iconutil', 'codesign', 'lsregister', 'killall', 'pkill']) fake(name, 'exit 127');
+  const install = path.join(home, '.local', 'share', 'workspace-automation');
+  const agents = path.join(home, 'Library', 'LaunchAgents');
+  const apps = path.join(home, 'Applications');
+  const run = (env = {}) => {
+    fs.writeFileSync(log, '');
+    return spawnSync('/bin/bash', [path.join(ws, 'setup.sh')], {
+      cwd: ws, encoding: 'utf8', timeout: 60000,
+      // 이 테스트 프로세스의 WORKSPACE_* 값이 새어 들어가지 않게 필요한 것만 넘긴다.
+      env: { PATH: `${bin}:${process.env.PATH}`, HOME: home, TMPDIR: os.tmpdir(), LANG: 'en_US.UTF-8', ...env },
+    });
+  };
+  const calls = () => fs.readFileSync(log, 'utf8');
+  // 폴더 안 모든 경로(없으면 빈 목록) — ~/Applications를 건드리지 않았는지 전후를 견준다.
+  const listAll = (dir) => {
+    if (!fs.existsSync(dir)) return [];
+    return fs.readdirSync(dir, { recursive: true }).map(String).sort();
+  };
+  return { root, home, ws, install, agents, apps, run, calls, listAll };
+}
+
+test('WP-O setup.sh: python3 없이 새로 설치하고, Dock 앱을 만들지 않으며, 끝에 크롬으로 앱 주소를 연다 · 설정 파일 모양은 예전과 같다', (t) => {
+  const fix = setupRunFixture(t);
+  const result = fix.run();
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const calls = fix.calls();
+  assert.doesNotMatch(calls, /^(python3?|osacompile|sips|iconutil|codesign|lsregister|killall|pkill) /m, 'python3·Dock 앱 만드는 명령·프로세스 끄는 명령을 부르지 않는다');
+  assert.doesNotMatch(result.stdout, /python3/);
+
+  // 설정 파일 — 예전 python3(json.dump ensure_ascii=False, indent=2 + 줄바꿈)와 같은 모양: 들여쓰기 2칸·한글 그대로·끝 줄바꿈 하나.
+  const example = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'workspace.config.example.json'), 'utf8'));
+  example.title = '테스트 사람의 워크스페이스';
+  example.server.port = 4321;
+  assert.equal(fs.readFileSync(path.join(fix.ws, 'workspace.config.json'), 'utf8'), `${JSON.stringify(example, null, 2)}\n`);
+
+  // Dock 앱·app-refresh 없음
+  assert.equal(fs.existsSync(fix.apps), false, '~/Applications에 아무것도 만들지 않는다');
+  assert.equal(fs.existsSync(path.join(fix.agents, 'com.workspace.app.app-refresh.plist')), false);
+  assert.equal(fs.existsSync(path.join(fix.install, 'app-refresh.sh')), false);
+  for (const name of ['server', 'update', 'apply', 'data-backup']) {
+    assert.ok(fs.existsSync(path.join(fix.agents, `com.workspace.app.${name}.plist`)), `${name}는 그대로 등록한다`);
+  }
+  // xml_escape(node) — 경로가 plist 안에 그대로 들어간다(형식 검사도 통과했다).
+  assert.match(fs.readFileSync(path.join(fix.agents, 'com.workspace.app.update.plist'), 'utf8'),
+    new RegExp(`<string>${fix.install.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/update-runner\\.sh</string>`));
+
+  // 새 설치 끝: 크롬으로 앱 주소 하나만 연다 + 「설치하기」 안내
+  assert.deepEqual(calls.split('\n').filter(line => line.startsWith('open ')), ['open -a Google Chrome http://localhost:4321']);
+  assert.match(result.stdout, /\[1\/4\][\s\S]*\[4\/4\]/);
+  assert.match(result.stdout, /✓ 설치를 끝냈어요 — 크롬에서 앱이 열려요\.\n사용설명서의 「설치하기」를 눌러 크롬 앱으로 설치해요\(창이 따로 떠요\)\.\n$/);
+  assert.doesNotMatch(result.stdout, /Dock 추가|확인되지 않은 개발자/);
+
+  // 다시 돌리면(설정이 이미 있다 = 업데이트 뒤) 열지 않는다
+  const again = fix.run();
+  assert.equal(again.status, 0, again.stdout + again.stderr);
+  assert.ok(!fix.calls().split('\n').some(line => line.startsWith('open ')), '업데이트 때는 열지 않는다');
+  assert.match(again.stdout, /✓ 설치를 끝냈어요\.\n$/);
+  // 팀 설치 파일(WORKSPACE_OPEN_APP=1)이면 설정이 있어도 연다. 실행기 안이면 열지 않는다.
+  fix.run({ WORKSPACE_OPEN_APP: '1' });
+  assert.deepEqual(fix.calls().split('\n').filter(line => line.startsWith('open ')), ['open -a Google Chrome http://localhost:4321']);
+  fix.run({ WORKSPACE_OPEN_APP: '1', WORKSPACE_APPLY_RUNNER: '1' });
+  assert.ok(!fix.calls().split('\n').some(line => line.startsWith('open ')), '실행기 안에서는 열지 않는다');
+});
+
+test('WP-O setup.sh: 크롬이 없으면 기본 브라우저로 열고 크롬 설치를 한 줄 권한다', (t) => {
+  const fix = setupRunFixture(t);
+  const result = fix.run({ FAKE_NO_CHROME: '1' });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.deepEqual(fix.calls().split('\n').filter(line => line.startsWith('open ')),
+    ['open -a Google Chrome http://localhost:4321', 'open http://localhost:4321']);
+  assert.match(result.stdout, /✓ 설치를 끝냈어요 — 브라우저에서 앱이 열려요\.\n크롬을 설치하면 앱으로 설치할 수 있어요\(지금은 브라우저 탭으로 써요\)\.\n$/);
+});
+
+test('WP-O setup.sh: 옛 설치의 app-refresh는 그 라벨 하나만 bootout하고 plist·복사본·요청 파일 하나씩만 지우며, ~/Applications의 앱은 그대로 둔다', (t) => {
+  const fix = setupRunFixture(t);
+  // 옛 설치(1.1.x)의 흔적
+  fs.mkdirSync(path.join(fix.install, 'requests'), { recursive: true });
+  fs.mkdirSync(fix.agents, { recursive: true });
+  fs.writeFileSync(path.join(fix.agents, 'com.workspace.app.app-refresh.plist'), '<plist/>');
+  fs.writeFileSync(path.join(fix.agents, 'com.someone.else.plist'), '<plist/>');
+  fs.writeFileSync(path.join(fix.install, 'app-refresh.sh'), '#!/bin/bash\n');
+  fs.writeFileSync(path.join(fix.install, 'app-bundle-name'), 'Workspace\n');
+  fs.writeFileSync(path.join(fix.install, 'requests', 'app-refresh.request'), '{}\n');
+  fs.writeFileSync(path.join(fix.install, 'requests', 'tiro-sync.request'), '{}\n');
+  fs.mkdirSync(path.join(fix.apps, 'Workspace.app', 'Contents', 'Resources', 'Scripts'), { recursive: true });
+  fs.writeFileSync(path.join(fix.apps, 'Workspace.app', 'Contents', 'Resources', 'Scripts', 'main.scpt'), 'old launcher');
+  fs.mkdirSync(path.join(fix.apps, 'Other.app'));
+  fs.writeFileSync(path.join(fix.apps, 'note.txt'), 'mine');
+  const appsBefore = fix.listAll(fix.apps);
+  fs.copyFileSync(path.join(REPO_ROOT, 'workspace.config.example.json'), path.join(fix.ws, 'workspace.config.json'));
+
+  const result = fix.run();
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /예전 Dock 앱 다시 만들기 등록을 내렸어요 \(Dock 앱은 그대로 둬요\)/);
+  const launchctl = fix.calls().split('\n').filter(line => line.startsWith('launchctl '));
+  assert.deepEqual(launchctl.filter(line => / bootout /.test(` ${line} `)), ['launchctl bootout gui/501/com.workspace.app.app-refresh'],
+    'bootout은 app-refresh 라벨 하나에만');
+  assert.ok(!launchctl.some(line => /app-refresh/.test(line) && !/bootout/.test(line)), 'app-refresh를 다시 load하지 않는다');
+  assert.equal(fs.existsSync(path.join(fix.agents, 'com.workspace.app.app-refresh.plist')), false);
+  assert.equal(fs.existsSync(path.join(fix.install, 'app-refresh.sh')), false);
+  assert.equal(fs.existsSync(path.join(fix.install, 'requests', 'app-refresh.request')), false);
+  assert.ok(fs.existsSync(path.join(fix.agents, 'com.someone.else.plist')), '다른 plist는 그대로');
+  assert.ok(fs.existsSync(path.join(fix.install, 'app-bundle-name')), '그 밖의 설치 위치 파일은 그대로');
+  assert.ok(fs.existsSync(path.join(fix.install, 'requests', 'tiro-sync.request')), '다른 요청 파일은 그대로');
+  assert.deepEqual(fix.listAll(fix.apps), appsBefore, '~/Applications는 하나도 건드리지 않는다');
+  assert.ok(!fix.calls().split('\n').some(line => line.startsWith('open ')), '설정이 있던 설치(업데이트)는 열지 않는다');
+
+  // 두 번째부터는 조용히 넘어간다(plist가 없으면 bootout도 없다)
+  const again = fix.run();
+  assert.equal(again.status, 0);
+  assert.ok(!/bootout/.test(fix.calls()), '없으면 부르지 않는다');
+  assert.doesNotMatch(again.stdout, /예전 Dock 앱 다시 만들기/);
+});
+
+test('WP-O update.sh: python3 없이 설정을 읽고, 옛 app-refresh는 그 라벨 하나만 bootout · plist·복사본만 지우며 ~/Applications는 그대로', { skip: !gitReady }, (t) => {
+  const fix = updateFixture(t);
+  const bin = path.join(fix.root, 'bin');
+  const pyLog = path.join(fix.root, 'python3.log');
+  writeExec(path.join(bin, 'python3'), `#!/bin/bash\necho "$*" >> ${JSON.stringify(pyLog)}\nexit 127\n`);
+  const agents = path.join(fix.root, 'Library', 'LaunchAgents');
+  const install = path.join(fix.root, 'install');
+  const apps = path.join(fix.root, 'Applications');
+  fs.mkdirSync(agents, { recursive: true });
+  fs.mkdirSync(path.join(install, 'requests'), { recursive: true });
+  fs.mkdirSync(path.join(apps, 'Workspace.app', 'Contents'), { recursive: true });
+  fs.writeFileSync(path.join(agents, 'com.workspace.app.app-refresh.plist'), '<plist/>');
+  fs.writeFileSync(path.join(agents, 'com.workspace.app.server.plist'), '<plist/>');
+  fs.writeFileSync(path.join(install, 'app-refresh.sh'), '#!/bin/bash\n');
+  fs.writeFileSync(path.join(install, 'requests', 'app-refresh.request'), '{}\n');
+  fs.writeFileSync(path.join(install, 'workspace.env'), 'WORKSPACE_DIR="/nowhere"\n');
+  fs.writeFileSync(path.join(apps, 'Workspace.app', 'Contents', 'Info.plist'), 'old');
+
+  const result = fix.run(['--yes']);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /v1\.1\.0으로 업데이트했어요/);
+  assert.equal(fs.existsSync(pyLog), false, 'python3를 부르지 않는다');
+  const calls = fs.readFileSync(path.join(fix.root, 'launchctl.log'), 'utf8').split('\n').filter(Boolean);
+  const bootouts = calls.filter(line => line.startsWith('bootout '));
+  assert.equal(bootouts.length, 1);
+  assert.match(bootouts[0], /^bootout gui\/\d+\/com\.workspace\.app\.app-refresh$/);
+  assert.equal(fs.existsSync(path.join(agents, 'com.workspace.app.app-refresh.plist')), false);
+  assert.equal(fs.existsSync(path.join(install, 'app-refresh.sh')), false);
+  assert.equal(fs.existsSync(path.join(install, 'requests', 'app-refresh.request')), false);
+  assert.ok(fs.existsSync(path.join(agents, 'com.workspace.app.server.plist')), '다른 등록은 그대로');
+  assert.ok(fs.existsSync(path.join(install, 'workspace.env')));
+  assert.equal(fs.readFileSync(path.join(apps, 'Workspace.app', 'Contents', 'Info.plist'), 'utf8'), 'old', '~/Applications의 옛 앱은 그대로');
+  const script = fs.readFileSync(path.join(REPO_ROOT, 'update.sh'), 'utf8');
+  assert.ok(!/python3 -|python3 -c|pkill|killall|xargs kill/.test(script));
+});
+
+test('WP-O 없앤 것: app-refresh.sh·Dock 앱 만드는 코드가 저장소 스크립트·서버에 없고, 프로세스를 끄거나 ~/Applications를 지우는 코드도 없다', () => {
+  assert.equal(fs.existsSync(automationScript('app-refresh.sh')), false);
+  const files = ['setup.sh', 'update.sh', 'make-team-installer.sh', 'tracker/inbox-app/automation/run-task.sh',
+    'tracker/inbox-app/personalize.js', 'tracker/inbox-app/routes-personalize.js', 'tracker/inbox-app/server.js', 'tracker/inbox-app/integrations.js'];
+  for (const rel of files) {
+    const text = fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8');
+    assert.ok(!/osacompile|iconutil|lsregister|app-refresh\.request.*writeFile|writeRefreshRequest|dockNameTaken/.test(text), `${rel}에 Dock 앱 만드는 코드가 없다`);
+    assert.ok(!/pkill|killall|xargs kill/.test(text), `${rel}에 프로세스를 이름으로 끄는 코드가 없다`);
+    assert.ok(!/rm -rf? [^\n]*Applications/.test(text), `${rel}은 ~/Applications를 지우지 않는다`);
+  }
+  // setup.sh·update.sh의 bootout은 app-refresh 라벨 하나뿐이다.
+  for (const rel of ['setup.sh', 'update.sh']) {
+    const text = fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8');
+    const lines = text.split('\n').filter(line => /launchctl bootout/.test(line));
+    assert.equal(lines.length, 1, `${rel}: bootout 한 줄`);
+    assert.match(lines[0], /com\.workspace\.app\.app-refresh"|\$LABEL\.app-refresh"/);
+  }
 });
