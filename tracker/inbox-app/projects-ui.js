@@ -24,9 +24,11 @@ function uiProjectRows(entries, items) {
 }
 
 // ---------- 프로젝트 묶어 보기 (BBUNDLE) ----------
-// 한 가지 일이 지라 티켓 둘 이상으로 나뉜 것을 이 탭에서만 한 줄로 본다. 서버는 `.workflow.json`의
-// 표시 정보(`projectBundles: [{ id, lead, keys }]`)만 준다 — 항목의 jira 칸은 그대로라 오늘 탭·확인 대기·
-// 회의·주간요약·리마인드는 묶음을 모르는 채 예전처럼 티켓별로 보인다(덩어리 1의 범위).
+// 한 가지 일이 지라 티켓 둘 이상으로 나뉜 것을 한 덩어리로 본다. 서버는 `.workflow.json`의
+// 표시 정보(`projectBundles: [{ id, lead, keys }]`)만 준다 — 항목의 jira 칸은 그대로다.
+// 프로젝트 탭(덩어리 1)에 더해 오늘 탭·나중에 할 일·확인 대기·회의 탭 프로젝트별 보기·고르기 목록이
+// projectGroupKey로 한 그룹이 된다(덩어리 2). 주간요약·배포 리마인드는 티켓별 그대로다.
+// 이 조회 함수들은 여러 화면이 쓴다 — index.html에서 app.js보다 먼저 읽히는 이 파일에 둔다.
 // 묶음 줄의 키는 대표 티켓의 키(`lead`)이고, 이름·색도 대표 티켓 것이다(uiGroupLabel·uiProjectDot).
 function projectBundles() {
   const list = (typeof workflowData === 'object' && workflowData && workflowData.projectBundles) || [];
@@ -66,6 +68,8 @@ function projectBundleRows(rows) {
 
 // 묶음을 풀거나 대표를 바꾸면 보던 키가 목록에서 사라질 수 있다 — 그 키가 든 묶음의 대표로 옮겨 본다.
 const projectBundleLeadOf = key => (projectBundleOf(key) || { lead: key }).lead;
+// 여러 화면이 한 그룹으로 모을 때 쓰는 열쇠 — 묶음에 든 지라 키면 대표 키, 아니면 그대로(`__misc__`·null 포함).
+const projectGroupKey = key => (typeof key === 'string' && key.startsWith('jira:') ? projectBundleLeadOf(key) : key);
 
 const PROJECT_KEY_STORE = 'projectKey';
 let projectKey = null;
@@ -1012,12 +1016,14 @@ function projectBundleAskNode(row) {
   box.setAttribute('tabindex', '-1');
   const head = document.createElement('div');
   head.className = 'ask';
-  head.textContent = `「${addName}」를 이 프로젝트와 함께 볼까요?`;
+  // 이름 끝이 영문·숫자·괄호인 일이 많아 받침으로 조사를 고를 수 없다 — 조사가 필요 없는 문장으로 쓴다.
+  head.textContent = `「${addName}」도 이 프로젝트와 함께 볼까요?`;
+  const what = [openCount ? `열린 항목 ${openCount}개` : '', meetingCount ? `회의 ${meetingCount}개` : ''].filter(Boolean).join('·');
   const facts = [
-    `${[openCount ? `열린 항목 ${openCount}개` : '', meetingCount ? `회의 ${meetingCount}개` : ''].filter(Boolean).join('·') || '그 프로젝트의 기록'}가 「${leadName}」에서 함께 보여요`,
+    `「${leadName}」에서 함께 보여요${what ? ` — ${what}` : ''}`,
     '지라 티켓은 그대로예요 — 상태·배포일도 티켓마다 따로',
-    `이름은 대표 「${leadName}」를 따라요(⋯에서 대표를 바꿀 수 있어요)`,
-    '오늘 탭·회의·주간요약은 지금처럼 티켓별로 보여요',
+    `이름은 대표 티켓 「${leadName}」 기준이에요(⋯에서 대표를 바꿀 수 있어요)`,
+    '오늘 탭·확인 대기·회의에서도 한 그룹으로 보여요 · 주간요약은 지금처럼 티켓별로',
   ].map((text) => { const line = document.createElement('div'); line.textContent = text; return line; });
   const acts = document.createElement('div');
   acts.className = 'acts';
@@ -1052,7 +1058,7 @@ async function projectBundleRun(row) {
     return;
   }
   projectBundleAsk = null;
-  await projectBundleFinish(result, `「${uiGroupLabel(add)}」를 「${uiGroupLabel(result.after.lead)}」에 묶었어요`, result.after.lead);
+  await projectBundleFinish(result, `「${uiGroupLabel(result.after.lead)}」에 함께 묶었어요 · ${uiGroupLabel(add)}`, result.after.lead);
 }
 
 async function projectBundleUndo(bundle) {
@@ -1064,7 +1070,7 @@ async function projectBundleUndo(bundle) {
 async function projectBundleLead(bundle, lead) {
   let result;
   try { result = await projectBundlePost('bundle-lead', { id: bundle.id, lead }); } catch { return; }
-  await projectBundleFinish(result, `대표를 「${uiGroupLabel(lead)}」로 바꿨어요`, lead);
+  await projectBundleFinish(result, `대표 티켓을 바꿨어요 · ${uiGroupLabel(lead)}`, lead);
 }
 
 // 묶음 상세의 `+ 할 일 추가`가 붙을 티켓 — 고른 것이 이 묶음에 아직 있으면 그것, 아니면 대표.
@@ -1129,7 +1135,7 @@ function renderProjectDetail(body, row) {
     if (key.startsWith('jira:')) bundleItems.push({ label: '다른 티켓과 묶기…', onClick: () => uiMenu(more, projectBundleChoices(row)) });
     if (bundle) {
       bundle.keys.filter(entry => entry !== bundle.lead).forEach((entry) => {
-        bundleItems.push({ label: `「${uiGroupLabel(entry)}」를 대표로`, onClick: () => projectBundleLead(bundle, entry) });
+        bundleItems.push({ label: `「${uiGroupLabel(entry)}」 대표로`, onClick: () => projectBundleLead(bundle, entry) });
       });
       bundleItems.push({ label: '묶음 풀기', onClick: () => projectBundleUndo(bundle) });
     }

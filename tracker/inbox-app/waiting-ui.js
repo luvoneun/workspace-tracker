@@ -410,7 +410,9 @@ function waitingGroups(items, today, detailOf) {
   const groups = new Map();
   sorted.forEach((item) => {
     const named = item.group || item.project;
-    const key = item.jira ? `jira:${item.jira}` : named ? `group:${named}` : '__misc__';
+    const raw = item.jira ? `jira:${item.jira}` : named ? `group:${named}` : '__misc__';
+    // 묶음(BBUNDLE)에 든 지라 티켓은 대표 키 하나로 모인다 — app.js:uiGroupTasks와 같은 규칙(복제본).
+    const key = typeof projectGroupKey === 'function' ? projectGroupKey(raw) : raw;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(item);
   });
@@ -463,7 +465,7 @@ function renderWaiting(items) {
       projectName: key === '__misc__' ? null : key,
       onOpenProject: key === '__misc__' ? null : () => openProjectTab(key),
     }));
-    group.forEach(item => list.appendChild(renderWaitingRow(item)));
+    group.forEach(item => list.appendChild(renderWaitingRow(item, { fromKey: uiGroupFromKey(key, item) })));
   });
 }
 
@@ -511,6 +513,8 @@ function renderWaitingRow(item, opts = {}) {
 
   // 조각으로 모아 두 줄째에 그대로 펼쳐 넣는다(한 겹 더 감싸면 사이 여백이 죽는다).
   const sub = document.createDocumentFragment();
+  // 묶음(BBUNDLE) 소제목 아래면 어느 티켓 것인지 작은 번호가 둘째 줄 맨 앞에 선다(프로젝트 탭과 같은 .d-pfrom).
+  if (opts.fromKey && typeof projectFromTag === 'function') sub.appendChild(projectFromTag(opts.fromKey));
   // 프로젝트별 묶음일 때는 소제목이 이미 프로젝트를 말해 준다 — 급한 순일 때만 줄 맨 앞에 붙인다.
   if (opts.showProject && (item.jira || item.group || item.project)) {
     sub.appendChild(uiInlineProject(item, { lead: false }));

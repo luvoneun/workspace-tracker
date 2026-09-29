@@ -537,6 +537,26 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
+/* ---------- 프로젝트 고르기 목록 (BBUNDLE 덩어리 2) ----------
+   옛 <select> 자리에 같은 자리에서 펼쳐진다: (찾기 칸 — 프로젝트 찾기의 .d-din.d-pfind 그대로) + 선택지(⋯ 메뉴 항목 .d-mitem 그대로).
+   묶음 줄은 굵게, 그 아래 티켓은 왼쪽 여백으로만 들이고 --muted 글자다. 지금 값은 고른 줄 색(--sel). 새 색·새 선은 없다 */
+.jira-pick { font-family: inherit; text-align: left; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jira-control.is-picking { flex: 1 1 100%; min-width: 0; }
+.d-mfield > .mc:has(.is-picking) { flex-basis: 100%; }
+.d-gpick { display: grid; gap: 2px; width: 100%; min-width: 0; }
+.d-gpick .d-gpfind { margin: 0 0 4px; font-size: 13.5px; }
+.d-gplist { display: flex; flex-direction: column; gap: 1px; max-height: min(280px, 50vh); overflow-y: auto; overscroll-behavior: contain; }
+.d-gpopt { flex: none; gap: 8px; min-width: 0; }
+.d-gpopt .nm { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.d-gpopt .ky { flex: none; font-size: 12px; font-weight: 500; color: var(--dim); font-variant-numeric: tabular-nums; }
+.d-gpopt.is-bundle .nm { font-weight: 700; }
+.d-gpopt.is-sub { padding-left: 32px; color: var(--muted); }
+.d-gpopt.is-act { color: var(--muted); }
+.d-gpopt[aria-selected="true"] { background: var(--sel); color: var(--accent-text); }
+.d-gphead { padding: 10px 12px 4px; font-size: 12px; font-weight: 600; color: var(--dim); }
+.d-gpnone { padding: 8px 12px; font-size: 13px; color: var(--dim); }
+.d-gpnone[hidden] { display: none; }
+
 /* ---------- 날짜 칸 ---------- */
 .d-datefield { display: inline-flex; align-items: center; gap: 4px; }
 .d-dateinput {
@@ -1788,6 +1808,28 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-jira .cell .d-dpick .v { flex: none; }
 .d-jira .cell .d-dpick:disabled { cursor: default; color: var(--dim); }
 .d-jira .cell .d-dpick:disabled:hover { background: none; }
+/* 묶음 상세의 옆 카드(대표가 아닌 티켓, BBUNDLE) — 좁은 폭(≤520)에서는 접힌 한 줄(`KEY · 이름 · 상태` + 꺾쇠, 줄 전체가 버튼)로
+   서고 누르면 카드가 그 아래 펼쳐진다. 넓은 폭은 줄을 숨겨 카드 그대로다. 판·그림자는 카드(.d-jira)와 같다 */
+.d-jfold { display: none; }
+@media (max-width: 520px) {
+  .d-jside > .d-jfold {
+    display: flex; align-items: center; gap: 6px; width: 100%; min-height: 44px; margin: 10px 0 0; padding: 0 10px 0 16px;
+    border: 1px solid var(--surface-line); border-radius: var(--r); background: var(--surface); box-shadow: var(--soft);
+    font-family: inherit; font-size: 13.5px; color: var(--muted); text-align: left; cursor: pointer;
+  }
+  .d-jside > .d-jfold:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .d-jside:not(.is-open) > .d-jira { display: none; }
+  .d-jside.is-open > .d-jira { margin-top: 6px; }
+}
+.d-jfold .ky { flex: none; font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.d-jfold .sep { flex: none; color: var(--dim); }
+.d-jfold .nm { flex: 0 1 auto; min-width: 0; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.d-jfold .st { flex: none; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.d-jfold .st.k-dim { color: var(--dim); }
+.d-jfold .st.k-acc { color: var(--accent-text); }
+.d-jfold .st.k-pos { color: var(--success); }
+.d-jfold .d-i { flex: none; margin-left: auto; color: var(--dim); transform: rotate(90deg); transition: transform 170ms var(--ease); }
+.d-jfold[aria-expanded="true"] .d-i { transform: rotate(-90deg); }
 /* 지라에 보내기 전 확인 줄 — 카드 안에 인라인으로 선다(새 창을 띄우지 않는다).
    Esc · 바깥 클릭 · `취소`로 닫히고, 닫히면 아무것도 보내지 않는다.
    판은 고른 줄과 같은 `--sel`이고 새 색은 쓰지 않는다 */
