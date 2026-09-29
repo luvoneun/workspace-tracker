@@ -1530,30 +1530,47 @@ function reportPlanProjectPicker() {
 }
 
 // 이미 담긴 계획 문장의 프로젝트를 바꾸는 고르개(문장 ⋯ 메뉴의 필드 줄). 서버는 `regroup`이고
-// 프로젝트 이름 검증(`planGroup`)은 담을 때와 같은 길을 쓴다.
+// 프로젝트 이름 검증(`planGroup`)은 담을 때와 같은 길을 쓴다. 버튼을 누르면 그 자리에서 목록(uiPickList —
+// 입력줄 앞 고르개와 같은 선택지 reportPlanPickEntries, 찾기만 있고 묶음은 없다)이 펼쳐지고, 고르면 저장하고 메뉴를 닫는다.
 function reportPlanRegroupPicker(item, row) {
-  const pick = reportNode('select', undefined, 'd-msel');
-  pick.setAttribute('aria-label', '계획 문장 프로젝트 바꾸기');
+  const wrap = reportNode('div', undefined, 'rp-regroup');
   const current = String(row.group || '').trim();
   const none = !current || current === REPORT_PLAN_NO_PROJECT
     || current === REPORT_NO_PROJECT_LABEL || current === REPORT_NO_PROJECT;
-  const names = reportPlanProjectNames();
-  // 지금 붙어 있는 이름이 목록에 없으면(프로젝트가 비었거나 이름이 바뀐 뒤) 그 이름을 맨 앞에 남긴다.
-  if (!none && !names.includes(current)) names.unshift(current);
-  // 옵션 글자만 `요약 · 키`로 바꾼다(BKEY 결정) — 저장되는 값은 그대로 원래 이름이다.
-  const sorted = [...names].sort((a, b) => reportPickerLabel(a).localeCompare(reportPickerLabel(b)));
-  for (const [value, text] of [['', REPORT_NO_PROJECT], ...sorted.map(name => [name, reportPickerLabel(name)])]) {
-    const option = reportNode('option', text);
-    option.value = value;
-    if (none ? value === '' : value === current) option.selected = true;
-    pick.appendChild(option);
-  }
-  pick.addEventListener('change', () => {
-    if (typeof uiMenuClose === 'function') uiMenuClose();
-    reportChange(item, { action: 'regroup', id: row.id, group: pick.value || undefined })
-      .catch(error => showNotice(error.message || '저장하지 못했어요. 적은 내용은 그대로 있어요', true));
+  const value = none ? '' : current;
+  const pick = reportNode('button', undefined, 'd-msel rp-pick');
+  pick.type = 'button';
+  pick.setAttribute('aria-haspopup', 'listbox');
+  pick.textContent = value ? reportPickerLabel(value) : REPORT_NO_PROJECT;
+  pick.title = pick.textContent;
+  pick.setAttribute('aria-label', `계획 문장 프로젝트: ${pick.textContent} — 바꾸기`);
+  let open = false;
+  const restore = (focus) => {
+    if (open) { open = false; wrap.replaceChildren(pick); }
+    if (focus) pick.focus();
+  };
+  pick.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const entries = reportPlanPickEntries(value);
+    const list = uiPickList({
+      entries,
+      label: '계획 문장 프로젝트',
+      search: uiPickSearchable(entries),
+      onPick: (next) => {
+        restore(false);
+        if (typeof uiMenuClose === 'function') uiMenuClose();
+        reportChange(item, { action: 'regroup', id: row.id, group: next || undefined })
+          .catch(error => showNotice(error.message || '저장하지 못했어요. 적은 내용은 그대로 있어요', true));
+      },
+      onClose: byKeyboard => restore(byKeyboard),
+    });
+    open = true;
+    wrap.replaceChildren(list);
+    if (typeof uiPickFit === 'function') uiPickFit(list);
+    list.focusStart();
   });
-  return pick;
+  wrap.appendChild(pick);
+  return wrap;
 }
 
 // ---------- 다음 주 계획: 후보에서 담기 · 직접 쓰기 ----------

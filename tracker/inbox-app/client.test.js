@@ -1966,9 +1966,15 @@ test('계획 문장의 ⋯에만 프로젝트 바꾸기 고르개가 붙는다',
     const calls = [];
     reportChange = async (item, action) => { calls.push(action); };
     uiMenuClose = () => {};
-    const pick = reportPlanRegroupPicker(${REPORT_ITEM}, { id: 'p1', heading: '다음 주 계획', group: '결제 리뉴얼' });
-    pick.value = '가입 개선'; pick.listeners.change();
-    pick.value = ''; pick.listeners.change();
+    const wrap = reportPlanRegroupPicker(${REPORT_ITEM}, { id: 'p1', heading: '다음 주 계획', group: '결제 리뉴얼' });
+    const choose = (text) => {
+      wrap.children[0].listeners.click({ stopPropagation() {} });
+      const options = wrap.children[0].children[wrap.children[0].children.length - 1].children;
+      options.find(kid => kid.dataset && kid.dataset.value === text).listeners.click({ stopPropagation() {} });
+    };
+    customGroupsCache = ['가입 개선', '결제 리뉴얼'];
+    choose('가입 개선');
+    choose('');
     return JSON.stringify(calls);
   })()`));
   assert.deepEqual(sent, [
@@ -1990,11 +1996,18 @@ test('다음 주 계획 프로젝트 고르개는 보이는 글자만 "요약 ·
     ['운영툴', '운영툴'],
     ['PAY-77 · 정산 배치', '정산 배치 · PAY-77'],
   ], '값은 원래 이름 그대로, 글자만 요약 · 키로 바뀌고 요약 기준으로 정렬된다(운영툴 → 정산 배치)');
-  assert.deepEqual(optionsOf(
-    `reportPlanRegroupPicker(${REPORT_ITEM}, { id: 'p1', heading: '다음 주 계획', group: 'PAY-77 · 정산 배치' })`), [
+  // 문장 ⋯의 고르개도 같은 목록이다 — 버튼을 누르면 그 자리에서 uiPickList가 펼쳐지고 <select>는 없다.
+  const wrap = app.run(`reportPlanRegroupPicker(${REPORT_ITEM}, { id: 'p1', heading: '다음 주 계획', group: 'PAY-77 · 정산 배치' })`);
+  const button = wrap.children[0];
+  assert.equal(button.textContent, '정산 배치 · PAY-77', '지금 프로젝트는 요약 · 키 글자로');
+  assert.equal(nodeFind(wrap, 'd-msel') === button, true);
+  assert.equal(wrap.children.some(kid => kid.tagName === 'SELECT'), false);
+  button.listeners.click({ stopPropagation() {} });
+  const list = wrap.children[0].children.find(kid => kid.getAttribute && kid.getAttribute('role') === 'listbox');
+  assert.deepEqual(list.children.map(kid => [kid.dataset.value, nodeFind(kid, 'nm').textContent]), [
     ['', '프로젝트 없음'],
     ['운영툴', '운영툴'],
-    ['PAY-77 · 정산 배치', '정산 배치 · PAY-77'],
+    ['PAY-77 · 정산 배치', '정산 배치'],
   ]);
 });
 
@@ -12582,4 +12595,88 @@ test('WP-X 설정 › 앱 `사용 통계` 줄 — 스위치와 안내 한 줄만
   assert.deepEqual(JSON.parse(app.run('JSON.stringify(window.steps)')), ['close', 'tab:weekly']);
   assert.equal(app.run('usageWorkDlg.dialog.open'), true);
   assert.equal(app.run('usageWorkDlg.opener'), app.nodes.get('tabBtnWeekly'), '링크를 찾지 못하면 닫을 때 주간요약 탭 버튼으로');
+});
+
+test('회의 초안: 되돌리기 뒤 문구를 고치고 다시 실행 → 되돌리기 하면 고친 문구가 돌아온다', async () => {
+  const { app, draw } = meetingBoardClient();
+  app.run('undoStack.length = 0; redoStack.length = 0;');
+  const box = draw();
+  const first = nodeFindAll(box, 'd-draft')[0];
+  const text = nodeFind(first, 'd-dtxt');
+  text.style = {};
+  text.value = '처음 문구'; text.listeners.input();
+  await nodeFind(first, 'd-dpull').listeners.click();
+  await app.run("replayUndo('undo')");
+  assert.equal(app.run("wfDraftEdits.get('mb1:stable:a').description"), '처음 문구');
+  app.run("wfDraftEdits.get('mb1:stable:a').description = '고친 문구'");
+  await app.run("replayUndo('redo')");
+  await app.run("replayUndo('undo')");
+  assert.equal(app.run("wfDraftEdits.get('mb1:stable:a').description"), '고친 문구', '수정 전 문구가 아니라 그 순간의 문구');
+});
+
+test('회의 초안: 다른 되돌리기가 도는 중에 누른 알림의 `되돌리기`는 잠긴 채 남지 않는다', async () => {
+  const { app, draw } = meetingBoardClient();
+  app.run('undoStack.length = 0; redoStack.length = 0;');
+  const box = draw();
+  await nodeFind(nodeFindAll(box, 'd-draft')[2], 'd-dpull').listeners.click();
+  const undo = app.nodes.get('liveRegion').children.find(kid => kid.textContent === '되돌리기');
+  app.run('undoReplaying = true;');
+  await undo.listeners.click();
+  app.run('undoReplaying = false;');
+  assert.notEqual(undo.disabled, true, '되돌리기가 실행되지 않았으니 다시 누를 수 있다');
+});
+
+test('회의 `기존 항목 연결`: <select> 대신 uiPickList — 고르면 버튼에 이름이 남고 `회의에 연결`이 그 항목을 보낸다, 0개면 한 줄', async () => {
+  const { app, sent, meeting } = meetingBoardClient();
+  const draw = () => app.run(`(() => {
+    const box = document.createElement('div');
+    const host = { kind: 'card', closable: false, getResult: () => null, setResult() {}, redraw() {}, box: () => box, openItem() {}, openMeeting() {} };
+    panelMeetingLink(__meeting, box, host);
+    return box;
+  })()`);
+  // 후보 0개 — 자리는 남고 한 줄로 알린다.
+  let box = draw();
+  assert.equal(nodeFind(nodeFind(box, 'd-dadd'), 'd-gpnone').textContent, '연결할 항목이 없어요');
+  assert.equal(nodeFind(box, 'd-msel'), null);
+
+  app.context.__items = [
+    { id: 'i1', type: 'task', description: '결제 스펙 정리' },
+    { id: 'i2', type: 'check', description: '디자인 회신', meetingId: 'other' },
+    { id: 'i3', type: 'decision', description: '배너로 간다' },
+  ];
+  app.run('workflowData = { items: __items, meetings: [__meeting] }; wfIndexData();');
+  box = draw();
+  const section = nodeFind(box, 'd-dadd');
+  assert.equal(nodeFindAll(section, 'd-gpnone').length, 0);
+  const slot = nodeFind(section, 'd-dpickslot');
+  const trigger = slot.children[0];
+  assert.equal(trigger.textContent, '항목 선택');
+  assert.notEqual(trigger.tagName, 'SELECT');
+  const link = nodeFindAll(section, 'd-btn')[0];
+  await link.listeners.click();
+  assert.equal(sent.length, 0, '고르기 전에는 보내지 않는다');
+  trigger.listeners.click();
+  const root = slot.children[0];
+  assert.equal(root.className, 'd-gpick');
+  const list = root.children.find(kid => kid.getAttribute && kid.getAttribute('role') === 'listbox');
+  assert.deepEqual(list.children.map(kid => kid.dataset.value), ['i1', 'i3'], '이미 다른 회의에 붙은 항목은 후보가 아니다');
+  list.children[1].listeners.click({ stopPropagation() {} });
+  assert.equal(slot.children[0], trigger, '고르면 목록이 접히고 버튼으로 돌아온다');
+  assert.equal(trigger.textContent, '배너로 간다');
+  await link.listeners.click();
+  assert.deepEqual(sent[0], { url: '/api/workflow/link', body: { id: 'i3', meetingId: 'mb1' } });
+  assert.ok(meeting);
+});
+
+test('회의 `기존 항목 연결` 목록은 8개 이상이면 찾기 칸이 서고, .d-msel.wide 규칙은 남지 않는다', () => {
+  const { app } = meetingBoardClient();
+  app.context.__items = Array.from({ length: 9 }, (_, index) => ({ id: `i${index}`, type: 'task', description: `항목 ${index}` }));
+  app.run('workflowData = { items: __items, meetings: [__meeting] }; wfIndexData();');
+  const box = app.run(`(() => { const b = document.createElement('div'); panelMeetingLink(__meeting, b, { redraw() {} }); return b; })()`);
+  const slot = nodeFind(box, 'd-dpickslot');
+  slot.children[0].listeners.click();
+  assert.equal(slot.children[0].children[0].type, 'search');
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.doesNotMatch(css, /\.d-msel\.wide/);
+  assert.doesNotMatch(fs.readFileSync(path.join(__dirname, 'meetings-ui.js'), 'utf8'), /d-msel wide/);
 });

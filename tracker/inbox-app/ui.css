@@ -522,7 +522,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 }
 .d-mtext { width: 124px; }
 .d-msel { max-width: 152px; padding: 0 6px; }
-.d-msel.wide { width: 100%; max-width: none; height: 32px; }
+.d-mpickbtn { width: 100%; max-width: none; height: 32px; padding: 0 10px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .d-mtext:focus, .d-msel:focus { outline: none; background: var(--surface); box-shadow: 0 0 0 2px var(--accent); }
 
 /* 옛 프로젝트 선택 컨트롤을 메뉴 줄 안에 맞춘다(지라 이슈 / 그룹 / 직접 입력…) */
@@ -1459,6 +1459,7 @@ textarea.d-dtitle {
 .d-dsec.d-dadd[open] > summary.lbl { margin-bottom: 6px; }
 .d-dcap { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .d-dcap .d-din { flex: 1; min-width: 140px; min-height: 30px; padding: 5px 9px; }
+.d-dcap .d-dpickslot { flex: 1; min-width: 140px; }
 .d-dcap .d-msel { flex: 1; }
 
 /* ---------- 줄 옆 카드 (상세가 서는 자리) ----------

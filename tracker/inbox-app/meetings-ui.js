@@ -421,9 +421,11 @@ const meetingDraftDismissLabel = description => (meetingDraftShort(description) 
 // 되살아난 초안에는 빼기 전에 고쳐 둔 문구·종류·날짜가 그대로 돌아온다. 판을 닫았다 열어도 ⌘Z는 그대로 된다
 // (기록은 회의 번호·초안 번호만 들고 있고 화면 조각을 붙잡지 않는다).
 async function meetingDraftDismiss(event, draft, edit, index, host = MEETING_HOST_CARD) {
-  const kept = { ...edit };
+  let kept = { ...edit }; // 되살릴 때 쓸 초안 내용 — 빼는 순간(처음·다시 실행)마다 그때 내용으로 다시 잡는다
   const send = async () => {
+    const now = wfDraftEdits.get(draft.id);
     await wfReview({ meetingId: event.id, dismiss: [draft.id] });
+    if (now) kept = { ...now };
     wfDraftEdits.delete(draft.id);
   };
   try { await send(); } catch { return; } // request()가 이미 알렸다 — 초안은 그 자리에 그대로 있다
@@ -452,6 +454,8 @@ async function meetingDraftDismiss(event, draft, edit, index, host = MEETING_HOS
       if (undoStack[undoStack.length - 1] !== entry) { showNotice('최근 작업부터 순서대로 실행 취소해 주세요', true); return; }
       if (button) button.disabled = true;
       await replayUndo('undo');
+      // 다른 되돌리기가 도는 중이라 아무것도 안 했거나 실패했으면 이 기록이 그대로 맨 위다 — 다시 누를 수 있게 푼다.
+      if (button && undoStack[undoStack.length - 1] === entry) button.disabled = false;
     },
   });
 }
@@ -1009,7 +1013,6 @@ function panelMeetingLink(event, box, host = MEETING_HOST_CARD) {
   // 묶음(BBUNDLE)이면 묶인 티켓 전부가 같은 프로젝트다.
   const same = typeof projectGroupKey === 'function' ? (a, b) => projectGroupKey(a) === projectGroupKey(b) : (a, b) => a === b;
   const candidates = items.filter(item => !item.meetingId && (!key || same(wfKey(item), key)));
-  if (!candidates.length) return;
   const section = document.createElement('details');
   section.className = 'd-dsec d-dadd';
   const label = document.createElement('summary');
@@ -1017,21 +1020,61 @@ function panelMeetingLink(event, box, host = MEETING_HOST_CARD) {
   label.innerHTML = uiIcon('chevron');
   label.append('기존 항목 연결');
   section.appendChild(label);
+  if (!candidates.length) {
+    const none = document.createElement('p');
+    none.className = 'd-gpnone';
+    none.textContent = '연결할 항목이 없어요';
+    section.appendChild(none);
+    box.appendChild(section);
+    return;
+  }
 
+  // 고르는 곳은 앱의 프로젝트 고르기와 같은 목록(uiPickList)이다 — 누르면 그 자리에서 펼쳐지고(8개 이상이면 찾기 칸),
+  // 고른 항목 이름이 버튼에 남는다. 실제 연결은 `회의에 연결`을 눌러야 한다.
+  const entries = candidates.map(item => ({
+    type: 'option', value: item.id, text: item.description, key: wfType(item.type), level: 0,
+    selected: false, find: [item.description, wfType(item.type)],
+  }));
+  let chosen = '';
   const row = document.createElement('div');
   row.className = 'd-dcap';
-  const select = document.createElement('select');
-  select.className = 'd-msel wide';
-  select.setAttribute('aria-label', '이 회의에서 나온 항목 선택');
-  [['', '항목 선택'], ...candidates.map(item => [item.id, `${wfType(item.type)} · ${item.description}`])].forEach(([value, text]) => {
-    const option = document.createElement('option');
-    option.value = value;
-    option.textContent = text;
-    select.appendChild(option);
+  const slot = document.createElement('div');
+  slot.className = 'd-dpickslot';
+  const trigger = document.createElement('button');
+  trigger.type = 'button';
+  trigger.className = 'd-msel d-mpickbtn';
+  trigger.setAttribute('aria-haspopup', 'listbox');
+  const paint = () => {
+    const item = candidates.find(entry => entry.id === chosen);
+    trigger.textContent = item ? item.description : '항목 선택';
+    trigger.title = trigger.textContent;
+    trigger.setAttribute('aria-label', `이 회의에서 나온 항목 선택: ${trigger.textContent}`);
+  };
+  paint();
+  let open = false;
+  const restore = (focus) => {
+    if (open) { open = false; slot.replaceChildren(trigger); }
+    if (focus) trigger.focus();
+  };
+  trigger.addEventListener('click', () => {
+    entries.forEach((entry) => { entry.selected = entry.value === chosen; });
+    const picker = uiPickList({
+      entries,
+      label: '이 회의에서 나온 항목',
+      search: uiPickSearchable(entries),
+      placeholder: '문구로 찾기',
+      emptyText: '찾는 항목이 없어요',
+      onPick: (value) => { chosen = value; paint(); restore(true); },
+      onClose: byKeyboard => restore(byKeyboard),
+    });
+    open = true;
+    slot.replaceChildren(picker);
+    picker.focusStart();
   });
-  row.append(select, panelRunButton('회의에 연결', async () => {
-    if (!select.value) return;
-    await wfPost('link', { id: select.value, meetingId: event.id });
+  slot.appendChild(trigger);
+  row.append(slot, panelRunButton('회의에 연결', async () => {
+    if (!chosen) return;
+    await wfPost('link', { id: chosen, meetingId: event.id });
     await load();
     host.redraw();
   }, 'd-btn', host));

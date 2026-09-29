@@ -2284,3 +2284,45 @@ test('내 담당 목록 조회가 401이면 예전처럼 실패하고, 추가 �
   });
   await assert.rejects(() => jiraListClient(extraDenied).listMyIssues(['IO-1']), error => error.status === 403);
 });
+
+// 추가 조회(key in) 나눠 묻기 — 지워진 키가 섞여도 살아 있는 키는 살리고, 호출 수는 묶는다.
+const extraFake = (dead, { status = 400, onExtra } = {}) => jiraFake({
+  '/rest/api/3/search/jql': (url) => {
+    const jql = decodeURIComponent(String(url).split('jql=')[1].split('&')[0]);
+    if (!jql.startsWith('key in')) return json(jiraListBody([jiraListIssue('MINE-1')]));
+    const keys = jql.slice(jql.indexOf('(') + 1, jql.lastIndexOf(')')).split(',');
+    if (onExtra) { const answer = onExtra(keys); if (answer) return answer; }
+    if (keys.some(key => dead.includes(key))) return json({ errorMessages: ['does not exist'] }, status);
+    return json(jiraListBody(keys.map(key => jiraListIssue(key))));
+  },
+});
+
+test('추가 조회에 지워진 키 1개가 섞여도 살아 있는 5개는 받고 호출 수는 상한 안이다', async () => {
+  const live = ['IO-1', 'IO-2', 'IO-3', 'IO-4', 'IO-5'];
+  const fake = extraFake(['IO-99']);
+  const issues = await jiraListClient(fake).listMyIssues([...live, 'IO-99']);
+  assert.deepEqual(issues.filter(issue => issue.extra).map(issue => issue.key).sort(), live);
+  assert.ok(fake.calls.length - 1 <= 12, `추가 조회 ${fake.calls.length - 1}번`);
+});
+
+test('지워진 키가 여러 개여도 살아 있는 키만 남는다', async () => {
+  const live = ['IO-1', 'IO-2', 'IO-3', 'IO-4'];
+  const fake = extraFake(['IO-90', 'IO-91', 'IO-92']);
+  const issues = await jiraListClient(fake).listMyIssues(['IO-90', 'IO-1', 'IO-2', 'IO-91', 'IO-3', 'IO-92', 'IO-4']);
+  assert.deepEqual(issues.filter(issue => issue.extra).map(issue => issue.key).sort(), live);
+  assert.ok(fake.calls.length - 1 <= 12);
+});
+
+test('나눠 묻는 도중 401이 나오면 그대로 던진다', async () => {
+  let asked = 0;
+  const fake = extraFake(['IO-99'], { onExtra: () => (++asked === 2 ? json({}, 401) : null) });
+  await assert.rejects(() => jiraListClient(fake).listMyIssues(['IO-1', 'IO-2', 'IO-99', 'IO-3']), error => error.status === 401);
+});
+
+test('전부 지워진 키가 많아도 추가 조회는 12번을 넘지 않고 남은 것은 뺀다', async () => {
+  const keys = Array.from({ length: 40 }, (_, index) => `IO-${index + 1}`);
+  const fake = extraFake(keys);
+  const issues = await jiraListClient(fake).listMyIssues(keys);
+  assert.deepEqual(issues.map(issue => issue.key), ['MINE-1']);
+  assert.equal(fake.calls.length - 1, 12, '상한에서 멈춘다');
+});

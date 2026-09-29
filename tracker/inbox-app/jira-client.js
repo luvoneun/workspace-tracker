@@ -431,6 +431,7 @@ function createJiraClient({ settings, request = (...args) => fetch(...args), rea
   // 프로젝트 고르기 목록·요약의 원천. ① 내 담당·미완료를 읽고,
   // ② 업무에 걸려 있는 키 중 ①에 없는 것만 `key in (…)`로 한 번 더 읽어 `extra:true`로 붙인다
   // (완료됐거나 담당이 바뀐 티켓의 요약이 사라지지 않게 — 파일 스냅샷의 `그 밖의 이슈`와 같은 규칙).
+  const EXTRA_SEARCH_LIMIT = 12;
   async function listMyIssues(linkedKeys = []) {
     const secret = token();
     const mine = (((await search(MY_ISSUES_JQL, secret)) || {}).issues || [])
@@ -439,15 +440,27 @@ function createJiraClient({ settings, request = (...args) => fetch(...args), rea
     const wanted = [...new Set((Array.isArray(linkedKeys) ? linkedKeys : [])
       .filter(key => typeof key === 'string' && JIRA_KEY_RE.test(key) && !have.has(key)))].slice(0, JIRA_LIST_LIMIT);
     if (!wanted.length) return mine;
-    // 지라에서 지워졌거나 없는 키가 섞이면 이 조회만 400으로 실패한다 — 그때는 추가분만 빼고 내 담당 목록은 돌려준다
-    // (인증 실패 401·403, 너무 잦은 요청 429, 상태 없는 네트워크 오류·5xx는 예전처럼 그대로 던진다).
-    let found;
-    try {
-      found = (await search(`key in (${wanted.join(',')})`, secret)) || {};
-    } catch (error) {
-      const status = error && error.status;
-      if (!(status >= 400 && status < 500) || status === 401 || status === 403 || status === 429) throw error;
-      return mine;
+    // 지라에서 지워졌거나 없는 키가 섞이면 그 조회가 4xx로 실패한다 — 키 목록을 반으로 나눠 다시 묻고,
+    // 한 개짜리가 4xx면 그 키만 뺀다(살아 있는 추가분은 살린다). 지라를 두드리는 수를 묶으려고
+    // 한 번 목록 갱신의 추가 조회는 EXTRA_SEARCH_LIMIT번까지만 — 넘으면 아직 못 물은 키는 빼고 끝낸다.
+    // (인증 실패 401·403, 너무 잦은 요청 429, 상태 없는 네트워크 오류·5xx는 중간에 나와도 예전처럼 그대로 던진다.)
+    const found = { issues: [] };
+    let budget = EXTRA_SEARCH_LIMIT;
+    const queue = [wanted];
+    while (queue.length && budget > 0) {
+      const keys = queue.shift();
+      budget -= 1;
+      try {
+        const body = (await search(`key in (${keys.join(',')})`, secret)) || {};
+        found.issues.push(...(body.issues || []));
+      } catch (error) {
+        const status = error && error.status;
+        if (!(status >= 400 && status < 500) || status === 401 || status === 403 || status === 429) throw error;
+        if (keys.length > 1) {
+          const half = Math.ceil(keys.length / 2);
+          queue.push(keys.slice(0, half), keys.slice(half));
+        }
+      }
     }
     const rest = (found.issues || [])
       .map(entry => shapeListIssue(entry, true)).filter(Boolean)
