@@ -55,6 +55,12 @@ const mondayKey = (value) => {
   date.setDate(date.getDate() - ((date.getDay() + 6) % 7));
   return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
 };
+// 그 주 월요일에서 며칠 뒤의 날짜(`YYYY-MM-DD`, 지역 시간).
+const dayAfter = (weekKey, days) => {
+  const date = new Date(`${weekKey}T12:00:00`);
+  date.setDate(date.getDate() + days);
+  return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+};
 // 제목·소제목 이름: 60자 이내 한 줄. 빈 값은 "원래대로"다(null).
 function polishName(value, what) {
   if (value === undefined || value === null) return null;
@@ -66,7 +72,10 @@ function polishName(value, what) {
 }
 
 // `bundles`(프로젝트 묶어 보기 목록)와 `projectLabel`(열쇠 → 지금 표시 이름)은 없어도 된다 — 없으면 묶음·새 이름 없이 예전과 같다.
-module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [], projectLabel = () => null }) => {
+// `tasks`는 보고 칸의 `+ 한 줄 추가`(addLine)가 업무를 만들고 되돌리기가 지우는 길이다 — `{ create({ description, done,
+// completed, jira, group }) → id, remove(id, keep) }`. 없으면 addLine을 거절한다. 서버(server.js)에서는 이 두 함수와 보고 저장이
+// 한 요청의 저장 트랜잭션(mutations.run) 안에서 돌아, 어느 한쪽이 실패하면 업무 파일과 보고 저장본이 함께 되돌아간다.
+module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [], projectLabel = () => null, tasks = null }) => {
   const filename = path.join(directory, '.report-drafts.json');
   const undo = new Map();
   function read() {
@@ -165,15 +174,22 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
     const rows = structuredClone(stored?.rows || importLegacy(old?.body || '', all));
     const claimed = new Set(rows.flatMap(row => row.sourceIds));
     const candidates = all.filter(item => eligible(item,weekKey) && !claimed.has(item.id));
+    const polish = polishOf(state, weekKey);
+    // 확정(`weekPolish[주].lockedAt`, 선택) — 확정한 주는 자동 모으기가 문장을 더 넣거나 고치지 않는다. 있던 문장은 전부
+    // 고친 문장처럼 다뤄 원본이 바뀌면 제안만 하고, 새 업무는 문장이 되지 않고 `confirmed.pending`(줄 수)로만 센다.
+    // `opts.release`(보고에 넣기 — change의 pullNew만)는 그 새 줄만 풀어 준다(있던 문장에 더하지 않고 새 줄로).
+    const lockedAt = typeof polish.lockedAt === 'string' && polish.lockedAt ? polish.lockedAt : null;
+    const hold = !!lockedAt && !opts.release;
+    const weekEnd = dayAfter(weekKey, 6);
     for (const row of rows) {
       const linked = row.sourceIds.map(id => byId.get(id)).filter(Boolean);
       const currentEvidence = linked.map(evidence);
       const missing = linked.length !== row.sourceIds.length;
-      const added = row.bucket && !row.excluded ? candidates.filter(item => bucket(item) === row.bucket && !claimed.has(item.id)) : [];
+      const added = row.bucket && !row.excluded && !lockedAt ? candidates.filter(item => bucket(item) === row.bucket && !claimed.has(item.id)) : [];
       added.forEach(item => claimed.add(item.id));
       const combined = [...linked, ...added];
       const mixed = new Set(combined.map(heading)).size > 1;
-      if (row.locked || row.excluded || weekKey < currentWeek()) {
+      if (row.locked || row.excluded || weekKey < currentWeek() || lockedAt) {
         const changed = !row.legacy && hash(currentEvidence) !== hash(row.evidence);
         if (added.length || changed || missing) row.suggestion = { text: textOf(combined), sourceIds: combined.map(item=>item.id), evidence: combined.map(evidence), added: added.length, missing, mixed };
       } else if (combined.length && !missing && !mixed) {
@@ -183,11 +199,18 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
       } else row.suggestion = { text: textOf(combined), sourceIds: combined.map(item=>item.id), evidence: currentEvidence, added: added.length, missing, mixed };
       row.needsReview = !!row.suggestion || mixed || missing;
       row.currentEvidence = currentEvidence;
+      // 완료 제안(`끝났어요 · 완료로`) — 사람이 고쳤거나(또는 확정으로 굳은) 진행 중 문장의 업무가 **이 주 안에** 전부 끝났고,
+      // 업무 문구는 그대로일 때만. 문구까지 바뀌었으면 원래 제안(원본 바뀜)만 선다 — 옮기면서 바뀐 문구를 묻어 버리지 않게.
+      if (row.heading === '진행중' && !row.excluded && row.suggestion && !row.suggestion.added && !missing && linked.length
+        && linked.every(item => ['task','bug'].includes(item.type) && item.status === 'done' && item.completed && item.completed >= weekKey && item.completed <= weekEnd)) {
+        const said = new Map((row.evidence || []).map(entry => [entry.id, entry.description]));
+        if (linked.every(item => said.get(item.id) === item.description)) row.completable = true;
+      }
     }
     const groups = new Map();
     candidates.filter(item=>!claimed.has(item.id)).forEach(item=>{ const key=bucket(item); if(!groups.has(key))groups.set(key,[]);groups.get(key).push(item); });
-    for (const [key,items] of groups) rows.push({ id:`auto-${hash([key,items.map(item=>item.id).sort()]).slice(0,16)}`,bucket:key,heading:heading(items[0]),group:items[0].label || items[0].group || items[0].project || '그룹 없음', text:textOf(items),sourceIds:items.map(item=>item.id),evidence:items.map(evidence),currentEvidence:items.map(evidence),locked:false,excluded:false,needsReview:false });
-    const polish = polishOf(state, weekKey);
+    let pending = 0, pendingDone = 0;
+    for (const [key,items] of groups) if (hold) { pending += 1; if (heading(items[0]) === '완료한 일') pendingDone += 1; } else rows.push({ id:`auto-${hash([key,items.map(item=>item.id).sort()]).slice(0,16)}`,bucket:key,heading:heading(items[0]),group:items[0].label || items[0].group || items[0].project || '그룹 없음', text:textOf(items),sourceIds:items.map(item=>item.id),evidence:items.map(evidence),currentEvidence:items.map(evidence),locked:false,excluded:false,needsReview:false });
     dress(rows, weekKey, polish, opts.bundles !== undefined ? opts.bundles : bundles());
     const since = marks(rows, polish.seen, byId);
     const order=['완료한 일','진행중','새로 정해진 것','확인 완료','확인 대기',PLAN_HEADING];
@@ -215,9 +238,10 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
     // 제목·소제목 이름·새로 기록도 revision에 든다 — 다른 창에서 바꾼 것을 모르고 덮어쓰지 않게.
     const revision = hash({ stored, rows: ordered, polish });
     return { weekKey, rows: visible, revision, updatedAt: stored?.updatedAt || null, title: typeof polish.title === 'string' && polish.title ? polish.title : null, since,
+      confirmed: lockedAt ? { at: lockedAt, pending, pendingDone } : null,
       ...(opts.raw ? { byId } : {}) };
   }
-  function clean(row) { const { suggestion, needsReview, currentEvidence, canSplit, partCount, groupKey, shownGroup, groupOrigin, nameKey, fresh, changed, ...rest } = row; return rest; }
+  function clean(row) { const { suggestion, needsReview, currentEvidence, canSplit, partCount, groupKey, shownGroup, groupOrigin, nameKey, fresh, changed, completable, ...rest } = row; return rest; }
   // 계획 문장에 붙이는 프로젝트 이름. 없으면 기존처럼 `직접 작성`으로 담는다.
   function planGroup(group) {
     if (group === undefined || group === null || group === '') return '직접 작성';
@@ -238,8 +262,8 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
     return link;
   }
   function change({ weekKey, revision, action, id, parentId, text, ids, token, group, planOf: planSource, folded, heading: groupHeading, groupKey }) {
-    const state=read(), current=view(weekKey,state,undefined,{raw:true});
-    if (revision !== current.revision) { const error=new Error('새 기록이나 다른 창의 변경이 있어요. 적은 내용은 그대로 있어요. 최신 내용을 확인한 뒤 다시 저장해 주세요.');error.status=409;throw error; }
+    const state=read(), base=view(weekKey,state,undefined,{raw:true});
+    if (revision !== base.revision) { const error=new Error('새 기록이나 다른 창의 변경이 있어요. 적은 내용은 그대로 있어요. 최신 내용을 확인한 뒤 다시 저장해 주세요.');error.status=409;throw error; }
     // 묶기 전 문장은 화면으로 나가지 않으므로(view가 `canSplit`만 알린다) 저장 파일에서 다시 붙인다.
     // `parts`는 서버가 merge에서만 만든다 — 요청 본문의 값은 받지 않는다.
     const storedParts=new Map((state.weeks[weekKey]?.rows||[]).filter(row=>row.parts).map(row=>[row.id,row.parts]));
@@ -247,7 +271,11 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
     const storedParents=new Map((state.weeks[weekKey]?.rows||[]).filter(row=>row.parent).map(row=>[row.id,row.parent]));
     const carry=row=>{const next=clean(row);if(storedParts.has(row.id))next.parts=storedParts.get(row.id);
       if(next.parent===undefined&&storedParents.has(row.id))next.parent=storedParents.get(row.id);return next;};
+    // `보고에 넣기`(pullNew)만 확정으로 붙들어 둔 새 줄을 풀어 본 결과에서 시작한다 — 되돌리기는 그 전(base)으로 돌아간다.
+    const current=action==='pullNew'&&base.confirmed&&base.confirmed.pending?view(weekKey,state,undefined,{raw:true,release:true}):base;
     let rows=current.rows.map(carry); const row=rows.find(row=>row.id===id), shown=current.rows.find(row=>row.id===id);
+    // `+ 한 줄 추가`가 만든 업무 — 되돌리기 기록에 남겨 되돌릴 때 함께 지운다. 업무 파일을 건드렸으면 화면이 목록을 다시 받게 알린다.
+    let createdTask=null, tasksChanged=false, keepUndo=true;
     // 이 주의 다듬기 칸(제목·소제목 이름·새로 기록). 되돌리기는 문장과 함께 이 칸도 그 전으로 돌린다.
     const polishBefore=structuredClone(polishOf(state,weekKey));
     let polish=structuredClone(polishBefore);
@@ -255,6 +283,13 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
       const prior=undo.get(token); if(!prior || prior.weekKey!==weekKey)throw new Error('되돌리기 기록이 만료됐어요.');
       if(hash({rows:state.weeks[weekKey]?.rows,polish:polishOf(state,weekKey)})!==prior.after)throw new Error('그 뒤에 다른 변경이 있어 되돌릴 수 없어요. 최신 보고를 확인해 주세요.');
       rows=prior.rows; polish=structuredClone(prior.polish||{});
+      // `+ 한 줄 추가`를 되돌리면 그때 만든 업무도 지운다. 그 뒤 업무를 고쳤으면(문구·상태) 지운 항목(설정 › 삭제한 항목)에
+      // 남겨 되살릴 수 있게 하고, 그대로면 흔적 없이 지운다. 이 되돌리기는 다시 되돌리지 않는다(업무가 없는 줄만 돌아오므로).
+      if(prior.createdTask&&tasks){
+        const made=current.byId.get(prior.createdTask.id);
+        if(made)tasks.remove(prior.createdTask.id,sourceMark(made)!==prior.createdTask.mark);
+        tasksChanged=true; keepUndo=false;
+      }
     } else if(action==='retitle') {
       // 보고 제목. 빈 값이면 원래 제목(`이번 주`·`9월 4주차`)으로 돌아간다.
       const title=polishName(text,'보고 제목');
@@ -275,6 +310,37 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
       if(Object.keys(names).length)polish.names=names; else delete polish.names;
     } else if(action==='ackNew') {
       // `모두 확인` — 지금 보이는 업무를 전부 본 것으로 적는다(새로·바뀜 표시가 걷힌다). 문장은 그대로다.
+    } else if(action==='confirm') {
+      // 확정(선택) — 이 주의 문장을 자동 모으기가 더 흔들지 않게 한다(view의 `lockedAt`). 이미 확정했으면 처음 때를 그대로 둔다.
+      // 확정은 "다 봤다"는 뜻이라 지금 보이는 업무를 전부 본 것으로 적는다(모두 확인과 같다).
+      if(!(typeof polish.lockedAt==='string'&&polish.lockedAt))polish.lockedAt=new Date().toISOString();
+    } else if(action==='unconfirm') {
+      if(!(typeof polish.lockedAt==='string'&&polish.lockedAt))throw new Error('확정하지 않은 보고예요.');
+      delete polish.lockedAt;
+    } else if(action==='pullNew') {
+      // `보고에 넣기` — 확정 뒤 새로 들어온 업무를 새 줄로 넣는다(있던 문장에 더하지 않는다). 확정은 그대로다.
+      if(!base.confirmed)throw new Error('확정한 보고에서만 넣을 수 있어요.');
+      if(!base.confirmed.pending)throw new Error('새로 넣을 줄이 없어요. 최신 보고를 확인해 주세요.');
+    } else if(action==='addLine') {
+      // `+ 한 줄 추가` — 완료한 일·진행 중 칸의 소제목(프로젝트) 아래에 사람이 쓴 문장 그대로 한 줄. 같은 프로젝트의 업무도
+      // 만든다(완료한 일이면 이 주에 끝낸 업무, 진행 중이면 진행 중 업무 — 흔적은 업무의 `source:weekly`). 업무를 먼저 만들고
+      // 그 업무를 읽어 낸 뒤에 줄을 쓴다 — 서버에서는 둘이 한 트랜잭션이라 한쪽만 남지 않는다. 같은 요청을 다시 보내면
+      // (Idempotency-Key) 서버가 앞 결과를 돌려준다.
+      if(!tasks)throw new Error('이 앱에서는 보고에 줄을 더할 수 없어요.');
+      if(groupHeading!=='완료한 일'&&groupHeading!=='진행중')throw new Error('완료한 일·진행 중 칸에만 한 줄을 더할 수 있어요.');
+      if(typeof text!=='string'||!text.trim()||text.length>1000||/[\r\n]/.test(text))throw new Error('더할 문장을 1,000자 이내 한 줄로 적어 주세요.');
+      if(weekKey>currentWeek())throw new Error('아직 오지 않은 주에는 줄을 더할 수 없어요.');
+      if(groupHeading==='진행중'&&weekKey<currentWeek())throw new Error('지난 주 보고에는 진행 중 줄을 더할 수 없어요. 완료한 일 칸에 더해 주세요.');
+      if(typeof groupKey!=='string'||!/^(jira:.+|group:.+|ungrouped)$/.test(groupKey)
+        ||!current.rows.some(entry=>entry.heading===groupHeading&&entry.groupKey===groupKey&&!entry.excluded))throw new Error('줄을 더할 소제목을 찾을 수 없어요. 최신 보고를 확인해 주세요.');
+      const project=groupKey.startsWith('jira:')?{jira:groupKey.slice(5)}:groupKey.startsWith('group:')?{group:groupKey.slice(6)}:{};
+      // 완료일: 이번 주면 오늘(업무를 끝낼 때와 같다), 지난 주면 그 주 금요일(주말 날짜가 업무 목록에 서지 않게).
+      const madeId=tasks.create({description:text.trim(),done:groupHeading==='완료한 일',completed:weekKey<currentWeek()?dayAfter(weekKey,4):null,...project});
+      const made=sources().find(item=>item.id===madeId);
+      if(!made||heading(made)!==groupHeading)throw new Error('업무를 만들지 못했어요. 적은 내용은 그대로 있어요.');
+      rows.push({id:randomUUID(),heading:groupHeading,group:made.label||made.group||made.project||'그룹 없음',bucket:bucket(made),text:text.trim(),
+        sourceIds:[made.id],evidence:[evidence(made)],locked:true,excluded:false,origin:'weekly'});
+      createdTask={id:made.id,mark:sourceMark(made)}; tasksChanged=true;
     } else if(action==='add') {
       if(typeof text!=='string'||!text.trim()||text.length>10000)throw new Error('보고 문장을 입력해 주세요.');
       const link=planOf(planSource);
@@ -316,6 +382,17 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
         const linked=(row.sourceIds||[]).map(sourceId=>current.byId.get(sourceId)).filter(Boolean);
         if(!row.locked||row.manual||!linked.length)throw new Error('원래 문장으로 돌릴 수 없어요. 원본 업무를 확인해 주세요.');
         row.text=textOf(linked);row.evidence=linked.map(evidence);row.sourceIds=linked.map(item=>item.id);row.locked=false;row.legacy=false;
+      }
+      // 완료 제안의 `완료로` — 진행 중 문장을 문장 그대로 완료한 일 칸(같은 프로젝트 소제목)으로 옮긴다. 다른 문장 아래에
+      // 있었거나 아래에 문장이 있었으면 그 자리 연결은 푼다(칸이 달라 함께 설 수 없다) — 되돌리기가 그대로 되살린다.
+      else if(action==='complete') {
+        if(!shown.completable)throw new Error('완료로 옮길 수 없어요. 최신 보고를 확인해 주세요.');
+        const linked=row.sourceIds.map(sourceId=>current.byId.get(sourceId));
+        row.heading='완료한 일';
+        if(row.bucket)row.bucket=bucket(linked[0]);
+        row.evidence=linked.map(evidence);row.locked=true;row.legacy=false;
+        delete row.parent;
+        rows.forEach(entry=>{if(entry.parent===row.id)delete entry.parent;});
       }
       else if(action==='accept') { if(!shown.suggestion || shown.suggestion.missing || shown.suggestion.mixed)throw new Error('원본 상태를 확인하고 문장을 직접 수정해 주세요.');Object.assign(row,shown.suggestion,{locked:true,legacy:false});delete row.added;delete row.missing;delete row.mixed; }
       else if(action==='acknowledge') { row.evidence=shown.suggestion?.evidence || shown.currentEvidence;row.sourceIds=shown.suggestion?.sourceIds || row.sourceIds;row.legacy=false;row.locked=true; }
@@ -371,12 +448,16 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
       const idsOf=list=>[...new Set(list.flatMap(entry=>[...(entry.sourceIds||[]),...(entry.suggestion?.sourceIds||[])]))];
       const seenIds=list=>Object.fromEntries(idsOf(list).map(sourceId=>[sourceId,sourceMark(current.byId.get(sourceId))]));
       const seen=isPlain(polish.seen)&&isPlain(polish.seen.ids)?polish.seen:null;
-      if(action==='ackNew'||!seen) polish.seen={at:now,ids:seenIds(current.rows)};
+      if(action==='ackNew'||action==='confirm'||!seen) polish.seen={at:now,ids:seenIds(current.rows)};
       else {
         const touched=new Set([id,parentId,...(Array.isArray(ids)?ids:[])].filter(value=>typeof value==='string'));
-        const hit=current.rows.filter(entry=>touched.has(entry.id)||(action==='rename'&&entry.heading===groupHeading&&entry.groupKey===groupKey));
+        const known=new Set(base.rows.map(entry=>entry.id));
+        const hit=current.rows.filter(entry=>touched.has(entry.id)||(action==='rename'&&entry.heading===groupHeading&&entry.groupKey===groupKey)
+          ||(action==='pullNew'&&!known.has(entry.id)));
         polish.seen={at:now,ids:{...seen.ids,...seenIds(hit)}};
       }
+      // 사람이 방금 더한 줄의 업무는 "새로 들어온 것"이 아니다.
+      if(createdTask)polish.seen.ids={...polish.seen.ids,[createdTask.id]:createdTask.mark};
     }
     const undoToken=randomUUID();
     state.weeks[weekKey]={rows,updatedAt:new Date().toISOString()};
@@ -384,8 +465,8 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
     if(Object.keys(polish).length){if(!isPlain(state.weekPolish))state.weekPolish={};state.weekPolish[weekKey]=polish;}
     else if(isPlain(state.weekPolish)){delete state.weekPolish[weekKey];if(!Object.keys(state.weekPolish).length)delete state.weekPolish;}
     atomicWrite(filename,JSON.stringify(state,null,2));
-    undo.set(undoToken,{weekKey,rows:current.rows.map(carry),polish:polishBefore,after:hash({rows,polish:polishOf(state,weekKey)})});if(undo.size>50)undo.delete(undo.keys().next().value);
-    return {ok:true,report:view(weekKey,state),undoToken};
+    if(keepUndo){undo.set(undoToken,{weekKey,rows:base.rows.map(carry),polish:polishBefore,after:hash({rows,polish:polishOf(state,weekKey)}),...(createdTask?{createdTask}:{})});if(undo.size>50)undo.delete(undo.keys().next().value);}
+    return {ok:true,report:view(weekKey,state),undoToken:keepUndo?undoToken:null,...(tasksChanged?{tasksChanged:true}:{})};
   }
   function weeks(snapshot=sources(), state=read()) {
     const dates=snapshot.flatMap(item=>[item.completed,...(['decision','check'].includes(item.type)?[item.created]:[])]).filter(date=>/^\d{4}-\d{2}-\d{2}$/.test(date || ''));

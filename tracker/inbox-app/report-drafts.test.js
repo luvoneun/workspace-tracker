@@ -1027,3 +1027,252 @@ test('다듬기 A(Codex P2): 묶음 소제목 이름을 바꾼 뒤 대표를 바
   f.bundles.length=0;
   assert.deepEqual([f.row('정산 배치 점검함').shownGroup,f.row('서버 로그 정리함').shownGroup],['결제 개편',undefined]);
 });
+
+// ---------- 다듬기 B: `+ 한 줄 추가`(업무로도) · 완료 제안 · 확정 ----------
+function lineFixture(t,{week='2026-09-14',bundles=[]}={}) {
+  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'report-lines-'));t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
+  const items=[
+    {id:'a',type:'task',description:'문구 검토하기',status:'done',created:'2026-09-14',completed:'2026-09-15',group:'가입',label:'가입'},
+    {id:'p',type:'task',description:'영수증 메일 발송 시점 정리하기',status:'to-do',doing:'2026-09-15',created:'2026-09-14',jira:'PAY-1',label:'PAY-1 · 결제 리뉴얼'},
+  ];
+  const made=[],removed=[];
+  let seq=0,failCreate=false;
+  const tasks={
+    create:({description,done,completed,jira,group})=>{
+      if(failCreate)throw new Error('업무 파일을 쓰지 못했어요');
+      const id=`w${++seq}`;
+      items.push({id,type:'task',description,status:done?'done':'to-do',created:'2026-09-16',...(done?{completed:completed||'2026-09-16'}:{doing:'2026-09-16'}),
+        ...(jira?{jira,label:`${jira} · 결제 리뉴얼`}:{}),...(group?{group,label:group}:{})});
+      made.push({id,description,done,completed,jira,group});return id;
+    },
+    remove:(id,keep)=>{removed.push([id,keep]);const at=items.findIndex(item=>item.id===id);if(at>=0)items.splice(at,1);return true;},
+  };
+  const opts={directory,sources:()=>items,legacy:()=>[],currentWeek:()=>week,bundles:()=>bundles,tasks};
+  const store=factory(opts);
+  const view=(key=week)=>store.view(key);
+  const change=(action,key=week)=>store.change({weekKey:key,revision:view(key).revision,...action});
+  const row=(text,key=week)=>view(key).rows.find(entry=>entry.text===text);
+  const file=path.join(directory,'.report-drafts.json');
+  const saved=()=>JSON.parse(fs.readFileSync(file,'utf8'));
+  return {directory,items,store,view,change,row,file,saved,opts,made,removed,fail:value=>{failCreate=value;}};
+}
+test('다듬기 B: `+ 한 줄 추가`는 완료한 일 칸이면 이 주에 끝낸 업무를, 진행 중 칸이면 진행 중 업무를 같은 프로젝트로 만들고 사람이 쓴 문장 그대로 한 줄을 넣는다',t=>{
+  const f=lineFixture(t);
+  const result=f.change({action:'addLine',heading:'완료한 일',groupKey:'group:가입',text:'  가입 완료 화면 카피 최종본 전달함 '});
+  assert.equal(result.tasksChanged,true,'화면이 업무 목록을 다시 받게 알린다');
+  assert.deepEqual(f.made[0],{id:'w1',description:'가입 완료 화면 카피 최종본 전달함',done:true,completed:null,jira:undefined,group:'가입'},'이번 주면 완료일은 오늘(만드는 쪽이 정한다)');
+  const line=f.row('가입 완료 화면 카피 최종본 전달함');
+  assert.deepEqual([line.heading,line.groupKey,line.sourceIds,line.locked,line.origin],['완료한 일','group:가입',['w1'],true,'weekly']);
+  assert.equal(line.fresh,undefined,'방금 더한 줄은 `새로`가 아니다');
+  assert.equal(f.view().rows.filter(entry=>entry.sourceIds.includes('w1')).length,1,'자동 문장이 같은 업무로 한 줄 더 생기지 않는다');
+  f.items.find(item=>item.id==='w1').description='가입 완료 화면 카피 최종본 전달하기';
+  assert.ok(f.row('가입 완료 화면 카피 최종본 전달함'),'자동 문장으로 다시 쓰지 않는다(고친 것 불변)');
+  f.change({action:'addLine',heading:'진행중',groupKey:'jira:PAY-1',text:'환불 규칙 정리 중'});
+  assert.deepEqual(f.made[1],{id:'w2',description:'환불 규칙 정리 중',done:false,completed:null,jira:'PAY-1',group:undefined});
+  assert.deepEqual([f.row('환불 규칙 정리 중').heading,f.row('환불 규칙 정리 중').groupKey],['진행중','jira:PAY-1']);
+  // 60자 넘는 긴 문장도 그대로 한 줄(줄바꿈은 화면이 보여 줄 때만).
+  const long='가'.repeat(120);
+  f.change({action:'addLine',heading:'완료한 일',groupKey:'group:가입',text:long});
+  assert.equal(f.row(long).text.length,120);
+});
+test('다듬기 B: 묶음이면 `+ 한 줄 추가`의 업무는 대표 티켓에 붙는다',t=>{
+  const bundles=[{id:'bd_1',lead:'jira:PAY-1',keys:['jira:PAY-1','jira:PAY-2'],at:'2026-09-15T03:00:00.000Z'}];
+  const f=lineFixture(t,{bundles});
+  f.items.push({id:'q',type:'task',description:'서버 로그 정리하기',status:'done',created:'2026-09-14',completed:'2026-09-15',jira:'PAY-2',label:'PAY-2 · 결제 서버'});
+  assert.equal(f.row('서버 로그 정리함').groupKey,'jira:PAY-1');
+  f.change({action:'addLine',heading:'완료한 일',groupKey:'jira:PAY-1',text:'정산 알림 켬'});
+  assert.equal(f.made[0].jira,'PAY-1');
+  assert.equal(f.row('정산 알림 켬').groupKey,'jira:PAY-1');
+});
+test('다듬기 B: `+ 한 줄 추가`를 되돌리면 줄과 업무가 함께 사라지고(고친 업무는 지운 항목에 남긴다), 그 되돌리기는 다시 되돌리지 않는다',t=>{
+  const f=lineFixture(t);
+  const first=f.change({action:'addLine',heading:'완료한 일',groupKey:'group:가입',text:'약관 링크 고침'});
+  const undone=f.change({action:'undo',token:first.undoToken});
+  assert.equal(f.row('약관 링크 고침'),undefined);
+  assert.equal(f.items.some(item=>item.id==='w1'),false);
+  assert.deepEqual(f.removed,[['w1',false]],'만든 그대로면 흔적 없이 지운다');
+  assert.equal(undone.undoToken,null);
+  assert.equal(undone.tasksChanged,true);
+  const second=f.change({action:'addLine',heading:'완료한 일',groupKey:'group:가입',text:'약관 링크 다시 고침'});
+  f.items.find(item=>item.id==='w2').description='약관 링크 다시 고침(최종)';
+  f.change({action:'undo',token:second.undoToken});
+  assert.deepEqual(f.removed[1],['w2',true],'만든 뒤 고친 업무는 지운 항목에 남긴다');
+  assert.equal(f.view().rows.some(entry=>entry.sourceIds.includes('w2')),false);
+});
+test('다듬기 B: 빈 문장·여러 줄·결정 칸·모르는 소제목·오지 않은 주는 거절하고 업무도 보고도 쓰지 않는다',t=>{
+  const f=lineFixture(t);
+  f.items.push({id:'d',type:'decision',description:'환불은 7일',created:'2026-09-15',status:'to-do',group:'가입',label:'가입'});
+  const bad=[
+    [{heading:'완료한 일',groupKey:'group:가입',text:'   '},/1,000자 이내 한 줄/],
+    [{heading:'완료한 일',groupKey:'group:가입',text:'두\n줄'},/1,000자 이내 한 줄/],
+    [{heading:'새로 정해진 것',groupKey:'group:가입',text:'결정 한 줄'},/완료한 일·진행 중 칸에만/],
+    [{heading:'완료한 일',groupKey:'group:없는',text:'한 줄'},/소제목을 찾을 수 없어요/],
+    [{heading:'진행중',groupKey:'group:가입',text:'한 줄'},/소제목을 찾을 수 없어요/],
+    [{heading:'완료한 일',groupKey:'name:여러 프로젝트',text:'한 줄'},/소제목을 찾을 수 없어요/],
+  ];
+  for(const [action,pattern] of bad)assert.throws(()=>f.change({action:'addLine',...action}),pattern);
+  assert.throws(()=>f.change({action:'addLine',heading:'완료한 일',groupKey:'group:가입',text:'미래'},'2026-09-21'),/아직 오지 않은 주/);
+  assert.equal(f.made.length,0);
+  assert.equal(fs.existsSync(f.file),false,'거절하면 보고 저장본도 쓰지 않는다');
+});
+test('다듬기 B: 지난 주 보고의 `+ 한 줄 추가`는 완료한 일 칸만 되고 완료일은 그 주 금요일이다',t=>{
+  const f=lineFixture(t,{week:'2026-09-21'});
+  f.change({action:'addLine',heading:'완료한 일',groupKey:'group:가입',text:'지난주에 한 일 적음'},'2026-09-14');
+  assert.equal(f.made[0].completed,'2026-09-18');
+  assert.equal(f.row('지난주에 한 일 적음','2026-09-14').heading,'완료한 일');
+  f.items.push({id:'r',type:'task',description:'진행 업무',status:'to-do',doing:'2026-09-22',created:'2026-09-21',group:'가입',label:'가입'});
+  assert.throws(()=>f.change({action:'addLine',heading:'진행중',groupKey:'group:가입',text:'x'},'2026-09-14'),/지난 주 보고에는 진행 중/);
+  assert.equal(f.made.length,1);
+});
+test('다듬기 B: 업무를 만들지 못하면(또는 만든 업무를 읽지 못하면) 줄도 쓰지 않는다',t=>{
+  const f=lineFixture(t);
+  f.fail(true);
+  assert.throws(()=>f.change({action:'addLine',heading:'완료한 일',groupKey:'group:가입',text:'반쯤'}),/업무 파일을 쓰지 못했어요/);
+  assert.equal(fs.existsSync(f.file),false);
+  f.fail(false);
+  const lost=factory({...f.opts,tasks:{create:()=>'없는-id',remove:()=>true}});
+  assert.throws(()=>lost.change({weekKey:'2026-09-14',revision:lost.view('2026-09-14').revision,action:'addLine',heading:'완료한 일',groupKey:'group:가입',text:'반쯤'}),/업무를 만들지 못했어요/);
+  assert.equal(fs.existsSync(f.file),false);
+  const none=factory({...f.opts,tasks:null});
+  assert.throws(()=>none.change({weekKey:'2026-09-14',revision:none.view('2026-09-14').revision,action:'addLine',heading:'완료한 일',groupKey:'group:가입',text:'x'}),/더할 수 없어요/);
+});
+test('다듬기 B: 더한 줄의 업무를 지우면 줄은 남고 원본 확인 제안, 미완료로 되돌리면 완료 칸에 남고 제안만(자동으로 옮기지 않는다)',t=>{
+  const f=lineFixture(t);
+  f.change({action:'addLine',heading:'완료한 일',groupKey:'group:가입',text:'첫 줄'});
+  f.change({action:'addLine',heading:'완료한 일',groupKey:'group:가입',text:'둘째 줄'});
+  f.items.splice(f.items.findIndex(item=>item.id==='w1'),1);
+  const gone=f.row('첫 줄');
+  assert.deepEqual([gone.heading,gone.suggestion.missing,gone.completable],['완료한 일',true,undefined]);
+  const task=f.items.find(item=>item.id==='w2');task.status='to-do';delete task.completed;
+  const back=f.row('둘째 줄');
+  assert.equal(back.heading,'완료한 일');
+  assert.ok(back.suggestion&&!back.suggestion.missing);
+  assert.equal(back.completable,undefined);
+});
+test('다듬기 B: 고친 진행 중 줄의 업무가 이 주에 끝나면 `완료로` 제안 — 누르면 문장 그대로 완료한 일 칸 같은 프로젝트로, 되돌리기도 된다',t=>{
+  const f=lineFixture(t);
+  const id=f.row('영수증 메일 발송 시점 정리하기').id;
+  f.change({action:'edit',id,text:'영수증 메일 발송 시점 정리 중'});
+  assert.equal(f.row('영수증 메일 발송 시점 정리 중').completable,undefined,'아직 안 끝났으면 제안 없음');
+  assert.throws(()=>f.change({action:'complete',id}),/완료로 옮길 수 없어요/);
+  const task=f.items.find(item=>item.id==='p');
+  Object.assign(task,{status:'done',completed:'2026-09-17'});delete task.doing;
+  const offer=f.row('영수증 메일 발송 시점 정리 중');
+  assert.deepEqual([offer.heading,offer.completable],['진행중',true]);
+  const moved=f.change({action:'complete',id});
+  const done=f.row('영수증 메일 발송 시점 정리 중');
+  assert.deepEqual([done.heading,done.groupKey,done.suggestion,done.completable],['완료한 일','jira:PAY-1',undefined,undefined]);
+  f.change({action:'undo',token:moved.undoToken});
+  assert.equal(f.row('영수증 메일 발송 시점 정리 중').heading,'진행중');
+});
+test('다듬기 B: 업무 문구까지 바뀌었거나 이 주 밖에서 끝났으면 `완료로` 제안이 없고, 자동 문장은 스스로 완료 칸으로 간다',t=>{
+  const f=lineFixture(t);
+  const task=f.items.find(item=>item.id==='p');
+  Object.assign(task,{status:'done',completed:'2026-09-16'});
+  assert.equal(f.view().rows.find(entry=>entry.sourceIds.includes('p')).heading,'완료한 일');
+  Object.assign(task,{status:'to-do',completed:undefined});
+  f.change({action:'edit',id:f.view().rows.find(entry=>entry.sourceIds.includes('p')).id,text:'정리 중'});
+  Object.assign(task,{status:'done',completed:'2026-09-16',description:'영수증 메일 발송 시점 정리하기(재작업)'});
+  const changed=f.row('정리 중');
+  assert.ok(changed.suggestion);
+  assert.equal(changed.completable,undefined,'문구가 바뀌면 원래 제안만');
+  Object.assign(task,{description:'영수증 메일 발송 시점 정리하기',completed:'2026-09-22'});
+  assert.equal(f.row('정리 중').completable,undefined,'다음 주에 끝났으면 이 주 완료로 옮기지 않는다');
+});
+test('다듬기 B: 아래로 넣은 진행 중 줄을 완료로 옮기면 자리 연결을 풀고, 더한 줄도 다른 문장 아래로 넣을 수 있다',t=>{
+  const f=lineFixture(t);
+  f.change({action:'addLine',heading:'진행중',groupKey:'jira:PAY-1',text:'환불 규칙 정리 중'});
+  const parent=f.row('영수증 메일 발송 시점 정리하기').id,child=f.row('환불 규칙 정리 중').id;
+  f.change({action:'nest',id:child,parentId:parent});
+  assert.equal(f.row('환불 규칙 정리 중').parent,parent,'더한 줄도 다른 문장 아래로 넣는다');
+  const task=f.items.find(item=>item.id==='w1');
+  Object.assign(task,{status:'done',completed:'2026-09-17'});delete task.doing;
+  assert.equal(f.row('환불 규칙 정리 중').completable,true);
+  f.change({action:'complete',id:child});
+  const moved=f.row('환불 규칙 정리 중');
+  assert.deepEqual([moved.heading,moved.parent],['완료한 일',undefined]);
+  assert.equal(f.saved().weeks['2026-09-14'].rows.find(entry=>entry.id===child).parent,undefined,'저장된 자리 연결도 푼다');
+});
+test('다듬기 B: 확정하면 자동 모으기가 새 문장을 넣지 않고 줄 수로만 세고, 있던 문장은 바뀌어도 그대로(제안만), `보고에 넣기`로 새 줄로 들어간다',t=>{
+  const f=lineFixture(t);
+  f.change({action:'confirm'});
+  const at=f.view().confirmed.at;
+  assert.match(at,/^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(f.saved().weekPolish['2026-09-14'].lockedAt,at,'맨 위 다듬기 칸에 둔다');
+  f.items.push({id:'n',type:'task',description:'가입 문구 후속 확인하기',status:'done',created:'2026-09-16',completed:'2026-09-16',group:'가입',label:'가입'});
+  f.items.push({id:'m',type:'decision',description:'새 결정',status:'to-do',created:'2026-09-16',group:'결제',label:'결제'});
+  let view=f.view();
+  assert.deepEqual(view.confirmed,{at,pending:2,pendingDone:1});
+  assert.equal(view.rows.some(entry=>entry.sourceIds.includes('n')||entry.sourceIds.includes('m')),false,'새 업무는 문장이 되지 않는다');
+  assert.equal(view.rows.find(entry=>entry.sourceIds.includes('a')).suggestion,undefined,'같은 소제목 문장에 새 업무를 붙이지도 않는다');
+  f.items.find(item=>item.id==='a').description='문구 검토하기(최종)';
+  const row=f.view().rows.find(entry=>entry.sourceIds.includes('a'));
+  assert.deepEqual([row.text,!!row.suggestion],['문구 검토함',true],'확정 뒤 원본이 바뀌어도 문장은 그대로, 제안만');
+  f.change({action:'confirm'});
+  assert.equal(f.view().confirmed.at,at,'다시 확정해도 처음 때 그대로');
+  const pulled=f.change({action:'pullNew'});
+  view=f.view();
+  assert.deepEqual(view.confirmed,{at,pending:0,pendingDone:0});
+  assert.ok(view.rows.some(entry=>entry.sourceIds.includes('n'))&&view.rows.some(entry=>entry.sourceIds.includes('m')));
+  assert.equal(view.rows.filter(entry=>entry.fresh).length,0,'넣은 줄은 본 것으로 적는다');
+  assert.throws(()=>f.change({action:'pullNew'}),/새로 넣을 줄이 없어요/);
+  f.change({action:'undo',token:pulled.undoToken});
+  assert.equal(f.view().confirmed.pending,2,'되돌리면 다시 붙들어 둔다');
+});
+test('다듬기 B: 확정·확정 풀기는 되돌릴 수 있고, 풀면 자동 모으기가 다시 새 업무를 넣는다',t=>{
+  const f=lineFixture(t);
+  const on=f.change({action:'confirm'});
+  f.change({action:'undo',token:on.undoToken});
+  assert.equal(f.view().confirmed,null);
+  f.change({action:'confirm'});
+  assert.throws(()=>lineFixture(t).change({action:'unconfirm'}),/확정하지 않은 보고예요/);
+  f.items.push({id:'n',type:'task',description:'가입 후속 확인하기',status:'done',created:'2026-09-16',completed:'2026-09-16',group:'가입',label:'가입'});
+  const off=f.change({action:'unconfirm'});
+  assert.equal(f.view().confirmed,null);
+  assert.ok(f.view().rows.some(entry=>entry.sourceIds.includes('n')),'풀면 새 업무가 다시 들어온다');
+  f.change({action:'undo',token:off.undoToken});
+  assert.equal(f.view().confirmed.pending,1,'되돌리면 확정으로 — 풀 때 들어온 줄은 다시 붙들어 둔다');
+});
+test('다듬기 B: 확정 뒤에도 사람이 하는 일(더하기·아래로 넣기·따로 빼기·완료로)은 되고 확정은 그대로다',t=>{
+  const f=lineFixture(t);
+  f.change({action:'confirm'});
+  f.change({action:'addLine',heading:'진행중',groupKey:'jira:PAY-1',text:'환불 규칙 정리 중'});
+  assert.equal(f.view().confirmed.pending,0,'더한 줄의 업무는 새로 들어온 것으로 세지 않는다');
+  const parent=f.row('영수증 메일 발송 시점 정리하기').id,child=f.row('환불 규칙 정리 중').id;
+  f.change({action:'nest',id:child,parentId:parent});
+  f.change({action:'unnest',id:child});
+  assert.equal(f.row('환불 규칙 정리 중').parent,undefined);
+  const task=f.items.find(item=>item.id==='p');
+  Object.assign(task,{status:'done',completed:'2026-09-17'});delete task.doing;
+  const auto=f.row('영수증 메일 발송 시점 정리하기');
+  assert.deepEqual([auto.heading,auto.completable],['진행중',true],'확정으로 굳은 자동 문장도 완료 제안');
+  f.change({action:'complete',id:auto.id});
+  assert.equal(f.row('영수증 메일 발송 시점 정리하기').heading,'완료한 일');
+  assert.ok(f.view().confirmed);
+});
+test('다듬기 B(99 ③): 옛 앱(1.2.1)이 저장해도 확정(맨 위 칸)과 더한 줄의 `origin`(행 안 칸)이 남고, origin이 사라져도 줄은 사람이 쓴 그대로다',t=>{
+  let source='';
+  try { source=require('node:child_process').execFileSync('git',['show','v1.2.1:tracker/inbox-app/report-drafts.js'],{cwd:__dirname,encoding:'utf8',stdio:['ignore','pipe','ignore']}); } catch {}
+  if(!source){t.skip('v1.2.1 태그를 읽을 수 없어요');return;}
+  const f=lineFixture(t);
+  f.change({action:'addLine',heading:'완료한 일',groupKey:'group:가입',text:'가입 카피 전달함'});
+  f.change({action:'confirm'});
+  const oldFile=path.join(f.directory,'old-report-drafts.js');
+  fs.writeFileSync(oldFile,source.replace("require('./safe-storage')",`require(${JSON.stringify(path.join(__dirname,'safe-storage'))})`));
+  const oldStore=require(oldFile)({directory:f.directory,sources:()=>f.items,legacy:()=>[],currentWeek:()=>'2026-09-14'});
+  const oldView=oldStore.view('2026-09-14');
+  assert.equal(oldView.rows.find(row=>row.text==='가입 카피 전달함').origin,'weekly','옛 앱도 행 안의 모르는 칸은 들고 있다');
+  oldStore.change({weekKey:'2026-09-14',revision:oldView.revision,action:'exclude',id:oldView.rows.find(row=>row.text==='문구 검토함').id});
+  const state=f.saved();
+  assert.equal(typeof state.weekPolish['2026-09-14'].lockedAt,'string','확정은 맨 위 칸이라 남는다');
+  assert.equal(state.weeks['2026-09-14'].rows.find(row=>row.text==='가입 카피 전달함').origin,'weekly','옛 앱의 저장(clean)도 행 안 칸은 버리지 않는다');
+  // 행 안 칸이 어떤 이유로 사라져도(손으로 고친 파일 등) 줄은 locked라 자동 문장으로 덮이지 않는다.
+  delete state.weeks['2026-09-14'].rows.find(row=>row.text==='가입 카피 전달함').origin;
+  state.weekPolish['2026-09-14']={};
+  fs.writeFileSync(f.file,JSON.stringify(state));
+  f.items.find(item=>item.id==='w1').description='다른 문구';
+  const back=factory(f.opts).view('2026-09-14');
+  const line=back.rows.find(row=>row.sourceIds.includes('w1'));
+  assert.deepEqual([line.text,line.heading,back.rows.filter(row=>row.sourceIds.includes('w1')).length],['가입 카피 전달함','완료한 일',1]);
+  assert.ok(f.items.some(item=>item.id==='w1'),'업무는 그대로 남는다');
+});

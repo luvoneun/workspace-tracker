@@ -2626,6 +2626,24 @@ const reportDrafts = require('./report-drafts')({
   directory: TRACKER_DIR, sources: () => workflows.snapshot().items, legacy: parseWeeklyReports, currentWeek: currentWeekKey,
   bundles: () => workflows.snapshot().projectBundles,
   projectLabel: key => (key.startsWith('jira:') ? projectLabelOf({ jira: key.slice('jira:'.length) }) : key.startsWith('group:') ? key.slice('group:'.length) : null),
+  // 보고 칸의 `+ 한 줄 추가`가 만드는 업무와 그 되돌리기. 부르는 곳(`/api/report/change`)이 이미 저장 트랜잭션(idempotent →
+  // mutations.run) 안이라 업무 파일과 보고 저장본이 함께 쓰이거나 함께 되돌아간다. 흔적은 기존 출처 칸(`source:weekly`) —
+  // 슬랙 출처(`slack:`)로 읽는 곳들은 앞머리로 가르므로 영향이 없다.
+  tasks: {
+    create: ({ description, done, completed, jira, group }) => {
+      const result = createManualTask({ description, jira, group, scheduled: completed || todayLocal() });
+      if (!result || !result.ok) throw new Error('업무를 만들지 못했어요. 적은 내용은 그대로 있어요.');
+      setTrackField(result.id, 'source', 'weekly', 'task');
+      if (done) {
+        toggleTrackStatus(result.id, 'done');
+        if (completed && completed !== todayLocal()) setTrackField(result.id, 'completed', completed, 'task');
+      } else setTrackDoing(result.id, true);
+      usage.add('task_add');
+      return result.id;
+    },
+    // keep: 만든 뒤 고친 업무면 지운 항목(.trash.json)에 남긴다.
+    remove: (id, keep) => removeTrackItem(id, !!keep),
+  },
 });
 const mutations = require('./mutation-store')(TRACKER_DIR, [MEETING_LINKS_PATH, weeklyReportStatePath()]);
 // 지라 직접 읽기. 설정이 없으면 `connected:false`만 돌려주고 아무 데도 접속하지 않는다.

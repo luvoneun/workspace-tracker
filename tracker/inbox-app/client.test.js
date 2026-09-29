@@ -11639,9 +11639,9 @@ test('v3: 머리 ⋯에는 전체 업무 기록·제외한 문장·되돌리기�
     const item = { weekKey: '2026-09-14', draft: { rows: [ { id: 'a', excluded: false, sourceIds: ['s1'] }, { id: 'b', excluded: true, sourceIds: [] } ] } };
     return JSON.stringify(reportHeadMenuSections(item).map(s => s.map(e => [e.label, !!e.disabled])));
   })()`));
-  assert.deepEqual(labels, [[['전체 업무 기록 보기', false], ['제외한 문장 보기 · 1개', false], ['직전 변경 되돌리기', false]], [['보고 1문장 · 근거 업무 1개', true]]]);
+  assert.deepEqual(labels, [[['이 보고 확정하기', false]], [['전체 업무 기록 보기', false], ['제외한 문장 보기 · 1개', false], ['직전 변경 되돌리기', false]], [['보고 1문장 · 근거 업무 1개', true]]]);
   app.run("reportMode = 'records'");
-  assert.equal(app.run("reportHeadMenuSections({ weekKey: 'W', draft: { rows: [] } })[0][0].label"), '보고로 돌아가기');
+  assert.equal(app.run("reportHeadMenuSections({ weekKey: 'W', draft: { rows: [] } })[1][0].label"), '보고로 돌아가기');
   app.run("reportMode = 'draft'");
   app.run("reportEdits.set('2026-09-14:a1', '고치는 중')");
   assert.equal(app.run("reportEditing('2026-09-14')"), true);
@@ -11936,4 +11936,175 @@ test('상세 카드 화면 규칙: 누구에게 조용한 입력, 결정 내용 
   assert.match(css, /\.d-iconbtn\.xs \{ width: 28px; height: 28px; \}/);
   assert.match(css, /\.d-dpick \.cv\.cal \.d-i \{ transform: none; \}/);
   assert.match(css, /\.d-dvalue \{ display: flex; align-items: center; gap: 4px; flex-wrap: nowrap;/);
+});
+
+// ---------- 주간요약 다듬기 B(화면): 칸마다 `+ 한 줄 추가` · 완료 제안 알약 · 확정 ----------
+const B_ROWS = `[
+  { id: 'd1', heading: '완료한 일', group: '가입', groupKey: 'group:가입', text: '문구 검토함', sourceIds: ['s1'], excluded: false },
+  { id: 'g1', heading: '진행중', group: 'PAY-1 · 결제 리뉴얼', groupKey: 'jira:PAY-1', text: '영수증 메일 발송 시점 정리 중', sourceIds: ['s2'], excluded: false, locked: true,
+    needsReview: true, completable: true, suggestion: { text: '영수증 메일 발송 시점 정리함', added: 0, missing: false, mixed: false } },
+  { id: 'w1', heading: '완료한 일', group: '가입', groupKey: 'group:가입', text: '가입 카피 전달함', sourceIds: ['s3'], excluded: false, locked: true, origin: 'weekly' },
+  { id: 'm1', heading: '완료한 일', group: '여러 프로젝트', groupKey: 'name:여러 프로젝트', text: '요약', sourceIds: [], excluded: false, manual: true }
+]`;
+const B_ITEM = `{ weekKey: '2026-09-14', draft: { revision: 1, rows: ${B_ROWS} } }`;
+test('다듬기 B: 진행 중 줄의 업무가 끝나면 줄 끝 초록 알약 `끝났어요` + 안의 `완료로` 하나 — 누르면 complete를 보낸다', async () => {
+  const app = reportClient();
+  app.run('calls = []; reportChange = async (target, action) => { calls.push(action); };');
+  const pill = v3Kid(v3Line(app, 1, B_ITEM), 'rp-pill');
+  assert.equal(pill.className, 'd-chip rp-pill is-done');
+  assert.deepEqual(pill.children.map(kid => kid.textContent), ['끝났어요', '완료로']);
+  assert.equal(pill.children[1].type, 'button');
+  const move = pill.children[1];
+  assert.equal(move.className, 'd-btn xs');
+  assert.match(move.getAttribute('aria-label'), /완료한 일로 옮기기$/);
+  move.listeners.click({ stopPropagation() {} });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), [{ action: 'complete', id: 'g1' }]);
+  assert.equal(v3Kid(v3Line(app, 0, B_ITEM), 'rp-pill'), undefined, '알약은 그 줄에만 선다');
+});
+test('다듬기 B: `+ 한 줄 추가`는 완료한 일 칸(지난 주 포함)·이번 주 진행 중 칸의 프로젝트 소제목에만, 모으기 중에는 없다', () => {
+  const app = reportClient();
+  app.run("reportPlanIsCurrentWeek = weekKey => weekKey === '2026-09-14';");
+  const can = (heading, key, week = '2026-09-14') => app.run(`reportCanAddLine({ weekKey: '${week}' }, '${heading}', { key: ${JSON.stringify(key)} })`);
+  assert.equal(can('완료한 일', 'group:가입'), true);
+  assert.equal(can('진행중', 'jira:PAY-1'), true);
+  assert.equal(can('완료한 일', 'ungrouped'), true);
+  assert.equal(can('진행중', 'jira:PAY-1', '2026-09-07'), false, '지난 주 진행 중 칸은 없다');
+  assert.equal(can('완료한 일', 'group:가입', '2026-09-07'), true, '지난 주 완료한 일 칸은 있다');
+  assert.equal(can('새로 정해진 것', 'group:가입'), false, '결정 칸은 없다');
+  assert.equal(can('확인 대기', 'group:가입'), false);
+  assert.equal(can('완료한 일', 'name:여러 프로젝트'), false, '프로젝트 열쇠가 없는 소제목은 없다');
+  assert.equal(can('완료한 일', null), false);
+  app.run("reportNestParentId = 'x'");
+  assert.equal(can('완료한 일', 'group:가입'), false, '모으기 중에는 없다');
+  app.run("reportNestParentId = null; reportMode = 'records'");
+  assert.equal(can('완료한 일', 'group:가입'), false);
+});
+test('다듬기 B: `+ 한 줄 추가` — 누르면 그 자리 입력칸과 안내 한 줄, 빈 Enter는 아무 일 없음, Enter는 요청 id와 함께 addLine, Esc는 닫기', async () => {
+  const app = reportClient();
+  app.context.crypto = globalThis.crypto;
+  app.run(`calls = []; reportChange = async (target, action, notice, options) => { calls.push([action, !!(options && options.key)]); };
+    renderReportDraft = () => {}; reportPlanIsCurrentWeek = weekKey => weekKey === '2026-09-14';
+    item = ${B_ITEM}; group = { group: '가입', key: 'group:가입', rows: [] };`);
+  const draw = () => app.run(`(() => { const host = document.createElement('div'); reportAddLineRow(item, '완료한 일', group, '가입 개편', host); return host.children[0]; })()`);
+  const closed = draw();
+  assert.equal(closed.className, 'rp-s is-add');
+  assert.deepEqual([closed.children[0].textContent, closed.children[0].getAttribute('aria-hidden')], ['+', 'true']);
+  const open = v3Kid(closed, 'tx').children[0];
+  assert.deepEqual([open.type, open.className, open.textContent, open.getAttribute('aria-label')], ['button', 'rp-pjadd', '한 줄 추가', '완료한 일 · 가입 개편에 한 줄 추가']);
+  open.listeners.click();
+  assert.equal(app.run("reportEdits.get('2026-09-14:addline:완료한 일|group:가입')"), '');
+  assert.equal(app.run("reportEditing('2026-09-14')"), false, '열어만 둔 빈 칸은 고치는 중이 아니다(복사를 막지 않는다)');
+  const box = v3Kid(draw(), 'tx');
+  assert.deepEqual(box.children.map(kid => kid.className), ['rp-ta', 'rp-help']);
+  assert.equal(box.children[1].textContent, 'Enter 추가 · 이번 주에 끝낸 업무로도 남아요 (가입 개편)');
+  const input = box.children[0];
+  const key = (k, extra = {}) => input.listeners.keydown({ key: k, preventDefault() {}, stopPropagation() {}, ...extra });
+  input.value = '   '; key('Enter');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), [], '빈 문장 Enter는 아무 일 없음');
+  input.value = '카피 최종본\n전달함'; input.listeners.input();
+  assert.equal(input.value, '카피 최종본 전달함', '줄바꿈은 빈칸으로(업무 제목은 한 줄)');
+  assert.equal(app.run("reportEditing('2026-09-14')"), true, '적기 시작하면 고치는 중');
+  key('Enter', { isComposing: true });
+  key('Enter');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), [[{ action: 'addLine', heading: '완료한 일', groupKey: 'group:가입', text: '카피 최종본 전달함' }, true]]);
+  key('Escape');
+  assert.equal(app.run("reportEdits.has('2026-09-14:addline:완료한 일|group:가입')"), false);
+  // 진행 중 칸·지난 주 칸의 안내
+  assert.equal(app.run("reportAddLineHint({ weekKey: '2026-09-14' }, '진행중', '결제')"), 'Enter 추가 · 진행 중인 업무로도 남아요 (결제)');
+  assert.equal(app.run("reportAddLineHint({ weekKey: '2026-09-07' }, '완료한 일', '결제')"), 'Enter 추가 · 그 주 금요일에 끝낸 업무로도 남아요 (결제)');
+});
+test('다듬기 B: 같은 글을 다시 보내면(응답을 못 받음) 같은 요청 id, 성공하면 id를 버린다', async () => {
+  const app = reportClient();
+  app.context.crypto = globalThis.crypto;
+  app.run(`keys = []; fail = true;
+    reportChange = async (target, action, notice, options) => { keys.push(options.key); if (fail) throw new Error('끊김'); };`);
+  const send = () => app.run(`reportAddLineSubmit({ weekKey: 'W' }, '완료한 일', { key: 'group:가입' }, 'W:addline:완료한 일|group:가입', '같은 글')`);
+  await assert.rejects(send());
+  await assert.rejects(send());
+  app.run('fail = false');
+  await send();
+  await send();
+  const keys = JSON.parse(app.run('JSON.stringify(keys)'));
+  assert.equal(keys[0], keys[1]);
+  assert.equal(keys[1], keys[2], '성공한 요청까지 같은 id');
+  assert.notEqual(keys[2], keys[3], '성공한 뒤 같은 글을 또 쓰면 새 줄이다');
+  assert.match(keys[0], /^[a-zA-Z0-9-]{16,100}$/);
+});
+test('다듬기 B: 확정한 주의 상태 줄은 회색 한 줄 `M/D에 확정했어요`(+ 새로 N줄 · 보고에 넣기), 머리 ⋯ 첫 묶음은 `확정 풀기`', () => {
+  const app = reportClient();
+  const at = '2026-09-17T03:00:00.000Z';
+  assert.equal(app.run(`reportConfirmedText({ at: '${at}', pending: 0, pendingDone: 0 })`), '9/17에 확정했어요');
+  assert.equal(app.run(`reportConfirmedText({ at: '${at}', pending: 2, pendingDone: 2 })`), '9/17에 확정했어요 · 그 뒤 2줄이 새로 끝났어요');
+  assert.equal(app.run(`reportConfirmedText({ at: '${at}', pending: 2, pendingDone: 1 })`), '9/17에 확정했어요 · 그 뒤 2줄이 새로 들어왔어요');
+  const top = app.run(`(() => { renderReportDraft = () => {}; const host = document.createElement('div');
+    reportTopBlock({ weekKey: '2026-09-14', draft: { rows: [], since: { at: 'x', fresh: 3, changed: 0 }, confirmed: { at: '${at}', pending: 1, pendingDone: 1 } } }, host); return host; })()`);
+  const line = top.children[0].children[0];
+  assert.deepEqual([line.className, line.children.map(kid => kid.textContent)], ['rp-status is-quiet', ['9/17에 확정했어요 · 그 뒤 1줄이 새로 끝났어요', '보고에 넣기']], '확정하면 새로 표시 줄 대신 이 한 줄');
+  const quiet = app.run(`(() => { const host = document.createElement('div');
+    reportTopBlock({ weekKey: '2026-09-14', draft: { rows: [], confirmed: { at: '${at}', pending: 0, pendingDone: 0 } } }, host); return host; })()`);
+  assert.deepEqual(quiet.children[0].children[0].children.map(kid => kid.textContent), ['9/17에 확정했어요'], '새로 없으면 버튼 없이 한 줄');
+  const menu = JSON.parse(app.run(`JSON.stringify(reportHeadMenuSections({ weekKey: 'W', draft: { rows: [], confirmed: { at: '${at}', pending: 0 } } })[0].map(e => e.label))`));
+  assert.deepEqual(menu, ['확정 풀기']);
+});
+test('다듬기 B: 확정·완료로·한 줄 추가·보고에 넣기의 알림은 무엇을 했는지 적고 되돌리기를 준다', () => {
+  const notice = (rows, action) => {
+    const app = reportClient();
+    app.run("reportUndo.set('2026-09-14', 'tok')");
+    app.run(`reportSavedNotice({ weekKey: '2026-09-14', draft: { revision: 1, rows: ${rows} } }, ${action})`);
+    const region = app.nodes.get('liveRegion');
+    return [region.textContent, region.children.map(kid => kid.textContent)];
+  };
+  assert.deepEqual(notice(B_ROWS, "{ action: 'complete', id: 'g1' }"), ['「영수증 메일 발송 시점 정리 중」 완료한 일로 옮겼어요', ['되돌리기', '닫기']]);
+  assert.deepEqual(notice('[]', "{ action: 'addLine', heading: '완료한 일', groupKey: 'group:가입', text: 'x' }"), ['보고에 한 줄 더했어요 · 업무에도 남겼어요', ['되돌리기', '닫기']]);
+  assert.deepEqual(notice('[]', "{ action: 'confirm' }"), ['이 보고를 확정했어요', ['되돌리기', '닫기']]);
+  assert.deepEqual(notice('[]', "{ action: 'unconfirm' }"), ['확정을 풀었어요', ['되돌리기', '닫기']]);
+  assert.deepEqual(notice('[]', "{ action: 'pullNew' }"), ['새로 들어온 줄을 보고에 넣었어요', ['되돌리기', '닫기']]);
+});
+test('다듬기 B: 확정은 고치는 중이면 막고, 아니면 confirm을 보낸다 · 사람이 더한 줄의 ⋯에는 `원래 문장으로`가 없다', async () => {
+  const app = reportClient();
+  app.run('calls = []; reportChange = async (target, action) => { calls.push(action); };');
+  app.run("reportEdits.set('2026-09-14:d1', '고치는 중')");
+  await app.run("reportConfirm({ weekKey: '2026-09-14' }, true)");
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), []);
+  assert.match(app.nodes.get('liveRegion').textContent, /고치는 중인 글이 있어요/);
+  app.run('reportEdits.clear()');
+  await app.run("reportConfirm({ weekKey: '2026-09-14' }, true)");
+  await app.run("reportConfirm({ weekKey: '2026-09-14' }, false)");
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), [{ action: 'confirm' }, { action: 'unconfirm' }]);
+  const labels = JSON.parse(app.run(`JSON.stringify(reportSentenceMenuSections(${B_ITEM}, (${B_ITEM}).draft.rows[2]).flat().map(e => e.label))`));
+  assert.equal(labels.includes('원래 문장으로'), false);
+});
+test('다듬기 B: 슬랙용으로 복사한 뒤 알림에 `이대로 확정`(확정한 주는 알림만)', async () => {
+  const app = reportClient();
+  app.run(`calls = []; notices = []; reportChange = async (target, action) => { calls.push(action); }; reportSlackCopy = async () => {}; usageTick = () => {};
+    showNotice = (message, error, retry, action) => { notices.push([message, action ? action.label : null]); lastAction = action; };`);
+  const copyButton = confirmed => app.run(`(() => { const host = document.createElement('div');
+    reportDocHead({ weekKey: '2026-09-14', draft: { rows: [], confirmed: ${confirmed} } }, host);
+    const acts = host.children[0].children.find(kid => kid.className === 'rp-acts');
+    return acts.children.find(kid => kid.textContent === '슬랙용으로 복사'); })()`);
+  await copyButton('null').listeners.click();
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(notices)')), [['슬랙에 붙여 넣을 수 있게 복사했어요', '이대로 확정']]);
+  await app.run('lastAction.onClick()');
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), [{ action: 'confirm' }]);
+  await copyButton("{ at: '2026-09-17T00:00:00Z', pending: 0 }").listeners.click();
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(notices)'))[1], ['슬랙에 붙여 넣을 수 있게 복사했어요', null], '확정한 주는 알림만');
+});
+test('다듬기 B: 초록 알약은 --success-bg·--success(상태 점 --success-dot 아님), 주차 목록에는 다음 버전 자리 둘(지금은 비어 있음)', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'report-ui.css'), 'utf8');
+  const done = css.slice(css.indexOf('.rp-s .rp-pill.is-done {'), css.indexOf('/* 소제목 묶음 맨 아래'));
+  assert.match(done, /var\(--success-bg\)/);
+  assert.match(done, /color: var\(--success\)/);
+  assert.doesNotMatch(done, /--success-dot/);
+  const app = reportClient();
+  assert.equal(app.run("reportWeekRowEnd({ weekKey: 'W' })"), null);
+  assert.equal(app.run('reportWeeksFoot([])'), null);
+  const main = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  assert.match(main, /reportWeekRowEnd\(item\)/);
+  assert.match(main, /reportWeeksFoot\(items\)/);
+  const ui = fs.readFileSync(path.join(__dirname, 'report-ui.js'), 'utf8');
+  const added = ui.slice(ui.indexOf('// ---------- 칸마다 `+ 한 줄 추가`(다듬기 B)'), ui.indexOf('// 제외한 문장은 문서 끝'));
+  assert.doesNotMatch(added, /innerHTML/);
 });

@@ -2125,6 +2125,9 @@ function renderWeeklyReports(items) {
       mark.textContent = `새 기록 ${fresh}`;
       btn.appendChild(mark);
     }
+    // 줄 오른쪽 끝에 끼울 자리(다음 버전 '내 일 기록'의 끝낸 일 막대·숫자 — report-ui.js의 reportWeekRowEnd, 지금은 비어 있다).
+    const end = typeof reportWeekRowEnd === 'function' ? reportWeekRowEnd(item) : null;
+    if (end) btn.appendChild(end);
     btn.setAttribute('aria-label', `${name}, ${label.range}${fresh ? `, 새 기록 ${fresh}개` : ''}`);
     btn.addEventListener('click', () => {
       selectedWeekKey = item.weekKey;
@@ -2132,6 +2135,9 @@ function renderWeeklyReports(items) {
     });
     nav.appendChild(btn);
   });
+  // 주차 목록 칸 맨 아래에 끼울 자리(다음 버전 '내 일 기록' — report-ui.js의 reportWeeksFoot, 지금은 비어 있다).
+  const foot = typeof reportWeeksFoot === 'function' ? reportWeeksFoot(items) : null;
+  if (foot) nav.appendChild(foot);
 
   // 문장을 고치거나 다음 주 계획을 적는 중이면 다시 그리지 않는다(입력이 날아가지 않게).
   if (detail.contains(document.activeElement) && detail.dataset.weekKey === selectedWeekKey) return;
