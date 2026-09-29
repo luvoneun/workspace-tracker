@@ -95,13 +95,12 @@ function wrapMetaCell(className, icon, text, hint) {
 
 function wrapMetaCells(item) {
   const cells = [];
-  // 진행 중이면 밀림을 붙이지 않고 진행 일수만 — 오늘 목록의 업무 줄(uiMetaCells)과 같은 규칙이다(WP-T).
-  // 이 창에는 반쯤 찬 체크박스가 없으므로 `N일째 진행 중`처럼 글자로 다 쓴다(체크박스 없는 자리의 규칙).
+  // 진행 중이면 밀림도 며칠째도 적지 않고 `진행 중`만 — 오늘 목록의 업무 줄(uiMetaCells)과 같은 규칙이다(사용자 요청).
+  // 이 창에는 반쯤 찬 체크박스가 없으므로 글자로 `진행 중`이라고 쓴다.
   const carry = item.doing ? null : uiCarryText(item.scheduled);
   if (carry) cells.push(wrapMetaCell('m-carry', 'clock', carry, '오늘 하려다 넘어온 업무예요'));
   if (item.doing) {
-    const days = -diffDays(item.doing) + 1;
-    cells.push(wrapMetaCell('m-doing', 'clock', days > 1 ? `${days}일째 진행 중` : '진행 중', '이미 손을 댄 업무예요'));
+    cells.push(wrapMetaCell('m-doing', 'clock', '진행 중', `${uiKoDate(item.doing)}부터 진행 중이에요`));
   }
   const due = uiDueText(item.due, 'row');
   if (due) cells.push(wrapMetaCell(`m-due${uiTone(due.tone)}`, 'calendar', due.text, item.due ? `기한은 ${uiKoDate(item.due)}이에요` : ''));
