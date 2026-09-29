@@ -614,7 +614,7 @@ function projectSection(title, count) {
 function projectTaskRow(item) {
   const mode = item.scheduled ? 'today' : 'later';
   const row = document.createElement('div');
-  row.className = 'd-prow2' + (panelState && panelState.id === item.id ? ' is-sel' : '');
+  row.className = 'd-prow2' + (item.doing ? ' is-doing' : '') + (panelState && panelState.id === item.id ? ' is-sel' : '');
   row.dataset.taskId = item.id;
 
   row.appendChild(uiCheckCell(item, row, false));
@@ -651,7 +651,7 @@ function projectTaskRow(item) {
   move.addEventListener('click', async () => {
     move.disabled = true;
     await fadeOutAndRun(row, () => setTaskScheduled(item.id, mode === 'later' ? todayStr() : null),
-      mode === 'later' ? '오늘 할 일로 옮겼어요' : '나중에 할 일로 옮겼어요 · 기한은 그대로예요');
+      mode === 'later' ? '오늘 할 일로 옮겼어요' : uiMoveNotice('나중에 할 일로 옮겼어요 · 기한은 그대로예요', [item], null));
     move.disabled = false;
   });
   acts.append(move, uiMoreButton(`${item.description} — 더 보기`, () => taskMenuSections({ item, mode, card: row })));

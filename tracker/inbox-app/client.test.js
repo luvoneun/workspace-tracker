@@ -196,7 +196,7 @@ test('업무 줄의 줄 태그는 우선순위 없이 상태 → 기한 차례�
   assert.doesNotMatch(full, /m-pri|class="m-c /, 'BC의 세 칸 자리 표시는 남아 있지 않다');
   assert.match(full, /m-wait.*답변 기다리는 중.*m-carry.*일째 밀림.*m-due.*기한 \d+일 지남/s,
     '상태(답변 · 밀림) → 기한 차례이고 기한이 맨 오른쪽이다');
-  assert.match(row("{ doing: todayStr() }", ", waiting: 'answered'"), /답변 왔어요.*진행 중/s, '상태가 겹치면 이어 쓴다');
+  assert.match(row("{ doing: '2000-01-01' }", ", waiting: 'answered'"), /답변 왔어요.*m-doing[^>]*>\d+일째</s, '상태가 겹치면 이어 쓴다');
   assert.equal(row("{ due: todayStr() }"), '<span class="m-due k-warn" title="기한은 ' + app.run('uiKoDate(todayStr())')
     + '이에요"><svg class="d-i" viewBox="0 0 16 16" aria-hidden="true">' + app.run('UI_ICONS.calendar') + '</svg>오늘까지</span>',
     '기한만 있으면 기한 한 칸뿐이다');
@@ -248,6 +248,72 @@ test('업무 체크박스는 우선순위를 꺾쇠·색·말로 함께 알린�
   const nasty = cell(JSON.stringify({ id: 'x', description: '<img src=x>', priority: 'high' }));
   assert.doesNotMatch(nasty.html, /<img/);
   assert.equal(nasty.label, '<img src=x> — 중요 · 완료로 표시');
+});
+
+// WP-T 시안 A: 진행 중인 업무는 체크박스 안 왼쪽 절반이 찬다. 밀림 대신 조용한 `N일째`(첫날은 비움).
+test('진행 중인 업무는 체크박스가 반쯤 차고 이름표에 진행 중을 품는다', () => {
+  const app = pureClient();
+  const cell = (item, done = 'false') => JSON.parse(app.run(`(() => {
+    const cell = uiCheckCell(${item}, document.createElement('div'), ${done});
+    const box = cell.children[0];
+    return JSON.stringify({ cls: box.className, label: box.getAttribute('aria-label'), title: box.title || null, html: cell.html });
+  })()`));
+  const base = { id: 't', description: '운영툴 권한 정리', doing: '2000-01-01' };
+  const doing = cell(JSON.stringify(base));
+  assert.equal(doing.cls, 'd-cb is-doing');
+  assert.equal(doing.label, '운영툴 권한 정리 — 진행 중 · 완료로 표시');
+  assert.equal(doing.title, '진행 중인 업무예요');
+  const both = cell(JSON.stringify({ ...base, priority: 'critical' }));
+  assert.equal(both.cls, 'd-cb is-pri-top is-doing', '우선순위와 함께면 꺾쇠도 그대로 선다');
+  assert.match(both.html, /class="d-pri"/);
+  assert.equal(both.label, '운영툴 권한 정리 — 긴급 · 진행 중 · 완료로 표시');
+  assert.equal(both.title, '가장 먼저 해야 하는 업무예요 · 진행 중인 업무예요');
+  const done = cell(JSON.stringify(base), 'true');
+  assert.equal(done.cls, 'd-cb', '완료한 업무는 평소의 체크다');
+  assert.equal(done.label, '운영툴 권한 정리 — 완료로 표시');
+  const plain = cell(JSON.stringify({ id: 't', description: '운영툴 권한 정리' }));
+  assert.equal(plain.cls, 'd-cb', '진행 중을 풀면 평소 체크박스로 돌아온다');
+});
+
+test('진행 중인 업무 줄에는 밀림이 없고 조용한 N일째만 선다 — 풀면 밀림이 돌아온다', () => {
+  const app = pureClient();
+  const row = (item, extra = '') => app.run(`uiMetaCells(${item}, { noPriority: true${extra} })`);
+  const doing = row("{ scheduled: '2000-01-01', doing: '2000-01-02' }");
+  assert.doesNotMatch(doing, /m-carry|밀림/, '진행 중이면 밀림을 붙이지 않는다');
+  assert.match(doing, /<span class="m-doing" title="[^"]*부터 진행 중이에요">\d+일째<\/span>/, '아이콘 없는 회색 N일째');
+  assert.doesNotMatch(doing, /진행 중<\/span>|<svg/, '말은 체크박스가 하므로 `진행 중` 글자는 없다');
+  assert.equal(row('{ doing: todayStr(), scheduled: todayStr() }'), '', '첫날은 비운다');
+  assert.equal(row("{ scheduled: '2000-01-01', doing: '2000-01-02' }", ', inDoingGroup: true'), doing, '진행 중 묶음 안에서도 같다');
+  assert.match(row("{ scheduled: '2000-01-01' }"), /m-carry.*\d+일째 밀림/s, '진행 중을 풀면 밀림이 돌아온다');
+  // 기한 지남 + 진행 중: 기한 배지는 그대로, 밀림은 없다.
+  const late = row("{ scheduled: '2000-01-01', doing: '2000-01-02', due: '2000-01-03' }", ', inDoingGroup: true');
+  assert.match(late, /m-doing.*m-due k-neg.*기한 \d+일 지남/s);
+  assert.doesNotMatch(late, /밀림/);
+  // 기한 때문에 들어온 업무(예정일 없음·미래)는 밀림이 아니다.
+  assert.doesNotMatch(row("{ due: '2000-01-03' }"), /밀림/);
+  assert.doesNotMatch(row("{ scheduled: '2999-01-01', due: todayStr() }"), /밀림/);
+  // 체크박스가 없는 자리(미루기 제안 줄)는 예전처럼 글자로 다 쓴다.
+  assert.match(app.run("uiMetaCells({ doing: '2000-01-02' })"), /m-doing.*\d+일째 진행 중/s);
+});
+
+// WP-T: 기한 때문에 오늘 목록에 선 업무는 예정일만 미뤄도 목록에 남는다 — 미루기 알림이 사실대로 말한다.
+test('기한이 오늘·지난 업무를 미루면 알림이 오늘 목록에 남는다고 말한다', () => {
+  const app = pureClient();
+  const note = (items, scheduled) => app.run(`uiMoveNotice(${JSON.stringify(items[0])}, ${JSON.stringify(items.slice(1))}, ${scheduled})`);
+  assert.equal(note(['내일로 미뤘어요', { due: '2000-01-01' }], 'tomorrowStr()'),
+    '내일로 미뤘어요 · 기한이 지나 오늘 목록에는 남아요 — 기한을 바꾸면 빠져요');
+  assert.equal(note(['나중에 할 일로 옮겼어요 · 기한은 그대로예요', { due: app.run('todayStr()') }], 'null'),
+    '나중에 할 일로 옮겼어요 · 기한이 오늘이라 오늘 목록에는 남아요 — 기한을 바꾸면 빠져요');
+  assert.equal(note(['내일로 미뤘어요', { due: '2999-01-01' }], 'tomorrowStr()'), '내일로 미뤘어요', '기한이 미래면 그대로');
+  assert.equal(note(['내일로 미뤘어요', {}], 'tomorrowStr()'), '내일로 미뤘어요', '기한이 없으면 그대로');
+  assert.equal(note(['오늘 할 일로 옮겼어요', { due: '2000-01-01' }], 'todayStr()'), '오늘 할 일로 옮겼어요', '오늘로 옮기면 덧붙이지 않는다');
+  // 여러 개 선택·오늘 정리: 남는 것만 센다.
+  assert.equal(app.run(`uiDueStaysNote([{ due: '2000-01-01' }, { due: todayStr() }, { due: '2999-01-01' }], null)`),
+    '2개는 기한이 오늘이거나 지나 오늘 목록에는 남아요 — 기한을 바꾸면 빠져요');
+  // 하루 마무리 줄도 진행 중이면 밀림을 붙이지 않는다(풀면 돌아온다).
+  const wrapKinds = item => app.run(`wrapMetaCells(${item}).map(cell => cell.className).join(' ')`);
+  assert.equal(wrapKinds("{ scheduled: '2000-01-01', doing: '2000-01-02' }"), 'm-doing', '진행 중이면 밀림 칸이 없다');
+  assert.equal(wrapKinds("{ scheduled: '2000-01-01' }"), 'm-carry', '진행 중을 풀면 밀림이 돌아온다');
 });
 
 test('상세 카드의 우선순위 값도 아이콘 없이 글자·색만 쓴다', () => {

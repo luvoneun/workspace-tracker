@@ -95,7 +95,9 @@ function wrapMetaCell(className, icon, text, hint) {
 
 function wrapMetaCells(item) {
   const cells = [];
-  const carry = uiCarryText(item.scheduled);
+  // 진행 중이면 밀림을 붙이지 않고 진행 일수만 — 오늘 목록의 업무 줄(uiMetaCells)과 같은 규칙이다(WP-T).
+  // 이 창에는 반쯤 찬 체크박스가 없으므로 `N일째 진행 중`처럼 글자로 다 쓴다(체크박스 없는 자리의 규칙).
+  const carry = item.doing ? null : uiCarryText(item.scheduled);
   if (carry) cells.push(wrapMetaCell('m-carry', 'clock', carry, '오늘 하려다 넘어온 업무예요'));
   if (item.doing) {
     const days = -diffDays(item.doing) + 1;
@@ -299,9 +301,13 @@ async function wrapSave() {
     return;
   }
 
+  // `내일`·`나중에`로 보낸 업무 중 기한 때문에 오늘 목록에 남는 것이 있으면 알림이 그 사실을 말한다(WP-T).
+  const movedIds = new Set(saved.filter(group => group.choice !== 'done').flatMap(group => group.ids));
+  const moved = (wrapState ? wrapState.rows : []).filter(row => movedIds.has(row.id)).map(row => row.item);
+  const stays = moved.length ? uiDueStaysNote(moved, null) : '';
   await load();
   wrapClose();
-  showNotice(wrapNoticeText(wrapSavedCounts(saved)), false, null, { label: '실행 취소', onClick: async () => {
+  showNotice(`${wrapNoticeText(wrapSavedCounts(saved))}${stays ? ` · ${stays}` : ''}`, false, null, { label: '실행 취소', onClick: async () => {
     // 되돌리기는 최근 작업부터다 — 일괄 정리 막대와 같은 규칙이다.
     if (undoStack[undoStack.length - 1] !== entry) { showNotice('최근 작업부터 순서대로 실행 취소해 주세요', true); return; }
     await replayUndo('undo');

@@ -104,6 +104,23 @@ function uiCarryText(scheduled) {
   return diff === -1 ? '어제에서 밀림' : `${-diff}일째 밀림`;
 }
 
+// 기한이 오늘이거나 지난 미완료 업무는 실행 예정일을 옮겨도 오늘 목록에 남는다(서버가 기한으로 보여 준다, WP-T).
+// 미루는 알림이 그 사실을 말한다 — 옮긴 곳이 오늘·지난 날짜면 남는 것이 당연하므로 덧붙이지 않는다.
+function uiDueStaysNote(items, scheduled) {
+  if (scheduled && !(diffDays(scheduled) > 0)) return '';
+  const days = (items || []).filter(item => item && item.status !== 'done' && item.due)
+    .map(item => diffDays(item.due)).filter(diff => !Number.isNaN(diff) && diff <= 0);
+  if (!days.length) return '';
+  const why = days.every(diff => diff < 0) ? '기한이 지나' : days.every(diff => diff === 0) ? '기한이 오늘이라' : '기한이 오늘이거나 지나';
+  const who = (items || []).length > 1 ? `${days.length}개는 ` : '';
+  return `${who}${why} 오늘 목록에는 남아요 — 기한을 바꾸면 빠져요`;
+}
+// 미루기 알림 한 줄: 남는 업무가 있으면 `· 기한은 그대로예요` 대신 남는 까닭을 붙인다.
+function uiMoveNotice(message, items, scheduled) {
+  const note = uiDueStaysNote(items, scheduled);
+  return note ? `${message.replace(/ · 기한은 그대로예요$/, '')} · ${note}` : message;
+}
+
 // Esc는 가장 위에 열린 것부터 하나씩 닫는다(설정 → 메뉴 → 검색 → 회의 → 상세 → 서랍).
 // 여는 쪽이 escPush로 "닫는 방법"을 올려 두고, 닫을 때 escDrop으로 내린다.
 const escStack = [];
@@ -334,20 +351,26 @@ function uiMetaCells(item, opts = {}) {
   const priorityCell = priority ? cellPlain(`m-pri${uiTone(priority.tone)}`, priority.text, priority.hint) : '';
   const status = [];
   if (opts.waiting) status.push(uiWaitCell(opts.waiting === 'answered'));
-  const carry = where === 'row' && !done ? uiCarryText(item.scheduled) : null;
+  // 진행 중인 업무에는 밀림을 붙이지 않는다 — 이미 손을 댄 일이라 `N일째 밀림`은 틀린 말이다(진행 중을 풀면 돌아온다).
+  const doing = !!item.doing && !done;
+  const carry = where === 'row' && !done && !doing ? uiCarryText(item.scheduled) : null;
   if (carry) status.push(cell('m-carry', 'clock', carry, '오늘 하려다 넘어온 업무예요'));
-  if (item.doing && !done && !opts.inDoingGroup) {
+  if (doing) {
     const days = -diffDays(item.doing) + 1;
-    status.push(cell('m-doing', 'clock', days > 1 ? `${days}일째 진행 중` : '진행 중', '이미 손을 댄 업무예요'));
+    const since = `${uiKoDate(item.doing)}부터 진행 중이에요`;
+    // 체크박스가 있는 줄(noPriority)은 반쯤 찬 체크박스가 `진행 중`을 말한다 — 오른쪽에는 조용한 `N일째`만(첫날은 비움).
+    // 체크박스가 없는 자리(미루기 제안 줄)는 예전처럼 글자로 다 쓴다.
+    if (opts.noPriority) { if (days > 1) status.push(cellPlain('m-doing', `${days}일째`, since)); }
+    else if (!opts.inDoingGroup) status.push(cell('m-doing', 'clock', days > 1 ? `${days}일째 진행 중` : '진행 중', '이미 손을 댄 업무예요'));
   }
   const due = done ? null : uiDueText(item.due, where);
   const dueCell = due ? cell(`m-due${uiTone(due.tone)}`, 'calendar', due.text, item.due ? `기한은 ${uiKoDate(item.due)}이에요` : '') : '';
   return [...cells, priorityCell, ...status, dueCell].filter(Boolean).join('');
 }
 
-// 업무 체크박스 한 칸(체크 + 흰 체크 + 우선순위 꺾쇠). 체크박스가 있는 줄은 모두 이 부품을 쓴다.
+// 업무 체크박스 한 칸(체크 + 흰 체크 + 우선순위 꺾쇠 + 진행 중 반쯤 채움). 체크박스가 있는 줄은 모두 이 부품을 쓴다.
 // 꺾쇠는 체크박스 위에 겹치고 `pointer-events: none`이라 누르는 자리는 그대로 28px이다.
-// 완료한 줄에는 붙지 않는다(체크된 파란 네모가 이미 다 말한다).
+// 완료한 줄에는 붙지 않는다(체크된 파란 네모가 이미 다 말한다). 진행 중은 체크박스 자신의 클래스(`is-doing`)다.
 const uiPriorityMark = (item, done) => (!done && item ? UI_PRIORITY_META[item.priority] || null : null);
 function uiCheckCell(item, row, done) {
   const cell = document.createElement('span');
@@ -690,7 +713,7 @@ function uiTaskRow(item, opts = {}) {
       button.setAttribute('aria-label', `${item.description} — ${label}`);
       button.addEventListener('click', async () => {
         button.disabled = true;
-        await fadeOutAndRun(row, () => setTaskScheduled(item.id, scheduled), message);
+        await fadeOutAndRun(row, () => setTaskScheduled(item.id, scheduled), uiMoveNotice(message, [item], scheduled));
         button.disabled = false;
       });
       acts.appendChild(button);
@@ -698,7 +721,8 @@ function uiTaskRow(item, opts = {}) {
     if (mode === 'later') {
       move('오늘로', todayStr(), '오늘 할 일로 옮겼어요');
     } else {
-      if (carried) move('오늘 할게요', todayStr(), '오늘 할 일로 옮겼어요');
+      // 진행 중인 업무는 이미 손대고 있는 일이라 `오늘 할게요`를 띄우지 않는다.
+      if (carried && !item.doing) move('오늘 할게요', todayStr(), '오늘 할 일로 옮겼어요');
       move('내일', tomorrowStr(), '내일로 미뤘어요');
       move('나중에', null, '나중에 할 일로 옮겼어요 · 기한은 그대로예요');
     }
@@ -981,6 +1005,10 @@ async function taskBatchApply(change) {
   taskSelectionRefresh();
   document.querySelectorAll('.d-selcb').forEach(input => { input.disabled = true; });
   try {
+    // 날짜를 옮길 때는 고른 업무를 미리 들고 있다가, 기한 때문에 오늘 목록에 남는 것이 있으면 알림이 말한다.
+    const moved = Object.hasOwn(change, 'scheduled')
+      ? [...(latestData?.todayTasks || []), ...(latestData?.laterTasks || [])].filter(task => taskSelection.has(task.id))
+      : [];
     const result = await wfPost('task-batch', { ids: [...taskSelection], change });
     let token = result.undoToken;
     const restore = async () => { const back = await wfPost('task-batch', { undoToken: token }); token = back.undoToken; };
@@ -988,7 +1016,8 @@ async function taskBatchApply(change) {
     pushUndo(entry);
     taskSelection.clear();
     await load();
-    showNotice(`${result.count}개를 바꿨어요`, false, null, { label: '실행 취소', onClick: async () => {
+    const stays = moved.length ? uiDueStaysNote(moved, change.scheduled) : '';
+    showNotice(`${result.count}개를 바꿨어요${stays ? ` · ${stays}` : ''}`, false, null, { label: '실행 취소', onClick: async () => {
       if (undoStack[undoStack.length - 1] !== entry) { showNotice('최근 작업부터 순서대로 실행 취소해 주세요', true); return; }
       await replayUndo('undo');
     } });
@@ -1669,7 +1698,7 @@ function renderSuggestions(suggestions) {
         button.disabled = true;
         try {
           await setTaskScheduled(entry.id, scheduled);
-          announce(message);
+          announce(uiMoveNotice(message, [task], scheduled));
         } catch { button.disabled = false; }
       });
       acts.appendChild(button);
@@ -2355,10 +2384,13 @@ function taskCompletionCheckbox(item, card, done) {
   checkbox.type = 'checkbox';
   // 우선순위는 색만으로 말하지 않는다 — 클래스는 꺾쇠·테두리 색을 정하고, 툴팁과 이름표가 말을 붙인다.
   const mark = uiPriorityMark(item, done);
-  checkbox.className = 'd-cb' + (mark ? ` is-pri-${mark.level}` : '');
+  // 진행 중(미완료 + doing)은 체크박스 안 왼쪽 절반이 파랗게 찬다 — 모양으로 말하고 title·aria-label이 말을 붙인다.
+  const doing = !done && !!(item && item.doing);
+  checkbox.className = 'd-cb' + (mark ? ` is-pri-${mark.level}` : '') + (doing ? ' is-doing' : '');
   checkbox.checked = done;
-  if (mark) checkbox.title = mark.hint;
-  checkbox.setAttribute('aria-label', `${item.description} — ${mark ? `${mark.text} · ` : ''}완료로 표시`);
+  const hint = [mark && mark.hint, doing && '진행 중인 업무예요'].filter(Boolean).join(' · ');
+  if (hint) checkbox.title = hint;
+  checkbox.setAttribute('aria-label', `${item.description} — ${mark ? `${mark.text} · ` : ''}${doing ? '진행 중 · ' : ''}완료로 표시`);
   checkbox.addEventListener('change', () => {
     // 끝내는 순간을 눈으로 보여 준다: 체크가 그려지고 → 제목에 줄이 그어지고 → 옅어진다.
     // 저장·되돌리기 쪽은 그대로다(클래스 하나만 붙인다. 움직임 줄이기에서는 ui.css가 끈다).
@@ -2374,7 +2406,7 @@ function taskWhenControl(item, mode, card) {
   wrap.className = 'd-chips';
   const move = async (scheduled, message) => {
     uiMenuClose();
-    await fadeOutAndRun(card || wrap, () => setTaskScheduled(item.id, scheduled), message);
+    await fadeOutAndRun(card || wrap, () => setTaskScheduled(item.id, scheduled), uiMoveNotice(message, [item], scheduled));
   };
   const options = [['오늘', todayStr(), '오늘 할 일로 옮겼어요'], ['내일', tomorrowStr(), '내일로 미뤘어요']];
   // 이미 나중에 있는 업무에 `나중에`를 또 보여 주지 않는다.
@@ -2866,11 +2898,11 @@ function panelTask({ item, detail, type }, box) {
     else {
       foot.appendChild(panelQuietButton('내일', async () => {
         await setTaskScheduled(item.id, tomorrowStr());
-        announce('내일로 미뤘어요');
+        announce(uiMoveNotice('내일로 미뤘어요', [item], tomorrowStr()));
       }));
       foot.appendChild(panelQuietButton('나중에', async () => {
         await setTaskScheduled(item.id, null);
-        announce('나중에 할 일로 옮겼어요 · 기한은 그대로예요');
+        announce(uiMoveNotice('나중에 할 일로 옮겼어요 · 기한은 그대로예요', [item], null));
       }));
     }
   }
@@ -4105,7 +4137,7 @@ function renderInbox(items) {
 
     // 줄에는 자주 쓰는 세 갈래만 늘 보인다 — 오늘 / 나중에 / 완료.
     choose('오늘', () => fadeOutAndRun(row, () => setTaskScheduled(item.id, todayStr()), '오늘 할 일로 옮겼어요'));
-    choose('나중에', () => fadeOutAndRun(row, () => setTaskScheduled(item.id, null), '나중에 할 일로 옮겼어요'));
+    choose('나중에', () => fadeOutAndRun(row, () => setTaskScheduled(item.id, null), uiMoveNotice('나중에 할 일로 옮겼어요', [item], null)));
     // 완료는 기록이 남고(주간요약에 들어감), 삭제는 남지 않는다 — 삭제는 ⋯ 안으로 들어갔다.
     choose('완료', () => fadeOutAndRun(row, () => toggleTask(item.id), '완료했어요'));
 

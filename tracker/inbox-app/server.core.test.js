@@ -343,7 +343,9 @@ test('batch rescheduling preserves deadlines and undo restores legacy schedules'
   const changed = await post('/api/workflow/task-batch', { ids: ['legacy', 'unseen'], change: { scheduled: shifted(1) } });
   assert.equal(changed.ok, true);
   let data = await items();
-  assert.equal(data.laterTasks.find(item => item.id === 'legacy').due, shifted(-2));
+  // 기한이 지난 legacy는 실행 예정일을 내일로 옮겨도 기한 때문에 오늘 목록에 남는다(WP-T).
+  assert.equal(data.todayTasks.find(item => item.id === 'legacy').due, shifted(-2));
+  assert.equal(data.todayTasks.find(item => item.id === 'legacy').scheduled, shifted(1));
   assert.equal(data.laterTasks.find(item => item.id === 'unseen').scheduled, shifted(1));
   const restored = await post('/api/workflow/task-batch', { undoToken: changed.undoToken });
   assert.equal(restored.ok, true);
@@ -351,7 +353,7 @@ test('batch rescheduling preserves deadlines and undo restores legacy schedules'
   assert.equal(data.todayTasks.find(item => item.id === 'legacy').scheduled, shifted(-2));
   assert.doesNotMatch(readTasks().split('\n').find(line => line.includes('id:legacy')), /scheduled:/);
   assert.equal((await post('/api/workflow/task-batch', { undoToken: restored.undoToken })).ok, true);
-  assert.equal((await items()).laterTasks.find(item => item.id === 'legacy').scheduled, shifted(1));
+  assert.equal((await items()).todayTasks.find(item => item.id === 'legacy').scheduled, shifted(1));
 });
 
 test('invalid batch targets and dates never partially modify tasks', async () => {
@@ -414,14 +416,44 @@ test('acknowledgement affects only the requested item', async () => {
 });
 
 test('rescheduling and removing a schedule preserve the deadline', async () => {
+  // legacy는 기한이 지났으므로 실행 예정일을 옮기거나 지워도 오늘 목록에 선다(WP-T) — 기한은 그대로다.
   await post('/api/track/set-scheduled', { id: 'legacy', scheduled: shifted(1) });
-  let item = (await items()).laterTasks.find(item => item.id === 'legacy');
+  let item = (await items()).todayTasks.find(item => item.id === 'legacy');
   assert.equal(item.scheduled, shifted(1));
   assert.equal(item.due, shifted(-2));
   await post('/api/track/set-scheduled', { id: 'legacy', scheduled: null });
-  item = (await items()).laterTasks.find(item => item.id === 'legacy');
+  item = (await items()).todayTasks.find(item => item.id === 'legacy');
   assert.equal(item.scheduled, null);
   assert.equal(item.due, shifted(-2));
+});
+
+// WP-T: 기한이 오늘이거나 지난 미완료 할 일은 실행 예정일이 없거나 미래여도 오늘 목록에 선다(보여 주기만 — 파일은 그대로).
+test('기한 오늘·지남 미완료 할 일은 오늘 목록에 서고 나중에 할 일에서는 빠진다 — 받지 않은 슬랙·완료·미래 기한은 제외', async () => {
+  fs.writeFileSync(tasksPath, `# Tasks
+- 기한 오늘 예정 없음 #task[id:dt1 status:to-do created:${shifted(-3)} scheduled:none due:${today}]
+- 기한 지남 예정 미래 #task[id:dt2 status:to-do created:${shifted(-3)} scheduled:${shifted(3)} due:${shifted(-1)}]
+- 기한 지남 진행 중 #task[id:dt3 status:to-do created:${shifted(-5)} scheduled:none due:${shifted(-2)} doing:${shifted(-4)}]
+- 받지 않은 슬랙 #task[id:dt4 status:to-do created:${today} due:${shifted(-1)} inbox:true source:slack:https://example.test/x]
+- 완료한 지난 기한 #task[id:dt5 status:done created:${shifted(-5)} due:${shifted(-1)} completed:${shifted(-1)}]
+- 기한 미래 #task[id:dt6 status:to-do created:${shifted(-1)} scheduled:none due:${shifted(2)}]
+- 기한 없음 #task[id:dt7 status:to-do created:${shifted(-1)} scheduled:none]
+`);
+  const original = readTasks();
+  const data = await items();
+  const ids = list => list.map(item => item.id).filter(id => id.startsWith('dt')).sort();
+  assert.deepEqual(ids(data.todayTasks), ['dt1', 'dt2', 'dt3']);
+  assert.deepEqual(ids(data.laterTasks), ['dt6', 'dt7'], '오늘 목록에 선 업무는 나중에 할 일에서 빠진다(두 번 나오지 않는다)');
+  const all = [...data.todayTasks, ...data.laterTasks].map(item => item.id);
+  assert.equal(new Set(all).size, all.length, '같은 업무가 두 목록에 겹치지 않는다');
+  assert.equal(data.todayTasks.find(item => item.id === 'dt1').scheduled, null, '실행 예정일을 지어 넣지 않는다(밀림이 아니다)');
+  assert.equal(data.todayTasks.find(item => item.id === 'dt2').scheduled, shifted(3));
+  assert.equal(data.todayTasks.find(item => item.id === 'dt3').doing, shifted(-4));
+  assert.equal(readTasks(), original, '파일은 한 글자도 바뀌지 않는다');
+  // 기한을 미래로 미루면 원래 자리(나중에 할 일)로 돌아간다.
+  assert.equal((await post('/api/track/set-due', { id: 'dt1', due: shifted(5) })).ok, true);
+  const after = await items();
+  assert.ok(after.laterTasks.some(item => item.id === 'dt1'));
+  assert.ok(!after.todayTasks.some(item => item.id === 'dt1'));
 });
 
 test('editing a legacy deadline does not change its execution day', async () => {

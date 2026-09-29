@@ -240,7 +240,15 @@ function plannedDay(fields) {
   return fields.scheduled === 'none' ? null : fields.scheduled || fields.due || null;
 }
 
-// "나중에 할 일" — committed tasks with no due date, or a due date in the future (not today/overdue)
+// 미완료 할 일이 오늘 목록에 서는가: 실행 예정일이 오늘·지났거나, **기한이 오늘·지났다**.
+// 기한으로 들어온 것은 보여 주기만 한다(scheduled를 써 넣지 않는다) — 기한을 지우거나 미루면 원래 자리로 돌아간다.
+// 아직 받지 않은 슬랙 항목(inbox)은 부르는 쪽이 먼저 거른다(새로 들어온 것에 그대로 남는다).
+function isOpenTaskForToday(fields, today) {
+  const scheduled = plannedDay(fields);
+  return !!(scheduled && scheduled <= today) || !!(fields.due && fields.due <= today);
+}
+
+// "나중에 할 일" — 오늘 목록에 서지 않는 미완료 할 일(실행 예정일이 없거나 미래이고, 기한도 없거나 미래)
 function getLaterTasks() {
   const today = todayLocal();
   const items = [];
@@ -252,7 +260,7 @@ function getLaterTasks() {
       const fields = parseFields(m[3]);
       if (fields.status === 'done' || fields.inbox === 'true') return;
       const scheduled = plannedDay(fields);
-      if (scheduled && scheduled <= today) return;
+      if (isOpenTaskForToday(fields, today)) return;
       items.push({
         file: path.basename(filePath),
         description: m[1],
@@ -274,7 +282,7 @@ function getLaterTasks() {
   return items;
 }
 
-// "오늘 할 일" — merges manual + slack-sourced tasks due today or overdue (unfinished tasks roll forward automatically)
+// "오늘 할 일" — 실행 예정일이나 기한이 오늘·지난 미완료 할 일(밀린 것은 저절로 따라온다) + 오늘 끝낸 할 일
 function getTodayTasks() {
   const today = todayLocal();
   const items = [];
@@ -287,7 +295,7 @@ function getTodayTasks() {
       if (fields.inbox === 'true' && fields.status !== 'done') return;
       const scheduled = plannedDay(fields);
       const completedDate = fields.completed || (fields.updated ? localDateOf(fields.updated) : fields.due);
-      if (fields.status === 'done' ? completedDate !== today : !scheduled || scheduled > today) return;
+      if (fields.status === 'done' ? completedDate !== today : !isOpenTaskForToday(fields, today)) return;
       items.push({
         file: path.basename(filePath),
         description: m[1],
