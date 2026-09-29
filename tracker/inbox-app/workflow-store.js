@@ -463,7 +463,7 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
   // 값은 `{ at: 확인 시각, answer: '확인 대기 번호:완료일' }`이다. 화면은 지금의 `답변`(blockedBy + 그 확인 대기의 완료일)이
   // 적어 둔 answer와 다를 때만 다시 올린다 — 다른 확인 대기에 다시 걸렸다가 답이 오면(또는 같은 확인 대기를 풀었다가
   // 다른 날 다시 끝내면) 다시 뜬다. 같은 날 풀었다 다시 끝낸 것은 같은 답으로 본다(완료일이 날짜뿐이다).
-  // 되돌리기(⌘Z) 대상이 아니다 — 가벼운 표시다. 업무 줄의 `답변 왔어요` 상태 글자는 그대로 남는다.
+  // 리마인드에서 빠지는 순간 알림의 `되돌리기`·⌘Z로 지울 수 있다(unmarkAnswerSeen). 업무 줄의 `답변 왔어요` 상태 글자는 그대로 남는다.
   const answerMark = (blockerId, blocker) => `${blockerId}:${(blocker && blocker.completed) || ''}`;
   function markAnswerSeen(body) {
     const id = body && body.id;

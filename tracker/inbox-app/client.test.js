@@ -9548,7 +9548,7 @@ test('WP-U 받는 동안: 목록을 못 받았는데 업데이트 중이면(상�
 // WP-W — 리마인드 줄의 프로젝트 · `답변 왔어요` 한 번 보면 빠짐 · 회의 줄 두 줄/펼침 · 회의 연결 뒤 옮기기 묻기
 
 function reminderClient(extraItems = []) {
-  const { app, sent } = meetingRowClient(new Response('{"ok":true}'));
+  const { app, sent } = meetingRowClient(new Response(JSON.stringify({ ok: true, answerSeen: { at: '2026-09-29T00:00:00.000Z', answer: 'c1:2026-09-28' } })));
   app.context.extraItems = extraItems;
   app.run(`jiraIssuesByKey = new Map([['IO-1', { key: 'IO-1', summary: '결제 리뉴얼' }]]);
     projectAliasesCache = { 'IO-2': '알림 센터' };
@@ -9741,7 +9741,7 @@ test('WP-W 확인 줄: 문구(다른 프로젝트·끝낸 것)·`옮기기`/`그
   app.run("meetingMoveAskOpen('m1', 'group:가입 개선', 'group:결제 리뉴얼', window.__host)");
   await app.run(`meetingMoveAskNode(${event}, window.__host)`).children[2].listeners.click();
   assert.deepEqual(sent.map(call => call.url), ['/api/meeting/move-items']);
-  assert.deepEqual(sent[0].body, { meetingId: 'm1', project: 'group:결제 리뉴얼', ids: ['a', 'b'] });
+  assert.deepEqual(sent[0].body, { meetingId: 'm1', project: 'group:결제 리뉴얼', from: 'group:가입 개선', ids: ['a', 'b'] });
   assert.equal(app.run('undoStack[undoStack.length - 1].label'), '회의 항목 2개 옮기기');
   sent.length = 0;
   await app.run('undoStack[undoStack.length - 1].undo()');
@@ -9758,7 +9758,7 @@ test('WP-W 확인 줄: 문구(다른 프로젝트·끝낸 것)·`옮기기`/`그
   assert.equal(unlink.children[2].textContent, '빼기');
   sent.length = 0;
   await unlink.children[2].listeners.click();
-  assert.deepEqual(sent[0].body, { meetingId: 'm1', project: null, ids: ['e'] });
+  assert.deepEqual(sent[0].body, { meetingId: 'm1', project: null, from: 'group:운영툴', ids: ['e'] });
   // 프로젝트가 그 사이 또 바뀌었으면 묻던 줄은 사라진다.
   app.run("meetingMoveAskOpen('m1', null, 'jira:IO-7', window.__host)");
   assert.equal(app.run(`meetingMoveAskNode(${event}, window.__host)`), null);
@@ -9781,7 +9781,7 @@ test('WP-W 오늘 탭 미팅 줄 ⋯에서 바꾸면 알림 버튼으로 묻고(
   assert.equal(sent.filter(call => call.url === '/api/meeting/move-items').length, 0, '누르기 전에는 아무것도 옮기지 않는다');
   await app.run('notices[0].action.onClick()');
   const move = sent.find(call => call.url === '/api/meeting/move-items');
-  assert.deepEqual(move.body, { meetingId: 'w1', project: 'group:결제 리뉴얼', ids: ['a'] });
+  assert.deepEqual(move.body, { meetingId: 'w1', project: 'group:결제 리뉴얼', from: null, ids: ['a'] });
   // 해제: 운영툴 → 없음 — 그 프로젝트에 있는 아이디어를 빼자고 묻는다.
   app.run(`notices = []; window.__sections = meetingMenuSections({ workflowId: 'w1', title: '운영 회의', project: { type: 'group', value: '운영툴', label: '운영툴' } }, {});`);
   await app.run('window.__sections[window.__sections.length - 1][0].control.opts').onSetGroup(null);
@@ -9831,4 +9831,40 @@ test('WP-W 화면 파일 규칙: 회의 줄에 새 innerHTML이 없고, 두 줄/
   const meetings = fs.readFileSync(path.join(__dirname, 'meetings-ui.js'), 'utf8');
   const uses = meetings.split('\n').filter(line => /innerHTML/.test(line) && !/^\s*\/\//.test(line));
   assert.ok(uses.every(line => /innerHTML = uiIcon\(/.test(line)), uses.join('\n'));
+});
+
+test('WP-W 답변 확인은 서버가 적은 뒤에만 줄을 빼고 알린다 — 실패는 조용히(줄 유지·알림 없음), 이미 닫혔으면 그 자리에서', async () => {
+  const { app } = reminderClient();
+  app.run("notices = []; showNotice = (text, error, retry, action) => notices.push({ text, error, action }); document.removeEventListener = () => {}; window.removeEventListener = () => {}; document.querySelectorAll = () => [];");
+  // ① 실패: 줄은 그대로, 저장 실패 알림도 되돌리기 알림도 없다.
+  app.context.fetch = async () => new Response('{"ok":false,"error":"x"}', { status: 500 });
+  app.run("panelState = { kind: 'item', id: 't1' }");
+  await app.run("answerSeenMark('t1')");
+  app.run('panelClose(); remindersRender()');
+  assert.equal(app.run('notices.length'), 0, '상세를 열기만 했는데 알림이 뜨지 않는다');
+  assert.ok(reminderRows(app).map(reminderTitle).includes('지라 업무'), '줄은 그대로다');
+  assert.equal(app.run("wfItem('t1').answerSeen"), undefined);
+  // ② 성공이 상세를 닫은 뒤에 오면 그때 빼고 알린다(닫는 순간에는 아직 아무것도 하지 않는다).
+  let release;
+  app.context.fetch = () => new Promise((resolve) => { release = () => resolve(new Response(JSON.stringify({ ok: true, answerSeen: { at: 'x', answer: 'c1:2026-09-28' } }))); });
+  app.run("panelState = { kind: 'item', id: 't2' }");
+  const pending = app.run("answerSeenMark('t2')");
+  app.run('panelClose()');
+  assert.equal(app.run('notices.length'), 0, '요청이 끝나기 전에는 빼지도 알리지도 않는다');
+  assert.ok(reminderRows(app).map(reminderTitle).includes('별칭 업무'));
+  release();
+  await pending;
+  assert.equal(app.run('notices[0].text'), '답변 확인했어요');
+  assert.ok(!reminderRows(app).map(reminderTitle).includes('별칭 업무'), '성공한 뒤에 빠진다');
+});
+
+test('WP-W 옮기기 알림: 서버가 건너뛴 항목이 있으면 「M개는 그사이 바뀌어 그대로 뒀어요」를 붙이고, ⇧⌘Z도 같은 from을 보낸다', async () => {
+  const { app, sent } = meetingRowClient(new Response(JSON.stringify({ ok: true, count: 1, moved: [{ id: 'a', from: null }], skipped: 1 })));
+  app.run("notices = []; showNotice = (text, error, retry, action) => { if (action || /그사이/.test(text)) notices.push({ text, action }); };");
+  app.run("workflowData = { meetings: [], items: [{ id: 'a', type: 'task', meetingId: 'm1' }, { id: 'b', type: 'task', meetingId: 'm1' }] }; wfIndexData(); itemsById = new Map();");
+  await app.run("meetingMoveCommit('m1', ['a', 'b'], 'group:가입 개선', 'group:결제 리뉴얼')");
+  assert.equal(app.run('notices[0].text'), '1개를 「결제 리뉴얼」로 옮겼어요 · 1개는 그사이 바뀌어 그대로 뒀어요');
+  sent.length = 0;
+  await app.run('undoStack[undoStack.length - 1].redo()');
+  assert.deepEqual(sent[0].body, { meetingId: 'm1', project: 'group:결제 리뉴얼', from: 'group:가입 개선', ids: ['a'] });
 });

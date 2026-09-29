@@ -847,19 +847,26 @@ async function meetingMoveSend(route, body) {
   return response.json();
 }
 // 서버로 보내고 ⌘Z·알림 되돌리기를 건다 — 확인 줄과 레일 알림이 함께 쓴다.
+// 서버는 from(어디서 옮기는지)으로 지금 자리를 다시 보고, 그 사이 바뀐 항목·끝낸 항목은 건너뛴다(skipped).
+// ⇧⌘Z 다시 실행도 같은 from을 보내 같은 규칙을 탄다.
 async function meetingMoveCommit(meetingId, ids, from, to) {
-  const result = await meetingMoveSend('/api/meeting/move-items', { meetingId, project: to, ids });
+  const result = await meetingMoveSend('/api/meeting/move-items', { meetingId, project: to, from: from || null, ids });
   await load();
   const moved = result.moved || [];
-  if (!moved.length) return result;
+  const skipped = result.skipped || 0;
+  const skippedText = skipped ? ` · ${skipped}개는 그사이 바뀌어 그대로 뒀어요` : '';
+  if (!moved.length) {
+    if (skipped) showNotice(`옮길 항목이 없어요${skippedText}`);
+    return result;
+  }
   const entry = {
     label: `회의 항목 ${moved.length}개 ${to ? '옮기기' : '빼기'}`,
     undo: () => meetingMoveSend('/api/meeting/move-items-undo', { meetingId, project: to, moved }),
-    redo: () => meetingMoveSend('/api/meeting/move-items', { meetingId, project: to, ids: moved.map(item => item.id) }),
+    redo: () => meetingMoveSend('/api/meeting/move-items', { meetingId, project: to, from: from || null, ids: moved.map(item => item.id) }),
   };
   pushUndo(entry);
-  const text = to ? `${moved.length}개를 「${meetingMoveName(to)}」${uiRoParticle(meetingMoveName(to))} 옮겼어요`
-    : `${moved.length}개를 「${meetingMoveName(from)}」에서 뺐어요`;
+  const text = (to ? `${moved.length}개를 「${meetingMoveName(to)}」${uiRoParticle(meetingMoveName(to))} 옮겼어요`
+    : `${moved.length}개를 「${meetingMoveName(from)}」에서 뺐어요`) + skippedText;
   showNotice(text, false, null, {
     label: '되돌리기',
     onClick: async () => {

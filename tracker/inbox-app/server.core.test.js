@@ -1201,12 +1201,24 @@ test('WP-W 지난 회의에서 프로젝트를 연결하면 그 회의도 바뀌
 
   // ② 거절: 다른 회의 항목·끝낸 항목·틀린 프로젝트 — 하나라도 틀리면 전부 그대로(한 트랜잭션).
   assert.equal((await post('/api/meeting/move-items', { meetingId: 'wpw-past', project: 'group:결제 리뉴얼', ids: ['legacy', 'wpw-other'] })).status, 400);
-  assert.equal((await post('/api/meeting/move-items', { meetingId: 'wpw-past', project: 'group:결제 리뉴얼', ids: ['legacy', 'wpw-done'] })).status, 400, '끝낸 항목은 옮기지 않는다');
+  const doneSkip = await post('/api/meeting/move-items', { meetingId: 'wpw-past', project: 'group:결제 리뉴얼', ids: ['wpw-done'] });
+  assert.deepEqual({ ok: doneSkip.ok, count: doneSkip.count, skipped: doneSkip.skipped }, { ok: true, count: 0, skipped: 1 }, '끝낸 항목은 옮기지 않고 건너뛴다');
   assert.equal(readTasks(), tasksBefore);
   assert.equal((await post('/api/meeting/move-items', { meetingId: 'wpw-past', project: 'nope', ids: ['legacy'] })).status, 400);
   // ③ 옮기기: 보여 준 번호만, 이미 그 프로젝트인 것은 세지 않는다. 아이디어는 제 프로젝트 칸으로.
-  const moved = await post('/api/meeting/move-items', { meetingId: 'wpw-past', project: 'group:결제 리뉴얼', ids: ['legacy', 'wpw-c', 'wpw-d', 'wpw-same', 'wpw-i'] });
+  // from(이전 프로젝트)이 없으면(처음 연결) 프로젝트가 없는 것만 옮기고, 이미 다른 프로젝트에 있는 것(wpw-c·wpw-d)은 건너뛴다.
+  const first = await post('/api/meeting/move-items', { meetingId: 'wpw-past', project: 'group:결제 리뉴얼', from: null, ids: ['wpw-c'] });
+  assert.deepEqual({ count: first.count, skipped: first.skipped }, { count: 0, skipped: 1 }, '그 사이 다른 프로젝트에 있으면 덮지 않는다');
+  assert.match(fs.readFileSync(checksPath, 'utf8'), /group:가입_개선/);
+  // 변경 A→B에서 from=A면 A에 있던 것만 옮긴다 — 여기서는 각 항목의 원래 자리를 from으로 한 번씩 확인하는 대신,
+  // 가입 개선(C)에 있던 wpw-c를 from으로 준 경우 옮겨지는 것을 본다.
+  const moved = await post('/api/meeting/move-items', { meetingId: 'wpw-past', project: 'group:결제 리뉴얼', from: 'group:가입_개선', ids: ['legacy', 'wpw-c', 'wpw-d', 'wpw-same', 'wpw-i'] });
   assert.equal(moved.ok, true);
+  assert.equal(moved.skipped, 1, '지라 IO-9에 있던 결정은 from이 아니라 건너뛴다');
+  const movedD = await post('/api/meeting/move-items', { meetingId: 'wpw-past', project: 'group:결제 리뉴얼', from: 'jira:IO-9', ids: ['wpw-d'] });
+  assert.equal(movedD.count, 1);
+  moved.moved.splice(2, 0, ...movedD.moved);
+  moved.count += movedD.count;
   assert.equal(moved.count, 4);
   assert.deepEqual(moved.moved, [{ id: 'legacy', from: null }, { id: 'wpw-c', from: 'group:가입 개선' }, { id: 'wpw-d', from: 'jira:IO-9' }, { id: 'wpw-i', from: null }]);
   const keyAll = async () => { const list = (await items()).workflows.items; return id => { const item = list.find(entry => entry.id === id); return item.jira ? `jira:${item.jira}` : (item.group || item.project) ? `group:${item.group || item.project}` : null; }; };
@@ -1223,14 +1235,22 @@ test('WP-W 지난 회의에서 프로젝트를 연결하면 그 회의도 바뀌
   keyOf = await keyAll();
   assert.deepEqual(['legacy', 'wpw-c', 'wpw-d', 'wpw-same', 'wpw-i'].map(keyOf), [null, 'group:운영툴', 'jira:IO-9', 'group:결제 리뉴얼', null]);
 
-  // ⑤ 빼기(해제 뒤): project null이면 그 항목들의 프로젝트를 비운다 — 아이디어도. 되돌리면 돌아온다.
-  const removed = await post('/api/meeting/move-items', { meetingId: 'wpw-past', project: null, ids: ['wpw-same'] });
+  // ⑤ 빼기(해제 뒤): project null이면 from에 있는 항목들의 프로젝트를 비운다. 되돌리면 돌아온다.
+  const removed = await post('/api/meeting/move-items', { meetingId: 'wpw-past', project: null, from: 'group:결제 리뉴얼', ids: ['wpw-same'] });
   assert.deepEqual(removed.moved, [{ id: 'wpw-same', from: 'group:결제 리뉴얼' }]);
   keyOf = await keyAll();
   assert.equal(keyOf('wpw-same'), null);
   assert.deepEqual((await post('/api/meeting/move-items-undo', { meetingId: 'wpw-past', project: null, moved: removed.moved })).restored, 1);
   keyOf = await keyAll();
   assert.equal(keyOf('wpw-same'), 'group:결제 리뉴얼');
+  // 옮긴 뒤 끝낸 항목은 되돌리기에서 건드리지 않는다(지난 기록의 프로젝트가 바뀌지 않게).
+  const again = await post('/api/meeting/move-items', { meetingId: 'wpw-past', project: 'group:운영툴', from: 'group:결제 리뉴얼', ids: ['wpw-same'] });
+  assert.equal(again.count, 1);
+  await post('/api/track/toggle', { id: 'wpw-same', status: 'done' });
+  const undoDone = await post('/api/meeting/move-items-undo', { meetingId: 'wpw-past', project: 'group:운영툴', moved: again.moved });
+  assert.deepEqual({ restored: undoDone.restored, skipped: undoDone.skipped }, { restored: 0, skipped: 1 });
+  keyOf = await keyAll();
+  assert.equal(keyOf('wpw-same'), 'group:운영툴');
 
   // ⑥ 같은 제목의 앞으로 회의(오늘 캘린더)에 새로 담는 항목은 연결된 프로젝트로 간다.
   fs.writeFileSync(calendarPath, `마지막 갱신: ${today}\n- 15:00-16:00 | ${title}\n`);

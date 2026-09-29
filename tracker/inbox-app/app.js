@@ -1818,23 +1818,26 @@ function remindersRender(data = latestData) {
 }
 
 // 업무 상세를 열면 `답변 왔어요`를 확인한 것으로 서버에 적는다(어디서 열든 — 리마인드 줄이든 오늘 목록이든).
-// 화면의 값은 먼저 바꿔 두고(다음에 그릴 때 리마인드에서 빠진다), 보내기가 실패하면 되돌린다. 알림은 띄우지 않는다
-// (NEW가 사라질 때처럼 조용한 표시다). 되돌리기(⌘Z) 대상이 아니다.
+// **서버가 적은 뒤에만** 화면 값을 바꾸고 줄을 뺀다: 상세가 아직 열려 있으면 닫을 때(panelClose), 이미 닫혔으면
+// 그 자리에서 빼며 `답변 확인했어요 · 되돌리기`를 띄운다. 보내기가 실패하면 줄은 그대로이고 **아무것도 알리지 않는다**
+// — 상세를 열기만 했는데 저장 실패 알림이 뜨면 안 된다(그래서 request()가 아닌 조용한 fetch를 쓴다).
 let answerSeenClosePending = null;
 async function answerSeenMark(id) {
   const entry = typeof wfItem === 'function' ? wfItem(id) : null;
   if (!entry || !['task', 'bug'].includes(entry.type) || entry.status === 'done' || !entry.blockedBy) return;
   const blocker = wfItem(entry.blockedBy);
   if (!blocker || blocker.status !== 'done' || answerSeenFor(entry)) return;
-  const previous = entry.answerSeen;
-  entry.answerSeen = { at: new Date().toISOString(), answer: `${entry.blockedBy}:${blocker.completed || ''}` };
-  answerSeenClosePending = id;
+  let saved = null;
   try {
-    await request('/api/workflow/answer-seen', { method: 'POST', quiet: true, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
-  } catch {
-    entry.answerSeen = previous;
-    if (answerSeenClosePending === id) answerSeenClosePending = null;
-  }
+    const response = await fetch('/api/workflow/answer-seen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+    const data = await response.json();
+    if (response.ok && data && data.ok) saved = data.answerSeen;
+  } catch { saved = null; }
+  if (!saved) return;
+  entry.answerSeen = saved;
+  if (panelState && panelState.kind !== 'meeting' && panelState.id === id) { answerSeenClosePending = id; return; }
+  remindersRender();
+  answerSeenNotice(id);
 }
 
 // 리마인드에서 빠지는 순간 알린다 — `답변 확인했어요 · 되돌리기`. 되돌리면 서버의 확인 표시를 지우고 줄이 다시 선다.
@@ -4870,6 +4873,8 @@ window.addEventListener('beforeinstallprompt', appInstallOnPrompt);
 // 창 크기가 바뀌면 두 줄 말줄임 제목(아이디어·회의 줄)이 잘렸는지 다시 잰다 — 멎은 뒤 한 번만.
 let uiClampResizeTimer = null;
 window.addEventListener('resize', () => { clearTimeout(uiClampResizeTimer); uiClampResizeTimer = setTimeout(uiClampResync, 150); });
+// 접힌 details 안에서 그려진 제목도 펼쳐진 뒤 다시 잰다(toggle은 거품이 없어 잡기 단계로 듣는다).
+document.addEventListener('toggle', () => requestAnimationFrame(uiClampResync), true);
 window.addEventListener('appinstalled', appInstallOnInstalled);
 setupQuickAdd('todayTaskInput', '/api/today-task/create', '오늘 할 일에 추가했어요');
 setupQuickAdd('laterTaskInput', '/api/later-task/create', '나중에 할 일에 추가했어요');
@@ -5009,6 +5014,8 @@ function setActiveTab(tab) {
   if (tab !== 'weekly' && typeof reportNestEnd === 'function') reportNestEnd();
   document.getElementById('skipLink').hidden = tab !== 'today';
   renderActiveTabLists();
+  // 숨은 탭에서 그려진 두 줄 말줄임 제목은 잴 수 없었다(크기 0) — 보이게 된 뒤 다시 잰다.
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(uiClampResync);
   try {
     localStorage.setItem('activeTab', tab);
   } catch {}

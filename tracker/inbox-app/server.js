@@ -1027,10 +1027,11 @@ function setMeetingLink(title, project, meetingId) {
 }
 
 // ---------- 회의 프로젝트를 연결·변경·해제한 뒤 이미 담은 항목도 옮기기·빼기 ----------
-// 회의 상세의 확인 줄(`옮기기`·`빼기`)과 오늘 미팅 줄 ⋯ 뒤의 알림 버튼만 부른다. 무엇을 옮길지는 화면이 고른다
-// (프로젝트가 없거나 이전 프로젝트에 있던 것만 — 사람이 따로 다른 프로젝트로 옮겨 둔 것은 덮지 않는다). 서버는 받은
-// 번호가 **이 회의의 항목이고 끝내지 않은 것**인지만 다시 확인한다 — 끝낸 항목은 주간요약 같은 지난 기록이 바뀌지
-// 않게 옮기지 않는다. 할 일·버그·확인 대기·결정은 jira/group 칸(set-jira/set-group과 같은 setTrackField), 아이디어는
+// 회의 상세의 확인 줄(`옮기기`·`빼기`)과 오늘 미팅 줄 ⋯ 뒤의 알림 버튼만 부른다. 화면이 고른 번호(ids)와 **어디서
+// 옮기는지(from — 이전 프로젝트, 처음 연결이면 null)**를 함께 받는다. 서버는 지금 위치를 다시 본다: 옮길 수 있는 것은
+// 지금 프로젝트가 없거나(연결·변경일 때) from에 있는 것뿐이고, 그 사이 다른 창·기기에서 다른 프로젝트로 옮겼거나
+// 끝낸 항목은 덮지 않고 건너뛴다(skipped로 센다 — 전부 실패가 아니다). 끝낸 항목은 주간요약 같은 지난 기록이 바뀌지
+// 않게 옮기지 않는다. 이 회의의 항목이 아닌 번호는 여전히 전부 거절한다. 할 일·버그·확인 대기·결정은 jira/group 칸(set-jira/set-group과 같은 setTrackField), 아이디어는
 // 제 프로젝트 칸(`project:` — /api/idea/set-project와 같은 규칙, 지라면 `jira:`)을 바꾼다. project가 null이면 뺀다.
 // 한 트랜잭션(idempotent → mutations.run)이라 하나라도 틀리면 전부 그대로다. 되돌리기는 돌려준 moved(원래 프로젝트)로.
 const MEETING_MOVE_TYPES = ['task', 'bug', 'check', 'decision', 'idea'];
@@ -1061,24 +1062,34 @@ function meetingSetItemProject(id, type, target) {
   if (!target) { setTrackField(id, 'jira', null, null); return setTrackField(id, 'group', null, null); }
   return setTrackField(id, target.type, target.value, null);
 }
-function moveMeetingItems({ meetingId, project = null, ids } = {}) {
+// from(이전 프로젝트 열쇠)을 서버의 열쇠 꼴로 — 그룹은 밑줄·공백을 같은 이름으로 본다. 보내지 않으면 null(처음 연결).
+function meetingMoveFromKey(from) {
+  if (from === null || from === undefined) return null;
+  if (typeof from !== 'string' || !MEETING_MOVE_KEY_RE.test(from) || from.length > 250 || /[\r\n\[\]]/.test(from)) throw new Error('이전 프로젝트를 확인해 주세요.');
+  return from.startsWith('group:') ? `group:${from.slice('group:'.length).replace(/_/g, ' ').trim()}` : from;
+}
+function moveMeetingItems({ meetingId, project = null, from = null, ids } = {}) {
   if (typeof meetingId !== 'string' || !meetingId) throw new Error('회의를 찾을 수 없어요.');
   const target = meetingMoveTarget(project);
+  const was = meetingMoveFromKey(from);
   meetingMoveCheckIds(ids);
   const linked = workflows.meetingItemIds(meetingId);
   const refs = getReportRefs();
   const key = meetingMoveKey(target);
   const moved = [];
+  let skipped = 0;
   ids.forEach((id) => {
     const ref = refs[id];
     if (!ref || !linked.has(id) || !MEETING_MOVE_TYPES.includes(ref.type)) throw new Error('이 회의에서 나온 항목이 아니에요. 새로고침한 뒤 다시 시도해 주세요.');
-    if (ref.status === 'done') throw new Error('끝낸 항목은 옮기지 않아요. 새로고침한 뒤 다시 시도해 주세요.');
-    const from = meetingItemKey(ref);
-    if (from === key) return; // 이미 그 자리다 — 세지도 않는다
+    const now = meetingItemKey(ref);
+    if (now === key) return; // 이미 그 자리다 — 세지도 않는다
+    // 끝낸 항목, 그리고 지금 자리가 옮겨도 되는 자리(연결·변경이면 없음 또는 from, 빼기면 from)가 아니면 건너뛴다.
+    const movable = now === null ? key !== null : (was !== null && now === was);
+    if (ref.status === 'done' || !movable) { skipped += 1; return; }
     if (!meetingSetItemProject(id, ref.type, target)) throw new Error('항목을 찾을 수 없어요.');
-    moved.push({ id, from });
+    moved.push({ id, from: now });
   });
-  return { ok: true, meetingId, project: key, count: moved.length, moved };
+  return { ok: true, meetingId, project: key, count: moved.length, moved, skipped };
 }
 // 되돌리기: 기록(moved)의 번호가 지금도 이 회의의 항목이고 아직 옮긴 그 자리(project, 뺐으면 없음)에 있을 때만
 // 원래대로 돌린다. 그 사이 다른 기기·사람이 바꿨으면 건드리지 않고 건너뛴다(skipped) — BMOVE 되돌리기와 같은 규칙.
@@ -1097,7 +1108,8 @@ function undoMoveMeetingItems({ meetingId, project = null, moved } = {}) {
   let restored = 0, skipped = 0;
   moved.forEach(({ id, from }) => {
     const ref = refs[id];
-    if (!ref || !linked.has(id) || meetingItemKey(ref) !== key) { skipped += 1; return; }
+    // 끝낸 항목은 되돌리기에서도 건드리지 않는다 — 옮긴 뒤 끝냈으면 그 프로젝트가 이미 지난 기록이다.
+    if (!ref || !linked.has(id) || ref.status === 'done' || meetingItemKey(ref) !== key) { skipped += 1; return; }
     const at = from ? from.indexOf(':') : -1;
     meetingSetItemProject(id, ref.type, from ? { type: from.slice(0, at), value: from.slice(at + 1) } : null);
     restored += 1;
@@ -2503,7 +2515,7 @@ const handleRequest = (req, res) => {
     '/api/workflow/review': workflows.review,
     '/api/workflow/review-undo': workflows.undoReview,
     '/api/workflow/link': workflows.link,
-    // 리마인드의 `답변 왔어요`를 한 번 열어 봤다는 표시(업무의 흐름 기록 칸 하나). 되돌리기 대상이 아니다.
+    // 리마인드의 `답변 왔어요`를 한 번 열어 봤다는 표시(업무의 흐름 기록 칸 하나)와 그 되돌리기(알림·⌘Z).
     '/api/workflow/answer-seen': workflows.markAnswerSeen,
     '/api/workflow/answer-seen-undo': workflows.unmarkAnswerSeen,
     // 회의에 연결한 프로젝트로 이 회의에서 이미 담은 항목도 옮기기 · 그 되돌리기(한 트랜잭션).
