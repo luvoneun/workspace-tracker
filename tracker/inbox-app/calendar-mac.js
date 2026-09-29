@@ -19,7 +19,7 @@ const os = require('os');
 const path = require('path');
 const { wallOf, instantOf } = require('./ical');
 
-const TIMEOUT_MS = 60 * 1000;        // 목록·읽기를 합친 제한 시간
+const TIMEOUT_MS = 60 * 1000;        // 목록·읽기를 합친 제한 시간(사람에게는 "1분")
 const KILL_GRACE_MS = 2000;          // TERM 뒤 KILL까지
 const MAX_OUTPUT = 20 * 1024 * 1024; // osascript 답의 최대 크기
 const MAX_CALENDARS = 200;           // 상태 파일에 남기는 캘린더 수
@@ -31,15 +31,17 @@ const NOW_AGENT = 'mac-calendar-now';
 
 // 사람에게 보이는 말(해요체). 실패 말은 로그의 ⚠️ 줄에 그대로 들어가고, 연동 카드의 멈춤 이유로 쓰인다.
 const WORDS = {
-  denied: '맥이 캘린더 접근을 막았어요 — 시스템 설정 → 개인정보 보호 및 보안 → 캘린더에서 허용해 주세요',
+  denied: '맥이 캘린더 접근을 막았어요 — 시스템 설정 › 개인정보 보호 및 보안 › 캘린더(전체 접근)와 자동화에서 허용해 주세요',
+  unanswered: '허용 창에 답하지 않았어요 — 허용하고 확인을 다시 눌러 주세요',
   noAccount: '맥 캘린더에 구글 계정이 없어요 — 1단계를 먼저 해 주세요',
   missing: '고른 캘린더를 찾지 못했어요 — 다시 골라 주세요',
   none: '읽을 캘린더를 아직 고르지 않았어요 — 설정 › 연동 › 캘린더에서 골라 주세요',
-  timeout: '맥 캘린더가 60초 안에 답하지 않았어요 — 캘린더가 많으면 잠시 뒤 다시 시도해 주세요',
+  timeout: '맥 캘린더가 1분 안에 답하지 않았어요 — 캘린더가 많으면 잠시 뒤 다시 시도해 주세요',
   failed: '맥 캘린더를 읽지 못했어요 — 잠시 뒤 다시 시도해 주세요',
 };
 // 종료 코드 — 0이 아니면 서버·화면이 실패로 읽는다(이유는 ⚠️ 줄).
-const EXIT = { denied: 77, noAccount: 78, missing: 79, none: 79, timeout: 124, failed: 1 };
+// 허용 창에 답하지 않음(75)은 다시 누르면 되는 일시 실패다(바로 멈춤이 아니다).
+const EXIT = { denied: 77, noAccount: 78, missing: 79, none: 79, unanswered: 75, timeout: 124, failed: 1 };
 // 저절로 풀리지 않고 사람이 고쳐야 하는 실패(허용 막힘 77·계정 없음 78·고른 캘린더 없음 79)의 ⚠️ 줄 — 서버가 한 번에 멈춤으로 본다
 // (토큰 문제와 같은 급). 시간 초과·그 밖의 일시 실패는 다른 자동화와 같은 회차 규칙이다.
 const NEEDS_PERSON_RE = new RegExp(`^⚠️ (?:${['denied', 'noAccount', 'missing', 'none'].map(key => WORDS[key].split(' — ')[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`);
@@ -177,13 +179,20 @@ function runOsascript(input, { bin = '/usr/bin/osascript', script = path.join(__
 }
 
 // ---------- 한 번 읽기 ----------
+// JXA·osascript의 실패 답 → 이유(아는 것만)와 허용 상태 숫자(`code` — 버리지 않고 상태 파일까지 남긴다).
+function failureOf(answer) {
+  const error = answer && answer.error;
+  const reason = ['denied', 'unanswered', 'timeout'].includes(error) ? error : 'failed';
+  return { reason, code: answer && Number.isFinite(answer.code) ? answer.code : null };
+}
+
 // kind: 'check'(허용하고 확인 — 목록 + 고른(또는 기본) 캘린더의 오늘 일정 수, 스냅샷은 쓰지 않는다) | 'run'(주기·지금 가져오기).
 async function readMac({ kind, chosen, source, email, now = Date.now(), timeZone, osa }) {
   // 제한 시간은 실제 시계로 잰다(`now`는 "오늘"을 정하는 값이다).
   const deadline = Date.now() + TIMEOUT_MS;
   const left = () => deadline - Date.now();
   const list = await osa({ mode: 'list' }, left());
-  if (!list || list.ok !== true) return { ok: false, reason: (list && list.error) === 'denied' ? 'denied' : (list && list.error) === 'timeout' ? 'timeout' : 'failed', calendars: [] };
+  if (!list || list.ok !== true) return { ok: false, ...failureOf(list), calendars: [] };
   const calendars = (Array.isArray(list.calendars) ? list.calendars : []).slice(0, MAX_CALENDARS)
     .map(one => ({ id: clean(one && one.id, 300), name: clean(one && one.name), writable: !(one && one.writable === false), account: clean(one && one.account) }))
     .filter(one => one.id);
@@ -205,7 +214,7 @@ async function readMac({ kind, chosen, source, email, now = Date.now(), timeZone
   const start = new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
   const end = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime();
   const read = await osa({ mode: 'read', ids, start, end }, left());
-  if (!read || read.ok !== true) return { ...base, ok: false, reason: (read && read.error) === 'denied' ? 'denied' : (read && read.error) === 'timeout' ? 'timeout' : 'failed', read: ids, missing };
+  if (!read || read.ok !== true) return { ...base, ok: false, ...failureOf(read), read: ids, missing };
   const failed = Array.isArray(read.failed) ? read.failed.map(String) : [];
   const good = ids.filter(id => !failed.includes(id));
   if (!good.length) return { ...base, ok: false, reason: 'failed', read: ids, missing };
@@ -228,10 +237,12 @@ function paths(env = process.env) {
 const statePath = dir => path.join(dir, STATE_FILE);
 const requestPath = dir => path.join(dir, 'requests', REQUEST_FILE);
 
-function writeAtomic(file, text) {
+// `mode`를 주면 그 권한으로 쓴다(결과 파일은 캘린더 이름이 들어 있어 0600 — 나만 읽기).
+function writeAtomic(file, text, mode = null) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, text);
+  fs.writeFileSync(tmp, text, mode === null ? undefined : { mode });
+  if (mode !== null) fs.chmodSync(tmp, mode);
   fs.renameSync(tmp, file);
 }
 
@@ -309,6 +320,7 @@ async function main({ mode = 'run', env = process.env, now = Date.now, osa = nul
     requestedAt,
     ok: !!result.ok,
     reason: result.ok ? null : (result.reason || 'failed'),
+    code: result.ok ? null : (Number.isFinite(result.code) ? result.code : null),
     message: result.ok ? line : (WORDS[result.reason] || WORDS.failed),
     calendars: result.calendars || [],
     suggested: result.suggested || [],
@@ -316,7 +328,7 @@ async function main({ mode = 'run', env = process.env, now = Date.now, osa = nul
     missing: result.missing || [],
     eventCount: result.ok ? events.length : null,
   };
-  try { writeAtomic(statePath(p.automation), `${JSON.stringify(state, null, 2)}\n`); } catch { /* 상태 파일은 화면용이다 — 기록은 로그에 남는다 */ }
+  try { writeAtomic(statePath(p.automation), `${JSON.stringify(state, null, 2)}\n`, 0o600); } catch { /* 상태 파일은 화면용이다 — 기록은 로그에 남는다 */ }
   appendLog(log, [`───── ${started} ${TASK} 시작${versionTag(p.version)}`, line, '', `───── ${stamp(now())} ${TASK} 종료 (exit ${code})`]);
   return code;
 }

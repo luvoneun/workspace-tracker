@@ -2437,7 +2437,8 @@ const SETTINGS_ICAL_OFF = '해제하면 오늘 일정 가져오기가 멈춰요.
 const SETTINGS_MAC_WAIT_MS = 90000;
 const SETTINGS_MAC_POLL_MS = 2000;
 const SETTINGS_MAC_WORDS = {
-  denied: '맥이 캘린더 접근을 막았어요 — 시스템 설정 → 개인정보 보호 및 보안 → 캘린더에서 허용해 주세요',
+  denied: '맥이 캘린더 접근을 막았어요 — 시스템 설정 › 개인정보 보호 및 보안 › 캘린더(전체 접근)와 자동화에서 허용해 주세요',
+  unanswered: '허용 창에 답하지 않았어요 — 허용하고 확인을 다시 눌러 주세요',
   noAccount: '맥 캘린더에 구글 계정이 없어요 — 1단계를 먼저 해 주세요',
   missing: '고른 캘린더를 찾지 못했어요 — 다시 골라 주세요',
   none: '읽을 캘린더를 아직 고르지 않았어요 — 아래에서 골라 주세요',
@@ -2445,7 +2446,7 @@ const SETTINGS_MAC_WORDS = {
   failed: '맥 캘린더를 읽지 못했어요 — 잠시 뒤 다시 눌러 주세요',
 };
 // 앱이 시스템 설정 화면을 직접 열 수는 없다 — 가는 길만 글자로 알려 준다.
-const SETTINGS_MAC_DENIED_HELP = '가는 길: 화면 왼쪽 위 애플 메뉴 → 시스템 설정 → 개인정보 보호 및 보안 → 캘린더 → 목록에서 이 앱(node·osascript 등 — 맥에 따라 이름이 달라요)을 「전체 접근」으로 켜고 다시 눌러 주세요';
+const SETTINGS_MAC_DENIED_HELP = '가는 길: 화면 왼쪽 위 애플 메뉴 › 시스템 설정 › 개인정보 보호 및 보안 › 캘린더에서 이 앱(node·osascript 등 — 맥에 따라 이름이 달라요)을 「전체 접근」으로, 같은 화면의 자동화에서도 캘린더를 켜고 다시 눌러 주세요';
 
 async function settingsMacLoad() {
   try {

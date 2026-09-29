@@ -12,9 +12,9 @@
 // 답(JSON 한 줄):
 //   { ok: true, calendars: [{ id, name, writable, account }], events: [{ calendarId, id, externalId, title, start, end,
 //     allDay, status, recurring, declined }], failed: [id] }
-//   또는 { ok: false, error: 'denied' | 'failed', code }
+//   또는 { ok: false, error: 'unanswered' | 'denied' | 'failed', code }
 // 장소·참석자 목록·메모는 싣지 않는다. 참석자는 "내가(isCurrentUser) 거절했나"에만 쓰고 답에는 true/false만 남긴다.
-// 허용을 아직 묻지 않았으면 한 번 묻고 30초까지 기다린다. 거부·제한이면 denied.
+// 허용을 아직 묻지 않았으면 한 번 묻고 30초까지 기다린다. 끝내 답이 없으면 unanswered, 거부·제한이면 denied.
 
 ObjC.import('EventKit');
 ObjC.import('Foundation');
@@ -29,7 +29,9 @@ function run(argv) {
   try { input = JSON.parse(argv[0] || '{}') || {}; } catch (error) { input = {}; }
   try {
     var store = $.EKEventStore.alloc.init;
-    if (!authorize(store)) return JSON.stringify({ ok: false, error: 'denied', code: authStatus() });
+    var status = authorize(store);
+    // 0(허용 창에 아직 답하지 않음)은 다시 물으면 되는 일시 실패, 1(제한)·2(거부)·4(쓰기만)는 사람이 설정에서 고쳐야 한다.
+    if (status !== AUTHORIZED) return JSON.stringify({ ok: false, error: status === 0 ? 'unanswered' : 'denied', code: status });
     var calendars = listCalendars(store);
     if (input.mode !== 'read') return JSON.stringify({ ok: true, calendars: calendars.map(shown), events: [], failed: [] });
     return JSON.stringify(readEvents(store, calendars, input));
@@ -41,18 +43,17 @@ function run(argv) {
 // ObjC 값은 `!==`로 견주면 늘 참이다 — 숫자로 바꿔 본다.
 function authStatus() { return Number($.EKEventStore.authorizationStatusForEntityType($.EKEntityTypeEvent)); }
 
+// 아직 안 물었으면(0) 한 번 묻고, 답이 올 때까지(상태가 0이 아닐 때까지) 30초까지 기다린다. 콜백에 기대지 않고 상태를 직접 본다.
+// 돌려주는 값은 마지막 허용 상태(숫자).
 function authorize(store) {
-  var status = authStatus();
-  if (status === 0) {
-    var done = false;
-    var callback = function () { done = true; };
+  if (authStatus() === 0) {
+    var callback = function () {};
     if (store.respondsToSelector('requestFullAccessToEventsWithCompletion:')) store.requestFullAccessToEventsWithCompletion(callback);
     else store.requestAccessToEntityTypeCompletion($.EKEntityTypeEvent, callback);
     var until = $.NSDate.dateWithTimeIntervalSinceNow(30);
-    while (!done && Number($.NSDate.date.compare(until)) < 0) $.NSRunLoop.currentRunLoop.runUntilDate($.NSDate.dateWithTimeIntervalSinceNow(0.2));
-    status = authStatus();
+    while (authStatus() === 0 && Number($.NSDate.date.compare(until)) < 0) $.NSRunLoop.currentRunLoop.runUntilDate($.NSDate.dateWithTimeIntervalSinceNow(0.2));
   }
-  return status === AUTHORIZED;
+  return authStatus();
 }
 
 function text(value) { try { var v = ObjC.unwrap(value); return v == null ? '' : String(v); } catch (error) { return ''; } }
@@ -83,6 +84,8 @@ function readEvents(store, calendars, input) {
     try {
       var predicate = store.predicateForEventsWithStartDateEndDateCalendars(start, end, $([entry.ref]));
       var found = store.eventsMatchingPredicate(predicate);
+      // 일정이 없는 날은 nil·빈 배열이 올 수 있다 — 실패가 아니라 0개다.
+      if (!found || found.isNil() || !Number(found.count)) return;
       for (var k = 0; k < Number(found.count); k += 1) {
         var ev = found.objectAtIndex(k);
         events.push({

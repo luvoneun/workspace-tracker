@@ -9624,9 +9624,9 @@ test('WP-V F. 맥 캘린더 확인 실패: 막힘은 이유 + 시스템 설정 �
     return { fx, error, help };
   };
   const denied = await run({ ok: true, installed: true, state: macState({ ok: false, reason: 'denied', calendars: [], eventCount: null }) });
-  assert.equal(denied.error, '맥이 캘린더 접근을 막았어요 — 시스템 설정 → 개인정보 보호 및 보안 → 캘린더에서 허용해 주세요');
+  assert.equal(denied.error, '맥이 캘린더 접근을 막았어요 — 시스템 설정 › 개인정보 보호 및 보안 › 캘린더(전체 접근)와 자동화에서 허용해 주세요');
   assert.equal(denied.help.hidden, false);
-  assert.match(denied.help.textContent, /애플 메뉴 → 시스템 설정 → 개인정보 보호 및 보안 → 캘린더/);
+  assert.match(denied.help.textContent, /애플 메뉴 › 시스템 설정 › 개인정보 보호 및 보안 › 캘린더에서 .*「전체 접근」으로, 같은 화면의 자동화에서도/);
   assert.equal(denied.fx.find('calendar', 'd-ich').length, 0);
 
   const noAccount = await run({ ok: true, installed: true, state: macState({ ok: false, reason: 'noAccount', calendars: [{ id: 'L', name: '캘린더', writable: true }], suggested: [], read: [] }) });
@@ -9677,4 +9677,17 @@ test('WP-V F. 연결된 맥 캘린더: `맥 캘린더에서 읽는 중 · 10분 
   await stopped.app.run('renderSettingsIntegrations()');
   assert.match(stopped.text('calendar'), /고른 캘린더를 찾지 못했어요 — 다시 골라 주세요/);
   assert.doesNotMatch(stopped.text('calendar'), /⚠️|최근 기록에서/, '이유 한 줄만');
+});
+
+test('WP-V F. 허용 창에 답하지 않음(0)은 다시 누르라는 말만 — 막힘 안내(시스템 설정 가는 길)는 거부일 때만', async () => {
+  const fx = intgClient({}, [{ body: { ok: true, requestedAt: '2026-09-29T01:00:00.000Z' } }]);
+  await fx.app.run('renderSettingsIntegrations()');
+  fx.toggle('calendar').listeners.click();
+  await tick();
+  fx.app.context.setTimeout = (fn) => { fn(); return 0; };
+  fx.mac.view = { ok: true, installed: true, state: macState({ ok: false, reason: 'unanswered', calendars: [], eventCount: null }) };
+  await fx.button('calendar', '허용하고 확인').listeners.click();
+  const box = fx.find('calendar', 'd-ichoice').find(one => one.dataset.choice === 'mac');
+  assert.equal(box.children.find(one => one.className === 'd-derr').textContent, '허용 창에 답하지 않았어요 — 허용하고 확인을 다시 눌러 주세요');
+  assert.equal(box.children.filter(one => one.className === 'd-ismall')[1].hidden, true, '가는 길은 보이지 않는다');
 });

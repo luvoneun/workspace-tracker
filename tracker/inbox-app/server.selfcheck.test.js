@@ -343,7 +343,7 @@ test('WP-V 점검: 맥 캘린더 갈래는 mac-calendar 등록 둘을 보고, Cl
   assert.equal(byKey(missing, 'calendar').detail, '맥 캘린더에서 읽어요');
 
   fs.writeFileSync(path.join(h.agents, 'com.workspace.app.mac-calendar-now.plist'), '<plist/>');
-  const summary = '⚠️ 맥이 캘린더 접근을 막았어요 — 시스템 설정 → 개인정보 보호 및 보안 → 캘린더에서 허용해 주세요';
+  const summary = '⚠️ 맥이 캘린더 접근을 막았어요 — 시스템 설정 › 개인정보 보호 및 보안 › 캘린더(전체 접근)와 자동화에서 허용해 주세요';
   const stopped = await createSelfcheck(depsFor(h, net, {
     claude: false,
     alerts: ['calendar'],
@@ -354,5 +354,5 @@ test('WP-V 점검: 맥 캘린더 갈래는 mac-calendar 등록 둘을 보고, Cl
   const item = byKey(stopped, 'calendar');
   assert.equal(item.state, 'bad');
   assert.equal(item.detail, '맥이 캘린더 접근을 막았어요');
-  assert.deepEqual(item.fix, { text: '시스템 설정 → 개인정보 보호 및 보안 → 캘린더에서 허용해 주세요' });
+  assert.deepEqual(item.fix, { text: '시스템 설정 › 개인정보 보호 및 보안 › 캘린더(전체 접근)와 자동화에서 허용해 주세요' });
 });

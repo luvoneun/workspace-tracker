@@ -2317,9 +2317,9 @@ test('WP-V setup.sh: 맥 캘린더 갈래면 mac-calendar(매일 8–20시 30분
   const every = fs.readFileSync(path.join(home, 'com.workspace.app.mac-calendar.plist'), 'utf8');
   assert.match(every, /<string>\/x\/inst &amp; co\/mac-calendar\.sh<\/string>\n\s*<string>run<\/string>/);
   const slots = [...every.matchAll(/<key>Hour<\/key><integer>(\d+)<\/integer><key>Minute<\/key><integer>(\d+)<\/integer>/g)].map(m => `${m[1]}:${m[2]}`);
-  assert.equal(slots.length, 24);
+  assert.equal(slots.length, 25);
   assert.equal(slots[0], '8:0');
-  assert.equal(slots[23], '19:30');
+  assert.equal(slots[24], '20:0');
   assert.match(every, /<key>RunAtLoad<\/key>\n\s*<true\/>/, '연결하자마자 한 번 읽는다');
   assert.match(every, /logs\/mac-calendar\.err/);
   if (fs.existsSync('/usr/bin/plutil')) {
@@ -2344,5 +2344,34 @@ test('WP-V run-task.sh: 캘린더가 맥 캘린더 갈래면 calendar-sync는 cl
   const env = { WORKSPACE_DIR: home, WORKSPACE_CONFIG: config, AUTOMATION_LOG_DIR: logs, CLAUDE_BIN: claude, WORKSPACE_CLAUDE_TOKEN_FILE: path.join(home, 'no-token') };
   assert.equal(runScript(automationScript('run-task.sh'), ['calendar-sync', '프롬프트', 'Read'], env).status, 0);
   assert.match(fs.readFileSync(path.join(logs, 'calendar-sync.log'), 'utf8'), /calendar-sync 맥 캘린더에서 읽고 있어 건너뛰어요/);
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+// setup.sh는 실행하지 않는다 — 등록 루프 조각만 가짜 launchctl·plutil로 돌려 본다(실제 launchd에 닿지 않는다).
+test('WP-V setup.sh: mac-calendar-now는 plist 내용이 그대로면 다시 올리지 않고, 바뀌었거나 처음이면 올린다', () => {
+  const script = fs.readFileSync(path.join(REPO_ROOT, 'setup.sh'), 'utf8');
+  assert.match(script, /OLD_MAC_NOW_PLIST="\$\(cat "\$AGENTS_DIR\/\$LABEL\.mac-calendar-now\.plist" 2>\/dev\/null\)"\ncat > "\$AGENTS_DIR\/\$LABEL\.mac-calendar-now\.plist"/, '쓰기 전에 전 내용을 적어 둔다');
+  const from = script.indexOf('for f in server slack-capture calendar-sync');
+  const loop = script.slice(from, script.indexOf('\ndone\n', from) + 6);
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-setup-reload-'));
+  const bin = path.join(home, 'bin');
+  fs.mkdirSync(bin);
+  const calls = path.join(home, 'launchctl.log');
+  writeExec(path.join(bin, 'launchctl'), `#!/bin/bash\necho "$@" >> ${JSON.stringify(calls)}\nexit 0\n`);
+  writeExec(path.join(bin, 'plutil'), '#!/bin/bash\nexit 0\n');
+  fs.writeFileSync(path.join(home, 'com.workspace.app.mac-calendar-now.plist'), '<plist>같은 내용</plist>');
+  const run = (old) => {
+    fs.rmSync(calls, { force: true });
+    const r = spawnSync('/bin/bash', ['-c', `AGENTS_DIR=${JSON.stringify(home)}; LABEL=com.workspace.app; IN_RUNNER=''; OLD_SERVER_PLIST=''; OLD_MAC_NOW_PLIST=${JSON.stringify(old)}\nok() { echo "$1"; }\ndie() { exit 1; }\n${loop}`], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    return { out: r.stdout, calls: fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8') : '' };
+  };
+  const same = run('<plist>같은 내용</plist>');
+  assert.match(same.out, /mac-calendar-now 그대로/);
+  assert.equal(same.calls, '', '내용이 같으면 launchctl을 부르지 않는다');
+  const changed = run('<plist>옛 내용</plist>');
+  assert.match(changed.calls, /unload .*mac-calendar-now\.plist\nload .*mac-calendar-now\.plist/);
+  const first = run('');
+  assert.match(first.calls, /load .*mac-calendar-now\.plist/, '처음이면 올린다');
   fs.rmSync(home, { recursive: true, force: true });
 });

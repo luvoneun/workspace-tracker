@@ -148,10 +148,10 @@ test('WP-V 실행 실패: 허용 막힘·계정 없음·고른 캘린더 모두 
   h.writeConfig({ integrations: { calendar: true }, calendar: { source: 'mac', macCalendars: [{ id: 'CAL-ME', name: 'me@example.test' }] } });
   fs.writeFileSync(path.join(h.data, 'calendar_today.md'), '이전 스냅샷\n');
   const cases = [
-    [fakeOsa({ list: { ok: false, error: 'denied', code: -1743 } }), 77, '⚠️ 맥이 캘린더 접근을 막았어요 — 시스템 설정 → 개인정보 보호 및 보안 → 캘린더에서 허용해 주세요', 'denied'],
+    [fakeOsa({ list: { ok: false, error: 'denied', code: -1743 } }), 77, '⚠️ 맥이 캘린더 접근을 막았어요 — 시스템 설정 › 개인정보 보호 및 보안 › 캘린더(전체 접근)와 자동화에서 허용해 주세요', 'denied'],
     [fakeOsa({ list: { ok: true, calendars: [] } }), 78, '⚠️ 맥 캘린더에 구글 계정이 없어요 — 1단계를 먼저 해 주세요', 'noAccount'],
     [fakeOsa({ list: { ok: true, calendars: [{ id: 'X', name: '다른 것' }] } }), 79, '⚠️ 고른 캘린더를 찾지 못했어요 — 다시 골라 주세요', 'missing'],
-    [fakeOsa({ list: { ok: false, error: 'timeout' } }), 124, '⚠️ 맥 캘린더가 60초 안에 답하지 않았어요 — 캘린더가 많으면 잠시 뒤 다시 시도해 주세요', 'timeout'],
+    [fakeOsa({ list: { ok: false, error: 'timeout' } }), 124, '⚠️ 맥 캘린더가 1분 안에 답하지 않았어요 — 캘린더가 많으면 잠시 뒤 다시 시도해 주세요', 'timeout'],
     [fakeOsa({ read: { ok: true, calendars: CALENDARS, events: [], failed: ['CAL-ME'] } }), 1, '⚠️ 맥 캘린더를 읽지 못했어요 — 잠시 뒤 다시 시도해 주세요', 'failed'],
   ];
   for (const [fake, exit, line, reason] of cases) {
@@ -290,4 +290,40 @@ else process.stdout.write(JSON.stringify({ ok: true, calendars: [], failed: [], 
   assert.equal(lost.status, 1);
   assert.match(lost.stderr, /설치 정보를 찾을 수 없어요/);
   assert.equal(spawnSync('/bin/bash', ['-n', script]).status, 0);
+});
+
+test('WP-V 허용: 창에 답하지 않음(0)은 일시 실패(75, 바로 멈춤 아님), 거부·제한(2·1)은 막힘(77, 바로 멈춤) — 허용 상태 숫자는 결과 파일에 남긴다', async (t) => {
+  const h = tempHome(t);
+  h.writeConfig({ integrations: { calendar: true }, calendar: { source: 'mac', macCalendars: [{ id: 'CAL-ME', name: 'me@example.test' }] } });
+  assert.equal(await mac.main({ mode: 'run', env: h.env, now: () => NOW, osa: fakeOsa({ list: { ok: false, error: 'unanswered', code: 0 } }).osa, timeZone: ZONE }), 75);
+  assert.ok(h.log().includes('⚠️ 허용 창에 답하지 않았어요 — 허용하고 확인을 다시 눌러 주세요\n'));
+  assert.equal(h.state().reason, 'unanswered');
+  assert.equal(h.state().code, 0);
+  assert.equal(mac.NEEDS_PERSON_RE.test(`⚠️ ${mac.WORDS.unanswered}`), false, '다시 누르면 되는 일시 실패 — 회차 규칙대로 늦어요');
+  for (const code of [2, 1]) {
+    assert.equal(await mac.main({ mode: 'run', env: h.env, now: () => NOW, osa: fakeOsa({ list: { ok: false, error: 'denied', code } }).osa, timeZone: ZONE }), 77);
+    assert.equal(h.state().reason, 'denied');
+    assert.equal(h.state().code, code, '허용 상태 숫자를 버리지 않는다');
+  }
+  assert.ok(h.log().includes('⚠️ 맥이 캘린더 접근을 막았어요 — 시스템 설정 › 개인정보 보호 및 보안 › 캘린더(전체 접근)와 자동화에서 허용해 주세요\n'));
+  assert.equal(mac.NEEDS_PERSON_RE.test(`⚠️ ${mac.WORDS.denied}`), true, '사람이 고쳐야 풀린다 — 바로 멈춤');
+  // 결과 파일은 캘린더 이름이 들어 있어 나만 읽기(0600)
+  assert.equal(fs.statSync(path.join(h.automation, 'mac-calendar.json')).mode & 0o777, 0o600);
+});
+
+test('WP-V 빈 날: 고른 캘린더가 모두 비어도 성공(일정 0개) — 실패로 쌓이지 않는다', async (t) => {
+  const h = tempHome(t);
+  h.writeConfig({ integrations: { calendar: true }, calendar: { source: 'mac', macCalendars: [{ id: 'CAL-ME', name: 'me@example.test' }, { id: 'CAL-LOCAL', name: '캘린더' }] } });
+  const empty = fakeOsa({ read: { ok: true, calendars: CALENDARS, events: [], failed: [] } });
+  assert.equal(await mac.main({ mode: 'run', env: h.env, now: () => NOW, osa: empty.osa, timeZone: ZONE }), 0);
+  assert.match(h.log(), /캘린더 2개 · 오늘 일정 0개를 읽었어요/);
+  assert.equal(h.state().ok, true);
+  assert.equal(h.state().eventCount, 0);
+  assert.equal(h.snapshot(), `# 오늘 캘린더 일정\n\n마지막 갱신: ${localDay(NOW)}\n\n`);
+  // JXA도 nil·빈 결과를 실패로 세지 않는다(그 캘린더를 failed에 넣지 않고 넘어간다)
+  const jxa = fs.readFileSync(path.join(__dirname, 'automation', 'mac-calendar.js'), 'utf8');
+  assert.match(jxa, /if \(!found \|\| found\.isNil\(\) \|\| !Number\(found\.count\)\) return;/);
+  // 허용 대기는 콜백이 아니라 상태(숫자)를 직접 본다
+  assert.match(jxa, /while \(authStatus\(\) === 0 && /);
+  assert.match(jxa, /error: status === 0 \? 'unanswered' : 'denied', code: status/);
 });

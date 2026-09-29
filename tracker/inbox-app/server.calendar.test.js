@@ -640,7 +640,7 @@ test('WP-V 맥 캘린더: 허용하고 확인은 plist가 있을 때만 요청 �
   const stamp = offset => { const d = new Date(Date.now() - offset * 60000); const p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; };
   fs.writeFileSync(path.join(app.automation, 'logs', 'mac-calendar.log'), [
     `───── ${stamp(40)} mac-calendar 시작 (v1.2.1)`, '캘린더 1개 · 오늘 일정 3개를 읽었어요', '', `───── ${stamp(40)} mac-calendar 종료 (exit 0)`,
-    `───── ${stamp(10)} mac-calendar 시작 (v1.2.1)`, '⚠️ 맥이 캘린더 접근을 막았어요 — 시스템 설정 → 개인정보 보호 및 보안 → 캘린더에서 허용해 주세요', '', `───── ${stamp(10)} mac-calendar 종료 (exit 77)`, '',
+    `───── ${stamp(10)} mac-calendar 시작 (v1.2.1)`, '⚠️ 맥이 캘린더 접근을 막았어요 — 시스템 설정 › 개인정보 보호 및 보안 › 캘린더(전체 접근)와 자동화에서 허용해 주세요', '', `───── ${stamp(10)} mac-calendar 종료 (exit 77)`, '',
   ].join('\n'));
   fs.writeFileSync(path.join(app.automation, 'logs', 'calendar-sync.log'), `───── ${stamp(5)} calendar-sync 시작\n옛 갈래 기록\n───── ${stamp(5)} calendar-sync 종료 (exit 0)\n`);
   const state = await (await fetch(app.base + '/api/integrations')).json();
@@ -655,7 +655,7 @@ test('WP-V 맥 캘린더: 허용하고 확인은 plist가 있을 때만 요청 �
   assert.ok(state.alerts.includes('calendar'));
   assert.ok(!state.calendar.log.some(one => /옛 갈래 기록/.test(one.text)), 'Claude 갈래 기록은 보지 않는다');
   // 시간 초과(124) 한 번은 일시 실패 — 다른 자동화와 같은 회차 규칙이라 늦어요(멈춤 아님), 세 번 이어지면 멈춤
-  const slow = n => [`───── ${stamp(n)} mac-calendar 시작`, '⚠️ 맥 캘린더가 60초 안에 답하지 않았어요 — 캘린더가 많으면 잠시 뒤 다시 시도해 주세요', '', `───── ${stamp(n)} mac-calendar 종료 (exit 124)`].join('\n');
+  const slow = n => [`───── ${stamp(n)} mac-calendar 시작`, '⚠️ 맥 캘린더가 1분 안에 답하지 않았어요 — 캘린더가 많으면 잠시 뒤 다시 시도해 주세요', '', `───── ${stamp(n)} mac-calendar 종료 (exit 124)`].join('\n');
   fs.appendFileSync(path.join(app.automation, 'logs', 'mac-calendar.log'), `${[
     `───── ${stamp(2)} mac-calendar 시작`, '캘린더 1개 · 오늘 일정 3개를 읽었어요', '', `───── ${stamp(2)} mac-calendar 종료 (exit 0)`].join('\n')}\n${slow(1)}\n`);
   const late = await (await fetch(app.base + '/api/integrations')).json();
