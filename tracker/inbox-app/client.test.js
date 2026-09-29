@@ -11448,3 +11448,270 @@ test('회의 정리 판 화면 규칙: 초안·결과 줄 사이 실선 없음, 
   assert.doesNotMatch(drafts, /innerHTML/, '초안 판에는 innerHTML이 없다');
   assert.doesNotMatch(drafts, /비어 있는 문구가 있어요/, '옛 머리 오류 문구는 없다');
 });
+
+// ---------- 상세 카드 입력 다듬기: 날짜 값 = 누르는 자리 · 빈 날짜 한 조각 · 기다리는 답변 목록 · 빈 값 change 막기 ----------
+function detailInputClient() {
+  const app = workflowsClient();
+  const sent = [];
+  app.context.fetch = async (url, init) => {
+    sent.push({ url, body: init && init.body ? JSON.parse(init.body) : null });
+    return new Response('{"ok":true}', { status: 200 });
+  };
+  app.run('requestAnimationFrame = () => 0; load = async () => {};');
+  app.run(`workflowData = { items: [
+    { id: 'ck1', type: 'check', status: 'to-do', description: '법무팀 약관 검토 회신', who: '민지' },
+    { id: 'ck2', type: 'check', status: 'to-do', description: '데이터팀 지표 정의 확인', who: '준호' },
+    { id: 'ck3', type: 'check', status: 'done', description: '끝난 확인', who: '' },
+  ], meetings: [] }; wfIndexData();`);
+  // 가짜 창에는 contains·replaceChild가 없다 — 기다리는 답변 칸이 쓰는 두 가지만 채운다.
+  const patch = (node) => {
+    node.contains = kid => node.children.includes(kid);
+    node.replaceChild = (next, old) => { const at = node.children.indexOf(old); if (at >= 0) { node.children[at] = next; next.parent = node; } return old; };
+    return node;
+  };
+  const dateField = (opts) => app.run(`(() => { var calls = []; var wrap = uiDateField(Object.assign({ onChange: v => calls.push(v) }, ${opts})); wrap.calls = calls; return wrap; })()`);
+  return { app, sent, patch, dateField };
+}
+const keyEvent = (key, extra = {}) => ({ key, isComposing: false, stopped: 0, prevented: 0, preventDefault() { this.prevented += 1; }, stopPropagation() { this.stopped += 1; }, ...extra });
+
+test('상세 카드: 업무 카드에 선택 상자(select)가 없다 — 기다리는 답변은 필드 격자의 값(프로젝트 다음), 구역은 결과 한 줄만', () => {
+  const { app } = detailInputClient();
+  const box = app.run(`(() => { const box = document.createElement('div'); panelTask({ item: { id: 't1', description: '업무', status: 'to-do', due: '2026-10-02', priority: 'medium' }, detail: { blockedBy: 'ck1' }, type: 'task' }, box); return box; })()`);
+  assert.equal(nodeFind(box, 'd-msel'), null);
+  const fields = nodeFind(box, 'd-fields');
+  const terms = fields.children.filter((kid, at) => at % 2 === 0).map(kid => kid.textContent);
+  assert.deepEqual(terms, ['언제 할지', '기한', '우선순위', '프로젝트', '기다리는 답변']);
+  assert.equal(box.children.some(kid => kid.dataset && kid.dataset.sec === '기다리는 답변'), false, '구역은 없어졌다');
+  assert.ok(box.children.some(kid => kid.dataset && kid.dataset.sec === '결과 한 줄'), '결과 한 줄 구역은 그대로');
+  const source = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  for (const name of ['function panelTask(', 'function panelTaskNotes(', 'function panelWaitingCell(', 'function panelCheck(', 'function panelDateCell(']) {
+    const at = source.indexOf(name);
+    const fn = source.slice(at, source.indexOf('\n}\n', at));
+    assert.doesNotMatch(fn, /createElement\('select'\)/, name);
+  }
+});
+
+test('상세 날짜 칸: 얼굴 글자는 uiDueDetail 말투 그대로(급함 색은 글자에만), 달력 아이콘, 옆에 따로 적는 글자·입력칸은 없다', () => {
+  const { app } = detailInputClient();
+  const due = app.run("(() => { const d = new Date(); d.setDate(d.getDate() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })()");
+  app.context.__due = due;
+  const wrap = app.run("panelDateCell('기한', __due, () => {})");
+  const want = app.run('uiDueDetail(__due)');
+  assert.ok(String(wrap.className).split(' ').includes('d-dvalue'));
+  assert.equal(wrap.children.length, 2, '값 버튼 + ✕ 둘뿐');
+  const [face, clear] = wrap.children;
+  assert.equal(face.className, 'd-dpick');
+  assert.equal(face.children[0].textContent, want.text);
+  assert.match(want.text, /기한 1일 지남$/);
+  assert.equal(face.children[0].className, 'v k-neg');
+  assert.equal(face.getAttribute('aria-label'), `기한 ${want.text} — 바꾸기`);
+  assert.equal(face.children[1].className, 'cv cal');
+  assert.equal(face.children[1].innerHTML, app.run("uiIcon('calendar')"));
+  assert.equal(clear.className, 'd-iconbtn xs');
+  assert.equal(clear.getAttribute('aria-label'), '기한 지우기');
+  // 기한이 아닌 날짜(다시 확인할 날짜)는 날짜만
+  const follow = app.run("panelDateCell('다시 확인할 날짜', '2026-10-02', () => {}, false)");
+  assert.equal(follow.children[0].children[0].textContent, '10월 2일 (금)');
+  assert.equal(follow.children[0].children[0].className, 'v');
+  // 옛 형식(날짜가 아닌 글자)은 원문을 보이고 말투를 붙이지 않는다
+  const odd = app.run("panelDateCell('기한', '곧', () => {})");
+  assert.equal(odd.children[0].children[0].textContent, '곧');
+});
+
+test('상세 날짜 칸: 빈 날짜는 회색 `없음` 한 조각(✕·`+ 기한` 없음), 누르면 그 자리 입력칸', () => {
+  const { dateField } = detailInputClient();
+  const wrap = dateField("{ value: '', label: '기한', shown: true, face: 'pick' }");
+  assert.equal(wrap.children.length, 1);
+  const face = wrap.children[0];
+  assert.equal(face.className, 'd-dpick');
+  assert.equal(face.children[0].textContent, '없음');
+  assert.equal(face.children[0].className, 'v k-mute');
+  assert.equal(face.getAttribute('aria-label'), '기한 없음 — 정하기');
+  face.listeners.click();
+  assert.equal(wrap.children[0].type, 'date');
+  assert.equal(wrap.children[0].focused, true);
+  assert.equal(wrap.children.length, 1, '값이 없으면 ✕도 없다');
+});
+
+test('상세 날짜 칸: 빈 값 change·Enter는 저장하지 않고 떠나면 원래 글자로, 치는 중 change는 Enter·Tab까지 기다림, 같은 날짜는 안 보냄, Esc는 입력칸만', () => {
+  const { dateField } = detailInputClient();
+  const wrap = dateField("{ value: '2026-10-02', label: '기한', shown: true, face: 'pick' }");
+  wrap.children[0].listeners.click();
+  let input = wrap.children[0];
+  input.value = '';
+  input.listeners.change();
+  input.listeners.keydown(keyEvent('Enter'));
+  assert.deepEqual([...wrap.calls], [], '비운 칸은 저장하지 않는다');
+  assert.equal(wrap.children[0], input, '입력칸은 그대로');
+  wrap.listeners.focusout({ relatedTarget: { other: true } });
+  assert.equal(wrap.children[0].className, 'd-dpick', '떠나면 원래 글자로');
+  assert.equal(wrap.children[0].children[0].textContent, '10월 2일 (금)');
+  assert.deepEqual([...wrap.calls], []);
+  // 달력이 열려 잠깐 비는 초점(relatedTarget 없음)에는 닫지 않는다
+  wrap.children[0].listeners.click();
+  input = wrap.children[0];
+  wrap.listeners.focusout({ relatedTarget: null });
+  assert.equal(wrap.children[0], input);
+  // 입력칸 → 옆의 ✕로 Tab(같은 칸 안)은 떠난 것이 아니다
+  wrap.contains = kid => wrap.children.includes(kid);
+  wrap.listeners.focusout({ relatedTarget: wrap.children[1] });
+  assert.equal(wrap.children[0], input);
+  // 숫자를 치는 동안의 change는 확정하지 않는다 → Enter로 확정
+  input.listeners.keydown(keyEvent('1'));
+  input.value = '2026-01-02';
+  input.listeners.change();
+  assert.deepEqual([...wrap.calls], []);
+  input.value = '2026-10-05';
+  input.listeners.keydown(keyEvent('Enter'));
+  assert.deepEqual([...wrap.calls], ['2026-10-05']);
+  assert.equal(wrap.children[0].children[0].textContent, '10월 5일 (월)');
+  assert.equal(wrap.children[0].focused, true, 'Enter 뒤 초점은 값 글자');
+  // 같은 날짜: 보내지 않고 글자로만
+  wrap.children[0].listeners.click();
+  input = wrap.children[0];
+  input.listeners.change();
+  assert.deepEqual([...wrap.calls], ['2026-10-05']);
+  assert.equal(wrap.children[0].className, 'd-dpick');
+  // 달력에서 고른 change(키 입력과 떨어진)는 곧바로 확정
+  wrap.children[0].listeners.click();
+  input = wrap.children[0];
+  input.value = '2026-10-07';
+  input.listeners.change();
+  assert.deepEqual([...wrap.calls], ['2026-10-05', '2026-10-07']);
+  // Tab(다른 곳으로 초점)으로 확정
+  wrap.children[0].listeners.click();
+  input = wrap.children[0];
+  input.listeners.keydown(keyEvent('2'));
+  input.value = '2026-10-08';
+  wrap.listeners.focusout({ relatedTarget: { other: true } });
+  assert.deepEqual([...wrap.calls], ['2026-10-05', '2026-10-07', '2026-10-08']);
+  // Esc: 입력칸만 닫고 문서의 Esc(카드 닫기)로 번지지 않는다
+  wrap.children[0].listeners.click();
+  input = wrap.children[0];
+  const esc = keyEvent('Escape');
+  input.listeners.keydown(esc);
+  assert.equal(esc.stopped, 1);
+  assert.equal(wrap.children[0].className, 'd-dpick');
+  assert.equal(wrap.children[0].focused, true);
+  // 한글 조합 중 Esc는 넘긴다
+  wrap.children[0].listeners.click();
+  input = wrap.children[0];
+  const composing = keyEvent('Escape', { isComposing: true });
+  input.listeners.keydown(composing);
+  assert.equal(composing.stopped, 0);
+  assert.equal(wrap.children[0], input);
+  // ✕만 지운다
+  const clear = wrap.children.find(kid => kid.className === 'd-iconbtn xs');
+  clear.listeners.click();
+  assert.deepEqual([...wrap.calls].slice(-1), [null]);
+  assert.equal(wrap.children[0].children[0].textContent, '없음');
+});
+
+test('uiDateField 기본 모양(목록·메뉴의 날짜 칸)도 빈 값 change는 저장하지 않고, 떠나면 칸에 원래 날짜를 되돌린다', () => {
+  const { dateField } = detailInputClient();
+  const wrap = dateField("{ value: '2026-10-02', label: '기한' }");
+  const input = wrap.children[0];
+  assert.equal(input.type, 'date');
+  input.value = '';
+  input.listeners.change();
+  assert.deepEqual([...wrap.calls], []);
+  input.listeners.blur();
+  assert.equal(input.value, '2026-10-02');
+  input.value = '2026-10-03';
+  input.listeners.change();
+  assert.deepEqual([...wrap.calls], ['2026-10-03']);
+});
+
+test('상세 기다리는 답변: 값은 `설명 · 누구에게`, 누르면 그 자리 목록(열린 확인 대기 + 맨 끝 `연결 끊기`), 고르기·끊기가 blockedBy를 보낸다', async () => {
+  const { app, sent, patch } = detailInputClient();
+  const cell = patch(app.run("panelWaitingCell({ id: 't1' }, { blockedBy: 'ck1' })"));
+  const button = cell.children[0];
+  assert.equal(button.className, 'd-dpick');
+  assert.equal(button.getAttribute('aria-haspopup'), 'listbox');
+  assert.equal(button.children[0].textContent, '법무팀 약관 검토 회신 · 민지');
+  button.listeners.click({ stopPropagation() {} });
+  const picker = cell.children[0];
+  assert.equal(picker.className, 'd-gpick');
+  const list = picker.children.find(kid => kid.className === 'd-gplist');
+  assert.equal(list.getAttribute('aria-label'), '기다리는 답변 고르기');
+  assert.deepEqual(list.children.map(kid => kid.children.map(part => part.textContent).join('|')), ['법무팀 약관 검토 회신|민지', '데이터팀 지표 정의 확인|준호', '연결 끊기'],
+    '해결된 확인 대기는 연결 대상일 때만 선다');
+  assert.equal(list.children[0].getAttribute('aria-selected'), 'true');
+  list.children[1].listeners.click({ stopPropagation() {} });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(sent.map(call => [call.url, call.body]), [['/api/workflow/item', { id: 't1', blockedBy: 'ck2' }]]);
+  assert.equal(cell.children[0], button, '고르면 값 자리로 돌아온다');
+  assert.equal(button.children[0].textContent, '데이터팀 지표 정의 확인 · 준호');
+  assert.equal(button.focused, true);
+  // 끊기
+  button.listeners.click({ stopPropagation() {} });
+  const again = cell.children[0].children.find(kid => kid.className === 'd-gplist');
+  const cut = again.children[again.children.length - 1];
+  assert.equal(cut.children[0].textContent, '연결 끊기');
+  cut.listeners.click({ stopPropagation() {} });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(sent[1].body, { id: 't1', blockedBy: null });
+  assert.equal(button.children[0].textContent, '연결 없음');
+  assert.equal(button.children[0].className, 'v k-mute');
+});
+
+test('상세 기다리는 답변: 대상이 사라지면 `삭제된 확인 대기` + 안내 줄, 해결된 대상은 `해결됨 · `, 확인 대기가 없으면 한 줄 안내', () => {
+  const { app, patch } = detailInputClient();
+  const gone = patch(app.run("panelWaitingCell({ id: 't1' }, { blockedBy: 'nope' })"));
+  assert.equal(gone.children[0].children[0].textContent, '삭제된 확인 대기');
+  assert.equal(gone.children[0].children[0].className, 'v k-mute');
+  assert.equal(gone.children[1].textContent, '연결했던 확인 대기가 삭제됐어요.');
+  const solved = patch(app.run("panelWaitingCell({ id: 't1' }, { blockedBy: 'ck3' })"));
+  assert.equal(solved.children[0].children[0].textContent, '해결됨 · 끝난 확인');
+  app.run('workflowData = { items: [], meetings: [] }; wfIndexData();');
+  const empty = patch(app.run("panelWaitingCell({ id: 't1' }, null)"));
+  empty.children[0].listeners.click({ stopPropagation() {} });
+  const none = empty.children[0].children.find(kid => kid.className === 'd-gpnone');
+  assert.equal(none.textContent, '열린 확인 대기가 없어요');
+  assert.equal(none.hidden, false);
+  const source = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const fn = source.slice(source.indexOf('function panelWaitingCell('), source.indexOf('\n}\n', source.indexOf('function panelWaitingCell(')));
+  assert.match(fn, /placeholder: '확인 대기 찾기'/);
+  assert.match(fn, /emptyText: '찾는 확인 대기가 없어요'/);
+  assert.equal((fn.match(/innerHTML/g) || []).length, 1, '아이콘 한 곳(uiIcon)뿐');
+});
+
+test('회의 정리 판 날짜 칸(shown) 세 가지: ① 고르면 글자 버튼으로 ② 칩 안 ✕로 지우기 ③ 입력칸을 열고 고르지 않고 벗어나도 입력칸이 그대로', () => {
+  const { draw } = meetingBoardClient();
+  const box = draw();
+  const card = nodeFindAll(box, 'd-draft')[0];
+  const field = nodeFind(card, 'd-datefield');
+  // ③ 열고 벗어나기 — 다시 그리지 않는다(달력이 곧바로 닫히지 않게). 빈 값으로 벗어나면 원래 날짜를 칸에 되돌릴 뿐.
+  nodeFind(card, 'is-shown').listeners.click();
+  const input = field.children[0];
+  assert.equal(input.type, 'date');
+  input.listeners.blur({ relatedTarget: { other: true } });
+  assert.equal(field.children[0], input, '입력칸이 그대로 남는다');
+  input.value = '';
+  input.listeners.change();
+  assert.equal(field.children[0], input, '빈 값 change는 무시');
+  input.listeners.blur({ relatedTarget: null });
+  assert.equal(input.value, '2026-10-02');
+  // ① 고르면 앱 날짜 글자 버튼으로
+  input.value = '2026-10-03';
+  input.listeners.change();
+  const face = field.children[0];
+  assert.equal(face.className, 'd-dateinput is-shown');
+  assert.equal(face.textContent, '10월 3일 (토)');
+  // ② ✕(날짜 지우기)로 지우기는 계속 된다
+  const clear = field.children.find(kid => kid.className === 'd-iconbtn sm');
+  assert.equal(clear.getAttribute('aria-label'), '기한 지우기');
+  clear.listeners.click();
+  assert.equal(field.children.length, 1);
+  assert.equal(field.children[0].textContent, '+ 기한');
+});
+
+test('상세 카드 화면 규칙: 누구에게 조용한 입력, 결정 내용 두 줄, 작은 ✕, 달력 아이콘은 돌리지 않는다', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /\.d-fields \.d-mtext \{[^}]*height: 28px;[^}]*background: none;/);
+  assert.match(css, /\.d-fields \.d-mtext:hover \{ background: var\(--hover\); \}/);
+  assert.match(css, /\.d-dsec\[data-sec="내용"\] \.d-din \{ min-height: 62px; \}/);
+  assert.match(css, /\.d-iconbtn\.xs \{ width: 28px; height: 28px; \}/);
+  assert.match(css, /\.d-dpick \.cv\.cal \.d-i \{ transform: none; \}/);
+  assert.match(css, /\.d-dvalue \{ display: flex; align-items: center; gap: 4px; flex-wrap: nowrap;/);
+});
