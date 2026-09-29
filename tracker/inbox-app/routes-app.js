@@ -39,6 +39,15 @@ module.exports = function appRoutes(req, res, url, ctx) {
     return true;
   }
 
+  // 화면이 입력 중·창이 열려 있다는 가벼운 신호(WP-U) — 쉬는 시간은 공통 가드(safeHandle)가 POST마다 이미 다시 센다.
+  // 여기서는 본문을 읽지 않고 파일도 쓰지 않는다.
+  if (url.pathname === '/api/activity' && req.method === 'POST') {
+    req.resume();
+    res.writeHead(204);
+    res.end();
+    return true;
+  }
+
   // 문제 보고에 붙일 최근 오류 줄 — 조회라 파일을 쓰지 않는다.
   if (url.pathname === '/api/about/diagnostics' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });

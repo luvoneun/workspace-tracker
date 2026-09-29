@@ -37,6 +37,8 @@ function fixture(t, overrides = {}) {
     modified: async () => state.modified,
     localDir: () => local,
     idleMs: () => AUTO_UPDATE_IDLE_MS,
+    // 시계를 크게 건너뛰는 테스트가 많아 깨어남 판단은 기본으로 끈다(깨어남 테스트만 켠다).
+    wakeGapMs: () => (state.wakeGap === undefined ? Infinity : state.wakeGap),
     request: async () => {
       const requestedAt = new Date(clock.now).toISOString();
       requests.push(requestedAt);
@@ -314,6 +316,32 @@ test('WP-U 이미 최신이면 하루 넘은 기록·남은 요청이 있어도 
   same(await fx.auto.tick(), { requested: false, reason: 'none' });
   assert.equal(await fx.auto.noticeReason(), null);
   assert.equal(fx.requests.length, 0);
+});
+
+test('WP-U 잠자기에서 깬 직후: 지난 판단과의 간격이 주기의 3배를 넘으면 쉬는 시간을 처음부터 센다', async (t) => {
+  const fx = fixture(t, { wakeGap: 3 * MIN });
+  fx.idle();
+  await fx.auto.tick(); // 첫 판단(기준 시각) — 요청까지 간다
+  assert.equal(fx.requests.length, 1);
+  // 다음 버전: 맥이 잠들어 2시간 뒤에 깼다
+  fx.state.offer = { available: true, label: 'v1.2.3' };
+  fx.clock.now += 2 * 60 * MIN;
+  same(await fx.auto.tick(), { requested: false, reason: 'active' }, '깬 직후에는 받지 않는다');
+  // 그 뒤 1분마다 판단하며 10분이 지나면 받는다
+  for (let i = 0; i < 9; i += 1) { fx.clock.now += MIN; assert.equal((await fx.auto.tick()).requested, false); }
+  fx.clock.now += MIN + 1000;
+  same(await fx.auto.tick(), { requested: true, version: 'v1.2.3' });
+});
+
+test('WP-U 사람이 되돌린 버전(마지막 상태가 그 버전에서 되돌리기 완료)은 자동으로 다시 깔지 않고, 한 줄은 실패 계열', async (t) => {
+  const fx = fixture(t, { view: { running: false, settled: false, status: { action: 'rollback', state: 'done', from: '1.2.2', to: '1.2.1', startedAt: '2026-09-28T00:00:00Z' } } });
+  fx.idle();
+  same(await fx.auto.tick(), { requested: false, reason: 'rolledback' });
+  assert.equal(await fx.auto.noticeReason(), 'failed');
+  assert.equal(fx.requests.length, 0);
+  // 더 새 버전이 나오면 그건 받는다
+  fx.state.offer = { available: true, label: 'v1.2.3' };
+  assert.equal((await fx.auto.tick()).requested, true);
 });
 
 function same(actual, expected, message) { assert.deepEqual(JSON.parse(JSON.stringify(actual)), expected, message); }

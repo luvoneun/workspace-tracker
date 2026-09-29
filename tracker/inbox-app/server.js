@@ -1646,7 +1646,8 @@ const MIME = {
 
 // ---------- 앱 정보 (GET /api/about) ----------
 // 지금 버전·데이터 형식·받는 갈래와, 이 설치가 저장소에서 벗어났는지(고친 파일)를 알려 준다.
-// 파일은 하나도 쓰지 않고, git이 없거나 실패하면 조용히 `null`이다.
+// 파일은 쓰지 않고, git이 없거나 실패하면 조용히 `null`이다. 예외 하나: 자동 업데이트(WP-U)로 요청한 버전이 실패·되돌려진 것을
+// 처음 보면 `local/auto-update.json`에 `failed: true`를 한 번 쓸 수 있다(업무 데이터가 아닌 이 맥의 기록 한 파일).
 const VERSION_PATH = path.join(REPO_DIR, 'VERSION');
 const NEWS_PATH = path.join(REPO_DIR, '소식.md');
 const REMOTE_CHECK_INTERVAL_MS = 60 * 60 * 1000;   // 1시간에 한 번(WP-U — 배포가 잦아 하루 안에 받게)
@@ -1681,7 +1682,8 @@ function git(args, timeout = 3000) {
 // 파일 이름만 쓰고 내용은 읽지 않는다.
 async function gitModified() {
   // `core.quotepath=false` — 한글 파일 이름이 8진수 escape(`\354\227…`)로 오지 않게(문제 보고에 그대로 실린다).
-  const out = await git(['-c', 'core.quotepath=false', 'status', '--porcelain']);
+  // `--no-optional-locks` — 1분 판단이 부르는 조회가 index.lock을 잡아 사람의 git 작업과 부딪치지 않게.
+  const out = await git(['--no-optional-locks', '-c', 'core.quotepath=false', 'status', '--porcelain']);
   if (out === null) return null;
   return out.split('\n').filter(Boolean).filter((line) => {
     const state = line.slice(0, 2);
@@ -1705,7 +1707,12 @@ let remoteCheckedAt = 0;                  // 마지막으로 원격에 물어본
 let remoteCheckRun = null;                // 지금 도는 확인(같은 때 두 번 묻지 않는다)
 let latestMain = null;                    // { sha, newer, checkedAt } — main 갈래일 때만
 
-const updateChannel = () => (CONFIG.server?.updateChannel === 'main' ? 'main' : 'stable');
+// 지금 갈래 — 뜰 때 읽은 설정과 지금 설정 파일 둘 중 하나라도 main이면 main(WP-U). 앱 정보(`channel`)·새 버전 판단·
+// 자동 업데이트·체크인이 모두 이 함수 하나를 쓴다(뜰 때만 읽던 값과 화면이 말하는 갈래가 어긋나지 않게).
+function updateChannel() {
+  const onDisk = ((currentConfigFile().server) || {}).updateChannel;
+  return CONFIG.server?.updateChannel === 'main' || onDisk === 'main' ? 'main' : 'stable';
+}
 
 async function checkLatestMain() {
   const out = await git(['ls-remote', 'origin', 'refs/heads/main'], 10000);
@@ -1835,7 +1842,7 @@ async function aboutApp({ cached = false, check = false } = {}) {
   return {
     version,
     dataFormat: DATA_FORMAT_VERSION,
-    channel: CONFIG.server?.updateChannel || 'stable',
+    channel,
     // launchd가 KeepAlive로 띄운 자리에는 setup.sh가 이 표시를 넣어 둔다(개발용 서버·픽스처에는 없다).
     install: process.env.WORKSPACE_MANAGED ? 'managed' : 'manual',
     gitRef: ref ? ref.trim() : null,
@@ -2024,10 +2031,7 @@ function setAutoUpdateForTests(options = {}) {
   autoUpdateTest.idleMs = Number.isFinite(options.idleMs) ? options.idleMs : null;
   autoUpdateTest.today = options.today || null;
 }
-const autoUpdateChannel = () => {
-  const onDisk = ((currentConfigFile().server) || {}).updateChannel;
-  return updateChannel() === 'main' || onDisk === 'main' ? 'main' : 'stable';
-};
+const autoUpdateChannel = () => updateChannel();
 function autoUpdateEnvironment() {
   if (autoUpdateTest.environment !== null) return autoUpdateTest.environment;
   return !!process.env.WORKSPACE_MANAGED && !process.env.WORKSPACE_NO_REMOTE_CHECK && !process.env.WORKSPACE_FIXTURE;
@@ -2058,10 +2062,15 @@ const autoUpdate = autoUpdateModule.createAutoUpdate({
   devRepo: () => repoHasManyWorktrees(),
 });
 // git worktree가 둘 이상이면 만든 사람의 개발 저장소로 보고 자동 업데이트에서 뺀다(읽기 전용 git, 실패하면 뺀다).
+// 결과는 10분 메모리에 들고 있는다(1분 판단마다 git을 부르지 않게).
+const WORKTREE_CACHE_MS = 10 * 60 * 1000;
+let worktreeCache = null;
 async function repoHasManyWorktrees() {
+  if (worktreeCache && Date.now() - worktreeCache.at < WORKTREE_CACHE_MS) return worktreeCache.value;
   const out = await git(['worktree', 'list', '--porcelain']);
-  if (out === null) return true;
-  return out.split('\n').filter(line => line.startsWith('worktree ')).length > 1;
+  const value = out === null ? true : out.split('\n').filter(line => line.startsWith('worktree ')).length > 1;
+  worktreeCache = { at: Date.now(), value };
+  return value;
 }
 // 뜰 때 한 번 건다(require.main 자리) — 자격이 없는 자리(개발용·main·테스트)면 타이머도 원격 확인도 걸지 않는다.
 function startAutoUpdate() {

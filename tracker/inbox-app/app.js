@@ -3973,6 +3973,21 @@ async function updateBusyCheck() {
   updateBusyTimer = setTimeout(() => { updateBusyTimer = null; load(); }, 15 * 1000);
 }
 
+// ---------- 입력 중 신호 (WP-U) ----------
+// 쉬는 틈 판단은 서버가 쓰기 요청(POST)으로만 센다. 긴 글을 쓰는 중이거나 창(체크인·설정 등 dialog)이 열려 있으면 저장 전이라
+// 서버가 모르므로, 1분에 한 번 본문 없는 `POST /api/activity`를 보내 쉬는 시간을 다시 세게 한다. 실패는 조용히 넘긴다.
+function activityBusy() {
+  if (isTyping()) return true;
+  return !!(typeof document.querySelector === 'function' && document.querySelector('dialog[open]'));
+}
+function activityPing() {
+  if (!activityBusy()) return false;
+  try {
+    fetch('/api/activity', { method: 'POST', headers: { 'Content-Type': 'application/json' } }).catch(() => {});
+  } catch { /* 조용히 */ }
+  return true;
+}
+
 // ---------- 사용설명서 카드 (오늘 탭) ----------
 // 닫기 전까지는 **늘** `새로 들어온 것` 자리에 선다(기록이 있든 없든). 닫으면 config가 아니라 이 브라우저에
 // 기억하고(localStorage `guideCardClosed` — 막혀 있으면 이 창이 열려 있는 동안만), 같은 네 줄은
@@ -5026,3 +5041,4 @@ settingsAboutLoad({ cached: true }).then((about) => {
   renderUpdateNotice();
 });
 setInterval(() => settingsAboutLoad({ cached: true }).then(renderUpdateNotice), 60 * 60 * 1000);
+setInterval(activityPing, 60 * 1000); // 입력 중·창이 열려 있으면 서버에 알려 자동 업데이트가 기다리게(WP-U)

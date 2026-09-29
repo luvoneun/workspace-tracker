@@ -9328,6 +9328,24 @@ test('WP-U 오늘 탭 한 줄: 하루 넘게 안 깔림(stale)은 새 버전 판
   same(fx.went(), [['app', null]]);
 });
 
+test('WP-U 입력 중 신호: 입력 중이거나 창(dialog)이 열려 있으면 본문 없는 POST /api/activity, 아니면 보내지 않고, 실패는 조용히', async () => {
+  const app = pureClient();
+  const sent = [];
+  app.context.fetch = async (url, options = {}) => { sent.push([String(url), options.method, options.body]); throw new TypeError('offline'); };
+  app.run('document.activeElement = null; document.querySelector = () => null;');
+  assert.equal(app.run('activityPing()'), false);
+  assert.equal(sent.length, 0, '아무것도 안 하고 있으면 보내지 않는다');
+  app.run("document.activeElement = { matches: sel => sel.includes('textarea'), isContentEditable: false };");
+  assert.equal(app.run('activityPing()'), true);
+  app.run("document.activeElement = null; document.querySelector = sel => (sel === 'dialog[open]' ? {} : null);");
+  assert.equal(app.run('activityPing()'), true, '체크인·설정 창이 열려 있어도 보낸다');
+  await new Promise(resolve => setImmediate(resolve));
+  same(sent, [['/api/activity', 'POST', null], ['/api/activity', 'POST', null]], '본문 없음');
+  assert.notEqual(app.nodes.get('liveRegion')?.textContent || '', '목록을 불러오지 못했어요', '실패해도 알림을 띄우지 않는다');
+  const script = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  assert.match(script.slice(script.indexOf(DEFINITIONS_MARKER)), /setInterval\(activityPing, 60 \* 1000\)/);
+});
+
 test('WP-U 설정 › 앱 새 버전 상자도 오늘 탭 한 줄과 같은 조사(끝 숫자 2·4·5·9는 `가`)', () => {
   for (const [label, want] of [['v1.2.2', '새 버전 v1.2.2가 있어요'], ['v1.2.4', '새 버전 v1.2.4가 있어요'], ['v1.3.0', '새 버전 v1.3.0이 있어요'], ['v2.0.1', '새 버전 v2.0.1이 있어요']]) {
     const fx = updateClient({ ...D3_ABOUT, update: { available: true, label } });

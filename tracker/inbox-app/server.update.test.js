@@ -367,6 +367,27 @@ test('WP-U 자동 업데이트: git worktree가 둘이면(만든 사람의 개�
   sameJson(about.update.auto, { eligible: false, on: true, notice: null });
 });
 
+test('WP-U 입력 중 신호: 본문 없는 POST /api/activity(204, 파일 안 씀)가 이어지면 쉬는 시간을 다시 세고, 멈추면 요청한다', { skip: !gitReady }, async (t) => {
+  const fx = await startAutoServer(t, { idleMs: 2500 });
+  const until = Date.now() + 3500;
+  while (Date.now() < until) {
+    const answer = await fetch(fx.app.base + '/api/activity', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+    assert.equal(answer.status, 204);
+    await sleep(400);
+  }
+  assert.equal(fs.existsSync(fx.request), false, '입력 중이라고 알리는 동안은 요청하지 않는다');
+  assert.equal(await waitFor(() => fs.existsSync(fx.request), 8000), true, '신호가 멈추면 쉬는 중으로 보고 요청한다');
+});
+
+test('WP-U 지금 갈래 하나: 뜬 뒤 설정 파일만 main으로 바뀌면 /api/about의 channel도 main이다(판단과 같은 함수)', { skip: !gitReady }, async (t) => {
+  const fx = await startAutoServer(t, { idleMs: 60 * 60 * 1000 });
+  assert.equal((await (await fetch(fx.app.base + '/api/about?cached=1')).json()).channel, 'stable');
+  fs.writeFileSync(path.join(fx.clone, 'workspace.config.json'), JSON.stringify({ server: { updateChannel: 'main' } }));
+  const view = await (await fetch(fx.app.base + '/api/about?cached=1')).json();
+  assert.equal(view.channel, 'main');
+  assert.equal(view.update.auto.eligible, false);
+});
+
 test('WP-U 쉬는 중: 사람의 쓰기(POST)가 이어지면 기다리고, 목록 새로 받기(GET)·슬랙 수집(/api/import)은 사람의 동작으로 세지 않는다', { skip: !gitReady }, async (t) => {
   const fx = await startAutoServer(t, { idleMs: 2500 });
   const send = (route, body) => fetch(fx.app.base + route, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

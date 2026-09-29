@@ -77,6 +77,8 @@ function createAutoUpdate(deps) {
   let lastActivityAt = now();
   let timer = null;
   let ticking = null;
+  let tickEvery = AUTO_UPDATE_TICK_MS;
+  let lastTickAt = null;
 
   const recordFile = () => {
     const dir = deps.localDir();
@@ -167,6 +169,12 @@ function createAutoUpdate(deps) {
     return failed;
   }
   const stoppedByFailure = view => !!(view && view.status && view.status.state === 'failed' && !view.settled);
+  // 마지막 상태가 되돌리기 완료이고 그 되돌림이 떠난 버전(`from`)이 지금 제안 중인 버전이면 — 사람이 되돌린 버전이라 자동으로 다시 깔지 않는다.
+  const bare = value => String(value || '').trim().replace(/^v/, '');
+  const rolledBack = (view, label) => {
+    const status = view && view.status;
+    return !!(status && status.action === 'rollback' && status.state === 'done' && status.from && bare(status.from) === bare(label));
+  };
 
   // 오늘 탭 한 줄 알림의 이유(없으면 null). GET /api/about이 부른다 — 파일은 쓰지 않는다(실패 표시 한 번은 예외).
   async function noticeReason({ modified } = {}) {
@@ -174,7 +182,7 @@ function createAutoUpdate(deps) {
     if (await devRepo()) return null;
     const label = deps.offer().label;
     const view = deps.status();
-    if (stoppedByFailure(view) || attemptFailed(readRecord(), view, label)) return 'failed';
+    if (stoppedByFailure(view) || rolledBack(view, label) || attemptFailed(readRecord(), view, label)) return 'failed';
     if (requestStuck(view)) return 'stuck';
     if (!deps.enabled()) return 'off';
     if (await deps.needsMove()) return 'relocate';
@@ -189,19 +197,22 @@ function createAutoUpdate(deps) {
   async function decide() {
     const blocked = gate();
     if (blocked) return { requested: false, reason: blocked };
-    if (await devRepo()) return { requested: false, reason: 'dev-repo' };
     const label = deps.offer().label;
-    // 하루 넘게 안 깔렸으면 쉬는 조건을 3분으로 낮춰 한 번 더 기회를 준다(다른 조건은 그대로).
-    const idleMs = markSeen(label) ? Math.min(deps.idleMs(), AUTO_STALE_IDLE_MS) : deps.idleMs();
     const view = deps.status();
+    // 싼 것 먼저(메모리·작은 파일) — 꺼짐·실패·되돌린 버전·오늘 이미 시도는 git을 부르기 전에 본다.
     if (stoppedByFailure(view)) return { requested: false, reason: 'failed' };
+    if (rolledBack(view, label)) return { requested: false, reason: 'rolledback' };
     if (!deps.enabled()) return { requested: false, reason: 'off' };
     if (view && view.running) return { requested: false, reason: 'running' };
     if (deps.recoveryNeeded()) return { requested: false, reason: 'recovery' };
-    if (idleFor() < idleMs) return { requested: false, reason: 'active' };
     const record = readRecord();
     if (attemptFailed(record, view, label)) return { requested: false, reason: 'failed' };
     if (record && record.version === label && record.triedOn === deps.today()) return { requested: false, reason: 'tried-today' };
+    // 만든 사람의 개발 저장소면 여기서 멈춘다(처음 본 때 기록도 그 저장소의 local/에 쓰지 않는다).
+    if (await devRepo()) return { requested: false, reason: 'dev-repo' };
+    // 하루 넘게 안 깔렸으면 쉬는 조건을 3분으로 낮춰 한 번 더 기회를 준다(다른 조건은 그대로).
+    const idleMs = markSeen(label) ? Math.min(deps.idleMs(), AUTO_STALE_IDLE_MS) : deps.idleMs();
+    if (idleFor() < idleMs) return { requested: false, reason: 'active' };
     if (!deps.agentInstalled()) return { requested: false, reason: 'not-installed' };
     if (deps.automationBusy()) return { requested: false, reason: 'busy' };
     if (await deps.needsMove()) return { requested: false, reason: 'relocate' };
@@ -220,8 +231,14 @@ function createAutoUpdate(deps) {
     return { requested: true, version: label };
   }
 
-  // 같은 때 두 번 돌지 않는다.
+  // 같은 때 두 번 돌지 않는다. 지난 판단과의 벽시계 간격이 판단 주기의 3배를 넘으면 맥이 잠들었다 깬 것으로 보고
+  // 쉬는 시간을 처음부터 센다(뚜껑을 연 직후 업데이트가 시작되지 않게). 테스트는 `wakeGapMs`로 이 간격을 바꾼다.
   function tick() {
+    // 판단이 길어져 이번 차례를 건너뛰어도 시각은 적는다(느린 git 때문에 깨어남으로 오해하지 않게).
+    const gap = typeof deps.wakeGapMs === 'function' ? deps.wakeGapMs() : tickEvery * 3;
+    const at = now();
+    if (lastTickAt !== null && at - lastTickAt > gap) touch();
+    lastTickAt = at;
     if (ticking) return ticking;
     ticking = decide().catch(() => ({ requested: false, reason: 'error' })).finally(() => { ticking = null; });
     return ticking;
@@ -229,6 +246,7 @@ function createAutoUpdate(deps) {
 
   function start(tickMs = AUTO_UPDATE_TICK_MS) {
     if (timer) return;
+    tickEvery = tickMs;
     timer = setInterval(tick, tickMs);
     if (timer.unref) timer.unref();
   }
