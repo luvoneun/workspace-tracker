@@ -7085,6 +7085,9 @@ function guideClient({ blocked = false } = {}) {
   return { app, store, shape, went: () => JSON.parse(app.run('JSON.stringify(window.went)')) };
 }
 
+// 첫사용: 오늘 탭 카드는 네 칸 판(`.d-guidegrid` 한 겹 안에 네 줄) — 줄의 이름은 `.t` 칸이다(설치 줄은 앞에 아이콘이 선다).
+const guideName = row => row.children.find(kid => kid && kid.className === 't').textContent;
+
 test('WP-D2 I. 사용설명서 카드: 닫기 전까지는 기록이 있어도 늘 서고, 네 줄이 각자 데려가는 곳이 있다', () => {
   const fx = guideClient();
   fx.app.run('renderGuideCard()');
@@ -7093,18 +7096,30 @@ test('WP-D2 I. 사용설명서 카드: 닫기 전까지는 기록이 있어도 �
   const card = zone.children[0];
   assert.equal(card.className, 'd-start d-guidecard');
   assert.equal(fx.shape("document.getElementById('startCardZone').children[0].children[0]").text, '사용설명서닫기');
-  const rows = card.children.slice(1);
+  assert.equal(card.children[1].className, 'd-guidegrid', '네 줄은 네 칸 판 한 겹 안에 선다(넓게 2×2, ≤520 한 줄씩은 CSS)');
+  const rows = card.children[1].children;
   // WP-L: 첫 줄은 `앱으로 설치`(가짜 창은 크롬이 설치 창을 주지 않은 일반 탭 — 글 안내)
-  same(rows.map(row => row.children[0].textContent), ['앱으로 설치', '할 일 적기', '연동은 나중에', '슬랙에서 보내는 법']);
+  same(rows.map(guideName), ['앱으로 설치', '할 일 적기', '연동은 나중에', '슬랙에서 보내는 법']);
   same(rows.map(row => String(row.type || '')), ['', 'button', 'button', 'button'], '첫 줄만 버튼이 아니다(할 일이 앱 밖에 있다)');
-  const text = index => fx.shape(`document.getElementById('startCardZone').children[0].children[${index + 1}]`).text;
-  assert.equal(text(0), '앱으로 설치크롬 ⋮ → 전송, 저장, 공유 → 페이지를 앱으로 설치이미 설치했으면 주소창 오른쪽 앱 열기', 'Dock 앱 예비 길 링크는 없다(WP-O)');
+  const text = index => fx.shape(`document.getElementById('startCardZone').children[0].children[1].children[${index}]`).text;
+  assert.equal(text(0), '앱으로 설치크롬 ⋮ → 페이지를 앱으로 설치', '한 줄 — `전송, 저장, 공유`·`이미 설치했으면`은 도움말에만');
   assert.equal(text(1), '할 일 적기맨 위 칸에 적고 Enter');
   assert.equal(text(2), '연동은 나중에설정 ⚙ → 연동에서 하나씩');
   assert.equal(text(3), '슬랙에서 보내는 법전달로 채널에 보내요');
-  const dock = rows[0].children[1].children.find(kid => kid.className === 'd-guidedock');
-  assert.equal(dock.getAttribute('aria-hidden'), 'true', 'Dock 그림은 꾸밈이다');
-  assert.equal(dock.children.find(kid => kid.className === 'me').src, '/app-icon.png', '지금 아이콘을 그대로 보여 준다');
+  assert.equal(rows[0].className, 'd-guide is-install');
+  const icon = rows[0].children[0];
+  assert.equal(icon.className, 'me', '설치 줄은 이름 앞에 앱 아이콘 하나');
+  assert.equal(icon.src, '/app-icon.png', '지금 아이콘을 그대로 보여 준다');
+  assert.equal(icon.alt, '', '아이콘은 꾸밈이다');
+  assert.ok(!rows[0].children[2].children.some(kid => kid.className === 'd-guidedock'), 'Dock 그림은 도움말에만');
+  // 버튼 줄 셋만 끝에 오른쪽 꺾쇠 — 글리프가 아니라 공용 아이콘(uiIcon chevron) SVG다
+  rows.slice(1).forEach((row) => {
+    const go = row.children.at(-1);
+    assert.equal(go.className, 'go');
+    assert.equal(go.html, fx.app.run("uiIcon('chevron')"));
+    assert.match(go.html, /aria-hidden="true"/);
+  });
+  assert.ok(!rows[0].children.some(kid => kid.className === 'go'), '설치 줄(버튼 아님)에는 꺾쇠가 없다');
 
   // 줄마다 데려가는 곳
   rows[1].listeners.click();
@@ -7165,21 +7180,19 @@ function installClient({ standalone = null, iosStandalone = false } = {}) {
       return event;
     };`);
   const card = () => fx.app.nodes.get('startCardZone').children[0];
-  const first = () => card().children[1];
-  const text = () => fx.shape("document.getElementById('startCardZone').children[0].children[1]").text;
-  const installButton = () => first().children[1].children.find(kid => String(kid.className || '').includes('d-installbtn'));
+  const first = () => card().children[1].children[0];
+  const text = () => fx.shape("document.getElementById('startCardZone').children[0].children[1].children[0]").text;
+  const installButton = () => first().children[2].children.find(kid => String(kid.className || '').includes('d-installbtn'));
   return { ...fx, card, first, text, installButton, notices: () => JSON.parse(fx.app.run('JSON.stringify(window.notices)')) };
 }
 
 test('WP-L 앱으로 설치: 크롬이 설치 창을 주지 않으면(이미 설치했거나 크롬이 아님) 사용설명서 첫 줄이 크롬 메뉴 길을 글로 알린다', () => {
   const fx = installClient({ standalone: false });
   fx.app.run('renderGuideCard()');
-  assert.equal(fx.first().children[0].textContent, '앱으로 설치');
+  assert.equal(guideName(fx.first()), '앱으로 설치');
   assert.equal(String(fx.first().type || ''), '', '줄 자체는 버튼이 아니다(할 일이 크롬에 있다)');
-  assert.equal(fx.text(), '앱으로 설치크롬 ⋮ → 전송, 저장, 공유 → 페이지를 앱으로 설치이미 설치했으면 주소창 오른쪽 앱 열기');
+  assert.equal(fx.text(), '앱으로 설치크롬 ⋮ → 페이지를 앱으로 설치', '오늘 탭 카드는 한 줄');
   assert.equal(fx.installButton(), undefined, '설치 창을 줄 수 없으면 버튼도 없다');
-  const words = fx.first().children[1].children;
-  assert.ok(words.some(kid => kid.className === 'd-guidedock'), 'Dock 그림은 그대로');
   same(fx.went(), []);
 });
 
@@ -7191,7 +7204,7 @@ test('WP-L 앱으로 설치: beforeinstallprompt를 잡아 두고 `설치하기`
   assert.equal(fx.app.run('window.ev.prevented'), 1, '크롬이 스스로 띄우지 않게 잡아 둔다');
   // 이미 떠 있는 카드를 다시 만들지 않고 그 줄만 다시 채운다
   assert.equal(fx.installButton().textContent, '설치하기');
-  assert.equal(fx.text(), '앱으로 설치설치하기 Dock·⌘Tab에 워크스페이스 아이콘이 따로 떠요');
+  assert.equal(fx.text(), '앱으로 설치설치하기', '오늘 탭 카드는 버튼 하나(설명 문장은 도움말·꾸미기에)');
   await fx.installButton().listeners.click();
   assert.equal(fx.app.run('window.ev.prompted'), 1, '누르면 크롬의 설치 창');
   assert.equal(fx.text(), '앱으로 설치설치했어요 · 새 창의 아이콘을 Dock에 유지해 주세요');
@@ -7208,7 +7221,7 @@ test('WP-L 앱으로 설치: 설치 창을 닫으면(dismissed) 이벤트는 한
   fx.app.run("appInstallOnPrompt(window.fakePrompt('dismissed'))");
   await fx.installButton().listeners.click();
   assert.equal(fx.installButton(), undefined);
-  assert.match(fx.text(), /^앱으로 설치크롬 ⋮ → 전송, 저장, 공유 → 페이지를 앱으로 설치/);
+  assert.equal(fx.text(), '앱으로 설치크롬 ⋮ → 페이지를 앱으로 설치');
 
   const other = installClient();
   other.app.run('renderGuideCard()');
@@ -7225,7 +7238,7 @@ test('WP-L 앱으로 설치: 설치된 창(standalone · 아이폰 navigator.sta
     fx.app.run("appInstallOnPrompt(window.fakePrompt('accepted'))");
     fx.app.run('renderGuideCard()');
     assert.equal(fx.app.run('appInstallState()'), 'standalone');
-    assert.equal(fx.first().children[0].textContent, 'Dock에 두기');
+    assert.equal(guideName(fx.first()), 'Dock에 두기');
     assert.equal(fx.text(), 'Dock에 두기Dock의 이 앱 아이콘 우클릭 → 옵션 → Dock에 유지');
     assert.equal(fx.installButton(), undefined);
     fx.app.run('renderSettingsManual()');
@@ -10307,6 +10320,168 @@ test('WP-V F. 허용 창에 답하지 않음(0)은 다시 누르라는 말만 �
   const box = fx.find('calendar', 'd-ichoice').find(one => one.dataset.choice === 'mac');
   assert.equal(box.children.find(one => one.className === 'd-derr').textContent, '허용 창에 답하지 않았어요 — 허용하고 확인을 다시 눌러 주세요');
   assert.equal(box.children.filter(one => one.className === 'd-ismall')[1].hidden, true, '가는 길은 보이지 않는다');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 첫 사용·빈 화면 정리 — 0은 적지 않는다 · 빈 화면엔 할 수 있는 것만 · 사용설명서는 네 칸 판(도움말은 그대로)
+function firstRunClient() {
+  const fx = guideClient();
+  // 줄·그룹 부품은 이 묶음의 관심 밖이다 — 개수·버튼·빈 문장만 본다.
+  fx.app.run(`uiTaskRow = () => document.createElement('div');
+    uiGroupHeading = () => document.createElement('div');
+    uiGroupAddRow = () => document.createElement('div');
+    recordIdeaRow = () => document.createElement('div');
+    recordDecisionRow = () => document.createElement('div');
+    renderTodayProgress = () => {};
+    wfMeetingProjectName = () => '';
+    setInterval = () => 0; clearInterval = () => {};
+    document.body = document.createElement('div');
+    workflowData = { items: [], meetings: [] };`);
+  const node = id => fx.app.run(`document.getElementById('${id}')`);
+  // 가짜 노드는 붙인 고정 마크업(insertAdjacentHTML)을 \`html\`에 쌓기만 한다 — 다시 그리기 전에 비운다.
+  fx.app.run(`window.freshHtml = (...ids) => ids.forEach(id => { document.getElementById(id).html = ''; });`);
+  return { ...fx, node };
+}
+
+test('첫사용 1·2: 개수 칩은 1 이상일 때만 선다 — 0이면 숨고, 다시 그릴 때 1이 되면 나타난다(1 → 0은 사라짐)', () => {
+  const fx = firstRunClient();
+  const draw = (n) => {
+    const list = JSON.stringify(Array.from({ length: n }, (_, i) => ({ id: `t${i}`, description: `일 ${i}`, status: 'open' })));
+    const events = JSON.stringify(Array.from({ length: n }, (_, i) => ({ start: '10:00', title: `회의 ${i}` })));
+    fx.app.run(`renderTodayTasks(${list}); renderWaiting(${list}); renderIdeas(${list}); renderDecisions(${list});
+      renderCalendar({ events: ${events} });`);
+  };
+  const ids = ['todayTaskCount', 'waitingSectionCount', 'ideaCount', 'decisionSectionCount', 'calendarSectionCount'];
+  draw(0);
+  ids.forEach(id => assert.equal(fx.node(id).hidden, true, `${id}: 0이면 숨김`));
+  draw(1);
+  ids.forEach((id) => {
+    assert.equal(fx.node(id).hidden, false, `${id}: 1이면 나타남`);
+    assert.equal(String(fx.node(id).textContent), '1');
+  });
+  draw(3);
+  ids.forEach(id => assert.equal(String(fx.node(id).textContent), '3', `${id}: 데이터가 있으면 지금 그대로`));
+  draw(0);
+  ids.forEach(id => assert.equal(fx.node(id).hidden, true, `${id}: 1 → 0이면 다시 숨김`));
+  // 오늘 할 일은 남은 개수다 — 모두 끝내 남은 것이 0이면 칩도 숨는다(`N개 중 N개 끝냈어요`가 말한다)
+  fx.app.run(`renderTodayTasks([{ id: 'a', description: '끝', status: 'done' }])`);
+  assert.equal(fx.node('todayTaskCount').hidden, true);
+  assert.equal(fx.node('todayDoneSummary').textContent, '1개 중 1개 끝냈어요');
+});
+
+test('첫사용 2·3: `나중에 할 일 N` 버튼은 0이면 숨고 1이면 선다 — 서랍이 열린 채 0이 되면 서랍은 열어 두고 초점은 서랍 닫기로', () => {
+  const fx = firstRunClient();
+  const toggle = fx.node('laterTaskToggle');
+  fx.app.run('renderLaterTasks([])');
+  assert.equal(toggle.hidden, true, '0이면 버튼 없음');
+  fx.app.run(`renderLaterTasks([{ id: 'l1', description: '나중 일', status: 'open' }])`);
+  assert.equal(toggle.hidden, false, '1이면 나타남');
+  assert.equal(String(fx.node('laterTaskSectionCount').textContent), '1');
+
+  // 서랍을 연 채, 초점이 버튼에 있는 동안 마지막 하나가 오늘로 옮겨져 0이 된다
+  fx.app.run(`laterDrawerOpen = true; document.activeElement = document.getElementById('laterTaskToggle');`);
+  fx.app.run('renderLaterTasks([])');
+  assert.equal(toggle.hidden, true);
+  assert.equal(fx.app.run('laterDrawerOpen'), true, '서랍은 열린 채(닫기 버튼이 있다)');
+  assert.equal(fx.node('laterTaskClose').focused, true, '초점은 사라진 버튼에 남지 않고 서랍 닫기로');
+  assert.equal(fx.node('laterTaskList').innerHTML, '<div class="d-empty">나중에 할 일이 없어요.</div>', '서랍의 빈 문장은 그대로');
+
+  // 그 뒤 서랍을 닫으면 숨은 버튼 대신 오늘 할 일 입력칸으로
+  fx.app.run(`document.activeElement = null; escDrop = () => {}; drawerClose()`);
+  assert.equal(fx.app.run('laterDrawerOpen'), false);
+  assert.equal(fx.node('todayTaskInput').focused, true);
+  assert.notEqual(toggle.focused, true);
+
+  // 버튼이 보이면 닫을 때 지금처럼 버튼으로 / 초점이 딴 데 있으면 건드리지 않는다
+  const other = firstRunClient();
+  other.app.run(`renderLaterTasks([{ id: 'l1', description: '나중 일', status: 'open' }]); laterDrawerOpen = true; escDrop = () => {}; drawerClose()`);
+  assert.equal(other.node('laterTaskToggle').focused, true);
+  other.app.run(`document.activeElement = document.getElementById('todayTaskInput'); laterDrawerOpen = true; renderLaterTasks([])`);
+  assert.notEqual(other.node('laterTaskClose').focused, true);
+});
+
+test('첫사용 5: 결정이 하나도 없으면(미반영 0 · 반영 완료 0) `결정 찾기`와 `반영 완료` 접힘을 숨기고, 반영 완료만 있어도 둘 다 선다', () => {
+  const fx = firstRunClient();
+  const draw = (pending, archived) => fx.app.run(`decisionArchiveCache = ${JSON.stringify(archived)};
+    renderDecisions(${JSON.stringify(pending)}); renderDecisionArchive();`);
+  draw([], []);
+  assert.equal(fx.node('decisionSearch').hidden, true);
+  assert.equal(fx.node('decisionArchiveZone').hidden, true);
+  draw([], [{ id: 'a1', description: '반영한 결정' }]);
+  assert.equal(fx.node('decisionSearch').hidden, false, '반영 완료가 있으면 찾기 그대로');
+  assert.equal(fx.node('decisionArchiveZone').hidden, false, '접힘도 그대로');
+  assert.equal(fx.node('decisionSectionCount').hidden, true, '미반영 0은 적지 않는다');
+  draw([{ id: 'd1', description: '결정' }], []);
+  assert.equal(fx.node('decisionSearch').hidden, false);
+  assert.equal(fx.node('decisionArchiveZone').hidden, false);
+
+  // 찾는 중에 마지막 결정이 사라지면 — 찾기 글자를 비우고 숨긴다(다음 결정이 생겼을 때 안 보이는 거름망이 되지 않게),
+  // 초점이 찾기 칸에 있었으면 `결정 추가` 칸으로
+  fx.app.run(`document.getElementById('decisionSearch').value = '결정'; decisionQuery = '결정';
+    document.activeElement = document.getElementById('decisionSearch'); window.freshHtml('decisionList');`);
+  draw([], []);
+  assert.equal(fx.node('decisionSearch').value, '');
+  assert.equal(fx.app.run('decisionQuery'), '');
+  assert.equal(fx.node('decisionSearch').hidden, true);
+  assert.equal(fx.node('decisionInput').focused, true);
+  assert.equal(fx.node('decisionList').html, '<div class="d-empty is-short">정해진 내용이 아직 없어요. 적어 두면 PRD 반영까지 여기서 챙겨요.</div>');
+});
+
+test('첫사용 6: 입력 칸 바로 아래 빈 문장 세 자리만 짧고 조용해지고(is-short), 찾기 결과·다 끝냄·서랍의 빈 문장은 그대로', () => {
+  const fx = firstRunClient();
+  fx.app.run('renderTodayTasks([]); renderIdeas([]); renderDecisions([])');
+  assert.equal(fx.node('todayTaskList').html, '<div class="d-empty is-short">오늘 할 일이 비었어요.</div>');
+  assert.equal(fx.node('ideaList').html, '<div class="d-empty is-short">아이디어가 아직 없어요. 떠오를 때 적어 두는 자리예요.</div>');
+  assert.equal(fx.node('decisionList').html, '<div class="d-empty is-short">정해진 내용이 아직 없어요. 적어 두면 PRD 반영까지 여기서 챙겨요.</div>');
+
+  const done = firstRunClient();
+  done.app.run(`renderTodayTasks([{ id: 'a', description: '끝', status: 'done' }])`);
+  assert.equal(done.node('todayTaskList').html, '<div class="d-empty">오늘 할 일을 모두 끝냈어요.</div>');
+
+  const found = firstRunClient();
+  found.app.run(`decisionArchiveCache = [{ id: 'a1', description: '반영한 결정' }]; decisionQuery = '없는말';
+    renderDecisions([{ id: 'd1', description: '결정' }]); renderDecisionArchive();`);
+  assert.equal(found.node('decisionList').html, '<div class="d-empty">찾는 결정이 없어요.</div>');
+  assert.equal(found.node('decisionArchiveList').html, '<div class="d-empty">찾는 결정이 없어요.</div>');
+
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /\.d-empty\.is-short \{ padding: 4px var\(--pad\) 14px; font-size: 14px; color: var\(--dim\); \}/);
+  assert.match(css, /\.d-empty \{ font-size: 15px; font-weight: 500; color: var\(--muted\); padding: 34px var\(--pad\); \}/, '다른 자리의 빈 문장 모양은 그대로');
+});
+
+test('첫사용 4: 도움말의 사용설명서(renderSettingsManual)는 모양·문구가 그대로다 — 네 칸 판·꺾쇠·줄인 설치 문구는 오늘 탭 카드에만', () => {
+  const fx = firstRunClient();
+  fx.store.set('guideCardClosed', '1');
+  fx.app.run('renderSettingsManual()');
+  const box = fx.node('settingsManualView').children[0];
+  assert.equal(box.className, 'd-manual');
+  const rows = box.children.slice(1, 5);
+  same(rows.map(row => row.className), ['d-guide', 'd-guide', 'd-guide', 'd-guide'], '판 없이 줄 넷이 바로 선다');
+  same(rows.map(row => row.children[0].textContent), ['앱으로 설치', '할 일 적기', '연동은 나중에', '슬랙에서 보내는 법']);
+  const text = index => fx.shape(`document.getElementById('settingsManualView').children[0].children[${index + 1}]`).text;
+  assert.equal(text(0), '앱으로 설치크롬 ⋮ → 전송, 저장, 공유 → 페이지를 앱으로 설치이미 설치했으면 주소창 오른쪽 앱 열기');
+  assert.equal(text(2), '연동은 나중에설정 ⚙ → 연동에서 하나씩');
+  assert.ok(rows[0].children[1].children.some(kid => kid.className === 'd-guidedock'), 'Dock 그림은 도움말에 남는다');
+  rows.forEach(row => assert.ok(!row.children.some(kid => kid.className === 'go' || kid.className === 'me'), '꺾쇠·앞 아이콘 없음'));
+  // 설치 창을 줄 수 있으면 도움말은 지금처럼 버튼 + 설명 문장
+  fx.app.run('appInstallOnPrompt({ preventDefault() {} })');
+  assert.equal(text(0), '앱으로 설치설치하기 Dock·⌘Tab에 워크스페이스 아이콘이 따로 떠요');
+
+  // 누르는 줄 셋은 카드에서도 여전히 button이고 같은 곳으로 데려간다
+  const card = firstRunClient();
+  card.app.run('renderGuideCard()');
+  const cardRows = card.node('startCardZone').children[0].children[1].children;
+  same(cardRows.slice(1).map(row => row.type), ['button', 'button', 'button']);
+  cardRows[1].listeners.click();
+  cardRows[2].listeners.click();
+  cardRows[3].listeners.click();
+  assert.equal(card.node('todayTaskInput').focused, true);
+  same(card.went(), [['close'], ['integrations', null], ['guide', null], ['show', '슬랙에서 이렇게 보내요']]);
+
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /\.d-guidegrid \{ display: grid; grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/, '넓게 2×2');
+  assert.match(css, /@media \(max-width: 520px\) \{\n  \.d-guidegrid \{ grid-template-columns: minmax\(0, 1fr\); \}/, '≤520 한 줄씩');
+  assert.ok(!/\.d-usagenote/.test(css), 'ui.css는 사용 횟수 줄(.d-usagenote)을 덮지 않는다');
 });
 
 // ---------- BBUNDLE: 프로젝트 묶어 보기(덩어리 1 — 프로젝트 탭만) ----------

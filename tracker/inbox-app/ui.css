@@ -888,6 +888,20 @@ button.d-guide .t { color: var(--accent-text); }
   .d-guide { flex-direction: column; gap: 2px; }
   .d-guide .t { width: auto; }
 }
+/* 오늘 탭의 사용설명서는 네 칸 판이다 — 넓게 2×2, ≤520은 한 줄씩. 한 칸 한 줄 `이름 설명 ›`(버튼 줄만 꺾쇠),
+   설치 줄은 Dock 그림 대신 앱 아이콘 22px 하나를 이름 앞에. 도움말 맨 위(.d-manual)는 위의 한 줄씩 모양 그대로다. */
+.d-start.d-guidecard { padding: 12px 10px 8px; }
+.d-guidecard .hd { padding: 0 6px 4px 14px; }
+.d-guidegrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 6px; }
+.d-guidegrid .d-guide { align-items: center; gap: 10px; padding: 8px 14px; }
+.d-guidegrid .d-guide .t { width: auto; }
+.d-guidegrid .d-guide .me { flex: none; display: block; width: 22px; height: 22px; border-radius: 6px; }
+.d-guidegrid .d-guide .go { flex: none; display: inline-flex; margin-left: auto; color: var(--dim); }
+.d-guidegrid .d-installbtn { margin-right: 0; }
+@media (max-width: 520px) {
+  .d-guidegrid { grid-template-columns: minmax(0, 1fr); }
+  .d-guidegrid .d-guide { flex-direction: row; flex-wrap: wrap; row-gap: 0; }
+}
 
 /* ---------- 새로 들어온 것 (아주 옅은 따뜻한 카드) ---------- */
 .d-inbox {
@@ -1209,6 +1223,8 @@ body.batch-open .d-row { grid-template-columns: 22px 30px minmax(0, 1fr) var(--w
   font-family: inherit; font-size: 13px; outline: none; box-shadow: 0 0 0 2px var(--accent);
 }
 .d-empty { font-size: 15px; font-weight: 500; color: var(--muted); padding: 34px var(--pad); }
+/* 입력 칸 바로 아래의 빈 목록 문장(오늘 할 일·아이디어·결정) — 위에 적을 자리가 있으니 짧고 조용하게 */
+.d-empty.is-short { padding: 4px var(--pad) 14px; font-size: 14px; color: var(--dim); }
 
 /* ---------- 상세 (업무 · 확인 대기 · 회의 정리 한 벌) ----------
    상세는 누른 줄 옆에 떠 있는 카드다(아래 `줄 옆 카드`). 목록은 늘 전체 폭을 쓴다.
