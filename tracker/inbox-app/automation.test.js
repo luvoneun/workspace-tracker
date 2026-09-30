@@ -878,6 +878,7 @@ test('WP-D3 setup.sh: update 에이전트를 늘 등록하고(실행기 안에�
   // 남은 일(/mcp)은 Claude 갈래 연동이 켜져 있을 때만 — 지라는 앱이 직접 읽는다
   const connect = script.slice(script.indexOf('CONNECT=""'), script.indexOf('# 마무리.'));
   assert.ok(!connect.includes('USE_JIRA'), '지라는 /mcp가 필요 없다');
+  assert.ok(!connect.includes('USE_SLACK'), '슬랙은 앱이 토큰으로 직접 읽는다 — /mcp가 필요 없다');
   assert.match(connect, /if \[ -n "\$CONNECT" \]; then/);
 
   assert.ok(!/pkill|killall|xargs kill/.test(script));

@@ -686,10 +686,9 @@ echo "  자동화 상태 확인 : launchctl list | grep workspace.app"
 echo "  로그             : $INSTALL_DIR/logs/"
 echo "  데이터 백업      : 매일 19:30 ~/workspace-data-backup/daily/ (7일치)"
 echo
-# /mcp 연결은 Claude Code로 도는 연동(슬랙 수집·캘린더 Claude 갈래·티로)이 켜져 있을 때만 알린다.
-# 지라·캘린더 비밀 주소·맥 캘린더는 Claude 없이 읽으므로 Claude 연결이 필요 없다.
+# /mcp 연결은 /mcp 커넥터로 읽는 연동(캘린더 Claude 갈래·티로)이 켜져 있을 때만 알린다.
+# 슬랙은 앱이 토큰으로 직접 읽고(문구 다듬기만 Claude), 지라·캘린더 비밀 주소·맥 캘린더도 Claude 연결 없이 읽는다.
 CONNECT=""
-[ "$USE_SLACK" = "yes" ] && CONNECT="$CONNECT 슬랙"
 [ "$USE_CAL_SYNC" = "yes" ] && CONNECT="$CONNECT 구글캘린더"
 [ "$USE_TIRO" = "yes" ] && CONNECT="$CONNECT 티로(tiro-mcp)"
 if [ -n "$CONNECT" ]; then
