@@ -3382,11 +3382,13 @@ function panelTask({ item, detail, type }, box) {
 
 // 언제 할지: `오늘` / `내일 · 9월 22일 (화)` / `어제부터 · 9월 20일 (일)` / `나중에` / `완료 · 9월 20일 (일)`
 // 밀린 업무를 `오늘`이라고 적으면 목록의 `어제부터`와 말이 어긋난다 — 같은 uiCarryText를 쓴다.
+// 진행 중인 업무는 밀렸어도 `진행 중`이다 — 목록 줄(wrap-ui)과 같은 규칙, 이미 손댄 일에 `밀림`은 틀린 말이다.
 function panelWhenText(item, mode) {
   if (item.status === 'done') return item.completed ? `완료 · ${uiKoDate(item.completed)}` : '완료';
   if (mode === 'later' && !item.scheduled) return '나중에';
   const scheduled = item.scheduled || todayStr();
   const carry = uiCarryText(scheduled);
+  if (carry && item.doing) return '진행 중';
   if (carry) return `${carry} · ${uiKoDate(scheduled)}`;
   const diff = diffDays(scheduled);
   if (Number.isNaN(diff)) return uiKoDate(scheduled);

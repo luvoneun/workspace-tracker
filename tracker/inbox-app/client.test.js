@@ -642,6 +642,23 @@ test('a task carried over says since when, and says nothing on the day it was pl
   assert.match(carry("'2000-01-01'"), /^\d+일째 밀림$/);
 });
 
+// 1.3.2: 상세의 `언제 할지`도 목록 줄과 같은 규칙 — 진행 중이면 밀렸어도 `밀림` 대신 `진행 중`.
+test('panelWhenText: 진행 중 + 지난 예정일은 `진행 중`', () => {
+  const app = pureClient();
+  assert.equal(app.run("panelWhenText({ status: 'open', doing: '2000-01-02', scheduled: '2000-01-01' }, 'today')"), '진행 중');
+});
+
+test('panelWhenText: 진행 중이 아니면 지난 예정일은 `N일째 밀림 · 날짜` 그대로', () => {
+  const app = pureClient();
+  assert.match(app.run("panelWhenText({ status: 'open', scheduled: '2000-01-01' }, 'today')"), /^\d+일째 밀림 · 1월 1일 \(토\)$/);
+});
+
+test('panelWhenText: 진행 중 + 오늘(또는 예정일 없음)은 `오늘` 그대로', () => {
+  const app = pureClient();
+  assert.equal(app.run("panelWhenText({ status: 'open', doing: todayStr(), scheduled: todayStr() }, 'today')"), '오늘');
+  assert.equal(app.run("panelWhenText({ status: 'open', doing: todayStr() }, 'today')"), '오늘');
+});
+
 test('the detail panel sends only the fields the person actually changed', () => {
   const app = pureClient();
   const changes = (initial, current) => JSON.parse(app.run(`JSON.stringify(panelFieldChanges('t1', ${initial}, ${current}))`));
