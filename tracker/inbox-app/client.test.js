@@ -13454,3 +13454,14 @@ test('개편 A 99 리뷰: `확인 필요 N`의 숫자와 aria의 N은 화면이 
   assert.equal(button.children[0].textContent, '확인 필요 3', '서버 4(가려진 문장 둘) → 들르는 줄 3');
   assert.equal(button.getAttribute('aria-label'), '확인 필요 3개 중 1번째로 이동');
 });
+
+// 1.3.2: 새로 들어온 것 줄의 `오늘`·`나중에`·`완료`는 회색 알약이 아니라 바탕 없는 파란 글자 버튼이다.
+test('새로 들어온 것 버튼 CSS: 평소 회색 바탕 없이 파란 글자, 줄 hover 연한 파랑, 버튼 hover 진한 파랑', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  const rules = css.split('\n').filter(line => /\.d-ibacts \.d-btn[^{]*\{/.test(line));
+  assert.ok(rules.length >= 3);
+  assert.ok(rules.every(line => !/--neutral-bg/.test(line)), '회색 알약 바탕 규칙이 없다');
+  assert.match(css, /^\.d-ibacts \.d-btn \{ background: none; color: var\(--accent-text\); \}$/m);
+  assert.match(css, /^\.d-ibrow:hover \.d-ibacts \.d-btn, \.d-ibrow:focus-within \.d-ibacts \.d-btn \{ background: var\(--accent-soft\);/m);
+  assert.match(css, /^\.d-ibacts \.d-btn:hover, [^{]*\{ background: var\(--accent-strong\); color: var\(--on-fill\); \}$/m);
+});

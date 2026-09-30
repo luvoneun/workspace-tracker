@@ -927,8 +927,8 @@ button.d-guide .t { color: var(--accent-text); }
 .d-ibrow .desc-edit-input { flex: 1; min-width: 0; font-size: 16px; font-weight: 500; }
 .d-ibrow .d-link { flex: none; }
 .d-ibacts { display: flex; align-items: center; gap: 6px; }
-/* 줄의 동작은 평소 연회색, 줄에 손이 닿으면 그제야 파란 기가 돈다 */
-.d-ibacts .d-btn { background: var(--neutral-bg); color: var(--muted); }
+/* 줄의 동작은 평소 바탕 없는 파란 글자 버튼(회색 알약이 줄마다 몰려 보였다), 줄에 손이 닿으면 연한 파랑, 버튼에 닿으면 진한 파랑 */
+.d-ibacts .d-btn { background: none; color: var(--accent-text); }
 .d-ibrow:hover .d-ibacts .d-btn, .d-ibrow:focus-within .d-ibacts .d-btn { background: var(--accent-soft); color: var(--accent-text); }
 .d-ibacts .d-btn:hover, .d-ibrow:hover .d-ibacts .d-btn:hover, .d-ibrow:focus-within .d-ibacts .d-btn:hover { background: var(--accent-strong); color: var(--on-fill); }
 .d-ibrow .jira-control { margin: 0; flex-wrap: nowrap; min-width: 0; }
