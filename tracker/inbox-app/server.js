@@ -2365,6 +2365,8 @@ const usage = require('./usage').createUsage({
   localDir: usageDir,
   today: () => checkinTest.today || todayLocal(),
   canSend: () => checkin.canSend(),
+  // 내 일 기록의 업무 기준 숫자(WP-Y) — 보고 초안과 같은 업무 목록(workflows.snapshot().items)을 읽기만 한다.
+  workDays: () => require('./usage').workDaysFrom(workflows.snapshot().items),
 });
 const checkin = require('./checkin').createCheckin({
   usageFields: (label, today) => usage.formFields(label, today),

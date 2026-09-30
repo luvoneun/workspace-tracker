@@ -12879,3 +12879,134 @@ test('1.3.1 작은 것: 해제 항목은 프로젝트 빼기, 숨은 한 줄 추
   assert.match(css, /\.rp-grp:not\(\.is-empty\):not\(:hover\):not\(:focus-within\) \.rp-s\.is-add:not\(\.is-open\) \{ height: 0;/);
   assert.match(css, /\.rp-pick \.cv svg \{[^}]*rotate\(90deg\)/);
 });
+
+// ---------- WP-Y — 내 일 기록 숫자를 보고 본문 `완료한 일` 기준(서버의 work)으로 ----------
+// work = 업무 목록에서 센 날짜별 숫자(usage.js workDaysFrom 모양). 없거나 깨졌으면 history 기준(예전 그대로).
+const wpyWork = (over = {}) => ({ done: {}, doneSlack: {}, inSlack: {}, inDirect: {}, records: {}, ...over });
+function wpySummary(app, history, weekKeys, selected, work) {
+  return JSON.parse(app.run(`JSON.stringify(usageWeeksSummary(${JSON.stringify(history)}, '${WPX_TODAY}', ${JSON.stringify(weekKeys)}, ${JSON.stringify(selected)},
+    key => (${JSON.stringify({ '2026-09-28': '이번 주', '2026-09-21': '지난 주' })}[key] || '주' + key), key => '라벨' + key, ${JSON.stringify(work)}))`));
+}
+
+test('WP-Y 주차 목록 — work가 있으면 끝낸 일은 업무 기준(사용 기록의 task_done 무시), 90일보다 오래된 주도 같은 눈금으로 숫자, 오늘 뒤는 버림', () => {
+  const app = usageWorkClient();
+  // 사용 기록은 끝낸 일 0(앱에서 누르지 않음) — 본문 `완료한 일`은 업무 기준 2개(픽스처 장면).
+  const history = { '2026-09-22': { tab_weekly: 1, task_done: 7 }, '2026-09-29': { jira_create: 1 } };
+  const work = wpyWork({
+    done: { '2026-06-02': 6, '2026-09-22': 1, '2026-09-24': 1, '2026-09-29': 3, '2026-10-02': 9 },
+    inDirect: { '2026-09-23': 2 },
+    records: { '2026-09-25': { decision: 1 } },
+  });
+  const keys = ['2026-09-28', '2026-09-21', '2026-09-14', '2026-06-01', '2026-05-25'];
+  const summary = wpySummary(app, history, keys, '2026-09-21', work);
+  assert.equal(summary.basis, 'work');
+  assert.deepEqual(summary.weeks['2026-09-21'], { done: 2, days: 4, full: true }, '끝냄 2 · 기록 있는 날 = 끝냄·들어옴·남김 중 하나라도(9/22·23·24·25)');
+  assert.deepEqual(summary.weeks['2026-09-28'], { done: 3, days: 1, full: true }, '오늘(9/30) 뒤 10/2는 버림, 지라만 있는 날(9/29 사용 기록)은 끝냄 날과 같은 날');
+  assert.deepEqual(summary.weeks['2026-06-01'], { done: 6, days: 1, full: false }, '90일보다 오래된 주도 숫자(첫 기록 날 6/2가 주 중간이라 덜 찬 주)');
+  assert.deepEqual(summary.weeks['2026-09-14'], { done: 0, days: 0, full: true });
+  assert.equal(summary.weeks['2026-05-25'], null, '첫 기록 날보다 앞선 주');
+  assert.equal(summary.max, 6, '눈금은 목록 안 최대(오래된 주 포함)');
+  assert.equal(usagePartsText(summary.line), '지난 주에 일 2개를 끝냈어요');
+  assert.equal(summary.average, '하루 평균 0.5개', '끝낸 일 ÷ 활동한 날(4)');
+  assert.equal(summary.note, '지난 주에 끝낸 할 일·버그 수(보고에서 뺀 것 포함)');
+  assert.equal(wpySummary(app, history, keys, '2026-09-28', work).note, '이번 주에 끝낸 할 일·버그 수(보고에서 뺀 것 포함)');
+  assert.equal(wpySummary(app, history, keys, '2026-06-01', work).note, '주2026-06-01에 끝낸 할 일·버그 수(보고에서 뺀 것 포함)');
+  assert.equal(wpySummary(app, history, keys, '2026-05-25', work).note, null, '기록 밖 주는 뜻 풀이 없음');
+  // work가 없거나 깨졌으면 사용 기록 기준(예전 그대로 — 9/21 주는 task_done 7, 오래된 주는 칸 없음, 뜻 풀이 없음).
+  for (const bad of [null, undefined, { done: 'x' }, [], wpyWork({ records: null })]) {
+    const old = wpySummary(app, history, keys, '2026-09-21', bad);
+    assert.equal(old.basis, 'usage', JSON.stringify(bad));
+    assert.deepEqual(old.weeks['2026-09-21'], { done: 7, days: 1, full: false });
+    assert.equal(old.weeks['2026-06-01'], null);
+    assert.equal(old.note, null);
+    assert.deepEqual(old, wpxSummary(app, history, keys, '2026-09-21'), '일곱째 인자가 없을 때와 같다');
+  }
+});
+
+test('WP-Y usageWorkStats 다섯째 인자 work — 끝낸·들어온·남긴 기록(지라는 사용 기록)·하루 평균·막대가 업무 기준, 90일은 그대로 90일, 오래된 지난 주도 연다', () => {
+  const app = usageWorkClient();
+  const history = { '2026-09-29': { task_done: 9, task_add: 9, slack_in: 9, jira_create: 2, idea_add: 9 } };
+  const work = wpyWork({
+    done: { '2026-05-06': 4, '2026-09-28': 2, '2026-09-30': 1 }, doneSlack: { '2026-09-28': 1 },
+    inSlack: { '2026-09-28': 3 }, inDirect: { '2026-09-29': 1 },
+    records: { '2026-09-29': { decision: 1, check: 2 }, '2026-09-30': { idea: 1 } },
+  });
+  const stats = (range, options, w = work) => JSON.parse(app.run(`JSON.stringify(usageWorkStats(${JSON.stringify(history)}, '${WPX_TODAY}', '${range}', ${JSON.stringify(options)}, ${JSON.stringify(w)}))`));
+  const week = stats('week', undefined);
+  assert.equal(week.basis, 'work');
+  assert.equal(week.doneNote, '이번 주에 끝낸 할 일·버그 수(보고에서 뺀 것 포함)');
+  assert.equal(usagePartsText(week.headline), '이번 주 일 3개를 끝냈어요');
+  assert.deepEqual(week.done, { total: 3, slack: 1 });
+  assert.deepEqual(week.in, { total: 4, slack: 3, direct: 1 });
+  assert.deepEqual(week.record, { total: 6, parts: [{ label: '결정', count: 1 }, { label: '아이디어', count: 1 }, { label: '지라', count: 2 }, { label: '확인 대기', count: 2 }] }, '지라만 사용 기록');
+  assert.equal(week.recordedDays, 3);
+  assert.equal(week.average, '1', '3 ÷ 활동한 날 3');
+  assert.deepEqual(week.bars.slice(0, 3).map(bar => [bar.in, bar.done]), [[3, 2], [1, 0], [0, 1]]);
+  assert.equal(stats('month', undefined).doneNote, '이번 달에 끝낸 할 일·버그 수(보고에서 뺀 것 포함)');
+  const d90 = stats('90', undefined);
+  assert.equal(d90.from, '2026-07-03');
+  assert.equal(d90.done.total, 3, '90일 보기는 90일(5/6의 4개는 빠짐)');
+  assert.equal(d90.doneNote, '최근 90일에 끝낸 할 일·버그 수(보고에서 뺀 것 포함)');
+  // 90일보다 오래된 지난 주도 그 주 숫자로 연다(알게 된 것은 창 밖이라 없음).
+  const old = stats('week', { week: '2026-05-04', name: '5월 1주차' });
+  assert.equal(usagePartsText(old.headline), '5월 1주차에 일 4개를 끝냈어요');
+  assert.equal(old.doneNote, '5월 1주차에 끝낸 할 일·버그 수(보고에서 뺀 것 포함)');
+  assert.deepEqual(old.insights, []);
+  // work가 없거나 깨졌으면 예전 그대로(사용 기록 기준, 뜻 풀이 없음).
+  for (const bad of [null, { done: 1 }]) {
+    const fallback = stats('week', undefined, bad);
+    assert.equal(fallback.basis, undefined);
+    assert.equal(fallback.doneNote, undefined);
+    assert.deepEqual(fallback, usageStats(app, history, WPX_TODAY, 'week'));
+  }
+});
+
+test('WP-Y 화면 — 주차 줄 끝 숫자·맨 아래 요약·자세히 창 `끝낸 일` 타일이 업무 기준, 요약 줄·타일에 title과 읽어 주는 같은 뜻 글자', () => {
+  const app = reportClient();
+  app.run(fs.readFileSync(path.join(__dirname, 'usage-ui.js'), 'utf8'));
+  app.run(`const __make = document.createElement;
+    document.createElement = tag => Object.assign(__make(tag), { tagName: String(tag).toUpperCase(), style: {} });
+    document.createElementNS = (ns, tag) => document.createElement(tag);
+    document.createTextNode = value => ({ textContent: String(value), children: [] });`);
+  app.run(`reportWeekName = key => (${JSON.stringify({ '2026-09-28': '이번 주', '2026-09-21': '지난 주' })}[key] || formatWeekLabel(key).week);
+    renderWeeklyReportDetail = () => {};
+    document.getElementById('weeklyReportDetail').contains = () => false;
+    activeTabKey = 'weekly';
+    usageInfo = { ok: true, today: '${WPX_TODAY}', days: 30, rows: [{ key: 'task_done', label: '할 일 끝냄', count: 0 }],
+      history: { '2026-09-22': { tab_weekly: 3 } },
+      work: ${JSON.stringify(wpyWork({ done: { '2026-06-03': 4, '2026-09-22': 2 }, inDirect: { '2026-09-22': 2 } }))} };
+    selectedWeekKey = '2026-09-21';`);
+  app.run(`renderWeeklyReports([{ weekKey: '2026-09-28', draft: { rows: [] } }, { weekKey: '2026-09-21', draft: { rows: [] } }, { weekKey: '2026-06-01', draft: { rows: [] } }])`);
+  const nav = app.nodes.get('weeklyReportNav');
+  const buttons = nav.children.filter(kid => kid.className === 'rp-wk');
+  const endOf = button => button.children.find(kid => kid.className === 'd-uwend');
+  assert.equal(endOf(buttons[1]).children[1].textContent, '2', '지난 주 = 본문 근거 2');
+  assert.equal(endOf(buttons[1]).children[0].children[0].style.width, '50%', '목록 안 최대(오래된 주 4) 대비');
+  assert.equal(endOf(buttons[2]).children[1].textContent, '4', '90일보다 오래된 주도 숫자');
+  assert.equal(endOf(buttons[2]).children[0].children[0].style.width, '100%');
+  assert.equal(endOf(buttons[0]).children[1].textContent, '0');
+  const foot = nav.children[nav.children.length - 1];
+  const first = foot.children[0].children[0];
+  assert.equal(first.title, '지난 주에 끝낸 할 일·버그 수(보고에서 뺀 것 포함)');
+  const hidden = first.children.find(kid => kid.className === 'sr-only');
+  assert.equal(hidden.textContent, ' — 지난 주에 끝낸 할 일·버그 수(보고에서 뺀 것 포함)');
+  assert.equal(wpxText(first).startsWith('지난 주에 일 2개를 끝냈어요'), true);
+  // 자세히 창 — 지난 주 기준, 끝낸 일 타일에 같은 뜻.
+  const link = foot.children[foot.children.length - 1];
+  link.listeners.click();
+  const body = app.run('usageWorkDlg.body');
+  const tile = wpxFind(body, node => node.className === 'd-uwtile is-done');
+  assert.equal(tile.title, '지난 주에 끝낸 할 일·버그 수(보고에서 뺀 것 포함)');
+  assert.equal(tile.children.find(kid => kid.className === 'sr-only').textContent, tile.title);
+  assert.equal(wpxText(wpxFind(tile, node => node.className === 'd-uwv')), '2개');
+  // 기능별 전체 보기 표는 사용 기록(rows) 그대로.
+  assert.equal(wpxText(wpxFind(body, node => node.tagName === 'TD')), '0');
+  app.run('usageWorkClose()');
+  // work가 없으면 예전 그대로 — 사용 기록 기준, title·숨은 글자 없음.
+  app.run(`usageInfo = { ...usageInfo, work: null, history: { '2026-09-22': { task_done: 5 } } }; renderWeeklyReports(weeklyReportsCache);`);
+  const foot2 = nav.children[nav.children.length - 1];
+  assert.equal(foot2.children[0].children[0].title, undefined);
+  assert.equal(foot2.children[0].children[0].children.some(kid => kid.className === 'sr-only'), false);
+  assert.equal(endOf(nav.children.filter(kid => kid.className === 'rp-wk')[1]).children[1].textContent, '5');
+  assert.equal(endOf(nav.children.filter(kid => kid.className === 'rp-wk')[2]), undefined, '사용 기록 기준이면 90일 밖 주는 칸 없음');
+});

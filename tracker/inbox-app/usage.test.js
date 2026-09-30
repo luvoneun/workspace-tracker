@@ -492,3 +492,163 @@ test('WP-X 화면 파일 규칙 — 주간요약 줄 끝·맨 아래·자세히 
   // 자세히 창은 설정과 같은 판 — 새 틀(.d-modal 재정의) 없음.
   assert.equal(/\.d-modal\s*[{,]/.test(added), false);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WP-Y — 내 일 기록 숫자를 보고 본문 `완료한 일` 기준(업무 목록)으로. GET /api/usage에 work만 더하고, 세기·보내기는 그대로.
+const { workDaysFrom, normalizeWork, formPairs, sumRange } = require('./usage');
+const reportFactory = require('./report-drafts');
+
+test('WP-Y workDaysFrom — 완료일이 있는 할 일·버그만 끝낸 일(주 첫날·끝날 경계), 슬랙/직접 쪼갬, 확인 완료는 끝낸 일이 아님', () => {
+  const items = [
+    { id: 'mon', type: 'task', status: 'done', created: '2026-09-20', completed: '2026-09-21' },                 // 월요일
+    { id: 'sun', type: 'bug', status: 'done', created: '2026-09-21', completed: '2026-09-27', permalink: 'https://s/1' },   // 일요일·슬랙
+    { id: 'late', type: 'task', status: 'done', created: '2026-09-27', completed: '2026-09-22' },               // 만든 날이 완료보다 뒤지만 같은 주 — 보고도 셈
+    { id: 'after', type: 'task', status: 'done', created: '2026-09-28', completed: '2026-09-22' },              // 만든 날이 그 주 뒤 — 보고에 안 섬
+    { id: 'nocreated', type: 'task', status: 'done', completed: '2026-09-22' },                                 // 만든 날 없음 — 보고에 안 섬
+    { id: 'nocompleted', type: 'task', status: 'done', created: '2026-09-22' },                                 // 완료일 없음
+    { id: 'open', type: 'task', status: 'to-do', created: '2026-09-23', completed: '2026-09-23' },              // 끝나지 않음
+    { id: 'chk', type: 'check', status: 'done', created: '2026-09-23', completed: '2026-09-24' },               // 확인 완료 — 남긴 기록만
+    { id: 'dec', type: 'decision', status: 'to-do', created: '2026-09-23' },
+    { id: 'idea', type: 'idea', status: 'to-do', created: '2026-09-23' },
+    { id: 'bad', type: 'task', status: 'done', created: 'yesterday', completed: '2026-09-23' },
+    null, 'x',
+  ];
+  const work = workDaysFrom(items);
+  assert.deepEqual(work.done, { '2026-09-21': 1, '2026-09-27': 1, '2026-09-22': 1 });
+  assert.deepEqual(work.doneSlack, { '2026-09-27': 1 });
+  assert.deepEqual(work.inSlack, { '2026-09-21': 1 });
+  assert.deepEqual(work.inDirect, { '2026-09-20': 1, '2026-09-27': 1, '2026-09-28': 1, '2026-09-22': 1, '2026-09-23': 1 });
+  assert.deepEqual(work.records, { '2026-09-23': { check: 1, decision: 1, idea: 1 } });
+  // 지운 업무는 업무 목록에 없으니 세지 않는다.
+  assert.deepEqual(workDaysFrom(items.filter(item => !item || item.id !== 'mon')).done, { '2026-09-27': 1, '2026-09-22': 1 });
+  assert.deepEqual(workDaysFrom(undefined), { done: {}, doneSlack: {}, inSlack: {}, inDirect: {}, records: {} });
+});
+
+test('WP-Y 본문 `완료한 일` 근거 업무 수 = work.done의 그 주 합(사람이 뺀 문장의 업무도 센다)', (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-usage-report-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const week = '2026-09-21';
+  const items = [
+    { id: 'a', type: 'task', description: '가입 문구 검토하기', status: 'done', created: '2026-09-14', completed: '2026-09-21', group: '가입' },
+    { id: 'b', type: 'task', description: '가입 버튼 고치기', status: 'done', created: '2026-09-22', completed: '2026-09-27', group: '가입' },
+    { id: 'c', type: 'bug', description: '결제 오류 확인하기', status: 'done', created: '2026-09-22', completed: '2026-09-23', group: '결제', permalink: 'https://s/2' },
+    { id: 'd', type: 'task', description: '다음 주로 넘김', status: 'done', created: '2026-09-22', completed: '2026-09-28', group: '결제' },
+    { id: 'e', type: 'task', description: '지난주 끝남', status: 'done', created: '2026-09-10', completed: '2026-09-20', group: '결제' },
+    { id: 'f', type: 'check', description: '법무 확인', status: 'done', created: '2026-09-22', completed: '2026-09-23' },
+    { id: 'g', type: 'decision', description: '환불은 7일', status: 'to-do', created: '2026-09-22' },
+    { id: 'h', type: 'task', description: '진행 중 일', status: 'to-do', created: '2026-09-22', doing: '2026-09-22' },
+  ];
+  const store = reportFactory({ directory, sources: () => items, legacy: () => [], currentWeek: () => week });
+  const doneIds = () => new Set(store.view(week).rows.filter(row => row.heading === '완료한 일').flatMap(row => row.sourceIds));
+  const weekDone = () => Object.entries(workDaysFrom(items).done).filter(([day]) => day >= week && day <= '2026-09-27').reduce((sum, [, n]) => sum + n, 0);
+  assert.equal(doneIds().size, 3);
+  assert.equal(weekDone(), doneIds().size, '본문 근거 수와 같다');
+  // 사람이 한 문장을 보고에서 빼도 업무 수는 그대로(업무 수 기준).
+  const first = store.view(week).rows.find(row => row.heading === '완료한 일');
+  store.change({ weekKey: week, revision: store.view(week).revision, action: 'exclude', id: first.id });
+  assert.equal(store.view(week).rows.find(row => row.id === first.id).excluded, true);
+  assert.equal(doneIds().size, 3);
+  assert.equal(weekDone(), 3);
+});
+
+test('WP-Y normalizeWork — 날짜 키·양의 정수만, 모양이 어긋나면 null', () => {
+  assert.equal(normalizeWork(null), null);
+  assert.equal(normalizeWork([]), null);
+  assert.equal(normalizeWork({ done: {} }), null, '칸이 빠짐');
+  assert.equal(normalizeWork({ done: [], doneSlack: {}, inSlack: {}, inDirect: {}, records: {} }), null);
+  assert.deepEqual(normalizeWork({ done: { '2026-09-01': 2, x: 3, '2026-09-02': -1, '2026-09-03': 1.5 }, doneSlack: {}, inSlack: {}, inDirect: {}, records: { '2026-09-01': { idea: 1, jira: 4, check: 0 }, bad: { idea: 1 } } }),
+    { done: { '2026-09-01': 2 }, doneSlack: {}, inSlack: {}, inDirect: {}, records: { '2026-09-01': { idea: 1 } } });
+});
+
+// 가짜 요청으로 createUsage의 GET /api/usage를 부른다(서버를 띄우지 않고 deps만 바꿔 끼운다).
+function usageGet(usage) {
+  return new Promise((resolve) => {
+    const res = { status: 0, writeHead(status) { this.status = status; }, end(body) { resolve({ status: this.status, body: JSON.parse(body) }); } };
+    usage.route({ method: 'GET' }, res, new URL('http://x/api/usage'), {});
+  });
+}
+
+test('WP-Y 업무 읽기 실패(던짐·없음·깨진 값) — GET /api/usage는 200, work null, 나머지 칸은 그대로', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-usage-work-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(dir, 'usage.json'), JSON.stringify(usageDays({ [TODAY]: { task_done: 2 }, [ago(3)]: { jira_create: 1 } })));
+  const make = workDays => createUsage({ localDir: () => dir, today: () => TODAY, canSend: () => false, ...(workDays === undefined ? {} : { workDays }) });
+  const plain = await usageGet(make(undefined));
+  assert.equal(plain.status, 200);
+  assert.equal(plain.body.work, null);
+  for (const workDays of [() => { throw new Error('업무 파일을 못 읽음'); }, () => undefined, () => ({ done: 'x' }), () => [], 'not a function']) {
+    const got = await usageGet(make(workDays));
+    assert.equal(got.status, 200);
+    assert.equal(got.body.work, null);
+    assert.deepEqual(got.body, plain.body, '나머지 칸은 같다');
+  }
+  const good = await usageGet(make(() => ({ done: { [TODAY]: 5 }, doneSlack: {}, inSlack: {}, inDirect: {}, records: {} })));
+  assert.equal(good.status, 200);
+  assert.deepEqual(good.body.work.done, { [TODAY]: 5 });
+  const { work, ...rest } = good.body;
+  const { work: none, ...restPlain } = plain.body;
+  assert.equal(none, null);
+  assert.ok(work);
+  assert.deepEqual(rest, restPlain, 'work 말고는 같다');
+});
+
+test('WP-Y 보내는 칸 불변 — 같은 usage.json이면 work가 있든 없든 formFields·formPairs·체크인 본문의 사용 횟수 칸이 같다', async (t) => {
+  const seed = usageDays({ [TODAY]: { task_done: 3, slack_done: 1, task_add: 2, tab_weekly: 4, jira_create: 1 }, [ago(1)]: { slack_in: 5, idea_add: 1, search: 2 } });
+  const fakeWork = () => ({ done: { [TODAY]: 40 }, doneSlack: { [TODAY]: 9 }, inSlack: { [TODAY]: 7 }, inDirect: {}, records: { [TODAY]: { idea: 3 } } });
+  const run = async (workDays) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-usage-same-'));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    fs.writeFileSync(path.join(dir, 'usage.json'), JSON.stringify(seed));
+    const usage = createUsage({ localDir: () => dir, today: () => TODAY, canSend: () => true, ...(workDays ? { workDays } : {}) });
+    await usageGet(usage);   // GET을 먼저 불러도 보내는 칸에는 영향이 없다
+    return { pairs: formPairs(sumRange(usage.load(), null, TODAY)), fields: usage.formFields('3일째', TODAY) };
+  };
+  const without = await run(null);
+  const withWork = await run(fakeWork);
+  assert.deepEqual(withWork.pairs, without.pairs);
+  assert.deepEqual(withWork.fields, without.fields);
+  assert.equal(without.fields.find(([entry]) => entry === USAGE_ENTRIES.taskDone)[1], '3', '끝낸 할 일 칸은 여전히 사용 기록(task_done)');
+  // 체크인 답(3일째)에 붙는 칸도 같다 — 하네스의 checkin은 h.usage를 그때그때 읽으므로 work가 있는 것으로 바꿔 끼운다.
+  const bodies = [];
+  for (const workDays of [null, fakeWork]) {
+    const h = harness(t);
+    if (workDays) h.usage = createUsage({ localDir: () => h.dir, today: () => h.today, canSend: () => h.checkin.canSend(), workDays });
+    h.seed(seedState(ago(3), [ago(3)]));
+    h.seedUsage(seed);
+    await h.open();
+    await usageGet(h.usage);
+    await h.checkin.act({ round: 'd3', action: 'send', answers: { setup: '쉬웠어요' } });
+    const body = h.body(h.calls.length - 1);
+    assert.equal(body.get(CHECKIN_AUTO_ENTRIES.round), '3일째');
+    bodies.push([...body.entries()].filter(([entry]) => USAGE_ENTRY_SET.has(entry)));
+  }
+  assert.equal(bodies[0].length, 9);
+  assert.deepEqual(bodies[1], bodies[0]);
+});
+
+test('WP-Y 서버 배선 — GET /api/usage의 work는 업무 목록(보고 초안과 같은 읽기)에서, 지운 업무는 빠진다', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-usage-server-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  serverModule.setUsageForTests({ localDir: dir });
+  fs.writeFileSync(support.tasksPath, ['# Tasks',
+    '- 슬랙 일 #task[id:w1 status:done priority:high created:2026-09-21 completed:2026-09-22 source:slack:https://example.test/1]',
+    '- 직접 버그 #bug[id:w2 status:done priority:medium created:2026-09-22 completed:2026-09-27]',
+    '- 진행 중 #task[id:w3 status:to-do priority:medium created:2026-09-23]',
+    '- 확인 #check[id:w4 status:done priority:medium created:2026-09-23 completed:2026-09-24]',
+    '- 결정 #decision[id:w5 status:to-do priority:medium created:2026-09-24]',
+    '- 아이디어 #idea[id:w6 status:to-do priority:medium created:2026-09-24]', ''].join('\n'));
+  const info = await (await fetch(base + '/api/usage')).json();
+  // 다른 테스트가 남긴 결정·확인·아이디어 파일(오늘 날짜)이 있을 수 있어 records는 이 테스트의 날짜만 본다.
+  const { records, ...counts } = info.work;
+  assert.deepEqual(counts, {
+    done: { '2026-09-22': 1, '2026-09-27': 1 }, doneSlack: { '2026-09-22': 1 },
+    inSlack: { '2026-09-21': 1 }, inDirect: { '2026-09-22': 1, '2026-09-23': 1 },
+  });
+  assert.deepEqual([records['2026-09-23'], records['2026-09-24']], [{ check: 1 }, { decision: 1, idea: 1 }]);
+  // 지우면(휴지통) 세지 않는다.
+  const removed = await fetch(base + '/api/track/remove', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'w2' }) });
+  assert.equal(removed.status, 200);
+  const after = await (await fetch(base + '/api/usage')).json();
+  assert.deepEqual(after.work.done, { '2026-09-22': 1 });
+  assert.deepEqual(after.work.inDirect, { '2026-09-23': 1 });
+});

@@ -7,7 +7,7 @@
 // 알림 줄은 이 설치가 실제로 보낼 수 있을 때(`canSend` — 만든 사람·개발용·폼 닫힘이 아님)만 보인다.
 // 새 innerHTML은 쓰지 않는다(요소를 만들어 붙인다). 알리기가 실패해도 조용히 넘어간다.
 
-let usageInfo = null;          // GET /api/usage 결과 { send, canSend, days, rows, today, history }
+let usageInfo = null;          // GET /api/usage 결과 { send, canSend, days, rows, today, history, work }
 let usageLoading = null;
 const usageGuideNodes = new Set();   // 사용설명서 알림 줄(오늘 탭 카드·도움말) — 켜고 끌 때 함께 다시 그린다
 let usageTabSeen = false;
@@ -135,6 +135,41 @@ function usageCleanHistory(history, today) {
   }
   return clean;
 }
+
+// 업무 기준(WP-Y) — 서버가 준 `work`(보고 본문 `완료한 일`과 같은 조건으로 업무 목록에서 센 날짜별 숫자)를 위와 같은
+// 날짜별 키 모양으로 바꾼다. 그래서 아래 계산은 기준이 바뀌어도 그대로다:
+//   끝낸 일 task_done = 완료 날짜가 있는 할 일·버그(slack_done = 그중 슬랙), 들어온 일 slack_in·task_add = 만든 날의 할 일·버그(슬랙/직접),
+//   남긴 기록 = 결정·아이디어·확인 대기의 만든 날 + 지라 이슈 만들기(업무 기록에 날짜가 없어 사용 기록 jira_create 그대로).
+// 90일로 자르지 않는다(오늘 뒤만 뺀다) — 주차 목록은 90일보다 오래된 주도 숫자를 보인다. 모양이 어긋나면 null(사용 기록 기준으로 떨어진다).
+const USAGE_WORK_BAGS = [['done', 'task_done'], ['doneSlack', 'slack_done'], ['inSlack', 'slack_in'], ['inDirect', 'task_add']];
+const USAGE_WORK_RECORDS = [['decision', 'decision_add'], ['idea', 'idea_add'], ['check', 'check_add']];
+function usageWorkValid(work) {
+  const bag = value => !!value && typeof value === 'object' && !Array.isArray(value);
+  return bag(work) && USAGE_WORK_BAGS.every(([name]) => bag(work[name])) && bag(work.records);
+}
+function usageCleanWork(work, history, today) {
+  if (!usageWorkValid(work) || !USAGE_DAY_RE.test(String(today || ''))) return null;
+  const clean = {};
+  const put = (day, key, value) => {
+    if (!USAGE_DAY_RE.test(day) || day > today || !Number.isInteger(value) || value <= 0) return;
+    const counts = clean[day] || (clean[day] = {});
+    counts[key] = (counts[key] || 0) + value;
+  };
+  for (const [name, key] of USAGE_WORK_BAGS) for (const [day, value] of Object.entries(work[name])) put(day, key, value);
+  for (const [day, parts] of Object.entries(work.records)) {
+    if (!parts || typeof parts !== 'object') continue;
+    for (const [type, key] of USAGE_WORK_RECORDS) put(day, key, parts[type]);
+  }
+  for (const [day, counts] of Object.entries(usageCleanHistory(history, today))) if (counts.jira_create) put(day, 'jira_create', counts.jira_create);
+  return clean;
+}
+// 오늘부터 90일 안만 — 업무 기준에서도 `알게 된 것`(요일·하루 최고)은 예전처럼 90일 창으로 본다.
+function usageLast90(clean, today) {
+  const oldest = usageAddDays(today, -(USAGE_VIEW_DAYS - 1));
+  return Object.fromEntries(Object.entries(clean).filter(([day]) => day >= oldest));
+}
+// `끝낸 일` 숫자의 뜻(⑂) — 업무 기준일 때만 title·읽어 주는 보충 글자로 붙인다.
+const usageDoneNote = name => `${name}에 끝낸 할 일·버그 수(보고에서 뺀 것 포함)`;
 
 // from~to(둘 다 포함) 합계 — 들어온·끝낸·남긴 기록, 키별 숫자, 기록이 있는 날 수.
 function usageTotals(clean, from, to) {
@@ -316,10 +351,13 @@ function usagePastWeek(today, options) {
 //     recordedDays, average: '1.5'|null, compare: null|{ from, to, in, done, change, tone: 'more'|'same'|'less', text },
 //     bars: [{ label, name, from, to, in, done, future, today, partial }], barNote: 글자|null, insights: [{ kind, parts }] }
 // 빈 상태(90일 안에 기록이 하나도 없음)면 range·today·from·to·periodLabel·empty만.
-function usageWorkStats(history, today, range, options) {
+// work(선택, WP-Y): 서버의 업무 기준 숫자 — 있으면 그 기준(basis: 'work', doneNote)으로 계산하고, 없거나 깨졌으면 history 기준(예전 그대로).
+//   업무 기준은 90일로 자르지 않으므로 90일보다 오래된 지난 주도 숫자가 선다(빈 상태는 기록이 하나도 없을 때만).
+function usageWorkStats(history, today, range, options, work) {
   const view = USAGE_RANGES.some(([key]) => key === range) ? range : 'week';
   if (!USAGE_DAY_RE.test(String(today || ''))) return { range: view, empty: true, periodLabel: '' };
-  const clean = usageCleanHistory(history, today);
+  const fromWork = usageCleanWork(work, history, today);
+  const clean = fromWork || usageCleanHistory(history, today);
   const recordedDays = Object.keys(clean).length;
   const past = view === 'week' ? usagePastWeek(today, options) : null;
   const period = past
@@ -328,6 +366,7 @@ function usageWorkStats(history, today, range, options) {
     : usagePeriod(today, view);
   const result = { range: view, today, from: period.from, to: period.to, periodLabel: period.label, empty: recordedDays === 0 };
   if (past) { result.week = past.week; result.weekName = past.name; }
+  if (fromWork) { result.basis = 'work'; result.doneNote = usageDoneNote(past ? past.name : view === 'week' ? '이번 주' : view === 'month' ? '이번 달' : `최근 ${USAGE_VIEW_DAYS}일`); }
   if (result.empty) return result;
   const current = usageTotals(clean, period.from, period.to);
   const n = key => current.keys[key] || 0;
@@ -362,16 +401,22 @@ function usageWorkStats(history, today, range, options) {
   }
   result.bars = usageBuckets(clean, today, view, period.from);
   result.barNote = usageBarNote(result.bars, view);
-  result.insights = usageInsights(clean, today, view, period, current, before, recordedDays, past);
+  // 알게 된 것은 90일 창(업무 기준은 90일보다 오래된 날도 있어 잘라서 넘긴다 — history 기준은 이미 90일 안이라 그대로).
+  //   90일 창보다 앞선 지난 주(업무 기준에서만 열린다)는 비교할 창 밖이라 알게 된 것을 두지 않는다.
+  const recent = fromWork ? usageLast90(clean, today) : clean;
+  result.insights = fromWork && past && period.from < usageAddDays(today, -(USAGE_VIEW_DAYS - 1)) ? []
+    : usageInsights(recent, today, view, period, current, before, Object.keys(recent).length, past);
   return result;
 }
 
 // ---------- 주간요약 주차 목록 — 계산(순수 함수, client.test.js가 직접 시험한다) ----------
 // history를 한 번만 훑어 주(월요일)별로 끝낸 일·기록 있는 날 수를 모아 둔다(같은 history·today면 다시 훑지 않는다).
+// work(선택, WP-Y)가 있으면 업무 기준(90일로 자르지 않음), 없으면 history 기준(90일 안).
 let usageWeekMemo = null;
-function usageWeekIndex(history, today) {
-  if (usageWeekMemo && usageWeekMemo.history === history && usageWeekMemo.today === today) return usageWeekMemo;
-  const clean = usageCleanHistory(history, today);
+function usageWeekIndex(history, today, work) {
+  if (usageWeekMemo && usageWeekMemo.history === history && usageWeekMemo.today === today && usageWeekMemo.work === work) return usageWeekMemo;
+  const fromWork = usageCleanWork(work, history, today);
+  const clean = fromWork || usageCleanHistory(history, today);
   const days = Object.keys(clean).sort();
   const weeks = new Map();
   for (const day of days) {
@@ -381,11 +426,11 @@ function usageWeekIndex(history, today) {
     week.days += 1;
     weeks.set(monday, week);
   }
-  usageWeekMemo = { history, today, first: days[0] || null, weeks };
+  usageWeekMemo = { history, today, work, basis: fromWork ? 'work' : 'usage', first: days[0] || null, weeks };
   return usageWeekMemo;
 }
 
-// 그 주(월요일)의 끝낸 일 — 기록이 닿지 않는 주(90일·첫 기록 날보다 앞, 오늘보다 뒤)는 null(0으로 보이지 않게).
+// 그 주(월요일)의 끝낸 일 — 기록이 닿지 않는 주(첫 기록 날보다 앞 — history 기준이면 90일 밖도, 오늘보다 뒤)는 null(0으로 보이지 않게).
 // 첫 기록 날이 그 주 중간이면 그대로 센다(full: false — 최고 기록 비교에서만 뺀다).
 function usageWeekRecord(index, weekKey) {
   if (!index || !index.first || !USAGE_DAY_RE.test(String(weekKey || '')) || !USAGE_DAY_RE.test(String(index.today || ''))) return null;
@@ -396,10 +441,11 @@ function usageWeekRecord(index, weekKey) {
 }
 
 // 주차 목록 요약 — weekKeys: 목록에 보이는 주(월요일)들, selected: 고른 주, nameOf(weekKey): `이번 주`/`지난 주`/`10월 1주차`,
-// labelOf(weekKey): `9월 3주차`(최고 기록 줄). → 90일 안에 기록이 없으면 { empty: true }, 아니면
-// { empty: false, weeks: { weekKey: { done, days, full } | null }, max, selected: 기록|null, line: 조각[], average: '하루 평균 3.7개'|null, best: 조각[]|null }.
-function usageWeeksSummary(history, today, weekKeys, selected, nameOf, labelOf) {
-  const index = usageWeekIndex(history, today);
+// labelOf(weekKey): `9월 3주차`(최고 기록 줄), work(선택, WP-Y): 업무 기준 숫자. → 기록이 없으면 { empty: true }, 아니면
+// { empty: false, basis: 'work'|'usage', weeks: { weekKey: { done, days, full } | null }, max, selected: 기록|null, line: 조각[],
+//   note: 끝낸 일 숫자의 뜻(업무 기준이고 고른 주에 기록이 있을 때만)|null, average: '하루 평균 3.7개'|null, best: 조각[]|null }.
+function usageWeeksSummary(history, today, weekKeys, selected, nameOf, labelOf, work) {
+  const index = usageWeekIndex(history, today, work);
   if (!index.first) return { empty: true };
   const name = typeof nameOf === 'function' ? nameOf : (key => `${usageMonthDay(key)} 주`);
   const label = typeof labelOf === 'function' ? labelOf : name;
@@ -410,10 +456,12 @@ function usageWeeksSummary(history, today, weekKeys, selected, nameOf, labelOf) 
   const pick = Object.prototype.hasOwnProperty.call(weeks, selected) ? weeks[selected] : usageWeekRecord(index, selected);
   let line;
   let average = null;
+  let note = null;
   if (!pick) line = ['이 주는 기록이 없어요'];
   else {
     const word = name(selected);
     const now = word === '이번 주';
+    if (index.basis === 'work') note = usageDoneNote(word);
     if (pick.done > 0) {
       line = [now ? '이번 주 일 ' : `${word}에 일 `, { b: `${pick.done}개` }, '를 끝냈어요'];
       if (pick.days > 0) average = `하루 평균 ${usageOneDecimal(pick.done / pick.days)}개`;   // 기록이 있는 날 기준, 제 줄에 따로
@@ -427,7 +475,7 @@ function usageWeeksSummary(history, today, weekKeys, selected, nameOf, labelOf) 
     const tops = full.filter(key => weeks[key].done === top);
     if (top > 0 && tops.length === 1) best = name(tops[0]) === '이번 주' ? ['이번 주가 최고 기록이에요'] : ['최고 기록: ', `${label(tops[0])} `, { b: `${top}개` }];
   }
-  return { empty: false, weeks, max, selected: pick, line, average, best };
+  return { empty: false, basis: index.basis, weeks, max, selected: pick, line, note, average, best };
 }
 
 // ---------- 주간요약 주차 목록 — 그리기(report-ui.js의 reportWeekRowEnd·reportWeeksFoot이 넘긴다) ----------
@@ -466,7 +514,7 @@ function usageWeeksNow(items) {
   if (usageWeeksMemo && usageWeeksMemo.info === usageInfo && usageWeeksMemo.sign === sign) return usageWeeksMemo.summary;
   const nameOf = typeof reportWeekName === 'function' ? reportWeekName : null;
   const labelOf = typeof formatWeekLabel === 'function' ? (key => formatWeekLabel(key).week) : null;
-  const summary = usageWeeksSummary(usageInfo.history, usageInfo.today, keys, selected, nameOf, labelOf);
+  const summary = usageWeeksSummary(usageInfo.history, usageInfo.today, keys, selected, nameOf, labelOf, usageInfo.work);
   usageWeeksMemo = { info: usageInfo, sign, summary };
   return summary;
 }
@@ -496,7 +544,10 @@ function usageWeeksFoot(items) {
   const foot = usageEl('div', 'd-uwfoot');
   // 요약은 가운뎃점 없이 한 줄씩 — 끝낸 일 / 하루 평균 / 최고 기록. 좁은 폭에서는 왼쪽 요약·오른쪽 링크.
   const sum = usageEl('div', 'd-uwfsum');
-  sum.appendChild(usageParts(usageEl('p', 'd-uwfline'), summary.line));
+  const first = usageParts(usageEl('p', 'd-uwfline'), summary.line);
+  // 업무 기준이면 숫자의 뜻을 title로, 읽어 주는 사람에게는 같은 말을 숨긴 글자로 덧붙인다(⑂).
+  if (summary.note) { first.title = summary.note; first.appendChild(usageEl('span', 'sr-only', ` — ${summary.note}`)); }
+  sum.appendChild(first);
   if (summary.average) sum.appendChild(usageEl('p', 'd-uwfline', summary.average));
   if (summary.best) sum.appendChild(usageParts(usageEl('p', 'd-uwfline'), summary.best));
   foot.appendChild(sum);
@@ -742,16 +793,18 @@ function usageKeepTogether(pairs) {
   return pairs.map(([label, count]) => `${label} ${count}`.replace(/ /g, '\u00a0')).join(' · ');
 }
 
-function usageTile(name, total, sub, strong) {
+// note(선택): 숫자의 뜻 — title과 읽어 주는 숨긴 글자로(⑂, 업무 기준의 `끝낸 일`).
+function usageTile(name, total, sub, strong, note) {
   const tile = usageEl('div', strong ? 'd-uwtile is-done' : 'd-uwtile');
   tile.append(usageEl('span', 'd-uwk', name), usageEl('b', 'd-uwv', `${total}개`), usageEl('span', 'd-uws', sub || ''));
+  if (note) { tile.title = note; tile.appendChild(usageEl('span', 'sr-only', note)); }
   return tile;
 }
 
 // options: { week, name } — 주차 목록에서 고른 지난 주(usageWorkStats의 options 그대로). 첫 칸 글자가 그 주 이름이 된다.
 function usageWorkBody(info, cell, options) {
   const range = usageRangeNow();
-  const stats = usageWorkStats(info.history, info.today, range, options);
+  const stats = usageWorkStats(info.history, info.today, range, options, info.work);
   const past = usagePastWeek(info.today, options);
   const body = usageEl('div', 'd-uw');
 
@@ -803,7 +856,7 @@ function usageWorkBody(info, cell, options) {
     const tiles = usageEl('div', 'd-uwtiles');
     tiles.append(
       usageTile('들어온 일', stats.in.total, usageKeepTogether([['슬랙', stats.in.slack], ['직접', stats.in.direct]])),
-      usageTile('끝낸 일', stats.done.total, stats.done.slack > 0 ? usageKeepTogether([['그중 슬랙', stats.done.slack]]) : '', true),
+      usageTile('끝낸 일', stats.done.total, stats.done.slack > 0 ? usageKeepTogether([['그중 슬랙', stats.done.slack]]) : '', true, stats.doneNote),
       usageTile('남긴 기록', stats.record.total, usageKeepTogether(stats.record.parts.map(part => [part.label, part.count]))),
     );
     body.appendChild(tiles);

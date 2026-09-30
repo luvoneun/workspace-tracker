@@ -113,8 +113,65 @@ function formPairs(total) {
   ];
 }
 
+// ---------- 내 일 기록의 업무 기준 숫자(WP-Y) ----------
+// 주간요약 본문 `완료한 일`(report-drafts.js의 heading·eligible)과 같은 조건으로 업무 목록에서 날짜별 숫자만 센다(읽기만).
+//   done[완료일]      — 할 일·버그, status done, completed 있음, created가 그 완료 주(월~일)의 일요일 이하(eligible과 같음)
+//   doneSlack[완료일] — 그중 슬랙 출처(permalink)
+//   inSlack/inDirect[만든 날] — 할 일·버그(슬랙 출처 / 나머지)
+//   records[만든 날]  — { decision, idea, check } 결정·아이디어·확인 대기(확인 완료는 끝낸 일이 아니다)
+// 지운 업무는 업무 목록에 없으니 세지 않고, 보고에서 사람이 뺀 문장의 업무는 그대로 센다(업무 수 기준).
+// 날짜는 자르지 않는다(전체) — 주차 목록은 모든 주를 보여 주므로 상한이 있으면 오래된 주가 다시 빈 칸이 된다. 크기는 날짜 수에 비례.
+const WORK_RECORD_TYPES = ['decision', 'idea', 'check'];
+function weekSunday(day) {
+  const at = new Date(`${day}T00:00:00Z`);
+  at.setUTCDate(at.getUTCDate() + (7 - at.getUTCDay()) % 7);
+  return at.toISOString().slice(0, 10);
+}
+function workDaysFrom(items) {
+  const work = { done: {}, doneSlack: {}, inSlack: {}, inDirect: {}, records: {} };
+  const bump = (bag, day) => { bag[day] = (bag[day] || 0) + 1; };
+  for (const item of Array.isArray(items) ? items : []) {
+    if (!item || typeof item !== 'object') continue;
+    const created = DAY_RE.test(String(item.created || '')) ? item.created : null;
+    if (item.type === 'task' || item.type === 'bug') {
+      if (created) bump(item.permalink ? work.inSlack : work.inDirect, created);
+      const completed = String(item.completed || '');
+      if (item.status === 'done' && DAY_RE.test(completed) && created && created <= weekSunday(completed)) {
+        bump(work.done, completed);
+        if (item.permalink) bump(work.doneSlack, completed);
+      }
+    } else if (WORK_RECORD_TYPES.includes(item.type) && created) {
+      const day = work.records[created] || (work.records[created] = {});
+      day[item.type] = (day[item.type] || 0) + 1;
+    }
+  }
+  return work;
+}
+// deps.workDays()가 준 값을 믿을 수 있는 모양으로 — 날짜 키·양의 정수만. 모양이 어긋나면 null(화면은 사용 기록으로 떨어진다).
+function normalizeWork(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const counts = (bag) => {
+    if (!bag || typeof bag !== 'object' || Array.isArray(bag)) return null;
+    const kept = {};
+    for (const [day, n] of Object.entries(bag)) if (DAY_RE.test(day) && Number.isInteger(n) && n > 0) kept[day] = n;
+    return kept;
+  };
+  const work = {};
+  for (const key of ['done', 'doneSlack', 'inSlack', 'inDirect']) { work[key] = counts(raw[key]); if (!work[key]) return null; }
+  if (!raw.records || typeof raw.records !== 'object' || Array.isArray(raw.records)) return null;
+  work.records = {};
+  for (const [day, parts] of Object.entries(raw.records)) {
+    if (!DAY_RE.test(day) || !parts || typeof parts !== 'object') continue;
+    const kept = {};
+    for (const type of WORK_RECORD_TYPES) if (Number.isInteger(parts[type]) && parts[type] > 0) kept[type] = parts[type];
+    if (Object.keys(kept).length) work.records[day] = kept;
+  }
+  return work;
+}
+
 // deps: localDir() → 폴더(없으면 null — 세지 않는다. 테스트가 실제 local/에 쓰지 않게) · today()
 //       · canSend() → 이 설치가 보낼 수 있나(체크인이 켜져 있고 폼이 닫히지 않음)
+//       · workDays()(선택) → 업무 목록 기준 날짜별 숫자(workDaysFrom 모양). 없거나 던지거나 모양이 어긋나면 `work: null`.
 function createUsage(deps) {
   const requestScope = new AsyncLocalStorage();
   let sending = false;   // 설치·정기 신호를 지금 보내는 중 — 두 창이 동시에 열어도 한 번만.
@@ -350,7 +407,10 @@ function createUsage(deps) {
           history = Object.fromEntries(Object.entries(load().days).filter(([day]) => day >= oldest));
         } catch { history = {}; }
       }
-      json(res, 200, { ok: true, send: sendOn(), canSend, days: VIEW_DAYS, rows: recent(today), today, history });
+      // work는 `내 일 기록`의 끝낸 일·들어온 일·남긴 기록 기준(보고 본문과 같은 업무 기록). 읽지 못해도 응답은 200 그대로.
+      let work = null;
+      try { work = typeof deps.workDays === 'function' ? normalizeWork(deps.workDays()) : null; } catch { work = null; }
+      json(res, 200, { ok: true, send: sendOn(), canSend, days: VIEW_DAYS, rows: recent(today), today, history, work });
       return true;
     }
     if (url.pathname === '/api/usage/tick' && req.method === 'POST') {
@@ -384,4 +444,4 @@ function createUsage(deps) {
   };
 }
 
-module.exports = { createUsage, normalizeUsage, formPairs, sumRange, USAGE_KEYS, TICK_KEYS, USAGE_ENTRIES };
+module.exports = { createUsage, normalizeUsage, formPairs, sumRange, workDaysFrom, normalizeWork, USAGE_KEYS, TICK_KEYS, USAGE_ENTRIES };
