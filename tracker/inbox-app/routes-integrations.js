@@ -10,6 +10,9 @@ module.exports = function integrationsRoutes(req, res, url, ctx) {
     getCalendarToday, getJiraSync, getReportRefs, getSlackSync, integrationAlerts, integrations, jiraLive, liveLog,
     meetingNotesStatus, readBody, requestApply, slackFollowOn, slackFollower, slackSyncSuccessAt, todayLocal,
     withApplyFailure, workflows, writeMeetingNotesRequest } = ctx;
+  // 본문 읽기 오류(깨진 JSON·너무 큼)는 고정 문구로만 — 파서 메시지에 본문 조각(토큰 일부)이 섞일 수 있다.
+  // 그 뒤 우리 검증 오류(bad(...))는 예전대로 그 문구를 돌려준다.
+  const readJson = request => readBody(request).catch((error) => { throw integrations.bodyReadError(error); });
 
   // 지금 연동 상태 — 토큰 값은 싣지 않고 있음/없음만 알려 준다.
   // 열 때마다 슬랙 채널 이름을 따라간다(5분 캐시, 이름만 고침 — slackFollower 참고). 카드의 상태 줄에
@@ -82,7 +85,7 @@ module.exports = function integrationsRoutes(req, res, url, ctx) {
 
   // 슬랙 위저드 `① 토큰`의 `다음` — `auth.test`로 토큰만 확인한다. 아무 파일도 쓰지 않고 `{ok}`만 돌려준다.
   if (url.pathname === '/api/integrations/slack-token-check' && req.method === 'POST') {
-    readBody(req)
+    readJson(req)
       .then((body) => {
         // 토큰 칸 없이 부르면(채널 고르기 — 새 채널 이름의 앞머리만 알고 싶을 때) 저장된 토큰을 서버 안에서만 쓴다.
         const given = typeof (body || {}).token === 'string' ? body.token.trim() : '';
@@ -103,7 +106,7 @@ module.exports = function integrationsRoutes(req, res, url, ctx) {
   // `USES`·지라 설정은 서버가 뜰 때 읽으므로, launchd가 띄운 자리면 응답 뒤 스스로 끝낸다(다시 떠 준다).
   if (url.pathname === '/api/integrations/save' && req.method === 'POST') {
     let before = {};
-    readBody(req)
+    readJson(req)
       .then(body => integrations.saveIntegrations({
         configPath: CONFIG_PATH,
         current: (before = currentConfigFile()),
@@ -159,7 +162,7 @@ module.exports = function integrationsRoutes(req, res, url, ctx) {
   // (그 id를 화면이 ③ 확인의 `연결`에 실어 보내고, 저장은 예전대로 `/api/integrations/save`만 한다).
   // 토큰 칸이 비어 있으면(`채널 고르기` — 이미 연결된 뒤 채널을 더하는 길) 저장된 토큰을 서버 안에서만 쓴다.
   if (url.pathname === '/api/integrations/slack-channel' && req.method === 'POST') {
-    readBody(req)
+    readJson(req)
       .then((body) => {
         const given = typeof (body || {}).token === 'string' ? body.token.trim() : '';
         const config = currentConfigFile();
@@ -221,7 +224,7 @@ module.exports = function integrationsRoutes(req, res, url, ctx) {
   }
 
   if (url.pathname === '/api/meeting-notes/request' && req.method === 'POST') {
-    readBody(req).then(body => {
+    readJson(req).then(body => {
       const result = writeMeetingNotesRequest(body);
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify(result));

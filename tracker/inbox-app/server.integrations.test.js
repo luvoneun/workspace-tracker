@@ -1532,6 +1532,62 @@ test('Claude 토큰 라우트: 저장은 {ok, saved}만, 다른 Origin·깨진 �
   assert.ok((await fetch(app.base + '/api/about')).ok, '저장 뒤에도 서버는 그대로 떠 있다(다시 켜지 않는다)');
 });
 
+test('연동 경로의 깨진 본문·너무 큰 본문: 파서 메시지(본문 조각) 대신 고정 문구, 상태 코드와 우리 검증 문구·정상 응답은 그대로', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-body-error-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const data = path.join(home, 'tracker');
+  fs.mkdirSync(data);
+  const config = path.join(home, 'workspace.config.json');
+  fs.writeFileSync(config, JSON.stringify({ integrations: { slack: false, calendar: false, jira: false, tiro: true } }, null, 2));
+  const app = await startAppServer(t, {
+    WORKSPACE_DATA_DIR: data, WORKSPACE_CONFIG: config, WORKSPACE_TOKEN_DIR: path.join(home, 'tokens'), WORKSPACE_AUTOMATION_DIR: path.join(home, 'automation'),
+  });
+  const send = (route, body) => fetch(app.base + route, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: typeof body === 'string' ? body : JSON.stringify(body),
+  });
+  const READ = '요청을 읽지 못했어요 — 다시 눌러 주세요';
+  // 전제: 짧은 깨진 본문이면 파서 메시지가 본문 조각을 싣는다
+  let echoed = '';
+  try { JSON.parse('xoxp-FAKE-TEST-ONLY'); } catch (error) { echoed = error.message; }
+  assert.equal(echoed.includes('FAKE-TEST-ONLY'), true, '전제: 파서 메시지는 본문을 싣는다');
+
+  const routes = ['/api/integrations/save', '/api/integrations/slack-token-check', '/api/integrations/slack-channel', '/api/meeting-notes/request'];
+  for (const route of routes) {
+    for (const broken of ['xoxp-FAKE-TEST-ONLY', '{"token":"xoxp-FAKE-TEST-ONLY', '{"slack":{"token":"xoxp-FAKE-TEST-ONLY"}']) {
+      const res = await send(route, broken);
+      const text = await res.text();
+      assert.equal(res.status, 400, `${route} 깨진 본문은 400`);
+      noSecret(text, `${route} 응답에 본문 조각이 없다`);
+      assert.equal(JSON.parse(text).ok, false);
+      assert.equal(JSON.parse(text).error, READ, `${route} 고정 문구`);
+    }
+    const huge = await send(route, { token: `xoxp-FAKE-TEST-ONLY${'q'.repeat(1024 * 1024)}` });
+    const hugeText = await huge.text();
+    assert.equal(huge.status, 413, `${route} 너무 큰 본문은 413`);
+    noSecret(hugeText, `${route} 413 응답에 값이 없다`);
+    assert.equal(JSON.parse(hugeText).error, '요청이 너무 커요.');
+  }
+
+  // 우리 검증 문구는 그대로(바깥에 나가지 않는 갈래만)
+  assert.deepEqual(await (await send('/api/integrations/slack-token-check', { token: 'xoxb-FAKE-TEST-ONLY' })).json(),
+    { ok: false, error: integrationsStore.INTEGRATION_MESSAGE.slackBot, code: 'bot_token' });
+  const noToken = await send('/api/integrations/slack-channel', { token: '', name: 'my-todo' });
+  assert.equal(noToken.status, 400);
+  assert.equal((await noToken.json()).error, integrationsStore.INTEGRATION_MESSAGE.slackToken);
+  const noUrl = await send('/api/integrations/save', { calendar: { enabled: true, source: 'ical', url: '' } });
+  assert.equal(noUrl.status, 400);
+  assert.equal((await noUrl.json()).error, integrationsStore.INTEGRATION_MESSAGE.icalUrl);
+  const noScope = await send('/api/meeting-notes/request', { scope: 'nope' });
+  assert.equal(noScope.status, 400);
+  assert.equal((await noScope.json()).error, '무엇을 가져올지 확인해 주세요.');
+
+  // 정상 요청은 그대로
+  const saved = await send('/api/integrations/save', { meetingNotes: { mode: 'other', name: '노션' } });
+  assert.equal(saved.status, 200);
+  assert.equal((await saved.json()).ok, true);
+  noSecret(app.log(), '서버 로그에 값이 없다');
+});
+
 test('Claude 토큰 라우트는 프로세스를 띄우지 않고 설정·등록·재시작 길을 부르지 않는다(코드 모양)', () => {
   const routes = fs.readFileSync(path.join(__dirname, 'routes-integrations.js'), 'utf8');
   const start = routes.indexOf("url.pathname === '/api/integrations/claude-token'");

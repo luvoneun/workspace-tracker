@@ -84,6 +84,15 @@ function bad(message, code) {
   return error;
 }
 
+// 본문을 읽다 난 오류(깨진 JSON·너무 큼·끊김)를 고정 문구로 바꾼다 — JSON 파서 메시지는 짧은 본문이면
+// 본문 조각(토큰 일부일 수 있다)을 그대로 싣기 때문이다. 상태 코드는 그대로(413은 413, 나머지는 400).
+function bodyReadError(error) {
+  const tooBig = !!error && error.status === 413;
+  const fixed = new Error(tooBig ? '요청이 너무 커요.' : '요청을 읽지 못했어요 — 다시 눌러 주세요');
+  fixed.status = tooBig ? 413 : 400;
+  return fixed;
+}
+
 const trimmed = value => (typeof value === 'string' ? value.trim() : '');
 const expandHome = value => String(value || '').replace(/^~(?=\/|$)/, os.homedir());
 // 자리표시자는 "빈 칸"으로 읽는다.
@@ -992,5 +1001,5 @@ module.exports = {
   scheduleRestart, errorLines, maskLine, claudeInstalled, claudeCandidateDirs, writeTokenFile,
   slackTokenCheck, savedSlackToken, createSlackNameFollower, SLACK_FOLLOW_MS, slackChannelPrefix, slackTsNow,
   normalizeIcalUrl, fetchIcal, icalCheck, savedIcalUrl, ICAL_TIMEOUT_MS, savePersonalize, registrationKey,
-  normalizeJiraSite, saveClaudeToken, CLAUDE_TOKEN_MAX,
+  normalizeJiraSite, saveClaudeToken, CLAUDE_TOKEN_MAX, bodyReadError,
 };
