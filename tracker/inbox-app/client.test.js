@@ -1925,6 +1925,119 @@ test('프로젝트 상세 카드 CSS: 업무 줄 격자는 체크 | 업무 | 기
   assert.doesNotMatch(css, /\.d-pcard[^{]*\.d-grp[^{]*\{[^}]*sticky/);
 });
 
+// 개편 A4-③: 읽는 그룹(확인 대기·결정·회의·아이디어)은 4개 이상이면 위 3줄 + `N개 더 ›`. 업무·끝낸 것은 접지 않는다.
+function projectFoldClient(counts) {
+  const items = [];
+  const add = (type, n, extra = {}) => { for (let i = 0; i < n; i += 1) items.push({ id: `${type}${i}`, type, description: `${type} ${i}`, status: 'to-do', group: '가입 개선', ...extra }); };
+  add('check', counts.check || 0);
+  add('decision', counts.decision || 0);
+  add('idea', counts.idea || 0);
+  add('task', counts.task || 0, { scheduled: '2026-09-30' });
+  const app = workflowsClient();
+  app.run(`workflowData = { items: ${JSON.stringify(items)}, meetings: [] }; wfIndexData(); itemsById = new Map();
+    projectKey = 'group:가입 개선'; projectFolds.clear();`);
+  // 실제 화면처럼 renderProjects가 오른쪽(projectBody)을 다시 그린다.
+  const render = () => { app.run('renderProjects()'); return app.nodes.get('projectBody'); };
+  const group = (label) => {
+    const card = nodeFind(app.nodes.get('projectBody'), 'd-pcard');
+    return card.children.find(c => c.className === 'd-pgrp' && nodeFind(c.children[0], 'gl').textContent === label);
+  };
+  const rowsOf = g => g.children.filter(c => /^d-(rec|prow2)\b/.test(String(c.className)));
+  const moreOf = g => g.children.find(c => String(c.className).includes('d-pmore'));
+  return { app, render, group, rowsOf, moreOf };
+}
+
+test('읽는 그룹 4개 이상: 위 3줄만 보이고 그룹 맨 아래 `N개 더 ›`, 제목 옆 숫자는 전체 개수', () => {
+  const { render, group, rowsOf, moreOf } = projectFoldClient({ check: 4, decision: 5, idea: 6, task: 5 });
+  render();
+  for (const [label, n] of [['확인 대기', 4], ['결정', 5], ['아이디어', 6]]) {
+    const g = group(label);
+    assert.deepEqual(rowsOf(g).map(r => !!r.hidden), Array.from({ length: n }, (_, i) => i >= 3), `${label}: 4번째부터 hidden`);
+    const link = moreOf(g);
+    assert.equal(g.children.at(-1), link, `${label}: 링크는 그룹 맨 아래`);
+    assert.equal(link.type, 'button');
+    assert.equal(link.textContent, `${n - 3}개 더 ›`);
+    assert.equal(link.getAttribute('aria-label'), `${label} ${n - 3}개 더 보기`);
+    assert.equal(link.getAttribute('aria-expanded'), 'false');
+    assert.ok(g.id, 'id가 있다');
+    assert.equal(link.getAttribute('aria-controls'), g.id, '그룹 id를 가리킨다');
+    assert.equal(nodeFind(g.children[0], 'n').textContent, n, '제목 옆 숫자는 전체 개수');
+  }
+  // 업무(오늘)는 5개여도 접지 않는다.
+  const today = group('오늘');
+  assert.equal(rowsOf(today).length, 5);
+  assert.ok(rowsOf(today).every(r => !r.hidden));
+  assert.equal(moreOf(today), undefined);
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /^\.d-rec\[hidden\], \.d-prow2\[hidden\] \{ display: none; \}$/m);
+  assert.match(css, /^\.d-ibmore, \.d-pmore \{/m, '새로 들어온 것 링크와 같은 부품');
+});
+
+test('읽는 그룹 3개 이하: 접힌 줄도 링크도 없다', () => {
+  const { render, group, rowsOf, moreOf } = projectFoldClient({ check: 3, decision: 1 });
+  render();
+  for (const label of ['확인 대기', '결정']) {
+    assert.ok(rowsOf(group(label)).every(r => !r.hidden));
+    assert.equal(moreOf(group(label)), undefined);
+  }
+});
+
+test('읽는 그룹 `N개 더 ›`: 다시 그리지 않고 hidden만 풀리고 `접기 ⌃`, 다시 누르면 접힌다', () => {
+  const { render, group, rowsOf, moreOf } = projectFoldClient({ idea: 5 });
+  render();
+  const g = group('아이디어');
+  const before = rowsOf(g);
+  const link = moreOf(g);
+  link.listeners.click();
+  assert.deepEqual(rowsOf(g), before, '줄을 새로 만들지 않는다(초점 유지)');
+  assert.ok(rowsOf(g).every(r => !r.hidden));
+  assert.equal(link.textContent, '접기 ⌃');
+  assert.equal(link.getAttribute('aria-label'), '아이디어 접기');
+  assert.equal(link.getAttribute('aria-expanded'), 'true');
+  link.listeners.click();
+  assert.deepEqual(rowsOf(g).map(r => !!r.hidden), [false, false, false, true, true]);
+  assert.equal(link.textContent, '2개 더 ›');
+});
+
+test('읽는 그룹 펼침은 renderProjects로 다시 그려도 남고, 그룹마다 따로이며, 3개 이하로 줄면 접힘으로 돌아간다', () => {
+  const { app, render, group, rowsOf, moreOf } = projectFoldClient({ check: 4, decision: 4 });
+  render();
+  moreOf(group('확인 대기')).listeners.click();
+  assert.equal(app.run("projectFolds.has('group:가입 개선::waiting')"), true, '프로젝트키::그룹으로 기억한다');
+  render();
+  assert.ok(rowsOf(group('확인 대기')).every(r => !r.hidden), '다시 그려도 펼친 채');
+  assert.equal(moreOf(group('확인 대기')).textContent, '접기 ⌃');
+  assert.deepEqual(rowsOf(group('결정')).map(r => !!r.hidden), [false, false, false, true], '다른 그룹은 그대로 접힘');
+  // 새 항목이 들어와도 자동으로 펼치지 않는다 — 숫자만 바뀐다.
+  app.run("workflowData.items.push({ id: 'd9', type: 'decision', description: '새 결정', status: 'to-do', group: '가입 개선' }); wfIndexData();");
+  render();
+  assert.equal(moreOf(group('결정')).textContent, '2개 더 ›');
+  assert.equal(nodeFind(group('결정').children[0], 'n').textContent, 5);
+  // 3개로 줄면 기억을 지운다 — 다시 4개가 되면 접힌 채로 시작한다.
+  app.run("workflowData.items = workflowData.items.filter(item => item.id !== 'check3'); wfIndexData();");
+  render();
+  assert.equal(moreOf(group('확인 대기')), undefined);
+  assert.equal(app.run("projectFolds.has('group:가입 개선::waiting')"), false);
+  app.run("workflowData.items.push({ id: 'c9', type: 'check', description: '새 확인', status: 'to-do', group: '가입 개선' }); wfIndexData();");
+  render();
+  assert.equal(moreOf(group('확인 대기')).getAttribute('aria-expanded'), 'false', '다시 4개가 되면 접힌 채');
+});
+
+test('uiFoldToggle: 새로 들어온 것 링크와 같은 공용 부품이고, 펼침은 부르는 쪽이 onChange로 기억한다', () => {
+  const app = pureClient();
+  const got = JSON.parse(app.run(`(() => {
+    const rows = [{ hidden: true }, { hidden: true }];
+    const seen = [];
+    const button = uiFoldToggle(rows, { label: '회의', expanded: false, controls: 'x1', className: 'd-pmore', onChange: open => seen.push(open) });
+    const first = [button.className, button.textContent, button.getAttribute('aria-label'), button.getAttribute('aria-controls')];
+    button.listeners.click();
+    return JSON.stringify({ first, after: [button.textContent, rows.map(r => r.hidden)], seen });
+  })()`));
+  assert.deepEqual(got, { first: ['d-link d-pmore', '2개 더 ›', '회의 2개 더 보기', 'x1'], after: ['접기 ⌃', [false, false]], seen: [true] });
+  assert.equal(app.run('UI_FOLD'), 3);
+  assert.equal(app.run('INBOX_FOLD'), app.run('UI_FOLD'), '옛 이름도 같은 값');
+});
+
 test('projectSimpleRow: 체크박스를 넘기지 않으면 예전과 똑같다(has-ck 없음)', () => {
   const app = pureClient();
   const row = app.run(`projectSimpleRow('문구', '메타', () => {}, 'id1', null)`);
@@ -4223,10 +4336,10 @@ test('지라 띠 B(두 줄): 하위 티켓 칸은 값 칸 줄(.cells)의 마지�
   assert.equal(open().children.at(-1).className.split(' ')[0], 'd-jkids');
   assert.equal(nodeFind(nodeFind(open(), 'cells'), 'd-jkids'), null, '목록은 값 줄 안에 들어가지 않는다');
 
-  // 좁아지면 하위 티켓 칸만 다음 줄로 내려간다 — 칸은 남은 폭을 채우되 300px보다 좁아지지 않는다.
+  // 좁아지면 하위 티켓 칸만 다음 줄로 내려간다 — 칸은 남은 폭을 채우되 420px보다 좁아지지 않는다.
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
   assert.match(css, /^\.d-jira \.cells \{ display: flex; flex-wrap: wrap;/m);
-  assert.match(css, /^\.d-jira \.cells > \.foot \{ flex: 1 1 300px;/m);
+  assert.match(css, /^\.d-jira \.cells > \.foot \{ flex: 1 1 420px;/m);
   assert.doesNotMatch(css.match(/^\.d-jira \.foot \{[^}]*\}/m)[0], /border-top/, '셋째 줄 구분선은 없다');
 });
 

@@ -927,8 +927,10 @@ button.d-guide .t { color: var(--accent-text); }
 .d-ibrow:hover, .d-ibrow:focus-within { background: var(--warm-hover); }
 /* 4번째 줄부터는 접혀 있다(hidden) — .d-ibrow가 grid라 [hidden]을 따로 적어 둔다 */
 .d-ibrow[hidden] { display: none; }
-/* 카드 맨 아래 `N개 더 ›` / `접기 ⌃` — 제목과 같은 왼쪽 선, 누르는 자리 28px */
-.d-ibmore { display: inline-flex; align-items: center; min-height: var(--h-sm); margin: 2px 0 0 var(--pad); padding: 0 2px; }
+/* 카드 맨 아래 `N개 더 ›` / `접기 ⌃` — 제목과 같은 왼쪽 선, 누르는 자리 28px.
+   프로젝트 카드의 읽는 그룹(확인 대기·결정·회의·아이디어) 맨 아래 링크(.d-pmore)도 같은 부품이다 */
+.d-ibmore, .d-pmore { display: inline-flex; align-items: center; min-height: var(--h-sm); margin: 2px 0 0 var(--pad); padding: 0 2px; }
+.d-pmore { justify-self: start; margin-bottom: 4px; }
 .d-ibmain { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .d-ibrow .ti {
   font-size: var(--fs-lg); font-weight: 500; color: var(--text); cursor: text; border-radius: 4px;
@@ -1814,9 +1816,9 @@ body.batch-open .d-toast { bottom: 76px; }
   display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px;
   font-size: 12.5px; color: var(--dim);
 }
-/* 값 칸 줄 끝의 하위 티켓 칸 — 남은 폭을 채우고(꺾쇠가 오른쪽 끝), 300px보다 좁아지면 다음 줄로 내려간다.
+/* 값 칸 줄 끝의 하위 티켓 칸 — 남은 폭을 채우고(꺾쇠가 오른쪽 끝), 420px보다 좁아지면 다음 줄로 내려간다.
    값 글자 줄(28px)에 맞춰 아래에 붙는다 */
-.d-jira .cells > .foot { flex: 1 1 300px; align-self: flex-end; min-width: 0; min-height: var(--h-sm); }
+.d-jira .cells > .foot { flex: 1 1 420px; align-self: flex-end; min-width: 0; min-height: var(--h-sm); }
 .d-jira .bar { display: inline-block; width: 84px; height: 6px; border-radius: 999px; background: var(--prog-track); overflow: hidden; }
 .d-jira .bar i { display: block; height: 100%; background: var(--success); border-radius: 999px; }
 /* 접힌 줄의 담당별 요약(미완료만) — 이름이 곧 거르개다(별도 토글·드롭다운을 두지 않는다).
@@ -2129,6 +2131,8 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-pghint { font-size: var(--fs-sm); font-weight: 500; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* 한 카드 안이라 읽는 그룹 줄(.d-rec)의 왼쪽 선을 업무 줄·그룹 제목(--pad)에 맞춘다 */
 .d-pcard .d-rec { padding-left: var(--pad); }
+/* 4번째 줄부터 접힌 읽는 그룹 줄(hidden) — 둘 다 grid라 [hidden]을 따로 적어 둔다 */
+.d-rec[hidden], .d-prow2[hidden] { display: none; }
 
 .d-prow2 {
   display: grid; grid-template-columns: 30px minmax(0, 1fr) 116px; align-items: center; column-gap: 10px;
@@ -2976,6 +2980,7 @@ a.d-btn { text-decoration: none; }
   .d-prow2 .dd { grid-area: c; }
   .d-prow2 .dd:empty { display: none; }
   .d-pcard .d-grp, .d-pcard .d-rec { padding-left: 12px; }
+  .d-pmore { margin-left: 12px; }
   .d-pcard .d-grp { padding-right: 12px; }
   .d-prow2.is-done .res { grid-area: a; }
   .d-prow2.is-done .dd { grid-area: c; justify-self: end; }

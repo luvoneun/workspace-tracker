@@ -1269,9 +1269,10 @@ let todaySort = 'project';
 // 완료 그룹과 미루기 제안은 접힌 채로 시작한다 — 첫 화면에 오늘 할 일이 가장 많이 보이게.
 let todayDoneOpen = false;
 let suggestOpen = false;
-// 새로 들어온 것은 위 3줄만 보이고 나머지는 `N개 더 ›`로 펼친다. 펼침은 화면 메모리에만 —
-// 새로고침하면 접힌 채로 시작하고, 3줄 이하로 줄면 접힘으로 돌아간다.
-const INBOX_FOLD = 3;
+// 긴 목록은 위 3줄만 보이고 나머지는 `N개 더 ›`로 펼친다(새로 들어온 것, 프로젝트 카드의 읽는 그룹).
+// 펼침은 화면 메모리에만 — 새로고침하면 접힌 채로 시작하고, 3줄 이하로 줄면 접힘으로 돌아간다.
+const UI_FOLD = 3;
+const INBOX_FOLD = UI_FOLD; // 옛 이름(새로 들어온 것) — 같은 값
 let inboxExpanded = false;
 let noticeTimer;
 let lastRemovedId = null;
@@ -4854,24 +4855,39 @@ function renderInbox(items) {
   if (rows.length) list.appendChild(inboxFoldToggle(rows));
 }
 
-// 카드 맨 아래 `N개 더 ›` / `접기 ⌃` — 누르면 접힌 줄의 hidden만 켜고 끈다(제목 옆 숫자는 늘 전체 개수).
-function inboxFoldToggle(rows) {
+// 접는 목록 맨 아래 `N개 더 ›` / `접기 ⌃` — 누르면 접힌 줄(rows)의 hidden만 켜고 끈다(다시 그리지 않아
+// 초점이 그대로 남는다, 제목 옆 숫자는 늘 전체 개수). label은 읽어 주는 이름(`<label> N개 더 보기`/`<label> 접기`),
+// expanded는 지금 펼침, controls는 줄을 담은 요소의 id, onChange(펼침)는 누를 때 펼침을 기억하는 자리다.
+function uiFoldToggle(rows, { label, expanded = false, controls = '', onChange = null, className = '' } = {}) {
+  let open = !!expanded;
   const button = document.createElement('button');
   button.type = 'button';
-  button.className = 'd-link d-ibmore';
-  button.setAttribute('aria-controls', 'inboxList');
+  button.className = `d-link ${className}`.trim();
+  if (controls) button.setAttribute('aria-controls', controls);
   const paint = () => {
-    button.textContent = inboxExpanded ? '접기 ⌃' : `${rows.length}개 더 ›`;
-    button.setAttribute('aria-label', inboxExpanded ? '새로 들어온 것 접기' : `새로 들어온 것 ${rows.length}개 더 보기`);
-    button.setAttribute('aria-expanded', String(inboxExpanded));
+    button.textContent = open ? '접기 ⌃' : `${rows.length}개 더 ›`;
+    button.setAttribute('aria-label', open ? `${label} 접기` : `${label} ${rows.length}개 더 보기`);
+    button.setAttribute('aria-expanded', String(open));
   };
   paint();
   button.addEventListener('click', () => {
-    inboxExpanded = !inboxExpanded;
-    rows.forEach(row => { row.hidden = !inboxExpanded; });
+    open = !open;
+    rows.forEach(row => { row.hidden = !open; });
+    if (onChange) onChange(open);
     paint();
   });
   return button;
+}
+
+// 새로 들어온 것 카드 맨 아래의 접기 링크 — 펼침은 inboxExpanded에 기억한다.
+function inboxFoldToggle(rows) {
+  return uiFoldToggle(rows, {
+    label: '새로 들어온 것',
+    expanded: inboxExpanded,
+    controls: 'inboxList',
+    className: 'd-ibmore',
+    onChange: (open) => { inboxExpanded = open; },
+  });
 }
 
 // 오늘 할 일 카드 윗변을 따라 흐르는 3px 선. 카드 모서리에 맞춰 잘리도록 카드를 덮는

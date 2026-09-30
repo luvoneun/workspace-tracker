@@ -74,6 +74,9 @@ const projectGroupKey = key => (typeof key === 'string' && key.startsWith('jira:
 const PROJECT_KEY_STORE = 'projectKey';
 let projectKey = null;
 let projectDoneOpen = false;
+// 프로젝트 카드의 읽는 그룹(확인 대기·결정·회의·아이디어) 중 펼친 것 — `프로젝트키::그룹`.
+// 화면 메모리에만 둔다(localStorage 아님): 새로고침·재시작하면 모두 접힌 채로 시작한다.
+const projectFolds = new Set();
 // 왼쪽 목록의 차례를 탭에 있는 동안 고정해 둔다 — 체크 한 번마다 load()가 다시 그리며 순서가
 // 뒤바뀌지 않게. 탭에 들어올 때·새로고침 때만(projectOrderResort) 다시 계산한다. 세션 동안만
 // 기억하는 값이라 localStorage에 넣지 않는다(projectPastOpen도 같다).
@@ -1237,18 +1240,41 @@ function renderProjectDetail(body, row) {
   taskGroup('나중에', open.filter(item => !item.scheduled));
 
   // menu가 있으면 줄마다 같은 목록이 쓰는 ⋯ 메뉴를 그대로 단다(회의용·프로젝트탭용으로 새로 만들지 않는다).
-  // check가 있으면(확인 대기·결정만) 목록이 쓰는 체크박스를 그대로 맨 앞에 단다.
-  // withSource가 있으면(아이디어만) 원문이 있는 줄에 조용한 `원문` 링크를 붙인다.
-  // lead가 있으면(확인 대기만) 그룹 맨 위에 그 줄을 먼저 세운다 — 방금 체크한 줄의 `다음은?`이다.
-  // hint가 있으면(결정만) 그룹 제목 끝에 조용한 안내가 붙는다.
-  const simple = (label, list, meta, onOpen, menu, check, withSource, lead, hint) => {
+  // opts.check가 있으면(확인 대기·결정만) 목록이 쓰는 체크박스를 그대로 맨 앞에 단다.
+  // opts.withSource가 있으면(아이디어만) 원문이 있는 줄에 조용한 `원문` 링크를 붙인다.
+  // opts.lead가 있으면(확인 대기만) 그룹 맨 위에 그 줄을 먼저 세운다 — 방금 체크한 줄의 `다음은?`이다(접지 않는다).
+  // opts.hint가 있으면(결정만) 그룹 제목 끝에 조용한 안내가 붙는다.
+  // opts.fold(그룹 이름표)가 있는 읽는 그룹은 4개 이상이면 위 3줄만 보이고 그룹 맨 아래 `N개 더 ›`로 펼친다 —
+  // 펼침은 projectFolds(`프로젝트키::그룹`)에 기억하고, 3개 이하로 줄면 접힘으로 돌아간다.
+  const simple = (label, list, meta, onOpen, menu, opts = {}) => {
+    const { check, withSource, lead, hint, fold } = opts;
     if (!list.length && !lead) return;
     const group = projectGroup(label, list.length, hint ? { hint } : {});
+    const foldKey = fold ? `${row.key}::${fold}` : '';
+    const folds = !!fold && list.length > UI_FOLD;
+    if (fold && !folds) projectFolds.delete(foldKey);
+    const expanded = folds && projectFolds.has(foldKey);
+    const hiddenRows = [];
     if (lead) group.appendChild(lead);
-    list.forEach(entry => group.appendChild(projectSimpleRow(entry.text, meta(entry.item), () => onOpen(entry.item), entry.id,
-      menu ? (row) => menu(entry.item, row) : null,
-      check ? (row) => check(entry.item, row) : null,
-      withSource ? uiSourceLink(entry.item) : null)));
+    list.forEach((entry, index) => {
+      const line = projectSimpleRow(entry.text, meta(entry.item), () => onOpen(entry.item), entry.id,
+        menu ? (host) => menu(entry.item, host) : null,
+        check ? (host) => check(entry.item, host) : null,
+        withSource ? uiSourceLink(entry.item) : null);
+      // 접힌 줄도 그려 두고 hidden만 건다 — 펼치기·접기는 다시 그리지 않아 초점이 그대로 남는다.
+      if (folds && index >= UI_FOLD) { line.hidden = !expanded; hiddenRows.push(line); }
+      group.appendChild(line);
+    });
+    if (folds) {
+      group.id = `projectGroup-${fold}`;
+      group.appendChild(uiFoldToggle(hiddenRows, {
+        label,
+        expanded,
+        controls: group.id,
+        className: 'd-pmore',
+        onChange: (open) => { if (open) projectFolds.add(foldKey); else projectFolds.delete(foldKey); },
+      }));
+    }
     card.appendChild(group);
   };
   const asItems = list => list.map(item => ({ item, text: item.description, id: item.id }));
@@ -1267,21 +1293,23 @@ function renderProjectDetail(body, row) {
   simple('확인 대기', asItems(items.filter(item => item.type === 'check' && item.status !== 'done')),
     // 누구에게 + 급한 날짜 말(`1일 늦음`·`오늘 답변 예정`)을 함께 — 담당이 적혀 있다고 늦은 것이 가려지면 안 된다.
     // 묶음이면 끝에 그 항목의 티켓 번호.
-    item => [item.who, uiItemDueText(item)?.text, fromOf(item)].filter(Boolean).join(' · '), openPanel, waitingMenuSections,
-    // 이 구역은 미완료만 보여 준다(위 필터) — 체크하면 확인 완료가 되어 목록에서 빠진다.
-    (item, row) => waitingCheckbox(item, row, false), false, waitingLead);
+    item => [item.who, uiItemDueText(item)?.text, fromOf(item)].filter(Boolean).join(' · '), openPanel, waitingMenuSections, {
+      // 이 그룹은 미완료만 보여 준다(위 필터) — 체크하면 확인 완료가 되어 목록에서 빠진다.
+      check: (item, host) => waitingCheckbox(item, host, false), lead: waitingLead, fold: 'waiting',
+    });
   // 결정은 미반영·반영을 글자로만 가른다(알약으로 그리지 않는다). 이 그룹은 반영 완료도 함께 보여 준다 —
   // 체크해도 줄은 남고 오른쪽 글자만 `미반영` → 반영 날짜로 바뀐다(구역의 기존 규칙 그대로).
   simple('결정', asItems(items.filter(item => item.type === 'decision')),
     item => [item.status === 'done' ? `${uiKoDateShort(item.completed)} 반영` : '미반영', fromOf(item)].filter(Boolean).join(' · '), openPanel, decisionMenuSections,
-    (item, row) => decisionCheckbox(item, row, item.status === 'done'), false, null, '· 체크하면 PRD 반영');
+    { check: (item, host) => decisionCheckbox(item, host, item.status === 'done'), hint: '· 체크하면 PRD 반영', fold: 'decision' });
 
   const meetings = workflowData.meetings.filter(event => rowKeys.includes(wfMeetingKey(event)) || items.some(item => item.meetingId === event.id));
   simple('회의', meetings.map(event => ({ item: event, text: event.title, id: null })),
     event => event.date ? uiKoDateShort(event.date) : '', event => panelOpen({ kind: 'meeting', id: event.id }),
-    meetingMenuSections);
+    meetingMenuSections, { fold: 'meeting' });
   simple('아이디어', asItems(items.filter(item => item.type === 'idea')),
-    item => [item.created ? `${uiKoDateShort(item.created)} 기록` : '', fromOf(item)].filter(Boolean).join(' · '), openPanel, ideaMenuSections, null, true);
+    item => [item.created ? `${uiKoDateShort(item.created)} 기록` : '', fromOf(item)].filter(Boolean).join(' · '), openPanel, ideaMenuSections,
+    { withSource: true, fold: 'idea' });
 
   // 끝낸 것 — 기본 접힘(세션 동안 기억), 제목을 누르면 펼친다.
   if (done.length) {
