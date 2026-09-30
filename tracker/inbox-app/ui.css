@@ -1309,6 +1309,19 @@ textarea.d-dtitle {
   font-size: 12.5px; font-weight: 600;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* 상세의 프로젝트 값은 알약이 아니라 다른 값(.d-dpick)과 같은 `● 이름 ⌄` 글자 고르개 — 바탕 없음, hover --hover */
+.d-fields .badge.is-plain {
+  display: inline-flex; align-items: center; gap: 6px; max-width: calc(100% + 12px);
+  min-height: 28px; padding: 2px 6px; margin: -2px -6px;
+  border: 0; border-radius: var(--r-xs); background: none;
+  font-size: 14px; font-weight: 400; color: var(--text);
+  transition: background 130ms var(--ease);
+}
+.d-fields .badge.is-plain:hover { background: var(--hover); }
+.d-fields .badge.is-plain:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.d-fields .badge.is-plain .v { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.d-fields .badge.is-plain .cv { display: inline-flex; flex: none; margin-left: -2px; color: var(--dim); }
+.d-fields .badge.is-plain .cv .d-i { transform: rotate(90deg); }
 
 .d-dfoot { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .d-dsec { border-top: 1px solid var(--hair); padding-top: 12px; }

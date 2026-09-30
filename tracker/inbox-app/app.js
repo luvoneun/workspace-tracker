@@ -2819,12 +2819,14 @@ function taskPriorityControl(item) {
   });
 }
 
-function taskProjectControl(item) {
+// opts.plain: 상세 카드의 필드 격자에서만 켠다(`● 이름 ⌄` 글자 고르개). ⋯ 메뉴는 알약 그대로.
+function taskProjectControl(item, opts = {}) {
   return renderGroupControl({
     jira: item.jira,
     group: item.group,
     onSetJira: (key) => setTaskJira(item.id, key),
     onSetGroup: (group) => setTaskGroup(item.id, group),
+    plain: !!opts.plain,
   });
 }
 
@@ -3334,7 +3336,7 @@ function panelTask({ item, detail, type }, box) {
   }));
   if (isTask) panelField(fields, '우선순위', panelPickCell('우선순위', panelPriorityCell(item),
     () => [[{ field: '우선순위', control: taskPriorityControl(item) }]]));
-  panelField(fields, '프로젝트', taskProjectControl(item));
+  panelField(fields, '프로젝트', taskProjectControl(item, { plain: true }));
   if (isTask) panelField(fields, '기다리는 답변', panelWaitingCell(item, detail));
   box.appendChild(fields);
 
@@ -3587,7 +3589,7 @@ function panelCheck({ item, detail }, box) {
     announce(value ? `${uiKoDate(value)}에 다시 확인할게요` : '다시 확인할 날짜를 지웠어요');
     await load();
   }, false));
-  panelField(fields, '프로젝트', taskProjectControl(item));
+  panelField(fields, '프로젝트', taskProjectControl(item, { plain: true }));
   box.appendChild(fields);
 
   const foot = document.createElement('div');
@@ -5360,7 +5362,7 @@ function uiPickFit(node) {
   if (over > 0) menu.style.top = `${Math.max(8, Math.round(box.top - over))}px`;
 }
 
-function renderGroupControl({ jira, group, onSetJira, onSetGroup, forceClearable = false, silent = false }) {
+function renderGroupControl({ jira, group, onSetJira, onSetGroup, forceClearable = false, silent = false, plain = false }) {
   const wrap = document.createElement('div');
   wrap.className = 'jira-control';
   const saved = (text) => { if (!silent) { announce(text); load(); } };
@@ -5455,16 +5457,25 @@ function renderGroupControl({ jira, group, onSetJira, onSetGroup, forceClearable
 
   // 이미 지정된 지라·그룹은 배지로 보이고, 누르면 같은 자리에서 고르는 목록으로 바뀐다.
   // keyText가 있으면(지라뿐) 요약 뒤에 조용한 회색 글자로 키를 덧붙인다(BKEY 결정 — 상세 카드의 값 표시).
+  // plain이면(상세 카드의 필드 격자) 회색 알약 대신 다른 값과 같은 `● 이름 ⌄` 글자 고르개로 그린다.
   const appendBadge = (className, label, current, keyText) => {
     const badge = document.createElement('button');
     badge.type = 'button';
-    badge.className = className;
-    badge.textContent = label;
+    badge.className = plain ? `${className} is-plain` : className;
+    const text = plain ? document.createElement('span') : badge;
+    if (plain) text.className = 'v';
+    text.textContent = label;
     if (keyText) {
       const key = document.createElement('span');
       key.className = 'k-mute';
       key.textContent = ` ${keyText}`;
-      badge.appendChild(key);
+      text.appendChild(key);
+    }
+    if (plain) {
+      const caret = document.createElement('span');
+      caret.className = 'cv';
+      caret.innerHTML = uiIcon('chevron');
+      badge.append(uiProjectDot(current.value), text, caret);
     }
     badge.setAttribute('aria-label', `${label}${keyText ? ` ${keyText}` : ''} — 클릭해서 변경/해제`);
     badge.setAttribute('aria-haspopup', 'listbox');

@@ -611,6 +611,36 @@ test('renderGroupControl: 지라 값은 요약 뒤에 조용한 키가 붙고, �
   assert.equal(group.children.length, 0);
 });
 
+// 1.3.2: 상세 카드의 필드 격자만 plain — 회색 알약 대신 `● 이름 ⌄` 글자 고르개(⋯ 메뉴는 알약 그대로).
+test('renderGroupControl plain: 색 점 + 이름 + 꺾쇠, 클래스 is-plain(기본 클래스는 유지)', () => {
+  const app = pureClient();
+  app.run("jiraIssuesCache = [{ key: 'IO-48394', summary: '게시글 작성하기_게임 임베드' }]; customGroupsCache = []");
+  const group = app.run(
+    "renderGroupControl({ jira: null, group: '가입 개선', onSetJira: () => {}, onSetGroup: () => {}, plain: true }).children[0]");
+  assert.equal(group.className, 'badge group-badge is-plain');
+  assert.deepEqual(group.children.map(node => node.className), ['d-pjdot', 'v', 'cv']);
+  assert.equal(group.children[0].dataset.pj, app.run("String(uiProjectHue('가입 개선'))"), '색 점은 다른 자리와 같은 이름 색');
+  assert.equal(group.children[1].textContent, '가입 개선');
+  assert.match(group.children[2].innerHTML, /<svg/);
+  assert.equal(group.getAttribute('aria-label'), '가입 개선 — 클릭해서 변경/해제');
+
+  const jira = app.run(
+    "renderGroupControl({ jira: 'IO-48394', group: null, onSetJira: () => {}, onSetGroup: () => {}, plain: true }).children[0]");
+  assert.equal(jira.className, 'badge jira-badge is-plain');
+  assert.equal(jira.children[0].dataset.pj, app.run("String(uiProjectHue('IO-48394'))"));
+  assert.equal(jira.children[1].children[0].className, 'k-mute', '요약 뒤 조용한 키는 그대로');
+
+  // plain을 켜지 않으면(⋯ 메뉴) 예전 알약 그대로 — 점·꺾쇠가 없다.
+  const pill = app.run(
+    "renderGroupControl({ jira: null, group: '가입 개선', onSetJira: () => {}, onSetGroup: () => {} }).children[0]");
+  assert.equal(pill.className, 'badge group-badge');
+  assert.equal(pill.children.length, 0);
+  // 프로젝트가 아직 없으면 plain이어도 `그룹 지정…` 칸 그대로.
+  const start = app.run(
+    "renderGroupControl({ jira: null, group: null, onSetJira: () => {}, onSetGroup: () => {}, plain: true }).children[0]");
+  assert.equal(start.className, 'jira-select jira-pick');
+});
+
 test('dates read as "9월 22일 (화)", without the year', () => {
   const app = pureClient();
   const ko = value => app.run(`uiKoDate(${JSON.stringify(value)})`);
