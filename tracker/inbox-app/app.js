@@ -5172,7 +5172,7 @@ function projectPickEntries(current, forceClearable) {
   out.push({ type: 'action', value: PICK_CUSTOM, text: '직접 입력…' });
   // 해제는 맨 끝 — 찾기 칸에서 ↓의 첫 도착이 '해제'면 Enter 한 번에 프로젝트가 풀린다(디자인 검수).
   // 여러 개를 한 번에 옮길 땐 "현재 그룹"이라는 게 없어도(current === null) 해제를 고를 수 있어야 한다.
-  if (current || forceClearable) out.push({ type: 'action', value: PICK_CLEAR, text: '그룹 해제' });
+  if (current || forceClearable) out.push({ type: 'action', value: PICK_CLEAR, text: '프로젝트 빼기' });
   return out;
 }
 
