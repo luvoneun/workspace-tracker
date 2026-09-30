@@ -1999,7 +1999,9 @@ test('다음 주 계획 프로젝트 고르개는 보이는 글자만 "요약 ·
   // 문장 ⋯의 고르개도 같은 목록이다 — 버튼을 누르면 그 자리에서 uiPickList가 펼쳐지고 <select>는 없다.
   const wrap = app.run(`reportPlanRegroupPicker(${REPORT_ITEM}, { id: 'p1', heading: '다음 주 계획', group: 'PAY-77 · 정산 배치' })`);
   const button = wrap.children[0];
-  assert.equal(button.textContent, '정산 배치 · PAY-77', '지금 프로젝트는 요약 · 키 글자로');
+  assert.equal(nodeFind(button, 'v').textContent, '정산 배치 · PAY-77', '지금 프로젝트는 요약 · 키 글자로');
+  assert.ok(nodeFind(button, 'cv'), '누를 수 있어 보이게 꺾쇠가 붙는다(v1.3.0 비교)');
+  assert.equal(button.title, '정산 배치 · PAY-77');
   assert.equal(nodeFind(wrap, 'd-msel') === button, true);
   assert.equal(wrap.children.some(kid => kid.tagName === 'SELECT'), false);
   button.listeners.click({ stopPropagation() {} });
@@ -10252,7 +10254,7 @@ test('선택 막대: `프로젝트…`는 그 자리에서 프로젝트 고르�
   same(app.run('({ silent: groupOpts.silent, forceClearable: groupOpts.forceClearable, jira: groupOpts.jira, group: groupOpts.group })'),
     { silent: true, forceClearable: true, jira: null, group: null });
   await app.run('groupOpts.onSetGroup(null)');
-  assert.equal(sent.length, 0, '`— 그룹 해제 —`는 지라 해제 한 번으로 끝난다(두 번 보내지 않는다)');
+  assert.equal(sent.length, 0, '`— 프로젝트 빼기 —`는 지라 해제 한 번으로 끝난다(두 번 보내지 않는다)');
   await app.run("groupOpts.onSetJira('AB-1')");
   same(sent.map(call => call.url), ['/api/workflow/task-batch']);
   same(sent[0].body, { ids: ['s1', 's2'], change: { project: 'jira:AB-1' } });
@@ -12864,4 +12866,16 @@ test('계획 문장 프로젝트 바꾸기: 목록을 펼치면 is-picking, 고�
   const css = require('node:fs').readFileSync(require('node:path').join(__dirname, 'report-ui.css'), 'utf8');
   assert.match(css, /\.d-mfield:has\(\.rp-regroup\.is-picking\) > \.ml \{[^}]*font-size: 12px; font-weight: 600; color: var\(--muted\)/);
   assert.match(css, /\.rp-regroup \.d-gplist \{ padding: 2px; \}/);
+});
+
+// v1.3.0 비교(디자인): 프로젝트 고르기의 해제 항목 이름은 `프로젝트 빼기`, 숨은 `+ 한 줄 추가`는 높이도 0.
+test('1.3.1 작은 것: 해제 항목은 프로젝트 빼기, 숨은 한 줄 추가는 높이 0 규칙', () => {
+  const app = pureClient();
+  app.run("jiraIssuesCache = []; customGroupsCache = ['운영툴']");
+  const texts = JSON.parse(app.run("JSON.stringify(projectPickEntries({ type: 'group', value: '운영툴' }, false).filter(e => e.type === 'action').map(e => e.text))"));
+  assert.ok(texts.includes('프로젝트 빼기'));
+  assert.ok(!texts.includes('그룹 해제'));
+  const css = require('node:fs').readFileSync(require('node:path').join(__dirname, 'report-ui.css'), 'utf8');
+  assert.match(css, /\.rp-grp:not\(\.is-empty\):not\(:hover\):not\(:focus-within\) \.rp-s\.is-add:not\(\.is-open\) \{ height: 0;/);
+  assert.match(css, /\.rp-pick \.cv svg \{[^}]*rotate\(90deg\)/);
 });

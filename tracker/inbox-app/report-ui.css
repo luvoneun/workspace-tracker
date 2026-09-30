@@ -116,6 +116,11 @@
    입력칸이 열려 있거나, 문장이 0개인 묶음이거나, hover가 없는 화면(손가락)에서는 늘 보인다. */
 .rp-grp .rp-s.is-add { opacity: 0; transition: opacity 130ms var(--ease); }
 .rp-grp:hover .rp-s.is-add, .rp-grp:focus-within .rp-s.is-add, .rp-grp.is-empty .rp-s.is-add, .rp-s.is-add.is-open { opacity: 1; }
+/* 숨어 있는 동안은 높이도 0 — 묶음 끝과 구분선 사이가 벌어지지 않게(v1.3.0 비교). 높이 0이어도 Tab으로 닿고,
+   초점이 들어오면(focus-within) 자리가 돌아온다. 손 올림·빈 묶음·열린 칸·손가락 화면은 자리 그대로. */
+@media (hover: hover) {
+  .rp-grp:not(.is-empty):not(:hover):not(:focus-within) .rp-s.is-add:not(.is-open) { height: 0; min-height: 0; padding-block: 0; margin-block: 0; overflow: hidden; }
+}
 @media (hover: none) { .rp-grp .rp-s.is-add { opacity: 1; } }
 
 /* 다른 문장 아래로 들어간 문장 — 한 단계 들여 쓴 `◦` 줄. 여러 줄 글자의 부연(.rp-s .sub)과 같은 가족이다. */
@@ -403,3 +408,9 @@ body.nest-open .d-toast { bottom: 104px; }
 .d-mfield > .mc:has(.rp-regroup.is-picking) { justify-content: flex-start; }
 .rp-regroup.is-picking { flex: 1 1 100%; min-width: 0; }
 .rp-regroup .d-gplist { padding: 2px; }
+
+/* 조용한 고르개의 꺾쇠(v1.3.0 비교 — ⌄가 사라져 글자만 남던 것): 글자는 말줄임, 꺾쇠는 아래로 돌린 작은 아이콘. */
+.rp-pick { display: inline-flex; align-items: center; gap: 4px; }
+.rp-pick .v { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rp-pick .cv { flex: none; display: inline-flex; color: var(--dim); }
+.rp-pick .cv svg { width: 12px; height: 12px; transform: rotate(90deg); }

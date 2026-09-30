@@ -1503,15 +1503,25 @@ function reportPlanPickEntries(current) {
   ];
 }
 
+// 조용한 고르개 버튼의 얼굴 — 글자(.v) + 꺾쇠(.cv, 누를 수 있어 보이게). 상세 카드 .d-dpick과 같은 모양.
+function reportPickFace(pick, text) {
+  const value = reportNode('span', text, 'v');
+  const caret = reportNode('span', undefined, 'cv');
+  caret.setAttribute('aria-hidden', 'true');
+  caret.innerHTML = uiIcon('chevron');
+  pick.replaceChildren(value, caret);
+  pick.title = text;
+}
+
 // 입력줄 앞의 조용한 고르개 — 누르면 떠 있는 메뉴 안에 찾기 칸 + 목록이 펼쳐진다(프로젝트가 많을 때만 찾기 칸).
 function reportPlanProjectPicker() {
   const pick = reportNode('button', undefined, 'd-msel rp-pick');
   pick.type = 'button';
   pick.setAttribute('aria-haspopup', 'listbox');
   const paint = () => {
-    pick.textContent = reportPlanGroup ? reportPickerLabel(reportPlanGroup) : REPORT_NO_PROJECT;
-    pick.title = pick.textContent;
-    pick.setAttribute('aria-label', `다음 주 계획 프로젝트: ${pick.textContent} — 바꾸기`);
+    const text = reportPlanGroup ? reportPickerLabel(reportPlanGroup) : REPORT_NO_PROJECT;
+    reportPickFace(pick, text);
+    pick.setAttribute('aria-label', `다음 주 계획 프로젝트: ${text} — 바꾸기`);
   };
   paint();
   pick.addEventListener('click', (event) => {
@@ -1541,9 +1551,9 @@ function reportPlanRegroupPicker(item, row) {
   const pick = reportNode('button', undefined, 'd-msel rp-pick');
   pick.type = 'button';
   pick.setAttribute('aria-haspopup', 'listbox');
-  pick.textContent = value ? reportPickerLabel(value) : REPORT_NO_PROJECT;
-  pick.title = pick.textContent;
-  pick.setAttribute('aria-label', `계획 문장 프로젝트: ${pick.textContent} — 바꾸기`);
+  const faceText = value ? reportPickerLabel(value) : REPORT_NO_PROJECT;
+  reportPickFace(pick, faceText);
+  pick.setAttribute('aria-label', `계획 문장 프로젝트: ${faceText} — 바꾸기`);
   let open = false;
   const restore = (focus) => {
     if (open) { open = false; wrap.classList.remove('is-picking'); wrap.replaceChildren(pick); }
