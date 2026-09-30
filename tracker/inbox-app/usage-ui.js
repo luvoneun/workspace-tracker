@@ -2,7 +2,7 @@
 //  ① 화면에서만 아는 것(탭 열기·검색·주간요약 복사)을 `POST /api/usage/tick`으로 알리고
 //  ② 사용설명서 카드 맨 아래 알림 한 줄(`… 보내요 · 끄기` ↔ `모으지 않아요 · 다시 켜기`)과
 //  ③ 설정 › 앱의 `익명 사용 횟수 보내기` 스위치와 `내 일 기록은 주간요약 탭에서 볼 수 있어요 · 보기` 한 줄,
-//  ④ 주간요약 탭 주차 목록의 줄 끝 칸(그 주 끝낸 일 막대·숫자)과 목록 맨 아래 한 덩어리(report-ui.js의 reportWeekRowEnd·reportWeeksFoot이 넘긴다),
+//  ④ 주간요약 탭 주차 목록의 줄 끝 칸(그 주 끝낸 일 막대·숫자)과 목록 맨 위 회색 판(report-ui.js의 reportWeekRowEnd·reportWeeksFoot이 넘긴다),
 //  ⑤ `내 일 기록` 자세히 창(설정과 같은 .d-modal — 이번 주·이번 달·90일 일 통계 + 맨 아래 `기능별 전체 보기` 표)을 그린다.
 // 알림 줄은 이 설치가 실제로 보낼 수 있을 때(`canSend` — 만든 사람·개발용·폼 닫힘이 아님)만 보인다.
 // 새 innerHTML은 쓰지 않는다(요소를 만들어 붙인다). 알리기가 실패해도 조용히 넘어간다.
@@ -517,7 +517,7 @@ function usageWeeksNow(items) {
   const sign = `${keys.join(',')}|${selected}`;
   if (usageWeeksMemo && usageWeeksMemo.info === usageInfo && usageWeeksMemo.sign === sign) return usageWeeksMemo.summary;
   if (usageWorkFailed(usageInfo)) {
-    // 업무 기록을 못 읽음 — 줄 끝 칸은 모두 없고 맨 아래는 한 줄(failed).
+    // 업무 기록을 못 읽음 — 줄 끝 칸은 모두 없고 맨 위 판은 한 줄(failed).
     const failed = { empty: false, failed: true, weeks: {}, max: 0, selected: null, line: [USAGE_WORK_FAILED], note: null, average: null, best: null };
     usageWeeksMemo = { info: usageInfo, sign, summary: failed };
     return failed;
@@ -547,21 +547,24 @@ function usageWeekRowEnd(item) {
   return end;
 }
 
-// 주차 목록 맨 아래 — 고른 주 한 문장 + (조건이 맞으면) 최고 기록 줄 + `내 일 기록 자세히`. 90일 안에 기록이 없으면 null.
+// 주차 목록 맨 위(머리 바로 아래)의 회색 판 — 요약 글 + 판 폭 전체 버튼 `내 일 기록 자세히`. 90일 안에 기록이 없으면 null.
+// 고른 주의 'N개를 끝냈어요' 문장은 바로 아래 목록 줄 숫자와 겹치므로 판에 두지 않는다 — 하루 평균(첫 줄)·최고 기록(둘째 줄)만.
+// 둘 다 없으면(끝낸 일 0·기록 없는 주·업무 기록을 못 읽음) 판이 비지 않게 그 문장을 첫 줄로 쓴다.
 function usageWeeksFoot(items) {
   const summary = usageWeeksNow(items);
   if (!summary || summary.empty) return null;
-  const foot = usageEl('div', 'd-uwfoot');
-  // 요약은 가운뎃점 없이 한 줄씩 — 끝낸 일 / 하루 평균 / 최고 기록. 좁은 폭에서는 왼쪽 요약·오른쪽 링크.
+  const foot = usageEl('div', summary.failed ? 'd-uwfoot is-failed' : 'd-uwfoot');
+  // 요약은 버튼이 아닌 글(끌어서 복사할 수 있게), 가운뎃점 없이 한 줄씩.
   const sum = usageEl('div', 'd-uwfsum');
-  const first = usageParts(usageEl('p', 'd-uwfline'), summary.line);
-  // 업무 기준이면 숫자의 뜻을 title로, 읽어 주는 사람에게는 같은 말을 숨긴 글자로 덧붙인다(⑂).
-  if (summary.note) { first.title = summary.note; first.appendChild(usageEl('span', 'sr-only', ` — ${summary.note}`)); }
-  sum.appendChild(first);
-  if (summary.average) sum.appendChild(usageEl('p', 'd-uwfline', summary.average));
+  if (summary.average) sum.appendChild(usageParts(usageEl('p', 'd-uwfline'), [summary.average]));
   if (summary.best) sum.appendChild(usageParts(usageEl('p', 'd-uwfline'), summary.best));
+  if (!sum.children.length) sum.appendChild(usageParts(usageEl('p', 'd-uwfline'), summary.line));
+  // 업무 기준이면 숫자의 뜻을 판의 첫 줄 title로, 읽어 주는 사람에게는 같은 말을 숨긴 글자로 덧붙인다(⑂).
+  const first = sum.children[0];
+  if (summary.note) { first.title = summary.note; first.appendChild(usageEl('span', 'sr-only', ` — ${summary.note}`)); }
   foot.appendChild(sum);
-  const link = usageEl('button', 'd-link d-uwmore', '내 일 기록 자세히');
+  // 판 아래 폭 전체 한 줄 3차 버튼(오른쪽 `›`는 CSS — 읽는 이름은 글자만).
+  const link = usageEl('button', 'd-uwmore', '내 일 기록 자세히');
   link.type = 'button';
   link.setAttribute('aria-haspopup', 'dialog');
   const selected = typeof selectedWeekKey !== 'undefined' ? selectedWeekKey : null;
@@ -661,7 +664,7 @@ function usageWorkClose() {
   if (back && typeof back.focus === 'function') back.focus();
 }
 
-// 설정 › 앱의 `보기` — 설정을 닫고 주간요약 탭으로 옮긴 뒤 자세히 창을 연다(닫으면 초점은 목록 맨 아래 링크로).
+// 설정 › 앱의 `보기` — 설정을 닫고 주간요약 탭으로 옮긴 뒤 자세히 창을 연다(닫으면 초점은 목록 맨 위 판의 `내 일 기록 자세히`로).
 function usageWorkFromSettings() {
   if (typeof settingsClose === 'function') settingsClose();
   if (typeof setActiveTab === 'function') setActiveTab('weekly');

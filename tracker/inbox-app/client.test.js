@@ -12483,16 +12483,16 @@ test('WP-X report-ui.js의 두 자리가 usage-ui.js로 넘기고, 주차 줄 ar
   assert.match(buttons[1].getAttribute('aria-label'), /, 끝낸 일 4개$/);
   assert.equal(buttons[2].children.some(kid => kid.className === 'd-uwend'), false, '기록이 없는 주는 0으로 보이지 않는다');
   assert.doesNotMatch(buttons[2].getAttribute('aria-label'), /끝낸 일/);
-  // 맨 아래 덩어리 — 고른 주(이번 주) 문장 + 링크.
-  const foot = nav.children[nav.children.length - 1];
+  // 맨 위 판 — 고른 주(이번 주)의 하루 평균(끝낸 일 문장은 목록 줄 숫자와 겹쳐 빠짐) + 버튼.
+  const foot = nav.children[0];
   assert.equal(foot.className, 'd-uwfoot');
-  assert.deepEqual(foot.children[0].children.map(wpxText), ['이번 주 일 2개를 끝냈어요', '하루 평균 2개'], '요약은 한 줄씩');
+  assert.deepEqual(foot.children[0].children.map(wpxText), ['하루 평균 2개'], '요약은 한 줄씩');
   const link = foot.children[foot.children.length - 1];
   assert.equal(link.textContent, '내 일 기록 자세히');
-  assert.equal(link.className, 'd-link d-uwmore');
-  // 8월 주를 고르면 `이 주는 기록이 없어요`, 링크는 그대로.
+  assert.equal(link.className, 'd-uwmore');
+  // 8월 주를 고르면 평균·최고 기록이 없어 `이 주는 기록이 없어요`가 첫 줄, 버튼은 그대로.
   app.run(`selectedWeekKey = '2026-08-17'; renderWeeklyReports(weeklyReportsCache);`);
-  const foot2 = nav.children[nav.children.length - 1];
+  const foot2 = nav.children[0];
   assert.deepEqual(foot2.children[0].children.map(wpxText), ['이 주는 기록이 없어요']);
   assert.equal(foot2.children[foot2.children.length - 1].textContent, '내 일 기록 자세히');
   // 90일 전체에 기록이 없으면 칸·덩어리 모두 없음.
@@ -12501,6 +12501,49 @@ test('WP-X report-ui.js의 두 자리가 usage-ui.js로 넘기고, 주차 줄 ar
   assert.equal(nav.children.some(kid => (kid.children || []).some(one => one.className === 'd-uwend')), false);
   const main = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
   assert.match(main, /end\.dataset\.label \? `, \$\{end\.dataset\.label\}` : ''/);
+});
+
+test('주차 목록 맨 위 `내 일 기록` 판 — 첫 주 앞에 붙고, 큰 끝낸 일 문장 없이 하루 평균·최고 기록, 판 폭 버튼(자세히 창), 기록을 못 읽어도 버튼은 남는다', () => {
+  const app = reportClient();
+  app.run(fs.readFileSync(path.join(__dirname, 'usage-ui.js'), 'utf8'));
+  app.run(`const __make = document.createElement;
+    document.createElement = tag => Object.assign(__make(tag), { tagName: String(tag).toUpperCase(), style: {} });
+    document.createElementNS = (ns, tag) => document.createElement(tag);
+    document.createTextNode = value => ({ textContent: String(value), children: [] });`);
+  app.run(`reportWeekName = key => (${JSON.stringify({ '2026-09-28': '이번 주', '2026-09-21': '지난 주' })}[key] || formatWeekLabel(key).week);
+    renderWeeklyReportDetail = () => {};
+    document.getElementById('weeklyReportDetail').contains = () => false;
+    activeTabKey = 'weekly';
+    usageInfo = { ok: true, today: '${WPX_TODAY}', rows: [], history: { '2026-09-01': { search: 1 }, '2026-09-08': { task_done: 3 }, '2026-09-15': { task_done: 9 }, '2026-09-22': { task_done: 4 }, '2026-09-29': { task_done: 2 } } };
+    selectedWeekKey = '2026-09-21';`);
+  app.run(`renderWeeklyReports(['2026-09-28', '2026-09-21', '2026-09-14', '2026-09-07'].map(weekKey => ({ weekKey, draft: { rows: [] } })))`);
+  const nav = app.nodes.get('weeklyReportNav');
+  assert.equal(nav.children[0].className, 'd-uwfoot', '판은 목록 맨 앞(첫 주 줄 위)');
+  assert.equal(nav.children.slice(1).every(kid => kid.className === 'rp-wk'), true, '판 뒤로는 주차 줄만');
+  const foot = nav.children[0];
+  const lines = foot.children[0].children.map(wpxText);
+  assert.deepEqual(lines, ['하루 평균 4개', '최고 기록: 9월 3주차 9개'], '하루 평균이 첫 줄, 최고 기록이 둘째 줄');
+  assert.equal(lines.some(line => /끝냈어요/.test(line)), false, '큰 끝낸 일 문장은 판에 없다');
+  const button = foot.children[1];
+  assert.equal(button.tagName, 'BUTTON');
+  assert.equal(button.className, 'd-uwmore', '파란 글자 링크(.d-link)가 아니다');
+  assert.equal(button.textContent, '내 일 기록 자세히');
+  assert.equal(button.getAttribute('aria-haspopup'), 'dialog');
+  button.listeners.click();
+  assert.equal(app.run('usageWorkDlg.week'), '2026-09-21', '고른 주 기준으로 연다');
+  app.run('usageWorkClose()');
+  // 업무 기록을 못 읽음 — 판 안 한 줄 + 버튼 그대로.
+  app.run(`usageInfo = { ...usageInfo, work: null }; renderWeeklyReports(weeklyReportsCache);`);
+  const failed = nav.children[0];
+  assert.equal(failed.className, 'd-uwfoot is-failed', '못 읽음 안내는 강조하지 않는 모양');
+  assert.deepEqual(failed.children[0].children.map(wpxText), ['끝낸 일을 읽지 못했어요']);
+  assert.equal(failed.children[1].textContent, '내 일 기록 자세히');
+  // 모양 — 회색 판이 머리 아래에 머물고(sticky), 좁은 폭에서는 주차 칸 줄 위 한 줄.
+  const css = fs.readFileSync(path.join(__dirname, 'usage-ui.css'), 'utf8');
+  assert.match(css, /\.d-uwfoot \{[^}]*position: sticky; top: 22px;[^}]*background: var\(--neutral-bg\)/);
+  assert.match(css, /\.d-uwmore \{[^}]*min-height: 40px;[^}]*border-top: 1px solid var\(--border\)[^}]*color: var\(--text\)/);
+  assert.match(css, /#weeklyReportNav > \.rp-wk \{ grid-row: 2; \}/);
+  assert.doesNotMatch(css, /\.d-uwfoot \.d-link/);
 });
 
 test('WP-X 아직 사용 기록을 못 불렀으면 줄 끝·덩어리는 null이고 한 번만 부른 뒤 주간요약이 보일 때만 다시 그린다', async () => {
@@ -12961,7 +13004,7 @@ test('WP-Y usageWorkStats 다섯째 인자 work — 끝낸·들어온·남긴 �
   }
 });
 
-test('WP-Y 화면 — 주차 줄 끝 숫자·맨 아래 요약·자세히 창 `끝낸 일` 타일이 업무 기준, 요약 줄·타일에 title과 읽어 주는 같은 뜻 글자', () => {
+test('WP-Y 화면 — 주차 줄 끝 숫자·맨 위 판 요약·자세히 창 `끝낸 일` 타일이 업무 기준, 요약 줄·타일에 title과 읽어 주는 같은 뜻 글자', () => {
   const app = reportClient();
   app.run(fs.readFileSync(path.join(__dirname, 'usage-ui.js'), 'utf8'));
   app.run(`const __make = document.createElement;
@@ -12985,12 +13028,13 @@ test('WP-Y 화면 — 주차 줄 끝 숫자·맨 아래 요약·자세히 창 `�
   assert.equal(endOf(buttons[2]).children[1].textContent, '4', '90일보다 오래된 주도 숫자');
   assert.equal(endOf(buttons[2]).children[0].children[0].style.width, '100%');
   assert.equal(endOf(buttons[0]).children[1].textContent, '0');
-  const foot = nav.children[nav.children.length - 1];
+  const foot = nav.children[0];
   const first = foot.children[0].children[0];
   assert.equal(first.title, '지난 주에 끝낸 할 일·버그 수(보고에서 뺀 것 포함)');
   const hidden = first.children.find(kid => kid.className === 'sr-only');
   assert.equal(hidden.textContent, ' — 지난 주에 끝낸 할 일·버그 수(보고에서 뺀 것 포함)');
-  assert.equal(wpxText(first).startsWith('지난 주에 일 2개를 끝냈어요'), true);
+  assert.equal(wpxText(first).startsWith('하루 평균 2개'), true, '판 첫 줄은 하루 평균(끝낸 일 문장은 목록 줄 숫자와 겹쳐 빠짐)');
+  assert.equal(foot.children[0].children.some(line => /끝냈어요/.test(wpxText(line))), false);
   // 자세히 창 — 지난 주 기준, 끝낸 일 타일에 같은 뜻.
   const link = foot.children[foot.children.length - 1];
   link.listeners.click();
@@ -13007,8 +13051,8 @@ test('WP-Y 화면 — 주차 줄 끝 숫자·맨 아래 요약·자세히 창 `�
   const rows2 = nav.children.filter(kid => kid.className === 'rp-wk');
   assert.equal(rows2.some(button => endOf(button)), false, '줄 끝 막대·숫자 모두 없음');
   assert.equal(rows2.some(button => /끝낸 일/.test(button.getAttribute('aria-label'))), false);
-  const foot2 = nav.children[nav.children.length - 1];
-  assert.equal(foot2.className, 'd-uwfoot');
+  const foot2 = nav.children[0];
+  assert.equal(foot2.className, 'd-uwfoot is-failed');
   assert.deepEqual(foot2.children[0].children.map(wpxText), ['끝낸 일을 읽지 못했어요']);
   assert.equal(foot2.children[0].children[0].title, undefined);
   const link2 = foot2.children[foot2.children.length - 1];

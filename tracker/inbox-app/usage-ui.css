@@ -60,8 +60,11 @@
 .d-uwins li .d-i { width: 16px; height: 16px; margin-top: 2px; color: var(--accent-text); }
 
 /* 주간요약 주차 목록(WP-X) — 줄 끝 칸은 48px 막대(트랙 --hair, 채움 --check-line, 고른 주 --accent) + 숫자(tabular-nums).
-   `새 기록 N` 칩과 함께 있으면 칩이 윗줄, 막대가 아랫줄로 나눠 선다. 맨 아래 덩어리는 판 없이 --muted 글자, 위에 --hair 선.
-   좁은 폭(≤900, 주차 목록이 가로 한 줄)에서는 덩어리가 줄 끝의 한 칸이 되고 선은 왼쪽으로. */
+   `새 기록 N` 칩과 함께 있으면 칩이 윗줄, 막대가 아랫줄로 나눠 선다.
+   목록 맨 위(머리 `주차 N` 바로 아래)의 `내 일 기록` 판은 --neutral-bg 판(--r-sm) 하나 — 요약 글(첫 줄 13/600 --text, 다음 줄 12.5 --muted)
+   + 판 폭 전체 3차 버튼(위에 --border 1px, 40px, 13/600 --text, 오른쪽 `›` --dim). 머리와 함께 목록 칸 안 위에 머문다(sticky —
+   머리는 top:-10px·32px라 판은 22px에 붙고, 판 아래 10px 틈은 ::after가 --surface로 덮어 지나가는 줄이 비치지 않게).
+   좁은 폭(≤900, 주차 목록이 가로 한 줄)에서는 판이 주차 칸 줄 위 한 줄(왼쪽 요약·오른쪽 버튼)이 된다. */
 .rp-wk > .d-uwend {
   grid-column: 2; grid-row: 1 / span 2; justify-self: end;
   display: inline-flex; align-items: center; gap: 6px;
@@ -75,29 +78,47 @@
 .rp-wk[aria-current="true"] .d-uwfill { background: var(--accent); }
 .d-uwnum { min-width: 2ch; text-align: right; }
 .d-uwfoot {
-  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
-  margin: 8px 0 0; padding: 12px 10px 4px; border-top: 1px solid var(--hair);
-  font-size: 12.5px; line-height: 1.5; color: var(--muted); word-break: keep-all;
+  position: sticky; top: 22px; z-index: 1;
+  display: flex; flex-direction: column; min-width: 0;
+  margin: 0 0 10px; border-radius: var(--r-sm); background: var(--neutral-bg);
+  word-break: keep-all;
 }
-.d-uwfsum { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.d-uwfline { margin: 0; }
+.d-uwfoot::after { content: ''; position: absolute; top: 100%; left: 0; right: 0; height: 10px; background: var(--surface); pointer-events: none; }
+.d-uwfsum { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 10px 12px; }
+.d-uwfline { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--muted); }
+.d-uwfline:first-child { font-size: 13px; font-weight: 600; color: var(--text); }
+/* 업무 기록을 못 읽음 — 안내 한 줄은 강조하지 않는다(⑂). */
+.d-uwfoot.is-failed .d-uwfline { font-weight: 400; color: var(--muted); }
 .d-uwfline b { font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
-.d-uwfoot .d-link { margin-top: 2px; min-height: 28px; font-size: 12.5px; }
+.d-uwmore {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; min-height: 40px; padding: 0 12px; border: 0; border-top: 1px solid var(--border);
+  border-radius: 0 0 var(--r-sm) var(--r-sm); background: transparent; cursor: pointer;
+  font-family: inherit; font-size: 13px; font-weight: 600; color: var(--text); text-align: left;
+  transition: background 170ms var(--ease);
+}
+.d-uwmore::after { content: '›'; content: '›' / ''; font-size: 16px; font-weight: 400; line-height: 1; color: var(--dim); }
+.d-uwmore:hover { background: var(--hover); }
+/* 판 아래 틈 덮개(::after)에 초점 테 아랫변이 가리지 않게 테를 안쪽으로 */
+.d-uwmore:focus-visible { outline-offset: -2px; border-radius: 0 0 var(--r-sm) var(--r-sm); }
 @media (max-width: 900px) {
   /* 가로 한 줄의 좁은 주차 칸(128px)에서는 이름이 잘리지 않게 막대·숫자를 날짜 아래 셋째 줄로 */
   .rp-wk > .d-uwend, .rp-wk > .nw ~ .d-uwend { grid-column: 1 / -1; grid-row: 3; justify-self: start; margin-top: 2px; }
-  /* 요약 덩어리는 가로 스크롤 끝에 숨지 않게 주차 줄 **아래 한 줄**(보이는 폭 전체, 왼쪽 요약·오른쪽 자세히).
-     주차 목록(nav)을 그 폭에서만 두 줄 격자로 — 윗줄은 주차 칸들(가로 스크롤 그대로), 아랫줄은 덩어리 하나.
-     덩어리는 목록 칸(.rp-weeks)의 보이는 폭(100cqw)만큼이고 같은 만큼의 음수 오른쪽 여백으로 첫 칸 폭을 늘리지 않으며, 스크롤해도 왼쪽에 붙어 있다. */
+  /* 판은 가로 스크롤 속에 숨지 않게 주차 칸 줄 **위 한 줄**(보이는 폭 전체, 왼쪽 요약·오른쪽 버튼).
+     주차 목록(nav)을 그 폭에서만 두 줄 격자로 — 윗줄은 판 하나, 아랫줄은 주차 칸들(가로 스크롤 그대로).
+     판은 목록 칸(.rp-weeks)의 보이는 폭(100cqw)만큼이고 같은 만큼의 음수 오른쪽 여백으로 첫 칸 폭을 늘리지 않으며, 스크롤해도 왼쪽에 붙어 있다. */
   .rp-weeks:has(.d-uwfoot) { container-type: inline-size; }
   #weeklyReportNav:has(> .d-uwfoot) { display: grid; grid-auto-flow: column; grid-auto-columns: max-content; grid-template-rows: auto auto; gap: 4px; }
-  #weeklyReportNav > .rp-wk { grid-row: 1; }
+  #weeklyReportNav > .rp-wk { grid-row: 2; }
   .d-uwfoot {
-    grid-row: 2; grid-column: 1; justify-self: start; position: sticky; left: 8px; z-index: 1;
-    width: 100cqw; margin-right: -100cqw; box-sizing: border-box; flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 16px;
-    margin-top: 4px; margin-left: 0; padding: 10px 10px 2px; white-space: normal;
+    grid-row: 1; grid-column: 1; justify-self: start; top: auto; left: 0;
+    width: 100cqw; margin: 0 -100cqw 4px 0; box-sizing: border-box;
+    flex-direction: row; align-items: stretch; white-space: normal;
   }
-  .d-uwfoot .d-link { margin-top: 0; }
+  .d-uwfoot::after { display: none; }
+  .d-uwfsum { flex: 1 1 auto; justify-content: center; padding: 8px 12px; }
+  .d-uwmore { flex: none; width: auto; border-top: 0; border-left: 1px solid var(--border); border-radius: 0 var(--r-sm) var(--r-sm) 0; }
+  .d-uwmore:focus-visible { border-radius: 0 var(--r-sm) var(--r-sm) 0; }
 }
 
 /* 설정 › 앱 `사용 통계` 줄의 `내 일 기록은 주간요약 탭에서 볼 수 있어요 · 보기` */

@@ -2142,6 +2142,10 @@ function renderWeeklyReports(items) {
   }
 
   nav.replaceChildren();
+  // 주차 목록 칸 맨 위(머리 바로 아래, 첫 주 앞)에 끼울 자리 — '내 일 기록' 판(하루 평균·최고 기록 + `내 일 기록 자세히`).
+  // report-ui.js의 reportWeeksFoot → usage-ui.js. 목록이 길어도 머리와 함께 위에 머문다(usage-ui.css).
+  const foot = typeof reportWeeksFoot === 'function' ? reportWeeksFoot(items) : null;
+  if (foot) nav.appendChild(foot);
   items.forEach(item => {
     const label = formatWeekLabel(item.weekKey);
     const name = reportWeekName(item.weekKey);
@@ -2175,9 +2179,6 @@ function renderWeeklyReports(items) {
     });
     nav.appendChild(btn);
   });
-  // 주차 목록 칸 맨 아래에 끼울 자리('내 일 기록' 한 줄·최고 기록·자세히 — report-ui.js의 reportWeeksFoot → usage-ui.js).
-  const foot = typeof reportWeeksFoot === 'function' ? reportWeeksFoot(items) : null;
-  if (foot) nav.appendChild(foot);
 
   // 문장을 고치거나 다음 주 계획을 적는 중이면 다시 그리지 않는다(입력이 날아가지 않게).
   if (detail.contains(document.activeElement) && detail.dataset.weekKey === selectedWeekKey) return;
