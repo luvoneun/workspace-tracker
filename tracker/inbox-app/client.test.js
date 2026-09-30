@@ -4127,6 +4127,31 @@ test('접힌 줄은 진행률 뒤에 담당별 개수를 적고, 하위가 없�
   assert.equal(nodeFind(bare.card(), 'd-jexp'), null);
 });
 
+test('지라 띠 B(두 줄): 하위 티켓 칸은 값 칸 줄(.cells)의 마지막 칸이고, 하위가 없으면 값 한 줄뿐이다', () => {
+  const app = pureClient();
+  const card = app.run(`jiraStripCard(${JSON.stringify(jiraIssue())})`);
+  assert.deepEqual(card.children.map(kid => kid.className), ['top', 'cells'], '카드는 두 줄 — 셋째 줄(.foot)이 따로 서지 않는다');
+  const cells = card.children[1];
+  assert.deepEqual(cells.children.map(kid => kid.className), ['cell', 'cell', 'cell', 'foot'], '값 셋 뒤 같은 줄에 하위 티켓');
+  assert.match(nodeText(cells.children[3]), /하위 티켓 .*12개 중 7개 완료/);
+
+  const bare = app.run(`jiraStripCard(${JSON.stringify(jiraIssue({ children: null }))})`);
+  assert.deepEqual(bare.children[1].children.map(kid => kid.className), ['cell', 'cell', 'cell'], '하위 티켓이 없으면 값 한 줄');
+  assert.equal(nodeFind(bare, 'foot'), null);
+
+  // 펼친 하위 목록은 값 줄 안이 아니라 카드 맨 끝에 선다(확인 줄 아래).
+  const { card: open } = jiraKidFixture(jiraWithKids());
+  nodeFind(open(), 'd-jexp').listeners.click();
+  assert.equal(open().children.at(-1).className.split(' ')[0], 'd-jkids');
+  assert.equal(nodeFind(nodeFind(open(), 'cells'), 'd-jkids'), null, '목록은 값 줄 안에 들어가지 않는다');
+
+  // 좁아지면 하위 티켓 칸만 다음 줄로 내려간다 — 칸은 남은 폭을 채우되 300px보다 좁아지지 않는다.
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /^\.d-jira \.cells \{ display: flex; flex-wrap: wrap;/m);
+  assert.match(css, /^\.d-jira \.cells > \.foot \{ flex: 1 1 300px;/m);
+  assert.doesNotMatch(css.match(/^\.d-jira \.foot \{[^}]*\}/m)[0], /border-top/, '셋째 줄 구분선은 없다');
+});
+
 test('펼치면 티켓마다 지라 상태·요약·담당자·배포 버전이 서고, 완료는 맨 아래 흐리게 선다', () => {
   const { app, card } = jiraKidFixture(jiraWithKids());
   nodeFind(card(), 'd-jexp').listeners.click();
@@ -4420,7 +4445,8 @@ test('지라에 쓰는 동안에는 세 고르개가 모두 잠긴다', async ()
   const sending = nodeFind(fixture.confirm(), 'acts').children[1].listeners.click();
   assert.equal(fixture.app.run('jiraBusy'), true);
   const locked = fixture.app.run('jiraStripCard(jiraCard.issue)');
-  const picks = nodeFind(locked, 'cells').children.map(cell => nodeFind(cell, 'd-dpick'));
+  // 값 칸 줄 끝의 하위 티켓 칸(.foot)은 고르개가 아니다 — 값 칸(.cell) 셋만 센다.
+  const picks = nodeFindAll(nodeFind(locked, 'cells'), 'cell').map(cell => nodeFind(cell, 'd-dpick'));
   assert.equal(picks.length, 3);
   assert.deepEqual(plain(picks.map(pick => pick.disabled)), [true, true, true]);
   assert.equal(nodeFind(locked, 'd-jref').disabled, true, '새로고침도 함께 잠긴다');

@@ -553,8 +553,9 @@ function jiraStripBody(key, projectKey = '', bundle = null) {
   return jiraStripCard(card.issue, projectKey, bundle);
 }
 
-// B 띠 카드: 첫 줄(지라 표시 · 요약 · 종류/담당 · 지라에서 열기 · 새로고침),
-// 둘째 줄(지라 상태 · 배포 버전 · 기한), 셋째 줄(하위 티켓 진행률).
+// B 띠 카드(두 줄): 첫 줄(지라 표시 · 요약 · 종류/담당 · 지라에서 열기 · 새로고침),
+// 둘째 줄(지라 상태 · 배포 버전 · 기한 + 하위 티켓 진행률). 하위 티켓 줄(.foot)은 값 칸들(.cells)의 마지막
+// 칸이라 폭이 모자라면 그 줄만 아래로 내려간다(CSS flex-wrap). 하위 티켓이 없으면 값 한 줄뿐이다.
 // bundle(묶음 상세의 카드만): 첫 줄 종류·담당 앞에 티켓 번호(묶음 안에서 어느 티켓인지 가르는 말)와
 // `대표`, 지라에서 끝난 티켓이면 `끝남`을 붙인다. 단일 프로젝트 카드는 예전 그대로다.
 function jiraStripCard(issue, projectKey = '', bundle = null) {
@@ -624,6 +625,14 @@ function jiraStripCard(issue, projectKey = '', bundle = null) {
   );
   card.append(top, cells);
 
+  // 하위 티켓 진행률은 값 칸 줄 끝에 붙는다(두 줄 띠). 펼친 목록은 확인 줄 아래, 카드 맨 끝이다.
+  const children = jiraChildrenLabel(issue.children);
+  // 펼침은 카드가 선 프로젝트마다 기억한다 — `jira:KEY`든 손으로 건 그룹이든 같은 열쇠 하나다.
+  const seat = projectKey || `jira:${issue.key}`;
+  const childItems = children && issue.children && Array.isArray(issue.children.items) ? issue.children.items.filter(Boolean) : [];
+  const childOpen = !!children && !!childItems.length && jiraChildOpened(seat);
+  if (children) cells.appendChild(jiraChildFoot(seat, children, childItems, childOpen, issue.key));
+
   // 확인 줄은 값 칸 바로 아래에 선다 — 무엇을 바꾸는지와 가장 가까운 자리다.
   if (jiraConfirm && jiraConfirm.key === issue.key) card.appendChild(jiraConfirmRow(issue, jiraConfirm));
   // 옮기기(BMOVE) 확인 줄 — ⋯의 `IO-123으로 옮기기…`를 눌렀을 때만 선다.
@@ -635,19 +644,11 @@ function jiraStripCard(issue, projectKey = '', bundle = null) {
     }));
   }
 
-  const children = jiraChildrenLabel(issue.children);
-  if (children) {
-    // 펼침은 카드가 선 프로젝트마다 기억한다 — `jira:KEY`든 손으로 건 그룹이든 같은 열쇠 하나다.
-    const seat = projectKey || `jira:${issue.key}`;
-    const items = (issue.children && Array.isArray(issue.children.items) ? issue.children.items : []).filter(Boolean);
-    const open = !!items.length && jiraChildOpened(seat);
-    card.appendChild(jiraChildFoot(seat, children, items, open, issue.key));
-    if (open) card.appendChild(jiraChildList(issue, items));
-  }
+  if (childOpen) card.appendChild(jiraChildList(issue, childItems));
   return card;
 }
 
-// 접힌 줄: 진행률 + 미완료의 담당별 개수(누르면 그 사람 것만) + 줄 끝 꺾쇠.
+// 값 칸 줄 끝의 하위 티켓 칸: 진행률 + 미완료의 담당별 개수(누르면 그 사람 것만) + 줄 끝 꺾쇠.
 function jiraChildFoot(seat, children, items, open, issueKey = '') {
   const foot = document.createElement('div');
   foot.className = 'foot';
