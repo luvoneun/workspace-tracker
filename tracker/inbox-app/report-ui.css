@@ -357,6 +357,14 @@
 .rp-flb { padding: 0 0 8px; }
 .rp-flb[hidden] { display: none; }
 .rp-flb .g { margin: 6px 0 0; font-size: 12.5px; font-weight: 600; color: var(--dim); }
+/* 그룹 머리 오른쪽 `모두 넣기`(2줄 이상일 때만) — 조용한 3차 글자 버튼, 누르는 자리 28px */
+.rp-flb .g:has(.rp-all) { display: flex; align-items: center; gap: 8px; }
+.rp-flb .rp-all {
+  margin-left: auto; min-height: 28px; padding: 0 4px; border: 0; border-radius: var(--r-xs); background: none;
+  color: var(--muted); font-family: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer;
+}
+.rp-flb .rp-all:hover { background: var(--hover); color: var(--text); }
+.rp-flb .rp-all:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .rp-flb .mr { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 34px; font-size: 13.5px; }
 .rp-flb .mr .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rp-flb .mr .m { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--dim); white-space: nowrap; }

@@ -12218,7 +12218,7 @@ test('다듬기 B: 같은 글을 다시 보내면(응답을 못 받음) 같은 �
   assert.notEqual(keys[2], keys[3], '성공한 뒤 같은 글을 또 쓰면 새 줄이다');
   assert.match(keys[0], /^[a-zA-Z0-9-]{16,100}$/);
 });
-test('다듬기 B: 확정한 주의 상태 줄은 회색 한 줄 `M/D에 확정했어요`(+ 새로 N줄 · 보고에 넣기), 머리 ⋯ 첫 묶음은 `확정 풀기`', () => {
+test('다듬기 B(개편 A): 확정한 주의 상태 줄은 회색 글 한 줄 `M/D에 확정했어요`(+ 새로 N줄, 버튼 없음), 머리 ⋯ 첫 묶음은 `확정 풀기`', () => {
   const app = reportClient();
   const at = '2026-09-17T03:00:00.000Z';
   assert.equal(app.run(`reportConfirmedText({ at: '${at}', pending: 0, pendingDone: 0 })`), '9/17에 확정했어요');
@@ -12227,7 +12227,7 @@ test('다듬기 B: 확정한 주의 상태 줄은 회색 한 줄 `M/D에 확정�
   const top = app.run(`(() => { renderReportDraft = () => {}; const host = document.createElement('div');
     reportTopBlock({ weekKey: '2026-09-14', draft: { rows: [], since: { at: 'x', fresh: 3, changed: 0 }, confirmed: { at: '${at}', pending: 1, pendingDone: 1 } } }, host); return host; })()`);
   const line = top.children[0].children[0];
-  assert.deepEqual([line.className, line.children.map(kid => kid.textContent)], ['rp-status is-quiet', ['9/17에 확정했어요 · 그 뒤 1줄이 새로 끝났어요', '보고에 넣기']], '확정하면 새로 표시 줄 대신 이 한 줄');
+  assert.deepEqual([line.className, line.children.map(kid => kid.textContent)], ['rp-status is-quiet', ['9/17에 확정했어요 · 그 뒤 1줄이 새로 끝났어요']], '확정하면 새로 표시 줄 대신 이 한 줄 — 넣기는 슬랙 카드 접힘 줄에서');
   const quiet = app.run(`(() => { const host = document.createElement('div');
     reportTopBlock({ weekKey: '2026-09-14', draft: { rows: [], confirmed: { at: '${at}', pending: 0, pendingDone: 0 } } }, host); return host; })()`);
   assert.deepEqual(quiet.children[0].children[0].children.map(kid => kid.textContent), ['9/17에 확정했어요'], '새로 없으면 버튼 없이 한 줄');
@@ -13143,13 +13143,16 @@ test('개편 A: 줄 끝 한 마디는 끝났어요 > 제안 알약 > 확인 필�
 test('개편 A: `확인 필요 N ›`은 서버의 첫 문장부터 문서 순서로 차례로 가고(접힌 부모 한 번), 그 문장 글자에 초점을 둔다', () => {
   const app = a7Client();
   assert.deepEqual(JSON.parse(app.run('JSON.stringify(reportReviewTargets(item.draft))')), ['s1', 'r1', 'p0']);
+  assert.equal(app.run('reportReviewButton(item)').getAttribute('aria-label'), '확인 필요 3개 중 1번째로 이동');
   assert.equal(app.run('reportReviewCount(item.draft)'), 3, '머리 한 줄은 서버 개수');
   app.run(`focused = []; document.getElementById('weeklyReportDetail').querySelector = sel => (/data-edit-text/.test(sel) ? { focus() { focused.push(sel); }, scrollIntoView() {} } : null);`);
   const go = () => { app.run('reportReviewGo(item)'); return app.run('reportReviewPick'); };
   assert.deepEqual([go(), go(), go(), go()], ['s1', 'r1', 'p0', 's1']);
   assert.match(app.run('focused[0]'), /data-edit-text="s1"/);
   const button = app.run('reportReviewButton(item)');
-  assert.deepEqual([button.className, button.children[0].textContent, button.getAttribute('aria-label')], ['rp-go', '확인 필요 3', '확인 필요 3개 — 걸린 문장으로 가기']);
+  assert.deepEqual([button.className, button.children[0].textContent, button.getAttribute('aria-label')], ['rp-go', '확인 필요 3', '확인 필요 3개 중 2번째로 이동'], '지금 s1에 있으니 다음은 2번째');
+  app.run("reportReviewPick = 'p0'");
+  assert.equal(app.run('reportReviewButton(item)').getAttribute('aria-label'), '확인 필요 3개 중 1번째로 이동', '끝이면 처음으로 돈다');
   // 편집 중에 누르면 적던 글은 그대로 두고 이동만 한다.
   app.run(`reportEdits.set('2026-09-14:o1', '적던 글'); reportReviewPick = null;`);
   go();
@@ -13356,4 +13359,26 @@ test('개편 A 화면 규칙: 새 innerHTML은 uiIcon뿐, 확인 필요·끝났�
   assert.doesNotMatch(block + card, /border-left:\s*[2-9]px/, '왼쪽 색 세로줄 없음');
   assert.match(card, /@media \(prefers-reduced-motion: reduce\) \{ \.rp-fl \.d-i \{ transition: none; \} \}/);
   assert.doesNotMatch(css, /\.rp-ex\b|\.rp-pill\.is-done|\.rp-secg/, '옛 부품(문서 맨 아래 제외 접힘·초록 알약·구역 칩 묶음)은 지웠다');
+});
+
+test('개편 A 검수: 접힘 줄의 `보고에 없는 끝낸 일 N` 머리 오른쪽 `모두 넣기`는 2줄 이상일 때만이고 기존 pullNew를 보내며, 문서 위 확정 줄에는 버튼이 없다', async () => {
+  const app = a7Client();
+  const two = `{ ...item, draft: { ...item.draft, material: { pending: [
+    { id: 'n1', description: '알림 발송 로그 확인', label: '알림 센터', completed: '2026-09-16' },
+    { id: 'n2', description: '가입 카피 최종 확인', label: '가입 개선', completed: '2026-09-17' } ] } } }`;
+  const body = app.run(`reportMaterialBlock(${two})`).children[1];
+  const head = body.children[0];
+  assert.equal(head.className, 'g');
+  assert.equal(head.children[0].textContent, '보고에 없는 끝낸 일 2');
+  const all = head.children[1];
+  assert.deepEqual([all.textContent, all.className, all.getAttribute('aria-label')], ['모두 넣기', 'rp-all', '보고에 없는 끝낸 일 2개 모두 보고에 넣기']);
+  await all.listeners.click();
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), [{ action: 'pullNew' }]);
+  const one = app.run('reportMaterialBlock(item)').children[1].children[0];
+  assert.deepEqual([one.textContent, one.children.length], ['보고에 없는 끝낸 일 1', 0], '1줄이면 머리 글만');
+  const top = app.run(`(() => { const host = document.createElement('div'); reportTopBlock(item, host); return host; })()`);
+  assert.deepEqual(top.children[0].children[0].children.map(kid => kid.textContent), ['9/16에 확정했어요 · 그 뒤 1줄이 새로 끝났어요']);
+  const ui = REPORT_A7_UI();
+  assert.doesNotMatch(ui.slice(ui.indexOf('function reportTopBlock'), ui.indexOf('function reportConfirmedText')), /pullNew/);
+  assert.match(ui, /REPORT_MOVE_NOTICE = \{[\s\S]*pullNew: '새로 들어온 줄을 보고에 넣었어요'/, '알림·되돌리기는 기존 그대로');
 });

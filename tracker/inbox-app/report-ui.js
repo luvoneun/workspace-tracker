@@ -1015,16 +1015,23 @@ function reportReviewButton(item) {
   chev.innerHTML = uiIcon('chevron');
   go.appendChild(chev);
   go.title = '확인이 필요한 문장으로 가요';
-  go.setAttribute('aria-label', `확인 필요 ${count}개 — 걸린 문장으로 가기`);
+  // 읽어 주는 이름은 `확인 필요 N개 중 k번째로 이동` — 누를 때마다 다음 문장으로 돈다(k는 이번에 갈 자리).
+  const targets = reportReviewTargets(item.draft);
+  const next = reportReviewNext(item.draft, targets);
+  go.setAttribute('aria-label', next ? `확인 필요 ${targets.length}개 중 ${targets.indexOf(next) + 1}번째로 이동` : `확인 필요 ${count}개`);
   go.addEventListener('click', () => reportReviewGo(item));
   return go;
 }
-function reportReviewGo(item) {
-  const targets = reportReviewTargets(item.draft);
-  if (!targets.length) return;
+// 다음에 갈 문장 — 아직 고른 줄이 없으면 서버의 첫 문장(없으면 문서 순서 첫 줄), 있으면 그다음(끝이면 처음으로).
+function reportReviewNext(report, targets = reportReviewTargets(report)) {
+  if (!targets.length) return null;
   const at = targets.indexOf(reportReviewPick);
-  const first = item.draft.review && targets.includes(item.draft.review.first) ? item.draft.review.first : targets[0];
-  const id = at >= 0 ? targets[(at + 1) % targets.length] : first;
+  if (at >= 0) return targets[(at + 1) % targets.length];
+  return report && report.review && targets.includes(report.review.first) ? report.review.first : targets[0];
+}
+function reportReviewGo(item) {
+  const id = reportReviewNext(item.draft);
+  if (!id) return;
   reportReviewPick = id;
   reportMode = 'draft';
   renderReportDraft(item);
@@ -1067,7 +1074,7 @@ function reportHeadMenuSections(item) {
 }
 
 // 머리 아래 상태 줄(v3) — 다듬은 뒤 새로 들어온(또는 바뀐) 줄이 있을 때만 옅은 파란 한 줄이 서고, 없으면 줄 자체가 없다.
-// 확정한 주는 대신 회색 한 줄 `M/D에 확정했어요`(+ 그 뒤 새로 들어온 줄이 있으면 ` · 그 뒤 N줄이 새로 끝났어요` + `보고에 넣기`).
+// 확정한 주는 대신 회색 한 줄 `M/D에 확정했어요`(+ 그 뒤 새로 들어온 줄이 있으면 ` · 그 뒤 N줄이 새로 끝났어요` — 글만).
 // `전체 업무 기록`을 보는 중에는 돌아가는 길을 같은 자리에 둔다.
 function reportTopBlock(item, host) {
   const top = reportNode('div', undefined, 'rp-top');
@@ -1080,8 +1087,8 @@ function reportTopBlock(item, host) {
     const confirmed = item.draft.confirmed;
     const line = reportNode('div', undefined, 'rp-status is-quiet');
     line.setAttribute('role', 'status');
+    // 글만 남긴다 — 넣기는 슬랙 카드 맨 위 접힘 줄(한 줄씩 `넣기`, 2줄 이상이면 그룹 머리의 `모두 넣기`)에서 한다(개편 A).
     line.appendChild(reportNode('span', reportConfirmedText(confirmed)));
-    if (confirmed.pending) line.appendChild(reportButton('보고에 넣기', () => reportChange(item, { action: 'pullNew' }), 'd-link'));
     top.appendChild(line);
   } else {
     const text = reportStatusText(item.draft.since);
@@ -2327,7 +2334,15 @@ function reportMaterialBlock(item) {
     body.hidden = !reportMaterialOpen;
   });
   if (pending.length) {
-    body.appendChild(reportNode('div', `보고에 없는 끝낸 일 ${pending.length}`, 'g'));
+    // 2줄 이상이면 그룹 머리 오른쪽에 조용한 글자 버튼 `모두 넣기` — 확정 뒤 새로 들어온 줄을 한 번에 넣는 기존 pullNew 그대로.
+    if (pending.length >= 2) {
+      const head = reportNode('div', undefined, 'g');
+      head.appendChild(reportNode('span', `보고에 없는 끝낸 일 ${pending.length}`));
+      const all = reportButton('모두 넣기', () => reportChange(item, { action: 'pullNew' }).then(reportMaterialFocus), 'rp-all');
+      all.setAttribute('aria-label', `보고에 없는 끝낸 일 ${pending.length}개 모두 보고에 넣기`);
+      head.appendChild(all);
+      body.appendChild(head);
+    } else body.appendChild(reportNode('div', `보고에 없는 끝낸 일 ${pending.length}`, 'g'));
     for (const task of pending) {
       const line = reportNode('div', undefined, 'mr');
       line.appendChild(reportNode('span', task.description, 't'));
