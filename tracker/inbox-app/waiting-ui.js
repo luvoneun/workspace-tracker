@@ -500,9 +500,10 @@ function waitingCheckbox(item, row, done) {
 }
 
 // 레일의 확인 대기 한 줄 — 두 줄 구성.
-//   첫 줄: 제목(최대 2줄) + `원문`
+//   첫 줄: 제목(최대 2줄)
 //   둘째 줄: (급한 순 보기면 맨 앞에 조용한 프로젝트 표기) + `결제팀 · 2일째`(3일째부터 주의색)
 //            + 답변 받을 날 배지(지났거나 오늘일 때만) + `오늘 다시 확인` / `9월 24일 다시 확인` / `오늘 요청함`
+//            + 원문이 있으면 끝에 `슬랙 ↗`(파란 글자)
 // 값 수정은 더보기·상세가 맡는다.
 function renderWaitingRow(item, opts = {}) {
   const done = item.status === 'done';
@@ -555,6 +556,9 @@ function renderWaitingRow(item, opts = {}) {
     cell.textContent = next;
     sub.appendChild(cell);
   }
+  // 원문은 따로 한 줄을 차지하지 않고 둘째 줄 끝에 `슬랙 ↗`로 선다(어디로 가는지 알 수 있게). 없으면 그리지 않는다.
+  const source = uiSourceLink(item, '슬랙 ↗');
+  if (source) sub.appendChild(source);
 
   const row = uiRailRow({
     id: item.id,
@@ -563,7 +567,6 @@ function renderWaitingRow(item, opts = {}) {
     two: true,
     selected: !!panelState && panelState.id === item.id,
     badge: item.isNew && !done ? renderNewDot(item) : null,
-    source: uiSourceLink(item),
     sub: sub.childNodes.length ? sub : '',
     more: done ? null : uiMoreButton(`${item.description} — 더 보기`, () => waitingMenuSections(item, row)),
     onOpen: () => panelOpen({ id: item.id }),

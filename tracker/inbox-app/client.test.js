@@ -3261,6 +3261,32 @@ function waitingNextClient(response = new Response('{"ok":true,"id":"nt1"}')) {
   return { app, sent, check };
 }
 
+// 1.3.2: 레일 확인 대기의 원문은 따로 한 줄이 아니라 둘째 줄(`누구 · N일째`) 끝의 `슬랙 ↗`.
+test('확인 대기 레일 줄: 원문이 있으면 둘째 줄 끝에 `슬랙 ↗`, 제목 묶음에는 없다', () => {
+  const { app } = waitingNextClient();
+  app.run("wfItem('ck1').permalink = 'https://example.slack.test/archives/C1/p1'");
+  const row = app.run("renderWaitingRow(wfItem('ck1'))");
+  assert.equal(nodeFind(row, 'tiwrap'), null, '제목 뒤 묶음(원문 자리)이 없다');
+  const sub = nodeFind(row, 'sub');
+  // 가짜 DOM은 조각(fragment)을 펼치지 않으므로 한 겹 벗겨 본다.
+  const kids = sub.children.flatMap(node => node.className ? [node] : node.children);
+  const last = kids[kids.length - 1];
+  assert.equal(last.className, 'd-src');
+  assert.equal(last.textContent, '슬랙 ↗');
+  assert.equal(last.href, 'https://example.slack.test/archives/C1/p1');
+  assert.ok(kids.findIndex(node => node.className === 'who') > -1
+    && kids.findIndex(node => node.className === 'who') < kids.length - 1, '누구 · N일째 뒤에 선다');
+});
+
+test('확인 대기 레일 줄: 원문이 없으면 링크를 그리지 않는다(둘째 줄이 비면 둘째 줄도 없다)', () => {
+  const { app } = waitingNextClient();
+  assert.equal(nodeFind(app.run("renderWaitingRow(wfItem('ck1'))"), 'd-src'), null);
+  // 누구·며칠째가 없고 원문만 있으면 둘째 줄에 링크만 선다.
+  app.run("Object.assign(wfItem('ck2'), { created: '', permalink: 'https://example.slack.test/p2' })");
+  const sub = nodeFind(app.run("renderWaitingRow(wfItem('ck2'))"), 'sub');
+  assert.deepEqual(sub.children.flatMap(node => node.className ? [node] : node.children).map(node => node.className), ['d-src']);
+});
+
 test('확인 대기를 체크하면 저장은 그대로이고, 알림은 사실만 알린다(`결정으로 남기기` 버튼은 줄이 대신한다)', async () => {
   const { app, sent } = waitingNextClient(new Response('{"ok":true}'));
   const row = app.run("renderWaitingRow(wfItem('ck1'))");

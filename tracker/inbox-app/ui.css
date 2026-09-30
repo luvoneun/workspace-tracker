@@ -688,6 +688,8 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 .d-wrow.is-two .sub { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; white-space: normal; overflow: visible; }
 .d-wrow.is-two .sub .who { color: var(--muted); font-weight: 600; }
 .d-wrow.is-two .sub .nx { color: var(--dim); }
+/* 확인 대기 둘째 줄 끝의 `슬랙 ↗` — 따로 한 줄을 차지하지 않고, 어디로 가는 링크인지 파란 글자로 */
+.d-wrow.is-two .sub .d-src { color: var(--accent-text); }
 /* 확인 대기 `급한 순` 보기의 둘째 줄 맨 앞 프로젝트 표기 — 말줄임(레일 폭 안에서 다른 말과 겹치지 않게) */
 .d-wrow.is-two .sub .d-inproj { max-width: 44%; overflow: hidden; text-overflow: ellipsis; }
 /* 확인 대기 카드의 프로젝트 소제목 — 줄과 같은 왼쪽 자리(10px)에 맞춘 작은 그룹 제목 */
@@ -2420,7 +2422,7 @@ body.batch-open .d-toast { bottom: 76px; }
   top: min(0px, calc(50% - 14px)); bottom: min(0px, calc(50% - 14px));
   left: min(0px, calc(50% - 14px)); right: min(0px, calc(50% - 14px));
 }
-/* 레일 확인 대기 줄은 `원문`이 제목 바로 아래 제 줄에 선다(사이 3px) — 위로는 2px만 넓혀 제목을 덮지 않고, 모자란 만큼 아래(글자뿐인 줄)로 */
+/* 레일 리마인드 줄은 `원문`이 제목 바로 아래 제 줄에 설 수 있다(사이 3px) — 위로는 2px만 넓혀 제목을 덮지 않고, 모자란 만큼 아래(글자뿐인 줄)로 */
 .d-wrow .tiwrap .d-src::after { top: -2px; bottom: min(0px, calc(100% - 26px)); }
 .d-abfiles { margin-top: 4px; font-size: 12px; line-height: 1.7; color: var(--dim); overflow-wrap: anywhere; }
 .d-abfiles[hidden], .d-abwrap[hidden] { display: none; }
