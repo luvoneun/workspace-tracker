@@ -11005,13 +11005,23 @@ test('WP-V F. 맥 캘린더 확인 실패: 막힘은 이유 + 시스템 설정 �
     await fx.button('calendar', '허용하고 확인').listeners.click();
     const box = fx.find('calendar', 'd-ichoice').find(one => one.dataset.choice === 'mac');
     const error = box.children.find(one => one.className === 'd-derr').textContent;
-    const help = box.children.filter(one => one.className === 'd-ismall')[1];
+    const help = box.children.find(one => one.className === 'd-imachelp');
     return { fx, error, help };
   };
   const denied = await run({ ok: true, installed: true, state: macState({ ok: false, reason: 'denied', calendars: [], eventCount: null }) });
-  assert.equal(denied.error, '맥이 캘린더 접근을 막았어요 — 시스템 설정 › 개인정보 보호 및 보안 › 캘린더(전체 접근)와 자동화에서 허용해 주세요');
+  assert.equal(denied.error, '맥이 캘린더 접근을 막았어요 — 맥 설정 › 개인정보 보호 및 보안 › 캘린더(그리고 자동화)에서 목록의 이름을 찾아 켜 주세요');
   assert.equal(denied.help.hidden, false);
-  assert.match(denied.help.textContent, /애플 메뉴 › 시스템 설정 › 개인정보 보호 및 보안 › 캘린더에서 .*「전체 접근」으로, 같은 화면의 자동화에서도/);
+  assert.match(denied.help.children[0].textContent, /애플 메뉴 › 시스템 설정이에요\. 캘린더 목록에서 아래 같은 이름을 찾아 「전체 접근」으로 켜고, 같은 화면의 자동화에서도 캘린더를 켠 뒤/);
+  // 찾을 이름 예시 그림 — 맥 화면이 아니라 예시임을 캡션이 말하고, 이름은 읽기 길에서 아는 것(node·osascript)만. 스위치는 그림이라 읽지 않는다.
+  const pic = denied.help.children[1];
+  assert.match(denied.fx.app.run('settingsMacDeniedHelp.toString()'), /createElement\('figure'\)[\s\S]*createElement\('figcaption'\)/, '그림은 figure + figcaption');
+  assert.equal(pic.className, 'd-imacpic');
+  assert.equal(pic.children[0].textContent, '예시 그림 — 맥 화면이 아니에요. 이름은 맥에 따라 달라요');
+  assert.equal(pic.children[1].textContent, '개인정보 보호 및 보안 › 캘린더');
+  const picRows = pic.children.filter(one => one.className === 'row');
+  same(picRows.map(row => row.children[0].textContent), ['node', 'osascript']);
+  assert.ok(picRows.every(row => row.children[1].className === 'sw' && row.children[1].getAttribute('aria-hidden') === 'true'));
+  assert.ok(!denied.fx.find('calendar', 'd-ichoice').some(one => /맥 설정 열기/.test(one.textContent)), '맥 설정 열기 버튼은 아직 없다(실기 확인 뒤)');
   assert.equal(denied.fx.find('calendar', 'd-ich').length, 0);
 
   const noAccount = await run({ ok: true, installed: true, state: macState({ ok: false, reason: 'noAccount', calendars: [{ id: 'L', name: '캘린더', writable: true }], suggested: [], read: [] }) });
@@ -11074,7 +11084,7 @@ test('WP-V F. 허용 창에 답하지 않음(0)은 다시 누르라는 말만 �
   await fx.button('calendar', '허용하고 확인').listeners.click();
   const box = fx.find('calendar', 'd-ichoice').find(one => one.dataset.choice === 'mac');
   assert.equal(box.children.find(one => one.className === 'd-derr').textContent, '허용 창에 답하지 않았어요 — 허용하고 확인을 다시 눌러 주세요');
-  assert.equal(box.children.filter(one => one.className === 'd-ismall')[1].hidden, true, '가는 길은 보이지 않는다');
+  assert.equal(box.children.find(one => one.className === 'd-imachelp').hidden, true, '가는 길·예시 그림은 보이지 않는다');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

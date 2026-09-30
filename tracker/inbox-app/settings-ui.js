@@ -2445,7 +2445,7 @@ const SETTINGS_ICAL_OFF = '해제하면 오늘 일정 가져오기가 멈춰요.
 const SETTINGS_MAC_WAIT_MS = 90000;
 const SETTINGS_MAC_POLL_MS = 2000;
 const SETTINGS_MAC_WORDS = {
-  denied: '맥이 캘린더 접근을 막았어요 — 시스템 설정 › 개인정보 보호 및 보안 › 캘린더(전체 접근)와 자동화에서 허용해 주세요',
+  denied: '맥이 캘린더 접근을 막았어요 — 맥 설정 › 개인정보 보호 및 보안 › 캘린더(그리고 자동화)에서 목록의 이름을 찾아 켜 주세요',
   unanswered: '허용 창에 답하지 않았어요 — 허용하고 확인을 다시 눌러 주세요',
   noAccount: '맥 캘린더에 구글 계정이 없어요 — 1단계를 먼저 해 주세요',
   missing: '고른 캘린더를 찾지 못했어요 — 다시 골라 주세요',
@@ -2453,8 +2453,34 @@ const SETTINGS_MAC_WORDS = {
   timeout: '맥 캘린더가 1분 안에 답하지 않았어요 — 캘린더가 많으면 잠시 뒤 다시 눌러 주세요',
   failed: '맥 캘린더를 읽지 못했어요 — 잠시 뒤 다시 눌러 주세요',
 };
-// 앱이 시스템 설정 화면을 직접 열 수는 없다 — 가는 길만 글자로 알려 준다.
-const SETTINGS_MAC_DENIED_HELP = '가는 길: 화면 왼쪽 위 애플 메뉴 › 시스템 설정 › 개인정보 보호 및 보안 › 캘린더에서 이 앱(node·osascript 등 — 맥에 따라 이름이 달라요)을 「전체 접근」으로, 같은 화면의 자동화에서도 캘린더를 켜고 다시 눌러 주세요';
+// 앱이 시스템 설정 화면을 직접 열 수는 없다(`맥 설정 열기` 버튼은 크롬 앱 창에서 링크가 열리는지 실기 확인 뒤) —
+// 가는 길은 글자로, 찾을 이름은 CSS로 그린 작은 예시 그림으로 알려 준다. 이름은 읽기 길(launchd → node → osascript)에서
+// 아는 것만 쓴다 — 실제 목록의 이름은 맥에 따라 다르다.
+const SETTINGS_MAC_DENIED_HELP = '맥 설정은 화면 왼쪽 위 애플 메뉴 › 시스템 설정이에요. 캘린더 목록에서 아래 같은 이름을 찾아 「전체 접근」으로 켜고, 같은 화면의 자동화에서도 캘린더를 켠 뒤 허용하고 확인을 다시 눌러 주세요';
+const SETTINGS_MAC_DENIED_NAMES = ['node', 'osascript'];
+function settingsMacDeniedHelp() {
+  const help = settingsEl('d-imachelp');
+  const pic = document.createElement('figure');
+  pic.className = 'd-imacpic';
+  const cap = document.createElement('figcaption');
+  cap.textContent = '예시 그림 — 맥 화면이 아니에요. 이름은 맥에 따라 달라요';
+  const where = settingsEl('where', '개인정보 보호 및 보안 › 캘린더');
+  pic.append(cap, where);
+  SETTINGS_MAC_DENIED_NAMES.forEach((name) => {
+    const row = settingsEl('row');
+    const label = document.createElement('span');
+    label.textContent = name;
+    // 켠 모양 스위치는 그림일 뿐이다(누를 수 없고 읽지 않는다).
+    const sw = document.createElement('span');
+    sw.className = 'sw';
+    sw.setAttribute('aria-hidden', 'true');
+    row.append(label, sw);
+    pic.appendChild(row);
+  });
+  help.append(settingsEl('d-ismall', SETTINGS_MAC_DENIED_HELP), pic);
+  help.hidden = true;
+  return help;
+}
 
 async function settingsMacLoad() {
   try {
@@ -2528,7 +2554,7 @@ function settingsMacShow(ui, state, chosen, mode) {
   } else {
     ui.result.textContent = '';
     ui.error.textContent = SETTINGS_MAC_WORDS[state.reason] || SETTINGS_MAC_WORDS.failed;
-    if (state.reason === 'denied') { ui.help.textContent = SETTINGS_MAC_DENIED_HELP; ui.help.hidden = false; }
+    if (state.reason === 'denied') ui.help.hidden = false;
   }
   if (calendars.length) settingsMacList(ui, calendars, chosen && chosen.length ? chosen : (state.read && state.read.length ? state.read : state.suggested || []), mode);
 }
@@ -2571,7 +2597,7 @@ function settingsMacChoice(card, data, mode) {
   tag.className = 'd-itag';
   tag.textContent = '추천';
   head.append(document.createTextNode('맥 캘린더'), tag);
-  const ui = { box, result: settingsEl('d-ismall'), error: settingsErrorLine(), help: settingsEl('d-ismall'), pick: settingsEl('d-ichwrap') };
+  const ui = { box, result: settingsEl('d-ismall'), error: settingsErrorLine(), help: settingsMacDeniedHelp(), pick: settingsEl('d-ichwrap') };
   ui.result.setAttribute('role', 'status');
   ui.help.hidden = true;
   ui.pick.hidden = true;

@@ -2668,6 +2668,14 @@ a.d-btn { text-decoration: none; }
 .d-ichoice { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 14px; border-radius: var(--r-sm); background: var(--surface); border: 1.5px solid var(--border); }
 .d-ichoice .hd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 14.5px; font-weight: 600; }
 .d-ichoice .soon { margin-left: auto; font-size: var(--fs-cap); font-weight: 600; color: var(--dim); }
+/* 맥 캘린더 막힘 — 찾을 이름 예시 그림(맥 화면 캡처가 아니다: 점선 테 + 캡션). 스위치는 그림이라 aria-hidden */
+.d-imachelp { display: flex; flex-direction: column; gap: 8px; }
+.d-imacpic { margin: 0; max-width: 340px; display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: var(--r-sm); border: 1px dashed var(--border); background: var(--bg); }
+.d-imacpic figcaption { font-size: var(--fs-cap); color: var(--dim); }
+.d-imacpic .where { font-size: var(--fs-cap); font-weight: 600; color: var(--muted); }
+.d-imacpic .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 32px; padding: 0 10px; border-radius: 8px; background: var(--surface); font-size: var(--fs-sm); font-weight: 600; color: var(--text); }
+.d-imacpic .sw { position: relative; flex: none; width: 30px; height: 18px; border-radius: 999px; background: var(--accent-strong); }
+.d-imacpic .sw::after { content: ''; position: absolute; top: 2px; right: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--on-fill); }
 .d-ichoice.is-off { opacity: 0.55; cursor: default; }
 /* 캘린더 갈래 셋(WP-V) — `맥 캘린더`(추천)가 맨 위, `Claude Code로`, 접힌 `다른 방법: 비밀 주소 붙이기`를 세로로 쌓는다.
    읽을 캘린더 목록은 쓸 곳 고르기(.d-ich)와 같은 줄 — 이름 칸이 없어 두 칸이다. */
