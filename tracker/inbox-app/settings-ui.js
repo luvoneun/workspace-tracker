@@ -1338,12 +1338,15 @@ function settingsFailWords(text) {
 const SETTINGS_CLAUDE_LOGIN = '자동 수집이 쓰는 Claude Code 로그인이 풀렸어요 — 도움말 “Claude Code 로그인이 풀렸다고 나와요”대로 다시 로그인해 주세요';
 const SETTINGS_CLAUDE_LOGIN_HERE = 'Claude Code 로그인이 풀렸어요 — 아래 두 줄이면 다시 돼요';
 const SETTINGS_CLAUDE_BOX_NAMES = { slack: '슬랙 수집', calendar: '캘린더', notes: '회의록' };
-const SETTINGS_CLAUDE_TOKEN_SAVED = '저장했어요 — 다시 시도를 눌러 보세요';
+const SETTINGS_CLAUDE_TOKEN_SAVED = '새 토큰을 저장했어요 — 다시 시도를 눌러 확인해 주세요';
 function settingsFailWhy(kind, state = {}, { reconnect = false } = {}) {
   if (state.claudeAuth && !state.auth) {
     if (!settingsClaudeBoxAt) return [SETTINGS_CLAUDE_LOGIN];
     if (settingsClaudeBoxAt === kind) return [SETTINGS_CLAUDE_LOGIN_HERE];
-    return [`Claude Code 로그인이 풀렸어요 — ${SETTINGS_CLAUDE_BOX_NAMES[settingsClaudeBoxAt]} 카드의 두 줄대로 하면 여기도 함께 다시 돼요`];
+    // 칸이 있는 카드 이름은 누르는 밑줄 글자 — 그 카드로 스크롤해 잠깐 밝히고 토큰 칸(저장했으면 `토큰 다시 붙이기`)에 초점을 둔다.
+    const host = settingsClaudeBoxAt;
+    const go = settingsButton(`${SETTINGS_CLAUDE_BOX_NAMES[host]} 카드의 두 줄`, 'd-ablink', () => settingsClaudeGoToBox(host));
+    return ['Claude Code 로그인이 풀렸어요 — ', go, '대로 하면 여기도 함께 다시 돼요'];
   }
   if (state.auth) {
     return [kind === 'calendar'
@@ -1361,6 +1364,12 @@ function settingsFailWhy(kind, state = {}, { reconnect = false } = {}) {
 let settingsClaudeBoxAt = null;
 // 이 화면에서 한 번 저장했으면(화면 메모리만) 다시 그려도 칸 대신 `저장했어요` 줄을 보인다 — 다음 수집이 돌기 전까지는 멈춤이 그대로라서.
 let settingsClaudeTokenSaved = false;
+// 칸 안에서 초점을 둘 자리(입력 칸, 저장 뒤면 `토큰 다시 붙이기`) — 다른 카드의 가리키는 글이 쓴다.
+let settingsClaudeFocus = null;
+function settingsClaudeGoToBox(host) {
+  settingsIntgFlash([host]);
+  if (typeof settingsClaudeFocus === 'function') settingsClaudeFocus();
+}
 function settingsClaudeBoxKind(data) {
   if (!data || data.claude !== true) return null;
   const failing = settingsIntgFailing(data);
@@ -1370,16 +1379,21 @@ function settingsClaudeBoxKind(data) {
 
 // 두 줄 칸 — ① 터미널에서 `claude setup-token`(복사) ② 나온 토큰을 붙여 `저장`. 서버가 0600 파일 하나에만 쓰고
 // (`POST /api/integrations/claude-token`) 값은 어디서도 다시 돌려주지 않는다. 저장 뒤 자동으로 다시 돌리지 않는다(안내만).
-function settingsClaudeTokenBox() {
+// `why`는 이 카드의 분홍 이유 줄 — 저장이 끝나면 초록 성공 줄과 부딪히지 않게 감춘다(상태 점 `멈췄어요`는 수집이 돌 때까지 그대로).
+function settingsClaudeTokenBox(why = null) {
   const box = settingsEl('d-iclaude');
   box.dataset.claude = 'token';
   const drawSaved = () => {
+    if (why) why.hidden = true;
     const line = settingsEl('d-iok', SETTINGS_CLAUDE_TOKEN_SAVED);
     line.setAttribute('role', 'status');
     const again = settingsEl('d-ismall');
-    again.appendChild(settingsButton('토큰 다시 붙이기', 'd-ablink', () => { settingsClaudeTokenSaved = false; drawForm(); }));
+    const againButton = settingsButton('토큰 다시 붙이기', 'd-ablink', () => { settingsClaudeTokenSaved = false; drawForm(); focusField(); });
+    again.appendChild(againButton);
     box.replaceChildren(line, again);
+    settingsClaudeFocus = () => againButton.focus();
   };
+  let focusField = () => {};
   const drawForm = () => {
     const one = settingsEl('d-ifield');
     const oneLabel = document.createElement('span');
@@ -1412,7 +1426,10 @@ function settingsClaudeTokenBox() {
     save.addEventListener('click', run);
     settingsOnEnter(field.input, run);
     field.input.addEventListener('input', () => field.input.removeAttribute('aria-invalid'));
+    if (why) why.hidden = false;
     box.replaceChildren(one, field.wrap, error, settingsStepFoot(null, save));
+    focusField = () => field.input.focus();
+    settingsClaudeFocus = focusField;
   };
   if (settingsClaudeTokenSaved) drawSaved(); else drawForm();
   return box;
@@ -1604,7 +1621,7 @@ function settingsIntgCard({ kind, name, chip, use, need, needClass = '', status 
     alert.why.forEach(part => line.appendChild(typeof part === 'string' ? document.createTextNode(part) : part));
     why.push(line);
     // Claude 로그인 풀림이면 이 카드(렌더가 고른 한 곳)에 두 줄 칸이 이유 줄 바로 아래에 선다.
-    if (settingsClaudeBoxAt === kind && state.claudeAuth && !state.auth) why.push(settingsClaudeTokenBox());
+    if (settingsClaudeBoxAt === kind && state.claudeAuth && !state.auth) why.push(settingsClaudeTokenBox(line));
   } else if (connectedLook && lag.late && lag.late.setup) {
     // 수집이 launchd에 등록돼 있지 않다 — 기다려도 읽지 않으니 할 일을 주황 한 줄로 분명히 말한다.
     const line = settingsEl('d-intgwhy k-warn', SETTINGS_LAG_SETUP);
@@ -2335,14 +2352,15 @@ function settingsSlackCard(data) {
       extra.push(line);
     }
   } else if (connected && (!data.claude || fetchState.claudeAuth)) {
-    const line = settingsEl('d-intgneed k-warn');
+    // 토큰 칸이 떠 있으면(로그인 풀림을 고칠 길이 이미 보인다) 같은 말을 되풀이하지 않고 대안임만 밝힌 조용한 한 줄.
+    const boxShown = !!(data.claude && fetchState.claudeAuth && settingsClaudeBoxAt);
+    const line = settingsEl(boxShown ? 'd-intgnote' : 'd-intgneed k-warn');
     line.dataset.tidy = 'stuck';
     const error = settingsErrorLine();
     const swap = settingsButton('원문 그대로로 바꾸기', 'd-ablink');
     swap.addEventListener('click', () => settingsIntegrationSave({ slack: { tidy: 'raw' } }, { error, button: swap, done: SETTINGS_SLACK_TIDY_DONE.raw }));
-    line.append(document.createTextNode(data.claude
-      ? 'Claude Code 로그인이 풀려 메시지를 다듬지 못하고 있어요 · '
-      : '이 맥에 Claude Code가 없어 메시지를 다듬지 못해요 · '), swap, error);
+    line.append(document.createTextNode(boxShown ? 'Claude 없이 쓰려면 · '
+      : (data.claude ? 'Claude Code 로그인이 풀려 메시지를 다듬지 못하고 있어요 · ' : '이 맥에 Claude Code가 없어 메시지를 다듬지 못해요 · ')), swap, error);
     extra.push(line);
   } else if (!connected && !data.claude) {
     extra.push(settingsEl('d-intgnote', '이 맥에는 Claude Code가 없어서 요약하지 않고 메시지 첫 줄을 그대로 받아요'));
@@ -2437,8 +2455,14 @@ function settingsJiraWizard(card, data) {
         tidied.hidden = false;
       }
     };
-    site.input.addEventListener('input', () => { state.site = site.input.value; tidied.hidden = true; site.input.removeAttribute('aria-invalid'); });
-    site.input.addEventListener('change', tidySite);
+    // 붙여 넣은 순간과 `연결`을 누를 때만 정리한다 — 칸을 벗어날 때(change) 정리하면 안내 줄이 생기며 `연결` 버튼이
+    // 누르는 도중 아래로 밀려 클릭이 빗나갔다. 치는 중에는 건드리지 않는다.
+    site.input.addEventListener('input', (event) => {
+      state.site = site.input.value;
+      tidied.hidden = true;
+      site.input.removeAttribute('aria-invalid');
+      if (event && event.inputType === 'insertFromPaste') tidySite();
+    });
     email.input.addEventListener('input', () => email.input.removeAttribute('aria-invalid'));
     site.wrap.hidden = !state.siteOpen;
     const parts = [email.wrap];
@@ -3123,6 +3147,7 @@ async function renderSettingsIntegrations({ quiet = false } = {}) {
   const lag = settingsIntgLagFrom(data, failing);
   settingsIntgLag = lag;
   settingsClaudeBoxAt = settingsClaudeBoxKind(data);
+  settingsClaudeFocus = null;
   // 로그인 풀림이 풀렸으면(칸이 서지 않으면) 저장 표시도 잊는다 — 다음에 또 풀리면 빈 칸부터.
   if (!settingsClaudeBoxAt) settingsClaudeTokenSaved = false;
   // 톱니바퀴의 주황 점도 방금 읽은 같은 값으로 맞춘다(목록을 다시 읽기 전에도 점과 탭이 같은 말을 하게).

@@ -2713,11 +2713,11 @@ a.d-btn { text-decoration: none; }
   .d-intg { grid-template-columns: minmax(0, 1fr); }
   .d-intg > .d-intgside { grid-column: 1; grid-row: auto; justify-self: stretch; margin-top: 8px; order: 1; }
   .d-intgside .d-istat { margin-right: auto; }
-  .d-intg > .d-intgwhy, .d-intg > .d-intgnote, .d-intg > .d-intgneed, .d-intg > .d-iconfirmslot, .d-intg > .d-intgbody { order: 2; }
+  .d-intg > .d-intgwhy, .d-intg > .d-intgnote, .d-intg > .d-intgneed, .d-intg > .d-iconfirmslot, .d-intg > .d-intgbody, .d-intg > .d-iclaude { order: 2; }
   .d-ich { grid-template-columns: 20px minmax(0, 1fr); }
   .d-ich .nm, .d-ich .nmwrap, .d-ich .lock { grid-column: 2; }
   .d-ich .nmwrap .nm { grid-column: auto; }
-  .d-intgbody { padding: 12px; }
+  .d-intgbody, .d-iclaude { padding: 12px; }
 }
 
 /* 도움말 — 글 폭 제한(64ch)은 문답 글에만. `문제가 생겼어요` 상자·묶음 줄은 창 폭 가득. */

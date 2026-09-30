@@ -7397,9 +7397,11 @@ test('연동 1층-B ①: 지라 주소를 주소창째 붙이면 칸에 `https:/
   const [email, site] = fx.find('jira', 'd-din');
   email.value = 'me@example.test';
   site.value = 'https://mycompany.atlassian.net/jira/software/projects/AB/boards/1?selectedIssue=AB-1';
-  site.listeners.input();
-  site.listeners.change();
-  assert.equal(site.value, 'https://mycompany.atlassian.net', '칸에 정리한 주소를 보인다');
+  site.listeners.input({ inputType: 'insertText' });
+  assert.equal(site.value.length > 40, true, '치는 중에는 건드리지 않는다');
+  assert.equal(site.listeners.change, undefined, '칸을 벗어날 때 정리하지 않는다(안내 줄이 생기며 연결 버튼이 밀려 클릭이 빗나갔다)');
+  site.listeners.input({ inputType: 'insertFromPaste' });
+  assert.equal(site.value, 'https://mycompany.atlassian.net', '붙여 넣은 순간 칸에 정리한 주소를 보인다');
   const tidied = fx.find('jira', 'k-ok')[0];
   assert.equal(tidied.hidden, false);
   assert.equal(tidied.textContent, '주소를 https://mycompany.atlassian.net 으로 정리했어요');
@@ -8863,6 +8865,16 @@ test('Claude 로그인 풀림: 첫 멈춘 카드(슬랙)에 `아래 두 줄이�
   }
   for (const kind of ['slack', 'calendar', 'notes']) assert.equal(fetchButton(fx, kind).textContent, '다시 시도', `${kind}: 토큰 문제가 아니라 다시 연결로 바꾸지 않는다`);
   assert.equal(fx.find('slack', 'd-iclaude').length, 1);
+  // 가리키는 글의 카드 이름은 누르는 밑줄 글자 — 그 카드를 밝히고 토큰 칸에 초점을 둔다
+  const pointer = fx.find('calendar', 'd-intgwhy')[0].children.find(one => String(one.className) === 'd-ablink');
+  assert.equal(pointer.textContent, '슬랙 수집 카드의 두 줄');
+  assert.equal(pointer.type, 'button');
+  const tokenInput = fx.find('slack', 'd-din').find(one => one.getAttribute('aria-label') === 'Claude 로그인 토큰');
+  let focused = 0;
+  tokenInput.focus = () => { focused += 1; };
+  pointer.listeners.click();
+  assert.equal(focused, 1, '토큰 칸에 초점');
+  assert.match(fx.card('slack').className, /\bis-flash\b/, '칸이 있는 카드를 잠깐 밝힌다');
   // 슬랙이 멀쩡하면 다음 멈춘 카드(캘린더)가 칸을 갖는다
   const cal = wpd25({ calendar: { enabled: true, source: 'claude', live: false, readAt: null, fetch }, meetingNotes: { mode: 'tiro', name: '', fetch } });
   await cal.app.run('renderSettingsIntegrations()');
@@ -8880,7 +8892,7 @@ test('Claude 로그인 풀림: 첫 멈춘 카드(슬랙)에 `아래 두 줄이�
   assert.equal(other.find('slack', 'd-iclaude').length, 0);
 });
 
-test('연동 1층-B ②: Claude 로그인 칸 — ① `claude setup-token` 복사 ② 가린 칸에 붙여 저장 → 전용 주소로만 보내고 `저장했어요 — 다시 시도를 눌러 보세요`, 틀리면 서버 문구 그대로(값 없음)', async () => {
+test('연동 1층-B ②: Claude 로그인 칸 — ① `claude setup-token` 복사 ② 가린 칸에 붙여 저장 → 전용 주소로만 보내고 `새 토큰을 저장했어요 — 다시 시도를 눌러 확인해 주세요`(분홍 이유 줄은 감춤), 틀리면 서버 문구 그대로(값 없음)', async () => {
   const fake = 'sk-ant-oat01-FAKE-TEST-ONLY';
   const fetch = { failing: true, auth: false, claudeAuth: true, failedAt: ago(7) };
   const shape = '토큰 사이에 띄어쓰기나 줄바꿈이 있어요 — 터미널에서 한 줄로 다시 복사해 주세요';
@@ -8891,6 +8903,7 @@ test('연동 1층-B ②: Claude 로그인 칸 — ① `claude setup-token` 복�
   await fx.app.run('renderSettingsIntegrations()');
   const box = () => fx.find('slack', 'd-iclaude')[0];
   assert.ok(box());
+  const statBefore = statOf(fx, 'slack');
   const labels = fx.find('slack', 'lb').filter(one => /^[①②]/.test(one.textContent)).map(one => one.textContent);
   same(labels, ['① 터미널에서 이 명령을 실행해요', '② 그 토큰을 여기 붙여 넣어요']);
   const code = fx.find('slack', 'd-icode')[0];
@@ -8925,16 +8938,24 @@ test('연동 1층-B ②: Claude 로그인 칸 — ① `claude setup-token` 복�
   same(sent[1].body, { token: fake });
   assert.equal(fx.sent.filter(one => one.url === '/api/integrations/save').length, 0, '설정 저장·재시작 길을 부르지 않는다');
   assert.equal(input.value, '', '보낸 뒤 칸을 비운다');
-  assert.equal(fx.find('slack', 'd-iok')[0].textContent, '저장했어요 — 다시 시도를 눌러 보세요');
+  assert.equal(fx.find('slack', 'd-iok')[0].textContent, '새 토큰을 저장했어요 — 다시 시도를 눌러 확인해 주세요');
   assert.equal(fx.find('slack', 'd-iok')[0].getAttribute('role'), 'status');
   assert.equal(fx.find('slack', 'd-din').filter(one => one.type === 'password').length, 0, '저장 뒤에는 칸이 없다');
+  const whyLine = () => fx.find('slack', 'd-intgwhy')[0];
+  assert.equal(whyLine().hidden, true, '저장하면 분홍 이유 줄은 감춘다(초록 성공 줄과 부딪히지 않게)');
+  same(statOf(fx, 'slack'), statBefore, '상태 점은 수집이 돌 때까지 그대로');
   assert.equal(String(JSON.stringify(fx.shape("document.getElementById('settingsIntegrationsView')"))).includes('FAKE-TEST-ONLY'), false, '화면 어디에도 값이 없다');
   assert.equal(fx.sent.filter(one => one.url === '/api/integrations/fetch').length, 0, '저장 뒤 자동으로 다시 돌리지 않는다');
   // 다시 그려도(수집이 아직 안 돌아 멈춤 그대로) 저장 줄이 남고, `토큰 다시 붙이기`로 칸을 다시 연다
   await fx.app.run('renderSettingsIntegrations()');
-  assert.equal(fx.find('slack', 'd-iok')[0].textContent, '저장했어요 — 다시 시도를 눌러 보세요');
+  assert.equal(fx.find('slack', 'd-iok')[0].textContent, '새 토큰을 저장했어요 — 다시 시도를 눌러 확인해 주세요');
+  assert.equal(whyLine().hidden, true, '다시 그려도 감춘 채');
   fx.button('slack', '토큰 다시 붙이기').listeners.click();
   assert.equal(fx.find('slack', 'd-iclaude')[0].children.length > 2, true);
+  assert.equal(whyLine().hidden, false, '칸을 다시 열면 이유 줄도 다시');
+  // 좁은 폭(≤520)에서도 칸은 상태 줄·이유 줄 아래(같은 order 2) — 빠지면 칸이 카드 맨 위로 올라갔다
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /\.d-intg > \.d-intgbody, \.d-intg > \.d-iclaude \{ order: 2; \}/);
   assert.ok(fx.button('slack', '저장'));
 });
 
@@ -10076,7 +10097,18 @@ test('Claude로 다듬는 중인데 Claude가 없거나 로그인이 풀려 멈�
 
   const expired = intgClient({ slack: { ...base, fetch: { failing: true, auth: false, claudeAuth: true, failedAt: ago(7) } }, claude: true });
   await expired.app.run('renderSettingsIntegrations()');
-  assert.match(expired.text('slack'), /Claude Code 로그인이 풀려 메시지를 다듬지 못하고 있어요 · 원문 그대로로 바꾸기/);
+  // 토큰 칸이 떠 있으면 같은 말을 되풀이하지 않고 대안임만 밝힌 조용한 한 줄(누르면 같은 저장)
+  assert.match(expired.text('slack'), /Claude 없이 쓰려면 · 원문 그대로로 바꾸기/);
+  assert.doesNotMatch(expired.text('slack'), /로그인이 풀려 메시지를 다듬지/);
+  const alt = expired.find('slack', 'd-intgnote').find(one => one.dataset.tidy === 'stuck');
+  assert.ok(alt, '주황 경고가 아니라 조용한 줄');
+  await expired.button('slack', '원문 그대로로 바꾸기').listeners.click();
+  same(expired.sent.find(one => one.url === '/api/integrations/save').body, { slack: { tidy: 'raw' } });
+  // 칸이 없을 때(로그인 풀림이지만 멈춘 카드가 아님)는 예전 문구·모양 그대로
+  const quiet = intgClient({ slack: { ...base, fetch: { failing: false, auth: false, claudeAuth: true } }, claude: true });
+  await quiet.app.run('renderSettingsIntegrations()');
+  assert.equal(quiet.find('slack', 'd-iclaude').length, 0);
+  assert.match(quiet.text('slack'), /Claude Code 로그인이 풀려 메시지를 다듬지 못하고 있어요 · 원문 그대로로 바꾸기/);
 
   // 아직 연결 전이고 Claude가 없으면 원문으로 받는다는 사실만 한 줄
   const fresh = intgClient({ claude: false });
