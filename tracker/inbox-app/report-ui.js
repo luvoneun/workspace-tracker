@@ -1006,7 +1006,9 @@ function reportCopyButton(item) {
 // `확인 필요 N ›` — 바탕 없는 주황 글자 버튼(`--warn`). 누르면 걸린 문장으로 가서 그 문장 글자에 초점을 둔다(다시 누르면 다음 문장).
 // 옮겨 간 줄은 선택 톤 + 바로 아래 근거 한 줄. 고치던 글은 reportEdits에 남고 입력칸도 닫지 않는다(이동만).
 function reportReviewButton(item) {
-  const count = reportReviewCount(item.draft);
+  // 숫자는 화면이 실제로 들르는 줄 수 — 서버는 접힌 부모 아래 문장을 하나씩 세지만 `›`는 그 부모를 한 번만 들른다.
+  const visits = reportReviewTargets(item.draft).length;
+  const count = visits || reportReviewCount(item.draft);
   const go = reportNode('button', undefined, 'rp-go');
   go.type = 'button';
   go.appendChild(reportNode('span', `확인 필요 ${count}`));
@@ -2312,10 +2314,15 @@ function reportSlackChips(report) {
 function reportMaterialBlock(item) {
   const report = item.draft;
   const pending = report.material && Array.isArray(report.material.pending) && report.confirmed ? report.material.pending : [];
+  // 확정 뒤 새로 들어온 줄 전부(끝낸 일·진행 중·결정 등, 서버의 confirmed.pending — `모두 넣기`(pullNew)가 실제로 넣는 줄 수)와
+  // 그중 끝낸 일이 아닌 줄 수. 끝낸 일은 한 줄씩 `넣기`로도 넣고, 나머지는 `모두 넣기`로만 들어간다.
+  const fresh = report.confirmed && Number.isFinite(report.confirmed.pending) ? report.confirmed.pending : 0;
+  const others = Math.max(0, fresh - (Number.isFinite(report.confirmed && report.confirmed.pendingDone) ? report.confirmed.pendingDone : fresh));
   const excluded = reportExcludedRows(report.rows);
-  if (!pending.length && !excluded.length) return null;
+  if (!pending.length && !fresh && !excluded.length) return null;
   const wrap = reportNode('div', undefined, 'rp-flw');
-  const label = [pending.length ? `보고에 없는 끝낸 일 ${pending.length}` : '', excluded.length ? `뺀 문장 ${excluded.length}` : ''].filter(Boolean).join(' · ');
+  const newText = pending.length ? `보고에 없는 끝낸 일 ${pending.length}${others ? ` · 새 줄 ${others}` : ''}` : fresh ? `보고에 없는 새 줄 ${fresh}` : '';
+  const label = [newText, excluded.length ? `뺀 문장 ${excluded.length}` : ''].filter(Boolean).join(' · ');
   const toggle = reportNode('button', undefined, 'rp-fl');
   toggle.type = 'button';
   toggle.appendChild(reportNode('span', label));
@@ -2333,16 +2340,18 @@ function reportMaterialBlock(item) {
     toggle.setAttribute('aria-expanded', String(reportMaterialOpen));
     body.hidden = !reportMaterialOpen;
   });
-  if (pending.length) {
-    // 2줄 이상이면 그룹 머리 오른쪽에 조용한 글자 버튼 `모두 넣기` — 확정 뒤 새로 들어온 줄을 한 번에 넣는 기존 pullNew 그대로.
-    if (pending.length >= 2) {
+  // `새로 들어온 줄 N 모두 넣기` — 확정 뒤 새로 들어온 줄 전부를 한 번에 새 줄로(기존 pullNew, 이름의 N이 곧 넣는 줄 수).
+  // 두 줄 이상이거나, 한 줄씩 넣기로 못 넣는 줄(진행 중·결정 등)이 있을 때만 선다.
+  if (pending.length || fresh) {
+    const headText = pending.length ? `보고에 없는 끝낸 일 ${pending.length}` : `보고에 없는 새 줄 ${fresh}`;
+    if (fresh >= 2 || fresh > pending.length) {
       const head = reportNode('div', undefined, 'g');
-      head.appendChild(reportNode('span', `보고에 없는 끝낸 일 ${pending.length}`));
-      const all = reportButton('모두 넣기', () => reportChange(item, { action: 'pullNew' }).then(reportMaterialFocus), 'rp-all');
-      all.setAttribute('aria-label', `보고에 없는 끝낸 일 ${pending.length}개 모두 보고에 넣기`);
+      head.appendChild(reportNode('span', headText));
+      const all = reportButton(`새로 들어온 줄 ${fresh} 모두 넣기`, () => reportChange(item, { action: 'pullNew' }).then(reportMaterialFocus), 'rp-all');
+      all.setAttribute('aria-label', `확정 뒤 새로 들어온 줄 ${fresh}개 모두 보고에 넣기`);
       head.appendChild(all);
       body.appendChild(head);
-    } else body.appendChild(reportNode('div', `보고에 없는 끝낸 일 ${pending.length}`, 'g'));
+    } else body.appendChild(reportNode('div', headText, 'g'));
     for (const task of pending) {
       const line = reportNode('div', undefined, 'mr');
       line.appendChild(reportNode('span', task.description, 't'));

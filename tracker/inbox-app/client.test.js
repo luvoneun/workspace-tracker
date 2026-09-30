@@ -13235,8 +13235,9 @@ test('개편 A: 슬랙 카드 맨 위 접힘 줄 — `보고에 없는 끝낸 �
   assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), [{ action: 'pullOne', ids: ['n1'] }, { action: 'exclude', id: 'x1' }]);
   // 확정하지 않은 주·옛 서버(material 없음)는 뺀 문장만, 둘 다 없으면 줄이 없다.
   assert.equal(app.run(`reportMaterialBlock({ ...item, draft: { ...item.draft, confirmed: null } }).children[0].children[0].textContent`), '뺀 문장 1');
-  assert.equal(app.run(`reportMaterialBlock({ ...item, draft: { ...item.draft, material: undefined } }).children[0].children[0].textContent`), '뺀 문장 1');
-  assert.equal(app.run(`reportMaterialBlock({ ...item, draft: { ...item.draft, rows: item.draft.rows.filter(row => !row.excluded), material: { pending: [] } } })`), null);
+  assert.equal(app.run(`reportMaterialBlock({ ...item, draft: { ...item.draft, material: undefined } }).children[0].children[0].textContent`), '보고에 없는 새 줄 1 · 뺀 문장 1',
+    '옛 서버(material 없음)도 확정 뒤 새 줄은 모두 넣기로 넣을 수 있다');
+  assert.equal(app.run(`reportMaterialBlock({ ...item, draft: { ...item.draft, rows: item.draft.rows.filter(row => !row.excluded), material: { pending: [] }, confirmed: { at: 'x', pending: 0, pendingDone: 0 } } })`), null);
   // 머리 ⋯ `제외한 문장 보기`는 이 줄을 펼친다(문서 맨 아래 접힘은 없다).
   app.run('reportMaterialOpen = false');
   const menu = app.run('reportHeadMenuSections(item)');
@@ -13365,13 +13366,14 @@ test('개편 A 검수: 접힘 줄의 `보고에 없는 끝낸 일 N` 머리 오�
   const app = a7Client();
   const two = `{ ...item, draft: { ...item.draft, material: { pending: [
     { id: 'n1', description: '알림 발송 로그 확인', label: '알림 센터', completed: '2026-09-16' },
-    { id: 'n2', description: '가입 카피 최종 확인', label: '가입 개선', completed: '2026-09-17' } ] } } }`;
+    { id: 'n2', description: '가입 카피 최종 확인', label: '가입 개선', completed: '2026-09-17' } ] },
+    confirmed: { at: '2026-09-16T00:00:00Z', pending: 2, pendingDone: 2 } } }`;
   const body = app.run(`reportMaterialBlock(${two})`).children[1];
   const head = body.children[0];
   assert.equal(head.className, 'g');
   assert.equal(head.children[0].textContent, '보고에 없는 끝낸 일 2');
   const all = head.children[1];
-  assert.deepEqual([all.textContent, all.className, all.getAttribute('aria-label')], ['모두 넣기', 'rp-all', '보고에 없는 끝낸 일 2개 모두 보고에 넣기']);
+  assert.deepEqual([all.textContent, all.className, all.getAttribute('aria-label')], ['새로 들어온 줄 2 모두 넣기', 'rp-all', '확정 뒤 새로 들어온 줄 2개 모두 보고에 넣기']);
   await all.listeners.click();
   assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), [{ action: 'pullNew' }]);
   const one = app.run('reportMaterialBlock(item)').children[1].children[0];
@@ -13381,4 +13383,40 @@ test('개편 A 검수: 접힘 줄의 `보고에 없는 끝낸 일 N` 머리 오�
   const ui = REPORT_A7_UI();
   assert.doesNotMatch(ui.slice(ui.indexOf('function reportTopBlock'), ui.indexOf('function reportConfirmedText')), /pullNew/);
   assert.match(ui, /REPORT_MOVE_NOTICE = \{[\s\S]*pullNew: '새로 들어온 줄을 보고에 넣었어요'/, '알림·되돌리기는 기존 그대로');
+});
+
+test('개편 A 99 리뷰 장면①: 확정 뒤 진행 중 업무만 새로 들어오면(끝낸 일 0) 접힘 줄이 `보고에 없는 새 줄 1`로 서고 `새로 들어온 줄 1 모두 넣기`가 pullNew를 보낸다', async () => {
+  const app = a7Client();
+  app.run(`item = { weekKey: '2026-09-14', draft: { revision: 1, rows: [], review: { count: 0, first: null }, material: { pending: [] },
+    confirmed: { at: '2026-09-16T00:00:00Z', pending: 1, pendingDone: 0 } } };`);
+  assert.equal(app.run('reportConfirmedText(item.draft.confirmed)'), '9/16에 확정했어요 · 그 뒤 1줄이 새로 들어왔어요');
+  const block = app.run('reportMaterialBlock(item)');
+  assert.ok(block, '끝낸 일이 0이어도 접힘 줄이 있다');
+  assert.equal(block.children[0].children[0].textContent, '보고에 없는 새 줄 1');
+  const head = block.children[1].children[0];
+  assert.equal(head.children[0].textContent, '보고에 없는 새 줄 1');
+  const all = head.children[1];
+  assert.equal(all.textContent, '새로 들어온 줄 1 모두 넣기', '한 줄씩 넣을 수 없는 줄이 있으면 1줄이어도 선다');
+  await all.listeners.click();
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), [{ action: 'pullNew' }]);
+});
+test('개편 A 99 리뷰 장면②: 끝낸 일 2 + 진행 중 1이면 요약은 `끝낸 일 2 · 새 줄 1`, 전부 넣기 이름은 실제로 넣는 수 `새로 들어온 줄 3 모두 넣기`', () => {
+  const app = a7Client();
+  app.run(`item = { weekKey: '2026-09-14', draft: { revision: 1, rows: [], review: { count: 0, first: null },
+    material: { pending: [{ id: 'n1', description: '가', label: '가입', completed: '2026-09-16' }, { id: 'n2', description: '나', label: '결제', completed: '2026-09-16' }] },
+    confirmed: { at: '2026-09-16T00:00:00Z', pending: 3, pendingDone: 2 } } };`);
+  const block = app.run('reportMaterialBlock(item)');
+  assert.equal(block.children[0].children[0].textContent, '보고에 없는 끝낸 일 2 · 새 줄 1');
+  const body = block.children[1];
+  assert.equal(body.children[0].children[0].textContent, '보고에 없는 끝낸 일 2');
+  assert.equal(body.children[0].children[1].textContent, '새로 들어온 줄 3 모두 넣기');
+  assert.equal(body.children.filter(kid => kid.className === 'mr').length, 2, '한 줄씩 넣기는 끝낸 일만');
+});
+test('개편 A 99 리뷰: `확인 필요 N`의 숫자와 aria의 N은 화면이 실제로 들르는 줄 수(접힌 부모 아래 여럿이면 한 번)', () => {
+  const app = a7Client();
+  app.run(`item.draft.rows.push({ id: 'k2', heading: '완료한 일', group: '운영', groupKey: 'group:운영', text: '가려진 둘째', sourceIds: ['t9'], excluded: false, parent: 'p0', review: { reason: 'marked' } });
+    item.draft.review = { count: 4, first: 's1' }; reportReviewPick = null;`);
+  const button = app.run('reportReviewButton(item)');
+  assert.equal(button.children[0].textContent, '확인 필요 3', '서버 4(가려진 문장 둘) → 들르는 줄 3');
+  assert.equal(button.getAttribute('aria-label'), '확인 필요 3개 중 1번째로 이동');
 });
