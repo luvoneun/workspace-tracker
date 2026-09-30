@@ -49,12 +49,12 @@ const WORDS = {
   pickChannels: '설정 › 연동 › 슬랙 ⋯ › 채널 고르기에서 다시 체크하면 새로 만들어 줘요',
   unreachable: '잠시 뒤 다시 점검해 주세요 — 회사 네트워크(VPN)를 쓰면 연결을 확인해 주세요',
   recentLog: kind => `설정 › 연동 › ${kind} ⋯ › 최근 기록에서 이유를 보고, 카드의 다시 시도를 눌러 주세요`,
-  claudeLogin: '① 터미널에서 claude setup-token → 브라우저에서 허용(토큰은 아직 복사하지 않아요) ② 아래 명령을 복사해 터미널에 붙여 넣고 Enter ③ 1번의 토큰을 복사해 붙여 넣고 Enter → `저장했어요`가 나오면 여기서 다시 점검',
+  claudeLogin: '① 아래 명령을 복사해 터미널에서 실행 → 브라우저에서 허용하면 긴 토큰(sk-ant-…)이 나와요 ② 그 토큰을 복사해 설정 › 연동의 멈춘 카드(`Claude Code 로그인이 풀렸어요`) 칸에 붙여 저장 → 카드의 다시 시도, 그다음 여기서 다시 점검',
   claudeInstall: 'Claude Code를 설치하고 터미널에서 claude → /login으로 로그인해 주세요(docs/연동.md)',
   node: `Node ${NODE_MIN_MAJOR} 이상으로 올린 뒤 업데이트 파일을 다시 실행해 주세요`,
 };
-// docs/연동.md의 "OAuth session expired" 절과 같은 한 줄(토큰은 화면에 보이지 않게 read -s로 받는다).
-const CLAUDE_TOKEN_COMMAND = 'mkdir -p ~/.config && read -s "T?토큰 붙여 넣고 Enter: " && printf \'%s\' "$T" > ~/.config/workspace-claude-token && chmod 600 ~/.config/workspace-claude-token && echo " 저장했어요"';
+// 터미널에서는 이 명령 하나만 — 나온 토큰은 앱의 칸에 붙인다(서버가 0600 파일로 저장, docs/연동.md "OAuth session expired" 절).
+const CLAUDE_TOKEN_COMMAND = 'claude setup-token';
 
 // 경로를 `~`로. 홈 밖이면 그대로.
 function tilde(value, home) {

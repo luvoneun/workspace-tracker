@@ -8516,8 +8516,9 @@ test('WP-D2.5 도움말: `지금 바로 새로 가져오고 싶어요` 문답이
   assert.match(found[2], /다시 연결/);
   const login = faq.flatMap(([, rows]) => rows).find(([question]) => question === 'Claude Code 로그인이 풀렸다고 나와요');
   assert.ok(login, 'Claude 로그인 풀림 문답도 있다');
-  assert.match(login[2], /claude.*\/login/);
-  assert.match(login[2], /claude setup-token/, '반복되면 오래 가는 토큰(1.1.1의 workspace-claude-token)으로 안내한다');
+  assert.match(login[2], /claude setup-token/, '터미널에는 이 명령 하나');
+  assert.match(login[2], /카드의 칸에 붙여 <b>저장<\/b>/, '토큰은 앱 칸에 붙인다');
+  assert.doesNotMatch(login[2], /read -s|printf|~\/\.config|docs\/연동\.md/, '터미널 긴 명령·파일 경로 안내는 없다');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -8845,7 +8846,7 @@ test('WP-E A·B. 맨 위 요약(카드와 같은 점·말): 정상이면 `N개 �
   same(failing({ ...WPD25_CONNECTED, calendar: { enabled: true, source: 'ical', readAt: null, failed: true } }), ['calendar'], '비밀 주소를 한 번도 못 읽었으면 멈춘 것');
 });
 
-test('Claude 로그인 풀림: 슬랙·캘린더(Claude)·회의록 카드의 이유 한 줄은 `터미널에서 claude → /login` 안내, 버튼은 `다시 시도` 그대로', async () => {
+test('Claude 로그인 풀림: 첫 멈춘 카드(슬랙)에 `아래 두 줄이면 다시 돼요` + 두 줄 칸, 캘린더(Claude)·회의록은 그 카드를 가리키고, 버튼은 `다시 시도` 그대로', async () => {
   const expired = 'Failed to authenticate. API Error: 401 OAuth session expired and could not be refreshed';
   const fetch = { failing: true, auth: false, claudeAuth: true, failedAt: ago(7), summary: expired };
   const fx = wpd25({
@@ -8855,14 +8856,86 @@ test('Claude 로그인 풀림: 슬랙·캘린더(Claude)·회의록 카드의 �
   });
   await fx.app.run('renderSettingsIntegrations()');
   const why = kind => fx.find(kind, 'd-intgwhy')[0].children.map(one => one.textContent).join('');
-  for (const kind of ['slack', 'calendar', 'notes']) {
-    assert.equal(why(kind), '자동 수집이 쓰는 Claude Code 로그인이 풀렸어요 — 도움말 “Claude Code 로그인이 풀렸다고 나와요”대로 다시 로그인해 주세요', kind);
-    assert.equal(fetchButton(fx, kind).textContent, '다시 시도', `${kind}: 토큰 문제가 아니라 다시 연결로 바꾸지 않는다`);
+  assert.equal(why('slack'), 'Claude Code 로그인이 풀렸어요 — 아래 두 줄이면 다시 돼요');
+  for (const kind of ['calendar', 'notes']) {
+    assert.equal(why(kind), 'Claude Code 로그인이 풀렸어요 — 슬랙 수집 카드의 두 줄대로 하면 여기도 함께 다시 돼요', kind);
+    assert.equal(fx.find(kind, 'd-iclaude').length, 0, `${kind}: 칸은 한 곳에만`);
   }
+  for (const kind of ['slack', 'calendar', 'notes']) assert.equal(fetchButton(fx, kind).textContent, '다시 시도', `${kind}: 토큰 문제가 아니라 다시 연결로 바꾸지 않는다`);
+  assert.equal(fx.find('slack', 'd-iclaude').length, 1);
+  // 슬랙이 멀쩡하면 다음 멈춘 카드(캘린더)가 칸을 갖는다
+  const cal = wpd25({ calendar: { enabled: true, source: 'claude', live: false, readAt: null, fetch }, meetingNotes: { mode: 'tiro', name: '', fetch } });
+  await cal.app.run('renderSettingsIntegrations()');
+  assert.equal(cal.find('calendar', 'd-iclaude').length, 1);
+  assert.match(cal.find('notes', 'd-intgwhy')[0].children.map(one => one.textContent).join(''), /캘린더 카드의 두 줄대로/);
+  // 이 맥에 Claude Code가 없으면(claudeInstalled 규칙) 칸이 서지 않고 도움말로 안내한다
+  const none = wpd25({ claude: false, meetingNotes: { mode: 'tiro', name: '', fetch } });
+  await none.app.run('renderSettingsIntegrations()');
+  assert.equal(none.find('notes', 'd-iclaude').length, 0);
+  assert.equal(none.find('notes', 'd-intgwhy')[0].children.map(one => one.textContent).join(''), '자동 수집이 쓰는 Claude Code 로그인이 풀렸어요 — 도움말 “Claude Code 로그인이 풀렸다고 나와요”대로 다시 로그인해 주세요');
   // 서버가 claudeAuth를 주지 않으면(가장 최근 실패가 다른 이유) 예전처럼 최근 기록으로 안내한다
   const other = wpd25({ slack: { ...WPD25_CONNECTED.slack, fetch: { ...fetch, claudeAuth: false, summary: 'my-todo 채널 확인 실패 — fetch 실패 (exit 28)' } } });
   await other.app.run('renderSettingsIntegrations()');
   assert.equal(other.find('slack', 'd-intgwhy')[0].children.map(one => one.textContent).join(''), '슬랙이 응답하지 않았어요 — 다시 시도해도 안 되면 ⋯ › 최근 기록');
+  assert.equal(other.find('slack', 'd-iclaude').length, 0);
+});
+
+test('연동 1층-B ②: Claude 로그인 칸 — ① `claude setup-token` 복사 ② 가린 칸에 붙여 저장 → 전용 주소로만 보내고 `저장했어요 — 다시 시도를 눌러 보세요`, 틀리면 서버 문구 그대로(값 없음)', async () => {
+  const fake = 'sk-ant-oat01-FAKE-TEST-ONLY';
+  const fetch = { failing: true, auth: false, claudeAuth: true, failedAt: ago(7) };
+  const shape = '토큰 사이에 띄어쓰기나 줄바꿈이 있어요 — 터미널에서 한 줄로 다시 복사해 주세요';
+  const fx = wpd25({ slack: { ...WPD25_CONNECTED.slack, fetch } }, [
+    { status: 400, body: { ok: false, code: 'claude_space', error: shape } },
+    { body: { ok: true, saved: true } },
+  ]);
+  await fx.app.run('renderSettingsIntegrations()');
+  const box = () => fx.find('slack', 'd-iclaude')[0];
+  assert.ok(box());
+  const labels = fx.find('slack', 'lb').filter(one => /^[①②]/.test(one.textContent)).map(one => one.textContent);
+  same(labels, ['① 터미널에서 이 명령을 실행해요', '② 그 토큰을 여기 붙여 넣어요']);
+  const code = fx.find('slack', 'd-icode')[0];
+  assert.equal(code.children[0].textContent, 'claude setup-token', '터미널에는 이 명령 하나만');
+  await code.children[1].listeners.click();
+  same(fx.copied, ['claude setup-token']);
+  const input = fx.find('slack', 'd-din').find(one => one.getAttribute('aria-label') === 'Claude 로그인 토큰');
+  assert.equal(input.type, 'password', '토큰 칸은 가린다');
+  assert.equal(input.getAttribute('autocomplete'), 'off');
+  const text = fx.text('slack');
+  assert.match(text, /브라우저에서 허용하면 터미널에 긴 토큰\(sk-ant-oat…\)이 나와요/);
+  assert.match(text, /이 맥의 파일에만 저장하고 화면·로그에는 다시 나오지 않아요/);
+  assert.doesNotMatch(text, /read -s|printf|chmod|workspace-claude-token/, '긴 터미널 명령은 없다');
+
+  // 빈 칸 — 서버에 보내지 않는다
+  await fx.button('slack', '저장').listeners.click();
+  const errors = () => fx.find('slack', 'd-derr').map(one => one.textContent).filter(Boolean);
+  same(errors(), ['claude setup-token이 보여 준 토큰을 붙여 넣어 주세요']);
+  assert.equal(fx.sent.filter(one => one.url === '/api/integrations/claude-token').length, 0);
+
+  // 모양 틀림 — 서버 문구 그대로, 칸이 붉다
+  input.value = 'sk-ant-oat01 FAKE';
+  await fx.button('slack', '저장').listeners.click();
+  same(errors(), [shape]);
+  assert.equal(input.getAttribute('aria-invalid'), 'true');
+
+  // 저장 — 전용 주소 하나로만(연동 저장은 부르지 않는다), 저장 뒤 칸을 비우고 안내 한 줄
+  input.value = `  ${fake}  `;
+  await fx.button('slack', '저장').listeners.click();
+  const sent = fx.sent.filter(one => one.url === '/api/integrations/claude-token');
+  assert.equal(sent.length, 2);
+  same(sent[1].body, { token: fake });
+  assert.equal(fx.sent.filter(one => one.url === '/api/integrations/save').length, 0, '설정 저장·재시작 길을 부르지 않는다');
+  assert.equal(input.value, '', '보낸 뒤 칸을 비운다');
+  assert.equal(fx.find('slack', 'd-iok')[0].textContent, '저장했어요 — 다시 시도를 눌러 보세요');
+  assert.equal(fx.find('slack', 'd-iok')[0].getAttribute('role'), 'status');
+  assert.equal(fx.find('slack', 'd-din').filter(one => one.type === 'password').length, 0, '저장 뒤에는 칸이 없다');
+  assert.equal(String(JSON.stringify(fx.shape("document.getElementById('settingsIntegrationsView')"))).includes('FAKE-TEST-ONLY'), false, '화면 어디에도 값이 없다');
+  assert.equal(fx.sent.filter(one => one.url === '/api/integrations/fetch').length, 0, '저장 뒤 자동으로 다시 돌리지 않는다');
+  // 다시 그려도(수집이 아직 안 돌아 멈춤 그대로) 저장 줄이 남고, `토큰 다시 붙이기`로 칸을 다시 연다
+  await fx.app.run('renderSettingsIntegrations()');
+  assert.equal(fx.find('slack', 'd-iok')[0].textContent, '저장했어요 — 다시 시도를 눌러 보세요');
+  fx.button('slack', '토큰 다시 붙이기').listeners.click();
+  assert.equal(fx.find('slack', 'd-iclaude')[0].children.length > 2, true);
+  assert.ok(fx.button('slack', '저장'));
 });
 
 test('WP-E B. 빨간 점을 누르면 연동 탭으로 열고 멈춘 카드만 약 2초 붉게(is-flash), 파란 점만 있으면 앱 탭', async () => {
@@ -9651,7 +9724,7 @@ const SC_BAD = {
   items: [
     { key: 'version', label: '앱 버전', state: 'ok', detail: 'v1.1.5 · 최신이에요' },
     { key: 'install', label: '설치 위치', state: 'ok', detail: '~/workspace' },
-    { key: 'claude', label: 'Claude Code 로그인', state: 'bad', detail: '최근 슬랙 수집이 "로그인이 풀렸어요"로 실패했어요 · 오늘 10:05 기준', fix: { text: '① 터미널에서 claude setup-token', command: 'mkdir -p ~/.config && read -s "T?토큰" && echo 저장' } },
+    { key: 'claude', label: 'Claude Code 로그인', state: 'bad', detail: '최근 슬랙 수집이 "로그인이 풀렸어요"로 실패했어요 · 오늘 10:05 기준', fix: { text: '① 아래 명령을 복사해 터미널에서 실행 ② 그 토큰을 설정 › 연동의 멈춘 카드 칸에 붙여 저장', command: 'claude setup-token' } },
     { key: 'slack_channels', label: '슬랙 채널', state: 'ok', detail: '#hana-todo 외 1개 · 모두 읽혀요', copy: '켜진 채널 2개 · 모두 읽혀요' },
     { key: 'slack', label: '슬랙 수집', state: 'bad', sameAs: 'claude', detail: 'Claude Code 로그인이 풀려서 멈췄어요', lag: 'slack' },
     { key: 'jira', label: '지라', state: 'ok', detail: '하나님 · 방금 확인', copy: '연결돼요 · 방금 확인', lag: 'jira' },
@@ -9725,7 +9798,7 @@ test('WP-K B. 문제가 있을 때: 요약은 ✗만 센다(같은 원인은 한
   assert.equal(command.className, 'd-icode');
   assert.equal(command.children[1].textContent, '명령 복사');
   await command.children[1].listeners.click();
-  same(fx.copied, ['mkdir -p ~/.config && read -s "T?토큰" && echo 저장']);
+  same(fx.copied, ['claude setup-token']);
   // 업데이트 파일은 무엇인지 + 한 줄 명령 + Finder 길
   const upd = rows[6].children[3];
   assert.match(upd.children[1].textContent, /업데이트 파일\(앱을 새로 받고 다시 켜 주는 파일\)/);

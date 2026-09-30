@@ -135,6 +135,25 @@ module.exports = function integrationsRoutes(req, res, url, ctx) {
     return true;
   }
 
+  // Claude 로그인 토큰 저장 — `claude setup-token`이 보여 준 한 줄을 0600 파일 하나에만 쓴다(integrations.saveClaudeToken).
+  // 연동 저장과 따로 둔다: config를 읽지도 쓰지도 않고, 서버를 다시 켜지 않고, 등록 요청도 프로세스 실행도 없다.
+  // 응답은 `{ ok, saved }`뿐이고 값을 읽어 주는 길은 없다. 오류 문구는 우리 문구(값 없음)만 싣는다 —
+  // JSON이 깨졌거나 너무 크면(본문 일부가 섞일 수 있는 오류 메시지) 한 줄로만 답한다.
+  if (url.pathname === '/api/integrations/claude-token' && req.method === 'POST') {
+    readBody(req, 16 * 1024)
+      .then(body => integrations.saveClaudeToken({ body }))
+      .then((result) => {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(result));
+      })
+      .catch((error) => {
+        const ours = error && error.status === 400 && typeof error.code === 'string' && error.code.startsWith('claude_');
+        res.writeHead(ours ? 400 : (error && error.status === 413 ? 413 : 400), { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(ours ? { ok: false, error: error.message, code: error.code } : { ok: false, error: '저장하지 못했어요 — 다시 눌러 주세요' }));
+      });
+    return true;
+  }
+
   // 슬랙 비공개 채널 대신 만들기 — `설정 > 연동 > 슬랙 수집` 위저드의 ② 채널이 고른 채널마다 한 번씩 부른다.
   // 여기서는 **아무 파일도 쓰지 않는다**: 토큰은 슬랙 헤더로만 나가고, 만든 채널의 id·이름만 돌려준다
   // (그 id를 화면이 ③ 확인의 `연결`에 실어 보내고, 저장은 예전대로 `/api/integrations/save`만 한다).

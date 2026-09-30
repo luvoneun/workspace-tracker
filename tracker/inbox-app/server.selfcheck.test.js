@@ -237,8 +237,10 @@ test('WP-K 점검: 고치는 법 — 토큰 만료·Claude 로그인(명령)·�
   const claude = byKey(result, 'claude');
   assert.equal(claude.state, 'bad');
   assert.match(claude.detail, /^최근 슬랙 수집이 "로그인이 풀렸어요"로 실패했어요 · .* 기준$/);
-  assert.match(claude.fix.command, /workspace-claude-token/);
-  assert.match(claude.fix.text, /claude setup-token/);
+  assert.equal(claude.fix.command, 'claude setup-token', '터미널에는 이 명령 하나만(긴 저장 명령은 없다)');
+  assert.match(claude.fix.text, /설정 › 연동의 멈춘 카드/);
+  assert.match(claude.fix.text, /칸에 붙여 저장/);
+  assert.doesNotMatch(claude.fix.text, /read -s|printf|chmod/);
   const collect = byKey(result, 'slack');
   assert.deepEqual([collect.state, collect.sameAs], ['bad', 'claude'], '수집이 멈춘 원인이 Claude 로그인이면 그 줄을 가리킨다');
   const agents = byKey(result, 'agents');

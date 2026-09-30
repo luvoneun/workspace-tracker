@@ -1402,3 +1402,144 @@ test('이미 있는 채널 저장: existing 표시가 없어도 만든 지 한 �
   });
   assert.equal(fix.read().slack.channels.todo.since, '1790000123.456000', '예전 메시지를 한꺼번에 가져오지 않는다');
 });
+
+// ---------- Claude 로그인 토큰(연동 1층-B ②) ----------
+// 값은 전부 **명백한 가짜**다. 실패 메시지에도 값이 나오지 않게 `includes` 결과만 단언한다(값을 메시지에 싣지 않는다).
+const FAKE_CLAUDE = `sk-ant-oat01-FAKE-TEST-ONLY-${'x'.repeat(40)}`;
+const noSecret = (text, label) => assert.equal(String(text).includes('FAKE-TEST-ONLY'), false, label);
+
+test('Claude 토큰 저장: 임시 토큰 폴더의 파일 하나에만 0600으로 쓰고(있던 파일도 덮어쓰고 권한 재조임), config는 안 건드리며 응답에 값이 없다', async (t) => {
+  const fix = integrationsFixture(t, { title: '그대로', integrations: { slack: true } });
+  const before = fs.readFileSync(fix.configPath, 'utf8');
+  const file = path.join(fix.tokenDir, 'workspace-claude-token');
+  assert.equal(integrationsStore.tokenPaths(fix.tokenDir).claude.file, file, '임시 폴더 안 자리');
+  assert.equal(integrationsStore.tokenPaths(fix.tokenDir).claude.config, undefined, 'config에 적을 경로가 없다');
+
+  const result = integrationsStore.saveClaudeToken({ body: { token: `  ${FAKE_CLAUDE}\n` }, tokenDir: fix.tokenDir });
+  assert.deepEqual(result, { ok: true, saved: true });
+  noSecret(JSON.stringify(result), '돌려주는 값에 토큰이 없다');
+  assert.equal(fs.readFileSync(file, 'utf8') === `${FAKE_CLAUDE}\n`, true, '앞뒤 공백은 떼고 한 줄(run-task.sh가 공백을 빼고 읽는 모양)');
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  assert.equal(fs.readFileSync(fix.configPath, 'utf8'), before, 'config는 한 글자도 바뀌지 않는다');
+  assert.deepEqual(fs.readdirSync(fix.tokenDir), ['workspace-claude-token'], '다른 파일은 만들지 않는다');
+
+  // 이미 있던 파일(느슨한 권한)도 덮어쓰고 0600으로 다시 조인다
+  fs.writeFileSync(file, 'sk-ant-old-FAKE-TEST-ONLY\n');
+  fs.chmodSync(file, 0o644);
+  integrationsStore.saveClaudeToken({ body: { token: `${FAKE_CLAUDE}2` }, tokenDir: fix.tokenDir });
+  assert.equal(fs.readFileSync(file, 'utf8') === `${FAKE_CLAUDE}2\n`, true);
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600, '있던 파일도 0600');
+});
+
+test('Claude 토큰 저장: 빈 값·공백/줄바꿈·형식 아님·너무 긴 값은 거절하고, 문구에 값이 없으며 파일을 만들지 않는다', async (t) => {
+  const fix = integrationsFixture(t, {});
+  const file = path.join(fix.tokenDir, 'workspace-claude-token');
+  const cases = [
+    [{}, 'claude_empty'], [{ token: '' }, 'claude_empty'], [{ token: '   \n ' }, 'claude_empty'], [{ token: 42 }, 'claude_empty'], [null, 'claude_empty'],
+    [{ token: 'sk-ant-FAKE-TEST-ONLY part2' }, 'claude_space'],
+    [{ token: 'sk-ant-FAKE-TEST-ONLY\npart2' }, 'claude_space'],
+    [{ token: 'sk-ant-FAKE-TEST-ONLY\tpart2' }, 'claude_space'],
+    [{ token: 'xoxp-FAKE-TEST-ONLY' }, 'claude_shape'],
+    [{ token: 'sk-ant-' }, 'claude_shape'],
+    [{ token: 'sk-ant-FAKE-TEST-ONLY-토큰' }, 'claude_shape'],
+    [{ token: `sk-ant-FAKE-TEST-ONLY${'y'.repeat(integrationsStore.CLAUDE_TOKEN_MAX)}` }, 'claude_long'],
+  ];
+  for (const [body, code] of cases) {
+    let caught = null;
+    try { integrationsStore.saveClaudeToken({ body, tokenDir: fix.tokenDir }); } catch (error) { caught = error; }
+    assert.ok(caught, `거절: ${code}`);
+    assert.equal(caught.code, code);
+    assert.equal(caught.status, 400);
+    noSecret(caught.message, `문구에 값이 없다: ${code}`);
+    assert.ok(!/part2|yyyy|xoxp|토큰-/.test(caught.message), `문구에 값 조각이 없다: ${code}`);
+  }
+  assert.equal(fs.existsSync(file), false, '거절하면 파일을 만들지 않는다');
+  // 딱 상한 길이는 받는다
+  const edge = `sk-ant-FAKE-TEST-ONLY${'z'.repeat(integrationsStore.CLAUDE_TOKEN_MAX - 21)}`;
+  assert.equal(edge.length, integrationsStore.CLAUDE_TOKEN_MAX);
+  integrationsStore.saveClaudeToken({ body: { token: edge }, tokenDir: fix.tokenDir });
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+});
+
+test('Claude 토큰 라우트: 저장은 {ok, saved}만, 다른 Origin·깨진 본문은 거절, 응답·서버 로그·연동 상태·config에 값이 없고 읽는 길도 없다', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-claude-token-route-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const data = path.join(home, 'tracker');
+  fs.mkdirSync(data);
+  const config = path.join(home, 'workspace.config.json');
+  const tokens = path.join(home, 'tokens');
+  fs.writeFileSync(config, JSON.stringify({ title: '그대로', integrations: { slack: false, calendar: false, jira: false, tiro: false } }, null, 2));
+  const configBefore = fs.readFileSync(config, 'utf8');
+  const automation = path.join(home, 'automation');
+  const app = await startAppServer(t, { WORKSPACE_DATA_DIR: data, WORKSPACE_CONFIG: config, WORKSPACE_TOKEN_DIR: tokens, WORKSPACE_AUTOMATION_DIR: automation });
+  const file = path.join(tokens, 'workspace-claude-token');
+  const send = (body, headers = {}) => fetch(app.base + '/api/integrations/claude-token', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: typeof body === 'string' ? body : JSON.stringify(body),
+  });
+
+  // 다른 Origin — 기존 방어(safeHandle) 그대로 403, 파일을 만들지 않는다
+  const foreign = await send({ token: FAKE_CLAUDE }, { Origin: 'https://untrusted.example' });
+  assert.equal(foreign.status, 403);
+  noSecret(await foreign.text(), '거절 응답에 값이 없다');
+  assert.equal(fs.existsSync(file), false);
+
+  // 모양 틀림 — 우리 문구 그대로(값 없음)
+  const wrong = await send({ token: 'sk-ant-FAKE-TEST-ONLY with space' });
+  assert.equal(wrong.status, 400);
+  const wrongBody = await wrong.text();
+  noSecret(wrongBody, '거절 문구에 값이 없다');
+  assert.equal(JSON.parse(wrongBody).code, 'claude_space');
+  assert.equal(fs.existsSync(file), false);
+
+  // 깨진 JSON(본문 일부가 오류 메시지에 섞일 수 있다) — 한 줄 문구만
+  const broken = await send(`{"token":"${FAKE_CLAUDE}`);
+  assert.equal(broken.status, 400);
+  const brokenBody = await broken.text();
+  noSecret(brokenBody, '깨진 본문의 조각이 응답에 없다');
+  assert.equal(JSON.parse(brokenBody).error, '저장하지 못했어요 — 다시 눌러 주세요');
+  // 짧은 깨진 본문은 JSON.parse 오류 메시지가 본문을 그대로 싣는다 — 그 메시지를 돌려주지 않는다
+  let echoed = '';
+  try { JSON.parse('xFAKE-TEST-ONLY'); } catch (error) { echoed = error.message; }
+  assert.equal(echoed.includes('FAKE-TEST-ONLY'), true, '전제: 파서 메시지는 본문을 싣는다');
+  const shortBroken = await send('xFAKE-TEST-ONLY');
+  assert.equal(shortBroken.status, 400);
+  noSecret(await shortBroken.text(), '파서 메시지를 그대로 돌려주지 않는다');
+
+  // 너무 큰 본문
+  const huge = await send({ token: `sk-ant-FAKE-TEST-ONLY${'q'.repeat(20000)}` });
+  assert.ok(huge.status === 413 || huge.status === 400);
+  noSecret(await huge.text(), '너무 큰 본문 응답에 값이 없다');
+  assert.equal(fs.existsSync(file), false);
+
+  // 저장
+  const ok = await send({ token: FAKE_CLAUDE });
+  assert.equal(ok.status, 200);
+  const okText = await ok.text();
+  noSecret(okText, '성공 응답에 값이 없다');
+  assert.deepEqual(JSON.parse(okText), { ok: true, saved: true });
+  assert.equal(fs.readFileSync(file, 'utf8') === `${FAKE_CLAUDE}\n`, true);
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  assert.equal(fs.readFileSync(config, 'utf8'), configBefore, 'config는 그대로');
+  assert.equal(fs.existsSync(path.join(automation, 'requests', 'apply.request')), false, '등록 요청 파일을 쓰지 않는다');
+
+  // 읽는 길이 없다 — GET은 이 경로가 아니고, 연동 상태에도 값이 없다
+  const read = await fetch(app.base + '/api/integrations/claude-token');
+  assert.notEqual(read.status, 200);
+  noSecret(await read.text(), 'GET 응답에 값이 없다');
+  const state = await fetch(app.base + '/api/integrations');
+  noSecret(await state.text(), '연동 상태에 값이 없다');
+  noSecret(app.log(), '서버 로그에 값이 없다');
+  assert.ok((await fetch(app.base + '/api/about')).ok, '저장 뒤에도 서버는 그대로 떠 있다(다시 켜지 않는다)');
+});
+
+test('Claude 토큰 라우트는 프로세스를 띄우지 않고 설정·등록·재시작 길을 부르지 않는다(코드 모양)', () => {
+  const routes = fs.readFileSync(path.join(__dirname, 'routes-integrations.js'), 'utf8');
+  const start = routes.indexOf("url.pathname === '/api/integrations/claude-token'");
+  assert.ok(start > 0);
+  const route = routes.slice(start, routes.indexOf('return true;', start));
+  assert.ok(!/exec|spawn|child_process|requestApply|scheduleRestart|currentConfigFile|saveIntegrations|console\./.test(route), '파일 하나만 쓴다');
+  const source = fs.readFileSync(path.join(__dirname, 'integrations.js'), 'utf8');
+  const fn = source.slice(source.indexOf('function saveClaudeToken'), source.indexOf('\n}\n', source.indexOf('function saveClaudeToken')));
+  assert.ok(!/exec|spawn|atomicWrite|configPath|console\./.test(fn));
+  assert.ok(!/require\(['"](node:)?child_process['"]\)/.test(source), 'integrations.js는 child_process를 읽지 않는다');
+});

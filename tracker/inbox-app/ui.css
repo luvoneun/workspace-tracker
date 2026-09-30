@@ -2603,10 +2603,11 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-intgneed.k-warn { color: var(--warn); }
 .d-intgneed.k-warn .d-ablink { color: var(--warn); }
 .d-intgnote { margin-top: 6px; font-size: 12.5px; color: var(--dim); }
-.d-intgbody { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; padding: 14px; background: var(--field); border-radius: var(--r-sm); }
-.d-intgbody .d-din { background: var(--surface); }
+/* Claude 로그인 토큰 칸(.d-iclaude)은 이유 줄 아래 늘 펼친 위저드 판과 같은 모양이다. */
+.d-intgbody, .d-iclaude { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; padding: 14px; background: var(--field); border-radius: var(--r-sm); }
+.d-intgbody .d-din, .d-iclaude .d-din { background: var(--surface); }
 .d-intgbody > .d-btn, .d-intgbody > a.d-btn { align-self: flex-start; }
-.d-intgbody .d-derr { margin: 0; }
+.d-intgbody .d-derr, .d-iclaude .d-derr { margin: 0; }
 .d-ifield { display: block; }
 .d-ifield .lb { display: block; margin-bottom: 4px; font-size: var(--fs-cap); font-weight: 600; color: var(--muted); }
 .d-ifield .d-din { width: 100%; box-sizing: border-box; }

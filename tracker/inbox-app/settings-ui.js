@@ -1333,9 +1333,18 @@ function settingsFailWords(text) {
 // 막힌 카드의 이유 한 줄. 토큰 문제면 버튼이 이미 `다시 연결`이라 그 말을, 계속 실패(서버의 `stuck`)라 버튼이
 // `다시 연결`이면(`reconnect` — 그 카드에 다시 연결 위저드가 있을 때) 그 말로 끝맺고, 아니면 최근 기록으로 안내한다.
 // 가장 최근 실패가 이 맥의 Claude Code 로그인 풀림(서버의 `claudeAuth`)이면 할 일 한 줄 — 버튼은 `다시 시도` 그대로다.
+// 이 맥에 Claude Code가 있으면 멈춘 카드 하나(슬랙 수집 → 캘린더 → 회의록 차례의 첫 카드)에 두 줄 칸이 선다
+// (`settingsClaudeTokenBox` — 토큰 하나가 셋을 함께 고친다). 다른 멈춘 카드는 그 카드를 가리킨다. 칸이 없을 때만 도움말로.
 const SETTINGS_CLAUDE_LOGIN = '자동 수집이 쓰는 Claude Code 로그인이 풀렸어요 — 도움말 “Claude Code 로그인이 풀렸다고 나와요”대로 다시 로그인해 주세요';
+const SETTINGS_CLAUDE_LOGIN_HERE = 'Claude Code 로그인이 풀렸어요 — 아래 두 줄이면 다시 돼요';
+const SETTINGS_CLAUDE_BOX_NAMES = { slack: '슬랙 수집', calendar: '캘린더', notes: '회의록' };
+const SETTINGS_CLAUDE_TOKEN_SAVED = '저장했어요 — 다시 시도를 눌러 보세요';
 function settingsFailWhy(kind, state = {}, { reconnect = false } = {}) {
-  if (state.claudeAuth && !state.auth) return [SETTINGS_CLAUDE_LOGIN];
+  if (state.claudeAuth && !state.auth) {
+    if (!settingsClaudeBoxAt) return [SETTINGS_CLAUDE_LOGIN];
+    if (settingsClaudeBoxAt === kind) return [SETTINGS_CLAUDE_LOGIN_HERE];
+    return [`Claude Code 로그인이 풀렸어요 — ${SETTINGS_CLAUDE_BOX_NAMES[settingsClaudeBoxAt]} 카드의 두 줄대로 하면 여기도 함께 다시 돼요`];
+  }
   if (state.auth) {
     return [kind === 'calendar'
       ? '비밀 주소를 읽을 수 없어요 — 다시 연결을 누르면 주소를 다시 붙여요'
@@ -1345,6 +1354,68 @@ function settingsFailWhy(kind, state = {}, { reconnect = false } = {}) {
   const reason = state.summary ? settingsFailWords(state.summary) : (words[kind] || '읽지 못했어요');
   if (state.stuck && reconnect) return [`${reason} — 계속 안 돼요. 다시 연결을 눌러 주세요(원래 오류는 ⋯ › 최근 기록)`];
   return [`${reason} — 다시 시도해도 안 되면 ⋯ › 최근 기록`];
+}
+
+// Claude 로그인 토큰 칸이 설 카드(렌더마다 정한다) — 이 맥에 Claude Code가 있고(`data.claude`), 멈춘 카드 중
+// 가장 최근 실패가 로그인 풀림(`claudeAuth`, 토큰 문제 아님)인 첫 카드. 없으면 null(칸이 서지 않는다).
+let settingsClaudeBoxAt = null;
+// 이 화면에서 한 번 저장했으면(화면 메모리만) 다시 그려도 칸 대신 `저장했어요` 줄을 보인다 — 다음 수집이 돌기 전까지는 멈춤이 그대로라서.
+let settingsClaudeTokenSaved = false;
+function settingsClaudeBoxKind(data) {
+  if (!data || data.claude !== true) return null;
+  const failing = settingsIntgFailing(data);
+  const states = { slack: (data.slack || {}).fetch, calendar: (data.calendar || {}).fetch, notes: (data.meetingNotes || {}).fetch };
+  return ['slack', 'calendar', 'notes'].find(key => failing.includes(key) && states[key] && states[key].claudeAuth && !states[key].auth) || null;
+}
+
+// 두 줄 칸 — ① 터미널에서 `claude setup-token`(복사) ② 나온 토큰을 붙여 `저장`. 서버가 0600 파일 하나에만 쓰고
+// (`POST /api/integrations/claude-token`) 값은 어디서도 다시 돌려주지 않는다. 저장 뒤 자동으로 다시 돌리지 않는다(안내만).
+function settingsClaudeTokenBox() {
+  const box = settingsEl('d-iclaude');
+  box.dataset.claude = 'token';
+  const drawSaved = () => {
+    const line = settingsEl('d-iok', SETTINGS_CLAUDE_TOKEN_SAVED);
+    line.setAttribute('role', 'status');
+    const again = settingsEl('d-ismall');
+    again.appendChild(settingsButton('토큰 다시 붙이기', 'd-ablink', () => { settingsClaudeTokenSaved = false; drawForm(); }));
+    box.replaceChildren(line, again);
+  };
+  const drawForm = () => {
+    const one = settingsEl('d-ifield');
+    const oneLabel = document.createElement('span');
+    oneLabel.className = 'lb';
+    oneLabel.textContent = '① 터미널에서 이 명령을 실행해요';
+    one.append(oneLabel, settingsCodeLine('claude setup-token'), settingsEl('d-hint', '브라우저에서 허용하면 터미널에 긴 토큰(sk-ant-oat…)이 나와요'));
+    const field = settingsField('② 그 토큰을 여기 붙여 넣어요', { type: 'password', placeholder: '붙여 넣기', hint: '이 맥의 파일에만 저장하고 화면·로그에는 다시 나오지 않아요' });
+    field.input.setAttribute('aria-label', 'Claude 로그인 토큰');
+    field.input.setAttribute('autocomplete', 'off');
+    const error = settingsErrorLine();
+    const save = settingsButton('저장', 'd-btn pri');
+    const run = async () => {
+      const value = String(field.input.value || '').trim();
+      error.textContent = '';
+      field.input.removeAttribute('aria-invalid');
+      if (!value) { error.textContent = 'claude setup-token이 보여 준 토큰을 붙여 넣어 주세요'; field.input.focus(); return; }
+      save.disabled = true;
+      const result = await settingsIntegrationAsk('/api/integrations/claude-token', { token: value }, '저장하지 못했어요 — 다시 눌러 주세요');
+      save.disabled = false;
+      if (!result.ok) {
+        error.textContent = result.error;
+        field.input.setAttribute('aria-invalid', 'true');
+        field.input.focus();
+        return;
+      }
+      field.input.value = '';
+      settingsClaudeTokenSaved = true;
+      drawSaved();
+    };
+    save.addEventListener('click', run);
+    settingsOnEnter(field.input, run);
+    field.input.addEventListener('input', () => field.input.removeAttribute('aria-invalid'));
+    box.replaceChildren(one, field.wrap, error, settingsStepFoot(null, save));
+  };
+  if (settingsClaudeTokenSaved) drawSaved(); else drawForm();
+  return box;
 }
 
 // 로그 시각(`YYYY-MM-DD HH:MM:SS`) → 오늘이면 `10:05`, 아니면 `9/23 10:05`.
@@ -1532,6 +1603,8 @@ function settingsIntgCard({ kind, name, chip, use, need, needClass = '', status 
     line.setAttribute('role', 'status');
     alert.why.forEach(part => line.appendChild(typeof part === 'string' ? document.createTextNode(part) : part));
     why.push(line);
+    // Claude 로그인 풀림이면 이 카드(렌더가 고른 한 곳)에 두 줄 칸이 이유 줄 바로 아래에 선다.
+    if (settingsClaudeBoxAt === kind && state.claudeAuth && !state.auth) why.push(settingsClaudeTokenBox());
   } else if (connectedLook && lag.late && lag.late.setup) {
     // 수집이 launchd에 등록돼 있지 않다 — 기다려도 읽지 않으니 할 일을 주황 한 줄로 분명히 말한다.
     const line = settingsEl('d-intgwhy k-warn', SETTINGS_LAG_SETUP);
@@ -3049,6 +3122,9 @@ async function renderSettingsIntegrations({ quiet = false } = {}) {
   const failing = settingsIntgFailing(data);
   const lag = settingsIntgLagFrom(data, failing);
   settingsIntgLag = lag;
+  settingsClaudeBoxAt = settingsClaudeBoxKind(data);
+  // 로그인 풀림이 풀렸으면(칸이 서지 않으면) 저장 표시도 잊는다 — 다음에 또 풀리면 빈 칸부터.
+  if (!settingsClaudeBoxAt) settingsClaudeTokenSaved = false;
   // 톱니바퀴의 주황 점도 방금 읽은 같은 값으로 맞춘다(목록을 다시 읽기 전에도 점과 탭이 같은 말을 하게).
   if (lag.all && typeof paintSyncGear === 'function') paintSyncGear(lag.all.late);
   const cards = [settingsSlackCard, settingsJiraCard, settingsCalendarCard, settingsNotesCard].map(make => make(data));
@@ -3577,7 +3653,7 @@ const SETTINGS_FAQ = [
     ['앱이 이상하게 동작하면', '없음',
       '먼저 <b>설정 &gt; 앱</b>의 <b>점검하기</b>로 무엇이 안 되는지와 고치는 법을 봐요. 그래도 안 되면 같은 줄의 <b>문제 보고 복사</b>를 누르면 버전·연동 상태·최근 오류 줄이 클립보드에 복사돼요. 업무 내용은 들어가지 않으니 그대로 슬랙에 붙여 넣어 주세요.'],
     ['Claude Code 로그인이 풀렸다고 나와요', 'Claude Code',
-      '자동 수집은 터미널 설정을 읽지 않아 그쪽 로그인만 풀릴 수 있어요. 먼저 터미널에서 <b>claude</b> → <b>/login</b> 후 카드의 <b>다시 시도</b>. 그래도 반복되면 <b>claude setup-token</b>으로 오래 가는 토큰을 만들어 <b>~/.config/workspace-claude-token</b>에 저장해요(방법: docs/연동.md).'],
+      '자동 수집은 터미널 설정을 읽지 않아 그쪽 로그인만 풀릴 수 있어요. 멈춘 카드에 뜨는 두 줄대로 해요: ① 터미널에서 <b>claude setup-token</b>(카드의 <b>복사</b>) → 브라우저에서 허용 ② 터미널에 나온 긴 토큰(sk-ant-…)을 카드의 칸에 붙여 <b>저장</b> → 카드의 <b>다시 시도</b>. 토큰은 이 맥의 파일에만 저장되고 화면·로그에는 다시 나오지 않아요. 약 1년 뒤 만료되면 같은 두 줄을 한 번 더 해요.'],
     ['업무 데이터는 어디에 백업되나요', '없음',
       '매일 19:30 이 맥의 <b>~/workspace-data-backup/daily</b>에 그날 데이터를 복사해 <b>7일치</b>를 남겨요(누구나 똑같아요). 업데이트 직전과 저장할 때마다의 직전 한 벌도 따로 있어요. 잘 됐는지는 <b>설정 &gt; 앱</b>의 <b>데이터 백업</b> 줄에서 보고, GitHub 비공개 저장소에도 올리고 싶으면 앱 README의 "업무 데이터 백업"대로 한 번 설정해요.'],
     ['앱에서 업데이트하기', '없음',

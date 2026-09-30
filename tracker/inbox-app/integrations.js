@@ -119,6 +119,9 @@ function tokenPaths(tokenDir) {
     slack: { file: path.join(dir, 'workspace-slack-token'), config: shape('workspace-slack-token') },
     // 캘린더 비밀 주소(iCal)도 토큰과 같은 급이다 — 파일(0600)로만 두고 config에는 경로만.
     calendar: { file: path.join(dir, 'workspace-calendar-ical'), config: shape('workspace-calendar-ical') },
+    // Claude 로그인 토큰(`claude setup-token`) — 자동화 실행기(run-task.sh)가 `~/.config/workspace-claude-token`을
+    // 공백을 뺀 한 줄로 읽어 CLAUDE_CODE_OAUTH_TOKEN으로 넘긴다. config에는 적지 않는다(경로도 고정).
+    claude: { file: path.join(dir, 'workspace-claude-token') },
   };
 }
 
@@ -148,6 +151,22 @@ function writeTokenFile(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${value}\n`, { mode: 0o600 });
   fs.chmodSync(file, 0o600);
+}
+
+// Claude 로그인 토큰 저장(설정 › 연동의 `Claude Code 로그인이 풀렸어요` 칸) — `POST /api/integrations/claude-token`.
+// 파일 하나(0600)만 쓴다: config는 읽지도 쓰지도 않고, 서버 재시작·등록 요청·프로세스 실행도 없다.
+// 이미 파일이 있으면 덮어쓰고 권한을 다시 조인다(writeTokenFile). 돌려주는 값은 `{ ok, saved }`뿐이고
+// 값을 읽어 주는 길은 만들지 않는다. 모양 검사는 느슨하게 — `sk-ant-`로 시작하는 공백 없는 한 줄(보이는 ASCII)만 본다
+// (setup-token 출력의 정확한 형식은 문서에 없어 추측으로 조이지 않는다). 거절 문구에는 값을 싣지 않는다.
+const CLAUDE_TOKEN_MAX = 1024;
+function saveClaudeToken({ body = {}, tokenDir, writeToken = writeTokenFile } = {}) {
+  const value = body && typeof body === 'object' && typeof body.token === 'string' ? body.token.trim() : '';
+  if (!value) throw bad(MESSAGE.claudeTokenEmpty, 'claude_empty');
+  if (value.length > CLAUDE_TOKEN_MAX) throw bad(MESSAGE.claudeTokenLong, 'claude_long');
+  if (/\s/.test(value)) throw bad(MESSAGE.claudeTokenSpace, 'claude_space');
+  if (!/^sk-ant-[\x21-\x7e]+$/.test(value)) throw bad(MESSAGE.claudeTokenShape, 'claude_shape');
+  writeToken(tokenPaths(tokenDir).claude.file, value);
+  return { ok: true, saved: true };
 }
 
 // 슬랙 채널 링크(`https://회사.slack.com/archives/C0123ABCD`)나 순수 ID에서 ID만 뽑는다.
@@ -973,5 +992,5 @@ module.exports = {
   scheduleRestart, errorLines, maskLine, claudeInstalled, claudeCandidateDirs, writeTokenFile,
   slackTokenCheck, savedSlackToken, createSlackNameFollower, SLACK_FOLLOW_MS, slackChannelPrefix, slackTsNow,
   normalizeIcalUrl, fetchIcal, icalCheck, savedIcalUrl, ICAL_TIMEOUT_MS, savePersonalize, registrationKey,
-  normalizeJiraSite,
+  normalizeJiraSite, saveClaudeToken, CLAUDE_TOKEN_MAX,
 };
