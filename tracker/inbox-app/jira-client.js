@@ -101,7 +101,7 @@ function jiraSettings(config) {
 }
 
 const issueUrl = (siteUrl, key) => `${siteUrl}/browse/${key}`;
-// 지라 키 `IO-48394`의 프로젝트는 `IO`다 — 버전 목록을 읽을 때 쓴다(따로 더 묻지 않는다).
+// 지라 키 `ABC-1234`의 프로젝트는 `ABC`다 — 버전 목록을 읽을 때 쓴다(따로 더 묻지 않는다).
 const projectOf = key => String(key || '').split('-')[0];
 
 const text = value => (typeof value === 'string' ? value : '');

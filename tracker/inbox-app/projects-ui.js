@@ -1146,7 +1146,7 @@ function renderProjectDetail(body, row) {
   const summary = document.createElement('div');
   // 별칭이 있으면 지라 원문이 길어질 수 있어 말줄임 + title로 전체를 남긴다(BJALIAS).
   summary.className = 'd-quiet' + (jiraAlias ? ' d-ptquiet' : '');
-  // 그 아래 조용한 줄에 지라 키를 덧붙이고(`열린 항목 2 · IO-48394`), 별칭이 있으면 지라 원래
+  // 그 아래 조용한 줄에 지라 키를 덧붙이고(`열린 항목 2 · ABC-1234`), 별칭이 있으면 지라 원래
   // 이름도 늘 보여 준다(어긋남을 숨기지 않는다 — 보관/조용함 교훈).
   const summaryParts = [`열린 항목 ${row.open}`];
   if (bundle) summaryParts.push(`티켓 ${bundle.keys.length}개 묶음`);

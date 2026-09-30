@@ -9,7 +9,7 @@
 //   (`pushUndo`를 쓰지 않는다) — 지라에 여러 이슈를 만드는 일은 되돌릴 수 없다.
 // - 지라에 쓰는 길은 `/api/jira/create` 하나뿐이고, 앱 항목은 기존 업무 만들기 API로만 만든다.
 // - 지라·사람이 준 글자는 전부 textContent로만 넣는다(innerHTML을 쓰지 않는다).
-// - 화면에 보이는 이름은 요약만이다(BKEY) — 지라 키는 미리 보기의 `IO-48394에 붙임`·확인 줄·툴팁에만.
+// - 화면에 보이는 이름은 요약만이다(BKEY) — 지라 키는 미리 보기의 `ABC-1234에 붙임`·확인 줄·툴팁에만.
 // index.html에서 projects-ui.js 뒤, app.js보다 먼저 읽힌다.
 
 // 설정에 저장된 직군 세트가 없을 때 쓰는 기본값. 저장하면 `.workflow.json`의 `jiraRoles`가 된다
@@ -1069,7 +1069,7 @@ function projectNewRender(body) {
   const form = document.createElement('div');
   form.className = 'd-pnew';
 
-  const name = projectNewInput(state.name, '프로젝트 이름 — 예: 게시글 작성하기_게임 임베드', '프로젝트 이름', (value) => {
+  const name = projectNewInput(state.name, '프로젝트 이름 — 예: 예시 게시글 작성하기_샘플 기능', '프로젝트 이름', (value) => {
     state.name = value;
     projectNewPreviewPaint();
   }, 200);
