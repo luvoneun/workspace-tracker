@@ -168,11 +168,11 @@ test('미팅 노트 가져오기를 끄면 조회·요청이 막히고 상태 �
   const automations = (await (await fetch(origin + '/api/automation/status')).json()).automations;
   assert.equal(automations.some(entry => entry.key === 'tiro'), false);
   // 지라도 꺼 둔 설정이다 — 직접 읽기·바꾸기 주소가 아예 열리지 않고, 화면도 `used:false`로 구역을 그리지 않는다.
-  assert.equal((await fetch(origin + '/api/jira/issue?key=IO-48394')).status, 404);
-  assert.equal((await fetch(origin + '/api/jira/options?key=IO-48394')).status, 404);
+  assert.equal((await fetch(origin + '/api/jira/issue?key=ABC-1234')).status, 404);
+  assert.equal((await fetch(origin + '/api/jira/options?key=ABC-1234')).status, 404);
   assert.equal((await fetch(origin + '/api/jira/change', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ key: 'IO-48394', kind: 'status', transitionId: '21' }),
+    body: JSON.stringify({ key: 'ABC-1234', kind: 'status', transitionId: '21' }),
   })).status, 404);
   assert.deepEqual((await (await fetch(origin + '/api/items')).json()).jiraSync, { used: false });
   assert.deepEqual((await (await fetch(origin + '/api/items')).json()).meetingNotes, { used: false, state: 'off' });
@@ -192,14 +192,14 @@ test('연동: 문제 보고에 실을 오류 줄만 고르고 이메일·지라 
     '2026-09-23 09:00:00 잘 돌았어요 — 회의에서 나온 업무 3건 등록',
     '2026-09-23 09:01:00 Error: connect ECONNREFUSED https://회사.atlassian.net/rest/api/3/search?jql=assignee=me',
     '    at Object.<anonymous> (/Users/someone/app/server.js:1:1)',
-    '2026-09-23 09:02:00 지라 동기화 실패 — 나@회사.com 계정으로 IO-48394를 읽지 못했어요',
+    '2026-09-23 09:02:00 지라 동기화 실패 — 나@회사.com 계정으로 ABC-1234를 읽지 못했어요',
     `2026-09-23 09:03:00 에러: ${'가'.repeat(400)}`,
   ].join('\n');
   const lines = integrationsStore.errorLines(log);
   assert.equal(lines.length, 4, '오류 줄과 스택만 남는다(정상 보고문은 빠진다)');
   assert.ok(!lines.join('\n').includes('회의에서 나온 업무'), '업무 문장은 실리지 않는다');
   assert.ok(!lines.join('\n').includes('나@회사.com'), '이메일은 가린다');
-  assert.ok(!lines.join('\n').includes('IO-48394'), '지라 키는 가린다');
+  assert.ok(!lines.join('\n').includes('ABC-1234'), '지라 키는 가린다');
   assert.ok(!lines.join('\n').includes('jql='), '주소의 조회 조건은 가린다');
   assert.ok(lines.every(line => line.length <= 200), '줄마다 200자에서 자른다');
   assert.deepEqual(integrationsStore.errorLines(''), []);

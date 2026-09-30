@@ -587,15 +587,15 @@ test('프로젝트 고르기 선택지: 해제는 지울 것이 있을 때만, �
 // BKEY: 항목 상세 카드의 프로젝트 값 — 요약 뒤에 조용한 회색 글자로 키(값 고르개가 닫혀 있을 때의 표시).
 test('renderGroupControl: 지라 값은 요약 뒤에 조용한 키가 붙고, 그룹·모르는 키는 그대로다', () => {
   const app = pureClient();
-  app.run("jiraIssuesCache = [{ key: 'IO-48394', summary: '게시글 작성하기_게임 임베드' }]; customGroupsCache = []");
+  app.run("jiraIssuesCache = [{ key: 'ABC-1234', summary: '예시 게시글 작성하기_샘플 기능' }]; customGroupsCache = []");
   const badge = app.run(
-    "renderGroupControl({ jira: 'IO-48394', group: null, onSetJira: () => {}, onSetGroup: () => {} }).children[0]");
+    "renderGroupControl({ jira: 'ABC-1234', group: null, onSetJira: () => {}, onSetGroup: () => {} }).children[0]");
   assert.equal(badge.className, 'badge jira-badge');
-  assert.equal(badge.textContent, '게시글 작성하기_게임 임베드', '보이는 자리는 요약만');
+  assert.equal(badge.textContent, '예시 게시글 작성하기_샘플 기능', '보이는 자리는 요약만');
   assert.equal(badge.children.length, 1);
   assert.equal(badge.children[0].className, 'k-mute');
-  assert.equal(badge.children[0].textContent, ' IO-48394', '요약 뒤에 조용한 회색 글자로 키');
-  assert.equal(badge.getAttribute('aria-label'), '게시글 작성하기_게임 임베드 IO-48394 — 클릭해서 변경/해제');
+  assert.equal(badge.children[0].textContent, ' ABC-1234', '요약 뒤에 조용한 회색 글자로 키');
+  assert.equal(badge.getAttribute('aria-label'), '예시 게시글 작성하기_샘플 기능 ABC-1234 — 클릭해서 변경/해제');
 
   // 요약을 모르는 키는 그대로만(조용한 키 span이 없다 — 이미 키뿐이라 덧붙일 것이 없다).
   const unknown = app.run(
@@ -614,7 +614,7 @@ test('renderGroupControl: 지라 값은 요약 뒤에 조용한 키가 붙고, �
 // 1.3.2: 상세 카드의 필드 격자만 plain — 회색 알약 대신 `● 이름 ⌄` 글자 고르개(⋯ 메뉴는 알약 그대로).
 test('renderGroupControl plain: 색 점 + 이름 + 꺾쇠, 클래스 is-plain(기본 클래스는 유지)', () => {
   const app = pureClient();
-  app.run("jiraIssuesCache = [{ key: 'IO-48394', summary: '게시글 작성하기_게임 임베드' }]; customGroupsCache = []");
+  app.run("jiraIssuesCache = [{ key: 'ABC-1234', summary: '예시 게시글 작성하기_샘플 기능' }]; customGroupsCache = []");
   const group = app.run(
     "renderGroupControl({ jira: null, group: '가입 개선', onSetJira: () => {}, onSetGroup: () => {}, plain: true }).children[0]");
   assert.equal(group.className, 'badge group-badge is-plain');
@@ -625,9 +625,9 @@ test('renderGroupControl plain: 색 점 + 이름 + 꺾쇠, 클래스 is-plain(�
   assert.equal(group.getAttribute('aria-label'), '가입 개선 — 클릭해서 변경/해제');
 
   const jira = app.run(
-    "renderGroupControl({ jira: 'IO-48394', group: null, onSetJira: () => {}, onSetGroup: () => {}, plain: true }).children[0]");
+    "renderGroupControl({ jira: 'ABC-1234', group: null, onSetJira: () => {}, onSetGroup: () => {}, plain: true }).children[0]");
   assert.equal(jira.className, 'badge jira-badge is-plain');
-  assert.equal(jira.children[0].dataset.pj, app.run("String(uiProjectHue('IO-48394'))"));
+  assert.equal(jira.children[0].dataset.pj, app.run("String(uiProjectHue('ABC-1234'))"));
   assert.equal(jira.children[1].children[0].className, 'k-mute', '요약 뒤 조용한 키는 그대로');
 
   // plain을 켜지 않으면(⋯ 메뉴) 예전 알약 그대로 — 점·꺾쇠가 없다.
@@ -3266,7 +3266,7 @@ test('다음 주 계획 프로젝트 목록은 그룹과 지라를 함께 담고
 test('슬랙으로 나가는 프로젝트 줄에는 지라 키를 싣지 않는다(요약을 모르면 키 그대로)', () => {
   const app = reportClient();
   assert.equal(app.run(`reportSlackProjectLabel('PAY-77 · 결제 정산 주기 정책 변경')`), '결제 정산 주기 정책 변경');
-  assert.equal(app.run(`reportSlackProjectLabel('IO-48394')`), 'IO-48394', '요약을 모르는 이슈는 키밖에 이름이 없다');
+  assert.equal(app.run(`reportSlackProjectLabel('ABC-1234')`), 'ABC-1234', '요약을 모르는 이슈는 키밖에 이름이 없다');
   assert.equal(app.run(`reportSlackProjectLabel('가입 개선')`), '가입 개선', '그룹 이름은 그대로');
   assert.equal(app.run(`reportSlackProjectLabel('A · B')`), 'A · B', '지라 키 꼴이 아니면 가운뎃점이 있어도 건드리지 않는다');
   const report = JSON.stringify({ weekKey: '2026-09-21', rows: [
@@ -3474,7 +3474,7 @@ const version = (name, days, released = false) =>
 // 프로젝트 넷: 지라 프로젝트 둘(지남·모레), 손으로 건 그룹 프로젝트 하나(오늘), 먼 배포 하나(+10일).
 const DEPLOY_ISSUES = `jiraIssuesByKey = new Map([
   ['OPS-1', { key: 'OPS-1', summary: '운영툴 대시보드', status: '진행 중', versions: [${version('v2.71.0', 6)}, ${version('v2.69.0', -2)}, ${version('v2.68.0', -9, true)}] }],
-  ['IO-1', { key: 'IO-1', summary: '게임 임베드', status: 'QA 대기', versions: [${version('v2.70.0', 2)}] }],
+  ['IO-1', { key: 'IO-1', summary: '샘플 기능', status: 'QA 대기', versions: [${version('v2.70.0', 2)}] }],
   ['PAY-7', { key: 'PAY-7', summary: '결제 정산', status: '개발 중', versions: [${version('v2.72.0', 0)}] }],
   ['ALT-9', { key: 'ALT-9', summary: '알림센터', status: '대기', versions: [${version('v2.80.0', 10)}] }],
   ['DONE-1', { key: 'DONE-1', summary: '가입 퍼널', status: '완료', versions: [${version('v2.60.0', -1, true)}] }],
@@ -3517,7 +3517,7 @@ test('가장 이른 미배포 버전만 고르고, 배포 버전 칸이 없으�
   assert.equal(pick(`{ versions: [${version('v2.68.0', -9, true)}] }`), null);
   assert.equal(pick(`{ versions: [${version('v2.72.0', null)}] }`), null, '배포일을 모르는 버전은 판단할 수 없다');
   assert.equal(pick('{ versions: [] }'), null);
-  assert.equal(pick("{ key: 'IO-1', summary: '게임 임베드' }"), null, 'live 칸이 없는 옛 응답에서는 조용히 빠진다');
+  assert.equal(pick("{ key: 'IO-1', summary: '샘플 기능' }"), null, 'live 칸이 없는 옛 응답에서는 조용히 빠진다');
   assert.equal(pick('null'), null);
 });
 
@@ -3527,7 +3527,7 @@ test('배포 임박 줄은 열린 항목이 있는 프로젝트만, 3일 안만,
   assert.deepEqual(rows.map(row => [row.label, row.name, row.text, row.open]), [
     ['운영툴 대시보드', 'v2.69.0', '배포일 2일 지남', 1],
     ['결제 리뉴얼', 'v2.72.0', '오늘 배포', 1],
-    ['게임 임베드', 'v2.70.0', '배포 2일 전', 2],
+    ['샘플 기능', 'v2.70.0', '배포 2일 전', 2],
   ], '지남 → 오늘 → 모레 차례이고, `열린 업무`는 미완료 업무 + 미완료 확인 대기다');
   assert.equal(rows.some(row => row.label.includes('알림센터')), false, '배포가 먼 프로젝트는 서지 않는다');
   assert.equal(rows.some(row => row.label.includes('가입 퍼널')), false, '열린 항목이 없으면 서지 않는다');
@@ -4135,9 +4135,9 @@ function nodeFindAll(node, className, found = []) {
   return found;
 }
 const jiraIssue = (extra = {}) => ({
-  key: 'IO-48394',
-  url: 'https://example-jira.test/browse/IO-48394',
-  summary: '게시글 작성하기_게임 임베드',
+  key: 'ABC-1234',
+  url: 'https://example-jira.test/browse/ABC-1234',
+  summary: '예시 게시글 작성하기_샘플 기능',
   type: '에픽',
   status: { name: '진행 중', category: 'doing' },
   assignee: '루본',
@@ -4193,7 +4193,7 @@ test('띠 카드는 값이 다 있으면 지라 상태·배포 버전·기한을
   const card = app.run(`jiraStripCard(${JSON.stringify(jiraIssue())})`);
   const text = nodeText(card);
   assert.match(text, /지라/);
-  assert.match(text, /게시글 작성하기_게임 임베드/);
+  assert.match(text, /예시 게시글 작성하기_샘플 기능/);
   assert.match(text, /에픽 · 담당 루본/);
   assert.match(text, /지라 상태 진행 중/);
   assert.match(text, /배포 버전 v2\.70\.0/);
@@ -4203,13 +4203,13 @@ test('띠 카드는 값이 다 있으면 지라 상태·배포 버전·기한을
   // 지라에서 온 글자는 전부 textContent로만 들어간다(새 innerHTML을 쓰지 않는다).
   assert.doesNotMatch(nodeHtml(card), /게시글 작성하기|진행 중|v2\.70\.0/);
   // 키는 `지라에서 열기` 링크의 title에만 보인다(BKEY 결정) — 카드 글자에는 없다.
-  assert.doesNotMatch(text, /IO-48394/);
+  assert.doesNotMatch(text, /ABC-1234/);
   const link = nodeFind(card, 'd-jopen');
   assert.equal(link.getAttribute('href'), undefined);
-  assert.equal(link.href, 'https://example-jira.test/browse/IO-48394');
+  assert.equal(link.href, 'https://example-jira.test/browse/ABC-1234');
   assert.equal(link.target, '_blank');
   assert.equal(link.rel, 'noopener noreferrer');
-  assert.match(link.title, /^IO-48394 · /);
+  assert.match(link.title, /^ABC-1234 · /);
 
   const bare = app.run(`jiraStripCard(${JSON.stringify(jiraIssue({ assignee: null, due: null, versions: [], children: null, status: { name: '완료', category: 'done' } }))})`);
   const bareText = nodeText(bare);
@@ -4222,13 +4222,13 @@ test('띠 카드는 값이 다 있으면 지라 상태·배포 버전·기한을
 
 test('띠 카드는 부르는 동안 뼈대를, 연결 안 됨·오류일 때는 조용한 한 줄을 세운다', async () => {
   const { app } = jiraClient(() => new Response(JSON.stringify({ ok: true, connected: true, issue: jiraIssue() })));
-  app.run("document.getElementById('jiraStrip').dataset.jiraKey = 'IO-48394'");
-  const loading = app.run("jiraCard = { ...jiraCard, key: 'IO-48394', state: 'loading' }; jiraStripBody('IO-48394')");
+  app.run("document.getElementById('jiraStrip').dataset.jiraKey = 'ABC-1234'");
+  const loading = app.run("jiraCard = { ...jiraCard, key: 'ABC-1234', state: 'loading' }; jiraStripBody('ABC-1234')");
   assert.equal(loading.className, 'd-jira is-loading');
   assert.equal(loading.getAttribute('aria-hidden'), 'true');
   assert.equal(nodeText(loading), '', '뼈대에는 글자가 없다');
 
-  const off = app.run("jiraCard = { ...jiraCard, state: 'off' }; jiraStripBody('IO-48394')");
+  const off = app.run("jiraCard = { ...jiraCard, state: 'off' }; jiraStripBody('ABC-1234')");
   assert.equal(nodeText(off), '지라 연결이 필요해요 · 설정 방법');
   const help = nodeFind(off, 'd-link');
   assert.match(help.title, /README의 "지라 연결 설정" 절/);
@@ -4236,11 +4236,11 @@ test('띠 카드는 부르는 동안 뼈대를, 연결 안 됨·오류일 때는
   help.listeners.click();
   assert.match(app.nodes.get('liveRegion').textContent, /README의 "지라 연결 설정" 절/);
 
-  const failed = app.run("jiraCard = { ...jiraCard, state: 'error', error: '지라 토큰을 확인해 주세요.' }; jiraStripBody('IO-48394')");
+  const failed = app.run("jiraCard = { ...jiraCard, state: 'error', error: '지라 토큰을 확인해 주세요.' }; jiraStripBody('ABC-1234')");
   assert.equal(nodeText(failed), '지라 토큰을 확인해 주세요. · 다시 시도');
   await nodeFind(failed, 'd-link').listeners.click();
   assert.equal(app.run('jiraCard.state'), 'ok', '`다시 시도`가 다시 읽어 온다');
-  assert.equal(app.run('jiraCard.issue.summary'), '게시글 작성하기_게임 임베드');
+  assert.equal(app.run('jiraCard.issue.summary'), '예시 게시글 작성하기_샘플 기능');
 });
 
 test('다른 프로젝트로 빨리 옮기면 늦게 온 지라 응답은 버린다', async () => {
@@ -4299,12 +4299,12 @@ const jiraWithKids = (items = jiraKids(), extra = {}) => jiraIssue({
   ...extra,
 });
 // 카드를 실제 화면 자리(`#jiraStrip`)에 세운다 — 꺾쇠·이름을 누르면 그 자리가 다시 그려진다.
-function jiraKidFixture(issue, projectKey = 'jira:IO-48394', storage = null) {
+function jiraKidFixture(issue, projectKey = 'jira:ABC-1234', storage = null) {
   const app = pureClient();
   if (storage) app.context.localStorage = storage;
-  app.run(`jiraCard = { key: 'IO-48394', state: 'ok', issue: ${JSON.stringify(issue)}, error: '', at: Date.now(), seq: 1 };`);
+  app.run(`jiraCard = { key: 'ABC-1234', state: 'ok', issue: ${JSON.stringify(issue)}, error: '', at: Date.now(), seq: 1 };`);
   const host = app.nodes.get('jiraStrip') || app.run("document.getElementById('jiraStrip')");
-  host.dataset.jiraKey = 'IO-48394';
+  host.dataset.jiraKey = 'ABC-1234';
   host.dataset.project = projectKey;
   app.run('jiraStripPaint()');
   return { app, host, card: () => host.children[0] };
@@ -4415,7 +4415,7 @@ test('펼치면 티켓마다 지라 상태·요약·담당자·배포 버전이 
   // 다시 누르면 접힌다.
   nodeFind(card(), 'd-jexp').listeners.click();
   assert.equal(nodeFind(card(), 'd-jkids'), null);
-  assert.equal(app.run("jiraChildPicks.get('IO-48394') ?? null"), null);
+  assert.equal(app.run("jiraChildPicks.get('ABC-1234') ?? null"), null);
 });
 
 test('완료가 다섯을 넘으면 나머지는 `완료 N개 더 보기` 뒤로 접는다', () => {
@@ -4443,7 +4443,7 @@ test('접힌 줄의 이름을 누르면 펼쳐지며 그 담당 것만 보이고
   const whoButton = name => nodeFindAll(card(), 'd-jwho').find(button => button.textContent.startsWith(name));
   assert.equal(nodeFind(card(), 'd-jkids'), null);
   whoButton('루본').listeners.click();
-  assert.equal(app.run("jiraChildPicks.get('IO-48394') ?? null"), '루본');
+  assert.equal(app.run("jiraChildPicks.get('ABC-1234') ?? null"), '루본');
   assert.equal(nodeFind(card(), 'd-jexp').getAttribute('aria-expanded'), 'true', '이름을 누르면 함께 펼쳐진다');
   assert.deepEqual(nodeFindAll(card(), 'd-jkid').map(row => nodeFind(row, 'sm').textContent),
     ['게임 목록 불러오기', '오류 문구 다듬기', '임베드 카드 붙이기'], '그 사람의 완료한 것도 함께 보인다');
@@ -4453,7 +4453,7 @@ test('접힌 줄의 이름을 누르면 펼쳐지며 그 담당 것만 보이고
   const clear = nodeFindAll(card(), 'd-jwho').find(button => button.textContent === '전체');
   assert.ok(clear);
   clear.listeners.click();
-  assert.equal(app.run("jiraChildPicks.get('IO-48394') ?? null"), null);
+  assert.equal(app.run("jiraChildPicks.get('ABC-1234') ?? null"), null);
   assert.equal(nodeFindAll(card(), 'd-jkid').length, 5);
   assert.equal(nodeFindAll(card(), 'd-jwho').find(button => button.textContent === '전체'), undefined);
 
@@ -4461,7 +4461,7 @@ test('접힌 줄의 이름을 누르면 펼쳐지며 그 담당 것만 보이고
   whoButton('하늘').listeners.click();
   assert.equal(nodeFindAll(card(), 'd-jkid').length, 1);
   whoButton('하늘').listeners.click();
-  assert.equal(app.run("jiraChildPicks.get('IO-48394') ?? null"), null);
+  assert.equal(app.run("jiraChildPicks.get('ABC-1234') ?? null"), null);
   assert.equal(nodeFindAll(card(), 'd-jkid').length, 5);
 
   // 거르는 중에 그 사람의 티켓이 사라지면 조용한 한 줄만 남는다(빈 칸을 남기지 않는다).
@@ -4473,24 +4473,24 @@ test('접힌 줄의 이름을 누르면 펼쳐지며 그 담당 것만 보이고
 test('펼침은 프로젝트별로 기억하고, 쓰기 뒤 `fresh` 재조회로 다시 그려도 그대로다', () => {
   const store = new Map();
   const storage = { getItem: key => (store.has(key) ? store.get(key) : null), setItem: (key, value) => store.set(key, String(value)) };
-  const first = jiraKidFixture(jiraWithKids(), 'jira:IO-48394', storage);
+  const first = jiraKidFixture(jiraWithKids(), 'jira:ABC-1234', storage);
   nodeFind(first.card(), 'd-jexp').listeners.click();
-  assert.deepEqual(JSON.parse(store.get('jiraChildrenOpen')), ['jira:IO-48394']);
+  assert.deepEqual(JSON.parse(store.get('jiraChildrenOpen')), ['jira:ABC-1234']);
 
   // 2단계의 쓰기가 끝나고 `fresh=1`로 다시 읽어 그려도 펼침·거르기는 그대로다.
-  first.app.run("jiraChildPicks.set('IO-48394', '루본')");
+  first.app.run("jiraChildPicks.set('ABC-1234', '루본')");
   first.app.run(`jiraCard = { ...jiraCard, issue: ${JSON.stringify(jiraWithKids())}, at: Date.now() }; jiraStripPaint()`);
   assert.equal(nodeFind(first.card(), 'd-jexp').getAttribute('aria-expanded'), 'true');
   assert.equal(nodeFindAll(first.card(), 'd-jkid').length, 3, '거르기도 살아 있다');
   // 같은 프로젝트를 다시 그리는 것(jiraCardEnsure)으로는 거르기가 풀리지 않는다.
-  first.app.run("jiraCardEnsure('IO-48394')");
-  assert.equal(first.app.run("jiraChildPicks.get('IO-48394') ?? null"), '루본');
+  first.app.run("jiraCardEnsure('ABC-1234')");
+  assert.equal(first.app.run("jiraChildPicks.get('ABC-1234') ?? null"), '루본');
   // 다른 프로젝트로 옮기면 거르기만 풀린다(펼침은 프로젝트마다 기억한 대로다).
   first.app.run("jiraCardEnsure('AB-9')");
-  assert.equal(first.app.run("jiraChildPicks.get('IO-48394') ?? null"), null);
+  assert.equal(first.app.run("jiraChildPicks.get('ABC-1234') ?? null"), null);
 
   // 다음에 같은 프로젝트를 열면 기억한 대로 펼쳐져 있다.
-  const again = jiraKidFixture(jiraWithKids(), 'jira:IO-48394', storage);
+  const again = jiraKidFixture(jiraWithKids(), 'jira:ABC-1234', storage);
   assert.equal(nodeFind(again.card(), 'd-jexp').getAttribute('aria-expanded'), 'true');
   assert.equal(nodeFindAll(again.card(), 'd-jkid').length, 5);
   // 다른 프로젝트는 기억이 따로다.
@@ -4499,13 +4499,13 @@ test('펼침은 프로젝트별로 기억하고, 쓰기 뒤 `fresh` 재조회로
   // 손으로 건 그룹 프로젝트에서도 카드 모양은 같다.
   nodeFind(other.card(), 'd-jexp').listeners.click();
   assert.equal(nodeFindAll(other.card(), 'd-jkid').length, 5);
-  assert.deepEqual(JSON.parse(store.get('jiraChildrenOpen')), ['jira:IO-48394', 'group:알림센터']);
+  assert.deepEqual(JSON.parse(store.get('jiraChildrenOpen')), ['jira:ABC-1234', 'group:알림센터']);
 });
 
 test('기억해 둘 곳이 막혀 있어도 펼치기는 그대로 동작한다', () => {
   // 사생활 보호 창처럼 localStorage가 던지는 자리 — 기억만 못 할 뿐 화면은 그대로다.
   const blocked = { getItem() { throw new Error('blocked'); }, setItem() { throw new Error('blocked'); } };
-  const { card } = jiraKidFixture(jiraWithKids(), 'jira:IO-48394', blocked);
+  const { card } = jiraKidFixture(jiraWithKids(), 'jira:ABC-1234', blocked);
   nodeFind(card(), 'd-jexp').listeners.click();
   assert.equal(nodeFindAll(card(), 'd-jkid').length, 5);
 });
@@ -4516,10 +4516,10 @@ test('하위가 100개면 목록 끝에 `지라에서 전체 보기`가 붙는�
   nodeFind(card(), 'd-jexp').listeners.click();
   const all = nodeFind(card(), 'all');
   assert.equal(all.textContent, '지라에서 전체 보기 ↗');
-  assert.equal(all.href, 'https://example-jira.test/browse/IO-48394');
+  assert.equal(all.href, 'https://example-jira.test/browse/ABC-1234');
   assert.equal(all.rel, 'noopener noreferrer');
   assert.equal(all.target, '_blank');
-  assert.match(all.title, /^IO-48394 · /);
+  assert.match(all.title, /^ABC-1234 · /);
   // 100개가 안 되면 붙지 않는다.
   const few = jiraKidFixture(jiraWithKids());
   nodeFind(few.card(), 'd-jexp').listeners.click();
@@ -4587,7 +4587,7 @@ test('지라 값을 골라도 확인 줄을 거치기 전에는 아무것도 보
   // 선택지 글씨도 카드 값과 같은 범주 색이다(BJCOLOR) — 진행 파랑 · 완료 초록 · 할 일 회색.
   assert.deepEqual(plain(jiraMenuItems(sections).map(entry => entry.tone)), ['k-acc', 'k-pos', 'k-dim']);
   assert.equal(fixture.calls.length, 1);
-  assert.match(fixture.calls[0].url, /\/api\/jira\/options\?key=IO-48394$/);
+  assert.match(fixture.calls[0].url, /\/api\/jira\/options\?key=ABC-1234$/);
   assert.equal(fixture.calls[0].method, 'GET');
 
   jiraMenuItems(sections)[1].onClick();
@@ -4596,11 +4596,11 @@ test('지라 값을 골라도 확인 줄을 거치기 전에는 아무것도 보
   assert.ok(row, '카드 안에 확인 줄이 선다');
   const text = nodeText(row);
   assert.match(text, /지라의 이 티켓을 바꿀까요\?/);
-  assert.match(text, /게시글 작성하기_게임 임베드/, '확인 창에는 티켓 요약을 쓴다');
-  assert.match(text, /IO-48394/, '키는 조용한 글자로만 붙는다');
+  assert.match(text, /예시 게시글 작성하기_샘플 기능/, '확인 창에는 티켓 요약을 쓴다');
+  assert.match(text, /ABC-1234/, '키는 조용한 글자로만 붙는다');
   assert.match(text, /지라 상태: 진행 중 → 완료/, '전 → 후를 보여 준다');
   assert.match(text, /취소 바꾸기/);
-  assert.equal(nodeFind(row, 'ky').textContent, 'IO-48394');
+  assert.equal(nodeFind(row, 'ky').textContent, 'ABC-1234');
 
   // 확인 줄이 떠 있는 채로 다른 고르개를 열면 확인 줄이 먼저 닫힌다(보내지 않는다).
   fixture.app.context.duePick = nodeFind(fixture.card(), 'cells').children[2].children[1];
@@ -4626,9 +4626,9 @@ test('확인 줄의 `바꾸기`만 지라에 쓰고, 성공하면 fresh=1로 다
   const posts = fixture.posts();
   assert.equal(posts.length, 1, '쓰기는 정확히 한 번이다');
   assert.match(posts[0].url, /\/api\/jira\/change$/);
-  assert.deepEqual(plain(posts[0].body), { key: 'IO-48394', kind: 'status', transitionId: '21' });
+  assert.deepEqual(plain(posts[0].body), { key: 'ABC-1234', kind: 'status', transitionId: '21' });
   // 낙관적 갱신 금지 — 성공한 뒤 지라에서 새로 읽어 그 값만 그린다.
-  assert.match(fixture.calls[fixture.calls.length - 1].url, /\/api\/jira\/issue\?key=IO-48394&fresh=1$/);
+  assert.match(fixture.calls[fixture.calls.length - 1].url, /\/api\/jira\/issue\?key=ABC-1234&fresh=1$/);
   // 앱의 ⌘Z 대상이 아니다.
   assert.equal(fixture.app.run('undoStack.length'), 0);
   assert.equal(fixture.app.run('redoStack.length'), 0);
@@ -4652,7 +4652,7 @@ test('지라가 거절하면 아무것도 바꾸지 않고 해요체 문구만 �
   assert.match(nodeText(row), /지라의 기한: 10월 2일 → 없음/);
   await nodeFind(row, 'acts').children[1].listeners.click();
   assert.equal(fixture.posts().length, 1);
-  assert.deepEqual(plain(fixture.posts()[0].body), { key: 'IO-48394', kind: 'due', due: null });
+  assert.deepEqual(plain(fixture.posts()[0].body), { key: 'ABC-1234', kind: 'due', due: null });
   const region = fixture.app.nodes.get('liveRegion');
   assert.equal(region.textContent, '지라에서 이 티켓을 바꿀 권한이 없어요.');
   assert.equal(fixture.app.run('jiraConfirm'), null);
@@ -4742,7 +4742,7 @@ test('배포 버전 메뉴는 옮기기와 버전 고치기 둘이고, 여러 �
   assert.match(nodeText(row), /이 버전의 이름: v2\.70\.0 → v2\.70\.1/);
   assert.match(nodeText(row), /이 버전을 쓰는 모든 티켓에 적용돼요/);
   assert.deepEqual(plain(fixture.app.run('jiraConfirm.body')),
-    { key: 'IO-48394', kind: 'versionEdit', versionId: '1', name: 'v2.70.1' });
+    { key: 'ABC-1234', kind: 'versionEdit', versionId: '1', name: 'v2.70.1' });
   assert.equal(fixture.posts().length, 0);
 
   // 버전이 여러 개면 옮기기 선택지 자체를 내놓지 않는다.
@@ -4764,7 +4764,7 @@ test('배포일을 고치는 길도 확인 줄을 거치고, 지우기까지 된
   dateField.children[0].listeners.change();
   assert.equal(fixture.posts().length, 0);
   assert.deepEqual(plain(fixture.app.run('jiraConfirm.body')),
-    { key: 'IO-48394', kind: 'versionEdit', versionId: '1', releaseDate: '2026-10-07' });
+    { key: 'ABC-1234', kind: 'versionEdit', versionId: '1', releaseDate: '2026-10-07' });
   assert.match(nodeText(fixture.confirm()), /이 버전을 쓰는 모든 티켓에 적용돼요/);
 });
 
@@ -4784,7 +4784,7 @@ function jiraLinkClient({ issue = jiraIssue(), links = {}, connected = true, ans
   app.run(`latestData = { jiraSync: { used: true, connected: ${connected}, siteUrl: 'https://example-jira.test' } };`);
   app.run(`workflowData = { items: [], meetings: [], projectLinks: ${JSON.stringify(links)} }; wfIndexData(); itemsById = new Map();`);
   app.run(`jiraIssuesCache = [
-    { key: 'IO-12345', summary: '게시글 작성하기_게임 임베드' },
+    { key: 'IO-12345', summary: '예시 게시글 작성하기_샘플 기능' },
     { key: 'PAY-77', summary: '정산 배치' },
     { key: 'ZZ-9', summary: '이미 끝난 것', extra: true },
   ]; jiraIssuesByKey = new Map(jiraIssuesCache.map(one => [one.key, one]));`);
@@ -4875,7 +4875,7 @@ test('BJLINK: 미리 보기를 거치기 전에는 `연결` 요청이 나가지 
   assert.equal(fixture.calls[0].method, 'GET', '찾기는 읽기만 한다');
   assert.equal(fixture.app.run('jiraLink.state'), 'preview');
   const preview = fixture.node();
-  assert.match(nodeText(preview), /게시글 작성하기_게임 임베드/);
+  assert.match(nodeText(preview), /예시 게시글 작성하기_샘플 기능/);
   assert.match(nodeText(preview), /진행 중 · 담당 루본/);
   assert.equal(nodeFind(preview, 'ky').textContent, 'IO-12345', '키는 조용한 글자로만 선다');
   assert.equal(fixture.posts().length, 0, '미리 보기까지는 저장이 없다');
@@ -4914,13 +4914,13 @@ test('BJLINK: 내 담당 티켓 선택지는 `요약 · 키`로 최대 여덟 �
   const picks = nodeFind(app.nodes.get('jiraLinkRow').children[0], 'opts');
   // 목록 끝에는 아직 누르지 않은 `완료한 티켓도 보기`가 조용한 글자로 붙어 있다(BARCHIVE).
   assert.deepEqual(picks.children.map(kid => kid.textContent),
-    ['내 담당 티켓', '게시글 작성하기_게임 임베드 · IO-12345', '정산 배치 · PAY-77', '완료한 티켓도 보기']);
+    ['내 담당 티켓', '예시 게시글 작성하기_샘플 기능 · IO-12345', '정산 배치 · PAY-77', '완료한 티켓도 보기']);
 });
 
 test('BJLINK: 이미 다른 프로젝트에 걸린 티켓도 막지 않고 조용히 알리기만 한다', async () => {
-  const fixture = jiraLinkClient({ links: { 운영툴: 'IO-48394' } });
+  const fixture = jiraLinkClient({ links: { 운영툴: 'ABC-1234' } });
   fixture.open('group:가입 개선');
-  await fixture.app.run("jiraLinkFind('group:가입 개선', 'IO-48394')");
+  await fixture.app.run("jiraLinkFind('group:가입 개선', 'ABC-1234')");
   assert.match(nodeText(fixture.node()), /다른 프로젝트 '운영툴'에도 연결돼 있어요/);
   const acts = fixture.node().children.find(kid => kid.className === 'acts');
   // 고른 티켓이 에픽이라(BMOVE) 옮기기 버튼도 함께 있다 — 막지 않는다는 뜻은 `연결만`이 그대로 있다는 것.
@@ -4928,10 +4928,10 @@ test('BJLINK: 이미 다른 프로젝트에 걸린 티켓도 막지 않고 조�
 });
 
 test('BJLINK: 띠 카드의 ⋯은 손으로 건 그룹 프로젝트에만 있고, 해제는 알림의 `되돌리기`로 되돌린다', async () => {
-  const fixture = jiraLinkClient({ links: { 운영툴: 'IO-48394' } });
+  const fixture = jiraLinkClient({ links: { 운영툴: 'ABC-1234' } });
   const bare = fixture.app.run(`jiraStripCard(${JSON.stringify(jiraIssue())})`);
   assert.equal(nodeFind(bare, 'd-more'), null, '예전처럼 부르면 ⋯이 없다');
-  const jiraProject = fixture.app.run(`jiraStripCard(${JSON.stringify(jiraIssue())}, 'jira:IO-48394')`);
+  const jiraProject = fixture.app.run(`jiraStripCard(${JSON.stringify(jiraIssue())}, 'jira:ABC-1234')`);
   assert.equal(nodeFind(jiraProject, 'd-more'), null, '`jira:KEY` 프로젝트에는 풀 연결이 없다');
 
   const card = fixture.app.run(`jiraStripCard(${JSON.stringify(jiraIssue())}, 'group:운영툴')`);
@@ -4940,7 +4940,7 @@ test('BJLINK: 띠 카드의 ⋯은 손으로 건 그룹 프로젝트에만 있�
   more.listeners.click({ stopPropagation() {} });
   const menu = JSON.parse(fixture.app.run("JSON.stringify(lastMenu.flat().map(one => one.label))"));
   // 고른 티켓이 에픽이라(BMOVE) 옮기기 항목도 같은 메뉴에 선다.
-  assert.deepEqual(menu, ['지라 연결 해제', 'IO-48394으로 옮기기…']);
+  assert.deepEqual(menu, ['지라 연결 해제', 'ABC-1234으로 옮기기…']);
 
   await fixture.app.run("lastMenu[0][0].onClick()");
   assert.deepEqual(fixture.posts().map(call => call.body), [{ project: 'group:운영툴', jira: null }]);
@@ -4950,14 +4950,14 @@ test('BJLINK: 띠 카드의 ⋯은 손으로 건 그룹 프로젝트에만 있�
   await undo.listeners.click();
   assert.deepEqual(fixture.posts().map(call => call.body), [
     { project: 'group:운영툴', jira: null },
-    { project: 'group:운영툴', jira: 'IO-48394' },
+    { project: 'group:운영툴', jira: 'ABC-1234' },
   ], '되돌리기는 같은 키로 다시 건다');
   assert.match(fixture.app.nodes.get('liveRegion').textContent, /지라 티켓을 다시 연결했어요/);
 });
 
 test('BJLINK: 연결해도 다른 화면의 프로젝트 이름·키 표기는 그대로다', () => {
   const before = jiraLinkClient();
-  const after = jiraLinkClient({ links: { 운영툴: 'IO-48394' } });
+  const after = jiraLinkClient({ links: { 운영툴: 'ABC-1234' } });
   const names = app => JSON.parse(app.run(`JSON.stringify([
     uiGroupLabel('group:운영툴'),
     uiGroupLabel('group:운영툴', { withKey: true }),
@@ -5235,7 +5235,7 @@ function doneLinkClient({ issues = null, fail = false, connected = true } = {}) 
       return new Response(JSON.stringify({ ok: true, connected: true, issues: issues || [
         { key: 'IO-99', summary: '끝난 임베드 정리', status: '완료', category: 'done', extra: false },
         { key: 'PAY-12', summary: '끝난 정산 점검', status: '완료', category: 'done', extra: false },
-        { key: 'IO-12345', summary: '게시글 작성하기_게임 임베드', status: '완료', category: 'done', extra: false },
+        { key: 'IO-12345', summary: '예시 게시글 작성하기_샘플 기능', status: '완료', category: 'done', extra: false },
       ] }));
     }
     const asked = (String(url).match(/key=([^&]+)/) || [, ''])[1];
@@ -5244,7 +5244,7 @@ function doneLinkClient({ issues = null, fail = false, connected = true } = {}) 
   app.run("latestData = { jiraSync: { used: true, connected: true, siteUrl: 'https://example-jira.test' } };");
   app.run("workflowData = { items: [], meetings: [], projectLinks: {} }; wfIndexData(); itemsById = new Map();");
   app.run(`jiraIssuesCache = [
-    { key: 'IO-12345', summary: '게시글 작성하기_게임 임베드' },
+    { key: 'IO-12345', summary: '예시 게시글 작성하기_샘플 기능' },
     { key: 'PAY-77', summary: '정산 배치' },
   ]; jiraIssuesByKey = new Map(jiraIssuesCache.map(one => [one.key, one]));`);
   app.run("jiraLink = jiraLinkIdle(null);");
@@ -5259,7 +5259,7 @@ function doneLinkClient({ issues = null, fail = false, connected = true } = {}) 
 test('BARCHIVE: `완료한 티켓도 보기`는 눌렀을 때만 최근 90일을 한 번 부르고, 받은 줄은 회색으로 아래에 붙는다', async () => {
   const fixture = doneLinkClient();
   assert.deepEqual(fixture.lines().map(line => line.text),
-    ['내 담당 티켓', '게시글 작성하기_게임 임베드 · IO-12345', '정산 배치 · PAY-77', '완료한 티켓도 보기']);
+    ['내 담당 티켓', '예시 게시글 작성하기_샘플 기능 · IO-12345', '정산 배치 · PAY-77', '완료한 티켓도 보기']);
   assert.equal(fixture.doneCalls().length, 0, '열기만 해서는 지라를 부르지 않는다');
   assert.equal(fixture.more().className, 'pk qt', '조용한 글자다');
 
@@ -5267,7 +5267,7 @@ test('BARCHIVE: `완료한 티켓도 보기`는 눌렀을 때만 최근 90일을
   assert.deepEqual(fixture.doneCalls(), ['/api/jira/done?days=90'], '기간은 90일이고 한 번만 부른다');
   assert.deepEqual(fixture.lines(), [
     { text: '내 담당 티켓', className: 'note' },
-    { text: '게시글 작성하기_게임 임베드 · IO-12345', className: 'pk' },
+    { text: '예시 게시글 작성하기_샘플 기능 · IO-12345', className: 'pk' },
     { text: '정산 배치 · PAY-77', className: 'pk' },
     { text: '완료한 티켓', className: 'note' },
     { text: '끝난 임베드 정리 · IO-99', className: 'pk qt' },
@@ -5940,7 +5940,7 @@ test('BNEXTRAIL: `자세히`는 상세 카드를 열고 ✕는 줄만 내린다 
 // 여기서 원문이 남아 있는 목록을 보고 되살리거나(기존 restore) 완전히 지운다.
 const TRASH_ITEMS = [
   { id: 'tr02', type: 'check', typeLabel: '확인 대기', description: '법무 검토 회신', file: 'checks.md',
-    deletedAt: '2026-09-22T01:05:00.000Z', project: '게임 임베드', projectKey: 'jira:IO-12345' },
+    deletedAt: '2026-09-22T01:05:00.000Z', project: '샘플 기능', projectKey: 'jira:IO-12345' },
   { id: 'tr01', type: 'task', typeLabel: '할 일', description: '정산 배치 설계 검토하기', file: 'tasks.md',
     deletedAt: '2026-09-21T13:10:00.000Z', project: '결제 리뉴얼', projectKey: 'group:결제 리뉴얼' },
   { id: 'tr03', type: 'idea', typeLabel: '아이디어', description: '알림 묶어 보내기', file: 'ideas.md',
@@ -5983,7 +5983,7 @@ test('BTRASH: 목록은 종류·문구·프로젝트와 삭제 시각을 한 줄
   assert.equal(nodeFind(rows[1], 'tx').textContent, '정산 배치 설계 검토하기');
   assert.equal(nodeFind(rows[1], 'tw').textContent, '9월 21일 22:10에 삭제');
   // 프로젝트는 다른 줄과 같은 표기(`· ● 이름`)다 — 지라는 서버가 요약만 실어 준다.
-  assert.equal(nodeFind(rows[0], 'd-inproj').children.filter(kid => typeof kid === 'string').join(''), '· 게임 임베드');
+  assert.equal(nodeFind(rows[0], 'd-inproj').children.filter(kid => typeof kid === 'string').join(''), '· 샘플 기능');
   assert.equal(nodeFind(rows[2], 'd-inproj'), null, '프로젝트가 없으면 아무것도 지어내지 않는다');
   assert.equal(nodeFind(rows[0], 'ta').children[0].textContent, '되살리기');
 
@@ -6209,10 +6209,10 @@ test('BJALIAS: 프로젝트 찾기(projectFindFilter)는 별칭·지라 원래 �
 const BJC_META = { ok: true, connected: true, project: 'IO', epic: { id: '10000', name: '에픽' }, types: [{ id: '10001', name: '작업' }], defaultTypeId: '10001' };
 const BJC_MADE = {
   ok: true, connected: true,
-  epic: { key: 'IO-48400', url: 'https://example-jira.test/browse/IO-48400', summary: '게시글 작성하기_게임 임베드', created: true },
+  epic: { key: 'IO-48400', url: 'https://example-jira.test/browse/IO-48400', summary: '예시 게시글 작성하기_샘플 기능', created: true },
   children: [
-    { summary: '[Web] 게시글 작성하기_게임 임베드', key: 'IO-48401', url: 'https://example-jira.test/browse/IO-48401' },
-    { summary: '[QA] 게시글 작성하기_게임 임베드', error: '지라에서 이 프로젝트에 이슈를 만들 권한이 없어요.', kind: 'makeForbidden' },
+    { summary: '[Web] 예시 게시글 작성하기_샘플 기능', key: 'IO-48401', url: 'https://example-jira.test/browse/IO-48401' },
+    { summary: '[QA] 예시 게시글 작성하기_샘플 기능', error: '지라에서 이 프로젝트에 이슈를 만들 권한이 없어요.', kind: 'makeForbidden' },
   ],
   made: 2, failed: 1,
 };
@@ -6252,11 +6252,11 @@ test('BJCREATE: 왼쪽 목록 머리의 `+`가 새 프로젝트 화면을 열고
   add.listeners.click();
   assert.equal(bjcText(fixture.body().children[0]), '새 프로젝트');
 
-  fixture.set("projectNew.name = '게시글 작성하기_게임 임베드'; projectNew.project = 'IO'; projectNew.roles = ['Web', 'QA']; projectNew.types = [{ id: '10001', name: '작업' }]; projectNew.typeId = '10001'");
+  fixture.set("projectNew.name = '예시 게시글 작성하기_샘플 기능'; projectNew.project = 'IO'; projectNew.roles = ['Web', 'QA']; projectNew.types = [{ id: '10001', name: '작업' }]; projectNew.typeId = '10001'");
   const preview = nodeFind(fixture.body(), 'd-pnewpv');
   assert.equal(bjcWords(nodeFind(preview, 'ep')).includes('새로 만듦'), true, '새 에픽이면 `새로 만듦`이라고 적는다');
   const titles = nodeFindAll(preview, 'ti').map(input => input.value);
-  assert.deepEqual(titles, ['[Web] 게시글 작성하기_게임 임베드', '[QA] 게시글 작성하기_게임 임베드']);
+  assert.deepEqual(titles, ['[Web] 예시 게시글 작성하기_샘플 기능', '[QA] 예시 게시글 작성하기_샘플 기능']);
   assert.deepEqual(nodeFindAll(preview, 'br').map(kid => kid.textContent), ['├', '└']);
   assert.deepEqual(nodeFindAll(preview, 'wh').map(kid => kid.textContent).slice(1), ['담당 없음', '담당 없음'], '담당은 비운다');
   assert.equal(bjcText(nodeFind(fixture.body(), 'pri')), '지라에 3개 만들기', '에픽 하나를 함께 센다');
@@ -6287,18 +6287,18 @@ test('BJCREATE: 직군을 하나도 안 고르면 에픽만, 직접 입력은 �
   assert.deepEqual(fixture.sent.filter(entry => entry.url.includes('jira-roles')), [], '직접 입력은 설정에 저장하지 않는다');
 
   // 이미 그 접두어의 하위가 있는 에픽에 붙일 때는 체크가 꺼진 채로 `이미 있어요 KEY`라고만 알린다.
-  fixture.set(`projectNew.mode = 'attach'; projectNew.roles = ['Web']; projectNew.epic = { key: 'IO-48394', summary: '임베드', children: { items: [{ key: 'IO-48401', summary: '[Web] 임베드' }] } }`);
+  fixture.set(`projectNew.mode = 'attach'; projectNew.roles = ['Web']; projectNew.epic = { key: 'ABC-1234', summary: '임베드', children: { items: [{ key: 'IO-48401', summary: '[Web] 임베드' }] } }`);
   assert.equal(fixture.app.run("projectNewExisting(projectNew, { label: 'Web', prefix: '[Web]' })"), 'IO-48401');
-  fixture.app.run("projectNewPickEpic({ key: 'IO-48394', summary: '임베드', children: { items: [{ key: 'IO-48401', summary: '[Web] 임베드' }] } })");
+  fixture.app.run("projectNewPickEpic({ key: 'ABC-1234', summary: '임베드', children: { items: [{ key: 'IO-48401', summary: '[Web] 임베드' }] } })");
   assert.equal(fixture.app.run('projectNew.roles.length'), 0, '겹치는 직군의 체크는 꺼진다');
   assert.match(bjcWords(nodeFind(fixture.body(), 'd-pnewroles')), /이미 있어요 IO-48401/);
-  assert.match(bjcWords(nodeFind(fixture.body(), 'd-pnewpv')), /IO-48394에 붙임/);
+  assert.match(bjcWords(nodeFind(fixture.body(), 'd-pnewpv')), /ABC-1234에 붙임/);
 });
 
 test('BJCREATE: 확인 줄을 거치지 않으면 만들기 요청이 나가지 않고, 만든 뒤에도 ⌘Z 대상이 아니다', async () => {
   const fixture = projectNewClient({ made: { ...BJC_MADE, children: [BJC_MADE.children[0]], made: 2, failed: 0 } });
   fixture.start();
-  fixture.set("projectNew.name = '게시글 작성하기_게임 임베드'; projectNew.project = 'IO'; projectNew.roles = ['Web']");
+  fixture.set("projectNew.name = '예시 게시글 작성하기_샘플 기능'; projectNew.project = 'IO'; projectNew.roles = ['Web']");
   const go = nodeFind(fixture.body(), 'pri');
   assert.equal(go.disabled, false);
   go.listeners.click();
@@ -6314,8 +6314,8 @@ test('BJCREATE: 확인 줄을 거치지 않으면 만들기 요청이 나가지 
   await bjcButton(nodeFind(fixture.body(), 'd-jconfirm'), '만들기').listeners.click();
   assert.deepEqual(fixture.sent.filter(entry => entry.url === '/api/jira/create'), [{ url: '/api/jira/create', body: { plan: {
     projectKey: 'IO',
-    epic: { summary: '게시글 작성하기_게임 임베드' },
-    children: [{ summary: '[Web] 게시글 작성하기_게임 임베드', issueTypeId: '10001' }],
+    epic: { summary: '예시 게시글 작성하기_샘플 기능' },
+    children: [{ summary: '[Web] 예시 게시글 작성하기_샘플 기능', issueTypeId: '10001' }],
   } } }]);
   assert.match(fixture.app.nodes.get('liveRegion').textContent, /지라에 2개를 만들었어요/);
   assert.equal(fixture.app.run('undoStack.length'), 0, '지라에 만드는 것은 앱의 ⌘Z 대상이 아니다');
@@ -6325,7 +6325,7 @@ test('BJCREATE: 확인 줄을 거치지 않으면 만들기 요청이 나가지 
 test('BJCREATE: 부분 실패는 만든 것과 실패한 줄·이유를 보여 주고, 다시 시도는 실패한 것만 보낸다', async () => {
   const fixture = projectNewClient();
   fixture.start();
-  fixture.set("projectNew.name = '게시글 작성하기_게임 임베드'; projectNew.project = 'IO'; projectNew.roles = ['Web', 'QA']");
+  fixture.set("projectNew.name = '예시 게시글 작성하기_샘플 기능'; projectNew.project = 'IO'; projectNew.roles = ['Web', 'QA']");
   nodeFind(fixture.body(), 'pri').listeners.click();
   await bjcButton(nodeFind(fixture.body(), 'd-jconfirm'), '만들기').listeners.click();
 
@@ -6338,7 +6338,7 @@ test('BJCREATE: 부분 실패는 만든 것과 실패한 줄·이유를 보여 �
   fixture.app.run(`projectNew.result.children = projectNew.result.children.map(child => child.error ? { ...child } : child);`);
   const again = bjcButton(fixture.body(), '실패한 것 다시 시도');
   fixture.app.run(`lastMade = { ok: true, connected: true, epic: { key: 'IO-48400', url: 'x', summary: 's', created: false },
-    children: [{ summary: '[QA] 게시글 작성하기_게임 임베드', key: 'IO-48402', url: 'y' }], made: 1, failed: 0 };`);
+    children: [{ summary: '[QA] 예시 게시글 작성하기_샘플 기능', key: 'IO-48402', url: 'y' }], made: 1, failed: 0 };`);
   fixture.app.context.fetch = async (url, options) => {
     fixture.sent.push({ url: String(url), body: options && options.body ? JSON.parse(options.body) : null });
     return new Response(JSON.stringify(fixture.app.run('lastMade')));
@@ -6347,7 +6347,7 @@ test('BJCREATE: 부분 실패는 만든 것과 실패한 줄·이유를 보여 �
   assert.deepEqual(fixture.sent.slice(-1)[0].body, { plan: {
     projectKey: 'IO',
     epic: { key: 'IO-48400' },
-    children: [{ summary: '[QA] 게시글 작성하기_게임 임베드', issueTypeId: '10001' }],
+    children: [{ summary: '[QA] 예시 게시글 작성하기_샘플 기능', issueTypeId: '10001' }],
   } });
   assert.equal(bjcText(nodeFind(fixture.body(), 'hd')), '지라에 3개를 만들었어요');
   assert.match(fixture.app.nodes.get('liveRegion').textContent, /남은 것도 다 만들었어요/);
@@ -6394,7 +6394,7 @@ test('BJCREATE: 직군 목록은 설정 세트를 따르고, 줄 편집은 앱�
 test('BJASSIGN: 새 에픽을 만들면 헤더 새로고침과 같은 조용한 길로 지라 목록을 새로 읽고 화면을 다시 받는다(그 순서로)', async () => {
   const fixture = projectNewClient();
   fixture.start();
-  fixture.set("projectNew.name = '게시글 작성하기_게임 임베드'; projectNew.project = 'IO'; projectNew.roles = ['Web']");
+  fixture.set("projectNew.name = '예시 게시글 작성하기_샘플 기능'; projectNew.project = 'IO'; projectNew.roles = ['Web']");
   const order = [];
   const baseFetch = fixture.app.context.fetch;
   fixture.app.context.fetch = async (url, options) => { order.push(String(url)); return baseFetch(url, options); };
@@ -6405,10 +6405,10 @@ test('BJASSIGN: 새 에픽을 만들면 헤더 새로고침과 같은 조용한 
 });
 
 test('BJASSIGN: 이미 있는 에픽에 붙일 때는 지라 목록을 새로 읽지 않는다 — 그 에픽은 재배정하지 않는다', async () => {
-  const attachMade = { ok: true, connected: true, epic: { key: 'IO-48394', url: 'https://example-jira.test/browse/IO-48394', summary: '임베드', created: false }, children: [{ summary: '[Web] 임베드', key: 'IO-48401', url: 'x' }], made: 1, failed: 0 };
+  const attachMade = { ok: true, connected: true, epic: { key: 'ABC-1234', url: 'https://example-jira.test/browse/ABC-1234', summary: '임베드', created: false }, children: [{ summary: '[Web] 임베드', key: 'IO-48401', url: 'x' }], made: 1, failed: 0 };
   const fixture = projectNewClient({ made: attachMade });
   fixture.start();
-  fixture.set(`projectNew.mode = 'attach'; projectNew.roles = ['Web']; projectNew.epic = { key: 'IO-48394', summary: '임베드', children: { items: [] } }`);
+  fixture.set(`projectNew.mode = 'attach'; projectNew.roles = ['Web']; projectNew.epic = { key: 'ABC-1234', summary: '임베드', children: { items: [] } }`);
   const calls = [];
   const baseFetch = fixture.app.context.fetch;
   fixture.app.context.fetch = async (url, options) => { calls.push(String(url)); return baseFetch(url, options); };
@@ -6421,13 +6421,13 @@ test('BJASSIGN: 이미 있는 에픽에 붙일 때는 지라 목록을 새로 �
 test('BJASSIGN: 결과 카드는 에픽 배정 실패를 조용한 회색 글자로만 알리고, 하위 줄에는 담당자 문구가 없다', async () => {
   const assignFailedMade = {
     ok: true, connected: true,
-    epic: { key: 'IO-48400', url: 'https://example-jira.test/browse/IO-48400', summary: '게시글 작성하기_게임 임베드', created: true, assignError: '지라에서 이 프로젝트에 이슈를 만들 권한이 없어요.' },
-    children: [{ summary: '[Web] 게시글 작성하기_게임 임베드', key: 'IO-48401', url: 'x' }],
+    epic: { key: 'IO-48400', url: 'https://example-jira.test/browse/IO-48400', summary: '예시 게시글 작성하기_샘플 기능', created: true, assignError: '지라에서 이 프로젝트에 이슈를 만들 권한이 없어요.' },
+    children: [{ summary: '[Web] 예시 게시글 작성하기_샘플 기능', key: 'IO-48401', url: 'x' }],
     made: 2, failed: 0,
   };
   const fixture = projectNewClient({ made: assignFailedMade });
   fixture.start();
-  fixture.set("projectNew.name = '게시글 작성하기_게임 임베드'; projectNew.project = 'IO'; projectNew.roles = ['Web']");
+  fixture.set("projectNew.name = '예시 게시글 작성하기_샘플 기능'; projectNew.project = 'IO'; projectNew.roles = ['Web']");
   fixture.app.run('load = async () => {};'); // 이 테스트는 새로고침 순서를 보지 않는다
   nodeFind(fixture.body(), 'pri').listeners.click();
   await bjcButton(nodeFind(fixture.body(), 'd-jconfirm'), '만들기').listeners.click();
@@ -6444,7 +6444,7 @@ test('BJASSIGN: 결과 카드는 에픽 배정 실패를 조용한 회색 글자
 test('BJASSIGN: 결과 화면의 첫 할 일은 선택이라고 적는다(새 에픽이 이미 배정돼 목록에 뜬 뒤라서)', async () => {
   const fixture = projectNewClient();
   fixture.start();
-  fixture.set("projectNew.name = '게시글 작성하기_게임 임베드'; projectNew.project = 'IO'; projectNew.roles = ['Web']");
+  fixture.set("projectNew.name = '예시 게시글 작성하기_샘플 기능'; projectNew.project = 'IO'; projectNew.roles = ['Web']");
   nodeFind(fixture.body(), 'pri').listeners.click();
   await bjcButton(nodeFind(fixture.body(), 'd-jconfirm'), '만들기').listeners.click();
   const result = nodeFind(fixture.body(), 'd-pnewres');
@@ -6455,7 +6455,7 @@ test('BJASSIGN: 결과 화면의 첫 할 일은 선택이라고 적는다(새 �
 test('BJASSIGN: 에픽 모드에서 첫 할 일을 비워도 확인 줄까지 그대로 진행된다', () => {
   const fixture = projectNewClient();
   fixture.start();
-  fixture.set("projectNew.name = '게시글 작성하기_게임 임베드'; projectNew.project = 'IO'; projectNew.roles = ['Web']");
+  fixture.set("projectNew.name = '예시 게시글 작성하기_샘플 기능'; projectNew.project = 'IO'; projectNew.roles = ['Web']");
   assert.equal(fixture.app.run('projectNew.first'), '', '첫 할 일 칸을 건드리지 않았다');
   const go = nodeFind(fixture.body(), 'pri');
   assert.equal(go.disabled, false, '첫 할 일이 비어 있어도 눌린다');
@@ -6550,14 +6550,14 @@ test('BMOVE ①: 옮기기가 실패하면 결과 화면에 조용한 회색 줄
 
 test('BMOVE ①: `있는 에픽에 붙이기`도 같은 감지 줄로, 대상은 고른 에픽이다', async () => {
   const fixture = projectNewClient();
-  bmoveNewFetch(fixture, { created: { key: 'IO-48394', url: 'x', summary: '살아 있는 것', created: false } });
+  bmoveNewFetch(fixture, { created: { key: 'ABC-1234', url: 'x', summary: '살아 있는 것', created: false } });
   fixture.start();
-  fixture.set(`projectNew.mode = 'attach'; projectNew.roles = ['Web']; projectNew.epic = { key: 'IO-48394', summary: '살아 있는 것', children: { items: [] } }`);
+  fixture.set(`projectNew.mode = 'attach'; projectNew.roles = ['Web']; projectNew.epic = { key: 'ABC-1234', summary: '살아 있는 것', children: { items: [] } }`);
   assert.equal(fixture.app.run('projectNew.moveCandidate'), '살아 있는 것');
   nodeFind(fixture.body(), 'pri').listeners.click();
   await bjcButton(nodeFind(fixture.body(), 'd-jconfirm'), '만들기').listeners.click();
   assert.deepEqual(fixture.sent.filter(entry => entry.url === '/api/project/move'),
-    [{ url: '/api/project/move', body: { project: 'group:살아 있는 것', to: 'IO-48394' } }]);
+    [{ url: '/api/project/move', body: { project: 'group:살아 있는 것', to: 'ABC-1234' } }]);
 });
 
 // ---------- BWRAP: 오늘 정리 ----------
@@ -6732,8 +6732,8 @@ test('BWRAP: `끝낸 것`은 접힌 소제목이고, 0개면 소제목 자체가
 // 여기 나오는 이름·댓글·티켓 번호는 전부 지어낸 것이다(실제 지라에는 닿지 않는다).
 const attentionAgo = minutes => new Date(Date.now() - minutes * 60000).toISOString();
 const attentionItem = (over = {}) => ({
-  id: 'jira:IO-48394:10001', source: 'jira', key: 'IO-48394', url: 'https://fake-jira.test/browse/IO-48394',
-  summary: '게시글 작성하기_게임 임베드', status: '배포 대기', statusTone: 'doing',
+  id: 'jira:ABC-1234:10001', source: 'jira', key: 'ABC-1234', url: 'https://fake-jira.test/browse/ABC-1234',
+  summary: '예시 게시글 작성하기_샘플 기능', status: '배포 대기', statusTone: 'doing',
   who: '테스터A', others: 0, count: 1, preview: '해외 서버에서는 안 뜨나요?',
   at: attentionAgo(120), mention: false, ...over,
 });
@@ -6797,8 +6797,8 @@ test('BATTENTION: 줄은 요약·`누가 · 언제`·미리보기이고 키는 �
   await fixture.app.run('attentionLoad()');
   const [row] = fixture.rows();
   const title = nodeFind(row, 'ti');
-  assert.equal(title.textContent, '게시글 작성하기_게임 임베드', '줄에는 요약만 적는다');
-  assert.equal(title.title, 'IO-48394 · 게시글 작성하기_게임 임베드', '키는 툴팁에만');
+  assert.equal(title.textContent, '예시 게시글 작성하기_샘플 기능', '줄에는 요약만 적는다');
+  assert.equal(title.title, 'ABC-1234 · 예시 게시글 작성하기_샘플 기능', '키는 툴팁에만');
   assert.equal(nodeFind(row, 'st'), null, '지라 상태는 반응 필요 줄에서 말하지 않는다(정보가 두 겹이라 뺐다)');
   assert.equal(nodeFind(row, 'wh').textContent, '테스터A 외 1명 · 2시간 전');
   assert.equal(nodeFind(row, 'mn').textContent, '@멘션');
@@ -6806,8 +6806,8 @@ test('BATTENTION: 줄은 요약·`누가 · 언제`·미리보기이고 키는 �
   assert.equal(nodeFind(row, 'pv').textContent, '해외 서버에서는 안 뜨나요?');
   assert.equal(nodeFind(row, 'ct').textContent, '· 댓글 2개');
   const open = nodeFind(row, 'd-src');
-  assert.deepEqual([open.textContent, open.href, open.target], ['열기', 'https://fake-jira.test/browse/IO-48394', '_blank']);
-  assert.equal(nodeFind(row, 'd-pjdot').dataset.pj, fixture.app.run("String(uiProjectHue('jira:IO-48394'))"));
+  assert.deepEqual([open.textContent, open.href, open.target], ['열기', 'https://fake-jira.test/browse/ABC-1234', '_blank']);
+  assert.equal(nodeFind(row, 'd-pjdot').dataset.pj, fixture.app.run("String(uiProjectHue('jira:ABC-1234'))"));
 
   // 댓글이 하나뿐이면 `댓글 N개`를 찍지 않고, 부름이 없으면 배지도 없다.
   const one = attentionClient();
@@ -6820,16 +6820,16 @@ test('BATTENTION: `했어요`는 그 줄만 치우고 알림의 `되돌리기`�
   const fixture = attentionClient({ items: [attentionItem(), attentionItem({ id: 'jira:IO-48395:20002', key: 'IO-48395', summary: '정산 배치' })] });
   await fixture.app.run('attentionLoad()');
   await fixture.button(fixture.rows()[0], '했어요').listeners.click();
-  assert.deepEqual(fixture.sent[fixture.sent.length - 1], { url: '/api/attention/dismiss', body: { id: 'jira:IO-48394:10001' } });
+  assert.deepEqual(fixture.sent[fixture.sent.length - 1], { url: '/api/attention/dismiss', body: { id: 'jira:ABC-1234:10001' } });
   assert.deepEqual(fixture.rows().map(row => nodeFind(row, 'ti').textContent), ['정산 배치'], '그 줄만 사라진다');
-  assert.match(fixture.notice(), /반응 필요에서 치웠어요 · 게시글 작성하기_게임 임베드/);
+  assert.match(fixture.notice(), /반응 필요에서 치웠어요 · 예시 게시글 작성하기_샘플 기능/);
   assert.equal(fixture.app.run('undoStack.length'), 0, '바깥 상태와 얽힌 표시라 ⌘Z 대상이 아니다');
 
   // 알림의 `되돌리기`는 반대 방향으로 한 번 더 보내고 목록을 다시 읽는다.
   const undo = fixture.app.nodes.get('liveRegion').children.find(node => node.textContent === '되돌리기');
   await undo.listeners.click();
   assert.equal(fixture.sent[fixture.sent.length - 2].url, '/api/attention/undismiss');
-  assert.deepEqual(fixture.sent[fixture.sent.length - 2].body, { id: 'jira:IO-48394:10001' });
+  assert.deepEqual(fixture.sent[fixture.sent.length - 2].body, { id: 'jira:ABC-1234:10001' });
   assert.equal(fixture.sent[fixture.sent.length - 1].url, '/api/attention', '되돌린 뒤 목록을 다시 읽는다');
   assert.equal(fixture.rows().length, 2);
 });
@@ -6849,7 +6849,7 @@ test('BATTENTION: `할 일로`는 `후속 할 일`과 같은 입력칸이고, �
   fixture.button(fixture.rows()[0], '할 일로').listeners.click();
   const form = nodeFind(fixture.rows()[0], 'is-ed');
   const input = nodeFind(form, 'd-din');
-  assert.equal(input.value, '댓글 답하기 — 게시글 작성하기_게임 임베드', '미리 채운다');
+  assert.equal(input.value, '댓글 답하기 — 예시 게시글 작성하기_샘플 기능', '미리 채운다');
   assert.equal(input.selected, true, '전체 선택된 채로 연다');
   assert.deepEqual(form.children.filter(node => node.className === 'd-btn sm').map(node => node.textContent), ['오늘', '나중에']);
 
@@ -6861,10 +6861,10 @@ test('BATTENTION: `할 일로`는 `후속 할 일`과 같은 입력칸이고, �
   await input.listeners.keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
   const made = fixture.sent[before];
   assert.equal(made.url, '/api/today-task/create', 'Enter는 오늘 할 일이다');
-  assert.deepEqual(made.body, { description: '댓글 답하기 — 게시글 작성하기_게임 임베드', jira: 'IO-48394' });
+  assert.deepEqual(made.body, { description: '댓글 답하기 — 예시 게시글 작성하기_샘플 기능', jira: 'ABC-1234' });
   assert.equal(fixture.sent[before + 1].url, '/api/attention/dismiss', '업무를 만든 것이 곧 반응한 것이다');
   assert.equal(fixture.app.run('undoStack.length'), 1, '만든 업무는 ⌘Z로 지운다(기존 등록 규칙)');
-  assert.equal(fixture.app.run('undoStack[0].label'), '댓글 답하기 — 게시글 작성하기_게임 임베드 (반응 필요)',
+  assert.equal(fixture.app.run('undoStack[0].label'), '댓글 답하기 — 예시 게시글 작성하기_샘플 기능 (반응 필요)',
     '⌘Z 이름표는 만든 곳(반응 필요)을 말한다 — 후속 할 일이 아니다');
   assert.equal(fixture.rows().length, 0);
   assert.match(fixture.notice(), /오늘 할 일에 추가했어요/);
@@ -13902,16 +13902,16 @@ test('개편 A: 넣을 구역은 글자 고르개 하나 — 메뉴 안 체크 �
 test('개편 A(B8): 다음 주 계획 소제목은 위 칸과 같은 표기(색 점 + 밑줄 없는 이름) — 슬랙 글도 `가입 개선`, 지라 정보는 원래 이름으로 찾는다', () => {
   const app = reportClient();
   assert.equal(app.run("reportPlanShownName('가입_개선')"), '가입 개선');
-  assert.equal(app.run("reportPlanShownName('IO-1 · 게시글 작성하기_게임 임베드')"), 'IO-1 · 게시글 작성하기_게임 임베드', '지라 이름의 밑줄은 그대로');
+  assert.equal(app.run("reportPlanShownName('IO-1 · 예시 게시글 작성하기_샘플 기능')"), 'IO-1 · 예시 게시글 작성하기_샘플 기능', '지라 이름의 밑줄은 그대로');
   const head = app.run(`reportPlanProjectHead('가입 개선', null, '가입_개선')`);
   assert.deepEqual(head.children.map(kid => [kid.className, kid.textContent]), [['d-pjdot', ''], ['nm', '가입 개선']]);
   const report = `{ weekKey: '2026-09-21', rows: [
     { id: 'p1', heading: '다음 주 계획', group: '가입_개선', text: 'A/B 결과 공유', sourceIds: [], excluded: false },
-    { id: 'p2', heading: '다음 주 계획', group: 'IO-1 · 게시글 작성하기_게임 임베드', text: '임베드 QA', sourceIds: [], excluded: false } ] }`;
+    { id: 'p2', heading: '다음 주 계획', group: 'IO-1 · 예시 게시글 작성하기_샘플 기능', text: '임베드 QA', sourceIds: [], excluded: false } ] }`;
   const text = app.run(`reportSlackText(reportSlackModel(${report}, { sections: ['예정'] }))`);
-  assert.equal(text, ['9월 4주차 (9/21~9/27)', '', '[예정]', '', '가입 개선', '• A/B 결과 공유', '', '게시글 작성하기_게임 임베드', '• 임베드 QA'].join('\n'));
+  assert.equal(text, ['9월 4주차 (9/21~9/27)', '', '[예정]', '', '가입 개선', '• A/B 결과 공유', '', '예시 게시글 작성하기_샘플 기능', '• 임베드 QA'].join('\n'));
   const projects = JSON.parse(app.run(`JSON.stringify(reportSlackModel(${report}, { sections: ['예정'] }).sections[0].projects.map(p => [p.name, p.source || null]))`));
-  assert.deepEqual(projects, [['가입 개선', '가입_개선'], ['IO-1 · 게시글 작성하기_게임 임베드', null]]);
+  assert.deepEqual(projects, [['가입 개선', '가입_개선'], ['IO-1 · 예시 게시글 작성하기_샘플 기능', null]]);
   app.run(`workflowData = { items: [], meetings: [], projectLinks: { '가입_개선': 'PAY-77' } }; jiraIssuesByKey = new Map([['PAY-77', { key: 'PAY-77', status: 'QA 대기', versions: [] }]]);`);
   assert.match(app.run(`reportSlackText(reportSlackModel(${report}, { sections: ['예정'], jira: true }))`), /^가입 개선 \(QA 대기\)$/m, '지라 정보는 저장된 이름(연결)으로 찾는다');
 });

@@ -847,7 +847,7 @@ const RENAME_REPORT = {
 function seedRename(home, report = RENAME_REPORT) {
   fs.writeFileSync(path.join(home, 'tasks.md'), '# Tasks\n'
     + '- 정산 배치 설계 검토하기 #task[id:rn01 status:to-do priority:high created:2026-09-20 group:결제_리뉴얼]\n'
-    + '- 게임 임베드 검수하기 #task[id:rn02 status:to-do priority:medium created:2026-09-20 jira:IO-12345]\n'
+    + '- 샘플 기능 검수하기 #task[id:rn02 status:to-do priority:medium created:2026-09-20 jira:IO-12345]\n'
     + '- 대시보드 지표 정리하기 #task[id:rn06 status:to-do priority:medium created:2026-09-20 group:운영툴]\n');
   fs.writeFileSync(path.join(home, 'checks.md'), '# Checks\n'
     + '- 법무 검토 회신 #check[id:rn03 status:to-do priority:medium created:2026-09-20 who:하늘 group:결제_리뉴얼]\n');
@@ -908,7 +908,7 @@ test('BRENAME: 이름을 바꾸면 항목·회의·연결·보관·주간요약�
   // ① 업무 파일 — 파일 표기의 공백→밑줄 규칙은 그대로, 지라가 걸린 줄과 다른 그룹은 손대지 않는다.
   const tasks = fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8');
   assert.match(tasks, /정산 배치 설계 검토하기 #task\[id:rn01 status:to-do priority:high created:2026-09-20 group:결제_정산\]/);
-  assert.match(tasks, /게임 임베드 검수하기 #task\[id:rn02 status:to-do priority:medium created:2026-09-20 jira:IO-12345\]/);
+  assert.match(tasks, /샘플 기능 검수하기 #task\[id:rn02 status:to-do priority:medium created:2026-09-20 jira:IO-12345\]/);
   assert.match(tasks, /group:운영툴\]/);
   assert.match(fs.readFileSync(path.join(server.home, 'checks.md'), 'utf8'), /who:하늘 group:결제_정산\]/);
   assert.match(fs.readFileSync(path.join(server.home, 'decisions.md'), 'utf8'), /group:결제_정산\]/);

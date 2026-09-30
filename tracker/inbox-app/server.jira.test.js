@@ -23,7 +23,7 @@ test('지라 캐시는 `그 밖의 이슈` 구역을 extra로 표시하고, 구�
       [{ key: 'IO-1', type: '에픽', status: '진행 중', summary: '보드 AI', extra: false }],
       '구역이 없는 옛 파일은 예전과 같이 전부 보통 이슈다');
 
-    const withSection = [...head, '## 업무에 연결된 그 밖의 이슈', '', '- IO-2 | 에픽 | 완료 | 게임 임베드', '',
+    const withSection = [...head, '## 업무에 연결된 그 밖의 이슈', '', '- IO-2 | 에픽 | 완료 | 샘플 기능', '',
       '## 다른 소제목', '', '- IO-3 | 스토리 | Backlog | 알림 로그 정리', ''];
     fs.writeFileSync(jiraPath, withSection.join('\n'));
     assert.deepEqual((await items()).jiraIssues.map(issue => [issue.key, issue.status, issue.extra]),
@@ -45,7 +45,7 @@ const jiraConfig = { jira: { siteUrl: JIRA_SITE, email: JIRA_EMAIL, tokenFile: '
 const jiraSettings = () => jiraModule.jiraSettings(jiraConfig);
 const jiraIssueBody = (extra = {}) => ({
   fields: {
-    summary: '게시글 작성하기_게임 임베드',
+    summary: '예시 게시글 작성하기_샘플 기능',
     status: { name: '진행 중', statusCategory: { key: 'indeterminate' } },
     issuetype: { name: '에픽' },
     assignee: { displayName: '루본' },
@@ -97,15 +97,15 @@ const jiraChildItems = [
 
 test('지라 읽기는 요약·상태 범주·배포 버전·기한·담당과 하위 집계를 한 덩어리로 돌려준다', async () => {
   const fake = jiraFake({
-    '/rest/api/3/issue/IO-48394': () => json(jiraIssueBody()),
+    '/rest/api/3/issue/ABC-1234': () => json(jiraIssueBody()),
     '/rest/api/3/search/jql': () => json(jiraChildBody),
   });
   const client = jiraModule.createJiraClient({ settings: jiraSettings(), request: fake.request, readToken: () => JIRA_TOKEN });
-  const issue = await client.getIssueOverview('IO-48394');
+  const issue = await client.getIssueOverview('ABC-1234');
   assert.deepEqual(issue, {
-    key: 'IO-48394',
-    url: `${JIRA_SITE}/browse/IO-48394`,
-    summary: '게시글 작성하기_게임 임베드',
+    key: 'ABC-1234',
+    url: `${JIRA_SITE}/browse/ABC-1234`,
+    summary: '예시 게시글 작성하기_샘플 기능',
     type: '에픽',
     status: { name: '진행 중', category: 'doing' },
     assignee: '루본',
@@ -114,12 +114,12 @@ test('지라 읽기는 요약·상태 범주·배포 버전·기한·담당과 �
     children: { total: 3, done: 2, items: jiraChildItems },
   });
   // 링크는 앱이 조립한다(siteUrl + /browse/KEY) — 지라가 준 self 주소를 쓰지 않는다.
-  assert.equal(issue.url, `${JIRA_SITE}/browse/IO-48394`);
+  assert.equal(issue.url, `${JIRA_SITE}/browse/ABC-1234`);
   // 요청은 두 번뿐이다: 이슈 하나 + 하위 조회 하나(목록 전체를 미리 부르지 않는다).
   assert.equal(fake.calls.length, 2);
   assert.match(fake.calls[0].url, /fields=summary,status,issuetype,assignee,duedate,fixVersions,subtasks$/);
   // 하위 조회가 받아 오는 칸은 이 다섯뿐이다 — 이메일·계정 id를 달라고 하지 않는다.
-  assert.match(fake.calls[1].url, /\/rest\/api\/3\/search\/jql\?jql=parent%3DIO-48394&fields=summary,status,assignee,fixVersions,issuetype&maxResults=100$/);
+  assert.match(fake.calls[1].url, /\/rest\/api\/3\/search\/jql\?jql=parent%3DABC-1234&fields=summary,status,assignee,fixVersions,issuetype&maxResults=100$/);
   // 인증은 Basic 한 벌이고, 그 값은 요청에만 실린다.
   assert.equal(fake.calls[0].headers.Authorization, `Basic ${Buffer.from(`${JIRA_EMAIL}:${JIRA_TOKEN}`).toString('base64')}`);
 });
@@ -158,11 +158,11 @@ test('하위가 search에 없으면 subtasks로 세고, 새 search 주소가 없
 // ---------- 지라 하위 티켓 목록 (BJR 3단계 — 읽기 전용) ----------
 test('하위 티켓 목록은 담당자를 표시 이름으로만 싣고 이메일·계정 id는 어디에도 남기지 않는다', async () => {
   const fake = jiraFake({
-    '/rest/api/3/issue/IO-48394': () => json(jiraIssueBody()),
+    '/rest/api/3/issue/ABC-1234': () => json(jiraIssueBody()),
     '/rest/api/3/search/jql': () => json(jiraChildBody),
   });
   const api = jiraModule.createJiraApi({ config: jiraConfig, request: fake.request, readFile: () => JIRA_TOKEN });
-  const answer = await api.read('IO-48394');
+  const answer = await api.read('ABC-1234');
   assert.deepEqual(answer.issue.children.items, jiraChildItems);
   // 1단계의 `total`/`done`은 그대로다 — 진행률 줄과 기존 화면이 그대로 돈다.
   assert.equal(answer.issue.children.total, 3);
@@ -262,7 +262,7 @@ test('지라 API는 키별로 60초 캐시하고 fresh=1이면 건너뛴다', as
   const api = jiraModule.createJiraApi({ config: jiraConfig, request: fake.request, readFile: () => JIRA_TOKEN, now: () => clock });
   const first = await api.read('AB-1');
   assert.equal(first.connected, true);
-  assert.equal(first.issue.summary, '게시글 작성하기_게임 임베드');
+  assert.equal(first.issue.summary, '예시 게시글 작성하기_샘플 기능');
   const issueCalls = () => fake.calls.filter(call => call.url.includes('/rest/api/3/issue/')).length;
   assert.equal(issueCalls(), 1);
   await api.read('AB-1');
@@ -299,7 +299,7 @@ test('GET /api/jira/issue는 파일을 쓰지 않고, 설정이 없으면 연결
     return `${name}:${stat.size}:${stat.mtimeMs}`;
   }).join('|');
   const before = snapshot();
-  const response = await fetch(`${base}/api/jira/issue?key=IO-48394`);
+  const response = await fetch(`${base}/api/jira/issue?key=ABC-1234`);
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { ok: true, connected: false });
   // 형식이 틀린 키만 400이다. 지라 쪽 실패는 200 + `ok:false`로 오므로 화면이 조용히 그 문구를 적는다.
@@ -367,7 +367,7 @@ test('지라 고르개의 선택지는 허용된 전환과 미배포 버전뿐�
   assert.equal(jiraWrites(fake).length, 0, '선택지를 읽는 것만으로는 지라에 아무것도 쓰지 않는다');
   // 프로젝트 키는 티켓 키에서 뽑는다 — 따로 더 묻지 않는다.
   assert.ok(fake.calls.some(call => call.url.endsWith('/rest/api/3/project/AB/versions')));
-  assert.equal(jiraModule.projectOf('IO-48394'), 'IO');
+  assert.equal(jiraModule.projectOf('ABC-1234'), 'ABC');
   // 설정이 없으면 지라를 부르지 않는다.
   const off = jiraModule.createJiraApi({ config: {}, request: jiraFake({}).request });
   assert.deepEqual(await off.options('AB-1'), { ok: true, connected: false });
@@ -570,7 +570,7 @@ async function startLinkedJiraServer(t, seed) {
   fs.writeFileSync(tokenFile, 'fixture-token-never-real\n');
   const config = path.join(home, 'workspace.config.json');
   fs.writeFileSync(config, JSON.stringify({ jira: { siteUrl: JIRA_LINK_SITE, email: 'fixture@example.test', tokenFile } }));
-  const known = { 'IO-12345': '게시글 작성하기_게임 임베드' };
+  const known = { 'IO-12345': '예시 게시글 작성하기_샘플 기능' };
   const wrapper = path.join(home, 'fake-jira-server.js');
   fs.writeFileSync(wrapper, `'use strict';
 const SITE = ${JSON.stringify(JIRA_LINK_SITE)};
@@ -702,11 +702,11 @@ const jiraListIssue = (key, extra = {}) => ({
 const jiraListClient = fake => jiraModule.createJiraClient({ settings: jiraSettings(), request: fake.request, readToken: () => JIRA_TOKEN });
 
 test('내 담당 목록은 파일과 같은 칸에 새 칸(범주·기한·배포 버전)만 얹어 돌려주고, 담당자는 아예 묻지 않는다', async () => {
-  const fake = jiraFake({ '/rest/api/3/search/jql': () => json(jiraListBody([jiraListIssue('IO-48394'), { key: '수상한키', fields: {} }])) });
+  const fake = jiraFake({ '/rest/api/3/search/jql': () => json(jiraListBody([jiraListIssue('ABC-1234'), { key: '수상한키', fields: {} }])) });
   const issues = await jiraListClient(fake).listMyIssues();
   assert.deepEqual(issues, [{
     // 기존 자리(프로젝트 이름 붙이기·고르기 목록)가 그대로 읽는 칸 — `status`는 상태 이름 글자다.
-    key: 'IO-48394', type: '스토리', status: '진행 중', summary: 'IO-48394의 요약', extra: false,
+    key: 'ABC-1234', type: '스토리', status: '진행 중', summary: 'ABC-1234의 요약', extra: false,
     // 이번에 더한 칸(화면은 아직 그리지 않는다 — 배포 임박 알림·주간요약이 쓸 값이다).
     category: 'doing', due: '2026-10-02',
     versions: [{ name: 'v2.70.0', releaseDate: '2026-09-30', released: false }],
@@ -728,18 +728,18 @@ test('업무에 걸린 키는 기본 목록에 없을 때만 한 번 더 묻고 
         assert.equal(jql, 'key in (IO-77777)', '기본 목록에 이미 있는 키는 다시 묻지 않는다');
         return json(jiraListBody([jiraListIssue('IO-77777', { status: { name: '완료', statusCategory: { key: 'done' } } })]));
       }
-      return json(jiraListBody([jiraListIssue('IO-48394')]));
+      return json(jiraListBody([jiraListIssue('ABC-1234')]));
     },
   };
   const fake = jiraFake(routes);
-  const issues = await jiraListClient(fake).listMyIssues(['IO-48394', 'IO-77777', 'IO-77777', 'not-a-key', null]);
+  const issues = await jiraListClient(fake).listMyIssues(['ABC-1234', 'IO-77777', 'IO-77777', 'not-a-key', null]);
   assert.deepEqual(issues.map(issue => [issue.key, issue.extra, issue.status, issue.category]),
-    [['IO-48394', false, '진행 중', 'doing'], ['IO-77777', true, '완료', 'done']]);
+    [['ABC-1234', false, '진행 중', 'doing'], ['IO-77777', true, '완료', 'done']]);
   assert.equal(fake.calls.length, 2, '기본 목록 한 번 + 남은 키 한 번');
 
   // 걸린 키가 전부 기본 목록에 있으면 두 번째 조회는 아예 나가지 않는다.
   const covered = jiraFake(routes);
-  await jiraListClient(covered).listMyIssues(['IO-48394']);
+  await jiraListClient(covered).listMyIssues(['ABC-1234']);
   assert.equal(covered.calls.length, 1);
 });
 
@@ -751,16 +751,16 @@ test('목록은 100개까지만 들고 오고, 새 search 주소가 없으면 �
 
   const fallback = jiraFake({
     '/rest/api/3/search/jql': () => json({ errorMessages: ['not found'] }, 404),
-    '/rest/api/3/search?': () => json(jiraListBody([jiraListIssue('IO-48394')])),
+    '/rest/api/3/search?': () => json(jiraListBody([jiraListIssue('ABC-1234')])),
   });
-  assert.deepEqual((await jiraListClient(fallback).listMyIssues()).map(issue => issue.key), ['IO-48394']);
+  assert.deepEqual((await jiraListClient(fallback).listMyIssues()).map(issue => issue.key), ['ABC-1234']);
   assert.equal(fallback.calls.length, 2, '새 주소가 404일 때만, 옛 주소로 한 번만 물러선다');
 });
 
 test('목록 API는 설정·토큰이 없으면 연결 안 됨으로만 답하고, 실패는 해요체 문구로 알린다', async () => {
-  const fake = jiraFake({ '/rest/api/3/search': () => json(jiraListBody([jiraListIssue('IO-48394')])) });
+  const fake = jiraFake({ '/rest/api/3/search': () => json(jiraListBody([jiraListIssue('ABC-1234')])) });
   const off = jiraModule.createJiraApi({ config: {}, request: fake.request });
-  assert.deepEqual(await off.list(['IO-48394']), { ok: true, connected: false });
+  assert.deepEqual(await off.list(['ABC-1234']), { ok: true, connected: false });
   assert.equal(fake.calls.length, 0, '연결되지 않았으면 지라를 부르지 않는다');
 
   const noToken = jiraModule.createJiraApi({ config: jiraConfig, request: fake.request, readFile: () => '' });
@@ -992,10 +992,10 @@ const jiraDoneIssue = key => ({
 });
 
 test('완료한 내 티켓은 최근 90일·완료 범주만, 요약·상태·종류 세 칸만 묻는다', async () => {
-  const fake = jiraFake({ '/rest/api/3/search/jql': () => json(jiraListBody([jiraDoneIssue('IO-48394'), { key: '수상한키', fields: {} }])) });
+  const fake = jiraFake({ '/rest/api/3/search/jql': () => json(jiraListBody([jiraDoneIssue('ABC-1234'), { key: '수상한키', fields: {} }])) });
   const issues = await jiraListClient(fake).listDoneIssues(90);
   assert.deepEqual(issues, [{
-    key: 'IO-48394', type: '스토리', status: '완료', summary: 'IO-48394의 끝난 일', extra: false,
+    key: 'ABC-1234', type: '스토리', status: '완료', summary: 'ABC-1234의 끝난 일', extra: false,
     // 묻지 않은 칸은 빈 값으로 흐른다(고르는 줄에 쓰지 않는다).
     category: 'done', due: null, versions: [],
   }], '키 형식이 아닌 줄은 버린다');
@@ -1026,14 +1026,14 @@ test('완료 목록도 100개까지만 들고 오고, 새 search 주소가 없�
 
   const fallback = jiraFake({
     '/rest/api/3/search/jql': () => json({ errorMessages: ['not found'] }, 404),
-    '/rest/api/3/search?': () => json(jiraListBody([jiraDoneIssue('IO-48394')])),
+    '/rest/api/3/search?': () => json(jiraListBody([jiraDoneIssue('ABC-1234')])),
   });
-  assert.deepEqual((await jiraListClient(fallback).listDoneIssues()).map(issue => issue.key), ['IO-48394']);
+  assert.deepEqual((await jiraListClient(fallback).listDoneIssues()).map(issue => issue.key), ['ABC-1234']);
   assert.equal(fallback.calls.length, 2, '새 주소가 404일 때만, 옛 주소로 한 번만 물러선다');
 });
 
 test('완료 목록 API는 60초 메모리 캐시 한 벌이고, 설정·토큰이 없으면 연결 안 됨으로만 답한다', async () => {
-  const fake = jiraFake({ '/rest/api/3/search': () => json(jiraListBody([jiraDoneIssue('IO-48394')])) });
+  const fake = jiraFake({ '/rest/api/3/search': () => json(jiraListBody([jiraDoneIssue('ABC-1234')])) });
   const off = jiraModule.createJiraApi({ config: {}, request: fake.request });
   assert.deepEqual(await off.listDone(90), { ok: true, connected: false });
   assert.equal(fake.calls.length, 0, '연결되지 않았으면 지라를 부르지 않는다');
@@ -1045,7 +1045,7 @@ test('완료 목록 API는 60초 메모리 캐시 한 벌이고, 설정·토큰�
   const api = jiraModule.createJiraApi({ config: jiraConfig, request: fake.request, readFile: () => JIRA_TOKEN, now: () => clock });
   const first = await api.listDone(90);
   assert.equal(first.connected, true);
-  assert.deepEqual(first.issues.map(issue => issue.key), ['IO-48394']);
+  assert.deepEqual(first.issues.map(issue => issue.key), ['ABC-1234']);
   await api.listDone(90);
   assert.equal(fake.calls.length, 1, '60초 안에는 다시 묻지 않는다(키 없이 한 벌)');
   await api.listDone(30);
@@ -1187,7 +1187,7 @@ function seedMove(home, report = MOVE_REPORT) {
   fs.writeFileSync(path.join(home, 'tasks.md'), '# Tasks\n'
     + '- 정산 배치 설계 검토하기 #task[id:mv01 status:to-do priority:high created:2026-09-20 group:결제_리뉴얼]\n'
     + '- 완료한 정산 작업 #task[id:mv02 status:done priority:medium created:2026-09-18 completed:2026-09-19 group:결제_리뉴얼]\n'
-    + '- 게임 임베드 검수하기 #task[id:mv03 status:to-do priority:medium created:2026-09-20 jira:IO-9999]\n'
+    + '- 샘플 기능 검수하기 #task[id:mv03 status:to-do priority:medium created:2026-09-20 jira:IO-9999]\n'
     + '- 대시보드 지표 정리하기 #task[id:mv06 status:to-do priority:medium created:2026-09-20 group:운영툴]\n');
   fs.writeFileSync(path.join(home, 'checks.md'), '# Checks\n'
     + '- 법무 검토 회신 #check[id:mv04 status:to-do priority:medium created:2026-09-20 who:하늘 group:결제_리뉴얼]\n');
@@ -1416,7 +1416,7 @@ function jiraMakeFake({ types = jiraCreateTypes, refuse = {}, epic = null, mineI
     '/issue/createmeta': () => json(types),
     '/rest/api/3/myself': () => (mineId ? json({ accountId: mineId }) : json({}, 401)),
     // 이미 있는 에픽을 대조할 때 읽는 자리(요약과 종류 id만 묻는다)
-    '/rest/api/3/issue/IO-': () => (epic ? json({ fields: { summary: epic.summary, issuetype: { id: epic.typeId } } }) : json({ errorMessages: ['no issue'] }, 404)),
+    '/rest/api/3/issue/ABC-': () => (epic ? json({ fields: { summary: epic.summary, issuetype: { id: epic.typeId } } }) : json({ errorMessages: ['no issue'] }, 404)),
   });
   const request = async (url, options) => {
     const method = (options && options.method) || 'GET';
@@ -1496,10 +1496,10 @@ test('BJCREATE: 에픽을 먼저 만들고 하위를 차례대로 그 에픽에 
   const fake = jiraMakeFake();
   const result = await jiraMakeApi(fake).create({ plan: {
     projectKey: 'IO',
-    epic: { summary: '게시글 작성하기_게임 임베드' },
+    epic: { summary: '예시 게시글 작성하기_샘플 기능' },
     children: [
-      { summary: '[Web] 게시글 작성하기_게임 임베드', issueTypeId: '10001' },
-      { summary: '[QA] 게시글 작성하기_게임 임베드', issueTypeId: '10001' },
+      { summary: '[Web] 예시 게시글 작성하기_샘플 기능', issueTypeId: '10001' },
+      { summary: '[QA] 예시 게시글 작성하기_샘플 기능', issueTypeId: '10001' },
     ],
   } });
   assert.equal(result.ok, true);
@@ -1507,12 +1507,12 @@ test('BJCREATE: 에픽을 먼저 만들고 하위를 차례대로 그 에픽에 
   assert.equal(result.failed, 0);
   assert.equal(result.epic.created, true);
   assert.equal(result.epic.url, `${JIRA_SITE}/browse/${result.epic.key}`);
-  assert.deepEqual(result.children.map(child => child.summary), ['[Web] 게시글 작성하기_게임 임베드', '[QA] 게시글 작성하기_게임 임베드']);
+  assert.deepEqual(result.children.map(child => child.summary), ['[Web] 예시 게시글 작성하기_샘플 기능', '[QA] 예시 게시글 작성하기_샘플 기능']);
   // 순서: 종류 조회(GET) → 에픽 → 하위 둘. 하위는 모두 그 에픽을 부모로 단다.
   assert.deepEqual(fake.made.map(entry => [entry.summary, entry.parent, entry.type]), [
-    ['게시글 작성하기_게임 임베드', null, '10000'],
-    ['[Web] 게시글 작성하기_게임 임베드', result.epic.key, '10001'],
-    ['[QA] 게시글 작성하기_게임 임베드', result.epic.key, '10001'],
+    ['예시 게시글 작성하기_샘플 기능', null, '10000'],
+    ['[Web] 예시 게시글 작성하기_샘플 기능', result.epic.key, '10001'],
+    ['[QA] 예시 게시글 작성하기_샘플 기능', result.epic.key, '10001'],
   ]);
   const posts = fake.calls.filter(call => call.method === 'POST');
   assert.equal(posts.length, 3);
@@ -1564,20 +1564,20 @@ test('BJCREATE: 에픽 자체가 실패하면 하위는 시작하지도 않는�
 });
 
 test('BJCREATE: 이미 있는 에픽에 붙일 때는 그 티켓이 정말 에픽인지 쓰기 직전에 확인한다', async () => {
-  const good = jiraMakeFake({ epic: { summary: '게시글 작성하기_게임 임베드', typeId: '10000' } });
+  const good = jiraMakeFake({ epic: { summary: '예시 게시글 작성하기_샘플 기능', typeId: '10000' } });
   const ok = await jiraMakeApi(good).create({ plan: {
-    projectKey: 'IO', epic: { key: 'IO-48394' }, children: [{ summary: '[Web] 붙임', issueTypeId: '10001' }],
+    projectKey: 'ABC', epic: { key: 'ABC-1234' }, children: [{ summary: '[Web] 붙임', issueTypeId: '10001' }],
   } });
   assert.equal(ok.ok, true);
   assert.equal(ok.epic.created, false);
-  assert.equal(ok.epic.summary, '게시글 작성하기_게임 임베드');
+  assert.equal(ok.epic.summary, '예시 게시글 작성하기_샘플 기능');
   assert.equal(ok.made, 1, '에픽은 이미 있으므로 세지 않는다');
-  assert.deepEqual(good.made.map(entry => entry.parent), ['IO-48394']);
+  assert.deepEqual(good.made.map(entry => entry.parent), ['ABC-1234']);
 
   // 에픽이 아닌 티켓(작업)에는 붙이지 않는다 — 아무것도 만들지 않는다.
   const wrong = jiraMakeFake({ epic: { summary: '그냥 작업', typeId: '10001' } });
   const refused = await jiraMakeApi(wrong).create({ plan: {
-    projectKey: 'IO', epic: { key: 'IO-48394' }, children: [{ summary: '[Web] 붙임', issueTypeId: '10001' }],
+    projectKey: 'ABC', epic: { key: 'ABC-1234' }, children: [{ summary: '[Web] 붙임', issueTypeId: '10001' }],
   } });
   assert.deepEqual(refused, { ok: false, error: '고른 티켓이 에픽이 아니에요.', kind: 'notEpic' });
   assert.equal(wrong.made.length, 0);
@@ -1728,8 +1728,8 @@ test('BJASSIGN: 새로 만든 에픽은 만든 직후 나에게 배정하고, �
   const fake = jiraMakeFake();
   const result = await jiraMakeApi(fake).create({ plan: {
     projectKey: 'IO',
-    epic: { summary: '게시글 작성하기_게임 임베드' },
-    children: [{ summary: '[Web] 게시글 작성하기_게임 임베드', issueTypeId: '10001' }],
+    epic: { summary: '예시 게시글 작성하기_샘플 기능' },
+    children: [{ summary: '[Web] 예시 게시글 작성하기_샘플 기능', issueTypeId: '10001' }],
   } });
   assert.equal(result.ok, true);
   assert.equal(result.epic.created, true);
@@ -1790,7 +1790,7 @@ test('BJASSIGN: myself가 401/403이면 다음 create() 때 다시 묻는다', a
 test('BJASSIGN: 이미 있는 에픽에 붙일 때는 에픽을 재배정하지 않는다 — `assigned` 칸 자체가 없다', async () => {
   const fake = jiraMakeFake({ epic: { summary: '남의 에픽', typeId: '10000' } });
   const result = await jiraMakeApi(fake).create({ plan: {
-    projectKey: 'IO', epic: { key: 'IO-48394' }, children: [{ summary: '[Web] 붙임', issueTypeId: '10001' }],
+    projectKey: 'ABC', epic: { key: 'ABC-1234' }, children: [{ summary: '[Web] 붙임', issueTypeId: '10001' }],
   } });
   assert.equal(result.ok, true);
   assert.equal(result.epic.created, false);
@@ -1842,7 +1842,7 @@ const attentionIssue = (key, comments, extra = {}) => ({
   },
 });
 const attentionRow = (comments, extra = {}) =>
-  jiraModule.shapeAttention(JIRA_SITE, attentionIssue(extra.key || 'IO-48394', comments, extra), ATTENTION_ME, comments);
+  jiraModule.shapeAttention(JIRA_SITE, attentionIssue(extra.key || 'ABC-1234', comments, extra), ATTENTION_ME, comments);
 const mineSaid = (id, at, body) => attentionComment(id, ATTENTION_ME, '나', at, body || adfSay('제가 확인할게요'));
 const theySaid = (id, at, name, body) => attentionComment(id, ATTENTION_OTHER + name, name, at, body || adfSay(`${name}의 댓글`));
 
@@ -1851,8 +1851,8 @@ test('반응 필요는 내 마지막 댓글 뒤에 남은 다른 사람 댓글�
   const mine = mineSaid('10001', '2026-09-21T09:00:00.000+0000');
   const b = theySaid('10003', '2026-09-22T03:00:00.000+0000', '테스터B');
   assert.deepEqual(attentionRow([a, mine, b]), {
-    id: 'jira:IO-48394:10003', source: 'jira', key: 'IO-48394', url: `${JIRA_SITE}/browse/IO-48394`,
-    summary: 'IO-48394의 요약', status: '진행 중', statusTone: 'doing',
+    id: 'jira:ABC-1234:10003', source: 'jira', key: 'ABC-1234', url: `${JIRA_SITE}/browse/ABC-1234`,
+    summary: 'ABC-1234의 요약', status: '진행 중', statusTone: 'doing',
     who: '테스터B', others: 0, count: 1, preview: '테스터B의 댓글',
     at: '2026-09-22T03:00:00.000Z', mention: false,
   }, '내 댓글보다 앞선 댓글은 세지 않는다');
@@ -1869,7 +1869,7 @@ test('반응 필요는 내 마지막 댓글 뒤에 남은 다른 사람 댓글�
   // 주소를 이 키로 조립하고 치우기가 이 id로 걸린다 — 형식이 아니면 줄을 만들지 않는다.
   assert.equal(attentionRow([a], { key: '수상한키' }), null);
   assert.equal(attentionRow([theySaid('10-a', '2026-09-22T03:00:00.000+0000', '테스터A')]), null);
-  assert.equal(jiraModule.shapeAttention(JIRA_SITE, attentionIssue('IO-48394', [a]), '', [a]), null, '누가 나인지 모르면 아무 줄도 만들지 않는다');
+  assert.equal(jiraModule.shapeAttention(JIRA_SITE, attentionIssue('ABC-1234', [a]), '', [a]), null, '누가 나인지 모르면 아무 줄도 만들지 않는다');
 });
 
 test('댓글이 최신순으로 와도 created 차례로 놓고 판정한다', () => {
@@ -1878,7 +1878,7 @@ test('댓글이 최신순으로 와도 created 차례로 놓고 판정한다', (
   // 최신순(내 댓글이 먼저)으로 와도 "내가 마지막으로 답한" 것이므로 줄이 없어야 한다.
   assert.equal(attentionRow([mine, theirs]), null);
   const later = theySaid('10003', '2026-09-22T06:00:00.000+0000', '테스터A');
-  assert.equal(attentionRow([later, mine, theirs]).id, 'jira:IO-48394:10003');
+  assert.equal(attentionRow([later, mine, theirs]).id, 'jira:ABC-1234:10003');
 });
 
 test('완료한 이슈도 빼지 않고, 지라 상태 글자와 범주를 함께 싣는다', () => {
@@ -1931,7 +1931,7 @@ test('반응 필요 조회는 이슈 50개·칸 셋만 묻고, 댓글이 잘린 
   const fake = jiraFake({
     '/rest/api/3/myself': () => json({ accountId: ATTENTION_ME, emailAddress: JIRA_EMAIL, displayName: '나' }),
     '/rest/api/3/search/jql': () => json({ issues: [
-      attentionIssue('IO-48394', [mineSaid('10001', '2026-09-20T01:00:00.000+0000'), theySaid('10002', '2026-09-21T02:00:00.000+0000', '테스터A')]),
+      attentionIssue('ABC-1234', [mineSaid('10001', '2026-09-20T01:00:00.000+0000'), theySaid('10002', '2026-09-21T02:00:00.000+0000', '테스터A')]),
       cut,
       attentionIssue('IO-48396', [theySaid('30002', '2026-09-20T02:00:00.000+0000', '테스터B'), mineSaid('30003', '2026-09-21T02:00:00.000+0000')]),
       { key: '수상한키', fields: {} },
@@ -1942,7 +1942,7 @@ test('반응 필요 조회는 이슈 50개·칸 셋만 묻고, 댓글이 잘린 
     ] }),
   });
   const items = await jiraListClient(fake).listAttention(ATTENTION_ME);
-  assert.deepEqual(items.map(item => item.id), ['jira:IO-48395:20003', 'jira:IO-48394:10002'],
+  assert.deepEqual(items.map(item => item.id), ['jira:IO-48395:20003', 'jira:ABC-1234:10002'],
     '내가 마지막으로 답한 이슈와 형식이 틀린 키는 빠진다');
   assert.equal(items[0].count, 2, '다시 읽어 온 댓글로 판정한다');
   // 요청은 둘뿐이다: 목록 하나 + 잘린 이슈 하나(다른 이슈는 다시 읽지 않는다).
@@ -1965,13 +1965,13 @@ test('반응 필요 조회는 이슈 50개·칸 셋만 묻고, 댓글이 잘린 
 test('반응 필요 API는 내 계정 id를 한 번만 묻고 응답 어디에도 싣지 않는다', async () => {
   const routes = {
     '/rest/api/3/myself': () => json({ accountId: ATTENTION_ME, emailAddress: JIRA_EMAIL, displayName: '나' }),
-    '/rest/api/3/search': () => json({ issues: [attentionIssue('IO-48394', [theySaid('10002', '2026-09-22T03:00:00.000+0000', '테스터A')])] }),
+    '/rest/api/3/search': () => json({ issues: [attentionIssue('ABC-1234', [theySaid('10002', '2026-09-22T03:00:00.000+0000', '테스터A')])] }),
   };
   const fake = jiraFake(routes);
   const api = jiraModule.createJiraApi({ config: jiraConfig, request: fake.request, readFile: () => JIRA_TOKEN });
   const answer = await api.attention();
   assert.equal(answer.connected, true);
-  assert.deepEqual(answer.items.map(item => [item.key, item.who]), [['IO-48394', '테스터A']]);
+  assert.deepEqual(answer.items.map(item => [item.key, item.who]), [['ABC-1234', '테스터A']]);
   await api.attention();
   assert.equal(fake.calls.filter(call => call.url.includes('/myself')).length, 1, '누가 나인지는 프로세스마다 한 번만 묻는다');
   const payload = JSON.stringify(answer);
@@ -2104,7 +2104,7 @@ globalThis.fetch = async (input, init) => {
     comment: { comments, total: comments.length },
   } });
   return json({ issues: [
-    issue('IO-48394', [comment('10001', '테스터A', '2026-09-22T05:31:00.000+0000', '해외 서버에서는 안 뜨나요?', true)]),
+    issue('ABC-1234', [comment('10001', '테스터A', '2026-09-22T05:31:00.000+0000', '해외 서버에서는 안 뜨나요?', true)]),
     issue('IO-48395', [
       comment('20001', '나', '2026-09-21T01:00:00.000+0000', '제가 볼게요', false),
       comment('20002', '테스터B', '2026-09-21T02:00:00.000+0000', '문구만 확인 부탁해요', false),
@@ -2150,12 +2150,12 @@ test('GET /api/attention은 나를 부른 줄을 맨 위에 두고, 조회는 �
   assert.equal(first.ok, true);
   assert.equal(first.connected, true);
   assert.deepEqual(first.items.map(item => [item.key, item.mention, item.count, item.who, item.others]), [
-    ['IO-48394', true, 1, '테스터A', 0],
+    ['ABC-1234', true, 1, '테스터A', 0],
     ['IO-48395', false, 2, '테스터C', 1],
   ], '내가 마지막으로 답한 이슈는 줄이 없다');
   assert.equal(first.items[0].preview, '@나 해외 서버에서는 안 뜨나요?');
   assert.deepEqual([first.items[0].status, first.items[0].statusTone], ['배포 대기', 'doing']);
-  assert.equal(first.items[0].url, `${ATTENTION_SITE}/browse/IO-48394`);
+  assert.equal(first.items[0].url, `${ATTENTION_SITE}/browse/ABC-1234`);
   assert.match(first.updatedAt, /^\d{4}-\d{2}-\d{2}T/);
   assert.equal(first.stale, false);
   assert.equal(first.error, undefined);
@@ -2172,14 +2172,14 @@ test('GET /api/attention은 나를 부른 줄을 맨 위에 두고, 조회는 �
     const response = await fetch(`${server.origin}${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
     return { status: response.status, ...await response.json() };
   };
-  const done = await send('/api/attention/dismiss', 'jira:IO-48394:10001');
-  assert.deepEqual([done.status, done.ok, done.id], [200, true, 'jira:IO-48394:10001']);
+  const done = await send('/api/attention/dismiss', 'jira:ABC-1234:10001');
+  assert.deepEqual([done.status, done.ok, done.id], [200, true, 'jira:ABC-1234:10001']);
   const saved = JSON.parse(fs.readFileSync(path.join(server.home, '.workflow.json'), 'utf8'));
-  assert.match(saved.attention.dismissed['jira:IO-48394:10001'], /^\d{4}-\d{2}-\d{2}T/);
+  assert.match(saved.attention.dismissed['jira:ABC-1234:10001'], /^\d{4}-\d{2}-\d{2}T/);
   assert.deepEqual((await read()).items.map(item => item.key), ['IO-48395'], '치운 줄은 빠진 채로 온다');
   // `되돌리기` — 다시 나타난다.
-  assert.equal((await send('/api/attention/undismiss', 'jira:IO-48394:10001')).ok, true);
-  assert.deepEqual((await read()).items.map(item => item.key), ['IO-48394', 'IO-48395']);
+  assert.equal((await send('/api/attention/undismiss', 'jira:ABC-1234:10001')).ok, true);
+  assert.deepEqual((await read()).items.map(item => item.key), ['ABC-1234', 'IO-48395']);
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(server.home, '.workflow.json'), 'utf8')).attention, { dismissed: {} });
 });
 
@@ -2194,8 +2194,8 @@ test('GET /api/attention은 지라 설정이 없으면 연결 안 됨으로만 �
 });
 
 test('반응 필요 치우기는 id 형식을 검증하고 같은 요청을 두 번 쓰지 않는다', async () => {
-  assert.equal((await post('/api/attention/dismiss', { id: 'jira:IO-48394' })).status, 400);
-  assert.equal((await post('/api/attention/dismiss', { id: 'JIRA:IO-48394:10001' })).status, 400);
+  assert.equal((await post('/api/attention/dismiss', { id: 'jira:ABC-1234' })).status, 400);
+  assert.equal((await post('/api/attention/dismiss', { id: 'JIRA:ABC-1234:10001' })).status, 400);
   assert.equal((await post('/api/attention/dismiss', { id: 'jira:io-48394:10001' })).status, 400);
   assert.equal((await post('/api/attention/dismiss', {})).status, 400);
   assert.equal((await post('/api/attention/undismiss', { id: '../../etc/passwd' })).status, 400);
@@ -2205,13 +2205,13 @@ test('반응 필요 치우기는 id 형식을 검증하고 같은 요청을 두 
   const call = () => fetch(`${base}/api/attention/dismiss`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'attention-request-0001' },
-    body: JSON.stringify({ id: 'jira:IO-48394:10001' }),
+    body: JSON.stringify({ id: 'jira:ABC-1234:10001' }),
   }).then(r => r.json());
   const a = await call();
   const b = await call();
   assert.deepEqual(a, b);
-  assert.equal(a.id, 'jira:IO-48394:10001');
-  assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(workflowPath, 'utf8')).attention.dismissed), ['jira:IO-48394:10001']);
+  assert.equal(a.id, 'jira:ABC-1234:10001');
+  assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(workflowPath, 'utf8')).attention.dismissed), ['jira:ABC-1234:10001']);
 });
 
 test('저장이 멈춘 동안에는 반응 필요도 치우지 못한다', async (t) => {
@@ -2221,7 +2221,7 @@ test('저장이 멈춘 동안에는 반응 필요도 치우지 못한다', async
     fs.writeFileSync(path.join(home, '.mutation.lock'), String(deadPid()));
   });
   const response = await fetch(`${server.base}/api/attention/dismiss`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'jira:IO-48394:10001' }),
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'jira:ABC-1234:10001' }),
   });
   assert.equal(response.status, 503);
   assert.equal((await response.json()).code, 'RECOVERY_NEEDED');
@@ -2263,11 +2263,11 @@ test('추가 조회(key in)만 400이면 추가분만 빠지고 내 담당 목�
     '/rest/api/3/search/jql': (url) => {
       const jql = decodeURIComponent(String(url).split('jql=')[1].split('&')[0]);
       if (jql.startsWith('key in')) return json({ errorMessages: ["An issue with key 'IO-99999' does not exist for field 'key'."] }, 400);
-      return json(jiraListBody([jiraListIssue('IO-48394')]));
+      return json(jiraListBody([jiraListIssue('ABC-1234')]));
     },
   });
-  const issues = await jiraListClient(fake).listMyIssues(['IO-48394', 'IO-99999']);
-  assert.deepEqual(issues.map(issue => [issue.key, issue.extra]), [['IO-48394', false]]);
+  const issues = await jiraListClient(fake).listMyIssues(['ABC-1234', 'IO-99999']);
+  assert.deepEqual(issues.map(issue => [issue.key, issue.extra]), [['ABC-1234', false]]);
   assert.equal(fake.calls.length, 2, '기본 목록 한 번 + 추가 조회 한 번(다시 묻지 않는다)');
 });
 
@@ -2280,7 +2280,7 @@ test('내 담당 목록 조회가 401이면 예전처럼 실패하고, 추가 �
   await assert.rejects(() => jiraListClient(mineBad).listMyIssues(), error => error.status === 400, '내 담당 목록 자체의 400은 그대로 실패');
 
   const extraDenied = jiraFake({
-    '/rest/api/3/search/jql': (url) => String(url).includes('key%20in') ? json({}, 403) : json(jiraListBody([jiraListIssue('IO-48394')])),
+    '/rest/api/3/search/jql': (url) => String(url).includes('key%20in') ? json({}, 403) : json(jiraListBody([jiraListIssue('ABC-1234')])),
   });
   await assert.rejects(() => jiraListClient(extraDenied).listMyIssues(['IO-1']), error => error.status === 403);
 });
