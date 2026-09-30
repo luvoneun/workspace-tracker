@@ -94,7 +94,7 @@ async function attentionDismiss(item, card) {
 // `할 일로` — 확인 대기의 `후속 할 일`과 **같은 입력칸·같은 등록 길**이다(⌘Z로 그 업무를 지우는
 // 규칙까지 그대로). 업무를 만든 것이 곧 반응한 것이라 그 줄은 이어서 치운다.
 async function attentionCreateTask(item, description, mode) {
-  await waitingNextCreateTask({ id: item.id, description: attentionLabel(item), jira: item.key }, description, mode);
+  await waitingNextCreateTask({ id: item.id, description: attentionLabel(item), jira: item.key }, description, mode, '반응 필요');
   try {
     await attentionSend('/api/attention/dismiss', item.id);
     attentionDrop(item.id);

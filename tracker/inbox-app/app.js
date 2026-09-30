@@ -3983,7 +3983,9 @@ function palList() {
 // 결과 한 줄: 종류 | (회의는 날짜·시각) | 제목 | 프로젝트 | 상태·기한. 의미 없는 값은 자리를 비운다.
 function palResultRow(entry, index, query) {
   const row = document.createElement('div');
-  row.className = 'd-pres' + (entry.kind === 'meeting' ? ' is-mtg' : '') + (index === palState.active ? ' is-sel' : '');
+  // 완료한 줄은 제목 글자만 조용해진다(취소선 없음 — ui.css `.d-pres.is-done .ti`).
+  const done = entry.kind !== 'meeting' && entry.item.status === 'done';
+  row.className = 'd-pres' + (entry.kind === 'meeting' ? ' is-mtg' : '') + (done ? ' is-done' : '') + (index === palState.active ? ' is-sel' : '');
   row.id = `palopt-${index}`;
   row.setAttribute('role', 'option');
   row.setAttribute('aria-selected', String(index === palState.active));

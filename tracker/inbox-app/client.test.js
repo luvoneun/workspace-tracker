@@ -814,6 +814,20 @@ test('BPAL: 체크박스는 대상 종류(할 일·버그·확인 대기)에만 
   assert.equal(meetingRow.children[0].className, 'tag', '회의 줄은 예전 그대로다');
 });
 
+test('BPAL: 완료한 줄은 제목 글자만 조용해진다(취소선 없음, 다른 화면의 완료 줄과 같은 --muted)', () => {
+  const { app } = palRowClient(new Response('{"ok":true}'));
+  const done = palRow(app, { id: 'd1', type: 'task', description: '끝낸 일', status: 'done' }, 1);
+  const open = palRow(app, { id: 'o1', type: 'task', description: '남은 일', status: 'to-do' }, 1);
+  assert.match(done.className, /\bis-done\b/);
+  assert.doesNotMatch(open.className, /\bis-done\b/);
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  const rule = css.match(/\.d-pres\.is-done \.ti \{([^}]*)\}/);
+  assert.ok(rule, '완료 줄 제목 규칙이 있다');
+  assert.match(rule[1], /color: var\(--muted\)/, '새 색 없이 --muted를 재사용한다');
+  assert.doesNotMatch(rule[1], /line-through/, '취소선은 쓰지 않는다');
+  assert.ok(css.indexOf('.d-pres.is-done .ti') < css.indexOf('.d-pres.is-sel .ti'), '고른 줄의 강조가 이긴다(뒤에 선다)');
+});
+
 test('BPAL: 체크박스를 누르면 목록과 같은 toggle 하나로 저장하고, 팔레트는 열린 채로 남는다', async () => {
   const { app, sent } = palRowClient(new Response('{"ok":true}'));
   app.run(`workflowData.items = [{ id: 't1', type: 'task', description: '업무 문구', status: 'to-do' }]; wfIndexData();`);
@@ -3288,6 +3302,7 @@ test('후속 할 일은 확인 대기와 같은 프로젝트로, 기한 없이 �
   assert.deepEqual(sent[0].body, { description: '법무 검토 회신 받기', group: '가입 개선' }, '기한·우선순위는 넣지 않는다');
   assert.equal(app.run('waitingNextId'), null, '만든 뒤에는 줄이 닫힌다');
   assert.equal(app.run('undoStack.length'), 1, '되돌리기는 만든 업무를 지우는 기존 길이다');
+  assert.equal(app.run('undoStack[0].label'), '법무 검토 회신 받기 (후속 할 일)', '⌘Z 이름표는 후속 할 일');
 });
 
 test('`나중에`는 나중에 할 일로, 지라 확인 대기는 같은 지라 이슈로 만든다', async () => {
@@ -6422,6 +6437,8 @@ test('BATTENTION: `할 일로`는 `후속 할 일`과 같은 입력칸이고, �
   assert.deepEqual(made.body, { description: '댓글 답하기 — 게시글 작성하기_게임 임베드', jira: 'IO-48394' });
   assert.equal(fixture.sent[before + 1].url, '/api/attention/dismiss', '업무를 만든 것이 곧 반응한 것이다');
   assert.equal(fixture.app.run('undoStack.length'), 1, '만든 업무는 ⌘Z로 지운다(기존 등록 규칙)');
+  assert.equal(fixture.app.run('undoStack[0].label'), '댓글 답하기 — 게시글 작성하기_게임 임베드 (반응 필요)',
+    '⌘Z 이름표는 만든 곳(반응 필요)을 말한다 — 후속 할 일이 아니다');
   assert.equal(fixture.rows().length, 0);
   assert.match(fixture.notice(), /오늘 할 일에 추가했어요/);
 });

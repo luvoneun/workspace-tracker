@@ -1638,6 +1638,8 @@ body.later-open .page { padding-right: 424px; }
 .d-pres .stx.k-warn { background: var(--warn-bg); color: var(--warn); }
 .d-pres .st:empty, .d-pres .when:empty, .d-pres .pj:empty { display: none; }
 .d-pres:hover { background: var(--hover); }
+/* 완료한 줄은 글자만 조용해진다(취소선 없음) — 고른 줄(.is-sel)의 강조가 이긴다 */
+.d-pres.is-done .ti { color: var(--muted); }
 .d-pres.is-sel { background: var(--sel); }
 .d-pres.is-sel .ti { font-weight: 600; color: var(--accent-text); }
 .d-mark { background: var(--mark); color: var(--text); border-radius: 3px; padding: 0 2px; }

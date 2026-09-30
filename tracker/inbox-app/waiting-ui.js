@@ -102,8 +102,9 @@ function waitingNextEdit(bar, { value, placeholder, label, buttons, onSubmit }) 
 
 // 후속 할 일은 기존 업무 만들기 길을 그대로 쓴다 — 프로젝트는 확인 대기와 같게(지라면 같은 지라 이슈),
 // 기한·우선순위는 넣지 않는다(마감일을 추측해 만들지 않는다).
-// 되돌리기는 만든 업무를 지우는 기존 길(결정으로 남기기와 같다).
-async function waitingNextCreateTask(item, description, mode) {
+// 되돌리기는 만든 업무를 지우는 기존 길(결정으로 남기기와 같다). `origin`은 ⌘Z 이름표 괄호 안 글자 —
+// 반응 필요의 `할 일로`는 '반응 필요'를 넘긴다.
+async function waitingNextCreateTask(item, description, mode, origin = '후속 할 일') {
   const endpoint = mode === 'later' ? '/api/later-task/create' : '/api/today-task/create';
   const response = await postJson(endpoint, {
     description,
@@ -111,7 +112,7 @@ async function waitingNextCreateTask(item, description, mode) {
   });
   const { id } = await response.json();
   pushUndo({
-    label: `${description} (후속 할 일)`,
+    label: `${description} (${origin})`,
     undo: () => postJson('/api/track/remove', { id }),
     redo: () => postJson('/api/track/restore', { id }),
   });
