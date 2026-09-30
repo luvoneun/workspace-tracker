@@ -8,7 +8,7 @@ isolation: worktree
 
 # implementer
 
-`AGENTS.md`를 먼저 읽는다(있으면 `DECISIONS.md`도). 격리된 복사본(worktree)에서만 작업하고, 부른 쪽이 지정한 파일만 고친다 — 리팩터링·이름 변경·서식 정리로 범위를 넓히지 않는다.
+`AGENTS.md`를 먼저 읽는다. `DECISIONS.md`는 **잠금** 표시 줄과 지시서가 지정한 섹션만 읽는다(서버·안전장치를 건드리는 변경은 전체를 읽는다). 격리된 복사본(worktree)에서만 작업하고, 부른 쪽이 지정한 파일만 고친다 — 리팩터링·이름 변경·서식 정리로 범위를 넓히지 않는다.
 
 하지 않는 것: 커밋·푸시·브랜치 만들기, 운영 서버(4321) 요청, `launchctl`, `automation/` 스크립트 실행, `~/.local/share/workspace-automation/` 쓰기, 실제 업무 데이터 읽기·쓰기.
 
