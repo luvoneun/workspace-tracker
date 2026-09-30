@@ -168,6 +168,10 @@ function usageLast90(clean, today) {
   const oldest = usageAddDays(today, -(USAGE_VIEW_DAYS - 1));
   return Object.fromEntries(Object.entries(clean).filter(([day]) => day >= oldest));
 }
+// 서버가 업무 기록을 읽지 못했나 — 응답에 `work` 칸이 있는데 믿을 수 없는 값(null 등)일 때. 그때는 옛 사용 기록으로
+// 떨어지지 않고 숫자를 숨긴 채 `끝낸 일을 읽지 못했어요` 한 줄만 둔다(본문과 다른 숫자를 보이지 않게). 칸 자체가 없으면(예전 응답) 사용 기록 기준.
+const USAGE_WORK_FAILED = '끝낸 일을 읽지 못했어요';
+const usageWorkFailed = info => !!info && Object.prototype.hasOwnProperty.call(info, 'work') && !usageWorkValid(info.work);
 // `끝낸 일` 숫자의 뜻(⑂) — 업무 기준일 때만 title·읽어 주는 보충 글자로 붙인다.
 const usageDoneNote = name => `${name}에 끝낸 할 일·버그 수(보고에서 뺀 것 포함)`;
 
@@ -512,6 +516,12 @@ function usageWeeksNow(items) {
   const keys = list.map(item => item && item.weekKey).filter(Boolean);
   const sign = `${keys.join(',')}|${selected}`;
   if (usageWeeksMemo && usageWeeksMemo.info === usageInfo && usageWeeksMemo.sign === sign) return usageWeeksMemo.summary;
+  if (usageWorkFailed(usageInfo)) {
+    // 업무 기록을 못 읽음 — 줄 끝 칸은 모두 없고 맨 아래는 한 줄(failed).
+    const failed = { empty: false, failed: true, weeks: {}, max: 0, selected: null, line: [USAGE_WORK_FAILED], note: null, average: null, best: null };
+    usageWeeksMemo = { info: usageInfo, sign, summary: failed };
+    return failed;
+  }
   const nameOf = typeof reportWeekName === 'function' ? reportWeekName : null;
   const labelOf = typeof formatWeekLabel === 'function' ? (key => formatWeekLabel(key).week) : null;
   const summary = usageWeeksSummary(usageInfo.history, usageInfo.today, keys, selected, nameOf, labelOf, usageInfo.work);
@@ -523,7 +533,7 @@ function usageWeeksNow(items) {
 // 버튼의 aria-label 끝에 붙일 말은 dataset.label(`끝낸 일 N개`) — app.js가 덧붙인다.
 function usageWeekRowEnd(item) {
   const summary = usageWeeksNow();
-  if (!summary || summary.empty || !item) return null;
+  if (!summary || summary.empty || summary.failed || !item) return null;
   const record = summary.weeks[item.weekKey];
   if (!record) return null;
   const end = usageEl('span', 'd-uwend');
@@ -807,6 +817,8 @@ function usageWorkBody(info, cell, options) {
   const stats = usageWorkStats(info.history, info.today, range, options, info.work);
   const past = usagePastWeek(info.today, options);
   const body = usageEl('div', 'd-uw');
+  // 업무 기록을 못 읽었으면 숫자 대신 한 줄(기간 전환도 숨김) — 기능별 전체 보기는 그대로 아래에.
+  const failed = usageWorkFailed(info);
 
   // 머리 — 기간 전환(기존 세그먼트 부품, 보기 전환이라 aria-pressed) + 기간 글자.
   const head = usageEl('div', 'd-uwhead');
@@ -833,9 +845,11 @@ function usageWorkBody(info, cell, options) {
   }
   head.append(seg, usageEl('p', 'd-uwperiod', stats.periodLabel));
   // 90일 안에 기록이 하나도 없으면 기간을 바꿔도 같은 한 줄이라 세그먼트·기간 글자를 숨긴다(빈 화면엔 할 수 있는 것만).
-  if (!stats.empty) body.appendChild(head);
+  if (!stats.empty && !failed) body.appendChild(head);
 
-  if (stats.empty) {
+  if (failed) {
+    body.appendChild(usageEl('p', 'd-ismall d-uwempty', USAGE_WORK_FAILED));
+  } else if (stats.empty) {
     body.appendChild(usageEl('p', 'd-ismall d-uwempty', '아직 기록이 없어요. 할 일을 끝내면 여기에 쌓여요.'));
   } else {
     body.appendChild(usageParts(usageEl('p', 'd-uwbig'), stats.headline));
@@ -855,7 +869,7 @@ function usageWorkBody(info, cell, options) {
     // 타일 3개 — 끝낸 일만 강조.
     const tiles = usageEl('div', 'd-uwtiles');
     tiles.append(
-      usageTile('들어온 일', stats.in.total, usageKeepTogether([['슬랙', stats.in.slack], ['직접', stats.in.direct]])),
+      usageTile('들어온 일', stats.in.total, usageKeepTogether([['슬랙', stats.in.slack], ['직접', stats.in.direct]].filter(([, count]) => count > 0))),
       usageTile('끝낸 일', stats.done.total, stats.done.slack > 0 ? usageKeepTogether([['그중 슬랙', stats.done.slack]]) : '', true, stats.doneNote),
       usageTile('남긴 기록', stats.record.total, usageKeepTogether(stats.record.parts.map(part => [part.label, part.count]))),
     );

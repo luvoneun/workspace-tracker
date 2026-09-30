@@ -13002,11 +13002,36 @@ test('WP-Y 화면 — 주차 줄 끝 숫자·맨 아래 요약·자세히 창 `�
   // 기능별 전체 보기 표는 사용 기록(rows) 그대로.
   assert.equal(wpxText(wpxFind(body, node => node.tagName === 'TD')), '0');
   app.run('usageWorkClose()');
-  // work가 없으면 예전 그대로 — 사용 기록 기준, title·숨은 글자 없음.
+  // 업무 기록을 못 읽었으면(work: null) 옛 사용 기록으로 떨어지지 않는다 — 줄 끝 칸 모두 없음, 맨 아래는 한 줄 + 자세히 링크.
   app.run(`usageInfo = { ...usageInfo, work: null, history: { '2026-09-22': { task_done: 5 } } }; renderWeeklyReports(weeklyReportsCache);`);
+  const rows2 = nav.children.filter(kid => kid.className === 'rp-wk');
+  assert.equal(rows2.some(button => endOf(button)), false, '줄 끝 막대·숫자 모두 없음');
+  assert.equal(rows2.some(button => /끝낸 일/.test(button.getAttribute('aria-label'))), false);
   const foot2 = nav.children[nav.children.length - 1];
+  assert.equal(foot2.className, 'd-uwfoot');
+  assert.deepEqual(foot2.children[0].children.map(wpxText), ['끝낸 일을 읽지 못했어요']);
   assert.equal(foot2.children[0].children[0].title, undefined);
-  assert.equal(foot2.children[0].children[0].children.some(kid => kid.className === 'sr-only'), false);
+  const link2 = foot2.children[foot2.children.length - 1];
+  assert.equal(link2.textContent, '내 일 기록 자세히');
+  link2.listeners.click();
+  const body2 = app.run('usageWorkDlg.body');
+  assert.equal(wpxText(wpxFind(body2, node => node.className === 'd-ismall d-uwempty')), '끝낸 일을 읽지 못했어요');
+  assert.equal(wpxFind(body2, node => /d-uwtile|d-uwbig|d-uwhead|d-uwchart/.test(String(node.className || ''))), null, '숫자·기간 전환·막대 없음');
+  assert.ok(wpxFind(body2, node => node.tagName === 'TABLE'), '기능별 전체 보기는 그대로');
+  app.run('usageWorkClose()');
+  // 응답에 work 칸 자체가 없으면(예전 응답) 사용 기록 기준 그대로.
+  app.run(`usageInfo = { ok: true, today: '${WPX_TODAY}', days: 30, rows: [], history: { '2026-09-22': { task_done: 5 } } }; renderWeeklyReports(weeklyReportsCache);`);
   assert.equal(endOf(nav.children.filter(kid => kid.className === 'rp-wk')[1]).children[1].textContent, '5');
-  assert.equal(endOf(nav.children.filter(kid => kid.className === 'rp-wk')[2]), undefined, '사용 기록 기준이면 90일 밖 주는 칸 없음');
+});
+
+test('WP-Y 자세히 창 타일 작은 글자 — 들어온 일은 0인 항목을 빼고(둘 다 0이면 빈칸), 끝낸 일 `그중 슬랙 0`도 없다', () => {
+  const app = wpxDomClient();
+  const tilesOf = work => {
+    app.run(`usageWorkDlg = null; usageInfo = { ok: true, today: '${WPX_TODAY}', days: 30, rows: [], history: {}, work: ${JSON.stringify(work)} }; usageWorkOpen(document.createElement('button'), null);`);
+    const body = app.run('usageWorkDlg.body');
+    return wpxAll(body, node => /^d-uwtile( |$)/.test(String(node.className || ''))).map(tile => wpxText(wpxFind(tile, node => node.className === 'd-uws')));
+  };
+  assert.deepEqual(tilesOf(wpyWork({ done: { '2026-09-29': 2 }, inDirect: { '2026-09-29': 3 } })), ['직접\u00a03', '', '']);
+  assert.deepEqual(tilesOf(wpyWork({ done: { '2026-09-29': 2 }, inSlack: { '2026-09-29': 1 }, inDirect: { '2026-09-29': 3 }, doneSlack: { '2026-09-29': 1 } })), ['슬랙\u00a01 · 직접\u00a03', '그중\u00a0슬랙\u00a01', '']);
+  assert.deepEqual(tilesOf(wpyWork({ done: { '2026-09-29': 2 } })), ['', '', ''], '둘 다 0이면 빈칸');
 });
