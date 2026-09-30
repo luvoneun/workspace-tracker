@@ -2953,7 +2953,7 @@ test('배포 버전 칸이 없거나(옛 서버·스냅샷) 모르는 프로젝�
   assert.equal(note('운영툴'), '', 'projectLinks가 통째로 없어도 오류 없이 빈 글자다');
 });
 
-test('`지라 정보` 칩은 기본 꺼짐이고, 고른 값은 localStorage에 기억된다(막혀 있으면 꺼진 채로)', () => {
+test('`지라 정보` 체크는 기본 꺼짐이고, 고른 값은 localStorage에 기억된다(막혀 있으면 꺼진 채로)', () => {
   const app = reportClient();
   app.run(REPORT_JIRA_SETUP);
   // 미리보기는 구역 사이 빈 줄을 진짜 줄바꿈 글자로 둔다 — 가짜 창에도 그 자리를 만들어 준다.
@@ -2965,16 +2965,21 @@ test('`지라 정보` 칩은 기본 꺼짐이고, 고른 값은 localStorage에 
   };
   assert.equal(app.run('reportJiraInfo'), false, '기본은 꺼짐이다');
   app.run(`reportPreview(${REPORT_JIRA_REPORT})`);
-  const chips = app.nodes.get('weeklyReportPreview').children[1];
-  const toggle = chips.children[chips.children.length - 1];
-  assert.equal(toggle.textContent, '지라 정보');
-  assert.equal(toggle.getAttribute('aria-pressed'), 'false');
-  assert.equal(chips.children[0].className, 'rp-secg', '구역 칩은 따로 묶여 있고 토글은 그 밖에 선다');
-  toggle.listeners.click();
+  // 개편 A: 칩 대신 `넣을 구역 ▾` 글자 고르개 + 작은 체크 `지라 정보`(기존 체크 부품 .d-wcb) — 저장 키는 그대로.
+  const chips = app.nodes.get('weeklyReportPreview').children.find(kid => kid.className === 'rp-secs');
+  assert.equal(chips.children[0].className, 'rp-gp', '구역은 글자 고르개 하나');
+  const label = chips.children[chips.children.length - 1];
+  assert.equal(label.className, 'rp-jchk');
+  assert.equal(label.children[1].textContent, '지라 정보');
+  const toggle = label.children[0];
+  assert.deepEqual([toggle.type, toggle.className, toggle.checked], ['checkbox', 'd-wcb', false]);
+  toggle.checked = true;
+  toggle.listeners.change();
   assert.equal(app.run('reportJiraInfo'), true);
   assert.equal(saved.get('workspace-report-jira-info'), 'on');
   assert.equal(app.run('reportJiraInfoLoad()'), true, '다음에 열면 켜진 채로 시작한다');
-  toggle.listeners.click();
+  toggle.checked = false;
+  toggle.listeners.change();
   assert.equal(saved.get('workspace-report-jira-info'), 'off');
 
   // 사생활 보호 창처럼 localStorage가 던지는 자리 — 기억만 못 할 뿐 화면은 그대로다.
@@ -12128,20 +12133,19 @@ const B_ROWS = `[
   { id: 'm1', heading: '완료한 일', group: '여러 프로젝트', groupKey: 'name:여러 프로젝트', text: '요약', sourceIds: [], excluded: false, manual: true }
 ]`;
 const B_ITEM = `{ weekKey: '2026-09-14', draft: { revision: 1, rows: ${B_ROWS} } }`;
-test('다듬기 B: 진행 중 줄의 업무가 끝나면 줄 끝 초록 알약 `끝났어요` + 안의 `완료로` 하나 — 누르면 complete를 보낸다', async () => {
+test('다듬기 B(개편 A): 진행 중 줄의 업무가 끝나면 줄 끝 초록 글자 버튼 `끝났어요 · 완료로` 하나 — 누르면 complete를 보낸다', async () => {
   const app = reportClient();
   app.run('calls = []; reportChange = async (target, action) => { calls.push(action); };');
-  const pill = v3Kid(v3Line(app, 1, B_ITEM), 'rp-pill');
-  assert.equal(pill.className, 'd-chip rp-pill is-done');
-  assert.deepEqual(pill.children.map(kid => kid.textContent), ['끝났어요', '완료로']);
-  assert.equal(pill.children[1].type, 'button');
-  const move = pill.children[1];
-  assert.equal(move.className, 'd-btn xs');
+  const move = v3Kid(v3Line(app, 1, B_ITEM), 'rp-end');
+  assert.equal(move.className, 'rp-end is-ok');
+  assert.equal(move.textContent, '끝났어요 · 완료로');
+  assert.equal(move.type, 'button');
+  assert.equal(move.children.length, 0, '누르는 자리는 한 곳');
   assert.match(move.getAttribute('aria-label'), /완료한 일로 옮기기$/);
   move.listeners.click({ stopPropagation() {} });
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), [{ action: 'complete', id: 'g1' }]);
-  assert.equal(v3Kid(v3Line(app, 0, B_ITEM), 'rp-pill'), undefined, '알약은 그 줄에만 선다');
+  assert.equal(v3Kid(v3Line(app, 0, B_ITEM), 'rp-end'), undefined, '그 줄에만 선다');
 });
 test('다듬기 B: `+ 한 줄 추가`는 완료한 일 칸(지난 주 포함)·이번 주 진행 중 칸의 프로젝트 소제목에만, 모으기 중에는 없다', () => {
   const app = reportClient();
@@ -12273,12 +12277,12 @@ test('다듬기 B: 슬랙용으로 복사한 뒤 알림에 `이대로 확정`(�
   await copyButton("{ at: '2026-09-17T00:00:00Z', pending: 0 }").listeners.click();
   assert.deepEqual(JSON.parse(app.run('JSON.stringify(notices)'))[1], ['슬랙에 붙여 넣을 수 있게 복사했어요', null], '확정한 주는 알림만');
 });
-test('다듬기 B: 초록 알약은 --success-bg·--success(상태 점 --success-dot 아님), 주차 목록에는 다음 버전 자리 둘(지금은 비어 있음)', () => {
+test('다듬기 B(개편 A): `끝났어요 · 완료로`는 바탕 없는 --success 글자(상태 점 --success-dot 아님), 주차 목록에는 다음 버전 자리 둘(지금은 비어 있음)', () => {
   const css = fs.readFileSync(path.join(__dirname, 'report-ui.css'), 'utf8');
-  const done = css.slice(css.indexOf('.rp-s .rp-pill.is-done {'), css.indexOf('/* 소제목 묶음 맨 아래'));
-  assert.match(done, /var\(--success-bg\)/);
+  const done = css.slice(css.indexOf('.rp-s .rp-end.is-ok {'), css.indexOf('/* `확인 필요 ›`로 옮겨 온 줄'));
+  assert.match(done, /background: none/);
   assert.match(done, /color: var\(--success\)/);
-  assert.doesNotMatch(done, /--success-dot/);
+  assert.doesNotMatch(done, /--success-dot|--success-bg/);
   const app = reportClient();
   assert.equal(app.run("reportWeekRowEnd({ weekKey: 'W' })"), null);
   assert.equal(app.run('reportWeeksFoot([])'), null);
@@ -12286,7 +12290,8 @@ test('다듬기 B: 초록 알약은 --success-bg·--success(상태 점 --success
   assert.match(main, /reportWeekRowEnd\(item\)/);
   assert.match(main, /reportWeeksFoot\(items\)/);
   const ui = fs.readFileSync(path.join(__dirname, 'report-ui.js'), 'utf8');
-  const added = ui.slice(ui.indexOf('// ---------- 칸마다 `+ 한 줄 추가`(다듬기 B)'), ui.indexOf('// 제외한 문장은 문서 끝'));
+  const added = ui.slice(ui.indexOf('// ---------- 칸마다 `+ 한 줄 추가`(다듬기 B)'), ui.indexOf('// 계획 문장에 붙일 프로젝트 — 앱의 다른 프로젝트 선택과 같은 목록'));
+  assert.ok(added.length > 200);
   assert.doesNotMatch(added, /innerHTML/);
 });
 test('다듬기 B 검수②③: 추가 입력칸은 크기 조절 없음, `+ 한 줄 추가`는 묶음 hover·focus-within에서만(opacity — Tab은 늘 닿는다), 빈 묶음·열린 칸·손가락 화면은 늘', () => {
@@ -13078,4 +13083,277 @@ test('WP-Y 자세히 창 타일 작은 글자 — 들어온 일은 0인 항목�
   assert.deepEqual(tilesOf(wpyWork({ done: { '2026-09-29': 2 }, inDirect: { '2026-09-29': 3 } })), ['직접\u00a03', '', '']);
   assert.deepEqual(tilesOf(wpyWork({ done: { '2026-09-29': 2 }, inSlack: { '2026-09-29': 1 }, inDirect: { '2026-09-29': 3 }, doneSlack: { '2026-09-29': 1 } })), ['슬랙\u00a01 · 직접\u00a03', '그중\u00a0슬랙\u00a01', '']);
   assert.deepEqual(tilesOf(wpyWork({ done: { '2026-09-29': 2 } })), ['', '', ''], '둘 다 0이면 빈칸');
+});
+
+// ─── 개편 A 7단계 주간요약: 보내기 전 확인 · 확인 필요(서버 판단, 화면은 표시만) · 근거 한 줄 · 접힘 줄(넣기·되살리기) · 복사 버튼 한 자리 ───
+const A7_ROWS = `[
+  { id: 's1', heading: '완료한 일', group: '가입', groupKey: 'group:가입', text: '원본 바뀐 문장', sourceIds: ['t2'], excluded: false, locked: true, needsReview: true,
+    review: { reason: 'undone' }, suggestion: { text: '다른 문장', added: 0, missing: false, mixed: false } },
+  { id: 'r1', heading: '완료한 일', group: '가입', groupKey: 'group:가입', text: '확인할 문장', sourceIds: ['t3'], excluded: false, needsReview: true, review: { reason: 'marked' },
+    currentEvidence: [{ id: 't3', description: '환불 표 정리하기 (확인 필요)', status: 'done', type: 'task', outcome: '' }] },
+  { id: 'o1', heading: '완료한 일', group: '가입', groupKey: 'group:가입', text: '결과 있는 문장', sourceIds: ['t6'], excluded: false,
+    currentEvidence: [{ id: 't6', description: '문구 검토하기', status: 'done', type: 'task', outcome: '문구 12개 넘김' }] },
+  { id: 'p0', heading: '완료한 일', group: '운영', groupKey: 'group:운영', text: '운영 요약', sourceIds: [], excluded: false, manual: true, folded: true },
+  { id: 'k1', heading: '완료한 일', group: '운영', groupKey: 'group:운영', text: '가려진 문장', sourceIds: ['t4'], excluded: false, parent: 'p0', review: { reason: 'missing' } },
+  { id: 'c1', heading: '진행중', group: '결제', groupKey: 'group:결제', text: '끝난 진행 문장', sourceIds: ['t1'], excluded: false, locked: true, completable: true, needsReview: true,
+    suggestion: { text: '끝남', added: 0, missing: false, mixed: false } },
+  { id: 'x1', heading: '완료한 일', group: '가입', groupKey: 'group:가입', text: '뺀 문장 하나\\n둘째 줄', sourceIds: ['t5'], excluded: true, needsReview: true },
+  { id: 'pl', heading: '다음 주 계획', group: '가입_개선', text: 'A/B 결과 공유', sourceIds: [], excluded: false }
+]`;
+const A7_ITEM = `{ weekKey: '2026-09-14', draft: { revision: 1, rows: ${A7_ROWS}, review: { count: 3, first: 's1' },
+  material: { pending: [{ id: 'n1', description: '알림 발송 로그 확인', label: '알림 센터', completed: '2026-09-16' }] },
+  confirmed: { at: '2026-09-16T00:00:00Z', pending: 1, pendingDone: 1 } } }`;
+function a7Client() {
+  const app = reportClient();
+  app.context.document.createTextNode = text => ({ textContent: String(text) });
+  app.run(`calls = []; reportChange = async (target, action) => { calls.push(action); }; renderReportDraft = () => {}; item = ${A7_ITEM};`);
+  return app;
+}
+const a7Line = (app, id) => app.run(`(() => { const host = document.createElement('div');
+  reportSentenceRow(item, item.draft.rows.find(row => row.id === '${id}'), { host, newIds: new Set() }); return host.children[0]; })()`);
+const a7Kid = (node, cls) => (node.children || []).find(kid => String(kid && kid.className).split(' ').includes(cls));
+
+test('개편 A: 줄 끝 한 마디는 끝났어요 > 제안 알약 > 확인 필요 순서로 하나만 — 확인 필요는 바탕 없는 주황 글자, 이유는 풍선', () => {
+  const app = a7Client();
+  const done = a7Line(app, 'c1');
+  assert.equal(a7Kid(done, 'rp-end').className, 'rp-end is-ok', '끝났어요가 제안 알약보다 먼저');
+  assert.equal(a7Kid(done, 'rp-pill'), undefined);
+  const changed = a7Line(app, 's1');
+  const pill = a7Kid(changed, 'rp-pill');
+  assert.equal(pill.textContent, '원본 바뀜', '제안 알약이 확인 필요보다 먼저');
+  assert.equal(pill.title, '근거 업무가 아직 끝나지 않았어요 — 문장은 완료한 일 칸에 있어요', '그 줄의 확인 필요 이유는 알약 풍선에');
+  assert.equal(a7Kid(changed, 'rp-end'), undefined);
+  assert.equal(changed.dataset.review, 'true');
+  const warn = a7Kid(a7Line(app, 'r1'), 'rp-end');
+  assert.deepEqual([warn.className, warn.textContent, warn.title], ['rp-end is-warn', '확인 필요', '업무 제목에 (확인 필요)·(미확정) 표시가 있어요']);
+  const folded = a7Line(app, 'p0');
+  assert.equal(a7Kid(folded, 'rp-end').title, '근거 업무가 지워졌어요', '접힌 부모는 가려진 아래 문장의 이유를 빌린다');
+  assert.equal(a7Kid(a7Line(app, 'o1'), 'rp-end'), undefined);
+  assert.equal(a7Line(app, 'o1').dataset.review, undefined);
+  // 옛 서버(응답에 review 없음) — needsReview로 `확인 필요`만.
+  app.run(`item = { weekKey: '2026-09-14', draft: { revision: 1, rows: [
+    { id: 'l1', heading: '완료한 일', group: '가입', text: '옛 서버 문장', sourceIds: ['t1'], excluded: false, needsReview: true },
+    { id: 'l2', heading: '완료한 일', group: '가입', text: '평범한 문장', sourceIds: ['t2'], excluded: false } ] } };`);
+  const old = a7Kid(a7Line(app, 'l1'), 'rp-end');
+  assert.deepEqual([old.textContent, old.title], ['확인 필요', '원본을 확인해 주세요']);
+  assert.equal(a7Kid(a7Line(app, 'l2'), 'rp-end'), undefined);
+  assert.equal(app.run('reportReviewCount(item.draft)'), 1, '옛 서버는 화면에 보이는 줄 수');
+});
+
+test('개편 A: `확인 필요 N ›`은 서버의 첫 문장부터 문서 순서로 차례로 가고(접힌 부모 한 번), 그 문장 글자에 초점을 둔다', () => {
+  const app = a7Client();
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(reportReviewTargets(item.draft))')), ['s1', 'r1', 'p0']);
+  assert.equal(app.run('reportReviewCount(item.draft)'), 3, '머리 한 줄은 서버 개수');
+  app.run(`focused = []; document.getElementById('weeklyReportDetail').querySelector = sel => (/data-edit-text/.test(sel) ? { focus() { focused.push(sel); }, scrollIntoView() {} } : null);`);
+  const go = () => { app.run('reportReviewGo(item)'); return app.run('reportReviewPick'); };
+  assert.deepEqual([go(), go(), go(), go()], ['s1', 'r1', 'p0', 's1']);
+  assert.match(app.run('focused[0]'), /data-edit-text="s1"/);
+  const button = app.run('reportReviewButton(item)');
+  assert.deepEqual([button.className, button.children[0].textContent, button.getAttribute('aria-label')], ['rp-go', '확인 필요 3', '확인 필요 3개 — 걸린 문장으로 가기']);
+  // 편집 중에 누르면 적던 글은 그대로 두고 이동만 한다.
+  app.run(`reportEdits.set('2026-09-14:o1', '적던 글'); reportReviewPick = null;`);
+  go();
+  assert.equal(app.run("reportEdits.get('2026-09-14:o1')"), '적던 글');
+});
+
+test('개편 A: 고르거나 고치는 문장 아래 근거 한 줄 — 업무 제목·상태, 끝낸 업무의 결과 한 줄이 비면 주황 글자, 계획·근거 없는 줄은 없음', () => {
+  const app = a7Client();
+  assert.equal(a7Kid(a7Line(app, 'r1'), 'rp-ev1'), undefined, '평소에는 없다');
+  app.run("reportReviewPick = 'r1'");
+  const line = a7Line(app, 'r1');
+  const ev = a7Kid(line, 'rp-ev1');
+  assert.deepEqual(ev.children.map(kid => kid.textContent), ['근거', '·', '환불 표 정리하기 (확인 필요)', '·', '완료', '·', '결과 한 줄 비었어요']);
+  assert.equal(ev.children[6].className, 'w');
+  assert.equal(ev.children[1].getAttribute('aria-hidden'), 'true');
+  // 고치는 중이면 입력칸 아래(글 칸 구성은 그대로 — 입력칸 + 안내 한 줄).
+  app.run("reportReviewPick = null; reportEdits.set('2026-09-14:o1', '결과 있는 문장')");
+  const editing = a7Line(app, 'o1');
+  assert.deepEqual(a7Kid(editing, 'tx').children.map(kid => kid.className), ['rp-ta', 'rp-help']);
+  assert.deepEqual(a7Kid(editing, 'rp-ev1').children.map(kid => kid.textContent), ['근거', '·', '문구 검토하기', '·', '완료'], '결과 한 줄이 있으면 주황 글자 없음');
+  app.run("reportEdits.set('2026-09-14:pl', 'A/B 결과 공유')");
+  assert.equal(a7Kid(a7Line(app, 'pl'), 'rp-ev1'), undefined, '다음 주 계획에는 근거 줄이 없다');
+  assert.equal(app.run("reportEvidenceLine({ heading: '완료한 일', sourceIds: [] }, [])"), null);
+  const gone = app.run("reportEvidenceLine({ heading: '완료한 일', sourceIds: ['a', 'b'], currentEvidence: [{ id: 'a', description: '남은 업무', status: 'to-do', type: 'task' }] }, [])");
+  assert.deepEqual(gone.children.filter(kid => kid.className !== 'dot').map(kid => [kid.textContent, kid.className]),
+    [['근거', 'k'], ['남은 업무', 't'], ['미완료', 'w'], ['지워진 업무 1개', 'w']]);
+});
+
+test('개편 A: 복사 버튼은 화면에 하나 — 좁은 폭(matchMedia 없음 포함)은 문서 머리 + 왼쪽 `확인 필요 N ›`, 넓은 폭은 슬랙 카드 머리 + `보내기 전 확인` 줄', () => {
+  const app = a7Client();
+  const copies = () => app.run(`(() => {
+    const doc = document.createElement('div'); reportDocHead(item, doc);
+    reportPreview(item.draft, item);
+    const all = []; const walk = node => { if (!node || typeof node !== 'object') return; if (node.textContent === '슬랙용으로 복사') all.push(node); (node.children || []).forEach(walk); };
+    walk(doc); const inDoc = all.length; walk(document.getElementById('weeklyReportPreview'));
+    return { inDoc, total: all.length, acts: doc.children[0].children.find(kid => kid.className === 'rp-acts').children.map(kid => kid.className) };
+  })()`);
+  const narrow = copies();
+  assert.deepEqual([narrow.inDoc, narrow.total], [1, 1]);
+  assert.equal(narrow.acts.indexOf('rp-go') + 1, narrow.acts.indexOf('d-btn pri'), '`확인 필요 N ›`은 복사 버튼 바로 왼쪽');
+  const preview = app.nodes.get('weeklyReportPreview');
+  assert.equal(preview.children.some(kid => kid.className === 'rp-check'), false, '좁은 폭에는 슬랙 카드의 확인 줄이 없다');
+  app.run('window.matchMedia = query => ({ matches: false })');
+  const wide = copies();
+  assert.deepEqual([wide.inDoc, wide.total], [0, 1]);
+  assert.equal(wide.acts.includes('rp-go'), false);
+  const top = preview.children[0];
+  assert.deepEqual(top.children.map(kid => kid.className), ['rp-slackhd', 'd-btn pri']);
+  const check = preview.children[1];
+  assert.equal(check.className, 'rp-check');
+  assert.deepEqual(check.children.map(kid => [kid.className, kid.textContent || kid.children[0].textContent]), [['hl', '보내기 전 확인'], ['rp-go', '확인 필요 3']]);
+  assert.deepEqual(preview.children.map(kid => kid.className), ['rp-slacktop', 'rp-check', 'rp-flw', 'rp-secs', 'rp-slackbox']);
+  // 걸린 문장이 없으면 회색 한 마디, 보낼 문장이 없으면 그 말.
+  app.run(`reportPreview({ ...item.draft, review: { count: 0, first: null } }, { ...item, draft: { ...item.draft, review: { count: 0, first: null } } })`);
+  assert.deepEqual(preview.children[1].children.map(kid => kid.textContent), ['보내기 전 확인', '확인할 것 없어요']);
+  app.run(`reportPreview({ weekKey: '2026-09-14', rows: [], review: { count: 0, first: null } }, { weekKey: '2026-09-14', draft: { weekKey: '2026-09-14', rows: [], review: { count: 0, first: null } } })`);
+  assert.deepEqual(preview.children[1].children.map(kid => kid.textContent), ['보내기 전 확인', '보낼 문장이 아직 없어요']);
+  // 고치는 중이면 어느 자리든 3차.
+  app.run("reportEdits.set('2026-09-14:r1', '고치는 중')");
+  assert.equal(copies().total, 1);
+  assert.equal(preview.children[0].children[1].className, 'd-btn');
+});
+
+test('개편 A: 슬랙 카드 맨 위 접힘 줄 — `보고에 없는 끝낸 일 N · 뺀 문장 N`, 펼치면 줄마다 넣기(pullOne)·되살리기(exclude), 둘 다 0이면 없다', async () => {
+  const app = a7Client();
+  const block = app.run('reportMaterialBlock(item)');
+  const [toggle, body] = block.children;
+  assert.equal(block.className, 'rp-flw');
+  assert.equal(toggle.children[0].textContent, '보고에 없는 끝낸 일 1 · 뺀 문장 1');
+  assert.deepEqual([toggle.getAttribute('aria-expanded'), toggle.getAttribute('aria-controls'), body.id, body.hidden], ['false', 'reportMaterialBody', 'reportMaterialBody', true]);
+  toggle.listeners.click();
+  assert.deepEqual([toggle.getAttribute('aria-expanded'), body.hidden, app.run('reportMaterialOpen')], ['true', false, true]);
+  assert.deepEqual(body.children.map(kid => kid.className), ['g', 'mr', 'g', 'mr']);
+  const take = body.children[1].children[1].children[1];
+  assert.deepEqual([body.children[1].children[1].children[0].textContent, take.textContent, take.getAttribute('aria-label')], ['알림 센터 · 9/16', '넣기', '알림 발송 로그 확인 — 보고에 넣기']);
+  await take.listeners.click();
+  const back = body.children[3].children[1].children[0];
+  assert.equal(body.children[3].children[0].textContent, '뺀 문장 하나', '뺀 문장은 첫 줄만');
+  await back.listeners.click();
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), [{ action: 'pullOne', ids: ['n1'] }, { action: 'exclude', id: 'x1' }]);
+  // 확정하지 않은 주·옛 서버(material 없음)는 뺀 문장만, 둘 다 없으면 줄이 없다.
+  assert.equal(app.run(`reportMaterialBlock({ ...item, draft: { ...item.draft, confirmed: null } }).children[0].children[0].textContent`), '뺀 문장 1');
+  assert.equal(app.run(`reportMaterialBlock({ ...item, draft: { ...item.draft, material: undefined } }).children[0].children[0].textContent`), '뺀 문장 1');
+  assert.equal(app.run(`reportMaterialBlock({ ...item, draft: { ...item.draft, rows: item.draft.rows.filter(row => !row.excluded), material: { pending: [] } } })`), null);
+  // 머리 ⋯ `제외한 문장 보기`는 이 줄을 펼친다(문서 맨 아래 접힘은 없다).
+  app.run('reportMaterialOpen = false');
+  const menu = app.run('reportHeadMenuSections(item)');
+  const open = menu[1].find(entry => /^제외한 문장 보기/.test(entry.label));
+  open.onClick();
+  assert.equal(app.run('reportMaterialOpen'), true);
+  assert.equal(app.run("typeof reportExcludedBlock"), 'undefined');
+  assert.match(REPORT_A7_UI(), /REPORT_MOVE_NOTICE = \{[\s\S]*pullOne: '보고에 한 줄 넣었어요'/);
+});
+const REPORT_A7_UI = () => fs.readFileSync(path.join(__dirname, 'report-ui.js'), 'utf8');
+
+test('개편 A: 넣을 구역은 글자 고르개 하나 — 메뉴 안 체크 줄로 켜고 끄고(저장 키 그대로), 내용 없는 구역은 잠긴다', () => {
+  const app = a7Client();
+  const saved = new Map();
+  app.context.localStorage = { getItem: key => (saved.has(key) ? saved.get(key) : null), setItem: (key, value) => saved.set(key, String(value)) };
+  app.run(`menus = []; uiMenu = (anchor, sections) => { const list = document.createElement('div'); menus.push([anchor, sections, list]); return list; };`);
+  const wrap = app.run('reportSlackChips(item.draft)');
+  const pick = wrap.children[0];
+  assert.deepEqual(pick.children.map(kid => kid.className), ['k', 'v', 'cv']);
+  assert.equal(pick.children[1].textContent, '완료 · 진행 중 · 예정');
+  assert.equal(pick.getAttribute('aria-label'), '슬랙에 넣을 구역: 완료 · 진행 중 · 예정 — 고르기');
+  pick.listeners.click({ stopPropagation() {} });
+  const list = app.run('menus[0][2]');
+  assert.deepEqual(list.children.map(row => [row.children[1].textContent, row.children[0].checked, row.children[0].disabled]),
+    [['완료', true, false], ['진행 중', true, false], ['결정', false, true], ['확인 대기', false, true], ['예정', true, false]]);
+  const doing = list.children[1].children[0];
+  doing.checked = false;
+  doing.listeners.change();
+  assert.equal(pick.children[1].textContent, '완료 · 예정', '얼굴 글자가 바로 바뀐다');
+  assert.deepEqual(JSON.parse(saved.get('workspace-report-slack-sections')).on, ['완료', '예정']);
+});
+
+test('개편 A(B8): 다음 주 계획 소제목은 위 칸과 같은 표기(색 점 + 밑줄 없는 이름) — 슬랙 글도 `가입 개선`, 지라 정보는 원래 이름으로 찾는다', () => {
+  const app = reportClient();
+  assert.equal(app.run("reportPlanShownName('가입_개선')"), '가입 개선');
+  assert.equal(app.run("reportPlanShownName('IO-1 · 게시글 작성하기_게임 임베드')"), 'IO-1 · 게시글 작성하기_게임 임베드', '지라 이름의 밑줄은 그대로');
+  const head = app.run(`reportPlanProjectHead('가입 개선', null, '가입_개선')`);
+  assert.deepEqual(head.children.map(kid => [kid.className, kid.textContent]), [['d-pjdot', ''], ['nm', '가입 개선']]);
+  const report = `{ weekKey: '2026-09-21', rows: [
+    { id: 'p1', heading: '다음 주 계획', group: '가입_개선', text: 'A/B 결과 공유', sourceIds: [], excluded: false },
+    { id: 'p2', heading: '다음 주 계획', group: 'IO-1 · 게시글 작성하기_게임 임베드', text: '임베드 QA', sourceIds: [], excluded: false } ] }`;
+  const text = app.run(`reportSlackText(reportSlackModel(${report}, { sections: ['예정'] }))`);
+  assert.equal(text, ['9월 4주차 (9/21~9/27)', '', '[예정]', '', '가입 개선', '• A/B 결과 공유', '', '게시글 작성하기_게임 임베드', '• 임베드 QA'].join('\n'));
+  const projects = JSON.parse(app.run(`JSON.stringify(reportSlackModel(${report}, { sections: ['예정'] }).sections[0].projects.map(p => [p.name, p.source || null]))`));
+  assert.deepEqual(projects, [['가입 개선', '가입_개선'], ['IO-1 · 게시글 작성하기_게임 임베드', null]]);
+  app.run(`workflowData = { items: [], meetings: [], projectLinks: { '가입_개선': 'PAY-77' } }; jiraIssuesByKey = new Map([['PAY-77', { key: 'PAY-77', status: 'QA 대기', versions: [] }]]);`);
+  assert.match(app.run(`reportSlackText(reportSlackModel(${report}, { sections: ['예정'], jira: true }))`), /^가입 개선 \(QA 대기\)$/m, '지라 정보는 저장된 이름(연결)으로 찾는다');
+});
+
+test('개편 A: 슬랙 복사 결과(reportSlackModel·Text·Html·Lines)는 v1.3.0과 한 글자도 같다 — 가입_개선(다음 주 계획 밑줄 이름) 한 건만 예외, review·material·needsReview와 무관', () => {
+  let oldUi = '';
+  try { oldUi = require('node:child_process').execFileSync('git', ['show', 'v1.3.0:tracker/inbox-app/report-ui.js'], { cwd: __dirname, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch {}
+  const fresh = reportClient();
+  const now = code => fresh.run(code);
+  const corpus = [REPORT_ROWS, REPORT_RECORD_ROWS, REPORT_SLACK_ROWS, REPORT_NEST_ROWS, REPORT_FOLD_PICK_ROWS, REPORT_FOLD_ROWS, POLISH_ROWS, B_ROWS,
+    JSON.stringify(JSON.parse(REPORT_JIRA_REPORT).rows), A7_ROWS.replace("group: '가입_개선'", "group: '가입 개선'")];
+  const outputs = (run) => corpus.flatMap(rows => ['undefined', "{ sections: ['완료', '진행 중', '결정', '확인 대기', '예정'] }", "{ sections: ['완료', '진행 중', '예정'], jira: true }"].map((options) => {
+    run(REPORT_JIRA_SETUP);
+    const call = `reportSlackModel({ weekKey: '2026-09-21', title: null, rows: ${rows} }, ${options})`;
+    return run(`JSON.stringify([${call}, reportSlackText(${call}), reportSlackHtml(${call}), reportSlackLines(${call})])`);
+  }));
+  const mine = outputs(now);
+  // 확인 필요·재료·옛 표시 칸을 붙여도(또는 떼도) 같은 글자다.
+  const stripped = code => now(`JSON.stringify((${code}).map(row => { const { review, needsReview, ...rest } = row; return rest; }))`);
+  const decorate = code => now(`JSON.stringify((${code}).map(row => ({ ...row, review: { reason: 'marked' }, needsReview: true })))`);
+  for (const rows of corpus) {
+    const a = now(`reportSlackText(reportSlackModel({ weekKey: '2026-09-21', rows: ${stripped(rows)}, material: { pending: [] } }))`);
+    const b = now(`reportSlackText(reportSlackModel({ weekKey: '2026-09-21', rows: ${decorate(rows)}, review: { count: 9, first: 'x' }, material: { pending: [{ id: 'n' }] } }))`);
+    assert.equal(a, b);
+  }
+  if (!oldUi) return;
+  const old = pureClient();
+  old.run(oldUi);
+  assert.deepEqual(outputs(code => old.run(code)), mine, '기존 픽스처 전부 같은 글자');
+  // 예외 한 건 — 다음 주 계획의 밑줄 이름만 `가입 개선`으로.
+  const plan = A7_ROWS;
+  const both = [now, code => old.run(code)].map(run => run(`reportSlackText(reportSlackModel({ weekKey: '2026-09-21', rows: ${plan} }))`));
+  assert.notEqual(both[0], both[1]);
+  assert.equal(both[0], both[1].replace('가입_개선', '가입 개선'));
+});
+
+test('개편 A: 주간요약을 다시 그려도 주차 칸 맨 위 `내 일 기록` 판은 하나(빠지거나 두 번 붙지 않는다)', () => {
+  const app = reportClient();
+  app.run(fs.readFileSync(path.join(__dirname, 'usage-ui.js'), 'utf8'));
+  app.run(`const __make = document.createElement;
+    document.createElement = tag => Object.assign(__make(tag), { tagName: String(tag).toUpperCase(), style: {} });
+    document.createElementNS = (ns, tag) => document.createElement(tag);
+    document.createTextNode = value => ({ textContent: String(value), children: [] });
+    escDrop = () => {}; escPush = () => {};
+    document.body = document.createElement('body');
+    document.getElementById('weeklyReportDetail').contains = () => false;
+    activeTabKey = 'weekly';
+    usageInfo = { ok: true, today: '${WPX_TODAY}', rows: [], history: { '2026-09-01': { search: 1 }, '2026-09-22': { task_done: 4 }, '2026-09-29': { task_done: 2 } } };`);
+  const weeks = `[{ weekKey: '2026-09-28', draft: { revision: 1, rows: ${A7_ROWS}, review: { count: 3, first: 's1' }, material: { pending: [] } } }, { weekKey: '2026-09-21', draft: { revision: 2, rows: [] } }]`;
+  app.run(`renderWeeklyReports(${weeks})`);
+  const nav = app.nodes.get('weeklyReportNav');
+  const boards = () => nav.children.filter(kid => /^d-uwfoot/.test(String(kid.className)));
+  assert.equal(boards().length, 1);
+  assert.equal(nav.children[0], boards()[0], '첫 주 앞(맨 위)');
+  app.run(`renderWeeklyReports(weeklyReportsCache); renderWeeklyReports(weeklyReportsCache); reportChange = async () => {}; renderReportDraft(weeklyReportsCache[0]);`);
+  assert.equal(boards().length, 1, '다시 그려도 하나');
+  assert.equal(nav.children[0], boards()[0]);
+  const index = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  assert.match(index, /<aside class="rp-slack" id="weeklyReportPreview" aria-label="슬랙 미리보기"><\/aside>/, '오른쪽 칸 구조는 그대로');
+  assert.equal((index.match(/id="weeklyReportNav"/g) || []).length, 1);
+});
+
+test('개편 A 화면 규칙: 새 innerHTML은 uiIcon뿐, 확인 필요·끝났어요는 토큰 글자색(새 색 없음), 왼쪽 색 세로줄 없음, 접힘 꺾쇠는 reduced-motion에서 멈춘다', () => {
+  const ui = REPORT_A7_UI();
+  const start = ui.indexOf('// ---------- 보내기 전 확인(개편 A) ----------');
+  assert.ok(start > 0);
+  const lines = ui.split('\n').filter(line => /innerHTML/.test(line));
+  assert.ok(lines.every(line => /innerHTML = uiIcon\('(chevron|plus|check)'\)/.test(line)), lines.join('\n'));
+  const css = fs.readFileSync(path.join(__dirname, 'report-ui.css'), 'utf8');
+  const block = css.slice(css.indexOf('/* 줄 끝 한 마디(개편 A)'), css.indexOf('/* 소제목 묶음 맨 아래'));
+  assert.match(block, /\.rp-s \.rp-end\.is-warn \{ color: var\(--warn\);/);
+  assert.match(block, /\.rp-s\.is-hit \{ background: var\(--sel\); \}/);
+  const card = css.slice(css.indexOf('/* 머리(개편 A)'), css.indexOf('/* 한 줄이 곧 붙여 넣을 한 줄이다'));
+  assert.doesNotMatch(block + card, /#[0-9a-fA-F]{3,8}\b|rgb\(/, '색은 토큰만');
+  assert.doesNotMatch(block + card, /border-left:\s*[2-9]px/, '왼쪽 색 세로줄 없음');
+  assert.match(card, /@media \(prefers-reduced-motion: reduce\) \{ \.rp-fl \.d-i \{ transition: none; \} \}/);
+  assert.doesNotMatch(css, /\.rp-ex\b|\.rp-pill\.is-done|\.rp-secg/, '옛 부품(문서 맨 아래 제외 접힘·초록 알약·구역 칩 묶음)은 지웠다');
 });

@@ -1591,3 +1591,27 @@ test('다듬기 B(99 리뷰): 저장된 요청과 같은 id를 보고가 바뀐 
   assert.equal(readTasks().split('\n').filter(line => line.startsWith('- 응답 잃은 줄 #task[')).length, 1);
   assert.equal((await weeklyNow()).draft.rows.filter(row => row.text === '응답 잃은 줄').length, 1);
 });
+test('개편 A: 목록 응답의 보고에 review{count,first}·material{pending}이 오고, `넣기`(pullOne)는 같은 길(/api/report/change)로 한 줄만 넣으며 저장 파일에 review가 없다', async t => {
+  const drafts = weeklySeed(t);
+  fs.appendFileSync(tasksPath, `- 환불 정책 표 업데이트 (확인 필요) #task[id:wa7_mark status:done priority:medium created:${today} completed:${today} group:가입_개편]\n`);
+  let week = await weeklyNow();
+  assert.deepEqual(Object.keys(week.draft.review).sort(), ['count', 'first']);
+  assert.equal(week.draft.review.count, 1);
+  assert.equal(week.draft.rows.find(row => row.id === week.draft.review.first).review.reason, 'marked');
+  assert.deepEqual(week.draft.material, { pending: [] });
+  assert.equal((await weeklyLine({ weekKey: week.weekKey, revision: week.draft.revision, action: 'confirm' })).status, 200);
+  fs.appendFileSync(tasksPath, `- 가입 카피 최종 확인하기 #task[id:wa7_new status:done priority:medium created:${today} completed:${today} group:가입_개편]\n`);
+  week = await weeklyNow();
+  assert.deepEqual(week.draft.material.pending.map(entry => [entry.id, entry.label]), [['wa7_new', '가입 개편']]);
+  const pulled = await weeklyLine({ weekKey: week.weekKey, revision: week.draft.revision, action: 'pullOne', ids: ['wa7_new'] }, 'weekly-pullone-0000001');
+  assert.equal(pulled.status, 200);
+  assert.equal(pulled.report.rows.filter(row => row.sourceIds.includes('wa7_new')).length, 1);
+  assert.deepEqual(pulled.report.material, { pending: [] });
+  assert.ok(pulled.report.confirmed, '확정 그대로');
+  assert.equal(fs.readFileSync(drafts, 'utf8').includes('"review"'), false);
+  const again = await weeklyLine({ weekKey: week.weekKey, revision: week.draft.revision, action: 'pullOne', ids: ['wa7_new'] }, 'weekly-pullone-0000001');
+  assert.equal(again.status, 200, '같은 요청 id면 앞 결과');
+  assert.equal((await weeklyNow()).draft.rows.filter(row => row.sourceIds.includes('wa7_new')).length, 1, '두 번 들어가지 않는다');
+  const stale = await weeklyLine({ weekKey: week.weekKey, revision: week.draft.revision, action: 'pullOne', ids: ['wa7_new'] });
+  assert.equal(stale.status, 409, '다른 창의 오래된 판이면 409');
+});

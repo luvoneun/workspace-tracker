@@ -183,6 +183,8 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
     const lockedAt = typeof polish.lockedAt === 'string' && polish.lockedAt ? polish.lockedAt : null;
     const hold = !!lockedAt && !opts.release;
     const weekEnd = dayAfter(weekKey, 6);
+    // 확인 필요 판단에 쓰는 행마다의 사실(지워진 근거·섞인 상태) — 아래 reviewOf가 읽는다. 저장하지 않는다.
+    const facts = new Map();
     for (const row of rows) {
       const linked = row.sourceIds.map(id => byId.get(id)).filter(Boolean);
       const currentEvidence = linked.map(evidence);
@@ -201,6 +203,7 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
       } else row.suggestion = { text: textOf(combined), sourceIds: combined.map(item=>item.id), evidence: currentEvidence, added: added.length, missing, mixed };
       row.needsReview = !!row.suggestion || mixed || missing;
       row.currentEvidence = currentEvidence;
+      facts.set(row, { linked, missing, mixed });
       // 완료 제안(`끝났어요 · 완료로`) — 사람이 고쳤거나(또는 확정으로 굳은) 진행 중 문장의 업무가 **이 주 안에** 전부 끝났고,
       // 업무 문구는 그대로일 때만. 문구까지 바뀌었으면 원래 제안(원본 바뀜)만 선다 — 옮기면서 바뀐 문구를 묻어 버리지 않게.
       if (row.heading === '진행중' && !row.excluded && row.suggestion && !row.suggestion.added && !missing && linked.length
@@ -212,11 +215,31 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
     const groups = new Map();
     candidates.filter(item=>!claimed.has(item.id)).forEach(item=>{ const key=bucket(item); if(!groups.has(key))groups.set(key,[]);groups.get(key).push(item); });
     let pending = 0, pendingDone = 0;
-    for (const [key,items] of groups) if (hold) { pending += 1; if (heading(items[0]) === '완료한 일') pendingDone += 1; } else rows.push({ id:`auto-${hash([key,items.map(item=>item.id).sort()]).slice(0,16)}`,bucket:key,heading:heading(items[0]),group:items[0].label || items[0].group || items[0].project || '그룹 없음', text:textOf(items),sourceIds:items.map(item=>item.id),evidence:items.map(evidence),currentEvidence:items.map(evidence),locked:false,excluded:false,needsReview:false });
+    // 확정한 주에 붙들어 둔 새 업무 중 끝낸 일(완료한 일 칸에 설 것)만 한 건씩 — 화면의 `보고에 없는 끝낸 일 N`과
+    // 한 줄씩 넣기(change의 pullOne)가 읽는다. 확정 전 주·진행 중·결정·확인은 없다(넣기는 완료 칸만, addLine 규칙과 같다).
+    const materialPending = [];
+    for (const [key,items] of groups) if (hold) { pending += 1; if (heading(items[0]) === '완료한 일') { pendingDone += 1;
+      items.forEach(item => materialPending.push({ id: item.id, description: item.description, label: item.label || item.group || item.project || '그룹 없음', completed: item.completed || null })); } } else rows.push({ id:`auto-${hash([key,items.map(item=>item.id).sort()]).slice(0,16)}`,bucket:key,heading:heading(items[0]),group:items[0].label || items[0].group || items[0].project || '그룹 없음', text:textOf(items),sourceIds:items.map(item=>item.id),evidence:items.map(evidence),currentEvidence:items.map(evidence),locked:false,excluded:false,needsReview:false });
     dress(rows, weekKey, polish, opts.bundles !== undefined ? opts.bundles : bundles());
     const since = marks(rows, polish.seen, byId);
     const order=['완료한 일','진행중','새로 정해진 것','확인 완료','확인 대기',PLAN_HEADING];
     rows.forEach(row=>{if(row.evidence.some(item=>/\(.*확인 필요.*\)|\(미확정\)/.test(item.description)))row.needsReview=true;});
+    // 확인 필요(개편 A) — 보내기 전에 사람이 볼 이유 하나(가장 급한 것)를 행에 붙인다. 화면은 표시만 하고 슬랙 글에는 넣지 않는다.
+    // undone: 근거 업무가 아직 안 끝났는데 문장이 `완료한 일`에 있다(확정·고친 줄에서 생긴다) · missing: 근거 업무가 지워졌다 ·
+    // mixed: 근거 업무의 상태가 섞였다 · changed: 원본이 바뀌어 제안이 섰다(`끝났어요 · 완료로`가 선 줄은 뺀다 — 그 제안이 말한다) ·
+    // marked: 근거 업무 제목에 `(확인 필요)`·`(미확정)`. 결과 한 줄이 빈 것은 이유가 아니다(화면의 근거 줄에만 보인다).
+    // 제외한 문장·다음 주 계획은 보지 않는다. 옛 화면이 읽는 needsReview는 그대로 둔다. clean()이 저장 전에 걷는다.
+    const reviewOf = (row) => {
+      if (row.excluded || row.heading === PLAN_HEADING) return null;
+      const fact = facts.get(row) || { linked: row.sourceIds.map(id => byId.get(id)).filter(Boolean), missing: false, mixed: false };
+      if (row.heading === '완료한 일' && fact.linked.some(item => ['task','bug'].includes(item.type) && item.status !== 'done')) return 'undone';
+      if (fact.missing) return 'missing';
+      if (fact.mixed) return 'mixed';
+      if (row.suggestion && !row.completable) return 'changed';
+      if (row.evidence.some(item => /\(.*확인 필요.*\)|\(미확정\)/.test(item.description))) return 'marked';
+      return null;
+    };
+    rows.forEach(row => { const reason = reviewOf(row); if (reason) row.review = { reason }; else delete row.review; });
     // 묶기 전 문장(`parts`)은 저장 파일에만 둔다 — 화면에는 "풀 수 있는지"만 알린다(큰 배열을 매번 내보내지 않으려고).
     // `parts`가 없는 옛 묶음 행은 `canSplit`이 붙지 않아 화면에서 `묶음 풀기`가 보이지 않는다.
     rows.forEach(row=>{if(row.parts){row.canSplit=true;row.partCount=row.parts.length;delete row.parts;}});
@@ -237,13 +260,18 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
     // 고아 규칙과 같은 태도). `opts.raw`는 change()가 다음 저장을 준비할 때만 쓰는 내부용으로, 숨긴 행도
     // 그대로 들고 있어야 carry()가 저장값을 잃지 않는다.
     const visible = opts.raw ? ordered : ordered.filter(row => !(row.manual && !(nested.get(row.id) || []).length));
+    // 머리의 `확인 필요 N ›`이 읽는 값 — 개수와 문서 순서의 첫 문장. 접힌 부모 아래의 문장이 걸리면 그 부모로 간다(화면에 보이는 줄).
+    const reviewed = visible.filter(row => row.review);
+    const anchorOf = (row) => { const parent = row.parent ? byRowId.get(row.parent) : null; return parent && parent.folded ? parent.id : row.id; };
     // 제목·소제목 이름·새로 기록도 revision에 든다 — 다른 창에서 바꾼 것을 모르고 덮어쓰지 않게.
     const revision = hash({ stored, rows: ordered, polish });
     return { weekKey, rows: visible, revision, updatedAt: stored?.updatedAt || null, title: typeof polish.title === 'string' && polish.title ? polish.title : null, since,
       confirmed: lockedAt ? { at: lockedAt, pending, pendingDone } : null,
+      review: { count: reviewed.length, first: reviewed.length ? anchorOf(reviewed[0]) : null },
+      material: { pending: materialPending },
       ...(opts.raw ? { byId } : {}) };
   }
-  function clean(row) { const { suggestion, needsReview, currentEvidence, canSplit, partCount, groupKey, shownGroup, groupOrigin, nameKey, fresh, changed, completable, ...rest } = row; return rest; }
+  function clean(row) { const { suggestion, needsReview, currentEvidence, canSplit, partCount, groupKey, shownGroup, groupOrigin, nameKey, fresh, changed, completable, review, ...rest } = row; return rest; }
   // 계획 문장에 붙이는 프로젝트 이름. 없으면 기존처럼 `직접 작성`으로 담는다.
   function planGroup(group) {
     if (group === undefined || group === null || group === '') return '직접 작성';
@@ -277,7 +305,7 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
     const current=action==='pullNew'&&base.confirmed&&base.confirmed.pending?view(weekKey,state,undefined,{raw:true,release:true}):base;
     let rows=current.rows.map(carry); const row=rows.find(row=>row.id===id), shown=current.rows.find(row=>row.id===id);
     // `+ 한 줄 추가`가 만든 업무 — 되돌리기 기록에 남겨 되돌릴 때 함께 지운다. 업무 파일을 건드렸으면 화면이 목록을 다시 받게 알린다.
-    let createdTask=null, tasksChanged=false, keepUndo=true;
+    let createdTask=null, tasksChanged=false, keepUndo=true, pulledOne=null;
     // 이 주의 다듬기 칸(제목·소제목 이름·새로 기록). 되돌리기는 문장과 함께 이 칸도 그 전으로 돌린다.
     const polishBefore=structuredClone(polishOf(state,weekKey));
     let polish=structuredClone(polishBefore);
@@ -324,6 +352,16 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
       // `보고에 넣기` — 확정 뒤 새로 들어온 업무를 새 줄로 넣는다(있던 문장에 더하지 않는다). 확정은 그대로다.
       if(!base.confirmed)throw new Error('확정한 보고에서만 넣을 수 있어요.');
       if(!base.confirmed.pending)throw new Error('새로 넣을 줄이 없어요. 최신 보고를 확인해 주세요.');
+    } else if(action==='pullOne') {
+      // 한 줄씩 넣기(개편 A) — 확정한 주에 붙들어 둔 끝낸 일 하나만 새 줄로 넣는다(있던 문장에 더하지 않는다). 확정은 그대로다.
+      // 넣을 수 있는 것은 지금 `material.pending`에 있는 업무뿐이다 — 그 사이 지워졌거나 이미 들어갔으면 거절한다.
+      if(!base.confirmed)throw new Error('확정한 보고에서만 넣을 수 있어요.');
+      const wanted=Array.isArray(ids)&&ids.length===1&&typeof ids[0]==='string'?ids[0]:null;
+      const item=wanted&&base.material.pending.some(entry=>entry.id===wanted)?base.byId.get(wanted):null;
+      if(!item||heading(item)!=='완료한 일')throw new Error('넣을 업무를 찾을 수 없어요. 최신 보고를 확인해 주세요.');
+      rows.push({id:randomUUID(),bucket:bucket(item),heading:heading(item),group:item.label||item.group||item.project||'그룹 없음',text:textOf([item]),
+        sourceIds:[item.id],evidence:[evidence(item)],locked:false,excluded:false});
+      pulledOne=item;
     } else if(action==='addLine') {
       // `+ 한 줄 추가` — 완료한 일·진행 중 칸의 소제목(프로젝트) 아래에 사람이 쓴 문장 그대로 한 줄. 같은 프로젝트의 업무도
       // 만든다(완료한 일이면 이 주에 끝낸 업무, 진행 중이면 진행 중 업무 — 흔적은 업무의 `source:weekly`). 업무를 먼저 만들고
@@ -459,8 +497,9 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
           ||(action==='pullNew'&&!known.has(entry.id)));
         polish.seen={at:now,ids:{...seen.ids,...seenIds(hit)}};
       }
-      // 사람이 방금 더한 줄의 업무는 "새로 들어온 것"이 아니다.
+      // 사람이 방금 더한 줄의 업무는 "새로 들어온 것"이 아니다(한 줄씩 넣은 업무도 같다).
       if(createdTask)polish.seen.ids={...polish.seen.ids,[createdTask.id]:createdTask.mark};
+      if(pulledOne)polish.seen.ids={...polish.seen.ids,[pulledOne.id]:sourceMark(pulledOne)};
     }
     const undoToken=randomUUID();
     state.weeks[weekKey]={rows,updatedAt:new Date().toISOString()};

@@ -1289,3 +1289,169 @@ test('다듬기 B 검수①: 줄 끝 알약(제안)이 선 줄은 상태 줄의 
   f.items.push({id:'n',type:'task',description:'새 업무 끝내기',status:'done',created:'2026-09-16',completed:'2026-09-16',group:'운영',label:'운영'});
   assert.deepEqual([f.view().since.fresh,f.view().since.changed],[1,0],'알약 없는 새 줄은 그대로 센다');
 });
+
+// ---------- 개편 A 7단계: 확인 필요(서버 판단)·재료(붙들어 둔 끝낸 일)·한 줄씩 넣기 ----------
+function reviewFixture(t,week='2026-09-14') {
+  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'report-review-'));t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
+  const items=[
+    {id:'a',type:'task',description:'문구 검토하기',status:'done',created:'2026-09-14',completed:'2026-09-15',group:'가입',label:'가입'},
+    {id:'k',type:'task',description:'권한 표 정리하기',status:'done',created:'2026-09-14',completed:'2026-09-15',group:'운영',label:'운영'},
+    {id:'d1',type:'task',description:'배치 설계하기 1차',status:'to-do',doing:'2026-09-15',created:'2026-09-14',group:'정산',label:'정산'},
+    {id:'d2',type:'task',description:'배치 설계하기 2차',status:'to-do',doing:'2026-09-15',created:'2026-09-14',group:'정산',label:'정산'},
+  ];
+  const opts={directory,sources:()=>items,legacy:()=>[],currentWeek:()=>week};
+  const store=factory(opts);
+  const view=(key=week)=>store.view(key);
+  const change=(action,key=week)=>store.change({weekKey:key,revision:view(key).revision,...action});
+  const row=(match,key=week)=>view(key).rows.find(entry=>entry.sourceIds.includes(match)||entry.text===match);
+  const file=path.join(directory,'.report-drafts.json');
+  const saved=()=>JSON.parse(fs.readFileSync(file,'utf8'));
+  return {directory,items,store,view,change,row,file,saved,opts,week};
+}
+test('개편 A: 확인 필요 이유는 undone·missing·mixed·changed·marked 다섯이고, 결과 한 줄이 빈 것은 이유가 아니다',t=>{
+  const f=reviewFixture(t);
+  let v=f.view();
+  assert.deepEqual(v.review,{count:0,first:null},'처음에는 없다 — 끝낸 업무에 결과 한 줄이 없어도(noOutcome) 세지 않는다');
+  assert.equal(v.rows.every(entry=>entry.review===undefined),true);
+  // marked — 근거 업무 제목의 `(확인 필요)`
+  f.items.find(item=>item.id==='k').description='권한 표 정리하기 (확인 필요)';
+  assert.deepEqual(f.row('k').review,{reason:'marked'});
+  // mixed — 진행 중 두 업무 중 하나만 끝남(문장은 진행 중 칸이라 undone은 아니다). 먼저 한 번 저장해 두 업무를 한 문장으로 둔다.
+  f.change({action:'ackNew'});
+  assert.deepEqual(f.row('d2').sourceIds,['d1','d2']);
+  Object.assign(f.items.find(item=>item.id==='d1'),{status:'done',completed:'2026-09-16'});
+  assert.deepEqual(f.row('d2').review,{reason:'mixed'});
+  // undone — 고친 완료 문장의 업무가 다시 미완료
+  f.change({action:'edit',id:f.row('a').id,text:'가입 문구 다듬음'});
+  Object.assign(f.items.find(item=>item.id==='a'),{status:'to-do'});
+  assert.deepEqual(f.row('a').review,{reason:'undone'},'원본 바뀜 제안보다 급한 이유 하나');
+  assert.equal(f.row('a').needsReview,true,'옛 화면이 읽는 needsReview는 그대로');
+  v=f.view();
+  assert.equal(v.review.count,3);
+  const order=v.rows.filter(entry=>entry.review).map(entry=>entry.id);
+  assert.equal(v.review.first,order[0],'첫 문장은 문서 순서');
+  assert.equal(v.rows.find(entry=>entry.id===v.review.first).heading,'완료한 일');
+});
+test('개편 A: missing·changed, 완료 제안이 선 줄·뺀 문장·다음 주 계획은 세지 않는다',t=>{
+  const f=reviewFixture(t);
+  f.change({action:'edit',id:f.row('a').id,text:'가입 문구 다듬음'});
+  f.items.find(item=>item.id==='a').description='문구 검토하기(최종)';
+  assert.deepEqual(f.row('a').review,{reason:'changed'});
+  f.items.splice(f.items.findIndex(item=>item.id==='a'),1);
+  assert.deepEqual(f.row('가입 문구 다듬음').review,{reason:'missing'});
+  // 뺀 문장은 세지 않는다
+  f.items.find(item=>item.id==='k').description='권한 표 정리하기 (미확정)';
+  assert.deepEqual(f.row('k').review,{reason:'marked'});
+  f.change({action:'exclude',id:f.row('k').id});
+  assert.equal(f.row('k').review,undefined);
+  f.change({action:'add',text:'(확인 필요) 계획',group:'가입'});
+  assert.equal(f.row('(확인 필요) 계획').review,undefined,'다음 주 계획은 보지 않는다');
+  assert.equal(f.view().review.count,1);
+  // 완료 제안(`끝났어요 · 완료로`)이 선 줄은 그 제안이 말한다 — changed로 세지 않는다
+  const g=lineFixture(t);
+  g.change({action:'edit',id:g.row('영수증 메일 발송 시점 정리하기').id,text:'정리 중'});
+  const task=g.items.find(item=>item.id==='p');Object.assign(task,{status:'done',completed:'2026-09-17'});delete task.doing;
+  const line=g.row('정리 중');
+  assert.deepEqual([line.completable,line.review],[true,undefined]);
+});
+test('개편 A: 접힌 부모 아래 문장이 걸리면 첫 문장은 그 부모(화면에 보이는 줄)이고, 개수는 문장 수다',t=>{
+  const f=reviewFixture(t);
+  f.items.push({id:'k2',type:'task',description:'요청 흐름 정리 (확인 필요)',status:'done',created:'2026-09-14',completed:'2026-09-15',group:'운영',label:'운영'});
+  f.items.find(item=>item.id==='k').description='권한 표 정리하기 (확인 필요)';
+  const ids=[f.row('k').id,f.row('k2').id];
+  assert.equal(new Set(ids).size,2);
+  f.change({action:'fold',ids,text:'운영 권한 정리'});
+  const v=f.view();
+  const parent=v.rows.find(entry=>entry.manual);
+  assert.equal(parent.folded,true);
+  assert.equal(v.review.count,2);
+  assert.equal(v.review.first,parent.id,'가려진 문장 대신 접힌 부모로 간다');
+  assert.equal(parent.review,undefined,'부모 자신은 세지 않는다');
+});
+test('개편 A: review는 저장 파일에 들어가지 않고(clean), 파일에 남아 있던 review 칸도 다시 계산한다',t=>{
+  const f=reviewFixture(t);
+  f.items.find(item=>item.id==='k').description='권한 표 정리하기 (확인 필요)';
+  f.change({action:'edit',id:f.row('a').id,text:'가입 문구 다듬음'});
+  f.change({action:'ackNew'});
+  assert.equal(fs.readFileSync(f.file,'utf8').includes('"review"'),false,'행 안에 review가 저장되지 않는다');
+  assert.equal(f.row('k').review.reason,'marked');
+  // 손상·옛 파일에 review 칸이 들어 있어도 그대로 믿지 않는다
+  const state=f.saved();
+  state.weeks[f.week].rows.forEach(entry=>{entry.review={reason:'undone'};});
+  fs.writeFileSync(f.file,JSON.stringify(state));
+  const v=factory(f.opts).view(f.week);
+  assert.deepEqual(v.rows.filter(entry=>entry.review).map(entry=>[entry.sourceIds[0],entry.review.reason]),[['k','marked']]);
+  f.change({action:'edit',id:f.row('가입 문구 다듬음').id,text:'가입 문구 다듬음 2'});
+  assert.equal(fs.readFileSync(f.file,'utf8').includes('"review"'),false,'다시 저장하면 걷힌다');
+});
+test('개편 A: 재료(material.pending)는 확정한 주에 붙들어 둔 끝낸 일만 한 건씩 — 확정 전 주·진행 중·결정은 없다',t=>{
+  const f=lineFixture(t);
+  f.items.push({id:'n',type:'task',description:'가입 문구 후속 확인하기',status:'done',created:'2026-09-16',completed:'2026-09-16',group:'가입',label:'가입'});
+  assert.deepEqual(f.view().material,{pending:[]},'확정 전에는 자동 모으기가 넣으므로 비어 있다');
+  f.items.pop();
+  f.change({action:'confirm'});
+  f.items.push({id:'n',type:'task',description:'가입 문구 후속 확인하기',status:'done',created:'2026-09-16',completed:'2026-09-16',group:'가입',label:'가입'});
+  f.items.push({id:'n2',type:'task',description:'가입 카피 최종 확인하기',status:'done',created:'2026-09-16',completed:'2026-09-17',group:'가입',label:'가입'});
+  f.items.push({id:'m',type:'decision',description:'새 결정',status:'to-do',created:'2026-09-16',group:'결제',label:'결제'});
+  f.items.push({id:'q',type:'task',description:'새로 진행하기',status:'to-do',doing:'2026-09-16',created:'2026-09-16',group:'결제',label:'결제'});
+  const v=f.view();
+  assert.deepEqual(v.material.pending.map(entry=>[entry.id,entry.label,entry.completed]).sort(),[['n','가입','2026-09-16'],['n2','가입','2026-09-17']]);
+  assert.deepEqual([v.confirmed.pending,v.confirmed.pendingDone],[4,2],'줄 수(pending)는 예전 그대로');
+});
+test('개편 A: 한 줄씩 넣기(pullOne) — 그 업무 하나만 새 줄, 확정 그대로, 되돌리기, 없는 업무·확정 전·오래된 revision은 거절',t=>{
+  const f=lineFixture(t);
+  assert.throws(()=>f.change({action:'pullOne',ids:['a']}),/확정한 보고에서만/);
+  f.change({action:'confirm'});
+  f.items.push({id:'n',type:'task',description:'가입 문구 후속 확인하기',status:'done',created:'2026-09-16',completed:'2026-09-16',group:'가입',label:'가입'});
+  f.items.push({id:'n2',type:'task',description:'가입 문구 후속 점검하기',status:'done',created:'2026-09-16',completed:'2026-09-16',group:'가입',label:'가입'});
+  assert.throws(()=>f.change({action:'pullOne',ids:['a']}),/넣을 업무를 찾을 수 없어요/,'이미 문장에 든 업무');
+  assert.throws(()=>f.change({action:'pullOne',ids:['zz']}),/넣을 업무를 찾을 수 없어요/);
+  assert.throws(()=>f.change({action:'pullOne',ids:['n','n2']}),/넣을 업무를 찾을 수 없어요/,'한 번에 하나만');
+  const old=f.view();
+  const done=f.change({action:'pullOne',ids:['n']});
+  let v=f.view();
+  const line=v.rows.find(entry=>entry.sourceIds.includes('n'));
+  assert.deepEqual([line.heading,line.text,line.sourceIds,line.group],['완료한 일','가입 문구 후속 확인함',['n'],'가입']);
+  assert.equal(v.rows.some(entry=>entry.sourceIds.includes('n2')),false,'같은 소제목의 다른 업무는 그대로 붙들어 둔다');
+  assert.deepEqual(v.material.pending.map(entry=>entry.id),['n2']);
+  assert.ok(v.confirmed,'확정은 그대로');
+  assert.equal(line.fresh,undefined,'사람이 넣은 줄은 새로 들어온 것이 아니다');
+  assert.throws(()=>f.store.change({weekKey:'2026-09-14',revision:old.revision,action:'pullOne',ids:['n2']}),error=>error.status===409);
+  f.change({action:'undo',token:done.undoToken});
+  v=f.view();
+  assert.equal(v.rows.some(entry=>entry.sourceIds.includes('n')),false);
+  assert.deepEqual(v.material.pending.map(entry=>entry.id).sort(),['n','n2']);
+  // 넣기 직전에 업무가 지워졌으면 거절
+  f.items.splice(f.items.findIndex(item=>item.id==='n'),1);
+  assert.throws(()=>f.change({action:'pullOne',ids:['n']}),/넣을 업무를 찾을 수 없어요/);
+});
+test('개편 A: 옛 앱(1.3.0)이 보고를 저장해도 review는 파일에 없고, 새 앱으로 다시 올라오면 확인 필요·재료·한 줄씩 넣기가 그대로 된다',t=>{
+  let source='';
+  try { source=require('node:child_process').execFileSync('git',['show','v1.3.0:tracker/inbox-app/report-drafts.js'],{cwd:__dirname,encoding:'utf8',stdio:['ignore','pipe','ignore']}); } catch {}
+  if(!source){t.skip('v1.3.0 태그를 읽을 수 없어요');return;}
+  const f=lineFixture(t);
+  f.items.push({id:'k',type:'task',description:'권한 표 정리하기 (확인 필요)',status:'done',created:'2026-09-14',completed:'2026-09-15',group:'운영',label:'운영'});
+  f.change({action:'edit',id:f.row('문구 검토함').id,text:'가입 문구 다듬음'});
+  f.change({action:'confirm'});
+  f.items.push({id:'n',type:'task',description:'가입 문구 후속 확인하기',status:'done',created:'2026-09-16',completed:'2026-09-16',group:'가입',label:'가입'});
+  f.change({action:'pullOne',ids:['n']});
+  assert.equal(fs.readFileSync(f.file,'utf8').includes('"review"'),false);
+  const oldFile=path.join(f.directory,'old-report-drafts.js');
+  fs.writeFileSync(oldFile,source.replace("require('./safe-storage')",`require(${JSON.stringify(path.join(__dirname,'safe-storage'))})`));
+  const oldStore=require(oldFile)({directory:f.directory,sources:()=>f.items,legacy:()=>[],currentWeek:()=>'2026-09-14',tasks:f.opts.tasks});
+  const oldView=oldStore.view('2026-09-14');
+  assert.equal(oldView.review,undefined,'옛 앱은 review를 모른다');
+  assert.equal(oldView.rows.some(entry=>entry.sourceIds.includes('n')),true,'한 줄씩 넣은 줄은 옛 앱에도 보통 줄이다');
+  oldStore.change({weekKey:'2026-09-14',revision:oldView.revision,action:'edit',id:oldView.rows.find(entry=>entry.sourceIds.includes('n')).id,text:'후속 확인 끝'});
+  assert.equal(fs.readFileSync(f.file,'utf8').includes('"review"'),false,'옛 앱이 다시 써도 review는 파일에 없다');
+  const back=factory(f.opts).view('2026-09-14');
+  assert.ok(back.confirmed,'확정 그대로');
+  assert.equal(back.rows.find(entry=>entry.sourceIds.includes('k')).review.reason,'marked');
+  assert.equal(back.review.count,1);
+  assert.deepEqual(back.material,{pending:[]});
+  assert.equal(back.rows.find(entry=>entry.sourceIds.includes('n')).text,'후속 확인 끝');
+  f.items.push({id:'n3',type:'task',description:'가입 카피 전달하기',status:'done',created:'2026-09-16',completed:'2026-09-17',group:'가입',label:'가입'});
+  const again=factory(f.opts);
+  const r=again.change({weekKey:'2026-09-14',revision:again.view('2026-09-14').revision,action:'pullOne',ids:['n3']});
+  assert.equal(r.report.rows.some(entry=>entry.sourceIds.includes('n3')),true);
+});
