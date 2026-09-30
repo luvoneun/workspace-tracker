@@ -589,8 +589,8 @@ function jiraStripCard(issue, projectKey = '', bundle = null) {
   const refresh = document.createElement('button');
   refresh.type = 'button';
   refresh.className = 'd-iconbtn sm d-jref';
-  refresh.setAttribute('aria-label', '지라 상태 새로고침');
-  refresh.title = '지라에서 다시 읽어요';
+  refresh.setAttribute('aria-label', '지라에서 새로 받기');
+  refresh.title = '지라에서 새로 받기';
   if (jiraBusy) refresh.disabled = true;
   refresh.insertAdjacentHTML('beforeend', uiIcon('refresh'));
   refresh.addEventListener('click', () => jiraCardLoad(issue.key, { fresh: true }));

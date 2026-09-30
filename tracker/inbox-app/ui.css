@@ -1053,7 +1053,7 @@ body.batch-open .d-row.is-done { opacity: 0.6; }
   background: var(--surface); cursor: pointer;
   transition: border-color 120ms var(--ease), background 120ms var(--ease);
 }
-.d-cb::after { content: ''; position: absolute; inset: -3px; border-radius: 9px; }
+.d-cb::after { content: ''; position: absolute; inset: -4px; border-radius: 10px; }
 .d-cb:hover { border-color: var(--accent); }
 .d-cb:checked { background: var(--accent); border-color: var(--accent); }
 .d-tick {
@@ -1106,7 +1106,7 @@ body.batch-open .d-row.is-done { opacity: 0.6; }
   background: var(--surface); cursor: pointer;
   transition: border-color 120ms var(--ease), background 120ms var(--ease);
 }
-.d-wcb::after { content: ''; position: absolute; inset: -4px; border-radius: 10px; }
+.d-wcb::after { content: ''; position: absolute; inset: -5px; border-radius: 11px; }
 .d-wcb:hover { border-color: var(--accent); }
 .d-wcb:checked { background: var(--accent); border-color: var(--accent); }
 .d-wcb:checked::before {
@@ -1144,7 +1144,7 @@ body.batch-open .d-row[data-task-id]:not(.is-done) { cursor: pointer; }
   width: 17px; height: 17px; border: 1.5px solid var(--check-line); border-radius: 4px;
   background: var(--surface); cursor: pointer;
 }
-.d-selcb::after { content: ''; position: absolute; inset: -6px; border-radius: 9px; }
+.d-selcb::after { content: ''; position: absolute; inset: -7px; border-radius: 10px; }
 .d-selcb:hover { border-color: var(--accent); }
 .d-selcb:checked { background: var(--accent); border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--surface); }
 .d-selcb:disabled { cursor: default; opacity: 0.5; }
