@@ -4395,11 +4395,13 @@ function renderNewsCard() {
   const card = document.createElement('div');
   card.className = 'd-start d-newscard';
   card.setAttribute('role', 'region');
-  card.setAttribute('aria-label', `v${version}로 바뀌었어요`);
+  // `v1.3.0으로`·`v1.2.1로` — 끝 숫자를 읽는 소리로 고른다. ㄹ 받침(1·7·8)과 받침 없음(2·4·5·9)은 `로`, 0·3·6은 `으로`.
+  const moved = `v${version}${/[036]$/.test(String(version)) ? '으로' : '로'} 바뀌었어요`;
+  card.setAttribute('aria-label', moved);
   const head = document.createElement('div');
   head.className = 'hd';
   const title = document.createElement('span');
-  title.textContent = `v${version}로 바뀌었어요`;
+  title.textContent = moved;
   const close = document.createElement('button');
   close.type = 'button';
   close.className = 'd-btn sm sp';

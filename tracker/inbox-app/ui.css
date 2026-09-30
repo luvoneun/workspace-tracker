@@ -2495,6 +2495,10 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-newsver .hd small { margin-left: 6px; font-weight: 400; color: var(--dim); }
 /* 오늘 탭 소식 카드 — 사용설명서 카드와 같은 따뜻한 판(.d-start)을 그대로 쓴다. */
 .d-newscard { margin-bottom: 18px; }
+/* 왼쪽 선을 사용설명서 네 칸 판(.d-guidecard)과 맞춘다 — 제목·목록 모두 카드 가장자리에서 24px. */
+.d-start.d-newscard { padding: 12px 10px 10px; }
+.d-newscard .hd { padding: 0 6px 4px 14px; }
+.d-newscard .d-newslist { margin: 4px 14px 2px; padding-left: 18px; }
 /* 오늘 탭 새 버전 한 줄(WP-U) — 설정 › 앱의 새 버전 상자(.d-abupd)·실패 상자(.d-abfail)를 그대로 쓰고 한 줄로만 눕힌다. */
 .d-updnote { margin-bottom: 18px; }
 .d-updnote .tx { flex: 1 1 200px; }
