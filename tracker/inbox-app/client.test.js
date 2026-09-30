@@ -7051,7 +7051,9 @@ function intgClient(state = {}, replies = []) {
 }
 // 가짜 창(vm)의 배열은 다른 realm이라 deepEqual이 참조까지 본다 — 값만 견준다.
 const same = (actual, expected, message) => assert.deepEqual(JSON.parse(JSON.stringify(actual)), expected, message);
-const ago = minutes => new Date(Date.now() - minutes * 60000).toISOString();
+// 반 분을 덜 뺀다 — 화면은 분을 반올림(settingsAgo)하므로, 여기서 만든 시각부터 그릴 때까지
+// 0~60초가 걸려도(부하 큰 전체 실행) `N분 전`이 그대로 N이다.
+const ago = minutes => new Date(Date.now() - (minutes * 60000 - 30000)).toISOString();
 
 test('WP-D1 A. 목록: 카드 차례는 슬랙 수집 → 지라 → 캘린더 → 회의록, 맨 위 한 줄과 개수, 칩은 회색 글자 칩 하나', async () => {
   const fx = intgClient();
