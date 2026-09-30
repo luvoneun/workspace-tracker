@@ -768,7 +768,8 @@ function projectTitleWithFrom(row, title, fromKey) {
 // 오늘/나중에는 줄이 아니라 그룹 제목이 말한다(renderProjectDetail).
 // fromKey(묶음 상세에서만)가 있으면 제목 뒤에 그 업무의 티켓 번호가 작게 붙는다.
 function projectTaskRow(item, fromKey = '') {
-  const mode = item.scheduled ? 'today' : 'later';
+  // 오늘 목록/나중에 할 일 중 어디에 있는지는 서버가 나눈 목록 그대로(panelMode) — 그룹 제목과 같은 기준이다.
+  const mode = panelMode(item);
   const row = document.createElement('div');
   row.className = 'd-prow2' + (item.doing ? ' is-doing' : '') + (panelState && panelState.id === item.id ? ' is-sel' : '');
   row.dataset.taskId = item.id;
@@ -1228,7 +1229,9 @@ function renderProjectDetail(body, row) {
     card.appendChild(add);
   }
 
-  // 진행할 업무는 오늘(실행 예정일이 있음 — 줄의 `나중에`/`오늘로` 버튼과 같은 기준)과 나중에 두 그룹이다.
+  // 진행할 업무는 오늘과 나중에 두 그룹이다 — 날짜를 여기서 다시 계산하지 않고 서버가 나눈 오늘 목록/나중에 할 일
+  // (taskListsCache, panelMode)을 그대로 쓴다: 오늘 = 예정일이 오늘·지난 것 또는 기한이 오늘·지난 것, 나중에 = 예정일
+  // 없음·내일·미래. 오늘 탭·서랍과 같은 말이고, 줄의 `나중에`/`오늘로` 버튼도 같은 판정이다.
   // 정렬은 그대로 마감·중요도순(compareTasks)이고, 이 두 그룹은 접지 않는다.
   const taskGroup = (label, list) => {
     if (!list.length) return;
@@ -1236,8 +1239,8 @@ function renderProjectDetail(body, row) {
     list.forEach(item => group.appendChild(projectTaskRow(item, fromOf(item))));
     card.appendChild(group);
   };
-  taskGroup('오늘', open.filter(item => item.scheduled));
-  taskGroup('나중에', open.filter(item => !item.scheduled));
+  taskGroup('오늘', open.filter(item => panelMode(item) === 'today'));
+  taskGroup('나중에', open.filter(item => panelMode(item) === 'later'));
 
   // menu가 있으면 줄마다 같은 목록이 쓰는 ⋯ 메뉴를 그대로 단다(회의용·프로젝트탭용으로 새로 만들지 않는다).
   // opts.check가 있으면(확인 대기·결정만) 목록이 쓰는 체크박스를 그대로 맨 앞에 단다.

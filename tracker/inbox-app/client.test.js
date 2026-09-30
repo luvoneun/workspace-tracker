@@ -1917,6 +1917,40 @@ test('프로젝트 상세 카드: 빈 그룹은 그리지 않고, 업무 0개면
   assert.deepEqual(one.groups(oneNode).map(one.label), ['나중에']);
 });
 
+test('프로젝트 상세 카드: 오늘/나중에는 서버가 나눈 오늘 목록·나중에 할 일 그대로(날짜를 다시 계산하지 않는다)', () => {
+  const day = n => { const d = new Date(); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+  const items = [
+    { id: 'tomorrow', type: 'task', description: '내일 예정', status: 'to-do', scheduled: day(1), group: '가입 개선' },
+    { id: 'yesterday', type: 'task', description: '어제 예정', status: 'to-do', scheduled: day(-1), group: '가입 개선' },
+    { id: 'none', type: 'task', description: '예정일 없음', status: 'to-do', group: '가입 개선' },
+    { id: 'overdue', type: 'task', description: '기한 지남', status: 'to-do', due: day(-2), group: '가입 개선' },
+  ];
+  const { app, body, groups, label } = projectCardClient(items);
+  // 서버(getTodayTasks·getLaterTasks — isOpenTaskForToday)가 나눈 그대로를 화면이 들고 있다.
+  const pick = ids => items.filter(item => ids.includes(item.id));
+  app.run(`taskListsCache = { todayTasks: ${JSON.stringify(pick(['yesterday', 'overdue']))}, laterTasks: ${JSON.stringify(pick(['tomorrow', 'none']))} };`);
+  const node = body();
+  const titles = g => nodeFindAll(g, 'd-prow2').map(row => nodeFind(row, 'ti').textContent).sort();
+  const [today, later] = groups(node);
+  assert.deepEqual([label(today), label(later)], ['오늘', '나중에']);
+  assert.deepEqual(titles(today), ['기한 지남', '어제 예정'], '어제 예정·기한 지남 → 오늘');
+  assert.deepEqual(titles(later), ['내일 예정', '예정일 없음'], '내일 예정·예정일 없음 → 나중에');
+  // 줄의 옮기기 버튼도 같은 판정 — 나중에 그룹의 내일 예정 줄은 `오늘로`.
+  const tomorrowRow = nodeFindAll(later, 'd-prow2').find(row => nodeFind(row, 'ti').textContent === '내일 예정');
+  assert.equal(nodeFind(nodeFind(tomorrowRow, 'ac'), 'd-btn').textContent, '오늘로');
+});
+
+test('프로젝트 상세 카드 CSS: 체크 칸이 없는 줄(회의·아이디어)은 체크 칸 폭만큼 비워 제목 시작을 맞춘다(넓은 폭·390px)', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  // 넓은 폭: 업무 줄 = --pad + 체크 30px + 칸 사이 10px, 읽는 줄도 같은 칸 사이, 체크 없는 줄은 그 40px을 여백으로.
+  assert.match(css, /^\.d-pcard \.d-rec \{ padding-left: var\(--pad\); column-gap: 10px; \}$/m);
+  assert.match(css, /^\.d-pcard \.d-rec:not\(\.has-ck\) \{ padding-left: calc\(var\(--pad\) \+ 40px\); \}$/m);
+  // 390px: 업무 줄 = 12px + 30px + 8px.
+  const narrow = [...css.matchAll(/@media \(max-width: 520px\) \{([\s\S]*?)\n\}/g)].map(m => m[1]).join('\n');
+  assert.match(narrow, /\.d-pcard \.d-rec \{ column-gap: 8px; \}/);
+  assert.match(narrow, /\.d-pcard \.d-rec:not\(\.has-ck\) \{ padding-left: calc\(12px \+ 38px\); \}/);
+});
+
 test('프로젝트 상세 카드 CSS: 업무 줄 격자는 체크 | 업무 | 기한 셋, 열 이름 줄·`언제 할지` 칸 규칙은 없다', () => {
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
   assert.match(css, /^\.d-prow2 \{\n  display: grid; grid-template-columns: 30px minmax\(0, 1fr\) 116px;/m);
