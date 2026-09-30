@@ -798,6 +798,82 @@ test('renderInbox: 프로젝트가 있는 줄에만 조용한 프로젝트 표�
   assert.equal(findClass(main2, 'd-inproj'), undefined, '프로젝트가 없으면 지어내지 않는다');
 });
 
+function inboxFoldClient() {
+  const app = client(new Response('{"ok":true}'));
+  app.run("escapeHtml = s => String(s || '')");
+  app.run("workflowData = { items: [], meetings: [] }; jiraIssuesByKey = new Map()");
+  app.run("var inboxOf = n => Array.from({ length: n }, (_, i) => ({ id: 'i' + i, description: '업무' + i }))");
+  const list = () => app.nodes.get('inboxList');
+  const rows = () => list().children.filter(kid => kid.className === 'd-ibrow');
+  const more = () => list().children.find(kid => String(kid.className).includes('d-ibmore'));
+  return { app, list, rows, more };
+}
+
+test('새로 들어온 것 4개: 위 3줄만 보이고 4번째는 hidden, 카드 맨 아래 `1개 더 ›`', () => {
+  const { app, list, rows, more } = inboxFoldClient();
+  app.run('renderInbox(inboxOf(4))');
+  assert.deepEqual(rows().map(r => r.hidden), [false, false, false, true]);
+  const link = more();
+  assert.ok(link, '링크가 선다');
+  assert.equal(list().children.at(-1), link, '링크는 카드 맨 아래');
+  assert.equal(link.type, 'button');
+  assert.match(link.textContent, /^1개 더 ›$/);
+  assert.equal(link.getAttribute('aria-label'), '새로 들어온 것 1개 더 보기');
+  assert.equal(link.getAttribute('aria-expanded'), 'false');
+  assert.equal(link.getAttribute('aria-controls'), 'inboxList');
+  assert.equal(app.nodes.get('inboxCount').textContent, 4, '제목 옆 숫자는 전체 개수');
+  // .d-ibrow는 grid라 hidden이 grid에 지지 않게 규칙을 따로 둔다.
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /^\.d-ibrow\[hidden\] \{ display: none; \}$/m);
+});
+
+test('새로 들어온 것 3개 이하: 접힌 줄도 링크도 없다', () => {
+  const { app, rows, more } = inboxFoldClient();
+  for (const n of [1, 3]) {
+    app.run(`renderInbox(inboxOf(${n}))`);
+    assert.equal(rows().length, n);
+    assert.ok(rows().every(r => !r.hidden), `${n}개면 모두 보인다`);
+    assert.equal(more(), undefined, `${n}개면 링크가 없다`);
+  }
+});
+
+test('새로 들어온 것 `N개 더 ›`를 누르면 다시 그리지 않고 hidden만 풀리고 `접기 ⌃`가 된다', () => {
+  const { app, rows, more } = inboxFoldClient();
+  app.run('renderInbox(inboxOf(6))');
+  const link = more();
+  assert.equal(link.textContent, '3개 더 ›');
+  const before = rows();
+  link.listeners.click();
+  assert.deepEqual(rows(), before, '줄을 새로 만들지 않는다(초점 유지)');
+  assert.ok(rows().every(r => !r.hidden));
+  assert.equal(more(), link, '링크도 같은 버튼');
+  assert.equal(link.textContent, '접기 ⌃');
+  assert.equal(link.getAttribute('aria-label'), '새로 들어온 것 접기');
+  assert.equal(link.getAttribute('aria-expanded'), 'true');
+  link.listeners.click();
+  assert.deepEqual(rows().map(r => r.hidden), [false, false, false, true, true, true]);
+  assert.equal(link.textContent, '3개 더 ›');
+  assert.equal(link.getAttribute('aria-expanded'), 'false');
+});
+
+test('새로 들어온 것 펼침은 다시 그려도 남고, 3개 이하로 줄면 접힘으로 돌아간다', () => {
+  const { app, rows, more } = inboxFoldClient();
+  app.run('renderInbox(inboxOf(5))');
+  more().listeners.click();
+  app.run('renderInbox(inboxOf(7))');
+  assert.ok(rows().every(r => !r.hidden), '펼친 채 다시 그려진다(새 항목이 와도)');
+  assert.equal(more().textContent, '접기 ⌃');
+  app.run('renderInbox(inboxOf(3))');
+  assert.equal(more(), undefined);
+  app.run('renderInbox(inboxOf(4))');
+  assert.deepEqual(rows().map(r => r.hidden), [false, false, false, true], '다시 늘어도 접힌 채');
+  assert.equal(more().textContent, '1개 더 ›');
+  more().listeners.click();
+  app.run('renderInbox([])');
+  app.run('renderInbox(inboxOf(4))');
+  assert.equal(rows()[3].hidden, true, '0개가 되어도 접힘으로 돌아간다');
+});
+
 test('the palette narrows by kind, by "완료 제외" and by "오늘 신규", and says nothing without a query or a filter', () => {
   const app = workflowsClient();
   app.run(`var pool = [
