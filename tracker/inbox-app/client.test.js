@@ -7304,7 +7304,7 @@ test('WP-J B. 이미 본 버전이면 다시 뜨지 않고, 버전이 올라가�
   assert.equal(zone.hidden, false);
   const card = zone.children[0];
   assert.equal(card.className, 'd-start d-newscard');
-  assert.equal(fx.shape("document.getElementById('newsCardZone').children[0].children[0]").text, 'v1.2.0로 바뀌었어요닫기');
+  assert.equal(fx.shape("document.getElementById('newsCardZone').children[0].children[0]").text, 'v1.2.0으로 바뀌었어요닫기');
   assert.equal(fx.shape("document.getElementById('newsCardZone').children[0].children[1]").text, 'Dock 아이콘을 눌러도 창이 하나만 떠요굵게도 돼요');
   const list = card.children[1];
   assert.equal(list.className, 'd-newslist');
