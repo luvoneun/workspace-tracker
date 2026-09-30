@@ -727,19 +727,20 @@ function projectRenameStart(title, key) {
   });
 }
 
-// `언제 할지` 열의 한마디: 오늘 / 내일 / 9월 25일 / 나중에.
-function projectPlaceWord(item) {
-  if (!item.scheduled) return '나중에';
-  const diff = diffDays(item.scheduled);
-  if (diff === 0) return '오늘';
-  if (diff === 1) return '내일';
-  return uiKoDateShort(item.scheduled);
-}
-
-function projectSection(title, count) {
+// 프로젝트 카드 안의 그룹 하나 — 오늘 목록과 같은 그룹 제목(uiGroupHeading) 아래 줄들이 바로 붙는다.
+// 그룹 제목이 옛 `언제 할지` 열·열 이름 줄을 대신한다(오늘/나중에가 줄마다가 아니라 제목에 한 번).
+// hint가 있으면(결정만) 제목 끝에 조용한 안내를 붙인다. 빈 그룹은 부르는 쪽이 아예 만들지 않는다.
+function projectGroup(label, count, opts = {}) {
   const section = document.createElement('section');
-  section.className = 'd-psec';
-  section.appendChild(uiGroupHeading(title, count));
+  section.className = 'd-pgrp';
+  const head = uiGroupHeading(label, count, opts);
+  if (opts.hint) {
+    const hint = document.createElement('span');
+    hint.className = 'd-pghint';
+    hint.textContent = opts.hint;
+    head.appendChild(hint);
+  }
+  section.appendChild(head);
   return section;
 }
 
@@ -760,7 +761,8 @@ function projectTitleWithFrom(row, title, fromKey) {
   row.appendChild(wrap);
 }
 
-// 프로젝트 면의 업무 한 줄: 체크 | 언제 할지 | 업무 | 우선순위 | 기한. hover에 옮기기와 더보기.
+// 프로젝트 면의 업무 한 줄: 체크 | 업무 | 기한. hover에 옮기기(`나중에`/`오늘로`)와 더보기.
+// 오늘/나중에는 줄이 아니라 그룹 제목이 말한다(renderProjectDetail).
 // fromKey(묶음 상세에서만)가 있으면 제목 뒤에 그 업무의 티켓 번호가 작게 붙는다.
 function projectTaskRow(item, fromKey = '') {
   const mode = item.scheduled ? 'today' : 'later';
@@ -769,11 +771,6 @@ function projectTaskRow(item, fromKey = '') {
   row.dataset.taskId = item.id;
 
   row.appendChild(uiCheckCell(item, row, false));
-
-  const place = document.createElement('span');
-  place.className = 'pl';
-  place.textContent = projectPlaceWord(item);
-  row.appendChild(place);
 
   const title = document.createElement('button');
   title.type = 'button';
@@ -1210,17 +1207,11 @@ function renderProjectDetail(body, row) {
   const open = tasks.filter(item => item.status !== 'done').sort(compareTasks);
   const done = tasks.filter(item => item.status === 'done').sort((a, b) => (b.completed || '').localeCompare(a.completed || ''));
 
-  // 진행할 업무 — 업무가 없어도 구역은 세우고 맨 아래에 이 프로젝트로 바로 추가하는 칸을 둔다(오늘 할 일로 들어간다).
+  // 카드 한 장 — 맨 위는 이 프로젝트로 바로 추가하는 칸(업무가 0개여도 있다, 오늘 할 일로 들어간다), 그 아래 그룹이
+  // 오늘 → 나중에 → 확인 대기 → 결정 → 회의 → 아이디어 → 끝낸 것 순으로 선다. 빈 그룹은 제목째 없다.
+  const card = document.createElement('div');
+  card.className = 'd-psurf d-pcard';
   {
-    const section = projectSection('진행할 업무', open.length);
-    const surface = document.createElement('div');
-    surface.className = 'd-psurf';
-    if (open.length) {
-      // 조용한 열 이름 줄 — 무슨 값이 어느 칸에 있는지 한 번만 적는다.
-      surface.insertAdjacentHTML('beforeend',
-        '<div class="d-colhd"><span></span><span>언제 할지</span><span>업무</span><span class="r">기한</span></div>');
-      open.forEach(item => surface.appendChild(projectTaskRow(item, fromOf(item))));
-    }
     // 오늘 목록의 그룹 `+` 입력줄과 같은 부품. 오늘 목록의 같은 그룹 줄과 헷갈리지 않게 자리 표시를 따로 붙인다.
     // 묶음이면 대표 티켓(또는 `→ KEY`로 고른 티켓)에 붙는다.
     const addKey = bundle ? projectBundleAddKey(bundle) : key;
@@ -1231,27 +1222,34 @@ function renderProjectDetail(body, row) {
     const input = add.querySelector('.d-addinput');
     if (input) { input.placeholder = '+ 이 프로젝트에 할 일 추가 — Enter'; input.setAttribute('aria-label', '이 프로젝트에 할 일 추가'); }
     if (bundle) add.appendChild(projectBundleAddTarget(bundle, addKey, input));
-    surface.appendChild(add);
-    section.appendChild(surface);
-    body.appendChild(section);
+    card.appendChild(add);
   }
+
+  // 진행할 업무는 오늘(실행 예정일이 있음 — 줄의 `나중에`/`오늘로` 버튼과 같은 기준)과 나중에 두 그룹이다.
+  // 정렬은 그대로 마감·중요도순(compareTasks)이고, 이 두 그룹은 접지 않는다.
+  const taskGroup = (label, list) => {
+    if (!list.length) return;
+    const group = projectGroup(label, list.length);
+    list.forEach(item => group.appendChild(projectTaskRow(item, fromOf(item))));
+    card.appendChild(group);
+  };
+  taskGroup('오늘', open.filter(item => item.scheduled));
+  taskGroup('나중에', open.filter(item => !item.scheduled));
 
   // menu가 있으면 줄마다 같은 목록이 쓰는 ⋯ 메뉴를 그대로 단다(회의용·프로젝트탭용으로 새로 만들지 않는다).
   // check가 있으면(확인 대기·결정만) 목록이 쓰는 체크박스를 그대로 맨 앞에 단다.
   // withSource가 있으면(아이디어만) 원문이 있는 줄에 조용한 `원문` 링크를 붙인다.
-  // lead가 있으면(확인 대기만) 구역 맨 위에 그 줄을 먼저 세운다 — 방금 체크한 줄의 `다음은?`이다.
-  const simple = (label, list, meta, onOpen, menu, check, withSource, lead) => {
+  // lead가 있으면(확인 대기만) 그룹 맨 위에 그 줄을 먼저 세운다 — 방금 체크한 줄의 `다음은?`이다.
+  // hint가 있으면(결정만) 그룹 제목 끝에 조용한 안내가 붙는다.
+  const simple = (label, list, meta, onOpen, menu, check, withSource, lead, hint) => {
     if (!list.length && !lead) return;
-    const section = projectSection(label, list.length);
-    const surface = document.createElement('div');
-    surface.className = 'd-psurf plain';
-    if (lead) surface.appendChild(lead);
-    list.forEach(entry => surface.appendChild(projectSimpleRow(entry.text, meta(entry.item), () => onOpen(entry.item), entry.id,
+    const group = projectGroup(label, list.length, hint ? { hint } : {});
+    if (lead) group.appendChild(lead);
+    list.forEach(entry => group.appendChild(projectSimpleRow(entry.text, meta(entry.item), () => onOpen(entry.item), entry.id,
       menu ? (row) => menu(entry.item, row) : null,
       check ? (row) => check(entry.item, row) : null,
       withSource ? uiSourceLink(entry.item) : null)));
-    section.appendChild(surface);
-    body.appendChild(section);
+    card.appendChild(group);
   };
   const asItems = list => list.map(item => ({ item, text: item.description, id: item.id }));
   const openPanel = item => panelOpen({ id: item.id });
@@ -1272,32 +1270,27 @@ function renderProjectDetail(body, row) {
     item => [item.who, uiItemDueText(item)?.text, fromOf(item)].filter(Boolean).join(' · '), openPanel, waitingMenuSections,
     // 이 구역은 미완료만 보여 준다(위 필터) — 체크하면 확인 완료가 되어 목록에서 빠진다.
     (item, row) => waitingCheckbox(item, row, false), false, waitingLead);
-  // 결정은 미반영·반영을 글자로만 가른다(알약으로 그리지 않는다). 이 구역은 반영 완료도 함께 보여 준다 —
+  // 결정은 미반영·반영을 글자로만 가른다(알약으로 그리지 않는다). 이 그룹은 반영 완료도 함께 보여 준다 —
   // 체크해도 줄은 남고 오른쪽 글자만 `미반영` → 반영 날짜로 바뀐다(구역의 기존 규칙 그대로).
   simple('결정', asItems(items.filter(item => item.type === 'decision')),
     item => [item.status === 'done' ? `${uiKoDateShort(item.completed)} 반영` : '미반영', fromOf(item)].filter(Boolean).join(' · '), openPanel, decisionMenuSections,
-    (item, row) => decisionCheckbox(item, row, item.status === 'done'));
-  simple('아이디어', asItems(items.filter(item => item.type === 'idea')),
-    item => [item.created ? `${uiKoDateShort(item.created)} 기록` : '', fromOf(item)].filter(Boolean).join(' · '), openPanel, ideaMenuSections, null, true);
+    (item, row) => decisionCheckbox(item, row, item.status === 'done'), false, null, '· 체크하면 PRD 반영');
 
   const meetings = workflowData.meetings.filter(event => rowKeys.includes(wfMeetingKey(event)) || items.some(item => item.meetingId === event.id));
   simple('회의', meetings.map(event => ({ item: event, text: event.title, id: null })),
     event => event.date ? uiKoDateShort(event.date) : '', event => panelOpen({ kind: 'meeting', id: event.id }),
     meetingMenuSections);
+  simple('아이디어', asItems(items.filter(item => item.type === 'idea')),
+    item => [item.created ? `${uiKoDateShort(item.created)} 기록` : '', fromOf(item)].filter(Boolean).join(' · '), openPanel, ideaMenuSections, null, true);
 
+  // 끝낸 것 — 기본 접힘(세션 동안 기억), 제목을 누르면 펼친다.
   if (done.length) {
-    const section = document.createElement('section');
-    section.className = 'd-psec';
-    section.appendChild(uiGroupHeading('완료한 업무', done.length, {
+    const group = projectGroup('끝낸 것', done.length, {
       open: projectDoneOpen,
       onToggle: () => { projectDoneOpen = !projectDoneOpen; renderProjects(); },
-    }));
-    if (projectDoneOpen) {
-      const surface = document.createElement('div');
-      surface.className = 'd-psurf';
-      done.forEach(item => surface.appendChild(projectDoneRow(item, fromOf(item))));
-      section.appendChild(surface);
-    }
-    body.appendChild(section);
+    });
+    if (projectDoneOpen) done.forEach(item => group.appendChild(projectDoneRow(item, fromOf(item))));
+    card.appendChild(group);
   }
+  body.appendChild(card);
 }

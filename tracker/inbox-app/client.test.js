@@ -1822,9 +1822,11 @@ test('프로젝트 탭의 확인 대기·결정 줄에는 체크박스가 붙고
     renderProjectDetail(body, { key: 'group:가입 개선', label: '가입 개선', open: 2 });
     return body;
   })()`);
-  const section = (label) => body.children.find(c => c.className === 'd-psec'
+  // 카드 한 장(.d-pcard) 안의 그룹(.d-pgrp) — 제목 다음부터가 줄이다.
+  const card = body.children.find(c => String(c.className).includes('d-pcard'));
+  const section = (label) => card.children.find(c => c.className === 'd-pgrp'
     && c.children[0].children.some(k => k.textContent === label));
-  const rowsOf = (label) => section(label).children[1].children;
+  const rowsOf = (label) => section(label).children.slice(1);
 
   const waitingRow = rowsOf('확인 대기')[0];
   assert.equal(waitingRow.className, 'd-rec has-ck has-ac');
@@ -1843,9 +1845,84 @@ test('프로젝트 탭의 확인 대기·결정 줄에는 체크박스가 붙고
   const ideaRow = rowsOf('아이디어')[0];
   assert.equal(ideaRow.className, 'd-rec has-ac', '아이디어 줄은 체크박스를 두지 않는다');
 
-  const meetingSection = body.children.find(c => c.className === 'd-psec' && c.children[0]
-    && c.children[0].children.some(k => k.textContent === '회의'));
-  assert.equal(meetingSection, undefined, '회의가 없는 프로젝트라 회의 구역 자체가 없다');
+  assert.equal(section('회의'), undefined, '회의가 없는 프로젝트라 회의 그룹 자체가 없다');
+});
+
+// 개편 A4-②: 프로젝트 상세는 카드 한 장 — 맨 위 빠른 추가, 그 아래 그룹 제목이 열을 대신한다.
+function projectCardClient(items, meetings = []) {
+  const app = workflowsClient();
+  app.run(`workflowData = { items: ${JSON.stringify(items)}, meetings: ${JSON.stringify(meetings)} }; wfIndexData(); itemsById = new Map();`);
+  const body = () => app.run(`(() => {
+    const body = document.createElement('div');
+    renderProjectDetail(body, { key: 'group:가입 개선', label: '가입 개선', open: 1 });
+    return body;
+  })()`);
+  const cardOf = node => node.children.filter(c => String(c.className).split(' ').includes('d-pcard'));
+  const groups = node => cardOf(node)[0].children.filter(c => c.className === 'd-pgrp');
+  const label = group => nodeFind(group.children[0], 'gl').textContent;
+  return { app, body, cardOf, groups, label };
+}
+const A4_ALL = [
+  { id: 't1', type: 'task', description: '오늘 할 일', status: 'to-do', scheduled: '2026-09-30', group: '가입 개선' },
+  { id: 't2', type: 'task', description: '나중 할 일', status: 'to-do', group: '가입 개선' },
+  { id: 't3', type: 'task', description: '끝낸 일', status: 'done', completed: '2026-09-29', group: '가입 개선' },
+  { id: 'w1', type: 'check', description: '확인 문구', status: 'to-do', group: '가입 개선' },
+  { id: 'd1', type: 'decision', description: '결정 문구', status: 'to-do', group: '가입 개선' },
+  { id: 'i1', type: 'idea', description: '아이디어 문구', status: 'to-do', group: '가입 개선' },
+];
+const A4_MEETING = [{ id: 'm1', title: '가입 회의', date: '2026-09-29', group: '가입 개선' }];
+
+test('프로젝트 상세 카드 하나: 흰 카드 1장, 맨 위 빠른 추가, 그룹은 오늘→나중에→확인 대기→결정→회의→아이디어→끝낸 것', () => {
+  // 회의는 이 프로젝트 항목이 나온 회의로도 잡힌다(meetingId).
+  const { body, cardOf, groups, label } = projectCardClient(A4_ALL.map(item => item.id === 'd1' ? { ...item, meetingId: 'm1' } : item), A4_MEETING);
+  const node = body();
+  assert.equal(cardOf(node).length, 1, '카드는 한 장');
+  assert.equal(nodeFindAll(node, 'd-psurf').length, 1, '구역마다 따로 선 흰 카드가 없다');
+  const card = cardOf(node)[0];
+  assert.ok(String(card.children[0].className).includes('d-padd'), '빠른 추가 칸이 카드 맨 위');
+  assert.deepEqual(groups(node).map(label), ['오늘', '나중에', '확인 대기', '결정', '회의', '아이디어', '끝낸 것']);
+  assert.equal(nodeFind(groups(node)[0], 'n').textContent, 1, '그룹 제목 옆 숫자');
+  // 줄 앞 `언제 할지` 칸과 열 이름 줄은 없다 — 그룹 제목이 말한다.
+  assert.equal(nodeFind(node, 'd-colhd'), null);
+  assert.equal(nodeFind(node, 'pl'), null);
+  assert.equal(nodeFind(groups(node)[0], 'd-prow2').children.length, 4, '체크 · 제목 · 기한 · 동작');
+  // 결정 제목 끝에는 조용한 안내.
+  const decision = groups(node)[3];
+  assert.equal(nodeFind(decision.children[0], 'd-pghint').textContent, '· 체크하면 PRD 반영');
+  assert.equal(nodeFind(groups(node)[2].children[0], 'd-pghint'), null, '다른 그룹에는 안내가 없다');
+  // 끝낸 것은 접힌 채 제목만(누르면 펼친다).
+  const doneGroup = groups(node)[6];
+  assert.equal(doneGroup.children.length, 1);
+  assert.equal(doneGroup.children[0].getAttribute('aria-expanded'), 'false');
+});
+
+test('프로젝트 상세 카드: 오늘/나중에 옮기기 버튼은 그룹 기준 그대로(오늘 → `나중에`, 나중에 → `오늘로`)', () => {
+  const { body, groups } = projectCardClient(A4_ALL);
+  const node = body();
+  const moveOf = group => nodeFind(nodeFind(group, 'ac'), 'd-btn').textContent;
+  assert.equal(moveOf(groups(node)[0]), '나중에');
+  assert.equal(moveOf(groups(node)[1]), '오늘로');
+});
+
+test('프로젝트 상세 카드: 빈 그룹은 그리지 않고, 업무 0개면 빠른 추가 칸만, 그룹 하나면 그 제목 하나', () => {
+  const empty = projectCardClient([]);
+  const node = empty.body();
+  assert.equal(empty.cardOf(node).length, 1, '업무가 0개여도 카드는 선다');
+  assert.equal(empty.groups(node).length, 0, '그룹이 없다');
+  assert.ok(String(empty.cardOf(node)[0].children[0].className).includes('d-padd'));
+  assert.equal(empty.cardOf(node)[0].children.length, 1, '빠른 추가 칸뿐');
+
+  const one = projectCardClient([{ id: 't2', type: 'task', description: '나중 할 일', status: 'to-do', group: '가입 개선' }]);
+  const oneNode = one.body();
+  assert.deepEqual(one.groups(oneNode).map(one.label), ['나중에']);
+});
+
+test('프로젝트 상세 카드 CSS: 업무 줄 격자는 체크 | 업무 | 기한 셋, 열 이름 줄·`언제 할지` 칸 규칙은 없다', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /^\.d-prow2 \{\n  display: grid; grid-template-columns: 30px minmax\(0, 1fr\) 116px;/m);
+  assert.doesNotMatch(css, /\.d-colhd|\.d-prow2 \.pl\b|\.d-psec/);
+  // 카드 안 그룹 제목은 스티키가 아니다(.d-list 안에서만 스티키).
+  assert.doesNotMatch(css, /\.d-pcard[^{]*\.d-grp[^{]*\{[^}]*sticky/);
 });
 
 test('projectSimpleRow: 체크박스를 넘기지 않으면 예전과 똑같다(has-ck 없음)', () => {
@@ -3539,12 +3616,13 @@ test('`다음은?` 줄은 프로젝트 탭 확인 대기 구역 맨 위와 회�
     renderProjectDetail(body, { key: 'group:가입 개선', label: '가입 개선', open: 1 });
     return body;
   })()`);
-  const section = body.children.find(node => node.className === 'd-psec'
+  const card = body.children.find(node => String(node.className).includes('d-pcard'));
+  const section = card.children.find(node => node.className === 'd-pgrp'
     && node.children[0].children.some(kid => kid.textContent === '확인 대기'));
-  const surface = section.children[1];
-  assert.equal(surface.children[0].className, 'd-wnextwrap', '체크한 줄은 구역 맨 위에 다시 서고');
-  assert.equal(surface.children[0].children[1].className, 'd-wnext');
-  assert.equal(surface.children[1].children[1].textContent, '남은 확인', '남은 줄은 그대로다');
+  // 그룹의 첫 자식은 제목이고 줄은 그 뒤에 바로 붙는다.
+  assert.equal(section.children[1].className, 'd-wnextwrap', '체크한 줄은 그룹 맨 위(제목 바로 아래)에 다시 서고');
+  assert.equal(section.children[1].children[1].className, 'd-wnext');
+  assert.equal(section.children[2].children[1].textContent, '남은 확인', '남은 줄은 그대로다');
 
   // 회의는 체크한 줄이 is-done으로 남으므로 그 줄 바로 아래에 붙는다
   app.run("workflowData.items.forEach(item => { if (item.id === 'ck1') item.meetingId = 'm1'; }); wfIndexData();");
