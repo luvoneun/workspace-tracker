@@ -11254,7 +11254,7 @@ test('WP-V G. 연결된 맥 캘린더 카드가 허용 막힘으로 멈추면 �
   const denied = await card(old);
   const why = denied.find('calendar', 'd-intgwhy');
   assert.equal(why.length, 1);
-  assert.equal(whyOf(denied), '맥이 캘린더 접근을 막았어요 — 맥 설정 › 개인정보 보호 및 보안 › 캘린더(그리고 자동화)에서 목록의 이름을 찾아 켜 주세요', '옛 문구는 새 안내로');
+  assert.equal(whyOf(denied), '맥이 캘린더 접근을 막았어요 — 맥 설정 › 개인정보 보호 및 보안 › 캘린더(그리고 자동화)에서 목록의 이름을 찾아 켜 주세요. 켠 뒤 다시 시도를 눌러 주세요.', '옛 문구는 새 안내로 + 다시 시도');
   assert.doesNotMatch(denied.text('calendar'), /전체 접근\)와 자동화에서 허용/, '옛 문구는 보이지 않는다');
   const pic = denied.find('calendar', 'd-imacpic');
   assert.equal(pic.length, 1, '이유 줄 아래 예시 그림 하나');

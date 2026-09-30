@@ -2627,7 +2627,8 @@ function settingsMacDeniedPic() {
 function settingsMacWhy(text) {
   const raw = String(text || '');
   const denied = raw === SETTINGS_MAC_WORDS.denied || (/캘린더/.test(raw) && /자동화/.test(raw) && /허용/.test(raw));
-  return { text: denied ? SETTINGS_MAC_WORDS.denied : raw, denied };
+  // 카드에는 `허용하고 확인`이 없으니 끝에 다시 시도를 붙인다(처음 연결 화면의 원본 문구는 그대로).
+  return { text: denied ? `${SETTINGS_MAC_WORDS.denied}. 켠 뒤 다시 시도를 눌러 주세요.` : raw, denied };
 }
 
 async function settingsMacLoad() {

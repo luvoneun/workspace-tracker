@@ -1069,7 +1069,7 @@ function projectNewRender(body) {
   const form = document.createElement('div');
   form.className = 'd-pnew';
 
-  const name = projectNewInput(state.name, '프로젝트 이름 — 예: 예시 게시글 작성하기_샘플 기능', '프로젝트 이름', (value) => {
+  const name = projectNewInput(state.name, '프로젝트 이름 — 예: 가입 개선_이메일 인증', '프로젝트 이름', (value) => {
     state.name = value;
     projectNewPreviewPaint();
   }, 200);
