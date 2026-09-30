@@ -10947,8 +10947,8 @@ test('첫사용 6: 입력 칸 바로 아래 빈 문장 세 자리만 짧고 조�
   assert.equal(found.node('decisionArchiveList').html, '<div class="d-empty">찾는 결정이 없어요.</div>');
 
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
-  assert.match(css, /\.d-empty\.is-short \{ padding: 4px var\(--pad\) 14px; font-size: 14px; color: var\(--dim\); \}/);
-  assert.match(css, /\.d-empty \{ font-size: 15px; font-weight: 500; color: var\(--muted\); padding: 34px var\(--pad\); \}/, '다른 자리의 빈 문장 모양은 그대로');
+  assert.match(css, /\.d-empty\.is-short \{ padding: 4px var\(--pad\) 14px; font-size: var\(--fs-body\); color: var\(--dim\); \}/);
+  assert.match(css, /\.d-empty \{ font-size: var\(--fs-md\); font-weight: 500; color: var\(--muted\); padding: 34px var\(--pad\); \}/, '다른 자리의 빈 문장 모양은 그대로');
 });
 
 test('첫사용 4: 도움말의 사용설명서(renderSettingsManual)는 모양·문구가 그대로다 — 네 칸 판·꺾쇠·줄인 설치 문구는 오늘 탭 카드에만', () => {
@@ -12309,10 +12309,10 @@ test('회의 정리 판 날짜 칸(shown) 세 가지: ① 고르면 글자 버�
 
 test('상세 카드 화면 규칙: 누구에게 조용한 입력, 결정 내용 두 줄, 작은 ✕, 달력 아이콘은 돌리지 않는다', () => {
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
-  assert.match(css, /\.d-fields \.d-mtext \{[^}]*height: 28px;[^}]*background: none;/);
+  assert.match(css, /\.d-fields \.d-mtext \{[^}]*height: var\(--h-sm\);[^}]*background: none;/);
   assert.match(css, /\.d-fields \.d-mtext:hover \{ background: var\(--hover\); \}/);
   assert.match(css, /\.d-dsec\[data-sec="내용"\] \.d-din \{ min-height: 62px; \}/);
-  assert.match(css, /\.d-iconbtn\.xs \{ width: 28px; height: 28px; \}/);
+  assert.match(css, /\.d-iconbtn\.xs \{ width: 28px; height: var\(--h-sm\); \}/);
   assert.match(css, /\.d-dpick \.cv\.cal \.d-i \{ transform: none; \}/);
   assert.match(css, /\.d-dvalue \{ display: flex; align-items: center; gap: 4px; flex-wrap: nowrap;/);
 });
@@ -13105,7 +13105,7 @@ test('계획 문장 프로젝트 바꾸기: 목록을 펼치면 is-picking, 고�
   list.children.find(kid => kid.dataset.value === '').listeners.click({ stopPropagation() {} });
   assert.deepEqual(log, ['+is-picking', '-is-picking'], '고르면 풀린다');
   const css = require('node:fs').readFileSync(require('node:path').join(__dirname, 'report-ui.css'), 'utf8');
-  assert.match(css, /\.d-mfield:has\(\.rp-regroup\.is-picking\) > \.ml \{[^}]*font-size: 12px; font-weight: 600; color: var\(--muted\)/);
+  assert.match(css, /\.d-mfield:has\(\.rp-regroup\.is-picking\) > \.ml \{[^}]*font-size: var\(--fs-cap\); font-weight: 600; color: var\(--muted\)/);
   assert.match(css, /\.rp-regroup \.d-gplist \{ padding: 2px; \}/);
 });
 

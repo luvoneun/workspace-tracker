@@ -78,6 +78,10 @@
   --wm: 168px;
   --rail-w: 296px;     /* 눈에 보이는 레일 폭 */
   --rail-bleed: 20px;  /* 레일이 물고 들어가는 페이지 왼쪽 여백 */
+
+  /* 글자 크기·높이 — 값이 정확히 같은 자리만 이름을 붙였다(반쪽 크기 11.5·12.5·13.5 등은 아직 숫자 그대로) */
+  --fs-cap: 12px;  --fs-sm: 13px;  --fs-body: 14px;  --fs-md: 15px;  --fs-lg: 16px;
+  --h-xs: 22px;  --h-sm: 28px;  --h-md: 32px;  --h-lg: 42px;  --h-touch: 44px;
   --ease: cubic-bezier(0.22, 0.8, 0.3, 1);
   --font: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", "Segoe UI", sans-serif;
 }
@@ -168,7 +172,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font);
-  font-size: 14px;
+  font-size: var(--fs-body);
   line-height: 1.55;
   word-break: keep-all; /* 한글은 단어 중간이 아니라 띄어쓰기에서 줄을 바꾼다 */
   overflow-wrap: break-word;
@@ -212,9 +216,9 @@ button:active { transform: scale(.98); }
 /* ---------- 당겨서 새로고침 — 화면 맨 위에서 아래로 끌면 나타난다 ---------- */
 .pull-indicator {
   position: fixed; top: 0; left: 50%; z-index: 60;
-  width: 32px; height: 32px; margin-left: -16px;
+  width: 32px; height: var(--h-md); margin-left: -16px;
   display: grid; place-items: center;
-  font-size: 15px; color: var(--muted);
+  font-size: var(--fs-md); color: var(--muted);
   background: var(--surface); border: 1px solid var(--border); border-radius: 50%;
   box-shadow: var(--shadow);
   opacity: 0; pointer-events: none; transform: translateY(-40px);
@@ -230,7 +234,7 @@ button:active { transform: scale(.98); }
 .desc-editable:focus-visible { background: var(--field); }
 .desc-editable:hover::after, .desc-editable:focus-visible::after { content: ' ✎'; color: var(--accent); }
 .desc-edit-input {
-  font-family: inherit; font-weight: 600; font-size: 14px; color: var(--text);
+  font-family: inherit; font-weight: 600; font-size: var(--fs-body); color: var(--text);
   border: none; border-bottom: 1px solid var(--accent); background: none;
   padding: 0; flex: 1; min-width: 0;
 }
@@ -243,7 +247,7 @@ button:active { transform: scale(.98); }
   background: var(--bg); border: 1px solid var(--border); color: var(--muted);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-button.badge { font-family: inherit; cursor: pointer; min-height: 28px; }
+button.badge { font-family: inherit; cursor: pointer; min-height: var(--h-sm); }
 button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)); }
 .badge.jira-badge {
   color: var(--accent-text); font-weight: 600;
@@ -253,12 +257,12 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 .badge.group-badge { color: var(--text); border-color: var(--border); background: var(--bg); font-weight: 600; }
 .jira-control { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
 .jira-select {
-  font-size: 12px; color: var(--muted);
+  font-size: var(--fs-cap); color: var(--muted);
   background: var(--bg); border: 1px solid var(--border); border-radius: 999px;
   padding: 4px 10px; max-width: calc(100% - 4px); box-sizing: border-box;
 }
 .group-input {
-  font-size: 12px; color: var(--text);
+  font-size: var(--fs-cap); color: var(--text);
   background: var(--bg); border: 1px solid var(--border); border-radius: 999px;
   padding: 4px 10px; max-width: 220px;
 }
@@ -274,7 +278,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 /* 레일 `오늘 미팅` 머리의 `전체 보기` 같은 곁들이 링크 */
 .wf-link {
   border: 0; background: none; color: var(--accent-text);
-  font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+  font: inherit; font-size: var(--fs-cap); font-weight: 600; cursor: pointer;
   padding: 6px; text-decoration: none;
 }
 .wf-link:hover { text-decoration: underline; }
@@ -293,11 +297,11 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 .d-btn:active { transform: scale(0.98); }
 .d-btn:disabled { color: var(--dim); cursor: default; }
 .d-btn:disabled:hover { background: var(--neutral-bg); color: var(--dim); }
-.d-btn.sm { height: 32px; padding: 0 12px; font-size: 13px; }
+.d-btn.sm { height: var(--h-md); padding: 0 12px; font-size: var(--fs-sm); }
 
 /* 1차 — 파랑으로 채운다(흰 글자를 얹으므로 한 단계 진한 파랑) */
 .d-btn.pri {
-  height: 42px; padding: 0 20px; border-radius: var(--r-sm);
+  height: var(--h-lg); padding: 0 20px; border-radius: var(--r-sm);
   background: var(--accent-strong); color: var(--on-fill); font-size: 14.5px; font-weight: 600;
 }
 .d-btn.pri:hover { background: var(--accent-strong); color: var(--on-fill); filter: brightness(1.08); }
@@ -318,7 +322,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 
 .d-link {
   border: 0; background: none; padding: 0; cursor: pointer;
-  font-family: inherit; font-size: 13px; font-weight: 600;
+  font-family: inherit; font-size: var(--fs-sm); font-weight: 600;
   color: var(--accent-text); border-radius: 4px;
 }
 .d-link:hover { text-decoration: underline; text-underline-offset: 2px; }
@@ -333,14 +337,14 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   transition: background 170ms var(--ease), color 170ms var(--ease), transform 400ms var(--ease);
 }
 .d-iconbtn:hover { background: var(--hover); color: var(--text); }
-.d-iconbtn.sm { width: 32px; height: 32px; }
-.d-iconbtn.xs { width: 28px; height: 28px; }
+.d-iconbtn.sm { width: 32px; height: var(--h-md); }
+.d-iconbtn.xs { width: 28px; height: var(--h-sm); }
 .d-iconbtn.spinning { transform: rotate(360deg); color: var(--accent); }
 
 /* 세그먼트 — 회색 트랙 위 흰 손잡이. 보기 전환 전용이라 동작 버튼과 모양이 다르다. */
 .d-seg { display: inline-flex; padding: 3px; gap: 2px; background: var(--neutral-bg); border-radius: var(--r-sm); }
 .d-seg button {
-  height: 32px; padding: 0 14px; border: 0; border-radius: 9px; background: none;
+  height: var(--h-md); padding: 0 14px; border: 0; border-radius: 9px; background: none;
   font-family: inherit; font-size: 13.5px; font-weight: 600; color: var(--muted); cursor: pointer;
   transition: background 170ms var(--ease), color 170ms var(--ease), transform 120ms var(--ease);
 }
@@ -360,7 +364,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   position: absolute; left: 12px; top: -48px; z-index: 70;
   padding: 10px 14px; border-radius: var(--r-sm);
   background: var(--accent-strong); color: var(--on-fill);
-  font-size: 14px; font-weight: 600; text-decoration: none;
+  font-size: var(--fs-body); font-weight: 600; text-decoration: none;
 }
 .skip-link:focus { top: 12px; }
 #todayTaskZone:focus { outline: none; }
@@ -385,7 +389,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 .d-datewrap { display: flex; align-items: center; gap: 8px; min-width: 0; }
 /* 날짜는 회색 칩 — 파랑은 선택·행동에만 아껴 둔다 */
 .d-date {
-  display: inline-flex; align-items: center; height: 28px; padding: 0 12px; border-radius: 999px;
+  display: inline-flex; align-items: center; height: var(--h-sm); padding: 0 12px; border-radius: 999px;
   background: var(--neutral-bg); color: var(--muted);
   font-size: 13.5px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap;
 }
@@ -395,7 +399,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 .d-tabs { display: flex; align-items: stretch; height: var(--hdr); margin-left: 10px; margin-right: auto; gap: 2px; min-width: 0; }
 .d-tab {
   position: relative; padding: 0 12px; border: 0; background: none; cursor: pointer;
-  font-family: inherit; font-size: 15px; font-weight: 500; color: var(--muted); white-space: nowrap;
+  font-family: inherit; font-size: var(--fs-md); font-weight: 500; color: var(--muted); white-space: nowrap;
   transition: color 130ms var(--ease);
 }
 .d-tab:hover { color: var(--text); }
@@ -419,7 +423,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   transition: color 170ms var(--ease), background 170ms var(--ease);
 }
 .d-srch:hover { color: var(--text); background: var(--hover); }
-.d-srch kbd { font: inherit; font-size: 12px; font-weight: 500; color: var(--dim); letter-spacing: 0.02em; }
+.d-srch kbd { font: inherit; font-size: var(--fs-cap); font-weight: 500; color: var(--dim); letter-spacing: 0.02em; }
 
 .d-gear { position: relative; }
 .d-baddot { display: none; position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--urgent); box-shadow: 0 0 0 2px var(--bg); }
@@ -442,7 +446,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   padding: 12px 24px;
   background: var(--urgent-bg);
   border-bottom: 1px solid var(--surface-line);
-  color: var(--urgent); font-size: 14px; font-weight: 600;
+  color: var(--urgent); font-size: var(--fs-body); font-weight: 600;
 }
 .d-bnote { color: var(--muted); font-size: 12.5px; font-weight: 400; }
 
@@ -454,7 +458,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   padding: 12px 12px 12px 18px;
   background: var(--surface); color: var(--text);
   border: 1px solid var(--surface-line); border-radius: 16px; box-shadow: var(--pop);
-  font-size: 14px;
+  font-size: var(--fs-body);
   animation: d-rise 140ms var(--ease);
 }
 .d-toast.error { border-color: var(--urgent); }
@@ -478,7 +482,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 .d-mitem {
   display: flex; align-items: center; width: 100%; height: 38px; padding: 0 12px;
   border: 0; border-radius: var(--r-xs); background: none; color: var(--text);
-  font-family: inherit; font-size: 14px; font-weight: 500; text-align: left; cursor: pointer;
+  font-family: inherit; font-size: var(--fs-body); font-weight: 500; text-align: left; cursor: pointer;
 }
 /* 지라 상태 고르개의 선택지 글씨 — 카드 값·하위 목록과 같은 범주 색(BJCOLOR). 회색(할 일)은
    hover·키보드 초점에서 --text로 진해져 "비활성"으로 보이지 않는다 */
@@ -504,7 +508,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 .d-chip {
   height: 30px; padding: 0 11px; border: 0; border-radius: 999px;
   background: none; color: var(--muted);
-  font-family: inherit; font-size: 13px; font-weight: 600; white-space: nowrap; cursor: pointer;
+  font-family: inherit; font-size: var(--fs-sm); font-weight: 600; white-space: nowrap; cursor: pointer;
 }
 .d-chip:hover { background: var(--hover); color: var(--text); }
 .d-chip.is-on { background: var(--accent-soft); color: var(--accent-text); }
@@ -517,19 +521,19 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   height: 30px; min-width: 0; padding: 0 10px;
   border: 0; border-radius: var(--r-sm);
   background: var(--field); color: var(--text);
-  font-family: inherit; font-size: 13px;
+  font-family: inherit; font-size: var(--fs-sm);
   transition: box-shadow 170ms var(--ease), background 170ms var(--ease);
 }
 .d-mtext { width: 124px; }
 .d-msel { max-width: 152px; padding: 0 6px; }
-.d-mpickbtn { width: 100%; max-width: none; height: 32px; padding: 0 10px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.d-mpickbtn { width: 100%; max-width: none; height: var(--h-md); padding: 0 10px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .d-mtext:focus, .d-msel:focus { outline: none; background: var(--surface); box-shadow: 0 0 0 2px var(--accent); }
 
 /* 옛 프로젝트 선택 컨트롤을 메뉴 줄 안에 맞춘다(지라 이슈 / 그룹 / 직접 입력…) */
 .d-mfield .jira-control { display: flex; justify-content: flex-end; margin: 0; min-width: 0; flex: 1; }
 .d-mfield .jira-select, .d-mfield .group-input {
   height: 30px; max-width: 152px; padding: 0 10px; border-radius: var(--r-sm);
-  border: 0; background: var(--field); color: var(--text); font-size: 13px;
+  border: 0; background: var(--field); color: var(--text); font-size: var(--fs-sm);
 }
 .d-mfield .badge {
   max-width: 152px; padding: 5px 9px; border-radius: var(--r-xs);
@@ -549,13 +553,13 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 .d-gplist { display: flex; flex-direction: column; gap: 1px; max-height: min(280px, 50vh); overflow-y: auto; overscroll-behavior: contain; }
 .d-gpopt { flex: none; gap: 8px; min-width: 0; }
 .d-gpopt .nm { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.d-gpopt .ky { flex: none; font-size: 12px; font-weight: 500; color: var(--dim); font-variant-numeric: tabular-nums; }
+.d-gpopt .ky { flex: none; font-size: var(--fs-cap); font-weight: 500; color: var(--dim); font-variant-numeric: tabular-nums; }
 .d-gpopt.is-bundle .nm { font-weight: 700; }
 .d-gpopt.is-sub { padding-left: 32px; color: var(--muted); }
 .d-gpopt.is-act { color: var(--muted); }
 .d-gpopt[aria-selected="true"] { background: var(--sel); color: var(--accent-text); }
-.d-gphead { padding: 10px 12px 4px; font-size: 12px; font-weight: 600; color: var(--dim); }
-.d-gpnone { padding: 8px 12px; font-size: 13px; color: var(--dim); }
+.d-gphead { padding: 10px 12px 4px; font-size: var(--fs-cap); font-weight: 600; color: var(--dim); }
+.d-gpnone { padding: 8px 12px; font-size: var(--fs-sm); color: var(--dim); }
 .d-gpnone[hidden] { display: none; }
 
 /* ---------- 날짜 칸 ---------- */
@@ -564,7 +568,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   height: 30px; min-width: 0; padding: 0 10px;
   border: 0; border-radius: var(--r-sm);
   background: var(--field); color: var(--text);
-  font-family: inherit; font-size: 13px;
+  font-family: inherit; font-size: var(--fs-sm);
   transition: box-shadow 170ms var(--ease), background 170ms var(--ease);
 }
 .d-dateinput:focus { outline: none; background: var(--surface); box-shadow: 0 0 0 2px var(--accent); }
@@ -606,10 +610,10 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 }
 .d-rhd {
   display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px;
-  font-size: 16px; font-weight: 700; letter-spacing: -0.015em; color: var(--text);
+  font-size: var(--fs-lg); font-weight: 700; letter-spacing: -0.015em; color: var(--text);
 }
 .d-rhd .n {
-  height: 22px; display: inline-flex; align-items: center; padding: 0 9px;
+  height: var(--h-xs); display: inline-flex; align-items: center; padding: 0 9px;
   border-radius: 999px; background: var(--neutral-bg); color: var(--muted);
   font-size: 12.5px; font-weight: 600;
 }
@@ -619,7 +623,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
    (누르는 자리는 28px — 34px 머리줄 안에 그대로 들어간다) */
 .d-rhd .wf-link {
   display: inline-flex; align-items: center;
-  margin-left: auto; padding: 0 6px; height: 28px;
+  margin-left: auto; padding: 0 6px; height: var(--h-sm);
   color: var(--dim); font-size: 12.5px; font-weight: 500;
 }
 .d-rhd .wf-link:hover { color: var(--accent-text); }
@@ -637,11 +641,11 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 /* 미팅 줄: 시각 | 제목(두 줄까지, 프로젝트는 그 뒤 작은 회색 글자) | 초안 N */
 .d-mrow {
   position: relative; display: grid; grid-template-columns: 44px minmax(0, 1fr) auto;
-  align-items: start; gap: 8px; height: auto; min-height: 44px; padding: 9px 10px; border-radius: 12px;
+  align-items: start; gap: 8px; height: auto; min-height: var(--h-touch); padding: 9px 10px; border-radius: 12px;
 }
 .d-mrow:hover, .d-mrow:focus-within, .d-wrow:hover, .d-wrow:focus-within { background: var(--rail-hover); }
 .d-mrow.is-sel, .d-wrow.is-sel { background: var(--sel); }
-.d-mrow .t { font-size: 14px; font-weight: 700; color: var(--text); letter-spacing: -0.01em; padding-top: 2px; font-variant-numeric: tabular-nums; }
+.d-mrow .t { font-size: var(--fs-body); font-weight: 700; color: var(--text); letter-spacing: -0.01em; padding-top: 2px; font-variant-numeric: tabular-nums; }
 /* 진행 중인 회의는 배지 없이 색으로 — 시각·제목이 파랗고 줄에 연파랑 바탕이 깔린다 */
 .d-mrow.is-now { background: var(--accent-soft); }
 .d-mrow.is-now .t, .d-mrow.is-now .ti { color: var(--accent-text); }
@@ -665,7 +669,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 .d-wrow {
   position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto;
   grid-template-areas: "ti mt" "sub sub";
-  align-items: center; gap: 2px 8px; min-height: 44px; padding: 9px 10px; border-radius: 12px;
+  align-items: center; gap: 2px 8px; min-height: var(--h-touch); padding: 9px 10px; border-radius: 12px;
 }
 .d-wrow.has-ck { grid-template-columns: 20px minmax(0, 1fr) auto; grid-template-areas: "ck ti mt" "ck sub sub"; }
 .d-wrow .ck { grid-area: ck; display: grid; place-items: center; }
@@ -695,7 +699,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 /* 확인 대기 `급한 순` 보기의 둘째 줄 맨 앞 프로젝트 표기 — 말줄임(레일 폭 안에서 다른 말과 겹치지 않게) */
 .d-wrow.is-two .sub .d-inproj { max-width: 44%; overflow: hidden; text-overflow: ellipsis; }
 /* 확인 대기 카드의 프로젝트 소제목 — 줄과 같은 왼쪽 자리(10px)에 맞춘 작은 그룹 제목 */
-#waitingList .d-grp { height: auto; min-height: 0; padding: 10px 10px 2px; font-size: 13px; }
+#waitingList .d-grp { height: auto; min-height: 0; padding: 10px 10px 2px; font-size: var(--fs-sm); }
 #waitingList .d-grp:first-child { padding-top: 2px; }
 .d-wrow .ti .new-dot { position: static; display: inline-block; width: 5px; height: 5px; margin-right: 5px; vertical-align: 2px; box-shadow: none; }
 /* 더보기는 hover·focus일 때만, 오른쪽 끝에 겹쳐 뜬다 */
@@ -718,7 +722,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 
 /* 후속 알림을 따로 나열하던 구역은 없앴다 — `다시 확인할 항목`은 확인 대기 목록 맨 위로,
    `답변이 해결된 업무`는 리마인드 카드의 줄이 되었다. */
-.d-rempty { font-size: 13px; color: var(--dim); padding: 6px 10px 4px; }
+.d-rempty { font-size: var(--fs-sm); color: var(--dim); padding: 6px 10px 4px; }
 
 /* ---------- 확인 대기를 체크한 뒤의 `다음은?` 줄 ----------
    세 자리(레일 확인 대기 카드 · 프로젝트 탭 확인 대기 구역 · 회의의 `이 회의에서 나온 것`)가
@@ -737,11 +741,11 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 .d-wnext .d-btn:hover { background: var(--hover); color: var(--text); }
 .d-wnext .d-btn.is-cl { margin-left: auto; background: none; color: var(--dim); }
 .d-wnext .d-btn.is-cl:hover { background: var(--hover); color: var(--text); }
-.d-wnext .nx.is-ed .d-din { flex: 1 1 150px; min-width: 0; min-height: 32px; padding: 5px 10px; font-size: 13px; }
+.d-wnext .nx.is-ed .d-din { flex: 1 1 150px; min-width: 0; min-height: var(--h-md); padding: 5px 10px; font-size: var(--fs-sm); }
 .d-wnext .bl { margin-top: 8px; }
-.d-wnext .bl > .lb { display: block; margin-bottom: 2px; font-size: 12px; color: var(--dim); }
-.d-wnext .bln { display: flex; align-items: center; gap: 6px; min-height: 32px; }
-.d-wnext .bln .ti { flex: 1 1 auto; min-width: 0; font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.d-wnext .bl > .lb { display: block; margin-bottom: 2px; font-size: var(--fs-cap); color: var(--dim); }
+.d-wnext .bln { display: flex; align-items: center; gap: 6px; min-height: var(--h-md); }
+.d-wnext .bln .ti { flex: 1 1 auto; min-width: 0; font-size: var(--fs-sm); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .d-wnext .bln .ac { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .d-wnext .bln.is-more { font-size: 12.5px; color: var(--dim); }
 /* 레일(296px)에서는 `닫기`를 오른쪽 끝으로 밀지 않는다 — 혼자 한 줄에 남지 않게 그대로 흐르게 둔다 */
@@ -777,14 +781,14 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 /* 구역 제목 — 굵고 크게. 개수는 둥근 회색 칩. */
 .d-sechd { display: flex; align-items: center; gap: 10px; height: 30px; font-size: 18px; font-weight: 700; letter-spacing: -0.015em; color: var(--text); }
 .d-sechd .n {
-  height: 22px; display: inline-flex; align-items: center; padding: 0 9px;
+  height: var(--h-xs); display: inline-flex; align-items: center; padding: 0 9px;
   border-radius: 999px; background: var(--warn-bg); color: var(--warn);
   font-size: 12.5px; font-weight: 600;
 }
 /* 제목 오른쪽 끝의 조용한 글자 버튼(`오늘 들어온 것 N` — 누르면 팔레트가 오늘 들어온 것만 모아 준다) */
 .d-headnum {
-  margin-left: auto; height: 28px; padding: 0 6px; border: 0; border-radius: var(--r-xs);
-  background: none; color: var(--dim); font: inherit; font-size: 13px; font-weight: 500;
+  margin-left: auto; height: var(--h-sm); padding: 0 6px; border: 0; border-radius: var(--r-xs);
+  background: none; color: var(--dim); font: inherit; font-size: var(--fs-sm); font-weight: 500;
   font-variant-numeric: tabular-nums; cursor: pointer;
 }
 .d-headnum:hover { background: var(--hover); color: var(--accent-text); }
@@ -814,9 +818,9 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 .d-atrow .ld { grid-area: ld; display: flex; align-items: center; gap: 8px; }
 .d-atrow .tl { grid-area: tl; display: flex; align-items: center; gap: 8px; min-width: 0; }
 /* 출처 이름표(지라·피그마) — 조용한 글자, 프로젝트 색 점보다 앞에 선다 */
-.d-atrow .sc { flex: none; font-size: 12px; font-weight: 600; color: var(--dim); }
+.d-atrow .sc { flex: none; font-size: var(--fs-cap); font-weight: 600; color: var(--dim); }
 .d-atrow .ti {
-  font-size: 16px; font-weight: 500; color: var(--text);
+  font-size: var(--fs-lg); font-weight: 500; color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; min-width: 0;
 }
 .d-atrow .mt {
@@ -827,7 +831,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 /* `나를 불렀어요`는 바탕을 채우지 않는다 — 급한 말 셋만 배지다 */
 .d-atrow .mn { font-size: 12.5px; font-weight: 600; white-space: nowrap; }
 .d-atrow .sb { grid-area: sb; display: flex; align-items: baseline; gap: 6px; min-width: 0; padding-right: 130px; }
-.d-atrow .pv { font-size: 13px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.d-atrow .pv { font-size: var(--fs-sm); color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .d-atrow .ct { flex: none; font-size: 12.5px; color: var(--dim); }
 /* 동작은 업무 줄과 같다 — 마우스·초점에 줄 위로 겹쳐 뜨고, 왼쪽 24px이 아래 글자를 가린다 */
 .d-atacts {
@@ -861,24 +865,24 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   background: var(--warm); border: 1px solid var(--warm-line); border-radius: var(--r);
   box-shadow: var(--soft); padding: 14px 10px 10px; margin: 6px 0 0;
 }
-.d-start .hd { display: flex; align-items: center; gap: 8px; padding: 0 10px 6px var(--pad); font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
+.d-start .hd { display: flex; align-items: center; gap: 8px; padding: 0 10px 6px var(--pad); font-size: var(--fs-md); font-weight: 700; letter-spacing: -0.01em; }
 .d-start .hd .sp { margin-left: auto; background: none; }
 .d-guidecard { margin-bottom: 18px; }
 .d-start .hd .sp:hover { background: var(--warm-hover); }
 .d-guide {
-  display: flex; gap: 12px; align-items: flex-start; width: 100%; min-height: 44px; padding: 10px var(--pad);
+  display: flex; gap: 12px; align-items: flex-start; width: 100%; min-height: var(--h-touch); padding: 10px var(--pad);
   border: 0; border-radius: 14px; background: none; text-align: left; font: inherit; color: inherit;
   transition: background 170ms var(--ease);
 }
 button.d-guide { cursor: pointer; }
 button.d-guide:hover { background: var(--warm-hover); }
-.d-guide .t { flex: none; width: 112px; font-size: 14px; font-weight: 600; color: var(--text); line-height: 1.5; }
+.d-guide .t { flex: none; width: 112px; font-size: var(--fs-body); font-weight: 600; color: var(--text); line-height: 1.5; }
 .d-guide .d { flex: 1; min-width: 0; font-size: 13.5px; color: var(--muted); line-height: 1.5; }
 .d-guide .d b { color: var(--text); font-weight: 600; }
 button.d-guide .t { color: var(--accent-text); }
 .d-guidedock { display: flex; align-items: flex-end; gap: 6px; width: max-content; margin-top: 8px; padding: 6px 10px; border-radius: 14px; background: var(--neutral-bg); }
-.d-guidedock i { display: block; width: 22px; height: 22px; border-radius: 6px; background: var(--border); }
-.d-guidedock .me { display: block; width: 28px; height: 28px; border-radius: 8px; }
+.d-guidedock i { display: block; width: 22px; height: var(--h-xs); border-radius: 6px; background: var(--border); }
+.d-guidedock .me { display: block; width: 28px; height: var(--h-sm); border-radius: 8px; }
 /* 앱으로 설치(크롬 PWA) — 사용설명서 첫 줄과 설정 › 꾸미기 맨 위가 같은 말을 쓴다. 버튼 옆 설명은 같은 줄에 잇고,
    크롬 메뉴 길 아래의 `이미 설치했으면`은 한 줄 내려 조용히 둔다. */
 .d-installbtn { margin-right: 6px; vertical-align: middle; }
@@ -888,7 +892,7 @@ button.d-guide .t { color: var(--accent-text); }
 .d-installline b { color: var(--text); font-weight: 600; }
 .d-pinstallnote { margin-top: 8px; }
 .d-manual { margin-bottom: 22px; padding: 12px 6px 6px; border-radius: var(--r-sm); background: var(--warm); border: 1px solid var(--warm-line); }
-.d-manual .hd { padding: 0 var(--pad) 4px; font-size: 14px; font-weight: 700; }
+.d-manual .hd { padding: 0 var(--pad) 4px; font-size: var(--fs-body); font-weight: 700; }
 .d-manual .d-guide { min-height: 40px; }
 @media (max-width: 520px) {
   .d-guide { flex-direction: column; gap: 2px; }
@@ -901,7 +905,7 @@ button.d-guide .t { color: var(--accent-text); }
 .d-guidegrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 6px; }
 .d-guidegrid .d-guide { align-items: center; gap: 10px; padding: 8px 14px; }
 .d-guidegrid .d-guide .t { width: auto; }
-.d-guidegrid .d-guide .me { flex: none; display: block; width: 22px; height: 22px; border-radius: 6px; }
+.d-guidegrid .d-guide .me { flex: none; display: block; width: 22px; height: var(--h-xs); border-radius: 6px; }
 .d-guidegrid .d-guide .go { flex: none; display: inline-flex; margin-left: auto; color: var(--dim); }
 .d-guidegrid .d-installbtn { margin-right: 0; }
 @media (max-width: 520px) {
@@ -923,16 +927,16 @@ button.d-guide .t { color: var(--accent-text); }
 /* 4번째 줄부터는 접혀 있다(hidden) — .d-ibrow가 grid라 [hidden]을 따로 적어 둔다 */
 .d-ibrow[hidden] { display: none; }
 /* 카드 맨 아래 `N개 더 ›` / `접기 ⌃` — 제목과 같은 왼쪽 선, 누르는 자리 28px */
-.d-ibmore { display: inline-flex; align-items: center; min-height: 28px; margin: 2px 0 0 var(--pad); padding: 0 2px; }
+.d-ibmore { display: inline-flex; align-items: center; min-height: var(--h-sm); margin: 2px 0 0 var(--pad); padding: 0 2px; }
 .d-ibmain { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .d-ibrow .ti {
-  font-size: 16px; font-weight: 500; color: var(--text); cursor: text; border-radius: 4px;
+  font-size: var(--fs-lg); font-weight: 500; color: var(--text); cursor: text; border-radius: 4px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   /* 프로젝트 표기·원문 링크는 제목 바로 뒤에 붙는다 — 제목은 늘어나지 않고(0), 자리가 모자라면 먼저 줄어든다(1) */
   flex: 0 1 auto; min-width: 0;
 }
 .d-ibmain .d-inproj { max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
-.d-ibrow .desc-edit-input { flex: 1; min-width: 0; font-size: 16px; font-weight: 500; }
+.d-ibrow .desc-edit-input { flex: 1; min-width: 0; font-size: var(--fs-lg); font-weight: 500; }
 .d-ibrow .d-link { flex: none; }
 .d-ibacts { display: flex; align-items: center; gap: 6px; }
 /* 줄의 동작은 평소 바탕 없는 파란 글자 버튼(회색 알약이 줄마다 몰려 보였다), 줄에 손이 닿으면 연한 파랑, 버튼에 닿으면 진한 파랑 */
@@ -959,7 +963,7 @@ button.d-guide .t { color: var(--accent-text); }
 .d-lhd .sub { display: inline-flex; align-items: center; gap: 10px; color: var(--dim); font-size: 13.5px; font-weight: 500; }
 /* 오늘 할 일의 남은 개수만 파란 칩이다 */
 .d-lhd .sub .cnt {
-  height: 22px; display: inline-flex; align-items: center; padding: 0 9px;
+  height: var(--h-xs); display: inline-flex; align-items: center; padding: 0 9px;
   border-radius: 999px; background: var(--accent-soft); color: var(--accent-text);
   font-size: 12.5px; font-weight: 600;
 }
@@ -999,7 +1003,7 @@ button.d-guide .t { color: var(--accent-text); }
 }
 .d-qaf:focus-within { background: var(--field); outline: 2px solid var(--accent); outline-offset: -1px; }
 .d-qaf .d-i { color: var(--dim); }
-.d-qaf input { flex: 1; min-width: 0; height: 100%; border: 0; background: none; outline: none; color: var(--text); font-family: inherit; font-size: 15px; }
+.d-qaf input { flex: 1; min-width: 0; height: 100%; border: 0; background: none; outline: none; color: var(--text); font-family: inherit; font-size: var(--fs-md); }
 .d-qaf input::placeholder { color: var(--dim); }
 
 .d-grp {
@@ -1013,7 +1017,7 @@ button.d-guide .t { color: var(--accent-text); }
 .d-grp button.gl { padding-block: 3px; margin-block: -3px; }
 .d-grp button.gl:hover { color: var(--accent-text); }
 /* 그룹 제목의 개수는 칩이 아니라 조용한 회색 숫자다(칩은 구역·카드 제목에만) */
-.d-grp .n { font-weight: 500; color: var(--dim); font-size: 13px; }
+.d-grp .n { font-weight: 500; color: var(--dim); font-size: var(--fs-sm); }
 .d-grp.is-doing { color: var(--text); }
 .d-grp.tog { cursor: pointer; }
 .d-grp.tog:hover { background: var(--hover); }
@@ -1031,7 +1035,7 @@ button.d-guide .t { color: var(--accent-text); }
 }
 .d-addrow:focus-within { background: var(--field); outline: 2px solid var(--accent); outline-offset: -1px; }
 .d-addrow[hidden] { display: none; }
-.d-addinput { flex: 1; min-width: 0; height: 100%; border: 0; background: none; outline: none; color: var(--text); font-family: inherit; font-size: 15px; }
+.d-addinput { flex: 1; min-width: 0; height: 100%; border: 0; background: none; outline: none; color: var(--text); font-family: inherit; font-size: var(--fs-md); }
 .d-addinput::placeholder { color: var(--dim); }
 
 /* ---------- 업무 행 ---------- */
@@ -1057,7 +1061,7 @@ body.batch-open .d-row.is-done { opacity: 0.6; }
 .d-check { position: relative; width: 30px; height: var(--row); display: grid; place-items: center; }
 .d-cb {
   appearance: none; -webkit-appearance: none; margin: 0; display: block; position: relative;
-  width: 22px; height: 22px; border: 1.5px solid var(--check-line); border-radius: 6px;
+  width: 22px; height: var(--h-xs); border: 1.5px solid var(--check-line); border-radius: 6px;
   background: var(--surface); cursor: pointer;
   transition: border-color 120ms var(--ease), background 120ms var(--ease);
 }
@@ -1159,7 +1163,7 @@ body.batch-open .d-row[data-task-id]:not(.is-done) { cursor: pointer; }
 
 .d-title {
   display: block; width: 100%; border-radius: 4px; cursor: pointer;
-  font-size: 16px; font-weight: 500; line-height: 25px; letter-spacing: -0.012em; color: var(--text);
+  font-size: var(--fs-lg); font-weight: 500; line-height: 25px; letter-spacing: -0.012em; color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 /* 업무 줄의 긴 문구(슬랙 원문 등)는 한 줄에서 자르지 않고 두 줄까지(말줄임) — 아이디어 줄과 같은 규칙이다.
@@ -1174,12 +1178,12 @@ body.batch-open .d-row[data-task-id]:not(.is-done) { cursor: pointer; }
 .d-titlewrap { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 /* 제목은 내용만큼만 — 그래야 뒤따르는 `· ● 프로젝트`와 `원문`이 제목에 바로 붙는다 */
 .d-titlewrap .d-title { flex: 0 1 auto; width: auto; }
-.d-inproj { display: inline-flex; align-items: center; gap: 4px; flex: none; font-size: 13px; color: var(--dim); white-space: nowrap; }
+.d-inproj { display: inline-flex; align-items: center; gap: 4px; flex: none; font-size: var(--fs-sm); color: var(--dim); white-space: nowrap; }
 .d-inproj .d-pjdot { vertical-align: 0; }
-.d-proj { font-size: 13px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.d-proj { font-size: var(--fs-sm); color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .d-meta {
   display: flex; justify-content: flex-end; align-items: center; gap: 8px;
-  font-size: 13px; color: var(--dim); white-space: nowrap; overflow: hidden;
+  font-size: var(--fs-sm); color: var(--dim); white-space: nowrap; overflow: hidden;
   font-variant-numeric: tabular-nums;
 }
 /* 상태말은 기본이 조용한 글자다 — 아이콘 + 회색 글자 */
@@ -1233,11 +1237,11 @@ body.batch-open .d-row[data-task-id]:not(.is-done) { cursor: pointer; }
 .d-resin {
   height: 30px; width: 100%; max-width: 250px; padding: 0 12px;
   border: 0; border-radius: 999px; background: var(--field); color: var(--text);
-  font-family: inherit; font-size: 13px; outline: none; box-shadow: 0 0 0 2px var(--accent);
+  font-family: inherit; font-size: var(--fs-sm); outline: none; box-shadow: 0 0 0 2px var(--accent);
 }
-.d-empty { font-size: 15px; font-weight: 500; color: var(--muted); padding: 34px var(--pad); }
+.d-empty { font-size: var(--fs-md); font-weight: 500; color: var(--muted); padding: 34px var(--pad); }
 /* 입력 칸 바로 아래의 빈 목록 문장(오늘 할 일·아이디어·결정) — 위에 적을 자리가 있으니 짧고 조용하게 */
-.d-empty.is-short { padding: 4px var(--pad) 14px; font-size: 14px; color: var(--dim); }
+.d-empty.is-short { padding: 4px var(--pad) 14px; font-size: var(--fs-body); color: var(--dim); }
 
 /* ---------- 상세 (업무 · 확인 대기 · 회의 정리 한 벌) ----------
    상세는 누른 줄 옆에 떠 있는 카드다(아래 `줄 옆 카드`). 목록은 늘 전체 폭을 쓴다.
@@ -1254,7 +1258,7 @@ body.batch-open .d-row[data-task-id]:not(.is-done) { cursor: pointer; }
   background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r);
   box-shadow: var(--soft);
 }
-.d-detail h3 { margin: 0; font-size: 13px; font-weight: 700; color: var(--text); }
+.d-detail h3 { margin: 0; font-size: var(--fs-sm); font-weight: 700; color: var(--text); }
 .d-dtop { display: flex; align-items: flex-start; gap: 6px; }
 .d-dtitle {
   flex: 1; min-width: 0;
@@ -1268,16 +1272,16 @@ textarea.d-dtitle {
   font-family: inherit; outline: none; box-shadow: 0 0 0 2px var(--accent);
 }
 /* 제목 바로 아래의 `슬랙 원문 열기` */
-.d-dsrc { align-self: flex-start; margin-top: -10px; font-size: 13px; }
+.d-dsrc { align-self: flex-start; margin-top: -10px; font-size: var(--fs-sm); }
 
 .d-fields { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 14px; align-items: baseline; margin: 0; }
 .d-fields dt { font-size: 12.5px; color: var(--muted); }
 /* 값 칸은 눌러서 고친다 — 읽기만 하는 글자로 보이지 않게 hover 면과 꺾쇠를 둔다 */
 .d-dpick {
   display: inline-flex; align-items: center; gap: 4px;
-  min-height: 28px; padding: 2px 6px; margin: -2px -6px;
+  min-height: var(--h-sm); padding: 2px 6px; margin: -2px -6px;
   border: 0; border-radius: var(--r-xs); background: none;
-  font-family: inherit; font-size: 14px; color: var(--text); text-align: left; cursor: pointer;
+  font-family: inherit; font-size: var(--fs-body); color: var(--text); text-align: left; cursor: pointer;
   transition: background 130ms var(--ease);
 }
 .d-dpick:hover { background: var(--hover); }
@@ -1289,7 +1293,7 @@ textarea.d-dtitle {
 .d-dpick .cv .d-i { transform: rotate(90deg); }
 /* 날짜 값의 아이콘은 달력이다(꺾쇠처럼 돌리지 않는다) */
 .d-dpick .cv.cal .d-i { transform: none; }
-.d-fields dd { margin: 0; min-width: 0; font-size: 14px; color: var(--text); font-variant-numeric: tabular-nums; }
+.d-fields dd { margin: 0; min-width: 0; font-size: var(--fs-body); color: var(--text); font-variant-numeric: tabular-nums; }
 /* 날짜 값 한 줄: 값 글자(누르는 자리) + 바로 옆 작은 ✕. 길면 값 글자만 말줄임 */
 .d-dvalue { display: flex; align-items: center; gap: 4px; flex-wrap: nowrap; min-width: 0; }
 .d-dvalue > .d-dpick, .d-wait > .d-dpick { flex: 0 1 auto; min-width: 0; max-width: calc(100% + 12px); }
@@ -1301,13 +1305,13 @@ textarea.d-dtitle {
 .d-wait { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
 .d-wait.is-picking { align-items: stretch; }
 /* 누구에게: 평소엔 값 글자처럼(바탕 없음), 올리면 옅은 면, 초점에서만 채움 + 파란 테 */
-.d-fields .d-mtext { width: calc(100% + 12px); height: 28px; margin: -2px -6px; padding: 0 6px; border-radius: var(--r-xs); background: none; font-size: 14px; }
+.d-fields .d-mtext { width: calc(100% + 12px); height: var(--h-sm); margin: -2px -6px; padding: 0 6px; border-radius: var(--r-xs); background: none; font-size: var(--fs-body); }
 .d-fields .d-mtext:hover { background: var(--hover); }
 .d-fields .d-mtext:focus { background: var(--surface); }
 .d-fields .jira-control { display: flex; margin: 0; min-width: 0; flex-wrap: wrap; }
 .d-fields .jira-select, .d-fields .group-input {
-  height: 32px; max-width: 100%; padding: 0 10px; border-radius: var(--r-sm);
-  border: 0; background: var(--field); color: var(--text); font-size: 13px;
+  height: var(--h-md); max-width: 100%; padding: 0 10px; border-radius: var(--r-sm);
+  border: 0; background: var(--field); color: var(--text); font-size: var(--fs-sm);
 }
 .d-fields .badge {
   max-width: 100%; padding: 5px 9px; border-radius: var(--r-xs);
@@ -1318,9 +1322,9 @@ textarea.d-dtitle {
 /* 상세의 프로젝트 값은 알약이 아니라 다른 값(.d-dpick)과 같은 `● 이름 ⌄` 글자 고르개 — 바탕 없음, hover --hover */
 .d-fields .badge.is-plain {
   display: inline-flex; align-items: center; gap: 6px; max-width: calc(100% + 12px);
-  min-height: 28px; padding: 2px 6px; margin: -2px -6px;
+  min-height: var(--h-sm); padding: 2px 6px; margin: -2px -6px;
   border: 0; border-radius: var(--r-xs); background: none;
-  font-size: 14px; font-weight: 400; color: var(--text);
+  font-size: var(--fs-body); font-weight: 400; color: var(--text);
   transition: background 130ms var(--ease);
 }
 .d-fields .badge.is-plain:hover { background: var(--hover); }
@@ -1331,18 +1335,18 @@ textarea.d-dtitle {
 
 .d-dfoot { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .d-dsec { border-top: 1px solid var(--hair); padding-top: 12px; }
-.d-dsec .lbl { display: block; margin-bottom: 6px; font-size: 13px; font-weight: 700; color: var(--text); }
+.d-dsec .lbl { display: block; margin-bottom: 6px; font-size: var(--fs-sm); font-weight: 700; color: var(--text); }
 .d-din {
   width: 100%; min-height: 38px; padding: 10px 14px;
   border: 0; border-radius: var(--r-sm); background: var(--field); color: var(--text);
-  font-family: inherit; font-size: 14px; line-height: 1.5; resize: vertical;
+  font-family: inherit; font-size: var(--fs-body); line-height: 1.5; resize: vertical;
   transition: box-shadow 170ms var(--ease), background 170ms var(--ease);
 }
 .d-din::placeholder { color: var(--dim); }
 /* 결정의 `내용`은 안내글이 두 줄이다 — 한 줄로 줄여 잡는 자동 높이(detailAutoGrow)에서도 비어 있을 때 두 줄은 보인다 */
 .d-dsec[data-sec="내용"] .d-din { min-height: 62px; }
 .d-din:focus { outline: none; background: var(--surface); box-shadow: 0 0 0 2px var(--accent); }
-.d-logline { font-size: 13px; line-height: 1.7; color: var(--muted); font-variant-numeric: tabular-nums; }
+.d-logline { font-size: var(--fs-sm); line-height: 1.7; color: var(--muted); font-variant-numeric: tabular-nums; }
 .d-hint { font-size: 12.5px; color: var(--muted); }
 .d-autosave { font-size: 12.5px; color: var(--muted); }
 .d-dsec .d-btn { margin-top: 4px; }
@@ -1352,7 +1356,7 @@ textarea.d-dtitle {
   align-self: flex-start;
   height: 26px; padding: 0 8px; margin: -2px 0 -8px -8px;
   border: 0; border-radius: var(--r-xs); background: none;
-  font-family: inherit; font-size: 13px; font-weight: 500; color: var(--muted); cursor: pointer;
+  font-family: inherit; font-size: var(--fs-sm); font-weight: 500; color: var(--muted); cursor: pointer;
 }
 .d-back:hover { background: var(--hover); color: var(--text); }
 
@@ -1361,12 +1365,12 @@ textarea.d-dtitle {
 .d-dhead2 { flex: 1; min-width: 0; }
 .d-dtitle.plain { cursor: default; padding: 0; margin: 0; }
 .d-dtitle.plain:hover { background: none; }
-.d-dsub { margin-top: 3px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.d-dsub .d-link { font-size: 13px; }
+.d-dsub { margin-top: 3px; font-size: var(--fs-sm); color: var(--muted); font-variant-numeric: tabular-nums; }
+.d-dsub .d-link { font-size: var(--fs-sm); }
 /* 회의 탭에서만 — 부제목의 프로젝트 이름이 왼쪽 목록을 그 프로젝트로 데려가는 버튼이다(그룹 제목의 이름과 같은 꼴) */
 .d-dsub .pjlink { border: 0; background: none; padding: 0; color: inherit; font: inherit; cursor: pointer; border-radius: 4px; }
 .d-dsub .pjlink:hover { color: var(--accent-text); }
-.d-derr { margin: -6px 0 0; color: var(--urgent); font-size: 13px; }
+.d-derr { margin: -6px 0 0; color: var(--urgent); font-size: var(--fs-sm); }
 .d-derr:empty { display: none; }
 
 /* 미팅 노트 가져오기 — 회의 머리 아래의 조용한 한 줄. 아직 안 가져왔으면 3차 버튼 하나,
@@ -1381,13 +1385,13 @@ textarea.d-dtitle {
 /* 연초록 면 위에서는 조용한 버튼이 흰 알맹이가 된다(회색 채움은 면에 묻힌다) */
 .d-dres .d-btn { background: var(--surface); color: var(--muted); }
 .d-dres .d-btn:hover { background: var(--surface); color: var(--text); }
-.d-dres .hd { display: flex; align-items: center; gap: 4px 10px; flex-wrap: wrap; font-size: 14px; }
-.d-dres .hd .ct { flex: 1; min-width: 0; font-size: 13px; color: var(--muted); }
-.d-dres .tk { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; }
+.d-dres .hd { display: flex; align-items: center; gap: 4px 10px; flex-wrap: wrap; font-size: var(--fs-body); }
+.d-dres .hd .ct { flex: 1; min-width: 0; font-size: var(--fs-sm); color: var(--muted); }
+.d-dres .tk { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--fs-sm); }
 .d-dres .tk .ti { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.d-dres .nx { font-size: 13px; }
+.d-dres .nx { font-size: var(--fs-sm); }
 /* `다음: …→`·`티로에서 열기` — 글자 링크지만 누르는 자리는 28px */
-.d-dres .nx .d-link, .d-dget > .d-link { display: inline-flex; align-items: center; min-height: 28px; padding: 0 2px; }
+.d-dres .nx .d-link, .d-dget > .d-link { display: inline-flex; align-items: center; min-height: var(--h-sm); padding: 0 2px; }
 
 /* 초안 카드 — 문구가 주인공이다. 종류는 카드 색이 아니라 세그먼트가 말해 준다. */
 /* 초안 사이는 선 없이 여백으로만 나눈다(면 안에 선을 긋지 않는다) */
@@ -1401,7 +1405,7 @@ textarea.d-dtitle {
   display: block; width: 100%; resize: none; overflow: hidden;
   min-height: 38px; padding: 9px 12px; margin: 0;
   border: 0; border-radius: var(--r-sm); background: var(--field); color: var(--text);
-  font-family: inherit; font-size: 14px; line-height: 1.5;
+  font-family: inherit; font-size: var(--fs-body); line-height: 1.5;
   transition: box-shadow 170ms var(--ease), background 170ms var(--ease);
 }
 .d-dtxt:focus { outline: none; background: var(--surface); box-shadow: 0 0 0 2px var(--accent); }
@@ -1414,7 +1418,7 @@ textarea.d-dtitle {
 .d-dateinput.is-shown { cursor: pointer; font-variant-numeric: tabular-nums; }
 .d-dateinput.is-shown:hover { background: var(--hover); }
 .d-draft .d-seg { padding: 2px; }
-.d-draft .d-seg button { height: 28px; padding: 0 10px; font-size: 12px; }
+.d-draft .d-seg button { height: var(--h-sm); padding: 0 10px; font-size: var(--fs-cap); }
 
 /* 담기 바 — 스크롤해도 패널 아래에 붙어 있는 흰 띠 */
 .d-dbar {
@@ -1432,18 +1436,18 @@ textarea.d-dtitle {
    결정=PRD 반영함, 아이디어는 자리만 비운다) — 목록이 쓰는 체크박스를 그대로 줄여 쓴다. */
 .d-mrow2 {
   display: grid; grid-template-columns: 30px 56px minmax(0, 1fr) auto 28px;
-  align-items: start; gap: 8px; min-height: 28px; padding: 5px 0; font-size: 13px; line-height: 18px;
+  align-items: start; gap: 8px; min-height: var(--h-sm); padding: 5px 0; font-size: var(--fs-sm); line-height: 18px;
 }
 /* 종류 소제목이 이미 종류를 말해 주는 자리에서는 줄의 종류 글자 칸이 통째로 빠진다(두 번 말하지 않는다) */
 .d-mrow2.no-tg { grid-template-columns: 30px minmax(0, 1fr) auto 28px; }
 /* 이 회의의 프로젝트가 아닌 줄에만 붙는 `· ● 이름` — 제목과 한 칸을 나눠 써서 제목 바로 뒤에 붙는다 */
 .d-mrow2 .tw { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .d-mrow2 .tw .ti { width: auto; flex: 0 1 auto; }
-.d-mrow2 .tw .d-inproj { flex: none; min-width: 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+.d-mrow2 .tw .d-inproj { flex: none; min-width: 0; font-size: var(--fs-cap); overflow: hidden; text-overflow: ellipsis; }
 /* 종류·프로젝트 소제목 — 줄 사이를 알려 주기만 하는 조용한 글자다(그룹 제목 부품이 아니다) */
 .d-mgrp {
   display: flex; align-items: center; gap: 5px;
-  margin: 10px 0 2px; font-size: 13px; font-weight: 600; color: var(--muted);
+  margin: 10px 0 2px; font-size: var(--fs-sm); font-weight: 600; color: var(--muted);
 }
 .d-mgrp:first-of-type { margin-top: 2px; }
 .d-mgrp .n { font-weight: 500; color: var(--dim); font-variant-numeric: tabular-nums; }
@@ -1457,7 +1461,7 @@ textarea.d-dtitle {
 .d-mrow2 .ti {
   min-width: 0; width: 100%; text-align: left; overflow: hidden;
   white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 18px;
-  border: 0; background: none; padding: 0; color: var(--text); font-family: inherit; font-size: 13px; cursor: pointer;
+  border: 0; background: none; padding: 0; color: var(--text); font-family: inherit; font-size: var(--fs-sm); cursor: pointer;
 }
 .d-mrow2.is-open .ti { -webkit-line-clamp: unset; display: block; }
 .d-mrow2 .ti:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
@@ -1467,14 +1471,14 @@ textarea.d-dtitle {
 .d-mrow2 .st { font-size: 11.5px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .d-mrow2.is-done .ti { color: var(--muted); text-decoration: line-through; }
 /* 문구를 그 자리에서 고치는 칸 — 줄 높이를 밀어내지 않게 촘촘한 꼴로 */
-.d-mrow2 .d-din { min-height: 28px; padding: 4px 8px; font-size: 13px; }
+.d-mrow2 .d-din { min-height: var(--h-sm); padding: 4px 8px; font-size: var(--fs-sm); }
 /* 이 줄에서 할 수 있는 일이 더보기뿐이라 ⋯은 늘 보인다 — 평소 흐리게, 손이 닿으면 진하게. */
 .d-mrow2 .ac { display: flex; align-items: center; justify-content: flex-end; }
-.d-mrow2 .ac .d-more { width: 28px; height: 28px; color: var(--dim); }
+.d-mrow2 .ac .d-more { width: 28px; height: var(--h-sm); color: var(--dim); }
 .d-mrow2:hover .ac .d-more, .d-mrow2:focus-within .ac .d-more { color: var(--text); }
 
 /* 직접 담기 · 기존 항목 연결 — 접히는 보조 구역 */
-.d-dsec.d-dadd > summary.lbl { display: flex; margin-bottom: 0; align-items: center; gap: 4px; min-height: 28px; list-style: none; cursor: pointer; }
+.d-dsec.d-dadd > summary.lbl { display: flex; margin-bottom: 0; align-items: center; gap: 4px; min-height: var(--h-sm); list-style: none; cursor: pointer; }
 .d-dadd > summary .d-i { color: var(--dim); transition: transform 130ms var(--ease); }
 .d-dadd[open] > summary .d-i { transform: rotate(90deg); }
 .d-dadd > summary::-webkit-details-marker { display: none; }
@@ -1560,7 +1564,7 @@ body.later-open .page { padding-right: 424px; }
 .d-dhd h2 { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.015em; }
 .d-dhd h2::before { display: none; }
 .d-dhd .n {
-  height: 22px; display: inline-flex; align-items: center; padding: 0 9px;
+  height: var(--h-xs); display: inline-flex; align-items: center; padding: 0 9px;
   border-radius: 999px; background: var(--neutral-bg); color: var(--muted);
   font-size: 12.5px; font-weight: 600;
 }
@@ -1639,15 +1643,15 @@ body.later-open .page { padding-right: 424px; }
 /* 종류는 조용한 글자다(칩으로 세우지 않는다) */
 .d-pres .tag { font-size: 12.5px; font-weight: 500; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .d-pres .tiwrap { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
-.d-pres .ti { font-size: 15px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.d-pres .ti { font-size: var(--fs-md); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 프로젝트는 제목 바로 뒤에 작은 색 점 + 회색 글자로 붙는다(10번 규칙) */
-.d-pres .pj { display: inline-flex; align-items: center; gap: 4px; flex: none; max-width: 42%; font-size: 13px; color: var(--dim); white-space: nowrap; overflow: hidden; }
+.d-pres .pj { display: inline-flex; align-items: center; gap: 4px; flex: none; max-width: 42%; font-size: var(--fs-sm); color: var(--dim); white-space: nowrap; overflow: hidden; }
 .d-pres .pj .nm { overflow: hidden; text-overflow: ellipsis; }
-.d-pres .when { font-size: 13px; color: var(--dim); white-space: nowrap; }
+.d-pres .when { font-size: var(--fs-sm); color: var(--dim); white-space: nowrap; }
 /* 상태 칸은 배지(.stx)와 `오늘로` 글자 버튼(BPAL)을 나란히 담는다 — 텍스트는 하나도 없어도(:empty) 자리만 비운다 */
 .d-pres .st {
   display: flex; align-items: center; gap: 8px;
-  font-size: 13px; color: var(--dim); white-space: nowrap;
+  font-size: var(--fs-sm); color: var(--dim); white-space: nowrap;
   justify-self: end; text-align: right; font-variant-numeric: tabular-nums;
 }
 /* 상태도 오늘 목록과 같은 규칙 — 급한 말만 6px 배지 */
@@ -1668,7 +1672,7 @@ body.later-open .page { padding-right: 424px; }
 .d-palfoot {
   flex: none; display: flex; align-items: center; gap: 12px;
   padding: 10px 20px; border-top: 1px solid var(--hair);
-  font-size: 12px; color: var(--dim);
+  font-size: var(--fs-cap); color: var(--dim);
 }
 /* `회의` 칩일 때만 붙는 조용한 링크 — 훑어보는 일은 회의 탭이 맡는다 */
 .d-palfoot .d-link { margin-left: auto; }
@@ -1694,14 +1698,14 @@ body.later-open .page { padding-right: 424px; }
   background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r); box-shadow: var(--pop);
 }
 /* `N개 선택`이 가장 먼저 읽히게 한 단계 크고 진하게 */
-.d-selbar .ct { font-size: 15px; font-weight: 700; color: var(--text); padding: 0 10px 0 4px; white-space: nowrap; }
+.d-selbar .ct { font-size: var(--fs-md); font-weight: 700; color: var(--text); padding: 0 10px 0 4px; white-space: nowrap; }
 /* 막 켰을 때(0개)의 안내 — 개수 자리에 조용한 글자로 */
 .d-selbar .hint { font-size: 13.5px; font-weight: 500; color: var(--dim); padding: 0 10px 0 4px; white-space: nowrap; }
 /* 옮기기 · 프로젝트 · 끝내기(완료·삭제) 묶음 사이만 10px 더 */
 .d-selbar .is-group { margin-left: 10px; }
 .d-selbar .sp { margin-left: auto; }
 .d-selbar .d-link { padding: 0 6px; }
-.d-selbar .d-dateinput { height: 32px; }
+.d-selbar .d-dateinput { height: var(--h-md); }
 body.later-open .d-selbar { right: 424px; }
 /* 막대가 마지막 줄을 가리지 않게 본문과 알림을 그만큼 띄운다 */
 body.batch-open .page { padding-bottom: 104px; }
@@ -1736,9 +1740,9 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-prow .dp.k-warn { color: var(--warn); }
 .d-prow .dp.k-neg { color: var(--urgent); }
 /* 열린 항목 수는 오른쪽 끝의 조용한 회색 숫자다(칩으로 세우지 않는다) */
-.d-prow .n { font-size: 13px; font-weight: 500; color: var(--dim); font-variant-numeric: tabular-nums; }
+.d-prow .n { font-size: var(--fs-sm); font-weight: 500; color: var(--dim); font-variant-numeric: tabular-nums; }
 /* 묶음 줄(BBUNDLE)의 `티켓 2개` — 배포일과 같은 조용한 글자(배지로 세우지 않는다) */
-.d-prow .bd { font-size: 12px; font-weight: 500; color: var(--dim); white-space: nowrap; }
+.d-prow .bd { font-size: var(--fs-cap); font-weight: 500; color: var(--dim); white-space: nowrap; }
 .d-prow[aria-current="true"] .bd { color: var(--accent-text); }
 .d-prow:hover { background: var(--hover); }
 .d-prow[aria-current="true"] { background: var(--sel); color: var(--accent-text); font-weight: 600; }
@@ -1751,7 +1755,7 @@ body.batch-open .d-toast { bottom: 76px; }
 /* 목록 끝의 `지난 프로젝트 N` / `숨기기` — 조용한 글자 버튼(정보처럼, 버튼처럼 그리지 않는다) */
 .d-plink {
   display: block; width: 100%; margin-top: 4px; padding: 8px 10px; border: 0; background: none; border-radius: 12px;
-  font-family: inherit; font-size: 13px; font-weight: 600; color: var(--dim); text-align: left; cursor: pointer;
+  font-family: inherit; font-size: var(--fs-sm); font-weight: 600; color: var(--dim); text-align: left; cursor: pointer;
   transition: background 170ms var(--ease), color 170ms var(--ease);
 }
 .d-plink:not(:disabled):hover { background: var(--hover); color: var(--accent-text); }
@@ -1760,9 +1764,9 @@ body.batch-open .d-toast { bottom: 76px; }
 
 /* BPVIEW — 보기 전환(상태별|배포별)은 회의 탭 `날짜순|프로젝트별`(.d-mseg)과 같은 크기다 */
 .d-plist .d-pfseg { margin: 6px 0 8px; }
-.d-plist .d-pfseg button { height: 28px; padding: 0 12px; font-size: 13px; }
+.d-plist .d-pfseg button { height: var(--h-sm); padding: 0 12px; font-size: var(--fs-sm); }
 /* 프로젝트 찾기 — 8개 이상일 때만 서는 조용한 입력칸(.d-din 그대로, 자리만 한 줄 전체) */
-.d-pfind { display: block; width: 100%; height: 32px; margin: 0 0 8px; }
+.d-pfind { display: block; width: 100%; height: var(--h-md); margin: 0 0 8px; }
 /* 배포별 소제목의 배포일 — 배지가 아니라 글자다(색은 k-warn·k-neg 공용 규칙을 그대로 쓴다) */
 .d-pdepdate { font-weight: 500; }
 
@@ -1771,7 +1775,7 @@ body.batch-open .d-toast { bottom: 76px; }
 /* 제목 줄 — 그룹 프로젝트만 이름 옆에 프로젝트 자체의 ⋯(이름 바꾸기)가 붙는다 */
 .d-ptitle { display: flex; align-items: center; gap: 2px; margin: 0 0 2px; font-size: 24px; font-weight: 700; letter-spacing: -0.025em; }
 .d-ptitle::before { display: none; }
-.d-ptitle .d-more { flex: none; width: 28px; height: 28px; color: var(--dim); }
+.d-ptitle .d-more { flex: none; width: 28px; height: var(--h-sm); color: var(--dim); }
 /* 지라 띠 카드 — 프로젝트 제목 아래, 첫 구역 위의 흰 카드 한 장(읽기 전용).
    첫 줄: `지라` 표시 + 요약 + 종류·담당 + `지라에서 열기` + 새로고침.
    둘째 줄: 라벨 위·값 아래의 칸들(지라 상태 · 배포 버전 · 기한).
@@ -1791,13 +1795,13 @@ body.batch-open .d-toast { bottom: 76px; }
 }
 .d-jira .top .nm { min-width: 0; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .d-jira .top .sub { flex: none; font-size: 12.5px; color: var(--dim); }
-.d-jira .d-jopen { flex: none; font-size: 13px; font-weight: 600; color: var(--accent-text); text-decoration: none; white-space: nowrap; }
+.d-jira .d-jopen { flex: none; font-size: var(--fs-sm); font-weight: 600; color: var(--accent-text); text-decoration: none; white-space: nowrap; }
 .d-jira .d-jopen:hover { text-decoration: underline; text-underline-offset: 2px; }
-.d-jira .d-jref { flex: none; width: 28px; height: 28px; color: var(--dim); }
+.d-jira .d-jref { flex: none; width: 28px; height: var(--h-sm); color: var(--dim); }
 .d-jira .cells { display: flex; flex-wrap: wrap; gap: 8px 28px; }
 .d-jira .cell { display: grid; gap: 1px; min-width: 0; }
-.d-jira .lb { font-size: 12px; font-weight: 600; color: var(--dim); }
-.d-jira .v { min-height: 22px; font-size: 14px; font-weight: 600; color: var(--text); }
+.d-jira .lb { font-size: var(--fs-cap); font-weight: 600; color: var(--dim); }
+.d-jira .v { min-height: var(--h-xs); font-size: var(--fs-body); font-weight: 600; color: var(--text); }
 .d-jira .v.is-none { color: var(--dim); font-weight: 500; }
 /* 값에 붙는 색은 다섯뿐이다 — 파랑(진행) · 회색(할 일) · 성공(완료) · 주의/급함(배포일). 배지로 세우지 않는다 */
 .d-jira .v.k-dim { color: var(--dim); }
@@ -1818,7 +1822,7 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-jira .foot .who .sep, .d-jira .foot .who .qt { color: var(--dim); }
 .d-jira .foot .sp { margin-left: auto; }
 .d-jwho {
-  display: inline-flex; align-items: center; min-height: 28px; padding: 0 5px; margin: 0 -5px;
+  display: inline-flex; align-items: center; min-height: var(--h-sm); padding: 0 5px; margin: 0 -5px;
   border: 0; background: none; border-radius: var(--r-xs); cursor: pointer;
   font-family: inherit; font-size: 12.5px; font-weight: 500; color: var(--dim); white-space: nowrap;
   transition: background 170ms var(--ease), color 170ms var(--ease);
@@ -1827,7 +1831,7 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-jwho[aria-pressed="true"] { font-weight: 700; color: var(--text); }
 /* 거르기를 푸는 `전체`는 이름이 아니라 동작이다 — 이름 줄에서 파란 글자로 갈린다 */
 .d-jwho.clear { margin-left: 3px; color: var(--accent-text); font-weight: 600; }
-.d-jira .foot .d-jexp { flex: none; width: 28px; height: 28px; color: var(--dim); }
+.d-jira .foot .d-jexp { flex: none; width: 28px; height: var(--h-sm); color: var(--dim); }
 .d-jira .foot .d-jexp .d-i { transform: rotate(90deg); transition: transform 170ms var(--ease); }
 .d-jira .foot .d-jexp[aria-expanded="true"] .d-i { transform: rotate(-90deg); }
 /* 펼친 하위 티켓 목록 — 카드 안에 그대로 이어 붙는다(새 면을 만들지 않는다).
@@ -1838,7 +1842,7 @@ body.batch-open .d-toast { bottom: 76px; }
    배포 버전 칸은 그 칸을 쓰는 줄이 하나라도 있을 때만 잡는다 */
 .d-jkid {
   display: grid; grid-template-columns: 74px minmax(0, 1fr) 96px;
-  align-items: center; gap: 0 10px; min-height: 28px; font-size: 13px;
+  align-items: center; gap: 0 10px; min-height: var(--h-sm); font-size: var(--fs-sm);
 }
 .d-jkids.has-ver .d-jkid { grid-template-columns: 74px minmax(0, 1fr) 96px 72px; }
 .d-jkid .st { font-size: 12.5px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1856,15 +1860,15 @@ body.batch-open .d-toast { bottom: 76px; }
 }
 .d-jkid .wh.is-none { color: var(--dim); }
 .d-jkid .ver {
-  text-align: right; font-size: 12px; color: var(--dim);
+  text-align: right; font-size: var(--fs-cap); color: var(--dim);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 /* 완료한 줄은 맨 아래에서 흐리게 선다(글자만 조용해진다 — 취소선·다른 면을 쓰지 않는다) */
 .d-jkid.is-done .sm, .d-jkid.is-done .wh, .d-jkid.is-done .ver { color: var(--dim); }
-.d-jkids .more { justify-self: start; min-height: 28px; padding: 0 4px; margin-left: -4px; font-size: 12.5px; }
-.d-jkids .none { display: flex; align-items: center; min-height: 28px; font-size: 12.5px; color: var(--dim); }
+.d-jkids .more { justify-self: start; min-height: var(--h-sm); padding: 0 4px; margin-left: -4px; font-size: 12.5px; }
+.d-jkids .none { display: flex; align-items: center; min-height: var(--h-sm); font-size: 12.5px; color: var(--dim); }
 .d-jkids .all {
-  justify-self: start; display: inline-flex; align-items: center; min-height: 28px;
+  justify-self: start; display: inline-flex; align-items: center; min-height: var(--h-sm);
   font-size: 12.5px; font-weight: 600; color: var(--accent-text); text-decoration: none;
 }
 .d-jkids .all:hover { text-decoration: underline; text-underline-offset: 2px; }
@@ -1881,7 +1885,7 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-jfold { display: none; }
 @media (max-width: 520px) {
   .d-jside > .d-jfold {
-    display: flex; align-items: center; gap: 6px; width: 100%; min-height: 44px; margin: 10px 0 0; padding: 0 10px 0 16px;
+    display: flex; align-items: center; gap: 6px; width: 100%; min-height: var(--h-touch); margin: 10px 0 0; padding: 0 10px 0 16px;
     border: 1px solid var(--surface-line); border-radius: var(--r); background: var(--surface); box-shadow: var(--soft);
     font-family: inherit; font-size: 13.5px; color: var(--muted); text-align: left; cursor: pointer;
   }
@@ -1889,7 +1893,7 @@ body.batch-open .d-toast { bottom: 76px; }
   .d-jside:not(.is-open) > .d-jira { display: none; }
   .d-jside.is-open > .d-jira { margin-top: 6px; }
 }
-.d-jfold .ky { flex: none; font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.d-jfold .ky { flex: none; font-size: var(--fs-cap); color: var(--dim); font-variant-numeric: tabular-nums; }
 .d-jfold .sep { flex: none; color: var(--dim); }
 .d-jfold .nm { flex: 0 1 auto; min-width: 0; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .d-jfold .st { flex: none; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
@@ -1903,14 +1907,14 @@ body.batch-open .d-toast { bottom: 76px; }
    판은 고른 줄과 같은 `--sel`이고 새 색은 쓰지 않는다 */
 .d-jconfirm {
   display: grid; gap: 5px; margin-top: 10px; padding: 12px 14px;
-  border-radius: var(--r-sm); background: var(--sel); font-size: 13px; color: var(--muted);
+  border-radius: var(--r-sm); background: var(--sel); font-size: var(--fs-sm); color: var(--muted);
 }
 .d-jconfirm:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.d-jconfirm .ask { font-size: 14px; font-weight: 700; color: var(--text); }
+.d-jconfirm .ask { font-size: var(--fs-body); font-weight: 700; color: var(--text); }
 .d-jconfirm .what { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; min-width: 0; }
 .d-jconfirm .what .sm { font-weight: 600; color: var(--text); }
 /* 확인 창에서도 키는 조용한 글자로만 선다(BKEY) */
-.d-jconfirm .what .ky { font-size: 12px; color: var(--dim); }
+.d-jconfirm .what .ky { font-size: var(--fs-cap); color: var(--dim); }
 .d-jconfirm .diff { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; }
 .d-jconfirm .diff .lb { color: var(--dim); }
 .d-jconfirm .diff .bf { color: var(--muted); text-decoration: line-through; }
@@ -1926,30 +1930,30 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-jconfirm .acts .d-btn:disabled, .d-jconfirm .acts .d-btn:disabled:hover { background: var(--neutral-bg); color: var(--dim); }
 /* 부르는 동안의 뼈대 — 카드와 같은 높이, 움직이지 않는다(깜빡임 없이) */
 .d-jira.is-loading .sk { display: inline-block; flex: none; height: 20px; border-radius: 6px; background: var(--neutral-bg); }
-.d-jira.is-loading .sk.round { width: 28px; height: 28px; border-radius: 999px; }
+.d-jira.is-loading .sk.round { width: 28px; height: var(--h-sm); border-radius: 999px; }
 .d-jira.is-loading .cell .sk:first-child { height: 18px; }
-.d-jira.is-loading .cell .sk:last-child { height: 22px; }
+.d-jira.is-loading .cell .sk:last-child { height: var(--h-xs); }
 /* 연결 안 됨·오류일 때는 카드 대신 조용한 한 줄이 선다 */
 .d-jline {
   display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
-  margin: 12px 0 4px; font-size: 13px; color: var(--dim);
+  margin: 12px 0 4px; font-size: var(--fs-sm); color: var(--dim);
 }
 .d-jline .sep { color: var(--dim); }
 /* 아직 지라를 걸지 않은 그룹 프로젝트의 `지라 티켓 연결` — 같은 조용한 줄이되 누르는 자리가 28px이다 */
-.d-jline .d-jlinkgo { display: inline-flex; align-items: center; min-height: 28px; padding: 0 4px; margin-left: -4px; }
+.d-jline .d-jlinkgo { display: inline-flex; align-items: center; min-height: var(--h-sm); padding: 0 4px; margin-left: -4px; }
 /* 손으로 건 연결을 푸는 ⋯ — 카드 첫 줄의 새로고침과 같은 28px 아이콘 버튼이다 */
-.d-jira .top .d-more { flex: none; width: 28px; height: 28px; color: var(--dim); }
+.d-jira .top .d-more { flex: none; width: 28px; height: var(--h-sm); color: var(--dim); }
 
 /* 지라 티켓을 손으로 거는 줄 — 띠 카드가 서는 그 자리에서 입력 → 미리 보기로만 넓어진다
    (새 창을 띄우지 않는다). 판은 확인 줄과 같은 `--sel`이고 새 색은 쓰지 않는다 */
 /* 파랑은 선택·행동에만 쓴다(DESIGN.md) — 이 박스는 커서 위치가 아니라 정보 상자라 중립색으로 */
 .d-jlink {
   display: grid; gap: 8px; margin: 12px 0 4px; padding: 12px 14px;
-  border-radius: var(--r-sm); background: var(--neutral-bg); font-size: 13px; color: var(--muted);
+  border-radius: var(--r-sm); background: var(--neutral-bg); font-size: var(--fs-sm); color: var(--muted);
 }
 .d-jlink .row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .d-jlink .in {
-  flex: 1 1 240px; min-width: 0; height: 32px; padding: 0 10px; border: 0; border-radius: var(--r-xs);
+  flex: 1 1 240px; min-width: 0; height: var(--h-md); padding: 0 10px; border: 0; border-radius: var(--r-xs);
   background: var(--field); font-family: inherit; font-size: 13.5px; color: var(--text);
 }
 .d-jlink .in::placeholder { color: var(--dim); }
@@ -1960,14 +1964,14 @@ body.batch-open .d-toast { bottom: 76px; }
 /* 미리 보기 한 줄: 요약이 먼저, 상태·담당은 그 뒤, 키는 조용한 글자로만(BKEY) */
 .d-jlink .pv { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; min-width: 0; }
 .d-jlink .pv .sm { font-weight: 600; color: var(--text); }
-.d-jlink .pv .ky { font-size: 12px; color: var(--dim); }
+.d-jlink .pv .ky { font-size: var(--fs-cap); color: var(--dim); }
 /* 곁들이는 선택지(내 담당 티켓) — 비면 자리 자체가 없다 */
 .d-jlink .opts { display: grid; gap: 2px; }
 .d-jlink .opts:empty { display: none; }
 .d-jlink .pk {
-  display: flex; align-items: center; min-height: 28px; padding: 0 8px; margin: 0 -8px;
+  display: flex; align-items: center; min-height: var(--h-sm); padding: 0 8px; margin: 0 -8px;
   border: 0; background: none; border-radius: var(--r-xs);
-  font-family: inherit; font-size: 13px; font-weight: 500; color: var(--muted); text-align: left; cursor: pointer;
+  font-family: inherit; font-size: var(--fs-sm); font-weight: 500; color: var(--muted); text-align: left; cursor: pointer;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   transition: background 170ms var(--ease), color 170ms var(--ease);
 }
@@ -2006,7 +2010,7 @@ body.batch-open .d-toast { bottom: 76px; }
    쓰고 새 색을 만들지 않는다 — 확인 줄은 지라 값 바꾸기와 같은 `.d-jconfirm`이다. */
 .d-plist .d-rhd .d-pnewgo {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px; margin-left: -2px; padding: 0;
+  width: 28px; height: var(--h-sm); margin-left: -2px; padding: 0;
   border: 0; background: none; border-radius: var(--r-xs);
   font-family: inherit; font-size: 17px; font-weight: 500; line-height: 1; color: var(--dim); cursor: pointer;
   transition: background 170ms var(--ease), color 170ms var(--ease);
@@ -2037,20 +2041,20 @@ body.batch-open .d-toast { bottom: 76px; }
 /* 고른 에픽 한 줄 — 요약이 먼저, 상태는 뒤, 키는 조용한 글자로만(BKEY) */
 .d-pnewepic {
   display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px;
-  padding: 8px 12px; border-radius: var(--r-sm); background: var(--neutral-bg); font-size: 13px; color: var(--muted);
+  padding: 8px 12px; border-radius: var(--r-sm); background: var(--neutral-bg); font-size: var(--fs-sm); color: var(--muted);
 }
 .d-pnewepic .sm { font-weight: 600; color: var(--text); }
-.d-pnewepic .ky { font-size: 12px; color: var(--dim); }
+.d-pnewepic .ky { font-size: var(--fs-cap); color: var(--dim); }
 .d-pnewepic .d-link { margin-left: auto; }
 /* 직군 체크 목록 — 체크박스는 앱의 가족(.d-wcb, 28px 누름 영역) 그대로다 */
 .d-pnewroles { display: flex; flex-wrap: wrap; gap: 4px 16px; }
 .d-pnewroles .rl { display: inline-flex; align-items: center; gap: 7px; min-height: 30px; font-size: 13.5px; color: var(--text); cursor: pointer; }
 .d-pnewroles .rl.is-had { color: var(--dim); }
 .d-pnewroles .rl.is-own { cursor: default; color: var(--muted); }
-.d-pnewroles .hd { font-size: 12px; color: var(--dim); }
+.d-pnewroles .hd { font-size: var(--fs-cap); color: var(--dim); }
 .d-pnewroles .x {
   width: 24px; height: 24px; border: 0; background: none; border-radius: var(--r-xs);
-  font-family: inherit; font-size: 12px; color: var(--dim); cursor: pointer;
+  font-family: inherit; font-size: var(--fs-cap); color: var(--dim); cursor: pointer;
 }
 .d-pnewroles .x:hover { background: var(--hover); color: var(--text); }
 .d-pnewown { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
@@ -2070,15 +2074,15 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-pnewpv {
   display: grid; gap: 4px; padding: 12px 14px; border-radius: var(--r);
   background: var(--surface); border: 1px solid var(--surface-line); box-shadow: var(--soft);
-  font-size: 13px; color: var(--muted);
+  font-size: var(--fs-sm); color: var(--muted);
 }
 .d-pnewpv .ep, .d-pnewpv .kid { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
-.d-pnewpv .kd { flex: none; min-width: 32px; font-size: 12px; font-weight: 600; color: var(--dim); }
+.d-pnewpv .kd { flex: none; min-width: 32px; font-size: var(--fs-cap); font-weight: 600; color: var(--dim); }
 .d-pnewpv .sm { font-weight: 600; color: var(--text); }
 .d-pnewpv .wh, .d-pnewpv .ty { font-size: 12.5px; color: var(--dim); }
-.d-pnewpv .hd { font-size: 12px; color: var(--warn); }
+.d-pnewpv .hd { font-size: var(--fs-cap); color: var(--warn); }
 .d-pnewpv .br { flex: none; width: 12px; color: var(--dim); }
-.d-pnewpv .ti { flex: 1 1 260px; min-width: 0; min-height: 32px; font-size: 13px; }
+.d-pnewpv .ti { flex: 1 1 260px; min-width: 0; min-height: var(--h-md); font-size: var(--fs-sm); }
 /* 주 버튼 줄 — 1차(파란 채움)는 이 면에 하나뿐이다 */
 .d-pnewgobox { margin-top: 16px; }
 .d-pnewacts { display: grid; gap: 6px; max-width: 520px; }
@@ -2087,13 +2091,13 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-pnewres {
   display: grid; gap: 6px; margin-top: 16px; padding: 14px 16px; border-radius: var(--r);
   background: var(--surface); border: 1px solid var(--surface-line); box-shadow: var(--soft);
-  font-size: 13px; color: var(--muted);
+  font-size: var(--fs-sm); color: var(--muted);
 }
-.d-pnewres .hd { font-size: 15px; font-weight: 700; color: var(--text); }
+.d-pnewres .hd { font-size: var(--fs-md); font-weight: 700; color: var(--text); }
 .d-pnewres .kid { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; min-width: 0; }
-.d-pnewres .kid .kd { flex: none; min-width: 32px; font-size: 12px; font-weight: 600; color: var(--dim); }
+.d-pnewres .kid .kd { flex: none; min-width: 32px; font-size: var(--fs-cap); font-weight: 600; color: var(--dim); }
 .d-pnewres .kid .sm { color: var(--text); }
-.d-pnewres .kid .ky { font-size: 12px; color: var(--dim); }
+.d-pnewres .kid .ky { font-size: var(--fs-cap); color: var(--dim); }
 .d-pnewres .kid.is-bad .sm { color: var(--muted); }
 .d-pnewres .acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .d-pnewres .first { display: grid; gap: 6px; margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--surface-line); }
@@ -2112,7 +2116,7 @@ body.batch-open .d-toast { bottom: 76px; }
 }
 /* 프로젝트가 하나도 없을 때 오른쪽의 한 판 — 같은 흰 카드에 제목 · 한 줄 · 2차 버튼 하나 */
 .d-pempty { margin-top: 0; padding: 22px 24px; }
-.d-pempty h2 { margin: 0 0 4px; font-size: 16px; font-weight: 700; letter-spacing: -0.01em; color: var(--text); }
+.d-pempty h2 { margin: 0 0 4px; font-size: var(--fs-lg); font-weight: 700; letter-spacing: -0.01em; color: var(--text); }
 .d-pempty p { margin: 0 0 14px; font-size: 13.5px; line-height: 1.6; color: var(--muted); max-width: 52ch; }
 /* 구역 제목은 카드 밖에 굵게 선다(카드 안에 카드를 만들지 않는다) */
 .d-psec > .d-grp {
@@ -2120,7 +2124,7 @@ body.batch-open .d-toast { bottom: 76px; }
   font-size: 17px; font-weight: 700; letter-spacing: -0.015em; color: var(--text);
 }
 .d-psec > .d-grp .n {
-  height: 22px; display: inline-flex; align-items: center; padding: 0 9px;
+  height: var(--h-xs); display: inline-flex; align-items: center; padding: 0 9px;
   border-radius: 999px; background: var(--neutral-bg); color: var(--muted);
   font-size: 12.5px; font-weight: 600;
 }
@@ -2129,7 +2133,7 @@ body.batch-open .d-toast { bottom: 76px; }
 /* 조용한 열 이름 줄 — 아래 행과 같은 격자를 쓴다 */
 .d-colhd {
   display: grid; grid-template-columns: 30px 60px minmax(0, 1fr) 116px; column-gap: 10px; align-items: center;
-  height: 28px; margin: 0 0 2px; padding: 0 var(--pad); font-size: 12px; font-weight: 500; color: var(--dim);
+  height: var(--h-sm); margin: 0 0 2px; padding: 0 var(--pad); font-size: var(--fs-cap); font-weight: 500; color: var(--dim);
 }
 .d-colhd .r { text-align: right; }
 
@@ -2140,10 +2144,10 @@ body.batch-open .d-toast { bottom: 76px; }
 }
 .d-prow2:hover, .d-prow2:focus-within { --rowbg: var(--hover); }
 .d-prow2.is-sel { --rowbg: var(--sel); }
-.d-prow2 .pl { font-size: 13px; color: var(--dim); white-space: nowrap; }
+.d-prow2 .pl { font-size: var(--fs-sm); color: var(--dim); white-space: nowrap; }
 .d-prow2 .ti {
-  border: 0; background: none; padding: 0; width: 100%; min-height: 28px; text-align: left; cursor: pointer;
-  font-family: inherit; font-size: 16px; font-weight: 500; color: var(--text);
+  border: 0; background: none; padding: 0; width: 100%; min-height: var(--h-sm); text-align: left; cursor: pointer;
+  font-family: inherit; font-size: var(--fs-lg); font-weight: 500; color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .d-prow2.is-sel .ti { font-weight: 600; color: var(--accent-text); }
@@ -2152,7 +2156,7 @@ body.batch-open .d-toast { bottom: 76px; }
 /* 묶음 상세(BBUNDLE)의 줄 — 제목 바로 뒤에 어느 티켓 것인지 작은 번호(.d-pfrom). 제목은 내용만큼만 */
 .d-prow2 .d-titlewrap { min-width: 0; }
 .d-prow2 .d-titlewrap .ti { flex: 0 1 auto; width: auto; min-width: 0; }
-.d-pfrom { flex: none; font-size: 12px; font-weight: 500; color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.d-pfrom { flex: none; font-size: var(--fs-cap); font-weight: 500; color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
 /* 묶음 상세의 `+ 할 일 추가` 끝 `→ KEY` — 할 일이 붙을 티켓, 누르면 바꾼다 */
 .d-paddto { flex: none; margin-left: 8px; font-size: 12.5px; color: var(--dim); white-space: nowrap; }
 /* 상태말은 오늘 목록과 같은 규칙이다 — 아이콘 + 회색 글자, 급한 말만 6px 배지.
@@ -2161,7 +2165,7 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-prow2 .dd {
   justify-self: end;
   display: inline-flex; align-items: center; justify-content: flex-end; gap: 4px;
-  font-size: 13px; font-weight: 500; color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums;
+  font-size: var(--fs-sm); font-weight: 500; color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums;
 }
 .d-prow2 .dd.k-neg, .d-prow2 .dd.k-warn {
   height: 23px; padding: 0 8px; border-radius: 6px;
@@ -2183,7 +2187,7 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-prow2 .ac .d-btn.dng:hover { background: var(--urgent-bg); color: var(--urgent); }
 .d-prow2.is-done { grid-template-columns: 30px minmax(0, 1fr) minmax(0, 190px) 110px; }
 .d-prow2.is-done .ti { color: var(--muted); font-weight: 400; text-decoration: line-through; text-decoration-color: var(--border); }
-.d-prow2.is-done .res { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.d-prow2.is-done .res { font-size: var(--fs-cap); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .d-prow2.is-done .res .out { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* 확인 대기·결정·아이디어·회의처럼 값이 한둘뿐인 구역의 한 줄 */
@@ -2213,7 +2217,7 @@ body.batch-open .d-toast { bottom: 76px; }
   display: flex; align-items: center;
   opacity: 1; pointer-events: auto;
 }
-.d-rec.has-ac .ac .d-more { width: 28px; height: 28px; color: var(--dim); }
+.d-rec.has-ac .ac .d-more { width: 28px; height: var(--h-sm); color: var(--dim); }
 .d-rec.has-ac:hover .ac .d-more, .d-rec.has-ac:focus-within .ac .d-more { color: var(--text); }
 
 /* ---------- 회의 탭 ----------
@@ -2228,13 +2232,13 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-mfil .d-chip.is-on, .d-mfil .d-chip.is-on:hover { background: var(--accent-soft); color: var(--accent-text); }
 /* 보기 전환 `날짜순 | 프로젝트별` — 칩 줄 아래에 제 줄로 선다(좁은 칸이라 칩과 나란히 두면 잘린다) */
 .d-mseg { flex: 1 0 100%; padding: 2px; }
-.d-mseg button { height: 28px; padding: 0 12px; font-size: 13px; }
+.d-mseg button { height: var(--h-sm); padding: 0 12px; font-size: var(--fs-sm); }
 /* 프로젝트별 보기의 소제목 — 목록 카드 안이라 레일 확인 대기와 같은 촘촘한 꼴로 줄인다 */
 #meetingList .d-grp { height: auto; min-height: 0; padding: 12px 10px 3px; font-size: 13.5px; }
 #meetingList .d-grp.tog { border-radius: 10px; }
 /* 소제목 옆의 조용한 지라 상태 — 범주 색 글자만(BJCOLOR), 칸이 좁으면 먼저 줄어든다 */
 #meetingList .d-grp .js {
-  min-width: 0; margin-left: 2px; font-size: 12px; font-weight: 500; color: var(--dim);
+  min-width: 0; margin-left: 2px; font-size: var(--fs-cap); font-weight: 500; color: var(--dim);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 #meetingList .d-grp .js.k-acc { color: var(--accent-text); }
@@ -2258,7 +2262,7 @@ body.batch-open .d-toast { bottom: 76px; }
 }
 /* 프로젝트별 보기에는 날짜 소제목이 없어 줄이 날짜를 함께 적는다(`9/22 10:00`) — 그만큼 첫 칸이 넓다 */
 .d-mtrow.has-date { grid-template-columns: 74px minmax(0, 1fr) auto; }
-.d-mtrow .t { font-size: 13px; font-weight: 700; color: var(--dim); font-variant-numeric: tabular-nums; }
+.d-mtrow .t { font-size: var(--fs-sm); font-weight: 700; color: var(--dim); font-variant-numeric: tabular-nums; }
 .d-mtrow .tw { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .d-mtrow .ti { font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 프로젝트는 제목 바로 뒤에 색 점 + 회색 글자로 붙는다(10번 규칙) */
@@ -2290,7 +2294,7 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-reccol .d-lhd { margin-bottom: 4px; min-height: 38px; }
 /* 구역 제목 옆의 개수는 둥근 회색 칩(오늘 할 일만 파란 칩이다) */
 .d-reccol .d-lhd > .sub {
-  height: 22px; display: inline-flex; align-items: center; padding: 0 9px;
+  height: var(--h-xs); display: inline-flex; align-items: center; padding: 0 9px;
   border-radius: 999px; background: var(--neutral-bg); color: var(--muted);
   font-size: 12.5px; font-weight: 600;
 }
@@ -2304,7 +2308,7 @@ body.batch-open .d-toast { bottom: 76px; }
 }
 .d-recsearch::placeholder { color: var(--dim); }
 .d-recsearch:focus { outline: none; background: var(--surface); box-shadow: 0 0 0 2px var(--accent); }
-.d-rec { min-height: 44px; }
+.d-rec { min-height: var(--h-touch); }
 /* 프로젝트 그룹 제목은 오늘 목록과 같은 부품이다 — 줄의 왼쪽 글자선(12px)에 맞춰 서고,
    묶음이 눈에 들어오도록 위 여백을 넉넉히 둔다. */
 .d-reccol .d-list .d-grp { height: auto; min-height: var(--grp); padding: 18px 12px 2px; }
@@ -2336,7 +2340,7 @@ body.batch-open .d-toast { bottom: 76px; }
 /* 결정은 말줄임 없이 전문을 줄바꿈한다 — 글줄 폭은 읽기 좋은 약 760px까지만 넓어진다 */
 .d-rec.is-dec .ti {
   white-space: normal; word-break: keep-all; overflow: visible;
-  font-size: 15px; line-height: 1.55; padding: 3px 0; max-width: 760px;
+  font-size: var(--fs-md); line-height: 1.55; padding: 3px 0; max-width: 760px;
 }
 .d-rec.is-dec .mt, .d-rec.is-idea .mt { padding-top: 5px; }
 .d-rec.is-idea.is-open .ti { -webkit-line-clamp: unset; display: block; }
@@ -2373,7 +2377,7 @@ body.batch-open .d-toast { bottom: 76px; }
 @media (hover: none) { .d-rec .ac { opacity: 1; pointer-events: auto; } }
 /* 이 줄에서 할 수 있는 일이 더보기뿐이라 ⋯은 늘 보인다 — 평소 흐리게, 손이 닿으면 진하게. */
 .d-rec.is-dec .ac, .d-rec.is-idea .ac { opacity: 1; pointer-events: auto; }
-.d-rec.is-dec .ac .d-more, .d-rec.is-idea .ac .d-more { width: 28px; height: 28px; color: var(--dim); }
+.d-rec.is-dec .ac .d-more, .d-rec.is-idea .ac .d-more { width: 28px; height: var(--h-sm); color: var(--dim); }
 .d-rec.is-dec:hover .ac .d-more, .d-rec.is-idea:hover .ac .d-more,
 .d-rec.is-dec:focus-within .ac .d-more, .d-rec.is-idea:focus-within .ac .d-more { color: var(--text); }
 
@@ -2422,9 +2426,9 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-pplacebody { display: flex; flex-direction: column; gap: 8px; }
 /* 설정 안 접이식 요약의 조용한 덧말(개수·이름 목록) */
 #settingsDialog .d-dadd > summary .cnt { font-weight: 500; color: var(--dim); font-variant-numeric: tabular-nums; }
-.d-abline { font-size: 14px; color: var(--text); font-variant-numeric: tabular-nums; }
+.d-abline { font-size: var(--fs-body); color: var(--text); font-variant-numeric: tabular-nums; }
 /* 데이터 백업 한 줄 — 점(연동 카드와 같은 .d-istat 부품)은 초록(잘 됨) · 빨강(멈춤). 멈추면 이유 한 줄이 그 아래 --urgent로. */
-.d-bkline { font-size: 14px; color: var(--text); font-variant-numeric: tabular-nums; }
+.d-bkline { font-size: var(--fs-body); color: var(--text); font-variant-numeric: tabular-nums; }
 .d-bkline.k-neg { color: var(--urgent); font-weight: 600; }
 .d-ismall.k-neg { color: var(--urgent); }
 .d-ablink {
@@ -2443,15 +2447,15 @@ body.batch-open .d-toast { bottom: 76px; }
 }
 /* 레일 리마인드 줄은 `원문`이 제목 바로 아래 제 줄에 설 수 있다(사이 3px) — 위로는 2px만 넓혀 제목을 덮지 않고, 모자란 만큼 아래(글자뿐인 줄)로 */
 .d-wrow .tiwrap .d-src::after { top: -2px; bottom: min(0px, calc(100% - 26px)); }
-.d-abfiles { margin-top: 4px; font-size: 12px; line-height: 1.7; color: var(--dim); overflow-wrap: anywhere; }
+.d-abfiles { margin-top: 4px; font-size: var(--fs-cap); line-height: 1.7; color: var(--dim); overflow-wrap: anywhere; }
 .d-abfiles[hidden], .d-abwrap[hidden] { display: none; }
 /* 업데이트 받기(시안 J) — 새 버전 상자는 선택 판(--sel), 실패 줄은 주의 판(--urgent-bg). 새 색은 쓰지 않는다. */
 .d-abwrap { display: flex; flex-direction: column; gap: 8px; margin-top: 2px; }
 .d-abupd, .d-abfail { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; border-radius: var(--r-sm); }
 .d-abupd { padding: 12px 14px; background: var(--sel); }
-.d-abupd .tx { flex: 1 1 100%; font-size: 14px; font-weight: 600; color: var(--accent-text); }
+.d-abupd .tx { flex: 1 1 100%; font-size: var(--fs-body); font-weight: 600; color: var(--accent-text); }
 .d-abupd.is-plain .tx { font-size: 13.5px; font-weight: 500; color: var(--text); }
-.d-abupd .d-ablink { display: inline-flex; align-items: center; min-height: 28px; color: var(--accent-text); }
+.d-abupd .d-ablink { display: inline-flex; align-items: center; min-height: var(--h-sm); color: var(--accent-text); }
 .d-abfail { padding: 10px 12px; background: var(--urgent-bg); }
 .d-abfail .tx { flex: 1 1 160px; font-size: 13.5px; font-weight: 600; color: var(--urgent); }
 .d-abfail .d-btn.dng { background: var(--surface); }
@@ -2460,21 +2464,21 @@ body.batch-open .d-toast { bottom: 76px; }
 /* 설정 › 앱 › 점검(WP-K 시안 A~C) — 요약 판 · 항목 줄(✓ ✗ ! ? –) · 문제 줄 아래 고치는 법 판. 새 색 없이 기존 상태 판만 쓴다
    (고칠 것 --urgent-bg · 확인해 볼 것 --warn-bg · 모두 정상 --success-bg · 인터넷 --neutral-bg). */
 .d-scwrap { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
-.d-scsum { display: flex; align-items: center; gap: 4px 8px; flex-wrap: wrap; padding: 10px 12px; border-radius: var(--r-sm); background: var(--urgent-bg); color: var(--urgent); font-size: 14px; font-weight: 600; }
+.d-scsum { display: flex; align-items: center; gap: 4px 8px; flex-wrap: wrap; padding: 10px 12px; border-radius: var(--r-sm); background: var(--urgent-bg); color: var(--urgent); font-size: var(--fs-body); font-weight: 600; }
 .d-scsum.is-warn { background: var(--warn-bg); color: var(--warn); }
 .d-scsum.is-good { background: var(--success-bg); color: var(--success); }
 .d-scsum .at { margin-left: auto; font-size: 12.5px; font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
 .d-scoff { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: var(--r-sm); background: var(--neutral-bg); }
-.d-scoff .tx { font-size: 14px; font-weight: 600; color: var(--text); }
+.d-scoff .tx { font-size: var(--fs-body); font-weight: 600; color: var(--text); }
 .d-sclist { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .d-sclist li { position: relative; display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 4px 10px; align-items: start; padding: 10px 4px; box-shadow: inset 0 -1px 0 var(--hair); }
 .d-sclist .ic { font-weight: 800; text-align: center; line-height: 1.5; color: var(--dim); }
 .d-sclist .ok .ic { color: var(--success); }
 .d-sclist .bad .ic { color: var(--urgent); }
 .d-sclist .warn .ic { color: var(--warn); }
-.d-sclist .t { min-width: 0; font-size: 14px; font-weight: 600; color: var(--text); }
+.d-sclist .t { min-width: 0; font-size: var(--fs-body); font-weight: 600; color: var(--text); }
 .d-sclist .t small { display: block; font-size: 12.5px; font-weight: 400; color: var(--muted); overflow-wrap: anywhere; }
-.d-sclist .fix { grid-column: 2; padding: 8px 10px; border-radius: var(--r-xs); font-size: 13px; line-height: 1.6; color: var(--text); }
+.d-sclist .fix { grid-column: 2; padding: 8px 10px; border-radius: var(--r-xs); font-size: var(--fs-sm); line-height: 1.6; color: var(--text); }
 .d-sclist .bad .fix { background: var(--urgent-bg); }
 .d-sclist .warn .fix { background: var(--warn-bg); }
 .d-sclist .fix .d-icode { margin-top: 6px; }
@@ -2482,13 +2486,13 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-scwrap .d-scall { margin-top: 0; padding-top: 0; border-top: 0; }
 .d-scall .d-sclist { margin-top: 4px; }
 .d-scfoot { margin-top: 4px; }
-.d-scfallback { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; resize: vertical; }
+.d-scfallback { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: var(--fs-cap); resize: vertical; }
 /* 도움말 맨 위 `문제가 생겼어요`(시안 D) — 증상 접이식(.d-dadd 꺾쇠) 여섯. 첫 줄은 점검하기로 데려가는 밑줄 글자. */
 .d-trouble { display: flex; flex-direction: column; gap: 8px; margin-bottom: 22px; }
-.d-trouble .hd { font-size: 14px; font-weight: 700; }
+.d-trouble .hd { font-size: var(--fs-body); font-weight: 700; }
 .d-trouble .d-trlead { margin-bottom: 2px; }
 .d-trq { padding: 8px 14px; border-radius: var(--r-sm); background: var(--field); }
-.d-trq > summary { display: flex; align-items: center; gap: 6px; min-height: 32px; list-style: none; cursor: pointer; font-size: 14px; font-weight: 600; color: var(--text); }
+.d-trq > summary { display: flex; align-items: center; gap: 6px; min-height: var(--h-md); list-style: none; cursor: pointer; font-size: var(--fs-body); font-weight: 600; color: var(--text); }
 .d-trq ol { margin: 6px 0 4px; padding-left: 22px; display: grid; gap: 6px; font-size: 13.5px; line-height: 1.6; color: var(--muted); }
 .d-trq b { color: var(--text); font-weight: 600; }
 .d-trq .d-icode { background: var(--surface); }
@@ -2533,11 +2537,11 @@ body.batch-open .d-toast { bottom: 76px; }
 /* 연동 카드 — 이름 · 칩 / 한 줄 효용 / 지금 상황 · 준비물 줄이 왼쪽, 상태 점 + 짧은 말 · (필요할 때만) 버튼 · ⋯가 오른쪽.
    펼친 자리(.d-intgbody)는 --field 판 위에 한 번에 한 단계만(카드 안 위저드). */
 #settingsIntegrationsView [hidden] { display: none !important; }
-.d-intghead { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; min-height: 44px; padding: 2px 0 12px; border-bottom: 1px solid var(--hair); font-size: 13.5px; color: var(--muted); }
+.d-intghead { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; min-height: var(--h-touch); padding: 2px 0 12px; border-bottom: 1px solid var(--hair); font-size: 13.5px; color: var(--muted); }
 .d-intghead .sp { margin-left: auto; font-variant-numeric: tabular-nums; }
 /* 상태 점 + 짧은 말 — 카드 넷과 맨 위 요약이 같은 부품. 10px 점(+ 옅은 링)은 장식이고 말이 늘 같이 선다.
    연결됨 초록 · 곧 읽어요 흐린 초록(천천히 숨 쉼) · 늦어요 주황 · 멈췄어요 빨강 · 연결 안 됨 회색 빈 원(말 없음). */
-.d-istat { display: inline-flex; align-items: center; gap: 7px; min-width: 0; font-size: 13px; font-weight: 600; white-space: nowrap; }
+.d-istat { display: inline-flex; align-items: center; gap: 7px; min-width: 0; font-size: var(--fs-sm); font-weight: 600; white-space: nowrap; }
 .d-istat .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
 .d-istat .w { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .d-istat .sub { color: var(--dim); font-weight: 500; }
@@ -2566,12 +2570,12 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-intgwhy.k-warn { background: var(--warn-bg); }
 .d-intgwhy.k-warn .d-ablink { color: var(--warn); }
 /* ⋯ › 최근 기록 — 시각 · 결과 한 줄(최근 10개), 실패는 빨강. 맨 아래 `오류 전문 복사`. */
-.d-ilog { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.d-ilog { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: var(--fs-sm); color: var(--muted); font-variant-numeric: tabular-nums; }
 .d-ilog li { display: flex; gap: 10px; min-width: 0; }
 .d-ilog .t { flex: none; min-width: 44px; color: var(--dim); }
 .d-ilog .bad { color: var(--urgent); }
 .d-ilog .more { margin-top: 4px; }
-.d-ilog .more .d-ablink { min-height: 28px; }
+.d-ilog .more .d-ablink { min-height: var(--h-sm); }
 .d-intg { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 16px; padding: 14px 0; }
 .d-intg > * { grid-column: 1 / -1; }
 .d-intg > .d-intghd, .d-intg > .d-intguse, .d-intg > .d-intgmeta { grid-column: 1; }
@@ -2582,7 +2586,7 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-intg > .d-intgside { grid-column: 2; grid-row: 1 / span 2; align-self: center; justify-self: end; display: flex; align-items: center; gap: 10px; min-width: 0; }
 .d-intgside .d-btn { flex: none; }
 /* 멈췄어요의 `다시 연결`은 채움이지만 줄 안의 작은 버튼이다(1차의 42px가 아니라 옆 버튼과 같은 32px) */
-.d-intgside .d-btn.sm.pri { height: 32px; padding: 0 12px; border-radius: var(--r-xs); font-size: 13px; }
+.d-intgside .d-btn.sm.pri { height: var(--h-md); padding: 0 12px; border-radius: var(--r-xs); font-size: var(--fs-sm); }
 /* 다시 시도: 1분 제한 동안은 흐리게(누르면 이유를 알려 주려고 disabled는 쓰지 않는다) */
 .d-intgside .d-ifetch[aria-disabled="true"], .d-intgside .d-ifetch[aria-disabled="true"]:hover { color: var(--dim); background: var(--neutral-bg); filter: none; }
 /* 지금 상황(`#채널 · 3분 전 읽음`) · 준비물·주기 줄을 한 줄에 */
@@ -2590,7 +2594,7 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-intgmeta .d-intgneed { display: inline; margin: 0; }
 .d-intgmeta .now:not(:empty) + .d-intgneed:not(:empty)::before { content: ' · '; color: var(--dim); }
 /* 필요한 것 칩 — 회색 글자 칩 하나로 통일한다(주황을 쓰지 않는다) */
-.d-itag { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px; background: var(--neutral-bg); color: var(--muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.d-itag { display: inline-flex; align-items: center; height: var(--h-xs); padding: 0 8px; border-radius: 6px; background: var(--neutral-bg); color: var(--muted); font-size: var(--fs-cap); font-weight: 600; white-space: nowrap; }
 .d-intguse { margin-top: 2px; font-size: 13.5px; color: var(--muted); }
 .d-intgneed { margin-top: 2px; font-size: 12.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
 .d-intgneed.k-warn { color: var(--warn); }
@@ -2601,19 +2605,19 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-intgbody > .d-btn, .d-intgbody > a.d-btn { align-self: flex-start; }
 .d-intgbody .d-derr { margin: 0; }
 .d-ifield { display: block; }
-.d-ifield .lb { display: block; margin-bottom: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.d-ifield .lb { display: block; margin-bottom: 4px; font-size: var(--fs-cap); font-weight: 600; color: var(--muted); }
 .d-ifield .d-din { width: 100%; box-sizing: border-box; }
 .d-ifield .d-hint { display: block; margin-top: 4px; }
 a.d-btn { text-decoration: none; }
-.d-btn.xs { height: 28px; padding: 0 10px; font-size: 12.5px; }
+.d-btn.xs { height: var(--h-sm); padding: 0 10px; font-size: 12.5px; }
 /* 단계 줄 ① 토큰 ─ ② 채널 ─ ③ 확인 — 끝낸 단계는 초록 ✓, 지금 단계만 파랑 */
-.d-isteps { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; font-weight: 600; color: var(--dim); }
+.d-isteps { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: var(--fs-cap); font-weight: 600; color: var(--dim); }
 .d-isteps .ln { width: 16px; height: 1px; background: var(--border); }
 .d-isteps .on { color: var(--accent-text); }
 .d-isteps .dn { color: var(--success); }
-.d-ihow { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.7; }
+.d-ihow { margin: 0; font-size: var(--fs-sm); color: var(--muted); line-height: 1.7; }
 .d-ihow b, .d-ismall b, .d-isend b, .d-inum b, .d-ich b { color: var(--text); font-weight: 600; }
-.d-ihow code, .d-icode code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
+.d-ihow code, .d-icode code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: var(--fs-cap); }
 .d-irow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .d-ismall { margin: 0; font-size: 12.5px; color: var(--dim); }
 .d-ifoot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -2629,12 +2633,12 @@ a.d-btn { text-decoration: none; }
 .d-ich .t { font-size: 13.5px; line-height: 1.5; }
 .d-ich .t .sub { display: block; }
 .d-ich .need { font-size: 11.5px; font-weight: 600; color: var(--accent-text); }
-.d-ich .nm { min-height: 32px; padding: 6px 10px; font-size: 13px; }
+.d-ich .nm { min-height: var(--h-md); padding: 6px 10px; font-size: var(--fs-sm); }
 .d-ich .d-din.nm:disabled { opacity: 0.5; }
 .d-ich .nm.is-done { font-size: 12.5px; font-weight: 600; color: var(--success); }
 /* 채널 고르기(시안 E·F) — 연결된 채널은 고정 글자(`#이름` + 작은 `연결됨`), 새 줄은 칸 위 작은 라벨 `새 채널 이름`.
    뺄 줄은 --urgent-bg 판 + 이름에 가운데 줄, 사라진 채널(다시 만들기)은 --warn-bg 판. */
-.d-ich .lock { font-size: 13px; font-weight: 600; color: var(--text); padding: 6px 0; overflow-wrap: anywhere; }
+.d-ich .lock { font-size: var(--fs-sm); font-weight: 600; color: var(--text); padding: 6px 0; overflow-wrap: anywhere; }
 .d-ich .lock small { display: block; font-size: 11.5px; font-weight: 400; color: var(--dim); }
 .d-ich .nmwrap { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .d-ich .nmwrap small { font-size: 11.5px; color: var(--dim); }
@@ -2642,21 +2646,21 @@ a.d-btn { text-decoration: none; }
 .d-ich.is-off .lock { color: var(--dim); text-decoration: line-through; }
 .d-ich.is-gone { background: var(--warn-bg); }
 .d-ich .sub.k-neg { color: var(--urgent); }
-.d-inote { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border-radius: var(--r-sm); background: var(--neutral-bg); font-size: 13px; color: var(--muted); line-height: 1.6; }
+.d-inote { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border-radius: var(--r-sm); background: var(--neutral-bg); font-size: var(--fs-sm); color: var(--muted); line-height: 1.6; }
 .d-inote b { color: var(--text); font-weight: 600; }
 .d-ich .d-icherr { grid-column: 2 / -1; }
 /* ③ 확인 · 연결 완료 한 줄 */
-.d-iok { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-radius: var(--r-sm); background: var(--success-bg); color: var(--success); font-size: 14px; font-weight: 600; }
+.d-iok { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-radius: var(--r-sm); background: var(--success-bg); color: var(--success); font-size: var(--fs-body); font-weight: 600; }
 /* 슬랙에서 이렇게 보내요 — 따뜻한 상자(시작 카드와 같은 --warm) */
 .d-isend { display: grid; gap: 8px; padding: 14px 16px; border-radius: var(--r-sm); background: var(--warm); border: 1px solid var(--warm-line); }
 .d-isend .hd { margin: 0; font-size: 13.5px; font-weight: 700; color: var(--text); }
-.d-isend ol { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 13px; color: var(--muted); line-height: 1.6; }
+.d-isend ol { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: var(--fs-sm); color: var(--muted); line-height: 1.6; }
 /* 붙여 넣을 명령 한 줄 + 복사 */
 .d-icode { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 6px 6px 12px; background: var(--surface); border-radius: var(--r-xs); }
 .d-icode code { flex: 1; min-width: 0; color: var(--text); overflow-wrap: anywhere; }
 .d-icode .d-btn { flex: none; }
 .d-inum { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
-.d-inum li { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: var(--muted); }
+.d-inum li { display: flex; gap: 8px; align-items: flex-start; font-size: var(--fs-sm); color: var(--muted); }
 .d-inum li > .n { flex: none; width: 18px; font-weight: 600; color: var(--dim); }
 .d-inum li > .c { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .d-inum li > .c > .d-icode { align-self: stretch; }
@@ -2664,13 +2668,13 @@ a.d-btn { text-decoration: none; }
 .d-ichoices { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); align-items: start; gap: 12px; }
 .d-ichoice { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 14px; border-radius: var(--r-sm); background: var(--surface); border: 1.5px solid var(--border); }
 .d-ichoice .hd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 14.5px; font-weight: 600; }
-.d-ichoice .soon { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--dim); }
+.d-ichoice .soon { margin-left: auto; font-size: var(--fs-cap); font-weight: 600; color: var(--dim); }
 .d-ichoice.is-off { opacity: 0.55; cursor: default; }
 /* 캘린더 갈래 셋(WP-V) — `맥 캘린더`(추천)가 맨 위, `Claude Code로`, 접힌 `다른 방법: 비밀 주소 붙이기`를 세로로 쌓는다.
    읽을 캘린더 목록은 쓸 곳 고르기(.d-ich)와 같은 줄 — 이름 칸이 없어 두 칸이다. */
 .d-ichoices.is-stack { grid-template-columns: minmax(0, 1fr); }
 .d-ich.is-cal { grid-template-columns: 20px minmax(0, 1fr); }
-.d-imore > summary { display: flex; align-items: center; gap: 6px; min-height: 32px; list-style: none; cursor: pointer; font-size: 13.5px; font-weight: 600; color: var(--muted); }
+.d-imore > summary { display: flex; align-items: center; gap: 6px; min-height: var(--h-md); list-style: none; cursor: pointer; font-size: 13.5px; font-weight: 600; color: var(--muted); }
 .d-imore > summary::-webkit-details-marker { display: none; }
 .d-imore > summary::before { content: "›"; display: inline-block; width: 12px; color: var(--dim); transition: transform 130ms var(--ease); }
 .d-imore[open] > summary::before { transform: rotate(90deg); }
@@ -2678,7 +2682,7 @@ a.d-btn { text-decoration: none; }
 .d-imore > .d-ichoice { margin-top: 6px; }
 /* 해제 확인 줄 — 카드 안, 큰 해제 버튼 대신 */
 .d-iconfirm { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; padding: 10px 12px; border-radius: var(--r-sm); background: var(--urgent-bg); }
-.d-iconfirm .tx { flex: 1 1 200px; font-size: 13px; color: var(--text); }
+.d-iconfirm .tx { flex: 1 1 200px; font-size: var(--fs-sm); color: var(--text); }
 .d-iconfirm .d-btn.dng { background: var(--surface); }
 .d-iconfirm .d-derr { flex-basis: 100%; margin: 0; }
 .d-itiro { display: flex; flex-direction: column; gap: 10px; }
@@ -2706,11 +2710,11 @@ a.d-btn { text-decoration: none; }
 
 /* 도움말 — 글 폭 제한(64ch)은 문답 글에만. `문제가 생겼어요` 상자·묶음 줄은 창 폭 가득. */
 .d-faq .q, .d-faq .need, .d-faq .a { max-width: 64ch; }
-.d-faqhd { margin-bottom: 6px; font-size: 14px; font-weight: 700; color: var(--text); }
-.d-faqintro { margin-bottom: 8px; font-size: 13px; color: var(--muted); line-height: 1.65; }
+.d-faqhd { margin-bottom: 6px; font-size: var(--fs-body); font-weight: 700; color: var(--text); }
+.d-faqintro { margin-bottom: 8px; font-size: var(--fs-sm); color: var(--muted); line-height: 1.65; }
 /* 문답 묶음 접이식(요약: 이름 + 개수, 첫 묶음만 펼침) — 묶음 사이 가는 선 */
 .d-faq .d-faqgrp { margin-top: 0; padding: 6px 0; }
-.d-faq .d-faqgrp > summary.lbl { min-height: 40px; font-size: 14px; font-weight: 600; color: var(--text); }
+.d-faq .d-faqgrp > summary.lbl { min-height: 40px; font-size: var(--fs-body); font-weight: 600; color: var(--text); }
 .d-faq .d-faqgrp[open] > summary.lbl { margin-bottom: 2px; }
 .d-faq .d-faqgrp > .inner { padding: 0 0 10px 18px; }
 /* 개념 한 줄 사전 — 맨 아래 `말 뜻` 접이식 안 */
@@ -2718,7 +2722,7 @@ a.d-btn { text-decoration: none; }
 .d-wordsfold .d-words { margin-top: 0; }
 .d-word { font-size: 12.5px; color: var(--muted); line-height: 1.7; }
 .d-word .w { font-weight: 600; color: var(--text); }
-.d-faq .q { margin-top: 18px; font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+.d-faq .q { margin-top: 18px; font-size: var(--fs-body); font-weight: 600; letter-spacing: -0.01em; }
 .d-faq .q:first-child { margin-top: 0; }
 /* 사용설명서의 `슬랙에서 보내는 법`으로 찾아온 문답 — 잠깐 밝힌다 */
 .d-faq .q.is-hit { background: var(--sel); border-radius: var(--r-xs); box-shadow: 0 0 0 6px var(--sel); transition: background 400ms var(--ease), box-shadow 400ms var(--ease); }
@@ -2729,43 +2733,43 @@ a.d-btn { text-decoration: none; }
 .d-pset { display: flex; align-items: flex-start; gap: 12px 16px; padding: 14px 0; flex-wrap: wrap; }
 .d-pset + .d-pset { box-shadow: inset 0 1px 0 var(--hair); }
 .d-pset .k { flex: none; width: 130px; padding-top: 8px; font-size: 14.5px; font-weight: 600; }
-.d-pset .k small { display: block; font-size: 12px; font-weight: 400; color: var(--dim); }
+.d-pset .k small { display: block; font-size: var(--fs-cap); font-weight: 400; color: var(--dim); }
 .d-pset .v { flex: 1 1 240px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
 .d-pset .v .d-din { width: 100%; box-sizing: border-box; }
 .d-piconpv { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .d-piconslot { flex: none; width: 56px; height: 56px; }
 .d-piconimg { display: block; width: 56px; height: 56px; border-radius: 22%; box-shadow: var(--shadow); object-fit: cover; }
-.d-piconpv .d-ablink { min-height: 28px; }
+.d-piconpv .d-ablink { min-height: var(--h-sm); }
 .d-pfoot { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; padding-top: 6px; }
 .d-pfoot .d-ismall { flex: 1 1 220px; }
-.d-psaved { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; margin-top: 12px; padding: 10px 12px; border-radius: var(--r-sm); background: var(--success-bg); color: var(--success); font-size: 13px; font-weight: 600; }
+.d-psaved { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; margin-top: 12px; padding: 10px 12px; border-radius: var(--r-sm); background: var(--success-bg); color: var(--success); font-size: var(--fs-sm); font-weight: 600; }
 .d-psaved span { font-weight: 400; color: var(--muted); }
 .d-pplace { margin-top: 12px; box-shadow: inset 0 1px 0 var(--hair); }
 .d-pplaceline { display: flex; flex-direction: column; gap: 4px; }
-.d-pplaceline .lb { font-size: 12px; font-weight: 600; color: var(--muted); }
+.d-pplaceline .lb { font-size: var(--fs-cap); font-weight: 600; color: var(--muted); }
 #settingsPersonalizeView > .d-derr:empty { display: none; }
 @media (max-width: 520px) {
   .d-pset .k { width: 100%; padding-top: 0; }
 }
 .d-faq .need { margin-top: 3px; font-size: 11.5px; color: var(--dim); }
-.d-faq .a { margin-top: 4px; font-size: 13px; font-weight: 400; color: var(--muted); line-height: 1.65; }
+.d-faq .a { margin-top: 4px; font-size: var(--fs-sm); font-weight: 400; color: var(--muted); line-height: 1.65; }
 .d-faq .a b { font-weight: 600; color: var(--text); }
 .d-dsec { margin-top: 22px; padding-top: 12px; border-top: 1px solid var(--hair); }
-.d-dsec .lbl { display: block; margin-bottom: 6px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.d-dsec .lbl { display: block; margin-bottom: 6px; font-size: var(--fs-cap); font-weight: 600; color: var(--muted); }
 .d-hint { margin-top: 6px; font-size: 11.5px; color: var(--muted); }
 
 /* 삭제한 항목 한 줄 — 자동화 줄(.d-auto)과 같은 리듬이다: 종류·문구·프로젝트 / 삭제 시각 | 되살리기 ⋯ */
 .d-trow { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
 .d-trow + .d-trow { box-shadow: inset 0 1px 0 var(--hair); }
 .d-trow .tm { flex: 1; min-width: 0; }
-.d-trow .tl { display: flex; align-items: baseline; gap: 6px; min-width: 0; min-height: 22px; }
-.d-trow .kd { flex: none; font-size: 12px; font-weight: 600; color: var(--muted); }
+.d-trow .tl { display: flex; align-items: baseline; gap: 6px; min-width: 0; min-height: var(--h-xs); }
+.d-trow .kd { flex: none; font-size: var(--fs-cap); font-weight: 600; color: var(--muted); }
 .d-trow .tx { flex: 1 1 auto; min-width: 6em; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 좁은 폭에서 프로젝트 이름이 문구를 밀어내지 않게 — 받은 것 줄(.d-ibmain)과 같은 상한 */
 .d-trow .tl .d-inproj { flex: 0 1 auto; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
 .d-trow .tw { margin-top: 2px; font-size: 12.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
 .d-trow .ta { display: flex; align-items: center; gap: 4px; flex: none; }
-.d-trow .ta .d-more { width: 28px; height: 28px; color: var(--dim); }
+.d-trow .ta .d-more { width: 28px; height: var(--h-sm); color: var(--dim); }
 .d-trow:hover .ta .d-more, .d-trow:focus-within .ta .d-more { color: var(--text); }
 .d-trow .ta .tq { font-size: 12.5px; color: var(--muted); }
 
@@ -2773,13 +2777,13 @@ a.d-btn { text-decoration: none; }
    설정과 같은 판(.d-modal) 위에 줄 목록 하나다. 줄은 `제목 · ● 프로젝트 | 상태말 | 세그먼트`이고
    상태말은 업무 줄과 같은 칸(.d-meta)을 그대로 쓴다. */
 #wrapDialog { width: min(720px, calc(100vw - 32px)); }
-.d-mhd .d-wrapdate { font-size: 13px; color: var(--dim); font-variant-numeric: tabular-nums; }
-.d-wrapsum { margin: 0 0 8px; font-size: 13px; color: var(--dim); }
+.d-mhd .d-wrapdate { font-size: var(--fs-sm); color: var(--dim); font-variant-numeric: tabular-nums; }
+.d-wrapsum { margin: 0 0 8px; font-size: var(--fs-sm); color: var(--dim); }
 .d-wrapdone {
-  padding: 4px 0 4px 22px; font-size: 13px; color: var(--dim);
+  padding: 4px 0 4px 22px; font-size: var(--fs-sm); color: var(--dim);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.d-wraprow { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 5px 0; }
+.d-wraprow { display: flex; align-items: center; gap: 10px; min-height: var(--h-touch); padding: 5px 0; }
 .d-wraprow + .d-wraprow { box-shadow: inset 0 1px 0 var(--hair); }
 .d-wraprow .tiwrap { display: flex; align-items: baseline; gap: 6px; flex: 1 1 auto; min-width: 0; }
 .d-wraprow .ti { flex: 1 1 auto; min-width: 4em; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2825,7 +2829,7 @@ a.d-btn { text-decoration: none; }
   .page { padding: 14px 16px 80px; }
   /* 손가락으로 쓰는 폭에서는 입력칸 글자를 16px로 — 사파리가 초점에서 화면을 확대하지 않게 */
   input, select { max-width: 100%; }
-  .desc-edit-input, .group-input { font-size: 16px; }
+  .desc-edit-input, .group-input { font-size: var(--fs-lg); }
   #gridToday { grid-template-columns: minmax(0, 1fr); min-height: 0; }
   /* 프로젝트·회의 목록도 레일처럼 본문 위로 쌓인다(카드는 그대로, 가로로 흐른다) */
   #gridProjects, #gridMeetings { grid-template-columns: minmax(0, 1fr); min-height: 0; }
@@ -2872,7 +2876,7 @@ a.d-btn { text-decoration: none; }
 @media (max-width: 640px) {
   .d-hdr { padding: 0 12px 0 16px; gap: 12px; }
   .d-brand { display: none; }
-  .d-date { height: 26px; padding: 0 10px; font-size: 13px; }
+  .d-date { height: 26px; padding: 0 10px; font-size: var(--fs-sm); }
   .d-tabs { margin-left: 12px; overflow-x: auto; }
   .d-srch span { display: none; }
   .d-srch kbd { display: none; }
@@ -2888,7 +2892,7 @@ a.d-btn { text-decoration: none; }
   .d-ibmore { margin-left: 14px; }
   body.later-open .page { padding-right: 16px; }
   .d-rail { margin-bottom: -36px; }
-  .d-qa, .d-dbody .d-qa { font-size: 16px; }
+  .d-qa, .d-dbody .d-qa { font-size: var(--fs-lg); }
   .d-banner { padding: 10px 16px; }
   .d-toast { left: 16px; right: 16px; bottom: 16px; max-width: none; }
 
@@ -2896,7 +2900,7 @@ a.d-btn { text-decoration: none; }
   .d-pal { padding: 52px 0 0; }
   .d-palbox { width: 100vw; max-width: none; max-height: calc(100dvh - 52px); border-radius: var(--r) var(--r) 0 0; }
   .d-palin { height: 54px; padding: 0 14px; }
-  .d-palin input { font-size: 16px; }
+  .d-palin input { font-size: var(--fs-lg); }
   .d-palfil { padding: 0 10px 10px; }
   /* 체크박스 칸(28px)은 좁은 폭에서도 줄지 않는다 — 제목이 먼저 줄어든다(BPAL). 회의는 그 칸이
      없으니 예전과 같은 2열이다. */
@@ -2931,7 +2935,7 @@ a.d-btn { text-decoration: none; }
     grid-area: ac; position: static; flex-direction: column; align-items: stretch;
     opacity: 1; pointer-events: auto; background: none; padding-left: 0;
   }
-  .d-acts .d-btn, .d-ibacts .d-btn { height: 32px; padding: 0 11px; }
+  .d-acts .d-btn, .d-ibacts .d-btn { height: var(--h-md); padding: 0 11px; }
   /* 업무 줄에는 ⋯ 하나만 — 내일·나중에·오늘로·오늘 할게요는 줄을 누르면 열리는 시트 발에 있다.
      미루기 제안 줄(.is-sug)은 시트가 없는 줄이라 그대로 둔다. 프로젝트 면의 줄은 아래 .d-prow2 */
   .d-row:not(.is-sug) .d-acts > .d-btn { display: none; }
@@ -2959,7 +2963,7 @@ a.d-btn { text-decoration: none; }
     grid-area: ac; position: static; justify-content: flex-start; flex-wrap: wrap;
     opacity: 1; pointer-events: auto; background: none; padding-left: 0;
   }
-  .d-atacts .d-btn { height: 32px; padding: 0 11px; }
+  .d-atacts .d-btn { height: var(--h-md); padding: 0 11px; }
 
   /* 새로 들어온 줄은 제목 한 줄 / 동작 한 줄 */
   .d-ibrow { grid-template-columns: minmax(0, 1fr); row-gap: 6px; }
@@ -2997,7 +3001,7 @@ a.d-btn { text-decoration: none; }
   .d-mhd .sp { order: 1; }
   .d-mhd #settingsCloseBtn { order: 2; }
   .d-mhd .d-seg { order: 3; flex-basis: 100%; }
-  #settingsDialog .d-mhd .d-seg button { flex: 1 1 auto; min-width: 0; padding: 0 4px; font-size: 13px; }
+  #settingsDialog .d-mhd .d-seg button { flex: 1 1 auto; min-width: 0; padding: 0 4px; font-size: var(--fs-sm); }
   .d-mbody { padding: 12px 14px 20px; }
   /* 오늘 정리 줄은 두 줄로 쌓인다 — 세그먼트가 줄 폭을 통째로 쓰고 넷이 고르게 나눠 선다 */
   .d-wraprow { flex-wrap: wrap; row-gap: 6px; padding: 8px 0; }
@@ -3005,7 +3009,7 @@ a.d-btn { text-decoration: none; }
   .d-wraprow .d-seg { flex: 1 1 100%; }
   .d-wraprow .d-seg button { flex: 1 1 0; padding: 0 8px; }
   .d-wrapfoot { bottom: -20px; margin: 12px -14px -20px; padding: 10px 14px; }
-  .d-recsearch { width: 100%; font-size: 16px; height: 36px; }
+  .d-recsearch { width: 100%; font-size: var(--fs-lg); height: 36px; }
 }
 
 /* ---------- 전화 너비: 헤더를 두 줄로 ----------
