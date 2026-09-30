@@ -1439,6 +1439,8 @@ function settingsIntgStat(tone, word, sub) {
 const settingsFailStop = (state = {}) => !!(state.auth || state.stuck);
 
 // ---------- 카드 한 장 ----------
+// 슬랙·캘린더·회의록 카드의 칩 — Claude Code가 없어도 쓸 수 있다는 말(원문 그대로 · 맥 캘린더·비밀 주소 · 직접 옮기기).
+const SETTINGS_NO_CLAUDE_CHIP = 'Claude 없이도 돼요';
 // 왼쪽 `이름 · 칩` / 한 줄 효용 / 지금 상황 · 준비물 줄, 오른쪽 `상태 점 + 말 · (막혔을 때만) 다시 시도|다시 연결 · ⋯`
 // (연결 안 된 카드는 빈 원 + `연결하기`) / (막혔으면 이유 한 줄) / (해제 확인 줄) / 펼치는 자리.
 // `status`는 연결된 카드의 지금 상황(`#채널 외 1개 · 3분 전 읽음`) — null이면 연결 안 된 카드이고, 그때 `mark`
@@ -1454,10 +1456,14 @@ function settingsIntgCard({ kind, name, chip, use, need, needClass = '', status 
   const title = document.createElement('span');
   title.className = 'nm';
   title.textContent = name;
-  const tag = document.createElement('span');
-  tag.className = 'd-itag';
-  tag.textContent = chip;
-  head.append(title, tag);
+  head.appendChild(title);
+  // 칩은 Claude 없이도 쓸 수 있는 카드(슬랙·캘린더·회의록)에만 — 지라는 늘 Claude 없이 도니 칩이 없다.
+  if (chip) {
+    const tag = document.createElement('span');
+    tag.className = 'd-itag';
+    tag.textContent = chip;
+    head.appendChild(tag);
+  }
 
   const connectedLook = status !== null;
   const state = (fetchSpec && fetchSpec.state) || {};
@@ -2269,7 +2275,7 @@ function settingsSlackCard(data) {
     { label: '해제…', danger: true, onClick: () => settingsIntgConfirmOff(card, { slack: { enabled: false } }) },
   ]] : null;
   card = settingsIntgCard({
-    kind: 'slack', name: '슬랙 수집', chip: '누구나 · Claude',
+    kind: 'slack', name: '슬랙 수집', chip: SETTINGS_NO_CLAUDE_CHIP,
     use: '나만 보는 채널에 공유한 메시지가 할 일로 들어와요',
     // 주기는 실제 등록 값(launchd 5분 간격, 매일 9–19시 — slack-capture.sh가 시간대를 본다).
     need: connected
@@ -2406,7 +2412,7 @@ function settingsJiraCard(data) {
   const fetchState = jira.fetch || {};
   let card = null;
   card = settingsIntgCard({
-    kind: 'jira', name: '지라', chip: '누구나',
+    kind: 'jira', name: '지라',
     use: '내 티켓이 프로젝트로 뜨고 상태·기한을 여기서 바꿔요',
     need: connected ? (counts || '앱이 지라를 직접 읽어요') : '3분 · Atlassian API 토큰 하나',
     needClass: connected && attentionBad ? 'k-warn' : '',
@@ -2727,7 +2733,7 @@ function settingsCalendarCard(data) {
   const macWhy = mac && /^⚠️\s*/.test(String(fetchState.summary || '')) ? String(fetchState.summary).replace(/^⚠️\s*/, '') : '';
   let card = null;
   card = settingsIntgCard({
-    kind: 'calendar', name: '캘린더', chip: '누구나 · Claude',
+    kind: 'calendar', name: '캘린더', chip: SETTINGS_NO_CLAUDE_CHIP,
     use: '오늘 회의가 뜨고 회의 정리가 열려요',
     // 주기는 실제 등록 값 — 비밀 주소는 앱이 30분마다, Claude 갈래는 launchd `calendar-sync`(매일 9·11·13·15·17·19시).
     need: on
@@ -2826,7 +2832,7 @@ function settingsNotesCard(data) {
   const ran = settingsAgo(state.lastRunAt);
   let card = null;
   card = settingsIntgCard({
-    kind: 'notes', name: '회의록', chip: '누구나 · Claude',
+    kind: 'notes', name: '회의록', chip: SETTINGS_NO_CLAUDE_CHIP,
     use: '티로 회의록이 초안으로 들어와요 — 직접 옮기기도 돼요',
     need: tiro ? '회의가 끝나면 회의 탭에서 가져오기' : need,
     status: tiro ? (ran ? `${ran} 가져옴` : '아직 가져온 적 없어요') : null,

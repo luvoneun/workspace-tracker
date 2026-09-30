@@ -7061,15 +7061,17 @@ test('WP-D1 A. 목록: 카드 차례는 슬랙 수집 → 지라 → 캘린더 �
   assert.equal(fx.shape("document.getElementById('settingsIntegrationsView').children[0]").text, '연동은 선택이에요. 필요할 때 하나씩 켜요.연결됨 0 · 남은 것 3', '회의록 직접 옮기기는 연결에도 남은 것에도 세지 않는다 — 켠 연동이 없으면 선택이라는 말과 `연결됨 0`');
   same(kids.slice(1, 5).map(one => one.dataset.integration), ['slack', 'jira', 'calendar', 'notes']);
 
-  const chips = ['slack', 'jira', 'calendar', 'notes'].map(kind => fx.find(kind, 'd-itag')[0]);
-  // 슬랙은 원문 그대로 모드가 생겨 Claude 없이도 쓴다(2026-09-29) — 캘린더·회의록과 같은 `누구나 · Claude`.
-  same(chips.map(chip => chip.textContent), ['누구나 · Claude', '누구나', '누구나 · Claude', '누구나 · Claude']);
+  const chips = ['slack', 'calendar', 'notes'].map(kind => fx.find(kind, 'd-itag')[0]);
+  // 칩은 Claude 없이도 쓸 수 있다는 말 하나 — 슬랙(원문 그대로)·캘린더(맥 캘린더·비밀 주소)·회의록(직접 옮기기). 지라는 칩 없음.
+  same(chips.map(chip => chip.textContent), ['Claude 없이도 돼요', 'Claude 없이도 돼요', 'Claude 없이도 돼요']);
   assert.ok(chips.every(chip => chip.className === 'd-itag'), '칩 색은 하나로 통일한다(주황 칩 없음)');
+  assert.equal(fx.find('jira', 'd-itag').length, 0, '지라 카드는 칩이 없다');
+  assert.ok(!/누구나/.test(fx.view().textContent), '카드에 `누구나` 칩은 없다');
 
-  assert.match(fx.text('slack'), /^슬랙 수집누구나 · Claude연결하기나만 보는 채널에 공유한 메시지가 할 일로 들어와요5분 · 팀 슬랙 앱 토큰 하나/);
-  assert.match(fx.text('jira'), /^지라누구나연결하기내 티켓이 프로젝트로 뜨고 상태·기한을 여기서 바꿔요3분 · Atlassian API 토큰 하나/);
-  assert.match(fx.text('calendar'), /^캘린더누구나 · Claude연결하기오늘 회의가 뜨고 회의 정리가 열려요3분 · 맥 캘린더·Claude Code·비밀 주소/);
-  assert.match(fx.text('notes'), /^회의록누구나 · Claude직접 옮기기바꾸기티로 회의록이 초안으로 들어와요 — 직접 옮기기도 돼요회의 정리 화면에 붙여 넣어요/);
+  assert.match(fx.text('slack'), /^슬랙 수집Claude 없이도 돼요연결하기나만 보는 채널에 공유한 메시지가 할 일로 들어와요5분 · 팀 슬랙 앱 토큰 하나/);
+  assert.match(fx.text('jira'), /^지라연결하기내 티켓이 프로젝트로 뜨고 상태·기한을 여기서 바꿔요3분 · Atlassian API 토큰 하나/);
+  assert.match(fx.text('calendar'), /^캘린더Claude 없이도 돼요연결하기오늘 회의가 뜨고 회의 정리가 열려요3분 · 맥 캘린더·Claude Code·비밀 주소/);
+  assert.match(fx.text('notes'), /^회의록Claude 없이도 돼요직접 옮기기바꾸기티로 회의록이 초안으로 들어와요 — 직접 옮기기도 돼요회의 정리 화면에 붙여 넣어요/);
   same(['slack', 'jira', 'calendar', 'notes'].map(kind => statOf(fx, kind)), [['d-istat k-off', ''], ['d-istat k-off', ''], ['d-istat k-off', ''], ['d-istat k-ok', '직접 옮기기']], '연결 안 됨은 빈 원(말 없음), 직접 옮기기는 초록');
   same(['slack', 'jira', 'calendar'].map(kind => fx.toggle(kind).className), ['d-btn acc', 'd-btn acc', 'd-btn acc']);
   // 접힌 카드에는 입력칸이 아예 없다 — 누른 카드만 그 자리에서 펼친다
