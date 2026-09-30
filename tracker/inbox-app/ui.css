@@ -2681,6 +2681,7 @@ a.d-btn { text-decoration: none; }
 .d-imacpic .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 32px; padding: 0 10px; border-radius: 8px; background: var(--surface); font-size: var(--fs-sm); font-weight: 600; color: var(--text); }
 .d-imacpic .sw { position: relative; flex: none; width: 30px; height: 18px; border-radius: 999px; background: var(--accent-strong); }
 .d-imacpic .sw::after { content: ''; position: absolute; top: 2px; right: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--on-fill); }
+.d-intg > .d-imacpic { margin-top: 8px; }
 .d-ichoice.is-off { opacity: 0.55; cursor: default; }
 /* 캘린더 갈래 셋(WP-V) — `맥 캘린더`(추천)가 맨 위, `Claude Code로`, 접힌 `다른 방법: 비밀 주소 붙이기`를 세로로 쌓는다.
    읽을 캘린더 목록은 쓸 곳 고르기(.d-ich)와 같은 줄 — 이름 칸이 없어 두 칸이다. */
@@ -2714,6 +2715,7 @@ a.d-btn { text-decoration: none; }
   .d-intg > .d-intgside { grid-column: 1; grid-row: auto; justify-self: stretch; margin-top: 8px; order: 1; }
   .d-intgside .d-istat { margin-right: auto; }
   .d-intg > .d-intgwhy, .d-intg > .d-intgnote, .d-intg > .d-intgneed, .d-intg > .d-iconfirmslot, .d-intg > .d-intgbody, .d-intg > .d-iclaude { order: 2; }
+  .d-intg > .d-imacpic { order: 2; }
   .d-ich { grid-template-columns: 20px minmax(0, 1fr); }
   .d-ich .nm, .d-ich .nmwrap, .d-ich .lock { grid-column: 2; }
   .d-ich .nmwrap .nm { grid-column: auto; }

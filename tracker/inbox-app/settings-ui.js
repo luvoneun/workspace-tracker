@@ -2596,6 +2596,12 @@ const SETTINGS_MAC_DENIED_HELP = '맥 설정은 화면 왼쪽 위 애플 메뉴 
 const SETTINGS_MAC_DENIED_NAMES = ['node', 'osascript'];
 function settingsMacDeniedHelp() {
   const help = settingsEl('d-imachelp');
+  help.append(settingsEl('d-ismall', SETTINGS_MAC_DENIED_HELP), settingsMacDeniedPic());
+  help.hidden = true;
+  return help;
+}
+// 찾을 이름 예시 그림 — 처음 연결 화면의 막힘 안내와 연결된 카드의 막힘 이유 줄 아래가 같은 그림을 쓴다.
+function settingsMacDeniedPic() {
   const pic = document.createElement('figure');
   pic.className = 'd-imacpic';
   const cap = document.createElement('figcaption');
@@ -2613,9 +2619,15 @@ function settingsMacDeniedHelp() {
     row.append(label, sw);
     pic.appendChild(row);
   });
-  help.append(settingsEl('d-ismall', SETTINGS_MAC_DENIED_HELP), pic);
-  help.hidden = true;
-  return help;
+  return pic;
+}
+// 연결된 카드의 이유 줄 — 읽기 스크립트(calendar-mac.js)가 로그에 남기는 옛 막힘 문구(`시스템 설정 › … 캘린더(전체 접근)와
+// 자동화에서 허용해 주세요`)는 처음 연결 화면과 같은 새 안내로 바꿔 보인다. 표시만 바꾼다 — 서버 응답·로그·스크립트는 그대로.
+// 판정은 느슨한 포함 검사(캘린더 + 자동화 + 허용)이고, 모르는 문구는 원문 그대로다.
+function settingsMacWhy(text) {
+  const raw = String(text || '');
+  const denied = raw === SETTINGS_MAC_WORDS.denied || (/캘린더/.test(raw) && /자동화/.test(raw) && /허용/.test(raw));
+  return { text: denied ? SETTINGS_MAC_WORDS.denied : raw, denied };
 }
 
 async function settingsMacLoad() {
@@ -2891,8 +2903,9 @@ function settingsCalendarCard(data) {
   // 비밀 주소를 한 번도 못 읽었으면 주소 문제로 보고 곧바로 멈췄어요 + 다시 연결이다.
   const neverRead = ical && !calendar.readAt && !!calendar.failed;
   const failing = on && (!!fetchState.failing || neverRead);
-  // 맥 캘린더 읽기의 실패 줄(`⚠️ 이유 — 고치는 법`)은 그대로 이유 한 줄로 보인다(늦어요·멈췄어요는 다른 연동과 같은 규칙).
-  const macWhy = mac && /^⚠️\s*/.test(String(fetchState.summary || '')) ? String(fetchState.summary).replace(/^⚠️\s*/, '') : '';
+  // 맥 캘린더 읽기의 실패 줄(`⚠️ 이유 — 고치는 법`)은 이유 한 줄로 보인다(옛 허용 막힘 문구만 새 안내로 — settingsMacWhy.
+  // 늦어요·멈췄어요는 다른 연동과 같은 규칙).
+  const macWhy = mac && /^⚠️\s*/.test(String(fetchState.summary || '')) ? settingsMacWhy(String(fetchState.summary).replace(/^⚠️\s*/, '')) : null;
   let card = null;
   card = settingsIntgCard({
     kind: 'calendar', name: '캘린더', chip: SETTINGS_NO_CLAUDE_CHIP,
@@ -2902,7 +2915,9 @@ function settingsCalendarCard(data) {
       ? (ical ? '30분마다' : mac ? '매일 8–20시, 30분마다' : '매일 9–19시, 2시간마다')
       : '3분 · 맥 캘린더·Claude Code·비밀 주소',
     status: on ? settingsCalendarStatus(calendar) : null,
-    alert: failing ? { stop: neverRead || settingsFailStop(fetchState), why: macWhy ? [macWhy] : settingsFailWhy('calendar', fetchState, { reconnect: ical }) } : null,
+    alert: failing ? { stop: neverRead || settingsFailStop(fetchState), why: macWhy ? [macWhy.text] : settingsFailWhy('calendar', fetchState, { reconnect: ical }) } : null,
+    // 허용 막힘이면 이유 줄 아래에 처음 연결 화면과 같은 예시 그림(가는 길 글은 `허용하고 확인` 버튼 몫이라 뺀다).
+    extra: failing && macWhy && macWhy.denied ? [settingsMacDeniedPic()] : [],
     // 비밀 주소면 앱이 곧바로 다시 읽고(`오늘 N개`), Claude 갈래면 요청만 남긴다. 주소 문제면 `다시 연결`.
     fetch: on ? {
       key: 'calendar', state: calendar.fetch || {}, unit: ical ? '오늘' : '',

@@ -11182,7 +11182,7 @@ test('WP-V F. 맥 캘린더 확인 실패: 막힘은 이유 + 시스템 설정 �
   assert.match(denied.help.children[0].textContent, /애플 메뉴 › 시스템 설정이에요\. 캘린더 목록에서 아래 같은 이름을 찾아 「전체 접근」으로 켜고, 같은 화면의 자동화에서도 캘린더를 켠 뒤/);
   // 찾을 이름 예시 그림 — 맥 화면이 아니라 예시임을 캡션이 말하고, 이름은 읽기 길에서 아는 것(node·osascript)만. 스위치는 그림이라 읽지 않는다.
   const pic = denied.help.children[1];
-  assert.match(denied.fx.app.run('settingsMacDeniedHelp.toString()'), /createElement\('figure'\)[\s\S]*createElement\('figcaption'\)/, '그림은 figure + figcaption');
+  assert.match(denied.fx.app.run('settingsMacDeniedPic.toString()'), /createElement\('figure'\)[\s\S]*createElement\('figcaption'\)/, '그림은 figure + figcaption');
   assert.equal(pic.className, 'd-imacpic');
   assert.equal(pic.children[0].textContent, '예시 그림 — 맥 화면이 아니에요. 이름은 맥에 따라 달라요');
   assert.equal(pic.children[1].textContent, '개인정보 보호 및 보안 › 캘린더');
@@ -11240,6 +11240,33 @@ test('WP-V F. 연결된 맥 캘린더: `맥 캘린더에서 읽는 중 · 10분 
   await stopped.app.run('renderSettingsIntegrations()');
   assert.match(stopped.text('calendar'), /고른 캘린더를 찾지 못했어요 — 다시 골라 주세요/);
   assert.doesNotMatch(stopped.text('calendar'), /⚠️|최근 기록에서/, '이유 한 줄만');
+  assert.equal(stopped.find('calendar', 'd-imacpic').length, 0, '허용 막힘이 아니면 예시 그림이 없다');
+});
+
+test('WP-V G. 연결된 맥 캘린더 카드가 허용 막힘으로 멈추면 이유 줄은 새 안내 + 예시 그림 — 모르는 문구는 원문 그대로', async () => {
+  const old = '⚠️ 맥이 캘린더 접근을 막았어요 — 시스템 설정 › 개인정보 보호 및 보안 › 캘린더(전체 접근)와 자동화에서 허용해 주세요';
+  const card = async (summary) => {
+    const fx = intgClient({ calendar: { enabled: true, source: 'mac', macCalendars: [{ id: 'CAL-ME', name: 'me@example.test' }], fetch: { failing: true, stuck: true, lastRunAt: ago(5), summary } } });
+    await fx.app.run('renderSettingsIntegrations()');
+    return fx;
+  };
+  const whyOf = fx => fx.shape("window.findByClass(document.getElementById('settingsIntegrationsView').children.find(one => one.dataset && one.dataset.integration === 'calendar'), 'd-intgwhy')[0]").text;
+  const denied = await card(old);
+  const why = denied.find('calendar', 'd-intgwhy');
+  assert.equal(why.length, 1);
+  assert.equal(whyOf(denied), '맥이 캘린더 접근을 막았어요 — 맥 설정 › 개인정보 보호 및 보안 › 캘린더(그리고 자동화)에서 목록의 이름을 찾아 켜 주세요', '옛 문구는 새 안내로');
+  assert.doesNotMatch(denied.text('calendar'), /전체 접근\)와 자동화에서 허용/, '옛 문구는 보이지 않는다');
+  const pic = denied.find('calendar', 'd-imacpic');
+  assert.equal(pic.length, 1, '이유 줄 아래 예시 그림 하나');
+  assert.equal(pic[0].children[0].textContent, '예시 그림 — 맥 화면이 아니에요. 이름은 맥에 따라 달라요');
+  assert.doesNotMatch(denied.text('calendar'), /허용하고 확인을 다시 눌러/, '카드에는 없는 버튼을 말하지 않는다');
+  // 카드 다른 줄(이름·효용·지금 상황·점)은 그대로
+  const unknown = await card('⚠️ 처음 보는 오류예요 — 무언가 달라요');
+  assert.equal(whyOf(unknown), '처음 보는 오류예요 — 무언가 달라요', '모르는 문구는 원문 그대로');
+  assert.equal(unknown.find('calendar', 'd-imacpic').length, 0);
+  const strip = fx => fx.text('calendar').replace(whyOf(fx), '').replace(/예시 그림[\s\S]*$/, '');
+  assert.equal(strip(denied), strip(unknown), '이유 줄·그림 말고는 같다');
+  assert.equal(strip(denied), '캘린더Claude 없이도 돼요멈췄어요연결하기다시 시도오늘 회의가 뜨고 회의 정리가 열려요읽지 못했어요매일 8–20시, 30분마다');
 });
 
 test('WP-V F. 허용 창에 답하지 않음(0)은 다시 누르라는 말만 — 막힘 안내(시스템 설정 가는 길)는 거부일 때만', async () => {
