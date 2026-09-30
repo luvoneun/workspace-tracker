@@ -415,11 +415,62 @@ test('연동 저장: 값이 틀리거나 확인에 실패하면 설정 파일도
     slackCheck: async () => { throw Object.assign(new Error('슬랙에서 이 채널을 읽지 못했어요 — 토큰과 채널을 확인해 주세요'), { status: 400 }); },
   });
   await assert.rejects(() => save({ jira: { enabled: true, siteUrl: 'http://회사.atlassian.net', email: 'a@b.c', token: 't' } }), /지라 주소는 https:\/\/로 시작해야 해요/);
-  await assert.rejects(() => save({ jira: { enabled: true, siteUrl: 'https://회사.atlassian.net', email: 'a@b.c', token: 't' } }), /지라에서 이 토큰으로 로그인하지 못했어요/);
+  await assert.rejects(() => save({ jira: { enabled: true, siteUrl: 'https://회사.atlassian.net', email: 'a@b.c', token: 't' } }), /이메일이나 토큰이 맞지 않아요/);
   await assert.rejects(() => save({ slack: { enabled: true, token: 't', channels: { todo: '#my-todo' } } }), /슬랙 채널 링크나 ID를 붙여 넣어 주세요/);
   await assert.rejects(() => save({ slack: { enabled: true, token: 't', channels: { todo: 'C0TODO11' } } }), /슬랙에서 이 채널을 읽지 못했어요/);
   assert.equal(fs.readFileSync(fix.configPath, 'utf8'), before, '실패하면 설정은 한 글자도 바뀌지 않는다');
   assert.equal(fs.existsSync(path.join(fix.tokenDir, 'workspace-jira-token')), false, '실패하면 토큰 파일도 만들지 않는다');
+});
+
+test('연동 저장(지라): 주소창째 붙인 주소는 origin만 남기고, 스킴이 없으면 https://를 붙이며, http://는 거절한다', async (t) => {
+  const fix = integrationsFixture(t, {});
+  const asked = [];
+  const save = siteUrl => integrationsStore.saveIntegrations({
+    configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir,
+    body: { jira: { enabled: true, siteUrl, email: 'me@example.test', token: 'fake-jira-token-000' } },
+    jiraCheck: async (settings) => { asked.push(settings.siteUrl); return { ok: true, displayName: '가짜' }; },
+  });
+  await save('https://mycompany.atlassian.net/jira/software/projects/AB/boards/1?selectedIssue=AB-1#x');
+  assert.equal(fix.read().jira.siteUrl, 'https://mycompany.atlassian.net', '경로·쿼리·조각은 떼고 적는다');
+  await save('mycompany.atlassian.net/browse/AB-1');
+  assert.equal(fix.read().jira.siteUrl, 'https://mycompany.atlassian.net', 'https:// 없이 오면 붙여 준다');
+  await save('https://jira.example.test:8443/secure/Dashboard.jspa');
+  assert.equal(fix.read().jira.siteUrl, 'https://jira.example.test:8443', '커스텀 도메인은 호스트(포트 포함) 그대로');
+  await save('https://회사.atlassian.net/');
+  assert.equal(fix.read().jira.siteUrl, 'https://회사.atlassian.net', '한글 호스트도 붙인 글자 그대로');
+  assert.deepEqual(asked, ['https://mycompany.atlassian.net', 'https://mycompany.atlassian.net', 'https://jira.example.test:8443', 'https://회사.atlassian.net'], '지라에 묻는 주소도 정리한 주소');
+  const before = fs.readFileSync(fix.configPath, 'utf8');
+  await assert.rejects(() => save('http://mycompany.atlassian.net'), (error) => error.message === '지라 주소는 https://로 시작해야 해요' && error.code === 'jira_site');
+  await assert.rejects(() => save('my company'), (error) => /지라 주소를 확인해 주세요/.test(error.message) && error.code === 'jira_site');
+  await assert.rejects(() => save(''), (error) => error.code === 'jira_site');
+  assert.equal(fs.readFileSync(fix.configPath, 'utf8'), before);
+});
+
+test('연동 저장(지라): 실패는 갈래별 문구(이메일 모양 / 이메일이나 토큰 / 연결 안 됨)이고 주소·이메일·토큰은 싣지 않는다', async (t) => {
+  const fix = integrationsFixture(t, {});
+  const secret = 'fake-jira-token-SECRET-123';
+  const email = 'someone@example.test';
+  const site = 'https://secret-site.atlassian.net';
+  const save = (body, kind) => integrationsStore.saveIntegrations({
+    configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir,
+    body: { jira: { enabled: true, siteUrl: site, email, token: secret, ...body } },
+    jiraCheck: async () => ({ ok: false, kind }),
+  });
+  const caught = async (promise) => { try { await promise; } catch (error) { return error; } assert.fail('거절돼야 한다'); };
+  const cases = [
+    [await caught(save({ email: 'someone.example.test' }, 'auth')), 'jira_email', /이메일 모양이 아니에요/],
+    [await caught(save({}, 'auth')), 'jira_auth', /^이메일이나 토큰이 맞지 않아요/],
+    [await caught(save({}, 'network')), 'jira_unreachable', /^지라에 연결하지 못했어요 — 주소와 인터넷 연결을 확인/],
+    [await caught(save({}, 'other')), 'jira_unreachable', /^지라에 연결하지 못했어요/],
+    [await caught(save({}, 'notfound')), 'jira_unreachable', /^지라에 연결하지 못했어요/],
+    [await caught(save({}, undefined)), 'jira_auth', /^이메일이나 토큰이 맞지 않아요/],
+  ];
+  for (const [error, code, words] of cases) {
+    assert.equal(error.code, code);
+    assert.match(error.message, words);
+    for (const value of [secret, email, 'someone.example.test', 'secret-site']) assert.ok(!error.message.includes(value), '문구에 주소·이메일·토큰이 없다');
+  }
+  assert.equal(fs.existsSync(path.join(fix.tokenDir, 'workspace-jira-token')), false, '실패하면 토큰 파일을 만들지 않는다');
 });
 
 test('연동 저장: 다시 켜기는 launchd가 띄운 자리에서만 하고, 테스트에서는 끼워 넣은 exit만 불린다', () => {

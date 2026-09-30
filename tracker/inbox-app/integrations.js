@@ -31,10 +31,20 @@ const SLACK_APPS_URL = 'https://api.slack.com/apps';
 const SLACK_CHANNEL_NAME_RE = /^[a-z0-9_-]{1,80}$/;
 
 const MESSAGE = {
+  // 지라 주소·실패 문구 — 어디를 고칠지 갈래마다 한 말. 주소·이메일·토큰은 싣지 않는다.
+  // 지라는 이메일이 틀려도 토큰이 틀려도 똑같이 401을 줘서 둘은 가를 수 없다(그래서 auth는 둘 다 보라고 한다).
   jiraSite: '지라 주소는 https://로 시작해야 해요',
+  jiraSiteBad: '지라 주소를 확인해 주세요 — 예: https://회사.atlassian.net',
   jiraEmail: '지라 계정 이메일을 적어 주세요',
+  jiraEmailShape: '이메일 모양이 아니에요 — 지라에 로그인하는 회사 이메일을 적어 주세요',
   jiraToken: 'API 토큰을 붙여 넣어 주세요',
-  jiraAuth: '지라에서 이 토큰으로 로그인하지 못했어요',
+  jiraAuth: '이메일이나 토큰이 맞지 않아요 — 이메일을 확인하고, 맞으면 ← 이전으로 돌아가 새 토큰을 붙여 넣어 주세요',
+  jiraReach: '지라에 연결하지 못했어요 — 주소와 인터넷 연결을 확인하고 다시 눌러 주세요',
+  // Claude 로그인 토큰(`claude setup-token`이 보여 주는 한 줄) — 값은 문구에 싣지 않는다.
+  claudeTokenEmpty: 'claude setup-token이 보여 준 토큰을 붙여 넣어 주세요',
+  claudeTokenSpace: '토큰 사이에 띄어쓰기나 줄바꿈이 있어요 — 터미널에서 한 줄로 다시 복사해 주세요',
+  claudeTokenShape: '토큰 모양이 아니에요 — claude setup-token이 보여 준 sk-ant-로 시작하는 한 줄을 붙여 넣어 주세요',
+  claudeTokenLong: '토큰이 너무 길어요 — claude setup-token이 보여 준 한 줄만 붙여 넣어 주세요',
   slackToken: '슬랙 토큰을 붙여 넣어 주세요',
   slackChannel: '슬랙 채널 링크나 ID를 붙여 넣어 주세요',
   slackRead: '슬랙에서 이 채널을 읽지 못했어요 — 토큰과 채널을 확인해 주세요',
@@ -78,6 +88,22 @@ const trimmed = value => (typeof value === 'string' ? value.trim() : '');
 const expandHome = value => String(value || '').replace(/^~(?=\/|$)/, os.homedir());
 // 자리표시자는 "빈 칸"으로 읽는다.
 const realChannelId = value => (trimmed(value) === PLACEHOLDER_CHANNEL_ID ? '' : trimmed(value));
+
+// 지라 주소를 origin(`https://호스트`)만 남게 정리한다 — 브라우저 주소창을 통째로 붙여도(경로·쿼리·끝 빗금) 되게.
+// `회사.atlassian.net`처럼 스킴 없이 오면 https://를 붙인다. https가 아닌 스킴(http:// 등)은 `scheme`,
+// 주소로 읽을 수 없으면 `bad`로 돌려준다(부르는 쪽이 문구를 고른다). 화면(settings-ui.js settingsJiraSite)도 같은 규칙이다.
+function normalizeJiraSite(value) {
+  let text = trimmed(value);
+  if (!text) return { error: 'bad' };
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) text = `https://${text.replace(/^\/+/, '')}`;
+  let url;
+  try { url = new URL(text); } catch { return { error: 'bad' }; }
+  if (url.protocol !== 'https:') return { error: 'scheme' };
+  // 호스트는 붙인 글자 그대로 쓴다(`URL`은 한글 호스트를 xn--로 바꿔 사람이 알아보기 어렵다) — 로그인 정보(`…@`)만 뗀다.
+  const host = /^https:\/\/([^/?#\\]*)/i.exec(text)[1].replace(/^.*@/, '').toLowerCase();
+  if (!host || /\s/.test(host)) return { error: 'bad' };
+  return { site: `https://${host}` };
+}
 
 // 토큰을 둘 자리. 테스트·픽스처는 `WORKSPACE_TOKEN_DIR`로 임시 폴더를 끼워 실제 `~/.config`를
 // 건드리지 않는다. 기본 자리일 때만 config에 `~/…` 꼴로 적는다(사람이 읽기 좋게).
@@ -545,18 +571,25 @@ async function saveIntegrations({
     if (body.jira.enabled === false) {
       config = withJira(config, { enabled: false });
     } else {
-      const siteUrl = trimmed(body.jira.siteUrl).replace(/\/+$/, '');
+      // 주소는 정리한 뒤에 본다(주소창째 붙여도 origin만) — 정리한 주소가 config에 적힌다.
+      const site = normalizeJiraSite(body.jira.siteUrl);
+      if (site.error) throw bad(site.error === 'scheme' ? MESSAGE.jiraSite : MESSAGE.jiraSiteBad, 'jira_site');
+      const siteUrl = site.site;
       const email = trimmed(body.jira.email);
       const token = trimmed(body.jira.token);
-      if (!/^https:\/\/[^\s/?#]+$/.test(siteUrl)) throw bad(MESSAGE.jiraSite);
-      if (!email) throw bad(MESSAGE.jiraEmail);
+      if (!email) throw bad(MESSAGE.jiraEmail, 'jira_email');
+      if (!/^[^\s@]+@[^\s@]+$/.test(email)) throw bad(MESSAGE.jiraEmailShape, 'jira_email');
       // 토큰 칸을 비워 두고 저장하면 이미 있는 토큰을 그대로 쓴다 — config에 적힌 경로(사람이 옮겨
       // 둔 자리)를 먼저 보고, 없으면 기본 자리를 본다(readIntegrations의 hasToken과 같은 규칙).
       const saved = token ? null : findToken(paths, 'jira', clone(config.jira).tokenFile);
       if (!token && !saved) throw bad(MESSAGE.jiraToken);
       const secret = token || saved.value;
-      const account = await (jiraCheck || (() => { throw bad(MESSAGE.jiraAuth); }))({ siteUrl, email, token: secret });
-      if (!account || !account.ok) throw bad(MESSAGE.jiraAuth);
+      const account = await (jiraCheck || (() => { throw bad(MESSAGE.jiraAuth, 'jira_auth'); }))({ siteUrl, email, token: secret });
+      // 실패는 checkJiraAccount가 준 갈래(`kind`)로 가른다 — auth(401·403)는 이메일·토큰, 그 밖(연결 안 됨·404 등)은 주소·인터넷.
+      if (!account || !account.ok) {
+        if (account && account.kind && account.kind !== 'auth') throw bad(MESSAGE.jiraReach, 'jira_unreachable');
+        throw bad(MESSAGE.jiraAuth, 'jira_auth');
+      }
       if (token) pending.push([paths.jira.file, token]);
       // 새 토큰은 기본 자리에 쓰고 config도 그쪽으로 적는다. 비워 두고 저장했으면 지금 토큰이
       // 있는 자리를 그대로 적는다(사람이 옮겨 둔 경로를 기본 경로로 덮어쓰지 않는다).
@@ -940,4 +973,5 @@ module.exports = {
   scheduleRestart, errorLines, maskLine, claudeInstalled, claudeCandidateDirs, writeTokenFile,
   slackTokenCheck, savedSlackToken, createSlackNameFollower, SLACK_FOLLOW_MS, slackChannelPrefix, slackTsNow,
   normalizeIcalUrl, fetchIcal, icalCheck, savedIcalUrl, ICAL_TIMEOUT_MS, savePersonalize, registrationKey,
+  normalizeJiraSite,
 };

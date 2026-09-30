@@ -841,6 +841,16 @@ const settingsSlackAppUrl = (value) => {
   if (!/^https:\/\/\S+$/.test(url)) return SETTINGS_SLACK_APPS_URL;
   return /^https:\/\/api\.slack\.com\/apps\/[A-Za-z0-9]+\/?$/.test(url) ? `${url.replace(/\/$/, '')}/oauth` : url;
 };
+// 지라 주소 정리 — 서버(integrations.js normalizeJiraSite)와 같은 규칙: 주소창째 붙여도 `https://호스트`만,
+// 스킴이 없으면 https://를 붙인다. https가 아닌 스킴·주소가 아닌 글자는 null(서버가 갈래 문구로 거절한다).
+const settingsJiraSite = (value) => {
+  let text = String(value || '').trim();
+  if (!text) return null;
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) text = `https://${text.replace(/^\/+/, '')}`;
+  const hit = /^https:\/\/([^/?#\\]*)/i.exec(text);
+  const host = hit ? hit[1].replace(/^.*@/, '').toLowerCase() : '';
+  return host && !/\s/.test(host) ? `https://${host}` : null;
+};
 // 슬랙 채널 이름 규칙대로 화면에서 정리한다 — 소문자·숫자·`-`·`_`만 80자, 띄어쓰기는 `-`로.
 const settingsSlackChannelName = value => String(value || '').trim().toLowerCase()
   .replace(/\s+/g, '-').replace(/[^a-z0-9_-]/g, '').slice(0, 80);
@@ -2339,7 +2349,24 @@ function settingsJiraWizard(card, data) {
     const email = settingsField('지라에 로그인하는 이메일', { placeholder: '나@회사.com', value: state.email });
     email.input.addEventListener('input', () => { state.email = email.input.value; });
     const site = settingsField('지라 주소', { placeholder: 'https://회사.atlassian.net', value: state.site });
-    site.input.addEventListener('input', () => { state.site = site.input.value; });
+    // 주소창째 붙였으면 앞부분만 남기고 한 줄로 알린다(정리한 주소는 비밀이 아니다). 팀 설정 주소는 그대로 보낸다.
+    const tidied = settingsEl('d-ismall k-ok');
+    tidied.dataset.jira = 'tidied';
+    tidied.setAttribute('role', 'status');
+    tidied.hidden = true;
+    const tidySite = () => {
+      const typed = String(site.input.value || '').trim();
+      const clean = settingsJiraSite(typed);
+      if (clean && clean !== typed) {
+        site.input.value = clean;
+        state.site = clean;
+        tidied.textContent = `주소를 ${clean} 으로 정리했어요`;
+        tidied.hidden = false;
+      }
+    };
+    site.input.addEventListener('input', () => { state.site = site.input.value; tidied.hidden = true; site.input.removeAttribute('aria-invalid'); });
+    site.input.addEventListener('change', tidySite);
+    email.input.addEventListener('input', () => email.input.removeAttribute('aria-invalid'));
     site.wrap.hidden = !state.siteOpen;
     const parts = [email.wrap];
     if (team) {
@@ -2355,15 +2382,27 @@ function settingsJiraWizard(card, data) {
         }));
       parts.push(note);
     }
-    parts.push(site.wrap);
+    parts.push(site.wrap, tidied);
     const error = settingsErrorLine();
     const go = settingsButton('연결', 'd-btn pri');
-    const connect = () => settingsIntegrationSave({
-      jira: { enabled: true, siteUrl: state.siteOpen ? site.input.value : team, email: email.input.value, token: state.token },
-    }, {
-      error, button: go, done: '지라에 연결했어요',
-      saved: (result) => { settingsIntgAfter = { kind: 'jira', displayName: (result.jira && result.jira.displayName) || '' }; },
-    });
+    const connect = () => {
+      email.input.removeAttribute('aria-invalid');
+      site.input.removeAttribute('aria-invalid');
+      if (state.siteOpen) tidySite();
+      return settingsIntegrationSave({
+        jira: { enabled: true, siteUrl: state.siteOpen ? site.input.value : team, email: email.input.value, token: state.token },
+      }, {
+        error, button: go, done: '지라에 연결했어요',
+        saved: (result) => { settingsIntgAfter = { kind: 'jira', displayName: (result.jira && result.jira.displayName) || '' }; },
+        // 고칠 칸을 붉게 — 이메일 모양은 이메일 칸, 주소·연결 안 됨은 주소 칸(열려 있을 때). 이메일·토큰은 서버도 가를 수 없어 표시하지 않는다.
+        failed: (data) => {
+          const field = data.code === 'jira_email' ? email.input
+            : ((data.code === 'jira_site' || data.code === 'jira_unreachable') && state.siteOpen ? site.input : null);
+          if (field) field.setAttribute('aria-invalid', 'true');
+          return false;
+        },
+      });
+    };
     go.addEventListener('click', connect);
     settingsOnEnter(email.input, connect);
     settingsOnEnter(site.input, connect);

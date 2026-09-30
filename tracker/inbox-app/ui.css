@@ -1415,6 +1415,9 @@ textarea.d-dtitle {
 /* 비운 채 담으려 한 칸 — 오류 토큰(연한 빨강 채움 + 빨간 테). 채우는 즉시 걷힌다 */
 .d-dtxt[aria-invalid="true"] { background: var(--urgent-bg); box-shadow: 0 0 0 1.5px var(--urgent); }
 .d-dtxt[aria-invalid="true"]:focus { background: var(--surface); box-shadow: 0 0 0 2px var(--urgent); }
+/* 연동 칸에서 고칠 칸(지라 이메일·주소) — 위 .d-dtxt와 같은 표시. */
+.d-din[aria-invalid="true"] { box-shadow: 0 0 0 1.5px var(--urgent); }
+.d-din[aria-invalid="true"]:focus { box-shadow: 0 0 0 2px var(--urgent); }
 /* 종류(할 일·확인 대기·결정)와 언제(나중에·오늘)는 다른 조작이라 가로 간격을 넓혀 두 덩어리로 보이게 */
 .d-draft .ct { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
 /* 날짜 칸 — 고른 날짜는 앱 날짜 글자로 보이는 버튼이다(누르면 입력칸) */
@@ -2430,6 +2433,7 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-bkline { font-size: var(--fs-body); color: var(--text); font-variant-numeric: tabular-nums; }
 .d-bkline.k-neg { color: var(--urgent); font-weight: 600; }
 .d-ismall.k-neg { color: var(--urgent); }
+.d-ismall.k-ok { color: var(--success); }
 .d-ablink {
   padding: 0; border: 0; background: none; font: inherit; color: var(--dim);
   text-decoration: underline; text-underline-offset: 2px; cursor: pointer;

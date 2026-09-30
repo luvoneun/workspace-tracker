@@ -7381,6 +7381,67 @@ test('WP-D1 E. 지라: 팀 주소가 있으면 묻지 않고(바꾸기로만 연
   assert.ok(!JSON.stringify(plain.shape("document.getElementById('settingsIntegrationsView')")).includes('내회사'), '예시값은 입력칸에 들어가지 않는다');
 });
 
+test('연동 1층-B ①: 지라 주소를 주소창째 붙이면 칸에 `https://호스트`만 남기고 `주소를 … 으로 정리했어요`, 실패는 갈래 문구 그대로 + 고칠 칸만 붉게', async () => {
+  const unreachable = '지라에 연결하지 못했어요 — 주소와 인터넷 연결을 확인하고 다시 눌러 주세요';
+  const shape = '이메일 모양이 아니에요 — 지라에 로그인하는 회사 이메일을 적어 주세요';
+  const auth = '이메일이나 토큰이 맞지 않아요 — 이메일을 확인하고, 맞으면 ← 이전으로 돌아가 새 토큰을 붙여 넣어 주세요';
+  const fx = intgClient({ jira: { siteUrl: '', email: '' } }, [
+    { status: 400, body: { ok: false, code: 'jira_unreachable', error: unreachable } },
+    { status: 400, body: { ok: false, code: 'jira_email', error: shape } },
+    { status: 400, body: { ok: false, code: 'jira_auth', error: auth } },
+  ]);
+  await fx.app.run('renderSettingsIntegrations()');
+  fx.toggle('jira').listeners.click();
+  fx.find('jira', 'd-din')[0].value = 'fake-jira-token';
+  await fx.button('jira', '다음 →').listeners.click();
+  const [email, site] = fx.find('jira', 'd-din');
+  email.value = 'me@example.test';
+  site.value = 'https://mycompany.atlassian.net/jira/software/projects/AB/boards/1?selectedIssue=AB-1';
+  site.listeners.input();
+  site.listeners.change();
+  assert.equal(site.value, 'https://mycompany.atlassian.net', '칸에 정리한 주소를 보인다');
+  const tidied = fx.find('jira', 'k-ok')[0];
+  assert.equal(tidied.hidden, false);
+  assert.equal(tidied.textContent, '주소를 https://mycompany.atlassian.net 으로 정리했어요');
+  // 다시 고쳐 치면 안내는 내려간다 — 스킴 없이 적어도 연결할 때 붙여 보낸다
+  site.value = 'mycompany.atlassian.net/browse/AB-1';
+  site.listeners.input();
+  assert.equal(tidied.hidden, true);
+
+  await fx.button('jira', '연결').listeners.click();
+  const sent = fx.sent.filter(one => one.url === '/api/integrations/save');
+  assert.equal(sent[0].body.jira.siteUrl, 'https://mycompany.atlassian.net', '보내는 주소도 정리한 것');
+  assert.equal(tidied.hidden, false);
+  const error = () => fx.find('jira', 'd-derr')[0].textContent;
+  assert.equal(error(), unreachable);
+  assert.equal(site.getAttribute('aria-invalid'), 'true', '연결 안 됨은 주소 칸');
+  assert.notEqual(email.getAttribute('aria-invalid'), 'true');
+
+  site.listeners.input();
+  await fx.button('jira', '연결').listeners.click();
+  assert.equal(error(), shape);
+  assert.equal(email.getAttribute('aria-invalid'), 'true', '이메일 모양은 이메일 칸');
+  assert.notEqual(site.getAttribute('aria-invalid'), 'true');
+
+  email.listeners.input();
+  await fx.button('jira', '연결').listeners.click();
+  assert.equal(error(), auth, '이메일·토큰은 가를 수 없어 둘 다 보라고 한다');
+  assert.notEqual(email.getAttribute('aria-invalid'), 'true');
+  assert.notEqual(site.getAttribute('aria-invalid'), 'true');
+
+  // 같은 정리 규칙(서버 normalizeJiraSite와 같은 답)
+  const tidy = value => fx.app.run(`settingsJiraSite(${JSON.stringify(value)})`);
+  assert.equal(tidy('https://jira.example.test:8443/secure/Dashboard.jspa'), 'https://jira.example.test:8443');
+  assert.equal(tidy('HTTPS://A.Atlassian.NET/'), 'https://a.atlassian.net');
+  assert.equal(tidy('https://회사.atlassian.net/'), 'https://회사.atlassian.net');
+  assert.equal(tidy('http://a.atlassian.net'), null, 'http는 정리하지 않고 서버 문구에 맡긴다');
+  assert.equal(tidy('my company'), null);
+  const { normalizeJiraSite } = require('./integrations');
+  for (const value of ['https://mycompany.atlassian.net/jira?x=1#y', 'mycompany.atlassian.net', '//a.atlassian.net', 'https://u:p@a.atlassian.net/x', 'https://회사.atlassian.net/']) {
+    assert.equal(tidy(value), normalizeJiraSite(value).site, value);
+  }
+});
+
 // WP-D2에서 바뀜: `비밀 주소 붙이기`는 이제 자리만이 아니라 실제 갈래다(곧 돼요·is-off·aria-disabled 단언을 새 동작으로 바꿈).
 // `Claude Code로` 갈래의 세 줄·복사·켜기(본문 `{ calendar: { enabled: true } }`)는 그대로다.
 test('WP-D1·D2·V F. 캘린더: `맥 캘린더`(추천)가 맨 위 → `Claude Code로` 세 줄 + 복사 + 켜기 → 접힌 `다른 방법: 비밀 주소 붙이기`', async () => {
