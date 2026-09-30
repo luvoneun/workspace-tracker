@@ -1878,7 +1878,7 @@ function renderSuggestions(suggestions) {
   toggle.setAttribute('aria-controls', 'suggestZone');
   toggle.innerHTML = uiIcon('chevron');
   const label = document.createElement('span');
-  label.textContent = defer ? `${data.items.length}개 미룰까요?` : '오늘 이건 어때요?';
+  label.textContent = defer ? `${data.items.length}개 미룰까요?` : `오늘 할 만한 일 ${data.items.length}개`;
   toggle.appendChild(label);
   toggle.addEventListener('click', () => { suggestOpen = !suggestOpen; renderSuggestions(suggestions); });
   // 링크는 머리줄의 진행 문장 뒤에, 펼친 줄은 머리줄 아래에 둔다.

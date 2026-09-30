@@ -683,6 +683,22 @@ test('panelWhenText: 진행 중이 아니면 지난 예정일은 `N일째 밀림
   assert.match(app.run("panelWhenText({ status: 'open', scheduled: '2000-01-01' }, 'today')"), /^\d+일째 밀림 · 1월 1일 \(토\)$/);
 });
 
+// 1.3.2: 오늘 할 일 머리줄의 끌어오기 제안은 `오늘 할 만한 일 N개`(미루기 `N개 미룰까요?`는 그대로, 0개면 없음).
+test('제안 머리줄 문구: 끌어오기는 `오늘 할 만한 일 N개`, 미루기는 `N개 미룰까요?`, 0개면 링크 없음', () => {
+  const app = workflowsClient();
+  app.run('workflowData = { items: [], meetings: [] }; wfIndexData();');
+  const label = (mode, ids) => app.run(`(() => {
+    suggestOpen = false; itemsById = new Map();
+    const slot = document.getElementById('suggestSlot'); slot.children = [];
+    renderSuggestions({ mode: '${mode}', items: ${JSON.stringify(ids)}.map(id => ({ id, description: id })) });
+    const toggle = slot.children.find(node => node.className === 'd-sug');
+    return toggle ? toggle.children.map(node => node.textContent).join('') : null;
+  })()`);
+  assert.equal(label('pull', ['a', 'b']), '오늘 할 만한 일 2개');
+  assert.equal(label('defer', ['a', 'b', 'c']), '3개 미룰까요?');
+  assert.equal(label('pull', []), null);
+});
+
 test('panelWhenText: 진행 중 + 오늘(또는 예정일 없음)은 `오늘` 그대로', () => {
   const app = pureClient();
   assert.equal(app.run("panelWhenText({ status: 'open', doing: todayStr(), scheduled: todayStr() }, 'today')"), '오늘');
