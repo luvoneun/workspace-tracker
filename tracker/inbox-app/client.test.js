@@ -13385,7 +13385,7 @@ test('개편 A 검수: 접힘 줄의 `보고에 없는 끝낸 일 N` 머리 오�
   assert.match(ui, /REPORT_MOVE_NOTICE = \{[\s\S]*pullNew: '새로 들어온 줄을 보고에 넣었어요'/, '알림·되돌리기는 기존 그대로');
 });
 
-test('개편 A 99 리뷰 장면①: 확정 뒤 진행 중 업무만 새로 들어오면(끝낸 일 0) 접힘 줄이 `보고에 없는 새 줄 1`로 서고 `새로 들어온 줄 1 모두 넣기`가 pullNew를 보낸다', async () => {
+test('개편 A 99 리뷰 장면①: 확정 뒤 진행 중 업무만 새로 들어오면(끝낸 일 0) 접힘 줄이 `보고에 없는 새 줄 1`로 서고 `보고에 넣기`(한 줄이면 이 이름)가 pullNew를 보낸다', async () => {
   const app = a7Client();
   app.run(`item = { weekKey: '2026-09-14', draft: { revision: 1, rows: [], review: { count: 0, first: null }, material: { pending: [] },
     confirmed: { at: '2026-09-16T00:00:00Z', pending: 1, pendingDone: 0 } } };`);
@@ -13396,7 +13396,7 @@ test('개편 A 99 리뷰 장면①: 확정 뒤 진행 중 업무만 새로 들�
   const head = block.children[1].children[0];
   assert.equal(head.children[0].textContent, '보고에 없는 새 줄 1');
   const all = head.children[1];
-  assert.equal(all.textContent, '새로 들어온 줄 1 모두 넣기', '한 줄씩 넣을 수 없는 줄이 있으면 1줄이어도 선다');
+  assert.equal(all.textContent, '보고에 넣기', '한 줄씩 넣을 수 없는 줄이 있으면 1줄이어도 선다');
   await all.listeners.click();
   assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), [{ action: 'pullNew' }]);
 });

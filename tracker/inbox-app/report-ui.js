@@ -2347,7 +2347,7 @@ function reportMaterialBlock(item) {
     if (fresh >= 2 || fresh > pending.length) {
       const head = reportNode('div', undefined, 'g');
       head.appendChild(reportNode('span', headText));
-      const all = reportButton(`새로 들어온 줄 ${fresh} 모두 넣기`, () => reportChange(item, { action: 'pullNew' }).then(reportMaterialFocus), 'rp-all');
+      const all = reportButton(fresh > 1 ? `새로 들어온 줄 ${fresh} 모두 넣기` : '보고에 넣기', () => reportChange(item, { action: 'pullNew' }).then(reportMaterialFocus), 'rp-all');
       all.setAttribute('aria-label', `확정 뒤 새로 들어온 줄 ${fresh}개 모두 보고에 넣기`);
       head.appendChild(all);
       body.appendChild(head);
