@@ -65,8 +65,8 @@ colors:
   success-bg-dark: "#1c3729"
   neutral-bg-dark: "#2a2f38"
   mark-dark: "rgba(255,190,107,.3)"
-  warm-dark: "#26221b"
-  warm-hover-dark: "#2e2820"
+  warm-dark: "#22252b"
+  warm-hover-dark: "#282c33"
   prog-track-dark: "#2b313b"
   pj-0-dark: "#7aa2ff"
   pj-1-dark: "#57c6ad"
@@ -362,7 +362,7 @@ components:
 | `--text` | `#191f28` | `#eaedf1` | 제목·본문 |
 | `--muted` | `#4e5968` | `#a8b1bd` | 보조 글자, 3차 버튼 글자, 배지 안 중립 글자 |
 | `--dim` | `#636c78` | `#8b95a1` | 가장 조용한 글자 — 상태말, 개수 숫자, placeholder, 0건 프로젝트 |
-| `--warm` / `--warm-hover` | `#fffaf2` / `#fff4e4` | `#26221b` / `#2e2820` | `새로 들어온 것` 카드(아주 옅은 따뜻한 면) |
+| `--warm` / `--warm-hover` | `#fffaf2` / `#fff4e4` | `#22252b` / `#282c33` (테두리 `--warm-line` `#2c3038`) | 아주 옅은 따뜻한 면 — `새로 들어온 것` 카드(`.d-inbox`), `반응 필요` 판과 줄 hover(`.d-atrow`), 사용설명서·소식 카드(`.d-start`), 설정 도움말 상자(`.d-manual`), 슬랙 보내는 법 상자(`.d-isend`). 어두운 화면에서는 갈색이 아니라 중립에 가까운 짙은 회색(목록 카드 `--surface`와는 테두리로 구분) |
 | `--prog-track` | `#e9edf2` | `#2b313b` | 오늘 카드 윗변 진행 선의 트랙 |
 | `--scrim` | `rgba(25,31,40,.16)` | `rgba(0,0,0,.5)` | 팔레트·설정 뒤 가림막 |
 

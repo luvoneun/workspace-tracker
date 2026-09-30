@@ -827,6 +827,15 @@ test('새로 들어온 것 4개: 위 3줄만 보이고 4번째는 hidden, 카드
   assert.match(css, /^\.d-ibrow\[hidden\] \{ display: none; \}$/m);
 });
 
+test('어두운 화면의 따뜻한 판은 짙은 회색이고, 시스템 다크·직접 고른 다크 두 곳이 같은 값이다(밝은 화면 그대로)', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  const warm = css.split('\n').filter(line => /^\s*--warm:/.test(line)).map(line => line.trim());
+  assert.equal(warm.length, 3, '밝은 화면 한 곳 + 어두운 화면 두 곳');
+  assert.equal(warm[0], '--warm: #fffaf2;  --warm-line: transparent;  --warm-hover: #fff4e4;');
+  assert.equal(warm[1], '--warm: #22252b;  --warm-line: #2c3038;  --warm-hover: #282c33;');
+  assert.equal(warm[2], warm[1], 'prefers-color-scheme와 [data-theme=dark]가 같은 값');
+});
+
 test('새로 들어온 것 3개 이하: 접힌 줄도 링크도 없다', () => {
   const { app, rows, more } = inboxFoldClient();
   for (const n of [1, 3]) {
