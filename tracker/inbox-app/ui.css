@@ -690,6 +690,8 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 .d-wrow.is-two .sub .nx { color: var(--dim); }
 /* 확인 대기 둘째 줄 끝의 `슬랙 ↗` — 따로 한 줄을 차지하지 않고, 어디로 가는 링크인지 파란 글자로 */
 .d-wrow.is-two .sub .d-src { color: var(--accent-text); }
+/* 시안처럼 `13일째 · 슬랙 ↗` — 점은 링크 밑줄에 걸리지 않게 inline-block, 흐린 색. 간격(10px)은 음수 여백으로 좁힌다 */
+.d-wrow.is-two .sub .d-src::before { content: " · "; display: inline-block; margin-left: -10px; white-space: pre; color: var(--dim); text-decoration: none; }
 /* 확인 대기 `급한 순` 보기의 둘째 줄 맨 앞 프로젝트 표기 — 말줄임(레일 폭 안에서 다른 말과 겹치지 않게) */
 .d-wrow.is-two .sub .d-inproj { max-width: 44%; overflow: hidden; text-overflow: ellipsis; }
 /* 확인 대기 카드의 프로젝트 소제목 — 줄과 같은 왼쪽 자리(10px)에 맞춘 작은 그룹 제목 */

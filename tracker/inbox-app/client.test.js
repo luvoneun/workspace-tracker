@@ -3320,6 +3320,8 @@ test('확인 대기 레일 줄: 원문이 있으면 둘째 줄 끝에 `슬랙 �
   assert.equal(last.className, 'd-src');
   assert.equal(last.textContent, '슬랙 ↗');
   assert.equal(last.href, 'https://example.slack.test/archives/C1/p1');
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /^\.d-wrow\.is-two \.sub \.d-src::before \{ content: " · ";[^}]*color: var\(--dim\);/m, '앞에 흐린 ` · `');
   assert.ok(kids.findIndex(node => node.className === 'who') > -1
     && kids.findIndex(node => node.className === 'who') < kids.length - 1, '누구 · N일째 뒤에 선다');
 });
