@@ -12317,6 +12317,11 @@ test('상세 카드 화면 규칙: 누구에게 조용한 입력, 결정 내용 
   assert.match(css, /\.d-dvalue \{ display: flex; align-items: center; gap: 4px; flex-wrap: nowrap;/);
 });
 
+test('글자 토큰: --fs-lg는 16px — ≤520px 입력칸(iOS 확대 방지)이 이 값에 묶여 있다', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /--fs-lg: 16px;/);
+});
+
 // ---------- 주간요약 다듬기 B(화면): 칸마다 `+ 한 줄 추가` · 완료 제안 알약 · 확정 ----------
 const B_ROWS = `[
   { id: 'd1', heading: '완료한 일', group: '가입', groupKey: 'group:가입', text: '문구 검토함', sourceIds: ['s1'], excluded: false },
