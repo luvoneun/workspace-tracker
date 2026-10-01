@@ -8,7 +8,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const {
   getSlackToken, saveOAuthResult, readOAuthStatus, authPaths, slackClientId, retryDelayMs,
-  REQUIRED_SCOPES, RETRY_DELAYS_MS,
+  DEFAULT_CLIENT_ID, REQUIRED_SCOPES, RETRY_DELAYS_MS,
 } = require('./slack-auth');
 
 const NOW = 1_800_000_000_000;
@@ -101,7 +101,7 @@ test('tokenDir를 끼우면 config의 경로를 보지 않고 그 폴더 안만 
 
 test('Client ID는 slack.clientId가 기본값을 덮는다', () => {
   assert.equal(slackClientId({ slack: { clientId: ' 9.9 ' } }), '9.9');
-  assert.equal(typeof slackClientId({}), 'string');
+  for (const config of [{}, { slack: {} }, { slack: { clientId: '  ' } }, undefined]) assert.equal(slackClientId(config), DEFAULT_CLIENT_ID);
 });
 
 test('만료가 멀면 갱신하지 않고 아무것도 쓰지 않는다', async t => {
@@ -322,11 +322,110 @@ test('갱신 정보 파일이 없거나 깨졌으면 reconnect이고 덮어쓰�
   }
 });
 
-test('Client ID가 없으면 요청하지 않고 retry다', async t => {
+test('저장된 Client ID도 설정도 없으면 기본값으로 묻고, 기본값마저 비었으면 요청하지 않고 retry다', async t => {
   const r = room(t);
   const base = seed(r, { clientId: '' });
-  const got = await getSlackToken({ ...base, config: { slack: { auth: 'oauth' } }, request: noRequest });
-  assert.deepEqual(got.failure, slackClientId({}) ? null : { kind: 'retry', reason: 'no_client_id' });
+  const slack = fakeSlack(refreshed());
+  const got = await getSlackToken({ ...base, config: { slack: { auth: 'oauth' } }, request: slack.request });
+  // 기본값(DEFAULT_CLIENT_ID)이 채워져 있든 비어 있든 통과한다.
+  if (DEFAULT_CLIENT_ID) {
+    assert.equal(got.token, NEW);
+    assert.equal(new URLSearchParams(slack.calls[0].init.body).get('client_id'), DEFAULT_CLIENT_ID);
+  } else {
+    assert.deepEqual(got.failure, { kind: 'retry', reason: 'no_client_id' });
+    assert.equal(got.token, OLD);
+    assert.equal(slack.calls.length, 0);
+  }
+});
+
+test('연결 때 저장한 Client ID가 설정·기본값보다 먼저다', async t => {
+  const r = room(t);
+  const base = seed(r, { clientId: '555.666' });
+  const slack = fakeSlack(refreshed());
+  await getSlackToken({ ...base, request: slack.request });
+  assert.equal(new URLSearchParams(slack.calls[0].init.body).get('client_id'), '555.666');
+});
+
+test('살아 있는 pid라도 오래된 잠금은 거두고, 갓 만든 잠금은 기다린다', async t => {
+  const r = room(t);
+  const base = seed(r);
+  plantLock(r.paths, process.pid);
+  // 갓 만든 잠금 — 기다리다 이전 토큰.
+  const fresh = await getSlackToken({ ...base, request: noRequest, lockTries: 2, lockWaitMs: 1 });
+  assert.deepEqual(fresh.failure, { kind: 'retry', reason: 'lock' });
+  assert.ok(fs.existsSync(r.paths.lockDir));
+  // 같은 잠금이 3분 전 것이면(요청 제한 시간보다 한참 오래) 죽은 것으로 보고 거둔다.
+  const old = new Date(Date.now() - 3 * MIN);
+  fs.utimesSync(r.paths.lockDir, old, old);
+  const slack = fakeSlack(refreshed());
+  const got = await getSlackToken({ ...base, request: slack.request, lockTries: 2, lockWaitMs: 1 });
+  assert.equal(got.token, NEW);
+  assert.equal(slack.calls.length, 1);
+  assert.ok(!fs.existsSync(r.paths.lockDir));
+  assert.deepEqual(fs.readdirSync(r.dir).sort(), ['workspace-slack-oauth.json', 'workspace-slack-token']);
+});
+
+test('잠금 정리가 실패해도 던지지 않는다', async t => {
+  const r = room(t);
+  const base = seed(r);
+  t.after(() => { try { fs.chmodSync(r.dir, 0o700); } catch { /* 이미 치웠다 */ } });
+  // 요청하는 사이 폴더가 쓰기 금지가 된다 — 저장도, 잠금 폴더 지우기도 실패한다.
+  const slack = fakeSlack(async () => { fs.chmodSync(r.dir, 0o500); return reply(refreshed()); });
+  const got = await getSlackToken({ ...base, request: slack.request });
+  assert.equal(got.token, NEW);
+  assert.deepEqual(got.failure, { kind: 'retry', reason: 'write' });
+  fs.chmodSync(r.dir, 0o700);
+  if (process.getuid && process.getuid() !== 0) assert.ok(fs.existsSync(r.paths.lockDir), '못 지운 잠금은 남는다');
+  // 남은 잠금은 주인(이 프로세스)이 살아 있어 기다리게 되지만, 오래되면 거둔다.
+  const later = await getSlackToken({ ...base, request: fakeSlack(refreshed()).request, lockTries: 2, lockWaitMs: 1, lockStaleMs: -1 });
+  assert.equal(later.token, NEW);
+  assert.ok(!fs.existsSync(r.paths.lockDir));
+});
+
+test('죽은 잠금을 거두다 남의 새 잠금을 옮겼고 되돌리지 못하면, 지우지 않고 lock 실패로 끝낸다', async t => {
+  const r = room(t);
+  const base = seed(r);
+  plantLock(r.paths, deadPid());
+  const pidFile = path.join(r.paths.lockDir, 'pid');
+  const real = fs.renameSync;
+  let moved = '';
+  t.mock.method(fs, 'renameSync', (from, to) => {
+    if (from === r.paths.lockDir && /\.dead$/.test(to)) {
+      // 죽은 것으로 본 직후, 옮기기 직전에 다른 프로세스가 그 자리에 새 잠금을 잡았다.
+      fs.writeFileSync(pidFile, `${process.pid}\nnew-owner\n`);
+      moved = to;
+      return real(from, to);
+    }
+    if (from === moved && to === r.paths.lockDir) throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
+    return real(from, to);
+  });
+  const got = await getSlackToken({ ...base, request: noRequest, lockTries: 3 });
+  assert.deepEqual(got.failure, { kind: 'retry', reason: 'lock' });
+  assert.equal(got.token, OLD);
+  assert.equal(fs.readFileSync(path.join(moved, 'pid'), 'utf8'), `${process.pid}\nnew-owner\n`, '남의 잠금 폴더는 지우지 않는다');
+  assert.equal(info(r.paths).refreshToken, OLD_REFRESH);
+});
+
+test('동시 호출에서 첫째가 실패를 기록하면 둘째는 같은 요청을 다시 보내지 않는다', async t => {
+  for (const [answer, failure] of [
+    [() => reply({ ok: false, error: 'invalid_refresh_token' }), { kind: 'reconnect', reason: 'slack_error', code: 'invalid_refresh_token' }],
+    [() => { throw new Error('offline'); }, { kind: 'retry', reason: 'network' }],
+  ]) {
+    const r = room(t);
+    const base = seed(r);
+    const slack = fakeSlack(async () => {
+      await new Promise(resolve => setTimeout(resolve, 40));
+      return answer();
+    });
+    const both = await Promise.all([1, 2].map(() => getSlackToken({ ...base, request: slack.request })));
+    assert.equal(slack.calls.length, 1);
+    for (const one of both) {
+      assert.deepEqual(one.failure, failure);
+      assert.equal(one.token, OLD);
+      assert.equal(one.retryAfterMs, failure.kind === 'retry' ? RETRY_DELAYS_MS[0] : null);
+    }
+    assert.equal(readOAuthStatus(base).failCount, failure.kind === 'retry' ? 1 : 0);
+  }
 });
 
 test('쓰다 실패해도 반쪽 파일이 남지 않고 원래 파일은 온전하다', async t => {
@@ -469,6 +568,25 @@ test('다시 연결할 때는 .legacy를 새로 만들지도 덮지도 않는다
   fs.writeFileSync(r2.paths.legacyFile, 'xoxp-first\n');
   await saveOAuthResult({ config: OAUTH, tokenDir: r2.dir, now: NOW, response: exchange() });
   assert.equal(fs.readFileSync(r2.paths.legacyFile, 'utf8'), 'xoxp-first\n');
+});
+
+test('옛 토큰이 있는데 갱신 정보 쓰기가 실패하면 .legacy를 남기지 않는다', async t => {
+  const r = room(t);
+  fs.writeFileSync(r.paths.tokenFile, 'xoxp-legacy-token\n', { mode: 0o600 });
+  // 갱신 정보 파일을 쓸 때만 실패한다(.legacy를 먼저 쓰던 순서라면 .legacy는 써졌을 것이다).
+  const opened = new Map();
+  const broken = {
+    ...fs,
+    openSync(file, ...rest) { const fd = fs.openSync(file, ...rest); opened.set(fd, file); return fd; },
+    writeSync(fd, content) {
+      if (String(opened.get(fd)).startsWith(r.paths.oauthFile)) throw new Error('ENOSPC');
+      return fs.writeSync(fd, content);
+    },
+  };
+  const saved = await saveOAuthResult({ config: OAUTH, tokenDir: r.dir, now: NOW, response: exchange(), fs: broken });
+  assert.deepEqual(saved, { ok: false, reason: 'write' });
+  assert.deepEqual(fs.readdirSync(r.dir), ['workspace-slack-token']);
+  assert.equal(fs.readFileSync(r.paths.tokenFile, 'utf8'), 'xoxp-legacy-token\n');
 });
 
 test('다른 워크스페이스로 허용했으면 저장하지 않는다', async t => {

@@ -37,6 +37,10 @@ const RECONNECT_ERRORS = new Set([
 ]);
 const LOCK_TRIES = 20;
 const LOCK_WAIT_MS = 250;
+// 잠금은 길어야 요청 제한 시간(8초) 남짓 쥔다. 이보다 훨씬 오래된 잠금 폴더는 pid가 살아 있다고 나와도 죽은 것으로 본다 —
+// 죽은 주인의 pid를 다른 프로그램이 다시 받았거나 남의 것(EPERM)이면 "살아 있음"이 영영 풀리지 않기 때문이다. 폴더 시각만 본다.
+const LOCK_STALE_MS = 2 * 60 * 1000;
+const ABORT = Symbol('lock-abort');
 const BUSY = Symbol('lock-busy');
 
 const trimmed = value => (typeof value === 'string' ? value.trim() : '');
@@ -152,7 +156,7 @@ function tryLock(lockDir, owner) {
     fs.renameSync(temp, lockDir);
     return true;
   } catch (error) {
-    fs.rmSync(temp, { recursive: true, force: true });
+    remove(temp);
     if (['ENOTEMPTY', 'EEXIST', 'ENOTDIR', 'EPERM', 'EACCES'].includes(error.code)) return false;
     throw error;
   }
@@ -160,26 +164,35 @@ function tryLock(lockDir, owner) {
 
 // 남아 있는 잠금의 pid가 죽었으면 거둔다. 거둘 때도 옆으로 옮긴 뒤 "내가 본 그 잠금"이 맞는지 확인하고 지운다 —
 // 둘이 동시에 거두다 한쪽이 새로 잡은 잠금을 지우지 않게.
-function reapDeadLock(lockDir) {
+// 돌려주는 값: true(거뒀다 — 바로 다시 잡아 본다) · false(주인이 살아 있다 — 기다린다) · ABORT(남의 잠금을 옮겼다가
+// 되돌리지 못했다 — 그 폴더는 지우지 않고 그대로 두고 이번 회차는 잠금 실패로 끝낸다).
+function reapDeadLock(lockDir, staleMs = LOCK_STALE_MS) {
   const seen = readLock(lockDir);
-  if (seen.pid && pidAlive(seen.pid)) return false;
+  let age = 0;
+  try { age = Date.now() - fs.statSync(lockDir).mtimeMs; } catch { age = 0; }
+  if (seen.pid && pidAlive(seen.pid) && age <= staleMs) return false;
   const tomb = `${lockDir}.${process.pid}.${randomUUID()}.dead`;
   try { fs.renameSync(lockDir, tomb); } catch { return true; }
   if (readLock(tomb).raw !== seen.raw) {
-    try { fs.renameSync(tomb, lockDir); } catch { fs.rmSync(tomb, { recursive: true, force: true }); }
+    try { fs.renameSync(tomb, lockDir); } catch { return ABORT; }
     return false;
   }
-  fs.rmSync(tomb, { recursive: true, force: true });
+  remove(tomb);
   return true;
+}
+
+// 잠금 정리는 못 해도 던지지 않는다(남은 폴더는 다음 호출이 죽은 잠금으로 거둔다).
+function remove(dir) {
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* 그대로 둔다 */ }
 }
 
 function unlock(lockDir, owner) {
   if (String(readLock(lockDir).raw || '').split('\n')[1] !== owner) return;
-  fs.rmSync(lockDir, { recursive: true, force: true });
+  remove(lockDir);
 }
 
 // 잠그고 `work`를 돌린다. 몇 번 기다려도 못 잡으면 BUSY — 부르는 쪽이 이전 토큰으로 넘어간다.
-async function withLock(paths, { lockTries = LOCK_TRIES, lockWaitMs = LOCK_WAIT_MS, sleep = defaultSleep } = {}, work) {
+async function withLock(paths, { lockTries = LOCK_TRIES, lockWaitMs = LOCK_WAIT_MS, lockStaleMs = LOCK_STALE_MS, sleep = defaultSleep } = {}, work) {
   const owner = randomUUID();
   for (let attempt = 0; attempt < lockTries; attempt += 1) {
     let held = false;
@@ -187,7 +200,9 @@ async function withLock(paths, { lockTries = LOCK_TRIES, lockWaitMs = LOCK_WAIT_
     if (held) {
       try { return await work(); } finally { unlock(paths.lockDir, owner); }
     }
-    if (reapDeadLock(paths.lockDir)) continue;
+    const reaped = reapDeadLock(paths.lockDir, lockStaleMs);
+    if (reaped === ABORT) return BUSY;
+    if (reaped) continue;
     if (attempt < lockTries - 1) await sleep(lockWaitMs);
   }
   return BUSY;
@@ -254,7 +269,9 @@ async function healCopy(paths, options) {
 //   failure: null | { kind: 'retry' | 'reconnect', reason, code? } — `token`은 실패해도 가진 것(이전 토큰)을 준다.
 //   retryAfterMs: `retry`일 때 다음 시도까지 기다릴 시간(1 → 5 → 15분).
 // 옵션: config(읽은 설정 객체) · tokenDir · now(수 또는 함수) · request(fetch 모양) · minValidMs · force ·
-//   staleToken(방금 슬랙이 거절한 토큰 — force일 때 파일의 토큰이 이미 다르면 갱신하지 않는다) · lockTries · lockWaitMs · sleep.
+//   staleToken(방금 슬랙이 거절한 토큰 — force일 때 파일의 토큰이 이미 다르면 갱신하지 않는다) · lockTries · lockWaitMs ·
+//   lockStaleMs · sleep · fs(비밀 파일 쓰기에 쓸 fs — 시험에서 쓰기 실패를 만들 때만).
+//   갱신은 됐는데 한 줄 토큰 파일 사본만 못 썼으면 `copyFailed: true`가 붙는다(실패가 아니다 — 다음 호출이 사본을 맞춘다).
 async function getSlackToken(options = {}) {
   const { config, minValidMs = DEFAULT_MIN_VALID_MS, force = false, staleToken } = options;
   const request = options.request || ((...args) => fetch(...args));
@@ -279,10 +296,10 @@ async function getSlackToken(options = {}) {
   }
 
   // `다시 연결`이 필요하다고 이미 판정된 갱신 토큰으로는 다시 묻지 않는다(새로 연결하면 상태가 지워진다).
+  const stuck = (info, state) => (state.failure && state.failure.kind === 'reconnect' && state.savedAt === info.savedAt
+    ? current(info, { failure: fail('reconnect', safeCode(state.failure.reason), safeCode(state.failure.code)) }) : null);
   const known = readState(paths.stateFile);
-  if (known.failure && known.failure.kind === 'reconnect' && known.savedAt === before.info.savedAt) {
-    return current(before.info, { failure: fail('reconnect', safeCode(known.failure.reason), safeCode(known.failure.code)) });
-  }
+  if (stuck(before.info, known)) return stuck(before.info, known);
 
   const failed = (info, failure, more) => {
     // `info`는 파일에 있는 갱신 정보다(상태가 어느 갱신 정보의 것인지 `savedAt`으로 맞춘다). 횟수는 같은 갱신 정보일 때만 잇는다.
@@ -299,6 +316,15 @@ async function getSlackToken(options = {}) {
     // 기다리는 사이 다른 쪽이 갱신했으면 그 토큰을 쓴다 — 같은 갱신 토큰을 두 번 쓰지 않는다.
     const changed = info.accessToken !== before.info.accessToken;
     if (changed ? !expiring(info) : !forced(info) && !expiring(info)) return current(info);
+    // 상태도 다시 읽는다 — 기다리는 사이 다른 호출이 `다시 연결`을 판정했거나 방금 실패를 적었으면 같은 요청을 또 보내지 않는다.
+    const state = readState(paths.stateFile);
+    if (stuck(info, state)) return stuck(info, state);
+    if (state.failure && state.savedAt === info.savedAt && (state.at !== known.at || state.failCount !== known.failCount)) {
+      return current(info, {
+        failure: fail('retry', safeCode(state.failure.reason), safeCode(state.failure.code)),
+        retryAfterMs: retryDelayMs(Number(state.failCount) || 1),
+      });
+    }
 
     const clientId = trimmed(info.clientId) || slackClientId(config);
     if (!clientId) return failed(info, fail('retry', 'no_client_id'));
@@ -359,13 +385,10 @@ async function saveOAuthResult(options = {}) {
     const prior = readInfo(paths.oauthFile).info;
     // 옛 방식에서 처음 옮길 때만 옛 토큰을 `.legacy`로 남긴다(지우는 것은 앱이 7일 뒤에 — 여기서는 지우지 않는다).
     const old = readLine(paths.tokenFile);
-    let legacyKeptAt = (prior && prior.legacyKeptAt) || null;
+    const keepLegacy = !prior && !!old && old !== tokens.accessToken && !fs.existsSync(paths.legacyFile);
     try {
-      if (!prior && old && old !== tokens.accessToken && !fs.existsSync(paths.legacyFile)) {
-        writeSecret(paths.legacyFile, `${old}\n`, options.fs);
-        legacyKeptAt = at;
-      }
       const info = {
+        // 파일 모양의 판 번호 — 지금은 읽는 곳이 없다(모양을 바꿀 때 옛 파일을 가려내려고 적어 둔다).
         version: 1,
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
@@ -373,9 +396,12 @@ async function saveOAuthResult(options = {}) {
         teamId, teamName: trimmed(team.name), userId: tokens.userId,
         scopes: tokens.scopes,
         clientId: trimmed(clientId) || slackClientId(config),
-        connectedAt: at, refreshedAt: null, savedAt: at, legacyKeptAt,
+        connectedAt: at, refreshedAt: null, savedAt: at,
+        legacyKeptAt: keepLegacy ? at : (prior && prior.legacyKeptAt) || null,
       };
       writeSecret(paths.oauthFile, `${JSON.stringify(info, null, 2)}\n`, options.fs);
+      // `.legacy`는 갱신 정보 저장이 성공한 뒤, 사본이 옛 토큰을 덮기 전에 만든다 — 저장이 실패하면 아무것도 남기지 않는다.
+      if (keepLegacy) { try { writeSecret(paths.legacyFile, `${old}\n`, options.fs); } catch { /* 연결은 그대로 둔다 */ } }
       let copyFailed = false;
       try { writeSecret(paths.tokenFile, `${info.accessToken}\n`, options.fs); } catch { copyFailed = true; }
       writeState(paths, null);
