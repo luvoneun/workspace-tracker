@@ -6103,7 +6103,8 @@ function uiInboxSchedUndo(item, scheduled) {
       } catch (error) {
         if (error.code === 'CHANGED_SINCE') {
           showNotice(error.message, true);
-          setTimeout(() => { const at = undoStack.lastIndexOf(entry); if (at >= 0) undoStack.splice(at, 1); }, 0);
+          // 목록도 다시 읽는다 — 다른 창에서 바뀐 모습(또는 응답만 놓친 되돌리기의 결과)이 이 창에 옛 모습으로 남지 않게.
+          setTimeout(() => { const at = undoStack.lastIndexOf(entry); if (at >= 0) undoStack.splice(at, 1); load(); }, 0);
         }
         throw error;
       }

@@ -1460,7 +1460,8 @@ function schedUndoClient() {
   }));
   // 시험 틀의 load는 빈 함수다 — 실제 load처럼 `새로 들어온 것`에 없는 업무는 목록 사전(itemsById — 오늘·나중에 목록)에 넣고,
   // `새로 들어온 것`을 다시 그리게 해 둔다. 일정을 정한 업무는 저장 직후 사전에 들어온다(이걸 빼먹으면 기록이 안 남는 것을 못 잡는다).
-  flow.app.run(`var inboxNow = []; load = async () => {
+  flow.app.run(`var inboxNow = []; var loads = 0; load = async () => {
+    loads += 1;
     itemsById = new Map(['i1', 'i2'].filter(id => !inboxNow.some(one => one.id === id)).map(id => [id, { id, description: '업무', scheduled: null }]));
     renderInbox(inboxNow);
   }`);
@@ -1537,12 +1538,14 @@ test('새로 들어온 것 되돌리기: 그 사이 다른 창에서 바뀌어 �
   open().pick('today').listeners.click(); await settle(); await finish();
   assert.equal(undoCount(), 1);
   const undoing = app.run("replayUndo('undo')"); await settle();
+  const loadsBefore = app.run('loads');
   calls[calls.length - 1].reply(409, { ok: false, error: '그 뒤에 바뀐 업무라 되돌릴 수 없어요.', code: 'CHANGED_SINCE' });
   await settle(); await undoing;
   await new Promise(resolve => setTimeout(resolve, 5));
   assert.equal(app.nodes.get('liveRegion').textContent, '그 뒤에 바뀐 업무라 되돌릴 수 없어요.');
   assert.deepEqual([undoCount(), redoCount()], [0, 0], '다시 눌러도 같은 거절만 받을 기록은 남기지 않는다');
   assert.deepEqual(rows(), [], '줄은 돌아오지 않는다');
+  assert.equal(app.run('loads'), loadsBefore + 1, '목록을 한 번 다시 읽는다 — 다른 창에서 바뀐 모습이 옛 모습으로 남지 않게');
 });
 
 test('새로 들어온 것 되돌리기: 누르는 화면에서는 오늘·나중에·날짜 모두 알림에 `되돌리기` 버튼이 서고, 누르면 같은 되돌리기다', async () => {
