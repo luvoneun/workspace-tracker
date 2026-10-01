@@ -454,7 +454,7 @@ function uiProjectLabel(item, grouped) {
 // 기한·밀림·진행·답변에는 14px 아이콘과 풀어 쓴 title 툴팁이 함께 붙는다. 급한 말(기한 N일 지남·오늘까지)만
 // 배지로 서고 나머지는 회색 글자다(모양은 ui.css가 정한다).
 // **우선순위는 `opts.noPriority`인 줄에서는 여기 나오지 않는다** — 업무 체크박스가 안의 위 꺾쇠로 말한다
-// (같은 말을 한 줄에서 두 번 하지 않는다). 체크박스가 없는 자리(미루기 제안 줄)에서는 예전처럼 글자로 쓴다.
+// (같은 말을 한 줄에서 두 번 하지 않는다). 체크박스가 없는 자리(당겨오기 제안 줄)에서는 예전처럼 글자로 쓴다.
 const UI_PRIORITY_META = {
   critical: { text: '긴급', tone: 'urgent', hint: '가장 먼저 해야 하는 업무예요', level: 'top', mark: 'priTop' },
   high: { text: '중요', tone: 'warn', hint: '중요한 업무예요', level: 'high', mark: 'priHigh' },
@@ -483,7 +483,7 @@ function uiMetaCells(item, opts = {}) {
   if (carry) status.push(cell('m-carry', 'clock', carry, '오늘 하려다 넘어온 업무예요'));
   if (doing) {
     // 체크박스가 있는 줄(noPriority)은 반쯤 찬 체크박스가 `진행 중`을 말한다 — 오른쪽에 며칠째인지 적지 않는다(사용자 요청: 날짜 표시가 거슬림).
-    // 체크박스가 없는 자리(미루기 제안 줄)는 `진행 중` 글자만.
+    // 체크박스가 없는 자리(당겨오기 제안 줄)는 `진행 중` 글자만.
     if (!opts.noPriority && !opts.inDoingGroup) status.push(cell('m-doing', 'clock', '진행 중', `${uiKoDate(item.doing)}부터 진행 중이에요`));
   }
   const due = done ? null : uiDueText(item.due, where);
@@ -1398,7 +1398,7 @@ function isTyping() {
   return !!(el && (el.matches('input, textarea, select') || el.isContentEditable));
 }
 let todaySort = 'project';
-// 완료 그룹과 미루기 제안은 접힌 채로 시작한다 — 첫 화면에 오늘 할 일이 가장 많이 보이게.
+// 완료 그룹과 당겨오기 제안은 접힌 채로 시작한다 — 첫 화면에 오늘 할 일이 가장 많이 보이게.
 let todayDoneOpen = false;
 let suggestOpen = false;
 // 긴 목록은 위 3줄만 보이고 나머지는 `N개 더 ›`로 펼친다(프로젝트 카드의 읽는 그룹 — 새로 들어온 것은 놓치지 않게 접지 않는다).
@@ -1982,29 +1982,24 @@ function suggestDismissedToday() {
   try { return localStorage.getItem('suggestDismissed') === todayStr(); } catch { return false; }
 }
 
-// 미루기 제안은 머리줄의 진행 문장 뒤에 글자 링크로 붙는다(`… 5개 끝냈어요 · 2개 미룰까요?`).
+// 당겨오기 제안은 머리줄의 진행 문장 뒤에 글자 링크로 붙는다(`… 5개 끝냈어요 · 오늘 할 만한 일 2개`).
 // 누르면 머리줄 아래로 업무 줄이 펼쳐진다. 제안이 없으면 앞 문장만 남는다.
 // 근거는 알약으로 그리지 않는다(마감 없음·우선순위 낮음 같은 말은 새로 알려 주는 게 없다).
 function renderSuggestions(suggestions) {
   const slot = document.getElementById('suggestSlot');
   if (slot) slot.replaceChildren();
   const zone = document.getElementById('suggestZone');
-  const data = { ...(suggestions || { mode: 'none', items: [] }) };
-  if (data.mode === 'pull') data.items = data.items.filter(item => {
+  const data = { mode: 'none', items: [], ...suggestions };
+  // 당겨오기만 있다(옛 서버가 보내는 다른 mode는 무시).
+  data.items = data.mode === 'pull' ? data.items.filter(item => {
     const blocked = wfItem(wfItem(item.id)?.blockedBy);
     return !blocked || blocked.status === 'done';
-  });
-  // 이미 손댄 업무(진행 중)나 끝낸 업무는 미루자고 하지 않는다.
-  data.items = (data.items || []).filter((entry) => {
-    const task = itemsById.get(entry.id);
-    return !task || (task.status !== 'done' && !task.doing);
-  });
+  }) : [];
   zone.replaceChildren();
   if (!data.items.length || suggestDismissedToday()) {
     zone.hidden = true;
     return;
   }
-  const defer = data.mode === 'defer';
   zone.hidden = false;
 
   const toggle = document.createElement('button');
@@ -2014,7 +2009,7 @@ function renderSuggestions(suggestions) {
   toggle.setAttribute('aria-controls', 'suggestZone');
   toggle.innerHTML = uiIcon('chevron');
   const label = document.createElement('span');
-  label.textContent = defer ? `${data.items.length}개 미룰까요?` : `오늘 할 만한 일 ${data.items.length}개`;
+  label.textContent = `오늘 할 만한 일 ${data.items.length}개`;
   toggle.appendChild(label);
   toggle.addEventListener('click', () => { suggestOpen = !suggestOpen; renderSuggestions(suggestions); });
   // 링크는 머리줄의 진행 문장 뒤에, 펼친 줄은 머리줄 아래에 둔다.
@@ -2033,23 +2028,19 @@ function renderSuggestions(suggestions) {
       + `<span class="d-meta">${uiMetaCells(task)}</span>`;
     const acts = document.createElement('span');
     acts.className = 'd-acts';
-    const move = (text, scheduled, message) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'd-btn sm';
-      button.textContent = text;
-      button.setAttribute('aria-label', `${task.description} — ${text}`);
-      button.addEventListener('click', async () => {
-        button.disabled = true;
-        try {
-          await setTaskScheduled(entry.id, scheduled);
-          announce(uiMoveNotice(message, [task], scheduled));
-        } catch { button.disabled = false; }
-      });
-      acts.appendChild(button);
-    };
-    if (defer) { move('내일', tomorrowStr(), '내일로 미뤘어요'); move('나중에', null, '나중에 할 일로 옮겼어요'); }
-    else move('오늘로', todayStr(), '오늘 할 일로 옮겼어요');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'd-btn sm';
+    button.textContent = '오늘로';
+    button.setAttribute('aria-label', `${task.description} — 오늘로`);
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        await setTaskScheduled(entry.id, todayStr());
+        announce(uiMoveNotice('오늘 할 일로 옮겼어요', [task], todayStr()));
+      } catch { button.disabled = false; }
+    });
+    acts.appendChild(button);
     row.appendChild(acts);
     box.appendChild(row);
   });

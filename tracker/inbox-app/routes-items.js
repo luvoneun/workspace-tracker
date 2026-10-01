@@ -191,11 +191,9 @@ function listReaders(ctx) {
     return Math.round((new Date(`${toDate}T00:00:00`) - new Date(`${fromDate}T00:00:00`)) / 86400000);
   }
 
-  // 오늘 목록 상태에 따라 방향이 갈린다.
-  // 여유 있으면 "이거 가져올까요?", 과부하면 "이건 미룰까요?", 적당하면 아무 말도 안 한다.
+  // 오늘 할 일이 적으면 "이거 가져올까요?"라고 하고, 아니면 아무 말도 안 한다(많아도 미루자고 하지 않는다).
   function getTodaySuggestions() {
     const openToday = getTodayTasks().filter((t) => t.status !== 'done');
-    if (openToday.length >= 8) return { mode: 'defer', total: openToday.length, items: suggestDeferrals(openToday) };
     if (openToday.length < 5) return { mode: 'pull', total: openToday.length, items: suggestPulls() };
     return { mode: 'none', total: openToday.length, items: [] };
   }
@@ -244,42 +242,6 @@ function listReaders(ctx) {
         return { ...task, score, reasons };
       })
       .filter((task) => task.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 3);
-  }
-
-  // 오늘 미뤄도 괜찮아 보이는 후보 — 오늘 미팅과 무관하고, 마감도 급하지 않고, 우선순위도 높지 않은 것
-  function suggestDeferrals(openToday) {
-    const today = todayLocal();
-    const meetingKeys = meetingProjectKeys();
-    return openToday
-      .map((task) => {
-        const key = projectKeyOf(task);
-        if (key && meetingKeys.has(key)) return null;
-        if (task.priority === 'high' || task.priority === 'critical') return null;
-
-        const reasons = [];
-        let score = 0;
-        if (task.due) {
-          const left = daysBetween(today, task.due);
-          if (left <= 3) return null;
-          score += 2;
-          reasons.push(`마감 ${left}일 남음`);
-        } else {
-          score += 3;
-          reasons.push('마감 없음');
-        }
-        if (task.priority === 'low') {
-          score += 4;
-          reasons.push('우선순위 낮음');
-        }
-        if (!key) {
-          score += 1;
-          reasons.push('프로젝트 미지정');
-        }
-        return { ...task, score, reasons };
-      })
-      .filter(Boolean)
       .sort((a, b) => b.score - a.score)
       .slice(0, 3);
   }
