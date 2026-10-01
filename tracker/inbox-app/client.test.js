@@ -1337,7 +1337,7 @@ test('일정 정하기: 모션 CSS — 쫀득 등장 240ms·1.025, 닫힘 140ms,
   assert.match(css, /\.d-schedpop \{[^}]*animation: d-sched-in 240ms/);
   const section = name => css.slice(css.indexOf(`@keyframes ${name} {`), css.indexOf('\n@keyframes', css.indexOf(`@keyframes ${name} {`) + 1));
   assert.match(section('d-sched-in'), /scale\(0\.88\)[\s\S]*55% \{[^}]*scale\(1\.025\)/);
-  assert.match(css, /\.d-schedpop\.is-out \{ animation: d-sched-out 140ms/);
+  assert.match(css, /\.d-schedpop\.is-out \{ animation: d-sched-out var\(--t-fast\)/);
   assert.match(css, /animation-delay: calc\(var\(--i, 0\) \* 18ms/);
   assert.match(css, /\.d-ibrow\.is-leaving \{ animation: d-sched-leave 220ms/);
   assert.match(css, /\.d-row\.is-rise \{ animation: d-sched-rise 260ms/);
@@ -15905,4 +15905,25 @@ test('설정 아이콘: index.html의 설정 버튼 SVG 안쪽이 UI_ICONS.gear�
   const m = html.match(/id="settingsBtn"[^>]*><svg class="d-i"[^>]*>(.*?)<\/svg>/);
   assert.ok(m, '설정 버튼 SVG를 찾는다');
   assert.equal(m[1], app.run('UI_ICONS.gear'));
+});
+
+// ---- 모션 기반(묶음 ①): 토큰 · 줄 이동 도우미 ----
+test('모션 토큰: 시간 4개·곡선 3개가 :root에 있고, 스프링은 linear()를 아는 환경에서만(모르면 --ease), 토큰과 값이 같은 시간은 숫자로 다시 적지 않는다', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /--ease: cubic-bezier\(0\.22, 0\.8, 0\.3, 1\);\n  --t-press: 100ms;  --t-fast: 140ms;  --t-move: 200ms;  --t-slow: 320ms;/);
+  const root = css.slice(0, css.indexOf('@supports (animation-timing-function: linear(0, 1))'));
+  assert.match(root, /--spring-1: var\(--ease\);\n  --spring-2: var\(--ease\);/, '기본은 넘침 없는 --ease');
+  const supports = css.slice(css.indexOf('@supports (animation-timing-function: linear(0, 1))'), css.indexOf('@keyframes d-fade'));
+  assert.match(supports, /--spring-1: linear\(0, 0\.42 12%, 0\.75 25%, 0\.94 38%, 1\.03 50%, 1\.046 58%, 1\.035 70%, 1\.015 85%, 1\);/);
+  assert.match(supports, /--spring-2: linear\(0, 0\.45 12%, 0\.82 25%, 1\.06 38%, 1\.18 48%, 1\.205 55%, 1\.17 65%, 1\.09 78%, 1\.03 90%, 1\);/);
+  const literal = css.split('\n').filter(line => /(transition|animation)[^;]*\b(100|140|200|320)ms/.test(line));
+  assert.deepEqual(literal, [], '100·140·200·320ms는 토큰으로 쓴다');
+});
+
+test('모션 토큰: 움직임 줄이기 — 전역은 .01ms(이동 끔) 그대로, 나타나는 것(알림·메뉴·판·팔레트·회의 새 줄)만 120ms 흐려짐', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  const block = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce) {\n  *, *::before'), css.indexOf('/* ---------- 헤더'));
+  assert.match(block, /transition-duration: 0\.01ms !important;\n    animation-duration: 0\.01ms !important;/);
+  assert.match(block, /\.d-toast, \.d-menulist, \.d-schedpop:not\(\.is-out\), \.d-palbox, \.d-mrow2\.is-new \{\n    animation: d-fade 120ms linear both !important;/);
+  assert.match(css, /@keyframes d-fade \{ from \{ opacity: 0; \} to \{ opacity: 1; \} \}/, '흐려짐은 투명도만');
 });
