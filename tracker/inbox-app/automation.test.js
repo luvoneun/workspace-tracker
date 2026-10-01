@@ -355,6 +355,13 @@ test('setup.sh: 설정은 python3가 아니라 node로 읽고, 못 읽으면 에
   assert.equal(read('server', 'port').stdout, '4399');
   assert.equal(read('server', 'extraHost').stdout, '', '없는 칸은 빈 값이다');
   assert.equal(read('slackToken').stdout, path.join(os.homedir(), '.config', 'workspace-slack-token'));
+  // 슬랙 연결 방식 — 칸이 없으면 옛 방식이고, 새 방식이면 갱신 정보 파일 자리를 준다(파일은 읽지 않는다).
+  assert.equal(read('slackAuth').stdout, 'token');
+  assert.equal(read('slackOAuthFile').stdout, path.join(os.homedir(), '.config', 'workspace-slack-oauth.json'));
+  fs.writeFileSync(config, JSON.stringify({ slack: { auth: 'oauth', oauthFile: '/somewhere/oauth.json' } }));
+  assert.equal(read('slackAuth').stdout, 'oauth');
+  assert.equal(read('slackOAuthFile').stdout, '/somewhere/oauth.json');
+  assert.match(script, /if \[ "\$SLACK_AUTH" = "oauth" \]; then[\s\S]*?ok "슬랙 연결 있음 \(자동 갱신\)"[\s\S]*?elif \[ -n "\$TOKEN_FILE" \]/, '새 방식 설치는 토큰 파일 경고 대신 갱신 정보 파일을 본다');
   // 크롬 프로필은 예전 Dock 앱만 썼다 — 이제 읽지 않는다(값은 쉘 명령 어디에도 들어가지 않는다)
   assert.equal(read('chromeProfile').stdout, '');
   assert.ok(!script.includes('CHROME_PROFILE'), 'setup.sh는 크롬 프로필을 읽지 않는다');
@@ -911,6 +918,8 @@ const TEAM_SECRET_CONFIG = {
   title: '비밀 제목',
   integrations: { slack: true, jira: true, calendar: true },
   slack: { workspaceUrl: 'https://myco.slack.com', appUrl: 'https://api.slack.com/apps/A0SECRETAPP', tokenFile: '~/.config/SECRET-slack-token',
+    // 슬랙 연결(자동 갱신) — Client ID만 팀 값이고, 연결 방식·갱신 정보 파일 자리는 사람마다 다르다.
+    clientId: '1234567890.9876543210', auth: 'oauth', oauthFile: '~/.config/SECRET-slack-oauth.json',
     channels: { todo: { id: 'C0SECRETCH', name: '#secret-todo' } } },
   jira: { siteUrl: 'https://myco.atlassian.net', email: 'me@secret-mail.test', displayName: '비밀이름', tokenFile: '~/.config/SECRET-jira-token' },
   calendar: { source: 'ical', icalFile: '/secret/ical-file' },
@@ -942,10 +951,12 @@ test('WP-D3 make-team-installer.sh: 허용 목록 값만 담고(규칙에 어긋
   assert.equal(spawnSync('/bin/bash', ['-n', command]).status, 0, '생성된 파일은 bash 문법이 맞다');
   const team = JSON.parse(/^TEAM_CONFIG='(.*)'$/m.exec(text)[1]);
   assert.deepEqual(team, {
-    slack: { workspaceUrl: 'https://myco.slack.com', appUrl: 'https://api.slack.com/apps/A0SECRETAPP' },
+    slack: { workspaceUrl: 'https://myco.slack.com', appUrl: 'https://api.slack.com/apps/A0SECRETAPP', clientId: '1234567890.9876543210' },
     jira: { siteUrl: 'https://myco.atlassian.net' },
     server: { updateChannel: 'stable' },
-  }, '허용 목록 네 칸만');
+  }, '허용 목록 다섯 칸만');
+  assert.match(made.stdout, /slack\.clientId = 1234567890\.9876543210/);
+  assert.doesNotMatch(text, /oauth|refresh|xox[a-z]/i, '연결 방식·갱신 정보·토큰은 묶음에 없다');
   assert.doesNotMatch(text.replace(/A0SECRETAPP/g, ''), TEAM_SECRETS, '토큰·토큰 파일·이메일·이름·채널·extraHost·chromeProfile·제목·Dock 이름·캘린더·포트는 없다');
   assert.doesNotMatch(text, /me@|tokenFile|displayName|extraHost|chromeProfile|dockName|icalFile|channels/);
   assert.match(text, /^REPO_URL='https:\/\/github\.com\/someone\/workspace\.git'$/m);
