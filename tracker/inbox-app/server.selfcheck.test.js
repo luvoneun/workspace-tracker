@@ -421,7 +421,7 @@ test('점검(슬랙 새 방식): 만료가 가까우면 점검이 갱신한 토�
   });
   const result = await createSelfcheck(oauthDeps(h, net)).run();
   assert.deepEqual(seen, ['Bearer xoxe.xoxp-1-CHECK-RENEWED'], '한 줄 사본이 아니라 갱신한 토큰으로 묻는다');
-  assert.equal(byKey(result, 'slack_token').detail, '자동 갱신 · 다음 갱신 10시간 뒤');
+  assert.equal(byKey(result, 'slack_token').detail, '자동 갱신 · 다음 갱신 11시간 뒤');
   assert.equal(JSON.parse(fs.readFileSync(paths.oauthFile, 'utf8')).refreshToken, 'xoxe-1-CHECK-RENEWED-R');
   assert.ok(!JSON.stringify(result).includes('RENEWED'));
   // 서버 타이머가 아직 안 돈 사이(만료 40분 전) — 수집 기준(10분)으로는 아직 갱신할 때가 아니다.

@@ -103,7 +103,8 @@ function whenText(value, now) {
 function untilText(at, now) {
   const left = Number(at) - now;
   if (!Number.isFinite(left) || left < 60 * 1000) return '곧';
-  const hours = Math.floor(left / (60 * 60 * 1000));
+  // 시간은 반올림한다 — 방금 갱신해 7시간 59분 남았을 때 `7시간 뒤`가 아니라 `8시간 뒤`로 읽히게.
+  const hours = left >= 60 * 60 * 1000 ? Math.round(left / (60 * 60 * 1000)) : 0;
   return hours >= 1 ? `${hours}시간 뒤` : `${Math.floor(left / (60 * 1000))}분 뒤`;
 }
 

@@ -354,6 +354,49 @@ test('QA 픽스처: browser-fixture가 서버에 넘기는 경로는 전부 임�
   }
 });
 
+test('QA 픽스처: 가짜 슬랙 상태(옛 토큰·새 방식 정상·잠시 안 됨·풀림)는 전부 임시 폴더의 가짜 값이고, 서버가 그 상태로 읽는다', (t) => {
+  const { prepareFixture, SLACK_STATES } = require('./browser-fixture');
+  const slackAuth = require('./slack-auth');
+  const integrations = require('./integrations');
+  assert.deepEqual(SLACK_STATES, ['token', 'oauth', 'oauth-retry', 'oauth-lost']);
+  const expected = {
+    token: { auth: 'token', connected: true },
+    oauth: { auth: 'oauth', connected: true, failure: null, legacyKept: true },
+    'oauth-retry': { auth: 'oauth', connected: true, failure: 'retry', legacyKept: true },
+    'oauth-lost': { auth: 'oauth', connected: false, failure: 'reconnect', legacyKept: true },
+  };
+  for (const kind of SLACK_STATES) {
+    const { root, env } = prepareFixture({ slack: kind });
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const config = JSON.parse(fs.readFileSync(env.WORKSPACE_CONFIG, 'utf8'));
+    for (const name of fs.readdirSync(env.WORKSPACE_TOKEN_DIR)) {
+      const file = path.join(env.WORKSPACE_TOKEN_DIR, name);
+      assert.equal(fs.statSync(file).mode & 0o777, 0o600, name);
+      for (const hit of fs.readFileSync(file, 'utf8').match(/xox[a-z.-]+[^"\s]*/g) || []) assert.match(hit, /fixture/, '진짜 토큰 모양이 아니다');
+    }
+    const status = slackAuth.readOAuthStatus({ config, tokenDir: env.WORKSPACE_TOKEN_DIR });
+    const want = expected[kind];
+    assert.equal(status.auth, want.auth, kind);
+    assert.equal(status.connected, want.connected, kind);
+    if (want.auth === 'oauth') {
+      assert.equal(status.lastFailure ? status.lastFailure.kind : null, want.failure, kind);
+      assert.equal(status.legacyKept, want.legacyKept);
+      assert.deepEqual(status.missingScopes, []);
+    }
+    // 연동 탭의 "연결됐나"(켜짐·토큰·채널)가 참이라 연결된 카드로 그려진다.
+    const state = integrations.readIntegrations(config, { tokenDir: env.WORKSPACE_TOKEN_DIR, claude: false });
+    assert.equal(state.slack.enabled && state.slack.hasToken && !!state.slack.channels.todo.id, true, kind);
+    assert.equal(state.slack.auth, want.auth);
+    // 그 환경으로 서버를 읽어 들여도 안전망을 통과한다(전부 임시 폴더).
+    const loaded = loadServerChild({ ...process.env, ...env });
+    assert.equal(loaded.status, 0, loaded.stderr);
+  }
+  // 이름을 주지 않으면 예전 그대로 — 토큰 폴더가 비어 있다.
+  const plain = prepareFixture();
+  t.after(() => fs.rmSync(plain.root, { recursive: true, force: true }));
+  assert.deepEqual(fs.readdirSync(plain.env.WORKSPACE_TOKEN_DIR), []);
+});
+
 test('QA 안전망: WORKSPACE_FIXTURE=1인데 경로가 하나라도 실제 설치 위치(또는 그 위)를 가리키면 서버가 시작하지 않고 이유를 알린다', (t) => {
   const { prepareFixture } = require('./browser-fixture');
   const { root, env } = prepareFixture();
