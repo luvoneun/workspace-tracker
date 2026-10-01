@@ -130,6 +130,7 @@ test('set-scheduled의 inbox:true+expect는 새로 들어온 것 표시를 되�
   assert.equal((await set({ id: made.id, scheduled: null, inbox: true })).status, 400, 'expect 없이 표시만 붙이는 길은 없다');
   for (const expect of ['', 5, '2026-02-30']) assert.equal((await set({ id: made.id, scheduled: null, inbox: true, expect })).status, 400, String(expect));
   assert.equal((await set({ id: made.id, scheduled: '2026-02-30', inbox: true, expect: shifted(1) })).status, 400);
+  assert.equal((await set({ id: made.id, scheduled: shifted(2), inbox: true, expect: shifted(1) })).status, 400, 'expect가 맞아도 예정일이 있는 받지 않은 업무는 만들지 않는다');
   assert.equal((await set({ id: 'no-such-task', scheduled: null, inbox: true, expect: null })).status, 404);
   assert.equal((await set({ id: check.id, scheduled: null, inbox: true, expect: null })).status, 404, '할 일이 아니면 대상이 아니다');
   // 그 사이 다른 창에서 다른 날로 옮겼으면(expect와 다름) 409 — 그 날짜를 덮지 않는다.

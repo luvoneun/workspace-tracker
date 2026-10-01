@@ -26,7 +26,8 @@ module.exports = function trackRoutes(req, res, url, ctx) {
       // 그 사이 다른 창에서 옮겼거나 끝낸 업무는 덮지 않고 409로 거절한다. 칸이 없으면 예전 그대로(표시를 지운다).
       const restoreInbox = url.pathname.endsWith('set-scheduled') && inbox !== undefined;
       if (restoreInbox) {
-        if (inbox !== true || !(expect === null || (typeof expect === 'string' && expect))) throw new Error('입력을 확인해 주세요.');
+        // 되살리는 업무의 예정일은 늘 없음이다 — 예정일이 있는 받지 않은 업무는 만들지 않는다.
+        if (inbox !== true || scheduled != null || !(expect === null || (typeof expect === 'string' && expect))) throw new Error('입력을 확인해 주세요.');
         validateDate(expect);
       }
       if (url.pathname.endsWith('set-scheduled')) validateDate(scheduled);
