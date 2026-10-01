@@ -419,6 +419,41 @@ test('입력 씹힘 ③: 구역 안 글자 칸에서 치는 중이면 다시 그
   assert.deepEqual(drawn, ['새', '바로']);
 });
 
+test('입력 씹힘 ④: 체크박스·라디오·select·버튼에 초점이 있으면 미루지 않고, 글자 칸(text·search·date·textarea·contenteditable)만 미룬다', () => {
+  const app = pureClient();
+  const fx = holdFixture(app);
+  const held = (tag, type, extra = {}) => {
+    const node = fx.field(tag);
+    if (type) node.type = type;
+    Object.assign(node, extra);
+    fx.focus(node);
+    return app.context.uiRenderHeld(fx.zone);
+  };
+  for (const type of ['checkbox', 'radio', 'button', 'submit', 'range', 'color', 'file']) {
+    assert.equal(held('INPUT', type), false, `input[type=${type}]는 글자 칸이 아니다`);
+  }
+  assert.equal(held('SELECT'), false, 'select는 고르는 즉시 끝난다');
+  assert.equal(held('BUTTON'), false);
+  for (const type of ['text', 'search', 'date', 'number', 'email', undefined]) {
+    assert.equal(held('INPUT', type), true, `input[type=${type || '(없음)'}]는 글자 칸이다`);
+  }
+  assert.equal(held('TEXTAREA'), true);
+  assert.equal(held('SPAN', undefined, { isContentEditable: true }), true);
+});
+
+test('입력 씹힘 ④: 업무 체크박스를 누른 뒤의 load()는 오늘 목록을 바로 다시 그린다(초점이 체크박스에 남아 있어도)', async () => {
+  const app = pureClient();
+  const fx = holdFixture(app);
+  const box = fx.field('INPUT');
+  box.type = 'checkbox';
+  fx.focus(box);
+  let drawn = 0;
+  assert.equal(app.context.uiRenderOrHold('today', fx.zone, () => { drawn += 1; }), true);
+  assert.equal(drawn, 1, '미루지 않는다 — 줄이 완료 묶음으로 옮겨 가고 개수가 바로 바뀐다');
+  assert.equal(app.run('uiHeldRenders.size'), 0, '남겨 둔 그리기·듣기가 없다');
+  assert.equal(box.handlers.focusout === undefined || box.handlers.focusout.length === 0, true, '체크박스에 듣기를 붙이지 않는다');
+});
+
 test('입력 씹힘 ③: 같은 구역의 버튼으로 초점이 옮겨 가거나 손가락이 눌린 동안에는 그리지 않는다(클릭이 씹히지 않게)', async () => {
   const app = pureClient();
   const fx = holdFixture(app);
@@ -450,7 +485,7 @@ test('입력 씹힘 ③: 저장 중인(잠긴) 고치기 칸이 남아 있으면
   fx.focus(title);
   let drawn = 0;
   app.context.uiRenderOrHold('inbox', fx.zone, () => { drawn += 1; });
-  fx.zone.querySelector = sel => (/disabled/.test(sel) ? title : null);
+  fx.zone.querySelectorAll = sel => (/disabled/.test(sel) ? [title] : []);
   fx.focus(app.context.document.body);
   title.fire('focusout'); await holdTick();
   assert.equal(drawn, 0, '실패하면 고치던 글이 남아야 하니 지우지 않는다');
@@ -469,6 +504,7 @@ test('입력 씹힘 ③: 그룹 `+` 줄은 조합 중일 때만 미루고, 조�
   input.addEventListener = (name, fn) => { (handlers[name] ||= []).push(fn); };
   input.removeEventListener = (name, fn) => { handlers[name] = (handlers[name] || []).filter(h => h !== fn); };
   input.matches = () => true;
+  input.tagName = 'INPUT'; input.type = 'text';
   input.value = '안녕하세요 한';
   fx.focus(input);
   let fresh = null;

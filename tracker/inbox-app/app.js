@@ -674,9 +674,20 @@ function uiAddRowRestore(snap) {
 let uiComposingEl = null;
 let uiPointerDown = false;
 const uiHeldRenders = new Map();
+// 글자를 치는 칸만 "입력 중"으로 본다 — 체크박스·라디오·버튼·select 등은 눌러도 목록이 바로 바뀌어야 한다
+// (전역 isTyping()은 input 전체를 입력 중으로 봐서, 체크한 뒤 목록·개수가 초점이 떠날 때까지 낡아 있었다).
+const UI_NOT_TEXT_INPUTS = ['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color', 'file', 'image'];
+function uiIsTextEntry(el) {
+  if (!el) return false;
+  if (el.isContentEditable) return true;
+  const tag = String(el.tagName || '').toUpperCase();
+  if (tag === 'TEXTAREA') return true;
+  if (tag !== 'INPUT') return false;
+  return !UI_NOT_TEXT_INPUTS.includes(String(el.type || 'text').toLowerCase());
+}
 function uiRenderHeld(zone) {
   const el = document.activeElement;
-  if (!zone || !el || !zone.contains?.(el) || !isTyping()) return false;
+  if (!zone || !el || !zone.contains?.(el) || !uiIsTextEntry(el)) return false;
   if (uiComposingEl && uiComposingEl === el) return true;
   return !uiAddRowSnapshot();
 }
@@ -707,7 +718,7 @@ function uiHeldFlush() {
     if (uiRenderHeld(zone)) { uiHoldArm(active); continue; }
     // 초점이 같은 구역의 다른 것(버튼 등)으로 옮겨 갔으면 그것을 지우지 않게 구역을 떠날 때까지 기다린다.
     if (active && active !== document.body && zone.contains?.(active) && !uiAddRowSnapshot()) { uiHoldArm(active); continue; }
-    if (zone.querySelector?.('input[type="text"]:disabled, textarea:disabled')) continue;
+    if ([...(zone.querySelectorAll?.('input:disabled, textarea:disabled') || [])].some(uiIsTextEntry)) continue;
     if (uiPointerDown) {
       document.addEventListener('pointerup', () => setTimeout(uiHeldFlush, 0), { once: true, capture: true });
       return;
