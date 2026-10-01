@@ -654,7 +654,7 @@ test('업무 줄의 줄 태그는 우선순위 없이 상태 → 기한 차례�
   assert.equal(row("{ due: todayStr() }"), '<span class="m-due k-warn" title="기한은 ' + app.run('uiKoDate(todayStr())')
     + '이에요"><svg class="d-i" viewBox="0 0 16 16" aria-hidden="true">' + app.run('UI_ICONS.calendar') + '</svg>오늘까지</span>',
     '기한만 있으면 기한 한 칸뿐이다');
-  // 체크박스가 없는 자리(미루기 제안 줄)에서는 우선순위를 예전처럼 글자로 쓴다.
+  // 체크박스가 없는 자리(당겨오기 제안 줄)에서는 우선순위를 예전처럼 글자로 쓴다.
   assert.match(cells("{ priority: 'high', due: todayStr() }"), /m-pri k-warn.*중요.*오늘까지/s);
   assert.match(cells("{ priority: 'high', scheduled: '2000-01-01', due: todayStr() }"), /중요.*밀림.*오늘까지/s);
 });
@@ -745,7 +745,7 @@ test('진행 중인 업무 줄에는 밀림도 며칠째도 없다(체크박스�
   // 기한 때문에 들어온 업무(예정일 없음·미래)는 밀림이 아니다.
   assert.doesNotMatch(row("{ due: '2000-01-03' }"), /밀림/);
   assert.doesNotMatch(row("{ scheduled: '2999-01-01', due: todayStr() }"), /밀림/);
-  // 체크박스가 없는 자리(미루기 제안 줄)는 `진행 중` 글자만(며칠째 없음).
+  // 체크박스가 없는 자리(당겨오기 제안 줄)는 `진행 중` 글자만(며칠째 없음).
   const plainRow = app.run("uiMetaCells({ doing: '2000-01-02' })");
   assert.match(plainRow, /m-doing.*진행 중/s);
   assert.doesNotMatch(plainRow, /일째/);
@@ -1131,8 +1131,8 @@ test('panelWhenText: 진행 중이 아니면 지난 예정일은 `N일째 밀림
   assert.match(app.run("panelWhenText({ status: 'open', scheduled: '2000-01-01' }, 'today')"), /^\d+일째 밀림 · 1월 1일 \(토\)$/);
 });
 
-// 1.3.2: 오늘 할 일 머리줄의 끌어오기 제안은 `오늘 할 만한 일 N개`(미루기 `N개 미룰까요?`는 그대로, 0개면 없음).
-test('제안 머리줄 문구: 끌어오기는 `오늘 할 만한 일 N개`, 미루기는 `N개 미룰까요?`, 0개면 링크 없음', () => {
+// 오늘 할 일 머리줄의 끌어오기 제안은 `오늘 할 만한 일 N개`(0개면 없음). 많을 때 미루자는 제안(`N개 미룰까요?`)은 없다.
+test('제안 머리줄 문구: 끌어오기는 `오늘 할 만한 일 N개`, 미루기 제안은 없음, 0개면 링크 없음', () => {
   const app = workflowsClient();
   app.run('workflowData = { items: [], meetings: [] }; wfIndexData();');
   const label = (mode, ids) => app.run(`(() => {
@@ -1143,7 +1143,7 @@ test('제안 머리줄 문구: 끌어오기는 `오늘 할 만한 일 N개`, 미
     return toggle ? toggle.children.map(node => node.textContent).join('') : null;
   })()`);
   assert.equal(label('pull', ['a', 'b']), '오늘 할 만한 일 2개');
-  assert.equal(label('defer', ['a', 'b', 'c']), '3개 미룰까요?');
+  assert.equal(label('defer', ['a', 'b', 'c']), null, '옛 서버가 defer를 보내도 미룰까요 링크는 없다');
   assert.equal(label('pull', []), null);
 });
 
