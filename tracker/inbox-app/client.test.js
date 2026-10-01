@@ -1271,6 +1271,90 @@ test('새로 들어온 것은 개수와 상관없이 모든 줄이 보이고 접
   assert.doesNotMatch(css, /\.d-ibmore/, '쓰이지 않는 접기 규칙이 남지 않는다');
 });
 
+// ---------- 일정 정하기 판 ----------
+test('일정 정하기: 줄에는 `일정 정하기`와 `완료` 둘만 늘 보이고 ⋯는 그대로, 옛 `오늘`·`나중에` 버튼은 없다', () => {
+  const { app, rows } = inboxFoldClient();
+  app.run("renderInbox(inboxOf(1))");
+  const acts = rows()[0].children[1];
+  const buttons = acts.children;
+  assert.equal(buttons.length, 3, '일정 정하기 · 완료 · ⋯');
+  assert.equal(buttons[0].className, 'd-btn sm d-schedbtn');
+  assert.equal(buttons[0].children[buttons[0].children.length - 1].className, 'cv', '이름 뒤에 꺾쇠 한 조각');
+  assert.equal(buttons[0].getAttribute('aria-haspopup'), 'true');
+  assert.equal(buttons[0].getAttribute('aria-expanded'), 'false');
+  assert.equal(buttons[0].getAttribute('aria-label'), '업무0 — 일정 정하기');
+  assert.equal(buttons[1].textContent, '완료');
+  assert.equal(buttons[1].getAttribute('aria-label'), '업무0 — 완료');
+  assert.ok(![...buttons].some(button => ['오늘', '나중에'].includes(button.textContent)), '오늘·나중에 버튼이 따로 없다');
+});
+
+test('일정 정하기: 날짜 항목 — 월~수에는 이번 주(금)가 있고, 목·금·토·일에는 숨고, 일요일에는 내일과 겹치는 다음 주도 숨는다', () => {
+  const { app } = inboxFoldClient();
+  const choices = day => JSON.parse(app.run(`JSON.stringify(uiSchedChoices(new Date(${day}T12:00:00)).map(c => [c.label, c.date]))`.replace('${day}', day)));
+  // 2026-10-05 월 · 10-07 수 · 10-08 목 · 10-09 금 · 10-10 토 · 10-11 일
+  assert.deepEqual(app.run("JSON.stringify(uiSchedChoices(new Date('2026-10-05T12:00:00')).map(c => [c.label, c.date]))"),
+    JSON.stringify([['오늘', '2026-10-05'], ['내일', '2026-10-06'], ['이번 주', '2026-10-09'], ['다음 주', '2026-10-12']]));
+  assert.equal(JSON.parse(app.run("JSON.stringify(uiSchedChoices(new Date('2026-10-07T12:00:00')).map(c => c.date))")).join(), '2026-10-07,2026-10-08,2026-10-09,2026-10-12');
+  for (const day of ['2026-10-08', '2026-10-09', '2026-10-10']) {
+    const labels = JSON.parse(app.run(`JSON.stringify(uiSchedChoices(new Date('${day}T12:00:00')).map(c => c.label))`));
+    assert.deepEqual(labels, ['오늘', '내일', '다음 주'], `${day}에는 이번 주가 없다`);
+  }
+  assert.deepEqual(JSON.parse(app.run("JSON.stringify(uiSchedChoices(new Date('2026-10-10T12:00:00')).map(c => c.date))")), ['2026-10-10', '2026-10-11', '2026-10-12'], '토요일: 다음 주 = 모레 월요일');
+  assert.deepEqual(JSON.parse(app.run("JSON.stringify(uiSchedChoices(new Date('2026-10-11T12:00:00')).map(c => c.label))")), ['오늘', '내일'], '일요일: 다음 주 월요일은 내일과 같은 날');
+  assert.equal(app.run("uiSchedDateText('2026-10-06')"), '10/6 (화)');
+});
+
+test('일정 정하기: 판이 열려 있는 동안 그 구역의 다시 그리기를 미루고, 닫으면 한 번 그린다', () => {
+  const { app } = inboxFoldClient();
+  const zone = app.context.document.getElementById('inboxZone');
+  const other = app.context.document.getElementById('laterTaskList');
+  app.run("var drawn = []");
+  app.context.zone = zone; app.context.other = other;
+  app.run("uiSchedOpen = { zone, pop: {}, anchor: {} }");
+  assert.equal(app.run("uiRenderOrHold('inbox', zone, () => drawn.push('미룸'))"), false, '열려 있으면 미룬다');
+  assert.equal(app.run("uiRenderOrHold('later', other, () => drawn.push('다른 구역'))"), true, '다른 구역은 그대로 그린다');
+  assert.deepEqual(JSON.parse(app.run("JSON.stringify(drawn)")), ['다른 구역']);
+  app.run("uiSchedOpen = null; uiHeldFlush()");
+  assert.deepEqual(JSON.parse(app.run("JSON.stringify(drawn)")), ['다른 구역', '미룸'], '닫은 뒤 미룬 것을 한 번 그린다');
+});
+
+test('일정 정하기: 나중에 할 일 서랍 줄은 미래 날짜로 정한 업무의 날짜를 보인다(미정·오늘·지난 날짜는 지어내지 않는다)', () => {
+  const { app } = inboxFoldClient();
+  app.run("escapeAttr = s => String(s || '')");
+  const future = app.run("uiKoDateShort(uiDateKey(new Date(Date.now() + 5 * 86400000)))");
+  const html = app.run("uiMetaCells({ id: 'a', status: 'to-do', scheduled: uiDateKey(new Date(Date.now() + 5 * 86400000)) }, { where: 'full', later: true })");
+  assert.match(html, new RegExp(`class="m-sched"[^>]*>.*${future} 예정`));
+  assert.doesNotMatch(app.run("uiMetaCells({ id: 'a', status: 'to-do', scheduled: null }, { where: 'full', later: true })"), /m-sched/);
+  assert.doesNotMatch(app.run("uiMetaCells({ id: 'a', status: 'to-do', scheduled: todayStr() }, { where: 'full', later: true })"), /m-sched/);
+  assert.doesNotMatch(app.run("uiMetaCells({ id: 'a', status: 'to-do', scheduled: uiDateKey(new Date(Date.now() + 5 * 86400000)) }, { where: 'row' })"), /m-sched/, '오늘 목록 줄에는 붙지 않는다');
+});
+
+test('일정 정하기: 모션 CSS — 쫀득 등장 240ms·1.025, 닫힘 140ms, 줄 접힘 220ms, 새 줄 솟음 260ms, 움직이는 건 transform·opacity뿐', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /\.d-schedpop \{[^}]*animation: d-sched-in 240ms/);
+  const section = name => css.slice(css.indexOf(`@keyframes ${name} {`), css.indexOf('\n@keyframes', css.indexOf(`@keyframes ${name} {`) + 1));
+  assert.match(section('d-sched-in'), /scale\(0\.88\)[\s\S]*55% \{[^}]*scale\(1\.025\)/);
+  assert.match(css, /\.d-schedpop\.is-out \{ animation: d-sched-out 140ms/);
+  assert.match(css, /animation-delay: calc\(var\(--i, 0\) \* 18ms/);
+  assert.match(css, /\.d-ibrow\.is-leaving \{ animation: d-sched-leave 220ms/);
+  assert.match(css, /\.d-row\.is-rise \{ animation: d-sched-rise 260ms/);
+  ['d-sched-in', 'd-sched-out', 'd-sched-item', 'd-sched-leave', 'd-sched-rise'].forEach((name) => {
+    assert.doesNotMatch(section(name).split('\n').slice(0, 6).join('\n'), /\b(width|height|top|left|margin|padding)\s*:/, `${name}: 레이아웃 속성은 움직이지 않는다`);
+  });
+});
+
+test('일정 정하기: 판 부품 — 진짜 button, role=menu, 열면 오늘에 초점, 한글 조합 중에는 키를 넘긴다, 닫힘 규칙이 Esc 스택에 오른다', () => {
+  const src = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const part = src.slice(src.indexOf('function uiSchedToggle'), src.indexOf('// 슬랙에서 갓 들어온 할 일.'));
+  assert.match(part, /pop\.setAttribute\('role', 'menu'\)/);
+  assert.match(part, /button\.setAttribute\('role', 'menuitem'\)/);
+  assert.match(part, /escPush\(onEsc\)/);
+  assert.match(part, /event\.isComposing/);
+  assert.match(part, /querySelector\('\[data-sched="today"\]'\);[\s\S]*first\?\.focus\(\)/);
+  assert.match(part, /'\[role="menuitem"\]'/, '↑↓는 메뉴 항목만 돈다');
+  assert.doesNotMatch(part, /\/api\//, '새 API 길을 만들지 않는다 — 저장은 기존 setTaskScheduled·setTaskJira·setTaskGroup');
+});
+
 test('어두운 화면의 따뜻한 판은 짙은 회색이고, 시스템 다크·직접 고른 다크 두 곳이 같은 값이다(밝은 화면 그대로)', () => {
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
   const warm = css.split('\n').filter(line => /^\s*--warm:/.test(line)).map(line => line.trim());

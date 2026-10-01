@@ -486,9 +486,12 @@ function uiMetaCells(item, opts = {}) {
     // 체크박스가 없는 자리(당겨오기 제안 줄)는 `진행 중` 글자만.
     if (!opts.noPriority && !opts.inDoingGroup) status.push(cell('m-doing', 'clock', '진행 중', `${uiKoDate(item.doing)}부터 진행 중이에요`));
   }
+  // 나중에 할 일 서랍의 줄: 미래 날짜로 정한 업무는 그 날짜를 보인다(날짜 미정은 지어내지 않는다).
+  const scheduledLater = opts.later && !done && item.scheduled && diffDays(item.scheduled) > 0
+    ? cell('m-sched', 'calendar', `${uiKoDateShort(item.scheduled)} 예정`, `${uiKoDate(item.scheduled)}에 하기로 했어요`) : '';
   const due = done ? null : uiDueText(item.due, where);
   const dueCell = due ? cell(`m-due${uiTone(due.tone)}`, 'calendar', due.text, item.due ? `기한은 ${uiKoDate(item.due)}이에요` : '') : '';
-  return [...cells, priorityCell, ...status, dueCell].filter(Boolean).join('');
+  return [...cells, priorityCell, ...status, scheduledLater, dueCell].filter(Boolean).join('');
 }
 
 // 업무 체크박스 한 칸(체크 + 흰 체크 + 우선순위 꺾쇠 + 진행 중 반쯤 채움). 체크박스가 있는 줄은 모두 이 부품을 쓴다.
@@ -686,6 +689,8 @@ function uiIsTextEntry(el) {
   return !UI_NOT_TEXT_INPUTS.includes(String(el.type || 'text').toLowerCase());
 }
 function uiRenderHeld(zone) {
+  // 일정 정하기 판이 열려 있는 동안은 그 구역을 다시 그리지 않는다(누른 줄·버튼이 사라지면 판이 허공에 뜬다).
+  if (zone && uiSchedOpen && uiSchedOpen.zone === zone) return true;
   const el = document.activeElement;
   if (!zone || !el || !zone.contains?.(el) || !uiIsTextEntry(el)) return false;
   if (uiComposingEl && uiComposingEl === el) return true;
@@ -984,7 +989,7 @@ function uiTaskRow(item, opts = {}) {
     // 우선순위는 왼쪽 체크박스가 말한다 — 이 줄의 오른쪽에는 날짜 성격의 말만 오른쪽 끝에 붙는다.
     // 여러 개 선택 중에는 체크박스가 없으므로 체크박스가 없는 줄처럼 우선순위·진행 중을 글자로 적는다.
     meta.innerHTML = uiMetaCells(item, {
-      where: mode === 'later' ? 'full' : 'row', inDoingGroup: opts.inDoingGroup, project, noPriority: !taskSelectionMode,
+      where: mode === 'later' ? 'full' : 'row', later: mode === 'later', inDoingGroup: opts.inDoingGroup, project, noPriority: !taskSelectionMode,
       waiting: blocker ? (blocker.status === 'done' ? 'answered' : 'waiting') : null,
     });
   }
@@ -4887,7 +4892,302 @@ function renderGuideCard() {
   zone.appendChild(card);
 }
 
-// 슬랙에서 갓 들어온 할 일. 오늘 할지 나중에 할지는 여기서 직접 고른다.
+// ---------- 일정 정하기 판 (새로 들어온 것 줄) ----------
+// `일정 정하기 ⌄` 하나가 오늘·내일·이번 주·다음 주·날짜·나중에와 프로젝트를 한 판에 모은다. 저장은 새 길 없이
+// 지금 있는 실행 날짜(setTaskScheduled)·프로젝트(setTaskJira·setTaskGroup)를 그대로 쓴다.
+// 판은 더보기 메뉴(.d-menulist)와 같은 모양의 떠 있는 층이고, 열려 있는 동안은 그 구역 다시 그리기를 미룬다(uiRenderHeld).
+let uiSchedOpen = null; // { pop, anchor, zone, id, onEsc, reposition }
+const uiSchedRise = new Map(); // 오늘로 정한 업무 id → 새 줄 솟음(renderTodayTasks가 한 번 쓰고 지운다)
+
+function uiDateKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+// 오른쪽에 적는 실제 날짜: `10/6 (화)`
+function uiSchedDateText(dateStr) {
+  return `${uiDateSlash(dateStr)} (${UI_WEEKDAYS[new Date(`${dateStr}T00:00:00`).getDay()]})`;
+}
+// 날짜 항목들. `이번 주`는 이번 주 금요일 — 목·금·토·일에는 오늘·내일과 겹치거나 지난 날이라 숨긴다.
+// `다음 주`는 다음 주 월요일 — 일요일에는 내일과 같은 날이라 숨긴다.
+function uiSchedChoices(now = new Date()) {
+  const base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const weekday = base.getDay();
+  const at = (days) => { const next = new Date(base); next.setDate(next.getDate() + days); return uiDateKey(next); };
+  const list = [
+    { key: 'today', label: '오늘', date: at(0), message: '오늘 할 일로 옮겼어요' },
+    { key: 'tomorrow', label: '내일', date: at(1), message: '내일로 미뤘어요' },
+  ];
+  if (weekday >= 1 && weekday <= 3) list.push({ key: 'week', label: '이번 주', date: at(5 - weekday) });
+  if (weekday !== 0) list.push({ key: 'next', label: '다음 주', date: at(8 - weekday) });
+  return list;
+}
+
+function uiSchedMotion() {
+  try { return !window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return true; }
+}
+
+function uiSchedPlace(pop, anchor) {
+  const box = anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : null;
+  if (!box) return;
+  const width = pop.offsetWidth || 304;
+  const height = pop.offsetHeight || 0;
+  const viewW = window.innerWidth || 1024;
+  const viewH = window.innerHeight || 768;
+  const left = Math.max(12, Math.min(box.left, viewW - 12 - width));
+  const below = box.bottom + 6;
+  // 아래 자리가 모자라면 위로 뒤집는다(기존 ⋯ 메뉴와 같이). 시작점은 누른 버튼 쪽이다.
+  const flip = below + height > viewH - 8 && box.top - 6 - height >= 8;
+  const top = flip ? box.top - 6 - height : Math.max(8, Math.min(below, viewH - 8 - height));
+  pop.style.left = `${Math.round(left)}px`;
+  pop.style.top = `${Math.round(top)}px`;
+  pop.style.setProperty('--ox', `${Math.round(box.left + box.width / 2 - left)}px`);
+  pop.style.setProperty('--oy', flip ? '100%' : '0');
+}
+
+function uiSchedClose({ restoreFocus = false, keepHeld = false } = {}) {
+  if (!uiSchedOpen) return;
+  const { pop, anchor, id, onEsc, reposition } = uiSchedOpen;
+  uiSchedOpen = null;
+  escDrop(onEsc);
+  window.removeEventListener('resize', reposition);
+  document.removeEventListener('scroll', reposition, true);
+  anchor.setAttribute('aria-expanded', 'false');
+  if (uiSchedMotion()) {
+    pop.classList.add('is-out');
+    setTimeout(() => pop.remove(), 140);
+  } else pop.remove();
+  // 고르는 중에 미룬 다시 그리기는 닫으면서 풀어 준다. 고른 경우(keepHeld)에는 저장이 끝나 그리는 쪽이 한 번에 처리한다.
+  if (keepHeld) return;
+  uiHeldFlush();
+  if (restoreFocus) document.querySelector?.(`[data-sched-id="${id}"]`)?.focus?.();
+}
+
+function uiSchedButton(item, row) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'd-btn sm d-schedbtn';
+  button.dataset.schedId = item.id;
+  button.setAttribute('aria-haspopup', 'true');
+  button.setAttribute('aria-expanded', 'false');
+  button.setAttribute('aria-label', `${item.description} — 일정 정하기`);
+  button.append('일정 정하기');
+  const caret = document.createElement('span');
+  caret.className = 'cv';
+  caret.innerHTML = uiIcon('chevron');
+  button.appendChild(caret);
+  button.addEventListener('click', (event) => { event.stopPropagation?.(); uiSchedToggle(item, row, button); });
+  return button;
+}
+
+function uiSchedToggle(item, row, anchor) {
+  if (uiSchedOpen && uiSchedOpen.anchor === anchor) { uiSchedClose({ restoreFocus: true }); return; }
+  uiSchedClose();
+  uiMenuClose();
+
+  const zone = document.getElementById('inboxZone');
+  const pop = document.createElement('div');
+  pop.className = 'd-schedpop';
+  pop.setAttribute('role', 'menu');
+  pop.setAttribute('aria-label', '일정 정하기');
+  pop.addEventListener('click', event => event.stopPropagation());
+
+  const label = document.createElement('div');
+  label.className = 'lab';
+  label.textContent = '실행 날짜';
+  pop.appendChild(label);
+
+  const mark = (button) => {
+    button.addEventListener('focus', () => { pop.querySelectorAll('.d-mitem.on').forEach(on => on.classList.remove('on')); button.classList.add('on'); });
+  };
+  let order = 0;
+  const entry = (keyLabel, text, detail, onPick) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'd-mitem';
+    button.setAttribute('role', 'menuitem');
+    button.dataset.key = String(keyLabel);
+    button.style.setProperty('--i', String(order++));
+    const name = document.createElement('span');
+    name.textContent = text;
+    button.appendChild(name);
+    if (detail) {
+      const dt = document.createElement('span');
+      dt.className = 'dt';
+      dt.textContent = detail;
+      button.appendChild(dt);
+    }
+    const kbd = document.createElement('kbd');
+    kbd.textContent = String(keyLabel);
+    button.appendChild(kbd);
+    button.addEventListener('click', onPick);
+    mark(button);
+    pop.appendChild(button);
+    return button;
+  };
+
+  // 고른 날짜(또는 나중에)를 저장한다 — 판은 닫고 줄은 접힌다. 오늘·나중에는 예전 두 버튼과 같은 동작·같은 알림이다.
+  const choose = async (scheduled, message) => {
+    uiSchedClose({ keepHeld: true });
+    row.classList.add('is-leaving');
+    if (scheduled === todayStr()) uiSchedRise.set(item.id, Date.now());
+    const move = scheduled === todayStr() || scheduled === null
+      ? () => fadeOutAndRun(row, () => setTaskScheduled(item.id, scheduled), uiMoveNotice(message, [item], scheduled))
+      : () => uiMoveRun(row, () => setTaskScheduled(item.id, scheduled), uiMoveNotice(message, [item], scheduled));
+    await move();
+    // 저장이 안 됐으면(알림은 request가 이미 했다) 줄을 되돌리고 미룬 다시 그리기를 푼다.
+    if (row.isConnected) { row.classList.remove('is-leaving'); uiSchedRise.delete(item.id); uiHeldFlush(); }
+  };
+
+  const choices = uiSchedChoices();
+  const picks = [];
+  choices.forEach((choice, index) => {
+    picks.push({ key: String(index + 1), run: () => choose(choice.date, choice.message || `${uiKoDate(choice.date)}로 옮겼어요`) });
+    entry(index + 1, choice.label, uiSchedDateText(choice.date), picks[picks.length - 1].run).dataset.sched = choice.key;
+  });
+
+  let dateRow = null;
+  const pickDate = () => {
+    if (dateRow) { dateRow.remove(); dateRow = null; place(); return; }
+    dateRow = document.createElement('div');
+    dateRow.className = 'd-schedwhen';
+    const input = document.createElement('input');
+    input.type = 'date';
+    input.className = 'd-dateinput';
+    input.min = todayStr();
+    input.value = '';
+    input.setAttribute('aria-label', '실행 날짜');
+    const commitDate = () => { if (input.value) choose(input.value, `${uiKoDate(input.value)}로 옮겼어요`); };
+    input.addEventListener('change', commitDate);
+    input.addEventListener('keydown', (event) => {
+      if (event.isComposing || event.key !== 'Enter' || !input.value) return;
+      event.preventDefault();
+      commitDate();
+    });
+    dateRow.appendChild(input);
+    dateButton.after(dateRow);
+    place();
+    input.focus();
+    try { input.showPicker?.(); } catch { /* 달력을 못 열면 입력칸에 초점만 둔다 */ }
+  };
+  const dateNumber = choices.length + 1;
+  const dateButton = entry(dateNumber, '날짜 고르기…', '', pickDate);
+  dateButton.dataset.sched = 'pick';
+  picks.push({ key: String(dateNumber), run: pickDate });
+
+  const separator = () => { const line = document.createElement('div'); line.className = 'd-msep'; pop.appendChild(line); };
+  separator();
+  const later = entry(0, '나중에', '날짜 미정', () => choose(null, '나중에 할 일로 옮겼어요'));
+  later.dataset.sched = 'later';
+  picks.push({ key: '0', run: () => choose(null, '나중에 할 일로 옮겼어요') });
+  separator();
+
+  // 프로젝트: 누르면 판 안에서 목록이 펼쳐진다(날짜를 정하기 전에 정해도, 프로젝트만 정하고 닫아도 된다).
+  const state = { jira: item.jira || null, group: item.group || null };
+  const projectKey = () => (state.jira ? `jira:${state.jira}` : state.group ? `group:${state.group}` : '');
+  const projectBox = document.createElement('div');
+  projectBox.className = 'd-schedproj';
+  const projectButton = document.createElement('button');
+  projectButton.type = 'button';
+  projectButton.className = 'd-mitem';
+  projectButton.setAttribute('role', 'menuitem');
+  projectButton.setAttribute('aria-haspopup', 'listbox');
+  projectButton.setAttribute('aria-expanded', 'false');
+  projectButton.style.setProperty('--i', String(order++));
+  mark(projectButton);
+  const paintProject = () => {
+    const key = projectKey();
+    projectButton.replaceChildren();
+    const name = document.createElement('span');
+    name.textContent = '프로젝트';
+    const value = document.createElement('span');
+    value.className = 'dt' + (key ? ' has' : '');
+    if (key) value.append(uiProjectDot(key), uiGroupLabel(key));
+    else value.textContent = '정하기';
+    const caret = document.createElement('span');
+    caret.className = 'cv';
+    caret.innerHTML = uiIcon('chevron');
+    projectButton.append(name, value, caret);
+    projectButton.setAttribute('aria-label', key ? `프로젝트 ${uiGroupLabel(key)} — 바꾸기` : '프로젝트 정하기');
+  };
+  paintProject();
+  let projectList = null;
+  const closeProjects = (focus) => {
+    if (projectList) { projectList.remove(); projectList = null; }
+    projectButton.setAttribute('aria-expanded', 'false');
+    if (focus) projectButton.focus();
+    place();
+  };
+  const saveProject = async (value) => {
+    try {
+      if (value === PICK_CLEAR) { await setTaskJira(item.id, null); await setTaskGroup(item.id, null); state.jira = null; state.group = null; }
+      else if (value.startsWith('group:')) { await setTaskGroup(item.id, value.slice(6)); state.group = value.slice(6); state.jira = null; }
+      else { await setTaskJira(item.id, value.replace(/^jira:/, '')); state.jira = value.replace(/^jira:/, ''); state.group = null; }
+    } catch { return; } // 저장이 안 되면 request가 이미 알렸다 — 판은 그대로 두고 지금 값을 보여 준다
+    paintProject();
+    announce(projectKey() ? '프로젝트를 정했어요' : '프로젝트를 뺐어요');
+    load(); // 이 구역은 판이 닫힐 때까지 미뤄진다
+  };
+  projectButton.addEventListener('click', () => {
+    if (projectList) { closeProjects(true); return; }
+    const current = state.jira ? { type: 'jira', value: state.jira } : state.group ? { type: 'group', value: state.group } : null;
+    const entries = projectPickEntries(current, false).filter(one => one.value !== PICK_CUSTOM);
+    projectButton.setAttribute('aria-expanded', 'true');
+    if (!entries.some(one => one.type === 'option')) {
+      projectList = document.createElement('div');
+      projectList.className = 'd-schedhint';
+      projectList.textContent = '아직 정해 둔 프로젝트가 없어요';
+    } else {
+      projectList = uiPickList({
+        entries,
+        label: '프로젝트 고르기',
+        search: uiPickSearchable(entries),
+        onClose: byKeyboard => closeProjects(byKeyboard),
+        onPick: async (value) => { closeProjects(true); await saveProject(value); },
+      });
+    }
+    projectBox.appendChild(projectList);
+    place();
+    projectList.focusStart?.();
+  });
+  projectBox.appendChild(projectButton);
+  pop.appendChild(projectBox);
+
+  const onEsc = () => uiSchedClose({ restoreFocus: true });
+  const place = () => uiSchedPlace(pop, anchor);
+  const reposition = (event) => { if (!event || !event.target || !pop.contains || !pop.contains(event.target)) place(); };
+  pop.addEventListener('keydown', (event) => {
+    if (event.isComposing) return;
+    if (event.key === 'Tab') { uiSchedClose({ restoreFocus: true }); return; }
+    const typing = event.target && String(event.target.tagName || '').toUpperCase() === 'INPUT';
+    if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && !typing) {
+      const buttons = [...pop.querySelectorAll('[role="menuitem"]')];
+      if (!buttons.length) return;
+      event.preventDefault();
+      const step = event.key === 'ArrowDown' ? 1 : -1;
+      const at = buttons.indexOf(document.activeElement);
+      buttons[(at + step + buttons.length) % buttons.length].focus();
+      return;
+    }
+    if (typing || (event.target && event.target.closest && event.target.closest('.d-gpick')) || event.metaKey || event.ctrlKey || event.altKey || !/^[0-9]$/.test(event.key)) return;
+    const found = picks.find(one => one.key === event.key);
+    if (found) { event.preventDefault(); found.run(); }
+  });
+
+  document.body.appendChild(pop);
+  anchor.setAttribute('aria-expanded', 'true');
+  uiSchedOpen = { pop, anchor, zone, id: item.id, onEsc, reposition };
+  escPush(onEsc);
+  window.addEventListener('resize', reposition);
+  document.addEventListener('scroll', reposition, true);
+  place();
+  const first = pop.querySelector('[data-sched="today"]');
+  first?.classList.add('on');
+  first?.focus();
+}
+document.addEventListener('click', (event) => {
+  if (uiSchedOpen && !uiSchedOpen.anchor.contains(event.target) && !uiSchedOpen.pop.contains(event.target)) uiSchedClose();
+});
+
+// 슬랙에서 갓 들어온 할 일. 언제 할지·프로젝트는 줄의 `일정 정하기`에서 고른다.
 // 비어 있으면 섹션 자체를 숨겨서, 처리할 게 있을 때만 눈에 띄게 한다.
 function renderInbox(items) {
   const zone = document.getElementById('inboxZone');
@@ -4921,21 +5221,16 @@ function renderInbox(items) {
 
     const actions = document.createElement('span');
     actions.className = 'd-ibacts';
-    const choose = (label, onClick, cls = '') => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = `d-btn sm ${cls}`.trim();
-      button.textContent = label;
-      button.setAttribute('aria-label', `${item.description} — ${label}`);
-      button.addEventListener('click', onClick);
-      actions.appendChild(button);
-    };
-
-    // 줄에는 자주 쓰는 세 갈래만 늘 보인다 — 오늘 / 나중에 / 완료.
-    choose('오늘', () => fadeOutAndRun(row, () => setTaskScheduled(item.id, todayStr()), '오늘 할 일로 옮겼어요'));
-    choose('나중에', () => fadeOutAndRun(row, () => setTaskScheduled(item.id, null), uiMoveNotice('나중에 할 일로 옮겼어요', [item], null)));
+    // 줄에는 두 갈래만 늘 보인다 — 일정 정하기(오늘·내일·이번 주·다음 주·날짜·나중에·프로젝트가 한 판) / 완료.
+    actions.appendChild(uiSchedButton(item, row));
     // 완료는 기록이 남고(주간요약에 들어감), 삭제는 남지 않는다 — 삭제는 ⋯ 안으로 들어갔다.
-    choose('완료', () => fadeOutAndRun(row, () => toggleTask(item.id), '완료했어요'));
+    const done = document.createElement('button');
+    done.type = 'button';
+    done.className = 'd-btn sm';
+    done.textContent = '완료';
+    done.setAttribute('aria-label', `${item.description} — 완료`);
+    done.addEventListener('click', () => fadeOutAndRun(row, () => toggleTask(item.id), '완료했어요'));
+    actions.appendChild(done);
 
     // 값을 정하는 것과 삭제는 ⋯ 안에 있다. 아직 분류 전이라도 기한·우선순위가 분명한 건은 미리 정해 둘 수 있다.
     actions.appendChild(uiMoreButton(`${item.description} — 더 보기`, () => [
@@ -5068,7 +5363,21 @@ function renderTodayTasks(items) {
     }));
     if (todayDoneOpen) doneItems.forEach(item => list.appendChild(uiTaskRow(item, { mode: 'today' })));
   }
+  uiSchedRiseApply(list);
 }
+
+// 일정 정하기에서 `오늘`로 정한 업무의 새 줄은 솟아오르며 연파랑이 잠깐 비친다(한 번만).
+function uiSchedRiseApply(list) {
+  if (!uiSchedRise.size || !list.querySelectorAll) return;
+  list.querySelectorAll('[data-task-id]').forEach((row) => {
+    const at = uiSchedRise.get(row.dataset.taskId);
+    if (at === undefined) return;
+    uiSchedRise.delete(row.dataset.taskId);
+    if (Date.now() - at < 8000) row.classList.add('is-rise');
+  });
+  [...uiSchedRise].forEach(([id, at]) => { if (Date.now() - at >= 8000) uiSchedRise.delete(id); });
+}
+
 
 function escapeHtml(str) {
   const div = document.createElement('div');
