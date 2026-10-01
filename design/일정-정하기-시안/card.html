@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="ko" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>일정 정하기 데모 카드</title>
+<style>
+@font-face { font-family: "Pretendard Variable"; font-weight: 45 920; font-display: swap; src: url("fonts/PretendardVariable.woff2") format("woff2-variations"), url("fonts/PretendardVariable.woff2") format("woff2"); }
+
+/* ===== 앱 토큰 그대로(ui.css :root) — 새 색 없음 ===== */
+:root {
+  color-scheme: light dark;
+  --bg:#f2f4f6; --surface:#fff; --surface-line:transparent; --field:#f2f4f6; --hover:#f4f6f8; --border:#e3e7eb; --hair:#eef1f4; --check-line:#8b95a1;
+  --text:#191f28; --muted:#4e5968; --dim:#636c78;
+  --accent:#3182f6; --accent-strong:#1b64da; --accent-text:#1b64da; --accent-soft:#e8f3ff; --on-fill:#fff; --sel:#eef5ff; --sel-hover:#e6f1ff;
+  --urgent:#c9252d; --warn:#b0560a; --warn-bg:#fff4e5; --success:#0d7a4a; --neutral-bg:#eef1f4;
+  --warm:#fffaf2; --warm-line:transparent; --warm-hover:#fff4e4;
+  --pj-0:#4f83e8; --pj-1:#2f9b87; --pj-2:#c0842b; --pj-3:#8a6ed2;
+  --soft:0 1px 3px rgba(25,31,40,.04),0 8px 24px rgba(25,31,40,.06); --shadow:0 1px 2px rgba(25,31,40,.06);
+  --pop:0 12px 36px rgba(25,31,40,.14),0 2px 8px rgba(25,31,40,.06);
+  --r:20px; --r-sm:12px; --r-xs:10px; --row:54px; --pad:20px;
+  --fs-cap:12px; --fs-sm:13px; --fs-body:14px; --fs-md:15px; --fs-lg:16px; --h-xs:22px; --h-sm:28px; --h-md:32px;
+  --ease:cubic-bezier(.22,.8,.3,1);
+  --font:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic","Segoe UI",sans-serif;
+}
+:root[data-theme="dark"] {
+  --bg:#15181e; --surface:#1e222a; --surface-line:#2b313b; --field:#262b34; --hover:#272c35; --border:#333a45; --hair:#2b313b; --check-line:#636e7d;
+  --text:#eaedf1; --muted:#a8b1bd; --dim:#8b95a1;
+  --accent:#4b91f1; --accent-strong:#4b91f1; --accent-text:#7aa9ff; --accent-soft:#1b2a44; --on-fill:#0b1020; --sel:#1c2533; --sel-hover:#212c3d;
+  --urgent:#ff8f8f; --warn:#ffbe6b; --warn-bg:#3a2e1b; --success:#6ddba0; --neutral-bg:#2a2f38;
+  --warm:#22252b; --warm-line:#2c3038; --warm-hover:#282c33;
+  --pj-0:#7aa2ff; --pj-1:#57c6ad; --pj-2:#dfa85c; --pj-3:#b198ff;
+  --soft:0 1px 3px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.3); --shadow:0 1px 2px rgba(0,0,0,.35);
+  --pop:0 12px 36px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.35);
+}
+* { box-sizing: border-box; }
+body { margin:0; padding:14px 20px 90px; background:var(--bg); color:var(--text); font-family:var(--font); font-size:var(--fs-body); line-height:1.55; word-break:keep-all; -webkit-font-smoothing:antialiased; }
+button { font-family: inherit; }
+
+/* ===== 모션 값(세 벌) — 시안 비교용. 기본은 spring ===== */
+html { --pop-dur:240ms; --pop-out:140ms; --pop-anim:pop-spring; --pop-out-anim:pop-spring-out; --stag:18ms; --leave:220ms; }
+html.m-calm { --pop-dur:120ms; --pop-out:100ms; --pop-anim:pop-calm; --pop-out-anim:pop-calm-out; --stag:0ms; --leave:160ms; }
+html.m-off  { --pop-dur:.01ms; --pop-out:.01ms; --stag:0ms; --leave:.01ms; }
+@media (prefers-reduced-motion: reduce) { html { --pop-dur:.01ms; --pop-out:.01ms; --stag:0ms; --leave:.01ms; } }
+html.m-off *, html.m-off *::before { animation-duration:.01ms !important; transition-duration:.01ms !important; }
+@media (prefers-reduced-motion: reduce) { *, *::before { animation-duration:.01ms !important; transition-duration:.01ms !important; } }
+
+/* ===== 앱 부품 복사: 섹션 제목·버튼·새로 들어온 것 줄 ===== */
+.d-sechd { display:flex; align-items:center; gap:10px; height:30px; font-size:18px; font-weight:700; letter-spacing:-.015em; }
+.d-sechd .n { height:var(--h-xs); display:inline-flex; align-items:center; padding:0 9px; border-radius:999px; background:var(--warn-bg); color:var(--warn); font-size:12.5px; font-weight:600; }
+.d-headnum { margin-left:auto; height:var(--h-sm); padding:0 6px; border:0; border-radius:var(--r-xs); background:none; color:var(--dim); font-size:var(--fs-sm); font-weight:500; font-variant-numeric:tabular-nums; cursor:pointer; }
+.d-headnum:hover { background:var(--hover); color:var(--accent-text); }
+.d-btn { display:inline-flex; align-items:center; justify-content:center; gap:5px; height:34px; padding:0 13px; border:0; border-radius:var(--r-xs); background:var(--neutral-bg); color:var(--muted); font-size:13.5px; font-weight:600; white-space:nowrap; cursor:pointer; transition:background 170ms var(--ease),color 170ms var(--ease),transform 120ms var(--ease); }
+.d-btn.sm { height:var(--h-md); padding:0 12px; font-size:var(--fs-sm); }
+.d-btn:active { transform:scale(.98); }
+.d-inbox { background:var(--warm); border:1px solid var(--warm-line); border-radius:var(--r); box-shadow:var(--soft); padding:10px; margin:6px 0 0; position:relative; }
+.d-ibrow { position:relative; display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:10px; min-height:var(--row); padding:8px 10px 8px var(--pad); border-radius:14px; transition:background 170ms var(--ease); }
+.d-ibrow:hover, .d-ibrow:focus-within, .d-ibrow.is-open { background:var(--warm-hover); }
+.d-ibmain { display:flex; align-items:center; gap:8px; min-width:0; }
+.d-ibrow .ti { font-size:var(--fs-lg); font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+.d-inproj { display:inline-flex; align-items:center; gap:4px; flex:none; font-size:var(--fs-sm); color:var(--dim); white-space:nowrap; max-width:40%; overflow:hidden; text-overflow:ellipsis; }
+.d-pjdot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--pj-0); flex:none; }
+.d-pjdot[data-pj="1"] { background:var(--pj-1); } .d-pjdot[data-pj="2"] { background:var(--pj-2); } .d-pjdot[data-pj="3"] { background:var(--pj-3); }
+.d-src { flex:none; color:var(--dim); font-weight:500; font-size:12.5px; text-decoration:none; }
+.d-ibacts { display:flex; align-items:center; gap:6px; }
+.d-ibacts .d-btn { background:none; color:var(--accent-text); }
+.d-ibrow:hover .d-ibacts .d-btn, .d-ibrow:focus-within .d-ibacts .d-btn, .d-ibrow.is-open .d-ibacts .d-btn { background:var(--accent-soft); color:var(--accent-text); }
+.d-ibacts .d-btn:hover, .d-ibrow:hover .d-ibacts .d-btn:hover, .d-ibacts .d-btn[aria-expanded="true"] { background:var(--accent-strong); color:var(--on-fill); }
+.d-ibacts .d-btn:focus-visible, .d-more:focus-visible, .d-mitem:focus-visible, .chip:focus-visible, .pjbtn:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.d-more { width:28px; height:var(--h-sm); border:0; border-radius:var(--r-xs); background:none; color:var(--dim); display:inline-flex; align-items:center; justify-content:center; cursor:pointer; }
+.d-more:hover { background:var(--hover); color:var(--text); }
+.d-more svg, .chev { width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; flex:none; }
+.chev { width:12px; height:12px; opacity:.75; transition:transform 130ms var(--ease); }
+[aria-expanded="true"] > .chev { transform:rotate(180deg); }
+
+/* 오늘 할 일 (흰 카드) — 본 앱 줄을 단순화 */
+.d-lhd { display:flex; align-items:center; gap:10px; min-height:34px; margin:22px 0 2px; }
+.d-lhd h2 { margin:0; font-size:19px; font-weight:700; letter-spacing:-.015em; }
+.cnt { height:var(--h-xs); display:inline-flex; align-items:center; padding:0 9px; border-radius:999px; background:var(--accent-soft); color:var(--accent-text); font-size:12.5px; font-weight:600; font-variant-numeric:tabular-nums; }
+.later { margin-left:auto; height:var(--h-sm); padding:0 10px; border:0; border-radius:var(--r-xs); background:none; color:var(--accent-text); font-size:var(--fs-sm); font-weight:600; cursor:pointer; }
+.later:hover { background:var(--accent-soft); }
+.card { background:var(--surface); border:1px solid var(--surface-line); border-radius:var(--r); box-shadow:var(--soft); padding:10px; margin-top:6px; }
+.trow { display:flex; align-items:center; gap:12px; min-height:var(--row); padding:8px 10px; border-radius:14px; }
+.trow .ck { width:22px; height:22px; border:1.5px solid var(--check-line); border-radius:6px; flex:none; background:var(--surface); }
+.trow .ti { font-size:var(--fs-lg); font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.trow.fresh, .d-ibrow.fresh { animation:fresh 1400ms ease-out both; }
+.trow.fresh.hold { animation:none; background:var(--sel); }
+.trow.rise { animation:rise 260ms var(--ease) both; }
+.chip-pop { animation:chip-pop 320ms var(--ease); }
+@keyframes fresh { from { background:var(--sel); } to { background:transparent; } }
+@keyframes rise { 0% { opacity:0; transform:translateY(10px) scale(.98); } 60% { opacity:1; transform:translateY(-1px) scale(1.005); } 100% { opacity:1; transform:none; } }
+@keyframes chip-pop { 0% { transform:scale(1); } 40% { transform:scale(1.18); } 100% { transform:scale(1); } }
+html.m-calm .trow.rise { animation-duration:120ms; }
+
+/* ===== 안 A: 줄 옆 팝오버 — 메뉴 부품(.d-menulist/.d-mitem)과 같은 모양 ===== */
+.sched { position:relative; display:inline-flex; }
+.pop { position:absolute; top:calc(100% + 6px); left:0; z-index:75; width:304px; max-width:calc(100vw - 24px); display:flex; flex-direction:column; gap:1px; padding:6px; background:var(--surface); border:1px solid var(--surface-line); border-radius:18px; box-shadow:var(--pop); transform-origin:var(--ox,40px) 0; text-align:left; animation:var(--pop-anim) var(--pop-dur) var(--ease) both; }
+.pop.out { animation:var(--pop-out-anim) var(--pop-out) var(--ease) both; pointer-events:none; }
+.pop .lab { padding:6px 12px 4px; font-size:12.5px; color:var(--muted); }
+.d-mitem { display:flex; align-items:center; width:100%; height:38px; padding:0 8px 0 12px; border:0; border-radius:var(--r-xs); background:none; color:var(--text); font-size:var(--fs-body); font-weight:500; text-align:left; cursor:pointer; animation:item-in 180ms var(--ease) both; animation-delay:calc(var(--i,0) * var(--stag) + 30ms); }
+.d-mitem.on { background:var(--sel); color:var(--accent-text); }
+.d-mitem .dt { margin-left:auto; font-size:12.5px; color:var(--dim); font-variant-numeric:tabular-nums; }
+.d-mitem.on .dt { color:var(--accent-text); opacity:.8; }
+kbd { margin-left:8px; min-width:18px; height:18px; padding:0 4px; border-radius:6px; background:var(--neutral-bg); color:var(--dim); font:600 11.5px/18px var(--font); text-align:center; }
+.d-mitem.on kbd { background:var(--surface); }
+.pop hr { border:0; border-top:1px solid var(--hair); margin:4px 6px; width:calc(100% - 12px); }
+.pjrow { display:flex; align-items:center; gap:8px; min-height:40px; padding:2px 6px 2px 12px; }
+.pjrow .ml { font-size:12.5px; color:var(--muted); min-width:52px; }
+.pjbtn { margin-left:auto; display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 8px; border:0; border-radius:var(--r-xs); background:none; color:var(--text); font-size:var(--fs-body); font-weight:500; cursor:pointer; }
+.pjbtn:hover { background:var(--hover); }
+.pjbtn.empty { color:var(--dim); }
+.gpick { display:grid; gap:2px; width:100%; padding:0 0 4px; animation:item-in 160ms var(--ease) both; }
+.dateinput { margin:2px 6px 4px; height:34px; border:0; border-radius:var(--r-sm); background:var(--field); color:var(--text); padding:0 10px; font:inherit; font-size:var(--fs-body); width:calc(100% - 12px); }
+.dateinput:focus { outline:0; background:var(--surface); box-shadow:0 0 0 2px var(--accent); }
+@keyframes pop-spring { 0% { opacity:0; transform:translateY(-4px) scale(.88); } 55% { opacity:1; transform:translateY(0) scale(1.025); } 100% { opacity:1; transform:none; } }
+@keyframes pop-spring-out { to { opacity:0; transform:translateY(-2px) scale(.96); } }
+@keyframes pop-calm { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:none; } }
+@keyframes pop-calm-out { to { opacity:0; transform:translateY(-6px); } }
+@keyframes item-in { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+html.m-calm .d-mitem, html.m-calm .gpick { animation:none; }
+
+/* ===== 안 B: 줄 아래로 펼치는 칩 줄 ===== */
+.chiprow { grid-column:1 / -1; display:grid; grid-template-rows:0fr; transition:grid-template-rows var(--pop-dur) var(--ease); }
+.d-ibrow.is-open .chiprow { grid-template-rows:1fr; }
+.chipin { min-height:0; overflow:hidden; opacity:0; transition:opacity 140ms var(--ease); }
+.d-ibrow.is-open .chipin { opacity:1; }
+.chipbox { display:grid; gap:8px; padding:6px 0 4px; }
+.chipline { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+.chipline .ml { font-size:12.5px; color:var(--muted); width:52px; flex:none; }
+.chip { display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 12px; border:0; border-radius:999px; background:var(--neutral-bg); color:var(--text); font-size:13.5px; font-weight:600; cursor:pointer; transform:scale(.9); opacity:0; transition:background 170ms var(--ease),color 170ms var(--ease),transform 200ms var(--ease),opacity 140ms; transition-delay:calc(var(--i,0) * var(--stag)); }
+.d-ibrow.is-open .chip { transform:none; opacity:1; }
+.chip:hover, .chip.on { background:var(--accent-soft); color:var(--accent-text); }
+.chip .dt { font-weight:500; color:var(--dim); font-size:12px; font-variant-numeric:tabular-nums; }
+.chip:active { transform:scale(.96) !important; }
+.chip.cur { background:var(--sel); color:var(--accent-text); box-shadow:inset 0 0 0 1.5px var(--accent); }
+
+/* 토스트 — 앱 알림 모양 */
+.toast { position:fixed; left:50%; bottom:18px; transform:translateX(-50%); z-index:90; display:flex; align-items:center; gap:14px; max-width:calc(100vw - 24px); padding:11px 14px 11px 18px; border-radius:16px; background:var(--text); color:var(--bg); box-shadow:var(--pop); font-size:var(--fs-body); font-weight:500; animation:toast-in 160ms var(--ease) both; }
+.toast button { border:0; background:none; color:var(--accent-text); font-weight:700; font-size:var(--fs-body); cursor:pointer; padding:2px 4px; }
+:root[data-theme="light"] .toast button { color:#8fbfff; }
+@keyframes toast-in { from { opacity:0; transform:translate(-50%,6px); } to { opacity:1; transform:translate(-50%,0); } }
+.sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }
+.reset { position:fixed; right:12px; bottom:12px; z-index:80; }
+
+/* ===== 좁은 화면(≤520px): 앱 규칙대로 제목 한 줄 / 동작 한 줄 ===== */
+@media (max-width:520px) {
+  body { padding:12px 12px 90px; }
+  .d-ibrow { grid-template-columns:minmax(0,1fr); row-gap:6px; padding:8px 10px 8px 14px; }
+  .d-ibacts { flex-wrap:wrap; justify-self:end; }
+  .d-ibacts .d-btn { height:var(--h-md); padding:0 11px; }
+  .chipline .ml { width:100%; }
+}
+@media (hover:none) { kbd { display:none; } }
+</style>
+</head>
+<body>
+<div class="d-sechd">새로 들어온 것<span class="n" id="inboxN">3</span><button class="d-headnum" type="button">오늘 들어온 것 <span>2</span></button></div>
+<div class="d-inbox" id="inbox"></div>
+
+<div class="d-lhd"><h2>오늘 할 일</h2><span class="cnt" id="todayN">3</span><button class="later" id="laterBtn" type="button">나중에 할 일 <span id="laterN">4</span></button></div>
+<div class="card" id="today"></div>
+<div id="live" class="sr" aria-live="polite"></div>
+<script>
+(function () {
+  'use strict';
+  const Q = new URLSearchParams(location.search);
+  const MODE = Q.get('mode') === 'B' ? 'B' : 'A';
+  const NOW = Q.has('now');            // ① 지금: 옛 세 버튼(정지 그림)
+  const STILL = Q.has('still');        // 정지 캡처용: 애니메이션·타이머 없이 상태만
+  const STEP = Q.has('step') ? Number(Q.get('step')) : -1;
+  const OPEN_ROW = Q.has('open') ? Number(Q.get('open')) : -1;
+  const PJ_OPEN = Q.has('pjlist');
+  const root = document.documentElement;
+  if (Q.get('theme')) root.dataset.theme = Q.get('theme');
+  function setMotion(m) { root.classList.remove('m-calm', 'm-off'); if (m === 'calm') root.classList.add('m-calm'); if (m === 'off') root.classList.add('m-off'); }
+  setMotion(Q.get('motion') || 'spring');
+  const REDUCED = () => root.classList.contains('m-off') || matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const SPEED = () => (REDUCED() ? 0 : root.classList.contains('m-calm') ? .55 : 1);
+
+  /* ---- 가짜 데이터(실제 이름·회사 정보 없음). 데모의 "오늘"은 2026-10-06(화)로 고정 ---- */
+  const TODAY = new Date(2026, 9, 6);
+  const PROJECTS = ['가입 개선', '결제 화면', '디자인 시스템'];
+  const DOW = ['일', '월', '화', '수', '목', '금', '토'];
+  const fmt = (d) => `${d.getMonth() + 1}/${d.getDate()} (${DOW[d.getDay()]})`;
+  const addDays = (n) => { const d = new Date(TODAY); d.setDate(d.getDate() + n); return d; };
+  // 이번 주 = 이번 주 금요일(목·금·주말이면 숨김 — 내일/다음 주와 겹치기 때문), 다음 주 = 다음 주 월요일
+  const thisFri = () => { const g = (5 - TODAY.getDay() + 7) % 7; return g >= 2 ? addDays(g) : null; };
+  const nextMon = () => addDays(((8 - TODAY.getDay()) % 7) || 7);
+  const OPTIONS = () => [
+    { k: 'today', l: '오늘', d: TODAY },
+    { k: 'tomorrow', l: '내일', d: addDays(1) },
+    thisFri() && { k: 'week', l: '이번 주', d: thisFri() },
+    { k: 'next', l: '다음 주', d: nextMon() },
+    { k: 'pick', l: '날짜 고르기…' },
+  ].filter(Boolean);
+
+  const inboxItems = [
+    { t: '가입 안내 문구 검수 요청', pj: 0 },
+    { t: '결제 화면 오류 제보 확인', pj: null },
+    { t: '디자인 리뷰 일정 조율', pj: null },
+  ];
+  const todayItems = [{ t: '주간 보고 초안 정리', pj: 0 }, { t: '테스터A 질문에 답하기', pj: null }, { t: '릴리스 노트 문장 다듬기', pj: 1 }];
+  let laterCount = 4;
+
+  const $ = (s, r = document) => r.querySelector(s);
+  const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
+  const CHEV = '<svg class="chev" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>';
+  const MORE = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="3.5" cy="8" r=".9" fill="currentColor"/><circle cx="8" cy="8" r=".9" fill="currentColor"/><circle cx="12.5" cy="8" r=".9" fill="currentColor"/></svg>';
+  const dot = (i) => `<i class="d-pjdot" data-pj="${i}"></i>`;
+  const inboxEl = $('#inbox'), todayEl = $('#today');
+  const live = (m) => { $('#live').textContent = m; };
+
+  /* ---- 줄 그리기 ---- */
+  function projTag(row, pj) {
+    let tag = $('.d-inproj', row);
+    if (pj == null) { if (tag) tag.remove(); return; }
+    if (!tag) { tag = el('span', 'd-inproj'); $('.ti', row).after(tag); }
+    tag.innerHTML = `· ${dot(pj)}${PROJECTS[pj]}`;
+  }
+  function makeRow(item) {
+    const row = el('div', 'd-ibrow');
+    row._item = item;
+    const main = el('span', 'd-ibmain');
+    main.append(el('span', 'ti', item.t));
+    main.lastChild.title = item.t;
+    const src = el('a', 'd-src', '원문'); src.href = '#'; src.addEventListener('click', e => e.preventDefault());
+    main.append(src);
+    row.append(main);
+    const acts = el('span', 'd-ibacts');
+    if (NOW) {
+      ['오늘', '나중에', '완료'].forEach(l => acts.append(el('button', 'd-btn sm', l)));
+    } else {
+      const wrap = el('span', 'sched');
+      const b = el('button', 'd-btn sm', `일정 정하기${CHEV}`);
+      b.type = 'button'; b.setAttribute('aria-haspopup', 'true'); b.setAttribute('aria-expanded', 'false');
+      b.setAttribute('aria-label', `${item.t} — 일정 정하기`);
+      b.addEventListener('click', () => (row.classList.contains('is-open') ? closeAll() : openFor(row)));
+      wrap.append(b); acts.append(wrap);
+      const done = el('button', 'd-btn sm', '완료'); done.type = 'button';
+      done.addEventListener('click', () => commit(row, 'done'));
+      acts.append(done);
+    }
+    const more = el('button', 'd-more', MORE); more.type = 'button'; more.setAttribute('aria-label', `${item.t} — 더 보기`);
+    acts.append(more);
+    row.append(acts);
+    projTag(row, item.pj);
+    if (MODE === 'B' && !NOW) row.append(buildChips(row));
+    return row;
+  }
+  inboxItems.forEach(it => inboxEl.append(makeRow(it)));
+  function todayRow(item, cls) {
+    const r = el('div', 'trow ' + (cls || ''));
+    r.append(el('span', 'ck'), el('span', 'ti', item.t));
+    if (item.pj != null) r.append(el('span', 'd-inproj', `· ${dot(item.pj)}${PROJECTS[item.pj]}`));
+    return r;
+  }
+  todayItems.forEach(it => todayEl.append(todayRow(it)));
+  const counts = () => { $('#inboxN').textContent = inboxEl.children.length; $('#todayN').textContent = todayEl.children.length; $('#laterN').textContent = laterCount; };
+
+  /* ---- 열기·닫기 ---- */
+  let openRow = null;
+  function openFor(row) {
+    closeAll(true);
+    openRow = row;
+    row.classList.add('is-open');
+    $('.sched .d-btn', row).setAttribute('aria-expanded', 'true');
+    if (MODE === 'A') buildPop(row); else focusChip(row, 0);
+  }
+  function closeAll(instant) {
+    const row = openRow; if (!row) return;
+    openRow = null;
+    const b = $('.sched .d-btn', row); b.setAttribute('aria-expanded', 'false');
+    if (MODE === 'A') {
+      const pop = $('.pop', row);
+      if (pop) {
+        if (instant || STILL) pop.remove();
+        else { pop.classList.add('out'); setTimeout(() => pop.remove(), 140 * (REDUCED() ? 0 : 1)); }
+      }
+      row.classList.remove('is-open');
+    } else row.classList.remove('is-open');
+  }
+  function buildPop(row) {
+    const item = row._item;
+    const pop = el('div', 'pop'); pop.setAttribute('role', 'menu'); pop.setAttribute('aria-label', '일정 정하기');
+    pop.append(el('div', 'lab', '실행 날짜'));
+    const opts = OPTIONS();
+    let n = 0;
+    const mk = (o, key) => {
+      const b = el('button', 'd-mitem'); b.type = 'button'; b.setAttribute('role', 'menuitem'); b.dataset.k = o.k; b.style.setProperty('--i', n++);
+      b.innerHTML = `<span>${o.l}</span>${o.d ? `<span class="dt">${fmt(o.d)}</span>` : ''}<kbd>${key}</kbd>`;
+      b.addEventListener('click', () => choose(row, o));
+      b.addEventListener('mouseenter', () => setOn(pop, b));
+      pop.append(b); return b;
+    };
+    opts.forEach((o, i) => mk(o, i + 1));
+    const dateWrap = el('div'); pop.append(dateWrap);
+    pop.append(document.createElement('hr'));
+    mk({ k: 'later', l: '나중에', d: null }, 0).insertAdjacentHTML('beforeend', '');
+    const laterBtn = pop.lastChild; $('span', laterBtn).insertAdjacentHTML('afterend', '<span class="dt">날짜 미정</span>');
+    pop.append(document.createElement('hr'));
+    pop.append(buildProjRow(row, pop));
+    row.querySelector('.sched').append(pop);
+    // 팝오버가 누른 버튼에서 솟도록: 시작점을 버튼 가운데 윗변으로, 화면 오른쪽을 넘으면 왼쪽으로 민다.
+    const btn = $('.sched .d-btn', row), br = btn.getBoundingClientRect();
+    const over = br.left + pop.offsetWidth - (innerWidth - 12);
+    const shift = over > 0 ? Math.min(over, br.left - 12) : 0;
+    pop.style.left = (-shift) + 'px';
+    pop.style.setProperty('--ox', (br.width / 2 + shift) + 'px');
+    setOn(pop, $('[data-k="today"]', pop));
+    if (!STILL) $('[data-k="today"]', pop).focus({ preventScroll: true });
+    pop.addEventListener('keydown', (e) => popKeys(e, row, pop, opts));
+    if (STILL && PJ_OPEN) toggleProjList(row, pop);
+  }
+  function setOn(pop, b) { pop.querySelectorAll('.d-mitem.on').forEach(x => x.classList.remove('on')); b.classList.add('on'); }
+  function popKeys(e, row, pop, opts) {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeAll(); $('.sched .d-btn', row).focus(); return; }
+    const items = [...pop.querySelectorAll('.d-mitem')];
+    const cur = items.findIndex(x => x === document.activeElement);
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const next = items[(cur + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length];
+      next.focus(); setOn(pop, next); return;
+    }
+    if (/^[0-9]$/.test(e.key) && !(e.target instanceof HTMLInputElement)) {
+      const o = e.key === '0' ? { k: 'later' } : opts[Number(e.key) - 1];
+      if (o) { e.preventDefault(); choose(row, o); }
+    }
+  }
+  function buildProjRow(row, pop) {
+    const wrap = el('div');
+    const r = el('div', 'pjrow'); r.append(el('span', 'ml', '프로젝트'));
+    const b = el('button', 'pjbtn'); b.type = 'button'; b.setAttribute('aria-haspopup', 'listbox'); b.setAttribute('aria-expanded', 'false');
+    const paint = () => {
+      const pj = row._item.pj;
+      b.className = 'pjbtn' + (pj == null ? ' empty' : '');
+      b.innerHTML = `${pj == null ? '정하기' : dot(pj) + PROJECTS[pj]}${CHEV}`;
+    };
+    paint(); b._paint = paint;
+    b.addEventListener('click', () => toggleProjList(row, pop));
+    r.append(b); wrap.append(r); wrap.className = 'pjwrap';
+    return wrap;
+  }
+  function toggleProjList(row, pop) {
+    const wrap = $('.pjwrap', pop), b = $('.pjbtn', wrap), old = $('.gpick', wrap);
+    if (old) { old.remove(); b.setAttribute('aria-expanded', 'false'); return; }
+    b.setAttribute('aria-expanded', 'true');
+    const list = el('div', 'gpick'); list.setAttribute('role', 'listbox');
+    const opt = (label, pj) => {
+      const o = el('button', 'd-mitem' + (row._item.pj === pj ? ' on' : ''));
+      o.type = 'button'; o.setAttribute('role', 'option'); o.style.animation = 'none';
+      o.innerHTML = pj == null ? `<span style="color:var(--muted)">프로젝트 없음</span>` : `${dot(pj)}<span style="margin-left:8px">${label}</span>`;
+      o.addEventListener('click', () => { row._item.pj = pj; projTag(row, pj); b._paint(); list.remove(); b.setAttribute('aria-expanded', 'false'); live(pj == null ? '프로젝트를 지웠어요' : `프로젝트를 ${label}로 정했어요`); b.focus(); });
+      return o;
+    };
+    PROJECTS.forEach((p, i) => list.append(opt(p, i)));
+    list.append(opt('없음', null));
+    wrap.append(list);
+  }
+  function showDateInput(row, pop) {
+    const w = pop.lastElementChild && $('[data-k="pick"]', pop).nextElementSibling;
+    if (w.firstChild) { w.innerHTML = ''; return; }
+    const inp = el('input', 'dateinput'); inp.type = 'date'; inp.value = '2026-10-15'; inp.setAttribute('aria-label', '실행 날짜');
+    inp.addEventListener('change', () => { if (inp.value) { const [y, m, d] = inp.value.split('-').map(Number); choose(row, { k: 'date', l: '', d: new Date(y, m - 1, d) }, true); } });
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter' && inp.value) { e.preventDefault(); inp.dispatchEvent(new Event('change')); } });
+    w.append(inp); inp.focus();
+  }
+  function choose(row, o, fromInput) {
+    if (o.k === 'pick' && !fromInput) {
+      if (MODE === 'A') showDateInput(row, $('.pop', row));
+      else { const cl = $('.chipline.dates', row); const i = $('.dateinput', cl); if (i) { i.remove(); } else { const inp = el('input', 'dateinput'); inp.type = 'date'; inp.value = '2026-10-15'; inp.style.cssText = 'width:150px;margin:0;height:30px'; inp.addEventListener('change', () => { const [y, m, d] = inp.value.split('-').map(Number); choose(row, { k: 'date', d: new Date(y, m - 1, d) }, true); }); cl.append(inp); inp.focus(); } }
+      return;
+    }
+    commit(row, o.k, o.d);
+  }
+
+  /* ---- 안 B: 칩 줄 ---- */
+  function buildChips(row) {
+    const rowEl = el('div', 'chiprow'); const inner = el('div', 'chipin'); const box = el('div', 'chipbox');
+    const l1 = el('div', 'chipline dates'); l1.append(el('span', 'ml', '실행 날짜'));
+    let n = 0;
+    OPTIONS().forEach((o, i) => {
+      const c = el('button', 'chip'); c.type = 'button'; c.dataset.k = o.k; c.style.setProperty('--i', n++);
+      c.innerHTML = `${o.l}${o.d ? `<span class="dt">${fmt(o.d)}</span>` : ''}<kbd>${i + 1}</kbd>`;
+      c.addEventListener('click', () => choose(row, o));
+      l1.append(c);
+    });
+    const later = el('button', 'chip'); later.type = 'button'; later.dataset.k = 'later'; later.style.setProperty('--i', n++);
+    later.innerHTML = '나중에<span class="dt">날짜 미정</span><kbd>0</kbd>'; later.addEventListener('click', () => choose(row, { k: 'later' }));
+    l1.append(later);
+    const l2 = el('div', 'chipline pj'); l2.append(el('span', 'ml', '프로젝트'));
+    const paintP = () => { l2.querySelectorAll('.chip').forEach(c => c.classList.toggle('cur', (c.dataset.pj === '' ? null : Number(c.dataset.pj)) === row._item.pj)); };
+    PROJECTS.forEach((p, i) => { const c = el('button', 'chip', `${dot(i)}${p}`); c.type = 'button'; c.dataset.pj = i; c.style.setProperty('--i', n++); c.addEventListener('click', () => { row._item.pj = row._item.pj === i ? null : i; projTag(row, row._item.pj); paintP(); live('프로젝트를 정했어요'); }); l2.append(c); });
+    const more = el('button', 'chip', `더 보기${CHEV}`); more.type = 'button'; more.style.setProperty('--i', n++); more.title = '프로젝트가 많으면 찾기 칸이 있는 목록으로'; l2.append(more);
+    box.append(l1, l2); inner.append(box); rowEl.append(inner);
+    row._paintP = paintP; setTimeout(paintP, 0);
+    rowEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); closeAll(); $('.sched .d-btn', row).focus(); return; }
+      if (/^[0-9]$/.test(e.key) && !(e.target instanceof HTMLInputElement)) { const k = ['later', ...OPTIONS().map(o => o.k)][e.key === '0' ? 0 : Number(e.key)]; const o = e.key === '0' ? { k: 'later' } : OPTIONS()[Number(e.key) - 1]; if (o) { e.preventDefault(); choose(row, o); } }
+    });
+    return rowEl;
+  }
+  function focusChip(row, i) { if (STILL) return; setTimeout(() => { const c = row.querySelectorAll('.chipline.dates .chip')[i]; if (c) c.focus({ preventScroll: true }); }, 30); }
+
+  /* ---- 고른 뒤: 줄이 떠나고, 갈 곳에서 반응한다 ---- */
+  let toastEl = null, toastTimer = null, lastUndo = null;
+  function showToast(msg, undo) {
+    if (toastEl) toastEl.remove(); clearTimeout(toastTimer);
+    toastEl = el('div', 'toast'); toastEl.setAttribute('role', 'status');
+    toastEl.append(el('span', '', msg));
+    if (undo) { const u = el('button', '', '실행 취소'); u.type = 'button'; u.addEventListener('click', () => { undo(); toastEl.remove(); toastEl = null; }); toastEl.append(u); }
+    document.body.append(toastEl); live(msg);
+    if (!STILL) toastTimer = setTimeout(() => { if (toastEl) { toastEl.remove(); toastEl = null; } }, 4200);
+  }
+  const pop1 = (node) => { node.classList.remove('chip-pop'); void node.offsetWidth; node.classList.add('chip-pop'); };
+  function commit(row, kind, date) {
+    const wasOpen = openRow === row; closeAll(false);
+    const item = row._item, idx = [...inboxEl.children].indexOf(row);
+    const goesToday = kind === 'today';
+    const msg = kind === 'done' ? '완료했어요'
+      : goesToday ? '오늘 할 일로 옮겼어요'
+      : kind === 'later' ? '나중에 할 일로 옮겼어요'
+      : kind === 'tomorrow' ? `내일로 옮겼어요 · ${fmt(date)}`
+      : kind === 'week' ? `이번 주 금요일로 옮겼어요 · ${fmt(date)}`
+      : kind === 'next' ? `다음 주 월요일로 옮겼어요 · ${fmt(date)}`
+      : `${fmt(date)}로 옮겼어요`;
+    let newToday = null;
+    const finish = () => {
+      row.remove();
+      if (goesToday) { newToday = todayRow(item, STILL ? 'fresh hold' : 'rise fresh'); todayEl.prepend(newToday); }
+      else if (kind !== 'done') laterCount++;
+      counts();
+      if (goesToday) pop1($('#todayN')); else if (kind !== 'done') pop1($('#laterN').parentNode);
+    };
+    const leave = (SPEED() === 0 || STILL) ? null : row.animate(
+      [{ height: row.offsetHeight + 'px', opacity: 1, transform: 'none' }, { height: '0px', opacity: 0, transform: goesToday ? 'translateY(10px)' : 'translateX(14px)', paddingTop: '0px', paddingBottom: '0px', minHeight: '0px' }],
+      { duration: 220 * SPEED(), delay: 50 * SPEED(), easing: 'cubic-bezier(.22,.8,.3,1)', fill: 'forwards' });
+    if (leave) leave.onfinish = finish; else finish();
+    showToast(msg, () => {
+      if (kind === 'done') {} else if (goesToday) { newToday && newToday.remove(); } else laterCount--;
+      row.getAnimations().forEach(a => a.cancel()); row.classList.remove('is-open');
+      const ref = inboxEl.children[idx]; inboxEl.insertBefore(row, ref || null);
+      if (!REDUCED()) row.animate([{ opacity: 0, transform: 'translateY(-6px)' }, { opacity: 1, transform: 'none' }], { duration: 200, easing: 'cubic-bezier(.22,.8,.3,1)' });
+      counts();
+    });
+    if (wasOpen && !STILL) { const next = inboxEl.children[idx + 1] || inboxEl.children[idx - 1]; const nb = next && $('.sched .d-btn', next); if (nb) nb.focus({ preventScroll: true }); }
+  }
+
+  /* ---- 바깥 클릭 · 초기 상태 · 바깥 메시지 ---- */
+  document.addEventListener('pointerdown', (e) => { if (openRow && !openRow.contains(e.target)) closeAll(); });
+  window.addEventListener('message', (e) => { const d = e.data || {}; if (d.motion) setMotion(d.motion); if (d.reset) location.reload(); });
+  counts();
+  if (OPEN_ROW >= 0) openFor(inboxEl.children[OPEN_ROW]);
+  if (STEP === 0) { openFor(inboxEl.children[0]); const p = $('.pop', inboxEl.children[0]); if (p) { p.style.animation = 'none'; p.querySelectorAll('.d-mitem').forEach(x => { x.style.animation = 'none'; }); const t = $('[data-k="today"]', p); if (t) t.style.transform = 'scale(.985)'; } else { const c = $('.chip[data-k="today"]', inboxEl.children[0]); if (c) c.style.transform = 'scale(.96)'; } }
+  if (STEP === 1) { const r0 = inboxEl.children[0]; openFor(r0); r0.style.opacity = '.5'; r0.style.transform = 'translateY(5px)'; const p = $('.pop', r0); if (p) { p.style.animation = 'none'; p.style.opacity = '.3'; p.style.transform = 'scale(.96)'; p.querySelectorAll('.d-mitem').forEach(x => { x.style.animation = 'none'; }); } }
+  if (STEP === 2) { commit(inboxEl.children[0], 'today', TODAY); }
+  if (STILL) document.querySelectorAll('.pop,.d-mitem,.chip').forEach(x => { x.style.animation = 'none'; x.style.transition = 'none'; });
+  if (STILL && OPEN_ROW >= 0 && MODE === 'B') document.querySelectorAll('.chiprow,.chipin').forEach(x => { x.style.transition = 'none'; });
+})();
+</script>
+</body>
+</html>

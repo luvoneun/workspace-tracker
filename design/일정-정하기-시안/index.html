@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="ko" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>새로 들어온 것 — 일정 정하기 시안</title>
+<style>
+@font-face { font-family: "Pretendard Variable"; font-weight: 45 920; src: url("fonts/PretendardVariable.woff2") format("woff2-variations"), url("fonts/PretendardVariable.woff2") format("woff2"); }
+:root { --bg:#f2f4f6; --surface:#fff; --text:#191f28; --muted:#4e5968; --dim:#636c78; --accent:#3182f6; --accent-strong:#1b64da; --accent-text:#1b64da; --accent-soft:#e8f3ff; --on-fill:#fff; --neutral-bg:#eef1f4; --warn:#b0560a; --warn-bg:#fff4e5; --success:#0d7a4a; --success-bg:#e6f6ee; --urgent:#c9252d; --urgent-bg:#ffeceb; --hair:#e3e7eb; --soft:0 1px 3px rgba(25,31,40,.04),0 8px 24px rgba(25,31,40,.06); }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--text); font-family:"Pretendard Variable",Pretendard,-apple-system,"Apple SD Gothic Neo",sans-serif; font-size:14.5px; line-height:1.6; word-break:keep-all; -webkit-font-smoothing:antialiased; }
+.wrap { max-width:1000px; margin:0 auto; padding:28px 20px 80px; }
+h1 { font-size:24px; letter-spacing:-.025em; margin:0 0 4px; }
+h2 { font-size:18px; letter-spacing:-.015em; margin:36px 0 10px; }
+.sub { color:var(--muted); margin:0 0 18px; }
+.box { background:var(--surface); border-radius:20px; box-shadow:var(--soft); padding:18px 22px; margin:12px 0; }
+.box h3 { margin:0 0 8px; font-size:16px; }
+.look li { margin:6px 0; }
+.two { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.opt h3 .tag { display:inline-block; margin-left:6px; padding:1px 8px; border-radius:6px; font-size:12.5px; background:var(--success-bg); color:var(--success); }
+.opt .weak { color:var(--warn); background:var(--warn-bg); padding:8px 12px; border-radius:12px; margin-top:10px; font-size:13.5px; }
+.opt .pro { color:var(--muted); font-size:13.5px; margin:8px 0 0; }
+.fr { position:relative; background:var(--surface); margin:14px 0 4px; border:2px solid var(--accent); border-radius:16px; overflow:hidden; background:var(--bg); }
+.fr iframe { margin-top:44px; display:block; width:100%; border:0; }
+.fr .no { position:absolute; z-index:5; left:10px; top:8px; width:28px; height:28px; border-radius:50%; background:var(--accent-strong); color:#fff; font-weight:700; display:grid; place-items:center; font-size:14px; }
+.fr .tl { position:absolute; z-index:5; right:12px; top:11px; font-size:12px; font-weight:600; color:var(--accent-strong); background:var(--accent-soft); border-radius:6px; padding:1px 8px; }
+.cap { margin:2px 4px 14px; color:var(--muted); font-size:13.5px; }
+.cap b { color:var(--text); }
+.pair { display:flex; gap:18px; flex-wrap:wrap; }
+.pair > div { flex:none; }
+.bar { display:flex; gap:14px; flex-wrap:wrap; align-items:center; margin:10px 0; }
+.seg { display:inline-flex; background:var(--neutral-bg); border-radius:12px; padding:3px; }
+.seg button { border:0; background:none; font:inherit; font-size:13.5px; font-weight:600; color:var(--muted); padding:5px 12px; border-radius:10px; cursor:pointer; }
+.seg button[aria-pressed="true"] { background:var(--surface); color:var(--accent-text); box-shadow:0 1px 2px rgba(25,31,40,.08); }
+.vals { font-size:13px; color:var(--muted); background:var(--surface); border-radius:12px; padding:10px 14px; }
+code { background:var(--neutral-bg); padding:1px 6px; border-radius:6px; font-size:12.5px; }
+table { border-collapse:collapse; width:100%; font-size:13.5px; }
+td, th { text-align:left; padding:6px 8px; border-top:1px solid var(--hair); vertical-align:top; }
+@media (max-width:700px) { .two { grid-template-columns:1fr; } }
+body.shot .only-full { display:none; }
+body.shot .wrap { padding-top:12px; max-width:960px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="only-full" data-top>
+  <h1>새로 들어온 것 — 일정 정하기 시안</h1>
+  <p class="sub">2026-10-02 · 오늘 탭 「새로 들어온 것」 줄의 「오늘」·「나중에」를 「일정 정하기」 하나로 합치고, 누르면 줄 옆에 작은 판이 쫀득하게 떠서 실행 날짜와 프로젝트를 정함. 아래 데모는 눌러 보면 실제로 움직임(가짜 데이터, 데모의 오늘은 10/6 화로 고정).</p>
+
+  <div class="box">
+    <h3>사용자가 볼 것 3가지 (묶음마다 하나씩 고르기)</h3>
+    <ol class="look">
+      <li><b>안 A(줄 옆 팝오버)와 안 B(줄 아래 칩 줄) 중 어느 쪽?</b> 추천은 A. 프로젝트 정하는 자리도 이 선택에 딸려 있음(A는 팝오버 맨 아래 한 줄, B는 둘째 칩 줄).</li>
+      <li><b>버튼 이름</b> — 「일정 정하기」(요청 그대로, 추천) / 「언제 할지」(상세 카드 필드 이름과 같음) 중 하나.</li>
+      <li><b>모션 세기</b> — 「쫀득」(240ms, 살짝 커졌다 자리잡음, 추천) / 「절제」(현재 메뉴와 같은 120ms·6px). 쫀득은 DESIGN.md 모션 절의 "장식적인 움직임은 없다"와 부딪혀 고르면 그 줄을 고쳐야 함.</li>
+    </ol>
+  </div>
+</div>
+
+<div class="only-full">
+  <div class="two">
+    <div class="box opt"><h3>안 A · 줄 옆 팝오버 <span class="tag">추천</span></h3>
+      한 줄 설명: 「일정 정하기」를 누르면 그 버튼 바로 아래에 메뉴 부품 모양의 작은 판이 떠서 오늘·내일·이번 주·다음 주·날짜 고르기·나중에와 프로젝트 한 줄이 들어 있음.
+      <p class="pro">클릭 줄이는 장치: 열리면 「오늘」에 이미 초점(Enter 한 번 = 오늘), 숫자 1~5·0 단축(0 = 나중에), ↑↓, Esc 닫기, 두 번째 클릭 자리가 첫 클릭 바로 아래라 마우스가 거의 안 움직임. 날짜가 옆에 적혀 있어 「이번 주」가 어느 날인지 보임.</p>
+      <div class="weak">약점: 판이 아래 줄을 가림(맨 아래 줄이면 위로 뒤집어야 함), 프로젝트는 판 안 한 줄 + 펼침이라 한 번 더 들어감.</div></div>
+    <div class="box opt"><h3>안 B · 줄 아래로 펼치는 칩 줄</h3>
+      한 줄 설명: 「일정 정하기」를 누르면 그 줄 아래가 부드럽게 열려 날짜 칩 줄과 프로젝트 칩 줄이 모두 보임(떠 있는 층 없음).
+      <p class="pro">장점: 선택지가 전부 보여 날짜·프로젝트가 각각 한 번에 끝나고, 아래 줄을 가리지 않고, 좁은 화면에서 줄바꿈만으로 해결됨. 같은 숫자 단축 지원.</p>
+      <div class="weak">약점: 열 때마다 아래 목록이 밀려 내려가 시선이 흔들리고, 줄이 두 배 높이가 됨. 프로젝트가 많으면 칩으로 다 못 보임(「더 보기」 필요). 사용자가 말한 "뾰로록 뜨는" 느낌과 거리가 있음.</div></div>
+  </div>
+  <div class="box" style="background:var(--warn-bg)"><b>반대 의견 한 줄</b> — 「오늘」이 한 번 클릭에서 두 번 클릭이 되는 것이 가장 큰 비용이고, 위 장치(초점·Enter·숫자)로 줄여도 마우스만 쓰는 사람은 줄지 않음. 그래도 결정된 방향이라 그대로 시안화함.</div>
+</div>
+
+<!-- ===== 정지 그림 ===== -->
+<section data-shot="1">
+  <h2 class="only-full">정지 그림</h2>
+  <div class="fr"><span class="no">①</span><span class="tl">지금</span><iframe src="card.html?now=1&still=1&theme=light" style="height:520px" title="지금"></iframe></div>
+  <p class="cap"><b>①</b> 지금 — 줄마다 「오늘」 「나중에」 「완료」 세 버튼. 프로젝트는 있을 때만 제목 뒤에 조용히 붙고, 정하는 길은 ⋯ 안에만 있음.</p>
+  <div class="fr"><span class="no">②</span><span class="tl">바뀐 뒤 · 닫힘 (A·B 같음)</span><iframe src="card.html?still=1&theme=light" style="height:520px" title="바뀐 뒤"></iframe></div>
+  <p class="cap"><b>②</b> 바뀐 뒤(닫힘) — 「일정 정하기 ⌄」와 「완료」. 닫혔을 때는 A·B가 똑같고, 줄에 늘 서는 표시는 하나 줄었음(3개 → 2개). 마우스를 올리면 연한 파랑, 버튼에 닿으면 진한 파랑은 지금과 같음.</p>
+</section>
+
+<section data-shot="2">
+  <div class="fr"><span class="no">③</span><span class="tl">안 A · 팝오버 열림 (프로젝트 없는 줄)</span><iframe src="card.html?mode=A&open=1&still=1&theme=light" style="height:580px" title="A 열림"></iframe></div>
+  <p class="cap"><b>③ A</b> 판 맨 위에 「오늘」이 연파랑으로 이미 골라져 있어 Enter 한 번이면 오늘. 오른쪽에 날짜와 숫자 단축키(1~5, 0). 맨 아래 「프로젝트 정하기 ⌄」는 누르면 판 안에서 프로젝트 목록이 펼쳐짐(날짜를 고르기 전에 정해 두는 자리).</p>
+  <div class="fr"><span class="no">③</span><span class="tl">안 B · 칩 줄 열림 (프로젝트 있는 줄)</span><iframe src="card.html?mode=B&open=0&still=1&theme=light" style="height:690px" title="B 열림"></iframe></div>
+  <p class="cap"><b>③ B</b> 줄 아래가 열려 「실행 날짜」 칩과 「프로젝트」 칩이 한눈에 보이고 현재 프로젝트는 파란 테두리. 대신 아래 줄들이 밀려 내려감.</p>
+</section>
+
+<section data-shot="3">
+  <div class="fr"><span class="no">④</span><span class="tl">0.0초 · 누름</span><iframe src="card.html?mode=A&step=0&still=1&theme=light" style="height:560px" title="4-1"></iframe></div>
+  <div class="fr"><span class="no">④</span><span class="tl">약 0.1초 · 판이 접히고 줄이 떠남</span><iframe src="card.html?mode=A&step=1&still=1&theme=light" style="height:560px" title="4-2"></iframe></div>
+  <div class="fr"><span class="no">④</span><span class="tl">약 0.3초 · 오늘 목록에 도착</span><iframe src="card.html?mode=A&step=2&still=1&theme=light" style="height:560px" title="4-3"></iframe></div>
+  <p class="cap"><b>④</b> 「오늘」을 고른 직후 — 판은 140ms에 살짝 작아지며 사라지고, 줄은 50ms 뒤 220ms 동안 아래(오늘 목록 쪽)로 6~10px 내려앉으며 접힘. 곧이어 오늘 할 일 맨 위에 새 줄이 260ms에 솟아오르고 연파랑이 1.4초에 걸쳐 옅어지며, 개수 칩이 320ms 한 번 톡 커졌다 돌아옴. 알림 「오늘 할 일로 옮겼어요 · 실행 취소」가 160ms에 뜸. 「나중에」·「내일」 등은 줄이 오른쪽으로 14px 밀리며 접히고 「나중에 할 일 N」 숫자가 톡 커짐. 마지막 그림 속 줄은 정지 캡처라 연파랑이 남아 있음.</p>
+</section>
+
+<section data-shot="4">
+  <div class="fr"><span class="no">⑤</span><span class="tl">다크 · 안 A</span><iframe src="card.html?mode=A&open=0&still=1&theme=dark" style="height:620px" title="다크 A"></iframe></div>
+  <div class="fr"><span class="no">⑤</span><span class="tl">다크 · 안 B</span><iframe src="card.html?mode=B&open=1&still=1&theme=dark" style="height:700px" title="다크 B"></iframe></div>
+  <p class="cap"><b>⑤</b> 다크 — 토큰만 바뀌고 모양은 같음. 고른 항목 「--sel」, 판 「--surface」 + 「--pop」 그림자, 숫자 키 칸 「--neutral-bg」.</p>
+</section>
+
+<section data-shot="5">
+  <div class="pair">
+    <div><div class="fr" style="width:394px"><span class="no">⑥</span><span class="tl">390px · A</span><iframe src="card.html?mode=A&open=1&still=1&theme=light" style="height:780px" title="390 A"></iframe></div></div>
+    <div><div class="fr" style="width:394px"><span class="no">⑥</span><span class="tl">390px · B</span><iframe src="card.html?mode=B&open=1&still=1&theme=light" style="height:780px" title="390 B"></iframe></div></div>
+  </div>
+  <p class="cap"><b>⑥</b> 390px — 줄은 제목 한 줄 / 동작 한 줄(앱 규칙 그대로). A는 판이 화면 안으로 밀려 들어오고(왼쪽 12px 여백 유지) 시작점은 누른 버튼 쪽, B는 칩이 줄바꿈됨. 터치 화면에서는 숫자 단축 표시를 숨김.</p>
+</section>
+
+<section data-shot="6">
+  <h2 class="only-full">눌러 보는 데모</h2>
+  <div class="bar only-full">
+    <span>안</span>
+    <span class="seg" id="segMode"><button type="button" aria-pressed="true" data-v="A">A 팝오버</button><button type="button" aria-pressed="false" data-v="B">B 칩 줄</button></span>
+    <span>모션</span>
+    <span class="seg" id="segMotion"><button type="button" aria-pressed="true" data-v="spring">쫀득</button><button type="button" aria-pressed="false" data-v="calm">절제</button><button type="button" aria-pressed="false" data-v="off">끔(reduced)</button></span>
+    <button type="button" class="seg" id="reset" style="border:0;padding:6px 14px;font:inherit;font-size:13.5px;font-weight:600;color:var(--accent-text);cursor:pointer">처음으로</button>
+  </div>
+  <div class="fr only-full"><iframe id="demo" src="card.html?mode=A" style="height:660px" title="데모"></iframe></div>
+  <p class="cap only-full">「일정 정하기」를 눌러 보기. 키보드: Tab으로 버튼 → Enter(열림, 「오늘」에 초점) → Enter(오늘) 또는 숫자 1~5·0, ↑↓, Esc. 고른 뒤 알림의 「실행 취소」로 되돌림. 「날짜 고르기…」는 브라우저 날짜 칸이 열림. 「끔」은 「prefers-reduced-motion」과 같은 동작(즉시 바뀜).</p>
+</section>
+
+<div class="only-full">
+  <h2>쓴 모션 값</h2>
+  <div class="vals">
+    <b>쫀득(제안)</b>: 판 등장 <code>240ms</code> · 시작 <code>scale .88 · 위 -4px</code>에서 55% 지점 <code>scale 1.025</code>까지 커졌다가 <code>1</code>로 안착 · 구간마다 앱 이징 <code>cubic-bezier(.22,.8,.3,1)</code> · 시작점(transform-origin)은 누른 버튼 가운데 윗변 · 항목은 4px 아래에서 <code>180ms</code>, 항목마다 <code>18ms</code> 간격으로 이어짐 · 닫힘 <code>140ms</code>(scale .96·투명) · 줄 접힘 <code>220ms</code>(50ms 뒤 시작) · 새 줄 솟음 <code>260ms</code>(+1px 살짝 넘침) · 강조 <code>1.4s</code> · 개수 칩 톡 <code>320ms scale 1.18</code>(완료 체크와 같은 길이) · 알림 <code>160ms</code> · 버튼 누름 <code>scale .98</code> 120ms(앱 그대로) · B 칩 줄 열림 <code>240ms</code>(grid 0fr→1fr)와 칩 <code>18ms</code> 간격.<br>
+    <b>절제</b>: 현재 메뉴와 같게 <code>120ms · -6px 이동 + 투명</code>, 이동 외 장식 없음. <b>reduced-motion</b>: 모든 transition·animation <code>.01ms</code>, 줄은 즉시 사라짐·타이머 없음.
+  </div>
+
+  <h2>기존 규칙과 부딪히는 점</h2>
+  <div class="box"><table>
+    <tr><th>어디</th><th>내용</th></tr>
+    <tr><td>DESIGN.md 854행</td><td>"등장은 6px 이동 + 투명도뿐이다. 장식적인 움직임은 없다." — 쫀득(살짝 커졌다 안착·항목 이어짐·개수 칩 톡)은 이 문장과 부딪힘. 쫀득을 고르면 모션 표에 「일정 팝오버 240ms」·「새 줄 솟음 260ms」 행을 더하고 이 문장을 "예외: 일정 팝오버"로 넓혀야 함. 「절제」를 고르면 부딪히지 않음.</td></tr>
+    <tr><td>DESIGN.md 687~695행 더보기 메뉴(한 벌)</td><td>"한 번에 하나만 열린다 · 버튼 오른쪽 끝에 맞춰 4px 아래" — 팝오버는 같은 판 부품(폭 304·18px·--pop·항목 38px)을 쓰지만 시작을 버튼 왼쪽에 맞춤. 같은 부품에 「라벨 줄」·「날짜·숫자 키 칸」이 더해지므로 "메뉴 항목을 더한다" 범위 안인지 확인 필요.</td></tr>
+    <tr><td>DECISIONS 69행(2026-09-21)·94행(09-30)</td><td>"줄에는 「오늘」·「나중에」·「완료」를 늘 보인다" — 이 결정을 「일정 정하기」+「완료」로 바꾸는 것이므로 새 줄로 덮어써야 함(같은 줄 "늘 보인다"는 유지, 단어만 바뀜).</td></tr>
+    <tr><td>README 46행</td><td>「오늘」·「나중에」·「완료」 설명과 프로젝트 "조용한 표기"를 고쳐야 함. 한글 입력 다시 그리기 규칙(58행 부근)은 팝오버가 열려 있는 동안 「새로 들어온 것」 구역이 다시 그려지면 판이 사라지는 문제와 겹침 — 열린 동안 구역 다시 그리기를 미뤄야 함.</td></tr>
+    <tr><td>DESIGN.md 816행 말투</td><td>버튼·메뉴 이름은 짧은 명사형 — 「일정 정하기」는 동사형이라 가까스로 맞음. 「언제 할지」(상세 카드 필드 이름)가 규칙에 더 맞음.</td></tr>
+  </table></div>
+
+  <h2>발견했지만 안 건드린 것</h2>
+  <div class="box"><ul>
+    <li>요청에는 "프로젝트를 정할 길이 없음"이라 했지만, 지금도 줄 ⋯ 안에 「프로젝트」 칸이 있음(app.js renderInbox의 「taskProjectControl」). 문제는 길이 아니라 눈에 안 띄는 것.</li>
+    <li>미래 날짜(내일·이번 주·다음 주)로 정한 업무는 지금 구조에서 「나중에 할 일」 서랍(「laterTasks」)으로 들어가는 것으로 보임 — 서랍에서 날짜가 줄에 보이는지·이름이 "나중에 할 일"이어도 되는지 확인 필요(코드 확인 안 함).</li>
+    <li>「이번 주」(금요일)·「다음 주」(월요일) 기준은 이 시안이 정한 가정임. 목·금·주말에는 「이번 주」를 숨기는 규칙(내일과 겹침)도 가정. 확정 필요.</li>
+    <li>이 시안의 판은 아래로만 열림. 맨 아래 줄·창 아래쪽에서는 위로 뒤집기가 필요(기존 ⋯ 메뉴에는 있음).</li>
+    <li>판이 열린 동안 서버 갱신으로 구역이 다시 그려지면 판이 사라질 수 있음 — 위 README 58행 규칙 확장 필요.</li>
+    <li>모션 이름 「쫀득」은 가칭. 실제로 만들 때는 모션 표의 이름 규칙에 맞춰 붙여야 함.</li>
+  </ul></div>
+</div>
+</div>
+<script>
+(function () {
+  const q = new URLSearchParams(location.search), shot = q.get('shot');
+  if (shot) {
+    document.body.classList.add('shot');
+    document.querySelectorAll('[data-shot]').forEach(s => { s.hidden = s.dataset.shot !== shot; });
+    document.querySelectorAll('[data-top]').forEach(s => { s.hidden = true; });
+  }
+  const demo = document.getElementById('demo'); if (!demo) return;
+  let mode = 'A', motion = 'spring';
+  const seg = (id, fn) => document.querySelectorAll('#' + id + ' button').forEach(b => b.addEventListener('click', () => { document.querySelectorAll('#' + id + ' button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); fn(b.dataset.v); }));
+  const load = () => { demo.src = 'card.html?mode=' + mode + '&motion=' + motion; };
+  seg('segMode', v => { mode = v; load(); });
+  seg('segMotion', v => { motion = v; demo.contentWindow.postMessage({ motion: v }, '*'); });
+  document.getElementById('reset').addEventListener('click', load);
+})();
+</script>
+</body>
+</html>
