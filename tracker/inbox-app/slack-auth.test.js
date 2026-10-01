@@ -662,3 +662,160 @@ test('연결하는 중에 온 갱신은 연결이 끝난 뒤의 새 토큰을 �
   assert.equal(info(r.paths).accessToken, NEW);
   assert.equal(fs.readFileSync(r.paths.tokenFile, 'utf8'), `${NEW}\n`);
 });
+
+// ---- 서버 타이머(createSlackRefresher) · 옛 토큰 보관분 치우기(cleanLegacy) ----
+const { createSlackRefresher, cleanLegacy, REFRESH_TICK_MS, REFRESH_AHEAD_MS, LEGACY_KEEP_MS } = require('./slack-auth');
+const DAY = 24 * HOUR;
+
+// 가짜 타이머 — 건 것을 적어 두기만 하고 스스로 돌지 않는다.
+function fakeTimers() {
+  const planned = [];
+  const cleared = [];
+  return {
+    planned, cleared,
+    setTimer: (fn, ms) => { const handle = { fn, ms, unref() { handle.unrefed = true; } }; planned.push(handle); return handle; },
+    clearTimer: handle => cleared.push(handle),
+  };
+}
+
+test('서버 타이머: 새 방식이고 만료가 60분 안이면 갱신하고 15분 뒤를 건다 — 멀면 요청 없이 파일만 본다', async t => {
+  const r = room(t);
+  const base = seed(r, { expiresAt: NOW + 50 * MIN });
+  const slack = fakeSlack(refreshed());
+  const timers = fakeTimers();
+  const refresher = createSlackRefresher({ readConfig: () => OAUTH, tokenDir: r.dir, now: () => NOW, request: slack.request, ...timers });
+  assert.equal(REFRESH_AHEAD_MS, 60 * MIN);
+  refresher.start();
+  refresher.start();
+  assert.equal(timers.planned.length, 1, '두 번 켜도 타이머는 하나');
+  assert.equal(timers.planned[0].unrefed, true, '이 타이머가 프로세스를 붙잡지 않는다');
+  const first = await refresher.tick();
+  assert.deepEqual(first, { kind: 'ok', refreshed: true, legacyRemoved: false, at: NOW, nextInMs: REFRESH_TICK_MS });
+  assert.equal(slack.calls.length, 1);
+  assert.equal(info(r.paths).accessToken, NEW);
+  assert.equal(timers.planned[timers.planned.length - 1].ms, REFRESH_TICK_MS);
+  // 방금 갱신해 12시간 남았다 — 다음 tick은 묻지 않는다.
+  const second = await refresher.tick();
+  assert.equal(second.refreshed, false);
+  assert.equal(slack.calls.length, 1);
+  noSecrets([first, second, refresher.last()]);
+  assert.ok(base);
+});
+
+test('서버 타이머: 잠시 안 되면 모듈이 준 1 → 5 → 15분을 지켜 다시 걸고, 다시 연결 필요면 더 묻지 않는다', async t => {
+  const r = room(t);
+  seed(r, { expiresAt: NOW + 30 * MIN });
+  let clock = NOW;
+  const slack = fakeSlack(() => reply({}, 503), () => reply({}, 503), () => reply({}, 503), () => reply({}, 503), { ok: false, error: 'invalid_refresh_token' });
+  const timers = fakeTimers();
+  const refresher = createSlackRefresher({ readConfig: () => OAUTH, tokenDir: r.dir, now: () => clock, request: slack.request, ...timers });
+  refresher.start();
+  const waits = [];
+  for (let i = 0; i < 4; i += 1) { const state = await refresher.tick(); assert.equal(state.kind, 'retry'); waits.push(state.nextInMs); clock += state.nextInMs; }
+  assert.deepEqual(waits, [1 * MIN, 5 * MIN, 15 * MIN, 15 * MIN]);
+  assert.deepEqual(timers.planned.slice(1).map(one => one.ms), waits, '다음 tick을 그 간격으로 건다');
+  const gone = await refresher.tick();
+  assert.equal(gone.kind, 'reconnect');
+  assert.equal(gone.nextInMs, REFRESH_TICK_MS);
+  assert.equal(slack.calls.length, 5);
+  // 그 뒤의 tick은 파일만 읽는다 — 같은 갱신 토큰으로 다시 묻지 않는다.
+  for (let i = 0; i < 3; i += 1) assert.equal((await refresher.tick()).kind, 'reconnect');
+  assert.equal(slack.calls.length, 5);
+  assert.equal(info(r.paths).accessToken, OLD, '이전 토큰은 그대로');
+});
+
+test('서버 타이머: 옛 방식이면 갱신을 부르지 않고, 끄면 건 타이머를 거두고 더 걸지 않는다', async t => {
+  const r = room(t);
+  fs.writeFileSync(r.paths.tokenFile, 'xoxp-legacy-token\n', { mode: 0o600 });
+  const before = listing(r.dir);
+  const timers = fakeTimers();
+  let asked = 0;
+  const refresher = createSlackRefresher({ readConfig: () => ({}), tokenDir: r.dir, now: () => NOW, request: noRequest, getToken: async () => { asked += 1; return {}; }, ...timers });
+  refresher.start();
+  assert.equal((await refresher.tick()).kind, 'token');
+  assert.equal(asked, 0);
+  assert.deepEqual(listing(r.dir), before, '옛 방식에서는 아무것도 쓰지 않는다');
+  const pending = timers.planned[timers.planned.length - 1];
+  refresher.stop();
+  assert.equal(refresher.running(), false);
+  assert.ok(timers.cleared.includes(pending), '걸어 둔 타이머를 거둔다');
+  const count = timers.planned.length;
+  await refresher.tick();
+  assert.equal(timers.planned.length, count, '끈 뒤에는 다시 걸지 않는다');
+  // 설정을 못 읽어도 던지지 않는다.
+  const broken = createSlackRefresher({ readConfig: () => { throw new Error('설정 깨짐'); }, tokenDir: r.dir, ...fakeTimers() });
+  assert.equal((await broken.tick()).kind, 'error');
+});
+
+test('서버 타이머: 도는 중에 또 부르면 겹쳐 돌지 않는다', async t => {
+  const r = room(t);
+  seed(r, { expiresAt: NOW + 30 * MIN });
+  const slack = fakeSlack(async () => { await new Promise(resolve => setTimeout(resolve, 30)); return reply(refreshed()); });
+  const refresher = createSlackRefresher({ readConfig: () => OAUTH, tokenDir: r.dir, now: () => NOW, request: slack.request, ...fakeTimers() });
+  const [a, b] = await Promise.all([refresher.tick(), refresher.tick()]);
+  assert.equal(a, b);
+  assert.equal(slack.calls.length, 1);
+});
+
+test('.legacy: 새 방식이 7일 동안 살아 있으면 지우고, 그 전이거나 풀려 있으면 그대로 둔다', async t => {
+  const r = room(t);
+  assert.equal(LEGACY_KEEP_MS, 7 * DAY);
+  const base = seed(r, { expiresAt: NOW + 8 * DAY, connectedAt: NOW, legacyKeptAt: NOW, savedAt: NOW });
+  assert.equal(await cleanLegacy(base), false, '.legacy가 없으면 할 일이 없다');
+  fs.writeFileSync(r.paths.legacyFile, 'xoxp-legacy-token\n', { mode: 0o600 });
+  assert.equal(await cleanLegacy({ ...base, now: NOW + 7 * DAY - 1 }), false);
+  assert.equal(fs.existsSync(r.paths.legacyFile), true);
+
+  // 7일이 지났어도 다시 연결이 필요한 동안에는 지우지 않는다.
+  fs.writeFileSync(r.paths.stateFile, JSON.stringify({ failure: { kind: 'reconnect', reason: 'slack_error', code: 'token_revoked' }, at: NOW + DAY, failCount: 0, savedAt: NOW }));
+  assert.equal(await cleanLegacy({ ...base, now: NOW + 8 * DAY }), false);
+  assert.equal(fs.existsSync(r.paths.legacyFile), true);
+  // 잠시 안 되는 갱신(retry)은 살아 있는 것이다.
+  fs.writeFileSync(r.paths.stateFile, JSON.stringify({ failure: { kind: 'retry', reason: 'network' }, at: NOW + DAY, failCount: 1, savedAt: NOW }));
+  assert.equal(await cleanLegacy({ ...base, now: NOW + 8 * DAY }), true);
+  assert.equal(fs.existsSync(r.paths.legacyFile), false);
+  assert.equal(info(r.paths).accessToken, OLD, '갱신 정보·사본은 건드리지 않는다');
+  assert.equal(fs.readFileSync(r.paths.tokenFile, 'utf8'), `${OLD}\n`);
+  assert.equal(readOAuthStatus({ ...base, now: NOW + 8 * DAY }).legacyKept, false);
+});
+
+test('.legacy: 중간에 다시 연결했으면 그때부터 7일을 다시 센다', async t => {
+  const r = room(t);
+  const base = seed(r, { expiresAt: NOW + 20 * DAY, connectedAt: NOW + 5 * DAY, legacyKeptAt: NOW, savedAt: NOW + 5 * DAY });
+  fs.writeFileSync(r.paths.legacyFile, 'xoxp-legacy-token\n', { mode: 0o600 });
+  assert.equal(await cleanLegacy({ ...base, now: NOW + 8 * DAY }), false);
+  assert.equal(await cleanLegacy({ ...base, now: NOW + 12 * DAY }), true);
+});
+
+test('.legacy: 붙여 넣기로 옛 방식에 돌아간 뒤 남은 파일은 만든 지 7일 뒤 지운다 — 갱신 정보가 남아 있으면 건드리지 않는다', async t => {
+  const r = room(t);
+  fs.writeFileSync(r.paths.tokenFile, 'xoxp-pasted\n', { mode: 0o600 });
+  fs.writeFileSync(r.paths.legacyFile, 'xoxp-legacy-token\n', { mode: 0o600 });
+  const made = fs.statSync(r.paths.legacyFile).mtimeMs;
+  const base = { config: {}, tokenDir: r.dir, lockWaitMs: 5 };
+  assert.equal(await cleanLegacy({ ...base, now: made + 6 * DAY }), false);
+  fs.writeFileSync(r.paths.oauthFile, '{"반쪽":', { mode: 0o600 });
+  assert.equal(await cleanLegacy({ ...base, now: made + 8 * DAY }), false, '갱신 정보가 남아 있으면(깨졌어도) 두고 본다');
+  fs.rmSync(r.paths.oauthFile);
+  assert.equal(await cleanLegacy({ ...base, now: made + 8 * DAY }), true);
+  assert.deepEqual(fs.readdirSync(r.dir), [path.basename(r.paths.tokenFile)], '한 줄 토큰만 남고 잠금도 풀렸다');
+  assert.equal(fs.readFileSync(r.paths.tokenFile, 'utf8'), 'xoxp-pasted\n');
+});
+
+test('.legacy: 갱신이 잠금을 쥐고 있으면 이번에는 지우지 않는다(잠금 안에서만 지운다)', async t => {
+  const r = room(t);
+  const base = seed(r, { expiresAt: NOW + 20 * DAY, connectedAt: NOW, legacyKeptAt: NOW, savedAt: NOW });
+  fs.writeFileSync(r.paths.legacyFile, 'xoxp-legacy-token\n', { mode: 0o600 });
+  plantLock(r.paths, process.pid);
+  assert.equal(await cleanLegacy({ ...base, now: NOW + 8 * DAY, lockTries: 2, lockWaitMs: 1 }), false);
+  assert.equal(fs.existsSync(r.paths.legacyFile), true);
+});
+
+test('서버 타이머는 tick마다 .legacy 치우기도 본다', async t => {
+  const r = room(t);
+  seed(r, { expiresAt: NOW + 20 * DAY, connectedAt: NOW, legacyKeptAt: NOW, savedAt: NOW });
+  fs.writeFileSync(r.paths.legacyFile, 'xoxp-legacy-token\n', { mode: 0o600 });
+  const refresher = createSlackRefresher({ readConfig: () => OAUTH, tokenDir: r.dir, now: () => NOW + 8 * DAY, request: noRequest, ...fakeTimers() });
+  assert.equal((await refresher.tick()).legacyRemoved, true);
+  assert.equal(fs.existsSync(r.paths.legacyFile), false);
+});
