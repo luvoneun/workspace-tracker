@@ -1670,10 +1670,6 @@ body.later-open .page { padding-right: 424px; }
 .d-palfil > .d-chip:hover { background: var(--hover); }
 .d-palfil > .d-chip.is-on, .d-palfil > .d-chip.is-on:hover { background: var(--accent-soft); color: var(--accent-text); }
 .d-palfil .sep { display: none; }
-.d-palnew { display: inline-flex; align-items: center; gap: 2px; padding-right: 2px; }
-.d-palnew .d-iconbtn { position: relative; width: 20px; height: 20px; color: inherit; }
-/* 칩 안의 작은 ✕ — 모양은 20px로 두고 누르는 영역만 28px로 넓힌다 */
-.d-palnew .d-iconbtn::after { content: ''; position: absolute; inset: -4px; }
 .d-palres { flex: 1; min-height: 0; overflow: auto; padding: 4px 8px 8px; border-top: 1px solid var(--hair); }
 .d-pres {
   display: grid; grid-template-columns: 28px 62px minmax(0, 1fr) auto;

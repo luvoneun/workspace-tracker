@@ -1660,7 +1660,6 @@ async function load() {
     tabMeetings.textContent = reviewMeetings ? String(reviewMeetings) : '';
     tabMeetings.title = reviewMeetings ? `검토할 초안이 있는 회의 ${reviewMeetings}개` : '';
   }
-  renderInboxHeadCount(data.createdToday || 0);
 
   remindersRender(data);
   // 반응 필요(오늘 탭 맨 위)는 서버 메모리에서 따로 읽는다 — 목록 응답을 그것 때문에 늦추지 않는다.
@@ -4151,19 +4150,8 @@ function palFilterChips() {
     palState.active = 0;
   }, track));
   chip('완료 제외', palState.hideDone, () => { palState.hideDone = !palState.hideDone; palState.active = 0; });
-  if (palState.newOnly) {
-    const pill = document.createElement('span');
-    pill.className = 'd-chip is-on d-palnew';
-    pill.append('오늘 들어온 것');
-    const clear = document.createElement('button');
-    clear.type = 'button';
-    clear.className = 'd-iconbtn sm';
-    clear.setAttribute('aria-label', '오늘 들어온 것 필터 지우기');
-    clear.innerHTML = uiIcon('close');
-    clear.addEventListener('click', () => { palState.newOnly = false; palState.active = 0; palRender(); palNodes.input.focus(); });
-    pill.appendChild(clear);
-    bar.appendChild(pill);
-  }
+  // 오늘 들어온 것만 모아 보기 — 머리에 늘 떠 있던 `오늘 들어온 것 N` 글자 버튼 대신 팔레트 안 토글이다.
+  chip('오늘 들어온 것', palState.newOnly, () => { palState.newOnly = !palState.newOnly; palState.active = 0; });
 }
 
 function palRenderResults() {
@@ -4364,19 +4352,6 @@ function palClose(silent) {
   escDrop(palClose);
   if (root) root.remove();
   if (!silent && back && back.isConnected) back.focus();
-}
-
-// `새로 들어온 것` 제목 오른쪽 끝의 조용한 글자 버튼(`오늘 들어온 것 N`) — 오늘 들어온 것만 팔레트로 모아 본다.
-// 0이면 아예 보이지 않는다.
-function renderInboxHeadCount(count) {
-  const button = document.getElementById('createdTodayBtn');
-  const cell = document.getElementById('createdTodayCount');
-  if (cell) cell.textContent = count;
-  if (button) {
-    button.hidden = !count;
-    // 낭독기 이름은 보이는 글자(`오늘 들어온 것 N`)로 시작한다 — 음성으로 부를 때도 같은 말로 찾게.
-    button.setAttribute('aria-label', `오늘 들어온 것 ${count} — 모아 보기`);
-  }
 }
 
 // ---------- 쉬운 말 소식 (WP-J) ----------
@@ -6131,9 +6106,8 @@ if (waitingHeadMoreSlot) {
   ], 'd-iconbtn sm d-headmore'));
 }
 
-// 검색 팔레트를 여는 두 자리: 헤더의 `검색 ⌘K` 버튼, `새로 들어온 것` 제목 옆 `오늘 들어온 것 N`.
+// 검색 팔레트를 여는 자리: 헤더의 `검색 ⌘K` 버튼(오늘 들어온 것 모아 보기는 팔레트 안 토글 칩).
 document.getElementById('searchEntryBtn')?.addEventListener('click', () => palOpen({}));
-document.getElementById('createdTodayBtn')?.addEventListener('click', () => palOpen({ newOnly: true }));
 
 // 여러 개 선택 — 같은 자리에서 시작하고 끝낸다(Esc도 끝내기).
 document.getElementById('taskSelectToggle')?.addEventListener('click', () => {

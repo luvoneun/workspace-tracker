@@ -1834,8 +1834,8 @@ function paletteChips(app, state) {
 test('팔레트 필터 줄에는 회의 전용 토글이 없다 — `미완료만`·`초안 있음`은 회의 탭으로 옮겼다', () => {
   const app = workflowsClient();
   const all = paletteChips(app, "{ type: 'meeting' }");
-  assert.deepEqual(all, ['전체', '할 일', '확인 대기', '결정', '아이디어', '회의', '완료 제외'],
-    '종류 칩과 `완료 제외`만 남는다');
+  assert.deepEqual(all, ['전체', '할 일', '확인 대기', '결정', '아이디어', '회의', '완료 제외', '오늘 들어온 것'],
+    '종류 칩과 모든 종류에 걸리는 토글(`완료 제외`·`오늘 들어온 것`)만 남는다 — 회의 전용 토글은 없다');
   assert.ok(!all.includes('미완료만') && !all.includes('초안 있음'));
   assert.deepEqual(paletteChips(app, '{}'), all, '다른 종류를 골라도 칩 줄이 흔들리지 않는다');
 });
@@ -14576,17 +14576,13 @@ test('작은 버튼 7: 오류 알림은 무엇이 안 됐는지 + 다음에 할 
   assert.match(notice, /'⌘Z로 되돌리기' : 'Ctrl\+Z로 되돌리기'/, 'showNotice 안은 그대로');
 });
 
-test('작은 버튼 8: `오늘 신규` 대신 `오늘 들어온 것 N` — 낭독기 이름도 보이는 글자로 시작한다', () => {
+test('오늘 들어온 것 N: 머리의 늘 떠 있는 글자 버튼은 없고, 모아 보기는 팔레트 안 토글 칩이다', () => {
   const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
-  assert.match(html, /id="createdTodayBtn" aria-label="오늘 들어온 것 0 — 모아 보기" hidden>오늘 들어온 것 <span class="num" id="createdTodayCount">0<\/span><\/button>/);
+  assert.doesNotMatch(html, /createdTodayBtn|createdTodayCount/, '머리에 두 번째 숫자가 없다');
   assert.doesNotMatch(html, /오늘 신규/);
-  const app = workflowsClient();
-  app.run('renderInboxHeadCount(3)');
-  assert.equal(app.nodes.get('createdTodayBtn').getAttribute('aria-label'), '오늘 들어온 것 3 — 모아 보기');
-  assert.equal(app.nodes.get('createdTodayBtn').hidden, false);
-  assert.equal(app.nodes.get('createdTodayCount').textContent, 3);
-  app.run('renderInboxHeadCount(0)');
-  assert.equal(app.nodes.get('createdTodayBtn').hidden, true);
+  const app = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  assert.doesNotMatch(app, /renderInboxHeadCount|createdTodayBtn/);
+  assert.match(app, /chip\('오늘 들어온 것', palState\.newOnly,/, '팔레트의 거르기는 그대로 — 켜고 끄는 칩으로 선다');
 });
 
 test('작은 버튼 9: 연동 요약 개수 — 회의록 직접 옮기기는 연결에도 남은 것에도 세지 않고, 캘린더는 켠 갈래 어느 것이든 연결(끔이면 남은 것)', () => {
