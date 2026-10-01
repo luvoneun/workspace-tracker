@@ -15927,3 +15927,252 @@ test('모션 토큰: 움직임 줄이기 — 전역은 .01ms(이동 끔) 그대�
   assert.match(block, /\.d-toast, \.d-menulist, \.d-schedpop:not\(\.is-out\), \.d-palbox, \.d-mrow2\.is-new \{\n    animation: d-fade 120ms linear both !important;/);
   assert.match(css, /@keyframes d-fade \{ from \{ opacity: 0; \} to \{ opacity: 1; \} \}/, '흐려짐은 투명도만');
 });
+
+// 줄 이동 도우미 시험 틀: 오늘 목록을 실제 renderTodayTasks로 그리되, 가짜 줄에 자리(목록 안 순서 × 40px)와
+// animate 기록을 달아 준다. 타이머는 모아 두었다가 손으로 돌린다(끝남 신호 없이 시간으로 치우는지 보려고).
+function moveClient({ rowHeight = 40 } = {}) {
+  const fx = firstRunClient();
+  const list = fx.node('todayTaskList');
+  const shift = { y: 0 }; // 위 목록(새로 들어온 것)의 높이 — 오늘 목록 줄이 그만큼 아래에 선다
+  const plays = [];
+  const timers = [];
+  fx.app.context.setTimeout = (fn, delay) => { timers.push({ fn, delay }); return timers.length; };
+  fx.app.run("window.innerWidth = 1200; window.innerHeight = 800; todaySort = 'priority'; uiActAt = 0; uiActQuiet = false; uiKeyAt = 0;");
+  // 시험 틀의 가짜 줄에 실제 줄과 같은 열쇠(data-task-id)를 단다.
+  fx.app.run("uiTaskRow = (item) => { const row = document.createElement('div'); row.dataset.taskId = item.id; return row; };");
+  list.querySelectorAll = () => list.children.filter(kid => kid && kid.dataset && kid.dataset.taskId !== undefined).map((row) => {
+    if (!row.getBoundingClientRect) {
+      const classes = new Set(String(row.className || '').split(' ').filter(Boolean));
+      row.classList = { add: name => classes.add(name), remove: name => classes.delete(name), contains: name => classes.has(name), toggle: (name, on) => (on ? classes.add(name) : classes.delete(name)) };
+      row.getBoundingClientRect = () => { const top = shift.y + list.children.indexOf(row) * rowHeight; return { left: 0, right: 600, top, bottom: top + 36, height: 36, width: 600 }; };
+      row.animate = (frames, options) => { const play = { id: row.dataset.taskId, frames, options, cancelled: false, cancel() { play.cancelled = true; } }; plays.push(play); return play; };
+    }
+    return row;
+  });
+  const items = (ids) => ids.map((id, i) => ({ id, description: `일 ${id}`, status: 'open', priority: 'normal', due: `2026-11-${String(10 + i).padStart(2, '0')}` }));
+  const json = ids => JSON.stringify(items(ids));
+  const draw = ids => fx.app.run(`renderTodayTasks(${json(ids)})`);
+  const order = () => list.querySelectorAll().map(row => row.dataset.taskId);
+  const act = (event = { type: 'click', detail: 1 }) => fx.app.context.uiActMark(event);
+  return { ...fx, list, plays, timers, shift, draw, json, order, act };
+}
+
+test('줄 이동: 사용자 동작 직후 순서가 바뀌는 다시 그리기 — 자리가 달라진 줄에만 transform이 걸리고(200ms·넘침 없는 --ease), 시간이 지나면 지운다', async () => {
+  const fx = moveClient();
+  fx.draw(['a', 'b', 'c']);
+  await settle();
+  assert.deepEqual(fx.order(), ['a', 'b', 'c']);
+  assert.equal(fx.plays.length, 0, '처음 그리기는 움직이지 않는다');
+  fx.act();
+  fx.draw(['c', 'a', 'b', 'd']);
+  assert.equal(fx.plays.length, 0, '그린 직후가 아니라 부른 쪽이 새 자리를 다 읽은 뒤에 건다');
+  await settle();
+  assert.deepEqual(fx.order(), ['c', 'a', 'b', 'd']);
+  const by = Object.fromEntries(fx.plays.map(play => [play.id, play]));
+  const gap = fx.list.children.indexOf(fx.list.querySelectorAll()[1]) - fx.list.children.indexOf(fx.list.querySelectorAll()[0]);
+  assert.equal(gap, 1);
+  assert.deepEqual(plain(by.c.frames), [{ transform: 'translate(0px, 80px)' }, { transform: 'none' }], '옛 자리에서 새 자리로');
+  assert.deepEqual(plain(by.a.frames), [{ transform: 'translate(0px, -40px)' }, { transform: 'none' }]);
+  assert.deepEqual(plain(by.c.options), { duration: 200, easing: 'cubic-bezier(0.22, 0.8, 0.3, 1)' });
+  assert.deepEqual(plain(by.d.frames), [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], '새 줄은 6px + 투명도');
+  assert.equal(by.d.options.duration, 140);
+  assert.ok(fx.plays.every(play => JSON.stringify(play.frames).match(/transform|opacity/) && !play.options.fill), 'transform·opacity만, 끝난 뒤 남는 값(fill) 없음');
+  // 끝남 신호(finish)는 한 번도 오지 않았다 — 시간으로 치운다.
+  assert.deepEqual(fx.timers.map(timer => timer.delay).sort(), [220, 280, 280, 280]);
+  fx.timers.forEach(timer => timer.fn());
+  assert.ok(fx.plays.every(play => play.cancelled), '끝남 신호 없이도 정리된다');
+  // 값은 ui.css 토큰과 같다.
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.ok(css.includes(`--ease: ${fx.app.run('UI_MOVE.ease')};`));
+  assert.ok(css.includes(`--t-move: ${fx.app.run('UI_MOVE.move')}ms`) && css.includes(`--t-fast: ${fx.app.run('UI_MOVE.enter')}ms`));
+});
+
+test('줄 이동: 자동 갱신(동작 없이·0.5초 지난 뒤)과 자리가 그대로인 줄은 움직이지 않는다', async () => {
+  const fx = moveClient();
+  fx.draw(['a', 'b', 'c']);
+  fx.draw(['c', 'b', 'a']);
+  await settle();
+  assert.equal(fx.plays.length, 0, '동작이 없었으면 순서가 바뀌어도 그대로 그린다');
+  fx.act();
+  fx.app.run('uiActAt = Date.now() - 501');
+  fx.draw(['a', 'b', 'c']);
+  await settle();
+  assert.equal(fx.plays.length, 0, '0.5초가 지난 뒤의 다시 그리기');
+  fx.act();
+  fx.draw(['a', 'b', 'c']);
+  await settle();
+  assert.equal(fx.plays.length, 0, '자리가 같으면 걸지 않는다');
+  fx.act({ type: 'click', detail: 1, isTrusted: false });
+  fx.app.run('uiActAt = 0');
+  fx.act({ type: 'click', detail: 1, isTrusted: false });
+  fx.draw(['b', 'a', 'c']);
+  await settle();
+  assert.equal(fx.plays.length, 0, '코드가 만든 click은 사용자 동작이 아니다');
+});
+
+test('줄 이동: 키보드로 연달아 하는 동작은 움직이지 않는다 — 한 번 누른 키는 움직이고, 1초 안에 이어진 키·누르고 있는 키·조합 키만은 아니다', async () => {
+  const fx = moveClient();
+  fx.draw(['a', 'b', 'c']);
+  fx.act({ type: 'keydown', key: 'Meta' });
+  assert.equal(fx.app.run('uiActAt'), 0, '조합 키만 누른 것은 동작이 아니다');
+  fx.act({ type: 'keydown', key: 'z' });
+  fx.draw(['b', 'a', 'c']);
+  await settle();
+  assert.equal(fx.plays.length, 2, '한 번 누른 ⌘Z는 움직인다');
+  fx.plays.length = 0;
+  fx.act({ type: 'keydown', key: 'z' });
+  fx.draw(['a', 'b', 'c']);
+  await settle();
+  assert.equal(fx.plays.length, 0, '1초 안에 이어진 키');
+  fx.app.run('uiKeyAt = 0');
+  fx.act({ type: 'keydown', key: ' ', repeat: true });
+  fx.draw(['b', 'a', 'c']);
+  await settle();
+  assert.equal(fx.plays.length, 0, '누르고 있는 키');
+  // 키보드가 만든 click(detail 0)은 연타 표시를 풀지 않는다.
+  fx.act({ type: 'click', detail: 0 });
+  fx.draw(['a', 'b', 'c']);
+  await settle();
+  assert.equal(fx.plays.length, 0);
+  fx.act({ type: 'click', detail: 1 });
+  fx.draw(['b', 'a', 'c']);
+  await settle();
+  assert.equal(fx.plays.length, 2, '마우스로 누르면 다시 움직인다');
+});
+
+test('줄 이동: 움직이면 안 되는 곳 — 글자 입력 중·한글 조합 중·일정 정하기 판이나 종류 목록이 열린 동안·가려진 창', async () => {
+  const cases = [
+    ['글자 칸에 초점', "document.activeElement = { tagName: 'INPUT', type: 'text' }", 'document.activeElement = null'],
+    ['한글 조합 중', 'uiComposingEl = {}', 'uiComposingEl = null'],
+    ['일정 정하기 판 열림', 'uiSchedOpen = { zone: null }', 'uiSchedOpen = null'],
+    ['종류 목록 열림', "document.querySelector = sel => (sel === '.d-typepop' ? {} : null)", 'document.querySelector = () => null'],
+    ['가려진 창', 'document.hidden = true', 'document.hidden = false'],
+  ];
+  for (const [name, on, off] of cases) {
+    const fx = moveClient();
+    fx.draw(['a', 'b', 'c']);
+    fx.app.run(on);
+    fx.act();
+    fx.draw(['c', 'b', 'a']);
+    await settle();
+    assert.equal(fx.plays.length, 0, name);
+    fx.app.run(off);
+    fx.act();
+    fx.draw(['a', 'b', 'c']);
+    await settle();
+    assert.equal(fx.plays.length, 2, `${name}이 풀리면 움직인다`);
+  }
+  // 체크박스에 초점이 있는 것은 글자 입력이 아니다.
+  const box = moveClient();
+  box.draw(['a', 'b']);
+  box.app.run("document.activeElement = { tagName: 'INPUT', type: 'checkbox' }");
+  box.act();
+  box.draw(['b', 'a']);
+  await settle();
+  assert.equal(box.plays.length, 2);
+});
+
+test('줄 이동: 보이는 줄이 40개를 넘으면 움직임 없이 그리고, 화면 밖에만 있는 줄은 건드리지 않는다', async () => {
+  const many = moveClient({ rowHeight: 10 });
+  const ids = Array.from({ length: 41 }, (_, i) => `t${String(i).padStart(2, '0')}`);
+  many.draw(ids);
+  many.act();
+  many.draw([...ids].reverse());
+  await settle();
+  assert.equal(many.plays.length, 0, '41줄이 다 보이면 걸지 않는다');
+  const edge = moveClient({ rowHeight: 10 });
+  edge.draw(ids.slice(0, 40));
+  edge.act();
+  edge.draw(ids.slice(0, 40).reverse());
+  await settle();
+  assert.equal(edge.plays.length, 40, '40줄까지는 움직인다');
+  // 긴 목록(줄 높이 40px × 60줄 — 화면 800px 밖이 많다): 보이는 줄이 40 이하라 움직이되, 앞뒤 모두 화면 밖인 줄은 뺀다.
+  const long = moveClient();
+  const sixty = Array.from({ length: 60 }, (_, i) => `t${String(i).padStart(2, '0')}`);
+  long.draw(sixty);
+  long.act();
+  long.draw([...sixty.slice(0, 55), sixty[59], sixty[58], sixty[57], sixty[56], sixty[55]]);
+  await settle();
+  assert.equal(long.plays.length, 0, '화면 밖(55~59번째)끼리 자리를 바꾼 줄');
+  long.act();
+  long.draw([sixty[1], sixty[0], ...sixty.slice(2)]);
+  await settle();
+  assert.deepEqual(long.plays.map(play => play.id).sort(), ['t00', 't01'], '보이는 두 줄만');
+});
+
+test('줄 이동: 움직임 줄이기 — 이동은 없고 새 줄만 120ms 흐려짐. 일정 정하기의 새 줄 솟음(is-rise)이 걸린 줄에는 겹쳐 걸지 않는다', async () => {
+  const fx = moveClient();
+  fx.app.run('window.matchMedia = () => ({ matches: true })');
+  fx.draw(['a', 'b', 'c']);
+  fx.act();
+  fx.draw(['c', 'a', 'b', 'd']);
+  await settle();
+  assert.deepEqual(plain(fx.plays.map(play => [play.id, play.frames, play.options.duration])), [['d', [{ opacity: 0 }, { opacity: 1 }], 120]]);
+  // 일정 정하기에서 `오늘`로 정한 업무: 새 줄은 CSS의 솟음 하나만 움직인다.
+  const rise = moveClient();
+  rise.draw(['a', 'b']);
+  rise.act();
+  rise.app.run("uiSchedRise.set('n', Date.now())");
+  // 가짜 줄의 classList는 처음 잴 때 달린다 — 솟음 표시를 볼 수 있게 미리 그려진 뒤에 붙인다.
+  const real = rise.app.context.uiSchedRiseApply;
+  rise.app.context.uiSchedRiseApply = (list) => { rise.list.querySelectorAll(); return real(list); };
+  rise.draw(['n', 'a', 'b']);
+  await settle();
+  const fresh = rise.list.querySelectorAll().find(row => row.dataset.taskId === 'n');
+  assert.ok(fresh.classList.contains('is-rise'), '새 줄 솟음은 그대로');
+  assert.deepEqual(rise.plays.map(play => play.id).sort(), ['a', 'b'], '밀려난 줄만 도우미가 움직인다');
+});
+
+test('줄 이동: 입력 중이라 미뤘다 푸는 다시 그리기는 움직이지 않는다 — load()의 세 목록은 uiMoveUnlessLate를 거친다', async () => {
+  const fx = moveClient();
+  fx.draw(['a', 'b', 'c']);
+  // 바로 그려지는 경우: 움직인다.
+  fx.act();
+  fx.app.run(`uiRenderOrHold('today', document.getElementById('todayTaskList'), uiMoveUnlessLate(() => renderTodayTasks(${fx.json(['c', 'b', 'a'])})))`);
+  await settle();
+  assert.equal(fx.plays.length, 2, '바로 그리면 움직인다');
+  fx.plays.length = 0;
+  // 미뤄졌다가(가짜: 닫힘 함수를 잡아 둔다) 사용자가 다른 곳을 눌러 풀리는 경우: 그 클릭 직후여도 움직이지 않는다.
+  fx.app.run(`held = uiMoveUnlessLate(() => renderTodayTasks(${fx.json(['a', 'b', 'c'])}))`);
+  await settle();
+  fx.act();
+  fx.app.run('held()');
+  await settle();
+  assert.deepEqual(fx.order(), ['a', 'b', 'c'], '그리기는 한다');
+  assert.equal(fx.plays.length, 0, '미뤘다 푼 그리기');
+  assert.equal(fx.app.run('uiMoveLate'), 0, '표시는 그리기가 끝나면 풀린다');
+  fx.act();
+  fx.draw(['b', 'a', 'c']);
+  await settle();
+  assert.equal(fx.plays.length, 2, '그 뒤의 내 동작은 다시 움직인다');
+  const loadSrc = script.slice(script.indexOf('async function load()'), script.indexOf('async function refreshJiraListQuietly'));
+  ['renderInbox', 'renderLaterTasks', 'renderTodayTasks'].forEach((name) => {
+    assert.match(loadSrc, new RegExp(`uiMoveUnlessLate\\(\\(\\) => ${name}\\(`), name);
+  });
+  // 새로 들어온 것 줄은 상세 카드가 쓰는 data-task-id 대신 이동 전용 열쇠를 단다.
+  assert.match(script, /row\.className = 'd-ibrow';\n    row\.dataset\.moveId = item\.id;/);
+  assert.match(script, /document\.addEventListener\('click', uiActMark, true\);\ndocument\.addEventListener\('keydown', uiActMark, true\);/);
+});
+
+test('줄 이동: 안전장치 정의에는 도우미가 들어가지 않는다 — 부르는 쪽(세 목록 그리기·load)에서만 건다', () => {
+  ['async function request(', 'function showNotice(', 'function pushUndo(', 'function recordUndoFor(', 'async function replayUndo(', 'async function toggleTask(', 'async function fadeOutAndRun('].forEach((head) => {
+    const at = script.indexOf(head);
+    if (at < 0) return;
+    const body = script.slice(at, script.indexOf('\n}\n', at));
+    assert.ok(!/uiRowsMove|uiMove|uiActMark/.test(body), head);
+  });
+});
+
+test('줄 이동: 위 목록이 줄어 밀려 올라온 아래 목록의 줄도 함께 잇는다 — 세 목록의 그리기 전 자리를 한 번에 잰다(다시 그리지 않은 목록 포함)', async () => {
+  const fx = moveClient();
+  fx.shift.y = 108;
+  fx.draw(['a', 'b']);
+  await settle();
+  fx.act();
+  // 새로 들어온 것만 다시 그려 두 줄(108px)이 사라졌다 — 오늘 목록은 다시 그리지 않았지만 줄이 그만큼 올라온다.
+  fx.app.run("uiRowsMove(document.getElementById('inboxList'), () => {})");
+  fx.shift.y = 0;
+  await settle();
+  assert.deepEqual(plain(fx.plays.map(play => [play.id, play.frames[0].transform])), [['a', 'translate(0px, 108px)'], ['b', 'translate(0px, 108px)']]);
+  assert.equal(fx.app.run('uiMoveShot'), null, '함께 쓰던 자리 기록은 한 틱 뒤에 비운다');
+});

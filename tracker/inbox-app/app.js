@@ -743,6 +743,111 @@ function uiHeldFlush() {
   }
 }
 
+// ---- 줄 이동 도우미 (모션 기반 — DESIGN.md 모션 절) ----
+// 목록은 매번 통째로 다시 그린다. 줄이 순간 이동하지 않게, 그리기 앞뒤의 자리를 재서 옛 자리에서 새 자리로 잇는다(FLIP).
+// 움직이는 것은 사용자의 동작(클릭·키) 직후 0.5초 안의 다시 그리기뿐이다. 자동 갱신·처음 그리기·미뤘다 푸는 그리기·
+// 글자 입력 중·일정 정하기 판이나 종류 목록이 열린 동안·키보드로 연달아 하는 동작·보이는 줄 40개 초과는 그냥 그린다.
+// transform·opacity만 쓰고(넘침 없음), 값은 ui.css의 --ease·--t-move·--t-fast와 같다(el.animate는 var()를 못 읽는다).
+const UI_MOVE = { ease: 'cubic-bezier(0.22, 0.8, 0.3, 1)', move: 200, enter: 140, fade: 120, within: 500, max: 40 };
+const UI_MOVE_ROWS = '[data-task-id], [data-move-id]';
+let uiActAt = 0;        // 마지막 사용자 동작 시각
+let uiActQuiet = false; // 그 동작이 키보드 연타(1초 안에 이어진 키·누르고 있는 키)였다
+let uiKeyAt = 0;
+let uiMoveLate = 0;     // 미뤘다 푸는 그리기 안에서는 0보다 크다
+
+// 문서의 click·keydown(잡기 단계)이 부른다. 키보드가 만든 click(detail 0)은 keydown이 이미 적었다.
+function uiActMark(event) {
+  if (!event || event.isTrusted === false) return;
+  const now = Date.now();
+  if (event.type === 'keydown') {
+    if (['Meta', 'Control', 'Shift', 'Alt'].includes(event.key)) return;
+    uiActQuiet = !!event.repeat || now - uiKeyAt < 1000;
+    uiKeyAt = now;
+  } else {
+    if (event.detail === 0) return;
+    uiActQuiet = false;
+  }
+  uiActAt = now;
+}
+function uiMoveStill(render) {
+  uiMoveLate += 1;
+  try { return render(); } finally { uiMoveLate -= 1; }
+}
+// load()가 uiRenderOrHold에 넘기는 그리기를 감싼다 — 바로 그려지면 움직이고, 미뤄졌다 나중에 풀리면 움직이지 않는다.
+function uiMoveUnlessLate(render) {
+  let late = false;
+  Promise.resolve().then(() => { late = true; });
+  return () => (late ? uiMoveStill(render) : render());
+}
+function uiMoveAllowed() {
+  if (uiMoveLate || uiActQuiet || Date.now() - uiActAt > UI_MOVE.within) return false;
+  if (uiSchedOpen || uiComposingEl || uiIsTextEntry(document.activeElement) || document.hidden) return false;
+  return !document.querySelector?.('.d-typepop');
+}
+// 줄마다 자리와 "화면에 보이는가"를 잰다. 열쇠는 업무 id(새로 들어온 것 줄은 data-move-id).
+function uiMoveBoxes(list) {
+  const boxes = new Map();
+  const viewW = window.innerWidth || 0;
+  const viewH = window.innerHeight || 0;
+  let shownCount = 0;
+  list.querySelectorAll(UI_MOVE_ROWS).forEach((row) => {
+    const box = row.getBoundingClientRect();
+    const shown = box.height > 0 && box.bottom > 0 && box.top < viewH && box.right > 0 && box.left < viewW;
+    if (shown) shownCount += 1;
+    boxes.set(String(row.dataset.taskId ?? row.dataset.moveId), { row, left: box.left, top: box.top, shown });
+  });
+  return { boxes, shownCount };
+}
+function uiMovePlay(row, frames, duration) {
+  let motion;
+  try { motion = row.animate(frames, { duration, easing: UI_MOVE.ease }); } catch { return; }
+  // 끝남 신호가 안 와도(가려진 탭 등) 시간으로 치운다 — transform이 줄에 남지 않게.
+  setTimeout(() => { try { motion.cancel(); } catch { /* 이미 끝났다 */ } }, duration + 80);
+}
+// 오늘 탭의 세 목록은 위아래로 이어져 있다 — 위 목록이 줄면 아래 목록의 줄도 밀린다. 그래서 같은 틱 안의 그리기들은
+// "그리기 전 자리"를 한 번만(첫 그리기 직전에, 세 목록 모두) 재서 함께 쓰고, 다 그린 뒤 한 번에 잇는다.
+const UI_MOVE_LISTS = ['inboxList', 'todayTaskList', 'laterTaskList'];
+let uiMoveShot = null; // { before: Map<목록, 자리>, drawn: Set<다시 그린 목록> }
+function uiRowsMove(list, render) {
+  if (!list || !list.querySelectorAll || !uiMoveAllowed()) { render(); return; }
+  if (!uiMoveShot) {
+    const shot = { before: new Map(), drawn: new Set() };
+    uiMoveShot = shot;
+    UI_MOVE_LISTS.forEach((id) => {
+      const el = document.getElementById(id);
+      if (el && el.querySelectorAll) shot.before.set(el, uiMoveBoxes(el));
+    });
+    // 그리기를 부른 쪽(load의 상세 카드 자리 잡기 등)이 줄의 새 자리를 다 읽은 뒤, 화면에 칠해지기 전에 건다.
+    Promise.resolve().then(() => { uiMoveShot = null; uiMoveJoin(shot); });
+  }
+  if (!uiMoveShot.before.has(list)) uiMoveShot.before.set(list, uiMoveBoxes(list));
+  uiMoveShot.drawn.add(list);
+  render();
+}
+function uiMoveJoin(shot) {
+  const lists = [...shot.before].map(([list, before]) => ({ list, before, after: uiMoveBoxes(list) }));
+  const count = side => lists.reduce((sum, each) => sum + each[side].shownCount, 0);
+  if (count('before') > UI_MOVE.max || count('after') > UI_MOVE.max) return;
+  const reduce = detailReduce(); // 움직임 줄이기: 이동은 끄고 새 줄의 120ms 흐려짐만
+  lists.forEach(({ list, before, after }) => after.boxes.forEach((now, id) => {
+    const row = now.row;
+    if (typeof row.animate !== 'function') return;
+    const was = before.boxes.get(id);
+    if (!was) {
+      // 새로 생긴 줄 — 일정 정하기의 새 줄 솟음(is-rise)이 이미 걸렸으면 그것 하나만 움직인다.
+      if (!now.shown || !shot.drawn.has(list) || row.classList.contains('is-rise')) return;
+      if (reduce) uiMovePlay(row, [{ opacity: 0 }, { opacity: 1 }], UI_MOVE.fade);
+      else uiMovePlay(row, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], UI_MOVE.enter);
+      return;
+    }
+    if (reduce || (!was.shown && !now.shown)) return;
+    const dx = was.left - now.left;
+    const dy = was.top - now.top;
+    if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
+    uiMovePlay(row, [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], UI_MOVE.move);
+  }));
+}
+
 // 그룹 제목의 `+`로 여는 그 자리 입력줄. 저장 뒤 목록을 다시 그려도 같은 줄로 포커스가 돌아온다(uiAddRowRestore).
 function uiGroupAddRow(key, endpoint, announceText) {
   const row = document.createElement('div');
@@ -1642,13 +1747,14 @@ async function load() {
   renderDateBar(data);
   renderCalendar(data.calendar);
   // 목록 안의 글자 칸(새로 들어온 것 제목 고치기·그룹 `+` 줄)에서 치는 중이면 그 목록은 손을 뗀 뒤 그린다.
-  uiRenderOrHold('inbox', document.getElementById('inboxZone'), () => renderInbox(data.inboxTasks || []));
+  // 세 목록은 줄 이동 도우미(uiRowsMove)를 거쳐 그린다 — 미뤘다 푸는 그리기는 움직이지 않는다(uiMoveUnlessLate).
+  uiRenderOrHold('inbox', document.getElementById('inboxZone'), uiMoveUnlessLate(() => renderInbox(data.inboxTasks || [])));
   renderUpdateNotice();
   renderNewsCard();
   renderGuideCard();
-  uiRenderOrHold('later', document.getElementById('laterTaskList'), () => renderLaterTasks(data.laterTasks || []));
+  uiRenderOrHold('later', document.getElementById('laterTaskList'), uiMoveUnlessLate(() => renderLaterTasks(data.laterTasks || [])));
   renderWaiting(data.waiting || []);
-  uiRenderOrHold('today', document.getElementById('todayTaskList'), () => renderTodayTasks(data.todayTasks || []));
+  uiRenderOrHold('today', document.getElementById('todayTaskList'), uiMoveUnlessLate(() => renderTodayTasks(data.todayTasks || [])));
   decisionArchiveCache = data.decisionArchive || [];
   // 아직 PRD에 반영하지 않은 결정 수. 탭 이름 옆 작은 숫자와 결정 구역 제목이 같은 값을 쓴다.
   const pendingDecisions = (data.decisions || []).length;
@@ -2714,6 +2820,9 @@ function removeTracked(item, card, message = '삭제했어요') {
 }
 
 function renderLaterTasks(items) {
+  uiRowsMove(document.getElementById('laterTaskList'), () => renderLaterTasksNow(items));
+}
+function renderLaterTasksNow(items) {
   document.getElementById('laterTaskSectionCount').textContent = items.length;
   document.getElementById('laterDrawerCount').textContent = items.length;
   laterToggleSync(items.length);
@@ -5148,6 +5257,9 @@ document.addEventListener('click', (event) => {
 // 슬랙에서 갓 들어온 할 일. 언제 할지·프로젝트는 줄의 `일정 정하기`에서 고른다.
 // 비어 있으면 섹션 자체를 숨겨서, 처리할 게 있을 때만 눈에 띄게 한다.
 function renderInbox(items) {
+  uiRowsMove(document.getElementById('inboxList'), () => renderInboxNow(items));
+}
+function renderInboxNow(items) {
   const zone = document.getElementById('inboxZone');
   const list = document.getElementById('inboxList');
   document.getElementById('inboxCount').textContent = items.length;
@@ -5159,6 +5271,7 @@ function renderInbox(items) {
   items.forEach((item) => {
     const row = document.createElement('div');
     row.className = 'd-ibrow';
+    row.dataset.moveId = item.id; // 줄 이동 도우미의 열쇠(data-task-id는 상세 카드를 여는 줄에만 쓴다)
 
     const main = document.createElement('span');
     main.className = 'd-ibmain';
@@ -5270,6 +5383,9 @@ function renderTodayChip(done, total) {
 }
 
 function renderTodayTasks(items) {
+  uiRowsMove(document.getElementById('todayTaskList'), () => renderTodayTasksNow(items));
+}
+function renderTodayTasksNow(items) {
   const doneItems = items.filter(item => item.status === 'done');
   renderTodayChip(doneItems.length, items.length);
   const list = document.getElementById('todayTaskList');
@@ -6073,6 +6189,9 @@ document.addEventListener('compositionend', (event) => { if (uiComposingEl === e
 document.addEventListener('pointerdown', () => { uiPointerDown = true; }, true);
 document.addEventListener('pointerup', () => { uiPointerDown = false; }, true);
 document.addEventListener('pointercancel', () => { uiPointerDown = false; }, true);
+// 사용자의 동작 시각을 적는다 — 그 직후 0.5초 안의 다시 그리기에서만 줄이 움직인다(uiRowsMove).
+document.addEventListener('click', uiActMark, true);
+document.addEventListener('keydown', uiActMark, true);
 setupQuickAdd('todayTaskInput', '/api/today-task/create', '오늘 할 일에 추가했어요');
 setupQuickAdd('laterTaskInput', '/api/later-task/create', '나중에 할 일에 추가했어요');
 setupQuickAdd('waitingInput', '/api/waiting/create', '확인 대기에 추가했어요');
