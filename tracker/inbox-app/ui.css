@@ -925,11 +925,9 @@ button.d-guide .t { color: var(--accent-text); }
   border-radius: 14px; transition: background 170ms var(--ease);
 }
 .d-ibrow:hover, .d-ibrow:focus-within { background: var(--warm-hover); }
-/* 4번째 줄부터는 접혀 있다(hidden) — .d-ibrow가 grid라 [hidden]을 따로 적어 둔다 */
-.d-ibrow[hidden] { display: none; }
-/* 카드 맨 아래 `N개 더 ›` / `접기 ⌃` — 제목과 같은 왼쪽 선, 누르는 자리 28px.
-   프로젝트 카드의 읽는 그룹(확인 대기·결정·회의·아이디어) 맨 아래 링크(.d-pmore)도 같은 부품이다 */
-.d-ibmore, .d-pmore { display: inline-flex; align-items: center; min-height: var(--h-sm); margin: 2px 0 0 var(--pad); padding: 0 2px; }
+/* 프로젝트 카드의 읽는 그룹(확인 대기·결정·회의·아이디어) 맨 아래 `N개 더 ›` / `접기 ⌃` —
+   제목과 같은 왼쪽 선, 누르는 자리 28px */
+.d-pmore { display: inline-flex; align-items: center; min-height: var(--h-sm); margin: 2px 0 0 var(--pad); padding: 0 2px; }
 .d-pmore { justify-self: start; margin-bottom: 4px; }
 .d-ibmain { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .d-ibrow .ti {
@@ -2903,7 +2901,6 @@ a.d-btn { text-decoration: none; }
   .d-qaf, .d-addrow { padding: 0 14px; }
   .d-list .d-grp { padding-left: 14px; padding-right: 14px; }
   .d-ibrow { padding: 8px 10px 8px 14px; }
-  .d-ibmore { margin-left: 14px; }
   body.later-open .page { padding-right: 16px; }
   .d-rail { margin-bottom: -36px; }
   .d-qa, .d-dbody .d-qa { font-size: var(--fs-lg); }

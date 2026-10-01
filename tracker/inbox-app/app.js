@@ -1401,11 +1401,9 @@ let todaySort = 'project';
 // 완료 그룹과 미루기 제안은 접힌 채로 시작한다 — 첫 화면에 오늘 할 일이 가장 많이 보이게.
 let todayDoneOpen = false;
 let suggestOpen = false;
-// 긴 목록은 위 3줄만 보이고 나머지는 `N개 더 ›`로 펼친다(새로 들어온 것, 프로젝트 카드의 읽는 그룹).
+// 긴 목록은 위 3줄만 보이고 나머지는 `N개 더 ›`로 펼친다(프로젝트 카드의 읽는 그룹 — 새로 들어온 것은 놓치지 않게 접지 않는다).
 // 펼침은 화면 메모리에만 — 새로고침하면 접힌 채로 시작하고, 3줄 이하로 줄면 접힘으로 돌아간다.
 const UI_FOLD = 3;
-const INBOX_FOLD = UI_FOLD; // 옛 이름(새로 들어온 것) — 같은 값
-let inboxExpanded = false;
 let noticeTimer;
 let lastRemovedId = null;
 
@@ -4906,15 +4904,12 @@ function renderInbox(items) {
   document.getElementById('inboxCount').textContent = items.length;
   zone.hidden = items.length === 0;
   list.replaceChildren();
-  if (items.length <= INBOX_FOLD) inboxExpanded = false;
   if (!items.length) return;
 
-  const rows = [];
-  items.forEach((item, index) => {
+  // 개수와 상관없이 전부 보인다 — 접으면 놓치게 된다.
+  items.forEach((item) => {
     const row = document.createElement('div');
     row.className = 'd-ibrow';
-    // 접힌 줄도 그려 두고 hidden만 건다 — 펼치기·접기는 다시 그리지 않아 초점이 그대로 남는다.
-    if (index >= INBOX_FOLD) { row.hidden = !inboxExpanded; rows.push(row); }
 
     const main = document.createElement('span');
     main.className = 'd-ibmain';
@@ -4985,7 +4980,6 @@ function renderInbox(items) {
     row.appendChild(actions);
     list.appendChild(row);
   });
-  if (rows.length) list.appendChild(inboxFoldToggle(rows));
 }
 
 // 접는 목록 맨 아래 `N개 더 ›` / `접기 ⌃` — 누르면 접힌 줄(rows)의 hidden만 켜고 끈다(다시 그리지 않아
@@ -5010,17 +5004,6 @@ function uiFoldToggle(rows, { label, expanded = false, controls = '', onChange =
     paint();
   });
   return button;
-}
-
-// 새로 들어온 것 카드 맨 아래의 접기 링크 — 펼침은 inboxExpanded에 기억한다.
-function inboxFoldToggle(rows) {
-  return uiFoldToggle(rows, {
-    label: '새로 들어온 것',
-    expanded: inboxExpanded,
-    controls: 'inboxList',
-    className: 'd-ibmore',
-    onChange: (open) => { inboxExpanded = open; },
-  });
 }
 
 // 오늘 할 일 카드 윗변을 따라 흐르는 3px 선. 카드 모서리에 맞춰 잘리도록 카드를 덮는

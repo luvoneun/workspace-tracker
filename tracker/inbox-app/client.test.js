@@ -1257,22 +1257,18 @@ function inboxFoldClient() {
   return { app, list, rows, more };
 }
 
-test('새로 들어온 것 4개: 위 3줄만 보이고 4번째는 hidden, 카드 맨 아래 `1개 더 ›`', () => {
+test('새로 들어온 것은 개수와 상관없이 모든 줄이 보이고 접기 링크(.d-ibmore)가 없다', () => {
   const { app, list, rows, more } = inboxFoldClient();
-  app.run('renderInbox(inboxOf(4))');
-  assert.deepEqual(rows().map(r => r.hidden), [false, false, false, true]);
-  const link = more();
-  assert.ok(link, '링크가 선다');
-  assert.equal(list().children.at(-1), link, '링크는 카드 맨 아래');
-  assert.equal(link.type, 'button');
-  assert.match(link.textContent, /^1개 더 ›$/);
-  assert.equal(link.getAttribute('aria-label'), '새로 들어온 것 1개 더 보기');
-  assert.equal(link.getAttribute('aria-expanded'), 'false');
-  assert.equal(link.getAttribute('aria-controls'), 'inboxList');
-  assert.equal(app.nodes.get('inboxCount').textContent, 4, '제목 옆 숫자는 전체 개수');
-  // .d-ibrow는 grid라 hidden이 grid에 지지 않게 규칙을 따로 둔다.
+  for (const n of [1, 3, 4, 7]) {
+    app.run(`renderInbox(inboxOf(${n}))`);
+    assert.equal(rows().length, n);
+    assert.ok(rows().every(r => !r.hidden), `${n}개면 모두 보인다`);
+    assert.equal(more(), undefined, `${n}개여도 링크가 없다`);
+    assert.equal(list().children.length, n, '줄 말고 다른 것을 붙이지 않는다');
+    assert.equal(app.nodes.get('inboxCount').textContent, n, '제목 옆 숫자는 전체 개수');
+  }
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
-  assert.match(css, /^\.d-ibrow\[hidden\] \{ display: none; \}$/m);
+  assert.doesNotMatch(css, /\.d-ibmore/, '쓰이지 않는 접기 규칙이 남지 않는다');
 });
 
 test('어두운 화면의 따뜻한 판은 짙은 회색이고, 시스템 다크·직접 고른 다크 두 곳이 같은 값이다(밝은 화면 그대로)', () => {
@@ -1282,53 +1278,6 @@ test('어두운 화면의 따뜻한 판은 짙은 회색이고, 시스템 다크
   assert.equal(warm[0], '--warm: #fffaf2;  --warm-line: transparent;  --warm-hover: #fff4e4;');
   assert.equal(warm[1], '--warm: #22252b;  --warm-line: #2c3038;  --warm-hover: #282c33;');
   assert.equal(warm[2], warm[1], 'prefers-color-scheme와 [data-theme=dark]가 같은 값');
-});
-
-test('새로 들어온 것 3개 이하: 접힌 줄도 링크도 없다', () => {
-  const { app, rows, more } = inboxFoldClient();
-  for (const n of [1, 3]) {
-    app.run(`renderInbox(inboxOf(${n}))`);
-    assert.equal(rows().length, n);
-    assert.ok(rows().every(r => !r.hidden), `${n}개면 모두 보인다`);
-    assert.equal(more(), undefined, `${n}개면 링크가 없다`);
-  }
-});
-
-test('새로 들어온 것 `N개 더 ›`를 누르면 다시 그리지 않고 hidden만 풀리고 `접기 ⌃`가 된다', () => {
-  const { app, rows, more } = inboxFoldClient();
-  app.run('renderInbox(inboxOf(6))');
-  const link = more();
-  assert.equal(link.textContent, '3개 더 ›');
-  const before = rows();
-  link.listeners.click();
-  assert.deepEqual(rows(), before, '줄을 새로 만들지 않는다(초점 유지)');
-  assert.ok(rows().every(r => !r.hidden));
-  assert.equal(more(), link, '링크도 같은 버튼');
-  assert.equal(link.textContent, '접기 ⌃');
-  assert.equal(link.getAttribute('aria-label'), '새로 들어온 것 접기');
-  assert.equal(link.getAttribute('aria-expanded'), 'true');
-  link.listeners.click();
-  assert.deepEqual(rows().map(r => r.hidden), [false, false, false, true, true, true]);
-  assert.equal(link.textContent, '3개 더 ›');
-  assert.equal(link.getAttribute('aria-expanded'), 'false');
-});
-
-test('새로 들어온 것 펼침은 다시 그려도 남고, 3개 이하로 줄면 접힘으로 돌아간다', () => {
-  const { app, rows, more } = inboxFoldClient();
-  app.run('renderInbox(inboxOf(5))');
-  more().listeners.click();
-  app.run('renderInbox(inboxOf(7))');
-  assert.ok(rows().every(r => !r.hidden), '펼친 채 다시 그려진다(새 항목이 와도)');
-  assert.equal(more().textContent, '접기 ⌃');
-  app.run('renderInbox(inboxOf(3))');
-  assert.equal(more(), undefined);
-  app.run('renderInbox(inboxOf(4))');
-  assert.deepEqual(rows().map(r => r.hidden), [false, false, false, true], '다시 늘어도 접힌 채');
-  assert.equal(more().textContent, '1개 더 ›');
-  more().listeners.click();
-  app.run('renderInbox([])');
-  app.run('renderInbox(inboxOf(4))');
-  assert.equal(rows()[3].hidden, true, '0개가 되어도 접힘으로 돌아간다');
 });
 
 test('the palette narrows by kind, by "완료 제외" and by "오늘 신규", and says nothing without a query or a filter', () => {
@@ -2452,7 +2401,7 @@ test('읽는 그룹 4개 이상: 위 3줄만 보이고 그룹 맨 아래 `N개 �
   assert.equal(moreOf(today), undefined);
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
   assert.match(css, /^\.d-rec\[hidden\], \.d-prow2\[hidden\] \{ display: none; \}$/m);
-  assert.match(css, /^\.d-ibmore, \.d-pmore \{/m, '새로 들어온 것 링크와 같은 부품');
+  assert.match(css, /^\.d-pmore \{ display: inline-flex;/m, '읽는 그룹 링크 부품');
 });
 
 test('읽는 그룹 3개 이하: 접힌 줄도 링크도 없다', () => {
@@ -2505,7 +2454,7 @@ test('읽는 그룹 펼침은 renderProjects로 다시 그려도 남고, 그룹�
   assert.equal(moreOf(group('확인 대기')).getAttribute('aria-expanded'), 'false', '다시 4개가 되면 접힌 채');
 });
 
-test('uiFoldToggle: 새로 들어온 것 링크와 같은 공용 부품이고, 펼침은 부르는 쪽이 onChange로 기억한다', () => {
+test('uiFoldToggle: 읽는 그룹 접기 공용 부품이고, 펼침은 부르는 쪽이 onChange로 기억한다', () => {
   const app = pureClient();
   const got = JSON.parse(app.run(`(() => {
     const rows = [{ hidden: true }, { hidden: true }];
@@ -2517,7 +2466,7 @@ test('uiFoldToggle: 새로 들어온 것 링크와 같은 공용 부품이고, �
   })()`));
   assert.deepEqual(got, { first: ['d-link d-pmore', '2개 더 ›', '회의 2개 더 보기', 'x1'], after: ['접기 ⌃', [false, false]], seen: [true] });
   assert.equal(app.run('UI_FOLD'), 3);
-  assert.equal(app.run('INBOX_FOLD'), app.run('UI_FOLD'), '옛 이름도 같은 값');
+  assert.equal(app.run("typeof INBOX_FOLD"), 'undefined', '새로 들어온 것 전용 옛 이름은 없다');
 });
 
 test('projectSimpleRow: 체크박스를 넘기지 않으면 예전과 똑같다(has-ck 없음)', () => {
