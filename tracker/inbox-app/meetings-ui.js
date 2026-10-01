@@ -6,8 +6,8 @@
 
 // ---------- 회의 정리 패널 ----------
 
-// 업무 상세와 같은 자리에서 회의를 정리한다: 결과 카드 → AI 초안 검토 → 이 회의에서 나온 것 →
-// 이전 회차의 미해결 항목 → 직접 적어 담기 → 기존 항목 연결. 내용이 없는 구역은 아예 두지 않는다.
+// 업무 상세와 같은 자리에서 회의를 정리한다: 결과 카드 → AI 초안 검토 → 이전 회차의 미해결 항목 →
+// 기존 항목 연결 → 이 회의에서 나온 것 → (발) 회의에서 나온 것 적기. 내용이 없는 구역은 아예 두지 않는다.
 // 프로젝트·반복 회의 입력은 두지 않는다(DECISIONS 화면) — 프로젝트는 오늘 미팅 줄의 더보기에서 바꾼다.
 
 // 아직 흐름 기록에 없는 회의(캘린더에만 있는 회의)에서 직접 담을 때 쓰는 길.
@@ -180,14 +180,18 @@ function panelMeeting(event, box, host = MEETING_HOST_CARD) {
     note.textContent = '아직 기록되지 않은 회의예요. 여기서 적은 것은 회의에 연결되지 않고 바로 담겨요.';
     box.appendChild(note);
   }
+  // 차례: 결과 → AI 초안 → 이전 회차 → 기존 항목 연결 → 이 회의에서 나온 것 → (발) 입력줄.
+  // 방금 적은 줄이 늘 입력줄 바로 위에 서도록 `이 회의에서 나온 것`이 본문의 맨 끝이다.
   if (linked) {
     panelMeetingResult(event, box, host);
     if (event.drafts && event.drafts.length) panelMeetingDrafts(event, box, host);
-    panelMeetingItems(event, box, host);
     panelMeetingPast(event, box, host);
+    panelMeetingLink(event, box, host);
   }
+  panelMeetingItems(event, box, host);
   panelMeetingCapture(event, box, linked, host);
-  if (linked) panelMeetingLink(event, box, host);
+  // 카드를 통째로 다시 그렸으면 열려 있던 종류 목록의 글자도 사라졌다 — 새 카드가 붙은 뒤에 정리한다.
+  if (meetingTypeOpen) setTimeout(() => meetingTypeOrphan(host), 0);
 }
 
 // 방금 초안을 담은 결과: 어디로 갔는지, 나중에 담긴 할 일을 오늘로, 되돌리기, 다음 검토할 회의.
@@ -274,126 +278,203 @@ async function panelPromoteTasks(result, ids, host = MEETING_HOST_CARD) {
   host.redraw();
 }
 
-// AI가 분류한 초안. 읽는 순서대로 문구(주인공) → 고르는 것들(종류·시점·날짜),
-// 담기 바는 패널 아래에 붙어 있다. 고친 문구·종류는 wfDraftEdits에 남아 다시 그려도 유지된다.
-// 초안 빼기는 문구 오른쪽의 조용한 글자 버튼 `빼기`다(✕는 날짜 칸의 `날짜 지우기` 하나만 남는다).
-let meetingDraftBarSeq = 0;
-function panelMeetingDrafts(event, box, host = MEETING_HOST_CARD) {
-  const section = panelSection(`AI가 분류한 초안 ${event.drafts.length}`);
-  section.classList.add('d-drafts');
+// 옛 자리 → 새 자리로 미끄러지기: 줄이 펼쳐지거나 접힐 때 자리는 바로 바뀌고(높이는 움직이지 않는다),
+// 밀리는 줄·구역 머리만 transform으로 따라온다. 움직임 줄이기에서는 그대로 바뀐다.
+function meetingFlip(root, mutate, duration, bounce = false) {
+  const moving = root && root.querySelectorAll && uiSchedMotion()
+    ? [...root.querySelectorAll('.d-mrow2, .d-dsec > .lbl, .d-dsec > summary, .d-dres, .d-hint')].filter(el => el.getBoundingClientRect && el.animate)
+    : [];
+  const before = new Map(moving.map(el => [el, el.getBoundingClientRect().top]));
+  mutate();
+  before.forEach((top, el) => {
+    if (!el.isConnected) return;
+    const delta = top - el.getBoundingClientRect().top;
+    if (Math.abs(delta) < 0.5) return;
+    el.animate(bounce
+      ? [{ transform: `translateY(${delta}px)` }, { transform: `translateY(${-Math.sign(delta) * 1.5}px)`, offset: 0.6 }, { transform: 'none' }]
+      : [{ transform: `translateY(${delta}px)` }, { transform: 'none' }],
+    { duration, easing: 'cubic-bezier(0.22, 0.8, 0.3, 1)' });
+  });
+}
 
-  const summary = document.createElement('span');
-  summary.className = 'sm';
-  // 담기 바의 오류 자리 — 요약 글자 자리에 대신 선다(빈 초안·저장 실패). 카드 머리까지 올라가 보지 않아도 되게.
-  const message = document.createElement('span');
+// AI가 분류한 초안 — 한 줄씩: `AI` | 문구 | (오늘 · 날짜) 종류 | 빼기. 문구를 누르면 그 자리에서 문구 칸 + 나중에/오늘 + 기한이
+// 펼쳐진다(한 번에 하나). 고친 문구·종류·날짜는 wfDraftEdits에 남아 다시 그려도 유지된다. `N개 담기`는 구역 제목 옆에 있다.
+// 초안 빼기는 조용한 글자 버튼 `빼기`다(✕는 날짜 칸의 `날짜 지우기` 하나만 남는다) — 손이 닿을 때만 보인다(누르는 화면에서는 늘).
+let meetingDraftBarSeq = 0;
+let meetingDraftOpenId = null; // 펼쳐 둔 초안 — 카드를 다시 그려도 그대로 펼쳐 둔다
+function panelMeetingDrafts(event, box, host = MEETING_HOST_CARD) {
+  const { section, label } = meetingSection('AI 초안', event.drafts.length);
+  section.classList.add('d-drafts');
+  // 오류 자리 — 구역 제목 바로 아래(빈 초안·저장 실패). 카드 머리까지 올라가 보지 않아도 되게.
+  const message = document.createElement('div');
   message.className = 'er';
   message.id = `meetingDraftBarError${++meetingDraftBarSeq}`;
   message.setAttribute('role', 'alert');
-  const texts = new Map(); // 초안 번호 → 문구 칸(빈 칸으로 초점을 보내고 표시하려고)
-  const refreshSummary = () => {
-    const counts = {};
-    let today = 0;
-    event.drafts.forEach(draft => {
-      const edit = wfDraftEdits.get(draft.id);
-      counts[edit.type] = (counts[edit.type] || 0) + 1;
-      if (edit.type === 'task' && edit.when === 'today') today++;
-    });
-    summary.textContent = WF_TYPES.filter(([key]) => counts[key])
-      .map(([key, label]) => `${label} ${counts[key]}${key === 'task' && today ? `(오늘 ${today})` : ''}`).join(' · ');
+  const list = document.createElement('div');
+  list.className = 'd-mlist';
+  const showBarError = (text) => { message.textContent = text || ''; };
+
+  event.drafts.forEach((draft) => {
+    if (!wfDraftEdits.has(draft.id)) wfDraftEdits.set(draft.id, { type: draft.type, description: wfCleanDraftText(draft.description), when: 'later', due: draft.due || '' });
+  });
+  if (!event.drafts.some(draft => draft.id === meetingDraftOpenId)) meetingDraftOpenId = null;
+  const flagged = new Set(); // 비운 채 담으려 한 초안
+  const rows = new Map(); // 초안 번호 → 지금 줄
+
+  const redraw = (draft, opening = false) => {
+    const old = rows.get(draft.id);
+    const row = build(draft, opening);
+    rows.set(draft.id, row);
+    if (old) old.replaceWith(row);
+    return row;
   };
-  const showBarError = (text) => {
-    message.textContent = text || '';
-    summary.hidden = !!text;
-  };
-  const markEmpty = (text, empty) => {
-    if (empty) { text.setAttribute('aria-invalid', 'true'); text.setAttribute('aria-describedby', message.id); }
-    else { text.removeAttribute('aria-invalid'); text.removeAttribute('aria-describedby'); }
+  // 한 줄을 펼치거나(id) 접는다(null). 다른 줄은 건드리지 않는다 — 누르던 줄이 사라져 클릭이 씹히지 않게.
+  const toggle = (id) => {
+    const previous = meetingDraftOpenId;
+    if (previous === id) return;
+    meetingFlip(host.box(), () => {
+      meetingDraftOpenId = id;
+      [previous, id].filter(Boolean).forEach((one) => {
+        const draft = event.drafts.find(other => other.id === one);
+        if (draft) redraw(draft, one === id);
+      });
+    }, id ? 220 : 130, !!id);
+    const text = id && rows.get(id) ? rows.get(id).draftText : null;
+    if (text) {
+      text.focus();
+      if (text.setSelectionRange) text.setSelectionRange(text.value.length, text.value.length);
+    }
   };
 
-  event.drafts.forEach((draft, index) => {
-    const edit = wfDraftEdits.get(draft.id) || { type: draft.type, description: wfCleanDraftText(draft.description), when: 'later', due: draft.due || '' };
-    wfDraftEdits.set(draft.id, edit);
-    const card = document.createElement('div');
-    card.className = 'd-draft';
-    card.dataset.type = edit.type;
+  function build(draft, opening) {
+    const index = event.drafts.indexOf(draft);
+    const edit = wfDraftEdits.get(draft.id);
+    const open = meetingDraftOpenId === draft.id;
+    const blank = !edit.description.trim();
+    const row = document.createElement('div');
+    row.className = 'd-mrow2 d-draft' + (open ? ' is-edit' : '') + (open && opening ? ' is-opening' : '')
+      + (blank ? ' is-blank' : '') + (flagged.has(draft.id) ? ' is-bad' : '');
+    row.dataset.type = edit.type;
 
-    // 문구는 여러 줄로 늘어나는 입력칸에 전부 보인다(한 줄 입력칸일 때는 긴 문구의 끝이 잘렸다).
-    const text = document.createElement('textarea');
-    text.className = 'd-dtxt';
-    text.rows = 1;
-    text.maxLength = 1000;
-    text.value = edit.description;
-    text.setAttribute('aria-label', '초안 문구');
-    texts.set(draft.id, text);
-    const fit = () => { text.style.height = 'auto'; text.style.height = `${text.scrollHeight + text.offsetHeight - text.clientHeight}px`; };
-
-    const dismiss = panelQuietButton('빼기', () => meetingDraftDismiss(event, draft, edit, index, host), 'd-headnum d-dpull');
+    const mark = document.createElement('span');
+    mark.className = 'ck ai';
+    mark.textContent = 'AI';
+    mark.title = 'AI가 뽑은 초안 — 담기 전이에요';
+    const right = document.createElement('span');
+    right.className = 'r';
+    const dismiss = panelQuietButton('빼기', () => meetingDraftDismiss(event, draft, edit, index, host), 'd-dpull');
     const labelDismiss = () => dismiss.setAttribute('aria-label', meetingDraftDismissLabel(edit.description));
     labelDismiss();
     dismiss.title = '이 초안 빼기';
 
-    text.addEventListener('input', () => {
-      // 문구는 한 줄이다: 붙여넣은 줄바꿈은 공백으로
-      if (text.value.includes('\n')) text.value = text.value.replace(/\s*\n\s*/g, ' ');
-      edit.description = text.value;
-      labelDismiss();
-      // 빈 칸 표시는 채우는 즉시 걷고, 빈 칸이 하나도 안 남으면 담기 바의 오류도 걷는다.
-      if (text.getAttribute('aria-invalid') === 'true' && text.value.trim()) {
-        markEmpty(text, false);
-        const left = [...texts.values()].filter(other => other.getAttribute('aria-invalid') === 'true').length;
-        showBarError(left ? meetingDraftEmptyText(left) : '');
+    let middle;
+    if (open) {
+      middle = document.createElement('div');
+      middle.className = 'ed';
+      const text = document.createElement('textarea');
+      text.className = 'd-dtxt';
+      text.rows = 1;
+      text.maxLength = 1000;
+      text.value = edit.description;
+      text.setAttribute('aria-label', '초안 문구');
+      if (flagged.has(draft.id)) { text.setAttribute('aria-invalid', 'true'); text.setAttribute('aria-describedby', message.id); }
+      row.draftText = text;
+      const fit = () => { text.style.height = 'auto'; text.style.height = `${text.scrollHeight + text.offsetHeight - text.clientHeight}px`; };
+      const was = edit.description;
+      text.addEventListener('input', () => {
+        // 문구는 한 줄이다: 붙여넣은 줄바꿈은 공백으로
+        if (text.value.includes('\n')) text.value = text.value.replace(/\s*\n\s*/g, ' ');
+        edit.description = text.value;
+        labelDismiss();
+        // 빈 칸 표시는 채우는 즉시 걷고, 빈 초안이 하나도 안 남으면 오류도 걷는다.
+        if (flagged.has(draft.id) && text.value.trim()) {
+          flagged.delete(draft.id);
+          text.removeAttribute('aria-invalid');
+          text.removeAttribute('aria-describedby');
+          showBarError(flagged.size ? meetingDraftEmptyText(flagged.size) : '');
+        }
+        fit();
+      });
+      text.addEventListener('keydown', (keyEvent) => {
+        if (keyEvent.key !== 'Enter' || keyEvent.isComposing) return; // 조합 중의 Enter는 글자를 확정하는 것이다
+        keyEvent.preventDefault();
+        toggle(null);
+        meetingCaptureFocus(host);
+      });
+      // Esc는 이 줄만 접고 문구를 펼치기 전으로 되돌린다(회의 카드는 닫히지 않는다).
+      row.addEventListener('keydown', (keyEvent) => {
+        if (keyEvent.key !== 'Escape' || keyEvent.isComposing) return;
+        keyEvent.preventDefault();
+        if (keyEvent.stopPropagation) keyEvent.stopPropagation();
+        edit.description = was;
+        toggle(null);
+        const title = rows.get(draft.id) ? rows.get(draft.id).draftTitle : null;
+        if (title) title.focus();
+      });
+      const controls = document.createElement('div');
+      controls.className = 'ct';
+      if (edit.type === 'task') {
+        const whenSeg = wfSegment([['later', '나중에 할 일'], ['today', '오늘 할 일']], edit.when || 'later', (key) => { edit.when = key; }, '언제 할 일로 담을까');
+        whenSeg.title = '나중에: 나중에 할 일로 담겨요 · 오늘: 오늘 할 일로 담겨요';
+        controls.appendChild(whenSeg);
       }
-      fit();
-    });
-    text.addEventListener('keydown', (keyEvent) => {
-      if (keyEvent.key === 'Enter' && !keyEvent.isComposing) keyEvent.preventDefault(); // 조합 중의 Enter는 글자를 확정하는 것이다
-    });
-
-    const top = document.createElement('div');
-    top.className = 'tp';
-    top.append(text, dismiss);
-
-    const controls = document.createElement('div');
-    controls.className = 'ct';
-    const whenSeg = wfSegment([['later', '나중에 할 일'], ['today', '오늘 할 일']], edit.when || 'later', (key) => { edit.when = key; refreshSummary(); }, '언제 할 일로 담을까');
-    whenSeg.title = '나중에: 나중에 할 일로 담겨요 · 오늘: 오늘 할 일로 담겨요';
-    const dateSlot = document.createElement('span');
-    const syncWhen = () => { whenSeg.hidden = edit.type !== 'task'; };
-    const syncDate = () => {
-      dateSlot.replaceChildren();
-      const label = wfDateLabel(edit.type); // 할 일 → 기한 · 확인 대기 → 답변 받을 날 · 결정 → 날짜 없음
+      const dateName = wfDateLabel(edit.type); // 할 일 → 기한 · 확인 대기 → 답변 받을 날 · 결정 → 날짜 없음
       // 고른 날짜는 앱의 날짜 글자(`10월 2일 (금)`)로 보인다 — 누르면 그 자리에서 날짜 입력칸으로 바뀐다.
-      if (label) dateSlot.appendChild(uiDateField({ value: edit.due || '', label, onChange: (value) => { edit.due = value || ''; }, shown: true }));
-    };
-    controls.append(wfTypeSegment(edit.type, (key) => {
+      if (dateName) controls.appendChild(uiDateField({ value: edit.due || '', label: dateName, onChange: (value) => { edit.due = value || ''; }, shown: true }));
+      middle.append(text, controls);
+      requestAnimationFrame(fit);
+    } else {
+      middle = document.createElement('button');
+      middle.type = 'button';
+      middle.className = 'ti';
+      middle.textContent = blank ? '빈 초안' : edit.description;
+      middle.title = '눌러서 고치기';
+      middle.setAttribute('aria-expanded', 'false');
+      middle.setAttribute('aria-label', `${blank ? '빈 초안' : edit.description} — 눌러서 고치기`);
+      middle.addEventListener('click', () => toggle(draft.id));
+      row.draftTitle = middle;
+      // 접힌 줄에는 고른 값만 조용히: 오늘 할 일로 고른 것, 날짜.
+      const note = (value) => { const tag = document.createElement('span'); tag.className = 'st'; tag.textContent = value; right.appendChild(tag); };
+      if (edit.type === 'task' && edit.when === 'today') note('오늘');
+      if (edit.type !== 'decision' && edit.due) note(uiDateSlash(edit.due));
+    }
+    right.appendChild(meetingTypeButton(edit.type, (key) => {
       edit.type = key;
-      card.dataset.type = key;
-      syncWhen();
-      syncDate();
-      refreshSummary();
-    }), whenSeg, dateSlot);
-    syncWhen();
-    syncDate();
+      redraw(draft);
+      meetingCaptureFocus(host);
+    }));
+    const acts = document.createElement('span');
+    acts.className = 'ac';
+    acts.appendChild(dismiss);
+    row.append(mark, middle, right, acts);
+    return row;
+  }
 
-    card.append(top, controls);
-    section.appendChild(card);
-    requestAnimationFrame(fit);
+  // 펼친 줄 밖을 누르면 접는다(종류 목록은 카드 밖에 떠 있어 여기 걸리지 않는다).
+  box.addEventListener('mousedown', (mouseEvent) => {
+    if (!meetingDraftOpenId) return;
+    const target = mouseEvent.target;
+    if (target && target.closest && target.closest('.d-draft.is-edit')) return;
+    toggle(null);
   });
-  box.appendChild(section);
 
-  const bar = document.createElement('div');
-  bar.className = 'd-dbar';
-  bar.append(summary, message);
-  bar.appendChild(panelQuietButton(`${event.drafts.length}개 담기`, async () => {
+  // 제목 옆 2차 버튼 — 초안은 틀릴 수 있어 사람이 담기를 눌러야 담긴다.
+  label.appendChild(panelQuietButton(`${event.drafts.length}개 담기`, async () => {
     showBarError('');
+    flagged.clear();
     const accept = event.drafts.map(draft => wfAcceptItem(draft.id, wfDraftEdits.get(draft.id)));
     const empty = accept.filter(item => !item.description);
-    texts.forEach((text, id) => markEmpty(text, empty.some(item => item.id === id)));
     if (empty.length) {
+      // 빈 초안은 표시하고, 첫 빈 초안을 펼쳐 초점을 보낸다.
+      empty.forEach(item => flagged.add(item.id));
       showBarError(meetingDraftEmptyText(empty.length));
-      texts.get(empty[0].id)?.focus();
+      meetingDraftOpenId = empty[0].id;
+      event.drafts.forEach(draft => redraw(draft));
+      const first = rows.get(empty[0].id).draftText;
+      if (first) first.focus();
       return;
     }
+    event.drafts.forEach(draft => redraw(draft));
     let result;
     try { result = await wfReview({ meetingId: event.id, accept }); } catch (error) {
       showBarError((typeof error?.message === 'string' && error.message) || '저장하지 못했어요. 내용을 확인한 뒤 다시 시도해 주세요.');
@@ -401,11 +482,14 @@ function panelMeetingDrafts(event, box, host = MEETING_HOST_CARD) {
     }
     host.setResult({ meetingId: event.id, created: result.created, accepted: accept });
     accept.forEach(item => wfDraftEdits.delete(item.id));
+    meetingDraftOpenId = null;
     await load();
     host.redraw(); // 결과 카드(role=status)가 담은 결과를 알려 주므로 따로 알림을 띄우지 않는다
-  }, 'd-btn pri'));
-  box.appendChild(bar);
-  refreshSummary();
+  }, 'd-btn sm acc'));
+
+  event.drafts.forEach(draft => list.appendChild(redraw(draft)));
+  section.append(message, list);
+  box.appendChild(section);
 }
 
 const meetingDraftEmptyText = count => `빈 초안이 ${count}개 있어요. 채우거나 빼 주세요`;
@@ -529,7 +613,7 @@ function panelMeetingRowEdit(row, titleEl, item, checkbox) {
 
 // 담은 항목의 종류 바꾸기 — 서버가 같은 id로 파일만 옮긴다(회의 연결·검토 기록이 그대로 남는다).
 // 되돌리기는 반대 방향으로 한 번 더 바꾸는 것이고, 알림의 `되돌리기`와 ⌘Z가 같은 길을 쓴다.
-const RETYPE_CHIPS = [['task', '할 일'], ['check', '확인 대기'], ['decision', '결정']];
+// 고르는 자리는 줄의 종류 글자가 여는 목록(meetingRowType) 하나다.
 const RETYPE_DISABLED_HINT = '완료한 항목은 종류를 바꿀 수 없어요';
 // `로`/`으로` — 받침이 없거나 ㄹ이면 `로`(할 일로 · 확인 대기로), 그 밖에는 `으로`(결정으로).
 function uiRoParticle(word) {
@@ -540,14 +624,16 @@ function uiRoParticle(word) {
   return tail === 0 || tail === 8 ? '로' : '으로';
 }
 const retypeDoneText = type => `${wfType(type)}${uiRoParticle(wfType(type))}`;
-async function retypeSend(id, type) {
+async function retypeSend(id, type, host = null) {
   const result = await wfPost('retype', { id, type });
   if (!result.ok) throw new Error(result.error || '종류를 바꾸지 못했어요.');
   await load();
+  // 입력줄에 초점이 있으면 카드 전체는 다시 그려지지 않는다 — 열려 있는 회의의 목록만 따로 맞춘다.
+  [...new Set([MEETING_HOST_CARD, MEETING_HOST_TAB, host])].forEach(one => meetingItemsRepaint(one));
 }
-async function retypeMeetingItem(item, type) {
+async function retypeMeetingItem(item, type, host = null) {
   const from = item.type;
-  await retypeSend(item.id, type);
+  await retypeSend(item.id, type, host);
   const entry = {
     label: `${item.description} (종류 바꾸기)`,
     undo: () => postJson('/api/workflow/retype', { id: item.id, type: from }),
@@ -558,7 +644,7 @@ async function retypeMeetingItem(item, type) {
     label: '되돌리기',
     onClick: async (button) => {
       if (button) button.disabled = true;
-      try { await retypeSend(item.id, from); } catch { if (button) button.disabled = false; return; }
+      try { await retypeSend(item.id, from, host); } catch { if (button) button.disabled = false; return; }
       // ⌘Z가 같은 되돌리기를 한 번 더 하지 않게 그 기록을 뺀다(삭제 되돌리기와 같은 규칙).
       const at = undoStack.lastIndexOf(entry);
       if (at >= 0) undoStack.splice(at, 1);
@@ -567,26 +653,15 @@ async function retypeMeetingItem(item, type) {
   });
 }
 
-// 회의 줄의 ⋯ — 앱의 다른 목록이 쓰는 메뉴를 그대로 쓰고, 맨 위에 `문구 고치기`와 `종류 바꾸기`를 얹는다.
+// 회의 줄의 ⋯ — 앱의 다른 목록이 쓰는 메뉴를 그대로 쓰고, 맨 위에 `문구 고치기`를 얹는다(종류는 줄의 종류 글자에서 바꾼다).
 // onOpen(업무·확인 대기)이 있으면 그 위에 `상세 열기` — 제목은 누르면 펼치는 자리라 상세는 여기서 연다.
 function panelMeetingRowMenu(item, row, onEdit, onOpen = null) {
   const base = item.type === 'check' ? waitingMenuSections(item, row)
     : item.type === 'decision' ? decisionMenuSections(item, row)
     : taskMenuSections({ item, mode: panelMode(item), card: row });
-  // 완료한 항목은 옮기지 않는다 — 끝난 줄이라 종류를 바꿀 일이 없다(서버도 거절한다).
-  const done = item.status === 'done';
-  const chips = uiMenuChips(RETYPE_CHIPS, item.type, async (value) => {
-    uiMenuClose();
-    try { await retypeMeetingItem(item, value); } catch { /* request()가 이미 알린다 */ }
-  }, true);
-  if (done) {
-    Array.from(chips.children).forEach((chip) => { chip.disabled = true; });
-    chips.title = RETYPE_DISABLED_HINT;
-    chips.setAttribute('aria-description', RETYPE_DISABLED_HINT);
-  }
   const head = [
     ...(typeof onOpen === 'function' ? [{ label: '상세 열기', onClick: onOpen }] : []),
-    { label: '문구 고치기', onClick: onEdit }, { field: '종류 바꾸기', control: chips },
+    { label: '문구 고치기', onClick: onEdit },
   ];
   return [head, ...base];
 }
@@ -628,22 +703,18 @@ function panelMeetingRowProject(item, event) {
   return uiInlineProject(item);
 }
 
-// opts.type === false — 종류 소제목이 이미 종류를 말해 주는 자리(줄에서 `할 일`/`확인 대기` 글자를 뺀다).
-// opts.project === false — 프로젝트 소제목으로 이미 나눈 자리(줄에서 `· ● 이름`을 뺀다).
-function panelMeetingRow(item, event, stateText, host = MEETING_HOST_CARD, opts = {}) {
+// 한 줄: 체크 | 문구 | (상태) 종류 | ⋯ — 종류는 줄마다 오른쪽에 조용한 글자로 선다(종류 소제목으로 나누지 않는다).
+function panelMeetingRow(item, event, stateText, host = MEETING_HOST_CARD) {
   const row = document.createElement('div');
   const done = item.status === 'done';
-  const project = opts.project === false ? null : panelMeetingRowProject(item, event);
-  row.className = 'd-mrow2' + (opts.type === false ? ' no-tg' : '') + (project ? ' has-pj' : '')
+  const project = panelMeetingRowProject(item, event);
+  row.className = 'd-mrow2' + (project ? ' has-pj' : '')
     + (done ? ' is-done' : '')
     + (panelState && panelState.kind !== 'meeting' && panelState.id === item.id ? ' is-sel' : '');
   // 회의 탭에서 제목을 누르면 이 줄 옆에 상세 카드가 뜬다 — 다른 목록과 같은 앵커 규칙을 쓴다.
   row.dataset.taskId = item.id;
   const { cell: checkCell, input: checkbox } = panelMeetingCheck(item, row, done);
   row.appendChild(checkCell);
-  const tag = document.createElement('span');
-  tag.className = 'tg';
-  tag.textContent = wfType(item.type);
   // 제목은 평소 두 줄까지(말줄임). **실제로 잘렸을 때만** 누르면(Enter·Space도 — 진짜 버튼이다) 그 자리에서 전문,
   // 다시 누르면 접힌다(아이디어 줄과 같은 uiClampWatch). 잘리지 않은 제목은 예전처럼 업무·확인 대기는 상세 열기,
   // 상세가 없는 결정은 `문구 고치기`다. ⋯ 맨 위의 `상세 열기`는 잘린 줄에서도 상세를 여는 길이다.
@@ -674,7 +745,6 @@ function panelMeetingRow(item, event, stateText, host = MEETING_HOST_CARD, opts 
   acts.className = 'ac';
   acts.appendChild(uiMoreButton(`${item.description} — 더 보기`,
     () => panelMeetingRowMenu(item, row, edit, openable ? () => host.openItem(item, event) : null)));
-  if (opts.type !== false) row.appendChild(tag);
   // 프로젝트 표기가 있을 때만 제목과 한 칸에 묶는다(`제목 · ● 이름`) — 없으면 줄 모양은 예전 그대로다.
   if (project) {
     const wrap = document.createElement('span');
@@ -684,173 +754,515 @@ function panelMeetingRow(item, event, stateText, host = MEETING_HOST_CARD, opts 
   } else {
     row.appendChild(title);
   }
-  row.append(state, acts);
+  // 오른쪽 칸: (있으면) 상태 글자 + 종류.
+  const right = document.createElement('span');
+  right.className = 'r';
+  if (state.textContent) right.appendChild(state);
+  right.appendChild(meetingRowType(item, host));
+  row.append(right, acts);
   return row;
 }
 
-// `이 회의에서 나온 것`을 종류로 나눈다(순수 함수): 할 일(버그 포함) · 확인 대기 · 결정, 그 밖은 끝에.
-// 종류가 하나뿐이면 구역 제목이 이미 개수를 말하므로 소제목을 세우지 않는다(부르는 쪽이 길이로 판단한다).
-const MEETING_TYPE_GROUPS = [['할 일', ['task', 'bug']], ['확인 대기', ['check']], ['결정', ['decision']]];
-const MEETING_TYPE_KNOWN = ['task', 'bug', 'check', 'decision'];
-function panelMeetingTypeGroups(items) {
-  const all = [...(items || [])];
-  const groups = [];
-  MEETING_TYPE_GROUPS.forEach(([label, types]) => {
-    const picked = all.filter(item => types.includes(item.type));
-    if (picked.length) groups.push({ label, items: picked });
-  });
-  // 아이디어처럼 표에 없는 종류는 제 이름으로 맨 끝에 선다.
-  const others = new Map();
-  all.filter(item => !MEETING_TYPE_KNOWN.includes(item.type)).forEach((item) => {
-    const label = wfType(item.type);
-    if (!others.has(label)) others.set(label, []);
-    others.get(label).push(item);
-  });
-  others.forEach((list, label) => groups.push({ label, items: list }));
-  return groups;
+// ---------- 종류 목록 ----------
+// 줄의 조용한 글자 `할 일 ⌄`이 여는 작은 목록(할 일 · 확인 대기 · 결정). 일정 정하기 판과 같은 부품(.d-schedpop·.d-mitem)과
+// 같은 움직임(누른 글자에서 튀어나옴)이고, 아래가 모자라면 위로 뒤집는다. ↑↓·Enter·Esc, 글쇠 `?` `!`(입력 앞머리와 같은 글자)·1~3.
+const MEETING_TYPE_KEYS = { check: '?', decision: '!' };
+let meetingTypeOpen = null; // { pop, anchor, onEsc, away, shut }
+
+function meetingTypePlace(pop, anchor) {
+  const box = anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : null;
+  if (!box) return;
+  const width = pop.offsetWidth || 176;
+  const height = pop.offsetHeight || 0;
+  const viewW = window.innerWidth || 1024;
+  const viewH = window.innerHeight || 768;
+  // 오른쪽 끝을 누른 글자에 맞춘다(종류 글자는 줄의 오른쪽에 있다).
+  const left = Math.max(8, Math.min(box.right - width + 6, viewW - 8 - width));
+  const flip = box.bottom + 4 + height > viewH - 8 && box.top - 4 - height >= 8;
+  const top = flip ? box.top - 4 - height : box.bottom + 4;
+  pop.style.left = `${Math.round(left)}px`;
+  pop.style.top = `${Math.round(top)}px`;
+  pop.style.setProperty('--ox', `${Math.round(box.left + box.width / 2 - left)}px`);
+  pop.style.setProperty('--oy', flip ? '100%' : '0');
 }
 
-// 종류·프로젝트 소제목 — 조용한 회색 한 줄이다(그룹 제목 부품이 아니다, 줄 사이를 알려 주기만 한다).
-// opts.projectName이 있으면 프로젝트 소제목(`· ● 알림센터`)이 된다.
-function panelMeetingSubhead(label, count, opts = {}) {
-  const head = document.createElement('div');
-  head.className = 'd-mgrp' + (opts.projectName === undefined ? '' : ' is-pj');
-  if (opts.projectName) head.append('· ', uiProjectDot(opts.projectName));
+function meetingTypeClose(restoreFocus = false) {
+  if (!meetingTypeOpen) return;
+  const { pop, anchor, onEsc, away, shut } = meetingTypeOpen;
+  meetingTypeOpen = null;
+  escDrop(onEsc);
+  document.removeEventListener('mousedown', away, true);
+  document.removeEventListener('scroll', shut, true);
+  window.removeEventListener('resize', shut);
+  anchor.setAttribute('aria-expanded', 'false');
+  if (uiSchedMotion()) {
+    pop.classList.add('is-out');
+    setTimeout(() => pop.remove(), 120);
+  } else pop.remove();
+  if (restoreFocus && anchor.isConnected) anchor.focus();
+}
+
+function meetingTypeToggle(anchor, current, onPick) {
+  if (meetingTypeOpen && meetingTypeOpen.anchor === anchor) { meetingTypeClose(true); return; }
+  meetingTypeClose();
+  uiSchedClose();
+  uiMenuClose();
+
+  const pop = document.createElement('div');
+  pop.className = 'd-schedpop d-typepop';
+  pop.setAttribute('role', 'listbox');
+  pop.setAttribute('aria-label', '종류');
+  pop.addEventListener('click', event => event.stopPropagation());
+  const pick = (key) => { meetingTypeClose(); onPick(key); };
+  const items = WF_TYPES.map(([key, text], index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'd-mitem' + (key === current ? ' on' : '');
+    button.setAttribute('role', 'option');
+    button.setAttribute('aria-selected', String(key === current));
+    button.dataset.key = key;
+    button.style.setProperty('--i', String(index));
+    const name = document.createElement('span');
+    name.textContent = text;
+    button.appendChild(name);
+    if (MEETING_TYPE_KEYS[key]) {
+      const kbd = document.createElement('kbd');
+      kbd.textContent = MEETING_TYPE_KEYS[key];
+      button.appendChild(kbd);
+    }
+    button.addEventListener('click', () => pick(key));
+    button.addEventListener('focus', () => { items.forEach(other => other.classList.remove('on')); button.classList.add('on'); });
+    pop.appendChild(button);
+    return button;
+  });
+  pop.addEventListener('keydown', (event) => {
+    const at = items.indexOf(document.activeElement);
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      items[(at + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length].focus();
+    } else if (event.key === 'Tab') meetingTypeClose();
+    else {
+      const hit = WF_TYPES.find(([key], index) => MEETING_TYPE_KEYS[key] === event.key || String(index + 1) === event.key);
+      if (hit) { event.preventDefault(); pick(hit[0]); }
+    }
+  });
+
+  document.body.appendChild(pop);
+  meetingTypePlace(pop, anchor);
+  anchor.setAttribute('aria-expanded', 'true');
+  const onEsc = () => meetingTypeClose(true);
+  escPush(onEsc);
+  const away = (event) => { if (!pop.contains(event.target) && !anchor.contains(event.target)) meetingTypeClose(); };
+  const shut = () => meetingTypeClose();
+  document.addEventListener('mousedown', away, true);
+  document.addEventListener('scroll', shut, true);
+  window.addEventListener('resize', shut);
+  meetingTypeOpen = { pop, anchor, onEsc, away, shut };
+  (items.find(button => button.dataset.key === current) || items[0]).focus();
+}
+
+// 목록을 연 글자가 다시 그리기로 사라졌으면(자동 갱신·저장 뒤 목록 맞춤) 허공에 남은 목록을 닫고 초점을 입력줄로 돌린다.
+function meetingTypeOrphan(host) {
+  if (!meetingTypeOpen || meetingTypeOpen.anchor.isConnected) return;
+  meetingTypeClose();
+  meetingCaptureFocus(host);
+}
+
+// 종류 글자 버튼. onPick이 없으면(담는 중인 줄) 같은 모양의 눌리지 않는 글자다.
+function meetingTypeButton(type, onPick, { hint = '' } = {}) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'd-tpk';
   const name = document.createElement('span');
-  name.textContent = label;
-  head.appendChild(name);
-  if (count) {
-    const number = document.createElement('span');
-    number.className = 'n num';
-    number.textContent = count;
-    head.appendChild(number);
+  name.className = 'tl';
+  name.textContent = wfType(type);
+  const caret = document.createElement('span');
+  caret.className = 'cv';
+  caret.innerHTML = uiIcon('chevron');
+  button.append(name, caret);
+  if (!onPick) {
+    button.disabled = true;
+    button.setAttribute('aria-label', `종류: ${wfType(type)}`);
+    if (hint) { button.title = hint; button.setAttribute('aria-description', hint); }
+    return button;
   }
-  return head;
+  button.setAttribute('aria-haspopup', 'listbox');
+  button.setAttribute('aria-expanded', 'false');
+  button.setAttribute('aria-label', `종류: ${wfType(type)} — 바꾸기`);
+  button.addEventListener('click', (event) => { if (event && event.stopPropagation) event.stopPropagation(); meetingTypeToggle(button, type, onPick); });
+  return button;
 }
 
-// 한 종류 묶음을 구역에 붙인다. 종류가 둘 이상이어서 소제목이 선 자리에서는 줄의 종류 글자를 빼고,
-// 그 종류 안에 프로젝트가 **둘 이상**일 때만 프로젝트 소제목으로 한 번 더 나눈다(하나뿐이면 나누지 않는다).
-function panelMeetingTypeRows(section, group, { headed, split, row }) {
-  if (headed) section.appendChild(panelMeetingSubhead(group.label, group.items.length));
-  const groups = split ? uiGroupTasks(group.items) : [];
-  if (groups.length > 1) {
-    groups.forEach(([key, items]) => {
-      section.appendChild(panelMeetingSubhead(uiGroupLabel(key), 0, { projectName: key === '__misc__' ? null : key }));
-      items.forEach(item => row(item, { type: !headed, project: false }));
-    });
-    return;
+// 담은 줄의 종류 — 고르면 기존 `종류 바꾸기`(retype) 길로 바꾸고 초점은 입력줄로 돌아간다(이어서 적게).
+// 완료한 항목은 옮기지 않는다 — 끝난 줄이라 종류를 바꿀 일이 없다(서버도 거절한다).
+function meetingRowType(item, host) {
+  if (item.status === 'done') return meetingTypeButton(item.type, null, { hint: RETYPE_DISABLED_HINT });
+  return meetingTypeButton(item.type, async (type) => {
+    meetingCaptureFocus(host);
+    if (type === item.type) return;
+    try { await retypeMeetingItem(item, type, host); } catch { return; /* request()가 이미 알린다 */ }
+    meetingCaptureFocus(host);
+  });
+}
+
+// 구역 머리: 제목 + 조용한 숫자(`이 회의에서 나온 것 3`). 숫자는 따로 든 칸이라 줄이 늘어도 그 칸만 바꾼다.
+function meetingSection(title, count) {
+  const section = panelSection(title);
+  const label = section.children[0];
+  section.className = 'd-dsec d-msec';
+  label.className = 'lbl d-mhead';
+  const number = document.createElement('span');
+  number.className = 'n num';
+  number.textContent = String(count);
+  label.appendChild(number);
+  return { section, label, number };
+}
+
+// ---------- 회의에서 나온 것 적기 ----------
+// 카드 발의 입력줄에 적고 Enter를 누르면 그 줄이 바로 목록 끝(입력줄 바로 위)에 선다 — 저장은 뒤에서 차례로 보낸다
+// (uiQueueSend). 아직 서버 목록에 없는 줄(담는 중·못 담음·담았지만 아직 다시 읽기 전)은 여기서 회의별로 들고 있어
+// 카드를 다시 그려도 그대로 남는다. 서버 목록에 들어온 줄은 내려놓는다(기록되지 않은 회의는 목록이 없어 그대로 둔다).
+const meetingCaptureLocal = new Map(); // 회의 키 → [{ seq, type, text, state: 'pending' | 'fail' | 'saved', id, fresh }]
+let meetingCaptureSeq = 0;
+const MEETING_PASTE_MAX = 30;
+const MEETING_TEXT_MAX = 1000;
+// 화면 메모리의 열쇠 — 기록된 회의는 번호, 기록되지 않은 회의는 날짜·시각·제목(매일 같은 시각·제목으로 열리는 회의가
+// 어제 적은 줄을 물려받지 않게 날짜를 넣는다).
+const meetingCaptureKey = event => event.id || `${event.date || todayStr()} ${event.start || ''} ${event.title || ''}`;
+const MEETING_TYPE_HEADS = { '?': 'check', '!': 'decision' };
+
+// 맨 앞 한 글자로 종류를 정한다: `?` 확인 대기 · `!` 결정(담을 때 떼어 낸다). 앞에 빈칸을 두면 글자 그대로 담는다.
+function meetingCaptureParse(raw) {
+  const value = String(raw || '');
+  const text = value.trim();
+  const type = /^\s/.test(value) ? null : MEETING_TYPE_HEADS[text[0]];
+  return type ? { type, text: text.slice(1).trim() } : { type: 'task', text };
+}
+// 붙여 넣은 줄 앞의 목록 표시(`-` `•` `*` `1.` `1)`)를 뗀다. 번호는 한두 자리이고 바로 뒤에 숫자가 오지 않을 때만 —
+// `10. 2 배포 일정`·`2026. 10. 5. 릴리스`처럼 날짜로 시작하는 글은 깎지 않는다.
+const meetingCaptureClean = line => String(line).replace(/^\s*(?:[-•*·]\s+|\d{1,2}[.)]\s+(?!\d))/, '').trim();
+function meetingCaptureLines(text) {
+  return String(text || '').split(/\r?\n/).map(meetingCaptureClean).filter(Boolean)
+    .map(meetingCaptureParse).filter(entry => entry.text);
+}
+
+// 지금 떠 있는 회의 카드(또는 탭)의 목록만 다시 그린다 — 입력줄은 건드리지 않아 한글 조합·초점이 그대로다.
+function meetingItemsRepaint(host) {
+  const box = host && host.box ? host.box() : null;
+  if (box && typeof box.meetingRepaintPast === 'function') box.meetingRepaintPast();
+  if (box && typeof box.meetingRepaint === 'function') box.meetingRepaint();
+}
+function meetingCaptureFocus(host) {
+  const box = host && host.box ? host.box() : null;
+  if (box && box.meetingInput) box.meetingInput.focus();
+}
+
+async function meetingCaptureSave(event, linked, entry) {
+  if (linked) {
+    const result = await wfPost('capture', { meetingId: event.id, type: entry.type, description: entry.text });
+    if (!result.ok) throw new Error(result.error || '담지 못했어요.');
+    return result.id;
   }
-  group.items.forEach(item => row(item, { type: !headed, project: true }));
+  // 기록되지 않은 회의: 회의에 연결하지 않고 목록에 바로 담는다(프로젝트는 회의에 연결된 것을 쓴다).
+  // 묶음(BBUNDLE)에 든 티켓이면 대표 티켓으로 담는다(서버 addToMeeting의 기본값과 같은 규칙).
+  const project = meetingCaptureProject(event.project);
+  const body = { description: entry.text, ...(project && project.type && project.value ? { [project.type]: project.value } : {}) };
+  const response = await request(MEETING_CAPTURE_ENDPOINT[entry.type], {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), quiet: true,
+  });
+  const result = await response.json();
+  if (!result.ok) throw new Error(result.error || '담지 못했어요.');
+  return result.id;
+}
+
+const meetingCaptureQueue = event => `meeting-capture:${meetingCaptureKey(event)}`;
+// 한 줄을 보낸다. 같은 회의의 저장은 한 줄로 서서 적은 순서대로 나가고, 앞 줄이 실패해도 다음 줄은 그대로 보낸다.
+// 목록은 대기열의 마지막 줄이 끝났을 때 한 번만 다시 읽는다(여러 줄을 붙여 넣어도 다시 읽기는 한 번).
+function meetingCaptureSend(event, linked, entry, host) {
+  const queueKey = meetingCaptureQueue(event);
+  entry.state = 'pending';
+  const run = uiQueueSend(queueKey, async () => {
+    try {
+      entry.id = await meetingCaptureSave(event, linked, entry);
+      entry.state = 'saved';
+      meetingCaptureUndo(event, entry);
+    } catch {
+      entry.state = 'fail'; // 알림은 request()가 이미 했다 — 적은 글은 그 줄에 그대로 있다
+    }
+    if (uiSendQueues.get(queueKey) === run.queueTail) await load();
+    meetingItemsRepaint(host);
+  });
+  return run;
+}
+
+// 직접 적어 담은 줄도 되돌린다 — 초안 담기의 `실행 취소`와 같은 길이다: 만든 항목을 삭제 휴지통으로 옮기고(원문 보존),
+// 다시 실행은 휴지통에서 되살린다. ⌘Z와 누르는 화면의 알림 `되돌리기`가 같은 기록을 쓴다.
+function meetingCaptureUndo(event, entry) {
+  if (!entry.id) return;
+  const key = meetingCaptureKey(event);
+  const record = {
+    label: `${entry.text} (회의에서 적기)`,
+    captureKey: key, // 입력줄의 ⌘Z가 "이 회의에서 방금 적어 담은 줄"인지 가리는 표시
+    undo: async () => {
+      await postJson('/api/track/remove', { id: entry.id });
+      const left = (meetingCaptureLocal.get(key) || []).filter(other => other !== entry);
+      if (left.length) meetingCaptureLocal.set(key, left); else meetingCaptureLocal.delete(key);
+    },
+    redo: async () => {
+      await postJson('/api/track/restore', { id: entry.id });
+      // 기록되지 않은 회의는 서버 목록이 없어 이 자리의 줄로 다시 세운다.
+      if (!event.id) { entry.seen = false; meetingCaptureLocal.set(key, [...(meetingCaptureLocal.get(key) || []), entry]); }
+    },
+  };
+  pushUndo(record);
+  // 누르는 화면에는 ⌘Z가 없다 — 알림의 `되돌리기` 버튼으로 같은 기록을 되돌린다(키보드가 있는 화면에서는 조용히 담는다).
+  if (uiTouchScreen()) uiUndoNotice('담았어요', null, record);
+}
+
+function meetingCaptureAdd(event, linked, entries, host) {
+  const key = meetingCaptureKey(event);
+  const fresh = entries.filter(entry => entry.text)
+    .map(entry => ({ seq: ++meetingCaptureSeq, type: entry.type, text: entry.text, state: 'pending', id: null, fresh: true }));
+  if (!fresh.length) return [];
+  meetingCaptureLocal.set(key, [...(meetingCaptureLocal.get(key) || []), ...fresh]);
+  meetingItemsRepaint(host);
+  return fresh.map(entry => meetingCaptureSend(event, linked, entry, host));
+}
+
+function meetingCaptureDrop(event, entry, host) {
+  const key = meetingCaptureKey(event);
+  const left = (meetingCaptureLocal.get(key) || []).filter(other => other !== entry);
+  if (left.length) meetingCaptureLocal.set(key, left); else meetingCaptureLocal.delete(key);
+  meetingItemsRepaint(host);
+}
+
+// 아직 서버 목록에 없는 줄 — 담는 중에는 체크만 잠긴 같은 모양, 못 담았으면 그 줄에만 조용한 표시와 `다시 시도`.
+function meetingLocalRow(entry, event, linked, host) {
+  const failed = entry.state === 'fail';
+  const row = document.createElement('div');
+  row.className = 'd-mrow2 is-local' + (entry.fresh ? ' is-new' : '') + (failed ? ' is-fail' : '');
+  entry.fresh = false; // 떠오르는 움직임은 처음 한 번만
+  const cell = document.createElement('span');
+  cell.className = 'ck';
+  const check = document.createElement('input');
+  check.type = 'checkbox';
+  check.disabled = true;
+  check.setAttribute('aria-label', `${entry.text} — ${failed ? '아직 담지 못했어요' : '담는 중'}`);
+  if (entry.type === 'check') { check.className = 'd-wcb'; cell.appendChild(check); }
+  else {
+    const wrap = document.createElement('span');
+    wrap.className = 'd-check';
+    check.className = 'd-cb';
+    wrap.appendChild(check);
+    cell.appendChild(wrap);
+  }
+  const title = document.createElement('span');
+  title.className = 'ti';
+  title.textContent = entry.text;
+  const right = document.createElement('span');
+  right.className = 'r';
+  const acts = document.createElement('span');
+  acts.className = 'ac';
+  if (failed) {
+    const note = document.createElement('span');
+    note.className = 'fail';
+    note.setAttribute('role', 'alert');
+    note.textContent = '못 담았어요';
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'd-link';
+    retry.textContent = '다시 시도';
+    retry.setAttribute('aria-label', `다시 시도: ${entry.text}`);
+    retry.addEventListener('click', () => {
+      const run = meetingCaptureSend(event, linked, entry, host);
+      meetingItemsRepaint(host);
+      meetingCaptureFocus(host);
+      return run;
+    });
+    right.append(note, retry);
+    acts.appendChild(uiMoreButton(`${entry.text} — 더 보기`,
+      () => [[{ label: '지우기', onClick: () => { meetingCaptureDrop(event, entry, host); meetingCaptureFocus(host); } }]]));
+  } else {
+    right.appendChild(meetingTypeButton(entry.type, null));
+  }
+  row.append(cell, title, right, acts);
+  return row;
+}
+
+// `이 회의에서 나온 것`은 시간순 한 목록이다: 담은 날짜순, 같은 날은 만든 순서. 항목 번호(`task_01M3…`)의 뒷부분이
+// 만든 시각 순으로 커지는 값이라 그것으로 가린다(종류를 바꿔도 번호는 그대로다). 그런 번호가 아닌 옛 항목은 원래 순서를 지킨다.
+const meetingItemStamp = (item) => {
+  const tail = String(item.id || '').split('_').pop();
+  return /^[0-9A-HJKMNP-TV-Z]{26}$/.test(tail) ? tail : '';
+};
+function meetingItemsInOrder(items) {
+  return [...(items || [])].map((item, index) => ({ item, index, stamp: meetingItemStamp(item) }))
+    .sort((x, y) => String(x.item.created || '').localeCompare(String(y.item.created || ''))
+      || (x.stamp && y.stamp ? (x.stamp < y.stamp ? -1 : x.stamp > y.stamp ? 1 : 0) : 0) || x.index - y.index)
+    .map(entry => entry.item);
 }
 
 function panelMeetingItems(event, box, host = MEETING_HOST_CARD) {
-  const items = wfMeetingItems(event.id);
-  if (!items.length) return;
-  const section = panelSection(`이 회의에서 나온 것 ${items.length}`);
-  const groups = panelMeetingTypeGroups(items);
-  const headed = groups.length > 1;
-  const row = (item, opts) => {
-    section.appendChild(panelMeetingRow(item, event, null, host, { type: opts.type, project: opts.project }));
-    // 체크한 확인 대기는 이 구역에 is-done으로 남는다 — 그 줄 바로 아래에 `다음은?`을 덧붙인다.
-    const next = item.type === 'check' ? waitingNextItem(item.id) : null;
-    if (next) section.appendChild(waitingNextRow(next));
+  const linked = !!event.id;
+  const key = meetingCaptureKey(event);
+  const { section, number } = meetingSection(linked ? '이 회의에서 나온 것' : '방금 담은 것', 0);
+  const list = document.createElement('div');
+  list.className = 'd-mlist';
+  section.appendChild(list);
+  // 초안도 담은 것도 없는 빈 회의에만 안내 한 줄.
+  const result = host.getResult();
+  const blank = linked && !(event.drafts && event.drafts.length) && !(result && result.meetingId === event.id);
+  const hint = document.createElement('div');
+  hint.className = 'd-hint';
+  hint.textContent = '적고 Enter를 누르면 바로 담겨요.';
+
+  const paint = () => {
+    // 줄의 문구를 그 자리에서 고치는 중이면 그 입력칸을 지우지 않는다(끝나면 그 저장이 다시 그린다).
+    const active = document.activeElement;
+    if (active && list.contains && list.contains(active) && uiIsTextEntry(active)) return;
+    const real = linked ? meetingItemsInOrder(wfMeetingItems(event.id)) : [];
+    const shown = new Set(real.map(item => item.id));
+    // 서버 목록에 들어온 줄은 내려놓는다. 한 번 보였다가 사라진 줄(되돌리기·삭제)도 내려놓는다.
+    const local = (meetingCaptureLocal.get(key) || []).filter((entry) => {
+      if (entry.state !== 'saved') return true;
+      if (shown.has(entry.id)) return false;
+      const found = typeof wfItem === 'function' && !!wfItem(entry.id);
+      if (found) entry.seen = true;
+      return found || !entry.seen;
+    });
+    if (local.length) meetingCaptureLocal.set(key, local); else meetingCaptureLocal.delete(key);
+    const rows = [];
+    real.forEach((item) => {
+      rows.push(panelMeetingRow(item, event, null, host));
+      // 체크한 확인 대기는 이 구역에 is-done으로 남는다 — 그 줄 바로 아래에 `다음은?`을 덧붙인다.
+      const next = item.type === 'check' ? waitingNextItem(item.id) : null;
+      if (next) rows.push(waitingNextRow(next));
+    });
+    let added = null;
+    local.forEach((entry) => {
+      const saved = entry.state === 'saved' && typeof wfItem === 'function' ? wfItem(entry.id) : null;
+      const row = saved ? panelMeetingRow(saved, event, null, host) : meetingLocalRow(entry, event, linked, host);
+      if (String(row.className).includes('is-new')) added = row;
+      rows.push(row);
+    });
+    list.replaceChildren(...rows);
+    const count = real.length + local.length;
+    number.textContent = String(count);
+    section.hidden = !count;
+    hint.hidden = !blank || !!count;
+    // 방금 적은 줄이 입력줄 바로 위에 보이게.
+    if (added && added.scrollIntoView) added.scrollIntoView({ block: 'nearest' });
+    meetingTypeOrphan(host);
   };
-  groups.forEach(group => panelMeetingTypeRows(section, group, { headed, split: true, row }));
-  box.appendChild(section);
+  box.meetingRepaint = paint;
+  box.append(section, hint);
+  paint();
 }
 
-// 같은 이름으로 반복되는 회의라면, 지난 회차에서 아직 안 끝난 것을 여기서 같이 본다.
-// 종류 소제목은 같은 규칙이고, 프로젝트로 한 번 더 나누지는 않는다 — 줄마다 이미 회차 표기가 있다.
+// 같은 이름으로 반복되는 회의라면, 지난 회차에서 아직 안 끝난 것을 여기서 같이 본다(줄마다 회차 표기).
+// 종류를 바꾸면(입력줄에 초점이 있어 카드가 다시 그려지지 않아도) 이 구역도 함께 맞춘다(meetingItemsRepaint).
 function panelMeetingPast(event, box, host = MEETING_HOST_CARD) {
   if (!event.series) return;
-  const meetings = (typeof workflowData === 'object' && workflowData ? workflowData.meetings : null) || [];
-  const past = meetings
-    .filter(other => other.id !== event.id && other.series === event.series && (other.date || '') < (event.date || ''))
-    .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  const rows = [];
-  past.forEach(other => wfMeetingItems(other.id).filter(item => item.status !== 'done').forEach(item => rows.push({ item, at: other.date })));
-  if (!rows.length) return;
-  const section = panelSection(`이전 회차의 미해결 항목 ${rows.length}`);
-  const at = new Map(rows.map(({ item, at: date }) => [item.id, date]));
-  const groups = panelMeetingTypeGroups(rows.map(({ item }) => item));
-  const headed = groups.length > 1;
-  const row = (item, opts) => section.appendChild(
-    panelMeetingRow(item, event, `${uiKoDateShort(at.get(item.id))} 회차`, host, { type: opts.type, project: opts.project }));
-  groups.forEach(group => panelMeetingTypeRows(section, group, { headed, split: false, row }));
+  const collect = () => {
+    const meetings = (typeof workflowData === 'object' && workflowData ? workflowData.meetings : null) || [];
+    const past = meetings
+      .filter(other => other.id !== event.id && other.series === event.series && (other.date || '') < (event.date || ''))
+      .sort((x, y) => (y.date || '').localeCompare(x.date || ''));
+    const rows = [];
+    past.forEach(other => wfMeetingItems(other.id).filter(item => item.status !== 'done').forEach(item => rows.push({ item, at: other.date })));
+    return rows;
+  };
+  if (!collect().length) return;
+  const { section, number } = meetingSection('이전 회차의 미해결 항목', 0);
+  const list = document.createElement('div');
+  list.className = 'd-mlist';
+  section.appendChild(list);
+  const paint = () => {
+    const active = document.activeElement;
+    if (active && list.contains && list.contains(active) && uiIsTextEntry(active)) return;
+    const rows = collect();
+    list.replaceChildren(...rows.map(({ item, at }) => panelMeetingRow(item, event, `${uiKoDateShort(at)} 회차`, host)));
+    number.textContent = String(rows.length);
+    section.hidden = !rows.length;
+  };
+  box.meetingRepaintPast = paint;
   box.appendChild(section);
+  paint();
 }
 
-// 직접 적어 담기 — 검토할 초안이 있으면 접어 두고(주 흐름은 검토 → 담기), 없을 때만 펼친다.
+// 카드 발에 붙박인 입력줄 — 평소 맨 줄, 초점에서만 흰 면 + 파란 테. 칸은 저장 중에도 잠그지 않는다.
 function panelMeetingCapture(event, box, linked, host = MEETING_HOST_CARD) {
-  const section = document.createElement('details');
-  section.className = 'd-dsec d-dadd';
-  section.open = !(event.drafts && event.drafts.length);
-  const label = document.createElement('summary');
-  label.className = 'lbl';
-  label.innerHTML = uiIcon('chevron');
-  label.append('직접 적어 담기');
-  section.appendChild(label);
-
-  const form = document.createElement('div');
-  form.className = 'd-dcap';
-  let type = 'task';
-  let due = '';
-  const dateSlot = document.createElement('span');
-  const syncDate = () => {
-    dateSlot.replaceChildren();
-    const name = wfDateLabel(type);
-    if (name) dateSlot.appendChild(uiDateField({ value: due, label: name, onChange: (value) => { due = value || ''; } }));
-  };
+  const foot = document.createElement('div');
+  foot.className = 'd-dbar d-qfoot';
+  const line = document.createElement('label');
+  line.className = 'd-qin';
+  const plus = document.createElement('span');
+  plus.className = 'pl';
+  plus.innerHTML = uiIcon('plus');
   const input = document.createElement('input');
   input.type = 'text';
-  input.className = 'd-din';
-  input.maxLength = 1000;
-  input.placeholder = '회의에서 나온 내용';
-  input.setAttribute('aria-label', '회의에서 나온 내용');
-  const add = document.createElement('button');
-  add.type = 'button';
-  add.className = 'd-btn pri';
-  add.textContent = '추가';
-
-  const submit = async () => {
-    const description = input.value.trim();
-    if (!description || add.disabled) return;
-    add.disabled = true;
-    panelSetError('', host);
-    try {
-      if (linked) await wfPost('capture', { meetingId: event.id, type, description, ...(type !== 'decision' && due ? { due } : {}) });
-      else {
-        // 기록되지 않은 회의: 회의에 연결하지 않고 목록에 바로 담는다(프로젝트는 회의에 연결된 것을 쓴다).
-        // 묶음(BBUNDLE)에 든 티켓이면 대표 티켓으로 담는다(서버 addToMeeting의 기본값과 같은 규칙).
-        const project = meetingCaptureProject(event.project);
-        const body = {
-          description,
-          ...(type !== 'decision' && due ? { due } : {}),
-          ...(project && project.type && project.value ? { [project.type]: project.value } : {}),
-        };
-        const response = await request(MEETING_CAPTURE_ENDPOINT[type], { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        const result = await response.json();
-        if (!result.ok) throw new Error(result.error || '담지 못했어요.');
-      }
-      await load();
-      host.redraw();
-    } catch {
-      panelSetError('추가하지 못했어요. 적은 내용은 그대로 있어요.', host);
-      add.disabled = false;
-      input.focus();
-    }
+  input.maxLength = MEETING_TEXT_MAX;
+  input.placeholder = '회의에서 나온 것 적기';
+  input.autocomplete = 'off';
+  input.setAttribute('aria-label', '회의에서 나온 것 적기');
+  input.setAttribute('enterkeyhint', 'done');
+  // 앞머리(`?` `!`)를 치는 동안 어떤 종류로 담길지 오른쪽에 조용히 알려 준다.
+  const kind = document.createElement('span');
+  kind.className = 'as';
+  kind.setAttribute('aria-live', 'polite');
+  const showKind = () => {
+    const { type } = meetingCaptureParse(input.value);
+    kind.textContent = type === 'task' ? '' : wfType(type);
   };
+  // 마지막으로 칸을 비운 뒤 이 칸에서 글을 친 적이 있는지 — 있으면 ⌘Z는 브라우저의 글자 되돌리기 몫이다.
+  let typed = false;
+  input.addEventListener('input', () => { typed = true; showKind(); });
   input.addEventListener('keydown', (keyEvent) => {
+    // 칸이 비어 있을 때의 ⌘Z는 **이 회의에서 방금 적어 담은 줄**만 되돌린다(⇧⌘Z는 그 줄을 다시 담는다) — 초점이 입력줄을
+    // 떠나지 않아도 되게. 그 밖에는 가로채지 않는다: 글을 적는 중이거나, 이 칸에서 치다 지운 글이 있거나(브라우저의 글자
+    // 되돌리기가 살릴 수 있다), 되돌리기 맨 위 기록이 다른 일(초안 빼기·다른 화면의 작업)일 때.
+    if ((keyEvent.metaKey || keyEvent.ctrlKey) && !keyEvent.altKey && String(keyEvent.key).toLowerCase() === 'z' && !input.value && !typed) {
+      const key = meetingCaptureKey(event);
+      const redo = !!keyEvent.shiftKey;
+      const mine = () => { const stack = redo ? redoStack : undoStack; const top = stack[stack.length - 1]; return !!top && top.captureKey === key; };
+      // 아직 저장 중인 줄이 있으면 끝나기를 기다렸다가 그 줄을 되돌린다(그 줄의 기록은 저장이 끝나야 생긴다).
+      const waiting = !redo && (meetingCaptureLocal.get(key) || []).some(entry => entry.state === 'pending');
+      if (!waiting && !mine()) return;
+      if (keyEvent.preventDefault) keyEvent.preventDefault();
+      return Promise.resolve(waiting ? uiSendQueues.get(meetingCaptureQueue(event)) : null)
+        .then(() => (mine() ? replayUndo(redo ? 'redo' : 'undo').then(() => meetingItemsRepaint(host)) : null));
+    }
     if (keyEvent.key !== 'Enter' || keyEvent.isComposing) return; // 한글을 조합하는 중의 Enter는 글자를 확정하는 것이다
-    keyEvent.preventDefault();
-    submit();
+    if (keyEvent.preventDefault) keyEvent.preventDefault();
+    const raw = input.value;
+    if (!raw.trim()) return;
+    input.value = ''; // 칸을 먼저 비운다 — 잠그지 않으니 곧바로 다음 줄을 칠 수 있다
+    typed = false;
+    kind.textContent = '';
+    return Promise.all(meetingCaptureAdd(event, linked, [meetingCaptureParse(raw)], host));
   });
-  add.addEventListener('click', submit);
-
-  form.append(wfTypeSegment('task', (key) => { type = key; syncDate(); }, '담을 종류'), input, dateSlot, add);
-  syncDate();
-  section.appendChild(form);
-  box.appendChild(section);
+  // 여러 줄을 붙여 넣으면 줄마다 한 건(한 줄짜리는 평소처럼 칸에 붙는다).
+  input.addEventListener('paste', (pasteEvent) => {
+    const data = pasteEvent.clipboardData || (typeof window === 'object' ? window.clipboardData : null);
+    const text = data ? data.getData('text') : '';
+    if (!/\n/.test(String(text).trim())) return;
+    pasteEvent.preventDefault();
+    const entries = meetingCaptureLines(text);
+    if (entries.length > MEETING_PASTE_MAX) {
+      showNotice(`한 번에 ${MEETING_PASTE_MAX}줄까지 담을 수 있어요(지금 ${entries.length}줄). 나눠서 붙여 넣어 주세요`, true);
+      return;
+    }
+    const long = entries.filter(entry => entry.text.length > MEETING_TEXT_MAX).length;
+    if (long) {
+      showNotice(`한 줄은 ${MEETING_TEXT_MAX}자까지 담을 수 있어요(넘는 줄 ${long}개). 줄을 나눠서 붙여 넣어 주세요`, true);
+      return;
+    }
+    return Promise.all(meetingCaptureAdd(event, linked, entries, host));
+  });
+  line.append(plus, input, kind);
+  foot.appendChild(line);
+  box.meetingInput = input;
+  box.appendChild(foot);
 }
 
 // ---------- 회의 프로젝트를 연결·변경·해제한 뒤: 이미 담은 것도 옮길까요·뺄까요? ----------
@@ -1014,7 +1426,7 @@ function panelMeetingLink(event, box, host = MEETING_HOST_CARD) {
   const same = typeof projectGroupKey === 'function' ? (a, b) => projectGroupKey(a) === projectGroupKey(b) : (a, b) => a === b;
   const candidates = items.filter(item => !item.meetingId && (!key || same(wfKey(item), key)));
   const section = document.createElement('details');
-  section.className = 'd-dsec d-dadd';
+  section.className = 'd-dsec d-msec d-dadd';
   const label = document.createElement('summary');
   label.className = 'lbl';
   label.innerHTML = uiIcon('chevron');

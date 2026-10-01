@@ -83,7 +83,12 @@
   /* ≤520px 입력 글자(iOS 확대 방지)가 --fs-lg에 묶여 있으니 16px 아래로 내리지 말 것 */
   --fs-cap: 12px;  --fs-sm: 13px;  --fs-body: 14px;  --fs-md: 15px;  --fs-lg: 16px;
   --h-xs: 22px;  --h-sm: 28px;  --h-md: 32px;  --h-lg: 42px;  --h-touch: 44px;
+  /* 모션 토큰(DESIGN.md 모션 절) — 시간 4개 + 곡선 3개. 줄 이동 도우미(app.js uiRowsMove)가 같은 값을 숫자로 쓴다 */
   --ease: cubic-bezier(0.22, 0.8, 0.3, 1);
+  --t-press: 100ms;  --t-fast: 140ms;  --t-move: 200ms;  --t-slow: 320ms;
+  /* 스프링 근사는 linear()를 아는 환경에서만(아래 @supports) — 모르면 넘침 없는 --ease로 떨어진다 */
+  --spring-1: var(--ease);
+  --spring-2: var(--ease);
   --font: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", "Segoe UI", sans-serif;
 }
 
@@ -371,11 +376,23 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 #todayTaskZone:focus { outline: none; }
 
 /* ---------- 움직임 ---------- */
+@supports (animation-timing-function: linear(0, 1)) {
+  :root {
+    --spring-1: linear(0, 0.42 12%, 0.75 25%, 0.94 38%, 1.03 50%, 1.046 58%, 1.035 70%, 1.015 85%, 1);
+    --spring-2: linear(0, 0.45 12%, 0.82 25%, 1.06 38%, 1.18 48%, 1.205 55%, 1.17 65%, 1.09 78%, 1.03 90%, 1);
+  }
+}
+@keyframes d-fade { from { opacity: 0; } to { opacity: 1; } }
+/* 움직임 줄이기: 이동·크기 변화는 끄고(전부 .01ms), 새로 나타나는 것만 120ms 흐려짐으로 남긴다.
+   전환(transition)을 전역 120ms로 두지 않는 이유 — 전환이 없던 요소까지 갑자기 움직인다. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
+  }
+  .d-toast, .d-menulist, .d-schedpop:not(.is-out), .d-palbox, .d-mrow2.is-new {
+    animation: d-fade 120ms linear both !important;
   }
 }
 
@@ -460,7 +477,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   background: var(--surface); color: var(--text);
   border: 1px solid var(--surface-line); border-radius: 16px; box-shadow: var(--pop);
   font-size: var(--fs-body);
-  animation: d-rise 140ms var(--ease);
+  animation: d-rise var(--t-fast) var(--ease);
 }
 .d-toast.error { border-color: var(--urgent); }
 .d-toast .d-btn { flex-shrink: 0; }
@@ -483,7 +500,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 
 /* ---------- 일정 정하기 판 (새로 들어온 것 줄) ----------
    더보기 메뉴(.d-menulist·.d-mitem)와 같은 모양 — 등장만 이 판의 쫀득한 움직임(DESIGN.md 모션 절의 예외 한 줄).
-   움직이는 것은 transform·opacity뿐이다. 움직임 줄이기에서는 위 전역 규칙이 전부 즉시로 만든다. */
+   움직이는 것은 transform·opacity뿐이다. 움직임 줄이기에서는 판이 이동 없이 120ms 흐려지며 뜨고 나머지는 즉시다(위 전역 규칙). */
 .d-schedbtn { gap: 4px; }
 .d-schedbtn .cv { display: inline-flex; margin-right: -2px; }
 .d-schedbtn .cv .d-i { transform: rotate(90deg); }
@@ -498,7 +515,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   /* 크기 변화는 240ms 그대로, 투명도는 처음 70ms만 — 반투명인 동안 뒤 줄 버튼이 비치지 않게 */
   animation: d-sched-in 240ms var(--ease) both, d-sched-fade 70ms linear both;
 }
-.d-schedpop.is-out { animation: d-sched-out 140ms var(--ease) both; pointer-events: none; }
+.d-schedpop.is-out { animation: d-sched-out var(--t-fast) var(--ease) both; pointer-events: none; }
 .d-schedpop .lab { padding: 6px 12px 4px; font-size: 12.5px; color: var(--muted); }
 .d-schedpop .d-mitem { gap: 8px; animation: d-sched-item 180ms var(--ease) both; animation-delay: calc(var(--i, 0) * 18ms + 30ms); }
 .d-schedpop .d-mitem.on, .d-schedpop .d-mitem:focus-visible { background: var(--sel); color: var(--accent-text); outline: none; }
@@ -509,6 +526,11 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   background: var(--neutral-bg); color: var(--dim); font: 600 11.5px/18px var(--font); text-align: center;
 }
 .d-schedpop .d-mitem.on kbd { background: var(--surface); }
+/* 종류 목록(회의 줄의 `할 일 ⌄`) — 같은 판·같은 움직임, 세 줄뿐이라 폭 176px에 조금 짧게(220ms · 닫힘 120ms) */
+.d-schedpop.d-typepop { width: 176px; animation: d-sched-in 220ms var(--ease) both, d-sched-fade 70ms linear both; }
+.d-schedpop.d-typepop.is-out { animation: d-sched-out 120ms var(--ease) both; }
+.d-typepop .d-mitem { animation-duration: 160ms; }
+.d-typepop kbd { margin-left: auto; }
 /* 프로젝트 줄은 값 쪽(`정하기` 또는 `● 이름`)과 꺾쇠가 오른쪽에 붙는다 */
 .d-schedproj .d-mitem .dt.has { display: inline-flex; align-items: center; gap: 6px; color: var(--text); }
 .d-schedproj .d-mitem .cv { display: inline-flex; color: var(--dim); }
@@ -1031,13 +1053,13 @@ button.d-guide .t { color: var(--accent-text); }
 .d-lhd .sub .cnt, .d-wrapsum.cnt {
   height: var(--h-xs); display: inline-flex; align-items: center; gap: 4px; padding: 0 9px 0 7px;
   border-radius: 999px; background: var(--accent-soft); color: var(--accent-text);
-  font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; transition: background 200ms var(--ease);
+  font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; transition: background var(--t-move) var(--ease);
 }
 .d-lhd .sub .cnt[hidden] { display: none; }
 .d-lhd .sub .cnt .gl, .d-wrapsum.cnt .gl { width: 12px; height: 12px; flex: none; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .d-lhd .sub .cnt.is-full, .d-wrapsum.cnt.is-full { background: var(--success-bg); color: var(--success); }
 .d-lhd .sub .cnt b { display: inline-block; font-weight: 600; }
-.d-lhd .sub .cnt b.tick { animation: d-tick 200ms var(--ease); }
+.d-lhd .sub .cnt b.tick { animation: d-tick var(--t-move) var(--ease); }
 @keyframes d-tick { from { transform: translateY(4px); opacity: 0.35; } to { transform: none; opacity: 1; } }
 .d-lhd .sp { margin-left: auto; }
 .d-headmore { color: var(--dim); }
@@ -1183,7 +1205,7 @@ body.batch-open .d-row.is-done { opacity: 0.6; }
 .d-cb:disabled, .d-wcb:disabled { cursor: default; opacity: 0.5; }
 
 /* 끝내는 순간: 체크가 그려지고 → 제목에 줄이 그어지고 → 옅어진다 */
-.d-cb:checked { animation: d-pop-check 320ms var(--ease); }
+.d-cb:checked { animation: d-pop-check var(--t-slow) var(--ease); }
 @keyframes d-pop-check { 0% { transform: scale(1); } 45% { transform: scale(1.18); } 100% { transform: scale(1); } }
 .d-row.is-completing .d-title {
   background-image: linear-gradient(currentColor, currentColor);
@@ -1425,6 +1447,8 @@ textarea.d-dtitle {
 /* 미팅 노트 가져오기 — 회의 머리 아래의 조용한 한 줄. 아직 안 가져왔으면 3차 버튼 하나,
    이미 가져왔으면 `.d-mtlast` 상태 글자 + (링크가 있으면) `티로에서 열기` */
 .d-dget { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: -8px; }
+/* 상태 글자도 카드의 시작선에서 시작한다(회의 탭 머리줄용 안쪽 여백은 여기서 쓰지 않는다) */
+.d-dget > .d-mtlast { padding: 0; }
 /* 머리 아래 한 줄 다음의 첫 구역은 위 여백을 한 번만 둔다(카드 간격 + 구역 위 여백이 겹쳐 빈 곳이 컸다) */
 .d-dget + .d-dsec { margin-top: 0; }
 
@@ -1442,13 +1466,38 @@ textarea.d-dtitle {
 /* `다음: …→`·`티로에서 열기` — 글자 링크지만 누르는 자리는 28px */
 .d-dres .nx .d-link, .d-dget > .d-link { display: inline-flex; align-items: center; min-height: var(--h-sm); padding: 0 2px; }
 
-/* 초안 카드 — 문구가 주인공이다. 종류는 카드 색이 아니라 세그먼트가 말해 준다. */
-/* 초안 사이는 선 없이 여백으로만 나눈다(면 안에 선을 긋지 않는다) */
-.d-draft { position: relative; display: grid; gap: 8px; padding: 10px 0 12px; }
-.d-draft + .d-draft { margin-top: 2px; }
-/* 첫 줄 = 문구 | `빼기`. `빼기`는 조용한 글자 버튼(.d-headnum, 28px) — ✕는 날짜 칸의 `날짜 지우기` 하나만 남는다 */
-.d-draft .tp { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 6px; }
-.d-draft .d-dpull { margin: 5px 0 0; padding: 0 8px; }
+/* AI 초안 — 한 줄(.d-mrow2 그대로): `AI` | 문구 | (오늘 · 날짜) 종류 | 빼기. 체크박스 자리에 조용한 `AI`가 선다(아직 내 항목이 아니다) */
+.d-mrow2 .ck.ai { padding-left: 3px; font-size: 11.5px; font-weight: 600; color: var(--dim); letter-spacing: 0.02em; }
+.d-draft.is-blank .ti { color: var(--dim); }
+.d-draft.is-bad .ti { color: var(--urgent); }
+.d-draft button.ti:hover { text-decoration: none; }
+/* `빼기` — 조용한 글자(28px 칸), 손이 닿을 때만. 누르는 화면·시트에서는 늘 보인다 */
+.d-dpull {
+  width: 28px; height: var(--h-sm); padding: 0; border: 0; border-radius: var(--r-xs); background: none;
+  color: var(--dim); font-family: inherit; font-size: var(--fs-cap); font-weight: 500; cursor: pointer; opacity: 0;
+  transition: opacity 130ms var(--ease), background 170ms var(--ease), color 170ms var(--ease);
+}
+.d-mrow2:hover .d-dpull, .d-mrow2:focus-within .d-dpull, .d-mrow2.is-edit .d-dpull { opacity: 1; }
+@media (hover: none) { .d-dpull { opacity: 1; } }
+.d-dpull:hover { background: var(--hover); color: var(--text); }
+.d-dpull:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* 문구를 누르면 그 자리에서 고친다 — 문구 칸의 글자가 접힌 줄의 글자와 같은 자리에 선다(안쪽 12px만큼 왼쪽으로 내민다) */
+.d-mrow2 .ed { display: grid; gap: 8px; margin: -5px 0 3px -12px; transform-origin: 50% 0; }
+.d-mrow2.is-opening .ed { animation: d-draft-open 220ms var(--ease) both; }
+@keyframes d-draft-open {
+  0% { opacity: 0; transform: translateY(-4px) scaleY(0.94); }
+  60% { opacity: 1; transform: scaleY(1.012); }
+  100% { opacity: 1; transform: none; }
+}
+.d-mrow2 .ed .d-dtxt {
+  min-height: var(--h-sm); padding: 5px 12px; font-size: var(--fs-sm); line-height: 18px;
+  background: var(--surface); box-shadow: 0 0 0 2px var(--accent);
+}
+.d-mrow2 .ed .d-dtxt[aria-invalid="true"] { box-shadow: 0 0 0 2px var(--urgent); }
+.d-mrow2 .ed .ct { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding-left: 12px; }
+/* 초안 구역의 오류 — 제목 바로 아래 한 줄(빈 초안·저장 실패) */
+.d-drafts > .er { margin: 0 0 4px; font-size: 12.5px; color: var(--urgent); }
+.d-drafts > .er:empty { display: none; }
 /* 초안 문구는 화면의 다른 입력칸과 같은 부품이다 — 테두리 없는 회색 채움, 초점에서만 파란 테 */
 .d-dtxt {
   display: block; width: 100%; resize: none; overflow: hidden;
@@ -1464,50 +1513,51 @@ textarea.d-dtitle {
 /* 연동 칸에서 고칠 칸(지라 이메일·주소) — 위 .d-dtxt와 같은 표시. */
 .d-din[aria-invalid="true"] { box-shadow: 0 0 0 1.5px var(--urgent); }
 .d-din[aria-invalid="true"]:focus { box-shadow: 0 0 0 2px var(--urgent); }
-/* 종류(할 일·확인 대기·결정)와 언제(나중에·오늘)는 다른 조작이라 가로 간격을 넓혀 두 덩어리로 보이게 */
-.d-draft .ct { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
 /* 날짜 칸 — 고른 날짜는 앱 날짜 글자로 보이는 버튼이다(누르면 입력칸) */
 .d-dateinput.is-shown { cursor: pointer; font-variant-numeric: tabular-nums; }
 .d-dateinput.is-shown:hover { background: var(--hover); }
 .d-draft .d-seg { padding: 2px; }
 .d-draft .d-seg button { height: var(--h-sm); padding: 0 10px; font-size: var(--fs-cap); }
 
-/* 담기 바 — 스크롤해도 패널 아래에 붙어 있는 흰 띠 */
+/* 카드 발 — 스크롤해도 패널 아래에 붙어 있는 흰 띠(회의 정리에서는 입력줄 .d-qfoot이 선다) */
 .d-dbar {
   position: sticky; bottom: -22px; z-index: 2;
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   margin: -6px -22px -22px; padding: 12px 22px;
   background: var(--surface); border-top: 1px solid var(--hair);
 }
-.d-dbar .sm { font-size: 12.5px; color: var(--muted); }
-/* 담기 바의 오류 — 요약 글자 자리에 대신 선다(버튼 왼쪽) */
-.d-dbar .er { flex: 1; min-width: 0; font-size: 12.5px; color: var(--urgent); }
-.d-dbar .er:empty { display: none; }
 
 /* 회의에서 나온 것 · 이전 회차 — 촘촘한 한 줄. 맨 앞 30px은 체크 칸(할 일=완료·확인 대기=확인 완료·
    결정=PRD 반영함, 아이디어는 자리만 비운다) — 목록이 쓰는 체크박스를 그대로 줄여 쓴다. */
 .d-mrow2 {
-  display: grid; grid-template-columns: 30px 56px minmax(0, 1fr) auto 28px;
-  align-items: start; gap: 8px; min-height: var(--h-sm); padding: 5px 0; font-size: var(--fs-sm); line-height: 18px;
+  display: grid; grid-template-columns: 30px minmax(0, 1fr) auto 28px;
+  align-items: start; column-gap: 8px; min-height: var(--h-sm); padding: 5px 0; font-size: var(--fs-sm); line-height: 18px;
 }
-/* 종류 소제목이 이미 종류를 말해 주는 자리에서는 줄의 종류 글자 칸이 통째로 빠진다(두 번 말하지 않는다) */
-.d-mrow2.no-tg { grid-template-columns: 30px minmax(0, 1fr) auto 28px; }
 /* 이 회의의 프로젝트가 아닌 줄에만 붙는 `· ● 이름` — 제목과 한 칸을 나눠 써서 제목 바로 뒤에 붙는다 */
 .d-mrow2 .tw { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .d-mrow2 .tw .ti { width: auto; flex: 0 1 auto; }
 .d-mrow2 .tw .d-inproj { flex: none; min-width: 0; font-size: var(--fs-cap); overflow: hidden; text-overflow: ellipsis; }
-/* 종류·프로젝트 소제목 — 줄 사이를 알려 주기만 하는 조용한 글자다(그룹 제목 부품이 아니다) */
-.d-mgrp {
-  display: flex; align-items: center; gap: 5px;
-  margin: 10px 0 2px; font-size: var(--fs-sm); font-weight: 600; color: var(--muted);
+/* 체크 칸 — 상자는 칸 왼쪽 끝에 붙는다(구역 제목·입력줄의 + 와 같은 시작선). 22px 상자가 18px 줄에 걸치게 위아래 -2px */
+.d-mrow2 .ck { display: flex; align-items: center; height: 22px; margin: -2px 0; }
+/* 촘촘한 줄이라 `.d-check`의 평소 크기(30×54px, 가운데 맞춤)는 쓰지 않는다 — 상자 크기만 남긴다. */
+.d-mrow2 .d-check { width: 22px; height: 22px; }
+/* 오른쪽 칸: (있으면) 상태 글자 + 종류 */
+.d-mrow2 .r { display: flex; align-items: center; gap: 8px; height: var(--h-sm); margin: -5px 0; white-space: nowrap; }
+/* 종류 — 조용한 글자 + 꺾쇠(.d-dpick 가족: 28px, hover --hover, 10px 모서리). 누르면 종류 목록(.d-typepop) */
+.d-tpk {
+  display: inline-flex; align-items: center; gap: 2px; height: var(--h-sm); padding: 0 4px 0 6px; margin-right: -4px;
+  border: 0; border-radius: var(--r-xs); background: none; color: var(--dim);
+  font-family: inherit; font-size: var(--fs-sm); font-weight: 500; cursor: pointer;
+  transition: background 130ms var(--ease), color 130ms var(--ease), transform 120ms var(--ease);
 }
-.d-mgrp:first-of-type { margin-top: 2px; }
-.d-mgrp .n { font-weight: 500; color: var(--dim); font-variant-numeric: tabular-nums; }
-.d-mgrp.is-pj { margin: 6px 0 2px; padding-left: 8px; font-size: 12.5px; font-weight: 500; color: var(--dim); }
-.d-mrow2 .ck { display: grid; place-items: center; }
-/* 촘촘한 줄이라 `.d-check`의 평소 높이(54px)는 너무 크다 — 상자 크기만 남기고 줄 높이에 맞춘다. */
-.d-mrow2 .d-check { height: auto; }
-.d-mrow2 .tg { font-size: 11.5px; color: var(--muted); }
+.d-tpk .cv { display: inline-flex; }
+.d-tpk .cv .d-i { width: 12px; height: 12px; transform: rotate(90deg); }
+.d-tpk:hover, .d-tpk[aria-expanded="true"] { background: var(--hover); color: var(--text); }
+.d-tpk:active { transform: scale(0.97); }
+.d-tpk:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.d-tpk:disabled { cursor: default; }
+.d-tpk:disabled:hover { background: none; color: var(--dim); }
+.d-tpk:disabled:active { transform: none; }
 /* 제목은 평소 두 줄까지(말줄임), 누르면(.is-open) 그 자리에서 전문 — 아이디어 줄(.d-rec.is-idea .ti)과 같은 규칙.
    두 줄이 되어도 체크·종류·상태·⋯는 첫 줄에 맞춰 선다(align-items: start + 같은 18px 줄 높이) */
 .d-mrow2 .ti {
@@ -1517,8 +1567,7 @@ textarea.d-dtitle {
 }
 .d-mrow2.is-open .ti { -webkit-line-clamp: unset; display: block; }
 .d-mrow2 .ti:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
-.d-mrow2 .ck { min-height: 18px; }
-.d-mrow2 .ac { margin: -5px 0; }
+.d-mrow2 .ac { height: var(--h-sm); margin: -5px 0; }
 .d-mrow2 button.ti:hover { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; }
 .d-mrow2 .st { font-size: 11.5px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .d-mrow2.is-done .ti { color: var(--muted); text-decoration: line-through; }
@@ -1528,8 +1577,41 @@ textarea.d-dtitle {
 .d-mrow2 .ac { display: flex; align-items: center; justify-content: flex-end; }
 .d-mrow2 .ac .d-more { width: 28px; height: var(--h-sm); color: var(--dim); }
 .d-mrow2:hover .ac .d-more, .d-mrow2:focus-within .ac .d-more { color: var(--text); }
+/* 방금 적은 줄 — 아직 담는 중이면 체크만 흐리고, 못 담았으면 그 줄에만 조용한 글자와 `다시 시도` */
+.d-mrow2.is-local span.ti { cursor: default; }
+.d-mrow2.is-local .d-cb, .d-mrow2.is-local .d-wcb { opacity: 0.5; cursor: default; }
+.d-mrow2.is-local .d-cb:hover, .d-mrow2.is-local .d-wcb:hover { border-color: var(--check-line); }
+.d-mrow2.is-new { animation: d-rise var(--t-fast) var(--ease) both; scroll-margin-bottom: 64px; }
+.d-mrow2 .fail { font-size: 12.5px; color: var(--urgent); }
+.d-mrow2 .fail + .d-link { height: var(--h-sm); padding: 0 2px; font-size: 12.5px; }
 
-/* 직접 담기 · 기존 항목 연결 — 접히는 보조 구역 */
+/* 회의 정리의 구역은 본문 간격(16px) + 가는 선 + 12px로만 나뉜다(설정 창용 .d-dsec의 위 여백 22px는 쓰지 않는다) */
+.d-dsec.d-msec { margin-top: 0; }
+/* 회의 구역 머리 — 제목 + 조용한 숫자, (초안이면) 오른쪽 끝에 2차 버튼 */
+.d-dsec .lbl.d-mhead { display: flex; align-items: center; gap: 5px; min-height: 18px; font-size: var(--fs-sm); line-height: 18px; font-weight: 700; color: var(--text); }
+.d-dsec .lbl.d-mhead .n { font-weight: 500; color: var(--dim); font-variant-numeric: tabular-nums; }
+.d-dsec .lbl.d-mhead .d-btn { margin: -7px 0 -7px auto; }
+
+/* 회의에서 나온 것 적기 — 카드 발에 붙박인 입력줄. 평소에는 채움 없는 맨 줄(+ 아이콘·안내글),
+   초점에서만 흰 면 + 2px 파란 테. 왼쪽은 줄의 체크 칸과 같은 30px 칸이라 글자가 줄 문구와 한 선에서 시작한다. */
+.d-dbar.d-qfoot { display: block; padding: 8px 12px 10px; }
+.d-qin {
+  display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; column-gap: 8px; align-items: center;
+  height: 40px; padding: 0 10px; border-radius: var(--r-sm); background: none; cursor: text;
+  transition: box-shadow 170ms var(--ease), background 170ms var(--ease);
+}
+.d-qin .pl { display: flex; align-items: center; padding-left: 4px; color: var(--dim); }
+.d-qin input {
+  min-width: 0; width: 100%; height: 100%; border: 0; background: none; outline: none; padding: 0;
+  color: var(--text); font-family: inherit; font-size: var(--fs-body);
+}
+.d-qin input::placeholder { color: var(--dim); }
+.d-qin:hover { background: var(--hover); }
+.d-qin:focus-within { background: var(--surface); box-shadow: 0 0 0 2px var(--accent); }
+.d-qin .as { padding-right: 4px; font-size: 12.5px; font-weight: 600; color: var(--accent-text); }
+.d-qin .as:empty { display: none; }
+
+/* 기존 항목 연결 — 접히는 보조 구역 */
 .d-dsec.d-dadd > summary.lbl { display: flex; margin-bottom: 0; align-items: center; gap: 4px; min-height: var(--h-sm); list-style: none; cursor: pointer; }
 .d-dadd > summary .d-i { color: var(--dim); transition: transform 130ms var(--ease); }
 .d-dadd[open] > summary .d-i { transform: rotate(90deg); }
@@ -1537,7 +1619,6 @@ textarea.d-dtitle {
 .d-dadd > summary:hover { color: var(--text); }
 .d-dsec.d-dadd[open] > summary.lbl { margin-bottom: 6px; }
 .d-dcap { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.d-dcap .d-din { flex: 1; min-width: 140px; min-height: 30px; padding: 5px 9px; }
 .d-dcap .d-dpickslot { flex: 1; min-width: 140px; }
 .d-dcap .d-dpickslot:has(.d-gpick) { flex-basis: 100%; } /* 목록이 펼쳐지면 `회의에 연결`은 그 아래 줄로 */
 .d-dcap .d-msel { flex: 1; }
@@ -1555,7 +1636,7 @@ textarea.d-dtitle {
 .d-popd .d-detail.is-pop > .d-back { flex: none; margin: 14px 0 -6px; padding-left: 18px; }
 .d-popd .d-detail.is-pop > .d-dtop {
   flex: none; padding: 18px 16px 12px 20px; background: var(--surface);
-  border-bottom: 1px solid transparent; transition: border-color 140ms var(--ease);
+  border-bottom: 1px solid transparent; transition: border-color var(--t-fast) var(--ease);
 }
 .d-popd .d-detail.is-pop:not(.at-top) > .d-dtop {
   border-bottom-color: var(--hair); box-shadow: 0 8px 12px -10px var(--scrim);
@@ -1575,12 +1656,15 @@ textarea.d-dtitle {
 .d-popd .d-detail.is-pop > .d-dfoot,
 .d-popd .d-detail.is-pop > .d-dbar {
   flex: none; position: static; margin: 0; padding: 12px 20px 16px; background: var(--surface);
-  border-top: 1px solid var(--hair); transition: border-color 140ms var(--ease);
+  border-top: 1px solid var(--hair); transition: border-color var(--t-fast) var(--ease);
 }
 .d-popd .d-detail.is-pop:not(.at-end) > .d-dfoot,
 .d-popd .d-detail.is-pop:not(.at-end) > .d-dbar { box-shadow: 0 -8px 12px -10px var(--scrim); }
 .d-popd .d-detail.is-pop.at-end > .d-dfoot,
 .d-popd .d-detail.is-pop.at-end > .d-dbar { border-top-color: transparent; }
+/* 회의 카드의 발은 입력줄이다 — 본문과 늘 가는 선 한 줄로 나뉘고, 입력줄의 + 가 본문의 20px 시작선에 선다 */
+.d-popd .d-detail.is-pop > .d-dbar.d-qfoot { padding: 8px 10px 10px; }
+.d-popd .d-detail.is-pop.at-end > .d-dbar.d-qfoot { border-top-color: var(--hair); }
 /* 머리 바로 아래에 또 선을 긋지 않는다 — 첫 구역은 경계 없이 본문에서 시작한다
    (회의 카드의 첫 자리는 비어 있을 때 숨는 오류 줄이라 그 다음 것도 같이 본다) */
 .d-popbody > :first-child,
@@ -1651,7 +1735,7 @@ body.later-open .page { padding-right: 424px; }
   width: min(620px, 100vw - 32px); max-height: calc(100dvh - 100px);
   background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r);
   box-shadow: var(--pop); overflow: hidden;
-  animation: d-pal-in 140ms var(--ease);
+  animation: d-pal-in var(--t-fast) var(--ease);
 }
 @keyframes d-pal-in { from { transform: translateY(-6px); opacity: 0; } to { transform: none; opacity: 1; } }
 .d-palin {
@@ -2889,6 +2973,15 @@ a.d-btn { text-decoration: none; }
     border: 0; border-radius: var(--r) var(--r) 0 0; box-shadow: none; padding: 20px 16px;
   }
   .d-side .d-dbar { bottom: -20px; margin: -6px -16px -20px; padding: 12px 16px; }
+  /* 시트에서도 입력줄은 맨 아래에 붙박인다(자판 바로 위가 될 자리). 손가락 크기: 줄 36px 이상, 입력 글자 16px */
+  .d-side .d-dbar.d-qfoot { padding: 8px 6px 10px; }
+  .d-side .d-qin { height: 44px; }
+  .d-side .d-qin input { font-size: var(--fs-lg); }
+  .d-side .d-mrow2 { min-height: 36px; padding: 8px 0; font-size: var(--fs-body); line-height: 20px; }
+  .d-side .d-mrow2 .ti { font-size: var(--fs-body); line-height: 20px; }
+  .d-side .d-mrow2 .ck { margin: -1px 0; }
+  .d-side .d-mrow2 .r, .d-side .d-mrow2 .ac { margin: -4px 0; }
+  .d-side .d-dpull { opacity: 1; }
   /* 시트 뒤에는 설정 창과 같은 가림막 — 선택 막대(46)와 같은 층, 문서에서 뒤에 붙어 그 위에 눕고 시트(47) 아래.
      뒤 목록이 눌리지 않고, 누르면 시트가 닫힌다(app.js panelScrim) */
   .d-scrim:not([hidden]) { display: block; position: fixed; inset: 0; z-index: 46; background: var(--scrim); }
