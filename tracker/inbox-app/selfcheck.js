@@ -44,6 +44,10 @@ const SKIP_NAMES = { slack: '슬랙', jira: '지라', calendar: '캘린더', not
 const WORDS = {
   updateFile: '업데이트 파일(앱을 새로 받고 다시 켜 주는 파일)을 한 번 실행해 주세요',
   reconnectSlack: '설정 › 연동 › 슬랙 ⋯ › 다시 연결 — OAuth & Permissions 화면의 User OAuth Token(xoxp-)을 붙여 주세요',
+  // 새 방식(슬랙 연결 버튼·자동 갱신)은 토큰을 찾지 않는다 — 버튼 한 번이다.
+  reconnectSlackOAuth: '설정 › 연동 › 슬랙 카드의 다시 연결을 누르고 슬랙에서 허용해 주세요 — 토큰을 다시 찾을 필요는 없어요',
+  refreshLater: '기다리면 앱이 다시 해 봐요 — 계속되면 회사 네트워크(VPN)를 확인해 주세요',
+  moreScopes: '설정 › 연동 › 슬랙 카드 ⋯ › 다시 연결에서 슬랙의 허용을 한 번 더 눌러 주세요 — 권한이 빠지면 일부 채널을 못 읽거나 새 채널을 못 만들어요',
   reconnectJira: '설정 › 연동 › 지라 ⋯ › 다시 연결에서 토큰을 새로 붙여 주세요',
   reconnectCalendar: '비밀 주소가 바뀌었을 수 있어요 — 설정 › 연동 › 캘린더 ⋯ › 다시 연결에서 새 주소를 붙여 주세요',
   pickChannels: '설정 › 연동 › 슬랙 ⋯ › 채널 고르기에서 다시 체크하면 새로 만들어 줘요',
@@ -93,6 +97,14 @@ function whenText(value, now) {
   if (diff === 0) return `오늘 ${time}`;
   if (diff === 1) return `어제 ${time}`;
   return `${at.getMonth() + 1}월 ${at.getDate()}일 ${time}`;
+}
+
+// 다음 갱신까지 — `2시간 뒤` · `40분 뒤` · `곧`(이미 갱신할 때가 됐다).
+function untilText(at, now) {
+  const left = Number(at) - now;
+  if (!Number.isFinite(left) || left < 60 * 1000) return '곧';
+  const hours = Math.floor(left / (60 * 60 * 1000));
+  return hours >= 1 ? `${hours}시간 뒤` : `${Math.floor(left / (60 * 1000))}분 뒤`;
 }
 
 // 연동 탭 카드의 "연결됐나"(settings-ui.js의 settingsIntgConnected)와 같은 기준 — 같은 입력에 같은 답(테스트로 고정).
@@ -238,12 +250,15 @@ function createSelfcheck(deps) {
       }
     }
 
+    // 슬랙이 새 방식(슬랙 연결 버튼·자동 갱신)인가 — 옛 방식이면 아래 슬랙 줄은 예전 그대로다.
+    const slackOAuthOn = on.slack && !!deps.slackOAuth && (deps.slackOAuth(config) || {}).auth === 'oauth';
+
     // 연동 카드의 "멈춤"(alerts) 한 줄 — 원인이 이미 다른 줄(토큰·Claude)에 있으면 그 줄을 가리키고 문제 수에 한 번만 센다.
     const stopped = (kind, name, authItem = null) => {
       const st = fetchState[kind] || {};
       if (st.claudeAuth && !st.auth && claudeBad) return { state: 'bad', sameAs: 'claude', detail: `Claude Code 로그인이 풀려서 멈췄어요 — 위 Claude Code 줄대로 고치면 돼요` };
-      if (st.auth && authItem && authItem.state === 'bad') return { state: 'bad', sameAs: authItem.key, detail: '토큰 문제로 멈췄어요 — 위 토큰 줄대로 고치면 돼요' };
-      if (st.auth) return { state: 'bad', detail: kind === 'calendar' ? '비밀 주소를 읽을 수 없어요' : '토큰이 만료됐거나 권한이 없어요', fix: { text: kind === 'calendar' ? WORDS.reconnectCalendar : kind === 'jira' ? WORDS.reconnectJira : WORDS.reconnectSlack } };
+      if (st.auth && authItem && authItem.state === 'bad') return { state: 'bad', sameAs: authItem.key, detail: kind === 'slack' && slackOAuthOn ? '연결이 풀려서 멈췄어요 — 위 슬랙 연결 줄대로 고치면 돼요' : '토큰 문제로 멈췄어요 — 위 토큰 줄대로 고치면 돼요' };
+      if (st.auth) return { state: 'bad', detail: kind === 'calendar' ? '비밀 주소를 읽을 수 없어요' : '토큰이 만료됐거나 권한이 없어요', fix: { text: kind === 'calendar' ? WORDS.reconnectCalendar : kind === 'jira' ? WORDS.reconnectJira : slackOAuthOn ? WORDS.reconnectSlackOAuth : WORDS.reconnectSlack } };
       const at = whenText(st.failedAt, now());
       return { state: 'bad', detail: `최근 읽기가 실패했어요${at ? ` · ${at}` : ''}`, fix: { text: WORDS.recentLog(name) } };
     };
@@ -251,12 +266,30 @@ function createSelfcheck(deps) {
     // ---------- 슬랙 ----------
     let slackTokenItem = null;
     if (on.slack) {
-      const token = deps.slackToken(config);
-      slackTokenItem = add({ key: 'slack_token', label: '슬랙 토큰', state: 'unknown', detail: '확인 못 함' });
-      const checked = await within(() => deps.slackTokenCheck(token), left());
-      if (checked.timeout) slackTokenItem.detail = '확인 못 함 — 슬랙이 제시간에 답하지 않았어요';
-      else if (checked.value) {
+      // 지금 쓸 토큰 — 새 방식이면 만료가 가까울 때 갱신한 뒤의 것이다(한 줄 사본만 읽지 않는다). 못 받으면 빈 글자.
+      const got = await within(() => deps.slackToken(config), left());
+      const token = typeof got.value === 'string' ? got.value : '';
+      // 갱신 상태는 토큰을 받은 **뒤에** 읽는다(방금 갱신했거나 실패했으면 그 결과가 보이게). 값 없이 시각·권한·실패 종류뿐이다.
+      const oauth = slackOAuthOn ? (deps.slackOAuth(config) || {}) : null;
+      const lost = !!oauth && (oauth.connected === false || !!(oauth.lastFailure && oauth.lastFailure.kind === 'reconnect'));
+      const lostItem = { state: 'bad', detail: '연결이 풀렸어요', fix: { text: WORDS.reconnectSlackOAuth } };
+      slackTokenItem = add({ key: 'slack_token', label: oauth ? '슬랙 연결' : '슬랙 토큰', state: 'unknown', detail: '확인 못 함' });
+      // 다시 연결해야 하는 것을 이미 알면 슬랙에 묻지 않는다(죽은 토큰으로 두드리지 않는다).
+      const checked = lost ? null : await within(() => deps.slackTokenCheck(token), left());
+      if (lost) Object.assign(slackTokenItem, lostItem);
+      else if (checked.timeout) slackTokenItem.detail = '확인 못 함 — 슬랙이 제시간에 답하지 않았어요';
+      else if (checked.value && oauth) {
+        const retrying = !!(oauth.lastFailure && oauth.lastFailure.kind === 'retry');
+        Object.assign(slackTokenItem, retrying
+          ? { state: 'warn', detail: '갱신이 잠시 안 돼요 — 곧 다시 해 봐요', fix: { text: WORDS.refreshLater } }
+          : { state: 'ok', detail: `자동 갱신 · 다음 갱신 ${untilText(oauth.nextRefreshAt, now())}` });
+        external.push({ item: slackTokenItem, net: false });
+      } else if (checked.value) {
         Object.assign(slackTokenItem, { state: 'ok', detail: 'User OAuth Token(xoxp-) · 연결돼요' });
+        external.push({ item: slackTokenItem, net: false });
+      } else if (oauth && !netError.slackToken(checked.error || {}, deps.messages)) {
+        // 갱신 기록은 멀쩡한데 슬랙이 토큰을 거절했다(슬랙에서 앱을 지웠거나 권한을 거둠) — 고치는 법은 같다.
+        Object.assign(slackTokenItem, lostItem);
         external.push({ item: slackTokenItem, net: false });
       } else {
         const error = checked.error || {};
@@ -268,11 +301,21 @@ function createSelfcheck(deps) {
         external.push({ item: slackTokenItem, net });
       }
 
+      // 받은 권한 — 새 방식에서 갱신 정보가 있을 때만(옛 방식은 토큰이 가진 권한을 여기서 알 수 없다). 빠진 것이 있으면 이름을 말한다.
+      if (oauth && oauth.expiresAt) {
+        const missing = Array.isArray(oauth.missingScopes) ? oauth.missingScopes.map(String) : [];
+        const count = Array.isArray(oauth.scopes) ? oauth.scopes.length : 0;
+        add(missing.length
+          ? { key: 'slack_scopes', label: '받은 권한', state: 'warn', detail: `빠진 권한: ${missing.join(', ')}`, fix: { text: WORDS.moreScopes } }
+          : { key: 'slack_scopes', label: '받은 권한', state: 'ok', detail: `${count}개 · 필요한 권한을 모두 받았어요` });
+      }
+
       const channels = (state.slack && state.slack.channels) || {};
       const onKeys = Object.keys(channels).filter(key => channels[key] && channels[key].id);
       const channelItem = add({ key: 'slack_channels', label: '슬랙 채널', state: 'unknown', detail: '확인 못 함' });
-      if (slackTokenItem.state !== 'ok') {
-        channelItem.detail = slackTokenItem.state === 'unknown' ? '확인 못 함' : '토큰을 고친 뒤 확인할 수 있어요';
+      // 갱신이 잠시 안 되는 중(warn)이어도 지금 토큰은 쓸 수 있다 — 채널은 그대로 확인한다.
+      if (!['ok', 'warn'].includes(slackTokenItem.state)) {
+        channelItem.detail = slackTokenItem.state === 'unknown' ? '확인 못 함' : oauth ? '다시 연결한 뒤 확인할 수 있어요' : '토큰을 고친 뒤 확인할 수 있어요';
       } else {
         const answers = await Promise.all(onKeys.map(key => within(() => deps.slackCheckChannel(token, channels[key].id), left())));
         const count = onKeys.length;
@@ -304,7 +347,10 @@ function createSelfcheck(deps) {
 
       // 슬랙 수집 — 연동 탭 카드의 `멈췄어요`와 같은 판단(계속 실패·토큰 문제·켜진 채널이 모두 사라짐). 늦음(주황)은 화면이 syncLag로 더한다(`lag`).
       const collect = { key: 'slack', label: '슬랙 수집', lag: 'slack' };
-      if (alerts.includes('slack')) {
+      if (alerts.includes('slack') && lost) {
+        // 새 방식의 연결이 풀려서 멈췄다 — 원인은 위 슬랙 연결 줄 하나다(문제 수에 한 번만 센다).
+        add({ ...collect, state: 'bad', sameAs: 'slack_token', detail: '연결이 풀려서 멈췄어요 — 위 슬랙 연결 줄대로 고치면 돼요' });
+      } else if (alerts.includes('slack')) {
         const allGone = !(fetchState.slack && fetchState.slack.failing);
         add({ ...collect, ...(allGone ? { state: 'bad', sameAs: channelItem.state === 'bad' ? 'slack_channels' : undefined, detail: '켜진 채널이 모두 사라져서 멈췄어요', fix: { text: WORDS.pickChannels } } : stopped('slack', '슬랙', slackTokenItem)) });
       } else {
