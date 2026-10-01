@@ -20,7 +20,11 @@ module.exports = function trackRoutes(req, res, url, ctx) {
   }
 
   if (req.method === 'POST' && ['/api/track/set-scheduled', '/api/track/seen', '/api/track/restore'].includes(url.pathname)) {
-    readBody(req).then(({ id, scheduled }) => {
+    readBody(req).then(({ id, scheduled, inbox }) => {
+      // `inbox: true`는 `새로 들어온 것`에서 정한 일정을 되돌릴 때만 온다 — 예정일을 전 값으로 돌리면서 받지 않은 표시를 되살린다.
+      // 칸이 없으면 예전 그대로(값이 바뀌면 표시를 지운다). true가 아닌 값은 받지 않는다.
+      const restoreInbox = url.pathname.endsWith('set-scheduled') && inbox !== undefined;
+      if (restoreInbox && inbox !== true) throw new Error('입력을 확인해 주세요.');
       if (url.pathname.endsWith('set-scheduled')) validateDate(scheduled);
       let ok;
       if (url.pathname.endsWith('/restore')) ok = restoreTrackItem(id);
@@ -28,7 +32,7 @@ module.exports = function trackRoutes(req, res, url, ctx) {
       else {
         ok = mutations.run(() => {
           const changed = setTrackField(id, 'scheduled', scheduled || 'none', 'task');
-          if(changed)setTrackField(id, 'inbox', null, 'task');
+          if(changed)setTrackField(id, 'inbox', restoreInbox ? 'true' : null, 'task');
           return changed;
         });
       }
