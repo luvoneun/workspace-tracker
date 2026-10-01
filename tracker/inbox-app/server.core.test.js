@@ -109,35 +109,64 @@ test('automation import validates, deduplicates source links, and uses inbox',as
   assert.equal(a.ok,true);assert.equal(a.id,b.id);assert.equal(b.duplicate,true);assert.ok((await items()).inboxTasks.some(item=>item.id===a.id));
   const before=readTasks();assert.equal((await post('/api/import',{kind:'item',payload:{...payload,description:'줄\n바꿈'}})).status,400);assert.equal(readTasks(),before);
 });
-test('set-scheduled의 inbox:true는 새로 들어온 것 표시를 되살린다 — 칸이 없으면 예전 그대로, 없는 업무·틀린 값은 거절', async () => {
-  const made = await post('/api/import', { kind: 'item', payload: { type: 'task', description: '되돌릴 수집', permalink: 'https://example.test/undo-inbox' } });
-  const line = () => readTasks().split('\n').find(one => one.includes(`id:${made.id} `) || one.includes(`id:${made.id}]`));
+test('set-scheduled의 inbox:true+expect는 새로 들어온 것 표시를 되살린다 — 칸이 없으면 예전 그대로, 그 사이 바뀐 업무·끝낸 업무·틀린 값·없는 업무는 거절', async () => {
+  const link = 'https://example.test/undo-inbox';
+  const made = await post('/api/import', { kind: 'item', payload: { type: 'task', description: '되돌릴 수집', permalink: link } });
+  const line = (id = made.id) => readTasks().split('\n').find(one => one.includes(`id:${id} `) || one.includes(`id:${id}]`));
+  const set = body => post('/api/track/set-scheduled', body);
+  const inInbox = async () => (await items()).inboxTasks.some(item => item.id === made.id);
   const original = line();
   assert.match(original, /inbox:true/);
   // 칸이 없으면 예전 그대로: 값이 정해지면 표시가 지워지고 다른 칸은 그대로다.
-  assert.equal((await post('/api/track/set-scheduled', { id: made.id, scheduled: shifted(1) })).ok, true);
+  assert.equal((await set({ id: made.id, scheduled: shifted(1) })).ok, true);
   assert.doesNotMatch(line(), /inbox:/);
   assert.match(line(), new RegExp(`scheduled:${shifted(1)}`));
-  let data = await items();
-  assert.equal(data.inboxTasks.some(item => item.id === made.id), false);
-  // 틀린 값·없는 업무는 한 줄도 바꾸지 않는다.
+  assert.equal(await inInbox(), false);
+  // 틀린 값·expect 없음·없는 업무·다른 종류는 한 줄도 바꾸지 않는다.
+  const check = await post('/api/waiting/create', { description: '되돌리기 대상 아님', who: '동료' });
+  assert.ok(check.id);
   const before = readTasks();
-  for (const inbox of [false, 'true', 1, null]) assert.equal((await post('/api/track/set-scheduled', { id: made.id, scheduled: null, inbox })).status, 400, String(inbox));
-  assert.equal((await post('/api/track/set-scheduled', { id: made.id, scheduled: '2026-02-30', inbox: true })).status, 400);
-  assert.equal((await post('/api/track/set-scheduled', { id: 'no-such-task', scheduled: null, inbox: true })).status, 404);
+  for (const inbox of [false, 'true', 1, null]) assert.equal((await set({ id: made.id, scheduled: null, inbox, expect: shifted(1) })).status, 400, String(inbox));
+  assert.equal((await set({ id: made.id, scheduled: null, inbox: true })).status, 400, 'expect 없이 표시만 붙이는 길은 없다');
+  for (const expect of ['', 5, '2026-02-30']) assert.equal((await set({ id: made.id, scheduled: null, inbox: true, expect })).status, 400, String(expect));
+  assert.equal((await set({ id: made.id, scheduled: '2026-02-30', inbox: true, expect: shifted(1) })).status, 400);
+  assert.equal((await set({ id: 'no-such-task', scheduled: null, inbox: true, expect: null })).status, 404);
+  assert.equal((await set({ id: check.id, scheduled: null, inbox: true, expect: null })).status, 404, '할 일이 아니면 대상이 아니다');
+  // 그 사이 다른 창에서 다른 날로 옮겼으면(expect와 다름) 409 — 그 날짜를 덮지 않는다.
+  const stale = await set({ id: made.id, scheduled: null, inbox: true, expect: shifted(3) });
+  assert.equal(stale.status, 409);
+  assert.equal(stale.code, 'CHANGED_SINCE');
+  assert.equal((await set({ id: made.id, scheduled: null, inbox: true, expect: null })).status, 409, '나중에로 정했던 기록인데 지금은 날짜가 있다');
   assert.equal(readTasks(), before);
-  // 되돌리기: 예정일을 전 값(없음)으로 돌리면서 표시를 되살린다 — 줄이 처음과 같다(원문 링크·새 점 포함).
-  assert.equal((await post('/api/track/set-scheduled', { id: made.id, scheduled: null, inbox: true })).ok, true);
+  // 되돌리기: 예정일을 없음으로 돌리면서 표시를 되살린다 — 줄이 처음과 같다(원문 링크·새 점 포함).
+  assert.equal((await set({ id: made.id, scheduled: null, inbox: true, expect: shifted(1) })).ok, true);
   assert.equal(line(), original);
-  data = await items();
-  assert.ok(data.inboxTasks.some(item => item.id === made.id));
+  assert.equal(await inInbox(), true);
+  let data = await items();
   assert.equal(data.laterTasks.some(item => item.id === made.id), false);
   assert.equal(data.todayTasks.some(item => item.id === made.id), false);
-  // 다시 하기(칸 없이 같은 값)는 다시 표시를 지운다. 같은 원문을 다시 수집해도 새 항목은 생기지 않는다.
-  await post('/api/track/set-scheduled', { id: made.id, scheduled: null });
+  // 나중에: 예정일이 그대로(없음→없음)여도 표시는 지워지고, 되돌리면(expect:null) 되살아나며, 다시 하기는 다시 지운다.
+  assert.equal((await set({ id: made.id, scheduled: null })).ok, true);
+  assert.doesNotMatch(line(), /inbox:/);
   assert.ok((await items()).laterTasks.some(item => item.id === made.id));
-  const again = await post('/api/import', { kind: 'item', payload: { type: 'task', description: '되돌릴 수집', permalink: 'https://example.test/undo-inbox' } });
-  assert.equal(again.duplicate, true);
+  assert.equal((await set({ id: made.id, scheduled: null, inbox: true, expect: shifted(1) })).status, 409);
+  assert.equal((await set({ id: made.id, scheduled: null, inbox: true, expect: null })).ok, true);
+  assert.equal(line(), original);
+  assert.equal(await inInbox(), true);
+  assert.equal((await set({ id: made.id, scheduled: null })).ok, true);
+  assert.equal(await inInbox(), false);
+  // 끝낸 업무에는 표시를 붙이지 않는다.
+  await post('/api/track/toggle', { id: made.id, status: 'done' });
+  const done = readTasks();
+  assert.equal((await set({ id: made.id, scheduled: null, inbox: true, expect: null })).status, 409);
+  assert.equal(readTasks(), done);
+  await post('/api/track/toggle', { id: made.id, status: 'to-do' });
+  // 원래 새로 들어온 것이 아니던 업무도 expect가 맞아야만 — 틀리면 그대로다.
+  const manual = await post('/api/later-task/create', { description: '직접 만든 업무' });
+  assert.equal((await set({ id: manual.id, scheduled: null, inbox: true, expect: shifted(2) })).status, 409);
+  assert.doesNotMatch(line(manual.id), /inbox:/);
+  // 같은 원문을 다시 수집해도 새 항목은 생기지 않는다(중복 판정은 원문 링크).
+  assert.equal((await post('/api/import', { kind: 'item', payload: { type: 'task', description: '되돌릴 수집', permalink: link } })).duplicate, true);
 });
 test('Slack에서 가져온 아이디어는 원문 링크를 들고 있다(아이디어 줄의 원문)',async()=>{
   const permalink='https://example.test/idea-fixture';

@@ -4958,7 +4958,9 @@ function uiSchedToggle(item, row, anchor) {
     row.classList.add('is-leaving');
     if (scheduled === todayStr()) uiSchedRise.set(item.id, Date.now());
     let saved = false;
-    const save = async () => { await setTaskScheduled(item.id, scheduled); saved = true; uiInboxSchedUndo(item, scheduled); };
+    // 받지 않은 업무인지는 저장 전에 정해 둔다 — 저장 뒤의 load()가 그 업무를 오늘·나중에 목록(itemsById)에 넣는다.
+    const fromInbox = !itemsById.has(item.id);
+    const save = async () => { await setTaskScheduled(item.id, scheduled); saved = true; if (fromInbox) uiInboxSchedUndo(item, scheduled); };
     try {
       await uiMoveRun(row, save, uiMoveNotice(message, [item], scheduled));
     } finally {
@@ -5971,15 +5973,28 @@ async function setTaskScheduled(id, scheduled) {
 }
 
 // `새로 들어온 것`은 itemsById에 없어 request(recordUndoFor)가 되돌리기 기록을 남기지 못한다 — 일정 정하기 판이 저장된 뒤 이걸로 남긴다.
-// 되돌릴 때는 예정일을 전 값으로 돌리면서 받지 않은 표시도 되살리고(inbox: true), 다시 하기는 처음 보낸 그대로다(서버가 표시를 다시 지운다).
+// 되돌릴 때는 예정일을 없음으로 돌리면서 받지 않은 표시도 되살린다(inbox: true). 전 예정일은 늘 없음이다 —
+// 수집은 예정일을 넣지 않고 `새로 들어온 것` 목록도 scheduled를 내려 주지 않는다.
+// expect는 내가 정했던 값이다: 서버는 지금 예정일이 그 값일 때만 되살리고, 그 사이 다른 창에서 바뀌었으면(CHANGED_SINCE)
+// 거절한다 — 그때는 서버 문구를 알리고 이 기록을 버린다(replayUndo가 실패한 기록을 다시 올린 뒤에 뺀다).
+// 다시 하기는 처음 보낸 그대로다(서버가 표시를 다시 지운다).
 function uiInboxSchedUndo(item, scheduled) {
-  if (itemsById.has(item.id)) return; // 목록에 있는 업무면 request가 이미 남겼다
-  const before = item.scheduled || null;
-  pushUndo({
+  const entry = {
     label: item.description,
-    undo: () => postJson('/api/track/set-scheduled', { id: item.id, scheduled: before, inbox: true }),
+    undo: async () => {
+      try {
+        await postJson('/api/track/set-scheduled', { id: item.id, scheduled: null, inbox: true, expect: scheduled });
+      } catch (error) {
+        if (error.code === 'CHANGED_SINCE') {
+          showNotice(error.message, true);
+          setTimeout(() => { const at = undoStack.lastIndexOf(entry); if (at >= 0) undoStack.splice(at, 1); }, 0);
+        }
+        throw error;
+      }
+    },
     redo: () => postJson('/api/track/set-scheduled', { id: item.id, scheduled }),
-  });
+  };
+  pushUndo(entry);
 }
 
 // 우선순위(아이디어 화면에서는 `가능성` — 같은 값·같은 저장 길)도 ⌘Z 대상이다.

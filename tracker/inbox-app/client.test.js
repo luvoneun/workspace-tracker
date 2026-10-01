@@ -1456,9 +1456,14 @@ function schedUndoClient() {
     url, body: options && options.body ? JSON.parse(options.body) : null,
     ok: (data = { ok: true }) => resolve(new Response(JSON.stringify(data))),
     fail: () => resolve(new Response('{"ok":false}', { status: 500 })),
+    reply: (status, data) => resolve(new Response(JSON.stringify(data), { status })),
   }));
-  // 시험 틀의 load는 빈 함수다 — 목록을 다시 받는 자리에 `새로 들어온 것`만 다시 그리게 해 둔다(불린 횟수도 센다).
-  flow.app.run("var inboxNow = []; var loads = 0; load = async () => { loads += 1; renderInbox(inboxNow); }");
+  // 시험 틀의 load는 빈 함수다 — 실제 load처럼 `새로 들어온 것`에 없는 업무는 목록 사전(itemsById — 오늘·나중에 목록)에 넣고,
+  // `새로 들어온 것`을 다시 그리게 해 둔다. 일정을 정한 업무는 저장 직후 사전에 들어온다(이걸 빼먹으면 기록이 안 남는 것을 못 잡는다).
+  flow.app.run(`var inboxNow = []; load = async () => {
+    itemsById = new Map(['i1', 'i2'].filter(id => !inboxNow.some(one => one.id === id)).map(id => [id, { id, description: '업무', scheduled: null }]));
+    renderInbox(inboxNow);
+  }`);
   // 저장 하나를 끝까지: 저장 응답 → 이어지는 다시 그리기(inbox에 남은 것).
   const finish = async (inboxTasks = []) => {
     flow.app.run(`inboxNow = ${JSON.stringify(inboxTasks)}`);
@@ -1484,7 +1489,7 @@ for (const [name, key, value] of [['내일', 'tomorrow', 'tomorrowStr()'], ['오
     await settle();
     const sent = calls[calls.length - 1];
     assert.equal(sent.url, '/api/track/set-scheduled');
-    assert.deepEqual(sent.body, { id: 'i1', scheduled: null, inbox: true });
+    assert.deepEqual(sent.body, { id: 'i1', scheduled: null, inbox: true, expect: scheduled }, '내가 정했던 값(expect)을 함께 보낸다 — 나중에는 null');
     await finish([{ id: 'i1', description: '업무' }]);
     await undoing;
     assert.deepEqual(rows(), ['업무'], '줄이 새로 들어온 것에 다시 보인다');
@@ -1502,14 +1507,14 @@ for (const [name, key, value] of [['내일', 'tomorrow', 'tomorrowStr()'], ['오
 
 test('새로 들어온 것 되돌리기: 연달아 2건 정하고 ⌘Z 두 번 — 나중 것부터 역순으로 돌아온다', async () => {
   const { app, open, calls, finish, rows, undoCount } = schedUndoClient();
-  open('i1').pick('tomorrow').listeners.click(); await settle(); await finish();
+  open('i1').pick('tomorrow').listeners.click(); await settle(); await finish([{ id: 'i2', description: '둘째' }]);
   open('i2').pick('later').listeners.click(); await settle(); await finish();
   assert.equal(undoCount(), 2);
   let undoing = app.run("replayUndo('undo')"); await settle();
-  assert.deepEqual(calls[calls.length - 1].body, { id: 'i2', scheduled: null, inbox: true });
+  assert.deepEqual(calls[calls.length - 1].body, { id: 'i2', scheduled: null, inbox: true, expect: null });
   await finish([{ id: 'i2', description: '둘째' }]); await undoing;
   undoing = app.run("replayUndo('undo')"); await settle();
-  assert.deepEqual(calls[calls.length - 1].body, { id: 'i1', scheduled: null, inbox: true });
+  assert.deepEqual(calls[calls.length - 1].body, { id: 'i1', scheduled: null, inbox: true, expect: app.run('tomorrowStr()') });
   await finish([{ id: 'i1', description: '첫째' }, { id: 'i2', description: '둘째' }]); await undoing;
   assert.deepEqual(rows(), ['첫째', '둘째']);
   assert.equal(undoCount(), 0);
@@ -1527,6 +1532,19 @@ test('새로 들어온 것 되돌리기: 저장이 실패하면 기록이 남지
   assert.deepEqual([undoCount(), redoCount()], [1, 0], '되돌리기 실패 — 다시 누를 수 있게 남는다');
 });
 
+test('새로 들어온 것 되돌리기: 그 사이 다른 창에서 바뀌어 서버가 거절하면(409 CHANGED_SINCE) 서버 문구를 알리고 그 기록은 버린다', async () => {
+  const { app, open, calls, finish, rows, undoCount, redoCount } = schedUndoClient();
+  open().pick('today').listeners.click(); await settle(); await finish();
+  assert.equal(undoCount(), 1);
+  const undoing = app.run("replayUndo('undo')"); await settle();
+  calls[calls.length - 1].reply(409, { ok: false, error: '그 뒤에 바뀐 업무라 되돌릴 수 없어요.', code: 'CHANGED_SINCE' });
+  await settle(); await undoing;
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(app.nodes.get('liveRegion').textContent, '그 뒤에 바뀐 업무라 되돌릴 수 없어요.');
+  assert.deepEqual([undoCount(), redoCount()], [0, 0], '다시 눌러도 같은 거절만 받을 기록은 남기지 않는다');
+  assert.deepEqual(rows(), [], '줄은 돌아오지 않는다');
+});
+
 test('새로 들어온 것 되돌리기: 누르는 화면에서는 오늘·나중에·날짜 모두 알림에 `되돌리기` 버튼이 서고, 누르면 같은 되돌리기다', async () => {
   for (const key of ['today', 'later', 'tomorrow']) {
     const { app, open, calls, finish, ctx } = schedUndoClient();
@@ -1535,7 +1553,7 @@ test('새로 들어온 것 되돌리기: 누르는 화면에서는 오늘·나�
     const button = app.nodes.get('liveRegion').children.find(one => one && one.textContent === '되돌리기');
     assert.ok(button, `${key}: 되돌리기 버튼`);
     button.listeners.click(); await settle();
-    assert.deepEqual(calls[calls.length - 1].body, { id: 'i1', scheduled: null, inbox: true }, key);
+    assert.equal(calls[calls.length - 1].body.inbox, true, key);
   }
 });
 

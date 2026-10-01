@@ -7,7 +7,7 @@
 // 것이다 — ctx를 감싸기 뒤에 만든다. 감싸기 전 것을 받으면 저장 잠금(mutations.run) 없이 파일을 쓰게 된다.
 
 module.exports = function trackRoutes(req, res, url, ctx) {
-  const { createDecision, createIdea, createLaterTask, createManualTask, createWaitingItem, idempotent, listTrash, mutations,
+  const { createDecision, createIdea, createLaterTask, createManualTask, createWaitingItem, getReportRefs, idempotent, listTrash, mutations,
     promoteIdeaToToday, readBody, removeTrackItem, restoreTrackItem, setIdeaProject, setTrackDescription, setTrackDoing, setTrackDue,
     setTrackField, setTrackGroup, setTrackJira, setTrackPriority, setTrackWho, toggleTrackStatus, validateDate } = ctx;
 
@@ -20,17 +20,28 @@ module.exports = function trackRoutes(req, res, url, ctx) {
   }
 
   if (req.method === 'POST' && ['/api/track/set-scheduled', '/api/track/seen', '/api/track/restore'].includes(url.pathname)) {
-    readBody(req).then(({ id, scheduled, inbox }) => {
+    readBody(req).then(({ id, scheduled, inbox, expect }) => {
       // `inbox: true`는 `새로 들어온 것`에서 정한 일정을 되돌릴 때만 온다 — 예정일을 전 값으로 돌리면서 받지 않은 표시를 되살린다.
-      // 칸이 없으면 예전 그대로(값이 바뀌면 표시를 지운다). true가 아닌 값은 받지 않는다.
+      // `expect`(내가 정했던 예정일, 나중에였으면 null)가 꼭 함께 와야 하고, 지금 예정일이 그 값이며 끝내지 않은 할 일일 때만 되살린다 —
+      // 그 사이 다른 창에서 옮겼거나 끝낸 업무는 덮지 않고 409로 거절한다. 칸이 없으면 예전 그대로(표시를 지운다).
       const restoreInbox = url.pathname.endsWith('set-scheduled') && inbox !== undefined;
-      if (restoreInbox && inbox !== true) throw new Error('입력을 확인해 주세요.');
+      if (restoreInbox) {
+        if (inbox !== true || !(expect === null || (typeof expect === 'string' && expect))) throw new Error('입력을 확인해 주세요.');
+        validateDate(expect);
+      }
       if (url.pathname.endsWith('set-scheduled')) validateDate(scheduled);
       let ok;
       if (url.pathname.endsWith('/restore')) ok = restoreTrackItem(id);
       else if (url.pathname.endsWith('/seen')) ok = setTrackField(id, 'seen', 'true', null);
       else {
         ok = mutations.run(() => {
+          if (restoreInbox) {
+            const now = getReportRefs()[id];
+            if (!now || now.type !== 'task') return false;
+            if (now.status === 'done' || (now.scheduled || null) !== expect) {
+              throw Object.assign(new Error('그 뒤에 바뀐 업무라 되돌릴 수 없어요.'), { status: 409, code: 'CHANGED_SINCE' });
+            }
+          }
           const changed = setTrackField(id, 'scheduled', scheduled || 'none', 'task');
           if(changed)setTrackField(id, 'inbox', restoreInbox ? 'true' : null, 'task');
           return changed;
