@@ -7981,6 +7981,20 @@ test('슬랙 연결 A. 처음 카드: 설명 한 줄 + 파란 `슬랙 연결` + 
   assert.equal(fx.timers().length, 0, '누르기 전에는 묻지 않는다');
 });
 
+test('슬랙 연결 A. 연결 안 한 카드의 준비물 줄은 버튼을 쓸 수 있을 때만 `1분 · 슬랙에서 허용 한 번`', async () => {
+  const prep = async (ready) => {
+    const fx = slackConnectClient({ connect: { ready, waiting: false, expiresAt: null, last: null } });
+    await fx.app.run('renderSettingsIntegrations()');
+    return fx.text('slack');
+  };
+  assert.match(await prep('ok'), /1분 · 슬랙에서 허용 한 번/);
+  for (const ready of ['remote', 'port', 'client']) {
+    const text = await prep(ready);
+    assert.match(text, /5분 · 팀 슬랙 앱 토큰 하나/, `${ready}: 버튼을 못 쓰는 자리는 지금 문구 그대로`);
+    assert.ok(!/허용 한 번/.test(text));
+  }
+});
+
 test('슬랙 연결 B. 누르면 빈 탭을 먼저 열고 서버가 준 슬랙 주소로 보낸 뒤 기다리는 줄(다시 열기·취소) — 2초마다 상태만 묻는다', async () => {
   const fx = slackConnectClient({}, [{ body: { ok: true, url: SLACK_AUTHORIZE, expiresAt: Date.now() + 600000 } }]);
   await fx.app.run('renderSettingsIntegrations()');

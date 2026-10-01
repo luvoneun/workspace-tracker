@@ -2583,7 +2583,7 @@ function settingsSlackCard(data) {
     // 주기는 실제 등록 값(launchd 5분 간격, 매일 9–19시 — slack-capture.sh가 시간대를 본다).
     need: connected
       ? `매일 9–19시, 5분마다${typeof slack.todayCount === 'number' ? ` · 오늘 새 항목 ${slack.todayCount}개` : ''}${oauthOn && !broken ? ' · 자동 갱신 켜짐' : ''}`
-      : '5분 · 팀 슬랙 앱 토큰 하나',
+      : (ready === 'ok' ? '1분 · 슬랙에서 허용 한 번' : '5분 · 팀 슬랙 앱 토큰 하나'),
     status, menu, extra, alert,
     // 다른 기기에서 열었으면 여는 버튼이 회색 `슬랙 연결`이고 안내 한 줄이 늘 보인다.
     ...(!connected && !channelStep && ready === 'remote' ? { locked: true, openText: '슬랙 연결', openClass: 'd-btn' } : {}),
