@@ -14548,3 +14548,18 @@ test('새로 들어온 것 버튼 CSS: 평소 회색 바탕 없이 파란 글자
   assert.match(css, /^\.d-ibrow:hover \.d-ibacts \.d-btn, \.d-ibrow:focus-within \.d-ibacts \.d-btn \{ background: var\(--accent-soft\);/m);
   assert.match(css, /^\.d-ibacts \.d-btn:hover, [^{]*\{ background: var\(--accent-strong\); color: var\(--on-fill\); \}$/m);
 });
+
+test('설정 아이콘: gear는 해 모양이 아니라 톱니바퀴(path로 시작)다', () => {
+  const { app } = waitingNextClient();
+  const gear = app.run('UI_ICONS.gear');
+  assert.ok(!gear.includes('M8 1.7v1.7'), '동그라미+선 8개(해 모양)가 아니다');
+  assert.ok(gear.startsWith('<path'), '톱니 바깥선 path로 시작한다');
+});
+
+test('설정 아이콘: index.html의 설정 버튼 SVG 안쪽이 UI_ICONS.gear와 글자 그대로 같다', () => {
+  const { app } = waitingNextClient();
+  const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  const m = html.match(/id="settingsBtn"[^>]*><svg class="d-i"[^>]*>(.*?)<\/svg>/);
+  assert.ok(m, '설정 버튼 SVG를 찾는다');
+  assert.equal(m[1], app.run('UI_ICONS.gear'));
+});

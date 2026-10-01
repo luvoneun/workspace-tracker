@@ -449,7 +449,7 @@ Pretendard Variable(v1.3.9, SIL OFL 1.1)은 **앱에 넣어 두고 서버가 직
 - `--pop` (`0 12px 36px …, 0 2px 8px …`): 떠 있는 것 — 줄 옆 카드(상세), 더보기 메뉴, ⌘K 팔레트, 설정 모달, 알림, 여러 개 선택 막대.
 - `--drawer-sh` (`-10px 0 30px …`): 나중에 할 일 서랍.
 
-**아이콘.** 14px 인라인 SVG 한 벌(`uiIcon`)만 쓴다 — `viewBox="0 0 16 16"`, `stroke: currentColor`, 굵기 1.5, 끝 둥글게, 채움 없음. 이모지·글리프 문자는 쓰지 않는다. 있는 아이콘: `search more close plus check chevron link refresh gear calendar clock chat priHigh priTop`. `priHigh`·`priTop`은 업무 체크박스 안에 겹치는 위 꺾쇠(굵기 2.2)다 — 줄에 붙는 상태말이 아니다.
+**아이콘.** 14px 인라인 SVG 한 벌(`uiIcon`)만 쓴다 — `viewBox="0 0 16 16"`, `stroke: currentColor`, 굵기 1.5, 끝 둥글게, 채움 없음. 이모지·글리프 문자는 쓰지 않는다. 있는 아이콘: `search more close plus check chevron link refresh gear calendar clock chat priHigh priTop`. `priHigh`·`priTop`은 업무 체크박스 안에 겹치는 위 꺾쇠(굵기 2.2)다 — 줄에 붙는 상태말이 아니다. `gear`는 톱니바퀴(설정)이며 동그라미+선 8개(해 모양)는 쓰지 않는다 — 해 모양은 밝게/어둡게 전환 버튼으로 읽힌다.
 
 ### Named Rules
 
