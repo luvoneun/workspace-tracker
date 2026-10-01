@@ -7565,7 +7565,10 @@ test('WP-D1 B. 슬랙 ① 토큰: 세 줄 안내 + 토큰 받는 곳 + 요청 �
   const steps = fx.find('slack', 'd-isteps')[0];
   same(steps.children.filter(one => one.className !== 'ln').map(one => [one.textContent, one.className]),
     [['① 토큰', 'on'], ['② 채널', ''], ['③ 확인', '']]);
-  const how = fx.shape("window.findByClass(document.getElementById('settingsIntegrationsView').children[1], 'd-ihow')[0]").text;
+  // 슬랙 연결 버튼을 쓸 수 없는 자리(Client ID 없음)에서는 버튼 대신 안내 한 줄이 서고, 토큰 붙여 넣기가 처음부터 펼쳐져 있다.
+  assert.equal(fx.find('slack', 'd-ihow')[0].textContent, '슬랙 연결 버튼은 아직 준비 중이에요 — 아래에서 토큰을 직접 붙여 넣어 주세요.');
+  assert.equal(fx.find('slack', 'd-iadv')[0].getAttribute('aria-expanded'), 'true');
+  const how = fx.shape("window.findByClass(document.getElementById('settingsIntegrationsView').children[1], 'd-ihow')[1]").text;
   assert.equal(how, '팀 슬랙 앱의 OAuth & Permissions 화면이 열려요(영어 화면이에요 — 다른 화면이면 왼쪽 메뉴에서 골라요).Install to (회사 슬랙 이름) 버튼(이미 했으면 Reinstall to …) → 허용(Allow)토큰이 두 개 보여요 — xoxp-로 시작하는 User OAuth Token 옆 Copy. xoxb-로 시작하는 Bot 토큰이 아니에요.');
   const open = fx.button('slack', '토큰 받는 곳 열기 ↗');
   assert.equal(open.href, 'https://api.slack.com/apps/A0XXXX/oauth', '토큰이 있는 OAuth & Permissions 화면으로 바로');
@@ -7605,6 +7608,306 @@ test('WP-D1 B. 슬랙 ① 토큰: 세 줄 안내 + 토큰 받는 곳 + 요청 �
   const after = fx.find('slack', 'd-isteps')[0].children.filter(one => one.className !== 'ln');
   same(after.map(one => [one.textContent, one.className]), [['① 토큰 ✓', 'dn'], ['② 채널', 'on'], ['③ 확인', '']], '끝낸 단계는 한 줄로 접힌다');
   assert.ok(!JSON.stringify(fx.shape("document.getElementById('settingsIntegrationsView')")).includes('xoxp-good'), '넘어간 뒤에는 토큰이 화면 어디에도 없다');
+});
+
+// ---------- 슬랙 연결 버튼 (허용 한 번으로 연결) ----------
+// 가짜 창에 새 탭 열기·2초 타이머를 끼운다. 실제 슬랙 주소는 열지 않는다 — 주소 글자만 본다.
+const SLACK_AUTHORIZE = 'https://slack.com/oauth/v2/authorize?client_id=111.222&state=S';
+function slackConnectClient(slack = {}, replies = []) {
+  const fx = intgClient({ slack: { auth: 'token', connect: { ready: 'ok', waiting: false, expiresAt: null, last: null }, ...slack } }, replies);
+  const opened = [];
+  const timers = [];
+  fx.app.context.window.open = (...args) => {
+    const tab = { location: { href: '' }, opener: 'app', closed: false, close() { this.closed = true; } };
+    opened.push({ args, tab });
+    return tab;
+  };
+  fx.app.context.setInterval = (fn) => { timers.push(fn); return timers.length; };
+  fx.app.context.clearInterval = (id) => { if (id) timers[id - 1] = null; };
+  const live = () => timers.filter(Boolean);
+  const renders = () => fx.sent.filter(one => one.url === '/api/integrations').length;
+  return { ...fx, opened, timers: live, renders, tick: () => live()[0]() };
+}
+const OAUTH_ON = {
+  auth: 'oauth', hasToken: true,
+  oauth: { connected: true, expiresAt: Date.now() + 6 * 3600000, nextRefreshAt: Date.now() + 5 * 3600000, missingScopes: [], lastFailure: null, teamName: '팀', legacyKept: false },
+};
+const SLACK_LINKED = {
+  enabled: true, hasToken: true, readAt: ago(5), todayCount: 3,
+  channels: { todo: { id: 'C1', name: '#my-todo' }, waiting: { id: '', name: '' }, align: { id: '', name: '' }, someday: { id: '', name: '' } },
+};
+
+test('슬랙 연결 A. 처음 카드: 설명 한 줄 + 파란 `슬랙 연결` + 접힌 `고급: 토큰 직접 붙여 넣기`(누르면 지금의 토큰 화면이 그대로)', async () => {
+  const fx = slackConnectClient();
+  await fx.app.run('renderSettingsIntegrations()');
+  assert.equal(fx.toggle('slack').textContent, '연결하기');
+  fx.toggle('slack').listeners.click();
+  const body = fx.find('slack', 'd-intgbody')[0];
+  assert.equal(body.children[0].textContent, "슬랙에서 '허용'만 누르면 돼요. 토큰을 복사할 필요가 없고, 앱이 알아서 연결을 이어 가요.");
+  const go = fx.button('slack', '슬랙 연결');
+  assert.equal(go.className, 'd-btn pri', '파란 1차 버튼(높이 42px)');
+  assert.equal(go.focused, true, '펼치면 초점이 큰 버튼에');
+  const adv = fx.find('slack', 'd-iadv')[0];
+  assert.equal(fx.shape("window.findByClass(document.getElementById('settingsIntegrationsView').children[1], 'd-iadv')[0]").text, '고급: 토큰 직접 붙여 넣기 ›');
+  assert.equal(adv.getAttribute('aria-expanded'), 'false');
+  const host = fx.find('slack', 'd-iadvbody')[0];
+  assert.equal(adv.getAttribute('aria-controls'), host.id);
+  assert.equal(host.hidden, true);
+  assert.equal(fx.find('slack', 'd-isteps').length, 0, '접혀 있을 때는 토큰 화면이 없다');
+
+  adv.listeners.click();
+  assert.equal(adv.getAttribute('aria-expanded'), 'true');
+  assert.equal(host.hidden, false);
+  assert.equal(fx.shape("window.findByClass(document.getElementById('settingsIntegrationsView').children[1], 'd-iadv')[0]").text, '고급: 토큰 직접 붙여 넣기 ⌃');
+  same(fx.find('slack', 'd-isteps')[0].children.filter(one => one.className !== 'ln').map(one => one.textContent), ['① 토큰', '② 채널', '③ 확인']);
+  assert.equal(fx.find('slack', 'd-din')[0].type, 'password');
+  assert.ok(fx.button('slack', '토큰 받는 곳 열기 ↗'));
+  adv.listeners.click();
+  assert.equal(adv.getAttribute('aria-expanded'), 'false');
+  assert.equal(host.hidden, true);
+  assert.equal(fx.opened.length, 0);
+  assert.equal(fx.timers().length, 0, '누르기 전에는 묻지 않는다');
+});
+
+test('슬랙 연결 B. 누르면 빈 탭을 먼저 열고 서버가 준 슬랙 주소로 보낸 뒤 기다리는 줄(다시 열기·취소) — 2초마다 상태만 묻는다', async () => {
+  const fx = slackConnectClient({}, [{ body: { ok: true, url: SLACK_AUTHORIZE, expiresAt: Date.now() + 600000 } }]);
+  await fx.app.run('renderSettingsIntegrations()');
+  fx.toggle('slack').listeners.click();
+  fx.payload.slack.connect = { ready: 'ok', waiting: true, expiresAt: Date.now() + 600000, last: null };
+  const clicked = fx.button('slack', '슬랙 연결').listeners.click();
+  same(fx.opened.map(one => one.args), [['', '_blank']], '누른 그 순간에 연다(서버 답을 기다리면 팝업으로 막힌다)');
+  await clicked;
+  same(fx.sent.find(one => one.url === '/api/integrations/slack-oauth/start'), { url: '/api/integrations/slack-oauth/start', body: {} });
+  assert.equal(fx.opened[0].tab.location.href, SLACK_AUTHORIZE);
+  assert.equal(fx.opened[0].tab.opener, null, '새 탭이 앱 창을 건드리지 못하게');
+
+  const row = fx.find('slack', 'd-iwait')[0];
+  assert.equal(row.getAttribute('aria-live'), 'polite');
+  assert.equal(row.getAttribute('role'), 'status');
+  assert.equal(row.children[0].textContent, '슬랙에서 허용을 눌러 주세요… 새 탭에 슬랙 화면이 열렸어요');
+  same(row.children.slice(1).map(one => one.textContent), ['다시 열기', '취소']);
+  assert.equal(row.children[1].focused, true, '키보드 초점은 기다리는 줄의 첫 버튼으로');
+  assert.equal(fx.button('slack', '슬랙 연결'), undefined);
+  assert.equal(fx.timers().length, 1, '타이머는 하나');
+
+  // 다시 열기 — 같은 주소를 새 탭으로(서버에 다시 묻지 않는다)
+  const starts = () => fx.sent.filter(one => one.url === '/api/integrations/slack-oauth/start').length;
+  row.children[1].listeners.click();
+  same(fx.opened[1].args, [SLACK_AUTHORIZE, '_blank', 'noopener']);
+  assert.equal(starts(), 1);
+
+  // 아직 기다리는 중이면 다시 그리지 않는다
+  const before = fx.renders();
+  fx.sent.length = 0;
+  await new Promise(resolve => setImmediate(resolve));
+  const waiting = { body: { ok: true, waiting: true, last: null } };
+  fx.app.context.fetch = (original => async (url, options) => (String(url) === '/api/integrations/slack-oauth/status'
+    ? new Response(JSON.stringify(fx.statusReply.body)) : original(url, options)))(fx.app.context.fetch);
+  fx.statusReply = waiting;
+  await fx.tick();
+  assert.equal(fx.renders(), 0, '기다리는 동안에는 카드를 건드리지 않는다');
+  assert.equal(fx.timers().length, 1);
+  assert.ok(before >= 2);
+
+  // 허용이 끝났다 — 타이머를 멈추고, 채널이 아직 없으니 채널 단계가 이어서 열린다(토큰 없이 서버에 앞머리를 묻는다)
+  Object.assign(fx.payload.slack, OAUTH_ON, { connect: { ready: 'ok', waiting: false, expiresAt: null, last: { ok: true, kind: 'connected', at: Date.now() } } });
+  fx.statusReply = { body: { ok: true, waiting: false, last: { ok: true, kind: 'connected', at: Date.now() } } };
+  await fx.tick();
+  assert.equal(fx.timers().length, 0, '끝나면 더 묻지 않는다');
+  same(fx.find('slack', 'd-isteps')[0].children.filter(one => one.className !== 'ln').map(one => [one.textContent, one.className]),
+    [['① 허용 ✓', 'dn'], ['② 채널', 'on'], ['③ 확인', '']]);
+  assert.equal(fx.find('slack', 'd-ich').length, 4);
+  same(fx.sent.find(one => one.url === '/api/integrations/slack-token-check').body, { token: '' }, '화면은 토큰을 모른다');
+  assert.equal(fx.button('slack', '← 이전'), undefined, '돌아갈 토큰 단계가 없다');
+  assert.equal(fx.find('slack', 'd-din').some(one => one.type === 'password'), false);
+});
+
+test('슬랙 연결 B. 창을 새로 열어도 기다림이 이어지고, 취소하면 서버의 기다림을 버리고 처음 카드로 돌아온다', async () => {
+  const fx = slackConnectClient({ connect: { ready: 'ok', waiting: true, expiresAt: Date.now() + 500000, last: null } }, [
+    { body: { ok: true } },
+  ]);
+  await fx.app.run('renderSettingsIntegrations()');
+  const row = fx.find('slack', 'd-iwait')[0];
+  assert.ok(row, '다시 그려도 기다리는 줄이 선다');
+  assert.equal(fx.toggle('slack').textContent, '접기');
+  assert.equal(fx.timers().length, 1);
+  fx.payload.slack.connect = { ready: 'ok', waiting: false, expiresAt: null, last: null };
+  await row.children[2].listeners.click();
+  await new Promise(resolve => setImmediate(resolve));
+  same(fx.sent.find(one => one.url === '/api/integrations/slack-oauth/cancel'), { url: '/api/integrations/slack-oauth/cancel', body: {} });
+  assert.equal(fx.timers().length, 0);
+  assert.equal(fx.find('slack', 'd-iwait').length, 0);
+  assert.ok(fx.button('slack', '슬랙 연결'), '처음 카드로');
+  assert.equal(fx.find('slack', 'd-derr')[0].textContent, '', '앱에서 취소한 것은 이유 줄을 남기지 않는다');
+});
+
+test('슬랙 연결 B. 다른 칸에 글을 쓰는 중이면 끝났어도 다시 그리지 않고 다음 차례로 미룬다', async () => {
+  const fx = slackConnectClient({ connect: { ready: 'ok', waiting: true, expiresAt: Date.now() + 500000, last: null } });
+  await fx.app.run('renderSettingsIntegrations()');
+  const view = fx.view();
+  const typing = { tagName: 'INPUT' };
+  view.contains = node => node === typing;
+  fx.app.context.document.activeElement = typing;
+  fx.payload.slack.connect = { ready: 'ok', waiting: false, expiresAt: null, last: { ok: false, kind: 'cancelled', at: 1 } };
+  const base = fx.app.context.fetch;
+  fx.app.context.fetch = async (url, options) => (String(url) === '/api/integrations/slack-oauth/status'
+    ? new Response(JSON.stringify({ ok: true, waiting: false, last: { ok: false, kind: 'cancelled', at: 1 } })) : base(url, options));
+  const before = fx.renders();
+  await fx.tick();
+  assert.equal(fx.renders(), before, '치는 중에는 그대로');
+  assert.equal(fx.timers().length, 1, '타이머는 남아 다음 차례에 다시 본다');
+  fx.app.context.document.activeElement = null;
+  await fx.tick();
+  assert.equal(fx.renders(), before + 1);
+  assert.equal(fx.timers().length, 0);
+  assert.equal(fx.find('slack', 'd-derr')[0].textContent, '취소했어요 — 다시 누르면 돼요');
+});
+
+test('슬랙 연결 C. 허용이 끝나지 않은 이유는 시안 문구 그대로 — 막힘 · 승인 대기 · 취소', async () => {
+  const words = {
+    blocked: '회사 슬랙이 이 앱을 막았어요 — 관리자에게 물어봐 주세요',
+    pending: "아직 허용이 끝나지 않았어요 — 슬랙에 '요청'이 떴다면 관리자 승인을 기다려 주세요",
+    cancelled: '취소했어요 — 다시 누르면 돼요',
+  };
+  for (const [kind, line] of Object.entries(words)) {
+    // 처음 카드 — 버튼 위 빨간 한 줄
+    const first = slackConnectClient({ connect: { ready: 'ok', waiting: false, expiresAt: null, last: { ok: false, kind, at: 1 } } });
+    await first.app.run('renderSettingsIntegrations()');
+    first.toggle('slack').listeners.click();
+    const error = first.find('slack', 'd-derr')[0];
+    assert.equal(error.textContent, line);
+    assert.equal(error.getAttribute('role'), 'alert');
+    assert.equal(error.dataset.slackFail, kind);
+    assert.ok(first.button('slack', '슬랙 연결'));
+
+    // 풀린 카드 — 멈췄어요 + 그 이유 한 줄 + `다시 연결` 하나
+    const lost = slackConnectClient({ ...SLACK_LINKED, ...OAUTH_ON, oauth: { ...OAUTH_ON.oauth, connected: false, lastFailure: { kind: 'reconnect', reason: 'slack_error', code: 'token_revoked' } },
+      connect: { ready: 'ok', waiting: false, expiresAt: null, last: { ok: false, kind, at: 1 } } });
+    await lost.app.run('renderSettingsIntegrations()');
+    same(statOf(lost, 'slack'), ['d-istat k-stop', '멈췄어요']);
+    assert.equal(lost.shape("window.findByClass(document.getElementById('settingsIntegrationsView').children[1], 'd-intgwhy')[0]").text, line);
+  }
+  assert.equal(slackConnectClient().app.run("settingsSlackFailText({ ok: false, kind: '모르는 종류' })"), '연결하지 못했어요 — 다시 눌러 주세요');
+  assert.equal(slackConnectClient().app.run('settingsSlackFailText({ ok: true })'), '');
+});
+
+test('슬랙 연결 D. 연결된 카드: 새 방식은 줄 끝에 `자동 갱신 켜짐`과 ⋯ `다시 연결`, 옛 토큰 사용자에게만 `새 방식으로 다시 연결 (자동 갱신)`', async () => {
+  const modern = slackConnectClient({ ...SLACK_LINKED, ...OAUTH_ON });
+  await modern.app.run('renderSettingsIntegrations()');
+  assert.match(modern.text('slack'), /매일 9–19시, 5분마다 · 오늘 새 항목 3개 · 자동 갱신 켜짐/);
+  same(statOf(modern, 'slack'), ['d-istat k-ok', '연결됨']);
+  same(modern.menu('slack').map(section => section.map(entry => entry.label)),
+    [['새로 받기', '보내는 법', '채널 고르기', '슬랙 정리 방식', '다시 연결'], ['해제…']]);
+
+  const legacy = slackConnectClient({ ...SLACK_LINKED }, [{ body: { ok: true, url: SLACK_AUTHORIZE, expiresAt: Date.now() + 600000 } }]);
+  await legacy.app.run('renderSettingsIntegrations()');
+  assert.ok(!/자동 갱신/.test(legacy.text('slack')), '옛 방식 카드는 그대로');
+  const menu = legacy.menu('slack');
+  same(menu.map(section => section.map(entry => entry.label)),
+    [['새로 받기', '보내는 법', '채널 고르기', '슬랙 정리 방식', '다시 연결(토큰 바꾸기)', '새 방식으로 다시 연결 (자동 갱신)'], ['해제…']]);
+  // 옮기기 — 누른 그 자리에서 탭을 열고 시작을 부른다
+  legacy.payload.slack.connect = { ready: 'ok', waiting: true, expiresAt: Date.now() + 600000, last: null };
+  menu[0][5].onClick();
+  assert.equal(legacy.opened.length, 1);
+  await settle();
+  assert.ok(legacy.sent.some(one => one.url === '/api/integrations/slack-oauth/start'));
+  assert.ok(legacy.find('slack', 'd-iwait')[0], '연결된 카드에서도 기다리는 줄이 선다');
+
+  // 다른 기기·Client ID 없음에서는 옮기는 칸을 보이지 않는다(눌러도 안 되는 것을 두지 않는다)
+  for (const ready of ['remote', 'port', 'client']) {
+    const far = slackConnectClient({ ...SLACK_LINKED, connect: { ready, waiting: false, expiresAt: null, last: null } });
+    await far.app.run('renderSettingsIntegrations()');
+    assert.ok(!far.menu('slack').flat().some(entry => /새 방식/.test(entry.label)), ready);
+  }
+});
+
+test('슬랙 연결 E. 풀림: `슬랙 연결이 풀렸어요 — 다시 연결 한 번이면 돼요` + `다시 연결` 하나, 그 밖의 멈춤은 `다시 시도` 그대로', async () => {
+  const lostState = { ...SLACK_LINKED, ...OAUTH_ON, oauth: { ...OAUTH_ON.oauth, connected: false, lastFailure: { kind: 'reconnect', reason: 'slack_error', code: 'invalid_refresh_token' } } };
+  const fx = slackConnectClient(lostState, [{ body: { ok: true, url: SLACK_AUTHORIZE, expiresAt: Date.now() + 600000 } }]);
+  await fx.app.run('renderSettingsIntegrations()');
+  same(statOf(fx, 'slack'), ['d-istat k-stop', '멈췄어요']);
+  const why = fx.find('slack', 'd-intgwhy')[0];
+  assert.equal(fx.shape("window.findByClass(document.getElementById('settingsIntegrationsView').children[1], 'd-intgwhy')[0]").text, '슬랙 연결이 풀렸어요 — 다시 연결 한 번이면 돼요');
+  assert.equal(why.getAttribute('role'), 'status');
+  assert.ok(!/자동 갱신 켜짐/.test(fx.text('slack')), '풀린 동안에는 켜졌다고 하지 않는다');
+  const button = fetchButton(fx, 'slack');
+  assert.equal(button.textContent, '다시 연결');
+  assert.equal(button.className, 'd-btn sm pri d-ifetch');
+  assert.equal(button.hidden, false);
+  fx.payload.slack.connect = { ready: 'ok', waiting: true, expiresAt: Date.now() + 600000, last: null };
+  button.listeners.click();
+  assert.equal(fx.opened.length, 1, '토큰 단계가 아니라 슬랙 허용 화면으로');
+  await settle();
+  assert.ok(fx.sent.some(one => one.url === '/api/integrations/slack-oauth/start'));
+  assert.equal(fx.find('slack', 'd-isteps').length, 0);
+
+  // 수집이 토큰 문제로 실패해도(새 방식) 같은 줄·같은 버튼
+  const auth = slackConnectClient({ ...SLACK_LINKED, ...OAUTH_ON, fetch: { failing: true, auth: true, stuck: true, failedAt: ago(2), summary: 'invalid_auth' } });
+  await auth.app.run('renderSettingsIntegrations()');
+  assert.equal(auth.shape("window.findByClass(document.getElementById('settingsIntegrationsView').children[1], 'd-intgwhy')[0]").text, '슬랙 연결이 풀렸어요 — 다시 연결 한 번이면 돼요');
+  assert.equal(fetchButton(auth, 'slack').textContent, '다시 연결');
+
+  // 그 밖의 멈춤(슬랙이 응답하지 않음)은 예전 그대로 `다시 시도`
+  const slow = slackConnectClient({ ...SLACK_LINKED, ...OAUTH_ON, fetch: { failing: true, auth: false, stuck: false, failedAt: ago(2), summary: 'fetch 실패' } });
+  await slow.app.run('renderSettingsIntegrations()');
+  assert.equal(fetchButton(slow, 'slack').textContent, '다시 시도');
+  assert.match(slow.shape("window.findByClass(document.getElementById('settingsIntegrationsView').children[1], 'd-intgwhy')[0]").text, /슬랙이 응답하지 않았어요/);
+
+  // 옛 방식의 토큰 문제는 예전 문구·예전 길(토큰 단계) 그대로
+  const old = slackConnectClient({ ...SLACK_LINKED, fetch: { failing: true, auth: true, stuck: true, failedAt: ago(2), summary: 'invalid_auth' } });
+  await old.app.run('renderSettingsIntegrations()');
+  assert.match(old.shape("window.findByClass(document.getElementById('settingsIntegrationsView').children[1], 'd-intgwhy')[0]").text, /토큰 단계부터 다시 열려요/);
+  fetchButton(old, 'slack').listeners.click();
+  assert.equal(old.opened.length, 0);
+  assert.equal(old.find('slack', 'd-isteps').length, 1);
+});
+
+test('슬랙 연결 F. 다른 기기에서는 버튼이 회색으로 눌리지 않고 안내 한 줄, 포트 밖·Client ID 없음도 버튼 대신 안내 한 줄', async () => {
+  const remote = slackConnectClient({ connect: { ready: 'remote', waiting: false, expiresAt: null, last: null } });
+  await remote.app.run('renderSettingsIntegrations()');
+  const gray = remote.toggle('slack');
+  assert.equal(gray.textContent, '슬랙 연결');
+  assert.equal(gray.disabled, true, '진짜 button의 disabled — 눌러도 안 된다');
+  assert.equal(gray.className, 'd-btn');
+  const body = remote.find('slack', 'd-intgbody')[0];
+  assert.equal(body.hidden, false, '안내는 늘 보인다');
+  assert.equal(body.children[0].textContent, '슬랙 연결은 앱을 설치한 맥에서 해 주세요.');
+  assert.equal(remote.find('slack', 'd-btn').some(one => one.className === 'd-btn pri'), false, '큰 버튼은 없다');
+  assert.equal(remote.find('slack', 'd-iadv')[0].getAttribute('aria-expanded'), 'false');
+
+  const notes = {
+    port: '지금 주소로는 슬랙 연결 버튼을 쓸 수 없어요 — 앱을 4321~4331번 포트로 열어 주세요.',
+    client: '슬랙 연결 버튼은 아직 준비 중이에요 — 아래에서 토큰을 직접 붙여 넣어 주세요.',
+  };
+  for (const [ready, line] of Object.entries(notes)) {
+    const fx = slackConnectClient({ connect: { ready, waiting: false, expiresAt: null, last: null } });
+    await fx.app.run('renderSettingsIntegrations()');
+    assert.equal(fx.toggle('slack').textContent, '연결하기');
+    assert.equal(fx.toggle('slack').disabled, false);
+    fx.toggle('slack').listeners.click();
+    assert.equal(fx.find('slack', 'd-intgbody')[0].children[0].textContent, line);
+    assert.equal(fx.button('slack', '슬랙 연결'), undefined);
+    assert.equal(fx.find('slack', 'd-iadv')[0].getAttribute('aria-expanded'), String(ready === 'client'), '토큰 붙여 넣기가 유일한 길이면 펼쳐 둔다');
+  }
+});
+
+test('슬랙 연결: 서버가 준 주소가 슬랙 허용 화면이 아니면 열지 않고, 시작이 실패하면 빈 탭을 닫고 그 자리에 알린다', async () => {
+  const check = slackConnectClient().app;
+  assert.equal(check.run(`settingsSlackAuthorizeUrl(${JSON.stringify(SLACK_AUTHORIZE)})`), SLACK_AUTHORIZE);
+  for (const bad of ['https://evil.example/oauth/v2/authorize?x', 'javascript:alert(1)', 'https://slack.com.evil.example/oauth/v2/authorize?x', '', null]) {
+    assert.equal(check.run(`settingsSlackAuthorizeUrl(${JSON.stringify(bad)})`), '');
+  }
+  for (const reply of [{ body: { ok: true, url: 'https://evil.example/' } }, { body: { ok: false, kind: 'port' } }, { status: 403, body: { ok: false, kind: 'remote' } }]) {
+    const fx = slackConnectClient({}, [reply]);
+    await fx.app.run('renderSettingsIntegrations()');
+    fx.toggle('slack').listeners.click();
+    await fx.button('slack', '슬랙 연결').listeners.click();
+    assert.equal(fx.opened[0].tab.closed, true);
+    assert.equal(fx.opened[0].tab.location.href, '');
+    assert.equal(fx.find('slack', 'd-derr')[0].textContent, '슬랙 연결을 시작하지 못했어요 — 다시 눌러 주세요');
+    assert.equal(fx.timers().length, 0);
+    assert.equal(fx.button('slack', '슬랙 연결').disabled, false);
+  }
 });
 
 // ① 토큰을 통과해 ② 채널에 선 가짜 창을 만든다.

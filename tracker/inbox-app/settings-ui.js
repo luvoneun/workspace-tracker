@@ -1545,7 +1545,7 @@ const SETTINGS_NO_CLAUDE_CHIP = 'Claude 없이도 돼요';
 // ({ tone, word })가 있으면 그 점을 쓴다(회의록 직접 옮기기 = 초록 `직접 옮기기`).
 // `alert`는 지금 막힌 카드의 { stop(멈췄어요 — 없으면 늦어요), fix(`none`이면 버튼 없음), status(지금 상황 줄을 이 말로),
 // why(이유 한 줄의 글 조각) }.
-function settingsIntgCard({ kind, name, chip, use, need, needClass = '', status = null, mark = null, openText = '연결하기', openClass = 'd-btn acc', menu = null, extra = [], fetch: fetchSpec = null, alert = null, onOpen }) {
+function settingsIntgCard({ kind, name, chip, use, need, needClass = '', status = null, mark = null, openText = '연결하기', openClass = 'd-btn acc', menu = null, extra = [], fetch: fetchSpec = null, alert = null, locked = false, onOpen }) {
   // 늦음·첫 읽기 전(톱니바퀴의 주황 점과 같은 기준 — syncLag)은 렌더가 정해 둔 값을 그 카드 몫만 읽는다.
   const lag = settingsIntgLagOf(kind);
   const row = settingsEl('d-intg');
@@ -1663,6 +1663,12 @@ function settingsIntgCard({ kind, name, chip, use, need, needClass = '', status 
   };
   toggle.addEventListener('click', () => { if (body.hidden) card.open(); else card.close(); });
   setOpen(false);
+  // 잠긴 카드(다른 기기에서 연 슬랙 카드) — 여는 버튼은 회색으로 눌리지 않고, 안내는 늘 펼쳐 둔다.
+  if (locked) {
+    toggle.disabled = true;
+    body.hidden = false;
+    onOpen(card);
+  }
   settingsIntgCards.set(kind, card);
   return card;
 }
@@ -1733,18 +1739,182 @@ const settingsSlackLabel = key => (SETTINGS_SLACK_CHANNELS.find(([one]) => one =
 // `#이름` 뒤 조사는 이름 끝 글자(영문·숫자가 대부분)로 받침을 가릴 수 없다 — 늘 `채널`을 붙여 `#이름 채널을`로 쓴다.
 const settingsChannelObject = name => (String(name || '').trim() ? `${String(name).trim()} 채널을` : '채널을');
 
-// 위저드 한 벌. mode: `new`(처음 연결) · `token`(다시 연결 — 토큰부터). 채널 더하기·빼기는 따로(settingsSlackPick).
+// ---------- 슬랙 연결 버튼 (허용 한 번으로 연결 — 토큰을 복사하지 않는다) ----------
+// 누르면 서버가 슬랙 허용 화면 주소를 주고(state·code_verifier는 서버 메모리에만), 새 탭에 그 화면이 열린다.
+// 앱은 2초마다 상태를 물어 끝났는지 본다. 토큰은 화면에 오지 않는다 — 채널 단계는 서버가 저장된 연결로 한다.
+const SETTINGS_SLACK_CONNECT_HOW = "슬랙에서 '허용'만 누르면 돼요. 토큰을 복사할 필요가 없고, 앱이 알아서 연결을 이어 가요.";
+const SETTINGS_SLACK_WAITING = '슬랙에서 허용을 눌러 주세요… 새 탭에 슬랙 화면이 열렸어요';
+const SETTINGS_SLACK_LOST = '슬랙 연결이 풀렸어요 — 다시 연결 한 번이면 돼요';
+const SETTINGS_SLACK_REMOTE = '슬랙 연결은 앱을 설치한 맥에서 해 주세요.';
+const SETTINGS_SLACK_PORT = '지금 주소로는 슬랙 연결 버튼을 쓸 수 없어요 — 앱을 4321~4331번 포트로 열어 주세요.';
+const SETTINGS_SLACK_NO_CLIENT = '슬랙 연결 버튼은 아직 준비 중이에요 — 아래에서 토큰을 직접 붙여 넣어 주세요.';
+const SETTINGS_SLACK_START_FAIL = '슬랙 연결을 시작하지 못했어요 — 다시 눌러 주세요';
+// 허용이 끝나지 않은 이유(서버가 종류만 준다 — `slack.connect.last.kind`).
+const SETTINGS_SLACK_FAIL = {
+  blocked: '회사 슬랙이 이 앱을 막았어요 — 관리자에게 물어봐 주세요',
+  pending: "아직 허용이 끝나지 않았어요 — 슬랙에 '요청'이 떴다면 관리자 승인을 기다려 주세요",
+  cancelled: '취소했어요 — 다시 누르면 돼요',
+  team: '다른 슬랙 워크스페이스로 허용했어요 — 연결해 둔 워크스페이스로 다시 해 주세요',
+  write: '연결을 저장하지 못했어요 — 다시 눌러 주세요',
+  failed: '연결하지 못했어요 — 다시 눌러 주세요',
+};
+const settingsSlackFailText = last => (last && last.ok === false ? (SETTINGS_SLACK_FAIL[last.kind] || SETTINGS_SLACK_FAIL.failed) : '');
+// 서버가 준 주소가 슬랙 허용 화면일 때만 연다.
+const settingsSlackAuthorizeUrl = url => (typeof url === 'string' && url.startsWith('https://slack.com/oauth/v2/authorize?') ? url : '');
+
+// 기다리는 중 — 이 창이 연 허용 화면의 주소(`다시 열기`용, 창을 새로 열면 없다)와 2초 타이머. 화면 메모리에만 있다.
+let settingsSlackWaitUrl = '';
+let settingsSlackTimer = null;
+function settingsSlackWatch() {
+  if (!settingsSlackTimer) settingsSlackTimer = setInterval(settingsSlackTick, 2000);
+}
+function settingsSlackWatchStop() {
+  if (settingsSlackTimer) clearInterval(settingsSlackTimer);
+  settingsSlackTimer = null;
+  settingsSlackWaitUrl = '';
+}
+// 연동 탭의 다른 칸에 글을 쓰는 중이면 다시 그리지 않고 다음 차례로 미룬다(칸을 새로 만들면 치던 글이 사라진다).
+function settingsSlackTyping() {
+  const view = document.getElementById('settingsIntegrationsView');
+  const at = document.activeElement;
+  return !!(view && at && view.contains(at) && /^(INPUT|TEXTAREA|SELECT)$/.test(at.tagName || ''));
+}
+async function settingsSlackTick() {
+  let status = null;
+  try {
+    const response = await fetch('/api/integrations/slack-oauth/status', { headers: { Accept: 'application/json' } });
+    status = response.ok ? await response.json() : null;
+  } catch { status = null; }
+  // 잠깐 못 읽었으면 다음 차례에 다시 묻는다. 아직 기다리는 중이면 그대로 둔다.
+  if (!status || (status.waiting && !status.last)) return;
+  if (settingsSlackTyping()) return;
+  await settingsSlackSettled(status.last);
+}
+// 기다림이 끝났다(연결됨·실패·10분 넘김·취소) — 타이머를 멈추고 카드를 다시 그린다.
+async function settingsSlackSettled(last) {
+  settingsSlackWatchStop();
+  settingsIntgAfter = { kind: 'slack' };
+  await renderSettingsIntegrations({ quiet: true });
+  const view = document.getElementById('settingsIntegrationsView');
+  if (last && last.ok === true) {
+    // 채널까지 연결돼 있던 카드(옛 방식에서 옮김·다시 연결)는 알림 한 줄, 처음 연결은 채널 단계가 이어서 열린다.
+    if (settingsIntgConnected(settingsIntegrations || {}).slack) showNotice('슬랙을 연결했어요 — 이제 연결이 알아서 이어져요');
+    return;
+  }
+  // 이유는 카드가 말한다. 카드에 설 자리가 없을 때만(잘 돌고 있는 카드에서 다시 연결을 눌렀다 그만둔 경우) 알림으로.
+  const words = settingsSlackFailText(last);
+  if (words && !(view && view.querySelector('[data-slack-fail]'))) showNotice(words, true);
+}
+// 버튼을 누른 그 순간에 빈 탭을 먼저 연다 — 서버 답을 기다린 뒤에 열면 브라우저가 팝업으로 막는다.
+async function settingsSlackConnectStart(error = null, button = null) {
+  let tab = null;
+  try { tab = window.open('', '_blank'); } catch { tab = null; }
+  if (error) error.textContent = '';
+  if (button) button.disabled = true;
+  const started = await settingsIntegrationAsk('/api/integrations/slack-oauth/start', {}, SETTINGS_SLACK_START_FAIL);
+  if (button) button.disabled = false;
+  const url = started && started.ok === true ? settingsSlackAuthorizeUrl(started.url) : '';
+  if (!url) {
+    if (tab) tab.close();
+    const words = (started && started.error) || SETTINGS_SLACK_START_FAIL;
+    if (error) error.textContent = words; else showNotice(words, true);
+    return false;
+  }
+  if (tab) {
+    try { tab.opener = null; } catch { /* 이미 끊겼다 */ }
+    tab.location.href = url;
+  }
+  settingsSlackWaitUrl = url;
+  settingsSlackWatch();
+  settingsIntgAfter = { kind: 'slack' };
+  await renderSettingsIntegrations({ quiet: true });
+  return true;
+}
+async function settingsSlackConnectCancel() {
+  await settingsIntegrationAsk('/api/integrations/slack-oauth/cancel', {}, '');
+  await settingsSlackSettled(null);
+}
+
+// 슬랙 카드의 펼친 자리 — 처음 연결(설명 한 줄 · `슬랙 연결` · 접힌 `고급: 토큰 직접 붙여 넣기`), 기다리는 중,
+// 버튼을 쓸 수 없을 때의 안내 한 줄(다른 기기 · 등록된 포트 밖 · Client ID 없음).
+function settingsSlackConnectBody(card, data, { connected = false, broken = false } = {}) {
+  const slack = data.slack || {};
+  const connect = slack.connect || {};
+  const ready = connect.ready || 'client';
+  if (ready === 'ok' && connect.waiting) {
+    const row = settingsEl('d-irow d-iwait');
+    row.setAttribute('role', 'status');
+    row.setAttribute('aria-live', 'polite');
+    const words = document.createElement('span');
+    words.textContent = SETTINGS_SLACK_WAITING;
+    const again = settingsButton('다시 열기', 'd-ablink k-acc', () => {
+      if (settingsSlackWaitUrl) window.open(settingsSlackWaitUrl, '_blank', 'noopener');
+      else settingsSlackConnectStart();
+    });
+    const cancel = settingsButton('취소', 'd-ablink', () => { cancel.disabled = true; settingsSlackConnectCancel(); });
+    row.append(words, again, cancel);
+    card.body.appendChild(row);
+    settingsSlackWatch();
+    // 누른 버튼은 다시 그리며 사라졌다 — 키보드 초점을 기다리는 줄의 첫 버튼으로 옮긴다(다른 칸에 글을 쓰는 중이면 그대로).
+    if (!settingsSlackTyping()) again.focus();
+    return;
+  }
+  const note = { remote: SETTINGS_SLACK_REMOTE, port: SETTINGS_SLACK_PORT, client: SETTINGS_SLACK_NO_CLIENT }[ready];
+  let go = null;
+  if (note) {
+    const line = document.createElement('p');
+    line.className = 'd-ihow';
+    line.dataset.slackNote = ready;
+    line.textContent = note;
+    card.body.appendChild(line);
+  } else {
+    const how = document.createElement('p');
+    how.className = 'd-ihow';
+    how.textContent = SETTINGS_SLACK_CONNECT_HOW;
+    const error = settingsErrorLine();
+    // 풀린 카드는 이유를 카드의 빨간 줄이 이미 말한다 — 여기서는 되풀이하지 않는다.
+    if (!broken && !connected) {
+      error.textContent = settingsSlackFailText(connect.last);
+      if (error.textContent) error.dataset.slackFail = connect.last.kind;
+    }
+    go = settingsButton(connected ? '다시 연결' : '슬랙 연결', 'd-btn pri');
+    go.addEventListener('click', () => settingsSlackConnectStart(error, go));
+    card.body.append(how, error, go);
+  }
+  // 옛 방식 — 접힌 글자 링크. 누르면 지금의 토큰 붙여 넣기 화면이 그대로 펼쳐진다.
+  const adv = settingsButton('', 'd-ablink d-iadv');
+  const mark = document.createElement('span');
+  mark.setAttribute('aria-hidden', 'true');
+  adv.append(document.createTextNode('고급: 토큰 직접 붙여 넣기 '), mark);
+  const host = settingsEl('d-iadvbody');
+  host.id = 'settingsSlackAdvanced';
+  adv.setAttribute('aria-controls', host.id);
+  const setOpen = (open) => {
+    host.hidden = !open;
+    adv.setAttribute('aria-expanded', String(open));
+    mark.textContent = open ? '⌃' : '›';
+    if (open && !host.children.length) settingsSlackWizard({ body: host }, data, connected ? 'token' : 'new');
+  };
+  adv.addEventListener('click', () => setOpen(host.hidden));
+  card.body.append(adv, host);
+  // Client ID가 없으면 토큰 붙여 넣기가 유일한 길이라 처음부터 펼쳐 둔다.
+  setOpen(ready === 'client');
+  if (go && !card.body.hidden && !settingsSlackTyping()) go.focus();
+}
+
+// 위저드 한 벌. mode: `new`(처음 연결) · `token`(다시 연결 — 토큰부터) · `oauth`(슬랙 연결 버튼으로 허용한 뒤 — 채널부터,
+// 토큰은 서버가 저장된 연결로 쓴다). 채널 더하기·빼기는 따로(settingsSlackPick).
 function settingsSlackWizard(card, data, mode = 'new') {
   const slack = data.slack || {};
   const saved = slack.channels || {};
   // 이미 연결돼 있고 슬랙에서 읽히는 채널 — ②에서 체크된 채 `#이름 연결됨`으로만 보이고 바꿀 수 없다.
   const linked = key => mode !== 'new' && !!(saved[key] && saved[key].id && !saved[key].missing);
   const state = {
-    step: 0,
+    step: mode === 'oauth' ? 1 : 0,
     token: '',
     prefix: 'my',
     picks: Object.fromEntries(SETTINGS_SLACK_CHANNELS.map(([key]) => [key, {
-      on: linked(key) || (mode === 'new' && (key === 'todo' || key === 'waiting')),
+      on: linked(key) || (mode !== 'token' && (key === 'todo' || key === 'waiting')),
       name: settingsSlackDefaultName(key),
       touched: false,
     }])),
@@ -1754,10 +1924,13 @@ function settingsSlackWizard(card, data, mode = 'new') {
   };
   const wanted = () => SETTINGS_SLACK_CHANNELS.map(([key]) => key)
     .filter(key => state.picks[key].on && !linked(key) && !state.made[key]);
+  // 새 채널 없이도 ③으로 넘어갈 수 있나 — 이미 만든 것이 있거나, 다시 연결(토큰만 바꾸기)이거나, 허용 뒤 이미 연결된 채널이 있을 때.
+  const canSkip = () => Object.keys(state.made).length > 0 || mode === 'token'
+    || (mode === 'oauth' && SETTINGS_SLACK_CHANNELS.some(([key]) => linked(key)));
 
   function draw() {
     card.body.replaceChildren();
-    card.body.appendChild(settingsSteps(['토큰', '채널', '확인'], state.step));
+    card.body.appendChild(settingsSteps([mode === 'oauth' ? '허용' : '토큰', '채널', '확인'], state.step));
     if (state.step === 0) drawToken();
     else if (state.step === 1) drawChannels();
     else drawConfirm();
@@ -1829,10 +2002,8 @@ function settingsSlackWizard(card, data, mode = 'new') {
     const inputs = {};
     const label = () => {
       const count = wanted().length;
-      // 다시 연결(토큰만 바꾸기)은 새 채널 없이도 ③으로 넘어갈 수 있다.
-      const canSkip = Object.keys(state.made).length > 0 || mode === 'token';
-      make.textContent = count ? `고른 채널 ${count}개 만들어 주기` : (canSkip ? '다음 →' : '고른 채널 0개 만들어 주기');
-      make.disabled = !count && !canSkip;
+      make.textContent = count ? `고른 채널 ${count}개 만들어 주기` : (canSkip() ? '다음 →' : '고른 채널 0개 만들어 주기');
+      make.disabled = !count && !canSkip();
       none.textContent = make.disabled ? SETTINGS_SLACK_NONE : '';
     };
     SETTINGS_SLACK_CHANNELS.forEach(([key, name, where]) => {
@@ -1903,7 +2074,7 @@ function settingsSlackWizard(card, data, mode = 'new') {
     });
     make.addEventListener('click', async () => {
       const keys = wanted();
-      if (!keys.length) { if (Object.keys(state.made).length || mode === 'token') { state.step = 2; draw(); } return; }
+      if (!keys.length) { if (canSkip()) { state.step = 2; draw(); } return; }
       state.error = '';
       // 이름부터 한 번에 본다 — 빈 이름이 있으면 아무것도 만들지 않는다.
       const blank = keys.filter(key => !settingsSlackChannelName(state.picks[key].name));
@@ -1926,7 +2097,7 @@ function settingsSlackWizard(card, data, mode = 'new') {
     label();
     const wrap = settingsEl('d-ichwrap');
     wrap.append(how, list, make, none);
-    if (mode === 'new') {
+    if (mode !== 'token') {
       const later = document.createElement('p');
       later.className = 'd-ismall';
       settingsRich(later, ['나중에 더하거나 빼고 싶으면 설정 › 연동 › 슬랙 ⋯ › ', ['b', '채널 고르기'], '.']);
@@ -1934,8 +2105,9 @@ function settingsSlackWizard(card, data, mode = 'new') {
     }
     error.textContent = state.error || '';
     wrap.appendChild(error);
-    const back = settingsButton('← 이전', 'd-btn sm', () => { state.step = 0; draw(); });
-    card.body.append(wrap, settingsStepFoot(back, null));
+    // 허용으로 들어온 길에는 돌아갈 토큰 단계가 없다.
+    const back = mode === 'oauth' ? null : settingsButton('← 이전', 'd-btn sm', () => { state.step = 0; draw(); });
+    card.body.append(...(back ? [wrap, settingsStepFoot(back, null)] : [wrap]));
     // 커서는 이름을 고칠 첫 줄로(없으면 주 버튼으로).
     const firstTaken = Object.keys(inputs).find(key => state.rowErrors[key]);
     const firstOpen = firstTaken || Object.keys(inputs).find(key => state.picks[key].on);
@@ -1971,6 +2143,15 @@ function settingsSlackWizard(card, data, mode = 'new') {
   }
 
   draw();
+  // 허용으로 들어왔으면 새 채널 이름의 앞머리(슬랙 사용자 이름)를 저장된 연결로 한 번 묻는다 — 못 받으면 `my`로 둔다.
+  if (mode === 'oauth') {
+    settingsSlackTokenCheck('').then((checked) => {
+      if (!checked || checked.ok !== true || state.step !== 1) return;
+      state.prefix = settingsSlackPrefix(checked.prefix);
+      Object.entries(state.picks).forEach(([key, pick]) => { if (!pick.touched) pick.name = settingsSlackDefaultName(key, state.prefix); });
+      if (!card.body.hidden && !settingsSlackTyping()) draw();
+    });
+  }
   return state;
 }
 
@@ -2322,7 +2503,17 @@ function settingsSlackCard(data) {
   // 원문 그대로 받는 중이면 상태 줄 맨 앞에 그 방식을 적는다(Claude로 다듬는 중은 예전 그대로).
   const status = connected ? `${slack.tidy === 'raw' ? '원문 그대로 받는 중 · ' : ''}${main.name || '채널'}${more ? ` 외 ${more}개` : ''}${ago ? ` · ${ago} 읽음` : ''}` : null;
   const fetchState = slack.fetch || {};
+  // 연결 방식 — `oauth`(슬랙 연결 버튼, 자동 갱신) · `token`(토큰 붙여 넣기). 버튼을 쓸 수 있는지는 서버가 정한다(`connect.ready`).
+  const connect = slack.connect || {};
+  const ready = connect.ready || 'client';
+  const oauthOn = slack.auth === 'oauth';
+  const oauth = slack.oauth || {};
+  // 새 방식에서 사람이 다시 연결해야 하는 멈춤 — 갱신이 더는 안 되거나(연결이 풀림) 수집이 토큰 문제로 실패.
+  const broken = connected && oauthOn && (oauth.connected === false || !!fetchState.auth);
+  // 허용은 끝났고 채널만 남았다 — 펼치면 채널 단계부터.
+  const channelStep = !connected && oauthOn && !!slack.hasToken && oauth.connected === true;
   let card = null;
+  const startConnect = () => { card.open('connect'); settingsSlackConnectStart(); };
   const pickLink = () => settingsButton('채널 고르기', 'd-ablink', () => card.open('pick'));
   // 켜진 채널이 **모두** 사라졌으면 수집이 멈춘 것과 같은 급이다 — 멈췄어요 + 이유 한 줄(시안 F). 고칠 곳은 이유 줄의
   // `채널 고르기`라 오른쪽 버튼은 두지 않는다. 일부만 사라졌으면 그 채널마다 주황 한 줄(아래 extra).
@@ -2331,6 +2522,12 @@ function settingsSlackCard(data) {
   if (allGone) {
     const gone = linkedKeys.length === 1 ? settingsChannelObject(channels[linkedKeys[0]].name) : '켜진 채널을 모두';
     alert = { stop: true, fix: 'none', status: `${gone} 찾을 수 없어요`, why: ['슬랙에서 지웠거나 보관했어요 · ', pickLink()] };
+  } else if (broken) {
+    // 이유가 따로 있으면(막힘 · 승인 대기 · 취소) 그 말로, 아니면 풀렸다는 한 줄. 고치는 법은 `다시 연결` 하나다.
+    const line = document.createElement('span');
+    line.dataset.slackFail = (connect.last && connect.last.kind) || 'lost';
+    line.textContent = settingsSlackFailText(connect.last) || SETTINGS_SLACK_LOST;
+    alert = { stop: true, why: [line] };
   } else if (connected && fetchState.failing) {
     alert = { stop: settingsFailStop(fetchState), why: settingsFailWhy('slack', fetchState, { reconnect: !fetchState.claudeAuth }) };
   }
@@ -2371,7 +2568,11 @@ function settingsSlackCard(data) {
     { label: '보내는 법', onClick: () => { card.open('how'); } },
     { label: '채널 고르기', onClick: () => card.open('pick') },
     { label: '슬랙 정리 방식', onClick: () => { card.open('tidy'); } },
-    { label: '다시 연결(토큰 바꾸기)', onClick: () => card.open('token') },
+    // 새 방식은 `다시 연결`(허용 한 번), 옛 방식은 예전 그대로 + 버튼을 쓸 수 있는 자리에서만 새 방식으로 옮기는 칸.
+    ...(oauthOn
+      ? [{ label: '다시 연결', onClick: ready === 'ok' ? startConnect : () => card.open('connect') }]
+      : [{ label: '다시 연결(토큰 바꾸기)', onClick: () => card.open('token') },
+        ...(ready === 'ok' ? [{ label: '새 방식으로 다시 연결 (자동 갱신)', onClick: startConnect }] : [])]),
   ], [
     { label: '해제…', danger: true, onClick: () => settingsIntgConfirmOff(card, { slack: { enabled: false } }) },
   ]] : null;
@@ -2380,10 +2581,15 @@ function settingsSlackCard(data) {
     use: '나만 보는 채널에 공유한 메시지가 할 일로 들어와요',
     // 주기는 실제 등록 값(launchd 5분 간격, 매일 9–19시 — slack-capture.sh가 시간대를 본다).
     need: connected
-      ? `매일 9–19시, 5분마다${typeof slack.todayCount === 'number' ? ` · 오늘 새 항목 ${slack.todayCount}개` : ''}`
+      ? `매일 9–19시, 5분마다${typeof slack.todayCount === 'number' ? ` · 오늘 새 항목 ${slack.todayCount}개` : ''}${oauthOn && !broken ? ' · 자동 갱신 켜짐' : ''}`
       : '5분 · 팀 슬랙 앱 토큰 하나',
     status, menu, extra, alert,
-    fetch: connected ? { key: 'slack', state: fetchState, reconnect: () => card.open('token') } : null,
+    // 다른 기기에서 열었으면 여는 버튼이 회색 `슬랙 연결`이고 안내 한 줄이 늘 보인다.
+    ...(!connected && !channelStep && ready === 'remote' ? { locked: true, openText: '슬랙 연결', openClass: 'd-btn' } : {}),
+    fetch: connected ? {
+      key: 'slack', state: broken ? { ...fetchState, claudeAuth: false } : fetchState,
+      reconnect: oauthOn ? (ready === 'ok' ? startConnect : () => card.open('connect')) : () => card.open('token'),
+    } : null,
     onOpen: (self, mode) => {
       if (mode === 'how') { self.body.appendChild(settingsSlackSendHow(settingsSlackMainName(channels))); return; }
       if (mode === 'tidy') { settingsSlackTidy(self, data); return; }
@@ -2392,7 +2598,9 @@ function settingsSlackCard(data) {
         settingsIntgLog(self, 'slack', '슬랙 수집', slack.log || [], slackLedgerNotes(automation ? automation.tail : []));
         return;
       }
-      if (!connected || mode === 'token') { settingsSlackWizard(self, data, connected ? 'token' : 'new'); return; }
+      if (mode === 'token') { settingsSlackWizard(self, data, connected ? 'token' : 'new'); return; }
+      if (channelStep && mode !== 'connect') { settingsSlackWizard(self, data, 'oauth'); return; }
+      if (!connected || mode === 'connect') { settingsSlackConnectBody(self, data, { connected, broken }); return; }
       settingsSlackPick(self, data);
     },
   });
@@ -3201,6 +3409,12 @@ async function renderSettingsIntegrations({ quiet = false } = {}) {
   if (after && after.kind === 'jira' && settingsIntgCards.get('jira')) {
     settingsIntgCards.get('jira').open('done', after.displayName);
   }
+  // 슬랙 허용을 기다리는 중이면(이 창이 시작했든, 창을 새로 열었든) 기다리는 줄을 펴고 2초 확인을 잇는다.
+  // 기다림이 끝난 직후에는 연결 안 된 카드를 펴 둔다 — 허용했으면 채널 단계, 아니면 처음 카드(이유 한 줄과 함께).
+  const slackConnect = (data.slack || {}).connect || {};
+  const slackCard = settingsIntgCards.get('slack');
+  if (slackCard && slackConnect.ready === 'ok' && slackConnect.waiting) slackCard.open('connect');
+  else if (slackCard && after && after.kind === 'slack' && !settingsIntgConnected(data).slack && slackConnect.ready !== 'remote') slackCard.open();
 }
 
 // ---------- 설정 > 꾸미기 (이 맥에만) ----------

@@ -2621,6 +2621,15 @@ a.d-btn { text-decoration: none; }
 .d-ihow b, .d-ismall b, .d-isend b, .d-inum b, .d-ich b { color: var(--text); font-weight: 600; }
 .d-ihow code, .d-icode code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: var(--fs-cap); }
 .d-irow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* 슬랙 연결 버튼 흐름 — 새 색·모양 없이 있는 토큰만. 기다리는 줄은 글 + 글자 버튼 둘(좁으면 줄바꿈),
+   접힌 `고급: 토큰 직접 붙여 넣기`는 조용한 회색 글자이고 펼치면 얇은 선 아래에 지금의 토큰 화면이 그대로 선다. */
+.d-iwait { gap: 4px 14px; font-size: var(--fs-sm); color: var(--muted); }
+.d-iwait .d-ablink { min-height: var(--h-sm); text-decoration: none; }
+.d-iwait .d-ablink.k-acc { color: var(--accent-text); font-weight: 600; }
+.d-iadv { align-self: flex-start; min-height: var(--h-sm); font-size: var(--fs-sm); text-decoration: none; }
+.d-iadvbody { display: flex; flex-direction: column; gap: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.d-iadvbody[hidden] { display: none; }
+.d-iadvbody > .d-btn, .d-iadvbody > a.d-btn { align-self: flex-start; }
 .d-ismall { margin: 0; font-size: 12.5px; color: var(--dim); }
 .d-ifoot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .d-ifoot .sp { margin-left: auto; }
