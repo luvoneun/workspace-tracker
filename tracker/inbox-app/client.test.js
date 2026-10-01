@@ -12337,9 +12337,11 @@ test('머리줄 칩: 오늘 0개면 없음, 일부는 `✓ M/N` 파랑, 전부�
   assert.doesNotMatch(css, /d-topprog|d-sug|is-sug/);
 });
 
-test('머리줄 칩: 서버가 suggestions 칸을 보내도 오늘 할 만한 일 링크는 그리지 않는다', () => {
+test('머리줄 칩: 화면에는 제안을 그리는 코드가 없다 — 서버가 suggestions 칸을 보내도 읽지 않는다(소스 글자·함수 없음 확인)', () => {
+  const fx = firstRunClient();
+  assert.equal(fx.app.run("typeof renderSuggestions"), 'undefined');
   const source = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
-  assert.doesNotMatch(source, /오늘 할 만한 일|data\.suggestions/);
+  assert.doesNotMatch(source, /오늘 할 만한 일|data\.suggestions|suggestOpen/);
 });
 
 test('첫사용 2·3: `나중에 할 일 N` 버튼은 0이면 숨고 1이면 선다 — 서랍이 열린 채 0이 되면 서랍은 열어 두고 초점은 서랍 닫기로', () => {

@@ -454,7 +454,7 @@ function uiProjectLabel(item, grouped) {
 // 기한·밀림·진행·답변에는 14px 아이콘과 풀어 쓴 title 툴팁이 함께 붙는다. 급한 말(기한 N일 지남·오늘까지)만
 // 배지로 서고 나머지는 회색 글자다(모양은 ui.css가 정한다).
 // **우선순위는 `opts.noPriority`인 줄에서는 여기 나오지 않는다** — 업무 체크박스가 안의 위 꺾쇠로 말한다
-// (같은 말을 한 줄에서 두 번 하지 않는다). 체크박스가 없는 자리(당겨오기 제안 줄)에서는 예전처럼 글자로 쓴다.
+// (같은 말을 한 줄에서 두 번 하지 않는다). 여러 개 선택 중(체크박스가 없는 줄)에는 예전처럼 글자로 쓴다.
 const UI_PRIORITY_META = {
   critical: { text: '긴급', tone: 'urgent', hint: '가장 먼저 해야 하는 업무예요', level: 'top', mark: 'priTop' },
   high: { text: '중요', tone: 'warn', hint: '중요한 업무예요', level: 'high', mark: 'priHigh' },
@@ -483,7 +483,7 @@ function uiMetaCells(item, opts = {}) {
   if (carry) status.push(cell('m-carry', 'clock', carry, '오늘 하려다 넘어온 업무예요'));
   if (doing) {
     // 체크박스가 있는 줄(noPriority)은 반쯤 찬 체크박스가 `진행 중`을 말한다 — 오른쪽에 며칠째인지 적지 않는다(사용자 요청: 날짜 표시가 거슬림).
-    // 체크박스가 없는 자리(당겨오기 제안 줄)는 `진행 중` 글자만.
+    // 여러 개 선택 중(체크박스가 없는 줄)은 `진행 중` 글자만.
     if (!opts.noPriority && !opts.inDoingGroup) status.push(cell('m-doing', 'clock', '진행 중', `${uiKoDate(item.doing)}부터 진행 중이에요`));
   }
   // 나중에 할 일 서랍의 줄: 미래 날짜로 정한 업무는 그 날짜를 보인다(날짜 미정은 지어내지 않는다).
