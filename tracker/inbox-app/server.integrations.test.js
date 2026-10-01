@@ -766,6 +766,37 @@ test('WP-D1: 채널 이름 따라가기 — 바뀐 이름만 config에 고치고
   assert.equal(never.length, 0);
 });
 
+test('채널 이름 따라가기(새 방식): 한 줄 사본이 아니라 갱신 모듈이 준 토큰으로 묻고, 다시 연결해야 하면 조용히 지나간다', async (t) => {
+  const slackAuth = require('./slack-auth');
+  const fix = integrationsFixture(t, { integrations: { slack: true }, slack: { auth: 'oauth', clientId: '111.222', channels: { todo: { id: 'C0TODO11', name: '#my-todo' } } } });
+  fs.mkdirSync(fix.tokenDir, { recursive: true });
+  const paths = slackAuth.authPaths({ config: fix.read(), tokenDir: fix.tokenDir });
+  const at = Date.now();
+  // 서버가 꺼져 있던 사이 만료된 상태 — 한 줄 사본에는 죽은 토큰이 남아 있다.
+  fs.writeFileSync(paths.tokenFile, 'xoxe.xoxp-STALE\n', { mode: 0o600 });
+  fs.writeFileSync(paths.oauthFile, JSON.stringify({ version: 1, accessToken: 'xoxe.xoxp-STALE', refreshToken: 'xoxe-1-R', expiresAt: at - 1000, teamId: 'T1', scopes: [], clientId: '111.222', connectedAt: at, savedAt: at }), { mode: 0o600 });
+  const asked = [];
+  const request = async (url, options) => { asked.push(options.headers.Authorization); return json({ ok: true, channel: { id: 'C0TODO11', name: 'todo-renamed' } }); };
+  let refreshes = 0;
+  let answer = { ok: true, access_token: 'xoxe.xoxp-FRESH', refresh_token: 'xoxe-1-R2', expires_in: 43200 };
+  const refresh = async () => { refreshes += 1; return json(answer); };
+  const token = (config, tokenDir) => integrationsStore.slackTokenForUse(config, { tokenDir, request: refresh });
+  const follower = integrationsStore.createSlackNameFollower({ request, token });
+  const first = await follower.follow({ read: fix.read, configPath: fix.configPath, tokenDir: fix.tokenDir });
+  assert.deepEqual(first.renamed, { todo: '#todo-renamed' });
+  assert.deepEqual(asked, ['Bearer xoxe.xoxp-FRESH']);
+  assert.equal(refreshes, 1);
+  assert.ok(!fs.readFileSync(fix.configPath, 'utf8').includes('xoxe'), '토큰은 config에 적지 않는다');
+
+  // 갱신 토큰이 죽었으면(다시 연결 필요) 슬랙에 묻지 않고 빈 답 — 던지지 않는다.
+  const info = JSON.parse(fs.readFileSync(paths.oauthFile, 'utf8'));
+  fs.writeFileSync(paths.oauthFile, JSON.stringify({ ...info, expiresAt: Date.now() - 1000 }));
+  answer = { ok: false, error: 'invalid_refresh_token' };
+  const lost = integrationsStore.createSlackNameFollower({ request, token });
+  assert.deepEqual(await lost.follow({ read: fix.read, configPath: fix.configPath, tokenDir: fix.tokenDir }), { renamed: {}, missing: {} });
+  assert.equal(asked.length, 1);
+});
+
 test('WP-D1 라우트: 토큰 확인·채널 여러 개 만들기(부분 실패)·채널 고치기(저장된 토큰)·이름 따라가기 — 토큰은 응답·파일 어디에도 없다', async (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-wpd1-'));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));

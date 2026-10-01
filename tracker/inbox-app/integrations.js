@@ -436,8 +436,8 @@ function savedSlackToken(config, tokenDir) {
 
 // 슬랙 연결 방식 — `oauth`(슬랙 연결 버튼, 자동 갱신) · `token`(토큰 붙여 넣기, 칸이 없는 옛 설치 포함).
 const slackAuthMode = config => (clone(clone(config).slack).auth === 'oauth' ? 'oauth' : 'token');
-// 서버(15분 타이머, 다음 묶음)가 미리 갱신하는 기준 — 화면의 `다음 갱신`이 이 기준으로 나온다.
-const SLACK_REFRESH_AHEAD_MS = 60 * 60 * 1000;
+// 서버(15분 타이머)가 미리 갱신하는 기준 — 화면의 `다음 갱신`이 이 기준으로 나온다.
+const SLACK_REFRESH_AHEAD_MS = slackAuth.REFRESH_AHEAD_MS;
 
 // 저장된 연결로 **지금 쓸 수 있는** 슬랙 토큰 — 화면이 토큰을 보내지 않는 길(채널 만들기·고르기·연결 저장)에서 서버 안에서만 쓴다.
 // 옛 방식은 한 줄 파일을 읽을 뿐이고(없으면 빈 글자), 새 방식은 만료가 가까우면 갱신한 뒤의 토큰을 준다.
@@ -927,7 +927,12 @@ function withSlackNames(config, names) {
   return { ...config, slack: { ...slack, channels } };
 }
 
-function createSlackNameFollower({ now = Date.now, ttlMs = SLACK_FOLLOW_MS, request = (...args) => fetch(...args) } = {}) {
+// `token`은 지금 쓸 토큰을 주는 함수다 — 새 방식(자동 갱신)이면 만료가 가까울 때 갱신한 뒤의 토큰을 받는다
+// (한 줄 사본만 읽으면 서버가 꺼져 있던 사이 만료된 토큰으로 묻게 된다). 못 받으면 빈 글자로 보고 조용히 지나간다.
+function createSlackNameFollower({
+  now = Date.now, ttlMs = SLACK_FOLLOW_MS, request = (...args) => fetch(...args),
+  token: tokenFor = (config, tokenDir) => slackTokenForUse(config, { tokenDir }),
+} = {}) {
   const cache = new Map();   // 채널 id → { at, info }  (info: { name } | { missing: true } | null)
 
   async function look(token, id) {
@@ -955,7 +960,8 @@ function createSlackNameFollower({ now = Date.now, ttlMs = SLACK_FOLLOW_MS, requ
   async function follow({ read, configPath, tokenDir, write = atomicWrite } = {}) {
     const config = clone(read());
     if (clone(config.integrations).slack === false) return { renamed: {}, missing: {} };
-    const token = savedSlackToken(config, tokenDir);
+    let token = '';
+    try { token = await tokenFor(config, tokenDir); } catch { token = ''; }
     if (!token) return { renamed: {}, missing: {} };
     const channels = clone(clone(config.slack).channels);
     const keys = SLACK_CHANNEL_KEYS.filter(key => realChannelId(clone(channels[key]).id));

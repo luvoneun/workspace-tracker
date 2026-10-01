@@ -590,3 +590,41 @@ test('슬랙 연결 경로: 옛 방식에서 옮기다 설정 쓰기만 실패�
   assert.equal(status.auth, 'token');
   assert.ok(app.slackLog().some(line => line.startsWith('exchange good')), '교환까지는 갔다');
 });
+
+// ---------- 멈춤 판정(톱니바퀴 빨간 점 · 연동 탭 · 점검하기가 같이 쓰는 한 기준) ----------
+test('멈춤 판정: 새 방식 연결이 풀리면 빨간 점·연동 탭·점검하기가 같이 알고, 잠시 안 되는 갱신은 멈춤이 아니다', async (t) => {
+  const port = await allowedPort();
+  if (!port) { t.skip('4323~4331이 전부 쓰이는 중이라 건너뛴다'); return; }
+  const seed = { integrations: { slack: true, calendar: false, jira: false, tiro: false }, slack: { auth: 'oauth', clientId: '111.222', channels: { todo: { id: 'C0TODO11', name: '#my-todo' } } } };
+  const app = await startFake(t, port, seed);
+  const paths = slackAuth.authPaths({ config: seed, tokenDir: app.tokens });
+  const at = Date.now();
+  const info = { version: 1, accessToken: ACCESS, refreshToken: REFRESH, expiresAt: at + 9 * 60 * MIN, teamId: 'T1', teamName: '팀', userId: 'U1',
+    scopes: slackAuth.REQUIRED_SCOPES, clientId: '111.222', connectedAt: at, refreshedAt: null, savedAt: at };
+  fs.writeFileSync(paths.oauthFile, JSON.stringify(info), { mode: 0o600 });
+  fs.writeFileSync(paths.tokenFile, `${ACCESS}\n`, { mode: 0o600 });
+  const fail = failure => fs.writeFileSync(paths.stateFile, JSON.stringify({ failure, at, failCount: 1, savedAt: at }));
+  const alerts = async () => (await app.get('/api/automation/status')).alerts;
+
+  assert.deepEqual(await alerts(), [], '정상이면 점이 없다');
+  fail({ kind: 'retry', reason: 'network' });
+  assert.deepEqual(await alerts(), [], '잠시 안 되는 갱신은 멈춤이 아니다');
+  assert.equal((await app.get('/api/integrations')).slack.oauth.connected, true);
+
+  fail({ kind: 'reconnect', reason: 'slack_error', code: 'invalid_refresh_token' });
+  assert.deepEqual(await alerts(), ['slack']);
+  const state = await app.get('/api/integrations');
+  assert.deepEqual(state.alerts, ['slack'], '연동 탭도 같은 판단');
+  assert.equal(state.slack.oauth.connected, false);
+  const check = await app.get('/api/selfcheck');
+  const item = key => check.items.find(one => one.key === key);
+  assert.deepEqual({ label: item('slack_token').label, state: item('slack_token').state, detail: item('slack_token').detail }, { label: '슬랙 연결', state: 'bad', detail: '연결이 풀렸어요' });
+  assert.deepEqual({ state: item('slack').state, sameAs: item('slack').sameAs }, { state: 'bad', sameAs: 'slack_token' });
+  assert.equal(app.slackLog().length, 0, '풀린 것을 알면 슬랙에 묻지 않는다');
+
+  // 갱신 정보 파일이 사라져도 풀린 것이다.
+  fs.rmSync(paths.oauthFile);
+  fs.rmSync(paths.stateFile);
+  assert.deepEqual(await alerts(), ['slack']);
+  for (const text of [JSON.stringify(state), JSON.stringify(check), app.serverLog()]) for (const secret of [ACCESS, REFRESH]) assert.ok(!text.includes(secret));
+});
