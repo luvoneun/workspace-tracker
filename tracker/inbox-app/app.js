@@ -577,6 +577,7 @@ function uiGroupHeading(label, count, opts = {}) {
   const collapsible = typeof opts.onToggle === 'function';
   const head = document.createElement(collapsible ? 'button' : 'div');
   head.className = 'd-grp' + (opts.tone === 'doing' ? ' is-doing' : '') + (collapsible ? ' tog' : '');
+  head.dataset.moveId = `grp:${label}`; // 줄 이동 도우미의 열쇠 — 제목도 줄과 함께 미끄러진다(uiRowsMove)
   if (collapsible) {
     head.type = 'button';
     head.setAttribute('aria-expanded', String(!!opts.open));
@@ -746,14 +747,14 @@ function uiHeldFlush() {
 // ---- 줄 이동 도우미 (모션 기반 — DESIGN.md 모션 절) ----
 // 목록은 매번 통째로 다시 그린다. 줄이 순간 이동하지 않게, 그리기 앞뒤의 자리를 재서 옛 자리에서 새 자리로 잇는다(FLIP).
 // 움직이는 것은 사용자의 동작(클릭·키) 직후 0.5초 안의 다시 그리기뿐이다. 자동 갱신·처음 그리기·미뤘다 푸는 그리기·
-// 글자 입력 중·일정 정하기 판이나 종류 목록이 열린 동안·키보드로 연달아 하는 동작·보이는 줄 40개 초과는 그냥 그린다.
+// 글자 입력 중·일정 정하기 판이나 종류 목록이 열린 동안·키보드로 연달아 하는 동작·보이는 줄 40개 초과(전체 150줄 초과는 재지도 않음)는 그냥 그린다.
 // transform·opacity만 쓰고(넘침 없음), 값은 ui.css의 --ease·--t-move·--t-fast와 같다(el.animate는 var()를 못 읽는다).
-const UI_MOVE = { ease: 'cubic-bezier(0.22, 0.8, 0.3, 1)', move: 200, enter: 140, fade: 120, within: 500, max: 40 };
-const UI_MOVE_ROWS = '[data-task-id], [data-move-id]';
+const UI_GLIDE = { ease: 'cubic-bezier(0.22, 0.8, 0.3, 1)', move: 200, enter: 140, fade: 120, within: 500, max: 40, rows: 150 };
+const UI_GLIDE_ROWS = '[data-task-id], [data-move-id]';
 let uiActAt = 0;        // 마지막 사용자 동작 시각
 let uiActQuiet = false; // 그 동작이 키보드 연타(1초 안에 이어진 키·누르고 있는 키)였다
 let uiKeyAt = 0;
-let uiMoveLate = 0;     // 미뤘다 푸는 그리기 안에서는 0보다 크다
+let uiGlideLate = 0;     // 미뤘다 푸는 그리기 안에서는 0보다 크다
 
 // 문서의 click·keydown(잡기 단계)이 부른다. 키보드가 만든 click(detail 0)은 keydown이 이미 적었다.
 function uiActMark(event) {
@@ -769,65 +770,83 @@ function uiActMark(event) {
   }
   uiActAt = now;
 }
-function uiMoveStill(render) {
-  uiMoveLate += 1;
-  try { return render(); } finally { uiMoveLate -= 1; }
+function uiGlideStill(render) {
+  uiGlideLate += 1;
+  try { return render(); } finally { uiGlideLate -= 1; }
 }
 // load()가 uiRenderOrHold에 넘기는 그리기를 감싼다 — 바로 그려지면 움직이고, 미뤄졌다 나중에 풀리면 움직이지 않는다.
-function uiMoveUnlessLate(render) {
+function uiGlideUnlessLate(render) {
   let late = false;
   Promise.resolve().then(() => { late = true; });
-  return () => (late ? uiMoveStill(render) : render());
+  return () => (late ? uiGlideStill(render) : render());
 }
-function uiMoveAllowed() {
-  if (uiMoveLate || uiActQuiet || Date.now() - uiActAt > UI_MOVE.within) return false;
+function uiGlideAllowed() {
+  if (uiGlideLate || uiActQuiet || Date.now() - uiActAt > UI_GLIDE.within) return false;
   if (uiSchedOpen || uiComposingEl || uiIsTextEntry(document.activeElement) || document.hidden) return false;
   return !document.querySelector?.('.d-typepop');
 }
-// 줄마다 자리와 "화면에 보이는가"를 잰다. 열쇠는 업무 id(새로 들어온 것 줄은 data-move-id).
-function uiMoveBoxes(list) {
+// 줄마다 자리와 "화면에 보이는가"를 잰다. 열쇠는 업무 id(새로 들어온 것 줄·그룹 제목은 data-move-id).
+// sized = 높이가 있었다(숨은 탭·접힌 구역 안의 줄은 자리가 전부 0이라 옛 자리로 쓸 수 없다).
+function uiGlideBoxes(list) {
   const boxes = new Map();
   const viewW = window.innerWidth || 0;
   const viewH = window.innerHeight || 0;
   let shownCount = 0;
-  list.querySelectorAll(UI_MOVE_ROWS).forEach((row) => {
+  list.querySelectorAll(UI_GLIDE_ROWS).forEach((row) => {
     const box = row.getBoundingClientRect();
-    const shown = box.height > 0 && box.bottom > 0 && box.top < viewH && box.right > 0 && box.left < viewW;
+    const sized = box.height > 0;
+    const shown = sized && box.bottom > 0 && box.top < viewH && box.right > 0 && box.left < viewW;
     if (shown) shownCount += 1;
-    boxes.set(String(row.dataset.taskId ?? row.dataset.moveId), { row, left: box.left, top: box.top, shown });
+    boxes.set(String(row.dataset.taskId ?? row.dataset.moveId), { row, left: box.left, top: box.top, shown, sized });
   });
   return { boxes, shownCount };
 }
-function uiMovePlay(row, frames, duration) {
+function uiGlidePlay(row, frames, duration) {
   let motion;
-  try { motion = row.animate(frames, { duration, easing: UI_MOVE.ease }); } catch { return; }
+  try { motion = row.animate(frames, { duration, easing: UI_GLIDE.ease }); } catch { return; }
   // 끝남 신호가 안 와도(가려진 탭 등) 시간으로 치운다 — transform이 줄에 남지 않게.
   setTimeout(() => { try { motion.cancel(); } catch { /* 이미 끝났다 */ } }, duration + 80);
 }
 // 오늘 탭의 세 목록은 위아래로 이어져 있다 — 위 목록이 줄면 아래 목록의 줄도 밀린다. 그래서 같은 틱 안의 그리기들은
 // "그리기 전 자리"를 한 번만(첫 그리기 직전에, 세 목록 모두) 재서 함께 쓰고, 다 그린 뒤 한 번에 잇는다.
-const UI_MOVE_LISTS = ['inboxList', 'todayTaskList', 'laterTaskList'];
-let uiMoveShot = null; // { before: Map<목록, 자리>, drawn: Set<다시 그린 목록> }
-function uiRowsMove(list, render) {
-  if (!list || !list.querySelectorAll || !uiMoveAllowed()) { render(); return; }
-  if (!uiMoveShot) {
-    const shot = { before: new Map(), drawn: new Set() };
-    uiMoveShot = shot;
-    UI_MOVE_LISTS.forEach((id) => {
-      const el = document.getElementById(id);
-      if (el && el.querySelectorAll) shot.before.set(el, uiMoveBoxes(el));
-    });
-    // 그리기를 부른 쪽(load의 상세 카드 자리 잡기 등)이 줄의 새 자리를 다 읽은 뒤, 화면에 칠해지기 전에 건다.
-    Promise.resolve().then(() => { uiMoveShot = null; uiMoveJoin(shot); });
+const UI_GLIDE_LISTS = ['inboxList', 'todayTaskList', 'laterTaskList'];
+let uiGlideShot = null; // { before: Map<목록, 자리>, drawn: Set<다시 그린 목록> }
+function uiGlideLists(list) {
+  const lists = UI_GLIDE_LISTS.map(id => document.getElementById(id)).filter(el => el && el.querySelectorAll);
+  return lists.includes(list) ? lists : [...lists, list];
+}
+// 줄이 너무 많으면 자리를 재지도 않는다(잴 때마다 화면 전체를 다시 계산한다) — 줄 수만 세고 그냥 그린다.
+function uiGlideTooMany(lists) {
+  return lists.reduce((sum, el) => sum + el.querySelectorAll(UI_GLIDE_ROWS).length, 0) > UI_GLIDE.rows;
+}
+// 그리기 전 자리를 잡아 둔다. 움직이지 않을 그리기면 null.
+function uiGlideOpen(list) {
+  if (!list || !list.querySelectorAll || !uiGlideAllowed()) return null;
+  if (uiGlideShot) {
+    if (!uiGlideShot.before.has(list)) uiGlideShot.before.set(list, uiGlideBoxes(list));
+    return uiGlideShot;
   }
-  if (!uiMoveShot.before.has(list)) uiMoveShot.before.set(list, uiMoveBoxes(list));
-  uiMoveShot.drawn.add(list);
+  const lists = uiGlideLists(list);
+  if (uiGlideTooMany(lists)) return null;
+  const shot = { before: new Map(lists.map(el => [el, uiGlideBoxes(el)])), drawn: new Set() };
+  uiGlideShot = shot;
+  // 그리기를 부른 쪽(load의 상세 카드 자리 잡기 등)이 줄의 새 자리를 다 읽은 뒤, 화면에 칠해지기 전에 건다.
+  Promise.resolve().then(() => {
+    uiGlideShot = null;
+    try { uiGlideJoin(shot); } catch { /* 움직임만 빠진다 */ }
+  });
+  return shot;
+}
+// 자리 재기가 어떻게 되든 그리기는 정확히 한 번 돈다 — 움직임은 덤이다.
+function uiRowsMove(list, render) {
+  try { uiGlideOpen(list)?.drawn.add(list); } catch { /* 재지 못했으면 그냥 그린다 */ }
   render();
 }
-function uiMoveJoin(shot) {
-  const lists = [...shot.before].map(([list, before]) => ({ list, before, after: uiMoveBoxes(list) }));
+function uiGlideJoin(shot) {
+  if (uiGlideTooMany([...shot.before.keys()])) return;
+  const lists = [...shot.before].map(([list, before]) => ({ list, before, after: uiGlideBoxes(list) }));
   const count = side => lists.reduce((sum, each) => sum + each[side].shownCount, 0);
-  if (count('before') > UI_MOVE.max || count('after') > UI_MOVE.max) return;
+  if (count('before') > UI_GLIDE.max || count('after') > UI_GLIDE.max) return;
   const reduce = detailReduce(); // 움직임 줄이기: 이동은 끄고 새 줄의 120ms 흐려짐만
   lists.forEach(({ list, before, after }) => after.boxes.forEach((now, id) => {
     const row = now.row;
@@ -836,15 +855,16 @@ function uiMoveJoin(shot) {
     if (!was) {
       // 새로 생긴 줄 — 일정 정하기의 새 줄 솟음(is-rise)이 이미 걸렸으면 그것 하나만 움직인다.
       if (!now.shown || !shot.drawn.has(list) || row.classList.contains('is-rise')) return;
-      if (reduce) uiMovePlay(row, [{ opacity: 0 }, { opacity: 1 }], UI_MOVE.fade);
-      else uiMovePlay(row, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], UI_MOVE.enter);
+      if (reduce) uiGlidePlay(row, [{ opacity: 0 }, { opacity: 1 }], UI_GLIDE.fade);
+      else uiGlidePlay(row, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], UI_GLIDE.enter);
       return;
     }
-    if (reduce || (!was.shown && !now.shown)) return;
+    // 전에 높이가 없던 줄(숨은 탭 안)은 옛 자리가 (0,0)이다 — 거기서 날아오지 않게 그냥 둔다.
+    if (reduce || !was.sized || (!was.shown && !now.shown)) return;
     const dx = was.left - now.left;
     const dy = was.top - now.top;
     if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
-    uiMovePlay(row, [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], UI_MOVE.move);
+    uiGlidePlay(row, [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], UI_GLIDE.move);
   }));
 }
 
@@ -1747,14 +1767,14 @@ async function load() {
   renderDateBar(data);
   renderCalendar(data.calendar);
   // 목록 안의 글자 칸(새로 들어온 것 제목 고치기·그룹 `+` 줄)에서 치는 중이면 그 목록은 손을 뗀 뒤 그린다.
-  // 세 목록은 줄 이동 도우미(uiRowsMove)를 거쳐 그린다 — 미뤘다 푸는 그리기는 움직이지 않는다(uiMoveUnlessLate).
-  uiRenderOrHold('inbox', document.getElementById('inboxZone'), uiMoveUnlessLate(() => renderInbox(data.inboxTasks || [])));
+  // 세 목록은 줄 이동 도우미(uiRowsMove)를 거쳐 그린다 — 미뤘다 푸는 그리기는 움직이지 않는다(uiGlideUnlessLate).
+  uiRenderOrHold('inbox', document.getElementById('inboxZone'), uiGlideUnlessLate(() => renderInbox(data.inboxTasks || [])));
   renderUpdateNotice();
   renderNewsCard();
   renderGuideCard();
-  uiRenderOrHold('later', document.getElementById('laterTaskList'), uiMoveUnlessLate(() => renderLaterTasks(data.laterTasks || [])));
+  uiRenderOrHold('later', document.getElementById('laterTaskList'), uiGlideUnlessLate(() => renderLaterTasks(data.laterTasks || [])));
   renderWaiting(data.waiting || []);
-  uiRenderOrHold('today', document.getElementById('todayTaskList'), uiMoveUnlessLate(() => renderTodayTasks(data.todayTasks || [])));
+  uiRenderOrHold('today', document.getElementById('todayTaskList'), uiGlideUnlessLate(() => renderTodayTasks(data.todayTasks || [])));
   decisionArchiveCache = data.decisionArchive || [];
   // 아직 PRD에 반영하지 않은 결정 수. 탭 이름 옆 작은 숫자와 결정 구역 제목이 같은 값을 쓴다.
   const pendingDecisions = (data.decisions || []).length;
