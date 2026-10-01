@@ -4958,10 +4958,9 @@ function uiSchedToggle(item, row, anchor) {
     row.classList.add('is-leaving');
     if (scheduled === todayStr()) uiSchedRise.set(item.id, Date.now());
     let saved = false;
-    const save = async () => { await setTaskScheduled(item.id, scheduled); saved = true; };
+    const save = async () => { await setTaskScheduled(item.id, scheduled); saved = true; uiInboxSchedUndo(item, scheduled); };
     try {
-      if (scheduled === todayStr() || scheduled === null) await fadeOutAndRun(row, save, uiMoveNotice(message, [item], scheduled));
-      else await uiMoveRun(row, save, uiMoveNotice(message, [item], scheduled));
+      await uiMoveRun(row, save, uiMoveNotice(message, [item], scheduled));
     } finally {
       uiSchedBusy.delete(item.id);
     }
@@ -5969,6 +5968,18 @@ async function setTaskScheduled(id, scheduled) {
     body: JSON.stringify({ id, scheduled }),
   });
   await load();
+}
+
+// `새로 들어온 것`은 itemsById에 없어 request(recordUndoFor)가 되돌리기 기록을 남기지 못한다 — 일정 정하기 판이 저장된 뒤 이걸로 남긴다.
+// 되돌릴 때는 예정일을 전 값으로 돌리면서 받지 않은 표시도 되살리고(inbox: true), 다시 하기는 처음 보낸 그대로다(서버가 표시를 다시 지운다).
+function uiInboxSchedUndo(item, scheduled) {
+  if (itemsById.has(item.id)) return; // 목록에 있는 업무면 request가 이미 남겼다
+  const before = item.scheduled || null;
+  pushUndo({
+    label: item.description,
+    undo: () => postJson('/api/track/set-scheduled', { id: item.id, scheduled: before, inbox: true }),
+    redo: () => postJson('/api/track/set-scheduled', { id: item.id, scheduled }),
+  });
 }
 
 // 우선순위(아이디어 화면에서는 `가능성` — 같은 값·같은 저장 길)도 ⌘Z 대상이다.
