@@ -2331,6 +2331,76 @@ test('회의 적기: 기록되지 않은 회의는 지금처럼 회의에 연결
   assert.deepEqual(rows().map(row => nodeFind(row, 'ti').textContent), ['바로 담는 할 일', '바로 담는 확인'], '담은 줄은 이 자리에 남아 보인다');
 });
 
+test('회의 적기: 직접 적어 담은 줄은 ⌘Z로 되돌린다(삭제 휴지통으로) — 여러 줄은 적은 역순으로, 다시 실행은 휴지통에서 되살린다', async () => {
+  const { app, held, input, enter, titles } = meetingCaptureClient();
+  const sending = [enter('첫 줄'), enter('둘째 줄')];
+  await settle(); held[0].ok();
+  await settle(); held[1].ok();
+  await Promise.all(sending);
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(undoStack.map(entry => entry.label))')), ['첫 줄 (회의에서 적기)', '둘째 줄 (회의에서 적기)']);
+  // 가짜 서버: remove는 목록에서 빼고 restore는 되돌려 놓는다.
+  const calls = [];
+  const trash = [];
+  app.context.fetch = async (url, options) => {
+    const body = options && options.body ? JSON.parse(options.body) : null;
+    if (body) calls.push([url, body]);
+    const saved = app.context.__saved;
+    if (url === '/api/track/remove') trash.push(...saved.splice(saved.findIndex(item => item.id === body.id), 1));
+    if (url === '/api/track/restore') saved.push(...trash.splice(trash.findIndex(item => item.id === body.id), 1));
+    return new Response('{"ok":true}');
+  };
+  // 입력줄이 비어 있을 때의 ⌘Z — 초점을 옮기지 않아도 방금 담은 줄부터 되돌린다.
+  let prevented = false;
+  await input().listeners.keydown({ key: 'z', metaKey: true, preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  assert.deepEqual(calls, [['/api/track/remove', { id: 'n2' }]], '초안 담기의 실행 취소와 같은 길 — 삭제 휴지통으로');
+  assert.deepEqual(titles(), ['첫 줄'], '입력줄에 초점이 있어도 목록이 맞춰진다');
+  await app.run("replayUndo('undo')");
+  assert.deepEqual(calls[1], ['/api/track/remove', { id: 'n1' }]);
+  app.run('__draw()');
+  assert.deepEqual(titles(), []);
+  // 다시 실행(⇧⌘Z)
+  await input().listeners.keydown({ key: 'Z', metaKey: true, shiftKey: true, preventDefault() {} });
+  assert.deepEqual(calls[2], ['/api/track/restore', { id: 'n1' }]);
+  assert.deepEqual(titles(), ['첫 줄']);
+  // 글을 적는 중의 ⌘Z는 그 글의 실행 취소다(앱이 가로채지 않는다).
+  input().value = '적는 중';
+  let taken = false;
+  await input().listeners.keydown({ key: 'z', metaKey: true, preventDefault() { taken = true; } });
+  assert.equal(taken, false);
+  assert.equal(calls.length, 3);
+  // 저장에 실패한 줄은 되돌릴 것이 없다.
+  app.run('undoStack.length = 0;');
+  app.context.fetch = async () => new Response('{"ok":false}', { status: 500 });
+  input().value = '';
+  await enter('실패할 줄');
+  await settle();
+  assert.equal(app.run('undoStack.length'), 0);
+});
+
+test('회의 적기: 누르는 화면에서는 담은 뒤 알림에 `되돌리기`가 서고, 키보드가 있는 화면에서는 알림 없이 조용히 담는다', async () => {
+  const quiet = meetingCaptureClient();
+  let sending = quiet.enter('조용히 담는 줄');
+  await settle(); quiet.held[0].ok();
+  await sending;
+  assert.doesNotMatch(String(quiet.app.nodes.get('liveRegion')?.textContent || ''), /담았어요/);
+
+  const touch = meetingCaptureClient();
+  touch.app.run('window.matchMedia = () => ({ matches: true });');
+  sending = touch.enter('손가락으로 적은 줄');
+  await settle(); touch.held[0].ok();
+  await sending;
+  const region = touch.app.nodes.get('liveRegion');
+  assert.match(region.textContent, /^담았어요/);
+  touch.app.context.fetch = async () => new Response('{"ok":true}');
+  const calls = [];
+  const real = touch.app.context.fetch;
+  touch.app.context.fetch = async (url, options) => { if (options && options.body) calls.push(url); return real(url, options); };
+  await region.children.find(node => node.textContent === '되돌리기').listeners.click();
+  await settle();
+  assert.deepEqual(calls, ['/api/track/remove']);
+});
+
 // ---------- 종류 목록: 줄의 `할 일 ⌄` ----------
 // 떠 있는 목록을 다루려면 가짜 창이 조금 더 진짜 같아야 한다(body·style·classList·remove·contains·초점).
 function richDom(app) {

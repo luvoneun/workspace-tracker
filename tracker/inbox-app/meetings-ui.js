@@ -969,6 +969,7 @@ function meetingCaptureSend(event, linked, entry, host) {
     try {
       entry.id = await meetingCaptureSave(event, linked, entry);
       entry.state = 'saved';
+      meetingCaptureUndo(event, entry);
     } catch {
       entry.state = 'fail'; // 알림은 request()가 이미 했다 — 적은 글은 그 줄에 그대로 있다
     }
@@ -976,6 +977,29 @@ function meetingCaptureSend(event, linked, entry, host) {
     meetingItemsRepaint(host);
   });
   return run;
+}
+
+// 직접 적어 담은 줄도 되돌린다 — 초안 담기의 `실행 취소`와 같은 길이다: 만든 항목을 삭제 휴지통으로 옮기고(원문 보존),
+// 다시 실행은 휴지통에서 되살린다. ⌘Z와 누르는 화면의 알림 `되돌리기`가 같은 기록을 쓴다.
+function meetingCaptureUndo(event, entry) {
+  if (!entry.id) return;
+  const key = panelMeetingKey(event);
+  const record = {
+    label: `${entry.text} (회의에서 적기)`,
+    undo: async () => {
+      await postJson('/api/track/remove', { id: entry.id });
+      const left = (meetingCaptureLocal.get(key) || []).filter(other => other !== entry);
+      if (left.length) meetingCaptureLocal.set(key, left); else meetingCaptureLocal.delete(key);
+    },
+    redo: async () => {
+      await postJson('/api/track/restore', { id: entry.id });
+      // 기록되지 않은 회의는 서버 목록이 없어 이 자리의 줄로 다시 세운다.
+      if (!event.id) { entry.seen = false; meetingCaptureLocal.set(key, [...(meetingCaptureLocal.get(key) || []), entry]); }
+    },
+  };
+  pushUndo(record);
+  // 누르는 화면에는 ⌘Z가 없다 — 알림의 `되돌리기` 버튼으로 같은 기록을 되돌린다(키보드가 있는 화면에서는 조용히 담는다).
+  if (uiTouchScreen()) uiUndoNotice('담았어요', null, record);
 }
 
 function meetingCaptureAdd(event, linked, entries, host) {
@@ -1081,7 +1105,14 @@ function panelMeetingItems(event, box, host = MEETING_HOST_CARD) {
     if (active && list.contains && list.contains(active) && uiIsTextEntry(active)) return;
     const real = linked ? meetingItemsInOrder(wfMeetingItems(event.id)) : [];
     const shown = new Set(real.map(item => item.id));
-    const local = (meetingCaptureLocal.get(key) || []).filter(entry => !(entry.state === 'saved' && shown.has(entry.id)));
+    // 서버 목록에 들어온 줄은 내려놓는다. 한 번 보였다가 사라진 줄(되돌리기·삭제)도 내려놓는다.
+    const local = (meetingCaptureLocal.get(key) || []).filter((entry) => {
+      if (entry.state !== 'saved') return true;
+      if (shown.has(entry.id)) return false;
+      const found = typeof wfItem === 'function' && !!wfItem(entry.id);
+      if (found) entry.seen = true;
+      return found || !entry.seen;
+    });
     if (local.length) meetingCaptureLocal.set(key, local); else meetingCaptureLocal.delete(key);
     const rows = [];
     real.forEach((item) => {
@@ -1151,6 +1182,12 @@ function panelMeetingCapture(event, box, linked, host = MEETING_HOST_CARD) {
   };
   input.addEventListener('input', showKind);
   input.addEventListener('keydown', (keyEvent) => {
+    // 칸이 비어 있을 때의 ⌘Z는 방금 적어 담은 줄을 되돌린다(⇧⌘Z는 다시 실행) — 초점이 입력줄을 떠나지 않아도 되게.
+    // 글을 적는 중이면 평소처럼 그 글의 실행 취소다.
+    if ((keyEvent.metaKey || keyEvent.ctrlKey) && !keyEvent.altKey && String(keyEvent.key).toLowerCase() === 'z' && !input.value) {
+      if (keyEvent.preventDefault) keyEvent.preventDefault();
+      return replayUndo(keyEvent.shiftKey ? 'redo' : 'undo').then(() => meetingItemsRepaint(host));
+    }
     if (keyEvent.key !== 'Enter' || keyEvent.isComposing) return; // 한글을 조합하는 중의 Enter는 글자를 확정하는 것이다
     if (keyEvent.preventDefault) keyEvent.preventDefault();
     const raw = input.value;
