@@ -633,3 +633,25 @@ test('멈춤 판정: 새 방식 연결이 풀리면 빨간 점·연동 탭·점�
   assert.deepEqual(await alerts(), ['slack']);
   for (const text of [JSON.stringify(state), JSON.stringify(check), app.serverLog()]) for (const secret of [ACCESS, REFRESH]) assert.ok(!text.includes(secret));
 });
+
+test('가드된 갱신 길: 만료가 임박한 새 방식에서 채널 앞머리 묻기·채널 만들기·연결 저장을 쳐도 갱신 요청은 바깥으로 나가지 않는다', async (t) => {
+  const port = await allowedPort();
+  if (!port) { t.skip('4323~4331이 전부 쓰이는 중이라 건너뛴다'); return; }
+  const seed = { integrations: { slack: true, calendar: false, jira: false, tiro: false }, slack: { auth: 'oauth', clientId: '111.222', channels: { todo: { id: 'C0TODO11', name: '#my-todo' } } } };
+  const app = await startFake(t, port, seed);
+  const paths = slackAuth.authPaths({ config: seed, tokenDir: app.tokens });
+  const at = Date.now();
+  fs.writeFileSync(paths.oauthFile, JSON.stringify({ version: 1, accessToken: ACCESS, refreshToken: REFRESH, expiresAt: at + 2 * MIN, teamId: 'T1', teamName: '팀', userId: 'U1',
+    scopes: slackAuth.REQUIRED_SCOPES, clientId: '111.222', connectedAt: at, refreshedAt: null, savedAt: at }), { mode: 0o600 });
+  fs.writeFileSync(paths.tokenFile, `${ACCESS}\n`, { mode: 0o600 });
+  // 이 서버의 fetch는 통째로 가짜 슬랙이다 — 가드가 없으면 갱신이 그 fetch로 나가 `exchange …` 줄이 남는다.
+  assert.equal((await app.post('/api/integrations/slack-token-check', {})).status, 200);
+  await app.post('/api/integrations/slack-channel', { name: 'me-todo', key: 'waiting' });
+  await app.post('/api/integrations/save', { slack: { enabled: true, channels: { todo: 'C0TODO11' } } });
+  const log = app.slackLog();
+  assert.ok(log.some(line => line === 'auth.test oauth'), '가진 토큰으로 슬랙 확인은 한다');
+  assert.deepEqual(log.filter(line => line.startsWith('exchange')), [], '갱신 요청(oauth.v2.access)은 한 번도 나가지 않았다');
+  // 갱신은 "잠시 안 됨"으로 적혔고 갱신 정보는 그대로다.
+  assert.equal(JSON.parse(fs.readFileSync(paths.stateFile, 'utf8')).failure.kind, 'retry');
+  assert.equal(JSON.parse(fs.readFileSync(paths.oauthFile, 'utf8')).refreshToken, REFRESH);
+});

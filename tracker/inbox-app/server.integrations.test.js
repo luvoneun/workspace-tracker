@@ -766,6 +766,25 @@ test('WP-D1: 채널 이름 따라가기 — 바뀐 이름만 config에 고치고
   assert.equal(never.length, 0);
 });
 
+test('연동 상태(새 방식): 한 줄 사본만 없어도 갱신 정보가 있으면 연결된 것으로 읽는다 — 옛 방식은 토큰 파일 유무 그대로', (t) => {
+  const slackAuth = require('./slack-auth');
+  const fix = integrationsFixture(t, { integrations: { slack: true }, slack: { auth: 'oauth', channels: { todo: { id: 'C0TODO11', name: '#my-todo' } } } });
+  fs.mkdirSync(fix.tokenDir, { recursive: true });
+  const paths = slackAuth.authPaths({ config: fix.read(), tokenDir: fix.tokenDir });
+  const read = config => integrationsStore.readIntegrations(config, { tokenDir: fix.tokenDir, claude: false }).slack;
+  assert.equal(read(fix.read()).hasToken, false, '갱신 정보도 사본도 없으면 연결 안 됨');
+  const at = Date.now();
+  fs.writeFileSync(paths.oauthFile, JSON.stringify({ version: 1, accessToken: 'xoxe.xoxp-A', refreshToken: 'xoxe-1-R', expiresAt: at + 3600000, teamId: 'T1', scopes: [], connectedAt: at, savedAt: at }), { mode: 0o600 });
+  const state = read(fix.read());
+  assert.equal(state.hasToken, true, '사본 쓰기가 실패했거나 지워져도 수집은 도니까 연결된 것이다');
+  assert.equal(state.oauth.connected, true);
+  assert.ok(!JSON.stringify(state).includes('xoxe'));
+  // 풀렸어도 카드는 연결된 카드(풀림)로 남는다 — 연결 안 한 카드로 돌아가지 않는다.
+  fs.writeFileSync(paths.stateFile, JSON.stringify({ failure: { kind: 'reconnect', reason: 'slack_error', code: 'token_revoked' }, at, failCount: 0, savedAt: at }));
+  assert.deepEqual([read(fix.read()).hasToken, read(fix.read()).oauth.connected], [true, false]);
+  assert.equal(read({ integrations: { slack: true }, slack: {} }).hasToken, false, '옛 방식은 갱신 정보 파일을 보지 않는다');
+});
+
 test('채널 이름 따라가기(새 방식): 한 줄 사본이 아니라 갱신 모듈이 준 토큰으로 묻고, 다시 연결해야 하면 조용히 지나간다', async (t) => {
   const slackAuth = require('./slack-auth');
   const fix = integrationsFixture(t, { integrations: { slack: true }, slack: { auth: 'oauth', clientId: '111.222', channels: { todo: { id: 'C0TODO11', name: '#my-todo' } } } });

@@ -193,8 +193,11 @@ if [ "$USE_SLACK" = "yes" ]; then
     fi
   elif [ -n "$TOKEN_FILE" ] && [ -f "$TOKEN_FILE" ]; then
     ok "슬랙 토큰 있음"
+  elif [ -f "$HOME/.config/workspace-slack-token" ]; then
+    # 설정에 적힌 자리에는 없지만 기본 자리에 있다 — 앱과 수집이 그 파일을 읽는다.
+    ok "슬랙 토큰 있음 (기본 자리)"
   else
-    warn "슬랙 토큰 파일이 없어요: ${TOKEN_FILE:-(설정 안 됨)} — 슬랙 캡처는 돌지 않아요."
+    warn "슬랙 토큰 파일이 없어요: ${TOKEN_FILE:-(설정 안 됨)} — 앱의 설정 › 연동 › 슬랙에서 연결하기 전에는 슬랙 수집이 실패로 남아요."
   fi
 fi
 

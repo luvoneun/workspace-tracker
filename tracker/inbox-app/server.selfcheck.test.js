@@ -491,3 +491,18 @@ test('서버: 토큰을 다시 받아야 하는 수집 실패 낱말(SLACK_AUTH_
   assert.equal(serverModule.slackRefresher.running(), false, '운영(직접 띄운 서버)에서만 켠다');
   assert.equal(serverModule.fetchStateAutomation({ lastKind: 'fail', lastSummary: 'my-todo 채널 확인 실패 — Slack: token_expired', failTimes: [Date.now()] }, re).stuck, true, '한 번이어도 토큰 문제면 멈춤');
 });
+
+test('시험 환경: 토큰 폴더는 늘 임시 폴더이고 슬랙 자동 갱신 타이머는 꺼져 있다 — 진짜 서버를 띄우는 시험도 실제 ~/.config에 닿지 않는다', () => {
+  const tokens = process.env.WORKSPACE_TOKEN_DIR;
+  assert.ok(tokens && tokens.startsWith(automationHome + path.sep), '공용 준비가 토큰 폴더를 임시 폴더로 끼운다');
+  assert.ok(!tokens.startsWith(path.join(os.homedir(), '.config')));
+  assert.equal(process.env.WORKSPACE_NO_SLACK_REFRESH, '1');
+  assert.equal(integrations.tokenPaths().dir, tokens);
+  assert.ok(require('./slack-auth').authPaths({ config: { slack: { auth: 'oauth' } } }).lockDir.startsWith(tokens + path.sep), '갱신 잠금도 그 폴더 안');
+  const source = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+  assert.match(source, /if \(!process\.env\.WORKSPACE_NO_REMOTE_CHECK && !process\.env\.WORKSPACE_NO_SLACK_REFRESH\) slackRefresher\.start\(\);/);
+  // 바깥 확인을 켜고 진짜 서버를 띄우는 시험(업데이트·소식)은 둘 다 직접 준다.
+  for (const name of ['server.update.test.js', 'server.news.test.js']) {
+    assert.match(fs.readFileSync(path.join(__dirname, name), 'utf8'), /WORKSPACE_NO_REMOTE_CHECK: '', WORKSPACE_NO_SLACK_REFRESH: '1', WORKSPACE_TOKEN_DIR: path\.join\(root, 'tokens'\)/, name);
+  }
+});

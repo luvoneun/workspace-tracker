@@ -29,6 +29,10 @@ process.env.WORKSPACE_BACKUP_DIR = path.join(automationHome, 'workspace-data-bac
 process.env.WORKSPACE_CONFIG = path.join(directory, 'absent.config.json');
 // 새 버전이 나왔는지 원격에 묻는 것도 끈다 — 테스트가 네트워크에 닿지 않게.
 process.env.WORKSPACE_NO_REMOTE_CHECK = '1';
+// 토큰 폴더도 임시 폴더다 — 설정 없는 서버가 실제 `~/.config`의 토큰·갱신 정보 파일을 보지 않게(값은 물론 있는지도).
+// 슬랙 자동 갱신 타이머도 확실히 끈다(진짜 서버를 띄우는 시험이 이 환경을 물려받는다).
+process.env.WORKSPACE_TOKEN_DIR = path.join(automationHome, 'tokens');
+process.env.WORKSPACE_NO_SLACK_REFRESH = '1';
 const { server } = require('./server');
 const date = value => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
 const today = date(new Date());

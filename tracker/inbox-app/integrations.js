@@ -577,6 +577,8 @@ function readIntegrations(config, { tokenDir, claude } = {}) {
   const mode = notes && typeof notes === 'object' && typeof notes.other === 'string'
     ? 'other'
     : (notes === 'tiro' || notes === 'manual' ? notes : (on('tiro') ? 'tiro' : 'manual'));
+  // 새 방식(자동 갱신)의 상태 — 값 없이. 옛 방식이면 null.
+  const slackOAuth = slackAuthMode(config) === 'oauth' ? slackOAuthView(config, tokenDir) : null;
   const channels = clone(slack.channels);
   // 뺀 채널(`off: true`)은 **없는 것으로** 읽는다 — 연결 수·상태 줄·수집 목록 어디에도 서지 않는다.
   // 채널 고르기에서 다시 체크하면 새로 만들지 않고 같은 채널을 다시 켜야 하므로 이름만 따로 알려 준다(id는 서버 안에만).
@@ -598,12 +600,14 @@ function readIntegrations(config, { tokenDir, claude } = {}) {
       workspaceUrl: trimmed(slack.workspaceUrl),
       // 토큰을 받으러 갈 주소(토큰이 아니다). 사람이 적어 둔 값이 https가 아니면 목록 화면으로 보낸다.
       appUrl: slackAppUrl(slack.appUrl),
-      hasToken: !!findToken(paths, 'slack', slack.tokenFile),
+      // 새 방식은 갱신 정보 파일이 연결의 주인이다 — 한 줄 사본만 없어도(쓰기 실패·지워짐) 연결된 것으로 본다
+      // (수집·서버는 갱신 정보에서 토큰을 받고 다음 호출이 사본을 다시 맞춘다). 풀렸는지는 `oauth.connected`가 말한다.
+      hasToken: !!findToken(paths, 'slack', slack.tokenFile) || !!(slackOAuth && slackOAuth.expiresAt !== null),
       // 정리 방식 — `raw`(원문 그대로)만 따로 읽고, 칸이 없거나 다른 값이면 `claude`(예전 그대로).
       tidy: slack.tidy === 'raw' ? 'raw' : 'claude',
       // 연결 방식과, 새 방식이면 자동 갱신 상태(값 없이). 옛 방식(칸 없음 포함)은 `token`이고 `oauth` 칸이 없다.
       auth: slackAuthMode(config),
-      ...(slackAuthMode(config) === 'oauth' ? { oauth: slackOAuthView(config, tokenDir) } : {}),
+      ...(slackOAuth ? { oauth: slackOAuth } : {}),
       channels: Object.fromEntries(SLACK_CHANNEL_KEYS.map((key) => {
         const entry = clone(channels[key]);
         // 예시 자리표시자가 남아 있거나 뺀 채널이면 "연결 안 된 칸"으로 본다(이름도 같이 비운다).

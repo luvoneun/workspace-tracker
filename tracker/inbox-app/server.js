@@ -2752,7 +2752,7 @@ const routeCtx = {
   // 앱 정보·업데이트
   aboutApp, aboutDiagnostics, requestUpdate, updateStatusView, UPDATE_MESSAGE, selfcheck,
   // 연동·자동화·백업·미팅 노트
-  calendarLive, slackFollower, slackFollowOn, currentConfigFile, claudeReady, getSlackSync, slackSyncSuccessAt,
+  calendarLive, slackFollower, slackFollowOn, slackRefreshRequest, currentConfigFile, claudeReady, getSlackSync, slackSyncSuccessAt,
   getAutomationStatus, fetchStateLive, fetchStateAutomation, SLACK_AUTH_RE, todayLocal, getReportRefs, withApplyFailure,
   liveLog, integrationAlerts, getCalendarToday, getJiraSync, requestApply, fetchNow, FETCH_MESSAGE, backupStatus,
   meetingNotesStatus, writeMeetingNotesRequest,
@@ -2823,7 +2823,9 @@ if (require.main === module) {
   calendarAfterRead = archiveMeetings;
   calendarLive.start();
   // 슬랙 자동 갱신(새 방식) — 뜨고 1초 뒤 한 번, 그 뒤 15분마다. 옛 방식이면 파일만 보고 지나간다. 서버가 내려가면 거둔다.
-  if (!process.env.WORKSPACE_NO_REMOTE_CHECK) slackRefresher.start();
+  // 바깥 확인을 끈 자리(테스트·픽스처)와 `WORKSPACE_NO_SLACK_REFRESH=1`에서는 켜지 않는다 — 진짜 서버를 띄우는 시험이
+  // 토큰 폴더를 건드리지 않게(타이머는 갱신 잠금을 잡고 `.legacy`를 지울 수 있다).
+  if (!process.env.WORKSPACE_NO_REMOTE_CHECK && !process.env.WORKSPACE_NO_SLACK_REFRESH) slackRefresher.start();
   server.on('close', () => slackRefresher.stop());
   fs.watchFile(path.join(TRACKER_DIR, 'calendar_today.md'), { interval: 1000, persistent: false }, archiveMeetings);
   // 쉬는 틈에 자동 업데이트(WP-U) — launchd 설치본이고 main 갈래가 아닐 때만 1분 판단·1시간 원격 확인을 건다.

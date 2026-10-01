@@ -88,6 +88,7 @@ const COLLECT_MIN_VALID_MS = 10 * 60 * 1000;
 // 슬랙이 토큰을 거절한 오류(slackGet·history가 던지는 `Slack: <이름>`).
 const AUTH_REJECT_RE = /^Slack: (?:token_expired|invalid_auth)\b/;
 // 갱신 실패를 값 없이 한 낱말로 — `retry · network`, `reconnect · invalid_refresh_token`(종류 · 이유 또는 슬랙 오류 이름).
+const RETRY_LATER = '슬랙 토큰 갱신이 잠시 안 됨 — 다음 회차에 다시';
 const failureWord = failure => `${failure.kind} · ${failure.code || failure.reason || 'unknown'}`;
 
 // 이번 회차의 토큰을 쥔다. `call(fn)`은 fn(token)을 부르고, 새 방식에서 슬랙이 토큰을 거절하면 강제 갱신을 **회차에 한 번만**
@@ -98,7 +99,7 @@ function createAuth(config, log = () => {}, options = {}) {
   const auth = { token: '', mode: 'token', failure: null, forced: false };
   auth.load = async () => {
     const got = await getSlackToken({ ...options, config, minValidMs: COLLECT_MIN_VALID_MS });
-    Object.assign(auth, { token: got.token || '', mode: got.auth, failure: got.failure });
+    Object.assign(auth, { token: got.token || '', mode: got.auth, failure: got.failure, expiresAt: got.expiresAt });
     return auth;
   };
   auth.call = async (fn) => {
@@ -108,7 +109,12 @@ function createAuth(config, log = () => {}, options = {}) {
       const got = await getSlackToken({ ...options, config, force: true, staleToken: auth.token });
       auth.failure = got.failure;
       if (got.failure) log(`슬랙 토큰 갱신 실패(${failureWord(got.failure)})`);
-      if (!got.token || got.token === auth.token) throw error;
+      if (!got.token || got.token === auth.token) {
+        // 갱신이 **잠시** 안 된 것이면 슬랙의 거절(`token_expired`)을 그대로 남기지 않는다 — 그 낱말은 서버가 "다시 연결"로 읽는다.
+        // 이 회차만 실패로 두고(다음 회차에 다시) 멈춤 판정에 안 걸리는 글로 바꾼다.
+        if (got.failure && got.failure.kind === 'retry') { const later = new Error(RETRY_LATER); later.retry = true; throw later; }
+        throw error;
+      }
       auth.token = got.token;
       return fn(auth.token);
     }
@@ -591,7 +597,15 @@ async function main() {
   // 새 방식인데 다시 연결해야 하면(갱신 토큰이 죽었거나 갱신 정보가 없음) 죽은 토큰으로 슬랙을 두드리지 않는다.
   const reconnect = auth.mode === 'oauth' && !!auth.failure && auth.failure.kind === 'reconnect';
   // 잠시 안 되는 갱신(네트워크·슬랙 5xx·잠금)은 이전 토큰으로 그대로 간다 — 아직 유효하면 수집은 된다.
-  if (auth.failure && !reconnect) log(`슬랙 토큰 갱신이 잠시 안 됨(${failureWord(auth.failure)}) — 이전 토큰으로 진행`);
+  // 다만 가진 토큰이 이미 만료됐으면(맥이 오래 잠들었다 깬 직후 등) 슬랙에 묻지 않고 이번 회차를 건너뛴다 — 물으면
+  // `token_expired`가 남아 한 번의 일시 실패가 "다시 연결"(빨강)로 읽힌다. 실패로 적지 않는다: 늦어지면 주황 `늦어요`가 말한다.
+  if (auth.failure && !reconnect) {
+    if (Number.isFinite(auth.expiresAt) && auth.expiresAt <= Date.now()) {
+      log(`슬랙 토큰 갱신이 잠시 안 됨(${failureWord(auth.failure)}) — 토큰이 만료돼 이번 회차는 건너뛰고 다음 회차에 다시`);
+      return 0;
+    }
+    log(`슬랙 토큰 갱신이 잠시 안 됨(${failureWord(auth.failure)}) — 이전 토큰으로 진행`);
+  }
   const state = readJson(stateFile) || {};
   const fetched = [];
   let failures = 0;

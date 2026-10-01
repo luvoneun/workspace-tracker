@@ -361,6 +361,8 @@ test('setup.sh: 설정은 python3가 아니라 node로 읽고, 못 읽으면 에
   fs.writeFileSync(config, JSON.stringify({ slack: { auth: 'oauth', oauthFile: '/somewhere/oauth.json' } }));
   assert.equal(read('slackAuth').stdout, 'oauth');
   assert.equal(read('slackOAuthFile').stdout, '/somewhere/oauth.json');
+  assert.match(script, /elif \[ -f "\$HOME\/\.config\/workspace-slack-token" \]; then[\s\S]*?ok "슬랙 토큰 있음 \(기본 자리\)"/, '기본 자리 토큰으로 도는 설치에 "돌지 않아요"라고 하지 않는다');
+  assert.doesNotMatch(script, /슬랙 캡처는 돌지 않아요/);
   assert.match(script, /if \[ "\$SLACK_AUTH" = "oauth" \]; then[\s\S]*?ok "슬랙 연결 있음 \(자동 갱신\)"[\s\S]*?elif \[ -n "\$TOKEN_FILE" \]/, '새 방식 설치는 토큰 파일 경고 대신 갱신 정보 파일을 본다');
   // 크롬 프로필은 예전 Dock 앱만 썼다 — 이제 읽지 않는다(값은 쉘 명령 어디에도 들어가지 않는다)
   assert.equal(read('chromeProfile').stdout, '');
@@ -1349,7 +1351,8 @@ process.stdout.write(mode === 'fence' ? '\`\`\`json\\n' + answer + '\\n\`\`\`\\n
   const run = (env = {}) => {
     for (const file of [requestLog, calls]) fs.rmSync(file, { force: true });
     return runScript(automationScript('slack-capture.sh'), [], {
-      HOME: home, WORKSPACE_DIR: home, WORKSPACE_CONFIG: configPath, AUTOMATION_LOG_DIR: logs, SLACK_CAPTURE_IGNORE_HOURS: '1',
+      // 토큰 폴더 끼우기(공용 준비의 WORKSPACE_TOKEN_DIR)는 비운다 — launchd가 돌릴 때처럼 설정의 경로와 (임시) HOME의 ~/.config를 본다.
+      HOME: home, WORKSPACE_TOKEN_DIR: '', WORKSPACE_DIR: home, WORKSPACE_CONFIG: configPath, AUTOMATION_LOG_DIR: logs, SLACK_CAPTURE_IGNORE_HOURS: '1',
       WORKSPACE_PORT: '4322', CLAUDE_BIN: claude, WORKSPACE_CLAUDE_TOKEN_FILE: path.join(home, 'no-claude-token'),
       NODE_OPTIONS: `--require ${preload}`, FAKE_FETCH_SPEC: specFile, FAKE_FETCH_LOG: requestLog, FAKE_CLAUDE_CALLS: calls, FAKE_SLACK_TOKEN: SLACK_TOKEN,
       ...env,
@@ -1998,6 +2001,34 @@ test('슬랙 수집(새 방식): 갱신이 잠시 안 되면(슬랙 5xx) 이전 
   assert.equal(fix.state().failure.kind, 'retry');
   assert.equal(fix.imports('health').pop().success, true);
   fix.noSecrets();
+});
+
+test('슬랙 수집(새 방식): 갱신이 잠시 안 되는데 토큰이 이미 만료면 슬랙에 묻지 않고 건너뛴다 — 풀림(다시 연결)으로 읽히는 낱말을 남기지 않는다', (t) => {
+  const AUTH_WORDS = /invalid_auth|token_revoked|account_inactive|token_expired|invalid_refresh_token|slack_reconnect/;
+  const fix = oauthCapture(t, { expiresInMs: -60 * 1000 });
+  fix.setSlack({ refresh: { status: 503 }, rejected: [OLD_SLACK_TOKEN], history: { C0TODO11: [memo('1790000004.000100', '나중에 받을 일')] } });
+  const run = fix.run();
+  assert.equal(run.status, 0, run.stderr + fix.logText());
+  assert.equal(fix.history().length, 0, '만료된 토큰으로 슬랙을 두드리지 않는다');
+  assert.match(fix.logText(), /슬랙 토큰 갱신이 잠시 안 됨\(retry · http\) — 토큰이 만료돼 이번 회차는 건너뛰고 다음 회차에 다시/);
+  assert.doesNotMatch(fix.logText(), AUTH_WORDS);
+  assert.equal(lastLogEvent(fix.logText()).kind, 'skip', '실패 기록이 아니다(서버의 멈춤 판정에 걸리지 않는다)');
+  assert.equal(fix.imports('health').length, 0, '성공으로도 적지 않는다 — 늦어지면 늦음이 말한다');
+  assert.equal(fix.state().failure.kind, 'retry');
+  // 다음 회차에 갱신이 되면 그대로 받는다.
+  fs.rmSync(path.join(fix.home, '.config', 'workspace-slack-oauth.json.state'));
+  fix.setSlack({ refresh: fix.granted, history: { C0TODO11: [memo('1790000004.000100', '나중에 받을 일')] } });
+  assert.equal(fix.run().status, 0);
+  assert.equal(fix.imports('item').length, 1);
+
+  // 만료 전인 토큰을 슬랙이 거절했고 강제 갱신이 잠시 안 되면 — 그 회차만 실패, 토큰 문제 낱말은 남기지 않는다.
+  const mid = oauthCapture(t, { expiresInMs: 6 * 60 * 60 * 1000 });
+  mid.setSlack({ refresh: { status: 503 }, rejected: [OLD_SLACK_TOKEN], history: { C0TODO11: [] } });
+  assert.equal(mid.run().status, 1);
+  assert.equal(mid.history().length, 1, '다시 부르지 않는다');
+  assert.match(mid.logText(), /my-todo 채널 확인 실패 — 슬랙 토큰 갱신이 잠시 안 됨 — 다음 회차에 다시/);
+  assert.doesNotMatch(mid.logText(), AUTH_WORDS);
+  mid.noSecrets();
 });
 
 test('슬랙 수집(옛 방식): 토큰 파일을 읽기만 한다 — 갱신 요청도 없고 ~/.config에 아무것도 쓰지 않는다', (t) => {
