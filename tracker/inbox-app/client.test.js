@@ -2323,6 +2323,146 @@ test('회의 적기: 기록되지 않은 회의는 지금처럼 회의에 연결
   assert.deepEqual(rows().map(row => nodeFind(row, 'ti').textContent), ['바로 담는 할 일', '바로 담는 확인'], '담은 줄은 이 자리에 남아 보인다');
 });
 
+// ---------- 종류 목록: 줄의 `할 일 ⌄` ----------
+// 떠 있는 목록을 다루려면 가짜 창이 조금 더 진짜 같아야 한다(body·style·classList·remove·contains·초점).
+function richDom(app) {
+  app.run(`(() => {
+    const make = document.createElement;
+    document.createElement = (tag) => {
+      const el = make(tag);
+      const names = new Set();
+      el.style = { setProperty(name, value) { this[name] = value; } };
+      el.classList = {
+        add: name => names.add(name), remove: name => names.delete(name), toggle() {},
+        contains: name => names.has(name) || String(el.className || '').split(' ').includes(name),
+      };
+      el.remove = () => { if (el.parent) el.parent.removeChild(el); else el.connected = false; };
+      el.contains = (node) => { for (let at = node; at; at = at.parent) if (at === el) return true; return false; };
+      el.focus = () => { el.focused = true; document.activeElement = el; if (el.listeners.focus) el.listeners.focus(); };
+      return el;
+    };
+    document.body = document.createElement('div');
+    document.removeEventListener = () => {};
+    window.removeEventListener = () => {};
+  })()`);
+}
+// 담긴 줄 둘이 있는 회의 카드. retype은 가짜 서버가 종류를 바꿔 준다.
+function meetingTypeClient() {
+  const view = meetingCaptureClient();
+  const { app } = view;
+  const sent = [];
+  app.context.fetch = async (url, options) => {
+    const body = options && options.body ? JSON.parse(options.body) : null;
+    sent.push({ url, body });
+    if (url === '/api/workflow/retype') app.context.__saved.find(item => item.id === body.id).type = body.type;
+    return new Response(JSON.stringify({ ok: true, id: body && body.id }));
+  };
+  richDom(app);
+  app.context.__saved.push(
+    { id: 'i1', type: 'task', status: 'to-do', description: 'QA 체크리스트 공유', meetingId: 'mc1' },
+    { id: 'i2', type: 'check', status: 'done', description: '끝난 확인', meetingId: 'mc1' });
+  app.run('load().then(() => { loaded = 0; __draw(); })');
+  const pop = () => app.context.document.body.children.find(node => String(node.className).includes('d-typepop')) || null;
+  return { ...view, sent, pop };
+}
+
+test('종류 목록: 줄의 종류 글자를 누르면 세 항목의 작은 목록이 뜨고(지금 종류 강조, 글쇠는 입력 앞머리와 같은 글자), 다시 누르면 닫힌다', async () => {
+  const { rows, pop } = meetingTypeClient();
+  await settle();
+  const button = nodeFind(rows()[0], 'd-tpk');
+  assert.equal(nodeFind(button, 'tl').textContent, '할 일');
+  assert.equal(button.getAttribute('aria-haspopup'), 'listbox');
+  assert.equal(button.getAttribute('aria-label'), '종류: 할 일 — 바꾸기');
+  button.listeners.click({});
+  const list = pop();
+  assert.equal(list.className, 'd-schedpop d-typepop', '일정 정하기 판과 같은 부품이다');
+  assert.equal(list.getAttribute('role'), 'listbox');
+  assert.deepEqual(list.children.map(item => [nodeText(item), item.getAttribute('aria-selected'), item.style['--i']]),
+    [['할 일', 'true', '0'], ['확인 대기 ?', 'false', '1'], ['결정 !', 'false', '2']], '항목은 차례로 이어 뜬다(--i)');
+  assert.equal(list.children[0].focused, true, '지금 종류에 초점');
+  assert.equal(button.getAttribute('aria-expanded'), 'true');
+  // ↑↓로 옮긴다
+  list.listeners.keydown({ key: 'ArrowDown', preventDefault() {} });
+  assert.equal(list.children[1].focused, true);
+  list.listeners.keydown({ key: 'ArrowUp', preventDefault() {} });
+  list.listeners.keydown({ key: 'ArrowUp', preventDefault() {} });
+  assert.equal(list.children[2].focused, true, '끝에서 돈다');
+  button.listeners.click({});
+  assert.equal(button.getAttribute('aria-expanded'), 'false');
+  assert.equal(list.classList.contains('is-out'), true, '닫힘은 짧게 사라진다');
+});
+
+test('종류 목록: 고르면 같은 id로 retype을 보내고 초점은 입력줄로, 줄의 종류 글자가 바뀌며 ⌘Z·알림 되돌리기가 같은 길이다', async () => {
+  const { app, rows, pop, sent, input } = meetingTypeClient();
+  await settle();
+  nodeFind(rows()[0], 'd-tpk').listeners.click({});
+  await pop().children[2].listeners.click();
+  await settle();
+  assert.deepEqual(sent.map(call => [call.url, call.body]), [['/api/workflow/retype', { id: 'i1', type: 'decision' }]]);
+  assert.equal(input().focused, true, '이어서 적게 초점은 입력줄로 돌아간다');
+  assert.equal(nodeFind(nodeFind(rows()[0], 'd-tpk'), 'tl').textContent, '결정', '입력줄에 초점이 있어도 목록은 맞춰진다');
+  const region = app.nodes.get('liveRegion');
+  assert.match(region.textContent, /^결정으로 바꿨어요/);
+  assert.equal(app.run('undoStack.length'), 1, '⌘Z로도 되돌린다');
+  assert.match(app.run('undoStack[0].label'), /종류 바꾸기/);
+  // 알림의 `되돌리기`는 반대 방향 retype 하나이고, 그 뒤에는 ⌘Z가 같은 일을 또 하지 않는다
+  await region.children.find(node => node.textContent === '되돌리기').listeners.click();
+  assert.deepEqual(sent[1], { url: '/api/workflow/retype', body: { id: 'i1', type: 'task' } });
+  assert.equal(app.run('undoStack.length'), 0);
+  assert.equal(nodeFind(nodeFind(rows()[0], 'd-tpk'), 'tl').textContent, '할 일');
+});
+
+test('종류 목록: 글쇠 `?`·`!`·1~3으로 바로 고르고, 지금 종류를 다시 고르면 아무것도 보내지 않는다', async () => {
+  const { rows, pop, sent, input } = meetingTypeClient();
+  await settle();
+  nodeFind(rows()[0], 'd-tpk').listeners.click({});
+  pop().listeners.keydown({ key: '?', preventDefault() {} });
+  await settle();
+  assert.deepEqual(sent[0].body, { id: 'i1', type: 'check' });
+  nodeFind(rows()[0], 'd-tpk').listeners.click({});
+  pop().listeners.keydown({ key: '2', preventDefault() {} });
+  await settle();
+  assert.equal(sent.length, 1, '같은 종류는 보내지 않는다');
+  assert.equal(input().focused, true);
+});
+
+test('종류 목록: Esc는 목록만 닫고 초점을 누른 글자로 돌려준다(회의 카드는 닫히지 않는다)', async () => {
+  const { app, rows, pop } = meetingTypeClient();
+  await settle();
+  const before = app.run('escStack.length');
+  const button = nodeFind(rows()[0], 'd-tpk');
+  button.listeners.click({});
+  assert.equal(app.run('escStack.length'), before + 1, 'Esc는 가장 위에 열린 목록부터 닫는다');
+  app.run('escStack.pop()()');
+  assert.equal(pop().classList.contains('is-out'), true);
+  assert.equal(button.focused, true);
+  assert.equal(app.run('escStack.length'), before);
+});
+
+test('종류 목록: 완료한 항목과 담는 중인 줄의 종류 글자는 눌리지 않는다(완료는 이유를 알려 준다)', async () => {
+  const { rows, held, enter } = meetingTypeClient();
+  await settle();
+  const done = nodeFind(rows()[1], 'd-tpk');
+  assert.equal(done.disabled, true);
+  assert.equal(done.title, '완료한 항목은 종류를 바꿀 수 없어요');
+  assert.equal(done.getAttribute('aria-description'), '완료한 항목은 종류를 바꿀 수 없어요');
+  assert.equal(done.listeners.click, undefined);
+  assert.ok(held);
+  enter('방금 적은 줄');
+  const pending = nodeFind(rows()[2], 'd-tpk');
+  assert.equal(pending.disabled, true);
+  assert.equal(nodeFind(pending, 'tl').textContent, '할 일');
+});
+
+test('종류 목록 CSS: 일정 정하기 판의 움직임을 그대로 쓰되 220ms·닫힘 120ms, 종류 글자는 28px 조용한 글자', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /\.d-schedpop\.d-typepop \{ width: 176px; animation: d-sched-in 220ms var\(--ease\) both, d-sched-fade 70ms linear both; \}/);
+  assert.match(css, /\.d-schedpop\.d-typepop\.is-out \{ animation: d-sched-out 120ms var\(--ease\) both; \}/);
+  assert.match(css, /@keyframes d-sched-in \{\s*0% \{ transform: translateY\(-4px\) scale\(0\.88\); \}\s*55% \{ transform: translateY\(0\) scale\(1\.025\); \}/, '.88 → 1.025(55%) → 1');
+  assert.match(css, /\.d-schedpop \.d-mitem \{[^}]*animation-delay: calc\(var\(--i, 0\) \* 18ms \+ 30ms\)/, '항목 18ms 간격');
+  assert.match(css, /\.d-tpk \{[^}]*height: var\(--h-sm\)[^}]*color: var\(--dim\)/);
+});
+
 test('팔레트 바닥은 `회의` 칩일 때만 회의 탭으로 가는 링크를 붙인다', () => {
   const app = workflowsClient();
   const foot = (state) => {
@@ -2505,7 +2645,7 @@ test('a meeting row reuses the list menus and only puts 문구 고치기 on top'
       .map(section => section.map(entry => entry.label || entry.field)))`));
   for (const type of ['task', 'bug', 'check', 'decision']) {
     assert.equal(menu(type)[0][0], '문구 고치기', `${type} 줄의 메뉴 맨 위는 문구 고치기다`);
-    assert.equal(menu(type)[0][1], '종류 바꾸기', `${type} 줄에서 종류를 바꾼다`);
+    assert.ok(!menu(type).flat().includes('종류 바꾸기'), `${type} 줄의 종류는 줄의 종류 글자에서 바꾼다(길은 하나)`);
     assert.ok(menu(type).flat().includes('삭제'), `${type} 줄도 여기서 지울 수 있다`);
   }
   // 맨 위 한 줄만 얹고 나머지는 목록에서 쓰는 메뉴 그대로다 — 회의 카드용 메뉴를 새로 만들지 않는다.
@@ -2517,7 +2657,7 @@ test('a meeting row reuses the list menus and only puts 문구 고치기 on top'
     listMenu("waitingMenuSections({ id: 'i1', type: 'check', description: '문구', status: 'to-do' }, document.createElement('div'))"),
     '확인 대기는 확인 대기 줄의 메뉴를 그대로 쓴다(답변 받을 날 포함)');
   assert.ok(menu('check').flat().includes('답변 받을 날'));
-  assert.deepEqual(menu('decision'), [['문구 고치기', '종류 바꾸기'], ['프로젝트'], ['삭제']], '결정에는 날짜가 없다');
+  assert.deepEqual(menu('decision'), [['문구 고치기'], ['프로젝트'], ['삭제']], '결정에는 날짜가 없다');
   assert.ok(menu('task').flat().includes('기한'), '할 일의 날짜 이름은 `기한`이다');
 });
 
@@ -6653,40 +6793,6 @@ test('BSMALL: 아이디어의 `가능성`도 같은 저장 길이라 ⌘Z 대상
   await chips.children[0].listeners.click();
   assert.deepEqual(sent[0], { url: '/api/track/set-priority', body: { id: 'i1', priority: 'high' } });
   assert.match(app.run('undoStack[0].label'), /가능성 변경/);
-});
-
-// ---------- BSMALL ②: 회의에서 담은 항목의 종류 바꾸기 ----------
-test('BSMALL: 종류 바꾸기 칩은 지금 종류만 비활성이고, 고르면 같은 id로 retype을 보낸다', async () => {
-  const { app, sent } = meetingRowClient(new Response('{"ok":true,"id":"i1","type":"decision","from":"check"}'));
-  app.run(`workflowData = { items: [{ id: 'i1', type: 'check', description: '담은 확인 대기', status: 'to-do' }], meetings: [] };
-    wfIndexData(); itemsById = new Map(workflowData.items.map(item => [item.id, item]));`);
-  const menu = app.run("panelMeetingRowMenu(wfItem('i1'), document.createElement('div'), () => {})");
-  const chips = menu[0][1].control;
-  assert.equal(menu[0][1].field, '종류 바꾸기');
-  assert.deepEqual(chips.children.map(chip => [chip.textContent, chip.disabled]),
-    [['할 일', false], ['확인 대기', true], ['결정', false]], '지금 종류는 누를 수 없다');
-
-  await chips.children[2].listeners.click();
-  assert.deepEqual(sent.map(call => [call.url, call.body]), [['/api/workflow/retype', { id: 'i1', type: 'decision' }]]);
-  const region = app.nodes.get('liveRegion');
-  assert.equal(region.textContent, '결정으로 바꿨어요', '받침에 맞는 조사로 적는다(할 일로 · 확인 대기로 · 결정으로)');
-  assert.equal(app.run('undoStack.length'), 1, '⌘Z로도 되돌린다');
-  assert.match(app.run('undoStack[0].label'), /종류 바꾸기/);
-
-  // 알림의 `되돌리기`는 반대 방향 retype 하나이고, 그 뒤에는 ⌘Z가 같은 일을 또 하지 않는다
-  const undo = region.children.find(node => node.textContent === '되돌리기');
-  await undo.listeners.click();
-  assert.deepEqual(sent[1], { url: '/api/workflow/retype', body: { id: 'i1', type: 'check' } });
-  assert.equal(app.run('undoStack.length'), 0);
-});
-
-test('BSMALL: 완료한 항목은 종류 바꾸기 칩이 모두 비활성이고 이유를 알려 준다', () => {
-  const { app } = meetingRowClient(new Response('{"ok":true}'));
-  const menu = app.run("panelMeetingRowMenu({ id: 'i1', type: 'task', description: '끝난 업무', status: 'done' }, document.createElement('div'), () => {})");
-  const chips = menu[0][1].control;
-  assert.deepEqual(chips.children.map(chip => chip.disabled), [true, true, true]);
-  assert.equal(chips.title, '완료한 항목은 종류를 바꿀 수 없어요');
-  assert.equal(chips.getAttribute('aria-description'), '완료한 항목은 종류를 바꿀 수 없어요');
 });
 
 // ---------- BSMALL ③: 결정의 `내용` ----------

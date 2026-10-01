@@ -509,6 +509,11 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   background: var(--neutral-bg); color: var(--dim); font: 600 11.5px/18px var(--font); text-align: center;
 }
 .d-schedpop .d-mitem.on kbd { background: var(--surface); }
+/* 종류 목록(회의 줄의 `할 일 ⌄`) — 같은 판·같은 움직임, 세 줄뿐이라 폭 176px에 조금 짧게(220ms · 닫힘 120ms) */
+.d-schedpop.d-typepop { width: 176px; animation: d-sched-in 220ms var(--ease) both, d-sched-fade 70ms linear both; }
+.d-schedpop.d-typepop.is-out { animation: d-sched-out 120ms var(--ease) both; }
+.d-typepop .d-mitem { animation-duration: 160ms; }
+.d-typepop kbd { margin-left: auto; }
 /* 프로젝트 줄은 값 쪽(`정하기` 또는 `● 이름`)과 꺾쇠가 오른쪽에 붙는다 */
 .d-schedproj .d-mitem .dt.has { display: inline-flex; align-items: center; gap: 6px; color: var(--text); }
 .d-schedproj .d-mitem .cv { display: inline-flex; color: var(--dim); }
@@ -1500,7 +1505,21 @@ textarea.d-dtitle {
 .d-mrow2 .d-check { width: 22px; height: 22px; }
 /* 오른쪽 칸: (있으면) 상태 글자 + 종류 */
 .d-mrow2 .r { display: flex; align-items: center; gap: 8px; height: var(--h-sm); margin: -5px 0; white-space: nowrap; }
-.d-mrow2 .tl { padding: 0 6px; font-size: var(--fs-sm); font-weight: 500; color: var(--dim); }
+/* 종류 — 조용한 글자 + 꺾쇠(.d-dpick 가족: 28px, hover --hover, 10px 모서리). 누르면 종류 목록(.d-typepop) */
+.d-tpk {
+  display: inline-flex; align-items: center; gap: 2px; height: var(--h-sm); padding: 0 4px 0 6px; margin-right: -4px;
+  border: 0; border-radius: var(--r-xs); background: none; color: var(--dim);
+  font-family: inherit; font-size: var(--fs-sm); font-weight: 500; cursor: pointer;
+  transition: background 130ms var(--ease), color 130ms var(--ease), transform 120ms var(--ease);
+}
+.d-tpk .cv { display: inline-flex; }
+.d-tpk .cv .d-i { width: 12px; height: 12px; transform: rotate(90deg); }
+.d-tpk:hover, .d-tpk[aria-expanded="true"] { background: var(--hover); color: var(--text); }
+.d-tpk:active { transform: scale(0.97); }
+.d-tpk:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.d-tpk:disabled { cursor: default; }
+.d-tpk:disabled:hover { background: none; color: var(--dim); }
+.d-tpk:disabled:active { transform: none; }
 /* 제목은 평소 두 줄까지(말줄임), 누르면(.is-open) 그 자리에서 전문 — 아이디어 줄(.d-rec.is-idea .ti)과 같은 규칙.
    두 줄이 되어도 체크·종류·상태·⋯는 첫 줄에 맞춰 선다(align-items: start + 같은 18px 줄 높이) */
 .d-mrow2 .ti {

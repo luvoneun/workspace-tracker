@@ -531,7 +531,7 @@ function panelMeetingRowEdit(row, titleEl, item, checkbox) {
 
 // 담은 항목의 종류 바꾸기 — 서버가 같은 id로 파일만 옮긴다(회의 연결·검토 기록이 그대로 남는다).
 // 되돌리기는 반대 방향으로 한 번 더 바꾸는 것이고, 알림의 `되돌리기`와 ⌘Z가 같은 길을 쓴다.
-const RETYPE_CHIPS = [['task', '할 일'], ['check', '확인 대기'], ['decision', '결정']];
+// 고르는 자리는 줄의 종류 글자가 여는 목록(meetingRowType) 하나다.
 const RETYPE_DISABLED_HINT = '완료한 항목은 종류를 바꿀 수 없어요';
 // `로`/`으로` — 받침이 없거나 ㄹ이면 `로`(할 일로 · 확인 대기로), 그 밖에는 `으로`(결정으로).
 function uiRoParticle(word) {
@@ -542,14 +542,16 @@ function uiRoParticle(word) {
   return tail === 0 || tail === 8 ? '로' : '으로';
 }
 const retypeDoneText = type => `${wfType(type)}${uiRoParticle(wfType(type))}`;
-async function retypeSend(id, type) {
+async function retypeSend(id, type, host = null) {
   const result = await wfPost('retype', { id, type });
   if (!result.ok) throw new Error(result.error || '종류를 바꾸지 못했어요.');
   await load();
+  // 입력줄에 초점이 있으면 카드 전체는 다시 그려지지 않는다 — 열려 있는 회의의 목록만 따로 맞춘다.
+  [...new Set([MEETING_HOST_CARD, MEETING_HOST_TAB, host])].forEach(one => meetingItemsRepaint(one));
 }
-async function retypeMeetingItem(item, type) {
+async function retypeMeetingItem(item, type, host = null) {
   const from = item.type;
-  await retypeSend(item.id, type);
+  await retypeSend(item.id, type, host);
   const entry = {
     label: `${item.description} (종류 바꾸기)`,
     undo: () => postJson('/api/workflow/retype', { id: item.id, type: from }),
@@ -560,7 +562,7 @@ async function retypeMeetingItem(item, type) {
     label: '되돌리기',
     onClick: async (button) => {
       if (button) button.disabled = true;
-      try { await retypeSend(item.id, from); } catch { if (button) button.disabled = false; return; }
+      try { await retypeSend(item.id, from, host); } catch { if (button) button.disabled = false; return; }
       // ⌘Z가 같은 되돌리기를 한 번 더 하지 않게 그 기록을 뺀다(삭제 되돌리기와 같은 규칙).
       const at = undoStack.lastIndexOf(entry);
       if (at >= 0) undoStack.splice(at, 1);
@@ -569,26 +571,15 @@ async function retypeMeetingItem(item, type) {
   });
 }
 
-// 회의 줄의 ⋯ — 앱의 다른 목록이 쓰는 메뉴를 그대로 쓰고, 맨 위에 `문구 고치기`와 `종류 바꾸기`를 얹는다.
+// 회의 줄의 ⋯ — 앱의 다른 목록이 쓰는 메뉴를 그대로 쓰고, 맨 위에 `문구 고치기`를 얹는다(종류는 줄의 종류 글자에서 바꾼다).
 // onOpen(업무·확인 대기)이 있으면 그 위에 `상세 열기` — 제목은 누르면 펼치는 자리라 상세는 여기서 연다.
 function panelMeetingRowMenu(item, row, onEdit, onOpen = null) {
   const base = item.type === 'check' ? waitingMenuSections(item, row)
     : item.type === 'decision' ? decisionMenuSections(item, row)
     : taskMenuSections({ item, mode: panelMode(item), card: row });
-  // 완료한 항목은 옮기지 않는다 — 끝난 줄이라 종류를 바꿀 일이 없다(서버도 거절한다).
-  const done = item.status === 'done';
-  const chips = uiMenuChips(RETYPE_CHIPS, item.type, async (value) => {
-    uiMenuClose();
-    try { await retypeMeetingItem(item, value); } catch { /* request()가 이미 알린다 */ }
-  }, true);
-  if (done) {
-    Array.from(chips.children).forEach((chip) => { chip.disabled = true; });
-    chips.title = RETYPE_DISABLED_HINT;
-    chips.setAttribute('aria-description', RETYPE_DISABLED_HINT);
-  }
   const head = [
     ...(typeof onOpen === 'function' ? [{ label: '상세 열기', onClick: onOpen }] : []),
-    { label: '문구 고치기', onClick: onEdit }, { field: '종류 바꾸기', control: chips },
+    { label: '문구 고치기', onClick: onEdit },
   ];
   return [head, ...base];
 }
@@ -690,12 +681,139 @@ function panelMeetingRow(item, event, stateText, host = MEETING_HOST_CARD) {
   return row;
 }
 
-// 줄 오른쪽의 종류 글자.
-function meetingRowType(item) {
-  const label = document.createElement('span');
-  label.className = 'tl';
-  label.textContent = wfType(item.type);
-  return label;
+// ---------- 종류 목록 ----------
+// 줄의 조용한 글자 `할 일 ⌄`이 여는 작은 목록(할 일 · 확인 대기 · 결정). 일정 정하기 판과 같은 부품(.d-schedpop·.d-mitem)과
+// 같은 움직임(누른 글자에서 튀어나옴)이고, 아래가 모자라면 위로 뒤집는다. ↑↓·Enter·Esc, 글쇠 `?` `!`(입력 앞머리와 같은 글자)·1~3.
+const MEETING_TYPE_KEYS = { check: '?', decision: '!' };
+let meetingTypeOpen = null; // { pop, anchor, onEsc, away, shut }
+
+function meetingTypePlace(pop, anchor) {
+  const box = anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : null;
+  if (!box) return;
+  const width = pop.offsetWidth || 176;
+  const height = pop.offsetHeight || 0;
+  const viewW = window.innerWidth || 1024;
+  const viewH = window.innerHeight || 768;
+  // 오른쪽 끝을 누른 글자에 맞춘다(종류 글자는 줄의 오른쪽에 있다).
+  const left = Math.max(8, Math.min(box.right - width + 6, viewW - 8 - width));
+  const flip = box.bottom + 4 + height > viewH - 8 && box.top - 4 - height >= 8;
+  const top = flip ? box.top - 4 - height : box.bottom + 4;
+  pop.style.left = `${Math.round(left)}px`;
+  pop.style.top = `${Math.round(top)}px`;
+  pop.style.setProperty('--ox', `${Math.round(box.left + box.width / 2 - left)}px`);
+  pop.style.setProperty('--oy', flip ? '100%' : '0');
+}
+
+function meetingTypeClose(restoreFocus = false) {
+  if (!meetingTypeOpen) return;
+  const { pop, anchor, onEsc, away, shut } = meetingTypeOpen;
+  meetingTypeOpen = null;
+  escDrop(onEsc);
+  document.removeEventListener('mousedown', away, true);
+  document.removeEventListener('scroll', shut, true);
+  window.removeEventListener('resize', shut);
+  anchor.setAttribute('aria-expanded', 'false');
+  if (uiSchedMotion()) {
+    pop.classList.add('is-out');
+    setTimeout(() => pop.remove(), 120);
+  } else pop.remove();
+  if (restoreFocus && anchor.isConnected) anchor.focus();
+}
+
+function meetingTypeToggle(anchor, current, onPick) {
+  if (meetingTypeOpen && meetingTypeOpen.anchor === anchor) { meetingTypeClose(true); return; }
+  meetingTypeClose();
+  uiSchedClose();
+  uiMenuClose();
+
+  const pop = document.createElement('div');
+  pop.className = 'd-schedpop d-typepop';
+  pop.setAttribute('role', 'listbox');
+  pop.setAttribute('aria-label', '종류');
+  pop.addEventListener('click', event => event.stopPropagation());
+  const pick = (key) => { meetingTypeClose(); onPick(key); };
+  const items = WF_TYPES.map(([key, text], index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'd-mitem' + (key === current ? ' on' : '');
+    button.setAttribute('role', 'option');
+    button.setAttribute('aria-selected', String(key === current));
+    button.dataset.key = key;
+    button.style.setProperty('--i', String(index));
+    const name = document.createElement('span');
+    name.textContent = text;
+    button.appendChild(name);
+    if (MEETING_TYPE_KEYS[key]) {
+      const kbd = document.createElement('kbd');
+      kbd.textContent = MEETING_TYPE_KEYS[key];
+      button.appendChild(kbd);
+    }
+    button.addEventListener('click', () => pick(key));
+    button.addEventListener('focus', () => { items.forEach(other => other.classList.remove('on')); button.classList.add('on'); });
+    pop.appendChild(button);
+    return button;
+  });
+  pop.addEventListener('keydown', (event) => {
+    const at = items.indexOf(document.activeElement);
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      items[(at + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length].focus();
+    } else if (event.key === 'Tab') meetingTypeClose();
+    else {
+      const hit = WF_TYPES.find(([key], index) => MEETING_TYPE_KEYS[key] === event.key || String(index + 1) === event.key);
+      if (hit) { event.preventDefault(); pick(hit[0]); }
+    }
+  });
+
+  document.body.appendChild(pop);
+  meetingTypePlace(pop, anchor);
+  anchor.setAttribute('aria-expanded', 'true');
+  const onEsc = () => meetingTypeClose(true);
+  escPush(onEsc);
+  const away = (event) => { if (!pop.contains(event.target) && !anchor.contains(event.target)) meetingTypeClose(); };
+  const shut = () => meetingTypeClose();
+  document.addEventListener('mousedown', away, true);
+  document.addEventListener('scroll', shut, true);
+  window.addEventListener('resize', shut);
+  meetingTypeOpen = { pop, anchor, onEsc, away, shut };
+  (items.find(button => button.dataset.key === current) || items[0]).focus();
+}
+
+// 종류 글자 버튼. onPick이 없으면(담는 중인 줄) 같은 모양의 눌리지 않는 글자다.
+function meetingTypeButton(type, onPick, { hint = '' } = {}) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'd-tpk';
+  const name = document.createElement('span');
+  name.className = 'tl';
+  name.textContent = wfType(type);
+  const caret = document.createElement('span');
+  caret.className = 'cv';
+  caret.innerHTML = uiIcon('chevron');
+  button.append(name, caret);
+  if (!onPick) {
+    button.disabled = true;
+    button.setAttribute('aria-label', `종류: ${wfType(type)}`);
+    if (hint) { button.title = hint; button.setAttribute('aria-description', hint); }
+    return button;
+  }
+  button.setAttribute('aria-haspopup', 'listbox');
+  button.setAttribute('aria-expanded', 'false');
+  button.setAttribute('aria-label', `종류: ${wfType(type)} — 바꾸기`);
+  button.addEventListener('click', (event) => { if (event && event.stopPropagation) event.stopPropagation(); meetingTypeToggle(button, type, onPick); });
+  return button;
+}
+
+// 담은 줄의 종류 — 고르면 기존 `종류 바꾸기`(retype) 길로 바꾸고 초점은 입력줄로 돌아간다(이어서 적게).
+// 완료한 항목은 옮기지 않는다 — 끝난 줄이라 종류를 바꿀 일이 없다(서버도 거절한다).
+function meetingRowType(item, host) {
+  if (item.status === 'done') return meetingTypeButton(item.type, null, { hint: RETYPE_DISABLED_HINT });
+  return meetingTypeButton(item.type, async (type) => {
+    meetingCaptureFocus(host);
+    if (type === item.type) return;
+    try { await retypeMeetingItem(item, type, host); } catch { return; /* request()가 이미 알린다 */ }
+    meetingCaptureFocus(host);
+  });
 }
 
 // 구역 머리: 제목 + 조용한 숫자(`이 회의에서 나온 것 3`). 숫자는 따로 든 칸이라 줄이 늘어도 그 칸만 바꾼다.
@@ -845,7 +963,7 @@ function meetingLocalRow(entry, event, linked, host) {
     acts.appendChild(uiMoreButton(`${entry.text} — 더 보기`,
       () => [[{ label: '지우기', onClick: () => { meetingCaptureDrop(event, entry, host); meetingCaptureFocus(host); } }]]));
   } else {
-    right.appendChild(meetingRowType(entry, host));
+    right.appendChild(meetingTypeButton(entry.type, null));
   }
   row.append(cell, title, right, acts);
   return row;
