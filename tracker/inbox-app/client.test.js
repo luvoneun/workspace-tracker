@@ -1355,6 +1355,184 @@ test('일정 정하기: 판 부품 — 진짜 button, role=menu, 열면 오늘�
   assert.doesNotMatch(part, /\/api\//, '새 API 길을 만들지 않는다 — 저장은 기존 setTaskScheduled·setTaskJira·setTaskGroup');
 });
 
+// 일정 정하기 실제 흐름용 가짜 화면 — 기본 가짜 노드에 classList·style·찾기를 보태 판을 진짜처럼 열고 누른다.
+function schedFlowClient() {
+  const app = client(new Response('{"ok":true}'));
+  const ctx = app.context;
+  const base = ctx.document.createElement;
+  const walk = (node, out = []) => { (node.children || []).forEach(kid => { if (kid && typeof kid === 'object') { out.push(kid); walk(kid, out); } }); return out; };
+  const match = (node, selector) => {
+    const attr = selector.match(/^\[([\w-]+)="(.*)"\]$/);
+    if (attr) { const [, name, value] = attr; return name.startsWith('data-') ? node.dataset[name.slice(5).replace(/-(\w)/g, (_, c) => c.toUpperCase())] === value : node.getAttribute(name) === value; }
+    if (selector.startsWith('.')) return String(node.className || '').split(' ').includes(selector.slice(1));
+    return selector.split(',').some(tag => String(node.tagName || '').toLowerCase() === tag.trim());
+  };
+  ctx.document.createElement = (tag) => {
+    const node = base(tag);
+    node.tagName = String(tag).toUpperCase();
+    const classes = new Set();
+    node.classList = { add: c => classes.add(c), remove: c => classes.delete(c), contains: c => classes.has(c), toggle() {} };
+    node.style = { setProperty() {} };
+    node.tabIndex = 0;
+    node.remove = function () { if (this.parent) this.parent.removeChild(this); };
+    node.after = function (next) { const at = this.parent.children.indexOf(this); this.parent.children.splice(at + 1, 0, next); next.parent = this.parent; };
+    node.contains = function (other) { return other === this || walk(this).includes(other); };
+    node.querySelectorAll = function (selector) { return walk(this).filter(one => match(one, selector)); };
+    node.querySelector = function (selector) { return this.querySelectorAll(selector)[0] || null; };
+    node.addEventListener = function (name, handler) { this.listeners[name] = handler; };
+    return node;
+  };
+  ctx.document.body = ctx.document.createElement('body');
+  ctx.document.removeEventListener = () => {};
+  ctx.window.removeEventListener = () => {};
+  app.run("escapeHtml = s => String(s || '')");
+  app.run("workflowData = { items: [], meetings: [] }; jiraIssuesByKey = new Map()");
+  const held = heldFetch(app);
+  const items = (pop, selector) => pop.querySelectorAll(selector);
+  const open = (id = 'i1') => {
+    app.run(`renderInbox([{ id: '${id}', description: '업무' }])`);
+    const list = app.nodes.get('inboxList');
+    const row = list.children[0];
+    const button = row.children[1].children[0];
+    button.listeners.click({ stopPropagation() {} });
+    const pop = ctx.document.body.children[ctx.document.body.children.length - 1];
+    return { row, button, pop, pick: key => items(pop, '[role="menuitem"]').find(one => one.dataset.sched === key) };
+  };
+  return { app, held, open, ctx };
+}
+
+test('일정 정하기 흐름 ①: 버튼 → 내일 클릭 → set-scheduled 본문 { id, scheduled: 내일 } 하나, 줄은 접히고 저장이 끝나도 접힌 채다', async () => {
+  const { app, held, open } = schedFlowClient();
+  const { row, button, pop, pick } = open();
+  assert.equal(button.getAttribute('aria-expanded'), 'true');
+  assert.equal(pop.getAttribute('role'), 'menu');
+  const tomorrow = app.run('tomorrowStr()');
+  pick('tomorrow').listeners.click();
+  await settle();
+  assert.equal(held.length, 1);
+  assert.equal(held[0].url, '/api/track/set-scheduled');
+  assert.deepEqual(held[0].body, { id: 'i1', scheduled: tomorrow });
+  assert.equal(button.getAttribute('aria-expanded'), 'false', '판은 닫힌다');
+  assert.ok(row.classList.contains('is-leaving'));
+  held[0].ok();
+  await settle();
+  assert.ok(row.classList.contains('is-leaving'), '저장된 줄은 접힌 채 — 다시 보이지 않는다');
+});
+
+test('일정 정하기 흐름 ②: 나중에는 scheduled:null, 오늘은 오늘 날짜 — 예전 두 버튼과 같은 본문', async () => {
+  const flow = schedFlowClient();
+  let opened = flow.open();
+  opened.pick('later').listeners.click();
+  await settle();
+  assert.deepEqual(flow.held[0].body, { id: 'i1', scheduled: null });
+  flow.held[0].ok(); await settle();
+  opened = flow.open('i2');
+  opened.pick('today').listeners.click();
+  await settle();
+  assert.deepEqual(flow.held[1].body, { id: 'i2', scheduled: flow.app.run('todayStr()') });
+});
+
+test('일정 정하기 흐름 ③: 저장이 실패하면 줄이 돌아오고(is-leaving 풀림) 판은 닫혀 있으며 알림이 선다', async () => {
+  const { app, held, open } = schedFlowClient();
+  const { row, button, pop, pick } = open();
+  pick('tomorrow').listeners.click();
+  await settle();
+  held[0].fail();
+  await settle();
+  assert.equal(row.classList.contains('is-leaving'), false, '줄 복귀');
+  assert.equal(button.getAttribute('aria-expanded'), 'false');
+  assert.equal(app.run('uiSchedOpen'), null);
+  assert.match(app.nodes.get('liveRegion').textContent, /저장됐는지 확인하지 못했어요/);
+});
+
+test('일정 정하기 흐름 ④: 숫자키를 연달아 눌러도 저장은 한 번 — 두 번째 선택은 줄을 되살리지 않는다', async () => {
+  const { held, open } = schedFlowClient();
+  const { row, pop } = open();
+  const press = key => pop.listeners.keydown({ key, target: { tagName: 'BUTTON' }, preventDefault() {} });
+  press('2'); press('3'); press('1');
+  await settle();
+  assert.equal(held.length, 1);
+  assert.ok(row.classList.contains('is-leaving'));
+  held[0].ok(); await settle();
+  assert.ok(row.classList.contains('is-leaving'));
+});
+
+test('일정 정하기 흐름 ⑤: 직접 입력 날짜 — 덜 쳐진 해(0002)·지난 날은 저장 요청이 없고, 치는 중의 change는 Enter에서만 확정, 달력 선택은 바로', async () => {
+  const { app, held, open } = schedFlowClient();
+  const { pop, pick } = open();
+  pick('pick').listeners.click();
+  const input = pop.querySelectorAll('input')[0];
+  assert.ok(input, '날짜 입력칸이 열린다');
+  const tomorrow = app.run('tomorrowStr()');
+  const enter = () => input.listeners.keydown({ key: 'Enter', preventDefault() {} });
+  input.value = '0002-10-06'; input.listeners.change(); enter();
+  input.value = '2000-01-01'; input.listeners.change(); enter();
+  input.value = ''; input.listeners.change(); enter();
+  await settle();
+  assert.equal(held.length, 0, '이상한 해·지난 날·빈 값은 저장하지 않는다');
+  input.listeners.keydown({ key: '2' });          // 손으로 치는 중
+  input.value = tomorrow; input.listeners.change();
+  await settle();
+  assert.equal(held.length, 0, '치는 중의 change는 확정하지 않는다');
+  enter();
+  await settle();
+  assert.equal(held.length, 1);
+  assert.deepEqual(held[0].body, { id: 'i1', scheduled: tomorrow }, 'Enter에서 확정');
+  held[0].ok(); await settle();
+
+  const second = open('i2');
+  second.pick('pick').listeners.click();
+  const calendar = second.pop.querySelectorAll('input')[0];
+  calendar.value = tomorrow; calendar.listeners.change();   // 달력에서 고름 — 손으로 친 키 없음
+  await settle();
+  assert.equal(held.length, 2);
+  assert.deepEqual(held[1].body, { id: 'i2', scheduled: tomorrow });
+});
+
+test('일정 정하기 흐름 ⑥: 날짜 칸을 치다 판 안의 다른 곳으로 초점이 가면 확정, 판 밖(Esc·바깥)으로 가면 저장하지 않는다', async () => {
+  const { app, held, open } = schedFlowClient();
+  const { pop, pick } = open();
+  pick('pick').listeners.click();
+  const input = pop.querySelectorAll('input')[0];
+  const tomorrow = app.run('tomorrowStr()');
+  input.listeners.keydown({ key: '3' });
+  input.value = tomorrow;
+  input.listeners.blur({ relatedTarget: null });
+  await settle();
+  assert.equal(held.length, 0, '판 밖으로 나가면 저장하지 않는다');
+  input.listeners.blur({ relatedTarget: pick('later') });
+  await settle();
+  assert.equal(held.length, 1, '판 안의 다른 곳이면 확정');
+});
+
+test('일정 정하기 흐름 ⑦: Tab은 입력칸 안·판 안에서는 판을 닫지 않고, 판 밖으로 나가는 Tab(마지막 칸에서 Tab)에서만 닫는다', () => {
+  const { app, open, ctx } = schedFlowClient();
+  const { pop, pick } = open();
+  pick('pick').listeners.click();
+  const input = pop.querySelectorAll('input')[0];
+  pop.listeners.keydown({ key: 'Tab', target: input });
+  assert.notEqual(app.run('uiSchedOpen'), null, '날짜 칸 안의 Tab은 넘긴다');
+  const stops = pop.querySelectorAll('button, input').filter(one => one.tabIndex !== -1);
+  ctx.document.activeElement = stops[0];
+  pop.listeners.keydown({ key: 'Tab', target: stops[0] });
+  assert.notEqual(app.run('uiSchedOpen'), null, '첫 칸에서 앞으로 가는 Tab은 판 안이다');
+  ctx.document.activeElement = stops[stops.length - 1];
+  pop.listeners.keydown({ key: 'Tab', target: stops[stops.length - 1] });
+  assert.equal(app.run('uiSchedOpen'), null, '마지막 칸에서 Tab은 판을 닫는다');
+});
+
+test('일정 정하기: 저장 중인 다른 줄의 판이 열려 있어도 옮긴 줄은 되살아나지 않고, uiSchedDateOk는 덜 친·지난·없는 날짜를 거른다', () => {
+  const { app } = schedFlowClient();
+  const ok = (v, validity) => app.run(`uiSchedDateOk(${JSON.stringify(v)}, ${JSON.stringify(validity || null)})`);
+  assert.equal(ok('0002-10-06'), false);
+  assert.equal(ok('2000-01-01'), false);
+  assert.equal(ok('2026-02-30'), false);
+  assert.equal(ok(''), false);
+  assert.equal(ok('2999-01-01', { valid: false }), false);
+  assert.equal(ok(app.run('tomorrowStr()')), true);
+  assert.equal(ok(app.run('todayStr()')), true);
+});
+
 test('어두운 화면의 따뜻한 판은 짙은 회색이고, 시스템 다크·직접 고른 다크 두 곳이 같은 값이다(밝은 화면 그대로)', () => {
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
   const warm = css.split('\n').filter(line => /^\s*--warm:/.test(line)).map(line => line.trim());

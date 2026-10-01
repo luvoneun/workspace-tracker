@@ -4921,6 +4921,17 @@ function uiSchedChoices(now = new Date()) {
   return list;
 }
 
+// 직접 친 날짜가 덜 쳐졌거나(해를 `2`까지만 쳐도 브라우저는 0002-10-06을 보낸다) 지난 날이면 저장하지 않는다.
+function uiSchedDateOk(value, validity) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) return false;
+  if (validity && validity.valid === false) return false;
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return false;
+  return value >= todayStr();
+}
+const uiSchedBusy = new Set(); // 저장 중인 업무 id — 같은 업무를 두 번 옮기지 않는다
+
 function uiSchedMotion() {
   try { return !window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return true; }
 }
@@ -4992,6 +5003,7 @@ function uiSchedToggle(item, row, anchor) {
 
   const label = document.createElement('div');
   label.className = 'lab';
+  label.setAttribute('role', 'presentation');
   label.textContent = '실행 날짜';
   pop.appendChild(label);
 
@@ -5026,15 +5038,22 @@ function uiSchedToggle(item, row, anchor) {
 
   // 고른 날짜(또는 나중에)를 저장한다 — 판은 닫고 줄은 접힌다. 오늘·나중에는 예전 두 버튼과 같은 동작·같은 알림이다.
   const choose = async (scheduled, message) => {
+    if (uiSchedBusy.has(item.id)) return; // 닫히는 140ms·저장 중의 두 번째 선택은 무시한다
+    uiSchedBusy.add(item.id);
     uiSchedClose({ keepHeld: true });
     row.classList.add('is-leaving');
     if (scheduled === todayStr()) uiSchedRise.set(item.id, Date.now());
-    const move = scheduled === todayStr() || scheduled === null
-      ? () => fadeOutAndRun(row, () => setTaskScheduled(item.id, scheduled), uiMoveNotice(message, [item], scheduled))
-      : () => uiMoveRun(row, () => setTaskScheduled(item.id, scheduled), uiMoveNotice(message, [item], scheduled));
-    await move();
-    // 저장이 안 됐으면(알림은 request가 이미 했다) 줄을 되돌리고 미룬 다시 그리기를 푼다.
-    if (row.isConnected) { row.classList.remove('is-leaving'); uiSchedRise.delete(item.id); uiHeldFlush(); }
+    let saved = false;
+    const save = async () => { await setTaskScheduled(item.id, scheduled); saved = true; };
+    try {
+      if (scheduled === todayStr() || scheduled === null) await fadeOutAndRun(row, save, uiMoveNotice(message, [item], scheduled));
+      else await uiMoveRun(row, save, uiMoveNotice(message, [item], scheduled));
+    } finally {
+      uiSchedBusy.delete(item.id);
+    }
+    // 저장이 안 됐을 때만(알림은 request가 이미 했다) 줄을 되돌리고 미룬 다시 그리기를 푼다.
+    // 저장된 줄은 접힌 채로 둔다 — 다른 줄의 판이 열려 다시 그리기가 미뤄져도 옮긴 업무가 다시 보이지 않는다.
+    if (!saved) { row.classList.remove('is-leaving'); uiSchedRise.delete(item.id); uiHeldFlush(); }
   };
 
   const choices = uiSchedChoices();
@@ -5049,18 +5068,32 @@ function uiSchedToggle(item, row, anchor) {
     if (dateRow) { dateRow.remove(); dateRow = null; place(); return; }
     dateRow = document.createElement('div');
     dateRow.className = 'd-schedwhen';
+    dateRow.setAttribute('role', 'group');
+    dateRow.setAttribute('aria-label', '실행 날짜 직접 입력');
     const input = document.createElement('input');
     input.type = 'date';
     input.className = 'd-dateinput';
     input.min = todayStr();
     input.value = '';
     input.setAttribute('aria-label', '실행 날짜');
-    const commitDate = () => { if (input.value) choose(input.value, `${uiKoDate(input.value)}로 옮겼어요`); };
-    input.addEventListener('change', commitDate);
+    // 달력에서 고른 날짜는 바로 확정하고, 손으로 치는 중(숫자·지우기 키)의 change는 덜 쳐진 값일 수 있어
+    // Enter나 판 안의 다른 곳으로 초점이 옮겨 갈 때만 확정한다.
+    let typed = false;
+    const commitDate = () => { if (uiSchedDateOk(input.value, input.validity)) choose(input.value, `${uiKoDate(input.value)}로 옮겼어요`); };
+    input.addEventListener('change', () => { if (!typed) commitDate(); });
     input.addEventListener('keydown', (event) => {
-      if (event.isComposing || event.key !== 'Enter' || !input.value) return;
-      event.preventDefault();
-      commitDate();
+      if (event.isComposing) return;
+      if (event.key === 'Enter') {
+        if (!uiSchedDateOk(input.value, input.validity)) return;
+        event.preventDefault();
+        commitDate();
+        return;
+      }
+      if (/^[0-9]$/.test(event.key) || event.key === 'Backspace' || event.key === 'Delete') typed = true;
+    });
+    input.addEventListener('blur', (event) => {
+      const to = event && event.relatedTarget;
+      if (typed && to && pop.contains && pop.contains(to)) commitDate();
     });
     dateRow.appendChild(input);
     dateButton.after(dateRow);
@@ -5073,7 +5106,7 @@ function uiSchedToggle(item, row, anchor) {
   dateButton.dataset.sched = 'pick';
   picks.push({ key: String(dateNumber), run: pickDate });
 
-  const separator = () => { const line = document.createElement('div'); line.className = 'd-msep'; pop.appendChild(line); };
+  const separator = () => { const line = document.createElement('div'); line.className = 'd-msep'; line.setAttribute('role', 'separator'); pop.appendChild(line); };
   separator();
   const later = entry(0, '나중에', '날짜 미정', () => choose(null, '나중에 할 일로 옮겼어요'));
   later.dataset.sched = 'later';
@@ -5085,6 +5118,8 @@ function uiSchedToggle(item, row, anchor) {
   const projectKey = () => (state.jira ? `jira:${state.jira}` : state.group ? `group:${state.group}` : '');
   const projectBox = document.createElement('div');
   projectBox.className = 'd-schedproj';
+  projectBox.setAttribute('role', 'group');
+  projectBox.setAttribute('aria-label', '프로젝트');
   const projectButton = document.createElement('button');
   projectButton.type = 'button';
   projectButton.className = 'd-mitem';
@@ -5156,7 +5191,13 @@ function uiSchedToggle(item, row, anchor) {
   const reposition = (event) => { if (!event || !event.target || !pop.contains || !pop.contains(event.target)) place(); };
   pop.addEventListener('keydown', (event) => {
     if (event.isComposing) return;
-    if (event.key === 'Tab') { uiSchedClose({ restoreFocus: true }); return; }
+    if (event.key === 'Tab') {
+      // 판 안에서는 Tab이 평소대로 움직인다(날짜 칸의 월·일·연, 프로젝트 찾기 칸). 판 밖으로 나가는 Tab에서만 닫는다.
+      const stops = [...pop.querySelectorAll('button, input')].filter(one => !one.disabled && one.tabIndex !== -1);
+      const edge = event.shiftKey ? stops[0] : stops[stops.length - 1];
+      if (!stops.length || document.activeElement === edge) uiSchedClose({ restoreFocus: true });
+      return;
+    }
     const typing = event.target && String(event.target.tagName || '').toUpperCase() === 'INPUT';
     if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && !typing) {
       const buttons = [...pop.querySelectorAll('[role="menuitem"]')];

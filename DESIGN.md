@@ -864,7 +864,7 @@ Pretendard Variable(v1.3.9, SIL OFL 1.1)은 **앱에 넣어 두고 서버가 직
 | 고른 뒤 줄 | 220ms 접히듯 사라짐(transform·opacity) |
 | 오늘 목록 새 줄 | 260ms 솟음 + 연파랑(`--sel`) 강조, 한 번만 |
 
-움직이는 속성은 transform·opacity뿐(레이아웃 속성은 움직이지 않는다). `prefers-reduced-motion: reduce`에서는 전부 즉시다. `prefers-reduced-motion: reduce`에서는 모든 transition·animation을 `.01ms`로 줄이고, 완료 순간의 두 애니메이션과 진행 선 전환은 아예 끈다.
+움직이는 속성은 transform·opacity뿐이고 새 줄에만 배경 강조 한 번이 더해진다(레이아웃 속성은 움직이지 않는다). `prefers-reduced-motion: reduce`에서는 전부 즉시다. `prefers-reduced-motion: reduce`에서는 모든 transition·animation을 `.01ms`로 줄이고, 완료 순간의 두 애니메이션과 진행 선 전환은 아예 끈다.
 
 ## 접근성 바닥
 
