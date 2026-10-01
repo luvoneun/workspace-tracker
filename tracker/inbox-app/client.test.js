@@ -1109,6 +1109,25 @@ test('deadline wording is the same everywhere, and a far deadline is left off a 
   assert.equal(due("'2999-12-31'", 'full').tone, '');
   assert.equal(due("'2999-12-31'", 'row'), null, 'a far deadline is not printed on a today row');
   assert.equal(due('null', 'full'), null, 'no deadline prints nothing');
+  // D-N: 오늘 목록 줄에서만, 2~7일 남았을 때 조용한 숫자 하나. 지금의 오늘까지·내일까지·지남은 그대로다.
+  const ahead = n => `uiDateKey(new Date(Date.now() + ${n} * 86400000))`;
+  assert.deepEqual(due(ahead(1), 'row'), { text: '내일까지', tone: '' });
+  assert.deepEqual(due('todayStr()', 'row'), { text: '오늘까지', tone: 'warn' });
+  assert.equal(due(ahead(2), 'row').text, 'D-2');
+  assert.equal(due(ahead(7), 'row').text, 'D-7');
+  assert.equal(due(ahead(8), 'row'), null, '8일 이상은 지금처럼 안 보인다');
+  assert.equal(due(ahead(3), 'row').tone, '', '색 없는 조용한 글자');
+  assert.match(due(ahead(3), 'row').hint, /^\d+월 \d+일까지$/, '뜻은 title·낭독기 이름이 말한다');
+  assert.match(due(ahead(3), 'full').text, /^\d+월 \d+일까지$/, '다른 자리(상세·서랍 등)의 말은 그대로');
+});
+
+test('오늘 줄의 기한 `D-N`: 아이콘 없는 숫자 하나이고 이름은 `10월 5일까지`, 오늘 정리 창에는 붙지 않는다', () => {
+  const app = pureClient();
+  const html = app.run(`uiMetaCells({ id: 'a', status: 'to-do', due: uiDateKey(new Date(Date.now() + 3 * 86400000)) }, { where: 'row', noPriority: true })`);
+  assert.match(html, /<span class="m-due is-d" role="img" title="\d+월 \d+일까지" aria-label="\d+월 \d+일까지">D-3<\/span>/);
+  assert.doesNotMatch(html, /<svg/, '아이콘이 없다');
+  const far = app.run(`uiMetaCells({ id: 'a', status: 'to-do', due: uiDateKey(new Date(Date.now() + 9 * 86400000)) }, { where: 'row', noPriority: true })`);
+  assert.doesNotMatch(far, /m-due/, '8일 이상은 아무것도 없다');
 });
 
 test('a task carried over says since when, and says nothing on the day it was planned for', () => {

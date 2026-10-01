@@ -105,7 +105,7 @@ function wrapMetaCells(item) {
     cells.push(wrapMetaCell('m-doing', 'clock', '진행 중', `${uiKoDate(item.doing)}부터 진행 중이에요`));
   }
   const due = uiDueText(item.due, 'row');
-  if (due) cells.push(wrapMetaCell(`m-due${uiTone(due.tone)}`, 'calendar', due.text, item.due ? `기한은 ${uiKoDate(item.due)}이에요` : ''));
+  if (due && !due.quiet) cells.push(wrapMetaCell(`m-due${uiTone(due.tone)}`, 'calendar', due.text, item.due ? `기한은 ${uiKoDate(item.due)}이에요` : ''));
   return cells;
 }
 

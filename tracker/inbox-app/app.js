@@ -54,8 +54,10 @@ function uiDateSlash(dateStr) {
   return `${Number(month)}/${Number(day)}`;
 }
 
+const UI_DUE_COUNTDOWN_DAYS = 7; // 이 날 안으로 남은 기한은 오늘 목록 줄에 `D-N`으로 선다
+
 // 기한 말투는 어디서나 같다: `기한 2일 지남`(urgent) `오늘까지`(warn) `내일까지` `9월 27일까지`.
-// where가 'row'면 오늘 목록의 한 줄 — 먼 기한은 찍지 않는다(의미 없는 값은 자리를 비운다).
+// where가 'row'면 오늘 목록의 한 줄 — 2~7일 남으면 조용한 `D-N`, 그보다 먼 기한은 찍지 않는다(의미 없는 값은 자리를 비운다).
 function uiDueText(due, where = 'full') {
   if (!due) return null;
   const diff = diffDays(due);
@@ -63,7 +65,11 @@ function uiDueText(due, where = 'full') {
   if (diff < 0) return { text: `기한 ${-diff}일 지남`, tone: 'urgent' };
   if (diff === 0) return { text: '오늘까지', tone: 'warn' };
   if (diff === 1) return { text: '내일까지', tone: '' };
-  if (where === 'row') return null;
+  if (where === 'row') {
+    // 2~7일 남았으면 오늘 목록 줄에 조용한 `D-3`만 — 아이콘·`까지` 없이. 뜻(`10월 5일까지`)은 title·낭독기 이름이 말한다.
+    if (diff <= UI_DUE_COUNTDOWN_DAYS) return { text: `D-${diff}`, tone: '', quiet: true, hint: `${uiKoDateShort(due)}까지` };
+    return null;
+  }
   return { text: `${uiKoDateShort(due)}까지`, tone: '' };
 }
 
@@ -490,7 +496,9 @@ function uiMetaCells(item, opts = {}) {
   const scheduledLater = opts.later && !done && item.scheduled && diffDays(item.scheduled) > 0
     ? cell('m-sched', 'calendar', `${uiKoDateShort(item.scheduled)} 예정`, `${uiKoDate(item.scheduled)}에 하기로 했어요`) : '';
   const due = done ? null : uiDueText(item.due, where);
-  const dueCell = due ? cell(`m-due${uiTone(due.tone)}`, 'calendar', due.text, item.due ? `기한은 ${uiKoDate(item.due)}이에요` : '') : '';
+  const dueCell = due && due.quiet
+    ? `<span class="m-due is-d" role="img" title="${escapeAttr(due.hint)}" aria-label="${escapeAttr(due.hint)}">${escapeHtml(due.text)}</span>`
+    : due ? cell(`m-due${uiTone(due.tone)}`, 'calendar', due.text, item.due ? `기한은 ${uiKoDate(item.due)}이에요` : '') : '';
   return [...cells, priorityCell, ...status, scheduledLater, dueCell].filter(Boolean).join('');
 }
 

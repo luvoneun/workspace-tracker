@@ -1248,6 +1248,8 @@ body.batch-open .d-row[data-task-id]:not(.is-done) { cursor: pointer; }
 }
 .d-meta .m-pri.k-neg, .d-meta .m-due.k-neg { background: var(--urgent-bg); color: var(--urgent); }
 .d-meta .m-due.k-warn { background: var(--warn-bg); color: var(--warn); }
+/* 2~7일 남은 기한의 `D-3` — 아이콘·바탕 없이 숫자만, 가장 조용하게 */
+.d-meta .m-due.is-d { font-size: 12.5px; font-weight: 500; color: var(--dim); font-variant-numeric: tabular-nums; }
 .d-meta .m-pri .d-dot { display: none; }   /* 아이콘이 이미 말해 준다 */
 .d-meta .m-proj { display: none; }
 .d-meta .d-link { flex: none; }
