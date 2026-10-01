@@ -170,7 +170,8 @@ function reapDeadLock(lockDir, staleMs = LOCK_STALE_MS) {
   const seen = readLock(lockDir);
   let age = 0;
   try { age = Date.now() - fs.statSync(lockDir).mtimeMs; } catch { age = 0; }
-  if (seen.pid && pidAlive(seen.pid) && age <= staleMs) return false;
+  // pid를 읽을 수 없는 잠금(남이 막 만들었거나 반쯤 지워진 폴더)도 나이 기준을 같이 탄다 — 갓 생긴 것은 기다린다.
+  if ((!seen.pid || pidAlive(seen.pid)) && age <= staleMs) return false;
   const tomb = `${lockDir}.${process.pid}.${randomUUID()}.dead`;
   try { fs.renameSync(lockDir, tomb); } catch { return true; }
   if (readLock(tomb).raw !== seen.raw) {
@@ -417,6 +418,25 @@ async function saveOAuthResult(options = {}) {
   return done === BUSY ? { ok: false, reason: 'lock' } : done;
 }
 
+// 새 방식을 그만둘 때(사람이 토큰을 직접 붙여 넣어 저장) — 갱신 정보와 실패 기록을 지운다. 둘이 같이 있으면 다음 갱신이
+// 붙여 넣은 토큰을 덮는다. 갱신과 같은 잠금 안에서 지우고, `then`(붙여 넣은 토큰 쓰기)도 그 안에서 돌린다 —
+// 진행 중이던 갱신이 뒤늦게 사본을 덮지 못하게. 잠금을 못 잡았거나 `then`이 던지면 false(아무것도 지우지 않았다).
+// `.legacy`는 건드리지 않는다.
+async function forgetOAuth(options = {}) {
+  const paths = authPaths(options);
+  const done = await withLock(paths, options, () => {
+    try {
+      if (typeof options.then === 'function') options.then();
+      fs.rmSync(paths.oauthFile, { force: true });
+      fs.rmSync(paths.stateFile, { force: true });
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  return done === true;
+}
+
 // 화면·점검하기가 읽는 상태 — 값 없이 시각·권한·실패 종류만. 파일을 쓰지 않는다.
 // `minValidMs`는 부르는 쪽의 갱신 기준(서버 60분)이다 — `nextRefreshAt`이 그 기준으로 나온다.
 function readOAuthStatus(options = {}) {
@@ -459,7 +479,7 @@ function readOAuthStatus(options = {}) {
 }
 
 module.exports = {
-  getSlackToken, saveOAuthResult, readOAuthStatus,
+  getSlackToken, saveOAuthResult, readOAuthStatus, forgetOAuth,
   authPaths, slackClientId, retryDelayMs,
   DEFAULT_CLIENT_ID, REQUIRED_SCOPES, RETRY_DELAYS_MS,
 };

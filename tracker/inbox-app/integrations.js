@@ -15,6 +15,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { atomicWrite } = require('./safe-storage');
 const { parseCalendar, todayEvents } = require('./ical');
+const slackAuth = require('./slack-auth');
 
 const SLACK_CHANNEL_KEYS = ['todo', 'align', 'someday', 'waiting'];
 // 칸 이름(화면의 SETTINGS_SLACK_CHANNELS와 같은 말) — `이미 ○○ 칸에 연결된 채널이에요`에만 쓴다.
@@ -66,6 +67,9 @@ const MESSAGE = {
   slackAppLevel: '이건 앱 수준 토큰(xapp-)이에요 — OAuth & Permissions 화면의 User OAuth Token(xoxp-)을 복사해 주세요',
   slackNotUser: 'User OAuth Token은 xoxp-로 시작해요 — OAuth & Permissions 화면에서 복사해 주세요',
   slackReach: '슬랙에 닿지 못했어요 — 잠시 뒤 다시 해 주세요',
+  // 새 방식(슬랙 연결 버튼)에서 저장된 연결을 쓸 수 없을 때 — 화면의 풀림 카드와 같은 말.
+  slackReconnect: '슬랙 연결이 풀렸어요 — 다시 연결 한 번이면 돼요',
+  slackBusy: '슬랙 연결을 정리하는 중이에요 — 잠시 뒤 다시 눌러 주세요',
   slackTidyClaude: 'Claude로 다듬으려면 이 맥에 Claude Code가 있어야 해요',
   icalUrl: '비밀 주소를 붙여 넣어 주세요',
   icalHttps: '주소는 https://로 시작해야 해요',
@@ -430,6 +434,45 @@ function savedSlackToken(config, tokenDir) {
   return found ? found.value : '';
 }
 
+// 슬랙 연결 방식 — `oauth`(슬랙 연결 버튼, 자동 갱신) · `token`(토큰 붙여 넣기, 칸이 없는 옛 설치 포함).
+const slackAuthMode = config => (clone(clone(config).slack).auth === 'oauth' ? 'oauth' : 'token');
+// 서버(15분 타이머, 다음 묶음)가 미리 갱신하는 기준 — 화면의 `다음 갱신`이 이 기준으로 나온다.
+const SLACK_REFRESH_AHEAD_MS = 60 * 60 * 1000;
+
+// 저장된 연결로 **지금 쓸 수 있는** 슬랙 토큰 — 화면이 토큰을 보내지 않는 길(채널 만들기·고르기·연결 저장)에서 서버 안에서만 쓴다.
+// 옛 방식은 한 줄 파일을 읽을 뿐이고(없으면 빈 글자), 새 방식은 만료가 가까우면 갱신한 뒤의 토큰을 준다.
+// 새 방식인데 다시 연결해야 하면 `slack_reconnect`로 던진다. 돌려주는 값은 응답·로그에 싣지 않는다.
+async function slackTokenForUse(config, { tokenDir, request, now } = {}) {
+  if (slackAuthMode(config) !== 'oauth') return savedSlackToken(config, tokenDir);
+  const got = await slackAuth.getSlackToken({ config, tokenDir, request, now });
+  if (!got.token || (got.failure && got.failure.kind === 'reconnect')) throw bad(MESSAGE.slackReconnect, 'slack_reconnect');
+  return got.token;
+}
+
+// 슬랙 `허용`이 끝난 뒤(slack-auth.js saveOAuthResult가 토큰을 저장한 뒤) 설정에 방식만 적는다 — `slack.auth: 'oauth'`.
+// 토큰 파일 경로 칸이 비어 있으면 기본 자리를 적는다(사람이 옮겨 둔 경로는 그대로). 켬/끔·채널은 건드리지 않는다.
+function saveSlackAuth({ configPath, current = {}, tokenDir, write = atomicWrite } = {}) {
+  const slack = { ...clone(current.slack), auth: 'oauth' };
+  if (!trimmed(slack.tokenFile)) slack.tokenFile = tokenPaths(tokenDir).slack.config;
+  const config = { ...current, slack };
+  write(configPath, `${JSON.stringify(config, null, 2)}\n`);
+  return config;
+}
+
+// 화면이 읽는 자동 갱신 상태 — 값 없이 시각·권한·실패 종류만(slack-auth.js readOAuthStatus에서 필요한 칸만 고른다).
+function slackOAuthView(config, tokenDir) {
+  const status = slackAuth.readOAuthStatus({ config, tokenDir, minValidMs: SLACK_REFRESH_AHEAD_MS });
+  const failure = status.lastFailure;
+  return {
+    connected: status.connected === true,
+    expiresAt: status.expiresAt, nextRefreshAt: status.nextRefreshAt,
+    missingScopes: status.missingScopes || [],
+    lastFailure: failure ? { kind: failure.kind, reason: failure.reason, ...(failure.code ? { code: failure.code } : {}) } : null,
+    teamName: status.teamName || '',
+    legacyKept: status.legacyKept === true,
+  };
+}
+
 function withJira(config, { enabled, siteUrl, email, tokenFile, displayName }) {
   const next = { ...config };
   next.integrations = { ...clone(config.integrations), jira: enabled };
@@ -558,6 +601,9 @@ function readIntegrations(config, { tokenDir, claude } = {}) {
       hasToken: !!findToken(paths, 'slack', slack.tokenFile),
       // 정리 방식 — `raw`(원문 그대로)만 따로 읽고, 칸이 없거나 다른 값이면 `claude`(예전 그대로).
       tidy: slack.tidy === 'raw' ? 'raw' : 'claude',
+      // 연결 방식과, 새 방식이면 자동 갱신 상태(값 없이). 옛 방식(칸 없음 포함)은 `token`이고 `oauth` 칸이 없다.
+      auth: slackAuthMode(config),
+      ...(slackAuthMode(config) === 'oauth' ? { oauth: slackOAuthView(config, tokenDir) } : {}),
       channels: Object.fromEntries(SLACK_CHANNEL_KEYS.map((key) => {
         const entry = clone(channels[key]);
         // 예시 자리표시자가 남아 있거나 뺀 채널이면 "연결 안 된 칸"으로 본다(이름도 같이 비운다).
@@ -586,12 +632,14 @@ function readIntegrations(config, { tokenDir, claude } = {}) {
 async function saveIntegrations({
   configPath, current = {}, body = {}, tokenDir, claude,
   jiraCheck, slackCheck, calendarCheck, write = atomicWrite, writeToken = writeTokenFile, now = Date.now,
+  slackToken = config => slackTokenForUse(config, { tokenDir }), forgetOAuth = slackAuth.forgetOAuth,
 } = {}) {
   if (!body || typeof body !== 'object') throw bad(MESSAGE.other);
   const paths = tokenPaths(tokenDir);
   let config = { ...current };
   const result = { ok: true };
   const pending = [];   // 확인이 끝난 뒤에 쓸 토큰 파일들
+  let pastedOverOAuth = '';   // 새 방식에서 토큰을 직접 붙여 넣었을 때의 그 토큰(갱신 정보를 지우면서 쓴다)
   let touched = false;
 
   if (body.jira && typeof body.jira === 'object') {
@@ -658,9 +706,12 @@ async function saveIntegrations({
       // 빼기만 하는 저장은 슬랙에 묻지 않는다 — 토큰도 필요 없다.
       const needsSlack = wanted.length > 0 || onKeys.length > 0 || !offKeys.length;
       const token = trimmed(body.slack.token);
-      const saved = token || !needsSlack ? null : findToken(paths, 'slack', clone(config.slack).tokenFile);
-      if (needsSlack && !token && !saved) throw bad(MESSAGE.slackToken);
-      const secret = token || (saved ? saved.value : '');
+      // 새 방식(슬랙 연결 버튼)이면 화면이 토큰을 모른다 — 저장된 연결에서 지금 쓸 토큰을 받는다(필요하면 갱신).
+      const oauth = slackAuthMode(config) === 'oauth';
+      const saved = token || !needsSlack || oauth ? null : findToken(paths, 'slack', clone(config.slack).tokenFile);
+      const renewed = !token && needsSlack && oauth ? await slackToken(config) : '';
+      if (needsSlack && !token && !saved && !renewed) throw bad(oauth ? MESSAGE.slackReconnect : MESSAGE.slackToken, oauth ? 'slack_reconnect' : undefined);
+      const secret = token || renewed || (saved ? saved.value : '');
       // 저장 뒤 **켜진 채널이 하나 이상**이어야 한다(어느 채널이든 — 할 일도 선택이다). 새로 붙이는 것 · 다시 켜는 것 ·
       // 이미 켜져 있고 빼지 않는 것을 센다. 예시 자리표시자와 뺀 채널은 켜진 것으로 세지 않는다.
       const savedOn = (key) => { const entry = clone(savedChannels[key]); return !!realChannelId(entry.id) && entry.off !== true; };
@@ -726,7 +777,10 @@ async function saveIntegrations({
         if (wanted.includes(key) || !realChannelId(clone(savedChannels[key]).id)) return;
         channels[key] = { off: true };
       });
-      if (token) pending.push([paths.slack.file, token]);
+      // 새 방식 사용자가 `고급: 토큰 직접 붙여 넣기`로 저장하면 옛 방식으로 되돌린다 — 갱신 정보가 남아 있으면
+      // 다음 갱신이 붙여 넣은 토큰을 덮기 때문에, 토큰 쓰기와 갱신 정보 지우기를 갱신과 같은 잠금 안에서 한다(아래).
+      if (token && oauth) pastedOverOAuth = token;
+      else if (token) pending.push([paths.slack.file, token]);
       const workspaceUrl = trimmed(body.slack.workspaceUrl);
       // 처음 연결(저장된 채널이 하나도 없고 정리 방식 칸도 없음)이면 이 맥에 Claude Code가 있는지로 정한다 —
       // 없으면 `raw`(원문 그대로), 있으면 `claude`. 이미 연결했던 사람은 칸이 없어도 그대로 `claude`다(동작 변화 없음).
@@ -737,6 +791,7 @@ async function saveIntegrations({
         ...(token ? { tokenFile: paths.slack.config } : (saved ? { tokenFile: saved.config } : {})),
         ...(workspaceUrl ? { workspaceUrl } : {}),
       });
+      if (pastedOverOAuth) config = { ...config, slack: { ...clone(config.slack), auth: 'token' } };
       if (tidy !== undefined) {
         config = withSlackTidy(config, tidy);
         result.slack.tidy = tidy;
@@ -787,6 +842,10 @@ async function saveIntegrations({
   if (!touched) throw bad(MESSAGE.other);
   // 여기까지 왔으면 전부 확인됐다 — 이제야 파일을 쓴다.
   pending.forEach(([file, value]) => writeToken(file, value));
+  if (pastedOverOAuth) {
+    const forgot = await forgetOAuth({ config: current, tokenDir, then: () => writeToken(paths.slack.file, pastedOverOAuth) });
+    if (!forgot) throw bad(MESSAGE.slackBusy, 'slack_busy');
+  }
   write(configPath, `${JSON.stringify(config, null, 2)}\n`);
   // 정리 방식만 바꾼 저장은 서버를 다시 켤 필요가 없다(수집 스크립트가 회차마다 설정을 읽는다).
   const quiet = tidyOnly && !body.jira && !body.calendar && !body.meetingNotes;
@@ -999,7 +1058,7 @@ module.exports = {
   SLACK_CHANNEL_KEYS, SLACK_APPS_URL, INTEGRATION_MESSAGE: MESSAGE,
   tokenPaths, parseChannelId, slackCheckChannel, slackCreateChannel, readIntegrations, saveIntegrations,
   scheduleRestart, errorLines, maskLine, claudeInstalled, claudeCandidateDirs, writeTokenFile,
-  slackTokenCheck, savedSlackToken, createSlackNameFollower, SLACK_FOLLOW_MS, slackChannelPrefix, slackTsNow,
+  slackTokenCheck, savedSlackToken, slackTokenForUse, saveSlackAuth, slackAuthMode, createSlackNameFollower, SLACK_FOLLOW_MS, slackChannelPrefix, slackTsNow,
   normalizeIcalUrl, fetchIcal, icalCheck, savedIcalUrl, ICAL_TIMEOUT_MS, savePersonalize, registrationKey,
   normalizeJiraSite, saveClaudeToken, CLAUDE_TOKEN_MAX, bodyReadError,
 };

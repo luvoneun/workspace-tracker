@@ -186,13 +186,32 @@ test('죽은 pid가 남긴 잠금은 거두고 갱신한다', async t => {
   assert.deepEqual(fs.readdirSync(r.dir).sort(), ['workspace-slack-oauth.json', 'workspace-slack-token']);
 });
 
-test('pid를 읽을 수 없는 잠금 폴더도 거둔다', async t => {
+test('pid를 읽을 수 없는 잠금 폴더도 오래됐으면 거둔다', async t => {
   const r = room(t);
   const base = seed(r);
   fs.mkdirSync(r.paths.lockDir);
   fs.writeFileSync(path.join(r.paths.lockDir, 'pid'), '숫자 아님\n');
+  const old = new Date(Date.now() - 3 * MIN);
+  fs.utimesSync(r.paths.lockDir, old, old);
   const got = await getSlackToken({ ...base, request: fakeSlack(refreshed()).request, lockTries: 3 });
   assert.equal(got.token, NEW);
+});
+
+// 빈 잠금 폴더(반쯤 지워진 잠금)는 여기 오지 않는다 — 이름 바꾸기가 빈 폴더 위에는 성공해서 tryLock이 바로 잡는다.
+test('pid를 읽을 수 없는 갓 만든 잠금은 지우지 않고 기다린다', async t => {
+  for (const plant of [lockDir => fs.writeFileSync(path.join(lockDir, 'other'), ''), lockDir => fs.writeFileSync(path.join(lockDir, 'pid'), '숫자 아님\n')]) {
+    const r = room(t);
+    const base = seed(r);
+    fs.mkdirSync(r.paths.lockDir);
+    plant(r.paths.lockDir);
+    const got = await getSlackToken({ ...base, request: noRequest, lockTries: 3, lockWaitMs: 1 });
+    assert.deepEqual(got.failure, { kind: 'retry', reason: 'lock' });
+    assert.equal(got.token, OLD);
+    assert.ok(fs.existsSync(r.paths.lockDir), '갓 만든 잠금은 그대로');
+    // 나이 기준(2분)을 넘기면 거둔다.
+    const later = await getSlackToken({ ...base, request: fakeSlack(refreshed()).request, lockTries: 3, lockWaitMs: 1, lockStaleMs: -1 });
+    assert.equal(later.token, NEW);
+  }
 });
 
 test('살아 있는 pid의 잠금은 기다리다 이전 토큰을 돌려주고 건드리지 않는다', async t => {

@@ -4,6 +4,11 @@
 // 여기서 server.js를 require하지 않는다(서로 부르는 고리가 생기지 않게). 파일 읽기 캐시(readScope)를 쓰는 함수도
 // server.js에 그대로 두고 ctx로 받아 부르므로, 요청 하나 안에서 같은 파일을 두 번 읽지 않는 것도 예전과 같다.
 
+const slackAuth = require('./slack-auth');
+const slackOAuth = require('./slack-oauth');
+// 슬랙 `허용`을 기다리는 연결(state·code_verifier)은 이 프로세스의 메모리에만 둔다 — 파일·응답·로그에 남기지 않는다.
+const slackConnect = slackOAuth.createSlackOAuth();
+
 module.exports = function integrationsRoutes(req, res, url, ctx) {
   const { CALENDAR_ICAL, CONFIG_PATH, FETCH_MESSAGE, SLACK_AUTH_RE, USES, attentionLive, backupStatus, calendarLive,
     claudeReady, currentConfigFile, fetchNow, fetchStateAutomation, fetchStateLive, getAutomationStatus,
@@ -13,6 +18,86 @@ module.exports = function integrationsRoutes(req, res, url, ctx) {
   // 본문 읽기 오류(깨진 JSON·너무 큼)는 고정 문구로만 — 파서 메시지에 본문 조각(토큰 일부)이 섞일 수 있다.
   // 그 뒤 우리 검증 오류(bad(...))는 예전대로 그 문구를 돌려준다.
   const readJson = request => readBody(request).catch((error) => { throw integrations.bodyReadError(error); });
+
+  const sendJson = (status, body) => {
+    res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify(body));
+  };
+  // 슬랙 연결 버튼을 그릴 수 있는지(`ok`·`remote`·`port`·`client`) — 포트는 이 요청이 실제로 들어온 포트로 본다.
+  const slackReady = config => slackOAuth.readiness({
+    local: slackOAuth.isLocalRequest(req), port: req.socket.localPort, clientId: slackAuth.slackClientId(config),
+  });
+
+  // 슬랙 연결 시작 — 앱을 설치한 맥의 브라우저(루프백)에서만. state와 code_verifier를 메모리에 만들고 슬랙 허용 화면
+  // 주소만 돌려준다(주소에는 state와 code_challenge가 들어 있다 — 비밀이 아니다). 포트가 등록된 범위 밖이거나
+  // Client ID가 없으면 주소 대신 종류(`port`·`client`)만 돌려준다. 파일은 쓰지 않는다.
+  if (url.pathname === '/api/integrations/slack-oauth/start' && req.method === 'POST') {
+    if (!slackOAuth.isLocalRequest(req)) { req.resume(); sendJson(403, { ok: false, kind: 'remote' }); return true; }
+    readJson(req)
+      .then(() => {
+        const config = currentConfigFile();
+        const ready = slackReady(config);
+        if (ready !== 'ok') { sendJson(200, { ok: false, kind: ready }); return; }
+        // 이미 새 방식으로 연결한 적이 있어 팀을 알 때만 "같은 워크스페이스인지"를 본다(처음 연결은 검사 없음).
+        const known = integrations.slackAuthMode(config) === 'oauth' ? slackAuth.readOAuthStatus({ config }).teamId : '';
+        const started = slackConnect.start({ clientId: slackAuth.slackClientId(config), port: req.socket.localPort, expectedTeamId: known || '' });
+        sendJson(200, { ok: true, url: started.url, expiresAt: started.expiresAt });
+      })
+      .catch(error => sendJson(error.status || 400, { ok: false, error: error.message }));
+    return true;
+  }
+
+  // 기다림 취소 — 메모리의 state를 전부 버린다(그 뒤 슬랙에서 허용을 눌러도 연결되지 않는다). 파일은 쓰지 않는다.
+  if (url.pathname === '/api/integrations/slack-oauth/cancel' && req.method === 'POST') {
+    if (!slackOAuth.isLocalRequest(req)) { req.resume(); sendJson(403, { ok: false, kind: 'remote' }); return true; }
+    readJson(req)
+      .then(() => { slackConnect.cancel(); sendJson(200, { ok: true }); })
+      .catch(error => sendJson(error.status || 400, { ok: false, error: error.message }));
+    return true;
+  }
+
+  // 기다리는 중인지·끝났는지·실패 종류와 자동 갱신 상태 — 화면이 2초마다 묻는다. 값(토큰·state)은 없다.
+  if (url.pathname === '/api/integrations/slack-oauth/status' && req.method === 'GET') {
+    const config = currentConfigFile();
+    const slack = integrations.readIntegrations(config).slack;
+    sendJson(200, {
+      ok: true, ready: slackReady(config), ...slackConnect.status(),
+      auth: slack.auth, hasToken: slack.hasToken, oauth: slack.oauth || null,
+    });
+    return true;
+  }
+
+  // 슬랙이 `허용` 뒤에 돌려보내는 자리 — 정적 파일 처리보다 앞이다(경로 묶음이 먼저 물어진다).
+  // state가 틀리거나 이미 썼거나 만료면 거절하고 아무것도 바꾸지 않는다(기다리는 상태도 그대로 — 남이 만든 주소로
+  // 기다림을 끝낼 수 없게). 페이지는 종류로 고른 정해진 문구뿐이다(쿼리 값을 되비추지 않는다).
+  if (url.pathname === '/slack/callback' && req.method === 'GET') {
+    const show = (kind) => {
+      res.writeHead(kind === 'connected' ? 200 : 400, slackOAuth.PAGE_HEADERS);
+      res.end(slackOAuth.page(kind));
+    };
+    if (!slackOAuth.isLocalRequest(req)) { show('remote'); return true; }
+    const entry = slackConnect.take(url.searchParams.get('state'));
+    if (!entry) { show('state'); return true; }
+    const stop = (kind) => { slackConnect.finish(false, kind); show(kind); };
+    // 복구가 필요한 동안에는 다른 저장과 같이 아무것도 쓰지 않는다.
+    if (ctx.storage && ctx.storage.recoveryNeeded) { stop('write'); return true; }
+    const code = url.searchParams.get('code') || '';
+    if (url.searchParams.get('error') || !code) { stop(slackOAuth.failureKind(url.searchParams.get('error'))); return true; }
+    (async () => {
+      const response = await slackOAuth.exchangeCode({ code, verifier: entry.verifier, clientId: entry.clientId, port: entry.port });
+      if (!response || response.ok !== true) { stop(slackOAuth.failureKind(response && response.error)); return; }
+      const saved = await slackAuth.saveOAuthResult({
+        response, config: currentConfigFile(), clientId: entry.clientId,
+        ...(entry.expectedTeamId ? { expectedTeamId: entry.expectedTeamId } : {}),
+      });
+      if (!saved.ok) { stop({ team_mismatch: 'team', write: 'write', lock: 'write' }[saved.reason] || 'failed'); return; }
+      // 토큰은 저장됐다 — 이제 설정에 방식을 적는다(여기서 실패하면 다시 누르면 된다).
+      try { integrations.saveSlackAuth({ configPath: CONFIG_PATH, current: currentConfigFile() }); } catch { stop('write'); return; }
+      slackConnect.finish(true);
+      show('connected');
+    })().catch(() => { if (!res.headersSent) stop('failed'); });
+    return true;
+  }
 
   // 지금 연동 상태 — 토큰 값은 싣지 않고 있음/없음만 알려 준다.
   // 열 때마다 슬랙 채널 이름을 따라간다(5분 캐시, 이름만 고침 — slackFollower 참고). 카드의 상태 줄에
@@ -45,6 +130,8 @@ module.exports = function integrationsRoutes(req, res, url, ctx) {
       state.jira.attentionError = !!attentionView.error;
       const slackSync = getSlackSync();
       state.slack.readAt = slackSync && slackSync.used !== false ? slackSyncSuccessAt() : null;
+      // 슬랙 연결 버튼을 그릴 수 있는지와, 허용을 기다리는 중인지·마지막 결과(값 없음) — 창을 새로 열어도 기다림이 이어진다.
+      state.slack.connect = { ready: slackReady(config), ...slackConnect.status() };
       // 캘린더 비밀 주소 갈래의 상태 줄(`비밀 주소로 읽는 중 · 오늘 3개 · 10분 전`)에 쓰는 값 — 메모리에서만.
       const calendar = CALENDAR_ICAL ? calendarLive.current() : null;
       state.calendar.live = CALENDAR_ICAL;
@@ -89,8 +176,10 @@ module.exports = function integrationsRoutes(req, res, url, ctx) {
       .then((body) => {
         // 토큰 칸 없이 부르면(채널 고르기 — 새 채널 이름의 앞머리만 알고 싶을 때) 저장된 토큰을 서버 안에서만 쓴다.
         const given = typeof (body || {}).token === 'string' ? body.token.trim() : '';
-        return integrations.slackTokenCheck(given || integrations.savedSlackToken(currentConfigFile()));
+        // 새 방식(슬랙 연결 버튼)이면 만료가 가까울 때 갱신한 뒤의 토큰이다.
+        return given || integrations.slackTokenForUse(currentConfigFile());
       })
+      .then(token => integrations.slackTokenCheck(token))
       .then((checked) => {
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ ok: true, prefix: checked.prefix }));
@@ -166,11 +255,12 @@ module.exports = function integrationsRoutes(req, res, url, ctx) {
       .then((body) => {
         const given = typeof (body || {}).token === 'string' ? body.token.trim() : '';
         const config = currentConfigFile();
-        const token = given || integrations.savedSlackToken(config);
         // 이름이 이미 있으면 내 채널인지 찾아 쓴다 — 다른 칸(뺀 칸 포함)에 연결된 채널인지는 저장된 설정으로 본다(읽기만).
         const key = typeof (body || {}).key === 'string' ? body.key.trim() : '';
         const slack = config && typeof config.slack === 'object' && config.slack ? config.slack : {};
-        return integrations.slackCreateChannel(token, (body || {}).name, undefined, { key, channels: slack.channels || {} });
+        // 새 방식(슬랙 연결 버튼)이면 만료가 가까울 때 갱신한 뒤의 토큰이다.
+        return Promise.resolve(given || integrations.slackTokenForUse(config))
+          .then(token => integrations.slackCreateChannel(token, (body || {}).name, undefined, { key, channels: slack.channels || {} }));
       })
       .then((channel) => {
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
