@@ -664,6 +664,61 @@ function uiAddRowRestore(snap) {
   try { if (snap.start != null) input.setSelectionRange(snap.start, snap.end, snap.direction || 'none'); } catch { /* 커서를 못 옮겨도 글·초점은 남는다 */ }
 }
 
+// 입력 중이면 그 구역의 다시 그리기를 미룬다 — 구역 안의 글자 칸에 초점이 있으면 목록을 새로 만들지 않는다.
+// 칸을 새로 만들면 한글 조합이 끊겨("한글 입력" → "한ㄱ") 글·초점·커서를 되돌려도(uiAddRowRestore) 소용이 없다.
+// 미룬 그리기는 손을 뗀 뒤 마지막 것 하나만 돌린다 — 초점이 그 구역을 떠났을 때(누르던 버튼이 사라져 클릭이
+// 씹히지 않게 손가락을 뗀 뒤), 또는 되돌릴 수 있는 입력줄의 조합이 끝났을 때. 그 사이 목록·개수는 잠깐 옛 상태다.
+// 저장 중인(잠긴) 고치기 칸이 남아 있으면 그 저장이 부르는 load()에 맡긴다(실패하면 고치던 글이 남아야 한다).
+// 글·초점·커서를 되돌릴 수 있는 그룹 `+` 줄·프로젝트 상세 추가 줄은 조합 중일 때만 미룬다(저장한 줄이 바로 보이게).
+// 회의 탭이 쓰던 "입력 중이면 미룸"을 여러 구역에 넓힌 것이다(구역마다 따로 두지 않는다).
+let uiComposingEl = null;
+let uiPointerDown = false;
+const uiHeldRenders = new Map();
+function uiRenderHeld(zone) {
+  const el = document.activeElement;
+  if (!zone || !el || !zone.contains?.(el) || !isTyping()) return false;
+  if (uiComposingEl && uiComposingEl === el) return true;
+  return !uiAddRowSnapshot();
+}
+// 그리거나(true) 미룬다(false). `name`이 같은 미룬 그리기는 마지막 것만 남는다.
+function uiRenderOrHold(name, zone, render) {
+  if (!uiRenderHeld(zone)) { uiHeldRenders.delete(name); render(); return true; }
+  uiHeldRenders.set(name, { zone, render });
+  uiHoldArm(document.activeElement);
+  return false;
+}
+function uiHoldArm(el) {
+  if (!el || el.uiHoldArmed) return;
+  el.uiHoldArmed = true;
+  const check = () => {
+    el.removeEventListener('focusout', check);
+    el.removeEventListener('compositionend', check);
+    el.uiHoldArmed = false;
+    // 초점이 옮겨 간 뒤·조합이 끝난 뒤의 상태로 판단한다(이벤트 도중의 activeElement는 아직 옛 칸이다).
+    setTimeout(uiHeldFlush, 0);
+  };
+  el.addEventListener('focusout', check);
+  el.addEventListener('compositionend', check);
+}
+function uiHeldFlush() {
+  const active = document.activeElement;
+  for (const [name, held] of [...uiHeldRenders]) {
+    const { zone } = held;
+    if (uiRenderHeld(zone)) { uiHoldArm(active); continue; }
+    // 초점이 같은 구역의 다른 것(버튼 등)으로 옮겨 갔으면 그것을 지우지 않게 구역을 떠날 때까지 기다린다.
+    if (active && active !== document.body && zone.contains?.(active) && !uiAddRowSnapshot()) { uiHoldArm(active); continue; }
+    if (zone.querySelector?.('input[type="text"]:disabled, textarea:disabled')) continue;
+    if (uiPointerDown) {
+      document.addEventListener('pointerup', () => setTimeout(uiHeldFlush, 0), { once: true, capture: true });
+      return;
+    }
+    uiHeldRenders.delete(name);
+    const typingRow = uiAddRowSnapshot();
+    held.render();
+    uiAddRowRestore(typingRow);
+  }
+}
+
 // 그룹 제목의 `+`로 여는 그 자리 입력줄. 저장 뒤 목록을 다시 그려도 같은 줄로 포커스가 돌아온다(uiAddRowRestore).
 function uiGroupAddRow(key, endpoint, announceText) {
   const row = document.createElement('div');
@@ -1566,13 +1621,14 @@ async function load() {
   renderDateBar(data);
   renderCalendar(data.calendar);
   renderSuggestions(data.suggestions);
-  renderInbox(data.inboxTasks || []);
+  // 목록 안의 글자 칸(새로 들어온 것 제목 고치기·그룹 `+` 줄)에서 치는 중이면 그 목록은 손을 뗀 뒤 그린다.
+  uiRenderOrHold('inbox', document.getElementById('inboxZone'), () => renderInbox(data.inboxTasks || []));
   renderUpdateNotice();
   renderNewsCard();
   renderGuideCard();
-  renderLaterTasks(data.laterTasks || []);
+  uiRenderOrHold('later', document.getElementById('laterTaskList'), () => renderLaterTasks(data.laterTasks || []));
   renderWaiting(data.waiting || []);
-  renderTodayTasks(data.todayTasks || []);
+  uiRenderOrHold('today', document.getElementById('todayTaskList'), () => renderTodayTasks(data.todayTasks || []));
   decisionArchiveCache = data.decisionArchive || [];
   // 아직 PRD에 반영하지 않은 결정 수. 탭 이름 옆 작은 숫자와 결정 구역 제목이 같은 값을 쓴다.
   const pendingDecisions = (data.decisions || []).length;
@@ -1627,18 +1683,15 @@ let activeTabKey = 'today';
 const tabStale = { projects: true, meetings: true, records: true, weekly: true };
 function renderActiveTabLists() {
   if (!latestData) return;
+  // 프로젝트 탭의 빠른 추가·새 프로젝트 이름 같은 칸에서 치는 중이면 손을 뗀 뒤 그린다(uiRenderOrHold).
   if (activeTabKey === 'projects' && tabStale.projects) {
-    tabStale.projects = false;
-    renderProjects();
+    // 미뤘다가 그릴 때 다른 탭으로 옮겨 가 있으면 그리지 않는다 — 탭을 다시 열 때 그린다(tabStale 그대로).
+    uiRenderOrHold('projects', document.getElementById('projectBody'), () => { if (activeTabKey !== 'projects') return; tabStale.projects = false; renderProjects(); });
   }
   // 회의 탭은 글을 쓰는 면이다 — 초안 문구·직접 담기 칸에 손이 가 있으면 다시 그리지 않는다
-  // (적던 글과 초점이 날아가지 않게. 줄 옆 카드의 syncTaskDetail과 같은 장치다).
+  // (적던 글과 초점이 날아가지 않게. 줄 옆 카드의 syncTaskDetail과 같은 장치다). 손을 떼면 그때 그린다.
   if (activeTabKey === 'meetings' && tabStale.meetings) {
-    const zone = document.getElementById('meetingBody');
-    if (!(zone && isTyping() && zone.contains(document.activeElement))) {
-      tabStale.meetings = false;
-      renderMeetings();
-    }
+    uiRenderOrHold('meetings', document.getElementById('meetingBody'), () => { if (activeTabKey !== 'meetings') return; tabStale.meetings = false; renderMeetings(); });
   }
   if (activeTabKey === 'records' && tabStale.records) {
     tabStale.records = false;
@@ -5740,6 +5793,12 @@ window.addEventListener('resize', () => { clearTimeout(uiClampResizeTimer); uiCl
 // 접힌 details 안에서 그려진 제목도 펼쳐진 뒤 다시 잰다(toggle은 거품이 없어 잡기 단계로 듣는다).
 document.addEventListener('toggle', () => requestAnimationFrame(uiClampResync), true);
 window.addEventListener('appinstalled', appInstallOnInstalled);
+// 한글 조합 중인 칸·눌린 손가락을 기억한다 — 입력 중 다시 그리기 미루기(uiRenderOrHold)가 본다.
+document.addEventListener('compositionstart', (event) => { uiComposingEl = event.target; }, true);
+document.addEventListener('compositionend', (event) => { if (uiComposingEl === event.target) uiComposingEl = null; }, true);
+document.addEventListener('pointerdown', () => { uiPointerDown = true; }, true);
+document.addEventListener('pointerup', () => { uiPointerDown = false; }, true);
+document.addEventListener('pointercancel', () => { uiPointerDown = false; }, true);
 setupQuickAdd('todayTaskInput', '/api/today-task/create', '오늘 할 일에 추가했어요');
 setupQuickAdd('laterTaskInput', '/api/later-task/create', '나중에 할 일에 추가했어요');
 setupQuickAdd('waitingInput', '/api/waiting/create', '확인 대기에 추가했어요');

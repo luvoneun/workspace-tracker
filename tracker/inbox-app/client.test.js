@@ -374,6 +374,156 @@ test('입력 씹힘 ②: 주간요약 문장 줄은 문장을 담아 문서가 �
   assert.equal(app.run('focusCount'), 3, '줄마다 한 번 + 끝에서 한 번');
 });
 
+// 입력 씹힘 ③: 가짜 구역·칸. 구역은 아이를 품고(contains), 칸은 듣는 것을 여럿 붙였다 뗄 수 있다.
+function holdFixture(app) {
+  const kids = new Set();
+  const zone = { contains: node => kids.has(node), querySelector: () => null };
+  const field = (tag = 'INPUT', cls = '') => {
+    const handlers = {};
+    const node = {
+      tagName: tag, className: cls, value: '', isConnected: true, dataset: {},
+      matches: sel => tag !== 'BUTTON' && /input|textarea/.test(sel),
+      addEventListener(name, fn) { (handlers[name] ||= []).push(fn); },
+      removeEventListener(name, fn) { handlers[name] = (handlers[name] || []).filter(h => h !== fn); },
+      fire(name) { [...(handlers[name] || [])].forEach(fn => fn({ target: node })); },
+      handlers,
+    };
+    kids.add(node);
+    return node;
+  };
+  const doc = app.context.document;
+  doc.body = { tagName: 'BODY' };
+  doc.addEventListener = () => {};
+  return { zone, field, focus: node => { doc.activeElement = node; } };
+}
+const holdTick = () => new Promise(resolve => setTimeout(resolve, 5));
+
+test('입력 씹힘 ③: 구역 안 글자 칸에서 치는 중이면 다시 그리기를 미루고, 칸을 떠나면 마지막 것 한 번만 그린다', async () => {
+  const app = pureClient();
+  const fx = holdFixture(app);
+  const title = fx.field();
+  fx.focus(title);
+  const drawn = [];
+  assert.equal(app.context.uiRenderOrHold('inbox', fx.zone, () => drawn.push('옛')), false, '치는 중이면 미룬다');
+  app.context.uiRenderOrHold('inbox', fx.zone, () => drawn.push('새'));
+  assert.deepEqual(drawn, []);
+  // 조합이 끝나도 칸에 그대로 있으면(되돌릴 수 없는 칸) 계속 미룬다.
+  title.fire('compositionend'); await holdTick();
+  assert.deepEqual(drawn, []);
+  // 조합이 끝나지 않고 blur만 돼도(구역 밖으로 초점이 떠남) 그린다.
+  fx.focus(app.context.document.body);
+  title.fire('focusout'); await holdTick();
+  assert.deepEqual(drawn, ['새'], '마지막 것 하나만 한 번');
+  // 치는 중이 아니면 바로 그린다.
+  assert.equal(app.context.uiRenderOrHold('inbox', fx.zone, () => drawn.push('바로')), true);
+  assert.deepEqual(drawn, ['새', '바로']);
+});
+
+test('입력 씹힘 ③: 같은 구역의 버튼으로 초점이 옮겨 가거나 손가락이 눌린 동안에는 그리지 않는다(클릭이 씹히지 않게)', async () => {
+  const app = pureClient();
+  const fx = holdFixture(app);
+  const name = fx.field();
+  const make = fx.field('BUTTON');
+  fx.focus(name);
+  let drawn = 0;
+  app.context.uiRenderOrHold('projects', fx.zone, () => { drawn += 1; });
+  fx.focus(make);
+  name.fire('focusout'); await holdTick();
+  assert.equal(drawn, 0, '같은 구역의 버튼을 지우지 않는다');
+  // 버튼에서도 떠나는데 손가락이 아직 눌려 있다 → 뗄 때까지 기다린다.
+  app.run('uiPointerDown = true');
+  const ups = [];
+  app.context.document.addEventListener = (type, fn) => { if (type === 'pointerup') ups.push(fn); };
+  fx.focus(app.context.document.body);
+  make.fire('focusout'); await holdTick();
+  assert.equal(drawn, 0);
+  assert.equal(ups.length, 1);
+  app.run('uiPointerDown = false');
+  ups[0](); await holdTick();
+  assert.equal(drawn, 1);
+});
+
+test('입력 씹힘 ③: 저장 중인(잠긴) 고치기 칸이 남아 있으면 그 저장의 load()에 맡긴다', async () => {
+  const app = pureClient();
+  const fx = holdFixture(app);
+  const title = fx.field();
+  fx.focus(title);
+  let drawn = 0;
+  app.context.uiRenderOrHold('inbox', fx.zone, () => { drawn += 1; });
+  fx.zone.querySelector = sel => (/disabled/.test(sel) ? title : null);
+  fx.focus(app.context.document.body);
+  title.fire('focusout'); await holdTick();
+  assert.equal(drawn, 0, '실패하면 고치던 글이 남아야 하니 지우지 않는다');
+  // 저장 뒤 load()가 부르면(치는 중이 아니므로) 그린다.
+  app.context.uiRenderOrHold('inbox', fx.zone, () => { drawn += 1; });
+  assert.equal(drawn, 1);
+});
+
+test('입력 씹힘 ③: 그룹 `+` 줄은 조합 중일 때만 미루고, 조합이 끝나면 그려서 글·초점을 새 줄로 옮긴다', async () => {
+  const app = pureClient();
+  const fx = holdFixture(app);
+  const view = addRowRedraw(app, "uiGroupAddRow('group:게임', '/api/today-task/create', 'x')");
+  const input = view.oldInput;
+  fx.zone.contains = node => node === input;
+  const handlers = {};
+  input.addEventListener = (name, fn) => { (handlers[name] ||= []).push(fn); };
+  input.removeEventListener = (name, fn) => { handlers[name] = (handlers[name] || []).filter(h => h !== fn); };
+  input.matches = () => true;
+  input.value = '안녕하세요 한';
+  fx.focus(input);
+  let fresh = null;
+  // 조합 중이 아니면 바로 그린다(되돌릴 수 있는 줄 — 저장한 줄이 바로 보이게).
+  assert.equal(app.context.uiRenderOrHold('today', fx.zone, () => {}), true);
+  app.run('uiComposingEl = document.activeElement');
+  assert.equal(app.context.uiRenderOrHold('today', fx.zone, () => { fresh = view.redraw(); }), false, '조합 중이면 미룬다');
+  assert.equal(fresh, null);
+  input.value = '안녕하세요 한글';
+  app.run('uiComposingEl = null');
+  (handlers.compositionend || []).forEach(fn => fn()); await holdTick();
+  assert.ok(fresh, '조합이 끝나면 그린다');
+  assert.equal(fresh.children[0].value, '안녕하세요 한글');
+  assert.equal(fresh.children[0].focused, true);
+  assert.equal(fresh.hidden, false);
+});
+
+test('입력 씹힘 ③: 오늘 탭 세 목록·프로젝트 탭·회의 탭이 같은 미루기 도우미를 쓴다', () => {
+  const loadSrc = definitions.slice(definitions.indexOf('async function load() {'));
+  for (const [name, zone] of [['inbox', 'inboxZone'], ['later', 'laterTaskList'], ['today', 'todayTaskList']]) {
+    assert.match(loadSrc, new RegExp(`uiRenderOrHold\\('${name}', document\\.getElementById\\('${zone}'\\)`));
+  }
+  const tabs = definitions.slice(definitions.indexOf('function renderActiveTabLists() {'));
+  assert.match(tabs, /uiRenderOrHold\('projects', document\.getElementById\('projectBody'\)/);
+  assert.match(tabs, /uiRenderOrHold\('meetings', document\.getElementById\('meetingBody'\)/);
+});
+
+test('입력 씹힘 ③: 회의 탭 보호 회귀 — 회의 본문에서 치는 중이면 다시 그리지 않고 손을 떼면 그린다', async () => {
+  const app = pureClient();
+  const fx = holdFixture(app);
+  const draft = fx.field('TEXTAREA');
+  const zone = fx.zone;
+  app.context.document.getElementById = id => (id === 'meetingBody' ? zone : element());
+  let drawn = 0;
+  app.run("latestData = {}; activeTabKey = 'meetings'; tabStale.meetings = true;");
+  app.context.renderMeetings = () => { drawn += 1; };
+  fx.focus(draft);
+  app.run('renderActiveTabLists()');
+  assert.equal(drawn, 0);
+  assert.equal(app.run('tabStale.meetings'), true, '다음에 그릴 것으로 남는다');
+  fx.focus(app.context.document.body);
+  draft.fire('focusout'); await holdTick();
+  assert.equal(drawn, 1);
+  assert.equal(app.run('tabStale.meetings'), false);
+  // 다른 탭으로 옮긴 뒤 손을 떼면 그리지 않는다(그 탭을 다시 열 때 그린다).
+  app.run('tabStale.meetings = true');
+  fx.focus(draft);
+  app.run('renderActiveTabLists()');
+  app.run("activeTabKey = 'today'");
+  fx.focus(app.context.document.body);
+  draft.fire('focusout'); await holdTick();
+  assert.equal(drawn, 1);
+  assert.equal(app.run('tabStale.meetings'), true);
+});
+
 test('failed card action stays visible and restores its original checkbox state', async () => {
   const app = client(new Response('{"ok":true}'));
   const checkbox = { checked: true };
@@ -4124,6 +4274,19 @@ test('가져오기가 끝나면 목록을 다시 그리고 한 번만 알린다'
   app.nodes.get('liveRegion').textContent = '';
   app.run("meetingNotesApply({ used: true, state: 'done', scope: 'today', summary: '노트 2개' })");
   assert.equal(app.nodes.get('liveRegion').textContent, '');
+});
+
+test('입력 씹힘 ③: 회의 노트 가져오기가 끝나도 입력 중이면 손을 뗄 때까지 목록 다시 받기·알림을 미룬다', async () => {
+  const { app } = meetingNotesClient([{ used: true, state: 'done', scope: 'today', summary: '노트 1개' }]);
+  app.run("meetingNotesApply({ used: true, state: 'running', scope: 'today' })");
+  app.context.document.activeElement = { matches: () => true };
+  const polling = app.run('meetingNotesPoll()');
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.equal(app.run('loaded'), 0, '입력 중에는 load()를 부르지 않는다');
+  app.context.document.activeElement = null;
+  await polling;
+  assert.equal(app.run('loaded'), 1, '손을 떼면 다시 받는다');
+  assert.match(app.nodes.get('liveRegion').textContent, /^미팅 노트를 가져왔어요/);
 });
 
 test('회의 하나를 가져오면 그 회의의 초안 수로 알리고, 없으면 못 찾았다고 알린다', async () => {

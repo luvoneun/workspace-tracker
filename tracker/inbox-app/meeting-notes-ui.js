@@ -183,6 +183,9 @@ async function meetingNotesPoll() {
   } catch { /* 잠깐 끊긴 것은 다음 물음에서 다시 본다 */ }
   if (!status) { meetingNotesSchedule(); return; }
   if (!meetingNotesApply(status)) return;
+  // 입력 중이면 손을 뗄 때까지(1초마다 보고) 목록 다시 받기와 알림을 미룬다 — 지금 다시 그리면 적던 칸이 날아갈 수 있고,
+  // 다시 받지 않고 알리면 옛 목록으로 세어 틀린 말(`노트를 찾지 못했어요` 등)을 한다.
+  while (typeof isTyping === 'function' && isTyping()) await new Promise(resolve => setTimeout(resolve, 1000));
   await load();
   meetingNotesAnnounce(status);
 }
