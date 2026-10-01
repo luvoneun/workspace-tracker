@@ -687,6 +687,8 @@ Pretendard Variable(v1.3.9, SIL OFL 1.1)은 **앱에 넣어 두고 서버가 직
 ### 더보기 메뉴 (한 벌)
 
 모든 줄·상세의 ⋯가 같은 컴포넌트를 쓴다(`aria-haspopup`, `aria-expanded`, `role="menu"` / `role="menuitem"`).
+**일정 정하기 판(변형)**: `새로 들어온 것` 줄의 `일정 정하기 ⌄` 버튼(`.d-btn.sm`)이 여는, 이 메뉴 부품(`.d-mitem`·`.d-msep`·`--pop`·18px 모서리)과 같은 모양의 판(`.d-schedpop`)이다. 항목 오른쪽에 조용한 날짜(`12.5/500 --dim`)와 숫자 키(`kbd`)가 붙고, 맨 아래 `프로젝트` 줄은 판 안에서 목록(`.d-gpick`)이 펼쳐진다. 위 `uiMenu`와 달리 열려 있는 동안 그 구역 다시 그리기를 미루고, 아래가 모자라면 위로 뒤집는다.
+
 **줄에서 할 수 있는 일이 더보기뿐인 곳은 ⋯을 항상 보인다**(아이디어·결정·반영 완료 줄 — 28px 영역, 평소 `--dim`, hover·focus에서 `--text`). hover에서야 뜨는 동작 버튼이 함께 있는 줄(오늘 목록·새로 들어온 것)은 지금대로 ⋯도 그때 나타난다.
 `position: fixed`, 폭 304px(최대 `100vw - 24px`), `--surface`, 18px 모서리, `--pop`, 안쪽 6px. 항목 38px / `0 12px` / 14px 500 / 10px 모서리, hover `--hover`. 구분선 1px `--hair`. `삭제`는 맨 아래 구분선 뒤이고 평소엔 `--muted`, hover에서만 `--urgent`.
 **필드 줄**: 라벨(12.5 `--muted`, 최소 52px) + 오른쪽 정렬 컨트롤(칩 30px 999px — 현재 값만 `--accent-soft`; 글자·선택·날짜 칸 30px 12px 모서리).
@@ -852,7 +854,17 @@ Pretendard Variable(v1.3.9, SIL OFL 1.1)은 **앱에 넣어 두고 서버가 직
 | 새로고침 아이콘 한 바퀴 | 400ms |
 | 팔레트에서 연 줄 밝히기 | 1.6s |
 
-등장은 6px 이동 + 투명도뿐이다. 장식적인 움직임은 없다. `prefers-reduced-motion: reduce`에서는 모든 transition·animation을 `.01ms`로 줄이고, 완료 순간의 두 애니메이션과 진행 선 전환은 아예 끈다.
+등장은 6px 이동 + 투명도뿐이다. 장식적인 움직임은 없다 — 단 하나, 일정 정하기 판의 쫀득 모션은 예외다(아래 표).
+
+| 일정 정하기 판 (쫀득) | 값 |
+|---|---|
+| 판 등장 | 240ms, scale .88 → 1.025(55%) → 1, 시작점은 누른 버튼 쪽 |
+| 항목 | 18ms 간격으로 이어 뜸(translateY 4px + opacity) |
+| 닫힘 | 140ms, scale .96 + opacity |
+| 고른 뒤 줄 | 220ms 접히듯 사라짐(transform·opacity) |
+| 오늘 목록 새 줄 | 260ms 솟음 + 연파랑(`--sel`) 강조, 한 번만 |
+
+움직이는 속성은 transform·opacity뿐이고 새 줄에만 배경 강조 한 번이 더해진다(레이아웃 속성은 움직이지 않는다). `prefers-reduced-motion: reduce`에서는 전부 즉시다. `prefers-reduced-motion: reduce`에서는 모든 transition·animation을 `.01ms`로 줄이고, 완료 순간의 두 애니메이션과 진행 선 전환은 아예 끈다.
 
 ## 접근성 바닥
 
