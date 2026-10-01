@@ -450,13 +450,8 @@ function renderWaiting(items) {
   const checkedNow = waitingNextItem();
   if (checkedNow) list.appendChild(waitingNextLead(checkedNow, entry => renderWaitingRow(entry, { showProject: true }), { one: true }));
 
-  if (!items.length) {
-    const empty = document.createElement('div');
-    empty.className = 'd-rempty';
-    empty.textContent = '기다리는 답변이 없어요.';
-    list.appendChild(empty);
-    return;
-  }
+  // 비었으면 아무 말도 적지 않는다 — 바로 아래 `+ 확인 대기 추가` 칸이 자리를 말한다.
+  if (!items.length) return;
   if (waitingView === 'urgent') {
     waitingOrder(items).forEach(item => list.appendChild(renderWaitingRow(item, { showProject: true })));
     return;
@@ -503,8 +498,8 @@ function waitingCheckbox(item, row, done) {
 
 // 레일의 확인 대기 한 줄 — 두 줄 구성.
 //   첫 줄: 제목(최대 2줄)
-//   둘째 줄: (급한 순 보기면 맨 앞에 조용한 프로젝트 표기) + `결제팀 · 2일째`(3일째부터 주의색)
-//            + 답변 받을 날 배지(지났거나 오늘일 때만) + `오늘 다시 확인` / `9월 24일 다시 확인` / `오늘 요청함`
+//   둘째 줄: (급한 순 보기면 맨 앞에 조용한 프로젝트 표기) + `결제팀 · 2일째`(3일째부터 주의색, 늦음·오늘 답변 예정이 서면 `N일째`는 뺀다)
+//            + 답변 받을 날 색 글자(지났거나 오늘일 때만) + `오늘 다시 확인` / `9월 24일 다시 확인` / `오늘 요청함`
 //            + 원문이 있으면 끝에 `슬랙 ↗`(파란 글자)
 // 값 수정은 더보기·상세가 맡는다.
 function renderWaitingRow(item, opts = {}) {
@@ -524,7 +519,9 @@ function renderWaitingRow(item, opts = {}) {
     sub.appendChild(uiInlineProject(item, { lead: false }));
   }
   // `결제팀 · 2일째` — 한 덩어리로 붙여 읽는다(3일째부터 주의색 글자, 배지는 아니다).
-  const age = waitingAgeText(item.created, today);
+  // 답변 받을 날의 말(`1일 늦음`·`오늘 답변 예정`)이 서면 `N일째`는 뺀다 — 날짜 말은 더 급한 하나만.
+  const reply = done ? null : uiReplyText(item.due);
+  const age = reply ? null : waitingAgeText(item.created, today);
   if (item.who || age) {
     const line = document.createElement('span');
     line.className = 'who';
@@ -539,15 +536,14 @@ function renderWaitingRow(item, opts = {}) {
     }
     sub.appendChild(line);
   }
-  // 답변 받을 날은 지났거나 오늘일 때만 배지로 세운다 — 먼 날짜는 줄을 시끄럽게 하지 않는다.
+  // 답변 받을 날은 지났거나 오늘일 때만 색 글자로 세운다(배지가 아니다 — 프로젝트 탭과 같은 모양) — 먼 날짜는 줄을 시끄럽게 하지 않는다.
   // 답을 받은 줄(체크한 뒤 `다음은?`과 함께 다시 그리는 줄)에는 늦음·다시 확인을 세우지 않는다.
-  const reply = done ? null : uiReplyText(item.due);
   if (reply) {
-    const badge = document.createElement('span');
-    badge.className = `bd${uiTone(reply.tone)}`;
-    badge.title = `${uiKoDate(item.due)}까지 답변을 받기로 했어요`;
-    badge.textContent = reply.text;
-    sub.appendChild(badge);
+    const late = document.createElement('span');
+    late.className = `rp${uiTone(reply.tone)}`;
+    late.title = `${uiKoDate(item.due)}까지 답변을 받기로 했어요`;
+    late.textContent = reply.text;
+    sub.appendChild(late);
   }
   const next = done ? '' : recheck ? '오늘 다시 확인'
     : detail?.followUp ? `${uiKoDateShort(detail.followUp)} 다시 확인`

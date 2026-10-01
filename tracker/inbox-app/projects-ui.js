@@ -881,7 +881,19 @@ function projectSimpleRow(text, meta, onOpen, id, menuSections, makeCheck, sourc
   }
   const note = document.createElement('span');
   note.className = 'mt';
-  note.textContent = meta || '';
+  // meta는 글자 하나이거나 조각 목록이다 — 조각이 {text, tone}이면 그 말만 색 글자(`1일 늦음`)로 선다.
+  if (Array.isArray(meta) && meta.some(part => part && typeof part === 'object' && part.tone)) {
+    meta.filter(Boolean).forEach((part, index) => {
+      if (index) note.append(' · ');
+      if (typeof part === 'string') { note.append(part); return; }
+      const span = document.createElement('span');
+      span.className = uiTone(part.tone).trim();
+      span.textContent = part.text;
+      note.append(span);
+    });
+  } else {
+    note.textContent = Array.isArray(meta) ? meta.map(part => (part && typeof part === 'object' ? part.text : part)).filter(Boolean).join(' · ') : meta || '';
+  }
   row.append(note);
   if (menuSections) {
     const acts = document.createElement('span');
@@ -1296,14 +1308,14 @@ function renderProjectDetail(body, row) {
   simple('확인 대기', asItems(items.filter(item => item.type === 'check' && item.status !== 'done')),
     // 누구에게 + 급한 날짜 말(`1일 늦음`·`오늘 답변 예정`)을 함께 — 담당이 적혀 있다고 늦은 것이 가려지면 안 된다.
     // 묶음이면 끝에 그 항목의 티켓 번호.
-    item => [item.who, uiItemDueText(item)?.text, fromOf(item)].filter(Boolean).join(' · '), openPanel, waitingMenuSections, {
+    item => [item.who, uiItemDueText(item), fromOf(item)], openPanel, waitingMenuSections, {
       // 이 그룹은 미완료만 보여 준다(위 필터) — 체크하면 확인 완료가 되어 목록에서 빠진다.
       check: (item, host) => waitingCheckbox(item, host, false), lead: waitingLead, fold: 'waiting',
     });
-  // 결정은 미반영·반영을 글자로만 가른다(알약으로 그리지 않는다). 이 그룹은 반영 완료도 함께 보여 준다 —
-  // 체크해도 줄은 남고 오른쪽 글자만 `미반영` → 반영 날짜로 바뀐다(구역의 기존 규칙 그대로).
+  // 결정은 반영한 줄만 날짜 글자로 말한다(알약으로 그리지 않는다 — 체크 안 됨이 곧 미반영). 이 그룹은 반영 완료도 함께 보여 준다 —
+  // 체크하면 줄은 남고 오른쪽에 반영 날짜가 생긴다(구역의 기존 규칙 그대로).
   simple('결정', asItems(items.filter(item => item.type === 'decision')),
-    item => [item.status === 'done' ? `${uiKoDateShort(item.completed)} 반영` : '미반영', fromOf(item)].filter(Boolean).join(' · '), openPanel, decisionMenuSections,
+    item => [item.status === 'done' ? `${uiKoDateShort(item.completed)} 반영` : '', fromOf(item)].filter(Boolean).join(' · '), openPanel, decisionMenuSections,
     { check: (item, host) => decisionCheckbox(item, host, item.status === 'done'), hint: '· 체크하면 PRD 반영', fold: 'decision' });
 
   const meetings = workflowData.meetings.filter(event => rowKeys.includes(wfMeetingKey(event)) || items.some(item => item.meetingId === event.id));

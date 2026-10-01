@@ -2144,7 +2144,6 @@ function reportPlanSection(item, host, newIds) {
       reportSentenceRow(item, row, { host, newIds, plan: true });
     }
   });
-  if (!rows.length) host.appendChild(reportNode('div', '직접 쓴 문장만 들어가요', 'rp-hint'));
 
   // 담은 문장들 바로 아래가 후보 자리다(이번 주만). 눌러 담는 것은 사람이고, 앱은 보여 주기만 한다.
   if (current) reportPlanCandidateSection(item, host);
@@ -2156,7 +2155,7 @@ function reportPlanSection(item, host, newIds) {
   const input = reportPlanInput(item, {
     key: REPORT_PLAN_BOTTOM_KEY, id: 'reportPlanInput',
     // 안내는 짧게 — 앞의 프로젝트 고르개와 한 줄을 나눠 써서 좁은 폭에서 잘리지 않게(구역 제목이 `다음 주 계획`이다).
-    placeholder: '한 문장씩 추가 — Enter', label: '다음 주 계획 문장 추가',
+    placeholder: rows.length ? '한 문장씩 추가 — Enter' : '직접 쓴 문장만 들어가요 — 한 문장씩 Enter', label: '다음 주 계획 문장 추가',
     groupOf: () => reportPlanGroup, alsoTaskOf: () => current && reportPlanAlsoTask,
   });
   if (String(input.className).includes('rp-addmulti')) add.className += ' is-multi';
@@ -2424,13 +2423,14 @@ function reportPreview(report, item) {
   if (wide) top.appendChild(reportCopyButton(item));
   host.appendChild(top);
   const empty = !reportSlackLines(reportSlackModel(report, { sections: reportSlackSectionNames(report) })).length;
-  if (wide) {
+  // 확인할 것이 0이면 이 줄 자체가 없다(0은 적지 않는다) — 보낼 문장이 없을 때의 한 마디와 걸린 문장이 있을 때만 선다.
+  const reviewCount = reportReviewCount(report);
+  if (wide && (empty || reviewCount > 0)) {
     const check = reportNode('div', undefined, 'rp-check');
     check.appendChild(reportNode('span', '보내기 전 확인', 'hl'));
-    const count = reportReviewCount(report);
     if (empty) check.appendChild(reportNode('span', '보낼 문장이 아직 없어요', 'fine'));
-    else if (count > 0 && reportMode === 'draft') check.appendChild(reportReviewButton(item));
-    else check.appendChild(reportNode('span', count > 0 ? `확인 필요 ${count}` : '확인할 것 없어요', 'fine'));
+    else if (reportMode === 'draft') check.appendChild(reportReviewButton(item));
+    else check.appendChild(reportNode('span', `확인 필요 ${reviewCount}`, 'fine'));
     host.appendChild(check);
   }
   const material = item ? reportMaterialBlock(item) : null;

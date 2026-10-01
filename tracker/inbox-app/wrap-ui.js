@@ -36,7 +36,9 @@ function wrapTodayTasks() {
 const wrapOpenTasks = items => (items || []).filter(item => item.status !== 'done');
 const wrapDoneTasks = items => (items || []).filter(item => item.status === 'done');
 
-const wrapSummaryText = (total, done) => `${total}개 중 ${done}개 끝냈어요 · 남은 ${total - done}개`;
+// 머리줄 칩(`✓ 2/6`)과 같은 모양 — 남은 개수는 아래 `남은 것 N` 소제목이 말한다.
+const wrapSummaryText = (total, done) => `✓ ${done}/${total}`;
+const wrapSummaryLabel = (total, done) => `${total}개 중 ${done}개 끝냈어요`;
 
 function wrapCounts(rows) {
   const counts = { tomorrow: 0, later: 0, done: 0, total: 0 };
@@ -177,7 +179,12 @@ function wrapRender() {
 
   const summary = document.createElement('div');
   summary.className = 'd-wrapsum';
-  summary.textContent = wrapSummaryText(wrapState.rows.length + wrapState.done.length, wrapState.done.length);
+  const wrapTotal = wrapState.rows.length + wrapState.done.length;
+  summary.textContent = wrapSummaryText(wrapTotal, wrapState.done.length);
+  summary.setAttribute('role', 'img');
+  summary.setAttribute('aria-label', wrapSummaryLabel(wrapTotal, wrapState.done.length));
+  summary.title = wrapSummaryLabel(wrapTotal, wrapState.done.length);
+  summary.classList.toggle('is-full', !wrapState.rows.length);
   body.appendChild(summary);
 
   // 끝낸 것은 접힌 소제목이다(0개면 소제목 자체가 없다).

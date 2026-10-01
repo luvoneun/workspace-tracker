@@ -4278,6 +4278,34 @@ test('확인 대기 레일 줄: 원문이 있으면 둘째 줄 끝에 `슬랙 �
     && kids.findIndex(node => node.className === 'who') < kids.length - 1, '누구 · N일째 뒤에 선다');
 });
 
+// 글 줄이기: 레일 둘째 줄은 한 줄이다 — 늦음은 배지가 아니라 색 글자이고, 날짜 말은 더 급한 하나만 선다.
+test('확인 대기 레일 줄: 늦음은 색 글자 하나로 서고 `N일째`는 빠진다, 늦지 않으면 `N일째`만', () => {
+  const { app } = waitingNextClient();
+  app.run("Object.assign(wfItem('ck1'), { created: '2000-01-01', due: '2000-01-02', permalink: 'https://example.slack.test/p1' })");
+  const parts = row => nodeFind(row, 'sub').children.flatMap(node => node.className ? [node] : node.children);
+  const late = parts(app.run("renderWaitingRow(wfItem('ck1'))"));
+  assert.equal(late.some(node => String(node.className).split(' ').includes('bd')), false, '배지로 세우지 않는다');
+  const word = late.find(node => String(node.className).split(' ').includes('rp'));
+  assert.match(word.textContent, /일 늦음$/);
+  assert.ok(String(word.className).includes('k-neg'), '늦음은 급함 색');
+  assert.equal(nodeText(nodeFind(app.run("renderWaitingRow(wfItem('ck1'))"), 'who')).includes('일째'), false, '날짜 말이 둘 겹치면 더 급한 하나만');
+  assert.equal(late[late.length - 1].className, 'd-src', '`슬랙 ↗`는 끝에 그대로');
+  app.run("wfItem('ck1').due = ''");
+  assert.match(nodeText(nodeFind(app.run("renderWaitingRow(wfItem('ck1'))"), 'who')), /일째/, '늦지 않으면 며칠째가 선다');
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /^\.d-wrow\.is-two \.sub \{[^}]*flex-wrap: nowrap;/m, '둘째 줄은 한 줄 — `슬랙 ↗`가 밀려 내려가지 않는다');
+});
+
+test('프로젝트 탭 확인 대기 줄: 늦음도 같은 색 글자다(레일과 한 모양)', () => {
+  const app = pureClient();
+  app.run("var __mt = projectSimpleRow('문구', ['법무팀', { text: '1일 늦음', tone: 'urgent' }, 'AB-1'], () => {}, 'id1', null)");
+  const mt = nodeFind(app.run('__mt'), 'mt');
+  assert.equal(nodeText(mt).replace(/\s+/g, ' ').trim().includes('1일 늦음'), true);
+  const span = mt.children.find(node => node.className);
+  assert.equal(span.className, 'k-neg');
+  assert.equal(span.textContent, '1일 늦음');
+});
+
 test('확인 대기 레일 줄: 원문이 없으면 링크를 그리지 않는다(둘째 줄이 비면 둘째 줄도 없다)', () => {
   const { app } = waitingNextClient();
   assert.equal(nodeFind(app.run("renderWaitingRow(wfItem('ck1'))"), 'd-src'), null);
@@ -7265,7 +7293,8 @@ test('BWRAP: 대상은 오늘 목록의 미완료 업무뿐이고, 기본은 전
   assert.equal(fixture.app.run('wrapState.rows.map(row => row.id).join(",")'), 'w1,w2,w3,w4',
     '완료한 줄도, 나중에 할 일도 대상이 아니다');
   assert.equal(fixture.app.run('wrapState.rows.every(row => row.choice === "keep")'), true, '앱이 미룰 것을 추측하지 않는다');
-  assert.equal(nodeFind(fixture.body(), 'd-wrapsum').textContent, '6개 중 2개 끝냈어요 · 남은 4개');
+  assert.equal(nodeFind(fixture.body(), 'd-wrapsum').textContent, '✓ 2/6', '머리줄 칩과 같은 `✓ 끝낸/전체` 모양 — 문장은 없다');
+  assert.equal(nodeFind(fixture.body(), 'd-wrapsum').getAttribute('aria-label'), '6개 중 2개 끝냈어요', '화면 읽기에는 뜻이 남는다');
   assert.equal(fixture.go().textContent, '바꿀 게 없어요');
   assert.equal(fixture.go().disabled, true);
 
@@ -7380,7 +7409,7 @@ test('BWRAP: `끝낸 것`은 접힌 소제목이고, 0개면 소제목 자체가
   const none = wrapClient(({ today }) => [wrapTask('w1', '남은 업무', { doing: today })]);
   none.app.run('wrapOpen()');
   assert.deepEqual(nodeFindAll(none.body(), 'd-grp').map(head => nodeFind(head, 'gl').textContent), ['남은 것']);
-  assert.equal(nodeFind(none.body(), 'd-wrapsum').textContent, '1개 중 0개 끝냈어요 · 남은 1개');
+  assert.equal(nodeFind(none.body(), 'd-wrapsum').textContent, '✓ 0/1');
 });
 
 // ---------- BATTENTION: 오늘 탭 맨 위의 `반응 필요` (1차 지라 댓글) ----------
@@ -9173,9 +9202,10 @@ test('오늘 미팅 카드: 캘린더를 껐으면 "켜면 보여요", 켰는데
   const app = pureClient();
   const empty = (calendar) => {
     app.run(`workflowData = { items: [], meetings: [] }; renderCalendar(${JSON.stringify(calendar)})`);
-    return app.nodes.get('calendarList').children[0].textContent;
+    const box = app.nodes.get('calendarList').children[0];
+    return box.children.length ? box.children[0].textContent : box.textContent;
   };
-  assert.equal(empty({ used: false, events: [], lastSync: null }), '캘린더를 켜면 오늘 일정이 보여요(설정 > 연동).');
+  assert.equal(empty({ used: false, events: [], lastSync: null }), '캘린더 연결', '껐으면 문장 대신 켜는 자리로 가는 글자 버튼 하나');
   assert.equal(empty({ events: [], lastSync: null }), '오늘 일정을 가져오지 못했어요.', '켜져 있는데 기록이 없으면 못 가져온 것이다');
   assert.equal(empty({ events: [], lastSync: '2026-09-23T09:00:00.000Z', stale: true }), '오늘 일정을 가져오지 못했어요.');
   assert.equal(empty({ events: [], lastSync: '2026-09-23T09:00:00.000Z' }), '오늘은 미팅이 없어요.');
@@ -14878,7 +14908,7 @@ test('개편 A: 복사 버튼은 화면에 하나 — 좁은 폭(matchMedia 없�
   assert.deepEqual(preview.children.map(kid => kid.className), ['rp-slacktop', 'rp-check', 'rp-flw', 'rp-secs', 'rp-slackbox']);
   // 걸린 문장이 없으면 회색 한 마디, 보낼 문장이 없으면 그 말.
   app.run(`reportPreview({ ...item.draft, review: { count: 0, first: null } }, { ...item, draft: { ...item.draft, review: { count: 0, first: null } } })`);
-  assert.deepEqual(preview.children[1].children.map(kid => kid.textContent), ['보내기 전 확인', '확인할 것 없어요']);
+  assert.equal(preview.children.some(kid => kid.className === 'rp-check'), false, '확인할 것이 0이면 `확인할 것 없어요` 문장도 줄도 없다');
   app.run(`reportPreview({ weekKey: '2026-09-14', rows: [], review: { count: 0, first: null } }, { weekKey: '2026-09-14', draft: { weekKey: '2026-09-14', rows: [], review: { count: 0, first: null } } })`);
   assert.deepEqual(preview.children[1].children.map(kid => kid.textContent), ['보내기 전 확인', '보낼 문장이 아직 없어요']);
   // 고치는 중이면 어느 자리든 3차.

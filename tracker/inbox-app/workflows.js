@@ -248,7 +248,9 @@ function workflowRender(data) {
   if (!document.getElementById('wfMeetingEntry')) {
     const button = wfNode('button', '전체 보기', 'wf-link'); button.type = 'button'; button.id = 'wfMeetingEntry';
     button.addEventListener('click', () => openMeetingsTab(null));
-    document.getElementById('calendarSectionCount').parentElement.appendChild(button);
+    const count = document.getElementById('calendarSectionCount');
+    button.hidden = count.hidden; // 미팅이 없으면 숨김 — 이후는 renderCalendar가 맞춘다
+    count.parentElement.appendChild(button);
   }
   // 후속 알림은 따로 나열하지 않는다 — `다시 확인할 항목`은 확인 대기 목록 맨 위로 올라가고
   // (waitingOrder + renderWaitingRow), `답변이 해결된 업무`는 리마인드 카드의 줄이 된다(renderReminders).

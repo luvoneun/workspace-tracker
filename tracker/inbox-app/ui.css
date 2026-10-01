@@ -745,15 +745,20 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 .d-wrow.is-two { grid-template-areas: "ti ti" "sub sub"; align-items: start; }
 .d-wrow.is-two.has-ck { grid-template-columns: 20px minmax(0, 1fr) auto; grid-template-areas: "ck ti ti" "ck sub sub"; }
 .d-wrow.is-two .ti { white-space: normal; text-overflow: clip; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.4; }
-.d-wrow.is-two .sub { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; white-space: normal; overflow: visible; }
-.d-wrow.is-two .sub .who { color: var(--muted); font-weight: 600; }
+/* 둘째 줄은 한 줄이다(두 줄을 넘지 않게) — 모자라면 `누구`·프로젝트가 말줄임으로 양보하고 `슬랙 ↗`는 제 자리에 선다 */
+.d-wrow.is-two .sub { display: flex; align-items: center; flex-wrap: nowrap; gap: 4px 10px; white-space: nowrap; overflow: hidden; }
+.d-wrow.is-two .sub > * { flex: none; }
+.d-wrow.is-two .sub .who { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-weight: 600; }
 .d-wrow.is-two .sub .nx { color: var(--dim); }
+.d-wrow.is-two .sub .rp { font-weight: 600; }
+.d-wrow.is-two .sub .rp.k-neg { color: var(--urgent); }
+.d-wrow.is-two .sub .rp.k-warn { color: var(--warn); }
 /* 확인 대기 둘째 줄 끝의 `슬랙 ↗` — 따로 한 줄을 차지하지 않고, 어디로 가는 링크인지 파란 글자로 */
 .d-wrow.is-two .sub .d-src { color: var(--accent-text); }
 /* 시안처럼 `13일째 · 슬랙 ↗` — 점은 링크 밑줄에 걸리지 않게 inline-block, 흐린 색. 간격(10px)은 음수 여백으로 좁힌다 */
 .d-wrow.is-two .sub .d-src::before { content: " · "; display: inline-block; margin-left: -10px; white-space: pre; color: var(--dim); text-decoration: none; }
 /* 확인 대기 `급한 순` 보기의 둘째 줄 맨 앞 프로젝트 표기 — 말줄임(레일 폭 안에서 다른 말과 겹치지 않게) */
-.d-wrow.is-two .sub .d-inproj { max-width: 44%; overflow: hidden; text-overflow: ellipsis; }
+.d-wrow.is-two .sub .d-inproj { flex: 0 1 auto; min-width: 0; max-width: 44%; overflow: hidden; text-overflow: ellipsis; }
 /* 확인 대기 카드의 프로젝트 소제목 — 줄과 같은 왼쪽 자리(10px)에 맞춘 작은 그룹 제목 */
 #waitingList .d-grp { height: auto; min-height: 0; padding: 10px 10px 2px; font-size: var(--fs-sm); }
 #waitingList .d-grp:first-child { padding-top: 2px; }
@@ -1246,8 +1251,8 @@ body.batch-open .d-row[data-task-id]:not(.is-done) { cursor: pointer; }
 .d-meta .m-pri .d-dot { display: none; }   /* 아이콘이 이미 말해 준다 */
 .d-meta .m-proj { display: none; }
 .d-meta .d-link { flex: none; }
-/* 레일 줄의 배지도 같은 모양 — 급한 말(`오늘까지`·`답변 N일 늦음`)과 `초안 N`만 세운다.
-   며칠째 기다리는지 같은 말은 배지가 아니라 색 글자다(.d-wrow .sub .k-warn). */
+/* 레일 줄의 배지도 같은 모양 — 급한 말(`오늘까지`)과 `초안 N`만 세운다.
+   며칠째·`N일 늦음`·`오늘 답변 예정` 같은 날짜 말은 배지가 아니라 색 글자다(.d-wrow .sub .k-warn · .rp). */
 .d-wrow .mt .k-neg, .d-wrow .mt .k-warn, .d-wrow .sub .bd, .d-mrow .ct:not(:empty), .d-mtrow .ct:not(:empty) {
   display: inline-flex; align-items: center; height: 23px; padding: 0 8px; border-radius: 6px;
   font-size: 12.5px; font-weight: 600; white-space: nowrap; pointer-events: none;
@@ -1386,7 +1391,6 @@ textarea.d-dtitle {
 .d-din:focus { outline: none; background: var(--surface); box-shadow: 0 0 0 2px var(--accent); }
 .d-logline { font-size: var(--fs-sm); line-height: 1.7; color: var(--muted); font-variant-numeric: tabular-nums; }
 .d-hint { font-size: 12.5px; color: var(--muted); }
-.d-autosave { font-size: 12.5px; color: var(--muted); }
 .d-dsec .d-btn { margin-top: 4px; }
 
 /* 회의에서 연 항목 상세의 맨 위 — 돌아갈 자리를 조용히 알려 준다 */
@@ -2242,6 +2246,8 @@ body.batch-open .d-toast { bottom: 76px; }
 }
 .d-rec.is-sel .ti { font-weight: 600; color: var(--accent-text); }
 .d-rec .mt { font-size: 12.5px; color: var(--dim); text-align: right; white-space: nowrap; }
+.d-rec .mt .k-neg { color: var(--urgent); font-weight: 600; }
+.d-rec .mt .k-warn { color: var(--warn); font-weight: 600; }
 /* 프로젝트 탭의 확인 대기·결정 줄만 맨 앞에 체크 칸이 붙는다(아이디어·회의는 그대로).
    확인 대기(.d-wcb, 20px)·결정(.d-check, 30px) 크기가 달라도 이 칸 가운데 놓인다. */
 .d-rec.has-ck { grid-template-columns: 30px minmax(0, 1fr) auto; }
@@ -2836,7 +2842,11 @@ a.d-btn { text-decoration: none; }
    상태말은 업무 줄과 같은 칸(.d-meta)을 그대로 쓴다. */
 #wrapDialog { width: min(720px, calc(100vw - 32px)); }
 .d-mhd .d-wrapdate { font-size: var(--fs-sm); color: var(--dim); font-variant-numeric: tabular-nums; }
-.d-wrapsum { margin: 0 0 8px; font-size: var(--fs-sm); color: var(--dim); }
+.d-wrapsum {
+  display: inline-flex; align-items: center; height: var(--h-xs); margin: 0 0 8px; padding: 0 9px;
+  border-radius: 999px; background: var(--accent-soft); color: var(--accent-text);
+  font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums;
+}
 .d-wrapdone {
   padding: 4px 0 4px 22px; font-size: var(--fs-sm); color: var(--dim);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -2845,7 +2855,8 @@ a.d-btn { text-decoration: none; }
 .d-wraprow + .d-wraprow { box-shadow: inset 0 1px 0 var(--hair); }
 .d-wraprow .tiwrap { display: flex; align-items: baseline; gap: 6px; flex: 1 1 auto; min-width: 0; }
 .d-wraprow .ti { flex: 1 1 auto; min-width: 4em; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.d-wraprow .tiwrap .d-inproj { flex: 0 1 auto; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
+/* 프로젝트 이름은 줄어들지 않는다(한 글자만 남으면 읽을 수 없다) — 모자란 자리는 제목이 말줄임으로 낸다 */
+.d-wraprow .tiwrap .d-inproj { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
 .d-wraprow .d-meta { flex: none; overflow: visible; }
 .d-wraprow .d-seg { flex: none; }
 /* 줄이 많아 본문이 스크롤해도 주 버튼은 늘 보인다 — 상세 카드의 동작 줄(.d-dbar)과 같은 방식이다

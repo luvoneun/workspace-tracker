@@ -1846,15 +1846,26 @@ function renderCalendar(calendar) {
   const calendarCount = document.getElementById('calendarSectionCount');
   calendarCount.textContent = events.length;
   calendarCount.hidden = !events.length; // 0은 적지 않는다 — 생기면 그 자리에 나타난다
+  const meetingEntry = document.getElementById('wfMeetingEntry'); // 미팅이 없으면 `전체 보기`도 없다
+  if (meetingEntry) meetingEntry.hidden = !events.length;
   const list = document.getElementById('calendarList');
   list.replaceChildren();
   if (!events.length) {
     const empty = document.createElement('div');
     empty.className = 'd-rempty';
     // 캘린더를 아예 끈 사람에게 "가져오지 못했어요"는 고장난 것처럼 읽힌다 — 켜는 자리를 알려 준다.
-    empty.textContent = calendar?.used === false
-      ? '캘린더를 켜면 오늘 일정이 보여요(설정 > 연동).'
-      : calendar?.stale || !calendar?.lastSync ? '오늘 일정을 가져오지 못했어요.' : '오늘은 미팅이 없어요.';
+    if (calendar?.used === false) {
+      // 문장 대신 켜는 자리로 가는 글자 버튼 하나 — 설정 > 연동의 캘린더로 간다.
+      const connect = document.createElement('button');
+      connect.type = 'button';
+      connect.className = 'wf-link';
+      connect.textContent = '캘린더 연결';
+      connect.title = '캘린더를 켜면 오늘 일정이 보여요';
+      connect.addEventListener('click', () => { if (typeof settingsOpen === 'function') settingsOpen('integrations'); });
+      empty.appendChild(connect);
+    } else {
+      empty.textContent = calendar?.stale || !calendar?.lastSync ? '오늘 일정을 가져오지 못했어요.' : '오늘은 미팅이 없어요.';
+    }
     list.appendChild(empty);
     return;
   }
@@ -2921,7 +2932,7 @@ function openMeetingPanel(event) {
 // ---------- 상세 (업무 · 확인 대기 · 회의 정리 한 벌) ----------
 // 어디서 열든(오늘 목록·나중 목록·리마인드·검색·프로젝트·회의) 누른 줄 옆에 떠 있는 카드로 연다.
 // 내용을 만드는 곳은 여기(panelTask·panelCheck·panelMeeting)이고, 어디에 붙일지는 아래 `줄 옆 카드`가 정한다.
-// 저장 버튼은 없다 — 값이 바뀔 때 저장하고, 맨 아래에 "고치면 바로 저장돼요"라고 적는다.
+// 저장 버튼은 없다 — 값이 바뀔 때 저장한다(안내 문장은 없다).
 
 let panelState = null;
 
@@ -3303,13 +3314,6 @@ function panelSection(title) {
   return section;
 }
 
-function panelAutosaveNote(box) {
-  const note = document.createElement('div');
-  note.className = 'd-autosave';
-  note.textContent = '고치면 바로 저장돼요';
-  box.appendChild(note);
-}
-
 function panelQuietButton(text, onClick, className = 'd-btn') {
   const button = document.createElement('button');
   button.type = 'button';
@@ -3425,7 +3429,6 @@ function panelTask({ item, detail, type }, box) {
     link.addEventListener('click', () => panelOpen({ kind: 'meeting', id: detail.meetingId, back: panelState?.back }));
     box.appendChild(link);
   }
-  panelAutosaveNote(box);
 }
 
 // 언제 할지: `오늘` / `내일 · 9월 22일 (화)` / `어제부터 · 9월 20일 (일)` / `나중에` / `완료 · 9월 20일 (일)`
@@ -3676,7 +3679,6 @@ function panelCheck({ item, detail }, box) {
   log.appendChild(panelQuietButton('오늘 확인 요청함', () => markContactedToday(item), 'd-btn sm'));
   box.appendChild(log);
 
-  panelAutosaveNote(box);
 }
 
 /* ---------- 줄 옆 카드 ----------
