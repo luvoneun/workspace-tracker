@@ -276,126 +276,203 @@ async function panelPromoteTasks(result, ids, host = MEETING_HOST_CARD) {
   host.redraw();
 }
 
-// AI가 분류한 초안. 읽는 순서대로 문구(주인공) → 고르는 것들(종류·시점·날짜),
-// 담기 바는 패널 아래에 붙어 있다. 고친 문구·종류는 wfDraftEdits에 남아 다시 그려도 유지된다.
-// 초안 빼기는 문구 오른쪽의 조용한 글자 버튼 `빼기`다(✕는 날짜 칸의 `날짜 지우기` 하나만 남는다).
-let meetingDraftBarSeq = 0;
-function panelMeetingDrafts(event, box, host = MEETING_HOST_CARD) {
-  const section = panelSection(`AI가 분류한 초안 ${event.drafts.length}`);
-  section.classList.add('d-drafts');
+// 옛 자리 → 새 자리로 미끄러지기: 줄이 펼쳐지거나 접힐 때 자리는 바로 바뀌고(높이는 움직이지 않는다),
+// 밀리는 줄·구역 머리만 transform으로 따라온다. 움직임 줄이기에서는 그대로 바뀐다.
+function meetingFlip(root, mutate, duration, bounce = false) {
+  const moving = root && root.querySelectorAll && uiSchedMotion()
+    ? [...root.querySelectorAll('.d-mrow2, .d-dsec > .lbl, .d-dsec > summary, .d-dres, .d-hint')].filter(el => el.getBoundingClientRect && el.animate)
+    : [];
+  const before = new Map(moving.map(el => [el, el.getBoundingClientRect().top]));
+  mutate();
+  before.forEach((top, el) => {
+    if (!el.isConnected) return;
+    const delta = top - el.getBoundingClientRect().top;
+    if (Math.abs(delta) < 0.5) return;
+    el.animate(bounce
+      ? [{ transform: `translateY(${delta}px)` }, { transform: `translateY(${-Math.sign(delta) * 1.5}px)`, offset: 0.6 }, { transform: 'none' }]
+      : [{ transform: `translateY(${delta}px)` }, { transform: 'none' }],
+    { duration, easing: 'cubic-bezier(0.22, 0.8, 0.3, 1)' });
+  });
+}
 
-  const summary = document.createElement('span');
-  summary.className = 'sm';
-  // 담기 바의 오류 자리 — 요약 글자 자리에 대신 선다(빈 초안·저장 실패). 카드 머리까지 올라가 보지 않아도 되게.
-  const message = document.createElement('span');
+// AI가 분류한 초안 — 한 줄씩: `AI` | 문구 | (오늘 · 날짜) 종류 | 빼기. 문구를 누르면 그 자리에서 문구 칸 + 나중에/오늘 + 기한이
+// 펼쳐진다(한 번에 하나). 고친 문구·종류·날짜는 wfDraftEdits에 남아 다시 그려도 유지된다. `N개 담기`는 구역 제목 옆에 있다.
+// 초안 빼기는 조용한 글자 버튼 `빼기`다(✕는 날짜 칸의 `날짜 지우기` 하나만 남는다) — 손이 닿을 때만 보인다(누르는 화면에서는 늘).
+let meetingDraftBarSeq = 0;
+let meetingDraftOpenId = null; // 펼쳐 둔 초안 — 카드를 다시 그려도 그대로 펼쳐 둔다
+function panelMeetingDrafts(event, box, host = MEETING_HOST_CARD) {
+  const { section, label } = meetingSection('AI 초안', event.drafts.length);
+  section.classList.add('d-drafts');
+  // 오류 자리 — 구역 제목 바로 아래(빈 초안·저장 실패). 카드 머리까지 올라가 보지 않아도 되게.
+  const message = document.createElement('div');
   message.className = 'er';
   message.id = `meetingDraftBarError${++meetingDraftBarSeq}`;
   message.setAttribute('role', 'alert');
-  const texts = new Map(); // 초안 번호 → 문구 칸(빈 칸으로 초점을 보내고 표시하려고)
-  const refreshSummary = () => {
-    const counts = {};
-    let today = 0;
-    event.drafts.forEach(draft => {
-      const edit = wfDraftEdits.get(draft.id);
-      counts[edit.type] = (counts[edit.type] || 0) + 1;
-      if (edit.type === 'task' && edit.when === 'today') today++;
-    });
-    summary.textContent = WF_TYPES.filter(([key]) => counts[key])
-      .map(([key, label]) => `${label} ${counts[key]}${key === 'task' && today ? `(오늘 ${today})` : ''}`).join(' · ');
+  const list = document.createElement('div');
+  list.className = 'd-mlist';
+  const showBarError = (text) => { message.textContent = text || ''; };
+
+  event.drafts.forEach((draft) => {
+    if (!wfDraftEdits.has(draft.id)) wfDraftEdits.set(draft.id, { type: draft.type, description: wfCleanDraftText(draft.description), when: 'later', due: draft.due || '' });
+  });
+  if (!event.drafts.some(draft => draft.id === meetingDraftOpenId)) meetingDraftOpenId = null;
+  const flagged = new Set(); // 비운 채 담으려 한 초안
+  const rows = new Map(); // 초안 번호 → 지금 줄
+
+  const redraw = (draft, opening = false) => {
+    const old = rows.get(draft.id);
+    const row = build(draft, opening);
+    rows.set(draft.id, row);
+    if (old) old.replaceWith(row);
+    return row;
   };
-  const showBarError = (text) => {
-    message.textContent = text || '';
-    summary.hidden = !!text;
-  };
-  const markEmpty = (text, empty) => {
-    if (empty) { text.setAttribute('aria-invalid', 'true'); text.setAttribute('aria-describedby', message.id); }
-    else { text.removeAttribute('aria-invalid'); text.removeAttribute('aria-describedby'); }
+  // 한 줄을 펼치거나(id) 접는다(null). 다른 줄은 건드리지 않는다 — 누르던 줄이 사라져 클릭이 씹히지 않게.
+  const toggle = (id) => {
+    const previous = meetingDraftOpenId;
+    if (previous === id) return;
+    meetingFlip(host.box(), () => {
+      meetingDraftOpenId = id;
+      [previous, id].filter(Boolean).forEach((one) => {
+        const draft = event.drafts.find(other => other.id === one);
+        if (draft) redraw(draft, one === id);
+      });
+    }, id ? 220 : 130, !!id);
+    const text = id && rows.get(id) ? rows.get(id).draftText : null;
+    if (text) {
+      text.focus();
+      if (text.setSelectionRange) text.setSelectionRange(text.value.length, text.value.length);
+    }
   };
 
-  event.drafts.forEach((draft, index) => {
-    const edit = wfDraftEdits.get(draft.id) || { type: draft.type, description: wfCleanDraftText(draft.description), when: 'later', due: draft.due || '' };
-    wfDraftEdits.set(draft.id, edit);
-    const card = document.createElement('div');
-    card.className = 'd-draft';
-    card.dataset.type = edit.type;
+  function build(draft, opening) {
+    const index = event.drafts.indexOf(draft);
+    const edit = wfDraftEdits.get(draft.id);
+    const open = meetingDraftOpenId === draft.id;
+    const blank = !edit.description.trim();
+    const row = document.createElement('div');
+    row.className = 'd-mrow2 d-draft' + (open ? ' is-edit' : '') + (open && opening ? ' is-opening' : '')
+      + (blank ? ' is-blank' : '') + (flagged.has(draft.id) ? ' is-bad' : '');
+    row.dataset.type = edit.type;
 
-    // 문구는 여러 줄로 늘어나는 입력칸에 전부 보인다(한 줄 입력칸일 때는 긴 문구의 끝이 잘렸다).
-    const text = document.createElement('textarea');
-    text.className = 'd-dtxt';
-    text.rows = 1;
-    text.maxLength = 1000;
-    text.value = edit.description;
-    text.setAttribute('aria-label', '초안 문구');
-    texts.set(draft.id, text);
-    const fit = () => { text.style.height = 'auto'; text.style.height = `${text.scrollHeight + text.offsetHeight - text.clientHeight}px`; };
-
-    const dismiss = panelQuietButton('빼기', () => meetingDraftDismiss(event, draft, edit, index, host), 'd-headnum d-dpull');
+    const mark = document.createElement('span');
+    mark.className = 'ck ai';
+    mark.textContent = 'AI';
+    mark.title = 'AI가 뽑은 초안 — 담기 전이에요';
+    const right = document.createElement('span');
+    right.className = 'r';
+    const dismiss = panelQuietButton('빼기', () => meetingDraftDismiss(event, draft, edit, index, host), 'd-dpull');
     const labelDismiss = () => dismiss.setAttribute('aria-label', meetingDraftDismissLabel(edit.description));
     labelDismiss();
     dismiss.title = '이 초안 빼기';
 
-    text.addEventListener('input', () => {
-      // 문구는 한 줄이다: 붙여넣은 줄바꿈은 공백으로
-      if (text.value.includes('\n')) text.value = text.value.replace(/\s*\n\s*/g, ' ');
-      edit.description = text.value;
-      labelDismiss();
-      // 빈 칸 표시는 채우는 즉시 걷고, 빈 칸이 하나도 안 남으면 담기 바의 오류도 걷는다.
-      if (text.getAttribute('aria-invalid') === 'true' && text.value.trim()) {
-        markEmpty(text, false);
-        const left = [...texts.values()].filter(other => other.getAttribute('aria-invalid') === 'true').length;
-        showBarError(left ? meetingDraftEmptyText(left) : '');
+    let middle;
+    if (open) {
+      middle = document.createElement('div');
+      middle.className = 'ed';
+      const text = document.createElement('textarea');
+      text.className = 'd-dtxt';
+      text.rows = 1;
+      text.maxLength = 1000;
+      text.value = edit.description;
+      text.setAttribute('aria-label', '초안 문구');
+      if (flagged.has(draft.id)) { text.setAttribute('aria-invalid', 'true'); text.setAttribute('aria-describedby', message.id); }
+      row.draftText = text;
+      const fit = () => { text.style.height = 'auto'; text.style.height = `${text.scrollHeight + text.offsetHeight - text.clientHeight}px`; };
+      const was = edit.description;
+      text.addEventListener('input', () => {
+        // 문구는 한 줄이다: 붙여넣은 줄바꿈은 공백으로
+        if (text.value.includes('\n')) text.value = text.value.replace(/\s*\n\s*/g, ' ');
+        edit.description = text.value;
+        labelDismiss();
+        // 빈 칸 표시는 채우는 즉시 걷고, 빈 초안이 하나도 안 남으면 오류도 걷는다.
+        if (flagged.has(draft.id) && text.value.trim()) {
+          flagged.delete(draft.id);
+          text.removeAttribute('aria-invalid');
+          text.removeAttribute('aria-describedby');
+          showBarError(flagged.size ? meetingDraftEmptyText(flagged.size) : '');
+        }
+        fit();
+      });
+      text.addEventListener('keydown', (keyEvent) => {
+        if (keyEvent.key !== 'Enter' || keyEvent.isComposing) return; // 조합 중의 Enter는 글자를 확정하는 것이다
+        keyEvent.preventDefault();
+        toggle(null);
+        meetingCaptureFocus(host);
+      });
+      // Esc는 이 줄만 접고 문구를 펼치기 전으로 되돌린다(회의 카드는 닫히지 않는다).
+      row.addEventListener('keydown', (keyEvent) => {
+        if (keyEvent.key !== 'Escape' || keyEvent.isComposing) return;
+        keyEvent.preventDefault();
+        if (keyEvent.stopPropagation) keyEvent.stopPropagation();
+        edit.description = was;
+        toggle(null);
+        const title = rows.get(draft.id) ? rows.get(draft.id).draftTitle : null;
+        if (title) title.focus();
+      });
+      const controls = document.createElement('div');
+      controls.className = 'ct';
+      if (edit.type === 'task') {
+        const whenSeg = wfSegment([['later', '나중에 할 일'], ['today', '오늘 할 일']], edit.when || 'later', (key) => { edit.when = key; }, '언제 할 일로 담을까');
+        whenSeg.title = '나중에: 나중에 할 일로 담겨요 · 오늘: 오늘 할 일로 담겨요';
+        controls.appendChild(whenSeg);
       }
-      fit();
-    });
-    text.addEventListener('keydown', (keyEvent) => {
-      if (keyEvent.key === 'Enter' && !keyEvent.isComposing) keyEvent.preventDefault(); // 조합 중의 Enter는 글자를 확정하는 것이다
-    });
-
-    const top = document.createElement('div');
-    top.className = 'tp';
-    top.append(text, dismiss);
-
-    const controls = document.createElement('div');
-    controls.className = 'ct';
-    const whenSeg = wfSegment([['later', '나중에 할 일'], ['today', '오늘 할 일']], edit.when || 'later', (key) => { edit.when = key; refreshSummary(); }, '언제 할 일로 담을까');
-    whenSeg.title = '나중에: 나중에 할 일로 담겨요 · 오늘: 오늘 할 일로 담겨요';
-    const dateSlot = document.createElement('span');
-    const syncWhen = () => { whenSeg.hidden = edit.type !== 'task'; };
-    const syncDate = () => {
-      dateSlot.replaceChildren();
-      const label = wfDateLabel(edit.type); // 할 일 → 기한 · 확인 대기 → 답변 받을 날 · 결정 → 날짜 없음
+      const dateName = wfDateLabel(edit.type); // 할 일 → 기한 · 확인 대기 → 답변 받을 날 · 결정 → 날짜 없음
       // 고른 날짜는 앱의 날짜 글자(`10월 2일 (금)`)로 보인다 — 누르면 그 자리에서 날짜 입력칸으로 바뀐다.
-      if (label) dateSlot.appendChild(uiDateField({ value: edit.due || '', label, onChange: (value) => { edit.due = value || ''; }, shown: true }));
-    };
-    controls.append(wfTypeSegment(edit.type, (key) => {
+      if (dateName) controls.appendChild(uiDateField({ value: edit.due || '', label: dateName, onChange: (value) => { edit.due = value || ''; }, shown: true }));
+      middle.append(text, controls);
+      requestAnimationFrame(fit);
+    } else {
+      middle = document.createElement('button');
+      middle.type = 'button';
+      middle.className = 'ti';
+      middle.textContent = blank ? '빈 초안' : edit.description;
+      middle.title = '눌러서 고치기';
+      middle.setAttribute('aria-expanded', 'false');
+      middle.setAttribute('aria-label', `${blank ? '빈 초안' : edit.description} — 눌러서 고치기`);
+      middle.addEventListener('click', () => toggle(draft.id));
+      row.draftTitle = middle;
+      // 접힌 줄에는 고른 값만 조용히: 오늘 할 일로 고른 것, 날짜.
+      const note = (value) => { const tag = document.createElement('span'); tag.className = 'st'; tag.textContent = value; right.appendChild(tag); };
+      if (edit.type === 'task' && edit.when === 'today') note('오늘');
+      if (edit.type !== 'decision' && edit.due) note(uiDateSlash(edit.due));
+    }
+    right.appendChild(meetingTypeButton(edit.type, (key) => {
       edit.type = key;
-      card.dataset.type = key;
-      syncWhen();
-      syncDate();
-      refreshSummary();
-    }), whenSeg, dateSlot);
-    syncWhen();
-    syncDate();
+      redraw(draft);
+      meetingCaptureFocus(host);
+    }));
+    const acts = document.createElement('span');
+    acts.className = 'ac';
+    acts.appendChild(dismiss);
+    row.append(mark, middle, right, acts);
+    return row;
+  }
 
-    card.append(top, controls);
-    section.appendChild(card);
-    requestAnimationFrame(fit);
+  // 펼친 줄 밖을 누르면 접는다(종류 목록은 카드 밖에 떠 있어 여기 걸리지 않는다).
+  box.addEventListener('mousedown', (mouseEvent) => {
+    if (!meetingDraftOpenId) return;
+    const target = mouseEvent.target;
+    if (target && target.closest && target.closest('.d-draft.is-edit')) return;
+    toggle(null);
   });
-  box.appendChild(section);
 
-  const bar = document.createElement('div');
-  bar.className = 'd-dbar';
-  bar.append(summary, message);
-  bar.appendChild(panelQuietButton(`${event.drafts.length}개 담기`, async () => {
+  // 제목 옆 2차 버튼 — 초안은 틀릴 수 있어 사람이 담기를 눌러야 담긴다.
+  label.appendChild(panelQuietButton(`${event.drafts.length}개 담기`, async () => {
     showBarError('');
+    flagged.clear();
     const accept = event.drafts.map(draft => wfAcceptItem(draft.id, wfDraftEdits.get(draft.id)));
     const empty = accept.filter(item => !item.description);
-    texts.forEach((text, id) => markEmpty(text, empty.some(item => item.id === id)));
     if (empty.length) {
+      // 빈 초안은 표시하고, 첫 빈 초안을 펼쳐 초점을 보낸다.
+      empty.forEach(item => flagged.add(item.id));
       showBarError(meetingDraftEmptyText(empty.length));
-      texts.get(empty[0].id)?.focus();
+      meetingDraftOpenId = empty[0].id;
+      event.drafts.forEach(draft => redraw(draft));
+      const first = rows.get(empty[0].id).draftText;
+      if (first) first.focus();
       return;
     }
+    event.drafts.forEach(draft => redraw(draft));
     let result;
     try { result = await wfReview({ meetingId: event.id, accept }); } catch (error) {
       showBarError((typeof error?.message === 'string' && error.message) || '저장하지 못했어요. 내용을 확인한 뒤 다시 시도해 주세요.');
@@ -403,11 +480,14 @@ function panelMeetingDrafts(event, box, host = MEETING_HOST_CARD) {
     }
     host.setResult({ meetingId: event.id, created: result.created, accepted: accept });
     accept.forEach(item => wfDraftEdits.delete(item.id));
+    meetingDraftOpenId = null;
     await load();
     host.redraw(); // 결과 카드(role=status)가 담은 결과를 알려 주므로 따로 알림을 띄우지 않는다
-  }, 'd-btn pri'));
-  box.appendChild(bar);
-  refreshSummary();
+  }, 'd-btn sm acc'));
+
+  event.drafts.forEach(draft => list.appendChild(redraw(draft)));
+  section.append(message, list);
+  box.appendChild(section);
 }
 
 const meetingDraftEmptyText = count => `빈 초안이 ${count}개 있어요. 채우거나 빼 주세요`;
@@ -820,6 +900,7 @@ function meetingRowType(item, host) {
 function meetingSection(title, count) {
   const section = panelSection(title);
   const label = section.children[0];
+  section.className = 'd-dsec d-msec';
   label.className = 'lbl d-mhead';
   const number = document.createElement('span');
   number.className = 'n num';
@@ -833,7 +914,6 @@ function meetingSection(title, count) {
 // (uiQueueSend). 아직 서버 목록에 없는 줄(담는 중·못 담음·담았지만 아직 다시 읽기 전)은 여기서 회의별로 들고 있어
 // 카드를 다시 그려도 그대로 남는다. 서버 목록에 들어온 줄은 내려놓는다(기록되지 않은 회의는 목록이 없어 그대로 둔다).
 const meetingCaptureLocal = new Map(); // 회의 키 → [{ seq, type, text, state: 'pending' | 'fail' | 'saved', id, fresh }]
-const meetingCaptureOrder = new Map(); // 항목 번호 → 이번에 적은 순서(같은 날 담은 줄의 차례)
 let meetingCaptureSeq = 0;
 const MEETING_PASTE_MAX = 30;
 const MEETING_TYPE_HEADS = { '?': 'check', '!': 'decision' };
@@ -889,7 +969,6 @@ function meetingCaptureSend(event, linked, entry, host) {
     try {
       entry.id = await meetingCaptureSave(event, linked, entry);
       entry.state = 'saved';
-      if (entry.id) meetingCaptureOrder.set(entry.id, entry.seq);
     } catch {
       entry.state = 'fail'; // 알림은 request()가 이미 했다 — 적은 글은 그 줄에 그대로 있다
     }
@@ -969,12 +1048,16 @@ function meetingLocalRow(entry, event, linked, host) {
   return row;
 }
 
-// `이 회의에서 나온 것`은 시간순 한 목록이다: 담은 날짜순, 같은 날은 이번에 적은 순서, 그다음 원래 순서.
+// `이 회의에서 나온 것`은 시간순 한 목록이다: 담은 날짜순, 같은 날은 만든 순서. 항목 번호(`task_01M3…`)의 뒷부분이
+// 만든 시각 순으로 커지는 값이라 그것으로 가린다(종류를 바꿔도 번호는 그대로다). 그런 번호가 아닌 옛 항목은 원래 순서를 지킨다.
+const meetingItemStamp = (item) => {
+  const tail = String(item.id || '').split('_').pop();
+  return /^[0-9A-HJKMNP-TV-Z]{26}$/.test(tail) ? tail : '';
+};
 function meetingItemsInOrder(items) {
-  const at = item => (meetingCaptureOrder.has(item.id) ? meetingCaptureOrder.get(item.id) : -1);
-  return [...(items || [])].map((item, index) => ({ item, index }))
-    .sort((a, b) => String(a.item.created || '').localeCompare(String(b.item.created || ''))
-      || at(a.item) - at(b.item) || a.index - b.index)
+  return [...(items || [])].map((item, index) => ({ item, index, stamp: meetingItemStamp(item) }))
+    .sort((x, y) => String(x.item.created || '').localeCompare(String(y.item.created || ''))
+      || (x.stamp && y.stamp ? (x.stamp < y.stamp ? -1 : x.stamp > y.stamp ? 1 : 0) : 0) || x.index - y.index)
     .map(entry => entry.item);
 }
 
@@ -1256,7 +1339,7 @@ function panelMeetingLink(event, box, host = MEETING_HOST_CARD) {
   const same = typeof projectGroupKey === 'function' ? (a, b) => projectGroupKey(a) === projectGroupKey(b) : (a, b) => a === b;
   const candidates = items.filter(item => !item.meetingId && (!key || same(wfKey(item), key)));
   const section = document.createElement('details');
-  section.className = 'd-dsec d-dadd';
+  section.className = 'd-dsec d-msec d-dadd';
   const label = document.createElement('summary');
   label.className = 'lbl';
   label.innerHTML = uiIcon('chevron');
