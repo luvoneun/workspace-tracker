@@ -1,0 +1,747 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>모션 제안 — 워크스페이스</title>
+<style>
+/* 색·모서리·그림자는 tracker/inbox-app/ui.css 의 토큰을 그대로 옮겼다(새 색·새 글꼴 없음). */
+:root {
+  color-scheme: light dark;
+  --bg:#f2f4f6; --surface:#ffffff; --surface-line:transparent; --field:#f2f4f6; --hover:#f4f6f8;
+  --border:#e3e7eb; --hair:#eef1f4; --check-line:#8b95a1;
+  --text:#191f28; --muted:#4e5968; --dim:#636c78;
+  --accent:#3182f6; --accent-strong:#1b64da; --accent-text:#1b64da; --accent-soft:#e8f3ff; --on-fill:#ffffff;
+  --sel:#eef5ff; --urgent:#c9252d; --urgent-bg:#ffeceb; --warn:#b0560a; --warn-bg:#fff4e5; --success:#0d7a4a; --success-bg:#e6f6ee;
+  --neutral-bg:#eef1f4; --warm:#fffaf2; --prog-track:#e9edf2;
+  --pj-0:#4f83e8; --pj-1:#2f9b87; --pj-2:#c0842b;
+  --soft:0 1px 3px rgba(25,31,40,.04), 0 8px 24px rgba(25,31,40,.06);
+  --shadow:0 1px 2px rgba(25,31,40,.06);
+  --pop:0 12px 36px rgba(25,31,40,.14), 0 2px 8px rgba(25,31,40,.06);
+  --r:20px; --r-sm:12px; --r-xs:10px; --row:54px; --pad:20px;
+  --ease:cubic-bezier(.22,.8,.3,1);
+  --font:"Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:#15181e; --surface:#1e222a; --surface-line:#2b313b; --field:#262b34; --hover:#272c35;
+    --border:#333a45; --hair:#2b313b; --check-line:#636e7d;
+    --text:#eaedf1; --muted:#a8b1bd; --dim:#8b95a1;
+    --accent:#4b91f1; --accent-strong:#4b91f1; --accent-text:#7aa9ff; --accent-soft:#1b2a44; --on-fill:#0b1020;
+    --sel:#1c2533; --urgent:#ff8f8f; --urgent-bg:#3a2022; --warn:#ffbe6b; --warn-bg:#3a2e1b; --success:#6ddba0; --success-bg:#1c3729;
+    --neutral-bg:#2a2f38; --warm:#22252b; --prog-track:#2b313b;
+    --pj-0:#7aa2ff; --pj-1:#57c6ad; --pj-2:#dfa85c;
+    --soft:0 1px 3px rgba(0,0,0,.2), 0 8px 24px rgba(0,0,0,.25);
+    --pop:0 12px 36px rgba(0,0,0,.45), 0 2px 8px rgba(0,0,0,.3);
+  }
+}
+* { box-sizing:border-box; }
+html { scroll-behavior:smooth; }
+body { margin:0; background:var(--bg); color:var(--text); font-family:var(--font); font-size:15px; line-height:1.65; -webkit-font-smoothing:antialiased; }
+main { max-width:1120px; margin:0 auto; padding:40px 24px 120px; }
+h1 { font-size:28px; letter-spacing:-.02em; line-height:1.3; margin:0 0 6px; }
+h2 { font-size:21px; letter-spacing:-.015em; margin:56px 0 10px; }
+h3 { font-size:16px; margin:26px 0 6px; }
+p { margin:8px 0; max-width:78ch; }
+.lead { font-size:17px; color:var(--muted); }
+.sub { color:var(--dim); font-size:13px; }
+code { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12.5px; background:var(--neutral-bg); padding:1px 5px; border-radius:6px; word-break:break-all; }
+.card { background:var(--surface); border:1px solid var(--surface-line); border-radius:var(--r); box-shadow:var(--soft); padding:22px 24px; margin:14px 0; }
+.sum { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:14px; }
+.sum .card { margin:0; }
+.sum .card > b:first-child { display:block; font-size:13px; color:var(--dim); font-weight:600; margin-bottom:4px; }
+nav.toc { display:flex; flex-wrap:wrap; gap:6px; margin:18px 0 0; }
+nav.toc a { height:30px; display:inline-flex; align-items:center; padding:0 12px; border-radius:var(--r-xs); background:var(--neutral-bg); color:var(--muted); font-size:13px; font-weight:600; text-decoration:none; }
+nav.toc a:hover { background:var(--hover); color:var(--text); }
+.tw { overflow-x:auto; margin:10px 0; background:var(--surface); border:1px solid var(--surface-line); border-radius:var(--r); box-shadow:var(--soft); }
+table { border-collapse:collapse; width:100%; font-size:13.5px; line-height:1.55; }
+th, td { text-align:left; vertical-align:top; padding:11px 14px; border-bottom:1px solid var(--hair); }
+th { font-size:12.5px; color:var(--dim); font-weight:600; white-space:nowrap; }
+tr:last-child td { border-bottom:0; }
+td:first-child { font-weight:600; }
+.tag { display:inline-flex; align-items:center; height:22px; padding:0 7px; border-radius:6px; font-size:12px; font-weight:600; white-space:nowrap; }
+.tag.s { background:var(--success-bg); color:var(--success); } .tag.m { background:var(--warn-bg); color:var(--warn); } .tag.l { background:var(--urgent-bg); color:var(--urgent); } .tag.n { background:var(--neutral-bg); color:var(--muted); }
+.guess { color:var(--warn); font-weight:600; }
+ul { margin:6px 0; padding-left:20px; } li { margin:3px 0; }
+
+/* ---- 데모 공통 ---- */
+.ctl { position:sticky; top:0; z-index:30; display:flex; flex-wrap:wrap; align-items:center; gap:10px 18px; padding:10px 14px; margin:14px -14px; background:var(--bg); border-bottom:1px solid var(--hair); }
+.ctl .lb { font-size:13px; color:var(--dim); font-weight:600; }
+.d-seg { display:inline-flex; padding:3px; gap:2px; background:var(--neutral-bg); border-radius:var(--r-sm); }
+.d-seg button { height:32px; padding:0 14px; border:0; border-radius:9px; background:none; font:inherit; font-size:13.5px; font-weight:600; color:var(--muted); cursor:pointer; }
+.d-seg button[aria-pressed="true"] { background:var(--surface); color:var(--text); box-shadow:var(--shadow); }
+.d-btn { display:inline-flex; align-items:center; justify-content:center; gap:5px; height:34px; padding:0 13px; border:0; border-radius:var(--r-xs); background:var(--neutral-bg); color:var(--muted); font:inherit; font-size:13.5px; font-weight:600; white-space:nowrap; cursor:pointer; }
+.d-btn:hover { background:var(--hover); color:var(--text); }
+.d-btn.sm { height:28px; padding:0 10px; font-size:13px; }
+.d-btn.on { background:var(--accent-soft); color:var(--accent-text); }
+.demo { margin:22px 0 34px; }
+.demo > .dh { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+.demo > .dh h3 { margin:0; }
+.pair { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:16px; margin-top:10px; }
+.side > .cap { display:flex; align-items:center; gap:8px; font-size:12.5px; font-weight:600; color:var(--dim); margin:0 4px 6px; }
+.side > .cap .rst { margin-left:auto; }
+.stage { position:relative; min-height:300px; padding:16px; border-radius:var(--r); background:var(--bg); border:1px solid var(--border); overflow:hidden; }
+.note { font-size:13px; color:var(--muted); margin:8px 4px 0; }
+.lhd { display:flex; align-items:center; gap:10px; min-height:34px; margin:0 4px 4px; font-size:18px; font-weight:700; letter-spacing:-.015em; }
+.lhd .sumtxt { font-size:13px; font-weight:500; color:var(--dim); }
+.cnt { height:22px; display:inline-flex; align-items:center; padding:0 9px; border-radius:999px; background:var(--accent-soft); color:var(--accent-text); font-size:12.5px; font-weight:600; font-variant-numeric:tabular-nums; }
+.cnt.w { background:var(--warn-bg); color:var(--warn); }
+.cnt > span, .gh .n { display:inline-block; }
+.lcard { position:relative; background:var(--surface); border:1px solid var(--surface-line); border-radius:var(--r); box-shadow:var(--soft); padding:10px; }
+.lcard.warm { background:var(--warm); box-shadow:none; }
+.topprog { position:absolute; inset:0; border-radius:var(--r); overflow:hidden; pointer-events:none; }
+.topprog::before { content:''; position:absolute; top:0; left:0; right:0; height:3px; background:var(--prog-track); }
+.topprog > i { position:absolute; top:0; left:0; height:3px; background:var(--accent); }
+.topprog.w > i { width:var(--p,0%); transition:width 320ms var(--ease); }
+.topprog.x > i { width:100%; transform-origin:left; transform:scaleX(var(--px,0)); transition:transform 320ms var(--ease); }
+.trow { position:relative; display:flex; align-items:center; gap:12px; min-height:var(--row); padding:8px 10px; border-radius:14px; background:transparent; }
+.trow:hover { background:var(--hover); }
+.trow.sel { background:var(--sel); }
+.trow .ti { flex:1; min-width:0; font-size:16px; font-weight:500; letter-spacing:-.012em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.trow .pj { display:inline-flex; align-items:center; gap:5px; font-size:13px; color:var(--dim); white-space:nowrap; }
+.trow .pj i { width:7px; height:7px; border-radius:50%; background:var(--pj-0); }
+.trow .pj.p1 i { background:var(--pj-1); } .trow .pj.p2 i { background:var(--pj-2); }
+.trow .due { font-size:13px; color:var(--dim); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.trow .due.u { height:22px; display:inline-flex; align-items:center; padding:0 7px; border-radius:6px; background:var(--urgent-bg); color:var(--urgent); font-weight:600; font-size:12px; }
+.trow.fresh { animation:fresh 1400ms ease-out both; }
+@keyframes fresh { from { background:var(--sel); } to { background:transparent; } }
+.cb { position:relative; flex:none; width:22px; height:22px; padding:0; border:1.5px solid var(--check-line); border-radius:6px; background:var(--surface); cursor:pointer; display:grid; place-items:center; transition:border-color 120ms var(--ease), background 120ms var(--ease); }
+.cb:hover { border-color:var(--accent); }
+.cb svg { width:13px; height:13px; fill:none; stroke:var(--on-fill); stroke-width:2.2; stroke-linecap:round; stroke-linejoin:round; opacity:0; }
+.cb.on { background:var(--accent); border-color:var(--accent); }
+.cb.on svg { opacity:1; }
+.cb.draw svg { stroke-dasharray:18; stroke-dashoffset:18; opacity:1; transition:stroke-dashoffset 160ms var(--ease); }
+.cb.draw.on svg { stroke-dashoffset:0; }
+/* 지금 앱의 완료 순간(ui.css 1134~1143행 그대로) */
+.cb.popnow { animation:d-pop-check 320ms var(--ease); }
+@keyframes d-pop-check { 0% { transform:scale(1); } 45% { transform:scale(1.18); } 100% { transform:scale(1); } }
+.strike-now .ti { background-image:linear-gradient(currentColor,currentColor); background-repeat:no-repeat; background-position:0 58%; background-size:0% 1px; animation:d-strike 520ms var(--ease) forwards; }
+@keyframes d-strike { 0% { background-size:0% 1px; opacity:1; } 42% { background-size:100% 1px; opacity:1; } 100% { background-size:100% 1px; opacity:.4; } }
+.strike-new .ti { background-image:linear-gradient(currentColor,currentColor); background-repeat:no-repeat; background-position:0 58%; background-size:100% 1px; opacity:.5; transition:background-size 200ms var(--ease), opacity 200ms var(--ease); }
+.gh { display:flex; align-items:center; gap:8px; height:36px; padding:0 10px; font-size:13px; font-weight:600; color:var(--dim); }
+.gh .n { font-variant-numeric:tabular-nums; }
+.empty { font-size:15px; font-weight:500; color:var(--muted); padding:22px var(--pad); }
+.toast { position:absolute; left:16px; bottom:16px; z-index:8; display:flex; align-items:center; gap:12px; max-width:calc(100% - 32px); padding:10px 12px 10px 16px; background:var(--surface); border:1px solid var(--surface-line); border-radius:16px; box-shadow:var(--pop); font-size:14px; }
+.toast .tn { font-size:12.5px; color:var(--muted); white-space:nowrap; }
+.toast.rise { animation:d-rise 140ms var(--ease); }
+@keyframes d-rise { from { transform:translateY(6px); opacity:0; } to { transform:none; opacity:1; } }
+.menu { position:absolute; z-index:9; width:230px; display:flex; flex-direction:column; gap:1px; padding:6px; background:var(--surface); border:1px solid var(--surface-line); border-radius:18px; box-shadow:var(--pop); }
+.menu.popnow { animation:d-pop 120ms var(--ease); }
+@keyframes d-pop { from { transform:translateY(-6px); opacity:0; } to { transform:none; opacity:1; } }
+.mi { display:flex; align-items:center; width:100%; height:38px; padding:0 12px; border:0; border-radius:var(--r-xs); background:none; color:var(--text); font:inherit; font-size:14px; font-weight:500; text-align:left; cursor:pointer; }
+.mi:hover { background:var(--hover); }
+.mi .dt { margin-left:auto; font-size:12.5px; color:var(--dim); font-variant-numeric:tabular-nums; }
+.msep { height:1px; background:var(--hair); margin:4px 2px; }
+.more { width:28px; height:28px; border:0; border-radius:var(--r-xs); background:none; color:var(--dim); cursor:pointer; font-size:18px; line-height:1; }
+.more:hover, .more[aria-expanded="true"] { background:var(--neutral-bg); color:var(--text); }
+.popd { position:absolute; z-index:7; right:16px; width:44%; padding:16px 18px; background:var(--surface); border:1px solid var(--surface-line); border-radius:var(--r); box-shadow:var(--pop); }
+.popd h4 { margin:0 0 10px; font-size:16px; line-height:1.4; }
+.popd dl { margin:0; display:grid; grid-template-columns:auto 1fr; gap:6px 14px; font-size:13.5px; }
+.popd dt { color:var(--dim); } .popd dd { margin:0; }
+.popd .x { position:absolute; top:10px; right:10px; }
+.press { transition:transform 100ms var(--ease); }
+.press:active { transform:scale(.97); }
+html.rm .press:active { transform:none; }
+#selftest { display:none; padding:10px 14px; border-radius:var(--r-sm); background:var(--success-bg); color:var(--success); font-weight:600; margin:10px 0; }
+#selftest.bad { background:var(--urgent-bg); color:var(--urgent); }
+@media (max-width:820px) { .pair, .sum { grid-template-columns:1fr; } main { padding:24px 16px 80px; } }
+</style>
+</head>
+<body>
+<main>
+
+<p class="sub">2026-10-02 · 탐색(제안만 — 앱 코드는 고치지 않았다) · 가짜 데이터</p>
+<h1>모션 제안 — "쫀득"을 앱 전체로, 단 자주 하는 일일수록 조용하게</h1>
+<p class="lead">한 줄 방향: <b>움직임은 "어디서 와서 어디로 갔는지"를 보여 주는 데만 쓰고, 넘침(쫀득)의 세기는 그 동작을 하루에 몇 번 하느냐로 정한다.</b></p>
+
+<div class="sum">
+  <div class="card"><b>결론</b>지금 앱은 "나타날 때만" 움직이고 사라질 때·자리가 바뀔 때는 뚝 끊긴다. 가장 큰 효과는 화려함이 아니라 <b>끊기는 세 곳(완료·옮기기·닫힘)을 잇는 것</b>이다.</div>
+  <div class="card"><b>가장 큰 제약</b>목록을 매번 통째로 지우고 다시 그린다(<code>app.js:5026</code>, <code>4897</code>, <code>2784</code>). 줄이 "이동"할 수 없는 구조라, 먼저 작은 기반(다시 그리기 앞뒤로 자리를 재서 잇는 도우미)이 필요하다.</div>
+  <div class="card"><b>반대 의견 한 줄</b>종일 띄워 두는 업무 도구에서 넘치는 모션은 며칠 뒤 피로가 된다. 그래서 일정 정하기 판의 "쫀득" 값은 <b>가끔 여는 것</b>에만 쓰고, 체크·옮기기 같은 매번 하는 동작에는 넘침을 거의 주지 않는 것을 권한다.</div>
+</div>
+
+<nav class="toc">
+  <a href="#demo">눌러 보는 데모</a><a href="#principles">원칙·세기 3단계</a><a href="#tokens">모션 토큰</a><a href="#moments">순간별 제안</a><a href="#never">움직이면 안 되는 곳</a><a href="#ui">UI가 나아지는 방향</a><a href="#plan">단계 계획</a><a href="#risk">반대 의견·위험</a><a href="#ask">정할 것</a>
+</nav>
+
+<!-- ============================ 데모 ============================ -->
+<h2 id="demo">1. 눌러 보는 데모 — 지금 / 제안</h2>
+<p>왼쪽은 지금 앱의 값을 그대로 옮긴 것, 오른쪽은 제안이다. 위 스위치로 세기와 "움직임 줄이기"를 바꿔 가며 눌러 볼 수 있다. 왼쪽의 "서버 응답 뒤 다시 그리기"는 90ms로 흉내 냈다(실제 응답 시간은 재지 않았다 — <span class="guess">추정</span>).</p>
+<div id="selftest"></div>
+
+<div class="ctl" role="group" aria-label="데모 설정">
+  <span class="lb">제안 쪽 세기</span>
+  <div class="d-seg" id="lvSeg">
+    <button type="button" data-lv="1" aria-pressed="false">1 차분</button>
+    <button type="button" data-lv="2" aria-pressed="true">2 쫀득 (추천 기본)</button>
+    <button type="button" data-lv="3" aria-pressed="false">3 더 쫀득</button>
+  </div>
+  <button type="button" class="d-btn" id="rmBtn" aria-pressed="false">움직임 줄이기: 꺼짐</button>
+  <button type="button" class="d-btn" id="slowBtn" aria-pressed="false">4배 느리게: 꺼짐</button>
+  <span class="sub">세기 3은 일정 정하기 판에서 고른 값(.88 → 1.025)과 같다.</span>
+</div>
+
+<div class="demo" id="dA">
+  <div class="dh"><h3>① 체크해서 끝냄</h3><span class="sub">하루 수십 번 · 체크박스를 눌러 본다</span></div>
+  <div class="pair">
+    <div class="side"><div class="cap">지금<button type="button" class="d-btn sm rst">처음으로</button></div><div class="stage" data-mode="now"></div></div>
+    <div class="side"><div class="cap">제안<button type="button" class="d-btn sm rst">처음으로</button></div><div class="stage" data-mode="next"></div></div>
+  </div>
+  <p class="note">지금: 체크가 커졌다 돌아오고(320ms) 줄 긋기(520ms)가 시작되지만, 저장이 끝나면 목록을 통째로 다시 그려 줄이 도중에 사라진다. 제안: 체크가 그려지고 → 줄이 그어지고 → 그 줄이 접힌 <b>완료</b> 머리줄로 들어가며 숫자가 톡, 아래 줄들이 미끄러져 올라온다. <code>N개 중 M개 끝냈어요</code> 문장은 진행 선이 대신한다.</p>
+</div>
+
+<div class="demo" id="dB">
+  <div class="dh"><h3>② 새로 들어온 것을 오늘 / 나중에로 보냄</h3><span class="sub">하루 수십 번 · <code>오늘</code>·<code>나중에</code>를 눌러 본다</span></div>
+  <div class="pair">
+    <div class="side"><div class="cap">지금<button type="button" class="d-btn sm rst">처음으로</button></div><div class="stage" data-mode="now" style="min-height:470px"></div></div>
+    <div class="side"><div class="cap">제안<button type="button" class="d-btn sm rst">처음으로</button></div><div class="stage" data-mode="next" style="min-height:470px"></div></div>
+  </div>
+  <p class="note">지금: 줄이 사라지고 다른 곳에 생긴 뒤, 알림 글자가 결과를 말해 준다. 제안: 줄이 <b>목적지까지 직접 간다</b>(오늘 목록의 제자리 / 닫힌 서랍이면 <code>나중에 할 일 N</code> 버튼). 도착한 줄은 연파랑이 1.4초 동안 옅어진다. 목적지가 화면에 보일 때는 알림을 띄우지 않는다.</p>
+</div>
+
+<div class="demo" id="dF">
+  <div class="dh"><h3>③ 목록 순서가 바뀔 때</h3><span class="sub">가끔 · 정렬 버튼을 눌러 본다</span></div>
+  <div class="pair">
+    <div class="side"><div class="cap">지금<button type="button" class="d-btn sm rst">처음으로</button></div><div class="stage" data-mode="now" style="min-height:360px"></div></div>
+    <div class="side"><div class="cap">제안<button type="button" class="d-btn sm rst">처음으로</button></div><div class="stage" data-mode="next" style="min-height:360px"></div></div>
+  </div>
+  <p class="note">같은 도우미가 정렬·진행 중 표시·되돌리기(⌘Z)·우선순위 바꾸기에 모두 쓰인다. 줄 이동에는 넘침을 주지 않는다(먼 거리를 튕기면 어지럽다).</p>
+</div>
+
+<div class="demo" id="dC">
+  <div class="dh"><h3>④ ⋯ 메뉴 열고 닫기</h3><span class="sub">가끔 · ⋯를 눌러 열고, 다시 눌러 닫는다</span></div>
+  <div class="pair">
+    <div class="side"><div class="cap">지금</div><div class="stage" data-mode="now"></div></div>
+    <div class="side"><div class="cap">제안</div><div class="stage" data-mode="next"></div></div>
+  </div>
+  <p class="note">지금: 위 6px에서 내려오고(120ms), 닫힐 때는 즉시 사라진다. 제안: <b>누른 버튼 모서리에서</b> 자라 나오고, 닫힐 때도 같은 곳으로 100ms 만에 들어간다. 키보드로 연 경우에는 이동 없이 80ms 나타남만.</p>
+</div>
+
+<div class="demo" id="dD">
+  <div class="dh"><h3>⑤ 상세 카드가 누른 줄에서 열림</h3><span class="sub">가끔 · 줄을 누르고, 다른 줄을 누르고, 같은 줄을 다시 눌러 닫는다</span></div>
+  <div class="pair">
+    <div class="side"><div class="cap">지금</div><div class="stage" data-mode="now"></div></div>
+    <div class="side"><div class="cap">제안</div><div class="stage" data-mode="next"></div></div>
+  </div>
+  <p class="note">지금: 처음 열 때만 140ms 나타나고, 다른 줄을 누르면 카드가 순간 이동, 닫힘은 즉시. 제안: 줄 쪽 모서리에서 자라 나오고, 다른 줄을 누르면 카드가 그 줄 옆으로 <b>미끄러져 간다</b> — 어느 줄의 상세인지 눈이 따라간다.</p>
+</div>
+
+<div class="demo" id="dE">
+  <div class="dh"><h3>⑥ 알림과 되돌리기</h3><span class="sub">가끔 · 버튼을 여러 번 빠르게 눌러 본다</span></div>
+  <div class="pair">
+    <div class="side"><div class="cap">지금</div><div class="stage" data-mode="now" style="min-height:190px"></div></div>
+    <div class="side"><div class="cap">제안</div><div class="stage" data-mode="next" style="min-height:190px"></div></div>
+  </div>
+  <p class="note">지금: 아래 6px에서 올라오고(140ms) 시간이 되면 뚝 사라진다. 제안: 제 높이만큼 아래에서 올라와 앉고, 사라질 때는 같은 방향으로 140ms. 떠 있는 동안 새 알림이 오면 다시 튀어 오르지 않고 글자만 바뀐다.</p>
+</div>
+
+<!-- ============================ 원칙 ============================ -->
+<h2 id="principles">2. 원칙과 "쫀득"의 정의</h2>
+<div class="tw"><table>
+<tr><th>원칙</th><th>뜻</th><th>지금 앱에서 어긋나는 곳</th></tr>
+<tr><td>① 온 곳과 간 곳이 보이게</td><td>메뉴·카드는 누른 곳에서 자라 나오고, 옮긴 줄은 목적지로 간다. 나타난 길로 사라진다.</td><td>메뉴는 늘 위 6px에서 내려옴(<code>ui.css:482</code>), 닫힘은 전부 즉시(<code>app.js:158</code>, <code>4011</code>, <code>4444</code>, <code>1461</code>)</td></tr>
+<tr><td>② 자주 할수록 짧고 조용하게</td><td>아래 세기 3단계. 하루 수십 번 하는 동작에는 넘침을 주지 않는다.</td><td>가장 잦은 동작(체크)이 가장 길다 — 320ms + 520ms(<code>ui.css:1134~1139</code>)</td></tr>
+<tr><td>③ 끊을 수 있게</td><td>움직이는 중에도 다음 동작을 받는다. 입력을 막는 대기 시간을 넣지 않는다.</td><td>등장이 전부 <code>@keyframes</code>라 도중에 방향을 바꿀 수 없다(빠르게 여닫으면 처음부터 다시)</td></tr>
+<tr><td>④ 위치·투명도만 움직인다</td><td><code>transform</code>·<code>opacity</code>만. 폭·여백·높이는 움직이지 않는다(화면 전체를 다시 계산하게 만들어 끊긴다).</td><td>서랍이 열릴 때 본문 <code>padding-right</code>를 160ms 움직임(<code>ui.css:1561</code>), 진행 선이 <code>width</code>로 참(<code>ui.css:997</code>)</td></tr>
+<tr><td>⑤ 키보드로 반복하는 동작은 움직이지 않는다</td><td>⌘K, 화살표, Enter, ⌘Z 연타는 0~80ms 나타남뿐.</td><td>⌘K 팔레트가 140ms 내려옴(<code>ui.css:1606</code>)</td></tr>
+<tr><td>⑥ 내가 한 일만 움직인다</td><td>5분 자동 갱신·창으로 돌아올 때의 갱신으로 바뀐 것은 조용히 바뀐다. 움직임 줄이기 설정에서는 이동 대신 짧은 흐려짐만.</td><td>지금은 해당 없음(움직임이 없어서). 기반을 넣을 때 반드시 지켜야 할 선</td></tr>
+</table></div>
+
+<h3>"쫀득"을 숫자로</h3>
+<p><b>넘침</b> = 목표 크기를 살짝 지나쳤다 돌아오는 정도. <b>스프링</b> = 용수철처럼 빠르게 출발해 살짝 넘쳤다 자리 잡는 움직임(시간 고정 곡선과 달리 끝이 부드럽다). 쫀득은 "빠른 출발 + 한 번의 작은 넘침 + 흔들림 없이 멈춤"으로 정의한다. 두 번 이상 출렁이면 쫀득이 아니라 "젤리"다.</p>
+<div class="tw"><table>
+<tr><th>세기</th><th>어디에</th><th>넘침(크기 기준)</th><th>시간</th><th>시작 크기</th><th>예</th></tr>
+<tr><td>0 없음</td><td>키보드 반복 · 자동 갱신 · 타이핑 중</td><td>0</td><td>0~80ms(나타남만)</td><td>—</td><td>⌘K, ↑↓, ⌘Z 연타, 5분 갱신</td></tr>
+<tr><td>1 매번 <span class="sub">(하루 수십 번)</span></td><td>체크 · 옮기기 · 누름 · 줄 이동</td><td>0~0.5% <span class="sub">(줄 이동은 0)</span></td><td>100~200ms</td><td>.97</td><td>체크박스, <code>오늘</code>·<code>나중에</code>, 버튼 누름</td></tr>
+<tr><td>2 가끔 <span class="sub">(하루 몇 번~열몇 번)</span></td><td>열고 닫는 것</td><td>0.5~2.5%</td><td>등장 200~240ms · 퇴장 100~140ms</td><td>.94 ~ .88</td><td>⋯ 메뉴, 일정 정하기 판, 상세 카드, 알림, 서랍, 설정 창</td></tr>
+<tr><td>3 드물게 <span class="sub">(하루 한두 번 이하)</span></td><td>기분 좋은 순간</td><td>3~5%</td><td>320~480ms</td><td>.85</td><td>오늘 할 일을 다 끝냄, 연동 첫 성공, 빈 화면 첫 등장</td></tr>
+</table></div>
+<p class="sub">일정 정하기 판(240ms, .88 → 1.025 → 1, 닫힘 140ms, 항목 18ms 간격)은 세기 2의 위쪽 끝이다. 이 값은 그대로 두고, 그보다 자주 쓰는 ⋯ 메뉴는 한 칸 약하게(.94, 넘침 0.5% 안팎, 간격 없음) 권한다. 데모의 "세기" 스위치는 이 기본값을 전체적으로 올리고 내려 보는 용도다.</p>
+
+<!-- ============================ 토큰 ============================ -->
+<h2 id="tokens">3. 모션 토큰 — 지금 값 → 제안 값</h2>
+<p>지금은 이징 하나에 시간 값이 9가지(120·130·140·160·170·260·320·400·520ms)가 흩어져 있다. 시간 4개 + 곡선 3개, 모두 7개로 줄인다.</p>
+<div class="tw"><table>
+<tr><th>토큰</th><th>지금</th><th>제안</th><th>쓰는 곳</th></tr>
+<tr><td><code>--ease</code></td><td><code>cubic-bezier(.22,.8,.3,1)</code></td><td>그대로(이름도 그대로)</td><td>색 변화, 줄 이동, 모든 퇴장. 넘침 없음</td></tr>
+<tr><td><code>--spring-1</code> <span class="sub">새로</span></td><td>—</td><td><code>linear(0, .42 12%, .75 25%, .94 38%, 1.03 50%, 1.046 58%, 1.035 70%, 1.015 85%, 1)</code> — 진행 넘침 약 5%</td><td>세기 1~2의 등장(⋯ 메뉴, 상세 카드, 알림, 숫자 톡)</td></tr>
+<tr><td><code>--spring-2</code> <span class="sub">새로</span></td><td>일정 정하기 판의 <code>@keyframes</code>(.88 → 1.025(55%) → 1)</td><td><code>linear(0, .45 12%, .82 25%, 1.06 38%, 1.18 48%, 1.205 55%, 1.17 65%, 1.09 78%, 1.03 90%, 1)</code> — 진행 넘침 약 20%. .88에서 시작하면 최고 1.025로 같은 값</td><td>세기 2 위쪽~3(일정 정하기 판, 설정 창, 다 끝낸 순간)</td></tr>
+<tr><td><code>--t-press</code></td><td>120ms(버튼), 없음(맨 <code>button</code>)</td><td>100ms</td><td>누르는 순간의 줄어듦(.97)</td></tr>
+<tr><td><code>--t-fast</code></td><td>120 · 130 · 140 · 170ms</td><td>140ms</td><td>hover 색, 초점, 꺾쇠 회전, <b>모든 퇴장</b></td></tr>
+<tr><td><code>--t-move</code></td><td>160ms(서랍), 120~140ms(등장)</td><td>200ms <span class="sub">(큰 판은 240ms)</span></td><td>등장, 줄 이동, 서랍</td></tr>
+<tr><td><code>--t-slow</code></td><td>320 · 400 · 520ms</td><td>320ms</td><td>진행 선, 새로고침 한 바퀴, 세기 3</td></tr>
+<tr><td>등장 / 퇴장</td><td>등장만 있음. 퇴장은 즉시</td><td>퇴장 = 등장의 약 60% 시간, 넘침 없음, 같은 길</td><td>메뉴 200 / 100, 판 240 / 140, 알림 200 / 140</td></tr>
+<tr><td>움직임 줄이기</td><td>전부 .01ms로(<code>ui.css:374</code>)</td><td>이동·크기 변화는 끄고 <b>120ms 흐려짐은 남긴다</b></td><td>아예 없으면 무엇이 바뀌었는지 놓친다</td></tr>
+<tr><td>그대로 두는 예외</td><td>팔레트에서 연 줄 밝히기 1.6s, 연동 점 숨쉬기 2.4s</td><td>그대로</td><td>길어야 뜻이 있는 것</td></tr>
+</table></div>
+<p class="sub"><code>linear()</code>는 스프링 곡선을 점 여러 개로 흉내 내는 CSS 기능이다. 크롬 113·사파리 17.2부터 된다. 앱 창(<code>Workspace.app</code>)이 어떤 브라우저 엔진으로 도는지는 이번에 확인하지 못했다 — <span class="guess">추정</span>으로는 문제없지만, 묶음 ①에서 먼저 확인하고 안 되면 <code>--ease</code>로 떨어지게 둔다(아이폰 홈 화면 앱 포함).</p>
+
+<!-- ============================ 순간별 ============================ -->
+<h2 id="moments">4. 순간별 제안 — 우선순위 순</h2>
+<p>비용: <span class="tag s">작음</span> CSS 몇 줄 · <span class="tag m">중간</span> 화면 코드 한 곳 + CSS · <span class="tag l">큼</span> 다시 그리기 구조에 손댐. <b>FLIP</b> = 다시 그리기 전후의 자리를 재서, 새 줄을 옛 자리에서 새 자리로 미끄러뜨리는 기법(통째로 다시 그려도 "이동"처럼 보이게 한다).</p>
+<div class="tw"><table>
+<tr><th>#</th><th>순간</th><th>지금</th><th>제안</th><th>얻는 것</th><th>비용</th><th>위험</th></tr>
+<tr><td>1</td><td>체크해서 끝냄</td><td>체크 커짐 320ms + 줄 긋기·옅어짐 520ms(<code>ui.css:1134~1143</code>). 저장 뒤 <code>load()</code>가 목록을 통째로 다시 그려(<code>app.js:5253</code> → <code>5026</code>) 도중에 끊김 <span class="guess">(끊기는 시점은 추정)</span></td><td>체크 그리기 160ms → 줄 긋기 200ms → 줄이 <code>완료 N</code> 머리줄로 들어감 + 아래 줄 올라옴 200ms(넘침 없음) → 숫자 톡. 진행 선은 <code>scaleX</code>로</td><td>결과 확인 · 방향 감각("끝낸 건 완료로 갔다")</td><td><span class="tag l">큼</span> FLIP 기반 필요</td><td>연달아 체크할 때 겹침 → 줄마다 따로 돌고, 다음 클릭을 막지 않는다</td></tr>
+<tr><td>2</td><td>새로 들어온 것 → 오늘·내일·나중에</td><td>움직임 없음. <code>fadeOutAndRun</code>은 이름과 달리 흐려짐이 없고 잠금만 건다(<code>app.js:5176</code>). 결과는 알림 글자로(<code>app.js:4935~4938</code>)</td><td>같은 줄이 목적지 자리로 감 200~260ms, 도착 줄 연파랑 1.4s. 서랍이 닫혀 있으면 <code>나중에 할 일 N</code> 버튼으로 들어가고 숫자 톡</td><td>결과 확인 · 방향 감각</td><td><span class="tag l">큼</span> FLIP 기반(1과 같은 것)</td><td>목적지가 화면 밖이면 날아갈 곳이 없다 → 그때만 지금처럼 알림</td></tr>
+<tr><td>3</td><td>줄 순서가 바뀜(정렬·진행 중·우선순위·⌘Z)</td><td>순간 바뀜(<code>app.js:5026</code>)</td><td>줄 이동 200ms <code>--ease</code>, 넘침 0. 화면에 보이는 줄만, 40줄 넘으면 생략</td><td>방향 감각("내 줄이 어디로 갔나")</td><td><span class="tag s">작음</span> 기반이 있으면 한 줄</td><td>⌘Z 연타 → 이전 이동을 끊고 현재 자리에서 이어감</td></tr>
+<tr><td>4</td><td>⋯ 메뉴·일정 정하기 판</td><td>위 6px에서 120ms(<code>ui.css:480~482</code>), 시작점 없음, 닫힘 즉시(<code>app.js:158</code>)</td><td>누른 버튼 모서리가 시작점, .94 → 1 <code>--spring-1</code> 200ms, 닫힘 100ms. 위로 뒤집힐 때는 시작점도 아래로. 키보드로 열면 80ms 나타남만</td><td>방향 감각 · 손맛</td><td><span class="tag m">중간</span> 닫힘에 100ms 기다렸다 지우는 코드</td><td>닫히는 중 다시 열기 → 지우기 취소하고 이어서 열기</td></tr>
+<tr><td>5</td><td>상세 카드</td><td>처음만 140ms(<code>app.js:3876~3879</code>), 줄 바꿈은 순간 이동(<code>app.js:3963~3975</code>), 닫힘 즉시(<code>app.js:4011</code>)</td><td>줄 쪽 모서리에서 .94 → 1 200ms, 줄을 바꾸면 카드가 미끄러져 감 200ms, 닫힘 120ms. 스크롤로 따라갈 때는 움직임 없음</td><td>방향 감각("어느 줄의 상세인가")</td><td><span class="tag m">중간</span></td><td>카드 안에서 타이핑 중일 때 카드가 움직이면 안 됨 → 초점이 카드 안에 있으면 이동 생략</td></tr>
+<tr><td>6</td><td>알림(되돌리기 포함)</td><td>아래 6px에서 140ms(<code>ui.css:463</code>), 사라짐 즉시(<code>app.js:1461</code>). 새 알림마다 다시 튀어 오름</td><td>제 높이만큼 아래에서 200ms <code>--spring-1</code>, 사라짐 140ms 같은 길. 떠 있을 때 바뀌면 글자만 교체</td><td>결과 확인이 덜 거슬림</td><td><span class="tag m">중간</span> <code>showNotice</code>는 "정의를 고치지 않는 안전장치"(<code>app.js:5198</code> 주석) → CSS만으로 할 수 있는 범위 먼저</td><td>안전장치 수정은 따로 승인 필요</td></tr>
+<tr><td>7</td><td>누르는 손맛</td><td><code>.d-btn</code>만 .98 + 120ms. 맨 <code>button</code>은 전환 없이 뚝(<code>ui.css:211</code>). 탭·검색·링크는 끔(<code>ui.css:359</code>)</td><td>누름 .97 / 100ms, 뗄 때 140ms. 줄 자체는 줄어들지 않는다. 손가락 화면에서도 같다</td><td>"들었다"는 즉답</td><td><span class="tag s">작음</span></td><td>작은 글자 버튼이 흔들려 보임 → 28px 이하는 .98</td></tr>
+<tr><td>8</td><td>숫자 칩이 바뀔 때</td><td>글자만 교체(<code>app.js:5021</code>, <code>4895</code>, <code>2780~2781</code>)</td><td>내 동작으로 바뀐 숫자만: 새 숫자가 아래에서 160ms 올라옴. 목적지 숫자는 1.12배 톡 200ms. 자동 갱신으로 바뀐 숫자는 그대로 교체</td><td>결과 확인(알림 글자 대신)</td><td><span class="tag s">작음</span></td><td>숫자가 계속 꿈틀대면 산만 → "내 동작 뒤 0.5초 안"에만</td></tr>
+<tr><td>9</td><td>나중에 할 일 서랍</td><td>160ms 미끄러짐 + 본문 <code>padding-right</code> 160ms(<code>ui.css:1558~1561</code>)</td><td>서랍 240ms <code>--ease</code>(넘침 없음 — 큰 면이 튕기면 무겁다), 닫힘 160ms. 본문 밀림은 긴 목록에서 끊기는지 먼저 재고, 끊기면 여백은 즉시 + 줄만 FLIP</td><td>기다림 완화 · 끊김 제거</td><td><span class="tag m">중간</span></td><td>본문이 밀리며 상세 카드 자리도 바뀜(<code>app.js:2835</code>) → 끝난 뒤 한 번만 자리 잡기</td></tr>
+<tr><td>10</td><td>접기·펼치기(완료 그룹, 나중에 그룹, 설정의 접힌 줄)</td><td>꺾쇠만 130ms 회전, 내용은 뚝(<code>app.js:2532</code>, <code>ui.css:1025</code>)</td><td>펼친 내용 160ms 나타남 + 4px, 아래 줄들은 FLIP으로 밀려남. 접을 때 120ms</td><td>방향 감각</td><td><span class="tag m">중간</span></td><td>높이를 직접 움직이지 않는다(끊김) — 자리 이동으로만</td></tr>
+<tr><td>11</td><td>탭 전환</td><td>즉시(<code>hidden</code> 바꿈, <code>app.js:5911~5916</code>). 밑줄은 고른 탭에 새로 그려짐(<code>ui.css:409</code>)</td><td>밑줄이 고른 탭으로 미끄러짐 200ms. 내용은 100ms 나타남만(옆으로 밀지 않는다)</td><td>방향 감각, 가벼운 손맛</td><td><span class="tag m">중간</span> 밑줄을 한 개의 움직이는 선으로 바꿔야 함</td><td>하루 수십 번 누름 → 내용 쪽은 더 줄여도 됨. 키보드 ←→로 옮길 때는 0</td></tr>
+<tr><td>12</td><td>오늘 할 일을 다 끝냄</td><td>문장 <code>오늘 할 일을 모두 끝냈어요.</code>가 뚝 나타남(<code>app.js:5060</code>)</td><td>진행 선이 끝까지 찬 뒤 한 번 밝아졌다 가라앉음 480ms, 문장은 320ms <code>--spring-2</code>로 나타남. 하루 한 번뿐인 세기 3</td><td>기분 좋은 마무리</td><td><span class="tag s">작음</span></td><td>이미 끝낸 채로 창을 열 때는 재생하지 않는다(내가 방금 끝냈을 때만)</td></tr>
+<tr><td>13</td><td>자동 수집으로 새 항목이 들어옴 · NEW 점</td><td>다시 그려지며 뚝 나타남. NEW 점은 1.5초 뒤 뚝 사라짐(<code>app.js:5159~5160</code>)</td><td>새 줄은 자리 이동 없이 따뜻한 바탕이 1.4s 옅어짐. NEW 점은 300ms 흐려지며 사라짐</td><td>"방금 들어온 것"이 조용히 눈에 띔</td><td><span class="tag s">작음</span></td><td>보고 있던 줄이 밀려 내려감 — 이건 모션이 아니라 자리 문제라 이번 범위 밖</td></tr>
+<tr><td>14</td><td>설정 창 · 오늘 정리 창</td><td>모션 없음(<code>ui.css:2386~2393</code>, <code>settings-ui.js:4194</code>)</td><td>가운데에서 .96 → 1 240ms <code>--spring-1</code> + 뒤 어둠 160ms, 닫힘 140ms. 안쪽 구역 전환은 손잡이만 미끄러짐</td><td>기다림 완화</td><td><span class="tag m">중간</span> 닫힘은 <code>dialog</code>를 늦게 닫아야 함</td><td>Esc 순서(위에서부터 하나씩)를 건드리지 않게</td></tr>
+<tr><td>15</td><td>검색 팔레트(⌘K)</td><td>위 6px에서 140ms(<code>ui.css:1606~1608</code>), 닫힘 즉시</td><td><b>줄인다</b>: 이동 없이 80ms 나타남. 결과 줄은 움직이지 않는다</td><td>키보드 흐름이 빨라짐</td><td><span class="tag s">작음</span></td><td>없음</td></tr>
+</table></div>
+<p class="sub">드래그로 옮기는 기능은 앱에 없다(<code>app.js</code>에 끌기 처리 없음 — 휴대폰의 당겨서 새로고침만 있다). 로딩은 새로고침 아이콘 한 바퀴(400ms)와 연동 점 숨쉬기가 이미 있어 그대로 둔다.</p>
+
+<!-- ============================ 금지 ============================ -->
+<h2 id="never">5. 움직이면 안 되는 곳</h2>
+<div class="tw"><table>
+<tr><th>곳</th><th>이유</th><th>지키는 장치</th></tr>
+<tr><td>타이핑 중인 구역</td><td>칸을 새로 만들면 한글 조합이 끊긴다. 이미 손을 뗄 때까지 다시 그리기를 미룬다(<code>uiRenderOrHold</code>, <code>app.js:695</code>, DECISIONS 2026-10-01)</td><td>미뤄졌다가 나중에 그려지는 것은 움직이지 않는다. 초점 있는 칸의 조상에는 <code>transform</code>을 걸지 않는다</td></tr>
+<tr><td>5분 자동 갱신 · 창으로 돌아올 때</td><td>내가 하지 않은 변화가 움직이면 "뭐가 바뀌었지?" 하고 주의를 뺏긴다(<code>app.js:6062~6072</code>)</td><td>"방금 내가 누른 뒤 0.5초 안"의 다시 그리기만 움직인다</td></tr>
+<tr><td>⌘K · 화살표 · Enter · 숫자 키 · ⌘Z 연타</td><td>하루 수백 번. 움직이면 느리게 느껴진다</td><td>키보드로 시작한 동작은 80ms 나타남 이하</td></tr>
+<tr><td>hover(마우스 올림)에서 크기·위치 변화</td><td>훑을 때마다 목록이 꿈틀거린다</td><td>hover는 색만(지금처럼)</td></tr>
+<tr><td>스크롤을 따라가는 상세 카드</td><td>따라오는 것이 늦으면 끌려오는 느낌(<code>app.js:3978</code>)</td><td>스크롤 추종에는 전환 없음</td></tr>
+<tr><td>날짜·기한·늦음 배지, 캘린더 시계</td><td>읽어야 하는 정보. 깜빡이면 믿음이 떨어진다</td><td>글자만 교체</td></tr>
+<tr><td>오류 알림 · 저장 멈춤 안내</td><td>나쁜 소식에 튕김은 장난스럽다</td><td>넘침 0, 나타남만</td></tr>
+<tr><td>주간요약 문장 고치기 · 회의 정리</td><td>글 쓰는 면. 줄이 움직이면 커서를 놓친다</td><td>이 두 화면은 FLIP 대상에서 뺀다</td></tr>
+<tr><td>늘 돌아가는 장식(반짝임·떠다님)</td><td>종일 옆에 떠 있는 화면이다. 반복 움직임은 연동 점 숨쉬기 하나로 충분</td><td>무한 반복은 새로 만들지 않는다</td></tr>
+</table></div>
+
+<!-- ============================ UI ============================ -->
+<h2 id="ui">6. 모션이 UI 자체를 낫게 하는 방향</h2>
+<div class="tw"><table>
+<tr><th>방향</th><th>지금</th><th>바뀐 뒤</th><th>뺄 수 있는 글자·표시</th></tr>
+<tr><td>A. 결과를 글자 대신 "줄이 간 곳"으로</td><td>옮길 때마다 왼쪽 아래 알림(<code>오늘 할 일로 옮겼어요</code> · <code>⌘Z로 되돌리기</code> · <code>닫기</code>)이 4.5초 뜬다</td><td>줄이 목적지로 가고 도착 줄이 잠깐 밝다. 목적지가 안 보일 때만 알림</td><td>넓은 화면의 옮기기 알림 대부분. 소리 읽기용 문장은 안 보이게 남김. 손가락 화면의 <code>되돌리기</code> 버튼은 유지</td></tr>
+<tr><td>B. 진행 문장을 진행 선으로</td><td><code>N개 중 M개 끝냈어요</code> 문장(<code>app.js:5024</code>)과 카드 윗변 진행 선이 같은 말을 두 번 한다</td><td>체크할 때 선이 차오르는 것이 보인다</td><td>그 문장(마우스를 올리면 뜨는 말과 소리 읽기용으로만 남김)</td></tr>
+<tr><td>C. 닫힌 서랍·접힌 그룹이 "받았다"고 말하기</td><td><code>나중에</code>로 보낸 것이 잘 들어갔는지 서랍을 열어야 안다</td><td>줄이 <code>나중에 할 일 N</code> 버튼으로 들어가고 숫자가 톡. <code>완료 N</code>도 같다</td><td><code>나중에 할 일로 옮겼어요</code> 알림. 완료 그룹을 확인하려고 펼칠 일</td></tr>
+<tr><td>D. 상세 카드가 줄에서 자라 나옴</td><td>카드가 줄 옆에 그냥 서 있어, 줄을 바꾸면 어느 줄 것인지 다시 찾는다</td><td>누른 줄에서 나오고, 줄을 바꾸면 따라 미끄러진다</td><td>글자는 없음. 대신 팔레트에서 연 줄의 1.6초 파란 테(<code>ui.css:1685</code>)를 0.8초로 줄일 수 있다 <span class="guess">(눌러 보고 판단)</span></td></tr>
+<tr><td>E. 다 끝낸 순간을 한 번만 크게</td><td>문장이 뚝 나타난다</td><td>진행 선이 끝까지 차고 한 번 밝아진다</td><td>없음(문장은 유지) — 솔직히 이건 덜어내기가 아니라 보상</td></tr>
+</table></div>
+
+<!-- ============================ 계획 ============================ -->
+<h2 id="plan">7. 단계 계획 — 작은 버전 4개</h2>
+<div class="tw"><table>
+<tr><th>묶음</th><th>넣는 것</th><th>고칠 파일</th><th>크기</th><th>무엇을 보면 성공인가</th></tr>
+<tr><td>① 토큰 · 기반</td><td>토큰 7개, 움직임 줄이기 규칙 바꿈(이동은 끄고 흐려짐은 남김), "다시 그리기 앞뒤로 자리 재서 잇기" 도우미 하나(줄에 이미 <code>data-task-id</code>가 있어 그걸 열쇠로 쓴다 — <code>app.js:899</code>), "내 동작 뒤 0.5초" 표시, 앱 창의 <code>linear()</code> 지원 확인</td><td><code>ui.css</code> · <code>app.js</code>(도우미 60~80줄 + 세 목록의 그리기 감싸기) · <code>client.test.js</code> · <code>DESIGN.md</code> 모션 절 · <code>DECISIONS.md</code> 한 줄</td><td>중간</td><td>정렬을 바꾸면 줄이 미끄러진다 · 5분 갱신에는 아무것도 안 움직인다 · 타이핑 보류 테스트가 그대로 통과</td></tr>
+<tr><td>② 매일 가장 많이 하는 셋</td><td>체크 완료(#1), 옮기기(#2) + 숫자 톡(#8), 누름(#7). 방향 A·B·C의 글자 덜어내기</td><td><code>app.js</code>(완료·옮기기 자리) · <code>ui.css</code> · README 화면 설명 · <code>client.test.js</code>(알림 문구를 고정한 테스트)</td><td>중간</td><td>체크 → 다음 체크를 기다림 없이 연달아 할 수 있다 · 옮기기 알림이 넓은 화면에서 사라졌는데도 "어디 갔지?"가 없다</td></tr>
+<tr><td>③ 열고 닫는 것들</td><td>⋯ 메뉴·판(#4), 상세 카드(#5), 알림(#6), 서랍(#9), 설정 창(#14), 팔레트 줄이기(#15)</td><td><code>app.js</code>(메뉴·카드·팔레트 닫힘) · <code>settings-ui.js</code> · <code>ui.css</code> · <code>DESIGN.md</code> 부품 절</td><td>중간~큼</td><td>모든 떠 있는 것이 나타난 길로 사라진다 · 빠르게 여닫아도 처음부터 다시 재생되지 않는다 · Esc 순서 그대로</td></tr>
+<tr><td>④ 다듬기</td><td>탭 밑줄(#11), 접기·펼치기(#10), 다 끝냄(#12), 새 항목·NEW 점(#13), 일주일 써 본 뒤 세기 조정</td><td><code>ui.css</code> · <code>app.js</code> 일부 · <code>*-ui.js</code>는 필요할 때만</td><td>작음</td><td>일주일 뒤 "거슬린다"가 없고, 끄고 싶은 것이 없다</td></tr>
+</table></div>
+<h3>성능 예산과 재는 법</h3>
+<ul>
+<li>목표 60fps(한 장면 16ms 안). <code>transform</code>·<code>opacity</code>만 움직인다. 폭·높이·여백·그림자 크기는 움직이지 않는다.</li>
+<li>FLIP은 화면에 보이는 줄만 잰다. 한 번에 40줄을 넘으면 건너뛰고 그냥 그린다. 자리 재기는 다시 그리기 앞뒤 한 번씩만.</li>
+<li>동시에 움직이는 것은 250ms 안에 끝난다. 움직임이 끝나기를 기다렸다가 저장하지 않는다 — 저장이 먼저, 움직임은 그 위에.</li>
+<li>재는 법: 임시 서버(4322)에 줄 200개를 넣고 크롬 개발자 도구 Performance로 완료·옮기기·서랍을 녹화(CPU 4배 느리게). 16ms를 넘는 장면이 연속 3개 이상이면 그 순간은 세기를 내리거나 뺀다.</li>
+</ul>
+
+<!-- ============================ 위험 ============================ -->
+<h2 id="risk">8. 반대 의견 · 위험</h2>
+<div class="tw"><table>
+<tr><th>위험</th><th>왜 걱정인가</th><th>줄이는 장치</th></tr>
+<tr><td>며칠 뒤 피로</td><td>처음엔 기분 좋은 넘침이 300번째에는 방해가 된다. 고른 값(.88 → 1.025)을 체크·옮기기까지 넓히면 거의 확실히 그렇게 된다</td><td>빈도별 세기. 매번 하는 동작은 넘침 0~0.5%. 묶음 ② 뒤 일주일 써 보고 조정. 값이 토큰 7개라 한 곳에서 내릴 수 있다</td></tr>
+<tr><td>통째 다시 그리기 + FLIP 비용</td><td>줄이 많으면 자리 재기가 무겁고, 다시 그리기가 겹치면(저장 응답 + 5분 갱신) 움직임이 꼬인다</td><td>보이는 줄만·40줄 상한·내 동작 뒤에만. 진행 중인 움직임은 현재 자리에서 이어간다. 화면 전환 API(View Transitions)는 쓰지 않는다 — 화면 전체를 사진으로 찍어 겹치는 방식이라 그동안 입력이 멈추고, 타이핑 보호와 부딪힌다</td></tr>
+<tr><td>한글 입력 보호와 충돌</td><td>움직임을 넣으려고 그리기 시점을 건드리면 "자음·모음이 씹힘"이 되살아날 수 있다</td><td><code>uiRenderOrHold</code>는 그대로 두고 그 <b>안쪽</b>의 그리기만 감싼다. 미뤄진 그리기는 움직이지 않는다. 기존 보류 테스트를 통과 조건으로 건다</td></tr>
+<tr><td>안전장치 손대기</td><td><code>fadeOutAndRun</code>·<code>showNotice</code>는 "정의를 고치지 않는다"고 적힌 장치다(<code>app.js:5198</code>, <code>5229</code>)</td><td>두 함수는 건드리지 않고 부르는 쪽과 CSS에서 해결. 꼭 고쳐야 하면 따로 승인 + 무거운 모델 + Codex 검토</td></tr>
+<tr><td>알림을 줄이면 되돌리기를 못 찾음</td><td><code>⌘Z로 되돌리기</code> 안내가 알림에 붙어 있다(<code>app.js:1416~1421</code>)</td><td>손가락 화면의 <code>되돌리기</code> 버튼은 유지. 넓은 화면은 ⌘Z를 이미 쓰는 사용자 한 명이라 영향이 작다고 본다 <span class="guess">(추정 — 확인 필요)</span></td></tr>
+<tr><td>접근성</td><td>움직임에 예민한 사람, 화면 읽기 프로그램</td><td>움직임 줄이기에서는 이동·크기 0, 흐려짐 120ms만. 소리 읽기용 문장(<code>aria-live</code>)은 모두 유지. 초점 복귀 규칙 그대로</td></tr>
+<tr><td>DESIGN.md의 "장식적인 움직임은 없다"</td><td>기조 문장을 바꾸는 일이다</td><td>"뜻 없는 움직임은 없다 — 온 곳·간 곳·결과를 보여 주는 움직임만"으로 바꾸고, 세기 표와 금지 목록을 그 절에 넣는다</td></tr>
+</table></div>
+
+<!-- ============================ 결정 ============================ -->
+<h2 id="ask">9. 정해 주면 좋은 것 — 두 가지</h2>
+<div class="tw"><table>
+<tr><th>질문</th><th>추천</th><th>반대쪽 한 줄</th></tr>
+<tr><td>① 앱 전체 기본 세기</td><td><b>빈도별로 나눔</b> — 매번 하는 동작은 세기 1, 열고 닫는 것은 세기 2, 일정 정하기 판은 고른 값 그대로(데모 스위치 "2 쫀득")</td><td>전부 세기 3으로 통일하면 첫인상은 가장 좋지만, 체크·옮기기에서 며칠 안에 피로해질 가능성이 높다</td></tr>
+<tr><td>② 옮기기 알림을 줄일지</td><td><b>줄임</b> — 목적지가 화면에 보일 때는 알림 없이 줄의 움직임으로만 알린다(되돌리기는 ⌘Z, 손가락 화면은 버튼 유지)</td><td>알림을 남기면 안전하지만, 움직임과 글자가 같은 말을 두 번 해서 "표시를 줄인다"는 방향과 어긋난다</td></tr>
+</table></div>
+
+</main>
+
+<script>
+(() => {
+  const EASE = 'cubic-bezier(.22,.8,.3,1)';
+  const S1 = 'linear(0, .42 12%, .75 25%, .94 38%, 1.03 50%, 1.046 58%, 1.035 70%, 1.015 85%, 1)';
+  const S2 = 'linear(0, .45 12%, .82 25%, 1.06 38%, 1.18 48%, 1.205 55%, 1.17 65%, 1.09 78%, 1.03 90%, 1)';
+  // 세기별 값. pop = 열고 닫는 것, press = 매번 하는 것, move = 줄 이동(넘침 없음이 기본)
+  const LV = {
+    1: { pop: EASE, from: .97, popMs: 160, outMs: 100, move: EASE, moveMs: 180, bump: 1.06, stag: 0 },
+    2: { pop: S1,   from: .94, popMs: 200, outMs: 100, move: EASE, moveMs: 200, bump: 1.12, stag: 0 },
+    3: { pop: S2,   from: .88, popMs: 240, outMs: 140, move: S1,   moveMs: 240, bump: 1.18, stag: 18 },
+  };
+  let level = 2, reduce = false, slow = false;
+  const errors = [];
+  const L = () => LV[level];
+  const T = (ms) => slow ? ms * 4 : ms;
+
+  function anim(el, frames, opts) {
+    try { return el.animate(frames, opts); }
+    catch (e) { return el.animate(frames, { ...opts, easing: EASE }); } // linear()를 모르는 브라우저
+  }
+  function done(a, el, ms) { let gone = false; const rm = () => { if (!gone) { gone = true; el.remove(); } }; a.onfinish = rm; a.oncancel = rm; setTimeout(rm, ms + 80); }
+  function h(tag, cls, text) { const el = document.createElement(tag); if (cls) el.className = cls; if (text != null) el.textContent = text; return el; }
+  function btn(cls, text) { const b = h('button', cls, text); b.type = 'button'; return b; }
+  const TICK = '<svg viewBox="0 0 13 13" aria-hidden="true"><path d="M2.5 6.8l2.7 2.7 5.3-5.8"/></svg>';
+
+  // 다시 그리기 앞뒤의 자리를 재서 잇는다(FLIP). data-k가 같은 것은 "같은 줄"로 본다.
+  function flip(scope, mutate, opt = {}) {
+    if (reduce) {
+      const before = new Set([...scope.querySelectorAll('[data-k]')].map(el => el.dataset.k));
+      mutate();
+      scope.querySelectorAll('[data-k]').forEach(el => { if (!before.has(el.dataset.k)) el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: T(120) }); });
+      return;
+    }
+    const first = new Map();
+    scope.querySelectorAll('[data-k]').forEach(el => first.set(el.dataset.k, el.getBoundingClientRect()));
+    const ghosts = (opt.ghost || []).map(g => {
+      const el = scope.querySelector(`[data-k="${g.k}"]`);
+      if (!el) return null;
+      const c = el.cloneNode(true); c.removeAttribute('data-k'); c.querySelectorAll('[data-k]').forEach(x => x.removeAttribute('data-k'));
+      return { c, r: el.getBoundingClientRect(), to: g.to };
+    }).filter(Boolean);
+    mutate();
+    const delta = new Map();
+    scope.querySelectorAll('[data-k]').forEach(el => {
+      const a = first.get(el.dataset.k); if (!a) return;
+      const b = el.getBoundingClientRect();
+      delta.set(el, { dx: a.left - b.left, dy: a.top - b.top });
+    });
+    scope.querySelectorAll('[data-k]').forEach(el => {
+      const d = delta.get(el);
+      if (!d) { anim(el, [{ opacity: 0, transform: 'translateY(8px) scale(.98)' }, { opacity: 1, transform: 'none' }], { duration: T(L().moveMs), easing: L().move }); return; }
+      const up = el.parentElement && el.parentElement.closest('[data-k]');
+      const pd = up ? delta.get(up) : null;           // 조상이 같이 움직이면 그만큼은 뺀다
+      const dx = d.dx - (pd ? pd.dx : 0), dy = d.dy - (pd ? pd.dy : 0);
+      if (Math.abs(dx) < .5 && Math.abs(dy) < .5) return;
+      anim(el, [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: T(L().moveMs), easing: L().move });
+    });
+    const sr = scope.getBoundingClientRect();
+    ghosts.forEach(({ c, r, to }) => {
+      Object.assign(c.style, { position: 'absolute', left: (r.left - sr.left) + 'px', top: (r.top - sr.top) + 'px', width: r.width + 'px', margin: 0, pointerEvents: 'none', zIndex: 6 });
+      scope.append(c);
+      const t = to().getBoundingClientRect();
+      const dx = (t.left + t.width / 2) - (r.left + r.width / 2), dy = (t.top + t.height / 2) - (r.top + r.height / 2);
+      done(c.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: `translate(${dx}px, ${dy}px) scale(.35)` }], { duration: T(L().moveMs + 40), easing: EASE }), c, T(L().moveMs + 40));
+    });
+  }
+  function bump(el) { if (reduce || !el) return; anim(el, [{ transform: 'scale(1)' }, { transform: `scale(${L().bump})`, offset: .4 }, { transform: 'scale(1)' }], { duration: T(220), easing: EASE }); }
+  function roll(el, text) {
+    if (String(el.textContent) === String(text)) return;
+    el.textContent = text;
+    if (reduce) return;
+    anim(el, [{ transform: 'translateY(45%)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: T(160), easing: EASE });
+  }
+  function fresh(el) { if (!el) return; el.classList.remove('fresh'); void el.offsetWidth; el.classList.add('fresh'); }
+
+  // ---------- ① 체크해서 끝냄 ----------
+  function demoDone(stage, mode) {
+    const init = () => [{ k: 'a', t: '주간 보고 초안 정리' }, { k: 'b', t: '테스터 질문에 답하기' }, { k: 'c', t: '릴리스 노트 문장 다듬기' }, { k: 'd', t: '알림 문구 검토 요청' }];
+    let items, done;
+    stage.replaceChildren();
+    const head = h('div', 'lhd'); head.append(h('span', '', '오늘 할 일'));
+    const cnt = h('span', 'cnt'); const cntN = h('span'); cnt.append(cntN); head.append(cnt);
+    const sum = h('span', 'sumtxt'); if (mode === 'now') head.append(sum);
+    const card = h('div', 'lcard');
+    const prog = h('span', 'topprog ' + (mode === 'now' ? 'w' : 'x')); const bar = h('i'); prog.append(bar); card.append(prog);
+    const list = h('div'); card.append(list);
+    const dh = h('div', 'gh'); dh.dataset.k = 'dh'; const dhN = h('span', 'n'); dh.append(h('span', '', '› 완료'), dhN);
+    card.append(dh);
+    stage.append(head, card);
+    function paint(first) {
+      const total = items.length + done;
+      list.replaceChildren(...items.map(row));
+      if (!items.length) list.append(h('div', 'empty', '오늘 할 일을 모두 끝냈어요.'));
+      cnt.hidden = !items.length;
+      if (mode === 'now' || first) cntN.textContent = items.length; else roll(cntN, items.length);
+      sum.textContent = `${total}개 중 ${done}개 끝냈어요`;
+      dhN.textContent = done;
+      if (mode === 'now') bar.style.setProperty('--p', Math.round(done / total * 100) + '%');
+      else bar.style.setProperty('--px', (done / total).toFixed(3));
+      card.title = mode === 'next' ? `${total}개 중 ${done}개 끝냈어요` : '';
+    }
+    function row(it) {
+      const r = h('div', 'trow'); r.dataset.k = it.k;
+      const cb = btn('cb' + (mode === 'next' ? ' draw' : '')); cb.innerHTML = TICK; cb.setAttribute('aria-label', it.t + ' — 완료로 표시');
+      cb.addEventListener('click', () => complete(it, r, cb));
+      r.append(cb, h('span', 'ti', it.t));
+      return r;
+    }
+    function complete(it, r, cb) {
+      if (cb.classList.contains('on')) return;
+      cb.classList.add('on');
+      const apply = () => { items = items.filter(x => x !== it); done += 1; paint(); };
+      if (mode === 'now') {
+        cb.classList.add('popnow'); r.classList.add('strike-now');
+        setTimeout(apply, T(90)); // 저장 응답 뒤 통째 다시 그리기
+        return;
+      }
+      if (reduce) { setTimeout(apply, T(120)); return; }
+      anim(cb, [{ transform: 'scale(1)' }, { transform: 'scale(.86)', offset: .3 }, { transform: 'scale(1)' }], { duration: T(200), easing: L().pop });
+      setTimeout(() => r.classList.add('strike-new'), T(90));
+      setTimeout(() => { flip(stage, apply, { ghost: [{ k: it.k, to: () => dh }] }); bump(dhN); }, T(300));
+    }
+    stage._reset = () => { items = init(); done = 2; paint(true); };
+    stage._reset();
+    stage._auto = () => stage.querySelector('.cb').click();
+  }
+
+  // ---------- ② 새로 들어온 것 → 오늘 / 나중에 ----------
+  function demoMove(stage, mode) {
+    let inbox, today, later, toastTimer;
+    stage.replaceChildren();
+    const top = h('div', 'lhd'); top.append(h('span', '', '새로 들어온 것'));
+    const ic = h('span', 'cnt w'); const icN = h('span'); ic.append(icN); top.append(ic);
+    const laterBtn = btn('d-btn sm'); laterBtn.style.marginLeft = 'auto'; const lN = h('span', 'n'); lN.style.display = 'inline-block';
+    laterBtn.append('나중에 할 일 ', lN); top.append(laterBtn);
+    const icard = h('div', 'lcard warm');
+    const blk = h('div'); blk.dataset.k = 'blkT'; blk.style.marginTop = '18px';
+    const th = h('div', 'lhd'); th.append(h('span', '', '오늘 할 일')); const tc = h('span', 'cnt'); const tcN = h('span'); tc.append(tcN); th.append(tc);
+    const tcard = h('div', 'lcard'); blk.append(th, tcard);
+    stage.append(top, icard, blk);
+    function irow(it) {
+      const r = h('div', 'trow'); r.dataset.k = it.k;
+      const a = btn('d-btn sm press', '오늘'), b = btn('d-btn sm press', '나중에');
+      a.addEventListener('click', () => move(it, 'today')); b.addEventListener('click', () => move(it, 'later'));
+      r.append(h('span', 'ti', it.t), a, b); return r;
+    }
+    function trow(it) {
+      const r = h('div', 'trow'); r.dataset.k = it.k;
+      const cb = h('span', 'cb'); r.append(cb, h('span', 'ti', it.t)); return r;
+    }
+    function paint(first) {
+      icard.replaceChildren(...inbox.map(irow)); icard.hidden = !inbox.length; top.firstChild.style.opacity = inbox.length ? 1 : .45;
+      tcard.replaceChildren(...today.map(trow));
+      const set = (el, v) => (mode === 'now' || first) ? (el.textContent = v) : roll(el, v);
+      set(icN, inbox.length); set(tcN, today.length); set(lN, later);
+    }
+    function toast(msg) {
+      stage.querySelector('.toast')?.remove(); clearTimeout(toastTimer);
+      const t = h('div', 'toast rise'); t.append(h('span', '', msg), h('span', 'tn', '⌘Z로 되돌리기'), btn('d-btn sm', '닫기'));
+      stage.append(t); toastTimer = setTimeout(() => t.remove(), T(2600));
+    }
+    function move(it, where) {
+      const apply = () => { inbox = inbox.filter(x => x !== it); if (where === 'today') today = [it, ...today]; else later += 1; paint(); };
+      if (mode === 'now') { setTimeout(() => { apply(); toast(where === 'today' ? '오늘 할 일로 옮겼어요' : '나중에 할 일로 옮겼어요'); }, T(90)); return; }
+      if (where === 'today') { flip(stage, apply); fresh(stage.querySelector(`[data-k="${it.k}"]`)); }
+      else { flip(stage, apply, { ghost: [{ k: it.k, to: () => laterBtn }] }); setTimeout(() => bump(laterBtn), T(140)); }
+    }
+    stage._reset = () => {
+      stage.querySelector('.toast')?.remove();
+      inbox = [{ k: 'i1', t: '결제 오류 문의 확인' }, { k: 'i2', t: '온보딩 문구 정리(회의에서 나옴)' }, { k: 'i3', t: '배포 일정 답장' }];
+      today = [{ k: 't1', t: '주간 보고 초안 정리' }, { k: 't2', t: '테스터 질문에 답하기' }]; later = 3; paint(true);
+    };
+    stage._reset();
+    stage._auto = () => { const b = stage.querySelectorAll('.lcard.warm .d-btn'); b[0].click(); setTimeout(() => stage.querySelectorAll('.lcard.warm .d-btn')[1]?.click(), 200); };
+  }
+
+  // ---------- ③ 순서가 바뀔 때 ----------
+  function demoSort(stage, mode) {
+    const items = [
+      { k: 's1', t: '결제 화면 문구 확정', pj: ['알림센터', ''], due: '오늘', u: 1, pri: 1 },
+      { k: 's2', t: '릴리스 노트 문장 다듬기', pj: ['알림센터', ''], due: '10/6', pri: 4 },
+      { k: 's3', t: '설문 결과 정리', pj: ['온보딩', 'p1'], due: '10/3', pri: 2 },
+      { k: 's4', t: '첫 화면 안내 검토', pj: ['온보딩', 'p1'], due: '10/8', pri: 5 },
+      { k: 's5', t: '정산 표 확인 요청', pj: ['정산', 'p2'], due: '10/5', pri: 3 },
+    ];
+    let byPri;
+    stage.replaceChildren();
+    const head = h('div', 'lhd'); head.append(h('span', '', '오늘 할 일'));
+    const seg = h('div', 'd-seg'); seg.style.marginLeft = 'auto';
+    const b1 = btn('', '프로젝트순'), b2 = btn('', '마감·중요도순'); seg.append(b1, b2); head.append(seg);
+    const card = h('div', 'lcard'); stage.append(head, card);
+    function row(it) {
+      const r = h('div', 'trow'); r.dataset.k = it.k;
+      const pj = h('span', 'pj ' + it.pj[1]); pj.append(h('i'), it.pj[0]);
+      r.append(h('span', 'cb'), h('span', 'ti', it.t));
+      if (byPri) r.append(pj);
+      r.append(h('span', 'due' + (it.u ? ' u' : ''), it.due)); return r;
+    }
+    function paint() {
+      b1.setAttribute('aria-pressed', String(!byPri)); b2.setAttribute('aria-pressed', String(byPri));
+      card.replaceChildren();
+      if (byPri) { const g = h('div', 'gh', '마감·중요도순'); g.dataset.k = 'g-pri'; card.append(g, ...[...items].sort((a, b) => a.pri - b.pri).map(row)); return; }
+      ['알림센터', '온보딩', '정산'].forEach(name => { const g = h('div', 'gh', name); g.dataset.k = 'g-' + name; card.append(g, ...items.filter(i => i.pj[0] === name).map(row)); });
+    }
+    const set = (v) => { if (byPri === v) return; const run = () => { byPri = v; paint(); }; mode === 'now' ? run() : flip(stage, run); };
+    b1.addEventListener('click', () => set(false)); b2.addEventListener('click', () => set(true));
+    stage._reset = () => { byPri = false; paint(); };
+    stage._reset();
+    stage._auto = () => b2.click();
+  }
+
+  // ---------- ④ ⋯ 메뉴 ----------
+  function demoMenu(stage, mode) {
+    stage.replaceChildren();
+    const card = h('div', 'lcard');
+    const mk = (t) => { const r = h('div', 'trow'); const m = btn('more', '⋯'); m.setAttribute('aria-label', '더보기'); m.setAttribute('aria-expanded', 'false'); r.append(h('span', 'cb'), h('span', 'ti', t), m); m.addEventListener('click', () => toggle(m)); return r; };
+    card.append(mk('주간 보고 초안 정리'), mk('테스터 질문에 답하기'));
+    stage.append(card);
+    let open = null, closing = null;
+    function build() {
+      const m = h('div', 'menu'); m.setAttribute('role', 'menu');
+      [['오늘', '10/2 (금)'], ['내일', '10/3 (토)'], ['다음 주', '10/5 (월)'], null, ['나중에', ''], ['삭제', '']].forEach(x => {
+        if (!x) { m.append(h('span', 'msep')); return; }
+        const i = btn('mi', x[0]); if (x[1]) i.append(h('span', 'dt', x[1])); i.addEventListener('click', close); m.append(i);
+      });
+      return m;
+    }
+    function toggle(anchor) {
+      if (open && open.anchor === anchor) { close(); return; }
+      if (open) close(true);
+      const m = build();
+      const sr = stage.getBoundingClientRect(), ar = anchor.getBoundingClientRect();
+      m.style.top = (ar.bottom - sr.top + 6) + 'px'; m.style.right = (sr.right - ar.right) + 'px';
+      stage.append(m); anchor.setAttribute('aria-expanded', 'true'); open = { m, anchor };
+      if (mode === 'now') { m.classList.add('popnow'); return; }
+      if (reduce) { m.animate([{ opacity: 0 }, { opacity: 1 }], { duration: T(100) }); return; }
+      m.style.transformOrigin = 'calc(100% - 14px) 0';   // 누른 ⋯ 쪽 모서리
+      anim(m, [{ opacity: 0, transform: `scale(${L().from})` }, { opacity: 1, transform: 'none' }], { duration: T(L().popMs), easing: L().pop });
+      if (L().stag) [...m.children].forEach((c, i) => anim(c, [{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }], { duration: T(160), delay: T(40 + i * L().stag), fill: 'backwards', easing: EASE }));
+    }
+    function close(instant) {
+      if (!open) return;
+      const { m, anchor } = open; open = null; anchor.setAttribute('aria-expanded', 'false');
+      if (mode === 'now' || instant === true) { m.remove(); return; }
+      m.style.pointerEvents = 'none';
+      const ms = T(reduce ? 80 : L().outMs);
+      done(m.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: reduce ? 'none' : 'scale(.97)' }], { duration: ms, easing: EASE, fill: 'forwards' }), m, ms);
+    }
+    stage._auto = () => { const m = stage.querySelector('.more'); m.click(); setTimeout(() => m.click(), 150); };
+  }
+
+  // ---------- ⑤ 상세 카드 ----------
+  function demoDetail(stage, mode) {
+    stage.replaceChildren();
+    const card = h('div', 'lcard'); card.style.width = '50%';
+    const data = [['결제 화면 문구 확정', '알림센터', '오늘'], ['설문 결과 정리', '온보딩', '10월 3일 (토)'], ['정산 표 확인 요청', '정산', '10월 5일 (월)'], ['첫 화면 안내 검토', '온보딩', '10월 8일 (목)']];
+    const rows = data.map((d, i) => { const r = h('div', 'trow'); r.tabIndex = 0; r.style.cursor = 'pointer'; r.append(h('span', 'cb'), h('span', 'ti', d[0])); r.addEventListener('click', () => pick(i)); return r; });
+    card.append(...rows); stage.append(card);
+    let pop = null, cur = -1;
+    function fill(i) {
+      pop.replaceChildren();
+      const x = btn('d-btn sm x', '닫기'); x.addEventListener('click', (e) => { e.stopPropagation(); shut(); });
+      const dl = h('dl'); [['프로젝트', data[i][1]], ['언제 할지', '오늘'], ['기한', data[i][2]], ['원문', '슬랙 메시지']].forEach(([a, b]) => dl.append(h('dt', '', a), h('dd', '', b)));
+      pop.append(h('h4', '', data[i][0]), dl, x);
+    }
+    const topFor = (i) => Math.min(rows[i].offsetTop + card.offsetTop, stage.clientHeight - 190);
+    function pick(i) {
+      if (cur === i) { shut(); return; }
+      rows.forEach((r, n) => r.classList.toggle('sel', n === i));
+      if (!pop) {
+        pop = h('div', 'popd'); stage.append(pop); fill(i); pop.style.top = topFor(i) + 'px'; cur = i;
+        if (mode === 'now') { pop.animate([{ opacity: 0, transform: 'translateY(-4px) scale(.985)' }, { opacity: 1, transform: 'none' }], { duration: T(140), easing: EASE }); return; }
+        if (reduce) { pop.animate([{ opacity: 0 }, { opacity: 1 }], { duration: T(120) }); return; }
+        pop.style.transformOrigin = '0 27px';   // 누른 줄 쪽
+        anim(pop, [{ opacity: 0, transform: `translateX(-10px) scale(${L().from})` }, { opacity: 1, transform: 'none' }], { duration: T(L().popMs), easing: L().pop });
+        return;
+      }
+      const old = pop.getBoundingClientRect().top;   // 움직이는 중이면 지금 보이는 자리에서 이어간다
+      pop.getAnimations().forEach(a => a.cancel());
+      fill(i); pop.style.top = topFor(i) + 'px'; cur = i;
+      if (mode === 'now') return;
+      if (reduce) { pop.animate([{ opacity: .4 }, { opacity: 1 }], { duration: T(120) }); return; }
+      const dy = old - pop.getBoundingClientRect().top;
+      anim(pop, [{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: T(L().moveMs), easing: L().move });
+    }
+    function shut() {
+      if (!pop) return;
+      const p = pop; pop = null; cur = -1; rows.forEach(r => r.classList.remove('sel'));
+      if (mode === 'now') { p.remove(); return; }
+      p.style.pointerEvents = 'none';
+      const ms = T(reduce ? 80 : 120);
+      done(p.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: reduce ? 'none' : 'translateX(-6px) scale(.97)' }], { duration: ms, easing: EASE, fill: 'forwards' }), p, ms);
+    }
+    stage._auto = () => { rows[0].click(); setTimeout(() => rows[2].click(), 120); setTimeout(() => rows[2].click(), 300); };
+  }
+
+  // ---------- ⑥ 알림 ----------
+  function demoToast(stage, mode) {
+    stage.replaceChildren();
+    const msgs = ['완료했어요', '내일로 미뤘어요', '프로젝트를 바꿨어요'];
+    let n = 0, toast = null, timer;
+    const b = btn('d-btn press', '알림 띄우기'); stage.append(b);
+    function hide() {
+      if (!toast) return; const t = toast; toast = null;
+      if (mode === 'now') { t.remove(); return; }
+      done(t.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: reduce ? 'none' : 'translateY(60%)' }], { duration: T(140), easing: EASE, fill: 'forwards' }), t, T(140));
+    }
+    b.addEventListener('click', () => {
+      const msg = msgs[n++ % msgs.length]; clearTimeout(timer); timer = setTimeout(hide, T(2400));
+      if (mode === 'next' && toast) {   // 떠 있으면 글자만 바꾼다
+        const s = toast.firstChild; s.textContent = msg;
+        if (!reduce) s.animate([{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }], { duration: T(140), easing: EASE });
+        return;
+      }
+      if (toast) toast.remove();
+      toast = h('div', 'toast'); const x = btn('d-btn sm', '닫기'); x.addEventListener('click', hide);
+      toast.append(h('span', '', msg), h('span', 'tn', '⌘Z로 되돌리기'), x); stage.append(toast);
+      if (mode === 'now') { toast.classList.add('rise'); return; }
+      if (reduce) { toast.animate([{ opacity: 0 }, { opacity: 1 }], { duration: T(120) }); return; }
+      anim(toast, [{ opacity: 0, transform: 'translateY(calc(100% + 16px))' }, { opacity: 1, transform: 'none' }], { duration: T(L().popMs), easing: L().pop });
+    });
+    stage._auto = () => { b.click(); setTimeout(() => b.click(), 120); };
+  }
+
+  const DEMOS = { dA: demoDone, dB: demoMove, dF: demoSort, dC: demoMenu, dD: demoDetail, dE: demoToast };
+  const stages = [];
+  Object.entries(DEMOS).forEach(([id, fn]) => {
+    document.querySelectorAll(`#${id} .side`).forEach(side => {
+      const stage = side.querySelector('.stage');
+      try { fn(stage, stage.dataset.mode); } catch (e) { errors.push(id + ': ' + e.message); }
+      stages.push(stage);
+      side.querySelector('.rst')?.addEventListener('click', () => stage._reset && stage._reset());
+    });
+  });
+
+  // ---------- 스위치 ----------
+  document.querySelectorAll('#lvSeg button').forEach(b => b.addEventListener('click', () => {
+    level = Number(b.dataset.lv);
+    document.querySelectorAll('#lvSeg button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  }));
+  const rmBtn = document.getElementById('rmBtn'), slowBtn = document.getElementById('slowBtn');
+  function setReduce(v) { reduce = v; rmBtn.setAttribute('aria-pressed', String(v)); rmBtn.classList.toggle('on', v); rmBtn.textContent = '움직임 줄이기: ' + (v ? '켜짐' : '꺼짐'); document.documentElement.classList.toggle('rm', v); }
+  rmBtn.addEventListener('click', () => setReduce(!reduce));
+  try { if (matchMedia('(prefers-reduced-motion: reduce)').matches) setReduce(true); } catch (e) {}
+  slowBtn.addEventListener('click', () => {
+    slow = !slow; slowBtn.setAttribute('aria-pressed', String(slow)); slowBtn.classList.toggle('on', slow); slowBtn.textContent = '4배 느리게: ' + (slow ? '켜짐' : '꺼짐');
+    document.documentElement.style.setProperty('--slow', slow ? 4 : 1);
+  });
+  // "지금" 쪽의 CSS 애니메이션도 느리게: 재생 속도를 맞춘다
+  (function tick() {
+    if (slow && document.getAnimations) document.getAnimations().forEach(a => { if (a instanceof CSSAnimation && a.playbackRate !== .25) a.playbackRate = .25; });
+    requestAnimationFrame(tick);
+  })();
+  window.addEventListener('error', e => errors.push(e.message));
+
+  // ---------- 자가 점검(?selftest=1): 모든 데모를 세기 1·2·3과 움직임 줄이기에서 한 번씩 눌러 본다 ----------
+  if (new URLSearchParams(location.search).has('selftest')) {
+    const out = document.getElementById('selftest'); out.style.display = 'block'; out.textContent = '자가 점검 중…';
+    const rounds = [[1, false], [2, false], [3, false], [2, true]];
+    let i = 0, clicks = 0;
+    (function next() {
+      if (i >= rounds.length) {
+        setTimeout(() => {
+          const leftover = document.querySelectorAll('.stage > .trow:not([data-k])').length;   // 안 치워진 유령 줄
+          const ok = !errors.length && !leftover;
+          out.classList.toggle('bad', !ok);
+          out.textContent = ok ? `자가 점검 통과 — 누름 ${clicks}번, 오류 0, 남은 유령 줄 0` : `자가 점검 실패 — ${errors.join(' / ') || ''} 유령 줄 ${leftover}`;
+          document.title = ok ? 'SELFTEST OK' : 'SELFTEST FAIL';
+        }, 900);
+        return;
+      }
+      level = rounds[i][0]; setReduce(rounds[i][1]); i += 1;
+      stages.forEach(s => { try { s._reset && s._reset(); s._auto && s._auto(); clicks += 1; } catch (e) { errors.push(e.message); } });
+      setTimeout(next, 900);
+    })();
+  }
+})();
+</script>
+</body>
+</html>
