@@ -3127,9 +3127,9 @@ function panelSheetMount(box, focusFirst) {
   return true;
 }
 
-// 열면 고칠 곳으로 바로 간다 — 업무·확인 대기는 제목, 회의는 검토할 초안이 없을 때만 직접 담기 입력.
+// 열면 고칠 곳으로 바로 간다 — 업무·확인 대기는 제목, 회의는 검토할 초안이 없을 때만 발의 입력줄(회의에서 나온 것 적기).
 function panelFocusFirst(box) {
-  const first = panelState?.kind === 'meeting' ? (box.querySelector('.d-dcap input') || box) : box.querySelector('.d-dtitle');
+  const first = panelState?.kind === 'meeting' ? ((!box.querySelector('.d-drafts') && box.querySelector('.d-qin input')) || box) : box.querySelector('.d-dtitle');
   first?.focus?.();
 }
 

@@ -2063,78 +2063,264 @@ test('프로젝트 소제목 옆의 지라 상태는 앱이 그 티켓을 들고
   assert.equal(note('jira:AL-1'), null);
 });
 
-// ---------- BMGROUP: `이 회의에서 나온 것`의 종류 소제목 ----------
-// 구역의 모양을 한 줄씩 읽는다: 소제목이면 그 글자, 줄이면 class + 제목.
-function meetingSectionShape(section) {
-  return section.children.slice(1).map((node) => {
-    const cls = String(node.className || '');
-    if (cls.includes('d-mgrp')) return `소제목 ${cls.includes('is-pj') ? '(프로젝트)' : ''}${nodeText(node)}`.replace('  ', ' ');
-    if (cls.includes('d-mrow2')) return `${cls} | ${nodeFind(node, 'ti').textContent}`;
-    return cls;
-  });
+// ---------- 회의에서 나온 것: 시간순 한 목록 + 줄마다 종류 ----------
+// 목록의 모양을 한 줄씩 읽는다: class | 제목 | 오른쪽 칸(상태·종류).
+function meetingListShape(section) {
+  const list = nodeFind(section, 'd-mlist') || section;
+  return nodeFindAll(list, 'd-mrow2').map(row => [row.className, nodeFind(row, 'ti').textContent,
+    (nodeFind(row, 'r').children || []).map(nodeText).join(' ')].join(' | '));
 }
 const meetingSection = (app, code) => app.run(`(() => { const box = document.createElement('div'); ${code}; return box.children[0]; })()`);
 
-test('`이 회의에서 나온 것`은 종류 소제목으로 나뉘고, 한 종류 안에 프로젝트가 둘 이상일 때만 한 번 더 나뉜다', () => {
+test('`이 회의에서 나온 것`은 종류 소제목 없이 한 목록이고, 줄마다 오른쪽에 종류 글자가 선다', () => {
   const app = meetingsViewClient();
   const section = meetingSection(app, "panelMeetingItems(workflowData.meetings[0], box)");
-  assert.equal(section.children[0].textContent, '이 회의에서 나온 것 4', '구역 제목은 그대로다');
-  assert.deepEqual(meetingSectionShape(section), [
-    '소제목 할 일 2',
-    '소제목 (프로젝트)알림센터',
-    'd-mrow2 no-tg | 발송 정책 검토',
-    '소제목 (프로젝트)운영툴',
-    'd-mrow2 no-tg | 권한 범위 확인',
-    '소제목 확인 대기 1',
-    'd-mrow2 no-tg | 법무 회신 받기',
-    '소제목 결정 1',
-    'd-mrow2 no-tg | 재시도는 3회',
-  ], '할 일에는 프로젝트가 둘이라 한 번 더 나뉘고, 확인 대기·결정은 하나뿐이라 나누지 않는다');
-  // 소제목이 종류를 말해 주므로 줄에서는 종류 글자를 뺀다(두 번 말하지 않는다 — `no-tg`).
-  const rows = nodeFindAll(section, 'd-mrow2');
-  assert.ok(rows.every(row => nodeFind(row, 'tg') === null));
-  // 프로젝트 소제목은 `· ● 이름`이고, 회의 자체의 프로젝트도 이름 그대로 적는다.
-  const projectHeads = nodeFindAll(section, 'd-mgrp').filter(head => String(head.className).includes('is-pj'));
-  assert.deepEqual(projectHeads.map(head => head.children[0]), ['· ', '· ']);
-  assert.deepEqual(projectHeads.map(head => nodeFind(head, 'd-pjdot').dataset.pj !== undefined), [true, true]);
-  // 프로젝트로 나눈 줄에는 `· ● 이름`을 되풀이하지 않는다.
-  assert.ok(rows.every(row => nodeFind(row, 'd-inproj') === null));
-});
-
-test('종류가 하나뿐이면 소제목을 세우지 않는다 — 구역 제목이 이미 개수를 말한다', () => {
-  const app = meetingsViewClient();
-  const section = meetingSection(app, "panelMeetingItems(workflowData.meetings[2], box)");
-  assert.equal(section.children[0].textContent, '이 회의에서 나온 것 1');
-  assert.deepEqual(meetingSectionShape(section), ['d-mrow2 | 정산 주기는 월 1회'], '줄의 종류 글자도 그대로 남는다');
-  assert.equal(nodeFind(section, 'tg').textContent, '결정');
-});
-
-test('회의에 없는 프로젝트의 항목은 줄 제목 뒤 `· ● 이름`으로 남는다 — 프로젝트로 나누지 않은 자리에서만', () => {
-  const app = meetingsViewClient();
-  // 결정 하나를 다른 프로젝트로 옮긴다 — 종류가 셋이라 소제목은 서지만 결정 안의 프로젝트는 하나뿐이다.
-  app.run("wfItem('d1').group = '알림센터'; wfIndexData();");
-  const section = meetingSection(app, "panelMeetingItems(workflowData.meetings[0], box)");
-  const decision = nodeFindAll(section, 'd-mrow2').find(row => nodeFind(row, 'ti').textContent === '재시도는 3회');
-  assert.equal(decision.className, 'd-mrow2 no-tg has-pj');
-  const tag = nodeFind(decision, 'd-inproj');
+  const head = section.children[0];
+  assert.equal(head.textContent, '이 회의에서 나온 것', '구역 제목');
+  assert.equal(head.className, 'lbl d-mhead');
+  assert.equal(nodeFind(head, 'n').textContent, '4', '개수는 조용한 숫자 칸에 따로 선다');
+  assert.deepEqual(meetingListShape(section), [
+    'd-mrow2 | 권한 범위 확인 | 할 일',
+    'd-mrow2 has-pj | 발송 정책 검토 | 할 일',
+    'd-mrow2 | 법무 회신 받기 | 확인 대기',
+    'd-mrow2 | 재시도는 3회 | 결정',
+  ], '담긴 순서 그대로 한 목록이다');
+  assert.equal(nodeFind(section, 'd-mgrp'), null, '종류·프로젝트 소제목은 없다');
+  // 이 회의의 프로젝트가 아닌 줄만 제목 뒤에 `· ● 이름`을 단다.
+  const other = nodeFindAll(section, 'd-mrow2')[1];
+  const tag = nodeFind(other, 'd-inproj');
   assert.deepEqual([tag.children[0], tag.children[2]], ['· ', '알림센터'], '기존 `· ● 이름` 부품 그대로다');
+  assert.equal(nodeFind(nodeFindAll(section, 'd-mrow2')[0], 'd-inproj'), null);
 });
 
-test('`이전 회차의 미해결 항목`도 같은 종류 소제목을 쓰지만 프로젝트로 나누지는 않는다', () => {
+test('`이 회의에서 나온 것`은 담은 날짜순이고, 같은 날은 원래 순서를 지킨다', () => {
+  const app = meetingsViewClient();
+  app.run("wfItem('t1').created = '2026-10-02'; wfItem('c1').created = '2026-10-01'; wfItem('t2').created = '2026-10-01'; wfItem('d1').created = '2026-10-02';");
+  const section = meetingSection(app, "panelMeetingItems(workflowData.meetings[0], box)");
+  assert.deepEqual(meetingListShape(section).map(line => line.split(' | ')[1]),
+    ['발송 정책 검토', '법무 회신 받기', '권한 범위 확인', '재시도는 3회']);
+});
+
+test('`이전 회차의 미해결 항목`도 같은 줄이고 종류 앞에 회차가 적힌다', () => {
   const app = meetingsViewClient();
   app.run(`workflowData.items.push(
     { id: 'c0', type: 'check', status: 'to-do', description: '지난 회차의 확인', meetingId: 'ops0', group: '알림센터' });
     wfIndexData();`);
   const section = meetingSection(app, "panelMeetingPast(workflowData.meetings[0], box)");
-  assert.equal(section.children[0].textContent, '이전 회차의 미해결 항목 2');
-  assert.deepEqual(meetingSectionShape(section), [
-    '소제목 할 일 1',
-    'd-mrow2 no-tg | 지난 회차에 남은 일',
-    '소제목 확인 대기 1',
-    'd-mrow2 no-tg has-pj | 지난 회차의 확인',
-  ], '회차 표기가 이미 있으니 프로젝트 소제목은 세우지 않는다');
-  // 줄 오른쪽에는 그대로 회차가 적힌다.
-  assert.match(nodeFindAll(section, 'd-mrow2')[0].children[2].textContent, /회차$/);
+  assert.equal(section.children[0].textContent, '이전 회차의 미해결 항목');
+  assert.equal(nodeFind(section.children[0], 'n').textContent, '2');
+  const lines = meetingListShape(section);
+  assert.match(lines[0], /^d-mrow2 \| 지난 회차에 남은 일 \| \d+월 \d+일 회차 할 일$/);
+  assert.match(lines[1], /^d-mrow2 has-pj \| 지난 회차의 확인 \| \d+월 \d+일 회차 확인 대기$/);
+});
+
+// ---------- 회의에서 나온 것 적기: 발의 입력줄, Enter 순간 담김 ----------
+// 회의 카드 한 벌(목록 + 입력줄)을 가짜 창에 그린다. load()는 서버가 돌려준 항목을 목록에 넣는 흉내를 낸다.
+function meetingCaptureClient({ linked = true } = {}) {
+  const app = workflowsClient();
+  const held = [];
+  let seq = 0;
+  app.context.fetch = (url, options) => new Promise((resolve) => {
+    const body = options && options.body ? JSON.parse(options.body) : null;
+    held.push({
+      url, body,
+      ok: () => {
+        const id = `n${++seq}`;
+        const type = body.type || { '/api/today-task/create': 'task', '/api/waiting/create': 'check', '/api/decision/create': 'decision' }[url];
+        if (/capture$|create$/.test(url)) app.context.__saved.push({ id, type, status: 'to-do', description: body.description, ...(body.meetingId ? { meetingId: body.meetingId } : {}) });
+        resolve(new Response(JSON.stringify({ ok: true, id })));
+      },
+      fail: () => resolve(new Response('{"ok":false}', { status: 500 })),
+    });
+  });
+  app.context.__saved = [];
+  app.context.__event = linked
+    ? { id: 'mc1', date: meetingNotesDay(0), start: '11:00', end: '12:00', title: '결제 리뉴얼 주간 회의' }
+    : { start: '11:00', title: '기록 안 된 회의', project: { type: 'group', value: '결제 리뉴얼', label: '결제 리뉴얼' } };
+  app.run(`
+    var loaded = 0;
+    workflowData = { items: [], meetings: ${linked ? '[__event]' : '[]'} }; wfIndexData(); itemsById = new Map();
+    meetingCaptureLocal.clear(); meetingCaptureOrder.clear(); undoStack.length = 0; redoStack.length = 0;
+    load = async () => { loaded += 1; workflowData.items = [...__saved]; wfIndexData(); itemsById = new Map(workflowData.items.map(item => [item.id, item])); };
+    var __box = null;
+    var __host = { kind: 'card', closable: false, getResult: () => null, setResult() {}, redraw() { __draw(); }, box: () => __box, openItem() {}, openMeeting() {} };
+    function __draw() {
+      __box = document.createElement('div');
+      panelMeetingItems(__event, __box, __host);
+      panelMeetingCapture(__event, __box, ${linked}, __host);
+      return __box;
+    }
+    __draw();
+  `);
+  const box = () => app.run('__box');
+  const input = () => box().meetingInput;
+  const enter = (text, extra = {}) => { const el = input(); el.value = text; return el.listeners.keydown({ key: 'Enter', isComposing: false, preventDefault() {}, ...extra }); };
+  const rows = () => nodeFindAll(nodeFind(box(), 'd-mlist'), 'd-mrow2');
+  const titles = () => rows().map(row => nodeFind(row, 'ti').textContent);
+  return { app, held, box, input, enter, rows, titles };
+}
+
+test('회의 적기: 입력줄은 카드 발에 있고(placeholder 한 줄), 접히는 `직접 적어 담기`·세그먼트·추가 버튼은 없다', () => {
+  const { box, input } = meetingCaptureClient();
+  const foot = box().children[box().children.length - 1];
+  assert.equal(foot.className, 'd-dbar d-qfoot', '발 — 줄 옆 카드·회의 탭이 붙박는 그 자리다');
+  assert.equal(foot.children[0].className, 'd-qin');
+  assert.equal(input().placeholder, '회의에서 나온 것 적기');
+  assert.equal(input().getAttribute('aria-label'), '회의에서 나온 것 적기');
+  assert.equal(input().maxLength, 1000);
+  assert.equal(nodeFind(box(), 'd-dadd'), null, '접히는 구역이 아니다');
+  assert.equal(nodeFind(box(), 'd-seg'), null, '종류 세그먼트가 없다');
+  assert.equal(nodeFindAll(box(), 'd-btn').length, 0, '추가 버튼이 없다');
+  // 빈 회의에는 안내 한 줄만 있고, 목록 구역은 숨는다.
+  assert.equal(nodeFind(box(), 'd-hint').textContent, '적고 Enter를 누르면 바로 담겨요.');
+  assert.equal(nodeFind(box(), 'd-hint').hidden, false);
+  assert.equal(box().children[0].hidden, true);
+});
+
+test('회의 적기: Enter 세 번 → 줄 셋이 바로 서고, 저장은 적은 순서대로 한 건씩 나가며 칸은 잠기지 않고 초점도 그대로다', async () => {
+  const { app, held, input, enter, titles, rows, box } = meetingCaptureClient();
+  const el = input();
+  const sending = [enter('QA 체크리스트 공유'), enter('환불 한도 법무 검토 회신'), enter('환불 한도 법무 검토 회신')];
+  assert.deepEqual(titles(), ['QA 체크리스트 공유', '환불 한도 법무 검토 회신', '환불 한도 법무 검토 회신'], '응답을 기다리지 않고 줄이 선다(같은 글 두 번도 각각)');
+  assert.equal(el.value, '', 'Enter 순간 칸을 비운다');
+  assert.equal(el.disabled, false, '저장 중에도 칸을 잠그지 않는다');
+  assert.equal(el.blurs, 0, '초점이 입력줄을 떠나지 않는다');
+  assert.equal(input(), el, '입력줄을 새로 만들지 않는다(한글 조합이 끊기지 않게)');
+  assert.ok(rows().every(row => row.className.includes('is-local')));
+  assert.equal(nodeFind(box(), 'n').textContent, '3');
+  assert.equal(nodeFind(box(), 'd-hint').hidden, true);
+  await settle();
+  assert.equal(held.length, 1, '앞 건이 끝나기 전에는 다음 건을 보내지 않는다');
+  assert.deepEqual([held[0].url, held[0].body], ['/api/workflow/capture', { meetingId: 'mc1', type: 'task', description: 'QA 체크리스트 공유' }]);
+  el.value = '치는 중';
+  held[0].ok(); await settle();
+  held[1].ok(); await settle();
+  assert.equal(app.run('loaded'), 0, '대기열이 남아 있는 동안은 목록을 다시 읽지 않는다');
+  held[2].ok();
+  await Promise.all(sending);
+  assert.deepEqual(held.map(call => call.body.description), ['QA 체크리스트 공유', '환불 한도 법무 검토 회신', '환불 한도 법무 검토 회신']);
+  assert.equal(app.run('loaded'), 1, '마지막 줄이 끝났을 때 한 번만 다시 읽는다');
+  assert.equal(el.value, '치는 중', '저장 응답 뒤에 칸을 건드리지 않는다');
+  assert.deepEqual(rows().map(row => row.className), ['d-mrow2', 'd-mrow2', 'd-mrow2'], '서버 목록에 들어온 줄은 진짜 줄(체크·⋯)로 바뀐다');
+  assert.deepEqual(rows().map(row => row.dataset.taskId), ['n1', 'n2', 'n3'], '적은 순서 그대로');
+  assert.equal(app.run('meetingCaptureLocal.size'), 0);
+});
+
+test('회의 적기: 한글 조합 중 Enter는 넘기고, 빈 글 Enter는 아무 일도 하지 않는다', async () => {
+  const { held, input, enter, titles } = meetingCaptureClient();
+  await enter('조합 중인 글', { isComposing: true });
+  assert.equal(input().value, '조합 중인 글', '조합 중 Enter는 글자를 확정할 뿐이다');
+  assert.deepEqual(titles(), []);
+  await enter('   ');
+  await settle();
+  assert.equal(held.length, 0);
+});
+
+test('회의 적기: 맨 앞 `?`는 확인 대기, `!`는 결정으로 담고 앞머리는 뗀다 — 앞에 빈칸을 두면 글자 그대로 할 일', async () => {
+  const { held, input, enter, rows } = meetingCaptureClient();
+  const el = input();
+  const kind = el.parent.children[2];
+  el.value = '?환불 한도'; el.listeners.input();
+  assert.equal(kind.textContent, '확인 대기', '치는 동안 어떤 종류로 담길지 조용히 알려 준다');
+  el.value = '그냥 글'; el.listeners.input();
+  assert.equal(kind.textContent, '');
+  const sending = [enter('? 환불 한도 법무 검토 회신'), enter('!부분 환불은 이번 버전에서 뺌'), enter(' ?로 시작하는 글')];
+  assert.deepEqual(rows().map(row => [nodeFind(row, 'ti').textContent, nodeText(nodeFind(row, 'r'))]),
+    [['환불 한도 법무 검토 회신', '확인 대기'], ['부분 환불은 이번 버전에서 뺌', '결정'], ['?로 시작하는 글', '할 일']]);
+  for (let index = 0; index < 3; index += 1) { await settle(); held[index].ok(); }
+  await Promise.all(sending);
+  assert.deepEqual(held.map(call => [call.body.type, call.body.description]),
+    [['check', '환불 한도 법무 검토 회신'], ['decision', '부분 환불은 이번 버전에서 뺌'], ['task', '?로 시작하는 글']]);
+  assert.ok(held.every(call => !('due' in call.body)), '기한은 입력줄에서 정하지 않는다');
+});
+
+test('회의 적기: 여러 줄을 붙여 넣으면 줄마다 한 건(목록 표시는 떼고 빈 줄은 버린다), 한 줄짜리는 평소처럼 칸에 붙는다', async () => {
+  const { held, input, titles } = meetingCaptureClient();
+  const paste = (text) => {
+    let prevented = false;
+    const done = input().listeners.paste({ clipboardData: { getData: () => text }, preventDefault() { prevented = true; } });
+    return { prevented, done };
+  };
+  assert.equal(paste('한 줄짜리 글').prevented, false, '한 줄은 브라우저가 칸에 붙인다');
+  assert.deepEqual(titles(), []);
+  const many = paste('- 결제 실패 로그 일주일치 뽑기\n• ?환불 한도 법무 검토 회신\n1. !부분 환불은 이번 버전에서 뺌\n\n  \n2) 디자인 2차 시안 리뷰 잡기\n* 정산 화면 QA 범위 넣기\n');
+  assert.equal(many.prevented, true);
+  assert.deepEqual(titles(), ['결제 실패 로그 일주일치 뽑기', '환불 한도 법무 검토 회신', '부분 환불은 이번 버전에서 뺌', '디자인 2차 시안 리뷰 잡기', '정산 화면 QA 범위 넣기']);
+  for (let index = 0; index < 5; index += 1) { await settle(); held[index].ok(); }
+  await many.done;
+  assert.equal(held.length, 5, '5줄 → 5건');
+  assert.deepEqual(held.map(call => call.body.type), ['task', 'check', 'decision', 'task', 'task']);
+  assert.equal(input().value, '', '붙여 넣은 글은 칸에 남지 않는다');
+});
+
+test('회의 적기: 30줄을 넘게 붙여 넣으면 하나도 담지 않고 알린다', async () => {
+  const { app, held, input, titles } = meetingCaptureClient();
+  const lines = Array.from({ length: 31 }, (_, index) => `- 줄 ${index + 1}`).join('\n');
+  let prevented = false;
+  input().listeners.paste({ clipboardData: { getData: () => lines }, preventDefault() { prevented = true; } });
+  await settle();
+  assert.equal(prevented, true);
+  assert.equal(held.length, 0);
+  assert.deepEqual(titles(), []);
+  assert.match(app.nodes.get('liveRegion').textContent, /한 번에 30줄까지 담을 수 있어요\(지금 31줄\)/);
+  // 딱 30줄은 담는다.
+  input().listeners.paste({ clipboardData: { getData: () => lines.split('\n').slice(0, 30).join('\n') }, preventDefault() {} });
+  assert.equal(titles().length, 30);
+});
+
+test('회의 적기: 저장이 실패한 줄만 `못 담았어요 · 다시 시도`가 서고 글은 남는다 — 다른 줄은 그대로 담기고, 다시 시도하면 담긴다', async () => {
+  const { app, held, input, enter, rows } = meetingCaptureClient();
+  const sending = [enter('첫 줄'), enter('실패할 줄'), enter('셋째 줄')];
+  await settle(); held[0].ok();
+  await settle(); held[1].fail();
+  await settle(); held[2].ok();
+  await Promise.all(sending);
+  assert.equal(held.length, 3, '앞 줄이 실패해도 다음 줄은 보낸다');
+  const failed = rows().find(row => row.className.includes('is-fail'));
+  assert.equal(nodeFind(failed, 'ti').textContent, '실패할 줄', '적은 글을 잃지 않는다');
+  const note = nodeFind(failed, 'fail');
+  assert.equal(note.textContent, '못 담았어요');
+  assert.equal(note.getAttribute('role'), 'alert');
+  const retry = nodeFind(failed, 'd-link');
+  assert.equal(retry.textContent, '다시 시도');
+  assert.deepEqual(rows().map(row => row.className), ['d-mrow2', 'd-mrow2', 'd-mrow2 is-local is-fail'], '담긴 줄은 진짜 줄, 실패한 줄만 남아 있다');
+  assert.equal(input().value, '', '실패한 글을 입력줄에 되밀어 넣지 않는다(치던 글을 덮지 않게)');
+  // 카드를 다시 그려도 실패한 줄은 남는다.
+  app.run('__draw()');
+  assert.equal(rows().filter(row => row.className.includes('is-fail')).length, 1);
+  const again = nodeFind(rows().find(row => row.className.includes('is-fail')), 'd-link').listeners.click();
+  assert.equal(rows().filter(row => row.className.includes('is-fail')).length, 0, '다시 보내는 동안은 담는 중 모양');
+  assert.equal(input().focused, true, '초점은 입력줄로');
+  await settle(); held[3].ok();
+  await again;
+  assert.deepEqual(held[3].body, { meetingId: 'mc1', type: 'task', description: '실패할 줄' });
+  assert.deepEqual(rows().map(row => row.className), ['d-mrow2', 'd-mrow2', 'd-mrow2']);
+});
+
+test('회의 적기: 못 담은 줄은 ⋯의 `지우기`로 치운다(서버에 보내지 않는다)', async () => {
+  const { app, held, enter, rows, box } = meetingCaptureClient();
+  const sending = enter('지울 줄');
+  await settle(); held[0].fail();
+  await sending;
+  assert.equal(nodeFind(rows()[0], 'd-more').getAttribute('aria-label'), '지울 줄 — 더 보기');
+  app.run('meetingCaptureDrop(__event, meetingCaptureLocal.get(panelMeetingKey(__event))[0], __host)');
+  assert.equal(rows().length, 0);
+  assert.equal(held.length, 1, '지우기는 서버에 아무것도 보내지 않는다');
+  assert.equal(nodeFind(box(), 'd-hint').hidden, false, '빈 회의로 돌아가면 안내 한 줄이 다시 선다');
+});
+
+test('회의 적기: 기록되지 않은 회의는 지금처럼 회의에 연결하지 않고 종류별 목록에 바로 담는다(프로젝트는 회의의 것)', async () => {
+  const { held, enter, rows, box } = meetingCaptureClient({ linked: false });
+  const sending = [enter('바로 담는 할 일'), enter('?바로 담는 확인')];
+  await settle(); held[0].ok();
+  await settle(); held[1].ok();
+  await Promise.all(sending);
+  assert.deepEqual(held.map(call => [call.url, call.body]), [
+    ['/api/today-task/create', { description: '바로 담는 할 일', group: '결제 리뉴얼' }],
+    ['/api/waiting/create', { description: '바로 담는 확인', group: '결제 리뉴얼' }],
+  ]);
+  assert.equal(box().children[0].children[0].textContent, '방금 담은 것');
+  assert.deepEqual(rows().map(row => nodeFind(row, 'ti').textContent), ['바로 담는 할 일', '바로 담는 확인'], '담은 줄은 이 자리에 남아 보인다');
 });
 
 test('팔레트 바닥은 `회의` 칩일 때만 회의 탭으로 가는 링크를 붙인다', () => {
@@ -4480,10 +4666,10 @@ test('`다음은?` 줄은 프로젝트 탭 확인 대기 구역 맨 위와 회�
   // 회의는 체크한 줄이 is-done으로 남으므로 그 줄 바로 아래에 붙는다
   app.run("workflowData.items.forEach(item => { if (item.id === 'ck1') item.meetingId = 'm1'; }); wfIndexData();");
   const box = app.run(`(() => { const box = document.createElement('div'); panelMeetingItems({ id: 'm1' }, box); return box; })()`);
-  const rows = box.children[0].children;
-  // 회의에 프로젝트가 없고 항목에는 있으므로 줄이 `· ● 가입 개선`을 달고 있다(has-pj) — 종류는 하나뿐이라 소제목은 없다.
-  assert.equal(rows[1].className, 'd-mrow2 has-pj is-done');
-  assert.equal(rows[2].className, 'd-wnext');
+  const rows = nodeFind(box, 'd-mlist').children;
+  // 회의에 프로젝트가 없고 항목에는 있으므로 줄이 `· ● 가입 개선`을 달고 있다(has-pj).
+  assert.equal(rows[0].className, 'd-mrow2 has-pj is-done');
+  assert.equal(rows[1].className, 'd-wnext');
 });
 
 test('`닫기`는 줄만 내린다 — 체크는 이미 저장됐으므로 아무것도 보내지 않는다', () => {
