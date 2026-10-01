@@ -94,16 +94,15 @@
         </div>
 
         <div id="todayTaskZone" tabindex="-1">
-          <!-- 머리줄: 제목 + 파란 개수 칩 + `19개 중 5개 끝냈어요`(+ 오늘 할 일이 적으면 `오늘 할 만한 일 2개`)
+          <!-- 머리줄: 제목 + 끝낸 개수 칩 하나 `✓ 5/19`(전부 끝내면 초록)
                / 오른쪽 `나중에 할 일 N` + ⋯(보기 전환·여러 개 선택). -->
           <div class="d-lhd">
             <h2>오늘 할 일</h2>
-            <span class="sub num"><span class="cnt" id="todayTaskCount">0</span><span id="todayDoneSummary"></span><span id="suggestSlot"></span></span>
+            <span class="sub num"><span class="cnt" id="todayTaskCount" role="img" hidden><svg class="gl" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.2 6.4 4.9 9 9.8 3.2"/></svg><span class="n" aria-hidden="true"><b id="todayDoneNum"></b><span id="todayTotalNum"></span></span></span></span>
             <span class="sp"></span>
             <button type="button" class="d-btn" id="laterTaskToggle" aria-expanded="false" aria-controls="laterTaskDrawer">나중에 할 일 <span class="num" id="laterTaskSectionCount">0</span></button>
             <span id="todayHeadMore"></span>
           </div>
-          <div id="suggestZone" hidden></div>
           <div class="task-content-layout">
             <div class="d-list" id="todayListSurface">
               <div class="d-qaf">

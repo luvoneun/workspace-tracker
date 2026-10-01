@@ -1403,9 +1403,8 @@ function isTyping() {
   return !!(el && (el.matches('input, textarea, select') || el.isContentEditable));
 }
 let todaySort = 'project';
-// 완료 그룹과 당겨오기 제안은 접힌 채로 시작한다 — 첫 화면에 오늘 할 일이 가장 많이 보이게.
+// 완료 그룹은 접힌 채로 시작한다 — 첫 화면에 오늘 할 일이 가장 많이 보이게.
 let todayDoneOpen = false;
-let suggestOpen = false;
 // 긴 목록은 위 3줄만 보이고 나머지는 `N개 더 ›`로 펼친다(프로젝트 카드의 읽는 그룹 — 새로 들어온 것은 놓치지 않게 접지 않는다).
 // 펼침은 화면 메모리에만 — 새로고침하면 접힌 채로 시작하고, 3줄 이하로 줄면 접힘으로 돌아간다.
 const UI_FOLD = 3;
@@ -1634,7 +1633,6 @@ async function load() {
   projectAliasesCache = (workflowData && workflowData.projectAliases) || {};
   renderDateBar(data);
   renderCalendar(data.calendar);
-  renderSuggestions(data.suggestions);
   // 목록 안의 글자 칸(새로 들어온 것 제목 고치기·그룹 `+` 줄)에서 치는 중이면 그 목록은 손을 뗀 뒤 그린다.
   uiRenderOrHold('inbox', document.getElementById('inboxZone'), () => renderInbox(data.inboxTasks || []));
   renderUpdateNotice();
@@ -1982,90 +1980,6 @@ function calendarClockStart() {
   calendarClockTimer = setInterval(calendarClockTick, 60000);
 }
 
-
-function suggestDismissedToday() {
-  try { return localStorage.getItem('suggestDismissed') === todayStr(); } catch { return false; }
-}
-
-// 당겨오기 제안은 머리줄의 진행 문장 뒤에 글자 링크로 붙는다(`… 5개 끝냈어요 · 오늘 할 만한 일 2개`).
-// 누르면 머리줄 아래로 업무 줄이 펼쳐진다. 제안이 없으면 앞 문장만 남는다.
-// 근거는 알약으로 그리지 않는다(마감 없음·우선순위 낮음 같은 말은 새로 알려 주는 게 없다).
-function renderSuggestions(suggestions) {
-  const slot = document.getElementById('suggestSlot');
-  if (slot) slot.replaceChildren();
-  const zone = document.getElementById('suggestZone');
-  const data = { mode: 'none', items: [], ...suggestions };
-  // 당겨오기만 있다(옛 서버가 보내는 다른 mode는 무시).
-  data.items = data.mode === 'pull' ? data.items.filter(item => {
-    const blocked = wfItem(wfItem(item.id)?.blockedBy);
-    return !blocked || blocked.status === 'done';
-  }) : [];
-  zone.replaceChildren();
-  if (!data.items.length || suggestDismissedToday()) {
-    zone.hidden = true;
-    return;
-  }
-  zone.hidden = false;
-
-  const toggle = document.createElement('button');
-  toggle.type = 'button';
-  toggle.className = 'd-sug';
-  toggle.setAttribute('aria-expanded', String(suggestOpen));
-  toggle.setAttribute('aria-controls', 'suggestZone');
-  toggle.innerHTML = uiIcon('chevron');
-  const label = document.createElement('span');
-  label.textContent = `오늘 할 만한 일 ${data.items.length}개`;
-  toggle.appendChild(label);
-  toggle.addEventListener('click', () => { suggestOpen = !suggestOpen; renderSuggestions(suggestions); });
-  // 링크는 머리줄의 진행 문장 뒤에, 펼친 줄은 머리줄 아래에 둔다.
-  if (slot) { slot.append('· ', toggle); } else { zone.appendChild(toggle); }
-  if (!suggestOpen) { zone.hidden = true; return; }
-
-  const box = document.createElement('div');
-  box.className = 'd-sugbox';
-  data.items.forEach((entry) => {
-    const task = itemsById.get(entry.id) || { id: entry.id, description: entry.description };
-    const row = document.createElement('div');
-    row.className = 'd-row is-sug';
-    row.innerHTML = '<span class="d-check"></span>'
-      + `<span class="d-title" title="${escapeAttr(task.description)}">${escapeHtml(task.description)}</span>`
-      + '<span class="d-proj"></span>'
-      + `<span class="d-meta">${uiMetaCells(task)}</span>`;
-    const acts = document.createElement('span');
-    acts.className = 'd-acts';
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'd-btn sm';
-    button.textContent = '오늘로';
-    button.setAttribute('aria-label', `${task.description} — 오늘로`);
-    button.addEventListener('click', async () => {
-      button.disabled = true;
-      try {
-        await setTaskScheduled(entry.id, todayStr());
-        announce(uiMoveNotice('오늘 할 일로 옮겼어요', [task], todayStr()));
-      } catch { button.disabled = false; }
-    });
-    acts.appendChild(button);
-    row.appendChild(acts);
-    box.appendChild(row);
-  });
-
-  const foot = document.createElement('div');
-  foot.className = 'd-sugfoot';
-  const dismiss = document.createElement('button');
-  dismiss.type = 'button';
-  dismiss.className = 'd-link';
-  dismiss.textContent = '오늘은 괜찮아요';
-  dismiss.addEventListener('click', () => {
-    try { localStorage.setItem('suggestDismissed', todayStr()); } catch {}
-    zone.hidden = true;
-    zone.replaceChildren();
-    announce('오늘은 제안을 접어 둘게요');
-  });
-  foot.appendChild(dismiss);
-  box.appendChild(foot);
-  zone.appendChild(box);
-}
 
 function todayStr() {
   const d = new Date();
@@ -5333,31 +5247,28 @@ function uiFoldToggle(rows, { label, expanded = false, controls = '', onChange =
   return button;
 }
 
-// 오늘 할 일 카드 윗변을 따라 흐르는 3px 선. 카드 모서리에 맞춰 잘리도록 카드를 덮는
-// 투명한 판 안에 둔다(판이 둥글게 잘라 준다). 할 일이 없으면 선도 없다.
-function renderTodayProgress(done, total) {
-  const card = document.getElementById('todayListSurface');
-  if (!card) return;
-  let bar = card.querySelector(':scope > .d-topprog');
-  if (!total) { if (bar) bar.remove(); return; }
-  if (!bar) {
-    bar = document.createElement('span');
-    bar.className = 'd-topprog';
-    bar.setAttribute('aria-hidden', 'true');
-    bar.appendChild(document.createElement('i'));
-    card.prepend(bar);
+// 머리줄의 끝낸 개수 칩 `✓ 5/19` — 끝낸 개수를 보이는 유일한 곳. 오늘 할 일이 0개면 칩이 없고,
+// 전부 끝내면 초록이 된다. 화면 읽기에는 `19개 중 5개 끝냈어요`를 그대로 읽어 준다.
+function renderTodayChip(done, total) {
+  const chip = document.getElementById('todayTaskCount');
+  chip.hidden = !total;
+  if (!total) return;
+  const label = `${total}개 중 ${done}개 끝냈어요`;
+  chip.setAttribute('aria-label', label);
+  chip.title = label;
+  chip.classList.toggle('is-full', done === total);
+  const num = document.getElementById('todayDoneNum');
+  if (num.textContent !== String(done)) {
+    const had = num.textContent !== '';
+    num.textContent = done;
+    if (had) { num.classList.remove('tick'); void num.offsetWidth; num.classList.add('tick'); }
   }
-  bar.firstChild.style.setProperty('--p', `${Math.round((done / total) * 100)}%`);
+  document.getElementById('todayTotalNum').textContent = `/${total}`;
 }
 
 function renderTodayTasks(items) {
   const doneItems = items.filter(item => item.status === 'done');
-  const todayCount = document.getElementById('todayTaskCount');
-  todayCount.textContent = items.length - doneItems.length;
-  todayCount.hidden = items.length === doneItems.length; // 남은 것이 0이면 적지 않는다
-  // 한 마디로 오늘의 진행을 알려 준다. 아직 아무것도 없으면 아무 말도 하지 않는다.
-  document.getElementById('todayDoneSummary').textContent = items.length ? `${items.length}개 중 ${doneItems.length}개 끝냈어요` : '';
-  renderTodayProgress(doneItems.length, items.length);
+  renderTodayChip(doneItems.length, items.length);
   const list = document.getElementById('todayTaskList');
   list.replaceChildren();
 

@@ -13,7 +13,7 @@ module.exports = function itemsRoutes(req, res, url, ctx) {
     storage, todayLocal, workflows } = ctx;
 
   if (url.pathname === '/api/items' && req.method === 'GET') {
-    const { getInboxTasks, getDecisions, getWaitingItems, getIdeas, getTodaySuggestions, getWeeklyReports, getTodayActivityCounts } = listReaders(ctx);
+    const { getInboxTasks, getDecisions, getWaitingItems, getIdeas, getWeeklyReports, getTodayActivityCounts } = listReaders(ctx);
     // 지라 목록이 묵었으면 갱신만 걸어 둔다 — 이 응답은 기다리지 않는다(지라 때문에 목록이 늦지 않게).
     if (USES.jira) jiraLive.nudge();
     // 캘린더 비밀 주소도 같다 — 묵었으면 뒤에서 다시 읽게만 걸어 둔다.
@@ -46,7 +46,6 @@ module.exports = function itemsRoutes(req, res, url, ctx) {
       })(),
       customGroups: getCustomGroups(),
       calendar: getCalendarWithLinks(),
-      suggestions: getTodaySuggestions(),
       reportRefs: getReportRefs(),
       workflows: workflows.snapshot(),
       // 미팅 노트 가져오기의 지금 상태 — 페이지를 새로 열어도 진행 중인 가져오기가 이어지게 첫 조회에 함께 싣는다.
@@ -66,8 +65,8 @@ module.exports = function itemsRoutes(req, res, url, ctx) {
 
 // 목록 읽기 도우미 — 이 경로만 쓴다(server.js에서 글자 그대로 옮겼다). 다른 곳도 쓰는 도우미는 server.js에 두고 ctx로 받는다.
 function listReaders(ctx) {
-  const { TRACK_RE, fs, getCalendarToday, getLaterTasks, getTodayTasks, isNewSlack, listTrackerFiles, localDateOf, parseFields,
-    parseWeeklyReports, projectKeyOf, readMeetingLinks, reportDrafts, todayLocal, weeklyReportStatePath, workflows } = ctx;
+  const { TRACK_RE, fs, isNewSlack, listTrackerFiles, localDateOf, parseFields,
+    parseWeeklyReports, reportDrafts, todayLocal, weeklyReportStatePath, workflows } = ctx;
 
   // "새로 들어온 것" — 슬랙에서 캡처됐지만 오늘 할지 나중에 할지 아직 안 정한 것.
   // 오늘/나중에 목록에 섞여 묻히는 걸 막으려고 따로 모아둔다. 사람이 분류하면 inbox가 지워진다.
@@ -176,76 +175,6 @@ function listReaders(ctx) {
     return items;
   }
 
-  // 오늘 미팅에 연결된 프로젝트들 — 제안이 "오늘 미팅 있는 일"을 건드리지 않도록 쓰인다
-  function meetingProjectKeys() {
-    const links = readMeetingLinks();
-    const keys = new Set();
-    getCalendarToday().events.forEach((event) => {
-      const key = links[String(event.title).trim()];
-      if (key) keys.add(key);
-    });
-    return keys;
-  }
-
-  function daysBetween(fromDate, toDate) {
-    return Math.round((new Date(`${toDate}T00:00:00`) - new Date(`${fromDate}T00:00:00`)) / 86400000);
-  }
-
-  // 오늘 할 일이 적으면 "이거 가져올까요?"라고 하고, 아니면 아무 말도 안 한다(많아도 미루자고 하지 않는다).
-  function getTodaySuggestions() {
-    const openToday = getTodayTasks().filter((t) => t.status !== 'done');
-    if (openToday.length < 5) return { mode: 'pull', total: openToday.length, items: suggestPulls() };
-    return { mode: 'none', total: openToday.length, items: [] };
-  }
-
-  // 오늘 하기 좋은 후보 — 나중에 할 일 중에서
-  function suggestPulls() {
-    const today = todayLocal();
-    const meetingKeys = meetingProjectKeys();
-    return getLaterTasks()
-      .map((task) => {
-        const reasons = [];
-        let score = 0;
-        const key = projectKeyOf(task);
-        if (key && meetingKeys.has(key)) {
-          score += 10;
-          reasons.push('오늘 미팅 관련');
-        }
-        if (task.due) {
-          const left = daysBetween(today, task.due);
-          if (left <= 1) {
-            score += 9;
-            reasons.push(left < 0 ? '마감 지남' : '마감 임박');
-          } else if (left <= 3) {
-            score += 6;
-            reasons.push(`마감 ${left}일 전`);
-          } else if (left <= 7) {
-            score += 3;
-            reasons.push('이번 주 마감');
-          }
-        }
-        if (task.priority === 'critical') {
-          score += 6;
-          reasons.push('긴급');
-        } else if (task.priority === 'high') {
-          score += 4;
-          reasons.push('중요');
-        }
-        const waited = task.created ? daysBetween(task.created, today) : 0;
-        if (waited >= 7) {
-          score += 3;
-          reasons.push(`${waited}일째 대기`);
-        } else if (waited >= 3) {
-          score += 1;
-          reasons.push(`${waited}일째 대기`);
-        }
-        return { ...task, score, reasons };
-      })
-      .filter((task) => task.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 3);
-  }
-
   function weekLabel(weekKey) {
     const monday = new Date(weekKey + 'T00:00:00');
     const sunday = new Date(monday);
@@ -290,5 +219,5 @@ function listReaders(ctx) {
     return { createdToday };
   }
 
-  return { getInboxTasks, getDecisions, getWaitingItems, getIdeas, getTodaySuggestions, getWeeklyReports, getTodayActivityCounts };
+  return { getInboxTasks, getDecisions, getWaitingItems, getIdeas, getWeeklyReports, getTodayActivityCounts };
 }

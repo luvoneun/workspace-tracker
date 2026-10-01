@@ -51,7 +51,7 @@
 
   /* 따뜻한 면 — 새로 들어온 것 */
   --warm: #fffaf2;  --warm-line: transparent;  --warm-hover: #fff4e4;
-  --prog-track: #e9edf2;         /* 오늘 카드 윗변 진행 선의 트랙 */
+  --prog-track: #e9edf2;         /* 지라 진행 막대의 트랙 */
 
   /* 프로젝트 색 점 — 이름 해시로 정하는 여섯 개 */
   --pj-0: #4f83e8;  --pj-1: #2f9b87;  --pj-2: #c0842b;
@@ -1010,34 +1010,27 @@ button.d-guide .t { color: var(--accent-text); }
 }
 
 /* ---------- 목록 머리줄 ---------- */
-/* 제목 + 파란 개수 칩 + 한 마디(`19개 중 5개 끝냈어요`) / 오른쪽 `나중에 할 일 N` + ⋯ */
+/* 제목 + 끝낸 개수 칩(`✓ 5/19`) / 오른쪽 `나중에 할 일 N` + ⋯ */
 .d-lhd { display: flex; align-items: center; gap: 12px 10px; flex-wrap: wrap; min-height: 34px; margin: 0 0 2px; }
 .d-lhd > * { flex: none; }
 .d-lhd h2 { margin: 0; font-size: 19px; font-weight: 700; letter-spacing: -0.015em; white-space: nowrap; }
 .d-lhd .d-btn, .d-seg button { white-space: nowrap; }
 .d-lhd h2::before { display: none; }
 .d-lhd .sub { display: inline-flex; align-items: center; gap: 10px; color: var(--dim); font-size: 13.5px; font-weight: 500; }
-/* 오늘 할 일의 남은 개수만 파란 칩이다 */
+/* 오늘 할 일의 끝낸 개수 칩 `✓ 5/19` — 파란 칩, 전부 끝내면 초록. 숫자가 바뀔 때 짧게 올라온다 */
 .d-lhd .sub .cnt {
-  height: var(--h-xs); display: inline-flex; align-items: center; padding: 0 9px;
+  height: var(--h-xs); display: inline-flex; align-items: center; gap: 4px; padding: 0 9px 0 7px;
   border-radius: 999px; background: var(--accent-soft); color: var(--accent-text);
-  font-size: 12.5px; font-weight: 600;
+  font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; transition: background 200ms var(--ease);
 }
+.d-lhd .sub .cnt[hidden] { display: none; }
+.d-lhd .sub .cnt .gl { width: 12px; height: 12px; flex: none; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.d-lhd .sub .cnt.is-full { background: var(--success-bg); color: var(--success); }
+.d-lhd .sub .cnt b { display: inline-block; font-weight: 600; }
+.d-lhd .sub .cnt b.tick { animation: d-tick 200ms var(--ease); }
+@keyframes d-tick { from { transform: translateY(4px); opacity: 0.35; } to { transform: none; opacity: 1; } }
 .d-lhd .sp { margin-left: auto; }
 .d-headmore { color: var(--dim); }
-
-/* ---------- 당겨오기 제안 — 진행 문장 뒤의 조용한 글자 링크, 머리줄 아래로 펼친다 ---------- */
-#suggestZone[hidden] { display: none; }
-#suggestZone { display: flex; flex-direction: column; align-items: stretch; margin: -2px 0 4px; }
-.d-sug {
-  display: inline-flex; align-items: center; gap: 4px; height: 24px; margin: 0; padding: 0;
-  border: 0; border-radius: 4px; background: none; color: var(--dim);
-  font-family: inherit; font-size: 13.5px; font-weight: 500; cursor: pointer;
-}
-.d-sug:hover { background: none; color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; }
-.d-sug .d-i { display: none; }
-.d-sugbox { margin: 2px 0 6px; padding: 2px 0; }
-.d-sugfoot { padding: 2px 6px 4px; }
 
 /* ---------- 목록 면 하나 — 테두리 없는 둥근 흰 카드 ---------- */
 .d-list {
@@ -1045,12 +1038,6 @@ button.d-guide .t { color: var(--accent-text); }
   background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r);
   box-shadow: var(--soft); overflow: visible; padding: 10px; margin-top: 6px;
 }
-/* 진행 표시 — 오늘 할 일 카드 윗변을 따라 흐르는 3px 선.
-   카드 모서리에 맞춰 잘리도록 카드를 덮는 투명한 판 안에 둔다(판이 둥글게 잘라 준다). */
-.d-topprog { position: absolute; inset: 0; border-radius: var(--r); overflow: hidden; pointer-events: none; }
-.d-topprog::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--prog-track); }
-.d-topprog > i { position: absolute; top: 0; left: 0; height: 3px; width: var(--p, 0%); background: var(--accent); transition: width 320ms var(--ease); }
-
 /* 빠른 추가 — 평소에는 그냥 맨 줄(+ 아이콘·안내글), 초점에서만 채움과 파란 테 */
 .d-qaf {
   display: flex; align-items: center; gap: 8px; height: 48px; margin: 0 0 4px; padding: 0 var(--pad);
@@ -1200,7 +1187,8 @@ body.batch-open .d-row.is-done { opacity: 0.6; }
 }
 @media (prefers-reduced-motion: reduce) {
   .d-cb:checked, .d-row.is-completing .d-title { animation: none; }
-  .d-topprog > i { transition: none; }
+  .d-lhd .sub .cnt { transition: none; }
+  .d-lhd .sub .cnt b.tick { animation: none; }
 }
 
 /* 여러 개 선택 중에는 완료 체크 자리(첫 칸 30px)에 선택 칸이 대신 선다 — 열을 더하지 않아 줄이 밀리지 않는다.
@@ -1279,12 +1267,6 @@ body.batch-open .d-row[data-task-id]:not(.is-done) { cursor: pointer; }
   opacity: 0; pointer-events: none; transition: opacity 130ms var(--ease);
 }
 .d-row:hover .d-acts, .d-row:focus-within .d-acts, .d-row.is-sel .d-acts { opacity: 1; pointer-events: auto; }
-
-.d-row.is-sug { grid-template-columns: 30px minmax(0, 1fr) var(--wp) var(--wm) 104px; --rowbg: var(--bg); }
-.d-row.is-sug, .d-row.is-sug:hover { background: none; }
-.d-row.is-sug:hover { --rowbg: var(--bg); }
-.d-row.is-sug .d-title { cursor: default; }
-.d-row.is-sug .d-acts { position: static; opacity: 1; pointer-events: auto; background: none; padding-left: 0; }
 
 .d-row.is-done { --wmcol: 280px; }
 .d-row.is-done .d-title { color: var(--muted); font-weight: 400; cursor: pointer; text-decoration: line-through; text-decoration-color: var(--border); }
@@ -2494,9 +2476,9 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-ablink:hover { color: var(--text); }
 /* 작은 글자 링크·버튼도 넓은 화면에서 누르는 자리 28px — 모양은 그대로, 투명 ::after만 넓힌다.
    0과 (칸 − 28px)/2 중 작은 값이라 이미 28px 이상인 칸(.d-abupd 등)은 늘지 않는다.
-   대상: 설정의 밑줄 글자(`요청하기`·`각자 붙이는 법`·`점검하기`·`보기`), 선택 막대 `전체 선택`, 줄의 `원문`, 머리줄 `오늘 할 만한 일 N개` */
-.d-ablink, .d-selbar .d-link, .d-src, .d-sug { position: relative; }
-.d-ablink::after, .d-selbar .d-link::after, .d-src::after, .d-sug::after {
+   대상: 설정의 밑줄 글자(`요청하기`·`각자 붙이는 법`·`점검하기`·`보기`), 선택 막대 `전체 선택`, 줄의 `원문` */
+.d-ablink, .d-selbar .d-link, .d-src { position: relative; }
+.d-ablink::after, .d-selbar .d-link::after, .d-src::after {
   content: ''; position: absolute;
   top: min(0px, calc(50% - 14px)); bottom: min(0px, calc(50% - 14px));
   left: min(0px, calc(50% - 14px)); right: min(0px, calc(50% - 14px));
@@ -2992,7 +2974,7 @@ a.d-btn { text-decoration: none; }
   .d-pres.is-mtg .st { grid-column: 2; grid-row: 3; }
 
   /* 행은 두 줄로 쌓이고, 숨어 있던 동작은 항상 보인다 */
-  .d-row, .d-row.is-sug {
+  .d-row {
     grid-template-columns: 30px minmax(0, 1fr) auto;
     grid-template-areas: "ck ti ac" "ck mt ac";
     height: auto; min-height: 60px; padding: 10px 12px; row-gap: 2px; column-gap: 10px;
@@ -3006,14 +2988,14 @@ a.d-btn { text-decoration: none; }
   /* 두 줄 행에서도 같은 순서로 이어 붙는다(상태 → 기한) — 왼쪽 정렬만 다르다 */
   .d-meta { grid-area: mt; justify-content: flex-start; flex-wrap: wrap; row-gap: 5px; }
   /* 프로젝트 이름은 제목 뒤 `· ● 이름`(.d-inproj)이 이미 말한다 — 상태 줄의 .m-proj는 좁은 폭에서도 숨긴 채 둔다(두 번 찍히지 않게) */
-  .d-acts, .d-row.is-sug .d-acts {
+  .d-acts {
     grid-area: ac; position: static; flex-direction: column; align-items: stretch;
     opacity: 1; pointer-events: auto; background: none; padding-left: 0;
   }
   .d-acts .d-btn, .d-ibacts .d-btn { height: var(--h-md); padding: 0 11px; }
   /* 업무 줄에는 ⋯ 하나만 — 내일·나중에·오늘로·오늘 할게요는 줄을 누르면 열리는 시트 발에 있다.
-     당겨오기 제안 줄(.is-sug)은 시트가 없는 줄이라 그대로 둔다. 프로젝트 면의 줄은 아래 .d-prow2 */
-  .d-row:not(.is-sug) .d-acts > .d-btn { display: none; }
+     프로젝트 면의 줄은 아래 .d-prow2 */
+  .d-row .d-acts > .d-btn { display: none; }
   /* 누르는 자리는 38px — 모양(체크 22px · ⋯ 32px)은 그대로, 투명한 ::after만 넓힌다 */
   .d-row .d-cb::after, .d-prow2 .d-cb::after { inset: -10px; border-radius: 12px; }
   /* 체크 칸은 줄 높이만큼 선다(체크박스는 가운데 그대로) — 칸의 빈 여백 누름이 줄 누름(시트 열기)으로 번지지 않게 */

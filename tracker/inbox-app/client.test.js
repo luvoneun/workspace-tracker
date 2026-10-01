@@ -1131,22 +1131,6 @@ test('panelWhenText: 진행 중이 아니면 지난 예정일은 `N일째 밀림
   assert.match(app.run("panelWhenText({ status: 'open', scheduled: '2000-01-01' }, 'today')"), /^\d+일째 밀림 · 1월 1일 \(토\)$/);
 });
 
-// 오늘 할 일 머리줄의 끌어오기 제안은 `오늘 할 만한 일 N개`(0개면 없음). 많을 때 미루자는 제안(`N개 미룰까요?`)은 없다.
-test('제안 머리줄 문구: 끌어오기는 `오늘 할 만한 일 N개`, 미루기 제안은 없음, 0개면 링크 없음', () => {
-  const app = workflowsClient();
-  app.run('workflowData = { items: [], meetings: [] }; wfIndexData();');
-  const label = (mode, ids) => app.run(`(() => {
-    suggestOpen = false; itemsById = new Map();
-    const slot = document.getElementById('suggestSlot'); slot.children = [];
-    renderSuggestions({ mode: '${mode}', items: ${JSON.stringify(ids)}.map(id => ({ id, description: id })) });
-    const toggle = slot.children.find(node => node.className === 'd-sug');
-    return toggle ? toggle.children.map(node => node.textContent).join('') : null;
-  })()`);
-  assert.equal(label('pull', ['a', 'b']), '오늘 할 만한 일 2개');
-  assert.equal(label('defer', ['a', 'b', 'c']), null, '옛 서버가 defer를 보내도 미룰까요 링크는 없다');
-  assert.equal(label('pull', []), null);
-});
-
 test('panelWhenText: 진행 중 + 오늘(또는 예정일 없음)은 `오늘` 그대로', () => {
   const app = pureClient();
   assert.equal(app.run("panelWhenText({ status: 'open', doing: todayStr(), scheduled: todayStr() }, 'today')"), '오늘');
@@ -12062,10 +12046,10 @@ test('좁은 폭 시트: 탭을 옮기면 닫혀 가림막이 남지 않고, 창
   })()`), { calls: ['clear', 'render'], scrimHidden: true, sideHidden: true });
 });
 
-test('좁은 폭 CSS: 업무 줄에는 ⋯만(제안 줄은 그대로), 체크·⋯ 누르는 자리 38px, 가림막, 누르는 화면의 ⌘Z 글자 숨김 — 넓은 폭 규칙은 없다', () => {
+test('좁은 폭 CSS: 업무 줄에는 ⋯만, 체크·⋯ 누르는 자리 38px, 가림막, 누르는 화면의 ⌘Z 글자 숨김 — 넓은 폭 규칙은 없다', () => {
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
   const narrow = [...css.matchAll(/@media \(max-width: 520px\) \{([\s\S]*?)\n\}/g)].map(m => m[1]).join('\n');
-  assert.match(narrow, /\.d-row:not\(\.is-sug\) \.d-acts > \.d-btn \{ display: none; \}/);
+  assert.match(narrow, /\.d-row \.d-acts > \.d-btn \{ display: none; \}/);
   assert.match(narrow, /\.d-prow2 \.ac > \.d-btn \{ display: none; \}/);
   assert.match(narrow, /\.d-row \.d-cb::after, \.d-prow2 \.d-cb::after \{ inset: -10px;/, '::after는 테두리 안쪽(19px)에서 재므로 19 + 10 × 2 = 39px');
   assert.match(narrow, /\.d-row \.d-acts \.d-more::after, \.d-prow2 \.ac \.d-more::after \{ content: ''; position: absolute; inset: -3px;/, '32 + 3 × 2 = 38px');
@@ -12287,7 +12271,6 @@ function firstRunClient() {
     uiGroupAddRow = () => document.createElement('div');
     recordIdeaRow = () => document.createElement('div');
     recordDecisionRow = () => document.createElement('div');
-    renderTodayProgress = () => {};
     wfMeetingProjectName = () => '';
     setInterval = () => 0; clearInterval = () => {};
     document.body = document.createElement('div');
@@ -12306,7 +12289,7 @@ test('첫사용 1·2: 개수 칩은 1 이상일 때만 선다 — 0이면 숨고
     fx.app.run(`renderTodayTasks(${list}); renderWaiting(${list}); renderIdeas(${list}); renderDecisions(${list});
       renderCalendar({ events: ${events} });`);
   };
-  const ids = ['todayTaskCount', 'waitingSectionCount', 'ideaCount', 'decisionSectionCount', 'calendarSectionCount'];
+  const ids = ['waitingSectionCount', 'ideaCount', 'decisionSectionCount', 'calendarSectionCount'];
   draw(0);
   ids.forEach(id => assert.equal(fx.node(id).hidden, true, `${id}: 0이면 숨김`));
   draw(1);
@@ -12318,10 +12301,45 @@ test('첫사용 1·2: 개수 칩은 1 이상일 때만 선다 — 0이면 숨고
   ids.forEach(id => assert.equal(String(fx.node(id).textContent), '3', `${id}: 데이터가 있으면 지금 그대로`));
   draw(0);
   ids.forEach(id => assert.equal(fx.node(id).hidden, true, `${id}: 1 → 0이면 다시 숨김`));
-  // 오늘 할 일은 남은 개수다 — 모두 끝내 남은 것이 0이면 칩도 숨는다(`N개 중 N개 끝냈어요`가 말한다)
-  fx.app.run(`renderTodayTasks([{ id: 'a', description: '끝', status: 'done' }])`);
-  assert.equal(fx.node('todayTaskCount').hidden, true);
-  assert.equal(fx.node('todayDoneSummary').textContent, '1개 중 1개 끝냈어요');
+});
+
+// 머리줄 끝낸 개수 칩 `✓ M/N` — 끝낸 개수를 보이는 유일한 곳(문장·남은 개수 칩·윗변 진행 선·제안 링크는 없다).
+test('머리줄 칩: 오늘 0개면 없음, 일부는 `✓ M/N` 파랑, 전부는 초록, 화면 읽기는 문장 그대로', () => {
+  const fx = firstRunClient();
+  const chip = fx.node('todayTaskCount');
+  const classes = new Set(); // 가짜 노드의 classList는 아무 일도 하지 않으므로 직접 단다
+  chip.classList = { toggle: (name, on) => { if (on) classes.add(name); else classes.delete(name); return on; }, contains: name => classes.has(name) };
+  const draw = (statuses) => fx.app.run(`renderTodayTasks(${JSON.stringify(statuses.map((status, i) => ({ id: `t${i}`, description: `일 ${i}`, status })))})`);
+  const text = () => `${fx.node('todayDoneNum').textContent}${fx.node('todayTotalNum').textContent}`;
+  draw([]);
+  assert.equal(chip.hidden, true, '오늘 할 일이 0개면 칩이 없다');
+  draw(['open', 'open', 'open']);
+  assert.equal(chip.hidden, false);
+  assert.equal(text(), '0/3', '아직 하나도 못 끝내도 칩은 선다');
+  assert.equal(chip.getAttribute('aria-label'), '3개 중 0개 끝냈어요');
+  assert.equal(chip.title, '3개 중 0개 끝냈어요');
+  draw(['done', 'open', 'open']);
+  assert.equal(text(), '1/3');
+  assert.equal(chip.getAttribute('aria-label'), '3개 중 1개 끝냈어요');
+  assert.equal(chip.classList.contains('is-full'), false);
+  draw(['done', 'done', 'done']);
+  assert.equal(text(), '3/3', '전부 끝내도 칩은 남는다');
+  assert.equal(chip.classList.contains('is-full'), true, '전부 끝내면 초록');
+  assert.equal(chip.hidden, false);
+  draw(['done', 'open']);
+  assert.equal(chip.classList.contains('is-full'), false, '다시 열린 일이 생기면 파랑으로 돌아온다');
+  // 옛 요소·문장·진행 선은 없다
+  const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  const source = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.doesNotMatch(html, /todayDoneSummary|suggestSlot|suggestZone/);
+  assert.doesNotMatch(source, /renderTodayProgress|d-topprog|renderSuggestions|suggestDismissed|todayDoneSummary/);
+  assert.doesNotMatch(css, /d-topprog|d-sug|is-sug/);
+});
+
+test('머리줄 칩: 서버가 suggestions 칸을 보내도 오늘 할 만한 일 링크는 그리지 않는다', () => {
+  const source = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  assert.doesNotMatch(source, /오늘 할 만한 일|data\.suggestions/);
 });
 
 test('첫사용 2·3: `나중에 할 일 N` 버튼은 0이면 숨고 1이면 선다 — 서랍이 열린 채 0이 되면 서랍은 열어 두고 초점은 서랍 닫기로', () => {
@@ -14386,8 +14404,8 @@ test('회의 `기존 항목 연결` 목록은 8개 이상이면 찾기 칸이 �
 
 test('작은 버튼 1: 넓은 화면의 작은 글자 링크·버튼은 투명 ::after로 누르는 자리 28px(이미 28 이상이면 그대로), 그룹 이름은 여백으로', () => {
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
-  assert.match(css, /\n\.d-ablink, \.d-selbar \.d-link, \.d-src, \.d-sug \{ position: relative; \}/);
-  const rule = css.slice(css.indexOf('.d-ablink::after, .d-selbar .d-link::after, .d-src::after, .d-sug::after {'));
+  assert.match(css, /\n\.d-ablink, \.d-selbar \.d-link, \.d-src \{ position: relative; \}/);
+  const rule = css.slice(css.indexOf('.d-ablink::after, .d-selbar .d-link::after, .d-src::after {'));
   const body = rule.slice(0, rule.indexOf('}'));
   assert.match(body, /content: ''; position: absolute;/);
   ['top', 'bottom', 'left', 'right'].forEach(side => assert.match(body, new RegExp(`${side}: min\\(0px, calc\\(50% - 14px\\)\\)`), side));

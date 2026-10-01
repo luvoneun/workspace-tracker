@@ -517,13 +517,14 @@ test('a decision kept from a waiting item carries its Slack link without showing
   assert.equal((await post('/api/decision/create', { description: 'Bad link', permalink: 'https://example.test/a b' })).status, 400);
 });
 
-// 오늘 할 일이 많아도 서버는 미루자는 제안(defer)을 보내지 않는다(남은 일 수를 보여 주는 것으로 충분하다).
-test('a crowded today list gets no defer suggestion', async (t) => {
-  const lines = Array.from({ length: 9 }, (_, i) => `- 많은 업무 ${i} #task[id:crowd${i} status:to-do priority:low created:${today} scheduled:${today}]`).join('\n');
-  const server = await startServer(t, home => fs.writeFileSync(path.join(home, 'tasks.md'), `# Tasks\n${lines}\n`));
+// 서버는 당겨오기·미루기 제안을 보내지 않는다 — 앱이 먼저 말 걸지 않는다.
+test('the items response carries no suggestions', async (t) => {
+  const lines = Array.from({ length: 3 }, (_, i) => `- 업무 ${i} #task[id:few${i} status:to-do priority:low created:${today} scheduled:${today}]`).join('\n');
+  const later = `- 나중 업무 #task[id:later1 status:to-do priority:high created:${today} due:${today}]`;
+  const server = await startServer(t, home => fs.writeFileSync(path.join(home, 'tasks.md'), `# Tasks\n${lines}\n${later}\n`));
   const data = await (await fetch(server.base + '/api/items')).json();
-  assert.ok(data.todayTasks.length >= 9, '시험 준비: 오늘 할 일이 9개 이상이어야 한다');
-  assert.deepEqual(data.suggestions, { mode: 'none', total: data.todayTasks.length, items: [] });
+  assert.ok(data.todayTasks.length >= 3, '시험 준비: 오늘 할 일이 있어야 한다');
+  assert.equal('suggestions' in data, false);
 });
 
 test('a refused startup recovery keeps the app up with saving locked', async (t) => {
