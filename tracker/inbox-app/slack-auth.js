@@ -20,8 +20,9 @@ const os = require('node:os');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 
-// 슬랙 앱의 Client ID(비밀이 아니다 — PKCE라 Client Secret은 쓰지 않는다). 설정 `slack.clientId`가 덮는다.
-const DEFAULT_CLIENT_ID = '';
+// 슬랙 앱의 Client ID(비밀이 아니다 — 허용 화면 주소에 그대로 실리는 값이고, PKCE라 Client Secret은 쓰지 않는다).
+// 설정 `slack.clientId`가 덮는다(팀이 다른 슬랙 앱을 쓸 때). 코드에 넣기로 정했다(2026-10-02) — 이 값이 있어야 `슬랙 연결` 버튼이 열린다.
+const DEFAULT_CLIENT_ID = '1318200013236.12227483916048';
 const REQUIRED_SCOPES = ['channels:read', 'channels:history', 'groups:read', 'groups:history', 'users:read', 'groups:write'];
 const TOKEN_URL = 'https://slack.com/api/oauth.v2.access';
 const OAUTH_FILE = 'workspace-slack-oauth.json';

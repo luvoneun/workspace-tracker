@@ -401,9 +401,14 @@ test('슬랙 연결 경로: 시작 → 콜백 → 저장 → 채널 단계까지
   };
   const tokenFiles = () => fs.readdirSync(app.tokens).sort();
 
-  // Client ID가 없으면 주소 대신 종류만 — 화면은 버튼 대신 안내 한 줄을 그린다.
-  assert.deepEqual(await (await app.post('/api/integrations/slack-oauth/start')).json(), { ok: false, kind: 'client' });
-  assert.equal((await app.get('/api/integrations')).slack.connect.ready, 'client');
+  // Client ID는 코드 기본값이 있어 설정이 비어도 버튼이 열린다 — 주소에는 기본값이 실리고, 설정 `slack.clientId`가 그것을 덮는다.
+  // (기본값도 설정도 없을 때의 `client` 갈래는 위 readiness 시험이 본다.)
+  assert.match(slackAuth.DEFAULT_CLIENT_ID, /^\d+\.\d+$/);
+  const byDefault = await (await app.post('/api/integrations/slack-oauth/start')).json();
+  assert.equal(new URL(byDefault.url).searchParams.get('client_id'), slackAuth.DEFAULT_CLIENT_ID);
+  assert.equal(new URL(byDefault.url).searchParams.has('client_secret'), false);
+  assert.equal((await app.get('/api/integrations')).slack.connect.ready, 'ok');
+  assert.equal((await app.post('/api/integrations/slack-oauth/cancel')).status, 200);
   fs.writeFileSync(app.config, JSON.stringify({ ...app.readConfig(), slack: { clientId: '111.222' } }, null, 2));
   const first = await app.get('/api/integrations');
   assert.deepEqual(first.slack.connect, { ready: 'ok', waiting: false, expiresAt: null, last: null });

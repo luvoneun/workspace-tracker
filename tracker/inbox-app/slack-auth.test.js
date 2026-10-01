@@ -102,6 +102,8 @@ test('tokenDir를 끼우면 config의 경로를 보지 않고 그 폴더 안만 
 test('Client ID는 slack.clientId가 기본값을 덮는다', () => {
   assert.equal(slackClientId({ slack: { clientId: ' 9.9 ' } }), '9.9');
   for (const config of [{}, { slack: {} }, { slack: { clientId: '  ' } }, undefined]) assert.equal(slackClientId(config), DEFAULT_CLIENT_ID);
+  // 기본값은 슬랙 앱의 Client ID 모양(숫자.숫자)이다 — 비밀 값(Client Secret·토큰)이 아니다.
+  assert.equal(DEFAULT_CLIENT_ID, '1318200013236.12227483916048');
 });
 
 test('만료가 멀면 갱신하지 않고 아무것도 쓰지 않는다', async t => {
