@@ -13,7 +13,7 @@ module.exports = function integrationsRoutes(req, res, url, ctx) {
   const { CALENDAR_ICAL, CONFIG_PATH, FETCH_MESSAGE, SLACK_AUTH_RE, USES, attentionLive, backupStatus, calendarLive,
     claudeReady, currentConfigFile, fetchNow, fetchStateAutomation, fetchStateLive, getAutomationStatus,
     getCalendarToday, getJiraSync, getReportRefs, getSlackSync, integrationAlerts, integrations, jiraLive, liveLog,
-    meetingNotesStatus, readBody, requestApply, slackFollowOn, slackFollower, slackSyncSuccessAt, todayLocal,
+    meetingNotesStatus, readBody, requestApply, slackFollowOn, slackFollower, slackRefreshRequest, slackSyncSuccessAt, todayLocal,
     withApplyFailure, workflows, writeMeetingNotesRequest } = ctx;
   // 본문 읽기 오류(깨진 JSON·너무 큼)는 고정 문구로만 — 파서 메시지에 본문 조각(토큰 일부)이 섞일 수 있다.
   // 그 뒤 우리 검증 오류(bad(...))는 예전대로 그 문구를 돌려준다.
@@ -23,6 +23,9 @@ module.exports = function integrationsRoutes(req, res, url, ctx) {
     res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify(body));
   };
+  // 저장된 연결로 지금 쓸 슬랙 토큰 — 새 방식의 갱신 요청은 서버의 가드된 길(`slackRefreshRequest`)로만 나간다
+  // (테스트·픽스처에서는 바깥에 닿지 않는다). 다시 연결해야 하면 `slack_reconnect`로 던진다.
+  const slackTokenFor = config => integrations.slackTokenForUse(config, { request: slackRefreshRequest });
   // 슬랙 연결 버튼을 그릴 수 있는지(`ok`·`remote`·`port`·`client`) — 포트는 이 요청이 실제로 들어온 포트로 본다.
   const slackReady = config => slackOAuth.readiness({
     local: slackOAuth.isLocalRequest(req), port: req.socket.localPort, clientId: slackAuth.slackClientId(config),
@@ -188,7 +191,7 @@ module.exports = function integrationsRoutes(req, res, url, ctx) {
         // 토큰 칸 없이 부르면(채널 고르기 — 새 채널 이름의 앞머리만 알고 싶을 때) 저장된 토큰을 서버 안에서만 쓴다.
         const given = typeof (body || {}).token === 'string' ? body.token.trim() : '';
         // 새 방식(슬랙 연결 버튼)이면 만료가 가까울 때 갱신한 뒤의 토큰이다.
-        return given || integrations.slackTokenForUse(currentConfigFile());
+        return given || slackTokenFor(currentConfigFile());
       })
       .then(token => integrations.slackTokenCheck(token))
       .then((checked) => {
@@ -213,6 +216,7 @@ module.exports = function integrationsRoutes(req, res, url, ctx) {
         body,
         // 슬랙 정리 방식: 처음 연결할 때 Claude Code가 없으면 원문 그대로, `Claude로 다듬기`는 있을 때만 받는다.
         claude: claudeReady(),
+        slackToken: slackTokenFor,
         jiraCheck: settings => require('./jira-client').checkJiraAccount(settings),
         slackCheck: (token, id) => integrations.slackCheckChannel(token, id),
         // 비밀 주소는 한 번 읽어 오늘 일정 수만 센다(10초 제한). 주소는 응답·로그에 남지 않는다.
@@ -270,7 +274,7 @@ module.exports = function integrationsRoutes(req, res, url, ctx) {
         const key = typeof (body || {}).key === 'string' ? body.key.trim() : '';
         const slack = config && typeof config.slack === 'object' && config.slack ? config.slack : {};
         // 새 방식(슬랙 연결 버튼)이면 만료가 가까울 때 갱신한 뒤의 토큰이다.
-        return Promise.resolve(given || integrations.slackTokenForUse(config))
+        return Promise.resolve(given || slackTokenFor(config))
           .then(token => integrations.slackCreateChannel(token, (body || {}).name, undefined, { key, channels: slack.channels || {} }));
       })
       .then((channel) => {

@@ -11,9 +11,10 @@
 # zip이 그걸 지켜 준다.
 #
 # 지키는 것:
-#   - 내 workspace.config.json에서 **허용 목록 값만** 담는다 — slack.workspaceUrl · slack.appUrl ·
-#     jira.siteUrl, 그리고 받는 갈래(내 설정과 무관하게 stable — TEAM_UPDATE_CHANNEL=main일 때만 main). 토큰·토큰 파일·이메일·이름·채널·extraHost·
+#   - 내 workspace.config.json에서 **허용 목록 값만** 담는다 — slack.workspaceUrl · slack.appUrl · slack.clientId(팀이 다른
+#     슬랙 앱을 쓸 때만 적는 값 — 비밀이 아니다) · jira.siteUrl, 그리고 받는 갈래(내 설정과 무관하게 stable — TEAM_UPDATE_CHANNEL=main일 때만 main). 토큰·토큰 파일·이메일·이름·채널·extraHost·
 #     chromeProfile·제목·앱 이름(dockName)·캘린더는 절대 담지 않는다.
+#     슬랙 연결 방식(slack.auth)·갱신 정보 파일(slack.oauthFile)도 담지 않는다 — 연결은 사람마다 자기 맥에서 `허용`을 눌러 한다.
 #   - 값마다 https 주소 규칙을 확인하고, 어긋난 값은 그 값만 빼고 알린다.
 #   - 저장소 주소는 이 폴더의 origin(https://github.com/…)에서만 가져온다.
 #   - 이미 같은 이름의 zip이 있으면 덮어쓰지 않고 멈춘다.
@@ -59,6 +60,9 @@ const group = (name) => (config && typeof config[name] === "object" && config[na
 const rules = [
   ["slack", "workspaceUrl", /^https:\/\/[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.slack\.com\/?$/],
   ["slack", "appUrl", /^https:\/\/api\.slack\.com\/apps\/[A-Za-z0-9]+(\/[A-Za-z0-9_\/-]*)?$/],
+  // 슬랙 앱의 Client ID(숫자.숫자) — 허용 화면 주소에 그대로 실리는 값이라 비밀이 아니다. 내 설정에 적어 뒀을 때만 담긴다
+  // (비어 있으면 코드 기본값을 쓴다). 연결 방식·갱신 정보·토큰은 이 목록에 없다.
+  ["slack", "clientId", /^[0-9]{6,20}\.[0-9]{6,20}$/],
   ["jira", "siteUrl", /^https:\/\/[A-Za-z0-9-]+\.atlassian\.net\/?$/],
 ];
 const team = {};

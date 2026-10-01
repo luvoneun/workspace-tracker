@@ -358,3 +358,151 @@ test('WP-V 점검: 맥 캘린더 갈래는 mac-calendar 등록 둘을 보고, Cl
   assert.equal(item.detail, '맥이 캘린더 접근을 막았어요');
   assert.deepEqual(item.fix, { text: '시스템 설정 › 개인정보 보호 및 보안 › 캘린더(전체 접근)와 자동화에서 허용해 주세요' });
 });
+
+// ---- 슬랙 새 방식(슬랙 연결 버튼·자동 갱신) — 점검 줄이 갱신 상태를 말한다 ----
+// 갱신 정보는 임시 토큰 폴더에만 있고(가짜 값), 갱신·확인 요청은 전부 가짜다.
+const slackAuth = require('./slack-auth');
+const OAUTH_ACCESS = 'xoxe.xoxp-1-CHECK-ACCESS';
+const OAUTH_REFRESH = 'xoxe-1-CHECK-REFRESH';
+const HOUR_MS = 60 * 60 * 1000;
+function oauthHome(t, { expiresInMs = 9 * HOUR_MS, scopes = slackAuth.REQUIRED_SCOPES, failure = null, noFile = false } = {}) {
+  const h = home(t, { jira: false, calendar: false });
+  h.config.slack.auth = 'oauth';
+  h.config.slack.clientId = '111.222';
+  const paths = slackAuth.authPaths({ config: h.config, tokenDir: h.tokens });
+  const at = Date.now();
+  fs.writeFileSync(paths.tokenFile, `${OAUTH_ACCESS}\n`);
+  if (!noFile) {
+    fs.writeFileSync(paths.oauthFile, JSON.stringify({
+      version: 1, accessToken: OAUTH_ACCESS, refreshToken: OAUTH_REFRESH, expiresAt: at + expiresInMs,
+      teamId: 'T1', teamName: '팀', userId: 'U1', scopes, clientId: '111.222', connectedAt: at, refreshedAt: null, savedAt: at,
+    }));
+  }
+  if (failure) fs.writeFileSync(paths.stateFile, JSON.stringify({ failure, at, failCount: 1, savedAt: at }));
+  ['server', 'update', 'apply', 'data-backup', 'slack-capture', 'slack-capture-now'].forEach(name => fs.writeFileSync(path.join(h.agents, `com.workspace.app.${name}.plist`), ''));
+  return { h, paths };
+}
+// 서버가 넘기는 것과 같은 두 길 — 지금 쓸 토큰(갱신 모듈)과 갱신 상태.
+const oauthDeps = (h, net, extra = {}) => depsFor(h, net, {
+  ...extra,
+  override: {
+    slackToken: config => integrations.slackTokenForUse(config, { tokenDir: h.tokens, request: net.request }).catch(() => ''),
+    slackOAuth: config => slackAuth.readOAuthStatus({ config, tokenDir: h.tokens, minValidMs: slackAuth.REFRESH_AHEAD_MS }),
+    ...(extra.override || {}),
+  },
+});
+const noOAuthSecrets = (result) => {
+  const text = JSON.stringify(result);
+  for (const secret of [OAUTH_ACCESS, OAUTH_REFRESH]) assert.ok(!text.includes(secret), '점검 응답에 토큰 값이 없다');
+};
+
+test('점검(슬랙 새 방식): 정상이면 `자동 갱신 · 다음 갱신 N시간 뒤`(✓)와 받은 권한 한 줄 — 갱신 요청은 없다', async (t) => {
+  const { h } = oauthHome(t, { expiresInMs: 9 * HOUR_MS + 5 * 60 * 1000 });
+  const net = fakeNet(okRoutes);
+  const result = await createSelfcheck(oauthDeps(h, net)).run();
+  const token = byKey(result, 'slack_token');
+  assert.deepEqual({ label: token.label, state: token.state, detail: token.detail }, { label: '슬랙 연결', state: 'ok', detail: '자동 갱신 · 다음 갱신 8시간 뒤' });
+  assert.equal(token.fix, undefined);
+  assert.deepEqual(byKey(result, 'slack_scopes'), { key: 'slack_scopes', label: '받은 권한', state: 'ok', detail: '6개 · 필요한 권한을 모두 받았어요' });
+  assert.equal(byKey(result, 'slack_channels').state, 'ok');
+  assert.equal(byKey(result, 'slack').state, 'ok');
+  assert.deepEqual(result.items.map(item => item.key).filter(key => key.startsWith('slack')), ['slack_token', 'slack_scopes', 'slack_channels', 'slack']);
+  assert.ok(!net.calls.some(call => call.url.includes('oauth.v2.access')), '만료가 멀면 점검이 갱신을 부르지 않는다');
+  noOAuthSecrets(result);
+});
+
+test('점검(슬랙 새 방식): 만료가 가까우면 점검이 갱신한 토큰으로 확인하고, 갱신할 때가 됐으면 `곧`이라고 말한다', async (t) => {
+  const { h, paths } = oauthHome(t, { expiresInMs: 5 * 60 * 1000 });
+  const seen = [];
+  const net = fakeNet({
+    'oauth.v2.access': () => json({ ok: true, access_token: 'xoxe.xoxp-1-CHECK-RENEWED', refresh_token: 'xoxe-1-CHECK-RENEWED-R', expires_in: 43200 }),
+    'auth.test': (url, options) => { seen.push(options.headers.Authorization); return json({ ok: true, user: 'hana' }); },
+    'conversations.info': () => json({ ok: true, channel: { name: 'hana-todo', is_private: true, created: 1 } }),
+  });
+  const result = await createSelfcheck(oauthDeps(h, net)).run();
+  assert.deepEqual(seen, ['Bearer xoxe.xoxp-1-CHECK-RENEWED'], '한 줄 사본이 아니라 갱신한 토큰으로 묻는다');
+  assert.equal(byKey(result, 'slack_token').detail, '자동 갱신 · 다음 갱신 11시간 뒤');
+  assert.equal(JSON.parse(fs.readFileSync(paths.oauthFile, 'utf8')).refreshToken, 'xoxe-1-CHECK-RENEWED-R');
+  assert.ok(!JSON.stringify(result).includes('RENEWED'));
+  // 서버 타이머가 아직 안 돈 사이(만료 40분 전) — 수집 기준(10분)으로는 아직 갱신할 때가 아니다.
+  const soon = oauthHome(t, { expiresInMs: 40 * 60 * 1000 });
+  const quiet = fakeNet(okRoutes);
+  assert.equal(byKey(await createSelfcheck(oauthDeps(soon.h, quiet)).run(), 'slack_token').detail, '자동 갱신 · 다음 갱신 곧');
+});
+
+test('점검(슬랙 새 방식): 갱신이 잠시 안 되면 `!`(주의) — 채널은 그대로 확인하고 멈춤으로 세지 않는다', async (t) => {
+  const { h } = oauthHome(t, { failure: { kind: 'retry', reason: 'network' } });
+  const net = fakeNet(okRoutes);
+  const result = await createSelfcheck(oauthDeps(h, net)).run();
+  const token = byKey(result, 'slack_token');
+  assert.deepEqual({ state: token.state, detail: token.detail }, { state: 'warn', detail: '갱신이 잠시 안 돼요 — 곧 다시 해 봐요' });
+  assert.match(token.fix.text, /기다리면 앱이 다시 해 봐요/);
+  assert.equal(byKey(result, 'slack_channels').state, 'ok');
+  assert.equal(byKey(result, 'slack').state, 'ok');
+});
+
+test('점검(슬랙 새 방식): 연결이 풀렸으면 ✗ `연결이 풀렸어요` + 다시 연결 안내 — 슬랙에 묻지 않고, 수집 줄은 같은 원인으로 한 번만 센다', async (t) => {
+  for (const setup of [{ failure: { kind: 'reconnect', reason: 'slack_error', code: 'invalid_refresh_token' } }, { noFile: true }]) {
+    const { h } = oauthHome(t, setup);
+    const net = fakeNet(okRoutes);
+    const result = await createSelfcheck(oauthDeps(h, net, { alerts: ['slack'] })).run();
+    const token = byKey(result, 'slack_token');
+    assert.deepEqual({ label: token.label, state: token.state, detail: token.detail }, { label: '슬랙 연결', state: 'bad', detail: '연결이 풀렸어요' });
+    assert.match(token.fix.text, /다시 연결을 누르고 슬랙에서 허용/);
+    assert.doesNotMatch(token.fix.text, /xoxp/, '새 방식은 토큰을 찾으라고 하지 않는다');
+    assert.equal(byKey(result, 'slack_channels').detail, '다시 연결한 뒤 확인할 수 있어요');
+    assert.deepEqual({ state: byKey(result, 'slack').state, sameAs: byKey(result, 'slack').sameAs }, { state: 'bad', sameAs: 'slack_token' });
+    assert.equal(byKey(result, 'slack').fix, undefined);
+    assert.equal(net.calls.filter(call => call.url.includes('slack.com')).length, 0, '죽은 토큰으로 슬랙을 두드리지 않는다');
+    assert.equal(!!byKey(result, 'slack_scopes'), !setup.noFile, '갱신 정보가 없으면 권한 줄도 없다');
+    noOAuthSecrets(result);
+  }
+  // 갱신 기록은 멀쩡한데 슬랙이 토큰을 거절해도 같은 말·같은 고치는 법이다.
+  const { h } = oauthHome(t);
+  const rejecting = fakeNet({ ...okRoutes, 'auth.test': () => json({ ok: false, error: 'token_revoked' }) });
+  const token = byKey(await createSelfcheck(oauthDeps(h, rejecting)).run(), 'slack_token');
+  assert.deepEqual({ state: token.state, detail: token.detail }, { state: 'bad', detail: '연결이 풀렸어요' });
+});
+
+test('점검(슬랙 새 방식): 받은 권한이 모자라면 빠진 권한 이름을 말한다(!)', async (t) => {
+  const { h } = oauthHome(t, { scopes: ['channels:read', 'channels:history', 'users:read'] });
+  const result = await createSelfcheck(oauthDeps(h, fakeNet(okRoutes))).run();
+  const scopes = byKey(result, 'slack_scopes');
+  assert.deepEqual({ state: scopes.state, detail: scopes.detail }, { state: 'warn', detail: '빠진 권한: groups:read, groups:history, groups:write' });
+  assert.match(scopes.fix.text, /허용을 한 번 더/);
+  assert.equal(byKey(result, 'slack_token').state, 'ok');
+});
+
+test('점검(슬랙 옛 방식): 갱신 상태 길이 있어도 줄은 예전 그대로 — 슬랙 토큰 한 줄, 권한 줄 없음', async (t) => {
+  const h = home(t, { jira: false, calendar: false });
+  const result = await createSelfcheck(depsFor(h, fakeNet(okRoutes), { override: {
+    slackOAuth: config => slackAuth.readOAuthStatus({ config, tokenDir: h.tokens }),
+  } })).run();
+  assert.deepEqual({ label: byKey(result, 'slack_token').label, detail: byKey(result, 'slack_token').detail }, { label: '슬랙 토큰', detail: 'User OAuth Token(xoxp-) · 연결돼요' });
+  assert.equal(byKey(result, 'slack_scopes'), undefined);
+  assert.deepEqual(fs.readdirSync(h.tokens).sort(), ['workspace-calendar-ical', 'workspace-jira-token', 'workspace-slack-token']);
+});
+
+test('서버: 토큰을 다시 받아야 하는 수집 실패 낱말(SLACK_AUTH_RE)에 자동 갱신의 것이 들어 있고, 자동 갱신 타이머는 시험에서 돌지 않는다', () => {
+  const re = serverModule.SLACK_AUTH_RE;
+  for (const line of ['my-todo 채널 확인 실패 — Slack: token_expired', 'Slack: invalid_refresh_token', 'Slack: invalid_auth', 'Slack: token_revoked',
+    'my-todo 채널 확인 실패 — 슬랙 연결이 풀림, 다시 연결 필요(slack_reconnect · no_oauth_file)']) assert.ok(re.test(line), line);
+  for (const line of ['my-todo 채널 확인 실패 — Slack: ratelimited', '슬랙 토큰 갱신이 잠시 안 됨(retry · network) — 이전 토큰으로 진행', 'Slack: channel_not_found']) assert.ok(!re.test(line), line);
+  assert.equal(serverModule.slackRefresher.running(), false, '운영(직접 띄운 서버)에서만 켠다');
+  assert.equal(serverModule.fetchStateAutomation({ lastKind: 'fail', lastSummary: 'my-todo 채널 확인 실패 — Slack: token_expired', failTimes: [Date.now()] }, re).stuck, true, '한 번이어도 토큰 문제면 멈춤');
+});
+
+test('시험 환경: 토큰 폴더는 늘 임시 폴더이고 슬랙 자동 갱신 타이머는 꺼져 있다 — 진짜 서버를 띄우는 시험도 실제 ~/.config에 닿지 않는다', () => {
+  const tokens = process.env.WORKSPACE_TOKEN_DIR;
+  assert.ok(tokens && tokens.startsWith(automationHome + path.sep), '공용 준비가 토큰 폴더를 임시 폴더로 끼운다');
+  assert.ok(!tokens.startsWith(path.join(os.homedir(), '.config')));
+  assert.equal(process.env.WORKSPACE_NO_SLACK_REFRESH, '1');
+  assert.equal(integrations.tokenPaths().dir, tokens);
+  assert.ok(require('./slack-auth').authPaths({ config: { slack: { auth: 'oauth' } } }).lockDir.startsWith(tokens + path.sep), '갱신 잠금도 그 폴더 안');
+  const source = fs.readFileSync(path.join(__dirname, 'server.js'), 'utf8');
+  assert.match(source, /if \(!process\.env\.WORKSPACE_NO_REMOTE_CHECK && !process\.env\.WORKSPACE_NO_SLACK_REFRESH\) slackRefresher\.start\(\);/);
+  // 바깥 확인을 켜고 진짜 서버를 띄우는 시험(업데이트·소식)은 둘 다 직접 준다.
+  for (const name of ['server.update.test.js', 'server.news.test.js']) {
+    assert.match(fs.readFileSync(path.join(__dirname, name), 'utf8'), /WORKSPACE_NO_REMOTE_CHECK: '', WORKSPACE_NO_SLACK_REFRESH: '1', WORKSPACE_TOKEN_DIR: path\.join\(root, 'tokens'\)/, name);
+  }
+});

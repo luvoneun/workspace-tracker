@@ -12,12 +12,16 @@
 // 설정 `slack.tidy`가 'raw'(원문 그대로)면 2)·3)을 건너뛰고 규칙으로 답을 만든다(rawAnswer) — Claude가 없어도 돈다.
 // 칸이 없으면 'claude'다. Claude 모드에서 분류가 실패하면 원문으로 대신 넣지 않는다(실패 기록·커서 그대로).
 // 토큰은 슬랙 요청 머리글에만 쓴다 — 프롬프트·로그에 싣지 않는다. 로그에는 채널별 수치와 항목 문구만 남긴다.
+// 토큰은 공용 모듈(slack-auth.js getSlackToken)로 받는다 — 옛 방식(`slack.auth` 없음)은 한 줄 파일을 읽을 뿐이고,
+// 새 방식(`oauth`)은 만료 10분 전이면 갱신한 뒤의 토큰이다. 슬랙이 토큰을 거절하면(`token_expired`·`invalid_auth`)
+// 강제 갱신을 한 회차에 한 번 하고 그 호출만 한 번 다시 부른다(createAuth).
 'use strict';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn, execFile } = require('node:child_process');
 const { history } = require('./slack-history');
+const { getSlackToken } = require('./slack-auth');
 
 const APP_DIR = __dirname;
 const WORKSPACE_DIR = path.resolve(APP_DIR, '..', '..');
@@ -79,7 +83,46 @@ function isSystem(message) {
   return !!(message.bot_id && !message.user);
 }
 
-async function slackGet(token, method, params) {
+// 수집은 실행 직전 "앞으로 10분은 쓸 수 있는 토큰"을 받는다(서버는 60분 전에 미리 갱신한다 — 여기는 그 뒤의 안전망).
+const COLLECT_MIN_VALID_MS = 10 * 60 * 1000;
+// 슬랙이 토큰을 거절한 오류(slackGet·history가 던지는 `Slack: <이름>`).
+const AUTH_REJECT_RE = /^Slack: (?:token_expired|invalid_auth)\b/;
+// 갱신 실패를 값 없이 한 낱말로 — `retry · network`, `reconnect · invalid_refresh_token`(종류 · 이유 또는 슬랙 오류 이름).
+const RETRY_LATER = '슬랙 토큰 갱신이 잠시 안 됨 — 다음 회차에 다시';
+const failureWord = failure => `${failure.kind} · ${failure.code || failure.reason || 'unknown'}`;
+
+// 이번 회차의 토큰을 쥔다. `call(fn)`은 fn(token)을 부르고, 새 방식에서 슬랙이 토큰을 거절하면 강제 갱신을 **회차에 한 번만**
+// 한 뒤 그 호출을 한 번만 다시 부른다(갱신이 안 됐거나 토큰이 그대로면 원래 오류를 그대로 던진다).
+// 갱신 실패 종류는 slack-auth.js가 상태 파일(`…oauth.json.state`, 값 없음)에 적는다 — 서버가 그 파일을 읽는다.
+// `options`는 시험이 가짜 요청·임시 폴더를 끼울 때만 쓴다.
+function createAuth(config, log = () => {}, options = {}) {
+  const auth = { token: '', mode: 'token', failure: null, forced: false };
+  auth.load = async () => {
+    const got = await getSlackToken({ ...options, config, minValidMs: COLLECT_MIN_VALID_MS });
+    Object.assign(auth, { token: got.token || '', mode: got.auth, failure: got.failure, expiresAt: got.expiresAt });
+    return auth;
+  };
+  auth.call = async (fn) => {
+    try { return await fn(auth.token); } catch (error) {
+      if (auth.mode !== 'oauth' || auth.forced || !AUTH_REJECT_RE.test(String(error && error.message))) throw error;
+      auth.forced = true;
+      const got = await getSlackToken({ ...options, config, force: true, staleToken: auth.token });
+      auth.failure = got.failure;
+      if (got.failure) log(`슬랙 토큰 갱신 실패(${failureWord(got.failure)})`);
+      if (!got.token || got.token === auth.token) {
+        // 갱신이 **잠시** 안 된 것이면 슬랙의 거절(`token_expired`)을 그대로 남기지 않는다 — 그 낱말은 서버가 "다시 연결"로 읽는다.
+        // 이 회차만 실패로 두고(다음 회차에 다시) 멈춤 판정에 안 걸리는 글로 바꾼다.
+        if (got.failure && got.failure.kind === 'retry') { const later = new Error(RETRY_LATER); later.retry = true; throw later; }
+        throw error;
+      }
+      auth.token = got.token;
+      return fn(auth.token);
+    }
+  };
+  return auth;
+}
+
+async function slackFetch(token, method, params) {
   const url = new URL(`https://slack.com/api/${method}`);
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, String(value)));
   const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(20000) });
@@ -93,16 +136,17 @@ async function slackGet(token, method, params) {
   }
   return body;
 }
+const slackGet = (auth, method, params) => auth.call(token => slackFetch(token, method, params));
 
 // 원본 스레드 전체(댓글을 공유했으면 그 댓글이 속한 스레드). 슬랙이 거절하면(권한·채널 없음 등) null.
-async function readThread(token, channel, threadTs) {
+async function readThread(auth, channel, threadTs) {
   const messages = [], seen = new Set();
   let cursor = '';
   for (let page = 0; page < 5; page += 1) {
     const params = { channel, ts: threadTs, limit: 200 };
     if (cursor) params.cursor = cursor;
     let body;
-    try { body = await slackGet(token, 'conversations.replies', params); }
+    try { body = await slackGet(auth, 'conversations.replies', params); }
     catch (error) { if (error.retry || !/^Slack: /.test(error.message)) throw error; return { error: error.message.slice(7) }; }
     if (Array.isArray(body.messages)) messages.push(...body.messages);
     cursor = (body.response_metadata && body.response_metadata.next_cursor) || '';
@@ -129,11 +173,11 @@ const mentionIds = text => [...String(text || '').matchAll(/<@([UW][A-Z0-9]+)(?:
 const withNames = (text, names) => String(text || '').replace(/<@([UW][A-Z0-9]+)(?:\|[^>]*)?>/g, (whole, id) => (names[id] ? `@${names[id]}` : whole));
 
 // 이름 찾기는 있으면 좋은 정도다 — 권한(users:read)이 없거나 실패하면 id를 그대로 둔다.
-async function lookupNames(token, ids) {
+async function lookupNames(auth, ids) {
   const names = {};
   for (const id of [...new Set(ids)].slice(0, MAX_USERS)) {
     try {
-      const body = await slackGet(token, 'users.info', { user: id });
+      const body = await slackGet(auth, 'users.info', { user: id });
       const user = body.user || {}, profile = user.profile || {};
       const name = profile.display_name || user.real_name || profile.real_name || user.name;
       if (name) names[id] = String(name).slice(0, 80);
@@ -143,7 +187,7 @@ async function lookupNames(token, ids) {
 }
 
 // 한 메시지의 분류 재료. 공유면 원본 스레드까지 읽는다(재시도해야 하는 실패는 위로 던져 채널을 실패시킨다).
-async function gather(token, channel, message) {
+async function gather(auth, channel, message) {
   const ownLink = `${channel.workspaceUrl}/archives/${channel.id}/p${String(message.ts).replace('.', '')}`;
   const attachments = Array.isArray(message.attachments) ? message.attachments : [];
   const shared = attachments.filter(one => one && one.is_share === true);
@@ -176,7 +220,7 @@ async function gather(token, channel, message) {
       if (!source.channel || !source.threadTs) {
         share.threadError = '원본 스레드를 못 읽음(원본 위치 없음)';
       } else {
-        const thread = await readThread(token, source.channel, source.threadTs);
+        const thread = await readThread(auth, source.channel, source.threadTs);
         if (thread.error) {
           share.threadError = `원본 스레드를 못 읽음(${thread.error})`;
         } else {
@@ -440,17 +484,17 @@ async function processChannel(ctx, channel, messages) {
         users.push(...mentionIds(message.text));
         (Array.isArray(message.attachments) ? message.attachments : []).forEach(one => { if (one && one.is_share === true) users.push(...mentionIds(one.text)); });
       });
-      const names = await lookupNames(ctx.token, users);
+      const names = await lookupNames(ctx.auth, users);
       answer = rawAnswer(channel, human, names);
     } else if (human.length) {
       const gathered = [];
       const users = [];
       for (const message of human) {
-        const one = await gather(ctx.token, channel, message);
+        const one = await gather(ctx.auth, channel, message);
         gathered.push(one.entry);
         users.push(...one.users);
       }
-      const names = await lookupNames(ctx.token, users);
+      const names = await lookupNames(ctx.auth, users);
       gathered.forEach(entry => applyNames(entry, names));
       if (!ctx.app) ctx.app = await readAppItems(ctx.config);
       const types = EXISTING_TYPES[channel.type];
@@ -549,8 +593,19 @@ async function main() {
   // 받을 채널은 넷 중 켜진 것 아무거나다(할 일 채널이 꼭 있어야 하는 것은 아니다). 하나도 없으면 수집하지 않는다.
   if (!channels.length) { log('켜진 채널이 없어 건너뛰어요'); return 0; }
 
-  let token = '';
-  try { token = fs.readFileSync(String(slack.tokenFile || '').replace(/^~(?=\/|$)/, os.homedir()), 'utf8').trim(); } catch { token = ''; }
+  const auth = await createAuth(config, log).load();
+  // 새 방식인데 다시 연결해야 하면(갱신 토큰이 죽었거나 갱신 정보가 없음) 죽은 토큰으로 슬랙을 두드리지 않는다.
+  const reconnect = auth.mode === 'oauth' && !!auth.failure && auth.failure.kind === 'reconnect';
+  // 잠시 안 되는 갱신(네트워크·슬랙 5xx·잠금)은 이전 토큰으로 그대로 간다 — 아직 유효하면 수집은 된다.
+  // 다만 가진 토큰이 이미 만료됐으면(맥이 오래 잠들었다 깬 직후 등) 슬랙에 묻지 않고 이번 회차를 건너뛴다 — 물으면
+  // `token_expired`가 남아 한 번의 일시 실패가 "다시 연결"(빨강)로 읽힌다. 실패로 적지 않는다: 늦어지면 주황 `늦어요`가 말한다.
+  if (auth.failure && !reconnect) {
+    if (Number.isFinite(auth.expiresAt) && auth.expiresAt <= Date.now()) {
+      log(`슬랙 토큰 갱신이 잠시 안 됨(${failureWord(auth.failure)}) — 토큰이 만료돼 이번 회차는 건너뛰고 다음 회차에 다시`);
+      return 0;
+    }
+    log(`슬랙 토큰 갱신이 잠시 안 됨(${failureWord(auth.failure)}) — 이전 토큰으로 진행`);
+  }
   const state = readJson(stateFile) || {};
   const fetched = [];
   let failures = 0;
@@ -558,19 +613,23 @@ async function main() {
     // 어디서부터 볼지 = 수집 커서와 since 중 큰 값(슬랙 ts는 소수라 글자가 아니라 수로 견준다).
     const cursor = TS_RE.test(String(state[channel.cursor] || '')) ? String(state[channel.cursor]) : '';
     const oldest = !channel.since ? cursor : (!cursor || tsCompare(channel.since, cursor) > 0 ? channel.since : cursor);
-    if (!token) { failures += 1; log(`${channel.cursor} 채널 확인 실패 — 슬랙 토큰을 읽을 수 없음`); continue; }
+    // `slack_reconnect`는 서버의 SLACK_AUTH_RE가 잡는 낱말이다(토큰을 다시 받아야 하는 실패).
+    if (reconnect) { failures += 1; log(`${channel.cursor} 채널 확인 실패 — 슬랙 연결이 풀림, 다시 연결 필요(slack_reconnect · ${auth.failure.code || auth.failure.reason || 'unknown'})`); continue; }
+    if (!auth.token) { failures += 1; log(`${channel.cursor} 채널 확인 실패 — 슬랙 토큰을 읽을 수 없음`); continue; }
     try {
-      const result = await history({ token, channel: channel.id, oldest: oldest || undefined, limit: 100 });
+      const result = await auth.call(token => history({ token, channel: channel.id, oldest: oldest || undefined, limit: 100 }));
       fetched.push({ channel, messages: result.messages });
     } catch (error) {
       failures += 1;
       log(`${channel.cursor} 채널 확인 실패 — ${oneLine(error.message, 160)}`);
     }
   }
+  // 수집 상태(`lastError`)에 남는 글 — 연결이 풀려서면 그 종류를 값 없이 같이 적는다.
+  const failText = reconnect ? '슬랙 연결이 풀렸어요 — 다시 연결이 필요해요 (slack_reconnect)' : '일부 채널을 확인하지 못했습니다.';
   const found = fetched.reduce((sum, one) => sum + one.messages.length, 0);
   // 상태도 앱의 저장 경로를 쓴다. 수집 전에는 성공으로 기록하지 않는다.
   if (!found) {
-    if (failures) { await importRecord(configFile, 'health', { success: false, error: '일부 채널을 확인하지 못했습니다.' }); return 1; }
+    if (failures) { await importRecord(configFile, 'health', { success: false, error: failText }); return 1; }
     if (!(await importRecord(configFile, 'health', { success: true })).ok) return 1;
     log('새 메시지 없음 — Claude 호출 생략');
     return 0;
@@ -578,7 +637,7 @@ async function main() {
 
   const started = stamp();
   // 정리 방식 — `raw`만 원문 그대로이고, 칸이 없거나 다른 값이면 예전처럼 Claude로 다듬는다.
-  const ctx = { token, config: configFile, runTask, app: null, tidy: slack.tidy === 'raw' ? 'raw' : 'claude' };
+  const ctx = { auth, config: configFile, runTask, app: null, tidy: slack.tidy === 'raw' ? 'raw' : 'claude' };
   const lines = [], details = [];
   const total = { seen: 0, saved: 0, duplicate: 0, similar: 0, system: 0 };
   let failed = false;
@@ -592,7 +651,7 @@ async function main() {
     Object.keys(total).forEach(key => { total[key] += result.ledger[key]; });
     if (!result.ok) failed = true;
   }
-  if (failures) await importRecord(configFile, 'health', { success: false, error: '일부 채널을 확인하지 못했습니다.' });
+  if (failures) await importRecord(configFile, 'health', { success: false, error: failText });
   const status = failed || failures ? 1 : 0;
   // 한 회차 = 로그 블록 하나(run-task.sh와 같은 시작/종료 줄) — 앱의 연동 카드가 그대로 읽는다.
   // 맨 앞 처리 대장 한 줄은 예전 지침이 남기던 문장과 같은 모양이다(연동 카드 ⋯ › 최근 기록 위의 요약 줄이 읽는다).
@@ -609,4 +668,4 @@ if (require.main === module) {
     process.exitCode = 1;
   });
 }
-module.exports = { claudeAuthPhrase, validate, isSystem, buildPrompt, shareSource, slackPlain, firstLine, rawItem };
+module.exports = { createAuth, claudeAuthPhrase, validate, isSystem, buildPrompt, shareSource, slackPlain, firstLine, rawItem };

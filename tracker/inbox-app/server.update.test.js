@@ -41,7 +41,7 @@ function remoteFixture(t, { channel = 'stable' } = {}) {
   fs.writeFileSync(config, JSON.stringify({ server: { updateChannel: channel } }));
   const env = {
     WORKSPACE_REPO_DIR: clone, WORKSPACE_DATA_DIR: path.join(clone, 'tracker'), WORKSPACE_CONFIG: config,
-    WORKSPACE_NO_REMOTE_CHECK: '', WORKSPACE_AUTOMATION_DIR: path.join(root, 'automation'), WORKSPACE_LAUNCH_AGENTS_DIR: path.join(root, 'agents'),
+    WORKSPACE_NO_REMOTE_CHECK: '', WORKSPACE_NO_SLACK_REFRESH: '1', WORKSPACE_TOKEN_DIR: path.join(root, 'tokens'), WORKSPACE_AUTOMATION_DIR: path.join(root, 'automation'), WORKSPACE_LAUNCH_AGENTS_DIR: path.join(root, 'agents'),
   };
   return { root, clone, env };
 }

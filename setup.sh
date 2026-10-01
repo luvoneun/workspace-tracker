@@ -141,6 +141,12 @@ if (kind === "uses") {
   const channels = group("slack").channels || {};
   const left = Object.values(channels).some(one => one && one.off !== true && one.id === "여기에_채널ID");
   process.stdout.write(left ? "yes" : "no");
+} else if (kind === "slackAuth") {
+  // 슬랙 연결 방식 — "oauth"(슬랙 연결 버튼·자동 갱신)면 토큰 대신 갱신 정보 파일을 본다. 칸이 없으면 옛 방식("token").
+  process.stdout.write(group("slack").auth === "oauth" ? "oauth" : "token");
+} else if (kind === "slackOAuthFile") {
+  const file = String(group("slack").oauthFile || "~/.config/workspace-slack-oauth.json");
+  process.stdout.write(file.replace(/^~(?=\/|$)/, require("os").homedir()));
 } else if (kind === "slackToken") {
   const file = String(group("slack").tokenFile || "");
   process.stdout.write(file.replace(/^~(?=\/|$)/, require("os").homedir()));
@@ -175,10 +181,23 @@ if [ "$USE_SLACK" = "yes" ]; then
   SLACK_PLACEHOLDER=$(config_read slackPlaceholder) || die "$CONFIG_UNREADABLE"
   [ "$SLACK_PLACEHOLDER" = "yes" ] && die "workspace.config.json의 채널 ID를 아직 채우지 않았어요."
   TOKEN_FILE=$(config_read slackToken) || die "$CONFIG_UNREADABLE"
-  if [ -n "$TOKEN_FILE" ] && [ -f "$TOKEN_FILE" ]; then
+  SLACK_AUTH=$(config_read slackAuth) || die "$CONFIG_UNREADABLE"
+  # 새 방식(슬랙 연결 버튼)은 앱이 토큰을 스스로 갱신한다 — 한 줄 토큰 파일이 아니라 갱신 정보 파일이 있는지를 본다
+  # (있는지만 — 읽지 않는다). 없으면 붙여 넣을 토큰이 아니라 앱의 다시 연결을 안내한다.
+  if [ "$SLACK_AUTH" = "oauth" ]; then
+    SLACK_OAUTH_FILE=$(config_read slackOAuthFile) || die "$CONFIG_UNREADABLE"
+    if [ -f "$SLACK_OAUTH_FILE" ]; then
+      ok "슬랙 연결 있음 (자동 갱신)"
+    else
+      warn "슬랙 연결 정보가 없어요 — 앱의 설정 › 연동 › 슬랙에서 다시 연결을 눌러 주세요."
+    fi
+  elif [ -n "$TOKEN_FILE" ] && [ -f "$TOKEN_FILE" ]; then
     ok "슬랙 토큰 있음"
+  elif [ -f "$HOME/.config/workspace-slack-token" ]; then
+    # 설정에 적힌 자리에는 없지만 기본 자리에 있다 — 앱과 수집이 그 파일을 읽는다.
+    ok "슬랙 토큰 있음 (기본 자리)"
   else
-    warn "슬랙 토큰 파일이 없어요: ${TOKEN_FILE:-(설정 안 됨)} — 슬랙 캡처는 돌지 않아요."
+    warn "슬랙 토큰 파일이 없어요: ${TOKEN_FILE:-(설정 안 됨)} — 앱의 설정 › 연동 › 슬랙에서 연결하기 전에는 슬랙 수집이 실패로 남아요."
   fi
 fi
 

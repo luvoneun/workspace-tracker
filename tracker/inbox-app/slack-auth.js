@@ -20,8 +20,9 @@ const os = require('node:os');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 
-// 슬랙 앱의 Client ID(비밀이 아니다 — PKCE라 Client Secret은 쓰지 않는다). 설정 `slack.clientId`가 덮는다.
-const DEFAULT_CLIENT_ID = '';
+// 슬랙 앱의 Client ID(비밀이 아니다 — 허용 화면 주소에 그대로 실리는 값이고, PKCE라 Client Secret은 쓰지 않는다).
+// 설정 `slack.clientId`가 덮는다(팀이 다른 슬랙 앱을 쓸 때). 코드에 넣기로 정했다(2026-10-02) — 이 값이 있어야 `슬랙 연결` 버튼이 열린다.
+const DEFAULT_CLIENT_ID = '1318200013236.12227483916048';
 const REQUIRED_SCOPES = ['channels:read', 'channels:history', 'groups:read', 'groups:history', 'users:read', 'groups:write'];
 const TOKEN_URL = 'https://slack.com/api/oauth.v2.access';
 const OAUTH_FILE = 'workspace-slack-oauth.json';
@@ -35,6 +36,11 @@ const RECONNECT_ERRORS = new Set([
   'invalid_refresh_token', 'token_revoked', 'invalid_grant', 'token_expired',
   'invalid_auth', 'account_inactive', 'user_removed_from_team', 'app_uninstalled',
 ]);
+// 서버 타이머 — 15분마다 보고, 만료 60분 전이면 미리 갱신한다(수집은 실행 직전 10분 기준 — 서버가 꺼져 있을 때의 안전망).
+const REFRESH_TICK_MS = 15 * 60 * 1000;
+const REFRESH_AHEAD_MS = 60 * 60 * 1000;
+// 옮길 때 남긴 옛 토큰(`.legacy`)을 두는 기간.
+const LEGACY_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
 const LOCK_TRIES = 20;
 const LOCK_WAIT_MS = 250;
 // 잠금은 길어야 요청 제한 시간(8초) 남짓 쥔다. 이보다 훨씬 오래된 잠금 폴더는 pid가 살아 있다고 나와도 죽은 것으로 본다 —
@@ -494,8 +500,94 @@ function readOAuthStatus(options = {}) {
   };
 }
 
+// ---- 옛 토큰 보관분(`.legacy`) 치우기 · 서버 타이머 -------------------------------------------------
+
+// 옮길 때 남긴 옛 토큰 파일을 7일 뒤 지운다. 지웠으면 true. 갱신과 같은 잠금 안에서 다시 읽고 지운다.
+//   - 새 방식: 연결이 살아 있고(다시 연결 필요가 아님), 마지막으로 연결한 때(처음 옮긴 때 또는 그 뒤 `다시 연결`)부터 7일이
+//     지났을 때만. 풀려 있는 동안에는 지우지 않는다 — 다시 연결하면 그때부터 다시 7일을 센다.
+//   - 옛 방식(토큰을 붙여 넣어 돌아감): 갱신 정보가 없으면 주인 없는 파일이다 — 만든 지 7일이 지났으면 지운다.
+//     갱신 정보가 남아 있으면(설정만 바뀐 어중간한 상태) 건드리지 않는다.
+async function cleanLegacy(options = {}) {
+  const { config, keepMs = LEGACY_KEEP_MS } = options;
+  const clock = clockOf(options.now);
+  const paths = authPaths(options);
+  if (!fs.existsSync(paths.legacyFile)) return false;
+  const done = await withLock(paths, options, () => {
+    let since = 0;
+    if (authMode(config) === 'oauth') {
+      const status = readOAuthStatus(options);
+      if (!status.connected) return false;
+      since = Math.max(Number(status.connectedAt) || 0, Number(status.legacyKeptAt) || 0);
+    } else {
+      if (!readInfo(paths.oauthFile).missing) return false;
+      try { since = fs.statSync(paths.legacyFile).mtimeMs; } catch { return false; }
+    }
+    if (!since || clock() - since < keepMs) return false;
+    try { fs.rmSync(paths.legacyFile, { force: true }); return true; } catch { return false; }
+  });
+  return done === true;
+}
+
+// 서버가 쓰는 타이머 — 프로세스를 띄우지 않고 이 프로세스 안에서만 돈다. 한 번 돌 때(tick):
+//   새 방식이면 `getSlackToken({ minValidMs: 60분 })` — 만료가 멀면 파일만 읽고 끝난다.
+//     · 잠시 안 됨(retry)이면 모듈이 준 `retryAfterMs`(1 → 5 → 15분) 뒤에 다시.
+//     · 다시 연결 필요(reconnect)면 갱신 요청을 멈춘다 — 그 뒤의 tick은 파일만 읽고(모듈이 같은 갱신 토큰으로 다시 묻지 않는다),
+//       사람이 `다시 연결`을 하면 다음 tick부터 저절로 이어진다.
+//   그리고 방식과 상관없이 `.legacy` 치우기(cleanLegacy)를 한 번 본다.
+// `readConfig`는 지금 설정을 새로 읽는 함수. 타이머·시계·요청은 시험에서 끼운다. 돌려주는 상태(`last()`)에 토큰은 없다.
+function createSlackRefresher({
+  readConfig, request, tokenDir, now = Date.now, intervalMs = REFRESH_TICK_MS, firstDelayMs = 1000,
+  setTimer = setTimeout, clearTimer = clearTimeout, getToken = getSlackToken, clean = cleanLegacy,
+} = {}) {
+  let timer = null;
+  let running = null;
+  let on = false;
+  let last = null;
+
+  function plan(ms) {
+    if (!on) return;
+    timer = setTimer(() => { timer = null; tick(); }, ms);
+    // 이 타이머 때문에 프로세스가 살아 있지 않게 한다.
+    if (timer && typeof timer.unref === 'function') timer.unref();
+  }
+
+  async function once() {
+    let wait = intervalMs;
+    let state = { kind: 'token', refreshed: false, legacyRemoved: false, at: now() };
+    try {
+      const config = readConfig() || {};
+      if (authMode(config) === 'oauth') {
+        const got = await getToken({ config, tokenDir, request, now, minValidMs: REFRESH_AHEAD_MS });
+        state = { ...state, kind: got.failure ? got.failure.kind : 'ok', refreshed: got.refreshed === true };
+        if (got.failure && got.failure.kind === 'retry' && Number.isFinite(got.retryAfterMs)) wait = Math.min(intervalMs, got.retryAfterMs);
+      }
+      state.legacyRemoved = await clean({ config, tokenDir, now });
+    } catch {
+      state = { ...state, kind: 'error' };
+    }
+    last = { ...state, nextInMs: wait };
+    return last;
+  }
+
+  // 겹쳐 돌지 않는다 — 도는 중에 또 부르면 같은 약속을 돌려준다.
+  function tick() {
+    if (running) return running;
+    if (timer) { clearTimer(timer); timer = null; }
+    running = once().then((state) => { running = null; plan(state.nextInMs); return state; });
+    return running;
+  }
+
+  return {
+    start() { if (on) return; on = true; plan(firstDelayMs); },
+    stop() { on = false; if (timer) { clearTimer(timer); timer = null; } },
+    tick,
+    last: () => (last ? { ...last } : null),
+    running: () => on,
+  };
+}
+
 module.exports = {
-  getSlackToken, saveOAuthResult, readOAuthStatus, forgetOAuth, undoOAuth,
-  authPaths, slackClientId, retryDelayMs,
-  DEFAULT_CLIENT_ID, REQUIRED_SCOPES, RETRY_DELAYS_MS,
+  getSlackToken, saveOAuthResult, readOAuthStatus, forgetOAuth, undoOAuth, cleanLegacy, createSlackRefresher,
+  authPaths, authMode, slackClientId, retryDelayMs,
+  DEFAULT_CLIENT_ID, REQUIRED_SCOPES, RETRY_DELAYS_MS, REFRESH_TICK_MS, REFRESH_AHEAD_MS, LEGACY_KEEP_MS,
 };

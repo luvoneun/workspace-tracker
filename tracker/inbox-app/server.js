@@ -13,6 +13,7 @@ const { exec, execFile } = require('child_process');
 const { DATA_FORMAT_VERSION, readDataVersion, TOO_NEW_MESSAGE } = require('./migrate');
 // 설정 > 연동이 쓰는 한 벌(값 확인·config 합치기·토큰 파일·문제 보고의 오류 줄).
 const integrations = require('./integrations');
+const slackAuth = require('./slack-auth');
 // 설정 › 꾸미기(앱 아이콘·앱 이름·제목 — 이 맥에만).
 const personalize = require('./personalize');
 // 쉬운 말 소식(WP-J) — 소식.md 파서 + 원격(태그) 소식.md 읽기.
@@ -759,7 +760,9 @@ const FETCH_MESSAGE = {
   calendarSlow: '캘린더가 10초 안에 답하지 않았어요 — 잠시 뒤 다시 시도해 주세요',
 };
 // 슬랙이 준 오류 이름 중 "토큰을 다시 받아야 하는 것"(수집 로그의 `채널 확인 실패 — ERR:<이름>`).
-const SLACK_AUTH_RE = /\b(invalid_auth|token_revoked|account_inactive)\b/;
+// `token_expired`·`invalid_refresh_token`은 자동 갱신(새 방식)이 더는 안 될 때, `slack_reconnect`는 수집이 "다시 연결 필요"를
+// 알고 슬랙에 묻지 않고 남기는 낱말이다(slack-collect.js).
+const SLACK_AUTH_RE = /\b(invalid_auth|token_revoked|account_inactive|token_expired|invalid_refresh_token|slack_reconnect)\b/;
 // 이 맥의 Claude Code 로그인이 풀렸을 때 claude가 남기는 말(자동화 로그). 토큰 문제가 아니라서 버튼은 `다시 시도` 그대로고,
 // 카드의 이유 한 줄만 `터미널에서 claude → /login` 안내로 바뀐다(원문은 ⋯ › 최근 기록에 그대로).
 // 실패한 실행의 로그 전체를 보므로, 작업 중 부른 커넥터(MCP)·API의 흔한 인증 오류(authentication_error 등)에 걸리지 않게
@@ -909,12 +912,21 @@ function fetchStateAutomation(automation, authRe = null) {
 // 한 번 실패는 멈춘 것이 아니다(연동 탭의 주황 `늦어요`). 비밀 주소를 한 번도 못 읽었으면 주소 문제로 보고 멈춘 것이다.
 // 슬랙은 수집이 계속 실패하거나 **켜진 채널이 모두 사라졌으면** 멈춘 것이다(일부만 사라졌으면 카드의 주황 줄일 뿐이다.
 // 사라졌는지는 이름 따라가기가 이미 들고 있는 답만 본다 — 여기서 슬랙에 묻지 않는다). 값은 로그·메모리에서만 읽고 파일은 쓰지 않는다.
+// 새 방식(자동 갱신)의 연결이 풀렸는가 — 사람이 `다시 연결`을 눌러야 하는 상태(갱신 토큰이 죽었거나 갱신 정보가 없음)면
+// 수집 기록과 상관없이 멈춘 것이다(연동 탭 슬랙 카드의 `broken`과 같은 기준: 연결된 카드 + `oauth.connected === false`).
+// 잠시 안 되는 갱신(retry)은 멈춤이 아니다 — 이전 토큰으로 수집이 이어지고, 늦어지면 주황 `늦어요`가 말한다. 파일만 읽는다.
+function slackOAuthBroken(config = currentConfigFile()) {
+  if (integrations.slackAuthMode(config) !== 'oauth') return false;
+  const status = slackAuth.readOAuthStatus({ config });
+  const lost = status.connected === false || !!(status.lastFailure && status.lastFailure.kind === 'reconnect');
+  return lost && slackConnectedNow();
+}
 function integrationAlerts(config = currentConfigFile(), automations = getAutomationStatus()) {
   const stuckAutomation = (key, authRe = null) => fetchStateAutomation(automations.find(one => one.key === key) || null, authRe).stuck;
   const icalStuck = () => fetchStateLive(calendarLive.failure(), calendarLive.history()).stuck
     || (!calendarLive.current() && calendarLive.failed());
   const alerts = [];
-  if (USES.slack && (stuckAutomation('slack', SLACK_AUTH_RE) || slackFollower.allKnownMissing(config))) alerts.push('slack');
+  if (USES.slack && (stuckAutomation('slack', SLACK_AUTH_RE) || slackOAuthBroken(config) || slackFollower.allKnownMissing(config))) alerts.push('slack');
   if (USES.jira && jira.connected && fetchStateLive(jiraLive.failure(), jiraLive.history()).stuck) alerts.push('jira');
   if (USES.calendar && (CALENDAR_ICAL ? icalStuck() : stuckAutomation('calendar'))) alerts.push('calendar');
   if (USES.tiro && stuckAutomation('tiro')) alerts.push('notes');
@@ -2240,7 +2252,22 @@ function currentConfigFile() {
 }
 // 슬랙 채널 이름 따라가기(연동 탭을 열 때). 테스트는 `WORKSPACE_NO_REMOTE_CHECK`로 바깥에 묻지 않게 하므로
 // 그때는 끄고, 가짜 슬랙을 끼운 테스트·픽스처만 `WORKSPACE_SLACK_FOLLOW=1`로 다시 켠다.
-const slackFollower = integrations.createSlackNameFollower();
+// 슬랙 토큰 갱신 요청이 나가는 길 — 테스트·픽스처(`WORKSPACE_NO_REMOTE_CHECK`)에서는 바깥에 닿지 않고,
+// `setSlackRefreshFetchForTests`로 가짜만 끼운다(점검하기의 selfcheckRequest와 같은 규칙).
+let slackRefreshFetch = null;
+function setSlackRefreshFetchForTests(fn) { slackRefreshFetch = typeof fn === 'function' ? fn : null; }
+function slackRefreshRequest(...args) {
+  if (slackRefreshFetch) return slackRefreshFetch(...args);
+  if (process.env.WORKSPACE_NO_REMOTE_CHECK) return Promise.reject(new Error('바깥 확인을 끈 자리예요'));
+  return fetch(...args);
+}
+// 저장된 연결로 지금 쓸 수 있는 슬랙 토큰(새 방식이면 만료가 가까울 때 갱신한 뒤의 것) — 서버 안에서만 쓰고 싣지 않는다.
+// 다시 연결해야 하면 빈 글자.
+const slackTokenNow = (config, tokenDir) => integrations.slackTokenForUse(config, { tokenDir, request: slackRefreshRequest }).catch(() => '');
+// 자동 갱신 타이머(새 방식) — 15분마다 보고 만료 60분 전이면 미리 갱신한다. `.legacy` 7일 뒤 지우기도 여기서 본다.
+// 프로세스를 띄우지 않고, 타이머는 unref라 서버를 붙잡지 않는다. 운영에서만 켠다(아래 `require.main`).
+const slackRefresher = slackAuth.createSlackRefresher({ readConfig: currentConfigFile, request: slackRefreshRequest });
+const slackFollower = integrations.createSlackNameFollower({ token: slackTokenNow });
 const slackFollowOn = () => !process.env.WORKSPACE_NO_REMOTE_CHECK || process.env.WORKSPACE_SLACK_FOLLOW === '1';
 // 슬랙 수집이 마지막으로 성공한 때(ISO) — 상태 파일을 읽기만 한다. 없으면 null.
 function slackSyncSuccessAt() {
@@ -2292,7 +2319,9 @@ const selfcheck = require('./selfcheck').createSelfcheck({
   jiraHistory: () => jiraLive.history(),
   claudeInstalled: claudeReady,
   slackSuccessAt: slackSyncSuccessAt,
-  slackToken: config => integrations.savedSlackToken(config),
+  slackToken: config => slackTokenNow(config),
+  // 새 방식의 갱신 상태(값 없이 시각·권한·실패 종류) — 옛 방식이면 `{ auth: 'token' }`뿐이다.
+  slackOAuth: config => slackAuth.readOAuthStatus({ config, minValidMs: slackAuth.REFRESH_AHEAD_MS }),
   slackTokenCheck: token => integrations.slackTokenCheck(token, selfcheckRequest),
   slackCheckChannel: (token, id) => integrations.slackCheckChannel(token, id, selfcheckRequest),
   // 비밀 주소 읽기가 네트워크에서 막혔는지 가르려고 요청 길만 한 겹 감싼다(주소는 어디에도 남기지 않는다).
@@ -2723,7 +2752,7 @@ const routeCtx = {
   // 앱 정보·업데이트
   aboutApp, aboutDiagnostics, requestUpdate, updateStatusView, UPDATE_MESSAGE, selfcheck,
   // 연동·자동화·백업·미팅 노트
-  calendarLive, slackFollower, slackFollowOn, currentConfigFile, claudeReady, getSlackSync, slackSyncSuccessAt,
+  calendarLive, slackFollower, slackFollowOn, slackRefreshRequest, currentConfigFile, claudeReady, getSlackSync, slackSyncSuccessAt,
   getAutomationStatus, fetchStateLive, fetchStateAutomation, SLACK_AUTH_RE, todayLocal, getReportRefs, withApplyFailure,
   liveLog, integrationAlerts, getCalendarToday, getJiraSync, requestApply, fetchNow, FETCH_MESSAGE, backupStatus,
   meetingNotesStatus, writeMeetingNotesRequest,
@@ -2793,6 +2822,11 @@ if (require.main === module) {
   // 캘린더 비밀 주소 — 뜰 때 한 번, 그 뒤 30분마다(비밀 주소 갈래일 때만). 읽으면 회의 기록을 맞춘다.
   calendarAfterRead = archiveMeetings;
   calendarLive.start();
+  // 슬랙 자동 갱신(새 방식) — 뜨고 1초 뒤 한 번, 그 뒤 15분마다. 옛 방식이면 파일만 보고 지나간다. 서버가 내려가면 거둔다.
+  // 바깥 확인을 끈 자리(테스트·픽스처)와 `WORKSPACE_NO_SLACK_REFRESH=1`에서는 켜지 않는다 — 진짜 서버를 띄우는 시험이
+  // 토큰 폴더를 건드리지 않게(타이머는 갱신 잠금을 잡고 `.legacy`를 지울 수 있다).
+  if (!process.env.WORKSPACE_NO_REMOTE_CHECK && !process.env.WORKSPACE_NO_SLACK_REFRESH) slackRefresher.start();
+  server.on('close', () => slackRefresher.stop());
   fs.watchFile(path.join(TRACKER_DIR, 'calendar_today.md'), { interval: 1000, persistent: false }, archiveMeetings);
   // 쉬는 틈에 자동 업데이트(WP-U) — launchd 설치본이고 main 갈래가 아닐 때만 1분 판단·1시간 원격 확인을 건다.
   startAutoUpdate();
@@ -2830,4 +2864,6 @@ module.exports = {
   autoUpdate, setAutoUpdateForTests,
   // 계속 실패(멈췄어요·빨간 점) 판단 — 같은 수치를 테스트가 고정한다.
   failStuck, fetchStateLive, fetchStateAutomation,
+  // 슬랙 자동 갱신 — 가짜 요청을 끼우고 타이머 한 번(tick)을 직접 돌려 보는 테스트 전용 길.
+  slackRefresher, setSlackRefreshFetchForTests, integrationAlerts, SLACK_AUTH_RE,
 };
