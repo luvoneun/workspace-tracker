@@ -1346,6 +1346,19 @@ test('일정 정하기: 모션 CSS — 쫀득 등장 240ms·1.025, 닫힘 140ms,
   });
 });
 
+test('일정 정하기 다듬기: 투명도는 처음 70ms만, 날짜 칸 초점이면 `오늘` 강조를 빼고, 올라온 줄의 버튼은 포인터가 움직이기 전까지 진하게 채우지 않는다', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /\.d-schedpop \{[^}]*animation: d-sched-in 240ms var\(--ease\) both, d-sched-fade 70ms linear both;/, '크기는 240ms 그대로, 투명도만 짧게');
+  const frames = css.slice(css.indexOf('@keyframes d-sched-in {'), css.indexOf('@keyframes d-sched-out'));
+  assert.doesNotMatch(frames.split('d-sched-fade')[0], /opacity/, '크기 변화 쪽에는 투명도가 없다(반투명인 시간이 짧아진다)');
+  assert.match(css, /\.is-hover-settling \.d-ibacts \.d-btn:hover[^}]*background: var\(--accent-soft\)/, '움직이기 전에는 연파랑');
+  const src = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  assert.match(src, /input\.addEventListener\('focus', \(\) => pop\.querySelectorAll\('\.d-mitem\.on'\)\.forEach\(on => on\.classList\.remove\('on'\)\)\)/, '날짜 칸 초점이면 강조를 뺀다');
+  const settle = src.slice(src.indexOf('function uiHoverSettle'), src.indexOf('function uiSchedMotion'));
+  assert.match(settle, /!event\.movementX && !event\.movementY/, '가짜 mousemove(움직임 0)는 걸러진다');
+  assert.match(src.slice(src.indexOf('const choose = async'), src.indexOf('const choices = uiSchedChoices()')), /uiHoverSettle\(\)/, '하나 고르면 건다');
+});
+
 test('일정 정하기: 판 부품 — 진짜 button, role=menu, 열면 오늘에 초점, 한글 조합 중에는 키를 넘긴다, 닫힘 규칙이 Esc 스택에 오른다', () => {
   const src = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
   const part = src.slice(src.indexOf('function uiSchedToggle'), src.indexOf('// 슬랙에서 갓 들어온 할 일.'));

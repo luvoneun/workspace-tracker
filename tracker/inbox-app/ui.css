@@ -495,7 +495,8 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   background: var(--surface); border: 1px solid var(--surface-line);
   border-radius: 18px; box-shadow: var(--pop);
   transform-origin: var(--ox, 40px) var(--oy, 0);
-  animation: d-sched-in 240ms var(--ease) both;
+  /* 크기 변화는 240ms 그대로, 투명도는 처음 70ms만 — 반투명인 동안 뒤 줄 버튼이 비치지 않게 */
+  animation: d-sched-in 240ms var(--ease) both, d-sched-fade 70ms linear both;
 }
 .d-schedpop.is-out { animation: d-sched-out 140ms var(--ease) both; pointer-events: none; }
 .d-schedpop .lab { padding: 6px 12px 4px; font-size: 12.5px; color: var(--muted); }
@@ -519,10 +520,11 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 .d-schedwhen .d-dateinput { width: 100%; }
 .d-schedhint { padding: 6px 12px 8px; font-size: var(--fs-sm); color: var(--muted); }
 @keyframes d-sched-in {
-  0% { opacity: 0; transform: translateY(-4px) scale(0.88); }
-  55% { opacity: 1; transform: translateY(0) scale(1.025); }
-  100% { opacity: 1; transform: none; }
+  0% { transform: translateY(-4px) scale(0.88); }
+  55% { transform: translateY(0) scale(1.025); }
+  100% { transform: none; }
 }
+@keyframes d-sched-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes d-sched-out { to { opacity: 0; transform: translateY(-2px) scale(0.96); } }
 @keyframes d-sched-item { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 /* 고른 뒤 줄은 접히듯 사라지고(220ms), 오늘 목록의 새 줄은 솟아오르며 연파랑이 잠깐 비친다(260ms) */
@@ -1004,6 +1006,9 @@ button.d-guide .t { color: var(--accent-text); }
 .d-ibacts .d-btn { background: none; color: var(--accent-text); }
 .d-ibrow:hover .d-ibacts .d-btn, .d-ibrow:focus-within .d-ibacts .d-btn { background: var(--accent-soft); color: var(--accent-text); }
 .d-ibacts .d-btn:hover, .d-ibrow:hover .d-ibacts .d-btn:hover, .d-ibrow:focus-within .d-ibacts .d-btn:hover { background: var(--accent-strong); color: var(--on-fill); }
+/* 일정을 고른 직후 다음 줄이 포인터 밑으로 올라오면 마우스가 안 움직여도 :hover가 붙어 버튼이 눌린 것처럼 진해진다 —
+   포인터가 실제로 움직이기 전까지는 진한 채움 대신 줄 hover의 연파랑 그대로 둔다(uiHoverSettle) */
+.is-hover-settling .d-ibacts .d-btn:hover, .is-hover-settling .d-ibrow:hover .d-ibacts .d-btn:hover { background: var(--accent-soft); color: var(--accent-text); }
 .d-ibrow .jira-control { margin: 0; flex-wrap: nowrap; min-width: 0; }
 .d-ibrow .jira-select, .d-ibrow .group-input {
   height: 30px; max-width: 124px; padding: 0 10px; border-radius: var(--r-sm); border: 0;

@@ -4831,6 +4831,20 @@ function uiSchedDateOk(value, validity) {
 }
 const uiSchedBusy = new Set(); // 저장 중인 업무 id — 같은 업무를 두 번 옮기지 않는다
 
+// 줄이 접혀 다음 줄이 마우스 밑으로 올라온 직후에는 포인터가 실제로 움직일 때까지 버튼의 진한 hover 채움을 막는다.
+// (브라우저가 레이아웃이 바뀐 뒤 보내는 가짜 mousemove는 움직임 값이 0이라 걸러진다.)
+function uiHoverSettle() {
+  const root = document.body;
+  if (!root || !root.classList || root.classList.contains('is-hover-settling')) return;
+  root.classList.add('is-hover-settling');
+  const release = (event) => {
+    if (event && !event.movementX && !event.movementY) return;
+    root.classList.remove('is-hover-settling');
+    document.removeEventListener('mousemove', release, true);
+  };
+  document.addEventListener('mousemove', release, true);
+}
+
 function uiSchedMotion() {
   try { return !window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return true; }
 }
@@ -4939,6 +4953,7 @@ function uiSchedToggle(item, row, anchor) {
   const choose = async (scheduled, message) => {
     if (uiSchedBusy.has(item.id)) return; // 닫히는 140ms·저장 중의 두 번째 선택은 무시한다
     uiSchedBusy.add(item.id);
+    uiHoverSettle();
     uiSchedClose({ keepHeld: true });
     row.classList.add('is-leaving');
     if (scheduled === todayStr()) uiSchedRise.set(item.id, Date.now());
@@ -4975,6 +4990,8 @@ function uiSchedToggle(item, row, anchor) {
     input.min = todayStr();
     input.value = '';
     input.setAttribute('aria-label', '실행 날짜');
+    // 날짜 칸에 초점이 가면 `오늘` 항목의 파란 강조는 뺀다 — 지금 고르는 것은 날짜 칸이다.
+    input.addEventListener('focus', () => pop.querySelectorAll('.d-mitem.on').forEach(on => on.classList.remove('on')));
     // 달력에서 고른 날짜는 바로 확정하고, 손으로 치는 중(숫자·지우기 키)의 change는 덜 쳐진 값일 수 있어
     // Enter나 판 안의 다른 곳으로 초점이 옮겨 갈 때만 확정한다.
     let typed = false;
