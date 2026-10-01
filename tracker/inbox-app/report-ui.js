@@ -1967,12 +1967,23 @@ async function reportPlanAddLines(item, lines, { key, group, alsoTask, focusId, 
   const names = reportPlanProjectNames();
   const full = `${item.weekKey}:${key}`;
   let madeTask = false;
+  // 문장을 담을 때마다 문서가 다시 그려진다(reportChange) — 초점이 빠졌으면 곧바로 새 칸으로 돌려
+  // 그 사이 치는 글자가 빈 화면으로 새지 않게 한다(다른 칸으로 옮겨 가 있으면 뺏지 않는다).
+  const refocus = () => {
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected !== false) return;
+    const next = document.getElementById(focusId);
+    const row = next && next.closest ? next.closest('.rp-add') : null;
+    if (row) row.hidden = false;
+    next?.focus();
+  };
   // 담는 동안 입력칸은 비워 둔다 — 실패하면 남은 줄을 그 자리에 되돌려 놓는다.
   if (!taken) reportEdits.delete(full);
   for (let index = 0; index < lines.length; index += 1) {
     const line = reportPlanSplitPrefix(lines[index], names, group);
     try {
       madeTask = (await reportPlanAddOne(item, { text: line.text, group: line.group, alsoTask })) || madeTask;
+      refocus();
     } catch (error) {
       const rest = lines.slice(index).join('\n');
       // 그 사이 칸에 새 글을 치고 있으면 덮어쓰지 않고, 어떤 글이 안 됐는지만 알린다.

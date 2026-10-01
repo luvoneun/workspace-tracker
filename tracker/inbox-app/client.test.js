@@ -286,6 +286,94 @@ test('입력 씹힘 ①: 확인 대기 `다음은?` 입력줄은 보내는 동�
   await app.run('Promise.all([p1, p2])');
 });
 
+// 가짜 창에서 "다시 그리기"를 흉내 낸다: 같은 이름표의 새 줄을 만들고 옛 줄은 떼어 낸다.
+function addRowRedraw(app, makeRow) {
+  const oldRow = app.run(makeRow);
+  const oldInput = oldRow.children[0];
+  oldInput.closest = () => oldRow;
+  return {
+    oldRow, oldInput,
+    redraw() {
+      const fresh = app.run(makeRow);
+      fresh.children[0].closest = () => fresh;
+      fresh.children[0].setSelectionRange = function (start, end) { this.selection = [start, end]; };
+      oldRow.connected = false; oldInput.connected = false;
+      app.context.document.querySelectorAll = () => [fresh];
+      return fresh;
+    },
+  };
+}
+
+test('입력 씹힘 ②: load()가 다시 그려도 그룹 `+` 줄의 적던 글·초점·커서가 새 줄로 옮겨 간다', () => {
+  const app = pureClient();
+  const view = addRowRedraw(app, "uiGroupAddRow('group:게임', '/api/today-task/create', 'x')");
+  view.oldRow.hidden = false;
+  view.oldInput.value = 'halfMORE';
+  view.oldInput.selectionStart = 4; view.oldInput.selectionEnd = 4;
+  app.context.document.activeElement = view.oldInput;
+  const snap = app.context.uiAddRowSnapshot();
+  assert.ok(snap, '초점이 있던 줄을 잡는다');
+  const fresh = view.redraw();
+  assert.equal(fresh.hidden, true, '새로 그린 줄은 닫힌 채 태어난다');
+  app.context.uiAddRowRestore(snap);
+  assert.equal(fresh.hidden, false, '다시 연다');
+  assert.equal(fresh.children[0].value, 'halfMORE', '적던 글이 남는다');
+  assert.equal(fresh.children[0].focused, true, '초점이 남는다');
+  assert.deepEqual(fresh.children[0].selection, [4, 4], '커서 자리도 남는다');
+});
+
+test('입력 씹힘 ②: 프로젝트 상세의 추가 줄도 같은 길이고, 초점이 다른 데 있으면 아무것도 하지 않는다', () => {
+  const app = pureClient();
+  const make = "(() => { const r = uiGroupAddRow('jira:ABC-1', '/api/today-task/create', 'x'); r.dataset.addKey += '::project'; r.hidden = false; r.className += ' d-padd'; return r; })()";
+  const view = addRowRedraw(app, make);
+  view.oldInput.value = '프로젝트에 적는 중';
+  view.oldInput.selectionStart = 2; view.oldInput.selectionEnd = 5;
+  app.context.document.activeElement = view.oldInput;
+  const snap = app.context.uiAddRowSnapshot();
+  assert.equal(snap.key, '/api/today-task/create::jira:ABC-1::project');
+  const fresh = view.redraw();
+  app.context.uiAddRowRestore(snap);
+  assert.equal(fresh.children[0].value, '프로젝트에 적는 중');
+  assert.equal(fresh.children[0].focused, true);
+  assert.deepEqual(fresh.children[0].selection, [2, 5]);
+  // 초점이 다른 칸(예: 맨 위 빠른 추가)에 있으면 잡지 않는다 — 초점을 뺏지 않는다.
+  app.context.document.activeElement = app.context.document.getElementById('todayTaskInput');
+  assert.equal(app.context.uiAddRowSnapshot(), null);
+  // 줄이 다시 그려지지 않았으면(그대로 붙어 있으면) 건드리지 않는다.
+  const other = addRowRedraw(app, "uiGroupAddRow('group:x', '/api/today-task/create', 'x')");
+  other.oldInput.value = '그대로';
+  app.context.document.activeElement = other.oldInput;
+  app.context.uiAddRowRestore(app.context.uiAddRowSnapshot());
+  assert.equal(other.oldInput.value, '그대로');
+});
+
+test('입력 씹힘 ②: load()는 목록을 그리기 직전에 입력줄을 잡고 다 그린 뒤 되돌린다', () => {
+  const body = definitions.slice(definitions.indexOf('async function load() {'));
+  const end = body.indexOf('\n}\n');
+  const loadSrc = body.slice(0, end);
+  const snap = loadSrc.indexOf('uiAddRowSnapshot()');
+  assert.ok(snap > 0, 'load 안에서 잡는다');
+  for (const render of ['renderLaterTasks(', 'renderTodayTasks(', 'renderActiveTabLists(', 'workflowRender(']) {
+    assert.ok(snap < loadSrc.indexOf(render), `${render} 전에 잡는다`);
+    assert.ok(loadSrc.indexOf(render) < loadSrc.indexOf('uiAddRowRestore(typingRow)'), `${render} 뒤에 되돌린다`);
+  }
+  assert.ok(loadSrc.trim().endsWith('uiAddRowRestore(typingRow);'), '맨 끝에서 되돌린다');
+});
+
+test('입력 씹힘 ②: 주간요약 문장 줄은 문장을 담아 문서가 다시 그려질 때마다 초점을 새 칸으로 돌린다', async () => {
+  const app = reportClient();
+  await app.run(`(async () => {
+    focusCount = 0;
+    load = async () => {};
+    renderReportDraft = () => {};
+    reportChange = async () => {};
+    document.getElementById('reportPlanInput').focus = () => { focusCount += 1; };
+    await reportPlanAddLines({ weekKey: 'W', draft: { rows: [] } }, ['첫 줄', '둘째 줄'],
+      { key: 'new', group: '', alsoTask: false, focusId: 'reportPlanInput', taken: true });
+  })()`);
+  assert.equal(app.run('focusCount'), 3, '줄마다 한 번 + 끝에서 한 번');
+});
+
 test('failed card action stays visible and restores its original checkbox state', async () => {
   const app = client(new Response('{"ok":true}'));
   const checkbox = { checked: true };

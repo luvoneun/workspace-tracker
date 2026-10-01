@@ -644,7 +644,27 @@ function uiUnsavedNotice(text, queueKey, run = null, restored = false) {
   if (tail) tail.then(show); else show();
 }
 
-// 그룹 제목의 `+`로 여는 그 자리 입력줄. 저장 뒤 목록을 다시 그려도 같은 줄로 포커스가 돌아온다.
+// 그룹 `+` 줄·프로젝트 상세 추가 줄은 load()가 목록을 다시 그릴 때 새 칸으로 바뀐다 — 다시 그리기 직전에
+// 초점이 있던 줄의 이름표(data-add-key)·글·커서를 잡아 두었다가 새 칸에 되돌린다(적던 글·초점이 날아가지 않게).
+// 초점이 다른 데 있으면 아무것도 하지 않는다(초점을 뺏지 않는다).
+function uiAddRowSnapshot() {
+  const el = document.activeElement;
+  const row = el?.closest?.('.d-addrow');
+  if (!row || !row.dataset?.addKey || !String(el.className || '').includes('d-addinput')) return null;
+  return { el, key: row.dataset.addKey, start: el.selectionStart, end: el.selectionEnd, direction: el.selectionDirection };
+}
+function uiAddRowRestore(snap) {
+  if (!snap || snap.el.isConnected) return;
+  const row = [...(document.querySelectorAll?.('.d-addrow') || [])].find(node => node.dataset?.addKey === snap.key);
+  const input = row?.querySelector('.d-addinput');
+  if (!input) return;
+  row.hidden = false;
+  input.value = snap.el.value;
+  input.focus();
+  try { if (snap.start != null) input.setSelectionRange(snap.start, snap.end, snap.direction || 'none'); } catch { /* 커서를 못 옮겨도 글·초점은 남는다 */ }
+}
+
+// 그룹 제목의 `+`로 여는 그 자리 입력줄. 저장 뒤 목록을 다시 그려도 같은 줄로 포커스가 돌아온다(uiAddRowRestore).
 function uiGroupAddRow(key, endpoint, announceText) {
   const row = document.createElement('div');
   row.className = 'd-addrow';
@@ -676,10 +696,9 @@ function uiGroupAddRow(key, endpoint, announceText) {
         body: JSON.stringify(payload),
       });
       announce(announceText);
+      // load()가 목록을 다시 그려 이 칸이 떨어져 나가도, 초점이 이 줄에 있었으면 같은 그룹의 새 줄로
+      // 적던 글·초점·커서가 옮겨 간다(load 안의 uiAddRowRestore). 다른 데로 옮겨 갔으면 초점을 뺏지 않는다.
       await load();
-      // load()가 목록을 다시 그려서 이 입력칸은 떨어져 나간다 — 같은 그룹의 새 줄을 찾아 다시 연다.
-      const reopened = current();
-      if (reopened && reopened !== input) { reopened.closest('.d-addrow').hidden = false; reopened.focus(); }
     });
     return run.catch(() => { uiSendRestore(current(), description, addKey, run); });
   });
@@ -1535,6 +1554,8 @@ async function load() {
     }
   }
 
+  // 여기부터 목록을 다시 그린다 — 그룹 `+` 줄·프로젝트 상세 추가 줄에 적던 글·초점·커서를 잡아 두었다가 끝에 되돌린다.
+  const typingRow = uiAddRowSnapshot();
   // 미팅 노트 가져오기의 상태는 목록과 함께 온다 — 페이지를 새로 열어도 진행 중이면 같은 표시로 이어진다.
   meetingNotesApply(data.meetingNotes);
   jiraIssuesCache = data.jiraIssues || [];
@@ -1579,6 +1600,7 @@ async function load() {
   syncTaskDetail();
   palSync();
   taskSelectionRefresh();
+  uiAddRowRestore(typingRow);
 }
 
 // 내 담당 지라 목록(프로젝트 고르기 선택지·프로젝트 이름의 원천)도 서버가 지라에서 직접 읽는 값이다.
