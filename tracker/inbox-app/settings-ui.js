@@ -1785,8 +1785,9 @@ async function settingsSlackTick() {
     const response = await fetch('/api/integrations/slack-oauth/status', { headers: { Accept: 'application/json' } });
     status = response.ok ? await response.json() : null;
   } catch { status = null; }
-  // 잠깐 못 읽었으면 다음 차례에 다시 묻는다. 아직 기다리는 중이면 그대로 둔다.
-  if (!status || (status.waiting && !status.last)) return;
+  // 잠깐 못 읽었으면 다음 차례에 다시 묻는다. 아직 기다리는 중이면 그대로 둔다 — 버튼을 여러 번 눌러 기다림이 둘 이상일 때
+  // 하나가 실패해도(취소 등) 남은 탭에서 허용하면 연결되므로, 연결됐을 때만 기다림을 끝낸다(다시 그리기를 되풀이하지 않게).
+  if (!status || (status.waiting && !(status.last && status.last.ok === true))) return;
   if (settingsSlackTyping()) return;
   await settingsSlackSettled(status.last);
 }

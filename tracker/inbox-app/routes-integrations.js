@@ -86,13 +86,24 @@ module.exports = function integrationsRoutes(req, res, url, ctx) {
     (async () => {
       const response = await slackOAuth.exchangeCode({ code, verifier: entry.verifier, clientId: entry.clientId, port: entry.port });
       if (!response || response.ok !== true) { stop(slackOAuth.failureKind(response && response.error)); return; }
+      const before = currentConfigFile();
       const saved = await slackAuth.saveOAuthResult({
-        response, config: currentConfigFile(), clientId: entry.clientId,
+        response, config: before, clientId: entry.clientId,
         ...(entry.expectedTeamId ? { expectedTeamId: entry.expectedTeamId } : {}),
       });
       if (!saved.ok) { stop({ team_mismatch: 'team', write: 'write', lock: 'write' }[saved.reason] || 'failed'); return; }
-      // 토큰은 저장됐다 — 이제 설정에 방식을 적는다(여기서 실패하면 다시 누르면 된다).
-      try { integrations.saveSlackAuth({ configPath: CONFIG_PATH, current: currentConfigFile() }); } catch { stop('write'); return; }
+      // 토큰은 저장됐다 — 이제 설정에 방식을 적는다(이미 새 방식이면 적을 것이 없다). 한 번 더 해 보고도 못 쓰면 연결을 되돌린다:
+      // 설정은 옛 방식인데 한 줄 파일에 12시간짜리 토큰만 남으면 갱신할 곳이 없어 수집이 멈추기 때문이다.
+      if (integrations.slackAuthMode(before) !== 'oauth') {
+        const write = () => integrations.saveSlackAuth({ configPath: CONFIG_PATH, current: currentConfigFile() });
+        try {
+          try { write(); } catch { write(); }
+        } catch {
+          await slackAuth.undoOAuth({ config: before });
+          stop('write');
+          return;
+        }
+      }
       slackConnect.finish(true);
       show('connected');
     })().catch(() => { if (!res.headersSent) stop('failed'); });

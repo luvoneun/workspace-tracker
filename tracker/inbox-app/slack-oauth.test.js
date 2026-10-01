@@ -527,3 +527,66 @@ test('슬랙 연결 경로: 서버 포트가 4321~4331 밖이면 주소 대신 �
   assert.equal((await app.get('/api/integrations/slack-oauth/status')).waiting, false);
   assert.equal((await fetch(`${app.origin}/slack/callback?code=x&state=y`)).status, 400, '콜백은 정적 파일 처리(404)보다 앞이다');
 });
+
+test('지난 결과는 10분 뒤 잊는다 — 며칠 전의 실패 이유가 다시 뜨지 않는다', () => {
+  let at = NOW;
+  const flow = oauth.createSlackOAuth({ now: () => at });
+  // 콜백이 state를 꺼내 쓴 뒤 취소로 끝난 경우
+  flow.take(new URL(flow.start({ clientId: 'c', port: 4321 }).url).searchParams.get('state'));
+  flow.finish(false, 'cancelled');
+  at = NOW + 10 * MIN - 1;
+  assert.equal(flow.status().last.kind, 'cancelled');
+  at = NOW + 10 * MIN;
+  assert.deepEqual(flow.status(), { waiting: false, expiresAt: null, last: null });
+  flow.finish(true);
+  at += 3 * 24 * 60 * MIN;
+  assert.equal(flow.status().last, null, '성공도 마찬가지');
+});
+
+test('undoOAuth: 옛 토큰이 있었으면 한 줄 파일을 되돌리고, 없었으면 지운다 — 갱신 정보는 남기지 않는다', async (t) => {
+  for (const old of ['xoxp-legacy-before', '']) {
+    const dir = room(t);
+    const config = { slack: { clientId: '111.222' } };
+    const paths = slackAuth.authPaths({ config, tokenDir: dir });
+    if (old) fs.writeFileSync(paths.tokenFile, `${old}\n`, { mode: 0o600 });
+    assert.equal((await slackAuth.saveOAuthResult({ response: exchange(), config, tokenDir: dir, now: NOW })).ok, true);
+    assert.equal(fs.readFileSync(paths.tokenFile, 'utf8'), `${ACCESS}\n`);
+    assert.equal(await slackAuth.undoOAuth({ config, tokenDir: dir }), true);
+    assert.deepEqual(fs.readdirSync(dir), old ? ['workspace-slack-token'] : []);
+    if (old) {
+      assert.equal(fs.readFileSync(paths.tokenFile, 'utf8'), `${old}\n`);
+      assert.equal(mode(paths.tokenFile), 0o600);
+    }
+  }
+});
+
+test('슬랙 연결 경로: 옛 방식에서 옮기다 설정 쓰기만 실패하면 옛 토큰으로 되돌리고 갱신 정보를 남기지 않는다', async (t) => {
+  const port = await allowedPort();
+  if (!port) { t.skip('4323~4331이 전부 쓰이는 중이라 건너뛴다'); return; }
+  const seed = { integrations: { slack: true, calendar: false, jira: false, tiro: false }, slack: { clientId: '111.222', channels: { todo: { id: 'C0TODO11', name: '#my-todo' } } } };
+  const app = await startFake(t, port, seed);
+  const tokenFile = path.join(app.tokens, 'workspace-slack-token');
+  fs.writeFileSync(tokenFile, 'xoxp-legacy-before\n', { mode: 0o600 });
+  const started = await (await app.post('/api/integrations/slack-oauth/start')).json();
+  const state = new URL(started.url).searchParams.get('state');
+  // 설정 파일이 있는 폴더를 읽기 전용으로 — 설정 쓰기(임시 파일 + 이름 바꾸기)만 실패한다. 토큰 폴더는 그대로 쓸 수 있다.
+  const home = path.dirname(app.config);
+  const before = fs.readFileSync(app.config, 'utf8');
+  // 가짜 슬랙이 부른 것을 적는 파일은 미리 만들어 둔다(읽기 전용 폴더에서는 새 파일을 못 만든다).
+  fs.writeFileSync(path.join(home, 'slack-calls.log'), '');
+  fs.chmodSync(home, 0o555);
+  let response, html;
+  try {
+    response = await fetch(`${app.origin}/slack/callback?code=good&state=${encodeURIComponent(state)}`);
+    html = await response.text();
+  } finally { fs.chmodSync(home, 0o755); }
+  assert.equal(response.status, 400);
+  assert.match(html, /연결을 저장하지 못했어요/);
+  assert.equal(fs.readFileSync(app.config, 'utf8'), before, '설정은 그대로(옛 방식)');
+  assert.equal(fs.readFileSync(tokenFile, 'utf8'), 'xoxp-legacy-before\n', '한 줄 파일은 옛 토큰 그대로');
+  assert.deepEqual(fs.readdirSync(app.tokens), ['workspace-slack-token'], '갱신 정보·.legacy·잠금이 남지 않는다');
+  const status = await app.get('/api/integrations/slack-oauth/status');
+  assert.equal(status.last.kind, 'write');
+  assert.equal(status.auth, 'token');
+  assert.ok(app.slackLog().some(line => line.startsWith('exchange good')), '교환까지는 갔다');
+});

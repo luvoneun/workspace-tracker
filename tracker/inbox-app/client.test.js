@@ -7763,6 +7763,26 @@ test('슬랙 연결 B. 다른 칸에 글을 쓰는 중이면 끝났어도 다시
   assert.equal(fx.find('slack', 'd-derr')[0].textContent, '취소했어요 — 다시 누르면 돼요');
 });
 
+test('슬랙 연결 B. 기다림이 둘 이상일 때 하나가 실패해도 다시 그리지 않고 기다림을 잇는다 — 연결됐을 때만 끝낸다', async () => {
+  const fx = slackConnectClient({ connect: { ready: 'ok', waiting: true, expiresAt: Date.now() + 500000, last: null } });
+  await fx.app.run('renderSettingsIntegrations()');
+  const base = fx.app.context.fetch;
+  let reply = { ok: true, waiting: true, last: { ok: false, kind: 'cancelled', at: Date.now() } };
+  fx.app.context.fetch = async (url, options) => (String(url) === '/api/integrations/slack-oauth/status'
+    ? new Response(JSON.stringify(reply)) : base(url, options));
+  const before = fx.renders();
+  for (let i = 0; i < 3; i += 1) await fx.tick();
+  assert.equal(fx.renders(), before, '남은 기다림이 있는 동안에는 한 번도 다시 그리지 않는다');
+  assert.equal(fx.timers().length, 1);
+  assert.ok(fx.find('slack', 'd-iwait')[0]);
+  // 남은 탭에서 허용 — 그때 한 번만 다시 그린다
+  reply = { ok: true, waiting: false, last: { ok: true, kind: 'connected', at: Date.now() } };
+  Object.assign(fx.payload.slack, OAUTH_ON, { connect: { ready: 'ok', waiting: false, expiresAt: null, last: reply.last } });
+  await fx.tick();
+  assert.equal(fx.renders(), before + 1);
+  assert.equal(fx.timers().length, 0);
+});
+
 test('슬랙 연결 C. 허용이 끝나지 않은 이유는 시안 문구 그대로 — 막힘 · 승인 대기 · 취소', async () => {
   const words = {
     blocked: '회사 슬랙이 이 앱을 막았어요 — 관리자에게 물어봐 주세요',

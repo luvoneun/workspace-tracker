@@ -69,6 +69,8 @@ function createSlackOAuth({ now = Date.now, random = randomBytes } = {}) {
 
   // 만료된 것을 치운다. 기다리던 것이 전부 시간이 지나 사라졌으면 "아직 허용이 끝나지 않았어요"(pending)로 적는다.
   function prune() {
+    // 지난 결과는 10분 뒤 잊는다 — 며칠 전의 `취소했어요`가 풀린 카드에 다시 뜨지 않게.
+    if (last && now() - last.at >= STATE_TTL_MS) last = null;
     const before = pending.size;
     for (const [state, entry] of pending) if (entry.expiresAt <= now()) pending.delete(state);
     if (before && !pending.size && !last) last = { ok: false, kind: 'pending', at: now() };

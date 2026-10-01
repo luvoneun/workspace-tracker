@@ -437,6 +437,22 @@ async function forgetOAuth(options = {}) {
   return done === true;
 }
 
+// 방금 한 처음 연결을 되돌린다 — 토큰은 저장됐는데 설정에 방식(`slack.auth`)을 적지 못했을 때. 설정은 옛 방식인데 한 줄 파일에
+// 12시간짜리 토큰만 남으면 갱신할 곳이 없어 수집이 멈춘다. 갱신과 같은 잠금 안에서: `.legacy`(옛 토큰)가 있으면 한 줄 파일로
+// 되돌리고 `.legacy`를 지우고, 없으면(원래 토큰이 없던 설치) 한 줄 파일을 지운다. 그 뒤 갱신 정보·실패 기록을 지운다.
+async function undoOAuth(options = {}) {
+  const paths = authPaths(options);
+  return forgetOAuth({
+    ...options,
+    then: () => {
+      const old = readLine(paths.legacyFile);
+      if (old) writeSecret(paths.tokenFile, `${old}\n`, options.fs);
+      else fs.rmSync(paths.tokenFile, { force: true });
+      fs.rmSync(paths.legacyFile, { force: true });
+    },
+  });
+}
+
 // 화면·점검하기가 읽는 상태 — 값 없이 시각·권한·실패 종류만. 파일을 쓰지 않는다.
 // `minValidMs`는 부르는 쪽의 갱신 기준(서버 60분)이다 — `nextRefreshAt`이 그 기준으로 나온다.
 function readOAuthStatus(options = {}) {
@@ -479,7 +495,7 @@ function readOAuthStatus(options = {}) {
 }
 
 module.exports = {
-  getSlackToken, saveOAuthResult, readOAuthStatus, forgetOAuth,
+  getSlackToken, saveOAuthResult, readOAuthStatus, forgetOAuth, undoOAuth,
   authPaths, slackClientId, retryDelayMs,
   DEFAULT_CLIENT_ID, REQUIRED_SCOPES, RETRY_DELAYS_MS,
 };
