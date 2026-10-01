@@ -2541,6 +2541,165 @@ test('종류 목록 CSS: 일정 정하기 판의 움직임을 그대로 쓰되 2
   assert.match(css, /\.d-tpk \{[^}]*height: var\(--h-sm\)[^}]*color: var\(--dim\)/);
 });
 
+// ---------- 회의 적기: 검수에서 나온 경계 ----------
+test('회의 적기: 붙여 넣은 줄의 번호 떼기는 날짜로 시작하는 글을 깎지 않는다(한두 자리 번호 + 뒤에 숫자가 바로 오지 않을 때만)', () => {
+  const app = workflowsClient();
+  const lines = text => JSON.parse(app.run(`JSON.stringify(meetingCaptureLines(${JSON.stringify(text)}).map(entry => entry.text))`));
+  assert.deepEqual(lines('10. 2 배포 일정 확정\n2026. 10. 5. 릴리스\n10.2 회의\n3) 5명 인터뷰 잡기'),
+    ['10. 2 배포 일정 확정', '2026. 10. 5. 릴리스', '10.2 회의', '3) 5명 인터뷰 잡기'],
+    '번호 바로 뒤가 숫자면 날짜·수량일 수 있어 그대로 둔다');
+  assert.deepEqual(lines('1. 첫째\n12) 열두째\n- 2026. 10. 5. 릴리스\n123. 세 자리는 번호가 아니다'),
+    ['첫째', '열두째', '2026. 10. 5. 릴리스', '123. 세 자리는 번호가 아니다']);
+});
+
+test('회의 적기: 붙여 넣은 줄이 1000자를 넘으면 하나도 담지 않고 알린다', async () => {
+  const { app, held, input, titles } = meetingCaptureClient();
+  let prevented = false;
+  input().listeners.paste({ clipboardData: { getData: () => `짧은 줄\n${'가'.repeat(1001)}` }, preventDefault() { prevented = true; } });
+  await settle();
+  assert.equal(prevented, true);
+  assert.equal(held.length, 0);
+  assert.deepEqual(titles(), []);
+  assert.match(app.nodes.get('liveRegion').textContent, /한 줄은 1000자까지 담을 수 있어요\(넘는 줄 1개\)/);
+});
+
+test('회의 적기 ⌘Z ①: 되돌리기 맨 위 기록이 이 회의에서 적어 담은 줄이 아니면 입력줄의 ⌘Z는 가로채지 않는다', async () => {
+  const { app, held, input, enter, titles } = meetingCaptureClient();
+  const sending = enter('담은 줄');
+  await settle(); held[0].ok();
+  await sending;
+  const press = (extra = {}) => { let taken = false; const done = input().listeners.keydown({ key: 'z', metaKey: true, preventDefault() { taken = true; }, ...extra }); return { taken: () => taken, done }; };
+  // 그 뒤에 다른 일(초안 빼기·다른 화면의 작업)을 했다 — 그 기록은 입력줄에서 되돌리지 않는다.
+  app.run("var undone = 0; pushUndo({ label: '다른 작업', undo: async () => { undone += 1; }, redo: async () => {} });");
+  const other = press();
+  await other.done;
+  assert.equal(other.taken(), false, '브라우저에 맡긴다');
+  assert.equal(app.run('undone'), 0);
+  assert.deepEqual(titles(), ['담은 줄']);
+  // 다른 회의에서 적어 담은 줄도 이 회의의 입력줄에서는 되돌리지 않는다.
+  app.run("undoStack.pop(); undoStack[undoStack.length - 1].captureKey = '다른 회의';");
+  const foreign = press();
+  await foreign.done;
+  assert.equal(foreign.taken(), false);
+  assert.equal(app.run('undoStack.length'), 1);
+});
+
+test('회의 적기 ⌘Z ②: Enter 직후 저장이 끝나기 전의 ⌘Z는 저장을 기다렸다가 방금 그 줄을 되돌린다(앞 기록을 건드리지 않는다)', async () => {
+  const { app, held, input, enter, titles } = meetingCaptureClient();
+  app.run("var undone = 0; pushUndo({ label: '앞서 한 다른 작업', undo: async () => { undone += 1; }, redo: async () => {} });");
+  const sending = enter('방금 적은 줄');
+  let taken = false;
+  const undoing = input().listeners.keydown({ key: 'z', metaKey: true, preventDefault() { taken = true; } });
+  assert.equal(taken, true, '담는 중인 줄이 있으면 가로챈다');
+  await settle();
+  assert.equal(app.run('undone'), 0, '저장이 끝나기 전에는 아무것도 되돌리지 않는다');
+  const calls = [];
+  const capture = held[0];
+  app.context.fetch = async (url, options) => {
+    if (options && options.body) calls.push([url, JSON.parse(options.body)]);
+    if (url === '/api/track/remove') app.context.__saved.length = 0;
+    return new Response('{"ok":true}');
+  };
+  capture.ok();
+  await sending;
+  await undoing;
+  assert.deepEqual(calls, [['/api/track/remove', { id: 'n1' }]], '방금 그 줄을 되돌린다');
+  assert.equal(app.run('undone'), 0, '앞 기록은 그대로다');
+  assert.equal(app.run('undoStack.length'), 1);
+  assert.deepEqual(titles(), []);
+});
+
+test('회의 적기 ⌘Z ③: 이 칸에서 글을 치다 전부 지운 뒤의 ⌘Z는 브라우저의 글자 되돌리기에 넘긴다', async () => {
+  const { app, held, input, enter, titles } = meetingCaptureClient();
+  const sending = enter('담은 줄');
+  await settle(); held[0].ok();
+  await sending;
+  const el = input();
+  el.value = '치다가'; el.listeners.input();
+  el.value = ''; el.listeners.input();
+  let taken = false;
+  await el.listeners.keydown({ key: 'z', metaKey: true, preventDefault() { taken = true; } });
+  assert.equal(taken, false, '지운 글을 살리려는 ⌘Z다');
+  assert.equal(app.run('undoStack.length'), 1);
+  assert.deepEqual(titles(), ['담은 줄']);
+  // Enter로 담아 칸이 비면 다시 "방금 담은 줄 되돌리기"다.
+  const again = enter('또 담은 줄');
+  await settle(); held[1].ok();
+  await again;
+  app.context.fetch = async () => new Response('{"ok":true}');
+  await input().listeners.keydown({ key: 'z', metaKey: true, preventDefault() { taken = true; } });
+  assert.equal(taken, true);
+  assert.equal(app.run('undoStack.length'), 1);
+});
+
+test('이전 회차 줄에서 종류를 바꾸면 그 줄의 종류 글자도 바뀐다(입력줄에 초점이 있어 카드가 다시 그려지지 않아도)', async () => {
+  const app = meetingsViewClient();
+  richDom(app);
+  const sent = [];
+  app.context.fetch = async (url, options) => {
+    const body = JSON.parse(options.body);
+    sent.push([url, body]);
+    app.run(`wfItem(${JSON.stringify(body.id)}).type = ${JSON.stringify(body.type)}`);
+    return new Response('{"ok":true}');
+  };
+  app.run(`itemsById = new Map(workflowData.items.map(item => [item.id, item]));
+    var __box = document.createElement('div');
+    var __host = { kind: 'card', closable: false, getResult: () => null, setResult() {}, redraw() {}, box: () => __box, openItem() {}, openMeeting() {} };
+    panelMeetingPast(workflowData.meetings[0], __box, __host);
+    panelMeetingItems(workflowData.meetings[0], __box, __host);`);
+  const box = app.run('__box');
+  const past = box.children[0];
+  const type = () => nodeFind(nodeFind(nodeFindAll(past, 'd-mrow2')[0], 'd-tpk'), 'tl').textContent;
+  assert.equal(type(), '할 일');
+  nodeFind(nodeFindAll(past, 'd-mrow2')[0], 'd-tpk').listeners.click({});
+  await app.context.document.body.children.find(node => String(node.className).includes('d-typepop')).children[1].listeners.click();
+  await settle();
+  assert.deepEqual(sent, [['/api/workflow/retype', { id: 't0', type: 'check' }]]);
+  assert.equal(type(), '확인 대기', '서버만 바뀌고 줄은 낡은 채로 남지 않는다');
+  // 다시 눌러 원래 종류로 — 낡은 값과 견줘 "같은 종류"라며 안 보내는 일이 없다.
+  nodeFind(nodeFindAll(past, 'd-mrow2')[0], 'd-tpk').listeners.click({});
+  await app.context.document.body.children.filter(node => String(node.className).includes('d-typepop')).pop().children[0].listeners.click();
+  await settle();
+  assert.deepEqual(sent[1], ['/api/workflow/retype', { id: 't0', type: 'task' }]);
+  assert.equal(type(), '할 일');
+});
+
+test('회의 적기: 기록되지 않은 회의의 화면 메모리 열쇠에는 날짜가 들어간다 — 어제 같은 시각·제목 회의의 줄이 오늘 카드에 보이지 않는다', () => {
+  const app = workflowsClient();
+  const key = code => app.run(`meetingCaptureKey(${code})`);
+  assert.equal(key("{ id: 'm1', date: '2026-10-02', start: '10:00', title: '데일리' }"), 'm1', '기록된 회의는 번호');
+  assert.equal(key("{ date: '2026-10-01', start: '10:00', title: '데일리' }"), '2026-10-01 10:00 데일리');
+  assert.notEqual(key("{ date: '2026-10-01', start: '10:00', title: '데일리' }"), key("{ date: '2026-10-02', start: '10:00', title: '데일리' }"));
+  assert.equal(key("{ start: '10:00', title: '데일리' }"), `${app.run('todayStr()')} 10:00 데일리`, '날짜가 없는 캘린더 줄은 오늘');
+  // 어제 회의에 남은 실패 줄은 오늘 같은 시각·제목 회의의 목록에 서지 않는다.
+  app.run(`meetingCaptureLocal.clear();
+    meetingCaptureLocal.set(meetingCaptureKey({ date: '2026-10-01', start: '10:00', title: '데일리' }), [{ seq: 1, type: 'task', text: '어제 못 담은 줄', state: 'fail', id: null }]);
+    workflowData = { items: [], meetings: [] }; wfIndexData();`);
+  const box = app.run(`(() => { const box = document.createElement('div'); panelMeetingItems({ date: '2026-10-02', start: '10:00', title: '데일리' }, box); return box; })()`);
+  assert.equal(nodeFindAll(box, 'd-mrow2').length, 0);
+});
+
+test('종류 목록: 열린 채 목록이 다시 그려져 누른 글자가 사라지면 목록을 닫고 초점을 입력줄로 돌린다', async () => {
+  const { app, rows, pop, input } = meetingTypeClient();
+  await settle();
+  const button = nodeFind(rows()[0], 'd-tpk');
+  button.listeners.click({});
+  assert.equal(pop().classList.contains('is-out'), false);
+  const list = pop();
+  // 저장이 끝나 목록을 맞추는 다시 그리기 — 옛 줄(과 그 글자)은 떨어져 나간다.
+  button.connected = false;
+  app.run('__box.meetingRepaint()');
+  assert.equal(list.classList.contains('is-out'), true, '허공에 남지 않는다');
+  assert.equal(input().focused, true);
+  assert.equal(app.run('meetingTypeOpen'), null);
+  // 글자가 그대로 붙어 있으면 건드리지 않는다.
+  const still = nodeFind(rows()[0], 'd-tpk');
+  still.listeners.click({});
+  app.run('meetingTypeOrphan(__host)');
+  assert.notEqual(app.run('meetingTypeOpen'), null);
+  app.run('meetingTypeClose()');
+});
+
 test('팔레트 바닥은 `회의` 칩일 때만 회의 탭으로 가는 링크를 붙인다', () => {
   const app = workflowsClient();
   const foot = (state) => {

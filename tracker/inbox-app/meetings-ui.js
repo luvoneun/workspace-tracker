@@ -190,6 +190,8 @@ function panelMeeting(event, box, host = MEETING_HOST_CARD) {
   }
   panelMeetingItems(event, box, host);
   panelMeetingCapture(event, box, linked, host);
+  // 카드를 통째로 다시 그렸으면 열려 있던 종류 목록의 글자도 사라졌다 — 새 카드가 붙은 뒤에 정리한다.
+  if (meetingTypeOpen) setTimeout(() => meetingTypeOrphan(host), 0);
 }
 
 // 방금 초안을 담은 결과: 어디로 갔는지, 나중에 담긴 할 일을 오늘로, 되돌리기, 다음 검토할 회의.
@@ -859,6 +861,13 @@ function meetingTypeToggle(anchor, current, onPick) {
   (items.find(button => button.dataset.key === current) || items[0]).focus();
 }
 
+// 목록을 연 글자가 다시 그리기로 사라졌으면(자동 갱신·저장 뒤 목록 맞춤) 허공에 남은 목록을 닫고 초점을 입력줄로 돌린다.
+function meetingTypeOrphan(host) {
+  if (!meetingTypeOpen || meetingTypeOpen.anchor.isConnected) return;
+  meetingTypeClose();
+  meetingCaptureFocus(host);
+}
+
 // 종류 글자 버튼. onPick이 없으면(담는 중인 줄) 같은 모양의 눌리지 않는 글자다.
 function meetingTypeButton(type, onPick, { hint = '' } = {}) {
   const button = document.createElement('button');
@@ -916,6 +925,10 @@ function meetingSection(title, count) {
 const meetingCaptureLocal = new Map(); // 회의 키 → [{ seq, type, text, state: 'pending' | 'fail' | 'saved', id, fresh }]
 let meetingCaptureSeq = 0;
 const MEETING_PASTE_MAX = 30;
+const MEETING_TEXT_MAX = 1000;
+// 화면 메모리의 열쇠 — 기록된 회의는 번호, 기록되지 않은 회의는 날짜·시각·제목(매일 같은 시각·제목으로 열리는 회의가
+// 어제 적은 줄을 물려받지 않게 날짜를 넣는다).
+const meetingCaptureKey = event => event.id || `${event.date || todayStr()} ${event.start || ''} ${event.title || ''}`;
 const MEETING_TYPE_HEADS = { '?': 'check', '!': 'decision' };
 
 // 맨 앞 한 글자로 종류를 정한다: `?` 확인 대기 · `!` 결정(담을 때 떼어 낸다). 앞에 빈칸을 두면 글자 그대로 담는다.
@@ -925,8 +938,9 @@ function meetingCaptureParse(raw) {
   const type = /^\s/.test(value) ? null : MEETING_TYPE_HEADS[text[0]];
   return type ? { type, text: text.slice(1).trim() } : { type: 'task', text };
 }
-// 붙여 넣은 줄 앞의 목록 표시(`-` `•` `*` `1.` `1)`)를 뗀다.
-const meetingCaptureClean = line => String(line).replace(/^\s*(?:[-•*·]|\d+[.)])\s+/, '').trim();
+// 붙여 넣은 줄 앞의 목록 표시(`-` `•` `*` `1.` `1)`)를 뗀다. 번호는 한두 자리이고 바로 뒤에 숫자가 오지 않을 때만 —
+// `10. 2 배포 일정`·`2026. 10. 5. 릴리스`처럼 날짜로 시작하는 글은 깎지 않는다.
+const meetingCaptureClean = line => String(line).replace(/^\s*(?:[-•*·]\s+|\d{1,2}[.)]\s+(?!\d))/, '').trim();
 function meetingCaptureLines(text) {
   return String(text || '').split(/\r?\n/).map(meetingCaptureClean).filter(Boolean)
     .map(meetingCaptureParse).filter(entry => entry.text);
@@ -935,6 +949,7 @@ function meetingCaptureLines(text) {
 // 지금 떠 있는 회의 카드(또는 탭)의 목록만 다시 그린다 — 입력줄은 건드리지 않아 한글 조합·초점이 그대로다.
 function meetingItemsRepaint(host) {
   const box = host && host.box ? host.box() : null;
+  if (box && typeof box.meetingRepaintPast === 'function') box.meetingRepaintPast();
   if (box && typeof box.meetingRepaint === 'function') box.meetingRepaint();
 }
 function meetingCaptureFocus(host) {
@@ -960,10 +975,11 @@ async function meetingCaptureSave(event, linked, entry) {
   return result.id;
 }
 
+const meetingCaptureQueue = event => `meeting-capture:${meetingCaptureKey(event)}`;
 // 한 줄을 보낸다. 같은 회의의 저장은 한 줄로 서서 적은 순서대로 나가고, 앞 줄이 실패해도 다음 줄은 그대로 보낸다.
 // 목록은 대기열의 마지막 줄이 끝났을 때 한 번만 다시 읽는다(여러 줄을 붙여 넣어도 다시 읽기는 한 번).
 function meetingCaptureSend(event, linked, entry, host) {
-  const queueKey = `meeting-capture:${panelMeetingKey(event)}`;
+  const queueKey = meetingCaptureQueue(event);
   entry.state = 'pending';
   const run = uiQueueSend(queueKey, async () => {
     try {
@@ -983,9 +999,10 @@ function meetingCaptureSend(event, linked, entry, host) {
 // 다시 실행은 휴지통에서 되살린다. ⌘Z와 누르는 화면의 알림 `되돌리기`가 같은 기록을 쓴다.
 function meetingCaptureUndo(event, entry) {
   if (!entry.id) return;
-  const key = panelMeetingKey(event);
+  const key = meetingCaptureKey(event);
   const record = {
     label: `${entry.text} (회의에서 적기)`,
+    captureKey: key, // 입력줄의 ⌘Z가 "이 회의에서 방금 적어 담은 줄"인지 가리는 표시
     undo: async () => {
       await postJson('/api/track/remove', { id: entry.id });
       const left = (meetingCaptureLocal.get(key) || []).filter(other => other !== entry);
@@ -1003,7 +1020,7 @@ function meetingCaptureUndo(event, entry) {
 }
 
 function meetingCaptureAdd(event, linked, entries, host) {
-  const key = panelMeetingKey(event);
+  const key = meetingCaptureKey(event);
   const fresh = entries.filter(entry => entry.text)
     .map(entry => ({ seq: ++meetingCaptureSeq, type: entry.type, text: entry.text, state: 'pending', id: null, fresh: true }));
   if (!fresh.length) return [];
@@ -1013,7 +1030,7 @@ function meetingCaptureAdd(event, linked, entries, host) {
 }
 
 function meetingCaptureDrop(event, entry, host) {
-  const key = panelMeetingKey(event);
+  const key = meetingCaptureKey(event);
   const left = (meetingCaptureLocal.get(key) || []).filter(other => other !== entry);
   if (left.length) meetingCaptureLocal.set(key, left); else meetingCaptureLocal.delete(key);
   meetingItemsRepaint(host);
@@ -1087,7 +1104,7 @@ function meetingItemsInOrder(items) {
 
 function panelMeetingItems(event, box, host = MEETING_HOST_CARD) {
   const linked = !!event.id;
-  const key = panelMeetingKey(event);
+  const key = meetingCaptureKey(event);
   const { section, number } = meetingSection(linked ? '이 회의에서 나온 것' : '방금 담은 것', 0);
   const list = document.createElement('div');
   list.className = 'd-mlist';
@@ -1135,6 +1152,7 @@ function panelMeetingItems(event, box, host = MEETING_HOST_CARD) {
     hint.hidden = !blank || !!count;
     // 방금 적은 줄이 입력줄 바로 위에 보이게.
     if (added && added.scrollIntoView) added.scrollIntoView({ block: 'nearest' });
+    meetingTypeOrphan(host);
   };
   box.meetingRepaint = paint;
   box.append(section, hint);
@@ -1142,18 +1160,34 @@ function panelMeetingItems(event, box, host = MEETING_HOST_CARD) {
 }
 
 // 같은 이름으로 반복되는 회의라면, 지난 회차에서 아직 안 끝난 것을 여기서 같이 본다(줄마다 회차 표기).
+// 종류를 바꾸면(입력줄에 초점이 있어 카드가 다시 그려지지 않아도) 이 구역도 함께 맞춘다(meetingItemsRepaint).
 function panelMeetingPast(event, box, host = MEETING_HOST_CARD) {
   if (!event.series) return;
-  const meetings = (typeof workflowData === 'object' && workflowData ? workflowData.meetings : null) || [];
-  const past = meetings
-    .filter(other => other.id !== event.id && other.series === event.series && (other.date || '') < (event.date || ''))
-    .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  const rows = [];
-  past.forEach(other => wfMeetingItems(other.id).filter(item => item.status !== 'done').forEach(item => rows.push({ item, at: other.date })));
-  if (!rows.length) return;
-  const { section } = meetingSection('이전 회차의 미해결 항목', rows.length);
-  rows.forEach(({ item, at }) => section.appendChild(panelMeetingRow(item, event, `${uiKoDateShort(at)} 회차`, host)));
+  const collect = () => {
+    const meetings = (typeof workflowData === 'object' && workflowData ? workflowData.meetings : null) || [];
+    const past = meetings
+      .filter(other => other.id !== event.id && other.series === event.series && (other.date || '') < (event.date || ''))
+      .sort((x, y) => (y.date || '').localeCompare(x.date || ''));
+    const rows = [];
+    past.forEach(other => wfMeetingItems(other.id).filter(item => item.status !== 'done').forEach(item => rows.push({ item, at: other.date })));
+    return rows;
+  };
+  if (!collect().length) return;
+  const { section, number } = meetingSection('이전 회차의 미해결 항목', 0);
+  const list = document.createElement('div');
+  list.className = 'd-mlist';
+  section.appendChild(list);
+  const paint = () => {
+    const active = document.activeElement;
+    if (active && list.contains && list.contains(active) && uiIsTextEntry(active)) return;
+    const rows = collect();
+    list.replaceChildren(...rows.map(({ item, at }) => panelMeetingRow(item, event, `${uiKoDateShort(at)} 회차`, host)));
+    number.textContent = String(rows.length);
+    section.hidden = !rows.length;
+  };
+  box.meetingRepaintPast = paint;
   box.appendChild(section);
+  paint();
 }
 
 // 카드 발에 붙박인 입력줄 — 평소 맨 줄, 초점에서만 흰 면 + 파란 테. 칸은 저장 중에도 잠그지 않는다.
@@ -1167,7 +1201,7 @@ function panelMeetingCapture(event, box, linked, host = MEETING_HOST_CARD) {
   plus.innerHTML = uiIcon('plus');
   const input = document.createElement('input');
   input.type = 'text';
-  input.maxLength = 1000;
+  input.maxLength = MEETING_TEXT_MAX;
   input.placeholder = '회의에서 나온 것 적기';
   input.autocomplete = 'off';
   input.setAttribute('aria-label', '회의에서 나온 것 적기');
@@ -1180,19 +1214,30 @@ function panelMeetingCapture(event, box, linked, host = MEETING_HOST_CARD) {
     const { type } = meetingCaptureParse(input.value);
     kind.textContent = type === 'task' ? '' : wfType(type);
   };
-  input.addEventListener('input', showKind);
+  // 마지막으로 칸을 비운 뒤 이 칸에서 글을 친 적이 있는지 — 있으면 ⌘Z는 브라우저의 글자 되돌리기 몫이다.
+  let typed = false;
+  input.addEventListener('input', () => { typed = true; showKind(); });
   input.addEventListener('keydown', (keyEvent) => {
-    // 칸이 비어 있을 때의 ⌘Z는 방금 적어 담은 줄을 되돌린다(⇧⌘Z는 다시 실행) — 초점이 입력줄을 떠나지 않아도 되게.
-    // 글을 적는 중이면 평소처럼 그 글의 실행 취소다.
-    if ((keyEvent.metaKey || keyEvent.ctrlKey) && !keyEvent.altKey && String(keyEvent.key).toLowerCase() === 'z' && !input.value) {
+    // 칸이 비어 있을 때의 ⌘Z는 **이 회의에서 방금 적어 담은 줄**만 되돌린다(⇧⌘Z는 그 줄을 다시 담는다) — 초점이 입력줄을
+    // 떠나지 않아도 되게. 그 밖에는 가로채지 않는다: 글을 적는 중이거나, 이 칸에서 치다 지운 글이 있거나(브라우저의 글자
+    // 되돌리기가 살릴 수 있다), 되돌리기 맨 위 기록이 다른 일(초안 빼기·다른 화면의 작업)일 때.
+    if ((keyEvent.metaKey || keyEvent.ctrlKey) && !keyEvent.altKey && String(keyEvent.key).toLowerCase() === 'z' && !input.value && !typed) {
+      const key = meetingCaptureKey(event);
+      const redo = !!keyEvent.shiftKey;
+      const mine = () => { const stack = redo ? redoStack : undoStack; const top = stack[stack.length - 1]; return !!top && top.captureKey === key; };
+      // 아직 저장 중인 줄이 있으면 끝나기를 기다렸다가 그 줄을 되돌린다(그 줄의 기록은 저장이 끝나야 생긴다).
+      const waiting = !redo && (meetingCaptureLocal.get(key) || []).some(entry => entry.state === 'pending');
+      if (!waiting && !mine()) return;
       if (keyEvent.preventDefault) keyEvent.preventDefault();
-      return replayUndo(keyEvent.shiftKey ? 'redo' : 'undo').then(() => meetingItemsRepaint(host));
+      return Promise.resolve(waiting ? uiSendQueues.get(meetingCaptureQueue(event)) : null)
+        .then(() => (mine() ? replayUndo(redo ? 'redo' : 'undo').then(() => meetingItemsRepaint(host)) : null));
     }
     if (keyEvent.key !== 'Enter' || keyEvent.isComposing) return; // 한글을 조합하는 중의 Enter는 글자를 확정하는 것이다
     if (keyEvent.preventDefault) keyEvent.preventDefault();
     const raw = input.value;
     if (!raw.trim()) return;
     input.value = ''; // 칸을 먼저 비운다 — 잠그지 않으니 곧바로 다음 줄을 칠 수 있다
+    typed = false;
     kind.textContent = '';
     return Promise.all(meetingCaptureAdd(event, linked, [meetingCaptureParse(raw)], host));
   });
@@ -1205,6 +1250,11 @@ function panelMeetingCapture(event, box, linked, host = MEETING_HOST_CARD) {
     const entries = meetingCaptureLines(text);
     if (entries.length > MEETING_PASTE_MAX) {
       showNotice(`한 번에 ${MEETING_PASTE_MAX}줄까지 담을 수 있어요(지금 ${entries.length}줄). 나눠서 붙여 넣어 주세요`, true);
+      return;
+    }
+    const long = entries.filter(entry => entry.text.length > MEETING_TEXT_MAX).length;
+    if (long) {
+      showNotice(`한 줄은 ${MEETING_TEXT_MAX}자까지 담을 수 있어요(넘는 줄 ${long}개). 줄을 나눠서 붙여 넣어 주세요`, true);
       return;
     }
     return Promise.all(meetingCaptureAdd(event, linked, entries, host));
