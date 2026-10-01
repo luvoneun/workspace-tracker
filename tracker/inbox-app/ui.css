@@ -633,7 +633,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 
 /* 제목 아래의 조용한 한 줄(프로젝트 탭의 `열린 항목 8`) */
 .d-quiet { font-size: 13.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
-/* ---------- 레일 한 줄 요약 — 자리를 옮겼다(`오늘 들어온 것 N`은 새로 들어온 것 제목 오른쪽 끝) ---------- */
+/* ---------- 레일 한 줄 요약 — 숨겨 둔 옛 자리(숫자 칸은 갱신 코드가 그대로 쓴다) ---------- */
 #railSummary { display: none; }
 
 /* ---------- 오늘 레이아웃 (레일 296px + 본문) ---------- */
@@ -751,7 +751,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 .d-wrow.is-two .sub { display: flex; align-items: center; flex-wrap: nowrap; gap: 4px 10px; white-space: nowrap; overflow: hidden; }
 .d-wrow.is-two .sub > * { flex: none; }
 .d-wrow.is-two .sub .who { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-weight: 600; }
-.d-wrow.is-two .sub .nx { color: var(--dim); }
+.d-wrow.is-two .sub .nx { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--dim); }
 .d-wrow.is-two .sub .rp { font-weight: 600; }
 .d-wrow.is-two .sub .rp.k-neg { color: var(--urgent); }
 .d-wrow.is-two .sub .rp.k-warn { color: var(--warn); }
@@ -848,7 +848,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   border-radius: 999px; background: var(--warn-bg); color: var(--warn);
   font-size: 12.5px; font-weight: 600;
 }
-/* 제목 오른쪽 끝의 조용한 글자 버튼(`오늘 들어온 것 N` — 누르면 팔레트가 오늘 들어온 것만 모아 준다) */
+/* 조용한 글자 버튼(.d-headnum) — 28px, 오른쪽 끝으로 민다 */
 .d-headnum {
   margin-left: auto; height: var(--h-sm); padding: 0 6px; border: 0; border-radius: var(--r-xs);
   background: none; color: var(--dim); font: inherit; font-size: var(--fs-sm); font-weight: 500;
@@ -1028,14 +1028,14 @@ button.d-guide .t { color: var(--accent-text); }
 .d-lhd h2::before { display: none; }
 .d-lhd .sub { display: inline-flex; align-items: center; gap: 10px; color: var(--dim); font-size: 13.5px; font-weight: 500; }
 /* 오늘 할 일의 끝낸 개수 칩 `✓ 5/19` — 파란 칩, 전부 끝내면 초록. 숫자가 바뀔 때 짧게 올라온다 */
-.d-lhd .sub .cnt {
+.d-lhd .sub .cnt, .d-wrapsum.cnt {
   height: var(--h-xs); display: inline-flex; align-items: center; gap: 4px; padding: 0 9px 0 7px;
   border-radius: 999px; background: var(--accent-soft); color: var(--accent-text);
   font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; transition: background 200ms var(--ease);
 }
 .d-lhd .sub .cnt[hidden] { display: none; }
-.d-lhd .sub .cnt .gl { width: 12px; height: 12px; flex: none; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.d-lhd .sub .cnt.is-full { background: var(--success-bg); color: var(--success); }
+.d-lhd .sub .cnt .gl, .d-wrapsum.cnt .gl { width: 12px; height: 12px; flex: none; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.d-lhd .sub .cnt.is-full, .d-wrapsum.cnt.is-full { background: var(--success-bg); color: var(--success); }
 .d-lhd .sub .cnt b { display: inline-block; font-weight: 600; }
 .d-lhd .sub .cnt b.tick { animation: d-tick 200ms var(--ease); }
 @keyframes d-tick { from { transform: translateY(4px); opacity: 0.35; } to { transform: none; opacity: 1; } }
@@ -2845,11 +2845,7 @@ a.d-btn { text-decoration: none; }
    상태말은 업무 줄과 같은 칸(.d-meta)을 그대로 쓴다. */
 #wrapDialog { width: min(720px, calc(100vw - 32px)); }
 .d-mhd .d-wrapdate { font-size: var(--fs-sm); color: var(--dim); font-variant-numeric: tabular-nums; }
-.d-wrapsum {
-  display: inline-flex; align-items: center; height: var(--h-xs); margin: 0 0 8px; padding: 0 9px;
-  border-radius: 999px; background: var(--accent-soft); color: var(--accent-text);
-  font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums;
-}
+.d-wrapsum { margin: 0 0 8px; }
 .d-wrapdone {
   padding: 4px 0 4px 22px; font-size: var(--fs-sm); color: var(--dim);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

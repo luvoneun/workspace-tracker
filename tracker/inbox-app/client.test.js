@@ -4326,6 +4326,9 @@ test('확인 대기 레일 줄: 늦음은 색 글자 하나로 서고 `N일째`�
   assert.match(nodeText(nodeFind(app.run("renderWaitingRow(wfItem('ck1'))"), 'who')), /일째/, '늦지 않으면 며칠째가 선다');
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
   assert.match(css, /^\.d-wrow\.is-two \.sub \{[^}]*flex-wrap: nowrap;/m, '둘째 줄은 한 줄 — `슬랙 ↗`가 밀려 내려가지 않는다');
+  assert.match(css, /^\.d-wrow\.is-two \.sub > \* \{ flex: none; \}/m, '`슬랙 ↗`(.d-src)는 줄어들지 않는다');
+  assert.match(css, /^\.d-wrow\.is-two \.sub \.nx \{ flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;/m, '`다시 확인` 말은 모자라면 말줄임으로 양보한다');
+  assert.match(css, /^\.d-wrow\.is-two \.sub \.who \{ flex: 0 1 auto; min-width: 0;/m, '상대 이름도 양보한다');
 });
 
 test('프로젝트 탭 확인 대기 줄: 늦음도 같은 색 글자다(레일과 한 모양)', () => {
@@ -7325,7 +7328,9 @@ test('BWRAP: 대상은 오늘 목록의 미완료 업무뿐이고, 기본은 전
   assert.equal(fixture.app.run('wrapState.rows.map(row => row.id).join(",")'), 'w1,w2,w3,w4',
     '완료한 줄도, 나중에 할 일도 대상이 아니다');
   assert.equal(fixture.app.run('wrapState.rows.every(row => row.choice === "keep")'), true, '앱이 미룰 것을 추측하지 않는다');
-  assert.equal(nodeFind(fixture.body(), 'd-wrapsum').textContent, '✓ 2/6', '머리줄 칩과 같은 `✓ 끝낸/전체` 모양 — 문장은 없다');
+  assert.equal(nodeText(nodeFind(fixture.body(), 'd-wrapsum')).trim(), '2/6', '머리줄 칩과 같은 `✓ 끝낸/전체` 모양(체크 아이콘 + 숫자) — 문장은 없다');
+  assert.match(nodeHtml(nodeFind(fixture.body(), 'd-wrapsum')), /<svg class="gl"[^>]*><path d="M2\.2 6\.4 4\.9 9 9\.8 3\.2"\/>/, '머리줄 칩과 같은 체크 아이콘');
+  assert.ok(String(nodeFind(fixture.body(), 'd-wrapsum').className).split(' ').includes('cnt'), '머리줄 칩과 같은 클래스');
   assert.equal(nodeFind(fixture.body(), 'd-wrapsum').getAttribute('aria-label'), '6개 중 2개 끝냈어요', '화면 읽기에는 뜻이 남는다');
   assert.equal(fixture.go().textContent, '바꿀 게 없어요');
   assert.equal(fixture.go().disabled, true);
@@ -7441,7 +7446,7 @@ test('BWRAP: `끝낸 것`은 접힌 소제목이고, 0개면 소제목 자체가
   const none = wrapClient(({ today }) => [wrapTask('w1', '남은 업무', { doing: today })]);
   none.app.run('wrapOpen()');
   assert.deepEqual(nodeFindAll(none.body(), 'd-grp').map(head => nodeFind(head, 'gl').textContent), ['남은 것']);
-  assert.equal(nodeFind(none.body(), 'd-wrapsum').textContent, '✓ 0/1');
+  assert.equal(nodeText(nodeFind(none.body(), 'd-wrapsum')).trim(), '0/1');
 });
 
 // ---------- BATTENTION: 오늘 탭 맨 위의 `반응 필요` (1차 지라 댓글) ----------

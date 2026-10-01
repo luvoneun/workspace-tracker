@@ -3943,7 +3943,7 @@ function detailUnmount() {
   window.removeEventListener('resize', detailPopFollow);
 }
 
-// ---------- ⌘K 검색 팔레트 (검색 · 오늘 신규) ----------
+// ---------- ⌘K 검색 팔레트 (검색 · 오늘 들어온 것) ----------
 // 큰 창 대신 위에서 내려오는 한 겹. 여기는 **찾는 창**이다 — 훑어보며 몰아서 정리하는 일은 `회의` 탭이 맡는다
 // (DECISIONS 2026-09-22). 찾는 범위는 예전 통합 검색과 같다: 완료한 업무와 결과 한 줄,
 // 결정·확인 대기·아이디어, 회의와 회의 초안 문구까지(외부 미팅 노트 전문은 찾지 않는다 — README와 같다).
@@ -3964,7 +3964,7 @@ function palDefaults(state) {
   return { query: '', type: '', hideDone: false, newOnly: false, active: 0, scroll: 0, ...(state || {}) };
 }
 
-// 항목 거르기(순수 함수): 종류 · 완료 제외 · 오늘 신규 · 검색어. 회의는 palMeetings가 따로 본다.
+// 항목 거르기(순수 함수): 종류 · 완료 제외 · 오늘 들어온 것 · 검색어. 회의는 palMeetings가 따로 본다.
 // 검색어도 필터도 없으면 아무것도 돌려주지 않는다 — 팔레트는 그때 안내 문구만 보여 준다.
 function palFilter(items, state) {
   if (state.type === 'meeting') return [];
@@ -3981,7 +3981,7 @@ function palFilter(items, state) {
   });
 }
 
-// 회의 거르기(순수 함수): 초안 있음 · 미완료만 · 오늘 신규 · 검색어(초안 문구와 이 회의에서 나온 항목까지).
+// 회의 거르기(순수 함수): 초안 있음 · 미완료만 · 오늘 들어온 것 · 검색어(초안 문구와 이 회의에서 나온 항목까지).
 // 검토할 초안이 있는 회의가 언제나 먼저 온다 — 지금 손댈 것이 위로.
 // 팔레트는 검색어·종류만 넘기고, `초안 있음`·`미완료만`은 회의 탭(meetingsTabList)이 넘긴다.
 // 미완료는 할 일·확인 대기만 센다 — 결정은 세지 않는다(meetingUnresolvedCount와 같은 기준).

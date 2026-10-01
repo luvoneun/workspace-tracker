@@ -36,8 +36,9 @@ function wrapTodayTasks() {
 const wrapOpenTasks = items => (items || []).filter(item => item.status !== 'done');
 const wrapDoneTasks = items => (items || []).filter(item => item.status === 'done');
 
-// 머리줄 칩(`✓ 2/6`)과 같은 모양 — 남은 개수는 아래 `남은 것 N` 소제목이 말한다.
-const wrapSummaryText = (total, done) => `✓ ${done}/${total}`;
+// 머리줄 칩(`✓ 2/6`)과 같은 모양(같은 체크 아이콘·같은 칩 CSS) — 남은 개수는 아래 `남은 것 N` 소제목이 말한다.
+const WRAP_CHECK_ICON = '<svg class="gl" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.2 6.4 4.9 9 9.8 3.2"/></svg>';
+const wrapSummaryText = (total, done) => `${done}/${total}`;
 const wrapSummaryLabel = (total, done) => `${total}개 중 ${done}개 끝냈어요`;
 
 function wrapCounts(rows) {
@@ -178,9 +179,14 @@ function wrapRender() {
   body.replaceChildren();
 
   const summary = document.createElement('div');
-  summary.className = 'd-wrapsum';
+  summary.className = 'd-wrapsum cnt';
   const wrapTotal = wrapState.rows.length + wrapState.done.length;
-  summary.textContent = wrapSummaryText(wrapTotal, wrapState.done.length);
+  summary.insertAdjacentHTML('beforeend', WRAP_CHECK_ICON);
+  const wrapNum = document.createElement('span');
+  wrapNum.className = 'n';
+  wrapNum.setAttribute('aria-hidden', 'true');
+  wrapNum.textContent = wrapSummaryText(wrapTotal, wrapState.done.length);
+  summary.appendChild(wrapNum);
   summary.setAttribute('role', 'img');
   summary.setAttribute('aria-label', wrapSummaryLabel(wrapTotal, wrapState.done.length));
   summary.title = wrapSummaryLabel(wrapTotal, wrapState.done.length);
