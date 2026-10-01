@@ -1962,25 +1962,31 @@ async function reportPlanAddOne(item, { text, group, alsoTask }) {
 }
 
 // 여러 줄을 차례로 담는다. 중간에 실패하면 거기서 멈추고 남은 줄을 입력칸에 되돌려 놓는다.
-async function reportPlanAddLines(item, lines, { key, group, alsoTask, focusId }) {
+// `taken`: 입력칸을 들고 있는 쪽이 보낼 글을 이미 칸에서 꺼냈다(Enter·붙여넣기) — 담는 동안 새로 친 글은 건드리지 않는다.
+async function reportPlanAddLines(item, lines, { key, group, alsoTask, focusId, taken = false }) {
   const names = reportPlanProjectNames();
+  const full = `${item.weekKey}:${key}`;
   let madeTask = false;
   // 담는 동안 입력칸은 비워 둔다 — 실패하면 남은 줄을 그 자리에 되돌려 놓는다.
-  reportEdits.delete(`${item.weekKey}:${key}`);
+  if (!taken) reportEdits.delete(full);
   for (let index = 0; index < lines.length; index += 1) {
     const line = reportPlanSplitPrefix(lines[index], names, group);
     try {
       madeTask = (await reportPlanAddOne(item, { text: line.text, group: line.group, alsoTask })) || madeTask;
     } catch (error) {
-      reportEdits.set(`${item.weekKey}:${key}`, lines.slice(index).join('\n'));
+      const rest = lines.slice(index).join('\n');
+      // 그 사이 칸에 새 글을 치고 있으면 덮어쓰지 않고, 어떤 글이 안 됐는지만 알린다.
+      const busy = !!String(reportEdits.get(full) || '').trim();
+      if (!busy) reportEdits.set(full, rest);
       if (madeTask) await load();
       renderReportDraft(item);
       document.getElementById(focusId)?.focus();
-      showNotice(error.message || '저장됐는지 확인하지 못했어요. 적은 내용은 그대로 있어요', true);
+      if (busy) uiUnsavedNotice(rest, `report:${full}`);
+      else showNotice(error.message || '저장됐는지 확인하지 못했어요. 적은 내용은 그대로 있어요', true);
       return;
     }
   }
-  reportEdits.delete(`${item.weekKey}:${key}`);
+  // 성공한 뒤 늦게 비우지 않는다 — 담는 동안 새로 친 글(reportEdits)은 그대로 다시 그려진다.
   // 만든 업무가 `나중에 할 일` 서랍과 후보 목록에 바로 보이게 목록을 다시 받는다.
   if (madeTask) await load();
   renderReportDraft(item);
@@ -2009,13 +2015,19 @@ function reportPlanInput(item, { key, id, placeholder, label, groupOf, alsoTaskO
   el.addEventListener('input', () => {
     if (el.value) reportEdits.set(full, el.value); else reportEdits.delete(full);
   });
-  const submit = async () => {
+  // 칸은 잠그지 않는다(잠긴 칸에 친 글자는 브라우저가 버린다) — 보낼 글을 꺼내 칸을 바로 비우고,
+  // 같은 칸의 저장은 대기열로 하나씩 순서대로 담는다(오늘 목록 입력칸과 같은 uiQueueSend).
+  const send = (lines) => {
+    const opts = { key, group: groupOf(), alsoTask: alsoTaskOf(), focusId: id, taken: true };
+    return uiQueueSend(`report:${full}`, () => reportPlanAddLines(item, lines, opts))
+      .catch(error => showNotice(error.message || '저장됐는지 확인하지 못했어요. 적은 내용은 그대로 있어요', true));
+  };
+  const submit = () => {
     const lines = reportPlanLines(el.value);
     if (!lines.length) return;
-    el.disabled = true;
-    try { await reportPlanAddLines(item, lines, { key, group: groupOf(), alsoTask: alsoTaskOf(), focusId: id }); }
-    catch (error) { showNotice(error.message || '저장됐는지 확인하지 못했어요. 적은 내용은 그대로 있어요', true); }
-    finally { el.disabled = false; }
+    el.value = '';
+    reportEdits.delete(full);
+    return send(lines);
   };
   el.addEventListener('keydown', async (event) => {
     if (event.key === 'Escape' && !event.isComposing && key !== REPORT_PLAN_BOTTOM_KEY) {
@@ -2024,7 +2036,7 @@ function reportPlanInput(item, { key, id, placeholder, label, groupOf, alsoTaskO
       return;
     }
     // 한글을 조합하는 중의 Enter는 글자를 확정하는 것이지 추가가 아니다.
-    if (event.key !== 'Enter' || event.isComposing || event.shiftKey || el.disabled) return;
+    if (event.key !== 'Enter' || event.isComposing || event.shiftKey) return;
     event.preventDefault();
     await submit();
   });
@@ -2036,11 +2048,8 @@ function reportPlanInput(item, { key, id, placeholder, label, groupOf, alsoTaskO
     event.preventDefault();
     const lines = reportPlanLines(pasted);
     if (!lines.length) return;
-    el.disabled = true;
-    Promise.resolve()
-      .then(() => reportPlanAddLines(item, lines, { key, group: groupOf(), alsoTask: alsoTaskOf(), focusId: id }))
-      .catch(error => showNotice(error.message || '저장됐는지 확인하지 못했어요. 적은 내용은 그대로 있어요', true))
-      .finally(() => { el.disabled = false; });
+    // 붙여넣은 줄은 칸에 들어가지 않는다 — 칸에 적던 글은 그대로 두고 붙여넣은 줄만 담는다.
+    send(lines);
   });
   return el;
 }

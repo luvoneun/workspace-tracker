@@ -601,6 +601,49 @@ function uiGroupHeading(label, count, opts = {}) {
   return head;
 }
 
+// 글자 칸의 Enter 저장은 칸을 잠그지 않는다 — 잠긴(disabled) 칸에 친 글자는 브라우저가 버려서,
+// "적고 Enter, 곧바로 다음 줄"을 치면 앞 글자(한글은 첫 음절)가 사라지고 빠른 두 번째 Enter는 조용히 묻혔다.
+// 그래서 Enter 순간의 글을 들고 칸을 바로 비우고, 같은 칸(열쇠)의 저장은 이 대기열로 하나씩 순서대로 보낸다.
+// 앞 건이 실패해도 다음 건은 그대로 보낸다. 같은 글을 두 번 보내도 각각 저장한다(일부러 같은 글을 넣을 수 있다).
+const uiSendQueues = new Map();
+function uiQueueSend(key, job) {
+  const run = (uiSendQueues.get(key) || Promise.resolve()).then(job);
+  const tail = run.catch(() => {});
+  run.queueTail = tail;
+  uiSendQueues.set(key, tail);
+  tail.then(() => { if (uiSendQueues.get(key) === tail) uiSendQueues.delete(key); });
+  return run;
+}
+
+// 저장하지 못한 글 되돌리기 — 칸이 비어 있으면 그 글을 칸에 되돌린다(적은 글을 잃지 않게).
+// 칸에 이미 다른 글을 치고 있거나 칸이 사라졌으면(다른 탭으로 옮김) 덮어쓰지 않고 어떤 글이 안 됐는지 알린다.
+// `run`은 실패한 그 저장(uiQueueSend가 돌려준 것) — 뒤에 기다리던 저장이 있는지 가리는 데 쓴다.
+function uiSendRestore(input, text, queueKey, run) {
+  const restored = !!(input && input.isConnected !== false && !String(input.value || '').trim());
+  if (restored) {
+    input.value = text;
+    const row = input.closest?.('.d-addrow');
+    if (row) row.hidden = false;
+    // 다른 칸으로 옮겨 가 있으면 초점을 뺏지 않는다.
+    const active = document.activeElement;
+    if (!active || active === input || active === document.body) input.focus();
+  }
+  uiUnsavedNotice(text, queueKey, run, restored);
+  return restored;
+}
+// 어떤 글이 저장 안 됐는지 알린다. 뒤에 기다리던 저장의 `저장 중…`·`저장했어요`가 이 알림을 덮지 않게
+// 같은 칸의 대기열이 다 끝난 뒤에 띄운다. 글을 칸에 되돌렸고 뒤에 기다리는 저장도 없으면
+// request()가 이미 띄운 알림("입력한 내용은 그대로 있어요" 또는 복구 필요 안내)을 그대로 둔다.
+function uiUnsavedNotice(text, queueKey, run = null, restored = false) {
+  const tail = queueKey ? uiSendQueues.get(queueKey) : null;
+  const later = !!tail && (!run || tail !== run.queueTail);
+  if (restored && !later) return;
+  const shown = String(text).replace(/\s+/g, ' ').trim();
+  const show = () => showNotice(`“${shown.length > 40 ? `${shown.slice(0, 40)}…` : shown}” 저장됐는지 확인하지 못했어요. ${restored
+    ? '적은 글은 칸에 그대로 있어요' : '칸에 다른 글이 있어 되돌리지 않았어요 — 다시 적어 주세요'}`, true);
+  if (tail) tail.then(show); else show();
+}
+
 // 그룹 제목의 `+`로 여는 그 자리 입력줄. 저장 뒤 목록을 다시 그려도 같은 줄로 포커스가 돌아온다.
 function uiGroupAddRow(key, endpoint, announceText) {
   const row = document.createElement('div');
@@ -612,33 +655,37 @@ function uiGroupAddRow(key, endpoint, announceText) {
   input.className = 'd-addinput';
   input.placeholder = '이 그룹에 추가 — Enter';
   input.setAttribute('aria-label', `${key === '__misc__' ? '프로젝트 없음' : key.slice(key.indexOf(':') + 1)} 그룹에 할 일 추가`);
-  input.addEventListener('keydown', async (event) => {
+  input.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && !event.isComposing) { row.hidden = true; return; }
-    if (event.key !== 'Enter' || event.isComposing || input.disabled) return;
+    if (event.key !== 'Enter' || event.isComposing) return;
     const description = input.value.trim();
     if (!description) return;
-    input.disabled = true;
+    // 칸은 잠그지 않고 바로 비운다 — 저장 중에 친 다음 글자는 그대로 남는다(uiQueueSend).
+    input.value = '';
     const payload = { description };
     if (key.startsWith('jira:')) payload.jira = key.slice(5);
     else if (key.startsWith('group:')) payload.group = key.slice(6);
-    try {
+    const addKey = row.dataset.addKey;
+    // 저장 사이에 목록이 다시 그려졌으면 같은 이름표의 새 칸이 이 줄이다.
+    const current = () => (input.isConnected ? input
+      : [...(document.querySelectorAll?.('.d-addrow') || [])].find(node => node.dataset?.addKey === addKey)?.querySelector('.d-addinput') || null);
+    const run = uiQueueSend(addKey, async () => {
       await request(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      input.value = '';
       announce(announceText);
       await load();
       // load()가 목록을 다시 그려서 이 입력칸은 떨어져 나간다 — 같은 그룹의 새 줄을 찾아 다시 연다.
-      const reopened = document.querySelector(`.d-addrow[data-add-key="${CSS.escape(row.dataset.addKey)}"] .d-addinput`);
-      if (reopened) { reopened.closest('.d-addrow').hidden = false; reopened.focus(); }
-    } catch { /* Keep the draft for retry. */ }
-    finally { input.disabled = false; if (input.isConnected) input.focus(); }
+      const reopened = current();
+      if (reopened && reopened !== input) { reopened.closest('.d-addrow').hidden = false; reopened.focus(); }
+    });
+    return run.catch(() => { uiSendRestore(current(), description, addKey, run); });
   });
   // 다른 곳을 누르면 닫는다 — 적던 글이 있으면 잃지 않게 그대로 둔다. 늘 보이는 프로젝트 상세 줄(d-padd)은 닫지 않는다.
   input.addEventListener('blur', () => {
-    if (input.disabled || input.value.trim() || String(row.className).includes('d-padd')) return;
+    if (input.value.trim() || String(row.className).includes('d-padd')) return;
     row.hidden = true;
   });
   row.appendChild(input);
@@ -5636,21 +5683,21 @@ async function setTaskJira(id, jiraKey) {
 
 function setupQuickAdd(inputId, endpoint, announceText) {
   const input = document.getElementById(inputId);
-  input.addEventListener('keydown', async (e) => {
-    if (e.key !== 'Enter' || e.isComposing || input.disabled) return;
+  input.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.isComposing) return;
     const description = input.value.trim();
     if (!description) return;
-    input.disabled = true;
-    try {
+    // 칸은 잠그지 않고 바로 비운다 — 저장 중에 친 다음 글자는 그대로 남고, 연속 Enter는 순서대로 저장된다.
+    input.value = '';
+    const run = uiQueueSend(inputId, async () => {
       await request(endpoint, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ description }),
       });
-      input.value = '';
       announce(announceText);
       await load();
-    } catch { /* Keep the draft for retry. */ }
-    finally { input.disabled = false; input.focus(); }
+    });
+    return run.catch(() => { uiSendRestore(input, description, inputId, run); });
   });
 }
 

@@ -63,11 +63,14 @@ function waitingNextEdit(bar, { value, placeholder, label, buttons, onSubmit }) 
   };
   escPush(cancel);
 
+  // 보내는 동안 글자 칸은 잠그지 않는다(잠긴 칸에 친 글자는 브라우저가 버린다) — 두 번 보내지 않게 표시만 따로 둔다.
+  // 한 번 쓰고 닫히는 칸이라 대기열은 없다: 성공하면 줄이 닫히고, 실패하면 칸의 글이 그대로 남는다.
+  let sending = false;
   const submit = async (mode, button) => {
-    if (settled || input.disabled) return;
+    if (settled || sending) return;
     const text = input.value.replace(/[\r\n]+/g, ' ').trim();
     if (!text) { cancel(); return; }
-    input.disabled = true;
+    sending = true;
     if (button) button.disabled = true;
     try {
       await onSubmit(text, mode);
@@ -75,10 +78,9 @@ function waitingNextEdit(bar, { value, placeholder, label, buttons, onSubmit }) 
       escDrop(cancel);
       waitingNextClose();
     } catch {
-      input.disabled = false;
       if (button) button.disabled = false;
       input.focus();
-    }
+    } finally { sending = false; }
   };
   buttons.forEach(([mode, text]) => {
     const button = document.createElement('button');

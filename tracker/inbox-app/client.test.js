@@ -112,6 +112,180 @@ test('quick-add ignores IME composition and clears input only after a successful
   assert.equal(input.disabled, false);
 });
 
+// 입력 씹힘: 저장 응답을 손으로 풀어 주는 가짜 서버. 보낸 순서·본문을 그대로 모은다.
+function heldFetch(app) {
+  const held = [];
+  app.context.fetch = (url, options) => new Promise(resolve => held.push({
+    url, body: options && options.body ? JSON.parse(options.body) : null,
+    ok: () => resolve(new Response('{"ok":true}')),
+    fail: () => resolve(new Response('{"ok":false}', { status: 500 })),
+  }));
+  return held;
+}
+const settle = async () => { for (let i = 0; i < 10; i += 1) await new Promise(resolve => setImmediate(resolve)); };
+
+test('입력 씹힘 ①: Enter 뒤 칸은 잠그지 않고 바로 비운다 — 응답이 느려도 그 사이 친 글자는 남고, 응답 뒤에 늦게 비우지 않는다', async () => {
+  const app = client(new Response('{"ok":true}'));
+  const held = heldFetch(app);
+  app.run("setupQuickAdd('draft', '/api/today-task/create', '추가함')");
+  const input = app.nodes.get('draft');
+  input.value = 'first task A';
+  const sending = input.listeners.keydown({ key: 'Enter', isComposing: false });
+  assert.equal(input.disabled, false, '저장 중에도 칸은 잠기지 않는다(잠기면 브라우저가 글자를 버린다)');
+  assert.equal(input.value, '', 'Enter 순간 칸을 비운다');
+  input.value = 'second typed fast';
+  await settle();
+  assert.equal(held.length, 1);
+  assert.deepEqual(held[0].body, { description: 'first task A' });
+  held[0].ok();
+  await sending;
+  assert.equal(input.value, 'second typed fast', '저장 응답 뒤에 칸을 비우지 않는다 — 그 사이 친 글자가 그대로다');
+  assert.equal(input.disabled, false);
+});
+
+test('입력 씹힘 ①: 연속 Enter 두 건은 앞 건이 끝난 뒤 순서대로 보내고, 같은 글을 두 번 쳐도 각각 저장한다', async () => {
+  const app = client(new Response('{"ok":true}'));
+  const held = heldFetch(app);
+  app.run("setupQuickAdd('draft', '/api/today-task/create', '추가함')");
+  const input = app.nodes.get('draft');
+  const enter = text => { input.value = text; return input.listeners.keydown({ key: 'Enter', isComposing: false }); };
+  const first = enter('third A');
+  const second = enter('fourth B');
+  const third = enter('fourth B');
+  await settle();
+  assert.equal(held.length, 1, '앞 건이 끝나기 전에는 다음 건을 보내지 않는다(순서가 뒤집히지 않게)');
+  held[0].ok(); await settle();
+  assert.equal(held.length, 2);
+  held[1].ok(); await settle();
+  held[2].ok();
+  await Promise.all([first, second, third]);
+  assert.deepEqual(held.map(call => call.body.description), ['third A', 'fourth B', 'fourth B'], '빠짐없이·순서대로, 같은 글도 각각');
+  assert.equal(input.value, '');
+  // 빈 글 Enter는 아무 일도 하지 않는다.
+  await enter('   ');
+  await settle();
+  assert.equal(held.length, 3);
+});
+
+test('입력 씹힘 ①: 첫 건만 실패하면 둘째는 그대로 저장되고, 칸이 비었으면 실패한 글을 되돌리고 차 있으면 덮어쓰지 않고 알린다', async () => {
+  const app = client(new Response('{"ok":true}'));
+  const held = heldFetch(app);
+  app.run("setupQuickAdd('draft', '/api/today-task/create', '추가함')");
+  const input = app.nodes.get('draft');
+  const enter = text => { input.value = text; return input.listeners.keydown({ key: 'Enter', isComposing: false }); };
+  // 칸이 비어 있을 때 실패 → 글이 칸에 돌아온다.
+  const lone = enter('실패할 글');
+  await settle();
+  held[0].fail();
+  await lone;
+  assert.equal(input.value, '실패할 글', '실패해도 적은 글은 남는다');
+  assert.equal(input.focused, true);
+  // 두 건 중 첫 건만 실패, 그 사이 칸에 새 글을 치는 중 → 덮어쓰지 않고 어떤 글이 안 됐는지 알린다.
+  const one = enter('첫 건');
+  const two = enter('둘째 건');
+  input.value = '셋째를 치는 중';
+  await settle();
+  held[1].fail(); await settle();
+  assert.equal(input.value, '셋째를 치는 중', '치던 글을 덮어쓰지 않는다');
+  assert.equal(held.length, 3, '앞 건이 실패해도 다음 건은 보낸다');
+  assert.deepEqual(held[2].body, { description: '둘째 건' });
+  held[2].ok();
+  await Promise.all([one, two]);
+  await settle();
+  assert.equal(input.value, '셋째를 치는 중');
+  assert.match(app.nodes.get('liveRegion').textContent, /“첫 건” 저장됐는지 확인하지 못했어요\. 칸에 다른 글이 있어 되돌리지 않았어요/,
+    '뒤 건의 `저장했어요`가 덮지 않게 대기열이 끝난 뒤 알린다');
+});
+
+test('입력 씹힘 ①: 한글 조합 중 Enter는 넘기고(칸도 그대로), 조합이 끝난 뒤 Enter에서 한 번만 보낸다', async () => {
+  const app = client(new Response('{"ok":true}'));
+  const held = heldFetch(app);
+  app.run("setupQuickAdd('draft', '/api/today-task/create', '추가함')");
+  const input = app.nodes.get('draft');
+  input.value = '조합 시험 글';
+  await input.listeners.keydown({ key: 'Enter', isComposing: true });
+  assert.equal(input.value, '조합 시험 글', '조합 중 Enter는 글자를 확정할 뿐이다');
+  assert.equal(held.length, 0);
+  const sending = input.listeners.keydown({ key: 'Enter', isComposing: false });
+  await settle();
+  assert.equal(held.length, 1);
+  held[0].ok();
+  await sending;
+  assert.equal(held.length, 1, '한 번만 보낸다');
+});
+
+test('입력 씹힘 ①: 그룹 `+` 줄도 잠그지 않고 순서대로 보내며, 칸이 사라진 뒤 온 실패는 알림만 한다', async () => {
+  const app = pureClient();
+  const held = heldFetch(app);
+  app.run("var __row = uiGroupAddRow('group:게임', '/api/today-task/create', 'x'); __row.hidden = false; var __input = __row.children[0];");
+  const input = app.run('__input');
+  const enter = text => { input.value = text; return input.listeners.keydown({ key: 'Enter', isComposing: false }); };
+  const one = enter('그룹 첫 건');
+  assert.equal(input.disabled, false);
+  assert.equal(input.value, '');
+  const two = enter('그룹 둘째 건');
+  input.value = '그룹 셋째';
+  await settle();
+  assert.equal(held.length, 1);
+  assert.deepEqual(held[0].body, { description: '그룹 첫 건', group: '게임' });
+  held[0].ok(); await settle();
+  assert.deepEqual(held[1].body, { description: '그룹 둘째 건', group: '게임' });
+  // 다른 탭으로 옮겨 칸이 사라졌다 — 되돌릴 자리가 없으니 알림만.
+  input.connected = false;
+  held[1].fail();
+  await Promise.all([one, two]);
+  await settle();
+  assert.match(app.nodes.get('liveRegion').textContent, /“그룹 둘째 건” 저장됐는지 확인하지 못했어요/);
+  assert.equal(input.value, '그룹 셋째');
+});
+
+test('입력 씹힘 ①: 주간요약 문장 줄도 잠그지 않는다 — 담는 동안 새로 친 글은 성공 뒤에도 남는다', async () => {
+  const app = reportClient();
+  await app.run(`(async () => {
+    sent = [];
+    release = [];
+    load = async () => {};
+    renderReportDraft = () => {};
+    reportChange = (item, action) => new Promise(resolve => { sent.push(action.text); release.push(resolve); });
+    item = { weekKey: 'W', draft: { rows: [] } };
+    el = reportPlanInput(item, { key: 'new', id: 'reportPlanInput', placeholder: '', label: '', groupOf: () => '', alsoTaskOf: () => false });
+    el.value = '첫 문장';
+    el.listeners.input();
+    p1 = el.listeners.keydown({ key: 'Enter', isComposing: false, shiftKey: false, preventDefault() {} });
+    afterEnter = { disabled: el.disabled, value: el.value, draft: reportEdits.get('W:new') };
+    el.value = '둘째 문장';
+    el.listeners.input();
+    p2 = el.listeners.keydown({ key: 'Enter', isComposing: false, shiftKey: false, preventDefault() {} });
+    el.value = '셋째를 치는 중';
+    el.listeners.input();
+  })()`);
+  await settle();
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(afterEnter)')), { disabled: false, value: '' }, 'Enter 순간 칸을 비우고 잠그지 않는다');
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(sent)')), ['첫 문장'], '앞 문장이 끝나기 전에는 다음을 보내지 않는다');
+  app.run('release[0]()'); await settle();
+  app.run('release[1]()'); await settle();
+  await app.run('Promise.all([p1, p2])');
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(sent)')), ['첫 문장', '둘째 문장']);
+  assert.equal(app.run("reportEdits.get('W:new')"), '셋째를 치는 중', '성공 뒤에 늦게 비우지 않는다');
+});
+
+test('입력 씹힘 ①: 확인 대기 `다음은?` 입력줄은 보내는 동안 칸을 잠그지 않고, 두 번 눌러도 한 번만 보낸다', async () => {
+  const app = pureClient();
+  await app.run(`(async () => {
+    calls = 0; release = null;
+    bar = document.createElement('div'); host = document.createElement('div'); host.appendChild(bar);
+    form = waitingNextEdit(bar, { value: '후속', label: '후속 할 일', buttons: [['today', '오늘']],
+      onSubmit: () => { calls += 1; return new Promise(resolve => { release = resolve; }); } });
+    p1 = form.input.listeners.keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    p2 = form.input.listeners.keydown({ key: 'Enter', isComposing: false, preventDefault() {} });
+    during = form.input.disabled;
+  })()`);
+  assert.equal(app.run('during'), false, '보내는 중에도 칸은 잠그지 않는다');
+  assert.equal(app.run('calls'), 1, '두 번 눌러도 한 번만 보낸다');
+  app.run('release()');
+  await app.run('Promise.all([p1, p2])');
+});
+
 test('failed card action stays visible and restores its original checkbox state', async () => {
   const app = client(new Response('{"ok":true}'));
   const checkbox = { checked: true };
