@@ -36,6 +36,13 @@ const RECONNECT_ERRORS = new Set([
   'invalid_refresh_token', 'token_revoked', 'invalid_grant', 'token_expired',
   'invalid_auth', 'account_inactive', 'user_removed_from_team', 'app_uninstalled',
 ]);
+// 잠시 안 되는 갱신(retry)이 **토큰이 만료된 뒤에도** 이어지면 "이어 가지 못함"(stalled)으로 올린다 — 수집이 조용히 멈춘 채
+// 주황 `늦어요`만 영원히 보이지 않게. 판정은 상태 파일의 횟수로만 한다(값 없음).
+//   - 슬랙이 답은 했는데 거절(모르는 오류 이름·5xx·429·읽을 수 없는 답): 갱신 성공 없이 3번이면. 기다려도 풀리지 않는 쪽이라 빠르게.
+//   - 그 밖(네트워크 등): 만료된 뒤의 실패가 6번 이상이고 그 첫 실패부터 30분이 넘었으면. 실패 사이가 30분 넘게 뜨면
+//     (맥이 잠들었다 깸 — 깨어 있으면 서버가 길어야 15분마다 다시 한다) 새로 센다 — 잠깐의 끊김으로는 올라가지 않는다.
+const SLACK_ANSWERED = new Set(['slack_error', 'http', 'bad_response']);
+const STALL = { rejects: 3, downCount: 6, downMs: 30 * 60 * 1000, gapMs: 30 * 60 * 1000 };
 // 서버 타이머 — 15분마다 보고, 만료 60분 전이면 미리 갱신한다(수집은 실행 직전 10분 기준 — 서버가 꺼져 있을 때의 안전망).
 const REFRESH_TICK_MS = 15 * 60 * 1000;
 const REFRESH_AHEAD_MS = 60 * 60 * 1000;
@@ -311,8 +318,17 @@ async function getSlackToken(options = {}) {
   const failed = (info, failure, more) => {
     // `info`는 파일에 있는 갱신 정보다(상태가 어느 갱신 정보의 것인지 `savedAt`으로 맞춘다). 횟수는 같은 갱신 정보일 때만 잇는다.
     const prior = readState(paths.stateFile);
-    const count = failure.kind !== 'retry' ? 0 : (prior.savedAt === info.savedAt ? Number(prior.failCount) || 0 : 0) + 1;
-    writeState(paths, { failure, at: clock(), failCount: count, savedAt: info.savedAt }, options.fs);
+    const same = prior.savedAt === info.savedAt;
+    const retry = failure.kind === 'retry';
+    const count = !retry ? 0 : (same ? Number(prior.failCount) || 0 : 0) + 1;
+    const at = clock();
+    // "이어 가지 못함" 판정의 재료(STALL) — 슬랙이 거절한 횟수와, 만료된 뒤 이어진 실패의 횟수·첫 시각.
+    const rejects = !retry ? 0 : (same ? Number(prior.rejects) || 0 : 0) + (SLACK_ANSWERED.has(failure.reason) ? 1 : 0);
+    const kept = retry && same && Number.isFinite(prior.at) && at - prior.at <= STALL.gapMs && Number.isFinite(prior.downSince);
+    const expired = retry && info.expiresAt <= at;
+    const downCount = (kept ? Number(prior.downCount) || 0 : 0) + (expired ? 1 : 0);
+    const downSince = kept ? prior.downSince : (expired ? at : null);
+    writeState(paths, { failure, at, failCount: count, savedAt: info.savedAt, ...(retry ? { rejects, downCount, downSince } : {}) }, options.fs);
     return current(info, { failure, retryAfterMs: failure.kind === 'retry' ? retryDelayMs(count) : null, ...more });
   };
 
@@ -471,7 +487,7 @@ function readOAuthStatus(options = {}) {
   const base = {
     auth: 'oauth', connected: false, expiresAt: null, expiresInMs: null, nextRefreshAt: null,
     scopes: [], missingScopes: [], teamId: '', teamName: '', userId: '', connectedAt: null, refreshedAt: null,
-    lastFailure: null, failCount: 0, retryAfterMs: null, nextRetryAt: null,
+    lastFailure: null, failCount: 0, retryAfterMs: null, nextRetryAt: null, stalled: false,
     legacyKept: fs.existsSync(paths.legacyFile), legacyKeptAt: null,
   };
   const read = readInfo(paths.oauthFile);
@@ -484,6 +500,10 @@ function readOAuthStatus(options = {}) {
   const at = Number.isFinite(state.at) ? state.at : null;
   const failCount = stale ? 0 : Number(state.failCount) || 0;
   const retryAfterMs = !stale && kind === 'retry' ? retryDelayMs(failCount) : null;
+  // 이어 가지 못함 — 토큰이 이미 만료됐고 잠시 안 되는 갱신이 기준(STALL)을 넘겨 이어졌다. 갱신이 되면 상태가 지워져 바로 풀린다.
+  const now = clock();
+  const down = Number.isFinite(state.downSince) && (Number(state.downCount) || 0) >= STALL.downCount && now - state.downSince >= STALL.downMs;
+  const stalled = !stale && kind === 'retry' && info.expiresAt <= now && ((Number(state.rejects) || 0) >= STALL.rejects || down);
   return {
     ...base,
     connected: stale || kind !== 'reconnect',
@@ -494,7 +514,7 @@ function readOAuthStatus(options = {}) {
     teamId: trimmed(info.teamId), teamName: trimmed(info.teamName), userId: trimmed(info.userId),
     connectedAt: info.connectedAt || null, refreshedAt: info.refreshedAt || null,
     lastFailure: stale ? null : { ...fail(kind, safeCode(state.failure.reason), safeCode(state.failure.code)), at },
-    failCount, retryAfterMs,
+    failCount, retryAfterMs, stalled,
     nextRetryAt: retryAfterMs !== null && at !== null ? at + retryAfterMs : null,
     legacyKeptAt: info.legacyKeptAt || null,
   };
@@ -588,6 +608,6 @@ function createSlackRefresher({
 
 module.exports = {
   getSlackToken, saveOAuthResult, readOAuthStatus, forgetOAuth, undoOAuth, cleanLegacy, createSlackRefresher,
-  authPaths, authMode, slackClientId, retryDelayMs,
+  authPaths, authMode, slackClientId, retryDelayMs, STALL,
   DEFAULT_CLIENT_ID, REQUIRED_SCOPES, RETRY_DELAYS_MS, REFRESH_TICK_MS, REFRESH_AHEAD_MS, LEGACY_KEEP_MS,
 };

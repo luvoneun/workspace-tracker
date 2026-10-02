@@ -21,7 +21,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn, execFile } = require('node:child_process');
 const { history } = require('./slack-history');
-const { getSlackToken } = require('./slack-auth');
+const { getSlackToken, readOAuthStatus } = require('./slack-auth');
 
 const APP_DIR = __dirname;
 const WORKSPACE_DIR = path.resolve(APP_DIR, '..', '..');
@@ -90,6 +90,12 @@ const AUTH_REJECT_RE = /^Slack: (?:token_expired|invalid_auth)\b/;
 // 갱신 실패를 값 없이 한 낱말로 — `retry · network`, `reconnect · invalid_refresh_token`(종류 · 이유 또는 슬랙 오류 이름).
 const RETRY_LATER = '슬랙 토큰 갱신이 잠시 안 됨 — 다음 회차에 다시';
 const failureWord = failure => `${failure.kind} · ${failure.code || failure.reason || 'unknown'}`;
+// 토큰이 만료됐는데 갱신이 안 될 때 남기는 한 줄(연동 카드 ⋯ › 최근 기록에 그대로 보인다 — 오류 이름으로 원인을 안다).
+// 실패가 기준을 넘겨 이어졌으면(`stalled` — slack-auth.js STALL) 사람이 다시 연결해야 한다고 말한다. 멈춤 판정은 서버가
+// 갱신 상태 파일로 한다(이 줄의 낱말에 기대지 않는다 — 갱신이 다시 되면 바로 풀리게).
+const expiredSkipLine = (failure, stalled) => (stalled
+  ? `슬랙 연결을 이어 가지 못함(${failureWord(failure)}) — 토큰이 만료돼 수집을 건너뜀, 설정 › 연동에서 다시 연결 필요`
+  : `슬랙 토큰 갱신이 잠시 안 됨(${failureWord(failure)}) — 토큰이 만료돼 이번 회차는 건너뛰고 다음 회차에 다시`);
 
 // 이번 회차의 토큰을 쥔다. `call(fn)`은 fn(token)을 부르고, 새 방식에서 슬랙이 토큰을 거절하면 강제 갱신을 **회차에 한 번만**
 // 한 뒤 그 호출을 한 번만 다시 부른다(갱신이 안 됐거나 토큰이 그대로면 원래 오류를 그대로 던진다).
@@ -601,7 +607,7 @@ async function main() {
   // `token_expired`가 남아 한 번의 일시 실패가 "다시 연결"(빨강)로 읽힌다. 실패로 적지 않는다: 늦어지면 주황 `늦어요`가 말한다.
   if (auth.failure && !reconnect) {
     if (Number.isFinite(auth.expiresAt) && auth.expiresAt <= Date.now()) {
-      log(`슬랙 토큰 갱신이 잠시 안 됨(${failureWord(auth.failure)}) — 토큰이 만료돼 이번 회차는 건너뛰고 다음 회차에 다시`);
+      log(expiredSkipLine(auth.failure, readOAuthStatus({ config }).stalled === true));
       return 0;
     }
     log(`슬랙 토큰 갱신이 잠시 안 됨(${failureWord(auth.failure)}) — 이전 토큰으로 진행`);
@@ -668,4 +674,4 @@ if (require.main === module) {
     process.exitCode = 1;
   });
 }
-module.exports = { createAuth, claudeAuthPhrase, validate, isSystem, buildPrompt, shareSource, slackPlain, firstLine, rawItem };
+module.exports = { createAuth, expiredSkipLine, claudeAuthPhrase, validate, isSystem, buildPrompt, shareSource, slackPlain, firstLine, rawItem };

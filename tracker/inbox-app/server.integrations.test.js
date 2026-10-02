@@ -358,6 +358,22 @@ test('연동 저장: 아는 키만 바꾸고 모르는 키는 그대로 두며, 
   assert.equal(fs.statSync(tokenFile).mode & 0o777, 0o600, '토큰 파일은 나만 읽는다');
 });
 
+test('연동 저장: 12시간짜리 토큰(xoxe.xoxp-)을 붙여 넣어도 저장은 되고 응답에 경고 종류만 싣는다 — 보통 토큰에는 없다', async (t) => {
+  const save = (token) => {
+    const fix = integrationsFixture(t, {});
+    return integrationsStore.saveIntegrations({
+      configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir,
+      body: { slack: { enabled: true, token, channels: { todo: 'C0TODO11' } } },
+      slackCheck: async () => ({ name: 'my-todo', isPrivate: true }),
+    }).then(saved => ({ saved, fix }));
+  };
+  const rotating = await save('xoxe.xoxp-1-ROTATING');
+  assert.equal(rotating.saved.result.slack.warning, 'rotating_token');
+  assert.equal(fs.readFileSync(path.join(rotating.fix.tokenDir, 'workspace-slack-token'), 'utf8'), 'xoxe.xoxp-1-ROTATING\n', '막지 않는다');
+  assert.ok(!JSON.stringify(rotating.saved.result).includes('ROTATING'));
+  assert.equal((await save('xoxp-plain')).saved.result.slack.warning, undefined);
+});
+
 test('연동 저장: 슬랙 채널은 넷 중 하나 이상이면 되고(할 일도 선택), 채널 이름은 슬랙이 준 것으로 적는다', async (t) => {
   const fix = integrationsFixture(t, { slack: { channels: { todo: { id: '옛ID', name: '#옛이름' } } } });
   const asked = [];
@@ -658,6 +674,9 @@ test('WP-D1: 슬랙 토큰 확인은 auth.test 하나만 부르고, Bot 토큰·
   assert.deepEqual(calls.map(call => call.url), ['https://slack.com/api/auth.test']);
   assert.equal(calls[0].options.headers.Authorization, 'Bearer xoxp-good', '토큰은 헤더로만 나간다');
   assert.ok(!JSON.stringify(ok).includes('xoxp-good'));
+  // 12시간짜리 토큰(토큰 교체를 켠 앱의 `xoxe.xoxp-`)은 받되 경고 종류를 같이 돌려준다 — 막지 않는다.
+  const rotating = await integrationsStore.slackTokenCheck('xoxe.xoxp-1-ROTATING', fake({ ok: true, user: 'me' }));
+  assert.deepEqual(rotating, { ok: true, prefix: 'me', warning: 'rotating_token' });
 
   calls.length = 0;
   await assert.rejects(() => integrationsStore.slackTokenCheck('xoxp-bad', fake({ ok: false, error: 'invalid_auth' })),

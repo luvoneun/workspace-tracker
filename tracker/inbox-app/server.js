@@ -914,11 +914,12 @@ function fetchStateAutomation(automation, authRe = null) {
 // 사라졌는지는 이름 따라가기가 이미 들고 있는 답만 본다 — 여기서 슬랙에 묻지 않는다). 값은 로그·메모리에서만 읽고 파일은 쓰지 않는다.
 // 새 방식(자동 갱신)의 연결이 풀렸는가 — 사람이 `다시 연결`을 눌러야 하는 상태(갱신 토큰이 죽었거나 갱신 정보가 없음)면
 // 수집 기록과 상관없이 멈춘 것이다(연동 탭 슬랙 카드의 `broken`과 같은 기준: 연결된 카드 + `oauth.connected === false`).
-// 잠시 안 되는 갱신(retry)은 멈춤이 아니다 — 이전 토큰으로 수집이 이어지고, 늦어지면 주황 `늦어요`가 말한다. 파일만 읽는다.
+// 잠시 안 되는 갱신(retry)은 멈춤이 아니다 — 이전 토큰으로 수집이 이어지고, 늦어지면 주황 `늦어요`가 말한다. 다만 토큰이
+// 만료된 뒤에도 그 실패가 이어지면(`stalled` — 기준은 slack-auth.js STALL) 수집이 조용히 멈춘 것이라 같이 올린다. 파일만 읽는다.
 function slackOAuthBroken(config = currentConfigFile()) {
   if (integrations.slackAuthMode(config) !== 'oauth') return false;
   const status = slackAuth.readOAuthStatus({ config });
-  const lost = status.connected === false || !!(status.lastFailure && status.lastFailure.kind === 'reconnect');
+  const lost = status.connected === false || !!(status.lastFailure && status.lastFailure.kind === 'reconnect') || status.stalled === true;
   return lost && slackConnectedNow();
 }
 function integrationAlerts(config = currentConfigFile(), automations = getAutomationStatus()) {

@@ -181,7 +181,7 @@ test('readIntegrations: 옛 방식은 auth token이고 oauth 칸이 없다. 새 
   assert.equal(slack.auth, 'oauth');
   assert.equal(slack.hasToken, true);
   assert.deepEqual(slack.oauth, {
-    connected: true, expiresAt: NOW + 43200 * 1000, nextRefreshAt: NOW + 43200 * 1000 - 60 * MIN,
+    connected: true, stalled: false, expiresAt: NOW + 43200 * 1000, nextRefreshAt: NOW + 43200 * 1000 - 60 * MIN,
     missingScopes: [], lastFailure: null, teamName: '팀', legacyKept: false,
   });
   const text = JSON.stringify(slack);
@@ -260,6 +260,7 @@ test('연동 저장: 새 방식에서 토큰을 직접 붙여 넣으면 token �
   assert.equal(mode(c.paths.tokenFile), 0o600);
   assert.ok(!fs.existsSync(c.paths.oauthFile), '갱신 정보 파일을 지웠다');
   assert.ok(!fs.existsSync(c.paths.stateFile));
+  assert.equal(saved.result.slack.warning, undefined, '보통 토큰(xoxp-)에는 경고가 없다');
   assert.ok(!fs.existsSync(c.paths.lockDir));
   assert.deepEqual(await slackAuth.getSlackToken({ config: saved.config, tokenDir: c.tokenDir }),
     { auth: 'token', token: 'xoxp-pasted', refreshed: false, expiresAt: null, failure: null, retryAfterMs: null });
@@ -615,6 +616,27 @@ test('멈춤 판정: 새 방식 연결이 풀리면 빨간 점·연동 탭·점�
   fail({ kind: 'retry', reason: 'network' });
   assert.deepEqual(await alerts(), [], '잠시 안 되는 갱신은 멈춤이 아니다');
   assert.equal((await app.get('/api/integrations')).slack.oauth.connected, true);
+
+  // 토큰이 만료된 뒤에도 갱신이 이어지지 않으면 멈춤이다 — 슬랙이 거절한 것은 3번이면, 네트워크는 느리게(6번·30분).
+  const streak = (failure, more) => fs.writeFileSync(paths.stateFile, JSON.stringify({ failure, at: Date.now(), failCount: 3, savedAt: at, ...more }));
+  fs.writeFileSync(paths.oauthFile, JSON.stringify({ ...info, expiresAt: Date.now() - MIN }), { mode: 0o600 });
+  streak({ kind: 'retry', reason: 'network' }, { rejects: 0, downCount: 3, downSince: Date.now() - 10 * MIN });
+  assert.deepEqual(await alerts(), [], '만료됐어도 네트워크 실패 몇 번은 아직 늦음일 뿐이다');
+  assert.equal((await app.get('/api/integrations')).slack.oauth.stalled, false);
+  streak({ kind: 'retry', reason: 'slack_error', code: 'some_new_error' }, { rejects: 3, downCount: 3, downSince: Date.now() - 10 * MIN });
+  assert.deepEqual(await alerts(), ['slack'], '슬랙이 모르는 오류로 3번 거절했다');
+  const stalledState = await app.get('/api/integrations');
+  assert.deepEqual(stalledState.alerts, ['slack']);
+  assert.deepEqual([stalledState.slack.oauth.stalled, stalledState.slack.oauth.connected, stalledState.slack.oauth.lastFailure.code], [true, true, 'some_new_error']);
+  // (점검하기의 같은 줄은 server.selfcheck.test.js가 본다 — 이 서버의 점검 결과는 잠깐 간직돼 아래 풀림 확인과 섞인다.)
+  streak({ kind: 'retry', reason: 'network' }, { rejects: 0, downCount: 6, downSince: Date.now() - 31 * MIN });
+  assert.deepEqual(await alerts(), ['slack'], '네트워크 실패도 만료 뒤 6번·30분을 넘기면 멈춤이다');
+  // 갱신이 다시 되면(상태가 지워지고 새 만료 시각) 바로 풀린다 — 수집 기록을 기다리지 않는다.
+  fs.rmSync(paths.stateFile);
+  fs.writeFileSync(paths.oauthFile, JSON.stringify(info), { mode: 0o600 });
+  assert.deepEqual(await alerts(), []);
+  assert.equal((await app.get('/api/integrations')).slack.oauth.stalled, false);
+  for (const secret of [ACCESS, REFRESH]) assert.ok(!JSON.stringify(stalledState).includes(secret));
 
   fail({ kind: 'reconnect', reason: 'slack_error', code: 'invalid_refresh_token' });
   assert.deepEqual(await alerts(), ['slack']);

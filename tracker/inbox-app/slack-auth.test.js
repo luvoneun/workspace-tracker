@@ -8,7 +8,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const {
   getSlackToken, saveOAuthResult, readOAuthStatus, authPaths, slackClientId, retryDelayMs,
-  DEFAULT_CLIENT_ID, REQUIRED_SCOPES, RETRY_DELAYS_MS,
+  DEFAULT_CLIENT_ID, REQUIRED_SCOPES, RETRY_DELAYS_MS, STALL,
 } = require('./slack-auth');
 
 const NOW = 1_800_000_000_000;
@@ -288,6 +288,92 @@ test('retry는 1 → 5 → 15분을 알려 주고, 성공하면 실패 기록이
   assert.equal(after.lastFailure, null);
   assert.equal(after.failCount, 0);
   assert.equal(after.refreshedAt, NOW);
+});
+
+// ---------- 이어 가지 못함(stalled) — 만료된 뒤에도 잠시 안 되는 갱신이 이어질 때 ----------
+const unknownError = async () => reply({ ok: false, error: 'some_new_error' });
+const offline = async () => { throw new Error('offline'); };
+// 시각을 옮겨 가며 갱신을 여러 번 부른다(가짜 요청). 돌려주는 것은 마지막 상태.
+async function failAt(base, request, times) {
+  for (const now of times) await getSlackToken({ ...base, now, request });
+  return readOAuthStatus({ ...base, now: times[times.length - 1] });
+}
+
+test('이어 가지 못함: 만료된 뒤 슬랙이 모르는 오류로 3번 거절하면 stalled — 오류 이름이 상태에 남고, 갱신이 되면 바로 풀린다', async t => {
+  const r = room(t);
+  const base = seed(r, { expiresAt: NOW - MIN });
+  assert.equal(STALL.rejects, 3);
+  const two = await failAt(base, unknownError, [NOW, NOW + MIN]);
+  assert.equal(two.stalled, false, '두 번까지는 잠시 안 되는 것');
+  const three = await failAt(base, unknownError, [NOW + 6 * MIN]);
+  assert.equal(three.stalled, true);
+  assert.equal(three.connected, true, '다시 연결 필요(reconnect)와는 다른 상태다');
+  assert.deepEqual(three.lastFailure, { kind: 'retry', reason: 'slack_error', code: 'some_new_error', at: NOW + 6 * MIN });
+  noSecrets(three);
+  noSecrets(JSON.parse(fs.readFileSync(r.paths.stateFile, 'utf8')));
+  // 5xx·읽을 수 없는 답도 "슬랙이 답은 했다" 쪽이다.
+  const r2 = room(t);
+  const base2 = seed(r2, { expiresAt: NOW - MIN });
+  assert.equal((await failAt(base2, async () => reply({}, 503), [NOW, NOW + MIN, NOW + 6 * MIN])).stalled, true);
+
+  const got = await getSlackToken({ ...base, now: NOW + 7 * MIN, request: fakeSlack(refreshed()).request });
+  assert.equal(got.token, NEW);
+  const after = readOAuthStatus({ ...base, now: NOW + 7 * MIN });
+  assert.deepEqual([after.stalled, after.lastFailure, after.failCount], [false, null, 0]);
+});
+
+test('이어 가지 못함: 토큰이 아직 살아 있으면 슬랙이 몇 번을 거절해도 stalled가 아니고, 만료되는 순간 올라간다', async t => {
+  const r = room(t);
+  const base = seed(r, { expiresAt: NOW + 30 * MIN });
+  const live = await failAt({ ...base, minValidMs: 60 * MIN }, unknownError, [NOW, NOW + MIN, NOW + 6 * MIN, NOW + 21 * MIN]);
+  assert.equal(live.failCount, 4);
+  assert.equal(live.stalled, false, '이전 토큰으로 수집은 이어진다');
+  assert.equal(readOAuthStatus({ ...base, now: NOW + 31 * MIN }).stalled, true);
+});
+
+test('이어 가지 못함: 네트워크 실패는 느리게 — 만료 뒤 6번 이상이고 30분이 넘어야, 그 전에는 늦음일 뿐이다', async t => {
+  const r = room(t);
+  const base = seed(r, { expiresAt: NOW - MIN });
+  // 수집이 5분마다 두드려 횟수는 금방 찬다 — 시간 기준이 같이 있어야 한다.
+  const quick = await failAt(base, offline, [0, 5, 10, 15, 20, 25].map(m => NOW + m * MIN));
+  assert.equal(quick.failCount, 6);
+  assert.equal(quick.stalled, false, '6번이어도 30분이 안 됐다');
+  assert.deepEqual(quick.lastFailure, { kind: 'retry', reason: 'network', at: NOW + 25 * MIN });
+  const slow = await failAt(base, offline, [NOW + 30 * MIN]);
+  assert.equal(slow.stalled, true);
+  // 서버만 돌 때(1 → 5 → 15 → 15분)는 30분이 지나도 횟수가 모자라면 아직이다.
+  const r2 = room(t);
+  const base2 = seed(r2, { expiresAt: NOW - MIN });
+  const few = await failAt(base2, offline, [0, 1, 6, 21, 36].map(m => NOW + m * MIN));
+  assert.deepEqual([few.failCount, few.stalled], [5, false]);
+  assert.equal((await failAt(base2, offline, [NOW + 51 * MIN])).stalled, true);
+});
+
+test('이어 가지 못함: 맥이 잠들었다 깨서 실패 사이가 30분 넘게 뜨면 새로 센다 — 잠깐의 끊김으로는 올라가지 않는다', async t => {
+  const r = room(t);
+  const base = seed(r, { expiresAt: NOW - MIN });
+  const before = await failAt(base, offline, [0, 5, 10, 15, 20].map(m => NOW + m * MIN));
+  assert.equal(before.stalled, false);
+  // 8시간 뒤 깨어난 직후 한 번 더 실패 — 만료된 지 오래고 횟수도 6이지만 새 줄기의 첫 실패다.
+  const woke = await failAt(base, offline, [NOW + 8 * HOUR]);
+  assert.deepEqual([woke.failCount, woke.stalled], [6, false]);
+  const state = JSON.parse(fs.readFileSync(r.paths.stateFile, 'utf8'));
+  assert.deepEqual([state.downCount, state.downSince], [1, NOW + 8 * HOUR]);
+  // 만료 전에 쌓인 네트워크 실패는 세지 않는다.
+  const r2 = room(t);
+  const base2 = seed(r2, { expiresAt: NOW + 26 * MIN });
+  const early = await failAt({ ...base2, minValidMs: 60 * MIN }, offline, [0, 5, 10, 15, 20, 25].map(m => NOW + m * MIN));
+  assert.equal(early.failCount, 6);
+  assert.equal(readOAuthStatus({ ...base2, now: NOW + 40 * MIN }).stalled, false);
+});
+
+test('이어 가지 못함: 옛 방식에는 그 칸이 없고, 다시 연결 필요(reconnect)는 stalled가 아니다', async t => {
+  const r = room(t);
+  fs.writeFileSync(r.paths.tokenFile, 'xoxp-legacy\n');
+  assert.deepEqual(readOAuthStatus({ config: {}, tokenDir: r.dir }), { auth: 'token', connected: true });
+  const base = seed(r, { expiresAt: NOW - MIN });
+  const dead = await failAt(base, async () => reply({ ok: false, error: 'invalid_refresh_token' }), [NOW, NOW + MIN, NOW + 2 * MIN]);
+  assert.deepEqual([dead.connected, dead.stalled, dead.lastFailure.kind], [false, false, 'reconnect']);
 });
 
 test('invalid_refresh_token·token_revoked·invalid_grant은 reconnect이고 다시 묻지 않는다', async t => {
@@ -572,7 +658,7 @@ test('saveOAuthResult는 두 파일을 0600으로 쓰고 옛 토큰을 .legacy�
   assert.deepEqual(status, {
     auth: 'oauth', connected: true, expiresAt: NOW + 12 * HOUR, expiresInMs: 12 * HOUR, nextRefreshAt: NOW + 11 * HOUR,
     scopes: REQUIRED_SCOPES, missingScopes: [], teamId: 'T1', teamName: '팀', userId: 'U1',
-    connectedAt: NOW, refreshedAt: null, lastFailure: null, failCount: 0, retryAfterMs: null, nextRetryAt: null,
+    connectedAt: NOW, refreshedAt: null, lastFailure: null, failCount: 0, retryAfterMs: null, nextRetryAt: null, stalled: false,
     legacyKept: true, legacyKeptAt: NOW,
   });
 });

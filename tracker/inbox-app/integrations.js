@@ -357,8 +357,11 @@ async function slackTokenCheck(token, request = (...args) => fetch(...args)) {
   let auth;
   try { auth = await slackCall(secret, 'auth.test', null, request); } catch { throw bad(MESSAGE.slackReach); }
   if (!auth || auth.ok !== true) throw bad(MESSAGE.slackAuth, 'invalid_auth');
-  return { ok: true, prefix: slackChannelPrefix(auth.user) };
+  return { ok: true, prefix: slackChannelPrefix(auth.user), ...(slackRotatingToken(secret) ? { warning: 'rotating_token' } : {}) };
 }
+// 붙여 넣은 토큰이 12시간짜리(토큰 교체를 켠 슬랙 앱의 `xoxe.xoxp-`)인가 — 옛 방식으로 저장하면 갱신할 수단이 없어 12시간 뒤 끊긴다.
+// 막지는 않는다(버튼을 못 쓰는 사람의 임시 길) — 화면과 저장 응답이 경고 종류(`rotating_token`)만 알린다.
+const slackRotatingToken = token => /^xoxe\.xoxp-/.test(trimmed(token));
 
 // ---------- 캘린더 비밀 주소(iCal) ----------
 // 비밀 주소는 토큰과 같은 급이다: 돌려주는 값·로그·오류 문구 어디에도 싣지 않는다(오류 문구는 우리 글자만).
@@ -465,6 +468,8 @@ function slackOAuthView(config, tokenDir) {
   const failure = status.lastFailure;
   return {
     connected: status.connected === true,
+    // 갱신이 만료 뒤에도 이어지지 않는다 — 카드가 `멈췄어요`로 올린다(서버의 integrationAlerts와 같은 값).
+    stalled: status.stalled === true,
     expiresAt: status.expiresAt, nextRefreshAt: status.nextRefreshAt,
     missingScopes: status.missingScopes || [],
     lastFailure: failure ? { kind: failure.kind, reason: failure.reason, ...(failure.code ? { code: failure.code } : {}) } : null,
@@ -796,6 +801,7 @@ async function saveIntegrations({
         ...(workspaceUrl ? { workspaceUrl } : {}),
       });
       if (pastedOverOAuth) config = { ...config, slack: { ...clone(config.slack), auth: 'token' } };
+      if (token && slackRotatingToken(token)) result.slack.warning = 'rotating_token';
       if (tidy !== undefined) {
         config = withSlackTidy(config, tidy);
         result.slack.tidy = tidy;
