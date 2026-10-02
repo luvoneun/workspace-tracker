@@ -394,6 +394,42 @@ button:disabled:active, .d-cb:disabled:active, .d-wcb:disabled:active { scale: n
   }
 }
 @keyframes d-fade { from { opacity: 0; } to { opacity: 1; } }
+
+/* ---------- 뜨는 것 (모션 부품 ① — 더보기 메뉴·분류 판·종류 목록·상세 카드·검색 팔레트) ----------
+   app.js uiFloatOpen이 붙이고(.d-float), uiFloatPlace가 누른 곳을 시작점(--ox·--oy)으로 놓고,
+   uiFloatClose가 .is-out을 건 뒤 시간으로 치운다. 값은 여기 한 곳이다(app.js UI_FLOAT가 같은 숫자를 쓴다).
+   쫀득 표준은 이 키프레임이다(.88 → 1.025(55%) → 1, 240ms) — 큰 면은 --float-from·--float-over로 넘침을 줄인다.
+   움직이는 것은 transform·opacity뿐이다. 움직임 줄이기에서는 이동 없이 120ms 흐려지며 뜨고 닫힘은 즉시다(아래 전역 규칙). */
+.d-float {
+  --float-in: 240ms;  --float-fade: 70ms;  --float-out: var(--t-fast);  --float-flat: var(--t-fast);  --float-quick: 80ms;
+  --float-item: 180ms;  --float-gap: 18ms;  --float-lead: 30ms;
+  --float-from: 0.88;  --float-over: 1.025;  --float-to: 0.96;
+  transform-origin: var(--ox, 40px) var(--oy, 0);
+  /* 크기 변화는 --float-in 그대로, 투명도는 처음 70ms만 — 반투명인 동안 뒤 줄 버튼이 비치지 않게 */
+  animation: d-float-in var(--float-in) var(--ease) both, d-float-fade var(--float-fade) linear both;
+}
+.d-float.is-out { animation: d-float-out var(--float-out) var(--ease) both; pointer-events: none; }
+/* 키보드로 연 것·검색 팔레트 — 이동·넘침 없이 나타남만 */
+.d-float.is-flat { animation: d-float-fade var(--float-flat) linear both; }
+.d-float.is-flat.is-out { animation: d-float-gone var(--float-out) linear both; }
+.d-float.is-flat .d-mitem { animation: none; }
+/* 좁은 폭의 아래 시트 — 아래에서 올라오고 내려간다(큰 면이라 넘침 없음) */
+.d-float.is-sheet { animation: d-float-up var(--float-in) var(--ease) both; }
+.d-float.is-sheet.is-out { animation: d-float-down var(--float-out) var(--ease) both; }
+/* 열린 채 내용만 갈아 끼울 때(팔레트를 연 채 다시 ⌘K)는 다시 나타나지 않는다 */
+.d-float.is-still:not(.is-out) { animation: none; }
+@keyframes d-float-in {
+  0% { transform: translateY(var(--float-dy, -4px)) scale(var(--float-from)); }
+  55% { transform: translateY(0) scale(var(--float-over)); }
+  100% { transform: none; }
+}
+@keyframes d-float-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes d-float-out { to { opacity: 0; transform: translateY(calc(var(--float-dy, -4px) / 2)) scale(var(--float-to)); } }
+@keyframes d-float-gone { to { opacity: 0; } }
+@keyframes d-float-item { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes d-float-up { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes d-float-down { to { transform: translateY(100%); } }
+
 /* 움직임 줄이기: 이동·크기 변화는 끄고(전부 .01ms), 새로 나타나는 것만 120ms 흐려짐으로 남긴다.
    전환(transition)을 전역 120ms로 두지 않는 이유 — 전환이 없던 요소까지 갑자기 움직인다. */
 @media (prefers-reduced-motion: reduce) {
@@ -402,7 +438,8 @@ button:disabled:active, .d-cb:disabled:active, .d-wcb:disabled:active { scale: n
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
   }
-  .d-toast, .d-menulist, .d-schedpop:not(.is-out), .d-palbox, .d-mrow2.is-new {
+  /* 뜨는 것은 부품 클래스 하나(.d-float)로 등록한다 — 요소 이름을 늘어놓지 않는다 */
+  .d-toast, .d-float:not(.is-out):not(.is-still), .d-mrow2.is-new {
     animation: d-fade 120ms linear both !important;
   }
   /* 누름의 크기 변화도 끈다 — 색은 그대로 바뀐다 */
@@ -507,13 +544,12 @@ button:disabled:active, .d-cb:disabled:active, .d-wcb:disabled:active { scale: n
   padding: 6px; text-align: left;
   background: var(--surface); border: 1px solid var(--surface-line);
   border-radius: 18px; box-shadow: var(--pop);
-  animation: d-pop 120ms var(--ease);
+  /* 등장·닫힘은 뜨는 것 부품(.d-float) — 누른 ⋯에서 자라 나오고 짧게 닫힌다 */
 }
-@keyframes d-pop { from { transform: translateY(-6px); opacity: 0; } to { transform: none; opacity: 1; } }
 
 /* ---------- 분류 판 (새로 들어온 것 줄) ----------
-   더보기 메뉴(.d-menulist·.d-mitem)와 같은 모양 — 등장만 이 판의 쫀득한 움직임(DESIGN.md 모션 절의 예외 한 줄).
-   움직이는 것은 transform·opacity뿐이다. 움직임 줄이기에서는 판이 이동 없이 120ms 흐려지며 뜨고 나머지는 즉시다(위 전역 규칙). */
+   더보기 메뉴(.d-menulist·.d-mitem)와 같은 모양이고, 등장·닫힘도 같은 부품(.d-float)이다.
+   이 판과 종류 목록만 항목이 차례로 뜬다(--i). */
 .d-schedbtn { gap: 4px; }
 .d-schedbtn .cv { display: inline-flex; margin-right: -2px; }
 .d-schedbtn .cv .d-i { transform: rotate(90deg); }
@@ -524,13 +560,9 @@ button:disabled:active, .d-cb:disabled:active, .d-wcb:disabled:active { scale: n
   padding: 6px; text-align: left;
   background: var(--surface); border: 1px solid var(--surface-line);
   border-radius: 18px; box-shadow: var(--pop);
-  transform-origin: var(--ox, 40px) var(--oy, 0);
-  /* 크기 변화는 240ms 그대로, 투명도는 처음 70ms만 — 반투명인 동안 뒤 줄 버튼이 비치지 않게 */
-  animation: d-sched-in 240ms var(--ease) both, d-sched-fade 70ms linear both;
 }
-.d-schedpop.is-out { animation: d-sched-out var(--t-fast) var(--ease) both; pointer-events: none; }
 .d-schedpop .lab { padding: 6px 12px 4px; font-size: 12.5px; color: var(--muted); }
-.d-schedpop .d-mitem { gap: 8px; animation: d-sched-item 180ms var(--ease) both; animation-delay: calc(var(--i, 0) * 18ms + 30ms); }
+.d-schedpop .d-mitem { gap: 8px; animation: d-float-item var(--float-item) var(--ease) both; animation-delay: calc(var(--i, 0) * var(--float-gap) + var(--float-lead)); }
 .d-schedpop .d-mitem.on, .d-schedpop .d-mitem:focus-visible { background: var(--sel); color: var(--accent-text); outline: none; }
 .d-schedpop .d-mitem .dt { margin-left: auto; font-size: 12.5px; font-weight: 500; color: var(--dim); font-variant-numeric: tabular-nums; }
 .d-schedpop .d-mitem.on .dt { color: var(--accent-text); opacity: 0.8; }
@@ -539,29 +571,19 @@ button:disabled:active, .d-cb:disabled:active, .d-wcb:disabled:active { scale: n
   background: var(--neutral-bg); color: var(--dim); font: 600 11.5px/18px var(--font); text-align: center;
 }
 .d-schedpop .d-mitem.on kbd { background: var(--surface); }
-/* 종류 목록(회의 줄의 `할 일 ⌄`) — 같은 판·같은 움직임, 세 줄뿐이라 폭 176px에 조금 짧게(220ms · 닫힘 120ms) */
-.d-schedpop.d-typepop { width: 176px; animation: d-sched-in 220ms var(--ease) both, d-sched-fade 70ms linear both; }
-.d-schedpop.d-typepop.is-out { animation: d-sched-out 120ms var(--ease) both; }
-.d-typepop .d-mitem { animation-duration: 160ms; }
+/* 종류 목록(회의 줄의 `할 일 ⌄`) — 같은 판·같은 부품, 세 줄뿐이라 폭만 176px */
+.d-schedpop.d-typepop { width: 176px; }
 .d-typepop kbd { margin-left: auto; }
 /* 프로젝트 줄은 값 쪽(`정하기` 또는 `● 이름`)과 꺾쇠가 오른쪽에 붙는다 */
 .d-schedproj .d-mitem .dt.has { display: inline-flex; align-items: center; gap: 6px; color: var(--text); }
 .d-schedproj .d-mitem .cv { display: inline-flex; color: var(--dim); }
 .d-schedproj .d-mitem .cv .d-i { transform: rotate(90deg); }
 .d-schedproj .d-mitem[aria-expanded="true"] .cv .d-i { transform: rotate(-90deg); }
-.d-schedproj .d-gpick { padding: 2px 0 4px; animation: d-sched-item 160ms var(--ease) both; }
+.d-schedproj .d-gpick { padding: 2px 0 4px; animation: d-float-item var(--float-item) var(--ease) both; }
 .d-schedproj .d-gpopt { animation: none; }
 .d-schedwhen { padding: 2px 6px 4px; }
 .d-schedwhen .d-dateinput { width: 100%; }
 .d-schedhint { padding: 6px 12px 8px; font-size: var(--fs-sm); color: var(--muted); }
-@keyframes d-sched-in {
-  0% { transform: translateY(-4px) scale(0.88); }
-  55% { transform: translateY(0) scale(1.025); }
-  100% { transform: none; }
-}
-@keyframes d-sched-fade { from { opacity: 0; } to { opacity: 1; } }
-@keyframes d-sched-out { to { opacity: 0; transform: translateY(-2px) scale(0.96); } }
-@keyframes d-sched-item { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 /* 고른 뒤 줄은 접히듯 사라지고(220ms), 오늘 목록의 새 줄은 솟아오르며 연파랑이 잠깐 비친다(260ms) */
 .d-ibrow.is-leaving { animation: d-sched-leave 220ms var(--ease) both; pointer-events: none; transform-origin: 50% 0; }
 @keyframes d-sched-leave { to { opacity: 0; transform: translateY(-4px) scaleY(0.92); } }

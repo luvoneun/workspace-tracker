@@ -764,27 +764,10 @@ function panelMeetingRow(item, event, stateText, host = MEETING_HOST_CARD) {
 }
 
 // ---------- 종류 목록 ----------
-// 줄의 조용한 글자 `할 일 ⌄`이 여는 작은 목록(할 일 · 확인 대기 · 결정). 일정 정하기 판과 같은 부품(.d-schedpop·.d-mitem)과
-// 같은 움직임(누른 글자에서 튀어나옴)이고, 아래가 모자라면 위로 뒤집는다. ↑↓·Enter·Esc, 글쇠 `?` `!`(입력 앞머리와 같은 글자)·1~3.
+// 줄의 조용한 글자 `할 일 ⌄`이 여는 작은 목록(할 일 · 확인 대기 · 결정). 분류 판과 같은 모양(.d-schedpop·.d-mitem)이고
+// 여닫기는 공용 "뜨는 것"(app.js uiFloatOpen·uiFloatPlace·uiFloatClose — 누른 글자에서 자라 나오고, 아래가 모자라면 위로 뒤집는다). ↑↓·Enter·Esc, 글쇠 `?` `!`(입력 앞머리와 같은 글자)·1~3.
 const MEETING_TYPE_KEYS = { check: '?', decision: '!' };
 let meetingTypeOpen = null; // { pop, anchor, onEsc, away, shut }
-
-function meetingTypePlace(pop, anchor) {
-  const box = anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : null;
-  if (!box) return;
-  const width = pop.offsetWidth || 176;
-  const height = pop.offsetHeight || 0;
-  const viewW = window.innerWidth || 1024;
-  const viewH = window.innerHeight || 768;
-  // 오른쪽 끝을 누른 글자에 맞춘다(종류 글자는 줄의 오른쪽에 있다).
-  const left = Math.max(8, Math.min(box.right - width + 6, viewW - 8 - width));
-  const flip = box.bottom + 4 + height > viewH - 8 && box.top - 4 - height >= 8;
-  const top = flip ? box.top - 4 - height : box.bottom + 4;
-  pop.style.left = `${Math.round(left)}px`;
-  pop.style.top = `${Math.round(top)}px`;
-  pop.style.setProperty('--ox', `${Math.round(box.left + box.width / 2 - left)}px`);
-  pop.style.setProperty('--oy', flip ? '100%' : '0');
-}
 
 function meetingTypeClose(restoreFocus = false) {
   if (!meetingTypeOpen) return;
@@ -795,10 +778,7 @@ function meetingTypeClose(restoreFocus = false) {
   document.removeEventListener('scroll', shut, true);
   window.removeEventListener('resize', shut);
   anchor.setAttribute('aria-expanded', 'false');
-  if (uiSchedMotion()) {
-    pop.classList.add('is-out');
-    setTimeout(() => pop.remove(), 120);
-  } else pop.remove();
+  uiFloatClose(pop);
   if (restoreFocus && anchor.isConnected) anchor.focus();
 }
 
@@ -847,8 +827,9 @@ function meetingTypeToggle(anchor, current, onPick) {
     }
   });
 
-  document.body.appendChild(pop);
-  meetingTypePlace(pop, anchor);
+  uiFloatOpen(pop);
+  // 오른쪽 끝을 누른 글자에 맞춘다(종류 글자는 줄의 오른쪽에 있다).
+  uiFloatPlace(pop, anchor, { align: 'end', nudge: 6, width: 176 });
   anchor.setAttribute('aria-expanded', 'true');
   const onEsc = () => meetingTypeClose(true);
   escPush(onEsc);

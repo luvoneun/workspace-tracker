@@ -152,7 +152,59 @@ document.addEventListener('keydown', (event) => {
   document.getElementById('searchEntryBtn')?.click();
 });
 
+// ---- 뜨는 것 (모션 부품 ① — DESIGN.md 모션 절, ui.css .d-float) ----
+// 떠 있는 판(더보기 메뉴·분류 판·종류 목록·상세 카드·검색 팔레트)은 전부 이 셋으로 여닫는다 — 따로 붙이지 않는다(시험이 본다).
+//   uiFloatOpen  붙인다. 키보드로 연 것은 넘침 없이 나타남만(is-flat).
+//   uiFloatPlace 누른 것 옆에 놓고(아래가 모자라면 위로 뒤집고 화면 안으로 맞춘다) 시작점(--ox·--oy)을 누른 곳으로 둔다.
+//   uiFloatClose 닫힘을 재생한 뒤(.is-out) 치운다. 끝남 신호를 기다리지 않고 시간으로 치운다(가려진 탭에서도 남지 않게).
+// 시간은 ui.css `.d-float`의 값과 같다(el.animate·setTimeout은 var()를 못 읽는다 — 시험이 맞춰 본다).
+const UI_FLOAT = { out: 140, quick: 80, slide: 200, ease: 'cubic-bezier(0.22, 0.8, 0.3, 1)' };
+function uiFloatMotion() {
+  try { return !window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return true; }
+}
+// flat: 이동·넘침 없이 나타남만(기본은 "방금 동작이 키보드였나"). still: 다시 나타나지 않는다(열린 채 갈아 끼울 때).
+function uiFloatOpen(el, { parent = document.body, flat = uiActByKey, still = false } = {}) {
+  el.className = [el.className, 'd-float', flat && 'is-flat', still && 'is-still'].filter(Boolean).join(' ');
+  parent.appendChild(el);
+  return el;
+}
+// align: 누른 것의 왼쪽('start')·오른쪽('end')에 맞춘다. gap: 누른 것과의 틈. pad: 화면 가장자리 여백.
+// nudge: 맞춘 자리에서 옆으로 더 미는 값. edge: 오른쪽 한계(카드 안에서 여는 고르개). width: 폭을 못 잴 때 쓸 값.
+function uiFloatPlace(el, anchor, { align = 'start', gap = 4, pad = 8, nudge = 0, edge = null, width: fallback = 0 } = {}) {
+  const box = anchor && anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : null;
+  if (!box) return null;
+  // 폭·높이는 transform(등장 중의 scale)에 흔들리지 않는 값으로 잰다.
+  const drawn = el.offsetWidth ? null : el.getBoundingClientRect?.();
+  const width = el.offsetWidth || drawn?.width || fallback;
+  const height = el.offsetHeight || drawn?.height || 0;
+  const viewW = window.innerWidth || 1024;
+  const viewH = window.innerHeight || 768;
+  const start = align === 'end' ? box.right - width + nudge : box.left + nudge;
+  const left = Math.max(pad, Math.min(start, (edge === null ? viewW - pad : edge) - width));
+  const below = box.bottom + gap;
+  // 아래 자리가 모자라면 위로 뒤집는다. 위에도 자리가 없으면 화면 안으로 맞춘다. 시작점은 어느 쪽이든 누른 것 쪽이다.
+  const flip = below + height > viewH - 8 && box.top - gap - height >= 8;
+  const top = flip ? box.top - gap - height : Math.max(8, Math.min(below, viewH - 8 - height));
+  el.style.left = `${Math.round(left)}px`;
+  el.style.top = `${Math.round(top)}px`;
+  const mid = box.left + box.width / 2 - left;
+  el.style.setProperty?.('--ox', `${Math.round(width ? Math.max(0, Math.min(width, mid)) : mid)}px`);
+  el.style.setProperty?.('--oy', flip ? '100%' : '0');
+  el.style.setProperty?.('--float-dy', flip ? '4px' : '-4px');
+  return { left, top, flip };
+}
+function uiFloatClosing(el) { return !!(el && el.classList && el.classList.contains('is-out')); }
+// 닫히는 동안에는 눌리지도 초점을 받지도 않는다(pointer-events·inert). 다시 여는 쪽은 새 요소를 만든다 — 닫히는 것은 제 시간에 사라진다.
+function uiFloatClose(el, ms = UI_FLOAT.out) {
+  if (!el) return;
+  if (!uiFloatMotion() || uiFloatClosing(el)) { if (!uiFloatClosing(el)) el.remove(); return; }
+  el.classList.add('is-out');
+  el.inert = true;
+  setTimeout(() => el.remove(), ms);
+}
+
 // 한 벌뿐인 더보기 메뉴. 한 번에 하나만 열리고, 아래 자리가 없으면 위로 뒤집힌다.
+// 누른 버튼에서 자라 나오고 짧게 닫힌다(뜨는 것 부품).
 // sections는 [[항목…], [항목…]] — 묶음 사이에 구분선이 들어간다.
 // 항목은 { label, onClick, danger, disabled } 또는 값을 바꾸는 { field, control }.
 let uiMenuOpen = null;
@@ -161,7 +213,7 @@ function uiMenuClose() {
   const { list, anchor, onEsc } = uiMenuOpen;
   uiMenuOpen = null;
   escDrop(onEsc);
-  list.remove();
+  uiFloatClose(list);
   anchor.setAttribute('aria-expanded', 'false');
 }
 function uiMenu(anchor, sections) {
@@ -210,28 +262,19 @@ function uiMenu(anchor, sections) {
       item.setAttribute('role', 'menuitem');
       item.textContent = entry.label;
       if (entry.disabled) item.disabled = true;
-      item.addEventListener('click', () => { uiMenuClose(); entry.onClick(); });
+      // 닫히는 140ms 동안의 두 번째 누름은 무시한다(pointer-events로도 막혀 있다).
+      item.addEventListener('click', () => { if (uiFloatClosing(list)) return; uiMenuClose(); entry.onClick(); });
       list.appendChild(item);
     });
   });
 
   // 모달(`<dialog>`) 안에서 연 메뉴는 그 모달 안에 붙인다 — 맨 위 층(top layer) 밖에 있으면
   // 보이기만 하고 눌리지 않는다(설정 창의 ⋯). 자리는 `position: fixed`라 어디에 붙어도 같다.
-  (anchor.closest('dialog[open]') || document.body).appendChild(list);
-  const button = anchor.getBoundingClientRect();
-  const size = list.getBoundingClientRect();
+  uiFloatOpen(list, { parent: anchor.closest('dialog[open]') || document.body });
   // 값 고르개(상세 카드의 `보통 ⌄`)는 값의 왼쪽에 맞춰 카드 안에서 열리고, ⋯ 메뉴는 버튼 오른쪽에 맞춘다.
   const pick = anchor.classList.contains('d-dpick');
   const card = pick && anchor.closest('.d-popd') ? anchor.closest('.d-popd').getBoundingClientRect() : null;
-  const edge = card ? card.right - 12 : window.innerWidth - 8;
-  const start = pick ? button.left : button.right - size.width;
-  const left = Math.max(8, Math.min(start, edge - size.width));
-  const below = button.bottom + 4;
-  const top = below + size.height > window.innerHeight - 8
-    ? Math.max(8, button.top - 4 - size.height)
-    : below;
-  list.style.left = `${Math.round(left)}px`;
-  list.style.top = `${Math.round(top)}px`;
+  uiFloatPlace(list, anchor, { align: pick ? 'start' : 'end', edge: card ? card.right - 12 : null });
 
   anchor.setAttribute('aria-haspopup', 'true');
   anchor.setAttribute('aria-expanded', 'true');
@@ -753,6 +796,7 @@ const UI_GLIDE = { ease: 'cubic-bezier(0.22, 0.8, 0.3, 1)', move: 200, enter: 14
 const UI_GLIDE_ROWS = '[data-task-id], [data-move-id]';
 let uiActAt = 0;        // 마지막 사용자 동작 시각
 let uiActQuiet = false; // 그 동작이 키보드 연타(1초 안에 이어진 키·누르고 있는 키)였다
+let uiActByKey = false; // 그 동작이 키보드였다 — 키보드로 연 뜨는 것은 넘침 없이 나타남만(uiFloatOpen)
 let uiKeyAt = 0;
 let uiGlideLate = 0;     // 미뤘다 푸는 그리기 안에서는 0보다 크다
 
@@ -764,9 +808,11 @@ function uiActMark(event) {
     if (['Meta', 'Control', 'Shift', 'Alt'].includes(event.key)) return;
     uiActQuiet = !!event.repeat || now - uiKeyAt < 1000;
     uiKeyAt = now;
+    uiActByKey = true;
   } else {
     if (event.detail === 0) return;
     uiActQuiet = false;
+    uiActByKey = false;
   }
   uiActAt = now;
 }
@@ -4975,27 +5021,7 @@ function uiHoverSettle() {
   document.addEventListener('mousemove', release, true);
 }
 
-function uiSchedMotion() {
-  try { return !window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return true; }
-}
-
-function uiSchedPlace(pop, anchor) {
-  const box = anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : null;
-  if (!box) return;
-  const width = pop.offsetWidth || 304;
-  const height = pop.offsetHeight || 0;
-  const viewW = window.innerWidth || 1024;
-  const viewH = window.innerHeight || 768;
-  const left = Math.max(12, Math.min(box.left, viewW - 12 - width));
-  const below = box.bottom + 6;
-  // 아래 자리가 모자라면 위로 뒤집는다(기존 ⋯ 메뉴와 같이). 시작점은 누른 버튼 쪽이다.
-  const flip = below + height > viewH - 8 && box.top - 6 - height >= 8;
-  const top = flip ? box.top - 6 - height : Math.max(8, Math.min(below, viewH - 8 - height));
-  pop.style.left = `${Math.round(left)}px`;
-  pop.style.top = `${Math.round(top)}px`;
-  pop.style.setProperty('--ox', `${Math.round(box.left + box.width / 2 - left)}px`);
-  pop.style.setProperty('--oy', flip ? '100%' : '0');
-}
+function uiSchedMotion() { return uiFloatMotion(); }
 
 function uiSchedClose({ restoreFocus = false, keepHeld = false } = {}) {
   if (!uiSchedOpen) return;
@@ -5005,10 +5031,7 @@ function uiSchedClose({ restoreFocus = false, keepHeld = false } = {}) {
   window.removeEventListener('resize', reposition);
   document.removeEventListener('scroll', reposition, true);
   anchor.setAttribute('aria-expanded', 'false');
-  if (uiSchedMotion()) {
-    pop.classList.add('is-out');
-    setTimeout(() => pop.remove(), 140);
-  } else pop.remove();
+  uiFloatClose(pop);
   // 고르는 중에 미룬 다시 그리기는 닫으면서 풀어 준다. 고른 경우(keepHeld)에는 저장이 끝나 그리는 쪽이 한 번에 처리한다.
   if (keepHeld) return;
   uiHeldFlush();
@@ -5234,7 +5257,7 @@ function uiSchedToggle(item, row, anchor) {
   pop.appendChild(projectBox);
 
   const onEsc = () => uiSchedClose({ restoreFocus: true });
-  const place = () => uiSchedPlace(pop, anchor);
+  const place = () => uiFloatPlace(pop, anchor, { gap: 6, pad: 12, width: 304 });
   const reposition = (event) => { if (!event || !event.target || !pop.contains || !pop.contains(event.target)) place(); };
   pop.addEventListener('keydown', (event) => {
     if (event.isComposing) return;
@@ -5260,7 +5283,7 @@ function uiSchedToggle(item, row, anchor) {
     if (found) { event.preventDefault(); found.run(); }
   });
 
-  document.body.appendChild(pop);
+  uiFloatOpen(pop);
   anchor.setAttribute('aria-expanded', 'true');
   uiSchedOpen = { pop, anchor, zone, id: item.id, onEsc, reposition };
   escPush(onEsc);

@@ -1332,29 +1332,34 @@ test('분류: 나중에 할 일 서랍 줄은 미래 날짜로 정한 업무의 
   assert.doesNotMatch(app.run("uiMetaCells({ id: 'a', status: 'to-do', scheduled: uiDateKey(new Date(Date.now() + 5 * 86400000)) }, { where: 'row' })"), /m-sched/, '오늘 목록 줄에는 붙지 않는다');
 });
 
-test('분류: 모션 CSS — 쫀득 등장 240ms·1.025, 닫힘 140ms, 줄 접힘 220ms, 새 줄 솟음 260ms, 움직이는 건 transform·opacity뿐', () => {
+test('분류: 모션 CSS — 쫀득 등장 240ms·1.025, 닫힘 140ms(뜨는 것 부품의 값), 줄 접힘 220ms, 새 줄 솟음 260ms, 움직이는 건 transform·opacity뿐', () => {
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
-  assert.match(css, /\.d-schedpop \{[^}]*animation: d-sched-in 240ms/);
+  const part = css.slice(css.indexOf('\n.d-float {'), css.indexOf('}', css.indexOf('\n.d-float {')));
+  assert.match(part, /--float-in: 240ms;[^\n]*--float-out: var\(--t-fast\);/);
+  assert.match(part, /--float-from: 0\.88;\s+--float-over: 1\.025;\s+--float-to: 0\.96;/);
+  assert.doesNotMatch(css, /\.d-schedpop[^{]*\{[^}]*animation: d-float-(in|out)/, '판은 등장·닫힘을 따로 적지 않는다 — 부품이 한다');
   const section = name => css.slice(css.indexOf(`@keyframes ${name} {`), css.indexOf('\n@keyframes', css.indexOf(`@keyframes ${name} {`) + 1));
-  assert.match(section('d-sched-in'), /scale\(0\.88\)[\s\S]*55% \{[^}]*scale\(1\.025\)/);
-  assert.match(css, /\.d-schedpop\.is-out \{ animation: d-sched-out var\(--t-fast\)/);
-  assert.match(css, /animation-delay: calc\(var\(--i, 0\) \* 18ms/);
+  assert.match(section('d-float-in'), /scale\(var\(--float-from\)\)[\s\S]*55% \{[^}]*scale\(var\(--float-over\)\)/);
+  assert.match(css, /\.d-float\.is-out \{ animation: d-float-out var\(--float-out\) var\(--ease\) both; pointer-events: none; \}/);
+  assert.match(css, /animation-delay: calc\(var\(--i, 0\) \* var\(--float-gap\) \+ var\(--float-lead\)\)/);
+  assert.match(part, /--float-item: 180ms;\s+--float-gap: 18ms;\s+--float-lead: 30ms;/);
   assert.match(css, /\.d-ibrow\.is-leaving \{ animation: d-sched-leave 220ms/);
   assert.match(css, /\.d-row\.is-rise \{ animation: d-sched-rise 260ms/);
-  ['d-sched-in', 'd-sched-out', 'd-sched-item', 'd-sched-leave', 'd-sched-rise'].forEach((name) => {
+  ['d-float-in', 'd-float-out', 'd-float-item', 'd-sched-leave', 'd-sched-rise'].forEach((name) => {
     assert.doesNotMatch(section(name).split('\n').slice(0, 6).join('\n'), /\b(width|height|top|left|margin|padding)\s*:/, `${name}: 레이아웃 속성은 움직이지 않는다`);
   });
 });
 
 test('분류 다듬기: 투명도는 처음 70ms만, 날짜 칸 초점이면 `오늘` 강조를 빼고, 올라온 줄의 버튼은 포인터가 움직이기 전까지 진하게 채우지 않는다', () => {
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
-  assert.match(css, /\.d-schedpop \{[^}]*animation: d-sched-in 240ms var\(--ease\) both, d-sched-fade 70ms linear both;/, '크기는 240ms 그대로, 투명도만 짧게');
-  const frames = css.slice(css.indexOf('@keyframes d-sched-in {'), css.indexOf('@keyframes d-sched-out'));
-  assert.doesNotMatch(frames.split('d-sched-fade')[0], /opacity/, '크기 변화 쪽에는 투명도가 없다(반투명인 시간이 짧아진다)');
+  assert.match(css, /\.d-float \{[^}]*--float-fade: 70ms;[^}]*animation: d-float-in var\(--float-in\) var\(--ease\) both, d-float-fade var\(--float-fade\) linear both;/, '크기는 240ms 그대로, 투명도만 짧게');
+  const frames = css.slice(css.indexOf('@keyframes d-float-in {'), css.indexOf('@keyframes d-float-out'));
+  assert.doesNotMatch(frames.split('d-float-fade')[0], /opacity/, '크기 변화 쪽에는 투명도가 없다(반투명인 시간이 짧아진다)');
   assert.match(css, /\.is-hover-settling \.d-ibacts \.d-btn:hover[^}]*background: var\(--accent-soft\)/, '움직이기 전에는 연파랑');
   const src = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
   assert.match(src, /input\.addEventListener\('focus', \(\) => pop\.querySelectorAll\('\.d-mitem\.on'\)\.forEach\(on => on\.classList\.remove\('on'\)\)\)/, '날짜 칸 초점이면 강조를 뺀다');
   const settle = src.slice(src.indexOf('function uiHoverSettle'), src.indexOf('function uiSchedMotion'));
+  assert.ok(settle.length > 0);
   assert.match(settle, /!event\.movementX && !event\.movementY/, '가짜 mousemove(움직임 0)는 걸러진다');
   assert.match(src.slice(src.indexOf('const choose = async'), src.indexOf('const choices = uiSchedChoices()')), /uiHoverSettle\(\)/, '하나 고르면 건다');
 });
@@ -2565,7 +2570,7 @@ test('종류 목록: 줄의 종류 글자를 누르면 세 항목의 작은 목�
   assert.equal(button.getAttribute('aria-label'), '종류: 할 일 — 바꾸기');
   button.listeners.click({});
   const list = pop();
-  assert.equal(list.className, 'd-schedpop d-typepop', '분류 판과 같은 부품이다');
+  assert.equal(list.className, 'd-schedpop d-typepop d-float', '분류 판과 같은 모양, 여닫기는 공용 뜨는 것');
   assert.equal(list.getAttribute('role'), 'listbox');
   assert.deepEqual(list.children.map(item => [nodeText(item), item.getAttribute('aria-selected'), item.style['--i']]),
     [['할 일', 'true', '0'], ['확인 대기 ?', 'false', '1'], ['결정 !', 'false', '2']], '항목은 차례로 이어 뜬다(--i)');
@@ -2644,12 +2649,16 @@ test('종류 목록: 완료한 항목과 담는 중인 줄의 종류 글자는 �
   assert.equal(nodeFind(pending, 'tl').textContent, '할 일');
 });
 
-test('종류 목록 CSS: 분류 판의 움직임을 그대로 쓰되 220ms·닫힘 120ms, 종류 글자는 28px 조용한 글자', () => {
+test('종류 목록 CSS: 분류 판과 같은 부품(뜨는 것) — 따로 적은 시간·키프레임이 없고 폭만 176px, 종류 글자는 28px 조용한 글자', () => {
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
-  assert.match(css, /\.d-schedpop\.d-typepop \{ width: 176px; animation: d-sched-in 220ms var\(--ease\) both, d-sched-fade 70ms linear both; \}/);
-  assert.match(css, /\.d-schedpop\.d-typepop\.is-out \{ animation: d-sched-out 120ms var\(--ease\) both; \}/);
-  assert.match(css, /@keyframes d-sched-in \{\s*0% \{ transform: translateY\(-4px\) scale\(0\.88\); \}\s*55% \{ transform: translateY\(0\) scale\(1\.025\); \}/, '.88 → 1.025(55%) → 1');
-  assert.match(css, /\.d-schedpop \.d-mitem \{[^}]*animation-delay: calc\(var\(--i, 0\) \* 18ms \+ 30ms\)/, '항목 18ms 간격');
+  assert.match(css, /\.d-schedpop\.d-typepop \{ width: 176px; \}/);
+  assert.doesNotMatch(css, /\.d-typepop[^{]*\{[^}]*animation/, '종류 목록만의 움직임 값은 없다');
+  assert.match(css, /@keyframes d-float-in \{\s*0% \{ transform: translateY\(var\(--float-dy, -4px\)\) scale\(var\(--float-from\)\); \}\s*55% \{ transform: translateY\(0\) scale\(var\(--float-over\)\); \}/, '.88 → 1.025(55%) → 1');
+  assert.match(css, /\.d-schedpop \.d-mitem \{[^}]*animation-delay: calc\(var\(--i, 0\) \* var\(--float-gap\) \+ var\(--float-lead\)\)/, '항목 18ms 간격');
+  const src = fs.readFileSync(path.join(__dirname, 'meetings-ui.js'), 'utf8');
+  assert.doesNotMatch(src, /function meetingTypePlace|classList\.add\('is-out'\)|body\.appendChild\(pop\)/, '베껴 만든 자리 잡기·닫힘은 없다');
+  assert.match(src, /uiFloatOpen\(pop\);[\s\S]{0,120}uiFloatPlace\(pop, anchor, \{ align: 'end', nudge: 6, width: 176 \}\);/);
+  assert.match(src.slice(src.indexOf('function meetingTypeClose'), src.indexOf('function meetingTypeToggle')), /uiFloatClose\(pop\);/);
   assert.match(css, /\.d-tpk \{[^}]*height: var\(--h-sm\)[^}]*color: var\(--dim\)/);
 });
 
@@ -15937,11 +15946,12 @@ test('모션 토큰: 시간 5개·곡선 3개가 :root에 있고, 스프링은 l
   assert.deepEqual(literal, [], '100·140·170·200·320ms는 토큰으로 쓴다');
 });
 
-test('모션 토큰: 움직임 줄이기 — 전역은 .01ms(이동 끔) 그대로, 나타나는 것(알림·메뉴·판·팔레트·회의 새 줄)만 120ms 흐려짐', () => {
+test('모션 토큰: 움직임 줄이기 — 전역은 .01ms(이동 끔) 그대로, 나타나는 것(알림·뜨는 것 부품·회의 새 줄)만 120ms 흐려짐', () => {
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
   const block = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce) {\n  *, *::before'), css.indexOf('/* ---------- 헤더'));
   assert.match(block, /transition-duration: 0\.01ms !important;\n    animation-duration: 0\.01ms !important;/);
-  assert.match(block, /\.d-toast, \.d-menulist, \.d-schedpop:not\(\.is-out\), \.d-palbox, \.d-mrow2\.is-new \{\n    animation: d-fade 120ms linear both !important;/);
+  assert.match(block, /\n  \.d-toast, \.d-float:not\(\.is-out\):not\(\.is-still\), \.d-mrow2\.is-new \{\n    animation: d-fade 120ms linear both !important;/);
+  assert.doesNotMatch(block, /\.d-menulist|\.d-schedpop|\.d-palbox|\.d-popd/, '뜨는 것은 요소 이름을 늘어놓지 않고 부품 클래스 하나로 등록한다');
   assert.match(css, /@keyframes d-fade \{ from \{ opacity: 0; \} to \{ opacity: 1; \} \}/, '흐려짐은 투명도만');
 });
 
@@ -15975,17 +15985,9 @@ const MOTION_RAW_ALLOWED = [
   ['ui.css', '.d-iconbtn', 'transition', '400ms', 'E', '새로고침 아이콘 한 바퀴 400ms — 기다림 부품에서 정한다(색·누름은 토큰)'],
   ['ui.css', '*, *::before, *::after', 'transition-duration', '0.01ms', '남김', '움직임 줄이기 전역 값(.01ms로 끄고 나타남만 120ms) — 토큰과 뜻이 다르다'],
   ['ui.css', '*, *::before, *::after', 'animation-duration', '0.01ms', '남김', '움직임 줄이기 전역 값(.01ms로 끄고 나타남만 120ms) — 토큰과 뜻이 다르다'],
-  ['ui.css', '.d-toast, .d-menulist, .d-schedpop:not(.is-out), .d-palbox, .d-mrow2.is-new', 'animation', '120ms', '남김', '움직임 줄이기 전역 값(.01ms로 끄고 나타남만 120ms) — 토큰과 뜻이 다르다'],
-  ['ui.css', '.d-menulist', 'animation', '120ms', 'B', '메뉴 등장 — 뜨는 것 부품으로 바뀐다'],
-  ['ui.css', '.d-schedpop', 'animation', '240ms 70ms', 'B', '쫀득 키프레임 값 — 스프링 토큰과 어느 쪽을 표준으로 할지 묶음 B에서 정한다'],
-  ['ui.css', '.d-schedpop .d-mitem', 'animation', '180ms', 'B', '쫀득 키프레임 값 — 스프링 토큰과 어느 쪽을 표준으로 할지 묶음 B에서 정한다'],
-  ['ui.css', '.d-schedpop .d-mitem', 'animation-delay', '18ms 30ms', 'B', '쫀득 키프레임 값 — 스프링 토큰과 어느 쪽을 표준으로 할지 묶음 B에서 정한다'],
-  ['ui.css', '.d-schedpop.d-typepop', 'animation', '220ms 70ms', 'B', '쫀득 키프레임 값 — 스프링 토큰과 어느 쪽을 표준으로 할지 묶음 B에서 정한다'],
-  ['ui.css', '.d-schedpop.d-typepop.is-out', 'animation', '120ms', 'B', '쫀득 키프레임 값 — 스프링 토큰과 어느 쪽을 표준으로 할지 묶음 B에서 정한다'],
-  ['ui.css', '.d-typepop .d-mitem', 'animation-duration', '160ms', 'B', '쫀득 키프레임 값 — 스프링 토큰과 어느 쪽을 표준으로 할지 묶음 B에서 정한다'],
-  ['ui.css', '.d-schedproj .d-gpick', 'animation', '160ms', 'B', '쫀득 키프레임 값 — 스프링 토큰과 어느 쪽을 표준으로 할지 묶음 B에서 정한다'],
-  ['ui.css', '.d-ibrow.is-leaving', 'animation', '220ms', 'B', '쫀득 키프레임 값 — 스프링 토큰과 어느 쪽을 표준으로 할지 묶음 B에서 정한다'],
-  ['ui.css', '.d-row.is-rise', 'animation', '260ms 1400ms', 'B', '쫀득 키프레임 값 — 스프링 토큰과 어느 쪽을 표준으로 할지 묶음 B에서 정한다'],
+  ['ui.css', '.d-toast, .d-float:not(.is-out):not(.is-still), .d-mrow2.is-new', 'animation', '120ms', '남김', '움직임 줄이기 전역 값(.01ms로 끄고 나타남만 120ms) — 토큰과 뜻이 다르다'],
+  ['ui.css', '.d-ibrow.is-leaving', 'animation', '220ms', 'C', '분류 뒤 줄 접힘 — 뜨는 것이 아니라 줄이다. 사라지는 줄 부품과 함께 정한다'],
+  ['ui.css', '.d-row.is-rise', 'animation', '260ms 1400ms', 'C', '분류 뒤 새 줄 솟음·배경 강조 — 뜨는 것이 아니라 줄이다. 줄 부품과 함께 정한다'],
   ['ui.css', '.d-row.is-completing .d-title', 'animation', '520ms', 'C', '완료 줄 긋기 520ms — 완료 흐름과 함께 줄인다'],
   ['ui.css', '.d-mrow2.is-opening .ed', 'animation', '220ms', 'D', '초안 펼침 220ms — 펼침 부품의 본보기, 값은 D에서'],
   ['ui.css', '.d-drawer', 'transition', '160ms 160ms', 'D', '서랍 160ms — 펼침 부품에서 값이 바뀐다'],
@@ -16535,4 +16537,266 @@ test('줄 이동: 그룹 제목도 줄과 같은 열쇠 칸(data-move-id)을 달
   assert.equal(head.dataset.moveId, 'grp:게임');
   assert.equal(head.dataset.taskId, undefined, '상세 카드가 여는 줄(data-task-id)은 아니다');
   assert.equal(app.run('UI_GLIDE_ROWS'), '[data-task-id], [data-move-id]');
+});
+
+// ---- 모션 묶음 B1: 뜨는 것(공용 부품) ----
+// 화면 코드(브라우저에 실리는 .js) 원문 — 서버의 isClientFile이 정한 목록 그대로.
+function floatClientSources() {
+  const { isClientFile } = require('./server.js');
+  const out = {};
+  fs.readdirSync(__dirname).filter(name => name.endsWith('.js') && isClientFile(name)).forEach((name) => { out[name] = fs.readFileSync(path.join(__dirname, name), 'utf8'); });
+  return out;
+}
+// 떠 있는 것을 실제 흐름으로 본다 — 가짜 창에 body·자리(getBoundingClientRect)·창 크기를 주고, 타이머는 모아 두었다가 손으로 돌린다.
+function floatClient({ reduce = false } = {}) {
+  const app = client(new Response('{"ok":true}'));
+  richDom(app);
+  const timers = [];
+  app.context.setTimeout = (fn, delay) => { timers.push({ fn, delay: delay || 0 }); return timers.length; };
+  app.context.clearTimeout = () => {};
+  app.run(`window.innerWidth = 1200; window.innerHeight = 800; window.matchMedia = () => ({ matches: ${reduce} });`);
+  // 누르는 버튼 하나: 자리·closest·classList가 있다.
+  const anchor = (box, className = 'd-iconbtn sm d-more') => {
+    app.context.__box = box; app.context.__cls = className;
+    return app.run(`(() => { const el = document.createElement('button'); el.className = __cls;
+      el.getBoundingClientRect = () => ({ ...__box, width: __box.right - __box.left, height: __box.bottom - __box.top });
+      el.closest = () => null; document.body.appendChild(el); return el; })()`);
+  };
+  const floats = () => app.context.document.body.children.filter(node => String(node.className).split(' ').includes('d-float'));
+  // 지금까지 걸린 타이머 가운데 ms 이하인 것을 돌린다(시간이 ms만큼 흐른 것).
+  const tick = (ms) => { const due = timers.filter(timer => timer.delay <= ms); due.forEach((timer) => { timers.splice(timers.indexOf(timer), 1); timer.fn(); }); };
+  const size = (el, width, height) => { el.offsetWidth = width; el.offsetHeight = height; return el; };
+  return { app, anchor, floats, tick, timers, size };
+}
+
+test('뜨는 것 부품: CSS 한 곳 — 값(등장 240·투명도 70·닫힘 --t-fast·항목 180/18/30·넘침 .88 → 1.025)과 변형(is-out·is-flat·is-sheet·is-still), 움직이는 것은 transform·opacity뿐', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  const at = css.indexOf('\n.d-float {');
+  const rule = css.slice(at, css.indexOf('}', at) + 1);
+  assert.match(rule, /--float-in: 240ms;\s+--float-fade: 70ms;\s+--float-out: var\(--t-fast\);\s+--float-flat: var\(--t-fast\);\s+--float-quick: 80ms;/);
+  assert.match(rule, /transform-origin: var\(--ox, 40px\) var\(--oy, 0\);/, '시작점은 누른 곳');
+  assert.match(css, /\.d-float\.is-flat \{ animation: d-float-fade var\(--float-flat\) linear both; \}/, '키보드로 연 것·팔레트는 나타남만');
+  assert.match(css, /\.d-float\.is-flat\.is-out \{ animation: d-float-gone var\(--float-out\) linear both; \}/);
+  assert.match(css, /\.d-float\.is-flat \.d-mitem \{ animation: none; \}/, '나타남만일 때는 항목도 차례로 뜨지 않는다');
+  assert.match(css, /\.d-float\.is-sheet \{ animation: d-float-up var\(--float-in\) var\(--ease\) both; \}/);
+  assert.match(css, /\.d-float\.is-sheet\.is-out \{ animation: d-float-down var\(--float-out\) var\(--ease\) both; \}/);
+  assert.match(css, /\.d-float\.is-still:not\(\.is-out\) \{ animation: none; \}/);
+  const frames = css.slice(css.indexOf('@keyframes d-float-in {'), css.indexOf('@keyframes d-float-down') + 80);
+  assert.doesNotMatch(frames, /\b(width|height|top|left|margin|padding)\s*:/, '레이아웃 속성은 움직이지 않는다');
+  assert.doesNotMatch(css, /@keyframes (d-pop|d-sched-in|d-sched-out|d-sched-fade|d-sched-item) /, '옛 키프레임은 남지 않는다');
+  // 쫀득 표준은 손으로 적은 키프레임이다 — 뜨는 것은 스프링 토큰을 쓰지 않는다.
+  assert.doesNotMatch(css.slice(at, css.indexOf('@media (prefers-reduced-motion: reduce) {\n  *, *::before')), /--spring-/);
+});
+
+test('뜨는 것 부품: 화면 코드의 숫자(UI_FLOAT)가 CSS의 값과 같다 — 닫힘 140(--t-fast)·팔레트 80·미끄러짐 200(--t-move)', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  const app = pureClient();
+  const ms = name => Number(css.match(new RegExp(`${name}: (\\d+)ms`))[1]);
+  assert.equal(app.run('UI_FLOAT.out'), ms('--t-fast'));
+  assert.equal(app.run('UI_FLOAT.quick'), ms('--float-quick'));
+  assert.equal(app.run('UI_FLOAT.slide'), ms('--t-move'));
+  assert.ok(css.includes(`--ease: ${app.run('UI_FLOAT.ease')};`), '곡선도 --ease와 같다');
+});
+
+test('뜨는 것 부품: 누른 곳에 놓기 — 왼쪽·오른쪽 맞춤, 가장자리 여백, 아래가 모자라면 위로 뒤집고(시작점 100%), 위도 모자라면 화면 안으로 맞춘다', () => {
+  const { app, anchor, size } = floatClient();
+  const place = (box, options, [width, height] = [300, 200]) => {
+    app.context.__el = size(app.run("document.createElement('div')"), width, height);
+    app.context.__a = anchor(box);
+    app.context.__o = options;
+    const spot = app.run('uiFloatPlace(__el, __a, __o)');
+    const style = app.context.__el.style;
+    return { left: style.left, top: style.top, ox: style['--ox'], oy: style['--oy'], dy: style['--float-dy'], flip: spot.flip };
+  };
+  // 왼쪽 맞춤(분류 판): 누른 버튼의 왼쪽 끝 + 틈 6
+  assert.deepEqual(place({ left: 400, right: 460, top: 100, bottom: 128 }, { gap: 6, pad: 12 }),
+    { left: '400px', top: '134px', ox: '30px', oy: '0', dy: '-4px', flip: false });
+  // 오른쪽 맞춤(⋯ 메뉴): 버튼 오른쪽 끝에 판의 오른쪽 끝
+  assert.deepEqual(place({ left: 900, right: 934, top: 100, bottom: 134 }, { align: 'end' }),
+    { left: '634px', top: '138px', ox: '283px', oy: '0', dy: '-4px', flip: false });
+  // 종류 목록: 오른쪽 맞춤에서 6px 더 오른쪽
+  assert.equal(place({ left: 500, right: 560, top: 100, bottom: 128 }, { align: 'end', nudge: 6 }, [176, 120]).left, '390px');
+  // 화면 오른쪽을 넘지 않는다(가장자리 여백), 시작점은 그래도 누른 버튼의 가운데
+  const right = place({ left: 1100, right: 1160, top: 100, bottom: 128 }, { gap: 6, pad: 12 });
+  assert.equal(right.left, '888px');
+  assert.equal(right.ox, '242px');
+  // 카드 안에서 여는 고르개는 카드 오른쪽 한계를 넘지 않는다
+  assert.equal(place({ left: 700, right: 760, top: 100, bottom: 128 }, { edge: 900 }).left, '600px');
+  // 아래가 모자라면 위로 뒤집는다 — 시작점도 아래쪽, 살짝 내려오며 뜬다
+  assert.deepEqual(place({ left: 400, right: 460, top: 700, bottom: 728 }, { gap: 6, pad: 12 }),
+    { left: '400px', top: '494px', ox: '30px', oy: '100%', dy: '4px', flip: true });
+  // 위도 모자라면(키 큰 판) 뒤집지 않고 화면 안으로 맞춘다
+  const tall = place({ left: 400, right: 460, top: 300, bottom: 328 }, {}, [300, 600]);
+  assert.equal(tall.flip, false);
+  assert.equal(tall.top, '192px');
+  // 누른 것의 자리를 못 재면 아무것도 하지 않는다
+  assert.equal(app.run('uiFloatPlace(document.createElement("div"), {}, {})'), null);
+});
+
+test('뜨는 것 부품: 붙이기 — 부품 클래스가 붙고, 방금 동작이 키보드(키·키보드가 만든 클릭)면 넘침 없이 나타남만(is-flat), 마우스면 자라 나온다', () => {
+  const { app, floats } = floatClient();
+  const open = () => app.run("uiFloatOpen(Object.assign(document.createElement('div'), { className: 'x' })).className");
+  app.run("uiActMark({ type: 'click', detail: 1 })");
+  assert.equal(open(), 'x d-float');
+  app.run("uiActMark({ type: 'keydown', key: 'Enter' })");
+  assert.equal(open(), 'x d-float is-flat');
+  app.run("uiActMark({ type: 'click', detail: 0 })");
+  assert.equal(open(), 'x d-float is-flat', '키보드가 만든 클릭(detail 0)은 키보드 동작 그대로다');
+  app.run("uiActMark({ type: 'click', detail: 1 }); uiActMark({ type: 'keydown', key: 'Shift' })");
+  assert.equal(open(), 'x d-float', '꾸밈 키만으로는 키보드 동작이 아니다');
+  assert.equal(app.run("uiFloatOpen(document.createElement('div'), { flat: true, still: true }).className"), 'd-float is-flat is-still');
+  assert.equal(floats().length, 5, '전부 body에 붙는다');
+});
+
+test('뜨는 것 부품: 닫기 — is-out을 걸고 눌리지 않게 한 뒤 시간(140ms)으로 치운다. 끝남 신호를 기다리지 않고, 두 번 닫아도·이미 떨어진 요소여도 안전하다', () => {
+  const { app, floats, tick, timers } = floatClient();
+  const el = app.run("uiFloatOpen(document.createElement('div'))");
+  app.context.__el = el;
+  app.run('uiFloatClose(__el)');
+  assert.equal(el.classList.contains('is-out'), true);
+  assert.equal(el.inert, true, '닫히는 동안 초점·누름을 받지 않는다');
+  assert.equal(app.run('uiFloatClosing(__el)'), true);
+  assert.equal(floats().length, 1, '아직 화면에 있다(닫힘 재생 중)');
+  assert.deepEqual(timers.map(timer => timer.delay), [140]);
+  app.run('uiFloatClose(__el)');
+  assert.equal(timers.length, 1, '닫히는 중에 또 닫아도 타이머는 하나다');
+  tick(139);
+  assert.equal(floats().length, 1);
+  tick(140);
+  assert.equal(floats().length, 0, '시간이 지나면 DOM에서 빠진다');
+  // 이미 사라진 요소(다시 그리기로 부모째 떨어짐)를 닫아도 던지지 않는다.
+  app.run("(() => { const gone = document.createElement('div'); uiFloatClose(gone); })()");
+  tick(140);
+  app.run('uiFloatClose(null)');
+  // 팔레트처럼 짧은 닫힘은 시간을 넘겨 준다.
+  app.run("uiFloatClose(uiFloatOpen(document.createElement('div')), UI_FLOAT.quick)");
+  assert.deepEqual(timers.map(timer => timer.delay), [80]);
+});
+
+test('뜨는 것 부품: 움직임 줄이기 — 닫힘은 재생하지 않고 바로 치운다(등장은 CSS 전역 규칙이 120ms 흐려짐으로 바꾼다)', () => {
+  const { app, floats, timers } = floatClient({ reduce: true });
+  app.context.__el = app.run("uiFloatOpen(document.createElement('div'))");
+  app.run('uiFloatClose(__el)');
+  assert.equal(floats().length, 0);
+  assert.equal(timers.length, 0);
+  assert.equal(app.context.__el.classList.contains('is-out'), false);
+});
+
+test('더보기 메뉴(뜨는 것): 열면 부품 클래스·누른 ⋯가 시작점, 닫으면 is-out → 140ms 뒤 DOM에서 빠진다. Esc 스택·aria·초점 복귀는 닫는 순간 그대로다', () => {
+  const { app, anchor, floats, tick } = floatClient();
+  app.context.__a = anchor({ left: 900, right: 934, top: 100, bottom: 134 });
+  app.run("var picked = []; uiActMark({ type: 'click', detail: 1 });");
+  const before = app.run('escStack.length');
+  const list = app.run("uiMenu(__a, [[{ label: '삭제', onClick: () => picked.push('삭제') }], [{ label: '복사', onClick: () => picked.push('복사') }]])");
+  assert.equal(list.className, 'd-menulist d-float', '마우스로 열면 자라 나온다');
+  assert.equal(list.parent, app.context.document.body);
+  assert.deepEqual([list.style.left, list.style.top, list.style['--oy']], ['934px', '138px', '0'], '버튼 오른쪽 끝에 맞춰 4px 아래(가짜 창은 폭을 재지 못해 0)');
+  assert.equal(list.style['--ox'], '-17px', '시작점은 누른 버튼의 가운데');
+  assert.equal(app.context.__a.getAttribute('aria-expanded'), 'true');
+  assert.equal(app.run('escStack.length'), before + 1);
+  // Esc — 닫힘을 재생하지만 상태(스택·aria·초점)는 바로 닫힌 것이다.
+  app.run('escStack.pop()()');
+  assert.equal(app.run('uiMenuOpen'), null);
+  assert.equal(app.run('escStack.length'), before);
+  assert.equal(app.context.__a.getAttribute('aria-expanded'), 'false');
+  assert.equal(app.context.__a.focused, true, '초점은 누른 버튼으로');
+  assert.equal(list.classList.contains('is-out'), true);
+  assert.equal(floats().length, 1, '닫히는 140ms 동안은 화면에 남아 있다');
+  tick(140);
+  assert.equal(floats().length, 0);
+  assert.equal(list.parent, null);
+});
+
+test('더보기 메뉴(뜨는 것): 닫히는 중 다시 열면 새 메뉴가 뜨고 옛 것은 제 시간에 사라진다 · 닫히는 메뉴의 항목은 눌러도 무시된다 · 같은 버튼을 다시 누르면 닫힌다', () => {
+  const { app, anchor, floats, tick } = floatClient();
+  app.context.__a = anchor({ left: 900, right: 934, top: 100, bottom: 134 });
+  app.context.__b = anchor({ left: 900, right: 934, top: 200, bottom: 234 });
+  app.run("var picked = []; var sections = () => [[{ label: '삭제', onClick: () => picked.push('삭제') }]]; uiActMark({ type: 'click', detail: 1 });");
+  const first = app.run('uiMenu(__a, sections())');
+  assert.equal(app.run('uiMenu(__a, sections())'), null, '같은 버튼을 다시 누르면 닫힌다');
+  assert.equal(first.classList.contains('is-out'), true);
+  // 닫히는 중(140ms 안)에 다시 연다 — 연타.
+  const second = app.run('uiMenu(__a, sections())');
+  assert.notEqual(second, first);
+  assert.equal(second.classList.contains('is-out'), false);
+  assert.equal(floats().length, 2, '닫히는 것과 새로 연 것이 잠깐 함께 있다');
+  assert.equal(app.run('uiMenuOpen.list') === second, true);
+  // 닫히는 메뉴의 항목을 눌러도 아무 일도 없다(새 메뉴도 닫히지 않는다).
+  first.children[0].listeners.click();
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(picked)')), []);
+  assert.equal(app.run('uiMenuOpen.list') === second, true);
+  tick(140);
+  assert.deepEqual(floats(), [second], '옛 메뉴만 사라진다');
+  // 다른 버튼의 메뉴를 열면 앞의 것이 닫히며 바뀐다.
+  const third = app.run('uiMenu(__b, sections())');
+  assert.equal(second.classList.contains('is-out'), true);
+  assert.equal(app.context.__a.getAttribute('aria-expanded'), 'false');
+  assert.equal(third.style.top, '238px');
+  // 열린 메뉴의 항목은 예전 그대로 — 닫고 실행한다.
+  third.children[0].listeners.click();
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(picked)')), ['삭제']);
+  assert.equal(app.run('uiMenuOpen'), null);
+  tick(140);
+  assert.equal(floats().length, 0);
+  assert.equal(app.run('escStack.length'), 0, 'Esc 스택에 남는 것이 없다');
+});
+
+test('더보기 메뉴(뜨는 것): 키보드로 열면 넘침 없이 나타남만(is-flat), 움직임 줄이기에서는 닫힘도 바로', () => {
+  const key = floatClient();
+  key.app.context.__a = key.anchor({ left: 900, right: 934, top: 100, bottom: 134 });
+  key.app.run("uiActMark({ type: 'keydown', key: 'Enter' })");
+  assert.equal(key.app.run("uiMenu(__a, [[{ label: '삭제', onClick() {} }]])").className, 'd-menulist d-float is-flat');
+  const reduce = floatClient({ reduce: true });
+  reduce.app.context.__a = reduce.anchor({ left: 900, right: 934, top: 100, bottom: 134 });
+  reduce.app.run("uiMenu(__a, [[{ label: '삭제', onClick() {} }]]); uiMenuClose();");
+  assert.equal(reduce.floats().length, 0, '닫힘을 재생하지 않는다');
+});
+
+test('더보기 메뉴(뜨는 것): 부르는 쪽은 그대로다 — uiMenu·uiMenuClose의 이름과 인자가 바뀌지 않았고, 창(dialog) 안에서 연 메뉴는 그 창 안에 붙는다', () => {
+  const src = floatClientSources();
+  assert.match(src['app.js'], /\nfunction uiMenuClose\(\) \{/);
+  assert.match(src['app.js'], /\nfunction uiMenu\(anchor, sections\) \{/);
+  assert.match(src['app.js'], /uiFloatOpen\(list, \{ parent: anchor\.closest\('dialog\[open\]'\) \|\| document\.body \}\);/);
+  const { app, anchor } = floatClient();
+  const a = anchor({ left: 100, right: 134, top: 100, bottom: 134 });
+  const dialog = app.run("document.createElement('dialog')");
+  a.closest = selector => (selector === 'dialog[open]' ? dialog : null);
+  app.context.__a = a;
+  assert.equal(app.run("uiMenu(__a, [[{ label: '삭제', onClick() {} }]])").parent, dialog);
+});
+
+test('분류 판·종류 목록(뜨는 것): 따로 만든 자리 잡기·닫힘이 없고 공용 도우미를 부른다 — 판이 열린 동안의 다시 그리기 보류(uiRenderHeld)는 그대로', () => {
+  const src = floatClientSources();
+  assert.doesNotMatch(src['app.js'], /function uiSchedPlace/);
+  const toggle = src['app.js'].slice(src['app.js'].indexOf('function uiSchedToggle'), src['app.js'].indexOf('// 슬랙에서 갓 들어온 할 일.'));
+  assert.match(toggle, /const place = \(\) => uiFloatPlace\(pop, anchor, \{ gap: 6, pad: 12, width: 304 \}\);/);
+  assert.match(toggle, /uiFloatOpen\(pop\);\n  anchor\.setAttribute\('aria-expanded', 'true'\);\n  uiSchedOpen = \{ pop, anchor, zone, id: item\.id, onEsc, reposition \};/);
+  const close = src['app.js'].slice(src['app.js'].indexOf('function uiSchedClose'), src['app.js'].indexOf('function uiSchedButton'));
+  assert.match(close, /uiFloatClose\(pop\);\n  \/\/ 고르는 중에 미룬 다시 그리기는 닫으면서 풀어 준다[^\n]*\n  if \(keepHeld\) return;\n  uiHeldFlush\(\);/, '닫힘 재생을 건 뒤 미룬 그리기를 푼다(순서 그대로)');
+  assert.match(src['app.js'], /if \(zone && uiSchedOpen && uiSchedOpen\.zone === zone\) return true;/);
+});
+
+test('분류 판(뜨는 것): 실제로 열고 닫는다 — 부품 클래스·누른 버튼이 시작점, 닫으면 is-out 뒤 140ms에 빠지고 미룬 그리기는 닫는 순간 풀린다', () => {
+  const { app, floats, tick } = floatClient();
+  app.run("escapeHtml = s => String(s || ''); workflowData = { items: [], meetings: [] }; jiraIssuesByKey = new Map(); projectPickEntries = () => []; uiActMark({ type: 'click', detail: 1 });");
+  app.run("renderInbox([{ id: 'i1', description: '업무1' }])");
+  const row = app.nodes.get('inboxList').children[0];
+  const button = row.children[1].children[0];
+  button.getBoundingClientRect = () => ({ left: 400, right: 460, top: 100, bottom: 128, width: 60, height: 28 });
+  button.contains = node => node === button;
+  button.listeners.click({});
+  const pop = floats()[0];
+  assert.equal(pop.className, 'd-schedpop d-float');
+  assert.deepEqual([pop.style.left, pop.style.top, pop.style['--ox'], pop.style['--oy']], ['400px', '134px', '30px', '0']);
+  const zone = app.context.document.getElementById('inboxZone');
+  app.context.zone = zone;
+  app.run('var drawn = 0;');
+  assert.equal(app.run("uiRenderOrHold('inbox', zone, () => { drawn += 1; })"), false, '열려 있는 동안은 미룬다');
+  button.listeners.click({});
+  assert.equal(pop.classList.contains('is-out'), true);
+  assert.equal(app.run('drawn'), 1, '닫는 순간 미룬 그리기가 풀린다(닫힘 재생을 기다리지 않는다)');
+  assert.equal(app.run('uiSchedOpen'), null);
+  assert.equal(floats().length, 1);
+  tick(140);
+  assert.equal(floats().length, 0);
 });
