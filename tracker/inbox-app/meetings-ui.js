@@ -769,7 +769,7 @@ function panelMeetingRow(item, event, stateText, host = MEETING_HOST_CARD) {
 const MEETING_TYPE_KEYS = { check: '?', decision: '!' };
 let meetingTypeOpen = null; // { pop, anchor, onEsc, away, shut }
 
-function meetingTypeClose(restoreFocus = false) {
+function meetingTypeClose(restoreFocus = false, pressed = null) {
   if (!meetingTypeOpen) return;
   const { pop, anchor, onEsc, away, shut } = meetingTypeOpen;
   meetingTypeOpen = null;
@@ -778,7 +778,7 @@ function meetingTypeClose(restoreFocus = false) {
   document.removeEventListener('scroll', shut, true);
   window.removeEventListener('resize', shut);
   anchor.setAttribute('aria-expanded', 'false');
-  uiFloatClose(pop);
+  uiFloatClose(pop, UI_FLOAT.out, pressed);
   if (restoreFocus && anchor.isConnected) anchor.focus();
 }
 
@@ -793,7 +793,7 @@ function meetingTypeToggle(anchor, current, onPick) {
   pop.setAttribute('role', 'listbox');
   pop.setAttribute('aria-label', '종류');
   pop.addEventListener('click', event => event.stopPropagation());
-  const pick = (key) => { meetingTypeClose(); onPick(key); };
+  const pick = (key) => { meetingTypeClose(false, items.find(button => button.dataset.key === key) || null); onPick(key); };
   const items = WF_TYPES.map(([key, text], index) => {
     const button = document.createElement('button');
     button.type = 'button';
@@ -834,7 +834,8 @@ function meetingTypeToggle(anchor, current, onPick) {
   const onEsc = () => meetingTypeClose(true);
   escPush(onEsc);
   const away = (event) => { if (!pop.contains(event.target) && !anchor.contains(event.target)) meetingTypeClose(); };
-  const shut = () => meetingTypeClose();
+  // 닫힘을 재생하는 복사본(방금 닫힌 메뉴 등)에 스크롤 자리를 옮기며 나가는 scroll은 사용자의 스크롤이 아니다.
+  const shut = (event) => { if (!uiFloatGhostEvent(event)) meetingTypeClose(); };
   document.addEventListener('mousedown', away, true);
   document.addEventListener('scroll', shut, true);
   window.addEventListener('resize', shut);

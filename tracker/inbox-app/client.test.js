@@ -2666,7 +2666,7 @@ test('종류 목록 CSS: 분류 판과 같은 부품(뜨는 것) — 따로 적�
   const src = fs.readFileSync(path.join(__dirname, 'meetings-ui.js'), 'utf8');
   assert.doesNotMatch(src, /function meetingTypePlace|classList\.add\('is-out'\)|body\.appendChild\(pop\)/, '베껴 만든 자리 잡기·닫힘은 없다');
   assert.match(src, /uiFloatOpen\(pop\);[\s\S]{0,120}uiFloatPlace\(pop, anchor, \{ align: 'end', nudge: 6, width: 176 \}\);/);
-  assert.match(src.slice(src.indexOf('function meetingTypeClose'), src.indexOf('function meetingTypeToggle')), /uiFloatClose\(pop\);/);
+  assert.match(src.slice(src.indexOf('function meetingTypeClose'), src.indexOf('function meetingTypeToggle')), /uiFloatClose\(pop, UI_FLOAT\.out, pressed\);/);
   assert.match(css, /\.d-tpk \{[^}]*height: var\(--h-sm\)[^}]*color: var\(--dim\)/);
 });
 
@@ -16138,8 +16138,61 @@ test('누름: 뺀 것의 누름 = 색 한 단계 — 줄어들지 않는 것은 
   assert.ok(lum(press[1]) > lum(hover[1]), '다크: 가리킴보다 밝다(면에서 더 떠 보인다)');
   assert.doesNotMatch(rule, /scale|transform/, '크기는 그대로다');
   // 눌러서 닫은 메뉴 항목은 닫히는 동안 누름 색을 든다.
-  assert.match(css, /\.d-float\.is-out \.is-held \{ background: var\(--press\); \}/);
-  assert.match(fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8'), /if \(node\.matches\(':hover'\)\) held = twins\[at\];\n    \}\);\n    held\?\.closest\('button'\)\?\.classList\.add\('is-held'\);/);
+  assert.match(css, /\.d-float\.is-out \.d-mitem\.is-held:not\(:disabled\) \{ background: var\(--press\); \}/);
+  assert.match(css, /\.d-float\.is-out \.d-mitem\.dng\.is-held:not\(:disabled\) \{ background: var\(--urgent-bg\); color: var\(--urgent\); \}/);
+  const src = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  assert.match(src, /if \(node === pressed\) twins\[at\]\.classList\.add\('is-held'\);/);
+  assert.doesNotMatch(src, /matches\(':hover'\)/, '마우스가 얹혀 있던 항목이 아니라 실제로 누른 항목에만 붙는다');
+  // 누름 색이 다른 규칙에 가려지지 않는다: 강조(.on)된 판 항목과 위험 항목은 제 규칙 바로 뒤에 더 센 누름 규칙이 온다.
+  const on = css.indexOf('.d-schedpop .d-mitem.on, .d-schedpop .d-mitem:focus-visible {');
+  assert.match(css.slice(on, on + 420), /\n\.d-schedpop \.d-mitem:active:not\(:disabled\) \{ background: var\(--press\); \}/, '강조된 항목도 누르는 동안은 누름 색(떼면 강조로 돌아온다)');
+  const dng = css.indexOf('.d-mitem.dng:hover, .d-mitem.dng:focus-visible {');
+  assert.match(css.slice(dng, dng + 360), /\n\.d-mitem\.dng:active:not\(:disabled\) \{ background: var\(--urgent-bg\); color: var\(--urgent\); \}/, '위험 항목은 위험색의 연한 바탕');
+});
+
+test('뜨는 것 부품: 닫힘 복사본 — 눌러서 닫은 항목만 누름 색을 든다(Esc·바깥 클릭은 아님), 뿌리 요소의 스크롤 자리도 옮긴다', () => {
+  const { app, anchor, floats } = floatClient();
+  app.context.__a = anchor({ left: 900, right: 934, top: 100, bottom: 134 });
+  // 가짜 창의 복사본은 아이를 옮기지 않으니, 뿌리를 "누른 것"으로 넘겨 표시가 붙는 길만 본다.
+  const el = app.run("uiFloatOpen(document.createElement('div'))");
+  el.scrollTop = 120; el.querySelectorAll = () => [];
+  app.context.__el = el;
+  app.run('uiFloatClose(__el, UI_FLOAT.out, __el)');
+  assert.equal(floats()[0].scrollTop, 120, '뿌리가 스크롤되는 것(시트·분류 판)도 닫히는 동안 맨 위로 튀지 않는다');
+  assert.equal(floats()[0].classList.contains('is-held'), true);
+  const plain = app.run("uiFloatOpen(document.createElement('div'))");
+  plain.querySelectorAll = () => [];
+  app.context.__el = plain;
+  app.run('uiFloatClose(__el)');
+  assert.equal(floats()[1].classList.contains('is-held'), false, '누른 것이 없으면(Esc·바깥 클릭) 표시도 없다');
+  // 부르는 쪽: 메뉴 항목 클릭·분류 판 고르기·종류 목록 고르기만 누른 항목을 넘긴다.
+  const src = floatClientSources();
+  assert.match(src['app.js'], /item\.addEventListener\('click', \(\) => \{ uiMenuClose\(item\); entry\.onClick\(\); \}\);/);
+  assert.match(src['app.js'], /const onEsc = \(\) => \{ uiMenuClose\(\); anchor\.focus\(\); \};/);
+  assert.match(src['app.js'], /if \(uiMenuOpen && !uiMenuOpen\.anchor\.contains\(event\.target\)\) uiMenuClose\(\);/);
+  assert.match(src['app.js'], /uiSchedClose\(\{ keepHeld: true, pressed: pressedEntry \}\);/);
+  assert.match(src['meetings-ui.js'], /const pick = \(key\) => \{ meetingTypeClose\(false, items\.find\(button => button\.dataset\.key === key\) \|\| null\); onPick\(key\); \};/);
+});
+
+test('뜨는 것 부품: 복사본에서 온 scroll 이벤트는 무시한다 — 종류 목록이 닫히지 않고, 분류 판·상세 카드도 자리를 다시 잡지 않는다. 복사본은 "열려 있나" 판정에도 걸리지 않는다', async () => {
+  const pure = pureClient();
+  const ghostEvent = "{ target: { closest: selector => (selector === '.is-out' ? {} : null) } }";
+  assert.equal(pure.run(`uiFloatGhostEvent(${ghostEvent})`), true);
+  assert.equal(pure.run('uiFloatGhostEvent({ target: { closest: () => null } })'), false);
+  assert.equal(pure.run('uiFloatGhostEvent({ target: {} })'), false, '창(resize)처럼 closest가 없는 곳');
+  assert.equal(pure.run('uiFloatGhostEvent(undefined)'), false);
+  // 종류 목록: 문서의 scroll(잡기 단계)을 듣는다 — 복사본 것은 넘기고 진짜 스크롤에는 닫힌다.
+  const { app, rows } = meetingTypeClient();
+  await settle();
+  nodeFind(rows()[0], 'd-tpk').listeners.click({});
+  app.run(`meetingTypeOpen.shut(${ghostEvent})`);
+  assert.notEqual(app.run('meetingTypeOpen'), null, '방금 닫힌 메뉴의 복사본이 스크롤 자리를 옮기며 낸 scroll에는 닫히지 않는다');
+  app.run('meetingTypeOpen.shut({ target: { closest: () => null } })');
+  assert.equal(app.run('meetingTypeOpen'), null, '사용자의 스크롤에는 예전처럼 닫힌다');
+  const src = floatClientSources();
+  assert.match(src['app.js'], /function detailPopFollow\(event\) \{\n  if \(detailPopTick \|\| uiFloatGhostEvent\(event\)\) return;/);
+  assert.match(src['app.js'], /const reposition = \(event\) => \{ if \(uiFloatGhostEvent\(event\)\) return;/);
+  assert.match(src['app.js'], /return !document\.querySelector\?\.\('\.d-typepop:not\(\.is-out\)'\);/, '종류를 고른 직후의 줄 이동이 복사본 때문에 꺼지지 않는다');
 });
 
 test('누름: 움직임 줄이기 — 크기 변화는 끄고 색은 그대로 바뀐다', () => {
@@ -16368,7 +16421,7 @@ test('줄 이동: 움직이면 안 되는 곳 — 글자 입력 중·한글 조�
     ['글자 칸에 초점', "document.activeElement = { tagName: 'INPUT', type: 'text' }", 'document.activeElement = null'],
     ['한글 조합 중', 'uiComposingEl = {}', 'uiComposingEl = null'],
     ['분류 판 열림', 'uiSchedOpen = { zone: null }', 'uiSchedOpen = null'],
-    ['종류 목록 열림', "document.querySelector = sel => (sel === '.d-typepop' ? {} : null)", 'document.querySelector = () => null'],
+    ['종류 목록 열림', "document.querySelector = sel => (sel === '.d-typepop:not(.is-out)' ? {} : null)", 'document.querySelector = () => null'],
     ['가려진 창', 'document.hidden = true', 'document.hidden = false'],
   ];
   for (const [name, on, off] of cases) {
@@ -16732,10 +16785,11 @@ test('뜨는 것 부품: 닫힘 복사본 — id를 떼고(getElementById가 죽
   const ghost = src.slice(src.indexOf('function uiFloatGhost'), src.indexOf('function uiFloatClose'));
   assert.match(ghost, /ghost\.removeAttribute\('id'\);\n    ghost\.querySelectorAll\('\[id\]'\)\.forEach\(node => node\.removeAttribute\('id'\)\);/);
   assert.match(ghost, /twins\[at\]\.scrollTop = node\.scrollTop;/);
+  assert.match(ghost, /const twins = \[ghost, \.\.\.ghost\.querySelectorAll\('\*'\)\];\n    \[el, \.\.\.el\.querySelectorAll\('\*'\)\]\.forEach/, '뿌리 요소 자신의 스크롤 자리도 옮긴다');
   assert.match(ghost, /setTimeout\(\(\) => ghost\.remove\(\), ms\);/);
   assert.doesNotMatch(ghost, /animationend|transitionend|\.finished/, '끝남 신호를 기다리지 않는다');
   const close = src.slice(src.indexOf('function uiFloatClose'), src.indexOf('// 한 벌뿐인 더보기 메뉴.'));
-  assert.match(close, /uiFloatGhost\(el, ms\);\n  el\.remove\(\);/);
+  assert.match(close, /uiFloatGhost\(el, ms, pressed\);\n  el\.remove\(\);/);
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
   assert.match(css, /\.d-float\.is-out \* \{ animation: none !important; \}/);
 });
@@ -16826,7 +16880,7 @@ test('더보기 메뉴(뜨는 것): 키보드로 열면 넘침 없이 나타남�
 
 test('더보기 메뉴(뜨는 것): 부르는 쪽은 그대로다 — uiMenu·uiMenuClose의 이름과 인자가 바뀌지 않았고, 창(dialog) 안에서 연 메뉴는 그 창 안에 붙는다', () => {
   const src = floatClientSources();
-  assert.match(src['app.js'], /\nfunction uiMenuClose\(\) \{/);
+  assert.match(src['app.js'], /\nfunction uiMenuClose\(pressed = null\) \{/, '인자 없이 부르던 곳은 그대로다(누른 항목은 메뉴 안에서만 넘긴다)');
   assert.match(src['app.js'], /\nfunction uiMenu\(anchor, sections\) \{/);
   assert.match(src['app.js'], /uiFloatOpen\(list, \{ parent: anchor\.closest\('dialog\[open\]'\) \|\| document\.body \}\);/);
   const { app, anchor } = floatClient();
@@ -16844,7 +16898,7 @@ test('분류 판·종류 목록(뜨는 것): 따로 만든 자리 잡기·닫힘
   assert.match(toggle, /const place = \(\) => uiFloatPlace\(pop, anchor, \{ gap: 6, pad: 12, width: 304 \}\);/);
   assert.match(toggle, /uiFloatOpen\(pop\);\n  anchor\.setAttribute\('aria-expanded', 'true'\);\n  uiSchedOpen = \{ pop, anchor, zone, id: item\.id, onEsc, reposition \};/);
   const close = src['app.js'].slice(src['app.js'].indexOf('function uiSchedClose'), src['app.js'].indexOf('function uiSchedButton'));
-  assert.match(close, /uiFloatClose\(pop\);\n  \/\/ 고르는 중에 미룬 다시 그리기는 닫으면서 풀어 준다[^\n]*\n  if \(keepHeld\) return;\n  uiHeldFlush\(\);/, '닫힘 재생을 건 뒤 미룬 그리기를 푼다(순서 그대로)');
+  assert.match(close, /uiFloatClose\(pop, UI_FLOAT\.out, pressed\);\n  \/\/ 고르는 중에 미룬 다시 그리기는 닫으면서 풀어 준다[^\n]*\n  if \(keepHeld\) return;\n  uiHeldFlush\(\);/, '닫힘 재생을 건 뒤 미룬 그리기를 푼다(순서 그대로)');
   assert.match(src['app.js'], /if \(zone && uiSchedOpen && uiSchedOpen\.zone === zone\) return true;/);
 });
 

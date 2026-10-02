@@ -198,7 +198,8 @@ function uiFloatPlace(el, anchor, { align = 'start', gap = 4, pad = 8, nudge = 0
 // 복사본에는 누름·초점·id가 없다: 닫히는 동안의 클릭, Esc 스택·초점 복귀·다시 그리기·getElementById가 닫힘 재생과 얽히지 않는다.
 // 진짜 요소를 남겨 두고 재생하지 않는 까닭 — 남겨 두면 초점이 옮겨 갈 때 그 안의 칸이 blur·change를 받아
 // "Esc로 닫으면 고치던 값을 버린다"가 "저장한다"로 바뀐다.
-function uiFloatGhost(el, ms = UI_FLOAT.out) {
+// pressed: 눌러서 닫은 항목(el 안의 버튼) — 복사본에서도 누름 색을 든 채 닫힌다(.is-held). Esc·바깥 클릭으로 닫을 때는 없다.
+function uiFloatGhost(el, ms = UI_FLOAT.out, pressed = null) {
   if (!el || el.isConnected === false || !uiFloatMotion() || typeof el.cloneNode !== 'function' || typeof el.after !== 'function') return null;
   let ghost = null;
   try {
@@ -209,24 +210,27 @@ function uiFloatGhost(el, ms = UI_FLOAT.out) {
     ghost.removeAttribute('id');
     ghost.querySelectorAll('[id]').forEach(node => node.removeAttribute('id'));
     el.after(ghost);
-    // 스크롤해 둔 자리는 복사되지 않는다 — 닫히는 순간 내용이 맨 위로 튀지 않게 옮겨 준다.
-    // 가리키던(방금 누른) 항목도 복사본에서는 상태를 잃는다 — 누름 색을 든 채 닫히게 표시해 준다(.is-held).
-    const twins = ghost.querySelectorAll('*');
-    let held = null;
-    el.querySelectorAll('*').forEach((node, at) => {
+    // 스크롤해 둔 자리는 복사되지 않는다 — 닫히는 순간 내용이 맨 위로 튀지 않게 옮겨 준다(뿌리 요소 자신도: 시트·분류 판은 뿌리가 스크롤된다).
+    // 이때 복사본에서 나가는 scroll 이벤트는 듣는 쪽이 무시한다(uiFloatGhostEvent).
+    const twins = [ghost, ...ghost.querySelectorAll('*')];
+    [el, ...el.querySelectorAll('*')].forEach((node, at) => {
       if (!twins[at]) return;
       if (node.scrollTop || node.scrollLeft) { twins[at].scrollTop = node.scrollTop; twins[at].scrollLeft = node.scrollLeft; }
-      if (node.matches(':hover')) held = twins[at];
+      if (node === pressed) twins[at].classList.add('is-held');
     });
-    held?.closest('button')?.classList.add('is-held');
   } catch { ghost?.remove?.(); return null; }
   setTimeout(() => ghost.remove(), ms);
   return ghost;
 }
-function uiFloatClose(el, ms = UI_FLOAT.out) {
+function uiFloatClose(el, ms = UI_FLOAT.out, pressed = null) {
   if (!el) return;
-  uiFloatGhost(el, ms);
+  uiFloatGhost(el, ms, pressed);
   el.remove();
+}
+// 닫힘을 재생하는 복사본에서 온 이벤트인가 — 문서의 scroll을 잡기 단계에서 듣는 곳(종류 목록 닫기, 분류 판·상세 카드 자리 다시 잡기)은 이것을 무시한다.
+function uiFloatGhostEvent(event) {
+  const from = event && event.target;
+  return !!(from && typeof from.closest === 'function' && from.closest('.is-out'));
 }
 
 // 한 벌뿐인 더보기 메뉴. 한 번에 하나만 열리고, 아래 자리가 없으면 위로 뒤집힌다.
@@ -234,12 +238,13 @@ function uiFloatClose(el, ms = UI_FLOAT.out) {
 // sections는 [[항목…], [항목…]] — 묶음 사이에 구분선이 들어간다.
 // 항목은 { label, onClick, danger, disabled } 또는 값을 바꾸는 { field, control }.
 let uiMenuOpen = null;
-function uiMenuClose() {
+// pressed: 눌러서 닫은 항목(있을 때만 — 닫히는 동안 누름 색을 든다).
+function uiMenuClose(pressed = null) {
   if (!uiMenuOpen) return;
   const { list, anchor, onEsc } = uiMenuOpen;
   uiMenuOpen = null;
   escDrop(onEsc);
-  uiFloatClose(list);
+  uiFloatClose(list, UI_FLOAT.out, pressed);
   anchor.setAttribute('aria-expanded', 'false');
 }
 function uiMenu(anchor, sections) {
@@ -288,7 +293,7 @@ function uiMenu(anchor, sections) {
       item.setAttribute('role', 'menuitem');
       item.textContent = entry.label;
       if (entry.disabled) item.disabled = true;
-      item.addEventListener('click', () => { uiMenuClose(); entry.onClick(); });
+      item.addEventListener('click', () => { uiMenuClose(item); entry.onClick(); });
       list.appendChild(item);
     });
   });
@@ -854,7 +859,7 @@ function uiGlideUnlessLate(render) {
 function uiGlideAllowed() {
   if (uiGlideLate || uiActQuiet || Date.now() - uiActAt > UI_GLIDE.within) return false;
   if (uiSchedOpen || uiComposingEl || uiIsTextEntry(document.activeElement) || document.hidden) return false;
-  return !document.querySelector?.('.d-typepop');
+  return !document.querySelector?.('.d-typepop:not(.is-out)'); // 닫힘을 재생하는 복사본은 열린 것이 아니다
 }
 // 줄마다 자리와 "화면에 보이는가"를 잰다. 열쇠는 업무 id(새로 들어온 것 줄·그룹 제목은 data-move-id).
 // sized = 높이가 있었다(숨은 탭·접힌 구역 안의 줄은 자리가 전부 0이라 옛 자리로 쓸 수 없다).
@@ -4137,8 +4142,8 @@ function detailPopPlace(row) {
 }
 
 // 스크롤하면 줄을 따라간다(갑자기 사라지지 않게). 줄이 화면 밖으로 나가면 그때 닫는다.
-function detailPopFollow() {
-  if (detailPopTick) return;
+function detailPopFollow(event) {
+  if (detailPopTick || uiFloatGhostEvent(event)) return;
   detailPopTick = requestAnimationFrame(() => {
     detailPopTick = 0;
     if (!detailPopHost || !panelState) return;
@@ -5090,7 +5095,7 @@ function uiHoverSettle() {
 
 function uiSchedMotion() { return uiFloatMotion(); }
 
-function uiSchedClose({ restoreFocus = false, keepHeld = false } = {}) {
+function uiSchedClose({ restoreFocus = false, keepHeld = false, pressed = null } = {}) {
   if (!uiSchedOpen) return;
   const { pop, anchor, id, onEsc, reposition } = uiSchedOpen;
   uiSchedOpen = null;
@@ -5098,7 +5103,7 @@ function uiSchedClose({ restoreFocus = false, keepHeld = false } = {}) {
   window.removeEventListener('resize', reposition);
   document.removeEventListener('scroll', reposition, true);
   anchor.setAttribute('aria-expanded', 'false');
-  uiFloatClose(pop);
+  uiFloatClose(pop, UI_FLOAT.out, pressed);
   // 고르는 중에 미룬 다시 그리기는 닫으면서 풀어 준다. 고른 경우(keepHeld)에는 저장이 끝나 그리는 쪽이 한 번에 처리한다.
   if (keepHeld) return;
   uiHeldFlush();
@@ -5144,6 +5149,7 @@ function uiSchedToggle(item, row, anchor) {
     button.addEventListener('focus', () => { pop.querySelectorAll('.d-mitem.on').forEach(on => on.classList.remove('on')); button.classList.add('on'); });
   };
   let order = 0;
+  let pressedEntry = null; // 마지막으로 누른 항목 — 고르고 닫힐 때 그 항목이 누름 색을 든다
   const entry = (keyLabel, text, detail, onPick) => {
     const button = document.createElement('button');
     button.type = 'button';
@@ -5163,7 +5169,7 @@ function uiSchedToggle(item, row, anchor) {
     const kbd = document.createElement('kbd');
     kbd.textContent = String(keyLabel);
     button.appendChild(kbd);
-    button.addEventListener('click', onPick);
+    button.addEventListener('click', () => { pressedEntry = button; return onPick(); });
     mark(button);
     pop.appendChild(button);
     return button;
@@ -5171,10 +5177,10 @@ function uiSchedToggle(item, row, anchor) {
 
   // 고른 날짜(또는 나중에)를 저장한다 — 판은 닫고 줄은 접힌다. 오늘·나중에는 예전 두 버튼과 같은 동작·같은 알림이다.
   const choose = async (scheduled, message) => {
-    if (uiSchedBusy.has(item.id)) return; // 닫히는 140ms·저장 중의 두 번째 선택은 무시한다
+    if (uiSchedBusy.has(item.id)) return; // 저장 중의 두 번째 선택은 무시한다(판은 고르는 순간 떨어지고, 닫힘은 눌리지 않는 복사본이 재생한다)
     uiSchedBusy.add(item.id);
     uiHoverSettle();
-    uiSchedClose({ keepHeld: true });
+    uiSchedClose({ keepHeld: true, pressed: pressedEntry });
     row.classList.add('is-leaving');
     if (scheduled === todayStr()) uiSchedRise.set(item.id, Date.now());
     let saved = false;
@@ -5325,7 +5331,7 @@ function uiSchedToggle(item, row, anchor) {
 
   const onEsc = () => uiSchedClose({ restoreFocus: true });
   const place = () => uiFloatPlace(pop, anchor, { gap: 6, pad: 12, width: 304 });
-  const reposition = (event) => { if (!event || !event.target || !pop.contains || !pop.contains(event.target)) place(); };
+  const reposition = (event) => { if (uiFloatGhostEvent(event)) return; if (!event || !event.target || !pop.contains || !pop.contains(event.target)) place(); };
   pop.addEventListener('keydown', (event) => {
     if (event.isComposing) return;
     if (event.key === 'Tab') {

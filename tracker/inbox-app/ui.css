@@ -422,8 +422,10 @@ button:disabled:active, .d-cb:disabled:active, .d-wcb:disabled:active { scale: n
 .d-float.is-out { animation: d-float-out var(--float-out) var(--ease) both; pointer-events: none; }
 /* 닫히는 복사본 안의 것은 다시 움직이지 않는다(항목이 차례로 다시 뜨거나 체크가 다시 커지지 않게) */
 .d-float.is-out * { animation: none !important; }
-/* 눌러서 닫은 항목은 닫히는 동안 누름 색을 그대로 든다(복사본은 가리킴·누름 상태를 잃는다 — 무엇을 골랐는지 끝까지 보이게) */
-.d-float.is-out .is-held { background: var(--press); }
+/* 눌러서 닫은 항목은 닫히는 동안 누름 색을 그대로 든다(복사본은 누름 상태를 잃는다 — 무엇을 골랐는지 끝까지 보이게).
+   Esc·바깥 클릭으로 닫을 때는 붙지 않는다. 강조(.on)·위험 항목보다 앞서게 세기를 맞춘다 */
+.d-float.is-out .d-mitem.is-held:not(:disabled) { background: var(--press); }
+.d-float.is-out .d-mitem.dng.is-held:not(:disabled) { background: var(--urgent-bg); color: var(--urgent); }
 /* 키보드로 연 것·검색 팔레트 — 이동·넘침 없이 나타남만 */
 .d-float.is-flat { animation: d-float-fade var(--float-flat) linear both; }
 .d-float.is-flat.is-out { animation: d-float-gone var(--float-out) linear both; }
@@ -579,6 +581,8 @@ button:disabled:active, .d-cb:disabled:active, .d-wcb:disabled:active { scale: n
 .d-schedpop .lab { padding: 6px 12px 4px; font-size: 12.5px; color: var(--muted); }
 .d-schedpop .d-mitem { gap: 8px; animation: d-float-item var(--float-item) var(--ease) both; animation-delay: calc(var(--i, 0) * var(--float-gap) + var(--float-lead)); }
 .d-schedpop .d-mitem.on, .d-schedpop .d-mitem:focus-visible { background: var(--sel); color: var(--accent-text); outline: none; }
+/* 강조(.on)된 항목도 누르는 동안은 누름 색이 보인다 — 떼면 강조로 돌아온다 */
+.d-schedpop .d-mitem:active:not(:disabled) { background: var(--press); }
 .d-schedpop .d-mitem .dt { margin-left: auto; font-size: 12.5px; font-weight: 500; color: var(--dim); font-variant-numeric: tabular-nums; }
 .d-schedpop .d-mitem.on .dt { color: var(--accent-text); opacity: 0.8; }
 .d-schedpop kbd {
@@ -625,6 +629,8 @@ button:disabled:active, .d-cb:disabled:active, .d-wcb:disabled:active { scale: n
 .d-mitem:disabled:hover { background: none; }
 .d-mitem.dng { color: var(--muted); }
 .d-mitem.dng:hover, .d-mitem.dng:focus-visible { background: var(--hover); color: var(--urgent); }
+/* 위험 항목의 누름 = 위험색의 연한 바탕(가리킴의 회색 + 빨간 글자보다 한 단계 진하게) */
+.d-mitem.dng:active:not(:disabled) { background: var(--urgent-bg); color: var(--urgent); }
 /* 비활성 항목(추가 입력이 필요한 전환 등)은 범주 색과 겹쳐도 비활성 표현이 이긴다 */
 .d-mitem:disabled.k-dim, .d-mitem:disabled.k-acc, .d-mitem:disabled.k-pos,
 .d-mitem:disabled.k-dim:hover, .d-mitem:disabled.k-dim:focus-visible { color: var(--muted); }
