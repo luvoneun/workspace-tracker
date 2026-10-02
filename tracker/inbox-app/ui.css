@@ -367,7 +367,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
    글자 탭·글자 링크·글자 제목(글자가 흔들린다) / 메뉴·고르개 항목(키보드 연타) / 줄 전체가 버튼인 것(줄이 줄면 목록이 흔들린다) */
 .d-tab:active, .d-srch:active, .d-link:active, .wf-link:active, .rp-rename:active,
 .d-title:active, .d-mrow .ti:active, .d-wrow .ti:active, .d-mrow2 .ti:active, .d-prow2 .ti:active, .d-rec .ti:active, .rp-rec .ti:active,
-.d-mitem:active, .d-mpickbtn:active, .jira-pick:active, .d-gpopt:active, .d-pres:active, .d-dpick:active, .rp-pick:active, .rp-ev .ev:active,
+.d-mitem:active, .d-mpickbtn:active, .jira-pick:active, .d-gpopt:active, .d-pres:active, .d-dpick:active, .d-fields .badge.is-plain:active, .rp-pick:active, .rp-ev .ev:active,
 .d-grp.tog:active, .d-guide:active, .d-prow:active, .d-plink:active, .d-mtrow:active, .d-jfold:active, .d-jlink .pk:active,
 .rp-wk:active, .rp-fl:active, .rp-gp:active, .d-uwmore:active,
 button:disabled:active, .d-cb:disabled:active, .d-wcb:disabled:active { scale: none; }

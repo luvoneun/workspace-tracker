@@ -16046,14 +16046,40 @@ test('누름: 공용 규칙 하나 — 모든 버튼·체크박스가 .97 / --t-
   ]);
 });
 
-test('누름: transition을 따로 적은 버튼 부품도 누름 전환을 함께 적는다(따로 적으면 공용 줄을 덮는다), 누름은 transform이 아니라 scale', () => {
-  const decls = MOTION_CSS_FILES.flatMap(file => motionDecls(file)).filter(d => d.prop === 'transition');
+// transition을 선언했지만 누름 전환이 없어도 되는 것 — 버튼이 아니다. [이유, 선택자들]
+// 버튼 부품에 transition을 새로 적으면 누름 전환을 함께 적거나 ui.css의 "누름에서 뺀 것"에 넣는다. 여기에는 버튼이 아닌 것만 더한다.
+const MOTION_NOT_PRESSED = [
+  ['입력칸 — 누르는 것이 아니라 글자를 친다', ['.d-dateinput', '.d-qa', '.d-din', '.d-dtxt', '.d-qin', '.d-recsearch']],
+  ['줄·카드(div·li·label) — 줄은 줄어들지 않고 안의 버튼이 눌린다', ['.d-mrow', '.d-wrow', '.d-atrow', '.d-ibrow', '.d-row', '.d-prow2', '.d-rec', '.d-intg', '.d-ich', '.d-faq .q.is-hit', '.rp-cand', '.rp-rec', '.rp-grp .rp-s.is-add', '.d-qaf', '.d-addrow', '.rp-add']],
+  ['줄 위에 겹쳐 뜨는 묶음·물러나는 글자(div·span) — 안의 버튼이 공용 누름을 갖는다', ['.d-wrow .ac, .d-mrow .ac', '.d-mrow .ct, .d-wrow .mt', '.d-atrow .mt', '.d-atacts', '.d-acts', '.d-prow2 .ac', '.rp-s .ac', '.rp-s .rp-aim', '.d-pri']],
+  ['아이콘·꺾쇠·숫자 칩 — 눌리는 것은 그 부모다', ['.d-grp.tog .d-i', '.d-dadd > summary .d-i', '.d-jira .foot .d-jexp .d-i', '.d-jfold .d-i', '.rp-s .rp-foldtoggle .d-i', '.rp-fl .d-i', '.d-imore > summary::before', '.d-lhd .sub .cnt, .d-wrapsum.cnt']],
+  ['면·틀 — 버튼이 아니다', ['.pull-indicator.snapping', '.d-popd .d-detail.is-pop > .d-dtop', '.d-popd .d-detail.is-pop > .d-dfoot, .d-popd .d-detail.is-pop > .d-dbar', '.d-drawer', '.page', '#settingsDialog .d-mhd']],
+  ['그 자리에서 고치는 문장(span) — 글자 입력의 시작', ['.rp-s .rp-edit']],
+];
+// ui.css "누름에서 뺀 것" 규칙의 선택자들(:active를 뗀 것).
+function motionPressOff() {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  const start = css.indexOf('.d-tab:active, .d-srch:active, .d-link:active,');
+  assert.ok(start >= 0, '누름에서 뺀 것 규칙이 있다');
+  return css.slice(start, css.indexOf('{', start)).split(',').map(part => part.trim().replace(/\s+/g, ' ').replace(/:active$/, ''));
+}
+
+test('누름: transition을 선언한 선택자는 전부 — 누름 전환을 함께 적었거나, 누름에서 뺀 것이거나, 버튼이 아닌 것(이유와 함께)이다', () => {
   const press = 'scale var(--t-press) var(--ease)';
-  ['.d-btn', '.d-iconbtn', '.d-seg button', '.d-cb, .d-wcb', '.d-dpull', '.d-tpk', '.d-jwho', '.d-plist .d-rhd .d-pnewgo', '.rp-pjadd', '.d-mtext, .d-msel', '.d-ckopt span'].forEach((selector) => {
-    const own = decls.filter(d => d.selector === selector);
-    assert.equal(own.length, 1, `전환 선언이 하나다: ${selector}`);
-    assert.ok(own[0].value.endsWith(press), `누름 전환이 있다: ${selector}`);
+  const decls = MOTION_CSS_FILES.flatMap(file => motionDecls(file)).filter(d => d.prop === 'transition' && d.value !== 'none');
+  const off = motionPressOff();
+  const notPressed = MOTION_NOT_PRESSED.flatMap(([why, selectors]) => { assert.ok(why.length >= 8, '이유를 적는다'); return selectors; });
+  const pressed = [];
+  const unknown = [];
+  decls.forEach((d) => {
+    if (d.value.endsWith(press)) { pressed.push(d.selector); return; }
+    if (d.selector.split(',').every(part => off.includes(part.trim()))) return;
+    if (!notPressed.includes(d.selector)) unknown.push(`${d.file} ${d.selector}`);
   });
+  assert.deepEqual(unknown, [], 'transition을 따로 적으면 공용 누름 전환을 덮는다 — 끝에 scale 전환을 적거나, 뺀 것에 넣거나, 버튼이 아니면 위 목록에 이유와 함께 더한다');
+  const selectors = new Set(decls.map(d => d.selector));
+  assert.deepEqual(notPressed.filter(selector => !selectors.has(selector)), [], '버튼이 아닌 것 목록에 있지만 이제 transition이 없는 선택자 — 목록에서 지운다');
+  assert.deepEqual(pressed.sort(), ['.d-btn', '.d-iconbtn', '.d-seg button', '.d-cb, .d-wcb', '.d-dpull', '.d-tpk', '.d-jwho', '.d-plist .d-rhd .d-pnewgo', '.rp-pjadd', '.d-mtext, .d-msel', '.d-ckopt span', 'button'].sort(), '누름 전환을 적은 부품');
   assert.deepEqual(decls.filter(d => /transform var\(--t-press\)/.test(d.value)).map(d => d.selector), [], '누름에 transform을 쓰지 않는다(회전·체크 커짐과 섞인다)');
 });
 
@@ -16103,20 +16129,38 @@ function motionMapRows(firstHead) {
   return rows;
 }
 // "구현" 칸: `파일` 뒤에 그 파일 안의 `이름`들. 파일이 있고, 이름(함수·변수는 낱말로, 선택자는 클래스·id·키프레임 이름으로)이 그 파일에 있어야 한다.
+// CSS 글에서 실제 규칙의 선택자(쉼표로 나눈 낱개)를 모은다 — 주석은 뺀다.
+const motionRuleCache = new Map();
+function motionRuleSelectors(css) {
+  if (motionRuleCache.has(css)) return motionRuleCache.get(css);
+  const set = new Set();
+  motionRuleCache.set(css, set);
+  for (const [, selector] of css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{/g)) {
+    selector.split(',').forEach(part => set.add(part.trim().replace(/\s+/g, ' ')));
+  }
+  return set;
+}
 function motionMapMissing(impl) {
   const missing = [];
   let file = null;
   let text = '';
+  let rules = null;
   for (const [, token] of impl.matchAll(/`([^`]+)`/g)) {
     if (/^[\w.-]+\.(js|css|html|md)$/.test(token)) {
       file = token;
       const at = ['DESIGN.md', 'DECISIONS.md'].includes(token) ? path.join(__dirname, '..', '..', token) : path.join(__dirname, token);
       text = fs.existsSync(at) ? fs.readFileSync(at, 'utf8') : null;
+      rules = text !== null && token.endsWith('.css') ? motionRuleSelectors(text) : null;
       if (text === null) missing.push(`파일 없음: ${token}`);
       continue;
     }
     if (!file) { missing.push(`파일 없이 이름만: ${token}`); continue; }
     if (text === null) continue;
+    if (rules && !token.startsWith('@keyframes')) {
+      // CSS 선택자는 주석 속 글자가 아니라 실제 규칙의 선택자로 있어야 한다(쉼표로 묶인 규칙은 낱개로 본다)
+      token.split(',').map(part => part.trim().replace(/\s+/g, ' ')).forEach((part) => { if (!rules.has(part)) missing.push(`${file}에 규칙 없음: ${part}`); });
+      continue;
+    }
     const words = /^[\w$]+$/.test(token)
       ? [token]
       : [...token.matchAll(/[.#]([A-Za-z][\w-]*)|@keyframes ([\w-]+)|\[([\w-]+)/g)].map(m => m[1] || m[2] || m[3]);
@@ -16152,7 +16196,9 @@ test('모션 장치: 전수 목록 대조 — 지도 문서의 표에 상태 빈
 
 test('모션 장치: 이름 대조 — 없는 파일·없는 함수·없는 선택자를 잡고, 있는 것은 지나친다', () => {
   assert.deepEqual(motionMapMissing('`ui.css` `.d-btn` `@keyframes d-fade` · `app.js` `uiRowsMove`'), []);
-  assert.deepEqual(motionMapMissing('`ui.css` `.d-no-such-part`'), ['ui.css에 없음: d-no-such-part']);
+  assert.deepEqual(motionMapMissing('`ui.css` `.d-no-such-part`'), ['ui.css에 규칙 없음: .d-no-such-part']);
+  assert.deepEqual(motionMapMissing('`ui.css` `.d-tpk:active`'), ['ui.css에 규칙 없음: .d-tpk:active'], '주석에만 남은 선택자는 없는 것이다');
+  assert.deepEqual(motionMapMissing('`ui.css` `.d-cb, .d-wcb` `button:active`'), [], '쉼표로 묶인 규칙은 낱개로 본다');
   assert.deepEqual(motionMapMissing('`app.js` `uiNoSuchHelper`'), ['app.js에 없음: uiNoSuchHelper']);
   assert.deepEqual(motionMapMissing('`no-such-ui.js` `anything`'), ['파일 없음: no-such-ui.js']);
   assert.deepEqual(motionMapMissing('—'), []);
