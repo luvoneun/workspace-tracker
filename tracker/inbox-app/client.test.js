@@ -12793,7 +12793,7 @@ test('좁은 폭 CSS: 업무 줄에는 ⋯만, 체크·⋯ 누르는 자리 38px
   assert.match(narrow, /\.d-prow2 \.ac > \.d-btn \{ display: none; \}/);
   assert.match(narrow, /\.d-row \.d-cb::after, \.d-prow2 \.d-cb::after \{ inset: -10px;/, '::after는 테두리 안쪽(19px)에서 재므로 19 + 10 × 2 = 39px');
   assert.match(narrow, /\.d-row \.d-acts \.d-more::after, \.d-prow2 \.ac \.d-more::after \{ content: ''; position: absolute; inset: -3px;/, '32 + 3 × 2 = 38px');
-  assert.match(narrow, /\.d-scrim:not\(\[hidden\]\) \{ display: block; position: fixed; inset: 0; z-index: 46; background: var\(--scrim\); \}/);
+  assert.match(narrow, /\.d-scrim:not\(\[hidden\]\) \{ display: block; position: fixed; inset: 0; z-index: 46; background: var\(--scrim\); animation: d-float-fade var\(--t-fast\) linear both; \}/);
   assert.doesNotMatch(narrow, /\.m-proj \{ display: inline/, '프로젝트 이름은 제목 뒤 .d-inproj 하나만 — 상태 줄에 또 찍지 않는다');
   const wide = css.replace(/@media \(max-width: 520px\) \{[\s\S]*?\n\}/g, '');
   assert.doesNotMatch(wide, /\.d-acts > \.d-btn \{ display: none|\.ac > \.d-btn \{ display: none|\.d-scrim:not/, '넓은 폭에는 새 규칙이 없다');
@@ -16837,4 +16837,145 @@ test('분류 판(뜨는 것): 실제로 열고 닫는다 — 부품 클래스·�
   assert.equal(floats().length, 1);
   tick(140);
   assert.equal(floats().length, 0);
+});
+
+// ---- 모션 묶음 B1: 상세 카드 ----
+// 카드 내용 만들기(panelTask 등)는 이 묶음의 관심 밖이다 — 카드를 세우는 길(detailPopMount)과 닫는 길(detailUnmount)을 실제로 돌린다.
+function cardClient(options) {
+  const fx = floatClient(options);
+  const { app } = fx;
+  app.run(`CSS = { escape: text => text }; requestAnimationFrame = () => 0; cancelAnimationFrame = () => {};
+    var rows = {}; var plays = [];
+    detailAnchorRow = () => rows[panelState.id] || null;
+    detailPopSide = () => 'body';
+    var cardRow = (id, top) => { rows[id] = { getBoundingClientRect: () => ({ left: 300, right: 900, top, bottom: top + 40, width: 600, height: 40 }) }; };
+    var cardOpen = (id) => { panelState = { kind: 'item', id }; const box = document.createElement('div'); const ok = detailPopMount(box, false);
+      const host = detailPopHost;
+      if (host && !host.animate) { host.offsetHeight = 300;
+        host.getBoundingClientRect = () => ({ left: parseFloat(host.style.left), top: parseFloat(host.style.top) });
+        host.animate = (frames, opts) => { const play = { frames, opts, cancelled: false, cancel() { play.cancelled = true; } }; plays.push(play); return play; }; }
+      return ok; };
+    cardRow('a', 200); cardRow('b', 400); uiActMark({ type: 'click', detail: 1 });`);
+  const host = () => app.run('detailPopHost');
+  return { ...fx, host, open: id => app.run(`cardOpen(${JSON.stringify(id)})`), plays: () => app.run('plays') };
+}
+
+test('상세 카드(뜨는 것): 누른 줄 쪽에서 자라 나온다 — 부품 클래스, 시작점은 카드 안에서 그 줄에 가장 가까운 점, 옛 140ms 손 애니메이션은 없다', () => {
+  const { app, host, open, plays, floats } = cardClient();
+  assert.equal(open('a'), true);
+  assert.equal(host().className, 'd-popd d-float');
+  assert.deepEqual(floats(), [host()]);
+  const spot = JSON.parse(app.run("JSON.stringify(detailPopPosition(rows.a.getBoundingClientRect(), { width: detailPopWidth(), height: 0 }, { width: 1200, height: 800 }, 'body'))"));
+  assert.deepEqual([host().style.left, host().style.top], [`${spot.left}px`, `${spot.top}px`]);
+  // 줄 가운데(x 600)가 카드 안이면 그 점, 밖이면 카드의 가까운 가장자리. 세로는 줄의 가운데 높이(카드 높이를 못 잰 첫 그리기에서는 맨 위).
+  assert.equal(host().style['--ox'], `${Math.max(0, Math.min(app.run('detailPopWidth()'), 600 - spot.left))}px`);
+  assert.equal(host().style['--oy'], '0px');
+  assert.equal(plays().length, 0, '등장은 CSS 부품이 한다 — 화면 코드가 따로 움직이지 않는다');
+  const src = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const mount = src.slice(src.indexOf('function detailPopMount'), src.indexOf('function detailPopSlide'));
+  assert.doesNotMatch(mount, /host\.animate|duration: 140|scale\(0\.985\)/);
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /\.d-popd \{ position: fixed; z-index: 50; width: 360px; --float-in: var\(--t-move\); --float-from: 0\.96; --float-over: 1\.006; --float-to: 0\.98; \}/, '큰 면이라 넘침은 작게');
+  // 붙을 줄 없이 연 카드(팔레트에서 연 숨은 항목)는 위 가운데에서.
+  const float = cardClient();
+  float.app.run("rows = {};");
+  assert.equal(float.open('zz'), true);
+  assert.deepEqual([float.host().style['--ox'], float.host().style['--oy']], ['50%', '0']);
+  // 키보드로 열면 넘침 없이 나타남만.
+  const key = cardClient();
+  key.app.run("uiActMark({ type: 'keydown', key: 'Enter' })");
+  key.open('a');
+  assert.equal(key.host().className, 'd-popd d-float is-flat');
+});
+
+test('상세 카드(뜨는 것): 다른 줄을 누르면 순간 이동 대신 그 줄로 미끄러져 간다(200ms·넘침 없음·transform만), 같은 줄을 다시 그릴 때는 움직이지 않는다', () => {
+  const { app, host, open, plays, tick, timers } = cardClient();
+  open('a');
+  const card = host();
+  const before = { left: parseFloat(card.style.left), top: parseFloat(card.style.top) };
+  open('a');
+  assert.equal(plays().length, 0, '같은 줄의 다시 그리기(저장 뒤·내용이 자람)는 움직이지 않는다');
+  open('b');
+  assert.equal(host(), card, '카드는 그대로 — 내용만 갈아 끼운다');
+  const after = { left: parseFloat(card.style.left), top: parseFloat(card.style.top) };
+  assert.equal(after.top - before.top, 200, '자리는 바로 새 줄 옆이다');
+  assert.equal(plays().length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(plays()[0].frames)), [{ transform: `translate(${before.left - after.left}px, ${before.top - after.top}px)` }, { transform: 'none' }], '옛 자리에서 새 자리로');
+  assert.deepEqual(JSON.parse(JSON.stringify(plays()[0].opts)), { duration: 200, easing: 'cubic-bezier(0.22, 0.8, 0.3, 1)' });
+  // 미끄러지는 중에 또 바꾸면 앞의 것을 거두고 지금 자리에서 이어 간다.
+  open('a');
+  assert.equal(plays()[0].cancelled, true);
+  assert.equal(plays().length, 2);
+  // 끝남 신호가 안 와도 시간으로 치운다.
+  assert.deepEqual(timers.map(timer => timer.delay), [280, 280]);
+  tick(280);
+  assert.equal(plays()[1].cancelled, true);
+  assert.equal(app.run('detailPopGlide'), null);
+  // 스크롤 따라가기(같은 줄의 자리만 바뀜)는 미끄러지지 않는다.
+  app.run("cardRow('a', 260); detailPopPlace(rows.a)");
+  assert.equal(plays().length, 2);
+});
+
+test('상세 카드(뜨는 것): 키보드로 연달아 줄을 바꿀 때와 움직임 줄이기에서는 미끄러지지 않고 그냥 옮긴다', () => {
+  const quiet = cardClient();
+  quiet.open('a');
+  quiet.app.run("uiActMark({ type: 'keydown', key: 'ArrowDown' }); uiActMark({ type: 'keydown', key: 'ArrowDown' });");
+  quiet.open('b');
+  assert.equal(quiet.plays().length, 0, '연타 중에는 넘침도 이동도 없다(세기 0)');
+  const reduce = cardClient({ reduce: true });
+  reduce.open('a');
+  reduce.open('b');
+  assert.equal(reduce.plays().length, 0);
+});
+
+test('상세 카드(뜨는 것): 닫으면 카드는 바로 떨어지고(초점 복귀·Esc 스택이 기다리지 않는다) 닫힘은 복사본이 140ms 재생한다 — 닫히는 중 다시 열어도 새 카드가 선다', () => {
+  const { app, host, open, floats, tick } = cardClient();
+  open('a');
+  const card = host();
+  app.run('detailUnmount()');
+  assert.equal(card.parent, null);
+  assert.equal(host(), null);
+  assert.equal(app.run('detailPopFor'), null);
+  const [ghost] = floats();
+  assert.equal(ghost.cloneOf, card);
+  assert.equal(ghost.classList.contains('is-out'), true);
+  assert.deepEqual([ghost.style.left, ghost.style.top], [card.style.left, card.style.top], '선 자리에서 닫힌다');
+  // 닫히는 중 다시 열기
+  open('b');
+  assert.notEqual(host(), card);
+  assert.equal(floats().length, 2);
+  assert.equal(app.run('plays.length'), 0, '새로 연 카드는 미끄러지지 않고 자라 나온다');
+  tick(140);
+  assert.deepEqual(floats(), [host()]);
+  const src = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const close = src.slice(src.indexOf('\nfunction panelClose()'), src.indexOf('// 시트를 연 줄을 다시 찾을 표식'));
+  assert.ok(close.indexOf('detailUnmount();') < close.indexOf('if (back && back.isConnected) back.focus();'), '카드를 거둔 뒤 초점을 돌려준다(예전 순서 그대로)');
+  assert.ok(close.indexOf('escDrop(panelClose);') < close.indexOf('detailUnmount();'));
+});
+
+test('상세 카드(뜨는 것): 좁은 폭의 아래 시트는 아래에서 올라오고 내려가며 가림막도 함께 흐려진다 — 자리가 남는 요소라 닫힘은 복사본이 재생한다', () => {
+  const src = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const mount = src.slice(src.indexOf('function panelSheetMount'), src.indexOf('// 열면 고칠 곳으로 바로 간다'));
+  assert.match(mount, /side\.classList\.add\('d-float', 'is-sheet'\);[^\n]*\n  side\.hidden = false;/);
+  const close = src.slice(src.indexOf('\nfunction panelClose()'), src.indexOf('// 시트를 연 줄을 다시 찾을 표식'));
+  assert.match(close, /if \(side\) \{ if \(!side\.hidden\) uiFloatGhost\(side\); side\.hidden = true; side\.replaceChildren\(\); \}/);
+  assert.match(src, /if \(!show && !panelScrimEl\.hidden\) uiFloatGhost\(panelScrimEl\);[^\n]*\n  panelScrimEl\.hidden = !show;/);
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /@keyframes d-float-up \{ from \{ transform: translateY\(100%\); \} to \{ transform: none; \} \}/);
+  assert.match(css, /@keyframes d-float-down \{ to \{ transform: translateY\(100%\); \} \}/);
+  assert.match(css, /\.d-scrim\.is-out \{ animation: d-float-gone var\(--t-fast\) linear both; pointer-events: none; \}/);
+  // 실제로: 열린 시트를 닫으면 자리는 바로 비고(hidden·내용 없음) 복사본이 선다.
+  const { app, floats, tick } = floatClient();
+  app.run(`window.innerWidth = 400; var side = document.createElement('div'); side.className = 'd-side d-float is-sheet'; side.hidden = false;
+    side.appendChild(document.createElement('div')); document.body.appendChild(side);
+    document.querySelectorAll = () => [];
+    panelSide = () => side; panelState = { kind: 'item', id: 'a' }; answerSeenClosePending = null; panelClose();`);
+  const side = app.run('side');
+  assert.equal(side.hidden, true);
+  assert.equal(side.children.length, 0);
+  const ghosts = floats().filter(node => node !== side);
+  assert.equal(ghosts.length, 1);
+  assert.equal(ghosts[0].classList.contains('is-out'), true);
+  tick(140);
+  assert.deepEqual(floats(), [side]);
 });

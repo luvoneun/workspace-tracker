@@ -3209,7 +3209,8 @@ function panelClose() {
   escDrop(panelClose);
   detailUnmount(); // 떠 있는 카드와 거기 붙은 스크롤·크기 감시를 함께 거둔다
   document.querySelectorAll('.is-sel[data-task-id], .d-wrow.is-sel, .d-mrow.is-sel').forEach(row => row.classList.remove('is-sel'));
-  if (side) { side.hidden = true; side.replaceChildren(); }
+  // 좁은 폭의 아래 시트는 자리가 남는 요소라, 닫힘(아래로 내려감)은 복사본이 재생한다.
+  if (side) { if (!side.hidden) uiFloatGhost(side); side.hidden = true; side.replaceChildren(); }
   panelScrim(false);
   // 방금 `답변 왔어요`를 확인한 업무의 상세를 닫으면 리마인드 카드를 다시 그려 그 줄을 뺀다
   // (열려 있는 동안은 카드가 붙어 있는 줄이라 남겨 두었다).
@@ -3263,6 +3264,7 @@ function panelScrim(show) {
     panelScrimEl.addEventListener('click', () => { if (panelState && panelState.kind !== 'meeting') panelClose(); });
     document.body.appendChild(panelScrimEl);
   }
+  if (!show && !panelScrimEl.hidden) uiFloatGhost(panelScrimEl); // 가림막도 시트와 함께 흐려지며 걷힌다
   panelScrimEl.hidden = !show;
 }
 
@@ -3315,6 +3317,7 @@ function panelSheetMount(box, focusFirst) {
   const side = panelSide();
   if (!side) return false;
   detailUnmount();
+  side.classList.add('d-float', 'is-sheet'); // 아래에서 올라온다(숨김이 풀릴 때 한 번 — 내용만 갈아 끼울 때는 다시 움직이지 않는다)
   side.hidden = false;
   side.replaceChildren(box);
   panelScrim(true);
@@ -3901,6 +3904,8 @@ let detailPopHost = null;
 let detailPopTick = 0;
 let detailPopSize = null;   // 내용이 자라면 자리를 다시 잡는 관찰자
 let detailPopFloat = false; // 붙을 줄 없이 연 카드 — 계속 화면 가운데 위에 선다
+let detailPopFor = null;    // 카드가 지금 붙어 있는 줄의 표식 — 다른 줄로 바뀌면 카드가 그 줄로 미끄러져 간다
+let detailPopGlide = null;  // 진행 중인 미끄러짐(연달아 줄을 바꾸면 지금 자리에서 이어 간다)
 let detailLastRow = null;   // 마지막으로 누른 줄 — 같은 항목이 여러 목록에 보일 때 그 자리를 쓴다
 
 function detailSheet() { return window.innerWidth <= DETAIL_SHEET_MAX; }
@@ -3981,25 +3986,26 @@ function detailPopPosition(row, card, view, side = 'body') {
 }
 
 // 만들어 둔 상세를 카드에 넣고 줄 옆에 세운다. 붙어 있던 줄이 사라졌으면 false(부르는 쪽이 닫는다).
+// 카드는 뜨는 것 부품이다 — 누른 줄 쪽에서 자라 나오고(큰 면이라 넘침은 작게), 다른 줄을 누르면 그 줄로 미끄러져 가고, 닫힘을 재생한다.
 function detailPopMount(box, focusFirst) {
   const row = detailAnchorRow();
   if (!detailPopHost) detailPopFloat = !row;
   if (!row && !detailPopFloat) return false;
   let host = detailPopHost;
+  const anchor = panelAnchorSelector();
+  // 다른 줄로 옮겨 가는 것이면, 옮기기 전의 보이는 자리를 재 둔다(진행 중인 미끄러짐까지 포함한 자리).
+  const from = host && detailPopFor !== anchor && host.getBoundingClientRect ? host.getBoundingClientRect() : null;
+  detailPopFor = anchor;
   if (!host) {
     host = document.createElement('div');
     host.className = 'd-popd';
     host.setAttribute('role', 'region');
     host.setAttribute('aria-label', '선택한 항목 상세');
-    document.body.appendChild(host);
+    uiFloatOpen(host);
     detailPopHost = host;
     document.addEventListener('mousedown', detailPopOutside, true);
     window.addEventListener('scroll', detailPopFollow, true);
     window.addEventListener('resize', detailPopFollow);
-    if (!detailReduce() && host.animate) {
-      host.animate([{ opacity: 0, transform: 'translateY(-4px) scale(0.985)' }, { opacity: 1, transform: 'none' }],
-        { duration: 140, easing: 'cubic-bezier(0.22, 0.8, 0.3, 1)' });
-    }
   }
   detailPopShape(box);
   host.replaceChildren(box);
@@ -4010,8 +4016,23 @@ function detailPopMount(box, focusFirst) {
     detailPopSize.observe(box);
   }
   detailPopPlace(detailPopFloat ? null : row);
+  detailPopSlide(host, from);
   if (focusFirst) panelFocusFirst(box);
   return true;
+}
+
+// 다른 줄을 누르면 카드가 순간 이동하지 않고 그 줄로 미끄러져 간다(200ms, 넘침 없음 — transform만). 내용은 바로 바뀐다.
+// 키보드로 연달아 옮길 때와 움직임 줄이기에서는 그냥 옮긴다. 끝남 신호가 안 와도 시간으로 치운다(transform이 카드에 남지 않게).
+function detailPopSlide(host, from) {
+  if (!from || typeof host.animate !== 'function' || !uiFloatMotion() || uiActQuiet) return;
+  const dx = from.left - parseFloat(host.style.left);
+  const dy = from.top - parseFloat(host.style.top);
+  if (!(Math.abs(dx) >= 0.5 || Math.abs(dy) >= 0.5)) return;
+  try { detailPopGlide?.cancel(); } catch { /* 이미 끝났다 */ }
+  let glide = null;
+  try { glide = host.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: UI_FLOAT.slide, easing: UI_FLOAT.ease }); } catch { return; }
+  detailPopGlide = glide;
+  setTimeout(() => { try { glide.cancel(); } catch { /* 이미 끝났다 */ } if (detailPopGlide === glide) detailPopGlide = null; }, UI_FLOAT.slide + 80);
 }
 
 // 머리(제목)와 발(동작 줄·담기 바)은 카드에 붙박이로 두고 가운데만 스크롤한다.
@@ -4091,10 +4112,14 @@ function detailPopPlace(row) {
   const view = { width: window.innerWidth, height: window.innerHeight };
   const card = host.firstElementChild;
   if (card) card.style.maxHeight = `${Math.max(160, view.height - DETAIL_HDR - DETAIL_GAP * 2)}px`;
-  const spot = detailPopPosition(row ? row.getBoundingClientRect() : null,
-    { width, height: host.offsetHeight }, view, row ? detailPopSide(row) : 'center');
+  const at = row ? row.getBoundingClientRect() : null;
+  const spot = detailPopPosition(at, { width, height: host.offsetHeight }, view, row ? detailPopSide(row) : 'center');
   host.style.left = `${spot.left}px`;
   host.style.top = `${spot.top}px`;
+  // 시작점(뜨는 것 부품의 --ox·--oy)은 누른 줄 쪽이다 — 카드 안에서 그 줄에 가장 가까운 점. 붙을 줄이 없으면 위 가운데.
+  const near = (value, max) => `${Math.round(Math.max(0, Math.min(max || 0, value)))}px`;
+  host.style.setProperty?.('--ox', at ? near(at.left + (at.right - at.left) / 2 - spot.left, width) : '50%');
+  host.style.setProperty?.('--oy', at ? near(at.top + (at.bottom - at.top) / 2 - spot.top, host.offsetHeight) : '0');
 }
 
 // 스크롤하면 줄을 따라간다(갑자기 사라지지 않게). 줄이 화면 밖으로 나가면 그때 닫는다.
@@ -4131,7 +4156,11 @@ function detailPopOutside(event) {
 function detailUnmount() {
   if (detailPopSize) { detailPopSize.disconnect(); detailPopSize = null; }
   if (detailPopTick) { cancelAnimationFrame(detailPopTick); detailPopTick = 0; }
-  if (detailPopHost) { detailPopHost.remove(); detailPopHost = null; }
+  // 카드는 바로 떨어지고 닫힘은 복사본이 재생한다(uiFloatClose) — 초점 복귀·Esc 스택은 기다리지 않는다.
+  if (detailPopHost) { uiFloatClose(detailPopHost); detailPopHost = null; }
+  try { detailPopGlide?.cancel(); } catch { /* 이미 끝났다 */ }
+  detailPopGlide = null;
+  detailPopFor = null;
   detailPopFloat = false;
   document.removeEventListener('mousedown', detailPopOutside, true);
   window.removeEventListener('scroll', detailPopFollow, true);

@@ -1662,7 +1662,8 @@ textarea.d-dtitle {
    누른 줄 옆에 떠 있는 카드. 자리(left·top·width)는 app.js가 계산해 넣는다.
    길어져도 화면을 넘지 않는다: 머리(제목)와 발(동작 줄·담기 바)은 붙박이, 가운데만 스크롤.
    스크롤 중일 때만 머리·발 경계에 옅은 선이 생긴다. */
-.d-popd { position: fixed; z-index: 50; width: 360px; }
+/* 뜨는 것 부품(.d-float): 누른 줄 쪽에서 200ms로 자라 나온다 — 큰 면이라 넘침은 작게(.96 → 1.006), 닫힘도 얕게(.98) */
+.d-popd { position: fixed; z-index: 50; width: 360px; --float-in: var(--t-move); --float-from: 0.96; --float-over: 1.006; --float-to: 0.98; }
 .d-popd .d-detail.is-pop {
   width: 100%; padding: 0; gap: 0;
   display: flex; flex-direction: column; overflow: hidden;
@@ -3018,7 +3019,8 @@ a.d-btn { text-decoration: none; }
   .d-side .d-dpull { opacity: 1; }
   /* 시트 뒤에는 설정 창과 같은 가림막 — 선택 막대(46)와 같은 층, 문서에서 뒤에 붙어 그 위에 눕고 시트(47) 아래.
      뒤 목록이 눌리지 않고, 누르면 시트가 닫힌다(app.js panelScrim) */
-  .d-scrim:not([hidden]) { display: block; position: fixed; inset: 0; z-index: 46; background: var(--scrim); }
+  .d-scrim:not([hidden]) { display: block; position: fixed; inset: 0; z-index: 46; background: var(--scrim); animation: d-float-fade var(--t-fast) linear both; }
+  .d-scrim.is-out { animation: d-float-gone var(--t-fast) linear both; pointer-events: none; }
 }
 @media (max-width: 900px) {
   .page { padding: 14px 16px 80px; }
