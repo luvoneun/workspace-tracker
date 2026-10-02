@@ -16106,6 +16106,42 @@ test('누름: 뺀 것 — 글자 탭·링크·제목, 메뉴 항목, 줄 전체�
   assert.match(css, /\n\.d-mitem, \.d-mpickbtn, \.jira-pick, \.d-gpopt, \.d-pres \{ transition: none; \}/);
 });
 
+// 누름에서 뺀 것 가운데 누름 색(--press)도 없는 것 — 배경이 없는 글자이거나 답할 것이 없는 것. [이유, 선택자들]
+const MOTION_PRESS_NO_COLOR = [
+  ['글자뿐인 탭·링크·제목 — 배경이 없다. 글자색은 고름·링크의 뜻(파랑·굵기)이라 누름으로 바꾸지 않는다', ['.d-tab', '.d-link', '.wf-link', '.d-title', '.d-mrow .ti', '.d-wrow .ti', '.d-mrow2 .ti', '.d-prow2 .ti', '.d-rec .ti', '.rp-rec .ti']],
+  ['따뜻한 카드(--warm) 위의 안내 줄 — 회색 누름 색이 그 면에서 튄다(따뜻한 누름 토큰이 생기면 옮긴다)', ['.d-guide']],
+  ['꺼진 버튼·잠긴 체크 — 눌리지 않는 것은 답하지 않는다', ['button:disabled', '.d-cb:disabled', '.d-wcb:disabled']],
+];
+
+test('누름: 뺀 것의 누름 = 색 한 단계 — 줄어들지 않는 것은 누르는 동안 배경이 --press(가리킴보다 한 단계 진하게, 100ms)가 되고, 색도 없는 것은 이유와 함께 목록에 있다', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  const off = motionPressOff();
+  const at = css.indexOf('.d-srch:active:not(:disabled),');
+  assert.ok(at > css.indexOf('button:disabled:active, .d-cb:disabled:active, .d-wcb:disabled:active { scale: none; }'), '뺀 것 목록 바로 뒤에 온다');
+  const rule = css.slice(at, css.indexOf('}', at) + 1);
+  assert.match(rule, /\{ background: var\(--press\); transition-duration: var\(--t-press\); \}$/);
+  const colored = rule.slice(0, rule.indexOf('{')).split(',').map(part => part.trim().replace(/\s+/g, ' '));
+  assert.ok(colored.every(selector => selector.endsWith(':active:not(:disabled)')), '꺼진 것은 답하지 않는다 — 그리고 뒤에 오는 :hover 규칙보다 앞선다');
+  const names = colored.map(selector => selector.replace(/:active:not\(:disabled\)$/, ''));
+  const plain = MOTION_PRESS_NO_COLOR.flatMap(([why, selectors]) => { assert.ok(why.length >= 8, '이유를 적는다'); return selectors; });
+  assert.deepEqual(off.filter(selector => !names.includes(selector) && !plain.includes(selector)), [], '뺀 것에 새로 넣은 선택자 — 누름 색 규칙에도 넣거나, 색도 없어야 하면 위 목록에 이유와 함께');
+  assert.deepEqual([...names, ...plain].filter(selector => !off.includes(selector)), [], '누름 색 목록에 있지만 뺀 것이 아닌 선택자');
+  assert.deepEqual(names.filter(selector => plain.includes(selector)), []);
+  // 토큰: 라이트·다크(자동·수동) 셋 다 정의돼 있고 가리킴·고름과 다른 값이다.
+  const press = [...css.matchAll(/\n\s+--press: (#[0-9a-f]{6});/g)].map(m => m[1]);
+  assert.deepEqual(press, ['#e9edf1', '#303641', '#303641']);
+  const hover = [...css.matchAll(/\n\s+--hover: (#[0-9a-f]{6});/g)].map(m => m[1]);
+  const sel = [...css.matchAll(/\n\s+--sel: (#[0-9a-f]{6});/g)].map(m => m[1]);
+  press.forEach((value, i) => { assert.notEqual(value, hover[i]); assert.notEqual(value, sel[i]); });
+  const lum = hex => [1, 3, 5].reduce((sum, k) => sum + parseInt(hex.slice(k, k + 2), 16), 0);
+  assert.ok(lum(press[0]) < lum(hover[0]), '라이트: 가리킴보다 어둡다');
+  assert.ok(lum(press[1]) > lum(hover[1]), '다크: 가리킴보다 밝다(면에서 더 떠 보인다)');
+  assert.doesNotMatch(rule, /scale|transform/, '크기는 그대로다');
+  // 눌러서 닫은 메뉴 항목은 닫히는 동안 누름 색을 든다.
+  assert.match(css, /\.d-float\.is-out \.is-held \{ background: var\(--press\); \}/);
+  assert.match(fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8'), /if \(node\.matches\(':hover'\)\) held = twins\[at\];\n    \}\);\n    held\?\.closest\('button'\)\?\.classList\.add\('is-held'\);/);
+});
+
 test('누름: 움직임 줄이기 — 크기 변화는 끄고 색은 그대로 바뀐다', () => {
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
   const block = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce) {\n  *, *::before'), css.indexOf('/* ---------- 헤더'));

@@ -210,10 +210,15 @@ function uiFloatGhost(el, ms = UI_FLOAT.out) {
     ghost.querySelectorAll('[id]').forEach(node => node.removeAttribute('id'));
     el.after(ghost);
     // 스크롤해 둔 자리는 복사되지 않는다 — 닫히는 순간 내용이 맨 위로 튀지 않게 옮겨 준다.
+    // 가리키던(방금 누른) 항목도 복사본에서는 상태를 잃는다 — 누름 색을 든 채 닫히게 표시해 준다(.is-held).
     const twins = ghost.querySelectorAll('*');
+    let held = null;
     el.querySelectorAll('*').forEach((node, at) => {
-      if (twins[at] && (node.scrollTop || node.scrollLeft)) { twins[at].scrollTop = node.scrollTop; twins[at].scrollLeft = node.scrollLeft; }
+      if (!twins[at]) return;
+      if (node.scrollTop || node.scrollLeft) { twins[at].scrollTop = node.scrollTop; twins[at].scrollLeft = node.scrollLeft; }
+      if (node.matches(':hover')) held = twins[at];
     });
+    held?.closest('button')?.classList.add('is-held');
   } catch { ghost?.remove?.(); return null; }
   setTimeout(() => ghost.remove(), ms);
   return ghost;
