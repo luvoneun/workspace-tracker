@@ -698,7 +698,7 @@ function uiIsTextEntry(el) {
   return !UI_NOT_TEXT_INPUTS.includes(String(el.type || 'text').toLowerCase());
 }
 function uiRenderHeld(zone) {
-  // 일정 정하기 판이 열려 있는 동안은 그 구역을 다시 그리지 않는다(누른 줄·버튼이 사라지면 판이 허공에 뜬다).
+  // 분류 판이 열려 있는 동안은 그 구역을 다시 그리지 않는다(누른 줄·버튼이 사라지면 판이 허공에 뜬다).
   if (zone && uiSchedOpen && uiSchedOpen.zone === zone) return true;
   const el = document.activeElement;
   if (!zone || !el || !zone.contains?.(el) || !uiIsTextEntry(el)) return false;
@@ -747,7 +747,7 @@ function uiHeldFlush() {
 // ---- 줄 이동 도우미 (모션 기반 — DESIGN.md 모션 절) ----
 // 목록은 매번 통째로 다시 그린다. 줄이 순간 이동하지 않게, 그리기 앞뒤의 자리를 재서 옛 자리에서 새 자리로 잇는다(FLIP).
 // 움직이는 것은 사용자의 동작(클릭·키) 직후 0.5초 안의 다시 그리기뿐이다. 자동 갱신·처음 그리기·미뤘다 푸는 그리기·
-// 글자 입력 중·일정 정하기 판이나 종류 목록이 열린 동안·키보드로 연달아 하는 동작·보이는 줄 40개 초과(전체 150줄 초과는 재지도 않음)는 그냥 그린다.
+// 글자 입력 중·분류 판이나 종류 목록이 열린 동안·키보드로 연달아 하는 동작·보이는 줄 40개 초과(전체 150줄 초과는 재지도 않음)는 그냥 그린다.
 // transform·opacity만 쓰고(넘침 없음), 값은 ui.css의 --ease·--t-move·--t-fast와 같다(el.animate는 var()를 못 읽는다).
 const UI_GLIDE = { ease: 'cubic-bezier(0.22, 0.8, 0.3, 1)', move: 200, enter: 140, fade: 120, within: 500, max: 40, rows: 150 };
 const UI_GLIDE_ROWS = '[data-task-id], [data-move-id]';
@@ -853,7 +853,7 @@ function uiGlideJoin(shot) {
     if (typeof row.animate !== 'function') return;
     const was = before.boxes.get(id);
     if (!was) {
-      // 새로 생긴 줄 — 일정 정하기의 새 줄 솟음(is-rise)이 이미 걸렸으면 그것 하나만 움직인다.
+      // 새로 생긴 줄 — 분류의 새 줄 솟음(is-rise)이 이미 걸렸으면 그것 하나만 움직인다.
       if (!now.shown || !shot.drawn.has(list) || row.classList.contains('is-rise')) return;
       if (reduce) uiGlidePlay(row, [{ opacity: 0 }, { opacity: 1 }], UI_GLIDE.fade);
       else uiGlidePlay(row, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], UI_GLIDE.enter);
@@ -4920,8 +4920,9 @@ function renderGuideCard() {
   zone.appendChild(card);
 }
 
-// ---------- 일정 정하기 판 (새로 들어온 것 줄) ----------
-// `일정 정하기 ⌄` 하나가 오늘·내일·이번 주·다음 주·날짜·나중에와 프로젝트를 한 판에 모은다. 저장은 새 길 없이
+// ---------- 분류 판 (새로 들어온 것 줄) ----------
+// 화면 이름은 `분류`다(처음 이름은 `일정 정하기` — 판에 날짜와 프로젝트가 같이 있어 바꿨다). 코드 이름 uiSched*·d-sched*는 그대로 둔다.
+// `분류 ⌄` 하나가 오늘·내일·이번 주·다음 주·날짜·나중에와 프로젝트를 한 판에 모은다. 저장은 새 길 없이
 // 지금 있는 실행 날짜(setTaskScheduled)·프로젝트(setTaskJira·setTaskGroup)를 그대로 쓴다.
 // 판은 더보기 메뉴(.d-menulist)와 같은 모양의 떠 있는 층이고, 열려 있는 동안은 그 구역 다시 그리기를 미룬다(uiRenderHeld).
 let uiSchedOpen = null; // { pop, anchor, zone, id, onEsc, reposition }
@@ -5021,8 +5022,8 @@ function uiSchedButton(item, row) {
   button.dataset.schedId = item.id;
   button.setAttribute('aria-haspopup', 'true');
   button.setAttribute('aria-expanded', 'false');
-  button.setAttribute('aria-label', `${item.description} — 일정 정하기`);
-  button.append('일정 정하기');
+  button.setAttribute('aria-label', `${item.description} — 분류`);
+  button.append('분류');
   const caret = document.createElement('span');
   caret.className = 'cv';
   caret.innerHTML = uiIcon('chevron');
@@ -5040,7 +5041,7 @@ function uiSchedToggle(item, row, anchor) {
   const pop = document.createElement('div');
   pop.className = 'd-schedpop';
   pop.setAttribute('role', 'menu');
-  pop.setAttribute('aria-label', '일정 정하기');
+  pop.setAttribute('aria-label', '분류');
   pop.addEventListener('click', event => event.stopPropagation());
 
   const label = document.createElement('div');
@@ -5274,7 +5275,7 @@ document.addEventListener('click', (event) => {
   if (uiSchedOpen && !uiSchedOpen.anchor.contains(event.target) && !uiSchedOpen.pop.contains(event.target)) uiSchedClose();
 });
 
-// 슬랙에서 갓 들어온 할 일. 언제 할지·프로젝트는 줄의 `일정 정하기`에서 고른다.
+// 슬랙에서 갓 들어온 할 일. 언제 할지·프로젝트는 줄의 `분류`에서 고른다.
 // 비어 있으면 섹션 자체를 숨겨서, 처리할 게 있을 때만 눈에 띄게 한다.
 function renderInbox(items) {
   uiRowsMove(document.getElementById('inboxList'), () => renderInboxNow(items));
@@ -5312,7 +5313,7 @@ function renderInboxNow(items) {
 
     const actions = document.createElement('span');
     actions.className = 'd-ibacts';
-    // 줄에는 두 갈래만 늘 보인다 — 일정 정하기(오늘·내일·이번 주·다음 주·날짜·나중에·프로젝트가 한 판) / 완료.
+    // 줄에는 두 갈래만 늘 보인다 — 분류(오늘·내일·이번 주·다음 주·날짜·나중에·프로젝트가 한 판) / 완료.
     actions.appendChild(uiSchedButton(item, row));
     // 완료는 기록이 남고(주간요약에 들어감), 삭제는 남지 않는다 — 삭제는 ⋯ 안으로 들어갔다.
     const done = document.createElement('button');
@@ -5457,7 +5458,7 @@ function renderTodayTasksNow(items) {
   uiSchedRiseApply(list);
 }
 
-// 일정 정하기에서 `오늘`로 정한 업무의 새 줄은 솟아오르며 연파랑이 잠깐 비친다(한 번만).
+// 분류에서 `오늘`로 정한 업무의 새 줄은 솟아오르며 연파랑이 잠깐 비친다(한 번만).
 function uiSchedRiseApply(list) {
   if (!uiSchedRise.size || !list.querySelectorAll) return;
   list.querySelectorAll('[data-task-id]').forEach((row) => {
@@ -6108,7 +6109,7 @@ async function setTaskScheduled(id, scheduled) {
   await load();
 }
 
-// `새로 들어온 것`은 itemsById에 없어 request(recordUndoFor)가 되돌리기 기록을 남기지 못한다 — 일정 정하기 판이 저장된 뒤 이걸로 남긴다.
+// `새로 들어온 것`은 itemsById에 없어 request(recordUndoFor)가 되돌리기 기록을 남기지 못한다 — 분류 판이 저장된 뒤 이걸로 남긴다.
 // 되돌릴 때는 예정일을 없음으로 돌리면서 받지 않은 표시도 되살린다(inbox: true). 전 예정일은 늘 없음이다 —
 // 수집은 예정일을 넣지 않고 `새로 들어온 것` 목록도 scheduled를 내려 주지 않는다.
 // expect는 내가 정했던 값이다: 서버는 지금 예정일이 그 값일 때만 되살리고, 그 사이 다른 창에서 바뀌었으면(CHANGED_SINCE)

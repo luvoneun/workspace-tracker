@@ -511,7 +511,7 @@ button:disabled:active, .d-cb:disabled:active, .d-wcb:disabled:active { scale: n
 }
 @keyframes d-pop { from { transform: translateY(-6px); opacity: 0; } to { transform: none; opacity: 1; } }
 
-/* ---------- 일정 정하기 판 (새로 들어온 것 줄) ----------
+/* ---------- 분류 판 (새로 들어온 것 줄) ----------
    더보기 메뉴(.d-menulist·.d-mitem)와 같은 모양 — 등장만 이 판의 쫀득한 움직임(DESIGN.md 모션 절의 예외 한 줄).
    움직이는 것은 transform·opacity뿐이다. 움직임 줄이기에서는 판이 이동 없이 120ms 흐려지며 뜨고 나머지는 즉시다(위 전역 규칙). */
 .d-schedbtn { gap: 4px; }

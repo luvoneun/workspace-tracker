@@ -1274,24 +1274,24 @@ test('새로 들어온 것은 개수와 상관없이 모든 줄이 보이고 접
   assert.doesNotMatch(css, /\.d-ibmore/, '쓰이지 않는 접기 규칙이 남지 않는다');
 });
 
-// ---------- 일정 정하기 판 ----------
-test('일정 정하기: 줄에는 `일정 정하기`와 `완료` 둘만 늘 보이고 ⋯는 그대로, 옛 `오늘`·`나중에` 버튼은 없다', () => {
+// ---------- 분류 판 ----------
+test('분류: 줄에는 `분류`와 `완료` 둘만 늘 보이고 ⋯는 그대로, 옛 `오늘`·`나중에` 버튼은 없다', () => {
   const { app, rows } = inboxFoldClient();
   app.run("renderInbox(inboxOf(1))");
   const acts = rows()[0].children[1];
   const buttons = acts.children;
-  assert.equal(buttons.length, 3, '일정 정하기 · 완료 · ⋯');
+  assert.equal(buttons.length, 3, '분류 · 완료 · ⋯');
   assert.equal(buttons[0].className, 'd-btn sm d-schedbtn');
   assert.equal(buttons[0].children[buttons[0].children.length - 1].className, 'cv', '이름 뒤에 꺾쇠 한 조각');
   assert.equal(buttons[0].getAttribute('aria-haspopup'), 'true');
   assert.equal(buttons[0].getAttribute('aria-expanded'), 'false');
-  assert.equal(buttons[0].getAttribute('aria-label'), '업무0 — 일정 정하기');
+  assert.equal(buttons[0].getAttribute('aria-label'), '업무0 — 분류');
   assert.equal(buttons[1].textContent, '완료');
   assert.equal(buttons[1].getAttribute('aria-label'), '업무0 — 완료');
   assert.ok(![...buttons].some(button => ['오늘', '나중에'].includes(button.textContent)), '오늘·나중에 버튼이 따로 없다');
 });
 
-test('일정 정하기: 날짜 항목 — 월~수에는 이번 주(금)가 있고, 목·금·토·일에는 숨고, 일요일에는 내일과 겹치는 다음 주도 숨는다', () => {
+test('분류: 날짜 항목 — 월~수에는 이번 주(금)가 있고, 목·금·토·일에는 숨고, 일요일에는 내일과 겹치는 다음 주도 숨는다', () => {
   const { app } = inboxFoldClient();
   const choices = day => JSON.parse(app.run(`JSON.stringify(uiSchedChoices(new Date(${day}T12:00:00)).map(c => [c.label, c.date]))`.replace('${day}', day)));
   // 2026-10-05 월 · 10-07 수 · 10-08 목 · 10-09 금 · 10-10 토 · 10-11 일
@@ -1307,7 +1307,7 @@ test('일정 정하기: 날짜 항목 — 월~수에는 이번 주(금)가 있�
   assert.equal(app.run("uiSchedDateText('2026-10-06')"), '10/6 (화)');
 });
 
-test('일정 정하기: 판이 열려 있는 동안 그 구역의 다시 그리기를 미루고, 닫으면 한 번 그린다', () => {
+test('분류: 판이 열려 있는 동안 그 구역의 다시 그리기를 미루고, 닫으면 한 번 그린다', () => {
   const { app } = inboxFoldClient();
   const zone = app.context.document.getElementById('inboxZone');
   const other = app.context.document.getElementById('laterTaskList');
@@ -1321,7 +1321,7 @@ test('일정 정하기: 판이 열려 있는 동안 그 구역의 다시 그리�
   assert.deepEqual(JSON.parse(app.run("JSON.stringify(drawn)")), ['다른 구역', '미룸'], '닫은 뒤 미룬 것을 한 번 그린다');
 });
 
-test('일정 정하기: 나중에 할 일 서랍 줄은 미래 날짜로 정한 업무의 날짜를 보인다(미정·오늘·지난 날짜는 지어내지 않는다)', () => {
+test('분류: 나중에 할 일 서랍 줄은 미래 날짜로 정한 업무의 날짜를 보인다(미정·오늘·지난 날짜는 지어내지 않는다)', () => {
   const { app } = inboxFoldClient();
   app.run("escapeAttr = s => String(s || '')");
   const future = app.run("uiKoDateShort(uiDateKey(new Date(Date.now() + 5 * 86400000)))");
@@ -1332,7 +1332,7 @@ test('일정 정하기: 나중에 할 일 서랍 줄은 미래 날짜로 정한 
   assert.doesNotMatch(app.run("uiMetaCells({ id: 'a', status: 'to-do', scheduled: uiDateKey(new Date(Date.now() + 5 * 86400000)) }, { where: 'row' })"), /m-sched/, '오늘 목록 줄에는 붙지 않는다');
 });
 
-test('일정 정하기: 모션 CSS — 쫀득 등장 240ms·1.025, 닫힘 140ms, 줄 접힘 220ms, 새 줄 솟음 260ms, 움직이는 건 transform·opacity뿐', () => {
+test('분류: 모션 CSS — 쫀득 등장 240ms·1.025, 닫힘 140ms, 줄 접힘 220ms, 새 줄 솟음 260ms, 움직이는 건 transform·opacity뿐', () => {
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
   assert.match(css, /\.d-schedpop \{[^}]*animation: d-sched-in 240ms/);
   const section = name => css.slice(css.indexOf(`@keyframes ${name} {`), css.indexOf('\n@keyframes', css.indexOf(`@keyframes ${name} {`) + 1));
@@ -1346,7 +1346,7 @@ test('일정 정하기: 모션 CSS — 쫀득 등장 240ms·1.025, 닫힘 140ms,
   });
 });
 
-test('일정 정하기 다듬기: 투명도는 처음 70ms만, 날짜 칸 초점이면 `오늘` 강조를 빼고, 올라온 줄의 버튼은 포인터가 움직이기 전까지 진하게 채우지 않는다', () => {
+test('분류 다듬기: 투명도는 처음 70ms만, 날짜 칸 초점이면 `오늘` 강조를 빼고, 올라온 줄의 버튼은 포인터가 움직이기 전까지 진하게 채우지 않는다', () => {
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
   assert.match(css, /\.d-schedpop \{[^}]*animation: d-sched-in 240ms var\(--ease\) both, d-sched-fade 70ms linear both;/, '크기는 240ms 그대로, 투명도만 짧게');
   const frames = css.slice(css.indexOf('@keyframes d-sched-in {'), css.indexOf('@keyframes d-sched-out'));
@@ -1359,7 +1359,7 @@ test('일정 정하기 다듬기: 투명도는 처음 70ms만, 날짜 칸 초점
   assert.match(src.slice(src.indexOf('const choose = async'), src.indexOf('const choices = uiSchedChoices()')), /uiHoverSettle\(\)/, '하나 고르면 건다');
 });
 
-test('일정 정하기: 판 부품 — 진짜 button, role=menu, 열면 오늘에 초점, 한글 조합 중에는 키를 넘긴다, 닫힘 규칙이 Esc 스택에 오른다', () => {
+test('분류: 판 부품 — 진짜 button, role=menu, 열면 오늘에 초점, 한글 조합 중에는 키를 넘긴다, 닫힘 규칙이 Esc 스택에 오른다', () => {
   const src = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
   const part = src.slice(src.indexOf('function uiSchedToggle'), src.indexOf('// 슬랙에서 갓 들어온 할 일.'));
   assert.match(part, /pop\.setAttribute\('role', 'menu'\)/);
@@ -1371,7 +1371,7 @@ test('일정 정하기: 판 부품 — 진짜 button, role=menu, 열면 오늘�
   assert.doesNotMatch(part, /\/api\//, '새 API 길을 만들지 않는다 — 저장은 기존 setTaskScheduled·setTaskJira·setTaskGroup');
 });
 
-// 일정 정하기 실제 흐름용 가짜 화면 — 기본 가짜 노드에 classList·style·찾기를 보태 판을 진짜처럼 열고 누른다.
+// 분류 실제 흐름용 가짜 화면 — 기본 가짜 노드에 classList·style·찾기를 보태 판을 진짜처럼 열고 누른다.
 function schedFlowClient() {
   const app = client(new Response('{"ok":true}'));
   const ctx = app.context;
@@ -1417,7 +1417,7 @@ function schedFlowClient() {
   return { app, held, open, ctx };
 }
 
-test('일정 정하기 흐름 ①: 버튼 → 내일 클릭 → set-scheduled 본문 { id, scheduled: 내일 } 하나, 줄은 접히고 저장이 끝나도 접힌 채다', async () => {
+test('분류 흐름 ①: 버튼 → 내일 클릭 → set-scheduled 본문 { id, scheduled: 내일 } 하나, 줄은 접히고 저장이 끝나도 접힌 채다', async () => {
   const { app, held, open } = schedFlowClient();
   const { row, button, pop, pick } = open();
   assert.equal(button.getAttribute('aria-expanded'), 'true');
@@ -1435,7 +1435,7 @@ test('일정 정하기 흐름 ①: 버튼 → 내일 클릭 → set-scheduled �
   assert.ok(row.classList.contains('is-leaving'), '저장된 줄은 접힌 채 — 다시 보이지 않는다');
 });
 
-test('일정 정하기 흐름 ②: 나중에는 scheduled:null, 오늘은 오늘 날짜 — 예전 두 버튼과 같은 본문', async () => {
+test('분류 흐름 ②: 나중에는 scheduled:null, 오늘은 오늘 날짜 — 예전 두 버튼과 같은 본문', async () => {
   const flow = schedFlowClient();
   let opened = flow.open();
   opened.pick('later').listeners.click();
@@ -1560,7 +1560,7 @@ test('새로 들어온 것 되돌리기: 누르는 화면에서는 오늘·나�
   }
 });
 
-test('일정 정하기 흐름 ③: 저장이 실패하면 줄이 돌아오고(is-leaving 풀림) 판은 닫혀 있으며 알림이 선다', async () => {
+test('분류 흐름 ③: 저장이 실패하면 줄이 돌아오고(is-leaving 풀림) 판은 닫혀 있으며 알림이 선다', async () => {
   const { app, held, open } = schedFlowClient();
   const { row, button, pop, pick } = open();
   pick('tomorrow').listeners.click();
@@ -1573,7 +1573,7 @@ test('일정 정하기 흐름 ③: 저장이 실패하면 줄이 돌아오고(is
   assert.match(app.nodes.get('liveRegion').textContent, /저장됐는지 확인하지 못했어요/);
 });
 
-test('일정 정하기 흐름 ④: 숫자키를 연달아 눌러도 저장은 한 번 — 두 번째 선택은 줄을 되살리지 않는다', async () => {
+test('분류 흐름 ④: 숫자키를 연달아 눌러도 저장은 한 번 — 두 번째 선택은 줄을 되살리지 않는다', async () => {
   const { held, open } = schedFlowClient();
   const { row, pop } = open();
   const press = key => pop.listeners.keydown({ key, target: { tagName: 'BUTTON' }, preventDefault() {} });
@@ -1585,7 +1585,7 @@ test('일정 정하기 흐름 ④: 숫자키를 연달아 눌러도 저장은 �
   assert.ok(row.classList.contains('is-leaving'));
 });
 
-test('일정 정하기 흐름 ⑤: 직접 입력 날짜 — 덜 쳐진 해(0002)·지난 날은 저장 요청이 없고, 치는 중의 change는 Enter에서만 확정, 달력 선택은 바로', async () => {
+test('분류 흐름 ⑤: 직접 입력 날짜 — 덜 쳐진 해(0002)·지난 날은 저장 요청이 없고, 치는 중의 change는 Enter에서만 확정, 달력 선택은 바로', async () => {
   const { app, held, open } = schedFlowClient();
   const { pop, pick } = open();
   pick('pick').listeners.click();
@@ -1617,7 +1617,7 @@ test('일정 정하기 흐름 ⑤: 직접 입력 날짜 — 덜 쳐진 해(0002)
   assert.deepEqual(held[1].body, { id: 'i2', scheduled: tomorrow });
 });
 
-test('일정 정하기 흐름 ⑥: 날짜 칸을 치다 판 안의 다른 곳으로 초점이 가면 확정, 판 밖(Esc·바깥)으로 가면 저장하지 않는다', async () => {
+test('분류 흐름 ⑥: 날짜 칸을 치다 판 안의 다른 곳으로 초점이 가면 확정, 판 밖(Esc·바깥)으로 가면 저장하지 않는다', async () => {
   const { app, held, open } = schedFlowClient();
   const { pop, pick } = open();
   pick('pick').listeners.click();
@@ -1633,7 +1633,7 @@ test('일정 정하기 흐름 ⑥: 날짜 칸을 치다 판 안의 다른 곳으
   assert.equal(held.length, 1, '판 안의 다른 곳이면 확정');
 });
 
-test('일정 정하기 흐름 ⑦: Tab은 입력칸 안·판 안에서는 판을 닫지 않고, 판 밖으로 나가는 Tab(마지막 칸에서 Tab)에서만 닫는다', () => {
+test('분류 흐름 ⑦: Tab은 입력칸 안·판 안에서는 판을 닫지 않고, 판 밖으로 나가는 Tab(마지막 칸에서 Tab)에서만 닫는다', () => {
   const { app, open, ctx } = schedFlowClient();
   const { pop, pick } = open();
   pick('pick').listeners.click();
@@ -1649,7 +1649,7 @@ test('일정 정하기 흐름 ⑦: Tab은 입력칸 안·판 안에서는 판을
   assert.equal(app.run('uiSchedOpen'), null, '마지막 칸에서 Tab은 판을 닫는다');
 });
 
-test('일정 정하기: 저장 중인 다른 줄의 판이 열려 있어도 옮긴 줄은 되살아나지 않고, uiSchedDateOk는 덜 친·지난·없는 날짜를 거른다', () => {
+test('분류: 저장 중인 다른 줄의 판이 열려 있어도 옮긴 줄은 되살아나지 않고, uiSchedDateOk는 덜 친·지난·없는 날짜를 거른다', () => {
   const { app } = schedFlowClient();
   const ok = (v, validity) => app.run(`uiSchedDateOk(${JSON.stringify(v)}, ${JSON.stringify(validity || null)})`);
   assert.equal(ok('0002-10-06'), false);
@@ -2565,7 +2565,7 @@ test('종류 목록: 줄의 종류 글자를 누르면 세 항목의 작은 목�
   assert.equal(button.getAttribute('aria-label'), '종류: 할 일 — 바꾸기');
   button.listeners.click({});
   const list = pop();
-  assert.equal(list.className, 'd-schedpop d-typepop', '일정 정하기 판과 같은 부품이다');
+  assert.equal(list.className, 'd-schedpop d-typepop', '분류 판과 같은 부품이다');
   assert.equal(list.getAttribute('role'), 'listbox');
   assert.deepEqual(list.children.map(item => [nodeText(item), item.getAttribute('aria-selected'), item.style['--i']]),
     [['할 일', 'true', '0'], ['확인 대기 ?', 'false', '1'], ['결정 !', 'false', '2']], '항목은 차례로 이어 뜬다(--i)');
@@ -2644,7 +2644,7 @@ test('종류 목록: 완료한 항목과 담는 중인 줄의 종류 글자는 �
   assert.equal(nodeFind(pending, 'tl').textContent, '할 일');
 });
 
-test('종류 목록 CSS: 일정 정하기 판의 움직임을 그대로 쓰되 220ms·닫힘 120ms, 종류 글자는 28px 조용한 글자', () => {
+test('종류 목록 CSS: 분류 판의 움직임을 그대로 쓰되 220ms·닫힘 120ms, 종류 글자는 28px 조용한 글자', () => {
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
   assert.match(css, /\.d-schedpop\.d-typepop \{ width: 176px; animation: d-sched-in 220ms var\(--ease\) both, d-sched-fade 70ms linear both; \}/);
   assert.match(css, /\.d-schedpop\.d-typepop\.is-out \{ animation: d-sched-out 120ms var\(--ease\) both; \}/);
@@ -16270,11 +16270,11 @@ test('줄 이동: 키보드로 연달아 하는 동작은 움직이지 않는다
   assert.equal(fx.plays.length, 2, '마우스로 누르면 다시 움직인다');
 });
 
-test('줄 이동: 움직이면 안 되는 곳 — 글자 입력 중·한글 조합 중·일정 정하기 판이나 종류 목록이 열린 동안·가려진 창', async () => {
+test('줄 이동: 움직이면 안 되는 곳 — 글자 입력 중·한글 조합 중·분류 판이나 종류 목록이 열린 동안·가려진 창', async () => {
   const cases = [
     ['글자 칸에 초점', "document.activeElement = { tagName: 'INPUT', type: 'text' }", 'document.activeElement = null'],
     ['한글 조합 중', 'uiComposingEl = {}', 'uiComposingEl = null'],
-    ['일정 정하기 판 열림', 'uiSchedOpen = { zone: null }', 'uiSchedOpen = null'],
+    ['분류 판 열림', 'uiSchedOpen = { zone: null }', 'uiSchedOpen = null'],
     ['종류 목록 열림', "document.querySelector = sel => (sel === '.d-typepop' ? {} : null)", 'document.querySelector = () => null'],
     ['가려진 창', 'document.hidden = true', 'document.hidden = false'],
   ];
@@ -16330,7 +16330,7 @@ test('줄 이동: 보이는 줄이 40개를 넘으면 움직임 없이 그리고
   assert.deepEqual(long.plays.map(play => play.id).sort(), ['t00', 't01'], '보이는 두 줄만');
 });
 
-test('줄 이동: 움직임 줄이기 — 이동은 없고 새 줄만 120ms 흐려짐. 일정 정하기의 새 줄 솟음(is-rise)이 걸린 줄에는 겹쳐 걸지 않는다', async () => {
+test('줄 이동: 움직임 줄이기 — 이동은 없고 새 줄만 120ms 흐려짐. 분류의 새 줄 솟음(is-rise)이 걸린 줄에는 겹쳐 걸지 않는다', async () => {
   const fx = moveClient();
   fx.app.run('window.matchMedia = () => ({ matches: true })');
   fx.draw(['a', 'b', 'c']);
@@ -16338,7 +16338,7 @@ test('줄 이동: 움직임 줄이기 — 이동은 없고 새 줄만 120ms 흐�
   fx.draw(['c', 'a', 'b', 'd']);
   await settle();
   assert.deepEqual(plain(fx.plays.map(play => [play.id, play.frames, play.options.duration])), [['d', [{ opacity: 0 }, { opacity: 1 }], 120]]);
-  // 일정 정하기에서 `오늘`로 정한 업무: 새 줄은 CSS의 솟음 하나만 움직인다.
+  // 분류에서 `오늘`로 정한 업무: 새 줄은 CSS의 솟음 하나만 움직인다.
   const rise = moveClient();
   rise.draw(['a', 'b']);
   rise.act();
