@@ -15925,9 +15925,9 @@ test('설정 아이콘: index.html의 설정 버튼 SVG 안쪽이 UI_ICONS.gear�
 });
 
 // ---- 모션 기반(묶음 ①): 토큰 · 줄 이동 도우미 ----
-test('모션 토큰: 시간 4개·곡선 3개가 :root에 있고, 스프링은 linear()를 아는 환경에서만(모르면 --ease), 토큰과 값이 같은 시간은 숫자로 다시 적지 않는다', () => {
+test('모션 토큰: 시간 5개·곡선 3개가 :root에 있고, 스프링은 linear()를 아는 환경에서만(모르면 --ease), 토큰과 값이 같은 시간은 숫자로 다시 적지 않는다', () => {
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
-  assert.match(css, /--ease: cubic-bezier\(0\.22, 0\.8, 0\.3, 1\);\n  --t-press: 100ms;  --t-fast: 140ms;  --t-move: 200ms;  --t-slow: 320ms;/);
+  assert.match(css, /--ease: cubic-bezier\(0\.22, 0\.8, 0\.3, 1\);\n  --t-press: 100ms;  --t-fast: 140ms;  --t-tint: 170ms;  --t-move: 200ms;  --t-slow: 320ms;/);
   const root = css.slice(0, css.indexOf('@supports (animation-timing-function: linear(0, 1))'));
   assert.match(root, /--spring-1: var\(--ease\);\n  --spring-2: var\(--ease\);/, '기본은 넘침 없는 --ease');
   const supports = css.slice(css.indexOf('@supports (animation-timing-function: linear(0, 1))'), css.indexOf('@keyframes d-fade'));
@@ -15943,6 +15943,215 @@ test('모션 토큰: 움직임 줄이기 — 전역은 .01ms(이동 끔) 그대�
   assert.match(block, /transition-duration: 0\.01ms !important;\n    animation-duration: 0\.01ms !important;/);
   assert.match(block, /\.d-toast, \.d-menulist, \.d-schedpop:not\(\.is-out\), \.d-palbox, \.d-mrow2\.is-new \{\n    animation: d-fade 120ms linear both !important;/);
   assert.match(css, /@keyframes d-fade \{ from \{ opacity: 0; \} to \{ opacity: 1; \} \}/, '흐려짐은 투명도만');
+});
+
+// ---- 모션 빠짐 방지 장치(묶음 0): 맨 시간 값 금지 · 전수 목록 대조 ----
+// CSS 네 파일에서 transition·animation(과 그 -duration·-delay) 선언을 선택자와 함께 뽑는다.
+const MOTION_CSS_FILES = ['ui.css', 'report-ui.css', 'usage-ui.css', 'checkin-ui.css'];
+function motionDecls(file) {
+  const css = fs.readFileSync(path.join(__dirname, file), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const out = [];
+  const stack = [];
+  let buf = '';
+  for (const ch of css) {
+    if (ch === '{') { stack.push(buf.trim().replace(/\s+/g, ' ')); buf = ''; continue; }
+    if (ch !== ';' && ch !== '}') { buf += ch; continue; }
+    const m = buf.match(/^\s*(transition|animation)(-duration|-delay)?\s*:\s*([\s\S]+)$/);
+    if (m && stack.length) out.push({ file, selector: stack[stack.length - 1], prop: m[1] + (m[2] || ''), value: m[3].trim().replace(/\s+/g, ' ') });
+    buf = '';
+    if (ch === '}') stack.pop();
+  }
+  return out;
+}
+// 토큰(var(--t-…))을 뺀 나머지에 남은 ms·s — 이것이 "맨 시간 값"이다.
+const motionRawTimes = value => value.replace(/var\(--[\w-]+\)/g, '').match(/(?<![\w.-])\d*\.?\d+m?s\b/g) || [];
+
+// 아직 토큰으로 못 옮긴 맨 시간 값. [파일, 선택자, 속성, 남은 값, 없앨 묶음, 남긴 이유]
+// 값을 토큰으로 옮기면 그 줄을 여기서 지운다(남아 있으면 시험이 "이제 없는 줄"이라고 실패한다).
+// 새 맨 값은 여기에 더하지 말고 토큰을 쓴다 — 가까운 토큰이 정말 없을 때만 이유와 함께 더한다.
+const MOTION_RAW_ALLOWED = [
+  ['ui.css', '.pull-indicator.snapping', 'transition', '260ms 260ms', 'E', '당겨서 새로고침 — 기다림 부품에서 정한다'],
+  ['ui.css', '.pull-indicator.refreshing', 'animation', '700ms', 'E', '당겨서 새로고침 — 기다림 부품에서 정한다'],
+  ['ui.css', '.d-btn', 'transition', '170ms 170ms 120ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-iconbtn', 'transition', '170ms 170ms 400ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-seg button', 'transition', '170ms 170ms 120ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '*, *::before, *::after', 'transition-duration', '0.01ms', '남김', '움직임 줄이기 전역 값(.01ms로 끄고 나타남만 120ms) — 토큰과 뜻이 다르다'],
+  ['ui.css', '*, *::before, *::after', 'animation-duration', '0.01ms', '남김', '움직임 줄이기 전역 값(.01ms로 끄고 나타남만 120ms) — 토큰과 뜻이 다르다'],
+  ['ui.css', '.d-toast, .d-menulist, .d-schedpop:not(.is-out), .d-palbox, .d-mrow2.is-new', 'animation', '120ms', '남김', '움직임 줄이기 전역 값(.01ms로 끄고 나타남만 120ms) — 토큰과 뜻이 다르다'],
+  ['ui.css', '.d-tab', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-srch', 'transition', '170ms 170ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-menulist', 'animation', '120ms', 'B', '메뉴 등장 — 뜨는 것 부품으로 바뀐다'],
+  ['ui.css', '.d-schedpop', 'animation', '240ms 70ms', 'B', '쫀득 키프레임 값 — 스프링 토큰과 어느 쪽을 표준으로 할지 묶음 B에서 정한다'],
+  ['ui.css', '.d-schedpop .d-mitem', 'animation', '180ms', 'B', '쫀득 키프레임 값 — 스프링 토큰과 어느 쪽을 표준으로 할지 묶음 B에서 정한다'],
+  ['ui.css', '.d-schedpop .d-mitem', 'animation-delay', '18ms 30ms', 'B', '쫀득 키프레임 값 — 스프링 토큰과 어느 쪽을 표준으로 할지 묶음 B에서 정한다'],
+  ['ui.css', '.d-schedpop.d-typepop', 'animation', '220ms 70ms', 'B', '쫀득 키프레임 값 — 스프링 토큰과 어느 쪽을 표준으로 할지 묶음 B에서 정한다'],
+  ['ui.css', '.d-schedpop.d-typepop.is-out', 'animation', '120ms', 'B', '쫀득 키프레임 값 — 스프링 토큰과 어느 쪽을 표준으로 할지 묶음 B에서 정한다'],
+  ['ui.css', '.d-typepop .d-mitem', 'animation-duration', '160ms', 'B', '쫀득 키프레임 값 — 스프링 토큰과 어느 쪽을 표준으로 할지 묶음 B에서 정한다'],
+  ['ui.css', '.d-schedproj .d-gpick', 'animation', '160ms', 'B', '쫀득 키프레임 값 — 스프링 토큰과 어느 쪽을 표준으로 할지 묶음 B에서 정한다'],
+  ['ui.css', '.d-ibrow.is-leaving', 'animation', '220ms', 'B', '쫀득 키프레임 값 — 스프링 토큰과 어느 쪽을 표준으로 할지 묶음 B에서 정한다'],
+  ['ui.css', '.d-row.is-rise', 'animation', '260ms 1400ms', 'B', '쫀득 키프레임 값 — 스프링 토큰과 어느 쪽을 표준으로 할지 묶음 B에서 정한다'],
+  ['ui.css', '.d-mtext, .d-msel', 'transition', '170ms 170ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-dateinput', 'transition', '170ms 170ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-qa', 'transition', '170ms 170ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-wrow .ac, .d-mrow .ac', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-mrow .ct, .d-wrow .mt', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-atrow', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-atrow .mt', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-atacts', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-guide', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-ibrow', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-qaf', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-grp.tog .d-i', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-addrow', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-row', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-cb', 'transition', '120ms 120ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-pri', 'transition', '120ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-wcb', 'transition', '120ms 120ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-row.is-completing .d-title', 'animation', '520ms', 'C', '완료 줄 긋기 520ms — 완료 흐름과 함께 줄인다'],
+  ['ui.css', '.d-acts', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-dpick', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-fields .badge.is-plain', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-din', 'transition', '170ms 170ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-dpull', 'transition', '130ms 170ms 170ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-mrow2.is-opening .ed', 'animation', '220ms', 'D', '초안 펼침 220ms — 펼침 부품의 본보기, 값은 D에서'],
+  ['ui.css', '.d-dtxt', 'transition', '170ms 170ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-tpk', 'transition', '130ms 130ms 120ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-qin', 'transition', '170ms 170ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-dadd > summary .d-i', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-drawer', 'transition', '160ms 160ms', 'D', '서랍 160ms — 펼침 부품에서 값이 바뀐다'],
+  ['ui.css', '.page', 'transition', '160ms', 'D', '서랍 160ms — 펼침 부품에서 값이 바뀐다'],
+  ['ui.css', '.is-flash', 'animation', '1.6s', 'F', '밝히기 — 부품 하나로 합친다'],
+  ['ui.css', '.d-prow', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-plink', 'transition', '170ms 170ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-jwho', 'transition', '170ms 170ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-jira .foot .d-jexp .d-i', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-jfold .d-i', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-jlink .pk', 'transition', '170ms 170ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-plist .d-rhd .d-pnewgo', 'transition', '170ms 170ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-prow2', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-prow2 .ac', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-rec', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-mtrow', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-recsearch', 'transition', '170ms 170ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '#settingsDialog .d-mhd', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-abprog .now .ic', 'animation', '1s', 'E', '도는·숨 쉬는 표시 — 기다림 부품에서 정한다'],
+  ['ui.css', '.d-istat.k-soon .dot', 'animation', '2.4s', 'E', '도는·숨 쉬는 표시 — 기다림 부품에서 정한다'],
+  ['ui.css', '.d-intg', 'transition', '400ms', 'F', '밝히기 — 부품 하나로 합친다'],
+  ['ui.css', '.d-imore > summary::before', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-faq .q.is-hit', 'transition', '400ms 400ms', 'F', '밝히기 — 부품 하나로 합친다'],
+  ['report-ui.css', '.rp-wk', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
+  ['report-ui.css', '.rp-rename', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
+  ['report-ui.css', '.rp-grp .rp-s.is-add', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
+  ['report-ui.css', '.rp-s .rp-foldtoggle .d-i', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
+  ['report-ui.css', '.rp-s .rp-aim', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
+  ['report-ui.css', '.rp-s .ac', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
+  ['report-ui.css', '.rp-add', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
+  ['report-ui.css', '.rp-pjadd', 'transition', '130ms 130ms', 'A', '토큰으로 옮길 값'],
+  ['report-ui.css', '.rp-cand', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
+  ['report-ui.css', '.rp-rec', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
+  ['report-ui.css', '.rp-fl .d-i', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
+  ['usage-ui.css', '.d-uwmore', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
+  ['checkin-ui.css', '.d-ckopt span', 'transition', '170ms 170ms', 'A', '토큰으로 옮길 값'],
+  ['checkin-ui.css', '.d-ckdlg[open]', 'animation', '0.22s', 'B', '체크인 창 등장 — 창 부품으로 바뀐다'],
+];
+
+test('모션 장치: 맨 시간 값 금지 — CSS 네 파일의 transition·animation에 토큰이 아닌 ms·s는 허용 목록에 있는 것뿐이다', () => {
+  const key = (file, selector, prop, times) => `${file} | ${selector} | ${prop} | ${times}`;
+  const found = MOTION_CSS_FILES.flatMap(file => motionDecls(file))
+    .map(d => ({ ...d, times: motionRawTimes(d.value) }))
+    .filter(d => d.times.length)
+    .map(d => key(d.file, d.selector, d.prop, d.times.join(' ')));
+  const allowed = MOTION_RAW_ALLOWED.map(([file, selector, prop, times]) => key(file, selector, prop, times));
+  MOTION_RAW_ALLOWED.forEach((row) => {
+    assert.equal(row.length, 6, `허용 목록 한 줄은 여섯 칸이다: ${row[1]}`);
+    assert.match(row[4], /^(A|B|C|D|E|F|남김)$/, `없앨 묶음: ${row[1]}`);
+    assert.ok(row[5].length >= 8, `남긴 이유를 적는다: ${row[1]}`);
+  });
+  const left = allowed.slice();
+  const fresh = found.filter((k) => { const i = left.indexOf(k); if (i < 0) return true; left.splice(i, 1); return false; });
+  assert.deepEqual(fresh, [], '새 맨 시간 값 — 토큰(--t-press·--t-fast·--t-tint·--t-move·--t-slow)을 쓴다');
+  assert.deepEqual(left, [], '허용 목록에 있지만 CSS에는 이제 없는 줄 — 목록에서 지운다');
+});
+
+test('모션 장치: 맨 시간 값 찾기 — 토큰은 지나치고 숫자 시간·지연·calc 안의 값은 잡는다', () => {
+  assert.deepEqual(motionRawTimes('background var(--t-tint) var(--ease), transform var(--t-press) var(--ease)'), []);
+  assert.deepEqual(motionRawTimes('d-rise var(--t-fast) var(--spring-1) both'), []);
+  assert.deepEqual(motionRawTimes('opacity 130ms var(--ease), background 170ms var(--ease)'), ['130ms', '170ms']);
+  assert.deepEqual(motionRawTimes('d-flash 1.6s var(--ease) both'), ['1.6s']);
+  assert.deepEqual(motionRawTimes('d-ck-rise 0.22s ease-out'), ['0.22s']);
+  assert.deepEqual(motionRawTimes('calc(var(--i, 0) * 18ms + 30ms)'), ['18ms', '30ms']);
+  assert.deepEqual(motionRawTimes('none'), []);
+});
+
+// 지도 문서(docs/지도/모션.md)의 표 한 장을 칸으로 읽는다 — 머리 줄의 첫 칸 이름으로 표를 찾는다.
+function motionMapRows(firstHead) {
+  const lines = fs.readFileSync(path.join(__dirname, '..', '..', 'docs', '지도', '모션.md'), 'utf8').split('\n');
+  const cells = line => line.split('|').slice(1, -1).map(cell => cell.trim());
+  const start = lines.findIndex(line => line.startsWith('|') && cells(line)[0] === firstHead);
+  assert.ok(start >= 0, `지도 문서에 표가 있다: ${firstHead}`);
+  const head = cells(lines[start]);
+  const rows = [];
+  for (let i = start + 2; i < lines.length && lines[i].startsWith('|'); i += 1) {
+    const row = cells(lines[i]);
+    assert.equal(row.length, head.length, `칸 수가 머리 줄과 같다: ${lines[i].slice(0, 60)}`);
+    rows.push(Object.fromEntries(head.map((name, at) => [name, row[at]])));
+  }
+  return rows;
+}
+// "구현" 칸: `파일` 뒤에 그 파일 안의 `이름`들. 파일이 있고, 이름(함수·변수는 낱말로, 선택자는 클래스·id·키프레임 이름으로)이 그 파일에 있어야 한다.
+function motionMapMissing(impl) {
+  const missing = [];
+  let file = null;
+  let text = '';
+  for (const [, token] of impl.matchAll(/`([^`]+)`/g)) {
+    if (/^[\w.-]+\.(js|css|html|md)$/.test(token)) {
+      file = token;
+      const at = ['DESIGN.md', 'DECISIONS.md'].includes(token) ? path.join(__dirname, '..', '..', token) : path.join(__dirname, token);
+      text = fs.existsSync(at) ? fs.readFileSync(at, 'utf8') : null;
+      if (text === null) missing.push(`파일 없음: ${token}`);
+      continue;
+    }
+    if (!file) { missing.push(`파일 없이 이름만: ${token}`); continue; }
+    if (text === null) continue;
+    const words = /^[\w$]+$/.test(token)
+      ? [token]
+      : [...token.matchAll(/[.#]([A-Za-z][\w-]*)|@keyframes ([\w-]+)|\[([\w-]+)/g)].map(m => m[1] || m[2] || m[3]);
+    words.forEach((word) => {
+      const found = new RegExp(`(^|[^\\w-])${word.replace(/[$]/g, '\\$')}(?![\\w-])`).test(text);
+      if (!found) missing.push(`${file}에 없음: ${word}`);
+    });
+  }
+  return missing;
+}
+
+test('모션 장치: 전수 목록 대조 — 지도 문서의 표에 상태 빈칸·주인 없는 남은 줄이 없고, 적힌 파일·선택자·함수 이름이 저장소에 있다', () => {
+  const rows = motionMapRows('#');
+  assert.equal(rows.length, 263, '전수 목록 줄 수 — 줄을 더하거나 빼면 이 숫자와 계획 문서를 함께 고친다');
+  assert.deepEqual(rows.map(row => Number(row['#'])), rows.map((row, at) => at + 1), '번호가 1부터 빠짐없이 이어진다');
+  const STATE = /^(적용됨|옛 모션|없음|닫힘만 즉시|의도적으로 안 움직임\(.{2,}\))$/;
+  const bad = [];
+  rows.forEach((row) => {
+    if (!STATE.test(row['상태'])) bad.push(`${row['#']}: 상태 "${row['상태']}"`);
+    const done = /^(적용됨|의도적으로 안 움직임)/.test(row['상태']);
+    if (!done && !/^[A-F]$/.test(row['묶음'])) bad.push(`${row['#']}: 남은 줄인데 맡은 묶음이 없다`);
+    if (!row['화면'] || !row['무엇'] || !row['부품'] || !row['정해진 대우']) bad.push(`${row['#']}: 빈칸`);
+    motionMapMissing(row['구현']).forEach(text => bad.push(`${row['#']}: ${text}`));
+  });
+  motionMapRows('부품').forEach((row) => {
+    motionMapMissing(row['공용 구현']).forEach(text => bad.push(`${row['부품']}: ${text}`));
+  });
+  motionMapRows('장치').forEach((row) => {
+    motionMapMissing(row['어디']).forEach(text => bad.push(`${row['장치']}: ${text}`));
+  });
+  assert.deepEqual(bad, []);
+});
+
+test('모션 장치: 이름 대조 — 없는 파일·없는 함수·없는 선택자를 잡고, 있는 것은 지나친다', () => {
+  assert.deepEqual(motionMapMissing('`ui.css` `.d-btn` `@keyframes d-fade` · `app.js` `uiRowsMove`'), []);
+  assert.deepEqual(motionMapMissing('`ui.css` `.d-no-such-part`'), ['ui.css에 없음: d-no-such-part']);
+  assert.deepEqual(motionMapMissing('`app.js` `uiNoSuchHelper`'), ['app.js에 없음: uiNoSuchHelper']);
+  assert.deepEqual(motionMapMissing('`no-such-ui.js` `anything`'), ['파일 없음: no-such-ui.js']);
+  assert.deepEqual(motionMapMissing('—'), []);
 });
 
 // 줄 이동 도우미 시험 틀: 오늘 목록을 실제 renderTodayTasks로 그리되, 가짜 줄에 자리(목록 안 순서 × 40px)와

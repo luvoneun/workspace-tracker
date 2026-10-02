@@ -83,9 +83,10 @@
   /* ≤520px 입력 글자(iOS 확대 방지)가 --fs-lg에 묶여 있으니 16px 아래로 내리지 말 것 */
   --fs-cap: 12px;  --fs-sm: 13px;  --fs-body: 14px;  --fs-md: 15px;  --fs-lg: 16px;
   --h-xs: 22px;  --h-sm: 28px;  --h-md: 32px;  --h-lg: 42px;  --h-touch: 44px;
-  /* 모션 토큰(DESIGN.md 모션 절) — 시간 4개 + 곡선 3개. 줄 이동 도우미(app.js uiRowsMove)가 같은 값을 숫자로 쓴다 */
+  /* 모션 토큰(DESIGN.md 모션 절) — 시간 5개 + 곡선 3개. 줄 이동 도우미(app.js uiRowsMove)가 같은 값을 숫자로 쓴다.
+     --t-tint는 색 전환(가리킴·고름·초점) 전용이다. 토큰이 아닌 맨 시간 값은 시험(client.test.js 허용 목록)이 막는다 */
   --ease: cubic-bezier(0.22, 0.8, 0.3, 1);
-  --t-press: 100ms;  --t-fast: 140ms;  --t-move: 200ms;  --t-slow: 320ms;
+  --t-press: 100ms;  --t-fast: 140ms;  --t-tint: 170ms;  --t-move: 200ms;  --t-slow: 320ms;
   /* 스프링 근사는 linear()를 아는 환경에서만(아래 @supports) — 모르면 넘침 없는 --ease로 떨어진다 */
   --spring-1: var(--ease);
   --spring-2: var(--ease);
