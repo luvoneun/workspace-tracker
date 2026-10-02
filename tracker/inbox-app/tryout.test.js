@@ -27,25 +27,32 @@ function box() {
   fs.mkdirSync(home, { recursive: true }); fs.mkdirSync(tmp, { recursive: true });
   return { root, home, tmp };
 }
+// tryout.sh 시험이 쓸 빈 포트(스크립트가 그 포트를 직접 열어 보므로 미리 쥐고 있을 수 없다).
 const freePort = () => new Promise(resolve => {
   const probe = net.createServer();
   probe.listen(0, '127.0.0.1', () => { const { port } = probe.address(); probe.close(() => resolve(port)); });
 });
-// 써 보기 서버를 띄운다 — 뜨면 주소를, 뜨기 전에 끝나면 종료 코드를 돌려준다.
-function launch({ home, tmp }, port, extra = {}) {
+// 써 보기 서버를 띄운다 — 포트는 서버가 직접 빈 것을 잡는다(TRYOUT_PORT=0, 닫았다 다시 여는 틈이 없다).
+// 뜨면 `port`·`base`가 채워지고, 뜨기 전에 끝나면 `up`이 false다.
+function launch({ home, tmp }, extra = {}) {
   const child = spawn(process.execPath, [path.join(__dirname, 'tryout-server.js')], {
-    env: { PATH: process.env.PATH, TZ: 'Asia/Seoul', HOME: home, TMPDIR: tmp, TRYOUT_PORT: String(port), ...extra },
+    env: { PATH: process.env.PATH, TZ: 'Asia/Seoul', HOME: home, TMPDIR: tmp, TRYOUT_PORT: '0', ...extra },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   children.add(child);
   let out = '';
-  const exited = new Promise(resolve => child.on('exit', code => { children.delete(child); resolve(code); }));
-  const up = new Promise(resolve => {
-    const read = chunk => { out += chunk; if (out.includes('써 보기 서버: http')) resolve(true); };
+  const run = { child, port: 0, base: '', log: () => out };
+  run.exited = new Promise(resolve => child.on('exit', code => { children.delete(child); resolve(code); }));
+  run.up = new Promise(resolve => {
+    const read = chunk => {
+      out += chunk;
+      const hit = /써 보기 서버: http:\/\/localhost:(\d+)/.exec(out);
+      if (hit) { run.port = Number(hit[1]); run.base = `http://localhost:${run.port}`; resolve(true); }
+    };
     child.stdout.on('data', read); child.stderr.on('data', read);
-    exited.then(() => resolve(false));
+    run.exited.then(() => resolve(false));
   });
-  return { child, exited, up, base: `http://localhost:${port}`, log: () => out };
+  return run;
 }
 const stop = async run => { run.child.kill('SIGTERM'); return run.exited; };
 const items = async base => (await fetch(`${base}/api/items`)).json();
@@ -56,10 +63,10 @@ const SEEDED = [5, 10, 4, 3, 2, 1];
 const tree = dir => fs.readdirSync(dir, { recursive: true }).map(String).sort();
 
 test('가짜 데이터가 기대한 개수로 읽히고, 물려받은 환경변수가 실제 자리를 가리켜도 임시 폴더만 쓴다', async () => {
-  const at = box(), port = await freePort();
+  const at = box();
   const hostile = path.join(at.home, '.config', 'real');
   // 운영처럼 보이는 값을 일부러 물려준다 — 써 보기 서버가 전부 덮어쓰거나 지워야 한다.
-  const run = launch(at, port, {
+  const run = launch(at, {
     WORKSPACE_DATA_DIR: hostile, WORKSPACE_CONFIG: path.join(hostile, 'workspace.config.json'), WORKSPACE_TOKEN_DIR: hostile,
     WORKSPACE_AUTOMATION_DIR: hostile, WORKSPACE_LAUNCH_AGENTS_DIR: hostile, WORKSPACE_LOCAL_DIR: hostile, WORKSPACE_BACKUP_DIR: hostile,
     WORKSPACE_MANAGED: '1', WORKSPACE_CHECKIN: '1', WORKSPACE_SLACK_FOLLOW: '1', WORKSPACE_PORT: '4321',
@@ -93,6 +100,18 @@ test('가짜 데이터가 기대한 개수로 읽히고, 물려받은 환경변�
   assert.equal(check.ok, false);
   assert.notEqual(check.code, 'invalid_auth');
   assert.match(run.log(), /바깥 요청을 막았어요: slack\.com/);
+  // 지라·캘린더 연결 확인(연동 저장이 먼저 읽어 보는 길)도 막히고, 저장되지 않는다.
+  const jira = await (await post(run.base, '/api/integrations/save', { jira: { enabled: true, siteUrl: 'https://tryout-check.atlassian.net', email: 'tester@example.test', token: 'not-a-real-token' } })).json();
+  assert.equal(jira.ok, false);
+  assert.match(run.log(), /바깥 요청을 막았어요: tryout-check\.atlassian\.net/);
+  const calendar = await (await post(run.base, '/api/integrations/save', { calendar: { enabled: true, source: 'ical', url: 'https://calendar.example.test/private-not-real/basic.ics' } })).json();
+  assert.equal(calendar.ok, false);
+  assert.match(run.log(), /바깥 요청을 막았어요: calendar\.example\.test/);
+  assert.equal((run.log().match(/바깥 요청을 막았어요/g) || []).length, 3, '막은 요청은 방금 누른 셋뿐이다(스스로 나가려던 요청이 없다)');
+  assert.doesNotMatch(run.log(), /private-not-real|not-a-real-token/, '주소의 호스트만 남긴다');
+  const kept = await items(run.base);
+  assert.equal(kept.jiraSync.used, false);
+  assert.equal(kept.calendar.events.length, 3);
   // 서버 파일은 화면으로 나가지 않는다.
   assert.equal((await fetch(`${run.base}/tryout-server.js`)).status, 404);
   assert.equal(await stop(run), 0);
@@ -101,9 +120,10 @@ test('가짜 데이터가 기대한 개수로 읽히고, 물려받은 환경변�
 });
 
 test('처음 상태로 — 서버를 다시 띄우지 않고 돌아오고, 임시 폴더 밖을 쓰지 않으며, 다른 출처의 요청은 거절한다', async () => {
-  const at = box(), port = await freePort();
-  const run = launch(at, port);
+  const at = box();
+  const run = launch(at);
   assert.equal(await run.up, true, run.log());
+  const { port } = run;
   const page = await fetch(`${run.base}/__tryout`);
   const html = await page.text();
   assert.equal(page.status, 200);
@@ -142,8 +162,8 @@ test('처음 상태로 — 서버를 다시 띄우지 않고 돌아오고, 임�
 });
 
 test('launchd가 띄운 자리에서는 설정까지 바뀌었을 때 스스로 끝나 다시 켜지게 한다(자기 자신만)', async () => {
-  const at = box(), port = await freePort();
-  const run = launch(at, port, { TRYOUT_KEEPALIVE: '1' });
+  const at = box();
+  const run = launch(at, { TRYOUT_KEEPALIVE: '1' });
   assert.equal(await run.up, true, run.log());
   // 데이터만 바뀌었으면 끝나지 않는다.
   assert.equal((await fetch(`${run.base}/__tryout/reset`, { method: 'POST', redirect: 'manual' })).status, 303);
@@ -155,43 +175,106 @@ test('launchd가 띄운 자리에서는 설정까지 바뀌었을 때 스스로 
   assert.deepEqual(fs.readdirSync(at.tmp), []);
 });
 
-test('시작할 때 자기 이름표가 있는 같은 포트의 옛 폴더만 치운다', async () => {
-  const at = box(), port = await freePort();
+test('옛 폴더 치우기 — 자기 이름표가 있는 같은 포트의 것만', async () => {
+  const at = box(), port = 4340;
   const make = (name, mark) => {
     const dir = path.join(at.tmp, name);
     fs.mkdirSync(path.join(dir, 'data'), { recursive: true });
     if (mark !== undefined) fs.writeFileSync(path.join(dir, tryout.MARK), mark);
     return dir;
   };
-  make('workspace-browser-mine', JSON.stringify({ port, pid: 1 }));
+  const mine = make('workspace-browser-mine', JSON.stringify({ port, pid: 1 }));
+  const current = make('workspace-browser-current', JSON.stringify({ port, pid: process.pid }));
   make('workspace-browser-otherport', JSON.stringify({ port: port + 1, pid: 1 }));
   make('workspace-browser-nomark');
   make('workspace-browser-broken', '{');
   make('something-else', JSON.stringify({ port, pid: 1 }));
-  const run = launch(at, port);
+  assert.deepEqual(tryout.sweepStale(current, port, at.tmp), [mine]);
+  assert.deepEqual(fs.readdirSync(at.tmp).sort(), ['something-else', 'workspace-browser-broken', 'workspace-browser-current', 'workspace-browser-nomark', 'workspace-browser-otherport']);
+  assert.deepEqual(tryout.sweepStale(current, port, path.join(at.tmp, 'absent')), []);
+  // 진짜로 띄운 서버도 뜬 뒤에 자기 포트의 이름표를 남긴다.
+  const live = box(), run = launch(live);
   assert.equal(await run.up, true, run.log());
-  const left = fs.readdirSync(at.tmp).sort();
-  assert.equal(left.includes('workspace-browser-mine'), false);
-  for (const name of ['workspace-browser-otherport', 'workspace-browser-nomark', 'workspace-browser-broken', 'something-else']) assert.ok(left.includes(name), name);
-  assert.equal(left.length, 5, '지금 쓰는 폴더 하나 + 남긴 넷');
+  const [folder] = fs.readdirSync(live.tmp);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(live.tmp, folder, tryout.MARK), 'utf8')).port, run.port);
   assert.equal(await stop(run), 0);
 });
 
+// 이 프로세스 안에서 임시 폴더 한 벌을 만들어 보는 시험 — 만드는 자리(os.tmpdir)를 시험 폴더로 끼웠다가 되돌린다.
+async function withTmp(tmp, fn) {
+  const before = process.env.TMPDIR;
+  process.env.TMPDIR = tmp;
+  try { return await fn(); } finally { if (before === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = before; }
+}
+
+test('날짜가 바뀌면 스스로 처음 상태로 돌리고, 설정까지 바뀌었으면 launchd 자리에서만 끝낸다', () => withTmp(box().tmp, () => {
+  let now = new Date(2030, 0, 15, 23, 58);
+  const exits = [];
+  const current = tryout.build(4340, now);
+  const tasks = () => fs.readFileSync(path.join(current.env.WORKSPACE_DATA_DIR, 'tasks.md'), 'utf8');
+  const keeper = tryout.createKeeper({ current, port: 4340, keepAlive: true, now: () => now, exit: code => exits.push(code) });
+  assert.match(tasks(), /scheduled:2030-01-15/);
+  fs.appendFileSync(path.join(current.env.WORKSPACE_DATA_DIR, 'tasks.md'), '- 써 보다 남긴 것 #task[id:zz status:to-do]\n');
+  assert.equal(keeper.tick(), false, '같은 날이면 건드리지 않는다');
+  assert.match(tasks(), /써 보다 남긴 것/);
+  now = new Date(2030, 0, 16, 0, 0);
+  assert.equal(keeper.tick(), true);
+  assert.match(tasks(), /scheduled:2030-01-16/);
+  assert.doesNotMatch(tasks(), /써 보다 남긴 것|scheduled:2030-01-15 group:가입_개선/);
+  assert.equal(keeper.tick(), false, '돌린 뒤에는 그날 다시 돌리지 않는다');
+  assert.deepEqual(exits, [], '데이터만 바뀌었으면 끝내지 않는다');
+  // 설정이 바뀐 채 날짜가 넘어가면 다시 켜지게 끝낸다.
+  fs.writeFileSync(current.env.WORKSPACE_CONFIG, JSON.stringify({ title: '바꾼 제목' }));
+  now = new Date(2030, 0, 17, 0, 1);
+  assert.equal(keeper.tick(), true);
+  assert.deepEqual(exits, [0]);
+  assert.equal(JSON.parse(fs.readFileSync(current.env.WORKSPACE_CONFIG, 'utf8')).title, tryout.TITLE);
+  // 손으로 띄운 자리(keepAlive 아님)는 설정이 바뀌어도 끝내지 않는다.
+  const manual = tryout.createKeeper({ current, port: 4340, now: () => now, exit: code => exits.push(code) });
+  fs.writeFileSync(current.env.WORKSPACE_CONFIG, JSON.stringify({ title: '바꾼 제목' }));
+  assert.equal(manual.reset(), false);
+  assert.deepEqual(exits, [0]);
+  assert.deepEqual(fs.readdirSync(process.env.TMPDIR), [path.basename(current.root)], '새로 만든 폴더는 남지 않는다');
+}));
+
+test('처음 상태로 돌리다 실패하면 새 폴더를 치우고, 바꿔 끼우던 중이면 어디서 띄웠든 스스로 끝낸다', () => withTmp(box().tmp, () => {
+  const exits = [];
+  const current = tryout.build(4340);
+  const keeper = tryout.createKeeper({ current, port: 4340, exit: code => exits.push(code) });
+  const only = () => assert.deepEqual(fs.readdirSync(process.env.TMPDIR), [path.basename(current.root)]);
+  const real = { writeFileSync: fs.writeFileSync, renameSync: fs.renameSync };
+  try {
+    // 새 폴더에 심다가 실패 — 지금 폴더는 그대로이고 끝내지 않는다.
+    fs.writeFileSync = (file, ...rest) => { if (path.basename(String(file)) === 'ideas.md') throw new Error('가짜 실패'); return real.writeFileSync(file, ...rest); };
+    assert.throws(() => keeper.reset(), /가짜 실패/);
+    assert.deepEqual(exits, []);
+    only();
+    assert.ok(fs.existsSync(path.join(current.env.WORKSPACE_DATA_DIR, 'tasks.md')));
+    assert.equal(keeper.tick(), false);
+    fs.writeFileSync = real.writeFileSync;
+    // 바꿔 끼우다 실패 — 반쪽이므로 끝낸다(launchd 자리가 아니어도).
+    let calls = 0;
+    fs.renameSync = (...args) => { if (++calls === 2) throw new Error('가짜 실패'); return real.renameSync(...args); };
+    assert.throws(() => keeper.reset(), /가짜 실패/);
+    assert.deepEqual(exits, [1]);
+    only();
+  } finally { Object.assign(fs, real); }
+}));
+
 test('임시 폴더가 실제 설치 위치 아래면 시작하지 않는다(서버의 안전망)', async () => {
-  const at = box(), port = await freePort();
+  const at = box();
   const tmp = path.join(at.home, '.config', 'tmp');
   fs.mkdirSync(tmp, { recursive: true });
-  const run = launch({ home: at.home, tmp }, port);
+  const run = launch({ home: at.home, tmp });
   assert.equal(await run.up, false);
   assert.equal(await run.exited, 1);
   assert.match(run.log(), /실제 설치 위치를 가리켜서 시작하지 않아요/);
   assert.deepEqual(fs.readdirSync(tmp), [], '만들던 폴더도 남기지 않는다');
-  await assert.rejects(fetch(`http://localhost:${port}/api/items`));
 });
 
 test('운영 앱·슬랙 연결 자리(4321~4331)에서는 열지 않는다', async () => {
   const at = box();
-  for (const port of ['4321', '4325', '4331', '80', 'abc']) {
+  for (const port of ['4321', '4325', '4331', '80', '1023', '65536', 'abc']) {
     const result = spawnSync(process.execPath, [path.join(__dirname, 'tryout-server.js')], {
       env: { PATH: process.env.PATH, HOME: at.home, TMPDIR: at.tmp, TRYOUT_PORT: port }, encoding: 'utf8',
     });
@@ -270,6 +353,7 @@ test('tryout.sh install — 자기 plist 하나만 만들고 올린다', async (
   assert.ok(plist.includes(`<string>${path.join(fs.realpathSync(REPO), 'tracker', 'inbox-app', 'tryout-server.js')}</string>`) || plist.includes(`<string>${path.join(REPO, 'tracker', 'inbox-app', 'tryout-server.js')}</string>`), '저장소 코드를 그대로 실행한다');
   assert.match(plist, /<key>RunAtLoad<\/key>\s*<true\/>/);
   assert.match(plist, /<key>KeepAlive<\/key>\s*<true\/>/);
+  assert.match(plist, /<key>ThrottleInterval<\/key>\s*<integer>30<\/integer>/);
   assert.match(plist, /<key>TRYOUT_KEEPALIVE<\/key>\s*<string>1<\/string>/);
   assert.ok(plist.includes(`<string>${path.join(sh.logs, 'tryout.log')}</string>`));
   assert.doesNotMatch(plist, /WORKSPACE_MANAGED/, '운영 설치본 표시를 넘기지 않는다');
@@ -299,23 +383,22 @@ test('tryout.sh install — 포트가 쓰이는 중이면 알리고 끝낸다(�
   await new Promise(resolve => holder.listen(0, '127.0.0.1', resolve));
   try {
     const sh = shellBox({ port: holder.address().port });
-    // 포트를 쥔 채로 스크립트를 기다려야 하므로 비동기로 돌린다.
-    const result = await new Promise(resolve => {
-      const child = spawn('/bin/bash', [SCRIPT, 'install'], { env: sh.env });
-      let out = '';
-      child.stdout.on('data', chunk => { out += chunk; }); child.stderr.on('data', chunk => { out += chunk; });
-      child.on('exit', status => resolve({ status, out }));
-    });
+    // 내 것을 내린 적이 없으면 한 번만 열어 보고 바로 끝난다(기다리지 않는다).
+    const result = sh.run('install');
     assert.equal(result.status, 1);
-    assert.match(result.out, /다른 프로그램이 쓰고 있어요/);
+    assert.match(result.stdout, /다른 프로그램이 쓰고 있어요/);
     assert.equal(fs.existsSync(sh.plist), false);
     assert.deepEqual(sh.called(), []);
     assert.equal(holder.listening, true);
   } finally { await new Promise(resolve => holder.close(resolve)); }
-  for (const port of ['4321', '4331', 'abc']) {
+  // 서버가 거절할 포트로는 올리지 않는다(올리면 launchd가 헛돈다).
+  for (const port of ['4321', '4331', '0', '1023', '65536', '08080', '999999', 'abc', '43 40']) {
     const sh = shellBox({ port });
-    assert.equal(sh.run('install').status, 1, port);
-    assert.equal(fs.existsSync(sh.plist), false);
+    const result = sh.run('install');
+    assert.equal(result.status, 1, port);
+    assert.match(result.stdout, /포트로는 올리지 않아요/);
+    assert.equal(fs.existsSync(sh.agents), false);
+    assert.deepEqual(sh.called(), []);
   }
 });
 
@@ -339,7 +422,7 @@ test('tryout.sh uninstall·restart·status — 자기 이름표 하나만 다룬
   assert.equal(sh.run('nope').status, 2);
 });
 
-test('tryout.sh는 프로세스를 훑거나 끝내지 않고, 설치·업데이트·배포 스크립트는 써 보기 서버를 모른다', () => {
+test('글자 검사 — tryout.sh에 kill·프로세스 목록 명령과 다른 이름표가 없고, 설치·업데이트·배포 스크립트에 tryout 글자가 없다', () => {
   const script = fs.readFileSync(SCRIPT, 'utf8').split('\n').filter(row => !row.trim().startsWith('#')).join('\n');
   assert.doesNotMatch(script, /\b(pkill|killall|kill|pgrep|lsof)\b|\bps\s|xargs/);
   for (const label of script.match(/com\.workspace\.[\w.]+/g)) assert.equal(label, 'com.workspace.app.tryout');
@@ -348,5 +431,5 @@ test('tryout.sh는 프로세스를 훑거나 끝내지 않고, 설치·업데이
     if (fs.existsSync(file)) assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /tryout/i, name);
   }
   const server = fs.readFileSync(path.join(__dirname, 'tryout-server.js'), 'utf8');
-  assert.doesNotMatch(server, /child_process|process\.kill|\bfetch\(/, '프로세스를 띄우지도, 신호를 보내지도, 바깥에 요청하지도 않는다');
+  assert.doesNotMatch(server, /child_process|process\.kill|\bfetch\(/, '써 보기 서버 코드에 child_process·process.kill·fetch( 호출 글자가 없다');
 });

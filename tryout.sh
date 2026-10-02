@@ -35,36 +35,50 @@ channel() {
   ' "$CONFIG" 2>/dev/null
 }
 
-# 포트가 비었는지 직접 열어 본다(누가 쓰는지 찾거나 끝내지 않는다). 방금 내린 내 서버가 닫힐 틈을 3초까지 준다.
+# 포트가 비었는지 직접 열어 본다(누가 쓰는지 찾거나 끝내지 않는다). 인자는 열어 볼 횟수(0.5초 간격) —
+# 방금 내 서버를 내렸을 때만 닫힐 틈을 3초까지 주고, 그 밖에는 한 번만 본다.
 port_free() {
   node -e '
     const net = require("node:net"), port = Number(process.argv[1]);
-    let left = 6;
+    let left = Number(process.argv[2]) || 1;
     const attempt = () => {
       const probe = net.createServer();
       probe.once("error", () => { if (--left > 0) setTimeout(attempt, 500); else process.exit(1); });
       probe.listen(port, "127.0.0.1", () => probe.close(() => process.exit(0)));
     };
     attempt();
-  ' "$PORT"
+  ' "$PORT" "${1:-1}"
+}
+
+# 서버(tryout-server.js)와 같은 범위만 받는다 — 1024~65535이고 4321~4331(운영 앱·슬랙 연결 자리)은 아니다.
+# 서버가 거절할 포트로 올리면 launchd가 헛돌기만 하므로 올리기 전에 막는다.
+port_ok() {
+  case "$PORT" in ''|*[!0-9]*|0*) return 1 ;; esac
+  [ "${#PORT}" -le 5 ] || return 1
+  [ "$PORT" -ge 1024 ] && [ "$PORT" -le 65535 ] || return 1
+  if [ "$PORT" -ge 4321 ] && [ "$PORT" -le 4331 ]; then return 1; fi
+  return 0
 }
 
 install() {
   command -v node >/dev/null 2>&1 || die "Node가 없어요."
-  case "$PORT" in ''|*[!0-9]*) die "포트는 숫자여야 해요: $PORT" ;; esac
-  if [ "$PORT" -ge 4321 ] && [ "$PORT" -le 4331 ]; then die "$PORT 포트는 운영 앱·슬랙 연결 자리예요 — 4321~4331 밖의 포트를 골라 주세요."; fi
+  port_ok || die "$PORT 포트로는 올리지 않아요 — 1024~65535 가운데 4321~4331(운영 앱·슬랙 연결 자리) 밖의 숫자를 골라 주세요."
   if [ "$(channel)" != "main" ]; then
     echo "  써 보기 서버는 앱을 만드는 사람의 맥 전용이에요(받는 갈래 main) — 이 설치에는 올리지 않았어요. 아무것도 바꾸지 않았어요."
     exit 0
   fi
   [ -f "$APP_DIR/tryout-server.js" ] || die "tryout-server.js가 없어요: $APP_DIR"
   # 이미 올려 둔 내 것이 있으면 먼저 내린다(그 포트는 내 것이므로).
-  [ -f "$PLIST" ] && "$LAUNCHCTL" unload "$PLIST" 2>/dev/null
-  if ! port_free; then
+  local tries=1
+  if [ -f "$PLIST" ]; then "$LAUNCHCTL" unload "$PLIST" 2>/dev/null; tries=6; fi
+  if ! port_free "$tries"; then
     [ -f "$PLIST" ] && "$LAUNCHCTL" load "$PLIST" 2>/dev/null
     die "$PORT 포트를 다른 프로그램이 쓰고 있어요 — 그 프로그램은 건드리지 않았어요. 끄고 다시 돌리거나 TRYOUT_PORT로 다른 포트를 골라 주세요."
   fi
   mkdir -p "$AGENTS_DIR" "$LOG_DIR"
+  # node 경로는 setup.sh가 운영 서버 plist에 넣는 방식 그대로다(올릴 때의 `command -v node`).
+  local NODE_PATH
+  NODE_PATH="$(command -v node)"
   cat > "$PLIST" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -74,7 +88,7 @@ install() {
   <string>$LABEL</string>
   <key>ProgramArguments</key>
   <array>
-    <string>$(command -v node)</string>
+    <string>$NODE_PATH</string>
     <string>$APP_DIR/tryout-server.js</string>
   </array>
   <key>WorkingDirectory</key>
@@ -90,6 +104,8 @@ install() {
   <true/>
   <key>KeepAlive</key>
   <true/>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
   <key>StandardOutPath</key>
   <string>$LOG_DIR/tryout.log</string>
   <key>StandardErrorPath</key>

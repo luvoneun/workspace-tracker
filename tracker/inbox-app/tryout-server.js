@@ -69,10 +69,10 @@ function seedData(dataDir, now = new Date()) {
   ]);
   const check = (text, fields) => line('check', text, { status: 'to-do', priority: 'medium', ...fields });
   write('checks.md', ['# Checks',
-    check('환불 한도 검토 회신', { id: 'w1', created: day(-4), who: '가람', due: day(-1), group: '결제_리뉴얼', source: slack(6) }),
-    check('디자인 시안 2차 회신', { id: 'w2', created: day(-2), who: '나래', due: T, group: '가입_개선', source: slack(7) }),
-    check('서버 배포 일정 확인', { id: 'w3', created: day(-1), who: '다온', group: '운영툴', source: slack(8) }),
-    check('약관 문구 검토 회신', { id: 'w0', status: 'done', created: day(-8), completed: day(-4), who: '가람', group: '가입_개선' }),
+    check('환불 한도 검토 회신', { id: 'w1', created: day(-4), who: '테스터A', due: day(-1), group: '결제_리뉴얼', source: slack(6) }),
+    check('디자인 시안 2차 회신', { id: 'w2', created: day(-2), who: '테스터B', due: T, group: '가입_개선', source: slack(7) }),
+    check('서버 배포 일정 확인', { id: 'w3', created: day(-1), who: '테스터C', group: '운영툴', source: slack(8) }),
+    check('약관 문구 검토 회신', { id: 'w0', status: 'done', created: day(-8), completed: day(-4), who: '테스터A', group: '가입_개선' }),
   ]);
   write('decisions.md', [
     line('decision', '권한 정책은 기존 방식 유지', { id: 'd1', status: 'to-do', created: day(-1), group: '운영툴' }),
@@ -94,7 +94,7 @@ function seedData(dataDir, now = new Date()) {
       { type: 'task', description: '환불 API 스펙 요청하기', due: day(3) },
       { type: 'task', description: '실패 사유 문구 3종 초안 쓰기' },
       { type: 'decision', description: '영수증은 결제 완료 화면 하단 고정 버튼으로 제공' },
-      { type: 'check', description: '나래에게 디자인 일정 회신 받기' },
+      { type: 'check', description: '테스터B에게 디자인 일정 회신 받기' },
       { type: 'task', description: 'QA 범위 문서에 정산 화면 추가' },
     ],
   }] }, null, 2)}\n`);
@@ -104,13 +104,18 @@ function seedData(dataDir, now = new Date()) {
 function build(port, now = new Date()) {
   const { prepareFixture } = require('./browser-fixture');
   const { root, env } = prepareFixture({ slack: 'token' });
-  fs.writeFileSync(path.join(root, MARK), `${JSON.stringify({ port, pid: process.pid })}\n`);
-  const config = JSON.parse(fs.readFileSync(env.WORKSPACE_CONFIG, 'utf8'));
-  config.title = TITLE;
-  config.integrations = { ...(config.integrations || {}), calendar: true, tiro: true, jira: false };
-  config.calendar = { ...(config.calendar || {}), source: 'claude' };
-  fs.writeFileSync(env.WORKSPACE_CONFIG, `${JSON.stringify(config, null, 2)}\n`);
-  seedData(env.WORKSPACE_DATA_DIR, now);
+  try {
+    fs.writeFileSync(path.join(root, MARK), `${JSON.stringify({ port, pid: process.pid })}\n`);
+    const config = JSON.parse(fs.readFileSync(env.WORKSPACE_CONFIG, 'utf8'));
+    config.title = TITLE;
+    config.integrations = { ...(config.integrations || {}), calendar: true, tiro: true, jira: false };
+    config.calendar = { ...(config.calendar || {}), source: 'claude' };
+    fs.writeFileSync(env.WORKSPACE_CONFIG, `${JSON.stringify(config, null, 2)}\n`);
+    seedData(env.WORKSPACE_DATA_DIR, now);
+  } catch (error) {
+    fs.rmSync(root, { recursive: true, force: true });   // 심다 만 폴더는 남기지 않는다
+    throw error;
+  }
   return { root, env };
 }
 
@@ -121,13 +126,22 @@ function resetInPlace(current, port, now = new Date()) {
   let before = null;
   try { before = fs.readFileSync(configPath, 'utf8'); } catch { /* 지워졌으면 달라진 것 */ }
   const fresh = build(port, now);
-  const freshConfig = fresh.env.WORKSPACE_CONFIG;
-  fs.writeFileSync(freshConfig, fs.readFileSync(freshConfig, 'utf8').split(fresh.root).join(current.root));
-  for (const name of PARTS) {
-    fs.rmSync(path.join(current.root, name), { recursive: true, force: true });
-    fs.renameSync(path.join(fresh.root, name), path.join(current.root, name));
+  // 새 폴더는 성공하든 실패하든 치운다. 바꿔 끼우기를 시작한 뒤에 실패하면 지금 폴더가 반쪽이라는 표시(`partial`)를 달아 던진다.
+  let swapping = false;
+  try {
+    const freshConfig = fresh.env.WORKSPACE_CONFIG;
+    fs.writeFileSync(freshConfig, fs.readFileSync(freshConfig, 'utf8').split(fresh.root).join(current.root));
+    swapping = true;
+    for (const name of PARTS) {
+      fs.rmSync(path.join(current.root, name), { recursive: true, force: true });
+      fs.renameSync(path.join(fresh.root, name), path.join(current.root, name));
+    }
+  } catch (error) {
+    error.partial = swapping;
+    throw error;
+  } finally {
+    fs.rmSync(fresh.root, { recursive: true, force: true });
   }
-  fs.rmSync(fresh.root, { recursive: true, force: true });
   return before !== fs.readFileSync(configPath, 'utf8');
 }
 
@@ -154,6 +168,8 @@ function tryoutAllowed(req, port) {
   if (!LOOPBACK.includes((req.socket || {}).remoteAddress)) return false;
   if (![`localhost:${port}`, `127.0.0.1:${port}`].includes(host)) return false;
   if (req.method !== 'POST') return true;
+  // 출처 표시(Origin·Sec-Fetch-Site)가 둘 다 없는 POST는 받는다 — 브라우저는 폼 POST에 늘 붙이므로 없는 것은 이 맥의 curl류뿐이고,
+  // 하는 일도 가짜 데이터를 처음으로 돌리는 것뿐이다.
   if (headers.origin && headers.origin !== `http://${host}`) return false;
   if (headers['sec-fetch-site'] && headers['sec-fetch-site'] !== 'same-origin') return false;
   return true;
@@ -187,10 +203,35 @@ function blockOutbound() {
   };
 }
 
+// 처음 상태로 돌리기와 날짜 바뀜 확인을 한 묶음으로 — 시계(`now`)와 끝내기(`exit`)는 시험이 끼운다.
+// `reset()`은 "다시 켜져야 한다"(설정까지 바뀌어 있었고 launchd가 다시 띄워 주는 자리)를 돌려준다.
+// 바꿔 끼우다 실패해 폴더가 반쪽이면 어디서 띄웠든 스스로 끝낸다(자기 자신만) — 반쪽 데이터로 계속 돌지 않게.
+function createKeeper({ current, port, keepAlive = false, now = () => new Date(), exit = code => process.exit(code) }) {
+  let seededDay = dayFrom(now());
+  const reset = () => {
+    let changed = false;
+    try { changed = resetInPlace(current, typeof port === 'function' ? port() : port, now()); } catch (error) {
+      if (error.partial) { console.error('처음 상태로 돌리다 멈춰서 써 보기 서버를 끝내요:', error.message); exit(1); }
+      throw error;
+    }
+    seededDay = dayFrom(now());
+    return changed && keepAlive;
+  };
+  // 맥이 계속 켜져 있으면 "오늘" 데이터가 어제 것이 된다 — 날짜가 바뀌었으면 처음 상태로 돌린다(1분마다 부른다).
+  const tick = () => {
+    if (dayFrom(now()) === seededDay) return false;
+    try { if (reset()) exit(0); } catch (error) { console.error('날짜가 바뀌어 처음 상태로 돌리려다 실패했어요(1분 뒤 다시):', error.message); }
+    return true;
+  };
+  return { reset, tick };
+}
+
 function main() {
-  const port = Number(process.env.TRYOUT_PORT || DEFAULT_PORT);
+  // `TRYOUT_PORT=0`은 시험용이다 — 빈 포트를 운영체제가 골라 주고(임시 포트 범위), 뜬 뒤에 그 포트로 판단한다.
+  let port = Number(process.env.TRYOUT_PORT || DEFAULT_PORT);
   // 4321~4331은 운영 앱과 슬랙 연결이 쓰는 자리다 — 그 포트에서는 `슬랙 연결` 버튼이 살아나므로 열지 않는다.
-  if (!Number.isInteger(port) || port < 1024 || port > 65535 || require('./slack-oauth').portAllowed(port)) {
+  const refused = value => !Number.isInteger(value) || value < 1024 || value > 65535 || require('./slack-oauth').portAllowed(value);
+  if (port !== 0 && refused(port)) {
     console.error(`써 보기 서버는 ${port} 포트에서 열지 않아요 — 4321~4331(운영 앱·슬랙 연결 자리) 밖의 포트를 골라 주세요.`);
     process.exit(1);
   }
@@ -200,10 +241,8 @@ function main() {
   const current = build(port);
   process.on('exit', () => { try { fs.rmSync(current.root, { recursive: true, force: true }); } catch { /* 다음 시작 때 치운다 */ } });
   Object.assign(process.env, current.env, { WORKSPACE_NO_SLACK_REFRESH: '1' });
-  let seededDay = dayFrom(new Date());
-  // launchd가 다시 띄워 주는 자리(tryout.sh가 넘긴다)에서만 스스로 끝난다 — 손으로 띄운 서버는 그대로 둔다.
-  const keepAlive = process.env.TRYOUT_KEEPALIVE === '1';
-  const reset = () => { const changed = resetInPlace(current, port); seededDay = dayFrom(new Date()); return changed && keepAlive; };
+  // 설정까지 바뀌었을 때는 launchd가 다시 띄워 주는 자리(tryout.sh가 넘긴다)에서만 스스로 끝난다 — 손으로 띄운 서버는 그대로 둔다.
+  const { reset, tick } = createKeeper({ current, port: () => port, keepAlive: process.env.TRYOUT_KEEPALIVE === '1' });
 
   const { server } = require('./server');   // 실제 설치 위치를 가리키면 여기서 안전망이 끝낸다
   const [app] = server.listeners('request');
@@ -234,18 +273,19 @@ function main() {
     process.exit(1);
   });
   server.listen(port, '127.0.0.1', () => {
+    if (port === 0) {
+      port = server.address().port;
+      if (refused(port)) { console.error(`써 보기 서버는 ${port} 포트에서 열지 않아요.`); process.exit(1); }
+      fs.writeFileSync(path.join(current.root, MARK), `${JSON.stringify({ port, pid: process.pid })}\n`);
+    }
     sweepStale(current.root, port);
     console.log(`써 보기 서버: http://localhost:${port} (처음 상태로: http://localhost:${port}/__tryout)`);
   });
-  // 맥이 계속 켜져 있으면 "오늘" 데이터가 어제 것이 된다 — 날짜가 바뀌면 스스로 처음 상태로 돌린다.
-  setInterval(() => {
-    if (dayFrom(new Date()) === seededDay) return;
-    try { if (reset()) process.exit(0); } catch (error) { console.error('날짜가 바뀌어 처음 상태로 돌리려다 실패했어요:', error.message); if (keepAlive) process.exit(1); }
-  }, 60 * 1000).unref();
+  setInterval(tick, 60 * 1000).unref();
   const stop = () => { if (server.closeAllConnections) server.closeAllConnections(); server.close(() => process.exit(0)); };
   process.on('SIGINT', stop); process.on('SIGTERM', stop);
 }
 
 if (require.main === module) main();
 
-module.exports = { seedData, meetingTimes, resetInPlace, build, sweepStale, tryoutAllowed, DEFAULT_PORT, TITLE, MARK };
+module.exports = { seedData, meetingTimes, resetInPlace, build, sweepStale, tryoutAllowed, createKeeper, DEFAULT_PORT, TITLE, MARK };
