@@ -15933,8 +15933,8 @@ test('모션 토큰: 시간 5개·곡선 3개가 :root에 있고, 스프링은 l
   const supports = css.slice(css.indexOf('@supports (animation-timing-function: linear(0, 1))'), css.indexOf('@keyframes d-fade'));
   assert.match(supports, /--spring-1: linear\(0, 0\.42 12%, 0\.75 25%, 0\.94 38%, 1\.03 50%, 1\.046 58%, 1\.035 70%, 1\.015 85%, 1\);/);
   assert.match(supports, /--spring-2: linear\(0, 0\.45 12%, 0\.82 25%, 1\.06 38%, 1\.18 48%, 1\.205 55%, 1\.17 65%, 1\.09 78%, 1\.03 90%, 1\);/);
-  const literal = css.split('\n').filter(line => /(transition|animation)[^;]*\b(100|140|200|320)ms/.test(line));
-  assert.deepEqual(literal, [], '100·140·200·320ms는 토큰으로 쓴다');
+  const literal = css.split('\n').filter(line => /(transition|animation)[^;]*\b(100|140|170|200|320)ms/.test(line));
+  assert.deepEqual(literal, [], '100·140·170·200·320ms는 토큰으로 쓴다');
 });
 
 test('모션 토큰: 움직임 줄이기 — 전역은 .01ms(이동 끔) 그대로, 나타나는 것(알림·메뉴·판·팔레트·회의 새 줄)만 120ms 흐려짐', () => {
@@ -15972,14 +15972,10 @@ const motionRawTimes = value => value.replace(/var\(--[\w-]+\)/g, '').match(/(?<
 const MOTION_RAW_ALLOWED = [
   ['ui.css', '.pull-indicator.snapping', 'transition', '260ms 260ms', 'E', '당겨서 새로고침 — 기다림 부품에서 정한다'],
   ['ui.css', '.pull-indicator.refreshing', 'animation', '700ms', 'E', '당겨서 새로고침 — 기다림 부품에서 정한다'],
-  ['ui.css', '.d-btn', 'transition', '170ms 170ms 120ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-iconbtn', 'transition', '170ms 170ms 400ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-seg button', 'transition', '170ms 170ms 120ms', 'A', '토큰으로 옮길 값'],
+  ['ui.css', '.d-iconbtn', 'transition', '400ms', 'E', '새로고침 아이콘 한 바퀴 400ms — 기다림 부품에서 정한다(색·누름은 토큰)'],
   ['ui.css', '*, *::before, *::after', 'transition-duration', '0.01ms', '남김', '움직임 줄이기 전역 값(.01ms로 끄고 나타남만 120ms) — 토큰과 뜻이 다르다'],
   ['ui.css', '*, *::before, *::after', 'animation-duration', '0.01ms', '남김', '움직임 줄이기 전역 값(.01ms로 끄고 나타남만 120ms) — 토큰과 뜻이 다르다'],
   ['ui.css', '.d-toast, .d-menulist, .d-schedpop:not(.is-out), .d-palbox, .d-mrow2.is-new', 'animation', '120ms', '남김', '움직임 줄이기 전역 값(.01ms로 끄고 나타남만 120ms) — 토큰과 뜻이 다르다'],
-  ['ui.css', '.d-tab', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-srch', 'transition', '170ms 170ms', 'A', '토큰으로 옮길 값'],
   ['ui.css', '.d-menulist', 'animation', '120ms', 'B', '메뉴 등장 — 뜨는 것 부품으로 바뀐다'],
   ['ui.css', '.d-schedpop', 'animation', '240ms 70ms', 'B', '쫀득 키프레임 값 — 스프링 토큰과 어느 쪽을 표준으로 할지 묶음 B에서 정한다'],
   ['ui.css', '.d-schedpop .d-mitem', 'animation', '180ms', 'B', '쫀득 키프레임 값 — 스프링 토큰과 어느 쪽을 표준으로 할지 묶음 B에서 정한다'],
@@ -15990,68 +15986,15 @@ const MOTION_RAW_ALLOWED = [
   ['ui.css', '.d-schedproj .d-gpick', 'animation', '160ms', 'B', '쫀득 키프레임 값 — 스프링 토큰과 어느 쪽을 표준으로 할지 묶음 B에서 정한다'],
   ['ui.css', '.d-ibrow.is-leaving', 'animation', '220ms', 'B', '쫀득 키프레임 값 — 스프링 토큰과 어느 쪽을 표준으로 할지 묶음 B에서 정한다'],
   ['ui.css', '.d-row.is-rise', 'animation', '260ms 1400ms', 'B', '쫀득 키프레임 값 — 스프링 토큰과 어느 쪽을 표준으로 할지 묶음 B에서 정한다'],
-  ['ui.css', '.d-mtext, .d-msel', 'transition', '170ms 170ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-dateinput', 'transition', '170ms 170ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-qa', 'transition', '170ms 170ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-wrow .ac, .d-mrow .ac', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-mrow .ct, .d-wrow .mt', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-atrow', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-atrow .mt', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-atacts', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-guide', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-ibrow', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-qaf', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-grp.tog .d-i', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-addrow', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-row', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-cb', 'transition', '120ms 120ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-pri', 'transition', '120ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-wcb', 'transition', '120ms 120ms', 'A', '토큰으로 옮길 값'],
   ['ui.css', '.d-row.is-completing .d-title', 'animation', '520ms', 'C', '완료 줄 긋기 520ms — 완료 흐름과 함께 줄인다'],
-  ['ui.css', '.d-acts', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-dpick', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-fields .badge.is-plain', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-din', 'transition', '170ms 170ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-dpull', 'transition', '130ms 170ms 170ms', 'A', '토큰으로 옮길 값'],
   ['ui.css', '.d-mrow2.is-opening .ed', 'animation', '220ms', 'D', '초안 펼침 220ms — 펼침 부품의 본보기, 값은 D에서'],
-  ['ui.css', '.d-dtxt', 'transition', '170ms 170ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-tpk', 'transition', '130ms 130ms 120ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-qin', 'transition', '170ms 170ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-dadd > summary .d-i', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
   ['ui.css', '.d-drawer', 'transition', '160ms 160ms', 'D', '서랍 160ms — 펼침 부품에서 값이 바뀐다'],
   ['ui.css', '.page', 'transition', '160ms', 'D', '서랍 160ms — 펼침 부품에서 값이 바뀐다'],
   ['ui.css', '.is-flash', 'animation', '1.6s', 'F', '밝히기 — 부품 하나로 합친다'],
-  ['ui.css', '.d-prow', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-plink', 'transition', '170ms 170ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-jwho', 'transition', '170ms 170ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-jira .foot .d-jexp .d-i', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-jfold .d-i', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-jlink .pk', 'transition', '170ms 170ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-plist .d-rhd .d-pnewgo', 'transition', '170ms 170ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-prow2', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-prow2 .ac', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-rec', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-mtrow', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '.d-recsearch', 'transition', '170ms 170ms', 'A', '토큰으로 옮길 값'],
-  ['ui.css', '#settingsDialog .d-mhd', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
   ['ui.css', '.d-abprog .now .ic', 'animation', '1s', 'E', '도는·숨 쉬는 표시 — 기다림 부품에서 정한다'],
   ['ui.css', '.d-istat.k-soon .dot', 'animation', '2.4s', 'E', '도는·숨 쉬는 표시 — 기다림 부품에서 정한다'],
   ['ui.css', '.d-intg', 'transition', '400ms', 'F', '밝히기 — 부품 하나로 합친다'],
-  ['ui.css', '.d-imore > summary::before', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
   ['ui.css', '.d-faq .q.is-hit', 'transition', '400ms 400ms', 'F', '밝히기 — 부품 하나로 합친다'],
-  ['report-ui.css', '.rp-wk', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
-  ['report-ui.css', '.rp-rename', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
-  ['report-ui.css', '.rp-grp .rp-s.is-add', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
-  ['report-ui.css', '.rp-s .rp-foldtoggle .d-i', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
-  ['report-ui.css', '.rp-s .rp-aim', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
-  ['report-ui.css', '.rp-s .ac', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
-  ['report-ui.css', '.rp-add', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
-  ['report-ui.css', '.rp-pjadd', 'transition', '130ms 130ms', 'A', '토큰으로 옮길 값'],
-  ['report-ui.css', '.rp-cand', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
-  ['report-ui.css', '.rp-rec', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
-  ['report-ui.css', '.rp-fl .d-i', 'transition', '130ms', 'A', '토큰으로 옮길 값'],
-  ['usage-ui.css', '.d-uwmore', 'transition', '170ms', 'A', '토큰으로 옮길 값'],
-  ['checkin-ui.css', '.d-ckopt span', 'transition', '170ms 170ms', 'A', '토큰으로 옮길 값'],
   ['checkin-ui.css', '.d-ckdlg[open]', 'animation', '0.22s', 'B', '체크인 창 등장 — 창 부품으로 바뀐다'],
 ];
 
@@ -16064,7 +16007,7 @@ test('모션 장치: 맨 시간 값 금지 — CSS 네 파일의 transition·ani
   const allowed = MOTION_RAW_ALLOWED.map(([file, selector, prop, times]) => key(file, selector, prop, times));
   MOTION_RAW_ALLOWED.forEach((row) => {
     assert.equal(row.length, 6, `허용 목록 한 줄은 여섯 칸이다: ${row[1]}`);
-    assert.match(row[4], /^(A|B|C|D|E|F|남김)$/, `없앨 묶음: ${row[1]}`);
+    assert.match(row[4], /^(B|C|D|E|F|남김)$/, `없앨 묶음: ${row[1]}`);
     assert.ok(row[5].length >= 8, `남긴 이유를 적는다: ${row[1]}`);
   });
   const left = allowed.slice();
@@ -16081,6 +16024,67 @@ test('모션 장치: 맨 시간 값 찾기 — 토큰은 지나치고 숫자 시
   assert.deepEqual(motionRawTimes('d-ck-rise 0.22s ease-out'), ['0.22s']);
   assert.deepEqual(motionRawTimes('calc(var(--i, 0) * 18ms + 30ms)'), ['18ms', '30ms']);
   assert.deepEqual(motionRawTimes('none'), []);
+});
+
+// ---- 모션 묶음 A: 누름 규칙 하나 · 체크 표시 하나 ----
+test('누름: 공용 규칙 하나 — 모든 버튼·체크박스가 .97 / --t-press로 눌리고, 크기를 바꾸는 :active는 다른 곳에 없다', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /\nbutton \{ transition: background-color var\(--t-tint\) var\(--ease\), color var\(--t-tint\) var\(--ease\), scale var\(--t-press\) var\(--ease\); \}\nbutton:active, \.d-cb:active, \.d-wcb:active \{ scale: 0\.97; \}/);
+  // 크기를 바꾸는 :active — 공용 규칙과 체크인 칩(같은 값) 말고는 전부 "끄기"(none)다.
+  const sizing = [];
+  MOTION_CSS_FILES.forEach((file) => {
+    const text = fs.readFileSync(path.join(__dirname, file), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    for (const [, selector, body] of text.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      if (!selector.includes(':active')) continue;
+      const size = body.match(/(?:^|[;\s])(scale|transform):\s*([^;]+);/);
+      if (size && !/^none( !important)?$/.test(size[2].trim())) sizing.push(`${file} ${selector.trim().replace(/\s+/g, ' ')} { ${size[1]}: ${size[2].trim()} }`);
+    }
+  });
+  assert.deepEqual(sizing, [
+    'ui.css button:active, .d-cb:active, .d-wcb:active { scale: 0.97 }',
+    'checkin-ui.css .d-ckopt:active span { scale: 0.97 }',
+  ]);
+});
+
+test('누름: transition을 따로 적은 버튼 부품도 누름 전환을 함께 적는다(따로 적으면 공용 줄을 덮는다), 누름은 transform이 아니라 scale', () => {
+  const decls = MOTION_CSS_FILES.flatMap(file => motionDecls(file)).filter(d => d.prop === 'transition');
+  const press = 'scale var(--t-press) var(--ease)';
+  ['.d-btn', '.d-iconbtn', '.d-seg button', '.d-cb, .d-wcb', '.d-dpull', '.d-tpk', '.d-jwho', '.d-plist .d-rhd .d-pnewgo', '.rp-pjadd', '.d-mtext, .d-msel', '.d-ckopt span'].forEach((selector) => {
+    const own = decls.filter(d => d.selector === selector);
+    assert.equal(own.length, 1, `전환 선언이 하나다: ${selector}`);
+    assert.ok(own[0].value.endsWith(press), `누름 전환이 있다: ${selector}`);
+  });
+  assert.deepEqual(decls.filter(d => /transform var\(--t-press\)/.test(d.value)).map(d => d.selector), [], '누름에 transform을 쓰지 않는다(회전·체크 커짐과 섞인다)');
+});
+
+test('누름: 뺀 것 — 글자 탭·링크·제목, 메뉴 항목, 줄 전체가 버튼인 것, 꺼진 버튼은 줄어들지 않고, 메뉴 항목은 색도 바로 바뀐다', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  const start = css.indexOf('.d-tab:active, .d-srch:active, .d-link:active,');
+  const off = css.slice(start, css.indexOf('}', start) + 1);
+  ['.d-tab', '.d-link', '.wf-link', '.d-title', '.d-mitem', '.d-gpopt', '.d-grp.tog', '.d-prow', '.rp-wk', '.d-uwmore', 'button:disabled', '.d-cb:disabled', '.d-wcb:disabled'].forEach((selector) => {
+    assert.ok(off.includes(`${selector}:active`), `뺀 목록에 있다: ${selector}`);
+  });
+  assert.match(off, /\{ scale: none; \}$/);
+  assert.ok(css.indexOf('button:active, .d-cb:active, .d-wcb:active { scale: 0.97; }') < start, '공용 규칙 뒤에 온다');
+  assert.match(css, /\n\.d-mitem, \.d-mpickbtn, \.jira-pick, \.d-gpopt, \.d-pres \{ transition: none; \}/);
+});
+
+test('누름: 움직임 줄이기 — 크기 변화는 끄고 색은 그대로 바뀐다', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  const block = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce) {\n  *, *::before'), css.indexOf('/* ---------- 헤더'));
+  assert.match(block, /button:active, \.d-cb:active, \.d-wcb:active \{ scale: none !important; \}/);
+  const checkin = fs.readFileSync(path.join(__dirname, 'checkin-ui.css'), 'utf8');
+  assert.match(checkin, /@media \(prefers-reduced-motion: reduce\) \{ \.d-ckopt:active span \{ scale: none; \} \}/);
+});
+
+test('체크 표시 하나: 업무 체크(.d-cb)와 레일 체크(.d-wcb)가 색 전환·가리킴·켜짐·커졌다 돌아오기를 한 규칙으로 같이 쓴다', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /\.d-cb, \.d-wcb \{ transition: border-color var\(--t-press\) var\(--ease\), background var\(--t-press\) var\(--ease\), scale var\(--t-press\) var\(--ease\); \}/);
+  assert.match(css, /\.d-cb:hover, \.d-wcb:hover \{ border-color: var\(--accent\); \}/);
+  assert.match(css, /\.d-cb:checked, \.d-wcb:checked \{ background: var\(--accent\); border-color: var\(--accent\); \}/);
+  assert.match(css, /\.d-cb:checked, \.d-wcb:checked \{ animation: d-pop-check var\(--t-slow\) var\(--ease\); \}/);
+  assert.match(css, /\.d-cb:checked, \.d-wcb:checked, \.d-row\.is-completing \.d-title \{ animation: none; \}/, '움직임 줄이기');
+  assert.doesNotMatch(css, /\n\.d-wcb:(hover|checked) \{/, '레일 체크만의 색 규칙은 없다');
 });
 
 // 지도 문서(docs/지도/모션.md)의 표 한 장을 칸으로 읽는다 — 머리 줄의 첫 칸 이름으로 표를 찾는다.

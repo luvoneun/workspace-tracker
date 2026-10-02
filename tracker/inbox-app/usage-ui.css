@@ -95,7 +95,7 @@
   width: 100%; min-height: 40px; padding: 0 12px; border: 0; border-top: 1px solid var(--border);
   border-radius: 0 0 var(--r-sm) var(--r-sm); background: transparent; cursor: pointer;
   font-family: inherit; font-size: var(--fs-sm); font-weight: 600; color: var(--text); text-align: left;
-  transition: background 170ms var(--ease);
+  transition: background var(--t-tint) var(--ease);
 }
 .d-uwmore::after { content: '›'; content: '›' / ''; font-size: var(--fs-lg); font-weight: 400; line-height: 1; color: var(--dim); }
 .d-uwmore:hover { background: var(--hover); }

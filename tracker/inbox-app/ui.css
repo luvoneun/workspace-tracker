@@ -213,8 +213,12 @@ body {
 }
 /* `hidden` 속성이 붙으면 어떤 display 규칙보다 먼저 사라진다 */
 [hidden] { display: none !important; }
-/* 새 부품은 저마다 :active를 가지고 있고, 이건 그 밖의 맨 button(지라·그룹 배지, 아이콘 버튼)용이다 */
-button:active { transform: scale(.98); }
+/* ---------- 누름·색 (공용 — 세기 1, 넘침 없음) ----------
+   모든 버튼과 체크박스는 같은 누름을 갖는다: 누르는 동안 .97, --t-press. 가리킴·고름의 색은 --t-tint로 바뀐다.
+   transform이 아니라 scale을 쓴다 — 아이콘 회전(.d-iconbtn.spinning)·체크 커짐 같은 transform과 섞이지 않는다.
+   버튼에 transition을 따로 적으면 이 줄을 덮으므로 거기에도 `scale var(--t-press) var(--ease)`를 함께 적는다. */
+button { transition: background-color var(--t-tint) var(--ease), color var(--t-tint) var(--ease), scale var(--t-press) var(--ease); }
+button:active, .d-cb:active, .d-wcb:active { scale: 0.97; }
 
 /* ---------- 탭 바깥 틀 (오늘·프로젝트 탭이 쓰는 두 칸 격자) ---------- */
 .grid { display: grid; gap: 20px; align-items: start; }
@@ -298,10 +302,9 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   background: var(--neutral-bg); color: var(--muted);
   font-family: inherit; font-size: 13.5px; font-weight: 600; white-space: nowrap;
   cursor: pointer;
-  transition: background 170ms var(--ease), color 170ms var(--ease), transform 120ms var(--ease);
+  transition: background var(--t-tint) var(--ease), color var(--t-tint) var(--ease), scale var(--t-press) var(--ease);
 }
 .d-btn:hover { background: var(--hover); color: var(--text); }
-.d-btn:active { transform: scale(0.98); }
 .d-btn:disabled { color: var(--dim); cursor: default; }
 .d-btn:disabled:hover { background: var(--neutral-bg); color: var(--dim); }
 .d-btn.sm { height: var(--h-md); padding: 0 12px; font-size: var(--fs-sm); }
@@ -341,7 +344,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   width: 34px; height: 34px; display: grid; place-items: center; flex: none;
   border: 0; border-radius: 50%; background: none; color: var(--muted);
   cursor: pointer; padding: 0;
-  transition: background 170ms var(--ease), color 170ms var(--ease), transform 400ms var(--ease);
+  transition: background var(--t-tint) var(--ease), color var(--t-tint) var(--ease), transform 400ms var(--ease), scale var(--t-press) var(--ease);
 }
 .d-iconbtn:hover { background: var(--hover); color: var(--text); }
 .d-iconbtn.sm { width: 32px; height: var(--h-md); }
@@ -353,16 +356,23 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 .d-seg button {
   height: var(--h-md); padding: 0 14px; border: 0; border-radius: 9px; background: none;
   font-family: inherit; font-size: 13.5px; font-weight: 600; color: var(--muted); cursor: pointer;
-  transition: background 170ms var(--ease), color 170ms var(--ease), transform 120ms var(--ease);
+  transition: background var(--t-tint) var(--ease), color var(--t-tint) var(--ease), scale var(--t-press) var(--ease);
 }
 .d-seg button:hover { color: var(--text); }
-.d-seg button:active { transform: scale(0.98); }
 /* 보기 전환은 aria-pressed, 값을 고르는 세그먼트(종류·시점)는 aria-checked를 쓴다 — 모양은 같다 */
 .d-seg button[aria-pressed="true"], .d-seg button[aria-checked="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
 .d-seg[hidden] { display: none; }
 
-/* 옛 화면에 남아 있는 `button:active { transform: scale(.98) }`가 새 부품에는 걸리지 않게 한다 */
-.d-tab:active, .d-srch:active, .d-link:active { transform: none; }
+/* 누름에서 뺀 것 — 줄어들면 어색한 것은 색으로만 답한다(docs/지도/모션.md "누름에서 뺀 것").
+   글자 탭·글자 링크·글자 제목(글자가 흔들린다) / 메뉴·고르개 항목(키보드 연타) / 줄 전체가 버튼인 것(줄이 줄면 목록이 흔들린다) */
+.d-tab:active, .d-srch:active, .d-link:active, .wf-link:active, .rp-rename:active,
+.d-title:active, .d-mrow .ti:active, .d-wrow .ti:active, .d-mrow2 .ti:active, .d-prow2 .ti:active, .d-rec .ti:active, .rp-rec .ti:active,
+.d-mitem:active, .d-mpickbtn:active, .jira-pick:active, .d-gpopt:active, .d-pres:active, .d-dpick:active, .rp-pick:active, .rp-ev .ev:active,
+.d-grp.tog:active, .d-guide:active, .d-prow:active, .d-plink:active, .d-mtrow:active, .d-jfold:active, .d-jlink .pk:active,
+.rp-wk:active, .rp-fl:active, .rp-gp:active, .d-uwmore:active,
+button:disabled:active, .d-cb:disabled:active, .d-wcb:disabled:active { scale: none; }
+/* 메뉴·고르개 항목은 화살표로 연달아 옮겨 다닌다 — 색도 바로 바뀐다(세기 0) */
+.d-mitem, .d-mpickbtn, .jira-pick, .d-gpopt, .d-pres { transition: none; }
 
 /* ---------- 포커스 ---------- */
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-xs); }
@@ -395,6 +405,8 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   .d-toast, .d-menulist, .d-schedpop:not(.is-out), .d-palbox, .d-mrow2.is-new {
     animation: d-fade 120ms linear both !important;
   }
+  /* 누름의 크기 변화도 끈다 — 색은 그대로 바뀐다 */
+  button:active, .d-cb:active, .d-wcb:active { scale: none !important; }
 }
 
 /* ---------- 헤더 (60px 흰 띠) ---------- */
@@ -419,7 +431,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 .d-tab {
   position: relative; padding: 0 12px; border: 0; background: none; cursor: pointer;
   font-family: inherit; font-size: var(--fs-md); font-weight: 500; color: var(--muted); white-space: nowrap;
-  transition: color 130ms var(--ease);
+  transition: color var(--t-fast) var(--ease);
 }
 .d-tab:hover { color: var(--text); }
 /* 켜진 탭은 굵은 글자 + 파란 밑줄(칩으로 만들지 않는다 — 머리줄에 이미 컨트롤이 있다) */
@@ -439,7 +451,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   border: 0; border-radius: 999px;
   background: var(--field); color: var(--muted);
   font-family: inherit; font-size: 13.5px; cursor: pointer;
-  transition: color 170ms var(--ease), background 170ms var(--ease);
+  transition: color var(--t-tint) var(--ease), background var(--t-tint) var(--ease);
 }
 .d-srch:hover { color: var(--text); background: var(--hover); }
 .d-srch kbd { font: inherit; font-size: var(--fs-cap); font-weight: 500; color: var(--dim); letter-spacing: 0.02em; }
@@ -603,7 +615,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   border: 0; border-radius: var(--r-sm);
   background: var(--field); color: var(--text);
   font-family: inherit; font-size: var(--fs-sm);
-  transition: box-shadow 170ms var(--ease), background 170ms var(--ease);
+  transition: box-shadow var(--t-tint) var(--ease), background var(--t-tint) var(--ease), scale var(--t-press) var(--ease);
 }
 .d-mtext { width: 124px; }
 .d-msel { max-width: 152px; padding: 0 6px; }
@@ -650,7 +662,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   border: 0; border-radius: var(--r-sm);
   background: var(--field); color: var(--text);
   font-family: inherit; font-size: var(--fs-sm);
-  transition: box-shadow 170ms var(--ease), background 170ms var(--ease);
+  transition: box-shadow var(--t-tint) var(--ease), background var(--t-tint) var(--ease);
 }
 .d-dateinput:focus { outline: none; background: var(--surface); box-shadow: 0 0 0 2px var(--accent); }
 
@@ -714,7 +726,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   display: block; width: 100%; height: 40px; margin: 4px 0 2px; padding: 0 16px;
   border: 0; border-radius: 999px;
   background: var(--field); color: var(--text); font-family: inherit; font-size: 13.5px;
-  transition: box-shadow 170ms var(--ease), background 170ms var(--ease);
+  transition: box-shadow var(--t-tint) var(--ease), background var(--t-tint) var(--ease);
 }
 .d-qa::placeholder { color: var(--dim); }
 .d-qa:focus { outline: none; background: var(--surface); box-shadow: 0 0 0 2px var(--accent); }
@@ -723,6 +735,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 .d-mrow {
   position: relative; display: grid; grid-template-columns: 44px minmax(0, 1fr) auto;
   align-items: start; gap: 8px; height: auto; min-height: var(--h-touch); padding: 9px 10px; border-radius: 12px;
+  transition: background var(--t-tint) var(--ease);
 }
 .d-mrow:hover, .d-mrow:focus-within, .d-wrow:hover, .d-wrow:focus-within { background: var(--rail-hover); }
 .d-mrow.is-sel, .d-wrow.is-sel { background: var(--sel); }
@@ -751,6 +764,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto;
   grid-template-areas: "ti mt" "sub sub";
   align-items: center; gap: 2px 8px; min-height: var(--h-touch); padding: 9px 10px; border-radius: 12px;
+  transition: background var(--t-tint) var(--ease);
 }
 .d-wrow.has-ck { grid-template-columns: 20px minmax(0, 1fr) auto; grid-template-areas: "ck ti mt" "ck sub sub"; }
 .d-wrow .ck { grid-area: ck; display: grid; place-items: center; }
@@ -793,11 +807,11 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
   display: flex; align-items: center; padding-left: 16px;
   background: linear-gradient(90deg, transparent 0, var(--rail-hover) 16px);
-  opacity: 0; pointer-events: none; transition: opacity 130ms var(--ease);
+  opacity: 0; pointer-events: none; transition: opacity var(--t-fast) var(--ease);
 }
 .d-wrow:hover .ac, .d-wrow:focus-within .ac, .d-mrow:hover .ac, .d-mrow:focus-within .ac { opacity: 1; pointer-events: auto; }
 /* 더보기가 나타나는 자리에 있던 조용한 정보는 같은 속도로 물러난다 — 글자가 반쯤 잘려 보이지 않게 */
-.d-mrow .ct, .d-wrow .mt { transition: opacity 130ms var(--ease); }
+.d-mrow .ct, .d-wrow .mt { transition: opacity var(--t-fast) var(--ease); }
 .d-mrow:has(.ac):hover .ct, .d-mrow:has(.ac):focus-within .ct,
 .d-wrow:has(.ac):hover .mt, .d-wrow:has(.ac):focus-within .mt { opacity: 0; }
 .d-wrow.is-sel .ac, .d-mrow.is-sel .ac { background: linear-gradient(90deg, transparent 0, var(--sel) 16px); opacity: 1; pointer-events: auto; }
@@ -898,7 +912,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   align-items: center; column-gap: 8px; row-gap: 2px;
   min-height: var(--row); padding: 8px 10px 8px var(--pad);
   border-radius: 14px; --rowbg: var(--warm);
-  transition: background 170ms var(--ease);
+  transition: background var(--t-tint) var(--ease);
 }
 .d-atrow:hover, .d-atrow:focus-within { background: var(--warm-hover); --rowbg: var(--warm-hover); }
 .d-atrow .ld { grid-area: ld; display: flex; align-items: center; gap: 8px; }
@@ -911,7 +925,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 }
 .d-atrow .mt {
   grid-area: mt; display: flex; align-items: center; gap: 8px; justify-self: end;
-  transition: opacity 130ms var(--ease);
+  transition: opacity var(--t-fast) var(--ease);
 }
 .d-atrow .wh { font-size: 12.5px; color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* `나를 불렀어요`는 바탕을 채우지 않는다 — 급한 말 셋만 배지다 */
@@ -925,7 +939,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   display: flex; align-items: center; justify-content: flex-end; gap: 6px;
   padding-left: 24px; background: linear-gradient(90deg, transparent 0, var(--rowbg) 24px);
   border-radius: 0 13px 13px 0;
-  opacity: 0; pointer-events: none; transition: opacity 130ms var(--ease);
+  opacity: 0; pointer-events: none; transition: opacity var(--t-fast) var(--ease);
 }
 .d-atrow:hover .d-atacts, .d-atrow:focus-within .d-atacts { opacity: 1; pointer-events: auto; }
 .d-atrow:hover .mt, .d-atrow:focus-within .mt { opacity: 0; }
@@ -958,7 +972,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 .d-guide {
   display: flex; gap: 12px; align-items: flex-start; width: 100%; min-height: var(--h-touch); padding: 10px var(--pad);
   border: 0; border-radius: 14px; background: none; text-align: left; font: inherit; color: inherit;
-  transition: background 170ms var(--ease);
+  transition: background var(--t-tint) var(--ease);
 }
 button.d-guide { cursor: pointer; }
 button.d-guide:hover { background: var(--warm-hover); }
@@ -1007,7 +1021,7 @@ button.d-guide .t { color: var(--accent-text); }
 .d-ibrow {
   display: grid; grid-template-columns: minmax(0, 1fr) auto;
   align-items: center; gap: 10px; min-height: var(--row); padding: 8px 10px 8px var(--pad);
-  border-radius: 14px; transition: background 170ms var(--ease);
+  border-radius: 14px; transition: background var(--t-tint) var(--ease);
 }
 .d-ibrow:hover, .d-ibrow:focus-within { background: var(--warm-hover); }
 /* 프로젝트 카드의 읽는 그룹(확인 대기·결정·회의·아이디어) 맨 아래 `N개 더 ›` / `접기 ⌃` —
@@ -1075,7 +1089,7 @@ button.d-guide .t { color: var(--accent-text); }
 .d-qaf {
   display: flex; align-items: center; gap: 8px; height: 48px; margin: 0 0 4px; padding: 0 var(--pad);
   background: none; border: 0; border-radius: 999px; box-shadow: none;
-  transition: background 170ms var(--ease);
+  transition: background var(--t-tint) var(--ease);
 }
 .d-qaf:focus-within { background: var(--field); outline: 2px solid var(--accent); outline-offset: -1px; }
 .d-qaf .d-i { color: var(--dim); }
@@ -1097,7 +1111,7 @@ button.d-guide .t { color: var(--accent-text); }
 .d-grp.is-doing { color: var(--text); }
 .d-grp.tog { cursor: pointer; }
 .d-grp.tog:hover { background: var(--hover); }
-.d-grp.tog .d-i { color: var(--dim); transition: transform 130ms var(--ease); }
+.d-grp.tog .d-i { color: var(--dim); transition: transform var(--t-fast) var(--ease); }
 .d-grp.tog[aria-expanded="true"] .d-i { transform: rotate(90deg); }
 .d-list .d-grp { position: sticky; top: 0; z-index: 2; background: var(--surface); }
 .d-list .d-grp:first-child { height: calc(var(--grp) + 2px); padding-top: 2px; }
@@ -1107,7 +1121,7 @@ button.d-guide .t { color: var(--accent-text); }
 .d-addrow {
   display: flex; align-items: center; height: 48px; margin: 0 0 6px; padding: 0 var(--pad);
   background: none; border: 0; border-radius: 999px; box-shadow: none;
-  transition: background 170ms var(--ease);
+  transition: background var(--t-tint) var(--ease);
 }
 .d-addrow:focus-within { background: var(--field); outline: 2px solid var(--accent); outline-offset: -1px; }
 .d-addrow[hidden] { display: none; }
@@ -1124,7 +1138,7 @@ button.d-guide .t { color: var(--accent-text); }
   align-items: center; column-gap: 12px;
   height: var(--row); padding: 0 var(--pad); position: relative;
   border-radius: 14px; --rowbg: var(--surface); background: var(--rowbg);
-  transition: background 170ms var(--ease);
+  transition: background var(--t-tint) var(--ease);
 }
 .d-row:hover, .d-row:focus-within { --rowbg: var(--hover); }
 .d-row.is-sel, .d-row.batch-selected { --rowbg: var(--sel); }
@@ -1139,11 +1153,12 @@ body.batch-open .d-row.is-done { opacity: 0.6; }
   appearance: none; -webkit-appearance: none; margin: 0; display: block; position: relative;
   width: 22px; height: var(--h-xs); border: 1.5px solid var(--check-line); border-radius: 6px;
   background: var(--surface); cursor: pointer;
-  transition: border-color 120ms var(--ease), background 120ms var(--ease);
 }
 .d-cb::after { content: ''; position: absolute; inset: -4px; border-radius: 10px; }
-.d-cb:hover { border-color: var(--accent); }
-.d-cb:checked { background: var(--accent); border-color: var(--accent); }
+/* 체크 표시는 하나다 — 업무 체크(.d-cb)와 레일 체크(.d-wcb)가 색 전환·가리킴·켜짐·누름을 같이 쓴다 */
+.d-cb, .d-wcb { transition: border-color var(--t-press) var(--ease), background var(--t-press) var(--ease), scale var(--t-press) var(--ease); }
+.d-cb:hover, .d-wcb:hover { border-color: var(--accent); }
+.d-cb:checked, .d-wcb:checked { background: var(--accent); border-color: var(--accent); }
 .d-tick {
   position: absolute; width: 13px; height: 13px; pointer-events: none; opacity: 0;
   fill: none; stroke: var(--on-fill); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round;
@@ -1159,7 +1174,7 @@ body.batch-open .d-row.is-done { opacity: 0.6; }
 .d-pri {
   position: absolute; width: 13px; height: 13px; pointer-events: none;
   fill: none; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round;
-  transition: opacity 120ms var(--ease);
+  transition: opacity var(--t-fast) var(--ease);
 }
 .d-cb.is-pri-high ~ .d-pri { stroke: var(--warn); }
 .d-cb.is-pri-top ~ .d-pri { stroke: var(--urgent); }
@@ -1192,11 +1207,8 @@ body.batch-open .d-row.is-done { opacity: 0.6; }
   appearance: none; -webkit-appearance: none; margin: 0; position: relative;
   width: 20px; height: 20px; border: 1.5px solid var(--check-line); border-radius: 6px;
   background: var(--surface); cursor: pointer;
-  transition: border-color 120ms var(--ease), background 120ms var(--ease);
 }
 .d-wcb::after { content: ''; position: absolute; inset: -5px; border-radius: 11px; }
-.d-wcb:hover { border-color: var(--accent); }
-.d-wcb:checked { background: var(--accent); border-color: var(--accent); }
 .d-wcb:checked::before {
   content: ''; position: absolute; left: 6px; top: 2px; width: 5px; height: 9px;
   border: solid var(--on-fill); border-width: 0 2px 2px 0; transform: rotate(45deg);
@@ -1206,7 +1218,7 @@ body.batch-open .d-row.is-done { opacity: 0.6; }
 .d-cb:disabled, .d-wcb:disabled { cursor: default; opacity: 0.5; }
 
 /* 끝내는 순간: 체크가 그려지고 → 제목에 줄이 그어지고 → 옅어진다 */
-.d-cb:checked { animation: d-pop-check var(--t-slow) var(--ease); }
+.d-cb:checked, .d-wcb:checked { animation: d-pop-check var(--t-slow) var(--ease); }
 @keyframes d-pop-check { 0% { transform: scale(1); } 45% { transform: scale(1.18); } 100% { transform: scale(1); } }
 .d-row.is-completing .d-title {
   background-image: linear-gradient(currentColor, currentColor);
@@ -1219,7 +1231,7 @@ body.batch-open .d-row.is-done { opacity: 0.6; }
   100% { background-size: 100% 1px; opacity: 0.4; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .d-cb:checked, .d-row.is-completing .d-title { animation: none; }
+  .d-cb:checked, .d-wcb:checked, .d-row.is-completing .d-title { animation: none; }
   .d-lhd .sub .cnt { transition: none; }
   .d-lhd .sub .cnt b.tick { animation: none; }
 }
@@ -1299,7 +1311,7 @@ body.batch-open .d-row[data-task-id]:not(.is-done) { cursor: pointer; }
   display: flex; align-items: center; justify-content: flex-end; gap: 6px;
   padding-left: 24px; background: linear-gradient(90deg, transparent 0, var(--rowbg) 24px);
   border-radius: 0 13px 13px 0;
-  opacity: 0; pointer-events: none; transition: opacity 130ms var(--ease);
+  opacity: 0; pointer-events: none; transition: opacity var(--t-fast) var(--ease);
 }
 .d-row:hover .d-acts, .d-row:focus-within .d-acts, .d-row.is-sel .d-acts { opacity: 1; pointer-events: auto; }
 
@@ -1355,7 +1367,7 @@ textarea.d-dtitle {
   min-height: var(--h-sm); padding: 2px 6px; margin: -2px -6px;
   border: 0; border-radius: var(--r-xs); background: none;
   font-family: inherit; font-size: var(--fs-body); color: var(--text); text-align: left; cursor: pointer;
-  transition: background 130ms var(--ease);
+  transition: background var(--t-fast) var(--ease);
 }
 .d-dpick:hover { background: var(--hover); }
 .d-dpick:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -1398,7 +1410,7 @@ textarea.d-dtitle {
   min-height: var(--h-sm); padding: 2px 6px; margin: -2px -6px;
   border: 0; border-radius: var(--r-xs); background: none;
   font-size: var(--fs-body); font-weight: 400; color: var(--text);
-  transition: background 130ms var(--ease);
+  transition: background var(--t-fast) var(--ease);
 }
 .d-fields .badge.is-plain:hover { background: var(--hover); }
 .d-fields .badge.is-plain:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -1413,7 +1425,7 @@ textarea.d-dtitle {
   width: 100%; min-height: 38px; padding: 10px 14px;
   border: 0; border-radius: var(--r-sm); background: var(--field); color: var(--text);
   font-family: inherit; font-size: var(--fs-body); line-height: 1.5; resize: vertical;
-  transition: box-shadow 170ms var(--ease), background 170ms var(--ease);
+  transition: box-shadow var(--t-tint) var(--ease), background var(--t-tint) var(--ease);
 }
 .d-din::placeholder { color: var(--dim); }
 /* 결정의 `내용`은 안내글이 두 줄이다 — 한 줄로 줄여 잡는 자동 높이(detailAutoGrow)에서도 비어 있을 때 두 줄은 보인다 */
@@ -1476,7 +1488,7 @@ textarea.d-dtitle {
 .d-dpull {
   width: 28px; height: var(--h-sm); padding: 0; border: 0; border-radius: var(--r-xs); background: none;
   color: var(--dim); font-family: inherit; font-size: var(--fs-cap); font-weight: 500; cursor: pointer; opacity: 0;
-  transition: opacity 130ms var(--ease), background 170ms var(--ease), color 170ms var(--ease);
+  transition: opacity var(--t-fast) var(--ease), background var(--t-tint) var(--ease), color var(--t-tint) var(--ease), scale var(--t-press) var(--ease);
 }
 .d-mrow2:hover .d-dpull, .d-mrow2:focus-within .d-dpull, .d-mrow2.is-edit .d-dpull { opacity: 1; }
 @media (hover: none) { .d-dpull { opacity: 1; } }
@@ -1505,7 +1517,7 @@ textarea.d-dtitle {
   min-height: 38px; padding: 9px 12px; margin: 0;
   border: 0; border-radius: var(--r-sm); background: var(--field); color: var(--text);
   font-family: inherit; font-size: var(--fs-body); line-height: 1.5;
-  transition: box-shadow 170ms var(--ease), background 170ms var(--ease);
+  transition: box-shadow var(--t-tint) var(--ease), background var(--t-tint) var(--ease);
 }
 .d-dtxt:focus { outline: none; background: var(--surface); box-shadow: 0 0 0 2px var(--accent); }
 /* 비운 채 담으려 한 칸 — 오류 토큰(연한 빨강 채움 + 빨간 테). 채우는 즉시 걷힌다 */
@@ -1549,16 +1561,14 @@ textarea.d-dtitle {
   display: inline-flex; align-items: center; gap: 2px; height: var(--h-sm); padding: 0 4px 0 6px; margin-right: -4px;
   border: 0; border-radius: var(--r-xs); background: none; color: var(--dim);
   font-family: inherit; font-size: var(--fs-sm); font-weight: 500; cursor: pointer;
-  transition: background 130ms var(--ease), color 130ms var(--ease), transform 120ms var(--ease);
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease), scale var(--t-press) var(--ease);
 }
 .d-tpk .cv { display: inline-flex; }
 .d-tpk .cv .d-i { width: 12px; height: 12px; transform: rotate(90deg); }
 .d-tpk:hover, .d-tpk[aria-expanded="true"] { background: var(--hover); color: var(--text); }
-.d-tpk:active { transform: scale(0.97); }
 .d-tpk:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .d-tpk:disabled { cursor: default; }
 .d-tpk:disabled:hover { background: none; color: var(--dim); }
-.d-tpk:disabled:active { transform: none; }
 /* 제목은 평소 두 줄까지(말줄임), 누르면(.is-open) 그 자리에서 전문 — 아이디어 줄(.d-rec.is-idea .ti)과 같은 규칙.
    두 줄이 되어도 체크·종류·상태·⋯는 첫 줄에 맞춰 선다(align-items: start + 같은 18px 줄 높이) */
 .d-mrow2 .ti {
@@ -1599,7 +1609,7 @@ textarea.d-dtitle {
 .d-qin {
   display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; column-gap: 8px; align-items: center;
   height: 40px; padding: 0 10px; border-radius: var(--r-sm); background: none; cursor: text;
-  transition: box-shadow 170ms var(--ease), background 170ms var(--ease);
+  transition: box-shadow var(--t-tint) var(--ease), background var(--t-tint) var(--ease);
 }
 .d-qin .pl { display: flex; align-items: center; padding-left: 4px; color: var(--dim); }
 .d-qin input {
@@ -1614,7 +1624,7 @@ textarea.d-dtitle {
 
 /* 기존 항목 연결 — 접히는 보조 구역 */
 .d-dsec.d-dadd > summary.lbl { display: flex; margin-bottom: 0; align-items: center; gap: 4px; min-height: var(--h-sm); list-style: none; cursor: pointer; }
-.d-dadd > summary .d-i { color: var(--dim); transition: transform 130ms var(--ease); }
+.d-dadd > summary .d-i { color: var(--dim); transition: transform var(--t-fast) var(--ease); }
 .d-dadd[open] > summary .d-i { transform: rotate(90deg); }
 .d-dadd > summary::-webkit-details-marker { display: none; }
 .d-dadd > summary:hover { color: var(--text); }
@@ -1858,7 +1868,7 @@ body.batch-open .d-toast { bottom: 76px; }
   display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px;
   width: 100%; height: 40px; padding: 0 10px; border: 0; background: none; border-radius: 12px;
   color: var(--text); font-family: inherit; font-size: 14.5px; text-align: left; cursor: pointer;
-  transition: background 170ms var(--ease);
+  transition: background var(--t-tint) var(--ease);
 }
 .d-prow .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 오른쪽 끝 묶음 — (있으면) 조용한 배포일 + 열린 항목 수 */
@@ -1889,7 +1899,7 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-plink {
   display: block; width: 100%; margin-top: 4px; padding: 8px 10px; border: 0; background: none; border-radius: 12px;
   font-family: inherit; font-size: var(--fs-sm); font-weight: 600; color: var(--dim); text-align: left; cursor: pointer;
-  transition: background 170ms var(--ease), color 170ms var(--ease);
+  transition: background var(--t-tint) var(--ease), color var(--t-tint) var(--ease);
 }
 .d-plink:not(:disabled):hover { background: var(--hover); color: var(--accent-text); }
 /* 찾는 동안은 전부 펼쳐 둔 소제목이라 누를 수 없다 — 글자만 남긴다 */
@@ -1960,14 +1970,14 @@ body.batch-open .d-toast { bottom: 76px; }
   display: inline-flex; align-items: center; min-height: var(--h-sm); padding: 0 5px; margin: 0 -5px;
   border: 0; background: none; border-radius: var(--r-xs); cursor: pointer;
   font-family: inherit; font-size: 12.5px; font-weight: 500; color: var(--dim); white-space: nowrap;
-  transition: background 170ms var(--ease), color 170ms var(--ease);
+  transition: background var(--t-tint) var(--ease), color var(--t-tint) var(--ease), scale var(--t-press) var(--ease);
 }
 .d-jwho:hover { background: var(--hover); color: var(--text); }
 .d-jwho[aria-pressed="true"] { font-weight: 700; color: var(--text); }
 /* 거르기를 푸는 `전체`는 이름이 아니라 동작이다 — 이름 줄에서 파란 글자로 갈린다 */
 .d-jwho.clear { margin-left: 3px; color: var(--accent-text); font-weight: 600; }
 .d-jira .foot .d-jexp { flex: none; width: 28px; height: var(--h-sm); color: var(--dim); }
-.d-jira .foot .d-jexp .d-i { transform: rotate(90deg); transition: transform 170ms var(--ease); }
+.d-jira .foot .d-jexp .d-i { transform: rotate(90deg); transition: transform var(--t-fast) var(--ease); }
 .d-jira .foot .d-jexp[aria-expanded="true"] .d-i { transform: rotate(-90deg); }
 /* 펼친 하위 티켓 목록 — 카드 안에 그대로 이어 붙는다(새 면을 만들지 않는다).
    한 줄 = 지라 상태(고정 폭) · 요약(지라 새 탭) · 담당자(오른쪽 고정 칸) · 조용한 배포 버전.
@@ -2036,7 +2046,7 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-jfold .st.k-dim { color: var(--dim); }
 .d-jfold .st.k-acc { color: var(--accent-text); }
 .d-jfold .st.k-pos { color: var(--success); }
-.d-jfold .d-i { flex: none; margin-left: auto; color: var(--dim); transform: rotate(90deg); transition: transform 170ms var(--ease); }
+.d-jfold .d-i { flex: none; margin-left: auto; color: var(--dim); transform: rotate(90deg); transition: transform var(--t-fast) var(--ease); }
 .d-jfold[aria-expanded="true"] .d-i { transform: rotate(-90deg); }
 /* 지라에 보내기 전 확인 줄 — 카드 안에 인라인으로 선다(새 창을 띄우지 않는다).
    Esc · 바깥 클릭 · `취소`로 닫히고, 닫히면 아무것도 보내지 않는다.
@@ -2109,7 +2119,7 @@ body.batch-open .d-toast { bottom: 76px; }
   border: 0; background: none; border-radius: var(--r-xs);
   font-family: inherit; font-size: var(--fs-sm); font-weight: 500; color: var(--muted); text-align: left; cursor: pointer;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  transition: background 170ms var(--ease), color 170ms var(--ease);
+  transition: background var(--t-tint) var(--ease), color var(--t-tint) var(--ease);
 }
 .d-jlink .pk:hover { background: var(--hover); color: var(--text); }
 /* `완료한 티켓도 보기`와 그렇게 받아 온 완료 티켓 줄 — 같은 줄 부품이되 조용한 글자다(완료 표시) */
@@ -2149,10 +2159,9 @@ body.batch-open .d-toast { bottom: 76px; }
   width: 28px; height: var(--h-sm); margin-left: -2px; padding: 0;
   border: 0; background: none; border-radius: var(--r-xs);
   font-family: inherit; font-size: 17px; font-weight: 500; line-height: 1; color: var(--dim); cursor: pointer;
-  transition: background 170ms var(--ease), color 170ms var(--ease);
+  transition: background var(--t-tint) var(--ease), color var(--t-tint) var(--ease), scale var(--t-press) var(--ease);
 }
 .d-plist .d-rhd .d-pnewgo:hover { background: var(--hover); color: var(--accent-text); }
-.d-plist .d-rhd .d-pnewgo:active { transform: scale(0.98); }
 
 /* 결과 카드(.d-pnewres)와 같은 흰 판 — 채우는 동안도 결과 화면과 같은 카드 위에 있어야 한다 */
 .d-pnew {
@@ -2270,7 +2279,7 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-prow2 {
   display: grid; grid-template-columns: 30px minmax(0, 1fr) 116px; align-items: center; column-gap: 10px;
   height: var(--row); padding: 0 var(--pad); position: relative; border-radius: 14px;
-  --rowbg: var(--surface); background: var(--rowbg); transition: background 170ms var(--ease);
+  --rowbg: var(--surface); background: var(--rowbg); transition: background var(--t-tint) var(--ease);
 }
 .d-prow2:hover, .d-prow2:focus-within { --rowbg: var(--hover); }
 .d-prow2.is-sel { --rowbg: var(--sel); }
@@ -2307,7 +2316,7 @@ body.batch-open .d-toast { bottom: 76px; }
   display: flex; align-items: center; justify-content: flex-end; gap: 6px;
   padding-left: 24px; background: linear-gradient(90deg, transparent 0, var(--rowbg) 24px);
   border-radius: 0 13px 13px 0;
-  opacity: 0; pointer-events: none; transition: opacity 130ms var(--ease);
+  opacity: 0; pointer-events: none; transition: opacity var(--t-fast) var(--ease);
 }
 .d-prow2:hover .ac, .d-prow2:focus-within .ac, .d-prow2.is-sel .ac { opacity: 1; pointer-events: auto; }
 .d-prow2 .ac .d-btn { background: var(--accent-soft); color: var(--accent-text); }
@@ -2323,7 +2332,7 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-rec {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px;
   min-height: 40px; padding: 6px 12px; border-radius: 12px;
-  --rowbg: var(--surface); background: var(--rowbg); transition: background 170ms var(--ease);
+  --rowbg: var(--surface); background: var(--rowbg); transition: background var(--t-tint) var(--ease);
 }
 .d-rec:hover, .d-rec:focus-within { --rowbg: var(--hover); }
 .d-rec.is-sel { --rowbg: var(--sel); }
@@ -2389,7 +2398,7 @@ body.batch-open .d-toast { bottom: 76px; }
   display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 8px;
   width: 100%; min-height: 40px; padding: 5px 10px; border: 0; background: none; border-radius: 12px;
   color: var(--text); font-family: inherit; text-align: left; cursor: pointer;
-  transition: background 170ms var(--ease);
+  transition: background var(--t-tint) var(--ease);
 }
 /* 프로젝트별 보기에는 날짜 소제목이 없어 줄이 날짜를 함께 적는다(`9/22 10:00`) — 그만큼 첫 칸이 넓다 */
 .d-mtrow.has-date { grid-template-columns: 74px minmax(0, 1fr) auto; }
@@ -2435,7 +2444,7 @@ body.batch-open .d-toast { bottom: 76px; }
   border: 0; border-radius: 999px;
   /* 머리줄은 카드 밖(회색 바탕)이라 회색 채움이면 안 보인다 — 흰 면으로 세운다 */
   background: var(--surface); box-shadow: var(--soft); color: var(--text); font-family: inherit; font-size: 13.5px;
-  transition: box-shadow 170ms var(--ease), background 170ms var(--ease);
+  transition: box-shadow var(--t-tint) var(--ease), background var(--t-tint) var(--ease);
 }
 .d-recsearch::placeholder { color: var(--dim); }
 .d-recsearch:focus { outline: none; background: var(--surface); box-shadow: 0 0 0 2px var(--accent); }
@@ -2537,7 +2546,7 @@ body.batch-open .d-toast { bottom: 76px; }
 #settingsDialog { margin: min(max(32px, 8vh), 120px) auto auto; overflow: hidden; }
 #settingsDialog:focus { outline: none; }
 /* 본문이 내려가 있을 때만 머리 아래 옅은 그림자 한 겹(맨 위면 가는 선만) */
-#settingsDialog .d-mhd { position: relative; z-index: 1; transition: box-shadow 130ms var(--ease); }
+#settingsDialog .d-mhd { position: relative; z-index: 1; transition: box-shadow var(--t-fast) var(--ease); }
 #settingsDialog.is-scrolled .d-mhd { box-shadow: var(--shadow); }
 
 /* 슬랙 처리 대장(연동 › 슬랙 ⋯ › 최근 기록 맨 위) — 경고가 아니라 사실이라 흐린 글자다. */
@@ -2768,7 +2777,7 @@ a.d-btn { text-decoration: none; }
 .d-ichwrap { display: flex; flex-direction: column; gap: 12px; }
 .d-ichwrap > .d-btn { align-self: flex-start; }
 .d-ichlist { display: grid; gap: 8px; }
-.d-ich { display: grid; grid-template-columns: 20px minmax(0, 1fr) 180px; align-items: center; gap: 4px 12px; padding: 12px 14px; border-radius: var(--r-sm); background: var(--surface); cursor: pointer; }
+.d-ich { display: grid; grid-template-columns: 20px minmax(0, 1fr) 180px; align-items: center; gap: 4px 12px; padding: 12px 14px; border-radius: var(--r-sm); background: var(--surface); cursor: pointer; transition: background var(--t-tint) var(--ease); }
 .d-ich.is-on { background: var(--sel); }
 .d-ich input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(--accent-strong); }
 .d-ich input[type=checkbox]:disabled { opacity: 1; }
@@ -2827,7 +2836,7 @@ a.d-btn { text-decoration: none; }
 .d-ich.is-cal { grid-template-columns: 20px minmax(0, 1fr); }
 .d-imore > summary { display: flex; align-items: center; gap: 6px; min-height: var(--h-md); list-style: none; cursor: pointer; font-size: 13.5px; font-weight: 600; color: var(--muted); }
 .d-imore > summary::-webkit-details-marker { display: none; }
-.d-imore > summary::before { content: "›"; display: inline-block; width: 12px; color: var(--dim); transition: transform 130ms var(--ease); }
+.d-imore > summary::before { content: "›"; display: inline-block; width: 12px; color: var(--dim); transition: transform var(--t-fast) var(--ease); }
 .d-imore[open] > summary::before { transform: rotate(90deg); }
 .d-imore > summary:hover { color: var(--text); }
 .d-imore > .d-ichoice { margin-top: 6px; }

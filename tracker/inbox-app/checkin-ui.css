@@ -16,8 +16,11 @@
 .d-ckopt span {
   display: inline-block; padding: 7px 12px; border-radius: var(--r-xs);
   background: var(--field); color: var(--text); font-size: var(--fs-sm);
-  transition: background 170ms var(--ease), color 170ms var(--ease);
+  transition: background var(--t-tint) var(--ease), color var(--t-tint) var(--ease), scale var(--t-press) var(--ease);
 }
+/* 누름 — 앱의 공용 누름(ui.css)과 같은 값 */
+.d-ckopt:active span { scale: 0.97; }
+@media (prefers-reduced-motion: reduce) { .d-ckopt:active span { scale: none; } }
 .d-ckopt input:checked + span {
   background: var(--accent-soft); color: var(--accent-text); font-weight: 700;
   box-shadow: inset 0 0 0 1.5px var(--accent);

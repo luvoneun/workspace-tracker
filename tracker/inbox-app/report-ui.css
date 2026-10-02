@@ -21,7 +21,7 @@
   display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0 8px;
   width: 100%; min-height: 48px; padding: 6px 10px; border: 0; background: none;
   border-radius: 12px; color: var(--text); font-family: inherit; text-align: left; cursor: pointer;
-  transition: background 170ms var(--ease);
+  transition: background var(--t-tint) var(--ease);
 }
 .rp-wk .nm { grid-column: 1; font-size: 14.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rp-wk .rg { grid-column: 1; font-size: 12.5px; color: var(--dim); }
@@ -55,13 +55,13 @@
 .rp-rename {
   border: 0; background: none; padding: 0 4px; margin: 0 0 0 -4px; border-radius: var(--r-xs);
   color: inherit; font: inherit; letter-spacing: inherit; text-align: left; cursor: text;
-  overflow-wrap: anywhere; transition: background 130ms var(--ease);
+  overflow-wrap: anywhere; transition: background var(--t-fast) var(--ease);
 }
 .rp-rename:hover, .rp-rename:focus-visible, .rp-s .rp-edit:hover, .rp-s .rp-edit:focus-visible {
   background: var(--hover); text-decoration: underline; text-decoration-color: var(--border); text-underline-offset: 4px;
 }
 .rp-rename:focus-visible, .rp-s .rp-edit:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.rp-s .rp-edit { border-radius: var(--r-xs); cursor: text; padding: 0 2px; margin: 0 -2px; }
+.rp-s .rp-edit { border-radius: var(--r-xs); cursor: text; padding: 0 2px; margin: 0 -2px; transition: background var(--t-fast) var(--ease); }
 .rp-s .rp-edit:focus { outline: none; }
 .rp-s .rp-edit:focus-visible { outline: 2px solid var(--accent); }
 /* 제목·소제목의 입력칸 — 글자 크기는 그 자리를 이어받는다(버튼이 없어 아래 안내 한 줄이 저장·취소를 알려 준다). */
@@ -127,7 +127,7 @@
 .rp-s.is-add .rp-ta { font-size: var(--fs-md); resize: none; }
 /* 평소에는 숨고(자리는 그대로 — Tab으로 늘 닿는다) 소제목 묶음(.rp-grp)에 손이 닿거나 초점이 들어올 때만 보인다.
    입력칸이 열려 있거나, 문장이 0개인 묶음이거나, hover가 없는 화면(손가락)에서는 늘 보인다. */
-.rp-grp .rp-s.is-add { opacity: 0; transition: opacity 130ms var(--ease); }
+.rp-grp .rp-s.is-add { opacity: 0; transition: opacity var(--t-fast) var(--ease); }
 .rp-grp:hover .rp-s.is-add, .rp-grp:focus-within .rp-s.is-add, .rp-grp.is-empty .rp-s.is-add, .rp-s.is-add.is-open { opacity: 1; }
 /* 숨어 있는 동안은 높이도 0 — 묶음 끝과 구분선 사이가 벌어지지 않게(v1.3.0 비교). 높이 0이어도 Tab으로 닿고,
    초점이 들어오면(focus-within) 자리가 돌아온다. 손 올림·빈 묶음·열린 칸·손가락 화면은 자리 그대로. */
@@ -170,7 +170,7 @@
   white-space: nowrap; cursor: pointer;
 }
 .rp-s .rp-foldtoggle { gap: 2px; }
-.rp-s .rp-foldtoggle .d-i { transition: transform 130ms var(--ease); }
+.rp-s .rp-foldtoggle .d-i { transition: transform var(--t-fast) var(--ease); }
 .rp-s .rp-foldtoggle[aria-expanded="true"] .d-i { transform: rotate(90deg); }
 .rp-s .rp-foldtoggle:hover { background: var(--hover); color: var(--text); }
 .rp-s .rp-foldtoggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -178,11 +178,11 @@
 .rp-s .rp-aim { display: flex; align-items: center; padding-top: 2px; pointer-events: none; }
 .rp-s .rp-aim .d-btn { height: var(--h-sm); }
 /* 과녁 표시는 그 줄에 손이 닿거나 초점이 올 때만 — 줄 자체는 늘 눌리는 자리(Tab으로 닿는다). 기준 줄의 `여기 아래로`는 늘 보인다. */
-.rp-s .rp-aim { opacity: 0; transition: opacity 130ms var(--ease); }
+.rp-s .rp-aim { opacity: 0; transition: opacity var(--t-fast) var(--ease); }
 .rp-s.is-pick:hover .rp-aim, .rp-s.is-pick:focus-within .rp-aim, .rp-s.is-pick:focus-visible .rp-aim { opacity: 1; }
 .rp-s .ac {
   display: flex; align-items: center; gap: 2px; padding-top: 2px;
-  opacity: 0; pointer-events: none; transition: opacity 130ms var(--ease);
+  opacity: 0; pointer-events: none; transition: opacity var(--t-fast) var(--ease);
 }
 .rp-s:hover .ac, .rp-s:focus-within .ac { opacity: 1; pointer-events: auto; }
 
@@ -214,7 +214,7 @@
 .rp-add {
   display: flex; align-items: center; gap: 8px; height: 48px; margin-top: 4px;
   padding: 0 14px; border: 0; border-radius: var(--r-sm); background: none;
-  transition: background 170ms var(--ease);
+  transition: background var(--t-tint) var(--ease);
 }
 .rp-add .d-i { color: var(--dim); }
 /* 프로젝트 선택은 조용히 — 평소에는 글자만, 건드릴 때만 칸이 보인다 */
@@ -248,7 +248,7 @@
 .rp-pjadd {
   border: 0; background: none; padding: 2px 6px; margin-left: -2px; border-radius: var(--r-xs);
   color: var(--dim); font-family: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer;
-  opacity: 0; transition: opacity 130ms var(--ease), background 130ms var(--ease);
+  opacity: 0; transition: opacity var(--t-fast) var(--ease), background var(--t-fast) var(--ease), scale var(--t-press) var(--ease);
 }
 .rp-pj:hover .rp-pjadd, .rp-pjadd:focus-visible { opacity: 1; }
 .rp-pjadd:hover { background: var(--hover); color: var(--text); }
@@ -272,7 +272,7 @@
 .rp-cand {
   display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center;
   min-height: 38px; padding: 3px 10px 3px 14px; margin: 0 -10px 0 0; border-radius: 10px;
-  transition: background 170ms var(--ease);
+  transition: background var(--t-tint) var(--ease);
 }
 .rp-cand:hover, .rp-cand:focus-within { background: var(--hover); }
 .rp-cand .ti {
@@ -299,7 +299,7 @@
 .rp-rec {
   display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 10px; align-items: center;
   min-height: var(--h-lg); padding: 4px 12px; border-radius: 12px;
-  transition: background 170ms var(--ease);
+  transition: background var(--t-tint) var(--ease);
 }
 .rp-rec:hover, .rp-rec:focus-within { background: var(--hover); }
 .rp-rec .tiwrap { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
@@ -352,7 +352,7 @@
 .rp-fl:hover { color: var(--text); }
 .rp-fl:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--r-xs); }
 .rp-fl .cv { display: inline-flex; color: var(--dim); }
-.rp-fl .d-i { width: 14px; height: 14px; transition: transform 130ms var(--ease); }
+.rp-fl .d-i { width: 14px; height: 14px; transition: transform var(--t-fast) var(--ease); }
 .rp-fl[aria-expanded="true"] .d-i { transform: rotate(90deg); }
 .rp-flb { padding: 0 0 8px; }
 .rp-flb[hidden] { display: none; }
