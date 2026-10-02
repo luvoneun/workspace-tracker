@@ -16592,7 +16592,7 @@ test('뜨는 것 부품: CSS 한 곳 — 값(등장 240·투명도 70·닫힘 --
   assert.match(css, /\.d-float\.is-still:not\(\.is-out\) \{ animation: none; \}/);
   const frames = css.slice(css.indexOf('@keyframes d-float-in {'), css.indexOf('@keyframes d-float-down') + 80);
   assert.doesNotMatch(frames, /\b(width|height|top|left|margin|padding)\s*:/, '레이아웃 속성은 움직이지 않는다');
-  assert.doesNotMatch(css, /@keyframes (d-pop|d-sched-in|d-sched-out|d-sched-fade|d-sched-item) /, '옛 키프레임은 남지 않는다');
+  assert.doesNotMatch(css, /@keyframes (d-pop|d-sched-in|d-sched-out|d-sched-fade|d-sched-item|d-pal-in) /, '옛 키프레임은 남지 않는다');
   // 쫀득 표준은 손으로 적은 키프레임이다 — 뜨는 것은 스프링 토큰을 쓰지 않는다.
   assert.doesNotMatch(css.slice(at, css.indexOf('@media (prefers-reduced-motion: reduce) {\n  *, *::before')), /--spring-/);
 });
@@ -16978,4 +16978,63 @@ test('상세 카드(뜨는 것): 좁은 폭의 아래 시트는 아래에서 올
   assert.equal(ghosts[0].classList.contains('is-out'), true);
   tick(140);
   assert.deepEqual(floats(), [side]);
+});
+
+// ---- 모션 묶음 B1: 검색 팔레트(줄임) ----
+function palClient(options) {
+  const fx = floatClient(options);
+  fx.app.run(fs.readFileSync(path.join(__dirname, 'workflows.js'), 'utf8'));
+  // 결과 그리기는 이 묶음의 관심 밖이다 — 여닫는 길만 실제로 돌린다.
+  fx.app.run("palRender = () => {}; palRenderResults = () => {}; var opener = document.createElement('button'); document.body.appendChild(opener); opener.focus();");
+  const roots = () => fx.app.context.document.body.children.filter(node => String(node.className).split(' ').includes('d-pal'));
+  return { ...fx, roots };
+}
+
+test('검색 팔레트(줄임): 이동·넘침 없이 80ms 나타남만 — 가림막과 상자가 함께, 닫힘도 80ms. 마우스로 열어도 자라 나오지 않는다', () => {
+  const { app, roots, tick, timers } = palClient();
+  app.run("uiActMark({ type: 'click', detail: 1 }); palOpen({})");
+  const root = roots()[0];
+  assert.equal(root.className, 'd-pal d-float is-flat', '가림막째로 나타남만');
+  assert.equal(root.children[0].className, 'd-palbox', '상자는 따로 움직이지 않는다');
+  const before = app.run('escStack.length');
+  app.run('escStack.pop()()');
+  assert.equal(app.run('palState'), null);
+  assert.equal(app.run('escStack.length'), before - 1);
+  assert.equal(root.parent, null, '진짜 팔레트는 바로 떨어진다');
+  assert.equal(app.run('opener.focused'), true, '초점은 연 곳으로 바로 돌아간다');
+  assert.equal(roots().length, 1);
+  assert.equal(roots()[0].classList.contains('is-out'), true);
+  assert.deepEqual(timers.map(timer => timer.delay), [80], '닫힘 80ms');
+  tick(79);
+  assert.equal(roots().length, 1);
+  tick(80);
+  assert.equal(roots().length, 0);
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /\.d-pal \{[^}]*--float-flat: var\(--float-quick\); --float-out: var\(--float-quick\);\s*\}/);
+  assert.match(css, /--float-quick: 80ms;/);
+  assert.doesNotMatch(css.match(/\n\.d-palbox \{[^}]*\}/)[0], /animation|transform/, '상자에는 이동이 없다');
+});
+
+test('검색 팔레트(줄임): ⌘K 연타 — 닫히는 80ms 안에 다시 열어도 새 팔레트가 서고, 열린 채 다시 열면 닫힘·등장을 재생하지 않고 그 자리에서 갈아 끼운다', () => {
+  const { app, roots, tick, timers } = palClient();
+  app.run('palOpen({}); palClose();');
+  assert.equal(roots()[0].classList.contains('is-out'), true);
+  app.run('palOpen({})');
+  assert.equal(roots().length, 2, '닫히는 복사본과 새 팔레트');
+  const open = roots().find(node => !node.classList.contains('is-out'));
+  assert.equal(open.className, 'd-pal d-float is-flat');
+  assert.equal(app.run('palNodes.root') === open, true);
+  tick(80);
+  assert.deepEqual(roots(), [open]);
+  // 열린 채 다시 연다(⌘K를 또 누름 · 팔레트로 되돌아옴)
+  app.run('palOpen({})');
+  assert.equal(open.parent, null);
+  assert.equal(roots().length, 1, '복사본을 세우지 않는다 — 가림막이 두 겹으로 어두워지지 않는다');
+  assert.equal(roots()[0].className, 'd-pal d-float is-flat is-still', '다시 나타나지 않는다');
+  assert.equal(timers.length, 0);
+  assert.equal(app.run('escStack.filter(close => close === palClose).length'), 1, 'Esc 스택에는 하나만');
+  // 움직임 줄이기: 닫힘은 바로.
+  const reduce = palClient({ reduce: true });
+  reduce.app.run('palOpen({}); palClose();');
+  assert.equal(reduce.roots().length, 0);
 });

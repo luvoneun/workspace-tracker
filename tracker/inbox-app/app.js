@@ -4486,7 +4486,8 @@ function palOpen(state) {
   // 더보기 메뉴가 열려 있으면 먼저 닫는다(떠 있는 층은 한 번에 하나).
   uiMenuClose();
   const reopening = !!palState;
-  if (palState) palClose(true);
+  // 열린 채 다시 여는 것(⌘K 연타)은 닫힘·등장을 재생하지 않고 그 자리에서 갈아 끼운다.
+  if (palState) palClose(true, true);
 
   palState = palDefaults(state);
   if (!reopening && typeof usageTick === 'function') usageTick('search');   // 사용 횟수(WP-R)
@@ -4537,7 +4538,8 @@ function palOpen(state) {
 
   box.append(bar, chips, results, foot);
   root.appendChild(box);
-  document.body.appendChild(root);
+  // 키보드로 반복해 여는 창이라 모션을 줄인다 — 이동·넘침 없이 80ms 나타남만, 가림막도 함께(ui.css .d-pal).
+  uiFloatOpen(root, { flat: true, still: reopening });
   palNodes = { root, box, input, chips, results, foot };
 
   root.addEventListener('mousedown', (event) => { if (!event.target.closest('.d-palbox')) palClose(); });
@@ -4574,7 +4576,8 @@ function palOpen(state) {
   input.setSelectionRange?.(input.value.length, input.value.length);
 }
 
-function palClose(silent) {
+// silent: 초점을 돌려주지 않는다(고른 항목이 가져간다). instant: 닫힘을 재생하지 않는다(열린 채 다시 열 때).
+function palClose(silent, instant) {
   if (!palState) return;
   const back = palState.returnFocus;
   const root = palNodes?.root;
@@ -4582,7 +4585,8 @@ function palClose(silent) {
   palNodes = null;
   palEntries = [];
   escDrop(palClose);
-  if (root) root.remove();
+  if (root && instant) root.remove();
+  else if (root) uiFloatClose(root, UI_FLOAT.quick);
   if (!silent && back && back.isConnected) back.focus();
 }
 

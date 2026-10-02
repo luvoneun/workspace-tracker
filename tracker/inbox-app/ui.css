@@ -1761,19 +1761,19 @@ body.later-open .page { padding-right: 424px; }
 .d-dbody .d-meta:empty { display: none; }
 
 /* ---------- ⌘K 검색 팔레트 ----------
-   가림막 위에 떠 있는 한 겹. 위에서 84px, 폭 620px, 결과는 46px 한 줄이다. */
+   가림막 위에 떠 있는 한 겹. 위에서 84px, 폭 620px, 결과는 46px 한 줄이다.
+   키보드로 반복해 여는 창이라 모션을 줄인다: 뜨는 것 부품의 "나타남만"(is-flat)을 80ms로 — 가림막과 상자가 함께 나타나고 함께 사라진다. */
 .d-pal {
   position: fixed; inset: 0; z-index: 60; background: var(--scrim);
   display: grid; justify-items: center; align-items: start; padding: 84px 16px 16px;
+  --float-flat: var(--float-quick); --float-out: var(--float-quick);
 }
 .d-palbox {
   display: flex; flex-direction: column;
   width: min(620px, 100vw - 32px); max-height: calc(100dvh - 100px);
   background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r);
   box-shadow: var(--pop); overflow: hidden;
-  animation: d-pal-in var(--t-fast) var(--ease);
 }
-@keyframes d-pal-in { from { transform: translateY(-6px); opacity: 0; } to { transform: none; opacity: 1; } }
 .d-palin {
   display: flex; align-items: center; gap: 12px; flex: none;
   height: 60px; padding: 0 20px; color: var(--dim);
