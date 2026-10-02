@@ -2532,6 +2532,10 @@ function richDom(app) {
         contains: name => names.has(name) || String(el.className || '').split(' ').includes(name),
       };
       el.remove = () => { if (el.parent) el.parent.removeChild(el); else el.connected = false; };
+      // 닫힘을 재생하는 복사본(uiFloatGhost) — 모양(클래스·자리)만 옮기고 누름(listeners)·아이는 옮기지 않는다.
+      el.cloneNode = () => { const copy = document.createElement(tag); copy.className = el.className; Object.assign(copy.style, el.style); copy.cloneOf = el; return copy; };
+      el.after = (node) => { if (el.parent) el.parent.appendChild(node); };
+      Object.defineProperty(el, 'isConnected', { get: () => el.connected !== false && !!el.parent, configurable: true });
       el.contains = (node) => { for (let at = node; at; at = at.parent) if (at === el) return true; return false; };
       el.focus = () => { el.focused = true; document.activeElement = el; if (el.listeners.focus) el.listeners.focus(); };
       return el;
@@ -2557,7 +2561,9 @@ function meetingTypeClient() {
     { id: 'i1', type: 'task', status: 'to-do', description: 'QA 체크리스트 공유', meetingId: 'mc1' },
     { id: 'i2', type: 'check', status: 'done', description: '끝난 확인', meetingId: 'mc1' });
   app.run('load().then(() => { loaded = 0; __draw(); })');
-  const pop = () => app.context.document.body.children.find(node => String(node.className).includes('d-typepop')) || null;
+  // 열려 있는 목록. 없으면 닫힘을 재생하는 복사본(is-out)을 돌려준다.
+  const pops = () => app.context.document.body.children.filter(node => String(node.className).includes('d-typepop'));
+  const pop = () => pops().find(node => !node.classList.contains('is-out')) || pops()[0] || null;
   return { ...view, sent, pop };
 }
 
@@ -2584,7 +2590,9 @@ test('종류 목록: 줄의 종류 글자를 누르면 세 항목의 작은 목�
   assert.equal(list.children[2].focused, true, '끝에서 돈다');
   button.listeners.click({});
   assert.equal(button.getAttribute('aria-expanded'), 'false');
-  assert.equal(list.classList.contains('is-out'), true, '닫힘은 짧게 사라진다');
+  assert.equal(list.parent, null, '진짜 목록은 바로 떨어진다');
+  assert.equal(pop().cloneOf, list, '닫힘은 복사본이 짧게 재생한다');
+  assert.equal(pop().classList.contains('is-out'), true);
 });
 
 test('종류 목록: 고르면 같은 id로 retype을 보내고 초점은 입력줄로, 줄의 종류 글자가 바뀌며 ⌘Z·알림 되돌리기가 같은 길이다', async () => {
@@ -2810,7 +2818,8 @@ test('종류 목록: 열린 채 목록이 다시 그려져 누른 글자가 사�
   // 저장이 끝나 목록을 맞추는 다시 그리기 — 옛 줄(과 그 글자)은 떨어져 나간다.
   button.connected = false;
   app.run('__box.meetingRepaint()');
-  assert.equal(list.classList.contains('is-out'), true, '허공에 남지 않는다');
+  assert.equal(list.parent, null, '허공에 남지 않는다');
+  assert.equal(pop().classList.contains('is-out'), true);
   assert.equal(input().focused, true);
   assert.equal(app.run('meetingTypeOpen'), null);
   // 글자가 그대로 붙어 있으면 건드리지 않는다.
@@ -16648,41 +16657,63 @@ test('뜨는 것 부품: 붙이기 — 부품 클래스가 붙고, 방금 동작
   assert.equal(floats().length, 5, '전부 body에 붙는다');
 });
 
-test('뜨는 것 부품: 닫기 — is-out을 걸고 눌리지 않게 한 뒤 시간(140ms)으로 치운다. 끝남 신호를 기다리지 않고, 두 번 닫아도·이미 떨어진 요소여도 안전하다', () => {
+test('뜨는 것 부품: 닫기 — 진짜 요소는 바로 떨어지고, 닫힘(is-out)은 죽은 복사본이 재생한 뒤 시간(140ms)으로 치운다. 두 번 닫아도·이미 떨어진 요소여도 안전하다', () => {
   const { app, floats, tick, timers } = floatClient();
-  const el = app.run("uiFloatOpen(document.createElement('div'))");
+  const el = app.run("uiFloatOpen(Object.assign(document.createElement('div'), { id: 'x' }))");
+  el.listeners.click = () => { throw new Error('닫힌 뒤에는 눌리지 않는다'); };
   app.context.__el = el;
   app.run('uiFloatClose(__el)');
-  assert.equal(el.classList.contains('is-out'), true);
-  assert.equal(el.inert, true, '닫히는 동안 초점·누름을 받지 않는다');
-  assert.equal(app.run('uiFloatClosing(__el)'), true);
-  assert.equal(floats().length, 1, '아직 화면에 있다(닫힘 재생 중)');
-  assert.deepEqual(timers.map(timer => timer.delay), [140]);
+  assert.equal(el.parent, null, '진짜 요소는 예전처럼 그 자리에서 바로 사라진다(Esc 스택·초점·다시 그리기가 기다리지 않는다)');
+  assert.equal(el.classList.contains('is-out'), false);
+  const [ghost] = floats();
+  assert.equal(ghost.cloneOf, el);
+  assert.equal(ghost.classList.contains('is-out'), true);
+  assert.equal(ghost.inert, true, '복사본은 초점·누름을 받지 않는다');
+  assert.equal(ghost.getAttribute('aria-hidden'), 'true');
+  assert.equal(ghost.listeners.click, undefined, '복사본에는 누름이 없다 — 닫히는 중의 클릭은 아무 일도 하지 않는다');
+  assert.deepEqual(timers.map(timer => timer.delay), [140], '끝남 신호가 아니라 시간으로 치운다');
   app.run('uiFloatClose(__el)');
-  assert.equal(timers.length, 1, '닫히는 중에 또 닫아도 타이머는 하나다');
+  assert.equal(timers.length, 1, '이미 떨어진 요소를 또 닫아도 복사본이 더 생기지 않는다');
   tick(139);
   assert.equal(floats().length, 1);
   tick(140);
   assert.equal(floats().length, 0, '시간이 지나면 DOM에서 빠진다');
-  // 이미 사라진 요소(다시 그리기로 부모째 떨어짐)를 닫아도 던지지 않는다.
-  app.run("(() => { const gone = document.createElement('div'); uiFloatClose(gone); })()");
-  tick(140);
   app.run('uiFloatClose(null)');
   // 팔레트처럼 짧은 닫힘은 시간을 넘겨 준다.
   app.run("uiFloatClose(uiFloatOpen(document.createElement('div')), UI_FLOAT.quick)");
   assert.deepEqual(timers.map(timer => timer.delay), [80]);
+  // 복사하지 못하는 환경이면 닫힘 재생만 빠지고 치우기는 그대로다.
+  const plain = app.run("uiFloatOpen(document.createElement('div'))");
+  plain.cloneNode = () => { throw new Error('복사 실패'); };
+  app.context.__el = plain;
+  app.run('uiFloatClose(__el)');
+  assert.equal(plain.parent, null);
+  assert.equal(timers.length, 1);
+});
+
+test('뜨는 것 부품: 닫힘 복사본 — id를 떼고(getElementById가 죽은 것을 집지 않게) 스크롤 자리를 옮기며, 안의 것은 다시 움직이지 않는다', () => {
+  const src = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const ghost = src.slice(src.indexOf('function uiFloatGhost'), src.indexOf('function uiFloatClose'));
+  assert.match(ghost, /ghost\.removeAttribute\('id'\);\n    ghost\.querySelectorAll\('\[id\]'\)\.forEach\(node => node\.removeAttribute\('id'\)\);/);
+  assert.match(ghost, /twins\[at\]\.scrollTop = node\.scrollTop;/);
+  assert.match(ghost, /setTimeout\(\(\) => ghost\.remove\(\), ms\);/);
+  assert.doesNotMatch(ghost, /animationend|transitionend|\.finished/, '끝남 신호를 기다리지 않는다');
+  const close = src.slice(src.indexOf('function uiFloatClose'), src.indexOf('// 한 벌뿐인 더보기 메뉴.'));
+  assert.match(close, /uiFloatGhost\(el, ms\);\n  el\.remove\(\);/);
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /\.d-float\.is-out \* \{ animation: none !important; \}/);
 });
 
 test('뜨는 것 부품: 움직임 줄이기 — 닫힘은 재생하지 않고 바로 치운다(등장은 CSS 전역 규칙이 120ms 흐려짐으로 바꾼다)', () => {
   const { app, floats, timers } = floatClient({ reduce: true });
   app.context.__el = app.run("uiFloatOpen(document.createElement('div'))");
   app.run('uiFloatClose(__el)');
-  assert.equal(floats().length, 0);
+  assert.equal(floats().length, 0, '복사본을 세우지 않는다');
   assert.equal(timers.length, 0);
-  assert.equal(app.context.__el.classList.contains('is-out'), false);
+  assert.equal(app.context.__el.parent, null);
 });
 
-test('더보기 메뉴(뜨는 것): 열면 부품 클래스·누른 ⋯가 시작점, 닫으면 is-out → 140ms 뒤 DOM에서 빠진다. Esc 스택·aria·초점 복귀는 닫는 순간 그대로다', () => {
+test('더보기 메뉴(뜨는 것): 열면 부품 클래스·누른 ⋯가 시작점, 닫으면 닫힘(is-out)이 재생되고 140ms 뒤 DOM에서 빠진다. Esc 스택·aria·초점 복귀는 닫는 순간 그대로다', () => {
   const { app, anchor, floats, tick } = floatClient();
   app.context.__a = anchor({ left: 900, right: 934, top: 100, bottom: 134 });
   app.run("var picked = []; uiActMark({ type: 'click', detail: 1 });");
@@ -16700,11 +16731,12 @@ test('더보기 메뉴(뜨는 것): 열면 부품 클래스·누른 ⋯가 시�
   assert.equal(app.run('escStack.length'), before);
   assert.equal(app.context.__a.getAttribute('aria-expanded'), 'false');
   assert.equal(app.context.__a.focused, true, '초점은 누른 버튼으로');
-  assert.equal(list.classList.contains('is-out'), true);
-  assert.equal(floats().length, 1, '닫히는 140ms 동안은 화면에 남아 있다');
+  assert.equal(list.parent, null, '진짜 메뉴는 바로 떨어진다');
+  assert.equal(floats().length, 1, '닫히는 140ms 동안은 복사본이 화면에 남아 있다');
+  assert.equal(floats()[0].classList.contains('is-out'), true);
+  assert.deepEqual([floats()[0].style.left, floats()[0].style.top, floats()[0].style['--ox']], ['934px', '138px', '-17px'], '같은 자리·같은 시작점에서 닫힌다');
   tick(140);
   assert.equal(floats().length, 0);
-  assert.equal(list.parent, null);
 });
 
 test('더보기 메뉴(뜨는 것): 닫히는 중 다시 열면 새 메뉴가 뜨고 옛 것은 제 시간에 사라진다 · 닫히는 메뉴의 항목은 눌러도 무시된다 · 같은 버튼을 다시 누르면 닫힌다', () => {
@@ -16714,22 +16746,25 @@ test('더보기 메뉴(뜨는 것): 닫히는 중 다시 열면 새 메뉴가 �
   app.run("var picked = []; var sections = () => [[{ label: '삭제', onClick: () => picked.push('삭제') }]]; uiActMark({ type: 'click', detail: 1 });");
   const first = app.run('uiMenu(__a, sections())');
   assert.equal(app.run('uiMenu(__a, sections())'), null, '같은 버튼을 다시 누르면 닫힌다');
-  assert.equal(first.classList.contains('is-out'), true);
+  assert.equal(first.parent, null);
+  const closing = floats()[0];
+  assert.equal(closing.classList.contains('is-out'), true);
   // 닫히는 중(140ms 안)에 다시 연다 — 연타.
   const second = app.run('uiMenu(__a, sections())');
   assert.notEqual(second, first);
   assert.equal(second.classList.contains('is-out'), false);
-  assert.equal(floats().length, 2, '닫히는 것과 새로 연 것이 잠깐 함께 있다');
+  assert.deepEqual(floats(), [closing, second], '닫히는 것과 새로 연 것이 잠깐 함께 있다');
   assert.equal(app.run('uiMenuOpen.list') === second, true);
-  // 닫히는 메뉴의 항목을 눌러도 아무 일도 없다(새 메뉴도 닫히지 않는다).
-  first.children[0].listeners.click();
+  // 닫히는 것은 누름이 없는 복사본이다 — 눌러도 아무 일도 없다(새 메뉴도 닫히지 않는다).
+  assert.equal(closing.listeners.click, undefined);
+  assert.equal(closing.children.length, 0, '가짜 창의 복사본에는 항목의 누름이 옮겨 오지 않는다(진짜 창의 cloneNode도 누름을 옮기지 않는다)');
+  assert.equal(closing.inert, true);
   assert.deepEqual(JSON.parse(app.run('JSON.stringify(picked)')), []);
-  assert.equal(app.run('uiMenuOpen.list') === second, true);
   tick(140);
   assert.deepEqual(floats(), [second], '옛 메뉴만 사라진다');
   // 다른 버튼의 메뉴를 열면 앞의 것이 닫히며 바뀐다.
   const third = app.run('uiMenu(__b, sections())');
-  assert.equal(second.classList.contains('is-out'), true);
+  assert.equal(second.parent, null);
   assert.equal(app.context.__a.getAttribute('aria-expanded'), 'false');
   assert.equal(third.style.top, '238px');
   // 열린 메뉴의 항목은 예전 그대로 — 닫고 실행한다.
@@ -16739,6 +16774,7 @@ test('더보기 메뉴(뜨는 것): 닫히는 중 다시 열면 새 메뉴가 �
   tick(140);
   assert.equal(floats().length, 0);
   assert.equal(app.run('escStack.length'), 0, 'Esc 스택에 남는 것이 없다');
+  assert.doesNotMatch(fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8').match(/\.d-float\.is-out \{[^}]*\}/)[0], /pointer-events: auto/);
 });
 
 test('더보기 메뉴(뜨는 것): 키보드로 열면 넘침 없이 나타남만(is-flat), 움직임 줄이기에서는 닫힘도 바로', () => {
@@ -16776,7 +16812,7 @@ test('분류 판·종류 목록(뜨는 것): 따로 만든 자리 잡기·닫힘
   assert.match(src['app.js'], /if \(zone && uiSchedOpen && uiSchedOpen\.zone === zone\) return true;/);
 });
 
-test('분류 판(뜨는 것): 실제로 열고 닫는다 — 부품 클래스·누른 버튼이 시작점, 닫으면 is-out 뒤 140ms에 빠지고 미룬 그리기는 닫는 순간 풀린다', () => {
+test('분류 판(뜨는 것): 실제로 열고 닫는다 — 부품 클래스·누른 버튼이 시작점, 닫으면 닫힘 재생 뒤 140ms에 빠지고 미룬 그리기는 닫는 순간 풀린다', () => {
   const { app, floats, tick } = floatClient();
   app.run("escapeHtml = s => String(s || ''); workflowData = { items: [], meetings: [] }; jiraIssuesByKey = new Map(); projectPickEntries = () => []; uiActMark({ type: 'click', detail: 1 });");
   app.run("renderInbox([{ id: 'i1', description: '업무1' }])");
@@ -16793,7 +16829,9 @@ test('분류 판(뜨는 것): 실제로 열고 닫는다 — 부품 클래스·�
   app.run('var drawn = 0;');
   assert.equal(app.run("uiRenderOrHold('inbox', zone, () => { drawn += 1; })"), false, '열려 있는 동안은 미룬다');
   button.listeners.click({});
-  assert.equal(pop.classList.contains('is-out'), true);
+  assert.equal(pop.parent, null);
+  assert.equal(floats()[0].cloneOf, pop, '닫힘은 복사본이 재생한다');
+  assert.equal(floats()[0].classList.contains('is-out'), true);
   assert.equal(app.run('drawn'), 1, '닫는 순간 미룬 그리기가 풀린다(닫힘 재생을 기다리지 않는다)');
   assert.equal(app.run('uiSchedOpen'), null);
   assert.equal(floats().length, 1);

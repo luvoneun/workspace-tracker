@@ -397,7 +397,7 @@ button:disabled:active, .d-cb:disabled:active, .d-wcb:disabled:active { scale: n
 
 /* ---------- 뜨는 것 (모션 부품 ① — 더보기 메뉴·분류 판·종류 목록·상세 카드·검색 팔레트) ----------
    app.js uiFloatOpen이 붙이고(.d-float), uiFloatPlace가 누른 곳을 시작점(--ox·--oy)으로 놓고,
-   uiFloatClose가 .is-out을 건 뒤 시간으로 치운다. 값은 여기 한 곳이다(app.js UI_FLOAT가 같은 숫자를 쓴다).
+   uiFloatClose가 닫힘(.is-out)을 죽은 복사본으로 재생한 뒤 시간으로 치운다. 값은 여기 한 곳이다(app.js UI_FLOAT가 같은 숫자를 쓴다).
    쫀득 표준은 이 키프레임이다(.88 → 1.025(55%) → 1, 240ms) — 큰 면은 --float-from·--float-over로 넘침을 줄인다.
    움직이는 것은 transform·opacity뿐이다. 움직임 줄이기에서는 이동 없이 120ms 흐려지며 뜨고 닫힘은 즉시다(아래 전역 규칙). */
 .d-float {
@@ -409,6 +409,8 @@ button:disabled:active, .d-cb:disabled:active, .d-wcb:disabled:active { scale: n
   animation: d-float-in var(--float-in) var(--ease) both, d-float-fade var(--float-fade) linear both;
 }
 .d-float.is-out { animation: d-float-out var(--float-out) var(--ease) both; pointer-events: none; }
+/* 닫히는 복사본 안의 것은 다시 움직이지 않는다(항목이 차례로 다시 뜨거나 체크가 다시 커지지 않게) */
+.d-float.is-out * { animation: none !important; }
 /* 키보드로 연 것·검색 팔레트 — 이동·넘침 없이 나타남만 */
 .d-float.is-flat { animation: d-float-fade var(--float-flat) linear both; }
 .d-float.is-flat.is-out { animation: d-float-gone var(--float-out) linear both; }

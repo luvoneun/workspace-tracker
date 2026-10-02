@@ -156,7 +156,8 @@ document.addEventListener('keydown', (event) => {
 // 떠 있는 판(더보기 메뉴·분류 판·종류 목록·상세 카드·검색 팔레트)은 전부 이 셋으로 여닫는다 — 따로 붙이지 않는다(시험이 본다).
 //   uiFloatOpen  붙인다. 키보드로 연 것은 넘침 없이 나타남만(is-flat).
 //   uiFloatPlace 누른 것 옆에 놓고(아래가 모자라면 위로 뒤집고 화면 안으로 맞춘다) 시작점(--ox·--oy)을 누른 곳으로 둔다.
-//   uiFloatClose 닫힘을 재생한 뒤(.is-out) 치운다. 끝남 신호를 기다리지 않고 시간으로 치운다(가려진 탭에서도 남지 않게).
+//   uiFloatClose 치운다 — 진짜 요소는 예전처럼 그 자리에서 바로 떨어지고, 닫힘(.is-out)은 죽은 복사본이 재생한다.
+//                복사본은 끝남 신호를 기다리지 않고 시간으로 치운다(가려진 탭에서도 남지 않게).
 // 시간은 ui.css `.d-float`의 값과 같다(el.animate·setTimeout은 var()를 못 읽는다 — 시험이 맞춰 본다).
 const UI_FLOAT = { out: 140, quick: 80, slide: 200, ease: 'cubic-bezier(0.22, 0.8, 0.3, 1)' };
 function uiFloatMotion() {
@@ -193,14 +194,34 @@ function uiFloatPlace(el, anchor, { align = 'start', gap = 4, pad = 8, nudge = 0
   el.style.setProperty?.('--float-dy', flip ? '4px' : '-4px');
   return { left, top, flip };
 }
-function uiFloatClosing(el) { return !!(el && el.classList && el.classList.contains('is-out')); }
-// 닫히는 동안에는 눌리지도 초점을 받지도 않는다(pointer-events·inert). 다시 여는 쪽은 새 요소를 만든다 — 닫히는 것은 제 시간에 사라진다.
+// 닫힘을 재생하는 복사본을 el 바로 뒤에 세운다(el은 건드리지 않는다 — 치우는 것은 부르는 쪽).
+// 복사본에는 누름·초점·id가 없다: 닫히는 동안의 클릭, Esc 스택·초점 복귀·다시 그리기·getElementById가 닫힘 재생과 얽히지 않는다.
+// 진짜 요소를 남겨 두고 재생하지 않는 까닭 — 남겨 두면 초점이 옮겨 갈 때 그 안의 칸이 blur·change를 받아
+// "Esc로 닫으면 고치던 값을 버린다"가 "저장한다"로 바뀐다.
+function uiFloatGhost(el, ms = UI_FLOAT.out) {
+  if (!el || el.isConnected === false || !uiFloatMotion() || typeof el.cloneNode !== 'function' || typeof el.after !== 'function') return null;
+  let ghost = null;
+  try {
+    ghost = el.cloneNode(true);
+    ghost.classList.add('is-out');
+    ghost.inert = true;
+    ghost.setAttribute('aria-hidden', 'true');
+    ghost.removeAttribute('id');
+    ghost.querySelectorAll('[id]').forEach(node => node.removeAttribute('id'));
+    el.after(ghost);
+    // 스크롤해 둔 자리는 복사되지 않는다 — 닫히는 순간 내용이 맨 위로 튀지 않게 옮겨 준다.
+    const twins = ghost.querySelectorAll('*');
+    el.querySelectorAll('*').forEach((node, at) => {
+      if (twins[at] && (node.scrollTop || node.scrollLeft)) { twins[at].scrollTop = node.scrollTop; twins[at].scrollLeft = node.scrollLeft; }
+    });
+  } catch { ghost?.remove?.(); return null; }
+  setTimeout(() => ghost.remove(), ms);
+  return ghost;
+}
 function uiFloatClose(el, ms = UI_FLOAT.out) {
   if (!el) return;
-  if (!uiFloatMotion() || uiFloatClosing(el)) { if (!uiFloatClosing(el)) el.remove(); return; }
-  el.classList.add('is-out');
-  el.inert = true;
-  setTimeout(() => el.remove(), ms);
+  uiFloatGhost(el, ms);
+  el.remove();
 }
 
 // 한 벌뿐인 더보기 메뉴. 한 번에 하나만 열리고, 아래 자리가 없으면 위로 뒤집힌다.
@@ -262,8 +283,7 @@ function uiMenu(anchor, sections) {
       item.setAttribute('role', 'menuitem');
       item.textContent = entry.label;
       if (entry.disabled) item.disabled = true;
-      // 닫히는 140ms 동안의 두 번째 누름은 무시한다(pointer-events로도 막혀 있다).
-      item.addEventListener('click', () => { if (uiFloatClosing(list)) return; uiMenuClose(); entry.onClick(); });
+      item.addEventListener('click', () => { uiMenuClose(); entry.onClick(); });
       list.appendChild(item);
     });
   });
