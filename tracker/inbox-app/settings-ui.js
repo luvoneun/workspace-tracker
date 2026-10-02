@@ -875,7 +875,7 @@ const settingsSlackTokenShape = (value) => {
 };
 // 토큰 교체를 켠 슬랙 앱의 사용자 토큰(`xoxe.xoxp-`)은 12시간짜리다 — 붙여 넣기로 저장하면 갱신할 수단이 없다.
 const settingsSlackRotating = value => /^xoxe\.xoxp-/.test(String(value || '').trim());
-const SETTINGS_SLACK_ROTATING = '이 토큰은 12시간 뒤 끊겨요 — 위의 「슬랙 연결」 버튼을 쓰면 알아서 이어져요';
+const SETTINGS_SLACK_ROTATING = '이 토큰은 12시간 뒤 끊겨요 — 「슬랙 연결」 버튼을 쓰면 알아서 이어져요';
 const SETTINGS_SLACK_ASK = '워크스페이스 슬랙 앱에 저를 Collaborator로 추가해 주세요';
 const SETTINGS_SLACK_TAKEN = '다른 사람이 쓰는 이름이에요 — 다른 이름을 적어 주세요';
 // 이름이 이미 있어도 내가 들어가 있는 내 채널이면 새로 만들지 않고 그 채널을 쓴다(서버가 `existing: true`로 알려 준다).
@@ -1751,6 +1751,8 @@ const SETTINGS_SLACK_LOST = '슬랙 연결이 풀렸어요 — 다시 연결 한
 const SETTINGS_SLACK_REMOTE = '슬랙 연결은 앱을 설치한 맥에서 해 주세요.';
 // 갱신이 토큰 만료 뒤에도 이어지지 않는다(서버가 준 `oauth.stalled` — 빨간 점·점검하기와 같은 값).
 const SETTINGS_SLACK_STALLED = '슬랙 연결을 이어 가지 못하고 있어요 — 다시 연결을 눌러 주세요';
+// 같은 멈춤인데 슬랙에 닿지 못해서일 때(`oauth.stalledBy: unreachable`) — 연결이 돌아오면 알아서 이어지니 다시 연결을 권하지 않는다.
+const SETTINGS_SLACK_OFFLINE = '슬랙에 닿지 못하고 있어요 — 인터넷 연결을 확인해 주세요';
 // 등록된 포트(4321~4331) 밖에서 연 주소 — 포트를 바꾸라는 말은 쓰는 사람이 할 수 없는 일이라 갈 수 있는 길만 말한다.
 const SETTINGS_SLACK_PORT = '이 주소에서는 「슬랙 연결」 버튼을 쓸 수 없어요 — 아래 「고급」으로 연결해 주세요';
 // 버튼으로는 더 갈 수 없을 때(회사가 막음·승인 대기) 덧붙이는 빠져나갈 길 — 바로 아래에 `고급` 링크가 있는 자리에서만 쓴다.
@@ -2532,7 +2534,9 @@ function settingsSlackCard(data) {
   const oauth = slack.oauth || {};
   // 새 방식에서 사람이 다시 연결해야 하는 멈춤 — 갱신이 더는 안 되거나(연결이 풀림) 수집이 토큰 문제로 실패.
   // 갱신이 만료 뒤에도 이어지지 않는 것(`oauth.stalled`)도 같은 멈춤이다 — 고치는 법이 같다(`다시 연결`).
-  const stalled = connected && oauthOn && oauth.stalled === true;
+  // 닿지 못해서 멈춘 것(`unreachable`)은 사람이 다시 연결할 일이 아니다 — 멈췄어요 + 한 줄 + `다시 시도`만.
+  const offline = connected && oauthOn && oauth.stalled === true && oauth.stalledBy === 'unreachable' && oauth.connected !== false && !fetchState.auth;
+  const stalled = connected && oauthOn && oauth.stalled === true && !offline;
   const broken = connected && oauthOn && (oauth.connected === false || !!fetchState.auth || stalled);
   // 허용은 끝났고 채널만 남았다 — 펼치면 채널 단계부터.
   const channelStep = !connected && oauthOn && !!slack.hasToken && oauth.connected === true;
@@ -2555,6 +2559,11 @@ function settingsSlackCard(data) {
     const way = stalled || settingsSlackStuckKind(connect.last)
       ? [' · ', settingsButton('고급: 토큰 직접 붙여 넣기', 'd-ablink', () => card.open('token'))] : [];
     alert = { stop: true, why: [line, ...way] };
+  } else if (offline) {
+    const line = document.createElement('span');
+    line.dataset.slackFail = 'offline';
+    line.textContent = SETTINGS_SLACK_OFFLINE;
+    alert = { stop: true, why: [line] };
   } else if (connected && fetchState.failing) {
     alert = { stop: settingsFailStop(fetchState), why: settingsFailWhy('slack', fetchState, { reconnect: !fetchState.claudeAuth }) };
   }
@@ -2608,14 +2617,14 @@ function settingsSlackCard(data) {
     use: '나만 보는 채널에 공유한 메시지가 할 일로 들어와요',
     // 주기는 실제 등록 값(launchd 5분 간격, 매일 9–19시 — slack-capture.sh가 시간대를 본다).
     need: connected
-      ? `매일 9–19시, 5분마다${typeof slack.todayCount === 'number' ? ` · 오늘 새 항목 ${slack.todayCount}개` : ''}${oauthOn && !broken ? ' · 자동 갱신 켜짐' : ''}`
+      ? `매일 9–19시, 5분마다${typeof slack.todayCount === 'number' ? ` · 오늘 새 항목 ${slack.todayCount}개` : ''}${oauthOn && !broken && !offline ? ' · 자동 갱신 켜짐' : ''}`
       : (ready === 'ok' ? '1분 · 슬랙에서 허용 한 번' : '5분 · 팀 슬랙 앱 토큰 하나'),
     status, menu, extra, alert,
     // 다른 기기에서 열었으면 여는 버튼이 회색 `슬랙 연결`이고 안내 한 줄이 늘 보인다.
     ...(!connected && !channelStep && ready === 'remote' ? { locked: true, openText: '슬랙 연결', openClass: 'd-btn' } : {}),
     fetch: connected ? {
       key: 'slack', state: broken ? { ...fetchState, claudeAuth: false } : fetchState,
-      reconnect: oauthOn ? (ready === 'ok' ? startConnect : () => card.open('connect')) : () => card.open('token'),
+      reconnect: offline ? null : oauthOn ? (ready === 'ok' ? startConnect : () => card.open('connect')) : () => card.open('token'),
     } : null,
     onOpen: (self, mode) => {
       if (mode === 'how') { self.body.appendChild(settingsSlackSendHow(settingsSlackMainName(channels))); return; }

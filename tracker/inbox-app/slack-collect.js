@@ -93,7 +93,10 @@ const failureWord = failure => `${failure.kind} · ${failure.code || failure.rea
 // 토큰이 만료됐는데 갱신이 안 될 때 남기는 한 줄(연동 카드 ⋯ › 최근 기록에 그대로 보인다 — 오류 이름으로 원인을 안다).
 // 실패가 기준을 넘겨 이어졌으면(`stalled` — slack-auth.js STALL) 사람이 다시 연결해야 한다고 말한다. 멈춤 판정은 서버가
 // 갱신 상태 파일로 한다(이 줄의 낱말에 기대지 않는다 — 갱신이 다시 되면 바로 풀리게).
-const expiredSkipLine = (failure, stalled) => (stalled
+// `stalledBy`: '' · `rejected`(슬랙이 거절) · `unreachable`(슬랙에 닿지 못함 — 연결이 돌아오면 알아서 이어진다).
+const expiredSkipLine = (failure, stalledBy) => (stalledBy === 'unreachable'
+  ? `슬랙에 닿지 못함(${failureWord(failure)}) — 토큰이 만료돼 수집을 건너뜀, 인터넷 연결 확인 필요`
+  : stalledBy
   ? `슬랙 연결을 이어 가지 못함(${failureWord(failure)}) — 토큰이 만료돼 수집을 건너뜀, 설정 › 연동에서 다시 연결 필요`
   : `슬랙 토큰 갱신이 잠시 안 됨(${failureWord(failure)}) — 토큰이 만료돼 이번 회차는 건너뛰고 다음 회차에 다시`);
 
@@ -607,7 +610,7 @@ async function main() {
   // `token_expired`가 남아 한 번의 일시 실패가 "다시 연결"(빨강)로 읽힌다. 실패로 적지 않는다: 늦어지면 주황 `늦어요`가 말한다.
   if (auth.failure && !reconnect) {
     if (Number.isFinite(auth.expiresAt) && auth.expiresAt <= Date.now()) {
-      log(expiredSkipLine(auth.failure, readOAuthStatus({ config }).stalled === true));
+      log(expiredSkipLine(auth.failure, readOAuthStatus({ config }).stalledBy));
       return 0;
     }
     log(`슬랙 토큰 갱신이 잠시 안 됨(${failureWord(auth.failure)}) — 이전 토큰으로 진행`);

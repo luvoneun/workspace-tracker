@@ -8566,7 +8566,7 @@ test('WP-D1 B. 슬랙 ① 토큰: 세 줄 안내 + 토큰 받는 곳 + 요청 �
   token.value = 'xoxe.xoxp-1-rotating';
   token.listeners.input();
   assert.equal(warn().hidden, false);
-  assert.equal(warn().textContent, '이 토큰은 12시간 뒤 끊겨요 — 위의 「슬랙 연결」 버튼을 쓰면 알아서 이어져요');
+  assert.equal(warn().textContent, '이 토큰은 12시간 뒤 끊겨요 — 「슬랙 연결」 버튼을 쓰면 알아서 이어져요');
   assert.equal(error(), '', '막는 오류가 아니다');
 
   // 틀린 토큰 → 그 자리에 이유, 맞는 토큰 → ② 채널로
@@ -8868,12 +8868,19 @@ test('슬랙 연결 E. 풀림: `슬랙 연결이 풀렸어요 — 다시 연결 
   assert.equal(fx.find('slack', 'd-isteps').length, 0);
 
   // 갱신이 만료 뒤에도 이어지지 않음(서버가 준 `oauth.stalled`) — 멈췄어요 + 한 줄 + `다시 연결`, 안 되면 갈 옛 길이 줄 끝에
-  const stalled = slackConnectClient({ ...SLACK_LINKED, ...OAUTH_ON, oauth: { ...OAUTH_ON.oauth, stalled: true, lastFailure: { kind: 'retry', reason: 'slack_error', code: 'some_new_error' } } });
+  const stalled = slackConnectClient({ ...SLACK_LINKED, ...OAUTH_ON, oauth: { ...OAUTH_ON.oauth, stalled: true, stalledBy: 'rejected', lastFailure: { kind: 'retry', reason: 'slack_error', code: 'some_new_error' } } });
   await stalled.app.run('renderSettingsIntegrations()');
   same(statOf(stalled, 'slack'), ['d-istat k-stop', '멈췄어요']);
   assert.equal(stalled.shape("window.findByClass(document.getElementById('settingsIntegrationsView').children[1], 'd-intgwhy')[0]").text, '슬랙 연결을 이어 가지 못하고 있어요 — 다시 연결을 눌러 주세요 · 고급: 토큰 직접 붙여 넣기');
   assert.equal(fetchButton(stalled, 'slack').textContent, '다시 연결');
   assert.ok(!/자동 갱신 켜짐/.test(stalled.text('slack')));
+  // 닿지 못해서 멈춘 것(네트워크·슬랙 장애)은 다시 연결을 권하지 않는다 — 한 줄 + `다시 시도`, 고급 링크 없음
+  const offline = slackConnectClient({ ...SLACK_LINKED, ...OAUTH_ON, oauth: { ...OAUTH_ON.oauth, stalled: true, stalledBy: 'unreachable', lastFailure: { kind: 'retry', reason: 'network' } } });
+  await offline.app.run('renderSettingsIntegrations()');
+  same(statOf(offline, 'slack'), ['d-istat k-stop', '멈췄어요']);
+  assert.equal(offline.shape("window.findByClass(document.getElementById('settingsIntegrationsView').children[1], 'd-intgwhy')[0]").text, '슬랙에 닿지 못하고 있어요 — 인터넷 연결을 확인해 주세요');
+  assert.equal(fetchButton(offline, 'slack').textContent, '다시 시도');
+  assert.ok(!/자동 갱신 켜짐/.test(offline.text('slack')));
   // 잠시 안 되는 갱신(stalled 아님)은 카드가 그대로다
   const retrying = slackConnectClient({ ...SLACK_LINKED, ...OAUTH_ON, oauth: { ...OAUTH_ON.oauth, stalled: false, lastFailure: { kind: 'retry', reason: 'network' } } });
   await retrying.app.run('renderSettingsIntegrations()');

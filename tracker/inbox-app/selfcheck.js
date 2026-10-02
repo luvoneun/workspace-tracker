@@ -48,6 +48,8 @@ const WORDS = {
   reconnectSlackOAuth: '설정 › 연동 › 슬랙 카드의 다시 연결을 누르고 슬랙에서 허용해 주세요 — 토큰을 다시 찾을 필요는 없어요',
   refreshLater: '기다리면 앱이 다시 해 봐요 — 계속되면 회사 네트워크(VPN)를 확인해 주세요',
   // 갱신이 만료 뒤에도 이어지지 않을 때 — 다시 연결이 먼저고, 그래도 안 되면 옛 길(토큰 붙여 넣기)이 남아 있다.
+  // 슬랙에 닿지 못해 이어 가지 못할 때 — 다시 연결을 권하지 않는다(연결이 돌아오면 앱이 알아서 잇는다).
+  stalledOffline: '인터넷 연결을 확인해 주세요 — 연결이 돌아오면 앱이 알아서 이어 가요. 회사 네트워크(VPN)를 쓰면 연결을 확인해 주세요',
   reconnectSlackStalled: '설정 › 연동 › 슬랙 카드의 다시 연결을 눌러 주세요 — 안 되면 카드의 고급: 토큰 직접 붙여 넣기로 연결할 수 있어요',
   moreScopes: '설정 › 연동 › 슬랙 카드 ⋯ › 다시 연결에서 슬랙의 허용을 한 번 더 눌러 주세요 — 권한이 빠지면 일부 채널을 못 읽거나 새 채널을 못 만들어요',
   reconnectJira: '설정 › 연동 › 지라 ⋯ › 다시 연결에서 토큰을 새로 붙여 주세요',
@@ -286,11 +288,14 @@ function createSelfcheck(deps) {
       // 갱신이 만료 뒤에도 이어지지 않는다(연동 탭 `멈췄어요`·빨간 점과 같은 값). 원인을 알아야 고친다 — 슬랙이 준 오류 이름
       // (값 없는 낱말)이나 실패 종류를 같이 말한다.
       const stalled = !lost && !!oauth && oauth.stalled === true;
+      // 슬랙이 거절한 것이 아니라 닿지 못해서면(네트워크·슬랙 장애) 말과 고치는 법이 다르다 — 예전 `슬랙에 닿지 못했어요` 갈래와 같은 쪽.
+      const offline = stalled && oauth.stalledBy === 'unreachable';
       const why = failureWords(oauth && oauth.lastFailure);
       slackTokenItem = add({ key: 'slack_token', label: oauth ? '슬랙 연결' : '슬랙 토큰', state: 'unknown', detail: '확인 못 함' });
       // 다시 연결해야 하는 것을 이미 알면 슬랙에 묻지 않는다(죽은 토큰으로 두드리지 않는다).
       const checked = lost || stalled ? null : await within(() => deps.slackTokenCheck(token), left());
       if (lost) Object.assign(slackTokenItem, lostItem);
+      else if (offline) { Object.assign(slackTokenItem, { state: 'bad', detail: '슬랙에 닿지 못하고 있어요', fix: { text: WORDS.stalledOffline } }); external.push({ item: slackTokenItem, net: true }); }
       else if (stalled) Object.assign(slackTokenItem, { state: 'bad', detail: `슬랙 연결을 이어 가지 못하고 있어요${why ? ` (${why})` : ''}`, fix: { text: WORDS.reconnectSlackStalled } });
       else if (checked.timeout) slackTokenItem.detail = '확인 못 함 — 슬랙이 제시간에 답하지 않았어요';
       else if (checked.value && oauth) {
@@ -331,7 +336,7 @@ function createSelfcheck(deps) {
       const channelItem = add({ key: 'slack_channels', label: '슬랙 채널', state: 'unknown', detail: '확인 못 함' });
       // 갱신이 잠시 안 되는 중(warn)이어도 지금 토큰은 쓸 수 있다 — 채널은 그대로 확인한다.
       if (!['ok', 'warn'].includes(slackTokenItem.state)) {
-        channelItem.detail = slackTokenItem.state === 'unknown' ? '확인 못 함' : oauth ? '다시 연결한 뒤 확인할 수 있어요' : '토큰을 고친 뒤 확인할 수 있어요';
+        channelItem.detail = slackTokenItem.state === 'unknown' ? '확인 못 함' : offline ? '슬랙에 닿은 뒤 확인할 수 있어요' : oauth ? '다시 연결한 뒤 확인할 수 있어요' : '토큰을 고친 뒤 확인할 수 있어요';
       } else {
         const answers = await Promise.all(onKeys.map(key => within(() => deps.slackCheckChannel(token, channels[key].id), left())));
         const count = onKeys.length;
@@ -365,7 +370,7 @@ function createSelfcheck(deps) {
       const collect = { key: 'slack', label: '슬랙 수집', lag: 'slack' };
       if (alerts.includes('slack') && (lost || stalled)) {
         // 새 방식의 연결이 풀려서(또는 이어 가지 못해서) 멈췄다 — 원인은 위 슬랙 연결 줄 하나다(문제 수에 한 번만 센다).
-        add({ ...collect, state: 'bad', sameAs: 'slack_token', detail: `${lost ? '연결이 풀려서' : '연결을 이어 가지 못해'} 멈췄어요 — 위 슬랙 연결 줄대로 고치면 돼요` });
+        add({ ...collect, state: 'bad', sameAs: 'slack_token', detail: `${lost ? '연결이 풀려서' : offline ? '슬랙에 닿지 못해' : '연결을 이어 가지 못해'} 멈췄어요 — 위 슬랙 연결 줄대로 고치면 돼요` });
       } else if (alerts.includes('slack')) {
         const allGone = !(fetchState.slack && fetchState.slack.failing);
         add({ ...collect, ...(allGone ? { state: 'bad', sameAs: channelItem.state === 'bad' ? 'slack_channels' : undefined, detail: '켜진 채널이 모두 사라져서 멈췄어요', fix: { text: WORDS.pickChannels } } : stopped('slack', '슬랙', slackTokenItem)) });

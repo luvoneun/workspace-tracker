@@ -457,6 +457,22 @@ test('점검(슬랙 새 방식): 만료된 뒤에도 갱신이 이어지지 않�
   assert.equal(net.calls.filter(call => /auth\.test|conversations/.test(call.url)).length, 0, '만료된 토큰으로 슬랙을 두드리지 않는다');
   noOAuthSecrets(result);
 
+  // 닿지 못해서 멈춘 것(네트워크·슬랙 장애)은 다시 연결을 권하지 않는다 — 예전 `슬랙에 닿지 못했어요` 갈래와 같은 쪽 말.
+  const off = oauthHome(t, { expiresInMs: -60 * 1000 });
+  const offAt = JSON.parse(fs.readFileSync(off.paths.oauthFile, 'utf8')).savedAt;
+  fs.writeFileSync(off.paths.stateFile, JSON.stringify({ failure: { kind: 'retry', reason: 'network' }, at: Date.now(), failCount: 6, savedAt: offAt, rejects: 0, downCount: 6, downSince: Date.now() - 31 * 60 * 1000 }));
+  const down = fakeNet({ ...okRoutes, 'oauth.v2.access': () => { throw new Error('offline'); } });
+  const offResult = await createSelfcheck(oauthDeps(off.h, down, { alerts: ['slack'] })).run();
+  const offToken = byKey(offResult, 'slack_token');
+  // 바깥 확인이 슬랙 하나뿐이고 그것이 네트워크에서 막혔으니 점검 전체가 예전처럼 `offline`으로 묶인다(다른 연동이 닿으면
+  // 이 줄은 ✗ `슬랙에 닿지 못하고 있어요` + 인터넷 확인 안내다). 어느 쪽이든 다시 연결을 권하지 않는다.
+  assert.deepEqual({ state: offToken.state, detail: offToken.detail, fix: offToken.fix }, { state: 'offline', detail: '닿지 못했어요', fix: undefined });
+  assert.equal(offResult.offline, true);
+  assert.doesNotMatch(JSON.stringify(offResult.items.filter(item => item.key.startsWith('slack'))), /다시 연결을 눌러/);
+  assert.equal(byKey(offResult, 'slack').detail, '슬랙에 닿지 못해 멈췄어요 — 위 슬랙 연결 줄대로 고치면 돼요');
+  assert.equal(byKey(offResult, 'slack_channels').detail, '슬랙에 닿은 뒤 확인할 수 있어요');
+  assert.equal(down.calls.filter(call => /auth\.test|conversations/.test(call.url)).length, 0);
+
   // 아직 기준을 넘지 않은 잠시 안 됨에도 슬랙이 준 오류 이름은 보인다(원인을 알아야 고친다).
   const early = oauthHome(t, { failure: { kind: 'retry', reason: 'slack_error', code: 'some_new_error' } });
   const warn = byKey(await createSelfcheck(oauthDeps(early.h, fakeNet(okRoutes))).run(), 'slack_token');
@@ -513,9 +529,10 @@ test('서버: 토큰을 다시 받아야 하는 수집 실패 낱말(SLACK_AUTH_
   // 만료 + 갱신 안 됨으로 건너뛴 회차의 한 줄 — 오류 이름이 최근 기록에 보이고, 멈춤 판정 낱말에는 걸리지 않는다(판정은 갱신 상태 파일).
   const { expiredSkipLine } = require('./slack-collect');
   const failure = { kind: 'retry', reason: 'slack_error', code: 'some_new_error' };
-  assert.equal(expiredSkipLine(failure, false), '슬랙 토큰 갱신이 잠시 안 됨(retry · some_new_error) — 토큰이 만료돼 이번 회차는 건너뛰고 다음 회차에 다시');
-  assert.equal(expiredSkipLine(failure, true), '슬랙 연결을 이어 가지 못함(retry · some_new_error) — 토큰이 만료돼 수집을 건너뜀, 설정 › 연동에서 다시 연결 필요');
-  for (const stalled of [false, true]) assert.ok(!re.test(expiredSkipLine(failure, stalled)) && !/채널 확인 실패/.test(expiredSkipLine(failure, stalled)));
+ assert.equal(expiredSkipLine({ kind: 'retry', reason: 'network' }, 'unreachable'), '슬랙에 닿지 못함(retry · network) — 토큰이 만료돼 수집을 건너뜀, 인터넷 연결 확인 필요');
+  assert.equal(expiredSkipLine(failure, ''), '슬랙 토큰 갱신이 잠시 안 됨(retry · some_new_error) — 토큰이 만료돼 이번 회차는 건너뛰고 다음 회차에 다시');
+  assert.equal(expiredSkipLine(failure, 'rejected'), '슬랙 연결을 이어 가지 못함(retry · some_new_error) — 토큰이 만료돼 수집을 건너뜀, 설정 › 연동에서 다시 연결 필요');
+  for (const stalled of ['', 'rejected', 'unreachable']) assert.ok(!re.test(expiredSkipLine(failure, stalled)) && !/채널 확인 실패/.test(expiredSkipLine(failure, stalled)));
   assert.equal(serverModule.slackRefresher.running(), false, '운영(직접 띄운 서버)에서만 켠다');
   assert.equal(serverModule.fetchStateAutomation({ lastKind: 'fail', lastSummary: 'my-todo 채널 확인 실패 — Slack: token_expired', failTimes: [Date.now()] }, re).stuck, true, '한 번이어도 토큰 문제면 멈춤');
 });

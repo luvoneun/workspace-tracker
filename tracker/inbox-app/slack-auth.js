@@ -38,10 +38,13 @@ const RECONNECT_ERRORS = new Set([
 ]);
 // 잠시 안 되는 갱신(retry)이 **토큰이 만료된 뒤에도** 이어지면 "이어 가지 못함"(stalled)으로 올린다 — 수집이 조용히 멈춘 채
 // 주황 `늦어요`만 영원히 보이지 않게. 판정은 상태 파일의 횟수로만 한다(값 없음).
-//   - 슬랙이 답은 했는데 거절(모르는 오류 이름·5xx·429·읽을 수 없는 답): 갱신 성공 없이 3번이면. 기다려도 풀리지 않는 쪽이라 빠르게.
-//   - 그 밖(네트워크 등): 만료된 뒤의 실패가 6번 이상이고 그 첫 실패부터 30분이 넘었으면. 실패 사이가 30분 넘게 뜨면
-//     (맥이 잠들었다 깸 — 깨어 있으면 서버가 길어야 15분마다 다시 한다) 새로 센다 — 잠깐의 끊김으로는 올라가지 않는다.
-const SLACK_ANSWERED = new Set(['slack_error', 'http', 'bad_response']);
+//   - 슬랙이 거절(200으로 답하며 모르는 오류 이름을 줌 · 읽을 수 없는 답): 갱신 성공 없이 3번이면. 기다려도 풀리지 않는 쪽이라
+//     빠르게 — `rejected`(사람이 `다시 연결`).
+//   - 그 밖(네트워크 · 슬랙 5xx·429 — 기다리면 풀리는 쪽): 만료된 뒤의 실패가 6번 이상이고 그 첫 실패부터 30분이 넘었으면
+//     — `unreachable`(다시 연결을 권하지 않는다: 연결이 돌아오면 알아서 이어진다). 실패 사이가 30분 넘게 뜨면(맥이 잠들었다 깸
+//     — 깨어 있으면 서버가 길어야 15분마다 다시 한다) 새로 세고, 마지막 실패가 30분 넘게 전이면(깬 직후, 아직 다시 해 보기 전)
+//     올리지 않는다 — 잠깐의 끊김이나 묵은 기록으로는 올라가지 않는다.
+const SLACK_ANSWERED = new Set(['slack_error', 'bad_response']);
 const STALL = { rejects: 3, downCount: 6, downMs: 30 * 60 * 1000, gapMs: 30 * 60 * 1000 };
 // 서버 타이머 — 15분마다 보고, 만료 60분 전이면 미리 갱신한다(수집은 실행 직전 10분 기준 — 서버가 꺼져 있을 때의 안전망).
 const REFRESH_TICK_MS = 15 * 60 * 1000;
@@ -487,7 +490,7 @@ function readOAuthStatus(options = {}) {
   const base = {
     auth: 'oauth', connected: false, expiresAt: null, expiresInMs: null, nextRefreshAt: null,
     scopes: [], missingScopes: [], teamId: '', teamName: '', userId: '', connectedAt: null, refreshedAt: null,
-    lastFailure: null, failCount: 0, retryAfterMs: null, nextRetryAt: null, stalled: false,
+    lastFailure: null, failCount: 0, retryAfterMs: null, nextRetryAt: null, stalled: false, stalledBy: '',
     legacyKept: fs.existsSync(paths.legacyFile), legacyKeptAt: null,
   };
   const read = readInfo(paths.oauthFile);
@@ -502,8 +505,11 @@ function readOAuthStatus(options = {}) {
   const retryAfterMs = !stale && kind === 'retry' ? retryDelayMs(failCount) : null;
   // 이어 가지 못함 — 토큰이 이미 만료됐고 잠시 안 되는 갱신이 기준(STALL)을 넘겨 이어졌다. 갱신이 되면 상태가 지워져 바로 풀린다.
   const now = clock();
-  const down = Number.isFinite(state.downSince) && (Number(state.downCount) || 0) >= STALL.downCount && now - state.downSince >= STALL.downMs;
-  const stalled = !stale && kind === 'retry' && info.expiresAt <= now && ((Number(state.rejects) || 0) >= STALL.rejects || down);
+  const down = Number.isFinite(state.downSince) && (Number(state.downCount) || 0) >= STALL.downCount && now - state.downSince >= STALL.downMs
+    && at !== null && now - at <= STALL.gapMs;
+  const live = !stale && kind === 'retry' && info.expiresAt <= now;
+  const stalledBy = !live ? '' : (Number(state.rejects) || 0) >= STALL.rejects ? 'rejected' : down ? 'unreachable' : '';
+  const stalled = !!stalledBy;
   return {
     ...base,
     connected: stale || kind !== 'reconnect',
@@ -514,7 +520,7 @@ function readOAuthStatus(options = {}) {
     teamId: trimmed(info.teamId), teamName: trimmed(info.teamName), userId: trimmed(info.userId),
     connectedAt: info.connectedAt || null, refreshedAt: info.refreshedAt || null,
     lastFailure: stale ? null : { ...fail(kind, safeCode(state.failure.reason), safeCode(state.failure.code)), at },
-    failCount, retryAfterMs, stalled,
+    failCount, retryAfterMs, stalled, stalledBy,
     nextRetryAt: retryAfterMs !== null && at !== null ? at + retryAfterMs : null,
     legacyKeptAt: info.legacyKeptAt || null,
   };

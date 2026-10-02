@@ -470,6 +470,8 @@ function slackOAuthView(config, tokenDir) {
     connected: status.connected === true,
     // 갱신이 만료 뒤에도 이어지지 않는다 — 카드가 `멈췄어요`로 올린다(서버의 integrationAlerts와 같은 값).
     stalled: status.stalled === true,
+    // 왜 이어 가지 못하나 — `rejected`(슬랙이 거절: 다시 연결) · `unreachable`(슬랙에 닿지 못함: 연결이 돌아오면 알아서 이어진다).
+    stalledBy: status.stalledBy || '',
     expiresAt: status.expiresAt, nextRefreshAt: status.nextRefreshAt,
     missingScopes: status.missingScopes || [],
     lastFailure: failure ? { kind: failure.kind, reason: failure.reason, ...(failure.code ? { code: failure.code } : {}) } : null,
