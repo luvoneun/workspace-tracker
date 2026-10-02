@@ -8560,10 +8560,20 @@ test('WP-D1 B. 슬랙 ① 토큰: 세 줄 안내 + 토큰 받는 곳 + 요청 �
   await fx.button('slack', '다음 →').listeners.click();
   assert.equal(fx.sent.length, before, 'Bot 토큰은 서버에 보내지 않는다');
 
+  // 12시간짜리 토큰(xoxe.xoxp-)은 막지 않고 붙이는 순간 한 줄로 알린다 — 다른 토큰으로 바꾸면 사라진다
+  const warn = () => fx.find('slack', 'd-ismall').find(one => one.dataset && one.dataset.slackWarn === 'rotating_token');
+  assert.equal(warn().hidden, true);
+  token.value = 'xoxe.xoxp-1-rotating';
+  token.listeners.input();
+  assert.equal(warn().hidden, false);
+  assert.equal(warn().textContent, '이 토큰은 12시간 뒤 끊겨요 — 위의 「슬랙 연결」 버튼을 쓰면 알아서 이어져요');
+  assert.equal(error(), '', '막는 오류가 아니다');
+
   // 틀린 토큰 → 그 자리에 이유, 맞는 토큰 → ② 채널로
   token.value = 'xoxp-wrong';
   token.listeners.input();
   assert.equal(error(), '', '고치면 경고가 사라진다');
+  assert.equal(warn().hidden, true);
   await fx.button('slack', '다음 →').listeners.click();
   same(fx.sent.at(-1), { url: '/api/integrations/slack-token-check', body: { token: 'xoxp-wrong' } });
   assert.equal(error(), '토큰이 맞지 않아요');
@@ -8670,6 +8680,9 @@ test('슬랙 연결 B. 누르면 빈 탭을 먼저 열고 서버가 준 슬랙 �
   assert.equal(row.getAttribute('aria-live'), 'polite');
   assert.equal(row.getAttribute('role'), 'status');
   assert.equal(row.children[0].textContent, '슬랙에서 허용을 눌러 주세요… 새 탭에 슬랙 화면이 열렸어요');
+  // 기다리는 10분 동안에도 옛 길(`고급`)이 접힌 채 보인다 — 허용 화면에서 막혔을 때 갈 곳.
+  assert.equal(fx.find('slack', 'd-iadv').length, 1);
+  assert.equal(fx.find('slack', 'd-iadv')[0].getAttribute('aria-expanded'), 'false');
   same(row.children.slice(1).map(one => one.textContent), ['다시 열기', '취소']);
   assert.equal(row.children[1].focused, true, '키보드 초점은 기다리는 줄의 첫 버튼으로');
   assert.equal(fx.button('slack', '슬랙 연결'), undefined);
@@ -8780,7 +8793,10 @@ test('슬랙 연결 C. 허용이 끝나지 않은 이유는 시안 문구 그대
     await first.app.run('renderSettingsIntegrations()');
     first.toggle('slack').listeners.click();
     const error = first.find('slack', 'd-derr')[0];
-    assert.equal(error.textContent, line);
+    // 시안 문구는 앞부분 그대로 — 버튼으로 더 갈 수 없는 둘(막힘·승인 대기)에만 빠져나갈 길을 덧붙인다.
+    const stuck = kind !== 'cancelled';
+    assert.equal(error.textContent, stuck ? `${line}. 안 되면 아래 「고급: 토큰 직접 붙여 넣기」로 연결할 수 있어요` : line);
+    assert.equal(first.find('slack', 'd-iadv').length, 1, '그 말이 가리키는 링크가 바로 아래에 있다');
     assert.equal(error.getAttribute('role'), 'alert');
     assert.equal(error.dataset.slackFail, kind);
     assert.ok(first.button('slack', '슬랙 연결'));
@@ -8790,7 +8806,12 @@ test('슬랙 연결 C. 허용이 끝나지 않은 이유는 시안 문구 그대
       connect: { ready: 'ok', waiting: false, expiresAt: null, last: { ok: false, kind, at: 1 } } });
     await lost.app.run('renderSettingsIntegrations()');
     same(statOf(lost, 'slack'), ['d-istat k-stop', '멈췄어요']);
-    assert.equal(lost.shape("window.findByClass(document.getElementById('settingsIntegrationsView').children[1], 'd-intgwhy')[0]").text, line);
+    assert.equal(lost.shape("window.findByClass(document.getElementById('settingsIntegrationsView').children[1], 'd-intgwhy')[0]").text, stuck ? `${line} · 고급: 토큰 직접 붙여 넣기` : line);
+    if (stuck) {
+      // 이유 줄 끝의 링크 — 누르면 토큰 단계가 열린다(옛 길).
+      lost.find('slack', 'd-intgwhy')[0].children.find(one => one.textContent === '고급: 토큰 직접 붙여 넣기').listeners.click();
+      assert.equal(lost.find('slack', 'd-isteps').length, 1);
+    }
   }
   assert.equal(slackConnectClient().app.run("settingsSlackFailText({ ok: false, kind: '모르는 종류' })"), '연결하지 못했어요 — 다시 눌러 주세요');
   assert.equal(slackConnectClient().app.run('settingsSlackFailText({ ok: true })'), '');
@@ -8846,6 +8867,19 @@ test('슬랙 연결 E. 풀림: `슬랙 연결이 풀렸어요 — 다시 연결 
   assert.ok(fx.sent.some(one => one.url === '/api/integrations/slack-oauth/start'));
   assert.equal(fx.find('slack', 'd-isteps').length, 0);
 
+  // 갱신이 만료 뒤에도 이어지지 않음(서버가 준 `oauth.stalled`) — 멈췄어요 + 한 줄 + `다시 연결`, 안 되면 갈 옛 길이 줄 끝에
+  const stalled = slackConnectClient({ ...SLACK_LINKED, ...OAUTH_ON, oauth: { ...OAUTH_ON.oauth, stalled: true, lastFailure: { kind: 'retry', reason: 'slack_error', code: 'some_new_error' } } });
+  await stalled.app.run('renderSettingsIntegrations()');
+  same(statOf(stalled, 'slack'), ['d-istat k-stop', '멈췄어요']);
+  assert.equal(stalled.shape("window.findByClass(document.getElementById('settingsIntegrationsView').children[1], 'd-intgwhy')[0]").text, '슬랙 연결을 이어 가지 못하고 있어요 — 다시 연결을 눌러 주세요 · 고급: 토큰 직접 붙여 넣기');
+  assert.equal(fetchButton(stalled, 'slack').textContent, '다시 연결');
+  assert.ok(!/자동 갱신 켜짐/.test(stalled.text('slack')));
+  // 잠시 안 되는 갱신(stalled 아님)은 카드가 그대로다
+  const retrying = slackConnectClient({ ...SLACK_LINKED, ...OAUTH_ON, oauth: { ...OAUTH_ON.oauth, stalled: false, lastFailure: { kind: 'retry', reason: 'network' } } });
+  await retrying.app.run('renderSettingsIntegrations()');
+  assert.equal(retrying.find('slack', 'd-intgwhy').length, 0);
+  assert.match(retrying.text('slack'), /자동 갱신 켜짐/);
+
   // 수집이 토큰 문제로 실패해도(새 방식) 같은 줄·같은 버튼
   const auth = slackConnectClient({ ...SLACK_LINKED, ...OAUTH_ON, fetch: { failing: true, auth: true, stuck: true, failedAt: ago(2), summary: 'invalid_auth' } });
   await auth.app.run('renderSettingsIntegrations()');
@@ -8879,9 +8913,15 @@ test('슬랙 연결 F. 다른 기기에서는 버튼이 회색으로 눌리지 �
   assert.equal(body.children[0].textContent, '슬랙 연결은 앱을 설치한 맥에서 해 주세요.');
   assert.equal(remote.find('slack', 'd-btn').some(one => one.className === 'd-btn pri'), false, '큰 버튼은 없다');
   assert.equal(remote.find('slack', 'd-iadv')[0].getAttribute('aria-expanded'), 'false');
+  // 회색인 것은 버튼뿐이다 — `고급`은 다른 기기에서도 열리고 토큰 단계가 그대로 선다(예전 버전에서 되던 길).
+  assert.equal(!!remote.find('slack', 'd-iadv')[0].disabled, false);
+  remote.find('slack', 'd-iadv')[0].listeners.click();
+  assert.equal(remote.find('slack', 'd-iadv')[0].getAttribute('aria-expanded'), 'true');
+  assert.equal(remote.find('slack', 'd-isteps').length, 1);
+  assert.ok(remote.find('slack', 'd-iadvbody')[0].children.length > 0);
 
   const notes = {
-    port: '지금 주소로는 슬랙 연결 버튼을 쓸 수 없어요 — 앱을 4321~4331번 포트로 열어 주세요.',
+    port: '이 주소에서는 「슬랙 연결」 버튼을 쓸 수 없어요 — 아래 「고급」으로 연결해 주세요',
     client: '슬랙 연결 버튼은 아직 준비 중이에요 — 아래에서 토큰을 직접 붙여 넣어 주세요.',
   };
   for (const [ready, line] of Object.entries(notes)) {

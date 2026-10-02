@@ -873,6 +873,9 @@ const settingsSlackTokenShape = (value) => {
   // `xoxe.xoxp-`(토큰 교체를 켠 앱의 사용자 토큰)도 맞는 모양이다. 치는 중인 앞부분은 기다린다.
   return /^(xoxe\.)?xoxp-/.test(text) || 'xoxp-'.startsWith(text) || 'xoxe.xoxp-'.startsWith(text) ? '' : SETTINGS_SLACK_NOTUSER;
 };
+// 토큰 교체를 켠 슬랙 앱의 사용자 토큰(`xoxe.xoxp-`)은 12시간짜리다 — 붙여 넣기로 저장하면 갱신할 수단이 없다.
+const settingsSlackRotating = value => /^xoxe\.xoxp-/.test(String(value || '').trim());
+const SETTINGS_SLACK_ROTATING = '이 토큰은 12시간 뒤 끊겨요 — 위의 「슬랙 연결」 버튼을 쓰면 알아서 이어져요';
 const SETTINGS_SLACK_ASK = '워크스페이스 슬랙 앱에 저를 Collaborator로 추가해 주세요';
 const SETTINGS_SLACK_TAKEN = '다른 사람이 쓰는 이름이에요 — 다른 이름을 적어 주세요';
 // 이름이 이미 있어도 내가 들어가 있는 내 채널이면 새로 만들지 않고 그 채널을 쓴다(서버가 `existing: true`로 알려 준다).
@@ -1746,7 +1749,13 @@ const SETTINGS_SLACK_CONNECT_HOW = "슬랙에서 '허용'만 누르면 돼요. �
 const SETTINGS_SLACK_WAITING = '슬랙에서 허용을 눌러 주세요… 새 탭에 슬랙 화면이 열렸어요';
 const SETTINGS_SLACK_LOST = '슬랙 연결이 풀렸어요 — 다시 연결 한 번이면 돼요';
 const SETTINGS_SLACK_REMOTE = '슬랙 연결은 앱을 설치한 맥에서 해 주세요.';
-const SETTINGS_SLACK_PORT = '지금 주소로는 슬랙 연결 버튼을 쓸 수 없어요 — 앱을 4321~4331번 포트로 열어 주세요.';
+// 갱신이 토큰 만료 뒤에도 이어지지 않는다(서버가 준 `oauth.stalled` — 빨간 점·점검하기와 같은 값).
+const SETTINGS_SLACK_STALLED = '슬랙 연결을 이어 가지 못하고 있어요 — 다시 연결을 눌러 주세요';
+// 등록된 포트(4321~4331) 밖에서 연 주소 — 포트를 바꾸라는 말은 쓰는 사람이 할 수 없는 일이라 갈 수 있는 길만 말한다.
+const SETTINGS_SLACK_PORT = '이 주소에서는 「슬랙 연결」 버튼을 쓸 수 없어요 — 아래 「고급」으로 연결해 주세요';
+// 버튼으로는 더 갈 수 없을 때(회사가 막음·승인 대기) 덧붙이는 빠져나갈 길 — 바로 아래에 `고급` 링크가 있는 자리에서만 쓴다.
+const SETTINGS_SLACK_ADV_HINT = '. 안 되면 아래 「고급: 토큰 직접 붙여 넣기」로 연결할 수 있어요';
+const settingsSlackStuckKind = last => !!last && last.ok === false && ['blocked', 'pending'].includes(last.kind);
 const SETTINGS_SLACK_NO_CLIENT = '슬랙 연결 버튼은 아직 준비 중이에요 — 아래에서 토큰을 직접 붙여 넣어 주세요.';
 const SETTINGS_SLACK_START_FAIL = '슬랙 연결을 시작하지 못했어요 — 다시 눌러 주세요';
 // 허용이 끝나지 않은 이유(서버가 종류만 준다 — `slack.connect.last.kind`).
@@ -1842,6 +1851,25 @@ function settingsSlackConnectBody(card, data, { connected = false, broken = fals
   const slack = data.slack || {};
   const connect = slack.connect || {};
   const ready = connect.ready || 'client';
+  // 옛 방식 — 접힌 글자 링크. 누르면 지금의 토큰 붙여 넣기 화면이 그대로 펼쳐진다.
+  const advanced = (open) => {
+    const adv = settingsButton('', 'd-ablink d-iadv');
+    const mark = document.createElement('span');
+    mark.setAttribute('aria-hidden', 'true');
+    adv.append(document.createTextNode('고급: 토큰 직접 붙여 넣기 '), mark);
+    const host = settingsEl('d-iadvbody');
+    host.id = 'settingsSlackAdvanced';
+    adv.setAttribute('aria-controls', host.id);
+    const setOpen = (next) => {
+      host.hidden = !next;
+      adv.setAttribute('aria-expanded', String(next));
+      mark.textContent = next ? '⌃' : '›';
+      if (next && !host.children.length) settingsSlackWizard({ body: host }, data, connected ? 'token' : 'new');
+    };
+    adv.addEventListener('click', () => setOpen(host.hidden));
+    card.body.append(adv, host);
+    setOpen(open);
+  };
   if (ready === 'ok' && connect.waiting) {
     const row = settingsEl('d-irow d-iwait');
     row.setAttribute('role', 'status');
@@ -1855,6 +1883,8 @@ function settingsSlackConnectBody(card, data, { connected = false, broken = fals
     const cancel = settingsButton('취소', 'd-ablink', () => { cancel.disabled = true; settingsSlackConnectCancel(); });
     row.append(words, again, cancel);
     card.body.appendChild(row);
+    // 기다리는 동안에도 옛 길은 보인다 — 허용 화면에서 막혔을 때(관리자 승인 등) 10분을 기다리지 않고 갈 수 있게.
+    advanced(false);
     settingsSlackWatch();
     // 누른 버튼은 다시 그리며 사라졌다 — 키보드 초점을 기다리는 줄의 첫 버튼으로 옮긴다(다른 칸에 글을 쓰는 중이면 그대로).
     if (!settingsSlackTyping()) again.focus();
@@ -1877,29 +1907,14 @@ function settingsSlackConnectBody(card, data, { connected = false, broken = fals
     if (!broken && !connected) {
       error.textContent = settingsSlackFailText(connect.last);
       if (error.textContent) error.dataset.slackFail = connect.last.kind;
+      if (settingsSlackStuckKind(connect.last)) error.textContent += SETTINGS_SLACK_ADV_HINT;
     }
     go = settingsButton(connected ? '다시 연결' : '슬랙 연결', 'd-btn pri');
     go.addEventListener('click', () => settingsSlackConnectStart(error, go));
     card.body.append(how, error, go);
   }
-  // 옛 방식 — 접힌 글자 링크. 누르면 지금의 토큰 붙여 넣기 화면이 그대로 펼쳐진다.
-  const adv = settingsButton('', 'd-ablink d-iadv');
-  const mark = document.createElement('span');
-  mark.setAttribute('aria-hidden', 'true');
-  adv.append(document.createTextNode('고급: 토큰 직접 붙여 넣기 '), mark);
-  const host = settingsEl('d-iadvbody');
-  host.id = 'settingsSlackAdvanced';
-  adv.setAttribute('aria-controls', host.id);
-  const setOpen = (open) => {
-    host.hidden = !open;
-    adv.setAttribute('aria-expanded', String(open));
-    mark.textContent = open ? '⌃' : '›';
-    if (open && !host.children.length) settingsSlackWizard({ body: host }, data, connected ? 'token' : 'new');
-  };
-  adv.addEventListener('click', () => setOpen(host.hidden));
-  card.body.append(adv, host);
   // Client ID가 없으면 토큰 붙여 넣기가 유일한 길이라 처음부터 펼쳐 둔다.
-  setOpen(ready === 'client');
+  advanced(ready === 'client');
   if (go && !card.body.hidden && !settingsSlackTyping()) go.focus();
 }
 
@@ -1956,6 +1971,11 @@ function settingsSlackWizard(card, data, mode = 'new') {
     token.input.setAttribute('aria-label', '슬랙 토큰');
     token.input.value = state.token;
     const error = settingsErrorLine();
+    // 12시간짜리 토큰이면 붙이는 순간 한 줄로 알린다(막지 않는다 — 버튼을 못 쓰는 사람의 임시 길).
+    const rotating = settingsEl('d-ismall k-warn', SETTINGS_SLACK_ROTATING);
+    rotating.dataset.slackWarn = 'rotating_token';
+    rotating.setAttribute('role', 'status');
+    rotating.hidden = !settingsSlackRotating(state.token);
     const next = settingsButton('다음 →', 'd-btn pri');
     // Bot 토큰은 서버에 보내지 않고 그 자리에서 알린다.
     // Bot(xoxb-)·앱 수준(xapp-) 등 채널을 못 읽는 토큰도 그 자리에서 알린다.
@@ -1965,6 +1985,7 @@ function settingsSlackWizard(card, data, mode = 'new') {
       const word = settingsSlackTokenShape(token.input.value);
       if (word) error.textContent = word;
       else if (shapeWords.includes(error.textContent)) error.textContent = '';
+      rotating.hidden = !settingsSlackRotating(token.input.value);
     });
     const go = async () => {
       const value = String(token.input.value || '').trim();
@@ -1984,7 +2005,7 @@ function settingsSlackWizard(card, data, mode = 'new') {
     };
     next.addEventListener('click', go);
     settingsOnEnter(token.input, go);
-    card.body.append(how, open, ask, token.wrap, error, settingsStepFoot(null, next));
+    card.body.append(how, open, ask, token.wrap, rotating, error, settingsStepFoot(null, next));
     token.input.focus();
   }
 
@@ -2510,7 +2531,9 @@ function settingsSlackCard(data) {
   const oauthOn = slack.auth === 'oauth';
   const oauth = slack.oauth || {};
   // 새 방식에서 사람이 다시 연결해야 하는 멈춤 — 갱신이 더는 안 되거나(연결이 풀림) 수집이 토큰 문제로 실패.
-  const broken = connected && oauthOn && (oauth.connected === false || !!fetchState.auth);
+  // 갱신이 만료 뒤에도 이어지지 않는 것(`oauth.stalled`)도 같은 멈춤이다 — 고치는 법이 같다(`다시 연결`).
+  const stalled = connected && oauthOn && oauth.stalled === true;
+  const broken = connected && oauthOn && (oauth.connected === false || !!fetchState.auth || stalled);
   // 허용은 끝났고 채널만 남았다 — 펼치면 채널 단계부터.
   const channelStep = !connected && oauthOn && !!slack.hasToken && oauth.connected === true;
   let card = null;
@@ -2527,8 +2550,11 @@ function settingsSlackCard(data) {
     // 이유가 따로 있으면(막힘 · 승인 대기 · 취소) 그 말로, 아니면 풀렸다는 한 줄. 고치는 법은 `다시 연결` 하나다.
     const line = document.createElement('span');
     line.dataset.slackFail = (connect.last && connect.last.kind) || 'lost';
-    line.textContent = settingsSlackFailText(connect.last) || SETTINGS_SLACK_LOST;
-    alert = { stop: true, why: [line] };
+    line.textContent = settingsSlackFailText(connect.last) || (stalled ? SETTINGS_SLACK_STALLED : SETTINGS_SLACK_LOST);
+    // 다시 연결로도 안 되는 경우(이어 가지 못함 · 회사가 막음 · 승인 대기)에는 옛 길을 이유 줄 끝에 둔다.
+    const way = stalled || settingsSlackStuckKind(connect.last)
+      ? [' · ', settingsButton('고급: 토큰 직접 붙여 넣기', 'd-ablink', () => card.open('token'))] : [];
+    alert = { stop: true, why: [line, ...way] };
   } else if (connected && fetchState.failing) {
     alert = { stop: settingsFailStop(fetchState), why: settingsFailWhy('slack', fetchState, { reconnect: !fetchState.claudeAuth }) };
   }
