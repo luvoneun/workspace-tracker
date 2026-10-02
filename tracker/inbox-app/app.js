@@ -3994,7 +3994,7 @@ function detailPopMount(box, focusFirst) {
   let host = detailPopHost;
   const anchor = panelAnchorSelector();
   // 다른 줄로 옮겨 가는 것이면, 옮기기 전의 보이는 자리를 재 둔다(진행 중인 미끄러짐까지 포함한 자리).
-  const from = host && detailPopFor !== anchor && host.getBoundingClientRect ? host.getBoundingClientRect() : null;
+  const from = host && detailPopFor !== anchor ? detailPopSpot(host) : null;
   detailPopFor = anchor;
   if (!host) {
     host = document.createElement('div');
@@ -4019,6 +4019,15 @@ function detailPopMount(box, focusFirst) {
   detailPopSlide(host, from);
   if (focusFirst) panelFocusFirst(box);
   return true;
+}
+
+// 카드가 지금 보이는 자리 — 놓인 자리(left·top)에 진행 중인 이동(transform의 옮김 값)을 더한다.
+// 등장 중의 크기 변화(scale)는 세지 않는다(getBoundingClientRect로 재면 줄어든 만큼 자리가 어긋난다).
+function detailPopSpot(host) {
+  let dx = 0;
+  let dy = 0;
+  try { const now = new DOMMatrix(getComputedStyle(host).transform); dx = now.e || 0; dy = now.f || 0; } catch { /* 옮김 없음으로 본다 */ }
+  return { left: (parseFloat(host.style.left) || 0) + dx, top: (parseFloat(host.style.top) || 0) + dy };
 }
 
 // 다른 줄을 누르면 카드가 순간 이동하지 않고 그 줄로 미끄러져 간다(200ms, 넘침 없음 — transform만). 내용은 바로 바뀐다.

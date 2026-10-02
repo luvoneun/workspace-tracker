@@ -17038,3 +17038,86 @@ test('검색 팔레트(줄임): ⌘K 연타 — 닫히는 80ms 안에 다시 열
   reduce.app.run('palOpen({}); palClose();');
   assert.equal(reduce.roots().length, 0);
 });
+
+// ---- 모션 빠짐 방지 장치(가-2): 여는 길 하나 ----
+// 떠 있는 것은 공용 도우미(uiFloatOpen·uiFloatPlace·uiFloatClose)로만 여닫는다. 글자 찾기 수준의 시험이라 돌려 쓴 표현은 못 잡는다 —
+// 그래서 세 군데를 본다: ① 화면에 직접 붙이는 줄 ② 창을 여는 줄(showModal) ③ CSS의 화면 고정(position: fixed) 규칙.
+// 아직 공용 길 밖에 있는 것은 아래 예외 목록에 [파일, 글자, 맡은 묶음(B2·D·E·남김), 이유]로 있어야 한다.
+const FLOAT_OPEN_OUTSIDE = [
+  ['app.js', 'document.body.appendChild(panelScrimEl)', '남김', '좁은 폭 시트의 가림막 — 한 번 붙여 두고 hidden으로 켜고 끄는 요소다. 닫힘은 uiFloatGhost가 재생한다'],
+  ['checkin-ui.js', 'document.body.appendChild(dialog)', 'B2', '체크인 창(dialog) — 창 부품에서 정한다'],
+  ['usage-ui.js', 'document.body.appendChild(dialog)', 'B2', '내 일 기록 창(dialog) — 창 부품에서 정한다'],
+];
+const FLOAT_MODAL_OUTSIDE = [
+  ['checkin-ui.js', 2, 'B2', '체크인 창 — 창 부품에서 정한다(다시 열기 포함 두 곳)'],
+  ['settings-ui.js', 1, 'B2', '설정 창 — 창 부품에서 정한다'],
+  ['usage-ui.js', 1, 'B2', '내 일 기록 창 — 창 부품에서 정한다'],
+  ['wrap-ui.js', 1, 'B2', '오늘 정리 창 — 창 부품에서 정한다'],
+];
+// 화면 고정 규칙: 뜨는 것 부품을 쓰는 것(화면 코드가 uiFloatOpen으로 붙이거나 부품 클래스를 건다)과, 아직 아닌 것.
+const FLOAT_FIXED_PART = ['.d-menulist', '.d-schedpop', '.d-popd', '.d-pal', '.d-side'];
+const FLOAT_FIXED_OUTSIDE = [
+  ['.pull-indicator', 'E', '당겨서 새로고침 표시 — 기다림 부품에서 정한다'],
+  ['.d-toast', 'B2', '알림 — showNotice 정의를 고치지 않고 CSS로 닫힘을 준다'],
+  ['.d-selbar', 'B2', '선택 막대 — hidden으로 켜고 끈다. CSS로 닫힘을 준다'],
+  ['.d-drawer', 'D', '나중에 할 일 서랍 — 펼침 부품(본문을 밀어내는 면)'],
+  ['.d-scrim:not([hidden])', '남김', '시트 가림막 — 뜨는 것의 나타남·사라짐 키프레임을 그대로 쓴다'],
+];
+
+test('모션 장치: 여는 길 하나 — 화면에 직접 붙이는 줄·showModal·화면 고정 규칙은 공용 "뜨는 것"을 거치거나 예외 목록(이유·맡은 묶음)에 있다', () => {
+  const sources = floatClientSources();
+  const reasons = rows => rows.forEach((row) => { assert.match(row[row.length - 2], /^(B2|C|D|E|F|남김)$/, `맡은 묶음: ${row[0]}`); assert.ok(row[row.length - 1].length >= 8, `이유를 적는다: ${row[0]}`); });
+  reasons(FLOAT_OPEN_OUTSIDE); reasons(FLOAT_MODAL_OUTSIDE); reasons(FLOAT_FIXED_OUTSIDE);
+
+  // ① 화면(body)에 직접 붙이는 줄
+  const attach = /document\.body\s*\)?\s*\.\s*(?:appendChild|append|prepend|insertBefore|insertAdjacentElement)\([^\n;]*/g;
+  const found = [];
+  Object.entries(sources).forEach(([file, text]) => { for (const [line] of text.matchAll(attach)) found.push(`${file} | ${line.replace(/\)\s*$/, ')')}`); });
+  const allowed = FLOAT_OPEN_OUTSIDE.map(([file, text]) => `${file} | ${text}`);
+  assert.deepEqual(found.filter(line => !allowed.includes(line)), [], '떠 있는 것은 uiFloatOpen으로 붙인다 — 정말 다른 길이어야 하면 예외 목록에 이유와 함께');
+  assert.deepEqual(allowed.filter(line => !found.includes(line)), [], '예외 목록에 있지만 이제 없는 줄 — 목록에서 지운다');
+
+  // ② 창(dialog)을 여는 줄 — B2에서 창 부품으로 옮긴다
+  const modals = Object.entries(sources).map(([file, text]) => [file, (text.match(/\.showModal\??\.?\(/g) || []).length]).filter(([, count]) => count);
+  assert.deepEqual(modals, FLOAT_MODAL_OUTSIDE.map(([file, count]) => [file, count]));
+
+  // ③ CSS의 화면 고정 규칙
+  const fixed = [];
+  MOTION_CSS_FILES.forEach((file) => {
+    const css = fs.readFileSync(path.join(__dirname, file), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) if (/position:\s*fixed/.test(body)) fixed.push(selector.trim().replace(/\s+/g, ' '));
+  });
+  const known = [...FLOAT_FIXED_PART, ...FLOAT_FIXED_OUTSIDE.map(([selector]) => selector)];
+  assert.deepEqual(fixed.filter(selector => !known.includes(selector)), [], '화면에 고정으로 뜨는 새 요소 — 뜨는 것 부품으로 여닫고 FLOAT_FIXED_PART에 더한다');
+  assert.deepEqual(known.filter(selector => !fixed.includes(selector)), [], '목록에 있지만 이제 고정 규칙이 아닌 것 — 목록에서 지운다');
+
+  // 부품을 쓰는 것은 실제로 공용 길을 지난다: 붙이는 곳 다섯, 닫힘 클래스를 거는 곳은 uiFloatGhost 하나.
+  const opens = Object.entries(sources).flatMap(([file, text]) => [...text.matchAll(/uiFloatOpen\((\w+)/g)].map(m => `${file} ${m[1]}`));
+  assert.deepEqual(opens.sort(), ['app.js el', 'app.js host', 'app.js list', 'app.js pop', 'app.js root', 'meetings-ui.js pop'], '(app.js el은 도우미 정의)');
+  const outs = Object.entries(sources).flatMap(([file, text]) => [...text.matchAll(/classList\.add\('is-out'\)/g)].map(() => file));
+  assert.deepEqual(outs, ['app.js'], '닫힘 클래스(is-out)는 uiFloatGhost만 건다');
+  assert.match(sources['app.js'].slice(sources['app.js'].indexOf('function uiFloatGhost'), sources['app.js'].indexOf('function uiFloatClose')), /ghost\.classList\.add\('is-out'\);/);
+  // 시트(.d-side)는 붙어 있는 요소라 클래스를 건다.
+  assert.match(sources['app.js'], /side\.classList\.add\('d-float', 'is-sheet'\);/);
+});
+
+test('입력 보류 장치 불변: uiRenderOrHold·uiHeldFlush·uiRenderHeld·uiHoldArm·replayUndo는 한 글자도 바뀌지 않았다(뜨는 것의 닫힘 재생은 이 장치 밖에서 돈다)', () => {
+  // 바꿔야 할 일이 생기면 이 값도 함께 바꾼다 — 검토에서 눈에 띄게 하려는 자물쇠다.
+  const crypto = require('node:crypto');
+  const source = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const fnSource = (name) => {
+    const at = source.indexOf(`function ${name}(`);
+    const from = source.lastIndexOf('\n', at) + 1;
+    let depth = 0;
+    for (let i = source.indexOf('{', at); i < source.length; i += 1) {
+      if (source[i] === '{') depth += 1;
+      else if (source[i] === '}' && --depth === 0) return source.slice(from, i + 1);
+    }
+    return '';
+  };
+  const hash = name => crypto.createHash('sha256').update(fnSource(name)).digest('hex').slice(0, 16);
+  same(Object.fromEntries(['uiRenderOrHold', 'uiHeldFlush', 'uiRenderHeld', 'uiHoldArm', 'replayUndo'].map(name => [name, hash(name)])), {
+    uiRenderOrHold: '68805031256deebb', uiHeldFlush: '992dc2c5f3314d64', uiRenderHeld: '690e256dad4c416d',
+    uiHoldArm: 'c4f238c73bfcb559', replayUndo: '7f98d7faa77c546d',
+  });
+});
