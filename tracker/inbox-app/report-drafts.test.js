@@ -11,7 +11,7 @@ function fixture(t,legacy=[]) {
   return {directory,items,store,view,change};
 }
 test('reading automatic drafts never writes and preserves source wording',t=>{
-  const f=fixture(t);assert.equal(f.view().rows[0].text,'문구 검토함');assert.deepEqual(fs.readdirSync(f.directory),[]);
+  const f=fixture(t);assert.equal(f.view().rows[0].text,'문구 검토');assert.deepEqual(fs.readdirSync(f.directory),[]);
 });
 test('edited sentences survive new evidence; proposal is explicit',t=>{
   const f=fixture(t),id=f.view().rows[0].id;f.change({action:'edit',id,text:'가입 문구 검토 완료'});
@@ -30,9 +30,9 @@ test('슬랙 원문처럼 긴 할 일 문구는 첫 문장(또는 80자)까지�
   const rows=f.view().rows,byId=id=>rows.find(row=>row.sourceIds.includes(id));
   assert.equal(byId('a').text,'결제 화면 오류 문의 대응하기. 고객센터에서 받은 스크린샷 세 장과 재현 절차를 정리해 두었어요!','80자가 넘으면 20자 넘게 간 뒤 첫 문장 끝까지');
   assert.equal(byId('a').evidence[0].description,long,'근거에는 전문이 남는다');
-  assert.equal(byId('v').text,'v2.1 배포 확인함','버전 번호 속 점에서 자르지 않는다 · 짧은 문구는 예전 그대로');
+  assert.equal(byId('v').text,'v2.1 배포 확인','버전 번호 속 점에서 자르지 않는다 · 짧은 문구는 예전 그대로');
   assert.equal(byId('n').text,`${'가'.repeat(80)}…`);
-  assert.equal(byId('s').text,'1. 기획서 정리 2. 공유하기','80자 이하는 마침표가 있어도 자르지 않는다(기존 보고 불변)');
+  assert.equal(byId('s').text,'1. 기획서 정리 2. 공유','80자 이하는 마침표가 있어도 자르지 않는다(끝말 `하기`만 뗀다)');
   assert.equal(byId('d').text,'환불은 7일. 그 뒤는 부분 환불','할 일이 아닌 것은 그대로');
 });
 test('stale revision cannot erase newly collected work',t=>{
@@ -56,7 +56,7 @@ test('past report never imports future decisions or current running tasks',t=>{
 test('merge rejects completion-state mixing and undo restores edited text',t=>{
   const f=fixture(t);f.items.push({...f.items[0],id:'b',status:'to-do',doing:'2026-09-15'});
   assert.throws(()=>f.change({action:'merge',ids:f.view().rows.map(row=>row.id)}));
-  const id=f.view().rows[0].id,result=f.change({action:'edit',id,text:'편집'});f.change({action:'undo',token:result.undoToken});assert.equal(f.view().rows[0].text,'문구 검토함');
+  const id=f.view().rows[0].id,result=f.change({action:'edit',id,text:'편집'});f.change({action:'undo',token:result.undoToken});assert.equal(f.view().rows[0].text,'문구 검토');
 });
 test('corrupt report storage is never silently reset',t=>{
   const f=fixture(t);fs.writeFileSync(path.join(f.directory,'.report-drafts.json'),'{bad');assert.throws(()=>f.view());assert.equal(fs.readFileSync(path.join(f.directory,'.report-drafts.json'),'utf8'),'{bad');
@@ -140,7 +140,7 @@ test('후보에서 담은 계획 문장은 planOf만 들고, 그 업무의 이�
   const after=f.view().rows.find(row=>row.heading==='진행중');
   assert.ok(after,'담아도 이번 주 진행중 문장은 사라지지 않는다');
   assert.deepEqual(after.sourceIds,['r']);
-  assert.equal(after.text,'정산 배치 설계하기');
+  assert.equal(after.text,'정산 배치 설계');
 });
 test('planOf는 clean·carry·새 인스턴스를 거쳐도 보존되고, 없으면 붙지 않는다',t=>{
   const f=fixture(t);
@@ -211,8 +211,8 @@ function mergeFixture(t) {
     {id:'b',type:'task',description:'알림 배너 정리하기',status:'done',created:'2026-09-14',completed:'2026-09-15',group:'알림'},
     {id:'c',type:'task',description:'정산 배치 설계하기',status:'done',created:'2026-09-14',completed:'2026-09-15',group:'결제'},
   );
-  // 두 문장만 묶고 셋째(`정산 배치 설계함`)는 낱 문장으로 남겨 둔다.
-  f.mergeTwo=()=>f.change({action:'merge',ids:f.view().rows.filter(row=>row.text!=='정산 배치 설계함').map(row=>row.id)});
+  // 두 문장만 묶고 셋째(`정산 배치 설계`)는 낱 문장으로 남겨 둔다.
+  f.mergeTwo=()=>f.change({action:'merge',ids:f.view().rows.filter(row=>row.text!=='정산 배치 설계').map(row=>row.id)});
   f.merged=()=>f.view().rows.find(row=>row.canSplit);
   f.savedRows=()=>JSON.parse(fs.readFileSync(path.join(f.directory,REPORT_FILE),'utf8')).weeks['2026-09-14'].rows;
   return f;
@@ -223,12 +223,12 @@ test('묶은 문장은 묶기 전 문장을 함께 저장하고, 화면에는 �
   assert.equal(merged.partCount,2);
   assert.equal(merged.parts,undefined,'묶기 전 문장 전체는 화면으로 내보내지 않는다');
   const parts=f.savedRows().find(row=>row.parts).parts;
-  assert.deepEqual(parts.map(part=>part.text).sort(),['문구 검토함','알림 배너 정리함']);
+  assert.deepEqual(parts.map(part=>part.text).sort(),['문구 검토','알림 배너 정리']);
   assert.deepEqual(parts.map(part=>part.group).sort(),['가입','알림']);
 });
 test('묶음 풀기는 묶기 전 문장을 그대로 되살린다',t=>{
   const f=mergeFixture(t);
-  const shape=rows=>rows.filter(row=>row.text!=='정산 배치 설계함').map(row=>[row.text,row.group,row.sourceIds,!!row.excluded]);
+  const shape=rows=>rows.filter(row=>row.text!=='정산 배치 설계').map(row=>[row.text,row.group,row.sourceIds,!!row.excluded]);
   const before=shape(f.view().rows);
   f.mergeTwo();
   f.change({action:'split',id:f.merged().id});
@@ -237,11 +237,11 @@ test('묶음 풀기는 묶기 전 문장을 그대로 되살린다',t=>{
 });
 test('묶음을 다시 묶은 것을 풀면 한 단계만 풀린다',t=>{
   const f=mergeFixture(t);f.mergeTwo();
-  f.change({action:'merge',ids:[f.merged().id,f.view().rows.find(row=>row.text==='정산 배치 설계함').id]});
+  f.change({action:'merge',ids:[f.merged().id,f.view().rows.find(row=>row.text==='정산 배치 설계').id]});
   assert.equal(f.view().rows.length,1);
   f.change({action:'split',id:f.merged().id});
   assert.equal(f.view().rows.length,2,'바깥 묶음만 풀려 안쪽 묶음 하나와 낱 문장 하나가 된다');
-  assert.equal(f.merged().text,'문구 검토함\n알림 배너 정리함');
+  assert.equal(f.merged().text,'문구 검토\n알림 배너 정리');
   assert.equal(f.merged().partCount,2);
   f.change({action:'split',id:f.merged().id});
   assert.equal(f.view().rows.length,3);
@@ -258,7 +258,7 @@ test('묶음을 푼 뒤 되돌리면 다시 묶음 상태가 된다',t=>{
   const result=f.change({action:'split',id:f.merged().id});
   assert.equal(f.merged(),undefined);
   f.change({action:'undo',token:result.undoToken});
-  assert.equal(f.merged().text,'문구 검토함\n알림 배너 정리함');
+  assert.equal(f.merged().text,'문구 검토\n알림 배너 정리');
   assert.equal(f.merged().partCount,2,'되돌린 묶음도 다시 풀 수 있다');
 });
 test('저장 파일을 새로 읽어도(새 인스턴스) 묶음을 풀 수 있다',t=>{
@@ -267,7 +267,7 @@ test('저장 파일을 새로 읽어도(새 인스턴스) 묶음을 풀 수 있�
   const view=()=>fresh.view('2026-09-14');
   assert.equal(view().rows.find(row=>row.canSplit).partCount,2);
   fresh.change({weekKey:'2026-09-14',revision:view().revision,action:'split',id:view().rows.find(row=>row.canSplit).id});
-  assert.deepEqual(view().rows.map(row=>row.text).sort(),['문구 검토함','알림 배너 정리함','정산 배치 설계함'].sort());
+  assert.deepEqual(view().rows.map(row=>row.text).sort(),['문구 검토','알림 배너 정리','정산 배치 설계'].sort());
   assert.equal(view().rows.some(row=>row.canSplit),false);
 });
 test('묶기 전 문장이 없는 옛 묶음은 그대로 읽히고, 풀기만 할 수 없다',t=>{
@@ -275,7 +275,7 @@ test('묶기 전 문장이 없는 옛 묶음은 그대로 읽히고, 풀기만 �
   const file=path.join(f.directory,REPORT_FILE),saved=JSON.parse(fs.readFileSync(file,'utf8'));
   saved.weeks['2026-09-14'].rows.forEach(row=>{delete row.parts;});
   fs.writeFileSync(file,JSON.stringify(saved,null,2));
-  const merged=f.view().rows.find(row=>row.text==='문구 검토함\n알림 배너 정리함');
+  const merged=f.view().rows.find(row=>row.text==='문구 검토\n알림 배너 정리');
   assert.ok(merged,'옛 묶음 문장은 그대로 읽힌다');
   assert.equal(merged.canSplit,undefined);
   assert.throws(()=>f.change({action:'split',id:merged.id}),/풀 수 없어요/);
@@ -296,24 +296,24 @@ function nestFixture(t) {
 }
 test('문장을 다른 문장 아래로 넣으면 글자는 그대로 두고 부모 바로 뒤에 선다',t=>{
   const f=nestFixture(t);
-  assert.deepEqual(f.shape(),[['문구 검토함',null],['정산 배치 설계함',null],['알림 배너 정리함',null]],'넣기 전에는 프로젝트 이름순이다');
-  const parent=f.row('문구 검토함').id;
-  f.change({action:'nest',id:f.row('알림 배너 정리함').id,parentId:parent});
-  assert.deepEqual(f.shape(),[['문구 검토함',null],['알림 배너 정리함',parent],['정산 배치 설계함',null]],'넣은 문장은 부모 바로 뒤로 온다');
-  assert.equal(f.row('알림 배너 정리함').text,'알림 배너 정리함','글자는 합치지 않는다');
-  assert.equal(f.row('알림 배너 정리함').group,'알림','프로젝트·근거도 그대로 남는다');
-  assert.deepEqual(f.row('알림 배너 정리함').sourceIds,['b']);
+  assert.deepEqual(f.shape(),[['문구 검토',null],['정산 배치 설계',null],['알림 배너 정리',null]],'넣기 전에는 프로젝트 이름순이다');
+  const parent=f.row('문구 검토').id;
+  f.change({action:'nest',id:f.row('알림 배너 정리').id,parentId:parent});
+  assert.deepEqual(f.shape(),[['문구 검토',null],['알림 배너 정리',parent],['정산 배치 설계',null]],'넣은 문장은 부모 바로 뒤로 온다');
+  assert.equal(f.row('알림 배너 정리').text,'알림 배너 정리','글자는 합치지 않는다');
+  assert.equal(f.row('알림 배너 정리').group,'알림','프로젝트·근거도 그대로 남는다');
+  assert.deepEqual(f.row('알림 배너 정리').sourceIds,['b']);
   // 여러 개를 넣으면 넣은 순서대로 부모 뒤에 줄을 선다.
-  f.change({action:'nest',id:f.row('정산 배치 설계함').id,parentId:parent});
-  assert.deepEqual(f.shape().map(([text])=>text),['문구 검토함','알림 배너 정리함','정산 배치 설계함']);
+  f.change({action:'nest',id:f.row('정산 배치 설계').id,parentId:parent});
+  assert.deepEqual(f.shape().map(([text])=>text),['문구 검토','알림 배너 정리','정산 배치 설계']);
   // 따로 빼면 원래 자리로 돌아간다.
-  f.change({action:'unnest',id:f.row('알림 배너 정리함').id});
-  assert.deepEqual(f.shape(),[['문구 검토함',null],['정산 배치 설계함',parent],['알림 배너 정리함',null]]);
+  f.change({action:'unnest',id:f.row('알림 배너 정리').id});
+  assert.deepEqual(f.shape(),[['문구 검토',null],['정산 배치 설계',parent],['알림 배너 정리',null]]);
 });
 test('아래로 넣기는 같은 상태의 낱 문장끼리만 된다',t=>{
   const f=nestFixture(t);
   f.items.push({id:'d',type:'task',description:'진행 중인 일',status:'to-do',created:'2026-09-14',doing:'2026-09-15',group:'가입'});
-  const a=f.row('문구 검토함').id,b=f.row('알림 배너 정리함').id,c=f.row('정산 배치 설계함').id,doing=f.row('진행 중인 일').id;
+  const a=f.row('문구 검토').id,b=f.row('알림 배너 정리').id,c=f.row('정산 배치 설계').id,doing=f.row('진행 중인 일').id;
   assert.throws(()=>f.change({action:'nest',id:b,parentId:'없는-행'}),/찾을 수 없어요/);
   assert.throws(()=>f.change({action:'nest',id:b}),/찾을 수 없어요/,'부모를 적지 않으면 거절한다');
   assert.throws(()=>f.change({action:'nest',id:b,parentId:b}),/찾을 수 없어요/,'자기 자신 아래로는 넣을 수 없다');
@@ -330,7 +330,7 @@ test('아래로 넣기는 같은 상태의 낱 문장끼리만 된다',t=>{
 });
 test('자동 초안 문장을 넣어도 id는 그대로고 원본을 계속 따라온다',t=>{
   const f=nestFixture(t);
-  const a=f.row('문구 검토함').id,b=f.row('알림 배너 정리함').id;
+  const a=f.row('문구 검토').id,b=f.row('알림 배너 정리').id;
   assert.ok(a.startsWith('auto-')&&b.startsWith('auto-'),'아직 저장되지 않은 자동 초안이다');
   f.change({action:'nest',id:b,parentId:a});
   assert.deepEqual(f.savedRows().map(row=>row.id).sort(),f.view().rows.map(row=>row.id).sort(),'넣는 순간 모든 행이 저장 행이 된다');
@@ -339,13 +339,13 @@ test('자동 초안 문장을 넣어도 id는 그대로고 원본을 계속 따�
   f.items.find(item=>item.id==='b').description='알림 배너 정리 마무리하기';
   f.items.find(item=>item.id==='a').outcome='가입 문구 확정';
   const after=f.view().rows;
-  assert.equal(after.find(row=>row.id===b).text,'알림 배너 정리 마무리함');
+  assert.equal(after.find(row=>row.id===b).text,'알림 배너 정리 마무리');
   assert.equal(after.find(row=>row.id===a).text,'가입 문구 확정');
   assert.equal(after.find(row=>row.id===b).parent,a,'id가 그대로라 들여쓰기도 그대로다');
 });
 test('부모가 사라지거나 제외되거나 상태가 달라지면 넣었던 문장은 최상위로 보인다',t=>{
   const f=nestFixture(t);
-  const a=f.row('문구 검토함').id,b=f.row('알림 배너 정리함').id;
+  const a=f.row('문구 검토').id,b=f.row('알림 배너 정리').id;
   f.change({action:'nest',id:b,parentId:a});
   // ① 부모를 제외하면 자식은 최상위로 보이고, 복원하면 다시 들어간다(저장값은 그대로다).
   f.change({action:'exclude',id:a});
@@ -369,7 +369,7 @@ test('부모가 사라지거나 제외되거나 상태가 달라지면 넣었던
 });
 test('아래로 넣기는 되돌릴 수 있고, 저장 파일을 새로 읽어도 그대로다',t=>{
   const f=nestFixture(t);
-  const a=f.row('문구 검토함').id,b=f.row('알림 배너 정리함').id;
+  const a=f.row('문구 검토').id,b=f.row('알림 배너 정리').id;
   const result=f.change({action:'nest',id:b,parentId:a});
   f.change({action:'undo',token:result.undoToken});
   assert.equal(f.view().rows.find(row=>row.id===b).parent,undefined,'되돌리면 넣기 전으로 돌아간다');
@@ -384,7 +384,7 @@ test('아래로 넣기는 되돌릴 수 있고, 저장 파일을 새로 읽어�
 test('옛 데이터와 요청 본문의 임의 필드는 아래로 넣기에 영향을 주지 않는다',t=>{
   const f=nestFixture(t);
   // `parent`가 없던 옛 행은 그대로 읽히고, 요청에 직접 적어 보낸 `parent`는 무시된다.
-  const a=f.row('문구 검토함').id,b=f.row('알림 배너 정리함').id;
+  const a=f.row('문구 검토').id,b=f.row('알림 배너 정리').id;
   f.change({action:'edit',id:b,text:'직접 고친 문장',parent:a,rows:[],parts:[{text:'끼워 넣기'}]});
   const saved=f.savedRows().find(row=>row.id===b);
   assert.equal(saved.parent,undefined,'서버가 검증한 id만 `parent`로 저장한다');
@@ -399,7 +399,7 @@ test('a historical saved draft is not silently rewritten by source changes',t=>{
   const f=fixture(t);f.items[0].created='2026-09-01';f.items[0].completed='2026-09-02';
   let old=f.store.view('2026-08-31');f.store.change({weekKey:old.weekKey,revision:old.revision,action:'add',text:'기록 보존'});
   f.items[0].description='이후 수정된 제목';old=f.store.view('2026-08-31');
-  assert.equal(old.rows.find(row=>row.sourceIds.includes('a')).text,'문구 검토함');
+  assert.equal(old.rows.find(row=>row.sourceIds.includes('a')).text,'문구 검토');
 });
 // 확인 대기도 답변 한 줄(outcome)을 가질 수 있다 — `확인 완료` 문장은 그 한 줄이 되고, 없으면 문구 그대로다.
 test('확인 완료 문장은 답변 한 줄이 있으면 그것을 쓰고, 없으면 확인 대기 문구를 그대로 쓴다',t=>{
@@ -630,7 +630,7 @@ test('BMOVE: 옮긴 뒤 별칭을 바꿔도(지웠어도) 되돌리기는 group�
 test('한 줄로 모으기 검증: 최소 개수·같은 상태·제외 안 함·중첩 금지·요약 글 길이',t=>{
   const f=nestFixture(t);
   f.items.push({id:'d',type:'task',description:'가입 배너 문구 확인하기',status:'done',created:'2026-09-14',completed:'2026-09-15',group:'가입'});
-  const a=f.row('문구 검토함').id,b=f.row('알림 배너 정리함').id,c=f.row('정산 배치 설계함').id,d=f.row('가입 배너 문구 확인함').id;
+  const a=f.row('문구 검토').id,b=f.row('알림 배너 정리').id,c=f.row('정산 배치 설계').id,d=f.row('가입 배너 문구 확인').id;
   assert.throws(()=>f.change({action:'fold',ids:[a],text:'요약'}),/두 개 이상 골라 주세요/);
   assert.throws(()=>f.change({action:'fold',ids:[a,a],text:'요약'}),/두 개 이상 골라 주세요/,'중복도 거절한다');
   f.items.push({id:'e',type:'task',description:'진행 중인 일',status:'to-do',created:'2026-09-14',doing:'2026-09-15',group:'가입'});
@@ -656,23 +656,23 @@ test('한 줄로 모으기: 새 부모는 먼저 고른 문장이 서 있던 자
     {id:'c',type:'task',description:'가입 온보딩 문구 확정하기',status:'done',created:'2026-09-14',completed:'2026-09-15',group:'가입'},
   );
   const row=text=>f.view().rows.find(r=>r.text===text);
-  assert.deepEqual(f.view().rows.map(r=>r.text),['문구 검토함','가입 배너 문구 확인함','가입 온보딩 문구 확정함'],'같은 프로젝트 안에서는 원본 순서 그대로다');
-  const a=row('문구 검토함').id,b=row('가입 배너 문구 확인함').id;
+  assert.deepEqual(f.view().rows.map(r=>r.text),['문구 검토','가입 배너 문구 확인','가입 온보딩 문구 확정'],'같은 프로젝트 안에서는 원본 순서 그대로다');
+  const a=row('문구 검토').id,b=row('가입 배너 문구 확인').id;
   const result=f.change({action:'fold',ids:[a,b],text:'가입 소소한 작업 2건'});
   const after=f.view().rows;
   assert.equal(after[0].text,'가입 소소한 작업 2건','새 부모가 먼저 고른 문장(맨 앞)의 자리를 그대로 쓴다');
   assert.equal(after[0].group,'가입','같은 프로젝트를 모으면 그 프로젝트로 남는다');
   assert.deepEqual(after.map(r=>[r.text,r.parent||null]),[
     ['가입 소소한 작업 2건',null],
-    ['문구 검토함',after[0].id],
-    ['가입 배너 문구 확인함',after[0].id],
-    ['가입 온보딩 문구 확정함',null],
+    ['문구 검토',after[0].id],
+    ['가입 배너 문구 확인',after[0].id],
+    ['가입 온보딩 문구 확정',null],
   ]);
   assert.ok(result.undoToken);
 });
 test('한 줄로 모으기: 프로젝트가 다르면 여러 프로젝트로 묶이고, folded:true·manual인 새 부모가 생긴다',t=>{
   const f=nestFixture(t);
-  const a=f.row('문구 검토함').id,b=f.row('알림 배너 정리함').id;
+  const a=f.row('문구 검토').id,b=f.row('알림 배너 정리').id;
   f.change({action:'fold',ids:[a,b],text:'소소한 작업 2건'});
   const parent=f.view().rows.find(row=>row.manual);
   assert.equal(parent.text,'소소한 작업 2건');
@@ -689,7 +689,7 @@ test('한 줄로 모으기: 프로젝트가 다르면 여러 프로젝트로 묶
 });
 test('setFolded는 아래에 문장이 있는 최상위 문장만 접고 펼치며, 기존 nest 부모에도 쓸 수 있다',t=>{
   const f=nestFixture(t);
-  const a=f.row('문구 검토함').id,b=f.row('알림 배너 정리함').id;
+  const a=f.row('문구 검토').id,b=f.row('알림 배너 정리').id;
   assert.throws(()=>f.change({action:'setFolded',id:a,folded:true}),/아래에 문장이 있는 문장만 접을 수 있어요/,'아직 아무것도 안 들어간 문장은 접을 수 없다');
   f.change({action:'nest',id:b,parentId:a});
   assert.throws(()=>f.change({action:'setFolded',id:b,folded:true}),/아래에 문장이 있는 문장만 접을 수 있어요/,'자식 문장은 최상위가 아니라 접을 수 없다');
@@ -700,7 +700,7 @@ test('setFolded는 아래에 문장이 있는 최상위 문장만 접고 펼치�
 });
 test('unfold: 사람이 지은 요약 부모는 지워지고, 원래 문장을 부모로 쓴 묶음은 남아서 펼쳐진다',t=>{
   const f=nestFixture(t);
-  const a=f.row('문구 검토함').id,b=f.row('알림 배너 정리함').id,c=f.row('정산 배치 설계함').id;
+  const a=f.row('문구 검토').id,b=f.row('알림 배너 정리').id,c=f.row('정산 배치 설계').id;
   f.change({action:'nest',id:b,parentId:a});
   f.change({action:'setFolded',id:a,folded:true});
   f.change({action:'unfold',id:a});
@@ -721,7 +721,7 @@ test('unfold: 사람이 지은 요약 부모는 지워지고, 원래 문장을 �
 });
 test('unnest: manual 부모의 마지막 아래 문장을 빼면 그 부모도 함께 지워지고, 원래 문장 부모는 남는다',t=>{
   const f=nestFixture(t);
-  const a=f.row('문구 검토함').id,b=f.row('알림 배너 정리함').id,c=f.row('정산 배치 설계함').id;
+  const a=f.row('문구 검토').id,b=f.row('알림 배너 정리').id,c=f.row('정산 배치 설계').id;
   f.change({action:'fold',ids:[a,b],text:'소소한 작업 2건'});
   const parentId=f.view().rows.find(row=>row.manual).id;
   f.change({action:'unnest',id:a});
@@ -735,7 +735,7 @@ test('unnest: manual 부모의 마지막 아래 문장을 빼면 그 부모도 �
 });
 test('view: folded를 그대로 내보내고, manual 부모 아래가 고아 규칙으로 전부 비면 화면에서만 숨기고 저장은 지우지 않는다',t=>{
   const f=nestFixture(t);
-  const a=f.row('문구 검토함').id,b=f.row('알림 배너 정리함').id;
+  const a=f.row('문구 검토').id,b=f.row('알림 배너 정리').id;
   f.change({action:'fold',ids:[a,b],text:'소소한 작업 2건'});
   const parentId=f.view().rows.find(row=>row.manual).id;
   assert.equal(f.view().rows.find(row=>row.id===parentId).folded,true,'view가 folded를 그대로 내보낸다');
@@ -757,7 +757,7 @@ test('view: folded를 그대로 내보내고, manual 부모 아래가 고아 규
 });
 test('한 줄로 모으기는 되돌릴 수 있고, 저장 파일을 새로 읽어도 유지된다',t=>{
   const f=nestFixture(t);
-  const a=f.row('문구 검토함').id,b=f.row('알림 배너 정리함').id;
+  const a=f.row('문구 검토').id,b=f.row('알림 배너 정리').id;
   const before=f.shape();
   const result=f.change({action:'fold',ids:[a,b],text:'소소한 작업 2건'});
   f.change({action:'undo',token:result.undoToken});
@@ -800,37 +800,37 @@ test('다듬기 A: 보고 제목은 저장되고 비우면 원래대로, 60자 �
 });
 test('다듬기 A: 소제목 이름은 그 소제목의 프로젝트에 묶이고, 새 업무도 바뀐 소제목 아래로 들어가며 원래 이름이 함께 온다',t=>{
   const f=polishFixture(t,{labels:{'group:가입':'가입'}});
-  const a=f.row('문구 검토함');
+  const a=f.row('문구 검토');
   assert.equal(a.groupKey,'group:가입');
   assert.equal(a.shownGroup,undefined,'바꾸기 전에는 저장된 이름 그대로(따로 싣지 않는다)');
   f.change({action:'rename',heading:'완료한 일',groupKey:'group:가입',text:'가입 개편 1차'});
-  const after=f.row('문구 검토함');
+  const after=f.row('문구 검토');
   assert.deepEqual([after.shownGroup,after.groupOrigin,after.group],['가입 개편 1차','가입','가입'],'저장된 프로젝트 이름은 그대로, 보이는 이름만 바뀐다');
   // 같은 프로젝트의 새 완료 업무(다른 주제) — 새 문장이 바뀐 소제목 아래로 선다.
   f.items.push({id:'a2',type:'task',description:'약관 동의 화면 확인하기',status:'done',created:'2026-09-15',completed:'2026-09-16',group:'가입',label:'가입'});
-  assert.equal(f.row('약관 동의 화면 확인함').shownGroup,'가입 개편 1차');
-  // 같은 프로젝트라도 다른 소제목(진행중)은 따로다.
+  assert.equal(f.row('약관 동의 화면 확인').shownGroup,'가입 개편 1차');
+  // 칸이 둘(한 일·할 일)이 된 뒤로 같은 프로젝트의 진행 중 줄도 한 일 칸 같은 소제목 아래 서서, `완료한 일|열쇠` 이름을 함께 쓴다.
   f.items.push({id:'a3',type:'task',description:'가입 퍼널 분석하기',status:'to-do',doing:'2026-09-15',created:'2026-09-15',group:'가입',label:'가입'});
-  assert.equal(f.row('가입 퍼널 분석하기').shownGroup,undefined);
+  assert.equal(f.row('가입 퍼널 분석').shownGroup,'가입 개편 1차');
   // 문장·연결·프로젝트는 손대지 않았다.
   assert.equal(f.saved().weeks['2026-09-14'].rows.every(row=>row.shownGroup===undefined&&row.groupKey===undefined&&row.groupOrigin===undefined),true,'계산한 칸은 행에 저장하지 않는다');
   assert.throws(()=>f.change({action:'rename',heading:'완료한 일',groupKey:'group:없음',text:'x'}),/소제목을 찾을 수 없어요/);
   assert.throws(()=>f.change({action:'rename',heading:'다음 주 계획',groupKey:'group:가입',text:'x'}),/소제목을 찾을 수 없어요/);
   // 원래 이름과 같게 적거나 비우면 원래대로.
   f.change({action:'rename',heading:'완료한 일',groupKey:'group:가입',text:'가입'});
-  assert.equal(f.row('문구 검토함').shownGroup,undefined);
+  assert.equal(f.row('문구 검토').shownGroup,undefined);
   assert.equal(f.saved().weekPolish['2026-09-14'].names,undefined);
 });
 test('다듬기 A: 소제목 이름을 바꾼 뒤 지라 요약이 바뀌어도 바꾼 이름은 그대로이고 원래 이름 표시는 새 이름이다',t=>{
   const f=polishFixture(t,{labels:{'jira:PAY-1':'PAY-1 · 결제 리뉴얼'}});
   f.change({action:'rename',heading:'완료한 일',groupKey:'jira:PAY-1',text:'결제 개편 1차'});
-  const locked=f.row('정산 배치 점검함');
+  const locked=f.row('정산 배치 점검');
   f.change({action:'edit',id:locked.id,text:'정산 배치 점검 끝냄'});
   // 지라에서 요약이 바뀜 — 서버가 입히는 label·projectLabel이 새 이름이 된다.
   f.labels['jira:PAY-1']='PAY-1 · 결제 개편';
   f.items[1].label='PAY-1 · 결제 개편';
   f.items.push({id:'j3',type:'task',description:'환불 정책 반영하기',status:'done',created:'2026-09-15',completed:'2026-09-16',jira:'PAY-1',label:'PAY-1 · 결제 개편'});
-  const old=f.row('정산 배치 점검 끝냄'),fresh=f.row('환불 정책 반영함');
+  const old=f.row('정산 배치 점검 끝냄'),fresh=f.row('환불 정책 반영');
   assert.deepEqual([old.shownGroup,old.groupOrigin],['결제 개편 1차','PAY-1 · 결제 개편']);
   assert.deepEqual([fresh.shownGroup,fresh.groupOrigin],['결제 개편 1차','PAY-1 · 결제 개편'],'옛 이름으로 저장된 문장과 새 문장이 한 소제목으로 모인다');
   assert.equal(old.text,'정산 배치 점검 끝냄','고친 문장은 그대로다');
@@ -838,7 +838,7 @@ test('다듬기 A: 소제목 이름을 바꾼 뒤 지라 요약이 바뀌어도 
 test('다듬기 A: 프로젝트 이름 바꾸기(renameGroup)·에픽으로 옮기기(moveGroup)와 되돌리기 뒤에도 바꾼 소제목 이름이 따라간다',t=>{
   const f=polishFixture(t,{labels:{'group:가입':'가입'}});
   f.change({action:'rename',heading:'완료한 일',groupKey:'group:가입',text:'가입 개편 1차'});
-  f.change({action:'edit',id:f.row('문구 검토함').id,text:'가입 문구 다듬음'});
+  f.change({action:'edit',id:f.row('문구 검토').id,text:'가입 문구 다듬음'});
   f.store.renameGroup('가입','가입 개선');
   Object.assign(f.items[0],{group:'가입 개선',label:'가입 개선'});f.labels['group:가입 개선']='가입 개선';
   let row=f.row('가입 문구 다듬음');
@@ -855,7 +855,7 @@ test('다듬기 A: 프로젝트 이름 바꾸기(renameGroup)·에픽으로 옮�
 });
 test('다듬기 A: 옛 데이터(다듬기 칸 없음)는 지금과 같고 새로 표시가 없으며, 처음 다듬은 뒤 새로 들어온 줄만 새로다',t=>{
   const f=polishFixture(t);
-  f.store.change({weekKey:'2026-09-14',revision:f.view().revision,action:'exclude',id:f.row('서버 로그 정리함').id});
+  f.store.change({weekKey:'2026-09-14',revision:f.view().revision,action:'exclude',id:f.row('서버 로그 정리').id});
   // 옛 앱이 남긴 것처럼 다듬기 칸을 지운다.
   const state=f.saved();delete state.weekPolish;fs.writeFileSync(f.file,JSON.stringify(state,null,2));
   f.items.push({id:'n1',type:'task',description:'알림 배너 정리하기',status:'done',created:'2026-09-15',completed:'2026-09-16',group:'알림',label:'알림'});
@@ -863,7 +863,7 @@ test('다듬기 A: 옛 데이터(다듬기 칸 없음)는 지금과 같고 새�
   assert.equal(old.since,null,'기록이 없으면 요약 줄도 없다');
   assert.equal(old.rows.some(row=>row.fresh||row.changed),false);
   // 처음 다듬기(문장 하나 고치기) — 지금 보이는 업무를 전부 본 것으로 적는다.
-  f.change({action:'edit',id:f.row('문구 검토함').id,text:'가입 문구 다듬음'});
+  f.change({action:'edit',id:f.row('문구 검토').id,text:'가입 문구 다듬음'});
   assert.deepEqual(f.view().since&&[f.view().since.fresh,f.view().since.changed],[0,0]);
   // 다듬은 뒤: 새 주제의 업무 → 새로, 기존 자동 문장에 붙는 업무 → 바뀜, 고친 문장에 붙는 업무 → 바뀜(제안).
   f.items.push({id:'n2',type:'task',description:'운영툴 권한 재정리하기',status:'done',created:'2026-09-16',completed:'2026-09-17',group:'운영툴',label:'운영툴'});
@@ -890,7 +890,7 @@ test('다듬기 A: 옛 데이터(다듬기 칸 없음)는 지금과 같고 새�
 });
 test('다듬기 A: 다듬은 뒤 같은 업무가 되돌렸다 다시 완료되면 줄이 겹치지 않고, 원본이 지워진 고친 문장은 그대로 둔 채 표시만 한다',t=>{
   const f=polishFixture(t);
-  f.change({action:'edit',id:f.row('문구 검토함').id,text:'가입 문구 다듬음'});
+  f.change({action:'edit',id:f.row('문구 검토').id,text:'가입 문구 다듬음'});
   f.change({action:'ackNew'});
   Object.assign(f.items[0],{status:'to-do',doing:'2026-09-16',completed:undefined});
   Object.assign(f.items[0],{status:'done',completed:'2026-09-17',doing:undefined});
@@ -908,13 +908,13 @@ test('다듬기 A: 다듬은 뒤 같은 업무가 되돌렸다 다시 완료되�
 test('다듬기 A: 묶음은 그 묶음이 생긴 주의 보고부터 대표 이름 소제목 하나이고, 그 전 주 보고는 티켓별 그대로다',t=>{
   const bundles=[{id:'bd_1',lead:'jira:PAY-1',keys:['jira:PAY-1','jira:PAY-2'],at:'2026-09-16T03:00:00.000Z'}];
   const f=polishFixture(t,{bundles,labels:{'jira:PAY-1':'PAY-1 · 결제 리뉴얼'}});
-  const one=f.row('정산 배치 점검함'),two=f.row('서버 로그 정리함');
+  const one=f.row('정산 배치 점검'),two=f.row('서버 로그 정리');
   assert.deepEqual([one.groupKey,two.groupKey],['jira:PAY-1','jira:PAY-1']);
   assert.deepEqual([one.shownGroup,two.shownGroup],[undefined,'PAY-1 · 결제 리뉴얼'],'묶인 티켓의 문장은 대표 이름 아래로');
   assert.equal(two.group,'PAY-2 · 결제 서버','저장된 이름은 그대로다');
   // 묶음 소제목도 이름을 바꿀 수 있다(열쇠는 대표).
   f.change({action:'rename',heading:'완료한 일',groupKey:'jira:PAY-1',text:'결제 개편'});
-  assert.deepEqual([f.row('정산 배치 점검함').shownGroup,f.row('서버 로그 정리함').shownGroup],['결제 개편','결제 개편']);
+  assert.deepEqual([f.row('정산 배치 점검').shownGroup,f.row('서버 로그 정리').shownGroup],['결제 개편','결제 개편']);
   // 묶음이 생기기 전 주 — 소급하지 않는다.
   f.items.push({id:'p1',type:'task',description:'지난주 서버 점검하기',status:'done',created:'2026-09-07',completed:'2026-09-08',jira:'PAY-2',label:'PAY-2 · 결제 서버'});
   const past=f.store.view('2026-09-07').rows.find(row=>row.sourceIds.includes('p1'));
@@ -922,7 +922,7 @@ test('다듬기 A: 묶음은 그 묶음이 생긴 주의 보고부터 대표 이
   // 생긴 때를 모르는 묶음은 이번 주부터만.
   f.bundles[0].at=null;
   assert.equal(f.store.view('2026-09-07').rows.find(row=>row.sourceIds.includes('p1')).shownGroup,undefined);
-  assert.equal(f.row('서버 로그 정리함').shownGroup,'결제 개편');
+  assert.equal(f.row('서버 로그 정리').shownGroup,'결제 개편');
 });
 test('다듬기 A: 제목·소제목 이름 바꾸기는 되돌릴 수 있고, 다른 창의 변경과 겹치면 저장하지 않는다',t=>{
   const f=polishFixture(t);
@@ -940,7 +940,7 @@ test('다듬기 A: 옛 앱(1.2.1)이 보고를 저장해도 파일 맨 위의 �
   const f=polishFixture(t);
   f.change({action:'retitle',text:'결제 보고'});
   f.change({action:'rename',heading:'완료한 일',groupKey:'group:가입',text:'가입 개편 1차'});
-  f.change({action:'edit',id:f.row('문구 검토함').id,text:'가입 문구 다듬음'});
+  f.change({action:'edit',id:f.row('문구 검토').id,text:'가입 문구 다듬음'});
   const oldFile=path.join(f.directory,'old-report-drafts.js');
   fs.writeFileSync(oldFile,source.replace("require('./safe-storage')",`require(${JSON.stringify(path.join(__dirname,'safe-storage'))})`));
   const oldStore=require(oldFile)({directory:f.directory,sources:()=>f.items,legacy:()=>[],currentWeek:()=>'2026-09-14'});
@@ -991,12 +991,12 @@ test('다듬기 A(99 리뷰②): 다듬기 칸(맨 위·주 칸·이름표)이 �
 });
 test('다듬기 A(v3): `원래 문장으로`는 고친 문장을 원본에서 다시 지은 문장으로 돌리고, 원본이 없거나 고치지 않은 문장은 거절한다',t=>{
   const f=polishFixture(t);
-  const id=f.row('문구 검토함').id;
+  const id=f.row('문구 검토').id;
   assert.throws(()=>f.change({action:'revert',id}),/원래 문장으로 돌릴 수 없어요/,'고치지 않은 문장');
   f.change({action:'edit',id,text:'가입 문구 다듬음'});
   f.change({action:'revert',id});
   const row=f.view().rows.find(entry=>entry.id===id);
-  assert.deepEqual([row.text,row.locked],['문구 검토함',false]);
+  assert.deepEqual([row.text,row.locked],['문구 검토',false]);
   f.items[0].description='문구 검토하기(최종)';
   assert.equal(f.view().rows.find(entry=>entry.id===id).text,'문구 검토하기(최종)'.replace(/하기$/,'함'),'다시 자동으로 따라간다');
   f.change({action:'edit',id,text:'다시 고침'});
@@ -1009,7 +1009,7 @@ test('다듬기 A(Codex P2): 묶음 소제목 이름을 바꾼 뒤 대표를 바
   f.change({action:'rename',heading:'완료한 일',groupKey:'jira:PAY-1',text:'결제 개편'});
   // 대표를 PAY-2로 바꿈 — 열쇠는 새 대표, 저장된 이름은 옛 대표 자리에 있다.
   f.bundles[0].lead='jira:PAY-2';
-  const one=f.row('정산 배치 점검함'),two=f.row('서버 로그 정리함');
+  const one=f.row('정산 배치 점검'),two=f.row('서버 로그 정리');
   assert.deepEqual([one.groupKey,one.shownGroup,two.shownGroup],['jira:PAY-2','결제 개편','결제 개편'],'대표를 바꿔도 바꾼 이름이 그대로');
   assert.equal(one.groupOrigin,'PAY-2 · 결제 서버','원래 이름 풍선은 지금 대표');
   assert.deepEqual(Object.keys(f.saved().weekPolish['2026-09-14'].names),['완료한 일|jira:PAY-1'],'읽기만으로는 저장을 바꾸지 않는다');
@@ -1018,14 +1018,14 @@ test('다듬기 A(Codex P2): 묶음 소제목 이름을 바꾼 뒤 대표를 바
   assert.deepEqual(f.saved().weekPolish['2026-09-14'].names,{'완료한 일|jira:PAY-2':'결제 개편 2차'});
   // 원래 이름으로 되돌리기(빈 값) — 옛 자리에서 찾은 이름도 남지 않는다.
   f.bundles[0].lead='jira:PAY-1';
-  assert.equal(f.row('정산 배치 점검함').shownGroup,'결제 개편 2차');
+  assert.equal(f.row('정산 배치 점검').shownGroup,'결제 개편 2차');
   f.change({action:'rename',heading:'완료한 일',groupKey:'jira:PAY-1',text:''});
-  assert.equal(f.row('정산 배치 점검함').shownGroup,undefined);
+  assert.equal(f.row('정산 배치 점검').shownGroup,undefined);
   assert.equal(f.saved().weekPolish['2026-09-14'].names,undefined,'되돌리면 옛 대표 자리의 이름도 지운다');
   // 묶음 풀기 — 이름은 저장된(바꿀 때의 대표) 티켓 소제목에만 남는다.
   f.change({action:'rename',heading:'완료한 일',groupKey:'jira:PAY-1',text:'결제 개편'});
   f.bundles.length=0;
-  assert.deepEqual([f.row('정산 배치 점검함').shownGroup,f.row('서버 로그 정리함').shownGroup],['결제 개편',undefined]);
+  assert.deepEqual([f.row('정산 배치 점검').shownGroup,f.row('서버 로그 정리').shownGroup],['결제 개편',undefined]);
 });
 
 // ---------- 다듬기 B: `+ 한 줄 추가`(업무로도) · 완료 제안 · 확정 ----------
@@ -1079,7 +1079,7 @@ test('다듬기 B: 묶음이면 `+ 한 줄 추가`의 업무는 대표 티켓에
   const bundles=[{id:'bd_1',lead:'jira:PAY-1',keys:['jira:PAY-1','jira:PAY-2'],at:'2026-09-15T03:00:00.000Z'}];
   const f=lineFixture(t,{bundles});
   f.items.push({id:'q',type:'task',description:'서버 로그 정리하기',status:'done',created:'2026-09-14',completed:'2026-09-15',jira:'PAY-2',label:'PAY-2 · 결제 서버'});
-  assert.equal(f.row('서버 로그 정리함').groupKey,'jira:PAY-1');
+  assert.equal(f.row('서버 로그 정리').groupKey,'jira:PAY-1');
   f.change({action:'addLine',heading:'완료한 일',groupKey:'jira:PAY-1',text:'정산 알림 켬'});
   assert.equal(f.made[0].jira,'PAY-1');
   assert.equal(f.row('정산 알림 켬').groupKey,'jira:PAY-1');
@@ -1151,7 +1151,7 @@ test('다듬기 B: 더한 줄의 업무를 지우면 줄은 남고 원본 확인
 });
 test('다듬기 B: 고친 진행 중 줄의 업무가 이 주에 끝나면 `완료로` 제안 — 누르면 문장 그대로 완료한 일 칸 같은 프로젝트로, 되돌리기도 된다',t=>{
   const f=lineFixture(t);
-  const id=f.row('영수증 메일 발송 시점 정리하기').id;
+  const id=f.row('영수증 메일 발송 시점 정리').id;
   f.change({action:'edit',id,text:'영수증 메일 발송 시점 정리 중'});
   assert.equal(f.row('영수증 메일 발송 시점 정리 중').completable,undefined,'아직 안 끝났으면 제안 없음');
   assert.throws(()=>f.change({action:'complete',id}),/완료로 옮길 수 없어요/);
@@ -1182,7 +1182,7 @@ test('다듬기 B: 업무 문구까지 바뀌었거나 이 주 밖에서 끝났�
 test('다듬기 B: 아래로 넣은 진행 중 줄을 완료로 옮기면 자리 연결을 풀고, 더한 줄도 다른 문장 아래로 넣을 수 있다',t=>{
   const f=lineFixture(t);
   f.change({action:'addLine',heading:'진행중',groupKey:'jira:PAY-1',text:'환불 규칙 정리 중'});
-  const parent=f.row('영수증 메일 발송 시점 정리하기').id,child=f.row('환불 규칙 정리 중').id;
+  const parent=f.row('영수증 메일 발송 시점 정리').id,child=f.row('환불 규칙 정리 중').id;
   f.change({action:'nest',id:child,parentId:parent});
   assert.equal(f.row('환불 규칙 정리 중').parent,parent,'더한 줄도 다른 문장 아래로 넣는다');
   const task=f.items.find(item=>item.id==='w1');
@@ -1207,7 +1207,7 @@ test('다듬기 B: 확정하면 자동 모으기가 새 문장을 넣지 않고 
   assert.equal(view.rows.find(entry=>entry.sourceIds.includes('a')).suggestion,undefined,'같은 소제목 문장에 새 업무를 붙이지도 않는다');
   f.items.find(item=>item.id==='a').description='문구 검토하기(최종)';
   const row=f.view().rows.find(entry=>entry.sourceIds.includes('a'));
-  assert.deepEqual([row.text,!!row.suggestion],['문구 검토함',true],'확정 뒤 원본이 바뀌어도 문장은 그대로, 제안만');
+  assert.deepEqual([row.text,!!row.suggestion],['문구 검토',true],'확정 뒤 원본이 바뀌어도 문장은 그대로, 제안만');
   f.change({action:'confirm'});
   assert.equal(f.view().confirmed.at,at,'다시 확정해도 처음 때 그대로');
   const pulled=f.change({action:'pullNew'});
@@ -1238,16 +1238,16 @@ test('다듬기 B: 확정 뒤에도 사람이 하는 일(더하기·아래로 �
   f.change({action:'confirm'});
   f.change({action:'addLine',heading:'진행중',groupKey:'jira:PAY-1',text:'환불 규칙 정리 중'});
   assert.equal(f.view().confirmed.pending,0,'더한 줄의 업무는 새로 들어온 것으로 세지 않는다');
-  const parent=f.row('영수증 메일 발송 시점 정리하기').id,child=f.row('환불 규칙 정리 중').id;
+  const parent=f.row('영수증 메일 발송 시점 정리').id,child=f.row('환불 규칙 정리 중').id;
   f.change({action:'nest',id:child,parentId:parent});
   f.change({action:'unnest',id:child});
   assert.equal(f.row('환불 규칙 정리 중').parent,undefined);
   const task=f.items.find(item=>item.id==='p');
   Object.assign(task,{status:'done',completed:'2026-09-17'});delete task.doing;
-  const auto=f.row('영수증 메일 발송 시점 정리하기');
+  const auto=f.row('영수증 메일 발송 시점 정리');
   assert.deepEqual([auto.heading,auto.completable],['진행중',true],'확정으로 굳은 자동 문장도 완료 제안');
   f.change({action:'complete',id:auto.id});
-  assert.equal(f.row('영수증 메일 발송 시점 정리하기').heading,'완료한 일');
+  assert.equal(f.row('영수증 메일 발송 시점 정리').heading,'완료한 일');
   assert.ok(f.view().confirmed);
 });
 test('다듬기 B(99 ③): 옛 앱(1.2.1)이 저장해도 확정(맨 위 칸)과 더한 줄의 `origin`(행 안 칸)이 남고, origin이 사라져도 줄은 사람이 쓴 그대로다',t=>{
@@ -1278,7 +1278,7 @@ test('다듬기 B(99 ③): 옛 앱(1.2.1)이 저장해도 확정(맨 위 칸)과
 });
 test('다듬기 B 검수①: 줄 끝 알약(제안)이 선 줄은 상태 줄의 새로·바뀜 개수에서 빠진다',t=>{
   const f=lineFixture(t);
-  const id=f.row('영수증 메일 발송 시점 정리하기').id;
+  const id=f.row('영수증 메일 발송 시점 정리').id;
   f.change({action:'edit',id,text:'정리 중'});
   f.change({action:'ackNew'});
   const task=f.items.find(item=>item.id==='p');
@@ -1349,7 +1349,7 @@ test('개편 A: missing·changed, 완료 제안이 선 줄·뺀 문장·다음 �
   assert.equal(f.view().review.count,1);
   // 완료 제안(`끝났어요 · 완료로`)이 선 줄은 그 제안이 말한다 — changed로 세지 않는다
   const g=lineFixture(t);
-  g.change({action:'edit',id:g.row('영수증 메일 발송 시점 정리하기').id,text:'정리 중'});
+  g.change({action:'edit',id:g.row('영수증 메일 발송 시점 정리').id,text:'정리 중'});
   const task=g.items.find(item=>item.id==='p');Object.assign(task,{status:'done',completed:'2026-09-17'});delete task.doing;
   const line=g.row('정리 중');
   assert.deepEqual([line.completable,line.review],[true,undefined]);
@@ -1411,7 +1411,7 @@ test('개편 A: 한 줄씩 넣기(pullOne) — 그 업무 하나만 새 줄, 확
   const done=f.change({action:'pullOne',ids:['n']});
   let v=f.view();
   const line=v.rows.find(entry=>entry.sourceIds.includes('n'));
-  assert.deepEqual([line.heading,line.text,line.sourceIds,line.group],['완료한 일','가입 문구 후속 확인함',['n'],'가입']);
+  assert.deepEqual([line.heading,line.text,line.sourceIds,line.group],['완료한 일','가입 문구 후속 확인',['n'],'가입']);
   assert.equal(v.rows.some(entry=>entry.sourceIds.includes('n2')),false,'같은 소제목의 다른 업무는 그대로 붙들어 둔다');
   assert.deepEqual(v.material.pending.map(entry=>entry.id),['n2']);
   assert.ok(v.confirmed,'확정은 그대로');
@@ -1431,7 +1431,7 @@ test('개편 A: 옛 앱(1.3.0)이 보고를 저장해도 review는 파일에 없
   if(!source){t.skip('v1.3.0 태그를 읽을 수 없어요');return;}
   const f=lineFixture(t);
   f.items.push({id:'k',type:'task',description:'권한 표 정리하기 (확인 필요)',status:'done',created:'2026-09-14',completed:'2026-09-15',group:'운영',label:'운영'});
-  f.change({action:'edit',id:f.row('문구 검토함').id,text:'가입 문구 다듬음'});
+  f.change({action:'edit',id:f.row('문구 검토').id,text:'가입 문구 다듬음'});
   f.change({action:'confirm'});
   f.items.push({id:'n',type:'task',description:'가입 문구 후속 확인하기',status:'done',created:'2026-09-16',completed:'2026-09-16',group:'가입',label:'가입'});
   f.change({action:'pullOne',ids:['n']});
@@ -1454,4 +1454,189 @@ test('개편 A: 옛 앱(1.3.0)이 보고를 저장해도 review는 파일에 없
   const again=factory(f.opts);
   const r=again.change({weekKey:'2026-09-14',revision:again.view('2026-09-14').revision,action:'pullOne',ids:['n3']});
   assert.equal(r.report.rows.some(entry=>entry.sourceIds.includes('n3')),true);
+});
+
+// ---------- 주간 보고 양식 ① — 끝말 규칙 · 결정·확인 기본 빠짐 · 할 일 칸 미리 채우기 · keep ----------
+function formFixture(t,{items=[],current='2026-09-21'}={}) {
+  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'report-form-'));t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
+  const state={current};
+  const store=factory({directory,sources:()=>items,legacy:()=>[],currentWeek:()=>state.current});
+  const view=(week=state.current)=>store.view(week);
+  const change=(action,week=state.current)=>store.change({weekKey:week,revision:view(week).revision,...action});
+  const file=path.join(directory,'.report-drafts.json');
+  const saved=()=>JSON.parse(fs.readFileSync(file,'utf8'));
+  const plan=(week)=>view(week).rows.filter(row=>row.heading==='다음 주 계획');
+  return {directory,items,store,view,change,saved,plan,state,file};
+}
+test('양식 ①: 끝말 규칙 — `요청 답하기`·`하기`·`했음`만 떼고, 2자 미만·잘린 글·결과 한 줄은 그대로다',t=>{
+  const done=(id,description,extra={})=>({id,type:'task',description,status:'done',created:'2026-09-21',completed:'2026-09-22',group:id,...extra});
+  const items=[
+    done('p1','결제 실패 사유 문구 초안 작성하기'), done('p2','환불 정책 문서 1차 작성했음'), done('p4','부분 환불 QA 케이스 추가 요청 답하기'),
+    done('j2','가입 안내 문구 검수 요청 답하기'), done('j3','본인 인증 오류 문의 대응하기'),
+    {id:'q2',type:'task',description:'환불 API 연동 확인하기',status:'to-do',created:'2026-09-21',doing:'2026-09-22',group:'q2'},
+    done('s1','하기'), done('s2','답했음'), done('o1','정산 배치 점검하기',{outcome:'정산 배치 점검 끝냄'}),
+    done('l1',`${'가'.repeat(90)}하기`),
+    {id:'d1',type:'decision',description:'부분 환불은 1차 범위에서 제외하기',status:'to-do',created:'2026-09-22',group:'d1'},
+  ];
+  const f=formFixture(t,{items});
+  const text=id=>f.view().rows.find(row=>row.sourceIds.includes(id)).text;
+  assert.deepEqual(['p1','p2','p4','j2','j3','q2'].map(text),
+    ['결제 실패 사유 문구 초안 작성','환불 정책 문서 1차 작성','부분 환불 QA 케이스 추가','가입 안내 문구 검수','본인 인증 오류 문의 대응','환불 API 연동 확인']);
+  assert.equal(text('s1'),'하기','떼고 남은 글이 2자 미만이면 그대로');
+  assert.equal(text('s2'),'답했음');
+  assert.equal(text('o1'),'정산 배치 점검 끝냄','결과 한 줄은 사람이 쓴 글이라 그대로');
+  assert.equal(text('l1'),`${'가'.repeat(80)}…`,'80자에서 잘린 글은 끝말을 떼지 않는다');
+  assert.equal(text('d1'),'부분 환불은 1차 범위에서 제외하기','결정·확인은 업무 제목이 아니라 그대로');
+  assert.equal(f.view().rows.find(row=>row.sourceIds.includes('p1')).evidence[0].description,'결제 실패 사유 문구 초안 작성하기','근거에는 업무 제목 전문');
+  // 저장된(고친) 문장은 다시 다듬지 않는다.
+  f.change({action:'edit',id:f.view().rows.find(row=>row.sourceIds.includes('p2')).id,text:'환불 정책 문서 1차 작성했음'});
+  assert.equal(text('p2'),'환불 정책 문서 1차 작성했음');
+});
+test('양식 ①: 결정·확인 줄은 처음부터 빠져 있고(확인 필요·새로 표시에서도), include로 넣고 빼며 되돌릴 수 있다 · 저장값은 그대로',t=>{
+  const items=[
+    {id:'a',type:'task',description:'문구 검토하기',status:'done',created:'2026-09-21',completed:'2026-09-22',group:'가입'},
+    {id:'d',type:'decision',description:'부분 환불은 제외 (미확정)',status:'to-do',created:'2026-09-22',group:'가입'},
+    {id:'c1',type:'check',description:'수수료 정책 확인',status:'done',created:'2026-09-22',group:'가입'},
+    {id:'c2',type:'check',description:'권한 기준 확인',status:'to-do',created:'2026-09-22',group:'운영'},
+  ];
+  const f=formFixture(t,{items});
+  const row=id=>f.view().rows.find(entry=>entry.sourceIds.includes(id));
+  assert.deepEqual(['d','c1','c2'].map(id=>[row(id).excluded,row(id).optOut]),[[true,true],[true,true],[true,true]]);
+  assert.equal(row('a').excluded,false);
+  assert.equal(f.view().review.count,0,'빠진 결정 줄의 (미확정)은 확인 필요로 세지 않는다');
+  f.change({action:'ackNew'});
+  items.push({id:'d2',type:'decision',description:'환불 수수료는 유지',status:'to-do',created:'2026-09-23',group:'운영'});
+  assert.equal(f.view().since.fresh,0,'새로 들어온 결정 줄도 새로로 세지 않는다');
+  const result=f.change({action:'include',id:row('d').id,on:true});
+  assert.deepEqual([row('d').excluded,row('d').optOut,row('d').included],[false,undefined,true]);
+  assert.equal(f.view().review.count,1,'다시 넣으면 확인 필요로 센다');
+  assert.equal(f.saved().weeks['2026-09-21'].rows.find(entry=>entry.sourceIds.includes('c1')).excluded,false,'저장 파일의 excluded는 바꾸지 않는다');
+  f.change({action:'undo',token:result.undoToken});
+  assert.equal(row('d').excluded,true,'되돌리면 다시 빠진다');
+  f.change({action:'include',id:row('c2').id,on:true});
+  f.change({action:'include',id:row('c2').id,on:false});
+  assert.deepEqual([row('c2').excluded,row('c2').included],[true,undefined]);
+  // 옛 앱처럼 저장값에 excluded:true인 결정 줄도 다시 넣으면 들어온다.
+  const state=f.saved();state.weeks['2026-09-21'].rows.find(entry=>entry.sourceIds.includes('c1')).excluded=true;fs.writeFileSync(f.file,JSON.stringify(state));
+  f.change({action:'include',id:row('c1').id,on:true});
+  assert.equal(row('c1').excluded,false);
+  assert.throws(()=>f.change({action:'include',id:row('a').id,on:true}),/결정·확인 줄만/);
+  assert.throws(()=>f.change({action:'include',id:row('d').id}),/넣을지 뺄지/);
+});
+test('양식 ①: 할 일 칸 미리 채우기 — 진행 중 + 지난주 업무와 이어진 계획 중 안 끝난 것만, 다음 주 기한만으로는 넣지 않고, 하나만',t=>{
+  const items=[
+    {id:'doing',type:'task',description:'관리자 권한 등급 확인하기',status:'to-do',created:'2026-09-10',doing:'2026-09-18',group:'운영툴',label:'운영툴'},
+    {id:'both',type:'task',description:'환불 API 연동 확인하기',status:'to-do',created:'2026-09-10',doing:'2026-09-22',group:'결제'},
+    {id:'left',type:'task',description:'결제 문구 정리하기',status:'to-do',created:'2026-09-10',jira:'PAY-1',label:'PAY-1 · 결제 리뉴얼'},
+    {id:'over',type:'task',description:'끝난 계획 업무',status:'done',created:'2026-09-10',completed:'2026-09-16',group:'결제'},
+    {id:'due',type:'task',description:'다음 주 마감 업무',status:'to-do',created:'2026-09-10',due:'2026-09-29',scheduled:'2026-09-28',group:'결제'},
+    {id:'lone',type:'task',description:'프로젝트 없는 진행 업무',status:'to-do',created:'2026-09-10',doing:'2026-09-22'},
+  ];
+  const f=formFixture(t,{items,current:'2026-09-14'});
+  // 지난주(9/14)에 계획 줄을 셋 담아 저장해 둔다 — 업무와 이어진 것 둘 + 직접 적은 것 하나 + 뺀 것 하나.
+  f.change({action:'add',text:'환불 연동',group:'결제',planOf:'both'});
+  f.change({action:'add',text:'결제 문구',group:'PAY-1 · 결제 리뉴얼',planOf:'left'});
+  f.change({action:'add',text:'끝난 것',group:'결제',planOf:'over'});
+  f.change({action:'add',text:'직접 적은 계획'});
+  f.change({action:'add',text:'뺀 계획',planOf:'due'});
+  f.change({action:'exclude',id:f.plan().find(row=>row.text==='뺀 계획').id});
+  assert.ok(f.plan('2026-09-14').every(row=>row.origin!=='carry'||row.planOf==='doing'||row.planOf==='both'||row.planOf==='lone'),'지난주에는 그때의 진행 중만');
+  f.state.current='2026-09-21';
+  const plan=f.plan();
+  const carried=plan.filter(row=>row.origin==='carry');
+  assert.deepEqual(carried.map(row=>row.planOf).sort(),['both','doing','left','lone'],'진행 중 둘 + 지난주 계획 중 안 끝난 것(진행 중과 겹친 것은 하나)');
+  const by=id=>carried.find(row=>row.planOf===id);
+  assert.deepEqual([by('doing').text,by('doing').group,by('doing').carryWhy,by('doing').locked],['관리자 권한 등급 확인','운영툴','doing',false]);
+  assert.deepEqual([by('left').group,by('left').carryWhy],['PAY-1 · 결제 리뉴얼','plan'],'한 일 칸과 같은 이름 규칙(서버 label)');
+  assert.equal(by('lone').group,'그룹 없음');
+  assert.deepEqual([by('doing').sourceIds,by('doing').evidence],[[],[]],'planOf만 들고 이번 주 진행 중 자동 문장은 그대로');
+  assert.ok(f.view().rows.some(row=>row.heading==='진행중'&&row.sourceIds.includes('doing')));
+  assert.equal(by('doing').review,undefined);
+  assert.equal(fs.existsSync(f.file)&&f.saved().weeks['2026-09-21'],undefined,'GET은 파일을 쓰지 않는다');
+});
+test('양식 ①: 미리 채운 줄 — 뺀 줄은 다시 안 들어오고, 안 고친 줄은 업무가 끝나거나 지워지면 빠지며, 고친 줄은 남는다 · 지난 주·확정한 주는 없다',t=>{
+  const items=[
+    {id:'x',type:'task',description:'권한 확인하기',status:'to-do',created:'2026-09-10',doing:'2026-09-22',group:'운영툴'},
+    {id:'y',type:'task',description:'배너 정리하기',status:'to-do',created:'2026-09-10',doing:'2026-09-22',group:'운영툴'},
+    {id:'z',type:'task',description:'메일 보내기',status:'to-do',created:'2026-09-10',doing:'2026-09-22',group:'운영툴'},
+  ];
+  const f=formFixture(t,{items});
+  const carry=id=>f.plan().find(row=>row.planOf===id);
+  f.change({action:'exclude',id:carry('x').id});
+  assert.equal(carry('x').excluded,true);
+  assert.equal(f.plan().filter(row=>row.planOf==='x').length,1,'뺀 줄은 다시 들어오지 않는다(제자리에 하나)');
+  f.change({action:'edit',id:carry('y').id,text:'배너 정리 마무리'});
+  assert.equal(f.saved().weeks['2026-09-21'].rows.find(row=>row.planOf==='y').origin,'carry','행 안 칸으로 저장된다(형식 번호 그대로)');
+  assert.equal(f.saved().schema,1);
+  items.find(item=>item.id==='y').status='done';
+  items.find(item=>item.id==='z').status='done';
+  assert.equal(carry('y').text,'배너 정리 마무리','고친 줄은 업무가 끝나도 남는다');
+  assert.equal(carry('z'),undefined,'안 고친 줄은 업무가 끝나면 빠진다');
+  items.find(item=>item.id==='z').status='to-do';
+  items.find(item=>item.id==='z').description='메일 다시 보내기';
+  assert.equal(carry('z').text,'메일 다시 보내기','안 고친 줄은 업무 제목을 따라간다');
+  items.splice(items.findIndex(item=>item.id==='z'),1);
+  assert.equal(carry('z'),undefined,'업무가 지워지면 빠진다');
+  // 확정한 주·지난 주에는 새로 채우지 않는다.
+  f.change({action:'confirm'});
+  items.push({id:'w',type:'task',description:'새 진행 업무',status:'to-do',created:'2026-09-10',doing:'2026-09-23',group:'결제'});
+  assert.equal(carry('w'),undefined,'확정한 주는 미리 채우기가 줄을 더하지 않는다');
+  f.change({action:'unconfirm'});
+  assert.ok(carry('w'));
+  f.state.current='2026-09-28';
+  assert.equal(f.plan('2026-09-21').some(row=>row.planOf==='w'),false,'지난 주 화면은 저장된 줄만');
+});
+test('양식 ①: keep은 지금 보이는 줄(미리 채운 줄 포함)을 문장·새로 기록·되돌리기 그대로 적고, 다음 주의 지난주 계획이 된다',t=>{
+  const items=[
+    {id:'a',type:'task',description:'문구 검토하기',status:'done',created:'2026-09-21',completed:'2026-09-22',group:'가입'},
+    {id:'x',type:'task',description:'권한 확인하기',status:'to-do',created:'2026-09-10',doing:'2026-09-22',group:'운영툴'},
+  ];
+  const f=formFixture(t,{items});
+  const before=f.view();
+  const result=f.change({action:'keep'});
+  assert.equal(result.undoToken,null,'되돌리기 기록을 남기지 않는다');
+  const saved=f.saved();
+  assert.deepEqual(saved.weeks['2026-09-21'].rows.map(row=>row.text).sort(),before.rows.map(row=>row.text).sort(),'문장은 그대로');
+  assert.equal(saved.weekPolish,undefined,'새로 기록(seen)을 적지 않는다');
+  assert.equal(saved.weeks['2026-09-21'].rows.find(row=>row.planOf==='x').carryWhy,undefined,'계산 값은 저장하지 않는다');
+  const at=fs.statSync(f.file).mtimeMs;
+  f.change({action:'keep'});
+  assert.equal(fs.statSync(f.file).mtimeMs,at,'바뀐 것이 없으면 다시 쓰지 않는다');
+  // 다음 주: 진행 중을 멈췄어도 지난주 계획(이어진 줄)에서 안 끝났으면 들어온다.
+  delete items.find(item=>item.id==='x').doing;
+  f.state.current='2026-09-28';
+  assert.equal(f.plan().find(row=>row.planOf==='x').carryWhy,'plan');
+});
+test('양식 ①: link는 할 일 칸 줄만 업무와 잇고 끊으며 되돌리기 기록을 남기지 않는다',t=>{
+  const f=formFixture(t,{items:[{id:'a',type:'task',description:'문구 검토하기',status:'done',created:'2026-09-21',completed:'2026-09-22',group:'가입'}]});
+  f.change({action:'add',text:'금요일 휴가'});
+  const line=f.plan()[0];
+  const linked=f.change({action:'link',id:line.id,planOf:'new-task'});
+  assert.equal(linked.undoToken,null);
+  assert.equal(f.plan()[0].planOf,'new-task');
+  f.change({action:'link',id:line.id,planOf:null});
+  assert.equal(f.plan()[0].planOf,undefined);
+  assert.throws(()=>f.change({action:'link',id:f.view().rows.find(row=>row.heading==='완료한 일').id,planOf:'x'}),/할 일 칸 줄만/);
+});
+test('양식 ①: 한 일 칸 소제목 이름은 `완료한 일|열쇠` → `진행중|열쇠` 순서로 찾고, 진행 중만 있는 프로젝트도 고치며, 고치면 옛 진행중 이름을 치운다',t=>{
+  const items=[
+    {id:'a',type:'task',description:'문구 검토하기',status:'done',created:'2026-09-21',completed:'2026-09-22',group:'가입'},
+    {id:'b',type:'task',description:'퍼널 분석하기',status:'to-do',created:'2026-09-21',doing:'2026-09-22',group:'가입'},
+    {id:'c',type:'task',description:'권한 정리하기',status:'to-do',created:'2026-09-21',doing:'2026-09-22',group:'운영'},
+  ];
+  const f=formFixture(t,{items});
+  f.change({action:'rename',heading:'진행중',groupKey:'group:가입',text:'가입 옛 이름'});
+  const row=id=>f.view().rows.find(entry=>entry.sourceIds.includes(id));
+  assert.deepEqual([row('a').shownGroup,row('b').shownGroup],['가입 옛 이름','가입 옛 이름'],'옛 진행중 이름도 한 일 칸 전체에 보인다');
+  f.change({action:'rename',heading:'완료한 일',groupKey:'group:운영',text:'운영 도구'});
+  assert.equal(row('c').shownGroup,'운영 도구','완료 줄이 없는 프로젝트도 완료한 일 자리로 고친다');
+  f.change({action:'rename',heading:'완료한 일',groupKey:'group:가입',text:'가입 개편'});
+  assert.deepEqual(f.saved().weekPolish['2026-09-21'].names,{'완료한 일|group:운영':'운영 도구','완료한 일|group:가입':'가입 개편'},'진행중 자리는 치운다');
+  f.change({action:'rename',heading:'완료한 일',groupKey:'group:가입',text:''});
+  assert.equal(row('b').shownGroup,undefined,'비우면 원래대로');
+  // 한 일 칸 `+ 한 줄 추가`는 진행 중만 있는 프로젝트에도 완료한 일로 더한다.
+  const tasks={made:[],create(entry){const id=`w${tasks.made.length}`;tasks.made.push(id);items.push({id,type:'task',description:entry.description,status:'done',created:'2026-09-21',completed:'2026-09-22',group:entry.group});return id;},remove(){}};
+  const store=factory({directory:f.directory,sources:()=>items,legacy:()=>[],currentWeek:()=>'2026-09-21',tasks});
+  store.change({weekKey:'2026-09-21',revision:store.view('2026-09-21').revision,action:'addLine',heading:'완료한 일',groupKey:'group:운영',text:'권한 표 공유'});
+  assert.ok(store.view('2026-09-21').rows.some(entry=>entry.text==='권한 표 공유'&&entry.heading==='완료한 일'));
 });

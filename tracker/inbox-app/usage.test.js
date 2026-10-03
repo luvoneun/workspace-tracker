@@ -65,8 +65,8 @@ test('WP-R tick은 허용 목록 키만 받는다(그 밖은 400) — 서버가 
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   serverModule.setUsageForTests({ localDir: dir });
   const tick = key => fetch(base + '/api/usage/tick', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key }) });
-  for (const bad of ['task_add', 'jira_create', 'evil', '', null, 3, '__proto__']) assert.equal((await tick(bad)).status, 400, String(bad));
-  for (const good of ['tab_today', 'tab_weekly', 'search', 'weekly_copy', 'search']) assert.equal((await tick(good)).status, 200, good);
+  for (const bad of ['task_add', 'jira_create', 'weekly_edit', 'weekly_plan_add', 'evil', '', null, 3, '__proto__']) assert.equal((await tick(bad)).status, 400, String(bad));
+  for (const good of ['tab_today', 'tab_weekly', 'search', 'weekly_copy', 'weekly_copy_plan', 'search']) assert.equal((await tick(good)).status, 200, good);
   const data = await (await fetch(base + '/api/usage')).json();
   const count = key => data.rows.find(row => row.key === key).count;
   assert.equal(count('search'), 2);
@@ -130,6 +130,28 @@ test('WP-R 서버가 API 성공 때만 +1 — 추가·끝냄·지움·슬랙 가
   // 파일에는 날짜별 숫자만 — 문구는 없다.
   const raw = fs.readFileSync(path.join(dir, 'usage.json'), 'utf8');
   for (const word of ['문서 정리', '슬랙에서 온 일', 'example.test', 'unseen']) assert.equal(raw.includes(word), false, word);
+});
+
+test('양식 ① 주간요약 세기 — 고치기(edit·rename·retitle)는 weekly_edit, 할 일 칸 적기(add)는 weekly_plan_add, 실패·다른 동작은 세지 않는다', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-usage-http-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  serverModule.setUsageForTests({ localDir: dir });
+  const counts = async () => Object.fromEntries((await (await fetch(base + '/api/usage')).json()).rows.map(row => [row.key, row.count]));
+  const report = async () => (await (await fetch(base + '/api/items')).json()).weeklyReports[0];
+  const change = async (body) => { const week = await report(); return fetch(base + '/api/report/change', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ weekKey: week.weekKey, revision: week.draft.revision, ...body }) }); };
+  assert.equal((await change({ action: 'retitle', text: '세기 시험 보고' })).status, 200);
+  assert.equal((await change({ action: 'add', text: '금요일 휴가' })).status, 200);
+  assert.equal((await change({ action: 'add', text: '' })).status, 400, '실패한 적기');
+  assert.equal((await change({ action: 'ackNew' })).status, 200);
+  const c = await counts();
+  assert.equal(c.weekly_edit, 1);
+  assert.equal(c.weekly_plan_add, 1);
+  const line = (await report()).draft.rows.find(row => row.text === '금요일 휴가');
+  await change({ action: 'edit', id: line.id, text: '금요일 반차' });
+  assert.equal((await counts()).weekly_edit, 2);
+  // 시험 서버의 보고를 처음 상태로 — 이름과 줄을 거둔다.
+  await change({ action: 'retitle', text: '' });
+  await change({ action: 'exclude', id: line.id });
 });
 
 test('WP-R 세기는 저장 트랜잭션 밖 — 세기 파일을 못 써도 저장은 된다', async (t) => {
@@ -442,7 +464,7 @@ test('WP-W GET /api/usage — 기존 칸은 그대로, today와 보관 중인 �
   assert.equal(info.today, TODAY);
   assert.deepEqual(info.history, { [TODAY]: { task_done: 3, slack_in: 2 }, [ago(5)]: { task_add: 1 } });
   assert.equal(info.days, 30);
-  assert.equal(info.rows.length, 17);
+  assert.equal(info.rows.length, 20);
   assert.equal(info.rows.find(row => row.key === 'task_done').count, 3);
   assert.equal(typeof info.send, 'boolean');
   assert.equal(typeof info.canSend, 'boolean');
