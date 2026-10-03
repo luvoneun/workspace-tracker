@@ -1884,25 +1884,44 @@ function reportPlanAskFocus(rowId) {
   const host = document.getElementById('weeklyReportDetail');
   host?.querySelector?.(`[data-plan-ask="${rowId}"] button`)?.focus();
 }
+// 업무와 보고 저장은 두 요청이다 — 보고 저장(link)이 실패하거나(409·서버 꺼짐) 다른 저장이 도는 중이라 건너뛰면, 방금 한
+// 업무 일을 되돌려 둘이 어긋나지 않게 한다(고아 업무·지워진 업무를 가리키는 줄이 남지 않게). 성공 여부는 저장 뒤 그 줄의 planOf로 본다.
+const reportPlanLinked = (item, rowId, taskId) => {
+  const now = ((item.draft && item.draft.rows) || []).find(entry => entry.id === rowId);
+  return !!now && (taskId ? now.planOf === taskId : !now.planOf);
+};
+const reportPlanRemoveTask = id => request('/api/track/remove', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
 async function reportPlanTake(item, row) {
   const entry = reportPlanAsk.get(row.id);
-  if (!entry) return;
-  const taskId = entry.taskId || await reportPlanCreateTask(String(row.text || '').split('\n')[0], row.group);
+  if (!entry || reportBusy) return;
+  const taskId = await reportPlanCreateTask(String(row.text || '').split('\n')[0], row.group);
   if (!taskId) throw new Error('나중에 할 일을 만들지 못했어요. 보고 줄은 그대로 있어요');
-  // 업무는 만들었는데 잇기가 실패하면 다시 누를 때 업무를 또 만들지 않는다.
+  let failure = null;
+  try { await reportChange(item, { action: 'link', id: row.id, planOf: taskId }, '나중에 할 일에도 담았어요'); } catch (error) { failure = error; }
+  if (failure || !reportPlanLinked(item, row.id, taskId)) {
+    // 잇지 못했으면 방금 만든 업무를 지운다(지운 항목에 남는다).
+    await reportPlanRemoveTask(taskId).catch(() => {});
+    if (typeof load === 'function') Promise.resolve(load()).catch(() => {});
+    throw failure || new Error('저장이 끝나지 않아 담지 못했어요. 다시 눌러 주세요');
+  }
   entry.taskId = taskId;
-  await reportChange(item, { action: 'link', id: row.id, planOf: taskId }, '나중에 할 일에도 담았어요');
   entry.idle = false;
   reportPlanAskIdle(row.id);
   reportPlanAskFocus(row.id);
   if (typeof load === 'function') Promise.resolve(load()).catch(() => {});
 }
+// 되돌리기는 차례를 뒤집는다 — 먼저 연결을 끊고(보고 저장), 그게 된 뒤에 업무를 지운다. 업무 지우기가 실패하면 연결을 다시 잇는다.
 async function reportPlanUntake(item, row) {
   const entry = reportPlanAsk.get(row.id);
-  if (!entry) return;
-  if (entry.taskId) await request('/api/track/remove', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: entry.taskId }) });
-  entry.taskId = null;
+  if (!entry || !entry.taskId || reportBusy) return;
+  const taskId = entry.taskId;
   await reportChange(item, { action: 'link', id: row.id, planOf: null }, '나중에 할 일에서 뺐어요');
+  if (!reportPlanLinked(item, row.id, null)) throw new Error('저장이 끝나지 않아 되돌리지 못했어요. 다시 눌러 주세요');
+  try { await reportPlanRemoveTask(taskId); } catch (error) {
+    await reportChange(item, { action: 'link', id: row.id, planOf: taskId }).catch(() => {});
+    throw error;
+  }
+  entry.taskId = null;
   reportPlanAskFocus(row.id);
   if (typeof load === 'function') Promise.resolve(load()).catch(() => {});
 }

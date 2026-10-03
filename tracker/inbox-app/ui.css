@@ -372,7 +372,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 .d-title:active, .d-mrow .ti:active, .d-wrow .ti:active, .d-mrow2 .ti:active, .d-prow2 .ti:active, .d-rec .ti:active, .rp-rec .ti:active,
 .d-mitem:active, .d-mpickbtn:active, .jira-pick:active, .d-gpopt:active, .d-pres:active, .d-dpick:active, .d-fields .badge.is-plain:active, .rp-pick:active, .rp-ev .ev:active,
 .d-grp.tog:active, .d-guide:active, .d-prow:active, .d-plink:active, .d-mtrow:active, .d-jfold:active, .d-jlink .pk:active,
-.rp-wk:active, .rp-fl:active, .rp-gp:active, .d-uwmore:active,
+.rp-wk:active, .rp-fl:active, .d-uwmore:active,
 button:disabled:active, .d-cb:disabled:active, .d-wcb:disabled:active { scale: none; }
 /* 뺀 것의 누름 = 색 한 단계 — 줄어들지 않는 대신, 누르는 동안 배경이 가리킴(--hover)보다 한 단계 진해진다(--press, 100ms).
    고른 표시(--sel 연파랑)와 다른 회색이라 헷갈리지 않는다. 글자뿐인 것(탭·글자 링크·제목)과 따뜻한 카드 위의 안내 줄(.d-guide)은 그대로 둔다.
@@ -381,7 +381,7 @@ button:disabled:active, .d-cb:disabled:active, .d-wcb:disabled:active { scale: n
 .d-mitem:active:not(:disabled), .d-mpickbtn:active:not(:disabled), .jira-pick:active:not(:disabled), .d-gpopt:active:not(:disabled), .d-pres:active:not(:disabled),
 .d-dpick:active:not(:disabled), .d-fields .badge.is-plain:active:not(:disabled), .rp-pick:active:not(:disabled), .rp-ev .ev:active:not(:disabled),
 .d-grp.tog:active:not(:disabled), .d-prow:active:not(:disabled), .d-plink:active:not(:disabled), .d-mtrow:active:not(:disabled), .d-jfold:active:not(:disabled), .d-jlink .pk:active:not(:disabled),
-.rp-wk:active:not(:disabled), .rp-fl:active:not(:disabled), .rp-gp:active:not(:disabled), .d-uwmore:active:not(:disabled) { background: var(--press); transition-duration: var(--t-press); }
+.rp-wk:active:not(:disabled), .rp-fl:active:not(:disabled), .d-uwmore:active:not(:disabled) { background: var(--press); transition-duration: var(--t-press); }
 /* 메뉴·고르개 항목은 화살표로 연달아 옮겨 다닌다 — 색도 바로 바뀐다(세기 0) */
 .d-mitem, .d-mpickbtn, .jira-pick, .d-gpopt, .d-pres { transition: none; }
 
