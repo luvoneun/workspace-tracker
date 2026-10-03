@@ -1344,6 +1344,15 @@ function deploySoonVersion(issue) {
   return open.slice().sort((a, b) => String(a.releaseDate).localeCompare(String(b.releaseDate)))[0];
 }
 
+// deploySoonVersion의 짝 — 날짜 있는 미배포 버전이 없을 때만, 날짜 없는 미배포 버전 하나(이름순 첫 번째). 주간요약 한 일 칸
+// 소제목의 자동 괄호 `(v2.70)`가 쓴다(이미 받아 둔 목록만 읽는다).
+function deployUndatedVersion(issue) {
+  if (!issue || !Array.isArray(issue.versions) || deploySoonVersion(issue)) return null;
+  const open = issue.versions.filter(version => version && !version.released && !version.releaseDate && String(version.name || '').trim());
+  if (!open.length) return null;
+  return open.slice().sort((a, b) => String(a.name).localeCompare(String(b.name)))[0];
+}
+
 // 배포일 색은 지라 띠 카드의 `배포 버전` 칸과 같은 규칙이다(배지가 아니라 글자색):
 // 3일 안이면 주의색, 지났는데 아직 배포되지 않았으면 급함 색.
 function deployTone(left) {
