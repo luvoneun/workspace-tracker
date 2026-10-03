@@ -240,7 +240,8 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
     // 확정한 주에 붙들어 둔 새 업무 중 끝낸 일(완료한 일 칸에 설 것)만 한 건씩 — 화면의 `보고에 없는 끝낸 일 N`과
     // 한 줄씩 넣기(change의 pullOne)가 읽는다. 확정 전 주·진행 중·결정·확인은 없다(넣기는 완료 칸만, addLine 규칙과 같다).
     const materialPending = [];
-    for (const [key,items] of groups) if (hold) { pending += 1; if (heading(items[0]) === '완료한 일') { pendingDone += 1;
+    // 결정·확인 묶음은 넣어도 처음부터 빠진 줄(optOut)이라 `보고에 없는 새 줄 N`에 세지 않는다 — 세면 `모두 넣기`를 눌러도 글이 그대로다.
+    for (const [key,items] of groups) if (hold) { if (!OPT_IN.has(heading(items[0]))) pending += 1; if (heading(items[0]) === '완료한 일') { pendingDone += 1;
       items.forEach(item => materialPending.push({ id: item.id, description: item.description, label: item.label || item.group || item.project || '그룹 없음', completed: item.completed || null })); } } else rows.push({ id:`auto-${hash([key,items.map(item=>item.id).sort()]).slice(0,16)}`,bucket:key,heading:heading(items[0]),group:items[0].label || items[0].group || items[0].project || '그룹 없음', text:textOf(items),sourceIds:items.map(item=>item.id),evidence:items.map(evidence),currentEvidence:items.map(evidence),locked:false,excluded:false,needsReview:false });
     // 결정·확인 줄은 `다시 넣기`(included) 전까지 보고에서 빠진 줄로 보인다 — 확인 필요·새로 표시·슬랙 글 모두 제외로 센다.
     rows.forEach((row) => { if (OPT_IN.has(row.heading) && !row.included && !row.excluded) { row.excluded = true; row.optOut = true; } });
@@ -444,8 +445,10 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
     } else if(action==='keep') {
       // 복사한 뒤 지금 보이는 줄(미리 채운 할 일 칸 줄 포함)을 그대로 파일에 적는다 — 문장·새로 기록·되돌리기는 그대로다.
       // GET은 파일을 쓰지 않아서, 한 번도 저장하지 않은 주의 미리 채운 줄은 다음 주의 `지난주 계획`이 되지 못한다.
+      // 줄 차례만 다른 것은 바뀐 것이 아니다(add는 맨 뒤에 붙이고 view는 소제목·이름순으로 세운다) — 쓰지 않아야 그 전 ⌘Z가 살아 있다.
       keepUndo=false;
-      if(hash(rows)===hash(state.weeks[weekKey]?.rows||null))return {ok:true,report:view(weekKey,state),undoToken:null};
+      const byId=list=>[...(list||[])].sort((a,b)=>String(a.id).localeCompare(String(b.id)));
+      if(hash(byId(rows))===hash(byId(state.weeks[weekKey]?.rows)))return {ok:true,report:view(weekKey,state),undoToken:null};
     } else if(action==='add') {
       if(typeof text!=='string'||!text.trim()||text.length>10000)throw new Error('보고 문장을 입력해 주세요.');
       const link=planOf(planSource);
@@ -491,6 +494,8 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
       // 알림의 `되돌리기`가 업무와 함께 직접 되돌리므로 ⌘Z 되돌리기 기록은 남기지 않는다.
       else if(action==='link') {
         if(shown.heading!==PLAN_HEADING)throw new Error('할 일 칸 줄만 업무와 이을 수 있어요.');
+        // 미리 채운 줄은 이미 업무를 가리킨다 — 다른 업무로 이으면 그 업무가 다시 미리 채워져 같은 업무의 줄이 둘이 될 수 있다.
+        if(shown.origin==='carry')throw new Error('미리 채운 줄은 이미 업무와 이어져 있어요.');
         const link=planOf(planSource);
         if(link)row.planOf=link; else delete row.planOf;
         keepUndo=false;
