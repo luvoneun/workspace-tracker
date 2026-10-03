@@ -23,8 +23,20 @@ const firstSentence = text => {
   const cut = match && match.index + 1 <= 80 ? value.slice(0, match.index + 1) : value;
   return cut.length > 80 ? `${cut.slice(0, 80).trimEnd()}…` : cut;
 };
-const taskText = item => (['task', 'bug'].includes(item.type) ? firstSentence(item.description) : item.description);
-const textOf = items => [...new Set(items.map(item => item.status === 'done' && item.outcome ? item.outcome : item.status === 'done' ? taskText(item).replace(/하기$/, '함') : taskText(item)))].join('\n');
+// 보고 줄의 끝말 다듬기 — AI가 아니라 규칙이다. 업무 제목 끝의 `요청 답하기`·`하기`·`했음`만 떼어 짧은 명사구로 둔다
+// (`환불 정책 문서 1차 작성했음` → `환불 정책 문서 1차 작성`). 떼고 남은 글이 2자 미만이면(`하기`·`확인했음` 같은 짧은 제목)
+// 그대로, 80자에서 잘린 글(`…`)도 그대로다. 업무 제목은 바뀌지 않고 근거(`evidence`)에 전문이 남는다.
+const trimEnd = (text) => {
+  const value = String(text || '').trim();
+  if (value.endsWith('…')) return value;
+  const cut = value.replace(/\s*요청 답하기$/, '').replace(/(하기|했음)$/, '').trim();
+  return cut.length >= 2 ? cut : value;
+};
+const taskText = item => (['task', 'bug'].includes(item.type) ? trimEnd(firstSentence(item.description)) : item.description);
+// 끝낸 일의 결과 한 줄(outcome)은 사람이 쓴 글이라 다듬지 않는다.
+const textOf = items => [...new Set(items.map(item => item.status === 'done' && item.outcome ? item.outcome : taskText(item)))].join('\n');
+// 업무가 설 프로젝트 이름(보고 소제목·할 일 칸 미리 채운 줄이 같은 규칙을 쓴다).
+const labelOf = item => item.label || item.group || item.project || '그룹 없음';
 
 // ---------- 다듬기(제목·소제목 이름·새로 표시) ----------
 // 사람이 고친 보고 제목과 소제목 이름, 그리고 "마지막으로 다듬은 때 무엇을 봤는지"는 파일 맨 위의 `weekPolish` 칸에
@@ -33,6 +45,12 @@ const textOf = items => [...new Set(items.map(item => item.status === 'done' && 
 // 새로 쓰므로 그 안의 모르는 칸은 버리지만, 파일 맨 위는 읽은 그대로 다시 쓴다(renameGroup 등도 같다). 문장 행에는
 // 새 칸을 더하지 않는다 — 소제목·새로 표시는 view()가 그때그때 계산해 내보내고 clean()이 저장 전에 걷는다.
 const HEADINGS = ['완료한 일', '진행중', '새로 정해진 것', '확인 완료', '확인 대기'];
+// 결정·확인 줄은 처음부터 보고에서 빠져 있다 — 사람이 `다시 넣기`(change의 include)를 누른 줄(`included`)만 보고에 든다.
+// 저장된 `excluded`는 건드리지 않고 view()가 보이는 결과에서만 빼며(`optOut`), clean()이 저장 전에 되돌린다.
+const OPT_IN = new Set(['새로 정해진 것', '확인 완료', '확인 대기']);
+// 한 일 칸의 소제목 이름을 찾는 차례 — 칸이 둘(한 일·할 일)이 된 뒤로 한 프로젝트의 완료·진행 중·결정·확인 줄이 한
+// 소제목 아래 서므로, 이름은 `완료한 일|열쇠` → `진행중|열쇠` → 그 줄 자기 소제목 자리 순서로 찾는다(옛 이름도 그대로 읽힌다).
+const NAME_ORDER = ['완료한 일', '진행중'];
 const POLISH_NAME_MAX = 60;
 // 문장 행이 속한 프로젝트 열쇠(`jira:KEY`·`group:이름`·`ungrouped`). 자동 갱신이 짝을 찾는 bucket 앞머리에서 읽는다
 // (group 이름에 `:`가 있을 수 있어 소제목 자리로 끊는다). bucket이 없는 행은 null — 부르는 쪽이 이름으로 짝을 찾는다.
@@ -134,9 +152,11 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
       // (저장된 이름은 옛 대표 열쇠에 있다) 이름이 사라지지 않게. 찾은 열쇠는 `nameKey`로 알려 rename이 그 자리를 치운다.
       // 묶음을 풀면 각 티켓은 자기 열쇠만 보므로 이름은 그 이름이 저장된(바꿀 때의 대표) 티켓 소제목에만 남는다.
       const tries = bundle ? [bundle.lead, ...bundle.keys.filter(entry => entry !== bundle.lead)] : [key];
-      const found = tries.find(entry => typeof names[`${row.heading}|${entry}`] === 'string' && names[`${row.heading}|${entry}`]
-        && Object.prototype.hasOwnProperty.call(names, `${row.heading}|${entry}`));
-      const custom = found ? names[`${row.heading}|${found}`] : null;
+      const heads = row.heading === PLAN_HEADING ? [row.heading] : [...new Set([...NAME_ORDER, row.heading])];
+      const has = slot => typeof names[slot] === 'string' && names[slot] && Object.prototype.hasOwnProperty.call(names, slot);
+      let found = null, slot = null;
+      for (const entry of tries) { const head = heads.find(name => has(`${name}|${entry}`)); if (head) { found = entry; slot = `${head}|${entry}`; break; } }
+      const custom = slot ? names[slot] : null;
       if (custom) { row.shownGroup = custom; row.groupOrigin = projectLabel(key) || natural; row.nameKey = found; }
       else if (natural !== row.group) row.shownGroup = natural;
     });
@@ -186,6 +206,8 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
     // 확인 필요 판단에 쓰는 행마다의 사실(지워진 근거·섞인 상태) — 아래 reviewOf가 읽는다. 저장하지 않는다.
     const facts = new Map();
     for (const row of rows) {
+      // 미리 채운 할 일 칸 줄은 근거(sourceIds)가 없는 계획 줄이다 — 자동 모으기·제안 대상이 아니다(아래 미리 채우기가 따로 다룬다).
+      if (row.origin === 'carry' && row.heading === PLAN_HEADING) { row.needsReview = false; row.currentEvidence = []; continue; }
       const linked = row.sourceIds.map(id => byId.get(id)).filter(Boolean);
       const currentEvidence = linked.map(evidence);
       const missing = linked.length !== row.sourceIds.length;
@@ -220,6 +242,34 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
     const materialPending = [];
     for (const [key,items] of groups) if (hold) { pending += 1; if (heading(items[0]) === '완료한 일') { pendingDone += 1;
       items.forEach(item => materialPending.push({ id: item.id, description: item.description, label: item.label || item.group || item.project || '그룹 없음', completed: item.completed || null })); } } else rows.push({ id:`auto-${hash([key,items.map(item=>item.id).sort()]).slice(0,16)}`,bucket:key,heading:heading(items[0]),group:items[0].label || items[0].group || items[0].project || '그룹 없음', text:textOf(items),sourceIds:items.map(item=>item.id),evidence:items.map(evidence),currentEvidence:items.map(evidence),locked:false,excluded:false,needsReview:false });
+    // 결정·확인 줄은 `다시 넣기`(included) 전까지 보고에서 빠진 줄로 보인다 — 확인 필요·새로 표시·슬랙 글 모두 제외로 센다.
+    rows.forEach((row) => { if (OPT_IN.has(row.heading) && !row.included && !row.excluded) { row.excluded = true; row.optOut = true; } });
+    // 할 일 칸 미리 채우기 — 이번 주·확정 전 보고에만, ⓐ 진행 중 업무 ⓑ 지난주 보고의 계획 줄 중 업무와 이어진(`planOf`) 것이
+    // 아직 안 끝난 것 둘만 넣는다(실행일·기한만 보고 넣지는 않는다). 줄은 `origin:'carry'`·`planOf`=업무 id·`locked:false`이고,
+    // 같은 업무를 가리키는 계획 줄이 이미 있으면(뺀 줄 포함) 넣지 않는다 — 덜어 낸 줄이 다시 들어오지 않게. 안 고친 미리 채운
+    // 줄은 업무가 끝나거나 지워지면 빠지고, 남아 있으면 업무 제목을 따라간다. 왜 들어왔는지(`carryWhy`)는 계산 값이다(저장 안 함).
+    // GET은 파일을 쓰지 않으므로 화면이 복사 성공 때 `keep`으로 한 번 적는다.
+    if (weekKey === currentWeek() && !lockedAt) {
+      const open = item => !!item && ['task', 'bug'].includes(item.type) && item.status !== 'done';
+      for (let index = rows.length - 1; index >= 0; index -= 1) {
+        const row = rows[index];
+        if (row.origin !== 'carry' || row.locked || row.excluded || row.heading !== PLAN_HEADING) continue;
+        const item = byId.get(row.planOf);
+        if (!open(item)) { rows.splice(index, 1); continue; }
+        row.text = textOf([item]); row.group = labelOf(item);
+      }
+      const taken = new Set(rows.filter(row => row.heading === PLAN_HEADING && typeof row.planOf === 'string').map(row => row.planOf));
+      const planned = (state.weeks[dayAfter(weekKey, -7)]?.rows || [])
+        .filter(row => row && row.heading === PLAN_HEADING && !row.excluded && typeof row.planOf === 'string').map(row => row.planOf);
+      const carried = [...all.filter(item => open(item) && item.doing), ...planned.map(id => byId.get(id)).filter(open)];
+      for (const item of carried) {
+        if (taken.has(item.id)) continue;
+        taken.add(item.id);
+        rows.push({ id: `carry-${hash([weekKey, item.id]).slice(0, 16)}`, heading: PLAN_HEADING, group: labelOf(item), text: textOf([item]),
+          sourceIds: [], evidence: [], currentEvidence: [], locked: false, excluded: false, needsReview: false, origin: 'carry', planOf: item.id });
+      }
+      rows.forEach((row) => { if (row.origin === 'carry' && open(byId.get(row.planOf))) row.carryWhy = byId.get(row.planOf).doing ? 'doing' : 'plan'; });
+    }
     dress(rows, weekKey, polish, opts.bundles !== undefined ? opts.bundles : bundles());
     const since = marks(rows, polish.seen, byId);
     const order=['완료한 일','진행중','새로 정해진 것','확인 완료','확인 대기',PLAN_HEADING];
@@ -271,7 +321,11 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
       material: { pending: materialPending },
       ...(opts.raw ? { byId } : {}) };
   }
-  function clean(row) { const { suggestion, needsReview, currentEvidence, canSplit, partCount, groupKey, shownGroup, groupOrigin, nameKey, fresh, changed, completable, review, ...rest } = row; return rest; }
+  function clean(row) {
+    const { suggestion, needsReview, currentEvidence, canSplit, partCount, groupKey, shownGroup, groupOrigin, nameKey, fresh, changed, completable, review, optOut, carryWhy, ...rest } = row;
+    if (optOut) rest.excluded = false;
+    return rest;
+  }
   // 계획 문장에 붙이는 프로젝트 이름. 없으면 기존처럼 `직접 작성`으로 담는다.
   function planGroup(group) {
     if (group === undefined || group === null || group === '') return '직접 작성';
@@ -291,7 +345,7 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
     if (!link || link.length > 100 || /[\u0000-\u001f\u007f]/.test(link)) throw new Error('담은 업무 표시를 100자 이내 한 줄로 보내 주세요.');
     return link;
   }
-  function change({ weekKey, revision, action, id, parentId, text, ids, token, group, planOf: planSource, folded, heading: groupHeading, groupKey }) {
+  function change({ weekKey, revision, action, id, parentId, text, ids, token, group, planOf: planSource, folded, heading: groupHeading, groupKey, on }) {
     const state=read(), base=view(weekKey,state,undefined,{raw:true});
     if (revision !== base.revision) { const error=new Error('새 기록이나 다른 창의 변경이 있어요. 적은 내용은 그대로 있어요. 최신 내용을 확인한 뒤 다시 저장해 주세요.');error.status=409;throw error; }
     // 묶기 전 문장은 화면으로 나가지 않으므로(view가 `canSplit`만 알린다) 저장 파일에서 다시 붙인다.
@@ -328,15 +382,19 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
     } else if(action==='rename') {
       // 소제목 이름 — 프로젝트 열쇠에 묶인다(화면이 보고 있던 소제목의 열쇠만 받는다). 빈 값이나 원래 이름과 같으면
       // 원래 이름으로 돌아간다. 문장·연결·프로젝트는 하나도 바뀌지 않는다.
+      // 한 일 칸(칸이 둘인 화면)은 `완료한 일`로 보낸다 — 그 프로젝트에 완료 줄이 없어도(진행 중·결정만) 같은 열쇠의 줄이면 된다.
+      const inSlot=entry=>entry.groupKey===groupKey&&(entry.heading===groupHeading||(groupHeading==='완료한 일'&&entry.heading!==PLAN_HEADING));
       if(typeof groupHeading!=='string'||typeof groupKey!=='string'||groupHeading===PLAN_HEADING
-        ||!current.rows.some(entry=>entry.heading===groupHeading&&entry.groupKey===groupKey))throw new Error('이름을 바꿀 소제목을 찾을 수 없어요. 최신 보고를 확인해 주세요.');
+        ||!current.rows.some(inSlot))throw new Error('이름을 바꿀 소제목을 찾을 수 없어요. 최신 보고를 확인해 주세요.');
       const name=polishName(text,'소제목 이름');
-      const sample=current.rows.find(entry=>entry.heading===groupHeading&&entry.groupKey===groupKey);
+      const sample=current.rows.find(inSlot);
       const natural=sample.groupOrigin||sample.shownGroup||sample.group;
       const plain=String(natural).replace(/^[A-Z][A-Z0-9]*-\d+ · /,'');
       const names={...(isPlain(polish.names)?polish.names:{})};
       // 이름이 옛 대표 열쇠에서 찾아진 것이면(대표를 바꾼 뒤) 그 자리도 함께 치우고 지금 대표 열쇠에 쓴다.
       if(sample.nameKey&&sample.nameKey!==groupKey)delete names[`${groupHeading}|${sample.nameKey}`];
+      // `완료한 일|열쇠`에 쓸 때는 옛 `진행중|열쇠` 이름도 치운다 — 한 일 칸은 그 둘을 차례로 읽으므로, 남겨 두면 원래대로가 안 된다.
+      if(groupHeading==='완료한 일')for(const key of new Set([groupKey,sample.nameKey].filter(Boolean)))delete names[`진행중|${key}`];
       if(!name||name===natural||name===plain)delete names[`${groupHeading}|${groupKey}`]; else names[`${groupHeading}|${groupKey}`]=name;
       if(Object.keys(names).length)polish.names=names; else delete polish.names;
     } else if(action==='ackNew') {
@@ -372,8 +430,9 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
       if(typeof text!=='string'||!text.trim()||text.length>1000||/[\r\n]/.test(text))throw new Error('더할 문장을 1,000자 이내 한 줄로 적어 주세요.');
       if(weekKey>currentWeek())throw new Error('아직 오지 않은 주에는 줄을 더할 수 없어요.');
       if(groupHeading==='진행중'&&weekKey<currentWeek())throw new Error('지난 주 보고에는 진행 중 줄을 더할 수 없어요. 완료한 일 칸에 더해 주세요.');
+      // 한 일 칸은 완료·진행 중·결정·확인 줄이 한 소제목 아래 서므로, 그 프로젝트의 줄이 칸 어디에든 있으면 된다.
       if(typeof groupKey!=='string'||!/^(jira:.+|group:.+|ungrouped)$/.test(groupKey)
-        ||!current.rows.some(entry=>entry.heading===groupHeading&&entry.groupKey===groupKey&&!entry.excluded))throw new Error('줄을 더할 소제목을 찾을 수 없어요. 최신 보고를 확인해 주세요.');
+        ||!current.rows.some(entry=>entry.groupKey===groupKey&&entry.heading!==PLAN_HEADING&&(entry.heading===groupHeading||groupHeading==='완료한 일')&&(!entry.excluded||entry.optOut)))throw new Error('줄을 더할 소제목을 찾을 수 없어요. 최신 보고를 확인해 주세요.');
       const project=groupKey.startsWith('jira:')?{jira:groupKey.slice(5)}:groupKey.startsWith('group:')?{group:groupKey.slice(6)}:{};
       // 완료일: 이번 주면 오늘(업무를 끝낼 때와 같다), 지난 주면 그 주 금요일(주말 날짜가 업무 목록에 서지 않게).
       const madeId=tasks.create({description:text.trim(),done:groupHeading==='완료한 일',completed:weekKey<currentWeek()?dayAfter(weekKey,4):null,...project});
@@ -382,6 +441,11 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
       rows.push({id:randomUUID(),heading:groupHeading,group:made.label||made.group||made.project||'그룹 없음',bucket:bucket(made),text:text.trim(),
         sourceIds:[made.id],evidence:[evidence(made)],locked:true,excluded:false,origin:'weekly'});
       createdTask={id:made.id,mark:sourceMark(made)}; tasksChanged=true;
+    } else if(action==='keep') {
+      // 복사한 뒤 지금 보이는 줄(미리 채운 할 일 칸 줄 포함)을 그대로 파일에 적는다 — 문장·새로 기록·되돌리기는 그대로다.
+      // GET은 파일을 쓰지 않아서, 한 번도 저장하지 않은 주의 미리 채운 줄은 다음 주의 `지난주 계획`이 되지 못한다.
+      keepUndo=false;
+      if(hash(rows)===hash(state.weeks[weekKey]?.rows||null))return {ok:true,report:view(weekKey,state),undoToken:null};
     } else if(action==='add') {
       if(typeof text!=='string'||!text.trim()||text.length>10000)throw new Error('보고 문장을 입력해 주세요.');
       const link=planOf(planSource);
@@ -417,6 +481,20 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
       if(!row)throw new Error('보고 항목을 찾을 수 없어요.');
       if(action==='edit') { if(typeof text!=='string'||!text.trim()||text.length>10000)throw new Error('보고 문장을 10,000자 이내로 입력해 주세요.');row.text=text.trim();row.locked=true;row.legacy=false;row.evidence=shown.currentEvidence; }
       else if(action==='exclude') row.excluded=!row.excluded;
+      // 결정·확인 줄 `다시 넣기`(on) / `보고에서 빼기`(off) — 이 줄들은 처음부터 빠져 있고 `included`인 줄만 보고에 든다.
+      else if(action==='include') {
+        if(!OPT_IN.has(shown.heading))throw new Error('결정·확인 줄만 보고에 다시 넣거나 뺄 수 있어요.');
+        if(on===true)row.included=true; else if(on===false)delete row.included; else throw new Error('넣을지 뺄지 알려 주세요.');
+        row.excluded=false;
+      }
+      // 할 일 칸 줄을 업무와 잇거나(`나중에 할 일에도 담기`가 만든 업무 id) 끊는다. 화면 표시용 연결이다(planOf 주석 참고).
+      // 알림의 `되돌리기`가 업무와 함께 직접 되돌리므로 ⌘Z 되돌리기 기록은 남기지 않는다.
+      else if(action==='link') {
+        if(shown.heading!==PLAN_HEADING)throw new Error('할 일 칸 줄만 업무와 이을 수 있어요.');
+        const link=planOf(planSource);
+        if(link)row.planOf=link; else delete row.planOf;
+        keepUndo=false;
+      }
       // `원래 문장으로` — 손으로 고친 문장을 연결된 업무에서 다시 지은 문장으로 돌린다(이번 주면 다시 자동 갱신된다).
       // 원본이 하나도 남아 있지 않으면 되돌릴 문장이 없어 거절한다. 연결(`sourceIds`)·자리(`parent`)는 그대로다.
       else if(action==='revert') {
@@ -484,7 +562,7 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
     // 다듬은 기록(`seen`). 되돌리기 말고는 모든 저장이 "다듬기"다 — 처음 다듬을 때(기록이 없던 주)는 지금 보이는 업무를
     // 전부, 그 뒤로는 손댄 문장의 업무만 본 것으로 더한다(한 문장을 고쳤다고 다른 줄의 `새로`가 걷히지 않게).
     // `모두 확인`은 늘 전부다.
-    if(action!=='undo') {
+    if(action!=='undo'&&action!=='keep'&&action!=='link') {
       const now=new Date().toISOString();
       const idsOf=list=>[...new Set(list.flatMap(entry=>[...(entry.sourceIds||[]),...(entry.suggestion?.sourceIds||[])]))];
       const seenIds=list=>Object.fromEntries(idsOf(list).map(sourceId=>[sourceId,sourceMark(current.byId.get(sourceId))]));

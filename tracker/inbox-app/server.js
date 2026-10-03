@@ -2545,7 +2545,9 @@ const handleRequest = (req, res) => {
   }
 
   if (url.pathname === '/api/report/change' && req.method === 'POST') {
-    readBody(req).then(body => { const result = idempotent(req, body, () => reportDrafts.change(body)); res.writeHead(200, {'Content-Type':'application/json; charset=utf-8'}); res.end(JSON.stringify(result)); })
+    // 사용 횟수(숫자만): 문장·제목·소제목 고치기 → weekly_edit, 할 일 칸에 적기 → weekly_plan_add(저장이 성공했을 때만).
+    const reportUsage = { edit: 'weekly_edit', rename: 'weekly_edit', retitle: 'weekly_edit', add: 'weekly_plan_add' };
+    readBody(req).then(body => { const result = idempotent(req, body, () => { const done = reportDrafts.change(body); if (reportUsage[body && body.action]) usage.add(reportUsage[body.action]); return done; }); res.writeHead(200, {'Content-Type':'application/json; charset=utf-8'}); res.end(JSON.stringify(result)); })
       .catch(error => { res.writeHead(error.status || 400, {'Content-Type':'application/json; charset=utf-8'}); res.end(JSON.stringify({ok:false,error:error.message,code:error.code})); });
     return;
   }

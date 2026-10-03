@@ -6,7 +6,7 @@
 //
 // 세는 자리는 서버가 우선이다 — 해당 API가 성공했을 때 +1(화면을 몇 개 열어도 한 번). 세기는 저장 트랜잭션 밖이다:
 // 요청 안에서 센 것은 모아 두었다가 응답이 2xx로 끝난 뒤에 적는다(되돌린 저장은 세지 않는다). 세기가 실패해도 저장은 그대로다.
-// 화면에서만 아는 것(탭 열기·검색·주간요약 복사)은 `POST /api/usage/tick { key }`로 받는다(허용 목록 키만).
+// 화면에서만 아는 것(탭 열기·검색·주간요약 복사·할 일 칸이 든 복사)은 `POST /api/usage/tick { key }`로 받는다(허용 목록 키만).
 //
 // 보내기(설치·정기 신호, 3일째·8일째 체크인에 붙는 칸)는 checkin.js의 전송(`deliver` — 목적지 상수·가짜 fetch)과
 // 같은 대기 규칙(다음에 열 때 하루 한 번, 7일 지나면 버림)을 쓴다. 폼이 닫혔으면(checkin의 closed) 모두 멈춘다.
@@ -32,10 +32,11 @@ const USAGE_KEYS = [
   ['slack_in', '슬랙에서 들어옴'], ['slack_done', '슬랙 항목 끝냄'], ['slack_remove', '슬랙 항목 지움'],
   ['check_add', '확인 대기 추가'], ['idea_add', '아이디어 추가'], ['decision_add', '결정 추가'],
   ['search', '검색'], ['weekly_copy', '주간요약 복사'], ['jira_create', '지라 이슈 만들기'],
+  ['weekly_edit', '주간요약 고치기'], ['weekly_plan_add', '할 일 칸에 적기'], ['weekly_copy_plan', '할 일 칸이 든 주간요약 복사'],
 ];
 const USAGE_KEY_SET = new Set(USAGE_KEYS.map(([key]) => key));
 // 화면이 알려 주는 키(`POST /api/usage/tick`) — 나머지는 서버가 API 성공 때 센다.
-const TICK_KEYS = new Set(['tab_today', 'tab_projects', 'tab_meetings', 'tab_records', 'tab_weekly', 'search', 'weekly_copy']);
+const TICK_KEYS = new Set(['tab_today', 'tab_projects', 'tab_meetings', 'tab_records', 'tab_weekly', 'search', 'weekly_copy', 'weekly_copy_plan']);
 const TAB_NAMES = [['tab_today', '오늘'], ['tab_projects', '프로젝트'], ['tab_meetings', '회의'], ['tab_records', '아이디어·결정'], ['tab_weekly', '주간요약']];
 
 // 폼의 사용 횟수 칸(13~21). 값은 숫자·탭 이름·부가 기능 한 줄뿐이다.
