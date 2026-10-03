@@ -1640,3 +1640,35 @@ test('양식 ①: 한 일 칸 소제목 이름은 `완료한 일|열쇠` → `�
   store.change({weekKey:'2026-09-21',revision:store.view('2026-09-21').revision,action:'addLine',heading:'완료한 일',groupKey:'group:운영',text:'권한 표 공유'});
   assert.ok(store.view('2026-09-21').rows.some(entry=>entry.text==='권한 표 공유'&&entry.heading==='완료한 일'));
 });
+test('양식 ① 검수: 확정한 주의 `보고에 없는 새 줄 N`은 결정·확인 묶음을 세지 않는다(넣어도 처음부터 빠진 줄이라)',t=>{
+  const items=[{id:'a',type:'task',description:'문구 검토하기',status:'done',created:'2026-09-21',completed:'2026-09-22',group:'가입'}];
+  const f=formFixture(t,{items});
+  f.change({action:'confirm'});
+  items.push({id:'d',type:'decision',description:'환불은 7일',status:'to-do',created:'2026-09-23',group:'가입'});
+  items.push({id:'c',type:'check',description:'수수료 확인',status:'to-do',created:'2026-09-23',group:'운영'});
+  assert.deepEqual([f.view().confirmed.pending,f.view().confirmed.pendingDone],[0,0],'결정·확인만 새로 들어오면 0');
+  assert.throws(()=>f.change({action:'pullNew'}),/새로 넣을 줄이 없어요/);
+  items.push({id:'b',type:'task',description:'배너 정리하기',status:'done',created:'2026-09-21',completed:'2026-09-23',group:'가입'});
+  assert.equal(f.view().confirmed.pending,1,'끝낸 일은 그대로 센다');
+});
+test('양식 ① 검수: keep은 저장본과 줄 차례만 다르면 쓰지 않아 그 전 되돌리기가 살아 있다',t=>{
+  const items=[
+    {id:'a',type:'task',description:'문구 검토하기',status:'done',created:'2026-09-21',completed:'2026-09-22',group:'가입'},
+    {id:'x',type:'task',description:'권한 확인하기',status:'to-do',created:'2026-09-10',doing:'2026-09-22',group:'운영툴'},
+  ];
+  const f=formFixture(t,{items});
+  f.change({action:'add',text:'금요일 휴가'});
+  const edit=f.change({action:'add',text:'가 먼저 오는 이름',group:'가나다'});
+  const before=fs.readFileSync(f.file,'utf8');
+  assert.notDeepEqual(f.view().rows.map(row=>row.id),f.saved().weeks['2026-09-21'].rows.map(row=>row.id),'보이는 차례와 저장 차례가 다르다');
+  f.change({action:'keep'});
+  assert.equal(fs.readFileSync(f.file,'utf8'),before,'차례만 다르면 쓰지 않는다');
+  f.change({action:'undo',token:edit.undoToken});
+  assert.equal(f.plan().some(row=>row.text==='가 먼저 오는 이름'),false,'그 전 변경을 ⌘Z로 되돌릴 수 있다');
+});
+test('양식 ① 검수: link는 미리 채운 줄(origin carry)에는 걸 수 없다',t=>{
+  const f=formFixture(t,{items:[{id:'x',type:'task',description:'권한 확인하기',status:'to-do',created:'2026-09-10',doing:'2026-09-22',group:'운영툴'}]});
+  const carry=f.plan().find(row=>row.origin==='carry');
+  assert.throws(()=>f.change({action:'link',id:carry.id,planOf:'other'}),/미리 채운 줄은 이미 업무와 이어져 있어요/);
+  assert.equal(f.plan().find(row=>row.origin==='carry').planOf,'x');
+});

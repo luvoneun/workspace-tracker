@@ -17081,3 +17081,50 @@ test('양식 ①: 없앤 것 — 넣을 구역 고르개·지라 정보 체크·
   for (const gone of ['.rp-secs', '.rp-gp', '.rp-jchk', '.rp-mchk', '.rp-cand', '.rp-also', '.rp-addfoot']) assert.equal(css.includes(gone), false, gone);
   assert.match(ui, /reportButton\('한 줄 추가'|'한 줄 추가', 'rp-pjadd'/, '한 일 칸 `+ 한 줄 추가`는 남는다');
 });
+test('양식 ① 검수: 담기·되돌리기는 보고 저장이 실패(409·서버 꺼짐)하거나 다른 저장 중이라 건너뛰면 방금 한 업무 일을 되돌린다', async () => {
+  const app = reportClient();
+  app.run(`posted = []; mode = 'fail'; renderReportDraft = () => {}; load = async () => {}; reportPlanIsCurrentWeek = () => true;
+    reportChange = async (target, action) => {
+      if (mode === 'fail') throw new Error('새 기록이나 다른 창의 변경이 있어요.');
+      if (mode === 'skip') return;
+      target.draft = { ...target.draft, rows: target.draft.rows.map(row => row.id === action.id ? { ...row, planOf: action.planOf || undefined } : row) };
+    };
+    request = async (url, options) => { posted.push([url, JSON.parse(options.body)]); if (url === '/api/track/remove' && mode === 'remove-fail') throw new Error('지우지 못했어요'); return { json: async () => (url === '/api/later-task/create' ? { ok: true, id: 'task-' + posted.length } : { ok: true }) }; };
+    item = { weekKey: '2026-10-05', draft: { revision: 1, rows: [{ id: 'r', heading: '다음 주 계획', group: '운영툴', text: '권한 표 공유', sourceIds: [], excluded: false }] } };
+    reportPlanAsk.set('r', { taskId: null, idle: false });
+    row = () => item.draft.rows[0];`);
+  await assert.rejects(() => app.run('reportPlanTake(item, row())'), /다른 창의 변경/);
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(posted.map(p => p[0]))')), ['/api/later-task/create', '/api/track/remove'], '저장이 실패하면 만든 업무를 지운다');
+  assert.equal(app.run("reportPlanAsk.get('r').taskId"), null);
+  app.run("mode = 'skip'; posted = []");
+  await assert.rejects(() => app.run('reportPlanTake(item, row())'), /담지 못했어요/);
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(posted.map(p => p[0]))')), ['/api/later-task/create', '/api/track/remove'], '저장을 건너뛰어도(바쁨) 지운다');
+  app.run("mode = 'ok'; posted = []");
+  await app.run('reportPlanTake(item, row())');
+  assert.equal(app.run('row().planOf'), 'task-1');
+  // 되돌리기: 연결을 먼저 끊고, 그 저장이 실패하면 업무를 지우지 않는다.
+  app.run("mode = 'fail'; posted = []");
+  await assert.rejects(() => app.run('reportPlanUntake(item, row())'));
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(posted)')), [], '연결 끊기가 실패하면 업무는 그대로');
+  assert.equal(app.run('row().planOf'), 'task-1');
+  // 업무 지우기가 실패하면 연결을 다시 잇는다.
+  app.run("mode = 'remove-fail'");
+  app.run(`reportChange = async (target, action) => { target.draft = { ...target.draft, rows: target.draft.rows.map(r => r.id === action.id ? { ...r, planOf: action.planOf || undefined } : r) }; }`);
+  await assert.rejects(() => app.run('reportPlanUntake(item, row())'), /지우지 못했어요/);
+  assert.equal(app.run('row().planOf'), 'task-1', '업무가 남았으니 연결도 다시 잇는다');
+  app.run("mode = 'ok'");
+  await app.run('reportPlanUntake(item, row())');
+  assert.deepEqual([app.run('row().planOf'), app.run("reportPlanAsk.get('r').taskId")], [undefined, null]);
+});
+test('양식 ① 검수: 날짜 없는 배포 버전은 이름의 숫자 차례로 고른다(`v2.9` < `v2.10`)', () => {
+  const app = reportClient();
+  assert.equal(app.run("deployUndatedVersion({ versions: [{ name: 'v2.10', released: false }, { name: 'v2.9', released: false }] }).name"), 'v2.9');
+});
+test('양식 ① 검수: 옛 보고에서 가져온 모르는 소제목 줄도 조용히 빠지지 않고 한 일 칸·슬랙 글에 선다', () => {
+  const app = reportClient();
+  const rows = `[{ id: 'legacy-1', heading: '리스크', group: '결제 리뉴얼', text: '정산 지연 가능성', sourceIds: [], excluded: false, legacy: true },
+    { id: 'legacy-2', heading: '조용히 완료한 일', group: '기존 보고', text: '숨긴 옛 줄', sourceIds: [], excluded: true, legacy: true }]`;
+  assert.deepEqual(JSON.parse(app.run(`JSON.stringify(reportDoneGroups(${rows}).groups.map(g => [g.group, g.rows.map(r => r.id)]))`)), [['결제 리뉴얼', ['legacy-1']]]);
+  assert.equal(app.run(`reportSlackText(reportSlackModel({ weekKey: '2026-09-21', rows: ${rows} }))`),
+    ['9월 4주차 (9/21~9/27)', '', '[완료]', '• 결제 리뉴얼', '    ◦ 정산 지연 가능성'].join('\n'), '옛 숨김 줄은 그대로 빠진다');
+});
