@@ -1202,7 +1202,7 @@ test('다듬기 B: 확정하면 자동 모으기가 새 문장을 넣지 않고 
   f.items.push({id:'n',type:'task',description:'가입 문구 후속 확인하기',status:'done',created:'2026-09-16',completed:'2026-09-16',group:'가입',label:'가입'});
   f.items.push({id:'m',type:'decision',description:'새 결정',status:'to-do',created:'2026-09-16',group:'결제',label:'결제'});
   let view=f.view();
-  assert.deepEqual(view.confirmed,{at,pending:2,pendingDone:1});
+  assert.deepEqual(view.confirmed,{at,pending:1,pendingDone:1},'결정 묶음은 넣어도 처음부터 빠진 줄이라 세지 않는다(양식 ①)');
   assert.equal(view.rows.some(entry=>entry.sourceIds.includes('n')||entry.sourceIds.includes('m')),false,'새 업무는 문장이 되지 않는다');
   assert.equal(view.rows.find(entry=>entry.sourceIds.includes('a')).suggestion,undefined,'같은 소제목 문장에 새 업무를 붙이지도 않는다');
   f.items.find(item=>item.id==='a').description='문구 검토하기(최종)';
@@ -1217,7 +1217,7 @@ test('다듬기 B: 확정하면 자동 모으기가 새 문장을 넣지 않고 
   assert.equal(view.rows.filter(entry=>entry.fresh).length,0,'넣은 줄은 본 것으로 적는다');
   assert.throws(()=>f.change({action:'pullNew'}),/새로 넣을 줄이 없어요/);
   f.change({action:'undo',token:pulled.undoToken});
-  assert.equal(f.view().confirmed.pending,2,'되돌리면 다시 붙들어 둔다');
+  assert.equal(f.view().confirmed.pending,1,'되돌리면 다시 붙들어 둔다');
 });
 test('다듬기 B: 확정·확정 풀기는 되돌릴 수 있고, 풀면 자동 모으기가 다시 새 업무를 넣는다',t=>{
   const f=lineFixture(t);
@@ -1396,7 +1396,7 @@ test('개편 A: 재료(material.pending)는 확정한 주에 붙들어 둔 끝�
   f.items.push({id:'q',type:'task',description:'새로 진행하기',status:'to-do',doing:'2026-09-16',created:'2026-09-16',group:'결제',label:'결제'});
   const v=f.view();
   assert.deepEqual(v.material.pending.map(entry=>[entry.id,entry.label,entry.completed]).sort(),[['n','가입','2026-09-16'],['n2','가입','2026-09-17']]);
-  assert.deepEqual([v.confirmed.pending,v.confirmed.pendingDone],[4,2],'줄 수(pending)는 예전 그대로');
+  assert.deepEqual([v.confirmed.pending,v.confirmed.pendingDone],[3,2],'줄 수(pending)는 결정·확인 묶음을 빼고 센다(양식 ①)');
 });
 test('개편 A: 한 줄씩 넣기(pullOne) — 그 업무 하나만 새 줄, 확정 그대로, 되돌리기, 없는 업무·확정 전·오래된 revision은 거절',t=>{
   const f=lineFixture(t);
