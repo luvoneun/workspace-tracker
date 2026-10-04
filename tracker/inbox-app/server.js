@@ -1006,19 +1006,12 @@ function projectDisplayName(key, summary) {
   return getProjectAliases()[key] || summary || '';
 }
 
-// 지금까지 직접 입력해서 쓴 커스텀 그룹명 목록 (지라 티켓 아닌 것) — 그룹 지정 드롭다운에서 재사용하기 위함
+// 프로젝트를 고르는 목록(그룹 지정·분류 판·주간요약 고르개)이 쓰는 직접 만든 프로젝트 이름들.
+// 프로젝트 탭 왼쪽 목록과 한 출처(workflows.groupList — 모든 종류·끝낸 업무·회의에 건 이름)를 쓴다.
+// 업무를 다 끝냈거나 결정·회의에만 건 프로젝트가 고르는 목록에서만 사라지지 않게 하려는 것이다 —
+// 조용해진 프로젝트는 화면이 `지난 프로젝트` 소제목 아래로 내린다(지우지 않는다).
 function getCustomGroups() {
-  const names = new Set();
-  listTrackerFiles().forEach((filePath) => {
-    fs.readFileSync(filePath, 'utf-8').split('\n').forEach((line) => {
-      const m = line.match(TRACK_RE);
-      if (!m || m[2] !== 'task') return;
-      const fields = parseFields(m[3]);
-      if (fields.status === 'done') return;
-      if (fields.group) names.add(fields.group.replace(/_/g, ' '));
-    });
-  });
-  return [...names].sort();
+  return [...new Set(workflows.groupList())].sort();
 }
 
 // ---------- 미팅 ↔ 프로젝트 연결 (사람이 직접 지정) ----------
@@ -1462,7 +1455,6 @@ const groupNameKey = value => String(value || '').replace(/_/g, ' ').trim().repl
 function projectNamesTaken({ excludeGroup = null, excludeJira = null } = {}) {
   const aliases = getProjectAliases();
   return new Set([
-    ...workflows.groupList().filter(entry => entry !== excludeGroup),
     ...getCustomGroups().filter(entry => entry !== excludeGroup),
     ...getJiraIssueCache().filter(issue => issue.key !== excludeJira).map(issue => issue.summary),
     ...Object.entries(aliases).filter(([key]) => key !== excludeJira).map(([, alias]) => alias),
@@ -2690,7 +2682,7 @@ const reportDrafts = require('./report-drafts')({
     // 같은 비교(groupNameKey)다. 없으면 null(새 그룹 이름으로 쓴다).
     findProject: (name) => {
       const wanted = groupNameKey(name);
-      const group = [...workflows.groupList(), ...getCustomGroups()].find(entry => groupNameKey(entry) === wanted);
+      const group = getCustomGroups().find(entry => groupNameKey(entry) === wanted);
       if (group) return `group:${String(group).replace(/_/g, ' ').trim()}`;
       const alias = Object.entries(getProjectAliases()).find(([, value]) => groupNameKey(value) === wanted);
       if (alias) return `jira:${alias[0]}`;
