@@ -591,6 +591,7 @@ async function reportChange(item, action, notice, options = {}) {
     // `+ 한 줄 추가`를 되돌린 결과처럼 서버가 되돌리기 표를 주지 않으면 되돌릴 것이 없다.
     if (result.undoToken) reportUndo.set(item.weekKey, result.undoToken); else reportUndo.delete(item.weekKey);
     tasksChanged = !!result.tasksChanged;
+    reportLastSkipped = Number.isFinite(result.skipped) ? result.skipped : 0;
     item.draft = result.report;
     const cached = weeklyReportsCache.find(entry => entry.weekKey === item.weekKey);
     if (cached) cached.draft = result.report;
@@ -619,8 +620,10 @@ const REPORT_MOVE_NOTICE = {
   pullOne: '보고에 한 줄 넣었어요',
 };
 // `notice`를 주면 그 문구만 조용히 알린다(다음 주 계획 담기처럼 무엇을 했는지 문구가 이미 다 말하는 자리).
+// 옮기기 되돌리기에서 서버가 건너뛴 업무 수(그 사이 다른 곳에서 프로젝트를 바꾼 업무 — 덮지 않았다).
+let reportLastSkipped = 0;
 function reportSavedNotice(item, action, notice) {
-  if (action.action === 'undo') { announce('되돌렸어요'); return; }
+  if (action.action === 'undo') { announce(reportLastSkipped ? `되돌렸어요 · 그 사이 프로젝트가 바뀐 업무 ${reportLastSkipped}개는 그대로 뒀어요` : '되돌렸어요'); return; }
   if (notice) { announce(notice); return; }
   const message = action.action === 'merge'
     ? `문장 ${action.ids.length}개를 묶었어요`
@@ -698,8 +701,9 @@ const reportHasProject = row => /^(jira|group):./.test(String((row && row.groupK
 // 팔로업으로 묶인 줄이 그렇게 보이는지 — 프로젝트가 사라지면(프로젝트 없음) 표시는 보이지 않는다(저장값은 그대로).
 const reportFollowShown = row => !!row && !!row.follow && !row.excluded && REPORT_TASK_HEADINGS.includes(row.heading) && reportHasProject(row);
 // 막대 버튼마다 맞는 줄 — 서버 follow·move와 같은 조건이다.
+// 다른 문장 아래로 넣은 줄(parent)은 슬랙 글에서 부모에 딸려 나가 `팔로업` 줄이 생기지 않으므로 묶지 않는다.
 const reportCanFollow = row => !!row && REPORT_TASK_HEADINGS.includes(row.heading) && !row.manual && !row.excluded && !row.follow
-  && (row.sourceIds || []).length > 0 && reportHasProject(row);
+  && !row.parent && (row.sourceIds || []).length > 0 && reportHasProject(row);
 function reportCanMove(row) {
   if (!row || reportOptIn(row)) return false;
   if (row.heading === REPORT_PLAN_HEADING) return true;
@@ -727,7 +731,8 @@ function reportTidyCounts(report, ids) {
     follow: of(reportCanFollow),
     unfollow: of(row => !!row.follow),
     move: of(reportCanMove),
-    unfold: of(row => !!reportUnfoldAction(rows, row)),
+    // `풀기`는 고른 줄이 하나일 때만 선다 — 줄마다 한 요청이라 여러 줄이면 되돌리기가 마지막 하나뿐이고 중간에 실패하면 반만 풀린다.
+    unfold: picked.length === 1 ? of(row => !!reportUnfoldAction(rows, row)) : [],
   };
 }
 const REPORT_TIDY_BUTTONS = [
@@ -913,12 +918,10 @@ async function reportTidyApply(item, key, ids, button) {
   if (!ids.length) return;
   if (key === 'move') { reportMoveOpen(item, ids, button); return; }
   if (key === 'unfold') {
-    // 옛 묶음 풀기는 줄마다 한 요청이다(서버 unfold·split·unnest — 한 줄씩 되돌린다).
-    for (const id of ids) {
-      const rows = item.draft.rows || [];
-      const action = reportUnfoldAction(rows, rows.find(row => row.id === id));
-      if (action) await reportChange(item, { action, id });
-    }
+    // 옛 묶음 풀기 — 고른 줄 하나만(서버 unfold·split·unnest, 되돌리기 하나).
+    const rows = item.draft.rows || [];
+    const action = ids.length === 1 ? reportUnfoldAction(rows, rows.find(row => row.id === ids[0])) : null;
+    if (action) await reportChange(item, { action, id: ids[0] });
   } else if (key === 'out' || key === 'in') await reportChange(item, { action: 'setOut', ids, out: key === 'out' });
   else await reportChange(item, { action: 'follow', ids, on: key === 'follow' });
   reportTidyFocus('[data-tidy-act]', key) || reportTidyFocus('[data-tidy-act]', REPORT_TIDY_SWAP[key]) || reportTidyFocus('[data-tidy-act]');
@@ -930,6 +933,11 @@ async function reportTidyApply(item, key, ids, button) {
 // 끝의 `직접 입력…`·`프로젝트 빼기` 대신 `기타`(프로젝트 없이 맨 아래 기타 소제목)·`새 프로젝트…`(그 자리 입력칸)를 둔다.
 // Esc는 목록만 닫고(초점은 버튼으로), 입력칸의 Esc는 목록으로 돌아간다.
 const REPORT_MOVE_ETC = 'etc';
+// 새 프로젝트 이름으로 받지 않는 말 — 서버(report-drafts.js RESERVED_NAMES)와 같은 목록·같은 말.
+const REPORT_RESERVED_NAMES = ['기타', '그룹 없음', '직접 작성', '프로젝트 없음'];
+const REPORT_RESERVED_NAME_ERROR = '`기타`·`그룹 없음`·`직접 작성`·`프로젝트 없음`은 새 프로젝트 이름으로 쓸 수 없어요. 다른 이름을 적어 주세요.';
+// 옮기기 요청 → 요청 id. 응답을 못 받고(15초) 다시 누르면 같은 id라 서버가 앞 결과를 돌려준다(업무를 두 번 옮기지 않고 되돌리기도 받는다).
+const reportMoveIds = new Map();
 const reportPickCustom = () => (typeof PICK_CUSTOM !== 'undefined' ? PICK_CUSTOM : '__custom__');
 function reportMoveEntries(current) {
   const base = typeof projectPickEntries === 'function' ? projectPickEntries(current || null, false) : [];
@@ -949,8 +957,19 @@ function reportMoveOpen(item, ids, button) {
   const back = () => { if (typeof uiMenuClose === 'function') uiMenuClose(); reportTidyFocus('[data-tidy-act]', 'move'); };
   const send = async (to) => {
     if (typeof uiMenuClose === 'function') uiMenuClose();
-    try { await reportChange(item, { action: 'move', ids, to }); }
-    catch (error) { showNotice(error.message || '옮기지 못했어요. 고른 줄은 그대로예요', true); }
+    const memo = `${item.weekKey}|${ids.join(',')}|${JSON.stringify(to)}`;
+    if (!reportMoveIds.has(memo)) reportMoveIds.set(memo, reportRequestId());
+    try {
+      await reportChange(item, { action: 'move', ids, to }, undefined, { key: reportMoveIds.get(memo) });
+      reportMoveIds.delete(memo);
+    } catch (error) {
+      // 같은 id의 앞 요청은 이미 옮겨졌는데 그 뒤 보고가 바뀐 경우 — 다시 보내지 않고 최신 보고를 받는다(addLine과 같은 규칙).
+      if (/다른 내용으로 같은 요청/.test(String(error && error.message))) {
+        reportMoveIds.delete(memo);
+        if (typeof load === 'function') await Promise.resolve(load()).catch(() => {});
+        showNotice('이미 옮겨 둔 줄이에요. 최신 보고를 불러왔어요.', true);
+      } else showNotice(error.message || '옮기지 못했어요. 고른 줄은 그대로예요', true);
+    }
     reportTidyFocus('[data-tidy-act]', 'move') || reportTidyFocus('[data-tidy-act]');
   };
   // 목록을 먼저 채운 뒤 메뉴를 띄운다 — 메뉴가 자리를 잴 때 목록 높이까지 알아야 막대 위로 뒤집힌다(아래가 모자라므로).
@@ -988,7 +1007,9 @@ function reportMoveOpen(item, ids, button) {
       if (event.key !== 'Enter') return;
       event.preventDefault();
       const name = input.value.replace(/\s+/g, ' ').trim();
-      if (name) send({ name });
+      if (!name) return;
+      if (REPORT_RESERVED_NAMES.includes(name)) { showNotice(REPORT_RESERVED_NAME_ERROR, true); return; }
+      send({ name });
     });
     box.append(input, reportNode('div', '이름을 적고 Enter — 이 보고와 업무에 함께 쓰여요 · Esc 목록으로', 'rp-help'));
     wrap.replaceChildren(box);
@@ -1441,9 +1462,10 @@ function reportSentenceRow(item, row, context) {
     });
     text.appendChild(input);
     const help = reportNode('div', undefined, 'rp-help');
-    // 글자 버튼을 누르면 적던 글은 버리고(고치기를 닫고) 그 일만 한다 — 저장하지 않은 글이 몰래 저장되지 않게.
+    // 글자 버튼을 누르면 적던 글은 저장하지 않고 그 일만 한다(저장하지 않은 글이 몰래 저장되지 않게). 고치기는 그 일이 **성공한 뒤에**
+    // 닫는다 — 실패하면(서버 꺼짐·409) 적던 글이 입력칸에 그대로 남는다.
     const helpButton = (label, aria, run) => {
-      const button = reportButton(label, async () => { reportEdits.delete(key); await run(); reportEditFocus(row.id); }, 'd-link');
+      const button = reportButton(label, async () => { await run(); reportEdits.delete(key); renderReportDraft(item); reportEditFocus(row.id); }, 'd-link');
       button.setAttribute('aria-label', aria);
       button.addEventListener('mousedown', event => event.preventDefault());
       help.appendChild(button);

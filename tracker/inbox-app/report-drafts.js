@@ -37,6 +37,9 @@ const taskText = item => (['task', 'bug'].includes(item.type) ? trimEnd(firstSen
 const textOf = items => [...new Set(items.map(item => item.status === 'done' && item.outcome ? item.outcome : taskText(item)))].join('\n');
 // 업무가 설 프로젝트 이름(보고 소제목·할 일 칸 미리 채운 줄이 같은 규칙을 쓴다).
 const labelOf = item => item.label || item.group || item.project || '그룹 없음';
+// 새 프로젝트 이름으로 받지 않는 말 — 보고가 "프로젝트 없음"으로 읽는 이름들(화면 report-ui.js REPORT_RESERVED_NAMES와 같은 목록).
+const RESERVED_NAMES = new Set(['기타', '그룹 없음', '직접 작성', '프로젝트 없음']);
+const RESERVED_NAME_ERROR = '`기타`·`그룹 없음`·`직접 작성`·`프로젝트 없음`은 새 프로젝트 이름으로 쓸 수 없어요. 다른 이름을 적어 주세요.';
 // 프로젝트가 없는 줄의 이름(한 일 칸은 `그룹 없음`, 할 일 칸은 `직접 작성`).
 const noProject = name => !name || name === '그룹 없음' || name === '직접 작성';
 // 업무의 프로젝트 열쇠(`jira:KEY`·`group:이름`), 없으면 null — 옮기기와 그 되돌리기가 견준다.
@@ -391,7 +394,7 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
     const current=action==='pullNew'&&base.confirmed&&base.confirmed.pending?view(weekKey,state,undefined,{raw:true,release:true}):base;
     let rows=current.rows.map(carry); const row=rows.find(row=>row.id===id), shown=current.rows.find(row=>row.id===id);
     // `+ 한 줄 추가`가 만든 업무 — 되돌리기 기록에 남겨 되돌릴 때 함께 지운다. 업무 파일을 건드렸으면 화면이 목록을 다시 받게 알린다.
-    let createdTask=null, tasksChanged=false, keepUndo=true, pulledOne=null, movedTasks=null;
+    let createdTask=null, tasksChanged=false, keepUndo=true, pulledOne=null, movedTasks=null, skippedTasks=0;
     // 정리 막대가 고른 줄들(setOut·follow·move) — 전부 지금 보고에 있어야 한다. 한 요청 = 한 저장 = 되돌리기 하나다.
     const picked=()=>{
       if(!Array.isArray(ids)||!ids.length||ids.length>500||ids.some(value=>typeof value!=='string')||new Set(ids).size!==ids.length)throw new Error('고른 줄을 확인해 주세요.');
@@ -419,7 +422,7 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
       if(prior.movedTasks&&tasks){
         for(const entry of prior.movedTasks){
           const now=current.byId.get(entry.id);
-          if(now&&projectKeyOf(now)===entry.to)tasks.setProject(entry.id,entry.from);
+          if(now&&projectKeyOf(now)===entry.to)tasks.setProject(entry.id,entry.from); else skippedTasks+=1;
         }
         tasksChanged=true; keepUndo=false;
       }
@@ -511,7 +514,11 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
       if(typeof out!=='boolean')throw new Error('뺄지 넣을지 알려 주세요.');
       for(const {row:target,shown:seen} of picked()){
         if(OPT_IN.has(seen.heading)){ if(out)delete target.included; else target.included=true; target.excluded=false; }
-        else target.excluded=out;
+        else {
+          target.excluded=out;
+          // 지난주 직접 적은 줄(carryOf)을 다시 넣으면 사람이 고른 줄이다 — 굳혀 둔다(옛 ① 앱이 미리 채운 줄로 보고 지우지 않게).
+          if(!out&&typeof target.carryOf==='string')target.locked=true;
+        }
       }
     } else if(action==='follow') {
       // `팔로업으로 묶기`(on) / `팔로업에서 빼기` — 행 안 `follow` 표시만 바꾼다(문장·자리는 그대로). 묶는 줄은 한 일 칸의
@@ -520,7 +527,8 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
       if(typeof on!=='boolean')throw new Error('묶을지 뺄지 알려 주세요.');
       for(const {row:target,shown:seen} of picked()){
         if(!on){ delete target.follow; continue; }
-        const task=(seen.heading==='완료한 일'||seen.heading==='진행중')&&!seen.manual&&(seen.sourceIds||[]).length
+        // 다른 문장 아래로 넣은 줄(parent)은 슬랙 글에서 부모에 딸려 나가 `팔로업` 줄이 생기지 않으므로 묶지 않는다.
+        const task=(seen.heading==='완료한 일'||seen.heading==='진행중')&&!seen.manual&&!seen.parent&&(seen.sourceIds||[]).length
           &&/^(jira|group):./.test(seen.groupKey||'');
         if(!task||seen.excluded)throw new Error('한 일 칸의 프로젝트 있는 업무 줄만 팔로업으로 묶을 수 있어요.');
         target.follow=true;
@@ -538,14 +546,17 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
       else if(isPlain(to)&&typeof to.name==='string'){
         const name=to.name.replace(/_/g,' ').replace(/\s+/g,' ').trim();
         if(!name||name.length>60||/[\u0000-\u001f\u007f\[\]]/.test(name))throw new Error('새 프로젝트 이름을 60자 이내 한 줄로, 대괄호 없이 적어 주세요.');
+        // `기타`·`그룹 없음`·`직접 작성`·`프로젝트 없음`은 보고가 "프로젝트 없음"으로 읽는 이름이다 — 업무엔 프로젝트가 생기는데 보고는
+        // 프로젝트 없음으로 보이거나 `기타`가 두 번 선다. 새 이름으로 받지 않는다(`기타`는 목록의 `기타`로).
+        if(RESERVED_NAMES.has(name))throw new Error(RESERVED_NAME_ERROR);
         const found=typeof tasks.findProject==='function'?tasks.findProject(name):null;
         target=typeof found==='string'&&/^(jira|group):./.test(found)?found:`group:${name}`;
       } else throw new Error('옮길 프로젝트를 확인해 주세요.');
       // 할 일 칸 줄에 적는 이름 — 지라는 `KEY · 이름`(60자를 넘으면 키만), 직접 만든 프로젝트는 그 이름.
       const label=target?(projectLabel(target)||target.slice(target.indexOf(':')+1)):null;
       const planName=!target?'직접 작성':target.startsWith('jira:')&&label.length>60?target.slice(5):label;
-      if(planName.length>60)throw new Error('프로젝트 이름이 길어 할 일 칸 줄은 옮길 수 없어요.');
       const list=picked(), taskIds=new Set();
+      if(planName.length>60&&list.some(entry=>entry.shown.heading===PLAN_HEADING))throw new Error('프로젝트 이름이 길어 할 일 칸 줄은 옮길 수 없어요.');
       for(const {row:entry,shown:seen} of list){
         if(OPT_IN.has(seen.heading))throw new Error('결정·확인 줄은 옮기지 않아요.');
         if(seen.heading===PLAN_HEADING){
@@ -720,7 +731,7 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
     else if(isPlain(state.weekPolish)){delete state.weekPolish[weekKey];if(!Object.keys(state.weekPolish).length)delete state.weekPolish;}
     atomicWrite(filename,JSON.stringify(state,null,2));
     if(keepUndo){undo.set(undoToken,{weekKey,rows:base.rows.map(carry),polish:polishBefore,after:hash({rows,polish:polishOf(state,weekKey)}),...(createdTask?{createdTask}:{}),...(movedTasks&&movedTasks.length?{movedTasks}:{})});if(undo.size>50)undo.delete(undo.keys().next().value);}
-    return {ok:true,report:view(weekKey,state),undoToken:keepUndo?undoToken:null,...(tasksChanged?{tasksChanged:true}:{})};
+    return {ok:true,report:view(weekKey,state),undoToken:keepUndo?undoToken:null,...(tasksChanged?{tasksChanged:true}:{}),...(skippedTasks?{skipped:skippedTasks}:{})};
   }
   function weeks(snapshot=sources(), state=read()) {
     const dates=snapshot.flatMap(item=>[item.completed,...(['decision','check'].includes(item.type)?[item.created]:[])]).filter(date=>/^\d{4}-\d{2}-\d{2}$/.test(date || ''));
