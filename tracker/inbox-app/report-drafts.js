@@ -51,6 +51,8 @@ const OPT_IN = new Set(['새로 정해진 것', '확인 완료', '확인 대기'
 // 한 일 칸의 소제목 이름을 찾는 차례 — 칸이 둘(한 일·할 일)이 된 뒤로 한 프로젝트의 완료·진행 중·결정·확인 줄이 한
 // 소제목 아래 서므로, 이름은 `완료한 일|열쇠` → `진행중|열쇠` → 그 줄 자기 소제목 자리 순서로 찾는다(옛 이름도 그대로 읽힌다).
 const NAME_ORDER = ['완료한 일', '진행중'];
+// 한 줄의 소제목 이름을 찾는 자리 목록 — view()가 읽고 rename이 비울 때 같은 목록으로 지운다(어긋나면 원래대로가 안 된다).
+const nameHeads = own => own === PLAN_HEADING ? [own] : [...new Set([...NAME_ORDER, own])];
 const POLISH_NAME_MAX = 60;
 // 문장 행이 속한 프로젝트 열쇠(`jira:KEY`·`group:이름`·`ungrouped`). 자동 갱신이 짝을 찾는 bucket 앞머리에서 읽는다
 // (group 이름에 `:`가 있을 수 있어 소제목 자리로 끊는다). bucket이 없는 행은 null — 부르는 쪽이 이름으로 짝을 찾는다.
@@ -152,7 +154,7 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
       // (저장된 이름은 옛 대표 열쇠에 있다) 이름이 사라지지 않게. 찾은 열쇠는 `nameKey`로 알려 rename이 그 자리를 치운다.
       // 묶음을 풀면 각 티켓은 자기 열쇠만 보므로 이름은 그 이름이 저장된(바꿀 때의 대표) 티켓 소제목에만 남는다.
       const tries = bundle ? [bundle.lead, ...bundle.keys.filter(entry => entry !== bundle.lead)] : [key];
-      const heads = row.heading === PLAN_HEADING ? [row.heading] : [...new Set([...NAME_ORDER, row.heading])];
+      const heads = nameHeads(row.heading);
       const has = slot => typeof names[slot] === 'string' && names[slot] && Object.prototype.hasOwnProperty.call(names, slot);
       let found = null, slot = null;
       for (const entry of tries) { const head = heads.find(name => has(`${name}|${entry}`)); if (head) { found = entry; slot = `${head}|${entry}`; break; } }
@@ -394,8 +396,13 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
       const names={...(isPlain(polish.names)?polish.names:{})};
       // 이름이 옛 대표 열쇠에서 찾아진 것이면(대표를 바꾼 뒤) 그 자리도 함께 치우고 지금 대표 열쇠에 쓴다.
       if(sample.nameKey&&sample.nameKey!==groupKey)delete names[`${groupHeading}|${sample.nameKey}`];
-      // `완료한 일|열쇠`에 쓸 때는 옛 `진행중|열쇠` 이름도 치운다 — 한 일 칸은 그 둘을 차례로 읽으므로, 남겨 두면 원래대로가 안 된다.
-      if(groupHeading==='완료한 일')for(const key of new Set([groupKey,sample.nameKey].filter(Boolean)))delete names[`진행중|${key}`];
+      // `완료한 일|열쇠`에 쓸 때는 한 일 칸 줄이 읽을 수 있는 다른 이름 자리(옛 `진행중|열쇠`·결정·확인 줄 자기 소제목 자리)도
+      // 치운다 — view()는 그 자리들을 차례로 읽으므로, 남겨 두면 원래대로가 안 된다(지금 없는 상태의 줄이 나중에 생겨도 같다).
+      if(groupHeading==='완료한 일'){
+        const keys=new Set([groupKey,...current.rows.filter(inSlot).map(entry=>entry.nameKey)].filter(Boolean));
+        for(const head of new Set(HEADINGS.flatMap(nameHeads)))
+          if(head!=='완료한 일')for(const key of keys)delete names[`${head}|${key}`];
+      }
       if(!name||name===natural||name===plain)delete names[`${groupHeading}|${groupKey}`]; else names[`${groupHeading}|${groupKey}`]=name;
       if(Object.keys(names).length)polish.names=names; else delete polish.names;
     } else if(action==='ackNew') {
