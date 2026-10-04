@@ -967,6 +967,43 @@ test('BRENAME: 직접 만든 프로젝트의 이름만, 형식과 겹침을 확�
   assert.equal((await renamePost(server.base, { project: 'group:결제 리뉴얼', name: '결제  리뉴얼' })).ok, true);
 });
 
+// 고르는 목록(customGroups)은 프로젝트 탭 왼쪽 목록과 한 출처(workflows.groupList)다 — 끝낸 업무뿐이거나
+// 확인 대기·결정·아이디어·회의에만 건 프로젝트도 고르는 목록에서 사라지지 않는다.
+test('고르는 목록 출처: 끝낸 업무·모든 종류·회의에 건 이름이 다 들어오고, 밑줄은 공백·코드 순 정렬·중복 없음, 지라 항목의 그룹 칸은 빠진다', async (t) => {
+  const server = await startServer(t, (home) => {
+    fs.writeFileSync(path.join(home, 'tasks.md'), '# Tasks\n'
+      + '- 끝낸 일 #task[id:cg01 status:done priority:medium created:2026-09-01 completed:2026-09-02 group:다_끝남]\n'
+      + '- 진행 중 일 #task[id:cg02 status:to-do priority:medium created:2026-09-20 group:운영툴]\n'
+      + '- 같은 그룹 둘째 #task[id:cg03 status:to-do priority:medium created:2026-09-20 group:운영툴]\n'
+      + '- 지라 일 #task[id:cg04 status:to-do priority:medium created:2026-09-20 jira:IO-1 group:지라에 묻힌_이름]\n');
+    fs.writeFileSync(path.join(home, 'checks.md'), '# Checks\n'
+      + '- 회신 기다림 #check[id:cg05 status:to-do priority:medium created:2026-09-20 who:하늘 group:확인만]\n');
+    fs.writeFileSync(path.join(home, 'decisions.md'), '# Decisions\n'
+      + '- 주 단위로 한다 #decision[id:cg06 status:to-do priority:medium created:2026-09-20 group:Beta_결정]\n');
+    fs.writeFileSync(path.join(home, 'ideas.md'), '# Ideas\n'
+      + '- 리포트 자동화 #idea[id:cg07 status:to-do priority:low created:2026-09-20 project:아이디어_칸]\n');
+    fs.writeFileSync(path.join(home, '.workflow.json'), JSON.stringify({
+      items: {}, meetings: {
+        m1: { id: 'm1', date: '2026-09-20', start: '10:00', end: '11:00', title: '회의', series: '회의', link: null,
+          project: { type: 'group', value: '회의에만_건', label: '회의에만 건' } },
+      },
+    }, null, 2));
+  });
+  const data = await (await fetch(server.base + '/api/items')).json();
+  assert.deepEqual(data.customGroups, ['Beta 결정', '다 끝남', '아이디어 칸', '운영툴', '확인만', '회의에만 건']);
+  // 프로젝트 탭 왼쪽 목록(화면 wfProjects)이 같은 내려받은 값에서 세는 그룹과 같다.
+  const tab = new Set();
+  data.workflows.items.forEach(item => { if (!item.jira && (item.group || item.project)) tab.add(String(item.group || item.project).replace(/_/g, ' ')); });
+  data.workflows.meetings.forEach(event => { if (event.project && event.project.type === 'group') tab.add(String(event.project.value).replace(/_/g, ' ')); });
+  assert.deepEqual([...tab].sort(), data.customGroups);
+  // 이름 겹침 검사(projectNamesTaken)는 그대로 — 끝낸 업무·회의에만 있는 이름과도 겹치면 거절, 지라 항목의 그룹 칸은 자유.
+  const taken = async (name) => (await renamePost(server.base, { project: 'group:운영툴', name })).error;
+  assert.equal(await taken('다 끝남'), '같은 이름의 프로젝트가 이미 있어요.');
+  assert.equal(await taken('회의에만 건'), '같은 이름의 프로젝트가 이미 있어요.');
+  assert.equal(await taken('beta  결정'), '같은 이름의 프로젝트가 이미 있어요.');
+  assert.equal((await renamePost(server.base, { project: 'group:운영툴', name: '지라에 묻힌 이름' })).ok, true);
+});
+
 test('BRENAME: 이름을 바꾸면 항목·회의·연결·보관·주간요약이 한 번에 따라오고 지라 항목은 그대로다', async (t) => {
   const server = await startServer(t, seedRename);
   const answer = await renamePost(server.base, { project: 'group:결제 리뉴얼', name: '결제 정산' });

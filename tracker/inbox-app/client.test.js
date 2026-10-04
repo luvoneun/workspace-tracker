@@ -1376,6 +1376,98 @@ test('분류: 판 부품 — 진짜 button, role=menu, 열면 오늘에 초점, 
   assert.doesNotMatch(part, /\/api\//, '새 API 길을 만들지 않는다 — 저장은 기존 setTaskScheduled·setTaskJira·setTaskGroup');
 });
 
+// 분류 판의 프로젝트 줄 — `직접 입력…`(845d9ae에서 빠졌던 것)을 되돌렸다.
+// (`지난 프로젝트` 판정은 projects-ui.js 몫이라 이 가짜 화면에서는 전부 `지금 프로젝트`로 둔다 — 소제목은 BNOARCHIVE 시험이 본다.)
+function schedProjectOpen(flow, id = 'i1') {
+  flow.app.run('projectLastDay = () => null; projectQuiet = () => false;');
+  const opened = flow.open(id);
+  const projectButton = opened.pop.querySelectorAll('[aria-haspopup="listbox"]')[0];
+  projectButton.listeners.click();
+  const options = () => opened.pop.querySelectorAll('[role="option"]');
+  const custom = () => options().find(one => one.dataset.value === '__custom__');
+  const nameInput = () => opened.pop.querySelectorAll('input').find(one => one.getAttribute('aria-label') === '새 그룹 이름');
+  const key = (node, k) => node.listeners.keydown({ key: k, target: node, preventDefault() {}, stopPropagation() {} });
+  return { ...opened, projectButton, options, custom, nameInput, key };
+}
+
+test('분류 판 직접 입력 ①: 프로젝트 목록에 `직접 입력…`이 서고, 누르면 판 안 이름 칸 → Enter면 그 이름으로 set-group 하나', async () => {
+  const flow = schedFlowClient();
+  flow.app.run("customGroupsCache = ['운영툴']; jiraIssuesCache = []");
+  const { custom, nameInput, key, projectButton } = schedProjectOpen(flow);
+  assert.ok(custom(), '`직접 입력…`이 보인다');
+  custom().listeners.click({ stopPropagation() {} });
+  const input = nameInput();
+  assert.ok(input, '같은 자리에 이름 칸');
+  assert.equal(input.focused, true, '초점이 이름 칸으로');
+  input.value = '  새 일  ';
+  key(input, 'Enter');
+  await settle();
+  assert.equal(flow.held.length, 1);
+  assert.equal(flow.held[0].url, '/api/track/set-group');
+  assert.deepEqual(flow.held[0].body, { id: 'i1', group: '새 일' });
+  assert.equal(projectButton.getAttribute('aria-expanded'), 'false', '목록은 닫힌다');
+  assert.equal(projectButton.focused, true, '초점은 프로젝트 줄로 돌아온다');
+});
+
+test('분류 판 직접 입력 ②: Esc는 이름 칸만 닫고 판은 남는다 — 저장 요청 없음, 빈 이름 Enter도 저장 없음', async () => {
+  const flow = schedFlowClient();
+  flow.app.run("customGroupsCache = ['운영툴']; jiraIssuesCache = []");
+  const { custom, nameInput, key, projectButton } = schedProjectOpen(flow);
+  custom().listeners.click({ stopPropagation() {} });
+  const input = nameInput();
+  input.value = '   ';
+  key(input, 'Enter');
+  key(input, 'Escape');
+  await settle();
+  assert.equal(flow.held.length, 0);
+  assert.equal(nameInput(), undefined, '이름 칸이 닫힌다');
+  assert.equal(projectButton.getAttribute('aria-expanded'), 'false');
+  assert.equal(projectButton.focused, true);
+  assert.notEqual(flow.app.run('uiSchedOpen'), null, 'Esc 한 번은 이름 칸만 닫는다');
+});
+
+test('분류 판 직접 입력 ③: 이미 있는 이름과 대소문자·공백·밑줄만 다르면 그 프로젝트로 간다(새로 만들지 않는다)', async () => {
+  const flow = schedFlowClient();
+  flow.app.run("customGroupsCache = ['Ops Tool']; jiraIssuesCache = [{ key: 'AB-1', summary: '결제 리뉴얼' }]");
+  let opened = schedProjectOpen(flow);
+  opened.custom().listeners.click({ stopPropagation() {} });
+  opened.nameInput().value = 'ops__  TOOL';
+  opened.key(opened.nameInput(), 'Enter');
+  await settle();
+  assert.deepEqual(flow.held[0].body, { id: 'i1', group: 'Ops Tool' });
+  flow.held[0].ok(); await settle();
+  opened = schedProjectOpen(flow, 'i2');
+  opened.custom().listeners.click({ stopPropagation() {} });
+  opened.nameInput().value = '결제  리뉴얼';
+  opened.key(opened.nameInput(), 'Enter');
+  await settle();
+  assert.equal(flow.held[1].url, '/api/track/set-jira', '지라 요약과 같은 이름이면 그 지라 프로젝트');
+  assert.deepEqual(flow.held[1].body, { id: 'i2', jiraKey: 'AB-1' });
+});
+
+test('분류 판 직접 입력 ④: 고를 프로젝트가 0개여도 안내 한 줄 아래 `직접 입력…`이 선다', () => {
+  const flow = schedFlowClient();
+  flow.app.run("customGroupsCache = []; jiraIssuesCache = []");
+  const { pop, options, custom } = schedProjectOpen(flow);
+  assert.ok(pop.querySelectorAll('.d-gphead').some(one => one.textContent === '아직 정해 둔 프로젝트가 없어요'));
+  assert.deepEqual(options().map(one => one.dataset.value), ['__custom__'], '선택지는 직접 입력 하나');
+  assert.ok(custom());
+});
+
+test('분류 판 직접 입력 ⑤: 찾는 말에 맞는 프로젝트가 없으면 Enter가 `직접 입력`으로 넘어가 찾던 글자를 채운다', () => {
+  const flow = schedFlowClient();
+  flow.app.run("customGroupsCache = ['가', '나', '다', '라', '마', '바', '사', '아']; jiraIssuesCache = []");
+  const { pop, nameInput } = schedProjectOpen(flow);
+  const find = pop.querySelectorAll('input').find(one => one.getAttribute('aria-label') === '프로젝트 고르기 — 찾기');
+  assert.ok(find, '8개 이상이면 찾기 칸');
+  find.value = '새 프로젝트';
+  find.listeners.input();
+  const list = pop.querySelectorAll('.d-gpick')[0];
+  list.listeners.keydown({ key: 'Enter', target: find, preventDefault() {}, stopPropagation() {} });
+  assert.ok(nameInput(), '이름 칸으로 넘어간다');
+  assert.equal(nameInput().value, '새 프로젝트');
+});
+
 // 분류 실제 흐름용 가짜 화면 — 기본 가짜 노드에 classList·style·찾기를 보태 판을 진짜처럼 열고 누른다.
 function schedFlowClient() {
   const app = client(new Response('{"ok":true}'));
