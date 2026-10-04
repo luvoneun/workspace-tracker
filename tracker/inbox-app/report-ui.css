@@ -68,6 +68,9 @@
 .rp-ren { display: grid; gap: 4px; flex: 1 1 auto; max-width: 520px; }
 .rp-ren .d-din { min-height: 36px; font-size: inherit; font-weight: inherit; letter-spacing: inherit; }
 .rp-ren .rp-help, .rp-s .rp-help { margin-top: 4px; font-size: 12.5px; font-weight: 400; letter-spacing: 0; color: var(--dim); }
+/* 고치는 중 안내 줄의 글자 버튼(②, `보고에서 빼기`·`원래 문장으로`) — 안내 글과 한 줄에 띄어 선다(시안 2번) */
+.rp-s .rp-help { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; }
+.rp-s .rp-help .d-link { font-size: 12.5px; min-height: 24px; }
 /* 머리 아래 상태 줄 — 다듬은 뒤 새로 들어온 게 있을 때만(옅은 파란 판, 고른 줄과 같은 --sel). 확정한 주는 회색 판(.is-quiet)
    한 줄 `M/D에 확정했어요`(+ 새로 들어온 줄 수 · `보고에 넣기`). */
 .rp-top { display: grid; gap: 6px; margin: 12px 0 4px; }
@@ -91,10 +94,10 @@
 h3.rp-h { line-height: inherit; }
 /* 한 일 칸 소제목의 자동 괄호(`(10/15 배포 목표)`·`(v2.70)`·`(진행 중)`) — 이름보다 한 단계 조용하게 */
 .rp-pj .pa { margin-left: 0.3em; font-weight: 500; color: var(--dim); }
-/* 처음부터 빠진(또는 뺀) 결정·확인 줄 — 지우지 않고 제자리에 흐리게. 취소선 없음, 읽어 주는 이름 `보고에서 뺌`. */
+/* 뺀 줄(처음부터 빠진 결정·확인 포함) — 지우지 않고 제자리에 흐리게. 취소선 없음, 읽어 주는 이름 `보고에서 뺌`. */
 .rp-s.is-dim .tx { color: var(--dim); }
 .rp-s.is-dim .bu { opacity: 0.45; }
-/* 결정·확인 줄 앞의 꼬리표(`결정`·`확인 완료`·`확인 대기`) */
+/* 줄 앞의 꼬리표(`결정`·`확인 완료`·`확인 대기`·`팔로업`) */
 .rp-s .tg { margin-right: 6px; font-size: var(--fs-cap); font-weight: 600; color: var(--dim); }
 /* 할 일 칸에 방금 적은 줄 뒤의 작은 질문 `나중에 할 일에도 담을까요? 담기` — 몇 초 뒤 숨고 손을 올리거나 초점이 오면 다시 보인다. */
 .rp-s .rp-ask { margin-left: 8px; font-size: 12.5px; color: var(--dim); white-space: nowrap; }
@@ -158,17 +161,34 @@ h3.rp-h { line-height: inherit; }
 /* 부모와 프로젝트가 다를 때만 붙는 조용한 이름(문서에서만 — 슬랙 글에는 나가지 않는다) */
 .rp-s .pj { margin-left: 8px; font-size: var(--fs-cap); color: var(--dim); white-space: nowrap; }
 
-/* 모으기 모드: 기준 문장은 연파랑 바탕 + `여기 아래로`, 넣을 수 있는 문장만 눌리고 나머지는 흐리다. */
-.rp-s.is-nest { background: var(--sel); }
-.rp-s .here {
-  margin-left: 8px; height: 20px; display: inline-flex; align-items: center; padding: 0 8px;
-  border-radius: 999px; background: var(--accent-soft); color: var(--accent-text);
-  font-size: 11.5px; font-weight: 600; white-space: nowrap;
+/* 정리 모드(②) — 글머리 자리에 선택 칸(오늘 탭 .d-selcb 그대로)이 서고 줄 아무 데나 눌러 고른다. 고른 줄은 선택 톤(--sel). */
+.rp-s.is-tidy { cursor: pointer; }
+.rp-s.is-tidy:hover { background: var(--hover); }
+.rp-s.is-tidy .bu { display: grid; place-items: center; height: 25.5px; }
+.rp-s.is-selected, .rp-s.is-selected:hover { background: var(--sel); }
+/* 팔로업으로 묶인 줄 — 그 프로젝트 맨 아래 흐리게(앞에 `팔로업` 꼬리표). 슬랙 글에는 그 프로젝트 맨 아래 `팔로업` 한 줄. */
+.rp-s.is-fol .bu, .rp-s.is-fol .tx { opacity: 0.55; }
+/* 정리 모드 알림 한 줄 — 문서 머리 아래. 항목을 누르면 그 줄들이 미리 골라진다(할 것 없는 항목은 안 선다). */
+.rp-tidy { display: flex; align-items: center; flex-wrap: wrap; gap: 0 4px; margin: 12px 0 0; font-size: var(--fs-sm); color: var(--dim); }
+.rp-tidy .k { margin-right: 2px; font-weight: 600; color: var(--muted); }
+.rp-tidy .calm { display: inline-flex; align-items: center; min-height: var(--h-sm); padding: 0 6px; }
+.rp-tidyit {
+  display: inline-flex; align-items: center; gap: 4px; min-height: var(--h-sm); padding: 0 6px;
+  border: 0; border-radius: var(--r-xs); background: none; color: var(--accent-text);
+  font-family: inherit; font-size: var(--fs-sm); font-weight: 600; cursor: pointer;
 }
-.rp-s.is-pick { cursor: pointer; }
-.rp-s.is-pick:hover { background: var(--hover); }
-.rp-s.is-pick:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.rp-s.is-off { opacity: 0.45; pointer-events: none; }
+.rp-tidyit:hover { background: var(--hover); }
+.rp-tidyit:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.rp-tidyit .n { font-variant-numeric: tabular-nums; }
+.rp-tidyit.is-seen { color: var(--dim); font-weight: 500; }
+.rp-tidyit.is-seen:hover { color: var(--text); }
+/* 머리의 `정리 N` — 숫자만 파란 글자, 모드 중(`완료`)에는 선택 톤 */
+.d-headnum .n { margin-left: 4px; color: var(--accent-text); font-weight: 600; }
+.d-headnum.is-on { background: var(--sel); color: var(--accent-text); }
+/* 프로젝트 옮기기 목록의 `새 프로젝트…` 입력칸 — 목록 자리가 그대로 입력칸이 된다 */
+.rp-newpj { display: flex; flex-direction: column; gap: 2px; padding: 2px; }
+.rp-newpj .d-din { width: 100%; box-sizing: border-box; }
+
 /* 문장이 이 화면에서 가장 큰 글자다 */
 .rp-s .tx { font-size: 15.5px; line-height: 1.65; word-break: keep-all; overflow-wrap: anywhere; }
 .rp-s .ln { white-space: pre-wrap; }
@@ -189,18 +209,6 @@ h3.rp-h { line-height: inherit; }
 .rp-s .rp-foldtoggle[aria-expanded="true"] .d-i { transform: rotate(90deg); }
 .rp-s .rp-foldtoggle:hover { background: var(--hover); color: var(--text); }
 .rp-s .rp-foldtoggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-/* 모으기·고르기 모드의 과녁 표시 — 누를 수 있는 줄 오른쪽의 읽기 전용 한 마디(버튼 모양만 빌린다, 누르는 것은 줄 전체). */
-.rp-s .rp-aim { display: flex; align-items: center; padding-top: 2px; pointer-events: none; }
-.rp-s .rp-aim .d-btn { height: var(--h-sm); }
-/* 과녁 표시는 그 줄에 손이 닿거나 초점이 올 때만 — 줄 자체는 늘 눌리는 자리(Tab으로 닿는다). 기준 줄의 `여기 아래로`는 늘 보인다. */
-.rp-s .rp-aim { opacity: 0; transition: opacity var(--t-fast) var(--ease); }
-.rp-s.is-pick:hover .rp-aim, .rp-s.is-pick:focus-within .rp-aim, .rp-s.is-pick:focus-visible .rp-aim { opacity: 1; }
-.rp-s .ac {
-  display: flex; align-items: center; gap: 2px; padding-top: 2px;
-  opacity: 0; pointer-events: none; transition: opacity var(--t-fast) var(--ease);
-}
-.rp-s:hover .ac, .rp-s:focus-within .ac { opacity: 1; pointer-events: auto; }
-
 /* 그 자리 수정 — 다른 입력칸과 같은 부품(테두리 없는 회색 채움 + 파란 테) */
 .rp-ta {
   box-sizing: border-box; width: 100%; resize: vertical;
@@ -351,7 +359,7 @@ h3.rp-h { line-height: inherit; }
 .rp-slackbox .note { padding-left: 30px; text-indent: -30px; color: var(--muted); }
 .rp-slackbox .memo { color: var(--muted); }
 
-/* 문장 묶기 막대는 주간요약 탭 전체 폭을 쓴다(왼쪽 레일이 없다) */
+/* 정리 막대(②)는 주간요약 탭 전체 폭을 쓴다(왼쪽 레일이 없다) */
 #reportNestBarEl { left: 0; }
 #reportNestBarEl .rp-hint { white-space: nowrap; }
 body.nest-open .page { padding-bottom: 104px; }
@@ -401,7 +409,7 @@ body.nest-open .d-toast { bottom: 104px; }
   .rp-slack { padding: 14px 16px 16px; }
 }
 
-/* 계획 문장 ⋯ › `프로젝트 바꾸기` 목록이 펼쳐지면: 라벨은 목록 위 한 줄(메뉴 소제목과 같은 12/600 --muted),
+/* 정리 막대 `프로젝트 옮기기` 목록(더보기 메뉴 안)이 펼쳐지면: 라벨은 목록 위 한 줄(메뉴 소제목과 같은 12/600 --muted),
    목록은 메뉴 폭 가득 왼쪽 정렬, 첫 항목 초점 테가 목록 칸에 잘리지 않게 안쪽 여백 2px(디자인 사후 확인). */
 .d-mfield:has(.rp-regroup.is-picking) { flex-direction: column; align-items: stretch; gap: 4px; }
 .d-mfield:has(.rp-regroup.is-picking) > .ml { font-size: var(--fs-cap); font-weight: 600; color: var(--muted); padding-top: 6px; }
