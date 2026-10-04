@@ -5309,8 +5309,10 @@ function uiSchedToggle(item, row, anchor) {
     if (projectList) { closeProjects(true); return; }
     const current = state.jira ? { type: 'jira', value: state.jira } : state.group ? { type: 'group', value: state.group } : null;
     const entries = projectPickEntries(current, false);
+    // 분류 판의 찾기 칸은 고를 프로젝트가 하나라도 있으면 늘 선다(다른 고르개의 8개 기준과 다르다 — DECISIONS 10/04).
+    const searchable = entries.some(one => one.type === 'option');
     // 고를 프로젝트가 아직 없어도 `직접 입력…`은 선다 — 안내 한 줄은 그 위 소제목으로.
-    if (!entries.some(one => one.type === 'option')) entries.unshift({ type: 'heading', text: '아직 정해 둔 프로젝트가 없어요' });
+    if (!searchable) entries.unshift({ type: 'heading', text: '아직 정해 둔 프로젝트가 없어요' });
     projectButton.setAttribute('aria-expanded', 'true');
     // `직접 입력…`(찾던 글자가 있으면 그 글자째)은 같은 자리에서 이름 칸으로 바뀐다 — 그룹 지정과 같은 칸(uiGroupNameInput).
     const typeName = (draft) => {
@@ -5337,7 +5339,7 @@ function uiSchedToggle(item, row, anchor) {
     projectList = uiPickList({
       entries,
       label: '프로젝트 고르기',
-      search: uiPickSearchable(entries),
+      search: searchable,
       onClose: byKeyboard => closeProjects(byKeyboard),
       onPick: async (value, query) => {
         if (value === PICK_CUSTOM) { typeName(query.trim()); return; }
