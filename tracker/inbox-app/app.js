@@ -5299,10 +5299,11 @@ function uiSchedToggle(item, row, anchor) {
       if (value === PICK_CLEAR) { await setTaskJira(item.id, null); await setTaskGroup(item.id, null); state.jira = null; state.group = null; }
       else if (value.startsWith('group:')) { await setTaskGroup(item.id, value.slice(6)); state.group = value.slice(6); state.jira = null; }
       else { await setTaskJira(item.id, value.replace(/^jira:/, '')); state.jira = value.replace(/^jira:/, ''); state.group = null; }
-    } catch { return; } // 저장이 안 되면 request가 이미 알렸다 — 판은 그대로 두고 지금 값을 보여 준다
+    } catch { return false; } // 저장이 안 되면 request가 이미 알렸다 — 판은 그대로 두고 지금 값을 보여 준다
     paintProject();
     announce(projectKey() ? '프로젝트를 정했어요' : '프로젝트를 뺐어요');
     load(); // 이 구역은 판이 닫힐 때까지 미뤄진다
+    return true;
   };
   projectButton.addEventListener('click', () => {
     if (projectList) { closeProjects(true); return; }
@@ -5318,7 +5319,12 @@ function uiSchedToggle(item, row, anchor) {
       const input = uiGroupNameInput({
         draft,
         className: 'd-din d-pfind d-gpfind',
-        onSave: async (value) => { closeProjects(true); await saveProject(value); },
+        // 저장이 된 뒤에 닫는다 — 서버가 거절하면(꺼짐·잘못된 이름) 적던 글자가 칸에 남는다.
+        onSave: async (value) => {
+          const ok = await saveProject(value);
+          if (ok && projectList === box) closeProjects(true);
+          return ok;
+        },
         onCancel: byKeyboard => { if (projectList === box) closeProjects(byKeyboard); },
       });
       box.appendChild(input);
@@ -6028,15 +6034,17 @@ function uiPickFit(node) {
   if (over > 0) menu.style.top = `${Math.max(8, Math.round(box.top - over))}px`;
 }
 
-// 직접 입력한 이름이 이미 있는 프로젝트(직접 만든 이름·지라 요약·별칭)와 대소문자·공백·밑줄만 다르면
-// 그 프로젝트의 값 — 서버 findProject와 같은 비교다. 없으면 새 그룹 값(`group:이름`).
+// 직접 입력한 이름이 이미 있는 프로젝트면 그 값 — 서버 findProject와 같은 비교·같은 순서다(직접 만든 이름 →
+// 별칭 표 전체 → 지라 요약 또는 `KEY · 요약`, 지라 목록은 `그 밖의 이슈`까지). 비교는 대소문자·공백·밑줄을 무시한다.
+// 없으면 새 그룹 값(`group:이름`).
 function uiPickByName(name) {
   const keyOf = typeof wfGroupNameKey === 'function' ? wfGroupNameKey : value => String(value || '').replace(/_/g, ' ').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
   const wanted = keyOf(name);
   const group = customGroupsCache.find(entry => keyOf(entry) === wanted);
-  if (group) return `group:${group}`;
-  const issue = jiraIssuesCache.find(entry => !entry.extra
-    && (keyOf(entry.summary) === wanted || keyOf(uiGroupLabel(`jira:${entry.key}`)) === wanted));
+  if (group) return `group:${String(group).replace(/_/g, ' ').trim()}`;
+  const alias = Object.entries(projectAliasesCache || {}).find(([, value]) => keyOf(value) === wanted);
+  if (alias) return `jira:${alias[0]}`;
+  const issue = jiraIssuesCache.find(entry => keyOf(entry.summary) === wanted || keyOf(`${entry.key} · ${entry.summary}`) === wanted);
   return issue ? `jira:${issue.key}` : `group:${String(name).trim()}`;
 }
 
@@ -6052,7 +6060,8 @@ function uiGroupNameInput({ draft = '', className = 'group-input', onSave, onCan
   input.value = draft;
   let done = false;
   input.addEventListener('click', event => event.stopPropagation());
-  input.addEventListener('keydown', (event) => {
+  input.addEventListener('keydown', async (event) => {
+    if (done) return; // 이미 저장을 보냈거나 닫았다 — 빠른 Enter 두 번이 요청 두 번이 되지 않게
     if (event.isComposing) return; // 한글을 조합하는 중의 Enter·Esc는 글자를 확정하는 것이다
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -6066,7 +6075,8 @@ function uiGroupNameInput({ draft = '', className = 'group-input', onSave, onCan
     const name = input.value.trim();
     if (!name) return;
     done = true;
-    onSave(uiPickByName(name));
+    // onSave가 false를 돌려주면(저장 실패) 칸과 글자를 그대로 두고 다시 칠 수 있게 연다.
+    if (await onSave(uiPickByName(name)) === false) { done = false; input.focus(); }
   });
   input.addEventListener('blur', () => { if (!done) { done = true; onCancel(false); } });
   return input;
