@@ -15731,7 +15731,7 @@ function motionMapMissing(impl) {
 
 test('모션 장치: 전수 목록 대조 — 지도 문서의 표에 상태 빈칸·주인 없는 남은 줄이 없고, 적힌 파일·선택자·함수 이름이 저장소에 있다', () => {
   const rows = motionMapRows('#');
-  assert.equal(rows.length, 267, '전수 목록 줄 수 — 줄을 더하거나 빼면 이 숫자와 계획 문서를 함께 고친다');
+  assert.equal(rows.length, 268, '전수 목록 줄 수 — 줄을 더하거나 빼면 이 숫자와 계획 문서를 함께 고친다');
   assert.deepEqual(rows.map(row => Number(row['#'])), rows.map((row, at) => at + 1), '번호가 1부터 빠짐없이 이어진다');
   const STATE = /^(적용됨|옛 모션|없음|닫힘만 즉시|의도적으로 안 움직임\(.{2,}\))$/;
   const bad = [];
