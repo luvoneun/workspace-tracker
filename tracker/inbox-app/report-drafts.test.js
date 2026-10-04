@@ -1106,6 +1106,8 @@ test('다듬기 B: 빈 문장·여러 줄·결정 칸·모르는 소제목·오�
     [{heading:'완료한 일',groupKey:'group:가입',text:'   '},/1,000자 이내 한 줄/],
     [{heading:'완료한 일',groupKey:'group:가입',text:'두\n줄'},/1,000자 이내 한 줄/],
     [{heading:'새로 정해진 것',groupKey:'group:가입',text:'결정 한 줄'},/완료한 일·진행 중 칸에만/],
+    [{heading:'확인 완료',groupKey:'group:가입',text:'확인 한 줄'},/완료한 일·진행 중 칸에만/],
+    [{heading:'확인 대기',groupKey:'group:가입',text:'확인 한 줄'},/완료한 일·진행 중 칸에만/],
     [{heading:'완료한 일',groupKey:'group:없는',text:'한 줄'},/소제목을 찾을 수 없어요/],
     [{heading:'진행중',groupKey:'group:가입',text:'한 줄'},/소제목을 찾을 수 없어요/],
     [{heading:'완료한 일',groupKey:'name:여러 프로젝트',text:'한 줄'},/소제목을 찾을 수 없어요/],
@@ -1639,6 +1641,24 @@ test('양식 ①: 한 일 칸 소제목 이름은 `완료한 일|열쇠` → `�
   const store=factory({directory:f.directory,sources:()=>items,legacy:()=>[],currentWeek:()=>'2026-09-21',tasks});
   store.change({weekKey:'2026-09-21',revision:store.view('2026-09-21').revision,action:'addLine',heading:'완료한 일',groupKey:'group:운영',text:'권한 표 공유'});
   assert.ok(store.view('2026-09-21').rows.some(entry=>entry.text==='권한 표 공유'&&entry.heading==='완료한 일'));
+});
+test('양식 ① 후속: 한 일 칸 이름을 비우면 결정·확인 줄 자기 소제목 자리에 남은 옛 이름도 치워 원래 이름으로 돌아온다',t=>{
+  const items=[
+    {id:'a',type:'task',description:'문구 검토하기',status:'done',created:'2026-09-21',completed:'2026-09-22',group:'가입'},
+    {id:'d',type:'decision',description:'환불은 7일',status:'to-do',created:'2026-09-22',group:'가입'},
+    {id:'c',type:'check',description:'수수료 확인',status:'to-do',created:'2026-09-22',group:'가입'},
+  ];
+  const f=formFixture(t,{items});
+  f.change({action:'rename',heading:'완료한 일',groupKey:'group:가입',text:'가입 개편'});
+  // 옛 앱이 결정·확인 줄 자기 소제목 자리에 남긴 이름(지금 앱은 그 자리에 쓰지 않는다).
+  const old=f.saved();
+  old.weekPolish['2026-09-21'].names={'새로 정해진 것|group:가입':'옛 결정 이름','확인 대기|group:가입':'옛 확인 이름','확인 완료|group:가입':'옛 완료 이름'};
+  fs.writeFileSync(f.file,JSON.stringify(old));
+  const row=id=>f.view().rows.find(entry=>entry.sourceIds.includes(id));
+  assert.deepEqual([row('d').shownGroup,row('c').shownGroup],['옛 결정 이름','옛 확인 이름'],'옛 이름이 읽힌다');
+  f.change({action:'rename',heading:'완료한 일',groupKey:'group:가입',text:''});
+  assert.deepEqual(['a','d','c'].map(id=>row(id).shownGroup),[undefined,undefined,undefined],'비우면 칸 전체가 원래 이름');
+  assert.equal(f.saved().weekPolish['2026-09-21'].names,undefined,'읽는 자리를 전부 지운다');
 });
 test('양식 ① 검수: 확정한 주의 `보고에 없는 새 줄 N`은 결정·확인 묶음을 세지 않는다(넣어도 처음부터 빠진 줄이라)',t=>{
   const items=[{id:'a',type:'task',description:'문구 검토하기',status:'done',created:'2026-09-21',completed:'2026-09-22',group:'가입'}];
