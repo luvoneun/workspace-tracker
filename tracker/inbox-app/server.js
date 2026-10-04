@@ -2545,8 +2545,9 @@ const handleRequest = (req, res) => {
   }
 
   if (url.pathname === '/api/report/change' && req.method === 'POST') {
-    // 사용 횟수(숫자만): 문장·제목·소제목 고치기 → weekly_edit, 할 일 칸에 적기 → weekly_plan_add(저장이 성공했을 때만).
-    const reportUsage = { edit: 'weekly_edit', rename: 'weekly_edit', retitle: 'weekly_edit', add: 'weekly_plan_add' };
+    // 사용 횟수(숫자만): 문장·제목·소제목 고치기 → weekly_edit, 할 일 칸에 적기 → weekly_plan_add, 정리 막대(빼기·넣기·팔로업·옮기기)
+    // → weekly_bulk(저장이 성공했을 때만).
+    const reportUsage = { edit: 'weekly_edit', rename: 'weekly_edit', retitle: 'weekly_edit', add: 'weekly_plan_add', setOut: 'weekly_bulk', follow: 'weekly_bulk', move: 'weekly_bulk' };
     readBody(req).then(body => { const result = idempotent(req, body, () => { const done = reportDrafts.change(body); if (reportUsage[body && body.action]) usage.add(reportUsage[body.action]); return done; }); res.writeHead(200, {'Content-Type':'application/json; charset=utf-8'}); res.end(JSON.stringify(result)); })
       .catch(error => { res.writeHead(error.status || 400, {'Content-Type':'application/json; charset=utf-8'}); res.end(JSON.stringify({ok:false,error:error.message,code:error.code})); });
     return;
@@ -2678,6 +2679,24 @@ const reportDrafts = require('./report-drafts')({
     },
     // keep: 지운 항목(.trash.json)에 남긴다(report-drafts는 늘 true로 부른다).
     remove: (id, keep) => removeTrackItem(id, !!keep),
+    // 정리 막대 `프로젝트 옮기기` — 업무 줄의 jira·group 칸만 바꾼다(회의 항목 옮기기 meetingSetItemProject와 같은 쓰기 길).
+    // 열쇠가 null이면 프로젝트를 비운다(`기타`). 같은 트랜잭션 안이라 보고 저장이 실패하면 함께 되돌아간다.
+    setProject: (id, key) => {
+      if (key === null) { setTrackField(id, 'jira', null, null); if (!setTrackField(id, 'group', null, null)) throw new Error('업무를 찾을 수 없어요.'); return; }
+      const target = resolveProject(key);
+      if (!target || !setTrackField(id, target.type, target.value, null)) throw new Error('업무를 찾을 수 없어요.');
+    },
+    // `새 프로젝트…`에 적은 이름이 이미 있는 프로젝트(직접 만든 이름·지라 요약·별칭)면 그 열쇠 — 이름 겹침 검사(projectNamesTaken)와
+    // 같은 비교(groupNameKey)다. 없으면 null(새 그룹 이름으로 쓴다).
+    findProject: (name) => {
+      const wanted = groupNameKey(name);
+      const group = [...workflows.groupList(), ...getCustomGroups()].find(entry => groupNameKey(entry) === wanted);
+      if (group) return `group:${String(group).replace(/_/g, ' ').trim()}`;
+      const alias = Object.entries(getProjectAliases()).find(([, value]) => groupNameKey(value) === wanted);
+      if (alias) return `jira:${alias[0]}`;
+      const issue = getJiraIssueCache().find(entry => groupNameKey(entry.summary) === wanted || groupNameKey(`${entry.key} · ${entry.summary}`) === wanted);
+      return issue ? `jira:${issue.key}` : null;
+    },
   },
 });
 const mutations = require('./mutation-store')(TRACKER_DIR, [MEETING_LINKS_PATH, weeklyReportStatePath()]);

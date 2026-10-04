@@ -100,10 +100,10 @@ function usageGuidePaintAll() {
 // 전부 서버가 준 `history`({ 'YYYY-MM-DD': { 키: 횟수 } })와 `today`로만 계산한다 — 브라우저 시계로 날짜를 만들지 않는다.
 // 주는 월요일 시작. 새로 세는 것은 없다.
 const USAGE_DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
-// 서버(usage.js)의 USAGE_KEYS와 같은 20개 — 이 밖의 키는 무시한다(usage.test.js가 두 목록이 같은지 본다).
+// 서버(usage.js)의 USAGE_KEYS와 같은 22개 — 이 밖의 키는 무시한다(usage.test.js가 두 목록이 같은지 본다).
 const USAGE_KNOWN_KEYS = ['tab_today', 'tab_projects', 'tab_meetings', 'tab_records', 'tab_weekly', 'task_add', 'task_done', 'task_remove',
   'slack_in', 'slack_done', 'slack_remove', 'check_add', 'idea_add', 'decision_add', 'search', 'weekly_copy', 'jira_create',
-  'weekly_edit', 'weekly_plan_add', 'weekly_copy_plan'];
+  'weekly_edit', 'weekly_plan_add', 'weekly_copy_plan', 'weekly_tidy', 'weekly_bulk'];
 const USAGE_IN_KEYS = ['slack_in', 'task_add'];
 // 끝낸 일은 할 일 끝냄만 — 슬랙 출처 할 일은 서버가 task_done·slack_done을 둘 다 올리므로 할 일로 한 번만 센다.
 const USAGE_DONE_KEYS = ['task_done'];

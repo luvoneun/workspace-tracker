@@ -33,10 +33,11 @@ const USAGE_KEYS = [
   ['check_add', '확인 대기 추가'], ['idea_add', '아이디어 추가'], ['decision_add', '결정 추가'],
   ['search', '검색'], ['weekly_copy', '주간요약 복사'], ['jira_create', '지라 이슈 만들기'],
   ['weekly_edit', '주간요약 고치기'], ['weekly_plan_add', '할 일 칸에 적기'], ['weekly_copy_plan', '할 일 칸이 든 주간요약 복사'],
+  ['weekly_tidy', '주간요약 정리 모드 열기'], ['weekly_bulk', '주간요약 정리 막대 쓰기'],
 ];
 const USAGE_KEY_SET = new Set(USAGE_KEYS.map(([key]) => key));
 // 화면이 알려 주는 키(`POST /api/usage/tick`) — 나머지는 서버가 API 성공 때 센다.
-const TICK_KEYS = new Set(['tab_today', 'tab_projects', 'tab_meetings', 'tab_records', 'tab_weekly', 'search', 'weekly_copy', 'weekly_copy_plan']);
+const TICK_KEYS = new Set(['tab_today', 'tab_projects', 'tab_meetings', 'tab_records', 'tab_weekly', 'search', 'weekly_copy', 'weekly_copy_plan', 'weekly_tidy']);
 const TAB_NAMES = [['tab_today', '오늘'], ['tab_projects', '프로젝트'], ['tab_meetings', '회의'], ['tab_records', '아이디어·결정'], ['tab_weekly', '주간요약']];
 
 // 폼의 사용 횟수 칸(13~21). 값은 숫자·탭 이름·부가 기능 한 줄뿐이다.
