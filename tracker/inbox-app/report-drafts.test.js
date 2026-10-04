@@ -1545,7 +1545,9 @@ test('양식 ①: 할 일 칸 미리 채우기 — 진행 중 + 지난주 업무
   assert.ok(f.plan('2026-09-14').every(row=>row.origin!=='carry'||row.planOf==='doing'||row.planOf==='both'||row.planOf==='lone'),'지난주에는 그때의 진행 중만');
   f.state.current='2026-09-21';
   const plan=f.plan();
-  const carried=plan.filter(row=>row.origin==='carry');
+  // ②부터 업무와 이어지지 않은(직접 적은) 지난주 줄은 흐리게 빠진 채 따로 온다(carryOf) — 여기서는 업무를 가리키는 줄만 본다.
+  assert.deepEqual(plan.filter(row=>row.carryOf).map(row=>[row.text,row.excluded]),[['직접 적은 계획',true]]);
+  const carried=plan.filter(row=>row.origin==='carry'&&!row.carryOf);
   assert.deepEqual(carried.map(row=>row.planOf).sort(),['both','doing','left','lone'],'진행 중 둘 + 지난주 계획 중 안 끝난 것(진행 중과 겹친 것은 하나)');
   const by=id=>carried.find(row=>row.planOf===id);
   assert.deepEqual([by('doing').text,by('doing').group,by('doing').carryWhy,by('doing').locked],['관리자 권한 등급 확인','운영툴','doing',false]);
@@ -1691,4 +1693,165 @@ test('양식 ① 검수: link는 미리 채운 줄(origin carry)에는 걸 수 �
   const carry=f.plan().find(row=>row.origin==='carry');
   assert.throws(()=>f.change({action:'link',id:carry.id,planOf:'other'}),/미리 채운 줄은 이미 업무와 이어져 있어요/);
   assert.equal(f.plan().find(row=>row.origin==='carry').planOf,'x');
+});
+
+// ---------- 양식 ②: 정리 막대(setOut·follow·move) · 지난주 계획 이어 보기(carryOf) ----------
+// 업무를 함께 바꾸는 move는 서버처럼 tasks.setProject·findProject를 넣어 준다 — 가짜 업무 목록의 jira·group·label을 바꾼다.
+function tidyFixture(t,{items,current='2026-09-21',known={}}={}) {
+  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'report-tidy-'));t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
+  const labels={'jira:PAY-1':'PAY-1 · 결제 리뉴얼',...known};
+  const calls=[];
+  const tasks={
+    create:()=>{throw new Error('없음');}, remove:()=>{},
+    setProject:(id,key)=>{
+      const item=items.find(entry=>entry.id===id); if(!item)throw new Error('업무를 찾을 수 없어요.');
+      calls.push([id,key]); delete item.jira; delete item.group; delete item.label;
+      if(key&&key.startsWith('jira:')){item.jira=key.slice(5);item.label=labels[key]||item.jira;}
+      else if(key){item.group=key.slice(6);item.label=item.group;}
+    },
+    findProject:name=>({'결제 리뉴얼':'jira:PAY-1','가입 개편':'group:가입 개편'})[name]||null,
+  };
+  const store=factory({directory,sources:()=>items,legacy:()=>[],currentWeek:()=>current,tasks,
+    projectLabel:key=>labels[key]||(key.startsWith('group:')?key.slice(6):null)});
+  const view=(week=current)=>store.view(week);
+  const change=(action,week=current)=>store.change({weekKey:week,revision:view(week).revision,...action});
+  const row=(text,week)=>view(week).rows.find(entry=>entry.text===text);
+  const file=path.join(directory,'.report-drafts.json');
+  return {directory,items,store,view,change,row,calls,file,saved:()=>JSON.parse(fs.readFileSync(file,'utf8'))};
+}
+const tidyItems=()=>[
+  {id:'a',type:'task',description:'결제 실패 문구 작성하기',status:'done',created:'2026-09-21',completed:'2026-09-22',group:'가입 개편',label:'가입 개편'},
+  {id:'b',type:'task',description:'가입 QA 대응하기',status:'done',created:'2026-09-21',completed:'2026-09-22',group:'가입 개편',label:'가입 개편'},
+  {id:'c',type:'task',description:'권한 등급 확인하기',status:'to-do',created:'2026-09-21',doing:'2026-09-22',group:'운영툴',label:'운영툴'},
+  {id:'n',type:'task',description:'채널 정리하기',status:'done',created:'2026-09-21',completed:'2026-09-23'},
+  {id:'d',type:'decision',description:'부분 환불은 다음 차수',status:'to-do',created:'2026-09-22',group:'가입 개편',label:'가입 개편'},
+];
+test('양식 ②: setOut은 여러 줄을 한 번에 빼고(결정·확인은 included로) 되돌리기 하나로 함께 돌아온다',t=>{
+  const f=tidyFixture(t,{items:tidyItems()});
+  const ids=['결제 실패 문구 작성','가입 QA 대응','부분 환불은 다음 차수'].map(text=>f.row(text).id);
+  assert.equal(f.row('부분 환불은 다음 차수').excluded,true,'결정 줄은 처음부터 빠져 있다');
+  const inn=f.change({action:'setOut',ids:[ids[2]],out:false});
+  assert.equal(f.row('부분 환불은 다음 차수').excluded,false,'다시 넣기 = included');
+  assert.ok(inn.undoToken);
+  const done=f.change({action:'setOut',ids,out:true});
+  assert.deepEqual(ids.map(id=>f.view().rows.find(row=>row.id===id).excluded),[true,true,true],'셋이 한 번에 빠진다(줄은 지우지 않는다)');
+  assert.equal(f.saved().weeks['2026-09-21'].rows.find(row=>row.id===ids[2]).included,undefined);
+  f.change({action:'undo',token:done.undoToken});
+  assert.deepEqual(ids.map(id=>f.view().rows.find(row=>row.id===id).excluded),[false,false,false],'되돌리기 하나로 셋 다 돌아온다');
+  assert.throws(()=>f.change({action:'setOut',ids,out:'yes'}),/뺄지 넣을지/);
+  assert.throws(()=>f.change({action:'setOut',ids:[ids[0],ids[0]],out:true}),/고른 줄을 확인/);
+  assert.throws(()=>f.change({action:'setOut',ids:['없음'],out:true}),/찾을 수 없어요/);
+});
+test('양식 ②: 정리 막대 동작도 판이 바뀌었으면 409이고 아무것도 쓰지 않는다',t=>{
+  const f=tidyFixture(t,{items:tidyItems()});
+  const old=f.view(), id=f.row('가입 QA 대응').id;
+  f.items.push({id:'z',type:'task',description:'새 업무하기',status:'done',created:'2026-09-21',completed:'2026-09-23',group:'운영툴',label:'운영툴'});
+  for(const action of [{action:'setOut',ids:[id],out:true},{action:'follow',ids:[id],on:true},{action:'move',ids:[id],to:'group:운영툴'}])
+    assert.throws(()=>f.store.change({weekKey:old.weekKey,revision:old.revision,...action}),error=>error.status===409);
+  assert.equal(fs.existsSync(f.file),false);
+  assert.deepEqual(f.calls,[],'업무도 건드리지 않는다');
+});
+test('양식 ②: follow는 한 일 칸 프로젝트 있는 업무 줄만 묶고(행 안 follow), 빼면 표시만 지운다 — 앱이 스스로 묶지 않는다',t=>{
+  const f=tidyFixture(t,{items:tidyItems()});
+  assert.equal(f.view().rows.some(row=>row.follow),false,'제목에 QA·대응이 있어도 저절로 묶이지 않는다');
+  const qa=f.row('가입 QA 대응').id, ops=f.row('권한 등급 확인').id;
+  const done=f.change({action:'follow',ids:[qa,ops],on:true});
+  assert.deepEqual([f.row('가입 QA 대응').follow,f.row('권한 등급 확인').follow],[true,true],'여러 프로젝트 줄을 함께 골라도 각 줄에 표시');
+  assert.equal(f.saved().weeks['2026-09-21'].rows.find(row=>row.id===qa).follow,true,'저장은 행 안 칸');
+  for(const text of ['채널 정리','부분 환불은 다음 차수']) assert.throws(()=>f.change({action:'follow',ids:[f.row(text).id],on:true}),/프로젝트 있는 업무 줄만/);
+  f.change({action:'add',text:'금요일 휴가'});
+  assert.throws(()=>f.change({action:'follow',ids:[f.row('금요일 휴가').id],on:true}),/프로젝트 있는 업무 줄만/,'할 일 칸 줄도 안 된다');
+  f.change({action:'follow',ids:[qa],on:false});
+  assert.equal(f.row('가입 QA 대응').follow,undefined);
+  assert.equal(f.row('권한 등급 확인').follow,true);
+  assert.ok(done.undoToken);
+});
+test('양식 ②: move는 줄의 업무 전부의 프로젝트를 바꾸고(고친 줄도 따라 옮김·제안 없음), 되돌리기가 업무까지 되돌린다',t=>{
+  const f=tidyFixture(t,{items:tidyItems()});
+  const qa=f.row('가입 QA 대응').id;
+  f.change({action:'edit',id:qa,text:'가입 QA 대응 마무리'});
+  const plan=f.change({action:'add',text:'권한 표 공유',group:'운영툴'});
+  const planId=f.view().rows.find(row=>row.text==='권한 표 공유').id;
+  const moved=f.change({action:'move',ids:[qa,f.row('결제 실패 문구 작성').id,planId],to:'jira:PAY-1'});
+  assert.equal(moved.tasksChanged,true);
+  assert.deepEqual(f.calls,[['b','jira:PAY-1'],['a','jira:PAY-1']]);
+  const edited=f.row('가입 QA 대응 마무리');
+  assert.deepEqual([edited.groupKey,edited.group,edited.suggestion],['jira:PAY-1','PAY-1 · 결제 리뉴얼',undefined],'고친 줄도 새 프로젝트로 — 이름표만 바뀌어 원본 바뀜 제안은 없다');
+  assert.equal(f.row('결제 실패 문구 작성').groupKey,'jira:PAY-1','자동 줄도 따라간다');
+  assert.equal(f.row('권한 표 공유').group,'PAY-1 · 결제 리뉴얼','할 일 칸 줄은 group');
+  f.change({action:'undo',token:moved.undoToken});
+  assert.deepEqual(['a','b'].map(id=>f.items.find(item=>item.id===id).group),['가입 개편','가입 개편'],'업무 프로젝트도 원래대로');
+  assert.equal(f.row('가입 QA 대응 마무리').groupKey,'group:가입 개편');
+  assert.equal(f.row('권한 표 공유').group,'운영툴');
+  assert.ok(plan.undoToken);
+  assert.throws(()=>f.change({action:'move',ids:[f.row('부분 환불은 다음 차수').id],to:'group:운영툴'}),/결정·확인 줄은 옮기지 않아요/);
+  assert.throws(()=>f.change({action:'move',ids:[qa],to:'nope'}),/옮길 프로젝트를 확인/);
+});
+test('양식 ②: move 되돌리기는 그 사이 다른 곳에서 프로젝트를 바꾼 업무는 덮지 않는다',t=>{
+  const f=tidyFixture(t,{items:tidyItems()});
+  const moved=f.change({action:'move',ids:[f.row('가입 QA 대응').id,f.row('결제 실패 문구 작성').id],to:'group:운영툴'});
+  const a=f.items.find(item=>item.id==='a'); a.group='다른 곳';a.label='다른 곳';
+  f.change({action:'undo',token:moved.undoToken});
+  assert.equal(f.items.find(item=>item.id==='b').group,'가입 개편');
+  assert.equal(a.group,'다른 곳','바뀐 업무는 그대로');
+});
+test('양식 ②: 새 프로젝트 이름이 이미 있는 프로젝트와 같으면 그 프로젝트로, 없으면 새 그룹 이름으로 옮긴다',t=>{
+  const f=tidyFixture(t,{items:tidyItems()});
+  f.change({action:'move',ids:[f.row('권한 등급 확인').id],to:{name:' 결제  리뉴얼 '}});
+  assert.equal(f.items.find(item=>item.id==='c').jira,'PAY-1','같은 이름(지라 요약)이면 그 지라 프로젝트');
+  f.change({action:'move',ids:[f.row('채널 정리').id],to:{name:'슬랙 정리'}});
+  assert.equal(f.items.find(item=>item.id==='n').group,'슬랙 정리');
+  assert.equal(f.row('채널 정리').groupKey,'group:슬랙 정리');
+  for(const name of ['', 'x'.repeat(61), '대괄호[x]']) assert.throws(()=>f.change({action:'move',ids:[f.row('채널 정리').id],to:{name}}),/새 프로젝트 이름/);
+});
+test('양식 ②: 기타로 옮기면 업무 프로젝트를 비우고 보고에서만 weekPolish.etc로 기타 아래 선다',t=>{
+  const f=tidyFixture(t,{items:tidyItems()});
+  f.change({action:'add',text:'금요일 휴가'});
+  const holiday=f.row('금요일 휴가').id;
+  const moved=f.change({action:'move',ids:[f.row('권한 등급 확인').id,holiday],to:'etc'});
+  assert.equal(f.items.find(item=>item.id==='c').group,undefined,'업무 프로젝트는 비었다');
+  assert.equal(f.row('권한 등급 확인').etc,true);
+  assert.equal(f.row('금요일 휴가').etc,true);
+  assert.equal(f.row('채널 정리').etc,undefined,'원래 프로젝트 없던 줄은 기타가 아니다');
+  assert.deepEqual(f.saved().weekPolish['2026-09-21'].etc.sort(),['c',holiday].sort());
+  assert.equal(f.saved().weeks['2026-09-21'].rows.some(row=>'etc' in row),false,'계산 값은 저장하지 않는다');
+  f.change({action:'move',ids:[f.row('권한 등급 확인').id],to:'group:운영툴'});
+  assert.deepEqual(f.saved().weekPolish['2026-09-21'].etc,[holiday],'다른 프로젝트로 옮기면 기타 표시를 걷는다');
+  assert.ok(moved.undoToken);
+});
+test('양식 ②: 지난주 직접 적은 계획 줄은 이번 주 할 일 칸에 흐리게 빠진 채 한 번만 들어오고, 다시 넣으면 남는다',t=>{
+  const items=tidyItems();
+  const f=tidyFixture(t,{items,current:'2026-09-14'});
+  f.change({action:'add',text:'금요일 휴가'},'2026-09-14');
+  f.change({action:'add',text:'정산 표 정리',group:'결제'},'2026-09-14');
+  f.change({action:'add',text:'뺀 계획'},'2026-09-14');
+  f.change({action:'setOut',ids:[f.row('뺀 계획','2026-09-14').id],out:true},'2026-09-14');
+  const g=tidyFixture(t,{items,current:'2026-09-21'});
+  fs.copyFileSync(f.file,g.file);
+  const echo=()=>g.view().rows.filter(row=>row.carryOf);
+  assert.deepEqual(echo().map(row=>[row.text,row.group,row.excluded,row.origin,row.carryWhy]).sort(),
+    [['금요일 휴가','직접 작성',true,'carry','note'],['정산 표 정리','결제',true,'carry','note']],'뺀 지난주 줄은 오지 않는다');
+  const back=echo().find(row=>row.text==='정산 표 정리');
+  g.change({action:'setOut',ids:[back.id],out:false});
+  assert.equal(g.view().rows.filter(row=>row.text==='정산 표 정리').length,1,'두 번 들어오지 않는다');
+  assert.equal(g.row('정산 표 정리').excluded,false,'다시 넣은 줄은 보고에 든다');
+  g.change({action:'keep'});
+  assert.equal(g.view().rows.filter(row=>row.carryOf).length,2,'저장한 뒤에도 한 번씩');
+  assert.equal(g.view('2026-09-14').rows.some(row=>row.carryOf),false,'지난 주 화면에는 없다');
+});
+test('양식 ②: 옛 접힌·합친·아래 줄은 unfold·split·unnest로 그대로 풀린다',t=>{
+  const items=[1,2,3,4].map(n=>({id:`t${n}`,type:'task',description:`일 ${n}하기`,status:'done',created:'2026-09-21',completed:'2026-09-22',group:'가입',label:'가입'}));
+  const f=tidyFixture(t,{items});
+  const id=text=>f.row(text).id;
+  f.change({action:'fold',ids:[id('일 1'),id('일 2')],text:'가입 묶음'});
+  f.change({action:'unfold',id:id('가입 묶음')});
+  assert.equal(f.view().rows.some(row=>row.text==='가입 묶음'),false,'모은 부모는 사라지고');
+  assert.equal(f.row('일 1').parent,undefined);
+  f.change({action:'nest',id:id('일 2'),parentId:id('일 1')});
+  f.change({action:'unnest',id:id('일 2')});
+  assert.equal(f.row('일 2').parent,undefined);
+  f.change({action:'merge',ids:[id('일 3'),id('일 4')]});
+  const merged=f.view().rows.find(row=>row.canSplit);
+  f.change({action:'split',id:merged.id});
+  assert.deepEqual(['일 3','일 4'].map(text=>!!f.row(text)),[true,true]);
 });

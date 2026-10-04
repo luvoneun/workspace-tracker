@@ -65,8 +65,8 @@ test('WP-R tick은 허용 목록 키만 받는다(그 밖은 400) — 서버가 
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   serverModule.setUsageForTests({ localDir: dir });
   const tick = key => fetch(base + '/api/usage/tick', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key }) });
-  for (const bad of ['task_add', 'jira_create', 'weekly_edit', 'weekly_plan_add', 'evil', '', null, 3, '__proto__']) assert.equal((await tick(bad)).status, 400, String(bad));
-  for (const good of ['tab_today', 'tab_weekly', 'search', 'weekly_copy', 'weekly_copy_plan', 'search']) assert.equal((await tick(good)).status, 200, good);
+  for (const bad of ['task_add', 'jira_create', 'weekly_edit', 'weekly_plan_add', 'weekly_bulk', 'evil', '', null, 3, '__proto__']) assert.equal((await tick(bad)).status, 400, String(bad));
+  for (const good of ['tab_today', 'tab_weekly', 'search', 'weekly_copy', 'weekly_copy_plan', 'weekly_tidy', 'search']) assert.equal((await tick(good)).status, 200, good);
   const data = await (await fetch(base + '/api/usage')).json();
   const count = key => data.rows.find(row => row.key === key).count;
   assert.equal(count('search'), 2);
@@ -149,9 +149,13 @@ test('양식 ① 주간요약 세기 — 고치기(edit·rename·retitle)는 wee
   const line = (await report()).draft.rows.find(row => row.text === '금요일 휴가');
   await change({ action: 'edit', id: line.id, text: '금요일 반차' });
   assert.equal((await counts()).weekly_edit, 2);
-  // 시험 서버의 보고를 처음 상태로 — 이름과 줄을 거둔다.
+  // 정리 막대(②) — setOut·follow·move 성공은 weekly_bulk, 거절은 세지 않는다.
+  assert.equal((await change({ action: 'setOut', ids: ['없는 줄'], out: true })).status, 400);
+  assert.ok(!(await counts()).weekly_bulk, '거절은 세지 않는다');
+  // 시험 서버의 보고를 처음 상태로 — 이름과 줄을 거둔다(빼기는 정리 막대 길로).
   await change({ action: 'retitle', text: '' });
-  await change({ action: 'exclude', id: line.id });
+  assert.equal((await change({ action: 'setOut', ids: [line.id], out: true })).status, 200);
+  assert.equal((await counts()).weekly_bulk, 1);
 });
 
 test('WP-R 세기는 저장 트랜잭션 밖 — 세기 파일을 못 써도 저장은 된다', async (t) => {
@@ -464,7 +468,7 @@ test('WP-W GET /api/usage — 기존 칸은 그대로, today와 보관 중인 �
   assert.equal(info.today, TODAY);
   assert.deepEqual(info.history, { [TODAY]: { task_done: 3, slack_in: 2 }, [ago(5)]: { task_add: 1 } });
   assert.equal(info.days, 30);
-  assert.equal(info.rows.length, 20);
+  assert.equal(info.rows.length, 22);
   assert.equal(info.rows.find(row => row.key === 'task_done').count, 3);
   assert.equal(typeof info.send, 'boolean');
   assert.equal(typeof info.canSend, 'boolean');

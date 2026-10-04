@@ -1623,6 +1623,35 @@ test('다듬기 B: `+ 한 줄 추가`에서 보고 저장이 실패하면 만든
   assert.equal((await weeklyLine(body, 'weekly-addline-000002')).status, 200);
   assert.equal(readTasks().split('\n').filter(line => line.startsWith('- 약관 개편 끝냄 #task[')).length, 1, '성공 뒤 같은 id를 또 보내도 하나');
 });
+test('양식 ②: 정리 막대 `프로젝트 옮기기`는 업무 파일의 프로젝트와 보고 줄을 한 트랜잭션으로 바꾸고, 되돌리기가 업무까지 되돌린다', async t => {
+  weeklySeed(t);
+  fs.appendFileSync(tasksPath, `- 정산 표 점검하기 #task[id:wb_other status:done priority:medium created:${today} completed:${today} group:운영툴]\n`);
+  const row = async () => (await weeklyNow()).draft.rows.find(entry => entry.sourceIds && entry.sourceIds.includes('wb_seed'));
+  const week = await weeklyNow();
+  const moved = await weeklyLine({ weekKey: week.weekKey, revision: week.draft.revision, action: 'move', ids: [(await row()).id], to: { name: '운영툴' } });
+  assert.equal(moved.status, 200);
+  assert.equal(moved.tasksChanged, true);
+  const line = () => readTasks().split('\n').find(entry => entry.includes('id:wb_seed'));
+  assert.match(line(), /group:운영툴/, '같은 이름의 프로젝트로 옮긴다(새로 만들지 않음)');
+  assert.doesNotMatch(line(), /group:가입_개편/);
+  assert.equal((await row()).groupKey, 'group:운영툴');
+  // 보고 저장이 실패하면 업무 파일도 그대로다(반쯤 된 상태 없음).
+  const realRename = fs.renameSync;
+  let failOnce = true;
+  fs.renameSync = (from, to) => { if (failOnce && String(to).endsWith('.report-drafts.json')) { failOnce = false; throw new Error('디스크에 쓰지 못했어요'); } return realRename(from, to); };
+  t.after(() => { fs.renameSync = realRename; });
+  const before = readTasks();
+  const now = await weeklyNow();
+  const failed = await weeklyLine({ weekKey: now.weekKey, revision: now.draft.revision, action: 'move', ids: [(await row()).id], to: 'etc' });
+  fs.renameSync = realRename;
+  assert.equal(failed.status, 400);
+  assert.equal(readTasks(), before, '업무 파일이 그대로다');
+  const latest = await weeklyNow();
+  const undone = await weeklyLine({ weekKey: latest.weekKey, revision: latest.draft.revision, action: 'undo', token: moved.undoToken });
+  assert.equal(undone.status, 200);
+  assert.match(line(), /group:가입_개편/, '되돌리면 업무도 원래 프로젝트');
+  assert.equal((await row()).groupKey, 'group:가입 개편');
+});
 test('다듬기 B: 진행 중 칸의 `+ 한 줄 추가`는 오늘 진행 중 업무를 만든다', async t => {
   weeklySeed(t);
   fs.appendFileSync(tasksPath, `- 정산 배치 고치기 #task[id:wb_doing status:to-do priority:medium created:${today} scheduled:${today} doing:${today} group:가입_개편]\n`);
