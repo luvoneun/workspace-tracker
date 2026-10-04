@@ -1469,6 +1469,93 @@ test('분류 판 직접 입력 ⑤: 찾는 말에 맞는 프로젝트가 없으�
   assert.equal(nameInput().value, '새 프로젝트');
 });
 
+// 분류 판의 찾기 칸은 프로젝트 개수와 상관없이 선다 — 다른 고르개(그룹 지정·확인 대기·회의·주간요약)는 8개 기준 그대로.
+const schedFind = pop => pop.querySelectorAll('input').find(one => one.getAttribute('aria-label') === '프로젝트 고르기 — 찾기');
+
+test('분류 판 찾기 칸 ①: 고를 프로젝트가 1·3·7·8·12개 어느 때나 찾기 칸이 서고, 맨 끝 `직접 입력…`도 그대로', () => {
+  [1, 3, 7, 8, 12].forEach((count) => {
+    const flow = schedFlowClient();
+    const names = Array.from({ length: count }, (_, i) => `프로젝트${i + 1}`);
+    flow.app.run(`customGroupsCache = ${JSON.stringify(names)}; jiraIssuesCache = []`);
+    const { pop, options, custom } = schedProjectOpen(flow);
+    const find = schedFind(pop);
+    assert.ok(find, `${count}개여도 찾기 칸`);
+    assert.equal(find.type, 'search');
+    assert.equal(find.focused, true, `${count}개: 열면 초점이 찾기 칸으로`);
+    assert.equal(options().length, count + 1, '선택지 + 직접 입력');
+    assert.ok(custom());
+  });
+});
+
+test('분류 판 찾기 칸 ②: 지라·묶음 없이 지라 하나만 있어도, `지난 프로젝트` 소제목 아래 것만 있어도 선다 — 찾으면 그 줄이 남는다', () => {
+  let flow = schedFlowClient();
+  flow.app.run("customGroupsCache = []; jiraIssuesCache = [{ key: 'AB-1', summary: '결제 리뉴얼' }]");
+  assert.ok(schedFind(schedProjectOpen(flow).pop), '지라 하나');
+  flow = schedFlowClient();
+  flow.app.run("customGroupsCache = ['옛 일', '지금 일']; jiraIssuesCache = []");
+  flow.app.run("projectLastDay = () => null; projectQuiet = () => false;");
+  const opened = flow.open('i1');
+  flow.app.run("projectQuiet = () => true"); // 둘 다 지난 프로젝트
+  opened.pop.querySelectorAll('[aria-haspopup="listbox"]')[0].listeners.click();
+  assert.ok(opened.pop.querySelectorAll('.d-gphead').some(one => one.textContent === '지난 프로젝트'));
+  const find = schedFind(opened.pop);
+  assert.ok(find, '지난 프로젝트만 있어도 찾기 칸');
+  find.value = '옛';
+  find.listeners.input();
+  const values = opened.pop.querySelectorAll('[role="option"]').map(one => one.dataset.value);
+  assert.deepEqual(values, ['group:옛 일', '__custom__'], '소제목 아래 것도 찾힌다');
+});
+
+test('분류 판 찾기 칸 ③: 0개면 찾기 칸 없이 안내 + `직접 입력…`만', () => {
+  const flow = schedFlowClient();
+  flow.app.run("customGroupsCache = []; jiraIssuesCache = []");
+  const { pop, options } = schedProjectOpen(flow);
+  assert.equal(schedFind(pop), undefined);
+  assert.ok(pop.querySelectorAll('.d-gphead').some(one => one.textContent === '아직 정해 둔 프로젝트가 없어요'));
+  assert.deepEqual(options().map(one => one.dataset.value), ['__custom__']);
+});
+
+test('분류 판 찾기 칸 ④: 적은 목록에서도 키보드 그대로 — ↓는 첫 선택지, 맞는 게 없으면 Enter로 이름 칸(찾던 글자), Esc는 목록만 닫고 판은 남는다', async () => {
+  const flow = schedFlowClient();
+  flow.app.run("customGroupsCache = ['운영툴', '결제']; jiraIssuesCache = []");
+  let opened = schedProjectOpen(flow);
+  let find = schedFind(opened.pop);
+  const list = () => opened.pop.querySelectorAll('.d-gpick')[0];
+  const press = (k, target) => list().listeners.keydown({ key: k, target, preventDefault() {}, stopPropagation() {} });
+  flow.app.context.document.activeElement = find; // 가짜 화면은 초점 자리를 따로 기억하지 않는다
+  press('ArrowDown', find);
+  assert.equal(opened.options()[0].focused, true, '↓는 첫 선택지');
+  press('Escape', opened.options()[0]);
+  assert.equal(opened.projectButton.getAttribute('aria-expanded'), 'false');
+  assert.equal(opened.projectButton.focused, true, '초점은 프로젝트 줄로');
+  assert.notEqual(flow.app.run('uiSchedOpen'), null, '판은 남는다');
+  // 다시 열어 맞는 게 없는 말 + Enter → 이름 칸
+  opened.projectButton.listeners.click();
+  find = schedFind(opened.pop);
+  assert.ok(find, '다시 열어도 찾기 칸');
+  find.value = '새 일';
+  find.listeners.input();
+  press('Enter', find);
+  assert.equal(opened.nameInput().value, '새 일');
+  // 이름 칸을 Esc로 닫고 다시 열어도 찾기 칸이 선다
+  opened.key(opened.nameInput(), 'Escape');
+  opened.projectButton.listeners.click();
+  assert.ok(schedFind(opened.pop), '이름 칸을 닫은 뒤 다시 열어도');
+  await settle();
+  assert.equal(flow.held.length, 0, '저장 요청 없음');
+});
+
+test('찾기 칸 늘 보이기는 분류 판만 — 다른 고르개(그룹 지정·확인 대기·회의·주간요약)는 uiPickSearchable(8개 기준) 그대로', () => {
+  const read = name => fs.readFileSync(path.join(__dirname, name), 'utf8');
+  const app = read('app.js');
+  const toggle = app.slice(app.indexOf('function uiSchedToggle'), app.indexOf('// 슬랙에서 갓 들어온 할 일.'));
+  assert.doesNotMatch(toggle, /uiPickSearchable/, '분류 판은 개수 기준을 쓰지 않는다');
+  assert.match(toggle, /const searchable = entries\.some\(one => one\.type === 'option'\);/);
+  assert.equal(app.split('search: uiPickSearchable(entries)').length - 1, 2, '확인 대기 고르개·renderGroupControl');
+  assert.equal(read('meetings-ui.js').split('search: uiPickSearchable(entries)').length - 1, 1);
+  assert.equal(read('report-ui.js').split('search: uiPickSearchable(entries)').length - 1, 1);
+});
+
 test('직접 입력 이름 비교는 서버 findProject와 같다 — 그 밖의 이슈 요약·별칭, 목록 밖 티켓의 별칭, `KEY · 요약` 꼴', () => {
   const app = client(new Response('{"ok":true}'));
   app.run(`customGroupsCache = ['운영툴'];
