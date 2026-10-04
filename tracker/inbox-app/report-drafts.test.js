@@ -1855,3 +1855,40 @@ test('양식 ②: 옛 접힌·합친·아래 줄은 unfold·split·unnest로 그
   f.change({action:'split',id:merged.id});
   assert.deepEqual(['일 3','일 4'].map(text=>!!f.row(text)),[true,true]);
 });
+
+test('② 검수: 새 프로젝트 이름으로 기타·그룹 없음·직접 작성·프로젝트 없음은 거절하고 업무를 건드리지 않는다',t=>{
+  const f=tidyFixture(t,{items:tidyItems()});
+  for(const name of ['기타','그룹 없음',' 직접  작성 ','프로젝트 없음'])
+    assert.throws(()=>f.change({action:'move',ids:[f.row('채널 정리').id],to:{name}}),/새 프로젝트 이름으로 쓸 수 없어요/,name);
+  assert.deepEqual(f.calls,[]);
+});
+test('② 검수: 할 일 칸 이름 60자 검사는 고른 줄에 할 일 칸 줄이 있을 때만 — 한 일 칸 줄은 긴 이름 그룹으로도 옮긴다',t=>{
+  const f=tidyFixture(t,{items:tidyItems()});
+  const long='가'.repeat(70);
+  f.change({action:'move',ids:[f.row('채널 정리').id],to:`group:${long}`});
+  assert.equal(f.items.find(item=>item.id==='n').group,long);
+  f.change({action:'add',text:'금요일 휴가'});
+  assert.throws(()=>f.change({action:'move',ids:[f.row('금요일 휴가').id],to:`group:${long}`}),/이름이 길어 할 일 칸 줄은/);
+});
+test('② 검수: move 되돌리기는 건너뛴 업무 수를 skipped로 돌려준다',t=>{
+  const f=tidyFixture(t,{items:tidyItems()});
+  const moved=f.change({action:'move',ids:[f.row('가입 QA 대응').id,f.row('결제 실패 문구 작성').id],to:'group:운영툴'});
+  const a=f.items.find(item=>item.id==='a'); a.group='다른 곳';a.label='다른 곳';
+  const undone=f.change({action:'undo',token:moved.undoToken});
+  assert.equal(undone.skipped,1);
+  const again=f.change({action:'move',ids:[f.row('채널 정리').id],to:'group:운영툴'});
+  assert.equal(f.change({action:'undo',token:again.undoToken}).skipped,undefined,'건너뛴 것이 없으면 칸이 없다');
+});
+test('② 검수: 다른 문장 아래 줄은 팔로업으로 묶지 못하고, 지난주 직접 적은 줄을 다시 넣으면 굳혀 둔다(locked)',t=>{
+  const items=[1,2].map(n=>({id:`t${n}`,type:'task',description:`일 ${n}하기`,status:'done',created:'2026-09-21',completed:'2026-09-22',group:'가입',label:'가입'}));
+  const f=tidyFixture(t,{items});
+  f.change({action:'nest',id:f.row('일 2').id,parentId:f.row('일 1').id});
+  assert.throws(()=>f.change({action:'follow',ids:[f.row('일 2').id],on:true}),/프로젝트 있는 업무 줄만/);
+  const g=tidyFixture(t,{items,current:'2026-09-14'});
+  g.change({action:'add',text:'직접 적은 계획'},'2026-09-14');
+  const h=tidyFixture(t,{items,current:'2026-09-21'});
+  fs.copyFileSync(g.file,h.file);
+  const echo=h.view().rows.find(row=>row.carryOf);
+  h.change({action:'setOut',ids:[echo.id],out:false});
+  assert.equal(h.saved().weeks['2026-09-21'].rows.find(row=>row.id===echo.id).locked,true);
+});

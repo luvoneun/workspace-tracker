@@ -16846,11 +16846,12 @@ test('②: 막대 버튼 판정 표 — 고른 줄에 맞는 버튼만, 일부�
   // 옛 묶음은 `풀기` — 접힌·모은 부모(unfold) · 합친 줄(split) · 아래 줄(unnest).
   assert.deepEqual(bar(['m']), ['보고에서 빼기', '풀기'], '사람이 지은 요약 부모는 옮기지 않는다');
   assert.deepEqual(bar(['x']), ['보고에서 빼기', '프로젝트 옮기기', '풀기']);
-  assert.deepEqual(bar(['k']), ['보고에서 빼기', '팔로업으로 묶기', '프로젝트 옮기기', '풀기']);
+  assert.deepEqual(bar(['k']), ['보고에서 빼기', '프로젝트 옮기기', '풀기'], '다른 문장 아래 줄은 팔로업으로 묶지 않는다(슬랙 글에서 부모에 딸려 나간다)');
+  assert.deepEqual(bar(['m', 'x']), ['보고에서 빼기', '프로젝트 옮기기 1'], '`풀기`는 고른 줄이 하나일 때만');
   assert.deepEqual(JSON.parse(app.run(`JSON.stringify(['m', 'x', 'k', 'a'].map(id => reportUnfoldAction(item.draft.rows, item.draft.rows.find(row => row.id === id))))`)), ['unfold', 'split', 'unnest', null]);
   assert.deepEqual(bar([]), []);
 });
-test('②: 막대 버튼은 고른 줄 전부를 한 요청으로(setOut·follow), 풀기는 줄마다 unfold·split·unnest — 고른 줄은 그대로다', async () => {
+test('②: 막대 버튼은 고른 줄 전부를 한 요청으로(setOut·follow), 풀기는 한 줄만 unfold·split·unnest(여러 줄이면 보내지 않는다) — 고른 줄은 그대로다', async () => {
   const app = tidyClient();
   app.run("reportTidy = { weekKey: '2026-09-21', ids: new Set(['a', 'd', 'h']), anchor: 'h' }");
   const counts = id => app.run(`reportTidyCounts(item.draft, reportTidy.ids)['${id}']`);
@@ -16859,14 +16860,17 @@ test('②: 막대 버튼은 고른 줄 전부를 한 요청으로(setOut·follow
   await app.run(`reportTidyApply(item, 'follow', reportTidyCounts(item.draft, reportTidy.ids).follow)`);
   app.run("reportTidy.ids = new Set(['g'])");
   await app.run(`reportTidyApply(item, 'unfollow', ['g'])`);
-  app.run("reportTidy.ids = new Set(['m', 'x', 'k'])");
-  await app.run(`reportTidyApply(item, 'unfold', reportTidyCounts(item.draft, reportTidy.ids).unfold)`);
+  for (const id of ['m', 'k', 'x']) {
+    app.run(`reportTidy.ids = new Set(['${id}'])`);
+    await app.run(`reportTidyApply(item, 'unfold', reportTidyCounts(item.draft, reportTidy.ids).unfold)`);
+  }
+  await app.run(`reportTidyApply(item, 'unfold', ['m', 'x'])`);
   assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), [
     { action: 'setOut', ids: ['a', 'h'], out: true }, { action: 'setOut', ids: ['d'], out: false }, { action: 'follow', ids: ['a'], on: true },
     { action: 'follow', ids: ['g'], on: false },
     { action: 'unfold', id: 'm' }, { action: 'unnest', id: 'k' }, { action: 'split', id: 'x' },
   ]);
-  assert.deepEqual(JSON.parse(app.run('JSON.stringify([...reportTidy.ids])')), ['m', 'x', 'k'], '고른 줄은 그대로');
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify([...reportTidy.ids])')), ['x'], '고른 줄은 그대로');
   assert.ok(counts);
 });
 test('②: 알림 한 줄 — 팔로업 후보는 프로젝트마다(제목에 팔로업·QA·대응, 묶인 줄·가려진 줄 제외) · 결정 · 프로젝트 없음, 눌러 보면 미리 골라지고 머리 숫자에서 빠진다', () => {
@@ -17042,4 +17046,61 @@ test('②: 뺀 줄은 제자리에 흐리게(할 일 칸도 — 지난주 직접
   assert.doesNotMatch(css.match(/\/\* 정리 모드\(②\)[\s\S]*?\.rp-newpj \.d-din[^}]*\}/)[0], /#[0-9a-f]{3,6}\b|rgba?\(|box-shadow/i, '새 색·새 그림자 없음(토큰만)');
   const map = fs.readFileSync(path.join(__dirname, '..', '..', 'docs', '지도', '모션.md'), 'utf8');
   for (const name of ['reportTidyBar', 'reportMoveOpen', 'reportTidyStart', 'reportTidyHeadButton']) assert.match(map, new RegExp(`\`${name}\``), `지도 전수 목록에 ${name}`);
+});
+
+test('② 검수: 새 프로젝트 이름이 `기타`·`그룹 없음`·`직접 작성`·`프로젝트 없음`이면 보내지 않고 서버와 같은 말로 알린다', async () => {
+  const app = tidyClient();
+  app.run("customGroupsCache = []; jiraIssuesCache = []; projectBundles = () => []; renderReportDraft = () => {};");
+  app.run("moveButton = document.createElement('button'); document.body.appendChild(moveButton); reportMoveOpen(item, ['a'], moveButton)");
+  const menu = app.run('uiMenuOpen.list');
+  nodeFindAll(menu, 'd-gpopt').find(kid => nodeFind(kid, 'nm').textContent === '새 프로젝트…').listeners.click({ stopPropagation() {} });
+  const input = nodeFind(menu, 'd-din');
+  for (const name of ['기타', ' 그룹 없음 ', '직접 작성', '프로젝트 없음']) {
+    input.value = name;
+    input.listeners.keydown({ key: 'Enter', preventDefault() {}, stopPropagation() {} });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.match(app.nodes.get('liveRegion').textContent, /새 프로젝트 이름으로 쓸 수 없어요/, name);
+  }
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), []);
+  const server = fs.readFileSync(path.join(__dirname, 'report-drafts.js'), 'utf8');
+  const ui = fs.readFileSync(path.join(__dirname, 'report-ui.js'), 'utf8');
+  const message = /REPORT_RESERVED_NAME_ERROR = '([^']+)'/.exec(ui)[1];
+  assert.ok(server.includes(`RESERVED_NAME_ERROR = '${message}'`), '화면과 서버가 같은 말');
+});
+test('② 검수: 옮기기는 요청 id(Idempotency-Key)를 달고, 응답을 못 받아 다시 보내면 같은 id — 성공하면 그 id를 버린다', async () => {
+  const app = tidyClient();
+  app.run("customGroupsCache = ['가입 개선']; jiraIssuesCache = []; projectBundles = () => []; renderReportDraft = () => {};");
+  app.run("keys = []; fail = true; reportChange = async (target, action, notice, options) => { keys.push(options && options.key); if (fail) { fail = false; throw new Error('저장됐는지 확인하지 못했어요. 적은 내용은 그대로 있어요'); } calls.push(action); };");
+  const pick = async () => {
+    app.run("moveButton = document.createElement('button'); document.body.appendChild(moveButton); reportMoveOpen(item, ['a'], moveButton)");
+    nodeFindAll(app.run('uiMenuOpen.list'), 'd-gpopt').find(kid => nodeFind(kid, 'nm').textContent === '가입 개선').listeners.click({ stopPropagation() {} });
+    await new Promise(resolve => setImmediate(resolve));
+  };
+  await pick();
+  await pick();
+  const keys = JSON.parse(app.run('JSON.stringify(keys)'));
+  assert.equal(keys.length, 2);
+  assert.ok(keys[0] && keys[0] === keys[1], '실패 뒤 다시 보내면 같은 요청 id');
+  assert.equal(app.run('reportMoveIds.size'), 0, '성공하면 버린다');
+  await pick();
+  assert.notEqual(JSON.parse(app.run('JSON.stringify(keys)'))[2], keys[0], '다음 옮기기는 새 id');
+});
+test('② 검수: 고치는 중 안내 줄 글자 버튼이 실패하면 적던 글이 그대로 남고, 성공한 뒤에만 고치기를 닫는다', async () => {
+  const app = tidyClient();
+  app.run("renderReportDraft = () => {}; reportChange = async () => { throw new Error('서버에 닿지 못했어요'); }; reportEdits.set('2026-09-21:a', '고치던 글');");
+  const help = nodeFind(app.run(`(() => { const host = document.createElement('div'); reportSentenceRow(item, item.draft.rows[0], { host, newIds: new Set() }); return host.children[0]; })()`), 'rp-help');
+  await help.children[0].listeners.click();
+  assert.equal(app.run("reportEdits.get('2026-09-21:a')"), '고치던 글', '실패하면 적던 글 보존');
+  app.run("reportChange = async (target, action) => { calls.push(action); };");
+  await help.children[0].listeners.click();
+  assert.equal(app.run("reportEdits.has('2026-09-21:a')"), false, '성공한 뒤에 닫는다');
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), [{ action: 'setOut', ids: ['a'], out: true }]);
+});
+test('② 검수: 옮기기 되돌리기에서 서버가 건너뛴 업무 수(skipped)를 알림에 적는다', () => {
+  const app = tidyClient();
+  app.run("reportLastSkipped = 2; reportSavedNotice(item, { action: 'undo' })");
+  assert.equal(app.nodes.get('liveRegion').textContent, '되돌렸어요 · 그 사이 프로젝트가 바뀐 업무 2개는 그대로 뒀어요');
+  app.run("reportLastSkipped = 0; reportSavedNotice(item, { action: 'undo' })");
+  assert.equal(app.nodes.get('liveRegion').textContent, '되돌렸어요');
+  assert.match(fs.readFileSync(path.join(__dirname, 'report-ui.js'), 'utf8'), /reportLastSkipped = Number\.isFinite\(result\.skipped\)/);
 });
