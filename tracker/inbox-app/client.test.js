@@ -1405,7 +1405,8 @@ test('분류 판 직접 입력 ①: 프로젝트 목록에 `직접 입력…`이
   assert.equal(flow.held.length, 1);
   assert.equal(flow.held[0].url, '/api/track/set-group');
   assert.deepEqual(flow.held[0].body, { id: 'i1', group: '새 일' });
-  assert.equal(projectButton.getAttribute('aria-expanded'), 'false', '목록은 닫힌다');
+  flow.held[0].ok(); await settle();
+  assert.equal(projectButton.getAttribute('aria-expanded'), 'false', '저장된 뒤 목록은 닫힌다');
   assert.equal(projectButton.focused, true, '초점은 프로젝트 줄로 돌아온다');
 });
 
@@ -1466,6 +1467,52 @@ test('분류 판 직접 입력 ⑤: 찾는 말에 맞는 프로젝트가 없으�
   list.listeners.keydown({ key: 'Enter', target: find, preventDefault() {}, stopPropagation() {} });
   assert.ok(nameInput(), '이름 칸으로 넘어간다');
   assert.equal(nameInput().value, '새 프로젝트');
+});
+
+test('직접 입력 이름 비교는 서버 findProject와 같다 — 그 밖의 이슈 요약·별칭, 목록 밖 티켓의 별칭, `KEY · 요약` 꼴', () => {
+  const app = client(new Response('{"ok":true}'));
+  app.run(`customGroupsCache = ['운영툴'];
+    jiraIssuesCache = [{ key: 'AB-1', summary: '결제 리뉴얼' }, { key: 'AB-2', summary: '끝난 이슈', extra: true }];
+    projectAliasesCache = { 'AB-2': '옛 별칭', 'ZZ-9': '목록 밖 별칭' };`);
+  const pick = name => app.run(`uiPickByName(${JSON.stringify(name)})`);
+  assert.equal(pick('운영툴'), 'group:운영툴');
+  assert.equal(pick('끝난  이슈'), 'jira:AB-2', '그 밖의 이슈 요약');
+  assert.equal(pick('옛_별칭'), 'jira:AB-2', '그 밖의 이슈 별칭');
+  assert.equal(pick('목록 밖 별칭'), 'jira:ZZ-9', '내 담당 목록 밖 티켓의 별칭');
+  assert.equal(pick('ab-1 · 결제 리뉴얼'), 'jira:AB-1', '`KEY · 요약` 꼴');
+  assert.equal(pick(' 새 이름 '), 'group:새 이름');
+});
+
+test('분류 판 직접 입력 ⑥: 서버가 거절하면(`[`가 든 이름) 칸과 적던 글자가 그대로 남고, 고쳐서 다시 Enter하면 저장된다', async () => {
+  const flow = schedFlowClient();
+  flow.app.run("customGroupsCache = ['운영툴']; jiraIssuesCache = []");
+  const { custom, nameInput, key, projectButton } = schedProjectOpen(flow);
+  custom().listeners.click({ stopPropagation() {} });
+  const input = nameInput();
+  input.value = '결제 [정산]';
+  key(input, 'Enter');
+  await settle();
+  flow.held[0].fail(); await settle();
+  assert.equal(nameInput(), input, '이름 칸이 그대로 있다');
+  assert.equal(input.value, '결제 [정산]', '적던 글자 보존');
+  assert.equal(projectButton.getAttribute('aria-expanded'), 'true');
+  input.value = '결제 정산';
+  key(input, 'Enter');
+  await settle();
+  assert.equal(flow.held.length, 2, '실패 뒤에는 다시 보낼 수 있다');
+  flow.held[1].ok(); await settle();
+  assert.equal(nameInput(), undefined, '저장된 뒤에 닫힌다');
+  assert.equal(projectButton.getAttribute('aria-expanded'), 'false');
+});
+
+test('이름 칸(uiGroupNameInput): Enter를 빠르게 두 번 쳐도 저장은 한 번', async () => {
+  const app = client(new Response('{"ok":true}'));
+  app.run("saves = []; nameBox = uiGroupNameInput({ onSave: value => { saves.push(value); return new Promise(() => {}); }, onCancel() {} }); nameBox.value = '새 그룹'");
+  const input = app.run('nameBox');
+  const enter = () => input.listeners.keydown({ key: 'Enter', preventDefault() {}, stopPropagation() {} });
+  enter(); enter();
+  await settle();
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(saves)')), ['group:새 그룹']);
 });
 
 // 분류 실제 흐름용 가짜 화면 — 기본 가짜 노드에 classList·style·찾기를 보태 판을 진짜처럼 열고 누른다.
