@@ -5307,21 +5307,38 @@ function uiSchedToggle(item, row, anchor) {
   projectButton.addEventListener('click', () => {
     if (projectList) { closeProjects(true); return; }
     const current = state.jira ? { type: 'jira', value: state.jira } : state.group ? { type: 'group', value: state.group } : null;
-    const entries = projectPickEntries(current, false).filter(one => one.value !== PICK_CUSTOM);
+    const entries = projectPickEntries(current, false);
+    // 고를 프로젝트가 아직 없어도 `직접 입력…`은 선다 — 안내 한 줄은 그 위 소제목으로.
+    if (!entries.some(one => one.type === 'option')) entries.unshift({ type: 'heading', text: '아직 정해 둔 프로젝트가 없어요' });
     projectButton.setAttribute('aria-expanded', 'true');
-    if (!entries.some(one => one.type === 'option')) {
-      projectList = document.createElement('div');
-      projectList.className = 'd-schedhint';
-      projectList.textContent = '아직 정해 둔 프로젝트가 없어요';
-    } else {
-      projectList = uiPickList({
-        entries,
-        label: '프로젝트 고르기',
-        search: uiPickSearchable(entries),
-        onClose: byKeyboard => closeProjects(byKeyboard),
-        onPick: async (value) => { closeProjects(true); await saveProject(value); },
+    // `직접 입력…`(찾던 글자가 있으면 그 글자째)은 같은 자리에서 이름 칸으로 바뀐다 — 그룹 지정과 같은 칸(uiGroupNameInput).
+    const typeName = (draft) => {
+      const box = document.createElement('div');
+      box.className = 'd-gpick';
+      const input = uiGroupNameInput({
+        draft,
+        className: 'd-din d-pfind d-gpfind',
+        onSave: async (value) => { closeProjects(true); await saveProject(value); },
+        onCancel: byKeyboard => { if (projectList === box) closeProjects(byKeyboard); },
       });
-    }
+      box.appendChild(input);
+      projectList.remove();
+      projectList = box;
+      projectBox.appendChild(box);
+      place();
+      input.focus();
+    };
+    projectList = uiPickList({
+      entries,
+      label: '프로젝트 고르기',
+      search: uiPickSearchable(entries),
+      onClose: byKeyboard => closeProjects(byKeyboard),
+      onPick: async (value, query) => {
+        if (value === PICK_CUSTOM) { typeName(query.trim()); return; }
+        closeProjects(true);
+        await saveProject(value);
+      },
+    });
     projectBox.appendChild(projectList);
     place();
     projectList.focusStart?.();
@@ -6011,40 +6028,65 @@ function uiPickFit(node) {
   if (over > 0) menu.style.top = `${Math.max(8, Math.round(box.top - over))}px`;
 }
 
+// 직접 입력한 이름이 이미 있는 프로젝트(직접 만든 이름·지라 요약·별칭)와 대소문자·공백·밑줄만 다르면
+// 그 프로젝트의 값 — 서버 findProject와 같은 비교다. 없으면 새 그룹 값(`group:이름`).
+function uiPickByName(name) {
+  const keyOf = typeof wfGroupNameKey === 'function' ? wfGroupNameKey : value => String(value || '').replace(/_/g, ' ').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+  const wanted = keyOf(name);
+  const group = customGroupsCache.find(entry => keyOf(entry) === wanted);
+  if (group) return `group:${group}`;
+  const issue = jiraIssuesCache.find(entry => !entry.extra
+    && (keyOf(entry.summary) === wanted || keyOf(uiGroupLabel(`jira:${entry.key}`)) === wanted));
+  return issue ? `jira:${issue.key}` : `group:${String(name).trim()}`;
+}
+
+// 직접 입력 칸 — 찾던 글자를 미리 채운다. Enter면 onSave(고를 값), Esc면 onCancel(true), 바깥으로 초점이 나가면 onCancel(false).
+// 그룹 지정(renderGroupControl)과 일정 정하기 판의 프로젝트 줄이 함께 쓴다.
+function uiGroupNameInput({ draft = '', className = 'group-input', onSave, onCancel }) {
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = className;
+  input.placeholder = '그룹명 입력 후 Enter';
+  input.autocomplete = 'off';
+  input.setAttribute('aria-label', '새 그룹 이름');
+  input.value = draft;
+  let done = false;
+  input.addEventListener('click', event => event.stopPropagation());
+  input.addEventListener('keydown', (event) => {
+    if (event.isComposing) return; // 한글을 조합하는 중의 Enter·Esc는 글자를 확정하는 것이다
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      done = true;
+      onCancel(true);
+      return;
+    }
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    const name = input.value.trim();
+    if (!name) return;
+    done = true;
+    onSave(uiPickByName(name));
+  });
+  input.addEventListener('blur', () => { if (!done) { done = true; onCancel(false); } });
+  return input;
+}
+
 function renderGroupControl({ jira, group, onSetJira, onSetGroup, forceClearable = false, silent = false, plain = false }) {
   const wrap = document.createElement('div');
   wrap.className = 'jira-control';
   const saved = (text) => { if (!silent) { announce(text); load(); } };
 
-  // 직접 입력 — 찾던 글자를 미리 채운 칸. Enter면 그 이름의 그룹, Esc·바깥 누름이면 원래 자리로.
+  // 직접 입력 — 찾던 글자를 미리 채운 칸(uiGroupNameInput). Enter면 그 이름의 프로젝트, Esc·바깥 누름이면 원래 자리로.
   const customInput = (revertTo, draft) => {
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'group-input';
-    input.placeholder = '그룹명 입력 후 Enter';
-    input.setAttribute('aria-label', '새 그룹 이름');
-    input.value = draft || '';
-    let inputCommitted = false;
-    input.addEventListener('click', (e) => e.stopPropagation());
-    input.addEventListener('keydown', async (e2) => {
-      if (e2.isComposing) return;
-      if (e2.key === 'Escape') {
-        e2.preventDefault();
-        e2.stopPropagation();
-        inputCommitted = true;
-        if (revertTo && wrap.contains(input)) { wrap.replaceChild(revertTo, input); revertTo.focus(); }
-        return;
-      }
-      if (e2.key !== 'Enter') return;
-      const v = input.value.trim();
-      if (!v) return;
-      inputCommitted = true;
-      await onSetGroup(v);
-      saved('그룹을 지정했어요');
-    });
-    input.addEventListener('blur', () => {
-      if (inputCommitted) return;
-      if (revertTo && wrap.contains(input)) wrap.replaceChild(revertTo, input);
+    const input = uiGroupNameInput({
+      draft,
+      onSave: value => commit(value),
+      onCancel: (byKeyboard) => {
+        if (!revertTo || !wrap.contains(input)) return;
+        wrap.replaceChild(revertTo, input);
+        if (byKeyboard) revertTo.focus();
+      },
     });
     return input;
   };
