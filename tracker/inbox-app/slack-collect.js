@@ -20,7 +20,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn, execFile } = require('node:child_process');
-const { history } = require('./slack-history');
+const { history, isTransientError, TRANSIENT_MARK, MANUAL_MARK } = require('./slack-history');
 const { getSlackToken, readOAuthStatus } = require('./slack-auth');
 
 const APP_DIR = __dirname;
@@ -52,6 +52,8 @@ const SYSTEM_SUBTYPES = new Set(['channel_join', 'channel_leave', 'channel_name'
 const MAX_MESSAGES = Number(process.env.SLACK_COLLECT_MAX_MESSAGES) || 50;
 const MAX_INPUT_CHARS = Number(process.env.SLACK_COLLECT_MAX_CHARS) || 100000;
 const MAX_EXISTING = 300;
+// 채널 읽기가 잠깐의 오류(시간 초과·네트워크·5xx·429)로 실패하면 이만큼 쉬고 한 번 더 읽는다(시험은 0으로 줄인다).
+const RETRY_GAP_MS = Number.isFinite(Number(process.env.SLACK_COLLECT_RETRY_MS)) && process.env.SLACK_COLLECT_RETRY_MS !== '' ? Number(process.env.SLACK_COLLECT_RETRY_MS) : 3000;
 const MAX_USERS = 50;
 const TEXT_LIMIT = 3000;
 const REPLY_LIMIT = 1500;
@@ -591,6 +593,11 @@ async function processChannel(ctx, channel, messages) {
 
 async function main() {
   const [configFile, stateFile, logFile, runTask] = process.argv.slice(2);
+  // 이 회차가 시작된 때 — 실패 블록의 시작 줄에 쓴다. 채널 확인 실패 한 줄들이 이 블록 안(시작 뒤)에 들어야
+  // 서버가 그 줄들을 이 회차 하나로 센다(getAutomationStatus의 failTimes).
+  const runStarted = stamp();
+  // `지금 가져오기`로 부른 회차면 실패 줄·블록 끝에 표시를 붙인다(서버가 밤에도 보이는 근거).
+  const manualTag = process.env.SLACK_CAPTURE_MANUAL === '1' ? ` ${MANUAL_MARK}` : '';
   const log = text => fs.appendFileSync(logFile, `${stamp()} ${text}\n`);
   const config = readJson(configFile);
   if (!config) { log('채널 확인 실패 — 설정된 채널을 읽을 수 없음'); return 1; }
@@ -617,34 +624,58 @@ async function main() {
   }
   const state = readJson(stateFile) || {};
   const fetched = [];
-  let failures = 0;
+  // 채널 확인 실패 한 줄(`<my-키> 채널 확인 실패 — 이유`)은 이 회차의 실패 블록 안에 적는다 — 서버가 회차 하나로 센다.
+  // 잠깐의 오류면 끝에 TRANSIENT_MARK, `지금 가져오기`면 그 뒤에 MANUAL_MARK.
+  const failLines = [];
+  let hardFailures = 0;
+  const failLine = (channel, reason, transient = false) => {
+    if (!transient) hardFailures += 1;
+    failLines.push(`${channel.cursor} 채널 확인 실패 — ${reason}${transient ? ` ${TRANSIENT_MARK}` : ''}${manualTag}`);
+  };
   for (const channel of channels) {
     // 어디서부터 볼지 = 수집 커서와 since 중 큰 값(슬랙 ts는 소수라 글자가 아니라 수로 견준다).
     const cursor = TS_RE.test(String(state[channel.cursor] || '')) ? String(state[channel.cursor]) : '';
     const oldest = !channel.since ? cursor : (!cursor || tsCompare(channel.since, cursor) > 0 ? channel.since : cursor);
     // `slack_reconnect`는 서버의 SLACK_AUTH_RE가 잡는 낱말이다(토큰을 다시 받아야 하는 실패).
-    if (reconnect) { failures += 1; log(`${channel.cursor} 채널 확인 실패 — 슬랙 연결이 풀림, 다시 연결 필요(slack_reconnect · ${auth.failure.code || auth.failure.reason || 'unknown'})`); continue; }
-    if (!auth.token) { failures += 1; log(`${channel.cursor} 채널 확인 실패 — 슬랙 토큰을 읽을 수 없음`); continue; }
+    if (reconnect) { failLine(channel, `슬랙 연결이 풀림, 다시 연결 필요(slack_reconnect · ${auth.failure.code || auth.failure.reason || 'unknown'})`); continue; }
+    if (!auth.token) { failLine(channel, '슬랙 토큰을 읽을 수 없음'); continue; }
+    const read = () => auth.call(token => history({ token, channel: channel.id, oldest: oldest || undefined, limit: 100 }));
     try {
-      const result = await auth.call(token => history({ token, channel: channel.id, oldest: oldest || undefined, limit: 100 }));
+      let result;
+      // 잠깐의 오류(시간 초과·네트워크·5xx·429)면 조금 쉬고 그 채널만 한 번 더 읽는다. 토큰 갱신이 잠시 안 된 것(RETRY_LATER)은
+      // 다시 읽어도 같은 토큰이라 다시 읽지 않는다.
+      try { result = await read(); } catch (error) {
+        if (!isTransientError(error)) throw error;
+        if (RETRY_GAP_MS > 0) await new Promise(resolve => setTimeout(resolve, RETRY_GAP_MS));
+        result = await read();
+      }
       fetched.push({ channel, messages: result.messages });
     } catch (error) {
-      failures += 1;
-      log(`${channel.cursor} 채널 확인 실패 — ${oneLine(error.message, 160)}`);
+      failLine(channel, oneLine(error.message, 160), isTransientError(error) || error.message === RETRY_LATER);
     }
   }
+  // 채널 확인 실패가 모두 잠깐의 오류였나 — 그러면 실패 블록·수집 상태 글에 표시를 붙여 서버가 연속 3회차까지 기다리게 한다.
+  const failures = failLines.length;
+  const transientOnly = failures > 0 && hardFailures === 0;
   // 수집 상태(`lastError`)에 남는 글 — 연결이 풀려서면 그 종류를 값 없이 같이 적는다.
-  const failText = reconnect ? '슬랙 연결이 풀렸어요 — 다시 연결이 필요해요 (slack_reconnect)' : '일부 채널을 확인하지 못했습니다.';
+  const failTextOf = soft => (reconnect ? '슬랙 연결이 풀렸어요 — 다시 연결이 필요해요 (slack_reconnect)'
+    : `일부 채널을 확인하지 못했습니다.${soft ? ` ${TRANSIENT_MARK}` : ''}`);
+  // 잠깐의 오류뿐인 회차의 맺음 줄 — 서버는 블록이 **이 줄로 끝날 때만** 잠깐 오류 회차로 센다(채널 줄 끝의 표시는 읽는 사람용).
+  const failNote = `채널 ${failures}개 확인 실패 ${TRANSIENT_MARK} — 다음 회차에 다시${manualTag}`;
   const found = fetched.reduce((sum, one) => sum + one.messages.length, 0);
   // 상태도 앱의 저장 경로를 쓴다. 수집 전에는 성공으로 기록하지 않는다.
   if (!found) {
-    if (failures) { await importRecord(configFile, 'health', { success: false, error: failText }); return 1; }
+    if (failures) {
+      await importRecord(configFile, 'health', { success: false, error: failTextOf(transientOnly) });
+      // 실패한 회차는 블록 하나로 끝맺는다 — 채널마다의 한 줄이 이 블록 안에 들어 회차 하나로 세진다.
+      fs.appendFileSync(logFile, [`───── ${runStarted} slack-capture 시작${versionTag()}`, ...failLines, ...(transientOnly ? [failNote] : []), '', `───── ${stamp()} slack-capture 종료 (exit 1)`, ''].join('\n'));
+      return 1;
+    }
     if (!(await importRecord(configFile, 'health', { success: true })).ok) return 1;
     log('새 메시지 없음 — Claude 호출 생략');
     return 0;
   }
 
-  const started = stamp();
   // 정리 방식 — `raw`만 원문 그대로이고, 칸이 없거나 다른 값이면 예전처럼 Claude로 다듬는다.
   const ctx = { auth, config: configFile, runTask, app: null, tidy: slack.tidy === 'raw' ? 'raw' : 'claude' };
   const lines = [], details = [];
@@ -660,12 +691,15 @@ async function main() {
     Object.keys(total).forEach(key => { total[key] += result.ledger[key]; });
     if (!result.ok) failed = true;
   }
-  if (failures) await importRecord(configFile, 'health', { success: false, error: failText });
+  if (failures) await importRecord(configFile, 'health', { success: false, error: failTextOf(transientOnly && !failed) });
   const status = failed || failures ? 1 : 0;
   // 한 회차 = 로그 블록 하나(run-task.sh와 같은 시작/종료 줄) — 앱의 연동 카드가 그대로 읽는다.
   // 맨 앞 처리 대장 한 줄은 예전 지침이 남기던 문장과 같은 모양이다(연동 카드 ⋯ › 최근 기록 위의 요약 줄이 읽는다).
   const ledger = `이번에 본 메시지 ${total.seen}개 = 등록 ${total.saved} · 링크 중복 ${total.duplicate} · 비슷한 일이라 건너뜀 ${total.similar} · 시스템 ${total.system}`;
-  fs.appendFileSync(logFile, [`───── ${started} slack-capture 시작${versionTag()}`, ledger, ...lines, ...details, '', `───── ${stamp()} slack-capture 종료 (exit ${status})`, ''].join('\n'));
+  // 채널 확인 실패 줄은 대장 줄 바로 다음(카드의 이유 한 줄이 200자 안에서 읽게). 모두 잠깐의 오류이고 정리 실패가 없을 때만
+  // 잠깐 오류 맺음 줄로 끝낸다(정리 실패가 섞이면 바로 실패다). 실패한 `지금 가져오기` 회차는 블록이 그 표시로 끝난다.
+  const tail = transientOnly && !failed ? [failNote] : (status && manualTag ? [manualTag.trim()] : []);
+  fs.appendFileSync(logFile, [`───── ${runStarted} slack-capture 시작${versionTag()}`, ledger, ...failLines, ...lines, ...details, ...tail, '', `───── ${stamp()} slack-capture 종료 (exit ${status})`, ''].join('\n'));
   return status;
 }
 
