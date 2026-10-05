@@ -1,0 +1,680 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>회의 종류별 구역</title>
+<style>
+@font-face { font-family: "Pretendard Variable"; font-weight: 45 920; font-display: swap; src: url("../../tracker/inbox-app/fonts/PretendardVariable.woff2") format("woff2-variations"); }
+
+/* ===== 앱 토큰 그대로(ui.css :root) — 새 색·새 글꼴 없음 ===== */
+:root, .th-light {
+  --bg:#f2f4f6; --surface:#fff; --surface-line:transparent; --field:#f2f4f6; --hover:#f4f6f8; --press:#e9edf1; --border:#e3e7eb; --hair:#eef1f4; --check-line:#8b95a1;
+  --text:#191f28; --muted:#4e5968; --dim:#636c78;
+  --accent:#3182f6; --accent-strong:#1b64da; --accent-text:#1b64da; --accent-soft:#e8f3ff; --on-fill:#fff; --sel:#eef5ff; --sel-hover:#e6f1ff;
+  --urgent:#c9252d; --urgent-bg:#ffeceb; --warn:#b0560a; --warn-bg:#fff4e5; --success:#0d7a4a; --success-bg:#e6f6ee; --neutral-bg:#eef1f4;
+  --pj-0:#4f83e8; --pj-1:#2f9b87;
+  --soft:0 1px 3px rgba(25,31,40,.04),0 8px 24px rgba(25,31,40,.06); --shadow:0 1px 2px rgba(25,31,40,.06);
+  --pop:0 12px 36px rgba(25,31,40,.14),0 2px 8px rgba(25,31,40,.06); --scrim:rgba(25,31,40,.16);
+  color-scheme: light;
+}
+:root {
+  --r:20px; --r-sm:12px; --r-xs:10px; --row:54px; --pad:20px;
+  --fs-cap:12px; --fs-sm:13px; --fs-body:14px; --fs-md:15px; --fs-lg:16px; --h-xs:22px; --h-sm:28px; --h-md:32px; --h-lg:42px; --h-touch:44px;
+  --ease:cubic-bezier(.22,.8,.3,1); --t-press:100ms; --t-fast:140ms; --t-tint:170ms; --t-move:200ms;
+  --font:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic","Segoe UI",sans-serif;
+}
+:root[data-theme="dark"], .th-dark {
+  --bg:#15181e; --surface:#1e222a; --surface-line:#2b313b; --field:#262b34; --hover:#272c35; --press:#303641; --border:#333a45; --hair:#2b313b; --check-line:#636e7d;
+  --text:#eaedf1; --muted:#a8b1bd; --dim:#8b95a1;
+  --accent:#4b91f1; --accent-strong:#4b91f1; --accent-text:#7aa9ff; --accent-soft:#1b2a44; --on-fill:#0b1020; --sel:#1c2533; --sel-hover:#212c3d;
+  --urgent:#ff8f8f; --urgent-bg:#3a2022; --warn:#ffbe6b; --warn-bg:#3a2e1b; --success:#6ddba0; --success-bg:#1c3729; --neutral-bg:#2a2f38;
+  --pj-0:#7aa2ff; --pj-1:#57c6ad;
+  --soft:0 1px 3px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.3); --shadow:0 1px 2px rgba(0,0,0,.35);
+  --pop:0 12px 36px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.35); --scrim:rgba(0,0,0,.5);
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:#15181e; --surface:#1e222a; --surface-line:#2b313b; --field:#262b34; --hover:#272c35; --press:#303641; --border:#333a45; --hair:#2b313b; --check-line:#636e7d;
+    --text:#eaedf1; --muted:#a8b1bd; --dim:#8b95a1;
+    --accent:#4b91f1; --accent-strong:#4b91f1; --accent-text:#7aa9ff; --accent-soft:#1b2a44; --on-fill:#0b1020; --sel:#1c2533; --sel-hover:#212c3d;
+    --urgent:#ff8f8f; --urgent-bg:#3a2022; --warn:#ffbe6b; --warn-bg:#3a2e1b; --success:#6ddba0; --success-bg:#1c3729; --neutral-bg:#2a2f38;
+    --pj-0:#7aa2ff; --pj-1:#57c6ad;
+    --soft:0 1px 3px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.3); --shadow:0 1px 2px rgba(0,0,0,.35);
+    --pop:0 12px 36px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.35); --scrim:rgba(0,0,0,.5);
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { background: var(--bg); }
+body { margin:0; padding:28px 16px 120px; background:var(--bg); color:var(--text); font-family:var(--font); font-size:var(--fs-body); line-height:1.55; word-break:keep-all; -webkit-font-smoothing:antialiased; }
+button, input { font-family: inherit; }
+.num { font-variant-numeric: tabular-nums; }
+:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:10px; }
+
+/* ===== 문서 껍데기 ===== */
+.doc { max-width: 1180px; margin: 0 auto; }
+h1 { margin:0 0 6px; font-size:22px; font-weight:700; letter-spacing:-.02em; }
+h2 { margin:44px 0 12px; font-size:18px; font-weight:700; letter-spacing:-.015em; }
+h3 { margin:0 0 8px; font-size:16px; font-weight:700; letter-spacing:-.015em; }
+p { margin:6px 0; }
+.sub { color:var(--muted); font-size:var(--fs-sm); }
+.paper { background:var(--surface); border:1px solid var(--surface-line); border-radius:var(--r); box-shadow:var(--soft); padding:20px 22px; }
+.paper + .paper { margin-top:16px; }
+.paper ol, .paper ul { margin:6px 0; padding-left:20px; }
+.paper li { margin:5px 0; }
+code { font:500 12.5px/1.4 var(--font); color:var(--muted); background:var(--field); padding:1px 5px; border-radius:5px; }
+kbd { display:inline-block; min-width:18px; height:18px; padding:0 4px; border-radius:6px; background:var(--neutral-bg); color:var(--muted); font:600 11.5px/18px var(--font); text-align:center; }
+table { border-collapse:collapse; width:100%; font-size:var(--fs-body); }
+th, td { text-align:left; vertical-align:top; padding:8px 10px; border-bottom:1px solid var(--hair); }
+th { color:var(--dim); font-weight:600; font-size:var(--fs-cap); white-space:nowrap; }
+.tblwrap { overflow-x:auto; }
+.two { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.two .paper + .paper { margin-top:0; }
+.pick { display:inline-block; margin-left:6px; padding:0 8px; height:22px; line-height:22px; border-radius:6px; background:var(--accent-soft); color:var(--accent-text); font-size:12.5px; font-weight:600; vertical-align:2px; }
+.lead { display:grid; gap:10px; }
+.lead .ln { display:grid; grid-template-columns:96px minmax(0,1fr); gap:12px; align-items:baseline; }
+.lead .ln > b { font-size:var(--fs-sm); color:var(--muted); font-weight:600; }
+.bar { display:flex; flex-wrap:wrap; align-items:center; gap:8px 10px; margin:0 0 14px; }
+.bar .lab { font-size:12.5px; color:var(--muted); margin-left:6px; }
+.bar .lab:first-child { margin-left:0; }
+.d-btn { display:inline-flex; align-items:center; justify-content:center; gap:5px; height:var(--h-md); padding:0 12px; border:0; border-radius:var(--r-xs); background:var(--neutral-bg); color:var(--muted); font-size:var(--fs-sm); font-weight:600; white-space:nowrap; cursor:pointer; transition:background var(--t-tint) var(--ease),color var(--t-tint) var(--ease),scale var(--t-press) var(--ease); }
+.d-btn:hover { background:var(--hover); color:var(--text); }
+.d-btn:active { scale:.98; }
+.d-btn[aria-pressed="true"] { background:var(--accent-soft); color:var(--accent-text); }
+.d-link { border:0; background:none; padding:0; cursor:pointer; font-size:var(--fs-sm); font-weight:600; color:var(--accent-text); border-radius:4px; }
+.d-link:hover { text-decoration:underline; text-underline-offset:2px; }
+.gal { display:flex; flex-wrap:wrap; gap:24px 28px; align-items:flex-start; }
+.fr { min-width:0; max-width:100%; }
+.fr.th-dark, .fr.th-light { padding:18px; border-radius:20px; background:var(--bg); color:var(--text); }
+.fr > .ttl { margin:0 0 4px; font-size:var(--fs-body); font-weight:700; }
+.fr > .note { margin:0 0 10px; font-size:12.5px; color:var(--muted); max-width:460px; }
+
+/* ===== 앱 부품(ui.css에서 값 그대로) ===== */
+.d-i { width:14px; height:14px; display:block; flex:none; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
+.d-iconbtn { width:34px; height:34px; display:grid; place-items:center; flex:none; border:0; border-radius:50%; background:none; color:var(--muted); cursor:pointer; padding:0; }
+.d-iconbtn:hover { background:var(--hover); color:var(--text); }
+.k-neg { color:var(--urgent); }
+.k-warn { color:var(--warn); }
+.d-pjdot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--pj-0); flex:none; }
+.d-pjdot[data-pj="1"] { background:var(--pj-1); }
+
+/* 줄 옆 회의 정리 카드 — 460px, 20px, --pop / 회의 탭 오른쪽 자리는 같은 내용 + --soft(붙어 있는 카드) */
+.stage { position:relative; width:460px; max-width:100%; }
+.card { width:100%; display:flex; flex-direction:column; overflow:hidden; background:var(--surface); border:1px solid var(--surface-line); border-radius:var(--r); box-shadow:var(--pop); color:var(--text); }
+.card.is-tab { box-shadow:var(--soft); }
+.d-dtop { flex:none; display:flex; align-items:flex-start; gap:6px; padding:18px 16px 12px 20px; }
+.d-dhead2 { flex:1; min-width:0; }
+.d-dtitle { font-size:17px; font-weight:700; line-height:25px; letter-spacing:-.02em; }
+.d-dsub { margin-top:3px; font-size:var(--fs-sm); color:var(--muted); font-variant-numeric:tabular-nums; }
+.d-popbody { flex:1 1 auto; min-height:0; overflow:auto; overscroll-behavior:contain; display:flex; flex-direction:column; gap:16px; padding:14px 20px 16px; }
+.d-dsec.d-msec { border-top:1px solid var(--hair); padding-top:12px; }
+.d-popbody > .d-dsec.d-msec:first-child { border-top:0; padding-top:0; }
+.d-mhead { display:flex; align-items:center; gap:5px; margin-bottom:6px; min-height:18px; font-size:var(--fs-sm); line-height:18px; font-weight:700; color:var(--text); }
+.d-mhead .n { font-weight:500; color:var(--dim); font-variant-numeric:tabular-nums; }
+.d-hint { font-size:12.5px; color:var(--muted); }
+
+/* `이 회의에서 나온 것` 줄(.d-mrow2): 체크 | 문구 | (상태) 종류 | ⋯ */
+.mrow { display:grid; grid-template-columns:30px minmax(0,1fr) auto 28px; column-gap:8px; align-items:start; min-height:var(--h-sm); padding:5px 0; font-size:var(--fs-sm); line-height:18px; }
+.mrow .ck { height:22px; margin:-2px 0; display:flex; align-items:center; }
+.cb { appearance:none; -webkit-appearance:none; margin:0; display:block; position:relative; width:22px; height:22px; border:1.5px solid var(--check-line); border-radius:6px; background:var(--surface); cursor:pointer; transition:border-color var(--t-press) var(--ease),background var(--t-press) var(--ease); }
+.cb.w { width:20px; height:20px; margin-left:1px; }
+.cb::after { content:''; position:absolute; inset:-4px; border-radius:10px; }
+.cb:hover { border-color:var(--accent); }
+.cb:checked { background:var(--accent); border-color:var(--accent); }
+.cb:checked::before { content:''; position:absolute; left:6.5px; top:2.5px; width:5px; height:10px; border:solid var(--on-fill); border-width:0 2px 2px 0; transform:rotate(45deg); }
+.cb.w:checked::before { left:6px; top:2px; height:9px; }
+.cb:disabled { opacity:.5; cursor:default; }
+.mrow .tw { display:flex; align-items:baseline; gap:6px; min-width:0; }
+.mrow .tw .ti { width:auto; flex:0 1 auto; }
+.d-inproj { display:inline-flex; align-items:center; gap:4px; flex:none; font-size:var(--fs-cap); color:var(--dim); white-space:nowrap; }
+.mrow .ti { min-width:0; width:100%; text-align:left; border:0; background:none; padding:0; color:var(--text); font-size:var(--fs-sm); line-height:18px; cursor:pointer; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; border-radius:4px; }
+.mrow button.ti:hover { color:var(--accent-text); text-decoration:underline; text-underline-offset:2px; }
+.mrow.is-done .ti { color:var(--muted); text-decoration:line-through; text-decoration-color:var(--border); }
+.mrow .r { display:flex; align-items:center; gap:8px; height:28px; margin:-5px 0; white-space:nowrap; }
+.mrow .st { font-size:11.5px; color:var(--muted); font-variant-numeric:tabular-nums; }
+.mrow .st.k-warn { color:var(--warn); } .mrow .st.k-neg { color:var(--urgent); }
+.mrow .ac { display:flex; align-items:center; justify-content:flex-end; height:28px; margin:-5px 0; }
+.d-more { width:28px; height:28px; display:grid; place-items:center; border:0; border-radius:50%; background:none; color:var(--dim); cursor:pointer; padding:0; transition:background var(--t-tint) var(--ease),color var(--t-tint) var(--ease); }
+.d-more:hover { background:var(--hover); color:var(--text); }
+.mrow:hover .d-more, .mrow:focus-within .d-more { color:var(--text); }
+.tpk { display:inline-flex; align-items:center; gap:2px; height:28px; padding:0 4px 0 6px; margin-right:-4px; border:0; border-radius:var(--r-xs); background:none; color:var(--dim); font-size:var(--fs-sm); font-weight:500; cursor:pointer; transition:background var(--t-fast) var(--ease),color var(--t-fast) var(--ease); }
+.tpk .d-i { transform:rotate(90deg); width:12px; height:12px; }
+.tpk:hover, .tpk[aria-expanded="true"] { background:var(--hover); color:var(--text); }
+/* 시안 그림에서만: 옮겨 간 줄 표시(앱에는 없다 — 앱은 140ms 떠오름) */
+.mrow.is-moved { background:var(--sel); border-radius:8px; box-shadow:0 0 0 4px var(--sel); }
+.mrow.is-new { animation:rise var(--t-fast) var(--ease) both; }
+@keyframes rise { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+
+/* ===== 새로 쓰는 것: 종류 소제목 =====
+   예전 앱의 .d-mgrp 값 그대로(2026-09-22~10-02에 쓰던 조용한 소제목 — 그룹 제목 부품이 아니다): 13/600 --muted + 숫자 500 --dim. */
+.mgrp { display:flex; align-items:center; gap:5px; margin:10px 0 2px; min-height:18px; font-size:var(--fs-sm); line-height:18px; font-weight:600; color:var(--muted); }
+.mgrp:first-child { margin-top:2px; }
+.mgrp .n { font-weight:500; color:var(--dim); font-variant-numeric:tabular-nums; }
+/* 안 B — 소제목 줄 전체가 버튼(접는 그룹 제목과 같은 규칙: 꺾쇠 90°, --t-fast). 글자는 그대로 20px 시작선에 둔다. */
+button.mgrp { width:calc(100% + 12px); min-height:var(--h-sm); margin:6px -6px 0; padding:0 6px; border:0; border-radius:var(--r-xs); background:none; cursor:pointer; text-align:left; transition:background var(--t-tint) var(--ease),color var(--t-tint) var(--ease); }
+button.mgrp:first-child { margin-top:-4px; }
+button.mgrp:hover { background:var(--hover); color:var(--text); }
+button.mgrp:active { background:var(--press); }
+button.mgrp .cv { color:var(--dim); transition:transform var(--t-fast) var(--ease); }
+button.mgrp .cv .d-i { width:12px; height:12px; }
+button.mgrp[aria-expanded="true"] .cv { transform:rotate(90deg); }
+
+/* 입력줄 — 카드 발 붙박이(.d-qfoot · .d-qin) */
+.foot-in { flex:none; padding:8px 10px 10px; border-top:1px solid var(--hair); background:var(--surface); }
+.qin { display:grid; grid-template-columns:30px minmax(0,1fr) auto; column-gap:8px; align-items:center; height:40px; padding:0 10px; border-radius:var(--r-sm); background:none; cursor:text; transition:box-shadow var(--t-tint) var(--ease),background var(--t-tint) var(--ease); }
+.qin .pl { display:flex; align-items:center; padding-left:4px; color:var(--dim); }
+.qin input { min-width:0; width:100%; height:100%; border:0; background:none; outline:none; padding:0; color:var(--text); font-size:var(--fs-body); }
+.qin input::placeholder { color:var(--dim); }
+.qin:hover { background:var(--hover); }
+.qin:focus-within { background:var(--surface); box-shadow:0 0 0 2px var(--accent); }
+.qin .as { font-size:12.5px; font-weight:600; color:var(--accent-text); padding-right:4px; }
+.qin .as:empty { display:none; }
+
+/* 종류 목록(.d-schedpop.d-typepop) */
+.typepop { position:absolute; z-index:75; width:176px; display:flex; flex-direction:column; gap:1px; padding:6px; background:var(--surface); border:1px solid var(--surface-line); border-radius:18px; box-shadow:var(--pop); animation:popin var(--t-move) var(--ease) both; }
+@keyframes popin { from { opacity:0; transform:translateY(-4px) scale(.96); } to { opacity:1; transform:none; } }
+.d-mitem { display:flex; align-items:center; gap:8px; width:100%; height:38px; padding:0 12px; border:0; border-radius:var(--r-xs); background:none; color:var(--text); font-size:var(--fs-body); font-weight:500; text-align:left; cursor:pointer; }
+.d-mitem:hover { background:var(--hover); }
+.d-mitem.on, .d-mitem:focus-visible { background:var(--sel); color:var(--accent-text); outline:none; }
+.d-mitem kbd { margin-left:auto; }
+
+/* 알림(.d-toast) */
+.toast { position:fixed; left:24px; bottom:24px; z-index:70; max-width:calc(100% - 48px); display:flex; align-items:center; gap:4px 12px; padding:12px 12px 12px 18px; background:var(--surface); color:var(--text); border:1px solid var(--surface-line); border-radius:16px; box-shadow:var(--pop); font-size:var(--fs-body); animation:rise var(--t-fast) var(--ease) both; }
+.sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+
+/* 회의 탭 ≤900 — 회의 목록이 본문 위로 쌓이고(높이 40vh) 정리 화면이 전체 폭 */
+.tabwrap { width:760px; max-width:100%; display:grid; gap:16px; }
+.mlist { background:var(--surface); border:1px solid var(--surface-line); border-radius:var(--r); box-shadow:var(--soft); padding:10px; max-height:150px; overflow:hidden; }
+.mlist .dh { padding:4px 10px 2px; font-size:12.5px; color:var(--dim); font-weight:600; }
+.mlist .mr { display:grid; grid-template-columns:44px minmax(0,1fr) auto; gap:8px; align-items:center; min-height:40px; padding:0 10px; border-radius:12px; font-size:14px; }
+.mlist .mr.on { background:var(--sel); color:var(--accent-text); font-weight:600; }
+.mlist .mr .t { font-weight:700; font-variant-numeric:tabular-nums; }
+.mlist .mr .x { font-size:12.5px; color:var(--dim); font-weight:500; }
+
+/* ≤520 아래 시트 */
+.phone { position:relative; width:390px; max-width:100%; height:740px; border-radius:28px; overflow:hidden; background:var(--bg); border:1px solid var(--border); }
+.phone::before { content:''; position:absolute; inset:0; background:var(--scrim); }
+.phone .stage { position:absolute; left:0; right:0; bottom:0; width:auto; }
+.is-sheet .card { border-radius:20px 20px 0 0; max-height:680px; }
+.is-sheet .mrow { font-size:var(--fs-body); line-height:20px; padding:8px 0; min-height:36px; }
+.is-sheet .mrow .ti { font-size:var(--fs-body); line-height:20px; }
+.is-sheet .mrow .ck { margin:-1px 0; }
+.is-sheet .mrow .r, .is-sheet .mrow .ac { margin:-4px 0; }
+.is-sheet .mgrp { font-size:var(--fs-body); line-height:20px; }
+.is-sheet button.mgrp { min-height:var(--h-touch); }
+.is-sheet .qin { height:44px; }
+.is-sheet .qin input { font-size:var(--fs-lg); }
+
+@media (max-width: 720px) {
+  .two { grid-template-columns:1fr; }
+  .lead .ln { grid-template-columns:1fr; gap:2px; }
+  .paper { padding:16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration:.01ms !important; }
+  .mrow.is-new, .toast, .typepop { animation:fade 120ms linear both !important; }
+  @keyframes fade { from { opacity:0; } to { opacity:1; } }
+}
+html.m-off *, html.m-off *::before { transition-duration:.01ms !important; animation-duration:.01ms !important; }
+</style>
+</head>
+<body>
+<div class="doc">
+
+<h1>회의 정리 — 종류별 구역 (시안 A·B)</h1>
+<p class="sub">회의 정리 화면(회의 탭 오른쪽 자리 · 오늘 탭의 줄 옆 회의 카드 — 같은 함수)의 <code>이 회의에서 나온 것</code>. 가짜 데이터, 앱 토큰·부품만 써요. 2026-10-06</p>
+
+<div class="paper" style="margin-top:16px">
+<div class="lead">
+<div class="ln"><b>반대 의견</b><span>여러 회의에 걸친 종류별 모아 보기는 결정 탭·확인 대기·프로젝트 탭이 이미 하는 일과 겹쳐서 이번엔 하지 않아요. 회의 <b>하나 안</b>에서만 나눠요.</span></div>
+<div class="ln"><b>먼저 알 것</b><span>10월 2일에 사용자가 직접 종류 소제목을 <b>뺐어요</b>(DECISIONS 127행: "방금 적은 줄이 종류 묶음 속으로 튀어 들어가면 어디로 갔는지 놓친다"). 이번 시안은 그 이유를 지키려고 <b>회의 중에 방금 담은 줄은 입력줄 바로 위 <code>방금 담은 것</code>에 시간순으로 남고</b>, 카드를 다시 열 때 제 구역으로 들어가요.</span></div>
+<div class="ln"><b>왜 만드나</b><span>한 회의를 다시 볼 때 결정·할 일·기다리는 답이 한 목록에 섞여 있어서, 줄마다 오른쪽 종류 글자를 읽어야 가려져요.</span></div>
+<div class="ln"><b>바뀔 행동</b><span>회의 뒤나 다음 회차 전에 카드를 열면 <code>할 일</code> 구역만 보고 바로 체크하거나 오늘로 옮기고, <code>확인 대기</code> 구역에서 재촉할 상대를 바로 찾아요.</span></div>
+<div class="ln"><b>성공 기준</b><span>일주일 써 본 뒤 "섞여서 헷갈린다"는 말이 다시 나오지 않고, "방금 적은 줄이 어디 갔지?"(10/2의 이유)도 나오지 않으면 성공이에요.</span></div>
+<div class="ln"><b>골라 주세요</b><span>A(늘 펼침) / B(접을 수 있음) 중 하나 <span class="pick">추천 A</span> — 아래 "눌러 보기"에서 둘 다 써 보세요.</span></div>
+</div>
+</div>
+
+<h2>눌러 보기</h2>
+<div class="paper">
+<div class="bar" role="group" aria-label="보기 고르기">
+<span class="lab">안</span>
+<button class="d-btn" data-g="v" data-v="now">지금</button><button class="d-btn" data-g="v" data-v="A" aria-pressed="true">A · 늘 펼침</button><button class="d-btn" data-g="v" data-v="B">B · 접을 수 있음</button>
+<span class="lab">회의</span>
+<button class="d-btn" data-g="m" data-v="main" aria-pressed="true">기본(9개)</button><button class="d-btn" data-g="m" data-v="gaps">빈 구역</button><button class="d-btn" data-g="m" data-v="one">한 종류</button><button class="d-btn" data-g="m" data-v="many">할 일 12</button>
+<span class="lab">폭</span>
+<button class="d-btn" data-g="w" data-v="card" aria-pressed="true">줄 옆 카드</button><button class="d-btn" data-g="w" data-v="tab">회의 탭 ≤900</button><button class="d-btn" data-g="w" data-v="sheet">시트 ≤520</button>
+<span class="lab">화면</span>
+<button class="d-btn" data-g="t" data-v="light" aria-pressed="true">라이트</button><button class="d-btn" data-g="t" data-v="dark">다크</button>
+<span class="lab">움직임</span>
+<button class="d-btn" data-g="s" data-v="1" aria-pressed="true">기본</button><button class="d-btn" data-g="s" data-v="0">끄기</button>
+</div>
+<p class="sub" style="margin:0 0 14px">입력줄에 적고 Enter → <code>방금 담은 것</code>에 서요(앞에 <kbd>?</kbd> 확인 대기, <kbd>!</kbd> 결정). 줄의 <code>할 일 ⌄</code>로 종류를 바꾸면 줄이 다른 구역으로 옮겨 가요. ⋯는 지우기(알림의 <code>되돌리기</code>). <b>카드 다시 열기</b>를 누르면 방금 담은 줄이 제 구역으로 들어가고, B의 접힘은 규칙대로 돌아가요.</p>
+<div id="liveWrap" class="fr"><div id="live"></div></div>
+<div class="bar" style="margin:12px 0 0"><button class="d-btn" id="reopen">카드 다시 열기</button><button class="d-btn" id="reset">처음으로</button></div>
+</div>
+
+<h2>같은 회의 · 지금 / A / B</h2>
+<p class="sub">결정 2 · 할 일 4(버그 1 포함) · 확인 대기 2 · 아이디어 1. 끝낸 줄 2개, 다른 프로젝트 줄 1개가 섞여 있어요.</p>
+<div class="gal" id="g-compare"></div>
+
+<h2>경우별 — 안 A</h2>
+<div class="gal" id="g-a"></div>
+
+<h2>경우별 — 안 B</h2>
+<div class="gal" id="g-b"></div>
+
+<h2>다크 · 좁은 폭</h2>
+<div class="gal" id="g-dark"></div>
+<div class="gal" id="g-narrow" style="margin-top:24px"></div>
+
+<h2>A와 B</h2>
+<div class="two">
+<div class="paper">
+<h3>A · 소제목 구역, 늘 펼침 <span class="pick">추천</span></h3>
+<p>소제목은 조용한 글자뿐이에요(누를 수 없음). 탭 순서가 지금과 같고, 늘어나는 표시는 소제목 넷이 전부예요. 할 일이 12개면 카드가 그만큼 길어져요 — 회의 카드는 가운데만 스크롤하고 입력줄은 발에 붙어 있어요.</p>
+<p class="sub"><b>약점</b> — 아이디어처럼 덜 급한 구역도 늘 자리를 차지해요.</p>
+</div>
+<div class="paper">
+<h3>B · 접을 수 있는 구역</h3>
+<p>소제목 줄 전체가 버튼이고 꺾쇠가 90° 돌아요(접는 그룹 제목과 같은 규칙). <b>기본 펼침 규칙: 할 일·결정은 늘 펼침, 확인 대기·아이디어는 3개 이하면 펼침이고 4개부터 접힘</b>(프로젝트 탭의 접는 기준 3과 같은 수). 접힘은 <b>카드가 열려 있는 동안만</b> 기억하고(다시 그려져도 유지) 닫았다 열면 규칙대로 돌아가요 — 기억하지 않는 게 기본이에요(표시 줄이기).</p>
+<p class="sub"><b>약점</b> — 접힌 확인 대기 안의 <code>1일 늦음</code>이 안 보여요. 탭 정류장이 구역마다 하나 늘어요. 접힌 구역으로 종류를 바꾸면 그 구역이 저절로 펼쳐져야 해요(시안은 그렇게 해요).</p>
+</div>
+</div>
+
+<h2>정한 것과 이유</h2>
+<div class="paper">
+<ul>
+<li><b>구역 순서는 할 일 → 확인 대기 → 결정 → 아이디어.</b> 요청 순서(결정 먼저)와 달라요 — 앱의 종류 목록(<code>WF_TYPES</code>)·⌘K 종류 칩·프로젝트 탭 구역·10/2 전의 예전 소제목이 모두 이 순서라서 따랐어요. 회의를 다시 열 때 가장 먼저 손댈 것도 할 일이에요.</li>
+<li><b>소제목은 예전 앱의 <code>.d-mgrp</code> 값 그대로</b>(13/600 <code>--muted</code> + 조용한 숫자). 새 색·새 부품은 없어요. 위의 <code>이 회의에서 나온 것 9</code> 머리는 그대로 두고, 그 안을 나눠요.</li>
+<li><b>개수가 0인 구역은 소제목째 없어요</b>(0은 적지 않아요). <b>종류가 하나뿐이어도 소제목은 서요</b> — 예외 없이 같은 규칙.</li>
+<li><b>줄 모양은 지금 그대로</b>: 체크박스(종류별 부품)·문구·상태 글자·종류 글자 <code>할 일 ⌄</code>·⋯. 종류 글자는 소제목과 겹치지만 종류를 바꾸는 유일한 길이라 남겨요. 버그는 <code>할 일</code> 구역에 서고 줄의 글자는 <code>버그 ⌄</code> 그대로.</li>
+<li><b>구역 안의 순서</b>는 지금 규칙 그대로(담은 날짜순, 같은 날은 만든 순서). 끝낸 줄도 그 자리에 남아요(아래로 밀지 않아요).</li>
+<li><b>회의 중에 방금 담은 줄</b>은 구역 맨 끝 <code>방금 담은 것 N</code>에 시간순으로 서요(입력줄 바로 위). 여기서 종류를 바꾸면 글자만 바뀌고 줄은 제자리예요. 카드를 닫았다 열면(회의 탭은 다른 회의를 골랐다 돌아오면) 제 구역으로 들어가요. 자동 새로고침으로는 옮기지 않아요. 이 이름은 기록되지 않은 회의에서 이미 쓰는 말을 그대로 썼어요. <b>AI 초안을 <code>N개 담기</code>로 담은 줄</b>은 결과 카드가 종류별 개수를 이미 말하니 바로 제 구역으로 가요.</li>
+<li><b>이미 있던 줄의 종류를 바꾸면</b> 그 줄이 새 구역의 제 순서 자리로 옮겨 가요(새 줄처럼 140ms 떠오름, 움직임 줄이기에서는 120ms 흐려짐만). 화면 읽기에는 <code>결정으로 옮겼어요</code>를 알려요. 초점은 지금처럼 입력줄로 돌아가요. 옮긴 뒤 빈 구역은 사라져요.</li>
+<li><b>키보드</b>: A는 탭 정류장이 지금과 같아요(소제목은 제목 표시라 화면 읽기의 제목 건너뛰기로 구역 사이를 옮겨요). B는 소제목이 버튼이라 Tab으로 닿고 Enter·Space로 접고 펴요(<code>aria-expanded</code>).</li>
+<li><b>건드리지 않는 것</b>: <code>이전 회차의 미해결 항목</code>(회차 표기가 있는 한 목록 그대로), AI 초안 구역, 기록되지 않은 회의의 <code>방금 담은 것</code>, 회의 목록, 데이터(화면만 바뀌어요 — 저장 형식은 그대로라 옛 앱과 섞여도 문제없어요).</li>
+</ul>
+</div>
+
+<h2>예외 상황</h2>
+<div class="paper tblwrap">
+<table>
+<tr><th>상황</th><th>보이는 모습</th></tr>
+<tr><td>줄의 종류 목록에서 종류를 바꿈</td><td>그 줄이 새 구역의 제 순서 자리로 옮겨 가 떠오르고, 두 구역의 숫자가 함께 바뀌어요. 결정으로 가면 기한 글자는 지금 규칙대로 빠져요. 원래 구역이 비면 소제목째 사라져요. B에서 옮겨 갈 구역이 접혀 있으면 펼쳐져요. ⌘Z로 되돌리면 원래 구역으로 돌아가요. 끝낸 줄은 지금처럼 종류를 못 바꿔요.</td></tr>
+<tr><td><code>방금 담은 것</code>의 줄 종류를 바꿈</td><td>글자만 바뀌고 줄은 그 자리에 있어요(놓치지 않게). 다시 열 때 바뀐 종류의 구역으로 가요.</td></tr>
+<tr><td>같은 문구가 두 줄</td><td>합치지 않아요 — 서로 다른 항목이라 각각 제 구역에 서요(같은 구역이면 만든 순서대로 두 줄).</td></tr>
+<tr><td>줄을 지움</td><td>그 구역에서 빠지고 숫자가 줄어요. 0이 되면 소제목째 사라져요. 알림의 <code>되돌리기</code>·⌘Z로 살리면 제 구역의 제 순서 자리로 돌아와요.</td></tr>
+<tr><td>못 담은 줄(저장 실패)</td><td><code>방금 담은 것</code>에 남아 지금처럼 <code>못 담았어요 · 다시 시도</code>.</td></tr>
+<tr><td>확인 대기를 체크함</td><td>그 줄 바로 아래 <code>다음은?</code> 줄이 지금처럼 붙어요(구역 안).</td></tr>
+<tr><td>다른 프로젝트 줄</td><td>지금처럼 제목 뒤 <code>· ● 이름</code>. 프로젝트로 한 번 더 나누지 않아요.</td></tr>
+<tr><td>옛 회의 기록</td><td>버그(<code>bug</code>)는 할 일 구역. 담은 날짜·번호가 없는 옛 항목은 지금처럼 원래 순서. 아이디어는 <code>기존 항목 연결</code>·프로젝트 옮기기로만 들어오는데, 들어와 있으면 아이디어 구역에 서요(체크 칸 비움 그대로).</td></tr>
+<tr><td>항목이 하나도 없는 회의</td><td>지금처럼 <code>이 회의에서 나온 것</code> 구역째 없고 안내 한 줄 <code>적고 Enter를 누르면 바로 담겨요.</code>만.</td></tr>
+</table>
+</div>
+
+<h2>지금 화면과 달라지는 점 · 문서와 부딪히는 곳</h2>
+<div class="paper">
+<ul>
+<li><b>DECISIONS 127행(2026-10-02, 사용자 결정)</b> "종류 소제목으로 나누지 않고 만든 순서대로 한 목록"을 다시 바꿔요. 이유(방금 적은 줄을 놓침)는 <code>방금 담은 것</code>으로 지켜요. 같은 날 152행의 화살표도 함께 고쳐야 해요.</li>
+<li><b>README</b> <code>회의 탭</code>·<code>업무·회의 연결</code> 절의 "만든 순서대로 한 목록(종류 소제목으로 나누지 않습니다)"와 <b>DESIGN.md 693행</b> "종류 소제목으로 나누지 않는다".</li>
+<li><b>시험</b> <code>client.test.js</code> 2418행 "종류 소제목 없이 한 목록"(<code>d-mgrp</code>가 없어야 함)과 2439행 순서 시험은 새 규칙으로 바꿔야 해요.</li>
+<li>"방금 담은 줄은 입력줄 바로 위"(README·DESIGN)는 그대로 지켜져요.</li>
+</ul>
+</div>
+
+<h2>사용자가 정할 것</h2>
+<div class="paper">
+<ol>
+<li><b>A / B</b> <span class="pick">추천 A</span> — 회의 하나에서 나오는 건 보통 열 개 안팎이라 접을 일이 드물고, B는 접힌 구역에 늦은 확인 대기가 숨어요.</li>
+<li><b>10/2 결정을 이렇게 바꿔도 되는지</b> — 회의 중엔 <code>방금 담은 것</code>에 시간순, 다시 열면 구역으로. <span class="pick">추천: 이대로</span></li>
+</ol>
+<p class="sub">되돌리기 쉬운 것(구역 순서, 한 종류여도 소제목 표시, 접힘 기준 3)은 위처럼 정해 두었어요. 바꾸고 싶으면 한마디만 주세요.</p>
+</div>
+
+</div>
+<div id="sr" class="sr" aria-live="polite"></div>
+
+<script>
+'use strict';
+window.__errors = [];
+window.addEventListener('error', e => window.__errors.push(String(e.message)));
+
+const IC = {
+  more:'<circle cx="8" cy="3.2" r="1.05"/><circle cx="8" cy="8" r="1.05"/><circle cx="8" cy="12.8" r="1.05"/>',
+  close:'<path d="M4 4l8 8M12 4l-8 8"/>', plus:'<path d="M8 3.2v9.6M3.2 8h9.6"/>', chevron:'<path d="M6 3.5 10.5 8 6 12.5"/>',
+};
+const ic = n => `<svg class="d-i" viewBox="0 0 16 16" aria-hidden="true">${IC[n]}</svg>`;
+const h = (tag, cls, html) => { const el = document.createElement(tag); if (cls) el.className = cls; if (html != null) el.innerHTML = html; return el; };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+let MOTION = true;
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// 종류 — 표시 말은 앱 wfType 그대로. 구역 순서는 WF_TYPES·⌘K·프로젝트 탭과 같은 할 일 → 확인 대기 → 결정 → 아이디어.
+const WORD = { task:'할 일', bug:'버그', check:'확인 대기', decision:'결정', idea:'아이디어' };
+const KINDS = [['task', '할 일', ['task', 'bug']], ['check', '확인 대기', ['check']], ['decision', '결정', ['decision']], ['idea', '아이디어', ['idea']]];
+const kindOf = type => (KINDS.find(([, , types]) => types.includes(type)) || KINDS[0])[0];
+const PICK = [['task', '할 일', ''], ['check', '확인 대기', '?'], ['decision', '결정', '!']];
+const FOLD = 3; // 프로젝트 탭 UI_FOLD와 같은 수
+const defaultOpen = (kind, count) => kind === 'task' || kind === 'decision' || count <= FOLD;
+
+// ---------- 가짜 회의 ----------
+// [종류, 문구, {done, st:[글자, 색], pj}] — 배열 순서 = 만든 순서
+const M = {
+  main: { title:'결제 리뉴얼 주간 회의', sub:'오늘 11:00–12:00 · 결제 리뉴얼', items:[
+    ['task', '결제 실패 로그 일주일치 뽑기', { st:['내일까지', ''] }],
+    ['decision', '부분 환불은 이번 버전에서 빼기로 함'],
+    ['check', '환불 한도 법무 검토 회신 — 테스터B', { st:['오늘 답변 예정', 'warn'] }],
+    ['task', '정산 화면 문구 초안 쓰기', { done:true, st:['완료', ''] }],
+    ['idea', '영수증 화면에 다음 결제일도 같이 보여 주기'],
+    ['bug', '결제 완료 화면에서 버튼 두 개가 겹쳐 보임'],
+    ['check', '디자인 2차 시안 일정 회신 받기 — 테스터C'],
+    ['task', 'QA 범위 문서에 정산 화면 추가', { pj:'가입 개선' }],
+    ['decision', '영수증은 결제 완료 화면 아래 고정 버튼으로 제공', { done:true, st:['완료', ''] }],
+  ]},
+  gaps: { title:'가입 개선 기획 리뷰', sub:'10월 5일 (월) 15:00–15:30 · 가입 개선', items:[
+    ['task', '약관 동의 화면 문구 정리'],
+    ['check', '본인 인증 업체 계약 일정 확인 — 테스터A', { st:['1일 늦음', 'neg'] }],
+    ['task', '가입 단계별 이탈 수치 뽑기', { st:['10월 8일까지', ''] }],
+  ]},
+  one: { title:'주간 운영 점검', sub:'오늘 09:30–10:00 · 운영', items:[
+    ['task', '알림 발송 실패 건 다시 보내기'],
+    ['task', '운영툴 권한 목록 정리', { st:['오늘까지', 'warn'] }],
+    ['task', '지난주 문의 유형 집계 공유'],
+  ]},
+  many: { title:'출시 전 점검 회의', sub:'오늘 14:00–15:00 · 결제 리뉴얼', items:[
+    ['task', '결제 수단별 결제 시험 다시 돌리기'], ['task', '실패 문구 3종 최종본 반영'], ['check', '보안 점검 결과 받기 — 테스터A'],
+    ['task', '출시 공지 초안 쓰기'], ['task', '고객센터 안내 문서 갱신'], ['decision', '출시는 단계적으로(10% → 50% → 전체)'],
+    ['task', '관리자 화면 환불 버튼 위치 확인'], ['task', '정산 파일 형식 재무팀과 맞추기'], ['check', '정산 파일 형식 회신 — 테스터B'],
+    ['task', '되돌리기 절차 문서로 남기기'], ['task', '모니터링 대시보드에 결제 실패율 추가'], ['check', '앱 심사 일정 확인 — 테스터C'],
+    ['task', '출시 당일 담당 순서 정하기'], ['task', '결제 완료 메일 문구 검수'], ['check', '법무 최종 검토 회신'],
+    ['task', 'QA 남은 이슈 3건 닫기'], ['task', '출시 후 첫 주 지표 보고 일정 잡기'],
+  ]},
+};
+const build = key => M[key].items.map(([type, text, o = {}], i) => ({ id:`${key}${i}`, type, text, done:!!o.done, st:o.st, pj:o.pj, seq:i }));
+
+// ---------- 회의 정리 카드 ----------
+let liveToast = null;
+function mount(host, opt) {
+  const V = opt.variant; // 'now' | 'A' | 'B'
+  const meet = M[opt.meeting];
+  const S = { items: build(opt.meeting), fresh: [], open: {}, seq: 100, moved: null };
+  (opt.fresh || []).forEach(([type, text, state]) => { const it = { id:'f' + (++S.seq), type, text, done:false, seq:S.seq, state: state || 'ok' }; S.items.push(it); S.fresh.push(it.id); });
+  if (opt.retyped) { const it = S.items.find(x => x.text === opt.retyped[0]); if (it) { it.type = opt.retyped[1]; if (it.type === 'decision' && !it.done) it.st = null; S.moved = it.id; } }
+  Object.assign(S.open, opt.open || {});
+
+  host.replaceChildren();
+  const stage = h('div', 'stage' + (opt.sheet ? ' is-sheet' : ''));
+  if (opt.tab) stage.style.width = '100%';
+  const card = h('div', 'card' + (opt.tab ? ' is-tab' : ''));
+  card.setAttribute('role', 'region'); card.setAttribute('aria-label', '회의 정리');
+  const top = h('div', 'd-dtop', `<div class="d-dhead2"><div class="d-dtitle">${meet.title}</div><div class="d-dsub">${meet.sub}</div></div><button class="d-iconbtn" type="button" aria-label="더보기">${ic('more')}</button>${opt.tab ? '' : `<button class="d-iconbtn" type="button" aria-label="닫기">${ic('close')}</button>`}`);
+  const body = h('div', 'd-popbody');
+  if (opt.maxH) body.style.maxHeight = opt.maxH + 'px';
+  const foot = h('div', 'foot-in');
+  const qin = h('label', 'qin', `<span class="pl">${ic('plus')}</span><input type="text" maxlength="1000" placeholder="회의에서 나온 것 적기" aria-label="회의에서 나온 것 적기" enterkeyhint="done"><span class="as" aria-live="polite"></span>`);
+  const input = qin.querySelector('input'), as = qin.querySelector('.as');
+  foot.append(qin); card.append(top, body, foot); stage.append(card); host.append(stage);
+
+  const sorted = list => list.slice().sort((a, b) => a.seq - b.seq);
+  const announce = text => { const sr = document.getElementById('sr'); sr.textContent = ''; setTimeout(() => { sr.textContent = text; }, 30); };
+
+  function row(it) {
+    const r = h('div', 'mrow' + (it.done ? ' is-done' : '') + (S.moved === it.id && !opt.static ? ' is-new' : '') + (S.moved === it.id && opt.static ? ' is-moved' : ''));
+    r.dataset.id = it.id;
+    const ck = h('span', 'ck');
+    if (it.type !== 'idea') {
+      const cb = h('input', 'cb' + (it.type === 'check' ? ' w' : '')); cb.type = 'checkbox'; cb.checked = it.done; cb.disabled = it.state === 'pending';
+      cb.setAttribute('aria-label', `${it.text} — ${it.type === 'decision' ? 'PRD 반영함' : it.type === 'check' ? '확인 완료로 표시' : '완료로 표시'}`);
+      cb.onchange = () => { it.done = cb.checked; it.st = it.done ? ['완료', ''] : null; cb.blur(); paint(); };
+      ck.append(cb);
+    }
+    const ti = h('button', 'ti'); ti.type = 'button'; ti.textContent = it.text; ti.title = it.text;
+    let mid = ti;
+    if (it.pj) { mid = h('span', 'tw'); mid.append(ti, h('span', 'd-inproj', `· <span class="d-pjdot" data-pj="1"></span>${esc(it.pj)}`)); }
+    const right = h('span', 'r');
+    if (it.state === 'fail') { const f = h('span', 'st k-neg', '못 담았어요'); f.setAttribute('role', 'alert'); right.append(f, h('button', 'd-link', '다시 시도')); }
+    else {
+      if (it.st && it.st[0]) right.append(h('span', 'st' + (it.st[1] ? ` k-${it.st[1]}` : ''), it.st[0]));
+      const b = h('button', 'tpk', `${WORD[it.type]}${ic('chevron')}`); b.type = 'button';
+      b.setAttribute('aria-haspopup', 'listbox'); b.setAttribute('aria-expanded', 'false');
+      b.setAttribute('aria-label', `종류: ${WORD[it.type]}${it.done ? '' : ' — 바꾸기'}`);
+      if (it.done) b.disabled = true; else b.onclick = e => { e.stopPropagation(); openPop(b, it); };
+      right.append(b);
+    }
+    const ac = h('span', 'ac'); const more = h('button', 'd-more', ic('more')); more.type = 'button'; more.setAttribute('aria-label', `${it.text} — 더 보기`);
+    more.onclick = () => remove(it);
+    ac.append(more);
+    r.append(ck, mid, right, ac);
+    return r;
+  }
+
+  function group(kind, label, list, foldable) {
+    const frag = document.createDocumentFragment();
+    const id = `${host.id || 'h'}-${kind}`;
+    let head;
+    if (foldable) {
+      const open = S.open[kind] ?? defaultOpen(kind, list.length);
+      head = h('button', 'mgrp', `<span>${label}</span><span class="n">${list.length}</span><span class="cv">${ic('chevron')}</span>`);
+      head.type = 'button'; head.setAttribute('aria-expanded', String(open)); head.setAttribute('aria-controls', id);
+      head.setAttribute('aria-label', `${label} ${list.length}개 — ${open ? '접기' : '펼치기'}`);
+      head.onclick = () => { S.open[kind] = !open; paint(); body.querySelector(`[aria-controls="${id}"]`)?.focus(); };
+      const box = h('div'); box.id = id; box.setAttribute('role', 'group'); box.setAttribute('aria-label', label); box.hidden = !open;
+      list.forEach(it => box.append(row(it)));
+      frag.append(head, box);
+    } else {
+      head = h('div', 'mgrp', `<span>${label}</span><span class="n">${list.length}</span>`);
+      head.setAttribute('role', 'heading'); head.setAttribute('aria-level', '4');
+      frag.append(head); list.forEach(it => frag.append(row(it)));
+    }
+    return frag;
+  }
+
+  function paint() {
+    body.replaceChildren();
+    const all = sorted(S.items);
+    if (!all.length) { body.append(h('div', 'd-hint', '적고 Enter를 누르면 바로 담겨요.')); return; }
+    const sec = h('section', 'd-dsec d-msec');
+    sec.append(h('div', 'd-mhead', `이 회의에서 나온 것 <span class="n">${all.length}</span>`));
+    if (V === 'now') all.forEach(it => sec.append(row(it)));
+    else {
+      const settled = all.filter(it => !S.fresh.includes(it.id));
+      KINDS.forEach(([kind, label]) => {
+        const list = settled.filter(it => kindOf(it.type) === kind);
+        if (list.length) sec.append(group(kind, label, list, V === 'B'));
+      });
+      const fresh = all.filter(it => S.fresh.includes(it.id));
+      if (fresh.length) sec.append(group('fresh', '방금 담은 것', fresh, false));
+    }
+    body.append(sec);
+    const moved = body.querySelector('.is-new');
+    if (moved && !opt.static) { moved.scrollIntoView?.({ block:'nearest' }); setTimeout(() => moved.classList.remove('is-new'), 400); }
+    if (!MOTION || reduced) body.querySelectorAll('.is-new').forEach(el => el.style.animation = 'none');
+    S.moved = null;
+    if (opt.static && opt.scrollEnd) body.scrollTop = body.scrollHeight;
+  }
+
+  // 종류 바꾸기 — 방금 담은 줄은 제자리, 이미 있던 줄은 새 구역의 제 순서 자리로
+  function retype(it, type) {
+    if (it.type === type) return;
+    it.type = type;
+    if (type === 'decision' && !it.done) it.st = null; // 결정에는 기한이 없다(retype 규칙 그대로)
+    if (!S.fresh.includes(it.id) && V !== 'now') { S.moved = it.id; if (V === 'B') S.open[kindOf(type)] = true; announce(`${WORD[type]}${type === 'decision' ? '으로' : '로'} 옮겼어요`); }
+    paint();
+  }
+  function remove(it) {
+    const at = S.items.indexOf(it); S.items.splice(at, 1); paint();
+    showToast('지웠어요', () => { S.items.splice(at, 0, it); S.moved = it.id; paint(); });
+  }
+
+  // 종류 목록
+  let pop = null;
+  function closePop(back) { if (!pop) return; pop.btn.setAttribute('aria-expanded', 'false'); document.removeEventListener('mousedown', pop.away, true); pop.el.remove(); if (back) pop.btn.focus(); pop = null; }
+  function openPop(btn, it) {
+    if (pop) { const same = pop.btn === btn; closePop(); if (same) return; }
+    const el = h('div', 'typepop'); el.setAttribute('role', 'listbox'); el.setAttribute('aria-label', '종류');
+    if (!MOTION || reduced) el.style.animation = MOTION ? '' : 'none';
+    PICK.forEach(([k, l, p]) => {
+      const b = h('button', 'd-mitem' + (it.type === k ? ' on' : ''), `<span>${l}</span>${p ? `<kbd>${p}</kbd>` : ''}`);
+      b.type = 'button'; b.setAttribute('role', 'option'); b.setAttribute('aria-selected', String(it.type === k)); b.dataset.k = k;
+      b.onclick = () => { closePop(); retype(it, k); if (!opt.static) input.focus(); };
+      el.append(b);
+    });
+    stage.append(el);
+    const sr = stage.getBoundingClientRect(), br = btn.getBoundingClientRect();
+    el.style.left = Math.max(8, br.right - sr.left - el.offsetWidth + 6) + 'px';
+    const below = br.bottom - sr.top + 4, up = br.top - sr.top - el.offsetHeight - 4;
+    el.style.top = (br.bottom + el.offsetHeight + 8 > innerHeight && up > 0 ? up : below) + 'px';
+    btn.setAttribute('aria-expanded', 'true');
+    const away = e => { if (!el.contains(e.target) && !btn.contains(e.target)) closePop(); };
+    document.addEventListener('mousedown', away, true);
+    pop = { el, btn, away };
+    const items = [...el.querySelectorAll('.d-mitem')];
+    if (!opt.static) (items.find(b => b.classList.contains('on')) || items[0]).focus();
+    el.onkeydown = e => {
+      const i = items.indexOf(document.activeElement);
+      if (e.key === 'ArrowDown') { e.preventDefault(); items[(i + 1) % items.length].focus(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); items[(i - 1 + items.length) % items.length].focus(); }
+      else if (e.key === 'Escape') { e.stopPropagation(); closePop(true); }
+      else if (e.key === 'Tab') closePop();
+      else { const t = PICK.find(([, , p], n) => (p && p === e.key) || String(n + 1) === e.key); if (t) { e.preventDefault(); el.querySelector(`[data-k="${t[0]}"]`).click(); } }
+    };
+  }
+
+  // 입력줄 — 맨 앞 ? 확인 대기 · ! 결정
+  const parse = raw => { const t = raw.trim(); const type = /^\s/.test(raw) ? null : ({ '?':'check', '!':'decision' })[t[0]]; return type ? [type, t.slice(1).trim()] : ['task', t]; };
+  input.addEventListener('input', () => { const [t] = parse(input.value); as.textContent = t === 'task' ? '' : WORD[t]; });
+  input.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' || e.isComposing) return;
+    e.preventDefault();
+    const [type, text] = parse(input.value); if (!text) return;
+    input.value = ''; as.textContent = '';
+    const it = { id:'f' + (++S.seq), type, text, done:false, seq:S.seq, state:'pending' };
+    S.items.push(it); S.fresh.push(it.id); S.moved = it.id; paint();
+    setTimeout(() => { it.state = 'ok'; const el = body.querySelector(`[data-id="${it.id}"]`); el?.replaceWith(row(it)); }, MOTION ? 400 : 0);
+  });
+
+  paint();
+  return {
+    reopen() { S.fresh = []; S.open = {}; closePop(); paint(); },
+    openPopOn(text) { const it = S.items.find(x => x.text === text); const el = body.querySelector(`[data-id="${it.id}"] .tpk`); openPop(el, it); },
+    host, input, body, S,
+  };
+}
+
+function showToast(text, undo) {
+  liveToast?.remove();
+  const t = h('div', 'toast'); t.setAttribute('role', 'status');
+  t.append(h('span', '', text));
+  const b = h('button', 'd-link', '되돌리기'); b.type = 'button'; b.onclick = () => { t.remove(); undo(); };
+  t.append(b); document.body.append(t); liveToast = t;
+  setTimeout(() => t.remove(), 6000);
+}
+
+// ---------- 틀 ----------
+function frame(parentId, f) {
+  const fr = h('div', 'fr ' + (f.theme === 'dark' ? 'th-dark' : f.theme === 'light' ? 'th-light' : ''));
+  fr.append(h('div', 'ttl', f.title));
+  if (f.note) fr.append(h('p', 'note', f.note));
+  const slot = h('div'); slot.id = 's' + Math.random().toString(36).slice(2, 8);
+  fr.append(slot); document.getElementById(parentId).append(fr);
+  place(slot, f);
+}
+function place(slot, f) {
+  const o = { variant:f.v, meeting:f.m, static:f.static !== false, fresh:f.fresh, retyped:f.retyped, open:f.open, maxH:f.maxH, scrollEnd:f.scrollEnd };
+  if (f.w === 'sheet') {
+    const ph = h('div', 'phone'); const inner = h('div'); inner.id = slot.id + 'i'; ph.append(inner); slot.append(ph);
+    return mount(inner, { ...o, sheet:true, maxH: f.maxH || 520 });
+  }
+  if (f.w === 'tab') {
+    const wrap = h('div', 'tabwrap');
+    wrap.append(h('div', 'mlist', `<div class="dh">오늘</div><div class="mr"><span class="t">09:30</span><span>주간 운영 점검</span><span class="x">미완료 3</span></div><div class="mr on"><span class="t">11:00</span><span>${M[f.m].title}</span><span class="x"></span></div><div class="mr"><span class="t">14:00</span><span>출시 전 점검 회의</span><span class="x">초안 4</span></div>`));
+    const inner = h('div'); inner.id = slot.id + 'i'; wrap.append(inner); slot.append(wrap);
+    return mount(inner, { ...o, tab:true });
+  }
+  return mount(slot, o);
+}
+
+const FRESH3 = [['task', '환불 사유 선택지 다섯 개로 줄이기'], ['check', '테스터A에게 결제 대행사 수수료 확인'], ['decision', '쿠폰 중복 사용은 막기로 함']];
+
+frame('g-compare', { title:'지금', v:'now', m:'main', note:'담은 순서 한 목록. 결정·할 일·확인 대기가 섞여 있고, 종류는 줄 오른쪽 글자로만 가려요.' });
+frame('g-compare', { title:'A · 늘 펼침', v:'A', m:'main', note:'같은 9줄을 할 일 → 확인 대기 → 결정 → 아이디어로. 소제목은 누를 수 없는 조용한 글자.' });
+frame('g-compare', { title:'B · 접을 수 있음', v:'B', m:'main', note:'소제목 줄이 버튼. 이 회의는 모든 구역이 3개 이하라 전부 펼친 채 시작해요.' });
+
+frame('g-a', { title:'빈 구역이 있는 회의', v:'A', m:'gaps', note:'결정·아이디어가 없으면 소제목째 없어요. 0은 적지 않아요.' });
+frame('g-a', { title:'한 종류뿐인 회의', v:'A', m:'one', note:'하나뿐이어도 소제목은 서요(예외 없이 같은 규칙).' });
+frame('g-a', { title:'할 일 12개', v:'A', m:'many', maxH:520, note:'전부 보여요. 카드는 가운데만 스크롤, 입력줄은 발에 붙박이.' });
+frame('g-a', { title:'회의 중 방금 담은 줄', v:'A', m:'main', fresh:FRESH3, maxH:520, scrollEnd:true, note:'입력줄로 담은 줄은 구역 끝 “방금 담은 것”에 시간순으로 서요(입력줄 바로 위). 다시 열면 제 구역으로 가요.' });
+frame('g-a', { title:'종류를 바꾼 직후', v:'A', m:'main', retyped:['결제 실패 로그 일주일치 뽑기', 'decision'], note:'줄의 “할 일 ⌄”에서 결정을 고르면 그 줄이 결정 구역의 제 순서 자리로 옮겨 가요(할 일 4 → 3, 결정 2 → 3). 파란 바탕은 그림 설명용 표시예요.' });
+
+frame('g-b', { title:'기본 접힘 규칙', v:'B', m:'many', maxH:560, note:'할 일·결정은 늘 펼침. 확인 대기가 4개라 접힌 채 시작(3개 이하면 펼침).' });
+frame('g-b', { title:'할 일을 접은 모습', v:'B', m:'many', open:{ task:false, check:true }, note:'누르면 꺾쇠가 돌고 접혀요. 닫았다 열면 규칙대로 돌아가요.' });
+frame('g-b', { title:'방금 담은 줄', v:'B', m:'gaps', fresh:FRESH3.slice(0, 2), note:'“방금 담은 것”은 접는 버튼이 없어요(눈이 머무는 자리라서요).' });
+
+frame('g-dark', { title:'다크 · 지금', v:'now', m:'main', theme:'dark' });
+frame('g-dark', { title:'다크 · A', v:'A', m:'main', theme:'dark' });
+frame('g-dark', { title:'다크 · B', v:'B', m:'many', theme:'dark', maxH:440 });
+
+frame('g-narrow', { title:'회의 탭 ≤900 · A', v:'A', m:'main', w:'tab', note:'회의 목록이 위로 쌓이고 정리 화면이 전체 폭. 내용은 줄 옆 카드와 같아요(✕만 없음).' });
+frame('g-narrow', { title:'시트 ≤520 · A', v:'A', m:'main', w:'sheet', note:'줄 14/20 · 36px 이상, 입력줄 44px.' });
+frame('g-narrow', { title:'시트 ≤520 · B', v:'B', m:'many', w:'sheet', note:'소제목 버튼은 44px 높이.' });
+
+// ---------- 눌러 보기 ----------
+const G = { v:'A', m:'main', w:'card', t:'light', s:'1' };
+let live = null;
+function buildLive() {
+  const wrap = document.getElementById('liveWrap');
+  wrap.className = 'fr ' + (G.t === 'dark' ? 'th-dark' : 'th-light');
+  const slot = document.getElementById('live'); slot.replaceChildren();
+  live = place(slot, { v:G.v, m:G.m, w:G.w, static:false, maxH: G.w === 'sheet' ? 520 : 560 });
+}
+document.querySelectorAll('[data-g]').forEach(b => b.onclick = () => {
+  G[b.dataset.g] = b.dataset.v;
+  document.querySelectorAll(`[data-g="${b.dataset.g}"]`).forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  if (b.dataset.g === 's') { MOTION = G.s === '1'; document.documentElement.classList.toggle('m-off', !MOTION); }
+  buildLive();
+});
+document.getElementById('reopen').onclick = () => live.reopen();
+document.getElementById('reset').onclick = buildLive;
+buildLive();
+
+// ---------- 스스로 점검 (?test=1) ----------
+if (new URLSearchParams(location.search).get('test')) {
+  const out = [], ok = (n, p, note = '') => out.push(`${p ? 'PASS' : 'FAIL'} · ${n}${note ? ' — ' + note : ''}`);
+  const heads = el => [...el.querySelectorAll('.mgrp')].map(x => x.textContent.trim());
+  const mk = (v, m, extra = {}) => { const d = h('div'); d.id = 't' + Math.random().toString(36).slice(2, 7); document.body.append(d); return mount(d, { variant:v, meeting:m, ...extra }); };
+  let a = mk('A', 'main');
+  ok('A 구역 순서', heads(a.body).join(',') === '할 일4,확인 대기2,결정2,아이디어1', heads(a.body).join(','));
+  ok('지금은 소제목 없음', mk('now', 'main').body.querySelectorAll('.mgrp').length === 0);
+  ok('빈 구역은 소제목째 없음', heads(mk('A', 'gaps').body).join(',') === '할 일2,확인 대기1');
+  ok('한 종류여도 소제목', heads(mk('A', 'one').body).join(',') === '할 일3');
+  const b = mk('B', 'many');
+  const exp = [...b.body.querySelectorAll('button.mgrp')].map(x => x.textContent.trim() + ':' + x.getAttribute('aria-expanded'));
+  ok('B 기본 규칙(할 일·결정 펼침, 확인 대기 4 → 접힘)', exp.join(',') === '할 일12:true,확인 대기4:false,결정1:true', exp.join(','));
+  b.body.querySelector('button.mgrp').click();
+  ok('B 누르면 접힘', b.body.querySelector('button.mgrp').getAttribute('aria-expanded') === 'false');
+  b.reopen();
+  ok('B 다시 열면 규칙대로', b.body.querySelector('button.mgrp').getAttribute('aria-expanded') === 'true');
+  a.input.value = '?새 확인'; a.input.dispatchEvent(new KeyboardEvent('keydown', { key:'Enter', bubbles:true }));
+  ok('Enter → 방금 담은 것', heads(a.body).at(-1) === '방금 담은 것1' && a.body.querySelector('.mrow:last-child .ti').textContent === '새 확인');
+  a.reopen();
+  ok('다시 열면 제 구역으로', heads(a.body).join(',') === '할 일4,확인 대기3,결정2,아이디어1', heads(a.body).join(','));
+  a.openPopOn('결제 실패 로그 일주일치 뽑기');
+  document.querySelector('.typepop [data-k="decision"]').click();
+  ok('종류 바꾸면 구역 이동', heads(a.body).join(',') === '할 일3,확인 대기3,결정3,아이디어1', heads(a.body).join(','));
+  const b2 = mk('B', 'many'); b2.openPopOn('결제 수단별 결제 시험 다시 돌리기'); document.querySelector('.typepop [data-k="check"]').click();
+  ok('B 접힌 구역으로 옮기면 펼침', [...b2.body.querySelectorAll('button.mgrp')][1].getAttribute('aria-expanded') === 'true');
+  a.body.querySelector('.mrow .d-more').click();
+  ok('지우면 숫자 줄어듦', heads(a.body)[0] === '할 일2');
+  document.querySelector('.toast .d-link').click();
+  ok('되돌리기', heads(a.body)[0] === '할 일3');
+  ok('가로 넘침 없음', document.documentElement.scrollWidth <= innerWidth, `창 ${innerWidth} · 내용 ${document.documentElement.scrollWidth}`);
+  ok('콘솔 오류 없음', window.__errors.length === 0, window.__errors.join(' | '));
+  const pre = h('pre'); pre.id = 'testout'; pre.textContent = out.join('\n'); document.body.prepend(pre);
+}
+</script>
+</body>
+</html>
