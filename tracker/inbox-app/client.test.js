@@ -3563,6 +3563,22 @@ test('회의 줄의 체크 칸: 종류마다 목록과 같은 체크박스가 �
   assert.equal(idea.children[0].children.length, 0, '아이디어는 체크가 없다 — 자리만 비워 다른 줄과 제목 시작을 맞춘다');
 });
 
+test('회의 줄: 끝낸 줄에는 `완료`·기한 글자가 없고(체크 + 취소선이 말한다) 오른쪽 끝에 종류 글자만 선다', () => {
+  const { app } = meetingRowClient(new Response('{"ok":true}'));
+  const row = (item) => app.run(`panelMeetingRow(${JSON.stringify(item)}, { id: 'm1' }, null)`);
+  const right = (r) => r.children.find(node => node.className === 'r');
+
+  const done = row({ id: 't1', type: 'task', description: '끝낸 업무', status: 'done', scheduled: '2026-01-01', doing: true });
+  assert.match(done.className, /\bis-done\b/, '취소선은 .is-done이 그대로 건다');
+  assert.equal(right(done).children.length, 1, '상태 글자 없이 종류 글자만');
+  assert.ok(!done.children.some(node => node.textContent === '완료'), '`완료` 글자가 어디에도 없다');
+
+  const open = row({ id: 't2', type: 'task', description: '진행 중 업무', status: 'to-do', doing: true });
+  assert.equal(right(open).children.length, 2, '안 끝난 줄은 상태(진행 중) + 종류 그대로');
+  assert.equal(right(open).children[0].textContent, '진행 중');
+  assert.ok(/line-through/.test(fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8').match(/\.d-mrow2\.is-done \.ti \{([^}]*)\}/)[1]));
+});
+
 test('회의 줄의 체크는 목록과 같은 toggle 길을 탄다(저장은 /api/track/toggle 하나)', async () => {
   const { app, sent } = meetingRowClient(new Response('{"ok":true}'));
   app.run(`workflowData = { items: [
