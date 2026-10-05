@@ -3195,6 +3195,8 @@ function panelOpen(view) {
     event: view.event || null,
     // 회의에서 초안을 담은 직후의 결과 카드. 회의 → 항목 → 회의로 돌아와도 그대로 남는다.
     result: view.result || null,
+    // 이 카드를 연 동안 입력줄로 담은 줄(`방금 담은 것` — meetings-ui.js). 결과 카드와 같이 들고 다닌다.
+    fresh: view.fresh || null,
     // 팔레트에서 열었으면 닫을 때 그 검색어·필터·스크롤 그대로 팔레트로 돌아간다.
     // 회의에서 연 항목이면 { kind: 'meeting', … }이 들어와 맨 위에 `← 회의로`가 붙는다.
     back: view.back || null,
@@ -3399,7 +3401,7 @@ function panelBackLink(box) {
   link.type = 'button';
   link.className = 'd-back';
   link.textContent = '← 회의로';
-  link.addEventListener('click', () => panelOpen({ kind: 'meeting', id: back.id, event: back.event, result: back.result, back: back.back }));
+  link.addEventListener('click', () => panelOpen({ kind: 'meeting', id: back.id, event: back.event, result: back.result, fresh: back.fresh, back: back.back }));
   box.appendChild(link);
 }
 

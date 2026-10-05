@@ -67,12 +67,14 @@ const MEETING_HOST_CARD = {
   closable: true,
   getResult: () => (panelState && panelState.kind === 'meeting' ? panelState.result : null) || null,
   setResult: (value) => { if (panelState) panelState.result = value; },
+  // 이 카드를 연 동안 입력줄로 담은 줄(`방금 담은 것`). 결과 카드처럼 회의 → 항목 → 회의로 돌아와도 남고, 닫았다 열면 비운다.
+  getFresh: () => (panelState && panelState.kind === 'meeting' ? (panelState.fresh || (panelState.fresh = [])) : null),
   redraw: () => panelRender(),
   box: () => panelDetailBox(),
   // 회의에서 연 항목은 같은 카드에서 열고 맨 위에 `← 회의로`가 붙는다.
   openItem: (item, event) => panelOpen({
     id: item.id,
-    back: { kind: 'meeting', id: event.id, event: event.id ? null : event, result: panelState?.result, back: panelState?.back },
+    back: { kind: 'meeting', id: event.id, event: event.id ? null : event, result: panelState?.result, fresh: panelState?.fresh, back: panelState?.back },
   }),
   openMeeting: (id) => panelOpen({ kind: 'meeting', id, back: panelState?.back }),
 };
@@ -81,6 +83,8 @@ const MEETING_HOST_TAB = {
   closable: false,
   getResult: () => meetingsTabState.result || null,
   setResult: (value) => { meetingsTabState.result = value; },
+  // 회의 탭에서는 다른 회의를 골랐다 돌아오면 비운다(meetingsTabSelect).
+  getFresh: () => meetingsTabState.fresh || (meetingsTabState.fresh = []),
   redraw: () => renderMeetings(),
   box: () => document.getElementById('meetingBody')?.querySelector('.d-detail') || null,
   // 회의 정리 화면이 뒤에 그대로 남아 있으므로 `← 회의로`를 붙이지 않는다 — 누른 줄 옆에 상세 카드만 뜬다.
@@ -627,9 +631,15 @@ const retypeDoneText = type => `${wfType(type)}${uiRoParticle(wfType(type))}`;
 async function retypeSend(id, type, host = null) {
   const result = await wfPost('retype', { id, type });
   if (!result.ok) throw new Error(result.error || '종류를 바꾸지 못했어요.');
-  await load();
-  // 입력줄에 초점이 있으면 카드 전체는 다시 그려지지 않는다 — 열려 있는 회의의 목록만 따로 맞춘다.
-  [...new Set([MEETING_HOST_CARD, MEETING_HOST_TAB, host])].forEach(one => meetingItemsRepaint(one));
+  // 종류 구역에 선 줄은 새 구역으로 옮겨 가며 떠오른다(`방금 담은 것`의 줄은 글자만 바뀌고 제자리).
+  meetingMovedIds.add(id);
+  try {
+    await load();
+    // 입력줄에 초점이 있으면 카드 전체는 다시 그려지지 않는다 — 열려 있는 회의의 목록만 따로 맞춘다.
+    [...new Set([MEETING_HOST_CARD, MEETING_HOST_TAB, host])].forEach(one => meetingItemsRepaint(one));
+  } finally {
+    meetingMovedIds.delete(id);
+  }
 }
 async function retypeMeetingItem(item, type, host = null) {
   const from = item.type;
@@ -703,7 +713,7 @@ function panelMeetingRowProject(item, event) {
   return uiInlineProject(item);
 }
 
-// 한 줄: 체크 | 문구 | (상태) 종류 | ⋯ — 종류는 줄마다 오른쪽에 조용한 글자로 선다(종류 소제목으로 나누지 않는다).
+// 한 줄: 체크 | 문구 | (상태) 종류 | ⋯ — 종류는 줄마다 오른쪽에 조용한 글자로 선다(종류 구역 안에서도 — 종류를 바꾸는 유일한 길이다).
 function panelMeetingRow(item, event, stateText, host = MEETING_HOST_CARD) {
   const row = document.createElement('div');
   const done = item.status === 'done';
@@ -904,7 +914,7 @@ function meetingSection(title, count) {
 // 카드 발의 입력줄에 적고 Enter를 누르면 그 줄이 바로 목록 끝(입력줄 바로 위)에 선다 — 저장은 뒤에서 차례로 보낸다
 // (uiQueueSend). 아직 서버 목록에 없는 줄(담는 중·못 담음·담았지만 아직 다시 읽기 전)은 여기서 회의별로 들고 있어
 // 카드를 다시 그려도 그대로 남는다. 서버 목록에 들어온 줄은 내려놓는다(기록되지 않은 회의는 목록이 없어 그대로 둔다).
-const meetingCaptureLocal = new Map(); // 회의 키 → [{ seq, type, text, state: 'pending' | 'fail' | 'saved', id, fresh }]
+const meetingCaptureLocal = new Map(); // 회의 키 → [{ seq, type, text, state: 'pending' | 'fail' | 'saved', id, fresh, recent }]
 let meetingCaptureSeq = 0;
 const MEETING_PASTE_MAX = 30;
 const MEETING_TEXT_MAX = 1000;
@@ -967,6 +977,7 @@ function meetingCaptureSend(event, linked, entry, host) {
     try {
       entry.id = await meetingCaptureSave(event, linked, entry);
       entry.state = 'saved';
+      if (entry.recent && !entry.recent.some(one => one.id === entry.id)) entry.recent.push({ id: entry.id, seq: entry.seq });
       meetingCaptureUndo(event, entry);
     } catch {
       entry.state = 'fail'; // 알림은 request()가 이미 했다 — 적은 글은 그 줄에 그대로 있다
@@ -1004,7 +1015,9 @@ function meetingCaptureUndo(event, entry) {
 function meetingCaptureAdd(event, linked, entries, host) {
   const key = meetingCaptureKey(event);
   const fresh = entries.filter(entry => entry.text)
-    .map(entry => ({ seq: ++meetingCaptureSeq, type: entry.type, text: entry.text, state: 'pending', id: null, fresh: true }));
+    .map(entry => ({ seq: ++meetingCaptureSeq, type: entry.type, text: entry.text, state: 'pending', id: null, fresh: true,
+      // 담긴 뒤에도 이 자리를 연 동안은 `방금 담은 것`에 남도록 그 자리의 목록을 들고 간다(저장 중에 카드를 다시 열었으면 옛 목록에 남는다).
+      recent: linked && host && host.getFresh ? host.getFresh() : null }));
   if (!fresh.length) return [];
   meetingCaptureLocal.set(key, [...(meetingCaptureLocal.get(key) || []), ...fresh]);
   meetingItemsRepaint(host);
@@ -1071,7 +1084,8 @@ function meetingLocalRow(entry, event, linked, host) {
   return row;
 }
 
-// `이 회의에서 나온 것`은 시간순 한 목록이다: 담은 날짜순, 같은 날은 만든 순서. 항목 번호(`task_01M3…`)의 뒷부분이
+// `이 회의에서 나온 것`은 종류 구역(할 일 → 확인 대기 → 결정 → 아이디어 — 앱의 종류 목록 차례, 버그는 할 일)으로 나뉘고,
+// 구역 안은 시간순이다: 담은 날짜순, 같은 날은 만든 순서. 항목 번호(`task_01M3…`)의 뒷부분이
 // 만든 시각 순으로 커지는 값이라 그것으로 가린다(종류를 바꿔도 번호는 그대로다). 그런 번호가 아닌 옛 항목은 원래 순서를 지킨다.
 const meetingItemStamp = (item) => {
   const tail = String(item.id || '').split('_').pop();
@@ -1083,6 +1097,28 @@ function meetingItemsInOrder(items) {
       || (x.stamp && y.stamp ? (x.stamp < y.stamp ? -1 : x.stamp > y.stamp ? 1 : 0) : 0) || x.index - y.index)
     .map(entry => entry.item);
 }
+const meetingItemGroups = () => [...WF_TYPES, ['idea', '아이디어']];
+const meetingItemGroup = type => (['check', 'decision', 'idea'].includes(type) ? type : 'task');
+
+// 종류 구역의 소제목 — 줄 사이를 알려 주기만 하는 조용한 글자(누를 수 없다, 그룹 제목 부품이 아니다) + 조용한 숫자.
+// 화면 읽기에서는 제목이라 제목 건너뛰기로 구역 사이를 옮긴다(Tab 정류장은 늘지 않는다).
+function meetingSubhead(label, count) {
+  const head = document.createElement('div');
+  head.className = 'd-mgrp';
+  head.setAttribute('role', 'heading');
+  head.setAttribute('aria-level', '3');
+  const name = document.createElement('span');
+  name.textContent = label;
+  const number = document.createElement('span');
+  number.className = 'n num';
+  number.textContent = String(count);
+  head.append(name, number);
+  return head;
+}
+
+// 종류를 바꿔 다른 구역으로 옮겨 가는 줄 — 그 줄만 새 줄처럼 떠오른다(.is-new 140ms, 움직임 줄이기면 120ms 흐려짐).
+// 종류를 바꾸는 동안(retypeSend)만 들고 있다.
+const meetingMovedIds = new Set();
 
 function panelMeetingItems(event, box, host = MEETING_HOST_CARD) {
   const linked = !!event.id;
@@ -1113,26 +1149,44 @@ function panelMeetingItems(event, box, host = MEETING_HOST_CARD) {
       return found || !entry.seen;
     });
     if (local.length) meetingCaptureLocal.set(key, local); else meetingCaptureLocal.delete(key);
+    // 이 자리를 연 동안 입력줄로 담은 줄은 종류 구역으로 튀어 들어가지 않고 맨 끝 `방금 담은 것`에 적은 순서대로 선다
+    // (입력줄 바로 위 — 방금 적은 줄을 놓치지 않게). 다시 열면 제 종류 구역으로 간다.
+    const recentSeq = new Map(((linked && host.getFresh ? host.getFresh() : null) || []).map(one => [one.id, one.seq]));
     const rows = [];
-    real.forEach((item) => {
-      rows.push(panelMeetingRow(item, event, null, host));
+    const itemRow = (item) => {
+      const row = panelMeetingRow(item, event, null, host);
+      if (meetingMovedIds.has(item.id) && !recentSeq.has(item.id)) row.className += ' is-new';
+      rows.push(row);
       // 체크한 확인 대기는 이 구역에 is-done으로 남는다 — 그 줄 바로 아래에 `다음은?`을 덧붙인다.
       const next = item.type === 'check' ? waitingNextItem(item.id) : null;
       if (next) rows.push(waitingNextRow(next));
+    };
+    const settled = real.filter(item => !recentSeq.has(item.id));
+    meetingItemGroups().forEach(([type, label]) => {
+      const items = settled.filter(item => meetingItemGroup(item.type) === type);
+      if (!items.length) return; // 빈 구역은 소제목째 없다
+      rows.push(meetingSubhead(label, items.length));
+      items.forEach(itemRow);
     });
-    let added = null;
-    local.forEach((entry) => {
+    const recent = [
+      ...real.filter(item => recentSeq.has(item.id)).map(item => ({ seq: recentSeq.get(item.id), item })),
+      ...local.map(entry => ({ seq: entry.seq, entry })),
+    ].sort((x, y) => x.seq - y.seq);
+    // 기록되지 않은 회의는 구역 제목이 이미 `방금 담은 것`이다.
+    if (linked && recent.length) rows.push(meetingSubhead('방금 담은 것', recent.length));
+    recent.forEach(({ item, entry }) => {
+      if (item) { itemRow(item); return; }
       const saved = entry.state === 'saved' && typeof wfItem === 'function' ? wfItem(entry.id) : null;
-      const row = saved ? panelMeetingRow(saved, event, null, host) : meetingLocalRow(entry, event, linked, host);
-      if (String(row.className).includes('is-new')) added = row;
-      rows.push(row);
+      if (saved) { itemRow(saved); return; }
+      rows.push(meetingLocalRow(entry, event, linked, host));
     });
     list.replaceChildren(...rows);
+    const added = rows.find(row => String(row.className).includes('is-new'));
     const count = real.length + local.length;
     number.textContent = String(count);
     section.hidden = !count;
     hint.hidden = !blank || !!count;
-    // 방금 적은 줄이 입력줄 바로 위에 보이게.
+    // 방금 적은 줄(또는 다른 구역으로 옮겨 간 줄)이 보이게.
     if (added && added.scrollIntoView) added.scrollIntoView({ block: 'nearest' });
     meetingTypeOrphan(host);
   };
@@ -1484,7 +1538,7 @@ function panelMeetingLink(event, box, host = MEETING_HOST_CARD) {
 const MEETINGS_TAB_WINDOW_DAYS = 14;
 let meetingsTabState = {
   key: null, unresolved: false, reviewOnly: false,
-  windowDays: MEETINGS_TAB_WINDOW_DAYS, showNoRecord: false, result: null,
+  windowDays: MEETINGS_TAB_WINDOW_DAYS, showNoRecord: false, result: null, fresh: null,
 };
 
 // 목록을 훑는 두 보기 — `날짜순`(기본)과 `프로젝트별`. 프로젝트로 거르던 드롭다운은 없앴고,
@@ -1612,10 +1666,12 @@ function meetingsTabPick(list, current, today, now) {
 const meetingsReviewCount = meetings => (meetings || []).filter(event => event.drafts && event.drafts.length).length;
 
 // 고른 회의를 바꾼다. 담은 결과 카드는 그 회의의 것이라 함께 내린다(줄 옆 카드가 회의를 옮길 때와 같다).
+// `방금 담은 것`도 내린다 — 돌아오면 그 줄들은 제 종류 구역에 선다.
 function meetingsTabSelect(id) {
   if (meetingsTabState.key === id) return;
   meetingsTabState.key = id;
   meetingsTabState.result = null;
+  meetingsTabState.fresh = null;
 }
 
 // 목록 밖의 회의를 열 때: 가리고 있는 조건을 풀어서라도 보이게 한다 — 오른쪽 내용은 반드시 열려야 한다.
@@ -1654,7 +1710,9 @@ function renderMeetings() {
   const today = todayStr();
   const filtering = !!(meetingsTabState.unresolved || meetingsTabState.reviewOnly);
   const rows = meetingsTabList(meetings, meetingsTabState, itemsOf);
-  meetingsTabState.key = meetingsTabPick(rows, meetingsTabState.key, today, nowHHMM());
+  const picked = meetingsTabPick(rows, meetingsTabState.key, today, nowHHMM());
+  if (picked !== meetingsTabState.key) meetingsTabState.fresh = null; // 다른 회의로 넘어가면 `방금 담은 것`도 내린다
+  meetingsTabState.key = picked;
 
   listEl.replaceChildren();
   const head = document.createElement('div');
