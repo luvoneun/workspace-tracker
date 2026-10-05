@@ -1641,12 +1641,12 @@ textarea.d-dtitle {
 
 /* `이 회의에서 나온 것`의 종류 소제목(할 일·확인 대기·결정·아이디어·방금 담은 것) — 줄 사이를 알려 주기만 하는
    조용한 글자다(그룹 제목 부품이 아니다, 누를 수 없다). 글자는 2026-09-22~10-02에 쓰던 값 그대로(13/600 --muted + 숫자 500 --dim),
-   여백만 넓혔다: 위 18px·아래 6px(오늘 레일 그룹 제목은 위 27·아래 15px쯤) */
+   여백만 넓혔다: 위 22px·아래 8px(오늘 레일 그룹 제목은 위 27·아래 15px쯤에 가깝게) */
 .d-mgrp {
   display: flex; align-items: center; gap: 5px; min-height: 18px;
-  margin: 18px 0 6px; font-size: var(--fs-sm); line-height: 18px; font-weight: 600; color: var(--muted);
+  margin: 22px 0 8px; font-size: var(--fs-sm); line-height: 18px; font-weight: 600; color: var(--muted);
 }
-.d-mgrp:first-child { margin-top: 10px; }
+.d-mgrp:first-child { margin-top: 12px; }
 .d-mgrp .n { font-weight: 500; color: var(--dim); font-variant-numeric: tabular-nums; }
 
 /* 회의 정리의 구역은 본문 간격(16px) + 가는 선 + 12px로만 나뉜다(설정 창용 .d-dsec의 위 여백 22px는 쓰지 않는다) */
