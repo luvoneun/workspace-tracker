@@ -549,8 +549,9 @@ async function meetingDraftDismiss(event, draft, edit, index, host = MEETING_HOS
 }
 
 // 항목 한 줄: 종류 | 문구 | 기한·상태. 기본 상태(미완료)는 모든 줄에 반복되니 적지 않는다.
+// 끝낸 줄은 체크 + 제목 취소선이 이미 말하니 글자를 더하지 않고, 남은 기한·진행 중도 뜻이 없어 적지 않는다.
 function panelMeetingItemState(item) {
-  if (item.status === 'done') return { text: '완료', tone: '' };
+  if (item.status === 'done') return null;
   const blocker = typeof wfItem === 'function' && item.blockedBy ? wfItem(item.blockedBy) : null;
   if (blocker && blocker.status !== 'done') return { text: '답변 대기', tone: 'warn' };
   const due = uiItemDueText(item);
