@@ -1266,7 +1266,6 @@ function reportStatusText(since) {
 }
 
 // 고르거나 고치는 문장 바로 아래 조용한 근거 한 줄(개편 A): `근거 · <업무 제목> · <상태·날짜>`. 여러 업무면 첫 업무 + `외 N개`.
-// 끝낸 업무 문장인데 결과 한 줄이 비었으면 끝에 주황 `결과 한 줄 비었어요` — 확인 필요로는 세지 않는다(앱이 채우지도 않는다).
 // 근거가 없는 줄(계획·옛 보고 문장)은 줄 자체가 없다. 출처 링크(`슬랙 ↗`)는 출처 종류 판별(2단계) 뒤에 붙인다.
 function reportEvidenceLine(row, rows) {
   if (!row || row.heading === REPORT_PLAN_HEADING) return null;
@@ -1289,12 +1288,6 @@ function reportEvidenceLine(row, rows) {
     bits.push(reportNode('span', state, off ? 'w' : ''));
   }
   if (gone) bits.push(reportNode('span', `지워진 업무 ${gone}개`, 'w'));
-  if (row.heading === '완료한 일') {
-    const done = sources.filter(source => ['task', 'bug'].includes(source.type) && source.status === 'done');
-    const empty = done.filter(source => !String(source.outcome || '').trim()).length;
-    if (empty && empty === sources.length) bits.push(reportNode('span', '결과 한 줄 비었어요', 'w'));
-    else if (empty) bits.push(reportNode('span', `결과 한 줄 빈 업무 ${empty}개`, 'w'));
-  }
   bits.forEach((bit, index) => {
     if (index) { const dot = reportNode('span', '·', 'dot'); dot.setAttribute('aria-hidden', 'true'); line.appendChild(dot); }
     line.appendChild(bit);

@@ -15287,20 +15287,19 @@ test('개편 A: `확인 필요 N ›`은 서버의 첫 문장부터 문서 순�
   assert.equal(app.run("reportEdits.get('2026-09-14:o1')"), '적던 글');
 });
 
-test('개편 A: 고르거나 고치는 문장 아래 근거 한 줄 — 업무 제목·상태, 끝낸 업무의 결과 한 줄이 비면 주황 글자, 계획·근거 없는 줄은 없음', () => {
+test('개편 A: 고르거나 고치는 문장 아래 근거 한 줄 — 업무 제목·상태(결과 한 줄이 비어도 안내 없음), 계획·근거 없는 줄은 없음', () => {
   const app = a7Client();
   assert.equal(a7Kid(a7Line(app, 'r1'), 'rp-ev1'), undefined, '평소에는 없다');
   app.run("reportReviewPick = 'r1'");
   const line = a7Line(app, 'r1');
   const ev = a7Kid(line, 'rp-ev1');
-  assert.deepEqual(ev.children.map(kid => kid.textContent), ['근거', '·', '환불 표 정리하기 (확인 필요)', '·', '완료', '·', '결과 한 줄 비었어요']);
-  assert.equal(ev.children[6].className, 'w');
+  assert.deepEqual(ev.children.map(kid => kid.textContent), ['근거', '·', '환불 표 정리하기 (확인 필요)', '·', '완료'], '결과 한 줄이 비었다는 안내는 없다');
   assert.equal(ev.children[1].getAttribute('aria-hidden'), 'true');
   // 고치는 중이면 입력칸 아래(글 칸 구성은 그대로 — 입력칸 + 안내 한 줄).
   app.run("reportReviewPick = null; reportEdits.set('2026-09-14:o1', '결과 있는 문장')");
   const editing = a7Line(app, 'o1');
   assert.deepEqual(a7Kid(editing, 'tx').children.map(kid => kid.className), ['rp-ta', 'rp-help']);
-  assert.deepEqual(a7Kid(editing, 'rp-ev1').children.map(kid => kid.textContent), ['근거', '·', '문구 검토하기', '·', '완료'], '결과 한 줄이 있으면 주황 글자 없음');
+  assert.deepEqual(a7Kid(editing, 'rp-ev1').children.map(kid => kid.textContent), ['근거', '·', '문구 검토하기', '·', '완료'], '근거 줄은 결과 한 줄 유무와 같다');
   app.run("reportEdits.set('2026-09-14:pl', 'A/B 결과 공유')");
   assert.equal(a7Kid(a7Line(app, 'pl'), 'rp-ev1'), undefined, '다음 주 계획에는 근거 줄이 없다');
   assert.equal(app.run("reportEvidenceLine({ heading: '완료한 일', sourceIds: [] }, [])"), null);
