@@ -8534,6 +8534,31 @@ test('슬랙 연결 E. 풀림: `슬랙 연결이 풀렸어요 — 다시 연결 
   assert.equal(old.find('slack', 'd-isteps').length, 1);
 });
 
+test('슬랙 헛경고 줄이기: 쉬는 시간(서버의 `fetch.resting`)이면 카드가 조용한 `대기 중`이고, 밤에도 서버가 보인 실패는 그대로 보인다', async () => {
+  // 서버가 지난 실패를 걸러 준 밤 — 흐린 초록 점 + 회색 `대기 중`, 지금 상황 줄은 다시 가져올 때, 이유 줄·버튼 없음
+  const night = slackConnectClient({ ...SLACK_LINKED, ...OAUTH_ON, fetch: { failing: false, auth: false, stuck: false, resting: true, restUntil: 9 } });
+  await night.app.run('renderSettingsIntegrations()');
+  same(statOf(night, 'slack'), ['d-istat k-rest', '대기 중']);
+  assert.match(night.text('slack'), /지금은 쉬는 시간이에요 · 아침 9시에 다시 가져와요/);
+  assert.equal(night.find('slack', 'd-intgwhy').length, 0);
+  assert.equal(fetchButton(night, 'slack').hidden, true, '버튼은 막혔을 때만');
+  assert.match(night.text('slack'), /매일 9–19시, 5분마다/, '주기 줄은 그대로');
+  // 맨 위 요약은 멈춤·늦음이 아니다
+  assert.doesNotMatch(night.shape("document.getElementById('settingsIntegrationsView').children[0]").text, /멈췄어요|늦어요/);
+  // 밤에 누른 `지금 가져오기`가 실패했으면(서버가 failing으로 준다) 시간대와 상관없이 늦어요 + 이유 줄
+  const manual = slackConnectClient({ ...SLACK_LINKED, ...OAUTH_ON, fetch: { failing: true, auth: false, stuck: false, resting: true, restUntil: 9, failedAt: ago(1), summary: 'my-todo 채널 확인 실패 — fetch failed (잠깐 오류) (지금 가져오기)' } });
+  await manual.app.run('renderSettingsIntegrations()');
+  same(statOf(manual, 'slack'), ['d-istat k-late', '늦어요']);
+  assert.equal(manual.find('slack', 'd-intgwhy').length, 1);
+  assert.match(manual.shape("window.findByClass(document.getElementById('settingsIntegrationsView').children[1], 'd-intgwhy')[0]").text, /^슬랙이 제시간에 답하지 않았어요/, '잠깐 오류는 사람 말로');
+  // 늦음 판단(syncLag — 톱니바퀴 주황 점과 같은 함수)도 쉬는 시간의 슬랙은 늦음·첫 읽기 기다림으로 세지 않는다(등록 안 됨은 그대로)
+  const lag = data => JSON.parse(night.app.run(`JSON.stringify(syncLag(${JSON.stringify(data)}, { clock: '23:00' }))`));
+  same(lag({ slackSync: { stale: true, lastSync: '2026-10-04', error: '일부 채널을 확인하지 못했습니다.', connected: true, scheduled: true, resting: true } }), { late: [], waiting: [] });
+  same(lag({ slackSync: { stale: true, lastSync: null, neverRead: true, connected: true, scheduled: true, resting: true } }), { late: [], waiting: [] });
+  same(lag({ slackSync: { stale: true, lastSync: null, neverRead: true, connected: true, scheduled: false, resting: true } }).late.map(one => one.key), ['slack']);
+  same(lag({ slackSync: { stale: true, lastSync: '2026-10-04', error: '일부 채널을 확인하지 못했습니다.', connected: true, scheduled: true, resting: false } }).late.map(one => one.key), ['slack'], '낮에는 예전 그대로');
+});
+
 test('슬랙 연결 F. 다른 기기에서는 버튼이 회색으로 눌리지 않고 안내 한 줄, 포트 밖·Client ID 없음도 버튼 대신 안내 한 줄', async () => {
   const remote = slackConnectClient({ connect: { ready: 'remote', waiting: false, expiresAt: null, last: null } });
   await remote.app.run('renderSettingsIntegrations()');

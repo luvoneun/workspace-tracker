@@ -33,6 +33,9 @@ process.env.WORKSPACE_NO_REMOTE_CHECK = '1';
 // 슬랙 자동 갱신 타이머도 확실히 끈다(진짜 서버를 띄우는 시험이 이 환경을 물려받는다).
 process.env.WORKSPACE_TOKEN_DIR = path.join(automationHome, 'tokens');
 process.env.WORKSPACE_NO_SLACK_REFRESH = '1';
+// 슬랙 수집의 쉬는 시간(9~19시 밖이면 카드가 `대기 중`·실패를 숨김)이 시험을 돌린 시각에 따라 달라지지 않게 — 기본은 오늘 낮 12시
+// (이 프로세스의 서버와 시험이 띄우는 서버 모두). 쉬는 시간을 보는 시험은 setSlackClockForTests로 따로 끼우고 끝나면 null로 되돌린다.
+process.env.WORKSPACE_SLACK_TEST_HOUR = '12';
 const { server } = require('./server');
 const date = value => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
 const today = date(new Date());

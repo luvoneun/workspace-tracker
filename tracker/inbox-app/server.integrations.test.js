@@ -1185,6 +1185,136 @@ test('WP-I 자동화 기록: 시작 줄의 `(v1.1.2)`를 그 회차의 버전으
   }
 });
 
+// ---------- 슬랙 헛경고 줄이기 (DECISIONS 2026-10-06) ----------
+// 회차 블록은 slack-collect.js가 남기는 모양 그대로다(채널 확인 실패 줄이 블록 안, 잠깐 오류·지금 가져오기 표시가 끝에).
+const same = (actual, expected, message) => assert.deepEqual(actual, expected, message);
+const slackRun = (start, body, exit = 1) => [`───── ${start} slack-capture 시작 (v9.9.9)`, ...body, '', `───── ${start.slice(0, -2)}40 slack-capture 종료 (exit ${exit})`];
+const timeoutRun = (start, manual = false) => slackRun(start, [
+  `my-todo 채널 확인 실패 — The operation was aborted due to timeout (잠깐 오류)${manual ? ' (지금 가져오기)' : ''}`,
+  `채널 1개 확인 실패 (잠깐 오류) — 다음 회차에 다시${manual ? ' (지금 가져오기)' : ''}`,
+]);
+const atHour = (hour, minute = 0) => () => { const at = new Date(); at.setHours(hour, minute, 0, 0); return at; };
+async function withSlackLog(lines, fn) {
+  const file = path.join(automationHome, 'logs', 'slack-capture.log');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const before = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+  const serverModule = require('./server');
+  const write = next => fs.writeFileSync(file, `${next.flat().join('\n')}\n`);
+  try { write(lines); await fn({ write, clock: fn2 => serverModule.setSlackClockForTests(fn2) }); } finally {
+    serverModule.setSlackClockForTests(null);
+    if (before === null) fs.rmSync(file, { force: true }); else fs.writeFileSync(file, before);
+  }
+}
+const slackState = async () => {
+  const intg = await (await fetch(base + '/api/integrations')).json();
+  return { ...intg.slack.fetch, alert: intg.alerts.includes('slack'), sync: intg.sync.slackSync };
+};
+
+test('헛경고 줄이기 ①: 잠깐의 오류(시간 초과)는 연속 3회차부터 실패 — 한 번·두 번은 실패가 아니고, 한 번 성공하면 처음부터, 밤새 안 돌아도 늘지 않는다', async () => {
+  const ok = start => slackRun(start, ['이번에 본 메시지 0개 = 등록 0 · 링크 중복 0 · 비슷한 일이라 건너뜀 0 · 시스템 0'], 0);
+  await withSlackLog([timeoutRun('2026-10-05 10:00:00')], async ({ write }) => {
+    let state = await slackState();
+    same([state.failing, state.stuck, state.alert], [false, false, false], '한 번 늦은 건 실패가 아니다');
+    const status = (await (await fetch(base + '/api/automation/status')).json()).automations.find(one => one.key === 'slack');
+    same([status.failTimes.length, status.failTransient, status.failManual], [1, true, false], '블록 안의 채널 줄은 회차 하나로 센다');
+    write([timeoutRun('2026-10-05 10:00:00'), timeoutRun('2026-10-05 10:05:00')]);
+    state = await slackState();
+    same([state.failing, state.alert], [false, false], '두 번째도 아직');
+    write([timeoutRun('2026-10-05 10:00:00'), timeoutRun('2026-10-05 10:05:00'), timeoutRun('2026-10-05 10:10:00')]);
+    state = await slackState();
+    same([state.failing, state.stuck, state.alert], [true, true, true], '연속 3회차면 멈췄어요·빨간 점');
+    assert.match(state.summary, /aborted due to timeout/);
+    // 한 번 성공하면 0부터 — 그 뒤 한 번 늦은 건 다시 실패가 아니다
+    write([timeoutRun('2026-10-05 10:00:00'), timeoutRun('2026-10-05 10:05:00'), ok('2026-10-05 10:10:00'), timeoutRun('2026-10-05 10:15:00')]);
+    state = await slackState();
+    same([state.failing, state.alert], [false, false]);
+    // 어제 저녁(19시 전) 한 번 늦고 밤새 안 돌았다 — 1시간이 넘어도(예전엔 멈춤) 실패가 아니다
+    write([timeoutRun('2026-10-04 18:55:00')]);
+    state = await slackState();
+    same([state.failing, state.stuck, state.alert], [false, false, false]);
+  });
+});
+
+test('헛경고 줄이기 ②: 토큰 문제·잠깐 오류가 아닌 실패는 예전처럼 바로, 잠깐 오류와 섞이면 바로, 표시 없는 옛 로그도 예전처럼', async () => {
+  await withSlackLog([slackRun('2026-10-05 10:00:00', ['my-todo 채널 확인 실패 — Slack: invalid_auth'])], async ({ write }) => {
+    let state = await slackState();
+    same([state.failing, state.auth, state.stuck, state.alert], [true, true, true, true], '인증 문제는 한 번이어도 멈춤');
+    write([slackRun('2026-10-05 10:00:00', ['my-todo 채널 확인 실패 — 슬랙 연결이 풀림, 다시 연결 필요(slack_reconnect · invalid_refresh_token)'])]);
+    same((await slackState()).auth, true, '블록 안의 다시 연결 줄도 토큰 문제로 읽는다');
+    write([slackRun('2026-10-05 10:00:00', ['my-todo 채널 확인 실패 — Slack: channel_not_found'])]);
+    state = await slackState();
+    same([state.failing, state.auth], [true, false], '잠깐 오류가 아닌 실패는 기다리지 않고 바로 실패');
+    write([slackRun('2026-10-05 10:00:00', ['my-todo 채널 확인 실패 — Slack: channel_not_found']), timeoutRun('2026-10-05 10:05:00')]);
+    same((await slackState()).failing, true, '이어진 회차에 잠깐 오류가 아닌 실패가 있으면 기다리지 않는다');
+    // 채널 줄 끝의 `(잠깐 오류)`만으로는 세지 않는다 — 다른 실패와 섞인 회차는 맺음 줄이 없다
+    write([slackRun('2026-10-05 10:00:00', ['my-align 채널 확인 실패 — Slack: not_in_channel', 'my-todo 채널 확인 실패 — The operation was aborted due to timeout (잠깐 오류)'])]);
+    same((await slackState()).failing, true, '섞인 회차는 바로 실패');
+    write([slackRun('2026-10-05 10:00:00', ['이번에 본 메시지 1개 = 등록 0 · 링크 중복 0 · 비슷한 일이라 건너뜀 0 · 시스템 0', 'my-todo 채널 확인 실패 — fetch failed (잠깐 오류)', 'my-waiting · 새 1개 · 저장 0 · 건너뜀 0 · 실패: 분류 실패(exit 3) — 커서 그대로'])]);
+    same((await slackState()).failing, true, '정리 실패와 섞인 회차도 바로 실패');
+    write(['2026-10-05 10:00:00 my-todo 채널 확인 실패 — The operation was aborted due to timeout']);
+    same((await slackState()).failing, true, '표시 없는 옛 줄은 예전 판단 그대로');
+    // 메시지 내용에 같은 글이 섞여도 끝에 붙은 표시만 본다
+    write([slackRun('2026-10-05 10:00:00', ['my-todo · 새 1개 · 저장 0 · 건너뜀 0 · 실패: 저장 1건 실패 — 커서 그대로', '  - (잠깐 오류) 라는 제목의 일'])]);
+    same((await slackState()).failing, true);
+  });
+});
+
+test('헛경고 줄이기 ③: 쉬는 시간(9~19시 밖)이면 `대기 중` — 지난 실패·빨간 점을 숨기고, 토큰 문제·밤에 누른 지금 가져오기의 실패는 보인다(경계 8:59·9:00·18:59·19:00)', async () => {
+  const hard = slackRun('2026-10-05 18:50:00', ['my-todo 채널 확인 실패 — Slack: channel_not_found']);
+  const stuckHard = [hard, slackRun('2026-10-05 18:55:00', ['my-todo 채널 확인 실패 — Slack: channel_not_found'])];
+  await withSlackLog(stuckHard, async ({ write, clock }) => {
+    clock(atHour(23));
+    let state = await slackState();
+    same([state.resting, state.restUntil, state.failing, state.stuck, state.alert, state.summary], [true, 9, false, false, false, null], '밤에는 지난 실패를 숨긴다');
+    same(state.sync.resting, true, '늦음 판단 재료(slackSync)에도 쉬는 시간');
+    const items = await (await fetch(base + '/api/items')).json();
+    same(items.slackSync.resting, true, '톱니바퀴 주황 점(/api/items)도 같은 값');
+    // 경계 — 8:59는 쉬는 시간, 9:00부터 실제 상태, 18:59까지 실제 상태, 19:00부터 쉬는 시간
+    for (const [hour, minute, resting] of [[8, 59, true], [9, 0, false], [18, 59, false], [19, 0, true]]) {
+      clock(atHour(hour, minute));
+      state = await slackState();
+      // 낮이면 실제 상태 — 어제 저녁의 실패가 1시간 넘게 이어진 것이라 멈춤(빨간 점)이다(첫 회차가 돌면 바뀐다)
+      same([state.resting, state.failing, state.alert], [resting, !resting, !resting], `${hour}:${minute}`);
+    }
+    clock(atHour(2));
+    // 토큰 문제는 밤에도 그대로 보인다(사람이 고칠 일)
+    write([slackRun('2026-10-05 18:55:00', ['my-todo 채널 확인 실패 — Slack: invalid_auth'])]);
+    state = await slackState();
+    same([state.resting, state.failing, state.auth, state.stuck, state.alert], [true, true, true, true, true]);
+    // 밤에 누른 지금 가져오기의 실패는 잠깐 오류여도 바로 보인다 — 다만 밤에는 시간이 흘러도 멈춤(빨강)이 되지 않는다
+    write([timeoutRun('2026-10-05 21:00:00', true)]);
+    state = await slackState();
+    same([state.resting, state.failing, state.stuck, state.alert], [true, true, false, false]);
+    assert.match(state.summary, /지금 가져오기/);
+    // 낮에 누른 지금 가져오기의 잠깐 오류도 바로 보인다(사람이 방금 누른 것)
+    clock(atHour(14));
+    same((await slackState()).failing, true);
+  });
+});
+
+test('헛경고 줄이기 ④: 잠깐의 오류만 남긴 수집 상태(`lastError` 끝 표시)는 늦음의 오류로 치지 않는다', async () => {
+  const file = path.join(directory, '.slack_capture_state.json');
+  const before = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+  try {
+    assert.equal((await post('/api/import', { kind: 'health', payload: { success: false, error: '일부 채널을 확인하지 못했습니다. (잠깐 오류)' } })).ok, true);
+    const soft = (await (await fetch(base + '/api/items')).json()).slackSync;
+    same([soft.error, soft.resting], [null, false]);
+    assert.equal((await post('/api/import', { kind: 'health', payload: { success: false, error: '일부 채널을 확인하지 못했습니다.' } })).ok, true);
+    same((await (await fetch(base + '/api/items')).json()).slackSync.error, '일부 채널을 확인하지 못했습니다.');
+  } finally {
+    if (before === null) fs.rmSync(file, { force: true }); else fs.writeFileSync(file, before);
+  }
+});
+
+test('헛경고 줄이기 ⑤: 시간대 값은 slack-capture.sh(CAPTURE_FROM·CAPTURE_UNTIL)와 서버(SLACK_CAPTURE_HOURS)가 같다', () => {
+  const { SLACK_CAPTURE_HOURS, slackCaptureResting } = require('./server');
+  const script = fs.readFileSync(path.join(__dirname, 'automation', 'slack-capture.sh'), 'utf8');
+  same({ from: Number(/^CAPTURE_FROM=(\d+)$/m.exec(script)[1]), until: Number(/^CAPTURE_UNTIL=(\d+)$/m.exec(script)[1]) }, SLACK_CAPTURE_HOURS);
+  assert.match(script, /if \[ "\$hour" -lt "\$CAPTURE_FROM" \] \|\| \[ "\$hour" -ge "\$CAPTURE_UNTIL" \]; then/);
+  const at = (h, m) => new Date(2026, 9, 6, h, m);
+  same([at(8, 59), at(9, 0), at(18, 59), at(19, 0), at(0, 0)].map(one => slackCaptureResting(one)), [true, false, false, true, true]);
+});
+
 test('claudeInstalled: launchd의 짧은 PATH여도 기본 설치 자리(~/.local/bin)·nvm 등의 claude를 찾는다', () => {
   const integrations = require('./integrations');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-claude-find-'));

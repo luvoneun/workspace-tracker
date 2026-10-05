@@ -10,8 +10,8 @@ const slackOAuth = require('./slack-oauth');
 const slackConnect = slackOAuth.createSlackOAuth();
 
 module.exports = function integrationsRoutes(req, res, url, ctx) {
-  const { CALENDAR_ICAL, CONFIG_PATH, FETCH_MESSAGE, SLACK_AUTH_RE, USES, attentionLive, backupStatus, calendarLive,
-    claudeReady, currentConfigFile, fetchNow, fetchStateAutomation, fetchStateLive, getAutomationStatus,
+  const { CALENDAR_ICAL, CONFIG_PATH, FETCH_MESSAGE, USES, attentionLive, backupStatus, calendarLive,
+    claudeReady, currentConfigFile, fetchNow, fetchStateAutomation, fetchStateLive, fetchStateSlack, getAutomationStatus,
     getCalendarToday, getJiraSync, getReportRefs, getSlackSync, integrationAlerts, integrations, jiraLive, liveLog,
     meetingNotesStatus, readBody, requestApply, slackFollowOn, slackFollower, slackRefreshRequest, slackSyncSuccessAt, todayLocal,
     withApplyFailure, workflows, writeMeetingNotesRequest } = ctx;
@@ -156,7 +156,7 @@ module.exports = function integrationsRoutes(req, res, url, ctx) {
       const automations = getAutomationStatus();
       const automation = key => automations.find(one => one.key === key) || null;
       state.jira.fetch = fetchStateLive(jiraLive.failure(), jiraLive.history());
-      state.slack.fetch = fetchStateAutomation(automation('slack'), SLACK_AUTH_RE);
+      state.slack.fetch = fetchStateSlack(automation('slack'));
       state.calendar.fetch = CALENDAR_ICAL ? fetchStateLive(calendarLive.failure(), calendarLive.history()) : fetchStateAutomation(automation('calendar'));
       state.meetingNotes.fetch = fetchStateAutomation(automation('tiro'));
       // 오늘 슬랙에서 들어온 항목 수(원본 링크가 슬랙이고 오늘 만든 것) — 슬랙 카드 둘째 줄.
