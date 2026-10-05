@@ -1936,6 +1936,7 @@ const SYNC_FIRST_RUN_BY = '09:30';
 //   있지 않으면(`scheduled: false`) 기다려도 읽지 않으므로 늦은 쪽(`setup`)에 넣는다.
 // - 자동 갱신은 아침 9시대에 그날 처음 돈다. 그 전(자정~아침)의 `어제 기준`은 고장이 아니라 아직 돌 차례가 아닌
 //   것이라 늦음으로 세지 않는다 — 오류가 있었거나 이틀 넘게 멈춘 것은 그대로 센다.
+// - 슬랙 수집이 쉬는 시간(`resting`)이면 늦음도 첫 읽기 기다림도 말하지 않는다(등록 안 됨은 그대로 말한다).
 const SYNC_NAMES = { slack: '슬랙 수집', calendar: '캘린더', jira: '지라' };
 function syncLag(data, { clock = nowHHMM(), now = Date.now() } = {}) {
   const out = { late: [], waiting: [] };
@@ -1950,11 +1951,13 @@ function syncLag(data, { clock = nowHHMM(), now = Date.now() } = {}) {
     if (source.neverRead && !source.error) {
       if (key === 'slack' && source.scheduled === false) {
         out.late.push({ key, name, setup: true, age: '시작 전', text: '아직 읽기 전이에요' });
-      } else {
+      } else if (!source.resting) {
         out.waiting.push(key);
       }
       return;
     }
+    // 슬랙 수집이 쉬는 시간(서버의 `resting` — 9~19시 밖)이면 늦음을 말하지 않는다 — 돌 차례가 아니다(카드는 `대기 중`).
+    if (source.resting) return;
     const stale = key === 'calendar' ? !!(source.stale || !source.lastSync) : !!source.stale;
     if (!stale) return;
     const days = source.lastSync ? -diffDays(source.lastSync) : null;

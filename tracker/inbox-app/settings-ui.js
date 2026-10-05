@@ -1327,6 +1327,8 @@ function settingsFailWords(text) {
   if (/슬랙 토큰을 읽을 수 없음/.test(raw)) return '토큰 파일을 읽지 못했어요';
   if (/설정된 채널을 읽을 수 없음/.test(raw)) return '설정에서 채널을 읽지 못했어요';
   if (/fetch 실패|ERR:/.test(raw)) return '슬랙이 응답하지 않았어요';
+  // 슬랙 수집의 잠깐 오류(시간 초과·네트워크·5xx·429)가 이어져 멈춘 것 — 연결 문제가 아니라 슬랙·인터넷이 늦은 것.
+  if (/aborted due to timeout|fetch failed|Slack HTTP (?:5\d\d|429)|Slack: ratelimited/.test(raw)) return '슬랙이 제시간에 답하지 않았어요';
   if (/35분이 넘도록|timed? ?out/i.test(raw)) return '너무 오래 걸려 멈췄어요';
   if (/캘린더 파일이 갱신되지 않았어요/.test(raw)) return '캘린더가 갱신되지 않았어요 — Claude에 구글 캘린더가 연결돼 있지 않으면 비밀 주소로 바꾸거나 Claude 커넥터에서 연결해 주세요';
   const plain = trimSummaryText(translateFailureText(raw));
@@ -1509,8 +1511,11 @@ const settingsLogItem = (card, log) => (Array.isArray(log) && log.length ? [{ la
 
 // ---------- 상태 점 + 짧은 말 ----------
 // 카드 넷과 맨 위 요약이 같은 부품이다. tone: ok 연결됨(초록) · soon 연결됨 · 곧 읽어요(흐린 초록, 천천히 숨 쉼) ·
-// late 늦어요(주황) · stop 멈췄어요(빨강) · off 연결 안 됨(회색 빈 원, 말 없음). 점은 장식이라 읽히지 않고 말이 읽힌다.
-const SETTINGS_STAT_WORD = { ok: '연결됨', soon: '연결됨', late: '늦어요', stop: '멈췄어요', off: '' };
+// late 늦어요(주황) · stop 멈췄어요(빨강) · rest 대기 중(흐린 초록 점, 회색 글자 — 슬랙 수집이 쉬는 시간) ·
+// off 연결 안 됨(회색 빈 원, 말 없음). 점은 장식이라 읽히지 않고 말이 읽힌다.
+const SETTINGS_STAT_WORD = { ok: '연결됨', soon: '연결됨', late: '늦어요', stop: '멈췄어요', rest: '대기 중', off: '' };
+// 쉬는 시간의 지금 상황 줄(서버가 `fetch.resting`·`restUntil`을 준다 — 시간대는 slack-capture.sh와 같은 값).
+const settingsRestText = (until = 9) => `지금은 쉬는 시간이에요 · ${until < 12 ? '아침' : '낮'} ${until}시에 다시 가져와요`;
 function settingsIntgStat(tone, word, sub) {
   const node = document.createElement('span');
   const dot = document.createElement('span');
@@ -1570,7 +1575,7 @@ function settingsIntgCard({ kind, name, chip, use, need, needClass = '', status 
   const state = (fetchSpec && fetchSpec.state) || {};
   let tone = connectedLook ? 'ok' : ((mark && mark.tone) || 'off');
   let detail = connectedLook ? status : '';
-  // 막힌 것(멈췄어요·늦어요)이 먼저고, 그다음 예정보다 늦음 · 첫 읽기 전 차례다.
+  // 막힌 것(멈췄어요·늦어요)이 먼저고, 그다음 쉬는 시간(대기 중) · 예정보다 늦음 · 첫 읽기 전 차례다.
   if (connectedLook && alert) {
     tone = alert.stop ? 'stop' : 'late';
     if (alert.status) detail = alert.status;
@@ -1578,6 +1583,10 @@ function settingsIntgCard({ kind, name, chip, use, need, needClass = '', status 
       const ago = settingsAgo(state.failedAt);
       detail = `읽지 못했어요${ago ? ` · ${ago}` : ''}`;
     }
+  } else if (connectedLook && state.resting) {
+    // 가져오기가 도는 시간대 밖 — 지난 실패 기록이 남아 있어도 경고가 아니라 조용한 `대기 중`(서버가 이미 실패를 거른다).
+    tone = 'rest';
+    detail = settingsRestText(state.restUntil);
   } else if (connectedLook && lag.late) {
     tone = 'late';
     detail = lag.late.text;
