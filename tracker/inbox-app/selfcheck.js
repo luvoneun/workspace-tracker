@@ -225,7 +225,7 @@ function createSelfcheck(deps) {
     const alerts = deps.alerts(config, automations);
     const automation = key => automations.find(one => one.key === key) || null;
     const fetchState = {
-      slack: deps.fetchStateAutomation(automation('slack'), deps.slackAuthRe),
+      slack: deps.fetchStateSlack ? deps.fetchStateSlack(automation('slack')) : deps.fetchStateAutomation(automation('slack'), deps.slackAuthRe),
       calendar: calendarIcal ? deps.fetchStateLive(deps.calendarFailure(), deps.calendarHistory ? deps.calendarHistory() : []) : deps.fetchStateAutomation(automation('calendar')),
       notes: deps.fetchStateAutomation(automation('tiro')),
       jira: deps.fetchStateLive(deps.jiraFailure(), deps.jiraHistory ? deps.jiraHistory() : []),

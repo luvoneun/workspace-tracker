@@ -14,6 +14,7 @@ const { DATA_FORMAT_VERSION, readDataVersion, TOO_NEW_MESSAGE } = require('./mig
 // 설정 > 연동이 쓰는 한 벌(값 확인·config 합치기·토큰 파일·문제 보고의 오류 줄).
 const integrations = require('./integrations');
 const slackAuth = require('./slack-auth');
+const { TRANSIENT_MARK: SLACK_TRANSIENT_MARK, MANUAL_MARK: SLACK_MANUAL_MARK } = require('./slack-history');
 // 설정 › 꾸미기(앱 아이콘·앱 이름·제목 — 이 맥에만).
 const personalize = require('./personalize');
 // 쉬운 말 소식(WP-J) — 소식.md 파서 + 원격(태그) 소식.md 읽기.
@@ -495,16 +496,19 @@ function getSlackSync() {
   if (!USES.slack) return { used: false };
   const statePath = path.join(process.env.WORKSPACE_DATA_DIR || __dirname, '.slack_capture_state.json');
   const scheduled = launchAgentInstalled('slack-capture') || (launchAgentInstalled('apply') && !applyLastFailure());
-  const extra = { connected: slackConnectedNow(), scheduled };
+  // 쉬는 시간(9~19시 밖)이면 늦음·첫 읽기 전을 말하지 않는다(화면 syncLag) — 돌 차례가 아니다.
+  const extra = { connected: slackConnectedNow(), scheduled, resting: slackCaptureResting() };
   if (!fs.existsSync(statePath)) return { lastSync: null, stale: true, neverRead: true, ...extra };
   try {
     const state = JSON.parse(fs.readFileSync(statePath, 'utf-8'));
     const lastSync = state.lastSuccessAt ? localDateOf(state.lastSuccessAt) : null;
     const neverRead = !state.lastSuccessAt && !state.lastError && !state.lastAttemptAt && !state.checkedAt;
+    // 잠깐의 오류만으로 실패한 회차(수집 상태 글 끝에 표시)는 오류로 치지 않는다 — 이어지면 수집 카드의 실패(연속 3회차)가 말한다.
+    const error = state.lastError && !String(state.lastError).endsWith(SLACK_TRANSIENT_MARK) ? state.lastError : null;
     return {
       lastSync, lastSuccessAt: typeof state.lastSuccessAt === 'string' ? state.lastSuccessAt : null,
-      lastAttempt: state.lastAttemptAt || state.checkedAt || null, error: state.lastError || null,
-      stale: !!state.lastError || !lastSync || lastSync < todayLocal(),
+      lastAttempt: state.lastAttemptAt || state.checkedAt || null, error,
+      stale: !!error || !lastSync || lastSync < todayLocal(),
       ...(neverRead ? { neverRead: true } : {}), ...extra,
     };
   } catch {
@@ -577,6 +581,11 @@ function parseAutomationLog(lines) {
   return events;
 }
 
+// 슬랙 수집의 실패 표시 — 블록의 **끝**에 붙은 것만 본다(메시지 내용에 같은 글이 섞여도 잘못 읽지 않게). 잠깐 오류 회차는
+// 맺음 줄 `채널 N개 확인 실패 (잠깐 오류) — 다음 회차에 다시`로 끝날 때만이다 — 채널 줄 끝의 `(잠깐 오류)`는 다른 실패와 섞일 수 있어 세지 않는다.
+const reEscape = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const SLACK_TRANSIENT_END_RE = new RegExp(`채널 \\d+개 확인 실패 ${reEscape(SLACK_TRANSIENT_MARK)} — 다음 회차에 다시(?: ${reEscape(SLACK_MANUAL_MARK)})?$`);
+const SLACK_MANUAL_END_RE = new RegExp(`${reEscape(SLACK_MANUAL_MARK)}$`);
 function getAutomationStatus() {
   const logDir = automationLogDir();
   const specs = [
@@ -596,12 +605,19 @@ function getAutomationStatus() {
     // 가장 최근부터 이어진 실패의 시각(ms, 최근 것이 앞) — "계속 실패"(failStuck)의 재료.
     // **회차 단위로** 센다 — 슬랙 수집은 채널마다 `채널 확인 실패` 한 줄을 블록 앞에 따로 남기므로, 뒤따르는 실패 블록이
     // 시작된 뒤에 적힌 한 줄은 그 회차에 속한 것으로 보고 한 번만 센다(채널 둘이 한 회차에 실패해도 1번).
+    // 그 회차들이 모두 잠깐의 오류였나(`failTransient`)와 가장 최근 실패 회차가 `지금 가져오기`였나(`failManual`)도 같이 —
+    // 슬랙 수집이 실패 줄·블록 끝에 붙이는 표시(slack-history.js)로만 읽는다. 옛 로그(표시 없음)는 둘 다 false라 예전과 같다.
     const failTimes = [];
+    let failTransient = false;
+    let failManual = false;
     let runStart = null;
     for (let i = events.length - 1; i >= 0 && events[i].kind === 'fail'; i -= 1) {
       const event = events[i];
       if (event.plain && runStart && event.time >= runStart) continue;
       runStart = event.plain ? null : (event.start || null);
+      const text = String(event.text || '');
+      if (!failTimes.length) { failTransient = SLACK_TRANSIENT_END_RE.test(text); failManual = SLACK_MANUAL_END_RE.test(text); }
+      else if (!SLACK_TRANSIENT_END_RE.test(text)) failTransient = false;
       failTimes.push(meetingNotesTime(event.time));
     }
     return {
@@ -612,6 +628,8 @@ function getAutomationStatus() {
       lastSummary: last ? last.text : null,
       recentFailures,
       failTimes,
+      failTransient,
+      failManual,
       // 연동 카드 ⋯ › 최근 기록 — 최근 10번(새것 먼저). 한 줄은 200자까지만.
       events: events.slice(-10).reverse().map(e => ({ time: e.time, kind: e.kind, text: String(e.text || '').slice(0, 200), ...(e.version ? { version: e.version } : {}) })),
       tail: lines.map(cleanLogLine).filter((l) => l.trim()).slice(-60),
@@ -892,8 +910,14 @@ function fetchStateLive(failure, history = []) {
   return { failing, auth, stuck: failing && (auth || failStuck(times)), failedAt: failure ? new Date(failure.at).toISOString() : null };
 }
 function fetchStateAutomation(automation, authRe = null) {
-  const failing = !!automation && automation.lastKind === 'fail';
-  const auth = failing && !!authRe && authRe.test(automation.lastSummary || '');
+  const failed = !!automation && automation.lastKind === 'fail';
+  const auth = failed && !!authRe && authRe.test(automation.lastSummary || '');
+  // 한 번 늦은 건 실패가 아니다 — 이어진 실패 회차가 모두 잠깐의 오류(시간 초과·네트워크·5xx·429)이고 사람이 누른 회차가
+  // 아니면, 연속 FAIL_STUCK.times(3)회차가 될 때까지 실패로 올리지 않는다(이때는 시간이 흘러도 — 밤새 안 돌아도 — 세지 않는다).
+  // 토큰 문제는 바로 올린다(DECISIONS 2026-10-06).
+  const waiting = failed && !auth && automation.failTransient === true && automation.failManual !== true
+    && (automation.failTimes || []).length < FAIL_STUCK.times;
+  const failing = failed && !waiting;
   return {
     failing,
     auth,
@@ -906,6 +930,35 @@ function fetchStateAutomation(automation, authRe = null) {
     // 멈춘 카드의 이유 한 줄(화면이 사람 말로 바꾼다). 로그 한 줄이라 200자까지만.
     summary: failing ? String(automation.lastSummary || '').slice(0, 200) : null,
   };
+}
+
+// 슬랙 수집이 도는 시간대 — slack-capture.sh의 CAPTURE_FROM·CAPTURE_UNTIL과 같은 값이다(automation.test.js가 둘을 맞춰 본다).
+// 이 밖(밤)에는 5분 주기 실행이 없으니 마지막 실패 기록이 아침까지 그대로 남는다 — 그래서 밤에는 경고 대신 `대기 중`이다.
+const SLACK_CAPTURE_HOURS = { from: 9, until: 19 };
+// 시계는 시험·픽스처만 바꿔 끼운다 — 모듈로 부르면 setSlackClockForTests, 띄운 서버는 `WORKSPACE_SLACK_TEST_HOUR`(오늘의 그 시).
+const slackClockDefault = () => {
+  const at = new Date();
+  const hour = process.env.WORKSPACE_SLACK_TEST_HOUR;
+  if (/^\d{1,2}$/.test(hour || '') && Number(hour) < 24) at.setHours(Number(hour));
+  return at;
+};
+let slackClock = slackClockDefault;
+function setSlackClockForTests(fn) { slackClock = typeof fn === 'function' ? fn : slackClockDefault; }
+function slackCaptureResting(now = slackClock()) {
+  const hour = now.getHours();
+  return hour < SLACK_CAPTURE_HOURS.from || hour >= SLACK_CAPTURE_HOURS.until;
+}
+// 슬랙 수집 카드·빨간 점·점검이 함께 쓰는 판단(fetchStateAutomation + 쉬는 시간). 쉬는 시간이면 `resting`(화면은 `대기 중`)이고
+// 지난 실패는 숨긴다 — 다만 토큰 문제와 `지금 가져오기`(사람이 방금 누른 것)의 실패는 그대로 보인다. 밤에는 돌지 않으니
+// "1시간 넘게 실패"로 멈춤이 되지 않고, 이어진 실패 횟수·토큰 문제로만 멈춘다.
+function fetchStateSlack(automation, { now = slackClock() } = {}) {
+  const state = fetchStateAutomation(automation, SLACK_AUTH_RE);
+  if (!slackCaptureResting(now)) return { ...state, resting: false };
+  const rest = { ...state, resting: true, restUntil: SLACK_CAPTURE_HOURS.from };
+  if (state.failing && (state.auth || (automation && automation.failManual === true))) {
+    return { ...rest, stuck: state.auth || (automation.failTimes || []).length >= FAIL_STUCK.times };
+  }
+  return { ...rest, failing: false, auth: false, stuck: false, claudeAuth: false, failedAt: null, summary: null };
 }
 
 // 연동마다 "지금 멈췄나" — 연동 탭의 `멈췄어요`·톱니바퀴의 빨간 점·점검이 같은 판단(`stuck` — 계속 실패 또는 토큰 문제)을 쓴다.
@@ -924,10 +977,11 @@ function slackOAuthBroken(config = currentConfigFile()) {
 }
 function integrationAlerts(config = currentConfigFile(), automations = getAutomationStatus()) {
   const stuckAutomation = (key, authRe = null) => fetchStateAutomation(automations.find(one => one.key === key) || null, authRe).stuck;
+  const slackStuck = () => fetchStateSlack(automations.find(one => one.key === 'slack') || null).stuck;
   const icalStuck = () => fetchStateLive(calendarLive.failure(), calendarLive.history()).stuck
     || (!calendarLive.current() && calendarLive.failed());
   const alerts = [];
-  if (USES.slack && (stuckAutomation('slack', SLACK_AUTH_RE) || slackOAuthBroken(config) || slackFollower.allKnownMissing(config))) alerts.push('slack');
+  if (USES.slack && (slackStuck() || slackOAuthBroken(config) || slackFollower.allKnownMissing(config))) alerts.push('slack');
   if (USES.jira && jira.connected && fetchStateLive(jiraLive.failure(), jiraLive.history()).stuck) alerts.push('jira');
   if (USES.calendar && (CALENDAR_ICAL ? icalStuck() : stuckAutomation('calendar'))) alerts.push('calendar');
   if (USES.tiro && stuckAutomation('tiro')) alerts.push('notes');
@@ -2305,7 +2359,7 @@ const selfcheck = require('./selfcheck').createSelfcheck({
   readIntegrations: config => integrations.readIntegrations(config, { claude: false }),
   automations: getAutomationStatus,
   alerts: (config, automations) => integrationAlerts(config, automations),
-  fetchStateAutomation, fetchStateLive,
+  fetchStateAutomation, fetchStateLive, fetchStateSlack,
   calendarFailure: () => calendarLive.failure(),
   calendarHistory: () => calendarLive.history(),
   jiraFailure: () => jiraLive.failure(),
@@ -2767,7 +2821,7 @@ const routeCtx = {
   aboutApp, aboutDiagnostics, requestUpdate, updateStatusView, UPDATE_MESSAGE, selfcheck,
   // 연동·자동화·백업·미팅 노트
   calendarLive, slackFollower, slackFollowOn, slackRefreshRequest, currentConfigFile, claudeReady, getSlackSync, slackSyncSuccessAt,
-  getAutomationStatus, fetchStateLive, fetchStateAutomation, SLACK_AUTH_RE, todayLocal, getReportRefs, withApplyFailure,
+  getAutomationStatus, fetchStateLive, fetchStateAutomation, fetchStateSlack, SLACK_AUTH_RE, todayLocal, getReportRefs, withApplyFailure,
   liveLog, integrationAlerts, getCalendarToday, getJiraSync, requestApply, fetchNow, FETCH_MESSAGE, backupStatus,
   meetingNotesStatus, writeMeetingNotesRequest,
   // 꾸미기
@@ -2877,7 +2931,7 @@ module.exports = {
   // WP-U 쉬는 틈에 자동 업데이트 — 판단 한 번(tick)·임시 local/·환경 끼우기(테스트·픽스처 전용, main 갈래 판단은 못 끼운다).
   autoUpdate, setAutoUpdateForTests,
   // 계속 실패(멈췄어요·빨간 점) 판단 — 같은 수치를 테스트가 고정한다.
-  failStuck, fetchStateLive, fetchStateAutomation,
+  failStuck, fetchStateLive, fetchStateAutomation, fetchStateSlack, slackCaptureResting, setSlackClockForTests, SLACK_CAPTURE_HOURS,
   // 슬랙 자동 갱신 — 가짜 요청을 끼우고 타이머 한 번(tick)을 직접 돌려 보는 테스트 전용 길.
   slackRefresher, setSlackRefreshFetchForTests, integrationAlerts, SLACK_AUTH_RE,
 };
