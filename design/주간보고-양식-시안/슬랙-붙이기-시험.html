@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>슬랙 붙이기 시험</title>
+<style>
+:root{--bg:#fafafa;--fg:#1f2328;--dim:#6b7280;--line:#e5e7eb;--card:#fff;--acc:#2563eb}
+@media (prefers-color-scheme:dark){:root{--bg:#1e222a;--fg:#e6e8eb;--dim:#9aa1ab;--line:#353b45;--card:#262b34;--acc:#6ea0ff}}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 -apple-system,system-ui,sans-serif}
+main{max-width:760px;margin:40px auto;padding:0 16px}
+h1{font-size:20px;margin:0 0 4px}
+p{margin:4px 0;color:var(--dim)}
+ol.steps{color:var(--fg);padding-left:20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:16px 0}
+.hd{display:flex;align-items:center;gap:12px}
+.hd b{font-size:16px}
+.hd span{color:var(--dim);font-size:13px;flex:1}
+button{font:inherit;padding:6px 14px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer}
+button:hover{border-color:var(--acc)}
+pre{margin:10px 0 0;font:13px/1.5 ui-monospace,Menlo,monospace;color:var(--dim);white-space:pre-wrap}
+.src{position:absolute;left:-9999px;top:0}
+.ok{color:var(--acc);font-size:13px;min-width:5em}
+</style>
+</head>
+<body>
+<main>
+<h1>슬랙 붙이기 시험</h1>
+<p>같은 보고를 네 가지 방식으로 복사해요. 어느 것이 슬랙에서 제대로 보이는지 고르는 시험이에요.</p>
+<ol class="steps">
+  <li>아래 카드의 <b>복사</b>를 눌러요.</li>
+  <li>슬랙에서 <b>나에게 보내는 DM</b>(내 이름 채팅)의 입력칸에 붙여 넣어요. <b>보내지 않아도 돼요</b> — 입력칸에 보이는 모양만 보면 돼요.</li>
+  <li>입력칸을 비우고 다음 카드로. 네 개를 다 본 뒤 "가·나·다·라 중 무엇이 좋았는지"만 알려 주세요.</li>
+</ol>
+
+<div class="card">
+  <div class="hd"><b>가</b><span>지금 앱 방식 — 공백 두 칸 들여쓰기</span><em class="ok" id="ok-a"></em><button data-copy="a">복사</button></div>
+  <pre id="pre-a"></pre>
+</div>
+<div class="card">
+  <div class="hd"><b>나</b><span>글머리 • 를 글자로 넣기</span><em class="ok" id="ok-b"></em><button data-copy="b">복사</button></div>
+  <pre id="pre-b"></pre>
+</div>
+<div class="card">
+  <div class="hd"><b>다</b><span>슬랙이 알아듣는 진짜 목록으로 넣기(서식 있는 글)</span><em class="ok" id="ok-c"></em><button data-copy="c">복사</button></div>
+  <p>붙이면 슬랙의 글머리 목록(들여쓰기 단계 포함)으로 바뀌는지 봐 주세요.</p>
+</div>
+<div class="card">
+  <div class="hd"><b>라</b><span>들여쓰기 없이 빈 줄로만 나누기</span><em class="ok" id="ok-d"></em><button data-copy="d">복사</button></div>
+  <pre id="pre-d"></pre>
+</div>
+</main>
+
+<div class="src" id="src-c" contenteditable="false"></div>
+
+<script>
+const R = [
+  { h: '[완료]', p: [
+    { n: '결제 리뉴얼 (10/15 배포 목표)', l: ['실패 사유 문구·환불 정책 문서 작성', '환불 API 스펙 요청, QA 범위 보강'] },
+    { n: '운영툴 (진행 중)', l: ['권한 확인'] },
+    { n: '가입 개선', l: ['팔로업: QA, 배포 일정 체크'] },
+  ], tail: ['금요일 휴가'] },
+  { h: '[진행 예정]', p: [
+    { n: '결제 리뉴얼', l: ['디자인 리뷰 일정 조율'] },
+    { n: '운영툴', l: ['알림 설정 요구사항 정리'] },
+  ], tail: [] },
+];
+const textA = () => R.map(s => [s.h, '', ...s.p.flatMap(p => [p.n, ...p.l.map(x => '  ' + x), '']), ...s.tail].join('\n').trimEnd()).join('\n\n\n');
+const textB = () => R.map(s => [s.h, '', ...s.p.flatMap(p => ['• ' + p.n, ...p.l.map(x => '    ◦ ' + x)]), ...s.tail.map(t => '• ' + t)].join('\n')).join('\n\n');
+const textD = () => R.map(s => [s.h, '', ...s.p.flatMap(p => [p.n, ...p.l, '']), ...s.tail].join('\n').trimEnd()).join('\n\n\n');
+const esc = t => t.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+const htmlC = () => R.map(s => `<p><b>${esc(s.h)}</b></p><ul>${s.p.map(p => `<li>${esc(p.n)}<ul>${p.l.map(x => `<li>${esc(x)}</li>`).join('')}</ul></li>`).join('')}${s.tail.map(t => `<li>${esc(t)}</li>`).join('')}</ul>`).join('');
+const textC = () => textB();
+
+document.getElementById('pre-a').textContent = textA();
+document.getElementById('pre-b').textContent = textB();
+document.getElementById('pre-d').textContent = textD();
+
+function flash(k, msg) { const el = document.getElementById('ok-' + k); el.textContent = msg; setTimeout(() => { el.textContent = ''; }, 2500); }
+
+function copyPlain(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  let ok = false; try { ok = document.execCommand('copy'); } catch {}
+  ta.remove(); return ok;
+}
+function copyRich(html, text) {
+  let ok = false;
+  const onCopy = e => { e.clipboardData.setData('text/html', html); e.clipboardData.setData('text/plain', text); e.preventDefault(); ok = true; };
+  document.addEventListener('copy', onCopy);
+  try { document.execCommand('copy'); } catch {}
+  document.removeEventListener('copy', onCopy);
+  return ok;
+}
+document.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', () => {
+  const k = b.dataset.copy;
+  const ok = k === 'c' ? copyRich(htmlC(), textC()) : copyPlain({ a: textA, b: textB, d: textD }[k]());
+  flash(k, ok ? '복사했어요' : '복사 실패');
+}));
+</script>
+</body>
+</html>

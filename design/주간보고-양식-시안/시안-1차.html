@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>주간보고 양식 시안</title>
+<style>
+/* 토큰은 tracker/inbox-app/ui.css 의 값 그대로다(새 색·새 치수 없음). 글꼴은 맥에 깔린 것만 쓴다(외부에서 받지 않는다). */
+:root {
+  color-scheme: light dark;
+  --bg: #f2f4f6; --surface: #ffffff; --surface-line: transparent; --field: #f2f4f6; --hover: #f4f6f8; --press: #e9edf1;
+  --border: #e3e7eb; --hair: #eef1f4; --check-line: #8b95a1;
+  --text: #191f28; --muted: #4e5968; --dim: #636c78;
+  --accent: #3182f6; --accent-strong: #1b64da; --accent-text: #1b64da; --accent-soft: #e8f3ff; --on-fill: #ffffff;
+  --sel: #eef5ff; --sel-hover: #e6f1ff;
+  --warn: #b0560a; --success: #0d7a4a; --neutral-bg: #eef1f4;
+  --pj-0: #4f83e8; --pj-1: #2f9b87; --pj-2: #c0842b;
+  --soft: 0 1px 3px rgba(25, 31, 40, 0.04), 0 8px 24px rgba(25, 31, 40, 0.06);
+  --shadow: 0 1px 2px rgba(25, 31, 40, 0.06);
+  --pop: 0 12px 36px rgba(25, 31, 40, 0.14), 0 2px 8px rgba(25, 31, 40, 0.06);
+  --r: 20px; --r-sm: 12px; --r-xs: 10px;
+  --fs-cap: 12px; --fs-sm: 13px; --fs-body: 14px; --fs-md: 15px; --fs-lg: 16px;
+  --h-xs: 22px; --h-sm: 28px; --h-md: 32px; --h-lg: 42px;
+  --ease: cubic-bezier(0.22, 0.8, 0.3, 1);
+  --t-press: 100ms; --t-fast: 140ms; --t-tint: 170ms;
+  --font: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15181e; --surface: #1e222a; --surface-line: #2b313b; --field: #262b34; --hover: #272c35; --press: #303641;
+    --border: #333a45; --hair: #2b313b; --check-line: #636e7d;
+    --text: #eaedf1; --muted: #a8b1bd; --dim: #8b95a1;
+    --accent: #4b91f1; --accent-strong: #4b91f1; --accent-text: #7aa9ff; --accent-soft: #1b2a44; --on-fill: #0b1020;
+    --sel: #1c2533; --sel-hover: #212c3d;
+    --warn: #ffbe6b; --success: #6ddba0; --neutral-bg: #2a2f38;
+    --pj-0: #7aa2ff; --pj-1: #57c6ad; --pj-2: #dfa85c;
+    --soft: 0 1px 3px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.3);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+    --pop: 0 12px 36px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15181e; --surface: #1e222a; --surface-line: #2b313b; --field: #262b34; --hover: #272c35; --press: #303641;
+  --border: #333a45; --hair: #2b313b; --check-line: #636e7d;
+  --text: #eaedf1; --muted: #a8b1bd; --dim: #8b95a1;
+  --accent: #4b91f1; --accent-strong: #4b91f1; --accent-text: #7aa9ff; --accent-soft: #1b2a44; --on-fill: #0b1020;
+  --sel: #1c2533; --sel-hover: #212c3d;
+  --warn: #ffbe6b; --success: #6ddba0; --neutral-bg: #2a2f38;
+  --pj-0: #7aa2ff; --pj-1: #57c6ad; --pj-2: #dfa85c;
+  --soft: 0 1px 3px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.3);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --pop: 0 12px 36px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  margin: 0; background: var(--bg); color: var(--text); font-family: var(--font); font-size: var(--fs-body);
+  line-height: 1.55; word-break: keep-all; overflow-wrap: break-word; -webkit-font-smoothing: antialiased;
+}
+button { transition: background-color var(--t-tint) var(--ease), color var(--t-tint) var(--ease), scale var(--t-press) var(--ease); }
+button:active:not(:disabled) { scale: 0.97; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.d-i { width: 14px; height: 14px; display: block; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.d-pjdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--pj-0); flex: none; align-self: center; }
+.d-pjdot[data-pj="1"] { background: var(--pj-1); }
+.d-pjdot[data-pj="2"] { background: var(--pj-2); }
+
+/* ---------- 시안 페이지 틀(앱 화면이 아닌 설명 부분) ---------- */
+.wrap { max-width: 1440px; margin: 0 auto; padding: 28px 20px 80px; }
+.top { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.top .sp { margin-left: auto; }
+h1 { margin: 0 0 4px; font-size: 24px; font-weight: 700; letter-spacing: -0.025em; }
+h2 { margin: 48px 0 4px; font-size: 18px; font-weight: 700; letter-spacing: -0.015em; }
+.lead { margin: 0 0 16px; max-width: 760px; color: var(--muted); font-size: var(--fs-md); }
+.lead b, .cap b { color: var(--text); font-weight: 600; }
+.sum { margin: 16px 0 0; padding: 16px 24px; max-width: 760px; background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r); box-shadow: var(--soft); }
+.sum ol { margin: 0; padding-left: 20px; font-size: var(--fs-md); }
+.sum li { margin: 4px 0; }
+.bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 12px; }
+.bar .note { color: var(--dim); font-size: var(--fs-sm); }
+.cap { margin: 0 0 12px; color: var(--muted); font-size: 13.5px; }
+.fr { padding: 16px; border: 1px solid var(--border); border-radius: var(--r); }
+.snaps { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.snap { background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r); box-shadow: var(--soft); padding: 20px 24px 24px; }
+.snap > h3 { margin: 0 0 4px; font-size: var(--fs-lg); font-weight: 700; letter-spacing: -0.01em; }
+.snap .st { margin: 16px 0 4px; font-size: var(--fs-cap); font-weight: 600; color: var(--dim); }
+.snap .stage { position: relative; }
+.snap .stage.has-menu { min-height: 236px; }
+.snap .stage.is-tall { min-height: 348px; }
+.two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+
+/* ---------- 앱 부품(ui.css · report-ui.css 와 같은 값) ---------- */
+.d-seg { display: inline-flex; padding: 3px; gap: 2px; background: var(--neutral-bg); border-radius: var(--r-sm); }
+.d-seg button { height: var(--h-md); padding: 0 14px; border: 0; border-radius: 9px; background: none; font-family: inherit; font-size: 13.5px; font-weight: 600; color: var(--muted); cursor: pointer; }
+.d-seg button:hover { color: var(--text); }
+.d-seg button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.d-btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 34px; padding: 0 13px; border: 0; border-radius: var(--r-xs); background: var(--neutral-bg); color: var(--muted); font-family: inherit; font-size: 13.5px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.d-btn:hover { background: var(--hover); color: var(--text); }
+.d-btn.sm { height: var(--h-md); padding: 0 12px; font-size: var(--fs-sm); }
+.d-btn.pri { height: var(--h-lg); padding: 0 20px; border-radius: var(--r-sm); background: var(--accent-strong); color: var(--on-fill); font-size: 14.5px; }
+.d-btn.pri:hover { background: var(--accent-strong); color: var(--on-fill); filter: brightness(1.08); }
+.d-btn.acc { background: var(--accent-soft); color: var(--accent-text); }
+.d-btn.acc:hover { background: var(--accent-strong); color: var(--on-fill); }
+.d-link { border: 0; background: none; padding: 0; cursor: pointer; font-family: inherit; font-size: var(--fs-sm); font-weight: 600; color: var(--accent-text); border-radius: 4px; }
+.d-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+.d-headnum { margin-left: auto; height: var(--h-sm); padding: 0 6px; border: 0; border-radius: var(--r-xs); background: none; color: var(--dim); font: inherit; font-size: var(--fs-sm); font-weight: 500; cursor: pointer; white-space: nowrap; }
+.d-headnum:hover { background: var(--hover); color: var(--accent-text); }
+.d-headnum:disabled { cursor: default; color: var(--dim); background: none; }
+.d-more { width: 28px; height: var(--h-sm); display: grid; place-items: center; flex: none; padding: 0; border: 0; border-radius: var(--r-xs); background: none; color: var(--dim); cursor: pointer; }
+.d-more:hover { background: var(--hover); color: var(--text); }
+.d-more .d-i { fill: currentColor; stroke: none; }
+.d-din { width: 100%; min-height: 38px; padding: 10px 14px; border: 0; border-radius: var(--r-sm); background: var(--field); color: var(--text); font-family: inherit; font-size: var(--fs-body); line-height: 1.5; }
+.d-din:focus, .d-din.is-focus { outline: none; background: var(--surface); box-shadow: 0 0 0 2px var(--accent); }
+.d-menulist { width: 304px; max-width: calc(100vw - 24px); display: flex; flex-direction: column; gap: 1px; padding: 6px; text-align: left; background: var(--surface); border: 1px solid var(--surface-line); border-radius: 18px; box-shadow: var(--pop); }
+.d-menulist.is-still { position: absolute; right: 0; top: 32px; z-index: 5; }
+.d-mitem { display: flex; align-items: center; width: 100%; height: 38px; padding: 0 12px; border: 0; border-radius: var(--r-xs); background: none; color: var(--text); font-family: inherit; font-size: var(--fs-body); font-weight: 500; text-align: left; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.d-mitem:hover, .d-mitem.is-point { background: var(--hover); }
+.d-mitem.k-dim { color: var(--dim); }
+.d-msep { display: block; height: 1px; background: var(--hair); margin: 4px 2px; }
+.d-toast { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; margin-top: 16px; padding: 12px 12px 12px 18px; background: var(--surface); color: var(--text); border: 1px solid var(--surface-line); border-radius: 16px; box-shadow: var(--pop); font-size: var(--fs-body); }
+.d-grp { display: flex; align-items: center; gap: 8px; height: var(--h-md); padding: 0 10px; color: var(--muted); font-size: 14.5px; font-weight: 600; }
+.d-grp .n { font-weight: 500; color: var(--dim); font-size: var(--fs-sm); }
+.d-wcb { appearance: none; -webkit-appearance: none; margin: 0; position: relative; width: 20px; height: 20px; border: 1.5px solid var(--check-line); border-radius: 6px; background: var(--surface); }
+
+/* 주간요약 세 칸 */
+.rp-grid { display: grid; grid-template-columns: 236px minmax(0, 1fr) 356px; gap: 16px; align-items: start; }
+.rp-grid.no-weeks { grid-template-columns: minmax(0, 1fr) 356px; }
+.rp-grid > * { min-width: 0; }
+.rp-weeks { background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r); box-shadow: var(--soft); padding: 10px; }
+.rp-wk { display: grid; gap: 0; min-height: 48px; padding: 6px 10px; border-radius: 12px; align-content: center; }
+.rp-wk .nm { font-size: 14.5px; font-weight: 500; }
+.rp-wk .rg { font-size: 12.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.rp-wk[aria-current="true"] { background: var(--sel); }
+.rp-wk[aria-current="true"] .nm { color: var(--accent-text); font-weight: 600; }
+.rp-doc { background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r); box-shadow: var(--soft); padding: 28px 32px 48px; }
+.rp-body { max-width: 720px; }
+.rp-hd { display: flex; align-items: baseline; gap: 8px; margin-bottom: 2px; flex-wrap: wrap; }
+.rp-hd .rp-acts { display: flex; align-items: center; gap: 4px; margin-left: auto; align-self: center; }
+.rp-hd .rp-acts .d-headnum { margin-left: 0; }
+.rp-title { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+.rp-hd .sub { color: var(--dim); font-size: 13.5px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.rp-hint { margin: 8px 0 0; font-size: var(--fs-sm); color: var(--dim); }
+.rp-top { display: grid; gap: 6px; margin: 12px 0 4px; }
+.rp-status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 8px 12px; border-radius: var(--r-sm); background: var(--sel); color: var(--text); font-size: 13.5px; }
+.rp-status .d-link { margin-left: auto; min-height: var(--h-sm); }
+.rp-h { margin: 30px 0 0; padding-top: 12px; border-top: 1px solid var(--hair); font-size: 12.5px; font-weight: 600; color: var(--dim); letter-spacing: 0.01em; }
+.rp-body > .rp-h:first-of-type, .rp-sec:first-of-type > .rp-h, .snap .rp-h { border-top: 0; padding-top: 0; margin-top: 16px; }
+.snap .rp-h { margin-top: 0; }
+.rp-pj { display: flex; align-items: baseline; gap: 8px; margin: 18px 0 2px; font-size: var(--fs-lg); font-weight: 700; letter-spacing: -0.01em; color: var(--text); }
+.rp-pj .ac { align-self: center; margin-left: auto; position: relative; opacity: 0; transition: opacity var(--t-fast) var(--ease); }
+.rp-pj:hover .ac, .rp-pj:focus-within .ac, .rp-pj.is-hover .ac { opacity: 1; }
+.rp-rename { border: 0; background: none; padding: 0 4px; margin: 0 0 0 -4px; border-radius: var(--r-xs); color: inherit; font: inherit; letter-spacing: inherit; text-align: left; cursor: text; overflow-wrap: anywhere; }
+.rp-rename:hover, .rp-rename:focus-visible, .rp-rename.is-hover, .rp-s .rp-edit:hover, .rp-s .rp-edit:focus-visible {
+  background: var(--hover); text-decoration: underline; text-decoration-color: var(--border); text-underline-offset: 4px;
+}
+.rp-s .rp-edit { border-radius: var(--r-xs); cursor: text; padding: 0 2px; margin: 0 -2px; }
+.rp-s .rp-edit:focus { outline: none; }
+.rp-s .rp-edit:focus-visible { outline: 2px solid var(--accent); }
+.rp-ren { display: grid; gap: 4px; flex: 1 1 auto; max-width: 520px; }
+.rp-ren .d-din { min-height: 36px; font-size: inherit; font-weight: inherit; letter-spacing: inherit; }
+.rp-help { margin-top: 4px; font-size: 12.5px; font-weight: 400; letter-spacing: 0; color: var(--dim); }
+.rp-s { position: relative; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto auto; align-items: start; gap: 4px 8px; padding: 4px 8px 4px 4px; margin-left: -4px; border-radius: var(--r-xs); }
+.rp-s .bu { justify-self: center; color: var(--dim); font-size: 15.5px; line-height: 1.65; }
+.rp-s .tx { font-size: 15.5px; line-height: 1.65; word-break: keep-all; overflow-wrap: anywhere; }
+.rp-s.is-sub { margin-left: 18px; }
+.rp-s.is-sub .bu { font-size: var(--fs-sm); line-height: 1.75; }
+.rp-s.is-sub .tx { font-size: 13.5px; line-height: 1.6; color: var(--muted); }
+.rp-s.is-hit { background: var(--sel); }
+.rp-s .ac { position: relative; display: flex; align-items: center; gap: 2px; padding-top: 2px; opacity: 0; pointer-events: none; transition: opacity var(--t-fast) var(--ease); }
+.rp-s:hover .ac, .rp-s:focus-within .ac, .rp-s.is-hover .ac { opacity: 1; pointer-events: auto; }
+.rp-s .rp-foldtoggle { display: inline-flex; align-items: center; gap: 2px; height: var(--h-sm); margin-left: 6px; padding: 0 6px; border: 0; border-radius: var(--r-xs); background: none; color: var(--dim); font-family: inherit; font-size: 12.5px; font-weight: 600; white-space: nowrap; cursor: pointer; vertical-align: middle; }
+.rp-s .rp-foldtoggle .d-i { transition: transform var(--t-fast) var(--ease); }
+.rp-s .rp-foldtoggle[aria-expanded="true"] .d-i { transform: rotate(90deg); }
+.rp-s .rp-foldtoggle:hover { background: var(--hover); color: var(--text); }
+.rp-ta { display: block; width: 100%; resize: none; padding: 10px 14px; border: 0; border-radius: var(--r-sm); background: var(--surface); color: var(--text); font-family: inherit; font-size: 15.5px; line-height: 1.65; box-shadow: 0 0 0 2px var(--accent); }
+.rp-ta:focus { outline: none; }
+.rp-s.is-add .bu { color: var(--dim); font-weight: 600; }
+.rp-pjadd { border: 0; background: none; min-height: var(--h-sm); padding: 0 4px; margin-left: -4px; border-radius: var(--r-xs); color: var(--dim); font-family: inherit; font-size: 13.5px; font-weight: 500; cursor: pointer; }
+.rp-pjadd:hover { background: var(--hover); color: var(--text); }
+/* 칸 맨 아래 `+ 한 줄` — 그 칸에 손이 닿거나 초점이 들어올 때만(자리는 그대로) */
+.rp-sec .rp-s.is-add { opacity: 0; transition: opacity var(--t-fast) var(--ease); }
+.rp-sec:hover .rp-s.is-add, .rp-sec:focus-within .rp-s.is-add, .rp-s.is-add.is-open { opacity: 1; }
+.rp-sep { height: 16px; }
+.rp-add { display: flex; align-items: center; gap: 8px; height: 48px; margin-top: 4px; padding: 0 14px; border-radius: var(--r-sm); color: var(--dim); font-size: var(--fs-md); }
+.rp-add .pk { font-size: var(--fs-sm); font-weight: 500; }
+
+.rp-slack { background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r); box-shadow: var(--soft); padding: 18px 20px 20px; }
+.rp-slacktop { display: flex; align-items: center; gap: 8px; min-height: var(--h-lg); margin-bottom: 6px; }
+.rp-slackhd { font-size: var(--fs-md); font-weight: 700; letter-spacing: -0.01em; white-space: nowrap; }
+.rp-slacktop .d-btn { margin-left: 0; }
+.rp-secs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 16px; margin: 2px 0 12px; }
+.rp-gp { display: inline-flex; align-items: center; gap: 3px; min-height: var(--h-sm); max-width: 100%; padding: 0 4px; margin-left: -4px; border: 0; border-radius: var(--r-xs); background: none; color: var(--text); font-family: inherit; font-size: var(--fs-sm); font-weight: 500; cursor: pointer; }
+.rp-gp:hover { background: var(--hover); }
+.rp-gp .k { color: var(--dim); margin-right: 2px; }
+.rp-gp .d-i { width: 13px; height: 13px; transform: rotate(90deg); color: var(--dim); }
+.rp-jchk { display: inline-flex; align-items: center; gap: 7px; min-height: var(--h-sm); font-size: var(--fs-sm); font-weight: 500; }
+.rp-slackbox { font-size: 13.5px; line-height: 1.7; word-break: keep-all; overflow-wrap: anywhere; white-space: pre-wrap; }
+.rp-slackbox .title { font-weight: 700; font-size: 14.5px; }
+.rp-slackbox .section, .rp-slackbox .project { font-weight: 700; }
+.rp-slackbox .item { padding-left: 14px; text-indent: -14px; }
+.rp-slackbox .is-hit { background: var(--sel); border-radius: 4px; }
+
+/* ---------- 새로 생기는 것(기존 토큰만 씀) ---------- */
+/* 줄여 보기 — 제안을 지금 글 옆에 나란히. 제안 판은 고른 줄과 같은 --sel, 모서리 --r-sm. */
+.rp-cmp { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.rp-cmp .lb { margin: 4px 0; font-size: 12.5px; font-weight: 600; color: var(--dim); }
+.rp-prop { padding: 8px 12px 12px; border-radius: var(--r-sm); background: var(--sel); }
+.rp-prop .rp-s { margin-left: -4px; padding-right: 0; }
+.rp-prop .n { margin-left: 6px; font-size: 12.5px; font-weight: 600; color: var(--dim); white-space: nowrap; }
+.rp-prop .acts { display: flex; gap: 8px; margin-top: 8px; }
+.rp-prop .d-btn:not(.acc) { background: var(--surface); }
+.rp-wait { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: var(--fs-sm); color: var(--muted); }
+.rp-wait .d-link { margin-left: auto; white-space: nowrap; }
+.rp-spin { width: 12px; height: 12px; flex: none; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: rp-turn 800ms linear infinite; }
+@keyframes rp-turn { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .rp-spin { animation: none; } * { transition: none !important; } }
+
+@media (max-width: 1280px) {
+  .rp-grid { grid-template-columns: 208px minmax(0, 1fr) 312px; gap: 14px; }
+  .rp-grid.no-weeks { grid-template-columns: minmax(0, 1fr) 312px; }
+  .rp-doc { padding: 24px 26px 40px; }
+  .rp-slacktop { flex-wrap: wrap; }
+}
+@media (max-width: 1120px) {
+  .rp-grid { grid-template-columns: 196px minmax(0, 1fr); }
+  .rp-grid.no-weeks { grid-template-columns: minmax(0, 1fr); }
+  .rp-slack { grid-column: 1 / -1; }
+  .rp-slackbox { max-width: 720px; }
+  .snaps { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+</head>
+<body>
+<main class="wrap">
+
+<div class="top">
+  <div>
+    <h1>주간보고 양식 시안</h1>
+    <p class="lead">주간요약 탭의 세 칸(주차 목록 · 보고 문서 · 슬랙 미리보기)은 그대로 두고, 문서와 슬랙 글의 내용 모양만 바꿔요. 아래 데이터는 전부 가짜예요.</p>
+  </div>
+  <div class="sp d-seg" role="group" aria-label="화면 색" data-seg="theme">
+    <button type="button" data-v="" aria-pressed="true">자동</button>
+    <button type="button" data-v="light" aria-pressed="false">밝게</button>
+    <button type="button" data-v="dark" aria-pressed="false">어둡게</button>
+  </div>
+</div>
+
+<section class="sum" aria-label="무엇이 바뀌나">
+  <ol>
+    <li><b>칸이 다섯에서 둘로</b> — 한 일(<span data-bound="done">[완료]</span>)과 할 일(<span data-bound="plan">[진행 예정]</span>). 프로젝트 이름 아래 짧은 줄 두세 개로 적어요.</li>
+    <li><b>할 일 칸은 미리 채워져요</b> — 빈칸에서 쓰지 않고, 채워진 줄에서 덜어 내요.</li>
+    <li><b>줄여 보기</b>를 누를 때만 줄인 제안이 지금 글 옆에 뜨고, 받아들인 것만 보고에 들어가요.</li>
+  </ol>
+</section>
+
+<h2>1. 지금과 바뀐 뒤</h2>
+<p class="lead">같은 한 주(업무 14개)예요. 버튼으로 바꿔 보세요. 바뀐 뒤 화면에서는 글자를 누르면 그 자리에서 고쳐지고, <b>· N건</b>을 누르면 묶인 원래 줄이 펼쳐져요.</p>
+<div class="bar">
+  <div class="d-seg" role="group" aria-label="보기" data-seg="s1">
+    <button type="button" data-v="now" aria-pressed="false">지금</button>
+    <button type="button" data-v="new" aria-pressed="true">바뀐 뒤</button>
+  </div>
+  <span class="note" id="s1Note"></span>
+</div>
+<div class="fr">
+  <div class="rp-grid" id="s1"></div>
+</div>
+
+<h2>2. 묶음 ① 양식 — 세부 조작</h2>
+<p class="lead">늘 떠 있는 버튼은 늘리지 않아요. 고치는 법은 글자를 누르는 것 하나, 줄 동작은 손을 올릴 때 보이는 ⋯ 하나예요. 아래는 그 순간을 멈춰 놓은 모습이에요.</p>
+<div class="snaps" id="s2"></div>
+
+<h2>3. 묶음 ② 할 일 칸 미리 채우기</h2>
+<p class="lead">아직 안 끝난 업무 가운데 <b>진행 중인 것 · 실행일이 다음 주인 것 · 기한이 다음 주 안인 것</b>이 프로젝트별로 먼저 들어와 있어요. 필요 없는 줄만 덜어 내요. 덜어 낸 줄은 다시 들어오지 않고, 직접 적은 줄은 그대로 남아요.</p>
+<div class="snaps" id="s3"></div>
+
+<h2>4. 묶음 ③ 줄여 보기</h2>
+<p class="lead">슬랙 미리보기 카드 머리의 <b>줄여 보기</b>를 누를 때만 돌아요. 제안은 지금 글 옆에 나란히 뜨고, 바꾸기 전에는 보고 글에 닿지 않아요. 아래 단계 버튼으로 넘겨 보거나 화면 안의 버튼을 직접 눌러 보세요.</p>
+<div class="bar">
+  <div class="d-seg" role="group" aria-label="단계" data-seg="s4">
+    <button type="button" data-v="idle" aria-pressed="true">처음</button>
+    <button type="button" data-v="run" aria-pressed="false">도는 중</button>
+    <button type="button" data-v="prop" aria-pressed="false">제안이 옴</button>
+    <button type="button" data-v="done" aria-pressed="false">받아들인 뒤</button>
+    <button type="button" data-v="fail" aria-pressed="false">실패</button>
+  </div>
+  <span class="note" id="s4Note"></span>
+</div>
+<div class="fr">
+  <div class="rp-grid no-weeks" id="s4"></div>
+</div>
+
+</main>
+
+<script>
+(() => {
+  const $ = (s, r = document) => r.querySelector(s);
+  const MORE = '<button class="d-more" type="button" aria-label="더보기"><svg class="d-i" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="3.2" r="1.05"/><circle cx="8" cy="8" r="1.05"/><circle cx="8" cy="12.8" r="1.05"/></svg></button>';
+  const CHEV = '<svg class="d-i" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg>';
+
+  /* ---------- 가짜 한 주 ---------- */
+  const PAY = { key: 'pay', name: '결제 리뉴얼', dot: 0,
+    raw: ['결제 실패 사유 문구 초안 작성', '환불 정책 문서 1차 작성', '환불 API 스펙 백엔드에 요청', 'QA 범위에 부분 환불 케이스 추가'],
+    sum: [{ t: '실패 사유 문구·환불 정책 문서 작성', ev: [0, 1] }, { t: '환불 API 스펙 요청, QA 범위 보강', ev: [2, 3] }] };
+  const JOIN = { key: 'join', name: '가입 개선', dot: 1,
+    raw: ['가입 퍼널 이탈 지표 확인', '본인 인증 단계 문의 답변', '약관 동의 화면 문구 검토', '가입 완료 메일 문구 확인'],
+    sum: [{ t: '퍼널 이탈 지표 확인, 인증 문의 답변', ev: [0, 1] }, { t: '약관 동의 화면·완료 메일 문구 검토', ev: [2, 3] }] };
+  const DECISION = '부분 환불은 1차 범위에서 제외';
+  const ANSWERED = '환불 수수료는 기존 정책 유지 (테스터B 답변)';
+  const WAITING = '권한 등급 기준 테스터C에게 확인 요청';
+
+  /* ---------- 문서 조각 ---------- */
+  const fold = (n) => `<button class="rp-foldtoggle" type="button" aria-expanded="false" aria-label="묶인 줄 ${n}건 펼치기">${CHEV}· ${n}건</button>`;
+  function row(text, o = {}) {
+    const cls = ['rp-s', o.sub && 'is-sub', o.hover && 'is-hover', o.hit && 'is-hit'].filter(Boolean).join(' ');
+    const ev = o.ev ? `<div class="rp-fold" hidden>${o.ev.map((t) => row(t, { sub: true })).join('')}</div>` : '';
+    return `<div class="${cls}"${o.title ? ` title="${o.title}"` : ''}><span class="bu" aria-hidden="true">${o.sub ? '◦' : '•'}</span>`
+      + `<div class="tx"><span class="rp-edit" tabindex="0" role="button">${text}</span>${o.ev ? fold(o.ev.length) : ''}</div>`
+      + `<span class="ac">${MORE}${o.menu || ''}</span></div>${ev}`;
+  }
+  const pj = (name, dot, o = {}) => `<div class="rp-pj${o.hover ? ' is-hover' : ''}">${dot == null ? '' : `<span class="d-pjdot" data-pj="${dot}"></span>`}`
+    + (o.fixed ? `<span>${name}</span>` : `<button class="rp-rename" type="button" title="누르면 이름을 고쳐요">${name}</button>`)
+    + (o.fixed ? '' : `<span class="ac">${MORE}${o.menu || ''}</span>`) + '</div>';
+  const secName = (text, bind) => `<h3 class="rp-h"><button class="rp-rename" type="button" data-bind="${bind}" title="누르면 칸 이름을 고쳐요">${text}</button></h3>`;
+  const plainH = (text) => `<h3 class="rp-h">${text}</h3>`;
+  const addLine = (o = {}) => `<div class="rp-s is-add${o.open ? ' is-open' : ''}"><span class="bu" aria-hidden="true">+</span><div class="tx"><button class="rp-pjadd" type="button">한 줄</button></div></div>`;
+  const menu = (items) => `<div class="d-menulist is-still" role="menu">${items.map((i) => i === '-' ? '<span class="d-msep"></span>'
+    : `<button class="d-mitem${i.point ? ' is-point' : ''}${i.dim ? ' k-dim' : ''}" type="button" role="menuitem">${i.t}</button>`).join('')}</div>`;
+  const sumRows = (g) => g.sum.map((s) => row(s.t, { ev: s.ev.map((i) => g.raw[i]) })).join('');
+  const rawRows = (g) => g.raw.map((t) => row(t)).join('');
+  const head = (o = {}) => `<div class="rp-hd"><span class="rp-title"><button class="rp-rename" type="button">이번 주</button></span><span class="sub">9/28 ~ 10/4</span>`
+    + `<span class="rp-acts"><button class="d-headnum" type="button">다음 주 계획</button>${MORE}</span></div>${o.status || ''}`;
+  const quiet = () => plainH('새로 정해진 것')
+    + '<p class="rp-hint">여기부터는 슬랙 글에 들어가지 않아요. 넣을 줄은 ⋯에서 슬랙 글에 넣기를 눌러요.</p>'
+    + pj(PAY.name, 0) + row(DECISION)
+    + plainH('확인 완료') + pj(PAY.name, 0) + row(ANSWERED)
+    + plainH('확인 대기') + pj('운영툴', 2) + row(WAITING);
+
+  /* ---------- 슬랙 글 ---------- */
+  function slackBox(lines) {
+    return '<div class="rp-slackbox">' + lines.map((l) => l === '' ? '\n'
+      : `<div class="${l.c}${l.hit ? ' is-hit' : ''}"${l.b ? ` data-bound="${l.b}"` : ''}>${l.t}</div>`).join('') + '</div>';
+  }
+  const count = (lines) => lines.filter((l) => l !== '').length;
+  function slackNew(v) {
+    const L = [{ c: 'title', t: '10월 1주차 (9/28~10/4)' }, '', { c: 'section', t: v.doneName || '[완료]', b: 'done' }];
+    v.done.forEach((g) => { L.push('', { c: 'project', t: g.name }); g.lines.forEach((t) => L.push({ c: 'item', t: '  ' + t, hit: g.hit === t })); });
+    if (v.follow && v.follow.length) { L.push('', { c: 'project', t: '팔로업' }); v.follow.forEach((t) => L.push({ c: 'item', t: '  ' + t })); }
+    if (v.notes && v.notes.length) { L.push(''); v.notes.forEach((t) => L.push({ c: 'memo', t })); }
+    L.push('', { c: 'section', t: v.planName || '[진행 예정]', b: 'plan' });
+    v.plan.forEach((g) => { L.push('', { c: 'project', t: g.name }); g.lines.forEach((t) => L.push({ c: 'item', t: '  ' + t })); });
+    return L;
+  }
+  function slackCard(lines, o = {}) {
+    const btn = o.old ? '' : `<button class="d-headnum" type="button" data-act="condense"${o.busy ? ' disabled' : ''}>${o.busy === 'run' ? '줄이는 중…' : '줄여 보기'}</button>`;
+    return `<aside class="rp-slack" aria-label="슬랙 미리보기"><div class="rp-slacktop"><div class="rp-slackhd">슬랙에 붙이면</div>${btn}`
+      + `<button class="d-btn pri" type="button"${o.old ? ' style="margin-left:auto"' : ''}>슬랙용으로 복사</button></div>${o.under || ''}`
+      + `<div class="rp-secs"><button class="rp-gp" type="button"><span class="k">넣을 구역</span><span>${o.old ? '완료 · 진행 중 · 예정' : '<span data-bound="done">[완료]</span> · <span data-bound="plan">[진행 예정]</span>'}</span>${CHEV}</button>`
+      + `<label class="rp-jchk"><input type="checkbox" class="d-wcb" aria-label="지라 정보">지라 정보</label></div>${slackBox(lines)}</aside>`;
+  }
+
+  /* ---------- 1. 지금 / 바뀐 뒤 ---------- */
+  const weeks = `<nav class="rp-weeks" aria-label="주차 목록"><div class="d-grp">주차 <span class="n">4</span></div>`
+    + [['이번 주', '9/28 ~ 10/4', 1], ['9월 4주차', '9/21 ~ 9/27'], ['9월 3주차', '9/14 ~ 9/20'], ['9월 2주차', '9/7 ~ 9/13']]
+      .map(([n, r, cur]) => `<div class="rp-wk"${cur ? ' aria-current="true"' : ''}><span class="nm">${n}</span><span class="rg">${r}</span></div>`).join('') + '</nav>';
+
+  const nowSlack = [{ c: 'title', t: '10월 1주차 (9/28~10/4)' }, '', { c: 'section', t: '[완료]' }, '', { c: 'project', t: PAY.name },
+    ...PAY.raw.map((t) => ({ c: 'item', t: '• ' + t })), { c: 'item', t: '• ' + ANSWERED }, '', { c: 'project', t: JOIN.name },
+    ...JOIN.raw.map((t) => ({ c: 'item', t: '• ' + t })), '', { c: 'section', t: '[진행중]' }, '', { c: 'project', t: '운영툴' }, { c: 'item', t: '• 관리자 권한 확인' }];
+  const nowDoc = `<article class="rp-doc" data-still><div class="rp-body">${head()}`
+    + plainH('완료한 일') + pj(PAY.name, 0) + rawRows(PAY) + pj(JOIN.name, 1) + rawRows(JOIN)
+    + plainH('진행 중') + pj('운영툴', 2) + row('관리자 권한 확인')
+    + plainH('새로 정해진 것') + pj(PAY.name, 0) + row(DECISION)
+    + plainH('확인 완료') + pj(PAY.name, 0) + row(ANSWERED)
+    + plainH('확인 대기') + pj('운영툴', 2) + row(WAITING)
+    + plainH('다음 주 계획') + '<div class="rp-add"><span class="pk">프로젝트 없음</span><span>직접 쓴 문장만 들어가요 — 한 문장씩 Enter</span></div>'
+    + '</div></article>';
+
+  const target = {
+    done: [{ name: '결제 리뉴얼 (10/15 배포 목표)', lines: PAY.sum.map((s) => s.t) }, { name: '운영툴 (진행 중)', lines: ['권한 확인'] }],
+    follow: [JOIN.name], notes: ['금요일 휴가'],
+    plan: [{ name: PAY.name, lines: ['디자인 리뷰 일정 조율'] }, { name: '운영툴', lines: ['알림 설정 요구사항 정리'] }],
+  };
+  const newSlack = slackNew(target);
+  const newDoc = `<article class="rp-doc"><div class="rp-body">${head()}`
+    + `<div class="rp-sec">${secName('[완료]', 'done')}`
+    + pj('결제 리뉴얼 (10/15 배포 목표)', 0) + sumRows(PAY)
+    + pj('운영툴 (진행 중)', 2) + row('권한 확인')
+    + pj('팔로업', null, { fixed: true }) + row(JOIN.name, { ev: JOIN.raw })
+    + '<div class="rp-sep"></div>' + row('금요일 휴가') + addLine() + '</div>'
+    + `<div class="rp-sec">${secName('[진행 예정]', 'plan')}`
+    + pj(PAY.name, 0) + row('디자인 리뷰 일정 조율', { title: '실행일이 다음 주(10/6)라 들어왔어요' })
+    + pj('운영툴', 2) + row('알림 설정 요구사항 정리', { title: '기한이 다음 주(10/8)라 들어왔어요' }) + addLine() + '</div>'
+    + quiet() + '</div></article>';
+
+  function drawS1(v) {
+    $('#s1').innerHTML = weeks + (v === 'now' ? nowDoc + slackCard(nowSlack, { old: true }) : newDoc + slackCard(newSlack));
+    $('#s1Note').textContent = v === 'now'
+      ? `슬랙 글 ${count(nowSlack)}줄 · 다음 주 칸은 직접 쓰기 전까지 비어 있어요`
+      : `슬랙 글 ${count(newSlack)}줄 · 다음 주 칸까지 들어 있어요 (지금은 ${count(nowSlack)}줄)`;
+  }
+
+  /* ---------- 2. 묶음 ① 세부 조작 ---------- */
+  const ren = (value, help) => `<div class="rp-ren"><input class="d-din is-focus" value="${value}" aria-label="이름 고치기" readonly><div class="rp-help">${help}</div></div>`;
+  $('#s2').innerHTML = [
+    `<div class="snap" data-still><h3>칸 이름 고치기</h3><p class="cap">칸 이름도 제목·문장과 똑같이 글자를 눌러 고쳐요. 한 번 고치면 이 맥에 기억해서 다음 주에도 같은 이름으로 나와요.</p>
+      <div class="two"><div><div class="st">손을 올리면</div><h3 class="rp-h"><button class="rp-rename is-hover" type="button">[완료]</button></h3></div>
+      <div><div class="st">누르면 그 자리가 입력칸</div><h3 class="rp-h">${ren('[완료한 일]', 'Enter 저장 · Esc 취소')}</h3></div></div></div>`,
+
+    `<div class="snap" data-still><h3>가볍게 본 프로젝트는 팔로업으로</h3><p class="cap">프로젝트 소제목에 손을 올리면 ⋯가 보여요. <b>팔로업으로</b>를 누르면 그 프로젝트는 팔로업 아래 이름 한 줄이 되고, 원래 줄은 근거로 접혀요. 앱이 알아서 팔로업으로 보내지는 않아요.</p>
+      <div class="two"><div class="stage has-menu"><div class="st">소제목 ⋯</div>${pj(JOIN.name, 1, { hover: true, menu: menu([{ t: '팔로업으로', point: true }]) })}${rawRows(JOIN)}</div>
+      <div><div class="st">누른 뒤</div>${pj('팔로업', null, { fixed: true })}${row(JOIN.name, { ev: JOIN.raw })}
+      <div class="d-toast">가입 개선을 팔로업으로 옮겼어요 <button class="d-btn sm" type="button">되돌리기</button></div></div></div></div>`,
+
+    `<div class="snap" data-still><h3>결정 줄을 슬랙 글에 넣기</h3><p class="cap">결정 · 확인 완료 · 확인 대기 줄은 문서에는 남고 슬랙 글에서는 기본으로 빠져요. 꼭 알릴 줄만 ⋯의 <b>슬랙 글에 넣기</b>로 그 프로젝트 아래 한 줄로 넣어요.</p>
+      <div class="two"><div class="stage has-menu is-tall"><div class="st">결정 줄 ⋯</div>${plainH('새로 정해진 것')}${pj(PAY.name, 0)}${row(DECISION, { hover: true, menu: menu([{ t: '슬랙 글에 넣기', point: true }, { t: '보고에서 빼기' }, { t: '다른 문장 아래로 넣기' }, '-', { t: '근거: 부분 환불 범위 결정', dim: true }]) })}</div>
+      <div><div class="st">슬랙 글</div>${slackBox([{ c: 'project', t: '결제 리뉴얼 (10/15 배포 목표)' }, ...PAY.sum.map((s) => ({ c: 'item', t: '  ' + s.t })), { c: 'item', t: '  ' + DECISION, hit: true }])}</div></div></div>`,
+
+    `<div class="snap" data-still><h3>직접 적는 한 줄</h3><p class="cap">휴가 · 근무일 · 꼬리말처럼 업무가 아닌 줄은 칸 맨 아래 <b>+ 한 줄</b>로 적어요. 업무를 만들지 않는 글 한 줄이에요(프로젝트 소제목 아래의 + 한 줄 추가는 지금처럼 업무로도 남아요).</p>
+      <div class="two"><div><div class="st">칸에 손을 올리면</div>${pj('운영툴 (진행 중)', 2)}${row('권한 확인')}<div class="rp-sep"></div>${addLine({ open: true })}</div>
+      <div><div class="st">누르면 그 자리가 입력칸</div>${pj('운영툴 (진행 중)', 2)}${row('권한 확인')}<div class="rp-sep"></div>
+      <div class="rp-s is-add is-open"><span class="bu" aria-hidden="true">+</span><div class="tx"><textarea class="rp-ta" rows="1" aria-label="한 줄 적기" readonly>금요일 휴가</textarea><div class="rp-help">Enter 추가 · Esc 취소 · 업무로는 남지 않아요</div></div></div></div></div></div>`,
+  ].join('');
+
+  /* ---------- 3. 묶음 ② 할 일 칸 미리 채우기 ---------- */
+  const rowMenu = menu([{ t: '보고에서 빼기', point: true }, { t: '다른 문장 아래로 넣기' }, '-', { t: '프로젝트 바꾸기' }, '-', { t: '근거: 관리자 권한 확인', dim: true }]);
+  $('#s3').innerHTML = [
+    `<div class="snap" data-still><h3>열면 이미 채워져 있어요</h3><p class="cap">줄에 손을 올리면 ⋯가 보이고, 지금 있는 <b>보고에서 빼기</b>로 덜어 내요. 왜 들어왔는지는 줄에 손을 올렸을 때의 풍선으로만 알려요.</p>
+      <div class="stage has-menu is-tall"><h3 class="rp-h"><button class="rp-rename" type="button">[진행 예정]</button></h3>
+      ${pj(PAY.name, 0)}${row('디자인 리뷰 일정 조율', { title: '실행일이 다음 주(10/6)라 들어왔어요' })}
+      ${pj('운영툴', 2)}${row('관리자 권한 확인', { hover: true, menu: rowMenu, title: '진행 중이라 들어왔어요' })}${row('알림 설정 요구사항 정리', { title: '기한이 다음 주(10/8)라 들어왔어요' })}</div></div>`,
+
+    `<div class="snap" data-still><h3>덜어 낸 뒤</h3><p class="cap">뺀 줄은 새로 고쳐도 다시 들어오지 않아요. 같은 업무가 한 일 칸에 <b>(진행 중)</b>으로 서 있어도 그쪽은 그대로예요. 슬랙 글도 바로 같이 줄어요.</p>
+      <div class="two"><div><h3 class="rp-h"><button class="rp-rename" type="button">[진행 예정]</button></h3>
+      ${pj(PAY.name, 0)}${row('디자인 리뷰 일정 조율')}${pj('운영툴', 2)}${row('알림 설정 요구사항 정리')}<div class="rp-sep"></div>${addLine({ open: true })}
+      <div class="d-toast">보고에서 뺐어요 <button class="d-btn sm" type="button">되돌리기</button></div></div>
+      <div><div class="st">슬랙 글</div>${slackBox([{ c: 'section', t: '[진행 예정]' }, '', { c: 'project', t: PAY.name }, { c: 'item', t: '  디자인 리뷰 일정 조율' }, '', { c: 'project', t: '운영툴' }, { c: 'item', t: '  알림 설정 요구사항 정리' }])}</div></div></div>`,
+  ].join('');
+
+  /* ---------- 4. 묶음 ③ 줄여 보기 ---------- */
+  const GROUPS = [PAY, JOIN];
+  const s4 = { step: 'idle', dec: { pay: null, join: null } };
+  let timer = 0;
+  function setStep(step) {
+    clearTimeout(timer);
+    s4.step = step;
+    if (step === 'done') GROUPS.forEach((g) => { s4.dec[g.key] = s4.dec[g.key] || 'yes'; });
+    else s4.dec = { pay: null, join: null };
+    if (step === 'run') timer = setTimeout(() => setStep('prop'), 1600);
+    drawS4();
+  }
+  function decide(key, v) {
+    s4.dec[key] = v;
+    if (GROUPS.every((g) => s4.dec[g.key])) s4.step = 'done';
+    drawS4();
+  }
+  function groupDoc(g) {
+    const d = s4.dec[g.key];
+    if (d === 'yes') return pj(g.name, g.dot) + sumRows(g);
+    if (s4.step !== 'prop' || d) return pj(g.name, g.dot) + rawRows(g);
+    return pj(g.name, g.dot) + `<div class="rp-cmp"><div><div class="lb">지금</div>${rawRows(g)}</div>`
+      + `<div class="rp-prop"><div class="lb">줄인 제안</div>`
+      + g.sum.map((s) => `<div class="rp-s"><span class="bu" aria-hidden="true">•</span><div class="tx">${s.t}<span class="n" title="${s.ev.map((i) => g.raw[i]).join(' · ')}">· ${s.ev.length}건</span></div></div>`).join('')
+      + `<div class="acts"><button class="d-btn acc sm" type="button" data-act="yes" data-key="${g.key}">이대로 바꾸기</button><button class="d-btn sm" type="button" data-act="no" data-key="${g.key}">그대로 두기</button></div></div></div>`;
+  }
+  function drawS4() {
+    const left = GROUPS.filter((g) => !s4.dec[g.key]).length;
+    const yes = GROUPS.filter((g) => s4.dec[g.key] === 'yes');
+    const status = s4.step === 'prop' ? `<div class="rp-top"><div class="rp-status" role="status">줄인 제안이 프로젝트 ${left}개에 왔어요. 바꾸기 전에는 보고 글이 그대로예요.<button class="d-link" type="button" data-act="all">모두 바꾸기</button></div></div>` : '';
+    const toast = s4.step === 'done' && yes.length ? `<div class="d-toast" role="status">프로젝트 ${yes.length}개의 줄을 줄였어요 <button class="d-btn sm" type="button" data-act="undo">되돌리기</button></div>` : '';
+    const doc = `<article class="rp-doc"><div class="rp-body">${head({ status })}<div class="rp-sec">${secName('[완료]', 'done')}`
+      + GROUPS.map(groupDoc).join('') + pj('운영툴 (진행 중)', 2) + row('권한 확인') + '<div class="rp-sep"></div>' + row('금요일 휴가') + addLine() + '</div>'
+      + `<div class="rp-sec">${secName('[진행 예정]', 'plan')}` + pj(PAY.name, 0) + row('디자인 리뷰 일정 조율') + pj('운영툴', 2) + row('알림 설정 요구사항 정리') + addLine() + '</div>'
+      + toast + '</div></article>';
+    const lines = slackNew({
+      done: [...GROUPS.map((g) => ({ name: g.name, lines: s4.dec[g.key] === 'yes' ? g.sum.map((s) => s.t) : g.raw })), { name: '운영툴 (진행 중)', lines: ['권한 확인'] }],
+      notes: ['금요일 휴가'], plan: target.plan,
+    });
+    const under = s4.step === 'run' ? '<div class="rp-wait" role="status"><span class="rp-spin" aria-hidden="true"></span>프로젝트마다 줄을 묶고 있어요. 보고 글은 그대로예요.</div>'
+      : s4.step === 'fail' ? '<div class="rp-wait" role="status">이번에는 줄이지 못했어요. 보고 글은 그대로예요.<button class="d-link" type="button">최근 기록 보기</button></div>' : '';
+    $('#s4').innerHTML = doc + slackCard(lines, { busy: s4.step === 'run' ? 'run' : s4.step === 'prop' ? 'wait' : '', under });
+    document.querySelectorAll('[data-seg="s4"] button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.v === s4.step)));
+    $('#s4Note').textContent = {
+      idle: `슬랙 글 ${count(lines)}줄 · 줄이 4개 이상인 프로젝트만 제안이 와요`,
+      run: '도는 동안 버튼은 잠겨요',
+      prop: '제안은 프로젝트마다 받거나 그대로 둘 수 있어요',
+      done: `슬랙 글 ${count(lines)}줄 · 요약 줄의 · N건을 누르면 원래 줄(근거)이 펼쳐져요. ⌘Z와 묶음 풀기로 되돌려요`,
+      fail: '실패해도 조용한 한 줄만 서요. 최근 기록 보기는 설정 › 연동으로 가요',
+    }[s4.step];
+  }
+
+  /* ---------- 눌러 보기 ---------- */
+  function startEdit(el) {
+    const isRow = el.classList.contains('rp-edit');
+    const wrap = document.createElement('div');
+    if (!isRow) wrap.className = 'rp-ren';
+    const input = document.createElement(isRow ? 'textarea' : 'input');
+    input.className = isRow ? 'rp-ta' : 'd-din is-focus';
+    if (isRow) input.rows = 1;
+    input.value = el.textContent;
+    input.setAttribute('aria-label', '고치기');
+    const help = document.createElement('div');
+    help.className = 'rp-help';
+    help.textContent = 'Enter 저장 · Esc 취소';
+    wrap.append(input, help);
+    const fold = isRow ? el.parentNode.querySelector('.rp-foldtoggle') : null;
+    el.hidden = true; if (fold) fold.hidden = true;
+    el.after(wrap); input.focus(); input.select();
+    let closed = false;
+    const done = (save) => {
+      if (closed) return; closed = true;
+      const text = input.value.replace(/\s+/g, ' ').trim();
+      if (save && text) {
+        el.textContent = text;
+        if (el.dataset.bind) document.querySelectorAll(`[data-bound="${el.dataset.bind}"]`).forEach((n) => { n.textContent = text; });
+      }
+      wrap.remove(); el.hidden = false; if (fold) fold.hidden = false; el.focus();
+    };
+    input.addEventListener('keydown', (ev) => {
+      if (ev.isComposing) return;
+      if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); done(true); } else if (ev.key === 'Escape') done(false);
+    });
+    input.addEventListener('blur', () => done(false));
+  }
+  document.addEventListener('click', (e) => {
+    const seg = e.target.closest('[data-seg] button');
+    if (seg) {
+      const kind = seg.parentNode.dataset.seg;
+      seg.parentNode.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b === seg)));
+      if (kind === 's1') drawS1(seg.dataset.v);
+      else if (kind === 's4') setStep(seg.dataset.v);
+      else if (seg.dataset.v) document.documentElement.dataset.theme = seg.dataset.v; else delete document.documentElement.dataset.theme;
+      return;
+    }
+    const act = e.target.closest('#s4 [data-act]');
+    if (act) {
+      const a = act.dataset.act;
+      if (a === 'condense') setStep('run');
+      else if (a === 'yes' || a === 'no') decide(act.dataset.key, a);
+      else if (a === 'all') { GROUPS.forEach((g) => { s4.dec[g.key] = s4.dec[g.key] || 'yes'; }); s4.step = 'done'; drawS4(); }
+      else if (a === 'undo') setStep('idle');
+      return;
+    }
+    const f = e.target.closest('.rp-foldtoggle');
+    if (f) {
+      const box = f.closest('.rp-s').nextElementSibling;
+      const open = f.getAttribute('aria-expanded') !== 'true';
+      f.setAttribute('aria-expanded', String(open));
+      if (box && box.classList.contains('rp-fold')) box.hidden = !open;
+      return;
+    }
+    const ed = e.target.closest('.rp-rename, .rp-edit');
+    if (ed && !ed.closest('[data-still]')) startEdit(ed);
+  });
+  document.addEventListener('keydown', (e) => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.classList && e.target.classList.contains('rp-edit') && !e.target.closest('[data-still]')) { e.preventDefault(); startEdit(e.target); }
+  });
+
+  drawS1('new');
+  drawS4();
+})();
+</script>
+</body>
+</html>

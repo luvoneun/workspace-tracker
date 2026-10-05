@@ -1,0 +1,1253 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>주간보고 양식 시안 3차</title>
+<style>
+/* 토큰은 tracker/inbox-app/ui.css 의 값 그대로다(새 색·새 치수 없음). 글꼴은 맥에 깔린 것만 쓴다(외부에서 받지 않는다).
+   1차 시안은 같은 폴더 시안-1차.html 에 그대로 있다. */
+:root {
+  color-scheme: light dark;
+  --bg: #f2f4f6; --surface: #ffffff; --surface-line: transparent; --field: #f2f4f6; --hover: #f4f6f8; --press: #e9edf1;
+  --border: #e3e7eb; --hair: #eef1f4; --check-line: #8b95a1;
+  --text: #191f28; --muted: #4e5968; --dim: #636c78;
+  --accent: #3182f6; --accent-strong: #1b64da; --accent-text: #1b64da; --accent-soft: #e8f3ff; --on-fill: #ffffff;
+  --sel: #eef5ff; --sel-hover: #e6f1ff;
+  --warn: #b0560a; --warn-bg: #fff4e5; --urgent: #c9252d; --urgent-bg: #ffeceb; --success: #0d7a4a; --neutral-bg: #eef1f4;
+  --pj-0: #4f83e8; --pj-1: #2f9b87; --pj-2: #c0842b;
+  --soft: 0 1px 3px rgba(25, 31, 40, 0.04), 0 8px 24px rgba(25, 31, 40, 0.06);
+  --shadow: 0 1px 2px rgba(25, 31, 40, 0.06);
+  --pop: 0 12px 36px rgba(25, 31, 40, 0.14), 0 2px 8px rgba(25, 31, 40, 0.06);
+  --r: 20px; --r-sm: 12px; --r-xs: 10px;
+  --fs-cap: 12px; --fs-sm: 13px; --fs-body: 14px; --fs-md: 15px; --fs-lg: 16px;
+  --h-xs: 22px; --h-sm: 28px; --h-md: 32px; --h-lg: 42px;
+  --row: 54px;
+  --ease: cubic-bezier(0.22, 0.8, 0.3, 1);
+  --t-press: 100ms; --t-fast: 140ms; --t-tint: 170ms; --t-move: 200ms; --t-slow: 320ms;
+  --font: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15181e; --surface: #1e222a; --surface-line: #2b313b; --field: #262b34; --hover: #272c35; --press: #303641;
+    --border: #333a45; --hair: #2b313b; --check-line: #636e7d;
+    --text: #eaedf1; --muted: #a8b1bd; --dim: #8b95a1;
+    --accent: #4b91f1; --accent-strong: #4b91f1; --accent-text: #7aa9ff; --accent-soft: #1b2a44; --on-fill: #0b1020;
+    --sel: #1c2533; --sel-hover: #212c3d;
+    --warn: #ffbe6b; --warn-bg: #3a2e1b; --urgent: #ff8f8f; --urgent-bg: #3a2022; --success: #6ddba0; --neutral-bg: #2a2f38;
+    --pj-0: #7aa2ff; --pj-1: #57c6ad; --pj-2: #dfa85c;
+    --soft: 0 1px 3px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.3);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+    --pop: 0 12px 36px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15181e; --surface: #1e222a; --surface-line: #2b313b; --field: #262b34; --hover: #272c35; --press: #303641;
+  --border: #333a45; --hair: #2b313b; --check-line: #636e7d;
+  --text: #eaedf1; --muted: #a8b1bd; --dim: #8b95a1;
+  --accent: #4b91f1; --accent-strong: #4b91f1; --accent-text: #7aa9ff; --accent-soft: #1b2a44; --on-fill: #0b1020;
+  --sel: #1c2533; --sel-hover: #212c3d;
+  --warn: #ffbe6b; --warn-bg: #3a2e1b; --urgent: #ff8f8f; --urgent-bg: #3a2022; --success: #6ddba0; --neutral-bg: #2a2f38;
+  --pj-0: #7aa2ff; --pj-1: #57c6ad; --pj-2: #dfa85c;
+  --soft: 0 1px 3px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.3);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --pop: 0 12px 36px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  margin: 0; background: var(--bg); color: var(--text); font-family: var(--font); font-size: var(--fs-body);
+  line-height: 1.55; word-break: keep-all; overflow-wrap: break-word; -webkit-font-smoothing: antialiased;
+}
+button { transition: background-color var(--t-tint) var(--ease), color var(--t-tint) var(--ease), scale var(--t-press) var(--ease); }
+button:active:not(:disabled) { scale: 0.97; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.d-i { width: 14px; height: 14px; display: block; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.d-pjdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--pj-0); flex: none; align-self: center; }
+.d-pjdot[data-pj="1"] { background: var(--pj-1); }
+.d-pjdot[data-pj="2"] { background: var(--pj-2); }
+
+/* ---------- 시안 페이지 틀(앱 화면이 아닌 설명 부분) ---------- */
+.wrap { max-width: 1440px; margin: 0 auto; padding: 28px 20px 120px; }
+.top { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.top .sp { margin-left: auto; }
+h1 { margin: 0 0 4px; font-size: 24px; font-weight: 700; letter-spacing: -0.025em; }
+h2 { margin: 48px 0 4px; font-size: 18px; font-weight: 700; letter-spacing: -0.015em; }
+h2 .later { margin-left: 8px; font-size: var(--fs-sm); font-weight: 600; color: var(--dim); letter-spacing: 0; }
+.lead { margin: 0 0 16px; max-width: 760px; color: var(--muted); font-size: var(--fs-md); }
+.lead b, .cap b { color: var(--text); font-weight: 600; }
+.sum { margin: 16px 0 0; padding: 16px 24px; max-width: 760px; background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r); box-shadow: var(--soft); }
+.sum ol { margin: 0; padding-left: 20px; font-size: var(--fs-md); }
+.sum li { margin: 4px 0; }
+.bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 12px; }
+.bar .note { color: var(--dim); font-size: var(--fs-sm); }
+.bar .d-link { margin-left: auto; min-height: var(--h-sm); }
+.cap { margin: 0 0 12px; color: var(--muted); font-size: 13.5px; }
+.fr { padding: 16px; border: 1px solid var(--border); border-radius: var(--r); }
+.snaps { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.snaps.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.snap { background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r); box-shadow: var(--soft); padding: 20px 24px 24px; }
+.snap > h3 { margin: 0 0 4px; font-size: var(--fs-lg); font-weight: 700; letter-spacing: -0.01em; }
+.snap .st { margin: 16px 0 4px; font-size: var(--fs-cap); font-weight: 600; color: var(--dim); }
+.snap .stage { padding-left: 28px; }
+.two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+.map { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.map th { text-align: left; font-size: var(--fs-cap); font-weight: 600; color: var(--dim); padding: 0 8px 4px 0; }
+.map td { padding: 6px 8px 6px 0; border-top: 1px solid var(--hair); vertical-align: top; }
+.map td:first-child { color: var(--muted); }
+.map .cut { color: var(--dim); text-decoration: line-through; text-decoration-color: var(--border); }
+.pre { margin: 0; padding: 12px 14px; border-radius: var(--r-sm); background: var(--field); font: 12.5px/1.6 ui-monospace, Menlo, monospace; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* ---------- 앱 부품(ui.css · report-ui.css 와 같은 값) ---------- */
+.d-seg { display: inline-flex; padding: 3px; gap: 2px; background: var(--neutral-bg); border-radius: var(--r-sm); }
+.d-seg button { height: var(--h-md); padding: 0 14px; border: 0; border-radius: 9px; background: none; font-family: inherit; font-size: 13.5px; font-weight: 600; color: var(--muted); cursor: pointer; }
+.d-seg button:hover { color: var(--text); }
+.d-seg button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.d-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 34px; padding: 0 13px; border: 0; border-radius: var(--r-xs); background: var(--neutral-bg); color: var(--muted); font-family: inherit; font-size: 13.5px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.d-btn:hover { background: var(--hover); color: var(--text); }
+.d-btn.sm { height: var(--h-md); padding: 0 12px; font-size: var(--fs-sm); }
+.d-btn.pri { height: var(--h-lg); padding: 0 20px; border-radius: var(--r-sm); background: var(--accent-strong); color: var(--on-fill); font-size: 14.5px; }
+.d-btn.pri:hover { background: var(--accent-strong); color: var(--on-fill); filter: brightness(1.08); }
+.d-btn.acc { background: var(--accent-soft); color: var(--accent-text); }
+.d-btn.acc:hover { background: var(--accent-strong); color: var(--on-fill); }
+.d-link { border: 0; background: none; padding: 0; cursor: pointer; font-family: inherit; font-size: var(--fs-sm); font-weight: 600; color: var(--accent-text); border-radius: 4px; }
+.d-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+.d-headnum { margin-left: auto; height: var(--h-sm); padding: 0 6px; border: 0; border-radius: var(--r-xs); background: none; color: var(--dim); font: inherit; font-size: var(--fs-sm); font-weight: 500; cursor: pointer; white-space: nowrap; }
+.d-headnum:hover { background: var(--hover); color: var(--accent-text); }
+.d-headnum:disabled { cursor: default; color: var(--dim); background: none; }
+.d-more { width: 28px; height: var(--h-sm); display: grid; place-items: center; flex: none; padding: 0; border: 0; border-radius: var(--r-xs); background: none; color: var(--dim); cursor: pointer; }
+.d-more:hover { background: var(--hover); color: var(--text); }
+.d-more .d-i { fill: currentColor; stroke: none; }
+.d-din { width: 100%; min-height: 38px; padding: 10px 14px; border: 0; border-radius: var(--r-sm); background: var(--field); color: var(--text); font-family: inherit; font-size: var(--fs-body); line-height: 1.5; }
+.d-din:focus, .d-din.is-focus { outline: none; background: var(--surface); box-shadow: 0 0 0 2px var(--accent); }
+.d-toast { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; margin-top: 16px; padding: 12px 12px 12px 18px; background: var(--surface); color: var(--text); border: 1px solid var(--surface-line); border-radius: 16px; box-shadow: var(--pop); font-size: var(--fs-body); }
+.d-grp { display: flex; align-items: center; gap: 8px; height: var(--h-md); padding: 0 10px; color: var(--muted); font-size: 14.5px; font-weight: 600; }
+.d-grp .n { font-weight: 500; color: var(--dim); font-size: var(--fs-sm); }
+.d-wcb { appearance: none; -webkit-appearance: none; margin: 0; position: relative; flex: none; width: 20px; height: 20px; border: 1.5px solid var(--check-line); border-radius: 6px; background: var(--surface); cursor: pointer; transition: border-color var(--t-press) var(--ease), background var(--t-press) var(--ease); }
+.d-wcb::after { content: ''; position: absolute; inset: -5px; border-radius: 11px; }
+.d-wcb:hover { border-color: var(--accent); }
+.d-wcb:checked { background: var(--accent); border-color: var(--accent); }
+.d-wcb:checked::before { content: ''; position: absolute; left: 6px; top: 2px; width: 5px; height: 9px; border: solid var(--on-fill); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.d-wcb:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* 회의 적기 입력줄(ui.css .d-qin 그대로) — 평소 맨 줄, 초점에서만 흰 면 + 파란 테 */
+.d-qin { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; column-gap: 8px; align-items: center; height: 40px; padding: 0 10px; border-radius: var(--r-sm); background: none; cursor: text; transition: box-shadow var(--t-tint) var(--ease), background var(--t-tint) var(--ease); }
+.d-qin .pl { display: flex; align-items: center; padding-left: 4px; color: var(--dim); }
+.d-qin input { min-width: 0; width: 100%; height: 100%; border: 0; background: none; outline: none; padding: 0; color: var(--text); font-family: inherit; font-size: var(--fs-body); }
+.d-qin input::placeholder { color: var(--dim); }
+.d-qin:hover { background: var(--hover); }
+.d-qin:focus-within, .d-qin.is-focus { background: var(--surface); box-shadow: 0 0 0 2px var(--accent); }
+.d-qin .as { padding-right: 4px; font-size: 12.5px; font-weight: 600; color: var(--accent-text); white-space: nowrap; }
+.d-qin .as:empty { display: none; }
+
+/* 선택 막대(ui.css .d-selbar 그대로 — 시안에는 왼쪽 레일이 없어 left 0) */
+.d-selbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 46; display: flex; justify-content: center; padding: 10px 20px calc(10px + env(safe-area-inset-bottom, 0px)); pointer-events: none; }
+.d-selbar .bar { pointer-events: auto; display: flex; align-items: center; flex-wrap: wrap; width: 100%; max-width: 1120px; margin: 0; padding: 10px 14px; gap: 6px; background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r); box-shadow: var(--pop); }
+.d-selbar .ct { font-size: var(--fs-md); font-weight: 700; color: var(--text); padding: 0 10px 0 4px; white-space: nowrap; }
+.d-selbar .hint { font-size: 13.5px; font-weight: 500; color: var(--dim); padding: 0 10px 0 4px; white-space: nowrap; }
+.d-selbar .sp { margin-left: auto; }
+.d-selbar .bar.is-in { animation: d-float-up 240ms var(--ease) both; }
+.d-selbar.is-still { position: static; padding: 0; margin-top: 16px; }
+.d-selbar.is-still .bar { max-width: none; }
+@keyframes d-float-up { from { transform: translateY(100%); } to { transform: none; } }
+
+/* 주간요약 세 칸 */
+.rp-grid { display: grid; grid-template-columns: 236px minmax(0, 1fr) 356px; gap: 16px; align-items: start; }
+.rp-grid.no-weeks { grid-template-columns: minmax(0, 1fr) 356px; }
+.rp-grid > * { min-width: 0; }
+.rp-weeks { background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r); box-shadow: var(--soft); padding: 10px; }
+.rp-wk { display: grid; gap: 0; min-height: 48px; padding: 6px 10px; border-radius: 12px; align-content: center; }
+.rp-wk .nm { font-size: 14.5px; font-weight: 500; }
+.rp-wk .rg { font-size: 12.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.rp-wk[aria-current="true"] { background: var(--sel); }
+.rp-wk[aria-current="true"] .nm { color: var(--accent-text); font-weight: 600; }
+.rp-doc { background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r); box-shadow: var(--soft); padding: 28px 32px 48px; }
+.rp-body { max-width: 720px; }
+.rp-hd { display: flex; align-items: baseline; gap: 8px; margin-bottom: 2px; flex-wrap: wrap; }
+.rp-hd .rp-acts { display: flex; align-items: center; gap: 4px; margin-left: auto; align-self: center; }
+.rp-hd .rp-acts .d-headnum { margin-left: 0; }
+.rp-title { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+.rp-hd .sub { color: var(--dim); font-size: 13.5px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.rp-hint { margin: 8px 0 0; font-size: var(--fs-sm); color: var(--dim); }
+.rp-h { margin: 28px 0 0; padding-top: 12px; border-top: 1px solid var(--hair); font-size: 12.5px; font-weight: 600; color: var(--dim); letter-spacing: 0.01em; }
+.rp-sec:first-of-type > .rp-h, .snap .rp-h { border-top: 0; padding-top: 0; }
+.snap .rp-h { margin-top: 0; }
+.snap .rp-tidy + .rp-h { margin-top: 16px; }
+.rp-pj { display: flex; align-items: baseline; gap: 8px; margin: 16px 0 2px; font-size: var(--fs-lg); font-weight: 700; letter-spacing: -0.01em; color: var(--text); }
+.rp-pj .pa { font-weight: 500; color: var(--muted); }
+.rp-rename { border: 0; background: none; padding: 0 4px; margin: 0 0 0 -4px; border-radius: var(--r-xs); color: inherit; font: inherit; letter-spacing: inherit; text-align: left; cursor: text; overflow-wrap: anywhere; }
+.rp-rename:hover, .rp-rename:focus-visible, .rp-rename.is-hover, .rp-s .rp-edit:hover, .rp-s .rp-edit:focus-visible, .rp-s .rp-edit.is-hover {
+  background: var(--hover); text-decoration: underline; text-decoration-color: var(--border); text-underline-offset: 4px;
+}
+.rp-s .rp-edit { border-radius: var(--r-xs); cursor: text; padding: 0 2px; margin: 0 -2px; }
+.rp-s .rp-edit:focus { outline: none; }
+.rp-s .rp-edit:focus-visible { outline: 2px solid var(--accent); }
+.rp-ren { display: grid; gap: 4px; flex: 1 1 auto; max-width: 520px; }
+.rp-ren .d-din { min-height: 36px; font-size: inherit; font-weight: inherit; letter-spacing: inherit; }
+.rp-help { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; font-size: 12.5px; font-weight: 400; letter-spacing: 0; color: var(--dim); }
+.rp-help .d-link { font-size: 12.5px; min-height: 24px; }
+.rp-ta { display: block; width: 100%; resize: none; overflow: hidden; padding: 10px 14px; border: 0; border-radius: var(--r-sm); background: var(--surface); color: var(--text); font-family: inherit; font-size: 15.5px; line-height: 1.65; box-shadow: 0 0 0 2px var(--accent); }
+.rp-ta:focus { outline: none; }
+
+/* 문장 한 줄 — 손잡이(⋮⋮)는 줄 왼쪽 바깥에 선다. 손이 닿거나 초점·선택일 때만 보인다(자리는 그대로). */
+.rp-s { position: relative; display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: start; gap: 4px 8px; padding: 4px 8px 4px 4px; margin-left: -4px; border-radius: var(--r-xs); transition: background-color var(--t-tint) var(--ease); }
+.rp-s .bu { justify-self: center; color: var(--dim); font-size: 15.5px; line-height: 1.65; }
+.rp-s .tx { font-size: 15.5px; line-height: 1.65; word-break: keep-all; overflow-wrap: anywhere; }
+.rp-s .tx .tg { margin-right: 6px; font-size: 12.5px; font-weight: 600; color: var(--dim); white-space: nowrap; }
+.rp-grip { position: absolute; left: -28px; top: 4px; width: 24px; height: var(--h-sm); display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--dim); cursor: pointer; opacity: 0; transition: opacity var(--t-fast) var(--ease), background-color var(--t-tint) var(--ease), color var(--t-tint) var(--ease); }
+.rp-grip .d-i { fill: currentColor; stroke: none; }
+.rp-s:hover .rp-grip, .rp-s.is-hover .rp-grip, .rp-grip:focus-visible, .rp-s.is-selected .rp-grip { opacity: 1; }
+.rp-grip:hover { background: var(--hover); color: var(--text); }
+.rp-s.is-selected { background: var(--sel); }
+.rp-s.is-selected .rp-grip { color: var(--accent-text); }
+.rp-s.is-selected .rp-grip:hover { background: var(--sel-hover); }
+/* 보고에서 뺀 줄 — 지우지 않고 제자리에 흐리게(취소선 없음). 슬랙 글에는 없다. */
+.rp-s.is-out .bu, .rp-s.is-out .tx { opacity: 0.45; transition: opacity var(--t-tint) var(--ease); }
+.rp-s.is-out .tx .rp-ed { opacity: 1; }
+.rp-s.is-out:has(.rp-ed) .tx { opacity: 1; }
+.rp-qin { margin: 2px 0 0 -10px; grid-template-columns: 22px minmax(0, 1fr) auto; }
+.rp-qin .pl { padding-left: 2px; }
+.rp-qin .pl .d-i { width: 13px; height: 13px; }
+.rp-sep { height: 12px; }
+
+/* 다듬기 한 줄 — 문서 머리 아래 조용히. 누르면 그 자리 아래로 짧은 체크 목록이 펼쳐진다(문서를 가리지 않는다). */
+.rp-tidy { display: flex; align-items: center; flex-wrap: wrap; gap: 0 4px; margin: 12px 0 0; font-size: var(--fs-sm); color: var(--dim); }
+.rp-tidy .k { margin-right: 8px; font-weight: 600; color: var(--muted); }
+.rp-tidy .dot { color: var(--dim); }
+.rp-tidyit { display: inline-flex; align-items: center; gap: 4px; min-height: var(--h-sm); padding: 0 6px; border: 0; border-radius: var(--r-xs); background: none; color: var(--accent-text); font-family: inherit; font-size: var(--fs-sm); font-weight: 600; cursor: pointer; }
+.rp-tidyit:hover { background: var(--hover); }
+.rp-tidyit[aria-expanded="true"] { background: var(--sel); }
+.rp-tidyit .n { font-variant-numeric: tabular-nums; }
+.rp-tidyit.is-seen { color: var(--dim); font-weight: 500; }
+.rp-tidybox { margin: 6px 0 4px; padding: 10px 14px 12px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface); transform-origin: 24px 0; animation: d-float-in 240ms var(--ease) both, d-float-fade 70ms linear both; }
+.rp-tidybox.is-out { animation: d-float-out var(--t-fast) var(--ease) both; }
+.rp-tidybox .tg { display: flex; align-items: center; gap: 6px; margin: 8px 0 2px; font-size: 12.5px; font-weight: 600; color: var(--dim); }
+.rp-tidybox .tg:first-child { margin-top: 0; }
+.rp-tidybox .ft { margin: 8px 0 0; font-size: 12.5px; color: var(--dim); }
+.rp-chk { display: flex; align-items: center; gap: 10px; min-height: 32px; padding: 0 6px; margin: 0 -6px; border-radius: var(--r-xs); font-size: var(--fs-body); cursor: pointer; }
+.rp-chk:hover { background: var(--hover); }
+.rp-pick { display: grid; gap: 6px; padding: 4px 0; }
+.rp-pick .t { font-size: var(--fs-body); }
+.rp-pick .ops { display: flex; flex-wrap: wrap; gap: 6px; }
+@keyframes d-float-in { 0% { transform: translateY(-4px) scale(0.96); } 55% { transform: translateY(0) scale(1.006); } 100% { transform: none; } }
+@keyframes d-float-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes d-float-out { to { opacity: 0; transform: translateY(-2px) scale(0.98); } }
+
+/* 슬랙 미리보기 카드 — 붙였을 때 모양(글머리 •, 둘째 단계 ◦ 들여쓰기, 칸 제목 굵게) */
+.rp-slack { background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r); box-shadow: var(--soft); padding: 18px 20px 20px; }
+.rp-slacktop { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-height: var(--h-lg); margin-bottom: 6px; }
+.rp-slackhd { font-size: var(--fs-md); font-weight: 700; letter-spacing: -0.01em; white-space: nowrap; }
+.rp-slacktop .pri-wrap { margin-left: auto; }
+.rp-slackbox { font-size: 13.5px; line-height: 1.7; word-break: keep-all; overflow-wrap: anywhere; white-space: pre-wrap; }
+.rp-slackbox .title { font-weight: 700; font-size: 14.5px; }
+.rp-slackbox .section, .rp-slackbox .project { font-weight: 700; }
+.sl { font-size: 14px; line-height: 1.6; word-break: keep-all; overflow-wrap: anywhere; }
+.sl p { margin: 0 0 4px; }
+.sl p + p { margin-top: 12px; }
+.sl ul { margin: 0 0 4px; padding: 0 0 0 22px; list-style: none; }
+.sl li { position: relative; margin: 2px 0; }
+.sl li::before { content: '•'; position: absolute; left: -16px; color: var(--muted); }
+.sl li li::before { content: '◦'; }
+.sl ul + p { margin-top: 12px; }
+.sl .is-new { animation: sl-hit 1400ms var(--ease) both; border-radius: 4px; }
+@keyframes sl-hit { 0%, 40% { background: var(--sel); } 100% { background: transparent; } }
+.rp-wait { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; font-size: var(--fs-sm); color: var(--muted); }
+.rp-wait .d-link { margin-left: auto; white-space: nowrap; }
+.rp-first { display: grid; gap: 8px; margin: 0 0 12px; padding: 12px 14px; border-radius: var(--r-sm); background: var(--sel); font-size: 13.5px; }
+.rp-first .acts { display: flex; gap: 8px; }
+.rp-spin { width: 12px; height: 12px; flex: none; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: rp-turn 800ms linear infinite; }
+@keyframes rp-turn { to { transform: rotate(360deg); } }
+
+/* Claude로 줄이기(③) — 제안은 지금 글 옆에 나란히. 제안 판은 고른 줄과 같은 --sel */
+.rp-cmp { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.rp-cmp .lb { margin: 4px 0; font-size: 12.5px; font-weight: 600; color: var(--dim); }
+.rp-prop { padding: 8px 12px 12px; border-radius: var(--r-sm); background: var(--sel); }
+.rp-prop .rp-s { margin-left: -4px; padding-right: 0; }
+.rp-prop .n { margin-left: 6px; font-size: 12.5px; font-weight: 600; color: var(--dim); white-space: nowrap; }
+.rp-prop .acts { display: flex; gap: 8px; margin-top: 8px; }
+.rp-prop .d-btn:not(.acc) { background: var(--surface); }
+.rp-why { margin: -2px 0 2px 26px; }
+.rp-foldtoggle { display: inline-flex; align-items: center; gap: 2px; min-height: 24px; padding: 0 6px; margin-left: -6px; border: 0; border-radius: var(--r-xs); background: none; color: var(--dim); font-family: inherit; font-size: 12.5px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.rp-foldtoggle .d-i { width: 12px; height: 12px; transition: transform var(--t-fast) var(--ease); }
+.rp-foldtoggle[aria-expanded="true"] .d-i { transform: rotate(90deg); }
+.rp-foldtoggle:hover { background: var(--hover); color: var(--text); }
+.rp-fold .rp-s { margin-left: 22px; }
+.rp-fold .rp-s .tx { font-size: 13.5px; color: var(--muted); }
+.rp-fold .rp-s .bu { font-size: var(--fs-sm); line-height: 1.75; }
+
+/* 오늘 탭 줄(ui.css .d-row · .d-cb · .d-title · .d-meta 그대로, 시안에 필요한 만큼) */
+.td-card { background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r); box-shadow: var(--soft); padding: 10px 8px 12px; max-width: 880px; }
+.d-row { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; column-gap: 12px; height: var(--row); padding: 0 12px; border-radius: 14px; background: var(--surface); transition: background var(--t-tint) var(--ease); }
+.d-row:hover { background: var(--hover); }
+.d-check { position: relative; width: 30px; height: var(--row); display: grid; place-items: center; }
+.d-cb { appearance: none; -webkit-appearance: none; margin: 0; display: block; position: relative; width: 22px; height: var(--h-xs); border: 1.5px solid var(--check-line); border-radius: 6px; background: var(--surface); cursor: pointer; }
+.d-cb:hover { border-color: var(--accent); }
+.d-cb.is-doing { border-color: var(--accent); }
+.d-cb.is-doing::before { content: ''; position: absolute; inset: 2px; border-radius: 3px; background: linear-gradient(90deg, var(--accent) 50%, transparent 50%); }
+.d-titlewrap { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.d-title { flex: 0 1 auto; min-width: 0; font-size: var(--fs-lg); font-weight: 500; line-height: 25px; letter-spacing: -0.012em; color: var(--text); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.d-row.is-doing .d-title { font-weight: 600; }
+.d-inproj { display: inline-flex; align-items: center; gap: 4px; flex: none; font-size: var(--fs-sm); color: var(--dim); white-space: nowrap; }
+.d-meta { display: flex; justify-content: flex-end; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.d-meta .m-due { color: var(--dim); font-weight: 500; }
+.d-meta .m-due.is-d { font-size: 12.5px; }
+.d-meta .m-due.k-warn { height: 23px; padding: 0 8px; border-radius: 6px; display: inline-flex; align-items: center; font-size: 12.5px; font-weight: 600; background: var(--warn-bg); color: var(--warn); }
+
+/* 팔로업으로 묶인 줄 — 문서에는 그 프로젝트 맨 아래 흐린 글씨로 남는다(슬랙 글에는 `팔로업` 한 줄) */
+.rp-s.is-fol .bu, .rp-s.is-fol .tx { opacity: 0.55; transition: opacity var(--t-tint) var(--ease); }
+.rp-s.is-fol:has(.rp-ed) .tx { opacity: 1; }
+/* 고르기 모드(B) — 글머리 자리에 선택 칸이 대신 선다(오늘 탭 .d-selcb 그대로). 줄 아무 데나 누르면 고른다 */
+.rp-s.is-pick { cursor: pointer; }
+.rp-s.is-pick .rp-edit { cursor: pointer; }
+.rp-s.is-pick .bu { display: grid; place-items: center; height: 25.5px; }
+.d-selcb { appearance: none; -webkit-appearance: none; margin: 0; display: block; position: relative; width: 17px; height: 17px; border: 1.5px solid var(--check-line); border-radius: 4px; background: var(--surface); cursor: pointer; transition: border-color var(--t-press) var(--ease), background var(--t-press) var(--ease); }
+.d-selcb::after { content: ''; position: absolute; inset: -7px; border-radius: 10px; }
+.d-selcb:hover { border-color: var(--accent); }
+.d-selcb:checked { background: var(--accent); border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--surface); }
+.d-selcb:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.d-headnum.is-on, .d-headnum[aria-pressed="true"] { background: var(--sel); color: var(--accent-text); }
+/* 나중에 할 일 질문 — 새 줄 바로 옆 작은 글자. 몇 초 뒤 숨고, 그 줄에 손을 올리면 다시 보인다 */
+.rp-ask { margin-left: 10px; font-size: 12.5px; color: var(--dim); white-space: nowrap; transition: opacity var(--t-tint) var(--ease); }
+.rp-ask .d-link { font-size: 12.5px; }
+.rp-ask.is-idle { opacity: 0; }
+.rp-s:hover .rp-ask.is-idle, .rp-s.is-hover .rp-ask.is-idle, .rp-ask:focus-within { opacity: 1; }
+.rp-tidy.is-quiet .k, .rp-tidy.is-quiet .rp-tidyit { color: var(--dim); font-weight: 500; }
+.rp-tidy.is-quiet .rp-tidyit:hover { color: var(--text); }
+.rp-newpj { width: 220px; height: var(--h-md); grid-template-columns: 18px minmax(0, 1fr); padding: 0 8px; background: var(--field); }
+.rp-newpj .pl { padding-left: 0; }
+
+/* 2절 데모 — 저절로 재생되는 작은 화면. 가짜 커서는 transform 만 움직인다 */
+.demos { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; margin-bottom: 16px; }
+.demo-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.demo-top h3 { margin: 0; font-size: var(--fs-lg); font-weight: 700; letter-spacing: -0.01em; }
+.demo-top .acts { margin-left: auto; display: flex; gap: 6px; }
+.demo-stage { position: relative; overflow: hidden; margin-top: 12px; padding: 16px 16px 84px 40px; border: 1px solid var(--border); border-radius: var(--r-sm); }
+.demo-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+.demo-grid .rp-hd { margin-bottom: 4px; }
+.demo-grid .rp-title { font-size: var(--fs-lg); }
+.demo-grid .rp-pj { margin-top: 4px; }
+.demo-grid .rp-s .tx, .demo-grid .rp-s .bu { font-size: 14px; }
+.demo-sl { padding: 12px 14px; border-radius: var(--r-sm); background: var(--field); }
+.demo-sl .lb { margin: 0 0 6px; font-size: 12.5px; font-weight: 600; color: var(--dim); }
+.demo-sl .sl { font-size: 13px; }
+.demo-sl .sl li { transition: opacity var(--t-tint) var(--ease); }
+.demo-stage .d-selbar.is-demo { position: absolute; left: 12px; right: 12px; bottom: 12px; padding: 0; }
+.demo-stage .d-selbar .bar { max-width: none; padding: 8px 10px; }
+.demo-cap { margin: 10px 0 0; min-height: 22px; font-size: 13.5px; color: var(--muted); }
+.demo-pro { margin: 8px 0 0; padding-top: 8px; border-top: 1px solid var(--hair); font-size: 13px; color: var(--muted); }
+.demo-pro b { color: var(--text); font-weight: 600; }
+.demo-cur { position: absolute; left: 0; top: 0; z-index: 3; width: 18px; height: 22px; pointer-events: none; transition: transform 520ms var(--ease); filter: drop-shadow(0 1px 2px rgba(25, 31, 40, 0.3)); }
+.demo-cur svg { display: block; width: 18px; height: 22px; transition: transform var(--t-press) var(--ease); transform-origin: 2px 2px; }
+.demo-cur.is-press svg { transform: scale(0.82); }
+.demo-cur .key { position: absolute; left: 16px; top: 16px; padding: 0 5px; border-radius: 5px; background: var(--text); color: var(--surface); font-size: 11.5px; font-weight: 700; line-height: 18px; opacity: 0; transition: opacity var(--t-fast) var(--ease); }
+.demo-cur.has-key .key { opacity: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+  button:active { scale: none !important; }
+}
+
+@media (max-width: 1280px) {
+  .rp-grid { grid-template-columns: 208px minmax(0, 1fr) 312px; gap: 14px; }
+  .rp-grid.no-weeks { grid-template-columns: minmax(0, 1fr) 312px; }
+  .rp-doc { padding: 24px 26px 40px 36px; }
+  .rp-slacktop { flex-wrap: wrap; }
+  .snaps.three { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}
+@media (max-width: 1120px) {
+  .rp-grid { grid-template-columns: 196px minmax(0, 1fr); }
+  .rp-grid.no-weeks { grid-template-columns: minmax(0, 1fr); }
+  .rp-slack { grid-column: 1 / -1; }
+  .sl, .rp-slackbox { max-width: 720px; }
+  .snaps, .snaps.three, .demos { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .rp-grid { grid-template-columns: minmax(0, 1fr); }
+  .rp-weeks { display: none; }
+  .two, .rp-cmp, .demo-grid { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+</head>
+<body>
+<main class="wrap">
+
+<div class="top">
+  <div>
+    <h1>주간보고 양식 시안 3차</h1>
+    <p class="lead">주간요약 탭의 세 칸(주차 목록 · 보고 문서 · 슬랙 미리보기)은 그대로 두고, 문서와 슬랙 글의 내용 모양과 줄을 다루는 법만 바꿔요. 데이터는 전부 가짜예요. 앞선 시안은 같은 폴더의 <b>시안-1차.html</b> · <b>시안-2차.html</b>에 있어요.</p>
+  </div>
+  <div class="sp d-seg" role="group" aria-label="화면 색" data-seg="theme">
+    <button type="button" data-v="" aria-pressed="true">자동</button>
+    <button type="button" data-v="light" aria-pressed="false">밝게</button>
+    <button type="button" data-v="dark" aria-pressed="false">어둡게</button>
+  </div>
+</div>
+
+<section class="sum" aria-label="무엇이 바뀌나">
+  <ol>
+    <li><b>칸은 둘</b> — <span data-bound="done">[완료]</span>와 <span data-bound="plan">[진행 예정]</span>. 프로젝트 이름 아래 끝말을 다듬은 짧은 줄로 나와요. 할 일 칸에는 진행 중 업무와 지난주 계획 중 안 끝난 것만 미리 들어와요.</li>
+    <li><b>줄에서 하는 일은 둘</b> — 글자를 누르면 고치고, 줄을 골라 아래 막대로 빼거나 다시 넣어요. 고르는 법은 두 안(A 손잡이 ⋮⋮ / B 고르기 모드)을 비교해 보세요. 뺀 줄은 지워지지 않고 흐리게 남아요.</li>
+    <li><b>다듬기 한 줄</b>이 팔로업 · 결정 · 프로젝트 없음을 그 자리에서 고르게 해 줘요. 다 본 뒤에도 조용히 남아 언제든 다시 고쳐요.</li>
+    <li><b>슬랙용으로 복사</b>는 슬랙의 진짜 목록(•, ◦ 들여쓰기)으로 붙어요. 이 시안에서도 실제로 복사돼요.</li>
+  </ol>
+</section>
+
+<h2>1. 지금과 바뀐 뒤</h2>
+<p class="lead">같은 한 주(업무 10개 · 결정·확인 3개)예요. 바뀐 뒤 화면은 실제로 눌러 볼 수 있어요 — 글자 고치기, 줄 고르기(A·B 바꿔 보기), 빼기·포함, 다듬기 펼치기, 할 일 적기가 오른쪽 슬랙 미리보기에 바로 반영돼요.</p>
+<div class="bar">
+  <div class="d-seg" role="group" aria-label="보기" data-seg="s1">
+    <button type="button" data-v="now" aria-pressed="false">지금</button>
+    <button type="button" data-v="new" aria-pressed="true">바뀐 뒤</button>
+  </div>
+  <div class="d-seg" role="group" aria-label="줄 고르는 법" data-seg="s1m">
+    <button type="button" data-v="A" aria-pressed="true">A 손잡이</button>
+    <button type="button" data-v="B" aria-pressed="false">B 고르기 모드</button>
+  </div>
+  <span class="note" id="s1Note" aria-live="polite"></span>
+  <button class="d-link" type="button" id="s1Reset">처음 상태로</button>
+</div>
+<div class="fr">
+  <div class="rp-grid" id="s1"></div>
+</div>
+
+<h2>2. 줄 하나에서 하는 일</h2>
+<p class="lead"><b>글자를 누르면</b> 그 자리가 입력칸이 되고, <b>줄을 고르면</b> 아래 막대로 빼거나 넣어요. 문장 줄의 ⋯ 메뉴는 없어요. 고르는 법은 두 안이에요 — 저절로 재생되는 데모로 비교해 보세요.</p>
+<div class="demos" id="demos"></div>
+<div class="snaps" id="s2"></div>
+
+<h2>3. 다듬기 한 줄</h2>
+<p class="lead">문서 머리 아래 조용한 한 줄이에요. 항목 글자를 누르면 그 자리 아래로 짧은 목록이 펼쳐지고(문서를 가리지 않아요), 고르는 즉시 슬랙 미리보기가 바뀌어요. 할 것이 없는 항목은 처음부터 안 보이고, 펼쳐 본 항목에는 ✓가 붙어요. 다 본 뒤에도 줄은 사라지지 않고 한 단계 흐려져 남아요 — 언제든 다시 눌러 고쳐요.</p>
+<div class="snaps" id="s3"></div>
+
+<h2>4. 이름 고치기</h2>
+<p class="lead">칸 이름과 프로젝트 이름(소제목)도 문장처럼 글자를 눌러 고쳐요. 소제목 괄호는 자동으로 붙고, 사람이 고친 이름이 이겨요.</p>
+<div class="snaps" id="s4"></div>
+
+<h2>5. 할 일 칸</h2>
+<p class="lead">열면 두 가지만 미리 들어와 있어요 — <b>진행 중인 업무</b>와 <b>지난주 계획 중 안 끝난 것</b>. 실행일 · 기한이 다음 주인 업무는 넣지 않아요(필요하면 입력줄에 적어요). 덜어 내기는 2번의 선택 막대로 해요.</p>
+<div class="snaps" id="s5"></div>
+
+<h2>6. 슬랙에 붙이기</h2>
+<p class="lead"><b>슬랙용으로 복사</b>는 서식 있는 목록(text/html)과 글자만(text/plain)을 함께 담아요. 슬랙은 서식 있는 쪽을 받아 진짜 글머리 목록으로 붙여요. 아래 버튼을 눌러 슬랙 입력칸에 붙여 보세요 — 내용은 1번 화면에서 고친 그대로예요.</p>
+<div class="snaps" id="s6"></div>
+
+<h2 id="h7">7. Claude로 줄이기 <span class="later">③ — ①·② 뒤에 만듦</span></h2>
+<p class="lead">슬랙 미리보기 카드 머리의 <b>Claude로 줄이기</b>를 누를 때만 돌아요. 처음 한 번만 무엇을 보내는지 알려 주고, 제안은 지금 글 옆에 나란히 떠요. 받아들인 것만 보고에 들어가요.</p>
+<div class="bar">
+  <div class="d-seg" role="group" aria-label="단계" data-seg="s7">
+    <button type="button" data-v="idle" aria-pressed="true">처음</button>
+    <button type="button" data-v="first" aria-pressed="false">첫 알림</button>
+    <button type="button" data-v="run" aria-pressed="false">도는 중</button>
+    <button type="button" data-v="prop" aria-pressed="false">제안이 옴</button>
+    <button type="button" data-v="done" aria-pressed="false">받아들인 뒤</button>
+    <button type="button" data-v="fail" aria-pressed="false">실패</button>
+  </div>
+  <span class="note" id="s7Note"></span>
+</div>
+<div class="fr">
+  <div class="rp-grid no-weeks" id="s7"></div>
+</div>
+
+<h2>8. 오늘 탭 제목 길이 시험</h2>
+<p class="lead">슬랙 수집이 업무 제목을 처음부터 짧은 명사구로 적으면 오늘 탭이 어떻게 보일지 보는 조각이에요. 보고 줄을 따로 다듬지 않아도 되는 대신, 오늘 탭에서 원래 부탁이 덜 보여요. 바꿔 보며 판단해 주세요.</p>
+<div class="bar">
+  <div class="d-seg" role="group" aria-label="제목 길이" data-seg="s8">
+    <button type="button" data-v="long" aria-pressed="true">긴 제목</button>
+    <button type="button" data-v="short" aria-pressed="false">짧은 제목</button>
+  </div>
+  <span class="note" id="s8Note"></span>
+</div>
+<div id="s8"></div>
+
+</main>
+
+<div class="d-selbar" id="selbar" role="group" aria-label="고른 줄" hidden></div>
+
+<script>
+(() => {
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const MORE = '<button class="d-more" type="button" aria-label="더보기"><svg class="d-i" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="3.2" r="1.05"/><circle cx="8" cy="8" r="1.05"/><circle cx="8" cy="12.8" r="1.05"/></svg></button>';
+  const CHEV = '<svg class="d-i" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg>';
+  const GRIP = '<svg class="d-i" viewBox="0 0 16 16" aria-hidden="true"><circle cx="5.6" cy="3.6" r="1.15"/><circle cx="10.4" cy="3.6" r="1.15"/><circle cx="5.6" cy="8" r="1.15"/><circle cx="10.4" cy="8" r="1.15"/><circle cx="5.6" cy="12.4" r="1.15"/><circle cx="10.4" cy="12.4" r="1.15"/></svg>';
+  const PLUS = '<svg class="d-i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>';
+  const TITLE = '10월 1주차 (9/28~10/4)';
+
+  /* ---------- 규칙으로 끝말 다듬기(AI 아님) — `요청 답하기` · `~하기` · `~했음`을 떼어 명사구로 ---------- */
+  const trimEnd = (t) => t.trim().replace(/\s*요청 답하기$/, '').replace(/(하기|했음)$/, '').trim();
+
+  /* ---------- 가짜 한 주 ---------- */
+  const PJ = {
+    pay: { name: '결제 리뉴얼', dot: 0, date: '10/15' },     // 지라 배포 버전에 날짜가 있음
+    join: { name: '가입 개선', dot: 1, ver: 'v2.70' },        // 날짜 없는 배포 버전만
+    ops: { name: '운영툴', dot: 2 },                          // 지라 없음 — 줄이 전부 진행 중이면 (진행 중)
+  };
+  const ORDER = ['pay', 'join', 'ops'];
+  const KIND = { decision: '결정', answered: '확인 완료', waiting: '확인 대기' };
+  const SEED = [
+    { id: 'p1', sec: 'done', pj: 'pay', raw: '결제 실패 사유 문구 초안 작성하기' },
+    { id: 'p2', sec: 'done', pj: 'pay', raw: '환불 정책 문서 1차 작성했음' },
+    { id: 'p3', sec: 'done', pj: 'pay', raw: '환불 API 스펙 백엔드에 요청하기' },
+    { id: 'p4', sec: 'done', pj: 'pay', raw: '부분 환불 QA 케이스 추가 요청 답하기' },
+    { id: 'pd', sec: 'done', pj: 'pay', kind: 'decision', raw: '부분 환불은 1차 범위에서 제외' },
+    { id: 'pa', sec: 'done', pj: 'pay', kind: 'answered', raw: '환불 수수료는 기존 정책 유지 (테스터B 답변)' },
+    { id: 'j1', sec: 'done', pj: 'join', raw: '가입 퍼널 이탈 지표 확인하기' },
+    { id: 'j2', sec: 'done', pj: 'join', raw: '가입 안내 문구 검수 요청 답하기' },
+    { id: 'j3', sec: 'done', pj: 'join', raw: '본인 인증 오류 문의 대응하기' },
+    { id: 'j4', sec: 'done', pj: 'join', raw: '가입 완료 메일 문구 확인했음' },
+    { id: 'o1', sec: 'done', pj: 'ops', doing: true, raw: '관리자 권한 등급 확인하기' },
+    { id: 'ow', sec: 'done', pj: 'ops', kind: 'waiting', raw: '권한 등급 기준 테스터C에게 확인 요청' },
+    { id: 'n1', sec: 'done', pj: null, raw: '슬랙 문의 채널 정리하기' },
+    // 할 일 칸 미리 채우기는 둘만: 진행 중 업무 + 지난주 계획 중 안 끝난 것(실행일·기한이 다음 주인 것은 입력줄로 적는다)
+    { id: 'q2', sec: 'plan', pj: 'pay', raw: '환불 API 연동 확인하기', why: '지난주 계획에 있었는데 아직 안 끝나서 들어왔어요' },
+    { id: 'q4', sec: 'plan', pj: 'ops', raw: '관리자 권한 등급 확인하기', why: '진행 중이라 들어왔어요' },
+    { id: 'm1', sec: 'plan', pj: null, kind: 'note', raw: '금요일 휴가' },
+  ];
+  // 프로젝트 없는 줄을 `기타`로 보내면 맨 아래 `기타` 소제목으로 모인다(점 없음, 괄호 없음)
+  PJ.etc = { name: '기타', dot: null, etc: true };
+  ORDER.push('etc');
+  const BASE_ORDER = [...ORDER];
+  const pjKeys = () => [...ORDER.filter((k) => k !== 'etc'), 'etc'];
+  function makeState() {
+    // 시안 안에서 만든 `새 프로젝트`는 처음 상태로 돌리면 지운다
+    ORDER.splice(0, ORDER.length, ...BASE_ORDER);
+    Object.keys(PJ).forEach((k) => { if (PJ[k].made) delete PJ[k]; });
+    const rows = SEED.map((r) => {
+      const task = !r.kind;
+      return { ...r, text: task ? trimEnd(r.raw) : r.raw, out: !!KIND[r.kind], loose: r.sec === 'done' && !r.pj && task,
+        follow: task && r.sec === 'done' && !!r.pj && /팔로업|QA|대응/.test(r.raw) };
+    });
+    return { rows, names: { done: '[완료]', plan: '[진행 예정]' }, heads: {}, sel: new Set(), anchor: null,
+      editing: null, edited: false, tidy: { open: null, seen: new Set(), newpj: null }, added: 0, mode: 'A', picking: false };
+  }
+
+  /* ---------- 보고 모양(문서와 슬랙 글이 같은 계산을 쓴다) ---------- */
+  const inc = (st, sec, k) => st.rows.filter((r) => r.sec === sec && r.pj === k && !r.out);
+  function autoParen(st, k) {
+    const p = PJ[k];
+    if (p.etc) return '';
+    if (p.date) return `(${p.date} 배포 목표)`;
+    if (p.ver) return `(${p.ver})`;
+    const rs = inc(st, 'done', k).filter((r) => !r.kind);
+    return rs.length && rs.every((r) => r.doing) ? '(진행 중)' : '';
+  }
+  const headKey = (sec, k) => `${sec}:${k}`;
+  function heading(st, sec, k) {
+    if (st.heads[headKey(sec, k)]) return { text: st.heads[headKey(sec, k)], name: st.heads[headKey(sec, k)], pa: '' };
+    const pa = sec === 'done' ? autoParen(st, k) : '';
+    return { text: pa ? `${PJ[k].name} ${pa}` : PJ[k].name, name: PJ[k].name, pa };
+  }
+  function model(st) {
+    const secs = ['done', 'plan'].map((sec) => {
+      const items = [];
+      pjKeys().forEach((k) => {
+        const rs = inc(st, sec, k);
+        if (!rs.length) return;
+        // 팔로업으로 묶인 줄은 슬랙 글에서 그 프로젝트 맨 아래 `팔로업` 한 단어 한 줄이 된다(업무를 나열하지 않는다)
+        const fol = sec === 'done' ? rs.filter((r) => r.follow) : [];
+        const lines = rs.filter((r) => !fol.includes(r)).map((r) => r.text);
+        if (fol.length) lines.push('팔로업');
+        items.push({ name: heading(st, sec, k).text, lines });
+      });
+      st.rows.filter((r) => r.sec === sec && !r.pj && !r.out).forEach((r) => items.push({ name: r.text, lines: [] }));
+      return { h: st.names[sec], items };
+    });
+    return { title: TITLE, secs };
+  }
+  const slackHtml = (m) => `<p><b>${esc(m.title)}</b></p>` + m.secs.map((s) => `<p><b>${esc(s.h)}</b></p>`
+    + (s.items.length ? `<ul>${s.items.map((i) => `<li>${esc(i.name)}${i.lines.length ? `<ul>${i.lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}</li>`).join('')}</ul>` : '')).join('');
+  const slackText = (m) => [m.title, ...m.secs.map((s) => [s.h, ...s.items.flatMap((i) => ['• ' + i.name, ...i.lines.map((l) => '    ◦ ' + l)])].join('\n'))].join('\n\n');
+  const slackCount = (m) => 1 + m.secs.reduce((n, s) => n + 1 + s.items.reduce((a, i) => a + 1 + i.lines.length, 0), 0);
+
+  /* ---------- 문서 조각 ---------- */
+  function rowEditor(r, o = {}) {
+    return `<div class="rp-ed" data-ed="row:${r.id}"><textarea class="rp-ta" rows="1" aria-label="문장 고치기" data-focus="t:${r.id}"${o.still ? ' readonly' : ''}>${esc(o.value || r.text)}</textarea>`
+      + `<div class="rp-help"><button class="d-link" type="button" data-outtoggle="${r.id}">${r.out ? '보고에 포함' : '보고에서 빼기'}</button><span>Enter 저장 · Esc 취소</span></div></div>`;
+  }
+  function rowHtml(st, r, o = {}) {
+    const sel = st.sel.has(r.id) || (o.sel || []).includes(r.id);
+    const hover = (o.hover || []).includes(r.id);
+    const fol = r.sec === 'done' && r.follow && !r.out;
+    const picking = o.picking !== undefined ? o.picking : st.picking;
+    const cls = ['rp-s', r.out && 'is-out', fol && 'is-fol', sel && 'is-selected', hover && 'is-hover', picking && 'is-pick'].filter(Boolean).join(' ');
+    // 나중에 할 일에도 담을지 — 할 일 칸 프로젝트 아래에 적은 줄에만, 작은 글자 질문 하나
+    const ask = r.kind === 'mine' && r.ask ? `<span class="rp-ask${r.idle || o.idle ? ' is-idle' : ''}">${r.later
+      ? `담았어요 · <button class="d-link" type="button" data-later="${r.id}" data-focus="l:${r.id}">되돌리기</button>`
+      : `나중에 할 일에도 담을까요? <button class="d-link" type="button" data-later="${r.id}" data-focus="l:${r.id}">담기</button>`}</span>` : '';
+    const lead = picking
+      ? `<span class="bu"><input type="checkbox" class="d-selcb" data-pickrow="${r.id}" data-focus="s:${r.id}" aria-label="줄 고르기: ${esc(r.text)}"${sel ? ' checked' : ''}></span>`
+      : '<span class="bu" aria-hidden="true">•</span>';
+    const tag = KIND[r.kind] || (r.sec === 'done' && r.follow ? '팔로업' : '');
+    const tips = [r.raw !== r.text && !r.kind ? `업무: ${r.raw}` : '', r.why || ''].filter(Boolean).join('\n');
+    const editing = (st.editing && st.editing.key === 'row:' + r.id) || (o.edit === r.id);
+    const body = editing ? rowEditor(r, { still: o.still })
+      : `<span class="rp-edit${(o.textHover || []).includes(r.id) ? ' is-hover' : ''}" tabindex="0" role="button" data-edit="row:${r.id}" data-focus="e:${r.id}"${tips ? ` title="${esc(tips)}"` : ''}>${esc(r.text)}</span>`;
+    const grip = picking || st.mode === 'B' && !o.forceGrip ? '' : `<button class="rp-grip" type="button" data-grip="${r.id}" data-focus="g:${r.id}" aria-pressed="${sel}" aria-label="줄 고르기: ${esc(r.text)}">${GRIP}</button>`;
+    return `<div class="${cls}" data-id="${r.id}">${grip}`
+      + `${lead}<div class="tx">${tag ? `<span class="tg">${tag}</span>` : ''}${body}${r.out ? '<span class="sr"> (보고에서 뺌)</span>' : fol ? '<span class="sr"> (팔로업으로 묶임 — 슬랙 글에는 팔로업 한 줄)</span>' : ''}${ask}</div></div>`;
+  }
+  const dotOf = (k) => PJ[k].dot == null ? '' : `<span class="d-pjdot" data-pj="${PJ[k].dot}"></span>`;
+  function pjHtml(st, sec, k, o = {}) {
+    const h = heading(st, sec, k);
+    const key = 'pj:' + headKey(sec, k);
+    const editing = (st.editing && st.editing.key === key) || o.edit;
+    const inner = editing
+      ? `<div class="rp-ren" data-ed="${key}"><input class="d-din is-focus" value="${esc(o.value || h.text)}" aria-label="소제목 고치기" data-focus="i:${key}"${o.still ? ' readonly' : ''}><div class="rp-help">보고에서만 바뀌어요 — 업무의 프로젝트 이름은 그대로예요 · Enter 저장 · Esc 취소</div></div>`
+      : `<button class="rp-rename${o.hover ? ' is-hover' : ''}" type="button" data-edit="${key}" data-focus="e:${key}" title="누르면 소제목을 고쳐요">${esc(h.name)}${h.pa ? ` <span class="pa">${esc(h.pa)}</span>` : ''}</button>`;
+    return `<div class="rp-pj">${dotOf(k)}${inner}</div>`;
+  }
+  function secHtml(st, sec, o = {}) {
+    const key = 'sec:' + sec;
+    const editing = (st.editing && st.editing.key === key) || o.edit;
+    const inner = editing
+      ? `<div class="rp-ren" data-ed="${key}"><input class="d-din is-focus" value="${esc(o.value || st.names[sec])}" aria-label="칸 이름 고치기" data-focus="i:${key}"${o.still ? ' readonly' : ''}><div class="rp-help">다음 주에도 이 이름으로 나와요 · Enter 저장 · Esc 취소</div></div>`
+      : `<button class="rp-rename${o.hover ? ' is-hover' : ''}" type="button" data-edit="${key}" data-focus="e:${key}" title="누르면 칸 이름을 고쳐요">${esc(st.names[sec])}</button>`;
+    return `<h3 class="rp-h">${inner}</h3>`;
+  }
+  const qin = (key, ph, o = {}) => `<label class="d-qin rp-qin${o.focus ? ' is-focus' : ''}"><span class="pl">${PLUS}</span>`
+    + `<input type="text" placeholder="${ph}" aria-label="${ph}" autocomplete="off" enterkeyhint="done" data-qin="${key}" data-focus="q:${key}" value="${esc(o.value || '')}"${o.still ? ' readonly' : ''}>`
+    + `<span class="as" aria-live="polite">${o.as || ''}</span></label>`;
+
+  /* 다듬기 한 줄 — 사라지지 않는다. 본 항목은 `N ✓`, 셋 다 보면 줄 전체가 한 단계 더 흐려진다. 언제든 다시 펼쳐 고친다. */
+  const looseRows = (st) => st.rows.filter((r) => r.loose);
+  const TIDY = {
+    follow: { label: () => '팔로업', has: (st) => st.rows.some((r) => r.sec === 'done' && r.pj && !r.kind), n: (st) => st.rows.filter((r) => r.sec === 'done' && r.follow && !r.out).length },
+    dec: { label: () => '결정', has: (st) => st.rows.some((r) => r.kind === 'decision'), n: (st) => st.rows.filter((r) => r.kind === 'decision' && !r.out).length || st.rows.filter((r) => r.kind === 'decision').length },
+    // 아직 안 정한 줄이 있으면 `프로젝트 없음`, 전부 `기타`로 보냈으면 `기타`
+    nopj: { label: (st) => { const L = looseRows(st); return L.some((r) => !r.pj) || !L.every((r) => r.pj === 'etc') ? '프로젝트 없음' : '기타'; },
+      has: (st) => looseRows(st).length > 0, n: (st) => { const L = looseRows(st); return L.filter((r) => !r.pj).length || L.length; } },
+  };
+  const tidyItems = (st) => Object.keys(TIDY).filter((k) => TIDY[k].has(st) && (k !== 'follow' || st.rows.some((r) => r.follow) || st.tidy.seen.has('follow')));
+  function tidyBox(st, k, o = {}) {
+    if (k === 'follow') {
+      return pjKeys().map((p) => {
+        const rs = st.rows.filter((r) => r.sec === 'done' && r.pj === p && !r.kind && !r.out);
+        if (!rs.length) return '';
+        return `<div class="tg">${dotOf(p)}${esc(PJ[p].name)}</div>`
+          + rs.map((r) => `<label class="rp-chk"><input type="checkbox" class="d-wcb" data-tchk="follow" data-id="${r.id}" data-focus="c:${r.id}"${r.follow ? ' checked' : ''}><span>${esc(r.text)}</span></label>`).join('');
+      }).join('') + '<p class="ft">체크한 줄은 슬랙 글에서 그 프로젝트 맨 아래 <b>팔로업</b> 한 줄로 묶여요. 문서에는 흐리게 남아 무엇이 묶였는지 보여요. 제목에 팔로업 · QA · 대응이 있으면 미리 체크돼요.</p>';
+    }
+    if (k === 'dec') {
+      return st.rows.filter((r) => r.kind === 'decision').map((r) => `<div class="tg">${dotOf(r.pj)}${esc(PJ[r.pj].name)}</div>`
+        + `<label class="rp-chk"><input type="checkbox" class="d-wcb" data-tchk="dec" data-id="${r.id}" data-focus="c:${r.id}"${r.out ? '' : ' checked'}><span>${esc(r.text)}</span></label>`).join('')
+        + '<p class="ft">결정은 처음엔 보고에서 빠져 있어요. 체크한 결정만 그 프로젝트 아래 한 줄로 들어가요.</p>';
+    }
+    // 프로젝트 없음 — 처음에 프로젝트가 없던 줄을 늘 보여 주고, 지금 고른 것이 눌린 채로 선다(다시 고칠 수 있게)
+    const newpj = o.newpj !== undefined ? o.newpj : st.tidy.newpj;
+    return looseRows(st).map((r) => `<div class="rp-pick"><span class="t">${esc(r.text)}</span><div class="ops">`
+      + pjKeys().map((p) => `<button class="d-btn sm${r.pj === p ? ' acc' : ''}" type="button" aria-pressed="${r.pj === p}" data-pick="${r.id}" data-pj="${p}" data-focus="k:${r.id}:${p}">${dotOf(p)}${esc(PJ[p].name)}</button>`).join('')
+      + (newpj === r.id
+        ? `<label class="d-qin rp-newpj${o.still ? ' is-focus' : ''}"><span class="pl">${PLUS}</span><input type="text" placeholder="새 프로젝트 이름" aria-label="새 프로젝트 이름" data-newpj="${r.id}" data-focus="n:${r.id}" autocomplete="off" enterkeyhint="done" value="${esc(o.newval || '')}"${o.still ? ' readonly' : ''}></label>`
+        : `<button class="d-btn sm" type="button" data-newpjopen="${r.id}" data-focus="m:${r.id}">새 프로젝트…</button>`)
+      + '</div></div>').join('') + `<p class="ft">${newpj ? '이름을 적고 Enter — 이 보고와 업무에 함께 쓰여요 · Esc 취소' : '고른 프로젝트 아래로 옮겨져요(업무의 프로젝트도 같이 바뀌어요). <b>기타</b>는 프로젝트 없이 맨 아래 기타 소제목으로 모여요.'}</p>`;
+  }
+  function tidyHtml(st, o = {}) {
+    const items = tidyItems(st);
+    const open = o.open !== undefined ? o.open : st.tidy.open;
+    if (!items.length) return '';
+    const quiet = !open && items.every((k) => st.tidy.seen.has(k));
+    const parts = items.map((k) => {
+      const seen = st.tidy.seen.has(k) && open !== k;
+      return `<button class="rp-tidyit${seen ? ' is-seen' : ''}" type="button" aria-expanded="${open === k}" data-tidy="${k}" data-focus="d:${k}">${TIDY[k].label(st)} <span class="n">${TIDY[k].n(st)}${seen ? ' ✓' : ''}</span></button>`;
+    });
+    return `<div class="rp-tidy${quiet ? ' is-quiet' : ''}" role="group" aria-label="다듬기"><span class="k">다듬기</span>${parts.join('<span class="dot" aria-hidden="true">·</span>')}</div>`
+      + (open ? `<div class="rp-tidybox" data-tidybox="${open}" role="group" aria-label="${TIDY[open].label(st)} 고르기"${o.still ? ' style="animation:none"' : ''}>${tidyBox(st, open, o)}</div>` : '');
+  }
+  // B(고르기 모드)일 때만 머리에 조용한 글자 버튼 `고르기`가 늘 선다
+  const docHead = (o = {}) => `<div class="rp-hd"><span class="rp-title"><button class="rp-rename" type="button" title="누르면 제목을 고쳐요">이번 주</button></span><span class="sub">9/28 ~ 10/4</span>`
+    + `<span class="rp-acts">${o.pick ? `<button class="d-headnum${o.pickOn ? ' is-on' : ''}" type="button" data-pickmode aria-pressed="${!!o.pickOn}"${o.dt ? ` data-dt="${o.dt}"` : ''}>고르기</button>` : ''}${o.mini ? '' : `<button class="d-headnum" type="button">다음 주 계획</button>${MORE}`}</span></div>`;
+  // 문서에서 한 프로젝트의 줄 차례 — 팔로업으로 묶인 줄은 그 프로젝트 맨 아래로(흐리게)
+  const pjRows = (st, sec, k) => { const rs = st.rows.filter((r) => r.sec === sec && r.pj === k); return [...rs.filter((r) => !(r.follow && sec === 'done' && !r.out)), ...rs.filter((r) => r.follow && sec === 'done' && !r.out)]; };
+  function docHtml(st) {
+    let h = `<article class="rp-doc" id="doc1"><div class="rp-body">${docHead({ pick: st.mode === 'B', pickOn: st.picking })}`
+      + (st.edited ? '' : '<p class="rp-hint">글자를 누르면 고칠 수 있어요</p>') + tidyHtml(st);
+    ['done', 'plan'].forEach((sec) => {
+      h += `<div class="rp-sec">${secHtml(st, sec)}`;
+      pjKeys().forEach((k) => {
+        const rs = pjRows(st, sec, k);
+        if (!rs.length && (sec === 'done' || PJ[k].etc)) return;
+        h += pjHtml(st, sec, k) + rs.map((r) => rowHtml(st, r)).join('');
+        if (sec === 'plan' && !PJ[k].etc) h += qin('pj:' + k, '할 일 적기');
+      });
+      const loose = st.rows.filter((r) => r.sec === sec && !r.pj);
+      if (loose.length || sec === 'plan') h += '<div class="rp-sep"></div>' + loose.map((r) => rowHtml(st, r)).join('');
+      if (sec === 'plan') h += qin('note', '한 줄 적기 (휴가 · 이슈)');
+      h += '</div>';
+    });
+    return h + '</div></article>';
+  }
+  function slackCard(st, o = {}) {
+    const m = o.model || model(st);
+    const btn = o.condense === false ? '' : `<button class="d-headnum" type="button" data-act="condense"${o.busy ? ' disabled' : ''}>${o.busy === 'run' ? '줄이는 중…' : 'Claude로 줄이기'}</button>`;
+    return `<aside class="rp-slack" aria-label="슬랙 미리보기"><div class="rp-slacktop"><div class="rp-slackhd">슬랙에 붙이면</div>${btn}`
+      + `<span class="pri-wrap"><button class="d-btn pri" type="button" data-copy="${o.copy || 's1'}">슬랙용으로 복사</button></span></div>${o.under || ''}`
+      + `<div class="sl">${slackHtml(m)}</div></aside>`;
+  }
+
+  /* ---------- 1. 지금 / 바뀐 뒤 ---------- */
+  let st = makeState();
+  let view = 'new';
+  const weeks = `<nav class="rp-weeks" aria-label="주차 목록"><div class="d-grp">주차 <span class="n">4</span></div>`
+    + [['이번 주', '9/28 ~ 10/4', 1], ['9월 4주차', '9/21 ~ 9/27'], ['9월 3주차', '9/14 ~ 9/20'], ['9월 2주차', '9/7 ~ 9/13']]
+      .map(([n, r, cur]) => `<div class="rp-wk"${cur ? ' aria-current="true"' : ''}><span class="nm">${n}</span><span class="rg">${r}</span></div>`).join('') + '</nav>';
+  // 지금 화면 — 업무 하나가 줄 하나, 칸 다섯, 업무 제목 그대로
+  const oldRow = (t) => `<div class="rp-s"><span class="bu" aria-hidden="true">•</span><div class="tx">${esc(t)}</div></div>`;
+  const oldPj = (k) => `<div class="rp-pj"><span class="d-pjdot" data-pj="${PJ[k].dot}"></span><span>${PJ[k].name}</span></div>`;
+  const plainH = (t) => `<h3 class="rp-h">${t}</h3>`;
+  const raws = (pfx) => SEED.filter((r) => r.id.startsWith(pfx) && !r.kind && r.sec === 'done' && !r.doing).map((r) => r.raw);
+  const nowDoc = `<article class="rp-doc"><div class="rp-body">${docHead()}`
+    + plainH('완료한 일') + oldPj('pay') + raws('p').map(oldRow).join('') + oldPj('join') + raws('j').map(oldRow).join('') + raws('n').map(oldRow).join('')
+    + plainH('진행 중') + oldPj('ops') + oldRow('관리자 권한 등급 확인하기')
+    + plainH('새로 정해진 것') + oldPj('pay') + oldRow('부분 환불은 1차 범위에서 제외')
+    + plainH('확인 완료') + oldPj('pay') + oldRow('환불 수수료는 기존 정책 유지 (테스터B 답변)')
+    + plainH('확인 대기') + oldPj('ops') + oldRow('권한 등급 기준 테스터C에게 확인 요청')
+    + plainH('다음 주 계획') + '<p class="rp-hint">직접 쓴 문장만 들어가요 — 한 문장씩 Enter</p></div></article>';
+  const nowLines = [{ c: 'title', t: TITLE }, '', { c: 'section', t: '[완료]' }, '', { c: 'project', t: '결제 리뉴얼' },
+    ...raws('p').map((t) => ({ c: 'item', t: '  ' + t })), { c: 'item', t: '  환불 수수료는 기존 정책 유지 (테스터B 답변)' }, '', { c: 'project', t: '가입 개선' },
+    ...raws('j').map((t) => ({ c: 'item', t: '  ' + t })), '', { c: 'item', t: '슬랙 문의 채널 정리하기' }, '', { c: 'section', t: '[진행중]' }, '',
+    { c: 'project', t: '운영툴' }, { c: 'item', t: '  관리자 권한 등급 확인하기' }];
+  const nowCount = nowLines.filter((l) => l !== '').length;
+  const nowSlack = `<aside class="rp-slack" aria-label="슬랙 미리보기"><div class="rp-slacktop"><div class="rp-slackhd">슬랙에 붙이면</div><span class="pri-wrap"><button class="d-btn pri" type="button">슬랙용으로 복사</button></span></div>`
+    + '<div class="rp-slackbox">' + nowLines.map((l) => l === '' ? '\n' : `<div class="${l.c}">${esc(l.t)}</div>`).join('') + '</div></aside>';
+
+  let lastSlack = '';
+  function drawS1() {
+    const fk = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.focus : null;
+    const inS1 = document.activeElement && document.activeElement.closest && document.activeElement.closest('#s1');
+    if (view === 'now') {
+      $('#s1').innerHTML = weeks + nowDoc + nowSlack;
+      $('#s1Note').textContent = `슬랙 글 ${nowCount}줄 · 다음 주 칸은 직접 쓰기 전까지 비어 있어요`;
+    } else {
+      const m = model(st);
+      const prev = lastSlack ? new Set(lastSlack) : null;
+      $('#s1').innerHTML = weeks + docHtml(st) + slackCard(st, { model: m });
+      // 바뀐 줄만 잠깐 밝힌다
+      const lis = $$('#s1 .sl li, #s1 .sl p');
+      const now = lis.map((n) => n.firstChild ? n.firstChild.textContent : '');
+      if (prev) lis.forEach((n, i) => { if (!prev.has(now[i])) n.classList.add('is-new'); });
+      lastSlack = now;
+      $('#s1Note').textContent = `슬랙 글 ${slackCount(m)}줄 · 할 일 칸까지 들어 있어요 (지금은 ${nowCount}줄)`;
+    }
+    drawSelbar();
+    drawS6();
+    if (st.editing && view === 'new') {
+      const inp = $('#s1 [data-ed] textarea, #s1 [data-ed] input');
+      if (inp) { fit(inp); if (st.editing.fresh) { inp.focus(); inp.select(); st.editing.fresh = false; } else if (fk && fk[0] !== 'e') inp.focus(); }
+    } else if (fk && inS1) {
+      const el = $(`#s1 [data-focus="${CSS.escape(fk)}"]`);
+      if (el) el.focus();
+    }
+  }
+  const fit = (ta) => { if (ta.tagName === 'TEXTAREA') { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; } };
+
+  /* 선택 막대 — 오늘 탭 .d-selbar 와 같은 부품. Esc로 닫힌다. A(손잡이)는 고른 줄이 있을 때만, B(고르기 모드)는 모드 내내 선다. */
+  const barInner = (o) => (o.n ? `<span class="ct">${o.n}줄 고름</span>` : '<span class="hint">고를 줄을 눌러요</span>')
+    + (o.inN ? `<button class="d-btn sm" type="button" data-selact="out">보고에서 빼기 ${o.inN}</button>` : '')
+    + (o.outN ? `<button class="d-btn sm" type="button" data-selact="in">보고에 포함 ${o.outN}</button>` : '')
+    + (o.pick ? '<span class="sp"></span><button class="d-btn acc sm" type="button" data-selact="done">완료</button>'
+      : `${o.n ? '<span class="hint">⌘·Shift로 여러 줄</span>' : ''}<span class="sp"></span><button class="d-btn sm" type="button" data-selact="clear">취소</button>`);
+  const barCounts = (st, ids) => { const rs = st.rows.filter((r) => ids.has(r.id)); const inN = rs.filter((r) => !r.out).length; return { n: rs.length, inN, outN: rs.length - inN }; };
+  let barShown = false;
+  function drawSelbar() {
+    const bar = $('#selbar');
+    if ((!st.sel.size && !st.picking) || view !== 'new') { bar.hidden = true; barShown = false; bar.innerHTML = ''; return; }
+    bar.innerHTML = `<div class="bar${barShown ? '' : ' is-in'}">${barInner({ ...barCounts(st, st.sel), pick: st.picking })}</div>`;
+    bar.hidden = false; barShown = true;
+  }
+  function pickGrip(id, e, attr = 'data-grip') {
+    const order = $$(`#s1 [${attr}]`).map((b) => b.getAttribute(attr));
+    if (e.shiftKey && st.anchor && order.includes(st.anchor)) {
+      const a = order.indexOf(st.anchor), b = order.indexOf(id);
+      order.slice(Math.min(a, b), Math.max(a, b) + 1).forEach((x) => st.sel.add(x));
+    } else if (e.metaKey || e.ctrlKey || e.detail === 0 || st.picking) {
+      // ⌘ 누름 · 키보드(Space) · 고르기 모드는 한 줄씩 더하고 뺀다
+      if (st.sel.has(id)) st.sel.delete(id); else st.sel.add(id);
+      st.anchor = id;
+    } else {
+      st.sel = st.sel.size === 1 && st.sel.has(id) ? new Set() : new Set([id]);
+      st.anchor = id;
+    }
+    st.editing = null;
+    drawS1();
+  }
+  function endPick() { st.picking = false; st.sel.clear(); drawS1(); const b = $('#s1 [data-pickmode]'); if (b) b.focus(); }
+  // 나중에 할 일 질문은 몇 초 뒤 조용히 숨는다(그 줄에 손을 올리면 다시 보인다)
+  function idleLater(r) {
+    clearTimeout(r.t);
+    r.idle = false;
+    r.t = setTimeout(() => { r.idle = true; const el = $(`#s1 .rp-s[data-id="${r.id}"] .rp-ask`); if (el && !el.contains(document.activeElement)) el.classList.add('is-idle'); }, 4000);
+  }
+  function saveEdit(key, value) {
+    const text = value.replace(/\s+/g, ' ').trim();
+    const [kind, a, b] = key.split(':');
+    if (text) {
+      if (kind === 'row') { const r = st.rows.find((x) => x.id === a); if (r) r.text = text; }
+      else if (kind === 'sec') { st.names[a] = text; $$(`[data-bound="${a}"]`).forEach((n) => { n.textContent = text; }); }
+      else if (kind === 'pj') { const auto = heading({ ...st, heads: {} }, a, b).text; if (text === auto) delete st.heads[headKey(a, b)]; else st.heads[headKey(a, b)] = text; }
+      st.edited = true;
+    }
+    st.editing = null;
+    drawS1();
+    const back = $(`#s1 [data-focus="e:${CSS.escape(kind === 'row' ? a : key)}"]`);
+    if (back) back.focus();
+  }
+  function cancelEdit() {
+    const key = st.editing && st.editing.key;
+    st.editing = null; drawS1();
+    if (key) { const back = $(`#s1 [data-focus="e:${CSS.escape(key.startsWith('row:') ? key.slice(4) : key)}"]`); if (back) back.focus(); }
+  }
+  function closeTidy(then) {
+    const box = $('#s1 [data-tidybox]');
+    const done = () => { st.tidy.open = null; if (then) then(); drawS1(); };
+    if (!box || matchMedia('(prefers-reduced-motion: reduce)').matches) return done();
+    box.classList.add('is-out');
+    setTimeout(done, 140);
+  }
+
+  /* ---------- 2. 줄 하나에서 하는 일(멈춰 놓은 모습) ---------- */
+  function drawStill() {
+    const s = makeState();
+    const R = (id) => s.rows.find((r) => r.id === id);
+    const slackMini = (m) => `<div class="sl">${slackHtml(m).replace(/^<p><b>[^<]*<\/b><\/p>/, '')}</div>`;
+    $('#s2').innerHTML = [
+      `<div class="snap" data-still><h3>글자를 누르면 그 자리에서 고쳐요</h3><p class="cap">입력칸 아래 안내 줄에 <b>보고에서 빼기</b> 글자 버튼 하나와 <b>Enter 저장 · Esc 취소</b>가 있어요. 따로 여는 메뉴는 없어요.</p>
+        <div class="two"><div class="stage"><div class="st">손을 올리면 글자에 밑줄</div>${pjHtml(s, 'done', 'pay')}${['p1', 'p2'].map((id) => rowHtml(s, R(id), { textHover: ['p2'] })).join('')}</div>
+        <div class="stage"><div class="st">누르면 그 자리가 입력칸</div>${pjHtml(s, 'done', 'pay')}${rowHtml(s, R('p1'))}${rowHtml(s, R('p2'), { edit: 'p2', still: true })}</div></div></div>`,
+
+      (() => {
+        const s2 = makeState(); s2.rows.find((r) => r.id === 'p3').out = true;
+        const R2 = (id) => s2.rows.find((r) => r.id === id);
+        const m = model(s2); m.secs = [{ h: m.secs[0].h, items: [m.secs[0].items[0]] }];
+        return `<div class="snap" data-still><h3>뺀 줄은 제자리에 흐리게</h3><p class="cap">지우지 않고 흐리게만 남아요(취소선 없음, 읽어 주는 이름은 <b>보고에서 뺌</b>). 슬랙 글에는 없어요. 결정 · 확인 줄은 <b>처음부터 흐린 채</b> 그 프로젝트 아래 있어요. 팔로업으로 묶인 줄도 맨 아래 흐리게 남고, 슬랙 글에는 <b>팔로업</b> 한 줄만 나가요.</p>
+        <div class="two"><div class="stage"><div class="st">문서</div>${pjHtml(s2, 'done', 'pay')}${pjRows(s2, 'done', 'pay').map((r) => rowHtml(s2, r, { sel: ['p3', 'pd'] })).join('')}</div>
+        <div><div class="st">슬랙 글</div>${slackMini(m)}</div></div>
+        <div class="d-selbar is-still" role="group" aria-label="고른 줄"><div class="bar">${barInner({ n: 2, outN: 2 })}</div></div></div>`;
+      })(),
+
+      `<div class="snap" data-still><h3>보고 줄은 끝말을 다듬어 나와요</h3><p class="cap">AI가 아니라 규칙이에요 — 업무 제목 끝의 <b>~하기 · ~했음 · 요청 답하기</b>만 떼요. 업무 제목은 그대로이고, 보고 줄에 손을 올리면 원래 제목이 풍선으로 보여요. 고친 줄은 다시 다듬지 않아요.</p>
+        <table class="map"><thead><tr><th>업무 제목(그대로)</th><th>보고 줄</th></tr></thead><tbody>
+        ${['p1', 'p2', 'p4', 'j2', 'j3', 'q2'].map((id) => { const r = R(id); const cut = r.raw.slice(r.text.length); return `<tr><td>${esc(r.text)}<span class="cut">${esc(cut)}</span></td><td>${esc(r.text)}</td></tr>`; }).join('')}
+        </tbody></table></div>`,
+    ].join('');
+
+    /* ---------- 3. 다듬기 한 줄 ---------- */
+    const t1 = makeState();
+    const t2 = makeState(); t2.tidy.seen.add('follow');
+    const t3 = makeState(); t3.tidy.seen.add('follow'); t3.tidy.seen.add('dec');
+    const t4 = makeState(); ['follow', 'dec', 'nopj'].forEach((k) => t4.tidy.seen.add(k)); t4.rows.find((r) => r.id === 'n1').pj = 'etc';
+    const first3 = (x) => `${pjHtml(x, 'done', 'pay')}${['p1', 'p2'].map((id) => rowHtml(x, x.rows.find((r) => r.id === id))).join('')}`;
+    $('#s3').innerHTML = [
+      `<div class="snap" data-still><h3>평소 — 한 줄</h3><p class="cap">할 것이 있는 항목만 서요. 숫자는 지금 상태(팔로업으로 묶인 줄 2 · 결정 1 · 프로젝트 없는 줄 1)예요. <b>확인했어요</b> 같은 버튼은 없어요.</p>
+        <div class="stage">${docHead()}${tidyHtml(t1, { still: true })}${secHtml(t1, 'done')}${first3(t1)}</div></div>`,
+      `<div class="snap" data-still><h3>팔로업을 펼치면</h3><p class="cap">프로젝트별 업무 체크 목록이에요. 체크한 줄은 문서에서 그 프로젝트 맨 아래 흐린 글씨로 남고, 슬랙 글에서는 그 프로젝트 맨 아래 <b>팔로업</b> 한 단어 한 줄이 돼요.</p>
+        <div class="stage">${tidyHtml(t1, { open: 'follow', still: true })}</div></div>`,
+      `<div class="snap" data-still><h3>결정을 펼치면</h3><p class="cap">보고에 넣을 결정만 체크해요. 팔로업은 본 뒤라 <b>2 ✓</b>예요.</p>
+        <div class="stage">${tidyHtml(t2, { open: 'dec', still: true })}</div></div>`,
+      `<div class="snap" data-still><h3>프로젝트 없음을 펼치면</h3><p class="cap">그 자리에서 프로젝트를 골라요. <b>기타</b>는 프로젝트 없이 맨 아래 기타 소제목으로 모이고(슬랙 글에도 기타), <b>새 프로젝트…</b>는 그 자리에서 이름을 적어 만들어요.</p>
+        <div class="stage">${tidyHtml(t3, { open: 'nopj', still: true })}</div></div>`,
+      `<div class="snap" data-still><h3>새 프로젝트…를 누르면</h3><p class="cap">버튼 자리가 입력칸이 돼요. 이름을 적고 Enter — 이 보고와 업무에 함께 쓰여요. Esc면 그대로예요.</p>
+        <div class="stage">${tidyHtml(t3, { open: 'nopj', still: true, newpj: 'n1', newval: '문의 채널 개편' })}</div></div>`,
+      `<div class="snap" data-still><h3>다 본 뒤 — 조용히 남아요</h3><p class="cap">셋 다 펼쳐 보면 줄이 한 단계 흐려지고 항목마다 ✓가 붙어요. 사라지지 않아서 언제든 다시 눌러 고쳐요. 기타로 보낸 줄은 한 일 칸 맨 아래 <b>기타</b> 소제목에 모여요.</p>
+        <div class="stage">${docHead()}${tidyHtml(t4)}${secHtml(t4, 'done')}${first3(t4)}<div class="st">…</div>${pjHtml(t4, 'done', 'etc')}${rowHtml(t4, t4.rows.find((r) => r.id === 'n1'))}</div></div>`,
+    ].join('');
+
+    /* ---------- 4. 이름 고치기 ---------- */
+    const n = makeState();
+    $('#s4').innerHTML = [
+      `<div class="snap" data-still><h3>칸 이름</h3><p class="cap">사람마다 하나예요(<b>[완료]</b> · <b>[완료한 일]</b> · <b>지난주 한 일</b>…). 한 번 고치면 이 맥에 기억해서 다음 주에도 같은 이름으로 나와요.</p>
+        <div class="two"><div class="stage"><div class="st">손을 올리면</div>${secHtml(n, 'done', { hover: true })}</div>
+        <div class="stage"><div class="st">누르면 그 자리가 입력칸</div>${secHtml(n, 'done', { edit: true, value: '[완료한 일]', still: true })}</div></div></div>`,
+      `<div class="snap" data-still><h3>프로젝트 이름(소제목)</h3><p class="cap">괄호까지 한 글자처럼 고쳐요. 보고에서만 바뀌고 업무의 프로젝트 이름은 그대로예요 — 이 안내는 입력칸 아래 안내 줄에만 있어요.</p>
+        <div class="two"><div class="stage"><div class="st">손을 올리면</div>${pjHtml(n, 'done', 'pay', { hover: true })}${rowHtml(n, n.rows[0])}</div>
+        <div class="stage"><div class="st">누르면 그 자리가 입력칸</div>${pjHtml(n, 'done', 'pay', { edit: true, value: '결제 리뉴얼 (QA 중)', still: true })}${rowHtml(n, n.rows[0])}</div></div></div>`,
+      `<div class="snap" data-still><h3>소제목 괄호는 자동으로</h3><p class="cap">한 일 칸 소제목에만 붙어요. 사람이 고친 소제목은 자동 괄호가 덮지 않아요.</p>
+        <table class="map"><thead><tr><th>소제목</th><th>왜</th></tr></thead><tbody>
+        <tr><td>결제 리뉴얼 <b>(10/15 배포 목표)</b></td><td>지라 배포 버전에 날짜가 있음</td></tr>
+        <tr><td>가입 개선 <b>(v2.70)</b></td><td>배포 버전은 있는데 날짜가 없음</td></tr>
+        <tr><td>운영툴 <b>(진행 중)</b></td><td>보고에 든 줄이 전부 진행 중</td></tr>
+        <tr><td>운영툴</td><td>끝낸 줄과 진행 중이 섞임 — 안 붙음</td></tr></tbody></table></div>`,
+    ].join('');
+
+    /* ---------- 5. 할 일 칸 ---------- */
+    const p = makeState();
+    const p2 = makeState();
+    p2.rows.push({ id: 'x1', sec: 'plan', pj: 'pay', kind: 'mine', raw: '디자인 리뷰 일정 조율', text: '디자인 리뷰 일정 조율', ask: true, later: true });
+    p2.rows.push({ id: 'x2', sec: 'plan', pj: 'pay', kind: 'mine', raw: '환불 오류 알림 문구 정리', text: '환불 오류 알림 문구 정리', ask: true });
+    const planOf = (x, o = {}) => pjKeys().filter((k) => !PJ[k].etc).map((k) => pjHtml(x, 'plan', k) + x.rows.filter((r) => r.sec === 'plan' && r.pj === k).map((r) => rowHtml(x, r, o)).join('')
+      + qin('pj:' + k, '할 일 적기', o.q && o.q[k] ? o.q[k] : {})).join('')
+      + '<div class="rp-sep"></div>' + x.rows.filter((r) => r.sec === 'plan' && !r.pj).map((r) => rowHtml(x, r)).join('') + qin('note', '한 줄 적기 (휴가 · 이슈)', o.q && o.q.note ? o.q.note : {});
+    $('#s5').innerHTML = [
+      `<div class="snap" data-still><h3>열면 두 가지만 들어와 있어요</h3><p class="cap"><b>진행 중인 업무</b>와 <b>지난주 계획 중 안 끝난 것</b>만이에요. 왜 들어왔는지는 줄에 손을 올렸을 때의 풍선으로만 알려요. 필요 없는 줄은 골라서 <b>보고에서 빼기</b> — 뺀 줄은 다시 채워지지 않아요.</p>
+        <div class="stage">${secHtml(p, 'plan')}${planOf(p, { hover: ['q4'] })}</div></div>`,
+      `<div class="snap" data-still><h3>적어 담기 — 할 일 업무는 고를 때만</h3><p class="cap">회의 적기와 같은 입력줄이에요. Enter로 담기면 <b>보고에만</b> 적히고, 새 줄 옆에 작은 질문 <b>나중에 할 일에도 담을까요? 담기</b>가 붙어요. 누르면 <b>담았어요 · 되돌리기</b>. 그냥 두면 몇 초 뒤 숨고 그 줄에 손을 올리면 다시 보여요. 초점은 입력줄에 그대로라 이어서 적어요. 칸 맨 아래 줄은 질문 없이 글만 적혀요.</p>
+        <div class="stage">${secHtml(p2, 'plan')}${planOf(p2, { q: { pay: { focus: true, value: '환불 오류 메일 발송 일정 확인', still: true }, note: { value: '', still: true } } })}</div></div>`,
+    ].join('');
+  }
+
+  /* ---------- 2. 데모 A(손잡이) · B(고르기 모드) — 저절로 재생, 움직임 줄이기면 단계 버튼 ---------- */
+  const RM = matchMedia('(prefers-reduced-motion: reduce)');
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const DEMO_ROWS = makeState().rows.filter((r) => r.sec === 'done' && r.pj === 'pay' && r.id !== 'pa');
+  const CURSOR = '<svg viewBox="0 0 18 22" aria-hidden="true"><path d="M2 2v15.5l4.2-4 3 6.3 2.6-1.2-3-6.2h6z" fill="#fff" stroke="#191f28" stroke-width="1.4" stroke-linejoin="round"/></svg><span class="key">⌘</span>';
+  const DEMOS = {
+    A: { title: 'A 손잡이 (지금 안)', pro: '<b>A</b> 늘 보이는 것 0 · 손을 올려야 ⋮⋮가 보여서 처음엔 모를 수 있어요.',
+      steps: [
+        { cap: '줄에 손을 올리면 왼쪽에 ⋮⋮가 나타나요', pre: (d) => { d.hover = 'p1'; }, to: '[data-id="p1"] .rp-edit' },
+        { cap: '⋮⋮를 누르면 그 줄이 골라지고 아래에 막대가 떠요', to: '[data-grip="p1"]', press: true, apply: (d) => { d.sel.add('p1'); } },
+        { cap: '⌘를 누른 채 다른 줄로', key: true, pre: (d) => { d.hover = 'p3'; }, to: '[data-id="p3"] .rp-edit' },
+        { cap: '⌘를 누른 채 ⋮⋮를 누르면 한 줄 더 골라져요', key: true, to: '[data-grip="p3"]', press: true, apply: (d) => { d.sel.add('p3'); d.hover = null; } },
+        { cap: '막대의 보고에서 빼기를 누르면', to: '[data-selact="out"]', press: true, apply: (d) => { d.rows.forEach((r) => { if (d.sel.has(r.id)) r.out = true; }); } },
+        { cap: '두 줄이 흐려지고 슬랙 글에서 빠졌어요. 다시 넣을 때는 같은 막대의 보고에 포함', hold: 1400, to: '[data-selact="clear"]', press: true, apply: (d) => { d.sel.clear(); } },
+      ] },
+    B: { title: 'B 고르기 모드 (비교안)', pro: '<b>B</b> 머리에 <b>고르기</b> 버튼 하나가 늘 보이지만, 무엇을 하는지 바로 보여요(오늘 탭 여러 개 선택과 같은 방식).',
+      steps: [
+        { cap: '문서 머리의 고르기를 누르면', to: '[data-pickmode]', press: true, apply: (d) => { d.picking = true; } },
+        { cap: '모든 줄 앞에 체크칸이 나타나요. 줄을 눌러 골라요', to: '[data-pickrow="p1"]', press: true, apply: (d) => { d.sel.add('p1'); } },
+        { cap: '하나 더', to: '[data-pickrow="p3"]', press: true, apply: (d) => { d.sel.add('p3'); } },
+        { cap: '같은 막대의 보고에서 빼기를 누르면 두 줄이 흐려지고 슬랙 글에서 빠져요', to: '[data-selact="out"]', press: true, apply: (d) => { d.rows.forEach((r) => { if (d.sel.has(r.id)) r.out = true; }); d.sel.clear(); } },
+        { cap: '완료를 누르면 체크칸이 사라져요', to: '[data-selact="done"]', press: true, apply: (d) => { d.picking = false; d.sel.clear(); } },
+      ] },
+  };
+  const freshDemo = (k) => ({ mode: k, rows: DEMO_ROWS.map((r) => ({ ...r })), sel: new Set(), picking: false, hover: null, editing: null, heads: {}, names: { done: '[완료]', plan: '[진행 예정]' }, tidy: { seen: new Set() } });
+  const demo = { A: { d: freshDemo('A'), i: -1, token: 0, played: false }, B: { d: freshDemo('B'), i: -1, token: 0, played: false } };
+  function demoView(k) {
+    const d = demo[k].d;
+    const it = model(d).secs[0].items[0];
+    const show = d.sel.size || d.picking;
+    return `<div class="demo-grid"><div>${docHead({ pick: k === 'B', pickOn: d.picking, mini: true })}${pjHtml(d, 'done', 'pay')}`
+      + pjRows(d, 'done', 'pay').map((r) => rowHtml(d, r, { hover: d.hover ? [d.hover] : [], forceGrip: k === 'A' })).join('') + '</div>'
+      + `<div class="demo-sl"><p class="lb">슬랙 글</p><div class="sl"><ul><li>${esc(it.name)}<ul>${it.lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul></li></ul></div></div></div>`
+      + `<div class="d-selbar is-demo"${show ? '' : ' hidden'}><div class="bar">${barInner({ ...barCounts(d, d.sel), pick: d.picking })}</div></div>`;
+  }
+  function demoDraw(k) { $(`[data-demo="${k}"] .demo-view`).innerHTML = demoView(k); }
+  function demoMove(k, sel, instant) {
+    const card = $(`[data-demo="${k}"]`); const stage = $('.demo-stage', card); const cur = $('.demo-cur', card);
+    const t = sel && $(sel, stage);
+    if (!t) return;
+    const a = stage.getBoundingClientRect(), b = t.getBoundingClientRect();
+    if (instant) cur.style.transition = 'none';
+    cur.style.transform = `translate(${Math.round(b.left - a.left + Math.min(b.width / 2, 40))}px, ${Math.round(b.top - a.top + b.height * 0.55)}px)`;
+    if (instant) { cur.getBoundingClientRect(); cur.style.transition = ''; }
+  }
+  function demoCap(k, text) { $(`[data-demo="${k}"] .demo-cap`).textContent = text; }
+  async function demoPlay(k) {
+    const D = demo[k]; const tok = ++D.token; const card = $(`[data-demo="${k}"]`); const cur = $('.demo-cur', card);
+    D.d = freshDemo(k); D.played = true; demoDraw(k);
+    $(`[data-dplay="${k}"]`).textContent = '다시 보기';
+    cur.classList.remove('has-key', 'is-press');
+    const stage = $('.demo-stage', card);
+    cur.style.transition = 'none'; cur.style.transform = `translate(${stage.clientWidth - 60}px, ${stage.clientHeight - 30}px)`; cur.getBoundingClientRect(); cur.style.transition = '';
+    demoCap(k, ' ');
+    await wait(500);
+    for (const s of DEMOS[k].steps) {
+      if (tok !== D.token) return;
+      demoCap(k, s.cap);
+      cur.classList.toggle('has-key', !!s.key);
+      if (s.pre) { s.pre(D.d); demoDraw(k); }
+      if (s.to) demoMove(k, s.to);
+      await wait(700);
+      if (tok !== D.token) return;
+      if (s.press) { cur.classList.add('is-press'); await wait(160); cur.classList.remove('is-press'); }
+      if (s.apply) { s.apply(D.d); demoDraw(k); }
+      await wait(s.hold || 900);
+    }
+    cur.classList.remove('has-key');
+  }
+  // 움직임 줄이기 — 단계 버튼으로 하나씩. 그 단계까지 적용한 모습과 커서 자리만 보인다.
+  function demoStep(k, dir) {
+    const D = demo[k]; D.token++;
+    const steps = DEMOS[k].steps;
+    D.i = Math.max(-1, Math.min(steps.length - 1, D.i + dir));
+    D.d = freshDemo(k);
+    for (let j = 0; j <= D.i; j++) { if (steps[j].pre) steps[j].pre(D.d); if (j < D.i && steps[j].apply) steps[j].apply(D.d); }
+    demoDraw(k);
+    const s = steps[D.i];
+    $(`[data-demo="${k}"] .demo-cur`).classList.toggle('has-key', !!(s && s.key));
+    if (s) demoMove(k, s.to, true);
+    else { const st2 = $(`[data-demo="${k}"] .demo-stage`); $(`[data-demo="${k}"] .demo-cur`).style.transform = `translate(${st2.clientWidth - 60}px, ${st2.clientHeight - 30}px)`; }
+    if (s && s.apply) { s.apply(D.d); demoDraw(k); }
+    demoCap(k, s ? `${D.i + 1}/${steps.length} · ${s.cap}` : `0/${steps.length} · 다음을 눌러 넘겨 보세요`);
+  }
+  function drawDemos() {
+    $('#demos').innerHTML = ['A', 'B'].map((k) => `<div class="snap" data-demo="${k}"><div class="demo-top"><h3>${DEMOS[k].title}</h3><div class="acts">`
+      + (RM.matches ? `<button class="d-btn sm" type="button" data-dstep="${k}" data-dir="-1">이전</button><button class="d-btn sm" type="button" data-dstep="${k}" data-dir="1">다음</button>`
+        : `<button class="d-btn sm" type="button" data-dplay="${k}">재생</button>`)
+      + `</div></div><div class="demo-stage" data-still inert><div class="demo-view"></div><div class="demo-cur" aria-hidden="true">${CURSOR}</div></div>`
+      + `<p class="demo-cap" aria-live="polite"></p><p class="demo-pro">${DEMOS[k].pro}</p></div>`).join('');
+    ['A', 'B'].forEach((k) => { demoDraw(k); if (RM.matches) { demo[k].i = -1; demoStep(k, 0); } });
+    if (RM.matches) return;
+    // 화면에 들어오면 한 번 저절로 재생한다
+    const io = new IntersectionObserver((es) => es.forEach((en) => {
+      const k = en.target.dataset.demo;
+      if (en.isIntersecting && !demo[k].played) { demoPlay(k); }
+    }), { threshold: 0.5 });
+    $$('[data-demo]').forEach((c) => io.observe(c));
+  }
+  $('#demos').addEventListener('click', (e) => {
+    const p = e.target.closest('[data-dplay]'); if (p) { demoPlay(p.dataset.dplay); return; }
+    const s = e.target.closest('[data-dstep]'); if (s) demoStep(s.dataset.dstep, +s.dataset.dir);
+  });
+
+  /* ---------- 6. 슬랙에 붙이기 ---------- */
+  function drawS6() {
+    const m = model(st);
+    $('#s6').innerHTML = `<div class="snap"><h3>붙였을 때 모양</h3><p class="cap">칸 제목은 굵게, 프로젝트는 글머리 •, 그 아래 줄은 한 단계 들여 ◦ 예요. 1번 화면에서 고치면 여기도 같이 바뀌어요.</p>
+      <div class="sl" style="margin-bottom:16px">${slackHtml(m)}</div><button class="d-btn pri" type="button" data-copy="s6">슬랙용으로 복사</button></div>`
+      + `<div class="snap"><h3>글자만 받는 곳에서는</h3><p class="cap">서식을 못 받는 곳(메모장 · 일부 입력칸)에는 같은 내용이 글자 글머리로 붙어요. 슬랙에서 확인한 <b>다</b> 방식과 같아요.</p><pre class="pre">${esc(slackText(m))}</pre></div>`;
+  }
+  function copyRich(html, text) {
+    let ok = false;
+    const onCopy = (e) => { e.clipboardData.setData('text/html', html); e.clipboardData.setData('text/plain', text); e.preventDefault(); ok = true; };
+    document.addEventListener('copy', onCopy);
+    try { document.execCommand('copy'); } catch (err) { ok = false; }
+    document.removeEventListener('copy', onCopy);
+    return ok;
+  }
+
+  /* ---------- 7. Claude로 줄이기(③) ---------- */
+  const C = {
+    pay: { k: 'pay', raw: ['p1', 'p2', 'p3', 'p4'], sum: [{ t: '실패 사유 문구 · 환불 정책 문서 작성', ev: [0, 1] }, { t: '환불 API 스펙 요청, 부분 환불 QA 케이스 추가', ev: [2, 3] }] },
+    join: { k: 'join', raw: ['j1', 'j2', 'j3', 'j4'], sum: [{ t: '가입 퍼널 · 안내 문구 · 인증 문의 · 완료 메일 점검', ev: [0, 1, 2, 3] }] },
+  };
+  const CG = [C.pay, C.join];
+  const base = makeState();
+  base.rows.forEach((r) => { r.follow = false; });
+  const ctext = (id) => base.rows.find((r) => r.id === id).text;
+  const s7 = { step: 'idle', dec: {}, acked: false, open: new Set() };
+  let timer = 0;
+  function setStep(step) {
+    clearTimeout(timer);
+    s7.step = step;
+    if (step === 'done') CG.forEach((g) => { s7.dec[g.k] = s7.dec[g.k] || 'yes'; }); else s7.dec = {};
+    if (step === 'run') { s7.acked = true; timer = setTimeout(() => setStep('prop'), 1600); }
+    drawS7();
+  }
+  function groupDoc(g) {
+    const d = s7.dec[g.k];
+    const rawRows = g.raw.map((id) => rowHtml(base, base.rows.find((r) => r.id === id))).join('');
+    if (d === 'yes') {
+      return pjHtml(base, 'done', g.k) + g.sum.map((s, i) => {
+        const key = g.k + i; const open = s7.open.has(key);
+        return rowHtml(base, { id: 'c' + key, sec: 'done', pj: g.k, raw: s.t, text: s.t })
+          + `<div class="rp-why"><button class="rp-foldtoggle" type="button" aria-expanded="${open}" data-fold="${key}">${CHEV}Claude가 줄임 · 근거 ${s.ev.length}개</button></div>`
+          + (open ? `<div class="rp-fold">${s.ev.map((i2) => `<div class="rp-s"><span class="bu" aria-hidden="true">◦</span><div class="tx">${esc(ctext(g.raw[i2]))}</div></div>`).join('')}</div>` : '');
+      }).join('');
+    }
+    if (s7.step !== 'prop' || d) return pjHtml(base, 'done', g.k) + rawRows;
+    return pjHtml(base, 'done', g.k) + `<div class="rp-cmp"><div><div class="lb">지금</div>${g.raw.map((id) => `<div class="rp-s"><span class="bu" aria-hidden="true">•</span><div class="tx">${esc(ctext(id))}</div></div>`).join('')}</div>`
+      + '<div class="rp-prop"><div class="lb">Claude 제안</div>'
+      + g.sum.map((s) => `<div class="rp-s"><span class="bu" aria-hidden="true">•</span><div class="tx">${esc(s.t)}<span class="n" title="${esc(s.ev.map((i) => ctext(g.raw[i])).join(' · '))}">근거 ${s.ev.length}개</span></div></div>`).join('')
+      + `<div class="acts"><button class="d-btn acc sm" type="button" data-act="yes" data-key="${g.k}">이대로 바꾸기</button><button class="d-btn sm" type="button" data-act="no" data-key="${g.k}">그대로 두기</button></div></div></div>`;
+  }
+  function drawS7() {
+    const left = CG.filter((g) => !s7.dec[g.k]).length;
+    const yes = CG.filter((g) => s7.dec[g.k] === 'yes');
+    const status = s7.step === 'prop' ? `<div class="rp-tidy" role="status" style="color:var(--muted)">Claude 제안이 프로젝트 ${left}개에 왔어요. 바꾸기 전에는 보고 글이 그대로예요.<button class="rp-tidyit" type="button" data-act="all" style="margin-left:auto">모두 바꾸기</button></div>` : '';
+    const toast = s7.step === 'done' && yes.length ? `<div class="d-toast" role="status">프로젝트 ${yes.length}개의 줄을 줄였어요 <button class="d-btn sm" type="button" data-act="undo">되돌리기</button></div>` : '';
+    const doc = `<article class="rp-doc" data-s7><div class="rp-body">${docHead()}${status}<div class="rp-sec">${secHtml(base, 'done')}`
+      + CG.map(groupDoc).join('') + pjHtml(base, 'done', 'ops') + rowHtml(base, base.rows.find((r) => r.id === 'o1')) + '</div>' + toast + '</div></article>';
+    const m = { title: TITLE, secs: [{ h: '[완료]', items: [...CG.map((g) => ({ name: heading(base, 'done', g.k).text,
+      lines: s7.dec[g.k] === 'yes' ? g.sum.map((s) => s.t) : g.raw.map(ctext) })), { name: heading(base, 'done', 'ops').text, lines: [ctext('o1')] }] }] };
+    const under = s7.step === 'first' ? '<div class="rp-first" role="status"><div>Claude로 줄이기는 <b>내 Claude 계정으로</b> 돌고 1분쯤 걸려요. 업무 제목만 보내요. 이 안내는 처음 한 번만 나와요.</div><div class="acts"><button class="d-btn acc sm" type="button" data-act="go">줄이기 시작</button><button class="d-btn sm" type="button" data-act="cancel">취소</button></div></div>'
+      : s7.step === 'run' ? '<div class="rp-wait" role="status"><span class="rp-spin" aria-hidden="true"></span>Claude가 프로젝트마다 줄을 묶고 있어요. 보고 글은 그대로예요.</div>'
+      : s7.step === 'fail' ? '<div class="rp-wait" role="status">이번에는 줄이지 못했어요. 보고 글은 그대로예요.<button class="d-link" type="button">최근 기록 보기</button></div>' : '';
+    $('#s7').innerHTML = doc + slackCard(base, { model: m, copy: 's7', busy: s7.step === 'run' ? 'run' : (s7.step === 'prop' || s7.step === 'first') ? 'wait' : '', under });
+    $$('[data-seg="s7"] button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.v === s7.step)));
+    $('#s7Note').textContent = {
+      idle: '줄이 4개 이상인 프로젝트만 제안이 와요',
+      first: '처음 한 번만 — 무엇을 어디로 보내는지 알리고 시작해요',
+      run: '도는 동안 버튼은 잠겨요',
+      prop: '프로젝트마다 받거나 그대로 둘 수 있어요',
+      done: '요약 줄 아래 근거 한 줄을 누르면 원래 줄이 펼쳐져요',
+      fail: '실패해도 조용한 한 줄만 서요',
+    }[s7.step];
+  }
+
+  /* ---------- 8. 오늘 탭 제목 길이 ---------- */
+  const TODAY = [
+    ['가입 안내 문구 검수 요청 답하기', '가입 안내 문구 검수', 'join', '<span class="m-due k-warn">오늘까지</span>'],
+    ['테스터B님이 요청한 환불 정책 문서 1차 검토하고 의견 남기기', '환불 정책 문서 1차 검토', 'pay', '<span class="m-due is-d">D-2</span>'],
+    ['본인 인증 오류 문의 들어온 것 원인 확인하고 대응하기', '본인 인증 오류 문의 대응', 'join', '', true],
+    ['관리자 권한 등급 기준 테스터C에게 다시 확인 요청하기', '권한 등급 기준 확인 요청', 'ops', ''],
+    ['결제 실패 사유 문구 초안 작성하기', '결제 실패 사유 문구 초안', 'pay', '<span class="m-due is-d">D-3</span>'],
+    ['알림 설정 요구사항 정리해서 테스터A에게 공유하기', '알림 설정 요구사항 정리 · 공유', 'ops', ''],
+    ['디자인 리뷰 일정 조율 요청 답하기', '디자인 리뷰 일정 조율', 'pay', '<span class="m-due">10/6</span>'],
+  ];
+  function drawS8(v) {
+    const i = v === 'short' ? 1 : 0;
+    $('#s8').innerHTML = `<div class="td-card"><div class="d-grp">오늘 <span class="n">${TODAY.length}</span></div>`
+      + TODAY.map((t) => `<div class="d-row${t[4] ? ' is-doing' : ''}"><span class="d-check"><input type="checkbox" class="d-cb${t[4] ? ' is-doing' : ''}" aria-label="${esc(t[i])} 끝내기"></span>`
+        + `<div class="d-titlewrap"><span class="d-title">${esc(t[i])}</span><span class="d-inproj">· <span class="d-pjdot" data-pj="${PJ[t[2]].dot}"></span>${PJ[t[2]].name}</span></div><div class="d-meta">${t[3]}</div></div>`).join('') + '</div>';
+    const avg = Math.round(TODAY.reduce((n, t) => n + t[i].length, 0) / TODAY.length);
+    $('#s8Note').textContent = `제목 평균 ${avg}자 · ${i ? '보고 줄과 같은 말이라 다듬기가 필요 없어요' : '지금 수집 그대로 — 부탁한 사람 · 할 일 말이 다 보여요'}`;
+  }
+
+  /* ---------- 눌러 보기 ---------- */
+  document.addEventListener('mousedown', (e) => {
+    // 입력칸 아래 `보고에서 빼기`를 눌러도 입력칸 초점을 잃지 않게(잃으면 입력칸이 먼저 닫힌다)
+    if (e.target.closest('[data-outtoggle]')) e.preventDefault();
+  });
+  document.addEventListener('click', (e) => {
+    const seg = e.target.closest('[data-seg] button');
+    if (seg) {
+      const kind = seg.parentNode.dataset.seg;
+      seg.parentNode.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b === seg)));
+      if (kind === 's1') { view = seg.dataset.v; st.sel.clear(); st.picking = false; st.editing = null; drawS1(); }
+      else if (kind === 's1m') { st.mode = seg.dataset.v; st.sel.clear(); st.picking = false; st.editing = null; drawS1(); }
+      else if (kind === 's7') setStep(seg.dataset.v);
+      else if (kind === 's8') drawS8(seg.dataset.v);
+      else if (seg.dataset.v) document.documentElement.dataset.theme = seg.dataset.v; else delete document.documentElement.dataset.theme;
+      return;
+    }
+    if (e.target.closest('[data-still]')) return;
+    const cp = e.target.closest('[data-copy]');
+    if (cp) {
+      const m = cp.dataset.copy === 's7' ? null : model(st);
+      const html = m ? slackHtml(m) : $('#s7 .sl').innerHTML;
+      const text = m ? slackText(m) : $('#s7 .sl').innerText;
+      const ok = copyRich(html, text);
+      const was = cp.textContent;
+      cp.textContent = ok ? '복사했어요' : '복사하지 못했어요';
+      setTimeout(() => { cp.textContent = was; }, 1600);
+      return;
+    }
+    const act = e.target.closest('#s7 [data-act]');
+    if (act) {
+      const a = act.dataset.act;
+      if (a === 'condense') setStep(s7.acked ? 'run' : 'first');
+      else if (a === 'go') setStep('run');
+      else if (a === 'cancel') setStep('idle');
+      else if (a === 'yes' || a === 'no') { s7.dec[act.dataset.key] = a; if (CG.every((g) => s7.dec[g.k])) s7.step = 'done'; drawS7(); }
+      else if (a === 'all') { CG.forEach((g) => { s7.dec[g.k] = s7.dec[g.k] || 'yes'; }); s7.step = 'done'; drawS7(); }
+      else if (a === 'undo') setStep('idle');
+      return;
+    }
+    const fd = e.target.closest('#s7 [data-fold]');
+    if (fd) { const k = fd.dataset.fold; if (s7.open.has(k)) s7.open.delete(k); else s7.open.add(k); drawS7(); $(`#s7 [data-fold="${k}"]`).focus(); return; }
+    if (e.target.closest('#s7')) return;
+
+    /* 1번 화면(바뀐 뒤) */
+    if (e.target.closest('#s1 [data-act="condense"]')) { $('#h7').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); return; }
+    // 입력칸이 닫히며 다시 그려진 뒤에 도착한 누름은 떨어져 나간 줄을 가리킨다 — 그래도 1번 화면의 것으로 본다
+    const live = !e.target.isConnected || !!e.target.closest('#s1');
+    const g = e.target.closest('[data-grip]');
+    if (g && live) { pickGrip(g.dataset.grip, e); return; }
+    const pm = live && e.target.closest('[data-pickmode]');
+    if (pm) { if (st.picking) endPick(); else { st.picking = true; st.sel.clear(); st.editing = null; drawS1(); } return; }
+    const pr = live && e.target.closest('[data-pickrow]');
+    if (pr) { pickGrip(pr.dataset.pickrow, e, 'data-pickrow'); return; }
+    // 고르기 모드 중에는 줄 아무 데나 눌러도 고른다(오늘 탭 여러 개 선택과 같다)
+    const prow = live && st.picking && e.target.closest('.rp-s.is-pick');
+    if (prow) { pickGrip(prow.dataset.id, e, 'data-pickrow'); return; }
+    const lt = live && e.target.closest('[data-later]');
+    if (lt) { const r = st.rows.find((x) => x.id === lt.dataset.later); r.later = !r.later; idleLater(r); drawS1(); return; }
+    const np = live && e.target.closest('[data-newpjopen]');
+    if (np) { st.tidy.newpj = np.dataset.newpjopen; drawS1(); const i = $(`#s1 [data-newpj="${np.dataset.newpjopen}"]`); if (i) i.focus(); return; }
+    const ot = e.target.closest('[data-outtoggle]');
+    if (ot) {
+      const r = st.rows.find((x) => x.id === ot.dataset.outtoggle);
+      r.out = !r.out; st.editing = null; drawS1();
+      const back = $(`#s1 [data-focus="e:${r.id}"]`); if (back) back.focus();
+      return;
+    }
+    const sa = e.target.closest('[data-selact]');
+    if (sa) {
+      const a = sa.dataset.selact;
+      if (a === 'clear') st.sel.clear();
+      else if (a === 'done') { endPick(); return; }
+      else st.rows.forEach((r) => { if (st.sel.has(r.id)) r.out = a === 'out'; });
+      drawS1();
+      return;
+    }
+    const td = live && e.target.closest('[data-tidy]');
+    if (td) {
+      const k = td.dataset.tidy;
+      if (st.tidy.open === k) closeTidy();
+      else { st.tidy.open = k; st.tidy.seen.add(k); drawS1(); }
+      return;
+    }
+    const pk = live && e.target.closest('[data-pick]');
+    if (pk) { st.rows.find((r) => r.id === pk.dataset.pick).pj = pk.dataset.pj; st.tidy.newpj = null; drawS1(); const t = $('#s1 [data-tidy="nopj"]'); if (t) t.focus(); return; }
+    const ed = live && e.target.closest('[data-edit]');
+    if (ed) { st.sel.clear(); st.editing = { key: ed.dataset.edit, fresh: true }; drawS1(); return; }
+    if (st.sel.size && !st.picking && !e.target.closest('#selbar')) { st.sel.clear(); drawS1(); }
+  });
+  document.addEventListener('change', (e) => {
+    const c = e.target.closest('#s1 [data-tchk]');
+    if (!c) return;
+    const r = st.rows.find((x) => x.id === c.dataset.id);
+    if (c.dataset.tchk === 'follow') r.follow = c.checked; else r.out = !c.checked;
+    drawS1();
+  });
+  document.addEventListener('input', (e) => {
+    if (e.target.matches('#s1 [data-ed] textarea')) fit(e.target);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.isComposing) return;
+    const t = e.target;
+    if (t.closest && t.closest('#s1 [data-ed]')) {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEdit(t.closest('[data-ed]').dataset.ed, t.value); }
+      else if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
+      return;
+    }
+    if (t.matches && t.matches('#s1 [data-newpj]')) {
+      if (e.key === 'Escape') { e.preventDefault(); const id = t.dataset.newpj; st.tidy.newpj = null; drawS1(); const b = $(`#s1 [data-newpjopen="${id}"]`); if (b) b.focus(); return; }
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      const name = t.value.replace(/\s+/g, ' ').trim();
+      if (!name) return;
+      const key = 'np' + (Object.keys(PJ).length);
+      PJ[key] = { name, dot: (ORDER.length - 1) % 3, made: true };
+      ORDER.splice(ORDER.indexOf('etc'), 0, key);
+      st.rows.find((r) => r.id === t.dataset.newpj).pj = key;
+      st.tidy.newpj = null;
+      drawS1();
+      const b = $(`#s1 [data-pick="${t.dataset.newpj}"][data-pj="${key}"]`); if (b) b.focus();
+      return;
+    }
+    if (t.matches && t.matches('#s1 [data-qin]') && e.key === 'Enter') {
+      e.preventDefault();
+      const text = t.value.replace(/\s+/g, ' ').trim();
+      if (!text) return;
+      const key = t.dataset.qin;
+      st.added += 1;
+      // 기본은 보고에만 적는다. 프로젝트 아래 줄에만 `나중에 할 일에도 담을까요? 담기`를 작게 붙인다
+      const row = { id: 'a' + st.added, sec: 'plan', pj: key === 'note' ? null : key.slice(3), kind: key === 'note' ? 'note' : 'mine', raw: text, text, ask: key !== 'note', later: false };
+      st.rows.push(row);
+      if (row.ask) idleLater(row);
+      drawS1();   // 초점은 같은 입력줄에 남는다(data-focus로 되찾음)
+      return;
+    }
+    if ((e.key === 'Enter' || e.key === ' ') && t.matches && t.matches('#s1 .rp-edit')) { e.preventDefault(); t.click(); return; }
+    if (e.key === 'Escape') {
+      if (st.picking) { endPick(); return; }
+      if (st.tidy.open) { const k = st.tidy.open; closeTidy(() => {}); setTimeout(() => { const b = $(`#s1 [data-tidy="${k}"]`); if (b) b.focus(); }, 160); return; }
+      if (st.sel.size) { const last = st.anchor; st.sel.clear(); drawS1(); const b = last && $(`#s1 [data-grip="${last}"]`); if (b) b.focus(); }
+    }
+  });
+  document.addEventListener('focusout', (e) => {
+    const box = e.target.closest && e.target.closest('#s1 [data-ed]');
+    if (!box || !st.editing) return;
+    if (e.relatedTarget && box.contains(e.relatedTarget)) return;
+    setTimeout(() => { if (st.editing && !(document.activeElement && box.contains(document.activeElement))) { st.editing = null; drawS1(); } }, 0);
+  });
+  $('#s1Reset').addEventListener('click', () => {
+    st = makeState(); lastSlack = '';
+    ['done', 'plan'].forEach((k) => $$(`[data-bound="${k}"]`).forEach((n) => { n.textContent = st.names[k]; }));
+    drawS1();
+  });
+
+  drawStill();
+  drawDemos();
+  drawS1();
+  drawS7();
+  drawS8('long');
+})();
+</script>
+</body>
+</html>
