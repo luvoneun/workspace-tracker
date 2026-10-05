@@ -2548,12 +2548,12 @@ test('종류 구역: 줄 옆 카드와 회의 탭은 같은 함수로 같은 구
   assert.equal(app.run('MEETING_HOST_CARD.getFresh()'), null);
 });
 
-test('종류 구역: 소제목 모양은 예전 `.d-mgrp` 값 그대로(13/600 --muted + 숫자 500 --dim) — 새 색·새 움직임 없음', () => {
+test('종류 구역: 소제목 모양은 예전 `.d-mgrp` 글자 값 그대로(13/600 --muted + 숫자 500 --dim, 여백만 위 18px·아래 6px로 넓힘) — 새 색·새 움직임 없음', () => {
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
   const rule = css.match(/\n\.d-mgrp \{[^}]*\}/)[0];
-  assert.match(rule, /margin: 10px 0 2px; font-size: var\(--fs-sm\); line-height: 18px; font-weight: 600; color: var\(--muted\);/);
+  assert.match(rule, /margin: 18px 0 6px; font-size: var\(--fs-sm\); line-height: 18px; font-weight: 600; color: var\(--muted\);/);
   assert.doesNotMatch(rule, /#[0-9a-f]{3,6}\b|rgba?\(|transition|animation|cursor/i);
-  assert.match(css, /\n\.d-mgrp:first-child \{ margin-top: 2px; \}/);
+  assert.match(css, /\n\.d-mgrp:first-child \{ margin-top: 10px; \}/);
   assert.match(css, /\n\.d-mgrp \.n \{ font-weight: 500; color: var\(--dim\); font-variant-numeric: tabular-nums; \}/);
   assert.match(css, /\.d-side \.d-mgrp \{ font-size: var\(--fs-body\); line-height: 20px; \}/, '좁은 화면 시트에서는 줄 글자와 같이 커진다');
   // 옮겨 간 줄의 떠오름은 새 줄과 같은 부품(.d-mrow2.is-new) — 움직임 줄이기 규칙에도 이미 들어 있다.
