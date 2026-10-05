@@ -1294,6 +1294,12 @@ globalThis.fetch = async (input, init = {}) => {
     if ((spec.rejected || []).some(one => headers.Authorization === 'Bearer ' + one)) return reply({ ok: false, error: 'token_expired' });
     if (method === 'conversations.history') {
       const found = (spec.history || {})[url.searchParams.get('channel')] || [];
+      // { timeout: n } — 이 회차에 그 채널의 처음 n번은 시간 초과(true면 늘), 그 뒤엔 messages로 답한다.
+      if (found && found.timeout) {
+        const seen = fs.readFileSync(process.env.FAKE_FETCH_LOG, 'utf8').split('\\n').filter(line => line.includes('conversations.history') && line.includes('channel=' + url.searchParams.get('channel'))).length;
+        if (found.timeout === true || seen <= found.timeout) throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+        return reply({ ok: true, messages: found.messages || [], has_more: false });
+      }
       return Array.isArray(found) ? reply({ ok: true, messages: found, has_more: false }) : reply({ ok: false, error: found.error });
     }
     if (method === 'conversations.replies') {
@@ -1352,7 +1358,7 @@ process.stdout.write(mode === 'fence' ? '\`\`\`json\\n' + answer + '\\n\`\`\`\\n
     for (const file of [requestLog, calls]) fs.rmSync(file, { force: true });
     return runScript(automationScript('slack-capture.sh'), [], {
       // 토큰 폴더 끼우기(공용 준비의 WORKSPACE_TOKEN_DIR)는 비운다 — launchd가 돌릴 때처럼 설정의 경로와 (임시) HOME의 ~/.config를 본다.
-      HOME: home, WORKSPACE_TOKEN_DIR: '', WORKSPACE_DIR: home, WORKSPACE_CONFIG: configPath, AUTOMATION_LOG_DIR: logs, SLACK_CAPTURE_IGNORE_HOURS: '1',
+      HOME: home, WORKSPACE_TOKEN_DIR: '', WORKSPACE_DIR: home, WORKSPACE_CONFIG: configPath, AUTOMATION_LOG_DIR: logs, SLACK_CAPTURE_IGNORE_HOURS: '1', SLACK_COLLECT_RETRY_MS: '0',
       WORKSPACE_PORT: '4322', CLAUDE_BIN: claude, WORKSPACE_CLAUDE_TOKEN_FILE: path.join(home, 'no-claude-token'),
       NODE_OPTIONS: `--require ${preload}`, FAKE_FETCH_SPEC: specFile, FAKE_FETCH_LOG: requestLog, FAKE_CLAUDE_CALLS: calls, FAKE_SLACK_TOKEN: SLACK_TOKEN,
       ...env,
@@ -2039,6 +2045,82 @@ test('슬랙 수집(옛 방식): 토큰 파일을 읽기만 한다 — 갱신 �
   assert.equal(fix.requests().filter(one => one.url.includes('conversations.history')).length, 1, '옛 방식은 다시 부르지 않는다');
   assert.match(fix.logText(), /my-todo 채널 확인 실패 — Slack: token_expired/);
   assert.equal(fs.existsSync(path.join(fix.home, '.config')), false);
+});
+
+// ---------- 슬랙 헛경고 줄이기 (DECISIONS 2026-10-06) ----------
+const same = (actual, expected, message) => assert.deepEqual(actual, expected, message);
+test('헛경고 줄이기: 채널 읽기가 시간 초과면 같은 회차에 한 번 더 읽고, 그래도 안 되면 회차 블록 하나에 잠깐 오류 표시를 남긴다', (t) => {
+  const fix = captureFixture(t, { slack: { channels: { todo: { id: 'C0TODO11', name: '#my-todo' }, waiting: { id: 'C0WAIT11', name: '#my-waiting' } } } });
+  const historyOf = channel => fix.urls().filter(url => url.includes(`channel=${channel}`)).length;
+  // 한 번 늦고 다시 읽으니 됐다 — 실패 기록이 없다
+  fix.setSlack({ history: { C0TODO11: { timeout: 1, messages: [] }, C0WAIT11: [] } });
+  const once = fix.run();
+  assert.equal(once.status, 0, once.stderr + once.stdout);
+  assert.equal(historyOf('C0TODO11'), 2, '같은 회차에 한 번 더');
+  assert.doesNotMatch(fix.logText(), /채널 확인 실패/);
+  assert.deepEqual(fix.imports('health'), [{ success: true }]);
+
+  // 두 번 다 늦었다 — 실패 줄과 끝맺음 줄이 이 회차의 블록 안에, 끝에 `(잠깐 오류)`. 수집 상태 글에도 같은 표시.
+  fs.writeFileSync(path.join(fix.home, 'logs', 'slack-capture.log'), '');
+  fix.setSlack({ history: { C0TODO11: { timeout: true }, C0WAIT11: [] } });
+  const twice = fix.run();
+  assert.equal(twice.status, 1);
+  assert.equal(historyOf('C0TODO11'), 2, '다시 읽기는 한 번만');
+  const lines = fix.logText().split('\n').filter(Boolean);
+  assert.match(lines[0], /^─+ \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} slack-capture 시작 \(v9\.9\.9\)$/);
+  assert.deepEqual(lines.slice(1, -1), ['my-todo 채널 확인 실패 — The operation was aborted due to timeout (잠깐 오류)', '채널 1개 확인 실패 (잠깐 오류) — 다음 회차에 다시']);
+  assert.match(lines[lines.length - 1], /slack-capture 종료 \(exit 1\)$/);
+  same(lastLogEvent(fix.logText()), { kind: 'fail', text: 'my-todo 채널 확인 실패 — The operation was aborted due to timeout (잠깐 오류) 채널 1개 확인 실패 (잠깐 오류) — 다음 회차에 다시' });
+  assert.deepEqual(fix.imports('health'), [{ success: false, error: '일부 채널을 확인하지 못했습니다. (잠깐 오류)' }]);
+
+  // `지금 가져오기`로 부른 회차는 줄마다 끝에 `(지금 가져오기)`
+  fs.writeFileSync(path.join(fix.home, 'logs', 'slack-capture.log'), '');
+  assert.equal(fix.run({ SLACK_CAPTURE_MANUAL: '1' }).status, 1);
+  assert.match(lastLogEvent(fix.logText()).text, /\(잠깐 오류\) \(지금 가져오기\) 채널 1개 확인 실패 \(잠깐 오류\) — 다음 회차에 다시 \(지금 가져오기\)$/);
+
+  // 잠깐 오류가 아닌 실패(권한·채널 없음)는 다시 읽지 않고 표시도 없다 — 서버가 바로 실패로 읽는다
+  fs.writeFileSync(path.join(fix.home, 'logs', 'slack-capture.log'), '');
+  fix.setSlack({ history: { C0TODO11: { error: 'channel_not_found' }, C0WAIT11: { timeout: true } } });
+  assert.equal(fix.run().status, 1);
+  assert.equal(historyOf('C0TODO11'), 1);
+  same(lastLogEvent(fix.logText()).text, 'my-todo 채널 확인 실패 — Slack: channel_not_found my-waiting 채널 확인 실패 — The operation was aborted due to timeout (잠깐 오류)', '섞이면 끝맺음 표시가 없다');
+  assert.equal(fix.imports('health').pop().error, '일부 채널을 확인하지 못했습니다.');
+
+  // 다른 채널에 새 메시지가 있어 처리한 회차도 — 실패 줄과 끝맺음이 그 블록 끝에
+  fs.writeFileSync(path.join(fix.home, 'logs', 'slack-capture.log'), '');
+  fix.setSlack({ history: { C0TODO11: { timeout: true }, C0WAIT11: [memo('1790000700.000100', '기다리는 일')] } });
+  assert.equal(fix.run().status, 1);
+  const busy = lastLogEvent(fix.logText());
+  assert.equal(busy.kind, 'fail');
+  assert.match(busy.text, /^이번에 본 메시지 1개 = 등록 1 · 링크 중복 0 · 비슷한 일이라 건너뜀 0 · 시스템 0 my-todo 채널 확인 실패 — The operation was aborted due to timeout \(잠깐 오류\) .* 채널 1개 확인 실패 \(잠깐 오류\) — 다음 회차에 다시$/, '채널 실패 줄은 대장 줄 바로 다음(카드 이유 줄이 200자 안에서 읽게)');
+
+  // 정리가 실패한 회차와 섞이면 잠깐 오류 맺음 줄이 없다 — 서버가 바로 실패로 읽는다. 수집 상태 글에도 표시가 없다.
+  fs.writeFileSync(path.join(fix.home, 'logs', 'slack-capture.log'), '');
+  fix.setSlack({ history: { C0TODO11: { timeout: true }, C0WAIT11: [memo('1790000800.000100', '또 기다리는 일')] } });
+  assert.equal(fix.run({ FAKE_CLAUDE_MODE: 'exit' }).status, 1);
+  const mixed = lastLogEvent(fix.logText());
+  assert.doesNotMatch(mixed.text, /다음 회차에 다시$/);
+  assert.equal(fix.imports('health').pop().error, '일부 채널을 확인하지 못했습니다.');
+  assert.equal(fix.logText().split('\n').filter(line => /^\d{4}-\d{2}-\d{2} .*채널 확인 실패/.test(line)).length, 0, '채널 실패는 따로 떨어진 한 줄로 남지 않는다(회차 하나로 센다)');
+});
+
+test('헛경고 줄이기: slack-capture.sh 시간대 경계 — 8시대·19시대는 조용히 빠지고 9시대·18시대는 돈다(수동은 늘 돈다)', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-slack-hours-'));
+  const logs = path.join(home, 'logs');
+  const config = path.join(home, 'workspace.config.json');
+  fs.writeFileSync(config, '{}');
+  placeCollector(home);
+  const env = { WORKSPACE_DIR: home, WORKSPACE_CONFIG: config, AUTOMATION_LOG_DIR: logs };
+  const ran = hour => {
+    fs.rmSync(logs, { recursive: true, force: true });
+    assert.equal(runScript(automationScript('slack-capture.sh'), [], { ...env, SLACK_CAPTURE_TEST_HOUR: hour }).status, 0);
+    return fs.existsSync(path.join(logs, 'slack-capture.log')) && /켜진 채널이 없어 건너뛰어요/.test(fs.readFileSync(path.join(logs, 'slack-capture.log'), 'utf8'));
+  };
+  assert.deepEqual(['00', '08', '09', '18', '19', '23'].map(ran), [false, false, true, true, false, false]);
+  fs.rmSync(logs, { recursive: true, force: true });
+  assert.equal(runScript(automationScript('slack-capture.sh'), [], { ...env, SLACK_CAPTURE_TEST_HOUR: '23', SLACK_CAPTURE_MANUAL: '1' }).status, 0);
+  assert.match(fs.readFileSync(path.join(logs, 'slack-capture.log'), 'utf8'), /켜진 채널이 없어 건너뛰어요/);
+  fs.rmSync(home, { recursive: true, force: true });
 });
 
 test('WP-I slack-collect.js 검증: 모양·필수 칸·길이·링크·처리 대장이 어긋나면 받지 않는다', () => {
