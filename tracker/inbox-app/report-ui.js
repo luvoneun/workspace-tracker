@@ -210,14 +210,23 @@ async function reportLeaveSave() {
     if (!reportEdits.has(key)) continue;
     const saver = reportLeaveSavers.get(key);
     const value = String(reportEdits.get(key) ?? '');
-    if (!value.trim() || value.trim() === String(saver.current ?? '').trim()) {
+    // 그 사이 사라진 줄(다른 창의 묶기·되돌리기)의 글은 갈 곳이 없다 — 보내면 거절돼 뒤 칸까지 막으므로 정리한다.
+    const gone = saver.rowId && !((fresh().draft && fresh().draft.rows) || []).some(row => row.id === saver.rowId);
+    if (gone || !value.trim() || value.trim() === String(saver.current ?? '').trim()) {
       reportEdits.delete(key);
+      reportLeaveSavers.delete(key);
       closed = true;
       continue;
     }
     reportLeaveSaving.add(key);
+    // 저장이 서버에 가 있는 동안 주간요약으로 돌아와도 옛 입력칸에 글을 더 치거나 Enter를 누르지 못하게, 보내자마자 한 번 다시
+    // 그린다 — 문장·이름 칸은 잠기고(reportLeaveSaving), 적기줄은 글을 꺼낸 빈 칸이 된다(그 사이 Enter는 같은 대기열 뒤에 선다).
+    if (saver.take) reportEdits.delete(key);
     try {
-      if (await saver.save(fresh(), value) === false) throw new Error(REPORT_LEAVE_FAIL);
+      const pending = saver.save(fresh(), value);
+      renderReportDraft(fresh());
+      if (await pending === false) throw new Error(REPORT_LEAVE_FAIL);
+      reportLeaveSavers.delete(key);
       saved += 1;
       last = saver;
     } catch {
@@ -230,9 +239,12 @@ async function reportLeaveSave() {
   if (closed && reportRenderedItem) renderReportDraft(reportRenderedItem);
   if (failed) { showNotice(REPORT_LEAVE_FAIL, true); return; }
   if (!saved) return;
-  if (saved > 1) { showNotice(`적던 글 ${saved}개를 저장했어요`); return; }
+  // 저장하지 않는 칸(`+ 한 줄 추가`·다른 주)에 글이 남았으면 함께 알린다.
+  const left = [...reportEdits.values()].filter(text => String(text ?? '').trim()).length;
+  const tail = left ? ` · 저장 안 한 글 ${left}개는 주간요약에 남아 있어요` : '';
+  if (saved > 1) { showNotice(`적던 글 ${saved}개를 저장했어요${tail}`); return; }
   const item = fresh();
-  showNotice('적던 글을 저장했어요', false, null,
+  showNotice(`적던 글을 저장했어요${tail}`, false, null,
     last.undo && reportUndo.has(week) ? { label: '되돌리기', onClick: () => reportUndoNow(item) } : null);
 }
 
@@ -650,8 +662,9 @@ function reportNewCount(item) {
 // ---------- 저장 ----------
 
 // `options.key`는 같은 요청을 다시 보내도 한 번만 되게 하는 요청 id(`+ 한 줄 추가`가 업무를 만들 때 — 서버의 Idempotency-Key).
+// 다른 저장이 도는 중이면 보내지 않고 false를 돌려준다(성공은 undefined — 이 값을 보는 쪽만 구분한다).
 async function reportChange(item, action, notice, options = {}) {
-  if (reportBusy) return;
+  if (reportBusy) return false;
   reportBusy = true;
   let tasksChanged = false;
   try {
@@ -1539,7 +1552,7 @@ function reportSentenceRow(item, row, context) {
     input.setAttribute('aria-label', `보고 문장 고치기 — ${REPORT_EDIT_HINT}`);
     input.addEventListener('input', () => reportEdits.set(key, input.value));
     // 탭을 떠나면 Enter와 같은 길로 저장한다(reportAutosaveLeave). 그 저장이 도는 동안 다시 그려진 칸은 잠근다.
-    reportLeaveSaver(key, { weekKey: item.weekKey, current: row.text, undo: true, save: (fresh, value) => reportChange(fresh, { action: 'edit', id: row.id, text: value }) });
+    reportLeaveSaver(key, { weekKey: item.weekKey, rowId: row.id, current: row.text, undo: true, save: (fresh, value) => reportChange(fresh, { action: 'edit', id: row.id, text: value }) });
     if (reportLeaveSaving.has(key)) input.disabled = true;
     const cancel = () => { reportEdits.delete(key); renderReportDraft(item); reportEditFocus(row.id); };
     input.addEventListener('keydown', (event) => {
@@ -1882,7 +1895,9 @@ async function reportPlanCreateTask(text, group) {
 // 한 줄을 할 일 칸에 적는다(서버 add — 보고에만, 업무는 만들지 않는다). 프로젝트 아래 줄이면 새로 생긴 줄에 질문을 단다.
 async function reportPlanAddOne(item, { text, group }, draw = true) {
   const before = new Set(((item.draft && item.draft.rows) || []).map(row => row.id));
-  await reportChange(item, { action: 'add', text, group: group || undefined }, '할 일 칸에 적었어요', { draw });
+  if (await reportChange(item, { action: 'add', text, group: group || undefined }, '할 일 칸에 적었어요', { draw }) === false) {
+    throw new Error('다른 저장이 끝나지 않아 적지 못했어요. 적은 내용은 그대로 있어요');
+  }
   if (!group) return;
   const made = ((item.draft && item.draft.rows) || []).find(row => !before.has(row.id) && row.heading === REPORT_PLAN_HEADING);
   if (made) { reportPlanAsk.set(made.id, { taskId: null, idle: false }); reportPlanAskIdle(made.id); }
@@ -1952,12 +1967,9 @@ function reportPlanInput(item, { key, id, placeholder, label, groupOf }) {
       .catch(error => showNotice(error.message || '저장됐는지 확인하지 못했어요. 적은 내용은 그대로 있어요', true));
   };
   // 탭을 떠나면 Enter와 같은 길로 적는다(reportAutosaveLeave) — 보고에만 들어가고 업무는 만들지 않는다. 글을 칸에서 꺼내 보내고,
-  // 실패하면 reportPlanAddLines가 남은 줄을 칸에 되돌린다(false).
-  reportLeaveSaver(full, { weekKey: item.weekKey, current: '', undo: true, save: (fresh, value) => {
-    const lines = reportPlanLines(value);
-    reportEdits.delete(full);
-    return uiQueueSend(`report:${full}`, () => reportPlanAddLines(fresh, lines, { key, group: groupOf(), focusId: id, taken: true }));
-  } });
+  // 실패하면 reportPlanAddLines가 남은 줄을 칸에 되돌린다(false). 글을 칸에서 꺼내는 것(take)은 저장 고리가 다시 그리기 전에 한다.
+  reportLeaveSaver(full, { weekKey: item.weekKey, current: '', undo: true, take: true, save: (fresh, value) =>
+    uiQueueSend(`report:${full}`, () => reportPlanAddLines(fresh, reportPlanLines(value), { key, group: groupOf(), focusId: id, taken: true })) });
   const submit = () => {
     const lines = reportPlanLines(el.value);
     if (!lines.length) return;
