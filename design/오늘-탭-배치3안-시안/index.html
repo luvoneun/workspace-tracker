@@ -1,0 +1,587 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>오늘 탭 배치 비교</title>
+<style>
+/* 글꼴은 앱에 넣어 둔 파일을 그대로 쓴다(외부에서 받지 않음) */
+@font-face { font-family: "Pretendard Variable"; font-weight: 45 920; font-display: swap;
+  src: url("../../tracker/inbox-app/fonts/PretendardVariable.woff2") format("woff2-variations"), url("../../tracker/inbox-app/fonts/PretendardVariable.woff2") format("woff2"); }
+
+/* ===== 앱 토큰 그대로(ui.css :root) — 새 색 없음 ===== */
+:root {
+  color-scheme: light dark;
+  --bg: #f2f4f6; --surface: #ffffff; --surface-line: transparent; --field: #f2f4f6; --hover: #f4f6f8; --press: #e9edf1;
+  --border: #e3e7eb; --hair: #eef1f4; --check-line: #8b95a1;
+  --text: #191f28; --muted: #4e5968; --dim: #636c78;
+  --accent: #3182f6; --accent-strong: #1b64da; --accent-text: #1b64da; --accent-soft: #e8f3ff; --on-fill: #ffffff;
+  --sel: #eef5ff; --sel-hover: #e6f1ff;
+  --urgent: #c9252d; --urgent-bg: #ffeceb; --warn: #b0560a; --warn-bg: #fff4e5; --success: #0d7a4a; --success-bg: #e6f6ee;
+  --neutral-bg: #eef1f4; --warm: #fffaf2; --warm-line: transparent; --warm-hover: #fff4e4;
+  --soft: 0 1px 3px rgba(25,31,40,.04), 0 8px 24px rgba(25,31,40,.06);
+  --shadow: 0 1px 2px rgba(25,31,40,.06);
+  --r: 20px; --r-sm: 12px; --r-xs: 10px; --row: 54px; --grp: 36px; --hdr: 60px; --pad: 20px;
+  --fs-cap: 12px; --fs-sm: 13px; --fs-body: 14px; --fs-md: 15px; --fs-lg: 16px;
+  --h-xs: 22px; --h-sm: 28px; --h-md: 32px; --h-lg: 42px; --h-touch: 44px;
+  --font: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15181e; --surface: #1e222a; --surface-line: #2b313b; --field: #262b34; --hover: #272c35; --press: #303641;
+    --border: #333a45; --hair: #2b313b; --check-line: #636e7d;
+    --text: #eaedf1; --muted: #a8b1bd; --dim: #8b95a1;
+    --accent: #4b91f1; --accent-strong: #4b91f1; --accent-text: #7aa9ff; --accent-soft: #1b2a44; --on-fill: #0b1020;
+    --sel: #1c2533; --sel-hover: #212c3d;
+    --urgent: #ff8f8f; --urgent-bg: #3a2022; --warn: #ffbe6b; --warn-bg: #3a2e1b; --success: #6ddba0; --success-bg: #1c3729;
+    --neutral-bg: #2a2f38; --warm: #22252b; --warm-line: #2c3038; --warm-hover: #282c33;
+    --soft: 0 1px 3px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3); --shadow: 0 1px 2px rgba(0,0,0,.35);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15181e; --surface: #1e222a; --surface-line: #2b313b; --field: #262b34; --hover: #272c35; --press: #303641;
+  --border: #333a45; --hair: #2b313b; --check-line: #636e7d;
+  --text: #eaedf1; --muted: #a8b1bd; --dim: #8b95a1;
+  --accent: #4b91f1; --accent-strong: #4b91f1; --accent-text: #7aa9ff; --accent-soft: #1b2a44; --on-fill: #0b1020;
+  --sel: #1c2533; --sel-hover: #212c3d;
+  --urgent: #ff8f8f; --urgent-bg: #3a2022; --warn: #ffbe6b; --warn-bg: #3a2e1b; --success: #6ddba0; --success-bg: #1c3729;
+  --neutral-bg: #2a2f38; --warm: #22252b; --warm-line: #2c3038; --warm-hover: #282c33;
+  --soft: 0 1px 3px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3); --shadow: 0 1px 2px rgba(0,0,0,.35);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; line-height: 1.55; word-break: keep-all; -webkit-font-smoothing: antialiased; }
+button { font-family: inherit; }
+.num { font-variant-numeric: tabular-nums; }
+.d-i { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ================= 앱 화면(시안 틀 안) — ui.css의 .d-* 부품을 옮겨 적음 ================= */
+body.app { overflow-x: hidden; }
+.d-hdr { position: sticky; top: 0; z-index: 30; height: var(--hdr); display: flex; align-items: center; gap: 16px; padding: 0 18px 0 24px; background: var(--surface); box-shadow: 0 1px 0 var(--hair); }
+.d-brand { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.02em; white-space: nowrap; }
+.d-date { display: inline-flex; align-items: center; height: var(--h-sm); padding: 0 12px; border-radius: 999px; background: var(--neutral-bg); color: var(--muted); font-size: 13.5px; font-weight: 600; white-space: nowrap; }
+.d-tabs { display: flex; align-items: stretch; height: var(--hdr); margin-left: 10px; margin-right: auto; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.d-tab { position: relative; padding: 0 12px; border: 0; background: none; font-size: var(--fs-md); font-weight: 500; color: var(--muted); white-space: nowrap; }
+.d-tab[aria-selected="true"] { color: var(--text); font-weight: 700; }
+.d-tab[aria-selected="true"]::after { content: ''; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2.5px; background: var(--accent); border-radius: 3px; }
+.d-tabnum { margin-left: 5px; font-size: 12.5px; font-weight: 600; color: var(--dim); }
+.d-hright { display: flex; align-items: center; gap: 6px; flex: none; }
+.d-srch { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px; border: 0; border-radius: 999px; background: var(--field); color: var(--muted); font-size: 13.5px; }
+.d-srch kbd { font: inherit; font-size: var(--fs-cap); font-weight: 500; color: var(--dim); }
+.d-iconbtn { width: 34px; height: 34px; display: grid; place-items: center; flex: none; border: 0; border-radius: 50%; background: none; color: var(--muted); padding: 0; }
+.d-iconbtn.xs { width: 28px; height: var(--h-sm); }
+
+.page { padding: 16px 20px 48px; }
+.col-main, .col-side { min-width: 0; }
+
+/* 배치 A — 지금 틀(왼쪽 레일 + 본문) */
+.g-a { display: grid; grid-template-columns: calc(296px - 20px) minmax(0, 1fr); grid-template-areas: "rail main"; min-height: calc(100dvh - var(--hdr) - 64px); }
+.g-a > .d-rail { grid-area: rail; } .g-a > .col-main { grid-area: main; padding-left: 20px; max-width: 1140px; }
+/* 배치 B — 세 칸(왼쪽 레일 | 오늘 할 일 | 반응 필요·새로 들어온 것) */
+.g-b { display: grid; grid-template-columns: calc(296px - 20px) minmax(0, 1fr) 340px; grid-template-areas: "rail main side"; column-gap: 20px; min-height: calc(100dvh - var(--hdr) - 64px); }
+.g-b > .d-rail { grid-area: rail; margin-right: -20px; } .g-b > .col-main { grid-area: main; padding-left: 0; }
+.g-b > .col-side { grid-area: side; position: sticky; top: calc(var(--hdr) + 16px); align-self: start; max-height: calc(100dvh - var(--hdr) - 32px); overflow-y: auto; scrollbar-width: none; }
+/* 배치 C — 오른쪽 레일 */
+.g-c { display: grid; grid-template-columns: minmax(0, 1120px) 296px; grid-template-areas: "main rail"; gap: 20px; align-items: start; }
+.g-c > .col-main { grid-area: main; } .g-c > .d-rail { grid-area: rail; }
+
+/* 레일 */
+.d-rail { min-width: 0; }
+.g-a > .d-rail, .g-b > .d-rail { position: sticky; top: var(--hdr); align-self: start; height: calc(100dvh - var(--hdr)); overflow-y: auto; margin: -16px 0 -48px -20px; padding: 14px 16px 32px; scrollbar-width: none; }
+.g-c > .d-rail { position: sticky; top: calc(var(--hdr) + 16px); max-height: calc(100dvh - var(--hdr) - 32px); overflow-y: auto; scrollbar-width: none; }
+.d-rsec { margin-bottom: 16px; background: var(--surface); padding: 10px; border: 1px solid var(--surface-line); border-radius: var(--r); box-shadow: var(--soft); }
+.d-rhd { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; font-size: var(--fs-lg); font-weight: 700; letter-spacing: -0.015em; }
+.d-rhd .n, .d-sechd .n { height: var(--h-xs); display: inline-flex; align-items: center; padding: 0 9px; border-radius: 999px; background: var(--neutral-bg); color: var(--muted); font-size: 12.5px; font-weight: 600; letter-spacing: 0; }
+.d-rhd .sp { margin-left: auto; }
+.d-rhd .more { color: var(--dim); display: inline-flex; }
+.d-mrow { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: start; gap: 8px; min-height: var(--h-touch); padding: 9px 10px; border-radius: 12px; }
+.d-mrow .t { font-size: var(--fs-body); font-weight: 700; padding-top: 2px; font-variant-numeric: tabular-nums; }
+.d-mrow .ti { font-size: 14.5px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.d-mrow .ti .pj { color: var(--dim); font-size: 12.5px; margin-left: 6px; white-space: nowrap; }
+.d-mrow.is-now { background: var(--accent-soft); }
+.d-mrow.is-now .t, .d-mrow.is-now .ti { color: var(--accent-text); }
+.d-mrow.is-past .t, .d-mrow.is-past .ti, .d-mrow.is-past .ti .pj { color: var(--dim); }
+.bdg { display: inline-flex; align-items: center; gap: 4px; height: 23px; padding: 0 8px; border-radius: 6px; font-size: 12.5px; font-weight: 600; white-space: nowrap; background: var(--neutral-bg); color: var(--muted); }
+.d-wrow { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-areas: "ti" "sub"; gap: 2px 8px; min-height: var(--h-touch); padding: 8px 10px; border-radius: 12px; align-items: start; }
+.d-wrow.has-ck { grid-template-columns: 20px minmax(0, 1fr); grid-template-areas: "ck ti" "ck sub"; }
+.d-wrow .ck { grid-area: ck; padding-top: 2px; }
+.d-wrow .ti { grid-area: ti; font-size: 14.5px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.d-wrow .ti .d-inproj { font-size: 12.5px; margin-left: 4px; }
+.d-wrow .sub { grid-area: sub; display: flex; align-items: center; gap: 4px 10px; font-size: 12.5px; color: var(--dim); white-space: nowrap; overflow: hidden; }
+.d-wrow .sub .who { color: var(--muted); font-weight: 600; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 0; }
+.d-wrow .sub .k-warn { color: var(--warn); font-weight: 600; }
+.d-wrow .sub .k-neg { color: var(--urgent); font-weight: 600; }
+.d-wrow .sub .k-pos { color: var(--success); font-weight: 600; }
+.d-wrow .sub .src { color: var(--accent-text); }
+.d-wrow .sub .src::before { content: "· "; color: var(--dim); margin-left: -6px; }
+.d-wgh { display: flex; align-items: center; gap: 6px; padding: 10px 10px 2px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.d-wgh .n { font-weight: 500; color: var(--dim); }
+.d-wcb { appearance: none; -webkit-appearance: none; margin: 0; width: 20px; height: 20px; border: 1.5px solid var(--check-line); border-radius: 6px; background: var(--surface); display: block; }
+.d-qa { display: block; width: 100%; height: 40px; margin: 4px 0 2px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--field); color: var(--dim); font-size: 13.5px; line-height: 40px; }
+.d-rempty { font-size: var(--fs-sm); color: var(--dim); padding: 6px 10px 4px; }
+
+/* 본문 구역 제목 · 따뜻한 카드 */
+.d-sechd { display: flex; align-items: center; gap: 10px; height: 30px; font-size: 18px; font-weight: 700; letter-spacing: -0.015em; }
+.zone { margin-bottom: 16px; }
+.d-warm { background: var(--warm); border: 1px solid var(--warm-line); border-radius: var(--r); box-shadow: var(--soft); padding: 10px; margin-top: 6px; }
+.d-atrow { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "ld tl mt" ". sb sb"; align-items: center; column-gap: 8px; row-gap: 2px; min-height: var(--row); padding: 8px 10px 8px var(--pad); border-radius: 14px; }
+.d-atrow .ld { grid-area: ld; display: flex; align-items: center; gap: 8px; }
+.d-atrow .sc { font-size: var(--fs-cap); font-weight: 600; color: var(--dim); }
+.d-atrow .tl { grid-area: tl; font-size: var(--fs-lg); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.d-atrow .mt { grid-area: mt; display: flex; gap: 8px; font-size: 12.5px; color: var(--dim); white-space: nowrap; }
+.d-atrow .mt .mn { color: var(--warn); font-weight: 600; }
+.d-atrow .sb { grid-area: sb; font-size: var(--fs-sm); color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.d-ibrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: var(--row); padding: 8px 10px 8px var(--pad); border-radius: 14px; }
+.d-ibmain { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.d-ibrow .ti { font-size: var(--fs-lg); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; min-width: 0; }
+.new-dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); margin-right: 6px; vertical-align: 2px; }
+.d-ibacts { display: flex; align-items: center; gap: 6px; }
+
+/* 오늘 할 일 머리줄 */
+.d-lhd { display: flex; align-items: center; gap: 12px 10px; flex-wrap: wrap; min-height: 34px; margin: 0 0 2px; }
+.d-lhd > * { flex: none; }
+.d-lhd h2 { margin: 0; font-size: 19px; font-weight: 700; letter-spacing: -0.015em; white-space: nowrap; }
+.d-lhd .sp { margin-left: auto; }
+.cnt { height: var(--h-xs); display: inline-flex; align-items: center; gap: 4px; padding: 0 9px 0 7px; border-radius: 999px; background: var(--neutral-bg); color: var(--muted); font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cnt svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.d-btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 34px; padding: 0 13px; border: 0; border-radius: var(--r-xs); background: var(--neutral-bg); color: var(--muted); font-size: 13.5px; font-weight: 600; white-space: nowrap; }
+.d-btn.sm { height: var(--h-md); padding: 0 12px; font-size: var(--fs-sm); }
+
+/* 목록 카드 · 업무 줄(세 안 모두 같은 줄 모양) */
+.d-list { position: relative; background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r); box-shadow: var(--soft); padding: 10px; margin-top: 6px; }
+.d-qaf { display: flex; align-items: center; gap: 8px; height: 48px; margin: 0 0 4px; padding: 0 var(--pad); border-radius: 999px; color: var(--dim); font-size: var(--fs-md); }
+.d-grp { display: flex; align-items: center; gap: 8px; width: 100%; height: calc(var(--grp) + 14px); padding: 14px var(--pad) 0; border: 0; background: transparent; color: var(--muted); font-size: 14.5px; font-weight: 600; text-align: left; }
+.d-grp .n { font-weight: 500; color: var(--dim); font-size: var(--fs-sm); }
+.d-grp.is-doing { color: var(--text); }
+.d-grp.tog .d-i { color: var(--dim); }
+.d-grp.first { height: calc(var(--grp) + 2px); padding-top: 2px; }
+.d-row { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; column-gap: 12px; height: var(--row); padding: 0 var(--pad); position: relative; border-radius: 14px; }
+.d-check { position: relative; width: 30px; height: var(--row); display: grid; place-items: center; }
+.d-cb { appearance: none; -webkit-appearance: none; margin: 0; display: block; position: relative; width: 22px; height: var(--h-xs); border: 1.5px solid var(--check-line); border-radius: 6px; background: var(--surface); }
+.d-cb.is-doing { border-color: var(--accent); }
+.d-cb.is-doing::before { content: ''; position: absolute; inset: 2px; border-radius: 3px; background: linear-gradient(90deg, var(--accent) 50%, transparent 50%); }
+.d-titlewrap { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.d-title { flex: 0 1 auto; min-width: 0; font-size: var(--fs-lg); font-weight: 500; line-height: 25px; letter-spacing: -0.012em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.d-row.is-doing .d-title { font-weight: 600; }
+.d-inproj { display: inline-flex; align-items: center; gap: 4px; flex: none; font-size: var(--fs-sm); color: var(--dim); white-space: nowrap; }
+.d-src { flex: none; color: var(--dim); font-weight: 500; font-size: 12.5px; }
+.d-ptag { flex: none; align-self: center; display: inline-flex; align-items: center; height: 23px; padding: 0 8px; border-radius: 6px; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.d-ptag.k-neg { background: var(--urgent-bg); color: var(--urgent); }
+.d-ptag.k-warn { padding: 0; color: var(--warn); }
+.d-meta { display: flex; justify-content: flex-end; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--dim); white-space: nowrap; overflow: hidden; font-variant-numeric: tabular-nums; }
+.d-meta > span { display: inline-flex; align-items: center; gap: 4px; font-weight: 500; }
+.d-meta .k-pos { color: var(--success); font-weight: 600; }
+.d-meta .dn { font-size: 12.5px; font-weight: 500; color: var(--dim); min-width: 40px; justify-content: flex-end; }
+.d-meta .dn.k-warn { color: var(--warn); font-weight: 600; }
+.d-meta .dn.k-neg { color: var(--urgent); font-weight: 600; }
+.d-rmore { display: none; width: 32px; height: 32px; border: 0; border-radius: 10px; background: none; color: var(--dim); place-items: center; }
+.d-empty { font-size: var(--fs-body); color: var(--dim); padding: 4px var(--pad) 14px; }
+
+/* 들어온 것 접힌 한 줄(배치 A·C) — 따뜻한 카드 + 접히는 그룹 제목 모양 */
+.d-infold { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 0 12px 0 var(--pad); border: 0; border-radius: 14px; background: none; color: var(--text); text-align: left; }
+.d-infold + .d-infold { box-shadow: 0 -1px 0 var(--hair); border-radius: 0 0 14px 14px; }
+.d-infold .lb { font-size: 14.5px; font-weight: 600; color: var(--muted); white-space: nowrap; }
+.d-infold .n { font-size: var(--fs-sm); font-weight: 500; color: var(--dim); }
+.d-infold .dot { color: var(--dim); }
+.d-infold .pv { flex: 1 1 auto; min-width: 0; font-size: var(--fs-sm); color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.d-infold .go { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; flex: none; font-size: var(--fs-sm); font-weight: 600; color: var(--accent-text); }
+.d-infold .go .d-i { transform: rotate(90deg); }
+.d-warm.is-fold { padding: 2px 10px; }
+.zone-fold { margin: 16px 0 0; }
+
+/* 배치 B 오른쪽 칸 — 같은 따뜻한 카드를 좁은 폭에 맞춰 쌓음 */
+.col-side .zone { margin-bottom: 16px; }
+.col-side .d-sechd { font-size: var(--fs-lg); height: 34px; padding: 0 4px; }
+.col-side .d-atrow { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "ld tl" "mt mt" "sb sb"; padding: 8px 10px 8px 12px; }
+.col-side .d-atrow .sb { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.col-side .d-ibrow { padding: 8px 6px 8px 12px; align-items: start; }
+.col-side .d-ibmain { flex-wrap: wrap; gap: 2px 8px; }
+.col-side .d-ibrow .ti { flex: 1 1 100%; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.4; }
+.col-side .d-ibacts .d-btn { display: none; }
+.col-side .d-rempty { padding: 6px 12px 8px; }
+
+/* ----- 반응형(앱 틀) ----- */
+@media (max-width: 1280px) { .d-row { column-gap: 10px; } }
+@media (max-width: 1180px) {
+  /* B: 오른쪽 칸이 들어갈 폭이 아니면 오늘 할 일 위로 쌓인다(= 지금 앱 모양) */
+  .g-b { grid-template-columns: calc(296px - 20px) minmax(0, 1fr); grid-template-areas: "rail side" "rail main"; grid-template-rows: auto 1fr; }
+  .g-b > .col-side { position: static; max-height: none; overflow: visible; }
+  .g-b > .col-side, .g-b > .col-main { padding-left: 0; }
+  .col-side .d-sechd { font-size: 18px; height: 30px; padding: 0; }
+}
+@media (max-width: 900px) {
+  .g-a, .g-b { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; min-height: 0; column-gap: 0; }
+  .g-a { grid-template-areas: "rail" "main"; } .g-b { grid-template-areas: "rail" "side" "main"; }
+  .g-a > .col-main { padding-left: 0; }
+  .g-a > .d-rail, .g-b > .d-rail { position: static; height: auto; margin: 0 0 16px; padding: 0 0 4px; display: flex; gap: 16px; overflow-x: auto; align-items: start; }
+  .g-a > .d-rail .d-rsec, .g-b > .d-rail .d-rsec { flex: 0 0 280px; margin: 0; }
+  .g-c { grid-template-columns: minmax(0, 1fr); grid-template-areas: "main" "rail"; }
+  .g-c > .d-rail { position: static; max-height: none; overflow: visible; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; margin-top: 16px; }
+  .d-infold .pv { display: none; }
+}
+
+/* ================= 문서(시안 설명) ================= */
+.wrap { max-width: 1280px; margin: 0 auto; padding: 28px 24px 64px; }
+.doc h1 { font-size: 24px; font-weight: 700; letter-spacing: -0.025em; margin: 0 0 6px; }
+.doc h2 { font-size: 19px; font-weight: 700; letter-spacing: -0.015em; margin: 44px 0 10px; }
+.doc h3 { font-size: 16px; font-weight: 700; letter-spacing: -0.015em; margin: 22px 0 8px; }
+.doc p { margin: 0 0 10px; max-width: 78ch; }
+.lede { color: var(--muted); }
+.note1 { display: inline-block; background: var(--warn-bg); color: var(--text); border-radius: var(--r-sm); padding: 8px 14px; margin: 4px 0 12px; font-weight: 600; }
+.card { background: var(--surface); border: 1px solid var(--surface-line); border-radius: var(--r); box-shadow: var(--soft); padding: 18px 22px; margin: 12px 0; }
+.card > :first-child { margin-top: 0; }
+.ask { background: var(--sel); border-radius: var(--r-sm); padding: 12px 16px; margin: 12px 0; }
+.ask b { color: var(--accent-text); }
+.doc table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+.doc th, .doc td { text-align: left; vertical-align: top; padding: 9px 12px 9px 0; border-bottom: 1px solid var(--hair); }
+.doc th { color: var(--dim); font-weight: 600; font-size: 12.5px; }
+.doc thead th { font-size: 14px; color: var(--text); font-weight: 700; }
+.doc td:first-child { color: var(--muted); font-weight: 600; width: 22%; }
+.doc td.big { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.doc td.big small { font-size: 12.5px; font-weight: 500; color: var(--dim); margin-left: 4px; }
+.doc td .sm { display: block; font-size: 12.5px; font-weight: 500; color: var(--dim); margin-top: 2px; white-space: normal; }
+.k-warn-t { color: var(--warn); } .k-neg-t { color: var(--urgent); } .k-pos-t { color: var(--success); }
+.doc ul.plain { margin: 6px 0 0; padding-left: 18px; }
+.doc ul.plain li { margin: 3px 0; }
+.frames { display: grid; gap: 22px 20px; }
+.frames.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.fr { margin: 0; min-width: 0; }
+.fr figcaption { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin: 0 0 6px; font-size: 14px; font-weight: 700; }
+.fr figcaption .sz { font-weight: 500; color: var(--dim); font-size: 12.5px; }
+.fr figcaption a { margin-left: auto; font-size: 12.5px; font-weight: 600; color: var(--accent-text); text-decoration: none; }
+.fr figcaption a:hover { text-decoration: underline; }
+.vp { position: relative; overflow: hidden; border-radius: 14px; box-shadow: 0 0 0 1px var(--border); background: var(--bg); }
+.vp iframe { position: absolute; left: 0; top: 0; border: 0; transform-origin: 0 0; background: var(--bg); }
+.fr .why { margin: 8px 0 0; font-size: 13.5px; color: var(--muted); }
+.pc { display: grid; grid-template-columns: 3em minmax(0, 1fr); gap: 4px 10px; font-size: 14px; margin: 10px 0 0; }
+.pc dt { font-weight: 700; }
+.pc dt.good { color: var(--success); } .pc dt.bad { color: var(--urgent); }
+.pc dd { margin: 0; }
+.fold-line { font-size: 13.5px; color: var(--muted); margin: 6px 0 0; }
+.fold-line b { color: var(--text); }
+.measure { position: absolute; left: -100000px; top: 0; visibility: hidden; border: 0; }
+.lay { margin-top: 30px; }
+code { font-family: var(--font); font-size: 0.93em; font-weight: 600; color: var(--muted); background: var(--neutral-bg); padding: 1px 6px; border-radius: 6px; white-space: nowrap; }
+.tblwrap { overflow-x: auto; }
+.tblwrap table { min-width: 640px; table-layout: fixed; }
+.tblwrap th:not(:first-child) { width: 26%; }
+body.shot .wrap { max-width: 900px; padding: 20px 20px 24px; }
+@media (max-width: 900px) { .frames.three { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 520px) { .wrap { padding: 20px 16px 48px; } .card { padding: 14px 14px; } .doc h1 { font-size: 21px; } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+'use strict';
+const Q = new URLSearchParams(location.search);
+const FRAME = Q.has('frame');
+const th = Q.get('theme');
+if (th === 'dark' || th === 'light') document.documentElement.dataset.theme = th;
+
+/* ---------- 아이콘(14px 한 벌, viewBox 16) ---------- */
+const ic = d => `<svg class="d-i" viewBox="0 0 16 16" aria-hidden="true">${d}</svg>`;
+const I = {
+  plus: ic('<path d="M8 3.2v9.6M3.2 8h9.6"/>'),
+  more: ic('<circle cx="3.5" cy="8" r=".9" fill="currentColor"/><circle cx="8" cy="8" r=".9" fill="currentColor"/><circle cx="12.5" cy="8" r=".9" fill="currentColor"/>'),
+  chev: ic('<path d="M6 3.5 10.5 8 6 12.5"/>'),
+  search: ic('<circle cx="7" cy="7" r="4.3"/><path d="m10.3 10.3 3.2 3.2"/>'),
+  refresh: ic('<path d="M13 8a5 5 0 1 1-1.5-3.6M13 3v2.6h-2.6"/>'),
+  gear: ic('<circle cx="8" cy="8" r="2.1"/><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M3.6 12.4l1.1-1.1M11.3 4.7l1.1-1.1"/>'),
+};
+const TICK = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.2 6.4 4.9 9 9.8 3.2"/></svg>';
+
+/* ---------- 가짜 데이터(실제 이름·회사 없음) — 오늘-탭-개편-시안과 같은 값 ---------- */
+const P = { pay: '결제 리뉴얼', join: '가입 개선', noti: '알림센터', ops: '운영툴', srch: '검색 개선' };
+const TASKS = [
+  { t: '가입 화면 약관 동의 순서 정리', p: 'join', doing: 1, due: 2 },
+  { t: '결제 실패 알림 문구 최종 확인', p: 'pay', pri: 'top', due: 0 },
+  { t: '결제 수단 순서 A/B 결과 정리', p: 'pay', wait: 'w' },
+  { t: '환불 정책 문서 링크 정리', p: 'pay', carry: '5일째 밀림' },
+  { t: '가입 완료 메일 제목 후보 세 개 적기', p: 'join', src: 1 },
+  { t: '알림센터 배지 숫자 기준 테스터B와 맞추기', p: 'noti', carry: '어제에서 밀림' },
+  { t: '알림 수신 설정 화면 QA 요청', p: 'noti', wait: 'y' },
+  { t: '운영툴 권한 요청 양식 검토', p: 'ops', pri: 'high', due: -2 },
+  { t: '테스터C 온보딩 자료 전달', p: 'ops' },
+  { t: '검색 결과 0건 화면 문구', p: 'srch', due: 5 },
+  { t: '검색 자동완성 로그 확인', p: 'srch', due: 12 },
+  { t: '주간 회의 안건 올리기', p: null, due: 1 },
+];
+const DONE_N = 3;
+const INBOX = [
+  { t: '가입 화면 문구 검토 요청', p: 'join', src: 1, isNew: 1 },
+  { t: '결제 완료 화면 영수증 버튼 위치 의견', p: 'pay', src: 1, isNew: 1 },
+  { t: '알림센터 읽음 처리 버그 제보', p: 'noti', src: 1 },
+  { t: '다음 주 검색 개선 킥오프 일정 잡기', p: 'srch' },
+];
+const ATTN = [
+  { t: '결제 실패 시 재시도 횟수 정책', who: '테스터A 외 1명 · 2시간 전', mention: 1, pv: '재시도 3회로 확정해도 될까요? 운영 쪽 의견도 같이 받아 두었어요.', n: 3 },
+  { t: '가입 이메일 인증 만료 시간', who: '테스터C · 어제', pv: '24시간이면 너무 길다는 의견이 있어요. 기준 한 번 봐 주세요.' },
+];
+const dateOf = n => { const d = new Date(2026, 9, 6 + n); return `${d.getMonth() + 1}월 ${d.getDate()}일`; };
+
+/* ---------- 앱 화면 그리기 ---------- */
+let O;
+function frameOpts() {
+  const n = (k, d) => (Q.has(k) ? Number(Q.get(k)) : d);
+  return { lay: Q.get('lay') || 'a', inbox: n('inbox', 4), attn: n('attn', 2), rail: Q.get('rail') || 'full' };
+}
+const projIn = p => (p ? `<span class="d-inproj">·&nbsp;${P[p]}</span>` : '');
+
+function header() {
+  return `<header class="d-hdr"><h1 class="d-brand">워크스페이스</h1><span class="d-date num">10월 6일 (화)</span>
+  <nav class="d-tabs" role="tablist"><button class="d-tab" role="tab" aria-selected="true">오늘</button><button class="d-tab" role="tab" aria-selected="false">프로젝트</button><button class="d-tab" role="tab" aria-selected="false">회의<span class="d-tabnum">2</span></button><button class="d-tab" role="tab" aria-selected="false">아이디어·결정<span class="d-tabnum">3</span></button><button class="d-tab" role="tab" aria-selected="false">주간요약</button></nav>
+  <div class="d-hright"><button class="d-iconbtn" aria-label="새로고침">${I.refresh}</button><button class="d-srch">${I.search}<span>검색</span><kbd>⌘K</kbd></button><button class="d-iconbtn" aria-label="설정">${I.gear}</button></div></header>`;
+}
+/* 줄 모양은 세 안 모두 같다: D-N 한 가지 · 중요 표시는 체크박스 밖 · 색 점 없음 */
+function metaHTML(t) {
+  const s = [];
+  if (t.carry) s.push(`<span>${t.carry}</span>`);
+  if (t.wait === 'w') s.push(`<span>답변 기다리는 중</span>`);
+  if (t.wait === 'y') s.push(`<span class="k-pos">답변 왔어요</span>`);
+  if (t.due != null && t.due <= 7) {
+    const lb = t.due < 0 ? `D+${-t.due}` : t.due === 0 ? 'D-DAY' : `D-${t.due}`;
+    const k = t.due < 0 ? ' k-neg' : t.due === 0 ? ' k-warn' : '';
+    s.push(`<span class="dn${k}" title="${dateOf(t.due)}까지">${lb}</span>`);
+  }
+  return s.join('');
+}
+function rowHTML(t, o = {}) {
+  const tag = t.pri ? (t.pri === 'top' ? '<span class="d-ptag k-neg">긴급</span>' : '<span class="d-ptag k-warn">중요</span>') : '';
+  return `<div class="d-row${t.doing ? ' is-doing' : ''}"><span class="d-check"><input type="checkbox" class="d-cb${t.doing ? ' is-doing' : ''}" aria-label="${t.t} — 완료로 표시"></span><div class="d-titlewrap">${tag}<span class="d-title">${t.t}</span>${o.proj ? projIn(t.p) : ''}${t.src ? '<span class="d-src">원문</span>' : ''}</div><span class="d-meta">${metaHTML(t)}</span><button class="d-rmore" aria-label="더보기">${I.more}</button></div>`;
+}
+const grpHTML = (label, n, o = {}) => `<div class="d-grp${o.first ? ' first' : ''}${o.doing ? ' is-doing' : ''}${o.tog ? ' tog' : ''}">${o.tog ? I.chev : ''}<span class="gl">${label}</span><span class="n num">${n}</span></div>`;
+function todayRows(list) {
+  const doing = list.filter(t => t.doing), rest = list.filter(t => !t.doing);
+  let h = '', first = true;
+  if (doing.length) { h += grpHTML('진행 중', doing.length, { first, doing: 1 }); first = false; doing.forEach(t => (h += rowHTML(t, { proj: 1 }))); }
+  ['pay', 'join', 'noti', 'ops', 'srch', null].forEach(p => {
+    const g = rest.filter(t => (t.p || null) === p);
+    if (!g.length) return;
+    h += grpHTML(p ? P[p] : '프로젝트 없음', g.length, { first }); first = false;
+    g.forEach(t => (h += rowHTML(t)));
+  });
+  return h + grpHTML('완료', DONE_N, { tog: 1 });
+}
+const attnRows = () => ATTN.slice(0, O.attn).map(a => `<div class="d-atrow" data-k="at"><span class="ld"><span class="sc">지라</span></span><span class="tl">${a.t}</span><span class="mt"><span>${a.who}</span>${a.mention ? '<span class="mn">@멘션</span>' : ''}</span><span class="sb">${a.pv}${a.n ? ` · 댓글 ${a.n}개` : ''}</span></div>`).join('');
+const inboxRows = () => INBOX.slice(0, O.inbox).map(x => `<div class="d-ibrow" data-k="in"><div class="d-ibmain"><span class="ti">${x.isNew ? '<i class="new-dot" aria-label="새 항목"></i>' : ''}${x.t}</span>${projIn(x.p)}${x.src ? '<span class="d-src">원문</span>' : ''}</div><div class="d-ibacts"><button class="d-btn sm">분류</button><button class="d-btn sm">완료</button><button class="d-iconbtn xs" aria-label="더보기">${I.more}</button></div></div>`).join('');
+
+function railHTML() {
+  if (O.rail === 'empty') {
+    return `<aside class="d-rail" aria-label="오늘 옆줄"><section class="d-rsec"><div class="d-rhd">오늘 미팅</div><div class="d-rempty">오늘은 미팅이 없어요.</div></section>
+    <section class="d-rsec"><div class="d-rhd">확인 대기</div><div class="d-qa">+ 확인 대기 추가</div></section></aside>`;
+  }
+  const meet = `<section class="d-rsec"><div class="d-rhd">오늘 미팅<span class="n num">3</span></div>
+    <div class="d-mrow is-past"><span class="t">10:00</span><span class="ti">결제 리뉴얼 주간 회의<span class="pj">${P.pay}</span></span><span></span></div>
+    <div class="d-mrow is-now"><span class="t">14:00</span><span class="ti">가입 화면 디자인 리뷰<span class="pj">${P.join}</span></span><span class="bdg">초안 2</span></div>
+    <div class="d-mrow"><span class="t">16:30</span><span class="ti">테스터B와 1:1</span><span></span></div></section>`;
+  const rem = `<section class="d-rsec"><div class="d-rhd">리마인드<span class="n num">2</span></div>
+    <div class="d-wrow"><span class="ti">${P.pay}</span><span class="sub"><span class="k-warn">v2.70.0 배포 3일 전</span><span>열린 업무 4</span></span></div>
+    <div class="d-wrow"><span class="ti">알림 수신 설정 화면 QA 요청${projIn('noti')}</span><span class="sub"><span class="k-pos">답변 왔어요</span></span></div></section>`;
+  const wr = (t, who, extra, src) => `<div class="d-wrow has-ck"><span class="ck"><input type="checkbox" class="d-wcb" aria-label="${t} — 확인됨으로 표시"></span><span class="ti">${t}</span><span class="sub"><span class="who">${who}</span>${extra}${src ? '<span class="src">슬랙 ↗</span>' : ''}</span></div>`;
+  const gh = (p, n) => `<div class="d-wgh">${p ? P[p] : '프로젝트 없음'}<span class="n">${n}</span></div>`;
+  const wait = `<section class="d-rsec"><div class="d-rhd">확인 대기<span class="n num">4</span><span class="sp"></span><span class="more">${I.more}</span></div>
+    ${gh('pay', 2)}${wr('환불 문구 법무 검토 회신', '테스터A', '<span class="k-warn">4일째</span>', 1)}${wr('PG사 수수료표 받기', '결제팀', '<span class="k-neg">1일 늦음</span>', 0)}
+    ${gh('join', 1)}${wr('본인인증 업체 견적', '테스터C', '<span>2일째</span>', 1)}
+    ${gh(null, 1)}${wr('사무실 출입증 재발급', '테스터B', '<span class="k-warn">오늘 답변 예정</span>', 0)}
+    <div class="d-qa">+ 확인 대기 추가</div></section>`;
+  return `<aside class="d-rail" aria-label="오늘 옆줄">${meet}${rem}${wait}</aside>`;
+}
+
+function todayBlock() {
+  const list = TASKS;
+  const chip = `<span class="cnt num" role="img" aria-label="${list.length + DONE_N}개 중 ${DONE_N}개 끝냈어요">${TICK}${DONE_N}/${list.length + DONE_N}</span>`;
+  const head = `<div class="d-lhd"><h2>오늘 할 일</h2>${chip}<span class="sp"></span><button class="d-btn">나중에 할 일 <span class="num">13</span></button><button class="d-iconbtn xs" aria-label="더보기">${I.more}</button></div>`;
+  const body = `<div class="d-list"><div class="d-qaf">${I.plus}오늘 할 일 추가 — Enter</div><div id="todayRows">${todayRows(list)}</div></div>`;
+  return { head, body };
+}
+const foldBtn = (label, n, pv, id) => `<button class="d-infold" aria-expanded="false" data-k="${id}"><span class="lb">${label}</span><span class="n num">${n}</span><span class="pv">${pv}</span><span class="go">펼치기${I.chev}</span></button>`;
+
+function mainA() {
+  const { head, body } = todayBlock();
+  let h = `<main class="col-main">${head}${body}`;
+  // 순서: 오늘 할 일 → 새로 들어온 것 → 반응 필요. 개수가 있을 때만 접힌 줄로 오늘 할 일 아래
+  const lines = [];
+  if (O.inbox) lines.push(foldBtn('새로 들어온 것', O.inbox, `최근: ${INBOX[0].t}`, 'fold-in'));
+  if (O.attn) lines.push(foldBtn('반응 필요', O.attn, ATTN[0].t, 'fold-at'));
+  if (lines.length) h += `<div class="d-warm is-fold zone-fold">${lines.join('')}</div>`;
+  return h + '</main>';
+}
+function mainC() {
+  const { head, body } = todayBlock();
+  let h = `<main class="col-main">${head}`;
+  const nIn = O.inbox, nAt = O.attn;
+  if (nIn || nAt) {
+    const parts = [];
+    if (nIn) parts.push(`<span class="lb">새로 들어온 것</span><span class="n num">${nIn}</span>`);
+    if (nIn && nAt) parts.push('<span class="dot">·</span>');
+    if (nAt) parts.push(`<span class="lb">반응 필요</span><span class="n num">${nAt}</span>`);
+    const pv = nIn ? `최근: ${INBOX[0].t}` : ATTN[0].t;
+    h += `<div class="d-warm is-fold"><button class="d-infold" aria-expanded="false" data-k="fold-in">${parts.join('')}<span class="pv">${pv}</span><span class="go">펼치기${I.chev}</span></button></div>`;
+  }
+  return h + body + '</main>';
+}
+function mainB() {
+  const { head, body } = todayBlock();
+  return `<main class="col-main">${head}${body}</main>`;
+}
+function sideB() {
+  // 접지 않고 늘 보이는 카드 둘(반응 필요 → 새로 들어온 것, 지금 앱의 위아래 차례 그대로)
+  const at = `<section class="zone"><div class="d-sechd">반응 필요<span class="n num">${O.attn}</span></div><div class="d-warm">${O.attn ? attnRows() : '<div class="d-rempty">반응할 것이 없어요.</div>'}</div></section>`;
+  const ib = `<section class="zone" data-k="in-card"><div class="d-sechd">새로 들어온 것<span class="n num">${O.inbox}</span></div><div class="d-warm">${O.inbox ? inboxRows() : '<div class="d-rempty">새로 들어온 것이 없어요.</div>'}</div></section>`;
+  return `<div class="col-side" aria-label="반응 필요와 새로 들어온 것">${at}${ib}</div>`;
+}
+
+function renderFrame() {
+  O = frameOpts();
+  document.body.className = 'app';
+  let grid;
+  if (O.lay === 'b') grid = `<div class="g-b">${railHTML()}${mainB()}${sideB()}</div>`;
+  else if (O.lay === 'c') grid = `<div class="g-c">${mainC()}${railHTML()}</div>`;
+  else grid = `<div class="g-a">${railHTML()}${mainA()}</div>`;
+  document.getElementById('root').innerHTML = header() + `<div class="page">${grid}</div>`;
+
+  // 직접 잼: 창 안(아래 끝·오른쪽 끝)에 통째로 들어온 줄만 센다. 레일처럼 따로 스크롤되는 칸은 그 칸 안에 보이는 것만.
+  const count = () => {
+    const vh = window.innerHeight, vw = window.innerWidth;
+    const inView = el => {
+      const r = el.getBoundingClientRect();
+      if (r.height === 0 || r.bottom > vh + 0.5 || r.top < 0 || r.right > vw + 0.5 || r.left < -0.5) return false;
+      const box = el.closest('.d-rail, .col-side');
+      if (box) { const b = box.getBoundingClientRect(); if (r.bottom > b.bottom + 0.5 || r.right > b.right + 0.5 || r.left < b.left - 0.5) return false; }
+      return true;
+    };
+    const rows = [...document.querySelectorAll('#todayRows .d-row')];
+    const n = rows.filter(inView).length;
+    const inRows = [...document.querySelectorAll('[data-k="in"]')].filter(inView).length;
+    const atRows = [...document.querySelectorAll('[data-k="at"]')].filter(inView).length;
+    const railRows = [...document.querySelectorAll('.d-rail .d-mrow, .d-rail .d-wrow')].filter(inView).length;
+    // 새로 들어온 것이 있다는 표시(접힌 줄 또는 카드 제목)가 첫 화면에 보이는가 · 그 위치
+    const mark = document.querySelector('[data-k="fold-in"], [data-k="in-card"] .d-sechd');
+    let inY = -1, inVis = 0;
+    if (mark) { const r = mark.getBoundingClientRect(); inY = Math.round(r.top); inVis = inView(mark) ? 1 : 0; }
+    const d = { kind: 'count', key: Q.get('key'), n, total: rows.length, inRows, atRows, railRows, glance: n + inRows + atRows + railRows, inY, inVis, vh };
+    Object.assign(document.documentElement.dataset, { visible: n, glance: d.glance, iny: inY });
+    if (Q.get('key') && parent !== window) parent.postMessage(d, '*');
+  };
+  count();
+  setTimeout(count, 300);
+  (document.fonts ? document.fonts.ready : Promise.resolve()).then(() => { count(); setTimeout(count, 80); });
+}
+
+/* ---------- 문서 ---------- */
+const LAYS = {
+  a: { name: '배치 A — 왼쪽 레일 유지, 본문 순서만 바꿈', short: 'A 왼쪽 레일 유지' },
+  b: { name: '배치 B — 세 칸(레일 | 오늘 할 일 | 반응 필요·새로 들어온 것)', short: 'B 세 칸' },
+  c: { name: '배치 C — 오른쪽 레일', short: 'C 오른쪽 레일' },
+};
+function frameEl(key, label, w, h, params, why) {
+  const qs = new URLSearchParams({ frame: 1, theme: 'light', ...params });
+  if (key) qs.set('key', key);
+  const src = 'index.html?' + qs.toString();
+  return `<figure class="fr"><figcaption>${label}<span class="sz num">${w}×${h}</span><a href="${src}" target="_blank" rel="noopener">크게 보기 ↗</a></figcaption>
+  <div class="vp" data-w="${w}" data-h="${h}"><iframe src="${src}" title="${label}" width="${w}" height="${h}" loading="eager"></iframe></div>${why ? `<p class="why">${why}</p>` : ''}</figure>`;
+}
+const measureEl = (key, w, h, params) => `<iframe class="measure" aria-hidden="true" tabindex="-1" src="index.html?${new URLSearchParams({ frame: 1, theme: 'light', key, ...params })}" width="${w}" height="${h}"></iframe>`;
+const cell = (k, f) => `<td class="big" data-count="${k}" data-f="${f}">…</td>`;
+
+function tableHTML() {
+  const r3 = (label, f, sz, extra = '') => `<tr><td>${label}${extra}</td>${['a', 'b', 'c'].map(l => cell(`${l}-${sz}`, f)).join('')}</tr>`;
+  return `<div class="card tblwrap"><table>
+<thead><tr><th></th><th>A 왼쪽 레일 유지</th><th>B 세 칸</th><th>C 오른쪽 레일</th></tr></thead>
+${r3('오늘 할 일 — 스크롤 없이 · 1440×820', 'n', '1440')}
+${r3('오늘 할 일 — 스크롤 없이 · 1280×720', 'n', '1280')}
+${r3('한눈에 보이는 것(통째로 보이는 줄) · 1440×820', 'glance', '1440', '<span class="sm">할 일 + 들어온 것·반응 필요 + 레일 줄</span>')}
+${r3('새로 들어온 것을 놓치기 쉬운 정도 · 1440×820', 'miss', '1440', '<span class="sm">표시가 첫 화면에 보이나 · 제목이 몇 개 보이나</span>')}
+${r3('〃 · 1280×720', 'miss', '1280')}
+<tr><td>오른쪽 칸이 빌 때</td><td>오른쪽 칸 없음. 들어온 것이 0개면 접힌 줄째 없어지고 오늘 할 일 아래가 비어요.<span class="sm">레일이 비면 지금처럼 조용한 카드 둘</span></td><td>카드 둘이 <code>새로 들어온 것이 없어요.</code>·<code>반응할 것이 없어요.</code> 한 줄씩으로 남아요. 340px 자리는 그대로(폭 안 흔들림), 꽤 비어 보여요.</td><td>레일이 조용한 카드 둘(<code>오늘은 미팅이 없어요.</code>·<code>+ 확인 대기 추가</code>)로 남아요. 자리는 그대로.</td></tr>
+${r3('폭 1120 — 오늘 할 일 스크롤 없이 · 1120×720', 'n', '1120')}
+<tr><td>폭 줄어들 때 동작</td><td>1120: 지금과 같음.<br>900 이하: 레일이 본문 <b>위</b> 가로 한 줄(지금 앱 규칙) — 오늘 할 일이 그만큼 내려가요.</td><td><b>1180 이하</b>: 오른쪽 칸이 들어갈 폭이 아니라 두 카드가 오늘 할 일 <b>위</b>로 올라와 쌓여요 = 지금 앱 모양으로 돌아감.<br>900 이하: 레일 가로 한 줄 → 카드 둘 → 오늘 할 일.</td><td>1120: 레일이 오른쪽 그대로, 본문만 좁아짐.<br>900 이하: 레일이 본문 <b>아래</b>로 — 오늘 할 일이 맨 위 그대로.</td></tr>
+${r3('폭 900 — 오늘 할 일 스크롤 없이 · 900×820', 'n', '900')}
+<tr><td>새로 들어온 것을 접나<span class="sm">10/1 결정 "접으면 놓친다"</span></td><td><b class="k-warn-t">접음</b> — 결정을 뒤집고, 접힌 줄이 오늘 할 일 <b>아래</b>라 셋 중 가장 놓치기 쉬움</td><td><b class="k-pos-t">안 접음</b> — 결정 그대로. 늘 펼친 카드</td><td><b class="k-warn-t">접음</b> — 결정을 뒤집되 접힌 줄이 오늘 할 일 바로 위라 개수·최근 제목이 늘 보임</td></tr>
+<tr><td>바뀌는 양(코드)</td><td><b>작음</b><span class="sm">본문 순서 바꾸기 + 접힌 줄 하나(C와 같은 부품). 틀·레일·폭 규칙은 그대로</span></td><td><b>큼</b><span class="sm">새 칸 하나 + 좁은 칸용 줄 모양(들어온 것·반응 필요) + 1180px 새 경계 + 900px 쌓는 순서. 접기는 없음</span></td><td><b>중간</b><span class="sm">틀 좌우 바꾸기 + 접힌 줄 + 900 이하 레일 아래로. 레일 속은 그대로</span></td></tr>
+</table>
+<p class="why" style="margin:10px 0 0;font-size:13px;color:var(--dim)">숫자는 이 페이지가 같은 가짜 데이터(오늘 할 일 12개·끝낸 것 3·새로 들어온 것 4·반응 필요 2·레일 꽉 참)로 그린 화면을 직접 재서 채워요. 창 아래·오른쪽 끝 안에 <b>줄이 통째로 들어온 것</b>만 세고, 레일처럼 따로 스크롤되는 칸은 그 칸 안에 보이는 것만 세요. 창 안쪽 높이는 1440×900 맥의 크롬 창 기준 820px, 1280×800은 720px로 두었어요.</p>
+<p class="why" style="margin:8px 0 0;font-size:13.5px;color:var(--text)"><b>읽는 법:</b> 넓은 화면(1440·1280)에서 스크롤 없이 보이는 오늘 할 일은 세 안이 거의 같아요 — 셋 다 위에 쌓인 카드를 걷어 냈기 때문이에요. 차이는 <b>새로 들어온 것이 어디서 보이느냐</b>와 <b>좁은 폭(1120·900)</b>에서 나요.</p></div>`;
+}
+
+function renderDoc() {
+  const SHOT = Q.get('shot') === 'table';
+  document.body.className = 'doc' + (SHOT ? ' shot' : '');
+  const base = { inbox: 4, attn: 2 };
+  const empty = { inbox: 0, attn: 0, rail: 'empty' };
+  const measures = ['a', 'b', 'c'].map(l => measureEl(`${l}-1280`, 1280, 720, { lay: l, ...base }) + measureEl(`${l}-1120`, 1120, 720, { lay: l, ...base }) + measureEl(`${l}-900`, 900, 820, { lay: l, ...base }) + (SHOT ? measureEl(`${l}-1440`, 1440, 820, { lay: l, ...base }) : '')).join('');
+  const top = `<h1>오늘 탭 배치 세 가지</h1>
+<p class="note1">옛 시안 파일(10/2 배치 A/B/C)이 없어져서, 기록에 남은 방향대로 다시 그렸어요.</p>
+<p class="lede">줄 모양(기한 <code>D-N</code> · <code>긴급</code>/<code>중요</code>는 체크박스 밖 · 개수 칩 회색 · 프로젝트 색 점 없음)은 세 안이 모두 같고 <b>칸 배치만</b> 달라요. 데이터는 전부 가짜(테스터A~C · 결제 리뉴얼 · 가입 개선 · 알림센터 · 운영툴 · 검색 개선), 오늘은 10월 6일 (화)예요.</p>
+<h2 style="margin-top:22px">숫자로 비교</h2>${tableHTML()}`;
+  if (SHOT) { document.getElementById('root').innerHTML = `<div class="wrap">${top}</div>${measures}`; listen(); return; }
+
+  const lay = (l, pros, cons, fold) => `<section class="lay">${frameEl(`${l}-1440`, LAYS[l].name, 1440, 820, { lay: l, ...base })}
+<dl class="pc"><dt class="good">장점</dt><dd>${pros}</dd><dt class="bad">단점</dt><dd>${cons}</dd></dl>
+<p class="fold-line"><b>새로 들어온 것:</b> ${fold}</p></section>`;
+  document.getElementById('root').innerHTML = `<div class="wrap">${top}
+<h2>세 안 — 1440×820 라이트</h2>
+${lay('a', '지금 앱과 가장 가까워요. 레일·폭 규칙이 그대로라 익숙하고 고칠 것이 적어요.', '새로 들어온 것·반응 필요가 오늘 할 일 <b>아래</b>로 가서, 할 일이 12개면 첫 화면에서 아예 안 보여요(표의 놓침 줄).', '<b>접어요</b> — 10/1 결정 "접으면 놓친다"를 뒤집고, 접힌 줄마저 스크롤해야 보여 놓침 위험이 셋 중 가장 커요.')}
+${lay('b', '오늘 할 일이 가운데 맨 위에서 시작하고, 새로 들어온 것·반응 필요도 펼친 채 한 화면에 같이 보여요. 아무것도 접지 않아요.', '판이 셋이라 오늘 할 일 폭이 가장 좁고(1440에서 약 740px), 1180px 이하에서는 오른쪽 칸이 위로 올라와 지금 모양으로 돌아가요.', '<b>안 접어요</b> — 10/1 결정 그대로. 오른쪽 칸에 제목까지 늘 보여요(분류·완료 버튼은 좁은 칸이라 ⋯ 안으로).')}
+${lay('c', '오늘 할 일이 왼쪽 맨 위부터 주인공이고, 1120·900처럼 좁아져도 맨 위 자리를 지켜요(900에서 셋 중 유일하게 7개 보임).', '레일이 왼쪽→오른쪽으로 옮겨 가 익숙한 자리가 바뀌어요. 넓은 화면에서 보이는 할 일 개수는 A·B와 같거나 하나 적고(접힌 줄 몫), 새로 들어온 것은 제목이 최근 하나만 보여요.', '<b>접어요</b> — 10/1 결정을 뒤집지만, 접힌 줄이 오늘 할 일 바로 위라 개수·최근 제목·새 항목 점이 늘 보여요.')}
+
+<div class="ask"><b>추천: 배치 B(세 칸).</b> 1440 첫 화면에서 오늘 할 일이 맨 위에 서면서도 새로 들어온 것을 접지 않는 안은 B 하나라, "오늘 할 일이 주인공"과 10/1 "접으면 놓친다"를 둘 다 지켜요. 레일 자리도 지금 그대로라 기존 앱과의 거리도 C보다 가깝고, 1440·1280에서 보이는 할 일 개수도 셋 중 가장 많거나 같아요. 다만 1180px 이하에서 어떻게 할지(지금 모양으로 돌아감 / C처럼 접힌 한 줄)는 같이 정해야 해요.<br>
+<b>반대 의견 한 줄:</b> 창을 1180px보다 좁게 쓰는 일이 잦으면 B는 1120에서 첫 화면 할 일이 0개로 돌아가고 고칠 양도 가장 커요 — 그런 폭이 주로 쓰는 폭이면 어느 폭에서도 오늘 할 일이 맨 위인 C가 나아요.</div>
+
+<h2>폭이 줄어들 때</h2>
+<p>1280×720 · 1120×720 · 900×820. 숫자는 위 표에 있어요.</p>
+<div class="frames three">
+${['a', 'b', 'c'].map(l => frameEl(null, `${LAYS[l].short} · 1280`, 1280, 720, { lay: l, ...base })).join('')}
+${['a', 'b', 'c'].map(l => frameEl(null, `${LAYS[l].short} · 1120`, 1120, 720, { lay: l, ...base })).join('')}
+${['a', 'b', 'c'].map(l => frameEl(null, `${LAYS[l].short} · 900`, 900, 820, { lay: l, ...base })).join('')}
+</div>
+
+<h2>오른쪽 칸이 빌 때</h2>
+<p>새로 들어온 것 0 · 반응 필요 0 · 오늘 미팅 0 · 리마인드 0 · 확인 대기 0. 1440×820.</p>
+<div class="frames three">
+${['a', 'b', 'c'].map(l => frameEl(null, `${LAYS[l].short} · 비었을 때`, 1440, 820, { lay: l, ...empty })).join('')}
+</div>
+
+<h2>판단해서 정한 것 · 범위 밖</h2>
+<div class="card"><ul class="plain">
+<li>A의 접힌 줄은 요청 그대로 <b>오늘 할 일 카드 아래</b>에 두고, 차례대로 <code>새로 들어온 것</code> → <code>반응 필요</code> 두 줄로 나눴어요(C는 한 줄에 함께).</li>
+<li>B의 오른쪽 칸은 340px. 차례는 지금 앱처럼 반응 필요 → 새로 들어온 것. 좁은 칸이라 새로 들어온 것의 <code>분류</code>·<code>완료</code>는 줄의 ⋯ 안으로 넣고 제목은 두 줄까지 보여요.</li>
+<li>B는 1180px 이하에서 오른쪽 칸을 오늘 할 일 위로 올렸어요(아래로 내리면 놓치기 쉬워서). 비었을 때는 카드가 한 줄 빈 말로 남아 칸 폭이 흔들리지 않게 했어요.</li>
+<li>900px 이하는 A·B가 지금 앱 규칙(레일이 위 가로 한 줄), C는 앞 시안처럼 레일이 아래.</li>
+<li>바뀌는 양(작음/중간/큼)은 화면 구조를 보고 어림한 값이에요 — 코드를 재 본 숫자는 아니에요.</li>
+<li>범위 밖: 나중에 할 일 서랍, 펼쳤을 때 모습, 휴대폰 폭 앱 화면, 움직임.</li>
+</ul></div>
+</div>${measures}`;
+
+  const fit = () => document.querySelectorAll('.vp').forEach(vp => {
+    const w = +vp.dataset.w, h = +vp.dataset.h, s = Math.min(1, vp.clientWidth / w);
+    vp.style.height = Math.round(h * s) + 'px';
+    vp.firstElementChild.style.transform = `scale(${s})`;
+  });
+  fit();
+  addEventListener('resize', fit);
+  listen();
+}
+function listen() {
+  addEventListener('message', e => {
+    const d = e.data;
+    if (!d || d.kind !== 'count') return;
+    document.querySelectorAll(`[data-count="${d.key}"]`).forEach(td => {
+      const f = td.dataset.f;
+      if (f === 'n') td.innerHTML = `${d.n}<small>/ ${d.total}개</small>`;
+      else if (f === 'glance') td.innerHTML = `${d.glance}<small>줄</small><span class="sm">할 일 ${d.n} · 들어온 것·반응 필요 ${d.inRows + d.atRows} · 레일 ${d.railRows}</span>`;
+      else if (f === 'miss') {
+        const lvl = !d.inVis ? ['높음', 'k-neg-t'] : d.inRows >= 4 ? ['낮음', 'k-pos-t'] : ['중간', 'k-warn-t'];
+        const where = d.inVis ? `첫 화면에 보임(위에서 ${d.inY}px)` : `첫 화면에 안 보임(${d.inY - d.vh}px 더 내려야)`;
+        const titles = d.inRows ? `제목 ${d.inRows}개 보임` : '제목은 접힌 줄의 최근 하나뿐';
+        td.innerHTML = `<span class="${lvl[1]}">${lvl[0]}</span><span class="sm">${where} · ${d.inVis ? titles : '제목 0개'}</span>`;
+      }
+    });
+  });
+}
+
+if (FRAME) renderFrame(); else renderDoc();
+</script>
+</body>
+</html>

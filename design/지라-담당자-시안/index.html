@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>지라 담당자 바꾸기</title>
+<style>
+@font-face { font-family: "Pretendard Variable"; font-weight: 45 920; font-display: swap; src: url("../../tracker/inbox-app/fonts/PretendardVariable.woff2") format("woff2-variations"); }
+
+/* ===== 앱 토큰 그대로(ui.css :root) — 새 색·새 글꼴 없음 ===== */
+:root, .th-light {
+  --bg:#f2f4f6; --surface:#fff; --surface-line:transparent; --field:#f2f4f6; --hover:#f4f6f8; --press:#e9edf1; --border:#e3e7eb; --hair:#eef1f4;
+  --text:#191f28; --muted:#4e5968; --dim:#636c78;
+  --accent:#3182f6; --accent-strong:#1b64da; --accent-text:#1b64da; --accent-soft:#e8f3ff; --on-fill:#fff; --sel:#eef5ff;
+  --urgent:#c9252d; --urgent-bg:#ffeceb; --warn:#b0560a; --success:#0d7a4a; --neutral-bg:#eef1f4; --prog-track:#e9edf2;
+  --soft:0 1px 3px rgba(25,31,40,.04),0 8px 24px rgba(25,31,40,.06);
+  --pop:0 12px 36px rgba(25,31,40,.14),0 2px 8px rgba(25,31,40,.06);
+  color-scheme: light;
+}
+:root {
+  --r:20px; --r-sm:12px; --r-xs:10px;
+  --fs-cap:12px; --fs-sm:13px; --fs-body:14px; --h-xs:22px; --h-sm:28px; --h-md:32px;
+  --ease:cubic-bezier(.22,.8,.3,1); --t-tint:170ms; --t-fast:140ms;
+  --font:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic","Segoe UI",sans-serif;
+}
+:root[data-theme="dark"], .th-dark {
+  --bg:#15181e; --surface:#1e222a; --surface-line:#2b313b; --field:#262b34; --hover:#272c35; --press:#303641; --border:#333a45; --hair:#2b313b;
+  --text:#eaedf1; --muted:#a8b1bd; --dim:#8b95a1;
+  --accent:#4b91f1; --accent-strong:#4b91f1; --accent-text:#7aa9ff; --accent-soft:#1b2a44; --on-fill:#0b1020; --sel:#1c2533;
+  --urgent:#ff8f8f; --urgent-bg:#3a2022; --warn:#ffbe6b; --success:#6ddba0; --neutral-bg:#2a2f38; --prog-track:#2b313b;
+  --soft:0 1px 3px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.3);
+  --pop:0 12px 36px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.35);
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:#15181e; --surface:#1e222a; --surface-line:#2b313b; --field:#262b34; --hover:#272c35; --press:#303641; --border:#333a45; --hair:#2b313b;
+    --text:#eaedf1; --muted:#a8b1bd; --dim:#8b95a1;
+    --accent:#4b91f1; --accent-strong:#4b91f1; --accent-text:#7aa9ff; --accent-soft:#1b2a44; --on-fill:#0b1020; --sel:#1c2533;
+    --urgent:#ff8f8f; --urgent-bg:#3a2022; --warn:#ffbe6b; --success:#6ddba0; --neutral-bg:#2a2f38; --prog-track:#2b313b;
+    --soft:0 1px 3px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.3);
+    --pop:0 12px 36px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.35);
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); }
+body { margin:0; padding:24px 16px 80px; background:var(--bg); color:var(--text); font-family:var(--font); font-size:var(--fs-body); line-height:1.55; word-break:keep-all; -webkit-font-smoothing:antialiased; }
+button, input { font-family: inherit; }
+:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:10px; }
+
+/* ===== 문서 껍데기(시안 설명용) ===== */
+.doc { max-width: 860px; margin: 0 auto; }
+h1 { margin:0 0 4px; font-size:21px; font-weight:700; letter-spacing:-.02em; }
+h2 { margin:34px 0 4px; font-size:17px; font-weight:700; letter-spacing:-.015em; }
+.note { margin:0 0 12px; color:var(--muted); font-size:var(--fs-sm); }
+.cap { margin:14px 0 6px; font-size:var(--fs-cap); font-weight:600; color:var(--dim); }
+.bar { display:flex; gap:8px; align-items:center; margin:10px 0 0; flex-wrap:wrap; }
+.grid2 { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:14px 16px; align-items:start; }
+.phone { width:380px; max-width:100%; padding:14px 12px; border-radius:24px; background:var(--bg); border:1px solid var(--border); }
+section[hidden] { display:none; }
+body.shot { padding:18px 16px 24px; }
+body.shot .doc > header { display:none; }
+body.shot h2 { margin-top:0; }
+
+/* ===== 앱 부품(ui.css 값 그대로) ===== */
+.d-i { width:14px; height:14px; display:block; flex:none; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
+.d-iconbtn { width:28px; height:28px; display:grid; place-items:center; flex:none; border:0; border-radius:50%; background:none; color:var(--dim); cursor:pointer; padding:0; }
+.d-iconbtn:hover { background:var(--hover); color:var(--text); }
+.d-btn { display:inline-flex; align-items:center; justify-content:center; gap:5px; height:34px; padding:0 13px; border:0; border-radius:var(--r-xs); background:var(--neutral-bg); color:var(--muted); font-size:13.5px; font-weight:600; white-space:nowrap; cursor:pointer; transition:background var(--t-tint) var(--ease), color var(--t-tint) var(--ease); }
+.d-btn:hover { background:var(--hover); color:var(--text); }
+.d-btn.sm { height:var(--h-md); padding:0 12px; font-size:var(--fs-sm); }
+.d-btn.acc { height:33px; background:var(--accent-soft); color:var(--accent-text); }
+.d-btn.acc:hover { background:var(--accent-strong); color:var(--on-fill); }
+.d-btn:disabled, .d-btn:disabled:hover { background:var(--neutral-bg); color:var(--dim); cursor:default; }
+.d-seg { display:inline-flex; padding:3px; border-radius:12px; background:var(--neutral-bg); }
+.d-seg button { height:28px; padding:0 12px; border:0; border-radius:9px; background:none; color:var(--muted); font-size:var(--fs-sm); font-weight:600; cursor:pointer; }
+.d-seg button[aria-pressed="true"] { background:var(--surface); color:var(--text); box-shadow:0 1px 2px rgba(25,31,40,.08); }
+
+/* 값 고르개(.d-dpick 그대로) */
+.d-dpick { display:inline-flex; align-items:center; gap:4px; min-height:var(--h-sm); padding:2px 6px; margin:-2px -6px; border:0; border-radius:var(--r-xs); background:none; font-size:inherit; color:inherit; text-align:left; cursor:pointer; transition:background var(--t-fast) var(--ease); }
+.d-dpick:hover, .d-dpick.is-open { background:var(--hover); }
+.d-dpick .cv { display:inline-flex; color:var(--dim); }
+.d-dpick .cv .d-i { transform:rotate(90deg); width:12px; height:12px; }
+.d-dpick:disabled { cursor:default; opacity:.6; }
+.d-dpick:disabled:hover { background:none; }
+
+/* 지라 띠 카드 */
+.d-jira { margin:0; padding:12px 16px; border-radius:var(--r); background:var(--surface); border:1px solid var(--surface-line); box-shadow:var(--soft); font-size:13.5px; color:var(--muted); }
+.d-jira .top { display:flex; align-items:center; gap:8px; margin-bottom:8px; min-width:0; }
+.d-jira .top .sp { margin-left:auto; }
+.d-jira .tag { flex:none; display:inline-flex; align-items:center; height:20px; padding:0 7px; border-radius:6px; background:var(--neutral-bg); color:var(--muted); font-size:11.5px; font-weight:700; letter-spacing:.02em; }
+.d-jira .top .nm { min-width:0; font-weight:600; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.d-jira .top .sub { flex:none; display:inline-flex; align-items:center; gap:4px; font-size:12.5px; color:var(--dim); white-space:nowrap; }
+.d-jira .top .sub .d-dpick { margin:-2px -2px -2px 0; padding:2px 4px; }
+.d-jira .d-jopen { flex:none; font-size:var(--fs-sm); font-weight:600; color:var(--accent-text); text-decoration:none; white-space:nowrap; }
+.d-jira .cells { display:flex; flex-wrap:wrap; gap:8px 28px; }
+.d-jira .cell { display:grid; gap:1px; min-width:0; }
+.d-jira .lb { font-size:var(--fs-cap); font-weight:600; color:var(--dim); }
+.d-jira .v { min-height:var(--h-xs); font-size:var(--fs-body); font-weight:600; color:var(--text); }
+.d-jira .v.k-acc { color:var(--accent-text); }
+.d-jira .v .k-warn { color:var(--warn); font-weight:500; }
+.d-jira .foot { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; font-size:12.5px; color:var(--dim); }
+.d-jira .cells > .foot { flex:1 1 420px; align-self:flex-end; min-width:0; min-height:var(--h-sm); }
+.d-jira .bar { display:inline-block; width:84px; height:6px; border-radius:999px; background:var(--prog-track); overflow:hidden; margin:0; }
+.d-jira .bar i { display:block; height:100%; background:var(--success); border-radius:999px; }
+.d-jira .foot .who { display:inline-flex; align-items:center; flex-wrap:wrap; gap:0 5px; }
+.d-jira .foot .sp { margin-left:auto; }
+.d-jira .foot .d-jexp .d-i { transform:rotate(-90deg); }
+.d-jkids { display:grid; gap:1px; margin-top:10px; padding-top:8px; border-top:1px solid var(--hair); }
+.d-jkid { display:grid; grid-template-columns:74px minmax(0,1fr) 104px; align-items:center; gap:0 10px; min-height:var(--h-sm); font-size:var(--fs-sm); }
+.d-jkid .st { font-size:12.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.d-jkid .st.k-dim { color:var(--dim); } .d-jkid .st.k-acc { color:var(--accent-text); } .d-jkid .st.k-pos { color:var(--success); }
+.d-jkid .sm { min-width:0; display:block; line-height:28px; color:var(--text); text-decoration:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* 새로: 담당 칸이 값 고르개가 된다 — 오른쪽 맞춤 그대로, 꺾쇠는 늘 보인다 */
+.d-jkid .wh { justify-self:end; max-width:100%; font-size:12.5px; color:var(--muted); }
+.d-jkid .wh .t { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.d-jkid .wh.is-none { color:var(--dim); }
+.d-jkid.is-done .sm, .d-jkid.is-done .wh { color:var(--dim); }
+.d-jkid.is-hl { background:var(--sel); border-radius:8px; margin:0 -6px; padding:0 6px; }
+
+/* 확인 줄(.d-jconfirm 그대로) */
+.d-jconfirm { display:grid; gap:5px; margin-top:10px; padding:12px 14px; border-radius:var(--r-sm); background:var(--sel); font-size:var(--fs-sm); color:var(--muted); }
+.d-jconfirm .ask { font-size:var(--fs-body); font-weight:700; color:var(--text); }
+.d-jconfirm .what { display:flex; align-items:baseline; flex-wrap:wrap; gap:6px; }
+.d-jconfirm .what .sm { font-weight:600; color:var(--text); }
+.d-jconfirm .what .ky { font-size:var(--fs-cap); color:var(--dim); }
+.d-jconfirm .diff { display:flex; align-items:baseline; flex-wrap:wrap; gap:6px; }
+.d-jconfirm .diff .lb { color:var(--dim); }
+.d-jconfirm .diff .bf { color:var(--muted); text-decoration:line-through; }
+.d-jconfirm .diff .ar { color:var(--dim); }
+.d-jconfirm .diff .af { font-weight:700; color:var(--text); }
+.d-jconfirm .warn { color:var(--warn); }
+.d-jconfirm .acts { display:flex; flex-wrap:wrap; gap:6px; justify-content:flex-end; margin-top:3px; }
+.d-jconfirm .acts .d-btn { background:var(--surface); }
+.d-jconfirm .acts .d-btn.acc { background:var(--accent-soft); }
+.d-jconfirm .acts .d-btn.acc:hover { background:var(--accent-strong); }
+
+/* 더보기 메뉴 + 공용 고르개(.d-menulist · .d-gpick 그대로) */
+.d-menulist { width:304px; max-width:100%; display:flex; flex-direction:column; gap:1px; padding:6px; background:var(--surface); border:1px solid var(--surface-line); border-radius:18px; box-shadow:var(--pop); }
+.d-gpick { display:grid; gap:2px; width:100%; min-width:0; }
+.d-din { width:100%; min-height:38px; padding:10px 14px; border:0; border-radius:var(--r-sm); background:var(--field); color:var(--text); font-size:var(--fs-body); }
+.d-din::placeholder { color:var(--dim); }
+.d-din.is-focus { background:var(--surface); box-shadow:0 0 0 2px var(--accent); outline:none; }
+.d-pfind { display:block; height:var(--h-md); min-height:0; padding:0 12px; }
+.d-gpfind { margin:0 0 4px; font-size:13.5px; }
+.d-gplist { display:flex; flex-direction:column; gap:1px; max-height:min(280px,50vh); overflow-y:auto; }
+.d-mitem { display:flex; align-items:center; gap:8px; width:100%; height:38px; padding:0 12px; border:0; border-radius:var(--r-xs); background:none; color:var(--text); font-size:var(--fs-body); font-weight:500; text-align:left; cursor:pointer; }
+.d-mitem:hover { background:var(--hover); }
+.d-gpopt .nm { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.d-gpopt .ky { flex:0 1 auto; min-width:0; max-width:62%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--fs-cap); font-weight:500; color:var(--dim); }
+.d-gpopt.is-act { color:var(--muted); }
+.d-gpopt[aria-selected="true"] { background:var(--sel); color:var(--accent-text); }
+.d-gpopt.is-kbd { background:var(--hover); }
+.d-gphead { padding:10px 12px 4px; font-size:var(--fs-cap); font-weight:600; color:var(--dim); }
+.d-gpnone { padding:8px 12px; font-size:var(--fs-sm); color:var(--dim); }
+.d-msep { height:1px; margin:4px 8px; background:var(--hair); }
+.d-link { border:0; background:none; padding:0; color:var(--accent-text); font-size:inherit; font-weight:600; cursor:pointer; }
+
+/* 알림(.d-toast) — 시안에서는 제자리에 세운다 */
+.d-toast { display:flex; align-items:center; flex-wrap:wrap; gap:4px 12px; max-width:100%; padding:12px 12px 12px 18px; background:var(--surface); color:var(--text); border:1px solid var(--surface-line); border-radius:16px; box-shadow:var(--pop); font-size:var(--fs-body); }
+.d-toast.error { border-color:var(--urgent); }
+.d-toast .msg { flex:1 1 auto; min-width:0; }
+.toasts { display:grid; gap:10px; justify-items:start; }
+
+/* 좁은 폭(≤640 규칙 그대로): 첫 줄이 둘로, 하위 줄은 담당이 요약 아래로 */
+.narrow .d-jira .top { flex-wrap:wrap; }
+.narrow .d-jira .top .nm { flex:1 1 calc(100% - 96px); }
+.narrow .d-jira .top .sub { order:3; flex:1 1 calc(100% - 140px); }
+.narrow .d-jira .top .d-jopen { order:4; margin-left:auto; }
+.narrow .d-jira .top .d-iconbtn { order:2; }
+.narrow .d-jira .top .sp { display:none; }
+.narrow .d-jkid { grid-template-columns:62px minmax(0,1fr); }
+.narrow .d-jkid .wh { grid-column:2; justify-self:start; margin:-6px -6px 2px; }
+.narrow .d-menulist { width:100%; }
+@media (max-width:640px) {
+  .grid2 { grid-template-columns:1fr; }
+  .d-jira .top { flex-wrap:wrap; }
+  .d-jira .top .nm { flex:1 1 calc(100% - 96px); }
+  .d-jira .top .sub { order:3; flex:1 1 calc(100% - 140px); } .d-jira .top .d-jopen { order:4; margin-left:auto; } .d-jira .top .d-iconbtn { order:2; } .d-jira .top .sp { display:none; }
+  .d-jkid { grid-template-columns:62px minmax(0,1fr); }
+  .d-jkid .wh { grid-column:2; justify-self:start; margin:-6px -6px 2px; }
+  .d-menulist { width:100%; }
+}
+</style>
+</head>
+<body>
+<div class="doc">
+<header>
+  <h1>지라 담당자 바꾸기 — 시안</h1>
+  <p class="note">프로젝트 탭 지라 띠 카드의 <b>담당 ○○</b>와 하위 티켓 줄의 담당 칸을 눌러, 이름으로 찾아 맡겨요. 가짜 데이터(테스터A~D)예요. 새 색·새 부품 없이 기존 값 고르개 · 공용 고르개 · 지라 확인 줄 · 알림만 써요.</p>
+  <div class="bar"><span class="d-seg" role="group" aria-label="테마"><button type="button" data-theme-btn="light" aria-pressed="true">라이트</button><button type="button" data-theme-btn="dark" aria-pressed="false">다크</button></span></div>
+</header>
+
+<!-- 01 지금 -->
+<section data-shot="now">
+  <h2>① 지금 — 담당 표시가 누르는 자리가 돼요</h2>
+  <p class="note">띠 카드 첫 줄의 <b>담당 테스터A ⌄</b>, 펼친 하위 티켓 줄 끝의 <b>담당 없음 ⌄</b>. 지라 연결이 없으면 지금처럼 글자일 뿐이에요.</p>
+  <div data-card="now"></div>
+</section>
+
+<!-- 02 고르개 -->
+<section data-shot="picker">
+  <h2>② 누르면 — 공용 고르개(찾기 칸 + 최근 고른 사람)</h2>
+  <p class="note">[Design] 결제 리뉴얼 디자인 줄의 <b>담당 없음</b>을 눌렀을 때. 두 글자부터 지라에 물어요(이 티켓을 맡을 수 있는 사람만).</p>
+  <div class="grid2">
+    <div><div class="cap">열자마자 — 최근 고른 사람 · 담당이 있으면 맨 아래 담당 빼기 ([Web] 줄)</div><div data-menu="recent"></div></div>
+    <div><div class="cap">두 글자 치면 — 찾는 중</div><div data-menu="loading"></div></div>
+    <div><div class="cap">결과 — 같은 이름 2명은 최근 맡은 티켓으로 구분</div><div data-menu="results"></div></div>
+    <div><div class="cap">결과 0명</div><div data-menu="none"></div></div>
+  </div>
+</section>
+
+<!-- 03 확인 -->
+<section data-shot="confirm">
+  <h2>③ 고르면 — 지라 확인 줄(추천)</h2>
+  <p class="note">지라는 담당이 바뀌면 그 사람에게 알림을 보내요. 되돌려도 이미 간 알림은 못 거둬서 한 번 확인해요.</p>
+  <div data-card="confirm"></div>
+  <div class="cap">에픽(띠 카드 티켓)을 내 담당에서 남에게 넘길 때만 경고 한 줄</div>
+  <div data-confirm="epic"></div>
+</section>
+
+<!-- 04 저장 후 · 되돌리기 -->
+<section data-shot="after">
+  <h2>④ 맡긴 뒤 — 새 값 + 알림 되돌리기</h2>
+  <p class="note">지라가 받아 준 뒤에만 새 값을 그려요. 알림의 <b>되돌리기</b>는 직전 담당(여기선 담당 없음)으로 돌려요. ⌘Z는 쓰지 않아요(추천).</p>
+  <div data-card="after"></div>
+  <div class="cap">알림</div>
+  <div class="toasts">
+    <div class="d-toast" role="status"><span class="msg">테스터B에게 맡겼어요</span><button type="button" class="d-btn sm">되돌리기</button></div>
+    <div class="d-toast" role="status"><span class="msg">되돌렸어요 · 담당 없음</span></div>
+    <div class="d-toast" role="status"><span class="msg">이미 테스터B가 맡고 있어요</span></div>
+  </div>
+</section>
+
+<!-- 05 오류 -->
+<section data-shot="errors">
+  <h2>⑤ 안 될 때 — 확인 줄을 닫고 오류 알림</h2>
+  <p class="note">오류 알림은 빨간 테두리이고 스스로 사라지지 않아요. 지라의 원래 문구·주소는 싣지 않아요.</p>
+  <div class="toasts">
+    <div class="d-toast error" role="alert"><span class="msg">지라에서 이 티켓의 담당을 바꿀 권한이 없어요.</span><button type="button" class="d-btn sm">지라에서 열기</button><button type="button" class="d-btn sm">닫기</button></div>
+    <div class="d-toast error" role="alert"><span class="msg">그 사이 지라에서 담당이 테스터C로 바뀌었어요. 확인하고 다시 골라 주세요.</span><button type="button" class="d-btn sm">닫기</button></div>
+    <div class="d-toast error" role="alert"><span class="msg">테스터B는 이 티켓을 맡을 수 없어요(지라 권한). 다른 사람을 골라 주세요.</span><button type="button" class="d-btn sm">닫기</button></div>
+    <div class="d-toast error" role="alert"><span class="msg">지라에 반영됐는지 확인하지 못했어요 — 카드를 새로 읽었어요.</span><button type="button" class="d-btn sm">닫기</button></div>
+    <div class="d-toast error" role="alert"><span class="msg">지라 토큰을 확인해 주세요.</span><button type="button" class="d-btn sm">설정 열기</button><button type="button" class="d-btn sm">닫기</button></div>
+    <div class="d-toast error" role="alert"><span class="msg">되돌리지 못했어요 — 담당은 테스터B 그대로예요.</span><button type="button" class="d-btn sm">지라에서 열기</button><button type="button" class="d-btn sm">닫기</button></div>
+  </div>
+  <div class="cap">충돌이면 카드는 지라의 지금 값으로 다시 그려져요</div>
+  <div data-card="stale"></div>
+</section>
+
+<!-- 06 좁은 폭 -->
+<section data-shot="narrow">
+  <h2>⑥ 좁은 폭(≤520) — 담당 칸이 요약 아래로</h2>
+  <p class="note">고르개는 화면 폭에 맞춰 넓어져요.</p>
+  <div class="grid2">
+    <div class="phone narrow"><div data-card="narrow"></div></div>
+    <div class="phone narrow"><div data-menu="results"></div><div style="height:12px"></div><div data-confirm="child"></div></div>
+  </div>
+</section>
+</div>
+
+<script>
+const IC = {
+  chevron: '<path d="M6 3.5 10.5 8 6 12.5"/>',
+  refresh: '<path d="M12.8 6.2A5 5 0 1 0 13 9.5"/><path d="M13 3.2v3.2H9.8"/>',
+};
+const ic = n => `<svg class="d-i" viewBox="0 0 16 16" aria-hidden="true">${IC[n]}</svg>`;
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' })[c]);
+const pick = (text, { none = false, open = false, label = '' } = {}) =>
+  `<button type="button" class="d-dpick${open ? ' is-open' : ''}" aria-haspopup="listbox" aria-label="${esc(label)}"><span class="t">${esc(text)}</span><span class="cv">${ic('chevron')}</span></button>`;
+
+const KIDS = [
+  { st:'진행 중', tone:'k-acc', sm:'[Web] 결제 리뉴얼 웹', who:'테스터C' },
+  { st:'할 일', tone:'k-dim', sm:'[iOS] 결제 리뉴얼 iOS', who:null },
+  { st:'할 일', tone:'k-dim', sm:'[Android] 결제 리뉴얼 안드로이드', who:null },
+  { st:'할 일', tone:'k-dim', sm:'[Backend] 결제 리뉴얼 서버', who:null },
+  { st:'할 일', tone:'k-dim', sm:'[Design] 결제 리뉴얼 디자인', who:null, mark:true },
+  { st:'완료', tone:'k-pos', sm:'[QA] 결제 리뉴얼 QA 계획', who:'테스터D', done:true },
+];
+
+function card({ epicWho = '테스터A', designWho = null, hl = false, open = false, confirm = '', disabled = false } = {}) {
+  const kids = KIDS.map((k) => {
+    const who = k.mark ? designWho : k.who;
+    const label = `${k.sm} 담당 바꾸기`;
+    const btn = `<span class="wh${who ? '' : ' is-none'}">${pick(who ? who : '담당 없음', { open: k.mark && open, label })}</span>`;
+    return `<div class="d-jkid${k.done ? ' is-done' : ''}${k.mark && hl ? ' is-hl' : ''}"><span class="st ${k.tone}">${k.st}</span><a class="sm" href="#" title="IO-1${KIDS.indexOf(k) + 41} · 지라에서 열어요">${esc(k.sm)}</a>${btn}</div>`;
+  }).join('');
+  const unassigned = KIDS.filter(k => !k.done && !(k.mark ? designWho : k.who)).length;
+  const counts = {};
+  KIDS.forEach((k) => { const w = k.mark ? designWho : k.who; if (!k.done && w) counts[w] = (counts[w] || 0) + 1; });
+  const whoLine = [unassigned ? `담당 없음 ${unassigned}` : '', ...Object.entries(counts).map(([n, c]) => `${n} ${c}`)].filter(Boolean)
+    .map(t => `<span>${t}</span>`).join('<span>·</span>');
+  return `<div class="d-jira" aria-label="지라에서 읽어 온 지금 상태">
+    <div class="top"><span class="tag">지라</span><span class="nm">결제 리뉴얼</span>
+      <span class="sub">에픽 · ${pick(`담당 ${epicWho || '없음'}`, { label: '이 티켓 담당 바꾸기' })}</span>
+      <span class="sp"></span><a class="d-jopen" href="#" title="IO-140 · 지라에서 열어요">지라에서 열기 ↗</a>
+      <button type="button" class="d-iconbtn" aria-label="지라에서 새로 받기">${ic('refresh')}</button></div>
+    <div class="cells">
+      <div class="cell"><span class="lb">지라 상태</span><span class="v k-acc">진행 중</span></div>
+      <div class="cell"><span class="lb">배포 버전</span><span class="v">v2.71.0 <span class="k-warn">· 10월 8일 배포 예정 · 2일 남음</span></span></div>
+      <div class="cell"><span class="lb">기한</span><span class="v">10월 17일</span></div>
+      <div class="foot"><span>하위 티켓</span><span class="bar"><i style="width:17%"></i></span><span>6개 중 1개 완료</span><span class="who">${whoLine}</span><span class="sp"></span>
+        <button type="button" class="d-iconbtn d-jexp" aria-expanded="true" aria-label="하위 티켓 접기">${ic('chevron')}</button></div>
+    </div>
+    ${confirm}
+    <div class="d-jkids">${kids}</div>
+  </div>`;
+}
+
+function confirmRow({ summary, key, before, after, warn = '', go = '맡기기' }) {
+  return `<div class="d-jconfirm" role="group" aria-label="지라에 보내기 전 확인" tabindex="-1">
+    <div class="ask">지라의 이 티켓을 바꿀까요?</div>
+    <div class="what"><span class="sm">${esc(summary)}</span><span class="ky">${key}</span></div>
+    <div class="diff"><span class="lb">담당:</span><span class="bf">${esc(before)}</span><span class="ar">→</span><span class="af">${esc(after)}</span></div>
+    ${warn ? `<div class="warn">${esc(warn)}</div>` : ''}
+    <div class="acts"><button type="button" class="d-btn sm">취소</button><button type="button" class="d-btn sm acc">${go}</button></div>
+  </div>`;
+}
+
+const opt = (name, { right = '', sel = false, act = false, kbd = false } = {}) =>
+  `<button type="button" class="d-mitem d-gpopt${act ? ' is-act' : ''}${kbd ? ' is-kbd' : ''}" role="option" aria-selected="${sel}"><span class="nm">${esc(name)}</span>${right ? `<span class="ky" title="${esc(right)}">${esc(right)}</span>` : ''}</button>`;
+const head = t => `<div class="d-gphead" role="presentation">${t}</div>`;
+function menu(kind) {
+  const find = (v, focus = true) => `<input class="d-din d-pfind d-gpfind${focus ? ' is-focus' : ''}" type="search" aria-label="지라 사용자 찾기" placeholder="이름으로 찾기 — 두 글자부터" value="${esc(v)}">`;
+  let body = '';
+  if (kind === 'recent') {
+    body = find('') + `<div class="d-gplist" role="listbox" aria-label="담당자 고르기">${head('최근 고른 사람')}${opt('테스터B', { kbd: true })}${opt('테스터C', { sel: true, right: '지금 담당' })}${opt('테스터D')}${opt('테스터A', { right: '나' })}</div>`;
+  } else if (kind === 'loading') {
+    body = find('테스') + `<div class="d-gplist" role="listbox" aria-label="담당자 고르기">${head('최근 고른 사람')}${opt('테스터B')}${opt('테스터C')}</div><div class="d-gpnone" role="status">지라에서 찾는 중…</div>`;
+  } else if (kind === 'results') {
+    body = find('테스') + `<div class="d-gplist" role="listbox" aria-label="담당자 고르기">${head('지라 사용자')}${opt('테스터A', { right: '나' })}${opt('테스터B', { right: '최근 · 결제 리뉴얼 iOS', kbd: true })}${opt('테스터B', { right: '최근 · 알림센터 서버' })}${opt('테스터C')}${opt('테스터D')}</div>`;
+  } else if (kind === 'none') {
+    body = find('없는이름') + `<div class="d-gpnone" role="status">이 티켓을 맡을 수 있는 사람 중에 '없는이름'이 없어요</div><div class="d-gplist" role="listbox" aria-label="담당자 고르기">${head('최근 고른 사람')}${opt('테스터B')}${opt('테스터C')}</div>`;
+  }
+  return `<div class="d-menulist" role="dialog" aria-label="담당자 고르기"><div class="d-gpick">${body}</div></div>`;
+}
+const menuWithUnassign = () => menu('recent').replace('</div></div></div>', `</div><div class="d-msep"></div>${opt('담당 빼기', { act: true })}</div></div>`);
+
+const DESIGN = { summary: '[Design] 결제 리뉴얼 디자인', key: 'IO-145' };
+const fill = {
+  'card:now': () => card(),
+  'card:confirm': () => card({ hl: true, confirm: confirmRow({ ...DESIGN, before: '없음', after: '테스터B' }) }),
+  'card:after': () => card({ designWho: '테스터B', hl: true }),
+  'card:stale': () => card({ designWho: '테스터C', hl: true }),
+  'card:narrow': () => card({ open: true, hl: true }),
+  'confirm:epic': () => confirmRow({ summary: '결제 리뉴얼', key: 'IO-140', before: '테스터A', after: '테스터B', warn: '내 담당에서 빠져요 — 왼쪽 목록에서 사라질 수 있어요.' }),
+  'confirm:child': () => confirmRow({ ...DESIGN, before: '없음', after: '테스터B' }),
+  'menu:recent': () => menuWithUnassign(),
+  'menu:loading': () => menu('loading'),
+  'menu:results': () => menu('results'),
+  'menu:none': () => menu('none'),
+};
+document.querySelectorAll('[data-card],[data-menu],[data-confirm]').forEach((node) => {
+  const [k, v] = Object.entries(node.dataset)[0];
+  const f = fill[`${k}:${v}`];
+  if (f) node.innerHTML = f();
+});
+const params = new URLSearchParams(location.search);
+function setTheme(t) {
+  document.documentElement.dataset.theme = t;
+  document.querySelectorAll('[data-theme-btn]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.themeBtn === t)));
+}
+document.querySelectorAll('[data-theme-btn]').forEach(b => b.addEventListener('click', () => setTheme(b.dataset.themeBtn)));
+setTheme(params.get('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+const shot = params.get('shot');
+if (shot) {
+  document.body.classList.add('shot');
+  const want = shot.split(',');
+  document.querySelectorAll('section[data-shot]').forEach(s => { s.hidden = !want.includes(s.dataset.shot); });
+}
+</script>
+</body>
+</html>
