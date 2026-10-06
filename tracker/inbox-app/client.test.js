@@ -18170,7 +18170,7 @@ test('뜨는 것 — 자리가 남는 것(.d-stay): 알림·창 넷·막대 둘�
   const wrapClose = sources['wrap-ui.js'].slice(sources['wrap-ui.js'].indexOf('function wrapClose()'), sources['wrap-ui.js'].indexOf('\n}\n', sources['wrap-ui.js'].indexOf('function wrapClose()')));
   assert.doesNotMatch(wrapClose, /replaceChildren/);
   // 그리기는 늘 본문을 새로 채운다(줄 부품을 거친다 — C2). 여는 그리기는 움직이지 않는다.
-  assert.match(sources['wrap-ui.js'], /function wrapRender\(\) \{\n[^\n]*\n  const body = wrapNodes\.body;\n  uiRowsMove\(body, \(\) => wrapRenderNow\(body\)\);\n\}\nfunction wrapRenderNow\(body\) \{\n  body\.replaceChildren\(\);/);
+  assert.match(sources['wrap-ui.js'], /function wrapRender\(\) \{\n[^\n]*\n  const body = wrapNodes\.body;\n  uiRowsMove\(body, \(\) => wrapRenderNow\(body\)\);\n\}\nfunction wrapRenderNow\(body\) \{\n(?:[^\n]*\n){0,2}  body\.replaceChildren\(\);/);
   assert.match(sources['wrap-ui.js'], /uiGlideStill\(wrapRender\);/);
 });
 
@@ -19251,6 +19251,126 @@ test('펼침 D1 다시 그리는 자리: uiFoldNote로 적은 동작의 그리�
   fx.act();
   fx.app.run("uiFoldShow(__el, 'jconfirm')");
   assert.equal(el.has('d-unfold'), false, '다음 동작의 그리기');
+});
+
+// ---- 모션 D2: 값 바뀜 도우미 ----
+test('값 바뀜 D2: uiNumTick — 값이 달라지고 내 동작 직후면 새 숫자가 아래 4px에서 200ms 올라온다, 목적지(pop)는 1.12배 톡 — 처음 보는 열쇠·같은 값은 그냥', () => {
+  const fx = foldApp();
+  const el = fx.make('n', 0);
+  fx.app.context.__el = el;
+  const tick = (text, kind) => { el.textContent = text; fx.app.run(`uiNumTick(__el, 'k'${kind ? `, '${kind}'` : ''})`); };
+  fx.act();
+  tick('3');
+  assert.equal(fx.plays.length, 0, '처음 보는 열쇠');
+  tick('3');
+  assert.equal(fx.plays.length, 0, '같은 값');
+  tick('4');
+  assert.deepEqual(fx.plays.map(play => [plain(play.frames), play.options.duration]), [[[{ transform: 'translateY(4px)', opacity: 0.35 }, { transform: 'none', opacity: 1 }], 200]]);
+  fx.plays.length = 0;
+  tick('5', 'pop');
+  assert.deepEqual(fx.plays.map(play => [plain(play.frames).map(f => f.transform), play.options.duration]), [[['scale(1)', 'scale(1.12)', 'scale(1)'], 200]]);
+});
+
+test('값 바뀜 D2: uiNumTick — 자동 갱신(내 동작 아님)·글자 입력 중·판이 열린 동안·키보드 연타·가려진 창·움직임 줄이기에서는 그냥 바뀐다', () => {
+  const cases = [
+    ['자동 갱신', null, false],
+    ['글자 입력 중', 'uiActInText = true', false],
+    ['키보드 연타', "uiActMark({ type: 'keydown', key: 'Enter', repeat: true, target: null })", false],
+    ['가려진 창', 'document.hidden = true', false],
+    ['움직임 줄이기', 'window.matchMedia = () => ({ matches: true })', false],
+    ['내 동작', '', true],
+  ];
+  for (const [why, setup, moves] of cases) {
+    const fx = foldApp();
+    const el = fx.make('n', 0);
+    fx.app.context.__el = el;
+    el.textContent = '1';
+    fx.app.run("uiNumTick(__el, 'k')");
+    if (why !== '자동 갱신') fx.act();
+    if (setup) fx.app.run(setup);
+    el.textContent = '2';
+    fx.app.run("uiNumTick(__el, 'k')");
+    assert.equal(fx.plays.length, moves ? 1 : 0, why);
+    assert.equal(fx.app.run("uiNumLast.get('k')"), '2', `${why}: 값은 늘 기억한다`);
+  }
+});
+
+test('값 바뀜 D2: uiNumBar — 칸은 늘 가득이고 (비율 - 100)% 만큼 왼쪽으로 밀려 있다, 같은 열쇠의 지난 값에서 200ms 미끄러진다(자동 갱신·움직임 줄이기는 바로)', () => {
+  const fx = foldApp();
+  const el = fx.make('bar', 0);
+  fx.app.context.__el = el;
+  fx.act();
+  fx.app.run("uiNumBar(__el, 'b', 40)");
+  assert.equal(el.attrs.style, 'transform:translateX(-60%)');
+  assert.equal(fx.plays.length, 0, '처음');
+  fx.app.run("uiNumBar(__el, 'b', 75)");
+  assert.equal(el.attrs.style, 'transform:translateX(-25%)');
+  assert.deepEqual(fx.plays.map(play => [plain(play.frames), play.options.duration]), [[[{ transform: 'translateX(-60%)' }, { transform: 'translateX(-25%)' }], 200]]);
+  fx.plays.length = 0;
+  fx.app.run('uiActAt = 0');
+  fx.app.run("uiNumBar(__el, 'b', 100)");
+  assert.equal(el.attrs.style, 'transform:translateX(0%)');
+  assert.equal(fx.plays.length, 0, '자동 갱신');
+  fx.app.run("uiNumBar(__el, 'c', 250)");
+  assert.equal(el.attrs.style, 'transform:translateX(0%)', '100을 넘기지 않는다');
+});
+
+test('값 바뀜 D2: uiNumGrow — 막대 값 묶음이 바뀌면 모든 막대가 바닥에서 scaleY로 자란다 — 같은 값·자동 갱신은 그냥', () => {
+  const fx = foldApp();
+  const bars = [fx.make('a', 0), fx.make('b', 0)];
+  fx.app.context.__bars = bars;
+  fx.act();
+  fx.app.run("uiNumGrow(__bars, 'g', '1/1,2/2')");
+  assert.equal(fx.plays.length, 0, '처음');
+  fx.app.run("uiNumGrow(__bars, 'g', '1/1,2/2')");
+  assert.equal(fx.plays.length, 0, '같은 값');
+  fx.app.run("uiNumGrow(__bars, 'g', '1/1,3/2')");
+  assert.deepEqual(fx.plays.map(play => [plain(play.frames), play.options.duration]), [0, 1].map(() => [[{ transform: 'scaleY(0)' }, { transform: 'none' }], 200]));
+});
+
+test('값 바뀜 D2: uiNumRise — 방금 바뀐 글자만 한 틱 뒤 올라온다, 자동 갱신이면 그냥', async () => {
+  const fx = foldApp();
+  const el = fx.make('note', 0);
+  fx.app.context.__el = el;
+  fx.act();
+  fx.app.run('uiNumRise(__el)');
+  await settle();
+  assert.deepEqual(fx.plays.map(play => play.options.duration), [200]);
+  fx.plays.length = 0;
+  fx.app.run('uiActAt = 0');
+  fx.app.run('uiNumRise(__el)');
+  await settle();
+  assert.equal(fx.plays.length, 0);
+});
+
+test('값 바뀜 D2: 끝낸 개수 칩의 옛 CSS 톡(b.tick)은 없고 도우미를 거친다 — 숫자가 transform을 받는 .nv는 inline-block이고 숨김·빈 칸은 그대로 숨는다', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.doesNotMatch(css, /b\.tick|@keyframes d-tick/);
+  assert.match(css, /\.nv \{ display: inline-block; \}\n\.nv\[hidden\], \.nv:empty \{ display: none; \}/);
+  assert.match(script, /uiNumTick\(num, 'chip:done'\);/);
+  assert.match(css, /\.d-jira \.bar i \{ display: block; width: 100%; height: 100%;/);
+});
+
+// 값 바뀜을 부르는 자리 — 열한 곳(전수 목록 4·18·79·114·146·157·194·205·212·229·246).
+const D2_SITES = [
+  ['app.js', /uiNumTick\(tabNum, 'tab:records'\);/, '4 탭 숫자(아이디어·결정)'],
+  ['app.js', /uiNumTick\(tabMeetings, 'tab:meetings'\);/, '4 탭 숫자(회의)'],
+  ['waiting-ui.js', /uiNumTick\(sectionCount, 'wait:section', 'pop'\);/, '18 확인 대기 개수'],
+  ['app.js', /uiNumTick\(laterNum, 'later:count', 'pop'\);/, '79 나중에 할 일 N'],
+  ['app.js', /uiNumTick\(countEl, 'rec:ideas'\);/, '114 아이디어 개수'],
+  ['app.js', /uiNumTick\(countEl, 'rec:decisions'\);/, '114 결정 개수'],
+  ['wrap-ui.js', /uiNumTick\(wrapNum, 'wrap:sum'\);/, '146 오늘 정리 요약 칩'],
+  ['settings-ui.js', /uiNumTick\(num, 'trash:tab'\);/, '157 삭제한 항목 N'],
+  ['usage-ui.js', /uiNumGrow\(\[\.\.\.bars\.querySelectorAll\('\.d-uwbar'\)\], 'uw:bars'/, '194 막대 그래프'],
+  ['usage-ui.js', /uiNumTick\(value, `uw:tile:\$\{name\}`\);/, '194 타일 숫자'],
+  ['meetings-ui.js', /uiNumTick\(badge, `mtt:ct:\$\{event\.id\}`\);/, '205 회의 탭 초안 N'],
+  ['app.js', /uiNumTick\(count, `mt:ct:\$\{row\.dataset\.meetingId\}`\);/, '205 오늘 회의 줄 초안 N'],
+  ['meetings-ui.js', /uiNumRise\(note\);/, '212 오늘로 → 오늘 할 일 ✓'],
+  ['projects-ui.js', /uiNumTick\(count, `pj:n:\$\{row\.key\}`\);/, '229 프로젝트 줄 숫자'],
+  ['jira-ui.js', /uiNumBar\(fill, `jbar:\$\{issueKey\}`, children\.ratio\);/, '246 지라 하위 티켓 막대'],
+];
+test('값 바뀜 D2: 도우미를 부르는 자리 열한 곳이 모두 있다', () => {
+  D2_SITES.forEach(([file, pattern, name]) => assert.match(fs.readFileSync(path.join(__dirname, file), 'utf8'), pattern, name));
 });
 
 // 펼침 부품을 부르는 자리 — 여섯 방식(① 그룹 제목 ② N개 더 ③ 접힌 설명 ④ hidden 토글·확인 줄 ⑤ 초안 ⑥ 서랍).
