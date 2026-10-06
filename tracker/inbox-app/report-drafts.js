@@ -873,6 +873,13 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
     }
     // 소제목 이름은 행 id가 아니라 열쇠에 붙어 있다 — 옮길 때 기록한 것(`movedNames`)만 원래 열쇠로 돌린다. 에픽이 원래
     // 갖고 있던 소제목 이름은 건드리지 않는다. 기록이 없으면(옛 이동 기록) 이름은 그대로 둔다.
+    const names = restoreNames(state, movedNames);
+    if (restored || names) atomicWrite(filename, JSON.stringify(state, null, 2));
+    return { restored, skipped: set.size - restored };
+  }
+  // moveNames가 옮긴 `[주, 옛 이름 열쇠, 새 이름 열쇠]` 목록을 거꾸로 돌린다 — 새 열쇠에 아직 그 이름이 있고 옛 열쇠가
+  // 비어 있을 때만(그 사이 사람이 고쳤으면 덮지 않는다). 되돌린 개수를 돌려준다.
+  function restoreNames(state, movedNames) {
     let names = 0;
     for (const entry of Array.isArray(movedNames) ? movedNames : []) {
       if (!Array.isArray(entry) || entry.length !== 3 || !entry.every(value => typeof value === 'string')) continue;
@@ -884,9 +891,62 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
       delete list[now];
       names += 1;
     }
+    return names;
+  }
+  // 직접 만든 프로젝트 A를 B로 합칠 때 — renameGroup과 같은 세 자리(group·bucket 앞머리·evidence[].label)를 모든 주에서
+  // B로 바꾼다(확정한 주·지난 주 포함). 같은 주에 B 소제목이 이미 있으면 한 소제목 아래 두 무리가 된다. 사람이 고친
+  // 소제목 이름은 moveNames 규칙 그대로 B에 이미 있으면 B 것을 남긴다. 되돌리기(mergeGroupUndo)가 자기가 바꾼 것만
+  // 되돌리게 **바뀐 행 id**와 옮긴 이름 열쇠를 돌려준다. 부르는 쪽(server.js mergeProject)의 트랜잭션 안에서 돈다.
+  function mergeGroup(from, to) {
+    const state = read();
+    const head = `group:${from}:`;
+    const ids = [];
+    const fix = (row) => {
+      if (!row || typeof row !== 'object') return false;
+      let touched = false;
+      if (row.group === from) { row.group = to; touched = true; }
+      if (typeof row.bucket === 'string' && row.bucket.startsWith(head)) { row.bucket = `group:${to}:${row.bucket.slice(head.length)}`; touched = true; }
+      (Array.isArray(row.evidence) ? row.evidence : []).forEach((item) => {
+        if (item && item.label === from) { item.label = to; touched = true; }
+      });
+      const childTouched = (Array.isArray(row.parts) ? row.parts : []).map(fix).some(Boolean);
+      return touched || childTouched;
+    };
+    for (const week of Object.values(state.weeks || {})) {
+      (week?.rows || []).forEach((row) => { if (fix(row)) ids.push(row.id); });
+    }
+    const names = [...moveNames(state, `group:${from}`, `group:${to}`), ...moveNames(state, `name:${from}`, `name:${to}`)];
+    if (ids.length || names.length) atomicWrite(filename, JSON.stringify(state, null, 2));
+    return { ids, names };
+  }
+  // mergeGroup의 반대 방향 — **기록에 있는 행 id들만**, B를 가리키는 자리만 A로 돌린다(id가 없어졌거나 그 사이
+  // 다른 프로젝트로 옮겨 B 자리가 하나도 없으면 건너뛴다). 소제목 이름은 기록한 열쇠만 돌린다.
+  function mergeGroupUndo(ids, from, to, movedNames) {
+    const state = read();
+    const set = new Set(Array.isArray(ids) ? ids : []);
+    const head = `group:${to}:`;
+    let restored = 0;
+    const fix = (row) => {
+      if (!row || typeof row !== 'object') return false;
+      let touched = false;
+      if (row.group === to) { row.group = from; touched = true; }
+      if (typeof row.bucket === 'string' && row.bucket.startsWith(head)) { row.bucket = `group:${from}:${row.bucket.slice(head.length)}`; touched = true; }
+      (Array.isArray(row.evidence) ? row.evidence : []).forEach((item) => {
+        if (item && item.label === to) { item.label = from; touched = true; }
+      });
+      const childTouched = (Array.isArray(row.parts) ? row.parts : []).map(fix).some(Boolean);
+      return touched || childTouched;
+    };
+    for (const week of Object.values(state.weeks || {})) {
+      for (const row of (week?.rows || [])) {
+        if (!set.has(row.id)) continue;
+        if (fix(row)) restored += 1;
+      }
+    }
+    const names = restoreNames(state, movedNames);
     if (restored || names) atomicWrite(filename, JSON.stringify(state, null, 2));
     return { restored, skipped: set.size - restored };
   }
   // read는 한 번 읽은 보고 기록을 weeks·view에 함께 넘겨 주 수만큼 다시 읽지 않게 하려고 내보낸다.
-  return {view,change,weeks,read,renameGroup,relabelProject,moveGroup,moveGroupUndo};
+  return {view,change,weeks,read,renameGroup,relabelProject,moveGroup,moveGroupUndo,mergeGroup,mergeGroupUndo};
 };

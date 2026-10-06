@@ -569,6 +569,104 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     return entry;
   }
 
+  // ---------- 직접 만든(그룹) 프로젝트 합치기·지우기 ----------
+  // 이 저장소가 가진 세 자리(회의 프로젝트·projectLinks 키·projectArchive 키)만 바꾼다. 업무 파일과 회의 연결
+  // 파일·주간요약은 부르는 쪽(server.js mergeProject)이 같은 트랜잭션 안에서 이어서 바꾼다.
+  // to가 이름이면 합치기(A → B), null이면 지우기(A → 프로젝트 없음). 되돌릴 때 정확히 반대로 가려고
+  // 바꾼 것마다 원래 값을 함께 돌려준다:
+  //   meetings: [{ id, before }] — before는 바꾸기 전 회의 프로젝트 칸 그대로
+  //   link: { key, moved } | null — moved는 B로 옮겼는지(B에 이미 연결이 있으면 B 것을 남기고 A 것은 지운다)
+  //   archive: [{ key, day, moved }] — 합치기만(지우기는 그대로 둔다). B에 이미 있으면 B 것을 남긴다
+  function mergeGroup(from, to) {
+    const state = read();
+    const meetings = [];
+    for (const [id, event] of Object.entries(state.meetings)) {
+      if (!event.project || event.project.type !== 'group' || linkGroupName(event.project.value) !== from) continue;
+      state.meetings[id] = { ...event, project: to === null ? null : { ...event.project, value: to, label: to } };
+      meetings.push({ id, before: event.project });
+    }
+    let link = null;
+    if (state.projectLinks) {
+      const next = {};
+      let found = null;
+      for (const [name, key] of Object.entries(state.projectLinks)) {
+        if (found === null && linkGroupName(name) === from) found = { name, key }; else next[name] = key;
+      }
+      if (found) {
+        const moved = to !== null && !Object.prototype.hasOwnProperty.call(next, to);
+        if (moved) next[to] = found.key;
+        link = { name: found.name, key: found.key, moved };
+        state.projectLinks = next;
+      }
+    }
+    const archive = [];
+    if (to !== null && state.projectArchive) {
+      const next = {};
+      const target = `group:${to}`;
+      const entries = Object.entries(state.projectArchive);
+      for (const [key, day] of entries) {
+        const named = key.startsWith('group:') && linkGroupName(key.slice('group:'.length)) === from;
+        if (!named) { next[key] = day; continue; }
+        const moved = !entries.some(([other]) => other === target) && !Object.prototype.hasOwnProperty.call(next, target);
+        if (moved) next[target] = day;
+        archive.push({ key, day, moved });
+      }
+      state.projectArchive = next;
+    }
+    if (meetings.length || link || archive.length) write(state);
+    return { meetings, link, archive };
+  }
+  // 되돌리기는 **기록에 있는 것만** 반대로 돌린다 — 그 사이 다른 프로젝트로 바뀌었거나 지워졌으면 건드리지 않고
+  // 건너뛴다(skipped로 센다). "지금도 합친 뒤 모양"이란 합치기면 B를 가리키는 그룹, 지우기면 프로젝트가 빈 회의다.
+  function undoMergeGroup({ from, to, meetings, link, archive }) {
+    const state = read();
+    let restored = 0, skipped = 0;
+    for (const { id, before } of Array.isArray(meetings) ? meetings : []) {
+      const event = state.meetings[id];
+      const now = event && event.project;
+      const still = to === null ? !!event && !now : !!now && now.type === 'group' && linkGroupName(now.value) === to;
+      if (!still) { skipped += 1; continue; }
+      state.meetings[id] = { ...event, project: before };
+      restored += 1;
+    }
+    if (link && typeof link.name === 'string') {
+      const links = { ...(state.projectLinks || {}) };
+      if (link.moved && links[to] === link.key) delete links[to];
+      if (!Object.keys(links).some(name => linkGroupName(name) === from)) links[link.name] = link.key;
+      state.projectLinks = links;
+    }
+    if (Array.isArray(archive) && archive.length) {
+      const kept = { ...(state.projectArchive || {}) };
+      for (const { key, day, moved } of archive) {
+        if (moved && kept[`group:${to}`] === day) delete kept[`group:${to}`];
+        if (!Object.prototype.hasOwnProperty.call(kept, key)) kept[key] = day;
+      }
+      state.projectArchive = kept;
+    }
+    write(state);
+    return { restored, skipped };
+  }
+  // 합치기·지우기 기록(`projectMerges`) — 옮기기 기록(`projectMoves`)과 **섞지 않는다**: 옛 앱의 move-undo가
+  // 합치기 기록을 옮기기로 잘못 되돌리지 않게. 화면에는 내려보내지 않고(snapshot()에 넣지 않는다) 최근 20개만 둔다.
+  // 칸이 없는 옛 파일은 처음 합칠 때 칸이 생긴다(데이터 형식 번호는 그대로다).
+  const PROJECT_MERGE_MAX = 20;
+  function recordProjectMerge(entry) {
+    const state = read();
+    const merges = Array.isArray(state.projectMerges) ? state.projectMerges : [];
+    state.projectMerges = [...merges, entry].slice(-PROJECT_MERGE_MAX);
+    write(state);
+  }
+  function takeProjectMerge(id) {
+    const state = read();
+    const merges = Array.isArray(state.projectMerges) ? state.projectMerges : [];
+    const index = merges.findIndex(entry => entry.id === id);
+    if (index === -1) return null;
+    const entry = merges[index];
+    state.projectMerges = [...merges.slice(0, index), ...merges.slice(index + 1)];
+    write(state);
+    return entry;
+  }
+
   // ---------- 반응 필요에서 치운 줄 (BATTENTION) ----------
   // 저장하는 것은 `줄 id → 치운 시각` 표 하나뿐이다 — 댓글 글자도, 사람 이름도 저장하지 않는다.
   // id는 `출처:키:마지막 다른 사람 댓글 id`라 댓글이 더 달리면 값이 달라져 그 줄이 다시 나타난다.
@@ -692,5 +790,5 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     write(state);
     return { ok: true };
   }
-  return { archive, snapshot, patchItem, saveMeeting, syncProject, meetingItemIds, markAnswerSeen, unmarkAnswerSeen, capture, review, restoreDismissed, undoReview, retype, link, checkProjectLink, linkProject, checkProjectAlias, setProjectAlias, projectAliases, checkJiraRoles, saveJiraRoles, bundleProjects, unbundleProjects, setBundleLead, restoreBundle, groupList, renameGroup, moveGroup, undoMoveGroup, recordProjectMove, takeProjectMove, attentionDismissed, dismissAttention, undismissAttention, outcome: id => read().items[id]?.outcome || '' };
+  return { archive, snapshot, patchItem, saveMeeting, syncProject, meetingItemIds, markAnswerSeen, unmarkAnswerSeen, capture, review, restoreDismissed, undoReview, retype, link, checkProjectLink, linkProject, checkProjectAlias, setProjectAlias, projectAliases, checkJiraRoles, saveJiraRoles, bundleProjects, unbundleProjects, setBundleLead, restoreBundle, groupList, renameGroup, moveGroup, undoMoveGroup, recordProjectMove, takeProjectMove, mergeGroup, undoMergeGroup, recordProjectMerge, takeProjectMerge, attentionDismissed, dismissAttention, undismissAttention, outcome: id => read().items[id]?.outcome || '' };
 };

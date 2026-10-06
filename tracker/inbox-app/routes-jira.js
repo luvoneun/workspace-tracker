@@ -6,7 +6,7 @@
 
 module.exports = function jiraRoutes(req, res, url, ctx) {
   const { JIRA_DONE_DAYS, JIRA_DONE_MAX_DAYS, PROJECT_MOVE_KEY_RE, USES, attentionLive, idempotent, jira, jiraLive,
-    moveProject, projectDisplayName, readBody, workflows } = ctx;
+    findProject, moveProject, projectDisplayName, readBody, workflows } = ctx;
 
   // 지라 직접 읽기 — 프로젝트 탭의 띠 카드가 열릴 때만 부른다. 파일은 쓰지 않고(조회),
   // 키별 60초 메모리 캐시를 둔다(`fresh=1`이면 건너뛴다). 인증 예외에는 넣지 않는다.
@@ -176,13 +176,25 @@ module.exports = function jiraRoutes(req, res, url, ctx) {
   // 앱 파일은 하나도 건드리지 않으므로 `idempotent()`·mutation-store를 타지 않는다(그것들은 앱
   // 데이터용이다) — 다만 복구 필요 상태의 POST 차단은 맨 위 전역 분기를 그대로 탄다.
   // 요청 본문은 어디에도 기록하지 않는다.
+  // 새 에픽의 요약은 프로젝트 이름이라 앱의 이름 규칙(밑줄→공백·연속 공백 하나)으로 한 번 더 고르고, 그 이름이
+  // 이미 있는 지라 프로젝트(에픽 요약·별칭 — findProject가 `jira:`를 돌려줌)와 같으면 지라에 아무것도 묻지 않고
+  // 409로 거절한다. 지라에 만드는 일은 되돌릴 수 없어서 화면 막기 하나로 끝내지 않는다. 직접 만든 프로젝트와 같은
+  // 이름은 통과한다(만든 뒤 옮기기 흐름). 비교는 화면과 같은 캐시라 내 목록에 없는 남의 에픽은 알아보지 못한다.
   if (url.pathname === '/api/jira/create' && req.method === 'POST') {
     if (!USES.jira) { res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ ok: false, error: '지라를 쓰지 않도록 설정돼 있어요.', kind: 'other' })); return true; }
     readBody(req)
-      .then(body => jira.create(body))
+      .then((body) => {
+        const epic = body && body.plan && typeof body.plan === 'object' && body.plan.epic && typeof body.plan.epic === 'object' ? body.plan.epic : null;
+        const fresh = epic && (epic.key == null || epic.key === '') && typeof epic.summary === 'string';
+        if (!fresh) return jira.create(body);
+        const summary = epic.summary.replace(/_/g, ' ').trim().replace(/\s+/g, ' ');
+        const same = summary ? findProject(summary) : null;
+        if (same && same.startsWith('jira:')) return { ok: false, error: '같은 이름의 지라 프로젝트가 이미 있어요.', kind: 'exists', project: same };
+        return jira.create({ ...body, plan: { ...body.plan, epic: { ...epic, summary } } });
+      })
       .then((payload) => {
-        // 보낸 쪽 잘못(키·값 형식·개수)만 400이다. 지라 쪽 실패는 200 + `ok:false`로 문구를 실어 보낸다.
-        res.writeHead(['key', 'value', 'tooMany'].includes(payload.kind) ? 400 : 200, { 'Content-Type': 'application/json; charset=utf-8' });
+        // 보낸 쪽 잘못(키·값 형식·개수)만 400이다. 같은 이름의 지라 프로젝트는 409. 지라 쪽 실패는 200 + `ok:false`로 문구를 실어 보낸다.
+        res.writeHead(payload.kind === 'exists' ? 409 : ['key', 'value', 'tooMany'].includes(payload.kind) ? 400 : 200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify(payload));
       })
       .catch(() => {

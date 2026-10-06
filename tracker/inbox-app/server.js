@@ -1520,6 +1520,18 @@ function projectNamesTaken({ excludeGroup = null, excludeJira = null } = {}) {
     ...Object.entries(aliases).filter(([key]) => key !== excludeJira).map(([, alias]) => alias),
   ].map(groupNameKey));
 }
+// 적은 이름이 이미 있는 프로젝트(직접 만든 이름·지라 요약·별칭)면 그 열쇠 — 이름 겹침 검사(projectNamesTaken)와
+// 같은 비교(groupNameKey)다. 차례는 직접 만든 이름 → 별칭 → 지라 요약·`KEY · 요약`(화면 uiPickByName과 같다). 없으면 null.
+// 주간요약의 `새 프로젝트…`(그 이름이 있으면 그 프로젝트로)와 지라 새 에픽 만들기의 같은 이름 막기가 함께 쓴다.
+function findProject(name) {
+  const wanted = groupNameKey(name);
+  const group = getCustomGroups().find(entry => groupNameKey(entry) === wanted);
+  if (group) return `group:${String(group).replace(/_/g, ' ').trim()}`;
+  const alias = Object.entries(getProjectAliases()).find(([, value]) => groupNameKey(value) === wanted);
+  if (alias) return `jira:${alias[0]}`;
+  const issue = getJiraIssueCache().find(entry => groupNameKey(entry.summary) === wanted || groupNameKey(`${entry.key} · ${entry.summary}`) === wanted);
+  return issue ? `jira:${issue.key}` : null;
+}
 function renameProject({ project, name }) {
   if (typeof project !== 'string' || !project.startsWith('group:')) throw new Error('직접 만든 프로젝트의 이름만 바꿀 수 있어요. 지라 프로젝트의 이름은 지라 요약을 따라요.');
   const from = project.slice('group:'.length).replace(/_/g, ' ').trim();
@@ -1733,6 +1745,168 @@ function undoMoveProject({ moveId }) {
       report: reportUndo.restored,
     },
     skipped: itemsSkipped + movedBack.skipped + meetingLinksSkipped + reportUndo.skipped,
+  };
+}
+
+// ---------- 직접 만든(그룹) 프로젝트 합치기·지우기 ----------
+// 같은 일이 이름만 다른 그룹 둘로 갈라졌을 때 A를 B로 합치거나(to: 'group:B'), A의 소속을 풀어 프로젝트 없음으로
+// 돌린다(to: null — 지우기). renameProject와 같은 여섯 자리를 한 트랜잭션(idempotent → mutations.run)으로 바꾸고,
+// 하나라도 실패하면 저널이 전부 되돌린다. 쓰는 길도 renameProject·moveProject와 같다. 지라에는 아무것도 묻지도
+// 쓰지도 않는다 — 지라 에픽으로 합칠 때는 화면이 기존 `/api/project/move`(에픽 검사가 그 라우트에 있다)를 부른다.
+// 겹침 검사(projectNamesTaken)는 하지 않는다 — 이미 있는 이름으로 가는 것이 목적이다. 같은 프로젝트인지는 이름이
+// 글자 그대로 같은지로 본다(`Pay Renewal`·`pay renewal`처럼 대소문자·공백만 다른 둘을 합치는 것이 바로 이 기능이다).
+//   ① 업무 파일의 `group:`·`project:` 칸 — 끝낸 항목 포함, 지라가 걸린 줄은 건너뛴다. 합치기는 값을 B로, 지우기는 칸을 뺀다
+//   ②③④ .workflow.json 회의 프로젝트·projectLinks·projectArchive(workflows.mergeGroup)
+//   ⑤ .meeting_links.json 의 `group:A` — 합치기는 B로, 지우기는 그 줄을 뺀다(남기면 다음 정기 회의가 A를 되살린다)
+//   ⑥ 주간요약 저장본 — 합치기만(모든 주). 지우기는 건드리지 않는다(지난 보고를 바꾸지 않는다)
+// 되돌리기용 기록은 `.workflow.json`의 `projectMerges`에 남긴다(projectMoves와 섞지 않는다).
+function mergeProject({ project, to }) {
+  if (typeof project !== 'string' || !project.startsWith('group:')) throw new Error('직접 만든 프로젝트만 합치거나 지울 수 있어요.');
+  const from = project.slice('group:'.length).replace(/_/g, ' ').trim();
+  if (!from) throw new Error('프로젝트를 확인해 주세요.');
+  if (typeof to === 'string' && to.startsWith('jira:')) throw new Error('지라 에픽으로 합칠 때는 옮기기를 써요.');
+  if (to !== null && (typeof to !== 'string' || !to.startsWith('group:'))) throw new Error('합칠 프로젝트를 확인해 주세요.');
+  const target = to === null ? null : to.slice('group:'.length).replace(/_/g, ' ').trim();
+  if (target === '') throw new Error('합칠 프로젝트를 확인해 주세요.');
+  const groups = workflows.groupList();
+  if (!groups.includes(from)) throw new Error('프로젝트를 찾을 수 없어요.');
+  if (target !== null && target === from) throw new Error('같은 프로젝트예요.');
+  if (target !== null && !groups.includes(target)) throw new Error('합칠 프로젝트를 찾을 수 없어요.');
+
+  // ① 업무 파일 — 먼저 모든 파일의 새 내용을 다 짓고(id 없는 줄이 있으면 아무것도 쓰기 전에 거절) 그다음 쓴다.
+  const token = target === null ? null : target.replace(/\s+/g, '_');
+  const items = [];
+  const plans = listTrackerFiles().map((filePath) => {
+    const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
+    let touched = false;
+    const next = lines.map((line) => {
+      const match = line.match(TRACK_RE);
+      if (!match) return line;
+      const fields = parseFields(match[3]);
+      if (fields.jira) return line;
+      const keys = [];
+      const parts = match[3].split(/\s+/).flatMap((part) => {
+        const at = part.indexOf(':');
+        if (at === -1) return [part];
+        const key = part.slice(0, at);
+        if ((key !== 'group' && key !== 'project') || part.slice(at + 1).replace(/_/g, ' ') !== from) return [part];
+        keys.push(key);
+        return token === null ? [] : [`${key}:${token}`];
+      });
+      if (!keys.length) return line;
+      // 되돌리기는 id로 짝을 찾는다 — id가 없는 줄은 되돌릴 수 없으니 합치기·지우기 자체를 하지 않는다.
+      if (!fields.id) throw new Error('id가 없는 항목이 있어 되돌릴 수 없어요.');
+      keys.forEach(key => items.push({ id: fields.id, key }));
+      touched = true;
+      return `- ${match[1]} #${match[2]}[${parts.join(' ')}]`;
+    });
+    return { filePath, next, touched };
+  });
+  plans.forEach(({ filePath, next, touched }) => { if (touched) fs.writeFileSync(filePath, next.join('\n')); });
+
+  // ②③④ 회의 프로젝트 · 수동 지라 연결 · 보관 표
+  const merged = workflows.mergeGroup(from, target);
+
+  // ⑤ 회의 제목 → 프로젝트 표
+  const links = readMeetingLinks();
+  const meetingLinks = [];
+  for (const [title, value] of Object.entries(links)) {
+    if (typeof value !== 'string' || !value.startsWith('group:')) continue;
+    if (value.slice('group:'.length).replace(/_/g, ' ').trim() !== from) continue;
+    meetingLinks.push({ title, before: value });
+    if (target === null) delete links[title]; else links[title] = `group:${target}`;
+  }
+  if (meetingLinks.length) fs.writeFileSync(MEETING_LINKS_PATH, JSON.stringify(links, null, 2));
+
+  // ⑥ 주간요약 저장본 — 합치기만.
+  const report = target === null ? { ids: [], names: [] } : reportDrafts.mergeGroup(from, target);
+
+  const mergeId = `mg_${ulid()}`;
+  const itemCount = new Set(items.map(entry => entry.id)).size;
+  const meetingCount = merged.meetings.length + meetingLinks.length;
+  workflows.recordProjectMerge({
+    id: mergeId, from, to: target, at: new Date().toISOString(),
+    items, meetings: merged.meetings, link: merged.link, archive: merged.archive,
+    meetingLinks, reportRows: report.ids, reportNames: report.names,
+    counts: { items: itemCount, meetings: meetingCount, report: report.ids.length },
+  });
+
+  return {
+    ok: true, project: target === null ? null : `group:${target}`, from, to: target, mergeId,
+    changed: { items: itemCount, meetings: meetingCount, links: merged.link ? 1 : 0, report: report.ids.length },
+  };
+}
+
+// 합치기·지우기의 반대 방향. **기록에 남은 것만**, 지금도 합친 뒤 모양일 때만 되돌린다 — 그 사이 다른 프로젝트로
+// 옮겼거나 지웠거나 회의 연결을 바꾼 것은 건드리지 않고 건너뛴다(skipped로 센다). 한 번 되돌리면 기록이 지워진다.
+function undoMergeProject({ mergeId }) {
+  if (typeof mergeId !== 'string' || !mergeId.trim()) throw new Error('되돌릴 기록을 확인해 주세요.');
+  const entry = workflows.takeProjectMerge(mergeId);
+  if (!entry) throw new Error('되돌릴 기록이 없어요.');
+  const { from, to } = entry;
+  const fromToken = from.replace(/\s+/g, '_');
+
+  // ① 업무 파일 — 합치기면 그 칸이 아직 B일 때, 지우기면 그 칸이 아직 비어 있고 지라도 없을 때만.
+  const wanted = new Map();
+  (Array.isArray(entry.items) ? entry.items : []).forEach(({ id, key }) => {
+    if (typeof id !== 'string' || (key !== 'group' && key !== 'project')) return;
+    if (!wanted.has(id)) wanted.set(id, new Set());
+    wanted.get(id).add(key);
+  });
+  const seen = new Set();
+  let itemsRestored = 0, itemsSkipped = 0;
+  listTrackerFiles().forEach((filePath) => {
+    const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
+    let touched = false;
+    const next = lines.map((line) => {
+      const match = line.match(TRACK_RE);
+      if (!match) return line;
+      const fields = parseFields(match[3]);
+      if (!fields.id || !wanted.has(fields.id) || seen.has(fields.id)) return line;
+      seen.add(fields.id);
+      const keys = wanted.get(fields.id);
+      const parts = match[3].split(/\s+/);
+      const has = key => parts.some(part => part.startsWith(`${key}:`));
+      const still = !fields.jira && [...keys].every(key => (to === null
+        ? !has('group') && !has('project')
+        : parts.some(part => part.startsWith(`${key}:`) && part.slice(key.length + 1).replace(/_/g, ' ') === to)));
+      if (!still) { itemsSkipped += 1; return line; }
+      const fieldStr = to === null
+        ? [...parts, ...[...keys].map(key => `${key}:${fromToken}`)].join(' ')
+        : parts.map((part) => {
+          const at = part.indexOf(':');
+          const key = at === -1 ? '' : part.slice(0, at);
+          return keys.has(key) && part.slice(at + 1).replace(/_/g, ' ') === to ? `${key}:${fromToken}` : part;
+        }).join(' ');
+      touched = true;
+      itemsRestored += 1;
+      return `- ${match[1]} #${match[2]}[${fieldStr}]`;
+    });
+    if (touched) fs.writeFileSync(filePath, next.join('\n'));
+  });
+  itemsSkipped += [...wanted.keys()].filter(id => !seen.has(id)).length; // 그 사이 지워진 항목
+
+  // ②③④ 회의 프로젝트 · 수동 지라 연결 · 보관 표
+  const back = workflows.undoMergeGroup({ from, to, meetings: entry.meetings, link: entry.link, archive: entry.archive });
+
+  // ⑤ 회의 제목 → 프로젝트 표
+  const linkState = readMeetingLinks();
+  let meetingLinksRestored = 0, meetingLinksSkipped = 0;
+  (Array.isArray(entry.meetingLinks) ? entry.meetingLinks : []).forEach(({ title, before }) => {
+    const still = to === null ? !Object.prototype.hasOwnProperty.call(linkState, title) : linkState[title] === `group:${to}`;
+    if (!still) { meetingLinksSkipped += 1; return; }
+    linkState[title] = before;
+    meetingLinksRestored += 1;
+  });
+  if (meetingLinksRestored) fs.writeFileSync(MEETING_LINKS_PATH, JSON.stringify(linkState, null, 2));
+
+  // ⑥ 주간요약 저장본 — 합치기만 바꿨다.
+  const reportUndo = to === null ? { restored: 0, skipped: 0 } : reportDrafts.mergeGroupUndo(entry.reportRows, from, to, entry.reportNames);
+
+  return {
+    ok: true, project: `group:${from}`,
+    restored: { items: itemsRestored, meetings: back.restored + meetingLinksRestored, report: reportUndo.restored },
+    skipped: itemsSkipped + back.skipped + meetingLinksSkipped + reportUndo.skipped,
   };
 }
 
@@ -2637,6 +2811,10 @@ const handleRequest = (req, res) => {
     // 옮기기(BMOVE)의 되돌리기 — 이동 기록에 남은 id들만 반대로 돌린다. 지라를 다시 읽지 않는다
     // (에픽 검사는 옮길 때 한 번으로 충분하다).
     '/api/project/move-undo': undoMoveProject,
+    // 직접 만든 프로젝트 합치기(to: 'group:B')·지우기(to: null)와 그 되돌리기 — 여섯 자리를 한 트랜잭션으로 바꾼다.
+    // 지라에는 아무것도 쓰지 않는다. 기록은 projectMerges(옮기기 기록과 따로)라 move-undo로는 되돌릴 수 없다.
+    '/api/project/merge': mergeProject,
+    '/api/project/merge-undo': undoMergeProject,
     // 프로젝트 묶어 보기(BBUNDLE) — `.workflow.json`의 표시 정보(projectBundles)만 바꾼다. 항목의 jira 칸과
     // 지라에는 아무것도 쓰지 않는다. 되돌리기(⌘Z·알림)는 bundle-restore가 "지금이 after일 때만" before로.
     '/api/project/bundle': workflows.bundleProjects,
@@ -2746,15 +2924,7 @@ const reportDrafts = require('./report-drafts')({
     },
     // `새 프로젝트…`에 적은 이름이 이미 있는 프로젝트(직접 만든 이름·지라 요약·별칭)면 그 열쇠 — 이름 겹침 검사(projectNamesTaken)와
     // 같은 비교(groupNameKey)다. 없으면 null(새 그룹 이름으로 쓴다).
-    findProject: (name) => {
-      const wanted = groupNameKey(name);
-      const group = getCustomGroups().find(entry => groupNameKey(entry) === wanted);
-      if (group) return `group:${String(group).replace(/_/g, ' ').trim()}`;
-      const alias = Object.entries(getProjectAliases()).find(([, value]) => groupNameKey(value) === wanted);
-      if (alias) return `jira:${alias[0]}`;
-      const issue = getJiraIssueCache().find(entry => groupNameKey(entry.summary) === wanted || groupNameKey(`${entry.key} · ${entry.summary}`) === wanted);
-      return issue ? `jira:${issue.key}` : null;
-    },
+    findProject: name => findProject(name),
   },
 });
 const mutations = require('./mutation-store')(TRACKER_DIR, [MEETING_LINKS_PATH, weeklyReportStatePath()]);
@@ -2832,7 +3002,7 @@ const routeCtx = {
   USES, CALENDAR_ICAL, CONFIG_PATH, LOCAL_DIR, PUBLIC_DIR,
   readBody, idempotent, integrations, personalize, workflows,
   // 지라
-  jira, jiraLive, attentionLive, JIRA_DONE_DAYS, JIRA_DONE_MAX_DAYS, PROJECT_MOVE_KEY_RE, projectDisplayName, moveProject,
+  jira, jiraLive, attentionLive, JIRA_DONE_DAYS, JIRA_DONE_MAX_DAYS, PROJECT_MOVE_KEY_RE, projectDisplayName, moveProject, findProject,
   // 앱 정보·업데이트
   aboutApp, aboutDiagnostics, requestUpdate, updateStatusView, UPDATE_MESSAGE, selfcheck,
   // 연동·자동화·백업·미팅 노트
