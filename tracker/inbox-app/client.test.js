@@ -2272,7 +2272,7 @@ function meetingsViewClient() {
 }
 const meetingsHeadings = list => nodeFindAll(list, 'd-grp')
   .map(head => [nodeFind(head, 'gl').textContent, head.getAttribute('aria-expanded')]);
-const meetingsRowIds = app => nodeFindAll(app.nodes.get('meetingList'), 'd-mtrow')
+const meetingsRowIds = app => nodeFindAll(app.run(`document.getElementById('meetingList')`), 'd-mtrow')
   .map(row => nodeFind(row, 'ti').textContent);
 
 test('회의 목록의 프로젝트별 보기: 미완료가 남은 프로젝트가 먼저, `프로젝트 없음`은 맨 끝', () => {
@@ -2288,7 +2288,7 @@ test('회의 목록의 프로젝트별 보기: 미완료가 남은 프로젝트�
   ], '미완료가 있는 운영툴이 먼저(그 안은 날짜 내림차순), 미완료가 없는 결제 리뉴얼이 뒤, 프로젝트 없음은 미완료가 있어도 맨 끝');
 
   app.run("meetingsTabView = 'project'; renderMeetings();");
-  const list = app.nodes.get('meetingList');
+  const list = app.run(`document.getElementById('meetingList')`);
   assert.deepEqual(meetingsHeadings(list),
     [['운영툴', 'true'], ['결제 리뉴얼', 'true'], ['프로젝트 없음', 'true']],
     '소제목은 접히는 그룹 제목 부품이라 aria-expanded를 들고 있다');
@@ -2304,7 +2304,7 @@ test('회의 목록의 두 보기는 같은 줄을 보여 준다 — 칩 셋은 
   const app = meetingsViewClient();
   app.run("meetingsTabView = 'date'; renderMeetings();");
   const byDate = meetingsRowIds(app);
-  assert.ok(nodeFind(app.nodes.get('meetingList'), 'd-mtday'), '날짜순에는 날짜 소제목이 있다');
+  assert.ok(nodeFind(app.run(`document.getElementById('meetingList')`), 'd-mtday'), '날짜순에는 날짜 소제목이 있다');
   app.run("meetingsTabView = 'project'; renderMeetings();");
   assert.deepEqual([...meetingsRowIds(app)].sort(), [...byDate].sort(), '거르는 결과는 보기와 무관하다');
 
@@ -2314,16 +2314,16 @@ test('회의 목록의 두 보기는 같은 줄을 보여 준다 — 칩 셋은 
   app.run("meetingsTabView = 'project'; renderMeetings();");
   assert.deepEqual([...meetingsRowIds(app)].sort(), [...urgentByDate].sort());
   assert.ok(!urgentByDate.includes('결제 리뉴얼 PRD 리뷰'), '미완료가 없는 회의는 두 보기 모두에서 빠진다');
-  assert.deepEqual(meetingsHeadings(app.nodes.get('meetingList')).map(([name]) => name), ['운영툴', '프로젝트 없음']);
+  assert.deepEqual(meetingsHeadings(app.run(`document.getElementById('meetingList')`)).map(([name]) => name), ['운영툴', '프로젝트 없음']);
 });
 
 test('프로젝트 소제목을 누르면 그 프로젝트만 접힌다 — 세션 동안만 기억하고 고른 회의는 다시 펼친다', () => {
   const app = meetingsViewClient();
   app.run("meetingsTabView = 'project'; renderMeetings();");
-  const head = nodeFindAll(app.nodes.get('meetingList'), 'd-grp')[0];
+  const head = nodeFindAll(app.run(`document.getElementById('meetingList')`), 'd-grp')[0];
   head.listeners.click();
   assert.equal(app.run("meetingsTabClosed.has('group:운영툴')"), true);
-  assert.deepEqual(meetingsHeadings(app.nodes.get('meetingList')),
+  assert.deepEqual(meetingsHeadings(app.run(`document.getElementById('meetingList')`)),
     [['운영툴', 'false'], ['결제 리뉴얼', 'true'], ['프로젝트 없음', 'true']]);
   assert.deepEqual(meetingsRowIds(app), ['결제 리뉴얼 PRD 리뷰', '자유 논의'], '접은 프로젝트의 줄은 빠진다');
   // 목록 밖의 회의를 열면 그 프로젝트는 다시 펼쳐진다 — 오른쪽 내용은 반드시 보여야 한다.
@@ -2358,7 +2358,7 @@ test('회의 정리 부제목의 프로젝트 이름을 누르면 왼쪽이 프�
   assert.equal(link.getAttribute('aria-label'), '운영툴 회의만 모아 보기');
   link.listeners.click();
   assert.equal(app.run('meetingsTabView'), 'project');
-  assert.deepEqual(meetingsHeadings(app.nodes.get('meetingList')),
+  assert.deepEqual(meetingsHeadings(app.run(`document.getElementById('meetingList')`)),
     [['운영툴', 'true'], ['결제 리뉴얼', 'false'], ['프로젝트 없음', 'false']], '고른 프로젝트만 펼쳐진 채로 선다');
   assert.deepEqual(meetingsRowIds(app), ['운영툴 주간 싱크', '운영툴 주간 싱크']);
 });
@@ -2376,11 +2376,11 @@ test('`더 보기`는 날짜순에서는 목록 끝 한 줄, 프로젝트별에�
     wfIndexData();
   `);
   app.run("meetingsTabView = 'date'; renderMeetings();");
-  let more = nodeFindAll(app.nodes.get('meetingList'), 'd-mmore');
+  let more = nodeFindAll(app.run(`document.getElementById('meetingList')`), 'd-mmore');
   assert.deepEqual(more.map(node => nodeText(node)), ['이전 회의 더 보기'], '날짜순은 목록 끝에 한 줄이다');
 
   app.run("meetingsTabView = 'project'; renderMeetings();");
-  more = nodeFindAll(app.nodes.get('meetingList'), 'd-mmore');
+  more = nodeFindAll(app.run(`document.getElementById('meetingList')`), 'd-mmore');
   assert.deepEqual(more.map(node => [node.className, nodeText(node)]),
     [['d-mmore is-in', '더 보기 2']], '프로젝트별은 그 프로젝트의 소제목 아래에 개수와 함께 붙는다');
   more[0].children[0].listeners.click();
@@ -5219,7 +5219,7 @@ test('안 가져온 미팅 노트는 리마인드 카드에 오르지 않는다 
 test('회의 탭 머리의 세 상태: 가져올 게 있으면 버튼+개수, 다 가져왔으면 상태 글자+`다시 확인`, 오늘 시작한 회의가 없으면 다른 글자', async () => {
   const { app, sent } = meetingNotesClient([{ used: true, state: 'requested', scope: 'today' }]);
   app.run("meetingNotesApply({ used: true, state: 'idle' })");
-  const list = () => app.nodes.get('meetingList');
+  const list = () => app.run(`document.getElementById('meetingList')`);
   const clean = text => text.replace(/\s+/g, ' ').trim();
 
   // 오늘 시작한 회의가 하나도 없다
@@ -16283,7 +16283,7 @@ test('체크 표시 하나: 업무 체크(.d-cb)와 레일 체크(.d-wcb)가 색
   assert.match(css, /\.d-cb:hover, \.d-wcb:hover \{ border-color: var\(--accent\); \}/);
   assert.match(css, /\.d-cb:checked, \.d-wcb:checked \{ background: var\(--accent\); border-color: var\(--accent\); \}/);
   assert.match(css, /\.d-cb:checked, \.d-wcb:checked \{ animation: d-pop-check var\(--t-fast\) var\(--ease\); \}/);
-  assert.match(css, /\.d-cb:checked, \.d-wcb:checked, \.d-row\.is-completing \.d-title \{ animation: none; \}/, '움직임 줄이기');
+  assert.match(css, /\.d-cb:checked, \.d-wcb:checked, \.d-row\.is-completing \.d-title, \.d-mrow2\.is-completing \.ti, \.d-prow2\.is-completing \.ti \{ animation: none; \}/, '움직임 줄이기 — 회의·프로젝트 줄의 긋기도(C2)');
   assert.doesNotMatch(css, /\n\.d-wcb:(hover|checked) \{/, '레일 체크만의 색 규칙은 없다');
 });
 
@@ -16945,7 +16945,8 @@ test('줄 이동 C1 완료 흐름: 체크 → 줄 긋기(200ms) → 줄이 `완�
   assert.match(css, /\.d-cb:checked, \.d-wcb:checked \{ animation: d-pop-check var\(--t-fast\) var\(--ease\); \}/);
   assert.match(css, /animation: d-strike var\(--t-move\) var\(--ease\) forwards;/);
   assert.equal(fx.app.run('UI_GLIDE.strike'), fx.app.run('UI_GLIDE.move'));
-  assert.match(script, /if \(!done\) uiGlideDoneMark\(item\.id, 'grp:완료', true\);/);
+  // 들어갈 제목은 줄이 정한다(프로젝트 상세는 `끝낸 것` — data-done-into), 없으면 오늘의 `완료`.
+  assert.match(script, /if \(!done\) uiGlideDoneMark\(item\.id, \(card\.dataset && card\.dataset\.doneInto\) \|\| 'grp:완료', true\);/);
   assert.match(script, /if \(!archived\) uiGlideDoneMark\(item\.id, 'decisionArchiveToggle'\);/);
 });
 
@@ -16961,10 +16962,11 @@ test('줄 이동 C1 사라진 줄: 옛 자리에 그림자 한 장(열쇠·id �
   const dress = () => fx.list.querySelectorAll().forEach((row) => {
     row.cloneNode = () => {
       const attrs = new Map([['data-task-id', row.dataset.taskId], ['id', 'x']]);
-      const ghost = { style: {}, classes: [], removed: false, offsetParent: host, dataset: {},
+      const ghost = { style: {}, classes: [], className: '', removed: false, offsetParent: host, dataset: {},
+        get isConnected() { return ghost.connected !== false; },
         get attributes() { return [...attrs.keys()].map(name => ({ name })); },
         removeAttribute: name => attrs.delete(name), setAttribute: (name, value) => attrs.set(name, value), attrs,
-        querySelectorAll: () => [], classList: { add: name => ghost.classes.push(name) }, remove() { ghost.removed = true; } };
+        querySelectorAll: () => [], classList: { add: (name) => { ghost.classes.push(name); ghost.className = ghost.classes.join(' '); } }, remove() { ghost.removed = true; } };
       ghost.animate = (frames, options) => { const play = { id: 'ghost', frames, options, cancel() {} }; fx.plays.push(play); return play; };
       ghosts.push(ghost);
       return ghost;
@@ -16986,12 +16988,14 @@ test('줄 이동 C1 사라진 줄: 옛 자리에 그림자 한 장(열쇠·id �
   const play = fx.plays.find(each => each.id === 'ghost');
   assert.deepEqual(plain(play.frames), [{ opacity: 1 }, { opacity: 0 }]);
   assert.deepEqual(plain(play.options), { duration: 120, easing: 'cubic-bezier(0.22, 0.8, 0.3, 1)', fill: 'forwards' });
-  // 그림자가 떠 있는 동안 다시 그리면 목록을 갈아 끼우며 함께 치워진다(다음 그리기의 줄로 세지도 않는다).
+  // 그림자가 떠 있는 동안 다시 그려도(저장 뒤 load와 부르는 쪽의 다시 그리기가 같은 틱에 두 번) 흐려지던 그림자는 남는다 —
+  // 다음 그리기의 줄로 세지 않고, 시간으로 스스로 떼어진다(C2).
   dress();
   fx.app.run('uiActAt = 0');
   draw(['a', 'c'], []);
   await settle();
-  assert.ok(!fx.list.children.includes(ghost), '다음 다시 그리기가 그림자를 치운다');
+  assert.ok(fx.list.children.includes(ghost), '다시 그려도 흐려지는 중인 그림자는 그대로 남는다');
+  assert.equal(fx.list.children.filter(kid => kid === ghost).length, 1, '한 번만 붙는다');
   fx.timers.forEach(timer => timer.fn());
   assert.equal(ghost.removed, true, '시간으로 떼어 낸다');
   assert.ok(!fx.list.querySelectorAll().some(row => row === ghost), '줄로 세지 않는다');
@@ -17081,6 +17085,367 @@ test('줄 이동 C1: 왼쪽 레일 무리(미팅·리마인드·확인 대기)�
   assert.equal(new Set(keys).size, keys.length);
 });
 
+// ---- 모션 묶음 C2: 다른 탭의 목록을 줄 부품에 등록 ----
+// 회의 정리·프로젝트 상세·주간요약처럼 줄이 깊이 들어 있는 자리는 열쇠 달린 줄을 자손까지 훑는다(화면의 querySelectorAll과 같다).
+// 줄은 훑은 차례대로 40px씩 아래에 선다. 움직임(animate)은 plays에 모은다. 시간 치우기(setTimeout)는 timers에 모아 두고 부르지 않는다.
+function glideApp(app) {
+  const plays = [];
+  const timers = [];
+  app.context.setTimeout = (fn, delay) => { timers.push({ fn, delay }); return timers.length; };
+  app.run("window.innerWidth = 1200; window.innerHeight = 4000; uiActAt = 0; uiActQuiet = false; uiActInText = false; uiKeyAt = 0; uiComposingEl = null; uiSchedOpen = null; document.activeElement = null; document.hidden = false; window.matchMedia = () => ({ matches: false });");
+  if (typeof app.run('document.querySelector') !== 'function') app.run('document.querySelector = () => null');
+  const walk = (node, out) => {
+    (node.children || []).forEach((kid) => {
+      if (!kid || typeof kid !== 'object') return;
+      if (glideKeyOf(kid) !== undefined) out.push(kid);
+      walk(kid, out);
+    });
+    return out;
+  };
+  const deep = (target) => {
+    target.getClientRects = () => [{}];
+    target.querySelectorAll = (selector) => {
+      if (selector !== undefined && !/data-task-id/.test(String(selector))) return [];
+      const rows = walk(target, []);
+      rows.forEach((row) => {
+        if (row.glideReady) return;
+        row.glideReady = true;
+        const classes = new Set(String(row.className || '').split(' ').filter(Boolean));
+        row.classList = { add: name => classes.add(name), remove: name => classes.delete(name), contains: name => classes.has(name), toggle: (name, on) => (on ? classes.add(name) : classes.delete(name)) };
+        row.getBoundingClientRect = () => { const top = walk(target, []).indexOf(row) * 40; return { left: 0, right: 600, top, bottom: top + 36, height: 36, width: 600 }; };
+        row.animate = (frames, options) => { const play = { id: glideKeyOf(row), frames, options, cancel() {} }; plays.push(play); return play; };
+      });
+      return rows;
+    };
+    return target;
+  };
+  const act = (event = { type: 'click', detail: 1 }) => app.context.uiActMark(event);
+  const keys = target => target.querySelectorAll().map(glideKeyOf);
+  return { plays, timers, deep, act, keys };
+}
+// 다섯 자리 — 각자 실제 그리기 함수로 그리고, 두 번째 그리기(variant 1)는 줄 하나가 빠지거나 늘어 자리가 바뀐다.
+const C2_PLACES = [
+  ['회의 목록', 'meetingList', () => meetingsViewClient(), (app, variant) => app.run(`meetingsTabState.unresolved = ${variant === 1}; renderMeetings();`), /^(mtg:|grp:)/],
+  ['회의 정리(이 회의에서 나온 것·지난 회차)', 'meetingBody', () => meetingsViewClient(),
+    (app, variant) => app.run(`workflowData.items = workflowData.items.filter(item => ${variant === 1} ? item.id !== 't1' : true); wfIndexData(); renderMeetings();`), /^(grp:|[a-z]\d$)/],
+  ['프로젝트 목록', 'projectList', () => c2ProjectClient(),
+    (app, variant) => app.run(`workflowData.items = __projectItems.filter(item => ${variant === 1} || item.group !== '알림센터'); wfIndexData(); renderProjects();`), /^(pj:|grp:)/],
+  ['프로젝트 상세', 'projectBody', () => c2ProjectClient(),
+    (app, variant) => app.run(`workflowData.items = __projectItems.filter(item => ${variant === 1} ? item.id !== 'p1' : true); wfIndexData(); renderProjects();`), /^(grp:|p\d$|a\d$)/],
+  ['주간요약 문장', 'weeklyReportDetail', () => c2ReportClient(),
+    (app, variant) => app.run(`__week.draft.rows = __reportRows.filter(row => ${variant === 1} ? row.id !== 's1' : true); renderReportDraft(__week);`), /^(rp:|grp:|add:)/],
+  ['삭제한 항목', 'settingsTrashView', () => { const fx = trashClient(); fx.app.context.__trash = TRASH_ITEMS; fx.app.run("settingsTrash = JSON.parse(JSON.stringify(__trash)); settingsTrashLabel = () => {};"); return fx.app; },
+    (app, variant) => app.run(variant === 1 ? "settingsTrashDrop('tr02')" : 'renderSettingsTrash()'), /^tr:/],
+  ['오늘 정리 창', 'wrapBody', () => c2WrapClient(),
+    (app, variant) => app.run(`wrapState.doneOpen = ${variant === 1}; wrapRender();`), /^(grp:|wd:|w\d$)/],
+];
+function c2ProjectClient() {
+  const app = workflowsClient();
+  app.context.__projectItems = [
+    { id: 'p1', type: 'task', status: 'to-do', description: '가입 문구 검토', group: '가입 개선', scheduled: '2026-10-06' },
+    { id: 'p2', type: 'task', status: 'to-do', description: '약관 링크 확인', group: '가입 개선', scheduled: '2026-10-06' },
+    { id: 'p3', type: 'task', status: 'to-do', description: '퍼널 대시보드', group: '가입 개선' },
+    { id: 'a1', type: 'task', status: 'to-do', description: '발송 실패 로그', group: '알림센터' },
+    { id: 'b1', type: 'task', status: 'to-do', description: '정산 배치 설계', group: '결제 리뉴얼' },
+  ];
+  app.run(`workflowData = { items: __projectItems, meetings: [] }; wfIndexData(); itemsById = new Map();
+    projectKey = 'group:가입 개선'; projectOrderKeys = null; projectOrderResort = true; projectFolds.clear(); load = async () => {};`);
+  return app;
+}
+function c2ReportClient() {
+  const app = reportClient();
+  app.run(`const __make = document.createElement;
+    document.createElement = tag => Object.assign(__make(tag), { tagName: String(tag).toUpperCase(), style: {} });
+    document.createElementNS = (ns, tag) => document.createElement(tag);
+    document.createTextNode = value => ({ textContent: String(value), children: [] });
+    escDrop = () => {}; escPush = () => {};
+    document.body = document.createElement('body');
+    document.getElementById('weeklyReportDetail').contains = () => false;
+    activeTabKey = 'weekly';`);
+  app.context.__reportRows = [
+    { id: 's1', heading: '완료한 일', group: '가입 개선', text: '가입 문구를 고쳤어요', sourceIds: ['x1'] },
+    { id: 's2', heading: '완료한 일', group: '가입 개선', text: '약관 링크를 바꿨어요', sourceIds: ['x2'] },
+    { id: 's3', heading: '완료한 일', group: '알림센터', text: '발송 실패를 줄였어요', sourceIds: ['x3'] },
+  ];
+  app.run("var __week = { weekKey: '2026-09-28', draft: { revision: 1, rows: __reportRows.slice() } }; weeklyReportsCache = [__week];");
+  return app;
+}
+function c2WrapClient() {
+  const fx = wrapClient();
+  fx.app.run('wrapOpen()');
+  return fx.app;
+}
+
+test('줄 이동 C2: 회의·프로젝트·주간요약·삭제한 항목·오늘 정리 — 내 동작 직후 다시 그리면 줄이 미끄러지고, 자동 갱신은 그냥 그린다', async () => {
+  for (const [name, id, make, draw, keyShape] of C2_PLACES) {
+    const app = make();
+    const fx = glideApp(app);
+    const place = fx.deep(app.run(`document.getElementById('${id}')`));
+    draw(app, 0);
+    await settle();
+    const keys = fx.keys(place);
+    assert.ok(keys.length >= 2, `${name}: 열쇠 달린 줄을 그린다 (${keys.join(',')})`);
+    assert.ok(keys.every(key => keyShape.test(key)), `${name}: 열쇠 모양 (${keys.join(',')})`);
+    assert.equal(new Set(keys).size, keys.length, `${name}: 자리 안 열쇠가 겹치지 않는다`);
+    assert.equal(fx.plays.length, 0, `${name}: 처음 그리기는 움직이지 않는다`);
+    fx.act();
+    draw(app, 1);
+    await settle();
+    assert.ok(fx.plays.length > 0, `${name}: 내 동작 뒤 다시 그리면 움직인다`);
+    assert.ok(fx.plays.every(play => play.options.duration <= 200), `${name}: 줄 부품 값(200ms 이하)`);
+    assert.ok(fx.plays.every(play => JSON.stringify(play.frames).match(/transform|opacity/) && !/height|width|margin/.test(JSON.stringify(play.frames))), `${name}: transform·opacity만`);
+    // 자동 갱신(동작 없이 0.5초가 지난 뒤)은 그냥 그린다.
+    fx.plays.length = 0;
+    app.run('uiActAt = Date.now() - 501');
+    draw(app, 0);
+    await settle();
+    assert.equal(fx.plays.length, 0, `${name}: 자동 갱신`);
+  }
+});
+
+test('줄 이동 C2 입력 보류: 글자 칸에 초점·한글 조합·칸 안 글 고치기·판이 열린 동안·키보드 연타·글자 칸의 Enter 뒤에는 C2 자리 일곱이 아무것도 움직이지 않는다', async () => {
+  const cases = [
+    ['글자 칸', "document.activeElement = { tagName: 'INPUT', type: 'text', matches: () => true }"],
+    ['한글 조합', 'uiComposingEl = {}'],
+    ['칸 안 글 고치기', "document.activeElement = { isContentEditable: true, matches: () => false }"],
+    ['분류 판이 열림', 'uiSchedOpen = { zone: null }'],
+    ['키보드 연타', "uiActMark({ type: 'keydown', key: 'j', repeat: true, target: null })"],
+    // 문장 고치기·회의 메모처럼 글자 칸에서 Enter로 저장하면 그 칸이 사라져 초점이 빠져도 움직이지 않는다.
+    ['글자 칸의 Enter', "uiActMark({ type: 'keydown', key: 'Enter', target: { tagName: 'TEXTAREA' } }); document.activeElement = null"],
+  ];
+  for (const [name, id, make, draw] of C2_PLACES) {
+    for (const [why, on] of cases) {
+      const app = make();
+      const fx = glideApp(app);
+      fx.deep(app.run(`document.getElementById('${id}')`));
+      draw(app, 0);
+      await settle();
+      fx.act();
+      app.run(on);
+      draw(app, 1);
+      await settle();
+      assert.equal(fx.plays.length, 0, `${name} · ${why}`);
+    }
+  }
+});
+
+test('줄 이동 C2 입력 보류: 회의·프로젝트 탭은 칸에서 치는 중이면 다시 그리기부터 미루고(uiRenderOrHold), 손을 뗀 뒤 푸는 그리기는 움직이지 않는다(uiGlideUnlessLate)', async () => {
+  for (const [tab, id, zoneId, make] of [['meetings', 'meetingBody', 'meetingBody', () => meetingsViewClient()], ['projects', 'projectBody', 'projectBody', () => c2ProjectClient()]]) {
+    const app = make();
+    const fx = glideApp(app);
+    const place = fx.deep(app.run(`document.getElementById('${id}')`));
+    app.run(`activeTabKey = '${tab}'; latestData = {}; tabStale.${tab} = true; renderActiveTabLists();`);
+    await settle();
+    const before = fx.keys(place);
+    assert.ok(before.length >= 3, tab);
+    // 칸에서 치는 중 — 다시 그리기를 미룬다(그리지도 재지도 않는다).
+    app.run(`document.getElementById('${zoneId}').contains = () => true;
+      document.activeElement = { tagName: 'INPUT', type: 'text', matches: () => true, addEventListener() {}, removeEventListener() {} };
+      workflowData.items = workflowData.items.slice(1); wfIndexData(); tabStale.${tab} = true;`);
+    fx.act();
+    app.run('renderActiveTabLists()');
+    await settle();
+    assert.deepEqual(fx.keys(place), before, `${tab}: 미뤘다`);
+    // 손을 뗐다 — 바로 뒤 누름(0.5초 안)이 있어도 미뤘다 푸는 그리기는 그냥 그린다.
+    app.run('document.activeElement = null');
+    fx.act();
+    app.run('uiHeldFlush()');
+    await settle();
+    assert.notDeepEqual(fx.keys(place), before, `${tab}: 풀려서 그렸다`);
+    assert.equal(fx.plays.length, 0, `${tab}: 푸는 그리기는 움직이지 않는다`);
+  }
+  // 원문: load의 두 탭 그리기는 uiGlideUnlessLate로 감싼다.
+  assert.match(script, /uiRenderOrHold\('projects', document\.getElementById\('projectBody'\), uiGlideUnlessLate\(\(\) => \{/);
+  assert.match(script, /uiRenderOrHold\('meetings', document\.getElementById\('meetingBody'\), uiGlideUnlessLate\(\(\) => \{/);
+});
+
+test('줄 이동 C2 글 보존: 주간요약 문장을 고치는 중에 다시 그려도 적던 글은 그대로이고(reportEdits) 아무것도 움직이지 않는다 — 그리기가 칸을 열고 초점을 보내도 마찬가지', async () => {
+  const app = c2ReportClient();
+  const fx = glideApp(app);
+  const host = fx.deep(app.run(`document.getElementById('weeklyReportDetail')`));
+  app.run('renderReportDraft(__week)');
+  await settle();
+  // 문장 고치기 시작 — 그리기가 입력칸을 열고 초점을 보낸다: 글자 입력의 시작이라 움직이지 않는다.
+  fx.act();
+  app.run(`(() => { const make = document.createElement; document.createElement = (tag) => { const el = make(tag); if (tag === 'textarea') el.focus = () => { document.activeElement = { tagName: 'TEXTAREA' }; }; return el; }; })();
+    reportEditStart(__week, __week.draft.rows[1]);`);
+  await settle();
+  assert.equal(fx.plays.length, 0, '칸을 여는 그리기');
+  app.run("reportEdits.set('2026-09-28:s2', '고치던 글 그대로')");
+  // 고치는 중(칸에 초점) 다른 줄이 빠져도 움직이지 않고, 다시 그린 칸에는 적던 글이 그대로다.
+  app.run("document.activeElement = { tagName: 'TEXTAREA', type: 'textarea', matches: () => true }");
+  fx.act();
+  app.run("__week.draft.rows = __week.draft.rows.filter(row => row.id !== 's1'); renderReportDraft(__week);");
+  await settle();
+  assert.equal(fx.plays.length, 0);
+  const area = (function find(node) { for (const kid of node.children || []) { if (kid && kid.dataset && kid.dataset.editRow === 's2') return kid; const got = kid && find(kid); if (got) return got; } return null; })(host);
+  assert.ok(area, '고치던 칸이 다시 서고');
+  assert.equal(area.value, '고치던 글 그대로', '적던 글은 그대로');
+});
+
+test('줄 이동 C2 화면 전환: 다른 회의·프로젝트·주를 고르면 오른쪽은 다른 내용이라 재지 않고 그린다 — 왼쪽 목록은 고른 줄 표시만 잇는다', async () => {
+  // 회의
+  const meet = meetingsViewClient();
+  const m = glideApp(meet);
+  const mbody = m.deep(meet.run(`document.getElementById('meetingBody')`));
+  const mlist = m.deep(meet.run(`document.getElementById('meetingList')`));
+  meet.run('renderMeetings()');
+  await settle();
+  m.act();
+  meet.run("meetingsTabSelect('pay1'); renderMeetings();");
+  await settle();
+  const bodyKeys = new Set(m.keys(mbody));
+  assert.equal(m.plays.filter(play => bodyKeys.has(play.id)).length, 0, '오른쪽은 움직이지 않는다(옛 줄 흐려짐·새 줄 떠오름 없음)');
+  assert.equal(meet.run("document.getElementById('meetingBody').dataset.meetingFor"), 'pay1');
+  assert.ok(m.keys(mlist).includes('mtg:pay1'));
+  // 같은 회의를 다시 그리면 오른쪽도 잰다.
+  m.plays.length = 0;
+  m.act();
+  meet.run("workflowData.items = workflowData.items.filter(item => item.id !== 'd2'); wfIndexData(); meetingsTabSelect('ops1'); renderMeetings();");
+  m.act();
+  meet.run("workflowData.items = workflowData.items.filter(item => item.id !== 't1'); wfIndexData(); renderMeetings();");
+  await settle();
+  assert.ok(m.plays.some(play => /^[a-z]\d$|^grp:/.test(play.id) && new Set(m.keys(mbody)).has(play.id)), '같은 회의면 오른쪽 줄이 미끄러진다');
+  // 프로젝트 — 다른 프로젝트·새 프로젝트 화면으로 옮기면 오른쪽은 그냥.
+  const proj = c2ProjectClient();
+  const p = glideApp(proj);
+  const pbody = p.deep(proj.run(`document.getElementById('projectBody')`));
+  proj.run('renderProjects()');
+  await settle();
+  p.act();
+  proj.run("projectKey = 'group:알림센터'; renderProjects();");
+  await settle();
+  const pkeys = new Set(p.keys(pbody));
+  assert.equal(p.plays.filter(play => pkeys.has(play.id)).length, 0);
+  assert.equal(proj.run("document.getElementById('projectBody').dataset.projectFor"), 'group:알림센터');
+  // 주간요약 — 다른 주·다른 보기면 그냥.
+  const rep = c2ReportClient();
+  const r = glideApp(rep);
+  r.deep(rep.run(`document.getElementById('weeklyReportDetail')`));
+  rep.run('renderReportDraft(__week)');
+  await settle();
+  r.act();
+  rep.run("renderReportDraft({ weekKey: '2026-09-21', draft: { revision: 1, rows: __reportRows.slice(1) } })");
+  await settle();
+  assert.equal(r.plays.length, 0, '다른 주');
+  rep.run('renderReportDraft(__week)');
+  await settle();
+  r.plays.length = 0;
+  r.act();
+  rep.run("reportMode = 'records'; renderReportDraft(__week)");
+  await settle();
+  assert.equal(r.plays.length, 0, '보고 ↔ 전체 업무 기록');
+});
+
+test('줄 이동 C2 고른 줄 배경: 다시 그린 줄의 고른 표시(is-sel·batch-selected·aria-current)가 옛 줄과 다르면 옛 표시를 잠깐 입혔다 새 표시로 돌린다 — 색 전환이 잇는다', async () => {
+  const app = meetingsViewClient();
+  const fx = glideApp(app);
+  const list = fx.deep(app.run(`document.getElementById('meetingList')`));
+  // 줄의 aria-current를 실제처럼 기억하고, 바뀐 차례를 모은다.
+  const log = [];
+  const make = app.run('document.createElement');
+  app.context.document.createElement = (tag) => {
+    const el = make(tag);
+    const attrs = new Map();
+    el.setAttribute = (name, value) => { attrs.set(name, String(value)); if (name === 'aria-current') log.push([el, String(value)]); };
+    el.getAttribute = name => (attrs.has(name) ? attrs.get(name) : null);
+    el.removeAttribute = (name) => { attrs.delete(name); if (name === 'aria-current') log.push([el, null]); };
+    return el;
+  };
+  app.run('renderMeetings()');
+  await settle();
+  fx.act();
+  log.length = 0;
+  app.run("meetingsTabSelect('pay1'); renderMeetings();");
+  await settle();
+  const row = id => list.querySelectorAll().find(each => each.dataset.moveId === `mtg:${id}`);
+  const steps = el => log.filter(([who]) => who === el).map(([, value]) => value);
+  assert.deepEqual(steps(row('pay1')).slice(-3), ['true', 'false', 'true'], '새로 고른 줄: 그리기(true) → 옛 표시(false) → 새 표시(true)');
+  assert.deepEqual(steps(row('ops1')).slice(-3), ['false', 'true', 'false'], '전에 고른 줄은 거꾸로');
+  assert.equal(row('pay1').getAttribute('aria-current'), 'true', '끝은 새 표시');
+  // 표시가 같은 줄은 건드리지 않는다. 움직임 줄이기에서는 하지 않는다.
+  assert.deepEqual(steps(row('free1')), ['false']);
+  log.length = 0;
+  app.run("window.matchMedia = () => ({ matches: true })");
+  fx.act();
+  app.run("meetingsTabSelect('ops1'); renderMeetings();");
+  await settle();
+  assert.deepEqual(steps(row('ops1')), ['true']);
+  // 원문: 고른 표시 셋, 한꺼번에 입히고 화면 계산은 한 번.
+  assert.match(script, /const UI_GLIDE_PICKS = \['is-sel', 'batch-selected'\];/);
+  const tint = script.slice(script.indexOf('function uiGlideTint('), script.indexOf('\n}\n', script.indexOf('function uiGlideTint(')));
+  assert.equal((tint.match(/getBoundingClientRect/g) || []).length, 1);
+});
+
+test('줄 이동 C2: 회의 초안 펼침의 따로 만든 도우미(meetingFlip)는 줄 부품의 바로 잇기(uiRowsShift)로 합쳤다 — 값은 그대로(펼침 220ms 1.5px 넘침 · 접힘 130ms)', () => {
+  const sources = fs.readFileSync(path.join(__dirname, 'meetings-ui.js'), 'utf8');
+  assert.doesNotMatch(sources, /function meetingFlip|meetingFlip\(/, '두 벌이 아니다');
+  assert.match(sources, /uiRowsShift\(host\.box\(\), MEETING_SHIFT_ROWS, \(\) => \{/);
+  assert.match(sources, /\}, id \? \{ duration: 220, bounce: true \} : \{ duration: 130 \}\);/);
+  assert.match(sources, /const MEETING_SHIFT_ROWS = '\.d-mrow2, \.d-dsec > \.lbl, \.d-dsec > summary, \.d-dres, \.d-hint';/, '밀리는 줄·구역 머리 — 옛 도우미와 같은 범위');
+  const app = pureClient();
+  const plays = [];
+  const timers = [];
+  app.context.setTimeout = (fn, delay) => { timers.push({ fn, delay }); return 1; };
+  app.run("window.matchMedia = () => ({ matches: false }); document.hidden = false;");
+  // 줄 셋: 가운데 줄이 펼쳐지면 아래 줄이 40px 밀린다.
+  const rows = [0, 1, 2].map(i => ({ i, top: i * 40, isConnected: true, getBoundingClientRect() { return { top: this.top }; },
+    animate(frames, options) { const play = { i, frames, options, cancelled: false, cancel() { play.cancelled = true; } }; plays.push(play); return play; } }));
+  app.context.__root = { querySelectorAll: () => rows };
+  app.context.__grow = () => { rows[2].top = 120; };
+  app.run('uiRowsShift(__root, MEETING_SHIFT_ROWS, __grow, { duration: 220, bounce: true })');
+  assert.equal(plays.length, 1, '자리가 바뀐 줄만');
+  assert.deepEqual(plain(plays[0].frames), [{ transform: 'translateY(-40px)' }, { transform: 'translateY(1.5px)', offset: 0.6 }, { transform: 'none' }]);
+  assert.deepEqual(plain(plays[0].options), { duration: 220, easing: 'cubic-bezier(0.22, 0.8, 0.3, 1)' });
+  assert.equal(timers[0].delay, 300, '끝남 신호 없이 시간으로 치운다(transform이 줄에 남지 않게 — 옛 도우미에 없던 것)');
+  timers[0].fn();
+  assert.equal(plays[0].cancelled, true);
+  // 접힘: 넘침 없이 130ms.
+  plays.length = 0;
+  app.context.__shrink = () => { rows[2].top = 80; };
+  app.run('uiRowsShift(__root, MEETING_SHIFT_ROWS, __shrink, { duration: 130 })');
+  assert.deepEqual(plain(plays[0].frames), [{ transform: 'translateY(40px)' }, { transform: 'none' }]);
+  assert.equal(plays[0].options.duration, 130);
+  // 움직임 줄이기·가려진 창에서는 그냥 바꾼다(바꾸기는 한 번 돈다).
+  for (const off of ["window.matchMedia = () => ({ matches: true })", 'window.matchMedia = () => ({ matches: false }); document.hidden = true']) {
+    plays.length = 0;
+    let changed = 0;
+    app.context.__count = () => { changed += 1; };
+    app.run(off);
+    app.run('uiRowsShift(__root, MEETING_SHIFT_ROWS, __count, { duration: 220, bounce: true })');
+    assert.equal(changed, 1);
+    assert.equal(plays.length, 0, off);
+  }
+});
+
+test('줄 이동 C2 완료 흐름: 회의·프로젝트 줄도 체크하면 제목에 줄이 그어진다(.ti) — 프로젝트 상세는 `끝낸 것` 제목 쪽으로 들어간다', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /\.d-row\.is-completing \.d-title, \.d-mrow2\.is-completing \.ti, \.d-prow2\.is-completing \.ti \{\n  background-image/);
+  assert.match(css, /\.d-row\.is-done\.is-completing \.d-title, \.d-mrow2\.is-done\.is-completing \.ti, \.d-prow2\.is-done\.is-completing \.ti \{ text-decoration-color: transparent; \}/);
+  assert.match(script, /const UI_GLIDE_STRIKE = '\.d-title, \.ti';/);
+  assert.match(fs.readFileSync(path.join(__dirname, 'projects-ui.js'), 'utf8'), /row\.dataset\.doneInto = 'grp:끝낸 것';/);
+  const app = workflowsClient();
+  app.run(`workflowData = { items: [], meetings: [] }; wfIndexData();`);
+  const marks = [];
+  app.context.uiGlideDoneMark = (id, into, strike) => marks.push([id, into, strike]);
+  app.run('fadeOutAndRun = async () => {}');
+  const row = app.run("projectTaskRow({ id: 'p1', type: 'task', status: 'to-do', description: '가입 문구' })");
+  const box = nodeFind(row, 'd-check').children[0];
+  box.listeners.change();
+  assert.deepEqual(marks, [['p1', 'grp:끝낸 것', true]]);
+});
+
+test('줄 이동 C2 빠른 추가: 주간요약 할 일 칸의 Enter 한 줄은 저장 뒤 그리기 한 번에서 새 줄만 나타난다 — 저장 안의 그리기는 쉰다(draw: false)', () => {
+  const sources = fs.readFileSync(path.join(__dirname, 'report-ui.js'), 'utf8');
+  assert.match(sources, /if \(typeof uiGlideAddMark === 'function'\) uiGlideAddMark\(el, event\);[^\n]*\n    await submit\(\);/);
+  assert.match(sources, /if \(options\.draw !== false\) renderReportDraft\(item\);/);
+  assert.match(sources, /await reportPlanAddOne\(item, \{ text: line\.text, group: line\.group \}, lines\.length > 1\);/);
+  // 다른 주·다른 보기로 옮길 때는 줄 부품을 거치지 않는다.
+  assert.match(sources, /const same = host\.dataset\.weekKey === item\.weekKey && host\.dataset\.reportMode === reportMode;/);
+  // 움직임 줄이기면 `다음 주 계획`도 바로 간다(부드러운 스크롤 없음).
+  assert.doesNotMatch(sources, /behavior: 'smooth' \}/);
+});
+
 // 목록 등록 시험(계획서 3절 가-3): 줄을 통째로 갈아 끼우는 목록은 줄 부품(uiRowsMove)을 거치거나, 지도의 "목록 등록" 표에 이유와 함께 있다.
 test('줄 이동 목록 등록: index.html의 목록(id가 …List)은 모두 지도 표에 있고, `줄 부품`이면 그리는 함수가 uiRowsMove를 거친다', () => {
   const rows = motionMapRows('목록');
@@ -17102,7 +17467,7 @@ test('줄 이동 목록 등록: index.html의 목록(id가 …List)은 모두 �
       (fn.match(/`([A-Za-z]+)`/g) || []).concat(['']).filter(Boolean).map(each => each.replace(/`/g, '')).forEach(name => assert.match(body(name), /uiRowsMove\(/, `${list}: ${name}이 줄 부품을 거친다`));
       assert.ok(key && key !== '—', `${list}: 열쇠`);
     } else {
-      assert.match(state, /^(안 움직임\(.+\)|C2 남음)$/, `${list}: 상태는 줄 부품 · 안 움직임(이유) · C2 남음 가운데 하나`);
+      assert.match(state, /^안 움직임\(.+\)$/, `${list}: 상태는 줄 부품 · 안 움직임(이유) 가운데 하나(C2로 남은 목록은 없다)`);
     }
   });
   // 열쇠: 레일 줄 data-rail-id, 미팅·배포·반응 필요·아이디어·결정 줄 data-move-id.
@@ -17707,7 +18072,9 @@ test('뜨는 것 — 자리가 남는 것(.d-stay): 알림·창 넷·막대 둘�
   assert.match(sources['checkin-ui.js'], /if \(current\.dialog\.open\) current\.dialog\.close\(\);\n[^\n]*\n  setTimeout\(\(\) => current\.dialog\.remove\(\), typeof UI_FLOAT === 'object' \? UI_FLOAT\.out : 140\);/);
   const wrapClose = sources['wrap-ui.js'].slice(sources['wrap-ui.js'].indexOf('function wrapClose()'), sources['wrap-ui.js'].indexOf('\n}\n', sources['wrap-ui.js'].indexOf('function wrapClose()')));
   assert.doesNotMatch(wrapClose, /replaceChildren/);
-  assert.match(sources['wrap-ui.js'], /function wrapRender\(\) \{\n[^\n]*\n  const body = wrapNodes\.body;\n  body\.replaceChildren\(\);/);
+  // 그리기는 늘 본문을 새로 채운다(줄 부품을 거친다 — C2). 여는 그리기는 움직이지 않는다.
+  assert.match(sources['wrap-ui.js'], /function wrapRender\(\) \{\n[^\n]*\n  const body = wrapNodes\.body;\n  uiRowsMove\(body, \(\) => wrapRenderNow\(body\)\);\n\}\nfunction wrapRenderNow\(body\) \{\n  body\.replaceChildren\(\);/);
+  assert.match(sources['wrap-ui.js'], /uiGlideStill\(wrapRender\);/);
 });
 
 test('입력 보류 장치 불변: uiRenderOrHold·uiHeldFlush·uiRenderHeld·uiHoldArm·replayUndo는 한 글자도 바뀌지 않았다(뜨는 것의 닫힘 재생은 이 장치 밖에서 돈다)', () => {
@@ -18113,7 +18480,7 @@ test('②: Esc 두 단계 — 첫 Esc는 떠 있는 옮기기 목록만 닫고(�
   app.run('escStack.pop()()');
   assert.equal(app.run('reportTidy'), null, '둘째 Esc — 모드 끝');
   assert.equal(bar.hidden, true);
-  assert.equal(app.nodes.get('weeklyReportDetail').children[0].focused, true, '초점은 머리 `정리` 버튼');
+  assert.equal(app.run(`document.getElementById('weeklyReportDetail')`).children[0].focused, true, '초점은 머리 `정리` 버튼');
   assert.equal(app.run('escStack.length'), before);
 });
 test('②: 옮기기 목록 — 프로젝트를 고르면 move(열쇠), 기타는 etc, 새 프로젝트…는 그 자리 입력칸(Enter는 {name}, Esc는 목록으로)', async () => {
