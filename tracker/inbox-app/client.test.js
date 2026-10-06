@@ -2557,7 +2557,7 @@ test('종류 구역: 소제목 모양은 예전 `.d-mgrp` 글자 값 그대로(1
   assert.match(css, /\n\.d-mgrp \.n \{ font-weight: 500; color: var\(--dim\); font-variant-numeric: tabular-nums; \}/);
   assert.match(css, /\.d-side \.d-mgrp \{ font-size: var\(--fs-body\); line-height: 20px; \}/, '좁은 화면 시트에서는 줄 글자와 같이 커진다');
   // 옮겨 간 줄의 떠오름은 새 줄과 같은 부품(.d-mrow2.is-new) — 움직임 줄이기 규칙에도 이미 들어 있다.
-  assert.match(css, /\n  \.d-float:not\(\.is-out\):not\(\.is-still\), \.d-mrow2\.is-new \{/);
+  assert.match(css, /\n  \.d-float:not\(\.is-out\):not\(\.is-still\), \.d-mrow2\.is-new, \.d-unfold \{/);
 });
 
 test('`이전 회차의 미해결 항목`도 같은 줄이고 종류 앞에 회차가 적힌다', () => {
@@ -14284,14 +14284,14 @@ test('회의 초안: 빼기가 실패하면 초안은 그대로(되돌리기 기
   assert.equal(app.run("wfDraftEdits.has('mb1:stable:a')"), true);
 });
 
-test('회의 정리 판 화면 규칙: 초안·결과 줄 사이 실선 없음, 빼기는 손이 닿을 때만, 펼침 220ms, 새 innerHTML 없음, 빈 칸 오류는 기존 오류 토큰', () => {
+test('회의 정리 판 화면 규칙: 초안·결과 줄 사이 실선 없음, 빼기는 손이 닿을 때만, 펼침 --t-move, 새 innerHTML 없음, 빈 칸 오류는 기존 오류 토큰', () => {
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
   assert.doesNotMatch(css, /\.d-draft \+ \.d-draft \{[^}]*border-top/);
   assert.doesNotMatch(css, /\.d-mrow2 \+ \.d-mrow2 \{[^}]*border-top/);
   assert.match(css, /\.d-dpull \{[^}]*opacity: 0;/);
   assert.match(css, /\.d-mrow2:hover \.d-dpull, \.d-mrow2:focus-within \.d-dpull, \.d-mrow2\.is-edit \.d-dpull \{ opacity: 1; \}/);
   assert.match(css, /@media \(hover: none\) \{ \.d-dpull \{ opacity: 1; \} \}/, '누르는 화면에서는 늘 보인다');
-  assert.match(css, /\.d-mrow2\.is-opening \.ed \{ animation: d-draft-open 220ms var\(--ease\) both; \}/);
+  assert.match(css, /\.d-mrow2\.is-opening \.ed \{ animation: d-draft-open var\(--t-move\) var\(--ease\) both; \}/, '펼침 부품의 본보기 — 값은 --t-move(D1)');
   assert.match(css, /\.d-dtxt\[aria-invalid="true"\] \{ background: var\(--urgent-bg\); box-shadow: 0 0 0 1\.5px var\(--urgent\); \}/);
   const ui = fs.readFileSync(path.join(__dirname, 'meetings-ui.js'), 'utf8');
   const drafts = ui.slice(ui.indexOf('function panelMeetingDrafts'), ui.indexOf('// 항목 한 줄: 종류 | 문구 | 기한·상태.'));
@@ -16016,25 +16016,27 @@ test('설정 아이콘: index.html의 설정 버튼 SVG 안쪽이 UI_ICONS.gear�
 });
 
 // ---- 모션 기반(묶음 ①): 토큰 · 줄 이동 도우미 ----
-test('모션 토큰: 시간 5개·곡선 3개가 :root에 있고, 스프링은 linear()를 아는 환경에서만(모르면 --ease), 토큰과 값이 같은 시간은 숫자로 다시 적지 않는다', () => {
+test('모션 토큰: 시간 6개(펼침 --t-unfold 포함)·곡선 3개가 :root에 있고, 스프링은 linear()를 아는 환경에서만(모르면 --ease), 토큰과 값이 같은 시간은 숫자로 다시 적지 않는다', () => {
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
-  assert.match(css, /--ease: cubic-bezier\(0\.22, 0\.8, 0\.3, 1\);\n  --t-press: 100ms;  --t-fast: 140ms;  --t-tint: 170ms;  --t-move: 200ms;  --t-slow: 320ms;/);
+  assert.match(css, /--ease: cubic-bezier\(0\.22, 0\.8, 0\.3, 1\);\n  --t-press: 100ms;  --t-fast: 140ms;  --t-tint: 170ms;  --t-move: 200ms;  --t-slow: 320ms;\n  --t-unfold: 160ms;/);
   const root = css.slice(0, css.indexOf('@supports (animation-timing-function: linear(0, 1))'));
   assert.match(root, /--spring-1: var\(--ease\);\n  --spring-2: var\(--ease\);/, '기본은 넘침 없는 --ease');
   const supports = css.slice(css.indexOf('@supports (animation-timing-function: linear(0, 1))'), css.indexOf('@keyframes d-fade'));
   assert.match(supports, /--spring-1: linear\(0, 0\.42 12%, 0\.75 25%, 0\.94 38%, 1\.03 50%, 1\.046 58%, 1\.035 70%, 1\.015 85%, 1\);/);
   assert.match(supports, /--spring-2: linear\(0, 0\.45 12%, 0\.82 25%, 1\.06 38%, 1\.18 48%, 1\.205 55%, 1\.17 65%, 1\.09 78%, 1\.03 90%, 1\);/);
-  const literal = css.split('\n').filter(line => /(transition|animation)[^;]*\b(100|140|170|200|320)ms/.test(line));
-  assert.deepEqual(literal, [], '100·140·170·200·320ms는 토큰으로 쓴다');
+  const literal = css.split('\n').filter(line => /(transition|animation)[^;]*\b(100|140|160|170|200|320)ms/.test(line));
+  assert.deepEqual(literal, [], '100·140·160·170·200·320ms는 토큰으로 쓴다');
 });
 
-test('모션 토큰: 움직임 줄이기 — 전역은 .01ms(이동 끔) 그대로, 나타나는 것(알림·뜨는 것 부품·회의 새 줄)만 120ms 흐려짐', () => {
+test('모션 토큰: 움직임 줄이기 — 전역은 .01ms(이동 끔) 그대로, 나타나는 것(알림·뜨는 것 부품·회의 새 줄·펼친 내용·접힌 설명)만 120ms 흐려짐', () => {
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
   const block = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce) {\n  *, *::before'), css.indexOf('/* ---------- 헤더'));
   assert.match(block, /transition-duration: 0\.01ms !important;\n    animation-duration: 0\.01ms !important;/);
-  assert.match(block, /\n  \.d-float:not\(\.is-out\):not\(\.is-still\), \.d-mrow2\.is-new \{\n    animation: d-fade 120ms linear both !important;/);
+  assert.match(block, /\n  \.d-float:not\(\.is-out\):not\(\.is-still\), \.d-mrow2\.is-new, \.d-unfold \{\n    animation: d-fade 120ms linear both !important;/);
+  // 펼침 부품(.d-unfold)과 접힌 설명(details)도 부품 선택자 하나씩으로 등록한다 — 접힌 설명은 위 4px 이동을 끈다
+  assert.match(block, /\n  details::details-content \{ translate: none !important; \}/);
   // 자리가 남는 것(.d-stay — 알림·창·막대)은 전환이라 열린 쪽에만 120ms를 걸고 이동(--stay-from·--stay-to)을 끈다 — 닫힘은 전역 .01ms로 바로
-  assert.match(block, /\n  \.d-stay \{ --stay-from: none; --stay-to: none; \}\n  \.d-stay:not\(\[hidden\], dialog:not\(\[open\]\)\), dialog\.d-stay\[open\]::backdrop \{ transition-duration: 120ms !important; \}/);
+  assert.match(block, /\n  \.d-stay \{ --stay-from: none; --stay-to: none; \}\n  \.d-stay:not\(\[hidden\], dialog:not\(\[open\]\)\), dialog\.d-stay\[open\]::backdrop, details\[open\]::details-content \{ transition-duration: 120ms !important; \}/);
   assert.doesNotMatch(block, /\.d-menulist|\.d-schedpop|\.d-palbox|\.d-popd|\.d-toast|\.d-modal|\.d-selbar|\.d-ckdlg|\.d-uwdlg|#settingsDialog|#wrapDialog/, '뜨는 것은 요소 이름을 늘어놓지 않고 부품 클래스(.d-float·.d-stay)로 등록한다');
   assert.match(css, /@keyframes d-fade \{ from \{ opacity: 0; \} to \{ opacity: 1; \} \}/, '흐려짐은 투명도만');
 });
@@ -16069,13 +16071,10 @@ const MOTION_RAW_ALLOWED = [
   ['ui.css', '.d-iconbtn', 'transition', '400ms', 'E', '새로고침 아이콘 한 바퀴 400ms — 기다림 부품에서 정한다(색·누름은 토큰)'],
   ['ui.css', '*, *::before, *::after', 'transition-duration', '0.01ms', '남김', '움직임 줄이기 전역 값(.01ms로 끄고 나타남만 120ms) — 토큰과 뜻이 다르다'],
   ['ui.css', '*, *::before, *::after', 'animation-duration', '0.01ms', '남김', '움직임 줄이기 전역 값(.01ms로 끄고 나타남만 120ms) — 토큰과 뜻이 다르다'],
-  ['ui.css', '.d-float:not(.is-out):not(.is-still), .d-mrow2.is-new', 'animation', '120ms', '남김', '움직임 줄이기 전역 값(.01ms로 끄고 나타남만 120ms) — 토큰과 뜻이 다르다'],
-  ['ui.css', '.d-stay:not([hidden], dialog:not([open])), dialog.d-stay[open]::backdrop', 'transition-duration', '120ms', '남김', '움직임 줄이기 전역 값(.01ms로 끄고 나타남만 120ms) — 토큰과 뜻이 다르다'],
+  ['ui.css', '.d-float:not(.is-out):not(.is-still), .d-mrow2.is-new, .d-unfold', 'animation', '120ms', '남김', '움직임 줄이기 전역 값(.01ms로 끄고 나타남만 120ms) — 토큰과 뜻이 다르다'],
+  ['ui.css', '.d-stay:not([hidden], dialog:not([open])), dialog.d-stay[open]::backdrop, details[open]::details-content', 'transition-duration', '120ms', '남김', '움직임 줄이기 전역 값(.01ms로 끄고 나타남만 120ms) — 토큰과 뜻이 다르다'],
   ['ui.css', '.d-ibrow.is-leaving', 'animation', '220ms', 'C', '분류 뒤 줄 접힘 — 뜨는 것이 아니라 줄이다. 사라지는 줄 부품과 함께 정한다'],
   ['ui.css', '.d-row.is-rise', 'animation', '260ms 1400ms', 'C', '분류 뒤 새 줄 솟음·배경 강조 — 뜨는 것이 아니라 줄이다. 줄 부품과 함께 정한다'],
-  ['ui.css', '.d-mrow2.is-opening .ed', 'animation', '220ms', 'D', '초안 펼침 220ms — 펼침 부품의 본보기, 값은 D에서'],
-  ['ui.css', '.d-drawer', 'transition', '160ms 160ms', 'D', '서랍 160ms — 펼침 부품에서 값이 바뀐다'],
-  ['ui.css', '.page', 'transition', '160ms', 'D', '서랍 160ms — 펼침 부품에서 값이 바뀐다'],
   ['ui.css', '.is-flash', 'animation', '1.6s', 'F', '밝히기 — 부품 하나로 합친다'],
   ['ui.css', '.d-abprog .now .ic', 'animation', '1s', 'E', '도는·숨 쉬는 표시 — 기다림 부품에서 정한다'],
   ['ui.css', '.d-istat.k-soon .dot', 'animation', '2.4s', 'E', '도는·숨 쉬는 표시 — 기다림 부품에서 정한다'],
@@ -16097,7 +16096,7 @@ test('모션 장치: 맨 시간 값 금지 — CSS 네 파일의 transition·ani
   });
   const left = allowed.slice();
   const fresh = found.filter((k) => { const i = left.indexOf(k); if (i < 0) return true; left.splice(i, 1); return false; });
-  assert.deepEqual(fresh, [], '새 맨 시간 값 — 토큰(--t-press·--t-fast·--t-tint·--t-move·--t-slow)을 쓴다');
+  assert.deepEqual(fresh, [], '새 맨 시간 값 — 토큰(--t-press·--t-fast·--t-tint·--t-unfold·--t-move·--t-slow)을 쓴다');
   assert.deepEqual(left, [], '허용 목록에 있지만 CSS에는 이제 없는 줄 — 목록에서 지운다');
 });
 
@@ -16138,7 +16137,7 @@ const MOTION_NOT_PRESSED = [
   ['줄·카드(div·li·label) — 줄은 줄어들지 않고 안의 버튼이 눌린다', ['.d-mrow', '.d-wrow', '.d-atrow', '.d-ibrow', '.d-row', '.d-prow2', '.d-rec', '.d-intg', '.d-ich', '.d-faq .q.is-hit', '.rp-rec', '.rp-grp .rp-s.is-add', '.d-qaf', '.d-addrow', '.rp-add']],
   ['줄 위에 겹쳐 뜨는 묶음·물러나는 글자(div·span) — 안의 버튼이 공용 누름을 갖는다', ['.d-wrow .ac, .d-mrow .ac', '.d-mrow .ct, .d-wrow .mt', '.d-atrow .mt', '.d-atacts', '.d-acts', '.d-prow2 .ac', '.d-pri']],
   ['아이콘·꺾쇠·숫자 칩 — 눌리는 것은 그 부모다', ['.d-grp.tog .d-i', '.d-dadd > summary .d-i', '.d-jira .foot .d-jexp .d-i', '.d-jfold .d-i', '.rp-s .rp-foldtoggle .d-i', '.rp-fl .d-i', '.d-imore > summary::before', '.d-lhd .sub .cnt, .d-wrapsum.cnt']],
-  ['면·틀 — 버튼이 아니다', ['.pull-indicator.snapping', '.d-popd .d-detail.is-pop > .d-dtop', '.d-popd .d-detail.is-pop > .d-dfoot, .d-popd .d-detail.is-pop > .d-dbar', '.d-drawer', '.page', '#settingsDialog .d-mhd', '.d-stay', 'dialog.d-stay::backdrop']],
+  ['면·틀 — 버튼이 아니다', ['.pull-indicator.snapping', '.d-popd .d-detail.is-pop > .d-dtop', '.d-popd .d-detail.is-pop > .d-dfoot, .d-popd .d-detail.is-pop > .d-dbar', '.d-drawer', '#settingsDialog .d-mhd', '.d-stay', 'dialog.d-stay::backdrop', 'details::details-content']],
   ['그 자리에서 고치는 문장(span) — 글자 입력의 시작', ['.rp-s .rp-edit']],
 ];
 // ui.css "누름에서 뺀 것" 규칙의 선택자들(:active를 뗀 것).
@@ -17448,14 +17447,14 @@ test('줄 이동 C2 그림자: 등장 클래스(is-new·is-opening·is-rise)는 
   app.run('uiGlideGhostMake(__old, null)');
   assert.deepEqual([...ghost.set], ['d-mrow2', 'd-draft', 'is-edit', 'd-glide-ghost']);
   assert.deepEqual([...inner.set], ['ti']);
-  assert.deepEqual(plain(app.run('UI_GLIDE_ENTRANCE')), ['is-new', 'is-opening', 'is-rise']);
+  assert.deepEqual(plain(app.run('UI_GLIDE_ENTRANCE')), ['is-new', 'is-opening', 'is-rise', 'd-unfold', 'd-unfold-big']);
 });
 
-test('줄 이동 C2: 회의 초안 펼침의 따로 만든 도우미(meetingFlip)는 줄 부품의 바로 잇기(uiRowsShift)로 합쳤다 — 값은 그대로(펼침 220ms 1.5px 넘침 · 접힘 130ms)', () => {
+test('줄 이동 C2: 회의 초안 펼침의 따로 만든 도우미(meetingFlip)는 줄 부품의 바로 잇기(uiRowsShift)로 합쳤다 — 펼침 --t-move 1.5px 넘침 · 접힘 120ms(D1에서 펼침 부품 값으로)', () => {
   const sources = fs.readFileSync(path.join(__dirname, 'meetings-ui.js'), 'utf8');
   assert.doesNotMatch(sources, /function meetingFlip|meetingFlip\(/, '두 벌이 아니다');
   assert.match(sources, /uiRowsShift\(host\.box\(\), MEETING_SHIFT_ROWS, \(\) => \{/);
-  assert.match(sources, /\}, id \? \{ duration: 220, bounce: true \} : \{ duration: 130 \}\);/);
+  assert.match(sources, /\}, id \? \{ duration: UI_GLIDE\.move, bounce: true \} : \{ duration: UI_UNFOLD\.close \}\);/);
   assert.match(sources, /const MEETING_SHIFT_ROWS = '\.d-mrow2, \.d-dsec > \.lbl, \.d-dsec > summary, \.d-dres, \.d-hint';/, '밀리는 줄·구역 머리 — 옛 도우미와 같은 범위');
   const app = pureClient();
   const plays = [];
@@ -19049,4 +19048,271 @@ test('BJASSIGN2: 맡기는 동안 값 고르개·새로고침·담당 고르개�
   await sending;
   assert.equal(fixture.posts().length, 1);
   assert.equal(fixture.app.run('jiraBusy'), false);
+});
+
+// ---- 모션 묶음 D1: 펼침·접힘(부품 ⑤) ----
+// 가짜 요소: 자리(top)·숨김(hidden)·클래스·animate를 가진다. 형제 차례는 부모의 kids 배열로 이어 준다.
+function foldApp() {
+  const app = pureClient();
+  const plays = [];
+  const ghosts = [];
+  app.context.setTimeout = () => 1;
+  app.run("window.innerWidth = 1200; window.innerHeight = 4000; uiActAt = 0; uiActQuiet = false; uiActInText = false; uiKeyAt = 0; uiComposingEl = null; uiSchedOpen = null; document.activeElement = null; document.hidden = false; window.matchMedia = () => ({ matches: false });");
+  if (typeof app.run('document.querySelector') !== 'function') app.run('document.querySelector = () => null');
+  app.context.__ghost = (host, specs) => ghosts.push({ host, specs });
+  app.run('uiGlideGhosts = (host, specs) => __ghost(host, specs)');
+  const make = (name, top, height = 36, parent = null) => {
+    const classes = new Set();
+    const el = {
+      name, top, height, hidden: false, isConnected: true, parentElement: parent, kids: [], dataset: {}, attrs: {}, tagName: 'DIV',
+      className: '',
+      classList: { add: (...n) => n.forEach(x => classes.add(x)), remove: (...n) => n.forEach(x => classes.delete(x)), contains: n => classes.has(n) },
+      has: n => classes.has(n),
+      get nextElementSibling() { const sibs = this.parentElement ? this.parentElement.kids : []; return sibs[sibs.indexOf(this) + 1] || null; },
+      get offsetWidth() { return 0; },
+      getClientRects() { return this.hidden ? [] : [{}]; },
+      getBoundingClientRect() { const h = this.hidden ? 0 : this.height; return { left: 0, right: 600, top: this.top, bottom: this.top + h, height: h, width: 600 }; },
+      animate(frames, options) { const play = { name, frames, options, cancel() {} }; plays.push(play); return play; },
+      cloneNode() { const copy = make(`${name}-copy`, top, height); copy.inputs = (this.inputs || []).map(input => ({ ...input, removeAttribute(attr) { delete this[attr]; } })); copy.querySelectorAll = () => copy.inputs; return copy; },
+      querySelectorAll() { return []; },
+      querySelector() { return null; },
+      getAttribute(attr) { return this.attrs[attr] ?? null; },
+      setAttribute(attr, value) { this.attrs[attr] = String(value); },
+    };
+    if (parent) parent.kids.push(el);
+    return el;
+  };
+  const act = (event = { type: 'click', detail: 1 }) => app.context.uiActMark(event);
+  return { app, plays, ghosts, make, act };
+}
+
+test('펼침 D1: uiFold — 내 동작 뒤 펼치면 내용이 나타나고(.d-unfold) 아래 것들이 옛 자리에서 200ms 미끄러진다, 접으면 내용의 그림자가 120ms 흐려진다 — 높이는 움직이지 않는다', () => {
+  const fx = foldApp();
+  const box = fx.make('box', 0, 400);
+  const head = fx.make('head', 0, 36, box);
+  const part = fx.make('part', 36, 80, box);
+  const below = fx.make('below', 116, 36, box);
+  part.hidden = true;
+  below.top = 36;
+  fx.app.context.__box = { box, head, part, below };
+  fx.act();
+  let ran = 0;
+  fx.app.context.__open = () => { ran += 1; part.hidden = false; below.top = 116; };
+  fx.app.run('uiFold(__open, { open: true, part: __box.part })');
+  assert.equal(ran, 1, '바꾸기는 정확히 한 번');
+  assert.ok(part.has('d-unfold'), '펼친 내용은 부품 클래스 하나로 나타난다(CSS --t-unfold)');
+  assert.equal(part.has('d-unfold-big'), false);
+  assert.deepEqual(fx.plays.map(play => [play.name, plain(play.frames), play.options.duration]), [['below', [{ transform: 'translate(0px, -80px)' }, { transform: 'none' }], 200]]);
+  assert.ok(fx.plays.every(play => !/height|width|margin|padding/.test(JSON.stringify(play.frames))), '높이·폭·여백은 움직이지 않는다');
+  // 접기: 내용의 그림자(복사본)가 옛 자리에서 120ms 흐려지고 아래 것이 올라온다.
+  fx.plays.length = 0;
+  fx.act();
+  fx.app.context.__shut = () => { part.hidden = true; below.top = 36; };
+  fx.app.run('uiFold(__shut, { open: false, part: __box.part })');
+  assert.equal(fx.ghosts.length, 1);
+  assert.equal(fx.ghosts[0].host, box, '그림자는 보이는 부모에 붙는다');
+  assert.equal(fx.ghosts[0].specs[0].duration, 120);
+  assert.deepEqual(plain(fx.ghosts[0].specs[0].frames), [{ opacity: 1 }, { opacity: 0 }]);
+  assert.equal(fx.ghosts[0].specs[0].was.top, 36, '옛 자리');
+  assert.deepEqual(fx.plays.map(play => [play.name, play.options.duration]), [['below', 200]]);
+  // 큰 면(설정 카드) — --t-move, 넘침 없음.
+  fx.act();
+  fx.app.run('uiFold(__open, { open: true, part: __box.part, big: true })');
+  assert.ok(part.has('d-unfold-big'));
+  assert.equal(fx.app.run('UI_UNFOLD.open'), 160, '--t-unfold와 같은 값');
+  assert.equal(fx.app.run('UI_UNFOLD.big'), 200, '--t-move와 같은 값');
+  assert.equal(fx.app.run('UI_UNFOLD.turn'), 140, '꺾쇠는 --t-fast');
+});
+
+test('펼침 D1 입력 보류: 글자 칸·한글 조합·칸 안 글 고치기·판이 열린 동안·키보드 연타·글자 칸의 Enter·0.5초 뒤·가려진 창·안에서 또 부름은 그냥 바꾼다 — 움직임 줄이기는 나타남(120ms 흐려짐)만', () => {
+  const cases = [
+    ['글자 칸', "document.activeElement = { tagName: 'INPUT', type: 'text', matches: () => true }"],
+    ['한글 조합', 'uiComposingEl = {}'],
+    ['칸 안 글 고치기', "document.activeElement = { isContentEditable: true, matches: () => false }"],
+    ['분류 판이 열림', 'uiSchedOpen = { zone: null }'],
+    ['키보드 연타', "uiActMark({ type: 'keydown', key: 'j', repeat: true, target: null })"],
+    ['글자 칸의 Enter', "uiActMark({ type: 'keydown', key: 'Enter', target: { tagName: 'TEXTAREA' } }); document.activeElement = null"],
+    ['자동 갱신(0.5초 뒤)', 'uiActAt = Date.now() - 501'],
+    ['가려진 창', 'document.hidden = true'],
+  ];
+  for (const [why, on] of cases) {
+    for (const open of [true, false]) {
+      const fx = foldApp();
+      const box = fx.make('box', 0, 400);
+      const part = fx.make('part', 36, 80, box);
+      const below = fx.make('below', 116, 36, box);
+      part.hidden = !open;
+      fx.app.context.__p = part;
+      let ran = 0;
+      fx.app.context.__flip = () => { ran += 1; part.hidden = open ? false : true; below.top = open ? 116 : 36; };
+      fx.act();
+      fx.app.run(on);
+      fx.app.run(`uiFold(__flip, { open: ${open}, part: __p })`);
+      assert.equal(ran, 1, `${why}: 바꾸기는 한 번`);
+      assert.equal(fx.plays.length + fx.ghosts.length, 0, `${why}: 움직이지 않는다`);
+      assert.equal(part.has('d-unfold'), false, `${why}: 나타남도 없다`);
+    }
+  }
+  // 안에서 또 부르면(카드를 열며 다른 카드를 접음) 안쪽은 그냥 바꾼다 — 바깥만 잰다.
+  const fx = foldApp();
+  const box = fx.make('box', 0, 400);
+  const other = fx.make('other', 0, 50, box);
+  const part = fx.make('part', 50, 80, box);
+  part.hidden = true;
+  Object.assign(fx.app.context, { __o: other, __p: part });
+  fx.app.context.__inner = () => { other.hidden = true; };
+  fx.app.context.__outer = () => { fx.app.run('uiFold(__inner, { open: false, part: __o })'); part.hidden = false; };
+  fx.act();
+  fx.app.run('uiFold(__outer, { open: true, part: __p })');
+  assert.equal(fx.ghosts.length, 0, '안쪽 접힘은 그림자를 띄우지 않는다');
+  assert.ok(part.has('d-unfold'));
+  // 움직임 줄이기: 이동·그림자 없이 나타남만(.d-unfold — CSS 전역 규칙이 120ms 흐려짐으로 바꾼다).
+  const rx = foldApp();
+  const rbox = rx.make('box', 0, 400);
+  const rpart = rx.make('part', 36, 80, rbox);
+  const rbelow = rx.make('below', 116, 36, rbox);
+  rpart.hidden = true; rbelow.top = 36;
+  rx.app.context.__p = rpart;
+  rx.app.context.__open = () => { rpart.hidden = false; rbelow.top = 116; };
+  rx.app.run('window.matchMedia = () => ({ matches: true })');
+  rx.act();
+  rx.app.run('uiFold(__open, { open: true, part: __p })');
+  assert.ok(rpart.has('d-unfold'));
+  assert.equal(rx.plays.length, 0);
+  rx.act();
+  rx.app.context.__shut = () => { rpart.hidden = true; };
+  rx.app.run('uiFold(__shut, { open: false, part: __p })');
+  assert.equal(rx.ghosts.length, 0, '움직임 줄이기에서는 접힘의 그림자도 없다(바로)');
+});
+
+test('펼침 D1 입력 보호: 접히는 내용의 그림자는 복사본이다 — 원래 칸은 그대로, 복사본의 칸은 이름을 떼고 잠그고 비밀 값을 비운다', () => {
+  const fx = foldApp();
+  const box = fx.make('box', 0, 400);
+  const part = fx.make('part', 36, 120, box);
+  const token = { tagName: 'INPUT', type: 'password', name: 'token', value: 'secret-typed', disabled: false };
+  const memo = { tagName: 'TEXTAREA', type: 'textarea', name: 'memo', value: '적던 글', disabled: false };
+  part.inputs = [token, memo];
+  fx.app.context.__p = part;
+  fx.app.context.__shut = () => { part.hidden = true; };
+  fx.act();
+  fx.app.run('uiFold(__shut, { open: false, part: __p })');
+  assert.deepEqual([token.value, token.name, token.disabled, memo.value, memo.name, memo.disabled], ['secret-typed', 'token', false, '적던 글', 'memo', false], '원래 칸은 건드리지 않는다');
+  const copy = fx.ghosts[0].specs[0].was.row;
+  assert.deepEqual(copy.inputs.map(input => [input.value, 'name' in input, input.disabled]), [['', false, true], ['적던 글', false, true]]);
+});
+
+test('펼침 D1 꺾쇠: 다시 그리는 접기 단추(uiFoldKey)는 누른 순간의 각도에서 새 각도로 140ms 돈다 — 같은 동작의 그리기에서만, 글자 입력·움직임 줄이기면 돌지 않는다', async () => {
+  for (const [why, on, turns] of [['내 동작', '', true], ['움직임 줄이기', 'window.matchMedia = () => ({ matches: true })', false], ['키보드 연타', "uiActMark({ type: 'keydown', key: 'Enter', repeat: true, target: null })", false]]) {
+    const fx = foldApp();
+    const old = fx.make('old', 0);
+    old.attrs['aria-expanded'] = 'false';
+    old.dataset.fold = 'grp:완료';
+    const oldIcon = { turn: 'none' };
+    old.querySelector = () => oldIcon;
+    const fresh = fx.make('fresh', 0);
+    const icon = { turn: 'matrix(0, 1, -1, 0, 0, 0)', animate(frames, options) { const play = { name: 'icon', frames, options, cancel() {} }; fx.plays.push(play); return play; } };
+    fresh.querySelector = () => icon;
+    fx.app.context.getComputedStyle = el => ({ transform: el.turn });
+    Object.assign(fx.app.context, { __old: old, __fresh: fresh });
+    fx.act();
+    fx.app.run("uiFoldPress({ target: { closest: () => __old } })");
+    if (on) fx.app.run(on);
+    fresh.attrs['aria-expanded'] = 'true';
+    fx.app.run("uiFoldKey(__fresh, 'grp:완료')");
+    await settle();
+    assert.deepEqual(fx.plays.map(play => [plain(play.frames), play.options.duration]), turns ? [[[{ transform: 'none' }, { transform: 'matrix(0, 1, -1, 0, 0, 0)' }], 140]] : [], why);
+    // 다음 동작의 그리기(자동 갱신 등)에서는 돌지 않는다.
+    fx.plays.length = 0;
+    fx.act();
+    fx.app.run("uiFoldKey(__fresh, 'grp:완료')");
+    await settle();
+    assert.equal(fx.plays.length, 0, `${why}: 다른 동작`);
+  }
+  // 그룹 제목은 한 곳(uiGroupHeading)에서 열쇠를 단다 — 부르는 13곳은 손대지 않는다.
+  assert.match(script, /uiFoldKey\(head, `grp:\$\{label\}`\);/);
+});
+
+test('펼침 D1 다시 그리는 자리: uiFoldNote로 적은 동작의 그리기에서만 uiFoldShow가 내용을 띄운다 — 나중의 다시 그리기·적지 않은 열쇠는 그냥 그린다', () => {
+  const fx = foldApp();
+  const el = fx.make('confirm', 0);
+  fx.app.context.__el = el;
+  fx.act();
+  fx.app.run("uiFoldNote('jconfirm')");
+  fx.app.run("uiFoldShow(__el, 'other')");
+  assert.equal(el.has('d-unfold'), false, '다른 열쇠');
+  fx.app.run("uiFoldShow(__el, 'jconfirm')");
+  assert.ok(el.has('d-unfold'));
+  el.classList.remove('d-unfold');
+  fx.act();
+  fx.app.run("uiFoldShow(__el, 'jconfirm')");
+  assert.equal(el.has('d-unfold'), false, '다음 동작의 그리기');
+});
+
+// 펼침 부품을 부르는 자리 — 여섯 방식(① 그룹 제목 ② N개 더 ③ 접힌 설명 ④ hidden 토글·확인 줄 ⑤ 초안 ⑥ 서랍).
+const D1_SITES = [
+  ['app.js', /uiFold\(\(\) => \{ rows\.forEach\(row => \{ row\.hidden = !open; \}\); \}, \{ open, part: rows \}\);/, '② N개 더(uiFoldToggle)'],
+  ['app.js', /uiFold\(\(\) => \{ row\.className = open \?/, '제목 두 줄 ↔ 전문(uiClampToggle)'],
+  ['app.js', /\}, \{ open: true, part: hidden, from: more \}\);/, '상세 카드 기록 N개 더(detailLogClamp)'],
+  ['app.js', /\}, \{ open: true, part: picker, from: button \}\);/, '확인 대기 고르기(panelWaitingCell)'],
+  ['app.js', /\}, \{ open: true, part: picker, from: revertTo \}\);/, '프로젝트 고르기·메뉴 안 목록(renderGroupControl)'],
+  ['app.js', /uiFold\(\(\) => \{ newsMarkSeen\(version\); renderNewsCard\(\); \}, \{ open: false, part: card \}\);/, '소식 카드 닫기'],
+  ['app.js', /uiFold\(\(\) => renderGuideCard\(\), \{ open: false,/, '사용설명서 카드 닫기'],
+  ['app.js', /if \(!wasOpen && !body\.hidden\) uiFoldShow\(body, 'decision-archive'\);/, '반영 완료 접기'],
+  ['app.js', /else if \(mode && zone && !shown && !zone\.hidden\) uiFoldReveal\(zone\);/, '새로 들어온 것 구역'],
+  ['app.js', /document\.body\.classList\.toggle\('later-open', laterDrawerOpen\);\n  uiFoldSlide\(before\);/, '⑥ 서랍'],
+  ['attention-ui.js', /uiFoldKey\(more, 'at:more'\);/, '반응 필요 외 N개 보기'],
+  ['waiting-ui.js', /uiFoldShow\(one \? waitingNextOne\(item\) : waitingNextRow\(item\), 'wnext'\)/, '`다음은?` 나타남'],
+  ['waiting-ui.js', /uiFold\(\(\) => gone\.remove\?\.\(\), \{ open: false, part: gone \}\);/, '`다음은?` 닫힘'],
+  ['report-ui.js', /uiFoldKey\(toggle, `rp-fold:\$\{row\.id\}`\);/, '주간요약 문장 접기 꺾쇠'],
+  ['report-ui.js', /uiFold\(\(\) => \{ body\.hidden = !reportMaterialOpen; \}, \{ open: reportMaterialOpen, part: body \}\);/, '주간요약 접힘 한 줄'],
+  ['report-ui.js', /line\.dataset\.moveId = 'st:report';/, '주간요약 상태 줄'],
+  ['meetings-ui.js', /uiFoldKey\(link, 'mtg:more'\);/, '회의 더 보기'],
+  ['meetings-ui.js', /card\.dataset\.moveId = `res:\$\{event\.id\}`;/, '회의 결과 카드'],
+  ['meetings-ui.js', /line\.dataset\.moveId = `mv:\$\{event\.id\}`;/, '회의 옮기기 확인 줄'],
+  ['meetings-ui.js', /uiFoldLeave\(closing, rows\.get\(previous\)\.parentElement\)/, '⑤ 초안 접힘의 내용'],
+  ['projects-ui.js', /uiFoldKey\(toggle, `pj:\$\{label\}`\);/, '시작 전·지난 프로젝트'],
+  ['projects-ui.js', /uiFoldKey\(head, head\.dataset\.moveId\);/, '배포별 소제목'],
+  ['projects-ui.js', /return uiFoldShow\(wfMoveConfirmNode\(/, '프로젝트 옮기기 확인 줄'],
+  ['jira-ui.js', /return uiFoldShow\(row, 'jconfirm'\);/, '지라 확인 줄 나타남'],
+  ['jira-ui.js', /uiFoldLeave\(shut, shut\.closest\('\[id\]'\)\)/, '지라 확인 줄 닫힘'],
+  ['jira-ui.js', /uiFoldKey\(caret, `jexp:\$\{issueKey\}`\);/, '지라 하위 티켓 펼침'],
+  ['jira-ui.js', /uiFoldKey\(button, `jfold:\$\{key\}`\);/, '지라 좁은 폭 접힌 줄'],
+  ['jira-ui.js', /uiFoldShow\(row, `jdone:\$\{issue\.key\}`\)/, '지라 완료 N개 더 보기'],
+  ['project-new-ui.js', /box\.appendChild\(uiFoldShow\(confirm, 'pnconfirm'\)\);/, '새 프로젝트 확인 줄'],
+  ['settings-ui.js', /\}, \{ open: true, part: body, big: true \}\);/, '설정 카드 펼침(큰 면)'],
+  ['settings-ui.js', /uiFold\(\(\) => \{ settingsIntgCloseOthers\(null\); card\.confirmSlot\.replaceChildren\(line\); \}/, '해제 확인 줄'],
+  ['settings-ui.js', /uiFold\(\(\) => setOpen\(next\), \{ open: next, part: host \}\);/, '고급'],
+  ['settings-ui.js', /uiFold\(\(\) => \{ ask\.hidden = !next; \}, \{ open: next, part: ask \}\);/, '요청하기'],
+  ['settings-ui.js', /uiFold\(\(\) => \{ files\.hidden = !open; \}, \{ open, part: files \}\);/, '수정된 파일'],
+  ['settings-ui.js', /return \[box, uiFoldShow\(confirm, 'upconfirm'\)\];/, '되돌리기 확인 줄'],
+  ['settings-ui.js', /if \(uiFoldMode\(\)\) uiFoldReveal\(ask\);/, '완전히 지우기 확인'],
+];
+test('펼침 D1 등록: 여섯 방식의 자리가 모두 펼침 부품을 부른다 — 접힌 설명은 CSS만, 서랍은 본문 여백 전환이 없다', () => {
+  D1_SITES.forEach(([file, pattern, name]) => assert.match(fs.readFileSync(path.join(__dirname, file), 'utf8'), pattern, name));
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /\n\.d-unfold \{ animation: d-unfold var\(--t-unfold\) var\(--ease\) both; \}\n\.d-unfold\.d-unfold-big \{ animation-duration: var\(--t-move\); \}\n@keyframes d-unfold \{ from \{ opacity: 0; translate: 0 -4px; \} \}/);
+  // ③ 접힌 설명 9종은 CSS 한 규칙 — 열림만 160ms, 닫힘은 바로(그림자를 띄울 수 없다).
+  assert.match(css, /\ndetails::details-content \{ transition: opacity var\(--t-unfold\) var\(--ease\), translate var\(--t-unfold\) var\(--ease\); \}\ndetails:not\(\[open\]\)::details-content \{ opacity: 0; translate: 0 -4px; transition: none; \}/);
+  // ⑥ 서랍: 큰 면(열림 --t-move · 닫힘 --t-fast), 본문 여백은 바로 바뀐다(자리 속성을 움직이는 곳이 없다).
+  assert.match(css, /transition: transform var\(--t-fast\) var\(--ease\), visibility var\(--t-fast\) var\(--ease\);\n\}\nbody\.later-open \.d-drawer \{ transform: none; visibility: visible; transition-duration: var\(--t-move\); \}/);
+  assert.doesNotMatch(css, /transition:[^;]*padding/, '여백(padding)을 움직이는 전환은 없다');
+  // 그림자는 펼침 클래스를 물려받지 않는다.
+  assert.match(script, /const UI_GLIDE_ENTRANCE = \['is-new', 'is-opening', 'is-rise', 'd-unfold', 'd-unfold-big'\];/);
+  // 접기 단추로 펼친 줄은 줄 부품이 펼침 값으로 띄운다(위 4px, --t-unfold).
+  assert.match(script, /else if \(uiFoldActive\(\)\) uiGlidePlay\(row, \[\{ opacity: 0, transform: 'translateY\(-4px\)' \}, \{ opacity: 1, transform: 'none' \}\], UI_UNFOLD\.open, wait\);/);
+  assert.match(fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8'), /id="decisionArchiveToggle" data-fold="decision-archive"/);
+});
+
+test('펼침 D1 서랍: 여닫으면 여백은 바로 바뀌고, 자리가 바뀐 줄만 옛 자리에서 미끄러진다 — 자동으로 여닫힐 때(0.5초 뒤)는 그냥 바뀐다', () => {
+  const fx = foldApp();
+  const rows = [0, 1, 2].map(i => fx.make(`r${i}`, i * 40));
+  fx.app.context.__rows = rows;
+  fx.app.run("document.querySelector = (sel) => sel === '.page' ? { querySelectorAll: () => __rows } : null; document.getElementById = () => null; document.body = { classList: { toggle: () => { __rows[2].top = 120; } } }; panelState = null;");
+  fx.act();
+  fx.app.run('laterDrawerOpen = true; drawerSync()');
+  assert.deepEqual(fx.plays.map(play => [play.name, plain(play.frames), play.options.duration]), [['r2', [{ transform: 'translate(0px, -40px)' }, { transform: 'none' }], 200]]);
+  fx.plays.length = 0;
+  rows[2].top = 80;
+  fx.app.run('uiActAt = Date.now() - 501; laterDrawerOpen = false; drawerSync()');
+  assert.equal(fx.plays.length, 0);
 });
