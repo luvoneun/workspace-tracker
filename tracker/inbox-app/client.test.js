@@ -2557,7 +2557,7 @@ test('종류 구역: 소제목 모양은 예전 `.d-mgrp` 글자 값 그대로(1
   assert.match(css, /\n\.d-mgrp \.n \{ font-weight: 500; color: var\(--dim\); font-variant-numeric: tabular-nums; \}/);
   assert.match(css, /\.d-side \.d-mgrp \{ font-size: var\(--fs-body\); line-height: 20px; \}/, '좁은 화면 시트에서는 줄 글자와 같이 커진다');
   // 옮겨 간 줄의 떠오름은 새 줄과 같은 부품(.d-mrow2.is-new) — 움직임 줄이기 규칙에도 이미 들어 있다.
-  assert.match(css, /\.d-toast, \.d-float:not\(\.is-out\):not\(\.is-still\), \.d-mrow2\.is-new \{/);
+  assert.match(css, /\n  \.d-float:not\(\.is-out\):not\(\.is-still\), \.d-mrow2\.is-new \{/);
 });
 
 test('`이전 회차의 미해결 항목`도 같은 줄이고 종류 앞에 회차가 적힌다', () => {
@@ -11285,7 +11285,7 @@ test('설정 정리: 파일 위치 — 경로가 하나만 있으면 그것만, 
 
 test('설정 정리: 창을 열면 초점은 창 자체(테 없음) · 이미 열린 창은 초점을 옮기지 않는다 · `점검하기` 표지면 그 버튼', async () => {
   const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
-  assert.match(html, /<dialog id="settingsDialog" class="d-modal" aria-label="설정" tabindex="-1" autofocus>/);
+  assert.match(html, /<dialog id="settingsDialog" class="d-modal d-stay" aria-label="설정" tabindex="-1" autofocus>/);
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
   assert.match(css, /#settingsDialog:focus \{ outline: none; \}/, '창 자체에만 테를 지운다');
   assert.match(css, /#settingsDialog \{ margin: min\(max\(32px, 8vh\), 120px\) auto auto; overflow: hidden; \}/, '윗변 고정 · 창은 스크롤하지 않는다');
@@ -15211,7 +15211,7 @@ test('WP-X 자세히 창 — .d-modal 판·제목·닫기, 열면 초점은 창,
     link = document.createElement('button');
     usageWorkOpen(link, '2026-09-21');`);
   const dialog = app.run('usageWorkDlg.dialog');
-  assert.equal(dialog.className, 'd-modal d-uwdlg');
+  assert.equal(dialog.className, 'd-modal d-stay d-uwdlg');
   assert.equal(dialog.getAttribute('aria-labelledby'), 'usageWorkTitle');
   assert.equal(wpxText(wpxFind(dialog, node => node.tagName === 'H2')), '내 일 기록');
   const close = wpxFind(dialog, node => node.className === 'd-iconbtn');
@@ -16032,8 +16032,10 @@ test('모션 토큰: 움직임 줄이기 — 전역은 .01ms(이동 끔) 그대�
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
   const block = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce) {\n  *, *::before'), css.indexOf('/* ---------- 헤더'));
   assert.match(block, /transition-duration: 0\.01ms !important;\n    animation-duration: 0\.01ms !important;/);
-  assert.match(block, /\n  \.d-toast, \.d-float:not\(\.is-out\):not\(\.is-still\), \.d-mrow2\.is-new \{\n    animation: d-fade 120ms linear both !important;/);
-  assert.doesNotMatch(block, /\.d-menulist|\.d-schedpop|\.d-palbox|\.d-popd/, '뜨는 것은 요소 이름을 늘어놓지 않고 부품 클래스 하나로 등록한다');
+  assert.match(block, /\n  \.d-float:not\(\.is-out\):not\(\.is-still\), \.d-mrow2\.is-new \{\n    animation: d-fade 120ms linear both !important;/);
+  // 자리가 남는 것(.d-stay — 알림·창·막대)은 전환이라 열린 쪽에만 120ms를 걸고 이동(--stay-from·--stay-to)을 끈다 — 닫힘은 전역 .01ms로 바로
+  assert.match(block, /\n  \.d-stay \{ --stay-from: none; --stay-to: none; \}\n  \.d-stay:not\(\[hidden\], dialog:not\(\[open\]\)\), dialog\.d-stay\[open\]::backdrop \{ transition-duration: 120ms !important; \}/);
+  assert.doesNotMatch(block, /\.d-menulist|\.d-schedpop|\.d-palbox|\.d-popd|\.d-toast|\.d-modal|\.d-selbar|\.d-ckdlg|\.d-uwdlg|#settingsDialog|#wrapDialog/, '뜨는 것은 요소 이름을 늘어놓지 않고 부품 클래스(.d-float·.d-stay)로 등록한다');
   assert.match(css, /@keyframes d-fade \{ from \{ opacity: 0; \} to \{ opacity: 1; \} \}/, '흐려짐은 투명도만');
 });
 
@@ -16067,7 +16069,8 @@ const MOTION_RAW_ALLOWED = [
   ['ui.css', '.d-iconbtn', 'transition', '400ms', 'E', '새로고침 아이콘 한 바퀴 400ms — 기다림 부품에서 정한다(색·누름은 토큰)'],
   ['ui.css', '*, *::before, *::after', 'transition-duration', '0.01ms', '남김', '움직임 줄이기 전역 값(.01ms로 끄고 나타남만 120ms) — 토큰과 뜻이 다르다'],
   ['ui.css', '*, *::before, *::after', 'animation-duration', '0.01ms', '남김', '움직임 줄이기 전역 값(.01ms로 끄고 나타남만 120ms) — 토큰과 뜻이 다르다'],
-  ['ui.css', '.d-toast, .d-float:not(.is-out):not(.is-still), .d-mrow2.is-new', 'animation', '120ms', '남김', '움직임 줄이기 전역 값(.01ms로 끄고 나타남만 120ms) — 토큰과 뜻이 다르다'],
+  ['ui.css', '.d-float:not(.is-out):not(.is-still), .d-mrow2.is-new', 'animation', '120ms', '남김', '움직임 줄이기 전역 값(.01ms로 끄고 나타남만 120ms) — 토큰과 뜻이 다르다'],
+  ['ui.css', '.d-stay:not([hidden], dialog:not([open])), dialog.d-stay[open]::backdrop', 'transition-duration', '120ms', '남김', '움직임 줄이기 전역 값(.01ms로 끄고 나타남만 120ms) — 토큰과 뜻이 다르다'],
   ['ui.css', '.d-ibrow.is-leaving', 'animation', '220ms', 'C', '분류 뒤 줄 접힘 — 뜨는 것이 아니라 줄이다. 사라지는 줄 부품과 함께 정한다'],
   ['ui.css', '.d-row.is-rise', 'animation', '260ms 1400ms', 'C', '분류 뒤 새 줄 솟음·배경 강조 — 뜨는 것이 아니라 줄이다. 줄 부품과 함께 정한다'],
   ['ui.css', '.d-row.is-completing .d-title', 'animation', '520ms', 'C', '완료 줄 긋기 520ms — 완료 흐름과 함께 줄인다'],
@@ -16079,7 +16082,6 @@ const MOTION_RAW_ALLOWED = [
   ['ui.css', '.d-istat.k-soon .dot', 'animation', '2.4s', 'E', '도는·숨 쉬는 표시 — 기다림 부품에서 정한다'],
   ['ui.css', '.d-intg', 'transition', '400ms', 'F', '밝히기 — 부품 하나로 합친다'],
   ['ui.css', '.d-faq .q.is-hit', 'transition', '400ms 400ms', 'F', '밝히기 — 부품 하나로 합친다'],
-  ['checkin-ui.css', '.d-ckdlg[open]', 'animation', '0.22s', 'B', '체크인 창 등장 — 창 부품으로 바뀐다'],
 ];
 
 test('모션 장치: 맨 시간 값 금지 — CSS 네 파일의 transition·animation에 토큰이 아닌 ms·s는 허용 목록에 있는 것뿐이다', () => {
@@ -16137,7 +16139,7 @@ const MOTION_NOT_PRESSED = [
   ['줄·카드(div·li·label) — 줄은 줄어들지 않고 안의 버튼이 눌린다', ['.d-mrow', '.d-wrow', '.d-atrow', '.d-ibrow', '.d-row', '.d-prow2', '.d-rec', '.d-intg', '.d-ich', '.d-faq .q.is-hit', '.rp-rec', '.rp-grp .rp-s.is-add', '.d-qaf', '.d-addrow', '.rp-add']],
   ['줄 위에 겹쳐 뜨는 묶음·물러나는 글자(div·span) — 안의 버튼이 공용 누름을 갖는다', ['.d-wrow .ac, .d-mrow .ac', '.d-mrow .ct, .d-wrow .mt', '.d-atrow .mt', '.d-atacts', '.d-acts', '.d-prow2 .ac', '.d-pri']],
   ['아이콘·꺾쇠·숫자 칩 — 눌리는 것은 그 부모다', ['.d-grp.tog .d-i', '.d-dadd > summary .d-i', '.d-jira .foot .d-jexp .d-i', '.d-jfold .d-i', '.rp-s .rp-foldtoggle .d-i', '.rp-fl .d-i', '.d-imore > summary::before', '.d-lhd .sub .cnt, .d-wrapsum.cnt']],
-  ['면·틀 — 버튼이 아니다', ['.pull-indicator.snapping', '.d-popd .d-detail.is-pop > .d-dtop', '.d-popd .d-detail.is-pop > .d-dfoot, .d-popd .d-detail.is-pop > .d-dbar', '.d-drawer', '.page', '#settingsDialog .d-mhd']],
+  ['면·틀 — 버튼이 아니다', ['.pull-indicator.snapping', '.d-popd .d-detail.is-pop > .d-dtop', '.d-popd .d-detail.is-pop > .d-dfoot, .d-popd .d-detail.is-pop > .d-dbar', '.d-drawer', '.page', '#settingsDialog .d-mhd', '.d-stay', 'dialog.d-stay::backdrop']],
   ['그 자리에서 고치는 문장(span) — 글자 입력의 시작', ['.rp-s .rp-edit']],
 ];
 // ui.css "누름에서 뺀 것" 규칙의 선택자들(:active를 뗀 것).
@@ -17205,31 +17207,30 @@ test('검색 팔레트(줄임): ⌘K 연타 — 닫히는 80ms 안에 다시 열
 // ---- 모션 빠짐 방지 장치(가-2): 여는 길 하나 ----
 // 떠 있는 것은 공용 도우미(uiFloatOpen·uiFloatPlace·uiFloatClose)로만 여닫는다. 글자 찾기 수준의 시험이라 돌려 쓴 표현은 못 잡는다 —
 // 그래서 세 군데를 본다: ① 화면에 직접 붙이는 줄 ② 창을 여는 줄(showModal) ③ CSS의 화면 고정(position: fixed) 규칙.
-// 아직 공용 길 밖에 있는 것은 아래 예외 목록에 [파일, 글자, 맡은 묶음(B2·D·E·남김), 이유]로 있어야 한다.
+// 아직 공용 길 밖에 있는 것은 아래 예외 목록에 [파일, 글자, 맡은 묶음(D·E·남김), 이유]로 있어야 한다.
+// 창(<dialog>)은 브라우저의 showModal·close로 여닫고(맨 위 층·초점 가두기는 브라우저 몫) 부품 클래스 .d-stay만 건다 — 아래에서 함께 본다.
 const FLOAT_OPEN_OUTSIDE = [
   ['app.js', 'document.body.appendChild(panelScrimEl)', '남김', '좁은 폭 시트의 가림막 — 한 번 붙여 두고 hidden으로 켜고 끄는 요소다. 닫힘은 uiFloatGhost가 재생한다'],
-  ['checkin-ui.js', 'document.body.appendChild(dialog)', 'B2', '체크인 창(dialog) — 창 부품에서 정한다'],
-  ['usage-ui.js', 'document.body.appendChild(dialog)', 'B2', '내 일 기록 창(dialog) — 창 부품에서 정한다'],
+  ['checkin-ui.js', 'document.body.appendChild(dialog)', '남김', '체크인 창(dialog) — 열 때마다 만들어 붙이고 showModal로 연다. 등장·닫힘은 창 부품 .d-stay'],
+  ['usage-ui.js', 'document.body.appendChild(dialog)', '남김', '내 일 기록 창(dialog) — 한 번 만들어 붙이고 showModal로 연다. 등장·닫힘은 창 부품 .d-stay'],
 ];
 const FLOAT_MODAL_OUTSIDE = [
-  ['checkin-ui.js', 2, 'B2', '체크인 창 — 창 부품에서 정한다(다시 열기 포함 두 곳)'],
-  ['settings-ui.js', 1, 'B2', '설정 창 — 창 부품에서 정한다'],
-  ['usage-ui.js', 1, 'B2', '내 일 기록 창 — 창 부품에서 정한다'],
-  ['wrap-ui.js', 1, 'B2', '오늘 정리 창 — 창 부품에서 정한다'],
+  ['checkin-ui.js', 2, '남김', '체크인 창 — 창 부품 .d-stay(다시 열기 포함 두 곳)'],
+  ['settings-ui.js', 1, '남김', '설정 창 — 창 부품 .d-stay'],
+  ['usage-ui.js', 1, '남김', '내 일 기록 창 — 창 부품 .d-stay'],
+  ['wrap-ui.js', 1, '남김', '오늘 정리 창 — 창 부품 .d-stay'],
 ];
 // 화면 고정 규칙: 뜨는 것 부품을 쓰는 것(화면 코드가 uiFloatOpen으로 붙이거나 부품 클래스를 건다)과, 아직 아닌 것.
-const FLOAT_FIXED_PART = ['.d-menulist', '.d-schedpop', '.d-popd', '.d-pal', '.d-side'];
+const FLOAT_FIXED_PART = ['.d-menulist', '.d-schedpop', '.d-popd', '.d-pal', '.d-side', '.d-toast', '.d-selbar'];
 const FLOAT_FIXED_OUTSIDE = [
   ['.pull-indicator', 'E', '당겨서 새로고침 표시 — 기다림 부품에서 정한다'],
-  ['.d-toast', 'B2', '알림 — showNotice 정의를 고치지 않고 CSS로 닫힘을 준다'],
-  ['.d-selbar', 'B2', '선택 막대 — hidden으로 켜고 끈다. CSS로 닫힘을 준다'],
   ['.d-drawer', 'D', '나중에 할 일 서랍 — 펼침 부품(본문을 밀어내는 면)'],
   ['.d-scrim:not([hidden])', '남김', '시트 가림막 — 뜨는 것의 나타남·사라짐 키프레임을 그대로 쓴다'],
 ];
 
 test('모션 장치: 여는 길 하나 — 화면에 직접 붙이는 줄·showModal·화면 고정 규칙은 공용 "뜨는 것"을 거치거나 예외 목록(이유·맡은 묶음)에 있다', () => {
   const sources = floatClientSources();
-  const reasons = rows => rows.forEach((row) => { assert.match(row[row.length - 2], /^(B2|C|D|E|F|남김)$/, `맡은 묶음: ${row[0]}`); assert.ok(row[row.length - 1].length >= 8, `이유를 적는다: ${row[0]}`); });
+  const reasons = rows => rows.forEach((row) => { assert.match(row[row.length - 2], /^(C|D|E|F|남김)$/, `맡은 묶음: ${row[0]}`); assert.ok(row[row.length - 1].length >= 8, `이유를 적는다: ${row[0]}`); });
   reasons(FLOAT_OPEN_OUTSIDE); reasons(FLOAT_MODAL_OUTSIDE); reasons(FLOAT_FIXED_OUTSIDE);
 
   // ① 화면(body)에 직접 붙이는 줄
@@ -17240,7 +17241,7 @@ test('모션 장치: 여는 길 하나 — 화면에 직접 붙이는 줄·showM
   assert.deepEqual(found.filter(line => !allowed.includes(line)), [], '떠 있는 것은 uiFloatOpen으로 붙인다 — 정말 다른 길이어야 하면 예외 목록에 이유와 함께');
   assert.deepEqual(allowed.filter(line => !found.includes(line)), [], '예외 목록에 있지만 이제 없는 줄 — 목록에서 지운다');
 
-  // ② 창(dialog)을 여는 줄 — B2에서 창 부품으로 옮긴다
+  // ② 창(dialog)을 여는 줄 — 파일마다 몇 곳인지 못 박는다(새 창은 예외 목록에 더하고 .d-stay를 건다 — 아래 시험)
   const modals = Object.entries(sources).map(([file, text]) => [file, (text.match(/\.showModal\??\.?\(/g) || []).length]).filter(([, count]) => count);
   assert.deepEqual(modals, FLOAT_MODAL_OUTSIDE.map(([file, count]) => [file, count]));
 
@@ -17262,6 +17263,53 @@ test('모션 장치: 여는 길 하나 — 화면에 직접 붙이는 줄·showM
   assert.match(sources['app.js'].slice(sources['app.js'].indexOf('function uiFloatGhost'), sources['app.js'].indexOf('function uiFloatClose')), /ghost\.classList\.add\('is-out'\);/);
   // 시트(.d-side)는 붙어 있는 요소라 클래스를 건다.
   assert.match(sources['app.js'], /side\.classList\.add\('d-float', 'is-sheet'\);/);
+});
+
+test('뜨는 것 — 자리가 남는 것(.d-stay): 알림·창 넷·막대 둘이 부품 클래스 하나를 걸고, 값은 CSS 한 곳 — 등장 @starting-style, 닫힘 allow-discrete, 비우고 닫는 막대만 복사본', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  const sources = floatClientSources();
+  // ① 거는 곳: 화면에 늘 있는 다섯(알림·막대 둘·창 둘)과 만들어 붙이는 창 둘. 창(<dialog>)은 전부 건다.
+  ['liveRegion', 'taskSelectBar', 'reportNestBarEl', 'settingsDialog', 'wrapDialog'].forEach((id) => {
+    const tag = html.match(new RegExp(`<[^>]*id="${id}"[^>]*>`))[0];
+    assert.match(tag, /class="[^"]*\bd-stay\b/, `${id}에 .d-stay`);
+  });
+  (html.match(/<dialog\b[^>]*>/g) || []).forEach(tag => assert.match(tag, /\bd-stay\b/, `창은 .d-stay를 건다: ${tag}`));
+  assert.match(sources['checkin-ui.js'], /checkinEl\('dialog', 'd-modal d-stay d-ckdlg'\)/);
+  assert.match(sources['usage-ui.js'], /usageEl\('dialog', 'd-modal d-stay d-uwdlg'\)/);
+  // ② CSS 한 곳: 시간은 토큰·부품 변수, 창은 .96 → 1(240ms)·닫힘 .98, 가림막 160ms. 움직이는 것은 transform·opacity뿐(display·overlay는 닫힘을 기다리게 하는 장치).
+  const at = css.indexOf('\n.d-stay {');
+  const part = css.slice(at, css.indexOf('@keyframes d-stay-out'));
+  assert.match(part, /--stay-in: var\(--t-move\);\s+--stay-out: var\(--t-fast\);\s+--stay-dim: 160ms;/);
+  assert.match(part, /transition: opacity var\(--stay-in\) var\(--ease\), transform var\(--stay-in\) var\(--ease\),\s+display var\(--stay-in\) allow-discrete, overlay var\(--stay-in\) allow-discrete;/);
+  assert.match(part, /dialog\.d-stay \{ --stay-in: 240ms;\s+--stay-from: scale\(0\.96\);\s+--stay-to: scale\(0\.98\); \}/);
+  assert.match(part, /\.d-stay\[hidden\], dialog\.d-stay:not\(\[open\]\) \{\n  opacity: 0; transform: var\(--stay-to\); transition-duration: var\(--stay-out\);\n  pointer-events: none; interactivity: inert;\n\}/, '닫히는 동안은 눌리지도 초점이 가지도 않는다');
+  assert.match(part, /@starting-style \{ \.d-stay \{ opacity: 0; transform: var\(--stay-from\); \} \}/);
+  assert.match(part, /@starting-style \{ dialog\.d-stay\[open\]::backdrop \{ opacity: 0; \} \}/);
+  assert.match(part, /\.d-stay\.is-out \{ transition: none; animation: d-stay-out var\(--stay-out\) var\(--ease\) both; pointer-events: none; \}/);
+  assert.doesNotMatch(part, /\b(width|height|top|left|bottom|margin|padding)\s*:/, '레이아웃 속성은 움직이지 않는다');
+  assert.doesNotMatch(part, /--spring-/, '큰 면·자주 뜨는 알림은 넘침 없음(--ease)');
+  // 요소 규칙에는 따로 적은 등장이 남지 않는다(옛 d-rise·d-ck-rise).
+  const toast = css.slice(css.indexOf('\n.d-toast {'), css.indexOf('}', css.indexOf('\n.d-toast {')));
+  assert.doesNotMatch(toast, /animation|transition/);
+  const checkinCss = fs.readFileSync(path.join(__dirname, 'checkin-ui.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.doesNotMatch(checkinCss, /\.d-ckdlg\[open\]|d-ck-rise/);
+  MOTION_CSS_FILES.forEach((file) => {
+    const text = fs.readFileSync(path.join(__dirname, file), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    for (const [, selector, body] of text.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      if (!/\.d-(toast|modal|selbar|ckdlg|uwdlg)\b|#settingsDialog|#wrapDialog/.test(selector)) continue;
+      assert.doesNotMatch(body, /(^|;)\s*animation\s*:/, `알림·창·막대의 등장은 부품(.d-stay)이 맡는다: ${file} ${selector.trim()}`);
+    }
+  });
+  // ③ 비우고 닫는 막대 둘은 숨기기 직전에 복사본을 세운다(시트 가림막과 같은 길). 창·알림의 닫기 함수는 CSS가 맡아 손대지 않는다.
+  assert.match(sources['app.js'], /if \(!taskSelectionMode && !bar\.hidden\) uiFloatGhost\(bar\);\n  bar\.hidden = !taskSelectionMode;\n  if \(!taskSelectionMode\) \{ bar\.replaceChildren\(\); return; \}/);
+  assert.match(sources['report-ui.js'], /if \(!open && !bar\.hidden && typeof uiFloatGhost === 'function'\) uiFloatGhost\(bar\);\n  bar\.hidden = !open;/);
+  assert.match(sources['settings-ui.js'], /\n  settingsDialog\.close\(\);\n  const back = settingsReturnFocus;/, '설정 창 닫기는 그대로 — 초점은 닫힘을 기다리지 않고 돌아간다');
+  // 체크인 창은 닫힘이 재생된 뒤에 떼어 낸다. 오늘 정리 창은 닫을 때 본문을 비우지 않는다(다시 열면 새로 그린다).
+  assert.match(sources['checkin-ui.js'], /if \(current\.dialog\.open\) current\.dialog\.close\(\);\n[^\n]*\n  setTimeout\(\(\) => current\.dialog\.remove\(\), typeof UI_FLOAT === 'object' \? UI_FLOAT\.out : 140\);/);
+  const wrapClose = sources['wrap-ui.js'].slice(sources['wrap-ui.js'].indexOf('function wrapClose()'), sources['wrap-ui.js'].indexOf('\n}\n', sources['wrap-ui.js'].indexOf('function wrapClose()')));
+  assert.doesNotMatch(wrapClose, /replaceChildren/);
+  assert.match(sources['wrap-ui.js'], /function wrapRender\(\) \{\n[^\n]*\n  const body = wrapNodes\.body;\n  body\.replaceChildren\(\);/);
 });
 
 test('입력 보류 장치 불변: uiRenderOrHold·uiHeldFlush·uiRenderHeld·uiHoldArm·replayUndo는 한 글자도 바뀌지 않았다(뜨는 것의 닫힘 재생은 이 장치 밖에서 돈다)', () => {

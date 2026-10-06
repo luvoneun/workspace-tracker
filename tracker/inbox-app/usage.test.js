@@ -504,7 +504,7 @@ test('WP-X 화면 파일 규칙 — 주간요약 줄 끝·맨 아래·자세히 
   const read = name => fs.readFileSync(path.join(__dirname, name), 'utf8').split('\n').filter(line => !/^\s*\/\//.test(line)).join('\n');
   const ui = read('usage-ui.js');
   for (const words of ['내 일 기록 자세히', '이 주는 기록이 없어요', '이번 주는 아직 끝낸 일이 없어요', '엔 끝낸 일이 없어요', '이번 주가 최고 기록이에요', '최고 기록: ',
-    '내 일 기록은 주간요약 탭에서 볼 수 있어요 · ', "'d-modal d-uwdlg'", "'aria-haspopup', 'dialog'", '끝낸 일 ${record.done}개']) assert.ok(ui.includes(words), words);
+    '내 일 기록은 주간요약 탭에서 볼 수 있어요 · ', "'d-modal d-stay d-uwdlg'", "'aria-haspopup', 'dialog'", '끝낸 일 ${record.done}개']) assert.ok(ui.includes(words), words);
   assert.equal(/innerHTML|insertAdjacentHTML|outerHTML/.test(ui), false);
   assert.equal(/쳐/.test(fs.readFileSync(path.join(__dirname, 'usage-ui.js'), 'utf8')), false);
   const report = read('report-ui.js');
