@@ -636,6 +636,7 @@ function usageWorkOpen(opener, week) {
   dlg.opener = opener || null;
   dlg.week = week || null;
   dlg.name = week && typeof reportWeekName === 'function' ? reportWeekName(week) : null;
+  if (!dlg.dialog.open && typeof uiNumForget === 'function') uiNumForget('uw:'); // 열 때는 지난번 값에서 움직이지 않는다
   if (!usageInfo) usageLoad().then(() => { if (usageWorkDlg && usageWorkDlg.dialog.open) usageWorkPaint(); });
   usageWorkPaint();
   if (!dlg.dialog.open) {
@@ -767,12 +768,24 @@ function usageRangeNow() {
 
 // [글자, { b: 굵은 글자 }] 조각 → 글자 노드와 <b> 요소.
 function usageParts(node, parts) {
+  let glue = null; // 숫자 바로 뒤에 붙은 조사까지 한 덩어리로 묶는 칸
   for (const part of parts) {
     if (part && typeof part === 'object') {
       const bold = document.createElement('b');
       bold.textContent = part.b;
-      node.appendChild(bold);
-    } else if (part) node.appendChild(document.createTextNode(part));
+      // 숫자는 transform을 받으려고 inline-block이라 뒤 조사(`개를`)와 갈라져 줄이 바뀔 수 있다 — 조사까지 한 칸에 묶는다.
+      glue = document.createElement('span');
+      glue.style.whiteSpace = 'nowrap';
+      glue.appendChild(bold);
+      node.appendChild(glue);
+    } else if (part) {
+      const tail = glue ? part.match(/^\S+/) : null;
+      if (tail) {
+        glue.appendChild(document.createTextNode(tail[0]));
+        if (part.length > tail[0].length) node.appendChild(document.createTextNode(part.slice(tail[0].length)));
+      } else node.appendChild(document.createTextNode(part));
+      glue = null;
+    }
   }
   return node;
 }

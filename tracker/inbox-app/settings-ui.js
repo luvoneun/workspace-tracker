@@ -4076,7 +4076,7 @@ function settingsTrashLabel() {
     label.splitText(label.length - String(count).length).replaceWith?.(num);
     num.textContent = String(count);
     uiNumTick(num, 'trash:tab');
-  } else if (typeof uiNumLast !== 'undefined') uiNumLast.set('trash:tab', String(count));
+  } else if (typeof uiNumLast !== 'undefined' && uiNumLast.has('trash:tab')) uiNumLast.set('trash:tab', String(count));
 }
 
 async function settingsTrashLoad() {
@@ -4261,6 +4261,7 @@ function settingsOpen(tab = 'integrations', focusKey = null) {
   settingsEsc = escPush(settingsClose);
   // 삭제한 항목은 열 때마다 새로 읽는다 — 탭 이름의 개수(`삭제한 항목 3`)도 이 값이다.
   settingsTrash = null;
+  if (typeof uiNumForget === 'function') uiNumForget('trash:'); // 열 때 읽어 온 개수는 올라오지 않는다
   settingsTrashLabel();
   settingsSetTab(tab);
   // 새 버전이 나왔는지(톱니바퀴의 파란 점)는 어느 탭으로 열든 한 번 새로 묻는다 — 예전엔 상태 탭이 이 일을 했다.

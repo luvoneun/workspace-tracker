@@ -900,6 +900,10 @@ function uiGlideAllowed() {
 // 시간은 ui.css의 --t-move와 같다(el.animate는 var()를 못 읽는다).
 const UI_NUM = { rise: 200, pop: 200 };
 const uiNumLast = new Map();
+// 창을 열거나 다른 기간·주로 다시 열 때 — 지난번 열쇠값과 비교하지 않게 그 이름으로 시작하는 열쇠를 지운다.
+function uiNumForget(prefix) {
+  [...uiNumLast.keys()].forEach((key) => { if (key.startsWith(prefix)) uiNumLast.delete(key); });
+}
 // 열쇠 없이 "지금 막 바뀐 값"을 올리는 한 줄(부르는 쪽이 값이 방금 바뀐 것을 안다). 붙인 뒤에 돌도록 한 틱 미룬다.
 function uiNumRise(el) {
   if (uiGlideMode() !== 'all' || detailReduce() || typeof el.animate !== 'function') return;
@@ -911,6 +915,7 @@ function uiNumTick(el, key, kind = 'rise') {
   const prev = uiNumLast.get(key);
   uiNumLast.set(key, text);
   if (prev === undefined || prev === text || typeof el.animate !== 'function') return;
+  if (kind === 'pop' && !(Number(text) > Number(prev))) return; // 목적지는 값이 늘 때만 톡 — 줄어든 쪽(떠난 곳)은 그냥 바뀐다
   if (uiGlideMode() !== 'all' || detailReduce()) return;
   el.animate(kind === 'pop'
     ? [{ transform: 'scale(1)' }, { transform: 'scale(1.12)', offset: 0.4 }, { transform: 'scale(1)' }]
@@ -7077,13 +7082,16 @@ function setActiveTab(tab) {
     document.getElementById(cfg.grid).setAttribute('aria-labelledby', cfg.btn);
   });
   if (typeof usageTabOpened === 'function') usageTabOpened(tab, activeTabKey);   // 사용 횟수(WP-R, usage-ui.js)
+  const tabSwitched = tab !== activeTabKey;
   activeTabKey = tab;
   // 주간요약을 떠나면 문장 모으기 막대도 함께 내린다(떠 있는 막대가 다른 탭에 남지 않게).
   if (tab !== 'weekly' && typeof reportNestEnd === 'function') reportNestEnd();
   // 여러 개 선택은 오늘 탭(목록·서랍)의 것이다 — 다른 탭으로 가면 끝낸다(보이지 않는 업무를 막대로 바꾸지 않게).
   if (tab !== 'today' && taskSelectionMode) taskSelectEnd();
   document.getElementById('skipLink').hidden = tab !== 'today';
-  renderActiveTabLists();
+  // 탭을 바꿔 그리는 것은 그동안 달라진 값을 한꺼번에 보이는 것이다 — 숫자가 올라오지 않는다(줄은 listShown이 같은 일을 한다).
+  if (tabSwitched) uiGlideStill(renderActiveTabLists);
+  else renderActiveTabLists();
   // 숨은 탭에서 그려진 두 줄 말줄임 제목은 잴 수 없었다(크기 0) — 보이게 된 뒤 다시 잰다.
   if (typeof requestAnimationFrame === 'function') requestAnimationFrame(uiClampResync);
   try {

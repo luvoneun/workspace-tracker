@@ -13734,7 +13734,7 @@ test('WP-W 그리기 — 세그먼트(aria-pressed)·타일 3개·막대는 aria
   const seg = all(work, node => node.dataset && node.dataset.range);
   assert.deepEqual(seg.map(button => [button.textContent, button.getAttribute('aria-pressed')]), [['이번 주', 'true'], ['이번 달', 'false'], ['90일', 'false']]);
   assert.equal(text(find(work, node => node.className === 'd-uwbig')), '이번 주 일 10개를 끝냈어요');
-  assert.equal(find(work, node => node.className === 'd-uwbig').children[1].tagName, 'B');
+  assert.equal(find(work, node => node.className === 'd-uwbig').children[1].children[0].tagName, 'B', '숫자는 뒤 조사와 한 칸(nowrap)에 묶여 있다');
   const tiles = all(work, node => /^d-uwtile( |$)/.test(String(node.className)));
   assert.deepEqual(tiles.map(tile => text(tile)), ['들어온 일12개슬랙\u00a011 · 직접\u00a01', '끝낸 일10개', '남긴 기록0개'], '항목 안은 붙는 빈칸 — `확인 대기 8`이 낱말 중간에서 안 끊긴다');
   assert.equal(tiles[1].className, 'd-uwtile is-done');
@@ -19349,6 +19349,65 @@ test('값 바뀜 D2: 끝낸 개수 칩의 옛 CSS 톡(b.tick)은 없고 도우�
   assert.match(css, /\.nv \{ display: inline-block; \}\n\.nv\[hidden\], \.nv:empty \{ display: none; \}/);
   assert.match(script, /uiNumTick\(num, 'chip:done'\);/);
   assert.match(css, /\.d-jira \.bar i \{ display: block; width: 100%; height: 100%;/);
+});
+
+test('값 바뀜 D2 검수: pop은 값이 늘 때만 — 줄어든 쪽(떠난 곳)은 그냥 바뀐다', () => {
+  const fx = foldApp();
+  const el = fx.make('n', 0);
+  fx.app.context.__el = el;
+  const tick = (text) => { el.textContent = text; fx.app.run("uiNumTick(__el, 'k', 'pop')"); };
+  fx.act();
+  tick('3');
+  tick('2');
+  assert.equal(fx.plays.length, 0, '줄어듦');
+  tick('4');
+  assert.equal(fx.plays.length, 1, '늘어남');
+});
+
+test('값 바뀜 D2 검수: 열기·탭 전환의 그리기는 숫자를 올리지 않는다 — 열쇠를 비우거나(uiNumForget) 안 움직이는 그리기(uiGlideStill)로 감싼다', () => {
+  const fx = foldApp();
+  const el = fx.make('n', 0);
+  fx.app.context.__el = el;
+  const tick = (text) => { el.textContent = text; fx.app.run("uiNumTick(__el, 'trash:tab')"); };
+  fx.act();
+  tick('0');
+  fx.app.run("uiNumForget('trash:')");
+  tick('3');
+  assert.equal(fx.plays.length, 0, '열 때 읽어 온 값(열쇠를 비운 뒤)');
+  tick('2');
+  assert.equal(fx.plays.length, 1, '열린 뒤 내 동작으로 바뀐 값은 움직인다');
+  fx.plays.length = 0;
+  fx.app.context.__draw = () => { el.textContent = '9'; fx.app.run("uiNumTick(__el, 'trash:tab')"); };
+  fx.app.run('uiGlideStill(__draw)');
+  assert.equal(fx.plays.length, 0, '탭을 바꿔 그리는 그리기(uiGlideStill 안)');
+  const app = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  assert.match(app, /if \(tabSwitched\) uiGlideStill\(renderActiveTabLists\);\n  else renderActiveTabLists\(\);/);
+  assert.match(fs.readFileSync(path.join(__dirname, 'settings-ui.js'), 'utf8'), /settingsTrash = null;\n  if \(typeof uiNumForget === 'function'\) uiNumForget\('trash:'\);/);
+  assert.match(fs.readFileSync(path.join(__dirname, 'usage-ui.js'), 'utf8'), /if \(!dlg\.dialog\.open && typeof uiNumForget === 'function'\) uiNumForget\('uw:'\);/);
+});
+
+test('값 바뀜 D2 검수: 삭제한 항목 탭 — 진짜 글자 노드(splitText)가 있으면 개수만 .nv 칸으로 감싸 그 숫자만 올린다, 탭 글자는 그대로', () => {
+  const app = trashClient().app;
+  const plays = [];
+  const tab = {
+    id: 'settingsTrashTab', firstChild: null, num: null,
+    set textContent(value) { this._text = value; this.firstChild = { length: value.length, splitText: n => ({ replaceWith: (span) => { tab.num = span; } }) }; },
+    get textContent() { return this._text; },
+  };
+  app.context.__tab = tab;
+  app.run("document.getElementById = (id) => (id === 'settingsTrashTab' ? __tab : null); window.matchMedia = () => ({ matches: false });");
+  app.run("window.innerWidth = 1200; window.innerHeight = 4000; uiActAt = 0; uiActQuiet = false; uiActInText = false; uiKeyAt = 0; uiComposingEl = null; uiSchedOpen = null; document.activeElement = null; document.hidden = false;");
+  if (typeof app.run('document.querySelector') !== 'function') app.run('document.querySelector = () => null');
+  app.run("const __mk = document.createElement.bind(document); document.createElement = (t) => { const e = __mk(t); e.animate = (f, o) => { __plays.push([f, o.duration]); return {}; }; return e; };".replace('__plays', '__p'));
+  app.context.__p = plays;
+  app.run('settingsTrash = [1, 2, 3]; settingsTrashLabel();');
+  assert.equal(tab.textContent, '삭제한 항목 3', '탭 글자는 그대로');
+  assert.ok(tab.num, '개수 칸이 생겼다');
+  assert.equal(tab.num.className, 'nv');
+  assert.equal(tab.num.textContent, '3');
+  app.run('uiActMark({ type: "click", detail: 1 }); settingsTrash = [1, 2]; settingsTrashLabel();');
+  assert.equal(tab.num.textContent, '2');
+  assert.equal(plays.length, 1, '내 동작으로 줄면 그 숫자만 올라온다');
 });
 
 // 값 바뀜을 부르는 자리 — 열한 곳(전수 목록 4·18·79·114·146·157·194·205·212·229·246).
