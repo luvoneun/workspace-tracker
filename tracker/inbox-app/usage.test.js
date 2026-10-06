@@ -468,7 +468,7 @@ test('WP-W GET /api/usage — 기존 칸은 그대로, today와 보관 중인 �
   assert.equal(info.today, TODAY);
   assert.deepEqual(info.history, { [TODAY]: { task_done: 3, slack_in: 2 }, [ago(5)]: { task_add: 1 } });
   assert.equal(info.days, 30);
-  assert.equal(info.rows.length, 22);
+  assert.equal(info.rows.length, 24);
   assert.equal(info.rows.find(row => row.key === 'task_done').count, 3);
   assert.equal(typeof info.send, 'boolean');
   assert.equal(typeof info.canSend, 'boolean');
@@ -677,4 +677,22 @@ test('WP-Y 서버 배선 — GET /api/usage의 work는 업무 목록(보고 초�
   const after = await (await fetch(base + '/api/usage')).json();
   assert.deepEqual(after.work.done, { '2026-09-22': 1 });
   assert.deepEqual(after.work.inDirect, { '2026-09-23': 1 });
+});
+
+test('BJASSIGN2 지라 담당 바꾸기는 지라에 실제로 쓴 때만 숫자로 센다 — 이미 그 사람·실패는 빼고, 되돌리기는 따로', async (t) => {
+  const h = harness(t);
+  const answers = [
+    [{ kind: 'assignee', to: 'fixture-c', toName: '테스터C', expect: null }, { ok: true, assignee: '테스터C', undoId: 'x' }],
+    [{ kind: 'assignee', to: 'fixture-c', toName: '테스터C', expect: '테스터C' }, { ok: true, same: true, assignee: '테스터C' }],
+    [{ kind: 'assignee', to: null, expect: '테스터C' }, { ok: false, kind: 'assignForbidden' }],
+    [{ kind: 'assigneeUndo', undoId: 'x' }, { ok: true, assignee: null }],
+    [{ kind: 'status', transitionId: '21' }, { ok: true }],
+  ];
+  const fake = { create: async () => ({ ok: true }), change: async body => answers.find(([asked]) => asked === body)[1] };
+  const counted = h.usage.countJira(fake);
+  for (const [body] of answers) await counted.change(body);
+  const today = JSON.parse(fs.readFileSync(h.usageFile, 'utf8')).days[TODAY];
+  assert.deepEqual(today, { jira_assign: 1, jira_assign_undo: 1 });
+  assert.doesNotMatch(fs.readFileSync(h.usageFile, 'utf8'), /fixture-c|테스터C|AB-1/, '숫자만 — 이름·키·계정 id는 싣지 않는다');
+  assert.ok(USAGE_KEYS.some(([key, label]) => key === 'jira_assign' && label === '지라 담당 바꾸기'));
 });

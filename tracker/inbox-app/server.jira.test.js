@@ -2335,3 +2335,249 @@ test('추가 조회 키 100개 가운데 지워진 키 하나면 상한 안에�
   assert.ok(!issues.some(issue => issue.key === 'IO-77'));
   assert.ok(fake.calls.length - 1 <= 16, `추가 조회 ${fake.calls.length - 1}번`);
 });
+
+// ---------- 담당자 바꾸기(BJASSIGN2) ----------
+// 가짜 지라: 티켓 AB-1의 지금 담당(`current`)을 들고, 맡을 수 있는 사람 검색·담당 읽기·PUT·최근 티켓 검색에 답한다.
+// 지라가 실제로 주듯 사람 덩어리에 이메일·아바타·시간대를 싣는다 — 서버가 버리는지 보려는 것.
+const ASSIGN_ME = 'fixture-assign-me';
+const assignPeople = [
+  { accountId: ASSIGN_ME, displayName: '테스터A', active: true, accountType: 'atlassian' },
+  { accountId: 'fixture-b1', displayName: '테스터B', active: true, accountType: 'atlassian' },
+  { accountId: 'fixture-b2', displayName: '테스터B', active: true, accountType: 'atlassian' },
+  { accountId: 'fixture-c', displayName: '테스터C', active: true, accountType: 'atlassian' },
+  { accountId: 'fixture-e', displayName: '테스터E', active: false, accountType: 'atlassian' },
+  { accountId: 'fixture-bot', displayName: '테스터봇', active: true, accountType: 'app' },
+];
+const withSecrets = user => ({ ...user, emailAddress: `${user.accountId}@example.test`, avatarUrls: { '48x48': 'https://avatar.example.test/a.png' }, timeZone: 'Asia/Seoul' });
+function assignFake({ current = null, people = assignPeople, putStatus = 204, putThrows = false, readStatus = 200, latest = { 'fixture-b1': '결제 리뉴얼 iOS', 'fixture-b2': '알림센터 서버' } } = {}) {
+  const state = { current, putStatus };
+  const calls = [];
+  const request = async (url, options = {}) => {
+    const method = options.method || 'GET';
+    const body = options.body ? JSON.parse(options.body) : null;
+    calls.push({ url: String(url), method, body });
+    const at = new URL(String(url));
+    if (at.pathname === '/rest/api/3/myself') return json({ accountId: ASSIGN_ME, displayName: '테스터A', emailAddress: JIRA_EMAIL });
+    if (at.pathname === '/rest/api/3/user/assignable/search') {
+      const query = at.searchParams.get('query') || '';
+      return json(people.filter(user => user.displayName.includes(query)).map(withSecrets));
+    }
+    if (at.pathname === '/rest/api/3/search/jql' && method === 'POST') {
+      const id = (body.jql.match(/assignee = "([^"]+)"/) || [])[1];
+      return json({ issues: latest[id] ? [{ key: 'AB-9', fields: { summary: latest[id] } }] : [] });
+    }
+    if (at.pathname === '/rest/api/3/issue/AB-1' && method === 'GET') {
+      if (readStatus !== 200) return json({ errorMessages: ['원문'] }, readStatus);
+      const who = people.find(user => user.accountId === state.current);
+      return json({ fields: { assignee: who ? withSecrets(who) : null } });
+    }
+    if (at.pathname === '/rest/api/3/issue/AB-1/assignee' && method === 'PUT') {
+      if (putThrows) throw new TypeError('fetch failed');
+      if (state.putStatus !== 204) return json({ errorMessages: ['지라 원문 오류 — 화면에 나오면 안 된다'] }, state.putStatus);
+      state.current = body.accountId;
+      return new Response(null, { status: 204 });
+    }
+    return json({ errorMessages: ['no route'] }, 404);
+  };
+  return { request, calls, state };
+}
+const assignApi = (fake, extra = {}) => jiraModule.createJiraApi({ config: jiraConfig, request: fake.request, readFile: () => JIRA_TOKEN, ...extra });
+const assignPuts = fake => fake.calls.filter(call => call.method === 'PUT');
+
+test('BJASSIGN2: 사람 찾기는 이 티켓에 맡길 수 있는 사람만, 이메일·아바타 없이 id·이름만 돌려준다', async () => {
+  const fake = assignFake();
+  const payload = await assignApi(fake).assignable('AB-1', '테스');
+  assert.equal(payload.ok, true);
+  assert.deepEqual(payload.users.map(user => [user.name, !!user.me]), [['테스터A', true], ['테스터B', false], ['테스터B', false], ['테스터C', false]],
+    '비활성(테스터E)·앱 계정(테스터봇)은 뺀다');
+  const text = JSON.stringify(payload);
+  assert.doesNotMatch(text, /emailAddress|avatar|timeZone|@example\.test|accountType|active/);
+  // 같은 이름 둘은 최근 맡은 티켓 요약으로 가른다(본문 JQL로 묻는다 — 주소에 id가 실리지 않는다).
+  assert.deepEqual(payload.users.filter(user => user.name === '테스터B').map(user => user.hint), ['최근 · 결제 리뉴얼 iOS', '최근 · 알림센터 서버']);
+  const search = fake.calls.find(call => call.url.includes('/user/assignable/search'));
+  assert.match(search.url, /issueKey=AB-1&query=%ED%85%8C%EC%8A%A4&maxResults=20$/);
+  // 지라로 가는 주소 어디에도 accountId가 없다.
+  for (const call of fake.calls) for (const user of assignPeople) assert.ok(!call.url.includes(user.accountId), call.url);
+  // 못 읽으면 `같은 이름 2명 중 1`·`2`.
+  const blind = await assignApi(assignFake({ latest: {} })).assignable('AB-1', '테스터B');
+  assert.deepEqual(blind.users.map(user => user.hint), ['같은 이름 2명 중 1', '같은 이름 2명 중 2']);
+});
+
+test('BJASSIGN2: 사람 찾기는 두 글자부터, 키 형식이 맞을 때만, 연결 안 됨이면 지라를 부르지 않는다', async () => {
+  const fake = assignFake();
+  const api = assignApi(fake);
+  assert.equal((await api.assignable('AB-1', '테')).kind, 'value');
+  assert.equal((await api.assignable('AB-1', ' 테 ')).kind, 'value');
+  assert.equal((await api.assignable('nope', '테스')).kind, 'key');
+  assert.equal(fake.calls.length, 0);
+  assert.deepEqual(await jiraModule.createJiraApi({ config: {}, request: fake.request }).assignable('AB-1', '테스'), { ok: true, connected: false });
+  assert.equal(fake.calls.length, 0);
+});
+
+test('BJASSIGN2: 맡기기는 지금 담당을 다시 읽어 대조하고, 맡을 수 있는지 확인한 뒤 PUT 한 번만 한다', async () => {
+  const fake = assignFake({ current: null });
+  const api = assignApi(fake);
+  const done = await api.change({ key: 'AB-1', kind: 'assignee', to: 'fixture-c', toName: '테스터C', expect: null });
+  assert.equal(done.ok, true);
+  assert.equal(done.assignee, '테스터C');
+  assert.match(done.undoId, /^[0-9a-f-]{36}$/);
+  assert.deepEqual(Object.keys(done).sort(), ['assignee', 'ok', 'undoId']);
+  const puts = assignPuts(fake);
+  assert.equal(puts.length, 1, '요청 하나에 PUT 하나');
+  assert.deepEqual(puts[0].body, { accountId: 'fixture-c' });
+  assert.ok(puts[0].url.endsWith('/rest/api/3/issue/AB-1/assignee'));
+  // 순서: 지금 담당 읽기 → 맡을 수 있나(이름으로 찾기) → PUT. 주소 어디에도 accountId가 없다.
+  assert.deepEqual(fake.calls.map(call => `${call.method} ${new URL(call.url).pathname}`),
+    ['GET /rest/api/3/issue/AB-1', 'GET /rest/api/3/user/assignable/search', 'PUT /rest/api/3/issue/AB-1/assignee']);
+  for (const call of fake.calls) assert.doesNotMatch(call.url, /fixture-c|accountId/);
+  assert.doesNotMatch(JSON.stringify(done), /fixture-c/);
+
+  // 빼기는 `{ accountId: null }` 하나다.
+  const out = await api.change({ key: 'AB-1', kind: 'assignee', to: null, expect: '테스터C' });
+  assert.deepEqual({ ok: out.ok, assignee: out.assignee }, { ok: true, assignee: null });
+  assert.deepEqual(assignPuts(fake)[1].body, { accountId: null });
+});
+
+test('BJASSIGN2: 대조가 어긋나면 PUT 0번 — 그 사이 바뀜·맡을 수 없는 사람·이미 그 사람', async () => {
+  const stale = assignFake({ current: 'fixture-c' });
+  const changed = await assignApi(stale).change({ key: 'AB-1', kind: 'assignee', to: 'fixture-b1', toName: '테스터B', expect: null });
+  assert.deepEqual(changed, { ok: false, kind: 'assigneeStale', error: '그 사이 지라에서 담당이 테스터C로 바뀌었어요. 확인하고 다시 골라 주세요.', assignee: '테스터C' });
+  assert.equal(assignPuts(stale).length, 0);
+
+  const outsider = assignFake({ current: null, people: assignPeople.filter(user => user.accountId !== 'fixture-c') });
+  const refused = await assignApi(outsider).change({ key: 'AB-1', kind: 'assignee', to: 'fixture-c', toName: '테스터C', expect: null });
+  assert.deepEqual(refused, { ok: false, kind: 'notAssignable', error: '테스터C는 이 티켓을 맡을 수 없어요(지라 권한). 다른 사람을 골라 주세요.' });
+  assert.equal(assignPuts(outsider).length, 0);
+  // 비활성·앱 계정도 맡을 수 없는 사람이다.
+  for (const [to, toName] of [['fixture-e', '테스터E'], ['fixture-bot', '테스터봇']]) {
+    const fake = assignFake();
+    assert.equal((await assignApi(fake).change({ key: 'AB-1', kind: 'assignee', to, toName, expect: null })).kind, 'notAssignable');
+    assert.equal(assignPuts(fake).length, 0);
+  }
+
+  const same = assignFake({ current: 'fixture-c' });
+  assert.deepEqual(await assignApi(same).change({ key: 'AB-1', kind: 'assignee', to: 'fixture-c', toName: '테스터C', expect: '테스터C' }), { ok: true, same: true, assignee: '테스터C' });
+  assert.equal(assignPuts(same).length, 0);
+  // 담당이 없는데 빼기도 쓰지 않는다.
+  const empty = assignFake({ current: null });
+  assert.equal((await assignApi(empty).change({ key: 'AB-1', kind: 'assignee', to: null, expect: null })).same, true);
+  assert.equal(assignPuts(empty).length, 0);
+});
+
+test('BJASSIGN2: 같은 요청을 3초 안에 두 번 받으면 두 번째는 쓰지 않는다', async () => {
+  let clock = 1000;
+  const fake = assignFake({ current: null });
+  const api = assignApi(fake, { now: () => clock });
+  const body = { key: 'AB-1', kind: 'assignee', to: 'fixture-c', toName: '테스터C', expect: null };
+  assert.equal((await api.change(body)).ok, true);
+  assert.deepEqual(await api.change(body), { ok: true, same: true, assignee: '테스터C' });
+  assert.equal(assignPuts(fake).length, 1);
+  clock += 3001;
+  // 3초가 지나면 다시 대조한다 — 지금은 테스터C라 화면이 본 `없음`과 어긋나 멈춘다.
+  assert.equal((await api.change(body)).kind, 'assigneeStale');
+  assert.equal(assignPuts(fake).length, 1);
+});
+
+test('BJASSIGN2: 401과 403은 문구가 갈리고, 쓰는 중에 끊기면 반영 여부를 모른다고 말한다', async () => {
+  const run = async options => assignApi(assignFake({ current: null, ...options }))
+    .change({ key: 'AB-1', kind: 'assignee', to: 'fixture-c', toName: '테스터C', expect: null });
+  assert.deepEqual(await run({ putStatus: 401 }), { ok: false, kind: 'auth', error: '지라 토큰을 확인해 주세요.' });
+  assert.deepEqual(await run({ putStatus: 403 }), { ok: false, kind: 'assignForbidden', error: '지라에서 이 티켓의 담당을 바꿀 권한이 없어요.' });
+  assert.deepEqual(await run({ putStatus: 400 }), { ok: false, kind: 'reject', error: '지라가 이 변경을 받아들이지 않았어요. 지라에서 직접 확인해 주세요.' });
+  assert.deepEqual(await run({ putThrows: true }), { ok: false, kind: 'assignUnsure', error: '지라에 반영됐는지 확인하지 못했어요 — 카드를 새로 읽었어요.' });
+  assert.deepEqual(await run({ readStatus: 401 }), { ok: false, kind: 'auth', error: '지라 토큰을 확인해 주세요.' });
+  // 기존 쓰기(상태·버전·기한)의 401·403은 예전처럼 합쳐서 `권한이 없어요`다.
+  assert.equal(jiraModule.writeKind({ status: 401 }), 'forbidden');
+  for (const options of [{ putStatus: 403 }, { putStatus: 400 }, { putStatus: 500 }]) {
+    const text = JSON.stringify(await run(options));
+    assert.doesNotMatch(text, /지라 원문 오류|fixture-c|@example\.test/);
+    assert.doesNotMatch(text, new RegExp(JIRA_TOKEN));
+  }
+});
+
+test('BJASSIGN2: 되돌리기는 직전 담당으로 한 번만, 그 사이 다시 바뀌었으면 쓰지 않는다', async () => {
+  const fake = assignFake({ current: null });
+  const api = assignApi(fake);
+  const done = await api.change({ key: 'AB-1', kind: 'assignee', to: 'fixture-c', toName: '테스터C', expect: null });
+  const undo = await api.change({ key: 'AB-1', kind: 'assigneeUndo', undoId: done.undoId });
+  assert.deepEqual(undo, { ok: true, assignee: null });
+  assert.deepEqual(assignPuts(fake).map(call => call.body), [{ accountId: 'fixture-c' }, { accountId: null }]);
+  // 한 번만 — 두 번째는 쓰지 않는다.
+  assert.deepEqual(await api.change({ key: 'AB-1', kind: 'assigneeUndo', undoId: done.undoId }), { ok: false, kind: 'undoGone', error: '되돌릴 수 있는 시간이 지났어요.' });
+  assert.equal(assignPuts(fake).length, 2);
+  // 되돌린 뒤 곧바로 같은 사람에게 다시 맡기면 쓰인다(3초 기억이 막지 않는다).
+  assert.equal((await api.change({ key: 'AB-1', kind: 'assignee', to: 'fixture-c', toName: '테스터C', expect: null })).same, undefined);
+  assert.equal(assignPuts(fake).length, 3);
+
+  // 그 사이 다른 사람이 바꿨으면 되돌리지 않는다(accountId로 대조).
+  const moved = assignFake({ current: 'fixture-c' });
+  const movedApi = assignApi(moved);
+  const first = await movedApi.change({ key: 'AB-1', kind: 'assignee', to: 'fixture-b1', toName: '테스터B', expect: '테스터C' });
+  moved.state.current = 'fixture-b2';   // 같은 이름 다른 사람 — 이름이 아니라 id로 대조하므로 잡힌다
+  assert.deepEqual(await movedApi.change({ key: 'AB-1', kind: 'assigneeUndo', undoId: first.undoId }), { ok: false, kind: 'undoStale', error: '그 사이 지라에서 다시 바뀌어 되돌리지 않았어요.' });
+  assert.equal(assignPuts(moved).length, 1);
+
+  // 10분이 지나면 되돌릴 수 없다.
+  let clock = 0;
+  const late = assignFake({ current: null });
+  const lateApi = assignApi(late, { now: () => clock });
+  const made = await lateApi.change({ key: 'AB-1', kind: 'assignee', to: 'fixture-c', toName: '테스터C', expect: null });
+  clock = 10 * 60 * 1000;
+  assert.equal((await lateApi.change({ key: 'AB-1', kind: 'assigneeUndo', undoId: made.undoId })).kind, 'undoGone');
+  // 되돌리다 지라가 거절하면 지금 담당 이름을 말하고, 한 번 쓴 되돌리기는 다시 쓰지 못한다.
+  const broken = assignFake({ current: null });
+  const brokenApi = assignApi(broken);
+  const given = await brokenApi.change({ key: 'AB-1', kind: 'assignee', to: 'fixture-c', toName: '테스터C', expect: null });
+  broken.state.putStatus = 500;
+  assert.deepEqual(await brokenApi.change({ key: 'AB-1', kind: 'assigneeUndo', undoId: given.undoId }), { ok: false, kind: 'undoFail', error: '되돌리지 못했어요 — 담당은 테스터C 그대로예요.' });
+  assert.equal((await brokenApi.change({ key: 'AB-1', kind: 'assigneeUndo', undoId: given.undoId })).kind, 'undoGone');
+});
+
+test('BJASSIGN2: 요청 하나는 티켓 하나·사람 하나 — 모양이 다르면 지라를 부르지 않는다', async () => {
+  const fake = assignFake();
+  const api = assignApi(fake);
+  const bad = [
+    { key: 'AB-1', kind: 'assignee' },                                         // to 없음
+    { key: 'AB-1', kind: 'assignee', to: ['fixture-c'], toName: '테스터C' },     // 여러 사람
+    { key: ['AB-1', 'AB-2'], kind: 'assignee', to: 'fixture-c', toName: '테스터C' },
+    { key: 'AB-1', kind: 'assignee', to: 'fixture-c' },                        // 이름 없음
+    { key: 'AB-1', kind: 'assignee', to: '../x?y', toName: '테스터C' },
+    { key: 'AB-1', kind: 'assignee', to: '-1', toName: '자동' },
+    { key: 'AB-1', kind: 'assignee', to: null, expect: 'a\nb' },
+    { key: 'AB-1', kind: 'assigneeUndo', undoId: 'nope' },
+  ];
+  for (const body of bad) {
+    const result = await api.change(body);
+    assert.ok(['key', 'value'].includes(result.kind), JSON.stringify(body));
+  }
+  assert.equal(fake.calls.length, 0);
+});
+
+test('BJASSIGN2: 띠·하위 응답에는 계정 id가 없고, 지금 담당이 비활성이면 그 표시만 붙는다', async () => {
+  const fake = jiraFake({
+    '/rest/api/3/issue/AB-1?fields': () => json(jiraIssueBody({ assignee: { displayName: '테스터E', active: false, accountId: 'fixture-e', emailAddress: 'e@example.test' } })),
+    '/search/jql': () => json({ issues: [{ key: 'AB-2', fields: { summary: '하위', status: { name: '할 일', statusCategory: { key: 'new' } }, assignee: { displayName: '테스터E', active: false, accountId: 'fixture-e' } } }] }),
+  });
+  const payload = await jiraModule.createJiraApi({ config: jiraConfig, request: fake.request, readFile: () => JIRA_TOKEN }).read('AB-1');
+  assert.equal(payload.issue.assignee, '테스터E');
+  assert.equal(payload.issue.assigneeInactive, true);
+  assert.equal(payload.issue.children.items[0].assigneeInactive, true);
+  assert.doesNotMatch(JSON.stringify(payload), /fixture-e|accountId|emailAddress/);
+});
+
+test('BJASSIGN2: /api/jira/assignable는 두 글자 미만·틀린 키면 400, 연결 안 됨이면 지라를 묻지 않고, 파일을 쓰지 않는다', async () => {
+  const snapshot = () => fs.readdirSync(directory).sort().map((name) => {
+    const stat = fs.statSync(path.join(directory, name));
+    return `${name}:${stat.size}:${stat.mtimeMs}`;
+  }).join('|');
+  const before = snapshot();
+  const off = await fetch(`${base}/api/jira/assignable?key=AB-1&q=${encodeURIComponent('테스')}`);
+  assert.equal(off.status, 200);
+  assert.deepEqual(await off.json(), { ok: true, connected: false });
+  assert.equal((await fetch(`${base}/api/jira/assignable?key=AB-1&q=a`)).status, 400);
+  assert.equal((await fetch(`${base}/api/jira/assignable?key=bad&q=ab`)).status, 400);
+  const change = await post('/api/jira/change', { key: 'AB-1', kind: 'assignee', to: 'fixture-c', toName: '테스터C', expect: null });
+  assert.equal(change.kind, 'off');
+  assert.equal((await post('/api/jira/change', { key: 'AB-1', kind: 'assignee', to: ['x'] })).status, 400);
+  assert.equal(snapshot(), before);
+});
