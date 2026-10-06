@@ -1165,8 +1165,8 @@ button.d-guide .t { color: var(--accent-text); }
 .d-lhd .sub .cnt .gl, .d-wrapsum.cnt .gl { width: 12px; height: 12px; flex: none; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .d-lhd .sub .cnt.is-full, .d-wrapsum.cnt.is-full { background: var(--success-bg); color: var(--success); }
 .d-lhd .sub .cnt b { display: inline-block; font-weight: 600; }
-.d-lhd .sub .cnt b.tick { animation: d-tick var(--t-move) var(--ease); }
-@keyframes d-tick { from { transform: translateY(4px); opacity: 0.35; } to { transform: none; opacity: 1; } }
+.nv { display: inline-block; }
+.nv[hidden], .nv:empty { display: none; }
 .d-lhd .sp { margin-left: auto; }
 .d-headmore { color: var(--dim); }
 
@@ -1329,7 +1329,6 @@ body.batch-open .d-row.is-done { opacity: 0.6; }
 @media (prefers-reduced-motion: reduce) {
   .d-cb.is-pop:checked, .d-wcb.is-pop:checked, .d-row.is-completing .d-title, .d-mrow2.is-completing .ti, .d-prow2.is-completing .ti { animation: none; }
   .d-lhd .sub .cnt { transition: none; }
-  .d-lhd .sub .cnt b.tick { animation: none; }
 }
 
 /* 여러 개 선택 중에는 완료 체크 자리(첫 칸 30px)에 선택 칸이 대신 선다 — 열을 더하지 않아 줄이 밀리지 않는다.
@@ -2067,7 +2066,7 @@ body.batch-open .d-toast { bottom: 76px; }
    값 글자 줄(28px)에 맞춰 아래에 붙는다 */
 .d-jira .cells > .foot { flex: 1 1 420px; align-self: flex-end; min-width: 0; min-height: var(--h-sm); }
 .d-jira .bar { display: inline-block; width: 84px; height: 6px; border-radius: 999px; background: var(--prog-track); overflow: hidden; }
-.d-jira .bar i { display: block; height: 100%; background: var(--success); border-radius: 999px; }
+.d-jira .bar i { display: block; width: 100%; height: 100%; background: var(--success); border-radius: 999px; }
 /* 접힌 줄의 담당별 요약(미완료만) — 이름이 곧 거르개다(별도 토글·드롭다운을 두지 않는다).
    색은 붙지 않고 거르는 중인 이름만 굵어진다. 줄 끝 꺾쇠가 목록을 펼친다 */
 .d-jira .foot .who { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 0 5px; min-width: 0; }

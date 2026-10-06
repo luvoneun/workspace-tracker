@@ -4068,6 +4068,15 @@ function settingsTrashLabel() {
   if (!tab) return;
   const count = settingsTrash ? settingsTrash.length : 0;
   tab.textContent = count ? `삭제한 항목 ${count}` : '삭제한 항목';
+  // 개수만 따로 감싸 그 숫자만 톡 한다 — 탭 글자(`삭제한 항목 3`)는 그대로 읽힌다.
+  const label = tab.firstChild;
+  if (count && typeof uiNumTick === 'function' && label && typeof label.splitText === 'function') {
+    const num = document.createElement('span');
+    num.className = 'nv';
+    label.splitText(label.length - String(count).length).replaceWith?.(num);
+    num.textContent = String(count);
+    uiNumTick(num, 'trash:tab');
+  } else if (typeof uiNumLast !== 'undefined') uiNumLast.set('trash:tab', String(count));
 }
 
 async function settingsTrashLoad() {

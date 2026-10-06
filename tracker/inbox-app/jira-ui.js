@@ -963,7 +963,9 @@ function jiraChildFoot(seat, children, items, open, issueKey = '') {
   bar.setAttribute('role', 'img');
   bar.setAttribute('aria-label', `하위 티켓 ${children.text}`);
   const fill = document.createElement('i');
-  fill.setAttribute('style', `width:${children.ratio}%`);
+  // 칸은 늘 가득이고 transform으로 찬다(uiNumBar — 막대 틀이 넘친 곳을 자른다). 열쇠는 이슈 키.
+  if (typeof uiNumBar === 'function' && issueKey) uiNumBar(fill, `jbar:${issueKey}`, children.ratio);
+  else fill.setAttribute('style', `transform:translateX(${Math.max(0, Math.min(100, Number(children.ratio) || 0)) - 100}%)`);
   bar.appendChild(fill);
   const count = document.createElement('span');
   count.textContent = children.text;

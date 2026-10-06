@@ -241,20 +241,26 @@ function panelMeetingResult(event, box, host = MEETING_HOST_CARD) {
     row.append(label, action);
     card.appendChild(row);
   };
-  const doneNote = () => {
+  const doneNote = (ids = []) => {
     const note = document.createElement('span');
     note.className = 'k-mute';
     note.textContent = '오늘 할 일 ✓';
+    // 방금 `오늘로`를 눌러 바뀐 줄만 새 글자가 올라온다(값 바뀜) — 처음 여는 그리기·다른 동작의 다시 그리기는 그냥 선다.
+    const fresh = ids.filter(id => (result.promoted || []).includes(id) && !(result.promotedShown || []).includes(id));
+    if (fresh.length && typeof uiNumRise === 'function') {
+      (result.promotedShown ||= []).push(...fresh);
+      uiNumRise(note);
+    }
     return note;
   };
   if (tasks.length && tasks.length <= 3) {
     tasks.forEach(task => taskRow(task.description, task.today
-      ? doneNote()
+      ? doneNote([task.itemId])
       : panelRunButton('오늘로', () => panelPromoteTasks(result, [task.itemId], host), 'd-btn sm', host)));
   } else if (tasks.length) {
     taskRow(later.length ? `나중에 담긴 할 일 ${later.length}개` : `할 일 ${tasks.length}개`, later.length
       ? panelRunButton('모두 오늘로', () => panelPromoteTasks(result, later.map(task => task.itemId), host), 'd-btn sm', host)
-      : doneNote());
+      : doneNote(tasks.map(task => task.itemId)));
   }
 
   const next = wfNextReview(event.id);
@@ -1734,6 +1740,7 @@ function renderMeetingsNow(listEl, body) {
   const headCount = document.createElement('span');
   headCount.className = 'n num';
   headCount.textContent = rows.length;
+  if (typeof uiNumTick === 'function') uiNumTick(headCount, 'mt:head');
   head.append(headName, headCount);
   // 머리 오른쪽 끝 — 오늘 가져올 미팅 노트가 있으면 버튼(+개수), 없으면 조용한 상태 글자 + `다시 확인`.
   const notesLast = [];
@@ -1976,10 +1983,12 @@ function meetingsTabRow(event, opts = {}) {
   const badge = document.createElement('span');
   badge.className = 'ct num';
   if (drafts) { badge.textContent = `초안 ${drafts}`; badge.title = `AI가 뽑은 초안 ${drafts}개를 아직 검토하지 않았어요`; }
+  if (typeof uiNumTick === 'function') uiNumTick(badge, `mtt:ct:${event.id}`);
   const state = document.createElement('span');
   state.className = 'st num';
   if (!drafts && open) {
     state.textContent = `미완료 ${open}`;
+    if (typeof uiNumTick === 'function') uiNumTick(state, `mtt:st:${event.id}`);
     state.title = `이 회의에서 나온 할 일·확인 대기 중 ${open}개가 아직 안 끝났어요`;
   }
 

@@ -20,7 +20,7 @@
 .d-uwperiod { margin: 0; font-size: var(--fs-cap); color: var(--dim); }
 .d-uwempty { margin: 0; }
 .d-uwbig { margin: 0; font-size: 17px; font-weight: 600; line-height: 1.4; color: var(--text); word-break: keep-all; }
-.d-uwbig b { font-weight: 800; color: var(--accent-text); font-variant-numeric: tabular-nums; }
+.d-uwbig b { display: inline-block; font-weight: 800; color: var(--accent-text); font-variant-numeric: tabular-nums; }
 .d-uwsub { margin: -6px 0 0; font-size: var(--fs-sm); line-height: 1.5; color: var(--muted); word-break: keep-all; }
 .d-uwcmp { color: var(--text); font-weight: 600; }
 .d-uwtiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
@@ -46,7 +46,7 @@
 .d-uwbars.is-d90 { gap: 2px; }
 .d-uwcol { display: flex; flex: 1 1 0; flex-direction: column; gap: 4px; min-width: 0; }
 .d-uwpair { display: flex; flex: 1 1 0; align-items: flex-end; justify-content: center; gap: 2px; min-height: 0; box-shadow: inset 0 -1px 0 var(--hair); }
-.d-uwbar { width: min(12px, 40%); border-radius: 3px 3px 0 0; background: var(--check-line); }
+.d-uwbar { transform-origin: bottom; width: min(12px, 40%); border-radius: 3px 3px 0 0; background: var(--check-line); }
 .d-uwbar.done { background: var(--accent); }
 .d-uwcol.is-future .d-uwbar { height: 2px; background: var(--hair); }
 .d-uwlab { min-height: 14px; font-size: 11px; line-height: 14px; text-align: center; white-space: nowrap; color: var(--dim); font-variant-numeric: tabular-nums; }

@@ -893,6 +893,53 @@ function uiGlideMode() {
 function uiGlideAllowed() {
   return uiGlideMode() === 'all';
 }
+// ---- 값 바뀜 (모션 부품 ④ — DESIGN.md 모션 절) ----
+// 숫자를 적은 뒤 부른다: 같은 열쇠의 지난 값과 달라졌고 내 동작 직후(uiGlideMode)면 새 숫자가 아래 4px에서 올라온다(rise, 200ms).
+// kind 'pop'은 옮겨 간 목적지 숫자 — 1.12배로 한 번 톡 커졌다 돌아온다(200ms). 자동 갱신·글자 입력·가려진 창·움직임 줄이기는 그냥 바뀐다.
+// 열쇠로 지난 값을 기억해서 목록을 다시 그려 새 요소가 된 숫자도 이어진다. 처음 보는 열쇠는 움직이지 않는다.
+// 시간은 ui.css의 --t-move와 같다(el.animate는 var()를 못 읽는다).
+const UI_NUM = { rise: 200, pop: 200 };
+const uiNumLast = new Map();
+// 열쇠 없이 "지금 막 바뀐 값"을 올리는 한 줄(부르는 쪽이 값이 방금 바뀐 것을 안다). 붙인 뒤에 돌도록 한 틱 미룬다.
+function uiNumRise(el) {
+  if (uiGlideMode() !== 'all' || detailReduce() || typeof el.animate !== 'function') return;
+  Promise.resolve().then(() => el.animate([{ transform: 'translateY(4px)', opacity: 0.35 }, { transform: 'none', opacity: 1 }], { duration: UI_NUM.rise, easing: UI_GLIDE.ease }));
+}
+function uiNumTick(el, key, kind = 'rise') {
+  if (!el) return;
+  const text = el.textContent;
+  const prev = uiNumLast.get(key);
+  uiNumLast.set(key, text);
+  if (prev === undefined || prev === text || typeof el.animate !== 'function') return;
+  if (uiGlideMode() !== 'all' || detailReduce()) return;
+  el.animate(kind === 'pop'
+    ? [{ transform: 'scale(1)' }, { transform: 'scale(1.12)', offset: 0.4 }, { transform: 'scale(1)' }]
+    : [{ transform: 'translateY(4px)', opacity: 0.35 }, { transform: 'none', opacity: 1 }],
+  { duration: kind === 'pop' ? UI_NUM.pop : UI_NUM.rise, easing: UI_GLIDE.ease });
+}
+// 막대 그래프: 값 묶음(signature)이 지난번(같은 열쇠)과 달라졌고 움직일 수 있는 때면 막대가 바닥에서 자란다(scaleY 0 → 1, 200ms).
+// 막대의 자리·높이는 그대로고 transform만 움직인다(바닥 기준 — ui css .d-uwbar transform-origin).
+function uiNumGrow(bars, key, signature) {
+  const prev = uiNumLast.get(key);
+  uiNumLast.set(key, signature);
+  if (prev === undefined || prev === signature) return;
+  if (uiGlideMode() !== 'all' || detailReduce()) return;
+  bars.forEach((bar) => {
+    if (typeof bar.animate === 'function') bar.animate([{ transform: 'scaleY(0)' }, { transform: 'none' }], { duration: UI_NUM.rise, easing: UI_GLIDE.ease });
+  });
+}
+// 막대는 칸 폭이 아니라 transform으로 찬다 — 칸은 늘 가득이고 (100 - 비율)% 만큼 왼쪽으로 밀려 있다(막대 틀이 넘친 곳을 자른다).
+// 지난 값(같은 열쇠)에서 지금 값으로 200ms 미끄러진다. 움직일 수 없는 때(자동 갱신 등)는 바로 지금 값.
+function uiNumBar(el, key, ratio) {
+  const now = Math.max(0, Math.min(100, Number(ratio) || 0));
+  const prev = uiNumLast.get(key);
+  uiNumLast.set(key, String(now));
+  el.setAttribute('style', `transform:translateX(${now - 100}%)`);
+  if (prev === undefined || Number(prev) === now || typeof el.animate !== 'function') return;
+  if (uiGlideMode() !== 'all' || detailReduce()) return;
+  el.animate([{ transform: `translateX(${Number(prev) - 100}%)` }, { transform: `translateX(${now - 100}%)` }],
+    { duration: UI_NUM.rise, easing: UI_GLIDE.ease });
+}
 // 줄마다 자리와 "화면에 보이는가"를 잰다. 열쇠는 업무 id(새로 들어온 것 줄·그룹 제목·그 밖의 목록은 data-move-id, 레일 줄은 data-rail-id).
 // sized = 높이가 있었다(숨은 탭·접힌 구역 안의 줄은 자리가 전부 0이라 옛 자리로 쓸 수 없다).
 function uiGlideKey(row) {
@@ -2305,6 +2352,7 @@ async function load() {
   const tabNum = document.getElementById('tabRecordsNum');
   if (tabNum) {
     tabNum.textContent = pendingDecisions ? String(pendingDecisions) : '';
+    uiNumTick(tabNum, 'tab:records');
     tabNum.title = decisionPendingTitle(pendingDecisions);
   }
   // 회의 탭 이름 옆 숫자 — 검토를 기다리는 초안이 있는 회의 수(아이디어·결정과 같은 부품·같은 때).
@@ -2312,6 +2360,7 @@ async function load() {
   const tabMeetings = document.getElementById('tabMeetingsNum');
   if (tabMeetings) {
     tabMeetings.textContent = reviewMeetings ? String(reviewMeetings) : '';
+    uiNumTick(tabMeetings, 'tab:meetings');
     tabMeetings.title = reviewMeetings ? `검토할 초안이 있는 회의 ${reviewMeetings}개` : '';
   }
 
@@ -2572,6 +2621,7 @@ function renderCalendarNow(calendar) {
     const count = document.createElement('span');
     count.className = 'ct num';
     count.textContent = event.draftCount ? `초안 ${event.draftCount}` : '';
+    uiNumTick(count, `mt:ct:${row.dataset.meetingId}`);
     if (event.draftCount) count.title = `AI가 뽑은 초안 ${event.draftCount}개를 아직 검토하지 않았어요`;
     row.appendChild(count);
 
@@ -3080,6 +3130,7 @@ function renderDecisions(items) {
   const countEl = document.getElementById('decisionSectionCount');
   countEl.textContent = items.length;
   countEl.hidden = !items.length;
+  uiNumTick(countEl, 'rec:decisions');
   countEl.title = decisionPendingTitle(items.length);
   const segBtn = document.getElementById('recordViewDecisionBtn');
   if (segBtn) segBtn.textContent = `결정 ${items.length}`;
@@ -3109,6 +3160,7 @@ function renderIdeas(items) {
   const countEl = document.getElementById('ideaCount');
   countEl.textContent = items.length;
   countEl.hidden = !items.length;
+  uiNumTick(countEl, 'rec:ideas');
   const segBtn = document.getElementById('recordViewIdeaBtn');
   if (segBtn) segBtn.textContent = `아이디어 ${items.length}`;
   renderRecordColumn(document.getElementById('ideaList'), items,
@@ -3392,7 +3444,9 @@ function renderLaterTasks(items) {
   uiRowsMove(document.getElementById('laterTaskList'), () => renderLaterTasksNow(items));
 }
 function renderLaterTasksNow(items) {
-  document.getElementById('laterTaskSectionCount').textContent = items.length;
+  const laterNum = document.getElementById('laterTaskSectionCount');
+  laterNum.textContent = items.length;
+  uiNumTick(laterNum, 'later:count', 'pop'); // 옮겨 간 목적지 — 톡
   document.getElementById('laterDrawerCount').textContent = items.length;
   laterToggleSync(items.length);
   const list = document.getElementById('laterTaskList');
@@ -6016,9 +6070,8 @@ function renderTodayChip(done, total) {
   chip.classList.toggle('is-full', done === total);
   const num = document.getElementById('todayDoneNum');
   if (num.textContent !== String(done)) {
-    const had = num.textContent !== '';
     num.textContent = done;
-    if (had) { num.classList.remove('tick'); void num.offsetWidth; num.classList.add('tick'); }
+    uiNumTick(num, 'chip:done');
   }
   document.getElementById('todayTotalNum').textContent = `/${total}`;
 }

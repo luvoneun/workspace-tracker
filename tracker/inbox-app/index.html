@@ -30,8 +30,8 @@
     <nav class="d-tabs" role="tablist" aria-label="화면">
       <button type="button" class="d-tab" id="tabBtnToday" role="tab">오늘</button>
       <button type="button" class="d-tab" id="tabBtnProjects" role="tab">프로젝트</button>
-      <button type="button" class="d-tab" id="tabBtnMeetings" role="tab">회의<span class="d-tabnum num" id="tabMeetingsNum"></span></button>
-      <button type="button" class="d-tab" id="tabBtnRecords" role="tab">아이디어·결정<span class="d-tabnum num" id="tabRecordsNum"></span></button>
+      <button type="button" class="d-tab" id="tabBtnMeetings" role="tab">회의<span class="d-tabnum num nv" id="tabMeetingsNum"></span></button>
+      <button type="button" class="d-tab" id="tabBtnRecords" role="tab">아이디어·결정<span class="d-tabnum num nv" id="tabRecordsNum"></span></button>
       <button type="button" class="d-tab" id="tabBtnWeekly" role="tab">주간요약</button>
     </nav>
     <button type="button" id="refreshBtn" class="d-iconbtn" aria-label="새로고침" title="새로고침"><svg class="d-i" viewBox="0 0 16 16" aria-hidden="true"><path d="M14 8a6 6 0 1 1-2-4.47L14 5.2"/><path d="M14 2v3.4h-3.4"/></svg></button>
@@ -47,7 +47,7 @@
         <!-- 한 줄 요약은 화면에서 내렸다(숫자는 탭 이름 옆과 카드 제목 옆으로 갔다).
              옛 자리에 있던 숫자 칸은 갱신 코드가 그대로 쓰도록 숨겨 둔 채 남는다. -->
         <div class="d-quiet" id="railSummary" hidden>
-          결정 검토 <span class="num" id="decisionCount">0</span> · 확인 대기 <span class="num" id="waitingCount">0</span>
+          결정 검토 <span class="num nv" id="decisionCount">0</span> · 확인 대기 <span class="num nv" id="waitingCount">0</span>
         </div>
 
         <section class="d-rsec" id="calendarZone">
@@ -62,7 +62,7 @@
 
         <!-- 확인 대기: 후속 알림이 카드 첫 줄로 올라오고, 입력칸은 카드 맨 아래에 있다 -->
         <section class="d-rsec" id="waitingZone">
-          <div class="d-rhd" id="waitingHeading"><span>확인 대기</span><span class="n num" id="waitingSectionCount">0</span><span class="sp"></span><span id="waitingHeadMore"></span></div>
+          <div class="d-rhd" id="waitingHeading"><span>확인 대기</span><span class="n num nv" id="waitingSectionCount">0</span><span class="sp"></span><span id="waitingHeadMore"></span></div>
           <div id="waitingList"></div>
           <input type="text" class="d-qa" id="waitingInput" placeholder="+ 확인 대기 추가" aria-label="확인 대기 추가" />
         </section>
@@ -99,7 +99,7 @@
             <h2>오늘 할 일</h2>
             <span class="sub num"><span class="cnt" id="todayTaskCount" role="img" hidden><svg class="gl" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.2 6.4 4.9 9 9.8 3.2"/></svg><span class="n" aria-hidden="true"><b id="todayDoneNum"></b><span id="todayTotalNum"></span></span></span></span>
             <span class="sp"></span>
-            <button type="button" class="d-btn" id="laterTaskToggle" aria-expanded="false" aria-controls="laterTaskDrawer">나중에 할 일 <span class="num" id="laterTaskSectionCount">0</span></button>
+            <button type="button" class="d-btn" id="laterTaskToggle" aria-expanded="false" aria-controls="laterTaskDrawer">나중에 할 일 <span class="num nv" id="laterTaskSectionCount">0</span></button>
             <span id="todayHeadMore"></span>
           </div>
           <div class="task-content-layout">
@@ -153,7 +153,7 @@
       </div>
 
       <section class="d-reccol" id="ideaCol" aria-labelledby="ideaColHead">
-        <div class="d-lhd"><h2 id="ideaColHead">아이디어</h2><span class="sub num" id="ideaCount">0</span></div>
+        <div class="d-lhd"><h2 id="ideaColHead">아이디어</h2><span class="sub num nv" id="ideaCount">0</span></div>
         <div class="d-list">
           <div class="d-qaf">
             <svg class="d-i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2v9.6M3.2 8h9.6"/></svg>
@@ -165,7 +165,7 @@
 
       <section class="d-reccol" id="decisionCol" aria-labelledby="decisionColHead">
         <div class="d-lhd">
-          <h2 id="decisionColHead">결정</h2><span class="sub num" id="decisionSectionCount">0</span>
+          <h2 id="decisionColHead">결정</h2><span class="sub num nv" id="decisionSectionCount">0</span>
           <span class="sp"></span>
           <input type="search" id="decisionSearch" class="d-recsearch" placeholder="결정 찾기" aria-label="결정 찾기" autocomplete="off" />
         </div>

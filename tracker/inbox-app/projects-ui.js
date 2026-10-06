@@ -357,6 +357,7 @@ function projectRowButton(row, past, labels) {
   const count = document.createElement('span');
   count.className = 'n num';
   count.textContent = row.open;
+  if (typeof uiNumTick === 'function') uiNumTick(count, `pj:n:${row.key}`);
   // 오른쪽 끝 묶음: (배포가 2주 안이면) 조용한 배포일 + 열린 항목 수.
   // 배포일은 고정 폭이라 이름 칸이 먼저 줄어든다 — 이름이 배포일에 밀려 잘리지 않는다.
   const right = document.createElement('span');

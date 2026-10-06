@@ -810,7 +810,9 @@ function usageKeepTogether(pairs) {
 // note(선택): 숫자의 뜻 — title과 읽어 주는 숨긴 글자로(⑂, 업무 기준의 `끝낸 일`).
 function usageTile(name, total, sub, strong, note) {
   const tile = usageEl('div', strong ? 'd-uwtile is-done' : 'd-uwtile');
-  tile.append(usageEl('span', 'd-uwk', name), usageEl('b', 'd-uwv', `${total}개`), usageEl('span', 'd-uws', sub || ''));
+  const value = usageEl('b', 'd-uwv', `${total}개`);
+  if (typeof uiNumTick === 'function') uiNumTick(value, `uw:tile:${name}`);
+  tile.append(usageEl('span', 'd-uwk', name), value, usageEl('span', 'd-uws', sub || ''));
   if (note) { tile.title = note; tile.appendChild(usageEl('span', 'sr-only', note)); }
   return tile;
 }
@@ -856,7 +858,9 @@ function usageWorkBody(info, cell, options) {
   } else if (stats.empty) {
     body.appendChild(usageEl('p', 'd-ismall d-uwempty', '아직 기록이 없어요. 할 일을 끝내면 여기에 쌓여요.'));
   } else {
-    body.appendChild(usageParts(usageEl('p', 'd-uwbig'), stats.headline));
+    const bigLine = usageParts(usageEl('p', 'd-uwbig'), stats.headline);
+    body.appendChild(bigLine);
+    if (typeof uiNumTick === 'function') [...bigLine.querySelectorAll('b')].forEach((num, index) => uiNumTick(num, `uw:big:${index}`));
     const sub = usageEl('p', 'd-uwsub');
     const bits = [];
     if (stats.average) {
@@ -904,6 +908,7 @@ function usageWorkBody(info, cell, options) {
       if (!bucket.future) list.appendChild(usageEl('li', '', `${bucket.name}${bucket.today && stats.range === 'week' ? '(오늘)' : ''}: 들어옴 ${bucket.in}개, 끝냄 ${bucket.done}개`));
     });
     chart.append(legend, bars, list);
+    if (typeof uiNumGrow === 'function') uiNumGrow([...bars.querySelectorAll('.d-uwbar')], 'uw:bars', stats.bars.map(bucket => `${bucket.in}/${bucket.done}`).join(','));
     if (stats.barNote) chart.appendChild(usageEl('p', 'd-uwnote', stats.barNote));
     body.appendChild(chart);
 

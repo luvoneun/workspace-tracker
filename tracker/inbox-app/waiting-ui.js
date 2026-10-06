@@ -448,9 +448,12 @@ function renderWaiting(items) {
 }
 function renderWaitingNow(items) {
   waitingItemsCache = items;
-  document.getElementById('waitingCount').textContent = items.length;
+  const headerCount = document.getElementById('waitingCount');
+  headerCount.textContent = items.length;
+  if (typeof uiNumTick === 'function') uiNumTick(headerCount, 'wait:head', 'pop');
   const sectionCount = document.getElementById('waitingSectionCount');
   sectionCount.textContent = items.length;
+  if (typeof uiNumTick === 'function') uiNumTick(sectionCount, 'wait:section', 'pop');
   sectionCount.hidden = !items.length; // 0은 적지 않는다 — 생기면 그 자리에 나타난다
   const list = document.getElementById('waitingList');
   list.replaceChildren();

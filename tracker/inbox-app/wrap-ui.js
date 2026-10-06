@@ -182,6 +182,8 @@ function wrapRender() {
   uiRowsMove(body, () => wrapRenderNow(body));
 }
 function wrapRenderNow(body) {
+  // 창을 여는 첫 그리기(비어 있던 자리)는 숫자를 움직이지 않는다 — 지난번 값과 비교하지 않게 열쇠를 비운다.
+  if (!body.childElementCount && typeof uiNumLast !== 'undefined') uiNumLast.delete('wrap:sum');
   body.replaceChildren();
 
   const summary = document.createElement('div');
@@ -193,6 +195,7 @@ function wrapRenderNow(body) {
   wrapNum.setAttribute('aria-hidden', 'true');
   wrapNum.textContent = wrapSummaryText(wrapTotal, wrapState.done.length);
   summary.appendChild(wrapNum);
+  if (typeof uiNumTick === 'function') uiNumTick(wrapNum, 'wrap:sum');
   summary.setAttribute('role', 'img');
   summary.setAttribute('aria-label', wrapSummaryLabel(wrapTotal, wrapState.done.length));
   summary.title = wrapSummaryLabel(wrapTotal, wrapState.done.length);
