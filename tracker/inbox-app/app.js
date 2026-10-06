@@ -824,7 +824,8 @@ function uiHeldFlush() {
 // 빠른 추가 칸에서 Enter로 적은 줄만은 예외로 새 줄 나타남만 준다(다른 줄은 그대로 — uiGlideAddMark).
 // transform·opacity만 쓰고(넘침 없음), 값은 ui.css의 --ease·--t-move·--t-fast와 같다(el.animate는 var()를 못 읽는다).
 // 어느 목록이든 그리기를 uiRowsMove(목록, 그리기)로 감싸면 된다. 줄의 열쇠는 data-task-id · data-move-id · data-rail-id 가운데 하나다.
-const UI_GLIDE = { ease: 'cubic-bezier(0.22, 0.8, 0.3, 1)', move: 200, enter: 140, fade: 120, strike: 200, within: 500, max: 40, rows: 150 };
+// doneFor: 체크 표시(uiGlideDoneMark)를 믿는 시간 · jitter: 잇지 않는 가로 어긋남(스크롤바)
+const UI_GLIDE = { ease: 'cubic-bezier(0.22, 0.8, 0.3, 1)', move: 200, enter: 140, fade: 120, strike: 200, within: 500, max: 40, rows: 150, doneFor: 2000, jitter: 8 };
 const UI_GLIDE_ROWS = '[data-task-id], [data-move-id], [data-rail-id]';
 let uiActAt = 0;        // 마지막 사용자 동작 시각
 let uiActQuiet = false; // 그 동작이 키보드 연타(1초 안에 이어진 키·누르고 있는 키)였다
@@ -861,7 +862,7 @@ function uiGlideAddMark(input, event) {
 function uiGlideDoneMark(id, into, strike = false) {
   if (id === undefined || id === null) return;
   uiGlideDone.set(String(id), { at: Date.now(), into, strike });
-  [...uiGlideDone].forEach(([key, entry]) => { if (Date.now() - entry.at > 2000) uiGlideDone.delete(key); });
+  [...uiGlideDone].forEach(([key, entry]) => { if (Date.now() - entry.at > UI_GLIDE.doneFor) uiGlideDone.delete(key); });
 }
 function uiGlideStill(render) {
   uiGlideLate += 1;
@@ -904,7 +905,11 @@ function uiGlideBoxes(list) {
     const key = uiGlideKey(row);
     if (!boxes.has(key)) boxes.set(key, { row, left: box.left, top: box.top, width: box.width, height: box.height, shown, sized });
   });
-  return { boxes, shownCount };
+  // 목록 자체가 보였나(숨은 탭·접힌 구역이면 상자가 없다) — 숨어 있던 목록이 처음 보일 때 줄이 전부 떠오르지 않게.
+  const rects = typeof list.getClientRects === 'function' ? list.getClientRects() : null;
+  const listShown = !rects || rects.length > 0;
+  const height = typeof list.getBoundingClientRect === 'function' ? list.getBoundingClientRect().height : 0;
+  return { boxes, shownCount, listShown, height };
 }
 // wait: 앞에서 기다리는 시간(줄 긋기). 기다리는 동안 첫 장면에 머문다(fill backwards) — 그 밖에는 끝난 뒤 남는 값이 없다.
 function uiGlidePlay(row, frames, duration, wait = 0, done = null) {
@@ -994,10 +999,16 @@ function uiGlideJoinGroup(shot, lists, reduce) {
       const entry = uiGlideDone.get(key);
       if (!entry || done.has(key)) return;
       uiGlideDone.delete(key);
+      // 오래된 표시(느린 서버로 그 그리기가 움직이지 못하고 지나간 것)는 버린다 — ⌘Z로 되살아난 줄에 긋기가 번쩍이지 않게.
+      if (now - entry.at > UI_GLIDE.doneFor) return;
       done.set(key, entry);
       if (entry.strike) wait = Math.max(wait, UI_GLIDE.strike - (now - entry.at));
     }));
   }
+  // 무리의 높이가 줄었으면 기다리지 않는다 — 카드는 바로 줄어드는데 줄이 옛 자리에 머물면 카드 밖으로 삐져나온다.
+  // 그때는 긋기를 그림자 위에서 이어 그리며 바로 들어간다.
+  const tall = side => lists.reduce((sum, each) => sum + (each[side].height || 0), 0);
+  if (tall('after') < tall('before') - 0.5) wait = 0;
   wait = Math.max(0, Math.round(wait));
   lists.forEach(({ list, after }) => after.boxes.forEach((nowBox, key) => {
     const row = nowBox.row;
@@ -1005,15 +1016,18 @@ function uiGlideJoinGroup(shot, lists, reduce) {
     const was = uiGlideFind(lists, list, 'before', key);
     if (!was) {
       // 새로 생긴 줄 — 분류의 새 줄 솟음(is-rise)이 이미 걸렸으면 그것 하나만 움직인다(위에서 걸렀다).
-      if (!nowBox.shown || !shot.drawn.has(list)) return;
+      // 숨어 있던 목록(처음 연 탭)의 줄은 새 줄이 아니라 처음 그리기다.
+      if (!nowBox.shown || !shot.drawn.has(list) || !shot.before.get(list).listShown) return;
       if (reduce) uiGlidePlay(row, [{ opacity: 0 }, { opacity: 1 }], UI_GLIDE.fade);
       else uiGlidePlay(row, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], UI_GLIDE.enter, wait);
       return;
     }
     // 빠른 추가 뒤에는 새 줄만 — 밀린 줄은 그대로 선다. 전에 높이가 없던 줄(숨은 탭 안)은 옛 자리가 (0,0)이다 — 거기서 날아오지 않게 그냥 둔다.
     if (shot.mode !== 'all' || reduce || !was.sized || (!was.shown && !nowBox.shown)) return;
-    if (done.has(key)) uiGlideStrikeOn(row, now - done.get(key).at, wait + UI_GLIDE.move);
-    const dx = was.left - nowBox.left;
+    if (done.has(key) && row.classList.contains('is-done')) uiGlideStrikeOn(row, now - done.get(key).at, wait + UI_GLIDE.move);
+    // 몇 px의 가로 어긋남은 줄이 옮겨 간 것이 아니라 창 스크롤바가 생기고 사라져 가운데 맞춘 열이 밀린 것이다 — 세로만 잇는다.
+    const shiftX = was.left - nowBox.left;
+    const dx = Math.abs(shiftX) <= UI_GLIDE.jitter ? 0 : shiftX;
     const dy = was.top - nowBox.top;
     if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
     uiGlidePlay(row, [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], UI_GLIDE.move, wait);
@@ -1022,6 +1036,7 @@ function uiGlideJoinGroup(shot, lists, reduce) {
   // 사라진 줄 — 옛 자리에 그림자 한 장을 띄워 흐린다(120ms). 체크해서 접힌 제목으로 들어간 줄은 그 제목 쪽으로 미끄러지며 흐려진다(200ms).
   lists.forEach(({ list, before }) => {
     if (!shot.drawn.has(list)) return;
+    const ghosts = [];
     before.boxes.forEach((was, key) => {
       if (!was.shown || key.startsWith('grp:')) return;
       // 같은 목록에 남았으면 위에서 미끄러졌다. 무리 안 다른 목록으로 갔어도 그 줄이 보일 때만 그쪽이 잇는다(닫힌 서랍으로 간 줄은 여기서 흐려진다).
@@ -1030,12 +1045,11 @@ function uiGlideJoinGroup(shot, lists, reduce) {
       if (moved && moved.shown) return;
       const entry = done.get(key);
       const target = entry && entry.into ? uiGlideTarget(lists, list, entry.into) : null;
-      if (target) {
-        uiGlideGhost(list, was, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: `translateY(${target.top - was.top}px) scale(.98)` }], UI_GLIDE.move, wait, entry.strike ? now - entry.at : null);
-      } else {
-        uiGlideGhost(list, was, [{ opacity: 1 }, { opacity: 0 }], UI_GLIDE.fade, wait, entry && entry.strike ? now - entry.at : null);
-      }
+      const strikeAt = entry && entry.strike ? now - entry.at : null;
+      if (target) ghosts.push({ was, frames: [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: `translateY(${target.top - was.top}px) scale(.98)` }], duration: UI_GLIDE.move, strikeAt });
+      else ghosts.push({ was, frames: [{ opacity: 1 }, { opacity: 0 }], duration: UI_GLIDE.fade, strikeAt });
     });
+    uiGlideGhosts(list, ghosts, wait);
   });
 }
 // 들어갈 자리 — 같은 목록의 그룹 제목(grp:완료) 또는 화면의 id(decisionArchiveToggle).
@@ -1055,30 +1069,44 @@ function uiGlideStrikeOn(row, elapsed, until) {
   setTimeout(() => row.classList.remove('is-completing'), until + 80);
 }
 // 사라진 줄의 그림자 — 옛 줄을 복사해 목록 끝에 붙이고(누를 수 없고 읽히지 않으며 열쇠·id가 없다) 옛 자리에 놓았다가 재생 뒤 떼어 낸다.
-function uiGlideGhost(list, was, frames, duration, wait, strikeAt) {
-  const old = was.row;
-  if (!old || old.isConnected !== false || typeof old.cloneNode !== 'function' || typeof list.appendChild !== 'function') return;
-  let ghost = null;
+// 목록 하나의 그림자는 한꺼번에 붙이고 자리 기준(host)을 한 번만 잰다 — 여러 줄을 한 번에 끝내도 화면 계산이 한 번이다.
+function uiGlideGhostMake(old, strikeAt) {
+  if (!old || old.isConnected !== false || typeof old.cloneNode !== 'function') return null;
+  const ghost = old.cloneNode(true);
+  [ghost, ...ghost.querySelectorAll('*')].forEach((node) => {
+    node.removeAttribute('id');
+    [...node.attributes].filter(attr => attr.name.startsWith('data-')).forEach(attr => node.removeAttribute(attr.name));
+  });
+  ghost.inert = true;
+  ghost.setAttribute('aria-hidden', 'true');
+  ghost.classList.add('d-glide-ghost');
+  if (strikeAt !== null) ghost.querySelectorAll('.d-title').forEach((title) => { title.style.animationDelay = `${-Math.max(0, strikeAt)}ms`; });
+  return ghost;
+}
+function uiGlideGhosts(list, specs, wait) {
+  if (!specs.length || typeof list.appendChild !== 'function') return;
+  const made = [];
   try {
-    ghost = old.cloneNode(true);
-    [ghost, ...ghost.querySelectorAll('*')].forEach((node) => {
-      node.removeAttribute('id');
-      [...node.attributes].filter(attr => attr.name.startsWith('data-')).forEach(attr => node.removeAttribute(attr.name));
+    specs.forEach((spec) => {
+      const ghost = uiGlideGhostMake(spec.was.row, spec.strikeAt);
+      if (!ghost) return;
+      list.appendChild(ghost);
+      made.push({ ghost, spec });
     });
-    ghost.inert = true;
-    ghost.setAttribute('aria-hidden', 'true');
-    ghost.classList.add('d-glide-ghost');
-    if (strikeAt !== null) ghost.querySelectorAll('.d-title').forEach((title) => { title.style.animationDelay = `${-Math.max(0, strikeAt)}ms`; });
-    list.appendChild(ghost);
-    const host = ghost.offsetParent;
-    if (!host) { ghost.remove(); return; }
+    if (!made.length) return;
+    const host = made[0].ghost.offsetParent;
+    if (!host) throw new Error('자리 기준 없음');
     const box = host.getBoundingClientRect();
-    ghost.style.left = `${was.left - box.left - host.clientLeft + host.scrollLeft}px`;
-    ghost.style.top = `${was.top - box.top - host.clientTop + host.scrollTop}px`;
-    ghost.style.width = `${was.width}px`;
-    ghost.style.height = `${was.height}px`;
-  } catch { ghost?.remove?.(); return; }
-  uiGlidePlay(ghost, frames, duration, wait, () => ghost.remove());
+    const left = box.left + host.clientLeft - host.scrollLeft;
+    const top = box.top + host.clientTop - host.scrollTop;
+    made.forEach(({ ghost, spec }) => {
+      ghost.style.left = `${spec.was.left - left}px`;
+      ghost.style.top = `${spec.was.top - top}px`;
+      ghost.style.width = `${spec.was.width}px`;
+      ghost.style.height = `${spec.was.height}px`;
+    });
+  } catch { made.forEach(({ ghost }) => ghost.remove?.()); return; }
+  made.forEach(({ ghost, spec }) => uiGlidePlay(ghost, spec.frames, spec.duration, wait, () => ghost.remove()));
 }
 
 // 그룹 제목의 `+`로 여는 그 자리 입력줄. 저장 뒤 목록을 다시 그려도 같은 줄로 포커스가 돌아온다(uiAddRowRestore).

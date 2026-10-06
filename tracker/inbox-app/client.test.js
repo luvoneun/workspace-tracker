@@ -16720,20 +16720,27 @@ function glideListClient(listId, { rowHeight = 40 } = {}) {
   const timers = [];
   fx.app.context.setTimeout = (fn, delay) => { timers.push({ fn, delay }); return timers.length; };
   fx.app.run("window.innerWidth = 1200; window.innerHeight = 800; uiActAt = 0; uiActQuiet = false; uiKeyAt = 0; document.activeElement = null;");
-  const keyOf = row => (row && row.dataset ? (row.dataset.taskId ?? row.dataset.moveId ?? row.dataset.railId) : undefined);
-  list.querySelectorAll = () => list.children.filter(kid => keyOf(kid) !== undefined).map((row) => {
-    if (!row.glideReady) {
-      row.glideReady = true;
-      const classes = new Set(String(row.className || '').split(' ').filter(Boolean));
-      row.classList = { add: name => classes.add(name), remove: name => classes.delete(name), contains: name => classes.has(name), toggle: (name, on) => (on ? classes.add(name) : classes.delete(name)) };
-      row.getBoundingClientRect = () => { const top = list.children.indexOf(row) * rowHeight; return { left: 0, right: 600, top, bottom: top + 36, height: 36, width: 600 }; };
-      row.animate = (frames, options) => { const play = { id: keyOf(row), frames, options, cancelled: false, cancel() { play.cancelled = true; } }; plays.push(play); return play; };
-    }
-    return row;
-  });
-  const order = () => list.querySelectorAll().map(keyOf);
+  // 다른 목록도 같은 꼴로 잴 수 있게(무리·상한 시험) — top은 그 목록이 화면에서 시작하는 자리.
+  const patch = (target, top0 = 0) => {
+    target.querySelectorAll = () => target.children.filter(kid => glideKeyOf(kid) !== undefined).map((row) => {
+      if (!row.glideReady) {
+        row.glideReady = true;
+        const classes = new Set(String(row.className || '').split(' ').filter(Boolean));
+        row.classList = { add: name => classes.add(name), remove: name => classes.delete(name), contains: name => classes.has(name), toggle: (name, on) => (on ? classes.add(name) : classes.delete(name)) };
+        row.getBoundingClientRect = () => { const top = top0 + target.children.indexOf(row) * rowHeight; return { left: 0, right: 600, top, bottom: top + 36, height: 36, width: 600 }; };
+        row.animate = (frames, options) => { const play = { id: glideKeyOf(row), frames, options, cancelled: false, cancel() { play.cancelled = true; } }; plays.push(play); return play; };
+      }
+      return row;
+    });
+    return target;
+  };
+  patch(list);
+  const order = () => list.querySelectorAll().map(glideKeyOf);
   const act = (event = { type: 'click', detail: 1 }) => fx.app.context.uiActMark(event);
-  return { ...fx, list, plays, timers, order, act };
+  return { ...fx, list, plays, timers, order, act, patch };
+}
+function glideKeyOf(row) {
+  return row && row.dataset ? (row.dataset.taskId ?? row.dataset.moveId ?? row.dataset.railId) : undefined;
 }
 // C1 목록 여섯 — 각자 실제 그리기 함수로 그린다(줄 부품이 아닌 곳만 가짜로 갈아 끼운다).
 const C1_LISTS = [
@@ -16757,6 +16764,8 @@ test('줄 이동 C1: 오늘 탭 나머지 목록(미팅·리마인드·확인 �
     fx.draw(['a', 'b', 'c']);
     await settle();
     assert.deepEqual(fx.order(), ['a', 'b', 'c'].map(key), `${name}: 열쇠`);
+    assert.ok(fx.order().every(each => typeof each === 'string' && each && each !== 'undefined'), `${name}: 열쇠 칸이 비지 않는다`);
+    assert.equal(new Set(fx.order()).size, fx.order().length, `${name}: 목록 안 열쇠가 겹치지 않는다`);
     assert.equal(fx.plays.length, 0, `${name}: 처음 그리기는 움직이지 않는다`);
     fx.act();
     fx.draw(['c', 'a', 'b', 'd']);
@@ -16824,11 +16833,21 @@ test('줄 이동 C1: 상한은 무리마다 따로 센다 — 다른 무리가 �
   fx.draw([...many].reverse());
   await settle();
   assert.equal(fx.plays.length, 0, '41줄이 보이면 걸지 않는다');
-  fx.act();
+  // 다른 무리(오늘 탭 가운데)가 41줄 보여도 아이디어(제 목록만)는 같은 틱에서 움직인다 — 상한은 무리마다 센다.
   fx.draw(many.slice(0, 3));
-  fx.draw(many.slice(0, 3).reverse());
   await settle();
-  assert.ok(fx.plays.length <= 40);
+  const today = fx.patch(fx.node('todayTaskList'), 2000);
+  fx.app.run("todaySort = 'priority'; uiTaskRow = (item) => { const row = document.createElement('div'); row.dataset.taskId = item.id; return row; };");
+  const tasks = ids => JSON.stringify(ids.map(id => ({ id, description: id, status: 'open', priority: 'normal' })));
+  const long = Array.from({ length: 41 }, (_, i) => `t${String(i).padStart(2, '0')}`);
+  fx.app.run(`renderTodayTasks(${tasks(long)})`);
+  await settle();
+  fx.plays.length = 0;
+  fx.act();
+  fx.app.run(`renderTodayTasks(${tasks([...long].reverse())}); renderIdeas(${JSON.stringify(['i02', 'i01', 'i00'].map(id => ({ id, description: id })))})`);
+  await settle();
+  assert.equal(today.querySelectorAll().length, 41);
+  assert.deepEqual(fx.plays.map(play => play.id).sort(), ['i00', 'i02'], '아이디어만 움직이고 41줄이 보인 오늘 할 일은 쉰다');
 });
 
 test('줄 이동 C1 빠른 추가: Enter로 적은 뒤 다시 그리기는 새 줄만 140ms 나타나고 다른 줄은 그대로 선다 — 누르고 있는 Enter·표시 없는 Enter는 아무것도', async () => {
@@ -16864,7 +16883,7 @@ test('줄 이동 C1 빠른 추가: Enter로 적은 뒤 다시 그리기는 새 �
 
 test('줄 이동 C1 완료 흐름: 체크 → 줄 긋기(200ms) → 줄이 `완료 N`으로 들어감 — 긋는 동안 무리 전체가 옛 자리에 머물고 긋기가 끝나면 함께 움직인다', async () => {
   const fx = moveClient();
-  fx.app.run("todayDoneOpen = true; uiGroupHeading = (label) => { const head = document.createElement('div'); head.dataset.moveId = `grp:${label}`; return head; };");
+  fx.app.run("todayDoneOpen = true; uiGroupHeading = (label) => { const head = document.createElement('div'); head.dataset.moveId = `grp:${label}`; return head; }; uiTaskRow = (item) => { const row = document.createElement('div'); row.dataset.taskId = item.id; row.className = item.status === 'done' ? 'd-row is-done' : 'd-row'; return row; };");
   const draw = (open, done) => fx.app.run(`renderTodayTasks(${JSON.stringify([...open.map(id => ({ id, description: id, status: 'open', priority: 'normal' })), ...done.map(id => ({ id, description: id, status: 'done', priority: 'normal' }))])})`);
   draw(['a', 'b', 'c'], []);
   await settle();
@@ -16872,7 +16891,7 @@ test('줄 이동 C1 완료 흐름: 체크 → 줄 긋기(200ms) → 줄이 `완�
   fx.app.run("uiGlideDoneMark('a', 'grp:완료', true); uiGlideDone.get('a').at = Date.now() - 50;");
   draw(['b', 'c'], ['a']);
   await settle();
-  assert.ok(fx.plays.length >= 3);
+  assert.deepEqual(fx.plays.map(play => play.id).sort(), ['a', 'b', 'c'], '내려간 a, 올라온 b·c');
   fx.plays.forEach((play) => {
     assert.ok(play.options.delay >= 140 && play.options.delay <= 150, `긋기의 남은 시간만큼 기다린다: ${play.options.delay}`);
     assert.equal(play.options.fill, 'backwards', '기다리는 동안 옛 자리에 머문다');
@@ -16880,6 +16899,37 @@ test('줄 이동 C1 완료 흐름: 체크 → 줄 긋기(200ms) → 줄이 `완�
   const a = fx.list.querySelectorAll().find(row => row.dataset.taskId === 'a');
   assert.ok(a.classList.contains('is-completing'), '다시 그려진 완료 줄이 긋기를 이어 그린다');
   assert.equal(fx.app.run("uiGlideDone.has('a')"), false, '표시는 한 번 쓰고 지운다');
+  // 오래된 표시(2초 넘음 — 느린 서버로 그 그리기가 움직이지 못하고 지나감)는 버린다: ⌘Z로 되살아난 열린 줄에 긋기·기다림이 없다.
+  const stale = moveClient();
+  stale.app.run("todayDoneOpen = true; uiTaskRow = (item) => { const row = document.createElement('div'); row.dataset.taskId = item.id; row.className = item.status === 'done' ? 'd-row is-done' : 'd-row'; return row; };");
+  const staleDraw = (open, done) => stale.app.run(`renderTodayTasks(${JSON.stringify([...open.map(id => ({ id, description: id, status: 'open', priority: 'normal' })), ...done.map(id => ({ id, description: id, status: 'done', priority: 'normal' }))])})`);
+  staleDraw(['b', 'c'], ['a']);
+  await settle();
+  stale.app.run(`uiGlideDoneMark('a', 'grp:완료', true); uiGlideDone.get('a').at = Date.now() - ${2001};`);
+  stale.act();
+  staleDraw(['a', 'b', 'c'], []);
+  await settle();
+  assert.ok(stale.plays.length > 0 && stale.plays.every(play => !play.options.delay), '기다림 없음');
+  assert.equal(stale.list.querySelectorAll().find(row => row.dataset.taskId === 'a').classList.contains('is-completing'), false, '열린 줄에 긋기 없음');
+  assert.equal(stale.app.run("uiGlideDone.has('a')"), false, '버린 표시도 지운다');
+  // 표시가 새것이어도 다시 그려진 줄이 열린 줄(완료가 아님)이면 긋지 않는다.
+  stale.app.run("uiGlideDoneMark('b', 'grp:완료', true)");
+  stale.act();
+  staleDraw(['b', 'a', 'c'], []);
+  await settle();
+  assert.equal(stale.list.querySelectorAll().find(row => row.dataset.taskId === 'b').classList.contains('is-completing'), false);
+  // 무리의 높이가 줄면(접힌 `완료`로 들어가 카드가 바로 줄어듦) 기다리지 않는다 — 옛 자리에 머문 줄이 카드 밖으로 삐져나오지 않게.
+  const shrink = moveClient();
+  shrink.list.getBoundingClientRect = () => ({ height: shrink.list.children.length * 40 });
+  shrink.app.run("todayDoneOpen = false;");
+  const shrinkDraw = (open, done) => shrink.app.run(`renderTodayTasks(${JSON.stringify([...open.map(id => ({ id, description: id, status: 'open', priority: 'normal' })), ...done.map(id => ({ id, description: id, status: 'done', priority: 'normal' }))])})`);
+  shrinkDraw(['a', 'b', 'c'], ['z']);
+  await settle();
+  shrink.act();
+  shrink.app.run("uiGlideDoneMark('a', 'grp:완료', true)");
+  shrinkDraw(['b', 'c'], ['a', 'z']);
+  await settle();
+  assert.ok(shrink.plays.length > 0 && shrink.plays.every(play => !play.options.delay), '높이가 줄면 바로 움직인다');
   // 움직임 줄이기: 기다림도 이동도 없다.
   const quiet = moveClient();
   quiet.app.run("todayDoneOpen = true; window.matchMedia = () => ({ matches: true });");
@@ -16936,6 +16986,12 @@ test('줄 이동 C1 사라진 줄: 옛 자리에 그림자 한 장(열쇠·id �
   const play = fx.plays.find(each => each.id === 'ghost');
   assert.deepEqual(plain(play.frames), [{ opacity: 1 }, { opacity: 0 }]);
   assert.deepEqual(plain(play.options), { duration: 120, easing: 'cubic-bezier(0.22, 0.8, 0.3, 1)', fill: 'forwards' });
+  // 그림자가 떠 있는 동안 다시 그리면 목록을 갈아 끼우며 함께 치워진다(다음 그리기의 줄로 세지도 않는다).
+  dress();
+  fx.app.run('uiActAt = 0');
+  draw(['a', 'c'], []);
+  await settle();
+  assert.ok(!fx.list.children.includes(ghost), '다음 다시 그리기가 그림자를 치운다');
   fx.timers.forEach(timer => timer.fn());
   assert.equal(ghost.removed, true, '시간으로 떼어 낸다');
   assert.ok(!fx.list.querySelectorAll().some(row => row === ghost), '줄로 세지 않는다');
@@ -16960,6 +17016,69 @@ test('줄 이동 C1 사라진 줄: 옛 자리에 그림자 한 장(열쇠·id �
   draw([], ['a', 'c']);
   await settle();
   assert.equal(ghosts.length, 0);
+});
+
+test('줄 이동 C1: 숨어 있던 목록(처음 연 탭)을 그리는 것은 처음 그리기다 — 탭을 누른 직후여도 줄이 떠오르지 않는다', async () => {
+  const fx = c1Client('ideaList', C1_LISTS.find(([name]) => name === '아이디어')[2]);
+  let shown = false;
+  fx.list.getClientRects = () => (shown ? [{}] : []);
+  fx.act();
+  shown = true; // 탭을 열어 보이게 된 뒤 그린다(그리기 전에는 숨어 있었다)
+  fx.app.run('uiGlideShot = null');
+  fx.list.getClientRects = () => [];
+  fx.app.run(`uiRowsMove(document.getElementById('ideaList'), () => { document.getElementById('ideaList').getClientRects = () => [{}]; renderRecordColumnNow(document.getElementById('ideaList'), ${JSON.stringify(['a', 'b'].map(id => ({ id, description: id })))}, recordIdeaRow, '', ''); })`);
+  await settle();
+  assert.equal(fx.plays.length, 0, '처음 보이는 목록의 줄은 새 줄이 아니다');
+  // 보이던 목록에 새 줄이 생기면 그대로 나타난다.
+  fx.act();
+  fx.draw(['a', 'b', 'c']);
+  await settle();
+  assert.deepEqual(fx.plays.map(play => play.id), ['c']);
+});
+
+test('줄 이동 C1: 창 스크롤바가 생기고 사라져 생기는 몇 px의 가로 어긋남은 잇지 않는다 — 세로 이동만 남긴다', async () => {
+  const fx = c1Client('ideaList', C1_LISTS.find(([name]) => name === '아이디어')[2]);
+  fx.draw(['a', 'b', 'c']);
+  await settle();
+  fx.act();
+  fx.draw(['a', 'c']);
+  // 다시 그린 뒤 열이 5px 왼쪽으로 밀렸다(스크롤바가 사라져 가운데 맞춘 열이 넓어짐).
+  fx.list.querySelectorAll().forEach((row) => { const real = row.getBoundingClientRect; row.getBoundingClientRect = () => ({ ...real(), left: -5 }); });
+  await settle();
+  assert.deepEqual(plain(fx.plays.find(play => play.id === 'c').frames[0]), { transform: 'translate(0px, 40px)' });
+  assert.equal(fx.app.run('UI_GLIDE.jitter'), 8);
+});
+
+test('줄 이동 C1: 체크하면 저장(toggleTask)은 기다림 없이 바로 불린다 — 완료·결정 반영·확인 대기 셋 다(움직임 표시는 저장을 늦추지 않는다)', async () => {
+  const app = pureClient();
+  app.run("window.calls = []; toggleTask = async (id) => { window.calls.push(id); }; load = async () => {}; announce = () => {}; showNotice = () => {}; workflowOutcome = () => {}; waitingNextOpen = () => {}; waitingNextClose = () => {};");
+  const fire = (code) => {
+    app.run('window.calls = []');
+    const box = app.run(code);
+    box.listeners.change();
+    return app.run('window.calls.slice()');
+  };
+  const item = "{ id: 'x1', description: '일' }";
+  assert.deepEqual(plain(fire(`taskCompletionCheckbox(${item}, document.createElement('div'), false)`)), ['x1'], '업무 완료');
+  assert.deepEqual(plain(fire(`decisionCheckbox(${item}, document.createElement('div'), false).children[0]`)), ['x1'], '결정 반영');
+  assert.deepEqual(plain(fire(`(() => { const row = document.createElement('div'); const box = waitingCheckboxInput(${item}, false); wireWaitingCheckbox(box, ${item}, row, false); return box; })()`)), ['x1'], '확인 대기');
+  await settle();
+  assert.ok(app.run("uiGlideDone.has('x1')"), '표시는 남는다(저장과 따로)');
+});
+
+test('줄 이동 C1: 왼쪽 레일 무리(미팅·리마인드·확인 대기)를 함께 그려도 열쇠가 겹치지 않는다', () => {
+  const fx = firstRunClient();
+  const keys = [];
+  ['calendarList', 'reminderList', 'waitingList'].forEach((id) => {
+    const list = fx.node(id);
+    list.querySelectorAll = () => list.children.filter(kid => glideKeyOf(kid) !== undefined);
+  });
+  fx.app.run(`renderCalendar({ events: [{ start: '10:00', title: 'w1', workflowId: 'w1' }] });
+    renderReminders([{ id: 't1', description: '일', due: '2026-10-06', priority: 'high' }], [{ id: 't2', description: '답 온 일' }], [{ key: 'jira:P-1', name: 'v1', text: '배포 3일 전', label: '프로젝트', open: 2, tone: 'warn' }]);
+    waitingView = 'urgent'; renderWaiting([{ id: 'w1', description: '대기', status: 'open' }]);`);
+  ['calendarList', 'reminderList', 'waitingList'].forEach(id => fx.node(id).querySelectorAll().forEach(row => keys.push(glideKeyOf(row))));
+  assert.deepEqual(keys, ['mt:w1', 'deploy:jira:P-1', 't2', 't1', 'w1'], '미팅 mt:·배포 deploy:로 업무 id와 갈린다');
+  assert.equal(new Set(keys).size, keys.length);
 });
 
 // 목록 등록 시험(계획서 3절 가-3): 줄을 통째로 갈아 끼우는 목록은 줄 부품(uiRowsMove)을 거치거나, 지도의 "목록 등록" 표에 이유와 함께 있다.
