@@ -1437,6 +1437,8 @@ function taskSelectionRefresh() {
   document.body.classList.toggle('batch-open', taskSelectionMode);
   const bar = document.getElementById('taskSelectBar');
   if (!bar) return;
+  // 비우고 닫으므로 닫힘은 복사본이 재생한다(뜨는 것 부품 .d-stay — 등장은 CSS가 맡는다)
+  if (!taskSelectionMode && !bar.hidden) uiFloatGhost(bar);
   bar.hidden = !taskSelectionMode;
   if (!taskSelectionMode) { bar.replaceChildren(); return; }
 

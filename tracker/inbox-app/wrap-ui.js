@@ -249,7 +249,7 @@ function wrapClose() {
   const back = wrapState.returnFocus;
   const dialog = wrapNodes && wrapNodes.dialog;
   if (wrapState.esc) escDrop(wrapState.esc);
-  if (wrapNodes && wrapNodes.body) wrapNodes.body.replaceChildren();
+  // 본문은 비우지 않는다 — 닫힘(.d-stay)이 재생되는 동안 내용이 그대로 보여야 한다. 다시 열면 wrapRender가 새로 그린다
   wrapState = null;
   wrapNodes = null;
   dialog?.close?.();

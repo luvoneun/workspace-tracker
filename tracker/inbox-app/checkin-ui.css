@@ -55,7 +55,4 @@
   .d-ckform { padding: 18px 16px 14px; }
   .d-ckfoot { bottom: -14px; margin-bottom: -14px; padding-bottom: 14px; }
 }
-@media (prefers-reduced-motion: no-preference) {
-  .d-ckdlg[open] { animation: d-ck-rise 0.22s ease-out; }
-  @keyframes d-ck-rise { from { transform: translateY(6px); opacity: 0.6; } }
-}
+/* 등장·닫힘은 다른 창과 같은 부품(ui.css .d-stay) — 창을 만들 때 클래스를 건다(checkin-ui.js) */

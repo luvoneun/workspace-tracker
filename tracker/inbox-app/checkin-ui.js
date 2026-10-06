@@ -151,7 +151,7 @@ function checkinAnswers(form) {
 
 function checkinShow(data) {
   const returnFocus = document.activeElement;
-  const dialog = checkinEl('dialog', 'd-modal d-ckdlg');
+  const dialog = checkinEl('dialog', 'd-modal d-stay d-ckdlg');
   dialog.setAttribute('aria-modal', 'true');
   dialog.setAttribute('aria-labelledby', 'ckTitle');
   dialog.setAttribute('aria-describedby', 'ckLead');
@@ -331,7 +331,8 @@ function checkinClose(current) {
   if (checkinCurrent !== current) return;
   checkinCurrent = null;
   if (current.dialog.open) current.dialog.close();
-  current.dialog.remove();
+  // 닫힘(.d-stay, 140ms)이 재생된 뒤에 떼어 낸다 — 초점 복귀는 기다리지 않는다
+  setTimeout(() => current.dialog.remove(), typeof UI_FLOAT === 'object' ? UI_FLOAT.out : 140);
   const back = current.returnFocus;
   if (back && back !== document.body && back.isConnected && back.focus) back.focus();
 }

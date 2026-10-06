@@ -591,7 +591,7 @@ function usageCloseIcon() {
 
 function usageWorkDialog() {
   if (usageWorkDlg) return usageWorkDlg;
-  const dialog = usageEl('dialog', 'd-modal d-uwdlg');
+  const dialog = usageEl('dialog', 'd-modal d-stay d-uwdlg');
   dialog.setAttribute('aria-labelledby', 'usageWorkTitle');
   dialog.tabIndex = -1;
   const head = usageEl('div', 'd-mhd');

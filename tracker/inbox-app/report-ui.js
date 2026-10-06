@@ -882,6 +882,8 @@ function reportTidyBar(item) {
   if (!bar) return;
   const open = !!reportTidy && reportMode === 'draft';
   document.body.classList.toggle('nest-open', open);
+  // 비우고 닫으므로 닫힘은 복사본이 재생한다(선택 막대와 같은 부품 .d-stay)
+  if (!open && !bar.hidden && typeof uiFloatGhost === 'function') uiFloatGhost(bar);
   bar.hidden = !open;
   if (!open) { bar.replaceChildren(); return; }
   bar.setAttribute('aria-label', '고른 줄');

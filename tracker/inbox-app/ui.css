@@ -447,6 +447,34 @@ button:disabled:active, .d-cb:disabled:active, .d-wcb:disabled:active { scale: n
 @keyframes d-float-up { from { transform: translateY(100%); } to { transform: none; } }
 @keyframes d-float-down { to { transform: translateY(100%); } }
 
+/* ---------- 뜨는 것 — 자리가 남는 것 (모션 부품 ①의 둘째 갈래 — 알림·창·막대) ----------
+   한 번 붙여 두고 hidden·<dialog>로 켜고 끄는 요소다. 화면 코드는 여닫기를 그대로 두고(showNotice·settingsClose·wrapClose 정의 그대로,
+   창은 showModal·close 그대로) 부품 클래스 .d-stay만 건다. 등장은 @starting-style, 닫힘은 표시가 꺼질 때 allow-discrete 전환이 재생한다 —
+   표시가 바뀔 때만 재생되므로 떠 있는 알림에 새 글이 와도 다시 튀지 않고, 닫히는 중에 다시 열면 그 자리에서 되돌아온다(깜박임 없음).
+   hidden·open은 닫는 순간 바뀌므로 초점 복귀·Esc 차례는 닫힘 재생을 기다리지 않고, 닫히는 동안은 눌리지 않는다(inert).
+   비우고 닫는 막대(선택 막대·모으기 막대)는 화면 코드가 숨기기 직전에 uiFloatGhost를 불러 복사본(.is-out)이 닫힘을 재생한다.
+   모르는 환경(옛 브라우저)에서는 지금처럼 바로 뜨고 바로 닫힌다 — 깨지지 않는다. */
+.d-stay {
+  --stay-in: var(--t-move);  --stay-out: var(--t-fast);  --stay-dim: 160ms;
+  --stay-from: translateY(100%);  --stay-to: translateY(8px);
+  transition: opacity var(--stay-in) var(--ease), transform var(--stay-in) var(--ease),
+    display var(--stay-in) allow-discrete, overlay var(--stay-in) allow-discrete;
+}
+/* 창은 가운데에서 .96 → 1(240ms, 큰 면이라 넘침 없음), 닫힘은 .98로 얕게 + 가림막 160ms */
+dialog.d-stay { --stay-in: 240ms;  --stay-from: scale(0.96);  --stay-to: scale(0.98); }
+.d-stay[hidden], dialog.d-stay:not([open]) {
+  opacity: 0; transform: var(--stay-to); transition-duration: var(--stay-out);
+  pointer-events: none; interactivity: inert;
+}
+@starting-style { .d-stay { opacity: 0; transform: var(--stay-from); } }
+dialog.d-stay::backdrop { transition: opacity var(--stay-dim) linear, display var(--stay-dim) allow-discrete, overlay var(--stay-dim) allow-discrete; }
+dialog.d-stay:not([open])::backdrop { opacity: 0; transition-duration: var(--stay-out); }
+@starting-style { dialog.d-stay[open]::backdrop { opacity: 0; } }
+/* 닫히는 복사본(uiFloatGhost) — 전환 대신 키프레임 한 번(새로 붙은 복사본이 @starting-style로 다시 뜨지 않게) */
+.d-stay.is-out { transition: none; animation: d-stay-out var(--stay-out) var(--ease) both; pointer-events: none; }
+.d-stay.is-out * { animation: none !important; }
+@keyframes d-stay-out { to { opacity: 0; transform: var(--stay-to); } }
+
 /* 움직임 줄이기: 이동·크기 변화는 끄고(전부 .01ms), 새로 나타나는 것만 120ms 흐려짐으로 남긴다.
    전환(transition)을 전역 120ms로 두지 않는 이유 — 전환이 없던 요소까지 갑자기 움직인다. */
 @media (prefers-reduced-motion: reduce) {
@@ -455,10 +483,13 @@ button:disabled:active, .d-cb:disabled:active, .d-wcb:disabled:active { scale: n
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
   }
-  /* 뜨는 것은 부품 클래스 하나(.d-float)로 등록한다 — 요소 이름을 늘어놓지 않는다 */
-  .d-toast, .d-float:not(.is-out):not(.is-still), .d-mrow2.is-new {
+  /* 뜨는 것은 부품 클래스(.d-float·.d-stay)로 등록한다 — 요소 이름을 늘어놓지 않는다 */
+  .d-float:not(.is-out):not(.is-still), .d-mrow2.is-new {
     animation: d-fade 120ms linear both !important;
   }
+  /* 자리가 남는 것(.d-stay)은 전환이라 같은 120ms를 열린 쪽에만 건다 — 이동 없이 흐려지며 뜨고, 닫힘은 바로 */
+  .d-stay { --stay-from: none; --stay-to: none; }
+  .d-stay:not([hidden], dialog:not([open])), dialog.d-stay[open]::backdrop { transition-duration: 120ms !important; }
   /* 누름의 크기 변화도 끈다 — 색은 그대로 바뀐다 */
   button:active, .d-cb:active, .d-wcb:active { scale: none !important; }
 }
@@ -544,13 +575,14 @@ button:disabled:active, .d-cb:disabled:active, .d-wcb:disabled:active { scale: n
   background: var(--surface); color: var(--text);
   border: 1px solid var(--surface-line); border-radius: 16px; box-shadow: var(--pop);
   font-size: var(--fs-body);
-  animation: d-rise var(--t-fast) var(--ease);
+  /* 등장·닫힘은 뜨는 것 부품의 자리가 남는 갈래(.d-stay) — 제 높이만큼 아래에서 200ms, 닫힘 140ms */
 }
 .d-toast.error { border-color: var(--urgent); }
 .d-toast .d-btn { flex-shrink: 0; }
 .d-tnote { font-size: 12.5px; color: var(--muted); flex-shrink: 0; }
 /* 누르는 화면에는 키보드가 없다 — ⌘Z 안내 글자 대신 알림의 `되돌리기` 버튼(app.js uiUndoNotice)이 선다 */
 @media (hover: none) and (pointer: coarse) { .d-tnote { display: none; } }
+/* 6px 떠오름 — 회의 정리의 새 줄(.d-mrow2.is-new)이 쓴다 */
 @keyframes d-rise { from { transform: translateY(6px); opacity: 0; } to { transform: none; opacity: 1; } }
 
 /* ---------- 더보기 메뉴 (한 벌) ---------- */

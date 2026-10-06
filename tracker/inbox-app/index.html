@@ -202,7 +202,7 @@
   </div>
 
   <!-- 문장 묶기 중에만 뜨는 아래 고정 막대(오늘 탭의 일괄 정리 막대와 같은 부품) -->
-  <div class="d-selbar" id="reportNestBarEl" role="group" aria-label="문장 아래로 모으기" hidden></div>
+  <div class="d-selbar d-stay" id="reportNestBarEl" role="group" aria-label="문장 아래로 모으기" hidden></div>
 
   <!-- 나중에 할 일 서랍 — 헤더 아래 오른쪽에 붙어서 열리고, 넓은 화면에서는 본문을 덮지 않고 밀어낸다 -->
   <aside class="d-drawer" id="laterTaskDrawer" aria-label="나중에 할 일" aria-hidden="true">
@@ -218,12 +218,12 @@
   </aside>
 
   <!-- 여러 개 선택 중에만 뜨는 아래 고정 막대. 본문 폭 안에 들어오고, 서랍이 열리면 그만큼 비켜선다 -->
-  <div class="d-selbar" id="taskSelectBar" role="group" aria-label="선택한 업무 일괄 정리" hidden></div>
+  <div class="d-selbar d-stay" id="taskSelectBar" role="group" aria-label="선택한 업무 일괄 정리" hidden></div>
 
-  <div id="liveRegion" class="d-toast" role="status" aria-live="polite" hidden></div>
+  <div id="liveRegion" class="d-toast d-stay" role="status" aria-live="polite" hidden></div>
 
   <!-- 오늘 정리 — 하루를 마감할 때만 여는 창이라 설정과 같은 모달 판(.d-modal)을 그대로 쓴다 -->
-  <dialog id="wrapDialog" class="d-modal" aria-label="오늘 정리">
+  <dialog id="wrapDialog" class="d-modal d-stay" aria-label="오늘 정리">
     <div class="d-mhd">
       <h2>오늘 정리</h2>
       <span class="d-wrapdate" id="wrapDialogDate"></span>
@@ -234,7 +234,7 @@
   </dialog>
 
   <!-- 설정 — 드물게 여는 창이라 모달 그대로 둔다(연동 / 앱 / 꾸미기 / 도움말 / 삭제한 항목 다섯 칸, 처음은 연동) -->
-  <dialog id="settingsDialog" class="d-modal" aria-label="설정" tabindex="-1" autofocus>
+  <dialog id="settingsDialog" class="d-modal d-stay" aria-label="설정" tabindex="-1" autofocus>
     <div class="d-mhd">
       <h2>설정</h2>
       <span class="d-seg" role="group" aria-label="설정 보기">
