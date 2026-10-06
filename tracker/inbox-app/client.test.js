@@ -6660,7 +6660,7 @@ test('BNOARCHIVE: 제목 ⋯ 메뉴에 보관 항목이 없다 — 그룹 프로
   const groupBody = detail('group:살아 있는 것');
   assert.equal(groupBody.children[1].textContent, '열린 항목 2', '요약 줄에 `보관한 프로젝트` 문구가 없다');
   nodeFind(groupBody.children[0], 'd-more').listeners.click({ stopPropagation() {} });
-  assert.equal(app.run('lastMenu')[0].map(entry => entry.label).join(','), '이름 바꾸기', '그룹 프로젝트는 이름 바꾸기만 남는다');
+  assert.equal(app.run('lastMenu')[0].map(entry => entry.label).join(','), '이름 바꾸기,다른 프로젝트로 합치기…', '그룹 프로젝트는 이름 바꾸기·합치기(+ 아래 지우기)뿐 보관 항목은 없다');
 
   // 지라 프로젝트는 보관 관련 항목은 없지만, 별칭을 위한 `이름 바꾸기`는 있다(BJALIAS — 보관을
   // 없애며 사라졌던 ⋯이 이 용도로 돌아왔다).
@@ -7280,7 +7280,7 @@ test('BRENAME: 그룹 프로젝트는 이름 바꾸기, 지라 프로젝트는 �
   const fixture = renameClient();
   const group = fixture.detail('group:살아 있는 것');
   nodeFind(group.children[0], 'd-more').listeners.click({ stopPropagation() {} });
-  assert.equal(fixture.app.run('lastMenu')[0].map(entry => entry.label).join(','), '이름 바꾸기');
+  assert.equal(fixture.app.run('lastMenu')[0].map(entry => entry.label).join(','), '이름 바꾸기,다른 프로젝트로 합치기…');
   assert.equal(group.children[0].title, undefined, '직접 만든 프로젝트의 제목에는 설명이 붙지 않는다');
 
   const jira = fixture.detail('jira:IO-12345');
@@ -7419,7 +7419,7 @@ test('BJALIAS: 그룹 프로젝트의 제목 ⋯ 메뉴는 그대로다(별칭�
   const fixture = renameClient();
   const group = fixture.detail('group:살아 있는 것');
   nodeFind(group.children[0], 'd-more').listeners.click({ stopPropagation() {} });
-  assert.equal(fixture.app.run('lastMenu')[0].map(entry => entry.label).join(','), '이름 바꾸기', '그룹 프로젝트에는 별칭 항목이 없다');
+  assert.equal(fixture.app.run('lastMenu')[0].map(entry => entry.label).join(','), '이름 바꾸기,다른 프로젝트로 합치기…', '그룹 프로젝트에는 별칭 항목이 없다');
 });
 
 test('BJALIAS: 프로젝트 찾기(projectFindFilter)는 별칭·지라 원래 요약 둘 다로 찾힌다', () => {
@@ -7457,6 +7457,8 @@ function projectNewClient({ meta = BJC_META, made = BJC_MADE, roles = null } = {
   fixture.app.run('openedProject = null; openProjectTab = key => { openedProject = key; };');
   fixture.app.run("lastMenu = null; uiMenu = (anchor, sections) => { lastMenu = sections; return null; };");
   fixture.app.run(`workflowData.jiraRoles = ${JSON.stringify(roles)};`);
+  // 실제 앱에서는 서버가 같은 출처(workflows.groupList)로 customGroups를 함께 준다 — 같은 이름 감지가 이 목록을 본다.
+  fixture.app.run("customGroupsCache = ['날짜 없는 것', '살아 있는 것', '오래 조용한 것', '최근에 끝난 것'];");
   const start = () => {
     fixture.app.run('projectNewStart()');
     // 지라 종류는 화면이 열리자마자 읽으므로 테스트에서는 그 결과를 바로 끼운다.
@@ -7487,7 +7489,7 @@ test('BJCREATE: 왼쪽 목록 머리의 `+`가 새 프로젝트 화면을 열고
   const preview = nodeFind(fixture.body(), 'd-pnewpv');
   assert.equal(bjcWords(nodeFind(preview, 'ep')).includes('새로 만듦'), true, '새 에픽이면 `새로 만듦`이라고 적는다');
   const titles = nodeFindAll(preview, 'ti').map(input => input.value);
-  assert.deepEqual(titles, ['[Web] 예시 게시글 작성하기_샘플 기능', '[QA] 예시 게시글 작성하기_샘플 기능']);
+  assert.deepEqual(titles, ['[Web] 예시 게시글 작성하기 샘플 기능', '[QA] 예시 게시글 작성하기 샘플 기능'], '밑줄은 공백으로 — 앱은 둘을 같은 이름으로 읽는다');
   assert.deepEqual(nodeFindAll(preview, 'br').map(kid => kid.textContent), ['├', '└']);
   assert.deepEqual(nodeFindAll(preview, 'wh').map(kid => kid.textContent).slice(1), ['담당 없음', '담당 없음'], '담당은 비운다');
   assert.equal(bjcText(nodeFind(fixture.body(), 'pri')), '지라에 3개 만들기', '에픽 하나를 함께 센다');
@@ -7545,9 +7547,9 @@ test('BJCREATE: 확인 줄을 거치지 않으면 만들기 요청이 나가지 
   await bjcButton(nodeFind(fixture.body(), 'd-jconfirm'), '만들기').listeners.click();
   assert.deepEqual(fixture.sent.filter(entry => entry.url === '/api/jira/create'), [{ url: '/api/jira/create', body: { plan: {
     projectKey: 'IO',
-    epic: { summary: '예시 게시글 작성하기_샘플 기능' },
-    children: [{ summary: '[Web] 예시 게시글 작성하기_샘플 기능', issueTypeId: '10001' }],
-  } } }]);
+    epic: { summary: '예시 게시글 작성하기 샘플 기능' },
+    children: [{ summary: '[Web] 예시 게시글 작성하기 샘플 기능', issueTypeId: '10001' }],
+  } } }], '보내는 에픽·하위 제목에 밑줄이 없다');
   assert.match(fixture.app.nodes.get('liveRegion').textContent, /지라에 2개를 만들었어요/);
   assert.equal(fixture.app.run('undoStack.length'), 0, '지라에 만드는 것은 앱의 ⌘Z 대상이 아니다');
   assert.match(bjcWords(nodeFind(fixture.body(), 'd-pnewres')), /지라에 2개를 만들었어요/);
@@ -7789,6 +7791,205 @@ test('BMOVE ①: `있는 에픽에 붙이기`도 같은 감지 줄로, 대상은
   await bjcButton(nodeFind(fixture.body(), 'd-jconfirm'), '만들기').listeners.click();
   assert.deepEqual(fixture.sent.filter(entry => entry.url === '/api/project/move'),
     [{ url: '/api/project/move', body: { project: 'group:살아 있는 것', to: 'ABC-1234' } }]);
+});
+
+// ---------- 프로젝트 정리 — 합치기·지우기·같은 이름 감지 (BMERGE) ----------
+// 기본 데이터(projectListClient)에는 그룹 `살아 있는 것`(열린 항목 1개)·`최근에 끝난 것` 등이 있다.
+function bmergeClient(answers = {}) {
+  const fixture = projectNewClient();
+  let made = 0;
+  const reply = {
+    '/api/project/merge': body => ({ ok: true, project: body.to, from: body.project.slice('group:'.length), to: body.to ? body.to.slice('group:'.length) : null,
+      mergeId: `mg_${made += 1}`, changed: { items: 1, meetings: 0, links: 0, report: 0 } }),
+    '/api/project/merge-undo': () => ({ ok: true, project: 'group:살아 있는 것', restored: { items: 1, meetings: 0, report: 0 }, skipped: 0 }),
+    '/api/project/move': body => ({ ok: true, project: `jira:${body.to}`, from: body.project.slice('group:'.length), to: body.to, moveId: `mv_${made += 1}`, changed: { items: 1, meetings: 0, links: 0, report: 0 } }),
+    '/api/project/move-undo': () => ({ ok: true, project: 'group:살아 있는 것', restored: { items: 1, meetings: 0, report: 0 }, skipped: 0 }),
+    ...answers,
+  };
+  fixture.app.context.fetch = async (url, options) => {
+    const body = options && options.body ? JSON.parse(options.body) : null;
+    fixture.sent.push({ url: String(url), body });
+    const answer = reply[String(url)];
+    if (answer) return new Response(JSON.stringify(typeof answer === 'function' ? answer(body) : answer));
+    if (String(url).includes('/api/jira/create-meta')) return new Response(JSON.stringify(BJC_META));
+    return new Response('{"ok":true}');
+  };
+  const notice = () => fixture.app.nodes.get('liveRegion').textContent;
+  // 가짜 노드는 textContent를 바꿔도 아이가 남는다 — 마지막에 붙은 `되돌리기`가 방금 알림의 것이다.
+  const undoButton = () => fixture.app.nodes.get('liveRegion').children.filter(kid => kid && kid.textContent === '되돌리기').pop();
+  return { ...fixture, notice, undoButton };
+}
+
+test('BMERGE ⋯: 직접 만든 프로젝트에만 `다른 프로젝트로 합치기…`·`프로젝트 지우기`(빨간 글자, 구분선 아래)가 있고 지라 프로젝트에는 없다', () => {
+  const fixture = renameClient();
+  const group = fixture.detail('group:살아 있는 것');
+  nodeFind(group.children[0], 'd-more').listeners.click({ stopPropagation() {} });
+  const sections = fixture.app.run('lastMenu').filter(section => section.length);
+  assert.equal(JSON.stringify(sections.map(section => section.map(entry => entry.label))), JSON.stringify([['이름 바꾸기', '다른 프로젝트로 합치기…'], ['프로젝트 지우기']]));
+  assert.equal(sections[1][0].danger, true, '지우기는 삭제 부품(빨간 글자)이다');
+
+  fixture.app.run('lastMenu = null;');
+  const jira = fixture.detail('jira:IO-12345');
+  nodeFind(jira.children[0], 'd-more').listeners.click({ stopPropagation() {} });
+  const labels = fixture.app.run('lastMenu').flat().map(entry => entry.label);
+  assert.equal(labels.includes('다른 프로젝트로 합치기…'), false);
+  assert.equal(labels.includes('프로젝트 지우기'), false);
+});
+
+test('BMERGE 고르개: 자기 자신·프로젝트 빼기·직접 입력이 없고, 지라를 안 쓰는 설치에서는 지라 프로젝트도 없다 — 고르면 확인 없이 바로 합친다', async () => {
+  const fixture = bmergeClient();
+  fixture.app.run(`jiraIssuesCache = [{ key: 'IO-48400', summary: '결제 에픽' }]; jiraIssuesByKey = new Map(jiraIssuesCache.map(one => [one.key, one]));`);
+  const values = () => fixture.app.run("projectMergeChoices({ key: 'group:살아 있는 것' })").filter(entry => entry.type === 'option').map(entry => entry.value);
+  const offValues = values();
+  assert.equal(offValues.includes('group:살아 있는 것'), false, '자기 자신은 빠진다');
+  assert.equal(offValues.some(value => value.startsWith('jira:')), false, '지라를 안 쓰면 지라 프로젝트가 없다');
+  assert.ok(offValues.includes('group:최근에 끝난 것'));
+  assert.equal(fixture.app.run("projectMergeChoices({ key: 'group:살아 있는 것' })").some(entry => entry.type === 'action'), false, '동작 줄(빼기·직접 입력)이 없다');
+  fixture.app.run('latestData = { jiraSync: { used: true, connected: true } };');
+  assert.ok(values().includes('jira:IO-48400'), '지라를 쓰고 연결돼 있으면 지라 에픽도 고를 수 있다');
+  fixture.app.run('latestData = { jiraSync: { used: true, connected: false } };');
+  assert.equal(values().includes('jira:IO-48400'), false, '연결 전이면 빠진다');
+
+  // ⋯ 자리에 이어서 연다 — 머리 줄 + 고르개. 고르면 바로 합치기 요청이 나간다.
+  fixture.app.run("projectMergeOpen(document.createElement('button'), { key: 'group:살아 있는 것' })");
+  const [[head, slot]] = fixture.app.run('lastMenu');
+  assert.equal(head.field, '합칠 곳 고르기 · 항목 1');
+  const option = nodeFindAll(slot.control, 'd-gpopt').find(kid => kid.dataset.value === 'group:최근에 끝난 것');
+  option.listeners.click({ stopPropagation() {} });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(fixture.sent.filter(entry => entry.url.startsWith('/api/project/')), [{ url: '/api/project/merge', body: { project: 'group:살아 있는 것', to: 'group:최근에 끝난 것' } }]);
+
+  // 합칠 곳이 하나도 없으면 누를 수 없는 한 줄.
+  fixture.app.run("customGroupsCache = ['살아 있는 것']; workflowData.items = workflowData.items.filter(item => item.group === '살아 있는 것'); wfIndexData(); latestData = { jiraSync: { used: false } };");
+  fixture.app.run("projectMergeOpen(document.createElement('button'), { key: 'group:살아 있는 것' })");
+  const [[, none]] = fixture.app.run('lastMenu');
+  assert.deepEqual([none.label, none.disabled], ['합칠 수 있는 프로젝트가 없어요', true]);
+});
+
+test('BMERGE ⌘Z: 합치기 뒤 ⌘Z는 merge-undo, ⇧⌘Z는 같은 합치기를 다시 보내고 새 기록 id로 되돌린다', async () => {
+  const fixture = bmergeClient({ '/api/project/merge-undo': { ok: true, project: 'group:살아 있는 것', restored: { items: 1, meetings: 0, report: 0 }, skipped: 2 } });
+  await fixture.app.run("projectMergeRun('group:살아 있는 것', 'group:최근에 끝난 것')");
+  assert.match(fixture.notice(), /^최근에 끝난 것으로 합쳤어요 · 항목 1$/);
+  assert.equal(fixture.app.run('openedProject'), 'group:최근에 끝난 것', '합친 곳을 연다');
+  assert.equal(fixture.app.run('undoStack.length'), 1);
+
+  await fixture.app.run("replayUndo('undo')");
+  assert.deepEqual(fixture.sent.slice(-1), [{ url: '/api/project/merge-undo', body: { mergeId: 'mg_1' } }]);
+  assert.match(fixture.notice(), /되돌렸어요 · 살아 있는 것 프로젝트로 · 그 사이 바뀐 2개는 그대로 두었어요/);
+  assert.equal(fixture.app.run('projectKey'), 'group:살아 있는 것', '원래 프로젝트를 연 채로 다시 그린다');
+
+  await fixture.app.run("replayUndo('redo')");
+  assert.deepEqual(fixture.sent.slice(-1), [{ url: '/api/project/merge', body: { project: 'group:살아 있는 것', to: 'group:최근에 끝난 것' } }]);
+  await fixture.app.run("replayUndo('undo')");
+  assert.deepEqual(fixture.sent.slice(-1), [{ url: '/api/project/merge-undo', body: { mergeId: 'mg_2' } }], '다시 한 합치기의 새 기록으로 되돌린다');
+});
+
+test('BMERGE 지우기: 확인 없이 바로 지우고, 알림 `되돌리기`가 ⌘Z와 같은 기록을 쓴다 — 둘 중 하나가 끝나면 다른 쪽은 `되돌릴 기록이 없어요`', async () => {
+  const fixture = bmergeClient();
+  await fixture.app.run("projectMergeRun('group:살아 있는 것', null)");
+  assert.deepEqual(fixture.sent.filter(entry => entry.url === '/api/project/merge'), [{ url: '/api/project/merge', body: { project: 'group:살아 있는 것', to: null } }]);
+  assert.match(fixture.notice(), /^살아 있는 것 프로젝트를 지웠어요 · 항목 1는 프로젝트 없음으로$/);
+  assert.equal(fixture.app.run('openedProject'), null, '지운 뒤에는 따로 열지 않는다(목록 첫 프로젝트 — 기존 동작)');
+  const button = fixture.undoButton();
+  await button.listeners.click();
+  assert.deepEqual(fixture.sent.slice(-1), [{ url: '/api/project/merge-undo', body: { mergeId: 'mg_1' } }]);
+  assert.equal(fixture.notice(), '살아 있는 것 프로젝트로 되돌렸어요', '알림 되돌리기는 이 동작의 말로 끝난다');
+  assert.equal(fixture.app.run('openedProject'), 'group:살아 있는 것');
+  const sent = fixture.sent.length;
+  // ⌘Z로 이미 되돌린 것을 알림 버튼으로 한 번 더 — 요청 없이 막는다.
+  await fixture.app.run("projectMergeRun('group:살아 있는 것', null)");
+  const second = fixture.undoButton();
+  await fixture.app.run("replayUndo('undo')");
+  await second.listeners.click();
+  assert.equal(fixture.notice(), '되돌릴 기록이 없어요');
+  assert.equal(fixture.sent.length, sent + 2, '합치기 하나 + ⌘Z 되돌리기 하나뿐이다');
+});
+
+test('BMERGE: 지라 에픽을 고르면 기존 옮기기 길로 가고 `합쳤어요`로 알리며, 기존 옮기기(wfProjectMoveFinish)도 ⌘Z에 오른다', async () => {
+  const fixture = bmergeClient();
+  await fixture.app.run("projectMergeRun('group:살아 있는 것', 'jira:IO-48400')");
+  assert.deepEqual(fixture.sent.filter(entry => entry.url.startsWith('/api/project/')), [{ url: '/api/project/move', body: { project: 'group:살아 있는 것', to: 'IO-48400' } }]);
+  assert.match(fixture.notice(), /^IO-48400로 합쳤어요 · 항목 1$/);
+  await fixture.app.run("replayUndo('undo')");
+  assert.deepEqual(fixture.sent.slice(-1), [{ url: '/api/project/move-undo', body: { moveId: 'mv_1' } }]);
+
+  await fixture.app.run("wfProjectMoveFinish({ ok: true, project: 'jira:IO-48400', from: '살아 있는 것', to: 'IO-48400', moveId: 'mv_9', changed: { items: 1, meetings: 0, links: 0, report: 0 } })");
+  assert.match(fixture.notice(), /^IO-48400로 옮겼어요 · 항목 1$/);
+  await fixture.app.run("replayUndo('undo')");
+  assert.deepEqual(fixture.sent.slice(-1), [{ url: '/api/project/move-undo', body: { moveId: 'mv_9' } }]);
+  await fixture.app.run("replayUndo('redo')");
+  assert.deepEqual(fixture.sent.slice(-1), [{ url: '/api/project/move', body: { project: 'group:살아 있는 것', to: 'IO-48400' } }], '다시 하기는 같은 옮기기를 새로 보낸다');
+});
+
+test('BMERGE: 서버가 거절하면(대상이 그 사이 사라짐) 목록을 다시 받고 그 이유를 알린다 — ⌘Z 기록은 없다 · 이름 바꾸기 겹침은 합치기를 안내한다', async () => {
+  const fixture = bmergeClient({ '/api/project/merge': { ok: false, error: '합칠 프로젝트를 찾을 수 없어요.' }, '/api/project/rename': { ok: false, error: '같은 이름의 프로젝트가 이미 있어요.' } });
+  const loads = fixture.app.run('loads');
+  await fixture.app.run("projectMergeRun('group:살아 있는 것', 'group:없어진 것')");
+  assert.equal(fixture.app.run('loads'), loads + 1);
+  assert.equal(fixture.notice(), '합칠 프로젝트를 찾을 수 없어요');
+  assert.equal(fixture.app.run('undoStack.length'), 0);
+  assert.equal(await fixture.app.run("projectRenameSave('group:살아 있는 것', '최근에 끝난 것')"), false);
+  assert.equal(fixture.notice(), '같은 이름의 프로젝트가 이미 있어요 — 합치려면 ⋯ › 다른 프로젝트로 합치기를 써요');
+});
+
+test('BMERGE 새 프로젝트: 지라 에픽 요약·별칭과 같은 이름이면 만들기가 막히고 `열기`가 그 프로젝트를 연다', () => {
+  const fixture = projectNewClient();
+  fixture.app.run(`jiraIssuesCache = [{ key: 'PAY-12', summary: '결제 리뉴얼' }, { key: 'PAY-30', summary: '정산 묶음' }];
+    jiraIssuesByKey = new Map(jiraIssuesCache.map(one => [one.key, one])); projectAliasesCache = { 'PAY-30': '정산 개편' };`);
+  fixture.start();
+  fixture.set("projectNew.name = '결제_리뉴얼'; projectNew.project = 'PAY'; projectNew.roles = ['Web']");
+  const box = nodeFind(fixture.body(), 'd-pnewmovebox');
+  assert.match(bjcWords(box), /결제 리뉴얼은 이미 지라에 있어요\(PAY-12\)/);
+  assert.equal(nodeFindAll(box, 'd-wcb').length, 0, '옮기기 체크가 없다');
+  assert.equal(nodeFind(fixture.body(), 'pri').disabled, true, '만들기 버튼이 막힌다');
+  assert.match(bjcWords(nodeFind(fixture.body(), 'd-pnewacts')), /같은 이름의 지라 프로젝트가 있어요 — 이름을 바꾸거나 '있는 에픽에 붙이기'로 붙여 주세요\./);
+
+  fixture.set("projectNew.name = '정산 개편'");
+  assert.match(bjcWords(nodeFind(fixture.body(), 'd-pnewmovebox')), /정산 개편은 이미 지라에 있어요\(PAY-30\)/, '별칭과 같아도 막는다');
+  fixture.set("projectNew.mode = 'none'; projectNew.first = '첫 일'");
+  assert.equal(nodeFind(fixture.body(), 'pri').disabled, true, '`지라 없이`도 막힌다');
+  assert.match(bjcWords(nodeFind(fixture.body(), 'd-pnewacts')), /같은 이름의 지라 프로젝트가 있어요 — 이름을 바꿔 주세요\./);
+
+  const open = nodeFindAll(nodeFind(fixture.body(), 'd-pnewmovebox'), 'd-link').find(kid => bjcText(kid) === '열기');
+  open.listeners.click();
+  assert.equal(fixture.app.run('openedProject'), 'jira:PAY-30');
+  assert.equal(fixture.app.run('projectNew'), null, '새 프로젝트 화면은 닫힌다');
+});
+
+test('BMERGE 새 프로젝트: `지라 없이`에서 직접 만든 프로젝트와 같은 이름이면 옮기기 체크 대신 `○○에 넣기` — 그 이름 그대로 보낸다', async () => {
+  const fixture = projectNewClient();
+  fixture.start();
+  fixture.set("projectNew.mode = 'none'; projectNew.name = '살아  있는_것'; projectNew.first = '첫 할 일'");
+  const box = nodeFind(fixture.body(), 'd-pnewmovebox');
+  assert.match(bjcWords(box), /살아 있는 것 프로젝트가 이미 있어요\(항목 1\) — 첫 할 일이 거기에 들어가요/);
+  assert.doesNotMatch(bjcWords(box), /만든 뒤 이 에픽으로 옮기기/, '`지라 없이`에는 옮기기 안내가 다시는 뜨지 않는다');
+  assert.ok(nodeFindAll(box, 'd-link').some(kid => bjcText(kid) === '열기'));
+  assert.equal(fixture.app.run('projectNew.moveCandidate'), null);
+  const go = nodeFind(fixture.body(), 'pri');
+  assert.equal(bjcText(go), '살아 있는 것에 넣기');
+  await go.listeners.click();
+  assert.deepEqual(fixture.sent.filter(entry => entry.url === '/api/later-task/create').map(entry => entry.body), [{ description: '첫 할 일', group: '살아 있는 것' }]);
+
+  // 같은 이름이 없으면 밑줄은 공백으로 정리해 새 그룹을 만든다.
+  const other = projectNewClient();
+  other.start();
+  other.set("projectNew.mode = 'none'; projectNew.name = '새_정산   배치'; projectNew.first = '첫 일'");
+  assert.equal(bjcText(nodeFind(other.body(), 'pri')), '프로젝트 만들기');
+  await nodeFind(other.body(), 'pri').listeners.click();
+  assert.deepEqual(other.sent.filter(entry => entry.url === '/api/later-task/create').map(entry => entry.body.group), ['새 정산 배치']);
+});
+
+test('BMERGE 새 프로젝트: 감지 비교는 uiPickByName과 같은 결과다(대소문자·공백·밑줄·`KEY · 요약`·별칭, 직접 만든 이름이 먼저)', () => {
+  const fixture = projectNewClient();
+  fixture.app.run(`jiraIssuesCache = [{ key: 'PAY-12', summary: 'Pay Renewal' }, { key: 'PAY-13', summary: '살아 있는 것' }];
+    jiraIssuesByKey = new Map(jiraIssuesCache.map(one => [one.key, one])); projectAliasesCache = { 'PAY-30': '정산 개편' };`);
+  ['pay  renewal', 'PAY_RENEWAL', 'PAY-12 · Pay Renewal', '정산_개편', '살아 있는 것', '살아_있는_것', '없는 이름'].forEach((name) => {
+    const same = fixture.app.run(`projectNewSame({ mode: 'epic', name: ${JSON.stringify(name)}, epic: null })`);
+    const picked = fixture.app.run(`uiPickByName(${JSON.stringify(name)})`);
+    const known = picked.startsWith('jira:') || fixture.app.run(`customGroupsCache.includes(${JSON.stringify(picked.slice('group:'.length))})`);
+    assert.equal(same ? same.key : null, known ? picked : null, name);
+  });
+  assert.equal(fixture.app.run("projectNewSame({ mode: 'epic', name: '살아 있는 것', epic: null }).kind"), 'group', '직접 만든 이름이 지라 요약보다 먼저다(막지 않는다)');
 });
 
 // ---------- BWRAP: 오늘 정리 ----------

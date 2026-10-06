@@ -1092,6 +1092,288 @@ test('BRENAME: 복구가 필요한 동안에는 이름도 바꾸지 않는다', 
   assert.match(fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8'), /group:결제_리뉴얼\]/);
 });
 
+// ---------- 직접 만든 프로젝트 합치기·지우기 (BMERGE) ----------
+// A를 B로 합치거나(to: 'group:B') A의 소속을 풀어(to: null) 여섯 자리를 한 트랜잭션으로 바꾼다. 되돌리기는
+// 기록(`projectMerges`)에 남은 것만, 지금도 합친 뒤 모양일 때만 돌린다.
+const mergeFetch = (route) => (origin, body, key) => fetch(origin + route, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', ...(key ? { 'Idempotency-Key': key } : {}) },
+  body: JSON.stringify(body),
+}).then(async response => ({ status: response.status, ...await response.json() }));
+const mergePost = mergeFetch('/api/project/merge');
+const mergeUndoPost = mergeFetch('/api/project/merge-undo');
+const MERGE_FILES = ['tasks.md', 'checks.md', 'decisions.md', 'ideas.md', '.workflow.json', '.meeting_links.json', '.report-drafts.json'];
+const mergeSnapshot = home => MERGE_FILES.map(name => fs.readFileSync(path.join(home, name), 'utf8'));
+const MERGE_REPORT = {
+  schema: 1,
+  weeks: {
+    '2026-09-07': {
+      rows: [
+        { id: 'w1', heading: '완료한 일', group: '결제 리뉴얼', bucket: 'group:결제 리뉴얼:완료한 일:정산 설계',
+          text: '정산 설계 마침', sourceIds: ['mg02'], evidence: [{ id: 'mg02', description: '정산 설계', status: 'done', type: 'task', outcome: '', label: '결제 리뉴얼', permalink: null }],
+          locked: true, excluded: false },
+      ],
+      updatedAt: '2026-09-12T00:00:00.000Z',
+    },
+    '2026-09-14': {
+      rows: [
+        { id: 'r1', heading: '진행중', group: '결제 리뉴얼', bucket: 'group:결제 리뉴얼:진행중:정산 배치',
+          text: '정산 배치 진행', sourceIds: ['mg01'], evidence: [{ id: 'mg01', description: '정산 배치', status: 'to-do', type: 'task', outcome: '', label: '결제 리뉴얼', permalink: null }],
+          locked: true, excluded: false },
+        { id: 'r2', heading: '진행중', group: '가입 개편', bucket: 'group:가입 개편:진행중:가입 화면',
+          text: '가입 화면 개편', sourceIds: ['mg04'], evidence: [], locked: true, excluded: false },
+      ],
+      updatedAt: '2026-09-20T00:00:00.000Z',
+    },
+  },
+  weekPolish: {
+    // 확정한 주 — 합치기는 이 주의 기록도 바꾼다.
+    '2026-09-07': { lockedAt: '2026-09-12T00:00:00.000Z', names: { '완료한 일|group:결제 리뉴얼': '정산 마무리' } },
+    // 같은 주에 A·B 소제목 이름이 다 있으면 B 것을 남긴다.
+    '2026-09-14': { names: { '진행중|group:결제 리뉴얼': 'A가 고친 이름', '진행중|group:가입 개편': 'B가 고친 이름' } },
+  },
+};
+function seedMerge(home, { report = MERGE_REPORT, links = { '결제 리뉴얼': 'PAY-1' } } = {}) {
+  fs.writeFileSync(path.join(home, 'tasks.md'), '# Tasks\n'
+    + '- 정산 배치 만들기 #task[id:mg01 status:to-do priority:high created:2026-09-20 group:결제_리뉴얼]\n'
+    + '- 정산 설계 #task[id:mg02 status:done priority:medium created:2026-09-01 completed:2026-09-08 group:결제_리뉴얼]\n'
+    + '- 지라에 걸린 일 #task[id:mg03 status:to-do priority:medium created:2026-09-20 jira:PAY-12 group:결제_리뉴얼]\n'
+    + '- 가입 화면 개편 #task[id:mg04 status:to-do priority:medium created:2026-09-20 group:가입_개편]\n');
+  fs.writeFileSync(path.join(home, 'checks.md'), '# Checks\n'
+    + '- 법무 회신 #check[id:mg05 status:to-do priority:medium created:2026-09-20 who:하늘 group:결제_리뉴얼]\n');
+  fs.writeFileSync(path.join(home, 'decisions.md'), '# Decisions\n'
+    + '- 주 단위로 정산 #decision[id:mg06 status:to-do priority:medium created:2026-09-20 group:결제_리뉴얼]\n');
+  fs.writeFileSync(path.join(home, 'ideas.md'), '# Ideas\n'
+    + '- 정산 리포트 자동화 #idea[id:mg07 status:to-do priority:low created:2026-09-20 project:결제_리뉴얼]\n');
+  fs.writeFileSync(path.join(home, '.workflow.json'), JSON.stringify({
+    items: {}, meetings: {
+      m1: { id: 'm1', date: '2026-09-20', start: '10:00', end: '11:00', title: '결제 주간 싱크', series: '결제 주간 싱크', link: null,
+        project: { type: 'group', value: '결제 리뉴얼', label: '결제 리뉴얼' } },
+      m2: { id: 'm2', date: '2026-09-19', start: '14:00', end: '15:00', title: '가입 회의', series: '가입 회의', link: null,
+        project: { type: 'group', value: '가입 개편', label: '가입 개편' } },
+    },
+    projectLinks: links,
+    projectArchive: { 'group:결제 리뉴얼': '2026-09-19' },
+    projectMoves: [],
+  }, null, 2));
+  fs.writeFileSync(path.join(home, '.meeting_links.json'), JSON.stringify({ '결제 주간 싱크': 'group:결제 리뉴얼', '가입 회의': 'group:가입 개편' }, null, 2));
+  fs.writeFileSync(path.join(home, '.report-drafts.json'), JSON.stringify(report, null, 2));
+}
+
+test('BMERGE: 그룹 → 그룹 합치기 — 업무 넷(끝낸 것 포함)·아이디어·회의·연결표·주간요약이 한 요청에 바뀌고 원래 프로젝트가 사라진다', async (t) => {
+  const server = await startServer(t, seedMerge);
+  const answer = await mergePost(server.base, { project: 'group:결제 리뉴얼', to: 'group:가입 개편' });
+  assert.equal(answer.status, 200, JSON.stringify(answer));
+  assert.match(answer.mergeId, /^mg_/);
+  assert.deepEqual({ ...answer, mergeId: undefined }, {
+    status: 200, ok: true, project: 'group:가입 개편', from: '결제 리뉴얼', to: '가입 개편', mergeId: undefined,
+    changed: { items: 5, meetings: 2, links: 1, report: 2 },
+  });
+  const tasks = fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8');
+  assert.match(tasks, /id:mg01 status:to-do priority:high created:2026-09-20 group:가입_개편\]/);
+  assert.match(tasks, /id:mg02 status:done .* group:가입_개편\]/, '끝낸 항목도 따라간다');
+  assert.match(tasks, /id:mg03 .* jira:PAY-12 group:결제_리뉴얼\]/, '지라가 걸린 줄은 건너뛴다');
+  assert.match(fs.readFileSync(path.join(server.home, 'checks.md'), 'utf8'), /group:가입_개편\]/);
+  assert.match(fs.readFileSync(path.join(server.home, 'decisions.md'), 'utf8'), /group:가입_개편\]/);
+  assert.match(fs.readFileSync(path.join(server.home, 'ideas.md'), 'utf8'), /project:가입_개편\]/);
+  const workflow = readJson(path.join(server.home, '.workflow.json'));
+  assert.deepEqual(workflow.meetings.m1.project, { type: 'group', value: '가입 개편', label: '가입 개편' });
+  assert.deepEqual(workflow.projectLinks, { '가입 개편': 'PAY-1' }, 'B에 연결이 없으면 A 것이 B로 옮겨 간다');
+  assert.deepEqual(workflow.projectArchive, { 'group:가입 개편': '2026-09-19' });
+  assert.deepEqual(workflow.projectMoves, [], '옮기기 기록과 섞이지 않는다');
+  assert.equal(workflow.projectMerges.length, 1);
+  assert.deepEqual(readJson(path.join(server.home, '.meeting_links.json')), { '결제 주간 싱크': 'group:가입 개편', '가입 회의': 'group:가입 개편' });
+  const report = readJson(path.join(server.home, '.report-drafts.json'));
+  assert.deepEqual([report.weeks['2026-09-14'].rows[0].group, report.weeks['2026-09-14'].rows[0].bucket, report.weeks['2026-09-14'].rows[0].evidence[0].label],
+    ['가입 개편', 'group:가입 개편:진행중:정산 배치', '가입 개편']);
+  assert.equal(report.weeks['2026-09-07'].rows[0].bucket, 'group:가입 개편:완료한 일:정산 설계', '확정한 지난 주도 바뀐다');
+  assert.deepEqual(report.weekPolish['2026-09-07'].names, { '완료한 일|group:가입 개편': '정산 마무리' });
+  assert.deepEqual(report.weekPolish['2026-09-14'].names, { '진행중|group:결제 리뉴얼': 'A가 고친 이름', '진행중|group:가입 개편': 'B가 고친 이름' },
+    '같은 주에 B 소제목 이름이 있으면 B 것을 남긴다(A 것은 옛 열쇠에 남아 쓰이지 않는다)');
+  const data = await (await fetch(server.base + '/api/items')).json();
+  assert.ok(!data.customGroups.includes('결제 리뉴얼') && data.customGroups.includes('가입 개편'), '원래 프로젝트는 목록에서 사라진다');
+  assert.equal(JSON.stringify(data).includes('projectMerges'), false, '기록은 화면에 내려보내지 않는다');
+});
+
+test('BMERGE: 합치기 되돌리기 — 기록된 것만 원래대로, 그 사이 다른 프로젝트로 옮긴 항목은 건너뛰고 skipped로 센다', async (t) => {
+  const server = await startServer(t, seedMerge);
+  const before = mergeSnapshot(server.home);
+  const merged = await mergePost(server.base, { project: 'group:결제 리뉴얼', to: 'group:가입 개편' });
+  // 그 사이 mg05를 다른 프로젝트로 옮긴다(앱의 다른 저장 길).
+  const moved = await fetch(server.base + '/api/track/set-group', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'mg05', group: '운영툴' }) });
+  assert.equal(moved.status, 200, await moved.text());
+  const undone = await mergeUndoPost(server.base, { mergeId: merged.mergeId });
+  assert.equal(undone.status, 200, JSON.stringify(undone));
+  assert.equal(undone.project, 'group:결제 리뉴얼');
+  assert.equal(undone.skipped, 1, '옮긴 확인 대기 하나만 건너뛴다');
+  assert.deepEqual(undone.restored, { items: 4, meetings: 2, report: 2 });
+  assert.match(fs.readFileSync(path.join(server.home, 'checks.md'), 'utf8'), /id:mg05 .*group:운영툴/, '건너뛴 것은 그대로 둔다');
+  const after = mergeSnapshot(server.home);
+  ['tasks.md', 'decisions.md', 'ideas.md', '.meeting_links.json', '.report-drafts.json'].forEach((name) => {
+    assert.equal(after[MERGE_FILES.indexOf(name)], before[MERGE_FILES.indexOf(name)], `${name}은 합치기 전과 같다`);
+  });
+  const workflow = readJson(path.join(server.home, '.workflow.json'));
+  const original = JSON.parse(before[MERGE_FILES.indexOf('.workflow.json')]);
+  assert.deepEqual(workflow.meetings, original.meetings);
+  assert.deepEqual(workflow.projectLinks, original.projectLinks);
+  assert.deepEqual(workflow.projectArchive, original.projectArchive);
+  assert.deepEqual(workflow.projectMerges, [], '한 번 되돌리면 기록이 지워진다');
+  // 두 번째는 기록이 없다.
+  const again = await mergeUndoPost(server.base, { mergeId: merged.mergeId });
+  assert.equal(again.status, 400);
+  assert.equal(again.error, '되돌릴 기록이 없어요.');
+});
+
+test('BMERGE: 지우기 — 항목 칸·회의 프로젝트가 비고 연결표 줄이 빠지며 주간요약은 바이트 그대로, 되돌리면 모두 돌아온다', async (t) => {
+  const server = await startServer(t, seedMerge);
+  const before = mergeSnapshot(server.home);
+  const answer = await mergePost(server.base, { project: 'group:결제 리뉴얼', to: null });
+  assert.equal(answer.status, 200, JSON.stringify(answer));
+  assert.equal(answer.project, null);
+  assert.equal(answer.to, null);
+  assert.deepEqual(answer.changed, { items: 5, meetings: 2, links: 1, report: 0 });
+  const tasks = fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8');
+  assert.match(tasks, /id:mg01 status:to-do priority:high created:2026-09-20\]/, '칸이 빠진다');
+  assert.match(tasks, /id:mg03 .* jira:PAY-12 group:결제_리뉴얼\]/);
+  assert.match(fs.readFileSync(path.join(server.home, 'ideas.md'), 'utf8'), /id:mg07 status:to-do priority:low created:2026-09-20\]/);
+  const workflow = readJson(path.join(server.home, '.workflow.json'));
+  assert.equal(workflow.meetings.m1.project, null);
+  assert.deepEqual(workflow.projectLinks, {});
+  assert.deepEqual(workflow.projectArchive, { 'group:결제 리뉴얼': '2026-09-19' }, '보관 표는 그대로 둔다');
+  assert.deepEqual(readJson(path.join(server.home, '.meeting_links.json')), { '가입 회의': 'group:가입 개편' });
+  assert.equal(fs.readFileSync(path.join(server.home, '.report-drafts.json'), 'utf8'), before[MERGE_FILES.indexOf('.report-drafts.json')], '주간요약은 건드리지 않는다');
+  const data = await (await fetch(server.base + '/api/items')).json();
+  assert.ok(!data.customGroups.includes('결제 리뉴얼'));
+  assert.equal((await (await fetch(server.base + '/api/track/trash')).json()).items.length, 0, '항목은 휴지통으로 가지 않는다');
+
+  const undone = await mergeUndoPost(server.base, { mergeId: answer.mergeId });
+  assert.equal(undone.status, 200, JSON.stringify(undone));
+  assert.equal(undone.skipped, 0);
+  const after = mergeSnapshot(server.home);
+  ['checks.md', 'decisions.md', '.report-drafts.json'].forEach((name) => {
+    assert.equal(after[MERGE_FILES.indexOf(name)], before[MERGE_FILES.indexOf(name)], `${name}은 지우기 전과 같다`);
+  });
+  // 연결표는 뺐던 줄이 다시 들어가 열쇠 차례만 바뀐다(뜻은 같다).
+  assert.deepEqual(JSON.parse(after[MERGE_FILES.indexOf('.meeting_links.json')]), JSON.parse(before[MERGE_FILES.indexOf('.meeting_links.json')]));
+  // 업무 줄은 칸이 끝에 다시 붙는다(칸 차례는 뜻이 없다) — 같은 프로젝트로 돌아왔는지 본다.
+  const back = await (await fetch(server.base + '/api/items')).json();
+  assert.ok(back.customGroups.includes('결제 리뉴얼'));
+  ['mg01', 'mg02', 'mg05', 'mg06'].forEach((id) => {
+    assert.equal(back.workflows.items.find(item => item.id === id).group, '결제 리뉴얼', id);
+  });
+  assert.equal(back.workflows.items.find(item => item.id === 'mg07').project, '결제 리뉴얼');
+  const workflowBack = readJson(path.join(server.home, '.workflow.json'));
+  assert.deepEqual(workflowBack.meetings, JSON.parse(before[MERGE_FILES.indexOf('.workflow.json')]).meetings);
+  assert.deepEqual(workflowBack.projectLinks, { '결제 리뉴얼': 'PAY-1' });
+});
+
+test('BMERGE: 수동 지라 연결이 둘 다 있으면 대상 것을 남기고, 되돌리면 원래 것이 다시 붙는다', async (t) => {
+  const server = await startServer(t, home => seedMerge(home, { links: { '결제 리뉴얼': 'PAY-1', '가입 개편': 'PAY-2' } }));
+  const answer = await mergePost(server.base, { project: 'group:결제 리뉴얼', to: 'group:가입 개편' });
+  assert.equal(answer.changed.links, 1);
+  assert.deepEqual(readJson(path.join(server.home, '.workflow.json')).projectLinks, { '가입 개편': 'PAY-2' });
+  await mergeUndoPost(server.base, { mergeId: answer.mergeId });
+  assert.deepEqual(readJson(path.join(server.home, '.workflow.json')).projectLinks, { '가입 개편': 'PAY-2', '결제 리뉴얼': 'PAY-1' });
+});
+
+test('BMERGE: 거절 — 지라 프로젝트를 원래로·자기 자신·없는 대상·지라 대상·모르는 프로젝트·빈 to는 어떤 파일도 바꾸지 않는다', async (t) => {
+  const server = await startServer(t, seedMerge);
+  const before = mergeSnapshot(server.home);
+  const refuse = async (body, message) => {
+    const answer = await mergePost(server.base, body);
+    assert.equal(answer.status, 400, JSON.stringify(body));
+    assert.equal(answer.error, message, JSON.stringify(body));
+  };
+  await refuse({ project: 'jira:PAY-12', to: 'group:가입 개편' }, '직접 만든 프로젝트만 합치거나 지울 수 있어요.');
+  await refuse({ project: 'group:결제 리뉴얼', to: 'group:결제 리뉴얼' }, '같은 프로젝트예요.');
+  await refuse({ project: 'group:결제 리뉴얼', to: 'group:결제_리뉴얼' }, '같은 프로젝트예요.');
+  await refuse({ project: 'group:결제 리뉴얼', to: 'group:없는 프로젝트' }, '합칠 프로젝트를 찾을 수 없어요.');
+  await refuse({ project: 'group:결제 리뉴얼', to: 'jira:PAY-12' }, '지라 에픽으로 합칠 때는 옮기기를 써요.');
+  await refuse({ project: 'group:모르는 프로젝트', to: 'group:가입 개편' }, '프로젝트를 찾을 수 없어요.');
+  await refuse({ project: 'group:결제 리뉴얼' }, '합칠 프로젝트를 확인해 주세요.');
+  await refuse({ project: 'group:결제 리뉴얼', to: '가입 개편' }, '합칠 프로젝트를 확인해 주세요.');
+  await refuse({ project: 'group:결제 리뉴얼', to: 'group:  ' }, '합칠 프로젝트를 확인해 주세요.');
+  assert.deepEqual(mergeSnapshot(server.home), before);
+  const undo = await mergeUndoPost(server.base, { mergeId: 'mg_없는기록' });
+  assert.equal(undo.error, '되돌릴 기록이 없어요.');
+  assert.deepEqual(mergeSnapshot(server.home), before);
+});
+
+test('BMERGE: 대소문자만 다른 두 프로젝트(Pay Renewal · pay renewal)도 합칠 수 있다', async (t) => {
+  const server = await startServer(t, (home) => {
+    seedMerge(home);
+    fs.appendFileSync(path.join(home, 'tasks.md'), '- 큰 글자 #task[id:mg08 status:to-do created:2026-09-20 group:Pay_Renewal]\n- 작은 글자 #task[id:mg09 status:to-do created:2026-09-20 group:pay_renewal]\n');
+  });
+  const answer = await mergePost(server.base, { project: 'group:Pay Renewal', to: 'group:pay renewal' });
+  assert.equal(answer.status, 200, JSON.stringify(answer));
+  assert.equal(answer.changed.items, 1);
+  assert.match(fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8'), /id:mg08 status:to-do created:2026-09-20 group:pay_renewal\]/);
+});
+
+test('BMERGE: id가 없는 줄이 있으면 아무것도 쓰기 전에 거절한다', async (t) => {
+  const server = await startServer(t, (home) => {
+    seedMerge(home);
+    fs.appendFileSync(path.join(home, 'decisions.md'), '- 아주 옛 줄 #decision[status:to-do created:2026-01-01 group:결제_리뉴얼]\n');
+  });
+  const before = mergeSnapshot(server.home);
+  const answer = await mergePost(server.base, { project: 'group:결제 리뉴얼', to: null });
+  assert.equal(answer.status, 400);
+  assert.equal(answer.error, 'id가 없는 항목이 있어 되돌릴 수 없어요.');
+  assert.deepEqual(mergeSnapshot(server.home), before);
+});
+
+test('BMERGE: 중간(주간요약 쓰기)에서 실패하면 업무 파일·회의·연결표까지 전부 원래대로 — 부분 쓰기가 없다', async (t) => {
+  const server = await startServer(t, home => seedMerge(home, { report: { schema: 2, weeks: {} } }));
+  const before = mergeSnapshot(server.home);
+  const failed = await mergePost(server.base, { project: 'group:결제 리뉴얼', to: 'group:가입 개편' });
+  assert.equal(failed.status, 400);
+  assert.match(failed.error, /보고 기록 형식을 확인해 주세요/);
+  assert.deepEqual(mergeSnapshot(server.home), before, '앞서 쓴 업무 파일·.workflow.json·연결표까지 되돌아간다');
+  assert.equal((await (await fetch(server.base + '/api/storage-status')).json()).recoveryNeeded, false);
+});
+
+test('BMERGE: 같은 요청 id 두 번이면 한 번만 합친다', async (t) => {
+  const server = await startServer(t, seedMerge);
+  const key = 'bmerge-idempotency-key-0001';
+  const first = await mergePost(server.base, { project: 'group:결제 리뉴얼', to: 'group:가입 개편' }, key);
+  const second = await mergePost(server.base, { project: 'group:결제 리뉴얼', to: 'group:가입 개편' }, key);
+  assert.equal(first.ok, true);
+  assert.deepEqual(second, first, '두 번째는 처음 결과를 그대로 돌려준다');
+  assert.equal(readJson(path.join(server.home, '.workflow.json')).projectMerges.length, 1);
+});
+
+test('BMERGE: projectMerges 칸이 없는 옛 파일에서도 되고, 옮기기 되돌리기(move-undo)에 합치기 id를 주면 거절한다', async (t) => {
+  const server = await startServer(t, (home) => {
+    seedMerge(home);
+    const state = readJson(path.join(home, '.workflow.json'));
+    delete state.projectMoves;
+    fs.writeFileSync(path.join(home, '.workflow.json'), JSON.stringify(state, null, 2));
+  });
+  assert.equal(readJson(path.join(server.home, '.workflow.json')).projectMerges, undefined);
+  const answer = await mergePost(server.base, { project: 'group:결제 리뉴얼', to: 'group:가입 개편' });
+  assert.equal(answer.ok, true);
+  const workflow = readJson(path.join(server.home, '.workflow.json'));
+  assert.equal(workflow.projectMerges.length, 1);
+  assert.equal(workflow.projectMoves, undefined, '옮기기 기록 칸을 만들지 않는다');
+  const wrong = await fetch(server.base + '/api/project/move-undo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ moveId: answer.mergeId }) })
+    .then(async response => ({ status: response.status, ...await response.json() }));
+  assert.equal(wrong.status, 400);
+  assert.equal(wrong.error, '되돌릴 기록이 없어요.');
+  assert.equal(readJson(path.join(server.home, '.workflow.json')).projectMerges.length, 1, '합치기 기록은 그대로 남는다');
+});
+
+test('BMERGE: 복구가 필요한 동안에는 합치지도 되돌리지도 않는다', async (t) => {
+  const server = await startServer(t, (home) => {
+    seedMerge(home);
+    fs.writeFileSync(path.join(home, '.mutation-journal.json'), journalEntry(path.join(home, 'tasks.md'), '# Tasks\n', '# Tasks\n- 중단된 저장\n'));
+    fs.writeFileSync(path.join(home, '.mutation.lock'), String(deadPid()));
+  });
+  const blocked = await mergePost(server.base, { project: 'group:결제 리뉴얼', to: null });
+  assert.equal(blocked.status, 503);
+  assert.match(blocked.error, /저장을 멈췄어요/);
+  assert.equal((await mergeUndoPost(server.base, { mergeId: 'mg_x' })).status, 503);
+});
+
 // ---------- 지라 프로젝트 앱 안 별칭 (BJALIAS) ----------
 // 기본은 지라 요약, 별칭이 있으면 앱 안 어디서나 그 이름이다. 지라 요약 자체는 고쳐 쓰지 않는다
 // (GET /api/jira/list 응답 불변) — `.workflow.json`의 `projectAliases` 칸 하나만 바뀐다.

@@ -2626,3 +2626,86 @@ test('BJASSIGN2: /api/jira/assignable는 두 글자 미만·틀린 키면 400, �
   assert.equal(plainText.status, 403);
   assert.equal(snapshot(), before);
 });
+
+// ---------- 새 에픽 만들기 전 같은 이름 막기 (BMERGE 3-3) ----------
+// 새 에픽 요약이 이미 있는 지라 프로젝트(에픽 요약·별칭)와 같으면 지라에 아무것도 묻지 않고 409로 거절한다.
+// 가짜 지라는 자식 프로세스 안에서 fetch를 가로채고, 목록 읽기(search)가 아닌 요청은 전부 calls.log에 한 줄씩 남긴다.
+const JIRA_SAME_SITE = 'https://same-jira.test';
+async function startSameNameJiraServer(t, seed) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-jirasame-'));
+  seed(home);
+  fs.writeFileSync(path.join(home, 'jira_issues.md'),
+    '# 지라 이슈 (내 담당, 진행중/백로그)\n\n마지막 갱신: 2026-10-06\n\n- PAY-12 | 에픽 | 진행 중 | 결제 리뉴얼\n- PAY-30 | 에픽 | 진행 중 | 정산 묶음\n');
+  const tokenFile = path.join(home, '.jira_token_fixture');
+  fs.writeFileSync(tokenFile, 'fixture-token-never-real\n');
+  const config = path.join(home, 'workspace.config.json');
+  fs.writeFileSync(config, JSON.stringify({ jira: { siteUrl: JIRA_SAME_SITE, email: 'fixture@example.test', tokenFile } }));
+  const callsFile = path.join(home, 'calls.log');
+  const wrapper = path.join(home, 'fake-jira-same-server.js');
+  fs.writeFileSync(wrapper, `'use strict';
+const fs = require('node:fs');
+const SITE = ${JSON.stringify(JIRA_SAME_SITE)};
+const CALLS = ${JSON.stringify(callsFile)};
+const TYPES = ${JSON.stringify(MOVE_TYPES)};
+const realFetch = globalThis.fetch;
+globalThis.fetch = async (input, init) => {
+  const url = String(input && input.url ? input.url : input);
+  if (!url.startsWith(SITE)) return realFetch(input, init);
+  const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  const issue = (key, summary) => ({ key, fields: { summary, status: { name: '진행 중', statusCategory: { key: 'indeterminate' } }, issuetype: { name: '에픽' } } });
+  if (url.includes('/search')) return json({ issues: [issue('PAY-12', '결제 리뉴얼'), issue('PAY-30', '정산 묶음')] });
+  fs.appendFileSync(CALLS, JSON.stringify({ method: (init && init.method) || 'GET', url, body: init && init.body ? String(init.body) : null }) + '\\n');
+  if (url.includes('/issue/createmeta/')) return json(TYPES);
+  if (url.endsWith('/myself')) return json({ accountId: 'fixture-me', displayName: '나' });
+  if (url.endsWith('/assignee')) return new Response(null, { status: 204 });
+  if (url.endsWith('/rest/api/3/issue') && init && init.method === 'POST') return json({ id: '1', key: 'PAY-99' }, 201);
+  return json({ errorMessages: ['no'] }, 404);
+};
+const { server } = require(${JSON.stringify(path.join(__dirname, 'server.js'))});
+server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => console.log('ready'));
+`);
+  const port = await freePort();
+  const child = spawn(process.execPath, [wrapper], {
+    env: { ...process.env, WORKSPACE_DATA_DIR: home, WORKSPACE_PORT: String(port), WORKSPACE_NO_OPEN: '1', WORKSPACE_HOST: '', WORKSPACE_CONFIG: config },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let log = '';
+  child.stdout.on('data', chunk => { log += chunk; });
+  child.stderr.on('data', chunk => { log += chunk; });
+  t.after(() => { child.kill('SIGKILL'); fs.rmSync(home, { recursive: true, force: true }); });
+  const origin = `http://127.0.0.1:${port}`;
+  const calls = () => (fs.existsSync(callsFile) ? fs.readFileSync(callsFile, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : []);
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) throw new Error(`서버가 종료되었습니다 (${child.exitCode}): ${log}`);
+    try { if ((await fetch(origin + '/api/storage-status')).ok) return { home, origin, calls }; } catch { /* 아직 안 떴다 */ }
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  throw new Error(`서버가 응답하지 않았습니다: ${log}`);
+}
+
+test('BMERGE 3-3: 새 에픽 요약이 지라 요약·별칭과 같으면 409이고 지라에 요청이 하나도 가지 않는다 — 그룹 이름과 같으면 통과, 밑줄은 공백으로', async (t) => {
+  const server = await startSameNameJiraServer(t, (home) => {
+    fs.writeFileSync(path.join(home, 'tasks.md'), '# Tasks\n- 운영 일 #task[id:sn01 status:to-do created:2026-09-20 group:운영툴]\n');
+    fs.writeFileSync(path.join(home, '.workflow.json'), JSON.stringify({ items: {}, meetings: {}, projectAliases: { 'PAY-30': '정산 개편' } }, null, 2));
+  });
+  const create = summary => fetch(server.origin + '/api/jira/create', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plan: { projectKey: 'PAY', epic: { summary }, children: [] } }),
+  }).then(async response => ({ status: response.status, ...await response.json() }));
+  for (const summary of ['결제 리뉴얼', '결제_리뉴얼', '  결제   리뉴얼 ', 'PAY-12 · 결제 리뉴얼', '정산 개편', '정산_개편']) {
+    const blocked = await create(summary);
+    assert.equal(blocked.status, 409, summary);
+    assert.equal(blocked.error, '같은 이름의 지라 프로젝트가 이미 있어요.', summary);
+    assert.equal(blocked.kind, 'exists');
+  }
+  assert.deepEqual(server.calls(), [], '막힌 요청은 지라에 아무것도 묻지 않는다');
+
+  // 직접 만든 프로젝트와 같은 이름은 통과(만든 뒤 옮기기 흐름). 요약의 밑줄은 공백으로 나간다.
+  const made = await create('운영툴');
+  assert.equal(made.status, 200, JSON.stringify(made));
+  assert.equal(made.ok, true, JSON.stringify(made));
+  const fresh = await create('새_정산   배치');
+  assert.equal(fresh.ok, true, JSON.stringify(fresh));
+  const summaries = server.calls().filter(call => call.method === 'POST' && call.url.endsWith('/rest/api/3/issue')).map(call => JSON.parse(call.body).fields.summary);
+  assert.deepEqual(summaries, ['운영툴', '새 정산 배치']);
+});
