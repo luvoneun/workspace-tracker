@@ -17579,3 +17579,52 @@ test('② 검수: 옮기기 되돌리기에서 서버가 건너뛴 업무 수(sk
   assert.equal(app.nodes.get('liveRegion').textContent, '되돌렸어요');
   assert.match(fs.readFileSync(path.join(__dirname, 'report-ui.js'), 'utf8'), /reportLastSkipped = Number\.isFinite\(result\.skipped\)/);
 });
+
+// 새 프로젝트 화면(결과 포함)이 다른 프로젝트·탭으로 가는 길을 막지 않는다.
+function projectNewStuckClient() {
+  const fixture = projectListClient({ posts: () => new Response('{"ok":true}') });
+  fixture.app.run('loads = 0; load = async () => { loads += 1; };');
+  fixture.app.run("uiMenu = () => null;");
+  fixture.app.run('renderProjects(); projectNewStart(); projectNew.result = { made: 2, failed: 0, epic: { key: "IO-1", url: "x", created: true }, children: [] }; projectNewPaint();');
+  const rowButton = name => fixture.list().children.find(kid => String(kid.className || '').startsWith('d-prow') && nodeFind(kid, 'nm').textContent === name);
+  return { ...fixture, rowButton };
+}
+
+test('BJCREATE: 결과 화면에서 다른 프로젝트 줄을 누르면 화면이 닫히고 고른 프로젝트가 보인다', () => {
+  const fixture = projectNewStuckClient();
+  assert.ok(fixture.app.run('!!projectNew'));
+  fixture.rowButton('최근에 끝난 것').listeners.click();
+  assert.equal(fixture.app.run('projectNew'), null);
+  assert.ok(!nodeFind(fixture.app.nodes.get('projectBody'), 'd-pnewres'), '결과 화면이 사라진다');
+  assert.equal(fixture.app.run('projectKey'), 'group:최근에 끝난 것', '고른 프로젝트가 선다');
+});
+
+test('BJCREATE: openProjectTab·탭 이동도 결과 화면을 닫는다', () => {
+  const a = projectNewStuckClient();
+  a.app.run("setActiveTab = () => {}; openProjectTab('group:살아 있는 것')");
+  assert.equal(a.app.run('projectNew'), null);
+  assert.equal(a.app.run('projectKey'), 'group:살아 있는 것');
+  // setActiveTab은 가짜 창에 올라오지 않는다 — 탭을 떠날 때 부르는 줄을 글자로 확인한다.
+  const source = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const tab = source.slice(source.indexOf('function setActiveTab('), source.indexOf('Object.entries(TABS).forEach', source.indexOf('function setActiveTab(')));
+  assert.match(tab, /activeTabKey === 'projects' && [^\n]*projectNewLeave\(\)\) renderProjects\(\)/);
+});
+
+test('BJCREATE: 지라에 만드는 중에는 줄을 눌러도 화면을 버리지 않는다', () => {
+  const fixture = projectNewStuckClient();
+  fixture.app.run('projectNew.busy = true');
+  fixture.rowButton('최근에 끝난 것').listeners.click();
+  assert.ok(fixture.app.run('!!projectNew'), '만드는 중이면 그대로 남는다');
+  assert.equal(fixture.app.run('projectNewLeave()'), false, '탭을 떠날 때도 같은 함수가 막는다');
+  assert.ok(fixture.app.run('!!projectNew'));
+  fixture.app.run('projectNew.busy = false');
+  fixture.rowButton('최근에 끝난 것').listeners.click();
+  assert.equal(fixture.app.run('projectNew'), null);
+});
+
+test('BJCREATE: 열린 항목 0인 새 에픽을 고르면 접어 둔 지난 프로젝트도 펼쳐져 목록에 보인다', () => {
+  const fixture = projectNewStuckClient();
+  fixture.app.run("projectNewDrop(); jiraIssuesCache = [{ key: 'IO-1', summary: '새 에픽', status: 'To Do', statusCategory: 'new', issuetype: 'Epic' }]; jiraIssuesByKey = new Map(jiraIssuesCache.map(i => [i.key, i])); projectPastOpen = false;");
+  fixture.app.run("projectPastOpen = null; projectKey = 'jira:IO-1'; renderProjects();");
+  assert.ok(fixture.rowsOf().some(row => /새 에픽/.test(row.name)), '고른 에픽 줄이 목록에 선다');
+});
