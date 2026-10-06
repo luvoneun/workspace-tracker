@@ -239,7 +239,9 @@ function wfUndoNoticeAction(entry, after) {
       if (undoStack[undoStack.length - 1] !== entry) { showNotice('최근 작업부터 순서대로 실행 취소해 주세요', true); return; }
       if (button) button.disabled = true;
       await replayUndo('undo');
-      if (redoStack[redoStack.length - 1] === entry) after();
+      if (redoStack[redoStack.length - 1] !== entry) return;
+      lastUndoRecordedAt = 0; // 방금 올린 기록은 되돌려졌다 — 끝난 알림에 `⌘Z로 되돌리기` 힌트를 다시 달지 않는다
+      after();
     },
   };
 }
