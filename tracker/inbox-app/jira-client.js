@@ -7,6 +7,7 @@
 // - siteUrl은 `https://`만, 키는 `^[A-Z][A-Z0-9]*-\d+$`만 받는다. 요청은 8초에서 끊는다.
 // - 이 모듈은 아무것도 기록하지 않는다(로그도, 파일 쓰기도 없다).
 const nodeFs = require('node:fs');
+const nodeCrypto = require('node:crypto');
 const os = require('node:os');
 
 const JIRA_KEY_RE = /^[A-Z][A-Z0-9]*-\d+$/;
@@ -36,7 +37,19 @@ const JIRA_DONE_DAYS = 90;
 const JIRA_DONE_MAX_DAYS = 365;
 const doneIssuesJql = days => `assignee = currentUser() AND statusCategory = Done AND resolved >= -${days}d ORDER BY resolved DESC`;
 const doneDaysOf = days => (Number.isInteger(days) && days >= 1 && days <= JIRA_DONE_MAX_DAYS ? days : JIRA_DONE_DAYS);
-const CHANGE_KINDS = ['status', 'version', 'due', 'versionEdit'];
+const CHANGE_KINDS = ['status', 'version', 'due', 'versionEdit', 'assignee', 'assigneeUndo'];
+// 담당자 바꾸기(BJASSIGN2) — 사람 찾기·맡기기·되돌리기. accountId는 지라 내부 식별자라
+// 찾기 응답·맡기기 요청 본문·지라로 보내는 본문(body)에만 지나가고, 주소(querystring)·오류 문구·기록에는 싣지 않는다.
+// 첫 글자는 영문·숫자 — 자동 배정 값(`-1`)은 받지 않는다.
+const JIRA_ACCOUNT_RE = /^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$/;
+const ASSIGNABLE_ASK = 20;       // 지라에 묻는 인원
+const ASSIGNABLE_SHOWN = 10;     // 고르개에 내놓는 인원
+const ASSIGNABLE_CHECK = 50;     // 쓰기 직전 "맡을 수 있나" 대조에 묻는 인원
+const ASSIGNABLE_QUERY_MAX = 50; // 찾는 글자 상한
+const ASSIGN_NAME_MAX = 255;
+const SAME_NAME_LOOKUPS = 3;     // 같은 이름 구분에 지라를 더 부르는 최대 인원
+const ASSIGN_UNDO_MS = 10 * 60 * 1000;
+const ASSIGN_REPEAT_MS = 3000;
 // 반응 필요(BATTENTION 1차)가 읽는 것 — 내가 담당·보고·지켜보는 이슈 중 최근 14일 안에 갱신된 것.
 // 받아 오는 칸은 셋뿐이고(요약·상태·댓글) 담당자는 아예 묻지 않는다.
 const ATTENTION_JQL = '(assignee = currentUser() OR reporter = currentUser() OR watcher = currentUser()) AND updated >= -14d ORDER BY updated DESC';
@@ -78,7 +91,29 @@ const MESSAGE = {
   typeStale: '지라에서 만들 수 있는 종류가 바뀌었어요. 화면을 새로 읽고 다시 골라 주세요.',
   tooMany: '한 번에 12개까지 만들 수 있어요.',
   duplicate: '같은 내용을 방금 보냈어요. 잠시 뒤에 다시 시도해 주세요.',
+  // 아래는 "담당자 바꾸기"에서만 쓰는 문구다. 이름이 들어가는 문구는 assignMessage가 짓는다.
+  assignForbidden: '지라에서 이 티켓의 담당을 바꿀 권한이 없어요.',
+  assignUnsure: '지라에 반영됐는지 확인하지 못했어요 — 카드를 새로 읽었어요.',
+  undoGone: '되돌릴 수 있는 시간이 지났어요.',
+  undoStale: '그 사이 지라에서 다시 바뀌어 되돌리지 않았어요.',
 };
+
+// 이름 뒤 조사 — 받침이 있으면 앞의 것. 한글이 아니면 받침 없음으로 본다. `로`는 ㄹ 받침도 받침 없음과 같다.
+function josa(name, withFinal, without) {
+  const word = String(name || '');
+  const code = word.charCodeAt(word.length - 1) - 0xac00;
+  const final = code >= 0 && code <= 11171 ? code % 28 : 0;
+  const has = withFinal === '으로' ? final !== 0 && final !== 8 : final !== 0;
+  return word + (has ? withFinal : without);
+}
+// 이름이 들어가는 담당자 문구. 이름은 지라의 표시 이름(화면에 이미 보이는 값)뿐이다.
+function assignMessage(kind, name) {
+  const who = name || '없음';
+  if (kind === 'assigneeStale') return `그 사이 지라에서 담당이 ${josa(who, '으로', '로')} 바뀌었어요. 확인하고 다시 골라 주세요.`;
+  if (kind === 'notAssignable') return `${josa(name || '이 사람', '은', '는')} 이 티켓을 맡을 수 없어요(지라 권한). 다른 사람을 골라 주세요.`;
+  if (kind === 'undoFail') return `되돌리지 못했어요 — 담당은 ${who} 그대로예요.`;
+  return MESSAGE[kind] || MESSAGE.write;
+}
 
 function jiraError(kind, status) {
   const error = new Error(MESSAGE[kind] || MESSAGE.other);
@@ -193,6 +228,8 @@ function shapeIssue(siteUrl, key, body, children) {
     type: text(fields.issuetype && fields.issuetype.name),
     status: { name: text(status.name), category: CATEGORY[status.statusCategory && status.statusCategory.key] || 'doing' },
     assignee: text(fields.assignee && fields.assignee.displayName) || null,
+    // 지금 담당이 지라에서 비활성일 때만 붙는다(고르개 맨 위 한 줄). 계정 id는 싣지 않는다.
+    ...(fields.assignee && fields.assignee.active === false ? { assigneeInactive: true } : {}),
     due: day(fields.duedate),
     versions: versions.map(version => ({
       id: idOf(version && version.id),
@@ -228,6 +265,7 @@ function shapeChild(siteUrl, entry) {
     type: text(fields.issuetype && fields.issuetype.name),
     status: { name: text(status.name), category: CATEGORY[status.statusCategory && status.statusCategory.key] || 'doing' },
     assignee: text(fields.assignee && fields.assignee.displayName) || null,
+    ...(fields.assignee && fields.assignee.active === false ? { assigneeInactive: true } : {}),
     version: text(versions[0] && versions[0].name) || null,
   };
 }
@@ -623,18 +661,57 @@ function createJiraClient({ settings, request = (...args) => fetch(...args), rea
     return { key, url: issueUrl(settings.siteUrl, key) };
   }
 
-  // 담당자를 accountId로 지정한다(BJASSIGN — 새로 만든 에픽만 부른다). accountId는 사람이 보는
+  // 담당자를 accountId로 지정한다(BJASSIGN 새 에픽 · BJASSIGN2 담당자 바꾸기). accountId는 사람이 보는
   // 값이 아니라 지라 내부 식별자라 본문(body)에만 싣고 주소(querystring)에는 절대 넣지 않는다.
+  // `null`을 주면 담당을 뺀다(`{ accountId: null }`). 자동 배정(`-1`)은 쓰지 않는다.
   async function assignIssue(key, accountId) {
     wantKey(key);
-    const id = idOf(accountId);
-    if (!id) throw jiraError('auth');
+    let id = null;
+    if (accountId !== null) {
+      id = idOf(accountId);
+      if (!id) throw jiraError('auth');
+    }
     await call(`/rest/api/3/issue/${key}/assignee`, token(), { method: 'PUT', send: { accountId: id } });
+  }
+
+  // ---------- 담당자 바꾸기(BJASSIGN2) ----------
+  const wantAccount = (id) => { const value = idOf(id); if (!JIRA_ACCOUNT_RE.test(value)) throw jiraError('value'); return value; };
+
+  // 이 티켓을 맡을 수 있는 사람(지라가 프로젝트 권한대로 거른다). 지라는 이메일·아바타·시간대까지 주지만
+  // id·표시 이름만 옮기고, 사람 계정(`atlassian`)·활성인 사람만 남긴다. 주소에는 키와 사람이 친 글자만 실린다.
+  async function searchAssignable(key, query, limit = ASSIGNABLE_ASK) {
+    wantKey(key);
+    const body = await call(`/rest/api/3/user/assignable/search?issueKey=${key}&query=${encodeURIComponent(String(query || ''))}&maxResults=${limit}`, token());
+    return (Array.isArray(body) ? body : [])
+      .filter(user => user && user.accountType === 'atlassian' && user.active !== false)
+      .map(user => ({ accountId: idOf(user.accountId), name: text(user.displayName) }))
+      .filter(user => JIRA_ACCOUNT_RE.test(user.accountId) && user.name);
+  }
+
+  // 지금 담당. id는 부르는 쪽이 메모리에서 대조에만 쓴다(돌려주는 응답에는 이름만 나간다).
+  async function getAssignee(key) {
+    wantKey(key);
+    const body = await call(`/rest/api/3/issue/${key}?fields=assignee`, token());
+    const who = body && body.fields && body.fields.assignee;
+    const id = idOf(who && who.accountId);
+    return id ? { accountId: id, name: text(who.displayName) || null } : { accountId: null, name: null };
+  }
+
+  // 그 사람이 최근 맡은 티켓 요약 한 줄(같은 이름이 둘 이상일 때 구분용). accountId는 본문(JQL)에만 싣는다.
+  async function latestSummaryOf(accountId) {
+    const id = wantAccount(accountId);
+    const body = await call('/rest/api/3/search/jql', token(), {
+      method: 'POST', read: true,
+      send: { jql: `assignee = "${id}" ORDER BY updated DESC`, fields: ['summary'], maxResults: 1 },
+    });
+    const first = body && Array.isArray(body.issues) ? body.issues[0] : null;
+    return text(first && first.fields && first.fields.summary) || null;
   }
 
   return {
     getIssueOverview, listMyIssues, listDoneIssues, getTransitions, getVersions, getIssueVersionIds,
     transition, updateIssueFields, updateVersion, getCreateMeta, getIssueBrief, createIssue, assignIssue,
+    searchAssignable, getAssignee, latestSummaryOf,
     getMyAccountId, getMyself, listAttention,
   };
 }
@@ -671,6 +748,41 @@ function writeKind(error) {
   return 'write';
 }
 
+// 담당자 바꾸기의 같은 표. 기존 쓰기 표(writeKind)는 401·403을 합쳐 `권한이 없어요`로 말하지만,
+// 담당자 바꾸기만은 401을 토큰 문제(`auth`)로 가른다. 지라에 쓰는 중(PUT)에 끊기거나 시간이 지나면
+// 반영됐는지 모르므로 `assignUnsure`다(화면이 카드를 새로 읽는다).
+const ASSIGN_GUARDS = ['key', 'value'];
+function assignKind(error, writing = false) {
+  if (error && ASSIGN_GUARDS.includes(error.kind)) return error.kind;
+  const status = error && error.status;
+  if (status === 401) return 'auth';
+  if (status === 403) return 'assignForbidden';
+  if (status === 400) return 'reject';
+  if (status === 404) return 'notfound';
+  if (!status) return writing ? 'assignUnsure' : 'network';
+  return 'write';
+}
+
+// 담당자 바꾸기 요청 모양 확인 — 요청 하나는 티켓 하나의 담당자 한 명 변경이다(여러 키·여러 사람을 받지 않는다).
+// 맞으면 고른 값, 틀리면 null.
+function assignPayload(payload) {
+  const name = value => (value === null || value === undefined || value === ''
+    ? null
+    : (typeof value === 'string' && value.trim() && value.length <= ASSIGN_NAME_MAX && !/[\r\n]/.test(value) ? value : undefined));
+  if (payload.kind === 'assigneeUndo') {
+    return typeof payload.undoId === 'string' && /^[0-9a-f-]{36}$/.test(payload.undoId) ? { undoId: payload.undoId } : null;
+  }
+  if (!('to' in payload)) return null;
+  const to = payload.to === null ? null : payload.to;
+  if (to !== null && !(typeof to === 'string' && JIRA_ACCOUNT_RE.test(to))) return null;
+  const expect = name(payload.expect);
+  const toName = name(payload.toName);
+  if (expect === undefined || toName === undefined) return null;
+  // 맡길 사람이 있으면 그 표시 이름도 있어야 한다 — 쓰기 직전 "맡을 수 있나"를 이름으로 찾아 id로 대조한다.
+  if (to !== null && !toName) return null;
+  return { to, expect, toName };
+}
+
 // 새로 만들기의 같은 표. 만들기는 실패 이유가 줄마다 따로 보이므로 문구를 따로 둔다
 // (400은 "필수 항목이 더 있을 수 있어요"까지 말해 준다 — 지라 원문은 여기서도 싣지 않는다).
 const MAKE_GUARDS = ['key', 'value', 'typeStale', 'epicType', 'notEpic'];
@@ -697,6 +809,16 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
   const madePlans = new Map();
   // 내 계정 id(반응 필요의 "나" 판별). 프로세스마다 한 번 묻고 메모리에만 둔다 — 어디에도 나가지 않는다.
   let mineId = null;
+  // 담당자 바꾸기(BJASSIGN2) — 되돌리기 표(undoId → 직전·직후 담당, 10분, 한 번 쓰면 지움)와
+  // 방금 쓴 `키+사람`(3초, 연타가 두 번 쓰지 않게). 둘 다 메모리에만 있다(파일·로그 없음, 재시작하면 사라진다).
+  const assignUndo = new Map();
+  const assignRecent = new Map();
+  const assignSweep = () => {
+    for (const [id, entry] of assignUndo) if (now() - entry.at >= ASSIGN_UNDO_MS) assignUndo.delete(id);
+    for (const [sig, entry] of assignRecent) if (now() - entry.at >= ASSIGN_REPEAT_MS) assignRecent.delete(sig);
+  };
+  // 그 티켓에 새로 쓰면 그 티켓의 "방금 쓴 사람" 기억은 전부 버린다(되돌린 뒤 곧바로 다시 맡겨도 쓰이게).
+  const assignForget = key => { for (const sig of [...assignRecent.keys()]) if (sig.startsWith(`${key}|`)) assignRecent.delete(sig); };
 
   function token() {
     try {
@@ -802,6 +924,120 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
     }
   }
 
+  // 담당자 고르개가 두 글자 이상 쳤을 때만 부른다 — 이 티켓을 맡을 수 있는 사람(최대 10명).
+  // 조회라 파일도 캐시도 없다. 응답에 실리는 것은 id·표시 이름·`나`·같은 이름 구분 글자뿐이다.
+  async function assignable(key, q) {
+    if (typeof key !== 'string' || !JIRA_KEY_RE.test(key)) return { ok: false, error: MESSAGE.key, kind: 'key' };
+    const query = typeof q === 'string' ? q.trim() : '';
+    if ([...query].length < 2 || query.length > ASSIGNABLE_QUERY_MAX || /[\r\n]/.test(query)) return { ok: false, error: MESSAGE.value, kind: 'value' };
+    if (!settings) return { ok: true, connected: false };
+    const secret = token();
+    if (!secret) return { ok: true, connected: false };
+    const client = createJiraClient({ settings, request, readToken: () => secret });
+    try {
+      const found = (await client.searchAssignable(key, query)).slice(0, ASSIGNABLE_SHOWN);
+      // 누가 나인지는 반응 필요·새 에픽과 같은 mineId를 쓴다(못 읽으면 `나` 표시만 빠진다).
+      if (!mineId) {
+        try { mineId = await client.getMyAccountId(); } catch { mineId = null; }
+      }
+      const total = new Map();
+      found.forEach(user => total.set(user.name, (total.get(user.name) || 0) + 1));
+      const nth = new Map();
+      let lookups = SAME_NAME_LOOKUPS;
+      const users = [];
+      for (const user of found) {
+        const entry = { accountId: user.accountId, name: user.name };
+        if (mineId && user.accountId === mineId) entry.me = true;
+        const many = total.get(user.name);
+        if (many > 1) {
+          // 같은 이름이 둘 이상이면 이메일 대신 그 사람이 최근 맡은 티켓 요약 한 줄로 가른다.
+          nth.set(user.name, (nth.get(user.name) || 0) + 1);
+          let summary = null;
+          if (lookups > 0) {
+            lookups -= 1;
+            try { summary = await client.latestSummaryOf(user.accountId); } catch { summary = null; }
+          }
+          entry.hint = summary ? `최근 · ${summary}` : `같은 이름 ${many}명 중 ${nth.get(user.name)}`;
+        }
+        users.push(entry);
+      }
+      return { ok: true, connected: true, users };
+    } catch (error) {
+      const kind = MESSAGE[error && error.kind] ? error.kind : 'other';
+      return { ok: false, error: MESSAGE[kind], kind };
+    }
+  }
+
+  // 담당자 바꾸기·되돌리기. 순서가 안전장치다(하나라도 어긋나면 쓰지 않고 멈춘다):
+  // ① 지금 담당을 다시 읽어 화면이 본 이름(`expect`)과 같은지 ② 맡길 사람이 이 티켓을 맡을 수 있는지
+  // (이름으로 찾고 id로 대조 — 주소에 id를 싣지 않으려고) ③ 이미 그 사람이면 쓰지 않음 ④ PUT.
+  // 되돌리기는 ①을 accountId로 대조한 뒤 직전 담당으로 PUT한다. 응답에는 이름만 나간다.
+  async function changeAssignee(key, asked, client) {
+    const fail = (kind, name) => ({ ok: false, error: assignMessage(kind, name), kind });
+    assignSweep();
+    if (asked.undoId) {
+      const entry = assignUndo.get(asked.undoId);
+      if (!entry || entry.key !== key) return fail('undoGone');
+      assignUndo.delete(asked.undoId);
+      let current;
+      try {
+        current = await client.getAssignee(key);
+      } catch (error) {
+        const kind = assignKind(error);
+        return kind === 'auth' ? fail('auth') : fail('undoFail', entry.afterName);
+      }
+      if (current.accountId !== entry.after) { cache.delete(key); return fail('undoStale'); }
+      try {
+        await client.assignIssue(key, entry.before);
+      } catch (error) {
+        const kind = assignKind(error, true);
+        cache.delete(key);
+        return kind === 'auth' || kind === 'assignUnsure' ? fail(kind) : fail('undoFail', entry.afterName);
+      }
+      cache.delete(key);
+      assignForget(key);
+      return { ok: true, assignee: entry.beforeName };
+    }
+
+    const { to, expect } = asked;
+    let toName = asked.toName;
+    const signature = `${key}|${to === null ? '' : to}`;
+    const repeat = assignRecent.get(signature);
+    if (repeat) return { ok: true, same: true, assignee: repeat.name };
+    let current;
+    try {
+      current = await client.getAssignee(key);
+    } catch (error) { return fail(assignKind(error)); }
+    if ((current.name || null) !== expect) {
+      cache.delete(key);
+      return { ...fail('assigneeStale', current.name), assignee: current.name };
+    }
+    if (to !== null) {
+      let allowed;
+      try {
+        allowed = await client.searchAssignable(key, toName, ASSIGNABLE_CHECK);
+      } catch (error) { return fail(assignKind(error)); }
+      const match = allowed.find(user => user.accountId === to);
+      if (!match) return fail('notAssignable', toName);
+      toName = match.name;
+    }
+    if (current.accountId === to) return { ok: true, same: true, assignee: current.name };
+    try {
+      await client.assignIssue(key, to);
+    } catch (error) {
+      const kind = assignKind(error, true);
+      cache.delete(key);
+      return fail(kind);
+    }
+    cache.delete(key);
+    const after = to === null ? null : toName;
+    assignForget(key);
+    assignRecent.set(signature, { at: now(), name: after });
+    const undoId = nodeCrypto.randomUUID();
+    assignUndo.set(undoId, { key, before: current.accountId, beforeName: current.name, after: to, afterName: after, at: now() });
+    return { ok: true, assignee: after, undoId };
+  }
+
   // 지라에 쓰는 단 하나의 길. 화면은 확인 절차를 거친 뒤에만 부르고,
   // 여기서는 보낸 값을 다시 검증하고 id를 **쓰기 직전에 다시 조회해 대조**한다.
   // 앱 데이터 저장소(mutation-store·idempotent)는 건드리지 않는다 — 지라는 앱 파일이 아니다.
@@ -811,10 +1047,14 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
     const what = payload.kind;
     if (typeof key !== 'string' || !JIRA_KEY_RE.test(key)) return { ok: false, error: MESSAGE.key, kind: 'key' };
     if (!CHANGE_KINDS.includes(what)) return { ok: false, error: MESSAGE.value, kind: 'value' };
+    const assigning = what === 'assignee' || what === 'assigneeUndo';
+    const asked = assigning ? assignPayload(payload) : null;
+    if (assigning && !asked) return { ok: false, error: MESSAGE.value, kind: 'value' };
     if (!settings) return { ok: false, error: MESSAGE.off, kind: 'off' };
     const secret = token();
     if (!secret) return { ok: false, error: MESSAGE.off, kind: 'off' };
     const client = createJiraClient({ settings, request, readToken: () => secret });
+    if (assigning) return changeAssignee(key, asked, client);
     try {
       if (what === 'status') {
         const id = idOf(payload.transitionId);
@@ -1015,12 +1255,12 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
     }
   }
 
-  return { read, list, listDone, attention, options, change, createMeta, create, checkEpic, connected: !!settings };
+  return { read, list, listDone, attention, options, assignable, change, createMeta, create, checkEpic, connected: !!settings };
 }
 
 module.exports = {
   createJiraClient, createJiraApi, checkJiraAccount, jiraSettings, issueUrl, projectOf, countChildren, shapeChildren,
-  shapeTransitions, shapeVersions, shapeListIssue, writeKind, makeKind,
+  shapeTransitions, shapeVersions, shapeListIssue, writeKind, makeKind, assignKind, assignMessage, josa,
   shapeCreateTypes, epicTypeOf, childTypesOf, defaultChildType,
   JIRA_KEY_RE, JIRA_TIMEOUT_MS, JIRA_CACHE_MS, JIRA_LIST_LIMIT, MY_ISSUES_JQL, JIRA_MESSAGE: MESSAGE,
   JIRA_DONE_DAYS, JIRA_DONE_MAX_DAYS, doneIssuesJql, JIRA_CREATE_MAX, JIRA_SUMMARY_MAX,

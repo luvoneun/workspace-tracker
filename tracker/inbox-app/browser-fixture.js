@@ -37,9 +37,18 @@ function seedSlack({config,tokens,data,agents},kind) {
   fs.writeFileSync(path.join(data,'.slack_capture_state.json'),JSON.stringify({lastSuccessAt:at,lastAttemptAt:at,checkedAt:at,lastError:null}));
 }
 
+// "연결된 지라" 가짜 상태(`WORKSPACE_FIXTURE_JIRA=1`) — 띠 카드·하위 티켓·담당자 바꾸기를 화면으로 보려는 것.
+// 주소는 가짜(jira-fixture.js의 FIXTURE_JIRA_SITE)이고 토큰도 임시 폴더의 가짜 값이다. 서버에는 가짜 지라 요청만 끼운다.
+function seedJira({config,tokens}) {
+  const {FIXTURE_JIRA_SITE}=require('./jira-fixture');
+  config.integrations={...(config.integrations||{}),jira:true};
+  config.jira={siteUrl:FIXTURE_JIRA_SITE,email:'fixture@fixture.invalid',tokenFile:path.join(tokens,'workspace-jira-token')};
+  fs.writeFileSync(path.join(tokens,'workspace-jira-token'),'fixture-jira-token-not-real\n',{mode:0o600});
+}
+
 // 임시 폴더를 만들고 서버에 넘길 환경변수 한 벌을 돌려준다(테스트도 이 함수를 그대로 쓴다).
-// `slack`은 위의 가짜 슬랙 상태 이름(없으면 예전처럼 연결 안 한 상태).
-function prepareFixture({slack}={}) {
+// `slack`은 위의 가짜 슬랙 상태 이름(없으면 예전처럼 연결 안 한 상태). `jira`가 참이면 가짜 지라에 연결된 상태.
+function prepareFixture({slack,jira}={}) {
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'workspace-browser-'));
   const dir=name=>{const at=path.join(root,name);fs.mkdirSync(at,{recursive:true});return at;};
   const data=dir('data'),repo=dir('repo'),local=dir('repo/local'),tokens=dir('tokens'),automation=dir('automation'),agents=dir('LaunchAgents'),apps=dir('Applications'),backup=dir('workspace-data-backup');
@@ -52,6 +61,7 @@ function prepareFixture({slack}={}) {
   if(config.jira)config.jira.tokenFile=path.join(tokens,'workspace-jira-token');
   if(config.calendar&&config.calendar.icalFile)config.calendar.icalFile=path.join(tokens,'workspace-calendar-ical');
   seedSlack({config,tokens,data,agents},slack);
+  if(jira)seedJira({config,tokens});
   const configPath=path.join(repo,'workspace.config.json');
   fs.writeFileSync(configPath,`${JSON.stringify(config,null,2)}\n`);
   const d=new Date(),date=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -80,10 +90,13 @@ function prepareFixture({slack}={}) {
 if(require.main===module){
   const slackState=process.env.WORKSPACE_FIXTURE_SLACK||'';
   if(slackState&&!SLACK_STATES.includes(slackState)){console.error(`WORKSPACE_FIXTURE_SLACK은 ${SLACK_STATES.join(' · ')} 중 하나예요`);process.exit(1);}
-  const {root,env}=prepareFixture({slack:slackState});
+  const jiraFake=process.env.WORKSPACE_FIXTURE_JIRA==='1';
+  const {root,env}=prepareFixture({slack:slackState,jira:jiraFake});
   Object.assign(process.env,env);
   const port=Number(process.env.WORKSPACE_FIXTURE_PORT||4322);
   const serverModule=require('./server');const {server}=serverModule;
+  // 가짜 지라를 켰으면 지라로 나가는 요청에 가짜 지라만 끼운다(그 밖의 주소에는 던진다).
+  if(jiraFake)serverModule.setJiraFetchForTests(require('./jira-fixture').createJiraFixture().request);
   // 가짜 슬랙 상태를 켰으면 점검하기의 슬랙 확인(auth.test·conversations.info)에만 가짜 답을 끼운다 — 그 밖의 주소는 예전처럼 막힌다.
   if(slackState){
     const answer=body=>new Response(JSON.stringify(body),{status:200,headers:{'Content-Type':'application/json'}});

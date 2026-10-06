@@ -1,4 +1,4 @@
-// 지라 경로 — 이슈 읽기·내 담당 목록·반응 필요·완료 목록·고르개·바꾸기·만들기·그룹 프로젝트에 걸기/옮기기.
+// 지라 경로 — 이슈 읽기·내 담당 목록·반응 필요·완료 목록·고르개·담당자 찾기·바꾸기·만들기·그룹 프로젝트에 걸기/옮기기.
 // server.js의 handleRequest가 공통 가드(인증·호스트·출처는 safeHandle, 복구 필요 중 쓰기 차단은 handleRequest 맨 위)를
 // 거친 뒤 이 함수에 묻는다. 처리했으면 true, 내 경로가 아니면 false. 필요한 값·함수는 모두 `ctx`로 받는다 —
 // 여기서 server.js를 require하지 않는다(서로 부르는 고리가 생기지 않게). 파일 읽기 캐시(readScope)를 쓰는 함수도
@@ -106,6 +106,23 @@ module.exports = function jiraRoutes(req, res, url, ctx) {
     jira.options(url.searchParams.get('key'))
       .then((payload) => {
         res.writeHead(payload.kind === 'key' ? 400 : 200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(payload));
+      })
+      .catch(() => {
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: '지라에 연결하지 못했어요.', kind: 'other' }));
+      });
+    return true;
+  }
+
+  // 담당자 고르개가 두 글자 이상 쳤을 때만 부른다 — 이 티켓을 맡을 수 있는 사람(최대 10명).
+  // 조회라 파일도 캐시도 없다. 응답에는 고르개가 쓸 id·표시 이름만 실린다(이메일·아바타는 서버가 버린다).
+  if (url.pathname === '/api/jira/assignable' && req.method === 'GET') {
+    if (!USES.jira) { res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ ok: false, error: '지라를 쓰지 않도록 설정돼 있어요.', kind: 'other' })); return true; }
+    jira.assignable(url.searchParams.get('key'), url.searchParams.get('q'))
+      .then((payload) => {
+        // 형식이 틀린 키·두 글자 미만은 400이다(보낸 쪽 잘못). 지라 쪽 실패는 200 + `ok:false`다.
+        res.writeHead(payload.kind === 'key' || payload.kind === 'value' ? 400 : 200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify(payload));
       })
       .catch(() => {

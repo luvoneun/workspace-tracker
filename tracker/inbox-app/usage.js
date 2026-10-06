@@ -32,6 +32,7 @@ const USAGE_KEYS = [
   ['slack_in', '슬랙에서 들어옴'], ['slack_done', '슬랙 항목 끝냄'], ['slack_remove', '슬랙 항목 지움'],
   ['check_add', '확인 대기 추가'], ['idea_add', '아이디어 추가'], ['decision_add', '결정 추가'],
   ['search', '검색'], ['weekly_copy', '주간요약 복사'], ['jira_create', '지라 이슈 만들기'],
+  ['jira_assign', '지라 담당 바꾸기'], ['jira_assign_undo', '지라 담당 되돌리기'],
   ['weekly_edit', '주간요약 고치기'], ['weekly_plan_add', '할 일 칸에 적기'], ['weekly_copy_plan', '할 일 칸이 든 주간요약 복사'],
   ['weekly_tidy', '주간요약 정리 모드 열기'], ['weekly_bulk', '주간요약 정리 막대 쓰기'],
 ];
@@ -265,11 +266,21 @@ function createUsage(deps) {
     }
     return result;
   };
-  // 지라 만들기 — 지라가 받아 준(ok) 때만. 원래 객체는 그대로 두고 create만 바꾼 겉을 돌려준다.
+  // 지라 만들기·담당 바꾸기 — 지라가 받아 준(ok) 때만. 원래 객체는 그대로 두고 create·change만 바꾼 겉을 돌려준다.
+  // 담당은 지라에 실제로 쓴 때만 센다(이미 그 사람이라 쓰지 않은 `same`은 빼고). 숫자만 — 이름·키·계정 id는 싣지 않는다.
   const countJira = api => Object.assign(Object.create(api), {
     create: async (...args) => {
       const payload = await api.create(...args);
       if (payload && payload.ok) add('jira_create');
+      return payload;
+    },
+    change: async (body, ...rest) => {
+      const payload = await api.change(body, ...rest);
+      const kind = body && body.kind;
+      if (payload && payload.ok && !payload.same) {
+        if (kind === 'assignee') add('jira_assign');
+        if (kind === 'assigneeUndo') add('jira_assign_undo');
+      }
       return payload;
     },
   });
