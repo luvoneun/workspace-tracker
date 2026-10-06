@@ -2760,8 +2760,8 @@ const reportDrafts = require('./report-drafts')({
 const mutations = require('./mutation-store')(TRACKER_DIR, [MEETING_LINKS_PATH, weeklyReportStatePath()]);
 // 지라 직접 읽기. 설정이 없으면 `connected:false`만 돌려주고 아무 데도 접속하지 않는다.
 // 토큰 파일은 서버의 읽기 묶음(readScope)을 쓰지 않는다 — 요청마다 새로 읽고 들고 있지 않으려고.
-// 지라로 나가는 요청은 기본이 전역 fetch이고, 화면 확인용 픽스처·써 보기 서버만 `setJiraFetchForTests`로
-// 가짜 지라(jira-fixture.js)를 끼운다 — 그때는 실제 지라에 닿지 않는다.
+// 지라로 나가는 요청은 기본이 전역 fetch이고, 화면 확인용 픽스처(`WORKSPACE_FIXTURE_JIRA=1 node browser-fixture.js`)만
+// `setJiraFetchForTests`로 가짜 지라(jira-fixture.js)를 끼운다 — 그때는 실제 지라에 닿지 않는다(써 보기 서버는 지라를 꺼 둔 채다).
 let jiraFetch = null;
 function setJiraFetchForTests(fn) { jiraFetch = typeof fn === 'function' ? fn : null; }
 const jira = require('./jira-client').createJiraApi({ config: CONFIG, request: (...args) => (jiraFetch || fetch)(...args) });
@@ -2950,6 +2950,6 @@ module.exports = {
   failStuck, fetchStateLive, fetchStateAutomation, fetchStateSlack, slackCaptureResting, setSlackClockForTests, SLACK_CAPTURE_HOURS,
   // 슬랙 자동 갱신 — 가짜 요청을 끼우고 타이머 한 번(tick)을 직접 돌려 보는 테스트 전용 길.
   slackRefresher, setSlackRefreshFetchForTests, integrationAlerts, SLACK_AUTH_RE,
-  // 가짜 지라를 끼우는 픽스처·써 보기 서버 전용 길(jira-fixture.js).
+  // 가짜 지라를 끼우는 브라우저 픽스처 전용 길(jira-fixture.js).
   setJiraFetchForTests,
 };

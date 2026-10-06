@@ -757,7 +757,8 @@ function jiraAssignConfirm(target, person) {
 }
 
 // 맡기기·되돌리기가 함께 쓰는 보내기. 실패도 `{ ok:false, kind, error }` 모양으로 돌려준다(던지지 않는다).
-// 옛 서버(이 종류를 모르는 앱 — 404·`value`)면 `restart`, 앱 서버에 닿지 못했으면 반영 여부를 모르는 `assignUnsure`.
+// 옛 서버(이 종류를 모르는 앱 — 404, 또는 종류를 몰라 `value`로 거절)면 `restart`, 앱 서버에 닿지 못했으면 반영 여부를
+// 모르는 `assignUnsure`. 새 서버가 보낸 모양을 거절하면 `assignValue`라 옛 서버와 섞이지 않는다(일반 오류 문구 그대로).
 async function jiraAssignPost(body) {
   let response;
   try {

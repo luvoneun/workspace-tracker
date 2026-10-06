@@ -143,7 +143,7 @@ module.exports = function jiraRoutes(req, res, url, ctx) {
       .then(body => jira.change(body))
       .then((payload) => {
         // 보낸 쪽 잘못(키·값 형식)만 400이다. 지라 쪽 실패는 200 + `ok:false`로 문구를 실어 보낸다.
-        res.writeHead(payload.kind === 'key' || payload.kind === 'value' ? 400 : 200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.writeHead(['key', 'value', 'assignValue'].includes(payload.kind) ? 400 : 200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify(payload));
       })
       .catch(() => {

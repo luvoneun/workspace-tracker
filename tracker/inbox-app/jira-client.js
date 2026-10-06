@@ -96,6 +96,8 @@ const MESSAGE = {
   assignUnsure: '지라에 반영됐는지 확인하지 못했어요 — 카드를 새로 읽었어요.',
   undoGone: '되돌릴 수 있는 시간이 지났어요.',
   undoStale: '그 사이 지라에서 다시 바뀌어 되돌리지 않았어요.',
+  assignValue: '보낸 값을 확인해 주세요.',
+  assignBusy: '이 티켓의 담당을 바꾸는 중이에요. 잠시 뒤에 다시 시도해 주세요.',
 };
 
 // 이름 뒤 조사 — 받침이 있으면 앞의 것. 한글이 아니면 받침 없음으로 본다. `로`는 ㄹ 받침도 받침 없음과 같다.
@@ -750,8 +752,9 @@ function writeKind(error) {
 
 // 담당자 바꾸기의 같은 표. 기존 쓰기 표(writeKind)는 401·403을 합쳐 `권한이 없어요`로 말하지만,
 // 담당자 바꾸기만은 401을 토큰 문제(`auth`)로 가른다. 지라에 쓰는 중(PUT)에 끊기거나 시간이 지나면
-// 반영됐는지 모르므로 `assignUnsure`다(화면이 카드를 새로 읽는다).
-const ASSIGN_GUARDS = ['key', 'value'];
+// 반영됐는지 모르므로(5xx도 같다) `assignUnsure`다(화면이 카드를 새로 읽는다). 보낸 모양이 틀리면 `assignValue`다 —
+// 이 종류를 모르는 옛 서버의 `value` 거절과 화면이 가를 수 있게 갈래 이름을 따로 둔다.
+const ASSIGN_GUARDS = ['key', 'value', 'assignValue'];
 function assignKind(error, writing = false) {
   if (error && ASSIGN_GUARDS.includes(error.kind)) return error.kind;
   const status = error && error.status;
@@ -759,7 +762,8 @@ function assignKind(error, writing = false) {
   if (status === 403) return 'assignForbidden';
   if (status === 400) return 'reject';
   if (status === 404) return 'notfound';
-  if (!status) return writing ? 'assignUnsure' : 'network';
+  // 쓰는 중 5xx(502·504 등)는 지라가 반영했는지 모른다 — 끊김과 같이 다룬다(화면이 카드를 새로 읽는다).
+  if (!status || status >= 500) return writing ? 'assignUnsure' : 'network';
   return 'write';
 }
 
@@ -813,6 +817,8 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
   // 방금 쓴 `키+사람`(3초, 연타가 두 번 쓰지 않게). 둘 다 메모리에만 있다(파일·로그 없음, 재시작하면 사라진다).
   const assignUndo = new Map();
   const assignRecent = new Map();
+  // 지금 지라에 담당을 쓰는 중인 티켓 — 같은 티켓에 동시에 온 두 번째 요청은 지라를 부르지 않고 멈춘다.
+  const assignBusy = new Set();
   const assignSweep = () => {
     for (const [id, entry] of assignUndo) if (now() - entry.at >= ASSIGN_UNDO_MS) assignUndo.delete(id);
     for (const [sig, entry] of assignRecent) if (now() - entry.at >= ASSIGN_REPEAT_MS) assignRecent.delete(sig);
@@ -973,6 +979,15 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
   // (이름으로 찾고 id로 대조 — 주소에 id를 싣지 않으려고) ③ 이미 그 사람이면 쓰지 않음 ④ PUT.
   // 되돌리기는 ①을 accountId로 대조한 뒤 직전 담당으로 PUT한다. 응답에는 이름만 나간다.
   async function changeAssignee(key, asked, client) {
+    if (assignBusy.has(key)) return { ok: false, error: assignMessage('assignBusy'), kind: 'assignBusy' };
+    assignBusy.add(key);
+    try {
+      return await changeAssigneeOnce(key, asked, client);
+    } finally {
+      assignBusy.delete(key);
+    }
+  }
+  async function changeAssigneeOnce(key, asked, client) {
     const fail = (kind, name) => ({ ok: false, error: assignMessage(kind, name), kind });
     assignSweep();
     if (asked.undoId) {
@@ -1002,12 +1017,14 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
     const { to, expect } = asked;
     let toName = asked.toName;
     const signature = `${key}|${to === null ? '' : to}`;
-    const repeat = assignRecent.get(signature);
-    if (repeat) return { ok: true, same: true, assignee: repeat.name };
     let current;
     try {
       current = await client.getAssignee(key);
     } catch (error) { return fail(assignKind(error)); }
+    // 3초 안에 같은 `키+사람`이 또 왔다(두 번 누름): 지라의 지금 담당이 방금 쓴 그 사람이거나 아직 화면이 본 그대로일
+    // 때만 쓰지 않고 `same`이다. 그 사이 다른 사람이 바꿨으면 아래 대조가 `stale`로 막는다(덮어쓰지 않는다).
+    const repeat = assignRecent.get(signature);
+    if (repeat && (current.accountId === to || (current.name || null) === expect)) return { ok: true, same: true, assignee: repeat.name };
     if ((current.name || null) !== expect) {
       cache.delete(key);
       return { ...fail('assigneeStale', current.name), assignee: current.name };
@@ -1049,7 +1066,7 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
     if (!CHANGE_KINDS.includes(what)) return { ok: false, error: MESSAGE.value, kind: 'value' };
     const assigning = what === 'assignee' || what === 'assigneeUndo';
     const asked = assigning ? assignPayload(payload) : null;
-    if (assigning && !asked) return { ok: false, error: MESSAGE.value, kind: 'value' };
+    if (assigning && !asked) return { ok: false, error: MESSAGE.assignValue, kind: 'assignValue' };
     if (!settings) return { ok: false, error: MESSAGE.off, kind: 'off' };
     const secret = token();
     if (!secret) return { ok: false, error: MESSAGE.off, kind: 'off' };
