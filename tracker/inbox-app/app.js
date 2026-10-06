@@ -656,6 +656,7 @@ function uiGroupHeading(label, count, opts = {}) {
     head.setAttribute('aria-expanded', String(!!opts.open));
     head.innerHTML = uiIcon('chevron');
     head.addEventListener('click', opts.onToggle);
+    uiFoldKey(head, `grp:${label}`); // 누르면 목록을 다시 그려 새 꺾쇠가 된다 — 옛 각도에서 돈다(펼침 부품)
   }
   if (opts.projectName) head.appendChild(uiProjectDot(opts.projectName));
   const name = document.createElement(opts.onOpenProject ? 'button' : 'span');
@@ -828,7 +829,7 @@ function uiHeldFlush() {
 const UI_GLIDE = { ease: 'cubic-bezier(0.22, 0.8, 0.3, 1)', move: 200, enter: 140, fade: 120, strike: 200, tint: 170, within: 500, max: 40, rows: 150, doneFor: 2000, jitter: 8 };
 const UI_GLIDE_ROWS = '[data-task-id], [data-move-id], [data-rail-id]';
 const UI_GLIDE_STRIKE = '.d-title, .ti'; // 완료 흐름에서 줄이 그어지는 제목 — 오늘 줄(.d-title)·회의·프로젝트 줄(.ti)
-const UI_GLIDE_ENTRANCE = ['is-new', 'is-opening', 'is-rise']; // 그림자가 물려받지 않는 등장 클래스(uiGlideGhostMake)
+const UI_GLIDE_ENTRANCE = ['is-new', 'is-opening', 'is-rise', 'd-unfold', 'd-unfold-big']; // 그림자가 물려받지 않는 등장 클래스(uiGlideGhostMake)
 let uiActAt = 0;        // 마지막 사용자 동작 시각
 let uiActQuiet = false; // 그 동작이 키보드 연타(1초 안에 이어진 키·누르고 있는 키)였다
 let uiActByKey = false; // 그 동작이 키보드였다 — 키보드로 연 뜨는 것은 넘침 없이 나타남만(uiFloatOpen)
@@ -1030,6 +1031,159 @@ function uiRowsShift(root, rows, mutate, { duration = UI_GLIDE.move, bounce = fa
       : [{ transform: `translateY(${delta}px)` }, { transform: 'none' }], duration);
   });
 }
+// ---- 펼침·접힘 (모션 부품 ⑤ — DESIGN.md 모션 절, ui.css .d-unfold) ----
+// 높이는 움직이지 않는다 — 자리는 바로 바뀌고, 펼친 내용이 위 4px에서 나타나며(--t-unfold 160ms, 큰 면은 --t-move)
+// 아래 것들이 옛 자리에서 미끄러져 온다(줄 부품과 같은 200ms, 넘침 없음). 접으면 내용의 그림자가 옛 자리에서 120ms 흐려진다.
+// 움직이는 때는 줄 부품과 같다(uiGlideMode — 내 동작 뒤 0.5초만, 글자 입력·판이 열린 동안·키보드 연타·가려진 창이면 그냥 바꾼다).
+// 움직임 줄이기에서는 이동·그림자 없이 펼친 내용의 120ms 흐려짐만 남는다(ui.css 전역 규칙에 .d-unfold로 등록).
+// 시간은 ui.css의 --t-unfold·--t-move·--t-fast와 같다(el.animate는 var()를 못 읽는다).
+const UI_UNFOLD = { open: 160, big: 200, close: 120, turn: 140 };
+let uiFoldLast = null; // 방금 누른 접기 단추(data-fold) — { key, was(누르기 전 펼침), act, from(꺾쇠의 옛 각도) }
+function uiFoldMode() {
+  if (uiGlideMode() !== 'all') return null;
+  return detailReduce() ? 'fade' : 'move';
+}
+// 문서의 click(잡기 단계, uiActMark 뒤)이 부른다 — 접기 단추를 누른 순간의 꺾쇠 각도를 적어 둔다(다시 그린 새 단추가 거기서 돈다).
+function uiFoldPress(event) {
+  const button = event && event.target && event.target.closest ? event.target.closest('[data-fold]') : null;
+  if (!button) return;
+  const icon = button.querySelector('.d-i');
+  let from = null;
+  try { from = icon && typeof getComputedStyle === 'function' ? getComputedStyle(icon).transform : null; } catch { from = null; }
+  uiFoldLast = { key: button.dataset.fold, was: button.getAttribute('aria-expanded') === 'true', act: uiActSeq, from };
+}
+// 접기 단추를 그리는 쪽이 aria-expanded를 단 뒤 부른다. 방금 누른 단추를 다시 그린 것이면(같은 열쇠, 펼침이 바뀜)
+// 새 꺾쇠가 옛 각도에서 지금 각도로 돈다(--t-fast). 다시 그리지 않는 단추는 CSS 전환이 그대로 돈다.
+function uiFoldKey(button, key) {
+  button.dataset.fold = key;
+  const last = uiFoldLast;
+  if (!last || last.key !== key || last.act !== uiActSeq || !last.from) return button;
+  if ((button.getAttribute('aria-expanded') === 'true') === last.was) return button;
+  Promise.resolve().then(() => {
+    const icon = button.isConnected && button.querySelector('.d-i');
+    if (!icon || typeof icon.animate !== 'function' || uiFoldMode() !== 'move') return;
+    const to = getComputedStyle(icon).transform;
+    if (to === last.from) return;
+    uiGlidePlay(icon, [{ transform: last.from }, { transform: to }], UI_UNFOLD.turn);
+  });
+  return button;
+}
+// 이번 동작이 접기 단추였나 — 줄 부품이 펼친 줄을 새 줄(아래 6px) 대신 펼침(위 4px, --t-unfold)으로 띄운다.
+function uiFoldActive() {
+  return !!uiFoldLast && uiFoldLast.act === uiActSeq;
+}
+// 통째로 다시 그리는 자리의 펼침 — 누른 쪽이 uiFoldNote(열쇠)로 적고, 그리는 쪽이 새로 만든 내용에 uiFoldShow(요소, 열쇠)를 부른다.
+// 같은 동작(uiActSeq) 안의 그리기에서만 나타난다 — 나중의 다시 그리기(자동 갱신·다른 동작)에서는 그냥 그린다.
+// 접기 단추(uiFoldKey)를 누른 동작이면 적지 않아도 그 열쇠로 나타난다.
+const uiFoldNotes = new Map();
+function uiFoldNote(key) {
+  uiFoldNotes.set(key, uiActSeq);
+  [...uiFoldNotes].forEach(([one, act]) => { if (act !== uiActSeq) uiFoldNotes.delete(one); });
+}
+function uiFoldShow(el, key, big = false) {
+  const pressed = uiFoldNotes.get(key) === uiActSeq || (uiFoldActive() && uiFoldLast.key === key);
+  if (!el || !pressed) return el;
+  try { if (uiFoldMode()) uiFoldReveal(el, big); } catch { /* 움직임만 빠진다 */ }
+  return el;
+}
+// 펼친 내용이 나타난다 — CSS 클래스 하나(.d-unfold)라 움직임 줄이기도 전역 규칙 한 곳이 맡는다.
+function uiFoldReveal(el, big = false) {
+  if (!el || !el.classList) return;
+  el.classList.remove('d-unfold', 'd-unfold-big');
+  void el.offsetWidth;
+  el.classList.add('d-unfold');
+  if (big) el.classList.add('d-unfold-big');
+  setTimeout(() => el.classList.remove('d-unfold', 'd-unfold-big'), (big ? UI_UNFOLD.big : UI_UNFOLD.open) + 80);
+}
+// 접히는 내용의 그림자 — 바꾸기 전에 불러 복사본을 떠 두고, 돌려준 함수를 바꾼 뒤에 부르면 옛 자리에서 흐려진다.
+// 복사본은 줄 그림자와 같다(uiGlideGhostMake — 누를 수 없고 읽히지 않으며 id·data-가 없다). 입력 칸은 이름을 떼고 잠근다
+// (그림자가 폼 안에 붙어도 보내지지 않게). 그림자를 붙일 자리(host)가 바꾼 뒤 사라졌으면 흐려짐만 빠진다.
+function uiFoldLeave(el, host = null) {
+  if (!el || !el.isConnected || typeof el.getBoundingClientRect !== 'function' || typeof el.cloneNode !== 'function') return () => {};
+  const box = el.getBoundingClientRect();
+  if (!(box.height > 0)) return () => {};
+  const copy = el.cloneNode(true);
+  copy.classList?.remove('d-unfold', 'd-unfold-big');
+  [copy, ...copy.querySelectorAll('input, textarea, select, button')].forEach((node) => {
+    if (!/^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(node.tagName || '')) return;
+    node.removeAttribute('name');
+    node.disabled = true;
+    if (node.type === 'password') node.value = ''; // 비밀 값은 복사본에 남기지 않는다
+  });
+  const parent = host || el.parentElement;
+  const was = { row: copy, left: box.left, top: box.top, width: box.width, height: box.height };
+  return () => {
+    if (!parent || !parent.isConnected) return;
+    // 바꾸며 자리째 숨었으면(카드 구역 hidden) 보이는 조상에 붙인다 — 숨은 자리의 그림자는 보이지 않는다.
+    let at = parent;
+    while (at && at !== document.body && typeof at.getClientRects === 'function' && !at.getClientRects().length) at = at.parentElement;
+    if (at) uiGlideGhosts(at, [{ was, frames: [{ opacity: 1 }, { opacity: 0 }], duration: UI_UNFOLD.close, strikeAt: null }], 0);
+  };
+}
+// 아래 것들 — from의 뒤 형제들, 그 부모의 뒤 형제들… scope(없으면 body)까지. 그림자·떠 있는 것은 뺀다.
+function uiFoldFollowers(from, scope = null) {
+  const out = [];
+  for (let node = from; node && node !== scope && node !== document.body && node.parentElement; node = node.parentElement) {
+    for (let next = node.nextElementSibling; next; next = next.nextElementSibling) {
+      if (!String(next.className || '').includes('d-glide-ghost')) out.push(next);
+      if (out.length > UI_GLIDE.rows) return [];
+    }
+  }
+  return out;
+}
+// 잰 것들을 옛 자리에서 새 자리로 잇는다(줄 이동과 같은 200ms, transform만). 앞뒤 모두 화면 밖인 것·사라진 것은 둔다.
+function uiFoldSlide(before) {
+  const viewH = window.innerHeight || 0;
+  let shown = 0;
+  const moves = [];
+  before.forEach(([el, was]) => {
+    if (!el.isConnected || typeof el.animate !== 'function') return;
+    const now = el.getBoundingClientRect();
+    if (!(now.height > 0) || !(was.height > 0)) return;
+    const seen = box => box.bottom > 0 && box.top < viewH;
+    if (!seen(was) && !seen(now)) return;
+    const dx = Math.abs(was.left - now.left) <= UI_GLIDE.jitter ? 0 : was.left - now.left;
+    const dy = was.top - now.top;
+    if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
+    shown += 1;
+    moves.push([el, dx, dy]);
+  });
+  if (shown > UI_GLIDE.max) return;
+  moves.forEach(([el, dx, dy]) => uiGlidePlay(el, [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], UI_GLIDE.move));
+}
+// 그 자리에서 펼치거나 접는다. mutate가 바꾸고(hidden 켜고 끄기·노드 넣고 빼기·그 자리 다시 그리기), 도우미는 앞뒤를 잇는다.
+//   open  펼치나(true) 접나(false)
+//   part  펼치거나 접히는 내용 — 요소, 또는 바꾼 뒤에 찾는 함수(바꾸기가 새로 만드는 경우)
+//   from  아래 것들을 셀 기준(기본은 바꾸기 전의 part — 새로 만드는 내용이면 그 앞의 것을 준다)
+//   scope 아래 것들을 셀 범위(기본은 문서 끝까지) · big 큰 면(설정 카드 — --t-move, 넘침 없음) · slide false면 아래 것은 안 민다
+//     (줄 부품이 같은 그리기에서 이미 잇는 목록 안이면 끈다 — 두 번 움직이지 않게)
+// 자리 재기가 어떻게 되든 바꾸기는 정확히 한 번 돈다 — 움직임은 덤이다.
+// 바꾸기 안에서 또 부르면(카드를 열며 다른 카드를 접음) 안쪽은 그냥 바꾼다 — 바깥이 이미 앞뒤를 쟀다(두 번 움직이지 않게).
+let uiFoldDepth = 0;
+function uiFold(mutate, { open, part = null, from = null, scope = null, big = false, slide = true } = {}) {
+  let mode = null;
+  try { mode = uiFoldDepth ? null : uiFoldMode(); } catch { mode = null; }
+  if (!mode) return mutate();
+  // part는 요소 여럿(접힌 줄들)이어도 된다 — 아래 것은 마지막 것 뒤부터 센다.
+  const find = () => { const got = typeof part === 'function' ? part() : part; return (Array.isArray(got) ? got : [got]).filter(Boolean); };
+  let before = [];
+  let leaves = [];
+  try {
+    const was = find();
+    if (!open && mode === 'move') leaves = was.map(el => uiFoldLeave(el));
+    const base = from || was[was.length - 1];
+    if (slide && mode === 'move' && base) before = uiFoldFollowers(base, scope).map(el => [el, el.getBoundingClientRect()]);
+  } catch { before = []; leaves = []; }
+  uiFoldDepth += 1;
+  let result;
+  try { result = mutate(); } finally { uiFoldDepth -= 1; }
+  try {
+    if (open) find().forEach(el => uiFoldReveal(el, big));
+    leaves.forEach(leave => leave());
+    uiFoldSlide(before);
+  } catch { /* 움직임만 빠진다 */ }
+  return result;
+}
 function uiGlideJoin(shot) {
   // 그리기가 글자 칸을 열고 초점을 보냈으면(문장 고치기·`한 줄 추가`·이름 바꾸기) 글자 입력의 시작이다 — 아무것도 걸지 않는다.
   if (shot.mode === 'all' && uiIsTextEntry(document.activeElement)) return;
@@ -1080,7 +1234,9 @@ function uiGlideJoinGroup(shot, lists, reduce) {
       // 새로 생긴 줄 — 분류의 새 줄 솟음(is-rise)·회의의 새 줄 떠오름(is-new)이 이미 걸렸으면 그것 하나만 움직인다(위에서 걸렀다).
       // 숨어 있던 목록(처음 연 탭)의 줄은 새 줄이 아니라 처음 그리기다.
       if (!nowBox.shown || !shot.drawn.has(list) || !shot.before.get(list).listShown) return;
+      // 접기 단추로 펼친 줄은 펼침 부품의 값으로 — 위 4px에서 --t-unfold(uiFold와 같다).
       if (reduce) uiGlidePlay(row, [{ opacity: 0 }, { opacity: 1 }], UI_GLIDE.fade);
+      else if (uiFoldActive()) uiGlidePlay(row, [{ opacity: 0, transform: 'translateY(-4px)' }, { opacity: 1, transform: 'none' }], UI_UNFOLD.open, wait);
       else uiGlidePlay(row, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], UI_GLIDE.enter, wait);
       return;
     }
@@ -2911,7 +3067,13 @@ function renderDecisionArchive() {
   const body = document.getElementById('decisionArchiveBody');
   const list = document.getElementById('decisionArchiveList');
   if (!toggle || !body || !list) return;
+  // 접힌 구역이라 줄 부품은 처음 그리기로 본다 — 펼치면 구역째 나타나고, 접으면 구역의 그림자가 흐려진다(펼침 부품).
+  const wasOpen = !body.hidden;
+  const pressed = uiFoldActive() && uiFoldLast.key === 'decision-archive';
+  const leave = wasOpen && pressed && uiFoldMode() === 'move' ? uiFoldLeave(body) : null;
   uiRowsMove(list, () => renderDecisionArchiveNow(toggle, body, list));
+  if (!wasOpen && !body.hidden) uiFoldShow(body, 'decision-archive');
+  if (leave && body.hidden) leave();
 }
 function renderDecisionArchiveNow(toggle, body, list) {
   const items = decisionArchiveCache.filter(decisionMatches);
@@ -3056,7 +3218,8 @@ function uiClampWatch(row, title, onMode) {
 function uiClampToggle(row, title) {
   if (!String(row.className).includes(' is-clamp')) return false;
   const open = !String(row.className).includes(' is-open');
-  row.className = open ? `${row.className} is-open` : String(row.className).replace(' is-open', '');
+  // 높이는 바로 바뀌고 아래 줄만 미끄러진다(펼침 부품 — 나타나는 내용은 없다).
+  uiFold(() => { row.className = open ? `${row.className} is-open` : String(row.className).replace(' is-open', ''); }, { open, from: row });
   title.setAttribute('aria-expanded', String(open));
   return true;
 }
@@ -3225,7 +3388,12 @@ let laterDrawerOpen = false;
 function drawerSync() {
   const drawer = document.getElementById('laterTaskDrawer');
   const toggle = document.getElementById('laterTaskToggle');
+  // 본문 여백은 바로 바뀐다(폭은 움직이지 않는다) — 줄 바꿈이 달라져 자리가 바뀐 줄만 옛 자리에서 미끄러진다(펼침 부품).
+  const page = uiFoldMode() === 'move' ? document.querySelector('.page') : null;
+  const rows = page ? [...page.querySelectorAll(UI_GLIDE_ROWS)] : [];
+  const before = rows.length <= UI_GLIDE.rows ? rows.map(row => [row, row.getBoundingClientRect()]) : [];
   document.body.classList.toggle('later-open', laterDrawerOpen);
+  uiFoldSlide(before);
   if (drawer) drawer.setAttribute('aria-hidden', String(!laterDrawerOpen));
   if (toggle) toggle.setAttribute('aria-expanded', String(laterDrawerOpen));
   // 서랍이 열리고 닫히면 상세 카드가 붙어 있던 줄이 움직인다 — 자리를 다시 잡아 준다.
@@ -4012,9 +4180,11 @@ function panelWaitingCell(item, detail) {
     }));
     if (current.blockedBy) entries.push({ type: 'action', value: PICK_CLEAR, text: '연결 끊기' });
     const restore = (focus) => {
-      wrap.classList.remove('is-picking');
-      button.setAttribute('aria-expanded', 'false');
-      if (wrap.contains(picker)) wrap.replaceChild(button, picker);
+      uiFold(() => {
+        wrap.classList.remove('is-picking');
+        button.setAttribute('aria-expanded', 'false');
+        if (wrap.contains(picker)) wrap.replaceChild(button, picker);
+      }, { open: false, part: wrap.contains(picker) ? picker : null }); // 그 자리 펼침(펼침 부품) — 접으면 목록이 흐려지고 아래가 올라온다
       if (focus) button.focus();
     };
     const picker = uiPickList({
@@ -4036,9 +4206,11 @@ function panelWaitingCell(item, detail) {
       const none = picker.querySelector('.d-gpnone');
       if (none) { none.textContent = '열린 확인 대기가 없어요'; none.hidden = false; }
     }
-    wrap.replaceChild(picker, button);
-    wrap.classList.add('is-picking');
-    button.setAttribute('aria-expanded', 'true');
+    uiFold(() => {
+      wrap.replaceChild(picker, button);
+      wrap.classList.add('is-picking');
+      button.setAttribute('aria-expanded', 'true');
+    }, { open: true, part: picker, from: button });
     picker.focusStart();
     // 고를 줄이 없어도 Esc·바깥 누름으로 닫히게 목록 자체에 초점을 둔다.
     if (!entries.length) { picker.tabIndex = -1; picker.focus(); }
@@ -4368,8 +4540,10 @@ function detailLogClamp(box, onOpen) {
   more.className = 'd-link d-logmore';
   more.textContent = `이전 기록 ${hidden.length}개 더 보기`;
   more.addEventListener('click', () => {
-    hidden.forEach(line => { line.hidden = false; });
-    more.remove();
+    uiFold(() => {
+      hidden.forEach(line => { line.hidden = false; });
+      more.remove();
+    }, { open: true, part: hidden, from: more });
     if (onOpen) onOpen();
   });
   hidden[hidden.length - 1].after(more);
@@ -4951,7 +5125,8 @@ function renderNewsCard() {
   close.className = 'd-btn sm sp';
   close.textContent = '닫기';
   close.setAttribute('aria-label', '새 소식 닫기');
-  close.addEventListener('click', () => { newsMarkSeen(version); renderNewsCard(); document.getElementById('todayTaskZone')?.focus?.(); });
+  // 닫으면 카드가 흐려지고 아래 것들이 올라온다(펼침 부품의 접힘).
+  close.addEventListener('click', () => { uiFold(() => { newsMarkSeen(version); renderNewsCard(); }, { open: false, part: card }); document.getElementById('todayTaskZone')?.focus?.(); });
   head.append(title, close);
   card.append(head, newsListNode(entry.lines));
   zone.appendChild(card);
@@ -5071,7 +5246,8 @@ function guideCardClosed() {
 function guideCardClose() {
   guideCardClosedHere = true;
   try { localStorage.setItem(GUIDE_CARD_KEY, '1'); } catch { /* 막혀 있으면 이 창이 열려 있는 동안만 기억한다 */ }
-  renderGuideCard();
+  // 닫으면 카드가 흐려지고 아래 것들이 올라온다(펼침 부품의 접힘).
+  uiFold(() => renderGuideCard(), { open: false, part: document.getElementById('startCardZone')?.firstElementChild || null });
   document.getElementById('todayTaskZone')?.focus?.();
 }
 
@@ -5657,8 +5833,16 @@ document.addEventListener('click', (event) => {
 
 // 슬랙에서 갓 들어온 할 일. 언제 할지·프로젝트는 줄의 `분류`에서 고른다.
 // 비어 있으면 섹션 자체를 숨겨서, 처리할 게 있을 때만 눈에 띄게 한다.
+// 구역이 사라지거나 생기는 것은 펼침 부품이다 — 마지막 줄을 치우면 구역 머리가 옛 자리에서 흐려지고, 다시 생기면 나타난다.
+// 아래 목록(오늘 할 일)의 줄은 같은 무리라 줄 부품이 함께 올린다. 처음 그리기·자동 갱신은 그냥 그린다(uiFoldMode).
 function renderInbox(items) {
+  const zone = document.getElementById('inboxZone');
+  const shown = !!zone && !zone.hidden;
+  const mode = uiFoldMode();
+  const leave = shown && !items.length && mode === 'move' ? uiFoldLeave(zone) : null;
   uiRowsMove(document.getElementById('inboxList'), () => renderInboxNow(items));
+  if (leave) leave();
+  else if (mode && zone && !shown && !zone.hidden) uiFoldReveal(zone);
 }
 function renderInboxNow(items) {
   const zone = document.getElementById('inboxZone');
@@ -5757,7 +5941,7 @@ function uiFoldToggle(rows, { label, expanded = false, controls = '', onChange =
   paint();
   button.addEventListener('click', () => {
     open = !open;
-    rows.forEach(row => { row.hidden = !open; });
+    uiFold(() => { rows.forEach(row => { row.hidden = !open; }); }, { open, part: rows });
     if (onChange) onChange(open);
     paint();
   });
@@ -6403,8 +6587,10 @@ function renderGroupControl({ jira, group, onSetJira, onSetGroup, forceClearable
   const openPicker = (current, revertTo) => {
     const entries = projectPickEntries(current, forceClearable);
     const restore = (focus) => {
-      wrap.classList.remove('is-picking');
-      if (wrap.contains(picker)) wrap.replaceChild(revertTo, picker);
+      uiFold(() => {
+        wrap.classList.remove('is-picking');
+        if (wrap.contains(picker)) wrap.replaceChild(revertTo, picker);
+      }, { open: false, part: wrap.contains(picker) ? picker : null }); // 그 자리 펼침(펼침 부품)
       if (focus) revertTo.focus();
     };
     const picker = uiPickList({
@@ -6429,8 +6615,10 @@ function renderGroupControl({ jira, group, onSetJira, onSetGroup, forceClearable
         commit(value);
       },
     });
-    wrap.replaceChild(picker, revertTo);
-    wrap.classList.add('is-picking');
+    uiFold(() => {
+      wrap.replaceChild(picker, revertTo);
+      wrap.classList.add('is-picking');
+    }, { open: true, part: picker, from: revertTo });
     uiPickFit(picker);
     picker.focusStart();
   };
@@ -6642,6 +6830,7 @@ document.addEventListener('pointercancel', () => { uiPointerDown = false; }, tru
 // 사용자의 동작 시각을 적는다 — 그 직후 0.5초 안의 다시 그리기에서만 줄이 움직인다(uiRowsMove).
 document.addEventListener('click', uiActMark, true);
 document.addEventListener('keydown', uiActMark, true);
+document.addEventListener('click', uiFoldPress, true); // uiActMark 뒤 — 접기 단추의 옛 꺾쇠 각도(uiFoldKey)
 setupQuickAdd('todayTaskInput', '/api/today-task/create', '오늘 할 일에 추가했어요');
 setupQuickAdd('laterTaskInput', '/api/later-task/create', '나중에 할 일에 추가했어요');
 setupQuickAdd('waitingInput', '/api/waiting/create', '확인 대기에 추가했어요');

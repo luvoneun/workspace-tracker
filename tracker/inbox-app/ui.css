@@ -88,6 +88,7 @@
      --t-tint는 색 전환(가리킴·고름·초점) 전용이다. 토큰이 아닌 맨 시간 값은 시험(client.test.js 허용 목록)이 막는다 */
   --ease: cubic-bezier(0.22, 0.8, 0.3, 1);
   --t-press: 100ms;  --t-fast: 140ms;  --t-tint: 170ms;  --t-move: 200ms;  --t-slow: 320ms;
+  --t-unfold: 160ms; /* 펼친 내용 나타남(펼침 부품 — app.js uiFold, 접힌 설명 details) */
   /* 스프링 근사는 linear()를 아는 환경에서만(아래 @supports) — 모르면 넘침 없는 --ease로 떨어진다 */
   --spring-1: var(--ease);
   --spring-2: var(--ease);
@@ -406,6 +407,17 @@ button:disabled:active, .d-cb:disabled:active, .d-wcb:disabled:active { scale: n
 }
 @keyframes d-fade { from { opacity: 0; } to { opacity: 1; } }
 
+/* ---------- 펼침·접힘 (모션 부품 ⑤ — app.js uiFold) ----------
+   높이는 움직이지 않는다 — 자리는 바로 바뀌고 펼친 내용이 위 4px에서 나타난다. 아래 것들의 미끄러짐·접힘의 그림자는 app.js가 맡는다.
+   큰 면(설정 카드)은 --t-move로 조금 길게, 넘침은 없다. `translate` 속성이라 누름의 scale·줄 이동의 transform과 섞이지 않는다 */
+.d-unfold { animation: d-unfold var(--t-unfold) var(--ease) both; }
+.d-unfold.d-unfold-big { animation-duration: var(--t-move); }
+@keyframes d-unfold { from { opacity: 0; translate: 0 -4px; } }
+/* 접힌 설명(details) — CSS만으로 같은 펼침을 탄다(::details-content, 크롬 131부터. 모르는 환경은 예전처럼 바로 열린다).
+   접힘은 바로 닫힌다 — 그림자를 띄울 수 없어, 흐려지는 동안 자리를 붙들었다가 늦게 닫히는 것보다 낫다 */
+details::details-content { transition: opacity var(--t-unfold) var(--ease), translate var(--t-unfold) var(--ease); }
+details:not([open])::details-content { opacity: 0; translate: 0 -4px; transition: none; }
+
 /* ---------- 뜨는 것 (모션 부품 ① — 더보기 메뉴·분류 판·종류 목록·상세 카드·검색 팔레트) ----------
    app.js uiFloatOpen이 붙이고(.d-float), uiFloatPlace가 누른 곳을 시작점(--ox·--oy)으로 놓고,
    uiFloatClose가 닫힘(.is-out)을 죽은 복사본으로 재생한 뒤 시간으로 치운다. 값은 여기 한 곳이다(app.js UI_FLOAT가 같은 숫자를 쓴다).
@@ -484,12 +496,14 @@ dialog.d-stay:not([open])::backdrop { opacity: 0; transition-duration: var(--sta
     animation-duration: 0.01ms !important;
   }
   /* 뜨는 것은 부품 클래스(.d-float·.d-stay)로 등록한다 — 요소 이름을 늘어놓지 않는다 */
-  .d-float:not(.is-out):not(.is-still), .d-mrow2.is-new {
+  .d-float:not(.is-out):not(.is-still), .d-mrow2.is-new, .d-unfold {
     animation: d-fade 120ms linear both !important;
   }
+  /* 접힌 설명은 전환이라 열린 쪽에만 같은 120ms를 건다 — 이동(위 4px) 없이 흐려지며 열린다 */
+  details::details-content { translate: none !important; }
   /* 자리가 남는 것(.d-stay)은 전환이라 같은 120ms를 열린 쪽에만 건다 — 이동 없이 흐려지며 뜨고, 닫힘은 바로 */
   .d-stay { --stay-from: none; --stay-to: none; }
-  .d-stay:not([hidden], dialog:not([open])), dialog.d-stay[open]::backdrop { transition-duration: 120ms !important; }
+  .d-stay:not([hidden], dialog:not([open])), dialog.d-stay[open]::backdrop, details[open]::details-content { transition-duration: 120ms !important; }
   /* 누름의 크기 변화도 끈다 — 색은 그대로 바뀐다 */
   button:active, .d-cb:active, .d-wcb:active { scale: none !important; }
 }
@@ -1575,7 +1589,7 @@ textarea.d-dtitle {
 .d-dpull:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* 문구를 누르면 그 자리에서 고친다 — 문구 칸의 글자가 접힌 줄의 글자와 같은 자리에 선다(안쪽 12px만큼 왼쪽으로 내민다) */
 .d-mrow2 .ed { display: grid; gap: 8px; margin: -5px 0 3px -12px; transform-origin: 50% 0; }
-.d-mrow2.is-opening .ed { animation: d-draft-open 220ms var(--ease) both; }
+.d-mrow2.is-opening .ed { animation: d-draft-open var(--t-move) var(--ease) both; }
 @keyframes d-draft-open {
   0% { opacity: 0; transform: translateY(-4px) scaleY(0.94); }
   60% { opacity: 1; transform: scaleY(1.012); }
@@ -1788,10 +1802,10 @@ textarea.d-dtitle {
   display: flex; flex-direction: column;
   background: var(--bg); border-left: 0; box-shadow: var(--drawer-sh);
   transform: translateX(100%); visibility: hidden;
-  transition: transform 160ms var(--ease), visibility 160ms var(--ease);
+  /* 펼침 부품의 큰 면(세기 2, 넘침 없음) — 열림 --t-move, 닫힘 --t-fast. 본문 여백은 바로 바뀌고 줄만 미끄러진다(app.js drawerSync) */
+  transition: transform var(--t-fast) var(--ease), visibility var(--t-fast) var(--ease);
 }
-body.later-open .d-drawer { transform: none; visibility: visible; }
-.page { transition: padding-right 160ms var(--ease); }
+body.later-open .d-drawer { transform: none; visibility: visible; transition-duration: var(--t-move); }
 /* 페이지가 창 왼쪽에서 시작하므로 서랍 폭(404px)에 여백 20px만 더해 밀면 된다 */
 body.later-open .page { padding-right: 424px; }
 .d-dhd {

@@ -205,6 +205,7 @@ function panelMeetingResult(event, box, host = MEETING_HOST_CARD) {
   const card = document.createElement('div');
   card.className = 'd-dres';
   card.setAttribute('role', 'status');
+  card.dataset.moveId = `res:${event.id}`; // 줄 부품의 열쇠 — 회의 탭에서 결과 카드가 나타나고 사라질 때 아래 줄이 미끄러진다(펼침 부품)
 
   const head = document.createElement('div');
   head.className = 'hd';
@@ -318,13 +319,18 @@ function panelMeetingDrafts(event, box, host = MEETING_HOST_CARD) {
   const toggle = (id) => {
     const previous = meetingDraftOpenId;
     if (previous === id) return;
+    // 접히는 초안의 문구 칸·버튼은 옛 자리에서 120ms 흐려진다(펼침 부품의 접힘). 아래 줄의 바로 잇기와 같은 조건 —
+    // 늘 내 동작(누름·Enter·Esc·바깥 누름)이 부르고, 접는 것이 바로 그 글자 칸이라 글자 입력 중 판정은 보지 않는다.
+    const closing = previous && rows.get(previous) ? rows.get(previous).querySelector('.ed') : null;
+    const leave = closing && !detailReduce() && !document.hidden ? uiFoldLeave(closing, rows.get(previous).parentElement) : () => {}; // 줄은 갈아 끼워지니 그림자는 목록에 붙인다
     uiRowsShift(host.box(), MEETING_SHIFT_ROWS, () => {
       meetingDraftOpenId = id;
       [previous, id].filter(Boolean).forEach((one) => {
         const draft = event.drafts.find(other => other.id === one);
         if (draft) redraw(draft, one === id);
       });
-    }, id ? { duration: 220, bounce: true } : { duration: 130 });
+    }, id ? { duration: UI_GLIDE.move, bounce: true } : { duration: UI_UNFOLD.close });
+    leave();
     const text = id && rows.get(id) ? rows.get(id).draftText : null;
     if (text) {
       text.focus();
@@ -1349,6 +1355,7 @@ function meetingMoveAskNode(event, host = MEETING_HOST_CARD) {
   const line = document.createElement('div');
   line.className = 'd-jline d-mmove';
   line.setAttribute('role', 'status');
+  line.dataset.moveId = `mv:${event.id}`; // 줄 부품의 열쇠 — 확인 줄이 나타나고 사라질 때(펼침 부품)
   const words = document.createElement('span');
   words.textContent = meetingMoveWords(picked, ask.from, ask.to);
   const sep1 = document.createElement('span'); sep1.className = 'sep'; sep1.textContent = '·';
@@ -1843,6 +1850,7 @@ function meetingsMoreRow(text, className = 'd-mmore') {
     meetingsTabState.windowDays = (meetingsTabState.windowDays || MEETINGS_TAB_WINDOW_DAYS) + MEETINGS_TAB_WINDOW_DAYS;
     renderMeetings();
   });
+  uiFoldKey(link, 'mtg:more'); // 더 그린 회의 줄은 줄 부품이 펼침 값(위 4px, --t-unfold)으로 띄운다
   more.appendChild(link);
   return more;
 }

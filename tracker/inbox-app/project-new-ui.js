@@ -765,7 +765,7 @@ function projectNewActions(state) {
     go.addEventListener('click', () => projectNewSend(state));
     acts.append(cancel, go);
     confirm.append(ask, what, acts);
-    box.appendChild(confirm);
+    box.appendChild(uiFoldShow(confirm, 'pnconfirm')); // `만들기`를 누른 그리기에서만 확인 줄이 펼쳐진다(펼침 부품)
     return box;
   }
   const line = document.createElement('div');
@@ -782,6 +782,7 @@ function projectNewActions(state) {
     // 지라 없이는 앱 항목 하나를 만드는 일이라 확인 줄을 세우지 않는다(⌘Z·삭제로 되돌린다).
     if (state.mode === 'none') return projectNewPlain(state);
     state.confirm = true;
+    uiFoldNote('pnconfirm');
     projectNewPaint();
     document.getElementById('projectBody')?.querySelector?.('.d-jconfirm')?.focus?.();
   });

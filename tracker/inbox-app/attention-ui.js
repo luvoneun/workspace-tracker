@@ -246,6 +246,7 @@ function attentionRenderNow(zone, list) {
     more.className = 'd-btn sm d-atmore';
     more.textContent = `외 ${items.length - shown.length}개 보기`;
     more.addEventListener('click', () => { attentionAll = true; attentionRender(); });
+    uiFoldKey(more, 'at:more'); // 펼친 카드는 줄 부품이 펼침 값(위 4px, --t-unfold)으로 띄운다
     nodes.push(more);
   }
   list.replaceChildren(...nodes);

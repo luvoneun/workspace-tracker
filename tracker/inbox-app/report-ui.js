@@ -1238,6 +1238,8 @@ function reportTopBlock(item, host) {
       top.appendChild(line);
     }
   }
+  // 상태 줄도 줄 부품의 열쇠를 단다 — `확인했어요`로 사라지면 그림자가 흐려지고, 새로 생기면 나타난다(펼침 부품).
+  [...top.children].forEach((line) => { line.dataset.moveId = 'st:report'; });
   if (top.children.length) host.appendChild(top);
 }
 
@@ -1519,6 +1521,7 @@ function reportSentenceRow(item, row, context) {
     toggle.appendChild(reportNode('span', `· ${childCount}건`));
     toggle.setAttribute('aria-label', `아래 문장 ${childCount}개 보기`);
     toggle.setAttribute('aria-expanded', String(peek));
+    uiFoldKey(toggle, `rp-fold:${row.id}`); // 누르면 문서를 다시 그려 새 꺾쇠가 된다 — 옛 각도에서 돈다(펼침 부품)
     if (tidy) toggle.tabIndex = -1;
     toggle.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -2132,8 +2135,9 @@ function reportMaterialBlock(item) {
   toggle.addEventListener('click', () => {
     reportMaterialOpen = !reportMaterialOpen;
     toggle.setAttribute('aria-expanded', String(reportMaterialOpen));
-    body.hidden = !reportMaterialOpen;
+    uiFold(() => { body.hidden = !reportMaterialOpen; }, { open: reportMaterialOpen, part: body });
   });
+  uiFoldKey(toggle, 'rp-material'); // 미리보기를 다시 그려도 꺾쇠가 옛 각도에서 돈다
   // `새로 들어온 줄 N 모두 넣기` — 확정 뒤 새로 들어온 줄 전부를 한 번에 새 줄로(기존 pullNew, 이름의 N이 곧 넣는 줄 수).
   // 두 줄 이상이거나, 한 줄씩 넣기로 못 넣는 줄(진행 중·결정 등)이 있을 때만 선다.
   if (pending.length || fresh) {

@@ -281,7 +281,11 @@ function jiraConfirmClose(repaint = true) {
   escDrop(onEsc);
   jiraConfirm = null;
   if (!repaint) return;
+  // 카드는 통째로 다시 그려진다 — 접히는 확인 줄의 그림자는 늘 있는 카드 자리(#jiraStrip·옆 자리)에 붙인다(펼침 부품의 접힘).
+  const shut = jiraCardNode(key)?.querySelector?.('.d-jconfirm') || null;
+  const leave = shut && uiFoldMode() === 'move' ? uiFoldLeave(shut, shut.closest('[id]')) : () => {};
   jiraStripPaint();
+  leave();
   // 닫으면 값을 고르던 그 고르개로 초점이 돌아간다(메뉴에서 값을 고른 뒤 초점이 머리로 튀지 않게).
   jiraCardNode(key)?.querySelector?.(`.d-dpick[aria-label^="${pickLabel}"]`)?.focus?.();
 }
@@ -291,6 +295,7 @@ function jiraConfirmOpen(plan) {
   plan.onEsc = () => jiraConfirmClose();
   escPush(plan.onEsc);
   jiraConfirm = plan;
+  uiFoldNote('jconfirm');
   jiraStripPaint();
   // 그려 붙인 뒤에 초점을 옮긴다 — 읽는 프로그램이 묻는 말부터 읽고, Tab이 `취소`·`바꾸기`로 이어진다.
   jiraCardNode(plan.key)?.querySelector?.('.d-jconfirm')?.focus?.();
@@ -537,7 +542,7 @@ function jiraConfirmRow(issue, plan) {
   });
   acts.append(cancel, go);
   row.appendChild(acts);
-  return row;
+  return uiFoldShow(row, 'jconfirm'); // 값을 고른 그리기에서만 확인 줄이 펼쳐진다(펼침 부품)
 }
 
 // ---------- 담당자 바꾸기 (BJASSIGN2 — 지라에 쓴다, 확인 줄을 거친다) ----------
@@ -943,7 +948,7 @@ function jiraStripCard(issue, projectKey = '', bundle = null) {
     }));
   }
 
-  if (childOpen) card.appendChild(jiraChildList(issue, childItems));
+  if (childOpen) card.appendChild(uiFoldShow(jiraChildList(issue, childItems), `jexp:${issue.key}`)); // 꺾쇠·담당 이름으로 펼친 그리기에서만
   return card;
 }
 
@@ -975,6 +980,7 @@ function jiraChildFoot(seat, children, items, open, issueKey = '') {
   caret.title = open ? '하위 티켓 목록을 접어요' : '하위 티켓 목록을 펼쳐요';
   // 고정 마크업(꺾쇠 아이콘)만 붙는 자리다 — 지라가 준 글자는 전부 textContent로만 들어간다.
   caret.insertAdjacentHTML('beforeend', uiIcon('chevron'));
+  uiFoldKey(caret, `jexp:${issueKey}`); // 카드를 다시 그려 새 꺾쇠가 된다 — 옛 각도에서 돈다(펼침 부품)
   caret.addEventListener('click', () => {
     jiraChildRemember(seat, !open);
     // 접으면 거르기도 함께 푼다 — 다시 폈을 때 왜 몇 줄뿐인지 모를 일이 없게.
@@ -1015,6 +1021,7 @@ function jiraChildWho(seat, items, issueKey = '') {
     button.addEventListener('click', () => {
       jiraChildReset(issueKey);
       if (!on) jiraChildPicks.set(issueKey, entry.name);
+      uiFoldNote(`jexp:${issueKey}`); // 거른 목록이 새로 나타난다(펼침 부품)
       // 접혀 있을 때 이름을 누르면 펼쳐지며 그 사람 것만 보인다.
       if (!on) jiraChildRemember(seat, true);
       jiraStripPaint();
@@ -1041,6 +1048,7 @@ function jiraChildWho(seat, items, issueKey = '') {
 
 // 펼친 목록. 누를 수 있는 것은 요약(지라 새 탭)·담당 칸(값 고르개, BJASSIGN2)·`완료 N개 더 보기`뿐이다 —
 // 상태·요약·배포 버전은 그대로 읽기 전용이다.
+let jiraChildDoneJust = null; // 방금 `완료 N개 더 보기`를 누른 카드 — { key, count }
 function jiraChildList(issue, items) {
   const list = document.createElement('div');
   list.className = 'd-jkids';
@@ -1059,13 +1067,18 @@ function jiraChildList(issue, items) {
   }
   // 배포 버전 칸은 그 칸을 쓰는 줄이 하나라도 있을 때만 자리를 잡는다(빈 칸을 남기지 않는다).
   if (shown.some(item => item.version)) list.className = 'd-jkids has-ver';
-  shown.forEach(item => list.appendChild(jiraChildRow(item, issue.key)));
+  // `완료 N개 더 보기`로 펼친 그리기에서는 새로 보이는 완료 줄만 나타난다(펼침 부품).
+  const fresh = jiraChildDoneJust && jiraChildDoneJust.key === issue.key && !folded ? jiraChildDoneJust.count : 0;
+  shown.forEach((item, at) => {
+    const row = jiraChildRow(item, issue.key);
+    list.appendChild(at >= shown.length - fresh ? uiFoldShow(row, `jdone:${issue.key}`) : row);
+  });
   if (folded) {
     const more = document.createElement('button');
     more.type = 'button';
     more.className = 'd-link more';
     more.textContent = `완료 ${folded}개 더 보기`;
-    more.addEventListener('click', () => { jiraChildDoneOpen.add(issue.key); jiraStripPaint(); });
+    more.addEventListener('click', () => { jiraChildDoneOpen.add(issue.key); jiraChildDoneJust = { key: issue.key, count: folded }; uiFoldNote(`jdone:${issue.key}`); jiraStripPaint(); });
     list.appendChild(more);
   }
   // 지라에서 100개까지만 읽어 온다 — 다 찼으면 나머지는 지라에서 본다.
@@ -1141,7 +1154,7 @@ function jiraStripPaint() {
     // 좁은 폭(≤520)에서는 접힌 한 줄(.d-jfold)이 먼저 서고 카드는 펼쳤을 때만 보인다 — 넓은 폭은 CSS가 줄을 숨겨 예전 그대로다.
     seat.classList.add('d-jside');
     seat.classList.toggle('is-open', jiraSideOpen.has(side));
-    seat.replaceChildren(jiraSideFold(side), ...(card ? [card] : []));
+    seat.replaceChildren(jiraSideFold(side), ...(card ? [uiFoldShow(card, `jfold:${side}`)] : []));
   });
 }
 
@@ -1179,6 +1192,7 @@ function jiraSideFold(key) {
   });
   // 고정 마크업(꺾쇠 아이콘)만 붙는 자리다 — 지라가 준 글자는 전부 textContent로만 들어간다.
   button.insertAdjacentHTML('beforeend', uiIcon('chevron'));
+  uiFoldKey(button, `jfold:${key}`); // 다시 그린 새 꺾쇠가 옛 각도에서 돈다(펼침 부품)
   button.addEventListener('click', () => {
     if (jiraSideOpen.has(key)) jiraSideOpen.delete(key); else jiraSideOpen.add(key);
     jiraStripPaint();

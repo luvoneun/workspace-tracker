@@ -15,7 +15,7 @@ let waitingNextId = null;
 let waitingNextOpener = null;
 const WAITING_ANSWER_PLACEHOLDER = '받은 답을 한 줄로 — 주간요약의 확인 완료에 그대로 올라가요';
 
-function waitingNextOpen(item) { waitingNextId = item.id; }
+function waitingNextOpen(item) { waitingNextId = item.id; uiFoldNote('wnext'); } // 이 동작의 그리기에서 `다음은?`이 펼쳐진다(uiFoldShow)
 
 // 지금 `다음은?`을 물어야 하는 확인 대기. 체크를 되돌렸으면(⌘Z·다시 체크 해제) 스스로 내려간다.
 // id를 주면 그 항목일 때만 돌려준다(회의 줄처럼 자기 줄 아래에만 붙이는 자리).
@@ -28,9 +28,13 @@ function waitingNextItem(id) {
 
 // 줄을 걷는다 — 목록을 통째로 다시 그리지 않고 그려져 있는 줄만 그 자리에서 없앤다.
 // 상세 카드 안의 `다음은?`(`.is-panel`)은 제안이 아니라 그 카드의 붙박이 구역이라 걷지 않는다.
+// 내 동작으로 걷으면 걷힌 자리가 흐려지고 아래 줄이 올라온다(펼침 부품의 접힘 — 탭을 떠날 때는 가려져 있어 그냥 걷힌다).
 function waitingNextClose() {
   waitingNextId = null;
-  [...(document.querySelectorAll?.('.d-wnext:not(.is-panel)') || [])].forEach(node => (node.closest?.('.d-wnextwrap') || node).remove?.());
+  [...(document.querySelectorAll?.('.d-wnext:not(.is-panel)') || [])].forEach((node) => {
+    const gone = node.closest?.('.d-wnextwrap') || node;
+    uiFold(() => gone.remove?.(), { open: false, part: gone });
+  });
 }
 
 // 이 확인 대기를 `기다리는 답변`(blockedBy)으로 연결해 둔 미완료 업무 — 답이 왔으니 이제 움직일 수 있다.
@@ -321,7 +325,7 @@ function waitingNextLead(item, makeRow, { one = false } = {}) {
   const wrap = document.createElement('div');
   wrap.className = 'd-wnextwrap';
   wrap.appendChild(makeRow(item));
-  wrap.appendChild(one ? waitingNextOne(item) : waitingNextRow(item));
+  wrap.appendChild(uiFoldShow(one ? waitingNextOne(item) : waitingNextRow(item), 'wnext'));
   return wrap;
 }
 

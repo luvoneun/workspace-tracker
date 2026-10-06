@@ -419,6 +419,7 @@ function projectToggleButton(label, count, open, onToggle, { locked = false } = 
   toggle.textContent = open && !locked ? `${label} 숨기기` : `${label} ${count}`;
   if (locked) toggle.disabled = true;
   else toggle.addEventListener('click', onToggle);
+  uiFoldKey(toggle, `pj:${label}`); // 펼친 프로젝트 줄은 줄 부품이 펼침 값(위 4px, --t-unfold)으로 띄운다
   return toggle;
 }
 
@@ -434,6 +435,7 @@ function projectDeployHeading(bucket, count, open, onToggle) {
   head.setAttribute('aria-expanded', String(open));
   head.innerHTML = uiIcon('chevron');
   head.addEventListener('click', onToggle);
+  uiFoldKey(head, head.dataset.moveId); // 다시 그린 새 꺾쇠가 옛 각도에서 돈다(펼침 부품)
   const name = document.createElement('span');
   name.className = 'gl';
   name.textContent = bucket.name || '배포 미정';
@@ -1059,11 +1061,11 @@ function projectMoveCandidateGroup(jiraKey) {
 let projectMoveSuggestConfirm = null; // { jiraKey, groupName, busy }
 function projectMoveSuggestNode(groupName, jiraKey) {
   if (projectMoveSuggestConfirm && projectMoveSuggestConfirm.jiraKey === jiraKey) {
-    return wfMoveConfirmNode(groupName, jiraKey, {
+    return uiFoldShow(wfMoveConfirmNode(groupName, jiraKey, {
       busy: projectMoveSuggestConfirm.busy,
       onCancel: () => { projectMoveSuggestConfirm = null; renderProjects(); },
       onConfirm: () => projectMoveSuggestRun(groupName, jiraKey),
-    });
+    }), `pmv:${jiraKey}`); // `옮기기`를 누른 그리기에서만 확인 줄이 펼쳐진다(펼침 부품)
   }
   const line = document.createElement('div');
   line.className = 'd-jline';
@@ -1072,7 +1074,7 @@ function projectMoveSuggestNode(groupName, jiraKey) {
   const sep1 = document.createElement('span'); sep1.className = 'sep'; sep1.textContent = '·';
   const move = document.createElement('button');
   move.type = 'button'; move.className = 'd-link'; move.textContent = '옮기기';
-  move.addEventListener('click', () => { projectMoveSuggestConfirm = { jiraKey, groupName, busy: false }; renderProjects(); });
+  move.addEventListener('click', () => { projectMoveSuggestConfirm = { jiraKey, groupName, busy: false }; uiFoldNote(`pmv:${jiraKey}`); renderProjects(); });
   const sep2 = document.createElement('span'); sep2.className = 'sep'; sep2.textContent = '·';
   const no = document.createElement('button');
   no.type = 'button'; no.className = 'd-link'; no.textContent = '아니요';

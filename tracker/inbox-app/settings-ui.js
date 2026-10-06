@@ -422,7 +422,7 @@ function settingsAboutFill() {
     toggle.setAttribute('aria-expanded', 'false');
     toggle.addEventListener('click', () => {
       const open = files.hidden;
-      files.hidden = !open;
+      uiFold(() => { files.hidden = !open; }, { open, part: files });
       toggle.setAttribute('aria-expanded', String(open));
     });
     line.appendChild(toggle);
@@ -625,7 +625,7 @@ function settingsUpdateNodes(view) {
     text.textContent = `업데이트하지 못했어요 — ${reason}`;
     box.appendChild(text);
     if (!view.confirming) {
-      box.appendChild(settingsButton('이전 버전으로 되돌리기', 'd-btn sm dng', () => settingsUpdatePaint({ ...view, confirming: true })));
+      box.appendChild(settingsButton('이전 버전으로 되돌리기', 'd-btn sm dng', () => { uiFoldNote('upconfirm'); settingsUpdatePaint({ ...view, confirming: true }); }));
       return [box];
     }
     const confirm = settingsEl('d-iconfirm');
@@ -633,9 +633,9 @@ function settingsUpdateNodes(view) {
     words.className = 'tx';
     words.textContent = SETTINGS_UPDATE_WORDS.confirm;
     confirm.append(words,
-      settingsButton('취소', 'd-btn sm', () => settingsUpdatePaint({ ...view, confirming: false })),
+      settingsButton('취소', 'd-btn sm', () => uiFold(() => settingsUpdatePaint({ ...view, confirming: false }), { open: false, part: confirm })),
       settingsButton('되돌리기', 'd-btn sm dng', () => settingsUpdateAsk('rollback')));
-    return [box, confirm];
+    return [box, uiFoldShow(confirm, 'upconfirm')]; // 누른 그리기에서만 확인 줄이 펼쳐진다(펼침 부품)
   }
   if (kind === 'none') {
     // 새 버전이 없을 때 — 배포 직후 기다리지 않고 지금 물어보는 버튼. 결과는 같은 자리에 다시 그린다.
@@ -1664,14 +1664,17 @@ function settingsIntgCard({ kind, name, chip, use, need, needClass = '', status 
     toneNow: () => tone,
     // ⋯ › 새로 받기 — 버튼의 `다시 시도`와 같은 길이다.
     fetchNow: () => (runner ? runner.fetchNow() : null),
+    // 펼침 부품의 큰 면(세기 2 — --t-move, 넘침 없음): 본문이 나타나고 아래 카드들이 미끄러진다. 입력 칸은 건드리지 않는다.
     open(mode, arg) {
-      settingsIntgCloseOthers(kind);
-      confirmSlot.replaceChildren();
-      body.replaceChildren();
-      setOpen(true);
-      onOpen(card, mode, arg);
+      uiFold(() => {
+        settingsIntgCloseOthers(kind);
+        confirmSlot.replaceChildren();
+        body.replaceChildren();
+        setOpen(true);
+        onOpen(card, mode, arg);
+      }, { open: true, part: body, big: true });
     },
-    close() { setOpen(false); body.replaceChildren(); confirmSlot.replaceChildren(); },
+    close() { uiFold(() => { setOpen(false); body.replaceChildren(); confirmSlot.replaceChildren(); }, { open: false, part: body.hidden ? null : body, from: body }); },
   };
   toggle.addEventListener('click', () => { if (body.hidden) card.open(); else card.close(); });
   setOpen(false);
@@ -1690,12 +1693,11 @@ const settingsFetchItem = card => ({ label: '새로 받기', onClick: () => card
 
 // 해제는 ⋯ 안의 `해제…` → 카드 안 확인 줄 한 번. 큰 해제 버튼은 두지 않는다.
 function settingsIntgConfirmOff(card, body, words = '해제하면 자동 수집이 멈춰요. 토큰 파일은 남아요.') {
-  settingsIntgCloseOthers(null);
   const line = settingsEl('d-iconfirm');
   const text = document.createElement('span');
   text.className = 'tx';
   text.textContent = words;
-  const no = settingsButton('취소', 'd-btn sm', () => card.confirmSlot.replaceChildren());
+  const no = settingsButton('취소', 'd-btn sm', () => uiFold(() => card.confirmSlot.replaceChildren(), { open: false, part: line }));
   const yes = settingsButton('해제', 'd-btn sm dng');
   const error = settingsErrorLine();
   yes.addEventListener('click', () => settingsIntegrationSave(body, {
@@ -1704,7 +1706,8 @@ function settingsIntgConfirmOff(card, body, words = '해제하면 자동 수집�
       : (words.includes('주소 파일') ? '연결을 해제했어요 — 주소 파일은 그대로 있어요' : '연결을 해제했어요'),
   }));
   line.append(text, no, yes, error);
-  card.confirmSlot.replaceChildren(line);
+  // 펼친 카드를 접는 것까지 한 번에 잰다(따로 재면 두 움직임이 겹친다).
+  uiFold(() => { settingsIntgCloseOthers(null); card.confirmSlot.replaceChildren(line); }, { open: true, part: line, from: card.confirmSlot });
   yes.focus();
   return line;
 }
@@ -1877,7 +1880,7 @@ function settingsSlackConnectBody(card, data, { connected = false, broken = fals
       mark.textContent = next ? '⌃' : '›';
       if (next && !host.children.length) settingsSlackWizard({ body: host }, data, connected ? 'token' : 'new');
     };
-    adv.addEventListener('click', () => setOpen(host.hidden));
+    adv.addEventListener('click', () => { const next = host.hidden; uiFold(() => setOpen(next), { open: next, part: host }); });
     card.body.append(adv, host);
     setOpen(open);
   };
@@ -3384,7 +3387,8 @@ function settingsIntgFoot() {
   settingsOnEnter(tool.input, send);
   ask.append(tool.wrap, copy, error);
   const open = settingsButton('요청하기', 'd-ablink', () => {
-    ask.hidden = !ask.hidden;
+    const next = ask.hidden;
+    uiFold(() => { ask.hidden = !next; }, { open: next, part: ask }); // 펼침 부품 — 칸이 나타난 뒤 초점이 들어간다
     open.setAttribute('aria-expanded', String(!ask.hidden));
     if (!ask.hidden) tool.input.focus();
   });
@@ -4109,7 +4113,7 @@ function settingsTrashConfirm(entry, acts) {
   no.type = 'button';
   no.className = 'd-btn sm';
   no.textContent = '취소';
-  no.addEventListener('click', () => { ask.replaceWith(acts); });
+  no.addEventListener('click', () => { ask.replaceWith(acts); if (uiFoldMode()) uiFoldReveal(acts); }); // 같은 자리 글자 바꿔 끼우기 — 나타남만(펼침 부품)
   yes.addEventListener('click', async () => {
     yes.disabled = true;
     try {
@@ -4120,6 +4124,7 @@ function settingsTrashConfirm(entry, acts) {
   });
   ask.append(words, yes, no);
   acts.replaceWith(ask);
+  if (uiFoldMode()) uiFoldReveal(ask);
   yes.focus();
 }
 
