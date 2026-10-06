@@ -16069,9 +16069,6 @@ const motionRawTimes = value => value.replace(/var\(--[\w-]+\)/g, '').match(/(?<
 // 값을 토큰으로 옮기면 그 줄을 여기서 지운다(남아 있으면 시험이 "이제 없는 줄"이라고 실패한다).
 // 새 맨 값은 여기에 더하지 말고 토큰을 쓴다 — 가까운 토큰이 정말 없을 때만 이유와 함께 더한다.
 const MOTION_RAW_ALLOWED = [
-  ['ui.css', '.pull-indicator.snapping', 'transition', '260ms 260ms', 'E', '당겨서 새로고침 — 기다림 부품에서 정한다'],
-  ['ui.css', '.pull-indicator.refreshing', 'animation', '700ms', 'E', '당겨서 새로고침 — 기다림 부품에서 정한다'],
-  ['ui.css', '.d-iconbtn', 'transition', '400ms', 'E', '새로고침 아이콘 한 바퀴 400ms — 기다림 부품에서 정한다(색·누름은 토큰)'],
   ['ui.css', '*, *::before, *::after', 'transition-duration', '0.01ms', '남김', '움직임 줄이기 전역 값(.01ms로 끄고 나타남만 120ms) — 토큰과 뜻이 다르다'],
   ['ui.css', '*, *::before, *::after', 'animation-duration', '0.01ms', '남김', '움직임 줄이기 전역 값(.01ms로 끄고 나타남만 120ms) — 토큰과 뜻이 다르다'],
   ['ui.css', '.d-float:not(.is-out):not(.is-still), .d-mrow2.is-new, .d-unfold', 'animation', '120ms', '남김', '움직임 줄이기 전역 값(.01ms로 끄고 나타남만 120ms) — 토큰과 뜻이 다르다'],
@@ -16081,8 +16078,7 @@ const MOTION_RAW_ALLOWED = [
   ['ui.css', '.d-ibrow.is-leaving', 'animation', '220ms', 'C', '분류 뒤 줄 접힘 — 뜨는 것이 아니라 줄이다. 사라지는 줄 부품과 함께 정한다'],
   ['ui.css', '.d-row.is-rise', 'animation', '260ms 1400ms', 'C', '분류 뒤 새 줄 솟음·배경 강조 — 뜨는 것이 아니라 줄이다. 줄 부품과 함께 정한다'],
   ['ui.css', '.is-flash', 'animation', '1.6s', 'F', '밝히기 — 부품 하나로 합친다'],
-  ['ui.css', '.d-abprog .now .ic', 'animation', '1s', 'E', '도는·숨 쉬는 표시 — 기다림 부품에서 정한다'],
-  ['ui.css', '.d-istat.k-soon .dot', 'animation', '2.4s', 'E', '도는·숨 쉬는 표시 — 기다림 부품에서 정한다'],
+  ['ui.css', '.d-istat.k-soon .dot', 'animation', '2.4s', '남김', '늘 도는 유일한 장식(연동 `곧 읽어요` 점 숨 쉬기) — 기다림 부품(E)에서 늘리지 않기로 하고 값도 그대로 둔다'],
   ['ui.css', '.d-intg', 'transition', '400ms', 'F', '밝히기 — 부품 하나로 합친다'],
   ['ui.css', '.d-faq .q.is-hit', 'transition', '400ms 400ms', 'F', '밝히기 — 부품 하나로 합친다'],
 ];
@@ -16168,7 +16164,7 @@ test('누름: transition을 선언한 선택자는 전부 — 누름 전환을 �
   assert.deepEqual(unknown, [], 'transition을 따로 적으면 공용 누름 전환을 덮는다 — 끝에 scale 전환을 적거나, 뺀 것에 넣거나, 버튼이 아니면 위 목록에 이유와 함께 더한다');
   const selectors = new Set(decls.map(d => d.selector));
   assert.deepEqual(notPressed.filter(selector => !selectors.has(selector)), [], '버튼이 아닌 것 목록에 있지만 이제 transition이 없는 선택자 — 목록에서 지운다');
-  assert.deepEqual(pressed.sort(), ['.d-btn', '.d-iconbtn', '.d-seg button', '.d-cb, .d-wcb', '.d-dpull', '.d-tpk', '.d-jwho', '.d-plist .d-rhd .d-pnewgo', '.rp-pjadd', '.d-mtext, .d-msel', '.d-ckopt span', 'button'].sort(), '누름 전환을 적은 부품');
+  assert.deepEqual(pressed.sort(), ['.d-btn', '.d-iconbtn', '.d-seg button', '.d-seg.is-knob > button', '.d-cb, .d-wcb', '.d-dpull', '.d-tpk', '.d-jwho', '.d-plist .d-rhd .d-pnewgo', '.rp-pjadd', '.d-mtext, .d-msel', '.d-ckopt span', 'button'].sort(), '누름 전환을 적은 부품');
   assert.deepEqual(decls.filter(d => /transform var\(--t-press\)/.test(d.value)).map(d => d.selector), [], '누름에 transform을 쓰지 않는다(회전·체크 커짐과 섞인다)');
 });
 
@@ -19580,4 +19576,286 @@ test('체크 톡 D1 검수: 방금 체크한 칸에만 .is-pop — 다시 그린
   rows[0].querySelectorAll = () => [late];
   fx.app.run('uiPopApply(__list)');
   assert.equal(late.set.has('is-pop'), false, '끝난 뒤의 다시 그리기(자동 갱신)는 튀지 않는다');
+});
+
+// ---- 모션 E: 화면 전환(손잡이·내용 나타남) · 기다림(aria-busy·도는 표시) ----
+// 세그먼트 한 벌(가짜) — 칸 셋 가운데 on번째가 고른 칸이다.
+function knobSeg(fx, name, on, count = 3) {
+  const group = fx.make(name, 0);
+  group.children = Array.from({ length: count }, (_, i) => {
+    const button = fx.make(`${name}-${i}`, 0, 36, group);
+    button.tagName = 'BUTTON';
+    button.matches = () => i === on;
+    return button;
+  });
+  group.contains = el => el === group || group.children.includes(el);
+  return group;
+}
+function knobApp() {
+  const fx = foldApp();
+  const slides = [];
+  fx.app.context.__slide = (group, from, to, elapsed) => slides.push([group.name, from && from.name, to && to.name, elapsed]);
+  fx.app.run('uiKnobLater = (g, f, t, e) => __slide(g, f, t, e)');
+  const knob = (group, key) => { fx.app.context.__g = group; fx.app.run(`uiKnob(__g, '${key}')`); };
+  return { ...fx, slides, knob };
+}
+
+test('화면 전환 E: 손잡이 uiKnob — 처음 그리기는 안 움직이고, 무리 안에서 고르면 옛 칸에서 새 칸으로, 다시 그려 새 요소가 된 무리도 기억한 칸에서 출발한다', () => {
+  const fx = knobApp();
+  const first = knobSeg(fx, 'g1', 0);
+  fx.act();
+  fx.knob(first, 'k');
+  assert.deepEqual(fx.slides, [], '처음 보는 열쇠(처음 그리기·창 처음 열기)');
+  const again = knobSeg(fx, 'g2', 2);
+  fx.act({ type: 'click', detail: 1, target: first.children[2] }); // 옛 무리의 칸을 눌렀고, 다시 그린 새 무리가 왔다
+  fx.knob(again, 'k');
+  assert.deepEqual(fx.slides, [['g2', 'g2-0', 'g2-2', 0]], '옛 칸(차례 0)에서 새 칸(차례 2)으로');
+  // 같은 동작 안에서 또 그려지면(저장 뒤 load) 처음부터가 아니라 미끄러지던 자리에서 잇는다.
+  const third = knobSeg(fx, 'g3', 2);
+  fx.knob(third, 'k');
+  assert.equal(fx.slides.length, 2);
+  assert.deepEqual(fx.slides[1].slice(0, 3), ['g3', 'g3-0', 'g3-2']);
+  assert.ok(fx.slides[1][3] >= 0 && fx.slides[1][3] < 200, '지난 시간만큼 앞에서');
+  // 같은 칸 그대로(자동 갱신·폴링의 다시 그리기)는 엉뚱한 자리에서 출발하지 않는다 — 아무것도 안 걸린다.
+  fx.app.run('uiKnobLast.get("k").moving = null');
+  fx.knob(knobSeg(fx, 'g4', 2), 'k');
+  assert.equal(fx.slides.length, 2, '같은 칸이면 그대로');
+});
+
+test('화면 전환 E: 손잡이 uiKnob — 무리 밖의 동작(창 열기·다른 버튼)·자동 갱신·키보드 연타·가려진 창·움직임 줄이기·칸 수가 달라진 무리는 그냥 바뀐다', () => {
+  const cases = [
+    ['무리 밖의 동작(창을 연 톱니바퀴)', 'outside', '', false],
+    ['자동 갱신(내 동작 아님)', 'none', '', false],
+    ['키보드 연타', 'inside', "uiActMark({ type: 'keydown', key: 'ArrowRight', repeat: true, target: __g1.children[1] })", false],
+    ['가려진 창', 'inside', 'document.hidden = true', false],
+    ['움직임 줄이기', 'inside', 'window.matchMedia = () => ({ matches: true })', false],
+    ['칸 수가 달라짐', 'inside', '', false, 4],
+    ['키보드 한 번(화살표)', 'key', '', true],
+    ['무리 안을 누름', 'inside', '', true],
+  ];
+  for (const [why, how, setup, moves, count] of cases) {
+    const fx = knobApp();
+    const before = knobSeg(fx, 'g1', 0);
+    fx.knob(before, 'k');
+    fx.app.context.__g1 = before;
+    if (how === 'outside') fx.act({ type: 'click', detail: 1, target: fx.make('gear', 0) });
+    if (how === 'inside') fx.act({ type: 'click', detail: 1, target: before.children[1] });
+    if (how === 'key') fx.act({ type: 'keydown', key: 'ArrowRight', repeat: false, target: before.children[0] });
+    if (setup) fx.app.run(setup);
+    fx.knob(knobSeg(fx, 'g2', 1, count), 'k');
+    assert.equal(fx.slides.length, moves ? 1 : 0, why);
+  }
+});
+
+test('화면 전환 E: 손잡이 uiKnobSlide — 손잡이 한 장(aria-hidden)을 새 칸 자리에 놓고 옛 칸의 자리·폭에서 200ms transform으로 잇는다, 시간이 지나면 떼고 고른 칸이 제 모양으로 돌아간다', () => {
+  const fx = foldApp();
+  const timers = [];
+  fx.app.context.setTimeout = (fn, ms) => { timers.push([fn, ms]); return timers.length; };
+  const box = (left, width) => ({ left, top: 10, width, height: 32, right: left + width, bottom: 42 });
+  const classes = new Set();
+  const group = {
+    kids: [], scrollLeft: 0, scrollTop: 0, clientLeft: 0, clientTop: 0, isConnected: true, offsetWidth: 0,
+    get children() { return this.kids; },
+    get firstChild() { return this.kids[0] || null; },
+    classList: { add: (...n) => n.forEach(x => classes.add(x)), remove: (...n) => n.forEach(x => classes.delete(x)), contains: n => classes.has(n) },
+    getBoundingClientRect: () => box(100, 300),
+    insertBefore(el, ref) { this.kids.splice(ref ? this.kids.indexOf(ref) : this.kids.length, 0, el); el.parentElement = this; },
+  };
+  const button = (left, width) => ({ isConnected: true, classList: { contains: () => false }, getBoundingClientRect: () => box(left, width), animate() {} });
+  const from = button(104, 60);
+  const to = button(240, 120);
+  group.kids.push(from, to);
+  const plays = [];
+  const knob = { attrs: {}, classList: { contains: n => n === 'd-knob' }, setAttribute(a, v) { this.attrs[a] = v; }, getAnimations: () => [], isConnected: true, remove() { this.isConnected = false; group.kids.splice(group.kids.indexOf(this), 1); }, animate: (frames, options) => plays.push({ frames, options }) };
+  fx.app.context.__parts = { group, from, to };
+  fx.app.run("document.createElement = () => __knob; getComputedStyle = () => ({ borderRadius: '9px' })");
+  fx.app.context.__knob = knob;
+  fx.app.run('uiKnobSlide(__parts.group, __parts.from, __parts.to, 0)');
+  assert.equal(group.kids[0], knob, '무리의 맨 앞(글자 아래)에 한 장');
+  assert.equal(knob.attrs['aria-hidden'], 'true', '그림일 뿐 — 접근성 트리에 없다');
+  assert.equal(knob.attrs.style, 'left:140px;top:0px;width:120px;height:32px;border-radius:9px', '새 칸 자리(무리 기준)');
+  assert.deepEqual(plain(plays.map(play => play.frames)), [[{ transform: 'translate(-136px, 0px) scale(0.5, 1)' }, { transform: 'none' }]], '옛 칸의 자리·폭에서');
+  assert.equal(plays[0].options.duration, 200);
+  assert.ok(classes.has('is-knob') && classes.has('is-gliding'), '미끄러지는 동안 고른 칸의 바탕·밑줄을 손잡이에 맡긴다');
+  assert.ok(!/width|left|height|margin/.test(JSON.stringify(plain(plays[0].frames))), '움직이는 것은 transform뿐');
+  const [done, ms] = timers[timers.length - 1];
+  assert.equal(ms, 230);
+  done();
+  assert.equal(classes.has('is-knob') || classes.has('is-gliding'), false);
+  assert.equal(group.kids.includes(knob), false, '시간이 지나면 손잡이를 뗀다');
+});
+
+test('화면 전환 E: 손잡이 CSS — 멈춰 있을 때 모양은 그대로(움직이는 동안만 .is-knob·.is-gliding), 바탕 전환을 끈 채 되돌아 깜박이지 않는다, 값은 --t-move', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /\n\.d-seg\.is-knob, \.d-tabs\.is-knob \{ position: relative; \}/);
+  assert.match(css, /\n\.d-seg\.is-knob > button \{ position: relative; transition: color var\(--t-tint\) var\(--ease\), scale var\(--t-press\) var\(--ease\); \}/, '손잡이가 붙어 있는 동안 바탕 전환은 없다(떼는 순간 바탕이 다시 번지지 않게)');
+  assert.match(css, /\n\.d-seg\.is-gliding > button\[aria-pressed="true"\], \.d-seg\.is-gliding > button\[aria-checked="true"\] \{ background: none; box-shadow: none; \}/);
+  assert.match(css, /\n\.d-tabs\.is-gliding > \.d-tab\[aria-selected="true"\]::after \{ content: none; \}/);
+  assert.match(css, /\n\.d-seg > \.d-knob \{ background: var\(--surface\); box-shadow: var\(--shadow\); \}/, '고른 칸과 같은 바탕·그림자');
+  assert.match(css, /\n\.d-tabs > \.d-knob::after \{ content: ''; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2\.5px; background: var\(--accent\); border-radius: 3px; \}/, '탭 밑줄과 같은 자리·모양');
+  // 원래 고른 모양은 그대로다 — 손잡이 규칙이 고른 칸의 멈춘 모양을 바꾸지 않는다.
+  assert.match(css, /\n\.d-seg button\[aria-pressed="true"\], \.d-seg button\[aria-checked="true"\] \{ background: var\(--surface\); color: var\(--text\); box-shadow: var\(--shadow\); \}/);
+  assert.match(css, /\n\.d-tab\[aria-selected="true"\]::after \{\n  content: ''; position: absolute; left: 8px; right: 8px; bottom: -1px;\n  height: 2\.5px; background: var\(--accent\); border-radius: 3px;\n\}/);
+  const fx = foldApp();
+  assert.equal(fx.app.run('UI_KNOB.move'), 200, '--t-move와 같은 값');
+  assert.equal(fx.app.run('UI_SWAP.in'), 100, '--t-press와 같은 값(내용 나타남)');
+});
+
+test('화면 전환 E: 내용 나타남 uiSwap — 고른 값이 바뀐 내 동작 직후만 .d-swap(100ms, 옆으로 밀지 않음), 처음 그리기·같은 값·자동 갱신·움직임 줄이기는 그냥, 창을 열 때 uiSwapForget', () => {
+  const fx = foldApp();
+  const el = fx.make('body', 0);
+  fx.app.context.__el = el;
+  const swap = value => fx.app.run(`uiSwap(__el, 'pane:x', ${JSON.stringify(value)})`);
+  fx.act();
+  swap('a');
+  assert.equal(el.has('d-swap'), false, '처음 그리기');
+  swap('a');
+  assert.equal(el.has('d-swap'), false, '같은 항목 다시 그리기');
+  swap('b');
+  assert.ok(el.has('d-swap'), '다른 항목을 고름');
+  el.classList.remove('d-swap');
+  fx.app.run('uiActAt = 0');
+  swap('c');
+  assert.equal(el.has('d-swap'), false, '자동 갱신(내 동작 아님)');
+  fx.act();
+  fx.app.run("uiSwapForget('pane:')");
+  swap('d');
+  assert.equal(el.has('d-swap'), false, '창을 열 때 지운 열쇠는 처음 그리기다');
+  fx.app.run('window.matchMedia = () => ({ matches: true })');
+  swap('e');
+  assert.equal(el.has('d-swap'), false, '움직임 줄이기');
+  // 여럿(바뀐 칸들만)도 받는다.
+  fx.app.run('window.matchMedia = () => ({ matches: false })');
+  const one = fx.make('one', 0);
+  const two = fx.make('two', 0);
+  fx.app.context.__els = [one, two];
+  fx.app.run("uiSwap(__els, 'pane:x', 'f')");
+  assert.ok(one.has('d-swap') && two.has('d-swap'));
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /\n\.d-swap \{ animation: d-fade var\(--t-press\) linear both; \}/, '한 규칙 — 이 줄만 지우면 내용 나타남이 전부 꺼진다');
+});
+
+test('화면 전환 E: 부르는 자리 — 탭·세그먼트 아홉 곳이 손잡이를, 고른 항목을 바꾸는 자리가 내용 나타남을 쓴다(창을 여는 쪽은 지난 값을 지운다)', () => {
+  const read = file => fs.readFileSync(path.join(__dirname, file), 'utf8');
+  const knobs = [
+    ['app.js', "uiKnob(document.querySelector('.d-tabs'), 'tabs');"],
+    ['app.js', "uiKnob(document.getElementById('recordViewSeg'), 'records:view');"],
+    ['settings-ui.js', "uiKnob(settingsDialog.querySelector('.d-mhd .d-seg'), 'settings:tab');"],
+    ['settings-ui.js', "uiKnob(seg, 'settings:tidy');"],
+    ['settings-ui.js', "uiKnob(seg, 'settings:notes');"],
+    ['workflows.js', 'uiKnob(group, group);'],
+    ['meetings-ui.js', "return uiKnob(seg, 'meetings:view');"],
+    ['projects-ui.js', "return uiKnob(seg, 'projects:view');"],
+    ['project-new-ui.js', "return uiKnob(seg, 'projnew:mode');"],
+    ['usage-ui.js', "uiKnob(seg, 'uw:range');"],
+  ];
+  const swaps = [
+    ['settings-ui.js', "uiSwap(body, 'settings:tab', want);"],
+    ['settings-ui.js', "uiSwap(card.body, 'settings:wiz:slack', state.step);"],
+    ['settings-ui.js', "uiSwap(card.body, 'settings:wiz:jira', state.step);"],
+    ['meetings-ui.js', "uiSwap(body, 'meetings:body', body.dataset.meetingFor);"],
+    ['projects-ui.js', "uiSwap(body, 'projects:body', body.dataset.projectFor);"],
+    ['project-new-ui.js', "uiSwap([...form.children].slice(modeFrom), 'projnew:mode', state.mode);"],
+    ['report-ui.js', "uiSwap(host, 'weekly:doc', `${item.weekKey}|${reportMode}`);"],
+    ['usage-ui.js', "'uw:range', stats.range);"],
+    ['app.js', "'today:select', true);"],
+  ];
+  const forgets = [
+    ['settings-ui.js', "uiSwapForget('settings:');"],
+    ['settings-ui.js', "uiSwapForget('settings:wiz:slack');"],
+    ['settings-ui.js', "uiSwapForget('settings:wiz:jira');"],
+    ['usage-ui.js', "uiSwapForget('uw:');"],
+    ['project-new-ui.js', "uiSwapForget('projnew:');"],
+  ];
+  [...knobs, ...swaps, ...forgets].forEach(([file, line]) => assert.ok(read(file).includes(line), `${file}: ${line}`));
+  // 주차 목록은 줄 부품으로 그려 고른 표시가 옛 줄에서 이어진다(uiGlideTint).
+  assert.match(read('app.js'), /uiRowsMove\(nav, \(\) => renderWeeklyNav\(items\)\);/);
+  assert.match(read('app.js'), /btn\.dataset\.moveId = `wk:\$\{item\.weekKey\}`;/);
+  // wfSegment는 칸을 붙인 뒤 고른다 — 칸이 없는 채 고르면 손잡이가 칸 수를 0으로 기억한다.
+  assert.match(read('workflows.js'), /group\.append\(\.\.\.buttons\);\n  choose\(value\);/);
+});
+
+test('기다림 E: aria-busy 규칙 하나 — 0.3초(--t-wait)가 지나야 옅어지고, `…하는 중` 글자 버튼·기다림 글자 줄은 대신 도는 표시, 움직임 줄이기에서는 글자만', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /\n  --t-wait: 300ms;  --t-turn: 400ms;  --t-loop: 1s;/);
+  assert.match(css, /\n\[aria-busy="true"\]:not\(\.d-btn, \.d-waiting, \.d-iconbtn\) \{ animation: d-busy var\(--t-move\) var\(--ease\) var\(--t-wait\) both; \}\n@keyframes d-busy \{ to \{ opacity: 0\.6; \} \}/);
+  assert.match(css, /\n\.d-btn\[aria-busy="true"\]::before, \.d-waiting\[aria-busy="true"\]::before \{\n[^}]*animation: d-busy-in var\(--t-move\) var\(--ease\) var\(--t-wait\) both, d-spin var\(--t-loop\) linear infinite;\n\}/);
+  assert.match(css, /@keyframes d-busy-in \{ from \{ opacity: 0; \} \}/);
+  const reduce = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce) {\n  *, *::before'), css.indexOf('/* ---------- 헤더'));
+  assert.match(reduce, /\n  \[aria-busy="true"\], \.d-iconbtn\.spinning \{ animation: none !important; \}\n  \.d-btn\[aria-busy="true"\]::before, \.d-waiting\[aria-busy="true"\]::before \{ display: none; \}/, '옅어짐·도는 표시 없이 글자만(.01ms로 줄인 지연 뒤 갑자기 옅어지지 않게 아예 끈다)');
+  // 늘 도는 장식은 늘리지 않는다 — infinite는 도는 동안만(.spinning·aria-busy·진행 중 줄) 붙는 것과 숨 쉬는 점 하나뿐이다.
+  const infinite = [];
+  MOTION_CSS_FILES.forEach((file) => motionDecls(file).forEach((d) => { if (/infinite/.test(d.value)) infinite.push(d.selector); }));
+  assert.deepEqual(infinite.sort(), ['.d-iconbtn.spinning', '.pull-indicator.refreshing', '.d-abprog .now .ic', '.d-istat.k-soon .dot', '.d-btn[aria-busy="true"]::before, .d-waiting[aria-busy="true"]::before'].sort());
+});
+
+test('기다림 E: 저장 잠금 fadeOutAndRun은 정의 그대로다 — aria-busy만 걸고 표시는 CSS 규칙 하나가 준다', () => {
+  const app = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  assert.ok(app.includes(`async function fadeOutAndRun(card, action, message) {
+  if (card.getAttribute('aria-busy') === 'true') return;
+  card.setAttribute('aria-busy', 'true');
+  try {
+    await action();
+    if (message) announce(message);
+  } catch {
+    card.querySelectorAll('input[type="checkbox"]').forEach(input => { input.checked = card.classList.contains('done'); });
+  } finally { card.removeAttribute('aria-busy'); }
+}`), '안전장치 정의는 고치지 않는다');
+});
+
+test('기다림 E: `…하는 중`으로 글자만 바뀌는 버튼은 부르는 쪽 한 줄로 aria-busy를 건다 — 빠진 곳은 시험이 잡는다', () => {
+  // 글자를 `…중…`으로 바꾸는 줄 근처(앞뒤 3줄)에 aria-busy가 있어야 한다. 버튼이 아닌 것은 이유와 함께 뺀다.
+  const NOT_BUTTON = [
+    ['jira-ui.js', "show(jiraAssignBaseEntries(target, trimmed), '찾는 중…');", '고르개 목록의 상태 한 줄(role=status) — 칸에 글자를 치는 중이라 움직이지 않는다'],
+  ];
+  const files = ['app.js', 'checkin-ui.js', 'jira-ui.js', 'meeting-notes-ui.js', 'meetings-ui.js', 'project-new-ui.js', 'projects-ui.js', 'selfcheck-ui.js', 'settings-ui.js', 'workflows.js', 'wrap-ui.js'];
+  const missing = [];
+  let checked = 0;
+  files.forEach((file) => {
+    const lines = fs.readFileSync(path.join(__dirname, file), 'utf8').split('\n');
+    lines.forEach((line, at) => {
+      if (/^\s*\/\//.test(line) || !/(textContent = |\? ['`])[^;]*중…/.test(line)) return;
+      if (NOT_BUTTON.some(([f, text]) => f === file && line.includes(text))) return;
+      checked += 1;
+      const near = lines.slice(Math.max(0, at - 3), at + 4).join('\n');
+      if (!/aria-busy|SELFCHECK_WORDS/.test(near)) missing.push(`${file}:${at + 1} ${line.trim()}`);
+    });
+  });
+  assert.deepEqual(missing, []);
+  assert.ok(checked >= 15, `글자를 바꾸는 줄을 실제로 훑었다(${checked}줄)`);
+  const read = file => fs.readFileSync(path.join(__dirname, file), 'utf8');
+  assert.match(read('selfcheck-ui.js'), /main\.setAttribute\('aria-busy', String\(!!selfcheckState\.busy\)\);/);
+  assert.match(read('wrap-ui.js'), /wrapNodes\.body\.setAttribute\('aria-busy', String\(!!wrapState\.busy\)\);/, '오늘 정리 저장 — 글자가 그대로인 버튼 대신 줄들이 옅어진다');
+  assert.match(read('jira-ui.js'), /anchor\.setAttribute\('aria-busy', 'true'\);[\s\S]*finally \{\n    anchor\.disabled = false;\n    anchor\.removeAttribute\('aria-busy'\);/, '지라 값 고르개 — 선택지를 읽는 동안');
+  assert.match(read('settings-ui.js'), /ui\.go\.setAttribute\('aria-busy', 'true'\); \/\/ 최대 90초/, '맥 캘린더 확인 — 글자만에서 도는 표시로');
+});
+
+test('기다림 E: 도는 표시 uiSpin — 누르면 한 바퀴(400ms), 오래 걸리면 1초에 한 바퀴, 끝나면 지금 바퀴를 마저 돌고 선다, 다시 그린 버튼도 같은 각도에서 잇는다', () => {
+  const fx = foldApp();
+  fx.app.context.setTimeout = () => 1;
+  const now = fx.app.run('Date.now()');
+  const end = ran => fx.app.run(`uiSpinEnd({ at: Date.now() - ${ran} }).end - (Date.now() - ${ran})`);
+  assert.equal(end(100), 400, '한 바퀴 안에 끝나면 그 바퀴 끝(400ms)');
+  assert.equal(end(900), 1400, '도는 중이면 지금 바퀴 끝(400 + 1000)');
+  assert.equal(end(2500), 3400, '세 바퀴째 도는 중 — 그 바퀴 끝(400 + 3 × 1000)');
+  const classes = new Set();
+  const style = {};
+  fx.app.context.__b = { classList: { add: n => classes.add(n), remove: n => classes.delete(n) }, style };
+  fx.app.run(`__spin = { at: ${now} - 1500 }`);
+  assert.equal(fx.app.run('uiSpin(__b, __spin)'), true);
+  assert.ok(classes.has('spinning'));
+  assert.match(style.animationDelay, /^-15\d\dms, -11\d\dms$/, '한 바퀴는 지났고 반복은 1.1초째 — 지난 시간만큼 앞에서');
+  fx.app.run(`__spin.end = ${now} - 1`);
+  assert.equal(fx.app.run('uiSpin(__b, __spin)'), false, '설 시각이 지났으면 세운다');
+  assert.equal(classes.has('spinning'), false);
+  assert.equal(fx.app.run('UI_WAIT.turn'), 400, '--t-turn과 같은 값');
+  assert.equal(fx.app.run('UI_WAIT.loop'), 1000, '--t-loop와 같은 값');
+  assert.match(fx.app.run('uiSpinPhase()'), /^-\d{1,3}ms$/, '시계에 맞춘 시작점(업데이트 진행 ⟳이 2초마다 다시 그려져도 0도에서 다시 시작하지 않는다)');
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /\n\.d-iconbtn\.spinning \{ color: var\(--accent\); animation: d-spin var\(--t-turn\) var\(--ease\), d-spin var\(--t-loop\) linear var\(--t-turn\) infinite; \}/);
+  assert.match(css, /\.d-abprog \.now \.ic \{ display: inline-block; color: var\(--accent\); animation: d-spin var\(--t-loop\) linear infinite; \}/);
+  // 지라 띠 카드의 새로고침은 보던 카드를 뼈대로 바꾸지 않고(keep) 헤더 새로고침처럼 돈다.
+  const jira = fs.readFileSync(path.join(__dirname, 'jira-ui.js'), 'utf8');
+  assert.match(jira, /refresh\.addEventListener\('click', \(\) => jiraRefreshRun\(issue\.key\)\);/);
+  assert.match(jira, /await jiraCardLoad\(key, \{ fresh: true, keep: true, spin \}\); \} finally \{ uiSpinEnd\(spin\); \}/);
 });
