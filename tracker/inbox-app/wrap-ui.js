@@ -141,6 +141,7 @@ function wrapRow(row) {
 function wrapDoneRow(item) {
   const el = document.createElement('div');
   el.className = 'd-wrapdone';
+  el.dataset.moveId = `wd:${item.id}`; // 줄 이동 도우미의 열쇠(wrapRender)
   el.textContent = item.description;
   el.title = item.description;
   return el;
@@ -173,9 +174,14 @@ function wrapFoot() {
   return foot;
 }
 
+// 창 안을 통째로 다시 그린다 — `끝낸 것`을 펼치고 접으면 아래 `남은 것` 줄이 줄 부품(uiRowsMove)으로 미끄러진다.
+// 창을 여는 첫 그리기는 숨어 있던 자리라 움직이지 않는다.
 function wrapRender() {
   if (!wrapState || !wrapNodes || !wrapNodes.body) return;
   const body = wrapNodes.body;
+  uiRowsMove(body, () => wrapRenderNow(body));
+}
+function wrapRenderNow(body) {
   body.replaceChildren();
 
   const summary = document.createElement('div');
@@ -236,7 +242,7 @@ function wrapOpen() {
   if (date) date.textContent = uiKoDate(wrapToday());
   dialog.showModal?.();
   wrapState.esc = escPush(wrapClose);
-  wrapRender();
+  uiGlideStill(wrapRender); // 여는 그리기는 움직이지 않는다 — 지난번 내용이 남아 있어도 줄이 떠오르거나 흐려지지 않게
 }
 
 function wrapClose() {

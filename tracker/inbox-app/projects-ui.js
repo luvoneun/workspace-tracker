@@ -346,6 +346,7 @@ function projectRowButton(row, past, labels) {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'd-prow' + (row.open ? '' : ' is-zero') + (past ? ' is-past' : '');
+  button.dataset.moveId = `pj:${row.key}`; // 줄 이동 도우미의 열쇠(uiRowsMove)
   button.setAttribute('aria-current', String(row.key === projectKey));
   const displayLabel = labels.get(row.key);
   const name = document.createElement('span');
@@ -413,6 +414,7 @@ function projectToggleButton(label, count, open, onToggle, { locked = false } = 
   const toggle = document.createElement('button');
   toggle.type = 'button';
   toggle.className = 'd-plink';
+  toggle.dataset.moveId = `grp:${label}`; // 줄 이동 도우미의 열쇠 — 접는 글자도 줄과 함께 미끄러진다
   toggle.setAttribute('aria-expanded', String(open));
   toggle.textContent = open && !locked ? `${label} 숨기기` : `${label} ${count}`;
   if (locked) toggle.disabled = true;
@@ -428,6 +430,7 @@ function projectDeployHeading(bucket, count, open, onToggle) {
   const head = document.createElement('button');
   head.type = 'button';
   head.className = 'd-grp tog';
+  head.dataset.moveId = `grp:dep:${bucket.name || '__none__'}`; // 줄 이동 도우미의 열쇠
   head.setAttribute('aria-expanded', String(open));
   head.innerHTML = uiIcon('chevron');
   head.addEventListener('click', onToggle);
@@ -510,10 +513,19 @@ function projectListPaintDeployTail(listEl, { visibleRows, pastRows, labels, que
 
 // opts.rowsOnly — 찾기 칸에서 글자를 칠 때만 쓰는 가벼운 다시 그리기다. 머리·세그먼트·찾기 칸은
 // 그대로 두고(칸 자체를 다시 만들면 한글 조합이 끊긴다) 그 뒤에 이어 붙은 소제목·줄만 지우고 다시 쌓는다.
+// 왼쪽 목록과 오른쪽 상세를 줄 부품(uiRowsMove)으로 감싸 그린다 — 찾기 칸에서 치는 중(rowsOnly)에는 도우미가 스스로 쉰다.
+// 두 자리는 옆으로 놓여 서로 밀지 않아 무리로 묶지 않는다. 다른 프로젝트(또는 새 프로젝트 화면)로 옮기면 오른쪽은
+// 다른 내용이다(화면 전환) — 오른쪽은 재지 않고 그린다.
+const projectBodyFor = () => (projectNew ? 'new' : String(projectKey));
 function renderProjects(opts = {}) {
   const listEl = document.getElementById('projectList');
   const body = document.getElementById('projectBody');
   if (!listEl || !body) return;
+  const draw = () => renderProjectsNow(listEl, body, opts);
+  const same = body.dataset.projectFor === projectBodyFor();
+  uiRowsMove(listEl, same ? () => uiRowsMove(body, draw) : draw);
+}
+function renderProjectsNow(listEl, body, opts) {
   // 묶음(BBUNDLE)은 이 탭에서만 한 줄로 합친다 — uiProjectRows는 리마인드도 쓰므로 그대로 두고 여기서 합친다.
   let rows = projectBundleRows(uiProjectRows(wfProjects(), workflowData.items));
   // 탭에 들어올 때·새로고침 때만(projectOrderResort) 다시 정렬한다 — 그 밖의 다시 그리기
@@ -577,6 +589,7 @@ function renderProjects(opts = {}) {
   if (projectNew) projectNewRender(body);
   else if (noProjects) projectEmptyBoard(body);
   else renderProjectDetail(body, rows.find(row => row.key === projectKey) || null);
+  body.dataset.projectFor = projectBodyFor(); // 오른쪽에 그린 것 — 다음 그리기가 같은 프로젝트인지 본다(renderProjects)
 }
 
 // 프로젝트가 하나도 없을 때 오른쪽 자리 — 한 문장 대신 흰 카드 한 판(프로젝트 구역과 같은 `.d-psurf`):
@@ -891,6 +904,7 @@ function projectTaskRow(item, fromKey = '') {
   const row = document.createElement('div');
   row.className = 'd-prow2' + (item.doing ? ' is-doing' : '') + (panelState && panelState.id === item.id ? ' is-sel' : '');
   row.dataset.taskId = item.id;
+  row.dataset.doneInto = 'grp:끝낸 것'; // 체크하면 이 그룹 제목 쪽으로 들어간다(완료 흐름 — taskCompletionCheckbox)
 
   row.appendChild(uiCheckCell(item, row, false));
 

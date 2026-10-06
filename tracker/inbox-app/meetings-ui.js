@@ -282,24 +282,8 @@ async function panelPromoteTasks(result, ids, host = MEETING_HOST_CARD) {
   host.redraw();
 }
 
-// 옛 자리 → 새 자리로 미끄러지기: 줄이 펼쳐지거나 접힐 때 자리는 바로 바뀌고(높이는 움직이지 않는다),
-// 밀리는 줄·구역 머리만 transform으로 따라온다. 움직임 줄이기에서는 그대로 바뀐다.
-function meetingFlip(root, mutate, duration, bounce = false) {
-  const moving = root && root.querySelectorAll && uiSchedMotion()
-    ? [...root.querySelectorAll('.d-mrow2, .d-dsec > .lbl, .d-dsec > summary, .d-dres, .d-hint')].filter(el => el.getBoundingClientRect && el.animate)
-    : [];
-  const before = new Map(moving.map(el => [el, el.getBoundingClientRect().top]));
-  mutate();
-  before.forEach((top, el) => {
-    if (!el.isConnected) return;
-    const delta = top - el.getBoundingClientRect().top;
-    if (Math.abs(delta) < 0.5) return;
-    el.animate(bounce
-      ? [{ transform: `translateY(${delta}px)` }, { transform: `translateY(${-Math.sign(delta) * 1.5}px)`, offset: 0.6 }, { transform: 'none' }]
-      : [{ transform: `translateY(${delta}px)` }, { transform: 'none' }],
-    { duration, easing: 'cubic-bezier(0.22, 0.8, 0.3, 1)' });
-  });
-}
+// 초안을 펼치거나 접을 때 밀리는 줄·구역 머리 — 줄 부품의 바로 잇기(app.js uiRowsShift)로 미끄러진다.
+const MEETING_SHIFT_ROWS = '.d-mrow2, .d-dsec > .lbl, .d-dsec > summary, .d-dres, .d-hint';
 
 // AI가 분류한 초안 — 한 줄씩: `AI` | 문구 | (오늘 · 날짜) 종류 | 빼기. 문구를 누르면 그 자리에서 문구 칸 + 나중에/오늘 + 기한이
 // 펼쳐진다(한 번에 하나). 고친 문구·종류·날짜는 wfDraftEdits에 남아 다시 그려도 유지된다. `N개 담기`는 구역 제목 옆에 있다.
@@ -336,13 +320,13 @@ function panelMeetingDrafts(event, box, host = MEETING_HOST_CARD) {
   const toggle = (id) => {
     const previous = meetingDraftOpenId;
     if (previous === id) return;
-    meetingFlip(host.box(), () => {
+    uiRowsShift(host.box(), MEETING_SHIFT_ROWS, () => {
       meetingDraftOpenId = id;
       [previous, id].filter(Boolean).forEach((one) => {
         const draft = event.drafts.find(other => other.id === one);
         if (draft) redraw(draft, one === id);
       });
-    }, id ? 220 : 130, !!id);
+    }, id ? { duration: 220, bounce: true } : { duration: 130 });
     const text = id && rows.get(id) ? rows.get(id).draftText : null;
     if (text) {
       text.focus();
@@ -358,6 +342,7 @@ function panelMeetingDrafts(event, box, host = MEETING_HOST_CARD) {
     const row = document.createElement('div');
     row.className = 'd-mrow2 d-draft' + (open ? ' is-edit' : '') + (open && opening ? ' is-opening' : '')
       + (blank ? ' is-blank' : '') + (flagged.has(draft.id) ? ' is-bad' : '');
+    row.dataset.moveId = `dr:${draft.id}`; // 줄 이동 도우미의 열쇠 — 빼거나 담으면 아래 줄이 올라온다(uiRowsMove)
     row.dataset.type = edit.type;
 
     const mark = document.createElement('span');
@@ -904,6 +889,7 @@ function meetingSection(title, count) {
   const label = section.children[0];
   section.className = 'd-dsec d-msec';
   label.className = 'lbl d-mhead';
+  label.dataset.moveId = `grp:sec:${title}`; // 줄 이동 도우미의 열쇠 — 구역 제목도 줄과 함께 미끄러진다(구역 자체에는 달지 않는다: 줄과 겹쳐 두 번 움직인다)
   const number = document.createElement('span');
   number.className = 'n num';
   number.textContent = String(count);
@@ -1037,6 +1023,7 @@ function meetingLocalRow(entry, event, linked, host) {
   const failed = entry.state === 'fail';
   const row = document.createElement('div');
   row.className = 'd-mrow2 is-local' + (entry.fresh ? ' is-new' : '') + (failed ? ' is-fail' : '');
+  row.dataset.moveId = `cap:${entry.seq}`; // 줄 이동 도우미의 열쇠(담는 중인 줄 — 서버 목록에 들어오면 data-task-id 줄로 바뀐다)
   entry.fresh = false; // 떠오르는 움직임은 처음 한 번만
   const cell = document.createElement('span');
   cell.className = 'ck';
@@ -1106,6 +1093,7 @@ const meetingItemGroup = type => (['check', 'decision', 'idea'].includes(type) ?
 function meetingSubhead(label, count) {
   const head = document.createElement('div');
   head.className = 'd-mgrp';
+  head.dataset.moveId = `grp:${label}`; // 줄 이동 도우미의 열쇠 — 종류 소제목도 줄과 함께 미끄러진다
   head.setAttribute('role', 'heading');
   head.setAttribute('aria-level', '3');
   const name = document.createElement('span');
@@ -1702,10 +1690,18 @@ function openMeetingsTab(id) {
   setActiveTab('meetings');
 }
 
+// 왼쪽 목록과 오른쪽 회의 정리를 줄 부품(uiRowsMove)으로 감싸 그린다 — 오른쪽은 카드를 통째로 새로 만들므로
+// 늘 있는 자리(meetingBody)를 목록으로 잰다. 두 자리는 옆으로 놓여 서로 밀지 않아 무리로 묶지 않는다.
+// 다른 회의를 고르면 오른쪽은 다른 내용이다(화면 전환) — 옛 줄이 흐려지고 새 줄이 떠오르지 않게 오른쪽은 재지 않고 그린다.
 function renderMeetings() {
   const listEl = document.getElementById('meetingList');
   const body = document.getElementById('meetingBody');
   if (!listEl || !body) return;
+  const draw = () => renderMeetingsNow(listEl, body);
+  const same = body.dataset.meetingFor === String(meetingsTabState.key);
+  uiRowsMove(listEl, same ? () => uiRowsMove(body, draw) : draw);
+}
+function renderMeetingsNow(listEl, body) {
   const meetings = (workflowData && workflowData.meetings) || [];
   const itemsOf = typeof wfMeetingItems === 'function' ? wfMeetingItems : null;
   const today = todayStr();
@@ -1774,6 +1770,7 @@ function renderMeetings() {
   }
 
   renderMeetingDetail(body, rows.find(event => event.id === meetingsTabState.key) || null);
+  body.dataset.meetingFor = String(meetingsTabState.key); // 오른쪽에 그린 회의 — 다음 그리기가 같은 회의인지 본다(renderMeetings)
 }
 
 // 날짜순 — 날짜별 조용한 소제목(묶음을 알려 주기만 한다, 개수·칩 없음) 아래로 줄이 선다.
@@ -1784,6 +1781,7 @@ function meetingsTabDateRows(listEl, rows, today) {
       lastDate = event.date;
       const day = document.createElement('div');
       day.className = 'd-mtday';
+      day.dataset.moveId = `grp:day:${event.date}`; // 줄 이동 도우미의 열쇠 — 날짜 소제목도 줄과 함께 미끄러진다
       day.textContent = event.date === today ? '오늘' : uiKoDate(event.date);
       listEl.appendChild(day);
     }
@@ -1926,6 +1924,7 @@ function meetingsTabRow(event, opts = {}) {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'd-mtrow' + (opts.withDate ? ' has-date' : '');
+  button.dataset.moveId = `mtg:${event.id || meetingCaptureKey(event)}`; // 줄 이동 도우미의 열쇠(uiRowsMove)
   button.setAttribute('aria-current', String(event.id === meetingsTabState.key));
 
   const time = document.createElement('span');

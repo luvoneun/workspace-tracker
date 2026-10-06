@@ -827,9 +827,11 @@ function uiHeldFlush() {
 // doneFor: 체크 표시(uiGlideDoneMark)를 믿는 시간 · jitter: 잇지 않는 가로 어긋남(스크롤바)
 const UI_GLIDE = { ease: 'cubic-bezier(0.22, 0.8, 0.3, 1)', move: 200, enter: 140, fade: 120, strike: 200, within: 500, max: 40, rows: 150, doneFor: 2000, jitter: 8 };
 const UI_GLIDE_ROWS = '[data-task-id], [data-move-id], [data-rail-id]';
+const UI_GLIDE_STRIKE = '.d-title, .ti'; // 완료 흐름에서 줄이 그어지는 제목 — 오늘 줄(.d-title)·회의·프로젝트 줄(.ti)
 let uiActAt = 0;        // 마지막 사용자 동작 시각
 let uiActQuiet = false; // 그 동작이 키보드 연타(1초 안에 이어진 키·누르고 있는 키)였다
 let uiActByKey = false; // 그 동작이 키보드였다 — 키보드로 연 뜨는 것은 넘침 없이 나타남만(uiFloatOpen)
+let uiActInText = false; // 그 동작이 글자 칸 안의 키(Enter로 저장·Esc로 취소)였다 — 칸이 사라져 초점이 빠져도 움직이지 않는다
 let uiKeyAt = 0;
 let uiActSeq = 0;        // 사용자 동작마다 하나씩 는다(같은 밀리초의 두 동작도 가린다)
 let uiGlideLate = 0;     // 미뤘다 푸는 그리기 안에서는 0보다 크다
@@ -845,10 +847,12 @@ function uiActMark(event) {
     uiActQuiet = !!event.repeat || now - uiKeyAt < 1000;
     uiKeyAt = now;
     uiActByKey = true;
+    uiActInText = uiIsTextEntry(event.target);
   } else {
     if (event.detail === 0) return;
     uiActQuiet = false;
     uiActByKey = false;
+    uiActInText = false;
   }
   uiActAt = now;
   uiActSeq += 1;
@@ -880,7 +884,7 @@ function uiGlideMode() {
   if (uiSchedOpen || uiComposingEl || document.hidden) return null;
   if (document.querySelector?.('.d-typepop:not(.is-out)')) return null; // 닫힘을 재생하는 복사본은 열린 것이 아니다
   const el = document.activeElement;
-  if (!uiIsTextEntry(el) && !uiActQuiet) return 'all';
+  if (!uiIsTextEntry(el) && !uiActQuiet && !uiActInText) return 'all';
   if (uiGlideAdd && el && uiGlideAdd.el === el && uiGlideAdd.act === uiActSeq) return 'enter';
   return null;
 }
@@ -903,13 +907,36 @@ function uiGlideBoxes(list) {
     const shown = sized && box.bottom > 0 && box.top < viewH && box.right > 0 && box.left < viewW;
     if (shown) shownCount += 1;
     const key = uiGlideKey(row);
-    if (!boxes.has(key)) boxes.set(key, { row, left: box.left, top: box.top, width: box.width, height: box.height, shown, sized });
+    if (!boxes.has(key)) boxes.set(key, { row, left: box.left, top: box.top, width: box.width, height: box.height, shown, sized, pick: uiGlidePick(row) });
   });
   // 목록 자체가 보였나(숨은 탭·접힌 구역이면 상자가 없다) — 숨어 있던 목록이 처음 보일 때 줄이 전부 떠오르지 않게.
   const rects = typeof list.getClientRects === 'function' ? list.getClientRects() : null;
   const listShown = !rects || rects.length > 0;
   const height = typeof list.getBoundingClientRect === 'function' ? list.getBoundingClientRect().height : 0;
   return { boxes, shownCount, listShown, height };
+}
+// 고른 줄의 표시 — 상세가 열린 줄(is-sel)·여러 개 고른 줄(batch-selected)·고른 회의·프로젝트(aria-current).
+// 다시 그린 줄은 새 요소라 CSS 색 전환이 재생되지 않는다 — 옛 줄과 다르면 잇는다(uiGlideTint).
+const UI_GLIDE_PICKS = ['is-sel', 'batch-selected'];
+function uiGlidePick(row) {
+  const classes = UI_GLIDE_PICKS.map(name => !!(row.classList && row.classList.contains(name)));
+  const current = typeof row.getAttribute === 'function' ? row.getAttribute('aria-current') : null;
+  return { classes, current, same(other) { return !!other && other.current === current && other.classes.every((on, i) => on === classes[i]); } };
+}
+// 새 줄에 옛 표시를 잠깐 입혔다가(한꺼번에 입히고 화면 계산 한 번) 새 표시로 돌린다 — 그 사이를 줄의 색 전환(--t-tint)이 잇는다.
+function uiGlideTint(pairs) {
+  if (!pairs.length) return;
+  const back = pairs.map(([row, was]) => {
+    const now = uiGlidePick(row);
+    UI_GLIDE_PICKS.forEach((name, i) => row.classList.toggle(name, was.classes[i]));
+    if (was.current === null) row.removeAttribute('aria-current'); else row.setAttribute('aria-current', was.current);
+    return [row, now];
+  });
+  try { void pairs[0][0].getBoundingClientRect(); } catch { /* 재지 못하면 전환 없이 새 표시로 */ }
+  back.forEach(([row, now]) => {
+    UI_GLIDE_PICKS.forEach((name, i) => row.classList.toggle(name, now.classes[i]));
+    if (now.current === null) row.removeAttribute('aria-current'); else row.setAttribute('aria-current', now.current);
+  });
 }
 // wait: 앞에서 기다리는 시간(줄 긋기). 기다리는 동안 첫 장면에 머문다(fill backwards) — 그 밖에는 끝난 뒤 남는 값이 없다.
 function uiGlidePlay(row, frames, duration, wait = 0, done = null) {
@@ -970,9 +997,38 @@ function uiGlideOpen(list) {
 // 자리 재기가 어떻게 되든 그리기는 정확히 한 번 돈다 — 움직임은 덤이다.
 function uiRowsMove(list, render) {
   try { uiGlideOpen(list)?.drawn.add(list); } catch { /* 재지 못했으면 그냥 그린다 */ }
+  // 같은 틱에 한 번 더 그려도(저장 뒤 load와 부르는 쪽의 다시 그리기) 흐려지는 중인 그림자는 남긴다 — 시간으로 스스로 치워진다.
+  const ghosts = uiGlideGhostsIn(list);
   render();
+  ghosts.forEach((ghost) => { if (ghost.isConnected === false) list.appendChild(ghost); });
+}
+function uiGlideGhostsIn(list) {
+  try { return list && list.children ? [...list.children].filter(kid => String(kid.className || '').includes('d-glide-ghost')) : []; } catch { return []; }
+}
+// 그 자리에서 펼치고 접는 줄(회의 초안)처럼 부르는 쪽이 줄 몇 개만 갈아 끼우는 경우 — 재고, 바꾸고, 그 자리에서 바로 잇는다.
+// 펼침·접힘은 늘 내 동작(누름·Enter·Esc·바깥 누름)이 부르므로 0.5초 창은 보지 않는다. 자리는 바로 바뀌고 밀리는 줄만 미끄러진다
+// (높이는 움직이지 않는다). 재생·치우기는 줄 부품과 같다(uiGlidePlay). 움직임 줄이기·가려진 창·150줄 초과에서는 그냥 바꾼다.
+// bounce: 펼칠 때 밀리는 줄이 1.5px 넘쳤다 돌아온다(초안 펼침의 쫀득 — DESIGN.md 회의 정리 표).
+function uiRowsShift(root, rows, mutate, { duration = UI_GLIDE.move, bounce = false } = {}) {
+  let moving = [];
+  try {
+    if (root && root.querySelectorAll && uiFloatMotion() && !document.hidden) moving = [...root.querySelectorAll(rows)].filter(el => el.getBoundingClientRect && el.animate);
+    if (moving.length > UI_GLIDE.rows) moving = [];
+  } catch { moving = []; }
+  const before = new Map(moving.map(el => [el, el.getBoundingClientRect().top]));
+  mutate();
+  before.forEach((top, el) => {
+    if (!el.isConnected) return;
+    const delta = top - el.getBoundingClientRect().top;
+    if (Math.abs(delta) < 0.5) return;
+    uiGlidePlay(el, bounce
+      ? [{ transform: `translateY(${delta}px)` }, { transform: `translateY(${-Math.sign(delta) * 1.5}px)`, offset: 0.6 }, { transform: 'none' }]
+      : [{ transform: `translateY(${delta}px)` }, { transform: 'none' }], duration);
+  });
 }
 function uiGlideJoin(shot) {
+  // 그리기가 글자 칸을 열고 초점을 보냈으면(문장 고치기·`한 줄 추가`·이름 바꾸기) 글자 입력의 시작이다 — 아무것도 걸지 않는다.
+  if (shot.mode === 'all' && uiIsTextEntry(document.activeElement)) return;
   const reduce = detailReduce(); // 움직임 줄이기: 이동·사라짐은 끄고 새 줄의 120ms 흐려짐만
   shot.groups.forEach((group) => {
     if (uiGlideTooMany(group)) return;
@@ -1010,12 +1066,14 @@ function uiGlideJoinGroup(shot, lists, reduce) {
   const tall = side => lists.reduce((sum, each) => sum + (each[side].height || 0), 0);
   if (tall('after') < tall('before') - 0.5) wait = 0;
   wait = Math.max(0, Math.round(wait));
+  const tints = [];
   lists.forEach(({ list, after }) => after.boxes.forEach((nowBox, key) => {
     const row = nowBox.row;
-    if (typeof row.animate !== 'function' || row.classList.contains('is-rise')) return;
+    if (typeof row.animate !== 'function' || row.classList.contains('is-rise') || row.classList.contains('is-new')) return;
     const was = uiGlideFind(lists, list, 'before', key);
+    if (was && shot.mode === 'all' && !reduce && was.pick && !was.pick.same(nowBox.pick) && typeof row.setAttribute === 'function') tints.push([row, was.pick]);
     if (!was) {
-      // 새로 생긴 줄 — 분류의 새 줄 솟음(is-rise)이 이미 걸렸으면 그것 하나만 움직인다(위에서 걸렀다).
+      // 새로 생긴 줄 — 분류의 새 줄 솟음(is-rise)·회의의 새 줄 떠오름(is-new)이 이미 걸렸으면 그것 하나만 움직인다(위에서 걸렀다).
       // 숨어 있던 목록(처음 연 탭)의 줄은 새 줄이 아니라 처음 그리기다.
       if (!nowBox.shown || !shot.drawn.has(list) || !shot.before.get(list).listShown) return;
       if (reduce) uiGlidePlay(row, [{ opacity: 0 }, { opacity: 1 }], UI_GLIDE.fade);
@@ -1032,6 +1090,7 @@ function uiGlideJoinGroup(shot, lists, reduce) {
     if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
     uiGlidePlay(row, [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], UI_GLIDE.move, wait);
   }));
+  uiGlideTint(tints);
   if (shot.mode !== 'all' || reduce) return;
   // 사라진 줄 — 옛 자리에 그림자 한 장을 띄워 흐린다(120ms). 체크해서 접힌 제목으로 들어간 줄은 그 제목 쪽으로 미끄러지며 흐려진다(200ms).
   lists.forEach(({ list, before }) => {
@@ -1065,7 +1124,7 @@ function uiGlideTarget(lists, list, into) {
 function uiGlideStrikeOn(row, elapsed, until) {
   if (!row.querySelectorAll) return;
   row.classList.add('is-completing');
-  row.querySelectorAll('.d-title').forEach((title) => { title.style.animationDelay = `${-Math.max(0, elapsed)}ms`; });
+  row.querySelectorAll(UI_GLIDE_STRIKE).forEach((title) => { title.style.animationDelay = `${-Math.max(0, elapsed)}ms`; });
   setTimeout(() => row.classList.remove('is-completing'), until + 80);
 }
 // 사라진 줄의 그림자 — 옛 줄을 복사해 목록 끝에 붙이고(누를 수 없고 읽히지 않으며 열쇠·id가 없다) 옛 자리에 놓았다가 재생 뒤 떼어 낸다.
@@ -1080,7 +1139,7 @@ function uiGlideGhostMake(old, strikeAt) {
   ghost.inert = true;
   ghost.setAttribute('aria-hidden', 'true');
   ghost.classList.add('d-glide-ghost');
-  if (strikeAt !== null) ghost.querySelectorAll('.d-title').forEach((title) => { title.style.animationDelay = `${-Math.max(0, strikeAt)}ms`; });
+  if (strikeAt !== null) ghost.querySelectorAll(UI_GLIDE_STRIKE).forEach((title) => { title.style.animationDelay = `${-Math.max(0, strikeAt)}ms`; });
   return ghost;
 }
 function uiGlideGhosts(list, specs, wait) {
@@ -2075,12 +2134,13 @@ function renderActiveTabLists() {
   // 프로젝트 탭의 빠른 추가·새 프로젝트 이름 같은 칸에서 치는 중이면 손을 뗀 뒤 그린다(uiRenderOrHold).
   if (activeTabKey === 'projects' && tabStale.projects) {
     // 미뤘다가 그릴 때 다른 탭으로 옮겨 가 있으면 그리지 않는다 — 탭을 다시 열 때 그린다(tabStale 그대로).
-    uiRenderOrHold('projects', document.getElementById('projectBody'), () => { if (activeTabKey !== 'projects') return; tabStale.projects = false; renderProjects(); });
+    // 미뤘다 푸는 그리기는 줄이 움직이지 않는다(uiGlideUnlessLate — 오늘 탭 세 목록과 같다).
+    uiRenderOrHold('projects', document.getElementById('projectBody'), uiGlideUnlessLate(() => { if (activeTabKey !== 'projects') return; tabStale.projects = false; renderProjects(); }));
   }
   // 회의 탭은 글을 쓰는 면이다 — 초안 문구·직접 담기 칸에 손이 가 있으면 다시 그리지 않는다
   // (적던 글과 초점이 날아가지 않게. 줄 옆 카드의 syncTaskDetail과 같은 장치다). 손을 떼면 그때 그린다.
   if (activeTabKey === 'meetings' && tabStale.meetings) {
-    uiRenderOrHold('meetings', document.getElementById('meetingBody'), () => { if (activeTabKey !== 'meetings') return; tabStale.meetings = false; renderMeetings(); });
+    uiRenderOrHold('meetings', document.getElementById('meetingBody'), uiGlideUnlessLate(() => { if (activeTabKey !== 'meetings') return; tabStale.meetings = false; renderMeetings(); }));
   }
   if (activeTabKey === 'records' && tabStale.records) {
     tabStale.records = false;
@@ -3219,7 +3279,7 @@ function taskCompletionCheckbox(item, card, done) {
     // 저장·되돌리기 쪽은 그대로다(클래스 하나만 붙인다. 움직임 줄이기에서는 ui.css가 끈다).
     if (!done) card.classList.add('is-completing');
     // 줄 긋기가 끝난 뒤 줄이 `완료 N` 제목으로 들어간다(다시 그리기의 줄 이동 도우미가 이 표시를 본다).
-    if (!done) uiGlideDoneMark(item.id, 'grp:완료', true);
+    if (!done) uiGlideDoneMark(item.id, (card.dataset && card.dataset.doneInto) || 'grp:완료', true);
     const mark = uiUndoMark();
     fadeOutAndRun(card, async () => { await toggleTask(item.id); if (!done) workflowOutcome(item, uiUndoOwn(mark)); }, done ? '미완료로 되돌렸어요' : null);
   });

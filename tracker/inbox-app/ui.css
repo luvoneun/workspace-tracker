@@ -1297,12 +1297,12 @@ body.batch-open .d-row.is-done { opacity: 0.6; }
    같은 긋기를 이어 그린다(animation-delay를 지난 시간만큼 당긴다) — 그동안 완료 줄의 취소선은 숨겨 두 줄이 겹치지 않게 한다. */
 .d-cb:checked, .d-wcb:checked { animation: d-pop-check var(--t-fast) var(--ease); }
 @keyframes d-pop-check { 0% { transform: scale(1); } 45% { transform: scale(1.18); } 100% { transform: scale(1); } }
-.d-row.is-completing .d-title {
+.d-row.is-completing .d-title, .d-mrow2.is-completing .ti, .d-prow2.is-completing .ti {
   background-image: linear-gradient(currentColor, currentColor);
   background-repeat: no-repeat; background-position: 0 58%; background-size: 0% 1px;
   animation: d-strike var(--t-move) var(--ease) forwards;
 }
-.d-row.is-done.is-completing .d-title { text-decoration-color: transparent; }
+.d-row.is-done.is-completing .d-title, .d-mrow2.is-done.is-completing .ti, .d-prow2.is-done.is-completing .ti { text-decoration-color: transparent; }
 @keyframes d-strike {
   0% { background-size: 0% 1px; }
   100% { background-size: 100% 1px; }
@@ -1310,7 +1310,7 @@ body.batch-open .d-row.is-done { opacity: 0.6; }
 /* 사라진 줄의 그림자 — 옛 자리에 한 장 떠서 흐려진다(줄 이동 도우미가 놓고 치운다). 목록 안에 붙지만 자리를 차지하지 않는다 */
 .d-glide-ghost { position: absolute; margin: 0; box-sizing: border-box; pointer-events: none; z-index: 1; }
 @media (prefers-reduced-motion: reduce) {
-  .d-cb:checked, .d-wcb:checked, .d-row.is-completing .d-title { animation: none; }
+  .d-cb:checked, .d-wcb:checked, .d-row.is-completing .d-title, .d-mrow2.is-completing .ti, .d-prow2.is-completing .ti { animation: none; }
   .d-lhd .sub .cnt { transition: none; }
   .d-lhd .sub .cnt b.tick { animation: none; }
 }

@@ -4086,10 +4086,12 @@ function settingsTrashWhen(value) {
 }
 
 // 목록에서 한 줄을 빼고 다시 그린다 — 되살리기·완전히 지우기가 같은 길을 쓴다.
+// 내 동작(되살리기·지우기) 뒤의 그리기라 줄 부품(uiRowsMove)을 거친다 — 뺀 줄은 그림자로 흐려지고 아래 줄이 올라온다.
+// 불러오기·탭 열기 뒤의 그리기(renderSettingsTrash 바로 부름)는 기다린 내용이라 움직이지 않는다.
 function settingsTrashDrop(id) {
   settingsTrash = (settingsTrash || []).filter(entry => entry.id !== id);
   settingsTrashLabel();
-  renderSettingsTrash();
+  uiRowsMove(document.getElementById('settingsTrashView'), renderSettingsTrash);
 }
 
 // `완전히 지우기`는 되돌릴 수 없으니 확인 줄을 한 번 세운다(창을 띄우지 않고 그 자리에서).
@@ -4124,6 +4126,7 @@ function settingsTrashConfirm(entry, acts) {
 function settingsTrashRow(entry) {
   const row = document.createElement('div');
   row.className = 'd-trow';
+  row.dataset.moveId = `tr:${entry.id}`; // 줄 이동 도우미의 열쇠(settingsTrashDrop)
 
   const main = document.createElement('div');
   main.className = 'tm';

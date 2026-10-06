@@ -596,7 +596,8 @@ async function reportChange(item, action, notice, options = {}) {
     const cached = weeklyReportsCache.find(entry => entry.weekKey === item.weekKey);
     if (cached) cached.draft = result.report;
   } finally { reportBusy = false; }
-  renderReportDraft(item);
+  // draw: false — 부르는 쪽이 곧바로 한 번 더 그린다(같은 틱에 두 번 그리면 첫 그리기의 줄 움직임이 지워진다).
+  if (options.draw !== false) renderReportDraft(item);
   reportSavedNotice(item, action, notice);
   // 업무를 만들거나 지웠으면(`+ 한 줄 추가`·그 되돌리기) 오늘·프로젝트 목록도 바로 보이게 목록을 다시 받는다.
   if (tasksChanged && typeof load === 'function') Promise.resolve(load()).catch(() => {});
@@ -1064,7 +1065,8 @@ function reportDocHead(item, host) {
       renderReportDraft(item);
       const input = document.getElementById('reportPlanInput');
       if (!input) return;
-      input.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      const still = typeof detailReduce === 'function' && detailReduce(); // 움직임 줄이기면 바로 간다
+      input.scrollIntoView({ block: 'center', behavior: still ? 'auto' : 'smooth' });
       input.focus();
     }, 'd-headnum'));
   }
@@ -1394,6 +1396,7 @@ function reportSentenceRow(item, row, context) {
   const chosen = tidy && reportTidy.ids.has(row.id);
   const line = reportNode('div', undefined, 'rp-s' + (parentRow ? ' is-sub' : '') + (out ? ' is-dim' : '') + (followed ? ' is-fol' : '')
     + (tidy ? ' is-tidy' : '') + (chosen ? ' is-selected' : ''));
+  line.dataset.moveId = `rp:${row.id}`; // 줄 이동 도우미의 열쇠(uiRowsMove)
   if (reportRowReview(item.draft, row)) line.dataset.review = 'true';
   // `확인 필요 ›`로 옮겨 온 줄 — 기존 선택 톤(--sel) 하나.
   const picked = reportReviewPick === row.id && reportMode === 'draft' && !tidy;
@@ -1556,6 +1559,7 @@ function reportColumnHead(item, key) {
   const names = reportColumnNames();
   const editKey = reportColumnEditKey(item.weekKey, key);
   const head = reportNode('h3', undefined, 'rp-h rp-col');
+  head.dataset.moveId = `grp:col:${key}`; // 줄 이동 도우미의 열쇠 — 칸 제목도 문장과 함께 미끄러진다
   if (reportEdits.has(editKey)) {
     head.appendChild(reportRenameBox(item, {
       editKey, label: '칸 이름', original: REPORT_COLUMN_DEFAULT[key], current: names[key], hint: '다음 주에도 이 이름으로 나와요',
@@ -1573,6 +1577,7 @@ function reportColumnHead(item, key) {
 // 손을 올렸을 때의 풍선만. 서버가 열쇠를 주지 않은 옛 응답이면 예전처럼 이름 글자만 선다.
 function reportGroupHead(item, group, name) {
   const head = reportNode('div', undefined, 'rp-pj');
+  head.dataset.moveId = `grp:done:${group.key || group.group || ''}`; // 줄 이동 도우미의 열쇠 — 소제목도 문장과 함께 미끄러진다
   const title = reportProjectTitle(item.draft, group, name);
   if (!group.key) { head.appendChild(reportNode('span', title.text, 'nm')); return head; }
   const editKey = reportNameEditKey(item.weekKey, REPORT_DONE_HEADING, group.key);
@@ -1778,9 +1783,9 @@ async function reportPlanCreateTask(text, group) {
 }
 
 // 한 줄을 할 일 칸에 적는다(서버 add — 보고에만, 업무는 만들지 않는다). 프로젝트 아래 줄이면 새로 생긴 줄에 질문을 단다.
-async function reportPlanAddOne(item, { text, group }) {
+async function reportPlanAddOne(item, { text, group }, draw = true) {
   const before = new Set(((item.draft && item.draft.rows) || []).map(row => row.id));
-  await reportChange(item, { action: 'add', text, group: group || undefined }, '할 일 칸에 적었어요');
+  await reportChange(item, { action: 'add', text, group: group || undefined }, '할 일 칸에 적었어요', { draw });
   if (!group) return;
   const made = ((item.draft && item.draft.rows) || []).find(row => !before.has(row.id) && row.heading === REPORT_PLAN_HEADING);
   if (made) { reportPlanAsk.set(made.id, { taskId: null, idle: false }); reportPlanAskIdle(made.id); }
@@ -1803,7 +1808,8 @@ async function reportPlanAddLines(item, lines, { key, group, focusId, taken = fa
   for (let index = 0; index < lines.length; index += 1) {
     const line = reportPlanSplitPrefix(lines[index], names, group);
     try {
-      await reportPlanAddOne(item, { text: line.text, group: line.group });
+      // 한 줄이면 아래 끝의 그리기 한 번으로 — 그 그리기에서 새 줄만 나타난다(빠른 추가 — uiGlideAddMark).
+      await reportPlanAddOne(item, { text: line.text, group: line.group }, lines.length > 1);
       refocus();
     } catch (error) {
       const rest = lines.slice(index).join('\n');
@@ -1864,6 +1870,7 @@ function reportPlanInput(item, { key, id, placeholder, label, groupOf }) {
     // 한글을 조합하는 중의 Enter는 글자를 확정하는 것이지 추가가 아니다.
     if (event.key !== 'Enter' || event.isComposing || event.shiftKey) return;
     event.preventDefault();
+    if (typeof uiGlideAddMark === 'function') uiGlideAddMark(el, event); // 빠른 추가 — 적은 뒤 다시 그리기에서 새 줄만 나타난다
     await submit();
   });
   // 한 줄 붙여넣기는 평소대로 — 줄바꿈이 있을 때만 가로채서 한 줄 = 한 문장으로 차례로 적는다.
@@ -1883,6 +1890,7 @@ function reportPlanInput(item, { key, id, placeholder, label, groupOf }) {
 // 입력줄 한 줄(`+` 아이콘 + 칸). `name`이 있으면 그 프로젝트의 `할 일 적기`, 없으면 맨 아래 `한 줄 적기`.
 function reportPlanAddRow(item, name, title) {
   const row = reportNode('div', undefined, 'rp-add' + (name ? ' is-group' : ''));
+  row.dataset.moveId = `add:${name || ''}`; // 줄 이동 도우미의 열쇠 — 입력줄도 문장과 함께 미끄러진다
   row.innerHTML = uiIcon('plus');
   const input = name
     ? reportPlanInput(item, { key: `plan-add:${name}`, id: `reportPlanAdd-${encodeURIComponent(name)}`, placeholder: '할 일 적기', label: `${title}에 할 일 적기`, groupOf: () => name })
@@ -1895,6 +1903,7 @@ function reportPlanAddRow(item, name, title) {
 // 할 일 칸 프로젝트 소제목 — 한 일 칸 소제목과 같은 표기(색 점 + 이름, 파일 표기 밑줄은 빈칸으로).
 function reportPlanProjectHead(name, source) {
   const head = reportNode('div', undefined, 'rp-pj');
+  head.dataset.moveId = `grp:plan:${source || name || ''}`; // 줄 이동 도우미의 열쇠
   if (source && typeof uiProjectDot === 'function') head.appendChild(uiProjectDot(reportProjectColorKey(source)));
   head.appendChild(reportNode('span', name, 'nm'));
   return head;
@@ -2237,9 +2246,18 @@ function reportSelectPreview() {
 
 // ---------- 문서 전체 ----------
 
+// 문서는 통째로 다시 그린다 — 줄 부품(uiRowsMove)으로 감싸 문장이 옛 자리에서 새 자리로 미끄러진다(빼기·모으기·팔로업·되돌리기).
+// 문장을 고치는 중(입력칸에 초점)·한글 조합 중·글자 칸의 Enter·Esc 뒤에는 도우미가 스스로 쉰다. 적던 글은 reportEdits가 지킨다(그대로).
+// 다른 주·다른 보기(보고 ↔ 전체 업무 기록)로 옮기면 다른 내용이다(화면 전환) — 재지 않고 그린다.
 function renderReportDraft(item) {
   const host = document.getElementById('weeklyReportDetail');
   if (!host) return;
+  const same = host.dataset.weekKey === item.weekKey && host.dataset.reportMode === reportMode;
+  if (same) uiRowsMove(host, () => renderReportDraftNow(item, host));
+  else renderReportDraftNow(item, host);
+  host.dataset.reportMode = reportMode;
+}
+function renderReportDraftNow(item, host) {
   if (reportRenderedWeek !== item.weekKey) {
     reportFoldOpen.clear();
     reportReviewPick = null;
