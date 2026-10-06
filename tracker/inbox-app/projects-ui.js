@@ -727,7 +727,7 @@ async function projectMergeFinish(result, body) {
     try {
       undone = await (await postJson('/api/project/merge-undo', { mergeId })).json();
     } catch (error) {
-      if (/되돌릴 기록이 없어요/.test(String(error && error.message))) showNotice('되돌릴 기록이 없어요', true);
+      wfUndoGone(entry, error);
       throw error;
     }
     entry.label = projectMergeBackLabel(from, undone.skipped);

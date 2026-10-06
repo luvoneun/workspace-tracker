@@ -76,17 +76,31 @@ function projectNewBlank() {
 // 보내는 이름의 규칙 — 밑줄은 공백, 연속 공백은 하나(서버 renameProject의 `to`·groupNameKey와 같은 꼴). 앱은 밑줄과
 // 공백을 같은 이름으로 읽으므로, 지라 에픽 제목·하위 제목·`지라 없이`의 그룹 이름에도 바뀐 값을 보낸다.
 const projectNewClean = value => String(value || '').replace(/_/g, ' ').trim().replace(/\s+/g, ' ');
-// 만들 이름이 이미 있는 프로젝트인지 — 공용 uiPickByName(서버 findProject와 같은 비교·차례: 직접 만든 이름 → 별칭 →
-// 지라 요약·`KEY · 요약`)으로 찾는다. 견주는 목록은 화면이 이미 가진 값뿐이다(내 목록에 없는 남의 에픽은 모른다).
+// 만들 이름이 이미 있는 프로젝트인지 — 공용 uiPickByName과 같은 비교(밑줄→공백·연속 공백·대소문자 무시)다. 다만
+// `새 에픽 만들기`·`지라 없이`는 **지라 쪽(별칭 → 요약·`KEY · 요약`)을 먼저** 본다 — 같은 이름의 직접 만든 그룹이 함께
+// 있어도 지라 짝이 있으면 막아야 한다(서버 findJiraProject와 같은 판단). 견주는 목록은 화면이 이미 가진 값뿐이다(내 목록에 없는 남의 에픽은 모른다).
 // `새 에픽 만들기`·`지라 없이`는 이름 칸, `있는 에픽에 붙이기`는 고른 에픽의 요약으로 견주고, 붙이기는 그 에픽 자신이
 // 지라 쪽 짝이라 직접 만든 프로젝트만 본다. → { kind: 'group'|'jira', key, name } 또는 null.
 function projectNewSame(state) {
   const name = state.mode === 'attach' ? projectNewClean(state.epic && state.epic.summary) : projectNewClean(state.name);
   if (!name) return null;
+  if (state.mode !== 'attach') {
+    const jira = projectNewJiraMatch(name);
+    if (jira) return { kind: 'jira', key: jira, name: uiGroupLabel(jira) };
+  }
   const key = uiPickByName(name);
-  if (key.startsWith('jira:')) return state.mode === 'attach' ? null : { kind: 'jira', key, name: uiGroupLabel(key) };
+  if (key.startsWith('jira:')) return null;
   const group = key.slice('group:'.length);
   return customGroupsCache.includes(group) ? { kind: 'group', key, name: group } : null;
+}
+// 지라 쪽만 보는 같은 이름 찾기 — uiPickByName의 지라 단계 그대로(별칭 → 요약·`KEY · 요약`).
+function projectNewJiraMatch(name) {
+  const keyOf = wfGroupNameKey;
+  const wanted = keyOf(name);
+  const alias = Object.entries(projectAliasesCache || {}).find(([, value]) => keyOf(value) === wanted);
+  if (alias) return `jira:${alias[0]}`;
+  const issue = jiraIssuesCache.find(entry => keyOf(entry.summary) === wanted || keyOf(`${entry.key} · ${entry.summary}`) === wanted);
+  return issue ? `jira:${issue.key}` : null;
 }
 // 지라와 같은 이름이면 만들지 않는다 — 지라에 만드는 일은 되돌릴 수 없고, 앱은 같은 이름을 한 프로젝트로 읽는다.
 const projectNewJiraSame = state => state.mode !== 'attach' && projectNewSame(state)?.kind === 'jira';

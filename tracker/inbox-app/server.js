@@ -1527,6 +1527,12 @@ function findProject(name) {
   const wanted = groupNameKey(name);
   const group = getCustomGroups().find(entry => groupNameKey(entry) === wanted);
   if (group) return `group:${String(group).replace(/_/g, ' ').trim()}`;
+  return findJiraProject(name);
+}
+// 지라 쪽(별칭 → 요약·`KEY · 요약`)만 보는 같은 비교 — 직접 만든 그룹이 같은 이름으로 함께 있어도 지라 짝을 놓치지 않는다.
+// 새 에픽 만들기의 같은 이름 막기가 쓴다(그룹이 먼저 잡히면 지라에 같은 이름 에픽이 또 생긴다 — 되돌릴 수 없다).
+function findJiraProject(name) {
+  const wanted = groupNameKey(name);
   const alias = Object.entries(getProjectAliases()).find(([, value]) => groupNameKey(value) === wanted);
   if (alias) return `jira:${alias[0]}`;
   const issue = getJiraIssueCache().find(entry => groupNameKey(entry.summary) === wanted || groupNameKey(`${entry.key} · ${entry.summary}`) === wanted);
@@ -1819,7 +1825,7 @@ function mergeProject({ project, to }) {
   if (meetingLinks.length) fs.writeFileSync(MEETING_LINKS_PATH, JSON.stringify(links, null, 2));
 
   // ⑥ 주간요약 저장본 — 합치기만.
-  const report = target === null ? { ids: [], names: [] } : reportDrafts.mergeGroup(from, target);
+  const report = target === null ? { ids: [], rows: [], names: [] } : reportDrafts.mergeGroup(from, target);
 
   const mergeId = `mg_${ulid()}`;
   const itemCount = new Set(items.map(entry => entry.id)).size;
@@ -1827,7 +1833,8 @@ function mergeProject({ project, to }) {
   workflows.recordProjectMerge({
     id: mergeId, from, to: target, at: new Date().toISOString(),
     items, meetings: merged.meetings, link: merged.link, archive: merged.archive,
-    meetingLinks, reportRows: report.ids, reportNames: report.names,
+    // reportRows: 행마다 바꾼 칸(report-drafts.mergeGroup) — 되돌리기가 그 칸만 돌린다.
+    meetingLinks, reportRows: report.rows, reportNames: report.names,
     counts: { items: itemCount, meetings: meetingCount, report: report.ids.length },
   });
 
@@ -3002,7 +3009,7 @@ const routeCtx = {
   USES, CALENDAR_ICAL, CONFIG_PATH, LOCAL_DIR, PUBLIC_DIR,
   readBody, idempotent, integrations, personalize, workflows,
   // 지라
-  jira, jiraLive, attentionLive, JIRA_DONE_DAYS, JIRA_DONE_MAX_DAYS, PROJECT_MOVE_KEY_RE, projectDisplayName, moveProject, findProject,
+  jira, jiraLive, attentionLive, JIRA_DONE_DAYS, JIRA_DONE_MAX_DAYS, PROJECT_MOVE_KEY_RE, projectDisplayName, moveProject, findJiraProject,
   // 앱 정보·업데이트
   aboutApp, aboutDiagnostics, requestUpdate, updateStatusView, UPDATE_MESSAGE, selfcheck,
   // 연동·자동화·백업·미팅 노트

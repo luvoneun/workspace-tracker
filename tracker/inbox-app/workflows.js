@@ -200,7 +200,7 @@ async function wfProjectMoveFinish(result, { verb = '옮겼어요' } = {}) {
     try {
       undone = await (await postJson('/api/project/move-undo', { moveId })).json();
     } catch (error) {
-      if (/되돌릴 기록이 없어요/.test(String(error && error.message))) showNotice('되돌릴 기록이 없어요', true);
+      wfUndoGone(entry, error);
       throw error;
     }
     const skipped = undone.skipped ? ` · 그 사이 바뀐 ${undone.skipped}개는 그대로 두었어요` : '';
@@ -221,6 +221,14 @@ async function wfProjectMoveFinish(result, { verb = '옮겼어요' } = {}) {
     openProjectTab(`group:${from}`);
     showNotice(entry.back);
   }));
+}
+// 서버가 `되돌릴 기록이 없어요`라고 하면(다른 창에서 이미 되돌림·기록 20개 넘김) 그 문구를 알리고 ⌘Z 기록에서 버린다 —
+// 남겨 두면 다음 ⌘Z가 같은 말만 되풀이하고 더 오래된 작업으로 가지 못한다. replayUndo(정의 그대로)는 실패한 기록을
+// 쌓임에 다시 넣으므로, 그 다음 차례(setTimeout 0)에 빼낸다.
+function wfUndoGone(entry, error) {
+  if (!/되돌릴 기록이 없어요/.test(String(error && error.message))) return;
+  showNotice('되돌릴 기록이 없어요', true);
+  setTimeout(() => { const at = undoStack.lastIndexOf(entry); if (at >= 0) undoStack.splice(at, 1); }, 0);
 }
 // ⌘Z로 되돌릴 때 다시 그릴 프로젝트를 정해 둔다(replayUndo가 곧 목록을 다시 받는다) — 탭은 옮기지 않는다.
 function wfProjectKeep(key) {

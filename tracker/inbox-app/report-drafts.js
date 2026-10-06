@@ -895,57 +895,60 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
   }
   // 직접 만든 프로젝트 A를 B로 합칠 때 — renameGroup과 같은 세 자리(group·bucket 앞머리·evidence[].label)를 모든 주에서
   // B로 바꾼다(확정한 주·지난 주 포함). 같은 주에 B 소제목이 이미 있으면 한 소제목 아래 두 무리가 된다. 사람이 고친
-  // 소제목 이름은 moveNames 규칙 그대로 B에 이미 있으면 B 것을 남긴다. 되돌리기(mergeGroupUndo)가 자기가 바꾼 것만
-  // 되돌리게 **바뀐 행 id**와 옮긴 이름 열쇠를 돌려준다. 부르는 쪽(server.js mergeProject)의 트랜잭션 안에서 돈다.
+  // 소제목 이름은 moveNames 규칙 그대로 B에 이미 있으면 B 것을 남긴다. 되돌리기(mergeGroupUndo)가 **자기가 바꾼 칸만**
+  // 되돌리게 행마다 바꾼 칸을 기록해 돌려준다: `{ id, group?, bucket?, labels?: [근거 차례], parts?: [[차례, 같은 꼴]] }`
+  // (한 문장에 A·B 근거가 섞여 있어도 원래 B였던 칸은 건드리지 않는다). 부르는 쪽(server.js mergeProject)의 트랜잭션 안에서 돈다.
   function mergeGroup(from, to) {
     const state = read();
     const head = `group:${from}:`;
-    const ids = [];
     const fix = (row) => {
-      if (!row || typeof row !== 'object') return false;
-      let touched = false;
-      if (row.group === from) { row.group = to; touched = true; }
-      if (typeof row.bucket === 'string' && row.bucket.startsWith(head)) { row.bucket = `group:${to}:${row.bucket.slice(head.length)}`; touched = true; }
-      (Array.isArray(row.evidence) ? row.evidence : []).forEach((item) => {
-        if (item && item.label === from) { item.label = to; touched = true; }
-      });
-      const childTouched = (Array.isArray(row.parts) ? row.parts : []).map(fix).some(Boolean);
-      return touched || childTouched;
+      if (!row || typeof row !== 'object') return null;
+      const mark = {};
+      if (row.group === from) { row.group = to; mark.group = 1; }
+      if (typeof row.bucket === 'string' && row.bucket.startsWith(head)) { row.bucket = `group:${to}:${row.bucket.slice(head.length)}`; mark.bucket = 1; }
+      const labels = [];
+      (Array.isArray(row.evidence) ? row.evidence : []).forEach((item, at) => { if (item && item.label === from) { item.label = to; labels.push(at); } });
+      if (labels.length) mark.labels = labels;
+      const parts = [];
+      (Array.isArray(row.parts) ? row.parts : []).forEach((part, at) => { const one = fix(part); if (one) parts.push([at, one]); });
+      if (parts.length) mark.parts = parts;
+      return Object.keys(mark).length ? mark : null;
     };
+    const rows = [];
     for (const week of Object.values(state.weeks || {})) {
-      (week?.rows || []).forEach((row) => { if (fix(row)) ids.push(row.id); });
+      (week?.rows || []).forEach((row) => { const mark = fix(row); if (mark) rows.push({ id: row.id, ...mark }); });
     }
     const names = [...moveNames(state, `group:${from}`, `group:${to}`), ...moveNames(state, `name:${from}`, `name:${to}`)];
-    if (ids.length || names.length) atomicWrite(filename, JSON.stringify(state, null, 2));
-    return { ids, names };
+    if (rows.length || names.length) atomicWrite(filename, JSON.stringify(state, null, 2));
+    return { ids: rows.map(row => row.id), rows, names };
   }
-  // mergeGroup의 반대 방향 — **기록에 있는 행 id들만**, B를 가리키는 자리만 A로 돌린다(id가 없어졌거나 그 사이
-  // 다른 프로젝트로 옮겨 B 자리가 하나도 없으면 건너뛴다). 소제목 이름은 기록한 열쇠만 돌린다.
-  function mergeGroupUndo(ids, from, to, movedNames) {
+  // mergeGroup의 반대 방향 — 기록한 행의 **기록한 칸만**, 지금도 B일 때만 A로 돌린다(id가 없어졌거나 그 사이 다른 곳으로
+  // 옮겨 돌릴 칸이 하나도 없으면 건너뛴다). 소제목 이름은 기록한 열쇠만 돌린다.
+  function mergeGroupUndo(marks, from, to, movedNames) {
     const state = read();
-    const set = new Set(Array.isArray(ids) ? ids : []);
+    const byId = new Map((Array.isArray(marks) ? marks : []).filter(mark => mark && typeof mark.id === 'string').map(mark => [mark.id, mark]));
     const head = `group:${to}:`;
     let restored = 0;
-    const fix = (row) => {
-      if (!row || typeof row !== 'object') return false;
+    const back = (row, mark) => {
+      if (!row || typeof row !== 'object' || !mark) return false;
       let touched = false;
-      if (row.group === to) { row.group = from; touched = true; }
-      if (typeof row.bucket === 'string' && row.bucket.startsWith(head)) { row.bucket = `group:${from}:${row.bucket.slice(head.length)}`; touched = true; }
-      (Array.isArray(row.evidence) ? row.evidence : []).forEach((item) => {
+      if (mark.group && row.group === to) { row.group = from; touched = true; }
+      if (mark.bucket && typeof row.bucket === 'string' && row.bucket.startsWith(head)) { row.bucket = `group:${from}:${row.bucket.slice(head.length)}`; touched = true; }
+      (Array.isArray(mark.labels) ? mark.labels : []).forEach((at) => {
+        const item = Array.isArray(row.evidence) ? row.evidence[at] : null;
         if (item && item.label === to) { item.label = from; touched = true; }
       });
-      const childTouched = (Array.isArray(row.parts) ? row.parts : []).map(fix).some(Boolean);
-      return touched || childTouched;
+      (Array.isArray(mark.parts) ? mark.parts : []).forEach(([at, one]) => { if (back(Array.isArray(row.parts) ? row.parts[at] : null, one)) touched = true; });
+      return touched;
     };
     for (const week of Object.values(state.weeks || {})) {
       for (const row of (week?.rows || [])) {
-        if (!set.has(row.id)) continue;
-        if (fix(row)) restored += 1;
+        if (byId.has(row.id) && back(row, byId.get(row.id))) restored += 1;
       }
     }
     const names = restoreNames(state, movedNames);
     if (restored || names) atomicWrite(filename, JSON.stringify(state, null, 2));
-    return { restored, skipped: set.size - restored };
+    return { restored, skipped: byId.size - restored };
   }
   // read는 한 번 읽은 보고 기록을 weeks·view에 함께 넘겨 주 수만큼 다시 읽지 않게 하려고 내보낸다.
   return {view,change,weeks,read,renameGroup,relabelProject,moveGroup,moveGroupUndo,mergeGroup,mergeGroupUndo};
