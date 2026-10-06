@@ -17337,44 +17337,118 @@ test('줄 이동 C2 화면 전환: 다른 회의·프로젝트·주를 고르면
   assert.equal(r.plays.length, 0, '보고 ↔ 전체 업무 기록');
 });
 
-test('줄 이동 C2 고른 줄 배경: 다시 그린 줄의 고른 표시(is-sel·batch-selected·aria-current)가 옛 줄과 다르면 옛 표시를 잠깐 입혔다 새 표시로 돌린다 — 색 전환이 잇는다', async () => {
+test('줄 이동 C2 고른 줄 배경: 다시 그린 줄의 고른 표시(is-sel·batch-selected·aria-current)가 옛 줄과 다르면 옛 줄의 배경색(그리기 전에 읽음)에서 새 배경색으로 170ms 잇는다', async () => {
   const app = meetingsViewClient();
   const fx = glideApp(app);
-  const list = fx.deep(app.run(`document.getElementById('meetingList')`));
-  // 줄의 aria-current를 실제처럼 기억하고, 바뀐 차례를 모은다.
-  const log = [];
+  const list = fx.deep(app.run("document.getElementById('meetingList')"));
+  // 줄의 aria-current를 실제처럼 기억하고, 배경색은 그 값으로 정한다(가짜 getComputedStyle).
   const make = app.run('document.createElement');
   app.context.document.createElement = (tag) => {
     const el = make(tag);
     const attrs = new Map();
-    el.setAttribute = (name, value) => { attrs.set(name, String(value)); if (name === 'aria-current') log.push([el, String(value)]); };
+    el.setAttribute = (name, value) => { attrs.set(name, String(value)); };
     el.getAttribute = name => (attrs.has(name) ? attrs.get(name) : null);
-    el.removeAttribute = (name) => { attrs.delete(name); if (name === 'aria-current') log.push([el, null]); };
+    el.removeAttribute = (name) => { attrs.delete(name); };
     return el;
   };
+  app.context.getComputedStyle = el => ({ backgroundColor: el.getAttribute && el.getAttribute('aria-current') === 'true' ? 'rgb(0, 0, 255)' : 'rgb(255, 255, 255)' });
   app.run('renderMeetings()');
   await settle();
   fx.act();
-  log.length = 0;
   app.run("meetingsTabSelect('pay1'); renderMeetings();");
   await settle();
-  const row = id => list.querySelectorAll().find(each => each.dataset.moveId === `mtg:${id}`);
-  const steps = el => log.filter(([who]) => who === el).map(([, value]) => value);
-  assert.deepEqual(steps(row('pay1')).slice(-3), ['true', 'false', 'true'], '새로 고른 줄: 그리기(true) → 옛 표시(false) → 새 표시(true)');
-  assert.deepEqual(steps(row('ops1')).slice(-3), ['false', 'true', 'false'], '전에 고른 줄은 거꾸로');
-  assert.equal(row('pay1').getAttribute('aria-current'), 'true', '끝은 새 표시');
-  // 표시가 같은 줄은 건드리지 않는다. 움직임 줄이기에서는 하지 않는다.
-  assert.deepEqual(steps(row('free1')), ['false']);
-  log.length = 0;
+  const tint = id => fx.plays.filter(play => play.id === `mtg:${id}` && play.frames[0].backgroundColor);
+  assert.deepEqual(plain(tint('pay1').map(play => [play.frames, play.options.duration])), [[[{ backgroundColor: 'rgb(255, 255, 255)' }, { backgroundColor: 'rgb(0, 0, 255)' }], 170]], '새로 고른 줄: 옛 배경 → 새 배경');
+  assert.deepEqual(plain(tint('ops1').map(play => play.frames)), [[{ backgroundColor: 'rgb(0, 0, 255)' }, { backgroundColor: 'rgb(255, 255, 255)' }]], '전에 고른 줄은 거꾸로');
+  assert.equal(tint('free1').length, 0, '표시가 같은 줄은 건드리지 않는다');
+  assert.equal(app.run('UI_GLIDE.tint'), 170, '--t-tint와 같은 값');
+  // 움직임 줄이기·자동 갱신에서는 하지 않는다.
+  fx.plays.length = 0;
   app.run("window.matchMedia = () => ({ matches: true })");
   fx.act();
   app.run("meetingsTabSelect('ops1'); renderMeetings();");
   await settle();
-  assert.deepEqual(steps(row('ops1')), ['true']);
-  // 원문: 고른 표시 셋, 한꺼번에 입히고 화면 계산은 한 번.
-  assert.match(script, /const UI_GLIDE_PICKS = \['is-sel', 'batch-selected'\];/);
-  const tint = script.slice(script.indexOf('function uiGlideTint('), script.indexOf('\n}\n', script.indexOf('function uiGlideTint(')));
-  assert.equal((tint.match(/getBoundingClientRect/g) || []).length, 1);
+  assert.equal(fx.plays.filter(play => play.frames[0].backgroundColor).length, 0);
+  // 클래스를 입혔다 돌리는 길은 없다(재는 동안 새 표시가 계산돼 전환이 바로 되돌아갔다).
+  assert.doesNotMatch(script, /classList\.toggle\(name, was\.classes/);
+});
+
+test('줄 이동 C2 화면 전환(그린 뒤에 앎): 그리는 안에서 고른 회의·프로젝트가 바뀌면(보던 것이 걸러지거나 사라짐) 오른쪽 잰 것을 버린다 — 오른쪽 움직임 0', async () => {
+  const meet = meetingsViewClient();
+  const m = glideApp(meet);
+  const mbody = m.deep(meet.run("document.getElementById('meetingBody')"));
+  meet.run('renderMeetings()');
+  await settle();
+  assert.equal(meet.run("document.getElementById('meetingBody').dataset.meetingFor"), 'ops1');
+  // 같은 회의일 때는 오른쪽도 움직인다(대조).
+  m.act();
+  meet.run("workflowData.items = workflowData.items.filter(item => item.id !== 't1'); wfIndexData(); renderMeetings();");
+  await settle();
+  assert.ok(m.plays.length > 0, '같은 회의면 오른쪽이 움직인다');
+  m.plays.length = 0;
+  // 보던 회의(ops1)가 거르기 칩으로 빠진다 — 그리기 전 키는 그대로라 오른쪽을 쟀지만, 그린 뒤 다른 회의임을 알고 버린다.
+  m.act();
+  meet.run("meetingsTabState.reviewOnly = false; workflowData.meetings = workflowData.meetings.filter(event => event.id !== 'ops1'); wfIndexData(); renderMeetings();");
+  await settle();
+  assert.notEqual(meet.run("document.getElementById('meetingBody').dataset.meetingFor"), 'ops1');
+  const bodyKeys = new Set(m.keys(mbody));
+  assert.equal(m.plays.filter(play => bodyKeys.has(play.id) || play.id === undefined).length, 0, '오른쪽은 움직이지 않는다(옛 줄 그림자·새 줄 떠오름 없음)');
+  assert.equal(meet.run('uiGlideShot'), null);
+  // 프로젝트 — 보던 프로젝트의 업무가 모두 사라져 다른 프로젝트로 넘어간다.
+  const proj = c2ProjectClient();
+  const p = glideApp(proj);
+  const pbody = p.deep(proj.run("document.getElementById('projectBody')"));
+  proj.run('renderProjects()');
+  await settle();
+  p.act();
+  proj.run("workflowData.items = __projectItems.filter(item => item.group !== '가입 개선'); wfIndexData(); renderProjects();");
+  await settle();
+  assert.notEqual(proj.run("document.getElementById('projectBody').dataset.projectFor"), 'group:가입 개선');
+  const pkeys = new Set(p.keys(pbody));
+  assert.equal(p.plays.filter(play => pkeys.has(play.id)).length, 0);
+});
+
+test('줄 이동 C2: 회의 탭은 저장 뒤 load()가 이미 그렸으면 다시 그리지 않는다(meetingLoadRedraw) — 첫 그리기의 새 줄 떠오름이 지워지지 않는다', async () => {
+  const sources = fs.readFileSync(path.join(__dirname, 'meetings-ui.js'), 'utf8');
+  assert.doesNotMatch(sources, /await load\(\);\n\s*host\.redraw\(\);/, '`await load(); host.redraw()` 두 번 그리기가 남지 않았다');
+  assert.equal((sources.match(/await meetingLoadRedraw\(host\);/g) || []).length, 5);
+  const app = meetingsViewClient();
+  const fx = glideApp(app);
+  fx.deep(app.run("document.getElementById('meetingBody')"));
+  app.run("activeTabKey = 'meetings'; renderMeetings();");
+  await settle();
+  // `N개 담기`처럼: 저장 뒤 load()가 새 줄을 받아 회의 탭을 그린다 — 그 그리기의 새 줄 떠오름이 끝까지 남는다.
+  app.run(`redraws = 0; MEETING_HOST_TAB.redraw = () => { redraws += 1; renderMeetings(); };
+    load = async () => { workflowData.items.push({ id: 'n1', type: 'task', status: 'to-do', description: '새로 담은 일', meetingId: 'ops1' }); wfIndexData(); renderMeetings(); };`);
+  fx.act();
+  await app.run('meetingLoadRedraw(MEETING_HOST_TAB)');
+  await settle();
+  assert.equal(app.run('redraws'), 0, 'load가 그렸으니 다시 그리지 않는다');
+  assert.ok(fx.plays.some(play => play.id === 'n1' && play.frames[0].opacity === 0), '새 줄이 떠오른다');
+  // load가 그리지 못했으면(입력 중이라 미룸) 예전처럼 다시 그린다. 줄 옆 카드는 늘 다시 그린다.
+  app.run('load = async () => {}');
+  await app.run('meetingLoadRedraw(MEETING_HOST_TAB)');
+  assert.equal(app.run('redraws'), 1);
+  app.run('cardRedraws = 0; __card = { kind: "card", redraw: () => { cardRedraws += 1; } }; load = async () => { renderMeetings(); };');
+  await app.run('meetingLoadRedraw(__card)');
+  assert.equal(app.run('cardRedraws'), 1);
+});
+
+test('줄 이동 C2 그림자: 등장 클래스(is-new·is-opening·is-rise)는 그림자로 옮기지 않는다 — 펼친 초안에서 바로 `빼기`해도 그림자에서 등장이 다시 돌지 않는다', () => {
+  const app = pureClient();
+  const kid = (classes) => {
+    const set = new Set(classes);
+    const attrs = new Map([['id', 'x'], ['data-task-id', 'a']]);
+    return { set, style: {}, classList: { add: name => set.add(name), remove: (...names) => names.forEach(name => set.delete(name)) },
+      get attributes() { return [...attrs.keys()].map(name => ({ name })); }, removeAttribute: name => attrs.delete(name), setAttribute: (name, value) => attrs.set(name, value) };
+  };
+  const inner = kid(['ti', 'is-new']);
+  const ghost = Object.assign(kid(['d-mrow2', 'd-draft', 'is-edit', 'is-opening', 'is-rise']), { querySelectorAll: () => [inner] });
+  app.context.__old = { isConnected: false, cloneNode: () => ghost };
+  app.run('uiGlideGhostMake(__old, null)');
+  assert.deepEqual([...ghost.set], ['d-mrow2', 'd-draft', 'is-edit', 'd-glide-ghost']);
+  assert.deepEqual([...inner.set], ['ti']);
+  assert.deepEqual(plain(app.run('UI_GLIDE_ENTRANCE')), ['is-new', 'is-opening', 'is-rise']);
 });
 
 test('줄 이동 C2: 회의 초안 펼침의 따로 만든 도우미(meetingFlip)는 줄 부품의 바로 잇기(uiRowsShift)로 합쳤다 — 값은 그대로(펼침 220ms 1.5px 넘침 · 접힘 130ms)', () => {
@@ -17464,7 +17538,26 @@ test('줄 이동 목록 등록: index.html의 목록(id가 …List)은 모두 �
   rows.forEach(({ 목록: list, '그리는 함수': fn, 열쇠: key, 상태: state }) => {
     assert.ok(state, `${list}: 상태 빈칸`);
     if (state === '줄 부품') {
-      (fn.match(/`([A-Za-z]+)`/g) || []).concat(['']).filter(Boolean).map(each => each.replace(/`/g, '')).forEach(name => assert.match(body(name), /uiRowsMove\(/, `${list}: ${name}이 줄 부품을 거친다`));
+      const names = (fn.match(/`([A-Za-z]+)`/g) || []).map(each => each.replace(/`/g, ''));
+      names.forEach(name => assert.match(body(name), /uiRowsMove\(/, `${list}: ${name}이 줄 부품을 거친다`));
+      // 그 목록 자체가 줄 부품에 넘어가는가(C2 검수 — 다른 자리만 감싸도 통과하던 구멍): uiRowsMove의 첫 인자가 그 id로 잡은 자리여야 한다.
+      const id = list.replace(/`/g, '');
+      const reaches = name => {
+        const code = body(name);
+        const args = [...code.matchAll(/uiRowsMove\(([^,]+),/g)].map(m => m[1].trim());
+        return args.some((arg) => {
+          if (arg === `document.getElementById('${id}')`) return true;
+          if (!/^\w+$/.test(arg)) return false;
+          if (new RegExp(`\\b${arg} = document\\.getElementById\\('${id}'\\)`).test(code)) return true;
+          // 인자로 받은 목록 — 부르는 곳이 그 id로 잡아 넘긴다(renderRecordColumn)
+          const params = ((code.match(/function \w+\(([^)]*)\)/) || [])[1] || '').split(',').map(each => each.split('=')[0].trim());
+          if (params[0] === arg && new RegExp(`${name}\\(document\\.getElementById\\('${id}'\\)`).test(sources)) return true;
+          // 다른 곳에 잡아 둔 자리(wrapNodes.body ← 여는 함수의 getElementById)
+          const held = code.match(new RegExp(`\\b${arg} = \\w+\\.(\\w+);`));
+          return !!held && new RegExp(`const ${held[1]} = document\\.getElementById\\('${id}'\\)`).test(sources);
+        });
+      };
+      assert.ok(names.some(reaches), `${list}: ${names.join('·')}이 이 목록(${id})을 uiRowsMove에 넘긴다`);
       assert.ok(key && key !== '—', `${list}: 열쇠`);
     } else {
       assert.match(state, /^안 움직임\(.+\)$/, `${list}: 상태는 줄 부품 · 안 움직임(이유) 가운데 하나(C2로 남은 목록은 없다)`);

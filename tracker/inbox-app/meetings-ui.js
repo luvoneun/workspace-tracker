@@ -223,8 +223,7 @@ function panelMeetingResult(event, box, host = MEETING_HOST_CARD) {
     // 되돌린 초안은 검토 대기로 돌아온다 — 사람이 고쳐 둔 문구·종류·날짜는 그대로 살려 둔다.
     result.accepted.forEach(item => wfDraftEdits.set(item.id, { type: item.type, description: item.description, when: item.when || 'later', due: item.due || '' }));
     host.setResult(null);
-    await load();
-    host.redraw();
+    await meetingLoadRedraw(host);
     announce('담은 것을 되돌렸어요');
   }, 'd-btn sm', host));
   card.appendChild(head);
@@ -278,8 +277,7 @@ async function panelPromoteTasks(result, ids, host = MEETING_HOST_CARD) {
     await request('/api/track/set-scheduled', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: itemId, scheduled: todayStr() }), quiet: true });
     (result.promoted ||= []).push(itemId);
   }
-  await load();
-  host.redraw();
+  await meetingLoadRedraw(host);
 }
 
 // 초안을 펼치거나 접을 때 밀리는 줄·구역 머리 — 줄 부품의 바로 잇기(app.js uiRowsShift)로 미끄러진다.
@@ -472,8 +470,7 @@ function panelMeetingDrafts(event, box, host = MEETING_HOST_CARD) {
     host.setResult({ meetingId: event.id, created: result.created, accepted: accept });
     accept.forEach(item => wfDraftEdits.delete(item.id));
     meetingDraftOpenId = null;
-    await load();
-    host.redraw(); // 결과 카드(role=status)가 담은 결과를 알려 주므로 따로 알림을 띄우지 않는다
+    await meetingLoadRedraw(host); // 결과 카드(role=status)가 담은 결과를 알려 주므로 따로 알림을 띄우지 않는다
   }, 'd-btn sm acc'));
 
   event.drafts.forEach(draft => list.appendChild(redraw(draft)));
@@ -514,8 +511,7 @@ async function meetingDraftDismiss(event, draft, edit, index, host = MEETING_HOS
     redo: send,
   };
   pushUndo(entry);
-  await load();
-  host.redraw();
+  await meetingLoadRedraw(host);
   // 빠진 자리 다음 초안(없으면 앞 초안)의 `빼기`로 초점을 옮긴다 — 누른 버튼이 사라져 초점을 잃지 않게.
   // 문구 칸이 아니라 버튼인 까닭: 입력칸에 초점이 있으면 되살린 뒤 판을 다시 그리지 않는다(쓰던 글 보호 장치).
   const left = host.box()?.querySelectorAll('.d-draft .d-dpull') || [];
@@ -1512,8 +1508,7 @@ function panelMeetingLink(event, box, host = MEETING_HOST_CARD) {
   row.append(slot, panelRunButton('회의에 연결', async () => {
     if (!chosen) return;
     await wfPost('link', { id: chosen, meetingId: event.id });
-    await load();
-    host.redraw();
+    await meetingLoadRedraw(host);
   }, 'd-btn', host));
   section.appendChild(row);
   box.appendChild(section);
@@ -1690,6 +1685,16 @@ function openMeetingsTab(id) {
   setActiveTab('meetings');
 }
 
+// 저장 뒤 다시 그리기 — 회의 탭은 load()가 이미 그렸으면(입력 중이라 미루지 않았으면) 다시 그리지 않는다.
+// 같은 틱에 두 번 그리면 첫 그리기의 줄 움직임(새 줄 떠오름·완료 긋기 기다림)이 둘째 그리기에 지워진다(보고의 draw: false와 같은 까닭).
+let meetingsDrawSeq = 0; // renderMeetingsNow마다 하나씩 는다
+async function meetingLoadRedraw(host) {
+  const seen = meetingsDrawSeq;
+  await load();
+  if (host.kind === 'tab' && meetingsDrawSeq !== seen) return;
+  host.redraw();
+}
+
 // 왼쪽 목록과 오른쪽 회의 정리를 줄 부품(uiRowsMove)으로 감싸 그린다 — 오른쪽은 카드를 통째로 새로 만들므로
 // 늘 있는 자리(meetingBody)를 목록으로 잰다. 두 자리는 옆으로 놓여 서로 밀지 않아 무리로 묶지 않는다.
 // 다른 회의를 고르면 오른쪽은 다른 내용이다(화면 전환) — 옛 줄이 흐려지고 새 줄이 떠오르지 않게 오른쪽은 재지 않고 그린다.
@@ -1697,11 +1702,14 @@ function renderMeetings() {
   const listEl = document.getElementById('meetingList');
   const body = document.getElementById('meetingBody');
   if (!listEl || !body) return;
+  const was = body.dataset.meetingFor;
   const draw = () => renderMeetingsNow(listEl, body);
-  const same = body.dataset.meetingFor === String(meetingsTabState.key);
-  uiRowsMove(listEl, same ? () => uiRowsMove(body, draw) : draw);
+  // 그리는 안에서 고른 회의가 바뀌면(거르기 칩·담기·보던 회의가 사라짐) 그린 뒤에 알게 된다 — 그때는 오른쪽 잰 것을 버린다.
+  const drawBody = () => { draw(); if (body.dataset.meetingFor !== was) uiGlideForget(body); };
+  uiRowsMove(listEl, was === String(meetingsTabState.key) ? () => uiRowsMove(body, drawBody) : draw);
 }
 function renderMeetingsNow(listEl, body) {
+  meetingsDrawSeq += 1;
   const meetings = (workflowData && workflowData.meetings) || [];
   const itemsOf = typeof wfMeetingItems === 'function' ? wfMeetingItems : null;
   const today = todayStr();

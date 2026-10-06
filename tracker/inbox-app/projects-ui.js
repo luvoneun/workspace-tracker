@@ -521,9 +521,11 @@ function renderProjects(opts = {}) {
   const listEl = document.getElementById('projectList');
   const body = document.getElementById('projectBody');
   if (!listEl || !body) return;
+  const was = body.dataset.projectFor;
   const draw = () => renderProjectsNow(listEl, body, opts);
-  const same = body.dataset.projectFor === projectBodyFor();
-  uiRowsMove(listEl, same ? () => uiRowsMove(body, draw) : draw);
+  // 그리는 안에서 고른 프로젝트가 바뀌면(보던 프로젝트가 사라짐·묶음 대표로) 그린 뒤에 알게 된다 — 그때는 오른쪽 잰 것을 버린다.
+  const drawBody = () => { draw(); if (body.dataset.projectFor !== was) uiGlideForget(body); };
+  uiRowsMove(listEl, was === projectBodyFor() ? () => uiRowsMove(body, drawBody) : draw);
 }
 function renderProjectsNow(listEl, body, opts) {
   // 묶음(BBUNDLE)은 이 탭에서만 한 줄로 합친다 — uiProjectRows는 리마인드도 쓰므로 그대로 두고 여기서 합친다.
