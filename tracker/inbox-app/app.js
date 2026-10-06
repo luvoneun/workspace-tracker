@@ -829,7 +829,7 @@ function uiHeldFlush() {
 const UI_GLIDE = { ease: 'cubic-bezier(0.22, 0.8, 0.3, 1)', move: 200, enter: 140, fade: 120, strike: 200, tint: 170, within: 500, max: 40, rows: 150, doneFor: 2000, jitter: 8 };
 const UI_GLIDE_ROWS = '[data-task-id], [data-move-id], [data-rail-id]';
 const UI_GLIDE_STRIKE = '.d-title, .ti'; // 완료 흐름에서 줄이 그어지는 제목 — 오늘 줄(.d-title)·회의·프로젝트 줄(.ti)
-const UI_GLIDE_ENTRANCE = ['is-new', 'is-opening', 'is-rise', 'd-unfold', 'd-unfold-big']; // 그림자가 물려받지 않는 등장 클래스(uiGlideGhostMake)
+const UI_GLIDE_ENTRANCE = ['is-new', 'is-opening', 'is-rise', 'd-unfold', 'd-unfold-big', 'is-pop']; // 그림자가 물려받지 않는 등장 클래스(uiGlideGhostMake)
 let uiActAt = 0;        // 마지막 사용자 동작 시각
 let uiActQuiet = false; // 그 동작이 키보드 연타(1초 안에 이어진 키·누르고 있는 키)였다
 let uiActByKey = false; // 그 동작이 키보드였다 — 키보드로 연 뜨는 것은 넘침 없이 나타남만(uiFloatOpen)
@@ -935,11 +935,12 @@ function uiGlideTint(row, from) {
   if (!from || !to || from === to) return;
   uiGlidePlay(row, [{ backgroundColor: from }, { backgroundColor: to }], UI_GLIDE.tint);
 }
-// wait: 앞에서 기다리는 시간(줄 긋기). 기다리는 동안 첫 장면에 머문다(fill backwards) — 그 밖에는 끝난 뒤 남는 값이 없다.
+// wait: 앞에서 기다리는 시간(줄 긋기). 0보다 작으면 이미 지난 시간 — 그만큼 앞에서 시작한다(같은 동작 안의 다시 그리기가 잇는다). 기다리는 동안 첫 장면에 머문다(fill backwards) — 그 밖에는 끝난 뒤 남는 값이 없다.
 function uiGlidePlay(row, frames, duration, wait = 0, done = null) {
   let motion;
   const options = { duration, easing: UI_GLIDE.ease };
   if (wait > 0) Object.assign(options, { delay: wait, fill: 'backwards' });
+  else if (wait < 0) options.delay = wait;
   if (done) options.fill = wait > 0 ? 'both' : 'forwards';
   try { motion = row.animate(frames, options); } catch { if (done) done(); return; }
   // 끝남 신호가 안 와도(가려진 탭 등) 시간으로 치운다 — transform이 줄에 남지 않게.
@@ -991,12 +992,40 @@ function uiGlideOpen(list) {
   });
   return shot;
 }
+// 체크 톡은 방금 체크한 칸에만 — 다시 그릴 때마다(완료 펼침·자동 갱신) 체크된 칸이 한꺼번에 튀지 않게.
+// 체크한 순간 그 칸에 .is-pop을 걸고 줄 열쇠를 적어 둔다. 체크 뒤 줄이 다시 그려지면 새 칸이 톡을 이어서 돈다(uiPopApply).
+const uiPops = new Map(); // 줄 열쇠 → 체크한 시각
+function uiPopMark(event) {
+  const box = event && event.target;
+  if (!box || !box.checked || !box.classList || !(box.classList.contains('d-cb') || box.classList.contains('d-wcb'))) return;
+  uiPopOn(box, 0);
+  const row = box.closest ? box.closest(UI_GLIDE_ROWS) : null;
+  if (row) uiPops.set(uiGlideKey(row), Date.now());
+}
+function uiPopOn(box, elapsed) {
+  box.classList.add('is-pop');
+  if (box.style) box.style.animationDelay = elapsed > 0 ? `${-elapsed}ms` : '';
+  setTimeout(() => { box.classList.remove('is-pop'); if (box.style) box.style.animationDelay = ''; }, UI_UNFOLD.turn - elapsed + 80);
+}
+function uiPopApply(list) {
+  if (!uiPops.size || !list || !list.querySelectorAll) return;
+  const now = Date.now();
+  uiPops.forEach((at, key) => {
+    const elapsed = now - at;
+    if (elapsed >= UI_UNFOLD.turn) { uiPops.delete(key); return; }
+    list.querySelectorAll(UI_GLIDE_ROWS).forEach((row) => {
+      if (uiGlideKey(row) !== key) return;
+      row.querySelectorAll('.d-cb:checked, .d-wcb:checked').forEach(box => uiPopOn(box, elapsed));
+    });
+  });
+}
 // 자리 재기가 어떻게 되든 그리기는 정확히 한 번 돈다 — 움직임은 덤이다.
 function uiRowsMove(list, render) {
   try { uiGlideOpen(list)?.drawn.add(list); } catch { /* 재지 못했으면 그냥 그린다 */ }
   // 같은 틱에 한 번 더 그려도(저장 뒤 load와 부르는 쪽의 다시 그리기) 흐려지는 중인 그림자는 남긴다 — 시간으로 스스로 치워진다.
   const ghosts = uiGlideGhostsIn(list);
   render();
+  try { uiPopApply(list); } catch { /* 톡만 빠진다 */ }
   ghosts.forEach((ghost) => { if (ghost.isConnected === false) list.appendChild(ghost); });
 }
 // 이번 그리기에서 이 목록을 잰 것을 버린다 — 그리고 나서야 화면 전환(다른 항목)이었다는 것을 안 경우. 같은 틱의 잇기 전에 부른다.
@@ -1061,10 +1090,15 @@ function uiFoldKey(button, key) {
   if ((button.getAttribute('aria-expanded') === 'true') === last.was) return button;
   Promise.resolve().then(() => {
     const icon = button.isConnected && button.querySelector('.d-i');
-    if (!icon || typeof icon.animate !== 'function' || uiFoldMode() !== 'move') return;
+    if (!icon || typeof icon.animate !== 'function') return;
+    // 같은 동작 안에서 또 그려지면(저장 뒤 load) 처음부터 다시 돌지 않고 돌던 자리에서 잇는다 — 다 돌았으면 그대로 둔다.
+    const elapsed = last.turnAt ? Date.now() - last.turnAt : 0;
+    if (elapsed >= UI_UNFOLD.turn) return;
+    if (!last.turnAt && uiFoldMode() !== 'move') return;
     const to = getComputedStyle(icon).transform;
     if (to === last.from) return;
-    uiGlidePlay(icon, [{ transform: last.from }, { transform: to }], UI_UNFOLD.turn);
+    if (!last.turnAt) last.turnAt = Date.now();
+    uiGlidePlay(icon, [{ transform: last.from }, { transform: to }], UI_UNFOLD.turn, -elapsed);
   });
   return button;
 }
@@ -1080,20 +1114,38 @@ function uiFoldNote(key) {
   uiFoldNotes.set(key, uiActSeq);
   [...uiFoldNotes].forEach(([one, act]) => { if (act !== uiActSeq) uiFoldNotes.delete(one); });
 }
+// 같은 동작 안에서 또 그려지면(저장 뒤 load) 처음부터 다시 나타나지 않고 나타나던 자리에서 잇는다 — 다 나타났으면 그대로 둔다.
+const uiFoldShown = new Map(); // 열쇠 → { act, at }
 function uiFoldShow(el, key, big = false) {
   const pressed = uiFoldNotes.get(key) === uiActSeq || (uiFoldActive() && uiFoldLast.key === key);
   if (!el || !pressed) return el;
-  try { if (uiFoldMode()) uiFoldReveal(el, big); } catch { /* 움직임만 빠진다 */ }
+  try {
+    const shown = uiFoldShown.get(key);
+    if (shown && shown.act === uiActSeq) {
+      const elapsed = Date.now() - shown.at;
+      if (elapsed < (big ? UI_UNFOLD.big : UI_UNFOLD.open)) uiFoldReveal(el, big, elapsed);
+      return el;
+    }
+    if (!uiFoldMode()) return el;
+    [...uiFoldShown].forEach(([one, entry]) => { if (entry.act !== uiActSeq) uiFoldShown.delete(one); });
+    uiFoldShown.set(key, { act: uiActSeq, at: Date.now() });
+    uiFoldReveal(el, big);
+  } catch { /* 움직임만 빠진다 */ }
   return el;
 }
 // 펼친 내용이 나타난다 — CSS 클래스 하나(.d-unfold)라 움직임 줄이기도 전역 규칙 한 곳이 맡는다.
-function uiFoldReveal(el, big = false) {
+// elapsed: 이미 지난 시간(같은 동작 안의 다시 그리기가 잇는다 — 그만큼 앞에서 시작).
+function uiFoldReveal(el, big = false, elapsed = 0) {
   if (!el || !el.classList) return;
   el.classList.remove('d-unfold', 'd-unfold-big');
   void el.offsetWidth;
+  if (el.style) el.style.animationDelay = elapsed > 0 ? `${-elapsed}ms` : '';
   el.classList.add('d-unfold');
   if (big) el.classList.add('d-unfold-big');
-  setTimeout(() => el.classList.remove('d-unfold', 'd-unfold-big'), (big ? UI_UNFOLD.big : UI_UNFOLD.open) + 80);
+  setTimeout(() => {
+    el.classList.remove('d-unfold', 'd-unfold-big');
+    if (el.style && elapsed > 0) el.style.animationDelay = '';
+  }, (big ? UI_UNFOLD.big : UI_UNFOLD.open) - elapsed + 80);
 }
 // 접히는 내용의 그림자 — 바꾸기 전에 불러 복사본을 떠 두고, 돌려준 함수를 바꾼 뒤에 부르면 옛 자리에서 흐려진다.
 // 복사본은 줄 그림자와 같다(uiGlideGhostMake — 누를 수 없고 읽히지 않으며 id·data-가 없다). 입력 칸은 이름을 떼고 잠근다
@@ -1101,7 +1153,8 @@ function uiFoldReveal(el, big = false) {
 function uiFoldLeave(el, host = null) {
   if (!el || !el.isConnected || typeof el.getBoundingClientRect !== 'function' || typeof el.cloneNode !== 'function') return () => {};
   const box = el.getBoundingClientRect();
-  if (!(box.height > 0)) return () => {};
+  // 화면 밖에서 접히는 것은 그림자를 띄우지 않는다(보이지 않는 복사본을 만들지 않게).
+  if (!(box.height > 0) || box.bottom <= 0 || box.top >= (window.innerHeight || 0)) return () => {};
   const copy = el.cloneNode(true);
   copy.classList?.remove('d-unfold', 'd-unfold-big');
   [copy, ...copy.querySelectorAll('input, textarea, select, button')].forEach((node) => {
@@ -1165,7 +1218,9 @@ function uiFold(mutate, { open, part = null, from = null, scope = null, big = fa
   try { mode = uiFoldDepth ? null : uiFoldMode(); } catch { mode = null; }
   if (!mode) return mutate();
   // part는 요소 여럿(접힌 줄들)이어도 된다 — 아래 것은 마지막 것 뒤부터 센다.
+  // 한 번에 다루는 것은 줄 부품의 상한(보이는 40개)까지 — 그보다 많은 펼침은 그냥 바꾼다.
   const find = () => { const got = typeof part === 'function' ? part() : part; return (Array.isArray(got) ? got : [got]).filter(Boolean); };
+  if (find().length > UI_GLIDE.max) return mutate();
   let before = [];
   let leaves = [];
   try {
@@ -3389,7 +3444,8 @@ function drawerSync() {
   const drawer = document.getElementById('laterTaskDrawer');
   const toggle = document.getElementById('laterTaskToggle');
   // 본문 여백은 바로 바뀐다(폭은 움직이지 않는다) — 줄 바꿈이 달라져 자리가 바뀐 줄만 옛 자리에서 미끄러진다(펼침 부품).
-  const page = uiFoldMode() === 'move' ? document.querySelector('.page') : null;
+  // 재는 범위는 지금 보이는 탭 하나다(숨은 탭의 줄까지 세면 150줄 상한에 일찍 걸린다).
+  const page = uiFoldMode() === 'move' ? document.querySelector('.page > :not([hidden])') : null;
   const rows = page ? [...page.querySelectorAll(UI_GLIDE_ROWS)] : [];
   const before = rows.length <= UI_GLIDE.rows ? rows.map(row => [row, row.getBoundingClientRect()]) : [];
   document.body.classList.toggle('later-open', laterDrawerOpen);
@@ -6831,6 +6887,7 @@ document.addEventListener('pointercancel', () => { uiPointerDown = false; }, tru
 document.addEventListener('click', uiActMark, true);
 document.addEventListener('keydown', uiActMark, true);
 document.addEventListener('click', uiFoldPress, true); // uiActMark 뒤 — 접기 단추의 옛 꺾쇠 각도(uiFoldKey)
+document.addEventListener('change', uiPopMark, true); // 방금 체크한 칸만 톡(ui.css .is-pop)
 setupQuickAdd('todayTaskInput', '/api/today-task/create', '오늘 할 일에 추가했어요');
 setupQuickAdd('laterTaskInput', '/api/later-task/create', '나중에 할 일에 추가했어요');
 setupQuickAdd('waitingInput', '/api/waiting/create', '확인 대기에 추가했어요');

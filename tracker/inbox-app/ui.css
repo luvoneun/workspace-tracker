@@ -503,7 +503,9 @@ dialog.d-stay:not([open])::backdrop { opacity: 0; transition-duration: var(--sta
   details::details-content { translate: none !important; }
   /* 자리가 남는 것(.d-stay)은 전환이라 같은 120ms를 열린 쪽에만 건다 — 이동 없이 흐려지며 뜨고, 닫힘은 바로 */
   .d-stay { --stay-from: none; --stay-to: none; }
-  .d-stay:not([hidden], dialog:not([open])), dialog.d-stay[open]::backdrop, details[open]::details-content { transition-duration: 120ms !important; }
+  .d-stay:not([hidden], dialog:not([open])), dialog.d-stay[open]::backdrop { transition-duration: 120ms !important; }
+  /* 접힌 설명은 따로 둔다 — 이 가상 요소를 모르는 브라우저가 묶음 규칙 전체를 버리지 않게 */
+  details[open]::details-content { transition-duration: 120ms !important; }
   /* 누름의 크기 변화도 끈다 — 색은 그대로 바뀐다 */
   button:active, .d-cb:active, .d-wcb:active { scale: none !important; }
 }
@@ -1309,7 +1311,8 @@ body.batch-open .d-row.is-done { opacity: 0.6; }
 /* 끝내는 순간(완료 흐름): 체크가 톡(--t-fast) → 제목에 줄이 그어지고(--t-move) → 줄이 `완료 N` 제목으로 들어간다.
    들어가는 것은 줄 이동 도우미가 긋기가 끝난 뒤에 건다(app.js uiGlideDoneMark·uiGlideJoinGroup). 다시 그려진 줄·그림자는
    같은 긋기를 이어 그린다(animation-delay를 지난 시간만큼 당긴다) — 그동안 완료 줄의 취소선은 숨겨 두 줄이 겹치지 않게 한다. */
-.d-cb:checked, .d-wcb:checked { animation: d-pop-check var(--t-fast) var(--ease); }
+/* 톡은 방금 체크한 칸에만(app.js uiPopMark가 .is-pop을 건다) — 다시 그린 체크된 칸은 튀지 않는다 */
+.d-cb.is-pop:checked, .d-wcb.is-pop:checked { animation: d-pop-check var(--t-fast) var(--ease); }
 @keyframes d-pop-check { 0% { transform: scale(1); } 45% { transform: scale(1.18); } 100% { transform: scale(1); } }
 .d-row.is-completing .d-title, .d-mrow2.is-completing .ti, .d-prow2.is-completing .ti {
   background-image: linear-gradient(currentColor, currentColor);
@@ -1324,7 +1327,7 @@ body.batch-open .d-row.is-done { opacity: 0.6; }
 /* 사라진 줄의 그림자 — 옛 자리에 한 장 떠서 흐려진다(줄 이동 도우미가 놓고 치운다). 목록 안에 붙지만 자리를 차지하지 않는다 */
 .d-glide-ghost { position: absolute; margin: 0; box-sizing: border-box; pointer-events: none; z-index: 1; }
 @media (prefers-reduced-motion: reduce) {
-  .d-cb:checked, .d-wcb:checked, .d-row.is-completing .d-title, .d-mrow2.is-completing .ti, .d-prow2.is-completing .ti { animation: none; }
+  .d-cb.is-pop:checked, .d-wcb.is-pop:checked, .d-row.is-completing .d-title, .d-mrow2.is-completing .ti, .d-prow2.is-completing .ti { animation: none; }
   .d-lhd .sub .cnt { transition: none; }
   .d-lhd .sub .cnt b.tick { animation: none; }
 }
@@ -1805,7 +1808,7 @@ textarea.d-dtitle {
   /* 펼침 부품의 큰 면(세기 2, 넘침 없음) — 열림 --t-move, 닫힘 --t-fast. 본문 여백은 바로 바뀌고 줄만 미끄러진다(app.js drawerSync) */
   transition: transform var(--t-fast) var(--ease), visibility var(--t-fast) var(--ease);
 }
-body.later-open .d-drawer { transform: none; visibility: visible; transition-duration: var(--t-move); }
+body.later-open .d-drawer { transform: none; visibility: visible; transition-duration: var(--t-move), 0s; } /* 열 때는 바로 보이게(visibility 0초) — 열자마자 입력 칸에 초점이 들어간다 */
 /* 페이지가 창 왼쪽에서 시작하므로 서랍 폭(404px)에 여백 20px만 더해 밀면 된다 */
 body.later-open .page { padding-right: 424px; }
 .d-dhd {

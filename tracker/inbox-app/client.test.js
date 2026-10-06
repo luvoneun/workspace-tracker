@@ -16036,7 +16036,10 @@ test('모션 토큰: 움직임 줄이기 — 전역은 .01ms(이동 끔) 그대�
   // 펼침 부품(.d-unfold)과 접힌 설명(details)도 부품 선택자 하나씩으로 등록한다 — 접힌 설명은 위 4px 이동을 끈다
   assert.match(block, /\n  details::details-content \{ translate: none !important; \}/);
   // 자리가 남는 것(.d-stay — 알림·창·막대)은 전환이라 열린 쪽에만 120ms를 걸고 이동(--stay-from·--stay-to)을 끈다 — 닫힘은 전역 .01ms로 바로
-  assert.match(block, /\n  \.d-stay \{ --stay-from: none; --stay-to: none; \}\n  \.d-stay:not\(\[hidden\], dialog:not\(\[open\]\)\), dialog\.d-stay\[open\]::backdrop, details\[open\]::details-content \{ transition-duration: 120ms !important; \}/);
+  assert.match(block, /\n  \.d-stay \{ --stay-from: none; --stay-to: none; \}\n  \.d-stay:not\(\[hidden\], dialog:not\(\[open\]\)\), dialog\.d-stay\[open\]::backdrop \{ transition-duration: 120ms !important; \}/);
+  // 접힌 설명은 따로 — 이 가상 요소를 모르는 브라우저가 묶음 규칙 전체를 버리지 않게(D1 검수)
+  assert.match(block, /\n  details\[open\]::details-content \{ transition-duration: 120ms !important; \}/);
+  assert.doesNotMatch(block, /, details\[open\]::details-content|details\[open\]::details-content,/, '다른 선택자와 묶지 않는다');
   assert.doesNotMatch(block, /\.d-menulist|\.d-schedpop|\.d-palbox|\.d-popd|\.d-toast|\.d-modal|\.d-selbar|\.d-ckdlg|\.d-uwdlg|#settingsDialog|#wrapDialog/, '뜨는 것은 요소 이름을 늘어놓지 않고 부품 클래스(.d-float·.d-stay)로 등록한다');
   assert.match(css, /@keyframes d-fade \{ from \{ opacity: 0; \} to \{ opacity: 1; \} \}/, '흐려짐은 투명도만');
 });
@@ -16072,7 +16075,9 @@ const MOTION_RAW_ALLOWED = [
   ['ui.css', '*, *::before, *::after', 'transition-duration', '0.01ms', '남김', '움직임 줄이기 전역 값(.01ms로 끄고 나타남만 120ms) — 토큰과 뜻이 다르다'],
   ['ui.css', '*, *::before, *::after', 'animation-duration', '0.01ms', '남김', '움직임 줄이기 전역 값(.01ms로 끄고 나타남만 120ms) — 토큰과 뜻이 다르다'],
   ['ui.css', '.d-float:not(.is-out):not(.is-still), .d-mrow2.is-new, .d-unfold', 'animation', '120ms', '남김', '움직임 줄이기 전역 값(.01ms로 끄고 나타남만 120ms) — 토큰과 뜻이 다르다'],
-  ['ui.css', '.d-stay:not([hidden], dialog:not([open])), dialog.d-stay[open]::backdrop, details[open]::details-content', 'transition-duration', '120ms', '남김', '움직임 줄이기 전역 값(.01ms로 끄고 나타남만 120ms) — 토큰과 뜻이 다르다'],
+  ['ui.css', '.d-stay:not([hidden], dialog:not([open])), dialog.d-stay[open]::backdrop', 'transition-duration', '120ms', '남김', '움직임 줄이기 전역 값(.01ms로 끄고 나타남만 120ms) — 토큰과 뜻이 다르다'],
+  ['ui.css', 'details[open]::details-content', 'transition-duration', '120ms', '남김', '움직임 줄이기 전역 값(.01ms로 끄고 나타남만 120ms) — 토큰과 뜻이 다르다'],
+  ['ui.css', 'body.later-open .d-drawer', 'transition-duration', '0s', '남김', '서랍을 열 때 visibility만 0초(바로 보여야 입력 칸에 초점이 들어간다) — 시간이 아니라 즉시'],
   ['ui.css', '.d-ibrow.is-leaving', 'animation', '220ms', 'C', '분류 뒤 줄 접힘 — 뜨는 것이 아니라 줄이다. 사라지는 줄 부품과 함께 정한다'],
   ['ui.css', '.d-row.is-rise', 'animation', '260ms 1400ms', 'C', '분류 뒤 새 줄 솟음·배경 강조 — 뜨는 것이 아니라 줄이다. 줄 부품과 함께 정한다'],
   ['ui.css', '.is-flash', 'animation', '1.6s', 'F', '밝히기 — 부품 하나로 합친다'],
@@ -16281,8 +16286,8 @@ test('체크 표시 하나: 업무 체크(.d-cb)와 레일 체크(.d-wcb)가 색
   assert.match(css, /\.d-cb, \.d-wcb \{ transition: border-color var\(--t-press\) var\(--ease\), background var\(--t-press\) var\(--ease\), scale var\(--t-press\) var\(--ease\); \}/);
   assert.match(css, /\.d-cb:hover, \.d-wcb:hover \{ border-color: var\(--accent\); \}/);
   assert.match(css, /\.d-cb:checked, \.d-wcb:checked \{ background: var\(--accent\); border-color: var\(--accent\); \}/);
-  assert.match(css, /\.d-cb:checked, \.d-wcb:checked \{ animation: d-pop-check var\(--t-fast\) var\(--ease\); \}/);
-  assert.match(css, /\.d-cb:checked, \.d-wcb:checked, \.d-row\.is-completing \.d-title, \.d-mrow2\.is-completing \.ti, \.d-prow2\.is-completing \.ti \{ animation: none; \}/, '움직임 줄이기 — 회의·프로젝트 줄의 긋기도(C2)');
+  assert.match(css, /\.d-cb\.is-pop:checked, \.d-wcb\.is-pop:checked \{ animation: d-pop-check var\(--t-fast\) var\(--ease\); \}/);
+  assert.match(css, /\.d-cb\.is-pop:checked, \.d-wcb\.is-pop:checked, \.d-row\.is-completing \.d-title, \.d-mrow2\.is-completing \.ti, \.d-prow2\.is-completing \.ti \{ animation: none; \}/, '움직임 줄이기 — 회의·프로젝트 줄의 긋기도(C2)');
   assert.doesNotMatch(css, /\n\.d-wcb:(hover|checked) \{/, '레일 체크만의 색 규칙은 없다');
 });
 
@@ -16941,7 +16946,7 @@ test('줄 이동 C1 완료 흐름: 체크 → 줄 긋기(200ms) → 줄이 `완�
   assert.equal(quiet.plays.length, 0);
   // 값: 체크 톡 --t-fast, 긋기 --t-move(줄 이동과 같은 박자), 도우미의 긋기 길이도 같다.
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
-  assert.match(css, /\.d-cb:checked, \.d-wcb:checked \{ animation: d-pop-check var\(--t-fast\) var\(--ease\); \}/);
+  assert.match(css, /\.d-cb\.is-pop:checked, \.d-wcb\.is-pop:checked \{ animation: d-pop-check var\(--t-fast\) var\(--ease\); \}/);
   assert.match(css, /animation: d-strike var\(--t-move\) var\(--ease\) forwards;/);
   assert.equal(fx.app.run('UI_GLIDE.strike'), fx.app.run('UI_GLIDE.move'));
   // 들어갈 제목은 줄이 정한다(프로젝트 상세는 `끝낸 것` — data-done-into), 없으면 오늘의 `완료`.
@@ -17447,7 +17452,7 @@ test('줄 이동 C2 그림자: 등장 클래스(is-new·is-opening·is-rise)는 
   app.run('uiGlideGhostMake(__old, null)');
   assert.deepEqual([...ghost.set], ['d-mrow2', 'd-draft', 'is-edit', 'd-glide-ghost']);
   assert.deepEqual([...inner.set], ['ti']);
-  assert.deepEqual(plain(app.run('UI_GLIDE_ENTRANCE')), ['is-new', 'is-opening', 'is-rise', 'd-unfold', 'd-unfold-big']);
+  assert.deepEqual(plain(app.run('UI_GLIDE_ENTRANCE')), ['is-new', 'is-opening', 'is-rise', 'd-unfold', 'd-unfold-big', 'is-pop']);
 });
 
 test('줄 이동 C2: 회의 초안 펼침의 따로 만든 도우미(meetingFlip)는 줄 부품의 바로 잇기(uiRowsShift)로 합쳤다 — 펼침 --t-move 1.5px 넘침 · 접힘 120ms(D1에서 펼침 부품 값으로)', () => {
@@ -19294,10 +19299,10 @@ test('펼침 D1 등록: 여섯 방식의 자리가 모두 펼침 부품을 부�
   // ③ 접힌 설명 9종은 CSS 한 규칙 — 열림만 160ms, 닫힘은 바로(그림자를 띄울 수 없다).
   assert.match(css, /\ndetails::details-content \{ transition: opacity var\(--t-unfold\) var\(--ease\), translate var\(--t-unfold\) var\(--ease\); \}\ndetails:not\(\[open\]\)::details-content \{ opacity: 0; translate: 0 -4px; transition: none; \}/);
   // ⑥ 서랍: 큰 면(열림 --t-move · 닫힘 --t-fast), 본문 여백은 바로 바뀐다(자리 속성을 움직이는 곳이 없다).
-  assert.match(css, /transition: transform var\(--t-fast\) var\(--ease\), visibility var\(--t-fast\) var\(--ease\);\n\}\nbody\.later-open \.d-drawer \{ transform: none; visibility: visible; transition-duration: var\(--t-move\); \}/);
+  assert.match(css, /transition: transform var\(--t-fast\) var\(--ease\), visibility var\(--t-fast\) var\(--ease\);\n\}\nbody\.later-open \.d-drawer \{ transform: none; visibility: visible; transition-duration: var\(--t-move\), 0s; \}/, '열 때 visibility는 0초 — 열자마자 입력 칸에 초점(D1 검수)');
   assert.doesNotMatch(css, /transition:[^;]*padding/, '여백(padding)을 움직이는 전환은 없다');
   // 그림자는 펼침 클래스를 물려받지 않는다.
-  assert.match(script, /const UI_GLIDE_ENTRANCE = \['is-new', 'is-opening', 'is-rise', 'd-unfold', 'd-unfold-big'\];/);
+  assert.match(script, /const UI_GLIDE_ENTRANCE = \['is-new', 'is-opening', 'is-rise', 'd-unfold', 'd-unfold-big', 'is-pop'\];/);
   // 접기 단추로 펼친 줄은 줄 부품이 펼침 값으로 띄운다(위 4px, --t-unfold).
   assert.match(script, /else if \(uiFoldActive\(\)\) uiGlidePlay\(row, \[\{ opacity: 0, transform: 'translateY\(-4px\)' \}, \{ opacity: 1, transform: 'none' \}\], UI_UNFOLD\.open, wait\);/);
   assert.match(fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8'), /id="decisionArchiveToggle" data-fold="decision-archive"/);
@@ -19307,7 +19312,7 @@ test('펼침 D1 서랍: 여닫으면 여백은 바로 바뀌고, 자리가 바�
   const fx = foldApp();
   const rows = [0, 1, 2].map(i => fx.make(`r${i}`, i * 40));
   fx.app.context.__rows = rows;
-  fx.app.run("document.querySelector = (sel) => sel === '.page' ? { querySelectorAll: () => __rows } : null; document.getElementById = () => null; document.body = { classList: { toggle: () => { __rows[2].top = 120; } } }; panelState = null;");
+  fx.app.run("document.querySelector = (sel) => sel === '.page > :not([hidden])' ? { querySelectorAll: () => __rows } : null; document.getElementById = () => null; document.body = { classList: { toggle: () => { __rows[2].top = 120; } } }; panelState = null;");
   fx.act();
   fx.app.run('laterDrawerOpen = true; drawerSync()');
   assert.deepEqual(fx.plays.map(play => [play.name, plain(play.frames), play.options.duration]), [['r2', [{ transform: 'translate(0px, -40px)' }, { transform: 'none' }], 200]]);
@@ -19315,4 +19320,85 @@ test('펼침 D1 서랍: 여닫으면 여백은 바로 바뀌고, 자리가 바�
   rows[2].top = 80;
   fx.app.run('uiActAt = Date.now() - 501; laterDrawerOpen = false; drawerSync()');
   assert.equal(fx.plays.length, 0);
+});
+
+test('펼침 D1 검수: 같은 동작 안에서 또 그려지면(저장 뒤 load) 나타남·꺾쇠가 처음부터 다시 돌지 않고 지난 시간만큼 앞에서 잇는다 — 다 끝났으면 그대로', async () => {
+  const fx = foldApp();
+  let clock = 1000;
+  fx.app.run('Date.now = () => __clock()');
+  fx.app.context.__clock = () => clock;
+  const first = fx.make('first', 0);
+  first.style = {};
+  const second = fx.make('second', 0);
+  second.style = {};
+  const third = fx.make('third', 0);
+  third.style = {};
+  Object.assign(fx.app.context, { __a: first, __b: second, __c: third });
+  fx.act();
+  fx.app.run("uiFoldNote('wnext')");
+  fx.app.run("uiFoldShow(__a, 'wnext')");
+  assert.ok(first.has('d-unfold'));
+  assert.equal(first.style.animationDelay, '', '처음은 처음부터');
+  clock += 60;
+  fx.app.run("uiFoldShow(__b, 'wnext')");
+  assert.ok(second.has('d-unfold'));
+  assert.equal(second.style.animationDelay, '-60ms', '두 번째 그리기는 60ms 지난 자리에서');
+  clock += 200;
+  fx.app.run("uiFoldShow(__c, 'wnext')");
+  assert.equal(third.has('d-unfold'), false, '다 나타난 뒤의 그리기는 그대로');
+  // 꺾쇠도 같다 — 두 번째 새 꺾쇠는 지난 시간만큼 앞에서(음수 delay), 다 돈 뒤에는 돌지 않는다.
+  const old = fx.make('old', 0);
+  old.attrs['aria-expanded'] = 'false';
+  old.dataset.fold = 'grp:완료';
+  old.querySelector = () => ({ turn: 'none' });
+  fx.app.context.getComputedStyle = el => ({ transform: el.turn });
+  const icons = [];
+  const freshHead = () => {
+    const head = fx.make('head', 0);
+    head.attrs['aria-expanded'] = 'true';
+    const icon = { turn: 'rotate', animate(frames, options) { icons.push(options); return { cancel() {} }; } };
+    head.querySelector = () => icon;
+    return head;
+  };
+  fx.act();
+  fx.app.context.__old = old;
+  fx.app.run("uiFoldPress({ target: { closest: () => __old } })");
+  for (const wait of [0, 50, 200]) {
+    clock += wait;
+    fx.app.context.__h = freshHead();
+    fx.app.run("uiFoldKey(__h, 'grp:완료')");
+    await settle();
+  }
+  assert.deepEqual(icons.map(o => [o.duration, o.delay]), [[140, undefined], [140, -50]]);
+});
+
+test('체크 톡 D1 검수: 방금 체크한 칸에만 .is-pop — 다시 그린 줄의 칸은 이어서 톡, 그 밖의 체크된 칸·그림자는 튀지 않는다', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.doesNotMatch(css, /\n\.d-cb:checked, \.d-wcb:checked \{ animation/, '체크된 칸 전부에 거는 톡은 없다');
+  assert.match(script, /document\.addEventListener\('change', uiPopMark, true\);/);
+  assert.match(script, /const UI_GLIDE_ENTRANCE = \[[^\]]*'is-pop'\];/, '그림자는 톡을 물려받지 않는다');
+  const fx = foldApp();
+  let clock = 5000;
+  fx.app.run('Date.now = () => __clock()');
+  fx.app.context.__clock = () => clock;
+  const mkBox = () => { const set = new Set(['d-cb']); return { checked: true, style: {}, set, classList: { add: n => set.add(n), remove: n => set.delete(n), contains: n => set.has(n) } }; };
+  const row = { dataset: { taskId: 't1' } };
+  const box = Object.assign(mkBox(), { closest: () => row });
+  fx.app.context.__box = box;
+  fx.app.run('uiPopMark({ target: __box })');
+  assert.ok(box.set.has('is-pop'));
+  clock += 40;
+  const fresh = mkBox();
+  const other = mkBox();
+  const rows = [{ dataset: { taskId: 't1' }, querySelectorAll: () => [fresh] }, { dataset: { taskId: 't2' }, querySelectorAll: () => [other] }];
+  fx.app.context.__list = { querySelectorAll: () => rows };
+  fx.app.run('uiPopApply(__list)');
+  assert.ok(fresh.set.has('is-pop'));
+  assert.equal(fresh.style.animationDelay, '-40ms', '이어서');
+  assert.equal(other.set.has('is-pop'), false, '다른 체크된 칸은 튀지 않는다');
+  clock += 200;
+  const late = mkBox();
+  rows[0].querySelectorAll = () => [late];
+  fx.app.run('uiPopApply(__list)');
+  assert.equal(late.set.has('is-pop'), false, '끝난 뒤의 다시 그리기(자동 갱신)는 튀지 않는다');
 });
