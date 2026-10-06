@@ -5658,7 +5658,7 @@ test('펼치면 티켓마다 지라 상태·요약·담당자·배포 버전이 
   assert.equal(nodeFind(rows[2], 'st').className, 'st k-dim', '할 일은 회색이다');
   assert.equal(nodeFind(rows[4], 'st').className, 'st k-pos', '완료는 성공색 글자다');
   const none = nodeFind(rows[1], 'wh');
-  assert.equal(none.textContent, '담당 없음');
+  assert.equal(nodeText(none), '담당 없음');
   assert.equal(none.className, 'wh is-none');
   assert.equal(nodeFind(rows[1], 'ver'), null, '배포 버전이 없으면 칸 자체가 없다');
   // 링크는 앱이 조립한 주소로 새 탭에 열리고, 키는 title에만 보인다(BKEY).
@@ -5668,10 +5668,12 @@ test('펼치면 티켓마다 지라 상태·요약·담당자·배포 버전이 
   assert.equal(link.rel, 'noopener noreferrer');
   assert.equal(link.title, 'IO-48392 · 지라에서 열어요');
   assert.doesNotMatch(nodeText(list), /IO-483/, '목록 글자 어디에도 키는 없다');
-  // 지라가 준 글자는 전부 textContent다 — 목록에 새 innerHTML을 쓰지 않는다(꺾쇠 아이콘만 고정 마크업).
-  assert.equal(nodeHtml(list), '');
-  // 읽기 전용이다: 목록에는 값 고르개도 ⋯도 없다.
-  assert.equal(nodeFind(list, 'd-dpick'), null);
+  // 지라가 준 글자는 전부 textContent다 — 목록에 새 innerHTML을 쓰지 않는다(담당 칸의 꺾쇠 아이콘만 고정 마크업).
+  assert.equal(nodeHtml(list), app.run("uiIcon('chevron')").repeat(rows.length));
+  // 상태·요약·배포 버전은 읽기 전용이다 — 목록의 값 고르개는 줄마다 담당 칸 하나뿐이고(BJASSIGN2) ⋯는 없다.
+  const picks = nodeFindAll(list, 'd-dpick');
+  assert.equal(picks.length, rows.length);
+  assert.ok(picks.every(pick => pick.dataset.assign && nodeFind(pick, 't')));
   assert.equal(nodeFind(list, 'd-more'), null);
   assert.doesNotMatch(nodeText(list), /할 일로 가져오기/);
 
@@ -13211,7 +13213,7 @@ test('BBUNDLE 상세: 두 티켓의 업무를 모아 줄마다 작은 KEY, 옆 �
   assert.ok(sent.some(url => url.startsWith('/api/jira/issue?key=IO-2')), '옆 카드는 제 티켓을 단건으로 읽는다');
   assert.equal(app.run("jiraSide.cards['IO-2'].state"), 'ok');
   const card = app.run("jiraStripBody('IO-2', 'jira:IO-2', { lead: false })");
-  assert.match(nodeFind(card, 'sub').textContent, /^IO-2 · 끝남/, '지라에서 끝난 티켓 카드에는 끝남');
+  assert.match(nodeText(nodeFind(card, 'sub')), /^IO-2 · 끝남/, '지라에서 끝난 티켓 카드에는 끝남');
   const add = nodeFind(body, 'd-padd');
   assert.equal(add.dataset.addKey, '/api/today-task/create::jira:IO-1::project', '할 일 추가는 대표 티켓');
   const target = nodeFind(add, 'd-paddto');
@@ -17627,4 +17629,270 @@ test('BJCREATE: 열린 항목 0인 새 에픽을 고르면 접어 둔 지난 프
   fixture.app.run("projectNewDrop(); jiraIssuesCache = [{ key: 'IO-1', summary: '새 에픽', status: 'To Do', statusCategory: 'new', issuetype: 'Epic' }]; jiraIssuesByKey = new Map(jiraIssuesCache.map(i => [i.key, i])); projectPastOpen = false;");
   fixture.app.run("projectPastOpen = null; projectKey = 'jira:IO-1'; renderProjects();");
   assert.ok(fixture.rowsOf().some(row => /새 에픽/.test(row.name)), '고른 에픽 줄이 목록에 선다');
+});
+
+// ---------- 지라 담당자 바꾸기(BJASSIGN2) ----------
+// 띠 카드·하위 줄 담당 칸 → 고르개(최근 고른 사람·찾기) → 확인 줄 → 맡기기 → 알림의 되돌리기.
+const ASSIGN_UNDO_ID = '11111111-1111-4111-8111-111111111111';
+const assignUsers = [
+  { accountId: 'acc-me', name: '루본', me: true },
+  { accountId: 'acc-b1', name: '테스터B', hint: '최근 · 결제 리뉴얼 iOS' },
+  { accountId: 'acc-b2', name: '테스터B', hint: '최근 · 알림센터 서버' },
+  { accountId: 'acc-c', name: '테스터C' },
+];
+function jiraAssignClient({ change = () => ({ ok: true, assignee: '테스터B', undoId: ASSIGN_UNDO_ID }), users = assignUsers, recent = null, issue = jiraWithKids() } = {}) {
+  const fixture = jiraChangeClient({ change, issue });
+  fixture.app.run("var saved = {}; localStorage = { getItem: k => (k in saved ? saved[k] : null), setItem: (k, v) => { saved[k] = String(v); } };");
+  if (recent) fixture.app.run(`localStorage.setItem('jiraAssignRecent', ${JSON.stringify(JSON.stringify(recent))})`);
+  const base = fixture.app.context.fetch;
+  fixture.app.context.fetch = async (url, options) => {
+    if (String(url).includes('/api/jira/assignable')) {
+      fixture.calls.push({ url: String(url), method: 'GET', body: null });
+      const answer = typeof users === 'function' ? await users(String(url)) : { ok: true, connected: true, users };
+      return answer instanceof Response ? answer : new Response(JSON.stringify(answer));
+    }
+    return base(url, options);
+  };
+  fixture.app.run("jiraIssuesByKey = new Map(); jiraAssignMe = null; jiraChildOpen = new Set(); jiraStripPaint();");
+  // 하위 목록을 펼쳐 둔다(담당 칸이 보이게).
+  nodeFind(fixture.card(), 'd-jexp').listeners.click();
+  const childPick = key => nodeFindAll(fixture.card(), 'd-dpick').find(pick => pick.dataset.assign === key);
+  const bandPick = () => nodeFind(nodeFind(fixture.card(), 'sub'), 'd-dpick');
+  const open = (pick) => { pick.listeners.click({ stopPropagation() {} }); return fixture.app.run('lastMenu')[0][0].control; };
+  const type = async (picker, word, wait = true) => {
+    const input = nodeFind(picker, 'd-gpfind');
+    input.value = word;
+    input.listeners.input();
+    if (wait) await new Promise(resolve => setTimeout(resolve, 320));
+  };
+  const options = picker => nodeFindAll(picker, 'd-gpopt');
+  const choose = (picker, text, at = 0) => options(picker).filter(button => nodeText(nodeFind(button, 'nm')) === text)[at].listeners.click({ stopPropagation() {} });
+  const go = () => nodeFind(fixture.confirm(), 'acts').children[1].listeners.click();
+  return { ...fixture, childPick, bandPick, open, type, options, choose, go };
+}
+const assignRegion = fixture => fixture.app.nodes.get('liveRegion');
+
+test('BJASSIGN2: 띠 카드의 `담당 ○○`과 하위 줄 담당 칸이 값 고르개다(28px .d-dpick · listbox)', () => {
+  const fixture = jiraAssignClient();
+  const band = fixture.bandPick();
+  assert.ok(band, '띠 첫 줄의 담당이 고르개다');
+  assert.equal(nodeText(band), '담당 루본');
+  assert.equal(band.getAttribute('aria-haspopup'), 'listbox');
+  assert.match(band.getAttribute('aria-label'), /^담당 바꾸기 · ABC-1234 · 지금 루본$/);
+  assert.match(nodeText(nodeFind(fixture.card(), 'sub')), /^에픽 · 담당 루본$/);
+  const none = fixture.childPick('IO-48395');
+  assert.equal(nodeText(none), '담당 없음');
+  assert.equal(nodeFind(none, 'v'), null, '값 칸(.v)의 굵은 글자 모양을 물려받지 않는다');
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /\.d-jkid \.wh \.d-dpick \.t \{[^}]*text-overflow: ellipsis/);
+});
+
+test('BJASSIGN2: 고르개는 최근 고른 사람부터 — 두 글자부터 250ms 뒤에 묻고, 한 글자는 최근만 거른다', async () => {
+  const fixture = jiraAssignClient({ recent: [{ name: '테스터C', accountId: 'acc-c' }, { name: '하늘', accountId: 'acc-h' }] });
+  const picker = fixture.open(fixture.childPick('IO-48395'));
+  assert.match(nodeText(picker), /최근 고른 사람 테스터C 하늘/);
+  assert.doesNotMatch(nodeText(picker), /담당 빼기/, '담당이 없으면 `담당 빼기`가 없다');
+  assert.equal(nodeFind(picker, 'd-gpfind').placeholder, '이름으로 찾기 — 두 글자부터');
+  await fixture.type(picker, '하');
+  assert.deepEqual(fixture.options(picker).map(button => nodeText(nodeFind(button, 'nm'))), ['하늘'], '한 글자는 최근 목록만 거른다');
+  assert.equal(fixture.calls.filter(call => call.url.includes('/api/jira/assignable')).length, 0, '한 글자는 서버에 묻지 않는다');
+  await fixture.type(picker, '테스', false);
+  assert.equal(nodeFind(picker, 'd-gpnone').textContent, '찾는 중…');
+  assert.equal(nodeFind(picker, 'd-gpnone').getAttribute('role'), 'status');
+  await new Promise(resolve => setTimeout(resolve, 320));
+  const asked = fixture.calls.filter(call => call.url.includes('/api/jira/assignable'));
+  assert.equal(asked.length, 1);
+  assert.equal(asked[0].url, `/api/jira/assignable?key=IO-48395&q=${encodeURIComponent('테스')}`);
+  assert.match(nodeText(picker), /^지라 사용자/);
+  const rows = fixture.options(picker).map(button => [nodeText(nodeFind(button, 'nm')), nodeFind(button, 'ky') ? nodeFind(button, 'ky').textContent : '']);
+  assert.deepEqual(rows, [['루본', '나'], ['테스터B', '최근 · 결제 리뉴얼 iOS'], ['테스터B', '최근 · 알림센터 서버'], ['테스터C', '']]);
+  assert.equal(nodeFind(picker, 'd-gpnone').hidden, true);
+});
+
+test('BJASSIGN2: 늦게 온 찾기 응답은 버린다(그 사이 친 글자가 이긴다)', async () => {
+  let releaseFirst;
+  const fixture = jiraAssignClient({
+    users: url => (url.includes(encodeURIComponent('테스터'))
+      ? { ok: true, connected: true, users: [{ accountId: 'acc-c', name: '테스터C' }] }
+      : new Promise((resolve) => { releaseFirst = () => resolve({ ok: true, connected: true, users: [{ accountId: 'acc-x', name: '테스엑스' }] }); })),
+  });
+  const picker = fixture.open(fixture.childPick('IO-48395'));
+  await fixture.type(picker, '테스');
+  await fixture.type(picker, '테스터');
+  releaseFirst();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.deepEqual(fixture.options(picker).map(button => nodeText(nodeFind(button, 'nm'))), ['테스터C']);
+});
+
+test('BJASSIGN2: 고르면 확인 줄이 서고(`맡기기`), 맡기면 한 번만 보내 fresh로 다시 읽고 알림에 되돌리기가 붙는다', async () => {
+  const fixture = jiraAssignClient();
+  const picker = fixture.open(fixture.childPick('IO-48395'));
+  await fixture.type(picker, '테스');
+  fixture.choose(picker, '테스터B', 1);
+  assert.equal(fixture.posts().length, 0, '고르기만으로는 지라에 쓰지 않는다');
+  const row = fixture.confirm();
+  assert.ok(row, '띠 카드 안에 확인 줄이 선다');
+  const text = nodeText(row);
+  assert.match(text, /지라의 이 티켓을 바꿀까요\?/);
+  assert.match(text, /검수 항목 정리하기 IO-48395/, '하위 티켓의 요약·키를 보인다');
+  assert.match(text, /담당: 없음 → 테스터B/);
+  assert.match(text, /취소 맡기기$/);
+  assert.doesNotMatch(text, /내 담당에서 빠져요/, '하위 티켓에는 경고가 없다');
+  assert.ok(nodeFindAll(fixture.card(), 'd-jkid').some(kid => kid.className.includes('is-hl') && nodeText(kid).includes('검수 항목 정리하기')), '묻는 줄이 옅게 칠해진다');
+
+  await fixture.go();
+  const posts = fixture.posts();
+  assert.equal(posts.length, 1, '요청 하나 = 티켓 하나의 담당자 한 명');
+  assert.deepEqual(plain(posts[0].body), { key: 'IO-48395', kind: 'assignee', to: 'acc-b2', toName: '테스터B', expect: null });
+  assert.match(fixture.calls.at(-1).url, /\/api\/jira\/issue\?key=ABC-1234&fresh=1$/, '낙관적 갱신 없이 카드를 새로 읽는다');
+  // 계정 id는 본문에만 — 화면이 부른 주소 어디에도 없다.
+  for (const call of fixture.calls) assert.doesNotMatch(call.url, /acc-/);
+  const region = assignRegion(fixture);
+  assert.match(region.textContent, /^테스터B에게 맡겼어요/);
+  const undo = region.children.find(kid => kid.textContent === '되돌리기');
+  assert.ok(undo, '알림에 `되돌리기`');
+  assert.equal(fixture.app.run('undoStack.length'), 0, '앱의 ⌘Z 대상이 아니다');
+  assert.deepEqual(JSON.parse(fixture.app.run("localStorage.getItem('jiraAssignRecent')")), [{ name: '테스터B', accountId: 'acc-b2' }], '반영된 뒤에만 최근 고른 사람에 넣는다');
+
+  // 되돌리기 — 확인 줄 없이 곧바로 직전 담당으로. 한 번 누르면 잠긴다.
+  fixture.change = null;
+  const sent = fixture.calls.length;
+  fixture.app.context.fetch = (base => async (url, options) => {
+    if (String(url).includes('/api/jira/change')) {
+      fixture.calls.push({ url: String(url), method: 'POST', body: JSON.parse(options.body) });
+      return new Response(JSON.stringify({ ok: true, assignee: null }));
+    }
+    return base(url, options);
+  })(fixture.app.context.fetch);
+  await undo.listeners.click(undo);
+  assert.equal(undo.disabled, true);
+  assert.equal(fixture.confirm(), null, '되돌리기는 확인 줄을 다시 띄우지 않는다');
+  const undoPost = fixture.calls.slice(sent).find(call => call.method === 'POST');
+  assert.deepEqual(plain(undoPost.body), { key: 'IO-48395', kind: 'assigneeUndo', undoId: ASSIGN_UNDO_ID });
+  assert.match(assignRegion(fixture).textContent, /^되돌렸어요 · 담당 없음/);
+  assert.equal(fixture.app.run('jiraBusy'), false);
+});
+
+test('BJASSIGN2: 최근 고른 사람은 5명까지 맨 앞에 쌓이고, 저장소가 막혀 있어도 찾기만으로 쓸 수 있다', async () => {
+  const five = ['가', '나', '다', '라', '마'].map((name, at) => ({ name: `${name}님`, accountId: `acc-${at}` }));
+  const fixture = jiraAssignClient({ recent: five });
+  const picker = fixture.open(fixture.childPick('IO-48395'));
+  await fixture.type(picker, '테스');
+  fixture.choose(picker, '테스터C');
+  await fixture.go();
+  const saved = JSON.parse(fixture.app.run("localStorage.getItem('jiraAssignRecent')"));
+  assert.equal(saved.length, 5);
+  assert.deepEqual(saved[0], { name: '테스터C', accountId: 'acc-c' });
+  assert.ok(!saved.some(person => person.accountId === 'acc-4'), '여섯 번째는 밀려난다');
+  assert.deepEqual(Object.keys(saved[1]).sort(), ['accountId', 'name'], '시각·티켓은 남기지 않는다');
+
+  const blocked = jiraAssignClient();
+  blocked.app.run("localStorage = { getItem() { throw new Error('막힘'); }, setItem() { throw new Error('막힘'); } };");
+  const list = blocked.open(blocked.childPick('IO-48395'));
+  assert.doesNotMatch(nodeText(list), /최근 고른 사람/);
+  await blocked.type(list, '테스');
+  blocked.choose(list, '테스터C');
+  await blocked.go();
+  assert.match(assignRegion(blocked).textContent, /^테스터B에게 맡겼어요/, '저장소가 막혀도 맡기기는 그대로');
+});
+
+test('BJASSIGN2: 내가 맡던 띠 카드 티켓을 넘길 때만 경고 한 줄, `담당 빼기`는 `→ 없음`·`빼기`', async () => {
+  const fixture = jiraAssignClient({ recent: [{ name: '테스터C', accountId: 'acc-c' }] });
+  fixture.app.run("jiraIssuesByKey = new Map([['ABC-1234', { key: 'ABC-1234', extra: false }]]);");
+  let picker = fixture.open(fixture.bandPick());
+  assert.match(nodeText(picker), /담당 빼기$/, '담당이 있으면 맨 아래 `담당 빼기`');
+  fixture.choose(picker, '테스터C');
+  assert.match(nodeText(fixture.confirm()), /담당: 루본 → 테스터C 내 담당에서 빠져요 — 왼쪽 목록에서 사라질 수 있어요\./);
+  nodeFind(fixture.confirm(), 'acts').children[0].listeners.click();
+  assert.equal(fixture.posts().length, 0, '`취소`는 아무것도 보내지 않는다');
+
+  picker = fixture.open(fixture.bandPick());
+  nodeFindAll(picker, 'd-gpopt').find(button => nodeText(button) === '담당 빼기').listeners.click({ stopPropagation() {} });
+  assert.match(nodeText(fixture.confirm()), /담당: 루본 → 없음 .*취소 빼기$/);
+  await fixture.go();
+  assert.deepEqual(plain(fixture.posts()[0].body), { key: 'ABC-1234', kind: 'assignee', to: null, expect: '루본' });
+
+  // 내 담당 목록에 없는(extra) 티켓이면 경고가 없다.
+  const other = jiraAssignClient({ recent: [{ name: '테스터C', accountId: 'acc-c' }] });
+  other.app.run("jiraIssuesByKey = new Map([['ABC-1234', { key: 'ABC-1234', extra: true }]]);");
+  other.choose(other.open(other.bandPick()), '테스터C');
+  assert.doesNotMatch(nodeText(other.confirm()), /내 담당에서 빠져요/);
+});
+
+test('BJASSIGN2: 실패는 확인 줄을 닫고 오류 알림 — 권한·토큰·그 사이 바뀜·이미 그 사람·옛 서버', async () => {
+  const run = async (answer) => {
+    const fixture = jiraAssignClient({ change: () => answer, recent: [{ name: '테스터C', accountId: 'acc-c' }] });
+    // 오류 알림(빨간 테두리·스스로 안 사라짐)인지는 showNotice의 두 번째 값으로 본다(가짜 창의 classList는 비어 있다).
+    fixture.app.run('var noticeErrors = []; var realNotice = showNotice; showNotice = (...args) => { noticeErrors.push(!!args[1]); return realNotice(...args); };');
+    fixture.choose(fixture.open(fixture.childPick('IO-48395')), '테스터C');
+    const before = fixture.calls.length;
+    await fixture.go();
+    const region = assignRegion(fixture);
+    return { fixture, region, error: fixture.app.run('noticeErrors.at(-1)'), reread: fixture.calls.slice(before).some(call => call.url.includes('fresh=1')), labels: region.children.map(kid => kid.textContent) };
+  };
+  const forbidden = await run({ ok: false, kind: 'assignForbidden', error: '지라에서 이 티켓의 담당을 바꿀 권한이 없어요.' });
+  assert.match(forbidden.region.textContent, /^지라에서 이 티켓의 담당을 바꿀 권한이 없어요\./);
+  assert.equal(forbidden.error, true, '오류 알림 — 빨간 테두리, 스스로 사라지지 않는다');
+  assert.ok(forbidden.labels.includes('지라에서 열기'));
+  assert.equal(forbidden.reread, false, '값은 그대로다');
+  assert.equal(forbidden.fixture.confirm(), null);
+  assert.equal(forbidden.fixture.app.run('jiraBusy'), false);
+
+  const token = await run({ ok: false, kind: 'auth', error: '지라 토큰을 확인해 주세요.' });
+  assert.ok(token.labels.includes('설정 열기'));
+
+  const stale = await run({ ok: false, kind: 'assigneeStale', error: '그 사이 지라에서 담당이 테스터C로 바뀌었어요. 확인하고 다시 골라 주세요.', assignee: '테스터C' });
+  assert.match(stale.region.textContent, /^그 사이 지라에서 담당이 테스터C로 바뀌었어요/);
+  assert.equal(stale.reread, true, '충돌이면 카드를 새로 읽는다');
+
+  const unsure = await run({ ok: false, kind: 'assignUnsure', error: '지라에 반영됐는지 확인하지 못했어요 — 카드를 새로 읽었어요.' });
+  assert.equal(unsure.reread, true);
+
+  const same = await run({ ok: true, same: true, assignee: '테스터B' });
+  assert.match(same.region.textContent, /^이미 테스터B가 맡고 있어요/);
+  assert.equal(same.error, false);
+  assert.ok(!same.labels.includes('되돌리기'));
+  assert.equal(same.fixture.app.run("localStorage.getItem('jiraAssignRecent')"), JSON.stringify([{ name: '테스터C', accountId: 'acc-c' }]), '쓰지 않았으니 최근 목록도 그대로');
+
+  const old = await run(new Response(JSON.stringify({ ok: false, error: '보낸 값을 확인해 주세요.', kind: 'value' }), { status: 400 }));
+  assert.match(old.region.textContent, /^앱을 다시 시작하면 쓸 수 있어요/);
+});
+
+test('BJASSIGN2: 찾기 실패·0명·옛 서버는 고르개 안의 상태 한 줄로 말한다', async () => {
+  const empty = jiraAssignClient({ users: [], recent: [{ name: '테스터C', accountId: 'acc-c' }] });
+  let picker = empty.open(empty.childPick('IO-48395'));
+  await empty.type(picker, '없는이름');
+  assert.equal(nodeFind(picker, 'd-gpnone').textContent, "이 티켓을 맡을 수 있는 사람 중에 '없는이름' 이름이 없어요");
+  assert.match(nodeText(picker), /최근 고른 사람 테스터C/, '최근 목록은 그대로');
+
+  const down = jiraAssignClient({ users: () => ({ ok: false, error: '지라에 연결하지 못했어요.', kind: 'network' }) });
+  picker = down.open(down.childPick('IO-48395'));
+  await down.type(picker, '테스');
+  assert.equal(nodeFind(picker, 'd-gpnone').textContent, '지라에 연결하지 못했어요');
+  assert.ok(down.options(picker).some(button => nodeText(button) === '다시 시도'));
+
+  const old = jiraAssignClient({ users: () => new Response('{}', { status: 404 }) });
+  picker = old.open(old.childPick('IO-48395'));
+  await old.type(picker, '테스');
+  assert.equal(nodeFind(picker, 'd-gpnone').textContent, '앱을 다시 시작하면 쓸 수 있어요');
+  assert.equal(old.posts().length, 0);
+});
+
+test('BJASSIGN2: 맡기는 동안 값 고르개·새로고침·담당 고르개가 모두 잠긴다', async () => {
+  let release;
+  const fixture = jiraAssignClient({ change: () => new Promise((resolve) => { release = () => resolve({ ok: true, assignee: '테스터C', undoId: ASSIGN_UNDO_ID }); }), recent: [{ name: '테스터C', accountId: 'acc-c' }] });
+  fixture.choose(fixture.open(fixture.childPick('IO-48395')), '테스터C');
+  const sending = fixture.go();
+  assert.equal(fixture.app.run('jiraBusy'), true);
+  assert.equal(nodeFind(fixture.confirm(), 'acts').children[1].textContent, '보내는 중…');
+  const locked = fixture.app.run('jiraStripCard(jiraCard.issue)');
+  assert.ok(nodeFindAll(locked, 'd-dpick').every(pick => pick.disabled), '띠의 담당 고르개까지 잠긴다');
+  // 잠긴 동안 고르개를 다시 열지 않는다.
+  fixture.app.run('lastMenu = null');
+  fixture.app.run('jiraAssignOpen({ isConnected: true }, { key: "IO-48395", cardKey: "ABC-1234" })');
+  assert.equal(fixture.app.run('lastMenu'), null);
+  release();
+  await sending;
+  assert.equal(fixture.posts().length, 1);
+  assert.equal(fixture.app.run('jiraBusy'), false);
 });
