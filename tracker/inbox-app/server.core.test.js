@@ -1267,6 +1267,21 @@ test('BMERGE: 지우기 — 항목 칸·회의 프로젝트가 비고 연결표 
   assert.deepEqual(workflowBack.projectLinks, { '결제 리뉴얼': 'PAY-1' });
 });
 
+test('BMERGE: 주간요약 되돌리기는 합치기가 바꾼 칸만 — 한 문장에 원래부터 있던 B 근거·B 소제목은 A로 가지 않는다', async (t) => {
+  const report = structuredClone(MERGE_REPORT);
+  report.weeks['2026-09-14'].rows.push({ id: 'r3', heading: '진행중', group: '가입 개편', bucket: 'group:가입 개편:진행중:섞인 문장',
+    text: '두 프로젝트 근거가 섞인 문장', sourceIds: ['mg01', 'mg04'],
+    evidence: [{ id: 'mg01', label: '결제 리뉴얼' }, { id: 'mg04', label: '가입 개편' }], locked: true, excluded: false });
+  const server = await startServer(t, home => seedMerge(home, { report }));
+  const before = fs.readFileSync(path.join(server.home, '.report-drafts.json'), 'utf8');
+  const merged = await mergePost(server.base, { project: 'group:결제 리뉴얼', to: 'group:가입 개편' });
+  const mixed = readJson(path.join(server.home, '.report-drafts.json')).weeks['2026-09-14'].rows.find(row => row.id === 'r3');
+  assert.deepEqual(mixed.evidence.map(item => item.label), ['가입 개편', '가입 개편']);
+  const undone = await mergeUndoPost(server.base, { mergeId: merged.mergeId });
+  assert.equal(undone.skipped, 0);
+  assert.equal(fs.readFileSync(path.join(server.home, '.report-drafts.json'), 'utf8'), before, '원래부터 B였던 소제목·근거는 B 그대로, 저장본이 합치기 전과 같다');
+});
+
 test('BMERGE: 수동 지라 연결이 둘 다 있으면 대상 것을 남기고, 되돌리면 원래 것이 다시 붙는다', async (t) => {
   const server = await startServer(t, home => seedMerge(home, { links: { '결제 리뉴얼': 'PAY-1', '가입 개편': 'PAY-2' } }));
   const answer = await mergePost(server.base, { project: 'group:결제 리뉴얼', to: 'group:가입 개편' });

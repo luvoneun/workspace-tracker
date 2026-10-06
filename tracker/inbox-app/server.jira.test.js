@@ -2635,7 +2635,7 @@ async function startSameNameJiraServer(t, seed) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-jirasame-'));
   seed(home);
   fs.writeFileSync(path.join(home, 'jira_issues.md'),
-    '# 지라 이슈 (내 담당, 진행중/백로그)\n\n마지막 갱신: 2026-10-06\n\n- PAY-12 | 에픽 | 진행 중 | 결제 리뉴얼\n- PAY-30 | 에픽 | 진행 중 | 정산 묶음\n');
+    '# 지라 이슈 (내 담당, 진행중/백로그)\n\n마지막 갱신: 2026-10-06\n\n- PAY-12 | 에픽 | 진행 중 | 결제 리뉴얼\n- PAY-30 | 에픽 | 진행 중 | 정산 묶음\n- PAY-40 | 에픽 | 진행 중 | Pay Renewal\n');
   const tokenFile = path.join(home, '.jira_token_fixture');
   fs.writeFileSync(tokenFile, 'fixture-token-never-real\n');
   const config = path.join(home, 'workspace.config.json');
@@ -2653,7 +2653,7 @@ globalThis.fetch = async (input, init) => {
   if (!url.startsWith(SITE)) return realFetch(input, init);
   const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
   const issue = (key, summary) => ({ key, fields: { summary, status: { name: '진행 중', statusCategory: { key: 'indeterminate' } }, issuetype: { name: '에픽' } } });
-  if (url.includes('/search')) return json({ issues: [issue('PAY-12', '결제 리뉴얼'), issue('PAY-30', '정산 묶음')] });
+  if (url.includes('/search')) return json({ issues: [issue('PAY-12', '결제 리뉴얼'), issue('PAY-30', '정산 묶음'), issue('PAY-40', 'Pay Renewal')] });
   fs.appendFileSync(CALLS, JSON.stringify({ method: (init && init.method) || 'GET', url, body: init && init.body ? String(init.body) : null }) + '\\n');
   if (url.includes('/issue/createmeta/')) return json(TYPES);
   if (url.endsWith('/myself')) return json({ accountId: 'fixture-me', displayName: '나' });
@@ -2686,19 +2686,20 @@ server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => console.log
 
 test('BMERGE 3-3: 새 에픽 요약이 지라 요약·별칭과 같으면 409이고 지라에 요청이 하나도 가지 않는다 — 그룹 이름과 같으면 통과, 밑줄은 공백으로', async (t) => {
   const server = await startSameNameJiraServer(t, (home) => {
-    fs.writeFileSync(path.join(home, 'tasks.md'), '# Tasks\n- 운영 일 #task[id:sn01 status:to-do created:2026-09-20 group:운영툴]\n');
+    // `결제 리뉴얼`은 직접 만든 그룹과 지라 에픽(PAY-12)에 같은 이름으로 함께 있다 — 그래도 막아야 한다.
+    fs.writeFileSync(path.join(home, 'tasks.md'), '# Tasks\n- 운영 일 #task[id:sn01 status:to-do created:2026-09-20 group:운영툴]\n- 결제 일 #task[id:sn02 status:to-do created:2026-09-20 group:결제_리뉴얼]\n');
     fs.writeFileSync(path.join(home, '.workflow.json'), JSON.stringify({ items: {}, meetings: {}, projectAliases: { 'PAY-30': '정산 개편' } }, null, 2));
   });
   const create = summary => fetch(server.origin + '/api/jira/create', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plan: { projectKey: 'PAY', epic: { summary }, children: [] } }),
   }).then(async response => ({ status: response.status, ...await response.json() }));
-  for (const summary of ['결제 리뉴얼', '결제_리뉴얼', '  결제   리뉴얼 ', 'PAY-12 · 결제 리뉴얼', '정산 개편', '정산_개편']) {
+  for (const summary of ['결제 리뉴얼', '결제_리뉴얼', '  결제   리뉴얼 ', 'PAY-12 · 결제 리뉴얼', '정산 개편', '정산_개편', 'pay  RENEWAL']) {
     const blocked = await create(summary);
     assert.equal(blocked.status, 409, summary);
     assert.equal(blocked.error, '같은 이름의 지라 프로젝트가 이미 있어요.', summary);
     assert.equal(blocked.kind, 'exists');
   }
-  assert.deepEqual(server.calls(), [], '막힌 요청은 지라에 아무것도 묻지 않는다');
+  assert.deepEqual(server.calls(), [], '막힌 요청은 지라에 아무것도 묻지 않는다(같은 이름의 직접 만든 그룹이 함께 있어도)');
 
   // 직접 만든 프로젝트와 같은 이름은 통과(만든 뒤 옮기기 흐름). 요약의 밑줄은 공백으로 나간다.
   const made = await create('운영툴');

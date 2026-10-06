@@ -7820,13 +7820,13 @@ function bmergeClient(answers = {}) {
   return { ...fixture, notice, undoButton };
 }
 
-test('BMERGE ⋯: 직접 만든 프로젝트에만 `다른 프로젝트로 합치기…`·`프로젝트 지우기`(빨간 글자, 구분선 아래)가 있고 지라 프로젝트에는 없다', () => {
+test('BMERGE ⋯: 직접 만든 프로젝트에만 `다른 프로젝트로 합치기…`·`프로젝트 지우기`(삭제 부품 — 올리면 빨강, 구분선 아래)가 있고 지라 프로젝트에는 없다', () => {
   const fixture = renameClient();
   const group = fixture.detail('group:살아 있는 것');
   nodeFind(group.children[0], 'd-more').listeners.click({ stopPropagation() {} });
   const sections = fixture.app.run('lastMenu').filter(section => section.length);
   assert.equal(JSON.stringify(sections.map(section => section.map(entry => entry.label))), JSON.stringify([['이름 바꾸기', '다른 프로젝트로 합치기…'], ['프로젝트 지우기']]));
-  assert.equal(sections[1][0].danger, true, '지우기는 삭제 부품(빨간 글자)이다');
+  assert.equal(sections[1][0].danger, true, '지우기는 삭제 부품(평소 회색, 올리면 빨강)이다');
 
   fixture.app.run('lastMenu = null;');
   const jira = fixture.detail('jira:IO-12345');
@@ -7956,6 +7956,33 @@ test('BMERGE 새 프로젝트: 지라 에픽 요약·별칭과 같은 이름이�
   assert.equal(fixture.app.run('projectNew'), null, '새 프로젝트 화면은 닫힌다');
 });
 
+test('BMERGE 새 프로젝트: 같은 이름의 직접 만든 그룹이 함께 있어도 지라 에픽과 같으면 막히고 `열기`는 지라 프로젝트를 연다', () => {
+  const fixture = projectNewClient();
+  fixture.app.run(`jiraIssuesCache = [{ key: 'PAY-13', summary: '살아 있는 것' }]; jiraIssuesByKey = new Map(jiraIssuesCache.map(one => [one.key, one])); projectAliasesCache = {};`);
+  fixture.start();
+  fixture.set("projectNew.name = '살아 있는 것'; projectNew.project = 'PAY'");
+  const box = nodeFind(fixture.body(), 'd-pnewmovebox');
+  assert.match(bjcWords(box), /살아 있는 것은 이미 지라에 있어요\(PAY-13\)/);
+  assert.equal(nodeFind(fixture.body(), 'pri').disabled, true);
+  assert.equal(fixture.app.run('projectNew.moveCandidate'), null, '옮기기 체크도 없다');
+  nodeFindAll(box, 'd-link').find(kid => bjcText(kid) === '열기').listeners.click();
+  assert.equal(fixture.app.run('openedProject'), 'jira:PAY-13');
+});
+
+test('BMERGE ⌘Z: 서버가 `되돌릴 기록이 없어요`라고 하면 그 기록을 버려 다음 ⌘Z는 더 오래된 작업으로 간다(옮기기도 같다)', async () => {
+  for (const kind of ['merge', 'move']) {
+    const fixture = bmergeClient({ [`/api/project/${kind}-undo`]: { ok: false, error: '되돌릴 기록이 없어요.' } });
+    fixture.app.run("oldUndone = 0; pushUndo({ label: '옛 작업', undo: async () => { oldUndone += 1; }, redo: async () => {} });");
+    await fixture.app.run(kind === 'merge' ? "projectMergeRun('group:살아 있는 것', 'group:최근에 끝난 것')" : "projectMergeRun('group:살아 있는 것', 'jira:IO-48400')");
+    await fixture.app.run("replayUndo('undo')");
+    assert.equal(fixture.notice(), '되돌릴 기록이 없어요', kind);
+    await new Promise(resolve => setTimeout(resolve, 5));
+    assert.equal(fixture.app.run('undoStack.length'), 1, `${kind}: 기록이 버려지고 옛 작업만 남는다`);
+    await fixture.app.run("replayUndo('undo')");
+    assert.equal(fixture.app.run('oldUndone'), 1, `${kind}: 다음 ⌘Z는 옛 작업을 되돌린다`);
+  }
+});
+
 test('BMERGE 새 프로젝트: `지라 없이`에서 직접 만든 프로젝트와 같은 이름이면 옮기기 체크 대신 `○○에 넣기` — 그 이름 그대로 보낸다', async () => {
   const fixture = projectNewClient();
   fixture.start();
@@ -7983,13 +8010,16 @@ test('BMERGE 새 프로젝트: 감지 비교는 uiPickByName과 같은 결과다
   const fixture = projectNewClient();
   fixture.app.run(`jiraIssuesCache = [{ key: 'PAY-12', summary: 'Pay Renewal' }, { key: 'PAY-13', summary: '살아 있는 것' }];
     jiraIssuesByKey = new Map(jiraIssuesCache.map(one => [one.key, one])); projectAliasesCache = { 'PAY-30': '정산 개편' };`);
-  ['pay  renewal', 'PAY_RENEWAL', 'PAY-12 · Pay Renewal', '정산_개편', '살아 있는 것', '살아_있는_것', '없는 이름'].forEach((name) => {
+  ['pay  renewal', 'PAY_RENEWAL', 'PAY-12 · Pay Renewal', '정산_개편', '최근에 끝난 것', '없는 이름'].forEach((name) => {
     const same = fixture.app.run(`projectNewSame({ mode: 'epic', name: ${JSON.stringify(name)}, epic: null })`);
     const picked = fixture.app.run(`uiPickByName(${JSON.stringify(name)})`);
     const known = picked.startsWith('jira:') || fixture.app.run(`customGroupsCache.includes(${JSON.stringify(picked.slice('group:'.length))})`);
     assert.equal(same ? same.key : null, known ? picked : null, name);
   });
-  assert.equal(fixture.app.run("projectNewSame({ mode: 'epic', name: '살아 있는 것', epic: null }).kind"), 'group', '직접 만든 이름이 지라 요약보다 먼저다(막지 않는다)');
+  // 직접 만든 그룹과 지라 에픽이 같은 이름으로 함께 있으면 — 새 에픽·지라 없이는 지라 짝을 먼저 봐서 막고, 붙이기는 그룹을 본다.
+  assert.equal(fixture.app.run("projectNewSame({ mode: 'epic', name: '살아_있는_것', epic: null }).key"), 'jira:PAY-13');
+  assert.equal(fixture.app.run("projectNewSame({ mode: 'none', name: '살아 있는 것', epic: null }).kind"), 'jira');
+  assert.equal(fixture.app.run("projectNewSame({ mode: 'attach', name: '', epic: { key: 'PAY-13', summary: '살아 있는 것' } }).key"), 'group:살아 있는 것');
 });
 
 // ---------- BWRAP: 오늘 정리 ----------
