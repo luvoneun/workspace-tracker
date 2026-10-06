@@ -17751,6 +17751,8 @@ test('BJASSIGN2: 고르면 확인 줄이 서고(`맡기기`), 맡기면 한 번�
   assert.match(region.textContent, /^테스터B에게 맡겼어요/);
   const undo = region.children.find(kid => kid.textContent === '되돌리기');
   assert.ok(undo, '알림에 `되돌리기`');
+  assert.match(fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8'), /noticeTimer = setTimeout\(\(\) => \{ region\.hidden = true; \}, action \? 8000 : 4500\)/,
+    '되돌리기가 붙은 알림은 8초 뒤 닫힌다(showNotice의 action 갈래)');
   assert.equal(fixture.app.run('undoStack.length'), 0, '앱의 ⌘Z 대상이 아니다');
   assert.deepEqual(JSON.parse(fixture.app.run("localStorage.getItem('jiraAssignRecent')")), [{ name: '테스터B', accountId: 'acc-b2' }], '반영된 뒤에만 최근 고른 사람에 넣는다');
 
@@ -17861,7 +17863,16 @@ test('BJASSIGN2: 실패는 확인 줄을 닫고 오류 알림 — 권한·토큰
   assert.equal(same.fixture.app.run("localStorage.getItem('jiraAssignRecent')"), JSON.stringify([{ name: '테스터C', accountId: 'acc-c' }]), '쓰지 않았으니 최근 목록도 그대로');
 
   const old = await run(new Response(JSON.stringify({ ok: false, error: '보낸 값을 확인해 주세요.', kind: 'value' }), { status: 400 }));
-  assert.match(old.region.textContent, /^앱을 다시 시작하면 쓸 수 있어요/);
+  assert.match(old.region.textContent, /^앱을 다시 시작하면 쓸 수 있어요/, '옛 서버(모르는 종류 → value)');
+  const gone = await run(new Response('{}', { status: 404 }));
+  assert.match(gone.region.textContent, /^앱을 다시 시작하면 쓸 수 있어요/, '옛 서버(길 없음 404)');
+  // 새 서버가 보낸 모양을 거절한 것(이름 길이·줄바꿈 등)은 일반 오류 문구 그대로다.
+  const shape = await run(new Response(JSON.stringify({ ok: false, error: '보낸 값을 확인해 주세요.', kind: 'assignValue' }), { status: 400 }));
+  assert.match(shape.region.textContent, /^보낸 값을 확인해 주세요\./);
+  assert.equal(shape.reread, false);
+  // 쓰는 중 5xx(서버가 assignUnsure로 돌림)·동시 요청 거절도 알림으로 말한다.
+  const busy = await run({ ok: false, kind: 'assignBusy', error: '이 티켓의 담당을 바꾸는 중이에요. 잠시 뒤에 다시 시도해 주세요.' });
+  assert.match(busy.region.textContent, /^이 티켓의 담당을 바꾸는 중이에요/);
 });
 
 test('BJASSIGN2: 찾기 실패·0명·옛 서버는 고르개 안의 상태 한 줄로 말한다', async () => {

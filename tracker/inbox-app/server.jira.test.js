@@ -2478,6 +2478,42 @@ test('BJASSIGN2: 같은 요청을 3초 안에 두 번 받으면 두 번째는 �
   assert.equal(assignPuts(fake).length, 1);
 });
 
+test('BJASSIGN2: 3초 안 같은 요청이어도 그 사이 다른 사람이 담당을 바꿨으면 same이 아니라 stale — 덮어쓰지 않는다', async () => {
+  const fake = assignFake({ current: null });
+  const api = assignApi(fake, { now: () => 1000 });
+  const body = { key: 'AB-1', kind: 'assignee', to: 'fixture-c', toName: '테스터C', expect: null };
+  assert.equal((await api.change(body)).ok, true);
+  fake.state.current = 'fixture-b1';   // 다른 사람이 지라에서 바꿈
+  const again = await api.change(body);
+  assert.equal(again.kind, 'assigneeStale');
+  assert.equal(again.assignee, '테스터B');
+  assert.equal(assignPuts(fake).length, 1);
+  // 지라가 아직 옛 값을 돌려주는 동안(화면이 본 그대로)의 두 번째 누름도 다시 쓰지 않는다.
+  const lag = assignFake({ current: null });
+  const lagApi = assignApi(lag, { now: () => 1000 });
+  assert.equal((await lagApi.change(body)).ok, true);
+  lag.state.current = null;
+  assert.deepEqual(await lagApi.change(body), { ok: true, same: true, assignee: '테스터C' });
+  assert.equal(assignPuts(lag).length, 1);
+});
+
+test('BJASSIGN2: 같은 티켓에 동시에 두 요청이 와도 지라 PUT은 한 번뿐이다', async () => {
+  const fake = assignFake({ current: null });
+  const api = assignApi(fake);
+  const body = { key: 'AB-1', kind: 'assignee', to: 'fixture-c', toName: '테스터C', expect: null };
+  const [first, second] = await Promise.all([api.change(body), api.change({ ...body, to: 'fixture-b1', toName: '테스터B' })]);
+  assert.equal(first.ok, true);
+  assert.deepEqual(second, { ok: false, kind: 'assignBusy', error: '이 티켓의 담당을 바꾸는 중이에요. 잠시 뒤에 다시 시도해 주세요.' });
+  assert.equal(assignPuts(fake).length, 1);
+  // 끝나면 표시가 풀려 다음 요청은 받는다(실패한 요청도 표시를 남기지 않는다).
+  assert.equal((await api.change({ key: 'AB-1', kind: 'assignee', to: null, expect: '테스터C' })).ok, true);
+  const broken = assignFake({ current: null, putStatus: 400 });
+  const brokenApi = assignApi(broken);
+  assert.equal((await brokenApi.change(body)).kind, 'reject');
+  broken.state.putStatus = 204;
+  assert.equal((await brokenApi.change(body)).ok, true);
+});
+
 test('BJASSIGN2: 401과 403은 문구가 갈리고, 쓰는 중에 끊기면 반영 여부를 모른다고 말한다', async () => {
   const run = async options => assignApi(assignFake({ current: null, ...options }))
     .change({ key: 'AB-1', kind: 'assignee', to: 'fixture-c', toName: '테스터C', expect: null });
@@ -2485,10 +2521,12 @@ test('BJASSIGN2: 401과 403은 문구가 갈리고, 쓰는 중에 끊기면 반�
   assert.deepEqual(await run({ putStatus: 403 }), { ok: false, kind: 'assignForbidden', error: '지라에서 이 티켓의 담당을 바꿀 권한이 없어요.' });
   assert.deepEqual(await run({ putStatus: 400 }), { ok: false, kind: 'reject', error: '지라가 이 변경을 받아들이지 않았어요. 지라에서 직접 확인해 주세요.' });
   assert.deepEqual(await run({ putThrows: true }), { ok: false, kind: 'assignUnsure', error: '지라에 반영됐는지 확인하지 못했어요 — 카드를 새로 읽었어요.' });
+  // 쓰는 중 5xx도 반영됐는지 모른다 — 카드를 새로 읽게 한다.
+  for (const status of [500, 502, 504]) assert.equal((await run({ putStatus: status })).kind, 'assignUnsure', String(status));
   assert.deepEqual(await run({ readStatus: 401 }), { ok: false, kind: 'auth', error: '지라 토큰을 확인해 주세요.' });
   // 기존 쓰기(상태·버전·기한)의 401·403은 예전처럼 합쳐서 `권한이 없어요`다.
   assert.equal(jiraModule.writeKind({ status: 401 }), 'forbidden');
-  for (const options of [{ putStatus: 403 }, { putStatus: 400 }, { putStatus: 500 }]) {
+  for (const options of [{ putStatus: 403 }, { putStatus: 400 }, { putStatus: 502 }]) {
     const text = JSON.stringify(await run(options));
     assert.doesNotMatch(text, /지라 원문 오류|fixture-c|@example\.test/);
     assert.doesNotMatch(text, new RegExp(JIRA_TOKEN));
@@ -2528,7 +2566,7 @@ test('BJASSIGN2: 되돌리기는 직전 담당으로 한 번만, 그 사이 다�
   const broken = assignFake({ current: null });
   const brokenApi = assignApi(broken);
   const given = await brokenApi.change({ key: 'AB-1', kind: 'assignee', to: 'fixture-c', toName: '테스터C', expect: null });
-  broken.state.putStatus = 500;
+  broken.state.putStatus = 400;   // 4xx는 반영 안 된 것이 확실하다(5xx는 `assignUnsure`)
   assert.deepEqual(await brokenApi.change({ key: 'AB-1', kind: 'assigneeUndo', undoId: given.undoId }), { ok: false, kind: 'undoFail', error: '되돌리지 못했어요 — 담당은 테스터C 그대로예요.' });
   assert.equal((await brokenApi.change({ key: 'AB-1', kind: 'assigneeUndo', undoId: given.undoId })).kind, 'undoGone');
 });
@@ -2548,7 +2586,7 @@ test('BJASSIGN2: 요청 하나는 티켓 하나·사람 하나 — 모양이 다
   ];
   for (const body of bad) {
     const result = await api.change(body);
-    assert.ok(['key', 'value'].includes(result.kind), JSON.stringify(body));
+    assert.ok(['key', 'assignValue'].includes(result.kind), JSON.stringify(body));
   }
   assert.equal(fake.calls.length, 0);
 });
@@ -2578,6 +2616,13 @@ test('BJASSIGN2: /api/jira/assignable는 두 글자 미만·틀린 키면 400, �
   assert.equal((await fetch(`${base}/api/jira/assignable?key=bad&q=ab`)).status, 400);
   const change = await post('/api/jira/change', { key: 'AB-1', kind: 'assignee', to: 'fixture-c', toName: '테스터C', expect: null });
   assert.equal(change.kind, 'off');
-  assert.equal((await post('/api/jira/change', { key: 'AB-1', kind: 'assignee', to: ['x'] })).status, 400);
+  const bad = await post('/api/jira/change', { key: 'AB-1', kind: 'assignee', to: ['x'] });
+  assert.equal(bad.status, 400);
+  assert.equal(bad.kind, 'assignValue', '모양 거절은 옛 서버의 `value`(모르는 종류)와 갈래가 다르다');
+  // 다른 출처의 POST는 공통 가드(safeHandle)가 지라 경로에 닿기 전에 막는다.
+  const cross = await fetch(`${base}/api/jira/change`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'http://evil.example' }, body: JSON.stringify({ key: 'AB-1', kind: 'assignee', to: null, expect: null }) });
+  assert.equal(cross.status, 403);
+  const plainText = await fetch(`${base}/api/jira/change`, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: '{}' });
+  assert.equal(plainText.status, 403);
   assert.equal(snapshot(), before);
 });
