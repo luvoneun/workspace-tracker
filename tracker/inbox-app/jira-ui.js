@@ -623,7 +623,8 @@ function jiraAssignBaseEntries(target, word = '') {
     entries.push({ type: 'heading', text: '최근 고른 사람' });
     recent.forEach(person => entries.push(jiraAssignOption(person, target, '')));
   }
-  if (target.assignee) entries.push({ type: 'sep' }, { type: 'action', value: JIRA_ASSIGN_CLEAR, text: '담당 빼기' });
+  // 구분선은 위에 사람이 있을 때만 — 최근 목록이 비면 `담당 빼기` 한 줄만 선다.
+  if (target.assignee) entries.push(...(recent.length ? [{ type: 'sep' }] : []), { type: 'action', value: JIRA_ASSIGN_CLEAR, text: '담당 빼기' });
   return entries;
 }
 // 사람 한 줄. 지금 담당은 --sel 바탕(aria-selected), 오른쪽 조용한 글자는 `나`·같은 이름 구분·`지금 담당` 중 하나.

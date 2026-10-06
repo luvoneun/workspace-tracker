@@ -17812,6 +17812,12 @@ test('BJASSIGN2: 내가 맡던 띠 카드 티켓을 넘길 때만 경고 한 줄
   await fixture.go();
   assert.deepEqual(plain(fixture.posts()[0].body), { key: 'ABC-1234', kind: 'assignee', to: null, expect: '루본' });
 
+  // 최근 고른 사람이 없으면 구분선 없이 `담당 빼기` 한 줄만 선다.
+  const bare = jiraAssignClient();
+  const lone = bare.open(bare.bandPick());
+  assert.equal(nodeFind(lone, 'd-msep'), null);
+  assert.equal(nodeText(nodeFind(lone, 'd-gplist')), '담당 빼기');
+
   // 내 담당 목록에 없는(extra) 티켓이면 경고가 없다.
   const other = jiraAssignClient({ recent: [{ name: '테스터C', accountId: 'acc-c' }] });
   other.app.run("jiraIssuesByKey = new Map([['ABC-1234', { key: 'ABC-1234', extra: true }]]);");
