@@ -1991,7 +1991,7 @@ body.batch-open .d-toast { bottom: 76px; }
   font-size: 11.5px; font-weight: 700; letter-spacing: .02em;
 }
 .d-jira .top .nm { min-width: 0; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.d-jira .top .sub { flex: none; font-size: 12.5px; color: var(--dim); }
+.d-jira .top .sub { flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; color: var(--dim); white-space: nowrap; }
 .d-jira .d-jopen { flex: none; font-size: var(--fs-sm); font-weight: 600; color: var(--accent-text); text-decoration: none; white-space: nowrap; }
 .d-jira .d-jopen:hover { text-decoration: underline; text-underline-offset: 2px; }
 .d-jira .d-jref { flex: none; width: 28px; height: var(--h-sm); color: var(--dim); }
@@ -2065,6 +2065,22 @@ body.batch-open .d-toast { bottom: 76px; }
 }
 /* 완료한 줄은 맨 아래에서 흐리게 선다(글자만 조용해진다 — 취소선·다른 면을 쓰지 않는다) */
 .d-jkid.is-done .sm, .d-jkid.is-done .wh, .d-jkid.is-done .ver { color: var(--dim); }
+/* 담당자 바꾸기(BJASSIGN2) — 띠 첫 줄의 `담당 ○○`과 하위 줄의 담당 칸은 값 고르개(.d-dpick 그대로, 28px·hover --hover)다.
+   글자 크기·색은 그 자리의 것을 그대로 물려받고, 하위 줄은 96px 칸 안에서 오른쪽 맞춤·긴 이름은 말줄임이다 */
+.d-jira .top .sub .d-dpick { margin: -2px -2px -2px 0; padding: 2px 4px; font-size: inherit; color: inherit; }
+.d-jkid .wh:has(.d-dpick) { overflow: visible; }
+.d-jkid .wh .d-dpick { max-width: calc(100% + 6px); margin: -2px -6px -2px 0; font-size: inherit; color: inherit; }
+.d-jkid .wh .d-dpick .t { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.d-jira .top .sub .d-dpick:disabled, .d-jkid .wh .d-dpick:disabled { cursor: default; color: var(--dim); }
+.d-jira .top .sub .d-dpick:disabled:hover, .d-jkid .wh .d-dpick:disabled:hover { background: none; }
+/* 확인 줄이 담당을 묻는 동안 그 하위 줄을 옅게 칠한다(어느 티켓인지) */
+.d-jkid.is-hl { margin: 0 -6px; padding: 0 6px; border-radius: 8px; background: var(--sel); }
+/* 담당자 고르개는 메뉴 한 칸을 다 쓴다(칸 이름은 숨긴다 — 목록이 `담당자 고르기`로 읽힌다). 오른쪽 조용한 구분 글자는 길면 말줄임 */
+.d-mfield:has(.d-jassign) { padding: 0; }
+.d-mfield:has(.d-jassign) > .ml { display: none; }
+.d-mfield > .mc:has(.d-jassign) { flex-basis: 100%; }
+.d-jassign { flex: 1 1 100%; min-width: 0; }
+.d-jassign .d-gpopt .ky { flex: 0 1 auto; min-width: 0; max-width: 62%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .d-jkids .more { justify-self: start; min-height: var(--h-sm); padding: 0 4px; margin-left: -4px; font-size: 12.5px; }
 .d-jkids .none { display: flex; align-items: center; min-height: var(--h-sm); font-size: 12.5px; color: var(--dim); }
 .d-jkids .all {
@@ -2201,6 +2217,7 @@ body.batch-open .d-toast { bottom: 76px; }
   /* 하위 티켓 줄은 두 줄이 된다 — 담당자가 요약 아래로 내려오고 배포 버전은 숨는다 */
   .d-jkid, .d-jkids.has-ver .d-jkid { grid-template-columns: 68px minmax(0, 1fr); gap: 0 8px; padding: 2px 0; }
   .d-jkid .wh { grid-column: 2; text-align: left; }
+  .d-jkid .wh .d-dpick { margin: -4px 0 -2px -6px; }
   .d-jkid .sm { line-height: 22px; }
   .d-jkid .ver { display: none; }
 }

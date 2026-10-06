@@ -5899,8 +5899,11 @@ function uiPickFilter(entries, query) {
 // 목록 한 벌: (찾기 칸) + role=listbox 안의 선택지 버튼들. 키보드는 ⋯ 메뉴(.d-menulist)와 같다 — ↑↓가 찾기 칸과
 // 선택지 사이를 돌고(찾기 칸에서 ↓면 첫 선택지), Enter는 그 선택지, Esc는 목록을 닫는다(메뉴 안이면 메뉴는 남는다).
 // 찾기 칸에서 Enter면 맨 위 선택지를 고른다. onPick(value, query), onClose(byKeyboard).
+// onQuery(query)를 주면 화면에서 거르지 않고 찾는 말이 바뀔 때마다 그 갈래를 부른다 — 부른 쪽이
+// `root.update(entries, status)`로 목록과 상태 한 줄(`찾는 중…` 등, role=status 자리)을 바꿔 끼운다(지라 담당자 찾기).
+// 선택지 사이에 `{ type: 'sep' }`을 두면 메뉴와 같은 구분선이 선다.
 let uiPickSeq = 0;
-function uiPickList({ entries, label, onPick, onClose, search = false, placeholder = '이름이나 지라 번호로 찾기', emptyText = '찾는 프로젝트가 없어요' }) {
+function uiPickList({ entries, label, onPick, onClose, search = false, placeholder = '이름이나 지라 번호로 찾기', emptyText = '찾는 프로젝트가 없어요', onQuery = null }) {
   uiPickSeq += 1;
   const root = document.createElement('div');
   root.className = 'd-gpick';
@@ -5917,17 +5920,25 @@ function uiPickList({ entries, label, onPick, onClose, search = false, placehold
   let closed = false;
   let shown = [];    // 지금 보이는 선택지(거른 뒤)
   let buttons = [];  // 그 버튼들 — 키보드 이동·Enter가 쓴다
+  let status = '';   // onQuery일 때 부른 쪽이 정한 상태 한 줄
   const close = (byKeyboard) => { if (closed) return; closed = true; onClose(byKeyboard); };
   const pick = (value) => { if (closed) return; closed = true; onPick(value, query); };
 
   const draw = () => {
     list.replaceChildren();
-    shown = uiPickFilter(entries, query);
+    shown = onQuery ? entries : uiPickFilter(entries, query);
     buttons = [];
     const found = shown.some(entry => entry.type === 'option');
-    none.textContent = query.trim() && !found ? emptyText : '';
+    none.textContent = onQuery ? status : (query.trim() && !found ? emptyText : '');
     none.hidden = !none.textContent;
     shown.forEach((entry) => {
+      if (entry.type === 'sep') {
+        const line = document.createElement('div');
+        line.className = 'd-msep';
+        line.setAttribute('role', 'presentation');
+        list.appendChild(line);
+        return;
+      }
       if (entry.type === 'heading') {
         const head = document.createElement('div');
         head.className = 'd-gphead';
@@ -5954,6 +5965,7 @@ function uiPickList({ entries, label, onPick, onClose, search = false, placehold
         const key = document.createElement('span');
         key.className = 'ky';
         key.textContent = entry.key;
+        key.title = entry.key;
         button.appendChild(key);
       }
       if (entry.label) button.setAttribute('aria-label', entry.label);
@@ -5979,7 +5991,7 @@ function uiPickList({ entries, label, onPick, onClose, search = false, placehold
     input.spellcheck = false;
     input.setAttribute('aria-label', `${label} — 찾기`);
     input.setAttribute('aria-controls', list.id);
-    input.addEventListener('input', () => { query = input.value; draw(); });
+    input.addEventListener('input', () => { query = input.value; if (onQuery) onQuery(query); else draw(); });
     root.appendChild(input);
   }
   root.append(none, list);
@@ -6022,6 +6034,12 @@ function uiPickList({ entries, label, onPick, onClose, search = false, placehold
       if (!root.contains(document.activeElement)) close(false);
     }, 0);
   });
+  root.update = (next, line = '') => {
+    if (closed) return;
+    entries = next;
+    status = line;
+    draw();
+  };
   root.focusStart = () => {
     const current = buttons.find(button => button.getAttribute('aria-selected') === 'true');
     const target = input || current || buttons[0];

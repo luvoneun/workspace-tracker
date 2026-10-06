@@ -469,10 +469,11 @@ function jiraConfirmRow(issue, plan) {
   what.className = 'what';
   const summary = document.createElement('span');
   summary.className = 'sm';
-  summary.textContent = issue.summary || issue.key;
+  // 담당 바꾸기는 하위 티켓일 수 있다 — 그때는 카드가 아니라 그 티켓의 요약·키를 보인다.
+  summary.textContent = plan.summary || issue.summary || issue.key;
   const keyText = document.createElement('span');
   keyText.className = 'ky';
-  keyText.textContent = issue.key;
+  keyText.textContent = plan.ticket || issue.key;
   what.append(summary, keyText);
 
   const diff = document.createElement('div');
@@ -509,9 +510,10 @@ function jiraConfirmRow(issue, plan) {
   const go = document.createElement('button');
   go.type = 'button';
   go.className = 'd-btn sm acc';
-  go.textContent = '바꾸기';
+  go.textContent = plan.go || '바꾸기';
   go.addEventListener('click', async () => {
     if (jiraBusy) return;
+    if (plan.assign) return jiraAssignRun(issue, plan, cancel, go);
     jiraBusy = true;
     jiraLockPicks(true);
     cancel.disabled = true;
@@ -536,6 +538,292 @@ function jiraConfirmRow(issue, plan) {
   acts.append(cancel, go);
   row.appendChild(acts);
   return row;
+}
+
+// ---------- 담당자 바꾸기 (BJASSIGN2 — 지라에 쓴다, 확인 줄을 거친다) ----------
+// 띠 카드의 `담당 ○○`과 하위 티켓 줄의 담당 칸이 값 고르개다. 누르면 그 자리에 더보기 메뉴 안의 공용 고르개
+// (uiPickList — 찾기 칸 늘 켬)가 뜨고, 고르면 카드 안 확인 줄(`맡기기`/`빼기`)을 한 번 더 거친다.
+// 지키는 것은 다른 지라 쓰기와 같다: 확인 줄 없이 나가지 않고, 화면을 먼저 바꾸지 않으며(지라가 받아 준 뒤
+// `fresh`로 다시 읽는다), 앱의 ⌘Z 대상이 아니다(`request()`를 타지 않는다). 되돌리기는 알림의 `되돌리기` 하나뿐이다.
+// 지라 계정 id는 고르개 선택지·보내는 본문·이 브라우저의 `최근 고른 사람`에만 머문다(주소·알림 문구에는 싣지 않는다).
+const JIRA_ASSIGN_RECENT_KEY = 'jiraAssignRecent';
+const JIRA_ASSIGN_RECENT_MAX = 5;
+const JIRA_ASSIGN_WAIT_MS = 250;
+const JIRA_ASSIGN_CLEAR = '__assign-clear__';
+const JIRA_ASSIGN_RETRY = '__assign-retry__';
+const JIRA_ASSIGN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$/;
+const JIRA_ASSIGN_RESTART = '앱을 다시 시작하면 쓸 수 있어요';
+// 이 화면에서 한 번 찾은 "나"(찾기 결과의 `나` 줄). 메모리에만 둔다 — 최근 목록의 `나` 표시에만 쓴다.
+let jiraAssignMe = null;
+
+// 이름 뒤 조사 — 받침이 있으면 앞의 것(서버 jira-client.js의 josa와 같은 규칙). `으로`는 ㄹ 받침이면 `로`다.
+function jiraJosa(name, withFinal, without) {
+  const word = String(name || '');
+  const code = word.charCodeAt(word.length - 1) - 0xac00;
+  const final = code >= 0 && code <= 11171 ? code % 28 : 0;
+  const has = withFinal === '으로' ? final !== 0 && final !== 8 : final !== 0;
+  return word + (has ? withFinal : without);
+}
+
+// 최근 고른 사람 — 이 브라우저의 localStorage에만, 최대 5명, `{ name, accountId }`만(시각·티켓은 남기지 않는다).
+// 저장소를 못 쓰는 창(사생활 보호 등)이면 빈 목록이다 — 고르개는 찾기만으로 그대로 쓸 수 있다.
+function jiraAssignRecent() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(JIRA_ASSIGN_RECENT_KEY));
+    if (!Array.isArray(raw)) return [];
+    return raw.filter(entry => entry && typeof entry.name === 'string' && entry.name && typeof entry.accountId === 'string' && JIRA_ASSIGN_ID_RE.test(entry.accountId))
+      .map(entry => ({ name: entry.name, accountId: entry.accountId })).slice(0, JIRA_ASSIGN_RECENT_MAX);
+  } catch {
+    return [];
+  }
+}
+// 맡기기가 지라에 반영됐을 때만 부른다 — 맨 앞에 넣고 여섯 번째부터는 밀려난다.
+function jiraAssignRemember(person) {
+  try {
+    const list = [{ name: person.name, accountId: person.accountId }, ...jiraAssignRecent().filter(entry => entry.accountId !== person.accountId)];
+    localStorage.setItem(JIRA_ASSIGN_RECENT_KEY, JSON.stringify(list.slice(0, JIRA_ASSIGN_RECENT_MAX)));
+  } catch {}
+}
+
+// 담당 값 고르개 한 개(글자 + 작은 꺾쇠). target = { key, cardKey, summary, url, assignee, inactive, epic }.
+// 쓰는 동안(jiraBusy)은 다른 값 고르개와 함께 잠긴다(jiraLockPicks가 `.d-dpick`을 잠근다).
+function jiraAssignButton(text, target) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'd-dpick';
+  button.dataset.assign = target.key;
+  button.setAttribute('aria-haspopup', 'listbox');
+  button.setAttribute('aria-expanded', 'false');
+  button.setAttribute('aria-label', `담당 바꾸기 · ${target.key} · 지금 ${target.assignee || '담당 없음'}`);
+  button.title = target.inactive ? '지금 담당자는 지라에서 비활성이에요 — 눌러서 바꿔요' : '눌러서 담당을 바꿔요';
+  if (jiraBusy) button.disabled = true;
+  // 값 칸(.v)과 다른 이름(.t)이다 — 값 칸 셋의 글자 모양(굵기·범주 색)을 물려받지 않고 그 자리 글자 그대로다.
+  const value = document.createElement('span');
+  value.className = 't';
+  value.textContent = text;
+  const caret = document.createElement('span');
+  caret.className = 'cv';
+  // 고정 마크업(꺾쇠 아이콘)만 붙는 자리다 — 지라가 준 글자는 위 textContent로만 들어간다.
+  caret.insertAdjacentHTML('beforeend', uiIcon('chevron'));
+  button.append(value, caret);
+  button.addEventListener('click', (event) => {
+    if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+    jiraAssignOpen(button, target);
+  });
+  return button;
+}
+
+// 찾기 전(또는 한 글자) 목록: 비활성 안내 · `최근 고른 사람` · 구분선 · `담당 빼기`(지금 담당이 있을 때만).
+function jiraAssignBaseEntries(target, word = '') {
+  const entries = [];
+  if (target.inactive) entries.push({ type: 'heading', text: '지금 담당자는 지라에서 비활성이에요' });
+  const needle = word.trim().toLocaleLowerCase();
+  const recent = jiraAssignRecent().filter(person => !needle || person.name.toLocaleLowerCase().includes(needle));
+  if (recent.length) {
+    entries.push({ type: 'heading', text: '최근 고른 사람' });
+    recent.forEach(person => entries.push(jiraAssignOption(person, target, '')));
+  }
+  if (target.assignee) entries.push({ type: 'sep' }, { type: 'action', value: JIRA_ASSIGN_CLEAR, text: '담당 빼기' });
+  return entries;
+}
+// 사람 한 줄. 지금 담당은 --sel 바탕(aria-selected), 오른쪽 조용한 글자는 `나`·같은 이름 구분·`지금 담당` 중 하나.
+function jiraAssignOption(person, target, hint) {
+  const me = person.me || (jiraAssignMe && jiraAssignMe === person.accountId);
+  const current = !!target.assignee && person.name === target.assignee;
+  return {
+    type: 'option', value: person.accountId, text: person.name, person,
+    key: me ? '나' : (hint || (current ? '지금 담당' : '')), selected: current,
+  };
+}
+
+// 서버에 묻는다(두 글자 이상). 옛 서버(이 길이 없는 앱)면 `restart`, 연결 실패면 `fail`.
+async function jiraAssignSearch(key, word) {
+  let response;
+  try {
+    response = await fetch(`/api/jira/assignable?key=${encodeURIComponent(key)}&q=${encodeURIComponent(word)}`);
+  } catch {
+    return { fail: true };
+  }
+  if (response.status === 404) return { restart: true };
+  let data = null;
+  try { data = await response.json(); } catch { data = null; }
+  if (!data || data.ok !== true || data.connected === false) return { fail: true };
+  return { users: Array.isArray(data.users) ? data.users : [] };
+}
+
+// 고르개 열기. 같은 고르개를 다시 누르면 닫는다. 확인 줄이 떠 있으면 먼저 닫는다(다시 그리므로 같은 자리를 다시 찾는다).
+function jiraAssignOpen(button, target, seed = '') {
+  if (jiraBusy) return;
+  if (uiMenuOpen && uiMenuOpen.anchor === button) { uiMenuClose(); return; }
+  if (jiraConfirm) jiraConfirmClose();
+  const anchor = button.isConnected === false
+    ? [...(jiraCardNode(target.cardKey)?.querySelectorAll?.('.d-dpick') || [])].find(node => node.dataset && node.dataset.assign === target.key)
+    : button;
+  if (!anchor) return;
+  let seq = 0;
+  let timer = null;
+  let word = '';
+  let picker = null;
+  // 고른 값이 어느 사람인지는 지금 보이는 목록에서 찾는다(바꿔 끼운 목록을 기억해 둔다).
+  let shown = jiraAssignBaseEntries(target);
+  const show = (next, line = '') => { shown = next; picker.update(next, line); };
+  // 찾는 말이 바뀔 때마다: 한 글자 이하면 최근 목록만 거르고(서버에 묻지 않는다), 두 글자부터 250ms 쉬었다가 묻는다.
+  // 그 사이 친 글자가 바뀌면 늦게 온 응답은 버린다(seq).
+  const ask = (query) => {
+    word = String(query || '');
+    seq += 1;
+    clearTimeout(timer);
+    const mine = seq;
+    const trimmed = word.trim();
+    if ([...trimmed].length < 2) { show(jiraAssignBaseEntries(target, trimmed)); return; }
+    show(jiraAssignBaseEntries(target, trimmed), '찾는 중…');
+    timer = setTimeout(async () => {
+      const found = await jiraAssignSearch(target.key, trimmed);
+      if (mine !== seq) return;
+      if (found.restart) { show(jiraAssignBaseEntries(target), JIRA_ASSIGN_RESTART); return; }
+      if (found.fail) {
+        show([...jiraAssignBaseEntries(target), { type: 'action', value: JIRA_ASSIGN_RETRY, text: '다시 시도' }], '지라에 연결하지 못했어요');
+        return;
+      }
+      if (!found.users.length) {
+        show(jiraAssignBaseEntries(target), `이 티켓을 맡을 수 있는 사람 중에 '${trimmed}' 이름이 없어요`);
+        return;
+      }
+      const meRow = found.users.find(user => user.me);
+      if (meRow) jiraAssignMe = meRow.accountId;
+      const recentIds = new Set(jiraAssignRecent().map(person => person.accountId));
+      const rows = found.users.filter(user => user && JIRA_ASSIGN_ID_RE.test(String(user.accountId || '')) && user.name).slice(0, 10)
+        .map(user => jiraAssignOption({ name: user.name, accountId: user.accountId, me: !!user.me }, target,
+          user.hint ? (recentIds.has(user.accountId) ? '최근 고름' : user.hint) : ''));
+      const tail = target.assignee ? [{ type: 'sep' }, { type: 'action', value: JIRA_ASSIGN_CLEAR, text: '담당 빼기' }] : [];
+      show([{ type: 'heading', text: '지라 사용자' }, ...rows, ...tail]);
+    }, JIRA_ASSIGN_WAIT_MS);
+  };
+  const close = (focus) => {
+    seq += 1;
+    clearTimeout(timer);
+    if (uiMenuOpen && uiMenuOpen.anchor === anchor) uiMenuClose();
+    if (focus) anchor.focus?.();
+  };
+  picker = uiPickList({
+    entries: shown,
+    label: '담당자 고르기',
+    search: true,
+    placeholder: '이름으로 찾기 — 두 글자부터',
+    emptyText: '',
+    onQuery: ask,
+    onClose: byKeyboard => close(byKeyboard),
+    onPick: (value) => {
+      const entry = shown.find(row => row.type === 'option' && row.value === value);
+      close(false);
+      if (value === JIRA_ASSIGN_RETRY) { jiraAssignOpen(anchor, target, word); return; }
+      if (value === JIRA_ASSIGN_CLEAR) { jiraAssignConfirm(target, null); return; }
+      if (entry && entry.person) jiraAssignConfirm(target, entry.person);
+    },
+  });
+  picker.classList.add('d-jassign');
+  const menu = uiMenu(anchor, [[{ field: '담당자', control: picker }]]);
+  if (!menu) return;
+  picker.focusStart();
+  if (seed) {
+    const input = picker.querySelector('input');
+    if (input) input.value = seed;
+    ask(seed);
+  }
+}
+
+// 고른 뒤: 고르개는 닫히고 카드 안 확인 줄이 선다. 내가 맡던 띠 카드 티켓(에픽)을 남에게 넘길 때만 경고 한 줄.
+// "내가 맡던"은 왼쪽 목록의 원천(내 담당 지라 목록)에 그 키가 있는지로 본다.
+function jiraAssignConfirm(target, person) {
+  const listed = typeof jiraIssuesByKey === 'object' && jiraIssuesByKey ? jiraIssuesByKey.get(target.key) : null;
+  const mineNow = !!(target.epic && listed && !listed.extra && target.assignee);
+  const toMe = !!(person && jiraAssignMe && person.accountId === jiraAssignMe);
+  jiraConfirmOpen({
+    key: target.cardKey,
+    label: '담당',
+    pickLabel: `담당 바꾸기 · ${target.key} ·`,
+    before: target.assignee || '',
+    after: person ? person.name : '',
+    go: person ? '맡기기' : '빼기',
+    warn: mineNow && !toMe ? '내 담당에서 빠져요 — 왼쪽 목록에서 사라질 수 있어요.' : '',
+    summary: target.summary,
+    ticket: target.key,
+    assign: { target, person },
+    body: person
+      ? { key: target.key, kind: 'assignee', to: person.accountId, toName: person.name, expect: target.assignee || null }
+      : { key: target.key, kind: 'assignee', to: null, expect: target.assignee || null },
+  });
+}
+
+// 맡기기·되돌리기가 함께 쓰는 보내기. 실패도 `{ ok:false, kind, error }` 모양으로 돌려준다(던지지 않는다).
+// 옛 서버(이 종류를 모르는 앱 — 404·`value`)면 `restart`, 앱 서버에 닿지 못했으면 반영 여부를 모르는 `assignUnsure`.
+async function jiraAssignPost(body) {
+  let response;
+  try {
+    response = await fetch('/api/jira/change', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  } catch {
+    return { ok: false, kind: 'assignUnsure', error: '지라에 반영됐는지 확인하지 못했어요 — 카드를 새로 읽었어요.' };
+  }
+  let data = null;
+  try { data = await response.json(); } catch { data = null; }
+  if (response.status === 404 || (data && data.kind === 'value')) return { ok: false, kind: 'restart', error: JIRA_ASSIGN_RESTART };
+  if (!data) return { ok: false, kind: 'assignUnsure', error: '지라에 반영됐는지 확인하지 못했어요 — 카드를 새로 읽었어요.' };
+  return data;
+}
+
+// 실패 알림 — 확인 줄은 이미 닫혔다. 권한 없음은 `지라에서 열기`, 토큰 문제는 `설정 열기`를 붙인다.
+// 그 사이 바뀜·반영 여부 모름은 카드를 새로 읽어 지라의 지금 값을 보인다.
+function jiraAssignFail(result, target) {
+  const kind = result && result.kind;
+  const message = (result && result.error) || '지라에 반영하지 못했어요.';
+  const action = kind === 'assignForbidden' || kind === 'undoFail'
+    ? { label: kind === 'undoFail' ? '지라에서 열기 ↗' : '지라에서 열기', onClick: () => jiraOpen(target.url) }
+    : kind === 'auth' ? { label: '설정 열기', onClick: () => { if (typeof settingsOpen === 'function') settingsOpen('integrations'); } } : null;
+  showNotice(message, true, null, action);
+  if (['assigneeStale', 'assignUnsure', 'undoStale', 'undoFail'].includes(kind)) jiraCardLoad(target.cardKey, { fresh: true });
+}
+
+// 확인 줄의 `맡기기`/`빼기`. 보내는 동안 세 값 고르개·새로고침·담당 고르개가 잠기고 버튼은 `보내는 중…`이다.
+async function jiraAssignRun(issue, plan, cancel, go) {
+  if (jiraBusy) return;
+  const { target, person } = plan.assign;
+  jiraBusy = true;
+  jiraLockPicks(true);
+  cancel.disabled = true;
+  go.disabled = true;
+  go.textContent = '보내는 중…';
+  const result = await jiraAssignPost(plan.body);
+  jiraBusy = false;
+  jiraConfirmClose(false);
+  if (!result || result.ok !== true) {
+    jiraStripPaint();
+    jiraAssignFail(result, target);
+    return;
+  }
+  if (result.same) {
+    showNotice(result.assignee ? `이미 ${jiraJosa(result.assignee, '이', '가')} 맡고 있어요` : '이미 담당이 없어요');
+  } else {
+    if (person) jiraAssignRemember(person);
+    const undoId = result.undoId;
+    showNotice(result.assignee ? `${result.assignee}에게 맡겼어요` : '담당을 뺐어요', false, null,
+      undoId ? { label: '되돌리기', onClick: button => jiraAssignUndo(target, undoId, button) } : null);
+  }
+  // 낙관적 갱신 금지 — 지라가 준 값만 그린다(하위 줄·접힌 줄의 담당별 개수도 이 한 번으로 바뀐다).
+  await jiraCardLoad(target.cardKey, { fresh: true });
+}
+
+// 알림의 `되돌리기` — 직전 담당으로 다시(확인 줄은 다시 띄우지 않는다: 방금 한 일을 되돌리는 것이라). 한 번만.
+async function jiraAssignUndo(target, undoId, button) {
+  if (jiraBusy) return;
+  if (button) button.disabled = true;
+  jiraBusy = true;
+  jiraLockPicks(true);
+  const result = await jiraAssignPost({ key: target.key, kind: 'assigneeUndo', undoId });
+  jiraBusy = false;
+  jiraLockPicks(false);
+  if (!result || result.ok !== true) { jiraAssignFail(result, target); return; }
+  showNotice(`되돌렸어요 · ${result.assignee || '담당 없음'}`);
+  await jiraCardLoad(target.cardKey, { fresh: true });
 }
 
 // projectKey는 이 카드가 서 있는 프로젝트다 — `group:…`이면 손으로 건 연결이라 카드에 ⋯(해제)가 붙는다.
@@ -575,8 +863,17 @@ function jiraStripCard(issue, projectKey = '', bundle = null) {
   const sub = document.createElement('span');
   sub.className = 'sub';
   const ended = !!bundle && !!issue.status && issue.status.category === 'done';
-  sub.textContent = [bundle ? issue.key : '', bundle && bundle.lead ? '대표' : '', ended ? '끝남' : '',
-    issue.type, `담당 ${issue.assignee || '없음'}`].filter(Boolean).join(' · ');
+  const lead = [bundle ? issue.key : '', bundle && bundle.lead ? '대표' : '', ended ? '끝남' : '', issue.type].filter(Boolean).join(' · ');
+  // `담당 ○○`은 값 고르개다(BJASSIGN2) — 눌러서 이름으로 찾아 맡긴다. 앞 글자(종류 등)는 그대로 글자다.
+  if (lead) {
+    const kind = document.createElement('span');
+    kind.textContent = `${lead} ·`;
+    sub.appendChild(kind);
+  }
+  sub.appendChild(jiraAssignButton(`담당 ${issue.assignee || '없음'}`, {
+    key: issue.key, cardKey: issue.key, summary: issue.summary || issue.key, url: issue.url,
+    assignee: issue.assignee || null, inactive: !!issue.assigneeInactive, epic: true,
+  }));
   const spacer = document.createElement('span');
   spacer.className = 'sp';
   const link = document.createElement('a');
@@ -740,7 +1037,8 @@ function jiraChildWho(seat, items, issueKey = '') {
   return box;
 }
 
-// 펼친 목록. 읽기 전용이다 — 누를 수 있는 것은 요약(지라 새 탭)과 `완료 N개 더 보기`뿐이다.
+// 펼친 목록. 누를 수 있는 것은 요약(지라 새 탭)·담당 칸(값 고르개, BJASSIGN2)·`완료 N개 더 보기`뿐이다 —
+// 상태·요약·배포 버전은 그대로 읽기 전용이다.
 function jiraChildList(issue, items) {
   const list = document.createElement('div');
   list.className = 'd-jkids';
@@ -759,7 +1057,7 @@ function jiraChildList(issue, items) {
   }
   // 배포 버전 칸은 그 칸을 쓰는 줄이 하나라도 있을 때만 자리를 잡는다(빈 칸을 남기지 않는다).
   if (shown.some(item => item.version)) list.className = 'd-jkids has-ver';
-  shown.forEach(item => list.appendChild(jiraChildRow(item)));
+  shown.forEach(item => list.appendChild(jiraChildRow(item, issue.key)));
   if (folded) {
     const more = document.createElement('button');
     more.type = 'button';
@@ -782,12 +1080,15 @@ function jiraChildList(issue, items) {
   return list;
 }
 
-// 한 줄 = 지라 상태 · 요약(지라 새 탭) · 담당자 · 조용한 배포 버전.
+// 한 줄 = 지라 상태 · 요약(지라 새 탭) · 담당자(값 고르개) · 조용한 배포 버전.
 // 상태는 범주로만 색이 붙는다(배지가 아니다) — 카드 위의 `지라 상태` 칸과 같은 규칙이다.
-function jiraChildRow(item) {
+// cardKey는 이 줄이 선 띠 카드의 티켓이다(확인 줄이 그 카드 안에 서고, 맡긴 뒤 그 카드를 새로 읽는다).
+function jiraChildRow(item, cardKey = '') {
   const row = document.createElement('div');
   const category = item.status && item.status.category;
-  row.className = 'd-jkid' + (category === 'done' ? ' is-done' : '');
+  // 확인 줄이 이 줄의 담당을 묻는 동안은 줄을 옅게 칠해 어느 티켓인지 보인다.
+  const asking = !!(jiraConfirm && jiraConfirm.assign && jiraConfirm.ticket === item.key);
+  row.className = 'd-jkid' + (category === 'done' ? ' is-done' : '') + (asking ? ' is-hl' : '');
   const status = document.createElement('span');
   const tone = jiraStatusTone(category);
   status.className = 'st' + (tone ? ` ${tone}` : '');
@@ -802,7 +1103,14 @@ function jiraChildRow(item) {
   link.textContent = item.summary || '제목 없음';
   const who = document.createElement('span');
   who.className = 'wh' + (item.assignee ? '' : ' is-none');
-  who.textContent = jiraChildWhoOf(item);
+  if (cardKey) {
+    who.appendChild(jiraAssignButton(jiraChildWhoOf(item), {
+      key: item.key, cardKey, summary: item.summary || item.key, url: item.url,
+      assignee: item.assignee || null, inactive: !!item.assigneeInactive, epic: false,
+    }));
+  } else {
+    who.textContent = jiraChildWhoOf(item);
+  }
   row.append(status, link, who);
   if (item.version) {
     const version = document.createElement('span');
