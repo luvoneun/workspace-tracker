@@ -204,7 +204,9 @@ function projectFindFilter(rows, query) {
 }
 
 // 오늘 목록의 그룹 제목·업무 상세의 `프로젝트 보기`가 부르는 길.
-function openProjectTab(key) {
+function openProjectTab(key, { keepNew = false } = {}) {
+  // 새 프로젝트 화면(결과 포함)은 다른 프로젝트를 열면 닫힌다 — 새 프로젝트 화면 자신이 부를 때만 둔다.
+  if (!keepNew) projectNewLeave();
   projectKey = key;
   try { localStorage.setItem(PROJECT_KEY_STORE, key); } catch {}
   // 이 패널은 오늘 탭 자리에 있다 — 프로젝트 탭으로 옮겨 가기 전에 닫는다(팔레트로 되돌아가지 않게).
@@ -384,7 +386,9 @@ function projectRowButton(row, past, labels) {
   // 오늘 목록의 그룹 제목과 같은 색 점 — 같은 프로젝트는 어디서나 같은 색이다.
   button.append(uiProjectDot(row.key), name, right);
   button.addEventListener('click', () => {
-    if (projectKey === row.key) return;
+    const hadNew = !!projectNew;
+    if (!projectNewLeave()) { showNotice('지라에 만드는 중이에요. 끝나면 옮길 수 있어요'); return; }
+    if (projectKey === row.key && !hadNew) return;
     projectKey = row.key;
     try { localStorage.setItem(PROJECT_KEY_STORE, row.key); } catch {}
     renderProjects();
