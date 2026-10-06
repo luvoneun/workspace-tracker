@@ -41,16 +41,21 @@ function backupDir() {
   return process.env.WORKSPACE_BACKUP_DIR || path.join(os.homedir(), 'workspace-data-backup');
 }
 
+// Claude Code의 기본 설정 파일(로그인 계정이 든 `~/.claude.json`) — 점검하기 `앱 자동화가 쓰는 Claude 계정` 줄만 읽는다.
+// 테스트·픽스처는 WORKSPACE_CLAUDE_GLOBAL_CONFIG로 임시 자리를 끼운다.
+function claudeGlobalConfigFile() {
+  return process.env.WORKSPACE_CLAUDE_GLOBAL_CONFIG || path.join(os.homedir(), '.claude.json');
+}
 // ---------- 화면 확인용 픽스처의 안전망 ----------
 // `WORKSPACE_FIXTURE=1`(browser-fixture.js가 켠다)이면 서버가 쓰는 자리가 하나라도 실제 설치 위치
-// (`~/.config`·`~/.local/share/workspace-automation`·`~/Library/LaunchAgents`·`~/Applications`·이 저장소의
+// (`~/.config`·`~/.local/share/workspace-automation`·`~/Library/LaunchAgents`·`~/Applications`·`~/.claude.json`·이 저장소의
 // `workspace.config.json`·`local/`·`tracker/`)이거나 그 위(홈 폴더 등)를 가리키면 시작하지 않는다.
 // 아래 판단은 경로 글자만 본다 — 설정 파일도 그 자리가 안전할 때만 읽어 토큰 경로 칸을 확인한다.
 function workspacePaths() {
   return {
     config: CONFIG_PATH, data: TRACKER_DIR, repo: REPO_DIR, local: LOCAL_DIR,
     tokens: integrations.tokenPaths().dir, automation: automationDir(), launchAgents: launchAgentsDir(), applications: applicationsDir(),
-    backup: backupDir(),
+    backup: backupDir(), claudeGlobal: claudeGlobalConfigFile(),
   };
 }
 // 없는 경로도 견줄 수 있게, 있는 데까지 실제 경로(심볼릭 링크를 푼 것)로 바꾸고 나머지를 붙인다.
@@ -76,6 +81,7 @@ function fixtureSafetyProblems(paths = workspacePaths(), home = os.homedir()) {
     ['~/Library/LaunchAgents', path.join(homeReal, 'Library', 'LaunchAgents')],
     ['~/Applications', path.join(homeReal, 'Applications')],
     ['~/workspace-data-backup', path.join(homeReal, 'workspace-data-backup')],
+    ['~/.claude.json', path.join(homeReal, '.claude.json')],
     ['저장소의 workspace.config.json', path.join(repoRoot, 'workspace.config.json')],
     ['저장소의 local/', path.join(repoRoot, 'local')],
     ['저장소의 tracker/', path.join(repoRoot, 'tracker')],
@@ -2365,6 +2371,12 @@ const selfcheck = require('./selfcheck').createSelfcheck({
   jiraFailure: () => jiraLive.failure(),
   jiraHistory: () => jiraLive.history(),
   claudeInstalled: claudeReady,
+  // 앱 자동화가 쓰는 Claude 계정 — run-task.sh가 읽는 토큰 파일과 기본 설정 파일(~/.claude.json)만 읽는다(프로세스·바깥 없음).
+  // 픽스처·테스트는 `WORKSPACE_CLAUDE_GLOBAL_CONFIG`로 임시 파일을 끼워 실제 로그인 정보에 닿지 않는다.
+  claudeAccount: () => integrations.claudeAccountSource({
+    tokenFile: integrations.tokenPaths().claude.file,
+    globalConfigFile: claudeGlobalConfigFile(),
+  }),
   slackSuccessAt: slackSyncSuccessAt,
   slackToken: config => slackTokenNow(config),
   // 새 방식의 갱신 상태(값 없이 시각·권한·실패 종류) — 옛 방식이면 `{ auth: 'token' }`뿐이다.

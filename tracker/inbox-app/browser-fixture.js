@@ -64,6 +64,8 @@ function prepareFixture({slack}={}) {
     WORKSPACE_REPO_DIR:repo,
     WORKSPACE_LOCAL_DIR:local,
     WORKSPACE_TOKEN_DIR:tokens,
+    // 점검하기 `앱 자동화가 쓰는 Claude 계정` 줄이 읽는 기본 설정 파일 — 실제 ~/.claude.json을 보지 않게(없는 파일 = 로그인 기록 없음).
+    WORKSPACE_CLAUDE_GLOBAL_CONFIG:path.join(root,'claude-global.json'),
     WORKSPACE_AUTOMATION_DIR:automation,
     WORKSPACE_LAUNCH_AGENTS_DIR:agents,
     WORKSPACE_APPLICATIONS_DIR:apps,

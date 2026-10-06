@@ -1072,10 +1072,39 @@ function claudeInstalled(pathValue = process.env.PATH, home = os.homedir()) {
     .some((dir) => { try { return fs.statSync(path.join(dir, 'claude')).isFile(); } catch { return false; } });
 }
 
+// 앱 자동화(run-task.sh)가 어느 Claude 계정으로 도는지 — 점검하기의 `앱 자동화가 쓰는 Claude 계정` 줄.
+// run-task.sh와 같은 순서다: ① 앱에 붙여 넣은 토큰 파일(공백을 빼고 한 글자라도 있으면) ② 이 맥 Claude Code의 기본 로그인
+// (run-task.sh는 CLAUDE_CONFIG_DIR을 주지 않으므로 기본 설정 파일 `~/.claude.json`의 `oauthAccount`).
+// 프로세스를 띄우지 않고 바깥에 묻지 않는다 — 파일 두 개만 읽는다. 토큰 값은 있는지만 보고, 이메일은 이 안에서 가린 꼴
+// (`a***@e***.com`)로만 내보낸다. 토큰만으로는 어느 계정인지 알 수 없어 그쪽은 출처만 준다.
+const CLAUDE_GLOBAL_CONFIG_MAX = 50 * 1024 * 1024;
+function maskEmail(value) {
+  const match = /^([^\s@]+)@([^\s@]+)$/.exec(trimmed(value));
+  if (!match) return '';
+  const labels = match[2].split('.');
+  const tld = labels.length > 1 ? labels.pop() : '';
+  if (!labels[0]) return '';
+  return `${[...match[1]][0]}***@${[...labels[0]][0]}***${tld ? `.${tld}` : ''}`;
+}
+function claudeAccountSource({ tokenFile, globalConfigFile } = {}) {
+  if (readToken(tokenFile)) return { source: 'token' };
+  let account = null;
+  try {
+    const file = expandHome(globalConfigFile);
+    if (fs.statSync(file).size <= CLAUDE_GLOBAL_CONFIG_MAX) {
+      const oauth = JSON.parse(fs.readFileSync(file, 'utf8')).oauthAccount;
+      if (oauth && typeof oauth === 'object') account = oauth;
+    }
+  } catch { /* 파일 없음·읽을 수 없음 — 로그인 기록 없음으로 본다 */ }
+  if (!account) return { source: 'none' };
+  const masked = maskEmail(account.emailAddress);
+  return masked ? { source: 'default', account: masked } : { source: 'default' };
+}
+
 module.exports = {
   SLACK_CHANNEL_KEYS, SLACK_APPS_URL, INTEGRATION_MESSAGE: MESSAGE,
   tokenPaths, parseChannelId, slackCheckChannel, slackCreateChannel, readIntegrations, saveIntegrations,
-  scheduleRestart, errorLines, maskLine, claudeInstalled, claudeCandidateDirs, writeTokenFile,
+  scheduleRestart, errorLines, maskLine, claudeInstalled, claudeCandidateDirs, claudeAccountSource, maskEmail, writeTokenFile,
   slackTokenCheck, savedSlackToken, slackTokenForUse, saveSlackAuth, slackAuthMode, createSlackNameFollower, SLACK_FOLLOW_MS, slackChannelPrefix, slackTsNow,
   normalizeIcalUrl, fetchIcal, icalCheck, savedIcalUrl, ICAL_TIMEOUT_MS, savePersonalize, registrationKey,
   normalizeJiraSite, saveClaudeToken, CLAUDE_TOKEN_MAX, bodyReadError,

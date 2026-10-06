@@ -11,6 +11,7 @@
 // - 프로세스를 띄우지 않는다(git도 부르지 않는다 — 파일만 읽는다). 파일을 쓰지 않는다.
 // - 토큰·비밀 주소·이메일은 응답에 싣지 않는다. 경로는 `~`로 줄인다. 채널 이름·지라 표시 이름은 화면용 `detail`에만 싣고,
 //   결과 복사용 `copy`에는 개수·고정 문구만 둔다.
+//   Claude 계정은 가린 꼴(`a***@e***.com`)만 화면용 `detail`에 싣고, `copy`에는 출처만 둔다.
 // - 같은 결과를 30초 동안 들고 있는다(그 안에 다시 부르면 같은 답 — 화면도 30초에 한 번만 다시 점검한다).
 
 const fs = require('node:fs');
@@ -150,6 +151,20 @@ const netError = {
   ical: error => !!error && !error.auth && error.net === true,
 };
 
+// `앱 자동화가 쓰는 Claude 계정` 한 줄 — 출처(앱 토큰 / 이 맥 기본 로그인 / 없음)와 가린 계정만.
+const CLAUDE_ACCOUNT_NOTE = '터미널에서 쓰는 계정과 다를 수 있어요';
+function claudeAccountItem(who) {
+  const base = { key: 'claudeAccount', label: '앱 자동화가 쓰는 Claude 계정' };
+  if (who.source === 'token') {
+    return { ...base, state: 'ok', detail: `앱에 붙여 넣은 토큰 · 토큰만으로는 어느 계정인지 알 수 없어요 · ${CLAUDE_ACCOUNT_NOTE}`, copy: '앱에 붙여 넣은 토큰' };
+  }
+  if (who.source === 'default') {
+    const account = typeof who.account === 'string' && who.account ? who.account : '';
+    return { ...base, state: 'ok', detail: `이 맥의 기본 Claude Code 로그인${account ? ` (${account})` : ''} · ${CLAUDE_ACCOUNT_NOTE}`, copy: '이 맥의 기본 Claude Code 로그인' };
+  }
+  return { ...base, state: 'unknown', detail: '로그인 없음 — 앱에 붙여 넣은 토큰도, 이 맥의 기본 Claude Code 로그인 기록도 찾지 못했어요', copy: '로그인 없음' };
+}
+
 function createSelfcheck(deps) {
   let held = null;   // { at, result }
   let running = null;
@@ -259,6 +274,10 @@ function createSelfcheck(deps) {
         } else {
           add({ key: 'claude', label: 'Claude Code 로그인', state: 'unknown', detail: '아직 알 수 없어요 — Claude가 한 번 돌면 최근 기록으로 알려 줘요' });
         }
+        // 어느 계정으로 도는지(run-task.sh와 같은 순서 — integrations.claudeAccountSource). 알리기만 하고 문제로 세지 않는다.
+        // 토큰 값·이메일 원문은 받지도 않는다(가린 꼴만). 가린 계정은 화면에만 두고 결과 복사에는 출처만.
+        const who = deps.claudeAccount ? deps.claudeAccount() : null;
+        if (who) add(claudeAccountItem(who));
       }
     }
 
