@@ -821,14 +821,19 @@ function uiHeldFlush() {
 // 목록은 매번 통째로 다시 그린다. 줄이 순간 이동하지 않게, 그리기 앞뒤의 자리를 재서 옛 자리에서 새 자리로 잇는다(FLIP).
 // 움직이는 것은 사용자의 동작(클릭·키) 직후 0.5초 안의 다시 그리기뿐이다. 자동 갱신·처음 그리기·미뤘다 푸는 그리기·
 // 글자 입력 중·분류 판이나 종류 목록이 열린 동안·키보드로 연달아 하는 동작·보이는 줄 40개 초과(전체 150줄 초과는 재지도 않음)는 그냥 그린다.
+// 빠른 추가 칸에서 Enter로 적은 줄만은 예외로 새 줄 나타남만 준다(다른 줄은 그대로 — uiGlideAddMark).
 // transform·opacity만 쓰고(넘침 없음), 값은 ui.css의 --ease·--t-move·--t-fast와 같다(el.animate는 var()를 못 읽는다).
-const UI_GLIDE = { ease: 'cubic-bezier(0.22, 0.8, 0.3, 1)', move: 200, enter: 140, fade: 120, within: 500, max: 40, rows: 150 };
-const UI_GLIDE_ROWS = '[data-task-id], [data-move-id]';
+// 어느 목록이든 그리기를 uiRowsMove(목록, 그리기)로 감싸면 된다. 줄의 열쇠는 data-task-id · data-move-id · data-rail-id 가운데 하나다.
+const UI_GLIDE = { ease: 'cubic-bezier(0.22, 0.8, 0.3, 1)', move: 200, enter: 140, fade: 120, strike: 200, within: 500, max: 40, rows: 150 };
+const UI_GLIDE_ROWS = '[data-task-id], [data-move-id], [data-rail-id]';
 let uiActAt = 0;        // 마지막 사용자 동작 시각
 let uiActQuiet = false; // 그 동작이 키보드 연타(1초 안에 이어진 키·누르고 있는 키)였다
 let uiActByKey = false; // 그 동작이 키보드였다 — 키보드로 연 뜨는 것은 넘침 없이 나타남만(uiFloatOpen)
 let uiKeyAt = 0;
+let uiActSeq = 0;        // 사용자 동작마다 하나씩 는다(같은 밀리초의 두 동작도 가린다)
 let uiGlideLate = 0;     // 미뤘다 푸는 그리기 안에서는 0보다 크다
+let uiGlideAdd = null;   // 빠른 추가 칸의 Enter — { el, act }(act는 그 Enter의 동작 번호)
+const uiGlideDone = new Map(); // 방금 체크한 줄 — id → { at, into(들어갈 제목의 열쇠·id), strike(줄 긋기를 기다리나) }
 
 // 문서의 click·keydown(잡기 단계)이 부른다. 키보드가 만든 click(detail 0)은 keydown이 이미 적었다.
 function uiActMark(event) {
@@ -845,6 +850,18 @@ function uiActMark(event) {
     uiActByKey = false;
   }
   uiActAt = now;
+  uiActSeq += 1;
+}
+// 빠른 추가 칸의 Enter(누르고 있는 키는 빼고)를 적는다 — 그 저장 뒤 다시 그리기에서 새 줄만 나타난다.
+function uiGlideAddMark(input, event) {
+  if (!event || event.repeat || event.isTrusted === false) return;
+  uiGlideAdd = { el: input, act: uiActSeq };
+}
+// 체크해서 다른 자리(`완료 N` 제목·`반영 완료` 접힘)로 들어가는 줄을 적는다 — strike면 줄 긋기(--t-move)가 끝난 뒤 움직인다.
+function uiGlideDoneMark(id, into, strike = false) {
+  if (id === undefined || id === null) return;
+  uiGlideDone.set(String(id), { at: Date.now(), into, strike });
+  [...uiGlideDone].forEach(([key, entry]) => { if (Date.now() - entry.at > 2000) uiGlideDone.delete(key); });
 }
 function uiGlideStill(render) {
   uiGlideLate += 1;
@@ -856,13 +873,24 @@ function uiGlideUnlessLate(render) {
   Promise.resolve().then(() => { late = true; });
   return () => (late ? uiGlideStill(render) : render());
 }
-function uiGlideAllowed() {
-  if (uiGlideLate || uiActQuiet || Date.now() - uiActAt > UI_GLIDE.within) return false;
-  if (uiSchedOpen || uiComposingEl || uiIsTextEntry(document.activeElement) || document.hidden) return false;
-  return !document.querySelector?.('.d-typepop:not(.is-out)'); // 닫힘을 재생하는 복사본은 열린 것이 아니다
+// 'all' 움직인다 · 'enter' 새 줄 나타남만(빠른 추가 Enter) · null 그냥 그린다.
+function uiGlideMode() {
+  if (uiGlideLate || Date.now() - uiActAt > UI_GLIDE.within) return null;
+  if (uiSchedOpen || uiComposingEl || document.hidden) return null;
+  if (document.querySelector?.('.d-typepop:not(.is-out)')) return null; // 닫힘을 재생하는 복사본은 열린 것이 아니다
+  const el = document.activeElement;
+  if (!uiIsTextEntry(el) && !uiActQuiet) return 'all';
+  if (uiGlideAdd && el && uiGlideAdd.el === el && uiGlideAdd.act === uiActSeq) return 'enter';
+  return null;
 }
-// 줄마다 자리와 "화면에 보이는가"를 잰다. 열쇠는 업무 id(새로 들어온 것 줄·그룹 제목은 data-move-id).
+function uiGlideAllowed() {
+  return uiGlideMode() === 'all';
+}
+// 줄마다 자리와 "화면에 보이는가"를 잰다. 열쇠는 업무 id(새로 들어온 것 줄·그룹 제목·그 밖의 목록은 data-move-id, 레일 줄은 data-rail-id).
 // sized = 높이가 있었다(숨은 탭·접힌 구역 안의 줄은 자리가 전부 0이라 옛 자리로 쓸 수 없다).
+function uiGlideKey(row) {
+  return String(row.dataset.taskId ?? row.dataset.moveId ?? row.dataset.railId);
+}
 function uiGlideBoxes(list) {
   const boxes = new Map();
   const viewW = window.innerWidth || 0;
@@ -873,23 +901,38 @@ function uiGlideBoxes(list) {
     const sized = box.height > 0;
     const shown = sized && box.bottom > 0 && box.top < viewH && box.right > 0 && box.left < viewW;
     if (shown) shownCount += 1;
-    boxes.set(String(row.dataset.taskId ?? row.dataset.moveId), { row, left: box.left, top: box.top, shown, sized });
+    const key = uiGlideKey(row);
+    if (!boxes.has(key)) boxes.set(key, { row, left: box.left, top: box.top, width: box.width, height: box.height, shown, sized });
   });
   return { boxes, shownCount };
 }
-function uiGlidePlay(row, frames, duration) {
+// wait: 앞에서 기다리는 시간(줄 긋기). 기다리는 동안 첫 장면에 머문다(fill backwards) — 그 밖에는 끝난 뒤 남는 값이 없다.
+function uiGlidePlay(row, frames, duration, wait = 0, done = null) {
   let motion;
-  try { motion = row.animate(frames, { duration, easing: UI_GLIDE.ease }); } catch { return; }
+  const options = { duration, easing: UI_GLIDE.ease };
+  if (wait > 0) Object.assign(options, { delay: wait, fill: 'backwards' });
+  if (done) options.fill = wait > 0 ? 'both' : 'forwards';
+  try { motion = row.animate(frames, options); } catch { if (done) done(); return; }
   // 끝남 신호가 안 와도(가려진 탭 등) 시간으로 치운다 — transform이 줄에 남지 않게.
-  setTimeout(() => { try { motion.cancel(); } catch { /* 이미 끝났다 */ } }, duration + 80);
+  setTimeout(() => {
+    try { motion.cancel(); } catch { /* 이미 끝났다 */ }
+    if (done) done();
+  }, wait + duration + 80);
 }
-// 오늘 탭의 세 목록은 위아래로 이어져 있다 — 위 목록이 줄면 아래 목록의 줄도 밀린다. 그래서 같은 틱 안의 그리기들은
-// "그리기 전 자리"를 한 번만(첫 그리기 직전에, 세 목록 모두) 재서 함께 쓰고, 다 그린 뒤 한 번에 잇는다.
-const UI_GLIDE_LISTS = ['inboxList', 'todayTaskList', 'laterTaskList'];
-let uiGlideShot = null; // { before: Map<목록, 자리>, drawn: Set<다시 그린 목록> }
+// 위아래로 이어진 목록은 함께 잰다 — 위 목록이 줄면 아래 목록의 줄도 밀린다. 그래서 같은 틱 안의 그리기들은
+// "그리기 전 자리"를 무리마다 한 번만(그 무리의 첫 그리기 직전에, 무리의 목록 모두) 재서 함께 쓰고, 다 그린 뒤 한 번에 잇는다.
+// 무리에 없는 목록은 제 목록만 잰다. 상한(보이는 40줄·전체 150줄)도 무리마다 따로 센다.
+const UI_GLIDE_LISTS = [
+  ['attentionList', 'inboxList', 'todayTaskList', 'laterTaskList'], // 오늘 탭 가운데(나중에 할 일은 서랍)
+  ['calendarList', 'reminderList', 'waitingList'],                  // 오늘 탭 왼쪽 레일
+  ['decisionList', 'decisionArchiveList'],                          // 결정 — 체크하면 `반영 완료`로 옮겨 간다
+];
+let uiGlideShot = null; // { mode, before: Map<목록, 자리>, groups: [목록…][], drawn: Set<다시 그린 목록> }
 function uiGlideLists(list) {
-  const lists = UI_GLIDE_LISTS.map(id => document.getElementById(id)).filter(el => el && el.querySelectorAll);
-  return lists.includes(list) ? lists : [...lists, list];
+  const group = UI_GLIDE_LISTS
+    .map(ids => ids.map(id => document.getElementById(id)).filter(el => el && el.querySelectorAll))
+    .find(lists => lists.includes(list));
+  return group || [list];
 }
 // 줄이 너무 많으면 자리를 재지도 않는다(잴 때마다 화면 전체를 다시 계산한다) — 줄 수만 세고 그냥 그린다.
 function uiGlideTooMany(lists) {
@@ -897,14 +940,20 @@ function uiGlideTooMany(lists) {
 }
 // 그리기 전 자리를 잡아 둔다. 움직이지 않을 그리기면 null.
 function uiGlideOpen(list) {
-  if (!list || !list.querySelectorAll || !uiGlideAllowed()) return null;
+  if (!list || !list.querySelectorAll) return null;
+  const mode = uiGlideMode();
+  if (!mode) return null;
   if (uiGlideShot) {
-    if (!uiGlideShot.before.has(list)) uiGlideShot.before.set(list, uiGlideBoxes(list));
+    if (uiGlideShot.before.has(list)) return uiGlideShot;
+    const lists = uiGlideLists(list).filter(el => !uiGlideShot.before.has(el));
+    if (uiGlideTooMany(lists)) return null;
+    lists.forEach(el => uiGlideShot.before.set(el, uiGlideBoxes(el)));
+    uiGlideShot.groups.push(lists);
     return uiGlideShot;
   }
   const lists = uiGlideLists(list);
   if (uiGlideTooMany(lists)) return null;
-  const shot = { before: new Map(lists.map(el => [el, uiGlideBoxes(el)])), drawn: new Set() };
+  const shot = { mode, before: new Map(lists.map(el => [el, uiGlideBoxes(el)])), groups: [lists], drawn: new Set() };
   uiGlideShot = shot;
   // 그리기를 부른 쪽(load의 상세 카드 자리 잡기 등)이 줄의 새 자리를 다 읽은 뒤, 화면에 칠해지기 전에 건다.
   Promise.resolve().then(() => {
@@ -919,29 +968,117 @@ function uiRowsMove(list, render) {
   render();
 }
 function uiGlideJoin(shot) {
-  if (uiGlideTooMany([...shot.before.keys()])) return;
-  const lists = [...shot.before].map(([list, before]) => ({ list, before, after: uiGlideBoxes(list) }));
-  const count = side => lists.reduce((sum, each) => sum + each[side].shownCount, 0);
-  if (count('before') > UI_GLIDE.max || count('after') > UI_GLIDE.max) return;
-  const reduce = detailReduce(); // 움직임 줄이기: 이동은 끄고 새 줄의 120ms 흐려짐만
-  lists.forEach(({ list, before, after }) => after.boxes.forEach((now, id) => {
-    const row = now.row;
-    if (typeof row.animate !== 'function') return;
-    const was = before.boxes.get(id);
+  const reduce = detailReduce(); // 움직임 줄이기: 이동·사라짐은 끄고 새 줄의 120ms 흐려짐만
+  shot.groups.forEach((group) => {
+    if (uiGlideTooMany(group)) return;
+    const lists = group.map(list => ({ list, before: shot.before.get(list), after: uiGlideBoxes(list) }));
+    const count = side => lists.reduce((sum, each) => sum + each[side].shownCount, 0);
+    if (count('before') > UI_GLIDE.max || count('after') > UI_GLIDE.max) return;
+    uiGlideJoinGroup(shot, lists, reduce);
+  });
+}
+// 그룹 제목(grp:)은 목록마다 따로 있어 같은 목록 안에서만 짝짓는다. 줄은 무리 안 다른 목록에서 왔어도 잇는다(새로 들어온 것 → 오늘, 결정 → 반영 완료).
+function uiGlideFind(lists, list, side, key) {
+  const own = lists.find(each => each.list === list)[side].boxes.get(key);
+  if (own || key.startsWith('grp:')) return own;
+  for (const each of lists) { const found = each[side].boxes.get(key); if (found) return found; }
+  return undefined;
+}
+function uiGlideJoinGroup(shot, lists, reduce) {
+  const now = Date.now();
+  // 완료 흐름: 체크 → 줄 긋기(--t-move) → 줄이 `완료 N` 제목으로 들어감. 긋는 동안은 무리 전체가 옛 자리에 머문다.
+  let wait = 0;
+  const done = new Map();
+  if (shot.mode === 'all' && !reduce) {
+    lists.forEach(({ before }) => before.boxes.forEach((was, key) => {
+      const entry = uiGlideDone.get(key);
+      if (!entry || done.has(key)) return;
+      uiGlideDone.delete(key);
+      done.set(key, entry);
+      if (entry.strike) wait = Math.max(wait, UI_GLIDE.strike - (now - entry.at));
+    }));
+  }
+  wait = Math.max(0, Math.round(wait));
+  lists.forEach(({ list, after }) => after.boxes.forEach((nowBox, key) => {
+    const row = nowBox.row;
+    if (typeof row.animate !== 'function' || row.classList.contains('is-rise')) return;
+    const was = uiGlideFind(lists, list, 'before', key);
     if (!was) {
-      // 새로 생긴 줄 — 분류의 새 줄 솟음(is-rise)이 이미 걸렸으면 그것 하나만 움직인다.
-      if (!now.shown || !shot.drawn.has(list) || row.classList.contains('is-rise')) return;
+      // 새로 생긴 줄 — 분류의 새 줄 솟음(is-rise)이 이미 걸렸으면 그것 하나만 움직인다(위에서 걸렀다).
+      if (!nowBox.shown || !shot.drawn.has(list)) return;
       if (reduce) uiGlidePlay(row, [{ opacity: 0 }, { opacity: 1 }], UI_GLIDE.fade);
-      else uiGlidePlay(row, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], UI_GLIDE.enter);
+      else uiGlidePlay(row, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], UI_GLIDE.enter, wait);
       return;
     }
-    // 전에 높이가 없던 줄(숨은 탭 안)은 옛 자리가 (0,0)이다 — 거기서 날아오지 않게 그냥 둔다.
-    if (reduce || !was.sized || (!was.shown && !now.shown)) return;
-    const dx = was.left - now.left;
-    const dy = was.top - now.top;
+    // 빠른 추가 뒤에는 새 줄만 — 밀린 줄은 그대로 선다. 전에 높이가 없던 줄(숨은 탭 안)은 옛 자리가 (0,0)이다 — 거기서 날아오지 않게 그냥 둔다.
+    if (shot.mode !== 'all' || reduce || !was.sized || (!was.shown && !nowBox.shown)) return;
+    if (done.has(key)) uiGlideStrikeOn(row, now - done.get(key).at, wait + UI_GLIDE.move);
+    const dx = was.left - nowBox.left;
+    const dy = was.top - nowBox.top;
     if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
-    uiGlidePlay(row, [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], UI_GLIDE.move);
+    uiGlidePlay(row, [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], UI_GLIDE.move, wait);
   }));
+  if (shot.mode !== 'all' || reduce) return;
+  // 사라진 줄 — 옛 자리에 그림자 한 장을 띄워 흐린다(120ms). 체크해서 접힌 제목으로 들어간 줄은 그 제목 쪽으로 미끄러지며 흐려진다(200ms).
+  lists.forEach(({ list, before }) => {
+    if (!shot.drawn.has(list)) return;
+    before.boxes.forEach((was, key) => {
+      if (!was.shown || key.startsWith('grp:')) return;
+      // 같은 목록에 남았으면 위에서 미끄러졌다. 무리 안 다른 목록으로 갔어도 그 줄이 보일 때만 그쪽이 잇는다(닫힌 서랍으로 간 줄은 여기서 흐려진다).
+      if (lists.find(each => each.list === list).after.boxes.has(key)) return;
+      const moved = uiGlideFind(lists, list, 'after', key);
+      if (moved && moved.shown) return;
+      const entry = done.get(key);
+      const target = entry && entry.into ? uiGlideTarget(lists, list, entry.into) : null;
+      if (target) {
+        uiGlideGhost(list, was, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: `translateY(${target.top - was.top}px) scale(.98)` }], UI_GLIDE.move, wait, entry.strike ? now - entry.at : null);
+      } else {
+        uiGlideGhost(list, was, [{ opacity: 1 }, { opacity: 0 }], UI_GLIDE.fade, wait, entry && entry.strike ? now - entry.at : null);
+      }
+    });
+  });
+}
+// 들어갈 자리 — 같은 목록의 그룹 제목(grp:완료) 또는 화면의 id(decisionArchiveToggle).
+function uiGlideTarget(lists, list, into) {
+  const head = lists.find(each => each.list === list).after.boxes.get(into);
+  if (head && head.shown) return head;
+  const el = document.getElementById?.(into);
+  if (!el || el.hidden || typeof el.getBoundingClientRect !== 'function') return null;
+  const box = el.getBoundingClientRect();
+  return box.height > 0 ? box : null;
+}
+// 체크한 줄의 줄 긋기를 새 줄에서 이어 그린다(다시 그려지며 처음부터 다시 그어지지 않게) — 끝나면 표시를 뗀다.
+function uiGlideStrikeOn(row, elapsed, until) {
+  if (!row.querySelectorAll) return;
+  row.classList.add('is-completing');
+  row.querySelectorAll('.d-title').forEach((title) => { title.style.animationDelay = `${-Math.max(0, elapsed)}ms`; });
+  setTimeout(() => row.classList.remove('is-completing'), until + 80);
+}
+// 사라진 줄의 그림자 — 옛 줄을 복사해 목록 끝에 붙이고(누를 수 없고 읽히지 않으며 열쇠·id가 없다) 옛 자리에 놓았다가 재생 뒤 떼어 낸다.
+function uiGlideGhost(list, was, frames, duration, wait, strikeAt) {
+  const old = was.row;
+  if (!old || old.isConnected !== false || typeof old.cloneNode !== 'function' || typeof list.appendChild !== 'function') return;
+  let ghost = null;
+  try {
+    ghost = old.cloneNode(true);
+    [ghost, ...ghost.querySelectorAll('*')].forEach((node) => {
+      node.removeAttribute('id');
+      [...node.attributes].filter(attr => attr.name.startsWith('data-')).forEach(attr => node.removeAttribute(attr.name));
+    });
+    ghost.inert = true;
+    ghost.setAttribute('aria-hidden', 'true');
+    ghost.classList.add('d-glide-ghost');
+    if (strikeAt !== null) ghost.querySelectorAll('.d-title').forEach((title) => { title.style.animationDelay = `${-Math.max(0, strikeAt)}ms`; });
+    list.appendChild(ghost);
+    const host = ghost.offsetParent;
+    if (!host) { ghost.remove(); return; }
+    const box = host.getBoundingClientRect();
+    ghost.style.left = `${was.left - box.left - host.clientLeft + host.scrollLeft}px`;
+    ghost.style.top = `${was.top - box.top - host.clientTop + host.scrollTop}px`;
+    ghost.style.width = `${was.width}px`;
+    ghost.style.height = `${was.height}px`;
+  } catch { ghost?.remove?.(); return; }
+  uiGlidePlay(ghost, frames, duration, wait, () => ghost.remove());
 }
 
 // 그룹 제목의 `+`로 여는 그 자리 입력줄. 저장 뒤 목록을 다시 그려도 같은 줄로 포커스가 돌아온다(uiAddRowRestore).
@@ -960,6 +1097,7 @@ function uiGroupAddRow(key, endpoint, announceText) {
     if (event.key !== 'Enter' || event.isComposing) return;
     const description = input.value.trim();
     if (!description) return;
+    uiGlideAddMark(input, event); // 빠른 추가와 같다 — 새 줄만 나타난다
     // 칸은 잠그지 않고 바로 비운다 — 저장 중에 친 다음 글자는 그대로 남는다(uiQueueSend).
     input.value = '';
     const payload = { description };
@@ -2053,6 +2191,9 @@ function nowHHMM() {
 
 // 레일의 오늘 미팅. 한 줄 = 시각 | 제목(프로젝트는 같은 줄 뒤 조용한 글자) | 조용한 개수 + hover 더보기.
 function renderCalendar(calendar) {
+  uiRowsMove(document.getElementById('calendarList'), () => renderCalendarNow(calendar));
+}
+function renderCalendarNow(calendar) {
   const events = ((calendar && calendar.events) || []).map(event => {
     const saved = workflowData.meetings.find(meeting => meeting.date === todayStr() && meeting.start === event.start && meeting.title === event.title);
     return saved ? { ...event, project: saved.project, workflowId: saved.id, draftCount: saved.drafts?.length || 0 } : event;
@@ -2092,6 +2233,7 @@ function renderCalendar(calendar) {
     row.className = 'd-mrow' + (running ? ' is-now' : past ? ' is-past' : '');
     // 회의 정리 패널이 열리면 이 표식으로 찾아 `지금 보는 회의`를 표시한다.
     row.dataset.meetingId = event.workflowId || `${event.start || ''} ${event.title || ''}`;
+    row.dataset.moveId = `mt:${row.dataset.meetingId}`; // 줄 이동 도우미의 열쇠
     // 1분마다 도는 시계가 이 값으로 `지금 하는 회의`를 다시 칠한다.
     row.dataset.start = event.start || '';
     row.dataset.end = event.end || '99:99';
@@ -2245,6 +2387,7 @@ function deployReminderRow(entry) {
     sub,
     onOpen: () => openProjectTab(entry.key),
   });
+  row.dataset.moveId = `deploy:${entry.key}`; // 줄 이동 도우미의 열쇠(업무 줄이 아니라 data-rail-id가 없다)
   const title = row.querySelector('.ti');
   if (title) {
     const line = `${entry.name} ${entry.text} · ${entry.label} · 열린 업무 ${entry.open}`;
@@ -2332,6 +2475,9 @@ function answerSeenNotice(id) {
 }
 
 function renderReminders(reminders, answered = [], deploys = []) {
+  uiRowsMove(document.getElementById('reminderList'), () => renderRemindersNow(reminders, answered, deploys));
+}
+function renderRemindersNow(reminders, answered, deploys) {
   const zone = document.getElementById('reminderZone');
   const list = document.getElementById('reminderList');
 
@@ -2508,6 +2654,9 @@ function decisionJiraSummary(item) {
 // `프로젝트 없음` 묶음만 색 점 없이 맨 아래에 선다(uiGroupTasks가 순서를 맡는다).
 // 빈 문장은 고정 문구뿐이다(사용자 값을 넣지 않는다). 입력 칸 바로 아래의 짧은 빈 문장은 `is-short`.
 function renderRecordColumn(list, items, row, emptyText, emptyTone = '') {
+  uiRowsMove(list, () => renderRecordColumnNow(list, items, row, emptyText, emptyTone));
+}
+function renderRecordColumnNow(list, items, row, emptyText, emptyTone) {
   list.replaceChildren();
   if (!items.length) {
     list.insertAdjacentHTML('beforeend', `<div class="d-empty${emptyTone ? ` ${emptyTone}` : ''}">${emptyText}</div>`);
@@ -2668,6 +2817,9 @@ function renderDecisionArchive() {
   const body = document.getElementById('decisionArchiveBody');
   const list = document.getElementById('decisionArchiveList');
   if (!toggle || !body || !list) return;
+  uiRowsMove(list, () => renderDecisionArchiveNow(toggle, body, list));
+}
+function renderDecisionArchiveNow(toggle, body, list) {
   const items = decisionArchiveCache.filter(decisionMatches);
   const open = decisionArchiveOpen || !!decisionQuery;
   document.getElementById('decisionArchiveCount').textContent = items.length;
@@ -2694,9 +2846,11 @@ function decisionCheckbox(item, row, archived) {
   box.checked = archived;
   box.title = 'PRD 반영함으로 표시';
   box.setAttribute('aria-label', `${item.description} — PRD 반영함으로 표시`);
-  box.addEventListener('change', () =>
-    fadeOutAndRun(row, () => toggleTask(item.id), archived ? 'PRD 미반영으로 되돌렸어요' : 'PRD 반영으로 표시했어요')
-  );
+  box.addEventListener('change', () => {
+    // 반영한 줄은 접힌 `반영 완료` 쪽으로 미끄러지며 빠진다(아이디어·결정 탭 — 다른 자리에서는 표시만 남고 쓰이지 않는다).
+    if (!archived) uiGlideDoneMark(item.id, 'decisionArchiveToggle');
+    fadeOutAndRun(row, () => toggleTask(item.id), archived ? 'PRD 미반영으로 되돌렸어요' : 'PRD 반영으로 표시했어요');
+  });
   check.appendChild(box);
   check.insertAdjacentHTML('beforeend', UI_TICK_SVG);
   return check;
@@ -2709,6 +2863,7 @@ function recordDecisionRow(item, archived) {
   row.className = 'd-rec is-dec' + (archived ? ' is-done' : '');
   // 검색 팔레트가 이 줄을 찾아 옮겨 갈 수 있게 표식을 남긴다.
   row.dataset.itemId = item.id;
+  row.dataset.moveId = item.id; // 줄 이동 도우미의 열쇠
 
   row.appendChild(decisionCheckbox(item, row, archived));
 
@@ -2820,6 +2975,7 @@ function recordIdeaRow(item) {
   const row = document.createElement('div');
   row.className = 'd-rec is-idea';
   row.dataset.itemId = item.id;
+  row.dataset.moveId = item.id; // 줄 이동 도우미의 열쇠
 
   // 평소 두 줄, **잘렸을 때만** 누르면 그 자리에서 전문(다시 누르면 접힘) — 잘리지 않은 아이디어는 누를 수 없는
   // 평범한 글자다(uiClampWatch). 원문은 제목 옆이 아니라 아래 정보 줄에 — 제목과 같이 잘려 사라지던 것.
@@ -3034,6 +3190,8 @@ function taskCompletionCheckbox(item, card, done) {
     // 끝내는 순간을 눈으로 보여 준다: 체크가 그려지고 → 제목에 줄이 그어지고 → 옅어진다.
     // 저장·되돌리기 쪽은 그대로다(클래스 하나만 붙인다. 움직임 줄이기에서는 ui.css가 끈다).
     if (!done) card.classList.add('is-completing');
+    // 줄 긋기가 끝난 뒤 줄이 `완료 N` 제목으로 들어간다(다시 그리기의 줄 이동 도우미가 이 표시를 본다).
+    if (!done) uiGlideDoneMark(item.id, 'grp:완료', true);
     const mark = uiUndoMark();
     fadeOutAndRun(card, async () => { await toggleTask(item.id); if (!done) workflowOutcome(item, uiUndoOwn(mark)); }, done ? '미완료로 되돌렸어요' : null);
   });
@@ -6349,6 +6507,7 @@ function setupQuickAdd(inputId, endpoint, announceText) {
     if (e.key !== 'Enter' || e.isComposing) return;
     const description = input.value.trim();
     if (!description) return;
+    uiGlideAddMark(input, e); // 저장 뒤 다시 그리기에서 새 줄만 나타난다(다른 줄은 그대로)
     // 칸은 잠그지 않고 바로 비운다 — 저장 중에 친 다음 글자는 그대로 남고, 연속 Enter는 순서대로 저장된다.
     input.value = '';
     const run = uiQueueSend(inputId, async () => {

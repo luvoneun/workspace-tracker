@@ -151,6 +151,7 @@ function attentionActs(item, card, edit) {
 function attentionRow(item) {
   const card = document.createElement('article');
   card.className = 'd-atrow';
+  card.dataset.moveId = `at:${item.id}`; // 줄 이동 도우미의 열쇠
   card.setAttribute('aria-label', `반응 필요 — ${attentionLabel(item)}`);
 
   // 앞머리(출처 이름표 + 색 점)는 제 칸(`ld`)에 따로 선다 — 그래야 둘째 줄 미리보기가 제목 바로
@@ -219,8 +220,13 @@ function attentionRender() {
   const zone = document.getElementById('attentionZone');
   const list = document.getElementById('attentionList');
   if (!zone || !list) return;
-  // `할 일로` 입력칸에 손이 가 있으면 다시 그리지 않는다(적던 글과 초점이 날아가지 않게).
+  // `할 일로` 입력칸에 손이 가 있으면 다시 그리지 않는다(적던 글과 초점이 날아가지 않게). 움직임은 이 보류 뒤에 선다.
   if (typeof isTyping === 'function' && isTyping() && zone.contains && zone.contains(document.activeElement)) return;
+  // 줄은 줄 이동 도우미(app.js uiRowsMove)를 거쳐 그린다 — `했어요` 뒤 줄이 흐려지고 아래(새로 들어온 것·오늘 할 일)가 올라온다.
+  if (typeof uiRowsMove === 'function') uiRowsMove(list, () => attentionRenderNow(zone, list));
+  else attentionRenderNow(zone, list);
+}
+function attentionRenderNow(zone, list) {
   const items = attentionState.connected ? attentionState.items : [];
   zone.hidden = !items.length;
   if (!items.length) { list.replaceChildren(); return; }

@@ -436,7 +436,13 @@ function setWaitingView(value) {
   renderWaiting(waitingItemsCache);
 }
 
+// 줄은 줄 이동 도우미(app.js uiRowsMove)를 거쳐 그린다 — 보기 전환·체크 뒤 줄이 미끄러진다(열쇠는 레일 줄의 data-rail-id).
 function renderWaiting(items) {
+  const list = document.getElementById('waitingList');
+  if (typeof uiRowsMove === 'function') uiRowsMove(list, () => renderWaitingNow(items));
+  else renderWaitingNow(items);
+}
+function renderWaitingNow(items) {
   waitingItemsCache = items;
   document.getElementById('waitingCount').textContent = items.length;
   const sectionCount = document.getElementById('waitingSectionCount');

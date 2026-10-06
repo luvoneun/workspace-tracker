@@ -1292,19 +1292,23 @@ body.batch-open .d-row.is-done { opacity: 0.6; }
 /* 회의 줄에서 문구를 고치는 동안은 체크박스를 잠근다 — 흐리게 보여 누를 수 없다는 것을 알린다. */
 .d-cb:disabled, .d-wcb:disabled { cursor: default; opacity: 0.5; }
 
-/* 끝내는 순간: 체크가 그려지고 → 제목에 줄이 그어지고 → 옅어진다 */
-.d-cb:checked, .d-wcb:checked { animation: d-pop-check var(--t-slow) var(--ease); }
+/* 끝내는 순간(완료 흐름): 체크가 톡(--t-fast) → 제목에 줄이 그어지고(--t-move) → 줄이 `완료 N` 제목으로 들어간다.
+   들어가는 것은 줄 이동 도우미가 긋기가 끝난 뒤에 건다(app.js uiGlideDoneMark·uiGlideJoinGroup). 다시 그려진 줄·그림자는
+   같은 긋기를 이어 그린다(animation-delay를 지난 시간만큼 당긴다) — 그동안 완료 줄의 취소선은 숨겨 두 줄이 겹치지 않게 한다. */
+.d-cb:checked, .d-wcb:checked { animation: d-pop-check var(--t-fast) var(--ease); }
 @keyframes d-pop-check { 0% { transform: scale(1); } 45% { transform: scale(1.18); } 100% { transform: scale(1); } }
 .d-row.is-completing .d-title {
   background-image: linear-gradient(currentColor, currentColor);
   background-repeat: no-repeat; background-position: 0 58%; background-size: 0% 1px;
-  animation: d-strike 520ms var(--ease) forwards;
+  animation: d-strike var(--t-move) var(--ease) forwards;
 }
+.d-row.is-done.is-completing .d-title { text-decoration-color: transparent; }
 @keyframes d-strike {
-  0% { background-size: 0% 1px; opacity: 1; }
-  42% { background-size: 100% 1px; opacity: 1; }
-  100% { background-size: 100% 1px; opacity: 0.4; }
+  0% { background-size: 0% 1px; }
+  100% { background-size: 100% 1px; }
 }
+/* 사라진 줄의 그림자 — 옛 자리에 한 장 떠서 흐려진다(줄 이동 도우미가 놓고 치운다). 목록 안에 붙지만 자리를 차지하지 않는다 */
+.d-glide-ghost { position: absolute; margin: 0; box-sizing: border-box; pointer-events: none; z-index: 1; }
 @media (prefers-reduced-motion: reduce) {
   .d-cb:checked, .d-wcb:checked, .d-row.is-completing .d-title { animation: none; }
   .d-lhd .sub .cnt { transition: none; }
