@@ -19910,3 +19910,160 @@ test('정리 E: 오늘 보기 세그먼트의 옛 코드(renderTodayViewSeg·#to
   assert.doesNotMatch(app, /todayViewSeg|renderTodayViewSeg/);
   assert.match(app, /function setTodaySort\(value\) \{\n  if \(todaySort === value\) return;\n  todaySort = value;\n  try \{ localStorage\.setItem\('todaySort', todaySort\); \} catch \{\}\n  load\(\);\n\}/);
 });
+
+// ---------- 주간요약: 탭을 떠나면 적던 글 저장(reportAutosaveLeave) ----------
+function leaveClient() {
+  const app = reportClient();
+  app.context.AbortSignal = AbortSignal;
+  app.run(`sent = []; notices = []; loads = 0;
+    reply = () => ({ ok: true, status: 200, json: async () => ({ ok: true, undoToken: 'u', report: { revision: item.draft.revision + 1, rows: item.draft.rows } }) });
+    showNotice = (m, e, r, a) => notices.push([m, !!e, a ? a.label : null]); announce = m => notices.push([m, false, null]);
+    renderReportDraft = () => {}; load = async () => { loads += 1; };
+    fetch = async (url, options) => {
+      if (url === '/api/items') return { ok: true, json: async () => ({ weeklyReports: [item] }) };
+      const body = JSON.parse(options.body); sent.push(body); return reply(body);
+    };
+    item = { weekKey: 'W', draft: { revision: 1, rows: [
+      { id: 'a1', heading: '완료한 일', group: '가입', groupKey: 'group:가입', text: '원래 문장', sourceIds: [], excluded: false },
+      { id: 'a2', heading: '완료한 일', group: '가입', groupKey: 'group:가입', text: '둘째 문장', sourceIds: [], excluded: false } ] } };
+    weeklyReportsCache = [item]; reportRenderedItem = item; activeTabKey = 'today';
+    sentence = (index, text) => { reportEdits.set('W:' + item.draft.rows[index].id, text);
+      reportSentenceRow(item, item.draft.rows[index], { host: document.createElement('div'), newIds: new Set() }); };
+    plan = (text) => { reportEdits.set('W:new', text);
+      return reportPlanInput(item, { key: 'new', id: 'reportPlanInput', placeholder: '', label: '', groupOf: () => '' }); };`);
+  return app;
+}
+const leaveSent = app => JSON.parse(app.run('JSON.stringify(sent.map(({ weekKey, revision, ...rest }) => rest))'));
+const leaveTick = () => new Promise(resolve => setTimeout(resolve, 40));
+const leaveNotices = app => JSON.parse(app.run('JSON.stringify(notices)'));
+
+test('탭 떠나면 저장: 고치던 문장은 Enter와 같은 edit 한 번으로 저장되고, 알림은 `적던 글을 저장했어요 · 되돌리기`', async () => {
+  const app = leaveClient();
+  app.run("sentence(0, '새로 고친 문장')");
+  await app.run('reportAutosaveLeave()');
+  assert.deepEqual(leaveSent(app), [{ action: 'edit', id: 'a1', text: '새로 고친 문장' }]);
+  assert.equal(app.run("reportEdits.size"), 0, '저장되면 적던 글이 비워진다(Enter와 같은 길)');
+  assert.deepEqual(leaveNotices(app).at(-1), ['적던 글을 저장했어요', false, '되돌리기']);
+  assert.equal(app.run("reportUndo.get('W')"), 'u', '되돌리기는 기존 길(그 주의 되돌리기 표 — 알림 버튼·⌘Z)');
+});
+
+test('탭 떠나면 저장: 제목·문장·할 일 칸 적기줄은 칸마다 순서대로 한 번씩 — 여럿이면 `적던 글 N개를 저장했어요`', async () => {
+  const app = leaveClient();
+  app.run(`reportEdits.set(reportTitleEditKey('W'), '새 제목');
+    reportDocHead(item, document.createElement('div'));
+    sentence(1, '둘째를 고침');
+    plan('다음 주 휴가');`);
+  await app.run('reportAutosaveLeave()');
+  assert.deepEqual(leaveSent(app), [
+    { action: 'retitle', text: '새 제목' },
+    { action: 'edit', id: 'a2', text: '둘째를 고침' },
+    { action: 'add', text: '다음 주 휴가' },
+  ], '계획 줄은 보고에만 적는 add — 업무를 만드는 요청은 없다');
+  assert.equal(app.run('reportEdits.size'), 0);
+  assert.deepEqual(leaveNotices(app).at(-1), ['적던 글 3개를 저장했어요', false, null]);
+});
+
+test('탭 떠나면 저장: 비었거나 원래 글과 같으면 보내지 않고 칸만 닫는다', async () => {
+  const app = leaveClient();
+  app.run(`sentence(0, '  원래 문장  '); sentence(1, '   ');
+    reportEdits.set(reportTitleEditKey('W'), ''); reportDocHead(item, document.createElement('div'));
+    plan(' ');`);
+  await app.run('reportAutosaveLeave()');
+  assert.deepEqual(leaveSent(app), []);
+  assert.equal(app.run('reportEdits.size'), 0, '입력칸은 닫힌다');
+  assert.deepEqual(leaveNotices(app), [], '저장한 것이 없으면 알리지 않는다');
+});
+
+test('탭 떠나면 저장: 실패(서버 오류·409)하면 거기서 멈추고 적던 글은 모두 남는다', async () => {
+  for (const status of [500, 409]) {
+    const app = leaveClient();
+    app.run(`reply = () => ({ ok: false, status: ${status}, json: async () => ({ ok: false, error: '안 됨' }) });
+      sentence(0, '첫째 고침'); sentence(1, '둘째 고침'); plan('계획 한 줄');`);
+    await app.run('reportAutosaveLeave()');
+    assert.equal(leaveSent(app).length, 1, `${status}: 첫 칸에서 멈추고 다음 칸은 보내지 않는다`);
+    assert.deepEqual(JSON.parse(app.run('JSON.stringify([...reportEdits])')),
+      [['W:a1', '첫째 고침'], ['W:a2', '둘째 고침'], ['W:new', '계획 한 줄']], `${status}: 글은 하나도 사라지지 않는다`);
+    assert.deepEqual(leaveNotices(app).at(-1), ['저장하지 못했어요 — 주간요약에 적던 글이 남아 있어요', true, null]);
+  }
+});
+
+test('탭 떠나면 저장: 할 일 칸 적기줄이 실패하면 글이 칸에 되돌아온다', async () => {
+  const app = leaveClient();
+  app.run(`reply = () => ({ ok: false, status: 500, json: async () => ({ ok: false, error: '꺼짐' }) }); plan('다음 주 휴가');`);
+  await app.run('reportAutosaveLeave()');
+  assert.deepEqual(leaveSent(app), [{ action: 'add', text: '다음 주 휴가' }]);
+  assert.equal(app.run("reportEdits.get('W:new')"), '다음 주 휴가');
+  assert.deepEqual(leaveNotices(app).at(-1), ['저장하지 못했어요 — 주간요약에 적던 글이 남아 있어요', true, null]);
+});
+
+test('탭 떠나면 저장: 연타해도·Enter 저장이 도는 중이어도 같은 글을 두 번 보내지 않는다', async () => {
+  const app = leaveClient();
+  app.run("sentence(0, '한 번만')");
+  await app.run('Promise.all([reportAutosaveLeave(), reportAutosaveLeave(), reportAutosaveLeave()])');
+  assert.equal(leaveSent(app).length, 1, '탭 전환 연타');
+  // Enter가 먼저 보내 놓은 글 — 저장이 끝난 뒤에 보고, 이미 비워졌으면 보내지 않는다.
+  app.run("sent = []; sentence(1, 'Enter로 보냄'); reportBusy = true;");
+  const run = app.run('reportAutosaveLeave()');
+  await leaveTick();
+  assert.equal(leaveSent(app).length, 0, '다른 저장이 도는 동안은 기다린다');
+  app.run("reportEdits.delete('W:a2'); reportBusy = false;");
+  await run;
+  assert.equal(leaveSent(app).length, 0, 'Enter가 저장한 글은 다시 보내지 않는다');
+  // 적기줄 Enter가 줄 서 있으면(글을 이미 꺼내 보냄) 그 칸은 건너뛴다.
+  app.run("uiSendQueues.set('report:W:new', Promise.resolve()); reportEdits.set('W:new', '새로 친 글');");
+  await app.run('reportAutosaveLeave()');
+  assert.equal(leaveSent(app).length, 0);
+  assert.equal(app.run("reportEdits.get('W:new')"), '새로 친 글');
+});
+
+test('탭 떠나면 저장: 한글 조합 중이면 조합이 끝난 뒤 저장한다', async () => {
+  const app = leaveClient();
+  app.run("sentence(0, '조합 중인 글'); reportComposing = true;");
+  const run = app.run('reportAutosaveLeave()');
+  await leaveTick();
+  assert.equal(leaveSent(app).length, 0);
+  app.run("reportEdits.set('W:a1', '조합 끝난 글'); reportComposing = false;");
+  await run;
+  assert.deepEqual(leaveSent(app), [{ action: 'edit', id: 'a1', text: '조합 끝난 글' }]);
+});
+
+test('탭 떠나면 저장: 저장하지 않는 것 — `+ 한 줄 추가`(업무도 만든다)·보고 있지 않은 주·돌아온 뒤·그려지지 않은 칸', async () => {
+  const app = leaveClient();
+  app.run("reportEdits.set('W:addline:완료한 일|group:가입', '업무가 될 글'); reportEdits.set('X:a1', '다른 주 글');");
+  app.run("reportLeaveSaver('X:a1', { weekKey: 'X', current: '', undo: true, save: async () => { sent.push({ action: 'other' }); } })");
+  await app.run('reportAutosaveLeave()');
+  assert.deepEqual(leaveSent(app), []);
+  assert.equal(app.run('reportEdits.size'), 2, '글은 그대로 남는다');
+  app.run("sentence(0, '돌아왔다'); activeTabKey = 'weekly';");
+  await app.run('reportAutosaveLeave()');
+  assert.deepEqual(leaveSent(app), [], '주간요약으로 돌아왔으면 남은 글은 사람 손에 둔다');
+  assert.equal(app.run("reportEdits.get('W:a1')"), '돌아왔다');
+  app.run("activeTabKey = 'today'; reportRenderedItem = null;");
+  await app.run('reportAutosaveLeave()');
+  assert.deepEqual(leaveSent(app), [], '문서가 아직 안 열렸으면 아무것도 하지 않는다');
+});
+
+test('탭 떠나면 저장: 저장이 도는 동안 다시 그려진 문장 칸은 Enter 때처럼 잠긴다', async () => {
+  const app = leaveClient();
+  app.run(`sentence(0, '고침'); hold = null;
+    reply = () => new Promise(resolve => { hold = () => resolve({ ok: true, status: 200, json: async () => ({ ok: true, report: item.draft }) }); });`);
+  const run = app.run('reportAutosaveLeave()');
+  await leaveTick();
+  const disabled = app.run(`(() => { const host = document.createElement('div');
+    reportSentenceRow(item, item.draft.rows[0], { host, newIds: new Set() });
+    return host.children[0].children.find(k => k.className === 'tx').children[0].disabled; })()`);
+  assert.equal(disabled, true);
+  app.run('hold()');
+  await run;
+  assert.equal(app.run("reportLeaveSaving.size"), 0);
+});
+
+test('탭 떠나면 저장: setActiveTab은 주간요약을 떠날 때만 부르고, 기다리지 않는다(activeTabKey를 바꾸기 전)', () => {
+  const source = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const body = source.slice(source.indexOf('function setActiveTab('), source.indexOf('Object.entries(TABS).forEach', source.indexOf('function setActiveTab(')));
+  assert.match(body, /if \(tab !== activeTabKey && activeTabKey === 'weekly' && typeof reportAutosaveLeave === 'function'\) reportAutosaveLeave\(\);/);
+  assert.doesNotMatch(body, /await reportAutosaveLeave/);
+  const report = fs.readFileSync(path.join(__dirname, 'report-ui.js'), 'utf8');
+  assert.match(report, /addEventListener\('beforeunload', event => \{\n\s+if \(reportEdits\.size \|\| reportBusy\) \{ event\.preventDefault\(\); event\.returnValue = ''; \}\n\}\);/,
+    '탭 닫기·새로고침은 지금처럼 묻기만 한다');
+});
