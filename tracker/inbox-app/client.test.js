@@ -16073,7 +16073,6 @@ const MOTION_RAW_ALLOWED = [
   ['ui.css', '.d-stay:not([hidden], dialog:not([open])), dialog.d-stay[open]::backdrop', 'transition-duration', '120ms', '남김', '움직임 줄이기 전역 값(.01ms로 끄고 나타남만 120ms) — 토큰과 뜻이 다르다'],
   ['ui.css', '.d-ibrow.is-leaving', 'animation', '220ms', 'C', '분류 뒤 줄 접힘 — 뜨는 것이 아니라 줄이다. 사라지는 줄 부품과 함께 정한다'],
   ['ui.css', '.d-row.is-rise', 'animation', '260ms 1400ms', 'C', '분류 뒤 새 줄 솟음·배경 강조 — 뜨는 것이 아니라 줄이다. 줄 부품과 함께 정한다'],
-  ['ui.css', '.d-row.is-completing .d-title', 'animation', '520ms', 'C', '완료 줄 긋기 520ms — 완료 흐름과 함께 줄인다'],
   ['ui.css', '.d-mrow2.is-opening .ed', 'animation', '220ms', 'D', '초안 펼침 220ms — 펼침 부품의 본보기, 값은 D에서'],
   ['ui.css', '.d-drawer', 'transition', '160ms 160ms', 'D', '서랍 160ms — 펼침 부품에서 값이 바뀐다'],
   ['ui.css', '.page', 'transition', '160ms', 'D', '서랍 160ms — 펼침 부품에서 값이 바뀐다'],
@@ -16267,7 +16266,7 @@ test('뜨는 것 부품: 복사본에서 온 scroll 이벤트는 무시한다 �
   const src = floatClientSources();
   assert.match(src['app.js'], /function detailPopFollow\(event\) \{\n  if \(detailPopTick \|\| uiFloatGhostEvent\(event\)\) return;/);
   assert.match(src['app.js'], /const reposition = \(event\) => \{ if \(uiFloatGhostEvent\(event\)\) return;/);
-  assert.match(src['app.js'], /return !document\.querySelector\?\.\('\.d-typepop:not\(\.is-out\)'\);/, '종류를 고른 직후의 줄 이동이 복사본 때문에 꺼지지 않는다');
+  assert.match(src['app.js'], /if \(document\.querySelector\?\.\('\.d-typepop:not\(\.is-out\)'\)\) return null;/, '종류를 고른 직후의 줄 이동이 복사본 때문에 꺼지지 않는다');
 });
 
 test('누름: 움직임 줄이기 — 크기 변화는 끄고 색은 그대로 바뀐다', () => {
@@ -16283,7 +16282,7 @@ test('체크 표시 하나: 업무 체크(.d-cb)와 레일 체크(.d-wcb)가 색
   assert.match(css, /\.d-cb, \.d-wcb \{ transition: border-color var\(--t-press\) var\(--ease\), background var\(--t-press\) var\(--ease\), scale var\(--t-press\) var\(--ease\); \}/);
   assert.match(css, /\.d-cb:hover, \.d-wcb:hover \{ border-color: var\(--accent\); \}/);
   assert.match(css, /\.d-cb:checked, \.d-wcb:checked \{ background: var\(--accent\); border-color: var\(--accent\); \}/);
-  assert.match(css, /\.d-cb:checked, \.d-wcb:checked \{ animation: d-pop-check var\(--t-slow\) var\(--ease\); \}/);
+  assert.match(css, /\.d-cb:checked, \.d-wcb:checked \{ animation: d-pop-check var\(--t-fast\) var\(--ease\); \}/);
   assert.match(css, /\.d-cb:checked, \.d-wcb:checked, \.d-row\.is-completing \.d-title \{ animation: none; \}/, '움직임 줄이기');
   assert.doesNotMatch(css, /\n\.d-wcb:(hover|checked) \{/, '레일 체크만의 색 규칙은 없다');
 });
@@ -16709,7 +16708,287 @@ test('줄 이동: 그룹 제목도 줄과 같은 열쇠 칸(data-move-id)을 달
   const head = app.run("uiGroupHeading('게임', 2, {})");
   assert.equal(head.dataset.moveId, 'grp:게임');
   assert.equal(head.dataset.taskId, undefined, '상세 카드가 여는 줄(data-task-id)은 아니다');
-  assert.equal(app.run('UI_GLIDE_ROWS'), '[data-task-id], [data-move-id]');
+  assert.equal(app.run('UI_GLIDE_ROWS'), '[data-task-id], [data-move-id], [data-rail-id]');
+});
+
+// ---- 모션 묶음 C1: 줄 부품 넓히기 + 오늘 탭 나머지 목록 ----
+// 어느 목록이든 받는 가짜 틀 — 줄의 열쇠(data-task-id · data-move-id · data-rail-id)가 있는 아이를 줄로 보고, 순서대로 40px씩 아래에 선다.
+function glideListClient(listId, { rowHeight = 40 } = {}) {
+  const fx = firstRunClient();
+  const list = fx.node(listId);
+  const plays = [];
+  const timers = [];
+  fx.app.context.setTimeout = (fn, delay) => { timers.push({ fn, delay }); return timers.length; };
+  fx.app.run("window.innerWidth = 1200; window.innerHeight = 800; uiActAt = 0; uiActQuiet = false; uiKeyAt = 0; document.activeElement = null;");
+  const keyOf = row => (row && row.dataset ? (row.dataset.taskId ?? row.dataset.moveId ?? row.dataset.railId) : undefined);
+  list.querySelectorAll = () => list.children.filter(kid => keyOf(kid) !== undefined).map((row) => {
+    if (!row.glideReady) {
+      row.glideReady = true;
+      const classes = new Set(String(row.className || '').split(' ').filter(Boolean));
+      row.classList = { add: name => classes.add(name), remove: name => classes.delete(name), contains: name => classes.has(name), toggle: (name, on) => (on ? classes.add(name) : classes.delete(name)) };
+      row.getBoundingClientRect = () => { const top = list.children.indexOf(row) * rowHeight; return { left: 0, right: 600, top, bottom: top + 36, height: 36, width: 600 }; };
+      row.animate = (frames, options) => { const play = { id: keyOf(row), frames, options, cancelled: false, cancel() { play.cancelled = true; } }; plays.push(play); return play; };
+    }
+    return row;
+  });
+  const order = () => list.querySelectorAll().map(keyOf);
+  const act = (event = { type: 'click', detail: 1 }) => fx.app.context.uiActMark(event);
+  return { ...fx, list, plays, timers, order, act };
+}
+// C1 목록 여섯 — 각자 실제 그리기 함수로 그린다(줄 부품이 아닌 곳만 가짜로 갈아 끼운다).
+const C1_LISTS = [
+  ['오늘 미팅', 'calendarList', ids => `renderCalendar({ events: ${JSON.stringify(ids.map((id, i) => ({ start: `1${i}:00`, title: id, workflowId: id })))} })`, id => `mt:${id}`],
+  ['리마인드', 'reminderList', ids => `renderReminders(${JSON.stringify(ids.map(id => ({ id, description: `일 ${id}`, due: '2026-10-06', priority: 'high' })))}, [], [])`, id => id],
+  ['확인 대기', 'waitingList', ids => `waitingView = 'urgent'; renderWaiting(${JSON.stringify(ids.map((id, i) => ({ id, description: `대기 ${id}`, status: 'open', created: `2026-10-0${i + 1}` })))})`, id => id],
+  ['반응 필요', 'attentionList', ids => `attentionAll = true; attentionState = { connected: true, items: ${JSON.stringify(ids.map(id => ({ id, key: `K-${id}`, title: `이슈 ${id}`, url: '', preview: '', count: 1 })))}, updatedAt: null, stale: false, error: '' }; attentionRender()`, id => `at:${id}`],
+  ['아이디어', 'ideaList', ids => `renderIdeas(${JSON.stringify(ids.map(id => ({ id, description: `생각 ${id}` })))})`, id => id],
+  ['결정', 'decisionList', ids => `decisionQuery = ''; renderDecisions(${JSON.stringify(ids.map(id => ({ id, description: `결정 ${id}` })))})`, id => id],
+];
+function c1Client(listId, draw) {
+  const fx = glideListClient(listId);
+  // 아이디어·결정 줄은 firstRunClient가 열쇠 없는 가짜로 바꿔 둔다 — 실제 줄과 같은 열쇠만 단다(실제 줄의 열쇠는 아래 시험이 원문으로 본다).
+  fx.app.run("recordIdeaRow = item => { const row = document.createElement('div'); row.dataset.moveId = item.id; return row; }; recordDecisionRow = item => { const row = document.createElement('div'); row.dataset.moveId = item.id; return row; };");
+  return { ...fx, draw: ids => fx.app.run(draw(ids)) };
+}
+
+test('줄 이동 C1: 오늘 탭 나머지 목록(미팅·리마인드·확인 대기·반응 필요)과 아이디어·결정 — 내 동작 직후 다시 그리면 자리가 바뀐 줄이 미끄러지고 새 줄은 나타난다', async () => {
+  for (const [name, listId, draw, key] of C1_LISTS) {
+    const fx = c1Client(listId, draw);
+    fx.draw(['a', 'b', 'c']);
+    await settle();
+    assert.deepEqual(fx.order(), ['a', 'b', 'c'].map(key), `${name}: 열쇠`);
+    assert.equal(fx.plays.length, 0, `${name}: 처음 그리기는 움직이지 않는다`);
+    fx.act();
+    fx.draw(['c', 'a', 'b', 'd']);
+    await settle();
+    const by = Object.fromEntries(fx.plays.map(play => [play.id, play]));
+    assert.deepEqual(plain(by[key('c')].frames), [{ transform: 'translate(0px, 80px)' }, { transform: 'none' }], `${name}: 옛 자리에서 새 자리로`);
+    assert.equal(by[key('c')].options.duration, 200);
+    assert.deepEqual(plain(by[key('d')].frames), [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], `${name}: 새 줄`);
+    // 자동 갱신(동작 없이 0.5초가 지난 뒤)은 그냥 그린다.
+    fx.plays.length = 0;
+    fx.app.run('uiActAt = Date.now() - 501');
+    fx.draw(['a', 'b', 'c', 'd']);
+    await settle();
+    assert.equal(fx.plays.length, 0, `${name}: 자동 갱신`);
+  }
+});
+
+test('줄 이동 C1 입력 보류: 글자 칸에 초점이 있거나 한글 조합 중이면 C1 목록 여섯은 아무것도 움직이지 않는다 — 입력 보호가 먼저다', async () => {
+  for (const [name, listId, draw] of C1_LISTS) {
+    for (const [why, on] of [['글자 칸', "document.activeElement = { tagName: 'INPUT', type: 'text', matches: () => true }"], ['한글 조합', 'uiComposingEl = {}'], ['칸 안 글 고치기', "document.activeElement = { isContentEditable: true, matches: () => false }"]]) {
+      const fx = c1Client(listId, draw);
+      fx.draw(['a', 'b', 'c']);
+      await settle();
+      fx.app.run(on);
+      fx.act();
+      fx.draw(['c', 'b', 'a']);
+      await settle();
+      assert.equal(fx.plays.length, 0, `${name} · ${why}`);
+    }
+  }
+  // 반응 필요의 `할 일로` 칸에서 치는 중이면 다시 그리기부터 미룬다 — 움직임은 그 뒤에 선다(그리지도 재지도 않는다).
+  const [, listId, draw, key] = C1_LISTS.find(([name]) => name === '반응 필요');
+  const fx = c1Client(listId, draw);
+  fx.draw(['a', 'b']);
+  await settle();
+  fx.app.run("isTyping = () => true; document.getElementById('attentionZone').contains = () => true;");
+  fx.act();
+  fx.draw(['b', 'a']);
+  await settle();
+  assert.deepEqual(fx.order(), ['a', 'b'].map(key), '미뤘다');
+  assert.equal(fx.plays.length, 0);
+});
+
+test('줄 이동 C1: 위아래로 이어진 목록은 무리로 함께 잰다(오늘 탭 가운데 넷·왼쪽 레일 셋·결정 둘) — 무리에 없는 목록은 제 목록만', () => {
+  const app = pureClient();
+  assert.equal(app.run("uiGlideLists(document.getElementById('waitingList')).length"), 3);
+  assert.ok(app.run("uiGlideLists(document.getElementById('waitingList')).includes(document.getElementById('reminderList'))"));
+  assert.ok(app.run("uiGlideLists(document.getElementById('inboxList')).includes(document.getElementById('attentionList'))"), '반응 필요가 사라지면 아래 목록이 올라온다');
+  assert.ok(app.run("uiGlideLists(document.getElementById('decisionList')).includes(document.getElementById('decisionArchiveList'))"));
+  assert.equal(app.run("uiGlideLists(document.getElementById('ideaList')).length"), 1, '아이디어는 제 목록만');
+  assert.deepEqual(plain(app.run('UI_GLIDE_LISTS')), [
+    ['attentionList', 'inboxList', 'todayTaskList', 'laterTaskList'],
+    ['calendarList', 'reminderList', 'waitingList'],
+    ['decisionList', 'decisionArchiveList'],
+  ]);
+});
+
+test('줄 이동 C1: 상한은 무리마다 따로 센다 — 다른 무리가 길어도 이 무리는 움직이고, 이 무리가 41줄 보이면 이 무리만 쉰다', async () => {
+  const fx = c1Client('ideaList', C1_LISTS.find(([name]) => name === '아이디어')[2]);
+  const many = Array.from({ length: 41 }, (_, i) => `i${String(i).padStart(2, '0')}`);
+  fx.app.run('window.innerHeight = 4000');
+  fx.draw(many);
+  await settle();
+  fx.act();
+  fx.draw([...many].reverse());
+  await settle();
+  assert.equal(fx.plays.length, 0, '41줄이 보이면 걸지 않는다');
+  fx.act();
+  fx.draw(many.slice(0, 3));
+  fx.draw(many.slice(0, 3).reverse());
+  await settle();
+  assert.ok(fx.plays.length <= 40);
+});
+
+test('줄 이동 C1 빠른 추가: Enter로 적은 뒤 다시 그리기는 새 줄만 140ms 나타나고 다른 줄은 그대로 선다 — 누르고 있는 Enter·표시 없는 Enter는 아무것도', async () => {
+  const run = async (mark) => {
+    const fx = moveClient();
+    fx.draw(['a', 'b']);
+    await settle();
+    fx.app.run("window.qa = { tagName: 'INPUT', type: 'text' }; document.activeElement = window.qa;");
+    // 글자를 치다가(1초 안에 이어진 키 — 연타로 친다) Enter.
+    fx.act({ type: 'keydown', key: 'ㄱ' });
+    const enter = { type: 'keydown', key: 'Enter', repeat: mark === 'repeat' };
+    fx.act(enter);
+    if (mark) fx.app.context.uiGlideAddMark(fx.app.run('window.qa'), enter);
+    fx.draw(['n', 'a', 'b']);
+    await settle();
+    return fx;
+  };
+  const added = await run('enter');
+  assert.deepEqual(plain(added.plays.map(play => [play.id, play.frames, play.options.duration])), [['n', [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], 140]], '새 줄만');
+  assert.equal((await run('repeat')).plays.length, 0, '누르고 있는 Enter');
+  assert.equal((await run(null)).plays.length, 0, '빠른 추가가 아닌 칸의 Enter');
+  // 다른 동작이 끼면(그 Enter의 동작 시각이 아니면) 풀린다.
+  const later = await run('enter');
+  later.plays.length = 0;
+  later.act({ type: 'keydown', key: 'ㄴ' });
+  later.draw(['m', 'n', 'a', 'b']);
+  await settle();
+  assert.equal(later.plays.length, 0);
+  // 빠른 추가 칸 다섯(오늘·나중에·확인 대기·아이디어·결정)은 setupQuickAdd 하나, 그룹 `+` 줄도 같은 표시를 단다.
+  assert.match(script, /if \(e\.key !== 'Enter' \|\| e\.isComposing\) return;\n    const description = input\.value\.trim\(\);\n    if \(!description\) return;\n    uiGlideAddMark\(input, e\);/);
+  assert.match(script, /if \(!description\) return;\n    uiGlideAddMark\(input, event\);/);
+});
+
+test('줄 이동 C1 완료 흐름: 체크 → 줄 긋기(200ms) → 줄이 `완료 N`으로 들어감 — 긋는 동안 무리 전체가 옛 자리에 머물고 긋기가 끝나면 함께 움직인다', async () => {
+  const fx = moveClient();
+  fx.app.run("todayDoneOpen = true; uiGroupHeading = (label) => { const head = document.createElement('div'); head.dataset.moveId = `grp:${label}`; return head; };");
+  const draw = (open, done) => fx.app.run(`renderTodayTasks(${JSON.stringify([...open.map(id => ({ id, description: id, status: 'open', priority: 'normal' })), ...done.map(id => ({ id, description: id, status: 'done', priority: 'normal' }))])})`);
+  draw(['a', 'b', 'c'], []);
+  await settle();
+  fx.act();
+  fx.app.run("uiGlideDoneMark('a', 'grp:완료', true); uiGlideDone.get('a').at = Date.now() - 50;");
+  draw(['b', 'c'], ['a']);
+  await settle();
+  assert.ok(fx.plays.length >= 3);
+  fx.plays.forEach((play) => {
+    assert.ok(play.options.delay >= 140 && play.options.delay <= 150, `긋기의 남은 시간만큼 기다린다: ${play.options.delay}`);
+    assert.equal(play.options.fill, 'backwards', '기다리는 동안 옛 자리에 머문다');
+  });
+  const a = fx.list.querySelectorAll().find(row => row.dataset.taskId === 'a');
+  assert.ok(a.classList.contains('is-completing'), '다시 그려진 완료 줄이 긋기를 이어 그린다');
+  assert.equal(fx.app.run("uiGlideDone.has('a')"), false, '표시는 한 번 쓰고 지운다');
+  // 움직임 줄이기: 기다림도 이동도 없다.
+  const quiet = moveClient();
+  quiet.app.run("todayDoneOpen = true; window.matchMedia = () => ({ matches: true });");
+  quiet.draw(['a', 'b']);
+  await settle();
+  quiet.act();
+  quiet.app.run("uiGlideDoneMark('a', 'grp:완료', true)");
+  quiet.app.run(`renderTodayTasks(${JSON.stringify([{ id: 'b', description: 'b', status: 'open' }, { id: 'a', description: 'a', status: 'done' }])})`);
+  await settle();
+  assert.equal(quiet.plays.length, 0);
+  // 값: 체크 톡 --t-fast, 긋기 --t-move(줄 이동과 같은 박자), 도우미의 긋기 길이도 같다.
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  assert.match(css, /\.d-cb:checked, \.d-wcb:checked \{ animation: d-pop-check var\(--t-fast\) var\(--ease\); \}/);
+  assert.match(css, /animation: d-strike var\(--t-move\) var\(--ease\) forwards;/);
+  assert.equal(fx.app.run('UI_GLIDE.strike'), fx.app.run('UI_GLIDE.move'));
+  assert.match(script, /if \(!done\) uiGlideDoneMark\(item\.id, 'grp:완료', true\);/);
+  assert.match(script, /if \(!archived\) uiGlideDoneMark\(item\.id, 'decisionArchiveToggle'\);/);
+});
+
+test('줄 이동 C1 사라진 줄: 옛 자리에 그림자 한 장(열쇠·id 없고 누를 수 없음)이 120ms 흐려지고 떼어진다 — 접힌 `완료` 제목으로 들어간 줄은 그쪽으로 200ms', async () => {
+  // 그룹 제목(data-move-id)도 줄로 세는 틀 — 들어갈 `완료` 제목의 자리를 잰다.
+  const fx = glideListClient('todayTaskList');
+  fx.app.run("todaySort = 'priority'; uiTaskRow = (item) => { const row = document.createElement('div'); row.dataset.taskId = item.id; return row; }; uiGroupHeading = (label) => { const head = document.createElement('div'); head.dataset.moveId = `grp:${label}`; return head; }; todayDoneOpen = false;");
+  // 가짜 줄을 실제처럼: 다시 그리면 옛 줄은 떨어지고, 복사·자리 계산이 된다.
+  const ghosts = [];
+  const real = fx.list.replaceChildren.bind(fx.list);
+  fx.list.replaceChildren = (...kids) => { fx.list.children.forEach((kid) => { kid.connected = false; }); real(...kids); };
+  const host = { getBoundingClientRect: () => ({ left: 10, top: 100 }), clientLeft: 0, clientTop: 0, scrollLeft: 0, scrollTop: 0 };
+  const dress = () => fx.list.querySelectorAll().forEach((row) => {
+    row.cloneNode = () => {
+      const attrs = new Map([['data-task-id', row.dataset.taskId], ['id', 'x']]);
+      const ghost = { style: {}, classes: [], removed: false, offsetParent: host, dataset: {},
+        get attributes() { return [...attrs.keys()].map(name => ({ name })); },
+        removeAttribute: name => attrs.delete(name), setAttribute: (name, value) => attrs.set(name, value), attrs,
+        querySelectorAll: () => [], classList: { add: name => ghost.classes.push(name) }, remove() { ghost.removed = true; } };
+      ghost.animate = (frames, options) => { const play = { id: 'ghost', frames, options, cancel() {} }; fx.plays.push(play); return play; };
+      ghosts.push(ghost);
+      return ghost;
+    };
+  });
+  const draw = (open, done) => fx.app.run(`renderTodayTasks(${JSON.stringify([...open.map(id => ({ id, description: id, status: 'open', priority: 'normal' })), ...done.map(id => ({ id, description: id, status: 'done', priority: 'normal' }))])})`);
+  draw(['a', 'b', 'c'], []);
+  await settle();
+  dress();
+  fx.act();
+  draw(['a', 'c'], []);
+  await settle();
+  assert.equal(ghosts.length, 1, '사라진 b의 그림자 하나');
+  const [ghost] = ghosts;
+  assert.deepEqual([...ghost.attrs.keys()], ['aria-hidden'], '열쇠·id는 떼고 읽히지 않게');
+  assert.equal(ghost.inert, true);
+  assert.deepEqual(ghost.classes, ['d-glide-ghost']);
+  assert.deepEqual(plain(ghost.style), { left: '-10px', top: '-20px', width: '600px', height: '36px' }, '옛 자리(목록 기준 — 맨 위 그룹 제목 다음 둘째 줄)');
+  const play = fx.plays.find(each => each.id === 'ghost');
+  assert.deepEqual(plain(play.frames), [{ opacity: 1 }, { opacity: 0 }]);
+  assert.deepEqual(plain(play.options), { duration: 120, easing: 'cubic-bezier(0.22, 0.8, 0.3, 1)', fill: 'forwards' });
+  fx.timers.forEach(timer => timer.fn());
+  assert.equal(ghost.removed, true, '시간으로 떼어 낸다');
+  assert.ok(!fx.list.querySelectorAll().some(row => row === ghost), '줄로 세지 않는다');
+  // 체크해서 접힌 `완료 N`으로 들어간 줄 — 긋기를 기다린 뒤 제목 쪽으로 미끄러지며 흐려진다.
+  ghosts.length = 0;
+  fx.plays.length = 0;
+  dress();
+  fx.act();
+  fx.app.run("uiGlideDoneMark('a', 'grp:완료', true)");
+  draw(['c'], ['a']);
+  await settle();
+  assert.equal(ghosts.length, 1);
+  const into = fx.plays.find(each => each.id === 'ghost');
+  assert.match(JSON.stringify(into.frames[1]), /translateY\(\d+px\) scale\(\.98\)/, '아래 `완료` 제목 쪽으로');
+  assert.equal(into.options.duration, 200);
+  assert.ok(into.options.delay > 0 && into.options.fill === 'both', '긋기를 기다린다');
+  // 움직임 줄이기에서는 그림자가 없다.
+  ghosts.length = 0;
+  fx.app.run('window.matchMedia = () => ({ matches: true })');
+  dress();
+  fx.act();
+  draw([], ['a', 'c']);
+  await settle();
+  assert.equal(ghosts.length, 0);
+});
+
+// 목록 등록 시험(계획서 3절 가-3): 줄을 통째로 갈아 끼우는 목록은 줄 부품(uiRowsMove)을 거치거나, 지도의 "목록 등록" 표에 이유와 함께 있다.
+test('줄 이동 목록 등록: index.html의 목록(id가 …List)은 모두 지도 표에 있고, `줄 부품`이면 그리는 함수가 uiRowsMove를 거친다', () => {
+  const rows = motionMapRows('목록');
+  assert.ok(rows.length >= 12, '표를 읽는다');
+  const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  const lists = [...html.matchAll(/id="([A-Za-z]+List)"/g)].map(m => m[1]);
+  const named = new Map(rows.map(row => [row['목록'].replace(/`/g, ''), row]));
+  lists.forEach(id => assert.ok(named.has(id), `지도 표에 없음: ${id}`));
+  const { isClientFile } = require('./server.js');
+  const sources = fs.readdirSync(__dirname).filter(name => name.endsWith('.js') && isClientFile(name)).map(name => fs.readFileSync(path.join(__dirname, name), 'utf8')).join('\n');
+  const body = (name) => {
+    const at = sources.search(new RegExp(`\\nfunction ${name}\\(`));
+    assert.ok(at >= 0, `함수를 찾는다: ${name}`);
+    return sources.slice(at, sources.indexOf('\n}\n', at));
+  };
+  rows.forEach(({ 목록: list, '그리는 함수': fn, 열쇠: key, 상태: state }) => {
+    assert.ok(state, `${list}: 상태 빈칸`);
+    if (state === '줄 부품') {
+      (fn.match(/`([A-Za-z]+)`/g) || []).concat(['']).filter(Boolean).map(each => each.replace(/`/g, '')).forEach(name => assert.match(body(name), /uiRowsMove\(/, `${list}: ${name}이 줄 부품을 거친다`));
+      assert.ok(key && key !== '—', `${list}: 열쇠`);
+    } else {
+      assert.match(state, /^(안 움직임\(.+\)|C2 남음)$/, `${list}: 상태는 줄 부품 · 안 움직임(이유) · C2 남음 가운데 하나`);
+    }
+  });
+  // 열쇠: 레일 줄 data-rail-id, 미팅·배포·반응 필요·아이디어·결정 줄 data-move-id.
+  [/row\.dataset\.moveId = `mt:\$\{row\.dataset\.meetingId\}`;/, /row\.dataset\.moveId = `deploy:\$\{entry\.key\}`;/, /row\.dataset\.moveId = item\.id; \/\/ 줄 이동 도우미의 열쇠/].forEach(re => assert.match(script, re));
+  assert.match(fs.readFileSync(path.join(__dirname, 'attention-ui.js'), 'utf8'), /card\.dataset\.moveId = `at:\$\{item\.id\}`;/);
 });
 
 // ---- 모션 묶음 B1: 뜨는 것(공용 부품) ----
