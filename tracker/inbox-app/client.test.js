@@ -19779,7 +19779,11 @@ test('기다림 E: aria-busy 규칙 하나 — 0.3초(--t-wait)가 지나야 옅
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
   assert.match(css, /\n  --t-wait: 300ms;  --t-turn: 400ms;  --t-loop: 1s;/);
   assert.match(css, /\n\[aria-busy="true"\]:not\(\.d-btn, \.d-waiting, \.d-iconbtn\) \{ animation: d-busy var\(--t-move\) var\(--ease\) var\(--t-wait\) both; \}\n@keyframes d-busy \{ to \{ opacity: 0\.6; \} \}/);
-  assert.match(css, /\n\.d-btn\[aria-busy="true"\]::before, \.d-waiting\[aria-busy="true"\]::before \{\n[^}]*animation: d-busy-in var\(--t-move\) var\(--ease\) var\(--t-wait\) both, d-spin var\(--t-loop\) linear infinite;\n\}/);
+  assert.match(css, /\n\.d-btn\[aria-busy="true"\]::before, \.d-waiting\[aria-busy="true"\]::before \{\n[^}]*--busy-shut: -5px;[^}]*animation: d-busy-room var\(--t-wait\) step-end both, d-busy-in var\(--t-move\) var\(--ease\) var\(--t-wait\) both, d-spin var\(--t-loop\) linear infinite;\n\}/);
+  // 기다리는 0.3초 동안은 자리도 없다 — 폭 0·테 0·버튼 틈(gap 5px)까지 거둬 짧은 저장에서 버튼 폭이 그대로다(step-end: 폭을 움직이지 않고 나타나는 순간 한 번에).
+  assert.match(css, /@keyframes d-busy-room \{ from \{ width: 0; border-width: 0; margin-right: var\(--busy-shut\); \} \}/);
+  assert.match(css, /\.d-btn \{\n  display: inline-flex; align-items: center; justify-content: center; gap: 5px;/, '거두는 틈(-5px)은 .d-btn의 gap과 같다');
+  assert.match(css, /\.d-waiting\[aria-busy="true"\]::before \{ margin-right: 6px; vertical-align: -1px; --busy-shut: 0px; \}/, '글자 줄은 틈이 margin이라 0으로 거둔다');
   assert.match(css, /@keyframes d-busy-in \{ from \{ opacity: 0; \} \}/);
   const reduce = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce) {\n  *, *::before'), css.indexOf('/* ---------- 헤더'));
   assert.match(reduce, /\n  \[aria-busy="true"\], \.d-iconbtn\.spinning \{ animation: none !important; \}\n  \.d-btn\[aria-busy="true"\]::before, \.d-waiting\[aria-busy="true"\]::before \{ display: none; \}/, '옅어짐·도는 표시 없이 글자만(.01ms로 줄인 지연 뒤 갑자기 옅어지지 않게 아예 끈다)');
@@ -19854,8 +19858,55 @@ test('기다림 E: 도는 표시 uiSpin — 누르면 한 바퀴(400ms), 오래 
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
   assert.match(css, /\n\.d-iconbtn\.spinning \{ color: var\(--accent\); animation: d-spin var\(--t-turn\) var\(--ease\), d-spin var\(--t-loop\) linear var\(--t-turn\) infinite; \}/);
   assert.match(css, /\.d-abprog \.now \.ic \{ display: inline-block; color: var\(--accent\); animation: d-spin var\(--t-loop\) linear infinite; \}/);
-  // 지라 띠 카드의 새로고침은 보던 카드를 뼈대로 바꾸지 않고(keep) 헤더 새로고침처럼 돈다.
-  const jira = fs.readFileSync(path.join(__dirname, 'jira-ui.js'), 'utf8');
-  assert.match(jira, /refresh\.addEventListener\('click', \(\) => jiraRefreshRun\(issue\.key\)\);/);
-  assert.match(jira, /await jiraCardLoad\(key, \{ fresh: true, keep: true, spin \}\); \} finally \{ uiSpinEnd\(spin\); \}/);
+});
+
+test('기다림 E: 지라 띠 카드 새로고침 — 받는 동안 보던 카드를 그대로 두고(뼈대 없음) 버튼이 돌며, 연타해도 요청은 하나, 성공하면 새 값·실패하면 오류 줄, 묶음의 옆 카드도 그대로 선다', async () => {
+  // 걸린 요청을 전부 한꺼번에 푼다(가드가 빠져 요청이 겹쳐도 시험이 멈추지 않고 개수로 실패하게).
+  const waiting = [];
+  const gate = () => waiting.splice(0).forEach(open => open());
+  let reply = { ok: true, connected: true, issue: jiraIssue({ key: 'AB-2', summary: '새 요약' }) };
+  const { app, calls } = jiraClient(() => new Promise((resolve) => { waiting.push(() => resolve(new Response(JSON.stringify(reply)))); }));
+  app.context.setTimeout = () => 1;
+  app.run("jiraCard = { key: 'AB-2', state: 'ok', issue: { ...jiraCard.issue, key: 'AB-2', summary: '옛 요약', url: 'https://example-jira.test/browse/AB-2' }, error: '', at: 1, seq: 1 }");
+  // 새로고침 버튼은 실제 띠 카드의 것을 누른다.
+  const card = app.run("jiraStripCard(jiraCard.issue, '')");
+  const refresh = nodeFind(card, 'd-jref');
+  assert.equal(refresh.getAttribute('aria-label'), '지라에서 새로 받기');
+  const first = refresh.listeners.click();
+  assert.equal(app.run('jiraCard.state'), 'ok', '받는 동안 뼈대(loading)로 바꾸지 않는다');
+  assert.equal(app.run('jiraCard.issue.summary'), '옛 요약', '보던 값이 그대로 선다');
+  const spinning = app.run("jiraStripCard(jiraCard.issue, '')");
+  assert.equal(app.run('jiraRefreshSpin.el'), nodeFind(spinning, 'd-jref'), '다시 그린 버튼이 같은 바퀴를 잇는다(uiSpin)');
+  assert.equal(nodeFind(spinning, 'd-jref').getAttribute('aria-busy'), 'true');
+  // 받는 동안 또 눌러도 요청은 하나다(카드가 그대로라 버튼을 다시 누를 수 있다).
+  const again = [app.run("jiraRefreshRun('AB-2')"), app.run("jiraRefreshRun('AB-2')")];
+  assert.equal(calls.length, 1, '연타해도 fresh 요청은 하나');
+  assert.match(calls[0], /key=AB-2&fresh=1$/);
+  gate();
+  await Promise.all([first, ...again]);
+  assert.equal(app.run('jiraCard.issue.summary'), '새 요약', '성공하면 그 자리에서 새 값');
+  assert.ok(app.run('jiraRefreshSpin.end') > 0, '끝나면 지금 바퀴를 마저 돌고 설 시각이 정해진다');
+  // 실패하면 예전처럼 오류 줄(조용한 재조회와 달리 알린다).
+  reply = { ok: false, error: '지라에 연결하지 못했어요.' };
+  const failed = app.run("jiraRefreshRun('AB-2')");
+  assert.equal(app.run('jiraCard.state'), 'ok');
+  gate();
+  await failed;
+  assert.equal(app.run('jiraCard.state'), 'error', '실패는 오류 줄');
+  assert.equal(calls.length, 2, '끝난 뒤의 새로고침은 다시 나간다');
+  // 묶음의 옆 카드도 받는 동안 그대로 선다.
+  reply = { ok: true, connected: true, issue: jiraIssue({ key: 'IO-2', summary: '옆 새 요약' }) };
+  app.run("jiraCard = { key: 'IO-1', state: 'ok', issue: { key: 'IO-1', summary: '대표' }, error: '', at: 1, seq: 5 }; jiraSide = { project: 'jira:IO-1', keys: ['IO-2'], cards: { 'IO-2': { key: 'IO-2', state: 'ok', issue: { key: 'IO-2', summary: '옆 옛 요약' }, at: 1, seq: 1 } } };");
+  const side = app.run("jiraRefreshRun('IO-2')");
+  assert.equal(app.run("jiraSide.cards['IO-2'].state"), 'ok', '옆 카드도 뼈대로 바뀌지 않는다');
+  assert.equal(app.run("jiraSide.cards['IO-2'].issue.summary"), '옆 옛 요약');
+  gate();
+  await side;
+  assert.equal(app.run("jiraSide.cards['IO-2'].issue.summary"), '옆 새 요약');
+});
+
+test('정리 E: 오늘 보기 세그먼트의 옛 코드(renderTodayViewSeg·#todayViewSeg)는 없다 — 보기 전환은 ⋯ 메뉴 안 칩 하나다', () => {
+  const app = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  assert.doesNotMatch(app, /todayViewSeg|renderTodayViewSeg/);
+  assert.match(app, /function setTodaySort\(value\) \{\n  if \(todaySort === value\) return;\n  todaySort = value;\n  try \{ localStorage\.setItem\('todaySort', todaySort\); \} catch \{\}\n  load\(\);\n\}/);
 });
