@@ -7135,23 +7135,12 @@ recordApplyView();
 
 try { todaySort = localStorage.getItem('todaySort') || 'project'; } catch {}
 // 보기 전환은 머리줄 ⋯ 메뉴 안의 두 칸 칩이다. 고른 값은 브라우저에 그대로 기억한다(저장 키·동작 그대로).
-const todayViewSeg = document.getElementById('todayViewSeg');
-function renderTodayViewSeg() {
-  todayViewSeg?.querySelectorAll('button').forEach((button) => {
-    button.setAttribute('aria-pressed', String(button.dataset.view === todaySort));
-  });
-}
 function setTodaySort(value) {
   if (todaySort === value) return;
   todaySort = value;
   try { localStorage.setItem('todaySort', todaySort); } catch {}
-  renderTodayViewSeg();
   load();
 }
-todayViewSeg?.querySelectorAll('button').forEach((button) => {
-  button.addEventListener('click', () => setTodaySort(button.dataset.view));
-});
-renderTodayViewSeg();
 
 // 오늘 할 일 머리줄의 ⋯ — 보기 전환과 여러 개 선택이 이 안에 있다(눌러 보는 건 하나뿐).
 const todayHeadMoreSlot = document.getElementById('todayHeadMore');

@@ -394,9 +394,12 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 .d-btn[aria-busy="true"]::before, .d-waiting[aria-busy="true"]::before {
   content: ''; flex: none; display: inline-block; box-sizing: border-box; width: 10px; height: 10px;
   border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%;
-  animation: d-busy-in var(--t-move) var(--ease) var(--t-wait) both, d-spin var(--t-loop) linear infinite;
+  --busy-shut: -5px; /* 기다리는 0.3초 동안은 자리도 없다 — 버튼 틈(gap 5px)까지 거둬 폭이 그대로다 */
+  animation: d-busy-room var(--t-wait) step-end both, d-busy-in var(--t-move) var(--ease) var(--t-wait) both, d-spin var(--t-loop) linear infinite;
 }
-.d-waiting[aria-busy="true"]::before { margin-right: 6px; vertical-align: -1px; }
+.d-waiting[aria-busy="true"]::before { margin-right: 6px; vertical-align: -1px; --busy-shut: 0px; }
+/* 자리는 움직이지 않는다 — 0.3초 동안 폭 0으로 서 있다가(step-end) 표시가 나타나는 순간 한 번에 자리를 잡는다 */
+@keyframes d-busy-room { from { width: 0; border-width: 0; margin-right: var(--busy-shut); } }
 @keyframes d-busy-in { from { opacity: 0; } }
 
 /* 누름에서 뺀 것 — 줄어들면 어색한 것은 색으로만 답한다(docs/지도/모션.md "누름에서 뺀 것").

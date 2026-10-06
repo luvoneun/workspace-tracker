@@ -1234,6 +1234,8 @@ async function jiraIssueRead(key, fresh, seq) {
 // 띠 카드의 새로고침 버튼 — 보던 카드를 뼈대로 바꾸지 않고(keep) 버튼만 돈다. 실패는 다른 새로고침처럼 오류 줄로 알린다.
 let jiraRefreshSpin = null; // { key, at, end, el } — 지금 도는 새로고침(uiSpin)
 async function jiraRefreshRun(key) {
+  // 받는 동안은 카드가 그대로라 버튼을 또 누를 수 있다 — 이미 도는 새로고침이 있으면 요청을 겹쳐 보내지 않는다.
+  if (jiraRefreshSpin && jiraRefreshSpin.key === key && !jiraRefreshSpin.end) return;
   const spin = { key, at: Date.now() };
   jiraRefreshSpin = spin;
   try { await jiraCardLoad(key, { fresh: true, keep: true, spin }); } finally { uiSpinEnd(spin); }
