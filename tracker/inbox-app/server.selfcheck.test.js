@@ -551,3 +551,99 @@ test('시험 환경: 토큰 폴더는 늘 임시 폴더이고 슬랙 자동 갱�
     assert.match(fs.readFileSync(path.join(__dirname, name), 'utf8'), /WORKSPACE_NO_REMOTE_CHECK: '', WORKSPACE_NO_SLACK_REFRESH: '1', WORKSPACE_TOKEN_DIR: path\.join\(root, 'tokens'\)/, name);
   }
 });
+
+// ---------- 앱 자동화가 쓰는 Claude 계정(run-task.sh와 같은 순서: 앱 토큰 → 이 맥 기본 로그인 → 없음) ----------
+const FAKE_CLAUDE_TOKEN = 'sk-ant-oat01-fake-claude-token-value-789';
+const FAKE_CLAUDE_EMAIL = 'tester.person@mailhost.example';
+const FAKE_ORG = 'Fake Org Name 42';
+function claudeHome(t, { token = null, login = true } = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-claude-account-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const tokenFile = path.join(root, 'workspace-claude-token');
+  const globalConfigFile = path.join(root, '.claude.json');
+  if (token !== null) fs.writeFileSync(tokenFile, token);
+  if (login) fs.writeFileSync(globalConfigFile, JSON.stringify({ numStartups: 3, oauthAccount: { accountUuid: 'uuid-1', emailAddress: FAKE_CLAUDE_EMAIL, organizationName: FAKE_ORG, displayName: 'Tester' } }));
+  return { tokenFile, globalConfigFile };
+}
+
+test('Claude 계정 출처: 토큰 파일(공백 빼고 한 글자라도) → 기본 로그인(가린 이메일) → 없음 — 토큰·이메일 원문은 돌려주지 않는다', (t) => {
+  const { claudeAccountSource, maskEmail } = integrations;
+  assert.deepEqual(claudeAccountSource(claudeHome(t, { token: `${FAKE_CLAUDE_TOKEN}\n` })), { source: 'token' }, '토큰이 있으면 기본 로그인이 있어도 토큰(run-task.sh와 같다)');
+  assert.deepEqual(claudeAccountSource(claudeHome(t, { token: '' })), { source: 'default', account: 't***@m***.example' }, '빈 토큰 파일은 없는 것');
+  assert.deepEqual(claudeAccountSource(claudeHome(t, { token: ' \n\t ' })), { source: 'default', account: 't***@m***.example' }, '공백뿐인 파일도 없는 것');
+  assert.deepEqual(claudeAccountSource(claudeHome(t)), { source: 'default', account: 't***@m***.example' });
+  assert.deepEqual(claudeAccountSource(claudeHome(t, { login: false })), { source: 'none' });
+  // 기본 설정 파일이 깨졌거나 oauthAccount가 없거나 이메일이 이상하면
+  const odd = claudeHome(t, { login: false });
+  fs.writeFileSync(odd.globalConfigFile, '{ not json');
+  assert.deepEqual(claudeAccountSource(odd), { source: 'none' });
+  fs.writeFileSync(odd.globalConfigFile, JSON.stringify({ numStartups: 1 }));
+  assert.deepEqual(claudeAccountSource(odd), { source: 'none' }, '로그아웃하면 oauthAccount가 없다');
+  fs.writeFileSync(odd.globalConfigFile, JSON.stringify({ oauthAccount: { emailAddress: 'not-an-email' } }));
+  assert.deepEqual(claudeAccountSource(odd), { source: 'default' }, '계정을 못 읽으면 출처만');
+  assert.deepEqual(claudeAccountSource({}), { source: 'none' }, '자리를 모르면 없음');
+  assert.equal(maskEmail('a@b.co.kr'), 'a***@b***.kr');
+  assert.equal(maskEmail('하나@회사'), '하***@회***');
+  assert.equal(maskEmail(''), '');
+  assert.equal(maskEmail('x@'), '');
+});
+
+test('점검: `앱 자동화가 쓰는 Claude 계정` 줄 — Claude Code 로그인 줄 바로 뒤, 출처 셋, 문제로 세지 않고, 토큰·이메일·조직 원문이 없다', async (t) => {
+  const h = home(t, { slack: true, jira: false, calendar: false });
+  const net = fakeNet(okRoutes);
+  const run = async (where, extra = {}) => createSelfcheck(depsFor(h, net, { ...extra, override: { claudeAccount: () => integrations.claudeAccountSource(where), ...(extra.override || {}) } })).run();
+  const automations = [{ key: 'slack', lastKind: 'run', events: [{ time: '2026-09-28 10:05:00', kind: 'run', text: '완료' }] }];
+
+  const token = await run(claudeHome(t, { token: FAKE_CLAUDE_TOKEN }), { automations });
+  const keys = token.items.map(item => item.key);
+  assert.equal(keys.indexOf('claudeAccount'), keys.indexOf('claude') + 1, 'Claude Code 로그인 줄 바로 뒤');
+  assert.deepEqual(byKey(token, 'claudeAccount'), { key: 'claudeAccount', label: '앱 자동화가 쓰는 Claude 계정', state: 'ok', detail: '앱에 붙여 넣은 토큰 · 토큰만으로는 어느 계정인지 알 수 없어요 · 터미널에서 쓰는 계정과 다를 수 있어요', copy: '앱에 붙여 넣은 토큰' });
+
+  const login = await run(claudeHome(t), { automations });
+  assert.deepEqual(byKey(login, 'claudeAccount'), { key: 'claudeAccount', label: '앱 자동화가 쓰는 Claude 계정', state: 'ok', detail: '이 맥의 기본 Claude Code 로그인 (t***@m***.example) · 터미널에서 쓰는 계정과 다를 수 있어요', copy: '이 맥의 기본 Claude Code 로그인' });
+
+  const none = await run(claudeHome(t, { token: '', login: false }), { automations });
+  assert.deepEqual([byKey(none, 'claudeAccount').state, byKey(none, 'claudeAccount').copy], ['unknown', '로그인 없음']);
+  assert.match(byKey(none, 'claudeAccount').detail, /^로그인 없음 — /);
+  assert.ok(!byKey(none, 'claudeAccount').fix, '고치는 법 없이 알리기만');
+
+  // 기존 `Claude Code 로그인` 줄의 판단은 그대로 — 계정 줄은 상태를 바꾸지 않는다(로그인 풀림 ✗도 그대로 한 번만 센다)
+  const failing = [{ key: 'slack', lastKind: 'fail', lastSummary: 'OAuth session expired and could not be refreshed', events: [] }];
+  const bad = await run(claudeHome(t), { automations: failing });
+  assert.equal(byKey(bad, 'claude').state, 'bad');
+  assert.equal(byKey(bad, 'claudeAccount').state, 'ok');
+  const withoutLine = await createSelfcheck(depsFor(h, net, { automations: failing })).run();
+  assert.deepEqual(bad.items.filter(item => item.key !== 'claudeAccount'), withoutLine.items, '계정 줄 말고는 예전과 같다');
+
+  // Claude가 필요한 연동이 없거나 claude가 없으면 줄이 없다(Claude Code 줄과 같은 조건)
+  const noClaude = await run(claudeHome(t), { automations, override: { claudeInstalled: () => false } });
+  assert.ok(!byKey(noClaude, 'claudeAccount'));
+  const rawOnly = home(t, { slack: false, jira: true, calendar: false });
+  const plain = await createSelfcheck(depsFor(rawOnly, net, { override: { claudeAccount: () => integrations.claudeAccountSource(claudeHome(t)) } })).run();
+  assert.ok(!byKey(plain, 'claudeAccount') && !byKey(plain, 'claude'));
+
+  // 원문이 어디에도 없다
+  for (const result of [token, login, none, bad]) {
+    const text = JSON.stringify(result);
+    for (const secret of [FAKE_CLAUDE_TOKEN, 'fake-claude-token', FAKE_CLAUDE_EMAIL, 'tester.person', 'mailhost', FAKE_ORG, 'uuid-1']) assert.ok(!text.includes(secret), `응답에 ${secret}가 없다`);
+  }
+});
+
+test('GET /api/selfcheck: 진짜 서버도 임시 자리의 토큰 파일·기본 설정 파일만 읽고, 응답에 원문이 없다', async (t) => {
+  const tokenFile = integrations.tokenPaths().claude.file;
+  const globalConfigFile = process.env.WORKSPACE_CLAUDE_GLOBAL_CONFIG;
+  assert.ok(globalConfigFile && globalConfigFile.startsWith(automationHome + path.sep), '공용 준비가 실제 ~/.claude.json 대신 임시 자리를 끼운다');
+  assert.ok(tokenFile.startsWith(automationHome + path.sep));
+  fs.mkdirSync(path.dirname(tokenFile), { recursive: true });
+  t.after(() => { fs.rmSync(tokenFile, { force: true }); fs.rmSync(globalConfigFile, { force: true }); serverModule.selfcheck.clear(); });
+  fs.writeFileSync(globalConfigFile, JSON.stringify({ oauthAccount: { emailAddress: FAKE_CLAUDE_EMAIL, organizationName: FAKE_ORG } }));
+  const look = async () => { serverModule.selfcheck.clear(); const body = await (await fetch(`${base}/api/selfcheck`)).json(); return { body, text: JSON.stringify(body), item: body.items.find(one => one.key === 'claudeAccount') }; };
+  const first = await look();
+  // 설정이 없으면 캘린더(Claude로 읽기)·회의록이 켜진 것으로 읽혀 Claude가 필요하다 — 이 맥에 claude가 있을 때만 줄이 선다.
+  if (!integrations.claudeInstalled()) { assert.ok(!first.item); return; }
+  assert.equal(first.item.detail, '이 맥의 기본 Claude Code 로그인 (t***@m***.example) · 터미널에서 쓰는 계정과 다를 수 있어요');
+  fs.writeFileSync(tokenFile, `${FAKE_CLAUDE_TOKEN}\n`);
+  const second = await look();
+  assert.equal(second.item.copy, '앱에 붙여 넣은 토큰');
+  for (const { text } of [first, second]) for (const secret of [FAKE_CLAUDE_TOKEN, FAKE_CLAUDE_EMAIL, FAKE_ORG]) assert.ok(!text.includes(secret), `응답에 ${secret}가 없다`);
+});

@@ -332,7 +332,7 @@ test('QA 픽스처: browser-fixture가 서버에 넘기는 경로는 전부 임�
   assert.equal(env.WORKSPACE_NO_OPEN, '1');
   assert.equal(env.WORKSPACE_NO_REMOTE_CHECK, '1');
   const keys = ['WORKSPACE_DATA_DIR', 'WORKSPACE_CONFIG', 'WORKSPACE_REPO_DIR', 'WORKSPACE_LOCAL_DIR', 'WORKSPACE_TOKEN_DIR',
-    'WORKSPACE_AUTOMATION_DIR', 'WORKSPACE_LAUNCH_AGENTS_DIR', 'WORKSPACE_APPLICATIONS_DIR', 'WORKSPACE_BACKUP_DIR'];
+    'WORKSPACE_AUTOMATION_DIR', 'WORKSPACE_LAUNCH_AGENTS_DIR', 'WORKSPACE_APPLICATIONS_DIR', 'WORKSPACE_BACKUP_DIR', 'WORKSPACE_CLAUDE_GLOBAL_CONFIG'];
   for (const key of keys) {
     assert.ok(env[key], `${key}를 넘긴다`);
     assert.ok(underPath(env[key], root), `${key}=${env[key]}`);
@@ -346,7 +346,7 @@ test('QA 픽스처: browser-fixture가 서버에 넘기는 경로는 전부 임�
   const loaded = loadServerChild({ ...process.env, ...env });
   assert.equal(loaded.status, 0, loaded.stderr);
   const used = JSON.parse(loaded.stdout);
-  assert.deepEqual(Object.keys(used).sort(), ['applications', 'automation', 'backup', 'config', 'data', 'launchAgents', 'local', 'repo', 'tokens']);
+  assert.deepEqual(Object.keys(used).sort(), ['applications', 'automation', 'backup', 'claudeGlobal', 'config', 'data', 'launchAgents', 'local', 'repo', 'tokens']);
   for (const [name, value] of Object.entries(used)) {
     const real = fs.existsSync(value) ? fs.realpathSync(value) : value;
     assert.ok(underPath(value, root) || underPath(real, rootReal), `${name}=${value}`);
@@ -414,6 +414,7 @@ test('QA 안전망: WORKSPACE_FIXTURE=1인데 경로가 하나라도 실제 설�
     ['launchAgents', without('WORKSPACE_LAUNCH_AGENTS_DIR'), '~/Library/LaunchAgents'],
     ['applications', without('WORKSPACE_APPLICATIONS_DIR'), '~/Applications'],
     ['backup', without('WORKSPACE_BACKUP_DIR'), '~/workspace-data-backup'],
+    ['claudeGlobal', without('WORKSPACE_CLAUDE_GLOBAL_CONFIG'), '~/.claude.json'],
     ['config', without('WORKSPACE_CONFIG'), '저장소의 workspace.config.json'],
     ['local', { ...base, WORKSPACE_LOCAL_DIR: path.join(repoRoot, 'local') }, '저장소의 local/'],
     ['data', without('WORKSPACE_DATA_DIR'), '저장소의 tracker/'],

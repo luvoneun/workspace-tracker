@@ -33,6 +33,8 @@ process.env.WORKSPACE_NO_REMOTE_CHECK = '1';
 // 슬랙 자동 갱신 타이머도 확실히 끈다(진짜 서버를 띄우는 시험이 이 환경을 물려받는다).
 process.env.WORKSPACE_TOKEN_DIR = path.join(automationHome, 'tokens');
 process.env.WORKSPACE_NO_SLACK_REFRESH = '1';
+// 점검하기 `앱 자동화가 쓰는 Claude 계정` 줄이 읽는 Claude Code 기본 설정 파일도 없는 임시 자리로 — 실제 ~/.claude.json(로그인 계정)을 보지 않게.
+process.env.WORKSPACE_CLAUDE_GLOBAL_CONFIG = path.join(automationHome, 'claude-global.json');
 // 슬랙 수집의 쉬는 시간(9~19시 밖이면 카드가 `대기 중`·실패를 숨김)이 시험을 돌린 시각에 따라 달라지지 않게 — 기본은 오늘 낮 12시
 // (이 프로세스의 서버와 시험이 띄우는 서버 모두). 쉬는 시간을 보는 시험은 setSlackClockForTests로 따로 끼우고 끝나면 null로 되돌린다.
 process.env.WORKSPACE_SLACK_TEST_HOUR = '12';
