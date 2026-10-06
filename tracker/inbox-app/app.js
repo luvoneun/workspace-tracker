@@ -6483,6 +6483,8 @@ function setActiveTab(tab) {
   if (tab !== activeTabKey) waitingNextClose();
   // 좁은 폭 시트는 탭에 붙어 있지 않다 — 탭을 옮기면 닫아 가림막이 새 탭을 막지 않게 한다.
   if (tab !== activeTabKey && panelScrimEl && !panelScrimEl.hidden) panelClose();
+  // 새 프로젝트 화면은 탭을 떠나면 버린다(만드는 중이면 남는다 — projectNewLeave).
+  if (tab !== activeTabKey && activeTabKey === 'projects' && typeof projectNew !== 'undefined' && projectNew && projectNewLeave()) renderProjects();
   // 프로젝트 탭에 새로 들어올 때만 왼쪽 목록 차례를 다시 정렬한다(체크 등으로 이미 그 탭에 있는 동안
   // 다시 그리는 것은 고정된 차례를 그대로 쓴다 — projectOrderResort).
   if (tab === 'projects' && activeTabKey !== 'projects') projectOrderResort = true;

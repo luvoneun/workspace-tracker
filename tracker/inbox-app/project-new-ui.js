@@ -130,6 +130,14 @@ function projectNewDrop() {
   jiraLinkBorrow(null);
   jiraLinkReset(false);
 }
+// 다른 프로젝트·탭으로 가기 전에 부른다 — 열려 있으면 버리고 true. 지라에 만드는 중(busy)이면 버리지 않고 false:
+// 요청은 이미 나갔으니 화면을 버리면 만들어진 결과를 볼 길이 없어진다(끝나면 결과 화면이 그대로 선다).
+function projectNewLeave() {
+  if (!projectNew) return true;
+  if (projectNew.busy) return false;
+  projectNewDrop();
+  return true;
+}
 function projectNewClose() {
   projectNewDrop();
   renderProjects();
@@ -841,7 +849,9 @@ async function projectNewSend(state) {
   if (!projectNew) return;
   if (data.epic && (data.epic.created || moveWanted)) {
     await load();
-    openProjectTab(`jira:${data.epic.key}`);
+    // 위 목록에 열린 항목이 0인 새 에픽은 `지난 프로젝트`로 가므로, 접어 둔 구역도 고른 것이 보이게 연다.
+    projectPastOpen = null;
+    openProjectTab(`jira:${data.epic.key}`, { keepNew: true });
   }
   projectNewPaint();
 }
