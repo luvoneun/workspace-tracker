@@ -162,6 +162,7 @@ function projectNewStart() {
   jiraLinkBorrow({ openLabel: '에픽 고르기', label: '이 에픽에 붙이기', onPick: issue => projectNewPickEpic(issue) });
   // Esc는 이 화면만 닫는다(탭·상세는 건드리지 않는다).
   projectNew.onEsc = escPush(() => projectNewClose());
+  uiSwapForget('projnew:'); // 여는 그리기는 화면 전체가 한 번 나타난다(projects:body) — 지난번 세그먼트 값과 견주지 않는다
   renderProjects();
   document.getElementById('projectBody')?.querySelector?.('.d-pnewname')?.focus?.();
   // 첫 제안 프로젝트의 만들 수 있는 종류를 미리 읽어 둔다(조회라 아무것도 저장하지 않는다).
@@ -372,7 +373,7 @@ function projectNewModes(state) {
     });
     seg.appendChild(button);
   });
-  return seg;
+  return uiKnob(seg, 'projnew:mode'); // 손잡이가 옛 칸에서 미끄러진다(화면 전환)
 }
 
 // 고른 에픽 한 줄(요약이 먼저, 상태는 뒤, 키는 조용한 글자로 — 연결 미리 보기와 같은 규칙).
@@ -533,6 +534,7 @@ function projectNewRoleEdit(state) {
   save.className = 'd-btn sm acc';
   save.textContent = state.roleBusy ? '저장하는 중…' : '저장';
   save.disabled = state.roleBusy;
+  if (state.roleBusy) save.setAttribute('aria-busy', 'true');
   save.addEventListener('click', () => projectNewRoleSave(state));
   acts.append(add, cancel, save);
   box.appendChild(acts);
@@ -580,7 +582,8 @@ function projectNewTypeRow(state) {
   row.className = 'd-pnewtype';
   if (state.typeBusy) {
     const busy = document.createElement('span');
-    busy.className = 'note';
+    busy.className = 'note d-waiting';
+    busy.setAttribute('aria-busy', 'true');
     busy.textContent = '지라에서 만들 수 있는 종류를 읽는 중…';
     row.appendChild(busy);
     return row;
@@ -762,6 +765,7 @@ function projectNewActions(state) {
     go.className = 'd-btn sm acc';
     go.textContent = state.busy ? '만드는 중…' : '만들기';
     go.disabled = state.busy;
+    if (state.busy) go.setAttribute('aria-busy', 'true');
     go.addEventListener('click', () => projectNewSend(state));
     acts.append(cancel, go);
     confirm.append(ask, what, acts);
@@ -1007,6 +1011,7 @@ function projectNewResult(state) {
     again.className = 'd-btn sm acc';
     again.textContent = state.busy ? '다시 만드는 중…' : '실패한 것 다시 시도';
     again.disabled = state.busy;
+    if (state.busy) again.setAttribute('aria-busy', 'true');
     again.addEventListener('click', () => projectNewRetry(state));
     acts.appendChild(again);
   }
@@ -1148,6 +1153,7 @@ function projectNewRender(body) {
   form.appendChild(projectNewMoveNode);
 
   form.appendChild(projectNewField('지라', projectNewModes(state)));
+  const modeFrom = form.children.length; // 여기서부터가 지라 세그먼트에 따라 바뀌는 칸이다(화면 전환 — 아래 uiSwap)
 
   if (state.mode === 'epic') {
     const project = projectNewInput(state.project, '지라 프로젝트 키 — 예: IO', '지라 프로젝트 키', (value) => { state.project = value; }, 20);
@@ -1209,4 +1215,6 @@ function projectNewRender(body) {
   projectNewGoNode.className = 'd-pnewgobox';
   projectNewGoNode.appendChild(projectNewActions(state));
   body.appendChild(projectNewGoNode);
+  // 지라 세그먼트를 바꿔 칸 구성이 달라졌으면 바뀐 칸들만 100ms 나타난다(이름 칸·세그먼트는 그대로 선다).
+  uiSwap([...form.children].slice(modeFrom), 'projnew:mode', state.mode);
 }

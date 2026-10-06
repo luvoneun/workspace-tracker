@@ -637,6 +637,7 @@ function usageWorkOpen(opener, week) {
   dlg.week = week || null;
   dlg.name = week && typeof reportWeekName === 'function' ? reportWeekName(week) : null;
   if (!dlg.dialog.open && typeof uiNumForget === 'function') uiNumForget('uw:'); // 열 때는 지난번 값에서 움직이지 않는다
+  if (!dlg.dialog.open && typeof uiSwapForget === 'function') uiSwapForget('uw:'); // 내용 나타남도(창은 제 등장이 있다)
   if (!usageInfo) usageLoad().then(() => { if (usageWorkDlg && usageWorkDlg.dialog.open) usageWorkPaint(); });
   usageWorkPaint();
   if (!dlg.dialog.open) {
@@ -862,6 +863,7 @@ function usageWorkBody(info, cell, options) {
     });
     seg.appendChild(button);
   }
+  if (typeof uiKnob === 'function') uiKnob(seg, 'uw:range'); // 손잡이가 옛 기간에서 미끄러진다(화면 전환)
   head.append(seg, usageEl('p', 'd-uwperiod', stats.periodLabel));
   // 90일 안에 기록이 하나도 없으면 기간을 바꿔도 같은 한 줄이라 세그먼트·기간 글자를 숨긴다(빈 화면엔 할 수 있는 것만).
   if (!stats.empty && !failed) body.appendChild(head);
@@ -939,6 +941,9 @@ function usageWorkBody(info, cell, options) {
       body.appendChild(insights);
     }
   }
+
+  // 기간을 바꿨으면 그 기간의 내용(머리 아래 ~ 알게 된 것)만 100ms 나타난다(화면 전환 — 기능별 전체 보기는 기간과 상관없어 그대로).
+  if (typeof uiSwap === 'function') uiSwap([...body.children].filter(node => node !== head), 'uw:range', stats.range);
 
   // 기능별 전체 보기 — 최근 30일 합계 표(기본 접힘).
   const rows = Array.isArray(info.rows) ? info.rows : [];

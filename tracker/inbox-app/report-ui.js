@@ -2260,6 +2260,10 @@ function renderReportDraft(item) {
   if (same) uiRowsMove(host, () => renderReportDraftNow(item, host));
   else renderReportDraftNow(item, host);
   host.dataset.reportMode = reportMode;
+  // 다른 주·다른 보기(전체 업무 기록)로 옮겼으면 문서가 100ms 나타나기만 한다(화면 전환 — 옆으로 밀지 않는다).
+  uiSwap(host, 'weekly:doc', `${item.weekKey}|${reportMode}`);
+  // 정리 모드를 켜면 글머리 자리의 선택 칸과 알림 한 줄이 100ms 나타난다(끌 때는 바로 사라진다).
+  uiSwap([...host.querySelectorAll('.rp-tidy, .rp-s.is-tidy .bu')], 'weekly:tidy', reportTidy ? item.weekKey : '');
 }
 function renderReportDraftNow(item, host) {
   if (reportRenderedWeek !== item.weekKey) {

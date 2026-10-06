@@ -1370,6 +1370,7 @@ function meetingMoveAskNode(event, host = MEETING_HOST_CARD) {
   move.type = 'button'; move.className = 'd-link';
   move.textContent = ask.busy ? `${ask.to ? '옮기는' : '빼는'} 중…` : verb;
   move.disabled = !!ask.busy;
+  if (ask.busy) move.setAttribute('aria-busy', 'true');
   move.addEventListener('click', () => meetingMoveRun(event.id, picked.ids, ask, host));
   const sep2 = document.createElement('span'); sep2.className = 'sep'; sep2.textContent = '·';
   const keep = document.createElement('button');
@@ -1720,6 +1721,7 @@ function renderMeetings() {
   // 그리는 안에서 고른 회의가 바뀌면(거르기 칩·담기·보던 회의가 사라짐) 그린 뒤에 알게 된다 — 그때는 오른쪽 잰 것을 버린다.
   const drawBody = () => { draw(); if (body.dataset.meetingFor !== was) uiGlideForget(body); };
   uiRowsMove(listEl, was === String(meetingsTabState.key) ? () => uiRowsMove(body, drawBody) : draw);
+  uiSwap(body, 'meetings:body', body.dataset.meetingFor); // 다른 회의를 골랐으면 오른쪽이 100ms 나타나기만 한다(화면 전환)
 }
 function renderMeetingsNow(listEl, body) {
   meetingsDrawSeq += 1;
@@ -1938,7 +1940,7 @@ function meetingsViewSegment() {
     button.addEventListener('click', () => setMeetingsView(value));
     seg.appendChild(button);
   });
-  return seg;
+  return uiKnob(seg, 'meetings:view'); // 손잡이가 옛 칸에서 미끄러진다(화면 전환)
 }
 
 // 목록 한 줄: 시각 | 제목 + `● 프로젝트` | 상태(`초안 N` 배지 · `미완료 N` 조용한 글자).

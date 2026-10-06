@@ -153,6 +153,8 @@ function wrapFootSync() {
   wrapNodes.go.textContent = wrapGoLabel(counts);
   wrapNodes.go.disabled = wrapState.busy || !counts.total;
   if (wrapNodes.cancel) wrapNodes.cancel.disabled = wrapState.busy;
+  // 저장하는 동안 — 0.3초 넘게 걸리면 줄들이 살짝 옅어진다(기다림 부품, ui.css [aria-busy]). 버튼 글자는 그대로라 버튼에는 걸지 않는다.
+  if (wrapNodes.body) wrapNodes.body.setAttribute('aria-busy', String(!!wrapState.busy));
 }
 
 function wrapFoot() {

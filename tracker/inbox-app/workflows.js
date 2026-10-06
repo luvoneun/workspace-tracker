@@ -63,11 +63,14 @@ function wfSegment(options, value, onChange, label) {
     button.dataset.key = key;
     return button;
   });
-  const choose = key => buttons.forEach(button => {
-    const on = button.dataset.key === key;
-    button.setAttribute('aria-checked', String(on));
-    button.tabIndex = on ? 0 : -1;
-  });
+  const choose = (key) => {
+    buttons.forEach((button) => {
+      const on = button.dataset.key === key;
+      button.setAttribute('aria-checked', String(on));
+      button.tabIndex = on ? 0 : -1;
+    });
+    uiKnob(group, group); // 손잡이가 옛 칸에서 미끄러진다(화면 전환 — 다시 그리지 않는 무리라 무리 자체가 열쇠)
+  };
   buttons.forEach((button, index) => {
     button.addEventListener('click', () => { choose(button.dataset.key); onChange(button.dataset.key); });
     button.addEventListener('keydown', event => {
@@ -78,8 +81,8 @@ function wfSegment(options, value, onChange, label) {
       next.focus(); next.click();
     });
   });
-  choose(value);
   group.append(...buttons);
+  choose(value);
   return group;
 }
 const wfTypeSegment = (value, onChange, label = '종류') => wfSegment(WF_TYPES, value, onChange, label);
@@ -174,6 +177,7 @@ function wfMoveConfirmNode(groupName, jiraKey, { busy = false, onCancel, onConfi
   go.className = 'd-btn sm acc';
   go.textContent = busy ? '옮기는 중…' : '옮기기';
   go.disabled = busy;
+  if (busy) go.setAttribute('aria-busy', 'true');
   go.addEventListener('click', onConfirm);
   acts.append(cancel, go);
   confirm.append(ask, acts);

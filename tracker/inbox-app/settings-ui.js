@@ -551,6 +551,8 @@ function settingsUpdateList(steps) {
     icon.className = 'ic';
     icon.setAttribute('aria-hidden', 'true');
     icon.textContent = mark;
+    // 2초마다 다시 그려진다 — 도는 ⟳이 0도에서 다시 시작하지 않게 시계에 맞춘 각도에서 잇는다(기다림 부품)
+    if (step.state === 'doing') icon.setAttribute('style', `animation-delay:${uiSpinPhase()}`);
     row.append(icon, document.createTextNode(step.name));
     list.appendChild(row);
   });
@@ -643,6 +645,7 @@ function settingsUpdateNodes(view) {
     const words = settingsEl('d-quiet', view.checked ? '최신 버전이에요 · 방금 확인했어요' : '');
     const check = settingsButton(view.checking ? '확인 중…' : '새 버전 확인', 'd-btn xs', () => settingsUpdateCheckNow());
     check.disabled = !!view.checking;
+    if (view.checking) check.setAttribute('aria-busy', 'true');
     row.append(check);
     if (words.textContent) row.append(words);
     return [row];
@@ -1048,7 +1051,7 @@ async function settingsIntegrationApplied(result, done) {
   }
   if (view) {
     view.replaceChildren();
-    view.insertAdjacentHTML('beforeend', '<div class="d-empty">적용하는 중… 앱을 다시 켜요</div>');
+    view.insertAdjacentHTML('beforeend', '<div class="d-empty d-waiting" aria-busy="true">적용하는 중… 앱을 다시 켜요</div>');
   }
   if (!await settingsWaitForServer()) {
     showNotice('앱이 다시 켜지지 않았어요 — 잠시 뒤 새로고침해 주세요', true);
@@ -1077,7 +1080,7 @@ async function settingsWaitForServer(tries = 20) {
 // (채널 고르기: 다시 체크한 채널이 사라졌으면 그 줄을 새로 만들기로 바꾼다).
 async function settingsIntegrationSave(body, { error = null, button = null, done = '저장했어요', saved = null, failed = null } = {}) {
   if (error) error.textContent = '';
-  if (button) button.disabled = true;
+  if (button) { button.disabled = true; button.setAttribute('aria-busy', 'true'); } // 기다림 표시 — 0.3초 넘게 걸릴 때만 보인다
   let result = null;
   try {
     const response = await fetch('/api/integrations/save', {
@@ -1088,7 +1091,7 @@ async function settingsIntegrationSave(body, { error = null, button = null, done
     let data = null;
     try { data = await response.json(); } catch { data = null; }
     if (!response.ok || !data || data.ok === false) {
-      if (button) button.disabled = false;
+      if (button) { button.disabled = false; button.removeAttribute('aria-busy'); }
       if (typeof failed === 'function' && data && failed(data) === true) return null;
       if (error) error.textContent = (data && typeof data.error === 'string' && data.error) || '저장하지 못했어요.';
       return null;
@@ -1097,9 +1100,10 @@ async function settingsIntegrationSave(body, { error = null, button = null, done
   } catch {
     if (error) error.textContent = '서버에 닿지 못했어요 — 앱이 켜져 있는지 확인해 주세요.';
     showNotice('저장됐는지 확인하지 못했어요. 입력한 내용은 그대로 있어요', true);
-    if (button) button.disabled = false;
+    if (button) { button.disabled = false; button.removeAttribute('aria-busy'); }
     return null;
   }
+  if (button) button.removeAttribute('aria-busy');
   if (typeof saved === 'function') saved(result);
   await settingsIntegrationApplied(result, done);
   return result;
@@ -1276,9 +1280,11 @@ function settingsFetchRunner(spec, paint, toneNow = () => 'ok') {
     if (Date.now() - (settingsFetchLast.get(key) || 0) < SETTINGS_FETCH_WAIT_MS) { showNotice(SETTINGS_FETCH_THROTTLED); return; }
     busy = true;
     button.disabled = true;
+    button.setAttribute('aria-busy', 'true'); // 읽는 동안 — 0.3초 뒤 글자 앞에 도는 표시(기다림 부품)
     const result = await settingsFetchAsk(key);
     busy = false;
     button.disabled = false;
+    button.removeAttribute('aria-busy');
     if (result.ok && (result.mode === 'done' || result.mode === 'requested')) {
       settingsFetchLast.set(key, Date.now());
       const text = result.mode === 'done'
@@ -1958,9 +1964,12 @@ function settingsSlackWizard(card, data, mode = 'new') {
   const canSkip = () => Object.keys(state.made).length > 0 || mode === 'token'
     || (mode === 'oauth' && SETTINGS_SLACK_CHANNELS.some(([key]) => linked(key)));
 
+  // 단계가 바뀌어 다시 그리면 본문이 100ms 나타난다(화면 전환 — 같은 단계 다시 그리기·처음 펼침은 그냥).
+  uiSwapForget('settings:wiz:slack');
   function draw() {
     card.body.replaceChildren();
     card.body.appendChild(settingsSteps([mode === 'oauth' ? '허용' : '토큰', '채널', '확인'], state.step));
+    uiSwap(card.body, 'settings:wiz:slack', state.step); // 단계가 칸에 초점을 보내기 전에 — 초점이 칸에 가면 움직이지 않는다
     if (state.step === 0) drawToken();
     else if (state.step === 1) drawChannels();
     else drawConfirm();
@@ -2007,8 +2016,10 @@ function settingsSlackWizard(card, data, mode = 'new') {
       if (isBot()) { error.textContent = settingsSlackTokenShape(value); token.input.focus(); return; }
       error.textContent = '';
       next.disabled = true;
+      next.setAttribute('aria-busy', 'true'); // 기다림 표시 — 0.3초 넘게 걸릴 때만
       const checked = await settingsSlackTokenCheck(value);
       next.disabled = false;
+      next.removeAttribute('aria-busy');
       if (!checked || checked.ok !== true) { error.textContent = checked.error; token.input.focus(); return; }
       state.token = value;
       // 새 채널의 기본 이름은 `<슬랙 사용자 이름>-todo`처럼 — 사람이 이미 고친 이름은 그대로 둔다.
@@ -2120,6 +2131,7 @@ function settingsSlackWizard(card, data, mode = 'new') {
         return;
       }
       make.disabled = true;
+      make.setAttribute('aria-busy', 'true'); // 채널을 만드는 동안 — 끝나면 다시 그린다
       const { made, stop } = await settingsSlackMakeChannels(state.token, keys, state);
       if (!stop && !wanted().length && made) {
         showNotice(settingsSlackMadeNotice(Object.values(state.made)));
@@ -2427,6 +2439,7 @@ function settingsSlackPick(card, data) {
       return;
     }
     go.disabled = true;
+    go.setAttribute('aria-busy', 'true'); // 만들고 저장하는 동안 — 끝나면 다시 그린다(저장은 settingsIntegrationSave가 이어 건다)
     if (toMake.length) {
       // 토큰 칸이 없다 — 서버가 저장된 토큰을 쓴다(응답에는 싣지 않는다).
       const { stop } = await settingsSlackMakeChannels('', toMake, state);
@@ -2462,7 +2475,9 @@ function settingsSlackPick(card, data) {
   }
 
   // 새 채널 이름의 앞머리(슬랙 사용자 이름)를 저장된 토큰으로 한 번 묻는다 — 못 받으면 `my`로 둔다.
-  card.body.replaceChildren(settingsEl('d-ismall', '채널을 불러오는 중이에요…'));
+  const loading = settingsEl('d-ismall d-waiting', '채널을 불러오는 중이에요…');
+  loading.setAttribute('aria-busy', 'true');
+  card.body.replaceChildren(loading);
   return settingsSlackTokenCheck('').then((checked) => {
     if (checked && checked.ok === true) state.prefix = settingsSlackPrefix(checked.prefix);
     Object.entries(state.picks).forEach(([key, pick]) => { if (!pick.touched) pick.name = settingsSlackDefaultName(key, state.prefix); });
@@ -2496,6 +2511,7 @@ function settingsSlackTidy(card, data) {
     // `원문 그대로`가 무엇인지 고르기 전에 읽히게 늘 세운다 — 이미 원문으로 받는 중이면 같은 줄이 카드 둘째 줄
     // 아래에 늘 서 있으므로 여기서는 겹쳐 적지 않는다.
     note.hidden = saved === 'raw';
+    uiKnob(seg, 'settings:tidy');
   };
   [['raw', '원문 그대로'], ['claude', 'Claude로 다듬기']].forEach(([mode, text]) => {
     const button = document.createElement('button');
@@ -2663,9 +2679,11 @@ function settingsJiraWizard(card, data) {
   const teamHost = team.replace(/^https?:\/\//, '');
   const state = { step: 0, token: '', email: String(settingsRealValue(jira.email) || ''), site: team, siteOpen: !team };
 
+  uiSwapForget('settings:wiz:jira');
   function draw() {
     card.body.replaceChildren();
     card.body.appendChild(settingsSteps(['토큰', '계정', '확인'], state.step));
+    uiSwap(card.body, 'settings:wiz:jira', state.step);
     if (state.step === 0) drawToken(); else drawAccount();
   }
 
@@ -2950,6 +2968,7 @@ function settingsMacList(ui, calendars, chosen, mode) {
 // 확인 결과를 그 자리에 — 성공이면 `캘린더 N개 · 오늘 일정 M개를 읽었어요` + 목록, 아니면 이유 한 줄(막힘이면 가는 길까지).
 function settingsMacShow(ui, state, chosen, mode) {
   ui.go.disabled = false;
+  ui.go.removeAttribute('aria-busy');
   ui.go.textContent = '허용하고 확인';
   ui.help.hidden = true;
   const calendars = Array.isArray(state.calendars) ? state.calendars : [];
@@ -2969,9 +2988,11 @@ async function settingsMacCheck(ui, data, mode) {
   ui.help.hidden = true;
   ui.go.disabled = true;
   ui.go.textContent = '확인하는 중…';
+  ui.go.setAttribute('aria-busy', 'true'); // 최대 90초 — 0.3초 뒤 글자 앞에 도는 표시(기다림 부품)
   ui.result.textContent = '맥 캘린더에 묻고 있어요 — 허용 창이 뜨면 허용을 눌러 주세요(최대 1분)';
   const done = (message) => {
     ui.go.disabled = false;
+    ui.go.removeAttribute('aria-busy');
     ui.go.textContent = '허용하고 확인';
     ui.result.textContent = '';
     ui.error.textContent = message;
@@ -3221,6 +3242,7 @@ function settingsNotesOpen(card, data) {
     buttons.forEach(([mode, button]) => button.setAttribute('aria-checked', String(mode === chosen)));
     tiro.hidden = chosen !== 'tiro';
     need.hidden = chosen !== 'tiro';
+    uiKnob(seg, 'settings:notes');
   };
   [['manual', '직접 옮기기(기본)'], ['tiro', '티로']].forEach(([mode, text]) => {
     const button = document.createElement('button');
@@ -4233,6 +4255,8 @@ function settingsSetTab(tab) {
   settingsDialog.querySelectorAll('[data-settings-tab]').forEach((button) => {
     button.setAttribute('aria-pressed', String(button.dataset.settingsTab === want));
   });
+  // 손잡이가 옛 탭에서 미끄러지고 본문은 100ms 나타나기만 한다(화면 전환 — 창을 열 때는 둘 다 그냥 바뀐다).
+  uiKnob(settingsDialog.querySelector('.d-mhd .d-seg'), 'settings:tab');
   document.getElementById('settingsIntegrationsView').hidden = want !== 'integrations';
   document.getElementById('settingsAppView').hidden = want !== 'app';
   document.getElementById('settingsPersonalizeView').hidden = want !== 'personalize';
@@ -4245,6 +4269,7 @@ function settingsSetTab(tab) {
   if (want === 'integrations') renderSettingsIntegrations();
   if (want === 'trash') renderSettingsTrash();
   settingsHeadShade();
+  uiSwap(body, 'settings:tab', want);
   return want;
 }
 
@@ -4263,6 +4288,7 @@ function settingsOpen(tab = 'integrations', focusKey = null) {
   settingsTrash = null;
   if (typeof uiNumForget === 'function') uiNumForget('trash:'); // 열 때 읽어 온 개수는 올라오지 않는다
   settingsTrashLabel();
+  uiSwapForget('settings:'); // 창은 제 등장이 있다 — 연 탭의 본문이 또 나타나지 않게
   settingsSetTab(tab);
   // 새 버전이 나왔는지(톱니바퀴의 파란 점)는 어느 탭으로 열든 한 번 새로 묻는다 — 예전엔 상태 탭이 이 일을 했다.
   if (tab !== 'app') settingsAboutLoad();

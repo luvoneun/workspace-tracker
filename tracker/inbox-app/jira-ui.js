@@ -327,6 +327,7 @@ async function jiraPickOpen(button, sections, key) {
   if (jiraConfirm) jiraConfirmClose();
   const anchor = (button.isConnected === false && jiraCardNode(key)?.querySelector?.(`.d-dpick[aria-label="${label}"]`)) || button;
   anchor.disabled = true;
+  anchor.setAttribute('aria-busy', 'true'); // 선택지를 읽는 동안 — 0.3초 넘게 걸리면 살짝 옅어진다(기다림 부품)
   let built;
   try {
     built = await sections();
@@ -335,6 +336,7 @@ async function jiraPickOpen(button, sections, key) {
     return;
   } finally {
     anchor.disabled = false;
+    anchor.removeAttribute('aria-busy');
   }
   if (anchor.isConnected === false) return;
   uiMenu(anchor, built);
@@ -524,6 +526,7 @@ function jiraConfirmRow(issue, plan) {
     cancel.disabled = true;
     go.disabled = true;
     go.textContent = '보내는 중…';
+    go.setAttribute('aria-busy', 'true');
     try {
       await jiraChangeSend(plan.body);
       jiraBusy = false;
@@ -799,6 +802,7 @@ async function jiraAssignRun(issue, plan, cancel, go) {
   cancel.disabled = true;
   go.disabled = true;
   go.textContent = '보내는 중…';
+  go.setAttribute('aria-busy', 'true');
   const result = await jiraAssignPost(plan.body);
   jiraBusy = false;
   jiraConfirmClose(false);
@@ -898,7 +902,12 @@ function jiraStripCard(issue, projectKey = '', bundle = null) {
   refresh.title = '지라에서 새로 받기';
   if (jiraBusy) refresh.disabled = true;
   refresh.insertAdjacentHTML('beforeend', uiIcon('refresh'));
-  refresh.addEventListener('click', () => jiraCardLoad(issue.key, { fresh: true }));
+  refresh.addEventListener('click', () => jiraRefreshRun(issue.key));
+  // 새로 받는 동안 헤더 새로고침처럼 돈다(기다림 부품 — 다시 그린 버튼도 같은 각도에서 잇고, 끝나면 지금 바퀴를 마저 돈다).
+  if (jiraRefreshSpin && jiraRefreshSpin.key === issue.key) {
+    if (!jiraRefreshSpin.end) refresh.setAttribute('aria-busy', 'true');
+    if (!uiSpin(refresh, jiraRefreshSpin)) jiraRefreshSpin = null;
+  }
   top.append(tag, name, sub, spacer, link, refresh);
   // 손으로 건 연결을 푸는 자리는 여기 하나다. `jira:KEY` 프로젝트의 카드에는 ⋯가 없다 —
   // 그 카드는 프로젝트가 곧 티켓이라 풀 연결이 아니다. 에픽이면 옮기기(BMOVE)도 같은 메뉴에 선다.
@@ -1222,16 +1231,25 @@ async function jiraIssueRead(key, fresh, seq) {
   }
 }
 
+// 띠 카드의 새로고침 버튼 — 보던 카드를 뼈대로 바꾸지 않고(keep) 버튼만 돈다. 실패는 다른 새로고침처럼 오류 줄로 알린다.
+let jiraRefreshSpin = null; // { key, at, end, el } — 지금 도는 새로고침(uiSpin)
+async function jiraRefreshRun(key) {
+  const spin = { key, at: Date.now() };
+  jiraRefreshSpin = spin;
+  try { await jiraCardLoad(key, { fresh: true, keep: true, spin }); } finally { uiSpinEnd(spin); }
+}
+
 // 묶음의 옆 카드를 읽는다 — jiraCardLoad와 같은 규칙(늦은 응답 버림·조용한 재조회 실패는 알리지 않음).
-async function jiraSideLoad(key, { fresh = false, quiet = false } = {}) {
+async function jiraSideLoad(key, { fresh = false, quiet = false, keep = false, spin = null } = {}) {
   jiraSideSeq += 1;
   const seq = jiraSideSeq;
   const prev = jiraSide.cards[key];
-  jiraSide.cards[key] = quiet && prev ? { ...prev, seq } : { key, state: 'loading', issue: null, error: '', at: 0, seq };
+  jiraSide.cards[key] = (quiet && prev) || (keep && prev && prev.state === 'ok') ? { ...prev, seq } : { key, state: 'loading', issue: null, error: '', at: 0, seq };
   jiraStripPaint();
   const next = await jiraIssueRead(key, fresh, seq);
   const now = jiraSide.cards[key];
   if (!now || now.seq !== seq) return;
+  uiSpinEnd(spin); // 다시 그린 버튼이 지금 바퀴를 마저 돌고 선다
   if (quiet && next.state === 'error' && now.state === 'ok') { jiraSide.cards[key] = { ...now, at: Date.now() }; return; }
   jiraSide.cards[key] = next;
   jiraStripPaint();
@@ -1257,17 +1275,19 @@ function jiraSideEnsure(projectKey, keys) {
   });
 }
 
-async function jiraCardLoad(key, { fresh = false, quiet = false } = {}) {
+// keep: 보던 카드를 그대로 두고 읽는다(새로고침 버튼 — 뼈대 대신 버튼이 돈다). quiet와 달리 실패는 오류 줄로 알린다.
+async function jiraCardLoad(key, { fresh = false, quiet = false, keep = false, spin = null } = {}) {
   // 묶음의 옆 카드(새로고침·다시 시도·지라 쓰기 뒤 재조회)는 그 카드 자리로 보낸다 — 대표 카드는 그대로.
-  if (jiraCard.key !== key && jiraSide.keys.includes(key)) return jiraSideLoad(key, { fresh, quiet });
+  if (jiraCard.key !== key && jiraSide.keys.includes(key)) return jiraSideLoad(key, { fresh, quiet, keep, spin });
   const seq = jiraCard.seq + 1;
-  jiraCard = quiet && jiraCard.key === key
+  jiraCard = (quiet || (keep && jiraCard.state === 'ok')) && jiraCard.key === key
     ? { ...jiraCard, seq }
     : { key, state: 'loading', issue: null, error: '', at: 0, seq };
   jiraStripPaint();
   const next = await jiraIssueRead(key, fresh, seq);
   // 다른 프로젝트로 옮겼거나 더 나중 요청이 이미 나갔으면 이 응답은 버린다.
   if (jiraCard.seq !== seq) return;
+  uiSpinEnd(spin); // 다시 그린 버튼이 지금 바퀴를 마저 돌고 선다
   // 뒤에서 조용히 새로 읽다가 실패한 것은 알리지 않는다 — 보고 있던 값이 오류 줄로 바뀌면 안 된다.
   if (quiet && next.state === 'error' && jiraCard.state === 'ok') { jiraCard = { ...jiraCard, at: Date.now() }; return; }
   jiraCard = next;
@@ -1462,7 +1482,7 @@ function jiraLinkInput(box, projectKey) {
   cancel.className = 'd-btn sm';
   cancel.textContent = '취소';
   cancel.addEventListener('click', () => jiraLinkReset());
-  if (jiraLink.busy) { input.disabled = true; find.disabled = true; find.textContent = '찾는 중…'; }
+  if (jiraLink.busy) { input.disabled = true; find.disabled = true; find.textContent = '찾는 중…'; find.setAttribute('aria-busy', 'true'); }
   input.addEventListener('keydown', (event) => {
     // 한글을 조합하는 중의 Enter는 글자를 확정하는 Enter다 — 찾지 않는다.
     if (event.key !== 'Enter' || event.isComposing) return;
@@ -1514,6 +1534,7 @@ function jiraLinkInput(box, projectKey) {
     } else {
       const more = option(jiraLink.doneBusy ? '불러오는 중…' : '완료한 티켓도 보기', () => jiraLinkLoadDone(projectKey), true);
       more.disabled = jiraLink.doneBusy;
+      if (jiraLink.doneBusy) more.setAttribute('aria-busy', 'true');
       if (jiraLink.doneError) note(jiraLink.doneError);
     }
     opts.replaceChildren(...rows);
@@ -1633,13 +1654,13 @@ async function jiraLinkConnect(projectKey, issue, go, back) {
   // 미리 보기를 거치지 않으면 여기까지 올 수 없다(버튼이 그 줄에만 있다) — 한 번 더 막아 둔다.
   if (jiraLink.state !== 'preview' || !jiraLink.issue || jiraLink.busy) return;
   jiraLink = { ...jiraLink, busy: true };
-  go.disabled = true; back.disabled = true; go.textContent = '연결하는 중…';
+  go.disabled = true; back.disabled = true; go.textContent = '연결하는 중…'; go.setAttribute('aria-busy', 'true');
   try {
     await jiraLinkSend(projectKey, issue.key);
   } catch {
     // 실패 문구는 request()가 이미 알렸다 — 미리 보기는 그대로 두고 다시 누를 수 있게 한다.
     jiraLink = { ...jiraLink, busy: false };
-    go.disabled = false; back.disabled = false; go.textContent = '연결';
+    go.disabled = false; back.disabled = false; go.textContent = '연결'; go.removeAttribute('aria-busy');
     return;
   }
   jiraLinkReset(false);

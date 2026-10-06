@@ -240,6 +240,7 @@ function selfcheckPaintButtons(at = Date.now()) {
   if (main) {
     main.disabled = !!why;
     main.textContent = selfcheckState.busy ? SELFCHECK_WORDS.running : '점검하기';
+    main.setAttribute('aria-busy', String(!!selfcheckState.busy)); // 점검하는 동안 — 0.3초 뒤 글자 앞에 도는 표시(기다림 부품)
     if (why) main.title = why; else main.removeAttribute('title');
   }
   const slot = document.getElementById('selfcheckResult');

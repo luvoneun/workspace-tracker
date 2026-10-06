@@ -313,7 +313,7 @@ function projectViewSegment() {
     button.addEventListener('click', () => setProjectListView(value));
     seg.appendChild(button);
   });
-  return seg;
+  return uiKnob(seg, 'projects:view'); // 손잡이가 옛 칸에서 미끄러진다(화면 전환)
 }
 
 // 프로젝트 찾기 칸 — 8개 이상일 때만 선다. 입력할 때마다 목록 부분만 다시 그린다(rowsOnly) — 이
@@ -529,6 +529,7 @@ function renderProjects(opts = {}) {
   // 그리는 안에서 고른 프로젝트가 바뀌면(보던 프로젝트가 사라짐·묶음 대표로) 그린 뒤에 알게 된다 — 그때는 오른쪽 잰 것을 버린다.
   const drawBody = () => { draw(); if (body.dataset.projectFor !== was) uiGlideForget(body); };
   uiRowsMove(listEl, was === projectBodyFor() ? () => uiRowsMove(body, drawBody) : draw);
+  uiSwap(body, 'projects:body', body.dataset.projectFor); // 다른 프로젝트·새 프로젝트 화면으로 옮겼으면 오른쪽이 100ms 나타나기만 한다(화면 전환)
 }
 function renderProjectsNow(listEl, body, opts) {
   // 묶음(BBUNDLE)은 이 탭에서만 한 줄로 합친다 — uiProjectRows는 리마인드도 쓰므로 그대로 두고 여기서 합친다.
@@ -1188,6 +1189,7 @@ function projectBundleAskNode(row) {
   go.className = 'd-btn sm acc';
   go.textContent = ask.busy ? '묶는 중…' : '묶기';
   go.disabled = ask.busy;
+  if (ask.busy) go.setAttribute('aria-busy', 'true');
   go.addEventListener('click', () => projectBundleRun(row));
   acts.append(cancel, go);
   box.append(head, ...facts, acts);

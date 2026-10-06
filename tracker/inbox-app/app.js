@@ -836,6 +836,7 @@ let uiActByKey = false; // 그 동작이 키보드였다 — 키보드로 연 �
 let uiActInText = false; // 그 동작이 글자 칸 안의 키(Enter로 저장·Esc로 취소)였다 — 칸이 사라져 초점이 빠져도 움직이지 않는다
 let uiKeyAt = 0;
 let uiActSeq = 0;        // 사용자 동작마다 하나씩 는다(같은 밀리초의 두 동작도 가린다)
+let uiActEl = null;       // 그 동작이 일어난 요소 — 손잡이·내용 나타남(⑥)이 "그 무리 안에서 고른 것인가"를 본다(uiActIn)
 let uiGlideLate = 0;     // 미뤘다 푸는 그리기 안에서는 0보다 크다
 let uiGlideAdd = null;   // 빠른 추가 칸의 Enter — { el, act }(act는 그 Enter의 동작 번호)
 const uiGlideDone = new Map(); // 방금 체크한 줄 — id → { at, into(들어갈 제목의 열쇠·id), strike(줄 긋기를 기다리나) }
@@ -858,6 +859,7 @@ function uiActMark(event) {
   }
   uiActAt = now;
   uiActSeq += 1;
+  uiActEl = event.target || null;
 }
 // 빠른 추가 칸의 Enter(누르고 있는 키는 빼고)를 적는다 — 그 저장 뒤 다시 그리기에서 새 줄만 나타난다.
 function uiGlideAddMark(input, event) {
@@ -944,6 +946,154 @@ function uiNumBar(el, key, ratio) {
   if (uiGlideMode() !== 'all' || detailReduce()) return;
   el.animate([{ transform: `translateX(${Number(prev) - 100}%)` }, { transform: `translateX(${now - 100}%)` }],
     { duration: UI_NUM.rise, easing: UI_GLIDE.ease });
+}
+// ---- 화면 전환 (모션 부품 ⑥ — DESIGN.md 모션 절, ui.css .d-knob · .d-swap) ----
+// 손잡이 하나: 탭 밑줄과 세그먼트의 고른 표시가 옛 칸에서 새 칸으로 200ms(--t-move) 미끄러진다. 고른 칸의 모양은 그대로이고,
+// 미끄러지는 동안만 무리 안에 손잡이 한 장(.d-knob — aria-hidden, 누를 수 없음)을 띄우고 고른 칸의 바탕·밑줄을 숨긴다.
+// role·aria-selected·aria-pressed·aria-checked·초점 차례는 건드리지 않는다(손잡이는 그림일 뿐이다).
+// 무리에 고른 표시를 단 뒤 uiKnob(무리, 열쇠)를 부른다. 열쇠로 "전에 고른 칸 차례"를 기억해 다시 그려 새 요소가 된 무리도 그 칸에서 출발한다.
+// 움직이는 때: 고른 칸이 바뀌었고, 내 동작(클릭·키) 직후(uiGlideMode)이며, 그 동작이 이 무리(또는 다시 그리기 전의 옛 무리) 안에서 일어났을 때.
+// 처음 그리기·창을 열 때·자동 갱신·폴링·키보드 연타·칸 수가 달라진 무리·움직임 줄이기는 그냥 바뀐다.
+// 시간은 ui.css의 --t-move와 같다(el.animate는 var()를 못 읽는다).
+const UI_KNOB = { move: 200 };
+const UI_KNOB_ON = '[aria-selected="true"], [aria-pressed="true"], [aria-checked="true"]';
+const uiKnobLast = new Map(); // 열쇠 → { at(고른 칸 차례), n(칸 수), el(그때의 무리) }
+const uiKnobLastEl = new WeakMap(); // 다시 그리지 않는 무리(wfSegment)는 무리 자체가 열쇠다
+// 마지막 사용자 동작이 이 요소 안에서 일어났나 — 떨어져 나간 옛 무리도 제 버튼을 품고 있어 그대로 물을 수 있다.
+function uiActIn(el) {
+  return !!(uiActEl && el && typeof el.contains === 'function' && el.contains(uiActEl));
+}
+function uiKnob(group, key) {
+  if (!group || !group.children) return group;
+  const buttons = [...group.children].filter(el => el.tagName === 'BUTTON' && !el.hidden);
+  const at = buttons.findIndex(el => typeof el.matches === 'function' && el.matches(UI_KNOB_ON));
+  const store = typeof key === 'string' ? uiKnobLast : uiKnobLastEl;
+  const prev = store.get(key);
+  const now = { at, n: buttons.length, el: group, moving: null };
+  store.set(key, now);
+  if (!prev || at < 0 || prev.at < 0 || prev.n !== buttons.length) return group;
+  // 같은 동작 안에서 또 그려지면(저장 뒤 load) 처음부터 다시 미끄러지지 않고 미끄러지던 자리에서 잇는다 — 다 왔으면 그대로.
+  if (prev.at === at) {
+    const moving = prev.moving;
+    const elapsed = moving ? Date.now() - moving.t0 : UI_KNOB.move;
+    if (prev.el !== group && elapsed < UI_KNOB.move) {
+      now.moving = moving;
+      uiKnobLater(group, buttons[moving.from], buttons[at], elapsed);
+    }
+    return group;
+  }
+  if (!uiActIn(prev.el) && !uiActIn(group)) return group;
+  if (uiGlideMode() !== 'all' || detailReduce()) return group;
+  now.moving = { from: prev.at, t0: Date.now() };
+  uiKnobLater(group, buttons[prev.at], buttons[at], 0);
+  return group;
+}
+// 그린 무리가 아직 화면에 붙기 전일 수 있다(카드를 다 만든 뒤 붙이는 쪽) — 같은 틱의 그리기가 끝난 뒤 잰다.
+function uiKnobLater(group, from, to, elapsed) {
+  Promise.resolve().then(() => {
+    try { if (group.isConnected) uiKnobSlide(group, from, to, elapsed); } catch { /* 움직임만 빠진다 */ }
+  });
+}
+function uiKnobSlide(group, from, to, elapsed = 0) {
+  if (!from || !to || !from.isConnected || !to.isConnected || typeof to.animate !== 'function') return;
+  const base = group.getBoundingClientRect();
+  const box = (el) => {
+    const r = el.getBoundingClientRect();
+    return { x: r.left - base.left + group.scrollLeft - group.clientLeft, y: r.top - base.top + group.scrollTop - group.clientTop, w: r.width, h: r.height };
+  };
+  // 연달아 고르면 날던 손잡이의 지금 자리에서 이어 출발한다.
+  let knob = [...group.children].find(el => el.classList && el.classList.contains('d-knob'));
+  const start = knob ? box(knob) : box(from);
+  const end = box(to);
+  if (!end.w || !end.h || !start.w || !start.h) return;
+  if (!knob) {
+    knob = document.createElement('span');
+    knob.className = 'd-knob';
+    knob.setAttribute('aria-hidden', 'true');
+    group.insertBefore(knob, group.firstChild);
+  }
+  if (typeof knob.getAnimations === 'function') knob.getAnimations().forEach(one => one.cancel());
+  let radius = '';
+  try { radius = getComputedStyle(to).borderRadius; } catch { radius = ''; }
+  knob.setAttribute('style', `left:${end.x}px;top:${end.y}px;width:${end.w}px;height:${end.h}px${radius ? `;border-radius:${radius}` : ''}`);
+  group.classList.add('is-knob', 'is-gliding');
+  knob.animate([
+    { transform: `translate(${start.x - end.x}px, ${start.y - end.y}px) scale(${start.w / end.w}, ${start.h / end.h})` },
+    { transform: 'none' },
+  ], { duration: UI_KNOB.move, easing: UI_GLIDE.ease, delay: -elapsed });
+  // 끝남 신호를 기다리지 않는다 — 시간이 지나면 고른 칸이 제 바탕을 다시 들고(바탕 전환이 꺼진 채라 바로), 그 모양이 잡힌 뒤
+  // 손잡이를 뗀다(같은 자리·같은 색이라 바뀌는 것이 없다). 한꺼번에 떼면 바탕이 --t-tint로 다시 번져 한 번 깜박인다.
+  clearTimeout(group.uiKnobTimer);
+  group.uiKnobTimer = setTimeout(() => {
+    group.classList.remove('is-gliding');
+    void group.offsetWidth;
+    group.classList.remove('is-knob');
+    if (knob.isConnected) knob.remove();
+  }, UI_KNOB.move - elapsed + 30);
+}
+// 내용 교체 — 고른 항목(회의·프로젝트·주·탭·단계)이 바뀌어 내용을 통째로 갈아 끼울 때 새 내용이 100ms 나타나기만 한다
+// (옆으로 밀지 않는다). 값은 ui.css `.d-swap` 한 규칙이라 그 규칙만 끄면 나타남이 전부 꺼진다. 그린 뒤 uiSwap(내용, 열쇠, 고른 값)을 부른다.
+// 같은 열쇠의 지난 값과 다르고 내 동작 직후일 때만 — 처음 그리기·같은 항목 다시 그리기·자동 갱신·가려진 창·움직임 줄이기는 그냥 그린다.
+// 창을 열 때는 uiSwapForget(열쇠 앞머리)로 지난 값을 지운다(열자마자 나타나지 않게 — 창은 제 등장이 있다).
+const UI_SWAP = { in: 100 };
+const uiSwapLast = new Map();
+function uiSwapForget(prefix) {
+  [...uiSwapLast.keys()].forEach((key) => { if (key.startsWith(prefix)) uiSwapLast.delete(key); });
+}
+// el은 요소 하나 또는 여럿(바뀐 칸들만 나타나게 할 때 — 새 프로젝트의 지라 세그먼트).
+function uiSwap(el, key, value) {
+  const prev = uiSwapLast.get(key);
+  uiSwapLast.set(key, value);
+  if (!el || prev === undefined || prev === value) return el;
+  if (uiGlideMode() !== 'all' || detailReduce()) return el;
+  const els = (Array.isArray(el) ? el : [el]).filter(one => one && one.classList);
+  els.forEach(one => one.classList.remove('d-swap'));
+  if (els.length) void els[0].offsetWidth;
+  els.forEach((one) => {
+    one.classList.add('d-swap');
+    clearTimeout(one.uiSwapTimer);
+    one.uiSwapTimer = setTimeout(() => one.classList.remove('d-swap'), UI_SWAP.in + 80);
+  });
+  return el;
+}
+// ---- 기다림 (모션 부품 ⑦ — DESIGN.md 모션 절, ui.css [aria-busy="true"] · .spinning) ----
+// 기다리는 동안의 표시는 CSS 규칙 하나가 맡는다: aria-busy="true"인 것은 0.3초(--t-wait)가 지나면 살짝 옅어지고(짧은 저장에는 안 보인다),
+// 글자 버튼(.d-btn)은 옅어지는 대신 글자 앞에 도는 표시가 0.3초 뒤 나타난다. 부르는 쪽은 aria-busy만 건다(fadeOutAndRun은 정의 그대로).
+// 새로고침 아이콘(.d-iconbtn.spinning)은 누르면 한 바퀴(400ms, --t-turn), 그보다 오래 걸리면 1초에 한 바퀴씩(--t-loop) 돌고,
+// 끝나면 지금 바퀴를 마저 돈 뒤 0도에서 선다. spin = { at: 돌기 시작한 시각, end: 설 시각 } — 다시 그린 새 버튼도 같은 각도에서 잇는다.
+const UI_WAIT = { turn: 400, loop: 1000 };
+// 일이 끝났다 — 설 시각을 정한다(한 바퀴 안이면 그 바퀴 끝, 도는 중이면 지금 바퀴 끝). 마지막으로 그린 버튼은 그때 선다.
+function uiSpinEnd(spin) {
+  if (!spin || spin.end) return spin;
+  const ran = Date.now() - spin.at;
+  spin.end = spin.at + (ran <= UI_WAIT.turn ? UI_WAIT.turn : UI_WAIT.turn + Math.ceil((ran - UI_WAIT.turn) / UI_WAIT.loop) * UI_WAIT.loop);
+  uiSpinLater(spin);
+  return spin;
+}
+function uiSpinStop(button) {
+  button.classList.remove('spinning');
+  if (button.style) button.style.animationDelay = '';
+}
+function uiSpinLater(spin) {
+  const button = spin.el;
+  if (!button) return;
+  setTimeout(() => { if (spin.el === button) uiSpinStop(button); }, Math.max(0, spin.end - Date.now()));
+}
+// 버튼을 돌린다(다시 그린 새 버튼이면 지난 시간만큼 앞에서 — 같은 각도). 이미 설 시각이 지났으면 세우고 false.
+function uiSpin(button, spin) {
+  if (!button || !button.classList || !spin) return false;
+  const now = Date.now();
+  if (spin.end && now >= spin.end) { uiSpinStop(button); return false; }
+  const ran = now - spin.at;
+  spin.el = button;
+  button.classList.add('spinning');
+  if (button.style) button.style.animationDelay = `${-ran}ms, ${UI_WAIT.turn - ran}ms`;
+  if (spin.end) uiSpinLater(spin);
+  return true;
+}
+// 늘 다시 그려지는 도는 표시(업데이트 진행 ⟳)가 다시 그릴 때마다 0도에서 다시 시작하지 않게 — 시계에 맞춘 시작점(음수 지연).
+function uiSpinPhase() {
+  return `${-(Date.now() % UI_WAIT.loop)}ms`;
 }
 // 줄마다 자리와 "화면에 보이는가"를 잰다. 열쇠는 업무 id(새로 들어온 것 줄·그룹 제목·그 밖의 목록은 data-move-id, 레일 줄은 data-rail-id).
 // sized = 높이가 있었다(숨은 탭·접힌 구역 안의 줄은 자리가 전부 0이라 옛 자리로 쓸 수 없다).
@@ -1897,7 +2047,10 @@ function taskSelectStart() {
   taskSelectionMode = true;
   taskSelection.clear();
   escPush(taskSelectEnd);
+  uiSwap(null, 'today:select', false); // 처음 켜는 것도 "꺼짐 → 켜짐"으로 본다
   taskListsRender();
+  // 줄마다 선 선택 칸이 100ms 나타난다(화면 전환 — 끌 때는 바로 사라진다).
+  uiSwap([...document.querySelectorAll('#todayTaskList .d-selcb, #laterTaskList .d-selcb')], 'today:select', true);
 }
 
 function taskSelectEnd() {
@@ -1909,6 +2062,7 @@ function taskSelectEnd() {
   escDrop(taskSelectEnd);
   uiMenuClose();
   taskListsRender();
+  uiSwap(null, 'today:select', false);
   (document.getElementById('taskSelectToggle') || document.querySelector('#todayHeadMore .d-more'))?.focus();
 }
 
@@ -2918,6 +3072,16 @@ function renderWeeklyReports(items) {
     selectedWeekKey = items[0].weekKey;
   }
 
+  // 주차 줄은 줄 부품으로 그린다 — 다른 주를 고르면 고른 표시(aria-current 배경)가 옛 줄에서 새 줄로 이어진다(uiGlideTint).
+  uiRowsMove(nav, () => renderWeeklyNav(items));
+
+  // 문장을 고치거나 다음 주 계획을 적는 중이면 다시 그리지 않는다(입력이 날아가지 않게).
+  if (detail.contains(document.activeElement) && detail.dataset.weekKey === selectedWeekKey) return;
+
+  renderWeeklyReportDetail(items.find(i => i.weekKey === selectedWeekKey));
+}
+function renderWeeklyNav(items) {
+  const nav = document.getElementById('weeklyReportNav');
   nav.replaceChildren();
   // 주차 목록 칸 맨 위(머리 바로 아래, 첫 주 앞)에 끼울 자리 — '내 일 기록' 판(하루 평균·최고 기록 + `내 일 기록 자세히`).
   // report-ui.js의 reportWeeksFoot → usage-ui.js. 목록이 길어도 머리와 함께 위에 머문다(usage-ui.css).
@@ -2932,6 +3096,7 @@ function renderWeeklyReports(items) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'rp-wk';
+    btn.dataset.moveId = `wk:${item.weekKey}`; // 줄 부품의 열쇠(renderWeeklyNav)
     if (item.weekKey === selectedWeekKey) btn.setAttribute('aria-current', 'true');
     const title = document.createElement('span');
     title.className = 'nm';
@@ -2956,11 +3121,6 @@ function renderWeeklyReports(items) {
     });
     nav.appendChild(btn);
   });
-
-  // 문장을 고치거나 다음 주 계획을 적는 중이면 다시 그리지 않는다(입력이 날아가지 않게).
-  if (detail.contains(document.activeElement) && detail.dataset.weekKey === selectedWeekKey) return;
-
-  renderWeeklyReportDetail(items.find(i => i.weekKey === selectedWeekKey));
 }
 
 function renderWeeklyReportDetail(item) {
@@ -3123,6 +3283,7 @@ function recordApplyView() {
   document.querySelectorAll('#recordViewSeg [data-record-view]').forEach((button) => {
     button.setAttribute('aria-pressed', String(button.dataset.recordView === recordView));
   });
+  uiKnob(document.getElementById('recordViewSeg'), 'records:view');
 }
 function recordSetView(view) {
   recordView = recordViewFrom(view);
@@ -7081,6 +7242,8 @@ function setActiveTab(tab) {
     document.getElementById(cfg.grid).setAttribute('role', 'tabpanel');
     document.getElementById(cfg.grid).setAttribute('aria-labelledby', cfg.btn);
   });
+  // 밑줄이 옛 탭에서 새 탭으로 미끄러진다(화면 전환 손잡이 — 탭 줄 안에서 고른 때만, 키보드 연타면 바로).
+  uiKnob(document.querySelector('.d-tabs'), 'tabs');
   if (typeof usageTabOpened === 'function') usageTabOpened(tab, activeTabKey);   // 사용 횟수(WP-R, usage-ui.js)
   const tabSwitched = tab !== activeTabKey;
   activeTabKey = tab;
@@ -7141,7 +7304,9 @@ if (restoreTab) setActiveTab(restoreTab);
 const refreshBtn = document.getElementById('refreshBtn');
 
 refreshBtn.addEventListener('click', async () => {
-  refreshBtn.classList.add('spinning');
+  // 누르면 한 바퀴, 오래 걸리면 도는 동안 계속 — 끝나면 지금 바퀴를 마저 돌고 선다(기다림 부품 uiSpin).
+  const spin = { at: Date.now() };
+  uiSpin(refreshBtn, spin);
   // 새로고침은 프로젝트 탭에 들어올 때와 같이 왼쪽 목록 차례를 다시 정렬해도 되는 때다.
   projectOrderResort = true;
   waitingNextClose(); // 화면을 새로 받는 때다 — 확인 대기의 `다음은?` 제안도 함께 내린다
@@ -7149,7 +7314,7 @@ refreshBtn.addEventListener('click', async () => {
   refreshBtn.setAttribute('aria-busy', 'true');
   await refreshListsFromServer();
   refreshBtn.removeAttribute('aria-busy');
-  setTimeout(() => refreshBtn.classList.remove('spinning'), 400);
+  uiSpinEnd(spin);
 });
 
 // 폰에서는 버튼이 작으니, 맨 위에서 아래로 끌어도 새로고침되게 한다.

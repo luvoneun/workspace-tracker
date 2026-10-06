@@ -289,6 +289,7 @@ async function checkinSend(current, parts) {
   parts.send.disabled = true;
   parts.later.disabled = true;
   parts.send.textContent = '보내는 중…';
+  parts.send.setAttribute('aria-busy', 'true'); // 0.3초 넘게 걸리면 글자 앞에 도는 표시(기다림 부품)
   parts.error.hidden = true;
   let result = null;
   try { result = await checkinPost({ round: current.round, action: 'send', answers: checkinAnswers(current.form) }); } catch { result = null; }
@@ -298,6 +299,7 @@ async function checkinSend(current, parts) {
     parts.send.disabled = false;
     parts.later.disabled = false;
     parts.send.textContent = '보내기';
+    parts.send.removeAttribute('aria-busy');
     parts.error.textContent = '앱에 닿지 못했어요 — 잠시 뒤 다시 눌러 주세요.';
     parts.error.hidden = false;
     parts.quit.hidden = false;

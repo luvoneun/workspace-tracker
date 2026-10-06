@@ -89,6 +89,7 @@
   --ease: cubic-bezier(0.22, 0.8, 0.3, 1);
   --t-press: 100ms;  --t-fast: 140ms;  --t-tint: 170ms;  --t-move: 200ms;  --t-slow: 320ms;
   --t-unfold: 160ms; /* 펼친 내용 나타남(펼침 부품 — app.js uiFold, 접힌 설명 details) */
+  --t-wait: 300ms;  --t-turn: 400ms;  --t-loop: 1s; /* 기다림(⑦ — app.js UI_WAIT): 표시가 나타나기까지 · 누른 한 바퀴 · 도는 동안 한 바퀴 */
   /* 스프링 근사는 linear()를 아는 환경에서만(아래 @supports) — 모르면 넘침 없는 --ease로 떨어진다 */
   --spring-1: var(--ease);
   --spring-2: var(--ease);
@@ -238,9 +239,9 @@ button:active, .d-cb:active, .d-wcb:active { scale: 0.97; }
   box-shadow: var(--shadow);
   opacity: 0; pointer-events: none; transform: translateY(-40px);
 }
-.pull-indicator.snapping { transition: transform 260ms var(--ease), opacity 260ms var(--ease); }
+.pull-indicator.snapping { transition: transform var(--t-move) var(--ease), opacity var(--t-move) var(--ease); }
 .pull-indicator.ready { color: var(--accent); border-color: var(--accent); }
-.pull-indicator.refreshing { color: var(--accent); animation: pull-spin 700ms linear infinite; }
+.pull-indicator.refreshing { color: var(--accent); animation: pull-spin var(--t-loop) linear infinite; }
 @keyframes pull-spin { to { transform: translateY(var(--pull-y, 56px)) rotate(360deg); } }
 
 /* ---------- 그 자리에서 고치는 제목 (새로 들어온 것·아이디어·결정) ---------- */
@@ -348,12 +349,15 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   width: 34px; height: 34px; display: grid; place-items: center; flex: none;
   border: 0; border-radius: 50%; background: none; color: var(--muted);
   cursor: pointer; padding: 0;
-  transition: background var(--t-tint) var(--ease), color var(--t-tint) var(--ease), transform 400ms var(--ease), scale var(--t-press) var(--ease);
+  transition: background var(--t-tint) var(--ease), color var(--t-tint) var(--ease), scale var(--t-press) var(--ease);
 }
 .d-iconbtn:hover { background: var(--hover); color: var(--text); }
 .d-iconbtn.sm { width: 32px; height: var(--h-md); }
 .d-iconbtn.xs { width: 28px; height: var(--h-sm); }
-.d-iconbtn.spinning { transform: rotate(360deg); color: var(--accent); }
+/* 새로고침 아이콘(기다림 ⑦) — 누르면 한 바퀴(--t-turn), 그보다 오래 걸리면 도는 동안 1초에 한 바퀴(--t-loop).
+   멈추는 때·다시 그린 버튼의 각도는 app.js uiSpin이 정한다(지금 바퀴를 마저 돌고 0도에서 선다) */
+.d-iconbtn.spinning { color: var(--accent); animation: d-spin var(--t-turn) var(--ease), d-spin var(--t-loop) linear var(--t-turn) infinite; }
+@keyframes d-spin { to { transform: rotate(360deg); } }
 
 /* 세그먼트 — 회색 트랙 위 흰 손잡이. 보기 전환 전용이라 동작 버튼과 모양이 다르다. */
 .d-seg { display: inline-flex; padding: 3px; gap: 2px; background: var(--neutral-bg); border-radius: var(--r-sm); }
@@ -366,6 +370,34 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 /* 보기 전환은 aria-pressed, 값을 고르는 세그먼트(종류·시점)는 aria-checked를 쓴다 — 모양은 같다 */
 .d-seg button[aria-pressed="true"], .d-seg button[aria-checked="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
 .d-seg[hidden] { display: none; }
+/* 손잡이(화면 전환 ⑥ — app.js uiKnob) — 고른 칸이 바뀔 때만 무리 안에 한 장(.d-knob) 떠서 옛 칸에서 새 칸으로 미끄러진다(--t-move).
+   미끄러지는 동안(.is-gliding) 고른 칸은 바탕·밑줄을 손잡이에 맡기고, 바탕 전환은 손잡이가 붙어 있는 동안(.is-knob) 꺼 둔다.
+   끝나면 손잡이를 떼고 제 모양으로 돌아간다 — 멈춰 있을 때의 모양은 그대로다. 버튼을 띄우는 것은 손잡이 위에 글자가 오게 하려는 것이다 */
+.d-seg.is-knob, .d-tabs.is-knob { position: relative; }
+.d-seg.is-knob > button { position: relative; transition: color var(--t-tint) var(--ease), scale var(--t-press) var(--ease); }
+.d-seg.is-gliding > button[aria-pressed="true"], .d-seg.is-gliding > button[aria-checked="true"] { background: none; box-shadow: none; }
+.d-tabs.is-gliding > .d-tab[aria-selected="true"]::after { content: none; }
+.d-knob { position: absolute; pointer-events: none; transform-origin: 0 0; }
+.d-seg > .d-knob { background: var(--surface); box-shadow: var(--shadow); }
+.d-tabs > .d-knob::after { content: ''; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2.5px; background: var(--accent); border-radius: 3px; }
+/* 내용 교체(화면 전환 ⑥ — app.js uiSwap) — 고른 항목이 바뀌어 내용을 통째로 갈아 끼울 때 새 내용이 100ms 나타나기만 한다(옆으로 밀지 않는다).
+   탭을 빠르게 오갈 때 답답하면 이 한 줄을 지운다 — 손잡이는 그대로 남는다 */
+.d-swap { animation: d-fade var(--t-press) linear both; }
+
+/* ---------- 기다림 (모션 부품 ⑦ — 부르는 쪽은 aria-busy만 건다, 새로고침 아이콘은 위 .spinning) ----------
+   기다리는 동안만 보인다 — 0.3초(--t-wait)가 지나도 안 끝났을 때만 살짝 옅어진다(짧은 저장에는 아무것도 안 보인다).
+   저장 잠금 fadeOutAndRun(정의 그대로)이 거는 aria-busy도 이 규칙 하나로 표시를 얻는다.
+   `…하는 중` 글자가 곧 표시인 것 — 글자 버튼(.d-btn)과 기다림 글자 줄(.d-waiting) — 은 옅어지는 대신 글자 앞에 도는 표시가
+   0.3초 뒤 나타난다(1초에 한 바퀴, 도는 동안만). 움직임 줄이기에서는 옅어짐·도는 표시 없이 글자만 남는다(아래 전역 규칙) */
+[aria-busy="true"]:not(.d-btn, .d-waiting, .d-iconbtn) { animation: d-busy var(--t-move) var(--ease) var(--t-wait) both; }
+@keyframes d-busy { to { opacity: 0.6; } }
+.d-btn[aria-busy="true"]::before, .d-waiting[aria-busy="true"]::before {
+  content: ''; flex: none; display: inline-block; box-sizing: border-box; width: 10px; height: 10px;
+  border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%;
+  animation: d-busy-in var(--t-move) var(--ease) var(--t-wait) both, d-spin var(--t-loop) linear infinite;
+}
+.d-waiting[aria-busy="true"]::before { margin-right: 6px; vertical-align: -1px; }
+@keyframes d-busy-in { from { opacity: 0; } }
 
 /* 누름에서 뺀 것 — 줄어들면 어색한 것은 색으로만 답한다(docs/지도/모션.md "누름에서 뺀 것").
    글자 탭·글자 링크·글자 제목(글자가 흔들린다) / 메뉴·고르개 항목(키보드 연타) / 줄 전체가 버튼인 것(줄이 줄면 목록이 흔들린다) */
@@ -508,6 +540,9 @@ dialog.d-stay:not([open])::backdrop { opacity: 0; transition-duration: var(--sta
   details[open]::details-content { transition-duration: 120ms !important; }
   /* 누름의 크기 변화도 끈다 — 색은 그대로 바뀐다 */
   button:active, .d-cb:active, .d-wcb:active { scale: none !important; }
+  /* 기다림은 옅어짐·도는 표시 없이 글자만(.01ms로 줄인 지연 뒤 갑자기 옅어지지 않게 아예 끈다) */
+  [aria-busy="true"], .d-iconbtn.spinning { animation: none !important; }
+  .d-btn[aria-busy="true"]::before, .d-waiting[aria-busy="true"]::before { display: none; }
 }
 
 /* ---------- 헤더 (60px 흰 띠) ---------- */
@@ -2768,10 +2803,9 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-abprog .ic { flex: none; width: 18px; text-align: center; font-weight: 700; }
 .d-abprog .done .ic { color: var(--success); }
 .d-abprog .now { font-weight: 600; }
-.d-abprog .now .ic { display: inline-block; color: var(--accent); animation: d-abspin 1s linear infinite; }
+.d-abprog .now .ic { display: inline-block; color: var(--accent); animation: d-spin var(--t-loop) linear infinite; } /* 2초마다 다시 그려진다 — 시작점은 시계에 맞춘다(settings-ui.js uiSpinPhase) */
 .d-abprog .wait, .d-abprog .wait .ic { color: var(--dim); }
 .d-abprog .fail, .d-abprog .fail .ic { color: var(--urgent); }
-@keyframes d-abspin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .d-abprog .now .ic { animation: none; } }
 
 /* 쉬운 말 소식(WP-J) — 줄 목록 하나를 새 버전 상자·오늘 탭 카드·지난 소식 전체가 함께 쓴다.
