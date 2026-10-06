@@ -7210,6 +7210,8 @@ function setActiveTab(tab) {
   if (tab !== activeTabKey) waitingNextClose();
   // 좁은 폭 시트는 탭에 붙어 있지 않다 — 탭을 옮기면 닫아 가림막이 새 탭을 막지 않게 한다.
   if (tab !== activeTabKey && panelScrimEl && !panelScrimEl.hidden) panelClose();
+  // 주간요약을 떠나면 적던 글을 Enter와 같은 길로 저장한다 — 기다리지 않는다(실패하면 글은 그대로 남는다, report-ui.js).
+  if (tab !== activeTabKey && activeTabKey === 'weekly' && typeof reportAutosaveLeave === 'function') reportAutosaveLeave();
   // 새 프로젝트 화면은 탭을 떠나면 버린다(만드는 중이면 남는다 — projectNewLeave).
   if (tab !== activeTabKey && activeTabKey === 'projects' && typeof projectNew !== 'undefined' && projectNew && projectNewLeave()) renderProjects();
   // 프로젝트 탭에 새로 들어올 때만 왼쪽 목록 차례를 다시 정렬한다(체크 등으로 이미 그 탭에 있는 동안
