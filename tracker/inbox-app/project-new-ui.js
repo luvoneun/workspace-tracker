@@ -72,28 +72,59 @@ function projectNewBlank() {
   };
 }
 
-// ---------- BMOVE ① — 만들 이름과 같은 그룹 프로젝트가 있으면 만든 뒤 옮기기를 제안 ----------
-// `새 에픽 만들기`는 이름 칸(state.name), `있는 에픽에 붙이기`는 고른 에픽의 요약으로 견준다.
-// wfGroupNameKey(밑줄→공백·연속 공백·대소문자 무시)가 서버 groupNameKey와 같은 잣대다.
-function projectNewMoveCandidate(state) {
-  const name = state.mode === 'attach' ? ((state.epic && state.epic.summary) || '') : state.name.trim();
+// ---------- 같은 이름 감지 (BMOVE ① + 프로젝트 정리) ----------
+// 보내는 이름의 규칙 — 밑줄은 공백, 연속 공백은 하나(서버 renameProject의 `to`·groupNameKey와 같은 꼴). 앱은 밑줄과
+// 공백을 같은 이름으로 읽으므로, 지라 에픽 제목·하위 제목·`지라 없이`의 그룹 이름에도 바뀐 값을 보낸다.
+const projectNewClean = value => String(value || '').replace(/_/g, ' ').trim().replace(/\s+/g, ' ');
+// 만들 이름이 이미 있는 프로젝트인지 — 공용 uiPickByName(서버 findProject와 같은 비교·차례: 직접 만든 이름 → 별칭 →
+// 지라 요약·`KEY · 요약`)으로 찾는다. 견주는 목록은 화면이 이미 가진 값뿐이다(내 목록에 없는 남의 에픽은 모른다).
+// `새 에픽 만들기`·`지라 없이`는 이름 칸, `있는 에픽에 붙이기`는 고른 에픽의 요약으로 견주고, 붙이기는 그 에픽 자신이
+// 지라 쪽 짝이라 직접 만든 프로젝트만 본다. → { kind: 'group'|'jira', key, name } 또는 null.
+function projectNewSame(state) {
+  const name = state.mode === 'attach' ? projectNewClean(state.epic && state.epic.summary) : projectNewClean(state.name);
   if (!name) return null;
-  const match = wfProjects().find(([key]) => key.startsWith('group:') && wfGroupNameKey(key.slice('group:'.length)) === wfGroupNameKey(name));
-  return match ? match[0].slice('group:'.length) : null;
+  const key = uiPickByName(name);
+  if (key.startsWith('jira:')) return state.mode === 'attach' ? null : { kind: 'jira', key, name: uiGroupLabel(key) };
+  const group = key.slice('group:'.length);
+  return customGroupsCache.includes(group) ? { kind: 'group', key, name: group } : null;
 }
-// 이름 칸 아래(또는 붙일 에픽 자리 아래)의 조용한 감지 줄. 후보가 없으면 null — 부르는 쪽이 비워 둔다.
+// 지라와 같은 이름이면 만들지 않는다 — 지라에 만드는 일은 되돌릴 수 없고, 앱은 같은 이름을 한 프로젝트로 읽는다.
+const projectNewJiraSame = state => state.mode !== 'attach' && projectNewSame(state)?.kind === 'jira';
+// 조용한 `열기` 글자 버튼 — 이 화면을 닫고 그 프로젝트를 연다(openProjectTab이 새 프로젝트 화면을 닫는다).
+function projectNewOpenButton(key) {
+  const open = document.createElement('button');
+  open.type = 'button';
+  open.className = 'd-link';
+  open.textContent = '열기';
+  open.addEventListener('click', () => { if (projectNewLeave()) openProjectTab(key); });
+  return open;
+}
+// 이름 칸 아래(또는 붙일 에픽 자리 아래)의 조용한 감지 줄 하나 — 상황에 따라 셋 중 하나다. 없으면 null.
+//   지라와 같음: `결제 리뉴얼은 이미 지라에 있어요(PAY-12) · 열기` (만들기는 막힌다)
+//   직접 만든 것과 같음(지라 없이): `… 프로젝트가 이미 있어요(항목 12) — 첫 할 일이 거기에 들어가요 · 열기`
+//   직접 만든 것과 같음(지라 모드): `… 프로젝트가 이미 있어요(항목 12) · ☑ 만든 뒤 이 에픽으로 옮기기`
 function projectNewMoveLine(state) {
-  const candidate = projectNewMoveCandidate(state);
-  state.moveCandidate = candidate;
-  if (!candidate) return null;
-  const counts = wfProjectMoveCounts(candidate);
+  const same = projectNewSame(state);
+  state.moveCandidate = same && same.kind === 'group' && state.mode !== 'none' ? same.name : null;
+  if (!same) return null;
   const line = document.createElement('div');
   line.className = 'd-quiet d-pnewmove';
   const text = document.createElement('span');
-  text.textContent = `${candidate} 프로젝트가 이미 있어요(항목 ${counts.items})`;
   const sep = document.createElement('span');
   sep.className = 'sep';
   sep.textContent = '·';
+  if (same.kind === 'jira') {
+    text.textContent = `${jiraJosa(same.name, '은', '는')} 이미 지라에 있어요(${same.key.slice('jira:'.length)})`;
+    line.append(text, sep, projectNewOpenButton(same.key));
+    return line;
+  }
+  const counts = wfProjectMoveCounts(same.name);
+  if (state.mode === 'none') {
+    text.textContent = `${same.name} 프로젝트가 이미 있어요(항목 ${counts.items}) — 첫 할 일이 거기에 들어가요`;
+    line.append(text, sep, projectNewOpenButton(same.key));
+    return line;
+  }
+  text.textContent = `${same.name} 프로젝트가 이미 있어요(항목 ${counts.items})`;
   const label = document.createElement('label');
   label.className = 'rl';
   const check = document.createElement('input');
@@ -153,7 +184,7 @@ function projectNewPicked(state) {
 }
 function projectNewTitle(state, role) {
   if (Object.prototype.hasOwnProperty.call(state.titles, role.label)) return state.titles[role.label];
-  const name = state.name.trim();
+  const name = projectNewClean(state.name);
   return name ? `${role.prefix} ${name}` : '';
 }
 // 이미 있는 에픽에 붙일 때, 그 에픽의 하위에 같은 접두어가 이미 있으면 그 키를 알려 준다.
@@ -181,12 +212,14 @@ function projectNewCount(state) {
 // 지금 보낼 수 있는지. 못 보내면 그 이유를 주 버튼 아래 조용한 한 줄로 적는다.
 function projectNewBlocker(state) {
   if (state.mode === 'none') {
-    if (!state.name.trim()) return '프로젝트 이름을 적어 주세요.';
+    if (!projectNewClean(state.name)) return '프로젝트 이름을 적어 주세요.';
+    if (projectNewJiraSame(state)) return '같은 이름의 지라 프로젝트가 있어요 — 이름을 바꿔 주세요.';
     if (!state.first.trim()) return '첫 할 일이 있어야 프로젝트가 생겨요.';
     return '';
   }
   if (state.mode === 'attach' && !state.epic) return '붙일 에픽을 골라 주세요.';
-  if (state.mode === 'epic' && !state.name.trim()) return '프로젝트 이름을 적어 주세요.';
+  if (state.mode === 'epic' && !projectNewClean(state.name)) return '프로젝트 이름을 적어 주세요.';
+  if (state.mode === 'epic' && projectNewJiraSame(state)) return "같은 이름의 지라 프로젝트가 있어요 — 이름을 바꾸거나 '있는 에픽에 붙이기'로 붙여 주세요.";
   if (state.mode === 'epic' && !/^[A-Z][A-Z0-9]*$/.test(projectNewProjectKey(state))) return '지라 프로젝트 키를 적어 주세요 — 예: IO';
   const rows = projectNewRows(state);
   if (state.mode === 'attach' && !rows.length) return '만들 하위 티켓을 골라 주세요.';
@@ -592,7 +625,7 @@ function projectNewTypeRow(state) {
 function projectNewPreview(state) {
   const box = document.createElement('div');
   box.className = 'd-pnewpv';
-  const name = state.name.trim();
+  const name = projectNewClean(state.name);
   const rows = projectNewRows(state);
   if (state.mode === 'none') {
     const line = document.createElement('div');
@@ -694,7 +727,7 @@ function projectNewActions(state) {
     what.className = 'what';
     const sm = document.createElement('span');
     sm.className = 'sm';
-    sm.textContent = state.mode === 'attach' ? ((state.epic && state.epic.summary) || '') : state.name.trim();
+    sm.textContent = state.mode === 'attach' ? ((state.epic && state.epic.summary) || '') : projectNewClean(state.name);
     what.appendChild(sm);
     if (state.mode === 'attach' && state.epic) {
       const key = document.createElement('span');
@@ -726,7 +759,10 @@ function projectNewActions(state) {
   const make = document.createElement('button');
   make.type = 'button';
   make.className = 'd-btn pri';
-  make.textContent = state.mode === 'none' ? '프로젝트 만들기' : `지라에 ${projectNewCount(state)}개 만들기`;
+  // `지라 없이`에서 같은 이름의 직접 만든 프로젝트가 있으면 새로 만들지 않고 거기에 넣는다(같은 이름 = 같은 프로젝트).
+  const sameGroup = state.mode === 'none' ? projectNewSame(state) : null;
+  make.textContent = state.mode !== 'none' ? `지라에 ${projectNewCount(state)}개 만들기`
+    : sameGroup && sameGroup.kind === 'group' ? `${sameGroup.name}에 넣기` : '프로젝트 만들기';
   make.disabled = !!blocker || state.busy;
   make.addEventListener('click', () => {
     // 지라 없이는 앱 항목 하나를 만드는 일이라 확인 줄을 세우지 않는다(⌘Z·삭제로 되돌린다).
@@ -765,7 +801,9 @@ async function projectNewPlain(state) {
   state.busy = true;
   state.error = '';
   projectNewPaint();
-  const name = state.name.trim();
+  // 같은 이름의 직접 만든 프로젝트가 있으면 그 이름 그대로(대소문자·공백만 다른 둘이 새로 생기지 않게).
+  const same = projectNewSame(state);
+  const name = same && same.kind === 'group' ? same.name : projectNewClean(state.name);
   try {
     await request('/api/later-task/create', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ description: state.first.trim(), group: name }),
@@ -779,7 +817,7 @@ async function projectNewPlain(state) {
   projectNewDrop();
   openProjectTab(`group:${name}`);
   await load();
-  showNotice(`프로젝트를 만들었어요 · ${name}`);
+  showNotice(same && same.kind === 'group' ? `${name}에 넣었어요` : `프로젝트를 만들었어요 · ${name}`);
 }
 
 // 지라에 보내는 단 하나의 길. 확인 줄의 `만들기`와 결과 화면의 `실패한 것 다시 시도`만 이리로 온다.
@@ -798,7 +836,7 @@ async function projectNewSend(state) {
   const rows = projectNewRows(state);
   const plan = {
     projectKey: projectNewProjectKey(state),
-    epic: state.mode === 'attach' ? { key: state.epic.key } : { summary: state.name.trim() },
+    epic: state.mode === 'attach' ? { key: state.epic.key } : { summary: projectNewClean(state.name) },
     children: rows.map(row => ({ summary: row.summary.trim(), issueTypeId: state.typeId })),
   };
   state.busy = true;
@@ -1079,14 +1117,14 @@ function projectNewRender(body) {
   const form = document.createElement('div');
   form.className = 'd-pnew';
 
-  const name = projectNewInput(state.name, '프로젝트 이름 — 예: 가입 개선_이메일 인증', '프로젝트 이름', (value) => {
+  const name = projectNewInput(state.name, '프로젝트 이름 — 예: 가입 개선 이메일 인증', '프로젝트 이름', (value) => {
     state.name = value;
     projectNewPreviewPaint();
   }, 200);
   name.classList.add('d-pnewname');
   form.appendChild(projectNewField('이름', name, state.mode === 'epic' ? '이 이름이 에픽 제목이 돼요.' : ''));
 
-  // BMOVE ① — 이름(또는 붙일 에픽 요약)과 같은 이름의 그룹 프로젝트가 있으면 여기 한 줄이 선다.
+  // 같은 이름 감지 줄 — 이름(또는 붙일 에픽 요약)이 이미 있는 프로젝트(직접 만든 것·지라)와 같으면 여기 한 줄이 선다.
   // `있는 에픽에 붙이기`는 에픽을 고르기 전에는 견줄 이름이 없어 빈 자리다.
   projectNewMoveNode = document.createElement('div');
   projectNewMoveNode.className = 'd-pnewmovebox';

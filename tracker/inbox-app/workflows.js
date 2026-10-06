@@ -186,27 +186,62 @@ async function wfProjectMoveSend(groupName, jiraKey) {
   });
   return response.json();
 }
-// 성공 뒤 공통 동작 — 데이터를 먼저 새로 받고 그다음 에픽 프로젝트를 연다(순서 규칙). 되돌리기는
-// 알림의 이 버튼 하나뿐이고(화면에 따로 표시하지 않는다) 앱의 ⌘Z 대상이 아니다(이름 바꾸기와 같은 태도).
-async function wfProjectMoveFinish(result) {
+// 성공 뒤 공통 동작 — ⌘Z 기록을 올리고, 데이터를 먼저 새로 받고 그다음 에픽 프로젝트를 연다(순서 규칙). 되돌리기는
+// ⌘Z와 알림의 `되돌리기`가 같은 기록(pushUndo)을 쓴다 — 같은 옮기기가 자리에 따라 ⌘Z가 되고 안 되면 헷갈린다.
+// 다시 하기(⇧⌘Z)는 같은 옮기기를 새 요청으로 한 번 더 보낸다(서버가 에픽인지 다시 확인한다). verb는 알림의
+// 동사다(⋯ › `다른 프로젝트로 합치기…`에서 지라 에픽을 고르면 같은 옮기기를 `합쳤어요`로 알린다).
+async function wfProjectMoveFinish(result, { verb = '옮겼어요' } = {}) {
+  const from = result.from;
+  const doneText = moved => `${moved.to}로 ${verb} · 항목 ${moved.changed.items}`;
+  const entry = { label: doneText(result) };
+  let moveId = result.moveId;
+  entry.undo = async () => {
+    let undone;
+    try {
+      undone = await (await postJson('/api/project/move-undo', { moveId })).json();
+    } catch (error) {
+      if (/되돌릴 기록이 없어요/.test(String(error && error.message))) showNotice('되돌릴 기록이 없어요', true);
+      throw error;
+    }
+    const skipped = undone.skipped ? ` · 그 사이 바뀐 ${undone.skipped}개는 그대로 두었어요` : '';
+    entry.label = `${from} 프로젝트로${skipped}`; // ⌘Z 알림은 replayUndo가 `되돌렸어요 · ` 뒤에 붙인다
+    entry.back = `${from} 프로젝트로 되돌렸어요${skipped}`;
+    wfProjectKeep(undone.project);
+  };
+  entry.redo = async () => {
+    const again = await wfProjectMoveSend(from, result.to);
+    moveId = again.moveId;
+    entry.label = doneText(again);
+    wfProjectKeep(again.project);
+  };
+  pushUndo(entry);
   await load();
   openProjectTab(result.project);
-  showNotice(`${result.to}로 옮겼어요 · 항목 ${result.changed.items}`, false, null, {
+  showNotice(doneText(result), false, null, wfUndoNoticeAction(entry, () => {
+    openProjectTab(`group:${from}`);
+    showNotice(entry.back);
+  }));
+}
+// ⌘Z로 되돌릴 때 다시 그릴 프로젝트를 정해 둔다(replayUndo가 곧 목록을 다시 받는다) — 탭은 옮기지 않는다.
+function wfProjectKeep(key) {
+  if (typeof projectKey === 'undefined' || !key) return;
+  projectKey = key;
+  try { localStorage.setItem(PROJECT_KEY_STORE, key); } catch {}
+  projectOrderResort = true;
+}
+// 알림의 `되돌리기` — ⌘Z와 같은 기록(entry)을 replayUndo로 되돌린다. 이미 되돌렸으면(⌘Z로 먼저) `되돌릴 기록이 없어요`,
+// 그 뒤에 다른 작업이 쌓였으면 차례를 안내한다. 되돌리기가 끝나면 after()가 이 동작의 말로 알림을 고쳐 쓴다.
+function wfUndoNoticeAction(entry, after) {
+  return {
     label: '되돌리기',
     onClick: async (button) => {
+      if (!undoStack.includes(entry)) { showNotice('되돌릴 기록이 없어요', true); return; }
+      if (undoStack[undoStack.length - 1] !== entry) { showNotice('최근 작업부터 순서대로 실행 취소해 주세요', true); return; }
       if (button) button.disabled = true;
-      let undone;
-      try {
-        const response = await request('/api/project/move-undo', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ moveId: result.moveId }),
-        });
-        undone = await response.json();
-      } catch { return; }
-      await load();
-      openProjectTab(undone.project);
-      showNotice(`${result.from} 프로젝트로 되돌렸어요` + (undone.skipped ? ` · 그 사이 바뀐 ${undone.skipped}개는 그대로 두었어요` : ''));
+      await replayUndo('undo');
+      if (redoStack[redoStack.length - 1] === entry) after();
     },
-  });
+  };
 }
 // 행 오른쪽의 상태 칩: 지금 손댈 것(검토할 초안)을 가장 눈에 띄게, 0인 숫자는 보이지 않게.
 function wfMeetingChips(event) {

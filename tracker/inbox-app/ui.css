@@ -2075,12 +2075,12 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-jira .top .sub .d-dpick:disabled:hover, .d-jkid .wh .d-dpick:disabled:hover { background: none; }
 /* 확인 줄이 담당을 묻는 동안 그 하위 줄을 옅게 칠한다(어느 티켓인지) */
 .d-jkid.is-hl { margin: 0 -6px; padding: 0 6px; border-radius: 8px; background: var(--sel); }
-/* 담당자 고르개는 메뉴 한 칸을 다 쓴다(칸 이름은 숨긴다 — 목록이 `담당자 고르기`로 읽힌다). 오른쪽 조용한 구분 글자는 길면 말줄임 */
-.d-mfield:has(.d-jassign) { padding: 0; }
-.d-mfield:has(.d-jassign) > .ml { display: none; }
-.d-mfield > .mc:has(.d-jassign) { flex-basis: 100%; }
-.d-jassign { flex: 1 1 100%; min-width: 0; }
-.d-jassign .d-gpopt .ky { flex: 0 1 auto; min-width: 0; max-width: 62%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 담당자 고르개·합칠 곳 고르개는 메뉴 한 칸을 다 쓴다(칸 이름은 숨긴다 — 목록이 제 이름으로 읽힌다). 오른쪽 조용한 구분 글자는 길면 말줄임 */
+.d-mfield:has(.d-jassign), .d-mfield:has(.d-pmerge) { padding: 0; }
+.d-mfield:has(.d-jassign) > .ml, .d-mfield:has(.d-pmerge) > .ml { display: none; }
+.d-mfield > .mc:has(.d-jassign), .d-mfield > .mc:has(.d-pmerge) { flex-basis: 100%; }
+.d-jassign, .d-pmerge { flex: 1 1 100%; min-width: 0; }
+.d-jassign .d-gpopt .ky, .d-pmerge .d-gpopt .ky { flex: 0 1 auto; min-width: 0; max-width: 62%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .d-jkids .more { justify-self: start; min-height: var(--h-sm); padding: 0 4px; margin-left: -4px; font-size: 12.5px; }
 .d-jkids .none { display: flex; align-items: center; min-height: var(--h-sm); font-size: 12.5px; color: var(--dim); }
 .d-jkids .all {

@@ -621,7 +621,11 @@ async function projectRenameApply(name) {
 
 async function projectRenameSave(fromKey, to) {
   const from = fromKey.slice('group:'.length);
-  try { await projectRenamePost(fromKey, to); } catch { return false; }
+  try { await projectRenamePost(fromKey, to); } catch (error) {
+    // 겹치는 이름은 거절이 맞다(같은 이름 = 같은 프로젝트) — 합치려는 것이면 그 길을 알려 준다.
+    if (/같은 이름의 프로젝트가 이미 있어요/.test(String(error && error.message))) showNotice('같은 이름의 프로젝트가 이미 있어요 — 합치려면 ⋯ › 다른 프로젝트로 합치기를 써요', true);
+    return false;
+  }
   await projectRenameApply(to);
   showNotice(`이름을 바꿨어요 · ${from} → ${to}`, false, null, {
     label: '되돌리기',
@@ -633,6 +637,116 @@ async function projectRenameSave(fromKey, to) {
     },
   });
   return true;
+}
+
+// ---------- 직접 만든 프로젝트 합치기·지우기 ----------
+// ⋯ › `다른 프로젝트로 합치기…`는 공용 프로젝트 고르개(projectPickEntries + uiPickList)를 ⋯ 자리에 이어서 열고, 고르면
+// 확인 줄 없이 바로 합친다(고르는 동작이 이미 의도다 — 확인창을 되살리지 않는다). 대상이 직접 만든 프로젝트면
+// `/api/project/merge`, 지라 에픽이면 기존 옮기기(`/api/project/move` — 에픽 검사가 그 라우트에 있다)다.
+// ⋯ › `프로젝트 지우기`는 같은 merge에 `to: null` — 항목은 프로젝트 없음으로 돌아가고 휴지통으로 가지 않는다.
+// 셋 다 ⌘Z 대상이고(pushUndo) 알림의 `되돌리기`도 같은 기록을 쓴다(replayUndo). 다시 하기(⇧⌘Z)는 같은 요청을 새로 보낸다.
+const projectMergePost = async body => (await request('/api/project/merge', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+})).json();
+
+// 고르개 선택지 — 자기 자신·`직접 입력`·`프로젝트 빼기` 동작 줄은 뺀다. 지라를 안 쓰는 설치(또는 연결 전)면 지라 줄도 뺀다.
+// 아래에 선택지가 하나도 안 남은 `지난 프로젝트` 소제목은 지운다.
+function projectMergeChoices(row) {
+  const jira = jiraUsed() && !!(latestData && latestData.jiraSync && latestData.jiraSync.connected !== false);
+  const kept = projectPickEntries(null, false).filter((entry) => {
+    if (entry.type === 'action') return false;
+    if (entry.type !== 'option') return true;
+    if (entry.value === row.key) return false;
+    return jira || !String(entry.value).startsWith('jira:');
+  });
+  return kept.filter((entry, index) => entry.type !== 'heading' || (kept[index + 1] && kept[index + 1].type === 'option'));
+}
+
+function projectMergeOpen(more, row) {
+  const groupName = row.key.slice('group:'.length);
+  // 이름 끝 받침을 알 수 없어 조사가 필요 없는 말로 쓴다(묶기 확인 줄과 같은 이유).
+  const head = { field: `합칠 곳 고르기 · 항목 ${wfProjectMoveCounts(groupName).items}` };
+  const entries = projectMergeChoices(row);
+  if (!entries.some(entry => entry.type === 'option')) {
+    uiMenu(more, [[head, { label: '합칠 수 있는 프로젝트가 없어요', disabled: true, onClick: () => {} }]]);
+    return;
+  }
+  const close = (focus) => {
+    if (uiMenuOpen && uiMenuOpen.anchor === more) uiMenuClose();
+    if (focus) more.focus?.();
+  };
+  const picker = uiPickList({
+    entries,
+    label: '합칠 곳 고르기',
+    search: uiPickSearchable(entries),
+    onClose: byKeyboard => close(byKeyboard),
+    onPick: (value) => { close(false); projectMergeRun(row.key, value); },
+  });
+  picker.classList.add('d-pmerge');
+  const menu = uiMenu(more, [[head, { field: '합칠 곳', control: picker }]]);
+  if (!menu) return;
+  picker.focusStart();
+}
+
+const projectMergeDoneText = result => (result.to === null
+  ? `${result.from} 프로젝트를 지웠어요 · 항목 ${result.changed.items}는 프로젝트 없음으로`
+  : `${result.to}${uiRoParticle(result.to)} 합쳤어요 · 항목 ${result.changed.items}`);
+// 되돌린 뒤의 말 — 알림 `되돌리기`는 이 문장 그대로, ⌘Z는 replayUndo가 `되돌렸어요 · ` 뒤에 label(동사 없는 꼴)을 붙인다.
+const projectMergeBackText = (from, skipped) => `${from} 프로젝트로 되돌렸어요` + (skipped ? ` · 그 사이 바뀐 ${skipped}개는 그대로 두었어요` : '');
+const projectMergeBackLabel = (from, skipped) => `${from} 프로젝트로` + (skipped ? ` · 그 사이 바뀐 ${skipped}개는 그대로 두었어요` : '');
+
+// 합치기·지우기·지라로 옮기기가 나가는 길. 실패는 request()가 이미 알렸다 — 서버가 거절한 이유(대상이 그 사이
+// 사라짐 등)는 목록을 다시 받은 뒤 그 문구로 알린다. 아무것도 바뀌지 않았다.
+async function projectMergeRun(fromKey, toKey) {
+  const from = fromKey.slice('group:'.length);
+  if (typeof toKey === 'string' && toKey.startsWith('jira:')) {
+    let moved;
+    try { moved = await wfProjectMoveSend(from, toKey.slice('jira:'.length)); } catch (error) { await projectMergeRefused(error); return; }
+    await wfProjectMoveFinish(moved, { verb: '합쳤어요' });
+    return;
+  }
+  const body = { project: fromKey, to: toKey };
+  let result;
+  try { result = await projectMergePost(body); } catch (error) { await projectMergeRefused(error); return; }
+  await projectMergeFinish(result, body);
+}
+async function projectMergeRefused(error) {
+  if (!error || error.name === 'TypeError' || error.name === 'AbortError' || /^요청이 실패했어요/.test(String(error.message))) return;
+  await load();
+  showNotice(String(error.message).replace(/\.$/, ''), true);
+}
+
+// 성공 뒤 — ⌘Z 기록을 먼저 올리고, 목록을 새로 받은 뒤 합친 곳을 연다(옮기기와 같은 차례). 지웠으면 지금 프로젝트가
+// 사라졌을 때의 기존 동작(목록 첫 프로젝트)을 따른다. 되돌린 뒤에는 원래 프로젝트를 연 채로 다시 그린다.
+async function projectMergeFinish(result, body) {
+  const from = result.from;
+  const entry = { label: projectMergeDoneText(result) };
+  let mergeId = result.mergeId;
+  entry.undo = async () => {
+    let undone;
+    try {
+      undone = await (await postJson('/api/project/merge-undo', { mergeId })).json();
+    } catch (error) {
+      if (/되돌릴 기록이 없어요/.test(String(error && error.message))) showNotice('되돌릴 기록이 없어요', true);
+      throw error;
+    }
+    entry.label = projectMergeBackLabel(from, undone.skipped);
+    entry.back = projectMergeBackText(from, undone.skipped);
+    wfProjectKeep(undone.project);
+  };
+  entry.redo = async () => {
+    const again = await projectMergePost(body);
+    mergeId = again.mergeId;
+    entry.label = projectMergeDoneText(again);
+    wfProjectKeep(again.project);
+  };
+  pushUndo(entry);
+  await load();
+  if (result.project) openProjectTab(result.project);
+  showNotice(projectMergeDoneText(result), false, null, wfUndoNoticeAction(entry, () => {
+    openProjectTab(`group:${from}`);
+    showNotice(entry.back);
+  }));
 }
 
 // ---------- 지라 프로젝트 앱 안 별칭 (BJALIAS) ----------
@@ -1147,6 +1261,9 @@ function renderProjectDetail(body, row) {
   if (named || key.startsWith('jira:')) {
     const menuItems = [{ label: '이름 바꾸기', onClick: () => projectRenameStart(title, row.key) }];
     if (jiraAlias) menuItems.push({ label: '지라 이름으로 되돌리기', onClick: () => projectAliasSave(key.slice('jira:'.length), null) });
+    // 합치기·지우기는 직접 만든 프로젝트만 — 고르개는 묶기와 같이 이 ⋯ 자리에 이어서 연다. 지우기는 확인창 없이 바로(⌘Z·알림 되돌리기).
+    if (named) menuItems.push({ label: '다른 프로젝트로 합치기…', onClick: () => projectMergeOpen(more, row) });
+    const removeItems = named ? [{ label: '프로젝트 지우기', danger: true, onClick: () => projectMergeRun(row.key, null) }] : [];
     // 묶기는 지라 프로젝트끼리만(BBUNDLE) — 고르기 목록은 이 ⋯ 자리에 이어서 연다.
     const bundleItems = [];
     if (key.startsWith('jira:')) bundleItems.push({ label: '다른 티켓과 묶기…', onClick: () => uiMenu(more, projectBundleChoices(row)) });
@@ -1156,7 +1273,7 @@ function renderProjectDetail(body, row) {
       });
       bundleItems.push({ label: '묶음 풀기', onClick: () => projectBundleUndo(bundle) });
     }
-    const more = uiMoreButton('프로젝트 메뉴', () => [menuItems, bundleItems]);
+    const more = uiMoreButton('프로젝트 메뉴', () => [menuItems, bundleItems, removeItems]);
     title.appendChild(more);
   }
   const summary = document.createElement('div');
