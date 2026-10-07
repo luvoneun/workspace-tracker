@@ -207,7 +207,7 @@ function buildPrompt(opts, infos, baseTip, modelPick) {
     const screenFiles = [...new Set(infos.flatMap((i) => i.files.filter((f) => f.kind === '화면').map((f) => f.file)))];
     L.push('## 화면 확인');
     L.push(`- 써 보기 4340(가짜 데이터)에서 바뀐 화면(${screenFiles.join(', ')})을 눌러 보기: 깨짐·잘림 없는지, 라이트·다크 각 한 장, 콘솔 오류. 운영 4321에서는 화면을 열어 보기만(데이터를 바꾸는 동작은 누르지 마).`);
-    L.push(`- **간격 측정(필수, 새로 생긴 것만)**: \`${DESIGN_TOOLS_README}\`의 \`measure.mjs\`로 — 두 번 다 \`--tokens DESIGN.md\`를 붙여(이 앱은 2px 눈금이라 눈금 밖 값만 경고) — main에서 같은 화면을 먼저 재 두고(\`--json main.json\`), 가지에서 \`--base main.json\`으로 다시 재서 **이번에 새로 생긴 것만** 보고에 적어(새로 생긴 간격 N곳·잘림 N곳, 1440 폭). 기준을 못 재면 "기준 비교 못 함"과 이유를 적어. "변경 없음"은 CSS·화면 구조 둘 다 안 바뀐 경우에만 쓸 것. 보고에 간격 줄이 없으면 안 끝난 것.`);
+    L.push(`- **간격 측정(필수, 새로 생긴 것만)**: \`${DESIGN_TOOLS_README}\`의 \`measure.mjs\`로 — 두 번 다 \`--scale 2,4,6,8,10,12,14,16,18,20,22,28,32\`를 붙여(이 앱은 DESIGN.md 간격 절의 2px 눈금이라 눈금 밖 값만 경고 — \`--tokens DESIGN.md\`는 글자 크기까지 모아 눈금이 너무 넓어지니 쓰지 말 것) — main에서 같은 화면을 먼저 재 두고(\`--json main.json\`), 가지에서 \`--base main.json\`으로 다시 재서 **이번에 새로 생긴 것만** 보고에 적어(새로 생긴 간격 N곳·잘림 N곳, 1440 폭). 기준을 못 재면 "기준 비교 못 함"과 이유를 적어. "변경 없음"은 CSS·화면 구조 둘 다 안 바뀐 경우에만 쓸 것. 보고에 간격 줄이 없으면 안 끝난 것.`);
     L.push('');
   }
 
