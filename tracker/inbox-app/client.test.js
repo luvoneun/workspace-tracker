@@ -15379,15 +15379,15 @@ test('회의 `기존 항목 연결` 목록은 8개 이상이면 찾기 칸이 �
 
 // ---------- 작은 버튼 누르는 자리 · 문구 · 접근성 묶음 ----------
 
-test('작은 버튼 1: 넓은 화면의 작은 글자 링크·버튼은 투명 ::after로 누르는 자리 28px(이미 28 이상이면 그대로), 그룹 이름은 여백으로', () => {
+test('작은 버튼 1: 넓은 화면의 작은 글자 링크·버튼은 투명 ::after로 누르는 자리 28px(이미 28 이상이면 그대로), 그룹 이름은 여백으로 — 간격 정리 묶음에서 `.d-link` 전부·지라에서 열기·주간요약 고치기 글자로 넓히고 그룹 이름 여백 3→4px(26→28px)', () => {
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
-  assert.match(css, /\n\.d-ablink, \.d-selbar \.d-link, \.d-src \{ position: relative; \}/);
-  const rule = css.slice(css.indexOf('.d-ablink::after, .d-selbar .d-link::after, .d-src::after {'));
+  assert.match(css, /\n\.d-ablink, \.d-link, \.d-src, \.d-jira \.d-jopen, \.rp-rename, \.rp-s \.rp-edit \{ position: relative; \}/);
+  const rule = css.slice(css.indexOf('.d-ablink::after, .d-link::after, .d-src::after, .d-jira .d-jopen::after, .rp-rename::after, .rp-s .rp-edit::after {'));
   const body = rule.slice(0, rule.indexOf('}'));
   assert.match(body, /content: ''; position: absolute;/);
   ['top', 'bottom', 'left', 'right'].forEach(side => assert.match(body, new RegExp(`${side}: min\\(0px, calc\\(50% - 14px\\)\\)`), side));
-  assert.match(css, /\.d-grp button\.gl \{ padding-block: 3px; margin-block: -3px; \}/, '말줄임이라 ::after가 잘리는 그룹 이름은 여백으로');
-  assert.match(css, /\.d-wrow \.tiwrap \.d-src::after \{ top: -2px; bottom: min\(0px, calc\(100% - 26px\)\); \}/, '레일의 `원문`은 바로 위 제목을 덮지 않는다');
+  assert.match(css, /\.d-grp button\.gl \{ padding-block: 4px; margin-block: -4px; \}/, '말줄임이라 ::after가 잘리는 그룹 이름은 여백으로');
+  assert.match(css, /\.d-wrow \.tiwrap \.d-src::after, \.d-wrow \.sub \.d-src::after \{ top: -2px; bottom: min\(0px, calc\(100% - 26px\)\); \}/, '레일의 `원문`은 바로 위 제목을 덮지 않는다');
   assert.doesNotMatch(body, /background|border|color/, '모양은 그대로(투명)');
 });
 
@@ -19791,10 +19791,10 @@ test('기다림 E: aria-busy 규칙 하나 — 0.3초(--t-wait)가 지나야 옅
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
   assert.match(css, /\n  --t-wait: 300ms;  --t-turn: 400ms;  --t-loop: 1s;/);
   assert.match(css, /\n\[aria-busy="true"\]:not\(\.d-btn, \.d-waiting, \.d-iconbtn\) \{ animation: d-busy var\(--t-move\) var\(--ease\) var\(--t-wait\) both; \}\n@keyframes d-busy \{ to \{ opacity: 0\.6; \} \}/);
-  assert.match(css, /\n\.d-btn\[aria-busy="true"\]::before, \.d-waiting\[aria-busy="true"\]::before \{\n[^}]*--busy-shut: -5px;[^}]*animation: d-busy-room var\(--t-wait\) step-end both, d-busy-in var\(--t-move\) var\(--ease\) var\(--t-wait\) both, d-spin var\(--t-loop\) linear infinite;\n\}/);
-  // 기다리는 0.3초 동안은 자리도 없다 — 폭 0·테 0·버튼 틈(gap 5px)까지 거둬 짧은 저장에서 버튼 폭이 그대로다(step-end: 폭을 움직이지 않고 나타나는 순간 한 번에).
+  assert.match(css, /\n\.d-btn\[aria-busy="true"\]::before, \.d-waiting\[aria-busy="true"\]::before \{\n[^}]*--busy-shut: -6px;[^}]*animation: d-busy-room var\(--t-wait\) step-end both, d-busy-in var\(--t-move\) var\(--ease\) var\(--t-wait\) both, d-spin var\(--t-loop\) linear infinite;\n\}/);
+  // 기다리는 0.3초 동안은 자리도 없다 — 폭 0·테 0·버튼 틈(gap 6px — 간격 정리 묶음에서 5→6, 2px 눈금)까지 거둬 짧은 저장에서 버튼 폭이 그대로다(step-end: 폭을 움직이지 않고 나타나는 순간 한 번에).
   assert.match(css, /@keyframes d-busy-room \{ from \{ width: 0; border-width: 0; margin-right: var\(--busy-shut\); \} \}/);
-  assert.match(css, /\.d-btn \{\n  display: inline-flex; align-items: center; justify-content: center; gap: 5px;/, '거두는 틈(-5px)은 .d-btn의 gap과 같다');
+  assert.match(css, /\.d-btn \{\n  display: inline-flex; align-items: center; justify-content: center; gap: 6px;/, '거두는 틈(-6px)은 .d-btn의 gap과 같다');
   assert.match(css, /\.d-waiting\[aria-busy="true"\]::before \{ margin-right: 6px; vertical-align: -1px; --busy-shut: 0px; \}/, '글자 줄은 틈이 margin이라 0으로 거둔다');
   assert.match(css, /@keyframes d-busy-in \{ from \{ opacity: 0; \} \}/);
   const reduce = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce) {\n  *, *::before'), css.indexOf('/* ---------- 헤더'));
