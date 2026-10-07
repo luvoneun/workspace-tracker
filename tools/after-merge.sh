@@ -121,10 +121,10 @@ else
   git branch -d "$branch" >/dev/null && did+=("가지 삭제: $branch")
 fi
 
-# 5. 장부
+# 5. 장부 — by:조율 이 붙어야 영수증 사다리가 "합침"의 증거로 센다(세션이 스스로 적은 줄은 증거가 아님)
 for t in "$merge_task" "$task"; do
   [ -n "$t" ] || continue
-  json="{\"task\":\"$t\",\"state\":\"done\",\"say\":\"합쳐졌어요. main $short.\"}"
+  json="{\"task\":\"$t\",\"state\":\"done\",\"say\":\"합쳤어요. main $short.\",\"by\":\"조율\"}"
   if [ "$dry" = 1 ]; then
     plan "장부: $json"
   elif node "$LEDGER_JS" add "$json" >/dev/null; then

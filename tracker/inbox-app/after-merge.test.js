@@ -88,6 +88,8 @@ test('실제 실행(가짜 claude·장부): 세션 종료·복사본·가지 삭
   assert.match(log, /claude stop abcd1234/);
   assert.match(log, /ledger \{"task":"mrg","state":"done"/);
   assert.match(log, /ledger \{"task":"impl","state":"done"/);
+  // 영수증 사다리가 "합침"의 증거로 세려면 조율이 적은 줄이어야 한다(by:조율)
+  assert.match(log, /ledger \{"task":"mrg","state":"done","say":"합쳤어요\. main [0-9a-f]+\.","by":"조율"\}/);
 });
 
 test('세션 id를 못 찾으면 그 단계만 건너뛰고 stop은 부르지 않는다', () => {
