@@ -15,6 +15,8 @@
 #   `로컬 성공 · 7일치` / `로컬 실패 — 이유`
 #   `GitHub 성공` / `GitHub 실패 — 이유` / `GitHub 건너뜀 — 이유`
 # 파일을 읽기만 하므로 앱의 저장을 방해하지 않는다(앱은 파일을 통째로 교체하는 방식으로 저장한다).
+# 앱이 저장하는 중(잠금 파일 .mutation.lock)에는 기다렸다가 한 벌을 통째로 복사한다 — 저장 도중의 반쪽 상태가
+# 섞이지 않게. 30초를 기다려도 저장 중이면 이번 회차는 `로컬 건너뜀` 한 줄만 남긴다(다음 회차가 한다).
 
 set -uo pipefail
 
@@ -39,6 +41,9 @@ BACKUP_ROOT="${WORKSPACE_BACKUP_DIR:-$HOME/workspace-data-backup}"
 DAILY="$BACKUP_ROOT/daily"
 DAILY_KEEP=7
 DAILY_NAME_RE='^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+# 앱의 저장 잠금 — mutation-store.js가 데이터 폴더에 만들고 저장이 끝나면 지운다. 안에는 저장하는 프로세스 번호가 있다.
+LOCK="$DATA_DIR/.mutation.lock"
+LOCK_WAIT_TRIES="${BACKUP_LOCK_WAIT_TRIES:-150}"  # 0.2초 × 150 = 30초
 
 # 백업할 파일 — update.sh의 DATA_FILES·STATE_FILES와 같은 목록이다(테스트가 두 목록을 견준다).
 # 단 접속 암호(.access-token)는 뺀다: 다른 기기에서 여는 암호라 사본을 7벌 늘릴 이유가 없고, 잃어버려도
@@ -98,12 +103,31 @@ drop_stale_leftovers() {
   return 0
 }
 
-local_backup() {
+# 앱이 저장하는 중인가 — 잠금 파일이 있고, 그 안의 프로세스가 살아 있을 때만 그렇다. 죽은 프로세스가 남긴 잠금(고아)은
+# mutation-store.js의 recover와 같은 규칙으로 본다: 번호가 없거나 그 번호의 프로세스가 없으면 저장 중이 아니다.
+# 프로세스는 그 번호 하나만 조회한다(신호를 보내지 않고, 잠금 파일도 지우지 않는다 — 정리는 서버가 시작할 때 한다).
+saving() {
+  local pid
+  [ -f "$LOCK" ] || return 1
+  pid="$(head -c 32 "$LOCK" 2>/dev/null | tr -cd '0-9')"
+  [ -n "$pid" ] && [ "$pid" -gt 0 ] 2>/dev/null || return 1
+  ps -p "$pid" >/dev/null 2>&1
+}
+
+# 저장이 끝날 때까지 0.2초 간격으로 기다린다 — 끝나면 0, LOCK_WAIT_TRIES번을 넘기면 1.
+wait_until_saved() {
+  local tries=0
+  while saving; do
+    tries=$((tries + 1))
+    [ "$tries" -gt "$LOCK_WAIT_TRIES" ] && return 1
+    sleep 0.2
+  done
+  return 0
+}
+
+# 한 벌을 임시 폴더에 복사한다.
+copy_set() {
   local f
-  mkdir -p "$DAILY" || { say "로컬 실패 — 백업 폴더를 만들지 못함 ($DAILY)"; return 1; }
-  drop_stale_leftovers
-  drop_tmp
-  mkdir "$TMP" || { say "로컬 실패 — 임시 폴더를 만들지 못함"; return 1; }
   for f in $DATA_FILES; do
     [ -f "$DATA_DIR/$f" ] || continue
     cp -p "$DATA_DIR/$f" "$TMP/$f" || { drop_tmp; say "로컬 실패 — 파일을 복사하지 못함 ($f)"; return 1; }
@@ -111,6 +135,35 @@ local_backup() {
   for f in $STATE_FILES; do
     [ -f "$STATE_DIR/$f" ] || continue
     cp -p "$STATE_DIR/$f" "$TMP/$f" || { drop_tmp; say "로컬 실패 — 파일을 복사하지 못함 ($f)"; return 1; }
+  done
+  return 0
+}
+
+# 복사한 벌이 지금 원본과 같은가 — 복사하는 동안 저장이 시작됐다 끝났으면(잠금이 이미 사라졌어도) 어느 파일이 달라진다.
+same_as_source() {
+  local f dir
+  for f in $DATA_FILES $STATE_FILES; do
+    dir="$DATA_DIR"; case " $STATE_FILES " in *" $f "*) dir="$STATE_DIR" ;; esac
+    if [ -f "$dir/$f" ]; then cmp -s "$dir/$f" "$TMP/$f" || return 1
+    else [ ! -e "$TMP/$f" ] || return 1; fi
+  done
+  return 0
+}
+
+local_backup() {
+  local attempt=1
+  mkdir -p "$DAILY" || { say "로컬 실패 — 백업 폴더를 만들지 못함 ($DAILY)"; return 1; }
+  drop_stale_leftovers
+  # 저장 중이 아닐 때 한 벌을 복사하고, 복사 뒤에도 저장 중이 아니며 원본과 같을 때만 쓴다.
+  # 복사 중에 저장이 끼었으면 그 벌을 버리고 한 번 더 한다. 그래도 끼거나 30초를 기다려도 저장 중이면 이번 회차는 건너뛴다.
+  while :; do
+    drop_tmp
+    if ! wait_until_saved; then say "로컬 건너뜀 — 저장 중이라 건너뜀 (다음 회차가 한다)"; return 0; fi
+    mkdir "$TMP" || { say "로컬 실패 — 임시 폴더를 만들지 못함"; return 1; }
+    copy_set || return 1
+    if ! saving && same_as_source; then break; fi
+    if [ "$attempt" -ge 2 ]; then drop_tmp; say "로컬 건너뜀 — 저장 중이라 건너뜀 (다음 회차가 한다)"; return 0; fi
+    attempt=$((attempt + 1))
   done
   # 다 복사한 뒤에만 오늘 것을 바꿔 넣는다(같은 날 다시 돌면 그날 것을 교체). 옛 것을 먼저 지우지 않는다 —
   # 옆 이름(.old-)으로 비켜 두고 새 것을 날짜 이름으로 옮긴 뒤, 성공했을 때만 옛 것을 지운다(실패하면 되돌린다).
