@@ -60,6 +60,7 @@ test('화면 파일: 파일 목록·개수 정확, 간격 측정 줄 포함, 시
   assert.match(out, /새로 생긴 간격 N곳·잘림 N곳/);
   assert.match(out, /--json main\.json/);
   assert.match(out, /--base main\.json/);
+  assert.match(out, /--tokens DESIGN\.md/);
   assert.match(out, /기준 비교 못 함/);
   assert.match(out, /CSS·화면 구조 둘 다 안 바뀐 경우에만/);
   assert.match(out, /전체 시험 \*\*1번\*\*/);
