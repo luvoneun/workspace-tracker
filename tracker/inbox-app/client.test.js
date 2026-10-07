@@ -9767,7 +9767,7 @@ test('WP-D2 I. 도움말: 문답마다 찾아갈 표지가 있고, `슬랙에서
   assert.equal(home.children[0].children[1].textContent, '연동·자동화');
   assert.ok(!home.open, '연동·자동화 묶음은 처음엔 접혀 있다');
   const added = [];
-  q.classList = { add: name => added.push(name), remove() {} };
+  q.classList = { add: name => added.push(name), remove() {}, contains: () => false };
   q.closest = selector => (selector === 'details' ? home : null);
   app.nodes.get('settingsGuideView').querySelectorAll = () => questions;
   assert.equal(app.run("settingsGuideShow('슬랙에서 이렇게 보내요')"), q);
@@ -20198,6 +20198,14 @@ test('드문 순간 F: uiHere — 한 가지 모양(d-here)을 달고 UI_RARE.he
   assert.equal(fx.app.run('UI_RARE.here'), 2000);
   fx.app.run('uiHere(__el)');
   assert.ok(fx.el.has('d-here') && !fx.el.has('is-warn'), '다시 밝히면 다시 선다');
+  // 밝히는 중에 같은 요소를 또 밝히면 앞 타이머가 새 밝히기를 일찍 거두지 않는다
+  fx.timers.length = 0;
+  fx.app.run('uiHere(__el)');
+  fx.app.run('uiHere(__el)');
+  fx.timers[0].fn();
+  assert.ok(fx.el.has('d-here'), '앞 타이머는 건드리지 않는다');
+  fx.timers[1].fn();
+  assert.ok(!fx.el.has('d-here'), '마지막 타이머가 거둔다');
 });
 
 test('드문 순간 F: uiDotOut — 새 항목 점은 300ms 흐려진 뒤 떼고, 움직임 줄이기·가려진 창은 바로 뗀다', () => {
