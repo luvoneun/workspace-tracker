@@ -276,8 +276,12 @@ function reportBlurWatch(scope, input, key) {
     if (input.disabled || !reportEdits.has(key) || reportLeaveSaving.has(key)) return;
     const next = event.relatedTarget;
     if (next && typeof scope.contains === 'function' && scope.contains(next)) return;
+    // 초점이 줄 밖의 다른 것(다른 문장 글자·버튼·입력칸)으로 옮겨 갔다 — 바로 줄을 세운다(그것을 누른 뒤 문서를 곧바로 다시
+    // 그려도 놓치지 않는다).
+    if (next) { reportBlurSave(key); return; }
     if (typeof document.hasFocus === 'function' && !document.hasFocus()) return;
-    // 초점이 다 옮겨 간 뒤에 본다 — 다시 그려 사라진 칸(Enter·Esc·새 기록)이면 판단하지 않는다.
+    // 옮겨 간 곳을 모르면(빈 곳을 누름·다시 그려 칸이 사라짐) 초점이 다 옮겨 간 뒤에 본다 — 다시 그려 사라진 칸(Enter·Esc·새 기록)은
+    // 판단하지 않는다(브라우저는 칸을 뗄 때도 초점이 나갔다고 알린다).
     setTimeout(() => {
       if (!scope.isConnected) return;
       const active = document.activeElement;
