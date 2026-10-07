@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const support = require('./test-support');
-const { directory, freePort, runGit, gitReady, startAppServer } = support;
+const { directory, freePort, runGit, gitReady, startAppServer, runSync } = support;
 let base;
 before(async () => { base = await support.ready(); });
 
@@ -318,9 +318,9 @@ test('WP-D2 꾸미기 라우트: local/icon.png 한 파일만 쓰고 지우며, 
 // QA v1.1.0 정정 — 픽스처 격리·안전망 · 되돌리기 기준점 · Dock 이름 충돌 · 실행기 작은 것
 
 // 서버 모듈만 읽어 들이는 자식 프로세스(듣지 않는다 — require.main이 아니다). 안전망이 막으면 1로 끝난다.
-const loadServerChild = env => spawnSync(process.execPath, ['-e',
+const loadServerChild = env => runSync(process.execPath, ['-e',
   "const s=require('./server.js');process.stdout.write(JSON.stringify(s.workspacePaths()));process.exit(0)"],
-{ cwd: __dirname, encoding: 'utf8', timeout: 20000, env });
+{ cwd: __dirname, encoding: 'utf8', env });
 const underPath = (child, parent) => child === parent || child.startsWith(parent + path.sep);
 
 test('QA 픽스처: browser-fixture가 서버에 넘기는 경로는 전부 임시 폴더 아래이고, 그 환경으로 뜬 서버도 실제 경로를 하나도 쓰지 않는다', (t) => {

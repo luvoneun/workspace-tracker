@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const support = require('./test-support');
-const { withoutStamp, withoutRevisions, directory, server, today, post, items, freePort, deadPid, journalEntry, startServer, jiraModule, json, jiraFake, readJson } = support;
+const { withoutStamp, withoutRevisions, directory, server, today, post, items, freePort, serverReady, HANG_MS, HANG_LABEL, deadPid, journalEntry, startServer, jiraModule, json, jiraFake, readJson } = support;
 let base;
 before(async () => { base = await support.ready(); });
 
@@ -598,13 +598,8 @@ server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => console.log
   child.stderr.on('data', chunk => { log += chunk; });
   t.after(() => { child.kill('SIGKILL'); fs.rmSync(home, { recursive: true, force: true }); });
   const origin = `http://127.0.0.1:${port}`;
-  const deadline = Date.now() + 10000;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error(`서버가 종료되었습니다 (${child.exitCode}): ${log}`);
-    try { if ((await fetch(origin + '/api/storage-status')).ok) return { home, origin }; } catch { /* 아직 안 떴다 */ }
-    await new Promise(resolve => setTimeout(resolve, 50));
-  }
-  throw new Error(`서버가 응답하지 않았습니다: ${log}`);
+  await serverReady(child, origin, () => log);
+  return { home, origin };
 }
 const linkPost = (origin, body) => fetch(origin + '/api/project/jira-link', {
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -897,13 +892,8 @@ server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => console.log
   child.stderr.on('data', chunk => { log += chunk; });
   t.after(() => { child.kill('SIGKILL'); fs.rmSync(home, { recursive: true, force: true }); });
   const origin = `http://127.0.0.1:${port}`;
-  const deadline = Date.now() + 10000;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error(`서버가 종료되었습니다 (${child.exitCode}): ${log}`);
-    try { if ((await fetch(origin + '/api/storage-status')).ok) return { home, origin }; } catch { /* 아직 안 떴다 */ }
-    await new Promise(resolve => setTimeout(resolve, 50));
-  }
-  throw new Error(`서버가 응답하지 않았습니다: ${log}`);
+  await serverReady(child, origin, () => log);
+  return { home, origin };
 }
 
 test('목록이 살아 있으면 고르기 목록·요약이 지라 값이 되고 낡음 경고가 사라진다 — 파일은 쓰지 않는다', async (t) => {
@@ -918,9 +908,11 @@ test('목록이 살아 있으면 고르기 목록·요약이 지라 값이 되�
   assert.equal(first.jiraIssues[0].summary, '파일에서 온 낡은 요약');
   assert.notEqual(first.jiraSync.live, true);
 
-  const deadline = Date.now() + 10000;
+  // 뒤에서 돈 갱신이 들어올 때까지 기다린다(멈춘 경우만 안전망).
+  const deadline = Date.now() + HANG_MS;
   let live = first;
-  while (Date.now() < deadline && live.jiraSync.live !== true) {
+  while (live.jiraSync.live !== true) {
+    if (Date.now() > deadline) throw new Error(`${HANG_LABEL} 뒤에서 돈 지라 갱신이 들어오지 않았습니다`);
     await new Promise(resolve => setTimeout(resolve, 50));
     live = await read();
   }
@@ -1158,13 +1150,8 @@ server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => console.log
   child.stderr.on('data', chunk => { log += chunk; });
   t.after(() => { child.kill('SIGKILL'); fs.rmSync(home, { recursive: true, force: true }); });
   const origin = `http://127.0.0.1:${port}`;
-  const deadline = Date.now() + 10000;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error(`서버가 종료되었습니다 (${child.exitCode}): ${log}`);
-    try { if ((await fetch(origin + '/api/storage-status')).ok) return { home, origin }; } catch { /* 아직 안 떴다 */ }
-    await new Promise(resolve => setTimeout(resolve, 50));
-  }
-  throw new Error(`서버가 응답하지 않았습니다: ${log}`);
+  await serverReady(child, origin, () => log);
+  return { home, origin };
 }
 
 const MOVE_REPORT = {
@@ -2129,13 +2116,8 @@ server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => console.log
   child.stderr.on('data', chunk => { log += chunk; });
   t.after(() => { child.kill('SIGKILL'); fs.rmSync(home, { recursive: true, force: true }); });
   const origin = `http://127.0.0.1:${port}`;
-  const deadline = Date.now() + 10000;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error(`서버가 종료되었습니다 (${child.exitCode}): ${log}`);
-    try { if ((await fetch(origin + '/api/storage-status')).ok) return { home, origin }; } catch { /* 아직 안 떴다 */ }
-    await new Promise(resolve => setTimeout(resolve, 50));
-  }
-  throw new Error(`서버가 응답하지 않았습니다: ${log}`);
+  await serverReady(child, origin, () => log);
+  return { home, origin };
 }
 
 test('GET /api/attention은 나를 부른 줄을 맨 위에 두고, 조회는 어떤 파일도 만들지 않는다', async (t) => {
@@ -2675,13 +2657,8 @@ server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => console.log
   t.after(() => { child.kill('SIGKILL'); fs.rmSync(home, { recursive: true, force: true }); });
   const origin = `http://127.0.0.1:${port}`;
   const calls = () => (fs.existsSync(callsFile) ? fs.readFileSync(callsFile, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : []);
-  const deadline = Date.now() + 10000;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error(`서버가 종료되었습니다 (${child.exitCode}): ${log}`);
-    try { if ((await fetch(origin + '/api/storage-status')).ok) return { home, origin, calls }; } catch { /* 아직 안 떴다 */ }
-    await new Promise(resolve => setTimeout(resolve, 50));
-  }
-  throw new Error(`서버가 응답하지 않았습니다: ${log}`);
+  await serverReady(child, origin, () => log);
+  return { home, origin, calls };
 }
 
 test('BMERGE 3-3: 새 에픽 요약이 지라 요약·별칭과 같으면 409이고 지라에 요청이 하나도 가지 않는다 — 그룹 이름과 같으면 통과, 밑줄은 공백으로', async (t) => {

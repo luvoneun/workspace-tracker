@@ -6,14 +6,15 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const support = require('./test-support');
-const { today, deadPid, gitEnv, runGit, gitReady } = support;
+const { today, deadPid, gitEnv, runGit, gitReady, runSync } = support;
 
 // launchd가 부르는 자동화 스크립트. 앱과 따로 돌지만 여기가 멈추면 수집이 통째로 멎기 때문에,
 // 실제 스크립트를 임시 폴더·가짜 claude로 돌려서 "멈춤 방지" 장치만 확인한다.
 // (슬랙 API나 운영 서버는 건드리지 않는다 — 채널이 없는 설정이라 곧바로 실패하고 끝난다)
 const automationScript = name => path.join(__dirname, 'automation', name);
-const runScript = (script, args, env) => spawnSync('/bin/bash', [script, ...args], {
-  env: { ...process.env, ...env }, encoding: 'utf8', timeout: 60000,
+// 끝나기만 기다리는 동기 실행 — 마감은 test-support의 안전망 하나(걸리면 `멈춤(안전망 …)`으로 던진다).
+const runScript = (script, args, env) => runSync('/bin/bash', [script, ...args], {
+  env: { ...process.env, ...env }, encoding: 'utf8',
 });
 const gone = pid => { try { process.kill(pid, 0); return false; } catch { return true; } };
 // slack-capture.sh는 설치 폴더의 tracker/inbox-app/slack-collect.js를 부른다 — 임시 설치 폴더에 진짜 파일을 둔다.
@@ -233,8 +234,8 @@ function updateFixture(t, { channel = 'stable' } = {}) {
   fs.writeFileSync(path.join(clone, 'tracker', '.workflow.json'), '{"items":{},"meetings":{}}');
 
   // `extra`는 물음에 답을 넣거나(input) 환경을 하나 더 끼울 때만 쓴다 — 주지 않으면 예전 그대로다.
-  const run = (args = [], extra = {}) => spawnSync('/bin/bash', [path.join(clone, 'update.sh'), ...args], {
-    cwd: clone, encoding: 'utf8', timeout: 120000, input: extra.input,
+  const run = (args = [], extra = {}) => runSync('/bin/bash', [path.join(clone, 'update.sh'), ...args], {
+    cwd: clone, encoding: 'utf8', input: extra.input,
     // 이 테스트 파일이 쓰는 WORKSPACE_DATA_DIR이 새어 들어가면 안 된다 — 복사본 안의 tracker/를 보게 비운다.
     env: { ...gitEnv, WORKSPACE_DATA_DIR: '', HOME: root, PATH: `${bin}:${process.env.PATH}`, WORKSPACE_BACKUP_DIR: backups, WORKSPACE_INSTALL_DIR: path.join(root, 'install'), ...(extra.env || {}) },
   });
@@ -2285,8 +2286,8 @@ function setupRunFixture(t) {
   const apps = path.join(home, 'Applications');
   const run = (env = {}) => {
     fs.writeFileSync(log, '');
-    return spawnSync('/bin/bash', [path.join(ws, 'setup.sh')], {
-      cwd: ws, encoding: 'utf8', timeout: 60000,
+    return runSync('/bin/bash', [path.join(ws, 'setup.sh')], {
+      cwd: ws, encoding: 'utf8',
       // 이 테스트 프로세스의 WORKSPACE_* 값이 새어 들어가지 않게 필요한 것만 넘긴다.
       env: { PATH: `${bin}:${process.env.PATH}`, HOME: home, TMPDIR: os.tmpdir(), LANG: 'en_US.UTF-8', ...env },
     });

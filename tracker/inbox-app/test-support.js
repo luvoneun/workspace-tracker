@@ -74,6 +74,46 @@ const freePort = () => new Promise(resolve => {
   probe.listen(0, '127.0.0.1', () => { const { port } = probe.address(); probe.close(() => resolve(port)); });
 });
 const deadPid = () => spawnSync(process.execPath, ['-e', '']).pid;
+
+// 시험이 띄운 자식 프로세스를 기다리는 **안전망** — 성공 경로는 이 값에 기대지 않는다. 자식이 멈춰 버렸을 때 시험이
+// 영원히 걸려 있지 않게 하는 것뿐이다(release.sh는 --test-timeout 없이 돈다). 맥이 메모리·CPU로 멈칫하면 node 하나 뜨는 데
+// 10~20초, setup.sh 한 번에 60초도 걸려(2026-10-08 측정 — 평소 0.1초·몇 초) 예전의 10·20·60초 마감이 진짜 실패가 아닌데 울렸다.
+const HANG_MS = 5 * 60 * 1000;
+// 안전망에 걸린 실패는 이 머리말로 시작한다 — 일반 실패(값이 틀림)와 "멈춤"을 글자로 가른다.
+const HANG_LABEL = `멈춤(안전망 ${HANG_MS / 60000}분):`;
+
+// 끝나기만 기다리는 동기 자식(셸 스크립트·node 한 번) — spawnSync에 안전망을 걸고, 거기 걸리면 "멈춤"으로 던진다.
+// 그 밖에는 spawnSync 결과를 그대로 돌려준다(종료 코드·출력은 부른 쪽이 본다).
+function runSync(command, args, options = {}) {
+  const result = spawnSync(command, args, { ...options, timeout: HANG_MS });
+  if (result.error && result.error.code === 'ETIMEDOUT') {
+    throw new Error(`${HANG_LABEL} ${path.basename(String(command))} ${args.map(String).join(' ').slice(0, 200)}\n${result.stdout || ''}${result.stderr || ''}`);
+  }
+  return result;
+}
+
+// 띄운 서버가 들을 때까지 기다린다 — 벽시계 몇 초가 아니라 "듣기 시작했다"는 한 줄(server.js의 `슬랙 인박스 앱: http…`,
+// 가짜 래퍼의 `ready`)과 "끝나 버림"을 기다린다. 들은 뒤 storage-status가 200인지 한 번 본다(예전 확인 그대로).
+// `log`는 부른 쪽이 stdout·stderr를 모으는 함수 — 부른 쪽의 'data' 듣기가 먼저 걸려 있어야 한다(모두 spawn 바로 뒤에 건다).
+function serverReady(child, origin, log) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => finish(new Error(`${HANG_LABEL} 서버가 듣기 시작하지 않았습니다: ${log()}`)), HANG_MS);
+    const onData = () => { if (/^(?:ready|슬랙 인박스 앱: http)/m.test(log())) finish(); };
+    const onExit = code => finish(new Error(`서버가 종료되었습니다 (${code}): ${log()}`));
+    function finish(error) {
+      clearTimeout(timer);
+      child.stdout.off('data', onData);
+      child.off('exit', onExit);
+      if (error) reject(error); else resolve();
+    }
+    child.stdout.on('data', onData);
+    child.once('exit', onExit);
+    if (child.exitCode !== null) onExit(child.exitCode); else onData();
+  }).then(async () => {
+    const response = await fetch(origin + '/api/storage-status');
+    if (!response.ok) throw new Error(`서버가 듣기 시작했지만 storage-status가 ${response.status}입니다: ${log()}`);
+  });
+}
 const journalEntry = (file, before, after) => JSON.stringify({ changes: [{ file, before: Buffer.from(before).toString('base64'), after: createHash('sha256').update(after).digest('hex'), intermediate: [] }] });
 async function startServer(t, seed) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-recovery-'));
@@ -88,13 +128,8 @@ async function startServer(t, seed) {
   child.stderr.on('data', chunk => { log += chunk; });
   t.after(() => { child.kill('SIGKILL'); fs.rmSync(home, { recursive: true, force: true }); });
   const base = `http://127.0.0.1:${port}`;
-  const deadline = Date.now() + 10000;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error(`서버가 종료되었습니다 (${child.exitCode}): ${log}`);
-    try { if ((await fetch(base + '/api/storage-status')).ok) return { home, base, log: () => log }; } catch { /* 아직 안 떴다 */ }
-    await new Promise(resolve => setTimeout(resolve, 50));
-  }
-  throw new Error(`서버가 응답하지 않았습니다: ${log}`);
+  await serverReady(child, base, () => log);
+  return { home, base, log: () => log };
 }
 
 // ---------- 지라 직접 읽기 (BJR 1단계 — 보기만) ----------
@@ -132,13 +167,8 @@ async function startAppServer(t, env) {
   child.stderr.on('data', chunk => { log += chunk; });
   t.after(() => child.kill('SIGKILL'));
   const address = `http://127.0.0.1:${port}`;
-  const deadline = Date.now() + 10000;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error(`서버가 종료되었습니다 (${child.exitCode}): ${log}`);
-    try { if ((await fetch(address + '/api/storage-status')).ok) return { base: address, log: () => log }; } catch { /* 아직 안 떴다 */ }
-    await new Promise(resolve => setTimeout(resolve, 50));
-  }
-  throw new Error(`서버가 응답하지 않았습니다: ${log}`);
+  await serverReady(child, address, () => log);
+  return { base: address, log: () => log };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -169,5 +199,5 @@ module.exports = {
   directory, automationHome, server, date, today, shifted, tasksPath, readTasks, post, items,
   // 서버 주소(`base`)는 띄운 뒤에야 정해지므로 값이 아니라 기다릴 약속으로 내보낸다.
   ready,
-  freePort, deadPid, journalEntry, startServer, jiraModule, json, jiraFake, readJson, gitEnv, runGit, gitReady, startAppServer, integrationsStore, integrationsFixture,
+  freePort, deadPid, HANG_MS, HANG_LABEL, runSync, serverReady, journalEntry, startServer, jiraModule, json, jiraFake, readJson, gitEnv, runGit, gitReady, startAppServer, integrationsStore, integrationsFixture,
 };

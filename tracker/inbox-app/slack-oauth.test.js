@@ -13,6 +13,8 @@ const { createHash } = require('node:crypto');
 const oauth = require('./slack-oauth');
 const slackAuth = require('./slack-auth');
 const integrations = require('./integrations');
+// 띄운 서버를 기다리는 도우미(준비 신호·멈춤 안전망)만 쓴다 — 공용 준비의 임시 폴더 환경도 함께 깔리지만 이 파일의 서버는 자기 폴더를 넘긴다.
+const { serverReady } = require('./test-support');
 
 const NOW = 1_800_000_000_000;
 const MIN = 60 * 1000;
@@ -370,13 +372,7 @@ server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => console.log
   child.stderr.on('data', (chunk) => { log += chunk; });
   t.after(() => child.kill('SIGKILL'));
   const origin = `http://127.0.0.1:${port}`;
-  const deadline = Date.now() + 10000;
-  for (;;) {
-    if (Date.now() > deadline) throw new Error(`서버가 응답하지 않았습니다: ${log}`);
-    if (child.exitCode !== null) throw new Error(`서버가 종료되었습니다 (${child.exitCode}): ${log}`);
-    try { if ((await fetch(origin + '/api/storage-status')).ok) break; } catch { /* 아직 안 떴다 */ }
-    await new Promise(resolve => setTimeout(resolve, 50));
-  }
+  await serverReady(child, origin, () => log);
   const post = (route, body = {}, headers = {}) => fetch(origin + route, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
   const get = async route => (await fetch(origin + route)).json();
   const slackLog = () => (fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').trim().split('\n').filter(Boolean) : []);

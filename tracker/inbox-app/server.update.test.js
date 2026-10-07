@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const support = require('./test-support');
-const { post, runGit, gitReady, startAppServer } = support;
+const { post, runGit, gitReady, startAppServer, HANG_MS, HANG_LABEL } = support;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // WP-D3 — 앱 안 `업데이트 받기`(+되돌리기) · 팀 전용 설치 파일 · 설치 마무리 문구
@@ -46,28 +46,42 @@ function remoteFixture(t, { channel = 'stable' } = {}) {
   return { root, clone, env };
 }
 
+// 원격 확인(임시 bare 저장소에 `git ls-remote`)이 끝난 뒤의 /api/about. 서버는 그 확인을 5초까지만 기다렸다 답하고(설정 화면용)
+// `?cached=1`은 아예 기다리지 않는다 — 맥이 멈칫해 확인이 늦으면 "새 버전 없음"으로 읽혀 흔들렸다. 확인이 끝났다는 표시
+// (`update.checkedAt`)가 올 때까지 cached로 다시 묻는다(멈춘 경우만 안전망). 첫 물음은 부른 쪽이 고른 그대로다.
+async function checkedAbout(base, { cached = false } = {}) {
+  let about = await (await fetch(base + (cached ? '/api/about?cached=1' : '/api/about'))).json();
+  const deadline = Date.now() + HANG_MS;
+  while (!about.update.checkedAt) {
+    if (Date.now() > deadline) throw new Error(`${HANG_LABEL} 원격 확인이 끝나지 않았습니다`);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    about = await (await fetch(base + '/api/about?cached=1')).json();
+  }
+  return about;
+}
+
 test('WP-D3 새 버전 판단: stable은 원격 태그 중 최신 > VERSION, main은 원격 main 커밋이 HEAD와 다르고 아직 받지 않았을 때', { skip: !gitReady }, async (t) => {
   const stable = remoteFixture(t);
-  const about = await (await fetch((await startAppServer(t, stable.env)).base + '/api/about')).json();
+  const about = await checkedAbout((await startAppServer(t, stable.env)).base);
   assert.equal(about.latest.tag, 'v1.1.0');
   assert.equal(about.update.available, true, 'v1.1.0 > 1.0.0');
   assert.equal(about.update.label, 'v1.1.0');
   assert.equal(about.update.changesUrl, null, '원격이 github.com이 아니면 `무엇이 바뀌었나요`를 숨긴다');
 
   const main = remoteFixture(t, { channel: 'main' });
-  const mainAbout = await (await fetch((await startAppServer(t, main.env)).base + '/api/about')).json();
+  const mainAbout = await checkedAbout((await startAppServer(t, main.env)).base);
   assert.equal(mainAbout.channel, 'main');
   assert.equal(mainAbout.update.available, true, '원격 main이 앞서 있고 이 저장소는 그 커밋이 아직 없다');
   assert.equal(mainAbout.update.label, 'main');
 
   // 받은 뒤(HEAD = 원격 main)에는 새 버전이 아니다
   runGit(main.clone, ['pull', '-q', '--ff-only', 'origin', 'main']);
-  const after = await (await fetch((await startAppServer(t, main.env)).base + '/api/about')).json();
+  const after = await checkedAbout((await startAppServer(t, main.env)).base);
   assert.equal(after.update.available, false);
   // 내가 앞서 있으면(원격 커밋을 이미 가짐) 역시 새 버전이 아니다
   fs.writeFileSync(path.join(main.clone, 'VERSION'), '1.2.0\n');
   runGit(main.clone, ['commit', '-qam', '내가 앞선 커밋']);
-  const ahead = await (await fetch((await startAppServer(t, main.env)).base + '/api/about')).json();
+  const ahead = await checkedAbout((await startAppServer(t, main.env)).base);
   assert.equal(ahead.update.available, false, 'HEAD와 달라도 이 저장소가 가진 커밋이면 알리지 않는다');
 });
 
@@ -310,17 +324,21 @@ async function startAutoServer(t, { channel = 'stable', idleMs = 0, plist = true
   const record = path.join(fx.clone, 'local', 'auto-update.json');
   return { ...fx, app, request, record };
 }
-const waitFor = async (check, ms) => {
-  const deadline = Date.now() + ms;
-  while (Date.now() < deadline) { if (check()) return true; await new Promise(resolve => setTimeout(resolve, 100)); }
-  return check();
+// 서버가 뒤에서 할 일(요청 파일 쓰기)이 일어날 때까지 기다린다 — 일어나면 바로 참, 멈춘 경우만 안전망에서 "멈춤"으로 던진다.
+const waitFor = async (check) => {
+  const deadline = Date.now() + HANG_MS;
+  while (!check()) {
+    if (Date.now() > deadline) throw new Error(`${HANG_LABEL} 기다리던 일이 일어나지 않았습니다`);
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  return true;
 };
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const sameJson = (actual, expected, message) => assert.deepEqual(JSON.parse(JSON.stringify(actual)), expected, message);
 
 test('WP-U 자동 업데이트: launchd 설치본 · stable · 새 버전 · 쉬는 중이면 `업데이트 받기`와 같은 요청 파일 한 줄 + local/auto-update.json', { skip: !gitReady }, async (t) => {
   const fx = await startAutoServer(t);
-  assert.equal(await waitFor(() => fs.existsSync(fx.request), 8000), true, '요청 파일을 쓴다');
+  assert.equal(await waitFor(() => fs.existsSync(fx.request)), true, '요청 파일을 쓴다');
   assert.match(fs.readFileSync(fx.request, 'utf8'), /^\{"action":"update","requestedAt":"[0-9T:.Z-]+"\}\n$/, '실행기가 알아보는 그 한 줄');
   const record = JSON.parse(fs.readFileSync(fx.record, 'utf8'));
   assert.equal(record.version, 'v1.1.0');
@@ -335,7 +353,7 @@ test('WP-U 자동 업데이트: launchd 설치본 · stable · 새 버전 · 쉬
 
 test('WP-U 자동 업데이트: 갈래가 main이면(만든 사람의 저장소) 새 버전·쉬는 중·에이전트가 다 있어도 **절대** 요청하지 않는다', { skip: !gitReady }, async (t) => {
   const fx = await startAutoServer(t, { channel: 'main' });
-  const about = await (await fetch(fx.app.base + '/api/about')).json();
+  const about = await checkedAbout(fx.app.base);
   assert.equal(about.update.available, true, '원격 main이 앞서 있다(새 버전은 보인다 — 파란 점은 그대로)');
   await sleep(2500);
   assert.equal(fs.existsSync(fx.request), false, '요청 파일이 없다');
@@ -359,7 +377,7 @@ test('WP-U 자동 업데이트: git worktree가 둘이면(만든 사람의 개�
     ...fx.env, WORKSPACE_MANAGED: '1', WORKSPACE_CHECKIN: '0', WORKSPACE_LOCAL_DIR: path.join(fx.clone, 'local'),
     WORKSPACE_AUTO_UPDATE_TICK_MS: '200', WORKSPACE_AUTO_UPDATE_IDLE_MS: '0',
   });
-  const about = await (await fetch(app.base + '/api/about')).json();
+  const about = await checkedAbout(app.base);
   assert.equal(about.update.available, true);
   await sleep(2500);
   assert.equal(fs.existsSync(path.join(fx.env.WORKSPACE_AUTOMATION_DIR, 'requests', 'update.request')), false, '요청 파일이 없다');
@@ -376,7 +394,7 @@ test('WP-U 입력 중 신호: 본문 없는 POST /api/activity(204, 파일 안 �
     await sleep(400);
   }
   assert.equal(fs.existsSync(fx.request), false, '입력 중이라고 알리는 동안은 요청하지 않는다');
-  assert.equal(await waitFor(() => fs.existsSync(fx.request), 8000), true, '신호가 멈추면 쉬는 중으로 보고 요청한다');
+  assert.equal(await waitFor(() => fs.existsSync(fx.request)), true, '신호가 멈추면 쉬는 중으로 보고 요청한다');
 });
 
 test('WP-U 지금 갈래 하나: 뜬 뒤 설정 파일만 main으로 바뀌면 /api/about의 channel도 main이다(판단과 같은 함수)', { skip: !gitReady }, async (t) => {
@@ -400,8 +418,9 @@ test('WP-U 쉬는 중: 사람의 쓰기(POST)가 이어지면 기다리고, 목�
   assert.equal(fs.existsSync(fx.request), false, '쓰는 동안은 요청하지 않는다');
   // 이제 GET과 슬랙 수집만 계속 온다 — 그래도 쉬는 중이다
   let seen = false;
-  const deadline = Date.now() + 8000;
-  while (Date.now() < deadline && !seen) {
+  const deadline = Date.now() + HANG_MS;
+  while (!seen) {
+    if (Date.now() > deadline) throw new Error(`${HANG_LABEL} GET·/api/import만 오는데 요청하지 않았습니다`);
     await fetch(fx.app.base + '/api/items');
     await send('/api/import', {});
     await sleep(300);
@@ -414,7 +433,7 @@ test('WP-U 자동이 안 될 때 오늘 탭 한 줄의 이유: 에이전트 없�
   const missing = await startAutoServer(t, { plist: false });
   await sleep(1000);
   assert.equal(fs.existsSync(missing.request), false);
-  const aboutMissing = await (await fetch(missing.app.base + '/api/about')).json();
+  const aboutMissing = await checkedAbout(missing.app.base);
   sameJson(aboutMissing.update.auto, { eligible: true, on: true, notice: 'not-installed' });
 
   const off = await startAutoServer(t, { idleMs: 60 * 60 * 1000 });
@@ -424,7 +443,7 @@ test('WP-U 자동이 안 될 때 오늘 탭 한 줄의 이유: 에이전트 없�
   assert.equal(saved.ok, true);
   assert.equal(config().server.autoUpdate, false, '끄면 server.autoUpdate: false');
   assert.equal(config().server.updateChannel, 'stable', '다른 키는 그대로');
-  const aboutOff = await (await fetch(off.app.base + '/api/about?cached=1')).json();
+  const aboutOff = await checkedAbout(off.app.base, { cached: true });
   sameJson(aboutOff.update.auto, { eligible: true, on: false, notice: 'off' });
   // 다시 켜면 그 칸을 지운다(기본 켜짐)
   await save({ autoUpdate: true });
@@ -439,7 +458,7 @@ test('WP-U 개발용 서버(WORKSPACE_MANAGED 없음)는 자동으로 요청하�
   fs.mkdirSync(agents, { recursive: true });
   fs.writeFileSync(path.join(agents, 'com.workspace.app.update.plist'), '<plist/>\n');
   const app = await startAppServer(t, { ...fx.env, WORKSPACE_CHECKIN: '0', WORKSPACE_LOCAL_DIR: path.join(fx.clone, 'local'), WORKSPACE_AUTO_UPDATE_TICK_MS: '200', WORKSPACE_AUTO_UPDATE_IDLE_MS: '0' });
-  const about = await (await fetch(app.base + '/api/about')).json();
+  const about = await checkedAbout(app.base);
   assert.equal(about.update.available, true);
   await sleep(1500);
   assert.equal(fs.existsSync(path.join(fx.env.WORKSPACE_AUTOMATION_DIR, 'requests', 'update.request')), false);

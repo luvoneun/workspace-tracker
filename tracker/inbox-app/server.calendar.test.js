@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const support = require('./test-support');
-const { today, items, freePort, integrationsStore } = support;
+const { today, items, freePort, serverReady, HANG_MS, HANG_LABEL, integrationsStore } = support;
 let base;
 before(async () => { base = await support.ready(); });
 
@@ -281,9 +281,10 @@ server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => { calendarL
   t.after(() => child.kill('SIGKILL'));
   const origin = `http://127.0.0.1:${port}`;
   let calendar = null;
-  const deadline = Date.now() + 10000;
+  // 서버가 뜨고 뒤에서 일정을 읽어 `live`가 될 때까지 기다린다(멈춘 경우만 안전망).
+  const deadline = Date.now() + HANG_MS;
   for (;;) {
-    if (Date.now() > deadline) throw new Error(`직접 읽은 일정이 오지 않았습니다: ${log} ${JSON.stringify(calendar)}`);
+    if (Date.now() > deadline) throw new Error(`${HANG_LABEL} 직접 읽은 일정이 오지 않았습니다: ${log} ${JSON.stringify(calendar)}`);
     if (child.exitCode !== null) throw new Error(`서버가 종료되었습니다 (${child.exitCode}): ${log}`);
     try { calendar = (await (await fetch(origin + '/api/items')).json()).calendar; if (calendar && calendar.live) break; } catch { /* 아직 */ }
     await new Promise(resolve => setTimeout(resolve, 50));
@@ -371,13 +372,7 @@ server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => console.log
   child.stderr.on('data', chunk => { log += chunk; });
   t.after(() => child.kill('SIGKILL'));
   const base = `http://127.0.0.1:${port}`;
-  const deadline = Date.now() + 10000;
-  for (;;) {
-    if (Date.now() > deadline) throw new Error(`서버가 응답하지 않았습니다: ${log}`);
-    if (child.exitCode !== null) throw new Error(`서버가 종료되었습니다 (${child.exitCode}): ${log}`);
-    try { if ((await fetch(base + '/api/storage-status')).ok) break; } catch { /* 아직 */ }
-    await new Promise(resolve => setTimeout(resolve, 50));
-  }
+  await serverReady(child, base, () => log);
   const ask = async (key) => {
     const response = await fetch(base + '/api/integrations/fetch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key }) });
     const text = await response.text();

@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const support = require('./test-support');
-const { directory, automationHome, today, shifted, post, items, freePort, jiraModule, json, jiraFake, startAppServer, integrationsStore, integrationsFixture } = support;
+const { directory, automationHome, today, shifted, post, items, freePort, serverReady, jiraModule, json, jiraFake, startAppServer, integrationsStore, integrationsFixture } = support;
 let base;
 before(async () => { base = await support.ready(); });
 
@@ -154,13 +154,12 @@ test('미팅 노트 가져오기를 끄면 조회·요청이 막히고 상태 �
     env: { ...process.env, WORKSPACE_DATA_DIR: home, WORKSPACE_PORT: String(port), WORKSPACE_NO_OPEN: '1', WORKSPACE_HOST: '', WORKSPACE_CONFIG: config },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  let log = '';
+  child.stdout.on('data', chunk => { log += chunk; });
+  child.stderr.on('data', chunk => { log += chunk; });
   t.after(() => { child.kill('SIGKILL'); fs.rmSync(home, { recursive: true, force: true }); });
   const origin = `http://127.0.0.1:${port}`;
-  const deadline = Date.now() + 10000;
-  while (Date.now() < deadline) {
-    try { if ((await fetch(origin + '/api/storage-status')).ok) break; } catch { /* 아직 안 떴다 */ }
-    await new Promise(resolve => setTimeout(resolve, 50));
-  }
+  await serverReady(child, origin, () => log);
   assert.equal((await fetch(origin + '/api/meeting-notes/status')).status, 404);
   const refused = await fetch(origin + '/api/meeting-notes/request', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: 'today' }) });
   assert.equal(refused.status, 404);
@@ -615,13 +614,7 @@ server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => console.log
   child.stderr.on('data', chunk => { log += chunk; });
   t.after(() => child.kill('SIGKILL'));
   const origin = `http://127.0.0.1:${port}`;
-  const deadline = Date.now() + 10000;
-  for (;;) {
-    if (Date.now() > deadline) throw new Error(`서버가 응답하지 않았습니다: ${log}`);
-    if (child.exitCode !== null) throw new Error(`서버가 종료되었습니다 (${child.exitCode}): ${log}`);
-    try { if ((await fetch(origin + '/api/storage-status')).ok) break; } catch { /* 아직 안 떴다 */ }
-    await new Promise(resolve => setTimeout(resolve, 50));
-  }
+  await serverReady(child, origin, () => log);
 
   const before = fs.readFileSync(config, 'utf8');
   const make = body => fetch(origin + '/api/integrations/slack-channel', {
@@ -895,13 +888,7 @@ server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => console.log
   child.stderr.on('data', chunk => { log += chunk; });
   t.after(() => child.kill('SIGKILL'));
   const origin = `http://127.0.0.1:${port}`;
-  const deadline = Date.now() + 10000;
-  for (;;) {
-    if (Date.now() > deadline) throw new Error(`서버가 응답하지 않았습니다: ${log}`);
-    if (child.exitCode !== null) throw new Error(`서버가 종료되었습니다 (${child.exitCode}): ${log}`);
-    try { if ((await fetch(origin + '/api/storage-status')).ok) break; } catch { /* 아직 안 떴다 */ }
-    await new Promise(resolve => setTimeout(resolve, 50));
-  }
+  await serverReady(child, origin, () => log);
   const post = (route, body) => fetch(origin + route, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const slackLog = () => (fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').trim().split('\n').filter(Boolean) : []);
 

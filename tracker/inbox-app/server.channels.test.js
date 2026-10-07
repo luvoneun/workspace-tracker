@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const support = require('./test-support');
-const { automationHome, post, freePort, integrationsStore, integrationsFixture } = support;
+const { automationHome, post, freePort, serverReady, integrationsStore, integrationsFixture } = support;
 let base;
 before(async () => { base = await support.ready(); });
 
@@ -195,13 +195,7 @@ server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => console.log
   child.stderr.on('data', chunk => { log += chunk; });
   t.after(() => child.kill('SIGKILL'));
   const origin = `http://127.0.0.1:${port}`;
-  const deadline = Date.now() + 10000;
-  for (;;) {
-    if (Date.now() > deadline) throw new Error(`서버가 응답하지 않았습니다: ${log}`);
-    if (child.exitCode !== null) throw new Error(`서버가 종료되었습니다 (${child.exitCode}): ${log}`);
-    try { if ((await fetch(origin + '/api/storage-status')).ok) break; } catch { /* 아직 안 떴다 */ }
-    await new Promise(resolve => setTimeout(resolve, 50));
-  }
+  await serverReady(child, origin, () => log);
   const post = (route, body) => fetch(origin + route, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const slackLog = () => (fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').trim().split('\n').filter(Boolean) : []);
   const channels = () => JSON.parse(fs.readFileSync(config, 'utf8')).slack.channels;
