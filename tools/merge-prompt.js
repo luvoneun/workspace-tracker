@@ -15,6 +15,7 @@ const LEDGER = '/Users/luvon/session-board/app/lib/ledger.js';
 const INSTALLED_AUTOMATION = '~/.local/share/workspace-automation/';
 const SAFETY_FUNCS = 'request·showNotice·pushUndo·recordUndoFor·toggleTask·fadeOutAndRun·isClientFile·RECOVERY_NEEDED';
 const TEST_CMD = '`cd tracker/inbox-app`에서 `node --test --test-concurrency=1 --test-timeout=300000 *.test.js`';
+const HUMAN_SPEED_FILES = new Set(['report-ui.js', 'app.js', 'projects-ui.js', 'meetings-ui.js', 'project-new-ui.js', 'settings-ui.js', 'waiting-ui.js']);
 const CIRCLED = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩'];
 const RISK_FILES = new Set(['server.js', 'slack-capture.sh', 'ui.css', 'app.js']);
 
@@ -45,6 +46,8 @@ function parseArgs(argv) {
   }
   if (!opts.branches.length) throw new UsageError('가지 이름이 하나는 필요함');
   if (!/^[A-Za-z0-9._-]+$/.test(opts.task)) throw new UsageError('--task 는 영문·숫자·._- 만 쓸 수 있음');
+  // 셸이 백틱을 명령으로 실행해 문구가 빠지는 사고가 있었다. 이 검사는 셸이 처리하고 남은 백틱만 잡을 수 있다(이미 빠진 문구는 알 수 없음).
+  if (opts.summary.includes('`')) throw new UsageError('--summary 에 백틱(`)이 있음 — 백틱 대신 「」를 써 주세요');
   if (opts.model && !['sonnet', 'opus'].includes(opts.model)) throw new UsageError('--model 은 sonnet 또는 opus');
   return opts;
 }
@@ -208,6 +211,13 @@ function buildPrompt(opts, infos, baseTip, modelPick) {
     L.push('');
   }
 
+  const humanFiles = [...new Set(infos.flatMap((i) => i.files.filter((f) => HUMAN_SPEED_FILES.has(path.basename(f.file))).map((f) => f.file)))];
+  if (humanFiles.length) {
+    L.push('## 사람 속도 확인');
+    L.push(`- 입력·클릭 파일이 바뀜(${humanFiles.join(', ')}). 입력칸·클릭 동작이 바뀐 일이면 써 보기 데이터 임시 서버(4350대 포트)와 헤드리스 크롬에서 실제 마우스(누름 100ms)·실제 한글 조합(CDP Input.imeSetComposition)으로 한 번 눌러 보고, 창이 가려져 앱이 안 움직이면 그렇게 적을 것(0ms 자동 클릭은 의미 없음).`);
+    L.push('');
+  }
+
   L.push('## 지키는 선');
   [
     '`git push`·`release.sh`·배포·태그·VERSION 올리기·소식.md 고치기 금지(배포는 사용자가 직접, 소식은 배포 전에).',
@@ -264,9 +274,10 @@ function run(argv, io = {}) {
     const md = buildPrompt(opts, infos, baseTip, modelPick);
     const json = JSON.stringify(buildJson(opts, infos, modelPick, heavy ? 2 : 1, docTestOnly)) + '\n';
     const openCmd = `node ${OPEN_QUEUED} ${opts.task}`;
+    const cleanCmd = `합친 뒤 정리: tools/after-merge.sh ${opts.branches[0]} --task <구현 이름표> --merge-task ${opts.task}`;
 
     if (opts['dry-run']) {
-      out(md + '\n--- ' + `${opts.task}.json` + ' ---\n' + json + '\n(dry-run: 파일을 쓰지 않음)\n열려면: ' + openCmd + '\n');
+      out(md + '\n--- ' + `${opts.task}.json` + ' ---\n' + json + '\n(dry-run: 파일을 쓰지 않음)\n열려면: ' + openCmd + '\n' + cleanCmd + '\n');
       return 0;
     }
     const outDir = path.resolve((opts.out || path.join(os.homedir(), '.session-board', 'launch-queue')).replace(/^~(?=\/|$)/, os.homedir()));
@@ -280,7 +291,7 @@ function run(argv, io = {}) {
     fs.mkdirSync(outDir, { recursive: true });
     fs.writeFileSync(mdPath, md);
     fs.writeFileSync(jsonPath, json);
-    out(`만듦: ${mdPath}\n만듦: ${jsonPath}\n세션을 열려면(이 스크립트는 열지 않음):\n${openCmd}\n`);
+    out(`만듦: ${mdPath}\n만듦: ${jsonPath}\n세션을 열려면(이 스크립트는 열지 않음):\n${openCmd}\n${cleanCmd}\n`);
     return 0;
   } catch (e) {
     if (e instanceof UsageError) { err(`오류: ${e.message}\n`); return 1; }
