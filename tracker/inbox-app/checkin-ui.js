@@ -325,6 +325,7 @@ function checkinDone(current, heading, sub) {
   const lead = checkinEl('p', null, sub);
   lead.id = 'ckLead';
   box.append(mark, title, lead, close);
+  if (typeof uiCheer === 'function') uiCheer(box); // 완료 화면 — 축하 한 번
   current.form.replaceChildren(box);
   close.focus();
 }

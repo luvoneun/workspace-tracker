@@ -89,7 +89,7 @@
   --ease: cubic-bezier(0.22, 0.8, 0.3, 1);
   --t-press: 100ms;  --t-fast: 140ms;  --t-tint: 170ms;  --t-move: 200ms;  --t-slow: 320ms;
   --t-unfold: 160ms; /* 펼친 내용 나타남(펼침 부품 — app.js uiFold, 접힌 설명 details) */
-  --t-wait: 300ms;  --t-turn: 400ms;  --t-loop: 1s; /* 기다림(⑦ — app.js UI_WAIT): 표시가 나타나기까지 · 누른 한 바퀴 · 도는 동안 한 바퀴 */
+  --t-wait: 300ms;  --t-turn: 400ms;  --t-loop: 1s;  --t-here: 2000ms; /* 기다림(⑦ — app.js UI_WAIT): 표시가 나타나기까지 · 누른 한 바퀴 · 도는 동안 한 바퀴 · 드문 순간(⑧ — app.js UI_RARE): 여기예요 밝히기 한 번(--t-slow는 축하 한 번, 새 항목 점은 --t-wait) */
   /* 스프링 근사는 linear()를 아는 환경에서만(아래 @supports) — 모르면 넘침 없는 --ease로 떨어진다 */
   --spring-1: var(--ease);
   --spring-2: var(--ease);
@@ -290,6 +290,8 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
   width: 11px; height: 11px; border-radius: 50%;
   background: var(--accent); box-shadow: 0 0 0 2px var(--surface);
 }
+/* 확인한 새 항목 점은 300ms 흐려지며 사라진다(app.js UI_RARE.dot이 같은 시간 뒤 떼어 낸다) */
+.new-dot.is-gone { opacity: 0; transition: opacity var(--t-wait) var(--ease); }
 
 /* 레일 `오늘 미팅` 머리의 `전체 보기` 같은 곁들이 링크 */
 .wf-link {
@@ -1964,9 +1966,23 @@ body.later-open .page { padding-right: 424px; }
 /* `회의` 칩일 때만 붙는 조용한 링크 — 훑어보는 일은 회의 탭이 맡는다 */
 .d-palfoot .d-link { margin-left: auto; }
 
-/* 팔레트에서 연 결정·아이디어 줄을 잠깐 밝힌다 */
-.is-flash { animation: d-flash 1.6s var(--ease) both; }
-@keyframes d-flash { 0%, 55% { box-shadow: inset 0 0 0 2px var(--accent); } 100% { box-shadow: none; } }
+/* ---------- 드문 순간 (모션 부품 ⑧ — app.js uiHere·uiCheer) ----------
+   여기예요 밝히기: 팔레트에서 연 줄·멈춘 설정 카드·사용설명서가 데려간 문답·`확인 필요 ›`로 옮겨 온 문장을 한 가지 모양(안쪽 판 + 4px 테두리 판)으로
+   --t-here 동안 밝혔다 흐린다. 판은 box-shadow라 그 요소의 배경은 건드리지 않는다. 색은 --here-bg로 바꾼다. 움직임 줄이기는 흐림 없이 판만 그 시간 동안 둔다. */
+.d-here {
+  --here-bg: color-mix(in srgb, var(--accent) 14%, var(--sel));
+  border-radius: var(--r-sm);
+  animation: d-here var(--t-here) var(--ease) both;
+}
+@keyframes d-here {
+  0%, 60% { box-shadow: inset 0 0 0 999px var(--here-bg), 0 0 0 4px var(--here-bg); }
+  100% { box-shadow: inset 0 0 0 999px transparent, 0 0 0 4px transparent; }
+}
+@media (prefers-reduced-motion: reduce) { .d-here { animation: none !important; box-shadow: inset 0 0 0 999px var(--here-bg), 0 0 0 4px var(--here-bg); } }
+/* 축하 한 번: 오늘 다 끝냄·처음 연결·꾸미기 저장·체크인 완료·새 프로젝트 결과 — 320ms 스프링으로 살짝 커지며 나타난다(넘침은 스프링 안). 움직임 줄이기는 그냥 선다. */
+.d-cheer { animation: d-cheer var(--t-slow) var(--spring-2) both; }
+@keyframes d-cheer { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .d-cheer { animation: none !important; } }
 
 /* ---------- 여러 개 선택: 아래 고정 막대 ---------- */
 /* 본문 폭 안에 들어오고, 서랍이 열리면 그만큼 비켜선다. 알림(toast)은 이 막대 위로 올라간다. */
@@ -2862,12 +2878,10 @@ body.batch-open .d-toast { bottom: 76px; }
 @media (prefers-reduced-motion: no-preference) {
   .d-istat.k-soon .dot { animation: d-ibreathe 2.4s var(--ease) infinite; }
 }
-/* 빨간 점을 누르고 들어오면 멈춘 카드가 약 2초 붉은 판(시안 B). 동작 줄이기면 전환 없이 바탕만 바뀐다. */
-.d-intg.is-flash { margin: 0 -10px; padding-left: 10px; padding-right: 10px; border-radius: var(--r-sm); background: var(--urgent-bg); box-shadow: none; animation: none; }
-.d-intg { transition: background 400ms var(--ease); }
-@media (prefers-reduced-motion: reduce) { .d-intg { transition: none; } }
+/* 빨간 점을 누르고 들어오면 멈춘 카드가 약 2초 붉은 판(시안 B) — 밝히기 부품(.d-here)의 색만 붉게 바꾼다. 카드 안쪽 여백을 넓혀 판이 글자에 붙지 않게 한다. */
+.d-intg.d-here { --here-bg: var(--urgent-bg); margin: 0 -10px; padding-left: 10px; padding-right: 10px; }
 /* 주황 점(늦음)을 누르고 들어오면 늦은 카드가 같은 방식으로 주황 판. */
-.d-intg.is-flash.is-warn { background: var(--warn-bg); }
+.d-intg.d-here.is-warn { --here-bg: var(--warn-bg); }
 /* 막힌 카드의 이유 한 줄 — 카드 안 옅은 판(멈췄어요 빨강 판 · 늦어요 주황 판). */
 .d-intgwhy { margin-top: 8px; padding: 8px 12px; border-radius: var(--r-sm); background: var(--urgent-bg); font-size: 12.5px; line-height: 1.5; color: var(--text); }
 .d-intgwhy .d-ablink { color: var(--urgent); }
@@ -3048,8 +3062,7 @@ a.d-btn { text-decoration: none; }
 .d-word .w { font-weight: 600; color: var(--text); }
 .d-faq .q { margin-top: 18px; font-size: var(--fs-body); font-weight: 600; letter-spacing: -0.01em; }
 .d-faq .q:first-child { margin-top: 0; }
-/* 사용설명서의 `슬랙에서 보내는 법`으로 찾아온 문답 — 잠깐 밝힌다 */
-.d-faq .q.is-hit { background: var(--sel); border-radius: var(--r-xs); box-shadow: 0 0 0 6px var(--sel); transition: background 400ms var(--ease), box-shadow 400ms var(--ease); }
+/* 사용설명서의 `슬랙에서 보내는 법`으로 찾아온 문답은 밝히기 부품(.d-here)이 밝힌다 */
 
 /* ---------- 설정 › 꾸미기 (이 맥에만) ----------
    줄마다 `이름(+작은 설명) | 값`. 아이콘은 56px 미리보기(고르면 가운데를 자른 캔버스) + 고르기 + 되돌리기. */

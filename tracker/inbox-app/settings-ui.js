@@ -2790,7 +2790,9 @@ function settingsJiraWizard(card, data) {
 function settingsJiraDone(card, data, displayName) {
   const jira = data.jira || {};
   card.body.appendChild(settingsSteps(['토큰', '계정', '확인'], 2));
-  card.body.appendChild(settingsEl('d-iok', `✓ ${displayName || jira.displayName || '내'}님으로 연결됐어요`));
+  const ok = settingsEl('d-iok', `✓ ${displayName || jira.displayName || '내'}님으로 연결됐어요`);
+  if (typeof uiCheer === 'function') uiCheer(ok); // 처음 연결 — 축하 한 번
+  card.body.appendChild(ok);
   const how = document.createElement('p');
   how.className = 'd-ihow';
   how.textContent = typeof jira.issueCount === 'number'
@@ -3378,17 +3380,15 @@ function settingsIntgFailing(data) {
 
 // 빨간 점을 누르고 들어왔으면 멈춘 카드를 약 2초 붉게 밝힌다(동작 줄이기면 ui.css가 전환 없이 바탕만 바꾼다).
 // 주황 점(늦음)을 누르고 들어왔으면 늦은 카드를 같은 방식으로 주황 판(`is-warn`)으로 밝힌다.
-const SETTINGS_FLASH_MS = 2000;
 function settingsIntgFlash(kinds, tone = '') {
   const cards = kinds.map(kind => settingsIntgCards.get(kind)).filter(Boolean);
   if (!cards.length) return [];
-  const marks = tone === 'warn' ? ['is-flash', 'is-warn'] : ['is-flash'];
-  cards.forEach((card) => { card.row.className = [card.row.className, ...marks].join(' '); });
+  // 여기예요 밝히기 부품(app.js uiHere) — 길이는 한 가지(UI_RARE.here), 늦음이면 주황 판
+  const marks = tone === 'warn' ? ['is-warn'] : [];
+  const rows = cards.map(card => card.row);
+  if (typeof uiHere === 'function') uiHere(rows, marks);
   if (typeof cards[0].row.scrollIntoView === 'function') cards[0].row.scrollIntoView({ block: 'nearest' });
-  setTimeout(() => cards.forEach((card) => {
-    card.row.className = String(card.row.className).split(' ').filter(one => !marks.includes(one)).join(' ');
-  }), SETTINGS_FLASH_MS);
-  return cards.map(card => card.row);
+  return rows;
 }
 
 function settingsIntgFoot() {
@@ -3843,6 +3843,7 @@ async function renderSettingsPersonalize() {
     const done = settingsEl('d-psaved');
     done.setAttribute('role', 'status');
     done.appendChild(document.createTextNode('✓ 바뀌었어요'));
+    if (typeof uiCheer === 'function') uiCheer(done); // 꾸미기 저장 — 축하 한 번
     view.appendChild(done);
     // 크롬 앱으로 설치했으면 — 크롬은 manifest를 곧바로 다시 읽지 않는다(사실대로 알린다).
     if (personalizeSavedNote.dock) {
@@ -3877,11 +3878,10 @@ function settingsGuideShow(question) {
   // 문답은 묶음 접이식 안에 있다 — 사람이 접어 둔 묶음이어도 먼저 펼친다.
   const group = typeof hit.closest === 'function' ? hit.closest('details') : null;
   if (group) group.open = true;
-  hit.classList.add('is-hit');
+  if (typeof uiHere === 'function') uiHere(hit);
   hit.tabIndex = -1;
   if (typeof hit.scrollIntoView === 'function') hit.scrollIntoView({ block: 'start' });
   if (typeof hit.focus === 'function') hit.focus({ preventScroll: true });
-  setTimeout(() => hit.classList.remove('is-hit'), 2400);
   return hit;
 }
 

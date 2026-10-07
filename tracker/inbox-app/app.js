@@ -895,6 +895,32 @@ function uiGlideMode() {
 function uiGlideAllowed() {
   return uiGlideMode() === 'all';
 }
+// ---- 드문 순간 (모션 부품 ⑧ — DESIGN.md 모션 절) ----
+// 세기 3은 하루에 몇 번 안 되는 순간에만 쓴다. 값은 ui.css의 --t-here(밝히기)·--t-wait(새 항목 점)와 같다(타이머는 var()를 못 읽는다).
+const UI_RARE = { here: 2000, dot: 300 };
+// 축하 한 번(.d-cheer — 320ms 스프링): 오늘 다 끝냄·처음 연결·꾸미기 저장·체크인 완료·새 프로젝트 결과.
+// 내 동작이 만든 순간만 움직인다 — strict(오늘 다 끝냄)는 자동 갱신·폴링·창 처음 열기에서 안 터지게 uiGlideMode의 내 동작 직후만 믿는다.
+// 완료 화면들(체크인·연결·새 프로젝트·꾸미기)은 누른 뒤 서버 응답 뒤에야 서므로 그 판정을 쓰지 않고, 가려진 창과 움직임 줄이기만 건너뛴다.
+function uiCheer(el, strict = false) {
+  if (!el || !el.classList || detailReduce() || document.hidden) return el;
+  if (strict && uiGlideMode() !== 'all') return el;
+  el.classList.add('d-cheer');
+  return el;
+}
+// 여기예요 밝히기(.d-here): 한 가지 모양·한 가지 길이(UI_RARE.here). 어디로 데려왔는지 보이게 할 때만 — 색은 부르는 쪽이 클래스(is-warn 등)나
+// --here-bg로 고른다. 움직임 줄이기는 CSS가 흐림 없이 판만 그 시간 동안 둔다(색만).
+function uiHere(els, extra = []) {
+  const list = [].concat(els).filter(el => el && el.classList);
+  const marks = ['d-here', ...extra];
+  list.forEach((el) => {
+    marks.forEach(mark => el.classList.add(mark));
+    // 같은 줄을 연달아 밝히면 애니메이션을 처음부터 다시 시작한다
+    if (typeof el.getAnimations === 'function') el.getAnimations().forEach(one => one.cancel && one.cancel());
+  });
+  setTimeout(() => list.forEach(el => marks.forEach(mark => el.classList.remove(mark))), UI_RARE.here);
+  return list;
+}
+
 // ---- 값 바뀜 (모션 부품 ④ — DESIGN.md 모션 절) ----
 // 숫자를 적은 뒤 부른다: 같은 열쇠의 지난 값과 달라졌고 내 동작 직후(uiGlideMode)면 새 숫자가 아래 4px에서 올라온다(rise, 200ms).
 // kind 'pop'은 옮겨 간 목적지 숫자 — 1.12배로 한 번 톡 커졌다 돌아온다(200ms). 자동 갱신·글자 입력·가려진 창·움직임 줄이기는 그냥 바뀐다.
@@ -2264,6 +2290,7 @@ function isTyping() {
 let todaySort = 'project';
 // 완료 그룹은 접힌 채로 시작한다 — 첫 화면에 오늘 할 일이 가장 많이 보이게.
 let todayDoneOpen = false;
+let todayHadOpen = false; // 앞 그리기에 남은 할 일이 있었나 — 다 끝냄 축하(uiCheer)는 이 값이 true였다가 비는 순간만
 // 긴 목록은 위 3줄만 보이고 나머지는 `N개 더 ›`로 펼친다(프로젝트 카드의 읽는 그룹 — 새로 들어온 것은 놓치지 않게 접지 않는다).
 // 펼침은 화면 메모리에만 — 새로고침하면 접힌 채로 시작하고, 3줄 이하로 줄면 접힘으로 돌아간다.
 const UI_FOLD = 3;
@@ -5205,8 +5232,7 @@ function palRevealRecord(item) {
   const row = document.querySelector(`#gridRecords [data-item-id="${CSS.escape(String(item.id))}"]`);
   if (!row) { announce(`${item.description} — 아이디어·결정 목록에서 찾아 주세요.`); return; }
   row.scrollIntoView({ block: 'center' });
-  row.classList.add('is-flash');
-  setTimeout(() => row.classList.remove('is-flash'), 1600);
+  uiHere(row);
 }
 
 function palOpen(state) {
@@ -6281,11 +6307,15 @@ function renderTodayTasksNow(items) {
     });
   }
 
-  if (!active.length && !doing.length) {
+  const todayCleared = !active.length && !doing.length;
+  if (todayCleared) {
     list.insertAdjacentHTML('beforeend', doneItems.length
       ? '<div class="d-empty">오늘 할 일을 모두 끝냈어요.</div>'
       : '<div class="d-empty is-short">오늘 할 일이 비었어요.</div>');
+    // 축하 한 번 — 방금 내가 마지막 할 일을 끝낸 순간만(앞 그리기에는 할 일이 남아 있었고, 지금은 내 동작 직후).
+    if (doneItems.length && todayHadOpen) uiCheer(list.lastElementChild, true);
   }
+  todayHadOpen = !todayCleared;
 
   if (doneItems.length) {
     list.appendChild(uiGroupHeading('완료', doneItems.length, {
@@ -6396,7 +6426,7 @@ function getNewItemObserver() {
             // NEW는 조용히 사라져야 한다 — 저장 알림을 띄우지 않는다(quiet).
             await request('/api/track/seen', { method: 'POST', quiet: true, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
             const dot = entry.target.querySelector('.new-dot');
-            if (dot) dot.remove();
+            if (dot) uiDotOut(dot);
           } catch {}
         }, 1500));
       } else if (newItemTimers.has(id)) {
@@ -6406,6 +6436,13 @@ function getNewItemObserver() {
     });
   }, { threshold: 0.6 });
   return newItemObserver;
+}
+
+// 확인한 새 항목 점은 300ms 흐려지며 사라진다(드문 순간 ⑧). 움직임 줄이기·가려진 창은 바로 뗀다.
+function uiDotOut(dot) {
+  if (detailReduce() || document.hidden) { dot.remove(); return; }
+  dot.classList.add('is-gone');
+  setTimeout(() => dot.remove(), UI_RARE.dot);
 }
 
 function observeNewItem(card, item) {

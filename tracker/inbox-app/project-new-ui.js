@@ -1130,7 +1130,10 @@ function projectNewRender(body) {
   body.appendChild(title);
 
   if (state.result) {
-    body.appendChild(projectNewResult(state));
+    const res = projectNewResult(state);
+    if (typeof uiCheer === 'function' && !state.resultSeen) uiCheer(res); // 결과 화면 — 만든 순간 한 번만(다시 그려도 안 터짐)
+    state.resultSeen = true;
+    body.appendChild(res);
     return;
   }
 

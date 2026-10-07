@@ -1295,6 +1295,9 @@ function reportReviewGo(item) {
   const still = typeof detailReduce === 'function' && detailReduce();
   if (typeof target.scrollIntoView === 'function') target.scrollIntoView({ block: 'center', behavior: still ? 'auto' : 'smooth' });
   target.focus({ preventScroll: true });
+  // 여기예요 밝히기 — 옮겨 온 문장 줄을 한 번 밝힌다(고른 톤 is-hit은 그대로 남는다)
+  const line = typeof target.closest === 'function' ? target.closest('.rp-s') : null;
+  if (line && typeof uiHere === 'function') uiHere(line);
 }
 
 // 머리 ⋯ 메뉴(순수에 가까움 — 테스트가 이름표를 본다). 개수 줄은 누를 수 없는 조용한 항목이다.
