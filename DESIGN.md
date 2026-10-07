@@ -509,6 +509,26 @@ Pretendard Variable(v1.3.9, SIL OFL 1.1)은 **앱에 넣어 두고 서버가 직
 
 **The Drawer Pushes Rule.** `나중에 할 일`은 본문을 덮지 않고 밀어낸다(900px 초과). 레일과 오늘 목록은 제자리에 남고 목록 폭만 줄어든다.
 
+## 동작 관습
+
+화면 일마다 다시 정하지 않도록, 앱이 이미 지키는 입력·저장 동작을 한 곳에 적는다(코드 확인 2026-10-08). 새 입력 화면은 이 다섯을 기본으로 삼고, 예외는 아래 줄에 적힌 것뿐이다. 새로 정하는 규칙이 아니라 지금 코드와 `DECISIONS.md`에 있는 것이며, 코드와 다르면 코드가 맞다.
+
+**1. 바깥 클릭은 저장 후 닫기.** 글을 적던 칸은 바깥을 누르거나 초점이 줄 밖으로 나가면(Tab 포함) Enter와 같은 길로 저장하고 닫는다. 비었거나 원래 글과 같으면 닫기만 한다. 곳: `panelTitleEdit`(상세 제목)·`makeEditableDesc`(`app.js`), `panelMeetingRowEdit`(`meetings-ui.js`), 주간요약 칸은 `reportBlurWatch`→`reportBlurSave`(`report-ui.js`, 탭을 떠날 때도 같은 길 — DECISIONS 2026-10-06). **예외** — ⓐ 저장 없이 닫히는 것: 그룹 이름 직접 입력 `uiGroupNameInput`(바깥은 취소, 저장은 Enter만)·고르개 `uiPickList`(초점이 나가면 닫기만)·할 일 적기줄 `.d-addinput`(Enter로만 저장, 바깥 누름은 글을 그대로 두고 저장하지 않음). ⓑ 바깥을 눌러도 닫히지 않는 것: 회의 정리 카드·설정·오늘 정리 모달(`<dialog>`에 바깥 클릭 처리 없음 — ✕·Esc·`취소`로만 닫는다). ⓒ 업무·확인 대기 상세 카드의 바깥 클릭은 카드를 닫기만 한다(DESIGN 상세 절 "닫힘") — 적던 칸은 자기 blur 저장(위)을 따른다.
+
+**2. Esc는 취소 — 적던 글은 버린다.** Esc는 칸만 닫고 글을 버리며 원래 값을 되돌린다. 한글 조합 중(`event.isComposing`)의 Esc는 글자를 확정하는 것이라 넘긴다. 곳: `panelTitleEdit`의 `cancel`, `makeEditableDesc`, `uiGroupNameInput`(`onCancel(true)`), 주간요약 문장 칸(`report-ui.js`의 `reportEdits.delete` 뒤 다시 그리기), 회의 초안 문구(Esc는 문구를 되돌리고 접는다). Esc는 **가장 위에 열린 것 하나만** 닫는다 — 열 때 `escPush`, 닫을 때 `escDrop`(`app.js` `escStack`; 입력칸의 Esc도 자기 취소를 이 스택에 올린다 — `meetings-ui.js`). 예외: 프로젝트 찾기 칸의 Esc는 칸을 비우고 초점을 칸에 남긴다. 날짜 입력·일정 판의 Esc는 입력칸만 닫는다.
+
+**3. 편집은 한 번에 하나.** 새 칸을 열면 앞 칸은 저장되고 닫힌다(바깥 클릭 = 규칙 1이 그 길이다). 곳: 주간요약은 다른 문장을 누르면 앞 문장이 저장돼 닫히고 새 문장이 열린다(`reportBlurWatch` 주석), 회의 초안 문구는 한 번에 한 줄만 펼침(`meetings-ui.js` 294줄 주석), 더보기 메뉴는 한 벌이라 한 번에 하나(`app.js` `uiMenuClose`), 팔레트를 열면 메뉴를 먼저 닫는다(`palOpen`). 떠 있는 층은 한 번에 하나다. 예외: 늘 떠 있는 적기줄(`할 일 적기`·`+ 한 줄 추가`)은 편집이 아니라 입력 자리라 다른 편집과 함께 있다.
+
+**4. 저장이 실패하면 적은 글은 그대로.** 실패하면 칸과 글을 지우지 않고 다시 쓸 수 있게 열어 두며(초점도 칸으로) 알림으로 알린다. 곳: `panelTitleEdit`·`panelMeetingRowEdit`의 `catch`(칸을 다시 풀고 초점), 주간요약은 실패해도 `reportEdits`에 글이 남는다(`report-ui.js`), `uiGroupNameInput`은 `onSave`가 `false`면 칸·글을 그대로 둔다, 빠른 추가는 `uiSendRestore`가 비어 있는 칸에 글을 되돌리고 칸에 이미 다른 글이 있으면 덮어쓰지 않고 어떤 글이 안 됐는지 알린다. 알림 문구는 `저장하지 못했어요. 적은 내용은 그대로 있어요`를 쓴다.
+
+**5. 저장 중에도 입력을 막지 않는다.** 칸을 잠그면(`disabled`) 브라우저가 그 칸에 친 글자를 버려서, 적고 곧바로 이어 치면 앞 글자(한글은 첫 음절)가 사라졌다. 그래서 Enter 순간의 글을 들고 칸을 바로 비우고, 같은 칸의 저장은 `uiQueueSend` 대기열이 하나씩 순서대로 보낸다(`app.js`). 곳: 그룹 `.d-addinput`(`app.js:1663`)·빠른 추가(`app.js:7137`)·회의 직접 적기(`meetings-ui.js:971`)·주간요약 적기 줄의 대기열(`report-ui.js:2165`). **현재 이 규칙을 따르지 않는 곳(어긋남)**은 아래 목록에 있고, 새 입력칸은 `disabled` 대신 대기열을 쓴다.
+
+> **어긋남 (2026-10-08 코드 확인, 고치지 않고 기록만)** — 규칙 5: 저장하는 동안 칸을 `disabled`로 잠근다. `app.js:1735`(메뉴 안 글자 칸 `uiMenuText`)·`app.js:1781`(결과 한 줄)·`app.js:4221`(상세 제목)·`app.js:6407`(`makeEditableDesc`), `report-ui.js:496`(주간요약 이름 바꾸기 칸)·`report-ui.js:1756`(주간요약 문장 Enter)·`report-ui.js:2006`(적기줄), `meetings-ui.js:592`(회의 항목 제목 — 다시 그리기를 허용하려는 이유를 주석에 적음). 이 칸들은 저장이 끝날 때까지 친 글자가 버려질 수 있다. 규칙 1: `.d-addinput`·`uiGroupNameInput`·`uiPickList`는 바깥 클릭이 저장이 아니다(위 예외 ⓐ).
+
+### 누를 자리 최소 크기
+
+**정해진 값은 있다 — 새로 정하지 않는다.** 줄 안의 컨트롤 28px 이상, 줄 자체 54px(≤520px은 60px 이상), 터치 토큰 `--h-touch` 44px(`ui.css`; 사용설명서·알림 같은 큰 줄의 최소 높이). 값과 예외는 아래 "접근성 바닥"의 "누르는 영역"이 기준이다. 측정은 `measure.mjs`(`/Users/luvon/session-board/docs/design/tools/README.md`)를 `--tokens DESIGN.md`로 돌려 YAML 머리의 `spacing` 눈금으로 판단한다.
+
 ## Components
 
 ### 버튼 세 등급 (이게 전부다)
