@@ -771,6 +771,19 @@ function uiIsTextEntry(el) {
   if (tag !== 'INPUT') return false;
   return !UI_NOT_TEXT_INPUTS.includes(String(el.type || 'text').toLowerCase());
 }
+// 조합 중인 칸이 다시 그리기로 지워지면 compositionend가 오지 않는다(Chrome 실측) — 떨어져 나간 칸의 조합은 끝난 것으로 본다.
+function uiComposingLive() {
+  return !!uiComposingEl && uiComposingEl.isConnected !== false;
+}
+// 떨어진 여러 요소를 보류 구역 하나로 묶는다 — 한 번에 그리는 목록이 화면 여러 곳에 있고, 그 사이에 같은 그리기로 다시
+// 만들지 않는 칸(빠른 추가·결정 찾기·상세 카드)이 있을 때. uiRenderOrHold가 구역에 묻는 것(contains·querySelectorAll)만 답한다.
+function uiZones(...els) {
+  const parts = els.filter(Boolean);
+  return {
+    contains: node => parts.some(el => el.contains?.(node)),
+    querySelectorAll: selector => parts.flatMap(el => [...(el.querySelectorAll?.(selector) || [])]),
+  };
+}
 function uiRenderHeld(zone) {
   // 분류 판이 열려 있는 동안은 그 구역을 다시 그리지 않는다(누른 줄·버튼이 사라지면 판이 허공에 뜬다).
   if (zone && uiSchedOpen && uiSchedOpen.zone === zone) return true;
@@ -885,7 +898,7 @@ function uiGlideUnlessLate(render) {
 // 'all' 움직인다 · 'enter' 새 줄 나타남만(빠른 추가 Enter) · null 그냥 그린다.
 function uiGlideMode() {
   if (uiGlideLate || Date.now() - uiActAt > UI_GLIDE.within) return null;
-  if (uiSchedOpen || uiComposingEl || document.hidden) return null;
+  if (uiSchedOpen || uiComposingLive() || document.hidden) return null;
   if (document.querySelector?.('.d-typepop:not(.is-out)')) return null; // 닫힘을 재생하는 복사본은 열린 것이 아니다
   const el = document.activeElement;
   if (!uiIsTextEntry(el) && !uiActQuiet && !uiActInText) return 'all';
@@ -2534,7 +2547,8 @@ async function load() {
   renderNewsCard();
   renderGuideCard();
   uiRenderOrHold('later', document.getElementById('laterTaskList'), uiGlideUnlessLate(() => renderLaterTasks(data.laterTasks || [])));
-  renderWaiting(data.waiting || []);
+  // 확인 대기 `다음은?` 칸에 치는 중이면 손을 뗀 뒤 그린다(아래 `+ 확인 대기 추가` 칸은 목록 밖이라 다시 만들지 않는다).
+  uiRenderOrHold('waiting', document.getElementById('waitingList'), uiGlideUnlessLate(() => renderWaiting(data.waiting || [])));
   uiRenderOrHold('today', document.getElementById('todayTaskList'), uiGlideUnlessLate(() => renderTodayTasks(data.todayTasks || [])));
   decisionArchiveCache = data.decisionArchive || [];
   // 아직 PRD에 반영하지 않은 결정 수. 탭 이름 옆 작은 숫자와 결정 구역 제목이 같은 값을 쓴다.
@@ -2595,18 +2609,25 @@ function renderActiveTabLists() {
   if (activeTabKey === 'projects' && tabStale.projects) {
     // 미뤘다가 그릴 때 다른 탭으로 옮겨 가 있으면 그리지 않는다 — 탭을 다시 열 때 그린다(tabStale 그대로).
     // 미뤘다 푸는 그리기는 줄이 움직이지 않는다(uiGlideUnlessLate — 오늘 탭 세 목록과 같다).
-    uiRenderOrHold('projects', document.getElementById('projectBody'), uiGlideUnlessLate(() => { if (activeTabKey !== 'projects') return; tabStale.projects = false; renderProjects(); }));
+    // 왼쪽 목록의 `프로젝트 찾기` 칸도 같은 그리기가 새로 만든다 — 구역은 목록과 오른쪽 본문(줄 옆 상세 카드는 빼고 — syncTaskDetail이 맡는다).
+    uiRenderOrHold('projects', uiZones(document.getElementById('projectList'), document.getElementById('projectBody')), uiGlideUnlessLate(() => { if (activeTabKey !== 'projects') return; tabStale.projects = false; renderProjects(); }));
   }
   // 회의 탭은 글을 쓰는 면이다 — 초안 문구·직접 담기 칸에 손이 가 있으면 다시 그리지 않는다
   // (적던 글과 초점이 날아가지 않게. 줄 옆 카드의 syncTaskDetail과 같은 장치다). 손을 떼면 그때 그린다.
   if (activeTabKey === 'meetings' && tabStale.meetings) {
     uiRenderOrHold('meetings', document.getElementById('meetingBody'), uiGlideUnlessLate(() => { if (activeTabKey !== 'meetings') return; tabStale.meetings = false; renderMeetings(); }));
   }
+  // 아이디어·결정 탭은 줄 문구 고치기 칸에서 치는 중이면 손을 뗀 뒤 그린다 — 구역은 세 목록뿐이다
+  // (위의 `추가` 칸·`결정 찾기`는 이 그리기가 다시 만들지 않으니 치는 동안에도 새 줄이 바로 보인다).
   if (activeTabKey === 'records' && tabStale.records) {
-    tabStale.records = false;
-    renderIdeas(latestData.ideas || []);
-    renderDecisions(latestData.decisions || []);
-    renderDecisionArchive();
+    const zone = uiZones(...['ideaList', 'decisionList', 'decisionArchiveList'].map(id => document.getElementById(id)));
+    uiRenderOrHold('records', zone, uiGlideUnlessLate(() => {
+      if (activeTabKey !== 'records') return;
+      tabStale.records = false;
+      renderIdeas(latestData.ideas || []);
+      renderDecisions(latestData.decisions || []);
+      renderDecisionArchive();
+    }));
   }
   if (activeTabKey === 'weekly' && tabStale.weekly) {
     tabStale.weekly = false;
