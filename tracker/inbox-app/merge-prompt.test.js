@@ -60,7 +60,7 @@ test('화면 파일: 파일 목록·개수 정확, 간격 측정 줄 포함, 시
   assert.match(out, /새로 생긴 간격 N곳·잘림 N곳/);
   assert.match(out, /--json main\.json/);
   assert.match(out, /--base main\.json/);
-  assert.match(out, /--scale 2,4,6,8,10,12,14,16,18,20,22,28,32/);
+  assert.match(out, /--tokens DESIGN\.md/);
   assert.match(out, /기준 비교 못 함/);
   assert.match(out, /CSS·화면 구조 둘 다 안 바뀐 경우에만/);
   assert.match(out, /전체 시험 \*\*1번\*\*/);
@@ -239,8 +239,8 @@ test('입력·클릭 파일이 바뀌면 사람 속도 확인 줄이 붙고, 아
   const yes = gen(r, ['b1', ...BASE, '--dry-run']).out;
   assert.match(yes, /## 사람 속도 확인/);
   assert.match(yes, /node tools\/human-check\.mjs <시나리오\.json> --serve/);
-  assert.match(yes, /imeSetComposition/);
-  assert.match(yes, /누름 100ms/);
+  assert.match(yes, /tools\/human-check\/README\.md/);
+  assert.match(yes, /누름 0·50·100·150·300ms/);
   const no = gen(r, ['b2', ...BASE, '--dry-run']).out;
   assert.doesNotMatch(no, /사람 속도 확인/);
 });
