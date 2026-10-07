@@ -56,7 +56,7 @@ test('화면 파일: 파일 목록·개수 정확, 간격 측정 줄 포함, 시
   const { code, out } = gen(r, ['b1', ...BASE, '--dry-run']);
   assert.equal(code, 0);
   assert.match(out, /정확히 3개\*\*여야 함: DESIGN\.md, tracker\/inbox-app\/client\.test\.js, tracker\/inbox-app\/ui\.css/);
-  assert.match(out, /간격 측정\(필수\)/);
+  assert.match(out, /간격 측정\(필수, 새로 생긴 것만\)/);
   assert.match(out, /새로 생긴 간격 N곳·잘림 N곳/);
   assert.match(out, /--json main\.json/);
   assert.match(out, /--base main\.json/);
