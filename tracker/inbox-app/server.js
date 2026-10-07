@@ -360,7 +360,7 @@ function setTrackField(id, fieldName, rawValue, matchType) {
         newFieldStr = `${newFieldStr} ${fieldName}:${value}`;
       }
       fileChanged = true;
-      return `- ${m[1]} #${m[2]}[${newFieldStr}]`;
+      return `- ${m[1]} #${m[2]}[${fieldName === 'seen' ? newFieldStr : stampUpdated(newFieldStr)}]`;
     });
     if (fileChanged) {
       fs.writeFileSync(filePath, newLines.join('\n'));
@@ -368,6 +368,20 @@ function setTrackField(id, fieldName, rawValue, matchType) {
     }
   });
   return changed;
+}
+
+// 업무 줄을 고칠 때마다 수정 시각(updated)을 새로 적는다 — 화면이 본 시각과 비교해 다른 창이 먼저 고친 내용을
+// 덮지 않게 한다(routes-track.js의 `expect`). `seen`(새 표시를 봤다)은 내용 변경이 아니라 적지 않는다.
+// 끝낸 날 칸(completed)이 없는 옛 완료 줄은 끝낸 날을 updated로 대신 읽으므로(getTodayTasks·결정 보관함) 건드리지 않는다.
+function stampUpdated(fieldStr) {
+  const fields = parseFields(fieldStr);
+  if (fields.status === 'done' && !fields.completed) return fieldStr;
+  // 같은 1ms 안에 두 번 고쳐도 시각이 달라지게 — 같으면 비교가 바뀐 것을 놓친다.
+  const before = Date.parse(fields.updated || '');
+  const nowIso = new Date(Math.max(Date.now(), Number.isNaN(before) ? 0 : before + 1)).toISOString();
+  return /(^|\s)updated:\S+/.test(fieldStr)
+    ? fieldStr.replace(/(^|\s)updated:\S+/, `$1updated:${nowIso}`)
+    : `${fieldStr} updated:${nowIso}`;
 }
 
 function setTrackJira(id, jiraKey) {
@@ -450,7 +464,7 @@ function setTrackDescription(id, description) {
       const fields = parseFields(m[3]);
       if (fields.id !== id) return line;
       fileChanged = true;
-      return `- ${description.trim()} #${m[2]}[${m[3]}]`;
+      return `- ${description.trim()} #${m[2]}[${stampUpdated(m[3])}]`;
     });
     if (fileChanged) {
       fs.writeFileSync(filePath, newLines.join('\n'));
@@ -1245,16 +1259,12 @@ function toggleTrackStatus(id, desired) {
       if (fields.id !== id) return line;
       const newStatus = desired || (fields.status === 'done' ? 'to-do' : 'done');
       if (newStatus === fields.status) { changed = true; return line; }
-      const nowIso = new Date().toISOString();
       let newFieldStr = m[3].replace(/status:\S+/, `status:${newStatus}`);
       newFieldStr = newFieldStr.replace(/\s+completed:\S+/g, '');
       // 완료하면 "진행 중"은 자동으로 풀린다 — 따로 해제할 일이 없게.
       if (newStatus === 'done') newFieldStr = newFieldStr.replace(/\s+doing:\S+/g, '') + ` completed:${todayLocal()}`;
-      newFieldStr = /updated:\S+/.test(newFieldStr)
-        ? newFieldStr.replace(/updated:\S+/, `updated:${nowIso}`)
-        : `${newFieldStr} updated:${nowIso}`;
       fileChanged = true;
-      return `- ${m[1]} #${m[2]}[${newFieldStr}]`;
+      return `- ${m[1]} #${m[2]}[${stampUpdated(newFieldStr)}]`;
     });
     if (fileChanged) {
       fs.writeFileSync(filePath, newLines.join('\n'));
@@ -1998,6 +2008,9 @@ function getReportRefs() {
         status: fields.status || 'to-do',
         created: fields.created || null,
         completed: fields.completed || null,
+        // 마지막 수정 시각 — 화면이 업무를 고칠 때 `expect.updated`로 돌려보낸다(다른 창이 먼저 고쳤는지 비교).
+        // 이름을 `updated`로 두지 않는다: 프로젝트 화면이 item.updated를 마지막 활동 날로 읽는다(뜻이 바뀌지 않게).
+        rev: fields.updated || null,
         scheduled: plannedDay(fields),
         due: fields.due || null,
         doing: fields.doing || null,
@@ -2898,7 +2911,7 @@ const workflows = require('./workflow-store')({
   // 종류 바꾸기: 같은 id로 업무 파일의 줄만 옮긴다(위 retypeTrackItem).
   move: retypeTrackItem,
 });
-const batchTasks = usage.countBatch(require('./task-batch')({ files: listTrackerFiles, pattern: TRACK_RE, parse: parseFields, validateDate, today: todayLocal }), () => getReportRefs());
+const batchTasks = usage.countBatch(require('./task-batch')({ files: listTrackerFiles, pattern: TRACK_RE, parse: parseFields, validateDate, today: todayLocal, stamp: stampUpdated }), () => getReportRefs());
 // 주간요약 소제목: 묶음(projectBundles)은 그 묶음이 생긴 주부터 대표 이름 하나로 서고, 사람이 바꾼 소제목 옆의
 // 원래 프로젝트 이름은 지금 이름(별칭·지라 요약)으로 적는다 — 두 값 다 읽기만 한다.
 const reportDrafts = require('./report-drafts')({

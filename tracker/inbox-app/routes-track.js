@@ -6,10 +6,59 @@
 // 저장 잠금: 받는 함수(setTrackField·createManualTask·removeTrackItem 등)는 server.js가 `transactional(...)`로 감싼 뒤의
 // 것이다 — ctx를 감싸기 뒤에 만든다. 감싸기 전 것을 받으면 저장 잠금(mutations.run) 없이 파일을 쓰게 된다.
 
+// 업무 하나를 고치는 경로 — 화면이 `expect: { updated }`(그 업무의 마지막 수정 시각, 없으면 null)를 함께 보내면 비교한다.
+// `seen`(새 표시를 봤다)·`restore`(지운 것 되살리기)는 내용 변경이 아니라 넣지 않는다.
+const CHANGED_ELSEWHERE = '새 기록이나 다른 창의 변경이 있어요. 적은 내용은 그대로 있어요. 최신 내용을 확인한 뒤 다시 저장해 주세요.';
+const GUARDED = new Set(['/api/track/set-scheduled', '/api/track/set-jira', '/api/track/set-group', '/api/track/set-due', '/api/track/set-doing',
+  '/api/track/set-who', '/api/track/set-priority', '/api/track/set-description', '/api/track/remove', '/api/track/toggle',
+  '/api/idea/set-project', '/api/idea/promote']);
+
 module.exports = function trackRoutes(req, res, url, ctx) {
   const { createDecision, createIdea, createLaterTask, createManualTask, createWaitingItem, getReportRefs, idempotent, listTrash, mutations,
-    promoteIdeaToToday, readBody, removeTrackItem, restoreTrackItem, setIdeaProject, setTrackDescription, setTrackDoing, setTrackDue,
-    setTrackField, setTrackGroup, setTrackJira, setTrackPriority, setTrackWho, toggleTrackStatus, validateDate } = ctx;
+    restoreTrackItem, validateDate } = ctx;
+  // 먼저 고친 내용이 조용히 사라지지 않게 — 아래 경로들이 부르는 저장 함수를 한 곳에서 감싼다. 요청 본문의 `expect`가
+  // `{ updated }` 꼴이면 첫 저장 직전에 저장 잠금 안에서 지금 줄의 수정 시각(refs의 rev)과 비교하고, 다르면 409로 거절해
+  // 아무것도 쓰지 않는다. 한 요청 안의 두 번째 저장(예정일 → 받음 표시)은 같은 잠금 안이라 다시 비교하지 않는다.
+  // `expect`가 없으면(옛 화면) 예전처럼 저장한다. set-scheduled의 되돌리기 `expect`(예정일 글자·null)는 꼴이 달라 여기서 보지 않는다.
+  let expected = null, stampedId = null;
+  const guarded = GUARDED.has(url.pathname) && req.method === 'POST';
+  const readBody = request => ctx.readBody(request).then(body => {
+    const want = body && body.expect;
+    if (guarded && want && typeof want === 'object' && !Array.isArray(want) && Object.hasOwn(want, 'updated')) {
+      if (typeof body.id !== 'string' || !(want.updated === null || (typeof want.updated === 'string' && want.updated.length <= 40))) throw new Error('입력을 확인해 주세요.');
+      expected = { id: body.id, updated: want.updated };
+    }
+    return body;
+  });
+  const guard = save => (...args) => {
+    if (!expected) return save(...args);
+    return mutations.run(() => {
+      const want = expected;
+      expected = null;
+      const now = getReportRefs()[want.id];
+      if (now && (now.rev || null) !== want.updated) throw Object.assign(new Error(CHANGED_ELSEWHERE), { status: 409, code: 'CHANGED_ELSEWHERE' });
+      stampedId = want.id;
+      return save(...args);
+    });
+  };
+  // 비교한 요청이 저장되면 응답에 새 수정 시각을 싣는다 — 같은 창이 이어서 고칠 때 그 값을 `expect`로 쓰게.
+  if (guarded) {
+    const end = res.end.bind(res);
+    res.end = body => {
+      if (stampedId && typeof body === 'string') {
+        try {
+          const data = JSON.parse(body);
+          const ref = getReportRefs()[stampedId];
+          if (data && data.ok && ref) body = JSON.stringify({ ...data, updated: ref.rev || null });
+        } catch { /* 응답은 그대로 */ }
+      }
+      return end(body);
+    };
+  }
+  const [promoteIdeaToToday, removeTrackItem, setIdeaProject, setTrackDescription, setTrackDoing, setTrackDue, setTrackField, setTrackGroup,
+    setTrackJira, setTrackPriority, setTrackWho, toggleTrackStatus] = [ctx.promoteIdeaToToday, ctx.removeTrackItem, ctx.setIdeaProject,
+    ctx.setTrackDescription, ctx.setTrackDoing, ctx.setTrackDue, ctx.setTrackField, ctx.setTrackGroup, ctx.setTrackJira, ctx.setTrackPriority,
+    ctx.setTrackWho, ctx.toggleTrackStatus].map(guard);
 
   // 설정 > `삭제한 항목`이 창을 열 때마다 읽는 목록. 조회라 어떤 파일도 쓰지 않고,
   // 인증 예외(publicAsset)에도 넣지 않는다. 되살리기는 기존 `/api/track/restore`가 맡는다.
