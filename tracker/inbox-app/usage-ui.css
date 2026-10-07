@@ -40,7 +40,7 @@
 }
 .d-uwchart { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .d-uwlegend { display: flex; gap: 12px; font-size: var(--fs-cap); color: var(--dim); }
-.d-uwkey::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 5px; border-radius: 2px; background: var(--check-line); }
+.d-uwkey::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 4px; border-radius: 2px; background: var(--check-line); }
 .d-uwkey.done::before { background: var(--accent); }
 .d-uwbars { display: flex; align-items: stretch; gap: 4px; height: 112px; }
 .d-uwbars.is-d90 { gap: 2px; }

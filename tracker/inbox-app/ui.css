@@ -202,7 +202,7 @@ body {
 
 .d-i { width: 14px; height: 14px; display: block; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .icon { width: 1em; height: 1em; display: block; flex-shrink: 0; }
-.d-dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: currentColor; margin-right: 5px; vertical-align: 1px; flex: none; }
+.d-dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: currentColor; margin-right: 4px; vertical-align: 1px; flex: none; }
 /* 프로젝트 색 점 — 이름 해시로 여섯 색 중 하나(같은 이름은 늘 같은 색) */
 .d-pjdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--pj-0); flex: none; }
 .d-pjdot[data-pj="1"] { background: var(--pj-1); }
@@ -304,8 +304,8 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 /* ---------- 버튼 세 등급 (둥근 사각. 알약은 입력칸·칩에만) ---------- */
 /* 3차 — 회색으로 채운 조용한 버튼 */
 .d-btn {
-  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
-  height: 34px; padding: 0 13px; border: 0; border-radius: var(--r-xs);
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 34px; padding: 0 12px; border: 0; border-radius: var(--r-xs);
   background: var(--neutral-bg); color: var(--muted);
   font-family: inherit; font-size: 13.5px; font-weight: 600; white-space: nowrap;
   cursor: pointer;
@@ -326,7 +326,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 
 /* 2차 — 연한 파란 바탕 + 진한 파란 글자. 줄 위에 떠오르는 동작이 여기. */
 .d-acts .d-btn, .d-ibacts .d-btn, .d-btn.acc {
-  height: 33px; padding: 0 13px;
+  height: 33px; padding: 0 12px;
   background: var(--accent-soft); color: var(--accent-text);
 }
 .d-acts .d-btn:hover, .d-ibacts .d-btn:hover, .d-btn.acc:hover { background: var(--accent-strong); color: var(--on-fill); }
@@ -396,7 +396,7 @@ button.badge:hover { background: color-mix(in srgb, var(--accent) 10%, var(--bg)
 .d-btn[aria-busy="true"]::before, .d-waiting[aria-busy="true"]::before {
   content: ''; flex: none; display: inline-block; box-sizing: border-box; width: 10px; height: 10px;
   border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%;
-  --busy-shut: -5px; /* 기다리는 0.3초 동안은 자리도 없다 — 버튼 틈(gap 5px)까지 거둬 폭이 그대로다 */
+  --busy-shut: -6px; /* 기다리는 0.3초 동안은 자리도 없다 — 버튼 틈(gap 6px)까지 거둬 폭이 그대로다 */
   animation: d-busy-room var(--t-wait) step-end both, d-busy-in var(--t-move) var(--ease) var(--t-wait) both, d-spin var(--t-loop) linear infinite;
 }
 .d-waiting[aria-busy="true"]::before { margin-right: 6px; vertical-align: -1px; --busy-shut: 0px; }
@@ -582,7 +582,7 @@ dialog.d-stay:not([open])::backdrop { opacity: 0; transition-duration: var(--sta
   height: 2.5px; background: var(--accent); border-radius: 3px;
 }
 /* 탭 이름 옆 작은 숫자(결정 검토 등). 0이면 app.js가 아예 비운다. */
-.d-tabnum { margin-left: 5px; font-size: 12.5px; font-weight: 600; color: var(--dim); font-variant-numeric: tabular-nums; }
+.d-tabnum { margin-left: 4px; font-size: 12.5px; font-weight: 600; color: var(--dim); font-variant-numeric: tabular-nums; }
 .d-tabnum:empty { display: none; }
 .d-tab[aria-selected="true"] .d-tabnum { color: var(--muted); }
 
@@ -722,7 +722,7 @@ dialog.d-stay:not([open])::backdrop { opacity: 0; transition-duration: var(--sta
 /* 비활성 항목(추가 입력이 필요한 전환 등)은 범주 색과 겹쳐도 비활성 표현이 이긴다 */
 .d-mitem:disabled.k-dim, .d-mitem:disabled.k-acc, .d-mitem:disabled.k-pos,
 .d-mitem:disabled.k-dim:hover, .d-mitem:disabled.k-dim:focus-visible { color: var(--muted); }
-.d-msep { display: block; height: 1px; background: var(--hair); margin: 4px 2px; }
+.d-msep { display: block; height: 1px; background: var(--hair); margin: 3px 0; } /* 항목 사이 1px + 3px = 위아래 4px, 왼쪽 끝은 항목과 같은 선 */
 .d-mfield { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 2px 10px; flex-wrap: wrap; }
 .d-mfield > .ml { font-size: 12.5px; color: var(--muted); flex: none; min-width: 52px; white-space: nowrap; }
 .d-mfield > .mc { display: flex; gap: 4px; flex: 1; min-width: 0; justify-content: flex-end; align-items: center; }
@@ -730,7 +730,7 @@ dialog.d-stay:not([open])::backdrop { opacity: 0; transition-duration: var(--sta
 /* 메뉴 필드 줄의 컨트롤 — 값을 고르는 칩, 짧은 글자 칸, 선택 목록 */
 .d-chips { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; flex: 1; min-width: 0; justify-content: flex-end; }
 .d-chip {
-  height: 30px; padding: 0 11px; border: 0; border-radius: 999px;
+  height: 30px; padding: 0 12px; border: 0; border-radius: 999px;
   background: none; color: var(--muted);
   font-family: inherit; font-size: var(--fs-sm); font-weight: 600; white-space: nowrap; cursor: pointer;
 }
@@ -760,7 +760,7 @@ dialog.d-stay:not([open])::backdrop { opacity: 0; transition-duration: var(--sta
   border: 0; background: var(--field); color: var(--text); font-size: var(--fs-sm);
 }
 .d-mfield .badge {
-  max-width: 152px; padding: 5px 9px; border-radius: var(--r-xs);
+  max-width: 152px; padding: 5px 8px; border-radius: var(--r-xs);
   background: var(--neutral-bg); border-color: transparent; color: var(--muted);
   font-size: 12.5px; font-weight: 600;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -837,7 +837,7 @@ dialog.d-stay:not([open])::backdrop { opacity: 0; transition-duration: var(--sta
   font-size: var(--fs-lg); font-weight: 700; letter-spacing: -0.015em; color: var(--text);
 }
 .d-rhd .n {
-  height: var(--h-xs); display: inline-flex; align-items: center; padding: 0 9px;
+  height: var(--h-xs); display: inline-flex; align-items: center; padding: 0 8px;
   border-radius: 999px; background: var(--neutral-bg); color: var(--muted);
   font-size: 12.5px; font-weight: 600;
 }
@@ -865,7 +865,7 @@ dialog.d-stay:not([open])::backdrop { opacity: 0; transition-duration: var(--sta
 /* 미팅 줄: 시각 | 제목(두 줄까지, 프로젝트는 그 뒤 작은 회색 글자) | 초안 N */
 .d-mrow {
   position: relative; display: grid; grid-template-columns: 44px minmax(0, 1fr) auto;
-  align-items: start; gap: 8px; height: auto; min-height: var(--h-touch); padding: 9px 10px; border-radius: 12px;
+  align-items: start; gap: 8px; height: auto; min-height: var(--h-touch); padding: 10px; border-radius: 12px;
   transition: background var(--t-tint) var(--ease);
 }
 .d-mrow:hover, .d-mrow:focus-within, .d-wrow:hover, .d-wrow:focus-within { background: var(--rail-hover); }
@@ -894,7 +894,7 @@ dialog.d-stay:not([open])::backdrop { opacity: 0; transition-duration: var(--sta
 .d-wrow {
   position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto;
   grid-template-areas: "ti mt" "sub sub";
-  align-items: center; gap: 2px 8px; min-height: var(--h-touch); padding: 9px 10px; border-radius: 12px;
+  align-items: center; gap: 2px 8px; min-height: var(--h-touch); padding: 10px; border-radius: 12px;
   transition: background var(--t-tint) var(--ease);
 }
 .d-wrow.has-ck { grid-template-columns: 20px minmax(0, 1fr) auto; grid-template-areas: "ck ti mt" "ck sub sub"; }
@@ -902,7 +902,7 @@ dialog.d-stay:not([open])::backdrop { opacity: 0; transition-duration: var(--sta
 .d-wrow .ti { grid-area: ti; }
 .d-wrow .mt { grid-area: mt; font-size: 12.5px; color: var(--dim); white-space: nowrap; }
 .d-wrow .mt b { font-weight: 600; color: var(--muted); }
-.d-wrow .sub { grid-area: sub; font-size: 12.5px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.d-wrow .sub { grid-area: sub; font-size: 12.5px; color: var(--dim); overflow: clip; overflow-clip-margin: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .d-wrow.is-wrap { align-items: start; }
 .d-wrow.is-wrap .ti { white-space: normal; text-overflow: clip; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.4; }
 .d-wrow.is-wrap .mt { padding-top: 1px; }
@@ -916,7 +916,7 @@ dialog.d-stay:not([open])::backdrop { opacity: 0; transition-duration: var(--sta
 .d-wrow.is-two.has-ck { grid-template-columns: 20px minmax(0, 1fr) auto; grid-template-areas: "ck ti ti" "ck sub sub"; }
 .d-wrow.is-two .ti { white-space: normal; text-overflow: clip; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.4; }
 /* 둘째 줄은 한 줄이다(두 줄을 넘지 않게) — 모자라면 `누구`·프로젝트가 말줄임으로 양보하고 `슬랙 ↗`는 제 자리에 선다 */
-.d-wrow.is-two .sub { display: flex; align-items: center; flex-wrap: nowrap; gap: 4px 10px; white-space: nowrap; overflow: hidden; }
+.d-wrow.is-two .sub { display: flex; align-items: center; flex-wrap: nowrap; gap: 4px 10px; white-space: nowrap; overflow: clip; overflow-clip-margin: 8px; }
 .d-wrow.is-two .sub > * { flex: none; }
 .d-wrow.is-two .sub .who { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-weight: 600; }
 .d-wrow.is-two .sub .nx { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--dim); }
@@ -932,7 +932,7 @@ dialog.d-stay:not([open])::backdrop { opacity: 0; transition-duration: var(--sta
 /* 확인 대기 카드의 프로젝트 소제목 — 줄과 같은 왼쪽 자리(10px)에 맞춘 작은 그룹 제목 */
 #waitingList .d-grp { height: auto; min-height: 0; padding: 10px 10px 2px; font-size: var(--fs-sm); }
 #waitingList .d-grp:first-child { padding-top: 2px; }
-.d-wrow .ti .new-dot { position: static; display: inline-block; width: 5px; height: 5px; margin-right: 5px; vertical-align: 2px; box-shadow: none; }
+.d-wrow .ti .new-dot { position: static; display: inline-block; width: 5px; height: 5px; margin-right: 6px; vertical-align: 2px; box-shadow: none; }
 /* 더보기는 hover·focus일 때만, 오른쪽 끝에 겹쳐 뜬다 */
 .d-wrow .ac, .d-mrow .ac {
   position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
@@ -1002,7 +1002,7 @@ dialog.d-stay:not([open])::backdrop { opacity: 0; transition-duration: var(--sta
 .d-wnext.is-one .d-btn.de { padding: 0 4px; color: var(--dim); background: none; }
 .d-wnext.is-one .d-btn.de:hover { background: var(--hover); color: var(--text); }
 /* ✕도 누름 영역은 28px 아래로 내려가지 않는다 */
-.d-wnext.is-one .d-btn.is-cl { padding: 0 5px; min-width: 28px; }
+.d-wnext.is-one .d-btn.is-cl { padding: 0 4px; min-width: 28px; }
 
 /* 상세 카드 안의 `다음은?`은 카드 바탕 위에 그대로 앉는다(고른 줄 표시가 아니다) */
 .d-wnext.is-panel { background: none; padding: 0; }
@@ -1012,7 +1012,7 @@ dialog.d-stay:not([open])::backdrop { opacity: 0; transition-duration: var(--sta
 /* 구역 제목 — 굵고 크게. 개수는 둥근 회색 칩. */
 .d-sechd { display: flex; align-items: center; gap: 10px; height: 30px; font-size: 18px; font-weight: 700; letter-spacing: -0.015em; color: var(--text); }
 .d-sechd .n {
-  height: var(--h-xs); display: inline-flex; align-items: center; padding: 0 9px;
+  height: var(--h-xs); display: inline-flex; align-items: center; padding: 0 8px;
   border-radius: 999px; background: var(--warn-bg); color: var(--warn);
   font-size: 12.5px; font-weight: 600;
 }
@@ -1074,7 +1074,7 @@ dialog.d-stay:not([open])::backdrop { opacity: 0; transition-duration: var(--sta
 }
 .d-atrow:hover .d-atacts, .d-atrow:focus-within .d-atacts { opacity: 1; pointer-events: auto; }
 .d-atrow:hover .mt, .d-atrow:focus-within .mt { opacity: 0; }
-.d-atacts .d-btn { background: var(--accent-soft); color: var(--accent-text); height: 33px; padding: 0 13px; }
+.d-atacts .d-btn { background: var(--accent-soft); color: var(--accent-text); height: 33px; padding: 0 12px; }
 .d-atacts .d-btn:hover { background: var(--accent-strong); color: var(--on-fill); }
 .d-atacts .d-src { margin-right: 2px; }
 /* `할 일로` 입력칸 — 확인 대기의 `후속 할 일`과 같은 부품(.nx)을 줄 아래에 그대로 편다 */
@@ -1183,7 +1183,7 @@ button.d-guide .t { color: var(--accent-text); }
   background: var(--field); color: var(--muted); font-size: 12.5px;
 }
 .d-ibrow .badge {
-  max-width: 124px; padding: 5px 9px; border-radius: var(--r-xs);
+  max-width: 124px; padding: 5px 8px; border-radius: var(--r-xs);
   background: var(--neutral-bg); border-color: transparent; color: var(--muted); font-weight: 600; font-size: 12.5px;
 }
 
@@ -1197,7 +1197,7 @@ button.d-guide .t { color: var(--accent-text); }
 .d-lhd .sub { display: inline-flex; align-items: center; gap: 10px; color: var(--dim); font-size: 13.5px; font-weight: 500; }
 /* 오늘 할 일의 끝낸 개수 칩 `✓ 5/19` — 파란 칩, 전부 끝내면 초록. 숫자가 바뀔 때 짧게 올라온다 */
 .d-lhd .sub .cnt, .d-wrapsum.cnt {
-  height: var(--h-xs); display: inline-flex; align-items: center; gap: 4px; padding: 0 9px 0 7px;
+  height: var(--h-xs); display: inline-flex; align-items: center; gap: 4px; padding: 0 8px 0 6px;
   border-radius: 999px; background: var(--accent-soft); color: var(--accent-text);
   font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; transition: background var(--t-move) var(--ease);
 }
@@ -1224,7 +1224,7 @@ button.d-guide .t { color: var(--accent-text); }
 }
 .d-qaf:focus-within { background: var(--field); outline: 2px solid var(--accent); outline-offset: -1px; }
 .d-qaf .d-i { color: var(--dim); }
-.d-qaf input { flex: 1; min-width: 0; height: 100%; border: 0; background: none; outline: none; color: var(--text); font-family: inherit; font-size: var(--fs-md); }
+.d-qaf input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: none; outline: none; color: var(--text); font-family: inherit; font-size: var(--fs-md); }
 .d-qaf input::placeholder { color: var(--dim); }
 
 .d-grp {
@@ -1235,7 +1235,7 @@ button.d-guide .t { color: var(--accent-text); }
 .d-grp .gl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .d-grp button.gl { border: 0; background: none; padding: 0; color: inherit; font: inherit; cursor: pointer; border-radius: 4px; }
 /* 그룹 이름(프로젝트로 가기)은 말줄임(overflow: hidden)이라 ::after가 잘린다 — 위아래 여백으로 누르는 자리만 28px, 줄 높이는 그대로 */
-.d-grp button.gl { padding-block: 3px; margin-block: -3px; }
+.d-grp button.gl { padding-block: 4px; margin-block: -4px; }
 .d-grp button.gl:hover { color: var(--accent-text); }
 /* 그룹 제목의 개수는 칩이 아니라 조용한 회색 숫자다(칩은 구역·카드 제목에만) */
 .d-grp .n { font-weight: 500; color: var(--dim); font-size: var(--fs-sm); }
@@ -1256,7 +1256,7 @@ button.d-guide .t { color: var(--accent-text); }
 }
 .d-addrow:focus-within { background: var(--field); outline: 2px solid var(--accent); outline-offset: -1px; }
 .d-addrow[hidden] { display: none; }
-.d-addinput { flex: 1; min-width: 0; height: 100%; border: 0; background: none; outline: none; color: var(--text); font-family: inherit; font-size: var(--fs-md); }
+.d-addinput { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: none; outline: none; color: var(--text); font-family: inherit; font-size: var(--fs-md); }
 .d-addinput::placeholder { color: var(--dim); }
 
 /* ---------- 업무 행 ---------- */
@@ -1534,7 +1534,7 @@ textarea.d-dtitle {
   border: 0; background: var(--field); color: var(--text); font-size: var(--fs-sm);
 }
 .d-fields .badge {
-  max-width: 100%; padding: 5px 9px; border-radius: var(--r-xs);
+  max-width: 100%; padding: 5px 8px; border-radius: var(--r-xs);
   background: var(--neutral-bg); border-color: transparent; color: var(--muted);
   font-size: 12.5px; font-weight: 600;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -1584,7 +1584,7 @@ textarea.d-dtitle {
 .d-dhead2 { flex: 1; min-width: 0; }
 .d-dtitle.plain { cursor: default; padding: 0; margin: 0; }
 .d-dtitle.plain:hover { background: none; }
-.d-dsub { margin-top: 3px; font-size: var(--fs-sm); color: var(--muted); font-variant-numeric: tabular-nums; }
+.d-dsub { margin-top: 4px; font-size: var(--fs-sm); color: var(--muted); font-variant-numeric: tabular-nums; }
 .d-dsub .d-link { font-size: var(--fs-sm); }
 /* 회의 탭에서만 — 부제목의 프로젝트 이름이 왼쪽 목록을 그 프로젝트로 데려가는 버튼이다(그룹 제목의 이름과 같은 꼴) */
 .d-dsub .pjlink { border: 0; background: none; padding: 0; color: inherit; font: inherit; cursor: pointer; border-radius: 4px; }
@@ -1615,7 +1615,7 @@ textarea.d-dtitle {
 .d-dres .nx .d-link, .d-dget > .d-link { display: inline-flex; align-items: center; min-height: var(--h-sm); padding: 0 2px; }
 
 /* AI 초안 — 한 줄(.d-mrow2 그대로): `AI` | 문구 | (오늘 · 날짜) 종류 | 빼기. 체크박스 자리에 조용한 `AI`가 선다(아직 내 항목이 아니다) */
-.d-mrow2 .ck.ai { padding-left: 3px; font-size: 11.5px; font-weight: 600; color: var(--dim); letter-spacing: 0.02em; }
+.d-mrow2 .ck.ai { padding-left: 4px; font-size: 11.5px; font-weight: 600; color: var(--dim); letter-spacing: 0.02em; }
 .d-draft.is-blank .ti { color: var(--dim); }
 .d-draft.is-bad .ti { color: var(--urgent); }
 .d-draft button.ti:hover { text-decoration: none; }
@@ -1735,7 +1735,7 @@ textarea.d-dtitle {
    조용한 글자다(그룹 제목 부품이 아니다, 누를 수 없다). 글자는 2026-09-22~10-02에 쓰던 값 그대로(13/600 --muted + 숫자 500 --dim),
    여백만 넓혔다: 위 22px·아래 8px(오늘 레일 그룹 제목은 위 27·아래 15px쯤에 가깝게) */
 .d-mgrp {
-  display: flex; align-items: center; gap: 5px; min-height: 18px;
+  display: flex; align-items: center; gap: 4px; min-height: 18px;
   margin: 22px 0 8px; font-size: var(--fs-sm); line-height: 18px; font-weight: 600; color: var(--muted);
 }
 .d-mgrp:first-child { margin-top: 12px; }
@@ -1744,7 +1744,7 @@ textarea.d-dtitle {
 /* 회의 정리의 구역은 본문 간격(16px) + 가는 선 + 12px로만 나뉜다(설정 창용 .d-dsec의 위 여백 22px는 쓰지 않는다) */
 .d-dsec.d-msec { margin-top: 0; }
 /* 회의 구역 머리 — 제목 + 조용한 숫자, (초안이면) 오른쪽 끝에 2차 버튼 */
-.d-dsec .lbl.d-mhead { display: flex; align-items: center; gap: 5px; min-height: 18px; font-size: var(--fs-sm); line-height: 18px; font-weight: 700; color: var(--text); }
+.d-dsec .lbl.d-mhead { display: flex; align-items: center; gap: 4px; min-height: 18px; font-size: var(--fs-sm); line-height: 18px; font-weight: 700; color: var(--text); }
 .d-dsec .lbl.d-mhead .n { font-weight: 500; color: var(--dim); font-variant-numeric: tabular-nums; }
 .d-dsec .lbl.d-mhead .d-btn { margin: -7px 0 -7px auto; }
 
@@ -1857,7 +1857,7 @@ body.later-open .page { padding-right: 424px; }
 .d-dhd h2 { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.015em; }
 .d-dhd h2::before { display: none; }
 .d-dhd .n {
-  height: var(--h-xs); display: inline-flex; align-items: center; padding: 0 9px;
+  height: var(--h-xs); display: inline-flex; align-items: center; padding: 0 8px;
   border-radius: 999px; background: var(--neutral-bg); color: var(--muted);
   font-size: 12.5px; font-weight: 600;
 }
@@ -2096,7 +2096,7 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-jira .top .sp { margin-left: auto; }
 /* 출처 표시다(누르는 것이 아니다) — 헤더의 날짜 칩과 같은 계열의 조용한 중립 면 */
 .d-jira .tag {
-  flex: none; display: inline-flex; align-items: center; height: 20px; padding: 0 7px;
+  flex: none; display: inline-flex; align-items: center; height: 20px; padding: 0 8px;
   border-radius: 6px; background: var(--neutral-bg); color: var(--muted);
   font-size: 11.5px; font-weight: 700; letter-spacing: .02em;
 }
@@ -2127,11 +2127,11 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-jira .bar i { display: block; width: 100%; height: 100%; background: var(--success); border-radius: 999px; }
 /* 접힌 줄의 담당별 요약(미완료만) — 이름이 곧 거르개다(별도 토글·드롭다운을 두지 않는다).
    색은 붙지 않고 거르는 중인 이름만 굵어진다. 줄 끝 꺾쇠가 목록을 펼친다 */
-.d-jira .foot .who { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 0 5px; min-width: 0; }
+.d-jira .foot .who { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 0 6px; min-width: 0; }
 .d-jira .foot .who .sep, .d-jira .foot .who .qt { color: var(--dim); }
 .d-jira .foot .sp { margin-left: auto; }
 .d-jwho {
-  display: inline-flex; align-items: center; min-height: var(--h-sm); padding: 0 5px; margin: 0 -5px;
+  display: inline-flex; align-items: center; min-height: var(--h-sm); padding: 0 4px; margin: 0 -4px;
   border: 0; background: none; border-radius: var(--r-xs); cursor: pointer;
   font-family: inherit; font-size: 12.5px; font-weight: 500; color: var(--dim); white-space: nowrap;
   transition: background var(--t-tint) var(--ease), color var(--t-tint) var(--ease), scale var(--t-press) var(--ease);
@@ -2139,7 +2139,7 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-jwho:hover { background: var(--hover); color: var(--text); }
 .d-jwho[aria-pressed="true"] { font-weight: 700; color: var(--text); }
 /* 거르기를 푸는 `전체`는 이름이 아니라 동작이다 — 이름 줄에서 파란 글자로 갈린다 */
-.d-jwho.clear { margin-left: 3px; color: var(--accent-text); font-weight: 600; }
+.d-jwho.clear { margin-left: 4px; color: var(--accent-text); font-weight: 600; }
 .d-jira .foot .d-jexp { flex: none; width: 28px; height: var(--h-sm); color: var(--dim); }
 .d-jira .foot .d-jexp .d-i { transform: rotate(90deg); transition: transform var(--t-fast) var(--ease); }
 .d-jira .foot .d-jexp[aria-expanded="true"] .d-i { transform: rotate(-90deg); }
@@ -2232,7 +2232,7 @@ body.batch-open .d-toast { bottom: 76px; }
    Esc · 바깥 클릭 · `취소`로 닫히고, 닫히면 아무것도 보내지 않는다.
    판은 고른 줄과 같은 `--sel`이고 새 색은 쓰지 않는다 */
 .d-jconfirm {
-  display: grid; gap: 5px; margin-top: 10px; padding: 12px 14px;
+  display: grid; gap: 4px; margin-top: 10px; padding: 12px 14px;
   border-radius: var(--r-sm); background: var(--sel); font-size: var(--fs-sm); color: var(--muted);
 }
 .d-jconfirm:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -2249,7 +2249,7 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-jconfirm .warn { color: var(--warn); }
 /* `바꾸기`는 2차(연파랑), `취소`는 3차다 — 연파란 판 위에서 묻히지 않게 3차의 바탕만 흰색으로 둔다
    (확인 대기의 `다음은?` 줄과 같은 규칙) */
-.d-jconfirm .acts { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; margin-top: 3px; }
+.d-jconfirm .acts { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; margin-top: 4px; }
 .d-jconfirm .acts .d-btn { background: var(--surface); }
 .d-jconfirm .acts .d-btn.acc { background: var(--accent-soft); }
 .d-jconfirm .acts .d-btn.acc:hover { background: var(--accent-strong); }
@@ -2266,7 +2266,7 @@ body.batch-open .d-toast { bottom: 76px; }
 }
 .d-jline .sep { color: var(--dim); }
 /* 아직 지라를 걸지 않은 그룹 프로젝트의 `지라 티켓 연결` — 같은 조용한 줄이되 누르는 자리가 28px이다 */
-.d-jline .d-jlinkgo { display: inline-flex; align-items: center; min-height: var(--h-sm); padding: 0 4px; margin-left: -4px; }
+.d-jline .d-jlinkgo { display: inline-flex; align-items: center; min-height: var(--h-sm); }
 /* 손으로 건 연결을 푸는 ⋯ — 카드 첫 줄의 새로고침과 같은 28px 아이콘 버튼이다 */
 .d-jira .top .d-more { flex: none; width: 28px; height: var(--h-sm); color: var(--dim); }
 
@@ -2374,7 +2374,7 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-pnewepic .d-link { margin-left: auto; }
 /* 직군 체크 목록 — 체크박스는 앱의 가족(.d-wcb, 28px 누름 영역) 그대로다 */
 .d-pnewroles { display: flex; flex-wrap: wrap; gap: 4px 16px; }
-.d-pnewroles .rl { display: inline-flex; align-items: center; gap: 7px; min-height: 30px; font-size: 13.5px; color: var(--text); cursor: pointer; }
+.d-pnewroles .rl { display: inline-flex; align-items: center; gap: 8px; min-height: 30px; font-size: 13.5px; color: var(--text); cursor: pointer; }
 .d-pnewroles .rl.is-had { color: var(--dim); }
 .d-pnewroles .rl.is-own { cursor: default; color: var(--muted); }
 .d-pnewroles .hd { font-size: var(--fs-cap); color: var(--dim); }
@@ -2577,7 +2577,7 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-mmore.is-in { padding: 4px 10px 6px 52px; text-align: left; }
 .d-mtrow {
   display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 8px;
-  width: 100%; min-height: 40px; padding: 5px 10px; border: 0; background: none; border-radius: 12px;
+  width: 100%; min-height: 40px; padding: 6px 10px; border: 0; background: none; border-radius: 12px;
   color: var(--text); font-family: inherit; text-align: left; cursor: pointer;
   transition: background var(--t-tint) var(--ease);
 }
@@ -2615,7 +2615,7 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-reccol .d-lhd { margin-bottom: 4px; min-height: 38px; }
 /* 구역 제목 옆의 개수는 둥근 회색 칩(오늘 할 일만 파란 칩이다) */
 .d-reccol .d-lhd > .sub {
-  height: var(--h-xs); display: inline-flex; align-items: center; padding: 0 9px;
+  height: var(--h-xs); display: inline-flex; align-items: center; padding: 0 8px;
   border-radius: 999px; background: var(--neutral-bg); color: var(--muted);
   font-size: 12.5px; font-weight: 600;
 }
@@ -2673,7 +2673,7 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-rec.is-done .ti { color: var(--muted); }
 /* 결정 아래 조용한 정보 한 줄 — 날짜 · 나온 회의(눌러서 회의 탭으로) · 원문(있는 것만) */
 .d-recinfo {
-  grid-column: 2 / -1; margin-top: 3px;
+  grid-column: 2 / -1; margin-top: 4px;
   font-size: 12.5px; color: var(--dim); line-height: 1.5;
 }
 .d-recinfo-lk { border: 0; background: none; padding: 0; color: var(--dim); font: inherit; cursor: pointer; }
@@ -2760,15 +2760,17 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-ablink:hover { color: var(--text); }
 /* 작은 글자 링크·버튼도 넓은 화면에서 누르는 자리 28px — 모양은 그대로, 투명 ::after만 넓힌다.
    0과 (칸 − 28px)/2 중 작은 값이라 이미 28px 이상인 칸(.d-abupd 등)은 늘지 않는다.
-   대상: 설정의 밑줄 글자(`요청하기`·`각자 붙이는 법`·`점검하기`·`보기`), 선택 막대 `전체 선택`, 줄의 `원문` */
-.d-ablink, .d-selbar .d-link, .d-src { position: relative; }
-.d-ablink::after, .d-selbar .d-link::after, .d-src::after {
+   대상: 설정의 밑줄 글자(`요청하기`·`각자 붙이는 법`·`점검하기`·`보기`), 글자 링크 `.d-link` 전부(`열기`·`직군 목록 고치기`·`전체 선택` 등),
+   줄의 `원문`, 지라 띠 `지라에서 열기`, 주간요약 제목·소제목·칸 이름 고치기(`.rp-rename`)·문장 첫 줄(`.rp-edit`) */
+.d-ablink, .d-link, .d-src, .d-jira .d-jopen, .rp-rename, .rp-s .rp-edit { position: relative; }
+.d-ablink::after, .d-link::after, .d-src::after, .d-jira .d-jopen::after, .rp-rename::after, .rp-s .rp-edit::after {
   content: ''; position: absolute;
   top: min(0px, calc(50% - 14px)); bottom: min(0px, calc(50% - 14px));
   left: min(0px, calc(50% - 14px)); right: min(0px, calc(50% - 14px));
 }
-/* 레일 리마인드 줄은 `원문`이 제목 바로 아래 제 줄에 설 수 있다(사이 3px) — 위로는 2px만 넓혀 제목을 덮지 않고, 모자란 만큼 아래(글자뿐인 줄)로 */
-.d-wrow .tiwrap .d-src::after { top: -2px; bottom: min(0px, calc(100% - 26px)); }
+/* 레일 리마인드 줄은 `원문`이 제목 바로 아래 제 줄에 설 수 있다(사이 3px) — 위로는 2px만 넓혀 제목을 덮지 않고, 모자란 만큼 아래(글자뿐인 줄)로.
+   확인 대기 줄의 둘째 줄(.sub)도 같다 — 둘째 줄은 넘침을 자르되(overflow: clip) 8px 여유를 둬 넓힌 자리가 잘리지 않게 한다(줄 아래 여백 10px 안) */
+.d-wrow .tiwrap .d-src::after, .d-wrow .sub .d-src::after { top: -2px; bottom: min(0px, calc(100% - 26px)); }
 .d-abfiles { margin-top: 4px; font-size: var(--fs-cap); line-height: 1.7; color: var(--dim); overflow-wrap: anywhere; }
 .d-abfiles[hidden], .d-abwrap[hidden] { display: none; }
 /* 업데이트 받기(시안 J) — 새 버전 상자는 선택 판(--sel), 실패 줄은 주의 판(--urgent-bg). 새 색은 쓰지 않는다. */
@@ -2863,7 +2865,7 @@ body.batch-open .d-toast { bottom: 76px; }
 /* 상태 점 + 짧은 말 — 카드 넷과 맨 위 요약이 같은 부품. 10px 점(+ 옅은 링)은 장식이고 말이 늘 같이 선다.
    연결됨 초록 · 곧 읽어요 흐린 초록(천천히 숨 쉼) · 늦어요 주황 · 멈췄어요 빨강 · 대기 중 흐린 초록 점 + 회색 글자(숨 쉬지 않음) ·
    연결 안 됨 회색 빈 원(말 없음). */
-.d-istat { display: inline-flex; align-items: center; gap: 7px; min-width: 0; font-size: var(--fs-sm); font-weight: 600; white-space: nowrap; }
+.d-istat { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--fs-sm); font-weight: 600; white-space: nowrap; }
 .d-istat .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
 .d-istat .w { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .d-istat .sub { color: var(--dim); font-weight: 500; }
@@ -3092,7 +3094,7 @@ a.d-btn { text-decoration: none; }
 @media (max-width: 520px) {
   .d-pset .k { width: 100%; padding-top: 0; }
 }
-.d-faq .need { margin-top: 3px; font-size: 11.5px; color: var(--dim); }
+.d-faq .need { margin-top: 4px; font-size: 11.5px; color: var(--dim); }
 .d-faq .a { margin-top: 4px; font-size: var(--fs-sm); font-weight: 400; color: var(--muted); line-height: 1.65; }
 .d-faq .a b { font-weight: 600; color: var(--text); }
 .d-dsec { margin-top: 22px; padding-top: 12px; border-top: 1px solid var(--hair); }
@@ -3124,7 +3126,7 @@ a.d-btn { text-decoration: none; }
   padding: 4px 0 4px 22px; font-size: var(--fs-sm); color: var(--dim);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.d-wraprow { display: flex; align-items: center; gap: 10px; min-height: var(--h-touch); padding: 5px 0; }
+.d-wraprow { display: flex; align-items: center; gap: 10px; min-height: var(--h-touch); padding: 6px 0; }
 .d-wraprow + .d-wraprow { box-shadow: inset 0 1px 0 var(--hair); }
 .d-wraprow .tiwrap { display: flex; align-items: baseline; gap: 6px; flex: 1 1 auto; min-width: 0; }
 .d-wraprow .ti { flex: 1 1 auto; min-width: 4em; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -3281,13 +3283,13 @@ a.d-btn { text-decoration: none; }
   .d-row .d-titlewrap { grid-area: ti; flex-wrap: wrap; }
   .d-proj { display: none; }
   /* 두 줄 행에서도 같은 순서로 이어 붙는다(상태 → 기한) — 왼쪽 정렬만 다르다 */
-  .d-meta { grid-area: mt; justify-content: flex-start; flex-wrap: wrap; row-gap: 5px; }
+  .d-meta { grid-area: mt; justify-content: flex-start; flex-wrap: wrap; row-gap: 4px; }
   /* 프로젝트 이름은 제목 뒤 `· ● 이름`(.d-inproj)이 이미 말한다 — 상태 줄의 .m-proj는 좁은 폭에서도 숨긴 채 둔다(두 번 찍히지 않게) */
   .d-acts {
     grid-area: ac; position: static; flex-direction: column; align-items: stretch;
     opacity: 1; pointer-events: auto; background: none; padding-left: 0;
   }
-  .d-acts .d-btn, .d-ibacts .d-btn { height: var(--h-md); padding: 0 11px; }
+  .d-acts .d-btn, .d-ibacts .d-btn { height: var(--h-md); padding: 0 12px; }
   /* 업무 줄에는 ⋯ 하나만 — 내일·나중에·오늘로·오늘 할게요는 줄을 누르면 열리는 시트 발에 있다.
      프로젝트 면의 줄은 아래 .d-prow2 */
   .d-row .d-acts > .d-btn { display: none; }
@@ -3315,7 +3317,7 @@ a.d-btn { text-decoration: none; }
     grid-area: ac; position: static; justify-content: flex-start; flex-wrap: wrap;
     opacity: 1; pointer-events: auto; background: none; padding-left: 0;
   }
-  .d-atacts .d-btn { height: var(--h-md); padding: 0 11px; }
+  .d-atacts .d-btn { height: var(--h-md); padding: 0 12px; }
 
   /* 새로 들어온 줄은 제목 한 줄 / 동작 한 줄 */
   .d-ibrow { grid-template-columns: minmax(0, 1fr); row-gap: 6px; }

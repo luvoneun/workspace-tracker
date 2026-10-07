@@ -28,7 +28,7 @@
 /* `새 기록 N`은 둥근 연파랑 칩 */
 .rp-wk .nw {
   grid-column: 2; grid-row: 1 / span 2; justify-self: end;
-  height: var(--h-xs); display: inline-flex; align-items: center; padding: 0 9px; border-radius: 999px;
+  height: var(--h-xs); display: inline-flex; align-items: center; padding: 0 8px; border-radius: 999px;
   background: var(--accent-soft); color: var(--accent-text); font-size: var(--fs-cap); font-weight: 600;
 }
 .rp-wk:hover { background: var(--hover); }
@@ -115,7 +115,7 @@ h3.rp-h { line-height: inherit; }
 /* 다듬은 뒤 새로 들어온 줄 — `새로` 글자 대신 앞 점만 파랗고 굵게(이름표 `새로 들어옴`이 같은 말을 한다) */
 .rp-s .bu.is-fresh { color: var(--accent); font-weight: 800; }
 /* 원본이 바뀐 고친 줄 끝의 작은 알약 — 기존 칩(.d-chip) 그대로, 조금 작게 */
-.rp-s .rp-pill { align-self: start; height: 24px; margin-top: 2px; padding: 0 9px; font-size: var(--fs-cap); background: var(--neutral-bg); }
+.rp-s .rp-pill { align-self: start; height: 24px; margin-top: 2px; padding: 0 8px; font-size: var(--fs-cap); background: var(--neutral-bg); }
 /* 줄 끝 한 마디(개편 A) — 바탕 없는 글자. `확인 필요`는 주황(--warn, 이유는 풍선), `끝났어요 · 완료로`는 초록(--success) 글자 버튼
    하나(누르는 자리 한 곳, 28px). 한 줄에 하나만 선다(끝났어요 > 제안 알약 > 확인 필요). */
 .rp-s .rp-end {
@@ -235,18 +235,18 @@ h3.rp-h { line-height: inherit; }
    목록의 빠른 추가와 같은 부품이다: 평소에는 맨 줄, 초점에서만 회색 채움 + 파란 테. */
 .rp-add {
   display: flex; align-items: center; gap: 8px; height: 48px; margin-top: 4px;
-  padding: 0 14px; border: 0; border-radius: var(--r-sm); background: none;
+  padding: 0 12px; border: 0; border-radius: var(--r-sm); background: none;
   transition: background var(--t-tint) var(--ease);
 }
 .rp-add .d-i { color: var(--dim); }
 .rp-add input {
-  flex: 1; min-width: 0; height: 100%; border: 0; background: none; outline: none;
+  flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: none; outline: none;
   color: var(--text); font-family: inherit; font-size: var(--fs-md);
 }
 .rp-add input::placeholder, .rp-add textarea::placeholder { color: var(--dim); }
 .rp-add:focus-within { background: var(--field); outline: 2px solid var(--accent); outline-offset: -1px; }
 /* 할 일 칸 프로젝트마다의 `할 일 적기` 입력줄 — 같은 부품이고 조금 낮다(맨 아래 `한 줄 적기`는 48px). */
-.rp-add.is-group { height: var(--h-lg); margin: 0 0 2px; padding-left: 12px; }
+.rp-add.is-group { height: var(--h-lg); margin: 0 0 2px; }
 /* 여러 줄 붙여넣기가 중간에 실패해 남은 줄을 돌려놓을 때만 여러 줄 칸이 된다. */
 .rp-add textarea {
   flex: 1; min-width: 0; align-self: stretch; margin: 8px 0; padding: 0; border: 0; background: none;
