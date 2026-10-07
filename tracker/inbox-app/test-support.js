@@ -160,7 +160,12 @@ function integrationsFixture(t, seed = {}) {
   return { home, configPath, tokenDir, read };
 }
 
+// 업무 줄을 고치면 수정 시각(updated)이 새로 붙고, 쓰기 응답에는 그 시각(revisions)이 실린다 — 줄·응답의 다른 칸을 볼 때 뺀다.
+const withoutStamp = text => text.replace(/ updated:[^\s\]]+/g, '');
+const withoutRevisions = ({ revisions, ...rest }) => rest;
+
 module.exports = {
+  withoutStamp, withoutRevisions,
   directory, automationHome, server, date, today, shifted, tasksPath, readTasks, post, items,
   // 서버 주소(`base`)는 띄운 뒤에야 정해지므로 값이 아니라 기다릴 약속으로 내보낸다.
   ready,

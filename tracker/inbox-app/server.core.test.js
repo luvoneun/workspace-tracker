@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const support = require('./test-support');
-const { directory, server, date, today, shifted, tasksPath, readTasks, post, items, deadPid, journalEntry, startServer, readJson } = support;
+const { withoutStamp, withoutRevisions, directory, server, date, today, shifted, tasksPath, readTasks, post, items, deadPid, journalEntry, startServer, readJson } = support;
 let base;
 before(async () => { base = await support.ready(); });
 
@@ -340,7 +340,7 @@ test('종류 바꾸기도 같은 요청 식별자로 두 번 보내면 한 번�
     body: JSON.stringify({ id: created.id, type: 'decision' }),
   }).then(response => response.json());
   const a = await call(), b = await call();
-  assert.deepEqual(a, b);
+  assert.deepEqual(withoutRevisions(a), withoutRevisions(b));
   assert.equal(fs.readFileSync(path.join(directory, 'decisions.md'), 'utf8').split(created.id).length - 1, 1);
   assert.equal(lineOf('tasks.md', created.id), undefined);
 });
@@ -1009,19 +1009,19 @@ test('고르는 목록 출처: 끝낸 업무·모든 종류·회의에 건 이�
 test('BRENAME: 이름을 바꾸면 항목·회의·연결·보관·주간요약이 한 번에 따라오고 지라 항목은 그대로다', async (t) => {
   const server = await startServer(t, seedRename);
   const answer = await renamePost(server.base, { project: 'group:결제 리뉴얼', name: '결제 정산' });
-  assert.deepEqual(answer, {
+  assert.deepEqual(withoutRevisions(answer), {
     status: 200, ok: true, project: 'group:결제 정산', from: '결제 리뉴얼', to: '결제 정산',
     changed: { items: 4, meetings: 2, links: 1, archive: 1, report: 1 },
   });
 
   // ① 업무 파일 — 파일 표기의 공백→밑줄 규칙은 그대로, 지라가 걸린 줄과 다른 그룹은 손대지 않는다.
-  const tasks = fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8');
+  const tasks = withoutStamp(fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8'));
   assert.match(tasks, /정산 배치 설계 검토하기 #task\[id:rn01 status:to-do priority:high created:2026-09-20 group:결제_정산\]/);
   assert.match(tasks, /샘플 기능 검수하기 #task\[id:rn02 status:to-do priority:medium created:2026-09-20 jira:IO-12345\]/);
   assert.match(tasks, /group:운영툴\]/);
-  assert.match(fs.readFileSync(path.join(server.home, 'checks.md'), 'utf8'), /who:하늘 group:결제_정산\]/);
-  assert.match(fs.readFileSync(path.join(server.home, 'decisions.md'), 'utf8'), /group:결제_정산\]/);
-  assert.match(fs.readFileSync(path.join(server.home, 'ideas.md'), 'utf8'), /project:결제_정산\]/, '아이디어의 프로젝트 칸도 함께 바뀐다');
+  assert.match(withoutStamp(fs.readFileSync(path.join(server.home, 'checks.md'), 'utf8')), /who:하늘 group:결제_정산\]/);
+  assert.match(withoutStamp(fs.readFileSync(path.join(server.home, 'decisions.md'), 'utf8')), /group:결제_정산\]/);
+  assert.match(withoutStamp(fs.readFileSync(path.join(server.home, 'ideas.md'), 'utf8')), /project:결제_정산\]/, '아이디어의 프로젝트 칸도 함께 바뀐다');
 
   // ②③④ 회의 프로젝트 · 수동 지라 연결 · 보관 표
   const workflow = readJson(path.join(server.home, '.workflow.json'));
@@ -1054,7 +1054,7 @@ test('BRENAME: 이름을 바꾸면 항목·회의·연결·보관·주간요약�
 
   // 반대 방향으로 한 번 더 보내면 그대로 돌아간다(화면의 `되돌리기`가 쓰는 길).
   assert.equal((await renamePost(server.base, { project: 'group:결제 정산', name: '결제 리뉴얼' })).ok, true);
-  assert.match(fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8'), /group:결제_리뉴얼\]/);
+  assert.match(withoutStamp(fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8')), /group:결제_리뉴얼\]/);
   assert.deepEqual(readJson(path.join(server.home, '.workflow.json')).projectLinks, { '결제 리뉴얼': 'IO-12345' });
 });
 
@@ -1079,7 +1079,7 @@ test('BRENAME: 한 자리라도 실패하면 전부 되돌아간다 — 반쯤 �
   // **업무 파일까지 쓴 뒤 되돌린 것**임을 이 줄이 보여 준다.
   fs.writeFileSync(path.join(server.home, '.report-drafts.json'), JSON.stringify(RENAME_REPORT, null, 2));
   assert.equal((await renamePost(server.base, { project: 'group:결제 리뉴얼', name: '결제 정산' })).ok, true);
-  assert.match(fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8'), /group:결제_정산\]/);
+  assert.match(withoutStamp(fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8')), /group:결제_정산\]/);
 });
 
 test('BRENAME: 복구가 필요한 동안에는 이름도 바꾸지 않는다', async (t) => {
@@ -1167,17 +1167,17 @@ test('BMERGE: 그룹 → 그룹 합치기 — 업무 넷(끝낸 것 포함)·아
   const answer = await mergePost(server.base, { project: 'group:결제 리뉴얼', to: 'group:가입 개편' });
   assert.equal(answer.status, 200, JSON.stringify(answer));
   assert.match(answer.mergeId, /^mg_/);
-  assert.deepEqual({ ...answer, mergeId: undefined }, {
+  assert.deepEqual({ ...withoutRevisions(answer), mergeId: undefined }, {
     status: 200, ok: true, project: 'group:가입 개편', from: '결제 리뉴얼', to: '가입 개편', mergeId: undefined,
     changed: { items: 5, meetings: 2, links: 1, report: 2 },
   });
-  const tasks = fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8');
+  const tasks = withoutStamp(fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8'));
   assert.match(tasks, /id:mg01 status:to-do priority:high created:2026-09-20 group:가입_개편\]/);
   assert.match(tasks, /id:mg02 status:done .* group:가입_개편\]/, '끝낸 항목도 따라간다');
   assert.match(tasks, /id:mg03 .* jira:PAY-12 group:결제_리뉴얼\]/, '지라가 걸린 줄은 건너뛴다');
-  assert.match(fs.readFileSync(path.join(server.home, 'checks.md'), 'utf8'), /group:가입_개편\]/);
-  assert.match(fs.readFileSync(path.join(server.home, 'decisions.md'), 'utf8'), /group:가입_개편\]/);
-  assert.match(fs.readFileSync(path.join(server.home, 'ideas.md'), 'utf8'), /project:가입_개편\]/);
+  assert.match(withoutStamp(fs.readFileSync(path.join(server.home, 'checks.md'), 'utf8')), /group:가입_개편\]/);
+  assert.match(withoutStamp(fs.readFileSync(path.join(server.home, 'decisions.md'), 'utf8')), /group:가입_개편\]/);
+  assert.match(withoutStamp(fs.readFileSync(path.join(server.home, 'ideas.md'), 'utf8')), /project:가입_개편\]/);
   const workflow = readJson(path.join(server.home, '.workflow.json'));
   assert.deepEqual(workflow.meetings.m1.project, { type: 'group', value: '가입 개편', label: '가입 개편' });
   assert.deepEqual(workflow.projectLinks, { '가입 개편': 'PAY-1' }, 'B에 연결이 없으면 A 것이 B로 옮겨 간다');
@@ -1212,7 +1212,7 @@ test('BMERGE: 합치기 되돌리기 — 기록된 것만 원래대로, 그 사�
   assert.match(fs.readFileSync(path.join(server.home, 'checks.md'), 'utf8'), /id:mg05 .*group:운영툴/, '건너뛴 것은 그대로 둔다');
   const after = mergeSnapshot(server.home);
   ['tasks.md', 'decisions.md', 'ideas.md', '.meeting_links.json', '.report-drafts.json'].forEach((name) => {
-    assert.equal(after[MERGE_FILES.indexOf(name)], before[MERGE_FILES.indexOf(name)], `${name}은 합치기 전과 같다`);
+    assert.equal(withoutStamp(after[MERGE_FILES.indexOf(name)]), before[MERGE_FILES.indexOf(name)], `${name}은 합치기 전과 같다(수정 시각만 새로 붙는다)`);
   });
   const workflow = readJson(path.join(server.home, '.workflow.json'));
   const original = JSON.parse(before[MERGE_FILES.indexOf('.workflow.json')]);
@@ -1234,10 +1234,10 @@ test('BMERGE: 지우기 — 항목 칸·회의 프로젝트가 비고 연결표 
   assert.equal(answer.project, null);
   assert.equal(answer.to, null);
   assert.deepEqual(answer.changed, { items: 5, meetings: 2, links: 1, report: 0 });
-  const tasks = fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8');
+  const tasks = withoutStamp(fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8'));
   assert.match(tasks, /id:mg01 status:to-do priority:high created:2026-09-20\]/, '칸이 빠진다');
   assert.match(tasks, /id:mg03 .* jira:PAY-12 group:결제_리뉴얼\]/);
-  assert.match(fs.readFileSync(path.join(server.home, 'ideas.md'), 'utf8'), /id:mg07 status:to-do priority:low created:2026-09-20\]/);
+  assert.match(withoutStamp(fs.readFileSync(path.join(server.home, 'ideas.md'), 'utf8')), /id:mg07 status:to-do priority:low created:2026-09-20\]/);
   const workflow = readJson(path.join(server.home, '.workflow.json'));
   assert.equal(workflow.meetings.m1.project, null);
   assert.deepEqual(workflow.projectLinks, {});
@@ -1253,7 +1253,7 @@ test('BMERGE: 지우기 — 항목 칸·회의 프로젝트가 비고 연결표 
   assert.equal(undone.skipped, 0);
   const after = mergeSnapshot(server.home);
   ['checks.md', 'decisions.md', '.report-drafts.json'].forEach((name) => {
-    assert.equal(after[MERGE_FILES.indexOf(name)], before[MERGE_FILES.indexOf(name)], `${name}은 지우기 전과 같다`);
+    assert.equal(withoutStamp(after[MERGE_FILES.indexOf(name)]), before[MERGE_FILES.indexOf(name)], `${name}은 지우기 전과 같다(수정 시각만 새로 붙는다)`);
   });
   // 연결표는 뺐던 줄이 다시 들어가 열쇠 차례만 바뀐다(뜻은 같다).
   assert.deepEqual(JSON.parse(after[MERGE_FILES.indexOf('.meeting_links.json')]), JSON.parse(before[MERGE_FILES.indexOf('.meeting_links.json')]));
@@ -1324,7 +1324,7 @@ test('BMERGE: 대소문자만 다른 두 프로젝트(Pay Renewal · pay renewal
   const answer = await mergePost(server.base, { project: 'group:Pay Renewal', to: 'group:pay renewal' });
   assert.equal(answer.status, 200, JSON.stringify(answer));
   assert.equal(answer.changed.items, 1);
-  assert.match(fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8'), /id:mg08 status:to-do created:2026-09-20 group:pay_renewal\]/);
+  assert.match(withoutStamp(fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8')), /id:mg08 status:to-do created:2026-09-20 group:pay_renewal\]/);
 });
 
 test('BMERGE: id가 없는 줄이 있으면 아무것도 쓰기 전에 거절한다', async (t) => {
@@ -1355,7 +1355,7 @@ test('BMERGE: 같은 요청 id 두 번이면 한 번만 합친다', async (t) =>
   const first = await mergePost(server.base, { project: 'group:결제 리뉴얼', to: 'group:가입 개편' }, key);
   const second = await mergePost(server.base, { project: 'group:결제 리뉴얼', to: 'group:가입 개편' }, key);
   assert.equal(first.ok, true);
-  assert.deepEqual(second, first, '두 번째는 처음 결과를 그대로 돌려준다');
+  assert.deepEqual(second, withoutRevisions(first), '두 번째는 처음 결과를 그대로 돌려준다(새로 적은 시각은 처음 응답에만)');
   assert.equal(readJson(path.join(server.home, '.workflow.json')).projectMerges.length, 1);
 });
 
