@@ -752,7 +752,7 @@ Slack 수집은 **가져오기·저장은 스크립트, 분류만 Claude**입니
 node --test --test-concurrency=1 *.test.js
 ```
 
-`tracker/inbox-app`에서 실행합니다. 임시 디렉터리와 임시 포트를 사용하며 실제 업무 데이터는 변경하지 않습니다. 서버 테스트는 기능별 파일(`server.core`·`server.jira`·`server.app`·`server.integrations`·`server.calendar`·`server.update`·`server.channels`·`server.selfcheck`)로, 자동화 셸 스크립트 테스트는 `automation.test.js` 하나로 나뉘어 있고 각각 따로 돌릴 수 있습니다(`node --test server.jira.test.js`). 함께 쓰는 준비는 `test-support.js`입니다.
+`tracker/inbox-app`에서 실행합니다. 임시 디렉터리와 임시 포트를 사용하며 실제 업무 데이터는 변경하지 않습니다. 서버 테스트는 기능별 파일(`server.core`·`server.jira`·`server.app`·`server.integrations`·`server.calendar`·`server.update`·`server.channels`·`server.selfcheck`)로, 자동화 셸 스크립트 테스트는 `automation.test.js` 하나로 나뉘어 있고 각각 따로 돌릴 수 있습니다(`node --test server.jira.test.js`). 함께 쓰는 준비는 `test-support.js`입니다. 시험이 띄우는 서버·스크립트는 벽시계 몇 초가 아니라 준비 신호(서버가 듣기 시작하며 찍는 한 줄)·끝남·원격 확인 끝남 같은 사건을 기다리고, 멈춰 버린 경우에만 안전망(`HANG_MS`, 5분)에서 `멈춤(안전망 5분):`으로 시작하는 실패를 냅니다 — 맥이 바빠 잠깐 멈칫해도 결과가 같습니다.
 클라이언트 테스트는 `app.js`와 위 화면 파일들을 같은 차례로 가짜 화면 환경에 올려 입력 보존, 실패 처리, 한글 조합 중 Enter, 복구 필요 안내 표시, 업무 카드의 배지·프로젝트 라벨·그룹 선택지를 검증합니다.
 
 테스트·별도 실행 시 `WORKSPACE_DATA_DIR`, `WORKSPACE_PORT`, `WORKSPACE_NO_OPEN=1`을 사용할 수 있습니다.

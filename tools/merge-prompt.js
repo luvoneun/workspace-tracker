@@ -192,7 +192,7 @@ function buildPrompt(opts, infos, baseTip, modelPick) {
   const steps = [];
   steps.push('각 가지의 안전 검사' + `: 안전장치 함수(${SAFETY_FUNCS}) 정의 변경 없음 확인(diff 직접 확인)`);
   steps.push('위 합치기 명령을 가지 순서대로 하나씩' + (infos.length > 1 ? ' (뒤 가지는 앞 가지가 합쳐진 main 위라 `--no-ff`)' : ''));
-  steps.push(`전체 시험 **${tests}번** — ${TEST_CMD}. 흔들리는 시험(automation·server.calendar·server.update·slack-oauth 시간 초과)은 단독 재실행(\`node --test --test-timeout=90000 <파일>\`)으로 구분하고, 진짜 실패면 되돌림. 이 맥엔 \`timeout\` 명령이 없으니 쓰지 마.`);
+  steps.push(`전체 시험 **${tests}번** — ${TEST_CMD}. 실패 문구가 「멈춤(안전망 5분):」으로 시작하면 맥이 그만큼 멈춘 것(메모리 부족 등)이라 그 파일만 단독 재실행(\`node --test --test-timeout=600000 <파일>\`)으로 구분하고, 그 밖의 실패는 진짜 실패로 보고 되돌림. 이 맥엔 \`timeout\` 명령이 없으니 쓰지 마.`);
   steps.push(automationBlock(infos));
   if (docTestOnly) {
     steps.push('문서·시험만 바뀐 변경이라 서버 재시작은 생략해도 됨. 그래도 4321·4340이 200인지는 확인.');
