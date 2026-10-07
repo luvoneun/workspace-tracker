@@ -4175,8 +4175,8 @@ test('자리를 옮긴 변경(넣기·빼기·묶기·풀기)의 알림은 무�
   assert.deepEqual(notice(`{ action: 'merge', ids: ['a', 'b', 'c'] }`), ['문장 3개를 묶었어요', ['되돌리기', '닫기']]);
   assert.deepEqual(notice(`{ action: 'split', id: 'r3' }`), ['묶음을 풀었어요', ['되돌리기', '닫기']]);
   assert.deepEqual(notice(`{ action: 'undo', token: 'tok' }`), ['되돌렸어요', ['닫기']]);
-  // 나머지 변경의 알림은 예전 그대로다.
-  assert.deepEqual(notice(`{ action: 'edit', id: 'r1', text: '고친 문장' }`), ['보고 내용을 저장했어요', ['닫기']]);
+  // 나머지 변경의 알림은 예전 그대로다(문장 고치기는 `저장했어요` + 되돌리기 — Enter·바깥 누르기가 같은 문구).
+  assert.deepEqual(notice(`{ action: 'edit', id: 'r1', text: '고친 문장' }`), ['저장했어요', ['되돌리기', '닫기']], '문장 고치기도 되돌리기를 준다(입력칸 떠나면 저장과 같은 문구)');
   // 제외는 (다듬기 A부터) 무엇을 했는지 적고 되돌리기를 준다 — 아래 다듬기 A 테스트가 자세히 본다.
   assert.deepEqual(notice(`{ action: 'exclude', id: 'r1' }`), ['보고에 되살렸어요', ['되돌리기', '닫기']]);
   // 되돌릴 토큰을 못 받았으면 버튼 없이 알림만 뜬다.
@@ -14388,16 +14388,16 @@ test('v3·②: 문장 줄은 글자가 곧 고치는 자리(Tab·Enter·Space)�
   assert.equal(text.children.some(kid => ['nw', 'edt', 'rv'].includes(kid.className)), false, '`새로`·`직접 수정`·`원본 확인 필요` 글자 표시는 없다');
   assert.equal(line.children.some(kid => kid.className === 'ac' || /d-more/.test(String(kid.className))), false, '문장 ⋯ 메뉴는 없앴다(②)');
   assert.equal(line.children.some(kid => /d-btn/.test(String(kid.className))), false, '수정·제외 버튼이 없다');
-  // Space로 편집 시작 → 입력칸 + `Enter 저장 · Esc 취소` 한 줄, 저장·취소 버튼 없음.
+  // Space로 편집 시작 → 입력칸 + `Enter·바깥 누르면 저장 · Esc 취소` 한 줄, 저장·취소 버튼 없음.
   first.listeners.keydown({ key: ' ', preventDefault() {} });
   assert.equal(app.run("reportEdits.get('2026-09-14:a2')"), '서버 로그 정리함');
   const editing = v3Line(app, 1);
   const box = v3Kid(editing, 'tx');
   assert.deepEqual(box.children.map(kid => kid.className), ['rp-ta', 'rp-help']);
-  // 안내 줄: 글자 버튼 `보고에서 빼기`(문장 ⋯ 대신 — ②) + `Enter 저장 · Esc 취소`. 손으로 고친 줄이 아니면 `원래 문장으로`는 없다.
+  // 안내 줄: 글자 버튼 `보고에서 빼기`(문장 ⋯ 대신 — ②) + `Enter·바깥 누르면 저장 · Esc 취소`. 손으로 고친 줄이 아니면 `원래 문장으로`는 없다.
   const help = box.children[1];
   assert.deepEqual(help.children.map(kid => [kid.type || '', kid.className || '', kid.textContent.split(' · ')[0]]),
-    [['button', 'd-link', '보고에서 빼기'], ['', '', 'Enter 저장']]);
+    [['button', 'd-link', '보고에서 빼기'], ['', '', 'Enter·바깥 누르면 저장']]);
 });
 test('v3: 편집 중 Enter는 저장(Shift+Enter·한글 조합 중은 아님), Esc는 취소, 글이 그대로면 저장하지 않는다', async () => {
   const app = reportClient();
@@ -14445,7 +14445,7 @@ test('v3: 소제목은 색 점 + 이름 글자(버튼)이고 원래 프로젝트
   head.children[1].listeners.click();
   const box = app.run(`reportGroupHead(item, groups[0], '결제 개편 1차').children[1]`);
   assert.deepEqual([box.className, box.children.map(kid => kid.className), box.children[1].textContent],
-    ['rp-ren', ['d-din', 'rp-help'], '보고에서만 바뀌어요 — 업무의 프로젝트 이름은 그대로예요 · Enter 저장 · Esc 취소']);
+    ['rp-ren', ['d-din', 'rp-help'], '보고에서만 바뀌어요 — 업무의 프로젝트 이름은 그대로예요 · Enter·바깥 누르면 저장 · Esc 취소']);
   assert.equal(box.children[0].placeholder, '결제 리뉴얼');
   box.children[0].value = '결제 개편';
   box.children[0].listeners.keydown({ key: 'Enter', preventDefault() {}, stopPropagation() {} });
@@ -18242,7 +18242,7 @@ test('양식 ①: 칸 이름은 글자를 눌러 고치고 이 브라우저에 �
   assert.deepEqual([button.className, button.textContent, button.title], ['rp-rename', '[완료]', '누르면 칸 이름을 고쳐요']);
   button.listeners.click();
   const box = app.run("reportColumnHead(item, 'done')").children[0];
-  assert.deepEqual([box.className, box.children[1].textContent], ['rp-ren', '다음 주에도 이 이름으로 나와요 · Enter 저장 · Esc 취소']);
+  assert.deepEqual([box.className, box.children[1].textContent], ['rp-ren', '다음 주에도 이 이름으로 나와요 · Enter·바깥 누르면 저장 · Esc 취소']);
   box.children[0].value = '지난주 한 일';
   box.children[0].listeners.keydown({ key: 'Enter', preventDefault() {}, stopPropagation() {} });
   await new Promise(resolve => setImmediate(resolve));
@@ -20394,10 +20394,10 @@ test('입력칸 떠나면 저장: 바깥으로 초점이 나가면 그 칸만 En
   assert.deepEqual(leaveSent(app), [{ action: 'edit', id: 'a1', text: '바깥을 눌러 저장' }], '떠난 칸 하나만 보낸다');
   assert.equal(app.run("reportEdits.has('W:a1')"), false, '저장되면 닫힌다');
   assert.equal(app.run("reportEdits.get('W:a2')"), '열어만 둔 둘째', '다른 칸의 글은 그대로');
-  assert.deepEqual(leaveNotices(app).at(-1), ['저장했어요', false, '되돌리기']);
+  assert.deepEqual(leaveNotices(app).at(-1), ['저장했어요', false, '되돌리기'], 'Enter와 같은 알림(reportSavedNotice)');
 });
 
-test('입력칸 떠나면 저장: 칸 아래 도구(`보고에서 빼기`)·같은 줄 안으로 옮기면 저장하지 않고 열어 둔다 · 줄 안 글자를 눌러도 초점이 남는다', async () => {
+test('입력칸 떠나면 저장: 칸 아래 도구(`보고에서 빼기`)·같은 줄 안으로 옮기면 저장하지 않고 열어 둔다 · 줄 안 글자를 누르면 닫지 않는다', async () => {
   const app = blurClient();
   app.run("a = open(0, '고치는 중'); leave(a, a.help.children[0]);");
   await blurSettle(app);
@@ -20407,13 +20407,22 @@ test('입력칸 떠나면 저장: 칸 아래 도구(`보고에서 빼기`)·같�
   app.run("document.activeElement = a.help.children[0]; leave(a);");
   await blurSettle(app);
   assert.deepEqual(leaveSent(app), []);
-  // 줄 안의 글자(근거·안내)를 누르면 초점을 가져가지 않게 막고, 누를 수 있는 것은 그대로 둔다.
-  const prevented = app.run(`(() => { const out = [];
-    for (const hit of [null, 'a']) { let stopped = false;
-      a.line.listeners.mousedown({ target: { closest: sel => (hit && sel.includes(hit) ? {} : null) }, preventDefault() { stopped = true; } });
-      out.push(stopped); }
-    return JSON.stringify(out); })()`);
-  assert.deepEqual(JSON.parse(prevented), [true, false]);
+  // 줄 안의 글자(근거·안내)를 누르면 초점이 body로 가도 닫지 않는다 — 글자를 고르지 않고 손을 떼면 입력칸으로 돌아오고,
+  // 골랐으면(근거 글자 복사) 그대로 둔다. mousedown은 막지 않는다(글자 선택이 된다).
+  assert.equal(app.run('a.line.listeners.mousedown'), undefined);
+  app.run(`document.activeElement = document.body; picked = { isCollapsed: true }; window.getSelection = () => picked;
+    reportPointerDown = true; reportPointerTarget = a.help; leave(a); reportPointerDown = false;
+    reportPointerWaiters.splice(0).forEach(run => run());`);
+  await blurSettle(app);
+  assert.deepEqual(leaveSent(app), []);
+  assert.equal(app.run('a.input.focused'), true, '고르지 않았으면 입력칸으로 돌아온다');
+  app.run(`a.input.focused = false; picked = { isCollapsed: false };
+    reportPointerDown = true; reportPointerTarget = a.help; leave(a); reportPointerDown = false;
+    reportPointerWaiters.splice(0).forEach(run => run());`);
+  await blurSettle(app);
+  assert.deepEqual(leaveSent(app), []);
+  assert.notEqual(app.run('a.input.focused'), true, '글자를 골랐으면 초점을 빼앗지 않는다');
+  assert.equal(app.run("reportEdits.get('W:a1')"), '고치는 중');
   assert.match(fs.readFileSync(path.join(__dirname, 'report-ui.js'), 'utf8'), /button\.addEventListener\('mousedown', event => event\.preventDefault\(\)\);/,
     '`보고에서 빼기`·`원래 문장으로`는 누를 때 초점을 가져가지 않는다(입력칸이 먼저 닫히지 않는다)');
 });
@@ -20537,4 +20546,92 @@ test('입력칸 떠나면 저장(실제 창에서 찾음): 다른 문장을 누�
   await blurSettle(app);
   assert.deepEqual(leaveSent(app), [{ action: 'edit', id: 'a1', text: '빠르게 넘어감' }]);
   assert.equal(app.run("reportEdits.get('W:a2')"), '새로 연 문장');
+});
+
+test('입력칸 떠나면 저장(검수): 누르고 있는 동안에는 저장도 다시 그리기도 하지 않는다 — 뗀 뒤 click이 먼저 돌아 누른 문장이 열린다', async () => {
+  const app = blurClient();
+  app.run(`draws = 0; renderReportDraft = () => { draws += 1; };
+    a = open(0, '앞 문장 고침');
+    reportPointerDown = true; leave(a, { dataset: { editText: 'a2' } });`);
+  await leaveTick(); await leaveTick();
+  assert.deepEqual(leaveSent(app), [], '누르는 동안(사람 손은 80~150ms)은 보내지 않는다');
+  assert.equal(app.run('draws'), 0, '문서를 갈아 끼우지 않는다 — 누른 문장이 그대로 붙어 있어 click이 간다');
+  // 손을 떼면 click이 먼저(누른 문장 열기), 그 뒤 앞 문장 저장.
+  app.run("reportPointerDown = false; b = open(1, '둘째 문장');");
+  await blurSettle(app);
+  assert.deepEqual(leaveSent(app), [{ action: 'edit', id: 'a1', text: '앞 문장 고침' }]);
+  assert.equal(app.run("reportEdits.get('W:a2')"), '둘째 문장', '누른 문장은 열려 있다');
+  assert.equal(app.run('draws'), 1, '저장이 끝난 뒤 한 번만 그린다');
+  const source = fs.readFileSync(path.join(__dirname, 'report-ui.js'), 'utf8');
+  assert.match(source, /if \(quiet\) reportLeaveLock\(key\);\n\s+else \{ renderReportDraft\(fresh\(\)\); reportFocusBack\(\); \}/,
+    '보내는 동안은 그 칸만 제자리에서 잠근다(탭 떠나면 저장은 예전처럼 다시 그려 잠근다)');
+});
+
+test('입력칸 떠나면 저장(검수): 실패·409 뒤에는 잠금을 푼 칸으로 다시 그린다 — 더 고치거나 Esc로 닫을 수 있다', async () => {
+  for (const status of [500, 409, 0]) {
+    const app = blurClient();
+    app.run(`draws = []; renderReportDraft = () => draws.push(reportLeaveSaving.has('W:a1'));
+      reply = () => { if (${status} === 0) throw new TypeError('Failed to fetch'); return { ok: false, status: ${status}, json: async () => ({ ok: false, error: '안 됨' }) }; };
+      a = open(0, '지키는 글'); leave(a);`);
+    await blurSettle(app);
+    const draws = JSON.parse(app.run('JSON.stringify(draws)'));
+    assert.equal(draws.at(-1), false, `${status || '네트워크'}: 마지막 그리기는 잠금이 풀린 뒤`);
+    const disabled = app.run(`(() => { const host = document.createElement('div'); reportSentenceRow(item, item.draft.rows[0], { host, newIds: new Set() });
+      return host.children[0].children.find(k => k.className === 'tx').children[0].disabled; })()`);
+    assert.equal(disabled, false, `${status || '네트워크'}: 다시 그린 칸은 잠겨 있지 않다`);
+    assert.equal(app.run("reportEdits.get('W:a1')"), '지키는 글');
+  }
+});
+
+test('입력칸 떠나면 저장(검수): 저장 응답 뒤 다시 그리기는 다른 칸의 한글 조합이 끝난 뒤에 — 저장은 그리지 않는 길(draw: false)로', async () => {
+  const app = blurClient();
+  app.run(`draws = 0; renderReportDraft = () => { draws += 1; }; hold = null; opts = [];
+    reply = () => new Promise(resolve => { hold = () => resolve({ ok: true, status: 200, json: async () => ({ ok: true, undoToken: 'u', report: item.draft }) }); });
+    const real = reportChange; reportChange = (t, action, notice, options) => { opts.push(options); return real(t, action, notice, options); };
+    a = open(0, '앞 문장'); leave(a);`);
+  await leaveTick(); await leaveTick();
+  app.run('reportComposing = true; hold();');
+  await leaveTick(); await leaveTick();
+  assert.equal(leaveSent(app).length, 1);
+  assert.equal(app.run('draws'), 0, '다른 칸에서 조합 중이면 그리지 않는다(조합이 끊기지 않게)');
+  app.run('reportComposing = false');
+  await blurSettle(app);
+  assert.equal(app.run('draws'), 1);
+  assert.equal(app.run('opts[0] && opts[0].draw'), false);
+  assert.deepEqual(leaveNotices(app).at(-1), ['저장했어요', false, '되돌리기']);
+});
+
+test('입력칸 떠나면 저장(검수): 줄 아래 도구는 다른 저장이 도는 중이면(false) 실패로 — 글과 칸이 남는다', async () => {
+  const app = blurClient();
+  app.run("a = open(0, '적던 글'); reportBusy = true;");
+  await app.run('a.help.children[0].listeners.click()');
+  assert.equal(app.run("reportEdits.get('W:a1')"), '적던 글');
+  assert.deepEqual(leaveNotices(app).at(-1), ['다른 저장이 끝나지 않아 하지 못했어요. 적은 내용은 그대로 있어요', true, null]);
+  assert.deepEqual(leaveSent(app), []);
+});
+
+test('입력칸 떠나면 저장(검수): 고치던 칸에서 곧장 `정리`·`슬랙용으로 복사`·확정을 누르면 줄 선 저장이 끝난 뒤에 한다', async () => {
+  const app = blurClient();
+  app.run(`hold = null; reply = () => new Promise(resolve => { hold = () => resolve({ ok: true, status: 200, json: async () => ({ ok: true, undoToken: 'u',
+      report: { revision: 2, rows: item.draft.rows.map(row => row.id === 'a1' ? { ...row, text: '저장된 글' } : row) } }) }); });
+    a = open(0, '저장된 글'); leave(a, { tagName: 'BUTTON' });
+    escDrop = () => {}; escPush = () => {}; reportTidyStart(item);`);
+  await leaveTick();
+  assert.equal(app.run('reportTidy'), null, '저장이 끝나기 전에는 켜지 않는다');
+  assert.notDeepEqual(leaveNotices(app).at(-1)?.[0], '고치는 중인 글이 있어요. Enter로 저장하거나 Esc로 취소한 뒤 정리해 주세요.');
+  app.run('hold()');
+  await blurSettle(app);
+  assert.equal(app.run('!!reportTidy'), true, '저장이 끝나면 정리 모드가 켜진다');
+  // 복사도 저장이 끝난 뒤의 보고(고친 글)로 한다.
+  const source = fs.readFileSync(path.join(__dirname, 'report-ui.js'), 'utf8');
+  assert.match(source, /return reportButton\('슬랙용으로 복사', async \(\) => \{\n\s+\/\/ [^\n]+\n\s+const latest = await reportBlurSettle\(item\);\n\s+const report = latest\.draft;/);
+  assert.match(source, /async function reportConfirm\(item, on\) \{\n\s+if \(on && reportEditing\(item\.weekKey\) && reportBlurPending\.size\) item = await reportBlurSettle\(item\);/);
+  // 저장이 실패해 글이 남았으면 예전처럼 알린다.
+  const fail = blurClient();
+  fail.run(`reply = () => ({ ok: false, status: 500, json: async () => ({ ok: false, error: '꺼짐' }) });
+    escDrop = () => {}; escPush = () => {}; a = open(0, '남을 글'); leave(a, { tagName: 'BUTTON' }); reportTidyStart(item);`);
+  await blurSettle(fail);
+  await leaveTick();
+  assert.equal(fail.run('reportTidy'), null);
+  assert.deepEqual(leaveNotices(fail).at(-1), ['고치는 중인 글이 있어요. Enter로 저장하거나 Esc로 취소한 뒤 정리해 주세요.', true, null]);
 });
