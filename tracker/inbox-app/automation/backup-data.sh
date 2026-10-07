@@ -199,7 +199,17 @@ github_backup() {
     say "GitHub 건너뜀 — 백업 저장 공간을 만들지 않음"
     return 0
   fi
-  G add -A >> "$LOG" 2>&1 || { say "GitHub 실패 — 파일을 담지 못함"; return 1; }
+  # 로컬 겹과 같다: 저장 중이 아닐 때 담고, 담는 동안 저장이 시작됐으면 담은 것만 되돌리고 한 번 더 한다(최대 2회).
+  # 그래도 저장 중이거나 30초를 기다려도 저장 중이면 이번 회차는 건너뛴다.
+  local attempt=1
+  while :; do
+    if ! wait_until_saved; then say "GitHub 건너뜀 — 저장 중이라 건너뜀 (다음 회차가 한다)"; return 0; fi
+    G add -A >> "$LOG" 2>&1 || { say "GitHub 실패 — 파일을 담지 못함"; return 1; }
+    saving || break
+    G reset -q >> "$LOG" 2>&1
+    if [ "$attempt" -ge 2 ]; then say "GitHub 건너뜀 — 저장 중이라 건너뜀 (다음 회차가 한다)"; return 0; fi
+    attempt=$((attempt + 1))
+  done
   if ! G diff --cached --quiet; then
     G commit -q -m "자동 백업 $(date '+%Y-%m-%d %H:%M')" >> "$LOG" 2>&1 || { say "GitHub 실패 — 커밋하지 못함"; return 1; }
   fi
