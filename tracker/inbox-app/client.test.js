@@ -572,6 +572,56 @@ test('failed card action stays visible and restores its original checkbox state'
   assert.equal(app.nodes.has('liveRegion'), false);
 });
 
+// 저장 충돌: 업무 하나를 고치는 요청에는 화면이 본 마지막 수정 시각(reportRefs[id].rev)을 expect로 붙이고,
+// 다른 창이 먼저 고쳐 409가 오면 서버 문구를 보이며 목록을 다시 받는다. 부른 쪽은 실패를 받아 적던 칸을 그대로 둔다.
+const CHANGED_ELSEWHERE = '새 기록이나 다른 창의 변경이 있어요. 적은 내용은 그대로 있어요. 최신 내용을 확인한 뒤 다시 저장해 주세요.';
+function conflictClient(answer) {
+  const app = client(new Response('{"ok":true}'));
+  const sent = [];
+  app.context.fetch = async (url, options) => { const body = JSON.parse(options.body); sent.push({ url, body }); return answer(url, body, sent.length); };
+  app.run("latestData = { reportRefs: { t1: { id: 't1', rev: '2026-10-08T01:00:00.000Z' }, t2: { id: 't2', rev: null }, old: { id: 'old' } } }");
+  return { app, sent };
+}
+
+test('저장 충돌: 업무 수정 요청에 본 시각을 expect로 붙인다 — 옛 서버(rev 없음)·목록에 없는 업무·이미 expect가 있는 요청·다른 요청은 그대로', async () => {
+  const { app, sent } = conflictClient(() => new Response('{"ok":true}'));
+  await app.run("request('/api/track/set-description', { method: 'POST', body: JSON.stringify({ id: 't1', description: '새 제목' }) })");
+  await app.run("postJson('/api/track/set-priority', { id: 't2', priority: 'high' })");
+  await app.run("postJson('/api/track/set-priority', { id: 'old', priority: 'high' })");
+  await app.run("postJson('/api/track/set-priority', { id: 'nope', priority: 'high' })");
+  await app.run("postJson('/api/track/set-scheduled', { id: 't1', scheduled: null, inbox: true, expect: '2026-10-09' })");
+  await app.run("postJson('/api/track/seen', { id: 't1' })");
+  await app.run("postJson('/api/today-task/create', { description: 'x' })");
+  assert.deepEqual(plain(sent.map(one => one.body.expect ?? '없음')), [{ updated: '2026-10-08T01:00:00.000Z' }, { updated: null }, '없음', '없음', '2026-10-09', '없음', '없음']);
+});
+
+test('저장 충돌: 409면 서버 문구를 보이고 실패로 돌려주며(적던 칸은 부른 쪽이 그대로 둔다) 목록을 다시 받는다', async () => {
+  const { app } = conflictClient(() => new Response(JSON.stringify({ ok: false, code: 'CHANGED_ELSEWHERE', error: CHANGED_ELSEWHERE }), { status: 409 }));
+  app.run('var reloads = 0; load = async () => { reloads += 1; };');
+  await assert.rejects(app.run("postJson('/api/track/set-description', { id: 't1', description: '적던 글' })"), /다른 창의 변경/);
+  assert.match(app.nodes.get('liveRegion').textContent, new RegExp(CHANGED_ELSEWHERE.replace(/[.]/g, '\\.')));
+  assert.doesNotMatch(app.nodes.get('liveRegion').textContent, /저장됐는지 확인하지 못했어요/);
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(app.run('reloads'), 1, '목록을 한 번 다시 받는다');
+});
+
+test('저장 충돌: 같은 업무를 잇달아 고치면 앞 저장이 끝난 뒤 그 응답의 새 시각으로 다음 요청을 보낸다', async () => {
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  const { app, sent } = conflictClient(async (url, body, count) => {
+    if (count === 1) { await held; return new Response(JSON.stringify({ ok: true, updated: '2026-10-08T02:00:00.000Z' })); }
+    return new Response(JSON.stringify({ ok: true, updated: '2026-10-08T03:00:00.000Z' }));
+  });
+  const first = app.run("postJson('/api/track/set-priority', { id: 't1', priority: 'high' })");
+  const second = app.run("postJson('/api/track/toggle', { id: 't1', status: 'done' })");
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(sent.length, 1, '앞 요청이 끝나기 전에는 보내지 않는다');
+  release();
+  await first; await second;
+  assert.deepEqual(plain(sent.map(one => one.body.expect)), [{ updated: '2026-10-08T01:00:00.000Z' }, { updated: '2026-10-08T02:00:00.000Z' }]);
+  assert.equal(app.run("latestData.reportRefs.t1.rev"), '2026-10-08T03:00:00.000Z');
+});
+
 test('an older server without the storage endpoint shows no banner', async () => {
   const app = client(new Response('Not found', { status: 404 }));
   app.run("document.getElementById('storageBanner').hidden = true");
@@ -12986,7 +13036,7 @@ test('안전장치 정의 불변: request·showNotice·pushUndo·recordUndoFor·
   };
   const hash = (file, name) => crypto.createHash('sha256').update(fnSource(file, name)).digest('hex').slice(0, 16);
   same(Object.fromEntries(['request', 'showNotice', 'pushUndo', 'recordUndoFor', 'toggleTask', 'fadeOutAndRun'].map(name => [name, hash('app.js', name)])), {
-    request: 'f5330efee721c1be', showNotice: '27900565f62632d7', pushUndo: '9c58100ac7b9fe14',
+    request: 'a500eaa7f062c03a', showNotice: '27900565f62632d7', pushUndo: '9c58100ac7b9fe14',
     recordUndoFor: 'e4ace20da15f22d4', toggleTask: '56730551bbbf4bc4', fadeOutAndRun: '7863e32aa6abda7c',
   });
   assert.equal(hash('server.js', 'isClientFile'), 'c0879ada26c72b01');

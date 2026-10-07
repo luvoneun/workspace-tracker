@@ -1626,6 +1626,75 @@ test('QA2 backup-data.sh: 시작할 때 daily/의 `.tmp-`·`.old-` 중 이름 �
   assert.ok(fs.lstatSync(path.join(daily, '.old-2020-01-01-999')).isSymbolicLink());
 });
 
+// 저장 중 대기: 앱의 저장 잠금(데이터 폴더의 .mutation.lock, 안에 저장하는 프로세스 번호)이 있으면 기다렸다가 한 벌을 통째로 복사한다.
+// 여기서 띄우는 프로세스는 이 테스트가 직접 띄운 것뿐이고, 끝낼 때도 그 번호에만 신호를 보낸다.
+const sleepMs = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+function waitForFile(file) {
+  for (let i = 0; i < 100 && !fs.existsSync(file); i += 1) sleepMs(20);
+  assert.ok(fs.existsSync(file), `${file}이 생겨야 한다`);
+}
+
+test('저장 중 대기 backup-data.sh: 저장 잠금이 풀릴 때까지 기다렸다가 저장이 끝난 한 벌을 복사한다', (t) => {
+  const fix = backupFixture(t);
+  const lock = path.join(fix.tracker, '.mutation.lock');
+  const tasks = path.join(fix.tracker, 'tasks.md');
+  // 가짜 저장: 잠금에 제 번호를 적고, 0.6초 동안 두 파일을 차례로 고친 뒤 잠금을 지운다.
+  const saver = spawn('/bin/sh', ['-c', `echo $$ > "${lock}"; sleep 0.3; echo '# Tasks\n- 저장 뒤 업무' > "${tasks}"; sleep 0.3; echo '{"items":{"saved":1}}' > "${path.join(fix.tracker, '.workflow.json')}"; rm -f "${lock}"`], { stdio: 'ignore' });
+  t.after(() => { try { process.kill(saver.pid); } catch { /* 이미 끝남 */ } });
+  waitForFile(lock);
+  const started = Date.now();
+  const result = fix.run();
+  assert.equal(result.status, 0, result.stderr + fix.logText());
+  assert.ok(Date.now() - started >= 300, '잠금이 풀릴 때까지 기다린다');
+  const todayDir = path.join(fix.backup, 'daily', fix.today);
+  assert.match(fs.readFileSync(path.join(todayDir, 'tasks.md'), 'utf8'), /저장 뒤 업무/);
+  assert.match(fs.readFileSync(path.join(todayDir, '.workflow.json'), 'utf8'), /"saved":1/, '두 파일 모두 저장이 끝난 쪽이다');
+  assert.match(fix.logText(), /로컬 성공 · 1일치/);
+});
+
+test('저장 중 대기 backup-data.sh: 정해진 시간을 기다려도 저장 중이면 이번 회차는 한 줄 남기고 건너뛴다(0으로 끝남·앱 표시 줄은 그대로)', (t) => {
+  const fix = backupFixture(t);
+  const lock = path.join(fix.tracker, '.mutation.lock');
+  fs.writeFileSync(lock, String(process.pid)); // 살아 있는 프로세스(이 테스트)
+  const result = fix.run({ BACKUP_LOCK_WAIT_TRIES: '3' });
+  assert.equal(result.status, 0, result.stderr + fix.logText());
+  assert.match(fix.logText(), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} 로컬 건너뜀 — 저장 중이라 건너뜀 \(다음 회차가 한다\)$/m);
+  assert.doesNotMatch(fix.logText(), /로컬 (성공|실패)/, '앱의 백업 줄(로컬 성공·실패)은 지난 결과 그대로다');
+  assert.deepEqual(fix.daily(), [], '반쪽 벌을 남기지 않는다');
+  assert.equal(fs.readFileSync(lock, 'utf8'), String(process.pid), '잠금 파일은 건드리지 않는다');
+});
+
+test('저장 중 대기 backup-data.sh: 죽은 프로세스가 남긴 잠금(고아)·번호 없는 잠금은 저장 중으로 보지 않고 바로 복사한다(잠금은 그대로)', (t) => {
+  for (const content of [String(deadPid()), '', 'abc']) {
+    const fix = backupFixture(t);
+    const lock = path.join(fix.tracker, '.mutation.lock');
+    fs.writeFileSync(lock, content);
+    const started = Date.now();
+    const result = fix.run({ BACKUP_LOCK_WAIT_TRIES: '50' });
+    assert.equal(result.status, 0, result.stderr + fix.logText());
+    assert.ok(Date.now() - started < 5000, `기다리지 않는다: ${JSON.stringify(content)}`);
+    assert.match(fix.logText(), /로컬 성공 · 1일치/, JSON.stringify(content));
+    assert.equal(fs.readFileSync(lock, 'utf8'), content, '고아 잠금 정리는 서버가 시작할 때 한다');
+  }
+});
+
+test('저장 중 대기 backup-data.sh: 복사하는 동안 파일이 바뀌면 그 벌을 버리고 한 번 더 — 그래도 바뀌면 건너뛴다', (t) => {
+  const fix = backupFixture(t);
+  const tasks = path.join(fix.tracker, 'tasks.md');
+  // 잠금 없이 계속 고쳐 쓰는 가짜 저장(복사 중에 저장이 시작·끝난 것과 같다) — 앱처럼 통째로 바꿔 넣어(mv) 빈 파일이 보이는
+  // 순간이 없고, 쓸 때마다 내용이 달라 복사본이 원본과 늘 어긋난다.
+  const writer = spawn('/bin/sh', ['-c', `i=0; while :; do i=$((i+1)); echo "- 업무 $i" > "${tasks}.w"; mv -f "${tasks}.w" "${tasks}"; done`], { stdio: 'ignore' });
+  t.after(() => { try { process.kill(writer.pid); } catch { /* 이미 끝남 */ } });
+  sleepMs(100);
+  const result = fix.run();
+  process.kill(writer.pid);
+  assert.equal(result.status, 0, result.stderr + fix.logText());
+  assert.match(fix.logText(), /로컬 건너뜀 — 저장 중이라 건너뜀/);
+  assert.deepEqual(fix.daily(), []);
+  const script = fs.readFileSync(automationScript('backup-data.sh'), 'utf8');
+  assert.match(script, /if ! saving && same_as_source; then break; fi/, '복사 뒤에 잠금과 원본을 다시 본다');
+});
+
 // apply-runner.sh — 가짜 setup.sh가 받은 환경만 적는다(실제 setup.sh·launchctl은 부르지 않는다).
 function applyRunnerFixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-wpf-apply-'));

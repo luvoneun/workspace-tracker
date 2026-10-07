@@ -115,7 +115,9 @@ test('set-scheduled의 inbox:true+expect는 새로 들어온 것 표시를 되�
   const line = (id = made.id) => readTasks().split('\n').find(one => one.includes(`id:${id} `) || one.includes(`id:${id}]`));
   const set = body => post('/api/track/set-scheduled', body);
   const inInbox = async () => (await items()).inboxTasks.some(item => item.id === made.id);
-  const original = line();
+  // 업무 저장은 수정 시각(updated)을 새로 적는다 — 줄 비교는 그 칸만 빼고 한다.
+  const withoutStamp = value => value.replace(/ updated:\S+/, '');
+  const original = withoutStamp(line());
   assert.match(original, /inbox:true/);
   // 칸이 없으면 예전 그대로: 값이 정해지면 표시가 지워지고 다른 칸은 그대로다.
   assert.equal((await set({ id: made.id, scheduled: shifted(1) })).ok, true);
@@ -141,7 +143,7 @@ test('set-scheduled의 inbox:true+expect는 새로 들어온 것 표시를 되�
   assert.equal(readTasks(), before);
   // 되돌리기: 예정일을 없음으로 돌리면서 표시를 되살린다 — 줄이 처음과 같다(원문 링크·새 점 포함).
   assert.equal((await set({ id: made.id, scheduled: null, inbox: true, expect: shifted(1) })).ok, true);
-  assert.equal(line(), original);
+  assert.equal(withoutStamp(line()), original);
   assert.equal(await inInbox(), true);
   let data = await items();
   assert.equal(data.laterTasks.some(item => item.id === made.id), false);
@@ -152,7 +154,7 @@ test('set-scheduled의 inbox:true+expect는 새로 들어온 것 표시를 되�
   assert.ok((await items()).laterTasks.some(item => item.id === made.id));
   assert.equal((await set({ id: made.id, scheduled: null, inbox: true, expect: shifted(1) })).status, 409);
   assert.equal((await set({ id: made.id, scheduled: null, inbox: true, expect: null })).ok, true);
-  assert.equal(line(), original);
+  assert.equal(withoutStamp(line()), original);
   assert.equal(await inInbox(), true);
   assert.equal((await set({ id: made.id, scheduled: null })).ok, true);
   assert.equal(await inInbox(), false);
