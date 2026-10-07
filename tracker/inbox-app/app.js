@@ -787,6 +787,10 @@ function uiZones(...els) {
 function uiRenderHeld(zone) {
   // 분류 판이 열려 있는 동안은 그 구역을 다시 그리지 않는다(누른 줄·버튼이 사라지면 판이 허공에 뜬다).
   if (zone && uiSchedOpen && uiSchedOpen.zone === zone) return true;
+  // 업무 저장이 서버에 가 있는 동안에는 그 구역의 잠긴(저장 중인) 고치기 칸을 지킨다 — 초점이 빠져 있어도(바깥을 눌러
+  // 저장한 칸) 다시 그리지 않는다. 실패(다른 창 변경 409 등)하면 적은 글이 그 칸에 남아야 한다. 저장이 끝나면 그 저장이
+  // 부르는 load()가 그린다(아래 uiHeldFlush의 같은 규칙을 탭 이동 등 바로 그리는 길에도).
+  if (zone && itemWritesInFlight && [...(zone.querySelectorAll?.('input:disabled, textarea:disabled') || [])].some(uiIsTextEntry)) return true;
   const el = document.activeElement;
   if (!zone || !el || !zone.contains?.(el) || !uiIsTextEntry(el)) return false;
   if (uiComposingEl && uiComposingEl === el) return true;
@@ -2396,7 +2400,51 @@ async function refreshStorageStatus() {
 }
 
 const pendingRequestKeys = new Map();
-async function request(url, options) {
+// 업무 하나를 고치는 요청 — 화면이 본 그 업무의 마지막 수정 시각(목록의 reportRefs[id].rev)을 `expect`로 붙인다.
+// 다른 창이 먼저 고쳤으면 서버가 409로 거절하고 아무것도 쓰지 않는다(먼저 고친 내용이 조용히 사라지지 않게).
+// 같은 업무에 대한 요청은 앞 요청이 끝난 뒤 보낸다 — 앞 저장이 돌려준 새 시각을 다음 요청이 쓰게(내 연속 저장이 거절되지 않게).
+const ITEM_WRITES = new Set(['/api/track/set-scheduled', '/api/track/set-jira', '/api/track/set-group', '/api/track/set-due', '/api/track/set-doing',
+  '/api/track/set-who', '/api/track/set-priority', '/api/track/set-description', '/api/track/remove', '/api/track/toggle',
+  '/api/idea/set-project', '/api/idea/promote']);
+const itemWriteChains = new Map();
+// 이 창이 성공시킨 저장의 새 수정 시각(id → updated, 응답의 revisions). 늦게 온 목록이 옛 값을 들고 와도
+// 내 변경을 남의 변경으로 보지 않게, 보낼 때 목록 값과 이 값 중 새 것을 쓴다. 남의 변경 시각은 여기 넣지 않는다.
+const ownRevisions = new Map();
+const newerRevision = (a, b) => (!a ? b || a : !b ? a : (a > b ? a : b));
+// 지금 그 업무에 붙일 expect — 옛 서버(목록에 rev가 없음)나 아직 목록에 없는 업무는 undefined(서버는 예전처럼 저장).
+// 글을 고치는 칸은 **열 때** 이 값을 받아 들고 있다가 그 칸이 닫힐 때까지 그대로 보낸다 — 409 뒤 목록이 새로 와도
+// 같은 칸에서 다시 저장하면 다시 거절된다(남의 변경을 본 적 없이 덮지 않게). 덮으려면 칸을 닫고(최신이 보임) 다시 연다.
+function itemExpect(id) {
+  const ref = latestData?.reportRefs?.[id];
+  if (!ref || !Object.hasOwn(ref, 'rev')) return undefined;
+  return { updated: newerRevision(ref.rev, ownRevisions.get(id)) ?? null };
+}
+function itemWriteId(url, options) {
+  if (options?.method !== 'POST' || !ITEM_WRITES.has(url)) return null;
+  try { const id = JSON.parse(options.body || '{}').id; return typeof id === 'string' ? id : null; } catch { return null; }
+}
+// 앞 요청이 다른 창 변경으로 거절됐으면 줄 서 있던 같은 업무 요청은 보내지 않고 같은 이유로 끝낸다(알림은 한 번).
+// 서버에 가 있는 업무 저장 수 — 끝나면(성공·실패 모두) 부른 쪽이 이어 가기 전에 줄어든다(uiRenderHeld가 본다).
+let itemWritesInFlight = 0;
+function itemWriteQueue(id, send) {
+  const run = (itemWriteChains.get(id) || Promise.resolve(null)).then((conflict) => {
+    if (conflict) throw Object.assign(new Error(conflict.message), { code: conflict.code, reported: true });
+    itemWritesInFlight += 1;
+    return send().finally(() => { itemWritesInFlight -= 1; });
+  });
+  const settled = run.then(() => null, error => (error?.code === 'CHANGED_ELSEWHERE' ? error : null));
+  itemWriteChains.set(id, settled);
+  settled.then(() => { if (itemWriteChains.get(id) === settled) itemWriteChains.delete(id); });
+  return run;
+}
+async function request(url, options, queued = false) {
+  const itemId = itemWriteId(url, options);
+  if (itemId && !queued) return itemWriteQueue(itemId, () => request(url, options, true));
+  const expect = itemId ? itemExpect(itemId) : undefined;
+  if (expect) {
+    const body = JSON.parse(options.body || '{}');
+    if (body.expect === undefined) options = { ...options, body: JSON.stringify({ ...body, expect }) };
+  }
   const writing = options?.method === 'POST';
   const retryKey = writing && /\/(create|capture|review)$/.test(url) ? url + options.body : null;
   if(retryKey && typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -2423,6 +2471,9 @@ async function request(url, options) {
       throw failure;
     }
     if(retryKey)pendingRequestKeys.delete(retryKey);
+    if (data?.revisions && typeof data.revisions === 'object') {
+      for (const [id, rev] of Object.entries(data.revisions)) if (typeof rev === 'string') ownRevisions.set(id, newerRevision(rev, ownRevisions.get(id)));
+    }
     if (writing) recordUndoFor(url, JSON.parse(options.body || '{}'));
     if (url === '/api/track/remove' && !undoReplaying) lastRemovedId = JSON.parse(options.body).id;
     if (writing && !quiet) showNotice('저장했어요');
@@ -2432,6 +2483,11 @@ async function request(url, options) {
     if (error.code === 'RECOVERY_NEEDED') {
       renderStorageBanner({ recoveryNeeded: true });
       showNotice(error.message, true);
+    } else if (error.code === 'CHANGED_ELSEWHERE') {
+      // 다른 창이 먼저 고쳤다 — 서버 문구를 그대로 보이고 목록을 다시 받는다. 다시 받기는 부른 쪽이 적던 칸을
+      // 되살린(초점을 돌려준) 뒤에 한다 — 치는 중인 칸은 다시 그리지 않으니 적은 글은 그대로 남는다.
+      showNotice(error.message, true);
+      setTimeout(() => { load().catch(() => {}); }, 0);
     } else showNotice(writing ? '저장됐는지 확인하지 못했어요. 입력한 내용은 그대로 있어요' : '목록을 불러오지 못했어요', true, writing ? null : () => load());
     throw error;
   } finally {
@@ -4206,12 +4262,15 @@ function panelTitleEdit(titleEl, item) {
   titleEl.replaceWith(area);
   area.focus();
   area.setSelectionRange?.(area.value.length, area.value.length);
-  let settled = false;
+  // 열 때 본 수정 시각 — 이 칸이 닫힐 때까지 그대로 보낸다(itemExpect). 다른 창 변경으로 거절됐으면 닫을 때 카드를 새로 그려 최신을 보인다.
+  const expect = itemExpect(item.id);
+  let settled = false, conflicted = false;
   const cancel = () => {
     if (settled) return;
     settled = true;
     area.replaceWith(titleEl);
     titleEl.focus();
+    if (conflicted) syncTaskDetail();
   };
   const commit = async () => {
     if (settled) return;
@@ -4220,9 +4279,10 @@ function panelTitleEdit(titleEl, item) {
     settled = true;
     area.disabled = true;
     try {
-      await postJson('/api/track/set-description', { id: item.id, description: value });
+      await postJson('/api/track/set-description', { id: item.id, description: value, expect });
       await load();
-    } catch {
+    } catch (error) {
+      if (error?.code === 'CHANGED_ELSEWHERE') conflicted = true;
       settled = false;
       area.disabled = false;
       area.focus();
@@ -6398,6 +6458,8 @@ function makeEditableDesc(el, item) {
     el.replaceWith(input);
     input.focus();
     input.setSelectionRange(input.value.length, input.value.length);
+    // 열 때 본 수정 시각 — 이 칸이 닫힐 때까지 그대로 보낸다(itemExpect). 닫으면 미뤄 둔 목록 그리기가 최신을 보인다.
+    const expect = itemExpect(item.id);
     let committed = false;
     const commit = async () => {
       if (committed) return;
@@ -6408,11 +6470,16 @@ function makeEditableDesc(el, item) {
         try {
           await request('/api/track/set-description', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: item.id, description: val }),
+            body: JSON.stringify({ id: item.id, description: val, expect }),
           });
           announce('내용을 고쳤어요');
           await load();
-        } catch { committed = false; }
+        } catch {
+          // 실패하면 적은 글이 든 칸에 초점을 돌려준다 — 이어서 다시 받는 목록이 치는 중인 칸을 다시 그리지 않게.
+          committed = false;
+          input.disabled = false;
+          input.focus();
+        }
         finally { input.disabled = false; }
       } else {
         input.replaceWith(el);

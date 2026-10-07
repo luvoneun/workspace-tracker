@@ -419,6 +419,37 @@ test('입력 씹힘 ③: 구역 안 글자 칸에서 치는 중이면 다시 그
   assert.deepEqual(drawn, ['새', '바로']);
 });
 
+test('저장 충돌: 업무 저장이 서버에 가 있는 동안 구역의 잠긴 고치기 칸은 초점이 빠져 있어도 다시 그리지 않는다(탭 버튼 등) — 끝나면 그 저장의 load()가 그린다', async () => {
+  const app = pureClient();
+  const fx = holdFixture(app);
+  const editing = fx.field();
+  editing.disabled = true; // 바깥을 눌러 저장 중인 칸
+  fx.zone.querySelectorAll = selector => (/:disabled/.test(selector) && editing.disabled ? [editing] : []);
+  const body = app.context.document.body;
+  body.addEventListener = () => {}; body.removeEventListener = () => {};
+  fx.focus(body);
+  let drawn = 0;
+  app.run('itemWritesInFlight = 1');
+  assert.equal(app.context.uiRenderOrHold('records', fx.zone, () => { drawn += 1; }), false, '저장이 가 있는 동안은 미룬다');
+  assert.equal(drawn, 0);
+  app.run('itemWritesInFlight = 0');
+  assert.equal(app.context.uiRenderOrHold('records', fx.zone, () => { drawn += 1; }), true, '저장이 끝나면(그 저장의 load) 바로 그린다');
+  assert.equal(drawn, 1);
+});
+
+test('저장 충돌: 서버에 가 있는 업무 저장 수는 성공·실패 모두 부른 쪽이 이어 가기 전에 줄어든다', async () => {
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  const { app } = conflictClient(async () => { await held; return new Response(JSON.stringify({ ok: false, code: 'CHANGED_ELSEWHERE', error: CHANGED_ELSEWHERE }), { status: 409 }); });
+  const saving = app.run("postJson('/api/track/set-description', { id: 't1', description: '글' }).catch(() => itemWritesInFlight)");
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(app.run('itemWritesInFlight'), 1);
+  release();
+  assert.equal(await saving, 0, '실패를 받은 쪽에서 이미 0');
+  const ok = conflictClient(() => new Response('{"ok":true}'));
+  assert.equal(await ok.app.run("postJson('/api/track/set-priority', { id: 't1', priority: 'high' }).then(() => itemWritesInFlight)"), 0);
+});
+
 test('입력 씹힘 ④: 체크박스·라디오·select·버튼에 초점이 있으면 미루지 않고, 글자 칸(text·search·date·textarea·contenteditable)만 미룬다', () => {
   const app = pureClient();
   const fx = holdFixture(app);
@@ -570,6 +601,97 @@ test('failed card action stays visible and restores its original checkbox state'
   assert.equal(checkbox.checked, false);
   assert.equal(card.getAttribute('aria-busy'), undefined);
   assert.equal(app.nodes.has('liveRegion'), false);
+});
+
+// 저장 충돌: 업무 하나를 고치는 요청에는 화면이 본 마지막 수정 시각(reportRefs[id].rev)을 expect로 붙이고,
+// 다른 창이 먼저 고쳐 409가 오면 서버 문구를 보이며 목록을 다시 받는다. 부른 쪽은 실패를 받아 적던 칸을 그대로 둔다.
+const CHANGED_ELSEWHERE = '새 기록이나 다른 창의 변경이 있어요. 적은 내용은 그대로 있어요. 최신 내용을 확인한 뒤 다시 저장해 주세요.';
+function conflictClient(answer) {
+  const app = client(new Response('{"ok":true}'));
+  const sent = [];
+  app.context.fetch = async (url, options) => { const body = JSON.parse(options.body); sent.push({ url, body }); return answer(url, body, sent.length); };
+  app.run("latestData = { reportRefs: { t1: { id: 't1', rev: '2026-10-08T01:00:00.000Z' }, t2: { id: 't2', rev: null }, old: { id: 'old' } } }");
+  return { app, sent };
+}
+
+test('저장 충돌: 업무 수정 요청에 본 시각을 expect로 붙인다 — 옛 서버(rev 없음)·목록에 없는 업무·이미 expect가 있는 요청·다른 요청은 그대로', async () => {
+  const { app, sent } = conflictClient(() => new Response('{"ok":true}'));
+  await app.run("request('/api/track/set-description', { method: 'POST', body: JSON.stringify({ id: 't1', description: '새 제목' }) })");
+  await app.run("postJson('/api/track/set-priority', { id: 't2', priority: 'high' })");
+  await app.run("postJson('/api/track/set-priority', { id: 'old', priority: 'high' })");
+  await app.run("postJson('/api/track/set-priority', { id: 'nope', priority: 'high' })");
+  await app.run("postJson('/api/track/set-scheduled', { id: 't1', scheduled: null, inbox: true, expect: '2026-10-09' })");
+  await app.run("postJson('/api/track/seen', { id: 't1' })");
+  await app.run("postJson('/api/today-task/create', { description: 'x' })");
+  assert.deepEqual(plain(sent.map(one => one.body.expect ?? '없음')), [{ updated: '2026-10-08T01:00:00.000Z' }, { updated: null }, '없음', '없음', '2026-10-09', '없음', '없음']);
+});
+
+test('저장 충돌: 409면 서버 문구를 보이고 실패로 돌려주며(적던 칸은 부른 쪽이 그대로 둔다) 목록을 다시 받는다', async () => {
+  const { app } = conflictClient(() => new Response(JSON.stringify({ ok: false, code: 'CHANGED_ELSEWHERE', error: CHANGED_ELSEWHERE }), { status: 409 }));
+  app.run('var reloads = 0; load = async () => { reloads += 1; };');
+  await assert.rejects(app.run("postJson('/api/track/set-description', { id: 't1', description: '적던 글' })"), /다른 창의 변경/);
+  assert.match(app.nodes.get('liveRegion').textContent, new RegExp(CHANGED_ELSEWHERE.replace(/[.]/g, '\\.')));
+  assert.doesNotMatch(app.nodes.get('liveRegion').textContent, /저장됐는지 확인하지 못했어요/);
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(app.run('reloads'), 1, '목록을 한 번 다시 받는다');
+});
+
+test('저장 충돌: 같은 업무를 잇달아 고치면 앞 저장이 끝난 뒤 그 응답의 새 시각으로 다음 요청을 보낸다', async () => {
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  const { app, sent } = conflictClient(async (url, body, count) => {
+    if (count === 1) { await held; return new Response(JSON.stringify({ ok: true, revisions: { t1: '2026-10-08T02:00:00.000Z' } })); }
+    return new Response(JSON.stringify({ ok: true, revisions: { t1: '2026-10-08T03:00:00.000Z' } }));
+  });
+  const first = app.run("postJson('/api/track/set-priority', { id: 't1', priority: 'high' })");
+  const second = app.run("postJson('/api/track/toggle', { id: 't1', status: 'done' })");
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(sent.length, 1, '앞 요청이 끝나기 전에는 보내지 않는다');
+  release();
+  await first; await second;
+  assert.deepEqual(plain(sent.map(one => one.body.expect)), [{ updated: '2026-10-08T01:00:00.000Z' }, { updated: '2026-10-08T02:00:00.000Z' }]);
+  assert.equal(app.run("itemExpect('t1').updated"), '2026-10-08T03:00:00.000Z');
+});
+
+test('저장 충돌: 늦게 온 목록이 옛 시각을 들고 와도 이 창이 성공시킨 시각(revisions)이 새 것이면 그 값을 보낸다 — 남의 더 새 시각은 목록 값', async () => {
+  const { app, sent } = conflictClient((url, body, count) => new Response(JSON.stringify(count === 1
+    ? { ok: true, revisions: { t1: '2026-10-08T02:00:00.000Z', t2: '2026-10-08T02:30:00.000Z' } } : { ok: true })));
+  await app.run("postJson('/api/workflow/task-batch', { ids: ['t1', 't2'], change: { scheduled: null } })");
+  // 저장 전에 떠난 목록 요청이 늦게 도착 — 옛 시각을 들고 온다.
+  app.run("latestData = { reportRefs: { t1: { id: 't1', rev: '2026-10-08T01:00:00.000Z' }, t2: { id: 't2', rev: '2026-10-08T05:00:00.000Z' } } }");
+  await app.run("postJson('/api/track/set-priority', { id: 't1', priority: 'high' })");
+  await app.run("postJson('/api/track/set-priority', { id: 't2', priority: 'high' })");
+  assert.deepEqual(plain(sent.slice(1).map(one => one.body.expect)), [{ updated: '2026-10-08T02:00:00.000Z' }, { updated: '2026-10-08T05:00:00.000Z' }]);
+});
+
+test('저장 충돌: 409 뒤 줄 서 있던 같은 업무 요청은 보내지 않고 같은 이유로 끝난다(알림 한 번) — 다음 요청은 다시 보낸다', async () => {
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  const { app, sent } = conflictClient(async (url, body, count) => {
+    if (count === 1) { await held; return new Response(JSON.stringify({ ok: false, code: 'CHANGED_ELSEWHERE', error: CHANGED_ELSEWHERE }), { status: 409 }); }
+    return new Response('{"ok":true}');
+  });
+  app.run('var notices = 0; var pass = showNotice; showNotice = (...args) => { if (args[1]) notices += 1; return pass(...args); };');
+  const first = app.run("postJson('/api/track/set-priority', { id: 't1', priority: 'high' })");
+  const second = app.run("postJson('/api/track/toggle', { id: 't1', status: 'done' })");
+  release();
+  await assert.rejects(first, /다른 창의 변경/);
+  await assert.rejects(second, error => error.code === 'CHANGED_ELSEWHERE');
+  assert.equal(sent.length, 1, '줄 서 있던 요청은 보내지 않는다');
+  assert.equal(app.run('notices'), 1, '알림은 한 번');
+  await app.run("postJson('/api/track/set-priority', { id: 't1', priority: 'low' })");
+  assert.equal(sent.length, 2);
+});
+
+test('저장 충돌: 글을 고치는 칸은 열 때의 시각을 들고 있다가 닫힐 때까지 그대로 보낸다(세 곳)', () => {
+  const app = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const meetings = fs.readFileSync(path.join(__dirname, 'meetings-ui.js'), 'utf8');
+  assert.match(app, /const expect = itemExpect\(item\.id\);\n  let settled = false, conflicted = false;/, '상세 카드 제목');
+  assert.match(app, /set-description', \{ id: item\.id, description: value, expect \}/);
+  assert.match(app, /const expect = itemExpect\(item\.id\);\n    let committed = false;/, '목록 줄 문구');
+  assert.match(app, /body: JSON\.stringify\(\{ id: item\.id, description: val, expect \}\)/);
+  assert.match(meetings, /const expect = itemExpect\(item\.id\);\n\n  let settled = false, conflicted = false;/, '회의 항목 문구');
+  assert.match(meetings, /set-description', \{ id: item\.id, description: value, expect \}/);
 });
 
 test('an older server without the storage endpoint shows no banner', async () => {
@@ -12986,7 +13108,7 @@ test('안전장치 정의 불변: request·showNotice·pushUndo·recordUndoFor·
   };
   const hash = (file, name) => crypto.createHash('sha256').update(fnSource(file, name)).digest('hex').slice(0, 16);
   same(Object.fromEntries(['request', 'showNotice', 'pushUndo', 'recordUndoFor', 'toggleTask', 'fadeOutAndRun'].map(name => [name, hash('app.js', name)])), {
-    request: 'f5330efee721c1be', showNotice: '27900565f62632d7', pushUndo: '9c58100ac7b9fe14',
+    request: '6e9659e4a9561c00', showNotice: '27900565f62632d7', pushUndo: '9c58100ac7b9fe14',
     recordUndoFor: 'e4ace20da15f22d4', toggleTask: '56730551bbbf4bc4', fadeOutAndRun: '7863e32aa6abda7c',
   });
   assert.equal(hash('server.js', 'isClientFile'), 'c0879ada26c72b01');
@@ -18198,7 +18320,7 @@ test('입력 보류 장치 불변: uiRenderOrHold·uiHeldFlush·uiRenderHeld·ui
   };
   const hash = name => crypto.createHash('sha256').update(fnSource(name)).digest('hex').slice(0, 16);
   same(Object.fromEntries(['uiRenderOrHold', 'uiHeldFlush', 'uiRenderHeld', 'uiHoldArm', 'replayUndo'].map(name => [name, hash(name)])), {
-    uiRenderOrHold: '68805031256deebb', uiHeldFlush: '992dc2c5f3314d64', uiRenderHeld: '690e256dad4c416d',
+    uiRenderOrHold: '68805031256deebb', uiHeldFlush: '992dc2c5f3314d64', uiRenderHeld: '1a92a60699c04e95',
     uiHoldArm: 'c4f238c73bfcb559', replayUndo: '7f98d7faa77c546d',
   });
 });

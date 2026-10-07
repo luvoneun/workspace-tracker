@@ -570,8 +570,10 @@ function panelMeetingRowEdit(row, titleEl, item, checkbox) {
   input.focus();
   input.select?.();
   if (checkbox) checkbox.disabled = true;
+  // 열 때 본 수정 시각 — 이 칸이 닫힐 때까지 그대로 보낸다(app.js itemExpect). 다른 창 변경으로 거절됐으면 닫을 때 카드를 새로 그린다.
+  const expect = itemExpect(item.id);
 
-  let settled = false;
+  let settled = false, conflicted = false;
   // Esc는 가장 위에 열린 것부터 닫는다 — 여기서는 회의 카드가 아니라 이 입력칸만 되돌린다.
   const cancel = () => {
     if (settled) return;
@@ -581,6 +583,7 @@ function panelMeetingRowEdit(row, titleEl, item, checkbox) {
     if (!input.isConnected) return; // 카드가 이미 다시 그려졌으면 되돌릴 자리가 없다
     input.replaceWith(titleEl);
     titleEl.focus?.();
+    if (conflicted) syncTaskDetail();
   };
   escPush(cancel);
   const commit = async () => {
@@ -591,9 +594,10 @@ function panelMeetingRowEdit(row, titleEl, item, checkbox) {
     escDrop(cancel);
     input.disabled = true; // 포커스가 빠져 load()가 회의 카드를 다시 그릴 수 있게 된다
     try {
-      await postJson('/api/track/set-description', { id: item.id, description: value });
+      await postJson('/api/track/set-description', { id: item.id, description: value, expect });
       await load(); // 개수(`이 회의에서 나온 것 N`)와 레일의 회의 줄까지 함께 맞춰진다 — 새 줄의 체크박스는 잠겨 있지 않다
-    } catch {
+    } catch (error) {
+      if (error?.code === 'CHANGED_ELSEWHERE') conflicted = true;
       settled = false;
       escPush(cancel);
       input.disabled = false;

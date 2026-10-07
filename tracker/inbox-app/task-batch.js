@@ -3,7 +3,8 @@ const { atomicWrite } = require('./safe-storage');
 const fs = { ...nativeFs, writeFileSync: atomicWrite };
 const { randomUUID } = require('node:crypto');
 
-module.exports = ({ files, pattern, parse, validateDate, today }) => {
+// stamp: 고친 줄의 수정 시각(updated)을 새로 적는 server.js의 stampUpdated — 한 건씩 고칠 때와 같게.
+module.exports = ({ files, pattern, parse, validateDate, today, stamp = fieldStr => fieldStr }) => {
   const history = new Map();
   const pick = (fields, keys) => Object.fromEntries(keys.map(key => [key, fields[key] ?? null]));
   function editFields(raw, values) {
@@ -51,7 +52,7 @@ module.exports = ({ files, pattern, parse, validateDate, today }) => {
         const next = record ? record.before : values;
         changes.push({ id: fields.id, before: current, after: { ...next } });
         found.add(fields.id);
-        return `- ${match[1]} #${match[2]}[${editFields(match[3], next)}]`;
+        return `- ${match[1]} #${match[2]}[${stamp(editFields(match[3], next))}]`;
       }).join('\n');
       if (before !== after) updates.push({ file, before, after });
     }

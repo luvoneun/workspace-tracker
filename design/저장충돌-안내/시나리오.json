@@ -1,0 +1,159 @@
+{
+  "name": "저장 충돌 안내 — 다른 창이 먼저 고친 결정 문구를 고쳐 저장",
+  "description": "결정 줄 문구를 고치는 동안 다른 창(여기서는 expect 없이 바로 보내는 요청 = curl과 같음)이 같은 결정을 먼저 고친다. 화면에서 Enter로 저장하면 서버가 409로 거절하고, 알림에 주간요약과 같은 문구가 뜨며, 고치던 칸과 적은 글은 그대로 남아야 한다. 409 뒤 바깥을 눌러(초점이 빠져) 같은 칸이 다시 저장돼도 다시 거절되고 글은 그대로다. Esc로 닫으면 목록에 다른 창의 문구가 보이고, 다시 열어 저장하면 저장된다.",
+  "steps": [
+    {
+      "do": "goto",
+      "url": "/",
+      "waitFor": "#tabBtnRecords",
+      "wait": 500
+    },
+    {
+      "do": "click",
+      "selector": "#tabBtnRecords",
+      "hold": 0
+    },
+    {
+      "do": "wait",
+      "selector": "#decisionList .desc-editable",
+      "timeout": 8000
+    },
+    {
+      "do": "eval",
+      "note": "결정 id·원래 문구 기억",
+      "expr": "(() => { const e = document.querySelector('#decisionList .desc-editable'); window.__hcId = e.closest('[data-item-id]').dataset.itemId; window.__hcText = e.textContent.trim(); return [window.__hcId, window.__hcText]; })()"
+    },
+    {
+      "do": "click",
+      "note": "결정 문구를 눌러 고치기 시작",
+      "selector": "#decisionList .desc-editable",
+      "hold": 0
+    },
+    {
+      "do": "wait",
+      "selector": "#decisionList input:not([type=checkbox]), #decisionList textarea",
+      "timeout": 3000
+    },
+    {
+      "do": "eval",
+      "note": "다른 창이 같은 결정을 먼저 고친다(expect 없이 — curl과 같음)",
+      "expr": "fetch('/api/track/set-description', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: window.__hcId, description: window.__hcText + ' (다른 창)' }) }).then(r => r.status)"
+    },
+    {
+      "do": "type",
+      "note": "이 창에서 끝에 '확인함'을 친다",
+      "text": " 확인함",
+      "ime": true
+    },
+    {
+      "do": "key",
+      "key": "Enter"
+    },
+    {
+      "do": "wait",
+      "ms": 1200
+    },
+    {
+      "do": "shot",
+      "name": "충돌-안내"
+    },
+    {
+      "do": "assert",
+      "message": "알림에 주간요약과 같은 충돌 문구가 떠야 해요",
+      "expr": "(document.getElementById('liveRegion')?.textContent || '').includes('새 기록이나 다른 창의 변경이 있어요. 적은 내용은 그대로 있어요. 최신 내용을 확인한 뒤 다시 저장해 주세요.')"
+    },
+    {
+      "do": "assert",
+      "message": "고치던 칸이 초점을 지닌 채 적은 글을 그대로 갖고 있어야 해요",
+      "expr": "(() => { const a = document.activeElement; return !!a && /^(INPUT|TEXTAREA)$/.test(a.tagName) && !!a.closest('#decisionList') && a.value === window.__hcText + ' 확인함'; })()"
+    },
+    {
+      "do": "assert",
+      "message": "서버에는 다른 창이 고친 문구가 그대로 있어야 해요(덮지 않음)",
+      "expr": "fetch('/api/items').then(r => r.json()).then(d => d.reportRefs[window.__hcId].description === window.__hcText + ' (다른 창)')"
+    },
+    {
+      "do": "eval",
+      "note": "알림 비우기 — 다음 거절을 새로 확인",
+      "expr": "(document.getElementById('liveRegion').textContent = '', 'ok')"
+    },
+    {
+      "do": "click",
+      "note": "바깥(지금 탭 버튼 — 누르면 그 탭 목록을 다시 그린다)을 눌러 초점을 빼 같은 칸을 다시 저장",
+      "selector": "#tabBtnRecords"
+    },
+    {
+      "do": "wait",
+      "ms": 1200
+    },
+    {
+      "do": "shot",
+      "name": "바깥-누름-뒤"
+    },
+    {
+      "do": "assert",
+      "message": "같은 칸의 다시 저장도 거절돼야 해요",
+      "expr": "(document.getElementById('liveRegion')?.textContent || '').includes('새 기록이나 다른 창의 변경이 있어요.')"
+    },
+    {
+      "do": "assert",
+      "message": "적은 글이 칸에 그대로 있어야 해요",
+      "expr": "!!document.querySelector('#decisionList input.desc-edit-input') && document.querySelector('#decisionList input.desc-edit-input').value === window.__hcText + ' 확인함'"
+    },
+    {
+      "do": "assert",
+      "message": "서버에는 여전히 다른 창 문구",
+      "expr": "fetch('/api/items').then(r => r.json()).then(d => d.reportRefs[window.__hcId].description === window.__hcText + ' (다른 창)')"
+    },
+    {
+      "do": "click",
+      "note": "칸으로 돌아가 Esc로 닫기",
+      "selector": "#decisionList input.desc-edit-input"
+    },
+    {
+      "do": "key",
+      "key": "Escape"
+    },
+    {
+      "do": "wait",
+      "ms": 800
+    },
+    {
+      "do": "assert",
+      "message": "닫으면 목록에 다른 창이 고친 문구가 보여야 해요",
+      "expr": "(document.querySelector(`#decisionList [data-item-id=\"${window.__hcId}\"] .desc-editable`)?.textContent || '').trim() === window.__hcText + ' (다른 창)'"
+    },
+    {
+      "do": "click",
+      "note": "다시 열어 고쳐 저장",
+      "selector": "#decisionList .desc-editable"
+    },
+    {
+      "do": "wait",
+      "selector": "#decisionList input.desc-edit-input",
+      "timeout": 3000
+    },
+    {
+      "do": "type",
+      "text": " 확인",
+      "ime": true
+    },
+    {
+      "do": "key",
+      "key": "Enter"
+    },
+    {
+      "do": "wait",
+      "ms": 1200
+    },
+    {
+      "do": "shot",
+      "name": "다시-열어-저장"
+    },
+    {
+      "do": "assert",
+      "message": "최신을 보고 다시 연 저장은 통과해야 해요",
+      "expr": "fetch('/api/items').then(r => r.json()).then(d => d.reportRefs[window.__hcId].description === window.__hcText + ' (다른 창) 확인')"
+    }
+  ]
+}

@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const support = require('./test-support');
-const { directory, server, today, post, items, freePort, deadPid, journalEntry, startServer, jiraModule, json, jiraFake, readJson } = support;
+const { withoutStamp, withoutRevisions, directory, server, today, post, items, freePort, deadPid, journalEntry, startServer, jiraModule, json, jiraFake, readJson } = support;
 let base;
 before(async () => { base = await support.ready(); });
 
@@ -1245,15 +1245,15 @@ test('BMOVE: 옮기면 항목·회의·연결·주간요약이 한 트랜잭션�
   assert.deepEqual(answer.changed, { items: 5, meetings: 2, links: 1, report: 1 });
 
   // ① 업무 파일 — 지라가 걸린 줄(mv03)과 다른 그룹(mv06)은 그대로, 나머지 넷은 jira:IO-48501로.
-  const tasks = fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8');
+  const tasks = withoutStamp(fs.readFileSync(path.join(server.home, 'tasks.md'), 'utf8'));
   assert.match(tasks, /정산 배치 설계 검토하기 #task\[id:mv01 status:to-do priority:high created:2026-09-20 jira:IO-48501\]/);
   assert.doesNotMatch(tasks, /id:mv01[^\n]*group:/);
   assert.match(tasks, /완료한 정산 작업 #task\[id:mv02 status:done priority:medium created:2026-09-18 completed:2026-09-19 jira:IO-48501\]/);
   assert.match(tasks, /id:mv03 status:to-do priority:medium created:2026-09-20 jira:IO-9999\]/, '이미 지라가 걸린 줄은 그대로다');
   assert.match(tasks, /id:mv06[^\n]*group:운영툴\]/, '다른 그룹은 그대로다');
-  assert.match(fs.readFileSync(path.join(server.home, 'checks.md'), 'utf8'), /id:mv04 status:to-do priority:medium created:2026-09-20 who:하늘 jira:IO-48501\]/);
-  assert.match(fs.readFileSync(path.join(server.home, 'decisions.md'), 'utf8'), /id:mv05 status:to-do priority:medium created:2026-09-20 jira:IO-48501\]/);
-  assert.match(fs.readFileSync(path.join(server.home, 'ideas.md'), 'utf8'), /id:mv07 status:to-do priority:low created:2026-09-20 jira:IO-48501\]/, '아이디어도 project: 대신 jira:로 옮긴다');
+  assert.match(withoutStamp(fs.readFileSync(path.join(server.home, 'checks.md'), 'utf8')), /id:mv04 status:to-do priority:medium created:2026-09-20 who:하늘 jira:IO-48501\]/);
+  assert.match(withoutStamp(fs.readFileSync(path.join(server.home, 'decisions.md'), 'utf8')), /id:mv05 status:to-do priority:medium created:2026-09-20 jira:IO-48501\]/);
+  assert.match(withoutStamp(fs.readFileSync(path.join(server.home, 'ideas.md'), 'utf8')), /id:mv07 status:to-do priority:low created:2026-09-20 jira:IO-48501\]/, '아이디어도 project: 대신 jira:로 옮긴다');
 
   // ②③ 회의 프로젝트 · 수동 지라 연결(옮긴 뒤에는 뜻이 없어 지운다)
   const workflow = readJson(path.join(server.home, '.workflow.json'));
@@ -1344,8 +1344,8 @@ test('BMOVE: 되돌리기는 기록에 있는 그 대상만 반대로 옮기고,
   assert.equal(moved.ok, true);
   const undone = await moveUndoPost(server.origin, { moveId: moved.moveId });
   assert.equal(undone.status, 200);
-  assert.deepEqual(undone, { status: 200, ok: true, project: 'group:결제 리뉴얼', restored: { items: 5, meetings: 2, report: 1 }, skipped: 0 });
-  assert.deepEqual(files.map(name => fs.readFileSync(path.join(server.home, name), 'utf8')), before, '옮기기 전과 글자 하나까지 같다');
+  assert.deepEqual(withoutRevisions(undone), { status: 200, ok: true, project: 'group:결제 리뉴얼', restored: { items: 5, meetings: 2, report: 1 }, skipped: 0 });
+  assert.deepEqual(files.map(name => withoutStamp(fs.readFileSync(path.join(server.home, name), 'utf8'))), before, '옮기기 전과 글자 하나까지 같다(수정 시각만 새로 붙는다)');
   // .workflow.json은 meetings·projectLinks가 옮기기 전과 같다 — 이동 기록(`projectMoves`)만 빈 배열로
   // 남는다(비운 기록도 한 번 만들어진 칸은 다른 표(반응 필요 치우기 등)처럼 지우지 않고 둔다).
   const workflowAfter = readJson(path.join(server.home, '.workflow.json'));
