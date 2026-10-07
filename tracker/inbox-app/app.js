@@ -904,7 +904,11 @@ const UI_RARE = { here: 2000, dot: 300 };
 function uiCheer(el, strict = false) {
   if (!el || !el.classList || detailReduce() || document.hidden) return el;
   if (strict && uiGlideMode() !== 'all') return el;
+  // 숨은 탭·닫힌 자리에 붙으면 나중에 다시 보일 때 처음부터 돈다(display:none에서 돌아오면 애니메이션이 다시 시작) — 숨은 자리에는 달지 않는다.
+  if (typeof el.closest === 'function' && el.closest('[hidden]')) return el;
   el.classList.add('d-cheer');
+  // 끝나면 뗀다 — 같은 요소가 숨었다 다시 보여도(창을 닫았다 열기·탭 돌아오기) 또 튀지 않는다.
+  if (typeof el.addEventListener === 'function') el.addEventListener('animationend', () => el.classList.remove('d-cheer'), { once: true });
   return el;
 }
 // 여기예요 밝히기(.d-here): 한 가지 모양·한 가지 길이(UI_RARE.here). 어디로 데려왔는지 보이게 할 때만 — 색은 부르는 쪽이 클래스(is-warn 등)나
@@ -2294,7 +2298,7 @@ function isTyping() {
 let todaySort = 'project';
 // 완료 그룹은 접힌 채로 시작한다 — 첫 화면에 오늘 할 일이 가장 많이 보이게.
 let todayDoneOpen = false;
-let todayHadOpen = false; // 앞 그리기에 남은 할 일이 있었나 — 다 끝냄 축하(uiCheer)는 이 값이 true였다가 비는 순간만
+let todayOpenIds = new Set(); // 앞 그리기에서 아직 안 끝난 할 일의 id — 다 끝냄 축하(uiCheer)는 이 할 일이 전부 '끝남'이 되어 목록이 빈 순간만(미루기·지우기로 빠진 것은 아니다)
 // 긴 목록은 위 3줄만 보이고 나머지는 `N개 더 ›`로 펼친다(프로젝트 카드의 읽는 그룹 — 새로 들어온 것은 놓치지 않게 접지 않는다).
 // 펼침은 화면 메모리에만 — 새로고침하면 접힌 채로 시작하고, 3줄 이하로 줄면 접힘으로 돌아간다.
 const UI_FOLD = 3;
@@ -6316,10 +6320,11 @@ function renderTodayTasksNow(items) {
     list.insertAdjacentHTML('beforeend', doneItems.length
       ? '<div class="d-empty">오늘 할 일을 모두 끝냈어요.</div>'
       : '<div class="d-empty is-short">오늘 할 일이 비었어요.</div>');
-    // 축하 한 번 — 방금 내가 마지막 할 일을 끝낸 순간만(앞 그리기에는 할 일이 남아 있었고, 지금은 내 동작 직후).
-    if (doneItems.length && todayHadOpen) uiCheer(list.lastElementChild, true);
+    // 축하 한 번 — 방금 내가 마지막 할 일을 '끝낸' 순간만: 앞 그리기에 남아 있던 할 일이 전부 지금 끝남이고(나중에로 미루거나 지워서 빈 것은 아니다), 지금은 내 동작 직후.
+    const doneIds = new Set(doneItems.map(item => String(item.id)));
+    if (todayOpenIds.size && [...todayOpenIds].every(id => doneIds.has(id))) uiCheer(list.lastElementChild, true);
   }
-  todayHadOpen = !todayCleared;
+  todayOpenIds = new Set([...active, ...doing].map(item => String(item.id)));
 
   if (doneItems.length) {
     list.appendChild(uiGroupHeading('완료', doneItems.length, {
