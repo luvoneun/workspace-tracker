@@ -214,7 +214,7 @@ function buildPrompt(opts, infos, baseTip, modelPick) {
   const humanFiles = [...new Set(infos.flatMap((i) => i.files.filter((f) => HUMAN_SPEED_FILES.has(path.basename(f.file))).map((f) => f.file)))];
   if (humanFiles.length) {
     L.push('## 사람 속도 확인');
-    L.push(`- 입력·클릭 파일이 바뀜(${humanFiles.join(', ')}). 입력칸·클릭 동작이 바뀐 일이면 써 보기 데이터 임시 서버(4350대 포트)와 헤드리스 크롬에서 실제 마우스(누름 100ms)·실제 한글 조합(CDP Input.imeSetComposition)으로 한 번 눌러 보고, 창이 가려져 앱이 안 움직이면 그렇게 적을 것(0ms 자동 클릭은 의미 없음).`);
+    L.push(`- 입력·클릭 파일이 바뀜(${humanFiles.join(', ')}). 입력칸·클릭·저장 동작이 바뀐 일이면 \`node tools/human-check.mjs <시나리오.json> --serve\`로 돌린다(누름 0·50·100·150·300ms·실제 한글 조합, 자기 크롬·자기 pid만 — 쓰는 법은 tools/human-check/README.md). 바뀐 흐름에 맞는 시나리오가 tools/human-check/scenarios/에 없으면 하나 써서 같이 커밋하고, 결과 요약 줄(통과 N · 실패 N · 못 돎 N)과 index.html 경로를 보고에 적을 것.`);
     L.push('');
   }
 

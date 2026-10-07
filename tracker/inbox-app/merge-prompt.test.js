@@ -238,6 +238,7 @@ test('입력·클릭 파일이 바뀌면 사람 속도 확인 줄이 붙고, 아
   branchWith(r, 'b2', { [`${IA}ui.css`]: 'a{}\n' });
   const yes = gen(r, ['b1', ...BASE, '--dry-run']).out;
   assert.match(yes, /## 사람 속도 확인/);
+  assert.match(yes, /node tools\/human-check\.mjs <시나리오\.json> --serve/);
   assert.match(yes, /imeSetComposition/);
   assert.match(yes, /누름 100ms/);
   const no = gen(r, ['b2', ...BASE, '--dry-run']).out;
