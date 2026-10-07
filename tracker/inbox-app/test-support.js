@@ -99,16 +99,17 @@ function serverReady(child, origin, log) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => finish(new Error(`${HANG_LABEL} 서버가 듣기 시작하지 않았습니다: ${log()}`)), HANG_MS);
     const onData = () => { if (/^(?:ready|슬랙 인박스 앱: http)/m.test(log())) finish(); };
+    // 'exit'가 아니라 'close' — 죽기 전에 찍은 이유(stderr)가 log에 다 들어온 뒤에 알린다.
     const onExit = code => finish(new Error(`서버가 종료되었습니다 (${code}): ${log()}`));
     function finish(error) {
       clearTimeout(timer);
       child.stdout.off('data', onData);
-      child.off('exit', onExit);
+      child.off('close', onExit);
       if (error) reject(error); else resolve();
     }
     child.stdout.on('data', onData);
-    child.once('exit', onExit);
-    if (child.exitCode !== null) onExit(child.exitCode); else onData();
+    child.once('close', onExit);
+    if (child.exitCode !== null && child.stdout.destroyed) onExit(child.exitCode); else onData();
   }).then(async () => {
     const response = await fetch(origin + '/api/storage-status');
     if (!response.ok) throw new Error(`서버가 듣기 시작했지만 storage-status가 ${response.status}입니다: ${log()}`);

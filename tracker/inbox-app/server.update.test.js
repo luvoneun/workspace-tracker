@@ -48,14 +48,15 @@ function remoteFixture(t, { channel = 'stable' } = {}) {
 
 // 원격 확인(임시 bare 저장소에 `git ls-remote`)이 끝난 뒤의 /api/about. 서버는 그 확인을 5초까지만 기다렸다 답하고(설정 화면용)
 // `?cached=1`은 아예 기다리지 않는다 — 맥이 멈칫해 확인이 늦으면 "새 버전 없음"으로 읽혀 흔들렸다. 확인이 끝났다는 표시
-// (`update.checkedAt`)가 올 때까지 cached로 다시 묻는다(멈춘 경우만 안전망). 첫 물음은 부른 쪽이 고른 그대로다.
+// (`update.checkedAt`)가 올 때까지 다시 묻는다(멈춘 경우만 안전망). 첫 물음은 부른 쪽이 고른 그대로다. 다시 물을 때는
+// `?check=1`(설정의 `새 버전 확인`과 같은 길) — 도는 확인을 기다리고, 확인이 실패로 끝났으면 1분 뒤 다시 묻게 한다.
 async function checkedAbout(base, { cached = false } = {}) {
   let about = await (await fetch(base + (cached ? '/api/about?cached=1' : '/api/about'))).json();
   const deadline = Date.now() + HANG_MS;
   while (!about.update.checkedAt) {
     if (Date.now() > deadline) throw new Error(`${HANG_LABEL} 원격 확인이 끝나지 않았습니다`);
     await new Promise(resolve => setTimeout(resolve, 50));
-    about = await (await fetch(base + '/api/about?cached=1')).json();
+    about = await (await fetch(base + '/api/about?check=1')).json();
   }
   return about;
 }
