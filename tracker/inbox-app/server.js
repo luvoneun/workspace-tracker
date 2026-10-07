@@ -1,7 +1,10 @@
 const http = require('http');
 const nativeFs = require('fs');
 const { atomicWrite } = require('./safe-storage');
+const { AsyncLocalStorage } = require('node:async_hooks');
 let readScope = null;
+// 요청 하나가 새로 적은 업무 수정 시각(id → updated)을 모은다 — safeHandle이 성공 응답에 `revisions`로 싣는다(stampUpdated).
+const stampScope = new AsyncLocalStorage();
 const fs = { ...nativeFs, readFileSync: (file,encoding) => {
   if(!readScope || typeof file!=='string')return nativeFs.readFileSync(file,encoding);
   const key=`${file}:${encoding || 'buffer'}`;
@@ -379,6 +382,9 @@ function stampUpdated(fieldStr) {
   // 같은 1ms 안에 두 번 고쳐도 시각이 달라지게 — 같으면 비교가 바뀐 것을 놓친다.
   const before = Date.parse(fields.updated || '');
   const nowIso = new Date(Math.max(Date.now(), Number.isNaN(before) ? 0 : before + 1)).toISOString();
+  // 이 요청이 새로 적은 시각을 모아 응답에 싣는다 — 화면이 바로 이어 고칠 때 자기 변경을 남의 변경으로 보지 않게.
+  const revisions = stampScope.getStore();
+  if (revisions && fields.id) revisions[fields.id] = nowIso;
   return /(^|\s)updated:\S+/.test(fieldStr)
     ? fieldStr.replace(/(^|\s)updated:\S+/, `$1updated:${nowIso}`)
     : `${fieldStr} updated:${nowIso}`;
@@ -1417,8 +1423,7 @@ function retypeTrackItem(id, type) {
   if (type === 'task' && !values.scheduled) values.scheduled = 'none';
   if (!values.status) values.status = 'to-do';
   if (!values.priority) values.priority = 'medium';
-  values.updated = new Date().toISOString();
-  const fieldStr = RETYPE_KEEP[type].filter(name => values[name] !== undefined).map(name => `${name}:${values[name]}`).join(' ');
+  const fieldStr = stampUpdated(RETYPE_KEEP[type].filter(name => values[name] !== undefined).map(name => `${name}:${values[name]}`).join(' '));
   const line = `- ${found.match[1]} #${type}[${fieldStr}]`;
   const targetPath = path.join(TRACKER_DIR, RETYPE_FILE[type]);
   // 옛 항목이 이미 그 파일에 있으면(옛 기록은 한 파일에 섞여 있기도 하다) 그 자리에서 종류만 바꾼다.
@@ -1583,7 +1588,7 @@ function renameProject({ project, name }) {
       if (fieldStr === match[3]) return line;
       touched = true;
       items += 1;
-      return `- ${match[1]} #${match[2]}[${fieldStr}]`;
+      return `- ${match[1]} #${match[2]}[${stampUpdated(fieldStr)}]`;
     });
     if (touched) fs.writeFileSync(filePath, next.join('\n'));
   });
@@ -1665,7 +1670,7 @@ function moveProject({ project, to, label }) {
         .concat(`jira:${to}`).join(' ');
       touched = true;
       if (fields.id) items.push(fields.id);
-      return `- ${match[1]} #${match[2]}[${fieldStr}]`;
+      return `- ${match[1]} #${match[2]}[${stampUpdated(fieldStr)}]`;
     });
     if (touched) fs.writeFileSync(filePath, next.join('\n'));
   });
@@ -1732,7 +1737,7 @@ function undoMoveProject({ moveId }) {
         .concat(`${key}:${from.replace(/\s+/g, '_')}`).join(' ');
       touched = true;
       itemsRestored += 1;
-      return `- ${match[1]} #${match[2]}[${fieldStr}]`;
+      return `- ${match[1]} #${match[2]}[${stampUpdated(fieldStr)}]`;
     });
     if (touched) fs.writeFileSync(filePath, next.join('\n'));
   });
@@ -1814,7 +1819,7 @@ function mergeProject({ project, to }) {
       if (!fields.id) throw new Error('id가 없는 항목이 있어 되돌릴 수 없어요.');
       keys.forEach(key => items.push({ id: fields.id, key }));
       touched = true;
-      return `- ${match[1]} #${match[2]}[${parts.join(' ')}]`;
+      return `- ${match[1]} #${match[2]}[${stampUpdated(parts.join(' '))}]`;
     });
     return { filePath, next, touched };
   });
@@ -1897,7 +1902,7 @@ function undoMergeProject({ mergeId }) {
         }).join(' ');
       touched = true;
       itemsRestored += 1;
-      return `- ${match[1]} #${match[2]}[${fieldStr}]`;
+      return `- ${match[1]} #${match[2]}[${stampUpdated(fieldStr)}]`;
     });
     if (touched) fs.writeFileSync(filePath, next.join('\n'));
   });
@@ -3054,6 +3059,14 @@ Object.assign(routeCtx, {
 function publicAssetRequest(req) {
   return req.method==='GET' && /^\/(icons\/[\w-]+\.png|manifest\.webmanifest)(\?.*)?$/.test(req.url||'');
 }
+function withRevisions(body, revisions) {
+  if (typeof body !== 'string' || !Object.keys(revisions).length) return body;
+  try {
+    const data = JSON.parse(body);
+    if (!data || typeof data !== 'object' || Array.isArray(data) || data.ok === false) return body;
+    return JSON.stringify({ ...data, revisions });
+  } catch { return body; }
+}
 function safeHandle(req, res) {
   try {
     if(req.method==='GET')readScope={files:new Map()};
@@ -3068,7 +3081,12 @@ function safeHandle(req, res) {
     res.setHeader('X-Content-Type-Options','nosniff');
     res.setHeader('Referrer-Policy','no-referrer');
     res.setHeader('Cache-Control','no-store');
-    usage.observe(res,()=>handleRequest(req,res));
+    if (req.method !== 'POST') { usage.observe(res,()=>handleRequest(req,res)); return; }
+    // 쓰기 요청은 새로 적은 업무 수정 시각을 모아 성공 응답에 `revisions: { id: updated }`로 싣는다(한 곳 — 경로마다 싣지 않는다).
+    const revisions = {};
+    const end = res.end.bind(res);
+    res.end = (body, ...rest) => end(withRevisions(body, revisions), ...rest);
+    stampScope.run(revisions, () => usage.observe(res,()=>handleRequest(req,res)));
   } catch(error) {
     console.error('요청 처리 실패:', error.message);
     if (!res.headersSent) res.writeHead(500, {'Content-Type':'application/json; charset=utf-8'});

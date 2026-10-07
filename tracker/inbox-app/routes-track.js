@@ -20,7 +20,8 @@ module.exports = function trackRoutes(req, res, url, ctx) {
   // `{ updated }` 꼴이면 첫 저장 직전에 저장 잠금 안에서 지금 줄의 수정 시각(refs의 rev)과 비교하고, 다르면 409로 거절해
   // 아무것도 쓰지 않는다. 한 요청 안의 두 번째 저장(예정일 → 받음 표시)은 같은 잠금 안이라 다시 비교하지 않는다.
   // `expect`가 없으면(옛 화면) 예전처럼 저장한다. set-scheduled의 되돌리기 `expect`(예정일 글자·null)는 꼴이 달라 여기서 보지 않는다.
-  let expected = null, stampedId = null;
+  // 저장되면 새 수정 시각은 server.js safeHandle이 응답의 `revisions`에 싣는다.
+  let expected = null;
   const guarded = GUARDED.has(url.pathname) && req.method === 'POST';
   const readBody = request => ctx.readBody(request).then(body => {
     const want = body && body.expect;
@@ -37,24 +38,9 @@ module.exports = function trackRoutes(req, res, url, ctx) {
       expected = null;
       const now = getReportRefs()[want.id];
       if (now && (now.rev || null) !== want.updated) throw Object.assign(new Error(CHANGED_ELSEWHERE), { status: 409, code: 'CHANGED_ELSEWHERE' });
-      stampedId = want.id;
       return save(...args);
     });
   };
-  // 비교한 요청이 저장되면 응답에 새 수정 시각을 싣는다 — 같은 창이 이어서 고칠 때 그 값을 `expect`로 쓰게.
-  if (guarded) {
-    const end = res.end.bind(res);
-    res.end = body => {
-      if (stampedId && typeof body === 'string') {
-        try {
-          const data = JSON.parse(body);
-          const ref = getReportRefs()[stampedId];
-          if (data && data.ok && ref) body = JSON.stringify({ ...data, updated: ref.rev || null });
-        } catch { /* 응답은 그대로 */ }
-      }
-      return end(body);
-    };
-  }
   const [promoteIdeaToToday, removeTrackItem, setIdeaProject, setTrackDescription, setTrackDoing, setTrackDue, setTrackField, setTrackGroup,
     setTrackJira, setTrackPriority, setTrackWho, toggleTrackStatus] = [ctx.promoteIdeaToToday, ctx.removeTrackItem, ctx.setIdeaProject,
     ctx.setTrackDescription, ctx.setTrackDoing, ctx.setTrackDue, ctx.setTrackField, ctx.setTrackGroup, ctx.setTrackJira, ctx.setTrackPriority,
