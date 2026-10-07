@@ -528,7 +528,7 @@ test('입력 씹힘 ③: 오늘 탭 세 목록·프로젝트 탭·회의 탭이 
     assert.match(loadSrc, new RegExp(`uiRenderOrHold\\('${name}', document\\.getElementById\\('${zone}'\\)`));
   }
   const tabs = definitions.slice(definitions.indexOf('function renderActiveTabLists() {'));
-  assert.match(tabs, /uiRenderOrHold\('projects', document\.getElementById\('projectBody'\)/);
+  assert.match(tabs, /uiRenderOrHold\('projects', uiZones\(document\.getElementById\('projectList'\), document\.getElementById\('projectBody'\)\)/);
   assert.match(tabs, /uiRenderOrHold\('meetings', document\.getElementById\('meetingBody'\)/);
 });
 
@@ -17266,7 +17266,8 @@ test('줄 이동 C2 입력 보류: 회의·프로젝트 탭은 칸에서 치는 
     assert.equal(fx.plays.length, 0, `${tab}: 푸는 그리기는 움직이지 않는다`);
   }
   // 원문: load의 두 탭 그리기는 uiGlideUnlessLate로 감싼다.
-  assert.match(script, /uiRenderOrHold\('projects', document\.getElementById\('projectBody'\), uiGlideUnlessLate\(\(\) => \{/);
+  assert.match(script, /uiRenderOrHold\('projects', uiZones\(document\.getElementById\('projectList'\), document\.getElementById\('projectBody'\)\), uiGlideUnlessLate\(\(\) => \{/);
+  assert.match(script, /uiRenderOrHold\('records', zone, uiGlideUnlessLate\(\(\) => \{/);
   assert.match(script, /uiRenderOrHold\('meetings', document\.getElementById\('meetingBody'\), uiGlideUnlessLate\(\(\) => \{/);
 });
 
@@ -20736,4 +20737,194 @@ test('입력칸 떠나면 저장(재검수): 고치던 칸에서 곧장 복사·
   app.run("sent = []; b = open(1, '확정 전에 고친 문장'); leave(b, { tagName: 'BUTTON' });");
   await app.run('reportConfirm(item, true)');
   assert.deepEqual(leaveSent(app).map(body => body.action), ['edit', 'confirm'], '확정은 저장 다음에');
+});
+
+// ---------- 입력 보호 구멍 막기 — 실제 한글 조합 이벤트열(compositionstart → input → compositionend) ----------
+// 실제 소스의 문서 듣기(조합 추적) 두 줄을 가짜 문서에 붙이고, 칸에 브라우저와 같은 차례로 이벤트를 쏜다
+// (문서의 capture 듣기 → 칸의 듣기). 칸의 값은 input 때 글자가 붙는다.
+function compositionBus(app, file, pattern) {
+  const doc = app.context.document;
+  const docHandlers = {};
+  doc.addEventListener = (name, fn) => { (docHandlers[name] ||= []).push(fn); };
+  const source = fs.readFileSync(path.join(__dirname, file), 'utf8');
+  const lines = source.split('\n').filter(line => /^document\.addEventListener\('composition(start|end)'/.test(line) && pattern.test(line));
+  assert.equal(lines.length, 2, `${file}의 조합 추적 줄 두 개`);
+  app.run(lines.join('\n'));
+  const fire = (node, type, data = '') => {
+    const event = { type, target: node, data, isComposing: type !== 'compositionend' };
+    (docHandlers[type] || []).forEach(fn => fn(event));
+    (node.handlers?.[type] || []).forEach(fn => fn(event));
+    node.listeners?.[type]?.(event);
+  };
+  return {
+    start(node, text) { fire(node, 'compositionstart'); node.value = `${node.value || ''}${text}`; fire(node, 'input', text); },
+    type(node, text) { node.value = `${node.value || ''}${text}`; fire(node, 'input', text); },
+    end(node) { fire(node, 'compositionend'); },
+  };
+}
+
+test('입력 보호 넓힘(아이디어·결정): 결정 줄 문구를 한글로 고치는 중(조합 시작·입력) 다시 그리기가 와도 칸을 새로 만들지 않고, 칸을 떠나면 한 번 그린다 — 위 추가 칸에서 치는 중이면 바로 그린다', async () => {
+  const app = pureClient();
+  const fx = holdFixture(app);
+  const ime = compositionBus(app, 'app.js', /uiComposingEl/);
+  const others = {};
+  app.context.document.getElementById = id => (id === 'decisionList' ? fx.zone : (others[id] ||= element()));
+  const drawn = [];
+  app.context.renderIdeas = () => drawn.push('아이디어');
+  app.context.renderDecisions = () => drawn.push('결정');
+  app.context.renderDecisionArchive = () => drawn.push('반영 완료');
+  app.run("latestData = { ideas: [], decisions: [] }; activeTabKey = 'records'; tabStale.records = true;");
+  const edit = fx.field();
+  edit.value = '결정 문구 ';
+  fx.focus(edit);
+  ime.start(edit, '고');
+  ime.type(edit, 'ㅊ');
+  app.run('renderActiveTabLists()');
+  assert.deepEqual(drawn, [], '조합 중인 칸이 있는 목록은 그리지 않는다');
+  assert.equal(app.context.document.activeElement, edit, '같은 칸에 초점이 그대로');
+  assert.equal(edit.value, '결정 문구 고ㅊ', '친 글자 그대로');
+  assert.equal(app.run('uiComposingEl'), edit);
+  assert.equal(app.run('tabStale.records'), true, '다음에 그릴 것으로 남는다');
+  ime.end(edit); await holdTick();
+  assert.deepEqual(drawn, [], '조합이 끝나도 칸에 있으면(되돌릴 수 없는 칸) 기다린다');
+  fx.focus(app.context.document.body);
+  edit.fire('focusout'); await holdTick();
+  assert.deepEqual(drawn, ['아이디어', '결정', '반영 완료'], '떠나면 세 목록을 한 번에');
+  assert.equal(app.run('tabStale.records'), false);
+  // 목록 밖의 `결정 추가` 칸(다시 만들지 않는 칸)에서 치는 중이면 새 줄이 바로 보이게 그린다.
+  const quick = Object.assign(element(), { tagName: 'INPUT', type: 'text' });
+  fx.focus(quick);
+  ime.start(quick, '새');
+  app.run('tabStale.records = true; renderActiveTabLists()');
+  assert.equal(drawn.length, 6);
+  ime.end(quick);
+});
+
+test('입력 보호 넓힘(확인 대기): 오른쪽 확인 대기 목록 안 글자 칸에서 한글을 치는 중(조합 시작·입력) load가 와도 목록을 새로 만들지 않고, 칸을 떠나면 마지막 자료로 한 번 그린다 — 지금 레일의 `다음은?`은 한 줄 제안이라 칸은 상세 카드에 뜨지만 목록에 칸이 생겨도 지킨다', async () => {
+  const app = pureClient();
+  const fx = holdFixture(app);
+  const ime = compositionBus(app, 'app.js', /uiComposingEl/);
+  app.context.document.getElementById = id => (id === 'waitingList' ? fx.zone : element());
+  const drawn = [];
+  app.context.renderWaiting = items => drawn.push(items.map(item => item.id).join(','));
+  // load()의 그 줄을 소스 그대로 돌린다(load 전체는 서버를 부른다).
+  const line = definitions.split('\n').find(text => text.includes("uiRenderOrHold('waiting'"));
+  assert.match(line, /uiRenderOrHold\('waiting', document\.getElementById\('waitingList'\), uiGlideUnlessLate\(\(\) => renderWaiting\(data\.waiting \|\| \[\]\)\)\);/);
+  const loadOnce = waiting => app.run(`(() => { const data = ${JSON.stringify({ waiting })}; ${line} })()`);
+  const next = fx.field();
+  next.className = 'd-din';
+  fx.focus(next);
+  ime.start(next, '확');
+  loadOnce([{ id: 'w1' }]);
+  ime.type(next, '인');
+  loadOnce([{ id: 'w1' }, { id: 'w2' }]);
+  assert.deepEqual(drawn, [], '조합 중에는 그리지 않는다');
+  assert.equal(app.context.document.activeElement, next);
+  assert.equal(next.value, '확인');
+  ime.end(next); await holdTick();
+  assert.deepEqual(drawn, []);
+  fx.focus(app.context.document.body);
+  next.fire('focusout'); await holdTick();
+  assert.deepEqual(drawn, ['w1,w2'], '마지막 것 하나만 한 번(갱신이 낡은 채 남지 않는다)');
+  // 치는 중이 아니면 바로 그린다.
+  loadOnce([{ id: 'w3' }]);
+  assert.deepEqual(drawn, ['w1,w2', 'w3']);
+});
+
+test('입력 보호 넓힘(프로젝트 찾기): 왼쪽 `프로젝트 찾기` 칸에 한글을 치는 중(조합 시작·입력) 다시 그리기가 와도 칸을 새로 만들지 않고, 떠나면 그린다 — 구역은 목록과 본문(상세 카드는 빼고)', async () => {
+  const app = pureClient();
+  const fx = holdFixture(app);
+  const ime = compositionBus(app, 'app.js', /uiComposingEl/);
+  const body = element();
+  const detail = Object.assign(element(), { tagName: 'TEXTAREA' });
+  body.contains = node => node === body;
+  app.context.document.getElementById = id => ({ projectList: fx.zone, projectBody: body }[id] || element());
+  let drawn = 0;
+  app.context.renderProjects = () => { drawn += 1; };
+  app.run("latestData = {}; activeTabKey = 'projects'; tabStale.projects = true;");
+  const find = fx.field();
+  find.className = 'd-din d-pfind';
+  fx.focus(find);
+  ime.start(find, '결');
+  app.run('renderActiveTabLists()');
+  assert.equal(drawn, 0, '찾기 칸을 새로 만들지 않는다');
+  assert.equal(app.context.document.activeElement, find);
+  assert.equal(find.value, '결');
+  ime.type(find, '제');
+  ime.end(find); await holdTick();
+  assert.equal(drawn, 0);
+  fx.focus(app.context.document.body);
+  find.fire('focusout'); await holdTick();
+  assert.equal(drawn, 1);
+  assert.equal(app.run('tabStale.projects'), false);
+  // 줄 옆 상세 카드에서 치는 중이면 목록은 미루지 않는다(상세는 syncTaskDetail이 지킨다).
+  fx.focus(detail);
+  app.run('tabStale.projects = true; renderActiveTabLists()');
+  assert.equal(drawn, 2);
+});
+
+test('입력 보호: 여러 요소를 묶은 구역(uiZones)은 어느 하나에 든 칸이면 품고, 잠긴 칸도 모두에서 찾는다', () => {
+  const app = pureClient();
+  const a = element(); const b = element(); const inA = {}; const inB = {}; const out = {};
+  a.contains = node => node === inA; b.contains = node => node === inB;
+  a.querySelectorAll = () => [inA]; b.querySelectorAll = () => [inB];
+  const zone = app.context.uiZones(a, null, b);
+  assert.equal(zone.contains(inA), true);
+  assert.equal(zone.contains(inB), true);
+  assert.equal(zone.contains(out), false);
+  assert.equal(zone.querySelectorAll('input:disabled').length, 2);
+});
+
+test('입력 보호(조합 추적): 조합 중인 칸이 다시 그리기로 지워져 compositionend가 오지 않아도 조합 표시가 남지 않는다 — 줄 이동이 멈춰 있지 않게', () => {
+  const app = pureClient();
+  const fx = holdFixture(app);
+  const ime = compositionBus(app, 'app.js', /uiComposingEl/);
+  const title = fx.field();
+  ime.start(title, '한');
+  assert.equal(app.run('uiComposingLive()'), true);
+  title.isConnected = false; // 칸이 지워짐 — Chrome은 compositionend를 보내지 않는다
+  assert.equal(app.run('uiComposingLive()'), false);
+  app.run('uiComposingEl = {}');
+  assert.equal(app.run('uiComposingLive()'), true, 'isConnected를 모르는 것은 조합 중으로 본다');
+  assert.match(definitions, /if \(uiSchedOpen \|\| uiComposingLive\(\) \|\| document\.hidden\) return null;/);
+});
+
+test('입력 보호(주간요약): 문장 A 바깥 누르기 저장 뒤 다시 그리기는 문장 B의 한글 조합(조합 시작·입력·끝)이 끝날 때까지 — 1초를 넘겨도 끊지 않는다', async () => {
+  const app = blurClient();
+  const ime = compositionBus(app, 'report-ui.js', /reportComposing/);
+  app.run(`draws = 0; renderReportDraft = () => { draws += 1; }; hold = null;
+    reply = () => new Promise(resolve => { hold = () => resolve({ ok: true, status: 200, json: async () => ({ ok: true, undoToken: 'u', report: item.draft }) }); });
+    a = open(0, '앞 문장 고침'); b = open(1, '둘째 '); leave(a);`);
+  await leaveTick(); await leaveTick();
+  const typing = app.run('b.input');
+  typing.value = '둘째 ';
+  ime.start(typing, '무');
+  app.run('hold()');
+  await new Promise(resolve => setTimeout(resolve, 1300));
+  assert.equal(leaveSent(app).length, 1, 'A는 저장됐다');
+  assert.equal(app.run('draws'), 0, '1초가 지나도 B가 조합 중이면 문서를 다시 그리지 않는다');
+  ime.type(typing, 'ㄴ');
+  assert.equal(typing.value, '둘째 무ㄴ');
+  ime.end(typing);
+  await blurSettle(app);
+  assert.equal(app.run('draws'), 1, '조합이 끝나면 한 번 그린다');
+  assert.match(fs.readFileSync(path.join(__dirname, 'report-ui.js'), 'utf8'), /const REPORT_COMPOSE_MAX = 5000;/);
+});
+
+test('입력 보호(주간요약): 조합 중이던 칸이 지워져(compositionend 없음) 남은 조합 표시는 기다림을 붙잡지 않는다', async () => {
+  const app = blurClient();
+  const ime = compositionBus(app, 'report-ui.js', /reportComposing/);
+  app.run(`draws = 0; renderReportDraft = () => { draws += 1; }; hold = null;
+    reply = () => new Promise(resolve => { hold = () => resolve({ ok: true, status: 200, json: async () => ({ ok: true, undoToken: 'u', report: item.draft }) }); });
+    a = open(0, '앞 문장 고침'); b = open(1, '둘째'); leave(a);`);
+  await leaveTick(); await leaveTick();
+  const gone = app.run('b.input');
+  ime.start(gone, '한');
+  gone.connected = false;
+  const started = Date.now();
+  app.run('hold()');
+  await blurSettle(app);
+  assert.equal(app.run('draws'), 1);
+  assert.ok(Date.now() - started < 1000, '상한(5초)까지 기다리지 않는다');
+  assert.equal(app.run('reportStillComposing()'), false);
 });
