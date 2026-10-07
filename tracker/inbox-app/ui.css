@@ -1981,7 +1981,7 @@ body.later-open .page { padding-right: 424px; }
 @media (prefers-reduced-motion: reduce) { .d-here { animation: none !important; box-shadow: inset 0 0 0 999px var(--here-bg), 0 0 0 4px var(--here-bg); } }
 /* 축하 한 번: 오늘 다 끝냄·처음 연결·꾸미기 저장·체크인 완료·새 프로젝트 결과 — 320ms 스프링으로 살짝 커지며 나타난다(넘침은 스프링 안). 움직임 줄이기는 그냥 선다. */
 .d-cheer { animation: d-cheer var(--t-slow) var(--spring-2) both; }
-@keyframes d-cheer { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: none; } }
+@keyframes d-cheer { from { opacity: 0; transform: scale(0.85); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .d-cheer { animation: none !important; } }
 
 /* ---------- 여러 개 선택: 아래 고정 막대 ---------- */
