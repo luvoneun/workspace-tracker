@@ -226,3 +226,29 @@ test('도구 코드는 open-queued·launchctl·네트워크를 실행하지 않�
   assert.doesNotMatch(src, /require\('node:(http|https|net)'\)/);
   assert.doesNotMatch(src, /\bspawn\w*\(/);
 });
+
+test('입력·클릭 파일이 바뀌면 사람 속도 확인 줄이 붙고, 아니면 안 붙는다', () => {
+  const r = makeRepo();
+  branchWith(r, 'b1', { [`${IA}report-ui.js`]: 'x\n' });
+  branchWith(r, 'b2', { [`${IA}ui.css`]: 'a{}\n' });
+  const yes = gen(r, ['b1', ...BASE, '--dry-run']).out;
+  assert.match(yes, /## 사람 속도 확인/);
+  assert.match(yes, /imeSetComposition/);
+  assert.match(yes, /누름 100ms/);
+  const no = gen(r, ['b2', ...BASE, '--dry-run']).out;
+  assert.doesNotMatch(no, /사람 속도 확인/);
+});
+
+test('--summary에 백틱이 있으면 거절한다', () => {
+  const r = makeRepo();
+  branchWith(r, 'b1', { 'a.md': 'a\n' });
+  const g = gen(r, ['b1', '--task', 't1', '--name', '세션', '--summary', '명령 `x` 포함', '--dry-run']);
+  assert.equal(g.code, 1);
+  assert.match(g.err, /백틱 대신 「」/);
+});
+
+test('끝 안내에 after-merge 정리 명령이 찍힌다', () => {
+  const r = makeRepo();
+  branchWith(r, 'b1', { 'a.md': 'a\n' });
+  assert.match(gen(r, ['b1', ...BASE, '--dry-run']).out, /tools\/after-merge\.sh b1 --task <구현 이름표> --merge-task t1/);
+});
