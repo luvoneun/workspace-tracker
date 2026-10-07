@@ -787,6 +787,10 @@ function uiZones(...els) {
 function uiRenderHeld(zone) {
   // 분류 판이 열려 있는 동안은 그 구역을 다시 그리지 않는다(누른 줄·버튼이 사라지면 판이 허공에 뜬다).
   if (zone && uiSchedOpen && uiSchedOpen.zone === zone) return true;
+  // 업무 저장이 서버에 가 있는 동안에는 그 구역의 잠긴(저장 중인) 고치기 칸을 지킨다 — 초점이 빠져 있어도(바깥을 눌러
+  // 저장한 칸) 다시 그리지 않는다. 실패(다른 창 변경 409 등)하면 적은 글이 그 칸에 남아야 한다. 저장이 끝나면 그 저장이
+  // 부르는 load()가 그린다(아래 uiHeldFlush의 같은 규칙을 탭 이동 등 바로 그리는 길에도).
+  if (zone && itemWritesInFlight && [...(zone.querySelectorAll?.('input:disabled, textarea:disabled') || [])].some(uiIsTextEntry)) return true;
   const el = document.activeElement;
   if (!zone || !el || !zone.contains?.(el) || !uiIsTextEntry(el)) return false;
   if (uiComposingEl && uiComposingEl === el) return true;
@@ -2420,10 +2424,13 @@ function itemWriteId(url, options) {
   try { const id = JSON.parse(options.body || '{}').id; return typeof id === 'string' ? id : null; } catch { return null; }
 }
 // 앞 요청이 다른 창 변경으로 거절됐으면 줄 서 있던 같은 업무 요청은 보내지 않고 같은 이유로 끝낸다(알림은 한 번).
+// 서버에 가 있는 업무 저장 수 — 끝나면(성공·실패 모두) 부른 쪽이 이어 가기 전에 줄어든다(uiRenderHeld가 본다).
+let itemWritesInFlight = 0;
 function itemWriteQueue(id, send) {
   const run = (itemWriteChains.get(id) || Promise.resolve(null)).then((conflict) => {
     if (conflict) throw Object.assign(new Error(conflict.message), { code: conflict.code, reported: true });
-    return send();
+    itemWritesInFlight += 1;
+    return send().finally(() => { itemWritesInFlight -= 1; });
   });
   const settled = run.then(() => null, error => (error?.code === 'CHANGED_ELSEWHERE' ? error : null));
   itemWriteChains.set(id, settled);
