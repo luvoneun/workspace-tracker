@@ -230,7 +230,9 @@ function reportLeaveFresh(week, shown) {
 // 칸 하나를 그 칸의 저장 길로 보낸다(탭을 떠날 때·입력칸을 떠날 때가 함께 쓴다). 돌려주는 것:
 // 'skip'(글·저장 길이 이미 없음) · 'closed'(비었거나 같거나 사라진 줄 — 글만 정리했다, 다시 그리기는 부르는 쪽) ·
 // 'saved'(저장됨, 저장 길이 그린다) · 'failed'(글은 reportEdits에 남는다, { error }).
-async function reportLeaveSaveKey(key, fresh) {
+// `quiet`(입력칸 떠나면 저장)이면 문서를 다시 그리지 않는다 — 그 칸만 제자리에서 잠그고 저장 길도 그리지 않게 하며(draw: false),
+// 다시 그리기는 부르는 쪽이 사람이 다른 칸에서 치는 한글 조합이 끝난 뒤에 한 번 한다.
+async function reportLeaveSaveKey(key, fresh, { quiet = false } = {}) {
   const saver = reportLeaveSavers.get(key);
   if (!reportEdits.has(key) || !saver) return { state: 'skip' };
   const value = String(reportEdits.get(key) ?? '');
@@ -246,9 +248,9 @@ async function reportLeaveSaveKey(key, fresh) {
   // 잠기고(reportLeaveSaving), 적기줄은 글을 꺼낸 빈 칸이 된다(그 사이 Enter는 같은 대기열 뒤에 선다).
   if (saver.take) reportEdits.delete(key);
   try {
-    const pending = saver.save(fresh(), value);
-    renderReportDraft(fresh());
-    reportFocusBack();
+    const pending = saver.save(fresh(), value, quiet ? { draw: false } : undefined);
+    if (quiet) reportLeaveLock(key);
+    else { renderReportDraft(fresh()); reportFocusBack(); }
     if (await pending === false) throw new Error(REPORT_LEAVE_FAIL);
     reportLeaveSavers.delete(key);
     return { state: 'saved', saver };
@@ -256,6 +258,15 @@ async function reportLeaveSaveKey(key, fresh) {
     return { state: 'failed', error };
   } finally {
     reportLeaveSaving.delete(key);
+  }
+}
+// 저장 중인 칸을 제자리에서 잠근다(문서를 갈아 끼우지 않는다 — 사람이 막 누른 다른 문장·버튼이 떨어져 나가지 않게).
+function reportLeaveLock(key) {
+  const host = document.getElementById('weeklyReportDetail');
+  if (!host || typeof host.querySelectorAll !== 'function') return;
+  const week = String(key).slice(0, String(key).indexOf(':'));
+  for (const el of host.querySelectorAll('[data-edit-row], [data-rename-input]')) {
+    if (el.dataset.renameInput === key || (el.dataset.editRow !== undefined && `${week}:${el.dataset.editRow}` === key)) el.disabled = true;
   }
 }
 
@@ -266,16 +277,21 @@ async function reportLeaveSaveKey(key, fresh) {
 // 누를 때 초점을 가져가지 않는다)·같은 줄 안 링크로 옮길 때, 앱 창 자체가 초점을 잃을 때(다른 앱·다른 창), Enter·Esc로
 // 닫히며 사라질 때, 그 칸이 이미 저장 중일 때. 한글 조합 중이면 조합이 끝난 뒤에 본다. 할 일 칸 적기줄은 늘 떠 있는 줄이라 대상이 아니다.
 function reportBlurWatch(scope, input, key) {
-  // 줄 안의 글자(근거·안내 줄)를 눌러도 초점이 입력칸에 남게 한다 — 누를 수 있는 것(링크·버튼·입력칸)은 그대로 둔다.
-  scope.addEventListener('mousedown', (event) => {
-    const target = event.target;
-    if (target && typeof target.closest === 'function' && target.closest('a, button, input, textarea, select, [tabindex]')) return;
-    event.preventDefault();
-  });
   scope.addEventListener('focusout', (event) => {
     if (input.disabled || !reportEdits.has(key) || reportLeaveSaving.has(key)) return;
     const next = event.relatedTarget;
     if (next && typeof scope.contains === 'function' && scope.contains(next)) return;
+    // 줄 안의 글자(근거·안내 줄)를 눌렀다 — 닫지 않는다. 손을 뗐을 때 글자를 고르지 않았으면 입력칸으로 초점을 돌려놓고,
+    // 골랐으면(근거의 업무 제목을 긁어 복사) 그대로 둔다.
+    if (!next && reportPointerDown && reportPointerTarget && typeof scope.contains === 'function' && scope.contains(reportPointerTarget)) {
+      reportAfterPointer(() => {
+        const picked = typeof window.getSelection === 'function' ? window.getSelection() : null;
+        if (!scope.isConnected || !reportEdits.has(key) || input.disabled || (picked && !picked.isCollapsed)) return;
+        const active = document.activeElement;
+        if (!active || active === document.body) input.focus();
+      });
+      return;
+    }
     // 초점이 줄 밖의 다른 것(다른 문장 글자·버튼·입력칸)으로 옮겨 갔다 — 바로 줄을 세운다(그것을 누른 뒤 문서를 곧바로 다시
     // 그려도 놓치지 않는다).
     if (next) { reportBlurSave(key); return; }
@@ -291,11 +307,36 @@ function reportBlurWatch(scope, input, key) {
     }, 0);
   });
 }
+// 누르고 있는 동안에는 저장·다시 그리기를 미룬다 — 문서를 갈아 끼우면 누른 문장·버튼이 떨어져 나가 손을 뗄 때 click이 사라진다.
+// 손을 뗀 뒤 한 틱(그 사이 click이 먼저 돈다). 창 밖에서 뗐으면 뗐다는 소식이 오지 않으므로 상한까지만 기다린다.
+let reportPointerDown = false;
+let reportPointerTarget = null;
+const reportPointerWaiters = [];
+document.addEventListener('pointerdown', (event) => { reportPointerDown = true; reportPointerTarget = event.target; }, true);
+for (const name of ['pointerup', 'pointercancel']) {
+  document.addEventListener(name, () => {
+    reportPointerDown = false;
+    const waiters = reportPointerWaiters.splice(0);
+    setTimeout(() => waiters.forEach(run => run()), 0);
+  }, true);
+}
+function reportAfterPointer(run) {
+  if (!reportPointerDown) { setTimeout(run, 0); return; }
+  reportPointerWaiters.push(run);
+}
 // 탭을 떠날 때 저장과 같은 줄에 선다 — 한 칸을 두 번 보내지 않는다.
+const reportBlurPending = new Set();   // 바깥을 눌러 저장하려고 줄 선 칸
 function reportBlurSave(key) {
-  const step = () => reportBlurSaveNow(key);
+  reportBlurPending.add(key);
+  const step = () => reportBlurSaveNow(key).finally(() => reportBlurPending.delete(key));
   reportLeaveRun = reportLeaveRun.then(step, step);
   return reportLeaveRun;
+}
+// 고치던 칸에서 곧장 `정리`·`슬랙용으로 복사`·`확정`을 누르면 그 click이 바깥 누르기 저장보다 먼저 돈다 — 줄 선 저장이 있으면
+// 끝난 뒤에 판단한다(그래도 남은 글이 있으면 — 저장 실패 — 예전처럼 저장·취소하라고 알린다). 돌려주는 것은 그 주의 최신 보고.
+async function reportBlurSettle(item) {
+  if (reportBlurPending.size) await reportLeaveRun.catch(() => {});
+  return reportRenderedItem && reportRenderedItem.weekKey === item.weekKey ? reportRenderedItem : item;
 }
 // 그 칸에 초점이 돌아와 있는지(다시 눌러 이어서 고치는 중이면 저장하지 않는다).
 function reportBlurBack(key) {
@@ -306,27 +347,27 @@ function reportBlurBack(key) {
 }
 async function reportBlurSaveNow(key) {
   await reportLeaveWait(() => !reportComposing, 1000);
+  await reportLeaveWait(() => !reportPointerDown, 3000);
   await new Promise(resolve => setTimeout(resolve, 0));
   const shown = reportRenderedItem;
   const saver = reportLeaveSavers.get(key);
   if (!shown || !saver || saver.weekKey !== shown.weekKey || !reportEdits.has(key) || reportBlurBack(key)) return;
   if (!await reportLeaveWait(() => !reportBusy, 20000)) { showNotice(REPORT_BLUR_FAIL, true); return; }
   if (!reportEdits.has(key) || reportBlurBack(key) || !reportRenderedItem || reportRenderedItem.weekKey !== saver.weekKey) return;
-  const step = await reportLeaveSaveKey(key, reportLeaveFresh(saver.weekKey, shown));
-  if (step.state === 'closed' && reportRenderedItem) { renderReportDraft(reportRenderedItem); reportFocusBack(); }
-  if (step.state === 'saved') {
-    reportFocusBack();
-    // 저장 길이 띄운 알림을 짧은 한 마디로 바꾼다 — 되돌릴 수 있으면(칸 이름은 이 브라우저에만 적어 없다) 그 주의 되돌리기를 붙인다.
-    const week = saver.weekKey;
-    const item = reportLeaveFresh(week, shown)();
-    if (saver.undo && reportUndo.has(week)) showNotice('저장했어요', false, null, { label: '되돌리기', onClick: () => reportUndoNow(item) });
-  }
+  const fresh = reportLeaveFresh(saver.weekKey, shown);
+  const step = await reportLeaveSaveKey(key, fresh, { quiet: true });
+  if (step.state === 'skip') return;
+  // 닫거나(저장·빈 글) 잠갔던 칸을 풀어(실패·409) 한 번 그린다 — 다른 칸에서 한글을 조합하는 중이면 끝난 뒤에(끊지 않게).
+  // 알림은 저장 길(reportSavedNotice — Enter와 같은 문구)이 이미 띄웠다.
+  await reportLeaveWait(() => !reportComposing, 1000);
+  if (reportRenderedItem && reportRenderedItem.weekKey === saver.weekKey) { renderReportDraft(fresh()); reportFocusBack(); }
   if (step.state === 'failed') {
     const message = step.error && step.error.message && step.error.message !== REPORT_LEAVE_FAIL ? step.error.message : REPORT_BLUR_FAIL;
     showNotice(message, true);
   }
 }
 const REPORT_BLUR_FAIL = '저장하지 못했어요. 적은 내용은 그대로 있어요';
+const REPORT_BUSY_TEXT = '다른 저장이 끝나지 않아 하지 못했어요. 적은 내용은 그대로 있어요';
 // 문서를 다시 그리면 초점이 있던 칸이 새 요소로 바뀐다 — 저장하는 사이 사람이 옮겨 간 칸(새로 연 문장·Tab으로 간 글자)에 초점과
 // 커서를 돌려놓는다. 초점이 이미 다른 곳에 있거나(사라진 칸이 아님) 주간요약을 보고 있지 않으면 아무것도 하지 않는다.
 let reportLastFocus = null;
@@ -388,9 +429,9 @@ function reportEditing(weekKey) {
 }
 
 // 편집 중 입력칸 아래의 단서 한 줄 — 버튼이 없으므로 이것이 저장·취소를 알려 주는 유일한 글자다(v3).
-const REPORT_EDIT_HINT = 'Enter 저장 · Esc 취소';
+const REPORT_EDIT_HINT = 'Enter·바깥 누르면 저장 · Esc 취소';
 
-// 제목·소제목 자리의 입력칸 — 글자를 누르면 그 자리가 입력칸(`.d-din`)이 되고 아래에 `Enter 저장 · Esc 취소` 한 줄이 선다.
+// 제목·소제목 자리의 입력칸 — 글자를 누르면 그 자리가 입력칸(`.d-din`)이 되고 아래에 `Enter·바깥 누르면 저장 · Esc 취소` 한 줄이 선다.
 // 저장·취소 버튼은 없다(v3 — 고치는 법은 하나). 한글 조합 중 Enter는 넘긴다. 원래 이름과 같으면 저장하지 않고 닫고,
 // 비우고 저장하면 원래 이름으로 돌아간다(placeholder가 원래 이름이다).
 function reportRenameBox(item, { editKey, label, original, current, save, hint, local = false }) {
@@ -405,7 +446,7 @@ function reportRenameBox(item, { editKey, label, original, current, save, hint, 
   input.addEventListener('input', () => reportEdits.set(editKey, input.value));
   // 탭을 떠나면 Enter와 같은 길로 저장한다(reportAutosaveLeave) — 비우면 원래 이름으로 돌리는 Enter와 달리 빈 칸은 닫기만 한다.
   // `local`(칸 이름)은 이 브라우저에만 적어 되돌릴 것이 없다.
-  reportLeaveSaver(editKey, { weekKey: item.weekKey, current, undo: !local, save: (fresh, value) => save(value.trim(), fresh) });
+  reportLeaveSaver(editKey, { weekKey: item.weekKey, current, undo: !local, save: (fresh, value, options) => save(value.trim(), fresh, options) });
   if (reportLeaveSaving.has(editKey)) input.disabled = true;
   // 바깥을 누르거나 Tab으로 나가면 같은 길로 이 칸만 저장하고 닫는다(reportBlurWatch).
   reportBlurWatch(box, input, editKey);
@@ -817,6 +858,7 @@ async function reportChange(item, action, notice, options = {}) {
 // 저장 뒤 알림 하나. 자리를 옮기는 변경(아래로 넣기·따로 빼기·옛 묶기·묶음 풀기)은 무엇이 바뀌었는지
 // 적고 그 자리에서 `되돌리기`까지 준다(머리줄의 `되돌리기`와 같은 길이다). 나머지는 예전 문구 그대로다.
 const REPORT_MOVE_NOTICE = {
+  edit: '저장했어요',
   nest: '문장을 아래로 넣었어요',
   unnest: '따로 뺐어요',
   split: '묶음을 풀었어요',
@@ -998,6 +1040,7 @@ function reportTidyTodo(item) {
 }
 
 function reportTidyStart(item) {
+  if (reportEditing(item.weekKey) && reportBlurPending.size) { reportBlurSettle(item).then(latest => reportTidyStart(latest)); return; }
   if (reportEditing(item.weekKey)) {
     showNotice('고치는 중인 글이 있어요. Enter로 저장하거나 Esc로 취소한 뒤 정리해 주세요.', true);
     return;
@@ -1255,7 +1298,7 @@ function reportDocHead(item, host) {
   if (reportEdits.has(titleKey)) {
     title.appendChild(reportRenameBox(item, {
       editKey: titleKey, label: '보고 제목', original, current,
-      save: (text, target = item) => reportChange(target, { action: 'retitle', text }),
+      save: (text, target = item, options) => reportChange(target, { action: 'retitle', text }, undefined, options),
     }));
   } else {
     title.appendChild(reportRenameButton(item, { editKey: titleKey, text: current, label: `보고 제목: ${current} — 고치기`, current, tip: '누르면 제목을 고쳐요' }));
@@ -1315,9 +1358,11 @@ function reportTidyHeadButton(item) {
 // `슬랙용으로 복사` — 한 화면에 채운 버튼은 이것 하나다. 고치는 중이거나 정리 모드일 때는 3차로 내려선다.
 // 자리는 부르는 쪽이 정한다(넓으면 슬랙 카드 머리, 좁으면 문서 머리 — reportCopyInSlack). 어느 자리든 하나만 그린다.
 function reportCopyButton(item) {
-  const report = item.draft;
   const busyMode = reportEditing(item.weekKey) || (reportMode === 'draft' && reportTidy !== null);
   return reportButton('슬랙용으로 복사', async () => {
+    // 바깥 누르기로 저장 중인 글이 있으면 끝난 뒤의 보고를 복사한다.
+    const latest = await reportBlurSettle(item);
+    const report = latest.draft;
     // 열어만 둔 빈 `+ 한 줄 추가` 칸은 적던 글이 아니다.
     if ([...reportEdits.keys()].some(key => key.startsWith(item.weekKey + ':')
       && !(key.startsWith(`${item.weekKey}:addline:`) && !String(reportEdits.get(key) || '').trim()))) {
@@ -1332,13 +1377,13 @@ function reportCopyButton(item) {
     }
     // 보고를 보내는 순간이 확정하기 가장 자연스러운 때다 — 복사 알림에 `이대로 확정`을 붙인다(이미 확정했으면 알림만).
     if (report.confirmed) announce('슬랙에 붙여 넣을 수 있게 복사했어요');
-    else showNotice('슬랙에 붙여 넣을 수 있게 복사했어요', false, null, { label: '이대로 확정', onClick: () => reportConfirm(item, true) });
+    else showNotice('슬랙에 붙여 넣을 수 있게 복사했어요', false, null, { label: '이대로 확정', onClick: () => reportConfirm(latest, true) });
     // 사용 횟수(WP-R) — 복사 한 번, 그리고 복사한 글에 할 일 칸 줄이 있으면 한 번 더(다음 주 칸이 빈칸에서 시작하지 않는지 보려고).
     if (typeof usageTick === 'function') {
       usageTick('weekly_copy');
       if (model.sections.some(section => section.key === 'plan')) usageTick('weekly_copy_plan');
     }
-    reportKeep(item);
+    reportKeep(latest);
   }, busyMode ? 'd-btn' : 'd-btn pri');
 }
 
@@ -1467,7 +1512,8 @@ function reportConfirmedText(confirmed) {
 }
 
 // 확정하기·풀기(머리 ⋯, 복사 알림의 `이대로 확정`). 고치는 중인 글이 있으면 먼저 저장·취소하게 한다.
-function reportConfirm(item, on) {
+async function reportConfirm(item, on) {
+  if (on && reportEditing(item.weekKey) && reportBlurPending.size) item = await reportBlurSettle(item);
   if (on && reportEditing(item.weekKey)) {
     showNotice('고치는 중인 글이 있어요. Enter로 저장하거나 Esc로 취소한 뒤 확정해 주세요.', true);
     return Promise.resolve();
@@ -1651,7 +1697,7 @@ function reportSentenceRow(item, row, context) {
   line.appendChild(text);
 
   if (!tidy && reportEdits.has(key)) {
-    // 그 자리에서 고친다(v3 — 저장·취소 버튼 없음). Enter 저장 · Esc 취소 · Shift+Enter 줄바꿈. 한글 조합 중 Enter는 넘긴다.
+    // 그 자리에서 고친다(v3 — 저장·취소 버튼 없음). Enter·바깥 누르면 저장 · Esc 취소 · Shift+Enter 줄바꿈. 한글 조합 중 Enter는 넘긴다.
     // 저장이 실패해도 적은 글자는 reportEdits에 남는다. 입력칸 아래 안내 줄에 글자 버튼 `보고에서 빼기`(뺀 줄이면 `다시 넣기`)와
     // (손으로 고친 줄이면) `원래 문장으로`가 선다(②, 문장 ⋯ 메뉴 대신). 근거 한 줄은 그 아래 그대로다.
     const input = reportNode('textarea', undefined, 'rp-ta');
@@ -1662,7 +1708,7 @@ function reportSentenceRow(item, row, context) {
     input.setAttribute('aria-label', `보고 문장 고치기 — ${REPORT_EDIT_HINT}`);
     input.addEventListener('input', () => reportEdits.set(key, input.value));
     // 탭을 떠나면 Enter와 같은 길로 저장한다(reportAutosaveLeave). 그 저장이 도는 동안 다시 그려진 칸은 잠근다.
-    reportLeaveSaver(key, { weekKey: item.weekKey, rowId: row.id, current: row.text, undo: true, save: (fresh, value) => reportChange(fresh, { action: 'edit', id: row.id, text: value }) });
+    reportLeaveSaver(key, { weekKey: item.weekKey, rowId: row.id, current: row.text, undo: true, save: (fresh, value, options) => reportChange(fresh, { action: 'edit', id: row.id, text: value }, undefined, options) });
     if (reportLeaveSaving.has(key)) input.disabled = true;
     // 바깥을 누르거나 Tab으로 줄 밖으로 나가면 같은 길로 이 칸만 저장하고 닫는다(reportBlurWatch — 아래 도구 줄·근거 줄은 줄 안이다).
     reportBlurWatch(line, input, key);
@@ -1684,7 +1730,10 @@ function reportSentenceRow(item, row, context) {
     // 글자 버튼을 누르면 적던 글은 저장하지 않고 그 일만 한다(저장하지 않은 글이 몰래 저장되지 않게). 고치기는 그 일이 **성공한 뒤에**
     // 닫는다 — 실패하면(서버 꺼짐·409) 적던 글이 입력칸에 그대로 남는다.
     const helpButton = (label, aria, run) => {
-      const button = reportButton(label, async () => { await run(); reportEdits.delete(key); renderReportDraft(item); reportEditFocus(row.id); }, 'd-link');
+      const button = reportButton(label, async () => {
+        if (await run() === false) throw new Error(REPORT_BUSY_TEXT);
+        reportEdits.delete(key); renderReportDraft(item); reportEditFocus(row.id);
+      }, 'd-link');
       button.setAttribute('aria-label', aria);
       button.addEventListener('mousedown', event => event.preventDefault());
       help.appendChild(button);
@@ -1811,7 +1860,7 @@ function reportGroupHead(item, group, name) {
   if (reportEdits.has(editKey)) {
     head.appendChild(reportRenameBox(item, {
       editKey, label: '소제목 이름', original: auto, current: title.text, hint: '보고에서만 바뀌어요 — 업무의 프로젝트 이름은 그대로예요',
-      save: (value, target = item) => reportChange(target, { action: 'rename', heading: REPORT_DONE_HEADING, groupKey: group.key, text: value === auto ? '' : value }),
+      save: (value, target = item, options) => reportChange(target, { action: 'rename', heading: REPORT_DONE_HEADING, groupKey: group.key, text: value === auto ? '' : value }, undefined, options),
     }));
     return head;
   }
