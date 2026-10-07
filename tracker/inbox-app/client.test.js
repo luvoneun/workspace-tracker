@@ -419,6 +419,37 @@ test('입력 씹힘 ③: 구역 안 글자 칸에서 치는 중이면 다시 그
   assert.deepEqual(drawn, ['새', '바로']);
 });
 
+test('저장 충돌: 업무 저장이 서버에 가 있는 동안 구역의 잠긴 고치기 칸은 초점이 빠져 있어도 다시 그리지 않는다(탭 버튼 등) — 끝나면 그 저장의 load()가 그린다', async () => {
+  const app = pureClient();
+  const fx = holdFixture(app);
+  const editing = fx.field();
+  editing.disabled = true; // 바깥을 눌러 저장 중인 칸
+  fx.zone.querySelectorAll = selector => (/:disabled/.test(selector) && editing.disabled ? [editing] : []);
+  const body = app.context.document.body;
+  body.addEventListener = () => {}; body.removeEventListener = () => {};
+  fx.focus(body);
+  let drawn = 0;
+  app.run('itemWritesInFlight = 1');
+  assert.equal(app.context.uiRenderOrHold('records', fx.zone, () => { drawn += 1; }), false, '저장이 가 있는 동안은 미룬다');
+  assert.equal(drawn, 0);
+  app.run('itemWritesInFlight = 0');
+  assert.equal(app.context.uiRenderOrHold('records', fx.zone, () => { drawn += 1; }), true, '저장이 끝나면(그 저장의 load) 바로 그린다');
+  assert.equal(drawn, 1);
+});
+
+test('저장 충돌: 서버에 가 있는 업무 저장 수는 성공·실패 모두 부른 쪽이 이어 가기 전에 줄어든다', async () => {
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  const { app } = conflictClient(async () => { await held; return new Response(JSON.stringify({ ok: false, code: 'CHANGED_ELSEWHERE', error: CHANGED_ELSEWHERE }), { status: 409 }); });
+  const saving = app.run("postJson('/api/track/set-description', { id: 't1', description: '글' }).catch(() => itemWritesInFlight)");
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(app.run('itemWritesInFlight'), 1);
+  release();
+  assert.equal(await saving, 0, '실패를 받은 쪽에서 이미 0');
+  const ok = conflictClient(() => new Response('{"ok":true}'));
+  assert.equal(await ok.app.run("postJson('/api/track/set-priority', { id: 't1', priority: 'high' }).then(() => itemWritesInFlight)"), 0);
+});
+
 test('입력 씹힘 ④: 체크박스·라디오·select·버튼에 초점이 있으면 미루지 않고, 글자 칸(text·search·date·textarea·contenteditable)만 미룬다', () => {
   const app = pureClient();
   const fx = holdFixture(app);
