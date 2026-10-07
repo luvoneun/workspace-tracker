@@ -164,7 +164,10 @@ export async function launchChrome({ width = 1280, height = 860 } = {}) {
   let dead = false;
   child.on('exit', () => { dead = true; });
   const signal = (sig) => { try { process.kill(-child.pid, sig); } catch { try { child.kill(sig); } catch {} } };
+  const onExit = () => { if (!dead) signal('SIGTERM'); }; // 도구가 갑자기 끝나도 우리가 띄운 크롬 그룹은 남기지 않는다
+  process.once('exit', onExit);
   const close = async () => {
+    process.off('exit', onExit);
     if (!dead) {
       signal('SIGTERM');
       for (let i = 0; i < 40 && !dead; i++) await sleep(100);
@@ -232,7 +235,10 @@ export async function startFixture(appDir = DEFAULT_APP) {
   child.on('exit', () => { dead = true; });
   child.stdout.on('data', (d) => { log += d; });
   child.stderr.on('data', (d) => { log += d; });
+  const onExit = () => { if (!dead) child.kill('SIGTERM'); };
+  process.once('exit', onExit);
   const close = async () => {
+    process.off('exit', onExit);
     if (dead) return;
     child.kill('SIGTERM'); // 우리가 띄운 pid 하나만(픽스처가 임시 폴더를 치우고 끝난다)
     for (let i = 0; i < 50 && !dead; i++) await sleep(100);
@@ -240,7 +246,7 @@ export async function startFixture(appDir = DEFAULT_APP) {
   };
   const url = `http://127.0.0.1:${port}/`;
   for (const t0 = Date.now(); Date.now() - t0 < 40000;) {
-    if (dead) throw new Error(`가짜 데이터 서버가 꺼졌어요: ${log.trim().slice(-400)}`);
+    if (dead) { await close(); throw new Error(`가짜 데이터 서버가 꺼졌어요: ${log.trim().slice(-400)}`); }
     try { const r = await fetch(url, { signal: AbortSignal.timeout(3000) }); if (r.status < 500) return { url, port, close, pid: child.pid }; } catch {}
     await sleep(200);
   }
