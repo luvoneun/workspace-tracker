@@ -10862,7 +10862,7 @@ test('WP-E B. 빨간 점을 누르면 연동 탭으로 열고 멈춘 카드만 �
   assert.ok(!/d-here/.test(fx.card('calendar').className), '약 2초 뒤 거둔다');
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
   assert.match(css, /\.d-intg\.d-here \{[^}]*--here-bg: var\(--urgent-bg\)/);
-  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{ \.d-here \{ animation: none !important;/, '동작 줄이기면 흐림 없이 판만 둔다(색만)');
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\n  \.d-here \{ animation: none !important;/, '동작 줄이기면 흐림 없이 판만 둔다(색만)');
 
   // 빨간 점이 없고 새 버전(파란 점)만 있으면 앱 탭, 아무 점도 없으면 연동
   fx.app.run(`settingsAlertKeys = []; settingsAbout = { version: '1.0.0', update: { available: true, label: 'v1.1.0' } };`);
@@ -16360,7 +16360,8 @@ test('모션 장치: 전수 목록 대조 — 지도 문서의 표에 상태 빈
   const rows = motionMapRows('#');
   assert.equal(rows.length, 271, '전수 목록 줄 수 — 줄을 더하거나 빼면 이 숫자와 계획 문서를 함께 고친다');
   assert.deepEqual(rows.map(row => Number(row['#'])), rows.map((row, at) => at + 1), '번호가 1부터 빠짐없이 이어진다');
-  const STATE = /^(적용됨|옛 모션|없음|닫힘만 즉시|의도적으로 안 움직임\(.{2,}\))$/;
+  // 모션은 전부 끝났다 — 상태는 두 가지뿐이다(남은 줄이 다시 생기면 이 줄을 넓히지 말고 그 줄의 묶음을 먼저 정한다).
+  const STATE = /^(적용됨|의도적으로 안 움직임\(.{2,}\))$/;
   const bad = [];
   rows.forEach((row) => {
     if (!STATE.test(row['상태'])) bad.push(`${row['#']}: 상태 "${row['상태']}"`);
@@ -20222,6 +20223,116 @@ test('드문 순간 F: uiDotOut — 새 항목 점은 300ms 흐려진 뒤 떼고
   fx.app.run('uiDotOut(__el)');
   assert.equal(removed, 2, '움직임 줄이기는 바로');
   assert.equal(fx.timers.length, 1);
+  fx.reduce(false);
+  fx.app.run('document.hidden = true');
+  fx.app.run('uiDotOut(__el)');
+  assert.equal(removed, 3, '가려진 창도 바로');
+  assert.equal(fx.timers.length, 1, '타이머를 걸지 않는다');
+});
+
+test('드문 순간 F 검수: uiCheer — 끝나면 클래스를 떼고(다시 보여도 또 안 튄다), 숨은 탭·닫힌 자리에는 달지 않는다', () => {
+  const fx = rareApp();
+  let ended = null;
+  fx.el.addEventListener = (name, fn, options) => { ended = { name, fn, options }; };
+  fx.app.run('uiCheer(__el)');
+  assert.ok(fx.el.has('d-cheer'));
+  assert.deepEqual([ended.name, ended.options && ended.options.once], ['animationend', true]);
+  ended.fn();
+  assert.equal(fx.el.has('d-cheer'), false, '끝나면 뗀다');
+  ended = null;
+  fx.el.closest = selector => (selector === '[hidden]' ? {} : null);
+  fx.app.run('uiCheer(__el)');
+  fx.app.run('uiCheer(__el, true)');
+  assert.equal(fx.el.has('d-cheer'), false, '숨은 자리에는 달지 않는다');
+  assert.equal(ended, null);
+});
+
+// 오늘 할 일 그리기만 떼어 본다 — 줄·제목을 만드는 도우미는 가짜로 바꾸고 축하가 불리는 때만 센다.
+function todayCheerApp() {
+  const fx = rareApp();
+  const cheers = [];
+  const list = {
+    children: [],
+    replaceChildren() { this.children = []; },
+    appendChild(kid) { this.children.push(kid); return kid; },
+    append(...kids) { kids.forEach(kid => this.children.push(kid)); },
+    insertAdjacentHTML(where, html) { this.children.push({ html }); },
+    get lastElementChild() { return this.children[this.children.length - 1] || null; },
+  };
+  fx.app.context.__list = list;
+  fx.app.context.__cheer = (el, strict) => cheers.push([String(el.html), strict]);
+  fx.app.run(`document.getElementById = id => (id === 'todayTaskList' ? __list : { hidden: false, classList: { add() {}, remove() {}, toggle() {} }, setAttribute() {}, append() {}, replaceChildren() {}, appendChild() {}, querySelector() { return null; }, querySelectorAll() { return []; }, dataset: {}, style: {} });
+    renderTodayChip = () => {}; uiGroupHeading = () => ({}); uiTaskRow = item => ({ item }); uiGroupTasks = items => (items.length ? [['__misc__', items]] : []);
+    uiGroupLabels = () => new Map([['__misc__', '']]); uiGroupAddRow = () => ({ querySelector() { return null; } }); uiSchedRiseApply = () => {}; compareTasks = () => 0;
+    uiCheer = __cheer;`);
+  const render = (open, done) => {
+    fx.app.context.__items = [...open.map(id => ({ id, status: 'open' })), ...done.map(id => ({ id, status: 'done' }))];
+    fx.app.run('renderTodayTasksNow(__items)');
+  };
+  return { ...fx, cheers, render };
+}
+
+test('드문 순간 F 검수: 오늘 다 끝냄 축하 — 남은 할 일이 전부 끝남이 되어 빈 순간 한 번만, 미루기·지우기로 빈 것과 다시 그리기·처음 그리기는 안 터진다', () => {
+  const fx = todayCheerApp();
+  fx.render([], ['a']);
+  assert.equal(fx.cheers.length, 0, '처음 그리기(앞에 남은 할 일이 없었다)');
+  fx.render(['b', 'c'], ['a']);
+  fx.render([], ['a', 'b', 'c']);
+  assert.deepEqual(fx.cheers.map(one => one[1]), [true], '남은 둘이 전부 끝남이 되어 비었다 — strict(내 동작 직후만)로 부른다');
+  assert.match(fx.cheers[0][0], /모두 끝냈어요/);
+  fx.render([], ['a', 'b', 'c']);
+  assert.equal(fx.cheers.length, 1, '한 번 더 그려도(자동 갱신) 안 터진다');
+  // 나중에로 미루거나 지워서 빈 것 — 그 할 일이 끝남 목록에 없다
+  fx.render(['d'], ['a']);
+  fx.render([], ['a']);
+  assert.equal(fx.cheers.length, 1, '미루기·지우기');
+  // 일부는 끝내고 일부는 미룬 채 빈 것도 축하하지 않는다
+  fx.render(['e', 'f'], ['a']);
+  fx.render([], ['a', 'e']);
+  assert.equal(fx.cheers.length, 1, '하나는 끝냄·하나는 미룸');
+  // 끝낸 줄이 하나도 없이 빈 것은 `비었어요`다
+  fx.render(['g'], []);
+  fx.render([], []);
+  assert.equal(fx.cheers.length, 1, '비었어요 문장');
+  // 되돌렸다가 다시 끝내면 다시 한 번
+  fx.render(['h'], ['a']);
+  fx.render([], ['a', 'h']);
+  assert.equal(fx.cheers.length, 2);
+});
+
+test('드문 순간 F 검수: 움직임 줄이기의 밝히기 판은 `.d-intg + .d-intg`의 위 구분선(명시도 0,2,0)에 지지 않는다', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  // 명시도(클래스·속성·가상 클래스 수, 태그 수) — 이 시험에 필요한 만큼의 계산이다.
+  const specificity = (selector) => {
+    const ids = (selector.match(/#[\w-]+/g) || []).length;
+    const classes = (selector.match(/\.[\w-]+|\[[^\]]*\]|:(?!:)[\w-]+/g) || []).length;
+    const tags = (selector.replace(/\[[^\]]*\]|[.#:][\w-]+/g, ' ').match(/[a-zA-Z][\w-]*/g) || []).length;
+    return [ids, classes, tags];
+  };
+  const higher = (a, b) => (a[0] - b[0]) || (a[1] - b[1]) || (a[2] - b[2]);
+  const ownRule = selector => css.match(new RegExp(`(^|\n)${selector.replace(/[.+\[\]()]/g, '\\$&')} \\{([^}]*)\\}`));
+  const divider = ownRule('.d-intg + .d-intg');
+  assert.match(divider[2], /box-shadow: inset 0 1px 0 var\(--hair\)/, '위 구분선 규칙이 아직 있다');
+  const reduce = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce) {\n  .d-here'), css.indexOf('/* 축하 한 번'));
+  const reduceRules = [...reduce.matchAll(/\n  ([^{\n/]+?) \{ ([^}]*box-shadow[^}]*)\}/g)].map(m => m[1].trim());
+  assert.ok(reduceRules.includes('.d-intg + .d-intg.d-here'), '둘째 카드부터의 판이 따로 있다');
+  const sel = '.d-intg + .d-intg.d-here';
+  assert.ok(higher(specificity(sel), specificity('.d-intg + .d-intg')) > 0, `${sel}이 구분선 규칙보다 세다`);
+  assert.ok(higher(specificity('.d-here'), specificity('.d-intg + .d-intg')) < 0, '맨 `.d-here`는 져서 위 규칙이 필요한 것이다(이 시험이 사라지는 규칙을 잡는다)');
+});
+
+test('드문 순간 F 검수: reportReviewGo — 옮겨 온 문장 줄을 밝힌다(줄이 없으면 아무것도 안 함)', () => {
+  const app = a7Client();
+  const lit = [];
+  app.context.__lit = lit;
+  app.run(`uiHere = el => __lit.push(el); window.__line = { name: 'rp-s' };
+    document.getElementById('weeklyReportDetail').querySelector = sel => (/data-edit-text/.test(sel) ? { focus() {}, scrollIntoView() {}, closest: s => (s === '.rp-s' ? window.__line : null) } : null);`);
+  app.run('reportReviewGo(item)');
+  assert.equal(lit.length, 1);
+  assert.equal(lit[0].name, 'rp-s');
+  app.run(`document.getElementById('weeklyReportDetail').querySelector = sel => (/data-edit-text/.test(sel) ? { focus() {}, scrollIntoView() {}, closest: () => null } : null);`);
+  app.run('reportReviewGo(item)');
+  assert.equal(lit.length, 1, '줄을 못 찾으면 안 밝힌다');
 });
 
 test('드문 순간 F: 값은 토큰 한 곳 — --t-here(밝히기)·--t-slow(축하)·--t-wait(새 항목 점)가 UI_RARE·CSS와 같고, 옛 밝히기 세 벌과 맨 시간 값은 없다', () => {
@@ -20234,7 +20345,7 @@ test('드문 순간 F: 값은 토큰 한 곳 — --t-here(밝히기)·--t-slow(�
   assert.match(css, /\.d-cheer \{ animation: d-cheer var\(--t-slow\) var\(--spring-2\) both; \}/);
   assert.match(css, /\.d-here \{[^}]*animation: d-here var\(--t-here\) var\(--ease\) both;/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{ \.d-cheer \{ animation: none !important; \} \}/, '움직임 줄이기 — 축하는 그냥 선다');
-  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{ \.d-here \{ animation: none !important; box-shadow:/, '움직임 줄이기 — 밝히기는 색(판)만');
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\n  \.d-here \{ animation: none !important; box-shadow:/, '움직임 줄이기 — 밝히기는 색(판)만');
   assert.match(css, /\.new-dot\.is-gone \{ opacity: 0; transition: opacity var\(--t-wait\) var\(--ease\); \}/);
   assert.doesNotMatch(css, /is-flash|@keyframes d-flash|\.d-faq \.q\.is-hit/, '옛 밝히기 세 벌');
   const sources = ['app.js', 'settings-ui.js', 'report-ui.js'].map(file => fs.readFileSync(path.join(__dirname, file), 'utf8')).join('\n');
@@ -20253,6 +20364,6 @@ test('드문 순간 F: 부르는 자리 — 밝히기 4곳(팔레트·설정 카
   assert.equal(count(read('project-new-ui.js'), /uiCheer\(res\)/g), 1);
   assert.match(read('project-new-ui.js'), /!state\.resultSeen\) uiCheer\(res\);[^\n]*\n\s*state\.resultSeen = true;/, '새 프로젝트 결과는 한 번만');
   const today = read('app.js');
-  assert.match(today, /if \(doneItems\.length && todayHadOpen\) uiCheer\(list\.lastElementChild, true\);\s*\}\s*todayHadOpen = !todayCleared;/);
+  assert.match(today, /if \(todayOpenIds\.size && \[\.\.\.todayOpenIds\]\.every\(id => doneIds\.has\(id\)\)\) uiCheer\(list\.lastElementChild, true\);\s*\}\s*todayOpenIds = new Set\(/);
   assert.equal(count(today, /uiCheer\(/g), 2, '정의 하나 + 오늘 다 끝냄 strict 한 곳 — 더 있으면 지도에 올린다');
 });
