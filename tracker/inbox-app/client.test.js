@@ -20527,3 +20527,12 @@ test('입력칸 떠나면 저장: 파란 테는 초점이 있는 문장 입력�
   assert.doesNotMatch(base, /box-shadow/);
   assert.match(css, /\.rp-ta:focus \{ outline: none; background: var\(--surface\); box-shadow: 0 0 0 2px var\(--accent\); \}/);
 });
+
+test('입력칸 떠나면 저장(실제 창에서 찾음): 다른 문장을 누르자마자 문서를 다시 그려도 앞 문장은 저장된다', async () => {
+  const app = blurClient();
+  // 다른 문장 글자를 누르면 초점이 그 글자로 옮겨 간 뒤 곧바로 click이 문서를 다시 그린다(옛 줄은 떨어져 나간다).
+  app.run("a = open(0, '빠르게 넘어감'); leave(a, { dataset: { editText: 'a2' } }); a.line.connected = false; b = open(1, '새로 연 문장');");
+  await leaveTick();
+  assert.deepEqual(leaveSent(app), [{ action: 'edit', id: 'a1', text: '빠르게 넘어감' }]);
+  assert.equal(app.run("reportEdits.get('W:a2')"), '새로 연 문장');
+});
