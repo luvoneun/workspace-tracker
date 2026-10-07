@@ -1,0 +1,22 @@
+{
+  "name": "결정 줄 문구 고치기 — 한글 조합 중에 다시 그리기",
+  "description": "아이디어·결정 탭에서 결정 줄 문구를 고치며 한글을 조합하는 도중(ㅇ만 친 상태)에 다른 저장·자동 갱신과 같은 다시 그리기(load())가 오면, 칸이 새 요소로 바뀌어 조합 중인 글자가 씹힌다(052ef5f에서 고침 — 입력 중엔 세 목록 다시 그리기를 미룸). 조합이 끝난 뒤 칸에 친 글이 그대로 있어야 하고, Enter로 저장된 문구에도 다 들어가야 한다.",
+  "steps": [
+    { "do": "goto", "url": "/", "waitFor": "#tabBtnRecords", "wait": 500 },
+    { "do": "click", "selector": "#tabBtnRecords", "hold": 0 },
+    { "do": "wait", "selector": "#decisionList .desc-editable", "timeout": 8000 },
+    { "do": "eval", "note": "결정 id·원래 문구 기억", "expr": "(() => { const e = document.querySelector('#decisionList .desc-editable'); window.__hcId = e.closest('[data-item-id]').dataset.itemId; window.__hcText = e.textContent.trim(); return [window.__hcId, window.__hcText]; })()" },
+    { "do": "click", "note": "결정 문구를 눌러 고치기 시작", "selector": "#decisionList .desc-editable", "hold": 0 },
+    { "do": "wait", "selector": "#decisionList input:not([type=checkbox]), #decisionList textarea", "timeout": 3000 },
+    { "do": "type", "note": "끝에 '확인함'을 한글 조합으로, '인'의 ㅇ을 조합하는 도중에 다시 그리기", "text": "확인함", "ime": true, "duringAt": 1,
+      "during": [ { "do": "eval", "note": "다른 저장·자동 갱신과 같은 다시 그리기", "expr": "load().then(() => 'load 끝')" } ] },
+    { "do": "wait", "ms": 600 },
+    { "do": "shot", "name": "조합-뒤" },
+    { "do": "assert", "message": "고치던 칸이 초점을 지닌 채 남아 있어야 해요", "expr": "(() => { const a = document.activeElement; return !!a && /^(INPUT|TEXTAREA)$/.test(a.tagName) && !!a.closest('#decisionList'); })()" },
+    { "do": "assert", "message": "칸의 글 끝이 '확인함'이어야 해요(조합 중 다시 그리기로 글자가 씹히면 안 됨)", "expr": "document.activeElement.value === window.__hcText + '확인함'" },
+    { "do": "key", "key": "Enter" },
+    { "do": "wait", "ms": 1200 },
+    { "do": "shot", "name": "Enter-뒤" },
+    { "do": "assert", "message": "저장된 결정 문구가 '…확인함'이어야 해요", "expr": "(document.querySelector(`#decisionList [data-item-id=\"${window.__hcId}\"] .desc-editable`)?.textContent || '').trim() === window.__hcText + '확인함'" }
+  ]
+}

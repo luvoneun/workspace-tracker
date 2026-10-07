@@ -1,0 +1,19 @@
+{
+  "name": "주간요약 — 문장 A를 고치다 문장 B 누르기",
+  "description": "A를 고치는 중에 B를 누르면 A는 저장되고 B는 바로 고치기 칸으로 열려야 한다. 누름 때 A의 focusout → 저장 → 문서 다시 그리기가 일어나 뗌 때 누른 요소가 바뀌면 click이 사라진다(첫 클릭 사라짐, 0446fd7에서 고침). hold를 벌려 그 시간 간격을 만든다.",
+  "steps": [
+    { "do": "goto", "url": "/", "waitFor": "#tabBtnWeekly", "wait": 500 },
+    { "do": "click", "selector": "#tabBtnWeekly", "hold": 0 },
+    { "do": "wait", "selector": "#weeklyReportDetail [data-edit-text]", "timeout": 8000 },
+    { "do": "eval", "note": "A·B 문장 id 기억", "expr": "(() => { const l = document.querySelectorAll('#weeklyReportDetail [data-edit-text]'); window.__hcA = l[0].dataset.editText; window.__hcB = l[1].dataset.editText; window.__hcBText = l[1].textContent; return [window.__hcA, window.__hcB]; })()" },
+    { "do": "click", "note": "A 문장을 눌러 고치기 시작", "selector": "#weeklyReportDetail [data-edit-text]", "hold": 0 },
+    { "do": "wait", "selector": "#weeklyReportDetail [data-edit-row]", "timeout": 3000 },
+    { "do": "type", "note": "A에 글 덧붙임", "text": " hc", "ime": false },
+    { "do": "eval", "note": "지금 화면의 B 문장에 표시", "expr": "document.querySelector(`#weeklyReportDetail [data-edit-text=\"${window.__hcB}\"]`).setAttribute('data-hc', 'b')" },
+    { "do": "click", "note": "B 문장을 누름(누름~뗌 = hold)", "selector": "[data-hc=\"b\"]" },
+    { "do": "wait", "ms": 1500 },
+    { "do": "shot", "name": "B-누른-뒤" },
+    { "do": "assert", "message": "B 문장이 고치기 칸으로 열려 있어야 해요(첫 클릭이 사라지면 안 열림)", "expr": "!!document.querySelector(`#weeklyReportDetail [data-edit-row=\"${window.__hcB}\"]`)" },
+    { "do": "assert", "message": "A 문장은 덧붙인 글로 저장돼 있어야 해요", "expr": "[...document.querySelectorAll('#weeklyReportDetail [data-edit-text]')].some((e) => e.dataset.editText === window.__hcA && e.textContent.endsWith(' hc'))" }
+  ]
+}
