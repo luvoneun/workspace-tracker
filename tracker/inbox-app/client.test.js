@@ -20382,11 +20382,15 @@ function blurClient() {
     leave = (ed, relatedTarget = null) => ed.line.listeners.focusout({ relatedTarget });`);
   return app;
 }
+// 떠남 판단(한 틱 뒤)과 저장 줄(reportLeaveRun)이 끝날 때까지 — 붙잡아 둔 응답이 없을 때만 쓴다.
+async function blurSettle(app) {
+  for (let i = 0; i < 3; i += 1) { await leaveTick(); await app.run('reportLeaveRun'); }
+}
 
 test('입력칸 떠나면 저장: 바깥으로 초점이 나가면 그 칸만 Enter와 같은 edit 한 번 — 칸은 닫히고 알림 `저장했어요 · 되돌리기`', async () => {
   const app = blurClient();
   app.run("a = open(0, '바깥을 눌러 저장'); b = open(1, '열어만 둔 둘째'); leave(a);");
-  await leaveTick();
+  await blurSettle(app);
   assert.deepEqual(leaveSent(app), [{ action: 'edit', id: 'a1', text: '바깥을 눌러 저장' }], '떠난 칸 하나만 보낸다');
   assert.equal(app.run("reportEdits.has('W:a1')"), false, '저장되면 닫힌다');
   assert.equal(app.run("reportEdits.get('W:a2')"), '열어만 둔 둘째', '다른 칸의 글은 그대로');
@@ -20396,12 +20400,12 @@ test('입력칸 떠나면 저장: 바깥으로 초점이 나가면 그 칸만 En
 test('입력칸 떠나면 저장: 칸 아래 도구(`보고에서 빼기`)·같은 줄 안으로 옮기면 저장하지 않고 열어 둔다 · 줄 안 글자를 눌러도 초점이 남는다', async () => {
   const app = blurClient();
   app.run("a = open(0, '고치는 중'); leave(a, a.help.children[0]);");
-  await leaveTick();
+  await blurSettle(app);
   assert.deepEqual(leaveSent(app), []);
   assert.equal(app.run("reportEdits.get('W:a1')"), '고치는 중');
   // 초점이 줄 밖으로 갔다고 들었어도 다 옮긴 뒤 줄 안(근거 링크 등)에 있으면 그대로다.
   app.run("document.activeElement = a.help.children[0]; leave(a);");
-  await leaveTick();
+  await blurSettle(app);
   assert.deepEqual(leaveSent(app), []);
   // 줄 안의 글자(근거·안내)를 누르면 초점을 가져가지 않게 막고, 누를 수 있는 것은 그대로 둔다.
   const prevented = app.run(`(() => { const out = [];
@@ -20433,7 +20437,7 @@ test('입력칸 떠나면 저장: Enter로 저장한 뒤의 blur·Esc로 닫은 
 test('입력칸 떠나면 저장: 비었거나 원래 글과 같으면 보내지 않고 닫기만 한다', async () => {
   const app = blurClient();
   app.run("a = open(0, '  원래 문장 '); b = open(1, '   '); leave(a); leave(b);");
-  await leaveTick();
+  await blurSettle(app);
   assert.deepEqual(leaveSent(app), []);
   assert.equal(app.run('reportEdits.size'), 0);
   assert.deepEqual(leaveNotices(app), []);
@@ -20444,7 +20448,7 @@ test('입력칸 떠나면 저장: 실패(서버 오류·409)하면 칸을 열어
     const app = blurClient();
     app.run(`reply = () => ({ ok: false, status: ${status}, json: async () => ({ ok: false, error: '먼저 바뀌었어요' }) });
       a = open(0, '지키는 글'); leave(a);`);
-    await leaveTick();
+    await blurSettle(app);
     assert.equal(leaveSent(app).length, 1);
     assert.equal(app.run("reportEdits.get('W:a1')"), '지키는 글', `${status}: 글이 남는다(칸이 열려 있다)`);
     assert.equal(app.run("reportLeaveSavers.has('W:a1')"), true, `${status}: 다음에 다시 저장할 길도 남는다`);
@@ -20458,8 +20462,7 @@ test('입력칸 떠나면 저장: 한글 조합 중이면 조합이 끝나 마�
   await leaveTick();
   assert.deepEqual(leaveSent(app), []);
   app.run("reportEdits.set('W:a1', '조합 중인 글자'); reportComposing = false;");
-  await leaveTick();
-  await leaveTick();
+  await blurSettle(app);
   assert.deepEqual(leaveSent(app), [{ action: 'edit', id: 'a1', text: '조합 중인 글자' }]);
 });
 
@@ -20482,15 +20485,15 @@ test('입력칸 떠나면 저장: 다른 문장을 누르면 앞 문장이 저�
 test('입력칸 떠나면 저장: 앱 창 자체가 초점을 잃을 때(다른 앱·다른 창)·다시 그려 사라진 칸·다시 돌아온 칸은 저장하지 않는다', async () => {
   const app = blurClient();
   app.run("a = open(0, '창을 바꿈'); focusOn = false; leave(a);");
-  await leaveTick();
+  await blurSettle(app);
   app.run("focusOn = true; document.activeElement = a.input; leave(a);");
-  await leaveTick();
+  await blurSettle(app);
   assert.deepEqual(leaveSent(app), [], 'window blur — 초점은 그 칸에 남아 있다');
   app.run("document.activeElement = null; a.line.connected = false; leave(a);");
-  await leaveTick();
+  await blurSettle(app);
   assert.deepEqual(leaveSent(app), [], '다시 그려 사라진 칸(Enter·Esc·새 기록)은 판단하지 않는다');
   app.run("a = open(0, '돌아옴'); leave(a); document.activeElement = { dataset: { editRow: 'a1' } };");
-  await leaveTick();
+  await blurSettle(app);
   assert.deepEqual(leaveSent(app), [], '저장 전에 그 칸(다시 그린 새 칸)으로 돌아왔으면 이어서 고친다');
   assert.equal(app.run("reportEdits.get('W:a1')"), '돌아옴');
 });
@@ -20499,14 +20502,13 @@ test('입력칸 떠나면 저장: 탭을 떠날 때 저장과 겹쳐도 한 번�
   const app = blurClient();
   app.run("a = open(0, '한 번만'); leave(a); activeTabKey = 'today';");
   await app.run('reportAutosaveLeave()');
-  await leaveTick();
+  await blurSettle(app);
   assert.equal(leaveSent(app).length, 1);
   app.run("activeTabKey = 'weekly'; sent = []; reportBusy = true; b = open(1, '기다림'); leave(b);");
   await leaveTick();
   assert.deepEqual(leaveSent(app), []);
   app.run('reportBusy = false');
-  await leaveTick();
-  await leaveTick();
+  await blurSettle(app);
   assert.deepEqual(leaveSent(app), [{ action: 'edit', id: 'a2', text: '기다림' }]);
 });
 
@@ -20515,7 +20517,7 @@ test('입력칸 떠나면 저장: 제목·소제목·칸 이름도 같다 — �
   app.run(`reportEdits.set(reportTitleEditKey('W'), '바깥 눌러 새 제목'); headHost = document.createElement('div'); reportDocHead(item, headHost);
     findBox = node => (String(node.className || '').includes('rp-ren') ? node : (node.children || []).map(k => k && typeof k === 'object' ? findBox(k) : null).find(Boolean));
     box = findBox(headHost); box.contains = el => deepHas(box, el); box.listeners.focusout({ relatedTarget: null });`);
-  await leaveTick();
+  await blurSettle(app);
   assert.deepEqual(leaveSent(app), [{ action: 'retitle', text: '바깥 눌러 새 제목' }]);
   const plan = app.run("plan('계획 한 줄')");
   assert.equal(plan.listeners.focusout, undefined, '적기줄에는 떠날 때 저장을 걸지 않는다');
@@ -20532,7 +20534,7 @@ test('입력칸 떠나면 저장(실제 창에서 찾음): 다른 문장을 누�
   const app = blurClient();
   // 다른 문장 글자를 누르면 초점이 그 글자로 옮겨 간 뒤 곧바로 click이 문서를 다시 그린다(옛 줄은 떨어져 나간다).
   app.run("a = open(0, '빠르게 넘어감'); leave(a, { dataset: { editText: 'a2' } }); a.line.connected = false; b = open(1, '새로 연 문장');");
-  await leaveTick();
+  await blurSettle(app);
   assert.deepEqual(leaveSent(app), [{ action: 'edit', id: 'a1', text: '빠르게 넘어감' }]);
   assert.equal(app.run("reportEdits.get('W:a2')"), '새로 연 문장');
 });
