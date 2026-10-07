@@ -28,6 +28,7 @@
   - 입력·클릭 파일(`report-ui.js`·`app.js`·`projects-ui.js`·`meetings-ui.js`·`project-new-ui.js`·`settings-ui.js`·`waiting-ui.js`)이 바뀌면 "사람 속도 확인"(실제 마우스·실제 한글 조합) 줄이 자동으로 붙는다.
   - `--summary`에 백틱(`` ` ``)이 남아 있으면 거절한다(셸이 명령으로 실행해 문구가 빠지는 사고 방지) — 「」를 쓴다.
   - 합친 뒤 정리는 `tools/after-merge.sh <가지> --task <구현 이름표> --merge-task <합치기 이름표> [--dry-run]` — main에 들어간 걸 확인하고 세션 종료(이름표로만)·복사본·가지 삭제·장부 두 줄을 한 번에 한다.
+- 사람 속도 확인(누름~뗌 간격·실제 한글 조합·조합 중 다시 그리기)은 `node tools/human-check.mjs <시나리오.json> --serve`로 한다(시나리오·동작 표는 `tools/human-check/README.md`). 새 임시 프로필 헤드리스 크롬을 띄워 CDP 입력 이벤트만 쓰고 그 그룹만 끈다 — 떠 있는 크롬·디버그 포트에 붙지 않고, 운영·금지 포트(4321·4340·4318·4319·9333)는 거절한다.
 - 사용자는 PM이다. 결론을 먼저 말하고 전문용어는 풀어서 설명한다.
 
 ## 만드는 방식
