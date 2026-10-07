@@ -156,8 +156,11 @@ spacing:
   "12": "12px"
   "14": "14px"
   "16": "16px"
+  "18": "18px"
   pad: "20px"
   "22": "22px"
+  "24": "24px"
+  "28": "28px"
   doc-gutter: "32px"
 sizes:
   hdr: "60px"
@@ -194,13 +197,13 @@ components:
     textColor: "{colors.accent-text}"
     rounded: "{rounded.r-xs}"
     height: "33px"
-    padding: "0 13px"
+    padding: "0 12px"
   button-tertiary:
     backgroundColor: "{colors.neutral-bg}"
     textColor: "{colors.muted}"
     rounded: "{rounded.r-xs}"
     height: "34px"
-    padding: "0 13px"
+    padding: "0 12px"
   button-danger:
     backgroundColor: "transparent"
     textColor: "{colors.urgent}"
@@ -235,7 +238,7 @@ components:
     textColor: "{colors.muted}"
     rounded: "{rounded.pill}"
     height: "22px"
-    padding: "0 9px"
+    padding: "0 8px"
   task-row:
     backgroundColor: "{colors.surface}"
     rounded: "{rounded.row}"
@@ -438,7 +441,7 @@ Pretendard Variable(v1.3.9, SIL OFL 1.1)은 **앱에 넣어 두고 서버가 직
 
 ## Spacing · Shapes · Elevation
 
-**간격.** 2px 눈금에서 2·4·6·8·10·12·14·16·20·22·28·32만 쓴다. 고정 값: 카드 안쪽 여백 10px, 줄 좌우 여백 `--pad` 20px, 줄 열 간격 12px, 카드 사이 16px, 문서 안쪽 여백 28/32px, 레일 카드 안쪽 10px.
+**간격.** 2px 눈금에서 2·4·6·8·10·12·14·16·18·20·22·24·28·32만 쓴다(위 `spacing:` 블록이 이 목록이다 — 재는 도구의 `--tokens DESIGN.md`가 이 블록을 읽는다). 32px보다 큰 자리는 4의 배수(36·40·48). 눈금 밖 값은 셋만 일부러 둔다: **줄 높이를 28px에 맞추는 세로 5px**(글줄 18px + 5px×2 — `.d-mrow2`·배지 고르개·`.rp-ev`), **세그먼트 트랙 안쪽 3px**(아래 `세그먼트`), **목록 항목 사이 1px**(메뉴 `.d-mitem`·지라 하위 줄 `.d-jkid` — 줄마다 28px 이상이고 hover 판끼리 붙지 않게 1px만 띄운다). 고정 값: 카드 안쪽 여백 10px, 줄 좌우 여백 `--pad` 20px, 줄 열 간격 12px, 카드 사이 16px, 문서 안쪽 여백 28/32px, 레일 카드 안쪽 10px.
 
 **치수.** `--hdr` 60px · `--row` 54px · `--grp` 36px · `--rail-w` 296px · `--rail-bleed` 20px · `--wp` 104px(프로젝트 열) · `--wm` 184px(상태 열). 자리를 고정한 줄(`.d-row.is-cols` — 오늘 목록·서랍·마감·중요도순)은 비어 있는 프로젝트 열을 접고(`--wp: 0`) 상태 열을 `--wm` 306px로 쓴다(≤1280은 268px).
 
@@ -513,8 +516,8 @@ Pretendard Variable(v1.3.9, SIL OFL 1.1)은 **앱에 넣어 두고 서버가 직
 | 등급 | 모양 | 쓰는 곳 |
 |---|---|---|
 | **1차 (파란 채움)** | 42px(`--h-lg`), 여백 `0 20px`, 12px 모서리, `--accent-strong` + `--on-fill`, 14.5/600. hover `brightness(1.08)` | **한 패널에 하나**: 상세의 `완료로 표시`, 회의의 `N개 담기`, 주간요약의 `슬랙용으로 복사`(문장·제목을 고치는 중이거나 모으기 막대가 떠 있으면 3차로 내려선다), 문장 모으기 막대의 `완료` |
-| **2차 (연파랑)** | 33px, 여백 `0 13px`, 10px 모서리, `--accent-soft` + `--accent-text`, 13.5/600. hover는 파란 채움 | 줄 위에 떠오르는 동작(`내일` `나중에` `오늘로`), 새로 들어온 줄의 `오늘`·`나중에`·`완료`, 선택 막대의 `완료로 표시`(`.d-btn.acc`) |
-| **3차 (연회색)** | 34px, 여백 `0 13px`, 10px 모서리, `--neutral-bg` + `--muted`, 13.5/600(반쪽 크기라 아직 숫자). 작은 형은 32px `--h-md` · 13 `--fs-sm`. hover `--hover` + `--text` | 그 밖의 모든 조용한 동작 |
+| **2차 (연파랑)** | 33px, 여백 `0 12px`, 10px 모서리, `--accent-soft` + `--accent-text`, 13.5/600. hover는 파란 채움 | 줄 위에 떠오르는 동작(`내일` `나중에` `오늘로`), 새로 들어온 줄의 `오늘`·`나중에`·`완료`, 선택 막대의 `완료로 표시`(`.d-btn.acc`) |
+| **3차 (연회색)** | 34px, 여백 `0 12px`, 10px 모서리, `--neutral-bg` + `--muted`, 13.5/600(반쪽 크기라 아직 숫자). 작은 형은 32px `--h-md` · 13 `--fs-sm`. hover `--hover` + `--text` | 그 밖의 모든 조용한 동작 |
 | **삭제 (빨간 글자)** | 3차와 같은 크기, 배경 없음, `--urgent` 글자. hover에서 `--urgent-bg` | `삭제`. 확인창 없이 실행하고 알림의 `실행 취소`(⌘Z)로 되돌린다 |
 
 전부 공용 누름 하나(누르는 동안 `scale` .97, 100ms)와 색 전환 170ms를 갖는다 — 글자 링크·메뉴 항목·줄 전체가 버튼인 것은 줄어들지 않는다(모션 절 "누름·색"). 곁가지: **글자 링크**(`.d-link`, `--accent-text` 13/600, hover 밑줄), **아이콘 버튼**(34px 원, `--muted` → hover `--hover`, `aria-label` 필수), **조용한 글자 버튼**(`.d-headnum`, 28px, `--dim` 13/500).
@@ -647,7 +650,7 @@ Pretendard Variable(v1.3.9, SIL OFL 1.1)은 **앱에 넣어 두고 서버가 직
 
 머리줄: 제목(19/700) + 끝낸 개수 칩 하나 `✓ 5/19`(오늘 할 일이 0개면 없음). 문장·남은 개수 칩·제안 링크는 없다 — 끝낸 개수는 이 칩 한 곳에서만 보인다 / 오른쪽 `나중에 할 일 13`(0이면 버튼 없음 — 서랍이 열린 채 0이 되면 서랍은 두고 버튼만 숨으며, 초점이 버튼에 있었으면 서랍 닫기로) + ⋯(보기 전환 `프로젝트별`·`마감·중요도순`, `여러 개 선택`). 프로젝트로 가는 길은 탭과 목록의 프로젝트 이름이다.
 
-**끝낸 개수 칩.** 22px 알약, 안쪽 `0 9px 0 7px`, 12px 체크 아이콘(`✓`, 고정) + `M/N` 12.5/600 `tabular-nums`. 일부는 `--accent-soft` + `--accent-text`, 전부 끝내면 `--success-bg` + `--success`(새 색 없음, 전환 200ms). `role="img"`에 `aria-label`·`title`은 `N개 중 M개 끝냈어요`. 체크할 때 M이 4px 아래에서 올라오며 바뀐다(200ms, `transform`·`opacity`만). 카드 윗변 진행 선은 없다 — 같은 값을 두 번 그리지 않는다.
+**끝낸 개수 칩.** 22px 알약, 안쪽 `0 8px 0 6px`, 12px 체크 아이콘(`✓`, 고정) + `M/N` 12.5/600 `tabular-nums`. 일부는 `--accent-soft` + `--accent-text`, 전부 끝내면 `--success-bg` + `--success`(새 색 없음, 전환 200ms). `role="img"`에 `aria-label`·`title`은 `N개 중 M개 끝냈어요`. 체크할 때 M이 4px 아래에서 올라오며 바뀐다(200ms, `transform`·`opacity`만). 카드 윗변 진행 선은 없다 — 같은 값을 두 번 그리지 않는다.
 
 ### 레일 카드 셋
 
@@ -1090,7 +1093,7 @@ Pretendard Variable(v1.3.9, SIL OFL 1.1)은 **앱에 넣어 두고 서버가 직
 
 **그 밖의 바닥**
 - 포커스: `:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px }`. 입력칸은 2px 파란 테나 `outline`으로 대신한다. hover에만 보이는 동작은 `:focus-within`에서도 보여야 한다.
-- 누르는 영역: 줄 안의 컨트롤 28px 이상(체크박스는 투명한 `::after`로 확보), 줄 자체 54px, 520px 이하에서는 줄 60px 이상. 520px 이하의 업무 줄 체크박스·⋯은 38px 이상. **넓은 화면의 작은 글자 링크·버튼도 28px**(설정의 밑줄 글자 `.d-ablink`, 선택 막대 `전체 선택`, 줄의 `원문` `.d-src`) — 모양은 그대로 두고 투명 `::after`를 `min(0px, calc(50% - 14px))`만큼 넓힌다(이미 28px 이상이면 늘지 않는다). 넓힌 자리가 옆 조작을 덮으면 안 된다 — 레일 확인 대기 줄의 `원문`은 바로 위가 제목이라 위로 2px만, 모자란 만큼 아래(글자뿐인 줄)로 넓힌다. 말줄임(`overflow: hidden`)이라 `::after`가 잘리는 그룹 이름(`.d-grp button.gl`)은 `padding-block: 3px; margin-block: -3px`로 줄 높이를 그대로 둔다.
+- 누르는 영역: 줄 안의 컨트롤 28px 이상(체크박스는 투명한 `::after`로 확보), 줄 자체 54px, 520px 이하에서는 줄 60px 이상. 520px 이하의 업무 줄 체크박스·⋯은 38px 이상. **넓은 화면의 작은 글자 링크·버튼도 28px**(설정의 밑줄 글자 `.d-ablink`, 글자 링크 `.d-link` 전부 — `열기`·`직군 목록 고치기`·`지라 티켓 연결`·`전체 선택` 등, 줄의 `원문` `.d-src`, 지라 띠 `지라에서 열기` `.d-jopen`, 주간요약의 제목·소제목·칸 이름 `.rp-rename`과 문장 첫 줄 `.rp-edit`) — 모양은 그대로 두고 투명 `::after`를 `min(0px, calc(50% - 14px))`만큼 넓힌다(이미 28px 이상이면 늘지 않는다). 글자 위치를 맞추려고 `padding` + 음수 `margin`으로 판을 부모 밖으로 내미는 방식은 쓰지 않는다(`지라 티켓 연결`이 줄 밖으로 4px 나가던 것을 이 방식으로 바꿨다). 넓힌 자리가 옆 조작을 덮으면 안 된다 — 레일의 `원문`(제목 옆 줄 `.tiwrap`, 확인 대기 둘째 줄 `.sub`)은 바로 위가 제목이라 위로 2px만, 모자란 만큼 아래(글자뿐인 줄·줄 아래 여백)로 넓힌다. 확인 대기 둘째 줄은 넘침을 `overflow: clip` + `overflow-clip-margin: 8px`로 잘라 넓힌 자리까지 잘리지 않게 한다. 말줄임(`overflow: hidden`)이라 `::after`가 잘리는 그룹 이름(`.d-grp button.gl`)은 `padding-block: 4px; margin-block: -4px`로 줄 높이를 그대로 둔다(글줄 20px + 8 = 28px). 재는 도구(`measure.mjs`)는 `::after`를 못 보므로 이 자리들은 `누를 자리가 작아요`로 계속 잡힌다 — 실제로 눌리는지는 `elementFromPoint`로 가운데를 지나는 세로·가로 28px을 찍어 확인한다. **아직 28px이 안 되는 것**: 줄 제목 글자 버튼(오늘 목록 `.d-title` 25px, 레일 `.d-mrow .ti`·`.d-wrow .ti` 20px, 회의 초안·프로젝트 읽는 그룹 `.ti` 18px, 새로 들어온 것 `.desc-editable` 25px) — 두 줄 말줄임(`-webkit-line-clamp`)이라 여백을 넣으면 셋째 줄이 비치고 `::after`는 잘린다. 넓은 화면에서 줄 빈 곳을 누르면 여는 동작으로 바꿀지와 함께 정할 일이다.
 - 초점 복귀: 저장 뒤 화면을 다시 그리면 초점을 **같은 필드의 누르는 자리**로 돌려준다 — 상세 카드는 `dd[data-field]` 이름표로 찾고, 없어졌으면 카드 제목(`panelFocusRestore`). 사람이 이미 다른 곳에 초점을 두었으면 건드리지 않는다. 프로그램 초점이라 마우스로 고른 뒤에는 테가 뜨지 않는다(`:focus-visible` 그대로).
 - 컨트롤 대비 3:1 이상(꺼진 체크박스 테두리 `--check-line`이 흰 면 위 3.04 ✓).
 - 키보드: ⌘K 검색 · ⌘Z 되돌리기 / ⌘⇧Z 다시 실행 · Esc는 **가장 위에 열린 것부터** 하나씩 닫는다(설정 → 메뉴 → 검색 → 회의 → 상세 → 서랍). 맨 위에 `오늘 할 일로 건너뛰기` 링크(초점을 받으면 나타나고, 흰 글자를 얹으므로 바탕은 `--accent-strong`이다).
