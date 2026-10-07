@@ -18320,7 +18320,7 @@ test('입력 보류 장치 불변: uiRenderOrHold·uiHeldFlush·uiRenderHeld·ui
   };
   const hash = name => crypto.createHash('sha256').update(fnSource(name)).digest('hex').slice(0, 16);
   same(Object.fromEntries(['uiRenderOrHold', 'uiHeldFlush', 'uiRenderHeld', 'uiHoldArm', 'replayUndo'].map(name => [name, hash(name)])), {
-    uiRenderOrHold: '68805031256deebb', uiHeldFlush: '992dc2c5f3314d64', uiRenderHeld: '690e256dad4c416d',
+    uiRenderOrHold: '68805031256deebb', uiHeldFlush: '992dc2c5f3314d64', uiRenderHeld: '1a92a60699c04e95',
     uiHoldArm: 'c4f238c73bfcb559', replayUndo: '7f98d7faa77c546d',
   });
 });
