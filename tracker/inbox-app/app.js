@@ -2396,7 +2396,33 @@ async function refreshStorageStatus() {
 }
 
 const pendingRequestKeys = new Map();
-async function request(url, options) {
+// 업무 하나를 고치는 요청 — 화면이 본 그 업무의 마지막 수정 시각(목록의 reportRefs[id].rev)을 `expect`로 붙인다.
+// 다른 창이 먼저 고쳤으면 서버가 409로 거절하고 아무것도 쓰지 않는다(먼저 고친 내용이 조용히 사라지지 않게).
+// 같은 업무에 대한 요청은 앞 요청이 끝난 뒤 보낸다 — 앞 저장이 돌려준 새 시각을 다음 요청이 쓰게(내 연속 저장이 거절되지 않게).
+const ITEM_WRITES = new Set(['/api/track/set-scheduled', '/api/track/set-jira', '/api/track/set-group', '/api/track/set-due', '/api/track/set-doing',
+  '/api/track/set-who', '/api/track/set-priority', '/api/track/set-description', '/api/track/remove', '/api/track/toggle',
+  '/api/idea/set-project', '/api/idea/promote']);
+const itemWriteChains = new Map();
+function itemWriteId(url, options) {
+  if (options?.method !== 'POST' || !ITEM_WRITES.has(url)) return null;
+  try { const id = JSON.parse(options.body || '{}').id; return typeof id === 'string' ? id : null; } catch { return null; }
+}
+function itemWriteQueue(id, send) {
+  const run = (itemWriteChains.get(id) || Promise.resolve()).then(send);
+  const settled = run.then(() => {}, () => {});
+  itemWriteChains.set(id, settled);
+  settled.then(() => { if (itemWriteChains.get(id) === settled) itemWriteChains.delete(id); });
+  return run;
+}
+async function request(url, options, queued = false) {
+  const itemId = itemWriteId(url, options);
+  if (itemId && !queued) return itemWriteQueue(itemId, () => request(url, options, true));
+  const ref = itemId ? latestData?.reportRefs?.[itemId] : null;
+  // 옛 서버(rev를 모름)나 아직 목록에 없는 업무는 붙이지 않는다 — 서버는 예전처럼 저장한다.
+  if (ref && Object.hasOwn(ref, 'rev')) {
+    const body = JSON.parse(options.body || '{}');
+    if (body.expect === undefined) options = { ...options, body: JSON.stringify({ ...body, expect: { updated: ref.rev } }) };
+  }
   const writing = options?.method === 'POST';
   const retryKey = writing && /\/(create|capture|review)$/.test(url) ? url + options.body : null;
   if(retryKey && typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -2423,6 +2449,7 @@ async function request(url, options) {
       throw failure;
     }
     if(retryKey)pendingRequestKeys.delete(retryKey);
+    if (ref && typeof data?.updated === 'string') ref.rev = data.updated;
     if (writing) recordUndoFor(url, JSON.parse(options.body || '{}'));
     if (url === '/api/track/remove' && !undoReplaying) lastRemovedId = JSON.parse(options.body).id;
     if (writing && !quiet) showNotice('저장했어요');
@@ -2432,6 +2459,11 @@ async function request(url, options) {
     if (error.code === 'RECOVERY_NEEDED') {
       renderStorageBanner({ recoveryNeeded: true });
       showNotice(error.message, true);
+    } else if (error.code === 'CHANGED_ELSEWHERE') {
+      // 다른 창이 먼저 고쳤다 — 서버 문구를 그대로 보이고 목록을 다시 받는다. 다시 받기는 부른 쪽이 적던 칸을
+      // 되살린(초점을 돌려준) 뒤에 한다 — 치는 중인 칸은 다시 그리지 않으니 적은 글은 그대로 남는다.
+      showNotice(error.message, true);
+      setTimeout(() => { load().catch(() => {}); }, 0);
     } else showNotice(writing ? '저장됐는지 확인하지 못했어요. 입력한 내용은 그대로 있어요' : '목록을 불러오지 못했어요', true, writing ? null : () => load());
     throw error;
   } finally {
@@ -6412,7 +6444,12 @@ function makeEditableDesc(el, item) {
           });
           announce('내용을 고쳤어요');
           await load();
-        } catch { committed = false; }
+        } catch {
+          // 실패하면 적은 글이 든 칸에 초점을 돌려준다 — 이어서 다시 받는 목록이 치는 중인 칸을 다시 그리지 않게.
+          committed = false;
+          input.disabled = false;
+          input.focus();
+        }
         finally { input.disabled = false; }
       } else {
         input.replaceWith(el);
