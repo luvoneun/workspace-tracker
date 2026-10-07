@@ -79,8 +79,8 @@
     },
     {
       "do": "click",
-      "note": "바깥(제목 줄)을 눌러 초점을 빼 같은 칸을 다시 저장",
-      "selector": "#tabBtnRecords"
+      "note": "바깥(아이디어 제목 글자 — 누르면 아무 일도 없는 곳)을 눌러 초점을 빼 같은 칸을 다시 저장",
+      "selector": "#ideaColHead"
     },
     {
       "do": "wait",
