@@ -8476,6 +8476,19 @@ function intgClient(state = {}, replies = []) {
     install: 'manual',
   };
   const app = settingsClient(payload);
+  // 드문 순간(uiHere)이 클래스를 달고 떼는 것을 className으로 보도록 — 이 가짜 창의 새 요소에만 className을 따라가는 classList를 준다.
+  const baseCreate = app.context.document.createElement;
+  app.context.document.createElement = (tag) => {
+    const node = baseCreate(tag);
+    const names = () => String(node.className || '').split(' ').filter(Boolean);
+    node.classList = {
+      contains: name => names().includes(name),
+      add: (...add) => { node.className = [...new Set([...names(), ...add])].join(' '); },
+      remove: (...gone) => { node.className = names().filter(one => !gone.includes(one)).join(' '); },
+      toggle() {},
+    };
+    return node;
+  };
   const sent = [];
   const copied = [];
   app.context.navigator = { clipboard: { writeText: async (text) => { copied.push(text); } }, platform: 'MacIntel' };
@@ -9758,7 +9771,7 @@ test('WP-D2 I. 도움말: 문답마다 찾아갈 표지가 있고, `슬랙에서
   q.closest = selector => (selector === 'details' ? home : null);
   app.nodes.get('settingsGuideView').querySelectorAll = () => questions;
   assert.equal(app.run("settingsGuideShow('슬랙에서 이렇게 보내요')"), q);
-  same(added, ['is-hit']);
+  same(added, ['d-here']);
   assert.equal(q.focused, true);
   assert.equal(home.open, true, '찾아온 문답의 묶음을 펼친다');
   // 사람이 다시 접어 두었어도 또 찾아오면 연다.
@@ -10286,7 +10299,7 @@ test('계속 실패(서버의 fetch.stuck)는 멈췄어요 — 다시 연결할 
   // 빨간 점을 누르고 들어오면 멈춘 카드만 붉힌다(한 번 실패한 캘린더는 아니다)
   fx.app.run("settingsFocusKey = 'alerts'");
   await fx.app.run('renderSettingsIntegrations()');
-  same(['slack', 'jira', 'calendar', 'notes'].map(kind => /\bis-flash\b/.test(fx.card(kind).className)), [true, true, false, true]);
+  same(['slack', 'jira', 'calendar', 'notes'].map(kind => /\bd-here\b/.test(fx.card(kind).className)), [true, true, false, true]);
 });
 
 test('누른 결과가 토큰 문제면 그 자리에서 멈췄어요 + `다시 연결`로 바뀐다(Claude 갈래 캘린더는 다시 시도만)', async () => {
@@ -10751,7 +10764,7 @@ test('Claude 로그인 풀림: 첫 멈춘 카드(슬랙)에 `아래 두 줄이�
   tokenInput.focus = () => { focused += 1; };
   pointer.listeners.click();
   assert.equal(focused, 1, '토큰 칸에 초점');
-  assert.match(fx.card('slack').className, /\bis-flash\b/, '칸이 있는 카드를 잠깐 밝힌다');
+  assert.match(fx.card('slack').className, /\bd-here\b/, '칸이 있는 카드를 잠깐 밝힌다');
   // 슬랙이 멀쩡하면 다음 멈춘 카드(캘린더)가 칸을 갖는다
   const cal = wpd25({ calendar: { enabled: true, source: 'claude', live: false, readAt: null, fetch }, meetingNotes: { mode: 'tiro', name: '', fetch } });
   await cal.app.run('renderSettingsIntegrations()');
@@ -10836,20 +10849,20 @@ test('연동 1층-B ②: Claude 로그인 칸 — ① `claude setup-token` 복�
   assert.ok(fx.button('slack', '저장'));
 });
 
-test('WP-E B. 빨간 점을 누르면 연동 탭으로 열고 멈춘 카드만 약 2초 붉게(is-flash), 파란 점만 있으면 앱 탭', async () => {
+test('WP-E B. 빨간 점을 누르면 연동 탭으로 열고 멈춘 카드만 약 2초 붉게(d-here), 파란 점만 있으면 앱 탭', async () => {
   const fx = wpd25({ calendar: { ...WPD25_CONNECTED.calendar, fetch: { failing: true, stuck: true, failedAt: ago(5) } } });
   fx.app.run(`settingsAlertKeys = ['calendar'];`);
   same(fx.app.run('settingsGearTab()'), ['integrations', 'alerts']);
   fx.app.run(`settingsFocusKey = 'alerts'`);
   await fx.app.run('renderSettingsIntegrations()');
-  assert.match(fx.card('calendar').className, /\bis-flash\b/, '멈춘 카드만');
-  assert.ok(!/is-flash/.test(fx.card('slack').className));
+  assert.match(fx.card('calendar').className, /\bd-here\b/, '멈춘 카드만');
+  assert.ok(!/d-here/.test(fx.card('slack').className));
   assert.equal(fx.app.run('settingsFocusKey'), null, '표지는 한 번만 쓴다');
   await new Promise(resolve => setTimeout(resolve, 2100));
-  assert.ok(!/is-flash/.test(fx.card('calendar').className), '약 2초 뒤 거둔다');
+  assert.ok(!/d-here/.test(fx.card('calendar').className), '약 2초 뒤 거둔다');
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
-  assert.match(css, /\.d-intg\.is-flash \{[^}]*background: var\(--urgent-bg\)/);
-  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{ \.d-intg \{ transition: none; \} \}/, '동작 줄이기면 전환 없이 바탕만');
+  assert.match(css, /\.d-intg\.d-here \{[^}]*--here-bg: var\(--urgent-bg\)/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{ \.d-here \{ animation: none !important;/, '동작 줄이기면 흐림 없이 판만 둔다(색만)');
 
   // 빨간 점이 없고 새 버전(파란 점)만 있으면 앱 탭, 아무 점도 없으면 연동
   fx.app.run(`settingsAlertKeys = []; settingsAbout = { version: '1.0.0', update: { available: true, label: 'v1.1.0' } };`);
@@ -11470,15 +11483,15 @@ test('QA2 연동 탭: 늦은 카드는 주황 `늦어요` + `다시 시도` + �
   assert.equal(fetchButton(fx, 'slack').textContent, '다시 시도', '예정보다 늦으면 다시 시도(새로 받기와 같은 길)');
   assert.equal(fx.shape(`window.findByClass(document.getElementById('settingsIntegrationsView').children[1], 'now')[0]`).text, '20시간째 새로 읽지 못했어요');
   assert.equal(fx.card('slack').dataset.late, 'true');
-  assert.match(fx.card('slack').className, /\bis-flash\b.*\bis-warn\b/, '주황 점을 누르고 들어오면 늦은 카드만 주황 판');
-  assert.ok(!/is-flash/.test(fx.card('jira').className));
+  assert.match(fx.card('slack').className, /\bd-here\b.*\bis-warn\b/, '주황 점을 누르고 들어오면 늦은 카드만 주황 판');
+  assert.ok(!/d-here/.test(fx.card('jira').className));
   // 점도 방금 읽은 같은 값으로 맞춘다
   same(fx.app.run('syncStale.map(one => one.key)'), ['slack']);
   // 톱니바퀴: 주황 점이면 연동 탭 + stale 표지
   fx.app.run(`settingsAlertKeys = []; document.getElementById('settingsBtn').classList.contains = cls => cls === 'has-stale';`);
   same(fx.app.run('settingsGearTab()'), ['integrations', 'stale']);
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
-  assert.match(css, /\.d-intg\.is-flash\.is-warn \{ background: var\(--warn-bg\); \}/);
+  assert.match(css, /\.d-intg\.d-here\.is-warn \{ --here-bg: var\(--warn-bg\); \}/);
   assert.match(css, /\.d-istat\.k-late \{ color: var\(--warn\); \}/);
 
   // 멈춘 카드는 빨강이 이긴다(늦음으로 세지 않는다)
@@ -16077,10 +16090,7 @@ const MOTION_RAW_ALLOWED = [
   ['ui.css', 'body.later-open .d-drawer', 'transition-duration', '0s', '남김', '서랍을 열 때 visibility만 0초(바로 보여야 입력 칸에 초점이 들어간다) — 시간이 아니라 즉시'],
   ['ui.css', '.d-ibrow.is-leaving', 'animation', '220ms', 'C', '분류 뒤 줄 접힘 — 뜨는 것이 아니라 줄이다. 사라지는 줄 부품과 함께 정한다'],
   ['ui.css', '.d-row.is-rise', 'animation', '260ms 1400ms', 'C', '분류 뒤 새 줄 솟음·배경 강조 — 뜨는 것이 아니라 줄이다. 줄 부품과 함께 정한다'],
-  ['ui.css', '.is-flash', 'animation', '1.6s', 'F', '밝히기 — 부품 하나로 합친다'],
   ['ui.css', '.d-istat.k-soon .dot', 'animation', '2.4s', '남김', '늘 도는 유일한 장식(연동 `곧 읽어요` 점 숨 쉬기) — 기다림 부품(E)에서 늘리지 않기로 하고 값도 그대로 둔다'],
-  ['ui.css', '.d-intg', 'transition', '400ms', 'F', '밝히기 — 부품 하나로 합친다'],
-  ['ui.css', '.d-faq .q.is-hit', 'transition', '400ms 400ms', 'F', '밝히기 — 부품 하나로 합친다'],
 ];
 
 test('모션 장치: 맨 시간 값 금지 — CSS 네 파일의 transition·animation에 토큰이 아닌 ms·s는 허용 목록에 있는 것뿐이다', () => {
@@ -16135,9 +16145,9 @@ test('누름: 공용 규칙 하나 — 모든 버튼·체크박스가 .97 / --t-
 // 버튼 부품에 transition을 새로 적으면 누름 전환을 함께 적거나 ui.css의 "누름에서 뺀 것"에 넣는다. 여기에는 버튼이 아닌 것만 더한다.
 const MOTION_NOT_PRESSED = [
   ['입력칸 — 누르는 것이 아니라 글자를 친다', ['.d-dateinput', '.d-qa', '.d-din', '.d-dtxt', '.d-qin', '.d-recsearch']],
-  ['줄·카드(div·li·label) — 줄은 줄어들지 않고 안의 버튼이 눌린다', ['.d-mrow', '.d-wrow', '.d-atrow', '.d-ibrow', '.d-row', '.d-prow2', '.d-rec', '.d-intg', '.d-ich', '.d-faq .q.is-hit', '.rp-rec', '.rp-grp .rp-s.is-add', '.d-qaf', '.d-addrow', '.rp-add']],
+  ['줄·카드(div·li·label) — 줄은 줄어들지 않고 안의 버튼이 눌린다', ['.d-mrow', '.d-wrow', '.d-atrow', '.d-ibrow', '.d-row', '.d-prow2', '.d-rec', '.d-ich', '.rp-rec', '.rp-grp .rp-s.is-add', '.d-qaf', '.d-addrow', '.rp-add']],
   ['줄 위에 겹쳐 뜨는 묶음·물러나는 글자(div·span) — 안의 버튼이 공용 누름을 갖는다', ['.d-wrow .ac, .d-mrow .ac', '.d-mrow .ct, .d-wrow .mt', '.d-atrow .mt', '.d-atacts', '.d-acts', '.d-prow2 .ac', '.d-pri']],
-  ['아이콘·꺾쇠·숫자 칩 — 눌리는 것은 그 부모다', ['.d-grp.tog .d-i', '.d-dadd > summary .d-i', '.d-jira .foot .d-jexp .d-i', '.d-jfold .d-i', '.rp-s .rp-foldtoggle .d-i', '.rp-fl .d-i', '.d-imore > summary::before', '.d-lhd .sub .cnt, .d-wrapsum.cnt']],
+  ['아이콘·꺾쇠·숫자 칩·점 — 눌리는 것은 그 부모다', ['.new-dot.is-gone', '.d-grp.tog .d-i', '.d-dadd > summary .d-i', '.d-jira .foot .d-jexp .d-i', '.d-jfold .d-i', '.rp-s .rp-foldtoggle .d-i', '.rp-fl .d-i', '.d-imore > summary::before', '.d-lhd .sub .cnt, .d-wrapsum.cnt']],
   ['면·틀 — 버튼이 아니다', ['.pull-indicator.snapping', '.d-popd .d-detail.is-pop > .d-dtop', '.d-popd .d-detail.is-pop > .d-dfoot, .d-popd .d-detail.is-pop > .d-dbar', '.d-drawer', '#settingsDialog .d-mhd', '.d-stay', 'dialog.d-stay::backdrop', 'details::details-content']],
   ['그 자리에서 고치는 문장(span) — 글자 입력의 시작', ['.rp-s .rp-edit']],
 ];
@@ -20139,4 +20149,102 @@ test('탭 떠나면 저장(검수): Enter가 실패해 남은 글은 탭을 떠�
   await net.run('reportAutosaveLeave()');
   assert.deepEqual(JSON.parse(net.run('JSON.stringify([...reportEdits])')), [['W:a1', '네트워크 글'], ['W:new', '계획 글']]);
   assert.deepEqual(leaveNotices(net).at(-1), ['저장하지 못했어요 — 주간요약에 적던 글이 남아 있어요', true, null]);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 모션 F — 드문 순간(부품 ⑧): 축하 한 번 · 여기예요 밝히기 · 새 항목 점 흐려짐
+
+function rareApp() {
+  const fx = foldApp();
+  const timers = [];
+  fx.app.context.setTimeout = (fn, ms) => { timers.push({ fn, ms }); return timers.length; };
+  fx.app.run("window.matchMedia = () => ({ matches: false }); document.hidden = false;");
+  const el = fx.make('card', 0);
+  fx.app.context.__el = el;
+  const reduce = on => fx.app.run(`window.matchMedia = () => ({ matches: ${on} })`);
+  return { ...fx, timers, el, reduce };
+}
+
+test('드문 순간 F: uiCheer — 완료 화면은 가려진 창·움직임 줄이기만 빼고 늘 서고, strict(오늘 다 끝냄)는 내 동작 직후에만 선다', () => {
+  const fx = rareApp();
+  fx.app.run('uiCheer(__el)');
+  assert.ok(fx.el.has('d-cheer'), '완료 화면은 누른 뒤 서버 응답 뒤에 서므로 동작 시각을 따지지 않는다');
+  fx.el.classList.remove('d-cheer');
+  fx.app.run('uiCheer(__el, true)');
+  assert.equal(fx.el.has('d-cheer'), false, '내 동작이 없으면(자동 갱신·창 처음 열기) 오늘 다 끝냄은 안 터진다');
+  fx.act();
+  fx.app.run('uiCheer(__el, true)');
+  assert.ok(fx.el.has('d-cheer'), '내 동작 직후');
+  fx.el.classList.remove('d-cheer');
+  fx.reduce(true);
+  fx.app.run('uiCheer(__el)');
+  assert.equal(fx.el.has('d-cheer'), false, '움직임 줄이기');
+  fx.reduce(false);
+  fx.app.run('document.hidden = true');
+  fx.app.run('uiCheer(__el)');
+  assert.equal(fx.el.has('d-cheer'), false, '가려진 창');
+  assert.equal(fx.app.run('uiCheer(null)'), null);
+});
+
+test('드문 순간 F: uiHere — 한 가지 모양(d-here)을 달고 UI_RARE.here 뒤에 뗀다, 부가 클래스(is-warn)도 함께 떼고 여러 요소를 한꺼번에 밝힌다', () => {
+  const fx = rareApp();
+  const other = fx.make('other', 40);
+  fx.app.context.__two = [fx.el, other];
+  fx.app.run("uiHere(__two, ['is-warn'])");
+  assert.ok(fx.el.has('d-here') && fx.el.has('is-warn') && other.has('d-here'));
+  assert.deepEqual(fx.timers.map(t => t.ms), [2000], '길이는 한 가지');
+  fx.timers[0].fn();
+  assert.ok(!fx.el.has('d-here') && !fx.el.has('is-warn') && !other.has('d-here'));
+  assert.equal(fx.app.run('UI_RARE.here'), 2000);
+  fx.app.run('uiHere(__el)');
+  assert.ok(fx.el.has('d-here') && !fx.el.has('is-warn'), '다시 밝히면 다시 선다');
+});
+
+test('드문 순간 F: uiDotOut — 새 항목 점은 300ms 흐려진 뒤 떼고, 움직임 줄이기·가려진 창은 바로 뗀다', () => {
+  const fx = rareApp();
+  let removed = 0;
+  fx.el.remove = () => { removed += 1; };
+  fx.app.run('uiDotOut(__el)');
+  assert.ok(fx.el.has('is-gone'));
+  assert.equal(removed, 0);
+  assert.deepEqual(fx.timers.map(t => t.ms), [300]);
+  fx.timers[0].fn();
+  assert.equal(removed, 1);
+  fx.reduce(true);
+  fx.app.run('uiDotOut(__el)');
+  assert.equal(removed, 2, '움직임 줄이기는 바로');
+  assert.equal(fx.timers.length, 1);
+});
+
+test('드문 순간 F: 값은 토큰 한 곳 — --t-here(밝히기)·--t-slow(축하)·--t-wait(새 항목 점)가 UI_RARE·CSS와 같고, 옛 밝히기 세 벌과 맨 시간 값은 없다', () => {
+  const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
+  const token = name => Number((css.match(new RegExp(`${name}:\\s*(\\d+)ms`)) || [])[1]);
+  const rare = JSON.parse(rareApp().app.run('JSON.stringify(UI_RARE)'));
+  assert.equal(token('--t-here'), rare.here);
+  assert.equal(token('--t-wait'), rare.dot);
+  assert.equal(token('--t-slow'), 320);
+  assert.match(css, /\.d-cheer \{ animation: d-cheer var\(--t-slow\) var\(--spring-2\) both; \}/);
+  assert.match(css, /\.d-here \{[^}]*animation: d-here var\(--t-here\) var\(--ease\) both;/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{ \.d-cheer \{ animation: none !important; \} \}/, '움직임 줄이기 — 축하는 그냥 선다');
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{ \.d-here \{ animation: none !important; box-shadow:/, '움직임 줄이기 — 밝히기는 색(판)만');
+  assert.match(css, /\.new-dot\.is-gone \{ opacity: 0; transition: opacity var\(--t-wait\) var\(--ease\); \}/);
+  assert.doesNotMatch(css, /is-flash|@keyframes d-flash|\.d-faq \.q\.is-hit/, '옛 밝히기 세 벌');
+  const sources = ['app.js', 'settings-ui.js', 'report-ui.js'].map(file => fs.readFileSync(path.join(__dirname, file), 'utf8')).join('\n');
+  assert.doesNotMatch(sources, /is-flash|SETTINGS_FLASH_MS/, '옛 밝히기 길이·클래스 없음');
+});
+
+test('드문 순간 F: 부르는 자리 — 밝히기 4곳(팔레트·설정 카드·문답·확인 필요)과 축하 5곳(오늘 다 끝냄·연결 완료·꾸미기·체크인·새 프로젝트)만, 오늘 다 끝냄은 직전에 할 일이 남아 있던 때만', () => {
+  const read = file => fs.readFileSync(path.join(__dirname, file), 'utf8');
+  const count = (text, re) => (text.match(re) || []).length;
+  assert.match(read('app.js'), /uiHere\(row\);/, '팔레트에서 연 줄');
+  assert.match(read('settings-ui.js'), /uiHere\(rows, marks\)/, '설정 카드');
+  assert.match(read('settings-ui.js'), /uiHere\(hit\)/, '문답');
+  assert.match(read('report-ui.js'), /uiHere\(line\)/, '확인 필요');
+  assert.equal(count(read('settings-ui.js'), /uiCheer\(/g), 2, '연결 완료·꾸미기');
+  assert.equal(count(read('checkin-ui.js'), /uiCheer\(/g), 1);
+  assert.equal(count(read('project-new-ui.js'), /uiCheer\(res\)/g), 1);
+  assert.match(read('project-new-ui.js'), /!state\.resultSeen\) uiCheer\(res\);[^\n]*\n\s*state\.resultSeen = true;/, '새 프로젝트 결과는 한 번만');
+  const today = read('app.js');
+  assert.match(today, /if \(doneItems\.length && todayHadOpen\) uiCheer\(list\.lastElementChild, true\);\s*\}\s*todayHadOpen = !todayCleared;/);
+  assert.equal(count(today, /uiCheer\(/g), 2, '정의 하나 + 오늘 다 끝냄 strict 한 곳 — 더 있으면 지도에 올린다');
 });
