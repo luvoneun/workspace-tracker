@@ -909,15 +909,19 @@ function uiCheer(el, strict = false) {
 }
 // 여기예요 밝히기(.d-here): 한 가지 모양·한 가지 길이(UI_RARE.here). 어디로 데려왔는지 보이게 할 때만 — 색은 부르는 쪽이 클래스(is-warn 등)나
 // --here-bg로 고른다. 움직임 줄이기는 CSS가 흐림 없이 판만 그 시간 동안 둔다(색만).
+const uiHereRun = new WeakMap(); // 요소 → 마지막으로 밝힌 때의 표 — 앞 타이머가 다시 밝힌 것을 일찍 거두지 않게
 function uiHere(els, extra = []) {
+  const token = {};
   const list = [].concat(els).filter(el => el && el.classList);
   const marks = ['d-here', ...extra];
   list.forEach((el) => {
+    // 같은 줄을 연달아 밝히면 클래스를 뗐다 다시 달아 애니메이션을 처음부터 다시 시작한다
+    if (el.classList.contains('d-here')) { marks.forEach(mark => el.classList.remove(mark)); void el.offsetWidth; }
     marks.forEach(mark => el.classList.add(mark));
-    // 같은 줄을 연달아 밝히면 애니메이션을 처음부터 다시 시작한다
-    if (typeof el.getAnimations === 'function') el.getAnimations().forEach(one => one.cancel && one.cancel());
+    uiHereRun.set(el, token);
   });
-  setTimeout(() => list.forEach(el => marks.forEach(mark => el.classList.remove(mark))), UI_RARE.here);
+  // 그 사이 같은 요소를 다시 밝혔으면(다른 token) 앞 타이머는 건드리지 않는다
+  setTimeout(() => list.forEach((el) => { if (uiHereRun.get(el) === token) marks.forEach(mark => el.classList.remove(mark)); }), UI_RARE.here);
   return list;
 }
 
