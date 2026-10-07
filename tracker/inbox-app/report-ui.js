@@ -276,7 +276,9 @@ function reportLeaveLock(key) {
 // 실패(서버 꺼짐·409·거절)하면 입력칸을 열어 둔 채 글을 남기고 알린다. 저장하지 않는 때: 칸 안 도구(`보고에서 빼기` 등 —
 // 누를 때 초점을 가져가지 않는다)·같은 줄 안 링크로 옮길 때, 앱 창 자체가 초점을 잃을 때(다른 앱·다른 창), Enter·Esc로
 // 닫히며 사라질 때, 그 칸이 이미 저장 중일 때. 한글 조합 중이면 조합이 끝난 뒤에 본다. 할 일 칸 적기줄은 늘 떠 있는 줄이라 대상이 아니다.
+const reportBlurWatched = new Map();   // 열쇠 → { scope, input } 지금 그려진 입력칸(다시 그리면 새 것으로 바뀐다)
 function reportBlurWatch(scope, input, key) {
+  reportBlurWatched.set(key, { scope, input });
   scope.addEventListener('focusout', (event) => {
     if (input.disabled || !reportEdits.has(key) || reportLeaveSaving.has(key)) return;
     const next = event.relatedTarget;
@@ -312,13 +314,29 @@ function reportBlurWatch(scope, input, key) {
 let reportPointerDown = false;
 let reportPointerTarget = null;
 const reportPointerWaiters = [];
-document.addEventListener('pointerdown', (event) => { reportPointerDown = true; reportPointerTarget = event.target; }, true);
-for (const name of ['pointerup', 'pointercancel']) {
-  document.addEventListener(name, () => {
-    reportPointerDown = false;
-    const waiters = reportPointerWaiters.splice(0);
-    setTimeout(() => waiters.forEach(run => run()), 0);
-  }, true);
+document.addEventListener('pointerdown', (event) => {
+  reportPointerDown = true;
+  reportPointerTarget = event.target;
+  reportBlurSweep(event.target);
+}, true);
+// 뗐다는 소식(pointerup)이 오지 않는 끝도 눌림을 푼다 — 오른쪽 메뉴·포인터 붙잡기를 잃음·탭이 가려짐.
+function reportPointerRelease() {
+  reportPointerDown = false;
+  const waiters = reportPointerWaiters.splice(0);
+  setTimeout(() => waiters.forEach(run => run()), 0);
+}
+for (const name of ['pointerup', 'pointercancel', 'lostpointercapture', 'contextmenu']) document.addEventListener(name, reportPointerRelease, true);
+document.addEventListener('visibilitychange', () => { if (document.hidden) reportPointerRelease(); });
+// 초점 없이 열려 있는 칸(근거 글자를 끌어 고른 뒤·저장 실패로 남은 칸·다시 그려 돌아온 칸)은 focusout이 다시 오지 않는다 —
+// 그 칸 줄 밖을 누르면 바깥 누르기와 같이 저장하고 닫는다(초점이 있는 칸은 focusout이 맡는다).
+function reportBlurSweep(target) {
+  const active = document.activeElement;
+  for (const [key, { scope, input }] of [...reportBlurWatched]) {
+    if (!scope.isConnected) { reportBlurWatched.delete(key); continue; }
+    if (!reportEdits.has(key) || input.disabled || reportLeaveSaving.has(key) || reportBlurPending.has(key)) continue;
+    if (typeof scope.contains !== 'function' || (active && scope.contains(active)) || (target && scope.contains(target))) continue;
+    reportBlurSave(key);
+  }
 }
 function reportAfterPointer(run) {
   if (!reportPointerDown) { setTimeout(run, 0); return; }
@@ -346,14 +364,17 @@ function reportBlurBack(key) {
   return el.dataset.renameInput === key || (el.dataset.editRow !== undefined && `${week}:${el.dataset.editRow}` === key);
 }
 async function reportBlurSaveNow(key) {
-  await reportLeaveWait(() => !reportComposing, 1000);
   await reportLeaveWait(() => !reportPointerDown, 3000);
+  await reportLeaveWait(() => !reportComposing, 1000);
   await new Promise(resolve => setTimeout(resolve, 0));
   const shown = reportRenderedItem;
   const saver = reportLeaveSavers.get(key);
   if (!shown || !saver || saver.weekKey !== shown.weekKey || !reportEdits.has(key) || reportBlurBack(key)) return;
   if (!await reportLeaveWait(() => !reportBusy, 20000)) { showNotice(REPORT_BLUR_FAIL, true); return; }
   if (!reportEdits.has(key) || reportBlurBack(key) || !reportRenderedItem || reportRenderedItem.weekKey !== saver.weekKey) return;
+  // 기다리는 사이 이 칸으로 돌아와 한글을 치기 시작했으면 마지막 글자가 들어온 뒤에 읽는다.
+  await reportLeaveWait(() => !reportComposing, 1000);
+  if (!reportEdits.has(key) || reportBlurBack(key)) return;
   const fresh = reportLeaveFresh(saver.weekKey, shown);
   const step = await reportLeaveSaveKey(key, fresh, { quiet: true });
   if (step.state === 'skip') return;
@@ -408,7 +429,9 @@ function reportButton(text, action, className = 'd-btn') {
   el.disabled = reportBusy;
   el.addEventListener('click', async () => {
     el.disabled = true;
-    try { await action(); }
+    // 다른 저장이 도는 중이면 저장 길은 아무것도 하지 않고 false를 돌려준다 — 조용히 무시하지 않고 알린다(바깥 누르기 저장은
+    // 문서를 다시 그리지 않아 그 사이 버튼이 살아 있다).
+    try { if (await action() === false) showNotice(REPORT_BUSY_TEXT, true); }
     catch (error) { showNotice(error.message || '저장하지 못했어요. 적은 내용은 그대로 있어요', true); }
     finally { el.disabled = false; }
   });
@@ -1449,8 +1472,10 @@ function reportReviewGo(item) {
   target.focus({ preventScroll: true });
   // 여기예요 밝히기 — 옮겨 온 문장 줄을 한 번 밝힌다(고른 톤 is-hit은 그대로 남는다)
   const line = typeof target.closest === 'function' ? target.closest('.rp-s') : null;
-  if (line && typeof uiHere === 'function') uiHere(line);
+  if (line && typeof uiHere === 'function') { uiHere(line); reportHereUntil = Date.now() + (typeof UI_RARE !== 'undefined' ? UI_RARE.here : 0); }
 }
+// 밝히는 동안 문서를 다시 그리면(바깥 누르기 저장 등) 새 줄에서 다시 밝힌다.
+let reportHereUntil = 0;
 
 // 머리 ⋯ 메뉴(순수에 가까움 — 테스트가 이름표를 본다). 개수 줄은 누를 수 없는 조용한 항목이다.
 function reportHeadMenuSections(item) {
@@ -1663,6 +1688,7 @@ function reportSentenceRow(item, row, context) {
   // `확인 필요 ›`로 옮겨 온 줄 — 기존 선택 톤(--sel) 하나.
   const picked = reportReviewPick === row.id && reportMode === 'draft' && !tidy;
   if (picked) line.classList.add('is-hit');
+  if (picked && Date.now() < reportHereUntil && typeof uiHere === 'function') uiHere(line);
   const lines = String(row.text ?? '').split('\n');
 
   // 글머리 — 정리 모드면 선택 칸, 아니면 점. 다듬은 뒤 새로 들어온 줄(기록이 없는 주는 브라우저별 새 기록)은 파란 점이고,
@@ -1834,7 +1860,11 @@ function reportColumnHead(item, key) {
   if (reportEdits.has(editKey)) {
     head.appendChild(reportRenameBox(item, {
       editKey, label: '칸 이름', original: REPORT_COLUMN_DEFAULT[key], current: names[key], hint: '다음 주에도 이 이름으로 나와요', local: true,
-      save: async (value, target = item) => { reportColumnSave(key, value); reportEdits.delete(editKey); renderReportDraft(target); },
+      save: async (value, target = item, options) => {
+        reportColumnSave(key, value);
+        reportEdits.delete(editKey);
+        if (!options || options.draw !== false) renderReportDraft(target);
+      },
     }));
   } else {
     head.appendChild(reportRenameButton(item, { editKey, text: names[key], label: `칸 이름 ${names[key]} — 고치기`, current: names[key], tip: '누르면 칸 이름을 고쳐요' }));
