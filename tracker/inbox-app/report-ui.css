@@ -209,12 +209,11 @@ h3.rp-h { line-height: inherit; }
 .rp-s .rp-foldtoggle[aria-expanded="true"] .d-i { transform: rotate(90deg); }
 .rp-s .rp-foldtoggle:hover { background: var(--hover); color: var(--text); }
 .rp-s .rp-foldtoggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-/* 그 자리 수정 — 다른 입력칸과 같은 부품(테두리 없는 회색 채움 + 파란 테) */
+/* 그 자리 수정 — 다른 입력칸과 같은 부품(테두리 없는 회색 채움, 파란 테는 초점이 있는 칸에만) */
 .rp-ta {
   box-sizing: border-box; width: 100%; resize: vertical;
   padding: 10px 14px; border: 0; border-radius: var(--r-sm);
   background: var(--field); color: var(--text); font-family: inherit; font-size: 15.5px; line-height: 1.65;
-  box-shadow: 0 0 0 2px var(--accent);
 }
 .rp-ta:focus { outline: none; background: var(--surface); box-shadow: 0 0 0 2px var(--accent); }
 
