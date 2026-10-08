@@ -7294,8 +7294,7 @@ test('BPVIEW: 찾기 칸에 입력해도 목록 부분만 다시 그린다 — �
   assert.deepEqual(fixture.rowsOf().map(row => row.name), ['결제 리뉴얼'], '그 뒤의 목록만 새로 그렸다');
 });
 
-// setActiveTab(탭을 떠나면 projectFindQuery를 비우는 곳)은 app.js의 "실행 코드" 구역(DEFINITIONS_MARKER
-// 아래)이라 이 test 파일이 읽는 정의부에는 없다 — Playwright로 4324에서 직접 확인한다.
+// 탭을 떠나면 projectFindQuery를 비우는 곳은 projects-ui.js projectsTabLeave다(아래 '탭 들어올 때·나갈 때' 시험).
 
 // ---------- BSMALL ①: 우선순위·기한 변경 ⌘Z ----------
 // 안전장치(recordUndoFor)는 손대지 않는다 — 값을 바꾸는 호출부에서 pushUndo를 부르기만 한다.
@@ -19095,10 +19094,39 @@ test('BJCREATE: openProjectTab·탭 이동도 결과 화면을 닫는다', () =>
   a.app.run("setActiveTab = () => {}; openProjectTab('group:살아 있는 것')");
   assert.equal(a.app.run('projectNew'), null);
   assert.equal(a.app.run('projectKey'), 'group:살아 있는 것');
-  // setActiveTab은 가짜 창에 올라오지 않는다 — 탭을 떠날 때 부르는 줄을 글자로 확인한다.
+  // 탭을 떠날 때는 setActiveTab이 프로젝트 화면의 projectsTabLeave를 부른다(연결은 아래 '탭 들어올 때·나갈 때' 시험).
+  const b = projectNewStuckClient();
+  b.app.run('projectsTabLeave()');
+  assert.equal(b.app.run('projectNew'), null, '탭을 떠나면 결과 화면을 버린다');
+  assert.ok(!nodeFind(b.app.nodes.get('projectBody'), 'd-pnewres'), '다시 그려 결과 화면이 사라진다');
+});
+
+test('탭 들어올 때·나갈 때: setActiveTab은 탭을 옮길 때만 떠나는 탭의 leave → 들어오는 탭의 enter를 activeTabKey를 바꾸기 전에 부른다 — 프로젝트는 차례 다시 정렬·찾기 비우기', () => {
   const source = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
-  const tab = source.slice(source.indexOf('function setActiveTab('), source.indexOf('Object.entries(TABS).forEach', source.indexOf('function setActiveTab(')));
-  assert.match(tab, /activeTabKey === 'projects' && [^\n]*projectNewLeave\(\)\) renderProjects\(\)/);
+  const tabs = source.slice(source.indexOf('const TABS = {'), source.indexOf('\n};\n', source.indexOf('const TABS = {')) + 3);
+  const body = source.slice(source.indexOf('function setActiveTab('), source.indexOf('\n}\n', source.indexOf('function setActiveTab(')) + 2);
+  // 실제 TABS·setActiveTab 앞부분(훅까지)을 가짜 창에서 돌린다 — 나머지(탭 버튼 그리기)는 실행 코드라 여기서 끊는다.
+  const head = body.slice(0, body.indexOf('  Object.entries(TABS).forEach')) + '  activeTabKey = tab;\n}';
+  const fixture = projectListClient({ posts: () => new Response('{"ok":true}') });
+  const { app } = fixture;
+  app.run(`calls = []; waitingNextClose = () => {}; panelScrimEl = null;
+    projectsTabEnter = (real => () => { calls.push('enter:projects'); real(); })(projectsTabEnter);
+    projectsTabLeave = (real => () => { calls.push('leave:projects'); real(); })(projectsTabLeave);
+    reportTabLeave = () => calls.push('leave:weekly:' + activeTabKey);`);
+  app.run(tabs.replace('const TABS', 'TABS') + '\n' + head.replace('function setActiveTab(', 'setActiveTabHead = function ('));
+  app.run("activeTabKey = 'today'; projectOrderResort = false; setActiveTabHead('projects')");
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), ['enter:projects']);
+  assert.equal(app.run('projectOrderResort'), true, '새로 들어오면 차례를 다시 정렬');
+  app.run("calls.length = 0; projectOrderResort = false; setActiveTabHead('projects')");
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), [], '같은 탭을 다시 누르면 아무것도 부르지 않는다');
+  assert.equal(app.run('projectOrderResort'), false);
+  app.run("renderProjects(); projectFindQuery = '결제'; setActiveTabHead('weekly')");
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), ['leave:projects']);
+  assert.equal(app.run('projectFindQuery'), '', '떠나면 찾기 칸을 비운다');
+  app.run("calls.length = 0; setActiveTabHead('meetings')");
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), ['leave:weekly:weekly'], '주간요약을 떠나는 일은 activeTabKey를 바꾸기 전');
+  app.run("calls.length = 0; setActiveTabHead('today')");
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), [], 'enter·leave가 없는 탭은 부를 것이 없다');
 });
 
 test('BJCREATE: 지라에 만드는 중에는 줄을 눌러도 화면을 버리지 않는다', () => {
@@ -19107,6 +19135,8 @@ test('BJCREATE: 지라에 만드는 중에는 줄을 눌러도 화면을 버리�
   fixture.rowButton('최근에 끝난 것').listeners.click();
   assert.ok(fixture.app.run('!!projectNew'), '만드는 중이면 그대로 남는다');
   assert.equal(fixture.app.run('projectNewLeave()'), false, '탭을 떠날 때도 같은 함수가 막는다');
+  fixture.app.run('projectsTabLeave()');
+  assert.ok(fixture.app.run('!!projectNew'), '탭을 떠나는 projectsTabLeave도 projectNewLeave 길로 막힌다');
   assert.ok(fixture.app.run('!!projectNew'));
   fixture.app.run('projectNew.busy = false');
   fixture.rowButton('최근에 끝난 것').listeners.click();
@@ -20370,11 +20400,11 @@ test('탭 떠나면 저장: 연타해도·Enter 저장이 도는 중이어도 �
 
 test('탭 떠나면 저장: 한글 조합 중이면 조합이 끝난 뒤 저장한다', async () => {
   const app = leaveClient();
-  app.run("sentence(0, '조합 중인 글'); reportComposing = true;");
+  app.run("sentence(0, '조합 중인 글'); uiComposingEl = {};");
   const run = app.run('reportAutosaveLeave()');
   await leaveTick();
   assert.equal(leaveSent(app).length, 0);
-  app.run("reportEdits.set('W:a1', '조합 끝난 글'); reportComposing = false;");
+  app.run("reportEdits.set('W:a1', '조합 끝난 글'); uiComposingEl = null;");
   await run;
   assert.deepEqual(leaveSent(app), [{ action: 'edit', id: 'a1', text: '조합 끝난 글' }]);
 });
@@ -20413,8 +20443,11 @@ test('탭 떠나면 저장: 저장이 도는 동안 다시 그려진 문장 칸�
 test('탭 떠나면 저장: setActiveTab은 주간요약을 떠날 때만 부르고, 기다리지 않는다(activeTabKey를 바꾸기 전)', () => {
   const source = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
   const body = source.slice(source.indexOf('function setActiveTab('), source.indexOf('Object.entries(TABS).forEach', source.indexOf('function setActiveTab(')));
-  assert.match(body, /if \(tab !== activeTabKey && activeTabKey === 'weekly' && typeof reportAutosaveLeave === 'function'\) reportAutosaveLeave\(\);/);
-  assert.doesNotMatch(body, /await reportAutosaveLeave/);
+  assert.match(source, /weekly: \{ grid: 'gridWeekly', btn: 'tabBtnWeekly', leave: \(\) => \{ if \(typeof reportTabLeave === 'function'\) reportTabLeave\(\); \} \},/);
+  assert.match(fs.readFileSync(path.join(__dirname, 'report-ui.js'), 'utf8'), /function reportTabLeave\(\) \{\n  reportAutosaveLeave\(\);\n\}/, '기다리지 않는다');
+  const whole = source.slice(source.indexOf('function setActiveTab('), source.indexOf('\n}\n', source.indexOf('function setActiveTab(')));
+  assert.ok(whole.indexOf('TABS[activeTabKey]?.leave?.()') > 0 && whole.indexOf('TABS[activeTabKey]?.leave?.()') < whole.indexOf('activeTabKey = tab;'), 'activeTabKey를 바꾸기 전');
+  assert.doesNotMatch(body, /await /);
   const report = fs.readFileSync(path.join(__dirname, 'report-ui.js'), 'utf8');
   assert.match(report, /addEventListener\('beforeunload', event => \{\n\s+if \(reportEdits\.size \|\| reportBusy\) \{ event\.preventDefault\(\); event\.returnValue = ''; \}\n\}\);/,
     '탭 닫기·새로고침은 지금처럼 묻기만 한다');
@@ -20469,7 +20502,7 @@ test('탭 떠나면 저장(검수): reportChange는 도는 중이면 false — �
 
 test('탭 떠나면 저장(검수): 조합이 끝났다는 소식이 없어도 1초 뒤에는 저장한다', async () => {
   const app = leaveClient();
-  app.run("sentence(0, '조합 중'); reportComposing = true;");
+  app.run("sentence(0, '조합 중'); uiComposingEl = {};");
   const started = Date.now();
   await app.run('reportAutosaveLeave()');
   assert.ok(Date.now() - started >= 900, '1초 상한까지 기다린다');
@@ -20808,10 +20841,10 @@ test('입력칸 떠나면 저장: 실패(서버 오류·409)하면 칸을 열어
 
 test('입력칸 떠나면 저장: 한글 조합 중이면 조합이 끝나 마지막 글자가 들어온 뒤에 보낸다', async () => {
   const app = blurClient();
-  app.run("a = open(0, '조합 중인 글'); reportComposing = true; leave(a);");
+  app.run("a = open(0, '조합 중인 글'); uiComposingEl = {}; leave(a);");
   await leaveTick();
   assert.deepEqual(leaveSent(app), []);
-  app.run("reportEdits.set('W:a1', '조합 중인 글자'); reportComposing = false;");
+  app.run("reportEdits.set('W:a1', '조합 중인 글자'); uiComposingEl = null;");
   await blurSettle(app);
   assert.deepEqual(leaveSent(app), [{ action: 'edit', id: 'a1', text: '조합 중인 글자' }]);
 });
@@ -20931,11 +20964,11 @@ test('입력칸 떠나면 저장(검수): 저장 응답 뒤 다시 그리기는 
     const real = reportChange; reportChange = (t, action, notice, options) => { opts.push(options); return real(t, action, notice, options); };
     a = open(0, '앞 문장'); leave(a);`);
   await leaveTick(); await leaveTick();
-  app.run('reportComposing = true; hold();');
+  app.run('uiComposingEl = {}; hold();');
   await leaveTick(); await leaveTick();
   assert.equal(leaveSent(app).length, 1);
   assert.equal(app.run('draws'), 0, '다른 칸에서 조합 중이면 그리지 않는다(조합이 끊기지 않게)');
-  app.run('reportComposing = false');
+  app.run('uiComposingEl = null');
   await blurSettle(app);
   assert.equal(app.run('draws'), 1);
   assert.equal(app.run('opts[0] && opts[0].draw'), false);
@@ -21044,12 +21077,12 @@ test('입력칸 떠나면 저장(재검수): 칸 이름도 저장 중에는 그�
   app.run(`draws = 0; renderReportDraft = () => { draws += 1; }; colKey = reportColumnEditKey('W', 'done'); reportEdits.set(colKey, '한 일');
     head = reportColumnHead(item, 'done'); box = head.children[0]; box.contains = el => deepHas(box, el);
     // 저장하는 그 순간 사람이 옮겨 간 칸에서 한글을 치기 시작한다.
-    const realSave = reportColumnSave; reportColumnSave = (k, v) => { reportComposing = true; return realSave(k, v); };
+    const realSave = reportColumnSave; reportColumnSave = (k, v) => { uiComposingEl = {}; return realSave(k, v); };
     box.listeners.focusout({ relatedTarget: { tagName: 'TEXTAREA' } });`);
   await leaveTick(); await leaveTick(); await leaveTick();
   assert.equal(app.run('reportEdits.has(colKey)'), false, '저장은 됐다');
   assert.equal(app.run('draws'), 0, '다른 칸에서 조합 중이면 그리지 않는다');
-  app.run('reportComposing = false');
+  app.run('uiComposingEl = null');
   await blurSettle(app);
   assert.equal(app.run('draws'), 1);
 });
@@ -21231,7 +21264,7 @@ test('입력 보호(조합 추적): 조합 중인 칸이 다시 그리기로 지
 
 test('입력 보호(주간요약): 문장 A 바깥 누르기 저장 뒤 다시 그리기는 문장 B의 한글 조합(조합 시작·입력·끝)이 끝날 때까지 — 1초를 넘겨도 끊지 않는다', async () => {
   const app = blurClient();
-  const ime = compositionBus(app, 'report-ui.js', /reportComposing/);
+  const ime = compositionBus(app, 'app.js', /uiComposingEl/);
   app.run(`draws = 0; renderReportDraft = () => { draws += 1; }; hold = null;
     reply = () => new Promise(resolve => { hold = () => resolve({ ok: true, status: 200, json: async () => ({ ok: true, undoToken: 'u', report: item.draft }) }); });
     a = open(0, '앞 문장 고침'); b = open(1, '둘째 '); leave(a);`);
@@ -21251,9 +21284,36 @@ test('입력 보호(주간요약): 문장 A 바깥 누르기 저장 뒤 다시 �
   assert.match(fs.readFileSync(path.join(__dirname, 'report-ui.js'), 'utf8'), /const REPORT_COMPOSE_MAX = 5000;/);
 });
 
+test('입력 공통(조합 추적): 한글 조합을 듣는 곳은 app.js 한 곳뿐 — 주간요약의 기다림도 같은 uiComposingLive를 본다', async () => {
+  const files = fs.readdirSync(__dirname).filter(name => /\.js$/.test(name) && !/\.test\.js$/.test(name));
+  const listeners = files.flatMap(name => fs.readFileSync(path.join(__dirname, name), 'utf8').split('\n')
+    .filter(line => /^document\.addEventListener\('composition(start|end)'/.test(line)).map(line => `${name}: ${line}`));
+  assert.equal(listeners.length, 2, listeners.join('\n'));
+  assert.ok(listeners.every(line => line.startsWith('app.js: ')), '듣기 두 줄은 app.js에');
+  const report = fs.readFileSync(path.join(__dirname, 'report-ui.js'), 'utf8');
+  assert.doesNotMatch(report, /reportComposing|reportStillComposing/);
+  // 실제 이벤트열: 조합 중이면 기다리고, 끝나면 바로 넘어간다.
+  const app = reportClient();
+  const ime = compositionBus(app, 'app.js', /uiComposingEl/);
+  const field = element();
+  ime.start(field, '한');
+  assert.equal(app.run('uiComposingLive()'), true);
+  const waited = app.run('reportLeaveWait(() => !uiComposingLive(), 2000)');
+  setTimeout(() => ime.end(field), 120);
+  assert.equal(await waited, true, '조합이 끝나면 기다림이 풀린다');
+  assert.equal(app.run('uiComposingLive()'), false);
+  // 다른 칸에서 온 compositionend로도 풀린다(옛 주간요약 추적과 같이 — 조합은 한 번에 하나).
+  const other = element();
+  ime.start(field, '글');
+  const waited2 = app.run('reportLeaveWait(() => !uiComposingLive(), 2000)');
+  setTimeout(() => ime.end(other), 120);
+  assert.equal(await waited2, true, '다른 칸의 끝으로도 기다림이 풀린다');
+  assert.equal(app.run('uiComposingLive()'), false);
+});
+
 test('입력 보호(주간요약): 조합 중이던 칸이 지워져(compositionend 없음) 남은 조합 표시는 기다림을 붙잡지 않는다', async () => {
   const app = blurClient();
-  const ime = compositionBus(app, 'report-ui.js', /reportComposing/);
+  const ime = compositionBus(app, 'app.js', /uiComposingEl/);
   app.run(`draws = 0; renderReportDraft = () => { draws += 1; }; hold = null;
     reply = () => new Promise(resolve => { hold = () => resolve({ ok: true, status: 200, json: async () => ({ ok: true, undoToken: 'u', report: item.draft }) }); });
     a = open(0, '앞 문장 고침'); b = open(1, '둘째'); leave(a);`);
@@ -21266,5 +21326,5 @@ test('입력 보호(주간요약): 조합 중이던 칸이 지워져(composition
   await blurSettle(app);
   assert.equal(app.run('draws'), 1);
   assert.ok(Date.now() - started < 1000, '상한(5초)까지 기다리지 않는다');
-  assert.equal(app.run('reportStillComposing()'), false);
+  assert.equal(app.run('uiComposingLive()'), false);
 });
