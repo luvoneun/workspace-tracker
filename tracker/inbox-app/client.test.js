@@ -19135,6 +19135,8 @@ test('BJCREATE: 지라에 만드는 중에는 줄을 눌러도 화면을 버리�
   fixture.rowButton('최근에 끝난 것').listeners.click();
   assert.ok(fixture.app.run('!!projectNew'), '만드는 중이면 그대로 남는다');
   assert.equal(fixture.app.run('projectNewLeave()'), false, '탭을 떠날 때도 같은 함수가 막는다');
+  fixture.app.run('projectsTabLeave()');
+  assert.ok(fixture.app.run('!!projectNew'), '탭을 떠나는 projectsTabLeave도 projectNewLeave 길로 막힌다');
   assert.ok(fixture.app.run('!!projectNew'));
   fixture.app.run('projectNew.busy = false');
   fixture.rowButton('최근에 끝난 것').listeners.click();
