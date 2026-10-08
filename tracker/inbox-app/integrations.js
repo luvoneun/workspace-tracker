@@ -457,62 +457,105 @@ async function slackTokenForUse(config, { tokenDir, request, now } = {}) {
 // `workspace.config.json`을 쓰는 길은 전부 여기를 지난다(연동 저장·꾸미기·슬랙 연결 방식·채널 이름 따라가기).
 // 저장은 시작할 때 본 설정(`base`)으로 새 설정(`next`)을 만들고, 그 사이 확인(지라·슬랙·캘린더, 몇 초)을 기다린다 —
 // 그동안 다른 창·다른 요청이 설정을 바꿀 수 있다. 그래서 통째로 쓰지 않는다:
-//   1) 쓰기 **직전에** 디스크의 최신 설정을 다시 읽는다(파일이 없거나 깨졌으면 `base`를 최신으로 본다).
-//   2) 이 요청이 바꾼 칸만 얹는다. 칸은 최상위 키, 값이 둘 다 객체면 그 아래 두 번째 키(`server.autoUpdate`·
-//      `slack.channels`·`jira.siteUrl`·`integrations.slack` 같은 단위)다. 바꾼 칸 = `base`와 `next`의 값이 다른 칸,
-//      `next`에서 사라진 칸은 지운다. 이 요청이 안 바꾼 칸은 최신 값 그대로다.
+//   1) 쓰기 **직전에** 디스크의 최신 설정을 다시 읽는다. 파일이 없거나 깨졌거나 빈 객체면(시작 때는 내용이 있었는데):
+//      사람의 저장은 `base`를 최신으로 보고 쓰고, 자동 갱신은 아무것도 쓰지 않는다(설정 전체를 날리지 않게).
+//   2) 이 요청이 바꾼 칸만 얹는다. 칸은 최상위 키, 값이 객체면 그 아래 두 번째 키(`server.autoUpdate`·
+//      `integrations.slack` 같은 단위)이고, 둘은 예외다:
+//      - **연결 묶음**(CONFIG_BUNDLES — 지라의 사이트·이메일·토큰 경로·표시 이름, 슬랙의 방식·토큰 경로·워크스페이스,
+//        캘린더의 갈래·주소 경로·맥 캘린더)은 확인을 함께 거친 한 덩어리라 통째로 한 칸이다 — 토큰 A에 이메일 B처럼
+//        짝이 어긋난 연결이 남지 않게. 이번 저장이 확인을 거친 묶음(`claim`)은 값이 base와 같아도 통째로 얹는다
+//        (같은 이메일로 토큰만 새로 넣은 저장이 그 사이 남이 바꾼 이메일을 남겨 두지 않게).
+//      - `slack.channels`는 채널 키(세 번째 단계)마다 한 칸이다 — 다른 채널을 바꾼 두 저장이 둘 다 남게.
+//      바꾼 칸 = `base`와 `next`의 값이 다른 칸, `next`에서 사라진 칸은 지운다. 안 바꾼 칸은 최신 값 그대로다.
 //   3) 같은 칸을 그 사이 남도 바꿨으면(최신 ≠ base): 사람이 방금 누른 저장(`wins: 'mine'`)은 이 요청 값이 이긴다
 //      (마지막 누름이 이김), 자동 갱신(`wins: 'theirs'` — 이름 따라가기)은 남의 값을 지키고 그 칸을 건너뛴다.
+//      얹을 칸이 하나도 없으면 쓰지 않는다.
 //   4) 다시 읽기 → 얹기 → 쓰기는 기다림 없이 한 번에(동기) 한다 — 같은 서버 안에서는 두 쓰기가 끼어들 수 없어
 //      따로 대기열이 없어도 한 줄로 선다. 쓰기는 원자적 교체(atomicWrite)다.
-// 돌려주는 값은 실제로 쓴 설정이다.
+// 돌려주는 값은 실제로 쓴 설정이다(쓰지 않았으면 디스크의 최신 설정, 못 읽었으면 `base`).
+const CONFIG_BUNDLES = {
+  jira: ['siteUrl', 'email', 'tokenFile', 'displayName'],
+  slack: ['auth', 'tokenFile', 'workspaceUrl'],
+  calendar: ['source', 'icalFile', 'macCalendars'],
+};
+const CONFIG_DEEP = { slack: 'channels' };
 const isPlain = value => !!value && typeof value === 'object' && !Array.isArray(value);
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const plain = value => (isPlain(value) ? value : {});
 
-function changedFields(base, next) {
+// 칸 하나 = { key } | { key, inner } | { key, inner, sub } | { key, bundle: [...] }
+function changedFields(base, next, claim = []) {
   const fields = [];
   new Set([...Object.keys(base), ...Object.keys(next)]).forEach((key) => {
     const before = base[key];
     const after = next[key];
-    if (same(before, after)) return;
+    if (same(before, after) && !(claim.includes(key) && isPlain(after))) return;
     // 처음 생기는 객체(base에 없던 `slack` 등)도 안쪽 칸 단위로 본다 — 그 사이 남이 만든 같은 객체의 다른 칸을 지우지 않게.
-    if (isPlain(after) && (isPlain(before) || before === undefined)) {
-      const was = isPlain(before) ? before : {};
-      new Set([...Object.keys(was), ...Object.keys(after)]).forEach((inner) => {
-        if (!same(was[inner], after[inner])) fields.push([key, inner]);
+    if (!(isPlain(after) && (isPlain(before) || before === undefined))) { fields.push({ key }); return; }
+    const was = plain(before);
+    const bundle = CONFIG_BUNDLES[key] || [];
+    if (bundle.length && (claim.includes(key) || bundle.some(inner => !same(was[inner], after[inner])))) fields.push({ key, bundle });
+    new Set([...Object.keys(was), ...Object.keys(after)]).forEach((inner) => {
+      if (bundle.includes(inner) || same(was[inner], after[inner])) return;
+      const deep = CONFIG_DEEP[key] === inner
+        && (isPlain(was[inner]) || was[inner] === undefined) && (isPlain(after[inner]) || after[inner] === undefined);
+      if (!deep) { fields.push({ key, inner }); return; }
+      const from = plain(was[inner]);
+      const to = plain(after[inner]);
+      new Set([...Object.keys(from), ...Object.keys(to)]).forEach((sub) => {
+        if (!same(from[sub], to[sub])) fields.push({ key, inner, sub });
       });
-    } else fields.push([key]);
+    });
   });
   return fields;
 }
 
-const fieldOf = (config, [key, inner]) => (inner === undefined ? config[key] : (isPlain(config[key]) ? config[key][inner] : undefined));
+function fieldOf(config, { key, inner, sub, bundle }) {
+  if (bundle) return bundle.map(one => plain(config[key])[one]);
+  if (inner === undefined) return config[key];
+  if (sub === undefined) return plain(config[key])[inner];
+  return plain(plain(config[key])[inner])[sub];
+}
 
-function mergeConfig({ base = {}, next = {}, latest = {}, wins = 'mine' } = {}) {
+const put = (holder, name, value) => { if (value === undefined) delete holder[name]; else holder[name] = value; };
+
+function mergeConfig({ base = {}, next = {}, latest = {}, wins = 'mine', claim = [] } = {}) {
   const merged = clone(JSON.parse(JSON.stringify(latest)));
-  changedFields(clone(base), clone(next)).forEach((field) => {
+  let applied = 0;
+  changedFields(clone(base), clone(next), claim).forEach((field) => {
     if (wins === 'theirs' && !same(fieldOf(latest, field), fieldOf(base, field))) return;
-    const [key, inner] = field;
-    const value = fieldOf(next, field);
-    if (inner === undefined) {
-      if (value === undefined) delete merged[key]; else merged[key] = value;
-      return;
+    applied += 1;
+    const { key, inner, sub, bundle } = field;
+    if (inner === undefined && !bundle) { put(merged, key, next[key]); return; }
+    // 최신에서 그 키가 객체가 아니게 바뀌었으면 빈 객체에서 시작한다(`theirs`면 위에서 이미 건너뛴다).
+    const holder = { ...plain(merged[key]) };
+    if (bundle) bundle.forEach(one => put(holder, one, plain(next[key])[one]));
+    else if (sub === undefined) put(holder, inner, plain(next[key])[inner]);
+    else {
+      const deep = { ...plain(holder[inner]) };
+      put(deep, sub, plain(plain(next[key])[inner])[sub]);
+      holder[inner] = deep;
     }
-    // 최신에서 그 키가 객체가 아니게 바뀌었으면 다음 쪽 객체에서 시작한다(`theirs`면 위에서 이미 건너뛴다).
-    const holder = isPlain(merged[key]) ? { ...merged[key] } : {};
-    if (value === undefined) delete holder[inner]; else holder[inner] = value;
     merged[key] = holder;
   });
+  Object.defineProperty(merged, 'applied', { value: applied });   // 얹은 칸 수(쓰지 않을지 정할 때만, JSON에는 안 실림)
   return merged;
 }
 
-function readConfigFile(configPath, fallback) {
-  try { return JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch { return fallback; }
+function readConfigFile(configPath) {
+  try { return JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch { return null; }
 }
 
-function writeConfig({ configPath, base = {}, next = {}, wins = 'mine', write = atomicWrite, read = file => readConfigFile(file, base) } = {}) {
-  const latest = read(configPath);
-  const merged = mergeConfig({ base, next, latest: isPlain(latest) ? latest : base, wins });
+function writeConfig({ configPath, base = {}, next = {}, wins = 'mine', claim = [], write = atomicWrite, read = readConfigFile } = {}) {
+  let latest = null;
+  try { latest = read(configPath); } catch { latest = null; }
+  const lost = !isPlain(latest) || (!Object.keys(latest).length && Object.keys(plain(base)).length > 0);
+  if (lost) {
+    if (wins === 'theirs') return clone(base);
+    latest = base;
+  }
+  const merged = mergeConfig({ base, next, latest, wins, claim });
+  if (!merged.applied) return merged;
   write(configPath, `${JSON.stringify(merged, null, 2)}\n`);
   return merged;
 }
@@ -713,6 +756,7 @@ async function saveIntegrations({
   let config = { ...current };
   const result = { ok: true };
   const pending = [];   // 확인이 끝난 뒤에 쓸 토큰 파일들
+  const claim = [];     // 확인을 거쳐 통째로 얹을 연결 묶음(writeConfig CONFIG_BUNDLES)
   let pastedOverOAuth = '';   // 새 방식에서 토큰을 직접 붙여 넣었을 때의 그 토큰(갱신 정보를 지우면서 쓴다)
   let touched = false;
 
@@ -745,6 +789,7 @@ async function saveIntegrations({
       // 있는 자리를 그대로 적는다(사람이 옮겨 둔 경로를 기본 경로로 덮어쓰지 않는다).
       const displayName = String(account.displayName || '').trim().slice(0, 80);
       config = withJira(config, { enabled: true, siteUrl, email, tokenFile: token ? paths.jira.config : saved.config, displayName });
+      claim.push('jira');
       result.jira = { displayName };
     }
   }
@@ -866,6 +911,7 @@ async function saveIntegrations({
         ...(workspaceUrl ? { workspaceUrl } : {}),
       });
       if (pastedOverOAuth) config = { ...config, slack: { ...clone(config.slack), auth: 'token' } };
+      if (token) claim.push('slack');
       if (token && slackRotatingToken(token)) result.slack.warning = 'rotating_token';
       if (tidy !== undefined) {
         config = withSlackTidy(config, tidy);
@@ -890,6 +936,7 @@ async function saveIntegrations({
       if (!checked || !checked.ok) throw bad(MESSAGE.icalRead);
       if (url) pending.push([paths.calendar.file, address]);
       config = withCalendar(config, true, { source: 'ical', icalFile: url ? paths.calendar.config : saved.config });
+      if (url) claim.push('calendar');
       result.calendar = { source: 'ical', count: Number(checked.count) || 0 };
     } else if (body.calendar.source === 'mac') {
       // 맥 캘린더 갈래 — 서버는 맥 캘린더를 읽지 않는다(프로세스를 띄우지 않는다). 화면이 `허용하고 확인`으로 이미 읽어 본
@@ -921,7 +968,7 @@ async function saveIntegrations({
     const forgot = await forgetOAuth({ config: current, tokenDir, then: () => writeToken(paths.slack.file, pastedOverOAuth) });
     if (!forgot) throw bad(MESSAGE.slackBusy, 'slack_busy');
   }
-  config = writeConfig({ configPath, base: current, next: config, write });
+  config = writeConfig({ configPath, base: current, next: config, claim, write });
   // 정리 방식만 바꾼 저장은 서버를 다시 켤 필요가 없다(수집 스크립트가 회차마다 설정을 읽는다).
   const quiet = tidyOnly && !body.jira && !body.calendar && !body.meetingNotes;
   return { config, result, quiet };
