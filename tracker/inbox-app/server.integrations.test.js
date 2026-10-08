@@ -893,11 +893,11 @@ test('설정 쓰기: 서로 다른 칸을 바꾸는 두 저장이 겹치면 둘 
   assert.equal(saved.jira.email, 'a@b.c');
 });
 
-test('설정 쓰기: 이름 따라가기(자동)와 사람의 저장이 같은 칸(slack.channels)이면 사람 값이 남는다 — 어느 쪽이 먼저 끝나도', async (t) => {
+test('설정 쓰기: 이름 따라가기(자동)와 사람의 저장이 같은 채널 칸이면 사람 값이 남고, 다른 채널 칸은 둘 다 남는다 — 어느 쪽이 먼저 끝나도', async (t) => {
   const seed = { title: '그대로', integrations: { slack: true }, slack: { channels: { todo: { id: 'C0TODO11', name: '#my-todo' }, waiting: { id: 'C0WAIT11', name: '#my-waiting' } } } };
   const renameAnswer = async url => json({ ok: true, channel: { id: new URL(url).searchParams.get('channel'), name: 'todo-renamed' } });
 
-  // 1) 따라가기가 슬랙을 기다리는 동안 사람이 채널을 빼면 — 따라가기는 그 칸을 건너뛴다
+  // 1) 따라가기가 슬랙을 기다리는 동안 사람이 채널 하나를 빼면 — 따라가기는 그 채널만 건너뛰고 다른 채널 이름은 고친다
   const one = integrationsFixture(t, seed);
   const answer = later();
   const follower = integrationsStore.createSlackNameFollower({ request: url => answer.promise.then(() => renameAnswer(url)), token: async () => 'xoxp-follow' });
@@ -907,8 +907,8 @@ test('설정 쓰기: 이름 따라가기(자동)와 사람의 저장이 같은 �
   answer.resolve();
   assert.deepEqual((await following).renamed, { todo: '#todo-renamed', waiting: '#todo-renamed' });
   const first = one.read();
-  assert.deepEqual(first.slack.channels.waiting, { id: 'C0WAIT11', name: '#my-waiting', off: true }, '사람이 뺀 표시가 남는다');
-  assert.equal(first.slack.channels.todo.name, '#my-todo', '자동 갱신은 사람이 바꾼 칸을 덮지 않는다');
+  assert.deepEqual(first.slack.channels.waiting, { id: 'C0WAIT11', name: '#my-waiting', off: true }, '사람이 뺀 표시가 남고, 자동 갱신은 그 채널 이름을 덮지 않는다');
+  assert.equal(first.slack.channels.todo.name, '#todo-renamed', '사람이 안 바꾼 채널 칸은 이름을 고친다');
   assert.equal(first.title, '그대로');
 
   // 2) 사람의 저장이 슬랙 확인을 기다리는 동안 따라가기가 먼저 이름을 고치면 — 사람의 저장이 끝나며 그 칸은 사람 값
@@ -916,19 +916,92 @@ test('설정 쓰기: 이름 따라가기(자동)와 사람의 저장이 같은 �
   const check = later();
   const human = integrationsStore.saveIntegrations({
     configPath: two.configPath, current: two.read(), tokenDir: two.tokenDir,
-    body: { slack: { enabled: true, token: 'xoxp-human', channels: { someday: 'C0SOME11' } } },
+    body: { slack: { enabled: true, token: 'xoxp-human', channels: { todo: 'C0TODO22' } } },
     slackCheck: () => check.promise,
   });
   await settle();
   const auto = integrationsStore.createSlackNameFollower({ request: renameAnswer, token: async () => 'xoxp-follow' });
   await auto.follow({ read: two.read, configPath: two.configPath, tokenDir: two.tokenDir });
   assert.equal(two.read().slack.channels.todo.name, '#todo-renamed', '그 사이 따라가기는 썼다');
-  check.resolve({ name: 'my-someday', created: 0 });
+  check.resolve({ name: 'new-todo', created: 0 });
   await human;
   const second = two.read();
-  assert.equal(second.slack.channels.todo.name, '#my-todo', '마지막에 누른 사람의 저장이 이긴다');
-  assert.equal(second.slack.channels.someday.id, 'C0SOME11');
+  assert.equal(second.slack.channels.todo.id, 'C0TODO22', '마지막에 누른 사람의 저장이 이긴다');
+  assert.equal(second.slack.channels.todo.name, '#new-todo');
+  assert.equal(second.slack.channels.waiting.name, '#todo-renamed', '사람이 안 바꾼 채널 칸의 이름 고치기는 남는다');
   assert.equal(second.title, '그대로');
+});
+
+test('설정 쓰기: 겹친 지라 저장 — 같은 이메일로 토큰만 새로 넣은 저장이 나중에 끝나면 그 저장의 연결 묶음(이메일·토큰)이 통째로 남는다', async (t) => {
+  const fix = integrationsFixture(t, {});
+  fs.mkdirSync(fix.tokenDir, { recursive: true });
+  const tokenFile = path.join(fix.tokenDir, 'workspace-jira-token');
+  fs.writeFileSync(tokenFile, 'token-a-old\n', { mode: 0o600 });
+  fs.writeFileSync(fix.configPath, JSON.stringify({
+    integrations: { jira: true }, jira: { siteUrl: 'https://team.atlassian.net', email: 'a@b.c', tokenFile, displayName: '가' },
+  }));
+  const check = later();
+  const renew = integrationsStore.saveIntegrations({
+    configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir,
+    body: { jira: { enabled: true, siteUrl: 'https://team.atlassian.net', email: 'a@b.c', token: 'token-a-new' } },
+    jiraCheck: () => check.promise,
+  });
+  await settle();
+  await integrationsStore.saveIntegrations({
+    configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir,
+    body: { jira: { enabled: true, siteUrl: 'https://other.atlassian.net', email: 'b@b.c', token: 'token-b' } },
+    jiraCheck: async () => ({ ok: true, displayName: '나' }),
+  });
+  assert.equal(fix.read().jira.email, 'b@b.c');
+  check.resolve({ ok: true, displayName: '가' });
+  await renew;
+  const saved = fix.read();
+  assert.equal(fs.readFileSync(tokenFile, 'utf8').trim(), 'token-a-new');
+  assert.deepEqual(saved.jira, { siteUrl: 'https://team.atlassian.net', email: 'a@b.c', tokenFile, displayName: '가' }, '토큰 A에 이메일 B가 남지 않는다');
+});
+
+test('설정 쓰기: 이름 따라가기 중 설정 파일이 없어지거나 깨지거나 빈 객체로 읽히면 아무것도 쓰지 않는다', async (t) => {
+  const seed = { title: '그대로', integrations: { slack: true }, slack: { channels: { todo: { id: 'C0TODO11', name: '#my-todo' } } } };
+  const renameAnswer = async url => json({ ok: true, channel: { id: new URL(url).searchParams.get('channel'), name: 'todo-renamed' } });
+  const cases = [
+    ['없어짐', fix => fs.rmSync(fix.configPath), fix => fix.read],
+    ['깨짐', fix => fs.writeFileSync(fix.configPath, '{ "title": '), fix => fix.read],
+    // 서버의 currentConfigFile처럼 못 읽으면 {}를 주는 read
+    ['빈 객체', fix => fs.writeFileSync(fix.configPath, '{ "title": '), fix => () => { try { return fix.read(); } catch { return {}; } }],
+  ];
+  for (const [label, breakIt, readerOf] of cases) {
+    const fix = integrationsFixture(t, seed);
+    const read = readerOf(fix);
+    const answer = later();
+    const writes = [];
+    const follower = integrationsStore.createSlackNameFollower({ request: url => answer.promise.then(() => renameAnswer(url)), token: async () => 'xoxp-follow' });
+    const following = follower.follow({ read, configPath: fix.configPath, tokenDir: fix.tokenDir, write: (...args) => writes.push(args) });
+    await settle();
+    breakIt(fix);
+    const broken = fs.existsSync(fix.configPath) ? fs.readFileSync(fix.configPath, 'utf8') : null;
+    answer.resolve();
+    await following;
+    assert.deepEqual(writes, [], `${label}: 쓰지 않는다`);
+    assert.equal(fs.existsSync(fix.configPath) ? fs.readFileSync(fix.configPath, 'utf8') : null, broken, `${label}: 파일 그대로`);
+  }
+});
+
+test('설정 쓰기: 사람 둘이 서로 다른 채널을 바꾸면 둘 다 남는다', async (t) => {
+  const fix = integrationsFixture(t, { integrations: { slack: true }, slack: { channels: { todo: { id: 'C0TODO11', name: '#my-todo' }, waiting: { id: 'C0WAIT11', name: '#my-waiting' } } } });
+  const check = later();
+  const first = integrationsStore.saveIntegrations({
+    configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir,
+    body: { slack: { enabled: true, token: 'xoxp-human', channels: { someday: 'C0SOME11' } } },
+    slackCheck: () => check.promise,
+  });
+  await settle();
+  await integrationsStore.saveIntegrations({ configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir, body: { slack: { enabled: true, off: ['waiting'] } } });
+  check.resolve({ name: 'my-someday', created: 0 });
+  await first;
+  const channels = fix.read().slack.channels;
+  assert.equal(channels.someday.id, 'C0SOME11');
+  assert.equal(channels.waiting.off, true, '먼저 끝난 사람의 빼기가 되살아나지 않는다');
+  assert.deepEqual(channels.todo, { id: 'C0TODO11', name: '#my-todo' });
 });
 
 test('설정 쓰기(mergeConfig): 바꾼 칸만 얹고, 지운 칸은 지우며, 자동 갱신은 남이 바꾼 칸을 건너뛴다', () => {
