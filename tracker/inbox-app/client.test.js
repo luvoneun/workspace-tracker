@@ -7294,8 +7294,7 @@ test('BPVIEW: 찾기 칸에 입력해도 목록 부분만 다시 그린다 — �
   assert.deepEqual(fixture.rowsOf().map(row => row.name), ['결제 리뉴얼'], '그 뒤의 목록만 새로 그렸다');
 });
 
-// setActiveTab(탭을 떠나면 projectFindQuery를 비우는 곳)은 app.js의 "실행 코드" 구역(DEFINITIONS_MARKER
-// 아래)이라 이 test 파일이 읽는 정의부에는 없다 — Playwright로 4324에서 직접 확인한다.
+// 탭을 떠나면 projectFindQuery를 비우는 곳은 projects-ui.js projectsTabLeave다(아래 '탭 들어올 때·나갈 때' 시험).
 
 // ---------- BSMALL ①: 우선순위·기한 변경 ⌘Z ----------
 // 안전장치(recordUndoFor)는 손대지 않는다 — 값을 바꾸는 호출부에서 pushUndo를 부르기만 한다.
@@ -19095,10 +19094,39 @@ test('BJCREATE: openProjectTab·탭 이동도 결과 화면을 닫는다', () =>
   a.app.run("setActiveTab = () => {}; openProjectTab('group:살아 있는 것')");
   assert.equal(a.app.run('projectNew'), null);
   assert.equal(a.app.run('projectKey'), 'group:살아 있는 것');
-  // setActiveTab은 가짜 창에 올라오지 않는다 — 탭을 떠날 때 부르는 줄을 글자로 확인한다.
+  // 탭을 떠날 때는 setActiveTab이 프로젝트 화면의 projectsTabLeave를 부른다(연결은 아래 '탭 들어올 때·나갈 때' 시험).
+  const b = projectNewStuckClient();
+  b.app.run('projectsTabLeave()');
+  assert.equal(b.app.run('projectNew'), null, '탭을 떠나면 결과 화면을 버린다');
+  assert.ok(!nodeFind(b.app.nodes.get('projectBody'), 'd-pnewres'), '다시 그려 결과 화면이 사라진다');
+});
+
+test('탭 들어올 때·나갈 때: setActiveTab은 탭을 옮길 때만 떠나는 탭의 leave → 들어오는 탭의 enter를 activeTabKey를 바꾸기 전에 부른다 — 프로젝트는 차례 다시 정렬·찾기 비우기', () => {
   const source = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
-  const tab = source.slice(source.indexOf('function setActiveTab('), source.indexOf('Object.entries(TABS).forEach', source.indexOf('function setActiveTab(')));
-  assert.match(tab, /activeTabKey === 'projects' && [^\n]*projectNewLeave\(\)\) renderProjects\(\)/);
+  const tabs = source.slice(source.indexOf('const TABS = {'), source.indexOf('\n};\n', source.indexOf('const TABS = {')) + 3);
+  const body = source.slice(source.indexOf('function setActiveTab('), source.indexOf('\n}\n', source.indexOf('function setActiveTab(')) + 2);
+  // 실제 TABS·setActiveTab 앞부분(훅까지)을 가짜 창에서 돌린다 — 나머지(탭 버튼 그리기)는 실행 코드라 여기서 끊는다.
+  const head = body.slice(0, body.indexOf('  Object.entries(TABS).forEach')) + '  activeTabKey = tab;\n}';
+  const fixture = projectListClient({ posts: () => new Response('{"ok":true}') });
+  const { app } = fixture;
+  app.run(`calls = []; waitingNextClose = () => {}; panelScrimEl = null;
+    projectsTabEnter = (real => () => { calls.push('enter:projects'); real(); })(projectsTabEnter);
+    projectsTabLeave = (real => () => { calls.push('leave:projects'); real(); })(projectsTabLeave);
+    reportTabLeave = () => calls.push('leave:weekly:' + activeTabKey);`);
+  app.run(tabs.replace('const TABS', 'TABS') + '\n' + head.replace('function setActiveTab(', 'setActiveTabHead = function ('));
+  app.run("activeTabKey = 'today'; projectOrderResort = false; setActiveTabHead('projects')");
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), ['enter:projects']);
+  assert.equal(app.run('projectOrderResort'), true, '새로 들어오면 차례를 다시 정렬');
+  app.run("calls.length = 0; projectOrderResort = false; setActiveTabHead('projects')");
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), [], '같은 탭을 다시 누르면 아무것도 부르지 않는다');
+  assert.equal(app.run('projectOrderResort'), false);
+  app.run("renderProjects(); projectFindQuery = '결제'; setActiveTabHead('weekly')");
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), ['leave:projects']);
+  assert.equal(app.run('projectFindQuery'), '', '떠나면 찾기 칸을 비운다');
+  app.run("calls.length = 0; setActiveTabHead('meetings')");
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), ['leave:weekly:weekly'], '주간요약을 떠나는 일은 activeTabKey를 바꾸기 전');
+  app.run("calls.length = 0; setActiveTabHead('today')");
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), [], 'enter·leave가 없는 탭은 부를 것이 없다');
 });
 
 test('BJCREATE: 지라에 만드는 중에는 줄을 눌러도 화면을 버리지 않는다', () => {
@@ -20413,8 +20441,11 @@ test('탭 떠나면 저장: 저장이 도는 동안 다시 그려진 문장 칸�
 test('탭 떠나면 저장: setActiveTab은 주간요약을 떠날 때만 부르고, 기다리지 않는다(activeTabKey를 바꾸기 전)', () => {
   const source = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
   const body = source.slice(source.indexOf('function setActiveTab('), source.indexOf('Object.entries(TABS).forEach', source.indexOf('function setActiveTab(')));
-  assert.match(body, /if \(tab !== activeTabKey && activeTabKey === 'weekly' && typeof reportAutosaveLeave === 'function'\) reportAutosaveLeave\(\);/);
-  assert.doesNotMatch(body, /await reportAutosaveLeave/);
+  assert.match(source, /weekly: \{ grid: 'gridWeekly', btn: 'tabBtnWeekly', leave: \(\) => \{ if \(typeof reportTabLeave === 'function'\) reportTabLeave\(\); \} \},/);
+  assert.match(fs.readFileSync(path.join(__dirname, 'report-ui.js'), 'utf8'), /function reportTabLeave\(\) \{\n  reportAutosaveLeave\(\);\n\}/, '기다리지 않는다');
+  const whole = source.slice(source.indexOf('function setActiveTab('), source.indexOf('\n}\n', source.indexOf('function setActiveTab(')));
+  assert.ok(whole.indexOf('TABS[activeTabKey]?.leave?.()') > 0 && whole.indexOf('TABS[activeTabKey]?.leave?.()') < whole.indexOf('activeTabKey = tab;'), 'activeTabKey를 바꾸기 전');
+  assert.doesNotMatch(body, /await /);
   const report = fs.readFileSync(path.join(__dirname, 'report-ui.js'), 'utf8');
   assert.match(report, /addEventListener\('beforeunload', event => \{\n\s+if \(reportEdits\.size \|\| reportBusy\) \{ event\.preventDefault\(\); event\.returnValue = ''; \}\n\}\);/,
     '탭 닫기·새로고침은 지금처럼 묻기만 한다');

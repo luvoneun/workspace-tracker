@@ -7343,12 +7343,13 @@ document.getElementById('laterTaskToggle')?.addEventListener('click', () => {
 });
 document.getElementById('laterTaskClose')?.addEventListener('click', drawerClose);
 drawerRestore();
+// 탭마다 들어올 때(enter)·나갈 때(leave) 할 일은 그 화면 파일이 갖는다 — setActiveTab은 탭을 옮길 때 부르기만 한다.
 const TABS = {
   today: { grid: 'gridToday', btn: 'tabBtnToday' },
-  projects: { grid: 'gridProjects', btn: 'tabBtnProjects' },
+  projects: { grid: 'gridProjects', btn: 'tabBtnProjects', enter: () => projectsTabEnter(), leave: () => projectsTabLeave() },
   meetings: { grid: 'gridMeetings', btn: 'tabBtnMeetings' },
   records: { grid: 'gridRecords', btn: 'tabBtnRecords' },
-  weekly: { grid: 'gridWeekly', btn: 'tabBtnWeekly' },
+  weekly: { grid: 'gridWeekly', btn: 'tabBtnWeekly', leave: () => { if (typeof reportTabLeave === 'function') reportTabLeave(); } },
 };
 projectKeyRestore();
 
@@ -7358,18 +7359,10 @@ function setActiveTab(tab) {
   if (tab !== activeTabKey) waitingNextClose();
   // 좁은 폭 시트는 탭에 붙어 있지 않다 — 탭을 옮기면 닫아 가림막이 새 탭을 막지 않게 한다.
   if (tab !== activeTabKey && panelScrimEl && !panelScrimEl.hidden) panelClose();
-  // 주간요약을 떠나면 적던 글을 Enter와 같은 길로 저장한다 — 기다리지 않는다(실패하면 글은 그대로 남는다, report-ui.js).
-  if (tab !== activeTabKey && activeTabKey === 'weekly' && typeof reportAutosaveLeave === 'function') reportAutosaveLeave();
-  // 새 프로젝트 화면은 탭을 떠나면 버린다(만드는 중이면 남는다 — projectNewLeave).
-  if (tab !== activeTabKey && activeTabKey === 'projects' && typeof projectNew !== 'undefined' && projectNew && projectNewLeave()) renderProjects();
-  // 프로젝트 탭에 새로 들어올 때만 왼쪽 목록 차례를 다시 정렬한다(체크 등으로 이미 그 탭에 있는 동안
-  // 다시 그리는 것은 고정된 차례를 그대로 쓴다 — projectOrderResort).
-  if (tab === 'projects' && activeTabKey !== 'projects') projectOrderResort = true;
-  // 프로젝트 찾기 칸의 값은 저장하지 않는다 — 탭을 떠나면 비운다(BPVIEW). 탭은 숨겨질 뿐 다시 그려지지
-  // 않으므로(tabStale.projects가 그대로다) 값을 지우는 것만으로는 부족하다 — 목록도 다시 그려 둔다.
-  if (tab !== 'projects' && activeTabKey === 'projects' && projectFindQuery) {
-    projectFindQuery = '';
-    renderProjects();
+  // 떠나는 탭의 leave → 들어오는 탭의 enter. activeTabKey를 바꾸기 전이다(각 화면 파일 — 주간요약 reportTabLeave, 프로젝트 projectsTab*).
+  if (tab !== activeTabKey) {
+    TABS[activeTabKey]?.leave?.();
+    TABS[tab].enter?.();
   }
   Object.entries(TABS).forEach(([key, cfg]) => {
     const active = key === tab;
@@ -7386,8 +7379,6 @@ function setActiveTab(tab) {
   if (typeof usageTabOpened === 'function') usageTabOpened(tab, activeTabKey);   // 사용 횟수(WP-R, usage-ui.js)
   const tabSwitched = tab !== activeTabKey;
   activeTabKey = tab;
-  // 주간요약을 떠나면 문장 모으기 막대도 함께 내린다(떠 있는 막대가 다른 탭에 남지 않게).
-  if (tab !== 'weekly' && typeof reportNestEnd === 'function') reportNestEnd();
   // 여러 개 선택은 오늘 탭(목록·서랍)의 것이다 — 다른 탭으로 가면 끝낸다(보이지 않는 업무를 막대로 바꾸지 않게).
   if (tab !== 'today' && taskSelectionMode) taskSelectEnd();
   document.getElementById('skipLink').hidden = tab !== 'today';

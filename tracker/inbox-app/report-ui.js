@@ -151,7 +151,7 @@ window.addEventListener('beforeunload', event => {
 });
 
 // ---------- 탭을 떠나면 적던 글 저장 ----------
-// 적던 글이 있는 채 최상위 탭을 바꾸면(setActiveTab이 주간요약을 떠날 때 부른다) 칸마다 Enter와 같은 길로 하나씩 저장한다.
+// 적던 글이 있는 채 최상위 탭을 바꾸면(주간요약을 떠날 때 setActiveTab → reportTabLeave가 부른다) 칸마다 Enter와 같은 길로 하나씩 저장한다.
 // 입력칸은 그려질 때 자기 저장 길을 여기 적어 둔다(열쇠 → { weekKey, current, undo, save(item, value) }). 적지 않는 칸 —
 // `+ 한 줄 추가`(업무도 함께 만든다)·`나중에 할 일에도 담기` — 은 저장하지 않고 글만 남는다. 보고 있던 주의 글만 저장한다
 // (다른 주를 저장하면 그 주가 문서 자리에 그려진다 — 다른 주의 글은 지금처럼 남는다). 비었거나 원래 글과 같으면 저장하지 않고
@@ -190,6 +190,10 @@ function reportLeaveWait(test, limit) {
     const tick = () => (test() || Date.now() - started >= limit ? resolve(!!test()) : setTimeout(tick, 50));
     tick();
   });
+}
+// 주간요약 탭을 떠날 때(app.js setActiveTab이 부른다) — 적던 글을 Enter와 같은 길로 저장한다. 기다리지 않는다(실패하면 글은 그대로 남는다).
+function reportTabLeave() {
+  reportAutosaveLeave();
 }
 // 탭을 떠날 때마다 한 번 — 앞의 저장이 끝난 뒤 이어서 돈다(연타해도 같은 글을 두 번 보내지 않는다).
 function reportAutosaveLeave() {

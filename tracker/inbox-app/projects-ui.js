@@ -102,7 +102,7 @@ function setProjectListView(value) {
   renderProjects();
 }
 
-// 찾기 칸의 값 — 저장하지 않는다(탭을 떠나면 setActiveTab이 비운다).
+// 찾기 칸의 값 — 저장하지 않는다(탭을 떠나면 projectsTabLeave가 비운다).
 let projectFindQuery = '';
 const PROJECT_FIND_MIN = 8; // 전체 프로젝트(지난 프로젝트 포함)가 이보다 적으면 찾기 칸 자체가 없다.
 // `시작 전` 접힘 — null이면 아직 손대지 않은 것(보고 있는 프로젝트가 거기 있으면 펼쳐 보인다), true/false는 사람이 누른 값.
@@ -319,6 +319,23 @@ function projectViewSegment() {
 // 프로젝트 찾기 칸 — 8개 이상일 때만 선다. 입력할 때마다 목록 부분만 다시 그린다(rowsOnly) — 이
 // 칸 자체는 다시 만들지 않는다(한글 조합 중에 칸이 통째로 바뀌면 조합이 끊긴다. project-new-ui.js의
 // `이름` 칸과 같은 방식 — 손대는 칸 밖에서 결과만 다시 그린다). Esc는 비우기만, 초점은 칸에 남는다.
+// ---------- 탭 들어올 때·나갈 때 (app.js setActiveTab이 탭을 옮길 때 부른다) ----------
+// 프로젝트 탭에 새로 들어올 때만 왼쪽 목록 차례를 다시 정렬한다(체크 등으로 이미 그 탭에 있는 동안
+// 다시 그리는 것은 고정된 차례를 그대로 쓴다 — projectOrderResort).
+function projectsTabEnter() {
+  projectOrderResort = true;
+}
+function projectsTabLeave() {
+  // 새 프로젝트 화면은 탭을 떠나면 버린다(만드는 중이면 남는다 — projectNewLeave).
+  if (typeof projectNew !== 'undefined' && projectNew && projectNewLeave()) renderProjects();
+  // 프로젝트 찾기 칸의 값은 저장하지 않는다 — 탭을 떠나면 비운다(BPVIEW). 탭은 숨겨질 뿐 다시 그려지지
+  // 않으므로(tabStale.projects가 그대로다) 값을 지우는 것만으로는 부족하다 — 목록도 다시 그려 둔다.
+  if (projectFindQuery) {
+    projectFindQuery = '';
+    renderProjects();
+  }
+}
+
 function projectFindInput() {
   const input = document.createElement('input');
   input.type = 'text';
