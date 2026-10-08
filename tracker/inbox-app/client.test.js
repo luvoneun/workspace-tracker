@@ -1954,7 +1954,8 @@ test('찾기 칸 늘 보이기는 분류 판만 — 다른 고르개(그룹 지�
   const toggle = app.slice(app.indexOf('function uiSchedToggle'), app.indexOf('// 슬랙에서 갓 들어온 할 일.'));
   assert.doesNotMatch(toggle, /uiPickSearchable/, '분류 판은 개수 기준을 쓰지 않는다');
   assert.match(toggle, /const searchable = entries\.some\(one => one\.type === 'option'\);/);
-  assert.equal(app.split('search: uiPickSearchable(entries)').length - 1, 2, '확인 대기 고르개·renderGroupControl');
+  assert.equal(app.split('search: uiPickSearchable(entries)').length - 1, 1, 'renderGroupControl');
+  assert.equal(read('waiting-ui.js').split('search: uiPickSearchable(entries)').length - 1, 1, '확인 대기 고르개(panelWaitingCell)');
   assert.equal(read('meetings-ui.js').split('search: uiPickSearchable(entries)').length - 1, 1);
   assert.equal(read('report-ui.js').split('search: uiPickSearchable(entries)').length - 1, 1);
 });
@@ -15029,7 +15030,7 @@ test('상세 카드: 업무 카드에 선택 상자(select)가 없다 — 기다
   assert.deepEqual(terms, ['언제 할지', '기한', '우선순위', '프로젝트', '기다리는 답변']);
   assert.equal(box.children.some(kid => kid.dataset && kid.dataset.sec === '기다리는 답변'), false, '구역은 없어졌다');
   assert.ok(box.children.some(kid => kid.dataset && kid.dataset.sec === '결과 한 줄'), '결과 한 줄 구역은 그대로');
-  const source = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const source = ['app.js', 'waiting-ui.js'].map(file => fs.readFileSync(path.join(__dirname, file), 'utf8')).join('\n');
   for (const name of ['function panelTask(', 'function panelTaskNotes(', 'function panelWaitingCell(', 'function panelCheck(', 'function panelDateCell(']) {
     const at = source.indexOf(name);
     const fn = source.slice(at, source.indexOf('\n}\n', at));
@@ -15215,7 +15216,7 @@ test('상세 기다리는 답변: 대상이 사라지면 `삭제된 확인 대�
   const none = empty.children[0].children.find(kid => kid.className === 'd-gpnone');
   assert.equal(none.textContent, '열린 확인 대기가 없어요');
   assert.equal(none.hidden, false);
-  const source = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const source = fs.readFileSync(path.join(__dirname, 'waiting-ui.js'), 'utf8');
   const fn = source.slice(source.indexOf('function panelWaitingCell('), source.indexOf('\n}\n', source.indexOf('function panelWaitingCell(')));
   assert.match(fn, /placeholder: '확인 대기 찾기'/);
   assert.match(fn, /emptyText: '찾는 확인 대기가 없어요'/);
@@ -19982,7 +19983,7 @@ const D1_SITES = [
   ['app.js', /uiFold\(\(\) => \{ rows\.forEach\(row => \{ row\.hidden = !open; \}\); \}, \{ open, part: rows \}\);/, '② N개 더(uiFoldToggle)'],
   ['app.js', /uiFold\(\(\) => \{ row\.className = open \?/, '제목 두 줄 ↔ 전문(uiClampToggle)'],
   ['app.js', /\}, \{ open: true, part: hidden, from: more \}\);/, '상세 카드 기록 N개 더(detailLogClamp)'],
-  ['app.js', /\}, \{ open: true, part: picker, from: button \}\);/, '확인 대기 고르기(panelWaitingCell)'],
+  ['waiting-ui.js', /\}, \{ open: true, part: picker, from: button \}\);/, '확인 대기 고르기(panelWaitingCell)'],
   ['app.js', /\}, \{ open: true, part: picker, from: revertTo \}\);/, '프로젝트 고르기·메뉴 안 목록(renderGroupControl)'],
   ['app.js', /uiFold\(\(\) => \{ newsMarkSeen\(version\); renderNewsCard\(\); \}, \{ open: false, part: card \}\);/, '소식 카드 닫기'],
   ['app.js', /uiFold\(\(\) => renderGuideCard\(\), \{ open: false,/, '사용설명서 카드 닫기'],

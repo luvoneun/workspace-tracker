@@ -3595,38 +3595,6 @@ function ideaProjectControl(item) {
 
 const STALE_WAITING_DAYS = 3;
 
-// 확인이 끝난 내용은 그대로 두면 사라진다 — 같은 문구로 정책/얼라인 한 줄을 만든다.
-// 알림의 후속 동작(확인 완료 직후)과 더보기·상세의 `결정으로 남기기`가 같은 길을 쓴다.
-async function createDecisionFromWaiting(item, button) {
-  if (button) button.disabled = true;
-  try {
-    const response = await postJson('/api/decision/create', { description: item.description, jira: item.jira, group: item.group, permalink: item.permalink });
-    const { id } = await response.json();
-    pushUndo({
-      label: `${item.description} (결정으로 남기기)`,
-      undo: () => postJson('/api/track/remove', { id }),
-      redo: () => postJson('/api/track/restore', { id }),
-    });
-    await load();
-    announce('결정으로 남겼어요 · 아이디어·결정 탭에서 다듬을 수 있어요');
-    return true;
-  } catch { if (button) button.disabled = false; return false; }
-}
-
-// 확인 요청을 오늘 다시 보냈다는 기록. 다시 확인할 날짜는 건드리지 않는다.
-async function markContactedToday(item) {
-  const detail = typeof wfItem === 'function' ? wfItem(item.id) : null;
-  await postJson('/api/workflow/item', { id: item.id, contacted: todayStr(), followUp: detail?.followUp || null });
-  await load();
-  announce('오늘 확인을 요청한 것으로 적었어요');
-}
-
-async function setTaskWho(id, who) {
-  await postJson('/api/track/set-who', { id, who: who || null });
-  announce(who ? '누구에게를 적었어요' : '누구에게를 지웠어요');
-  await load();
-}
-
 // 줄·상세 어디서 지우든 같은 길: 휴지통으로 보내고(원문 보존) 알림의 `삭제 실행 취소`로 되돌린다.
 function removeTracked(item, card, message = '삭제했어요') {
   return fadeOutAndRun(card, async () => {
@@ -4434,99 +4402,6 @@ function panelTaskNotes(item, detail, box) {
     } catch { /* 저장 실패는 request()가 알린다 — 적은 내용은 그대로 둔다 */ }
   };
   box.appendChild(panelOutcomeSection('결과 한 줄', '끝나고 한 줄로 남기면 주간요약에 그대로 올라가요', current, save));
-}
-
-// 기다리는 답변(필드 격자의 한 줄): 값 `설명 · 누구에게`(없으면 회색 `연결 없음`) + 꺾쇠.
-// 누르면 그 자리에서 프로젝트 고르기와 같은 목록(uiPickList)이 펼쳐진다 — 열린 확인 대기 + 맨 끝 `연결 끊기`.
-// 저장 길은 예전 선택 상자와 같다(blockedBy → /api/workflow/item, 알림 없음).
-function panelWaitingCell(item, detail) {
-  const current = { blockedBy: detail?.blockedBy || '' };
-  const initial = { ...current };
-  const save = async () => {
-    try {
-      if (await panelFieldSave(item.id, initial, current)) await load();
-    } catch { /* 저장 실패는 request()가 알린다 */ }
-  };
-  const checks = (typeof workflowData === 'object' && workflowData ? workflowData.items : [])
-    .filter(check => check.type === 'check' && (check.status !== 'done' || check.id === current.blockedBy));
-  const name = check => `${check.status === 'done' ? '해결됨 · ' : ''}${check.description}`;
-
-  const wrap = document.createElement('div');
-  wrap.className = 'd-wait';
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = 'd-dpick';
-  button.setAttribute('aria-haspopup', 'listbox');
-  button.setAttribute('aria-expanded', 'false');
-  const value = document.createElement('span');
-  const caret = document.createElement('span');
-  caret.className = 'cv';
-  caret.innerHTML = uiIcon('chevron');
-  button.append(value, caret);
-  const paint = () => {
-    const linked = checks.find(check => check.id === current.blockedBy);
-    // 연결은 남았는데 대상이 없으면(삭제됨) `연결 없음`이 아니라 사라졌다고 적는다 — 목록에서 `연결 끊기`로 정리한다.
-    const text = linked ? `${name(linked)}${linked.who ? ` · ${linked.who}` : ''}`
-      : current.blockedBy ? '삭제된 확인 대기' : '연결 없음';
-    value.className = linked ? 'v' : 'v k-mute';
-    value.textContent = text;
-    value.title = text;
-    button.setAttribute('aria-label', `기다리는 답변 ${text} — 눌러서 바꾸기`);
-  };
-  paint();
-  wrap.appendChild(button);
-  if (current.blockedBy && !checks.some(check => check.id === current.blockedBy)) {
-    const gone = document.createElement('div');
-    gone.className = 'd-hint';
-    gone.textContent = '연결했던 확인 대기가 삭제됐어요.';
-    wrap.appendChild(gone);
-  }
-
-  // 펼치는 방식은 프로젝트 고르기(renderGroupControl의 openPicker)와 같다 — 값 자리를 목록으로 바꿔 끼운다.
-  const openPicker = () => {
-    const entries = checks.map(check => ({
-      type: 'option', value: check.id, text: name(check), key: check.who || '',
-      selected: check.id === current.blockedBy, find: [check.description, check.who],
-    }));
-    if (current.blockedBy) entries.push({ type: 'action', value: PICK_CLEAR, text: '연결 끊기' });
-    const restore = (focus) => {
-      uiFold(() => {
-        wrap.classList.remove('is-picking');
-        button.setAttribute('aria-expanded', 'false');
-        if (wrap.contains(picker)) wrap.replaceChild(button, picker);
-      }, { open: false, part: wrap.contains(picker) ? picker : null }); // 그 자리 펼침(펼침 부품) — 접으면 목록이 흐려지고 아래가 올라온다
-      if (focus) button.focus();
-    };
-    const picker = uiPickList({
-      entries,
-      label: '기다리는 답변 고르기',
-      search: uiPickSearchable(entries),
-      placeholder: '확인 대기 찾기',
-      emptyText: '찾는 확인 대기가 없어요',
-      onClose: byKeyboard => restore(byKeyboard),
-      onPick: (picked) => {
-        restore(true);
-        current.blockedBy = picked === PICK_CLEAR ? '' : picked;
-        paint();
-        save();
-      },
-    });
-    if (!checks.length) {
-      // 고를 확인 대기가 하나도 없으면 빈 목록 대신 한 줄로 말한다(찾기 칸의 `없어요` 자리를 빌린다).
-      const none = picker.querySelector('.d-gpnone');
-      if (none) { none.textContent = '열린 확인 대기가 없어요'; none.hidden = false; }
-    }
-    uiFold(() => {
-      wrap.replaceChild(picker, button);
-      wrap.classList.add('is-picking');
-      button.setAttribute('aria-expanded', 'true');
-    }, { open: true, part: picker, from: button });
-    picker.focusStart();
-    // 고를 줄이 없어도 Esc·바깥 누름으로 닫히게 목록 자체에 초점을 둔다.
-    if (!entries.length) { picker.tabIndex = -1; picker.focus(); }
-  };
-  button.addEventListener('click', (event) => { event.stopPropagation(); openPicker(); });
-  return wrap;
 }
 
 // 결정의 `내용` — 정책 결정은 제목 한 줄로 끝나지 않는다. 여러 줄로 적고, 저장은 앱 파일
