@@ -20370,11 +20370,11 @@ test('탭 떠나면 저장: 연타해도·Enter 저장이 도는 중이어도 �
 
 test('탭 떠나면 저장: 한글 조합 중이면 조합이 끝난 뒤 저장한다', async () => {
   const app = leaveClient();
-  app.run("sentence(0, '조합 중인 글'); reportComposing = true;");
+  app.run("sentence(0, '조합 중인 글'); uiComposingEl = {};");
   const run = app.run('reportAutosaveLeave()');
   await leaveTick();
   assert.equal(leaveSent(app).length, 0);
-  app.run("reportEdits.set('W:a1', '조합 끝난 글'); reportComposing = false;");
+  app.run("reportEdits.set('W:a1', '조합 끝난 글'); uiComposingEl = null;");
   await run;
   assert.deepEqual(leaveSent(app), [{ action: 'edit', id: 'a1', text: '조합 끝난 글' }]);
 });
@@ -20469,7 +20469,7 @@ test('탭 떠나면 저장(검수): reportChange는 도는 중이면 false — �
 
 test('탭 떠나면 저장(검수): 조합이 끝났다는 소식이 없어도 1초 뒤에는 저장한다', async () => {
   const app = leaveClient();
-  app.run("sentence(0, '조합 중'); reportComposing = true;");
+  app.run("sentence(0, '조합 중'); uiComposingEl = {};");
   const started = Date.now();
   await app.run('reportAutosaveLeave()');
   assert.ok(Date.now() - started >= 900, '1초 상한까지 기다린다');
@@ -20808,10 +20808,10 @@ test('입력칸 떠나면 저장: 실패(서버 오류·409)하면 칸을 열어
 
 test('입력칸 떠나면 저장: 한글 조합 중이면 조합이 끝나 마지막 글자가 들어온 뒤에 보낸다', async () => {
   const app = blurClient();
-  app.run("a = open(0, '조합 중인 글'); reportComposing = true; leave(a);");
+  app.run("a = open(0, '조합 중인 글'); uiComposingEl = {}; leave(a);");
   await leaveTick();
   assert.deepEqual(leaveSent(app), []);
-  app.run("reportEdits.set('W:a1', '조합 중인 글자'); reportComposing = false;");
+  app.run("reportEdits.set('W:a1', '조합 중인 글자'); uiComposingEl = null;");
   await blurSettle(app);
   assert.deepEqual(leaveSent(app), [{ action: 'edit', id: 'a1', text: '조합 중인 글자' }]);
 });
@@ -20931,11 +20931,11 @@ test('입력칸 떠나면 저장(검수): 저장 응답 뒤 다시 그리기는 
     const real = reportChange; reportChange = (t, action, notice, options) => { opts.push(options); return real(t, action, notice, options); };
     a = open(0, '앞 문장'); leave(a);`);
   await leaveTick(); await leaveTick();
-  app.run('reportComposing = true; hold();');
+  app.run('uiComposingEl = {}; hold();');
   await leaveTick(); await leaveTick();
   assert.equal(leaveSent(app).length, 1);
   assert.equal(app.run('draws'), 0, '다른 칸에서 조합 중이면 그리지 않는다(조합이 끊기지 않게)');
-  app.run('reportComposing = false');
+  app.run('uiComposingEl = null');
   await blurSettle(app);
   assert.equal(app.run('draws'), 1);
   assert.equal(app.run('opts[0] && opts[0].draw'), false);
@@ -21044,12 +21044,12 @@ test('입력칸 떠나면 저장(재검수): 칸 이름도 저장 중에는 그�
   app.run(`draws = 0; renderReportDraft = () => { draws += 1; }; colKey = reportColumnEditKey('W', 'done'); reportEdits.set(colKey, '한 일');
     head = reportColumnHead(item, 'done'); box = head.children[0]; box.contains = el => deepHas(box, el);
     // 저장하는 그 순간 사람이 옮겨 간 칸에서 한글을 치기 시작한다.
-    const realSave = reportColumnSave; reportColumnSave = (k, v) => { reportComposing = true; return realSave(k, v); };
+    const realSave = reportColumnSave; reportColumnSave = (k, v) => { uiComposingEl = {}; return realSave(k, v); };
     box.listeners.focusout({ relatedTarget: { tagName: 'TEXTAREA' } });`);
   await leaveTick(); await leaveTick(); await leaveTick();
   assert.equal(app.run('reportEdits.has(colKey)'), false, '저장은 됐다');
   assert.equal(app.run('draws'), 0, '다른 칸에서 조합 중이면 그리지 않는다');
-  app.run('reportComposing = false');
+  app.run('uiComposingEl = null');
   await blurSettle(app);
   assert.equal(app.run('draws'), 1);
 });
@@ -21231,7 +21231,7 @@ test('입력 보호(조합 추적): 조합 중인 칸이 다시 그리기로 지
 
 test('입력 보호(주간요약): 문장 A 바깥 누르기 저장 뒤 다시 그리기는 문장 B의 한글 조합(조합 시작·입력·끝)이 끝날 때까지 — 1초를 넘겨도 끊지 않는다', async () => {
   const app = blurClient();
-  const ime = compositionBus(app, 'report-ui.js', /reportComposing/);
+  const ime = compositionBus(app, 'app.js', /uiComposingEl/);
   app.run(`draws = 0; renderReportDraft = () => { draws += 1; }; hold = null;
     reply = () => new Promise(resolve => { hold = () => resolve({ ok: true, status: 200, json: async () => ({ ok: true, undoToken: 'u', report: item.draft }) }); });
     a = open(0, '앞 문장 고침'); b = open(1, '둘째 '); leave(a);`);
@@ -21251,9 +21251,29 @@ test('입력 보호(주간요약): 문장 A 바깥 누르기 저장 뒤 다시 �
   assert.match(fs.readFileSync(path.join(__dirname, 'report-ui.js'), 'utf8'), /const REPORT_COMPOSE_MAX = 5000;/);
 });
 
+test('입력 공통(조합 추적): 한글 조합을 듣는 곳은 app.js 한 곳뿐 — 주간요약의 기다림도 같은 uiComposingLive를 본다', async () => {
+  const files = fs.readdirSync(__dirname).filter(name => /\.js$/.test(name) && !/\.test\.js$/.test(name));
+  const listeners = files.flatMap(name => fs.readFileSync(path.join(__dirname, name), 'utf8').split('\n')
+    .filter(line => /^document\.addEventListener\('composition(start|end)'/.test(line)).map(line => `${name}: ${line}`));
+  assert.equal(listeners.length, 2, listeners.join('\n'));
+  assert.ok(listeners.every(line => line.startsWith('app.js: ')), '듣기 두 줄은 app.js에');
+  const report = fs.readFileSync(path.join(__dirname, 'report-ui.js'), 'utf8');
+  assert.doesNotMatch(report, /reportComposing|reportStillComposing/);
+  // 실제 이벤트열: 조합 중이면 기다리고, 끝나면 바로 넘어간다.
+  const app = reportClient();
+  const ime = compositionBus(app, 'app.js', /uiComposingEl/);
+  const field = element();
+  ime.start(field, '한');
+  assert.equal(app.run('uiComposingLive()'), true);
+  const waited = app.run('reportLeaveWait(() => !uiComposingLive(), 2000)');
+  setTimeout(() => ime.end(field), 120);
+  assert.equal(await waited, true, '조합이 끝나면 기다림이 풀린다');
+  assert.equal(app.run('uiComposingLive()'), false);
+});
+
 test('입력 보호(주간요약): 조합 중이던 칸이 지워져(compositionend 없음) 남은 조합 표시는 기다림을 붙잡지 않는다', async () => {
   const app = blurClient();
-  const ime = compositionBus(app, 'report-ui.js', /reportComposing/);
+  const ime = compositionBus(app, 'app.js', /uiComposingEl/);
   app.run(`draws = 0; renderReportDraft = () => { draws += 1; }; hold = null;
     reply = () => new Promise(resolve => { hold = () => resolve({ ok: true, status: 200, json: async () => ({ ok: true, undoToken: 'u', report: item.draft }) }); });
     a = open(0, '앞 문장 고침'); b = open(1, '둘째'); leave(a);`);
@@ -21266,5 +21286,5 @@ test('입력 보호(주간요약): 조합 중이던 칸이 지워져(composition
   await blurSettle(app);
   assert.equal(app.run('draws'), 1);
   assert.ok(Date.now() - started < 1000, '상한(5초)까지 기다리지 않는다');
-  assert.equal(app.run('reportStillComposing()'), false);
+  assert.equal(app.run('uiComposingLive()'), false);
 });

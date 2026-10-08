@@ -165,7 +165,7 @@ const reportEnterSaving = new Set();
 // 바깥 누르기 저장과 같은 기다리기). 그래서 Enter 저장은 reportChange에 `draw: false`를 주고 이것으로 그린다.
 // `settle`은 그리기 직전에 적던 글을 다시 맞추는 일 — 조합이 끝나며 칸이 적던 글을 덮어쓰기 때문이다(한 줄 추가의 남길 글).
 async function reportEnterDraw(item, settle = null) {
-  await reportLeaveWait(() => !reportStillComposing(), REPORT_COMPOSE_MAX);
+  await reportLeaveWait(() => !uiComposingLive(), REPORT_COMPOSE_MAX);
   if (settle) settle();
   renderReportDraft(item);
 }
@@ -176,14 +176,7 @@ function reportEnterEsc(event, key) {
   return true;
 }
 let reportLeaveRun = Promise.resolve();
-let reportComposing = false;
-let reportComposingEl = null;
-document.addEventListener('compositionstart', (event) => { reportComposing = true; reportComposingEl = event.target || null; }, true);
-document.addEventListener('compositionend', () => { reportComposing = false; reportComposingEl = null; }, true);
-// 조합 중인 칸이 다시 그리기로 지워지면 compositionend가 오지 않는다(Chrome 실측) — 떨어져 나간 칸의 조합은 끝난 것으로 본다.
-function reportStillComposing() {
-  return reportComposing && !(reportComposingEl && reportComposingEl.isConnected === false);
-}
+// 한글 조합 중인지는 앱 공통 추적(app.js uiComposingLive — 떨어져 나간 칸의 조합은 끝난 것으로 본다)을 본다.
 // 바깥 누르기 저장은 한글 조합이 끝날 때까지 기다린다 — 문장 A를 고치다 문장 B를 눌러 치는 중에 A 저장 뒤 문서를 다시 그리면
 // B의 조합이 끊긴다. 상한은 멈춤 방지용이다(조합이 이만큼 이어지는 일은 거의 없다).
 const REPORT_COMPOSE_MAX = 5000;
@@ -205,7 +198,7 @@ function reportAutosaveLeave() {
 }
 async function reportLeaveSave() {
   // 한글 조합 중이면 조합이 끝나 마지막 글자가 reportEdits에 들어온 뒤에 본다.
-  await reportLeaveWait(() => !reportStillComposing(), 1000);
+  await reportLeaveWait(() => !uiComposingLive(), 1000);
   await new Promise(resolve => setTimeout(resolve, 0));
   const shown = reportRenderedItem;
   if (!shown || !shown.weekKey) return;
@@ -390,7 +383,7 @@ function reportBlurBack(key) {
 }
 async function reportBlurSaveNow(key) {
   await reportLeaveWait(() => !reportPointerDown, 3000);
-  await reportLeaveWait(() => !reportStillComposing(), REPORT_COMPOSE_MAX);
+  await reportLeaveWait(() => !uiComposingLive(), REPORT_COMPOSE_MAX);
   await new Promise(resolve => setTimeout(resolve, 0));
   const shown = reportRenderedItem;
   const saver = reportLeaveSavers.get(key);
@@ -398,14 +391,14 @@ async function reportBlurSaveNow(key) {
   if (!await reportLeaveWait(() => !reportBusy, 20000)) { showNotice(REPORT_BLUR_FAIL, true); return; }
   if (!reportEdits.has(key) || reportBlurBack(key) || !reportRenderedItem || reportRenderedItem.weekKey !== saver.weekKey) return;
   // 기다리는 사이 이 칸으로 돌아와 한글을 치기 시작했으면 마지막 글자가 들어온 뒤에 읽는다.
-  await reportLeaveWait(() => !reportStillComposing(), REPORT_COMPOSE_MAX);
+  await reportLeaveWait(() => !uiComposingLive(), REPORT_COMPOSE_MAX);
   if (!reportEdits.has(key) || reportBlurBack(key)) return;
   const fresh = reportLeaveFresh(saver.weekKey, shown);
   const step = await reportLeaveSaveKey(key, fresh, { quiet: true });
   if (step.state === 'skip') return;
   // 닫거나(저장·빈 글) 잠갔던 칸을 풀어(실패·409) 한 번 그린다 — 다른 칸에서 한글을 조합하는 중이면 끝난 뒤에(끊지 않게).
   // 알림은 저장 길(reportSavedNotice — Enter와 같은 문구)이 이미 띄웠다.
-  await reportLeaveWait(() => !reportStillComposing(), REPORT_COMPOSE_MAX);
+  await reportLeaveWait(() => !uiComposingLive(), REPORT_COMPOSE_MAX);
   if (reportRenderedItem && reportRenderedItem.weekKey === saver.weekKey) { renderReportDraft(fresh()); reportFocusBack(); }
   if (step.state === 'failed') {
     const message = step.error && step.error.message && step.error.message !== REPORT_LEAVE_FAIL ? step.error.message : REPORT_BLUR_FAIL;
