@@ -439,6 +439,68 @@ test('입력 씹힘 ⑤: 주간요약 `한 줄 추가`는 Enter 저장 중에도
   assert.equal(input && input.value, '다음 줄');
 });
 
+test('입력 씹힘 ⑤: 저장 중인(잠그지 않은) 결과 한 줄 칸(data-saving)이 있으면 그 구역 다시 그리기를 미루고, 저장이 끝나 표시를 떼면 그린다', async () => {
+  const app = pureClient();
+  const fx = holdFixture(app);
+  const cell = fx.field();
+  cell.dataset = { saving: '1' };
+  fx.zone.querySelectorAll = sel => (/data-saving/.test(sel) && cell.dataset.saving ? [cell] : []);
+  // Enter 뒤 바깥(구역 밖 버튼)을 눌렀다.
+  fx.focus({ tagName: 'BUTTON', addEventListener() {}, removeEventListener() {} });
+  let drawn = 0;
+  app.context.uiRenderOrHold('today', fx.zone, () => { drawn += 1; });
+  assert.equal(drawn, 0, 'Enter 뒤 바깥을 눌렀어도(초점 없음) 저장 중인 칸을 떼어 내지 않는다 — 실패하면 글이 남아야 한다');
+  app.run('uiHeldFlush()'); await holdTick();
+  assert.equal(drawn, 0, '미룬 그리기를 풀 때도 지킨다');
+  delete cell.dataset.saving;
+  app.context.uiRenderOrHold('today', fx.zone, () => { drawn += 1; });
+  assert.equal(drawn, 1, '저장이 끝나면 그 저장의 load()가 그린다');
+});
+
+test('입력 씹힘 ⑤: 결과 한 줄은 저장하는 동안 더 친 글이 있으면 성공 뒤에도 칸을 열어 둔 채 그 글을 남기고, 다음 Enter가 그 글로 저장한다', async () => {
+  const app = pureClient();
+  const held = heldFetch(app);
+  const enter = "input.listeners.keydown({ key: 'Enter', isComposing: false })";
+  app.run(`meta = document.createElement('span'); uiResultCell(meta, { id: 'i1', description: '보고서 쓰기' });
+    meta.children[0].listeners.click(); input = meta.children[0];
+    input.value = '확인'; ${enter}; marked = input.dataset.saving; input.value = '확인 끝';`);
+  assert.equal(app.run('marked'), '1', '저장 중인 칸에는 표시가 달린다');
+  await settle();
+  held[0].ok(); await settle();
+  assert.equal(app.run('meta.children[0] === input'), true, '더 친 글이 있으면 칸이 열린 채 남는다');
+  assert.equal(app.run('input.value'), '확인 끝');
+  assert.equal(app.run('input.dataset.saving'), undefined, '저장이 끝나면 표시를 뗀다');
+  app.run(enter); await settle();
+  assert.equal(held.length, 2);
+  assert.equal(held[1].body.outcome, '확인 끝');
+  held[1].ok(); await settle();
+  assert.equal(app.run('meta.children[0].textContent'), '확인 끝', '이번엔 닫혀 결과를 보인다');
+});
+
+test('입력 씹힘 ⑤: 주간요약 문장·제목 이름·한 줄 추가에서 저장 중의 Esc는 넘긴다 — 글을 지우지 않고, 실패하면 글이 그대로다', async () => {
+  const app = c2ReportClient();
+  const held = reportEnterHeld(app);
+  const esc = { key: 'Escape', isComposing: false, preventDefault() {}, stopPropagation() {} };
+  app.run("__week.draft.rows = __reportRows.map(row => ({ ...row, groupKey: 'group:' + row.group })); reportEdits.set('2026-09-28:s2', '약관 링크 교체'); reportEdits.set('2026-09-28:title', '이번주'); reportEdits.set('2026-09-28:addline:완료한 일|group:가입 개선', '약관 검수'); renderReportDraft(__week);");
+  const cases = [['editRow', 's2', '2026-09-28:s2', '약관 링크 교체'], ['renameInput', '2026-09-28:title', '2026-09-28:title', '이번주'],
+    ['addlineInput', '2026-09-28:addline:완료한 일|group:가입 개선', '2026-09-28:addline:완료한 일|group:가입 개선', '약관 검수']];
+  for (const [attr, id, key, text] of cases) {
+    const input = reportFindEl(app, attr, id);
+    input.value = text;
+    input.listeners.keydown(reportEnterKey);
+    input.listeners.keydown(esc);
+    assert.equal(app.run(`reportEdits.get(${JSON.stringify(key)})`), text, `${attr}: 저장 중 Esc는 글을 지우지 않는다`);
+    assert.ok(reportFindEl(app, attr, id), `${attr}: 칸도 닫지 않는다`);
+    await settle();
+    held[held.length - 1].fail();
+    await settle();
+    assert.equal(app.run(`reportEdits.get(${JSON.stringify(key)})`), text, `${attr}: 실패하면 글이 그대로(알림의 "그대로 있어요"가 맞다)`);
+    // 저장이 끝난 뒤의 Esc는 예전처럼 취소다.
+    reportFindEl(app, attr, id).listeners.keydown(esc);
+    assert.equal(app.run(`reportEdits.has(${JSON.stringify(key)})`), false, `${attr}: 저장이 끝난 뒤 Esc는 취소`);
+  }
+});
+
 // 가짜 창에서 "다시 그리기"를 흉내 낸다: 같은 이름표의 새 줄을 만들고 옛 줄은 떼어 낸다.
 function addRowRedraw(app, makeRow) {
   const oldRow = app.run(makeRow);
@@ -18476,7 +18538,7 @@ test('입력 보류 장치 불변: uiRenderOrHold·uiHeldFlush·uiRenderHeld·ui
   };
   const hash = name => crypto.createHash('sha256').update(fnSource(name)).digest('hex').slice(0, 16);
   same(Object.fromEntries(['uiRenderOrHold', 'uiHeldFlush', 'uiRenderHeld', 'uiHoldArm', 'replayUndo'].map(name => [name, hash(name)])), {
-    uiRenderOrHold: '68805031256deebb', uiHeldFlush: '992dc2c5f3314d64', uiRenderHeld: '1a92a60699c04e95',
+    uiRenderOrHold: '68805031256deebb', uiHeldFlush: '8341d542bf7c2961', uiRenderHeld: '9beb27fd6647a59f',
     uiHoldArm: 'c4f238c73bfcb559', replayUndo: '7f98d7faa77c546d',
   });
 });
