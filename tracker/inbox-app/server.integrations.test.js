@@ -828,6 +828,120 @@ test('채널 이름 따라가기(새 방식): 한 줄 사본이 아니라 갱신
   assert.equal(asked.length, 1);
 });
 
+// ---------- 설정 쓰기가 서로를 덮지 않는다(writeConfig) ----------
+// 저장은 확인(지라·슬랙·캘린더)을 기다리는 동안 다른 저장이 끼어들 수 있다 — 쓰기 직전에 파일을 다시 읽고 바꾼 칸만 얹는다.
+// 확인 함수는 손으로 푸는 약속(later)이라 실제 시간을 기다리지 않는다.
+const later = () => { let resolve; let reject; const promise = new Promise((ok, no) => { resolve = ok; reject = no; }); return { promise, resolve, reject }; };
+const settle = () => new Promise(resolve => setImmediate(resolve));
+
+test('설정 쓰기: 연동 저장이 지라 확인을 기다리는 동안 자동 업데이트를 끄면, 저장이 끝난 뒤에도 꺼져 있다', async (t) => {
+  const fix = integrationsFixture(t, { title: '그대로', server: { dockName: '내 앱' } });
+  const check = later();
+  const jira = integrationsStore.saveIntegrations({
+    configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir,
+    body: { jira: { enabled: true, siteUrl: 'https://team.atlassian.net', email: 'a@b.c', token: 'jira-secret' } },
+    jiraCheck: () => check.promise,
+  });
+  await settle();
+  await integrationsStore.savePersonalize({ configPath: fix.configPath, current: fix.read(), body: { autoUpdate: false } });
+  assert.equal(fix.read().server.autoUpdate, false);
+  check.resolve({ ok: true, displayName: '나' });
+  const { config } = await jira;
+  const saved = fix.read();
+  assert.equal(saved.server.autoUpdate, false, '꺼 둔 자동 업데이트가 되살아나지 않는다');
+  assert.equal(saved.server.dockName, '내 앱');
+  assert.equal(saved.integrations.jira, true);
+  assert.equal(saved.jira.siteUrl, 'https://team.atlassian.net');
+  assert.deepEqual(config, saved, '돌려주는 설정은 실제로 쓴 설정이다');
+});
+
+test('설정 쓰기: 확인이 실패하면 그 사이 다른 저장만 남고 이 저장은 설정·토큰 아무것도 쓰지 않는다', async (t) => {
+  const fix = integrationsFixture(t, { title: '그대로' });
+  const check = later();
+  const jira = integrationsStore.saveIntegrations({
+    configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir,
+    body: { jira: { enabled: true, siteUrl: 'https://team.atlassian.net', email: 'a@b.c', token: 'jira-secret' } },
+    jiraCheck: () => check.promise,
+  });
+  await settle();
+  await integrationsStore.savePersonalize({ configPath: fix.configPath, current: fix.read(), body: { autoUpdate: false } });
+  const between = fs.readFileSync(fix.configPath, 'utf8');
+  check.resolve({ ok: false, kind: 'auth' });
+  await assert.rejects(jira, /이메일이나 토큰이 맞지 않아요/);
+  assert.equal(fs.readFileSync(fix.configPath, 'utf8'), between);
+  assert.equal(fs.existsSync(path.join(fix.tokenDir, 'workspace-jira-token')), false);
+});
+
+test('설정 쓰기: 서로 다른 칸을 바꾸는 두 저장이 겹치면 둘 다 남는다', async (t) => {
+  const fix = integrationsFixture(t, { title: '옛 이름', meetingNotes: 'tiro' });
+  const check = later();
+  const jira = integrationsStore.saveIntegrations({
+    configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir,
+    body: { jira: { enabled: true, siteUrl: 'https://team.atlassian.net', email: 'a@b.c', token: 'jira-secret' } },
+    jiraCheck: () => check.promise,
+  });
+  await settle();
+  await integrationsStore.saveIntegrations({ configPath: fix.configPath, current: fix.read(), tokenDir: fix.tokenDir, body: { meetingNotes: { mode: 'manual' } } });
+  await integrationsStore.savePersonalize({ configPath: fix.configPath, current: fix.read(), body: { title: '새 이름' } });
+  check.resolve({ ok: true, displayName: '나' });
+  await jira;
+  const saved = fix.read();
+  assert.equal(saved.meetingNotes, 'manual');
+  assert.equal(saved.integrations.tiro, false);
+  assert.equal(saved.title, '새 이름');
+  assert.equal(saved.integrations.jira, true, '같은 객체(integrations)의 다른 칸도 둘 다 남는다');
+  assert.equal(saved.jira.email, 'a@b.c');
+});
+
+test('설정 쓰기: 이름 따라가기(자동)와 사람의 저장이 같은 칸(slack.channels)이면 사람 값이 남는다 — 어느 쪽이 먼저 끝나도', async (t) => {
+  const seed = { title: '그대로', integrations: { slack: true }, slack: { channels: { todo: { id: 'C0TODO11', name: '#my-todo' }, waiting: { id: 'C0WAIT11', name: '#my-waiting' } } } };
+  const renameAnswer = async url => json({ ok: true, channel: { id: new URL(url).searchParams.get('channel'), name: 'todo-renamed' } });
+
+  // 1) 따라가기가 슬랙을 기다리는 동안 사람이 채널을 빼면 — 따라가기는 그 칸을 건너뛴다
+  const one = integrationsFixture(t, seed);
+  const answer = later();
+  const follower = integrationsStore.createSlackNameFollower({ request: url => answer.promise.then(() => renameAnswer(url)), token: async () => 'xoxp-follow' });
+  const following = follower.follow({ read: one.read, configPath: one.configPath, tokenDir: one.tokenDir });
+  await settle();
+  await integrationsStore.saveIntegrations({ configPath: one.configPath, current: one.read(), tokenDir: one.tokenDir, body: { slack: { enabled: true, off: ['waiting'] } } });
+  answer.resolve();
+  assert.deepEqual((await following).renamed, { todo: '#todo-renamed', waiting: '#todo-renamed' });
+  const first = one.read();
+  assert.deepEqual(first.slack.channels.waiting, { id: 'C0WAIT11', name: '#my-waiting', off: true }, '사람이 뺀 표시가 남는다');
+  assert.equal(first.slack.channels.todo.name, '#my-todo', '자동 갱신은 사람이 바꾼 칸을 덮지 않는다');
+  assert.equal(first.title, '그대로');
+
+  // 2) 사람의 저장이 슬랙 확인을 기다리는 동안 따라가기가 먼저 이름을 고치면 — 사람의 저장이 끝나며 그 칸은 사람 값
+  const two = integrationsFixture(t, seed);
+  const check = later();
+  const human = integrationsStore.saveIntegrations({
+    configPath: two.configPath, current: two.read(), tokenDir: two.tokenDir,
+    body: { slack: { enabled: true, token: 'xoxp-human', channels: { someday: 'C0SOME11' } } },
+    slackCheck: () => check.promise,
+  });
+  await settle();
+  const auto = integrationsStore.createSlackNameFollower({ request: renameAnswer, token: async () => 'xoxp-follow' });
+  await auto.follow({ read: two.read, configPath: two.configPath, tokenDir: two.tokenDir });
+  assert.equal(two.read().slack.channels.todo.name, '#todo-renamed', '그 사이 따라가기는 썼다');
+  check.resolve({ name: 'my-someday', created: 0 });
+  await human;
+  const second = two.read();
+  assert.equal(second.slack.channels.todo.name, '#my-todo', '마지막에 누른 사람의 저장이 이긴다');
+  assert.equal(second.slack.channels.someday.id, 'C0SOME11');
+  assert.equal(second.title, '그대로');
+});
+
+test('설정 쓰기(mergeConfig): 바꾼 칸만 얹고, 지운 칸은 지우며, 자동 갱신은 남이 바꾼 칸을 건너뛴다', () => {
+  const base = { title: 'a', server: { dockName: 'x', autoUpdate: false }, slack: { tidy: 'raw' } };
+  const latest = { title: 'b', server: { dockName: 'y', autoUpdate: false, extraHost: 'h' }, slack: { tidy: 'claude' }, added: 1 };
+  const next = { title: 'a', server: { dockName: 'x' }, slack: { tidy: 'raw', auth: 'oauth' }, jira: { email: 'e' } };
+  assert.deepEqual(integrationsStore.mergeConfig({ base, next, latest }),
+    { title: 'b', server: { dockName: 'y', extraHost: 'h' }, slack: { tidy: 'claude', auth: 'oauth' }, added: 1, jira: { email: 'e' } });
+  const auto = { ...base, title: 'c', server: { dockName: 'z', autoUpdate: false } };
+  assert.deepEqual(integrationsStore.mergeConfig({ base, next: auto, latest, wins: 'theirs' }), latest, '남이 바꾼 칸은 자동 갱신이 덮지 않는다');
+  assert.deepEqual(integrationsStore.mergeConfig({ base, next: auto, latest }).title, 'c', '사람의 저장은 같은 칸에서 이긴다');
+});
+
 test('WP-D1 라우트: 토큰 확인·채널 여러 개 만들기(부분 실패)·채널 고치기(저장된 토큰)·이름 따라가기 — 토큰은 응답·파일 어디에도 없다', async (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-wpd1-'));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));

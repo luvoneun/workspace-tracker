@@ -169,7 +169,7 @@ test('saveSlackAuth는 slack.auth만 oauth로 적고 다른 칸은 그대로 둔
   const next = integrations.saveSlackAuth({ configPath, current, tokenDir: path.join(dir, 'tokens') });
   assert.deepEqual(next, { ...current, slack: { ...current.slack, auth: 'oauth' } });
   assert.deepEqual(JSON.parse(fs.readFileSync(configPath, 'utf8')), next);
-  const fresh = integrations.saveSlackAuth({ configPath, current: {}, tokenDir: path.join(dir, 'tokens') });
+  const fresh = integrations.saveSlackAuth({ configPath: path.join(dir, 'empty.config.json'), current: {}, tokenDir: path.join(dir, 'tokens') });
   assert.deepEqual(fresh, { slack: { auth: 'oauth', tokenFile: path.join(dir, 'tokens', 'workspace-slack-token') } });
 });
 

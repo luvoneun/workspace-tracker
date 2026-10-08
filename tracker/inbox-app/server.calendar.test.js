@@ -211,10 +211,10 @@ test('WP-D2 연동 저장: 비밀 주소는 한 번 읽어 센 뒤 0600 파일�
   assert.deepEqual(claude.config.calendar, { source: 'claude', icalFile: path.join(tokenDir, 'workspace-calendar-ical') });
   assert.deepEqual(claude.result.calendar, { source: 'claude' });
   assert.equal(integrationsStore.readIntegrations(claude.config, { tokenDir }).calendar.source, 'claude');
-  // 5) 해제는 켜짐만 끈다
+  // 5) 해제는 켜짐만 끈다 — 저장을 시작할 때 본 설정(`current`)이 낡았어도 안 바꾼 칸은 파일의 최신 값(4의 claude) 그대로
   const off = await integrationsStore.saveIntegrations({ configPath, current: config, tokenDir, write, body: { calendar: { enabled: false } } });
   assert.equal(off.config.integrations.calendar, false);
-  assert.equal(off.config.calendar.source, 'ical');
+  assert.equal(off.config.calendar.source, 'claude');
   assert.ok(fs.existsSync(file), '주소 파일은 지우지 않는다');
   fs.rmSync(home, { recursive: true, force: true });
 });
