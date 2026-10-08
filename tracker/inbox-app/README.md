@@ -744,6 +744,8 @@ Slack 수집은 **가져오기·저장은 스크립트, 분류만 Claude**입니
 | `usage-ui.js` | 사용 횟수 — 탭·검색·주간요약 복사 알리기, 사용설명서 맨 아래 알림 줄(끄기·다시 켜기), 설정 › 앱의 스위치·안내 한 줄, 주간요약 주차 목록의 줄 끝 칸·맨 위 판(report-ui.js의 `reportWeekRowEnd`·`reportWeeksFoot`이 넘김)와 `내 일 기록` 자세히 창(계산은 순수 함수 `usageWorkStats`·`usageWeeksSummary`, 모양은 `usage-ui.css`) |
 | `app.js` | 공용 부품(`ui*`), 오늘 탭(사용설명서 카드 포함), 상세 카드, 검색 팔레트, 되돌리기, 저장 안전장치(`request`·`showNotice`·`pushUndo`·`fadeOutAndRun`), 화면을 켜는 실행 코드 |
 
+탭을 옮길 때 화면마다 할 일(주간요약을 떠나면 적던 글 저장, 프로젝트를 떠나면 찾기 비우기 등)은 그 화면 파일의 들어올 때·나갈 때 함수(`projectsTabEnter`·`projectsTabLeave`·`reportTabLeave`)가 갖고, `app.js`의 `setActiveTab`은 `TABS`에 적힌 것을 부르기만 합니다. 입력 약속(DESIGN 「동작 관습」)을 어느 함수가 지키는지는 `docs/지도/입력.md`에 있습니다.
+
 서버 쪽에는 연동 설정 한 벌(`integrations.js` — 값 확인·`workspace.config.json` 합치기·토큰 파일·문제 보고의 오류 줄·다시 켜기), 캘린더 비밀 주소 풀이(`ical.js`)와 메모리 보관함(`calendar-live.js`), 꾸미기(`personalize.js` — 그림 확인·`local/icon.png`·요청 표시 파일), 체크인(`checkin.js`), 사용 횟수(`usage.js`)가 따로 있습니다. 요청 경로 가운데 목록 읽기(`routes-items.js` — `GET /api/items`)·항목 추가·수정·삭제·되살리기(`routes-track.js`)·지라(`routes-jira.js`)·연동·자동화 상태·백업·미팅 노트(`routes-integrations.js`)·앱 정보·업데이트·점검하기(`routes-app.js`, 판단은 `selfcheck.js`)·꾸미기(`routes-personalize.js`)는 묶음 파일로 나뉘어 있고, `server.js`가 인증·복구 필요 가드를 거친 뒤 차례로 묻습니다(묶음 파일은 필요한 값을 `server.js`에서 넘겨받기만 합니다). 나머지 경로(워크플로·프로젝트·보고서·가져오기·회의 연결)와 정적 파일은 `server.js`에 있습니다. 화면에는 나가지 않습니다.
 
 서버는 파일 이름을 하나하나 적지 않고 이 폴더의 `*.js`/`*.css` 가운데 서버 파일·저장소 코드·테스트·픽스처를 뺀 것만 내보냅니다(`server.js`의 `isClientFile`). 브라우저가 스스로 새로고침할지 판단하는 값(`appVersion`)도 같은 목록을 씁니다. 화면 파일을 더할 때는 `index.html`에 `<script>` 한 줄만 넣으면 됩니다. 서버 파일을 더할 때는 `server.js`의 차단 목록(`CLIENT_BLOCKED`)에 이름을 적어야 합니다 — `index.html`이 읽지 않는 `*.js`가 목록·패턴에서 빠지면 테스트가 실패합니다.
