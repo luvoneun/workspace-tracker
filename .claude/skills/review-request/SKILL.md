@@ -10,7 +10,7 @@ description: 구현 세션이 "끝"을 보고했을 때 합치기 전 검수를 
 ## 1. 검수 크기 고르기
 - **직접 diff 읽기(서브에이전트 없이):** 파일 3개 이하·수십 줄, 또는 이미 한 번 검수한 뒤의 고침분. `git diff main...<가지>`에서 안전장치 함수(request·showNotice·pushUndo·recordUndoFor·toggleTask·fadeOutAndRun·isClientFile·RECOVERY_NEEDED·uiRenderOrHold) 정의 hunk가 없는지 확인한다.
 - **Opus 읽기 검수(`reviewer` 에이전트, model opus):** 그 밖의 화면·입력·데이터 쓰기 변경.
-- **Codex 읽기 전용(`codex review --base main` — 프롬프트를 같이 주면 거절되니 붙이지 않는다):** 서버·스크립트·안전장치·업무 데이터 쓰기·외부 서비스 쓰기(지라 등)가 있을 때만. 샌드박스의 `listen EPERM` 실패는 코드 문제가 아니다.
+- **Codex 읽기 전용(`codex review --base main` — 프롬프트를 같이 주면 거절되니 붙이지 않는다):** 서버·스크립트·안전장치·업무 데이터 쓰기·외부 서비스 쓰기(지라 등)가 있을 때만. 샌드박스의 `listen EPERM` 실패는 코드 문제가 아니다. 모델·effort는 늘 명시한다 — 고르는 기준은 계정 스킬 `codex-call`(`~/.claude-account3/skills/codex-call/SKILL.md`) 하나를 따른다.
 
 ## 2. 검수 지시문 틀
 복사본 경로·가지·커밋·바뀐 파일을 적고, **"위험 순위를 먼저 적어라"**, 이전 검수에서 확인된 것은 반복하지 말고 **이번에 새로 만든 위험**에 집중하라고 쓴다. 변경 종류에 맞는 중점을 골라 붙인다.
