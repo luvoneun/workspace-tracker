@@ -15427,7 +15427,7 @@ test('다듬기 B(개편 A): `끝났어요 · 완료로`는 바탕 없는 --succ
   const app = reportClient();
   assert.equal(app.run("reportWeekRowEnd({ weekKey: 'W' })"), null);
   assert.equal(app.run('reportWeeksFoot([])'), null);
-  const main = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const main = fs.readFileSync(path.join(__dirname, 'report-ui.js'), 'utf8');
   assert.match(main, /reportWeekRowEnd\(item\)/);
   assert.match(main, /reportWeeksFoot\(items\)/);
   const ui = fs.readFileSync(path.join(__dirname, 'report-ui.js'), 'utf8');
@@ -15645,7 +15645,7 @@ test('WP-X report-ui.js의 두 자리가 usage-ui.js로 넘기고, 주차 줄 ar
   app.run(`usageInfo = { ok: true, today: '${WPX_TODAY}', rows: [], history: {} }; renderWeeklyReports(weeklyReportsCache);`);
   assert.equal(nav.children.some(kid => kid.className === 'd-uwfoot'), false);
   assert.equal(nav.children.some(kid => (kid.children || []).some(one => one.className === 'd-uwend')), false);
-  const main = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const main = fs.readFileSync(path.join(__dirname, 'report-ui.js'), 'utf8');
   assert.match(main, /end\.dataset\.label \? `, \$\{end\.dataset\.label\}` : ''/);
 });
 
@@ -20318,8 +20318,8 @@ test('화면 전환 E: 부르는 자리 — 탭·세그먼트 아홉 곳이 손�
   ];
   [...knobs, ...swaps, ...forgets].forEach(([file, line]) => assert.ok(read(file).includes(line), `${file}: ${line}`));
   // 주차 목록은 줄 부품으로 그려 고른 표시가 옛 줄에서 이어진다(uiGlideTint).
-  assert.match(read('app.js'), /uiRowsMove\(nav, \(\) => renderWeeklyNav\(items\)\);/);
-  assert.match(read('app.js'), /btn\.dataset\.moveId = `wk:\$\{item\.weekKey\}`;/);
+  assert.match(read('report-ui.js'), /uiRowsMove\(nav, \(\) => renderWeeklyNav\(items\)\);/);
+  assert.match(read('report-ui.js'), /btn\.dataset\.moveId = `wk:\$\{item\.weekKey\}`;/);
   // wfSegment는 칸을 붙인 뒤 고른다 — 칸이 없는 채 고르면 손잡이가 칸 수를 0으로 기억한다.
   assert.match(read('workflows.js'), /group\.append\(\.\.\.buttons\);\n  choose\(value\);/);
 });
