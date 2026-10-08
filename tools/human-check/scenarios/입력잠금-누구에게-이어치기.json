@@ -1,0 +1,106 @@
+{
+  "name": "누구에게 칸 — Enter로 저장하는 동안 이어 치기",
+  "description": "확인 대기 상세의 `누구에게`(uiMenuText)는 Enter로 저장해도 칸이 열린 채 남는다. 저장이 도는 동안 칸을 잠그면(disabled) 이어 친 글자를 브라우저가 버린다(d8e2059에서 실패: 칸에 `김`만 남음). 칸은 잠기지 않고 이어 친 `철수`가 남아야 하고, 다음 Enter가 `김철수`를 저장한다.",
+  "steps": [
+    {
+      "do": "goto",
+      "url": "/",
+      "waitFor": "#tabBtnToday",
+      "wait": 500
+    },
+    {
+      "do": "click",
+      "note": "앞 회차가 다른 탭에서 끝났으면 그 탭을 기억한다 — 오늘 탭으로",
+      "selector": "#tabBtnToday",
+      "hold": 0
+    },
+    {
+      "do": "eval",
+      "note": "확인 대기 하나를 만든다",
+      "expr": "fetch('/api/waiting/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ description: '디자인 시안 회신 받기' }) }).then(r => r.json()).then(j => { window.__hcId = j.id; return load().then(() => j.id); })"
+    },
+    {
+      "do": "eval",
+      "expr": "(document.querySelector(`[data-rail-id=\"${window.__hcId}\"]`).setAttribute('data-hc', 'row'), 'ok')"
+    },
+    {
+      "do": "click",
+      "note": "줄을 눌러 상세를 연다",
+      "selector": "[data-hc=row] button.ti"
+    },
+    {
+      "do": "wait",
+      "selector": ".d-detail input.d-mtext",
+      "timeout": 3000
+    },
+    {
+      "do": "eval",
+      "note": "저장을 늦춘다(서버가 느린 것처럼) — 그 사이 POST 수도 센다",
+      "expr": "(() => { if (!window.__hcFetch) { window.__hcFetch = window.fetch; window.__hcPosts = 0; window.fetch = (u, o) => { const hit = window.__hcSlow && window.__hcSlow.test(String(u)) && o && o.method === 'POST'; if (!hit) return window.__hcFetch(u, o); window.__hcPosts += 1; return new Promise(r => setTimeout(r, window.__hcMs)).then(() => window.__hcFail ? new Response(JSON.stringify({ ok: false, error: '시험용 실패' }), { status: 500, headers: { 'Content-Type': 'application/json' } }) : window.__hcFetch(u, o)); }; } window.__hcSlow = /set-who/; window.__hcMs = 1500; window.__hcFail = false; window.__hcPosts = 0; return 'ok'; })()"
+    },
+    {
+      "do": "click",
+      "selector": ".d-detail input.d-mtext"
+    },
+    {
+      "do": "type",
+      "text": "김",
+      "ime": true
+    },
+    {
+      "do": "key",
+      "key": "Enter"
+    },
+    {
+      "do": "type",
+      "note": "Enter 직후 곧바로 이어 친다(저장은 아직 도는 중)",
+      "text": "철수",
+      "ime": true
+    },
+    {
+      "do": "shot",
+      "name": "저장-중"
+    },
+    {
+      "do": "eval",
+      "note": "저장 중 칸 상태(잠겼으면 true) — 기록용",
+      "expr": "document.querySelector('.d-detail input.d-mtext')?.disabled "
+    },
+    {
+      "do": "assert",
+      "message": "이어 친 글자가 칸에 남아야 해요(잠긴 칸이면 `김`만 남음)",
+      "expr": "document.querySelector(\".d-detail input.d-mtext\")?.value === \"김철수\""
+    },
+    {
+      "do": "wait",
+      "ms": 2200
+    },
+    {
+      "do": "assert",
+      "message": "첫 Enter는 `김`을 저장했어요",
+      "expr": "fetch('/api/items').then(r => r.json()).then(d => d.reportRefs[window.__hcId].who === '김')"
+    },
+    {
+      "do": "assert",
+      "message": "저장이 끝난 뒤에도 칸에 초점과 `김철수`가 그대로",
+      "expr": "(() => { const a = document.activeElement; return !!a && a.matches(\".d-detail input.d-mtext\"); })() && document.querySelector(\".d-detail input.d-mtext\")?.value === \"김철수\""
+    },
+    {
+      "do": "key",
+      "key": "Enter"
+    },
+    {
+      "do": "wait",
+      "ms": 2200
+    },
+    {
+      "do": "shot",
+      "name": "두번째-Enter-뒤"
+    },
+    {
+      "do": "assert",
+      "message": "두 번째 Enter가 `김철수`를 저장해요",
+      "expr": "fetch('/api/items').then(r => r.json()).then(d => d.reportRefs[window.__hcId].who === '김철수')"
+    }
+  ]
+}

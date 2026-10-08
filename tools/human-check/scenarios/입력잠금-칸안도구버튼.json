@@ -1,0 +1,67 @@
+{
+  "name": "주간요약 문장 칸 안 도구 버튼 — 적던 글은 저장하지 않고 그 일만",
+  "description": "문장을 고치는 중에 칸 아래 글자 버튼 `보고에서 빼기`를 누르면(누름~뗌 = hold) 적던 글은 저장하지 않고 그 일만 하고 닫힌다. 잠금을 풀어도 도구 버튼이 바깥 누르기 저장으로 새거나 첫 클릭이 사라지면 안 된다.",
+  "steps": [
+    {
+      "do": "goto",
+      "url": "/",
+      "waitFor": "#tabBtnWeekly",
+      "wait": 500
+    },
+    {
+      "do": "click",
+      "selector": "#tabBtnWeekly",
+      "hold": 0
+    },
+    {
+      "do": "wait",
+      "selector": "#weeklyReportDetail [data-edit-text]",
+      "timeout": 8000
+    },
+    {
+      "do": "eval",
+      "expr": "(window.__hcRow = document.querySelector('#weeklyReportDetail [data-edit-text]').dataset.editText)"
+    },
+    {
+      "do": "click",
+      "selector": "#weeklyReportDetail [data-edit-text]"
+    },
+    {
+      "do": "wait",
+      "selector": "#weeklyReportDetail [data-edit-row]",
+      "timeout": 3000
+    },
+    {
+      "do": "type",
+      "text": " 고침",
+      "ime": true
+    },
+    {
+      "do": "eval",
+      "expr": "([...document.querySelectorAll('#weeklyReportDetail .rp-help .d-link')].find(b => b.textContent === '보고에서 빼기').setAttribute('data-hc', 'out'), 'ok')"
+    },
+    {
+      "do": "click",
+      "note": "칸 안 도구 버튼(누름~뗌 = hold)",
+      "selector": "[data-hc=out]"
+    },
+    {
+      "do": "wait",
+      "ms": 1500
+    },
+    {
+      "do": "shot",
+      "name": "뺀-뒤"
+    },
+    {
+      "do": "assert",
+      "message": "그 문장이 보고에서 빠졌고, 적던 ` 고침`은 저장되지 않았어요",
+      "expr": "fetch('/api/items').then(r => r.json()).then(d => { const draft = d.weeklyReports[0].draft; const r = draft.rows.find(x => x.id === window.__hcRow); return !!r && r.excluded === true && !r.text.endsWith(' 고침'); })"
+    },
+    {
+      "do": "assert",
+      "message": "칸은 닫혔어요",
+      "expr": "!document.querySelector('#weeklyReportDetail [data-edit-row]')"
+    }
+  ]
+}

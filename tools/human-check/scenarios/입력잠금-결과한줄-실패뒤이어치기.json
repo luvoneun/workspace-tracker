@@ -1,0 +1,113 @@
+{
+  "name": "결과 한 줄 — 늦게 실패한 저장 동안 이어 친 글자",
+  "description": "완료한 줄의 `결과 한 줄 적기`(uiResultCell)는 Enter로 저장하고 성공하면 닫힌다. 저장이 도는 동안 칸을 잠그면 그동안 친 글자는 버려지고, 저장이 실패해 칸이 다시 열려도 그 글자는 없다(d8e2059에서 실패: `확인`만 남음). 칸은 잠기지 않고 실패 뒤 `확인추가`가 초점과 함께 남아야 하며, 다시 Enter하면 그 글이 저장되고 칸이 닫힌다.",
+  "steps": [
+    {
+      "do": "goto",
+      "url": "/",
+      "waitFor": "#tabBtnToday",
+      "wait": 500
+    },
+    {
+      "do": "click",
+      "note": "앞 회차가 다른 탭에서 끝났으면 그 탭을 기억한다 — 오늘 탭으로",
+      "selector": "#tabBtnToday",
+      "hold": 0
+    },
+    {
+      "do": "eval",
+      "note": "완료 묶음을 편다",
+      "expr": "(() => { const h = [...document.querySelectorAll('button')].find(b => /^완료/.test(b.textContent.trim()) && b.getAttribute('aria-expanded') === 'false'); h?.click(); return !!h; })()"
+    },
+    {
+      "do": "wait",
+      "selector": ".d-meta .d-link",
+      "timeout": 3000
+    },
+    {
+      "do": "click",
+      "note": "`결과 한 줄 적기`를 누른다",
+      "selector": ".d-meta .d-link"
+    },
+    {
+      "do": "wait",
+      "selector": "input.d-resin",
+      "timeout": 2000
+    },
+    {
+      "do": "eval",
+      "note": "저장을 늦춘다(서버가 느린 것처럼) — 그 사이 POST 수도 센다",
+      "expr": "(() => { if (!window.__hcFetch) { window.__hcFetch = window.fetch; window.__hcPosts = 0; window.fetch = (u, o) => { const hit = window.__hcSlow && window.__hcSlow.test(String(u)) && o && o.method === 'POST'; if (!hit) return window.__hcFetch(u, o); window.__hcPosts += 1; return new Promise(r => setTimeout(r, window.__hcMs)).then(() => window.__hcFail ? new Response(JSON.stringify({ ok: false, error: '시험용 실패' }), { status: 500, headers: { 'Content-Type': 'application/json' } }) : window.__hcFetch(u, o)); }; } window.__hcSlow = /workflow\\/item/; window.__hcMs = 1500; window.__hcFail = false; window.__hcPosts = 0; return 'ok'; })()"
+    },
+    {
+      "do": "eval",
+      "note": "늦춘 저장이 끝에 실패하게(서버 500)",
+      "expr": "(window.__hcFail = true, 'ok')"
+    },
+    {
+      "do": "type",
+      "text": "확인",
+      "ime": true
+    },
+    {
+      "do": "key",
+      "key": "Enter"
+    },
+    {
+      "do": "type",
+      "note": "Enter 직후 곧바로 이어 친다(저장은 아직 도는 중)",
+      "text": "추가",
+      "ime": true
+    },
+    {
+      "do": "eval",
+      "note": "저장 중 칸 상태(잠겼으면 true) — 기록용",
+      "expr": "document.querySelector('input.d-resin')?.disabled "
+    },
+    {
+      "do": "wait",
+      "ms": 2000
+    },
+    {
+      "do": "shot",
+      "name": "실패-뒤"
+    },
+    {
+      "do": "assert",
+      "message": "실패 뒤 칸에 이어 친 글까지 `확인추가`가 있어야 해요",
+      "expr": "document.querySelector(\"input.d-resin\")?.value === \"확인추가\""
+    },
+    {
+      "do": "assert",
+      "message": "실패 뒤 칸에 초점이 있어야 해요",
+      "expr": "(() => { const a = document.activeElement; return !!a && a.matches(\"input.d-resin\"); })()"
+    },
+    {
+      "do": "assert",
+      "message": "저장 요청은 한 번만",
+      "expr": "window.__hcPosts === 1"
+    },
+    {
+      "do": "eval",
+      "note": "이제 저장은 성공",
+      "expr": "(window.__hcFail = false, 'ok')"
+    },
+    {
+      "do": "key",
+      "key": "Enter"
+    },
+    {
+      "do": "wait",
+      "ms": 2200
+    },
+    {
+      "do": "shot",
+      "name": "다시-저장-뒤"
+    },
+    {
+      "do": "assert",
+      "message": "다시 Enter하면 `확인추가`로 저장되고 칸이 닫혀요",
+      "expr": "!document.querySelector('input.d-resin') && [...document.querySelectorAll('.d-meta .out')].some(e => e.textContent === '확인추가')"
+    }
+  ]
+}

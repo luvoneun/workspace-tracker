@@ -1,0 +1,166 @@
+{
+  "name": "Enter 연타 — 잠그지 않아도 한 번만 저장",
+  "description": "칸을 잠그지 않으면 저장 중의 두 번째 Enter가 같은 글을 또 보낼 수 있다. 누구에게(대기열이 같은 글은 다시 보내지 않음)·주간요약 문장(저장 중 열쇠)·`한 줄 추가`(같은 줄이 두 번 생기면 안 됨)에서 Enter를 빠르게 두 번 쳐도 저장 요청은 한 번이어야 한다.",
+  "steps": [
+    {
+      "do": "goto",
+      "url": "/",
+      "waitFor": "#tabBtnToday",
+      "wait": 500
+    },
+    {
+      "do": "click",
+      "note": "앞 회차가 다른 탭에서 끝났으면 그 탭을 기억한다 — 오늘 탭으로",
+      "selector": "#tabBtnToday",
+      "hold": 0
+    },
+    {
+      "do": "eval",
+      "expr": "fetch('/api/waiting/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ description: '디자인 시안 회신 받기' }) }).then(r => r.json()).then(j => { window.__hcId = j.id; return load().then(() => j.id); })"
+    },
+    {
+      "do": "eval",
+      "expr": "(document.querySelector(`[data-rail-id=\"${window.__hcId}\"]`).setAttribute('data-hc', 'row'), 'ok')"
+    },
+    {
+      "do": "click",
+      "selector": "[data-hc=row] button.ti"
+    },
+    {
+      "do": "wait",
+      "selector": ".d-detail input.d-mtext",
+      "timeout": 3000
+    },
+    {
+      "do": "eval",
+      "note": "저장을 늦춘다(서버가 느린 것처럼) — 그 사이 POST 수도 센다",
+      "expr": "(() => { if (!window.__hcFetch) { window.__hcFetch = window.fetch; window.__hcPosts = 0; window.fetch = (u, o) => { const hit = window.__hcSlow && window.__hcSlow.test(String(u)) && o && o.method === 'POST'; if (!hit) return window.__hcFetch(u, o); window.__hcPosts += 1; return new Promise(r => setTimeout(r, window.__hcMs)).then(() => window.__hcFail ? new Response(JSON.stringify({ ok: false, error: '시험용 실패' }), { status: 500, headers: { 'Content-Type': 'application/json' } }) : window.__hcFetch(u, o)); }; } window.__hcSlow = /set-who/; window.__hcMs = 800; window.__hcFail = false; window.__hcPosts = 0; return 'ok'; })()"
+    },
+    {
+      "do": "click",
+      "selector": ".d-detail input.d-mtext"
+    },
+    {
+      "do": "type",
+      "text": "김",
+      "ime": true
+    },
+    {
+      "do": "key",
+      "key": "Enter"
+    },
+    {
+      "do": "key",
+      "key": "Enter"
+    },
+    {
+      "do": "wait",
+      "ms": 1500
+    },
+    {
+      "do": "assert",
+      "message": "누구에게: 저장 요청은 한 번",
+      "expr": "window.__hcPosts === 1"
+    },
+    {
+      "do": "click",
+      "selector": "#tabBtnWeekly",
+      "hold": 0
+    },
+    {
+      "do": "wait",
+      "selector": "#weeklyReportDetail [data-edit-text]",
+      "timeout": 8000
+    },
+    {
+      "do": "click",
+      "selector": "#weeklyReportDetail [data-edit-text]"
+    },
+    {
+      "do": "wait",
+      "selector": "#weeklyReportDetail [data-edit-row]",
+      "timeout": 3000
+    },
+    {
+      "do": "eval",
+      "note": "저장을 늦춘다(서버가 느린 것처럼) — 그 사이 POST 수도 센다",
+      "expr": "(() => { if (!window.__hcFetch) { window.__hcFetch = window.fetch; window.__hcPosts = 0; window.fetch = (u, o) => { const hit = window.__hcSlow && window.__hcSlow.test(String(u)) && o && o.method === 'POST'; if (!hit) return window.__hcFetch(u, o); window.__hcPosts += 1; return new Promise(r => setTimeout(r, window.__hcMs)).then(() => window.__hcFail ? new Response(JSON.stringify({ ok: false, error: '시험용 실패' }), { status: 500, headers: { 'Content-Type': 'application/json' } }) : window.__hcFetch(u, o)); }; } window.__hcSlow = /report\\/change/; window.__hcMs = 800; window.__hcFail = false; window.__hcPosts = 0; return 'ok'; })()"
+    },
+    {
+      "do": "type",
+      "text": " 끝",
+      "ime": true
+    },
+    {
+      "do": "key",
+      "key": "Enter"
+    },
+    {
+      "do": "key",
+      "key": "Enter"
+    },
+    {
+      "do": "wait",
+      "ms": 1500
+    },
+    {
+      "do": "assert",
+      "message": "문장: 저장 요청은 한 번",
+      "expr": "window.__hcPosts === 1"
+    },
+    {
+      "do": "eval",
+      "expr": "(document.querySelector('#weeklyReportDetail [data-addline]').click(), 'ok')"
+    },
+    {
+      "do": "wait",
+      "selector": "#weeklyReportDetail [data-addline-input]",
+      "timeout": 3000
+    },
+    {
+      "do": "eval",
+      "note": "저장을 늦춘다(서버가 느린 것처럼) — 그 사이 POST 수도 센다",
+      "expr": "(() => { if (!window.__hcFetch) { window.__hcFetch = window.fetch; window.__hcPosts = 0; window.fetch = (u, o) => { const hit = window.__hcSlow && window.__hcSlow.test(String(u)) && o && o.method === 'POST'; if (!hit) return window.__hcFetch(u, o); window.__hcPosts += 1; return new Promise(r => setTimeout(r, window.__hcMs)).then(() => window.__hcFail ? new Response(JSON.stringify({ ok: false, error: '시험용 실패' }), { status: 500, headers: { 'Content-Type': 'application/json' } }) : window.__hcFetch(u, o)); }; } window.__hcSlow = /report\\/change/; window.__hcMs = 800; window.__hcFail = false; window.__hcPosts = 0; return 'ok'; })()"
+    },
+    {
+      "do": "click",
+      "selector": "#weeklyReportDetail [data-addline-input]"
+    },
+    {
+      "do": "type",
+      "text": "연타",
+      "ime": true
+    },
+    {
+      "do": "key",
+      "key": "Enter"
+    },
+    {
+      "do": "key",
+      "key": "Enter"
+    },
+    {
+      "do": "wait",
+      "ms": 1500
+    },
+    {
+      "do": "shot",
+      "name": "연타-뒤"
+    },
+    {
+      "do": "eval",
+      "note": "기록용 — 보낸 수",
+      "expr": "window.__hcPosts"
+    },
+    {
+      "do": "assert",
+      "message": "한 줄 추가: 줄은 하나",
+      "expr": "fetch('/api/items').then(r => r.json()).then(d => { const draft = d.weeklyReports[0].draft; return draft.rows.filter(r => r.text === '연타').length === 1; })"
+    },
+    {
+      "do": "assert",
+      "message": "한 줄 추가: 저장 요청은 한 번",
+      "expr": "window.__hcPosts === 1"
+    }
+  ]
+}

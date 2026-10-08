@@ -1,0 +1,95 @@
+{
+  "name": "주간요약 문장 — 앱 창이 초점을 잃었다 돌아와 이어 치기",
+  "description": "문장을 고치는 중에 앱 창 자체가 초점을 잃으면(다른 앱으로 옮김) 저장하지 않고 칸을 그대로 둔다(reportBlurWatch). 헤드리스라 창 전환 대신 `document.hasFocus()`를 거짓으로 두고 칸의 초점을 뺀다. 돌아와 칸을 눌러 이어 치고 Enter하면 이어 친 것까지 한 번에 저장돼야 한다.",
+  "steps": [
+    {
+      "do": "goto",
+      "url": "/",
+      "waitFor": "#tabBtnWeekly",
+      "wait": 500
+    },
+    {
+      "do": "click",
+      "selector": "#tabBtnWeekly",
+      "hold": 0
+    },
+    {
+      "do": "wait",
+      "selector": "#weeklyReportDetail [data-edit-text]",
+      "timeout": 8000
+    },
+    {
+      "do": "eval",
+      "expr": "(window.__hcRow = document.querySelector('#weeklyReportDetail [data-edit-text]').dataset.editText)"
+    },
+    {
+      "do": "click",
+      "selector": "#weeklyReportDetail [data-edit-text]"
+    },
+    {
+      "do": "wait",
+      "selector": "#weeklyReportDetail [data-edit-row]",
+      "timeout": 3000
+    },
+    {
+      "do": "eval",
+      "note": "저장을 늦춘다(서버가 느린 것처럼) — 그 사이 POST 수도 센다",
+      "expr": "(() => { if (!window.__hcFetch) { window.__hcFetch = window.fetch; window.__hcPosts = 0; window.fetch = (u, o) => { const hit = window.__hcSlow && window.__hcSlow.test(String(u)) && o && o.method === 'POST'; if (!hit) return window.__hcFetch(u, o); window.__hcPosts += 1; return new Promise(r => setTimeout(r, window.__hcMs)).then(() => window.__hcFail ? new Response(JSON.stringify({ ok: false, error: '시험용 실패' }), { status: 500, headers: { 'Content-Type': 'application/json' } }) : window.__hcFetch(u, o)); }; } window.__hcSlow = /report\\/change/; window.__hcMs = 300; window.__hcFail = false; window.__hcPosts = 0; return 'ok'; })()"
+    },
+    {
+      "do": "type",
+      "text": " 확인",
+      "ime": true
+    },
+    {
+      "do": "eval",
+      "note": "앱 창이 초점을 잃는다",
+      "expr": "(() => { window.__hcHasFocus = document.hasFocus; document.hasFocus = () => false; document.activeElement.blur(); return 'ok'; })()"
+    },
+    {
+      "do": "wait",
+      "ms": 800
+    },
+    {
+      "do": "assert",
+      "message": "창이 초점을 잃었을 때는 저장하지 않고 칸이 그대로예요",
+      "expr": "window.__hcPosts === 0 && !!document.querySelector('#weeklyReportDetail [data-edit-row]')"
+    },
+    {
+      "do": "eval",
+      "note": "창으로 돌아온다",
+      "expr": "(document.hasFocus = window.__hcHasFocus, 'ok')"
+    },
+    {
+      "do": "click",
+      "selector": "#weeklyReportDetail [data-edit-row]"
+    },
+    {
+      "do": "eval",
+      "note": "커서를 끝으로",
+      "expr": "(() => { const e = document.activeElement; e.setSelectionRange(e.value.length, e.value.length); return e.value; })()"
+    },
+    {
+      "do": "type",
+      "text": "함",
+      "ime": true
+    },
+    {
+      "do": "key",
+      "key": "Enter"
+    },
+    {
+      "do": "wait",
+      "ms": 1200
+    },
+    {
+      "do": "shot",
+      "name": "돌아와-저장-뒤"
+    },
+    {
+      "do": "assert",
+      "message": "이어 친 것까지 한 번에 저장돼요",
+      "expr": "window.__hcPosts === 1 && fetch('/api/items').then(r => r.json()).then(d => { const draft = d.weeklyReports[0].draft; return / 확인함$/.test(draft.rows.find(r => r.id === window.__hcRow)?.text || ''); })"
+    }
+  ]
+}

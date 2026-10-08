@@ -1,0 +1,96 @@
+{
+  "name": "주간요약 `한 줄 추가` — Enter로 더하는 동안 다음 줄을 이어 치기",
+  "description": "주간요약 프로젝트의 `한 줄 추가` 칸은 Enter로 한 줄을 더하면 닫힌다. 저장이 도는 동안 칸을 잠그면 이어 친 글자를 브라우저가 버린다(d8e2059에서 실패). 칸은 잠기지 않고, 보낸 글 뒤에 더 친 것(`추가`)만 칸에 남아 열린 채 초점을 지녀야 한다. 다음 Enter가 그것을 둘째 줄로 더한다.",
+  "steps": [
+    {
+      "do": "goto",
+      "url": "/",
+      "waitFor": "#tabBtnWeekly",
+      "wait": 500
+    },
+    {
+      "do": "click",
+      "selector": "#tabBtnWeekly",
+      "hold": 0
+    },
+    {
+      "do": "wait",
+      "selector": "#weeklyReportDetail [data-edit-text]",
+      "timeout": 8000
+    },
+    {
+      "do": "eval",
+      "note": "`한 줄 추가`는 손을 올려야 보이는 글자 버튼이라 직접 누른다(여는 동작은 이 시험의 대상이 아님)",
+      "expr": "(document.querySelector('#weeklyReportDetail [data-addline]').click(), 'ok')"
+    },
+    {
+      "do": "wait",
+      "selector": "#weeklyReportDetail [data-addline-input]",
+      "timeout": 3000
+    },
+    {
+      "do": "eval",
+      "note": "저장을 늦춘다(서버가 느린 것처럼) — 그 사이 POST 수도 센다",
+      "expr": "(() => { if (!window.__hcFetch) { window.__hcFetch = window.fetch; window.__hcPosts = 0; window.fetch = (u, o) => { const hit = window.__hcSlow && window.__hcSlow.test(String(u)) && o && o.method === 'POST'; if (!hit) return window.__hcFetch(u, o); window.__hcPosts += 1; return new Promise(r => setTimeout(r, window.__hcMs)).then(() => window.__hcFail ? new Response(JSON.stringify({ ok: false, error: '시험용 실패' }), { status: 500, headers: { 'Content-Type': 'application/json' } }) : window.__hcFetch(u, o)); }; } window.__hcSlow = /report\\/change/; window.__hcMs = 1500; window.__hcFail = false; window.__hcPosts = 0; return 'ok'; })()"
+    },
+    {
+      "do": "click",
+      "selector": "#weeklyReportDetail [data-addline-input]"
+    },
+    {
+      "do": "type",
+      "text": "확인",
+      "ime": true
+    },
+    {
+      "do": "key",
+      "key": "Enter"
+    },
+    {
+      "do": "type",
+      "note": "Enter 직후 곧바로 다음 줄을 친다",
+      "text": "추가",
+      "ime": true
+    },
+    {
+      "do": "eval",
+      "note": "저장 중 칸 상태(잠겼으면 true) — 기록용",
+      "expr": "document.querySelector('#weeklyReportDetail [data-addline-input]')?.disabled "
+    },
+    {
+      "do": "wait",
+      "ms": 2200
+    },
+    {
+      "do": "shot",
+      "name": "저장-뒤"
+    },
+    {
+      "do": "assert",
+      "message": "`확인` 한 줄이 더해졌어요",
+      "expr": "fetch('/api/items').then(r => r.json()).then(d => { const draft = d.weeklyReports[0].draft; return draft.rows.filter(r => r.text === '확인').length === 1; })"
+    },
+    {
+      "do": "assert",
+      "message": "칸에는 뒤에 친 `추가`만 남아 초점을 지녀요",
+      "expr": "(() => { const a = document.activeElement; return !!a && a.matches(\"#weeklyReportDetail [data-addline-input]\"); })() && document.querySelector(\"#weeklyReportDetail [data-addline-input]\")?.value === \"추가\""
+    },
+    {
+      "do": "key",
+      "key": "Enter"
+    },
+    {
+      "do": "wait",
+      "ms": 2200
+    },
+    {
+      "do": "shot",
+      "name": "두번째-Enter-뒤"
+    },
+    {
+      "do": "assert",
+      "message": "두 번째 Enter가 `추가`를 둘째 줄로 더해요(첫 줄은 한 번만)",
+      "expr": "fetch('/api/items').then(r => r.json()).then(d => { const draft = d.weeklyReports[0].draft; return draft.rows.filter(r => r.text === '추가').length === 1 && draft.rows.filter(r => r.text === '확인').length === 1; })"
+    }
+  ]
+}

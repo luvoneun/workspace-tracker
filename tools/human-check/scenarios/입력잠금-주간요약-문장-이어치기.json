@@ -1,0 +1,107 @@
+{
+  "name": "주간요약 문장 — Enter로 저장하는 동안 이어 치기",
+  "description": "주간요약 문장 칸은 Enter로 저장하면 닫힌다. 저장이 도는 동안 칸을 잠그면 이어 친 글자를 브라우저가 버린다(d8e2059에서 실패: 칸이 닫히고 `추가`가 사라짐). 칸은 잠기지 않고, 저장하는 동안 더 친 글이 있으면 저장 뒤에도 칸이 그 글(`확인추가`)로 열려 있어야 한다. 다음 Enter가 그 글을 저장하고 닫는다.",
+  "steps": [
+    {
+      "do": "goto",
+      "url": "/",
+      "waitFor": "#tabBtnWeekly",
+      "wait": 500
+    },
+    {
+      "do": "click",
+      "selector": "#tabBtnWeekly",
+      "hold": 0
+    },
+    {
+      "do": "wait",
+      "selector": "#weeklyReportDetail [data-edit-text]",
+      "timeout": 8000
+    },
+    {
+      "do": "eval",
+      "note": "첫 문장 id 기억",
+      "expr": "(window.__hcRow = document.querySelector('#weeklyReportDetail [data-edit-text]').dataset.editText)"
+    },
+    {
+      "do": "click",
+      "note": "문장을 눌러 고치기 시작",
+      "selector": "#weeklyReportDetail [data-edit-text]"
+    },
+    {
+      "do": "wait",
+      "selector": "#weeklyReportDetail [data-edit-row]",
+      "timeout": 3000
+    },
+    {
+      "do": "eval",
+      "note": "칸을 비운다",
+      "expr": "(() => { const e = document.querySelector('#weeklyReportDetail [data-edit-row]'); e.value = ''; e.dispatchEvent(new Event('input')); return 'ok'; })()"
+    },
+    {
+      "do": "eval",
+      "note": "저장을 늦춘다(서버가 느린 것처럼) — 그 사이 POST 수도 센다",
+      "expr": "(() => { if (!window.__hcFetch) { window.__hcFetch = window.fetch; window.__hcPosts = 0; window.fetch = (u, o) => { const hit = window.__hcSlow && window.__hcSlow.test(String(u)) && o && o.method === 'POST'; if (!hit) return window.__hcFetch(u, o); window.__hcPosts += 1; return new Promise(r => setTimeout(r, window.__hcMs)).then(() => window.__hcFail ? new Response(JSON.stringify({ ok: false, error: '시험용 실패' }), { status: 500, headers: { 'Content-Type': 'application/json' } }) : window.__hcFetch(u, o)); }; } window.__hcSlow = /report\\/change/; window.__hcMs = 1500; window.__hcFail = false; window.__hcPosts = 0; return 'ok'; })()"
+    },
+    {
+      "do": "type",
+      "text": "확인",
+      "ime": true
+    },
+    {
+      "do": "key",
+      "key": "Enter"
+    },
+    {
+      "do": "type",
+      "note": "Enter 직후 곧바로 이어 친다",
+      "text": "추가",
+      "ime": true
+    },
+    {
+      "do": "eval",
+      "note": "저장 중 칸 상태(잠겼으면 true) — 기록용",
+      "expr": "document.querySelector('#weeklyReportDetail [data-edit-row]')?.disabled "
+    },
+    {
+      "do": "wait",
+      "ms": 2200
+    },
+    {
+      "do": "shot",
+      "name": "저장-뒤"
+    },
+    {
+      "do": "assert",
+      "message": "첫 Enter는 `확인`을 저장했어요",
+      "expr": "fetch('/api/items').then(r => r.json()).then(d => { const draft = d.weeklyReports[0].draft; return draft.rows.find(r => r.id === window.__hcRow)?.text === '확인'; })"
+    },
+    {
+      "do": "assert",
+      "message": "이어 친 글이 있어 칸이 `확인추가`로 열린 채 초점을 지녀요",
+      "expr": "(() => { const a = document.activeElement; return !!a && a.matches(\"#weeklyReportDetail [data-edit-row]\"); })() && document.querySelector(\"#weeklyReportDetail [data-edit-row]\")?.value === \"확인추가\""
+    },
+    {
+      "do": "key",
+      "key": "Enter"
+    },
+    {
+      "do": "wait",
+      "ms": 2200
+    },
+    {
+      "do": "shot",
+      "name": "두번째-Enter-뒤"
+    },
+    {
+      "do": "assert",
+      "message": "두 번째 Enter가 `확인추가`를 저장해요",
+      "expr": "fetch('/api/items').then(r => r.json()).then(d => { const draft = d.weeklyReports[0].draft; return draft.rows.find(r => r.id === window.__hcRow)?.text === '확인추가'; })"
+    },
+    {
+      "do": "assert",
+      "message": "이제 칸은 닫혀요",
+      "expr": "!document.querySelector('#weeklyReportDetail [data-edit-row]')"
+    }
+  ]
+}
