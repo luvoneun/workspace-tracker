@@ -286,6 +286,159 @@ test('입력 씹힘 ①: 확인 대기 `다음은?` 입력줄은 보내는 동�
   await app.run('Promise.all([p1, p2])');
 });
 
+// 입력 씹힘 ⑤: Enter로 저장하는 동안 칸을 잠그던(disabled) 곳 — 잠근 칸에 친 글자는 브라우저가 버린다(DESIGN 동작 관습 5).
+// 사람 속도 확인: tools/human-check/scenarios/입력잠금-*.json
+test('입력 씹힘 ⑤: 누구에게 칸(uiMenuText)은 저장 중에도 잠그지 않는다 — 이어 친 글자는 남고, 다음 저장은 앞 저장 뒤에 순서대로·같은 글은 한 번만·실패하면 다시 보낸다', async () => {
+  const app = pureClient();
+  const enter = "input.listeners.keydown({ key: 'Enter', isComposing: false, preventDefault() {} })";
+  app.run(`sent = []; release = [];
+    input = uiMenuText({ value: '', label: '누구에게', onChange: who => new Promise((resolve, reject) => { sent.push(who); release.push({ resolve, reject }); }) });
+    input.value = '김'; ${enter}; during = input.disabled;
+    input.value = '김철수'; ${enter}; ${enter}; input.listeners.change();`);
+  await settle();
+  assert.equal(app.run('during'), false, '저장 중에도 칸은 잠그지 않는다');
+  assert.equal(app.run('input.value'), '김철수', '이어 친 글자가 남는다');
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(sent)')), ['김'], '앞 저장이 끝나기 전에는 다음을 보내지 않는다');
+  app.run('release[0].resolve()'); await settle();
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(sent)')), ['김', '김철수'], '같은 글의 Enter·바깥 누르기는 한 번만 보낸다');
+  app.run("release[1].reject(new Error('저장 실패'))"); await settle();
+  assert.equal(app.run('input.value'), '김철수', '실패해도 글은 칸에 그대로');
+  app.run(enter); await settle();
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(sent)')), ['김', '김철수', '김철수'], '실패한 글은 다음 Enter가 다시 보낸다');
+  app.run('release[2].resolve()'); await settle();
+});
+
+test('입력 씹힘 ⑤: 결과 한 줄(uiResultCell)은 저장 중에도 잠그지 않는다 — 두 번째 Enter는 넘기고, 실패하면 그동안 친 글까지 칸에 남고, 성공하면 닫혀 결과를 보인다', async () => {
+  const app = pureClient();
+  const held = heldFetch(app);
+  const enter = "input.listeners.keydown({ key: 'Enter', isComposing: false })";
+  app.run(`meta = document.createElement('span'); uiResultCell(meta, { id: 'i1', description: '보고서 쓰기' });
+    meta.children[0].listeners.click(); input = meta.children[0];
+    input.value = '확인'; ${enter}; during = input.disabled;
+    input.value = '확인추가'; ${enter};`);
+  await settle();
+  assert.equal(app.run('during'), false, '저장 중에도 칸은 잠그지 않는다');
+  assert.equal(held.length, 1, '저장 중의 두 번째 Enter는 넘긴다');
+  assert.equal(held[0].body.outcome, '확인');
+  held[0].fail(); await settle();
+  assert.equal(app.run('meta.children[0] === input'), true, '실패하면 칸이 그대로 열려 있다');
+  assert.equal(app.run('input.value'), '확인추가', '그동안 친 글까지 남는다');
+  assert.equal(app.run('input.disabled'), false);
+  app.run(enter); await settle();
+  assert.equal(held.length, 2);
+  assert.equal(held[1].body.outcome, '확인추가');
+  held[1].ok(); await settle();
+  assert.equal(app.run('meta.children[0].className'), 'out', '성공하면 칸을 닫고 결과를 보인다');
+  assert.equal(app.run('meta.children[0].textContent'), '확인추가');
+});
+
+// 주간요약의 Enter 저장 칸(문장·제목 이름·한 줄 추가) — 응답을 손으로 풀어 주는 가짜 서버.
+function reportEnterHeld(app) {
+  const held = [];
+  app.context.AbortSignal = AbortSignal;
+  app.context.fetch = (url, options) => new Promise(resolve => held.push({
+    url, body: options && options.body ? JSON.parse(options.body) : null,
+    ok: report => resolve(new Response(JSON.stringify({ ok: true, report }))),
+    fail: () => resolve(new Response('{"ok":false,"error":"저장 실패"}', { status: 500 })),
+  }));
+  return held;
+}
+function reportFindEl(app, attr, key) {
+  const host = app.run("document.getElementById('weeklyReportDetail')");
+  return (function find(node) {
+    for (const kid of node.children || []) {
+      if (kid && kid.dataset && kid.dataset[attr] === key) return kid;
+      const got = kid && find(kid);
+      if (got) return got;
+    }
+    return null;
+  })(host);
+}
+const reportEnterKey = { key: 'Enter', isComposing: false, shiftKey: false, preventDefault() {}, stopPropagation() {} };
+
+test('입력 씹힘 ⑤: 주간요약 문장 칸은 Enter 저장 중에도 잠그지 않는다 — 두 번째 Enter는 넘기고, 저장하는 동안 더 친 글이 있으면 저장 뒤에도 칸이 그 글로 열려 있다', async () => {
+  const app = c2ReportClient();
+  const held = reportEnterHeld(app);
+  app.run("reportEdits.set('2026-09-28:s2', '약관 링크를 바꿨어요'); renderReportDraft(__week);");
+  let area = reportFindEl(app, 'editRow', 's2');
+  area.value = '약관 링크 교체';
+  area.listeners.input();
+  area.listeners.keydown(reportEnterKey);
+  assert.equal(area.disabled, false, '저장 중에도 칸은 잠그지 않는다');
+  area.value = '약관 링크 교체 완료';
+  area.listeners.input();
+  area.listeners.keydown(reportEnterKey);
+  await settle();
+  assert.equal(held.length, 1, '저장 중의 두 번째 Enter는 넘긴다');
+  assert.equal(held[0].body.text, '약관 링크 교체');
+  const rows = app.run('__reportRows').map(row => (row.id === 's2' ? { ...row, text: '약관 링크 교체' } : row));
+  held[0].ok({ revision: 2, rows });
+  await settle();
+  assert.equal(app.run("reportEdits.get('2026-09-28:s2')"), '약관 링크 교체 완료', '더 친 글은 지우지 않는다');
+  area = reportFindEl(app, 'editRow', 's2');
+  assert.ok(area, '칸이 열린 채 다시 선다');
+  assert.equal(area.value, '약관 링크 교체 완료');
+  // 더 친 글이 없으면 저장 뒤 닫힌다.
+  area.listeners.keydown(reportEnterKey);
+  await settle();
+  held[1].ok({ revision: 3, rows: rows.map(row => (row.id === 's2' ? { ...row, text: '약관 링크 교체 완료' } : row)) });
+  await settle();
+  assert.equal(app.run("reportEdits.has('2026-09-28:s2')"), false);
+  assert.equal(reportFindEl(app, 'editRow', 's2'), null, '칸이 닫힌다');
+});
+
+test('입력 씹힘 ⑤: 주간요약 제목 이름 칸도 Enter 저장 중에 잠그지 않고, 실패하면 그동안 친 글까지 남는다', async () => {
+  const app = c2ReportClient();
+  const held = reportEnterHeld(app);
+  app.run("reportEdits.set('2026-09-28:title', ''); renderReportDraft(__week);");
+  let input = reportFindEl(app, 'renameInput', '2026-09-28:title');
+  input.value = '이번주';
+  input.listeners.input();
+  input.listeners.keydown(reportEnterKey);
+  assert.equal(input.disabled, false, '저장 중에도 칸은 잠그지 않는다');
+  input.value = '이번주 보고';
+  input.listeners.input();
+  input.listeners.keydown(reportEnterKey);
+  await settle();
+  assert.equal(held.length, 1, '저장 중의 두 번째 Enter는 넘긴다');
+  assert.equal(held[0].body.text, '이번주');
+  held[0].fail();
+  await settle();
+  assert.equal(app.run("reportEdits.get('2026-09-28:title')"), '이번주 보고', '실패해도 그동안 친 글까지 남는다');
+  input = reportFindEl(app, 'renameInput', '2026-09-28:title');
+  assert.equal(input.value, '이번주 보고');
+  input.listeners.keydown(reportEnterKey);
+  await settle();
+  assert.equal(held.length, 2);
+  held[1].ok({ revision: 2, rows: app.run('__reportRows'), title: '이번주 보고' });
+  await settle();
+  assert.equal(app.run("reportEdits.has('2026-09-28:title')"), false, '더 친 글이 없으면 닫힌다');
+});
+
+test('입력 씹힘 ⑤: 주간요약 `한 줄 추가`는 Enter 저장 중에도 잠그지 않고, 보낸 글 뒤에 친 것만 칸에 남긴다', async () => {
+  const app = c2ReportClient();
+  const held = reportEnterHeld(app);
+  app.run("__week.draft.rows = __reportRows.map(row => ({ ...row, groupKey: 'group:' + row.group })); reportEdits.set('2026-09-28:addline:완료한 일|group:가입 개선', ''); renderReportDraft(__week);");
+  const key = '2026-09-28:addline:완료한 일|group:가입 개선';
+  let input = reportFindEl(app, 'addlineInput', key);
+  assert.ok(input, '한 줄 추가 칸이 열려 있다');
+  input.value = '약관 검수';
+  input.listeners.input();
+  input.listeners.keydown(reportEnterKey);
+  assert.equal(input.disabled, false, '저장 중에도 칸은 잠그지 않는다');
+  input.value = '약관 검수 다음 줄';
+  input.listeners.input();
+  input.listeners.keydown(reportEnterKey);
+  await settle();
+  assert.equal(held.length, 1, '저장 중의 두 번째 Enter는 넘긴다(같은 줄이 두 번 생기지 않게)');
+  assert.equal(held[0].body.text, '약관 검수');
+  held[0].ok({ revision: 2, rows: app.run('__week.draft.rows') });
+  await settle();
+  assert.equal(app.run(`reportEdits.get(${JSON.stringify(key)})`), '다음 줄', '보낸 글 뒤에 친 것만 남는다');
+  input = reportFindEl(app, 'addlineInput', key);
+  assert.equal(input && input.value, '다음 줄');
+});
+
 // 가짜 창에서 "다시 그리기"를 흉내 낸다: 같은 이름표의 새 줄을 만들고 옛 줄은 떼어 낸다.
 function addRowRedraw(app, makeRow) {
   const oldRow = app.run(makeRow);
@@ -14555,7 +14708,7 @@ test('v3: 원본이 바뀐 줄은 끝에 작은 알약(기존 칩) 하나 — �
   const missing = JSON.parse(app.run(`JSON.stringify(reportSuggestionMenuSections(${item}, (${item}).draft.rows[1]).flat().map(e => e.label))`));
   assert.equal(missing.includes('제안대로 바꾸기'), false, '원본이 지워졌으면 제안대로 바꿀 수 없다');
 });
-test('v3: 소제목은 색 점 + 이름 글자(버튼)이고 원래 프로젝트는 풍선(title)으로만 — 고치는 중이면 입력칸과 안내 한 줄, 늘 `완료한 일` 자리로 보낸다', () => {
+test('v3: 소제목은 색 점 + 이름 글자(버튼)이고 원래 프로젝트는 풍선(title)으로만 — 고치는 중이면 입력칸과 안내 한 줄, 늘 `완료한 일` 자리로 보낸다', async () => {
   const app = reportClient();
   app.run(`calls = []; reportChange = async (target, action) => { calls.push(action); }; renderReportDraft = () => {};
     item = ${V3_ITEM}; groups = reportDoneGroups(item.draft.rows).groups;`);
@@ -14571,11 +14724,13 @@ test('v3: 소제목은 색 점 + 이름 글자(버튼)이고 원래 프로젝트
   assert.equal(box.children[0].placeholder, '결제 리뉴얼');
   box.children[0].value = '결제 개편';
   box.children[0].listeners.keydown({ key: 'Enter', preventDefault() {}, stopPropagation() {} });
+  await settle(); // 같은 칸(열쇠)의 Enter 저장이 끝나야 다음 Enter를 받는다(reportEnterSaving)
   assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), [{ action: 'rename', heading: '완료한 일', groupKey: 'jira:PAY-1', text: '결제 개편' }]);
   // 사람이 고친 이름을 원래 자동 글자(`결제 리뉴얼`) 그대로 적으면 빈 값(원래대로)을 보낸다.
   const again = app.run(`reportGroupHead(item, groups[0], '결제 개편 1차').children[1]`);
   again.children[0].value = '결제 리뉴얼';
   again.children[0].listeners.keydown({ key: 'Enter', preventDefault() {}, stopPropagation() {} });
+  await settle();
   assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls[1])')), { action: 'rename', heading: '완료한 일', groupKey: 'jira:PAY-1', text: '' });
   // 진행 중만 있는 프로젝트(운영툴)도 `완료한 일` 자리로 보낸다 — 이번 주면 괄호까지 한 글자처럼 고친다.
   app.run(`reportPlanIsCurrentWeek = () => true; reportEdits.set(reportNameEditKey(item.weekKey, '완료한 일', 'group:운영툴'), '운영툴 (진행 중)')`);
@@ -14584,6 +14739,7 @@ test('v3: 소제목은 색 점 + 이름 글자(버튼)이고 원래 프로젝트
   assert.equal(own.children[0].value, '운영툴 (진행 중)', '입력칸은 괄호까지 담은 글자로 열린다');
   own.children[0].value = '운영 도구';
   own.children[0].listeners.keydown({ key: 'Enter', preventDefault() {}, stopPropagation() {} });
+  await settle();
   assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls[2])')), { action: 'rename', heading: '완료한 일', groupKey: 'group:운영툴', text: '운영 도구' });
   app.run(`reportEdits.clear()`);
   const shown = app.run(`reportGroupHead(item, groups[1], '운영툴').children[1]`);
