@@ -791,6 +791,8 @@ function uiRenderHeld(zone) {
   // 저장한 칸) 다시 그리지 않는다. 실패(다른 창 변경 409 등)하면 적은 글이 그 칸에 남아야 한다. 저장이 끝나면 그 저장이
   // 부르는 load()가 그린다(아래 uiHeldFlush의 같은 규칙을 탭 이동 등 바로 그리는 길에도).
   if (zone && itemWritesInFlight && [...(zone.querySelectorAll?.('input:disabled, textarea:disabled') || [])].some(uiIsTextEntry)) return true;
+  // 잠그지 않고 저장 중인 칸(`data-saving` — 결과 한 줄)도 같은 까닭으로 지킨다. 저장이 끝나면 표시를 떼고 그 저장의 load()가 그린다.
+  if (zone && [...(zone.querySelectorAll?.('[data-saving]') || [])].some(uiIsTextEntry)) return true;
   const el = document.activeElement;
   if (!zone || !el || !zone.contains?.(el) || !uiIsTextEntry(el)) return false;
   if (uiComposingEl && uiComposingEl === el) return true;
@@ -823,7 +825,7 @@ function uiHeldFlush() {
     if (uiRenderHeld(zone)) { uiHoldArm(active); continue; }
     // 초점이 같은 구역의 다른 것(버튼 등)으로 옮겨 갔으면 그것을 지우지 않게 구역을 떠날 때까지 기다린다.
     if (active && active !== document.body && zone.contains?.(active) && !uiAddRowSnapshot()) { uiHoldArm(active); continue; }
-    if ([...(zone.querySelectorAll?.('input:disabled, textarea:disabled') || [])].some(uiIsTextEntry)) continue;
+    if ([...(zone.querySelectorAll?.('input:disabled, textarea:disabled, [data-saving]') || [])].some(uiIsTextEntry)) continue;
     if (uiPointerDown) {
       document.addEventListener('pointerup', () => setTimeout(uiHeldFlush, 0), { once: true, capture: true });
       return;
@@ -1723,6 +1725,8 @@ function uiMenuChips(options, current, onPick, disableCurrent = false) {
 }
 
 // 메뉴 안의 한 줄 글자 칸(누구에게). Enter·포커스 이동 때 저장하고, 실패해도 적은 글자는 남긴다.
+// 저장 중에도 칸은 잠그지 않는다 — 잠근 칸에 친 글자는 브라우저가 버린다(DESIGN 동작 관습 5). 같은 칸의 저장은
+// uiQueueSend 대기열로 하나씩 순서대로 보내고, 마지막으로 보낸(보내는 중인) 글과 같으면 다시 보내지 않는다.
 function uiMenuText({ value, label, placeholder, onChange }) {
   const input = document.createElement('input');
   input.type = 'text';
@@ -1731,15 +1735,15 @@ function uiMenuText({ value, label, placeholder, onChange }) {
   if (placeholder) input.placeholder = placeholder;
   input.setAttribute('aria-label', label);
   let saved = (value || '').trim();
-  let sending = null;
-  const commit = async () => {
+  let sent = saved;
+  const commit = () => {
     const next = input.value.trim();
-    if (next === saved || sending === next) return;
-    sending = next;
-    input.disabled = true;
-    try { await onChange(next || null); saved = next; }
-    catch { /* 입력은 그대로 남긴다 */ }
-    finally { sending = null; input.disabled = false; }
+    if (next === sent) return undefined;
+    sent = next;
+    return uiQueueSend(input, async () => {
+      try { await onChange(next || null); saved = next; }
+      catch { if (sent === next) sent = saved; /* 입력은 그대로 남긴다 — 다음 Enter·바깥 누르기가 다시 보낸다 */ }
+    });
   };
   input.addEventListener('change', commit);
   input.addEventListener('keydown', (event) => {
@@ -1776,18 +1780,28 @@ function uiResultCell(meta, item) {
     input.setAttribute('aria-label', `${item.description} — 결과 한 줄`);
     meta.replaceChildren(input);
     input.focus();
+    // 저장 중에도 칸은 잠그지 않는다 — 잠근 칸에 친 글자는 브라우저가 버린다(DESIGN 동작 관습 5). 실패하면 그동안 친 글까지
+    // 칸에 그대로다. 저장 중의 두 번째 Enter·Esc는 넘긴다(같은 결과를 두 번 보내지 않게). 저장 중인 칸에는 `data-saving`을 달아
+    // 그 사이 목록 다시 그리기가 칸을 떼어 내지 않게 한다(uiRenderHeld — 잠긴 칸을 지키던 것과 같은 규칙).
+    let saving = false;
     input.addEventListener('keydown', async (event) => {
-      if (event.isComposing || input.disabled) return;
+      if (event.isComposing || saving) return;
       if (event.key === 'Escape') { uiResultCell(meta, item); return; }
       if (event.key !== 'Enter') return;
       const value = input.value.trim();
       if (!value) { uiResultCell(meta, item); return; }
-      input.disabled = true;
+      saving = true;
+      input.dataset.saving = '1';
       try {
         // 상세의 `결과 한 줄`과 같은 저장 경로를 쓴다.
         await postJson('/api/workflow/item', { id: item.id, outcome: value });
-        await load();
-      } catch { input.disabled = false; }
+      } catch { saving = false; delete input.dataset.saving; return; }
+      saving = false;
+      delete input.dataset.saving;
+      // 저장됐다 — 칸을 닫고 적은 결과를 보인 뒤 목록을 받는다(초점이 칸에 남아 있으면 목록 다시 그리기가 미뤄진다).
+      // 저장하는 동안 더 친 글이 있으면 칸을 열어 둔 채 그 글을 남긴다(다음 Enter가 그 글로 저장한다).
+      if (input.isConnected && input.value.trim() === value) uiResultCell(meta, { ...item, outcome: value });
+      await load();
     });
   });
   meta.appendChild(link);

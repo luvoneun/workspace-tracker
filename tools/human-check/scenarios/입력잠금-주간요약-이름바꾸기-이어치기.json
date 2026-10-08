@@ -1,0 +1,101 @@
+{
+  "name": "주간요약 제목 이름 바꾸기 — Enter로 저장하는 동안 이어 치기",
+  "description": "주간요약 제목·소제목 이름 칸(reportRenameBox)은 Enter로 저장하면 닫힌다. 저장이 도는 동안 칸을 잠그면 이어 친 글자를 브라우저가 버린다(d8e2059에서 실패). 칸은 잠기지 않고, 더 친 글이 있으면 저장 뒤에도 칸이 그 글로 열려 있어야 한다. 응답이 한글 조합 도중에 와도 조합이 끊기지 않아야 한다(30edea7에서 실패).",
+  "steps": [
+    {
+      "do": "goto",
+      "url": "/",
+      "waitFor": "#tabBtnWeekly",
+      "wait": 500
+    },
+    {
+      "do": "click",
+      "selector": "#tabBtnWeekly",
+      "hold": 0
+    },
+    {
+      "do": "wait",
+      "selector": "#weeklyReportDetail [data-edit-text]",
+      "timeout": 8000
+    },
+    {
+      "do": "click",
+      "note": "보고 제목을 눌러 이름 고치기",
+      "selector": "#weeklyReportDetail .rp-title [data-rename]"
+    },
+    {
+      "do": "wait",
+      "selector": "#weeklyReportDetail [data-rename-input]",
+      "timeout": 3000
+    },
+    {
+      "do": "eval",
+      "note": "칸을 비운다",
+      "expr": "(() => { const e = document.querySelector('#weeklyReportDetail [data-rename-input]'); e.value = ''; e.dispatchEvent(new Event('input')); return 'ok'; })()"
+    },
+    {
+      "do": "eval",
+      "note": "저장을 늦춘다(서버가 느린 것처럼) — 그 사이 POST 수도 센다",
+      "expr": "(() => { if (!window.__hcFetch) { window.__hcFetch = window.fetch; window.__hcPosts = 0; window.fetch = (u, o) => { const hit = window.__hcSlow && window.__hcSlow.test(String(u)) && o && o.method === 'POST'; if (!hit) return window.__hcFetch(u, o); window.__hcPosts += 1; return new Promise(r => setTimeout(r, window.__hcMs)).then(() => window.__hcFail ? new Response(JSON.stringify({ ok: false, error: '시험용 실패' }), { status: 500, headers: { 'Content-Type': 'application/json' } }) : window.__hcFetch(u, o)); }; } window.__hcSlow = /report\\/change/; window.__hcMs = 1500; window.__hcFail = false; window.__hcPosts = 0; return 'ok'; })()"
+    },
+    {
+      "do": "type",
+      "text": "이번주",
+      "ime": true
+    },
+    {
+      "do": "key",
+      "key": "Enter"
+    },
+    {
+      "do": "type",
+      "note": "Enter 직후 곧바로 이어 친다 — 둘째 글자를 조합하는 도중에 저장 응답이 온다",
+      "text": "보고",
+      "ime": true,
+      "duringAt": 1,
+      "during": [
+        {
+          "do": "wait",
+          "note": "조합 도중 응답 풀기",
+          "ms": 1800
+        }
+      ]
+    },
+    {
+      "do": "eval",
+      "note": "저장 중 칸 상태(잠겼으면 true) — 기록용",
+      "expr": "document.querySelector('#weeklyReportDetail [data-rename-input]')?.disabled "
+    },
+    {
+      "do": "wait",
+      "ms": 2200
+    },
+    {
+      "do": "shot",
+      "name": "저장-뒤"
+    },
+    {
+      "do": "assert",
+      "message": "첫 Enter는 `이번주`를 저장했어요",
+      "expr": "fetch('/api/items').then(r => r.json()).then(d => { const draft = d.weeklyReports[0].draft; return draft.title === '이번주'; })"
+    },
+    {
+      "do": "assert",
+      "message": "칸이 `이번주보고`로 열린 채 초점을 지녀요",
+      "expr": "(() => { const a = document.activeElement; return !!a && a.matches(\"#weeklyReportDetail [data-rename-input]\"); })() && document.querySelector(\"#weeklyReportDetail [data-rename-input]\")?.value === \"이번주보고\""
+    },
+    {
+      "do": "key",
+      "key": "Enter"
+    },
+    {
+      "do": "wait",
+      "ms": 2200
+    },
+    {
+      "do": "assert",
+      "message": "두 번째 Enter가 `이번주보고`를 저장하고 닫혀요",
+      "expr": "fetch('/api/items').then(r => r.json()).then(d => { const draft = d.weeklyReports[0].draft; return draft.title === '이번주보고'; }).then(ok => ok && !document.querySelector('#weeklyReportDetail [data-rename-input]'))"
+    }
+  ]
+}

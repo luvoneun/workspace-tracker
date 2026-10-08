@@ -592,7 +592,9 @@ function panelMeetingRowEdit(row, titleEl, item, checkbox) {
     if (!value || value === item.description) { cancel(); return; }
     settled = true;
     escDrop(cancel);
-    input.disabled = true; // 포커스가 빠져 load()가 회의 카드를 다시 그릴 수 있게 된다
+    // 잠근다 — Enter·바깥 누르기가 이미 초점을 뺀 저장이라 이어 친 글자가 이 칸으로 오지 않는다. 잠긴 칸은 업무 저장이 서버에 가 있는
+    // 동안 다시 그리지 않는 표시다(app.js uiRenderHeld — 409면 적은 글이 이 칸에 남아야 한다). 초점이 빠져 끝난 뒤의 load()는 카드를 다시 그린다.
+    input.disabled = true;
     try {
       await postJson('/api/track/set-description', { id: item.id, description: value, expect });
       await load(); // 개수(`이 회의에서 나온 것 N`)와 레일의 회의 줄까지 함께 맞춰진다 — 새 줄의 체크박스는 잠겨 있지 않다

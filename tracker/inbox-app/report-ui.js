@@ -157,7 +157,24 @@ window.addEventListener('beforeunload', event => {
 // (다른 주를 저장하면 그 주가 문서 자리에 그려진다 — 다른 주의 글은 지금처럼 남는다). 비었거나 원래 글과 같으면 저장하지 않고
 // 칸만 닫는다. 실패(서버 꺼짐·409·거절)하면 거기서 멈추고 남은 글은 reportEdits에 그대로다. 탭 전환은 기다리지 않는다.
 const reportLeaveSavers = new Map();
-const reportLeaveSaving = new Set();   // 지금 저장 중인 열쇠 — 그 사이 다시 그려진 입력칸은 Enter 저장 때처럼 잠근다
+const reportLeaveSaving = new Set();   // 지금 저장 중인 열쇠 — 그 사이 다시 그려진 입력칸은 잠근다(탭을 떠난 뒤라 칠 사람이 없다)
+// Enter로 저장 중인 열쇠 — 칸은 잠그지 않는다(잠근 칸에 친 글자는 브라우저가 버린다 — DESIGN 동작 관습 5). 그 사이 두 번째 Enter·
+// 바깥 누르기 저장은 넘긴다(같은 글을 두 번 보내지 않게).
+const reportEnterSaving = new Set();
+// Enter 저장이 끝난 뒤 문서를 그린다 — 그 사이 칸에서 한글을 조합하는 중이면 조합이 끝난 뒤에(칸을 갈아 끼우면 조합이 끊긴다 —
+// 바깥 누르기 저장과 같은 기다리기). 그래서 Enter 저장은 reportChange에 `draw: false`를 주고 이것으로 그린다.
+// `settle`은 그리기 직전에 적던 글을 다시 맞추는 일 — 조합이 끝나며 칸이 적던 글을 덮어쓰기 때문이다(한 줄 추가의 남길 글).
+async function reportEnterDraw(item, settle = null) {
+  await reportLeaveWait(() => !reportStillComposing(), REPORT_COMPOSE_MAX);
+  if (settle) settle();
+  renderReportDraft(item);
+}
+// 저장 중의 Esc는 넘긴다 — 저장은 이미 가고 있어 글만 지우면 실패 때 "그대로 있어요"가 거짓이 되고, 성공 때 취소한 글이 저장된다.
+function reportEnterEsc(event, key) {
+  if (!reportEnterSaving.has(key)) return false;
+  event.preventDefault(); event.stopPropagation();
+  return true;
+}
 let reportLeaveRun = Promise.resolve();
 let reportComposing = false;
 let reportComposingEl = null;
@@ -288,7 +305,7 @@ const reportBlurWatched = new Map();   // 열쇠 → { scope, input } 지금 그
 function reportBlurWatch(scope, input, key) {
   reportBlurWatched.set(key, { scope, input });
   scope.addEventListener('focusout', (event) => {
-    if (input.disabled || !reportEdits.has(key) || reportLeaveSaving.has(key)) return;
+    if (input.disabled || !reportEdits.has(key) || reportLeaveSaving.has(key) || reportEnterSaving.has(key)) return;
     const next = event.relatedTarget;
     if (next && typeof scope.contains === 'function' && scope.contains(next)) return;
     // 줄 안의 글자(근거·안내 줄)를 눌렀다 — 닫지 않는다. 손을 뗐을 때 글자를 고르지 않았으면 입력칸으로 초점을 돌려놓고,
@@ -341,7 +358,7 @@ function reportBlurSweep(target) {
   const active = document.activeElement;
   for (const [key, { scope, input }] of [...reportBlurWatched]) {
     if (!scope.isConnected) { reportBlurWatched.delete(key); continue; }
-    if (!reportEdits.has(key) || input.disabled || reportLeaveSaving.has(key) || reportBlurPending.has(key)) continue;
+    if (!reportEdits.has(key) || input.disabled || reportLeaveSaving.has(key) || reportEnterSaving.has(key) || reportBlurPending.has(key)) continue;
     if (typeof scope.contains !== 'function' || (active && scope.contains(active)) || (target && scope.contains(target))) continue;
     reportBlurSave(key);
   }
@@ -483,19 +500,23 @@ function reportRenameBox(item, { editKey, label, original, current, save, hint, 
   reportBlurWatch(box, input, editKey);
   const close = () => { reportEdits.delete(editKey); renderReportDraft(item); reportRenameFocus(editKey); };
   const commit = async () => {
-    const value = input.value.trim();
+    const typed = input.value;
+    const value = typed.trim();
     if (value === current) { close(); return; }
-    await save(value);
+    await save(value, item, { typed, draw: false });
+    await reportEnterDraw(item);
     reportRenameFocus(editKey);
   };
+  // Enter 저장 중에도 칸은 잠그지 않는다 — 이어 친 글자는 칸에 남고, 저장 뒤에도 칸이 그 글로 열려 있다(reportEditsDone).
   input.addEventListener('keydown', (event) => {
     if (event.isComposing) return;
-    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); return; }
+    if (event.key === 'Escape') { if (reportEnterEsc(event, editKey)) return; event.preventDefault(); event.stopPropagation(); close(); return; }
     if (event.key !== 'Enter' || input.disabled) return;
     event.preventDefault();
-    input.disabled = true;
+    if (reportEnterSaving.has(editKey)) return;
+    reportEnterSaving.add(editKey);
     commit().catch(error => showNotice(error.message || '저장하지 못했어요. 적은 내용은 그대로 있어요', true))
-      .finally(() => { input.disabled = false; });
+      .finally(() => { reportEnterSaving.delete(editKey); });
   });
   box.append(input, reportNode('div', hint ? `${hint} · ${REPORT_EDIT_HINT}` : REPORT_EDIT_HINT, 'rp-help'));
   return box;
@@ -840,8 +861,18 @@ function reportNewCount(item) {
 
 // ---------- 저장 ----------
 
+// 저장이 끝난 칸의 적던 글을 지운다 — 다만 Enter 때의 글(`options.typed`)과 지금 글이 다르면(저장하는 동안 이어 쳤으면) 지우지 않는다.
+// 칸이 그 글로 열린 채 남아 이어 친 글자가 버려지지 않는다(DESIGN 동작 관습 5). 한 줄 더하기(`rest`)는 보낸 글 뒤에 친 것만 남긴다.
+function reportEditsDone(key, options, rest = false) {
+  const now = reportEdits.get(key);
+  if (options.typed === undefined || now === undefined || now === options.typed) { reportEdits.delete(key); return; }
+  if (!rest) return;
+  const left = now.startsWith(options.typed) ? now.slice(options.typed.length).trimStart() : now;
+  if (left.trim()) reportEdits.set(key, left); else reportEdits.delete(key);
+}
 // `options.key`는 같은 요청을 다시 보내도 한 번만 되게 하는 요청 id(`+ 한 줄 추가`가 업무를 만들 때 — 서버의 Idempotency-Key).
 // 다른 저장이 도는 중이면 보내지 않고 false를 돌려준다(성공은 undefined — 이 값을 보는 쪽만 구분한다).
+// `options.typed`는 Enter 때 칸의 글 — 저장 뒤 적던 글을 지울지 가린다(reportEditsDone).
 async function reportChange(item, action, notice, options = {}) {
   if (reportBusy) return false;
   reportBusy = true;
@@ -865,10 +896,10 @@ async function reportChange(item, action, notice, options = {}) {
       if (result.code === 'RECOVERY_NEEDED' && typeof renderStorageBanner === 'function') renderStorageBanner({ recoveryNeeded: true });
       throw new Error(result.error || '저장됐는지 확인하지 못했어요. 적은 내용은 그대로 있어요');
     }
-    if (action.action === 'edit') reportEdits.delete(`${item.weekKey}:${action.id}`);
-    if (action.action === 'retitle') reportEdits.delete(reportTitleEditKey(item.weekKey));
-    if (action.action === 'rename') reportEdits.delete(reportNameEditKey(item.weekKey, action.heading, action.groupKey));
-    if (action.action === 'addLine') reportEdits.delete(reportAddLineKey(item.weekKey, action.heading, action.groupKey));
+    if (action.action === 'edit') reportEditsDone(`${item.weekKey}:${action.id}`, options);
+    if (action.action === 'retitle') reportEditsDone(reportTitleEditKey(item.weekKey), options);
+    if (action.action === 'rename') reportEditsDone(reportNameEditKey(item.weekKey, action.heading, action.groupKey), options);
+    if (action.action === 'addLine') reportEditsDone(reportAddLineKey(item.weekKey, action.heading, action.groupKey), options, true);
     // `add`로 적던 글을 비우는 것은 입력칸을 들고 있는 쪽(reportPlanAddLines)이 한다 —
     // 다른 입력줄(프로젝트 소제목의 `+ 추가`)에서 담았는데 맨 아래 줄의 글이 날아가면 안 된다.
     // `+ 한 줄 추가`를 되돌린 결과처럼 서버가 되돌리기 표를 주지 않으면 되돌릴 것이 없다.
@@ -1749,15 +1780,18 @@ function reportSentenceRow(item, row, context) {
     const cancel = () => { reportEdits.delete(key); renderReportDraft(item); reportEditFocus(row.id); };
     input.addEventListener('keydown', (event) => {
       if (event.isComposing) return;
-      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancel(); return; }
+      if (event.key === 'Escape') { if (reportEnterEsc(event, key)) return; event.preventDefault(); event.stopPropagation(); cancel(); return; }
       if (event.key !== 'Enter' || event.shiftKey || input.disabled) return;
       event.preventDefault();
+      if (reportEnterSaving.has(key)) return;
       if (input.value.trim() === String(row.text ?? '').trim()) { cancel(); return; }
-      input.disabled = true;
-      reportChange(item, { action: 'edit', id: row.id, text: input.value })
+      // 칸은 잠그지 않는다 — 저장하는 동안 이어 친 글자는 칸에 남고, 저장 뒤에도 칸이 그 글로 열려 있다(reportEditsDone).
+      reportEnterSaving.add(key);
+      reportChange(item, { action: 'edit', id: row.id, text: input.value }, undefined, { typed: input.value, draw: false })
+        .then(() => reportEnterDraw(item))
         .then(() => reportEditFocus(row.id))
         .catch(error => showNotice(error.message || '저장하지 못했어요. 적은 내용은 그대로 있어요', true))
-        .finally(() => { input.disabled = false; });
+        .finally(() => { reportEnterSaving.delete(key); });
     });
     text.appendChild(input);
     const help = reportNode('div', undefined, 'rp-help');
@@ -1940,11 +1974,13 @@ function reportRequestId() {
   const part = () => Math.random().toString(36).slice(2, 10).padEnd(8, '0');
   return `${Date.now().toString(36)}-${part()}-${part()}`;
 }
-async function reportAddLineSubmit(item, heading, group, editKey, text) {
+// `extra`는 reportChange에 넘길 칸 정보(Enter 때의 글 `typed`·`draw`) — 입력칸이 Enter로 부를 때만.
+async function reportAddLineSubmit(item, heading, group, editKey, text, extra = {}) {
   const memo = `${editKey}|${text}`;
   if (!reportAddLineIds.has(memo)) reportAddLineIds.set(memo, reportRequestId());
+  let done;
   try {
-    await reportChange(item, { action: 'addLine', heading, groupKey: group.key, text }, undefined, { key: reportAddLineIds.get(memo) });
+    done = await reportChange(item, { action: 'addLine', heading, groupKey: group.key, text }, undefined, { ...extra, key: reportAddLineIds.get(memo) });
   } catch (error) {
     // 같은 id의 앞 요청은 이미 저장됐는데(응답만 잃음) 그 뒤 보고가 바뀌어 본문이 달라진 경우 — 서버가 같은 id를 다른 내용으로
     // 받지 않는다. 이미 더해진 것이므로 id와 적던 글을 버리고 최신 보고를 받아 온다(다시 보내면 같은 줄이 두 번 생긴다).
@@ -1957,6 +1993,7 @@ async function reportAddLineSubmit(item, heading, group, editKey, text) {
     throw error;
   }
   reportAddLineIds.delete(memo);
+  return done;
 }
 function reportAddLineRow(item, heading, group, title, host) {
   const editKey = reportAddLineKey(item.weekKey, heading, group.key);
@@ -1995,6 +2032,7 @@ function reportAddLineRow(item, heading, group, title, host) {
   input.addEventListener('keydown', (event) => {
     if (event.isComposing) return;
     if (event.key === 'Escape') {
+      if (reportEnterEsc(event, editKey)) return;
       event.preventDefault(); event.stopPropagation();
       reportEdits.delete(editKey); renderReportDraft(item); reportAddLineFocus(editKey);
       return;
@@ -2002,12 +2040,15 @@ function reportAddLineRow(item, heading, group, title, host) {
     if (event.key !== 'Enter') return;
     event.preventDefault();
     const text = input.value.trim();
-    if (!text || input.disabled) return;
-    input.disabled = true;
-    reportAddLineSubmit(item, heading, group, editKey, text)
+    if (!text || reportEnterSaving.has(editKey)) return;
+    // 칸은 잠그지 않는다 — 저장하는 동안 이어 친 글자는 칸에 남는다(보낸 글 뒤에 친 것만 — reportEditsDone).
+    reportEnterSaving.add(editKey);
+    const typed = input.value;
+    reportAddLineSubmit(item, heading, group, editKey, text, { typed, draw: false })
+      .then(done => reportEnterDraw(item, done === false ? null : () => reportEditsDone(editKey, { typed }, true)))
       .then(() => reportAddLineFocus(editKey))
       .catch(error => showNotice(error.message || '저장됐는지 확인하지 못했어요. 적은 내용은 그대로 있어요', true))
-      .finally(() => { input.disabled = false; });
+      .finally(() => { reportEnterSaving.delete(editKey); });
   });
   box.appendChild(input);
   box.appendChild(reportNode('div', reportAddLineHint(item, heading, title), 'rp-help'));

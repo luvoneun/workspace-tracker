@@ -1,0 +1,169 @@
+{
+  "name": "상세 제목·결정 문구 — Enter가 칸을 닫는 칸(잠금 유지)",
+  "description": "상세 제목(panelTitleEdit)·결정 문구(makeEditableDesc)는 Enter가 곧 칸에서 초점을 빼고(blur) 저장하는 길이라, Enter 뒤에 친 글자는 잠금과 관계없이 그 칸으로 가지 않는다 — 잠금이 글자를 버리는 곳이 아니다. 저장 중의 잠금은 다시 그리기 보호 표시로 남긴다(uiRenderHeld). 여기서는 Enter 때의 글이 저장되고, 늦게 실패하면 칸이 풀린 채 초점·글이 돌아와 이어 칠 수 있는지 본다(저장 실패 시 잠김 없음).",
+  "steps": [
+    {
+      "do": "goto",
+      "url": "/",
+      "waitFor": "#tabBtnToday",
+      "wait": 500
+    },
+    {
+      "do": "click",
+      "note": "앞 회차가 다른 탭에서 끝났으면 그 탭을 기억한다 — 오늘 탭으로",
+      "selector": "#tabBtnToday",
+      "hold": 0
+    },
+    {
+      "do": "click",
+      "note": "오늘 줄을 눌러 상세를 연다",
+      "selector": "[data-task-id=c] .d-title"
+    },
+    {
+      "do": "wait",
+      "selector": ".d-detail div.d-dtitle",
+      "timeout": 3000
+    },
+    {
+      "do": "click",
+      "note": "제목을 눌러 고치기",
+      "selector": ".d-detail div.d-dtitle"
+    },
+    {
+      "do": "wait",
+      "selector": ".d-detail textarea.d-dtitle",
+      "timeout": 2000
+    },
+    {
+      "do": "eval",
+      "note": "저장을 늦춘다(서버가 느린 것처럼) — 그 사이 POST 수도 센다",
+      "expr": "(() => { if (!window.__hcFetch) { window.__hcFetch = window.fetch; window.__hcPosts = 0; window.fetch = (u, o) => { const hit = window.__hcSlow && window.__hcSlow.test(String(u)) && o && o.method === 'POST'; if (!hit) return window.__hcFetch(u, o); window.__hcPosts += 1; return new Promise(r => setTimeout(r, window.__hcMs)).then(() => window.__hcFail ? new Response(JSON.stringify({ ok: false, error: '시험용 실패' }), { status: 500, headers: { 'Content-Type': 'application/json' } }) : window.__hcFetch(u, o)); }; } window.__hcSlow = /set-description/; window.__hcMs = 1200; window.__hcFail = false; window.__hcPosts = 0; return 'ok'; })()"
+    },
+    {
+      "do": "eval",
+      "note": "늦춘 저장이 끝에 실패하게(서버 500)",
+      "expr": "(window.__hcFail = true, 'ok')"
+    },
+    {
+      "do": "type",
+      "text": " 확인",
+      "ime": true
+    },
+    {
+      "do": "key",
+      "key": "Enter"
+    },
+    {
+      "do": "wait",
+      "ms": 1800
+    },
+    {
+      "do": "shot",
+      "name": "제목-실패-뒤"
+    },
+    {
+      "do": "assert",
+      "message": "실패 뒤 제목 칸이 풀리고 초점·글이 돌아와요",
+      "expr": "(() => { const a = document.activeElement; return !!a && a.matches(\".d-detail textarea.d-dtitle\"); })() && document.activeElement.disabled === false && document.activeElement.value === '운영툴 권한 확인하기 확인'"
+    },
+    {
+      "do": "type",
+      "note": "실패 뒤 이어 친다",
+      "text": "함",
+      "ime": true
+    },
+    {
+      "do": "eval",
+      "note": "이제 저장은 성공",
+      "expr": "(window.__hcFail = false, 'ok')"
+    },
+    {
+      "do": "key",
+      "key": "Enter"
+    },
+    {
+      "do": "wait",
+      "ms": 1800
+    },
+    {
+      "do": "assert",
+      "message": "이어 친 글까지 저장돼요",
+      "expr": "fetch('/api/items').then(r => r.json()).then(d => d.reportRefs.c.description === '운영툴 권한 확인하기 확인함')"
+    },
+    {
+      "do": "click",
+      "selector": "#tabBtnRecords",
+      "hold": 0
+    },
+    {
+      "do": "wait",
+      "selector": "#decisionList .desc-editable",
+      "timeout": 8000
+    },
+    {
+      "do": "click",
+      "note": "결정 문구를 눌러 고치기",
+      "selector": "#decisionList .desc-editable"
+    },
+    {
+      "do": "wait",
+      "selector": "#decisionList input.desc-edit-input",
+      "timeout": 3000
+    },
+    {
+      "do": "eval",
+      "note": "저장을 늦춘다(서버가 느린 것처럼) — 그 사이 POST 수도 센다",
+      "expr": "(() => { if (!window.__hcFetch) { window.__hcFetch = window.fetch; window.__hcPosts = 0; window.fetch = (u, o) => { const hit = window.__hcSlow && window.__hcSlow.test(String(u)) && o && o.method === 'POST'; if (!hit) return window.__hcFetch(u, o); window.__hcPosts += 1; return new Promise(r => setTimeout(r, window.__hcMs)).then(() => window.__hcFail ? new Response(JSON.stringify({ ok: false, error: '시험용 실패' }), { status: 500, headers: { 'Content-Type': 'application/json' } }) : window.__hcFetch(u, o)); }; } window.__hcSlow = /set-description/; window.__hcMs = 1200; window.__hcFail = false; window.__hcPosts = 0; return 'ok'; })()"
+    },
+    {
+      "do": "eval",
+      "note": "늦춘 저장이 끝에 실패하게(서버 500)",
+      "expr": "(window.__hcFail = true, 'ok')"
+    },
+    {
+      "do": "type",
+      "text": " 확인",
+      "ime": true
+    },
+    {
+      "do": "key",
+      "key": "Enter"
+    },
+    {
+      "do": "wait",
+      "ms": 1800
+    },
+    {
+      "do": "shot",
+      "name": "문구-실패-뒤"
+    },
+    {
+      "do": "assert",
+      "message": "실패 뒤 문구 칸이 풀리고 초점·글이 돌아와요",
+      "expr": "(() => { const a = document.activeElement; return !!a && a.matches(\"#decisionList input.desc-edit-input\"); })() && document.activeElement.disabled === false && document.activeElement.value === '권한 정책은 기존 방식 유지 확인'"
+    },
+    {
+      "do": "type",
+      "text": "함",
+      "ime": true
+    },
+    {
+      "do": "eval",
+      "note": "이제 저장은 성공",
+      "expr": "(window.__hcFail = false, 'ok')"
+    },
+    {
+      "do": "key",
+      "key": "Enter"
+    },
+    {
+      "do": "wait",
+      "ms": 1800
+    },
+    {
+      "do": "assert",
+      "message": "이어 친 글까지 저장돼요",
+      "expr": "fetch('/api/items').then(r => r.json()).then(d => d.reportRefs.d.description === '권한 정책은 기존 방식 유지 확인함')"
+    }
+  ]
+}
