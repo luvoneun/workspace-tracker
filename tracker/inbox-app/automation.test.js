@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const support = require('./test-support');
-const { today, deadPid, gitEnv, runGit, gitReady, runSync } = support;
+const { today, deadPid, gitEnv, runGit, gitReady, runSync, HANG_MS, HANG_LABEL } = support;
 
 // launchd가 부르는 자동화 스크립트. 앱과 따로 돌지만 여기가 멈추면 수집이 통째로 멎기 때문에,
 // 실제 스크립트를 임시 폴더·가짜 claude로 돌려서 "멈춤 방지" 장치만 확인한다.
@@ -1679,16 +1679,32 @@ test('저장 중 대기 backup-data.sh: 죽은 프로세스가 남긴 잠금(고
   }
 });
 
-test('저장 중 대기 backup-data.sh: 복사하는 동안 파일이 바뀌면 그 벌을 버리고 한 번 더 — 그래도 바뀌면 건너뛴다', (t) => {
+test('저장 중 대기 backup-data.sh: 복사하는 동안 파일이 바뀌면 그 벌을 버리고 한 번 더 — 그래도 바뀌면 건너뛴다', async (t) => {
   const fix = backupFixture(t);
   const tasks = path.join(fix.tracker, 'tasks.md');
+  const stop = path.join(fix.home, 'stop-writer');
   // 잠금 없이 계속 고쳐 쓰는 가짜 저장(복사 중에 저장이 시작·끝난 것과 같다) — 앱처럼 통째로 바꿔 넣어(mv) 빈 파일이 보이는
   // 순간이 없고, 쓸 때마다 내용이 달라 복사본이 원본과 늘 어긋난다.
-  const writer = spawn('/bin/sh', ['-c', `i=0; while :; do i=$((i+1)); echo "- 업무 $i" > "${tasks}.w"; mv -f "${tasks}.w" "${tasks}"; done`], { stdio: 'ignore' });
-  t.after(() => { try { process.kill(writer.pid); } catch { /* 이미 끝남 */ } });
-  sleepMs(100);
+  // 끝낼 때는 신호가 아니라 멈춤 표시 파일로 세운다 — 신호로 셸만 끝내면 그때 돌던 mv가 남아 폴더를 지우는 정리와 겹쳤다
+  // (2026-10-08 단독 20번 중 4번, 전부 정리의 ENOTEMPTY). 셸이 스스로 끝나면 마지막 mv까지 끝난 뒤다.
+  const writer = spawn('/bin/sh', ['-c', `i=0; while [ ! -e "${stop}" ]; do i=$((i+1)); echo "- 업무 $i" > "${tasks}.w"; mv -f "${tasks}.w" "${tasks}"; done`], { stdio: 'ignore' });
+  const exited = new Promise(resolve => writer.once('exit', resolve));
+  t.after(() => { if (writer.exitCode === null && writer.signalCode === null) writer.kill(); });
+  const writerDone = () => {
+    let timer;
+    return Promise.race([exited, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${HANG_LABEL} 가짜 저장이 끝나지 않았습니다`)), HANG_MS); })])
+      .finally(() => clearTimeout(timer));
+  };
+  // 벽시계 몇 밀리초가 아니라 "고쳐 쓰기가 돌기 시작했다"(두 번째 저장)를 기다린다.
+  const started = Date.now();
+  while (!/^- 업무 (?:[2-9]|\d{2,})/.test(fs.readFileSync(tasks, 'utf8'))) {
+    if (writer.exitCode !== null) throw new Error('가짜 저장이 먼저 끝났습니다');
+    if (Date.now() - started > HANG_MS) throw new Error(`${HANG_LABEL} 가짜 저장이 시작하지 않았습니다`);
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
   const result = fix.run();
-  process.kill(writer.pid);
+  fs.writeFileSync(stop, '');
+  await writerDone();
   assert.equal(result.status, 0, result.stderr + fix.logText());
   assert.match(fix.logText(), /로컬 건너뜀 — 저장 중이라 건너뜀/);
   assert.deepEqual(fix.daily(), []);
