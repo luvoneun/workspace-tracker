@@ -1,0 +1,25 @@
+{
+  "name": "상세 제목 칸의 Esc — 칸만 닫고 상세 카드는 그대로",
+  "description": "칸의 Esc는 칸만 닫는다(DESIGN 동작 관습 2, 2026-10-08): 상세 카드의 제목을 눌러 고치다 Esc를 누르면 적던 글은 버려지고 제목이 원래대로 돌아오지만, 상세 카드는 열린 채 남아야 한다(전에는 Esc 하나에 카드까지 닫혔다). 그다음 Esc는 카드를 닫는다(가장 위에 열린 것 하나씩).",
+  "steps": [
+    { "do": "goto", "url": "/", "waitFor": "#tabBtnToday", "wait": 500 },
+    { "do": "click", "note": "앞 회차가 다른 탭에서 끝났으면 그 탭을 기억한다 — 오늘 탭으로", "selector": "#tabBtnToday", "hold": 0 },
+    { "do": "eval", "note": "상세가 열려 있으면 닫고 시작", "expr": "(() => { if (typeof panelState === 'object' && panelState) panelClose(); return true; })()" },
+    { "do": "wait", "ms": 300 },
+    { "do": "click", "note": "오늘 줄을 눌러 상세를 연다", "selector": "[data-task-id=c] .d-title" },
+    { "do": "wait", "selector": ".d-detail div.d-dtitle", "timeout": 3000 },
+    { "do": "eval", "note": "원래 제목 기억", "expr": "(window.__hcTitle = document.querySelector('.d-detail div.d-dtitle').textContent)" },
+    { "do": "click", "note": "제목을 눌러 고치기", "selector": ".d-detail div.d-dtitle" },
+    { "do": "wait", "selector": ".d-detail textarea.d-dtitle", "timeout": 3000 },
+    { "do": "type", "note": "한글로 조금 적는다", "text": "고침", "ime": true },
+    { "do": "key", "key": "Escape" },
+    { "do": "wait", "ms": 400 },
+    { "do": "shot", "name": "Esc-뒤" },
+    { "do": "assert", "message": "제목 칸은 닫혀야 해요", "expr": "!document.querySelector('.d-detail textarea.d-dtitle')" },
+    { "do": "assert", "message": "상세 카드는 열린 채여야 해요(칸의 Esc가 카드까지 닫으면 안 됨)", "expr": "!!panelState && String(panelState.id) === 'c' && !!document.querySelector('.d-detail div.d-dtitle')" },
+    { "do": "assert", "message": "적던 글은 버리고 원래 제목이어야 해요", "expr": "document.querySelector('.d-detail div.d-dtitle').textContent === window.__hcTitle" },
+    { "do": "key", "key": "Escape" },
+    { "do": "wait", "ms": 600 },
+    { "do": "assert", "message": "다음 Esc는 상세 카드를 닫아야 해요", "expr": "!panelState" }
+  ]
+}
