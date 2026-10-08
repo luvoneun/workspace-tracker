@@ -18901,6 +18901,18 @@ test('②: 알림 한 줄 — 팔로업 후보는 프로젝트마다(제목에 �
   const calm = app.run("reportTidyAlertLine({ weekKey: 'W', draft: { rows: [] } })");
   assert.deepEqual([calm.getAttribute('role'), calm.children[0].textContent], ['status', '손볼 줄이 없어요 — 줄을 골라 아래 막대로 정리해요']);
 });
+test('②: 정리 모드인 채 탭을 옮기면 모드가 끝나 막대(#reportNestBarEl)와 body.nest-open이 다른 탭에 남지 않는다 — 저장이 도는 중이어도', () => {
+  for (const busy of [false, true]) {
+    const app = tidyClient();
+    app.run(`nest = null; document.body.classList.toggle = (name, on) => { if (name === 'nest-open') nest = on; };
+      reportAutosaveLeave = () => {}; reportRenderedItem = item; reportTidyStart(item); reportTidyBar(item);`);
+    assert.deepEqual([app.run('nest'), app.run("document.getElementById('reportNestBarEl').hidden")], [true, false], '정리 모드면 막대가 선다');
+    app.run(`reportBusy = ${busy}; reportTabLeave(); reportBusy = false;`);
+    assert.equal(app.run('reportTidy'), null, busy ? '저장 중이어도 끝난다' : '정리 모드가 끝난다');
+    assert.deepEqual([app.run('nest'), app.run("document.getElementById('reportNestBarEl').hidden")], [false, true], '막대가 내려간다');
+    assert.equal(app.run('escStack.includes(reportTidyEnd)'), false, 'Esc 스택에서도 빠진다');
+  }
+});
 test('②: 정리 모드 줄은 글머리 자리 선택 칸(Tab은 선택 칸에만) — 줄 끝 알약·담기 질문·글자 고치기가 쉬고, Shift로 여러 줄을 고른다', () => {
   const app = tidyClient();
   app.run("reportTidyStart(item)");
@@ -20480,7 +20492,7 @@ test('탭 떠나면 저장: setActiveTab은 주간요약을 떠날 때만 부르
   const source = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
   const body = source.slice(source.indexOf('function setActiveTab('), source.indexOf('Object.entries(TABS).forEach', source.indexOf('function setActiveTab(')));
   assert.match(source, /weekly: \{ grid: 'gridWeekly', btn: 'tabBtnWeekly', leave: \(\) => \{ if \(typeof reportTabLeave === 'function'\) reportTabLeave\(\); \} \},/);
-  assert.match(fs.readFileSync(path.join(__dirname, 'report-ui.js'), 'utf8'), /function reportTabLeave\(\) \{\n  reportAutosaveLeave\(\);\n\}/, '기다리지 않는다');
+  assert.match(fs.readFileSync(path.join(__dirname, 'report-ui.js'), 'utf8'), /function reportTabLeave\(\) \{\n  reportAutosaveLeave\(\);\n  reportTidyEnd\(\{ leaving: true \}\);\n\}/, '기다리지 않는다(정리 모드는 끝낸다)');
   const whole = source.slice(source.indexOf('function setActiveTab('), source.indexOf('\n}\n', source.indexOf('function setActiveTab(')));
   assert.ok(whole.indexOf('TABS[activeTabKey]?.leave?.()') > 0 && whole.indexOf('TABS[activeTabKey]?.leave?.()') < whole.indexOf('activeTabKey = tab;'), 'activeTabKey를 바꾸기 전');
   assert.doesNotMatch(body, /await /);

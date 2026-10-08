@@ -192,8 +192,10 @@ function reportLeaveWait(test, limit) {
   });
 }
 // 주간요약 탭을 떠날 때(app.js setActiveTab이 부른다) — 적던 글을 Enter와 같은 길로 저장한다. 기다리지 않는다(실패하면 글은 그대로 남는다).
+// 정리 모드였으면 끝낸다 — 막대(#reportNestBarEl)와 body.nest-open이 다른 탭 위에 남지 않게(저장이 도는 중이어도).
 function reportTabLeave() {
   reportAutosaveLeave();
+  reportTidyEnd({ leaving: true });
 }
 // 탭을 떠날 때마다 한 번 — 앞의 저장이 끝난 뒤 이어서 돈다(연타해도 같은 글을 두 번 보내지 않는다).
 function reportAutosaveLeave() {
@@ -1112,15 +1114,16 @@ function reportTidyStart(item) {
   renderReportDraft(item);
   reportTidyFocus('[data-tidy-head]');
 }
-function reportTidyEnd() {
+// `leaving`(탭을 떠날 때)이면 저장이 도는 중이어도 끝내고, 보이지 않는 탭으로 초점을 옮기지 않는다.
+function reportTidyEnd({ leaving = false } = {}) {
   // 저장이 도는 중의 Esc는 아무것도 닫지 못한다 — 스택에서 빠진 자기를 되돌려 놓아야 다음 Esc가 듣는다.
-  if (reportBusy && reportTidy) { if (!escStack.includes(reportTidyEnd)) escPush(reportTidyEnd); return; }
+  if (reportBusy && reportTidy && !leaving) { if (!escStack.includes(reportTidyEnd)) escPush(reportTidyEnd); return; }
   if (!reportTidy) return;
   reportTidy = null;
   escDrop(reportTidyEnd);
   if (typeof uiMenuOpen === 'object' && uiMenuOpen && uiMenuOpen.anchor && uiMenuOpen.anchor.closest && uiMenuOpen.anchor.closest('#reportNestBarEl')) uiMenuClose();
   if (reportRenderedItem) renderReportDraft(reportRenderedItem);
-  reportTidyFocus('[data-tidy-head]');
+  if (!leaving) reportTidyFocus('[data-tidy-head]');
 }
 // 다시 그린 뒤 초점을 돌려놓는다 — 문서·막대 어디든(선택자가 가리키는 첫 요소).
 function reportTidyFocus(selector, value) {
