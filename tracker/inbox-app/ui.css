@@ -1162,14 +1162,15 @@ button.d-guide .t { color: var(--accent-text); }
    제목과 같은 왼쪽 선, 누르는 자리 28px */
 .d-pmore { display: inline-flex; align-items: center; min-height: var(--h-sm); margin: 2px 0 0 var(--pad); padding: 0 2px; }
 .d-pmore { justify-self: start; margin-bottom: 4px; }
-.d-ibmain { display: flex; align-items: center; gap: 8px; min-width: 0; align-self: stretch; }
+/* 제목 묶음은 줄 여백(위아래 8px)까지 차지한다 — 제목 판(고치기)이 줄 높이가 되게. 위아래가 같아 프로젝트·원문은 제자리 */
+.d-ibmain { display: flex; align-items: center; gap: 8px; min-width: 0; align-self: stretch; margin-block: -8px; }
 .d-ibrow .ti {
   font-size: var(--fs-lg); font-weight: 500; color: var(--text); cursor: text; border-radius: 4px;
   overflow: hidden; white-space: nowrap;
   /* 프로젝트 표기·원문 링크는 제목 바로 뒤에 붙는다 — 제목은 늘어나지 않고(0), 자리가 모자라면 먼저 줄어든다(1) */
   flex: 0 1 auto; min-width: 0;
-  /* 누르는 판(고치기)은 줄 높이 — 줄 여백(위아래 8px)까지 넓히고 글자는 가운데, 말줄임은 안쪽 글자 칸(.tx)이 */
-  align-self: stretch; display: flex; align-items: center; margin-block: -8px; padding-block: 8px;
+  /* 누르는 판(고치기)은 묶음 높이(= 줄 높이) — 글자는 가운데, 말줄임은 안쪽 글자 칸(.tx)이 */
+  align-self: stretch; display: flex; align-items: center;
 }
 .d-ibrow .ti > .tx { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-radius: 4px; }
 /* 고치기 표시(바탕)는 판이 아니라 글자에만 — 넓힌 판은 보이지 않는다 */
@@ -3344,8 +3345,9 @@ a.d-btn { text-decoration: none; }
 
   /* 새로 들어온 줄은 제목 한 줄 / 동작 한 줄 */
   .d-ibrow { grid-template-columns: minmax(0, 1fr); row-gap: 6px; }
-  /* 제목 판은 위로만 줄 여백(8px)까지, 아래는 동작 줄과의 틈(6px) 안에서 3px */
-  .d-ibrow .ti { margin-block: -8px -3px; padding-block: 8px 3px; }
+  /* 좁은 폭은 줄이 두 칸(제목 / 동작)이라 묶음은 늘리지 않고, 제목 판만 위아래 4px(아래는 동작 줄과의 틈 6px 안) */
+  .d-ibmain { margin-block: 0; }
+  .d-ibrow .ti { margin-block: -4px; padding-block: 4px; }
   .d-ibrow .jira-control { display: none; }
   .d-ibacts { flex-wrap: wrap; justify-self: end; }
 
