@@ -1395,10 +1395,13 @@ const JIRA_CREATE_ME = 'fixture-create-me-account';
 // 만들기 요청을 차례대로 받아 새 키를 내주는 가짜 지라. `refuse`에 적은 요약은 그 상태로 거절한다.
 // `mineId`가 null이면 `/myself`가 401을 돌려주고(누가 나인지 조회 실패), `assignStatus`가 204가
 // 아니면 에픽 배정(`PUT .../assignee`)이 그 상태로 거절된다.
-function jiraMakeFake({ types = jiraCreateTypes, refuse = {}, epic = null, mineId = JIRA_CREATE_ME, assignStatus = 204 } = {}) {
+// 결과 모름 흉내: `lose`에 적은 요약은 지라에 만들어지는데 응답이 끊긴다(던짐). `findStatus`가 있으면
+// 결과 모름 뒤 찾기(`project = … ORDER BY created DESC`)가 그 상태로 실패한다. `finds`는 찾기 JQL을 모은다.
+function jiraMakeFake({ types = jiraCreateTypes, refuse = {}, epic = null, mineId = JIRA_CREATE_ME, assignStatus = 204, lose = {}, findStatus = null } = {}) {
   let next = 48400;
   const made = [];
   const assigned = [];
+  const finds = [];
   const fake = jiraFake({
     '/issue/createmeta': () => json(types),
     '/rest/api/3/myself': () => (mineId ? json({ accountId: mineId }) : json({}, 401)),
@@ -1415,7 +1418,18 @@ function jiraMakeFake({ types = jiraCreateTypes, refuse = {}, epic = null, mineI
       next += 1;
       const key = `IO-${next}`;
       made.push({ key, summary, parent: sent.fields.parent ? sent.fields.parent.key : null, type: sent.fields.issuetype.id });
+      if (lose[summary]) throw new Error('socket hang up');
       return json({ id: '1', key });
+    }
+    const jql = String(url).includes('/search/jql?') ? new URL(String(url)).searchParams.get('jql') : '';
+    if (jql.startsWith('project = ')) {
+      fake.calls.push({ url, method, jql });
+      finds.push(jql);
+      if (findStatus) return json({ errorMessages: ['busy'] }, findStatus);
+      const type = jql.match(/issuetype = (\d+)/)[1];
+      const parent = (jql.match(/parent = ([A-Z]+-\d+)/) || [])[1] || null;
+      const hits = made.filter(entry => entry.type === type && (!parent || entry.parent === parent));
+      return json({ issues: hits.map(entry => ({ key: entry.key, fields: { summary: entry.summary, issuetype: { id: entry.type }, parent: entry.parent ? { key: entry.parent } : null } })) });
     }
     if (method === 'PUT' && String(url).endsWith('/assignee')) {
       const sent = JSON.parse(options.body);
@@ -1426,7 +1440,7 @@ function jiraMakeFake({ types = jiraCreateTypes, refuse = {}, epic = null, mineI
     }
     return fake.request(url, options);
   };
-  return { request, calls: fake.calls, made, assigned };
+  return { request, calls: fake.calls, made, assigned, finds };
 }
 const jiraMakeApi = (fake, extra = {}) => jiraModule.createJiraApi({ config: jiraConfig, request: fake.request, readFile: () => JIRA_TOKEN, ...extra });
 
@@ -1634,6 +1648,138 @@ test('BJCREATE: 같은 계획을 60초 안에 두 번 받으면 거절하고, �
   const badPlan = { plan: { projectKey: 'IO', epic: { summary: '거절되는 에픽' }, children: [] } };
   assert.equal((await retry.create(badPlan)).kind, 'makeReject');
   assert.equal((await retry.create(badPlan)).kind, 'makeReject', '중복이 아니라 같은 실패로 답한다');
+});
+
+test('지라두벌: 오류 갈래 — 만드는 중 4xx만 확실한 실패, 끊김·5xx·성공 번호인데 못 읽음은 결과 모름(읽기는 그대로)', () => {
+  const err = (status, kind = 'other') => Object.assign(new Error('x'), { status, kind });
+  assert.equal(jiraModule.makeKind(err(undefined, 'network'), true), 'makeUnsure', '끊김·시간 초과');
+  assert.equal(jiraModule.makeKind(err(502), true), 'makeUnsure');
+  assert.equal(jiraModule.makeKind(err(504), true), 'makeUnsure');
+  assert.equal(jiraModule.makeKind(err(201), true), 'makeUnsure', '201인데 응답을 못 읽음');
+  assert.equal(jiraModule.makeKind(err(undefined, 'make'), true), 'makeUnsure', '응답에 키가 없음');
+  assert.equal(jiraModule.makeKind(err(400), true), 'makeReject');
+  assert.equal(jiraModule.makeKind(err(403), true), 'makeForbidden');
+  assert.equal(jiraModule.makeKind(err(429), true), 'make', '그 밖의 4xx도 지라가 거절한 것');
+  assert.equal(jiraModule.makeKind(err(undefined, 'value'), true), 'value', '우리가 먼저 막은 것은 그 갈래');
+  assert.equal(jiraModule.makeKind(err(503)), 'make', '읽기(종류 목록·에픽 대조)는 만든 것이 없어 모름이 아니다');
+});
+
+test('지라두벌 ①: 에픽이 만들어졌는데 응답이 끊기면 결과 모름 — 30초 안엔 지라를 부르지 않고, 뒤에 다시 보내면 찾아서 두 벌을 만들지 않는다', async () => {
+  let clock = 1000;
+  const lose = { '끊긴 에픽': true };
+  const fake = jiraMakeFake({ lose });
+  const api = jiraMakeApi(fake, { now: () => clock });
+  const plan = { projectKey: 'IO', epic: { summary: '끊긴 에픽' }, children: [{ summary: '[Web] 끊긴 에픽', issueTypeId: '10001' }] };
+  assert.deepEqual(await api.create({ plan }), { ok: false, error: '지라에 만들어졌는지 확인하지 못했어요. 지라에서 확인한 뒤 다시 시도해 주세요.', kind: 'makeUnsure' });
+  assert.equal(fake.made.length, 1, '지라에는 에픽이 생겼다');
+  assert.equal(fake.assigned.length, 0, '모름이면 배정·하위로 나아가지 않는다');
+
+  const calls = fake.calls.length;
+  clock += 10 * 1000;
+  assert.deepEqual(await api.create({ plan }), { ok: false, error: '지라가 확인하는 중이에요. 잠시 뒤에 다시 시도해 주세요.', kind: 'makeSettling' });
+  assert.equal(fake.calls.filter((call, at) => at >= calls && (call.method === 'POST' || call.jql)).length, 0, '검색이 아직 못 잡을 수 있어 찾지도 만들지도 않는다');
+
+  clock += 25 * 1000;
+  const again = await api.create({ plan });
+  assert.equal(again.ok, true);
+  assert.equal(again.epic.key, fake.made[0].key, '찾은 키를 쓴다');
+  assert.equal(again.epic.found, true);
+  assert.equal(fake.made.filter(entry => entry.summary === '끊긴 에픽').length, 1, '에픽은 한 벌뿐');
+  assert.equal(fake.assigned.length, 1, '찾은 에픽(내가 만든 것)은 그때 나에게 배정');
+  assert.deepEqual(again.children.map(child => child.key), [fake.made[1].key]);
+  assert.equal(again.made, 2);
+  assert.equal(fake.finds.length, 1);
+  assert.match(fake.finds[0], /^project = IO AND issuetype = 10000 AND reporter = currentUser\(\) AND created >= -11m ORDER BY created DESC$/, '모름 시각 10분 앞까지, 보고자=나');
+
+  // 찾아서 끝났으니 모름 기록은 지워진다 — 61초 뒤 같은 계획은 평소처럼(찾지 않고) 만든다.
+  delete lose['끊긴 에픽'];
+  clock += 61 * 1000;
+  assert.equal((await api.create({ plan })).ok, true);
+  assert.equal(fake.finds.length, 1);
+});
+
+test('지라두벌 ②: 5xx로 안 만들어졌으면 다시 보낼 때 찾아서 없을 때만 새로 만든다', async () => {
+  let clock = 1000;
+  const refuse = { '바쁜 에픽': 503 };
+  const fake = jiraMakeFake({ refuse });
+  const api = jiraMakeApi(fake, { now: () => clock });
+  const plan = { projectKey: 'IO', epic: { summary: '바쁜 에픽' }, children: [] };
+  assert.equal((await api.create({ plan })).kind, 'makeUnsure');
+  assert.equal(fake.made.length, 0);
+  clock += 31 * 1000;
+  // 그 사이 지라가 살아났다. 요약만 같고 종류가 다른 것은 같은 이슈로 보지 않는다.
+  delete refuse['바쁜 에픽'];
+  fake.made.push({ key: 'IO-1', summary: '바쁜 에픽', parent: null, type: '10001' });
+  const again = await api.create({ plan });
+  assert.equal(again.ok, true);
+  assert.equal(fake.finds.length, 1, '보내기 전에 먼저 찾았다');
+  assert.equal(again.epic.found, undefined, '찾은 것이 없어 새로 만들었다');
+  assert.equal(fake.made.filter(entry => entry.summary === '바쁜 에픽' && entry.type === '10000').length, 1);
+});
+
+test('지라두벌 ③: 찾기도 실패하거나 같은 이슈가 둘 이상이면 결과 모름을 유지하고 만들지 않는다', async () => {
+  let clock = 1000;
+  const fake = jiraMakeFake({ lose: { '모르는 에픽': true }, findStatus: 503 });
+  const api = jiraMakeApi(fake, { now: () => clock });
+  const plan = { projectKey: 'IO', epic: { summary: '모르는 에픽' }, children: [] };
+  assert.equal((await api.create({ plan })).kind, 'makeUnsure');
+  for (const step of [1, 2]) {
+    clock += 31 * 1000;
+    assert.deepEqual(await api.create({ plan }), { ok: false, error: '지라에 만들어졌는지 확인하지 못했어요. 지라에서 확인한 뒤 다시 시도해 주세요.', kind: 'makeUnsure' }, `시도 ${step}`);
+  }
+  assert.equal(fake.finds.length, 2, '다시 보낼 때마다 찾기만 한다(자동으로 다시 하지 않는다)');
+  assert.equal(fake.made.length, 1, '두 벌째는 만들지 않는다');
+
+  // 같은 요약·종류가 최근에 둘 — 어느 쪽인지 가를 수 없다.
+  const twin = jiraMakeFake({ lose: { '쌍둥이': true } });
+  const twinApi = jiraMakeApi(twin, { now: () => clock });
+  const twinPlan = { projectKey: 'IO', epic: { summary: '쌍둥이' }, children: [] };
+  assert.equal((await twinApi.create({ plan: twinPlan })).kind, 'makeUnsure');
+  twin.made.push({ key: 'IO-9', summary: '쌍둥이', parent: null, type: '10000' });
+  clock += 31 * 1000;
+  assert.equal((await twinApi.create({ plan: twinPlan })).kind, 'makeUnsure');
+  assert.equal(twin.made.length, 2, '하나 더 만들지 않는다');
+});
+
+test('지라두벌 ④: 400은 지금처럼 확실한 실패 — 찾지 않고 지문도 지워 곧바로 다시 보낸다', async () => {
+  const fake = jiraMakeFake({ refuse: { '거절 에픽': 400 } });
+  const api = jiraMakeApi(fake, { now: () => 1000 });
+  const plan = { projectKey: 'IO', epic: { summary: '거절 에픽' }, children: [] };
+  assert.equal((await api.create({ plan })).kind, 'makeReject');
+  assert.equal((await api.create({ plan })).kind, 'makeReject', '중복이 아니라 다시 보낸 결과');
+  assert.equal(fake.finds.length, 0);
+  assert.equal(fake.calls.filter(call => call.method === 'POST' && String(call.url).endsWith('/rest/api/3/issue')).length, 2);
+});
+
+test('지라두벌 ⑤: 하위 티켓 하나가 결과 모름이면 그 줄만 모름 — `실패한 것 다시 시도`(있는 에픽에 붙이기)로 와도 찾아서 두 벌을 막는다', async () => {
+  let clock = 1000;
+  const fake = jiraMakeFake({ lose: { '[iOS] 하위': true }, refuse: { '[QA] 하위': 400 } });
+  // 가짜를 중간에 갈아 끼워도 같은 api(같은 메모리)가 받게 한 겹 거친다.
+  const api = jiraMakeApi({ request: (...args) => fake.request(...args) }, { now: () => clock });
+  const first = await api.create({ plan: { projectKey: 'IO', epic: { summary: '하위 시험' }, children: [
+    { summary: '[Web] 하위', issueTypeId: '10001' }, { summary: '[iOS] 하위', issueTypeId: '10001' }, { summary: '[QA] 하위', issueTypeId: '10001' },
+  ] } });
+  assert.equal(first.ok, true);
+  assert.deepEqual(first.children.map(child => child.kind || 'ok'), ['ok', 'makeUnsure', 'makeReject']);
+  assert.equal(first.children[1].error, '지라에 만들어졌는지 확인하지 못했어요. 지라에서 확인한 뒤 다시 시도해 주세요.');
+  assert.equal(first.failed, 2);
+  const epicKey = first.epic.key;
+  // `실패한 것 다시 시도`는 이미 있는 에픽에 붙이는 계획이다 — 붙이기 대조가 이 에픽을 읽게 가짜를 맞춘다.
+  const plain = fake.request;
+  fake.request = async (url, options) => (String(url).includes(`/rest/api/3/issue/${epicKey}?`)
+    ? json({ fields: { summary: '하위 시험', issuetype: { id: '10000' } } }) : plain(url, options));
+  clock += 31 * 1000;
+  const retry = () => api.create({ plan: { projectKey: 'IO', epic: { key: epicKey }, children: [
+    { summary: '[iOS] 하위', issueTypeId: '10001' }, { summary: '[QA] 하위', issueTypeId: '10001' },
+  ] } });
+  const again = await retry();
+  assert.equal(again.ok, true);
+  assert.equal(again.children[0].found, true, '[iOS]는 찾아서 그 키');
+  assert.equal(again.children[0].key, fake.made.find(entry => entry.summary === '[iOS] 하위').key);
+  assert.equal(again.children[1].kind, 'makeReject', '[QA]는 여전히 거절(찾지 않음)');
+  assert.equal(fake.made.filter(entry => entry.summary === '[iOS] 하위').length, 1, '두 벌 없음');
+  assert.equal(fake.finds.length, 1);
+  assert.match(fake.finds[0], new RegExp(`AND parent = ${epicKey} ORDER BY`), '하위는 같은 부모로 좁힌다');
 });
 
 test('BJCREATE: 설정이 없거나 토큰을 못 읽으면 지라를 부르지 않고 연결 필요로만 답한다', async () => {
