@@ -1,0 +1,98 @@
+{
+  "name": "새 프로젝트 이름 — 한글 조합 중 지라 종류 응답이 늦게 와도 글자가 그대로",
+  "steps": [
+    {
+      "do": "goto",
+      "url": "/",
+      "waitFor": "#tabBtnProjects",
+      "wait": 500
+    },
+    {
+      "do": "click",
+      "selector": "#tabBtnProjects",
+      "hold": 0
+    },
+    {
+      "do": "wait",
+      "selector": ".d-pnewgo",
+      "timeout": 8000
+    },
+    {
+      "do": "eval",
+      "note": "create-meta 응답을 문으로 막는다",
+      "expr": "(() => { window.__hcF = window.__hcF || window.fetch; window.__hcMeta = 0; window.fetch = (u, o) => { if (/create-meta/.test(String(u))) { window.__hcMeta++; return new Promise(r => { window.__hcOpen = () => r(window.__hcF(u, o)); }); } return window.__hcF(u, o); }; return 'ok'; })()"
+    },
+    {
+      "do": "click",
+      "selector": ".d-pnewgo",
+      "hold": 0
+    },
+    {
+      "do": "wait",
+      "selector": ".d-pnewname",
+      "timeout": 3000
+    },
+    {
+      "do": "eval",
+      "note": "기록: 프로젝트 키·meta 요청 수·초점",
+      "expr": "[projectNew && projectNew.project, window.__hcMeta, document.activeElement && document.activeElement.className]"
+    },
+    {
+      "do": "eval",
+      "note": "meta 요청이 안 갔으면 직접 부른다(키 IO)",
+      "expr": "(() => { if (!window.__hcMeta) { projectNew.project = 'IO'; projectNewMetaLoad('IO'); } return window.__hcMeta; })()"
+    },
+    {
+      "do": "wait",
+      "ms": 200
+    },
+    {
+      "do": "click",
+      "selector": ".d-pnewname",
+      "hold": 0
+    },
+    {
+      "do": "type",
+      "text": "닭갈비",
+      "ime": true,
+      "duringAt": 0,
+      "delay": 40,
+      "during": [
+        {
+          "do": "eval",
+          "note": "받침(ㄺ) 단계쯤에 응답 풀기",
+          "expr": "(setTimeout(() => window.__hcOpen && window.__hcOpen(), 70), 'armed')"
+        }
+      ]
+    },
+    {
+      "do": "wait",
+      "ms": 800
+    },
+    {
+      "do": "shot",
+      "name": "뒤"
+    },
+    {
+      "do": "eval",
+      "note": "기록",
+      "expr": "[document.querySelector('.d-pnewname')?.value, projectNew && projectNew.name, document.activeElement && document.activeElement.className, projectNew && projectNew.typeBusy]"
+    },
+    {
+      "do": "assert",
+      "message": "이름 칸이 '닭갈비'",
+      "expr": "document.querySelector('.d-pnewname')?.value === '닭갈비'"
+    },
+    {
+      "do": "assert",
+      "message": "하위 티켓 종류 줄은 응답을 받아 '읽는 중'이 아니다",
+      "expr": "!!document.querySelector('.d-pnewtype') && !document.querySelector('.d-pnewtype .d-waiting') && projectNew.typeBusy === false"
+    },
+    {
+      "do": "assert",
+      "message": "초점이 이름 칸에 그대로",
+      "expr": "document.activeElement === document.querySelector('.d-pnewname')"
+    }
+  ],
+  "description": "프로젝트 탭 머리 `+` → 새 프로젝트 이름 칸에 「닭갈비」를 조합하는 도중(받침 단계) 지라 「만들 수 있는 종류」(create-meta) 응답이 도착한다. 응답 뒤 폼 전체를 다시 만들면 칸이 바뀌어 조합이 끊겼다(「닭닭갈비」, 실제 맥은 받침 누락). 응답은 eval로 fetch를 감싸 문을 열 때까지 붙잡는다. 하위 티켓 종류 줄이 응답 뒤 바뀌는지도 본다."
+}

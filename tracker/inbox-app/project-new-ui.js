@@ -35,6 +35,7 @@ let projectNewPreviewNode = null;
 let projectNewGoNode = null;
 // BMOVE ① 감지 줄만 따로 다시 그리는 자리 — 위 둘과 같은 이유다.
 let projectNewMoveNode = null;
+let projectNewTypeNode = null; // 하위 티켓 종류 줄 — 지라 응답이 늦게 와도 이 줄만 바꿔 끼운다(projectNewTypePaint)
 
 const projectNewStore = (key, value) => { try { localStorage.setItem(key, value); } catch {} };
 const projectNewRead = (key) => { try { return localStorage.getItem(key) || ''; } catch { return ''; } };
@@ -173,6 +174,7 @@ function projectNewDrop() {
   projectNew = null;
   projectNewPreviewNode = null;
   projectNewGoNode = null;
+  projectNewTypeNode = null;
   jiraLinkBorrow(null);
   jiraLinkReset(false);
 }
@@ -274,7 +276,25 @@ async function projectNewMetaLoad(project) {
       || projectNew.types[0] || null;
     projectNew.typeId = found ? found.id : null;
   }
-  projectNewPaint();
+  // 늦게 오는 응답이라 폼 전체를 다시 만들지 않는다 — 사람이 이름·첫 할 일·미리 보기 제목 칸에서 한글을 조합하는 중이면
+  // 칸이 새로 생겨 조합이 끊긴다(「닭갈비」→「닭닭갈비」, 맥은 받침 누락). 응답에 기대는 곳만 고친다.
+  projectNewTypePaint();
+}
+// 종류에 기대는 곳은 셋 — 하위 티켓 종류 줄(통째로 바꿔 끼움), 미리 보기 줄의 종류 글자(.ty — 제목 칸이 같은 줄에 있어
+// 글자만 고친다), 주 버튼(종류가 없으면 못 보낸다). 그 밖의 칸은 건드리지 않는다.
+function projectNewTypePaint() {
+  if (!projectNew || projectNew.result) return; // 결과 화면은 종류를 쓰지 않는다(값은 위에서 이미 바뀌었다)
+  if (!projectNewGoNode || !projectNewGoNode.isConnected) { projectNewPaint(); return; } // 폼이 안 서 있으면 그냥 그린다
+  if (projectNewTypeNode && projectNewTypeNode.isConnected) {
+    const fresh = projectNewTypeRow(projectNew);
+    projectNewTypeNode.replaceWith(fresh);
+    projectNewTypeNode = fresh;
+  }
+  const picked = (projectNew.types || []).find(entry => entry.id === projectNew.typeId);
+  if (projectNewPreviewNode && projectNewPreviewNode.isConnected) {
+    [...(projectNewPreviewNode.querySelectorAll?.('.ty') || [])].forEach((type) => { type.textContent = picked ? picked.name : ''; });
+  }
+  projectNewGoPaint();
 }
 
 // ---------- 에픽 고르기(연결 입력칸을 빌려 쓴다) ----------
@@ -722,9 +742,13 @@ function projectNewMovePaint() {
   projectNewMoveNode.replaceChildren(...(line ? [line] : []));
 }
 // 주 버튼의 글자(개수)와 눌릴 수 있는지만 고쳐 준다 — 이름을 적는 동안 초점이 튀지 않게.
+// 초점이 이 자리 안(예: Tab으로 간 `취소`)에 있었으면 다시 그린 뒤 같은 버튼으로 되돌린다(전체 그리기 projectNewPaint와 같은 길).
 function projectNewGoPaint() {
   if (!projectNew || !projectNewGoNode || !projectNewGoNode.isConnected) return;
+  const active = document.activeElement;
+  const key = active && projectNewGoNode.contains?.(active) ? projectNewFocusKey(active) : null;
   projectNewGoNode.replaceChildren(projectNewActions(projectNew));
+  if (key) projectNewRefocus(projectNewGoNode, key);
 }
 
 // ---------- 확인 · 보내기 ----------
@@ -830,7 +854,8 @@ async function projectNewPlain(state) {
   } catch {
     if (!projectNew) return;
     state.busy = false;
-    projectNewPaint();
+    // 늦은 실패 — 바뀐 것은 주 버튼뿐이라 그것만 고친다(그 사이 이름·첫 할 일 칸에서 조합 중이어도 끊기지 않게).
+    if (projectNewGoNode && projectNewGoNode.isConnected) projectNewGoPaint(); else projectNewPaint();
     return;
   }
   projectNewDrop();
@@ -869,7 +894,8 @@ async function projectNewSend(state) {
     state.busy = false;
     state.confirm = false;
     state.error = error.message;
-    projectNewPaint();
+    // 늦은 실패 — 바뀐 것(확인 줄·오류 한 줄)은 주 버튼 자리에만 선다. 그 자리만 고친다(위 projectNewPlain과 같다).
+    if (projectNewGoNode && projectNewGoNode.isConnected) projectNewGoPaint(); else projectNewPaint();
     return;
   }
   if (!projectNew) return;
@@ -1196,7 +1222,8 @@ function projectNewRender(body) {
     roles.appendChild(state.roleEdit ? projectNewRoleEdit(state) : projectNewRoleBox(state));
     if (!state.roleEdit) roles.appendChild(projectNewOwnRow(state));
     form.appendChild(projectNewField('직군', roles, state.roleEdit ? '' : '하나도 고르지 않으면 에픽만 만들어요.'));
-    form.appendChild(projectNewField('하위 티켓', projectNewTypeRow(state)));
+    projectNewTypeNode = projectNewTypeRow(state);
+    form.appendChild(projectNewField('하위 티켓', projectNewTypeNode));
   }
 
   if (state.mode === 'none') {

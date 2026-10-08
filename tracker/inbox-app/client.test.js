@@ -7957,6 +7957,93 @@ test('BJCREATE: 확인 줄을 거치지 않으면 만들기 요청이 나가지 
   assert.match(bjcWords(nodeFind(fixture.body(), 'd-pnewres')), /지라에 2개를 만들었어요/);
 });
 
+// 동료 설문 "받침으로 넘어갈 때 인식 못하고 누락처리함" — 이름 칸에서 한글을 조합하는 중에 지라 종류 응답이 늦게 오면
+// 폼 전체를 새로 만들어 칸이 바뀌고 조합이 끊겼다(human-check `한글조합-새프로젝트이름-지라종류응답`).
+test('BJCREATE: 늦게 온 지라 종류 응답은 조합 중인 이름 칸을 바꾸지 않고, 종류 줄·주 버튼만 고친다', async () => {
+  const fixture = projectNewClient();
+  let open = null;
+  const gate = new Promise(resolve => { open = resolve; });
+  fixture.app.context.fetch = async (url) => {
+    if (String(url).includes('/api/jira/create-meta')) { await gate; return new Response(JSON.stringify(BJC_META)); }
+    return new Response('{"ok":true}');
+  };
+  fixture.app.run("projectNewStart(); projectNew.project = 'IO'; projectNew.roles = ['Web']; projectNewPaint(); metaDone = projectNewMetaLoad('IO');");
+  const byLabel = (node, label) => {
+    if (!node || typeof node !== 'object') return null;
+    if (node.getAttribute?.('aria-label') === label) return node;
+    for (const kid of node.children || []) { const hit = byLabel(kid, label); if (hit) return hit; }
+    return null;
+  };
+  const name = byLabel(fixture.body(), '프로젝트 이름');
+  assert.ok(name, '이름 칸이 있다');
+  assert.match(bjcWords(nodeFind(fixture.body(), 'd-pnewtype')), /읽는 중/, '응답 전에는 종류 줄이 기다린다');
+  // 이름 칸에서 「닭」을 조합하는 중(초점 + 조합 추적).
+  name.value = '닭';
+  name.listeners.input();
+  fixture.app.context.document.activeElement = name;
+  fixture.app.run('uiComposingEl = document.activeElement;');
+  const form = nodeFind(fixture.body(), 'd-pnew');
+  // 가짜 노드의 querySelectorAll은 빈 목록이라, 미리 보기 자리만 클래스로 찾게 끼운다.
+  const preview = nodeFind(fixture.body(), 'd-pnewpvbox');
+  preview.querySelectorAll = selector => (selector === '.ty' ? nodeFindAll(preview, 'ty') : []);
+  assert.deepEqual(nodeFindAll(preview, 'ty').map(type => type.textContent), [''], '응답 전에는 종류 글자가 비어 있다');
+
+  open();
+  await fixture.app.run('metaDone');
+  // 노드끼리 견줄 때는 ok로 — 다르면 equal이 거대한 가짜 노드 둘의 차이를 그리느라 멈춘다.
+  assert.ok(byLabel(fixture.body(), '프로젝트 이름') === name, '이름 칸은 같은 칸 그대로다(새로 만들지 않는다)');
+  assert.equal(name.isConnected, true);
+  assert.ok(nodeFind(fixture.body(), 'd-pnew') === form, '폼도 그대로다');
+  assert.equal(name.value, '닭');
+  assert.equal(fixture.app.run('projectNew.typeBusy'), false);
+  assert.match(bjcWords(nodeFind(fixture.body(), 'd-pnewtype')), /하위 티켓 종류 · 작업/, '종류 줄은 응답대로 바뀐다');
+  assert.deepEqual(nodeFindAll(nodeFind(fixture.body(), 'd-pnewpvbox'), 'ty').map(type => type.textContent), ['작업'], '미리 보기 줄의 종류 글자도 바뀐다');
+  assert.equal(bjcText(nodeFind(fixture.body(), 'pri')), '지라에 2개 만들기');
+  assert.equal(nodeFind(fixture.body(), 'pri').disabled, false, '종류가 생겨 주 버튼이 눌린다');
+  fixture.app.run('uiComposingEl = null;');
+});
+
+test('BJCREATE: 주 버튼 자리만 다시 그려도 그 자리에 있던 초점(Tab으로 간 `취소`)은 같은 버튼으로 돌아온다', async () => {
+  const fixture = projectNewClient();
+  let open = null;
+  const gate = new Promise(resolve => { open = resolve; });
+  fixture.app.context.fetch = async (url) => {
+    if (String(url).includes('/api/jira/create-meta')) { await gate; return new Response(JSON.stringify(BJC_META)); }
+    return new Response('{"ok":true}');
+  };
+  fixture.app.run("projectNewStart(); projectNew.name = '임베드'; projectNew.project = 'IO'; projectNewPaint(); metaDone = projectNewMetaLoad('IO');");
+  const goBox = nodeFind(fixture.body(), 'd-pnewgobox');
+  // 가짜 노드에는 contains·태그 찾기가 없어 이 자리만 끼운다(버튼은 type='button'으로 가린다).
+  const inside = (node, target) => node === target || (node.children || []).some(kid => kid && typeof kid === 'object' && inside(kid, target));
+  const buttons = node => (node.children || []).flatMap(kid => (kid && typeof kid === 'object' ? [...(kid.type === 'button' ? [kid] : []), ...buttons(kid)] : []));
+  goBox.contains = target => inside(goBox, target);
+  goBox.querySelectorAll = tag => (tag === 'BUTTON' ? buttons(goBox) : []);
+  const cancel = bjcButton(goBox, '취소');
+  cancel.tagName = 'BUTTON';
+  fixture.app.context.document.activeElement = cancel;
+
+  open();
+  await fixture.app.run('metaDone');
+  const fresh = bjcButton(nodeFind(fixture.body(), 'd-pnewgobox'), '취소');
+  assert.ok(fresh && fresh !== cancel, '주 버튼 자리는 새로 그려졌다');
+  assert.equal(fresh.focused, true, '초점은 새 `취소`로 돌아온다(body로 떨어지지 않는다)');
+});
+
+test('BJCREATE: 만들기가 늦게 실패해도 이름 칸은 그대로 두고 주 버튼 자리(오류 한 줄·확인 줄 닫힘)만 고친다', async () => {
+  const fixture = projectNewClient({ made: { ok: false, error: '지라에서 이 프로젝트에 이슈를 만들 권한이 없어요.' } });
+  fixture.start();
+  fixture.set("projectNew.name = '임베드'; projectNew.project = 'IO'; projectNew.roles = ['Web']");
+  nodeFind(fixture.body(), 'pri').listeners.click();
+  // 누른 순간의 `만드는 중…` 그리기는 사람이 누른 그 자리라 그대로다 — 견주는 것은 응답이 온 뒤다.
+  const sending = bjcButton(nodeFind(fixture.body(), 'd-jconfirm'), '만들기').listeners.click();
+  const form = nodeFind(fixture.body(), 'd-pnew');
+  await sending;
+  assert.ok(nodeFind(fixture.body(), 'd-pnew') === form, '폼(이름 칸 포함)은 새로 만들지 않는다');
+  assert.equal(nodeFind(fixture.body(), 'd-jconfirm'), null, '확인 줄은 닫힌다');
+  assert.match(bjcWords(nodeFind(fixture.body(), 'd-pnewacts')), /권한이 없어요/, '오류 한 줄이 선다');
+  assert.equal(nodeFind(fixture.body(), 'pri').disabled, false, '다시 누를 수 있다');
+});
+
 test('BJCREATE: 부분 실패는 만든 것과 실패한 줄·이유를 보여 주고, 다시 시도는 실패한 것만 보낸다', async () => {
   const fixture = projectNewClient();
   fixture.start();
