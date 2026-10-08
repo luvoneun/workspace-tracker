@@ -1696,6 +1696,45 @@ test('저장 중 대기 backup-data.sh: 복사하는 동안 파일이 바뀌면 
   assert.match(script, /if ! saving && same_as_source; then break; fi/, '복사 뒤에 잠금과 원본을 다시 본다');
 });
 
+// GitHub 겹도 같다 — 로컬 겹은 백업 자리를 파일로 막아 바로 실패시키고(기다리지 않음), 원격 없는 가짜 백업 저장소만 본다.
+function githubWaitFixture(t) {
+  const fix = backupFixture(t);
+  const gitDir = path.join(fix.home, 'data-backup.git');
+  const init = runGit(fix.home, ['--git-dir', gitDir, 'init', '-q', '-b', 'main']);
+  assert.equal(init.status, 0, init.stderr);
+  const blocked = path.join(fix.home, 'blocked');
+  fs.writeFileSync(blocked, '폴더가 아니라 파일');
+  const commits = () => spawnSync('git', ['--git-dir', gitDir, 'rev-list', '--all', '--count'], { encoding: 'utf8' }).stdout.trim();
+  return { ...fix, run: (env = {}) => fix.run({ WORKSPACE_BACKUP_DIR: blocked, ...env }), commits };
+}
+
+test('저장 중 대기 backup-data.sh GitHub 겹: 잠금이 살아 있는 동안은 커밋하지 않고 풀리면 커밋한다', (t) => {
+  const fix = githubWaitFixture(t);
+  const lock = path.join(fix.tracker, '.mutation.lock');
+  const tasks = path.join(fix.tracker, 'tasks.md');
+  const saver = spawn('/bin/sh', ['-c', `echo $$ > "${lock}"; sleep 0.6; echo '# Tasks\n- 저장 뒤 업무' > "${tasks}"; rm -f "${lock}"`], { stdio: 'ignore' });
+  t.after(() => { try { process.kill(saver.pid); } catch { /* 이미 끝남 */ } });
+  waitForFile(lock);
+  const started = Date.now();
+  fix.run(); // 로컬은 막아 둬서 1로 끝난다 — 여기서는 GitHub 줄만 본다
+  assert.ok(Date.now() - started >= 400, '잠금이 풀릴 때까지 기다린다');
+  assert.equal(fix.commits(), '1', '풀린 뒤 한 번 커밋한다');
+  const shown = spawnSync('git', ['--git-dir', path.join(fix.home, 'data-backup.git'), 'show', 'main:tasks.md'], { encoding: 'utf8' }).stdout;
+  assert.match(shown, /저장 뒤 업무/, '저장이 끝난 내용을 담는다');
+  assert.match(fix.logText(), /GitHub 건너뜀 — 원격 저장소가 연결되지 않음/);
+});
+
+test('저장 중 대기 backup-data.sh GitHub 겹: 끝내 저장 중이면 건너뜀 한 줄만 남기고 커밋하지 않는다(0으로 끝남)', (t) => {
+  const fix = githubWaitFixture(t);
+  const lock = path.join(fix.tracker, '.mutation.lock');
+  fs.writeFileSync(lock, String(process.pid)); // 살아 있는 프로세스(이 테스트)
+  fix.run({ BACKUP_LOCK_WAIT_TRIES: '3' });
+  assert.match(fix.logText(), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} GitHub 건너뜀 — 저장 중이라 건너뜀 \(다음 회차가 한다\)$/m);
+  assert.doesNotMatch(fix.logText(), /GitHub (성공|실패)/);
+  assert.equal(fix.commits(), '0', '커밋이 생기지 않는다');
+  assert.equal(fs.readFileSync(lock, 'utf8'), String(process.pid), '잠금 파일은 건드리지 않는다');
+});
+
 // apply-runner.sh — 가짜 setup.sh가 받은 환경만 적는다(실제 setup.sh·launchctl은 부르지 않는다).
 function applyRunnerFixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-wpf-apply-'));
