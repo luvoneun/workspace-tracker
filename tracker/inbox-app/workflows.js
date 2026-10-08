@@ -21,6 +21,7 @@ function wfDebounce(action, delay = 150) {
 let taskListsCache = { todayTasks: [], laterTasks: [] };
 // 검토 중에 고친 종류·문구 — 다른 항목을 빼느라 화면이 다시 그려져도 유지된다.
 const wfDraftEdits = new Map();
+// 열쇠 짓기 규칙은 서버의 project-keys.js projectKey와 같다(화면은 그 파일을 못 읽는다) — project-key.test.js가 같은 표로 묶는다.
 const wfKey = item => item.jira ? `jira:${item.jira}` : item.group || item.project ? `group:${item.group || item.project}` : null;
 // 회의에 붙은 그룹 이름은 파일에 저장된 그대로(`가입_개선`)라 업무 쪽 이름(`가입 개선`)과 글자가 다르다.
 // 같은 프로젝트가 목록에 두 번 나오지 않게 여기서 한 가지 꼴로 맞춘다.

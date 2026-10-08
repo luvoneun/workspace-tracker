@@ -4,7 +4,9 @@ const { createHash, randomUUID } = require('node:crypto');
 const { atomicWrite } = require('./safe-storage');
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const heading = item => item.type === 'decision' ? '새로 정해진 것' : item.type === 'check' ? (item.status==='done'?'확인 완료':'확인 대기') : item.status === 'done' ? '완료한 일' : '진행중';
-const project = item => item.jira ? `jira:${item.jira}` : item.group || item.project ? `group:${item.group || item.project}` : 'ungrouped';
+// 열쇠 짓기는 project-keys.js projectKey 한 곳 — 프로젝트가 없으면 여기서만 `ungrouped`.
+const { projectKey } = require('./project-keys');
+const project = item => projectKey(item) || 'ungrouped';
 // Shared project alone is not evidence that two tasks describe the same work.
 const topic = item => item.meetingId || item.permalink || item.description.normalize('NFKC').trim().split(/\s+/).slice(0,2).join(' ');
 const bucket = item => `${project(item)}:${heading(item)}:${topic(item)}`;
@@ -43,7 +45,7 @@ const RESERVED_NAME_ERROR = '`기타`·`그룹 없음`·`직접 작성`·`프로
 // 프로젝트가 없는 줄의 이름(한 일 칸은 `그룹 없음`, 할 일 칸은 `직접 작성`).
 const noProject = name => !name || name === '그룹 없음' || name === '직접 작성';
 // 업무의 프로젝트 열쇠(`jira:KEY`·`group:이름`), 없으면 null — 옮기기와 그 되돌리기가 견준다.
-const projectKeyOf = item => (project(item) === 'ungrouped' ? null : project(item));
+const projectKeyOf = projectKey;
 
 // ---------- 다듬기(제목·소제목 이름·새로 표시) ----------
 // 사람이 고친 보고 제목과 소제목 이름, 그리고 "마지막으로 다듬은 때 무엇을 봤는지"는 파일 맨 위의 `weekPolish` 칸에
