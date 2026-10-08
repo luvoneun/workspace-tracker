@@ -1842,6 +1842,137 @@ test('지라두벌 검수: 30초 경계 — 29.999초는 기다림, 30초부터 
   assert.equal(fake.made.length, 2);
 });
 
+// 지라모름기록: 결과 모름은 이 컴퓨터 전용 폴더(local/)의 jira-unsure.json에도 남아 서버를 다시 켜도 이어 간다.
+// "다시 켬"은 같은 파일로 createJiraApi를 새로 만드는 것이다(메모리는 비고 파일만 남는다).
+const unsureHome = (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jira-unsure-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  return path.join(dir, 'local', 'jira-unsure.json');
+};
+const unsureItems = file => JSON.parse(fs.readFileSync(file, 'utf8')).items;
+const quietErrors = (t) => {
+  const said = [];
+  const plain = console.error;
+  console.error = (...args) => { said.push(args.join(' ')); };
+  t.after(() => { console.error = plain; });
+  return said;
+};
+
+test('지라모름기록 ①: 모름 → 서버 다시 켬 → 30초 안엔 기다림, 뒤에 다시 보내면 찾기부터 해서 그 키를 쓰고 줄을 지운다', async (t) => {
+  const file = unsureHome(t);
+  let clock = 1000;
+  const fake = jiraMakeFake({ lose: { '재시작 에픽': true } });
+  const plan = { projectKey: 'IO', epic: { summary: '재시작 에픽' }, children: [] };
+  const first = jiraMakeApi(fake, { now: () => clock, unsureFile: () => file });
+  assert.equal((await first.create({ plan })).kind, 'makeUnsure');
+  assert.deepEqual(unsureItems(file), [{ projectKey: 'IO', parentKey: null, issueTypeId: '10000', summary: '재시작 에픽', at: 1000 }]);
+
+  const restarted = jiraMakeApi(fake, { now: () => clock, unsureFile: () => file, sleep: async (ms) => { clock += ms; } });
+  clock += 10 * 1000;
+  assert.equal((await restarted.create({ plan })).kind, 'makeSettling', '다시 켠 뒤에도 모름 시각을 이어 받는다');
+  assert.equal(fake.finds.length, 0);
+  clock += 21 * 1000;
+  const again = await restarted.create({ plan });
+  assert.equal(again.ok, true);
+  assert.equal(again.epic.found, true);
+  assert.equal(again.epic.key, fake.made[0].key, '가짜 지라에 이미 있던 키');
+  assert.equal(fake.made.length, 1, '두 벌 없음');
+  assert.equal(fake.finds.length, 1);
+  assert.deepEqual(unsureItems(file), [], '찾아서 끝났으니 줄을 지운다');
+});
+
+test('지라모름기록 ②: 24시간 지난 줄은 다시 켤 때 버리고(파일도 줄임) 평소처럼 만든다', async (t) => {
+  const file = unsureHome(t);
+  const clock = 1000 + jiraModule.UNSURE_KEEP_MS;
+  const old = { projectKey: 'IO', parentKey: null, issueTypeId: '10000', summary: '오래된 에픽', at: 1000 };
+  const fresh = { projectKey: 'IO', parentKey: 'IO-7', issueTypeId: '10001', summary: '[Web] 살아 있는 하위', at: 1001 };
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ version: 1, items: [old, fresh] }));
+  const fake = jiraMakeFake();
+  const api = jiraMakeApi(fake, { now: () => clock, unsureFile: () => file });
+  assert.deepEqual(unsureItems(file), [fresh], '켤 때 지난 줄을 지운다');
+  const made = await api.create({ plan: { projectKey: 'IO', epic: { summary: '오래된 에픽' }, children: [] } });
+  assert.equal(made.ok, true);
+  assert.equal(made.epic.found, undefined);
+  assert.equal(fake.finds.length, 0, '찾지 않고 만든다');
+});
+
+test('지라모름기록 ③: 파일이 깨졌거나 모양이 어긋나면 빈 기록으로 시작하고(로그 한 줄) 앱은 그대로 돈다', async (t) => {
+  const said = quietErrors(t);
+  for (const text of ['{깨진', '{"items":"x"}', '[]', '{"version":1,"items":[{"projectKey":"io","summary":1}]}']) {
+    const file = unsureHome(t);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, text);
+    const fake = jiraMakeFake({ lose: { '깨짐 뒤': true } });
+    const api = jiraMakeApi(fake, { now: () => 1000, unsureFile: () => file });
+    const plan = { projectKey: 'IO', epic: { summary: '평소 에픽' }, children: [] };
+    assert.equal((await api.create({ plan })).ok, true, text);
+    assert.equal(fake.finds.length, 0, text);
+    // 새 모름은 다시 제대로 적힌다.
+    assert.equal((await api.create({ plan: { projectKey: 'IO', epic: { summary: '깨짐 뒤' }, children: [] } })).kind, 'makeUnsure', text);
+    assert.deepEqual(unsureItems(file).map(item => item.summary), ['깨짐 뒤'], text);
+  }
+  assert.equal(said.filter(line => line.includes('지라 결과 모름 기록이 깨져')).length, 4, said.join('\n'));
+  // 폴더 자리가 파일이라 쓰지 못해도 만들기는 막히지 않는다(메모리 기록은 그대로).
+  const blocked = path.join(path.dirname(unsureHome(t)), 'blocked');
+  fs.mkdirSync(path.dirname(blocked), { recursive: true });
+  fs.writeFileSync(blocked, '');
+  const fake = jiraMakeFake({ lose: { '못 적음': true } });
+  let clock = 1000;
+  const api = jiraMakeApi(fake, { now: () => clock, unsureFile: () => path.join(blocked, 'jira-unsure.json'), sleep: async (ms) => { clock += ms; } });
+  const plan = { projectKey: 'IO', epic: { summary: '못 적음' }, children: [] };
+  assert.equal((await api.create({ plan })).kind, 'makeUnsure');
+  assert.ok(said.some(line => line.includes('지라 결과 모름 기록을 적지 못함')));
+  clock += 31 * 1000;
+  assert.equal((await api.create({ plan })).epic.found, true, '메모리 기록으로 찾는다');
+});
+
+test('지라모름기록 ④: 확실한 실패(400)·새로 만듦으로 끝나면 줄이 지워진다 · 찾기 실패면 남는다', async (t) => {
+  const file = unsureHome(t);
+  let clock = 1000;
+  const refuse = { '거절될 에픽': 503, '만들어질 에픽': 503 };
+  const fake = jiraMakeFake({ refuse });
+  const api = jiraMakeApi(fake, { now: () => clock, unsureFile: () => file, sleep: async (ms) => { clock += ms; } });
+  const rejected = { projectKey: 'IO', epic: { summary: '거절될 에픽' }, children: [] };
+  const created = { projectKey: 'IO', epic: { summary: '만들어질 에픽' }, children: [] };
+  assert.equal((await api.create({ plan: rejected })).kind, 'makeUnsure');
+  assert.equal((await api.create({ plan: created })).kind, 'makeUnsure');
+  assert.deepEqual(unsureItems(file).map(item => item.summary), ['거절될 에픽', '만들어질 에픽']);
+  clock += 31 * 1000;
+  refuse['거절될 에픽'] = 400;
+  delete refuse['만들어질 에픽'];
+  assert.equal((await api.create({ plan: rejected })).kind, 'makeReject');
+  assert.deepEqual(unsureItems(file).map(item => item.summary), ['만들어질 에픽'], '확실한 실패는 줄을 지운다');
+  const made = await api.create({ plan: created });
+  assert.equal(made.ok, true);
+  assert.equal(made.epic.found, undefined, '찾은 게 없어 새로 만들었다');
+  assert.deepEqual(unsureItems(file), [], '새로 만들었으니 줄을 지운다');
+
+  // 찾기도 실패하면 모름을 유지 — 줄도 남는다(다시 켜도 찾기부터).
+  const failing = jiraMakeFake({ lose: { '찾기 실패': true }, findStatus: 503 });
+  const keep = jiraMakeApi(failing, { now: () => clock, unsureFile: () => file });
+  const plan = { projectKey: 'IO', epic: { summary: '찾기 실패' }, children: [] };
+  assert.equal((await keep.create({ plan })).kind, 'makeUnsure');
+  clock += 31 * 1000;
+  assert.equal((await keep.create({ plan })).kind, 'makeUnsure');
+  assert.deepEqual(unsureItems(file).map(item => item.summary), ['찾기 실패']);
+});
+
+test('지라모름기록 ⑤: 파일에는 이슈 지문과 시각뿐 — 토큰·계정·주소·지라 응답이 없다 · 테스트 서버는 실제 local/에 쓰지 않는다', async (t) => {
+  const file = unsureHome(t);
+  const fake = jiraMakeFake({ lose: { '[Web] 비밀 시험': true }, epic: { summary: '남의 에픽', typeId: '10000' } });
+  const api = jiraMakeApi(fake, { now: () => 1000, unsureFile: () => file });
+  const result = await api.create({ plan: { projectKey: 'ABC', epic: { key: 'ABC-1234' }, children: [{ summary: '[Web] 비밀 시험', issueTypeId: '10001' }] } });
+  assert.equal(result.children[0].kind, 'makeUnsure');
+  const text = fs.readFileSync(file, 'utf8');
+  for (const secret of [JIRA_TOKEN, JIRA_EMAIL, JIRA_SITE, 'example-jira', JIRA_CREATE_ME, 'socket hang up', 'tokenFile', 'never-read-this']) {
+    assert.equal(text.includes(secret), false, secret);
+  }
+  assert.deepEqual(JSON.parse(text), { version: 1, items: [{ projectKey: 'ABC', parentKey: 'ABC-1234', issueTypeId: '10001', summary: '[Web] 비밀 시험', at: 1000 }] });
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600, '나만 읽는 파일');
+  assert.equal(require('./server').jiraUnsureFile(), null, '테스트(WORKSPACE_LOCAL_DIR 없음)는 메모리에만 둔다');
+});
+
 test('지라두벌 검수: 다른 계획이 같은 하위 티켓을 동시에 보내면 하나만 지라에 가고 둘째는 기다림', async () => {
   const fake = jiraMakeFake({ epic: { summary: '남의 에픽', typeId: '10000' } });
   let release;
