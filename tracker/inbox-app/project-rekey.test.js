@@ -198,8 +198,12 @@ function assertStamped(home, answer) {
 test('열쇠 빠뜨림: 이름 바꾸기 뒤 옛 이름이 0번, 반대로 한 번 더 바꾸면 모든 파일이 심은 때와 같다', async (t) => {
   const { home, post } = await start(t);
   const seeded = assertSeeded(home);
+  // 프로젝트 칸이 없는 줄은 칸 사이 공백이 둘이어도 그대로다(예전 코드는 이런 줄도 다시 써서 updated를 찍었다 — 7a46c30에서 고침).
+  const loose = '- 손으로 고친 줄 #task[id:rk08  status:to-do priority:low created:2026-09-20]';
+  fs.appendFileSync(path.join(home, 'tasks.md'), `${loose}\n`);
   const answer = await post('/api/project/rename', { project: `group:${A}`, name: '결제 정산' });
   assert.equal(answer.ok, true, JSON.stringify(answer));
+  assert.ok(fs.readFileSync(path.join(home, 'tasks.md'), 'utf8').includes(loose), '프로젝트 칸이 없는 줄은 손대지 않는다');
   assertNoOld(home, A, 'rename');
   assertStamped(home, answer);
   const back = await post('/api/project/rename', { project: 'group:결제 정산', name: A });
