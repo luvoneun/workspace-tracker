@@ -21300,6 +21300,13 @@ test('입력 공통(조합 추적): 한글 조합을 듣는 곳은 app.js 한 �
   setTimeout(() => ime.end(field), 120);
   assert.equal(await waited, true, '조합이 끝나면 기다림이 풀린다');
   assert.equal(app.run('uiComposingLive()'), false);
+  // 다른 칸에서 온 compositionend로도 풀린다(옛 주간요약 추적과 같이 — 조합은 한 번에 하나).
+  const other = element();
+  ime.start(field, '글');
+  const waited2 = app.run('reportLeaveWait(() => !uiComposingLive(), 2000)');
+  setTimeout(() => ime.end(other), 120);
+  assert.equal(await waited2, true, '다른 칸의 끝으로도 기다림이 풀린다');
+  assert.equal(app.run('uiComposingLive()'), false);
 });
 
 test('입력 보호(주간요약): 조합 중이던 칸이 지워져(compositionend 없음) 남은 조합 표시는 기다림을 붙잡지 않는다', async () => {

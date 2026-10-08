@@ -7246,7 +7246,7 @@ document.addEventListener('toggle', () => requestAnimationFrame(uiClampResync), 
 window.addEventListener('appinstalled', appInstallOnInstalled);
 // 한글 조합 중인 칸·눌린 손가락을 기억한다 — 입력 중 다시 그리기 미루기(uiRenderOrHold)가 본다.
 document.addEventListener('compositionstart', (event) => { uiComposingEl = event.target; }, true);
-document.addEventListener('compositionend', (event) => { if (uiComposingEl === event.target) uiComposingEl = null; }, true);
+document.addEventListener('compositionend', () => { uiComposingEl = null; }, true); // 조합은 한 번에 하나 — 어느 칸의 끝이든 푼다
 document.addEventListener('pointerdown', () => { uiPointerDown = true; }, true);
 document.addEventListener('pointerup', () => { uiPointerDown = false; }, true);
 document.addEventListener('pointercancel', () => { uiPointerDown = false; }, true);
