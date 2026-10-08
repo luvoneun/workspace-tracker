@@ -9,6 +9,8 @@
 const nodeFs = require('node:fs');
 const nodeCrypto = require('node:crypto');
 const os = require('node:os');
+const nodePath = require('node:path');
+const { atomicWrite } = require('./safe-storage');
 
 const JIRA_KEY_RE = /^[A-Z][A-Z0-9]*-\d+$/;
 const JIRA_PROJECT_RE = /^[A-Z][A-Z0-9]*$/;
@@ -62,7 +64,8 @@ const JIRA_CREATE_MAX = 12;
 const JIRA_SUMMARY_MAX = 255;
 // 만들 수 있는 이슈 종류 목록(createmeta)에서 읽어 오는 개수. 한 프로젝트의 종류는 이보다 훨씬 적다.
 const JIRA_TYPE_LIMIT = 100;
-// 만들기가 "결과 모름"(시간 초과·끊김·5xx·응답 해석 실패)으로 끝난 이슈를 기억하는 시간(메모리만, 재시작하면 사라진다).
+// 만들기가 "결과 모름"(시간 초과·끊김·5xx·응답 해석 실패)으로 끝난 이슈를 기억하는 시간.
+// 이 컴퓨터 전용 폴더의 `jira-unsure.json`에도 남겨 서버를 다시 켜도 이어 간다(unsureFile).
 // 그 안에 같은 이슈를 다시 만들라고 하면 지라에서 먼저 찾는다 — 응답만 끊긴 경우 두 벌이 생기지 않게.
 const UNSURE_KEEP_MS = 24 * 60 * 60 * 1000;
 // 지라 검색은 방금 만든 이슈를 몇 초 늦게 잡는다 — 모름이 난 뒤 이 시간 전에는 찾지도 만들지도 않는다.
@@ -839,9 +842,23 @@ function makeKind(error, writing = false) {
 }
 
 // 서버가 쓰는 겉면: 설정 확인 + 키별 60초 메모리 캐시 + 화면에 그대로 보여 줄 오류 문구.
-// 파일은 아무것도 쓰지 않는다(조회는 기록을 남기지 않는다).
+// 조회는 파일에 아무것도 남기지 않는다 — 쓰는 파일은 만들기의 결과 모름 기록(unsureFile) 하나뿐이다.
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
-function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = Date.now, ttlMs = JIRA_CACHE_MS, sleep = pause } = {}) {
+// 결과 모름 기록 파일의 모양: { version: 1, items: [{ projectKey, parentKey, issueTypeId, summary, at }] }.
+// 이슈 지문과 모름이 난 시각뿐이다 — 토큰·계정·지라 응답은 담지 않는다. 모양이 어긋난 줄은 버린다.
+const unsureSig = issue => JSON.stringify([issue.projectKey, issue.parentKey || null, issue.issueTypeId, issue.summary]);
+function readUnsureItems(raw) {
+  if (!raw || typeof raw !== 'object' || !Array.isArray(raw.items)) return null;
+  return raw.items.filter(item => item && typeof item === 'object'
+    && typeof item.projectKey === 'string' && JIRA_PROJECT_RE.test(item.projectKey)
+    && (item.parentKey === null || (typeof item.parentKey === 'string' && JIRA_KEY_RE.test(item.parentKey)))
+    && typeof item.issueTypeId === 'string' && JIRA_ID_RE.test(item.issueTypeId)
+    && typeof item.summary === 'string' && item.summary && item.summary.length <= JIRA_SUMMARY_MAX
+    && Number.isFinite(item.at));
+}
+
+// unsureFile() → 결과 모름 기록 파일 경로(없으면 null — 메모리에만 둔다. 테스트가 실제 local/에 쓰지 않게).
+function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = Date.now, ttlMs = JIRA_CACHE_MS, sleep = pause, unsureFile = () => null } = {}) {
   const settings = jiraSettings(config);
   const cache = new Map();
   // 완료한 내 티켓은 키가 없는 목록이라 캐시도 한 벌뿐이다(기간이 바뀌면 버린다).
@@ -851,9 +868,55 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
   // 방금 보낸 만들기 요청의 지문 → 받은 시각. 같은 계획이 60초 안에 두 번 오면 거절한다
   // (새로고침·두 번 누르기로 지라에 같은 이슈가 두 벌 생기지 않게). 메모리에만 있다.
   const madePlans = new Map();
-  // 결과 모름으로 끝난 이슈 하나하나의 지문(프로젝트·부모·종류·요약) → 모름이 난 시각. 계획 지문과 달리
-  // 하위 티켓 `다시 시도`(이미 있는 에픽에 붙이는 다른 계획)로 와도 같은 이슈면 잡힌다. 메모리에만 있다.
+  // 결과 모름으로 끝난 이슈 하나하나의 지문(프로젝트·부모·종류·요약) → { 그 칸들, at: 모름이 난 시각 }. 계획 지문과 달리
+  // 하위 티켓 `다시 시도`(이미 있는 에픽에 붙이는 다른 계획)로 와도 같은 이슈면 잡힌다.
+  // 서버가 뜰 때 unsureFile에서 채우고, 바뀔 때마다 파일에 다시 쓴다(24시간 지난 줄은 읽을 때·쓸 때 버린다).
   const unsureMade = new Map();
+  const unsurePath = () => { try { return unsureFile() || null; } catch { return null; } };
+  const unsureFresh = entry => now() - entry.at < UNSURE_KEEP_MS;
+  function unsureLoad() {
+    const file = unsurePath();
+    if (!file) return;
+    let text;
+    try { text = nodeFs.readFileSync(file, 'utf8'); } catch (error) {
+      if (error.code !== 'ENOENT') console.error('지라 결과 모름 기록을 읽지 못해 빈 기록으로 시작함:', error.code || error.message);
+      return;
+    }
+    let items = null;
+    try { items = readUnsureItems(JSON.parse(text)); } catch { items = null; }
+    if (!items) { console.error('지라 결과 모름 기록이 깨져 빈 기록으로 시작함'); return; }
+    for (const item of items) {
+      const entry = { projectKey: item.projectKey, parentKey: item.parentKey, issueTypeId: item.issueTypeId, summary: item.summary, at: item.at };
+      if (unsureFresh(entry)) unsureMade.set(unsureSig(entry), entry);
+    }
+    // 지난 줄을 버렸으면 파일도 바로 줄인다.
+    if (unsureMade.size < items.length) unsureSave();
+  }
+  // 실패해도 로그 한 줄로 넘어간다(메모리 기록은 그대로 — 쓰기 실패가 만들기를 막지 않는다).
+  function unsureSave() {
+    const file = unsurePath();
+    if (!file) return;
+    try {
+      const items = [...unsureMade.values()].filter(unsureFresh);
+      nodeFs.mkdirSync(nodePath.dirname(file), { recursive: true });
+      atomicWrite(file, `${JSON.stringify({ version: 1, items }, null, 2)}\n`);
+    } catch (error) {
+      console.error('지라 결과 모름 기록을 적지 못함:', error.code || error.message);
+    }
+  }
+  function unsureSet(sig, issue) {
+    unsureMade.set(sig, { projectKey: issue.projectKey, parentKey: issue.parentKey || null, issueTypeId: issue.issueTypeId, summary: issue.summary, at: now() });
+    unsureSave();
+  }
+  function unsureForget(sig) {
+    if (unsureMade.delete(sig)) unsureSave();
+  }
+  function unsureSweep() {
+    let gone = false;
+    for (const [sig, entry] of unsureMade) if (!unsureFresh(entry)) { unsureMade.delete(sig); gone = true; }
+    if (gone) unsureSave();
+  }
+  unsureLoad();
   // 지금 지라에 보내거나 찾는 중인 이슈 지문 — 다른 계획이 같은 이슈를 동시에 보내면 둘째는 기다리게 한다(assignBusy와 같은 방식).
   const makeBusy = new Set();
   // 내 계정 id(반응 필요의 "나" 판별). 프로세스마다 한 번 묻고 메모리에만 둔다 — 어디에도 나가지 않는다.
@@ -1190,7 +1253,7 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
   //  - 같은 이슈를 다른 요청이 지금 보내거나 찾는 중이면 → makeSettling
   //  - 둘 이상이거나 찾기도 실패 → 모름을 유지하고 만들지 않는다(자동으로 다시 하지 않는다) → makeUnsure
   async function makeOnce(client, issue) {
-    const sig = JSON.stringify([issue.projectKey, issue.parentKey || null, issue.issueTypeId, issue.summary]);
+    const sig = unsureSig(issue);
     if (makeBusy.has(sig)) return { kind: 'makeSettling' };
     makeBusy.add(sig);
     try {
@@ -1200,7 +1263,7 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
     }
   }
   async function makeOnceFree(client, issue, sig) {
-    const since = unsureMade.get(sig);
+    const since = unsureMade.has(sig) ? unsureMade.get(sig).at : undefined;
     if (since !== undefined) {
       if (now() - since < UNSURE_SETTLE_MS) return { kind: 'makeSettling' };
       const look = () => client.findMade({ ...issue, minutes: (now() - since) / 60000 + UNSURE_LOOKBACK_MIN });
@@ -1211,14 +1274,14 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
         if (!found.length) { await sleep(UNSURE_RECHECK_MS); found = await look(); }
       } catch { return { kind: 'makeUnsure' }; }
       if (found.length > 1) return { kind: 'makeUnsure' };
-      unsureMade.delete(sig);
+      unsureForget(sig);
       if (found.length === 1) return { ...found[0], found: true };
     }
     try {
       return await client.createIssue(issue);
     } catch (error) {
       const kind = makeKind(error, true);
-      if (kind === 'makeUnsure') unsureMade.set(sig, now());
+      if (kind === 'makeUnsure') unsureSet(sig, issue);
       return { kind };
     }
   }
@@ -1260,7 +1323,7 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
 
     const signature = JSON.stringify([projectKey, epicKey, epicSummary, children.map(child => [child.summary, child.issueTypeId])]);
     for (const [key, at] of madePlans) if (now() - at >= ttlMs) madePlans.delete(key);
-    for (const [key, at] of unsureMade) if (now() - at >= UNSURE_KEEP_MS) unsureMade.delete(key);
+    unsureSweep();
     if (madePlans.has(signature)) return bad('duplicate');
     madePlans.set(signature, now());
     // 아무것도 만들지 못하고 끝난 길은 지문을 지운다 — 곧바로 다시 시도할 수 있어야 한다.

@@ -2744,7 +2744,13 @@ const mutations = require('./mutation-store')(TRACKER_DIR, [MEETING_LINKS_PATH, 
 // `setJiraFetchForTests`로 가짜 지라(jira-fixture.js)를 끼운다 — 그때는 실제 지라에 닿지 않는다(써 보기 서버는 지라를 꺼 둔 채다).
 let jiraFetch = null;
 function setJiraFetchForTests(fn) { jiraFetch = typeof fn === 'function' ? fn : null; }
-const jira = require('./jira-client').createJiraApi({ config: CONFIG, request: (...args) => (jiraFetch || fetch)(...args) });
+// 만들기의 결과 모름 기록은 이 컴퓨터 전용 폴더의 `jira-unsure.json`에 남는다(재시작해도 두 벌을 막게) — 업무 데이터·백업 밖.
+// 사용 횟수와 같은 규칙: 테스트(WORKSPACE_NO_REMOTE_CHECK)에서 `WORKSPACE_LOCAL_DIR`를 따로 주지 않았으면 메모리에만 둔다.
+function jiraUnsureFile() {
+  if (process.env.WORKSPACE_NO_REMOTE_CHECK && !process.env.WORKSPACE_LOCAL_DIR) return null;
+  return path.join(LOCAL_DIR, 'jira-unsure.json');
+}
+const jira = require('./jira-client').createJiraApi({ config: CONFIG, request: (...args) => (jiraFetch || fetch)(...args), unsureFile: jiraUnsureFile });
 // 화면이 붙여 넣은 지라 주소의 호스트를 견줄 때만 쓰는 값이다(주소는 이미 카드의 `지라에서 열기`에
 // 그대로 나가 있다). 이메일·토큰은 어디에도 싣지 않는다.
 const JIRA_SITE_URL = (require('./jira-client').jiraSettings(CONFIG) || {}).siteUrl || '';
@@ -2936,7 +2942,7 @@ module.exports = {
   // WP-L 인증 없이 여는 경로(아이콘·manifest) — 목록이 늘지 않았는지 테스트가 본다.
   publicAssetRequest,
   // WP-N 체크인 — 가짜 전송·임시 local/·오늘 날짜를 끼우는 테스트·픽스처 전용 길.
-  setCheckinFetchForTests, setCheckinForTests, checkin, setUsageForTests, usage,
+  setCheckinFetchForTests, setCheckinForTests, checkin, setUsageForTests, usage, jiraUnsureFile,
   // WP-U 쉬는 틈에 자동 업데이트 — 판단 한 번(tick)·임시 local/·환경 끼우기(테스트·픽스처 전용, main 갈래 판단은 못 끼운다).
   autoUpdate, setAutoUpdateForTests,
   // 계속 실패(멈췄어요·빨간 점) 판단 — 같은 수치를 테스트가 고정한다.
