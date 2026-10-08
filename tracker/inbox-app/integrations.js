@@ -6,6 +6,7 @@
 //   1) **아는 키만** 바꾸고 모르는 키는 그대로 둔다 — 사람이 손으로 적어 둔 값이 사라지지 않게.
 //   2) **토큰은 config에 적지 않는다** — 파일(0600)로만 두고 config에는 경로만 적는다.
 //   3) 토큰 값은 돌려주는 값·로그·오류 문구 어디에도 싣지 않는다(있음/없음만).
+//   4) 파일 쓰기는 전부 `writeConfig` 한 곳으로 — 쓰기 직전에 다시 읽고 이 요청이 바꾼 칸만 얹는다(그 함수 위 주석).
 //
 // 프로세스를 끝내는 길(`scheduleRestart`)도 여기 있다 — 부르는 쪽이 `exit`를 끼워 넣으므로
 // 테스트에서는 실제 종료가 일어나지 않는다.
@@ -452,14 +453,76 @@ async function slackTokenForUse(config, { tokenDir, request, now } = {}) {
   return got.token;
 }
 
+// ---------- 설정 파일 쓰기(한 곳) ----------
+// `workspace.config.json`을 쓰는 길은 전부 여기를 지난다(연동 저장·꾸미기·슬랙 연결 방식·채널 이름 따라가기).
+// 저장은 시작할 때 본 설정(`base`)으로 새 설정(`next`)을 만들고, 그 사이 확인(지라·슬랙·캘린더, 몇 초)을 기다린다 —
+// 그동안 다른 창·다른 요청이 설정을 바꿀 수 있다. 그래서 통째로 쓰지 않는다:
+//   1) 쓰기 **직전에** 디스크의 최신 설정을 다시 읽는다(파일이 없거나 깨졌으면 `base`를 최신으로 본다).
+//   2) 이 요청이 바꾼 칸만 얹는다. 칸은 최상위 키, 값이 둘 다 객체면 그 아래 두 번째 키(`server.autoUpdate`·
+//      `slack.channels`·`jira.siteUrl`·`integrations.slack` 같은 단위)다. 바꾼 칸 = `base`와 `next`의 값이 다른 칸,
+//      `next`에서 사라진 칸은 지운다. 이 요청이 안 바꾼 칸은 최신 값 그대로다.
+//   3) 같은 칸을 그 사이 남도 바꿨으면(최신 ≠ base): 사람이 방금 누른 저장(`wins: 'mine'`)은 이 요청 값이 이긴다
+//      (마지막 누름이 이김), 자동 갱신(`wins: 'theirs'` — 이름 따라가기)은 남의 값을 지키고 그 칸을 건너뛴다.
+//   4) 다시 읽기 → 얹기 → 쓰기는 기다림 없이 한 번에(동기) 한다 — 같은 서버 안에서는 두 쓰기가 끼어들 수 없어
+//      따로 대기열이 없어도 한 줄로 선다. 쓰기는 원자적 교체(atomicWrite)다.
+// 돌려주는 값은 실제로 쓴 설정이다.
+const isPlain = value => !!value && typeof value === 'object' && !Array.isArray(value);
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+function changedFields(base, next) {
+  const fields = [];
+  new Set([...Object.keys(base), ...Object.keys(next)]).forEach((key) => {
+    const before = base[key];
+    const after = next[key];
+    if (same(before, after)) return;
+    // 처음 생기는 객체(base에 없던 `slack` 등)도 안쪽 칸 단위로 본다 — 그 사이 남이 만든 같은 객체의 다른 칸을 지우지 않게.
+    if (isPlain(after) && (isPlain(before) || before === undefined)) {
+      const was = isPlain(before) ? before : {};
+      new Set([...Object.keys(was), ...Object.keys(after)]).forEach((inner) => {
+        if (!same(was[inner], after[inner])) fields.push([key, inner]);
+      });
+    } else fields.push([key]);
+  });
+  return fields;
+}
+
+const fieldOf = (config, [key, inner]) => (inner === undefined ? config[key] : (isPlain(config[key]) ? config[key][inner] : undefined));
+
+function mergeConfig({ base = {}, next = {}, latest = {}, wins = 'mine' } = {}) {
+  const merged = clone(JSON.parse(JSON.stringify(latest)));
+  changedFields(clone(base), clone(next)).forEach((field) => {
+    if (wins === 'theirs' && !same(fieldOf(latest, field), fieldOf(base, field))) return;
+    const [key, inner] = field;
+    const value = fieldOf(next, field);
+    if (inner === undefined) {
+      if (value === undefined) delete merged[key]; else merged[key] = value;
+      return;
+    }
+    // 최신에서 그 키가 객체가 아니게 바뀌었으면 다음 쪽 객체에서 시작한다(`theirs`면 위에서 이미 건너뛴다).
+    const holder = isPlain(merged[key]) ? { ...merged[key] } : {};
+    if (value === undefined) delete holder[inner]; else holder[inner] = value;
+    merged[key] = holder;
+  });
+  return merged;
+}
+
+function readConfigFile(configPath, fallback) {
+  try { return JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch { return fallback; }
+}
+
+function writeConfig({ configPath, base = {}, next = {}, wins = 'mine', write = atomicWrite, read = file => readConfigFile(file, base) } = {}) {
+  const latest = read(configPath);
+  const merged = mergeConfig({ base, next, latest: isPlain(latest) ? latest : base, wins });
+  write(configPath, `${JSON.stringify(merged, null, 2)}\n`);
+  return merged;
+}
+
 // 슬랙 `허용`이 끝난 뒤(slack-auth.js saveOAuthResult가 토큰을 저장한 뒤) 설정에 방식만 적는다 — `slack.auth: 'oauth'`.
 // 토큰 파일 경로 칸이 비어 있으면 기본 자리를 적는다(사람이 옮겨 둔 경로는 그대로). 켬/끔·채널은 건드리지 않는다.
 function saveSlackAuth({ configPath, current = {}, tokenDir, write = atomicWrite } = {}) {
   const slack = { ...clone(current.slack), auth: 'oauth' };
   if (!trimmed(slack.tokenFile)) slack.tokenFile = tokenPaths(tokenDir).slack.config;
-  const config = { ...current, slack };
-  write(configPath, `${JSON.stringify(config, null, 2)}\n`);
-  return config;
+  return writeConfig({ configPath, base: current, next: { ...current, slack }, write });
 }
 
 // 화면이 읽는 자동 갱신 상태 — 값 없이 시각·권한·실패 종류만(slack-auth.js readOAuthStatus에서 필요한 칸만 고른다).
@@ -858,7 +921,7 @@ async function saveIntegrations({
     const forgot = await forgetOAuth({ config: current, tokenDir, then: () => writeToken(paths.slack.file, pastedOverOAuth) });
     if (!forgot) throw bad(MESSAGE.slackBusy, 'slack_busy');
   }
-  write(configPath, `${JSON.stringify(config, null, 2)}\n`);
+  config = writeConfig({ configPath, base: current, next: config, write });
   // 정리 방식만 바꾼 저장은 서버를 다시 켤 필요가 없다(수집 스크립트가 회차마다 설정을 읽는다).
   const quiet = tidyOnly && !body.jira && !body.calendar && !body.meetingNotes;
   return { config, result, quiet };
@@ -883,7 +946,7 @@ function registrationKey(config) {
 // ---------- 설정 › 꾸미기(이 맥에만) ----------
 // 여기서도 **아는 키만** 바꾼다: `title`(화면 헤더·탭 제목)·`server.dockName`(앱 이름 — 크롬 앱 manifest, 키 이름은 옛 설정 호환)·
 // `titleHidden`(헤더의 제목만 숨기는 스위치 — 값·앱 이름은 그대로 둔다) · `server.autoUpdate`(설정 › 앱의 자동 업데이트 스위치, WP-U).
-// 저장 방식은 연동 저장과 같다(파일을 새로 읽어 그 위에 얹고, 원자적 교체).
+// 저장 방식은 연동 저장과 같다(writeConfig — 쓰기 직전에 파일을 새로 읽어 바꾼 칸만 얹고, 원자적 교체).
 async function savePersonalize({ configPath, current = {}, body = {}, write = atomicWrite } = {}) {
   const personalize = require('./personalize');
   if (!body || typeof body !== 'object') throw bad(MESSAGE.other);
@@ -919,8 +982,7 @@ async function savePersonalize({ configPath, current = {}, body = {}, write = at
     touched = true;
   }
   if (!touched) throw bad(personalize.PERSONALIZE_MESSAGE.nothing);
-  write(configPath, `${JSON.stringify(next, null, 2)}\n`);
-  return { config: next, changed };
+  return { config: writeConfig({ configPath, base: current, next, write }), changed };
 }
 
 // ---------- 채널 이름 따라가기 ----------
@@ -968,7 +1030,8 @@ function createSlackNameFollower({
   }
 
   // `read`는 지금 config를 새로 읽는 함수다 — 슬랙을 기다리는 사이 다른 저장이 끼어들 수 있어서
-  // 고치기 직전에 한 번 더 읽고 그 위에 이름만 얹는다.
+  // 고치기 직전에 한 번 더 읽고 그 위에 이름만 얹는다(writeConfig `wins: 'theirs'` — 그 사이 사람이
+  // 채널 칸을 바꿨으면 이름 고치기는 건너뛴다. 다음에 탭을 열 때 다시 따라간다).
   async function follow({ read, configPath, tokenDir, write = atomicWrite } = {}) {
     const config = clone(read());
     if (clone(config.integrations).slack === false) return { renamed: {}, missing: {} };
@@ -989,12 +1052,7 @@ function createSlackNameFollower({
     });
     if (Object.keys(renamed).length && configPath) {
       try {
-        const fresh = clone(read());
-        const latest = clone(clone(fresh.slack).channels);
-        // 그 사이 채널이 바뀌었으면(다른 id) 그 칸은 건드리지 않는다.
-        const still = Object.fromEntries(Object.entries(renamed)
-          .filter(([key]) => realChannelId(clone(latest[key]).id) === realChannelId(clone(channels[key]).id)));
-        if (Object.keys(still).length) write(configPath, `${JSON.stringify(withSlackNames(fresh, still), null, 2)}\n`);
+        writeConfig({ configPath, base: config, next: withSlackNames(config, renamed), wins: 'theirs', write, read: () => clone(read()) });
       } catch { /* 이름을 못 고쳐도 조용히 옛 이름을 쓴다 */ }
     }
     return { renamed, missing };
@@ -1105,7 +1163,7 @@ module.exports = {
   SLACK_CHANNEL_KEYS, SLACK_APPS_URL, INTEGRATION_MESSAGE: MESSAGE,
   tokenPaths, parseChannelId, slackCheckChannel, slackCreateChannel, readIntegrations, saveIntegrations,
   scheduleRestart, errorLines, maskLine, claudeInstalled, claudeCandidateDirs, claudeAccountSource, maskEmail, writeTokenFile,
-  slackTokenCheck, savedSlackToken, slackTokenForUse, saveSlackAuth, slackAuthMode, createSlackNameFollower, SLACK_FOLLOW_MS, slackChannelPrefix, slackTsNow,
+  slackTokenCheck, savedSlackToken, slackTokenForUse, saveSlackAuth, slackAuthMode, writeConfig, mergeConfig, createSlackNameFollower, SLACK_FOLLOW_MS, slackChannelPrefix, slackTsNow,
   normalizeIcalUrl, fetchIcal, icalCheck, savedIcalUrl, ICAL_TIMEOUT_MS, savePersonalize, registrationKey,
   normalizeJiraSite, saveClaudeToken, CLAUDE_TOKEN_MAX, bodyReadError,
 };
