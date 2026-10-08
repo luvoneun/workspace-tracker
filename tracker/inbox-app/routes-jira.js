@@ -180,6 +180,8 @@ module.exports = function jiraRoutes(req, res, url, ctx) {
   // 이미 있는 지라 프로젝트(에픽 요약·별칭 — findJiraProject, 직접 만든 그룹이 같은 이름으로 함께 있어도 본다)와 같으면
   // 지라에 아무것도 묻지 않고 409로 거절한다. 지라에 만드는 일은 되돌릴 수 없어서 화면 막기 하나로 끝내지 않는다.
   // 직접 만든 프로젝트하고만 같은 이름은 통과한다(만든 뒤 옮기기 흐름). 비교는 화면과 같은 캐시라 내 목록에 없는 남의 에픽은 알아보지 못한다.
+  // 응답이 끊겨 배정 전에 멈춘 내 에픽(결과 모름)도 목록에 없어 여기를 통과한다 — 일부러 막지 않는다: jira.create의 makeOnce가
+  // 모름 기록(local/jira-unsure.json)을 보고 보내기 전에 지라에서 먼저 찾아, 있으면 그 에픽을 쓰고 배정한다(막으면 데려올 길이 없다).
   if (url.pathname === '/api/jira/create' && req.method === 'POST') {
     if (!USES.jira) { res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ ok: false, error: '지라를 쓰지 않도록 설정돼 있어요.', kind: 'other' })); return true; }
     readBody(req)
