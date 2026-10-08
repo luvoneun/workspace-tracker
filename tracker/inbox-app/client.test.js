@@ -315,6 +315,33 @@ test('입력 씹힘 ⑤: 누구에게 칸(uiMenuText)은 저장 중에도 잠그
   app.run('release[2].resolve()'); await settle();
 });
 
+test('칸의 Esc는 칸만 닫는다 — 그룹 `+` 줄·결과 한 줄·상세 제목·결정 문구 모두 문서(열린 상세 카드·서랍의 Esc 스택)로 올려 보내지 않는다', () => {
+  const app = pureClient();
+  app.run(`escEvent = () => ({ key: 'Escape', isComposing: false, stopped: 0, preventDefault() {}, stopPropagation() { this.stopped += 1; } });
+    holder = document.createElement('div');
+    addRow = uiGroupAddRow('group:게임', '/api/today-task/create', 'x'); addRow.hidden = false;
+    e1 = escEvent(); addRow.children[0].listeners.keydown(e1);
+    meta = document.createElement('span'); uiResultCell(meta, { id: 'i1', description: '보고서 쓰기' });
+    meta.children[0].listeners.click(); e2 = escEvent(); meta.children[0].listeners.keydown(e2);
+    title = document.createElement('h2'); holder.appendChild(title); panelTitleEdit(title, { id: 'i2', description: '제목' });
+    area = holder.children[0]; e3 = escEvent(); area.listeners.keydown(e3);
+    desc = document.createElement('span'); holder.appendChild(desc); makeEditableDesc(desc, { id: 'i3', description: '결정 문구' });
+    realMake = document.createElement; document.createElement = (tag) => Object.assign(realMake(tag), { setSelectionRange() {} });
+    desc.listeners.click(); document.createElement = realMake;
+    input = holder.children[1]; e4 = escEvent(); input.listeners.keydown(e4);`);
+  assert.equal(app.run('e1.stopped'), 1, '그룹 `+` 줄');
+  assert.equal(app.run('addRow.hidden'), true, '그룹 `+` 줄은 닫힌다');
+  assert.equal(app.run('e2.stopped'), 1, '결과 한 줄');
+  assert.equal(app.run('e3.stopped'), 1, '상세 제목');
+  assert.equal(app.run('holder.children[0] === title'), true, '상세 제목은 원래 글자로 돌아온다');
+  assert.equal(app.run('e4.stopped'), 1, '결정 문구');
+  assert.equal(app.run('holder.children[1] === desc'), true, '결정 문구는 원래 글자로 돌아온다');
+  // 한글 조합 중의 Esc는 글자 확정이라 칸도 문서도 건드리지 않는다
+  app.run(`addRow.hidden = false; e5 = escEvent(); e5.isComposing = true; addRow.children[0].listeners.keydown(e5);`);
+  assert.equal(app.run('e5.stopped'), 0);
+  assert.equal(app.run('addRow.hidden'), false);
+});
+
 test('입력 씹힘 ⑤: 결과 한 줄(uiResultCell)은 저장 중에도 잠그지 않는다 — 두 번째 Enter는 넘기고, 실패하면 그동안 친 글까지 칸에 남고, 성공하면 닫혀 결과를 보인다', async () => {
   const app = pureClient();
   const held = heldFetch(app);

@@ -1652,7 +1652,8 @@ function uiGroupAddRow(key, endpoint, announceText) {
   input.placeholder = '이 그룹에 추가 — Enter';
   input.setAttribute('aria-label', `${key === '__misc__' ? '프로젝트 없음' : key.slice(key.indexOf(':') + 1)} 그룹에 할 일 추가`);
   input.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && !event.isComposing) { row.hidden = true; return; }
+    // 칸의 Esc는 칸만 닫는다 — 문서의 Esc 스택(열린 상세 카드·서랍)까지 가지 않게 여기서 멈춘다(DESIGN 동작 관습 2).
+    if (event.key === 'Escape' && !event.isComposing) { event.stopPropagation(); row.hidden = true; return; }
     if (event.key !== 'Enter' || event.isComposing) return;
     const description = input.value.trim();
     if (!description) return;
@@ -1785,7 +1786,10 @@ function uiResultCell(meta, item) {
     // 그 사이 목록 다시 그리기가 칸을 떼어 내지 않게 한다(uiRenderHeld — 잠긴 칸을 지키던 것과 같은 규칙).
     let saving = false;
     input.addEventListener('keydown', async (event) => {
-      if (event.isComposing || saving) return;
+      if (event.isComposing) return;
+      // 칸의 Esc는 칸만 닫는다(저장 중이면 넘기기만) — 열린 상세 카드까지 닫히지 않게 문서로 올려 보내지 않는다.
+      if (event.key === 'Escape') event.stopPropagation();
+      if (saving) return;
       if (event.key === 'Escape') { uiResultCell(meta, item); return; }
       if (event.key !== 'Enter') return;
       const value = input.value.trim();
@@ -4318,7 +4322,8 @@ function panelTitleEdit(titleEl, item) {
   area.addEventListener('blur', commit);
   area.addEventListener('keydown', (event) => {
     if (event.isComposing) return;
-    if (event.key === 'Escape') { event.preventDefault(); cancel(); return; }
+    // 제목 칸의 Esc는 고치기만 취소한다 — 상세 카드는 열린 채로(문서의 Esc 스택까지 올려 보내지 않는다).
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancel(); return; }
     if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); area.blur(); }
   });
 }
@@ -6516,7 +6521,8 @@ function makeEditableDesc(el, item) {
     input.addEventListener('keydown', (e) => {
       if (e.isComposing) return;
       if (e.key === 'Enter') input.blur();
-      if (e.key === 'Escape') { committed = true; input.replaceWith(el); }
+      // 칸의 Esc는 칸만 닫는다 — 열린 상세 카드·서랍까지 닫히지 않게 문서로 올려 보내지 않는다.
+      if (e.key === 'Escape') { e.stopPropagation(); committed = true; input.replaceWith(el); }
     });
   });
 }
