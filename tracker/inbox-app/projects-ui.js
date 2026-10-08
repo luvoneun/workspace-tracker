@@ -934,7 +934,7 @@ function projectTaskRow(item, fromKey = '') {
   const title = document.createElement('button');
   title.type = 'button';
   title.className = 'ti';
-  title.textContent = item.description;
+  uiTitleText(title, item.description);
   title.title = item.description;
   title.setAttribute('aria-label', `${item.description} 상세 보기`);
   title.addEventListener('click', () => panelOpen({ id: item.id }));
@@ -979,7 +979,7 @@ function projectDoneRow(item, fromKey = '') {
   const title = document.createElement('button');
   title.type = 'button';
   title.className = 'ti';
-  title.textContent = item.description;
+  uiTitleText(title, item.description);
   title.title = item.description;
   title.setAttribute('aria-label', `${item.description} 상세 보기`);
   title.addEventListener('click', () => panelOpen({ id: item.id }));

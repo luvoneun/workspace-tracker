@@ -426,7 +426,7 @@ function panelMeetingDrafts(event, box, host = MEETING_HOST_CARD) {
       middle = document.createElement('button');
       middle.type = 'button';
       middle.className = 'ti';
-      middle.textContent = blank ? '빈 초안' : edit.description;
+      uiTitleText(middle, blank ? '빈 초안' : edit.description);
       middle.title = '눌러서 고치기';
       middle.setAttribute('aria-expanded', 'false');
       middle.setAttribute('aria-label', `${blank ? '빈 초안' : edit.description} — 눌러서 고치기`);
@@ -733,7 +733,7 @@ function panelMeetingRow(item, event, stateText, host = MEETING_HOST_CARD) {
   title.type = 'button';
   title.className = 'ti';
   title.title = item.description;
-  title.textContent = item.description;
+  uiTitleText(title, item.description);
   const edit = () => panelMeetingRowEdit(row, title, item, checkbox);
   uiClampWatch(row, title, (clamp) => {
     if (clamp) title.removeAttribute('aria-label');
@@ -1055,7 +1055,7 @@ function meetingLocalRow(entry, event, linked, host) {
   }
   const title = document.createElement('span');
   title.className = 'ti';
-  title.textContent = entry.text;
+  uiTitleText(title, entry.text);
   const right = document.createElement('span');
   right.className = 'r';
   const acts = document.createElement('span');

@@ -1,0 +1,20 @@
+{
+  "name": "줄 제목 — 넓힌 판의 빈 자리를 누르면 제목 동작(상세 열기)",
+  "description": "줄 제목 누를 자리 A안(2026-10-08): 오늘 줄의 제목 판(.d-title)이 줄 높이(54px)로 넓어져, 글자 아래 빈 자리를 눌러도 제목을 누른 것과 같이 상세가 열린다. 넓힌 판 안쪽 아래 끝(아래에서 3px, 글자 왼쪽 끝에서 6px)에 눈에 안 보이고 누름을 통과시키는 표식을 두고 그 자리를 사람처럼 누른다. 셋째 줄이 비치지 않는지(글자 칸 높이 ≤ 두 줄)도 본다.",
+  "steps": [
+    { "do": "goto", "url": "/", "waitFor": "#tabBtnToday", "wait": 500 },
+    { "do": "click", "note": "앞 회차가 다른 탭에서 끝났으면 그 탭을 기억한다 — 오늘 탭으로", "selector": "#tabBtnToday", "hold": 0 },
+    { "do": "wait", "selector": "[data-task-id=c] .d-title", "timeout": 5000 },
+    { "do": "eval", "note": "상세가 열려 있으면 닫고 시작(앞 회차가 남긴 것)", "expr": "(() => { if (typeof panelState === 'object' && panelState) panelClose(); return true; })()" },
+    { "do": "wait", "ms": 300 },
+    { "do": "assert", "message": "제목 판이 28px 이상이어야 해요(넓힌 판)", "expr": "document.querySelector('[data-task-id=c] .d-title').getBoundingClientRect().height >= 28" },
+    { "do": "assert", "message": "두 줄 말줄임 글자 칸이 두 줄을 넘지 않아야 해요(셋째 줄 비침 없음)", "expr": "(() => { const tx = document.querySelector('[data-task-id=c] .d-title > .tx'); return !!tx && tx.getBoundingClientRect().height <= parseFloat(getComputedStyle(tx).lineHeight) * 2 + 1; })()" },
+    { "do": "eval", "note": "넓힌 판 안쪽 아래 끝 — 글자 아래 빈 자리에 표식(누름은 통과)", "expr": "(() => { const t = document.querySelector('[data-task-id=c] .d-title'); const tx = t.querySelector('.tx'); const r = t.getBoundingClientRect(); const m = document.createElement('div'); m.id = 'hcMark'; Object.assign(m.style, { position: 'fixed', left: (r.left + 6 - 1) + 'px', top: (r.bottom - 3 - 1) + 'px', width: '2px', height: '2px', pointerEvents: 'none' }); document.body.appendChild(m); return [Math.round(r.bottom - 3), Math.round(tx.getBoundingClientRect().bottom)]; })()" },
+    { "do": "assert", "message": "표식 자리는 글자 칸 밖(아래 빈 자리)이고 그 자리를 누르면 제목 판이어야 해요", "expr": "(() => { const t = document.querySelector('[data-task-id=c] .d-title'); const m = document.getElementById('hcMark').getBoundingClientRect(); const x = m.left + 1, y = m.top + 1; const tx = t.querySelector('.tx').getBoundingClientRect(); const hit = document.elementFromPoint(x, y); return y > tx.bottom && !!hit && (hit === t || t.contains(hit)); })()" },
+    { "do": "click", "note": "넓힌 판의 빈 자리를 누른다", "selector": "#hcMark" },
+    { "do": "wait", "selector": ".d-detail div.d-dtitle", "timeout": 3000 },
+    { "do": "shot", "name": "빈자리-누른-뒤" },
+    { "do": "assert", "message": "누른 줄(c)의 상세가 열려야 해요", "expr": "!!panelState && String(panelState.id) === 'c'" },
+    { "do": "eval", "note": "치우기", "expr": "(() => { document.getElementById('hcMark')?.remove(); panelClose(); return true; })()" }
+  ]
+}

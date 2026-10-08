@@ -882,10 +882,12 @@ dialog.d-stay:not([open])::backdrop { opacity: 0; transition-duration: var(--sta
   font-family: inherit; font-size: 14.5px; color: var(--text); cursor: pointer;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.d-mrow .ti {
-  white-space: normal; text-overflow: clip; line-height: 1.35;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-}
+.d-mrow .ti { white-space: normal; text-overflow: clip; line-height: 1.35; }
+/* 레일 제목의 누르는 판은 줄 여백(10px) 안에서 위아래로 넓힌다(회의 4px · 확인 대기 위 6px 아래 2px — 아래는 둘째 줄과 붙어 있다).
+   여백이 셋째 줄을 비추지 않게 두 줄 말줄임은 안쪽 글자 칸(.tx, uiTitleText)이 맡는다 */
+.d-mrow .ti { padding-block: 4px; margin-block: -4px; }
+.d-wrow .ti { padding-block: 6px 2px; margin-block: -6px -2px; }
+.d-mrow .ti > .tx { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .d-mrow .ti:hover, .d-wrow .ti:hover { color: var(--accent-text); }
 .d-mrow .ti .pj { color: var(--dim); font-size: 12.5px; margin-left: 6px; white-space: nowrap; }
 .d-mrow .ct { white-space: nowrap; margin-top: 1px; }
@@ -904,7 +906,8 @@ dialog.d-stay:not([open])::backdrop { opacity: 0; transition-duration: var(--sta
 .d-wrow .mt b { font-weight: 600; color: var(--muted); }
 .d-wrow .sub { grid-area: sub; font-size: 12.5px; color: var(--dim); overflow: clip; overflow-clip-margin: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .d-wrow.is-wrap { align-items: start; }
-.d-wrow.is-wrap .ti { white-space: normal; text-overflow: clip; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.4; }
+.d-wrow.is-wrap .ti { white-space: normal; text-overflow: clip; line-height: 1.4; }
+.d-wrow.is-wrap .ti > .tx, .d-wrow.is-two .ti > .tx { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: normal; text-overflow: clip; }
 .d-wrow.is-wrap .mt { padding-top: 1px; }
 /* 리마인드 줄: 제목(두 줄까지) 바로 뒤에 `· ● 프로젝트`·`원문`이 붙는다 — 오늘 목록 좁은 화면(.d-titlewrap)과 같이
    자리가 모자라면 제목 아래 줄로 내려간다(제목을 더 자르지 않는다) */
@@ -914,7 +917,7 @@ dialog.d-stay:not([open])::backdrop { opacity: 0; transition-duration: var(--sta
 /* 확인 대기의 두 줄 구성: 제목 아래 `누구에게 · N일째` + 배지 + 다시 확인 표시가 한 줄로 흐른다 */
 .d-wrow.is-two { grid-template-areas: "ti ti" "sub sub"; align-items: start; }
 .d-wrow.is-two.has-ck { grid-template-columns: 20px minmax(0, 1fr) auto; grid-template-areas: "ck ti ti" "ck sub sub"; }
-.d-wrow.is-two .ti { white-space: normal; text-overflow: clip; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.4; }
+.d-wrow.is-two .ti { white-space: normal; text-overflow: clip; line-height: 1.4; }
 /* 둘째 줄은 한 줄이다(두 줄을 넘지 않게) — 모자라면 `누구`·프로젝트가 말줄임으로 양보하고 `슬랙 ↗`는 제 자리에 선다 */
 .d-wrow.is-two .sub { display: flex; align-items: center; flex-wrap: nowrap; gap: 4px 10px; white-space: nowrap; overflow: clip; overflow-clip-margin: 8px; }
 .d-wrow.is-two .sub > * { flex: none; }
@@ -1159,13 +1162,21 @@ button.d-guide .t { color: var(--accent-text); }
    제목과 같은 왼쪽 선, 누르는 자리 28px */
 .d-pmore { display: inline-flex; align-items: center; min-height: var(--h-sm); margin: 2px 0 0 var(--pad); padding: 0 2px; }
 .d-pmore { justify-self: start; margin-bottom: 4px; }
-.d-ibmain { display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* 제목 묶음은 줄 여백(위아래 8px)까지 차지한다 — 제목 판(고치기)이 줄 높이가 되게. 위아래가 같아 프로젝트·원문은 제자리 */
+.d-ibmain { display: flex; align-items: center; gap: 8px; min-width: 0; align-self: stretch; margin-block: -8px; }
 .d-ibrow .ti {
   font-size: var(--fs-lg); font-weight: 500; color: var(--text); cursor: text; border-radius: 4px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  overflow: hidden; white-space: nowrap;
   /* 프로젝트 표기·원문 링크는 제목 바로 뒤에 붙는다 — 제목은 늘어나지 않고(0), 자리가 모자라면 먼저 줄어든다(1) */
   flex: 0 1 auto; min-width: 0;
+  /* 누르는 판(고치기)은 묶음 높이(= 줄 높이) — 글자는 가운데, 말줄임은 안쪽 글자 칸(.tx)이 */
+  align-self: stretch; display: flex; align-items: center;
 }
+.d-ibrow .ti > .tx { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-radius: 4px; }
+/* 고치기 표시(바탕)는 판이 아니라 글자에만 — 넓힌 판은 보이지 않는다 */
+.d-ibrow .desc-editable:hover, .d-ibrow .desc-editable:focus-visible { background: none; }
+.d-ibrow .desc-editable:hover > .tx { background: var(--hover); }
+.d-ibrow .desc-editable:focus-visible > .tx { background: var(--field); }
 .d-ibmain .d-inproj { max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
 .d-ibrow .desc-edit-input { flex: 1; min-width: 0; font-size: var(--fs-lg); font-weight: 500; }
 .d-ibrow .d-link { flex: none; }
@@ -1354,7 +1365,7 @@ body.batch-open .d-row.is-done { opacity: 0.6; }
 /* 톡은 방금 체크한 칸에만(app.js uiPopMark가 .is-pop을 건다) — 다시 그린 체크된 칸은 튀지 않는다 */
 .d-cb.is-pop:checked, .d-wcb.is-pop:checked { animation: d-pop-check var(--t-fast) var(--ease); }
 @keyframes d-pop-check { 0% { transform: scale(1); } 45% { transform: scale(1.18); } 100% { transform: scale(1); } }
-.d-row.is-completing .d-title, .d-mrow2.is-completing .ti, .d-prow2.is-completing .ti {
+.d-row.is-completing .d-title > .tx, .d-mrow2.is-completing .ti > .tx, .d-prow2.is-completing .ti > .tx {
   background-image: linear-gradient(currentColor, currentColor);
   background-repeat: no-repeat; background-position: 0 58%; background-size: 0% 1px;
   animation: d-strike var(--t-move) var(--ease) forwards;
@@ -1367,7 +1378,7 @@ body.batch-open .d-row.is-done { opacity: 0.6; }
 /* 사라진 줄의 그림자 — 옛 자리에 한 장 떠서 흐려진다(줄 이동 도우미가 놓고 치운다). 목록 안에 붙지만 자리를 차지하지 않는다 */
 .d-glide-ghost { position: absolute; margin: 0; box-sizing: border-box; pointer-events: none; z-index: 1; }
 @media (prefers-reduced-motion: reduce) {
-  .d-cb.is-pop:checked, .d-wcb.is-pop:checked, .d-row.is-completing .d-title, .d-mrow2.is-completing .ti, .d-prow2.is-completing .ti { animation: none; }
+  .d-cb.is-pop:checked, .d-wcb.is-pop:checked, .d-row.is-completing .d-title > .tx, .d-mrow2.is-completing .ti > .tx, .d-prow2.is-completing .ti > .tx { animation: none; }
   .d-lhd .sub .cnt { transition: none; }
 }
 
@@ -1391,8 +1402,22 @@ body.batch-open .d-row[data-task-id]:not(.is-done) { cursor: pointer; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 /* 업무 줄의 긴 문구(슬랙 원문 등)는 한 줄에서 자르지 않고 두 줄까지(말줄임) — 아이디어 줄과 같은 규칙이다.
-   두 줄(25px × 2)이 줄 높이(--row 54px) 안에 들어가 짧은 줄의 모양은 그대로다. 전문은 누르면 열리는 상세에 있다. */
-.d-row .d-title { white-space: normal; text-overflow: clip; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+   두 줄(25px × 2)이 줄 높이(--row 54px) 안에 들어가 짧은 줄의 모양은 그대로다. 전문은 누르면 열리는 상세에 있다.
+   누르는 판(.d-title)은 줄 높이만큼 서고(글자 위아래 빈 곳도 제목 누름), 두 줄 말줄임은 안쪽 글자 칸(.tx, uiTitleText)이 맡는다. */
+.d-row .d-title { align-self: stretch; display: flex; align-items: center; white-space: normal; text-overflow: clip; }
+.d-row .d-titlewrap { align-self: stretch; }
+/* 묶음은 글자 밑선 맞춤 그대로 — 판이 줄 높이를 차지해도 `· ● 프로젝트`·`원문`은 제목 첫 줄에 붙는다 */
+.d-row .d-titlewrap .d-title { align-self: auto; min-height: 100%; }
+.d-title > .tx { min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+/* 넓힌 제목 판(오늘·새로 들어온 것·레일·회의·프로젝트 줄)의 키보드 초점 테는 판이 아니라 글자 칸 둘레에 — 판은 쉬는 모습에 안 보이는 자리라.
+   글자 칸이 스스로 자르므로(말줄임) 판은 넘침을 자르지 않는다(테가 잘리지 않게) */
+.d-row .d-title, .d-ibrow .ti, .d-mrow .ti, .d-wrow .ti, .d-mrow2 .ti, .d-prow2 .ti { overflow: visible; min-width: 0; }
+.d-row .d-title:focus-visible, .d-ibrow .ti:focus-visible, .d-mrow .ti:focus-visible, .d-wrow .ti:focus-visible, .d-mrow2 .ti:focus-visible, .d-prow2 .ti:focus-visible { outline: none; }
+.d-row .d-title:focus-visible > .tx, .d-ibrow .ti:focus-visible > .tx, .d-mrow .ti:focus-visible > .tx, .d-wrow .ti:focus-visible > .tx, .d-mrow2 .ti:focus-visible > .tx, .d-prow2 .ti:focus-visible > .tx {
+  outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px;
+}
+/* 한 줄 말줄임 제목은 글자 칸이 말줄임을 맡는다 */
+.d-wrow .ti > .tx, .d-prow2 .ti > .tx { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .d-row.is-doing .d-title { font-weight: 600; }
 .d-title .new-dot {
   position: static; display: inline-block; width: 5px; height: 5px;
@@ -1707,12 +1732,14 @@ textarea.d-dtitle {
 /* 제목은 평소 두 줄까지(말줄임), 누르면(.is-open) 그 자리에서 전문 — 아이디어 줄(.d-rec.is-idea .ti)과 같은 규칙.
    두 줄이 되어도 체크·종류·상태·⋯는 첫 줄에 맞춰 선다(align-items: start + 같은 18px 줄 높이) */
 .d-mrow2 .ti {
-  min-width: 0; width: 100%; text-align: left; overflow: hidden;
-  white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 18px;
+  min-width: 0; width: 100%; text-align: left;
+  white-space: normal; line-height: 18px;
   border: 0; background: none; padding: 0; color: var(--text); font-family: inherit; font-size: var(--fs-sm); cursor: pointer;
 }
-.d-mrow2.is-open .ti { -webkit-line-clamp: unset; display: block; }
-.d-mrow2 .ti:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+/* 누르는 판은 줄 여백(위아래 5px)까지 — 18px 글줄 + 10 = 28px. 두 줄 말줄임은 안쪽 글자 칸(.tx)이 맡아 여백에 셋째 줄이 비치지 않는다 */
+.d-mrow2 .ti { padding-block: 5px; margin-block: -5px; }
+.d-mrow2 .ti > .tx { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.d-mrow2.is-open .ti > .tx { -webkit-line-clamp: unset; display: block; }
 .d-mrow2 .ac { height: var(--h-sm); margin: -5px 0; }
 .d-mrow2 button.ti:hover { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; }
 .d-mrow2 .st { font-size: 11.5px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -1875,7 +1902,7 @@ body.later-open .page { padding-right: 424px; }
   height: auto; min-height: 58px; padding: 8px 12px; row-gap: 1px; align-content: center;
 }
 .d-dbody .d-check, .d-dbody .d-sel { grid-area: ck; height: auto; align-self: center; }
-.d-dbody .d-title { grid-area: ti; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 22px; }
+.d-dbody .d-title { grid-area: ti; white-space: normal; line-height: 22px; }
 .d-dbody .d-titlewrap { grid-area: ti; flex-wrap: wrap; }
 .d-dbody .d-proj { display: none; }
 .d-dbody .d-meta { grid-area: mt; justify-content: flex-start; gap: 8px; font-size: 12.5px; }
@@ -2467,7 +2494,7 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-prow2 .ti {
   border: 0; background: none; padding: 0; width: 100%; min-height: var(--h-sm); text-align: left; cursor: pointer;
   font-family: inherit; font-size: var(--fs-lg); font-weight: 500; color: var(--text);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  white-space: nowrap;   /* 자르기·말줄임은 글자 칸(.tx)이 — 판이 자르면 초점 테가 잘린다 */
 }
 .d-prow2.is-sel .ti { font-weight: 600; color: var(--accent-text); }
 /* 진행 중인 업무는 오늘 목록(`.d-row.is-doing`)과 같게 제목 600 */
@@ -2475,6 +2502,9 @@ body.batch-open .d-toast { bottom: 76px; }
 /* 묶음 상세(BBUNDLE)의 줄 — 제목 바로 뒤에 어느 티켓 것인지 작은 번호(.d-pfrom). 제목은 내용만큼만 */
 .d-prow2 .d-titlewrap { min-width: 0; }
 .d-prow2 .d-titlewrap .ti { flex: 0 1 auto; width: auto; min-width: 0; }
+/* 누르는 판(상세 열기)은 줄 높이만큼 — 오늘 목록 .d-title과 같다(버튼이라 글자는 저절로 가운데) */
+.d-prow2 .ti, .d-prow2 .d-titlewrap { align-self: stretch; }
+.d-prow2 .d-titlewrap .ti { align-self: auto; min-height: 100%; }
 .d-pfrom { flex: none; font-size: var(--fs-cap); font-weight: 500; color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
 /* 묶음 상세의 `+ 할 일 추가` 끝 `→ KEY` — 할 일이 붙을 티켓, 누르면 바꾼다 */
 .d-paddto { flex: none; margin-left: 8px; font-size: 12.5px; color: var(--dim); white-space: nowrap; }
@@ -3278,9 +3308,11 @@ a.d-btn { text-decoration: none; }
   }
   /* 업무 행에만 걸리게 한다 — 이름 붙인 칸이 없는 다른 줄(결정·아이디어)까지 흔들리지 않게 */
   .d-row .d-check, .d-row .d-sel { grid-area: ck; width: 30px; height: auto; }
-  .d-title { grid-area: ti; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .d-title { grid-area: ti; white-space: normal; }
   /* 제목 묶음도 업무 행에만 칸 이름을 준다 — 결정·아이디어 줄에는 이름 붙인 칸이 없어 줄이 어긋난다 */
   .d-row .d-titlewrap { grid-area: ti; flex-wrap: wrap; }
+  /* 좁은 폭은 줄 누름이 곧 제목 누름(uiRowTapOpens) — 판을 늘리지 않는다(묶음이 두 줄로 접힐 때 늘어나지 않게) */
+  .d-row .d-titlewrap .d-title { min-height: 0; }
   .d-proj { display: none; }
   /* 두 줄 행에서도 같은 순서로 이어 붙는다(상태 → 기한) — 왼쪽 정렬만 다르다 */
   .d-meta { grid-area: mt; justify-content: flex-start; flex-wrap: wrap; row-gap: 4px; }
@@ -3321,6 +3353,9 @@ a.d-btn { text-decoration: none; }
 
   /* 새로 들어온 줄은 제목 한 줄 / 동작 한 줄 */
   .d-ibrow { grid-template-columns: minmax(0, 1fr); row-gap: 6px; }
+  /* 좁은 폭은 줄이 두 칸(제목 / 동작)이라 묶음은 늘리지 않고, 제목 판만 위아래 4px(아래는 동작 줄과의 틈 6px 안) */
+  .d-ibmain { margin-block: 0; }
+  .d-ibrow .ti { margin-block: -4px; padding-block: 4px; }
   .d-ibrow .jira-control { display: none; }
   .d-ibacts { flex-wrap: wrap; justify-self: end; }
 
@@ -3332,8 +3367,10 @@ a.d-btn { text-decoration: none; }
   }
   .d-prow2.is-done { grid-template-columns: 30px auto minmax(0, 1fr) auto; grid-template-areas: "ck ti ti c" "ck a a a"; }
   .d-prow2 .d-check { grid-area: ck; width: 30px; height: auto; }
-  .d-prow2 .ti { grid-area: ti; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .d-prow2 .ti { grid-area: ti; white-space: normal; }
+  .d-prow2 .ti > .tx { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: normal; text-overflow: clip; }
   .d-prow2 .d-titlewrap { grid-area: ti; flex-wrap: wrap; }
+  .d-prow2 .d-titlewrap .ti { min-height: 0; }
   .d-prow2 .dd, .d-prow2 .res { justify-self: start; text-align: left; font-size: 11.5px; }
   .d-prow2 .dd { grid-area: c; }
   .d-prow2 .dd:empty { display: none; }

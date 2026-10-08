@@ -14,8 +14,15 @@ const definitions = script.slice(0, script.indexOf(DEFINITIONS_MARKER));
 function element() {
   const attributes = new Map();
   return {
-    value: '', disabled: false, hidden: false, textContent: '', children: [], listeners: {}, dataset: {},
-    parent: null, connected: true, blurs: 0,
+    value: '', disabled: false, hidden: false, children: [], listeners: {}, dataset: {},
+    parent: null, connected: true, blurs: 0, ownText: undefined,
+    // 글자를 직접 넣은 노드는 그 글자 — 줄 제목처럼 글자를 안쪽 칸(.tx, uiTitleText)에 넣은 판은 그 칸의 글자(실제 DOM과 같게).
+    get textContent() {
+      if (this.ownText !== undefined) return this.ownText;
+      const tx = this.children.find(kid => kid && kid.className === 'tx');
+      return tx ? tx.textContent : '';
+    },
+    set textContent(value) { this.ownText = value; },
     get isConnected() { return this.connected; },
     get childNodes() { return this.children; },
     classList: { toggle() {}, contains() { return false; }, add() {}, remove() {} },
@@ -306,6 +313,34 @@ test('입력 씹힘 ⑤: 누구에게 칸(uiMenuText)은 저장 중에도 잠그
   app.run(enter); await settle();
   assert.deepEqual(JSON.parse(app.run('JSON.stringify(sent)')), ['김', '김철수', '김철수'], '실패한 글은 다음 Enter가 다시 보낸다');
   app.run('release[2].resolve()'); await settle();
+});
+
+test('칸의 Esc는 칸만 닫는다 — 그룹 `+` 줄·결과 한 줄·상세 제목·결정 문구 모두 문서(열린 상세 카드·서랍의 Esc 스택)로 올려 보내지 않는다', () => {
+  const app = pureClient();
+  app.run(`escEvent = () => ({ key: 'Escape', isComposing: false, stopped: 0, preventDefault() {}, stopPropagation() { this.stopped += 1; } });
+    holder = document.createElement('div');
+    addRow = uiGroupAddRow('group:게임', '/api/today-task/create', 'x'); addRow.hidden = false;
+    e1 = escEvent(); addRow.children[0].listeners.keydown(e1);
+    meta = document.createElement('span'); uiResultCell(meta, { id: 'i1', description: '보고서 쓰기' });
+    meta.children[0].listeners.click(); e2 = escEvent(); meta.children[0].listeners.keydown(e2);
+    title = document.createElement('h2'); holder.appendChild(title); panelTitleEdit(title, { id: 'i2', description: '제목' });
+    area = holder.children[0]; e3 = escEvent(); area.listeners.keydown(e3);
+    desc = document.createElement('span'); holder.appendChild(desc); makeEditableDesc(desc, { id: 'i3', description: '결정 문구' });
+    realMake = document.createElement; document.createElement = (tag) => Object.assign(realMake(tag), { setSelectionRange() {} });
+    desc.listeners.click(); document.createElement = realMake;
+    input = holder.children[1]; e4 = escEvent(); input.listeners.keydown(e4);`);
+  assert.equal(app.run('e1.stopped'), 1, '그룹 `+` 줄');
+  assert.equal(app.run('addRow.hidden'), true, '그룹 `+` 줄은 닫힌다');
+  assert.equal(app.run('e2.stopped'), 1, '결과 한 줄');
+  assert.equal(app.run('e3.stopped'), 1, '상세 제목');
+  assert.equal(app.run('holder.children[0] === title'), true, '상세 제목은 원래 글자로 돌아온다');
+  assert.equal(app.run('e4.stopped'), 1, '결정 문구');
+  assert.equal(app.run('holder.children[1] === desc'), true, '결정 문구는 원래 글자로 돌아온다');
+  assert.equal(app.run('desc.focused'), true, '초점은 돌아온 제목 판으로(body로 빠지지 않게)');
+  // 한글 조합 중의 Esc는 글자 확정이라 칸도 문서도 건드리지 않는다
+  app.run(`addRow.hidden = false; e5 = escEvent(); e5.isComposing = true; addRow.children[0].listeners.keydown(e5);`);
+  assert.equal(app.run('e5.stopped'), 0);
+  assert.equal(app.run('addRow.hidden'), false);
 });
 
 test('입력 씹힘 ⑤: 결과 한 줄(uiResultCell)은 저장 중에도 잠그지 않는다 — 두 번째 Enter는 넘기고, 실패하면 그동안 친 글까지 칸에 남고, 성공하면 닫혀 결과를 보인다', async () => {
@@ -12344,7 +12379,9 @@ test('Claude로 다듬는 중인데 Claude가 없거나 로그인이 풀려 멈�
 
 test('긴 문구: 업무 줄 제목은 두 줄까지(말줄임) — 줄 높이 안에 들어가고, 도움말에 원문 모드 문답', () => {
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
-  assert.match(css, /\.d-row \.d-title \{ white-space: normal; text-overflow: clip; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; \}/);
+  // 누르는 판(.d-title)은 줄 높이로 서고, 두 줄 말줄임은 안쪽 글자 칸(.tx)이 맡는다 — 판의 빈 곳이 셋째 줄을 비추지 않는다.
+  assert.match(css, /\.d-row \.d-title \{ align-self: stretch; display: flex; align-items: center; white-space: normal; text-overflow: clip; \}/);
+  assert.match(css, /\.d-title > \.tx \{ min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; \}/);
   assert.match(css, /--row: 54px;/, '두 줄(25px × 2)이 줄 높이 안에 들어간다');
   const app = pureClient();
   const faq = JSON.parse(app.run('JSON.stringify(SETTINGS_FAQ)')).flatMap(([, rows]) => rows);
@@ -12859,8 +12896,8 @@ test('WP-W 회의 ⋯의 프로젝트 연결: 고르면 회의 번호를 함께 
 
 test('WP-W 화면 파일 규칙: 회의 줄에 새 innerHTML이 없고, 두 줄/펼침 CSS가 아이디어 줄과 같은 규칙이다', () => {
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
-  assert.match(css, /\.d-mrow2 \.ti \{[^}]*-webkit-line-clamp: 2/);
-  assert.match(css, /\.d-mrow2\.is-open \.ti \{ -webkit-line-clamp: unset; display: block; \}/);
+  assert.match(css, /\.d-mrow2 \.ti > \.tx \{[^}]*-webkit-line-clamp: 2/);
+  assert.match(css, /\.d-mrow2\.is-open \.ti > \.tx \{ -webkit-line-clamp: unset; display: block; \}/);
   assert.match(css, /\.d-wrow\.is-wrap \.tiwrap \{ grid-area: ti; display: flex; flex-wrap: wrap;/);
   const meetings = fs.readFileSync(path.join(__dirname, 'meetings-ui.js'), 'utf8');
   const uses = meetings.split('\n').filter(line => /innerHTML/.test(line) && !/^\s*\/\//.test(line));
@@ -16632,7 +16669,7 @@ test('체크 표시 하나: 업무 체크(.d-cb)와 레일 체크(.d-wcb)가 색
   assert.match(css, /\.d-cb:hover, \.d-wcb:hover \{ border-color: var\(--accent\); \}/);
   assert.match(css, /\.d-cb:checked, \.d-wcb:checked \{ background: var\(--accent\); border-color: var\(--accent\); \}/);
   assert.match(css, /\.d-cb\.is-pop:checked, \.d-wcb\.is-pop:checked \{ animation: d-pop-check var\(--t-fast\) var\(--ease\); \}/);
-  assert.match(css, /\.d-cb\.is-pop:checked, \.d-wcb\.is-pop:checked, \.d-row\.is-completing \.d-title, \.d-mrow2\.is-completing \.ti, \.d-prow2\.is-completing \.ti \{ animation: none; \}/, '움직임 줄이기 — 회의·프로젝트 줄의 긋기도(C2)');
+  assert.match(css, /\.d-cb\.is-pop:checked, \.d-wcb\.is-pop:checked, \.d-row\.is-completing \.d-title > \.tx, \.d-mrow2\.is-completing \.ti > \.tx, \.d-prow2\.is-completing \.ti > \.tx \{ animation: none; \}/, '움직임 줄이기 — 회의·프로젝트 줄의 긋기도(C2)');
   assert.doesNotMatch(css, /\n\.d-wcb:(hover|checked) \{/, '레일 체크만의 색 규칙은 없다');
 });
 
@@ -17845,9 +17882,9 @@ test('줄 이동 C2: 회의 초안 펼침의 따로 만든 도우미(meetingFlip
 
 test('줄 이동 C2 완료 흐름: 회의·프로젝트 줄도 체크하면 제목에 줄이 그어진다(.ti) — 프로젝트 상세는 `끝낸 것` 제목 쪽으로 들어간다', () => {
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
-  assert.match(css, /\.d-row\.is-completing \.d-title, \.d-mrow2\.is-completing \.ti, \.d-prow2\.is-completing \.ti \{\n  background-image/);
+  assert.match(css, /\.d-row\.is-completing \.d-title > \.tx, \.d-mrow2\.is-completing \.ti > \.tx, \.d-prow2\.is-completing \.ti > \.tx \{\n  background-image/);
   assert.match(css, /\.d-row\.is-done\.is-completing \.d-title, \.d-mrow2\.is-done\.is-completing \.ti, \.d-prow2\.is-done\.is-completing \.ti \{ text-decoration-color: transparent; \}/);
-  assert.match(script, /const UI_GLIDE_STRIKE = '\.d-title, \.ti';/);
+  assert.match(script, /const UI_GLIDE_STRIKE = '\.d-title > \.tx, \.ti > \.tx';/);
   assert.match(fs.readFileSync(path.join(__dirname, 'projects-ui.js'), 'utf8'), /row\.dataset\.doneInto = 'grp:끝낸 것';/);
   const app = workflowsClient();
   app.run(`workflowData = { items: [], meetings: [] }; wfIndexData();`);
@@ -18864,6 +18901,18 @@ test('②: 알림 한 줄 — 팔로업 후보는 프로젝트마다(제목에 �
   // 할 것이 없으면 조용한 한 마디.
   const calm = app.run("reportTidyAlertLine({ weekKey: 'W', draft: { rows: [] } })");
   assert.deepEqual([calm.getAttribute('role'), calm.children[0].textContent], ['status', '손볼 줄이 없어요 — 줄을 골라 아래 막대로 정리해요']);
+});
+test('②: 정리 모드인 채 탭을 옮기면 모드가 끝나 막대(#reportNestBarEl)와 body.nest-open이 다른 탭에 남지 않는다 — 저장이 도는 중이어도', () => {
+  for (const busy of [false, true]) {
+    const app = tidyClient();
+    app.run(`nest = null; document.body.classList.toggle = (name, on) => { if (name === 'nest-open') nest = on; };
+      reportAutosaveLeave = () => {}; reportRenderedItem = item; reportTidyStart(item); reportTidyBar(item);`);
+    assert.deepEqual([app.run('nest'), app.run("document.getElementById('reportNestBarEl').hidden")], [true, false], '정리 모드면 막대가 선다');
+    app.run(`reportBusy = ${busy}; reportTabLeave(); reportBusy = false;`);
+    assert.equal(app.run('reportTidy'), null, busy ? '저장 중이어도 끝난다' : '정리 모드가 끝난다');
+    assert.deepEqual([app.run('nest'), app.run("document.getElementById('reportNestBarEl').hidden")], [false, true], '막대가 내려간다');
+    assert.equal(app.run('escStack.includes(reportTidyEnd)'), false, 'Esc 스택에서도 빠진다');
+  }
 });
 test('②: 정리 모드 줄은 글머리 자리 선택 칸(Tab은 선택 칸에만) — 줄 끝 알약·담기 질문·글자 고치기가 쉬고, Shift로 여러 줄을 고른다', () => {
   const app = tidyClient();
@@ -20444,7 +20493,7 @@ test('탭 떠나면 저장: setActiveTab은 주간요약을 떠날 때만 부르
   const source = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
   const body = source.slice(source.indexOf('function setActiveTab('), source.indexOf('Object.entries(TABS).forEach', source.indexOf('function setActiveTab(')));
   assert.match(source, /weekly: \{ grid: 'gridWeekly', btn: 'tabBtnWeekly', leave: \(\) => \{ if \(typeof reportTabLeave === 'function'\) reportTabLeave\(\); \} \},/);
-  assert.match(fs.readFileSync(path.join(__dirname, 'report-ui.js'), 'utf8'), /function reportTabLeave\(\) \{\n  reportAutosaveLeave\(\);\n\}/, '기다리지 않는다');
+  assert.match(fs.readFileSync(path.join(__dirname, 'report-ui.js'), 'utf8'), /function reportTabLeave\(\) \{\n  reportAutosaveLeave\(\);\n  reportTidyEnd\(\{ leaving: true \}\);\n\}/, '기다리지 않는다(정리 모드는 끝낸다)');
   const whole = source.slice(source.indexOf('function setActiveTab('), source.indexOf('\n}\n', source.indexOf('function setActiveTab(')));
   assert.ok(whole.indexOf('TABS[activeTabKey]?.leave?.()') > 0 && whole.indexOf('TABS[activeTabKey]?.leave?.()') < whole.indexOf('activeTabKey = tab;'), 'activeTabKey를 바꾸기 전');
   assert.doesNotMatch(body, /await /);

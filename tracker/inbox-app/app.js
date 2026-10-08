@@ -847,7 +847,7 @@ function uiHeldFlush() {
 // doneFor: 체크 표시(uiGlideDoneMark)를 믿는 시간 · jitter: 잇지 않는 가로 어긋남(스크롤바)
 const UI_GLIDE = { ease: 'cubic-bezier(0.22, 0.8, 0.3, 1)', move: 200, enter: 140, fade: 120, strike: 200, tint: 170, within: 500, max: 40, rows: 150, doneFor: 2000, jitter: 8 };
 const UI_GLIDE_ROWS = '[data-task-id], [data-move-id], [data-rail-id]';
-const UI_GLIDE_STRIKE = '.d-title, .ti'; // 완료 흐름에서 줄이 그어지는 제목 — 오늘 줄(.d-title)·회의·프로젝트 줄(.ti)
+const UI_GLIDE_STRIKE = '.d-title > .tx, .ti > .tx'; // 완료 흐름에서 줄이 그어지는 제목 글자 칸 — 오늘 줄(.d-title)·회의·프로젝트 줄(.ti)
 const UI_GLIDE_ENTRANCE = ['is-new', 'is-opening', 'is-rise', 'd-unfold', 'd-unfold-big', 'is-pop']; // 그림자가 물려받지 않는 등장 클래스(uiGlideGhostMake)
 let uiActAt = 0;        // 마지막 사용자 동작 시각
 let uiActQuiet = false; // 그 동작이 키보드 연타(1초 안에 이어진 키·누르고 있는 키)였다
@@ -1652,7 +1652,8 @@ function uiGroupAddRow(key, endpoint, announceText) {
   input.placeholder = '이 그룹에 추가 — Enter';
   input.setAttribute('aria-label', `${key === '__misc__' ? '프로젝트 없음' : key.slice(key.indexOf(':') + 1)} 그룹에 할 일 추가`);
   input.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && !event.isComposing) { row.hidden = true; return; }
+    // 칸의 Esc는 칸만 닫는다 — 문서의 Esc 스택(열린 상세 카드·서랍)까지 가지 않게 여기서 멈춘다(DESIGN 동작 관습 2).
+    if (event.key === 'Escape' && !event.isComposing) { event.stopPropagation(); row.hidden = true; return; }
     if (event.key !== 'Enter' || event.isComposing) return;
     const description = input.value.trim();
     if (!description) return;
@@ -1785,7 +1786,10 @@ function uiResultCell(meta, item) {
     // 그 사이 목록 다시 그리기가 칸을 떼어 내지 않게 한다(uiRenderHeld — 잠긴 칸을 지키던 것과 같은 규칙).
     let saving = false;
     input.addEventListener('keydown', async (event) => {
-      if (event.isComposing || saving) return;
+      if (event.isComposing) return;
+      // 칸의 Esc는 칸만 닫는다(저장 중이면 넘기기만) — 열린 상세 카드까지 닫히지 않게 문서로 올려 보내지 않는다.
+      if (event.key === 'Escape') event.stopPropagation();
+      if (saving) return;
       if (event.key === 'Escape') { uiResultCell(meta, item); return; }
       if (event.key !== 'Enter') return;
       const value = input.value.trim();
@@ -1839,7 +1843,7 @@ function uiTaskRow(item, opts = {}) {
   const title = document.createElement('span');
   title.className = 'd-title';
   title.title = item.description;
-  title.textContent = item.description;
+  const titleText = uiTitleText(title, item.description);
   // 선택 중에는 키보드가 줄마다 선택 칸 한 곳에서만 멈춘다(Space로 고른다). 끝내면 다시 그려 0으로 돌아온다.
   title.tabIndex = taskSelectionMode ? -1 : 0;
   // 선택 중에는 선택 칸의 이름표(`제목 — 선택`)가 같은 말을 한다 — 제목은 낭독기에서 한 번 더 읽히지 않게 숨긴다
@@ -1872,7 +1876,7 @@ function uiTaskRow(item, opts = {}) {
     if (uiRowTapOpens(event, '.d-title')) open();
   });
   // NEW는 누르는 버튼이 아니라 표시다 — 화면에 잠깐 머물면 조용히 사라진다(observeNewItem).
-  if (item.isNew && !done) { title.prepend(renderNewDot(item)); observeNewItem(row, item); }
+  if (item.isNew && !done) { titleText.prepend(renderNewDot(item)); observeNewItem(row, item); }
 
   // 그룹 제목이 프로젝트를 말해 주지 않는 자리(진행 중·마감순·서랍)에서는 제목 바로 뒤에 `· ● 프로젝트`.
   // 원문이 있으면 그 뒤에 조용한 `원문` 링크가 늘 따라온다.
@@ -2012,13 +2016,13 @@ function uiRailRow(opts) {
   const title = document.createElement(opts.onOpen ? 'button' : 'span');
   title.className = 'ti';
   title.title = opts.text;
-  title.textContent = opts.text;
+  const titleText = uiTitleText(title, opts.text);
   if (opts.onOpen) {
     title.type = 'button';
     title.setAttribute('aria-label', `${opts.text} 상세 보기`);
     title.addEventListener('click', opts.onOpen);
   }
-  if (opts.badge) title.prepend(opts.badge);
+  if (opts.badge) titleText.prepend(opts.badge);
   // 원문이 있으면 제목 바로 뒤에 조용한 `원문` 링크(줄 열기로 번지지 않는다).
   // opts.project(`· ● 이름`, 리마인드)도 같은 묶음에서 제목 바로 뒤에 선다 — 원문보다 앞.
   if (opts.source || opts.project) {
@@ -2886,7 +2890,7 @@ function renderCalendarNow(calendar) {
     const title = document.createElement('button');
     title.type = 'button';
     title.className = 'ti';
-    title.textContent = event.title;
+    const titleText = uiTitleText(title, event.title);
     // 프로젝트 이름은 어디서나 같은 꼴로 적는다(파일에 저장된 `가입_개선`을 `가입 개선`으로).
     // 줄 안의 짧은 표기라 지라는 요약만(모르면 키) — 전체 `KEY · 요약`은 title 툴팁에 남긴다.
     const projectName = wfMeetingProjectName(event);
@@ -2897,7 +2901,7 @@ function renderCalendarNow(calendar) {
       const project = document.createElement('span');
       project.className = 'pj';
       project.textContent = projectName;
-      title.appendChild(project);
+      titleText.appendChild(project);
     }
     title.addEventListener('click', () => openMeetingPanel(event));
     row.appendChild(title);
@@ -3590,7 +3594,20 @@ function ideaMenuSections(item, row) {
 // 다시 누르면 접힌다. 잘리지 않은 제목은 펼칠 것이 없으니 원래 동작(회의 줄은 상세 열기·문구 고치기,
 // 아이디어는 누를 수 없는 글자)을 한다. 그릴 때(다음 화면 갱신)와 창 크기가 바뀔 때 다시 잰다.
 // 잘렸는지 재는 함수 — 가짜 DOM 테스트는 이것을 바꿔 끼운다.
-let uiTitleClamped = el => !!el && el.scrollHeight > el.clientHeight + 1;
+// 줄 제목의 글자 칸 — 누르는 판(제목 요소)은 줄 높이로 넓히고 두 줄 말줄임은 이 안쪽 칸이 맡는다
+// (판에 여백을 넣으면 셋째 줄이 비치고 `::after`는 잘린다 — DESIGN 「접근성 바닥 → 누르는 영역」). NEW 점·`.pj`도 이 칸에 넣는다.
+function uiTitleText(el, text) {
+  const tx = document.createElement('span');
+  tx.className = 'tx';
+  tx.textContent = text;
+  el.replaceChildren(tx);
+  return tx;
+}
+// 잘림은 글자 칸에서 잰다(판은 줄 높이라 잘림을 모른다).
+let uiTitleClamped = (el) => {
+  const box = el && el.querySelector ? el.querySelector('.tx') || el : el;
+  return !!box && box.scrollHeight > box.clientHeight + 1;
+};
 function uiClampMark(row, title, onMode) {
   const open = String(row.className).includes(' is-open');
   // 펼친 뒤에는 잘림이 없어도 접을 수 있어야 한다 — 펼침 모드를 유지한다.
@@ -4305,7 +4322,8 @@ function panelTitleEdit(titleEl, item) {
   area.addEventListener('blur', commit);
   area.addEventListener('keydown', (event) => {
     if (event.isComposing) return;
-    if (event.key === 'Escape') { event.preventDefault(); cancel(); return; }
+    // 제목 칸의 Esc는 고치기만 취소한다 — 상세 카드는 열린 채로(문서의 Esc 스택까지 올려 보내지 않는다).
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancel(); return; }
     if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); area.blur(); }
   });
 }
@@ -6267,11 +6285,11 @@ function renderInboxNow(items) {
     main.className = 'd-ibmain';
     const title = document.createElement('span');
     title.className = 'ti';
-    title.textContent = item.description;
+    const titleText = uiTitleText(title, item.description);
     makeEditableDesc(title, item);
     // 말줄임으로 잘린 문구도 마우스를 올리면 전부 읽을 수 있게(수정 안내는 aria-label이 한다).
     title.title = item.description;
-    if (item.isNew) { title.prepend(renderNewDot(item)); observeNewItem(row, item); }
+    if (item.isNew) { titleText.prepend(renderNewDot(item)); observeNewItem(row, item); }
     main.appendChild(title);
     // 프로젝트가 있으면 제목 뒤에 조용한 표기(다른 줄과 같은 uiInlineProject) — 없으면 지어내지 않는다.
     if (item.jira || item.group || item.project) main.appendChild(uiInlineProject(item));
@@ -6503,7 +6521,8 @@ function makeEditableDesc(el, item) {
     input.addEventListener('keydown', (e) => {
       if (e.isComposing) return;
       if (e.key === 'Enter') input.blur();
-      if (e.key === 'Escape') { committed = true; input.replaceWith(el); }
+      // 칸의 Esc는 칸만 닫는다 — 열린 상세 카드·서랍까지 닫히지 않게 문서로 올려 보내지 않고, 초점은 돌아온 제목 판으로.
+      if (e.key === 'Escape') { e.stopPropagation(); committed = true; input.replaceWith(el); el.focus(); }
     });
   });
 }
