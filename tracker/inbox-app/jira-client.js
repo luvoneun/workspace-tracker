@@ -71,6 +71,8 @@ const UNSURE_SETTLE_MS = 30 * 1000;
 const UNSURE_LOOKBACK_MIN = 10;
 // 한 번에 읽어 요약을 대조하는 개수. 이보다 많이 오면 가를 수 없다고 보고 모름을 유지한다.
 const UNSURE_LOOKUP_LIMIT = 50;
+// 찾기가 0개면 같은 요청 안에서 이만큼 쉬고 한 번 더 찾는다 — 그래도 0개일 때만 새로 만든다(검색 지연 대비).
+const UNSURE_RECHECK_MS = 3000;
 
 // 지라가 주는 범주 열쇠는 셋뿐이다. 모르는 값은 `진행`으로 본다(상태 이름은 그대로 보여 준다).
 const CATEGORY = { new: 'todo', indeterminate: 'doing', done: 'done' };
@@ -685,7 +687,9 @@ function createJiraClient({ settings, request = (...args) => fetch(...args), rea
       + (parentKey ? ` AND parent = ${wantKey(parentKey)}` : '') + ' ORDER BY created DESC';
     const body = await search(jql, token(), 'summary,issuetype,parent', UNSURE_LOOKUP_LIMIT);
     const issues = Array.isArray(body && body.issues) ? body.issues : null;
-    if (!issues || issues.length >= UNSURE_LOOKUP_LIMIT) throw jiraError('other');
+    // 덜 읽은 쪽이 있으면(새 주소는 nextPageToken·isLast:false, 옛 주소는 total) 남은 쪽에 같은 이슈가 있을 수 있다.
+    const partial = !!(body && (body.nextPageToken || body.isLast === false || (typeof body.total === 'number' && body.total > (issues || []).length)));
+    if (!issues || partial || issues.length >= UNSURE_LOOKUP_LIMIT) throw jiraError('other');
     const want = wantSummary(summary);
     return issues
       .filter(entry => entry && JIRA_KEY_RE.test(text(entry.key)) && text(entry.fields && entry.fields.summary).trim() === want)
@@ -836,7 +840,8 @@ function makeKind(error, writing = false) {
 
 // 서버가 쓰는 겉면: 설정 확인 + 키별 60초 메모리 캐시 + 화면에 그대로 보여 줄 오류 문구.
 // 파일은 아무것도 쓰지 않는다(조회는 기록을 남기지 않는다).
-function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = Date.now, ttlMs = JIRA_CACHE_MS } = {}) {
+const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = Date.now, ttlMs = JIRA_CACHE_MS, sleep = pause } = {}) {
   const settings = jiraSettings(config);
   const cache = new Map();
   // 완료한 내 티켓은 키가 없는 목록이라 캐시도 한 벌뿐이다(기간이 바뀌면 버린다).
@@ -849,6 +854,8 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
   // 결과 모름으로 끝난 이슈 하나하나의 지문(프로젝트·부모·종류·요약) → 모름이 난 시각. 계획 지문과 달리
   // 하위 티켓 `다시 시도`(이미 있는 에픽에 붙이는 다른 계획)로 와도 같은 이슈면 잡힌다. 메모리에만 있다.
   const unsureMade = new Map();
+  // 지금 지라에 보내거나 찾는 중인 이슈 지문 — 다른 계획이 같은 이슈를 동시에 보내면 둘째는 기다리게 한다(assignBusy와 같은 방식).
+  const makeBusy = new Set();
   // 내 계정 id(반응 필요의 "나" 판별). 프로세스마다 한 번 묻고 메모리에만 둔다 — 어디에도 나가지 않는다.
   let mineId = null;
   // 담당자 바꾸기(BJASSIGN2) — 되돌리기 표(undoId → 직전·직후 담당, 10분, 한 번 쓰면 지움)와
@@ -1179,16 +1186,29 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
   // 돌려주는 것: { key, url } · 찾았으면 { key, url, found: true } · 못 만들었거나 모르면 { kind }.
   // 찾기 규칙: 같은 프로젝트·종류·부모·요약(글자 그대로)·보고자=나·모름이 난 시각 10분 전 이후 생성(findMade).
   //  - 모름이 난 뒤 30초 안이면 찾지도 만들지도 않는다(검색이 방금 만든 것을 아직 못 잡을 수 있다) → makeSettling
-  //  - 하나 찾음 → 그 키를 쓰고 새로 만들지 않는다 · 없음 → 그때만 새로 만든다
+  //  - 하나 찾음 → 그 키를 쓰고 새로 만들지 않는다 · 없음 → 3초 쉬고 한 번 더 찾아 그래도 없을 때만 새로 만든다
+  //  - 같은 이슈를 다른 요청이 지금 보내거나 찾는 중이면 → makeSettling
   //  - 둘 이상이거나 찾기도 실패 → 모름을 유지하고 만들지 않는다(자동으로 다시 하지 않는다) → makeUnsure
   async function makeOnce(client, issue) {
     const sig = JSON.stringify([issue.projectKey, issue.parentKey || null, issue.issueTypeId, issue.summary]);
+    if (makeBusy.has(sig)) return { kind: 'makeSettling' };
+    makeBusy.add(sig);
+    try {
+      return await makeOnceFree(client, issue, sig);
+    } finally {
+      makeBusy.delete(sig);
+    }
+  }
+  async function makeOnceFree(client, issue, sig) {
     const since = unsureMade.get(sig);
     if (since !== undefined) {
       if (now() - since < UNSURE_SETTLE_MS) return { kind: 'makeSettling' };
+      const look = () => client.findMade({ ...issue, minutes: (now() - since) / 60000 + UNSURE_LOOKBACK_MIN });
       let found;
       try {
-        found = await client.findMade({ ...issue, minutes: (now() - since) / 60000 + UNSURE_LOOKBACK_MIN });
+        found = await look();
+        // 0개면 검색이 아직 못 잡았을 수 있다 — 짧게 쉬고 한 번 더 본다.
+        if (!found.length) { await sleep(UNSURE_RECHECK_MS); found = await look(); }
       } catch { return { kind: 'makeUnsure' }; }
       if (found.length > 1) return { kind: 'makeUnsure' };
       unsureMade.delete(sig);
@@ -1344,7 +1364,7 @@ module.exports = {
   shapeCreateTypes, epicTypeOf, childTypesOf, defaultChildType,
   JIRA_KEY_RE, JIRA_TIMEOUT_MS, JIRA_CACHE_MS, JIRA_LIST_LIMIT, MY_ISSUES_JQL, JIRA_MESSAGE: MESSAGE,
   JIRA_DONE_DAYS, JIRA_DONE_MAX_DAYS, doneIssuesJql, JIRA_CREATE_MAX, JIRA_SUMMARY_MAX,
-  UNSURE_KEEP_MS, UNSURE_SETTLE_MS, UNSURE_LOOKBACK_MIN,
+  UNSURE_KEEP_MS, UNSURE_SETTLE_MS, UNSURE_LOOKBACK_MIN, UNSURE_RECHECK_MS,
   adfText, attentionPreview, shapeAttention, attentionOrder,
   ATTENTION_JQL, ATTENTION_LIMIT, ATTENTION_PREVIEW_MAX,
 };
