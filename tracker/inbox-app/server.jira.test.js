@@ -1702,7 +1702,8 @@ test('지라두벌 ②: 5xx로 안 만들어졌으면 다시 보낼 때 찾아�
   let clock = 1000;
   const refuse = { '바쁜 에픽': 503 };
   const fake = jiraMakeFake({ refuse });
-  const api = jiraMakeApi(fake, { now: () => clock });
+  const slept = [];
+  const api = jiraMakeApi(fake, { now: () => clock, sleep: async (ms) => { slept.push(ms); clock += ms; } });
   const plan = { projectKey: 'IO', epic: { summary: '바쁜 에픽' }, children: [] };
   assert.equal((await api.create({ plan })).kind, 'makeUnsure');
   assert.equal(fake.made.length, 0);
@@ -1712,7 +1713,8 @@ test('지라두벌 ②: 5xx로 안 만들어졌으면 다시 보낼 때 찾아�
   fake.made.push({ key: 'IO-1', summary: '바쁜 에픽', parent: null, type: '10001' });
   const again = await api.create({ plan });
   assert.equal(again.ok, true);
-  assert.equal(fake.finds.length, 1, '보내기 전에 먼저 찾았다');
+  assert.equal(fake.finds.length, 2, '보내기 전에 찾고, 0개라 짧게 쉬고 한 번 더 찾았다');
+  assert.deepEqual(slept, [jiraModule.UNSURE_RECHECK_MS]);
   assert.equal(again.epic.found, undefined, '찾은 것이 없어 새로 만들었다');
   assert.equal(fake.made.filter(entry => entry.summary === '바쁜 에픽' && entry.type === '10000').length, 1);
 });
@@ -1780,6 +1782,89 @@ test('지라두벌 ⑤: 하위 티켓 하나가 결과 모름이면 그 줄만 �
   assert.equal(fake.made.filter(entry => entry.summary === '[iOS] 하위').length, 1, '두 벌 없음');
   assert.equal(fake.finds.length, 1);
   assert.match(fake.finds[0], new RegExp(`AND parent = ${epicKey} ORDER BY`), '하위는 같은 부모로 좁힌다');
+});
+
+test('지라두벌 검수: 다시 찾을 때 0개였다가 두 번째에 잡히면 그 키를 쓴다(검색 지연)', async () => {
+  let clock = 1000;
+  const fake = jiraMakeFake({ lose: { '늦게 잡힘': true } });
+  const hidden = [];
+  const plain = fake.request;
+  // 첫 찾기에는 방금 만든 것이 아직 안 잡힌다.
+  const api = jiraMakeApi({ request: (url, options) => (hidden.length < 1 && String(url).includes('search/jql') ? (hidden.push(1), json({ issues: [] })) : plain(url, options)) },
+    { now: () => clock, sleep: async (ms) => { clock += ms; } });
+  const plan = { projectKey: 'IO', epic: { summary: '늦게 잡힘' }, children: [] };
+  assert.equal((await api.create({ plan })).kind, 'makeUnsure');
+  clock += 30 * 1000;
+  const again = await api.create({ plan });
+  assert.equal(again.ok, true);
+  assert.equal(again.epic.found, true);
+  assert.equal(fake.made.length, 1, '두 벌 없음');
+});
+
+test('지라두벌 검수: 찾기가 덜 읽은 쪽(nextPageToken·isLast:false·total)이거나 50개 꽉 차면 모름 유지', async () => {
+  const pages = [
+    { issues: [], nextPageToken: 'next' },
+    { issues: [], isLast: false },
+    { issues: [], total: 3 },
+    { issues: Array.from({ length: 50 }, (_, at) => ({ key: `IO-${at + 1}`, fields: { summary: `다른 ${at}`, issuetype: { id: '10000' } } })) },
+  ];
+  for (const page of pages) {
+    let clock = 1000;
+    const fake = jiraMakeFake({ lose: { '쪽 시험': true } });
+    const plain = fake.request;
+    const api = jiraMakeApi({ request: (url, options) => (String(url).includes('search/jql') ? json(page) : plain(url, options)) },
+      { now: () => clock, sleep: async (ms) => { clock += ms; } });
+    const plan = { projectKey: 'IO', epic: { summary: '쪽 시험' }, children: [] };
+    assert.equal((await api.create({ plan })).kind, 'makeUnsure');
+    clock += 31 * 1000;
+    assert.equal((await api.create({ plan })).kind, 'makeUnsure', JSON.stringify(Object.keys(page)));
+    assert.equal(fake.made.length, 1, '하나 더 만들지 않는다');
+  }
+});
+
+test('지라두벌 검수: 30초 경계 — 29.999초는 기다림, 30초부터 찾는다 · 24시간 지난 지문은 지워 평소처럼 만든다', async () => {
+  let clock = 1000;
+  const lose = { '경계': true };
+  const fake = jiraMakeFake({ lose, findStatus: 503 });
+  const api = jiraMakeApi(fake, { now: () => clock, sleep: async (ms) => { clock += ms; } });
+  const plan = { projectKey: 'IO', epic: { summary: '경계' }, children: [] };
+  assert.equal((await api.create({ plan })).kind, 'makeUnsure');
+  clock += jiraModule.UNSURE_SETTLE_MS - 1;
+  assert.equal((await api.create({ plan })).kind, 'makeSettling');
+  assert.equal(fake.finds.length, 0);
+  clock += 1;
+  assert.equal((await api.create({ plan })).kind, 'makeUnsure', '30초 — 찾았는데 실패');
+  assert.equal(fake.finds.length, 1);
+  delete lose['경계'];
+  clock = 1000 + jiraModule.UNSURE_KEEP_MS;
+  assert.equal((await api.create({ plan })).ok, true, '24시간 지나면 지문이 지워져 찾지 않고 만든다');
+  assert.equal(fake.finds.length, 1);
+  assert.equal(fake.made.length, 2);
+});
+
+test('지라두벌 검수: 다른 계획이 같은 하위 티켓을 동시에 보내면 하나만 지라에 가고 둘째는 기다림', async () => {
+  const fake = jiraMakeFake({ epic: { summary: '남의 에픽', typeId: '10000' } });
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const plain = fake.request;
+  const api = jiraMakeApi({ request: async (url, options) => {
+    if ((options && options.method) === 'POST' && String(url).endsWith('/rest/api/3/issue')) await gate;
+    return plain(url, options);
+  } });
+  const child = { summary: '[Web] 동시', issueTypeId: '10001' };
+  const one = api.create({ plan: { projectKey: 'ABC', epic: { key: 'ABC-1234' }, children: [child] } });
+  const ticks = async (count) => { for (let at = 0; at < count; at += 1) await new Promise(resolve => setImmediate(resolve)); };
+  await ticks(20); // 첫 요청이 [Web]을 지라에 보내는 중(gate에서 멈춤)
+  // 둘째는 하위가 하나 더 붙은 다른 계획(계획 지문은 다르다)
+  const two = api.create({ plan: { projectKey: 'ABC', epic: { key: 'ABC-1234' }, children: [child, { summary: '[iOS] 동시', issueTypeId: '10001' }] } });
+  await ticks(20);
+  release();
+  const second = await two;
+  const first = await one;
+  assert.ok(first.children[0].key);
+  assert.equal(second.children[0].kind, 'makeSettling');
+  assert.equal(fake.made.filter(entry => entry.summary === '[Web] 동시').length, 1, '같은 하위는 한 벌');
+  assert.ok(second.children[1].key, '다른 하위는 그대로 만든다');
 });
 
 test('BJCREATE: 설정이 없거나 토큰을 못 읽으면 지라를 부르지 않고 연결 필요로만 답한다', async () => {
