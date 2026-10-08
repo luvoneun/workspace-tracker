@@ -343,6 +343,37 @@ test('칸의 Esc는 칸만 닫는다 — 그룹 `+` 줄·결과 한 줄·상세 
   assert.equal(app.run('addRow.hidden'), false);
 });
 
+test('칸의 Esc: 미뤄 둔 목록 그리기를 먼저 풀고(다른 창이 고친 문구가 보이게) 새로 그린 같은 id 줄의 제목 판에 초점을 준다', () => {
+  const app = pureClient();
+  app.run(`doc = document; doc.body = { tagName: 'BODY' }; doc.activeElement = doc.body;
+    CSS = { escape: s => s };
+    realMake = document.createElement;
+    // 실제 DOM처럼: 초점을 받으면 activeElement, 초점 든 칸이 떼어지면 body로.
+    make = (tag) => { const node = realMake(tag); node.tagName = String(tag).toUpperCase(); node.setSelectionRange = () => {};
+      node.focus = () => { node.focused = true; doc.activeElement = node; };
+      const swap = node.replaceWith.bind(node);
+      node.replaceWith = (other) => { swap(other); if (doc.activeElement === node) doc.activeElement = doc.body; };
+      return node; };
+    document.createElement = make;
+    list = make('div');
+    drawRow = (text) => { const row = make('div'); row.dataset.moveId = 'i9'; const ti = make('span'); ti.textContent = text;
+      row.appendChild(ti); makeEditableDesc(ti, { id: 'i9', description: text });
+      list.children.forEach(kid => { kid.connected = false; kid.children.forEach(k => { k.connected = false; }); }); list.replaceChildren(row); return ti; };
+    oldTitle = drawRow('옛 문구');
+    zone = { contains: node => { for (let at = node; at; at = at.parent) if (at === list) return true; return false; }, querySelectorAll: () => [] };
+    doc.querySelector = (sel) => (sel === '[data-move-id="i9"] .desc-editable' ? list.children[0]?.children[0] || null : null);
+    oldTitle.listeners.click(); input = list.children[0].children[0];
+    heldNow = uiRenderOrHold('inbox', zone, () => { newTitle = drawRow('다른 창이 고친 문구'); });
+    input.listeners.keydown({ key: 'Escape', isComposing: false, preventDefault() {}, stopPropagation() {} });
+    document.createElement = realMake;`);
+  assert.equal(app.run('heldNow'), false, '칸에서 치는 중에는 미룬다');
+  assert.equal(app.run('uiHeldRenders.size'), 0, 'Esc로 닫으면 미뤄 둔 그리기가 풀린다');
+  assert.equal(app.run('list.children[0].children[0] === newTitle'), true, '다른 창이 고친 문구로 다시 그렸다');
+  assert.equal(app.run('newTitle.textContent'), '다른 창이 고친 문구');
+  assert.equal(app.run('doc.activeElement === newTitle'), true, '초점은 새로 그린 같은 id 줄의 제목 판');
+  assert.notEqual(app.run('oldTitle.focused'), true, '떼어진 옛 제목 판에 주지 않는다');
+});
+
 test('입력 씹힘 ⑤: 결과 한 줄(uiResultCell)은 저장 중에도 잠그지 않는다 — 두 번째 Enter는 넘기고, 실패하면 그동안 친 글까지 칸에 남고, 성공하면 닫혀 결과를 보인다', async () => {
   const app = pureClient();
   const held = heldFetch(app);

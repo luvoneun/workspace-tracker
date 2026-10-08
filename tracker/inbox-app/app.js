@@ -6522,7 +6522,14 @@ function makeEditableDesc(el, item) {
       if (e.isComposing) return;
       if (e.key === 'Enter') input.blur();
       // 칸의 Esc는 칸만 닫는다 — 열린 상세 카드·서랍까지 닫히지 않게 문서로 올려 보내지 않고, 초점은 돌아온 제목 판으로.
-      if (e.key === 'Escape') { e.stopPropagation(); committed = true; input.replaceWith(el); el.focus(); }
+      // 초점을 주기 전에(초점이 body에 있을 때) 미뤄 둔 목록 그리기를 먼저 푼다 — 제목 판에 먼저 주면 같은 구역에 초점이
+      // 있다고 계속 미뤄져 다른 창이 고친 문구가 안 보인다. 다시 그려졌으면 같은 id 줄의 새 제목 판으로.
+      if (e.key === 'Escape') {
+        e.stopPropagation(); committed = true; input.replaceWith(el);
+        uiHeldFlush();
+        const fresh = el.isConnected ? el : document.querySelector(`[data-move-id="${CSS.escape(String(item.id))}"] .desc-editable`);
+        (fresh || el).focus();
+      }
     });
   });
 }
