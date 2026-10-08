@@ -1,6 +1,7 @@
 // 프로젝트 열쇠 짓기 고정 시험 — 업무 한 줄(item)에서 프로젝트 열쇠(`jira:KEY`·`group:이름`)를 짓는 곳이
 // 화면(workflows.js wfKey)·주간요약(report-drafts.js bucket 앞머리)·서버(오늘 회의의 관련 할 일 수)에 있다.
-// 세 곳이 지금 내는 값을 표 하나로 못 박는다 — 열쇠 짓기를 공용 함수로 모은 뒤에도 같은 표가 초록이어야 한다.
+// 세 곳이 내는 값을 표 하나로 못 박는다. 서버 쪽 둘은 공용 함수(project-keys.js projectKey)를 부르고, 화면은 그 파일을
+// 못 읽어 같은 규칙을 wfKey 한 줄로 갖는다 — 둘이 어긋나면 여기서 빨개진다.
 // 명세: docs/정리/2026-10-08-프로젝트-고정-번호.md (C3)
 const { test, before } = require('node:test');
 const assert = require('node:assert/strict');
@@ -10,6 +11,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const support = require('./test-support');
 const reportDrafts = require('./report-drafts');
+const { projectKey } = require('./project-keys');
 
 let base;
 before(async () => { base = await support.ready(); });
@@ -28,6 +30,10 @@ const CASES = [
   [{ group: '', project: '' }, null],
   [{}, null],
 ];
+
+test('공용 열쇠 짓기(project-keys.js projectKey): 표의 모든 줄', () => {
+  for (const [item, key] of CASES) assert.equal(projectKey(item), key, JSON.stringify(item));
+});
 
 test('화면 wfKey: 표의 모든 줄에서 같은 열쇠를 짓는다', () => {
   const context = vm.createContext({});

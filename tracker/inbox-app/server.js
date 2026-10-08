@@ -14,6 +14,7 @@ const path = require('path');
 const os = require('os');
 const { exec, execFile } = require('child_process');
 const { DATA_FORMAT_VERSION, readDataVersion, TOO_NEW_MESSAGE } = require('./migrate');
+const { projectKey } = require('./project-keys');
 // 설정 > 연동이 쓰는 한 벌(값 확인·config 합치기·토큰 파일·문제 보고의 오류 줄).
 const integrations = require('./integrations');
 const slackAuth = require('./slack-auth');
@@ -1245,11 +1246,8 @@ function getCalendarWithLinks() {
 
 // ---------- 오늘 할 일 제안 ----------
 
-function projectKeyOf(item) {
-  if (item.jira) return `jira:${item.jira}`;
-  if (item.group) return `group:${item.group}`;
-  return null;
-}
+// 업무 한 줄의 프로젝트 열쇠 — 짓는 규칙은 project-keys.js projectKey 한 곳이다(여기 오는 할 일에는 아이디어의 project 칸이 없다).
+const projectKeyOf = projectKey;
 
 function toggleTrackStatus(id, desired) {
   if (desired !== undefined && !['done','to-do'].includes(desired)) throw new Error('상태를 확인해 주세요.');
@@ -2617,7 +2615,7 @@ const handleRequest = (req, res) => {
     // 옮기기(BMOVE)의 되돌리기 — 이동 기록에 남은 id들만 반대로 돌린다. 지라를 다시 읽지 않는다
     // (에픽 검사는 옮길 때 한 번으로 충분하다).
     '/api/project/move-undo': undoMoveProject,
-    // 직접 만든 프로젝트 합치기(to: 'group:B')·지우기(to: null)와 그 되돌리기 — 여섯 자리를 한 트랜잭션으로 바꾼다.
+    // 직접 만든 프로젝트 합치기(to: 'group:B')·지우기(to: null)와 그 되돌리기 — 이름 바꾸기와 같은 자리(project-keys.js 자리 표 SITES)를 한 트랜잭션으로 바꾼다.
     // 지라에는 아무것도 쓰지 않는다. 기록은 projectMerges(옮기기 기록과 따로)라 move-undo로는 되돌릴 수 없다.
     '/api/project/merge': mergeProject,
     '/api/project/merge-undo': undoMergeProject,

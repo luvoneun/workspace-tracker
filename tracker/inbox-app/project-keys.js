@@ -37,6 +37,12 @@ const KEPT = [
   { id: '⑥', modes: ['delete'], why: '지우기는 지난 보고를 바꾸지 않는다(DECISIONS 169 · 10-06 명세 예외 9·10)' },
 ];
 
+// 열쇠 짓기 — 업무 한 줄(item)의 프로젝트 열쇠. 지라가 걸렸으면 `jira:KEY`, 아니면 `group:이름`(아이디어는 `project` 칸),
+// 둘 다 없으면 null. 이름은 받은 그대로다(밑줄·빈칸을 고치지 않는다 — 같은 이름 비교는 groupNameKey의 일).
+// 서버 쪽은 모두 이것을 부른다(report-drafts.js project·projectKeyOf, server.js projectKeyOf). 화면은 이 파일을 못 읽어
+// workflows.js wfKey가 같은 규칙을 한 줄로 갖고, 둘이 같은지는 project-key.test.js가 같은 표로 본다.
+const projectKey = item => (item.jira ? `jira:${item.jira}` : item.group || item.project ? `group:${item.group || item.project}` : null);
+
 module.exports = ({ fs, listTrackerFiles, TRACK_RE, parseFields, stampUpdated, readMeetingLinks, MEETING_LINKS_PATH, workflows, reportDrafts }) => {
   const plain = value => String(value).replace(/_/g, ' ');
   const token = name => name.replace(/\s+/g, '_');
@@ -198,3 +204,4 @@ module.exports = ({ fs, listTrackerFiles, TRACK_RE, parseFields, stampUpdated, r
 module.exports.SITES = SITES;
 module.exports.KEPT = KEPT;
 module.exports.MODES = MODES;
+module.exports.projectKey = projectKey;
