@@ -882,15 +882,17 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
       if (error.code !== 'ENOENT') console.error('지라 결과 모름 기록을 읽지 못해 빈 기록으로 시작함:', error.code || error.message);
       return;
     }
-    let items = null;
-    try { items = readUnsureItems(JSON.parse(text)); } catch { items = null; }
+    let raw = null;
+    try { raw = JSON.parse(text); } catch { raw = null; }
+    const items = readUnsureItems(raw);
     if (!items) { console.error('지라 결과 모름 기록이 깨져 빈 기록으로 시작함'); return; }
+    if (items.length < raw.items.length) console.error(`지라 결과 모름 기록이 깨져 모양이 어긋난 줄 ${raw.items.length - items.length}개를 버림`);
     for (const item of items) {
       const entry = { projectKey: item.projectKey, parentKey: item.parentKey, issueTypeId: item.issueTypeId, summary: item.summary, at: item.at };
       if (unsureFresh(entry)) unsureMade.set(unsureSig(entry), entry);
     }
     // 지난 줄을 버렸으면 파일도 바로 줄인다.
-    if (unsureMade.size < items.length) unsureSave();
+    if (unsureMade.size < raw.items.length) unsureSave();
   }
   // 실패해도 로그 한 줄로 넘어간다(메모리 기록은 그대로 — 쓰기 실패가 만들기를 막지 않는다).
   function unsureSave() {
