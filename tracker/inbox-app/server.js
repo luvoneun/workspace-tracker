@@ -1514,13 +1514,10 @@ function purgeTrashItem(id) {
 }
 
 // ---------- 직접 만든(그룹) 프로젝트 이름 바꾸기 ----------
-// 프로젝트 이름은 기록 여러 곳에 글자로 박혀 있다. 한 트랜잭션(idempotent → mutations.run) 안에서
-// 다섯 자리를 모두 바꾸고, 하나라도 실패하면 mutation-store의 저널이 전부 되돌린다 — 반쯤 바뀐
-// 이름을 남기지 않는다. 지라 프로젝트의 이름은 지라 요약이라 여기서 받지 않는다.
-//   ① tracker/*.md 의 `group:`·`project:` 칸(아이디어는 `project:`다) — 파일 표기는 공백→밑줄
-//   ② .workflow.json 의 회의 프로젝트(`project.type === 'group'`)
-//   ③ .workflow.json 의 `projectLinks` 키 · ④ `projectArchive` 키
-//   ⑤ .meeting_links.json 의 `group:` 값 · ⑥ 주간요약 저장본(.report-drafts.json)의 그룹 이름
+// 프로젝트 이름은 기록 여러 곳에 글자로 박혀 있다. 그 자리 목록(①~⑥)과 고쳐 쓰는 길은 project-keys.js의 자리 표
+// (SITES) 하나다 — 이름 바꾸기·옮기기·합치기·지우기와 되돌리기가 모두 rekeyProject·unrekeyProject만 부른다.
+// 한 트랜잭션(idempotent → mutations.run) 안에서 돌고, 하나라도 실패하면 mutation-store의 저널이 전부 되돌린다 —
+// 반쯤 바뀐 이름을 남기지 않는다. 지라 프로젝트의 이름은 지라 요약이라 여기서 받지 않는다.
 // 응답의 `meetings`는 ②와 ⑤를 함께 센다(둘 다 회의의 프로젝트다).
 const PROJECT_NAME_MAX = 60;
 const groupNameKey = value => String(value || '').replace(/_/g, ' ').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
@@ -1569,50 +1566,11 @@ function renameProject({ project, name }) {
   const taken = projectNamesTaken({ excludeGroup: from });
   if (taken.has(groupNameKey(to))) throw new Error('같은 이름의 프로젝트가 이미 있어요.');
 
-  // ① 업무 파일의 줄 — 지라가 걸린 항목은 그룹 이름을 쓰지 않으므로 건너뛴다.
-  const token = to.replace(/\s+/g, '_');
-  let items = 0;
-  listTrackerFiles().forEach((filePath) => {
-    const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
-    let touched = false;
-    const next = lines.map((line) => {
-      const match = line.match(TRACK_RE);
-      if (!match || parseFields(match[3]).jira) return line;
-      const fieldStr = match[3].split(/\s+/).map((part) => {
-        const at = part.indexOf(':');
-        if (at === -1) return part;
-        const key = part.slice(0, at);
-        if (key !== 'group' && key !== 'project') return part;
-        return part.slice(at + 1).replace(/_/g, ' ') === from ? `${key}:${token}` : part;
-      }).join(' ');
-      if (fieldStr === match[3]) return line;
-      touched = true;
-      items += 1;
-      return `- ${match[1]} #${match[2]}[${stampUpdated(fieldStr)}]`;
-    });
-    if (touched) fs.writeFileSync(filePath, next.join('\n'));
-  });
-
-  // ②③④ 회의 프로젝트·수동 지라 연결·보관 표
-  const moved = workflows.renameGroup(from, to);
-
-  // ⑤ 회의 제목 → 프로젝트 표(정기 회의의 연결)
-  const links = readMeetingLinks();
-  let meetingLinks = 0;
-  for (const [title, value] of Object.entries(links)) {
-    if (typeof value !== 'string' || !value.startsWith('group:')) continue;
-    if (value.slice('group:'.length).replace(/_/g, ' ').trim() !== from) continue;
-    links[title] = `group:${to}`;
-    meetingLinks += 1;
-  }
-  if (meetingLinks) fs.writeFileSync(MEETING_LINKS_PATH, JSON.stringify(links, null, 2));
-
-  // ⑥ 주간요약 저장본 — 저장 형식은 그대로 두고 그룹 이름 값만 바꾼다.
-  const report = reportDrafts.renameGroup(from, to);
-
+  // 자리 표(project-keys.js SITES)를 차례로 — ① 업무 줄 ②③④ 회의·연결·보관 ⑤ 회의 연결 ⑥ 주간요약.
+  const { items, workflow: moved, links, report } = projectKeys.rekeyProject({ from, mode: 'rename', to });
   return {
     ok: true, project: `group:${to}`, from, to,
-    changed: { items, meetings: moved.meetings + meetingLinks, links: moved.links, archive: moved.archive, report },
+    changed: { items: items.lines, meetings: moved.meetings + links.length, links: moved.links, archive: moved.archive, report },
   };
 }
 
@@ -1653,44 +1611,9 @@ function moveProject({ project, to, label }) {
   if (!groups.includes(from)) throw new Error('프로젝트를 찾을 수 없어요.');
   if (typeof to !== 'string' || !PROJECT_MOVE_KEY_RE.test(to)) throw new Error('지라 번호를 확인해 주세요.');
 
-  // ① 업무 파일의 줄 — 지라가 걸린 줄은 이미 지라라 건너뛴다. 아이디어는 `project:` 칸을 쓴다.
-  const items = [];
-  listTrackerFiles().forEach((filePath) => {
-    const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
-    let touched = false;
-    const next = lines.map((line) => {
-      const match = line.match(TRACK_RE);
-      if (!match) return line;
-      const fields = parseFields(match[3]);
-      if (fields.jira) return line;
-      const key = match[2] === 'idea' ? 'project' : 'group';
-      if (!fields[key] || fields[key].replace(/_/g, ' ') !== from) return line;
-      const fieldStr = match[3].split(/\s+/)
-        .filter((part) => { const at = part.indexOf(':'); return at === -1 || part.slice(0, at) !== key; })
-        .concat(`jira:${to}`).join(' ');
-      touched = true;
-      if (fields.id) items.push(fields.id);
-      return `- ${match[1]} #${match[2]}[${stampUpdated(fieldStr)}]`;
-    });
-    if (touched) fs.writeFileSync(filePath, next.join('\n'));
-  });
-
-  // ②④ 회의 프로젝트 · 수동 지라 연결(옮긴 뒤에는 뜻이 없으므로 지운다)
-  const moved = workflows.moveGroup(from, to);
-
-  // ⑤ 회의 제목 → 프로젝트 표
-  const links = readMeetingLinks();
-  const meetingLinks = [];
-  for (const [title, value] of Object.entries(links)) {
-    if (typeof value !== 'string' || !value.startsWith('group:')) continue;
-    if (value.slice('group:'.length).replace(/_/g, ' ').trim() !== from) continue;
-    links[title] = `jira:${to}`;
-    meetingLinks.push(title);
-  }
-  if (meetingLinks.length) fs.writeFileSync(MEETING_LINKS_PATH, JSON.stringify(links, null, 2));
-
-  // ⑥ 주간요약 저장본 — group:from: 행만 jira:to: 꼴로, 표시 이름은 부르는 쪽이 지은 label로.
-  const reportRows = reportDrafts.moveGroup(from, to, label);
+  // 자리 표(project-keys.js SITES)를 차례로 — 그룹 칸을 빼고 지라 칸을 넣는다. ③ 수동 지라 연결은 옮긴 뒤 뜻이 없어 지운다.
+  const { items: { marks: items }, workflow: moved, links, report: reportRows } = projectKeys.rekeyProject({ from, mode: 'move', to, label });
+  const meetingLinks = links.map(entry => entry.title);
 
   // 이동 기록 — 되돌리기를 정확하게 하기 위한 서버 저장값일 뿐이라 화면에는 내려보내지 않는다.
   const moveId = `mv_${ulid()}`;
@@ -1716,70 +1639,28 @@ function undoMoveProject({ moveId }) {
   if (typeof moveId !== 'string' || !moveId.trim()) throw new Error('되돌릴 기록을 확인해 주세요.');
   const entry = workflows.takeProjectMove(moveId);
   if (!entry) throw new Error('되돌릴 기록이 없어요.');
-  const { from, to, items: itemIds, meetings: meetingIds, links, meetingLinks: meetingLinkTitles, reportRows, reportNames, reportLabel } = entry;
-
-  // ① 업무 파일 — 기록된 id가 지금도 그 지라 키를 달고 있을 때만 되돌린다.
-  const idSet = new Set(itemIds);
-  let itemsRestored = 0, itemsSkipped = 0;
-  listTrackerFiles().forEach((filePath) => {
-    const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
-    let touched = false;
-    const next = lines.map((line) => {
-      const match = line.match(TRACK_RE);
-      if (!match) return line;
-      const fields = parseFields(match[3]);
-      if (!fields.id || !idSet.has(fields.id)) return line;
-      idSet.delete(fields.id);
-      if (fields.jira !== to) { itemsSkipped += 1; return line; }
-      const key = match[2] === 'idea' ? 'project' : 'group';
-      const fieldStr = match[3].split(/\s+/)
-        .filter((part) => { const at = part.indexOf(':'); return at === -1 || part.slice(0, at) !== 'jira'; })
-        .concat(`${key}:${from.replace(/\s+/g, '_')}`).join(' ');
-      touched = true;
-      itemsRestored += 1;
-      return `- ${match[1]} #${match[2]}[${stampUpdated(fieldStr)}]`;
-    });
-    if (touched) fs.writeFileSync(filePath, next.join('\n'));
-  });
-  itemsSkipped += idSet.size; // 기록에는 있었지만 지금은 그 id 자체가 없다(그 사이 지워짐).
-
-  // ②④ 회의 프로젝트 · 수동 지라 연결
-  const movedBack = workflows.undoMoveGroup({ from, to, meetingIds, link: links ? links[from] : null });
-
-  // ⑤ 회의 제목 → 프로젝트 표
-  const linkState = readMeetingLinks();
-  let meetingLinksRestored = 0, meetingLinksSkipped = 0;
-  meetingLinkTitles.forEach((title) => {
-    if (linkState[title] === `jira:${to}`) { linkState[title] = `group:${from}`; meetingLinksRestored += 1; }
-    else meetingLinksSkipped += 1;
-  });
-  if (meetingLinksRestored) fs.writeFileSync(MEETING_LINKS_PATH, JSON.stringify(linkState, null, 2));
-
-  // ⑥ 주간요약 저장본
-  const reportUndo = reportDrafts.moveGroupUndo(reportRows, from, to, reportLabel, reportNames);
-
+  const { from } = entry;
+  // 자리 표 차례로 — 기록된 id·회의·제목만, 지금도 옮긴 뒤 모양일 때만.
+  const { items, workflow: movedBack, links, report: reportUndo } = projectKeys.unrekeyProject('move', entry);
   return {
     ok: true, project: `group:${from}`,
     restored: {
-      items: itemsRestored,
-      meetings: movedBack.restored + meetingLinksRestored,
+      items: items.restored,
+      meetings: movedBack.restored + links.restored,
       report: reportUndo.restored,
     },
-    skipped: itemsSkipped + movedBack.skipped + meetingLinksSkipped + reportUndo.skipped,
+    skipped: items.skipped + movedBack.skipped + links.skipped + reportUndo.skipped,
   };
 }
 
 // ---------- 직접 만든(그룹) 프로젝트 합치기·지우기 ----------
 // 같은 일이 이름만 다른 그룹 둘로 갈라졌을 때 A를 B로 합치거나(to: 'group:B'), A의 소속을 풀어 프로젝트 없음으로
-// 돌린다(to: null — 지우기). renameProject와 같은 여섯 자리를 한 트랜잭션(idempotent → mutations.run)으로 바꾸고,
+// 돌린다(to: null — 지우기). renameProject와 같은 자리 표(project-keys.js)를 한 트랜잭션(idempotent → mutations.run)으로 바꾸고,
 // 하나라도 실패하면 저널이 전부 되돌린다. 쓰는 길도 renameProject·moveProject와 같다. 지라에는 아무것도 묻지도
 // 쓰지도 않는다 — 지라 에픽으로 합칠 때는 화면이 기존 `/api/project/move`(에픽 검사가 그 라우트에 있다)를 부른다.
 // 겹침 검사(projectNamesTaken)는 하지 않는다 — 이미 있는 이름으로 가는 것이 목적이다. 같은 프로젝트인지는 이름이
 // 글자 그대로 같은지로 본다(`Pay Renewal`·`pay renewal`처럼 대소문자·공백만 다른 둘을 합치는 것이 바로 이 기능이다).
-//   ① 업무 파일의 `group:`·`project:` 칸 — 끝낸 항목 포함, 지라가 걸린 줄은 건너뛴다. 합치기는 값을 B로, 지우기는 칸을 뺀다
-//   ②③④ .workflow.json 회의 프로젝트·projectLinks·projectArchive(workflows.mergeGroup)
-//   ⑤ .meeting_links.json 의 `group:A` — 합치기는 B로, 지우기는 그 줄을 뺀다(남기면 다음 정기 회의가 A를 되살린다)
-//   ⑥ 주간요약 저장본 — 합치기만(모든 주). 지우기는 건드리지 않는다(지난 보고를 바꾸지 않는다)
+// 자리마다 합치기·지우기가 하는 일은 자리 표(project-keys.js SITES·KEPT)에 적혀 있다 — 지우기는 ⑥ 주간요약을 건드리지 않는다.
 // 되돌리기용 기록은 `.workflow.json`의 `projectMerges`에 남긴다(projectMoves와 섞지 않는다).
 function mergeProject({ project, to }) {
   if (typeof project !== 'string' || !project.startsWith('group:')) throw new Error('직접 만든 프로젝트만 합치거나 지울 수 있어요.');
@@ -1794,53 +1675,10 @@ function mergeProject({ project, to }) {
   if (target !== null && target === from) throw new Error('같은 프로젝트예요.');
   if (target !== null && !groups.includes(target)) throw new Error('합칠 프로젝트를 찾을 수 없어요.');
 
-  // ① 업무 파일 — 먼저 모든 파일의 새 내용을 다 짓고(id 없는 줄이 있으면 아무것도 쓰기 전에 거절) 그다음 쓴다.
-  const token = target === null ? null : target.replace(/\s+/g, '_');
-  const items = [];
-  const plans = listTrackerFiles().map((filePath) => {
-    const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
-    let touched = false;
-    const next = lines.map((line) => {
-      const match = line.match(TRACK_RE);
-      if (!match) return line;
-      const fields = parseFields(match[3]);
-      if (fields.jira) return line;
-      const keys = [];
-      const parts = match[3].split(/\s+/).flatMap((part) => {
-        const at = part.indexOf(':');
-        if (at === -1) return [part];
-        const key = part.slice(0, at);
-        if ((key !== 'group' && key !== 'project') || part.slice(at + 1).replace(/_/g, ' ') !== from) return [part];
-        keys.push(key);
-        return token === null ? [] : [`${key}:${token}`];
-      });
-      if (!keys.length) return line;
-      // 되돌리기는 id로 짝을 찾는다 — id가 없는 줄은 되돌릴 수 없으니 합치기·지우기 자체를 하지 않는다.
-      if (!fields.id) throw new Error('id가 없는 항목이 있어 되돌릴 수 없어요.');
-      keys.forEach(key => items.push({ id: fields.id, key }));
-      touched = true;
-      return `- ${match[1]} #${match[2]}[${stampUpdated(parts.join(' '))}]`;
-    });
-    return { filePath, next, touched };
-  });
-  plans.forEach(({ filePath, next, touched }) => { if (touched) fs.writeFileSync(filePath, next.join('\n')); });
-
-  // ②③④ 회의 프로젝트 · 수동 지라 연결 · 보관 표
-  const merged = workflows.mergeGroup(from, target);
-
-  // ⑤ 회의 제목 → 프로젝트 표
-  const links = readMeetingLinks();
-  const meetingLinks = [];
-  for (const [title, value] of Object.entries(links)) {
-    if (typeof value !== 'string' || !value.startsWith('group:')) continue;
-    if (value.slice('group:'.length).replace(/_/g, ' ').trim() !== from) continue;
-    meetingLinks.push({ title, before: value });
-    if (target === null) delete links[title]; else links[title] = `group:${target}`;
-  }
-  if (meetingLinks.length) fs.writeFileSync(MEETING_LINKS_PATH, JSON.stringify(links, null, 2));
-
-  // ⑥ 주간요약 저장본 — 합치기만.
-  const report = target === null ? { ids: [], rows: [], names: [] } : reportDrafts.mergeGroup(from, target);
+  // 자리 표(project-keys.js SITES)를 차례로 — ① 업무 줄(id 없는 줄이 있으면 아무것도 쓰기 전에 거절) ②③④ ⑤, ⑥은 합치기만.
+  const result = projectKeys.rekeyProject({ from, mode: target === null ? 'delete' : 'merge', to: target });
+  const { items: { marks: items }, workflow: merged, links: meetingLinks } = result;
+  const report = result.report || { ids: [], rows: [], names: [] };
 
   const mergeId = `mg_${ulid()}`;
   const itemCount = new Set(items.map(entry => entry.id)).size;
@@ -1865,70 +1703,13 @@ function undoMergeProject({ mergeId }) {
   if (typeof mergeId !== 'string' || !mergeId.trim()) throw new Error('되돌릴 기록을 확인해 주세요.');
   const entry = workflows.takeProjectMerge(mergeId);
   if (!entry) throw new Error('되돌릴 기록이 없어요.');
-  const { from, to } = entry;
-  const fromToken = from.replace(/\s+/g, '_');
-
-  // ① 업무 파일 — 합치기면 그 칸이 아직 B일 때, 지우기면 그 칸이 아직 비어 있고 지라도 없을 때만.
-  const wanted = new Map();
-  (Array.isArray(entry.items) ? entry.items : []).forEach(({ id, key }) => {
-    if (typeof id !== 'string' || (key !== 'group' && key !== 'project')) return;
-    if (!wanted.has(id)) wanted.set(id, new Set());
-    wanted.get(id).add(key);
-  });
-  const seen = new Set();
-  let itemsRestored = 0, itemsSkipped = 0;
-  listTrackerFiles().forEach((filePath) => {
-    const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
-    let touched = false;
-    const next = lines.map((line) => {
-      const match = line.match(TRACK_RE);
-      if (!match) return line;
-      const fields = parseFields(match[3]);
-      if (!fields.id || !wanted.has(fields.id) || seen.has(fields.id)) return line;
-      seen.add(fields.id);
-      const keys = wanted.get(fields.id);
-      const parts = match[3].split(/\s+/);
-      const has = key => parts.some(part => part.startsWith(`${key}:`));
-      const still = !fields.jira && [...keys].every(key => (to === null
-        ? !has('group') && !has('project')
-        : parts.some(part => part.startsWith(`${key}:`) && part.slice(key.length + 1).replace(/_/g, ' ') === to)));
-      if (!still) { itemsSkipped += 1; return line; }
-      const fieldStr = to === null
-        ? [...parts, ...[...keys].map(key => `${key}:${fromToken}`)].join(' ')
-        : parts.map((part) => {
-          const at = part.indexOf(':');
-          const key = at === -1 ? '' : part.slice(0, at);
-          return keys.has(key) && part.slice(at + 1).replace(/_/g, ' ') === to ? `${key}:${fromToken}` : part;
-        }).join(' ');
-      touched = true;
-      itemsRestored += 1;
-      return `- ${match[1]} #${match[2]}[${stampUpdated(fieldStr)}]`;
-    });
-    if (touched) fs.writeFileSync(filePath, next.join('\n'));
-  });
-  itemsSkipped += [...wanted.keys()].filter(id => !seen.has(id)).length; // 그 사이 지워진 항목
-
-  // ②③④ 회의 프로젝트 · 수동 지라 연결 · 보관 표
-  const back = workflows.undoMergeGroup({ from, to, meetings: entry.meetings, link: entry.link, archive: entry.archive });
-
-  // ⑤ 회의 제목 → 프로젝트 표
-  const linkState = readMeetingLinks();
-  let meetingLinksRestored = 0, meetingLinksSkipped = 0;
-  (Array.isArray(entry.meetingLinks) ? entry.meetingLinks : []).forEach(({ title, before }) => {
-    const still = to === null ? !Object.prototype.hasOwnProperty.call(linkState, title) : linkState[title] === `group:${to}`;
-    if (!still) { meetingLinksSkipped += 1; return; }
-    linkState[title] = before;
-    meetingLinksRestored += 1;
-  });
-  if (meetingLinksRestored) fs.writeFileSync(MEETING_LINKS_PATH, JSON.stringify(linkState, null, 2));
-
-  // ⑥ 주간요약 저장본 — 합치기만 바꿨다.
-  const reportUndo = to === null ? { restored: 0, skipped: 0 } : reportDrafts.mergeGroupUndo(entry.reportRows, from, to, entry.reportNames);
-
+  const { from } = entry;
+  // 자리 표 차례로 — 합치기면 그 칸이 아직 B일 때, 지우기면 아직 비어 있고 지라도 없을 때만.
+  const { items, workflow: back, links, report: reportUndo } = projectKeys.unrekeyProject('merge', entry);
   return {
     ok: true, project: `group:${from}`,
-    restored: { items: itemsRestored, meetings: back.restored + meetingLinksRestored, report: reportUndo.restored },
-    skipped: itemsSkipped + back.skipped + meetingLinksSkipped + reportUndo.skipped,
+    restored: { items: items.restored, meetings: back.restored + links.restored, report: reportUndo.restored },
+    skipped: items.skipped + back.skipped + links.skipped + reportUndo.skipped,
   };
 }
 
@@ -2698,7 +2479,7 @@ const CLIENT_BLOCKED = new Set([
   'integrations.js', 'ical.js', 'calendar-live.js', 'personalize.js', 'news.js', 'test-support.js',
   'routes-jira.js', 'routes-integrations.js', 'routes-app.js', 'routes-personalize.js', 'routes-items.js',
   'routes-track.js', 'selfcheck.js', 'checkin.js', 'usage.js', 'auto-update.js', 'calendar-mac.js',
-  'slack-auth.js', 'slack-oauth.js', 'tryout-server.js',
+  'slack-auth.js', 'slack-oauth.js', 'tryout-server.js', 'project-keys.js',
 ]);
 function isClientFile(name) {
   if (!/^[A-Za-z0-9][\w.-]*\.(js|css)$/.test(name)) return false;   // 이름 한 칸짜리(하위 경로 없음)만
@@ -2951,6 +2732,10 @@ const reportDrafts = require('./report-drafts')({
     // 같은 비교(groupNameKey)다. 없으면 null(새 그룹 이름으로 쓴다).
     findProject: name => findProject(name),
   },
+});
+// 직접 만든 프로젝트의 열쇠(이름)가 박힌 자리 표와 열쇠 바꾸기 — 이름 바꾸기·옮기기·합치기·지우기·되돌리기가 함께 쓴다.
+const projectKeys = require('./project-keys')({
+  fs, listTrackerFiles, TRACK_RE, parseFields, stampUpdated, readMeetingLinks, MEETING_LINKS_PATH, workflows, reportDrafts,
 });
 const mutations = require('./mutation-store')(TRACKER_DIR, [MEETING_LINKS_PATH, weeklyReportStatePath()]);
 // 지라 직접 읽기. 설정이 없으면 `connected:false`만 돌려주고 아무 데도 접속하지 않는다.

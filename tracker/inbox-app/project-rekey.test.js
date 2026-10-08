@@ -10,6 +10,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { freePort, serverReady } = require('./test-support');
+const { SITES, KEPT, MODES } = require('./project-keys');
 
 const A = '결제 리뉴얼';
 const B = '가입 개편';
@@ -76,23 +77,25 @@ function seed(home) {
   ], null, 2));
 }
 
-// 데이터 폴더 전체를 파일마다 글자로 읽는다. 의도된 예외만 지운다 — 예외가 늘면 여기와 명세 1-2절을 함께 고친다.
-//   ⑦ `.workflow.json`의 projectMoves·projectMerges — 되돌리기 기록이라 옛 이름을 일부러 남긴다
-//   ⑧ `.trash.json` — 휴지통 원문 줄 · `.backups/` — 저장할 때마다 남기는 바로 전 사본(safe-storage)
-//   지라가 걸린 줄(rk03)의 group 칸 — 지라 프로젝트라 그룹 이름이 아니다
-//   지우기의 ⑥ `.report-drafts.json` — 지난 보고를 바꾸지 않는다(DECISIONS 169·10-06 명세 예외 9·10)
-//   옮기기·지우기의 ④ `projectArchive` — 읽는 코드가 없는 옛 기록이라 이 둘은 고쳐 쓰지 않는다(이름 바꾸기·합치기만 따라간다)
-function readData(home, { keepReport = false, keepArchive = false } = {}) {
+// 데이터 폴더 전체를 파일마다 글자로 읽는다. 의도된 예외는 자리 표의 KEPT(project-keys.js)에 적힌 것만 지운다 —
+// 예외를 늘리려면 KEPT에 이유와 함께 한 줄을 더한다(여기에 따로 적지 않는다).
+//   ⑦ `.workflow.json`의 projectMoves·projectMerges · ⑧ `.trash.json`·`.backups/`
+//   모드별: 옮기기·지우기의 ④ `projectArchive`, 지우기의 ⑥ `.report-drafts.json`
+//   그 밖에 지라가 걸린 줄(rk03)의 group 칸 — 지라 프로젝트라 그룹 이름이 아니다(① 규칙 "지라가 걸린 줄은 건너뜀")
+const kept = (id, mode) => KEPT.some(entry => entry.id === id && (!entry.modes || entry.modes.includes(mode)));
+function readData(home, mode) {
+  const keepReport = mode && kept('⑥', mode);
+  const keepArchive = mode && kept('④', mode);
   const out = {};
   const walk = (dir) => {
     for (const name of fs.readdirSync(dir)) {
       const file = path.join(dir, name);
       if (fs.statSync(file).isDirectory()) { walk(file); continue; }
       const rel = path.relative(home, file);
-      if (rel === '.trash.json' || rel.startsWith(`.backups${path.sep}`)) continue;
+      if (kept('⑧') && (rel === '.trash.json' || rel.startsWith(`.backups${path.sep}`))) continue;
       if (keepReport && rel === '.report-drafts.json') continue;
       let text = fs.readFileSync(file, 'utf8');
-      if (rel === '.workflow.json') {
+      if (rel === '.workflow.json' && kept('⑦')) {
         const state = JSON.parse(text);
         delete state.projectMoves;
         delete state.projectMerges;
@@ -108,15 +111,15 @@ function readData(home, { keepReport = false, keepArchive = false } = {}) {
 }
 const count = (text, word) => text.split(word).length - 1;
 // 파일마다 [A, B, 에픽 키]가 몇 번 나오나 — 공백 꼴(JSON)과 밑줄 꼴(업무 줄)을 함께 센다.
-function counts(home, opts) {
-  return Object.fromEntries(Object.entries(readData(home, opts)).map(([file, text]) => [file, {
+function counts(home) {
+  return Object.fromEntries(Object.entries(readData(home)).map(([file, text]) => [file, {
     a: count(text, A) + count(text, token(A)),
     b: count(text, B) + count(text, token(B)),
     epic: count(text, EPIC),
   }]).filter(([, value]) => value.a || value.b || value.epic));
 }
-function assertNoOld(home, word, opts) {
-  const left = Object.entries(readData(home, opts))
+function assertNoOld(home, word, mode) {
+  const left = Object.entries(readData(home, mode))
     .map(([file, text]) => [file, count(text, word) + count(text, token(word))])
     .filter(([, n]) => n > 0);
   assert.deepEqual(left, [], `옛 열쇠 「${word}」가 남은 파일: ${JSON.stringify(left)}`);
@@ -162,14 +165,24 @@ server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => console.log
   return { home, post };
 }
 
-// 심은 그대로인지 먼저 본다 — 자리마다 A가 실제로 있어야 시험이 뜻이 있다.
+// 심은 그대로인지 먼저 본다 — 자리 표의 모든 파일에 A가 실제로 있어야 시험이 뜻이 있고, A가 든 파일은 모두 자리 표에 있어야 한다
+// (표에 없는 자리에 이름을 심으면 — 곧 새 자리를 만들고 표에 안 올리면 — 여기서 빨개진다).
 function assertSeeded(home) {
   const seeded = counts(home);
-  for (const file of ['tasks.md', 'checks.md', 'decisions.md', 'ideas.md', '.workflow.json', '.meeting_links.json', '.report-drafts.json']) {
-    assert.ok(seeded[file] && seeded[file].a > 0, `${file}에 ${A}를 심어야 한다`);
-  }
+  const files = SITES.flatMap(site => site.files);
+  for (const file of files) assert.ok(seeded[file] && seeded[file].a > 0, `${file}에 ${A}를 심어야 한다`);
+  assert.deepEqual(Object.keys(seeded).filter(file => seeded[file].a > 0).sort(), [...files].sort(), '이름이 든 파일 = 자리 표의 파일');
   return seeded;
 }
+test('자리 표: 모든 자리가 네 동작마다 무엇을 하는지(또는 KEPT에 왜 안 하는지) 적혀 있다', () => {
+  for (const site of SITES) {
+    for (const mode of MODES) {
+      assert.ok(site.modes[mode] || kept(site.id, mode), `${site.id} ${mode}: 표에 할 일도, KEPT의 이유도 없다`);
+    }
+    assert.ok(site.undo && site.files.length, site.id);
+  }
+  for (const entry of KEPT) assert.ok(entry.why, entry.id);
+});
 // 업무 줄을 고친 동작은 그 줄의 수정 시각(updated)을 새로 적고 응답 revisions에 싣는다(저장 충돌 검사).
 const MOVED_ITEMS = ['rk01', 'rk02', 'rk05', 'rk06', 'rk07'];
 function assertStamped(home, answer) {
@@ -187,11 +200,11 @@ test('열쇠 빠뜨림: 이름 바꾸기 뒤 옛 이름이 0번, 반대로 한 �
   const seeded = assertSeeded(home);
   const answer = await post('/api/project/rename', { project: `group:${A}`, name: '결제 정산' });
   assert.equal(answer.ok, true, JSON.stringify(answer));
-  assertNoOld(home, A);
+  assertNoOld(home, A, 'rename');
   assertStamped(home, answer);
   const back = await post('/api/project/rename', { project: 'group:결제 정산', name: A });
   assert.equal(back.ok, true, JSON.stringify(back));
-  assertNoOld(home, '결제 정산');
+  assertNoOld(home, '결제 정산', 'rename');
   assert.deepEqual(counts(home), seeded);
 });
 
@@ -200,8 +213,13 @@ test('열쇠 빠뜨림: 지라 에픽으로 옮기기 뒤 옛 이름이 0번, �
   const seeded = assertSeeded(home);
   const answer = await post('/api/project/move', { project: `group:${A}`, to: EPIC });
   assert.equal(answer.ok, true, JSON.stringify(answer));
-  assertNoOld(home, A, { keepArchive: true });
+  assertNoOld(home, A, 'move');
   assertStamped(home, answer);
+  // 되돌리기 기록 꼴은 그대로다(옛 앱·옛 기록과 같은 칸) — 칸을 바꾸면 옛 기록 되돌리기를 따로 따져야 한다.
+  const [move] = JSON.parse(fs.readFileSync(path.join(home, '.workflow.json'), 'utf8')).projectMoves;
+  assert.deepEqual(Object.keys(move), ['id', 'from', 'to', 'at', 'items', 'meetings', 'links', 'meetingLinks', 'reportRows', 'reportNames', 'reportLabel', 'counts']);
+  assert.deepEqual([move.items, move.meetings, move.links, move.meetingLinks, move.reportRows, move.reportLabel, move.counts],
+    [['rk05', 'rk06', 'rk07', 'rk01', 'rk02'], ['m1'], { [A]: 'PAY-1' }, ['정산 주간 싱크'], ['w1', 'r1'], `${EPIC} · 정산 에픽`, { items: 5, meetings: 2, report: 2 }]);
   const back = await post('/api/project/move-undo', { moveId: answer.moveId });
   assert.equal(back.ok, true, JSON.stringify(back));
   assert.equal(back.skipped, 0);
@@ -213,8 +231,13 @@ test('열쇠 빠뜨림: 합치기 뒤 옛 이름이 0번, 되돌리면 모든 �
   const seeded = assertSeeded(home);
   const answer = await post('/api/project/merge', { project: `group:${A}`, to: `group:${B}` });
   assert.equal(answer.ok, true, JSON.stringify(answer));
-  assertNoOld(home, A);
+  assertNoOld(home, A, 'merge');
   assertStamped(home, answer);
+  const [merge] = JSON.parse(fs.readFileSync(path.join(home, '.workflow.json'), 'utf8')).projectMerges;
+  assert.deepEqual(Object.keys(merge), ['id', 'from', 'to', 'at', 'items', 'meetings', 'link', 'archive', 'meetingLinks', 'reportRows', 'reportNames', 'counts']);
+  assert.deepEqual([merge.items, merge.meetingLinks, merge.counts], [
+    [['rk05', 'group'], ['rk06', 'group'], ['rk07', 'project'], ['rk01', 'group'], ['rk02', 'group']].map(([id, key]) => ({ id, key })),
+    [{ title: '정산 주간 싱크', before: `group:${A}` }], { items: 5, meetings: 2, report: 2 }]);
   const back = await post('/api/project/merge-undo', { mergeId: answer.mergeId });
   assert.equal(back.ok, true, JSON.stringify(back));
   assert.equal(back.skipped, 0);
@@ -227,7 +250,7 @@ test('열쇠 빠뜨림: 지우기 뒤 옛 이름이 0번(주간요약만 예외)
   const report = fs.readFileSync(path.join(home, '.report-drafts.json'), 'utf8');
   const answer = await post('/api/project/merge', { project: `group:${A}`, to: null });
   assert.equal(answer.ok, true, JSON.stringify(answer));
-  assertNoOld(home, A, { keepReport: true, keepArchive: true });
+  assertNoOld(home, A, 'delete');
   assert.equal(fs.readFileSync(path.join(home, '.report-drafts.json'), 'utf8'), report, '지우기는 주간요약을 바이트 그대로 둔다');
   assertStamped(home, answer);
   const back = await post('/api/project/merge-undo', { mergeId: answer.mergeId });
