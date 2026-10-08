@@ -14,8 +14,15 @@ const definitions = script.slice(0, script.indexOf(DEFINITIONS_MARKER));
 function element() {
   const attributes = new Map();
   return {
-    value: '', disabled: false, hidden: false, textContent: '', children: [], listeners: {}, dataset: {},
-    parent: null, connected: true, blurs: 0,
+    value: '', disabled: false, hidden: false, children: [], listeners: {}, dataset: {},
+    parent: null, connected: true, blurs: 0, ownText: undefined,
+    // 글자를 직접 넣은 노드는 그 글자 — 줄 제목처럼 글자를 안쪽 칸(.tx, uiTitleText)에 넣은 판은 그 칸의 글자(실제 DOM과 같게).
+    get textContent() {
+      if (this.ownText !== undefined) return this.ownText;
+      const tx = this.children.find(kid => kid && kid.className === 'tx');
+      return tx ? tx.textContent : '';
+    },
+    set textContent(value) { this.ownText = value; },
     get isConnected() { return this.connected; },
     get childNodes() { return this.children; },
     classList: { toggle() {}, contains() { return false; }, add() {}, remove() {} },
@@ -12344,7 +12351,9 @@ test('Claude로 다듬는 중인데 Claude가 없거나 로그인이 풀려 멈�
 
 test('긴 문구: 업무 줄 제목은 두 줄까지(말줄임) — 줄 높이 안에 들어가고, 도움말에 원문 모드 문답', () => {
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
-  assert.match(css, /\.d-row \.d-title \{ white-space: normal; text-overflow: clip; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; \}/);
+  // 누르는 판(.d-title)은 줄 높이로 서고, 두 줄 말줄임은 안쪽 글자 칸(.tx)이 맡는다 — 판의 빈 곳이 셋째 줄을 비추지 않는다.
+  assert.match(css, /\.d-row \.d-title \{ align-self: stretch; display: flex; align-items: center; white-space: normal; text-overflow: clip; \}/);
+  assert.match(css, /\.d-title > \.tx \{ min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; \}/);
   assert.match(css, /--row: 54px;/, '두 줄(25px × 2)이 줄 높이 안에 들어간다');
   const app = pureClient();
   const faq = JSON.parse(app.run('JSON.stringify(SETTINGS_FAQ)')).flatMap(([, rows]) => rows);
@@ -12859,8 +12868,8 @@ test('WP-W 회의 ⋯의 프로젝트 연결: 고르면 회의 번호를 함께 
 
 test('WP-W 화면 파일 규칙: 회의 줄에 새 innerHTML이 없고, 두 줄/펼침 CSS가 아이디어 줄과 같은 규칙이다', () => {
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
-  assert.match(css, /\.d-mrow2 \.ti \{[^}]*-webkit-line-clamp: 2/);
-  assert.match(css, /\.d-mrow2\.is-open \.ti \{ -webkit-line-clamp: unset; display: block; \}/);
+  assert.match(css, /\.d-mrow2 \.ti > \.tx \{[^}]*-webkit-line-clamp: 2/);
+  assert.match(css, /\.d-mrow2\.is-open \.ti > \.tx \{ -webkit-line-clamp: unset; display: block; \}/);
   assert.match(css, /\.d-wrow\.is-wrap \.tiwrap \{ grid-area: ti; display: flex; flex-wrap: wrap;/);
   const meetings = fs.readFileSync(path.join(__dirname, 'meetings-ui.js'), 'utf8');
   const uses = meetings.split('\n').filter(line => /innerHTML/.test(line) && !/^\s*\/\//.test(line));
@@ -16632,7 +16641,7 @@ test('체크 표시 하나: 업무 체크(.d-cb)와 레일 체크(.d-wcb)가 색
   assert.match(css, /\.d-cb:hover, \.d-wcb:hover \{ border-color: var\(--accent\); \}/);
   assert.match(css, /\.d-cb:checked, \.d-wcb:checked \{ background: var\(--accent\); border-color: var\(--accent\); \}/);
   assert.match(css, /\.d-cb\.is-pop:checked, \.d-wcb\.is-pop:checked \{ animation: d-pop-check var\(--t-fast\) var\(--ease\); \}/);
-  assert.match(css, /\.d-cb\.is-pop:checked, \.d-wcb\.is-pop:checked, \.d-row\.is-completing \.d-title, \.d-mrow2\.is-completing \.ti, \.d-prow2\.is-completing \.ti \{ animation: none; \}/, '움직임 줄이기 — 회의·프로젝트 줄의 긋기도(C2)');
+  assert.match(css, /\.d-cb\.is-pop:checked, \.d-wcb\.is-pop:checked, \.d-row\.is-completing \.d-title > \.tx, \.d-mrow2\.is-completing \.ti > \.tx, \.d-prow2\.is-completing \.ti > \.tx \{ animation: none; \}/, '움직임 줄이기 — 회의·프로젝트 줄의 긋기도(C2)');
   assert.doesNotMatch(css, /\n\.d-wcb:(hover|checked) \{/, '레일 체크만의 색 규칙은 없다');
 });
 
@@ -17845,9 +17854,9 @@ test('줄 이동 C2: 회의 초안 펼침의 따로 만든 도우미(meetingFlip
 
 test('줄 이동 C2 완료 흐름: 회의·프로젝트 줄도 체크하면 제목에 줄이 그어진다(.ti) — 프로젝트 상세는 `끝낸 것` 제목 쪽으로 들어간다', () => {
   const css = fs.readFileSync(path.join(__dirname, 'ui.css'), 'utf8');
-  assert.match(css, /\.d-row\.is-completing \.d-title, \.d-mrow2\.is-completing \.ti, \.d-prow2\.is-completing \.ti \{\n  background-image/);
+  assert.match(css, /\.d-row\.is-completing \.d-title > \.tx, \.d-mrow2\.is-completing \.ti > \.tx, \.d-prow2\.is-completing \.ti > \.tx \{\n  background-image/);
   assert.match(css, /\.d-row\.is-done\.is-completing \.d-title, \.d-mrow2\.is-done\.is-completing \.ti, \.d-prow2\.is-done\.is-completing \.ti \{ text-decoration-color: transparent; \}/);
-  assert.match(script, /const UI_GLIDE_STRIKE = '\.d-title, \.ti';/);
+  assert.match(script, /const UI_GLIDE_STRIKE = '\.d-title > \.tx, \.ti > \.tx';/);
   assert.match(fs.readFileSync(path.join(__dirname, 'projects-ui.js'), 'utf8'), /row\.dataset\.doneInto = 'grp:끝낸 것';/);
   const app = workflowsClient();
   app.run(`workflowData = { items: [], meetings: [] }; wfIndexData();`);
