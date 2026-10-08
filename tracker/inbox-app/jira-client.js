@@ -62,6 +62,15 @@ const JIRA_CREATE_MAX = 12;
 const JIRA_SUMMARY_MAX = 255;
 // 만들 수 있는 이슈 종류 목록(createmeta)에서 읽어 오는 개수. 한 프로젝트의 종류는 이보다 훨씬 적다.
 const JIRA_TYPE_LIMIT = 100;
+// 만들기가 "결과 모름"(시간 초과·끊김·5xx·응답 해석 실패)으로 끝난 이슈를 기억하는 시간(메모리만, 재시작하면 사라진다).
+// 그 안에 같은 이슈를 다시 만들라고 하면 지라에서 먼저 찾는다 — 응답만 끊긴 경우 두 벌이 생기지 않게.
+const UNSURE_KEEP_MS = 24 * 60 * 60 * 1000;
+// 지라 검색은 방금 만든 이슈를 몇 초 늦게 잡는다 — 모름이 난 뒤 이 시간 전에는 찾지도 만들지도 않는다.
+const UNSURE_SETTLE_MS = 30 * 1000;
+// 찾을 때 "모름이 난 시각"보다 이만큼 앞까지 본다(맥과 지라의 시계가 다를 수 있다).
+const UNSURE_LOOKBACK_MIN = 10;
+// 한 번에 읽어 요약을 대조하는 개수. 이보다 많이 오면 가를 수 없다고 보고 모름을 유지한다.
+const UNSURE_LOOKUP_LIMIT = 50;
 
 // 지라가 주는 범주 열쇠는 셋뿐이다. 모르는 값은 `진행`으로 본다(상태 이름은 그대로 보여 준다).
 const CATEGORY = { new: 'todo', indeterminate: 'doing', done: 'done' };
@@ -91,6 +100,8 @@ const MESSAGE = {
   typeStale: '지라에서 만들 수 있는 종류가 바뀌었어요. 화면을 새로 읽고 다시 골라 주세요.',
   tooMany: '한 번에 12개까지 만들 수 있어요.',
   duplicate: '같은 내용을 방금 보냈어요. 잠시 뒤에 다시 시도해 주세요.',
+  makeUnsure: '지라에 만들어졌는지 확인하지 못했어요. 지라에서 확인한 뒤 다시 시도해 주세요.',
+  makeSettling: '지라가 확인하는 중이에요. 잠시 뒤에 다시 시도해 주세요.',
   // 아래는 "담당자 바꾸기"에서만 쓰는 문구다. 이름이 들어가는 문구는 assignMessage가 짓는다.
   assignForbidden: '지라에서 이 티켓의 담당을 바꿀 권한이 없어요.',
   assignUnsure: '지라에 반영됐는지 확인하지 못했어요 — 카드를 새로 읽었어요.',
@@ -663,6 +674,26 @@ function createJiraClient({ settings, request = (...args) => fetch(...args), rea
     return { key, url: issueUrl(settings.siteUrl, key) };
   }
 
+  // 결과 모름으로 끝난 만들기가 실제로 지라에 있는지 찾는다. 요약은 JQL 글자 검색(`~`)에 맡기지 않고
+  // (괄호·따옴표가 섞이면 검색 문법이 흔들린다) 같은 프로젝트·종류·부모·보고자=나·최근 생성으로 좁혀 읽은 뒤
+  // 요약을 글자 그대로 대조한다. 읽은 것이 상한만큼 차면 가를 수 없다고 보고 던진다(부르는 쪽이 모름을 유지한다).
+  async function findMade({ projectKey, issueTypeId, summary, parentKey = null, minutes } = {}) {
+    wantProject(projectKey);
+    const type = wantId(issueTypeId);
+    const within = Math.max(1, Math.ceil(Number(minutes) || 0));
+    const jql = `project = ${projectKey} AND issuetype = ${type} AND reporter = currentUser() AND created >= -${within}m`
+      + (parentKey ? ` AND parent = ${wantKey(parentKey)}` : '') + ' ORDER BY created DESC';
+    const body = await search(jql, token(), 'summary,issuetype,parent', UNSURE_LOOKUP_LIMIT);
+    const issues = Array.isArray(body && body.issues) ? body.issues : null;
+    if (!issues || issues.length >= UNSURE_LOOKUP_LIMIT) throw jiraError('other');
+    const want = wantSummary(summary);
+    return issues
+      .filter(entry => entry && JIRA_KEY_RE.test(text(entry.key)) && text(entry.fields && entry.fields.summary).trim() === want)
+      .filter(entry => idOf(entry.fields.issuetype && entry.fields.issuetype.id) === type)
+      .filter(entry => !parentKey || text(entry.fields.parent && entry.fields.parent.key) === parentKey)
+      .map(entry => ({ key: entry.key, url: issueUrl(settings.siteUrl, entry.key) }));
+  }
+
   // 담당자를 accountId로 지정한다(BJASSIGN 새 에픽 · BJASSIGN2 담당자 바꾸기). accountId는 사람이 보는
   // 값이 아니라 지라 내부 식별자라 본문(body)에만 싣고 주소(querystring)에는 절대 넣지 않는다.
   // `null`을 주면 담당을 뺀다(`{ accountId: null }`). 자동 배정(`-1`)은 쓰지 않는다.
@@ -712,7 +743,7 @@ function createJiraClient({ settings, request = (...args) => fetch(...args), rea
 
   return {
     getIssueOverview, listMyIssues, listDoneIssues, getTransitions, getVersions, getIssueVersionIds,
-    transition, updateIssueFields, updateVersion, getCreateMeta, getIssueBrief, createIssue, assignIssue,
+    transition, updateIssueFields, updateVersion, getCreateMeta, getIssueBrief, createIssue, findMade, assignIssue,
     searchAssignable, getAssignee, latestSummaryOf,
     getMyAccountId, getMyself, listAttention,
   };
@@ -789,10 +820,14 @@ function assignPayload(payload) {
 
 // 새로 만들기의 같은 표. 만들기는 실패 이유가 줄마다 따로 보이므로 문구를 따로 둔다
 // (400은 "필수 항목이 더 있을 수 있어요"까지 말해 준다 — 지라 원문은 여기서도 싣지 않는다).
+// `writing`은 이슈를 만드는 POST에서만 켠다. 그때 지라가 4xx로 거절한 것만 확실한 실패(안 만들어짐)이고,
+// 끊김·시간 초과(상태 번호 없음)·5xx·성공 번호인데 응답을 못 읽음은 **결과 모름**(`makeUnsure` — 만들어졌을 수도)이다.
+// 읽기(종류 목록·에픽 대조·나 조회)와 배정은 만든 것이 없으니 이 갈래를 타지 않는다.
 const MAKE_GUARDS = ['key', 'value', 'typeStale', 'epicType', 'notEpic'];
-function makeKind(error) {
+function makeKind(error, writing = false) {
   if (error && MAKE_GUARDS.includes(error.kind)) return error.kind;
   const status = error && error.status;
+  if (writing && (!status || status >= 500 || (status >= 200 && status < 300))) return 'makeUnsure';
   if (status === 401 || status === 403) return 'makeForbidden';
   if (status === 400) return 'makeReject';
   if (status === 404) return 'notfound';
@@ -811,6 +846,9 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
   // 방금 보낸 만들기 요청의 지문 → 받은 시각. 같은 계획이 60초 안에 두 번 오면 거절한다
   // (새로고침·두 번 누르기로 지라에 같은 이슈가 두 벌 생기지 않게). 메모리에만 있다.
   const madePlans = new Map();
+  // 결과 모름으로 끝난 이슈 하나하나의 지문(프로젝트·부모·종류·요약) → 모름이 난 시각. 계획 지문과 달리
+  // 하위 티켓 `다시 시도`(이미 있는 에픽에 붙이는 다른 계획)로 와도 같은 이슈면 잡힌다. 메모리에만 있다.
+  const unsureMade = new Map();
   // 내 계정 id(반응 필요의 "나" 판별). 프로세스마다 한 번 묻고 메모리에만 둔다 — 어디에도 나가지 않는다.
   let mineId = null;
   // 담당자 바꾸기(BJASSIGN2) — 되돌리기 표(undoId → 직전·직후 담당, 10분, 한 번 쓰면 지움)와
@@ -1137,10 +1175,39 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
     }
   }
 
+  // 이슈 하나를 만든다 — 같은 이슈가 결과 모름으로 남아 있으면 **보내기 전에 지라에서 먼저 찾는다**.
+  // 돌려주는 것: { key, url } · 찾았으면 { key, url, found: true } · 못 만들었거나 모르면 { kind }.
+  // 찾기 규칙: 같은 프로젝트·종류·부모·요약(글자 그대로)·보고자=나·모름이 난 시각 10분 전 이후 생성(findMade).
+  //  - 모름이 난 뒤 30초 안이면 찾지도 만들지도 않는다(검색이 방금 만든 것을 아직 못 잡을 수 있다) → makeSettling
+  //  - 하나 찾음 → 그 키를 쓰고 새로 만들지 않는다 · 없음 → 그때만 새로 만든다
+  //  - 둘 이상이거나 찾기도 실패 → 모름을 유지하고 만들지 않는다(자동으로 다시 하지 않는다) → makeUnsure
+  async function makeOnce(client, issue) {
+    const sig = JSON.stringify([issue.projectKey, issue.parentKey || null, issue.issueTypeId, issue.summary]);
+    const since = unsureMade.get(sig);
+    if (since !== undefined) {
+      if (now() - since < UNSURE_SETTLE_MS) return { kind: 'makeSettling' };
+      let found;
+      try {
+        found = await client.findMade({ ...issue, minutes: (now() - since) / 60000 + UNSURE_LOOKBACK_MIN });
+      } catch { return { kind: 'makeUnsure' }; }
+      if (found.length > 1) return { kind: 'makeUnsure' };
+      unsureMade.delete(sig);
+      if (found.length === 1) return { ...found[0], found: true };
+    }
+    try {
+      return await client.createIssue(issue);
+    } catch (error) {
+      const kind = makeKind(error, true);
+      if (kind === 'makeUnsure') unsureMade.set(sig, now());
+      return { kind };
+    }
+  }
+
   // 지라에 여러 이슈를 만드는 단 하나의 길. 화면이 미리 보기 + 확인 줄을 거친 뒤에만 부른다.
   // 앱 데이터 저장소(mutation-store·idempotent)는 건드리지 않는다 — 지라는 앱 파일이 아니다.
   // 순서는 늘 같다: ① 보낸 값 검증 → ② 같은 계획인지(60초) → ③ 만들 수 있는 종류를 **쓰기 직전에
   // 다시 읽어 대조** → ④ 에픽 → ⑤ 하위를 하나씩. 하위 하나가 실패해도 다음은 계속한다.
+  // ④·⑤는 makeOnce를 거친다 — 전에 결과 모름으로 끝난 같은 이슈면 보내기 전에 지라에서 먼저 찾는다.
   async function create(body) {
     const plan = body && typeof body === 'object' && body.plan && typeof body.plan === 'object' ? body.plan : null;
     const bad = (kind) => ({ ok: false, error: MESSAGE[kind], kind });
@@ -1173,9 +1240,12 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
 
     const signature = JSON.stringify([projectKey, epicKey, epicSummary, children.map(child => [child.summary, child.issueTypeId])]);
     for (const [key, at] of madePlans) if (now() - at >= ttlMs) madePlans.delete(key);
+    for (const [key, at] of unsureMade) if (now() - at >= UNSURE_KEEP_MS) unsureMade.delete(key);
     if (madePlans.has(signature)) return bad('duplicate');
     madePlans.set(signature, now());
     // 아무것도 만들지 못하고 끝난 길은 지문을 지운다 — 곧바로 다시 시도할 수 있어야 한다.
+    // 에픽이 결과 모름으로 끝나도 계획 지문은 지운다: 다시 보내면 `duplicate`가 아니라 makeOnce가 지라에서 먼저 찾는다
+    // (모름의 기억은 이슈 지문으로 unsureMade에 남아 있다).
     const give = (kind) => { madePlans.delete(signature); return bad(kind); };
 
     const client = createJiraClient({ settings, request, readToken: () => secret });
@@ -1216,13 +1286,10 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
           return give(makeKind(error));
         }
       }
-      try {
-        const made = await client.createIssue({ projectKey, issueTypeId: epicType.id, summary: epicSummary });
-        epic = { ...made, summary: epicSummary, created: true };
-      } catch (error) {
-        // 에픽이 실패하면 아무것도 만들지 않은 것과 같다 — 하위는 시작하지도 않는다.
-        return give(makeKind(error));
-      }
+      const outcome = await makeOnce(client, { projectKey, issueTypeId: epicType.id, summary: epicSummary });
+      // 에픽이 실패하거나 결과를 모르면 하위는 시작하지도 않는다(모름이면 그 에픽 지문은 unsureMade에 남는다).
+      if (outcome.kind) return give(outcome.kind);
+      epic = { key: outcome.key, url: outcome.url, summary: epicSummary, created: true, ...(outcome.found ? { found: true } : {}) };
       // 새로 만든 에픽만 나에게 배정한다. 실패해도 이미 만들어진 티켓이라 전체를 실패로 돌리지 않고
       // 그 이유만 결과에 얹는다 — 하위 티켓은 직군별로 사람이 나중에 따로 지정하므로 여기서는 배정하지 않는다.
       try {
@@ -1235,13 +1302,9 @@ function createJiraApi({ config, request, readFile = nodeFs.readFileSync, now = 
 
     const results = [];
     for (const child of children) {
-      try {
-        const made = await client.createIssue({ projectKey, issueTypeId: child.issueTypeId, summary: child.summary, parentKey: epic.key });
-        results.push({ summary: child.summary, key: made.key, url: made.url });
-      } catch (error) {
-        const kind = makeKind(error);
-        results.push({ summary: child.summary, error: MESSAGE[kind], kind });
-      }
+      const outcome = await makeOnce(client, { projectKey, issueTypeId: child.issueTypeId, summary: child.summary, parentKey: epic.key });
+      if (outcome.kind) results.push({ summary: child.summary, error: MESSAGE[outcome.kind], kind: outcome.kind });
+      else results.push({ summary: child.summary, key: outcome.key, url: outcome.url, ...(outcome.found ? { found: true } : {}) });
     }
     return {
       ok: true,
@@ -1281,6 +1344,7 @@ module.exports = {
   shapeCreateTypes, epicTypeOf, childTypesOf, defaultChildType,
   JIRA_KEY_RE, JIRA_TIMEOUT_MS, JIRA_CACHE_MS, JIRA_LIST_LIMIT, MY_ISSUES_JQL, JIRA_MESSAGE: MESSAGE,
   JIRA_DONE_DAYS, JIRA_DONE_MAX_DAYS, doneIssuesJql, JIRA_CREATE_MAX, JIRA_SUMMARY_MAX,
+  UNSURE_KEEP_MS, UNSURE_SETTLE_MS, UNSURE_LOOKBACK_MIN,
   adfText, attentionPreview, shapeAttention, attentionOrder,
   ATTENTION_JQL, ATTENTION_LIMIT, ATTENTION_PREVIEW_MAX,
 };
