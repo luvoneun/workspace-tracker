@@ -742,9 +742,13 @@ function projectNewMovePaint() {
   projectNewMoveNode.replaceChildren(...(line ? [line] : []));
 }
 // 주 버튼의 글자(개수)와 눌릴 수 있는지만 고쳐 준다 — 이름을 적는 동안 초점이 튀지 않게.
+// 초점이 이 자리 안(예: Tab으로 간 `취소`)에 있었으면 다시 그린 뒤 같은 버튼으로 되돌린다(전체 그리기 projectNewPaint와 같은 길).
 function projectNewGoPaint() {
   if (!projectNew || !projectNewGoNode || !projectNewGoNode.isConnected) return;
+  const active = document.activeElement;
+  const key = active && projectNewGoNode.contains?.(active) ? projectNewFocusKey(active) : null;
   projectNewGoNode.replaceChildren(projectNewActions(projectNew));
+  if (key) projectNewRefocus(projectNewGoNode, key);
 }
 
 // ---------- 확인 · 보내기 ----------

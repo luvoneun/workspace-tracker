@@ -7983,6 +7983,10 @@ test('BJCREATE: 늦게 온 지라 종류 응답은 조합 중인 이름 칸을 �
   fixture.app.context.document.activeElement = name;
   fixture.app.run('uiComposingEl = document.activeElement;');
   const form = nodeFind(fixture.body(), 'd-pnew');
+  // 가짜 노드의 querySelectorAll은 빈 목록이라, 미리 보기 자리만 클래스로 찾게 끼운다.
+  const preview = nodeFind(fixture.body(), 'd-pnewpvbox');
+  preview.querySelectorAll = selector => (selector === '.ty' ? nodeFindAll(preview, 'ty') : []);
+  assert.deepEqual(nodeFindAll(preview, 'ty').map(type => type.textContent), [''], '응답 전에는 종류 글자가 비어 있다');
 
   open();
   await fixture.app.run('metaDone');
@@ -7993,9 +7997,36 @@ test('BJCREATE: 늦게 온 지라 종류 응답은 조합 중인 이름 칸을 �
   assert.equal(name.value, '닭');
   assert.equal(fixture.app.run('projectNew.typeBusy'), false);
   assert.match(bjcWords(nodeFind(fixture.body(), 'd-pnewtype')), /하위 티켓 종류 · 작업/, '종류 줄은 응답대로 바뀐다');
+  assert.deepEqual(nodeFindAll(nodeFind(fixture.body(), 'd-pnewpvbox'), 'ty').map(type => type.textContent), ['작업'], '미리 보기 줄의 종류 글자도 바뀐다');
   assert.equal(bjcText(nodeFind(fixture.body(), 'pri')), '지라에 2개 만들기');
   assert.equal(nodeFind(fixture.body(), 'pri').disabled, false, '종류가 생겨 주 버튼이 눌린다');
   fixture.app.run('uiComposingEl = null;');
+});
+
+test('BJCREATE: 주 버튼 자리만 다시 그려도 그 자리에 있던 초점(Tab으로 간 `취소`)은 같은 버튼으로 돌아온다', async () => {
+  const fixture = projectNewClient();
+  let open = null;
+  const gate = new Promise(resolve => { open = resolve; });
+  fixture.app.context.fetch = async (url) => {
+    if (String(url).includes('/api/jira/create-meta')) { await gate; return new Response(JSON.stringify(BJC_META)); }
+    return new Response('{"ok":true}');
+  };
+  fixture.app.run("projectNewStart(); projectNew.name = '임베드'; projectNew.project = 'IO'; projectNewPaint(); metaDone = projectNewMetaLoad('IO');");
+  const goBox = nodeFind(fixture.body(), 'd-pnewgobox');
+  // 가짜 노드에는 contains·태그 찾기가 없어 이 자리만 끼운다(버튼은 type='button'으로 가린다).
+  const inside = (node, target) => node === target || (node.children || []).some(kid => kid && typeof kid === 'object' && inside(kid, target));
+  const buttons = node => (node.children || []).flatMap(kid => (kid && typeof kid === 'object' ? [...(kid.type === 'button' ? [kid] : []), ...buttons(kid)] : []));
+  goBox.contains = target => inside(goBox, target);
+  goBox.querySelectorAll = tag => (tag === 'BUTTON' ? buttons(goBox) : []);
+  const cancel = bjcButton(goBox, '취소');
+  cancel.tagName = 'BUTTON';
+  fixture.app.context.document.activeElement = cancel;
+
+  open();
+  await fixture.app.run('metaDone');
+  const fresh = bjcButton(nodeFind(fixture.body(), 'd-pnewgobox'), '취소');
+  assert.ok(fresh && fresh !== cancel, '주 버튼 자리는 새로 그려졌다');
+  assert.equal(fresh.focused, true, '초점은 새 `취소`로 돌아온다(body로 떨어지지 않는다)');
 });
 
 test('BJCREATE: 만들기가 늦게 실패해도 이름 칸은 그대로 두고 주 버튼 자리(오류 한 줄·확인 줄 닫힘)만 고친다', async () => {
