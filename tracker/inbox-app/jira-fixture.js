@@ -2,6 +2,9 @@
 // 이름(`*-fixture.js`)이라 화면으로 나가지 않는다(server.js isClientFile). 사람은 전부 가짜(테스터A~E)이고,
 // 정해 둔 가짜 주소(FIXTURE_JIRA_SITE) 말고는 어떤 주소에도 답하지 않고 던진다 — 실제 지라에 닿을 길이 없다.
 // 값은 이 프로세스 메모리에만 있다(담당을 바꾸면 메모리만 바뀐다. 파일은 쓰지 않는다).
+// 새 프로젝트 만들기도 받는다(에픽·작업 두 종류). 요약에 아래 표시를 넣으면 실패를 흉내 낸다 —
+// `[끊김]` 만들어지는데 응답이 끊김(결과 모름) · `[5xx]` 503으로 안 만들어짐(결과 모름) · `[거절]` 400(확실한 실패).
+// `[찾기실패]`가 든 요약을 찾으면(결과 모름 뒤 다시 시도) 검색이 503이다.
 const FIXTURE_JIRA_SITE = 'https://jira.fixture.invalid';
 const ME = 'fx-tester-a';
 
@@ -35,6 +38,11 @@ function createJiraFixture() {
     issue('IO-161', '알림센터 서버', '작업', 'fx-tester-b2', status('진행 중', 'indeterminate')),
   ];
   const byKey = key => issues.find(entry => entry.key === key) || null;
+  let nextKey = 200;
+  const createTypes = { issueTypes: [
+    { id: '10000', name: '에픽', subtask: false, hierarchyLevel: 1 },
+    { id: '10001', name: '작업', subtask: false, hierarchyLevel: 0 },
+  ] };
   // 지라가 실제로 주는 것처럼 사람 덩어리에 이메일·아바타까지 싣는다 — 서버가 버리는지 화면에서 보려는 것.
   const person = (id) => {
     const user = userOf(id);
@@ -49,10 +57,16 @@ function createJiraFixture() {
     fixVersions: entry.versions || [],
     subtasks: [],
   });
-  const shaped = entry => ({ key: entry.key, fields: fieldsOf(entry) });
+  const shaped = entry => ({ key: entry.key, fields: { ...fieldsOf(entry), parent: entry.parent ? { key: entry.parent } : null } });
   const notDone = entry => entry.state.statusCategory.key !== 'done';
 
   function search(jql) {
+    // 결과 모름 뒤 찾기(jira-client findMade) — 프로젝트·종류·보고자=나·(부모). 시각 조건은 이 픽스처에서 보지 않는다.
+    const made = jql.match(/^project = ([A-Z][A-Z0-9]*) AND issuetype = (\d+) AND reporter = currentUser\(\) AND created >= -\d+m(?: AND parent = ([A-Z][A-Z0-9]*-\d+))? ORDER BY created DESC$/);
+    if (made) {
+      return issues.filter(entry => entry.reporter === ME && entry.key.startsWith(`${made[1]}-`)
+        && (entry.type === '에픽' ? '10000' : '10001') === made[2] && (!made[3] || entry.parent === made[3]));
+    }
     const parent = jql.match(/^parent=([A-Z][A-Z0-9]*-\d+)$/);
     if (parent) return issues.filter(entry => entry.parent === parent[1]);
     const keys = jql.match(/^key in \(([^)]*)\)$/);
@@ -74,6 +88,7 @@ function createJiraFixture() {
     if (path === '/rest/api/3/myself') return reply({ ...person(ME) });
     if (path === '/rest/api/3/search/jql' || path === '/rest/api/3/search') {
       const jql = method === 'POST' ? String(sent && sent.jql || '') : String(url.searchParams.get('jql') || '');
+      if (jql.startsWith('project = ') && search(jql).some(entry => entry.summary.includes('[찾기실패]'))) return reply({ errorMessages: ['busy'] }, 503);
       const max = Number((method === 'POST' ? sent && sent.maxResults : url.searchParams.get('maxResults')) || 50);
       return reply({ issues: search(jql).slice(0, max).map(shaped) });
     }
@@ -91,6 +106,20 @@ function createJiraFixture() {
       entry.who = id;
       entry.updated = (updated += 1);
       return reply(null, 204);
+    }
+    if (path === '/rest/api/3/issue/createmeta/IO/issuetypes') return reply(createTypes);
+    if (path === '/rest/api/3/issue' && method === 'POST') {
+      const fields = (sent && sent.fields) || {};
+      const summary = String(fields.summary || '');
+      if (summary.includes('[거절]')) return reply({ errorMessages: ['refused'] }, 400);
+      if (summary.includes('[5xx]')) return reply({ errorMessages: ['unavailable'] }, 503);
+      nextKey += 1;
+      const key = `${fields.project.key}-${nextKey}`;
+      const epic = fields.issuetype && fields.issuetype.id === '10000';
+      issues.push(issue(key, summary, epic ? '에픽' : '작업', null, status('할 일', 'new'), { parent: fields.parent ? fields.parent.key : undefined, reporter: ME }));
+      // 지라에는 만들어졌는데 응답만 끊긴 경우 — 서버는 이것을 결과 모름으로 받아야 한다.
+      if (summary.includes('[끊김]')) throw new Error('fixture: socket hang up');
+      return reply({ id: String(nextKey), key }, 201);
     }
     const transitions = path.match(/^\/rest\/api\/3\/issue\/([A-Z][A-Z0-9]*-\d+)\/transitions$/);
     if (transitions) return reply({ transitions: [] });
