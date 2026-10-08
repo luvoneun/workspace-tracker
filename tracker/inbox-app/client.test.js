@@ -336,6 +336,7 @@ test('칸의 Esc는 칸만 닫는다 — 그룹 `+` 줄·결과 한 줄·상세 
   assert.equal(app.run('holder.children[0] === title'), true, '상세 제목은 원래 글자로 돌아온다');
   assert.equal(app.run('e4.stopped'), 1, '결정 문구');
   assert.equal(app.run('holder.children[1] === desc'), true, '결정 문구는 원래 글자로 돌아온다');
+  assert.equal(app.run('desc.focused'), true, '초점은 돌아온 제목 판으로(body로 빠지지 않게)');
   // 한글 조합 중의 Esc는 글자 확정이라 칸도 문서도 건드리지 않는다
   app.run(`addRow.hidden = false; e5 = escEvent(); e5.isComposing = true; addRow.children[0].listeners.keydown(e5);`);
   assert.equal(app.run('e5.stopped'), 0);

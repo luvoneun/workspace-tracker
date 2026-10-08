@@ -6521,8 +6521,8 @@ function makeEditableDesc(el, item) {
     input.addEventListener('keydown', (e) => {
       if (e.isComposing) return;
       if (e.key === 'Enter') input.blur();
-      // 칸의 Esc는 칸만 닫는다 — 열린 상세 카드·서랍까지 닫히지 않게 문서로 올려 보내지 않는다.
-      if (e.key === 'Escape') { e.stopPropagation(); committed = true; input.replaceWith(el); }
+      // 칸의 Esc는 칸만 닫는다 — 열린 상세 카드·서랍까지 닫히지 않게 문서로 올려 보내지 않고, 초점은 돌아온 제목 판으로.
+      if (e.key === 'Escape') { e.stopPropagation(); committed = true; input.replaceWith(el); el.focus(); }
     });
   });
 }

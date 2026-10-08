@@ -1732,7 +1732,7 @@ textarea.d-dtitle {
 /* 제목은 평소 두 줄까지(말줄임), 누르면(.is-open) 그 자리에서 전문 — 아이디어 줄(.d-rec.is-idea .ti)과 같은 규칙.
    두 줄이 되어도 체크·종류·상태·⋯는 첫 줄에 맞춰 선다(align-items: start + 같은 18px 줄 높이) */
 .d-mrow2 .ti {
-  min-width: 0; width: 100%; text-align: left; overflow: hidden;
+  min-width: 0; width: 100%; text-align: left;
   white-space: normal; line-height: 18px;
   border: 0; background: none; padding: 0; color: var(--text); font-family: inherit; font-size: var(--fs-sm); cursor: pointer;
 }
@@ -2494,7 +2494,7 @@ body.batch-open .d-toast { bottom: 76px; }
 .d-prow2 .ti {
   border: 0; background: none; padding: 0; width: 100%; min-height: var(--h-sm); text-align: left; cursor: pointer;
   font-family: inherit; font-size: var(--fs-lg); font-weight: 500; color: var(--text);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  white-space: nowrap;   /* 자르기·말줄임은 글자 칸(.tx)이 — 판이 자르면 초점 테가 잘린다 */
 }
 .d-prow2.is-sel .ti { font-weight: 600; color: var(--accent-text); }
 /* 진행 중인 업무는 오늘 목록(`.d-row.is-doing`)과 같게 제목 600 */
