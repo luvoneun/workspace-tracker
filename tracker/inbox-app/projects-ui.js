@@ -316,9 +316,6 @@ function projectViewSegment() {
   return uiKnob(seg, 'projects:view'); // 손잡이가 옛 칸에서 미끄러진다(화면 전환)
 }
 
-// 프로젝트 찾기 칸 — 8개 이상일 때만 선다. 입력할 때마다 목록 부분만 다시 그린다(rowsOnly) — 이
-// 칸 자체는 다시 만들지 않는다(한글 조합 중에 칸이 통째로 바뀌면 조합이 끊긴다. project-new-ui.js의
-// `이름` 칸과 같은 방식 — 손대는 칸 밖에서 결과만 다시 그린다). Esc는 비우기만, 초점은 칸에 남는다.
 // ---------- 탭 들어올 때·나갈 때 (app.js setActiveTab이 탭을 옮길 때 부른다) ----------
 // 프로젝트 탭에 새로 들어올 때만 왼쪽 목록 차례를 다시 정렬한다(체크 등으로 이미 그 탭에 있는 동안
 // 다시 그리는 것은 고정된 차례를 그대로 쓴다 — projectOrderResort).
@@ -336,6 +333,9 @@ function projectsTabLeave() {
   }
 }
 
+// 프로젝트 찾기 칸 — 8개 이상일 때만 선다. 입력할 때마다 목록 부분만 다시 그린다(rowsOnly) — 이
+// 칸 자체는 다시 만들지 않는다(한글 조합 중에 칸이 통째로 바뀌면 조합이 끊긴다. project-new-ui.js의
+// `이름` 칸과 같은 방식 — 손대는 칸 밖에서 결과만 다시 그린다). Esc는 비우기만, 초점은 칸에 남는다.
 function projectFindInput() {
   const input = document.createElement('input');
   input.type = 'text';
