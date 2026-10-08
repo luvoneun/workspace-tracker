@@ -907,7 +907,7 @@ dialog.d-stay:not([open])::backdrop { opacity: 0; transition-duration: var(--sta
 .d-wrow .sub { grid-area: sub; font-size: 12.5px; color: var(--dim); overflow: clip; overflow-clip-margin: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .d-wrow.is-wrap { align-items: start; }
 .d-wrow.is-wrap .ti { white-space: normal; text-overflow: clip; line-height: 1.4; }
-.d-wrow.is-wrap .ti > .tx, .d-wrow.is-two .ti > .tx { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.d-wrow.is-wrap .ti > .tx, .d-wrow.is-two .ti > .tx { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: normal; text-overflow: clip; }
 .d-wrow.is-wrap .mt { padding-top: 1px; }
 /* 리마인드 줄: 제목(두 줄까지) 바로 뒤에 `· ● 프로젝트`·`원문`이 붙는다 — 오늘 목록 좁은 화면(.d-titlewrap)과 같이
    자리가 모자라면 제목 아래 줄로 내려간다(제목을 더 자르지 않는다) */
@@ -1409,6 +1409,15 @@ body.batch-open .d-row[data-task-id]:not(.is-done) { cursor: pointer; }
 /* 묶음은 글자 밑선 맞춤 그대로 — 판이 줄 높이를 차지해도 `· ● 프로젝트`·`원문`은 제목 첫 줄에 붙는다 */
 .d-row .d-titlewrap .d-title { align-self: auto; min-height: 100%; }
 .d-title > .tx { min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+/* 넓힌 제목 판(오늘·새로 들어온 것·레일·회의·프로젝트 줄)의 키보드 초점 테는 판이 아니라 글자 칸 둘레에 — 판은 쉬는 모습에 안 보이는 자리라.
+   글자 칸이 스스로 자르므로(말줄임) 판은 넘침을 자르지 않는다(테가 잘리지 않게) */
+.d-row .d-title, .d-ibrow .ti, .d-mrow .ti, .d-wrow .ti, .d-mrow2 .ti, .d-prow2 .ti { overflow: visible; min-width: 0; }
+.d-row .d-title:focus-visible, .d-ibrow .ti:focus-visible, .d-mrow .ti:focus-visible, .d-wrow .ti:focus-visible, .d-mrow2 .ti:focus-visible, .d-prow2 .ti:focus-visible { outline: none; }
+.d-row .d-title:focus-visible > .tx, .d-ibrow .ti:focus-visible > .tx, .d-mrow .ti:focus-visible > .tx, .d-wrow .ti:focus-visible > .tx, .d-mrow2 .ti:focus-visible > .tx, .d-prow2 .ti:focus-visible > .tx {
+  outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px;
+}
+/* 한 줄 말줄임 제목은 글자 칸이 말줄임을 맡는다 */
+.d-wrow .ti > .tx, .d-prow2 .ti > .tx { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .d-row.is-doing .d-title { font-weight: 600; }
 .d-title .new-dot {
   position: static; display: inline-block; width: 5px; height: 5px;
@@ -1731,7 +1740,6 @@ textarea.d-dtitle {
 .d-mrow2 .ti { padding-block: 5px; margin-block: -5px; }
 .d-mrow2 .ti > .tx { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .d-mrow2.is-open .ti > .tx { -webkit-line-clamp: unset; display: block; }
-.d-mrow2 .ti:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 .d-mrow2 .ac { height: var(--h-sm); margin: -5px 0; }
 .d-mrow2 button.ti:hover { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; }
 .d-mrow2 .st { font-size: 11.5px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -3360,7 +3368,7 @@ a.d-btn { text-decoration: none; }
   .d-prow2.is-done { grid-template-columns: 30px auto minmax(0, 1fr) auto; grid-template-areas: "ck ti ti c" "ck a a a"; }
   .d-prow2 .d-check { grid-area: ck; width: 30px; height: auto; }
   .d-prow2 .ti { grid-area: ti; white-space: normal; }
-  .d-prow2 .ti > .tx { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .d-prow2 .ti > .tx { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: normal; text-overflow: clip; }
   .d-prow2 .d-titlewrap { grid-area: ti; flex-wrap: wrap; }
   .d-prow2 .d-titlewrap .ti { min-height: 0; }
   .d-prow2 .dd, .d-prow2 .res { justify-self: start; text-align: left; font-size: 11.5px; }
