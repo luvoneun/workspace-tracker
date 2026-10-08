@@ -2975,7 +2975,8 @@ test('BJASSIGN2: /api/jira/assignable는 두 글자 미만·틀린 키면 400, �
 // 새 에픽 요약이 이미 있는 지라 프로젝트(에픽 요약·별칭)와 같으면 지라에 아무것도 묻지 않고 409로 거절한다.
 // 가짜 지라는 자식 프로세스 안에서 fetch를 가로채고, 목록 읽기(search)가 아닌 요청은 전부 calls.log에 한 줄씩 남긴다.
 const JIRA_SAME_SITE = 'https://same-jira.test';
-async function startSameNameJiraServer(t, seed) {
+// `env`는 띄우는 서버에 더 줄 환경(예: 결과 모름 기록 폴더), `found`는 결과 모름 찾기(reporter = currentUser())가 돌려줄 이슈들.
+async function startSameNameJiraServer(t, seed, { env = {}, found = [] } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-jirasame-'));
   seed(home);
   fs.writeFileSync(path.join(home, 'jira_issues.md'),
@@ -2991,12 +2992,17 @@ const fs = require('node:fs');
 const SITE = ${JSON.stringify(JIRA_SAME_SITE)};
 const CALLS = ${JSON.stringify(callsFile)};
 const TYPES = ${JSON.stringify(MOVE_TYPES)};
+const FOUND = ${JSON.stringify(found)};
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (input, init) => {
   const url = String(input && input.url ? input.url : input);
   if (!url.startsWith(SITE)) return realFetch(input, init);
   const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
   const issue = (key, summary) => ({ key, fields: { summary, status: { name: '진행 중', statusCategory: { key: 'indeterminate' } }, issuetype: { name: '에픽' } } });
+  if (url.includes('/search') && decodeURIComponent(url).includes('reporter = currentUser()')) {
+    fs.appendFileSync(CALLS, JSON.stringify({ method: 'GET', url: decodeURIComponent(url), body: null }) + '\\n');
+    return json({ issues: FOUND });
+  }
   if (url.includes('/search')) return json({ issues: [issue('PAY-12', '결제 리뉴얼'), issue('PAY-30', '정산 묶음'), issue('PAY-40', 'Pay Renewal')] });
   fs.appendFileSync(CALLS, JSON.stringify({ method: (init && init.method) || 'GET', url, body: init && init.body ? String(init.body) : null }) + '\\n');
   if (url.includes('/issue/createmeta/')) return json(TYPES);
@@ -3010,7 +3016,7 @@ server.listen(Number(process.env.WORKSPACE_PORT), '127.0.0.1', () => console.log
 `);
   const port = await freePort();
   const child = spawn(process.execPath, [wrapper], {
-    env: { ...process.env, WORKSPACE_DATA_DIR: home, WORKSPACE_PORT: String(port), WORKSPACE_NO_OPEN: '1', WORKSPACE_HOST: '', WORKSPACE_CONFIG: config },
+    env: { ...process.env, WORKSPACE_DATA_DIR: home, WORKSPACE_PORT: String(port), WORKSPACE_NO_OPEN: '1', WORKSPACE_HOST: '', WORKSPACE_CONFIG: config, ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let log = '';
@@ -3048,4 +3054,42 @@ test('BMERGE 3-3: 새 에픽 요약이 지라 요약·별칭과 같으면 409이
   assert.equal(fresh.ok, true, JSON.stringify(fresh));
   const summaries = server.calls().filter(call => call.method === 'POST' && call.url.endsWith('/rest/api/3/issue')).map(call => JSON.parse(call.body).fields.summary);
   assert.deepEqual(summaries, ['운영툴', '새 정산 배치']);
+});
+
+// 같은 이름 막기(409)는 내 담당 에픽 목록만 본다 — 응답이 끊겨 담당 배정 전에 멈춘 에픽(결과 모름)은 목록에 없다.
+// 그 이름으로 다시 만들면 409가 아니라 결과 모름 흐름(makeOnce)으로 간다: 지라에서 먼저 찾아 있으면 그 키를 쓰고 나에게 배정한다.
+// 409로 막으면 이미 만들어진 담당 없는 에픽을 앱이 데려올 길이 없고, 기록이 24시간 뒤 지워지면 오히려 두 벌을 만든다.
+test('지라모름기록 ⑥: 모름 기록이 있는 에픽 이름으로 새 프로젝트를 만들면 409가 아니라 찾기부터 — 찾은 키를 쓰고 배정, 30초 안이면 기다림', async (t) => {
+  const local = fs.mkdtempSync(path.join(os.tmpdir(), 'jira-unsure-same-'));
+  t.after(() => fs.rmSync(local, { recursive: true, force: true }));
+  const file = path.join(local, 'jira-unsure.json');
+  const items = [
+    { projectKey: 'PAY', parentKey: null, issueTypeId: '10000', summary: '끊긴 에픽', at: Date.now() - 60 * 1000 },
+    { projectKey: 'PAY', parentKey: null, issueTypeId: '10000', summary: '방금 끊긴 에픽', at: Date.now() },
+  ];
+  fs.writeFileSync(file, JSON.stringify({ version: 1, items }));
+  const found = [{ key: 'PAY-77', fields: { summary: '끊긴 에픽', issuetype: { id: '10000' } } }];
+  const server = await startSameNameJiraServer(t, () => {}, { env: { WORKSPACE_LOCAL_DIR: local }, found });
+  const create = summary => fetch(server.origin + '/api/jira/create', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plan: { projectKey: 'PAY', epic: { summary }, children: [] } }),
+  }).then(async response => ({ status: response.status, ...await response.json() }));
+  const posts = () => server.calls().filter(call => call.method === 'POST' && call.url.endsWith('/rest/api/3/issue'));
+
+  const settling = await create('방금_끊긴 에픽');
+  assert.equal(settling.status, 200, JSON.stringify(settling));
+  assert.equal(settling.kind, 'makeSettling');
+  assert.equal(settling.error, '지라가 확인하는 중이에요. 잠시 뒤에 다시 시도해 주세요.');
+
+  const adopted = await create('끊긴_에픽');
+  assert.equal(adopted.status, 200, JSON.stringify(adopted));
+  assert.equal(adopted.ok, true, JSON.stringify(adopted));
+  assert.equal(adopted.epic.key, 'PAY-77');
+  assert.equal(adopted.epic.found, true);
+  assert.equal(adopted.epic.assigned, true, '찾은 에픽도 나에게 배정해 목록에 뜨게 한다');
+  const finds = server.calls().filter(call => call.url.includes('reporter = currentUser()'));
+  assert.equal(finds.length, 1, '보내기 전에 지라에서 먼저 찾는다');
+  assert.match(finds[0].url, /project = PAY AND issuetype = 10000/);
+  assert.deepEqual(posts(), [], '찾았으니 새로 만들지 않는다');
+  assert.ok(server.calls().some(call => call.method === 'PUT' && call.url.endsWith('/issue/PAY-77/assignee')));
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')).items.map(item => item.summary), ['방금 끊긴 에픽'], '찾은 에픽 줄만 지운다');
 });
