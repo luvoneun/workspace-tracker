@@ -1937,7 +1937,7 @@ function uiTaskRow(item, opts = {}) {
       move('오늘로', todayStr(), '오늘 할 일로 옮겼어요');
     } else {
       // 진행 중인 업무는 이미 손대고 있는 일이라 `오늘 할게요`를 띄우지 않는다.
-      if (carried && !item.doing) move('오늘 할게요', todayStr(), '오늘 할 일로 옮겼어요');
+      if (carried && !(item.doing && item.status !== 'done')) move('오늘 할게요', todayStr(), '오늘 할 일로 옮겼어요');
       move('내일', tomorrowStr(), '내일로 미뤘어요');
       move('나중에', null, '나중에 할 일로 옮겼어요 · 기한은 그대로예요');
     }
@@ -3799,9 +3799,11 @@ function taskProjectControl(item, opts = {}) {
 
 // 업무 줄·상세의 더보기: 동작 → 값 바꾸기 → 삭제. 오늘 줄과 나중 줄은 한 항목만 다르다.
 function taskMenuSections({ item, mode, card }) {
+  // 끝낸 업무에 남은 진행 시작일(2026-10-19부터 완료해도 남긴다)은 진행 중이 아니다.
+  const doing = !!item.doing && item.status !== 'done';
   const actions = [{
-    label: item.doing ? '진행 중 해제' : '진행 중으로 표시',
-    onClick: () => setTaskDoing(item.id, !item.doing),
+    label: doing ? '진행 중 해제' : '진행 중으로 표시',
+    onClick: () => setTaskDoing(item.id, !doing),
   }];
   if (mode === 'later') actions.push({
     label: '완료로 표시',
@@ -4274,7 +4276,7 @@ function panelTask({ item, detail, type }, box) {
   panelBackLink(box);
   box.appendChild(panelHead(item, () => {
     const actions = [];
-    if (isTask) actions.push({ label: item.doing ? '진행 중 해제' : '진행 중으로 표시', onClick: () => setTaskDoing(item.id, !item.doing) });
+    if (isTask) actions.push({ label: item.doing && !done ? '진행 중 해제' : '진행 중으로 표시', onClick: () => setTaskDoing(item.id, !(item.doing && !done)) });
     // 원문 열기는 제목 아래 링크가 늘 보여 주므로 메뉴에는 복사만 남긴다.
     if (item.permalink) actions.push({ label: '원본 링크 복사', onClick: () => panelCopyLink(item.permalink) });
     // 동작 줄은 한 줄로 둔다 — 자주 쓰지 않는 이동은 메뉴로 내린다.
@@ -4331,7 +4333,7 @@ function panelTask({ item, detail, type }, box) {
     if (mode === 'later') move('오늘로', todayStr(), '오늘 할 일로 옮겼어요');
     else {
       // 줄에 `오늘 할게요`가 뜨던 업무(밀렸고 진행 중이 아님)는 좁은 폭에서 줄 대신 시트 발에 그 버튼이 선다.
-      if (detailSheet() && mode === 'today' && uiCarryText(item.scheduled) && !item.doing) move('오늘 할게요', todayStr(), '오늘 할 일로 옮겼어요');
+      if (detailSheet() && mode === 'today' && uiCarryText(item.scheduled) && !(item.doing && !done)) move('오늘 할게요', todayStr(), '오늘 할 일로 옮겼어요');
       move('내일', tomorrowStr(), uiMoveNotice('내일로 미뤘어요', [item], tomorrowStr()));
       move('나중에', null, uiMoveNotice('나중에 할 일로 옮겼어요 · 기한은 그대로예요', [item], null));
     }

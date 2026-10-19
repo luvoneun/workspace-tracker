@@ -117,7 +117,7 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
   }
   // 그 주 끝(일요일) 기준으로 진행 중이던 할 일·버그 — `doing`이 그 주 끝까지 켜졌고, 지금 안 끝났거나 그 주 뒤에 끝났다.
   // 지난 주 보고(확정 전)도 이 기준으로 진행 중 줄·할 일 칸 미리 채우기를 한다(이번 주는 예전과 같다 — 끝난 업무는 늘 그 전이다).
-  // 완료하면 `doing`이 지워지므로(server.js toggleTrackStatus) "그 주 뒤에 끝난 업무"는 `doing`이 남아 있을 때만 잡힌다.
+  // 완료해도 `doing`은 남는다(2026-10-19부터 — server.js toggleTrackStatus). 그 전에 끝낸 업무는 `doing`이 지워져 있어 잡히지 않는다.
   function doingBy(item, until) {
     if (!item || !['task','bug'].includes(item.type) || !item.doing || item.doing > until) return false;
     return item.status !== 'done' || (!!item.completed && item.completed > until);

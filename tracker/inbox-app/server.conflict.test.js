@@ -154,3 +154,18 @@ test('아이디어 올리기·받음 표시를 같이 지우는 예정일 정하
   assert.equal(trackerFiles(), before);
   assert.match(readTasks().split('\n').find(line => line.includes(made.id)), /inbox:true/);
 });
+
+test('[2026-10-19] 완료해도 진행 시작일(doing)은 남고, 완료를 취소하면 다시 진행 중이다', async () => {
+  const made = await post('/api/today-task/create', { description: '진행하다 끝낸 업무' });
+  await post('/api/track/set-doing', { id: made.id, doing: true });
+  const started = (await items()).reportRefs[made.id];
+  const line = () => readTasks().split('\n').find(text => text.includes(`id:${made.id}`));
+  const doingDate = line().match(/doing:(\S+?)(?=[\s\]])/)[1];
+  await post('/api/track/toggle', { id: made.id, status: 'done' });
+  assert.match(line(), new RegExp(`status:done .*doing:${doingDate}|doing:${doingDate}.*status:done`), '완료해도 doing이 남는다');
+  assert.match(line(), /completed:\d{4}-\d{2}-\d{2}/);
+  await post('/api/track/toggle', { id: made.id, status: 'to-do' });
+  assert.match(line(), new RegExp(`doing:${doingDate}`), '다시 열면 진행 중 그대로');
+  assert.doesNotMatch(line(), /completed:/);
+  assert.ok(started);
+});

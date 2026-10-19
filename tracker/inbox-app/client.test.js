@@ -1172,6 +1172,12 @@ test('기한이 오늘·지난 업무를 미루면 알림이 오늘 목록에 �
   const wrapKinds = item => app.run(`wrapMetaCells(${item}).map(cell => cell.className).join(' ')`);
   assert.equal(wrapKinds("{ scheduled: '2000-01-01', doing: '2000-01-02' }"), 'm-doing', '진행 중이면 밀림 칸이 없다');
   assert.equal(wrapKinds("{ scheduled: '2000-01-01' }"), 'm-carry', '진행 중을 풀면 밀림이 돌아온다');
+  // [2026-10-19] 완료해도 doing이 남는다 — 끝낸 업무는 어디서도 진행 중이 아니다.
+  assert.equal(wrapKinds("{ status: 'done', doing: '2000-01-02' }"), '', '끝낸 업무에 남은 doing은 진행 중이 아니다');
+  assert.doesNotMatch(app.run("uiMetaCells({ status: 'done', doing: todayStr() }, {})"), /진행 중/);
+  const menuLabel = item => app.run(`taskMenuSections({ item: ${item}, mode: 'today', card: document.createElement('div') })[0][0].label`);
+  assert.equal(menuLabel("{ id: 'x1', type: 'task', description: '끝낸 일', status: 'done', doing: '2000-01-02' }"), '진행 중으로 표시');
+  assert.equal(menuLabel("{ id: 'x2', type: 'task', description: '하는 일', status: 'to-do', doing: '2000-01-02' }"), '진행 중 해제');
 });
 
 test('상세 카드의 우선순위 값도 아이콘 없이 글자·색만 쓴다', () => {
@@ -18035,6 +18041,8 @@ test('줄 이동 C2 완료 흐름: 회의·프로젝트 줄도 체크하면 제�
   app.context.uiGlideDoneMark = (id, into, strike) => marks.push([id, into, strike]);
   app.run('fadeOutAndRun = async () => {}');
   const row = app.run("projectTaskRow({ id: 'p1', type: 'task', status: 'to-do', description: '가입 문구' })");
+  assert.equal(app.run("projectTaskRow({ id: 'p2', type: 'task', status: 'done', doing: '2000-01-02', description: '끝낸 일' }).className"), 'd-prow2', '끝낸 업무에 남은 doing은 진행 중 줄이 아니다');
+  assert.equal(app.run("projectTaskRow({ id: 'p3', type: 'task', status: 'to-do', doing: '2000-01-02', description: '하는 일' }).className"), 'd-prow2 is-doing');
   const box = nodeFind(row, 'd-check').children[0];
   box.listeners.change();
   assert.deepEqual(marks, [['p1', 'grp:끝낸 것', true]]);

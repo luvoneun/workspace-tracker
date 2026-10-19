@@ -1265,8 +1265,10 @@ function toggleTrackStatus(id, desired) {
       if (newStatus === fields.status) { changed = true; return line; }
       let newFieldStr = m[3].replace(/status:\S+/, `status:${newStatus}`);
       newFieldStr = newFieldStr.replace(/\s+completed:\S+/g, '');
-      // 완료하면 "진행 중"은 자동으로 풀린다 — 따로 해제할 일이 없게.
-      if (newStatus === 'done') newFieldStr = newFieldStr.replace(/\s+doing:\S+/g, '') + ` completed:${todayLocal()}`;
+      // 완료해도 진행 시작일(`doing`)은 남긴다 — 주간요약이 "그 주에 진행 중이었다가 그 뒤에 끝난 일"을 지난주 진행 중으로
+      // 세려면 필요하다(2026-10-19). 화면·집계는 끝낸 업무를 진행 중으로 보지 않는다(읽는 곳마다 status로 막음). 완료를 취소하면
+      // (다시 열면) 남아 있던 진행 표시가 그대로 돌아온다 — 실수로 끝낸 것을 되돌리면 그 전 상태가 맞다.
+      if (newStatus === 'done') newFieldStr = `${newFieldStr} completed:${todayLocal()}`;
       fileChanged = true;
       return `- ${m[1]} #${m[2]}[${stampUpdated(newFieldStr)}]`;
     });

@@ -925,7 +925,7 @@ function projectTaskRow(item, fromKey = '') {
   // 오늘 목록/나중에 할 일 중 어디에 있는지는 서버가 나눈 목록 그대로(panelMode) — 그룹 제목과 같은 기준이다.
   const mode = panelMode(item);
   const row = document.createElement('div');
-  row.className = 'd-prow2' + (item.doing ? ' is-doing' : '') + (panelState && panelState.id === item.id ? ' is-sel' : '');
+  row.className = 'd-prow2' + (item.doing && item.status !== 'done' ? ' is-doing' : '') + (panelState && panelState.id === item.id ? ' is-sel' : '');
   row.dataset.taskId = item.id;
   row.dataset.doneInto = 'grp:끝낸 것'; // 체크하면 이 그룹 제목 쪽으로 들어간다(완료 흐름 — taskCompletionCheckbox)
 

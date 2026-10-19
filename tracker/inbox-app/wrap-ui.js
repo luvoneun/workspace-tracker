@@ -100,9 +100,11 @@ function wrapMetaCells(item) {
   const cells = [];
   // 진행 중이면 밀림도 며칠째도 적지 않고 `진행 중`만 — 오늘 목록의 업무 줄(uiMetaCells)과 같은 규칙이다(사용자 요청).
   // 이 창에는 반쯤 찬 체크박스가 없으므로 글자로 `진행 중`이라고 쓴다.
-  const carry = item.doing ? null : uiCarryText(item.scheduled);
+  // 끝낸 업무에 남은 진행 시작일은 진행 중이 아니다(완료해도 doing을 남긴다 — 2026-10-19).
+  const doing = !!item.doing && item.status !== 'done';
+  const carry = doing ? null : uiCarryText(item.scheduled);
   if (carry) cells.push(wrapMetaCell('m-carry', 'clock', carry, '오늘 하려다 넘어온 업무예요'));
-  if (item.doing) {
+  if (doing) {
     cells.push(wrapMetaCell('m-doing', 'clock', '진행 중', `${uiKoDate(item.doing)}부터 진행 중이에요`));
   }
   const due = uiDueText(item.due, 'row');
