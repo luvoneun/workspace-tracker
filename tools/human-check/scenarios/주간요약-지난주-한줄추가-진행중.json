@@ -1,0 +1,67 @@
+{
+  "name": "주간요약 지난주 보고 `한 줄 추가` — 진행 중을 고르고 한글로 적어 Enter",
+  "description": "[2026-10-19] 지난주 보고에도 그 주에 진행 중이던 일이 한 일 칸(진행 중)과 할 일 칸(미리 채움)에 서고, `+ 한 줄 추가` 칸 아래 고르개 `완료한 일 | 진행 중`으로 진행 중 줄을 더한다. 고르개는 Tab으로 닿고, 고를 때 칸을 다시 만들지 않으며(같은 입력칸), 한글 조합 도중 다시 그리기(load)가 와도 조합이 끊기지 않고, Enter가 진행 중 줄 + 지금 진행 중인 업무를 만든다.",
+  "steps": [
+    { "do": "goto", "url": "/", "waitFor": "#tabBtnWeekly", "wait": 500 },
+    { "do": "click", "selector": "#tabBtnWeekly", "hold": 0 },
+    { "do": "wait", "selector": "#weeklyReportDetail [data-edit-text]", "timeout": 8000 },
+    { "do": "click", "note": "주차 목록의 둘째 줄 = 지난주", "selector": ".rp-wk", "nth": 1, "hold": 0 },
+    { "do": "wait", "selector": "#weeklyReportDetail [data-addline$=\"group:운영툴\"]", "timeout": 5000 },
+    {
+      "do": "assert",
+      "message": "지난주 한 일 칸에 그때부터 진행 중인 `운영툴 권한 확인`이 서고, 할 일 칸에도 미리 채워져요",
+      "expr": "fetch('/api/items').then(r => r.json()).then(d => { const w = d.weeklyReports[1].draft; return w.rows.some(r => r.heading === '진행중' && r.sourceIds.includes('c')) && w.rows.some(r => r.heading === '다음 주 계획' && r.origin === 'carry' && r.planOf === 'c'); })"
+    },
+    { "do": "shot", "name": "지난주-처음" },
+    {
+      "do": "eval",
+      "note": "`한 줄 추가`는 손을 올려야 보이는 글자 버튼이라 직접 누른다(여는 동작은 이 시험의 대상이 아님)",
+      "expr": "(document.querySelector('#weeklyReportDetail [data-addline$=\"group:운영툴\"]').click(), 'ok')"
+    },
+    { "do": "wait", "selector": "#weeklyReportDetail [data-addline-input]", "timeout": 3000 },
+    { "do": "eval", "expr": "(window.__hcInput = document.querySelector('#weeklyReportDetail [data-addline-input]'), 'ok')" },
+    { "do": "click", "selector": "#weeklyReportDetail [data-addline-input]" },
+    { "do": "key", "key": "Tab" },
+    {
+      "do": "assert",
+      "message": "Tab 한 번에 고르개의 고른 칸(기본 `완료한 일`)에 닿아요",
+      "expr": "(() => { const a = document.activeElement; return !!a && a.matches('#weeklyReportDetail .rp-s.is-add [role=\"radio\"]') && a.getAttribute('aria-checked') === 'true' && a.textContent === '완료한 일'; })()"
+    },
+    { "do": "click", "selector": "#weeklyReportDetail .rp-s.is-add [role=\"radio\"]", "nth": 1 },
+    { "do": "wait", "ms": 300 },
+    {
+      "do": "assert",
+      "message": "`진행 중`이 골라지고 안내 글이 바뀌며, 입력칸은 다시 만들어지지 않아요",
+      "expr": "(() => { const r = [...document.querySelectorAll('#weeklyReportDetail .rp-s.is-add [role=\"radio\"]')]; const help = document.querySelector('#weeklyReportDetail .rp-s.is-add .rp-help'); return r[1].getAttribute('aria-checked') === 'true' && /진행 중인 업무로도 남아요/.test(help.textContent) && window.__hcInput.isConnected && window.__hcInput === document.querySelector('#weeklyReportDetail [data-addline-input]'); })()"
+    },
+    { "do": "shot", "name": "진행중-고름" },
+    { "do": "click", "selector": "#weeklyReportDetail [data-addline-input]" },
+    {
+      "do": "type",
+      "note": "둘째 글자를 조합하는 도중 화면 다시 받기(load) — 조합이 끊기면 글자가 씹힌다",
+      "text": "권한표점검",
+      "ime": true,
+      "duringAt": 1,
+      "during": [ { "do": "eval", "expr": "Promise.resolve(load()).then(() => 'ok')" } ]
+    },
+    { "do": "wait", "ms": 600 },
+    {
+      "do": "assert",
+      "message": "조합 도중 다시 받기가 와도 글자가 그대로예요",
+      "expr": "document.querySelector('#weeklyReportDetail [data-addline-input]')?.value === '권한표점검'"
+    },
+    { "do": "key", "key": "Enter" },
+    { "do": "wait", "ms": 1500 },
+    { "do": "shot", "name": "더한-뒤" },
+    {
+      "do": "assert",
+      "message": "지난주 보고에 진행 중 줄 `권한표점검`이 한 번 더해졌어요(사람이 쓴 줄)",
+      "expr": "fetch('/api/items').then(r => r.json()).then(d => { const rows = d.weeklyReports[1].draft.rows.filter(r => r.text === '권한표점검'); return rows.length === 1 && rows[0].heading === '진행중' && rows[0].locked === true && rows[0].origin === 'weekly'; })"
+    },
+    {
+      "do": "assert",
+      "message": "만든 업무는 지금 진행 중이라 이번 주 보고에도 진행 중으로 서요",
+      "expr": "fetch('/api/items').then(r => r.json()).then(d => { const id = d.weeklyReports[1].draft.rows.find(r => r.text === '권한표점검').sourceIds[0]; return d.weeklyReports[0].draft.rows.some(r => r.heading === '진행중' && r.sourceIds.includes(id)); })"
+    }
+  ]
+}

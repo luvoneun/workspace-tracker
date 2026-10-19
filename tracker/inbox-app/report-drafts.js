@@ -115,13 +115,21 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
     if (value.schema !== 1 || !value.weeks) throw new Error('보고 기록 형식을 확인해 주세요. 원본은 그대로 있어요.');
     return value;
   }
-  function eligible(item, weekKey) {
-    const end = new Date(`${weekKey}T12:00:00`); end.setDate(end.getDate() + 6);
-    const until = `${end.getFullYear()}-${String(end.getMonth()+1).padStart(2,'0')}-${String(end.getDate()).padStart(2,'0')}`;
+  // 그 주 끝(일요일) 기준으로 진행 중이던 할 일·버그 — `doing`이 그 주 끝까지 켜졌고, 지금 안 끝났거나 그 주 뒤에 끝났다.
+  // 지난 주 보고(확정 전)도 이 기준으로 진행 중 줄·할 일 칸 미리 채우기를 한다(이번 주는 예전과 같다 — 끝난 업무는 늘 그 전이다).
+  // 완료하면 `doing`이 지워지므로(server.js toggleTrackStatus) "그 주 뒤에 끝난 업무"는 `doing`이 남아 있을 때만 잡힌다.
+  function doingBy(item, until) {
+    if (!item || !['task','bug'].includes(item.type) || !item.doing || item.doing > until) return false;
+    return item.status !== 'done' || (!!item.completed && item.completed > until);
+  }
+  // `openPast`: 지난 주이고 확정하지 않았다(view가 정한다) — 그때만 지난 주에도 진행 중 업무가 든다.
+  function eligible(item, weekKey, openPast = false) {
+    const until = dayAfter(weekKey, 6);
     if (!item.created || item.created > until) return false;
-    if (['task','bug'].includes(item.type)) return item.status === 'done'
-      ? !!item.completed && item.completed >= weekKey && item.completed <= until
-      : !!item.doing && item.doing <= until && weekKey === currentWeek();
+    if (['task','bug'].includes(item.type)) {
+      if (item.status === 'done' && !!item.completed && item.completed >= weekKey && item.completed <= until) return true;
+      return doingBy(item, until) && (weekKey === currentWeek() || (openPast && weekKey < currentWeek()));
+    }
     if (item.type === 'decision') return item.created >= weekKey && item.created <= until;
     return item.type === 'check' && item.created >= weekKey && item.created <= until;
   }
@@ -208,7 +216,6 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
     const stored = state.weeks[weekKey];
     const rows = structuredClone(stored?.rows || importLegacy(old?.body || '', all));
     const claimed = new Set(rows.flatMap(row => row.sourceIds));
-    const candidates = all.filter(item => eligible(item,weekKey) && !claimed.has(item.id));
     const polish = polishOf(state, weekKey);
     // 확정(`weekPolish[주].lockedAt`, 선택) — 확정한 주는 자동 모으기가 문장을 더 넣거나 고치지 않는다. 있던 문장은 전부
     // 고친 문장처럼 다뤄 원본이 바뀌면 제안만 하고, 새 업무는 문장이 되지 않고 `confirmed.pending`(줄 수)로만 센다.
@@ -216,6 +223,14 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
     const lockedAt = typeof polish.lockedAt === 'string' && polish.lockedAt ? polish.lockedAt : null;
     const hold = !!lockedAt && !opts.release;
     const weekEnd = dayAfter(weekKey, 6);
+    const past = weekKey < currentWeek();
+    const candidates = all.filter(item => eligible(item, weekKey, !lockedAt) && !claimed.has(item.id));
+    // 지난 주 보고에서 그 주 뒤에 끝난 업무는 그 주 기준으로 아직 진행 중이다 — 소제목·묶음 자리·문장은 진행 중으로 읽는다
+    // (결과 한 줄은 끝낸 뒤에 쓴 글이라 쓰지 않는다). 근거(evidence)는 지금 업무 그대로다(`완료 10/20`처럼 사실대로 보인다).
+    const asOf = item => (past && item.status === 'done' && doingBy(item, weekEnd) ? { ...item, status: 'to-do', outcome: '' } : item);
+    const headAt = item => heading(asOf(item));
+    const bucketAt = item => bucket(asOf(item));
+    const textAt = items => textOf(items.map(asOf));
     // 확인 필요 판단에 쓰는 행마다의 사실(지워진 근거·섞인 상태) — 아래 reviewOf가 읽는다. 저장하지 않는다.
     const facts = new Map();
     for (const row of rows) {
@@ -224,18 +239,18 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
       const linked = row.sourceIds.map(id => byId.get(id)).filter(Boolean);
       const currentEvidence = linked.map(evidence);
       const missing = linked.length !== row.sourceIds.length;
-      const added = row.bucket && !row.excluded && !lockedAt ? candidates.filter(item => bucket(item) === row.bucket && !claimed.has(item.id)) : [];
+      const added = row.bucket && !row.excluded && !lockedAt ? candidates.filter(item => bucketAt(item) === row.bucket && !claimed.has(item.id)) : [];
       added.forEach(item => claimed.add(item.id));
       const combined = [...linked, ...added];
-      const mixed = new Set(combined.map(heading)).size > 1;
-      if (row.locked || row.excluded || weekKey < currentWeek() || lockedAt) {
+      const mixed = new Set(combined.map(headAt)).size > 1;
+      if (row.locked || row.excluded || past || lockedAt) {
         const changed = !row.legacy && hash(currentEvidence) !== hash(row.evidence);
-        if (added.length || changed || missing) row.suggestion = { text: textOf(combined), sourceIds: combined.map(item=>item.id), evidence: combined.map(evidence), added: added.length, missing, mixed };
+        if (added.length || changed || missing) row.suggestion = { text: textAt(combined), sourceIds: combined.map(item=>item.id), evidence: combined.map(evidence), added: added.length, missing, mixed };
       } else if (combined.length && !missing && !mixed) {
-        row.text = textOf(combined); row.sourceIds = combined.map(item=>item.id); row.evidence = combined.map(evidence);
-        row.heading = heading(combined[0]); row.bucket = bucket(combined[0]);
+        row.text = textAt(combined); row.sourceIds = combined.map(item=>item.id); row.evidence = combined.map(evidence);
+        row.heading = headAt(combined[0]); row.bucket = bucketAt(combined[0]);
         row.group=combined[0].label || combined[0].group || combined[0].project || '그룹 없음';
-      } else row.suggestion = { text: textOf(combined), sourceIds: combined.map(item=>item.id), evidence: currentEvidence, added: added.length, missing, mixed };
+      } else row.suggestion = { text: textAt(combined), sourceIds: combined.map(item=>item.id), evidence: currentEvidence, added: added.length, missing, mixed };
       row.needsReview = !!row.suggestion || mixed || missing;
       row.currentEvidence = currentEvidence;
       facts.set(row, { linked, missing, mixed });
@@ -248,23 +263,25 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
       }
     }
     const groups = new Map();
-    candidates.filter(item=>!claimed.has(item.id)).forEach(item=>{ const key=bucket(item); if(!groups.has(key))groups.set(key,[]);groups.get(key).push(item); });
+    candidates.filter(item=>!claimed.has(item.id)).forEach(item=>{ const key=bucketAt(item); if(!groups.has(key))groups.set(key,[]);groups.get(key).push(item); });
     let pending = 0, pendingDone = 0;
     // 확정한 주에 붙들어 둔 새 업무 중 끝낸 일(완료한 일 칸에 설 것)만 한 건씩 — 화면의 `보고에 없는 끝낸 일 N`과
     // 한 줄씩 넣기(change의 pullOne)가 읽는다. 확정 전 주·진행 중·결정·확인은 없다(넣기는 완료 칸만, addLine 규칙과 같다).
     const materialPending = [];
     // 결정·확인 묶음은 넣어도 처음부터 빠진 줄(optOut)이라 `보고에 없는 새 줄 N`에 세지 않는다 — 세면 `모두 넣기`를 눌러도 글이 그대로다.
-    for (const [key,items] of groups) if (hold) { if (!OPT_IN.has(heading(items[0]))) pending += 1; if (heading(items[0]) === '완료한 일') { pendingDone += 1;
-      items.forEach(item => materialPending.push({ id: item.id, description: item.description, label: item.label || item.group || item.project || '그룹 없음', completed: item.completed || null })); } } else rows.push({ id:`auto-${hash([key,items.map(item=>item.id).sort()]).slice(0,16)}`,bucket:key,heading:heading(items[0]),group:items[0].label || items[0].group || items[0].project || '그룹 없음', text:textOf(items),sourceIds:items.map(item=>item.id),evidence:items.map(evidence),currentEvidence:items.map(evidence),locked:false,excluded:false,needsReview:false });
+    for (const [key,items] of groups) if (hold) { if (!OPT_IN.has(headAt(items[0]))) pending += 1; if (headAt(items[0]) === '완료한 일') { pendingDone += 1;
+      items.forEach(item => materialPending.push({ id: item.id, description: item.description, label: item.label || item.group || item.project || '그룹 없음', completed: item.completed || null })); } } else rows.push({ id:`auto-${hash([key,items.map(item=>item.id).sort()]).slice(0,16)}`,bucket:key,heading:headAt(items[0]),group:items[0].label || items[0].group || items[0].project || '그룹 없음', text:textAt(items),sourceIds:items.map(item=>item.id),evidence:items.map(evidence),currentEvidence:items.map(evidence),locked:false,excluded:false,needsReview:false });
     // 결정·확인 줄은 `다시 넣기`(included) 전까지 보고에서 빠진 줄로 보인다 — 확인 필요·새로 표시·슬랙 글 모두 제외로 센다.
     rows.forEach((row) => { if (OPT_IN.has(row.heading) && !row.included && !row.excluded) { row.excluded = true; row.optOut = true; } });
-    // 할 일 칸 미리 채우기 — 이번 주·확정 전 보고에만, ⓐ 진행 중 업무 ⓑ 지난주 보고의 계획 줄 중 업무와 이어진(`planOf`) 것이
-    // 아직 안 끝난 것 둘만 넣는다(실행일·기한만 보고 넣지는 않는다). 줄은 `origin:'carry'`·`planOf`=업무 id·`locked:false`이고,
+    // 할 일 칸 미리 채우기 — 이번 주·지난 주의 확정 전 보고에, ⓐ 진행 중 업무 ⓑ 그 전 주 보고의 계획 줄 중 업무와 이어진(`planOf`)
+    // 것이 아직 안 끝난 것 둘만 넣는다(실행일·기한만 보고 넣지는 않는다). "진행 중"·"안 끝남"은 그 주 끝 기준이다(위 doingBy —
+    // 지난 주 보고에는 그 주 뒤에 끝났거나 아직 진행 중인 업무가, 그 주 뒤에 진행을 켠 업무는 빼고 든다). 줄은 `origin:'carry'`·`planOf`=업무 id·`locked:false`이고,
     // 같은 업무를 가리키는 계획 줄이 이미 있으면(뺀 줄 포함) 넣지 않는다 — 덜어 낸 줄이 다시 들어오지 않게. 안 고친 미리 채운
     // 줄은 업무가 끝나거나 지워지면 빠지고, 남아 있으면 업무 제목을 따라간다. 왜 들어왔는지(`carryWhy`)는 계산 값이다(저장 안 함).
     // GET은 파일을 쓰지 않으므로 화면이 복사 성공 때 `keep`으로 한 번 적는다.
-    if (weekKey === currentWeek() && !lockedAt) {
-      const open = item => !!item && ['task', 'bug'].includes(item.type) && item.status !== 'done';
+    if (weekKey <= currentWeek() && !lockedAt) {
+      const open = item => !!item && ['task', 'bug'].includes(item.type) && (item.status !== 'done' || (past && !!item.completed && item.completed > weekEnd));
+      const doing = item => open(item) && doingBy(item, weekEnd);
       for (let index = rows.length - 1; index >= 0; index -= 1) {
         const row = rows[index];
         if (row.origin !== 'carry' || row.locked || row.excluded || row.heading !== PLAN_HEADING || typeof row.carryOf === 'string') continue;
@@ -276,7 +293,7 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
       const lastRows = state.weeks[dayAfter(weekKey, -7)]?.rows || [];
       const planned = lastRows
         .filter(row => row && row.heading === PLAN_HEADING && !row.excluded && typeof row.planOf === 'string').map(row => row.planOf);
-      const carried = [...all.filter(item => open(item) && item.doing), ...planned.map(id => byId.get(id)).filter(open)];
+      const carried = [...all.filter(doing), ...planned.map(id => byId.get(id)).filter(open)];
       for (const item of carried) {
         if (taken.has(item.id)) continue;
         taken.add(item.id);
@@ -297,7 +314,7 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
       rows.forEach((row) => {
         if (row.origin !== 'carry') return;
         if (typeof row.carryOf === 'string') row.carryWhy = 'note';
-        else if (open(byId.get(row.planOf))) row.carryWhy = byId.get(row.planOf).doing ? 'doing' : 'plan';
+        else if (open(byId.get(row.planOf))) row.carryWhy = doing(byId.get(row.planOf)) ? 'doing' : 'plan';
       });
     }
     dress(rows, weekKey, polish, opts.bundles !== undefined ? opts.bundles : bundles());
@@ -487,13 +504,15 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
       if(groupHeading!=='완료한 일'&&groupHeading!=='진행중')throw new Error('완료한 일·진행 중 칸에만 한 줄을 더할 수 있어요.');
       if(typeof text!=='string'||!text.trim()||text.length>1000||/[\r\n]/.test(text))throw new Error('더할 문장을 1,000자 이내 한 줄로 적어 주세요.');
       if(weekKey>currentWeek())throw new Error('아직 오지 않은 주에는 줄을 더할 수 없어요.');
-      if(groupHeading==='진행중'&&weekKey<currentWeek())throw new Error('지난 주 보고에는 진행 중 줄을 더할 수 없어요. 완료한 일 칸에 더해 주세요.');
-      // 한 일 칸은 완료·진행 중·결정·확인 줄이 한 소제목 아래 서므로, 그 프로젝트의 줄이 칸 어디에든 있으면 된다.
+      // 한 일 칸은 완료·진행 중·결정·확인 줄이 한 소제목 아래 서므로, 그 프로젝트의 줄이 칸 어디에든 있으면 된다
+      // (완료한 일·진행 중 어느 쪽으로 더하든 — 화면의 `+ 한 줄 추가`가 둘 중 하나를 고른다).
       if(typeof groupKey!=='string'||!/^(jira:.+|group:.+|ungrouped)$/.test(groupKey)
-        ||!current.rows.some(entry=>entry.groupKey===groupKey&&entry.heading!==PLAN_HEADING&&(entry.heading===groupHeading||groupHeading==='완료한 일')&&(!entry.excluded||entry.optOut)))throw new Error('줄을 더할 소제목을 찾을 수 없어요. 최신 보고를 확인해 주세요.');
+        ||!current.rows.some(entry=>entry.groupKey===groupKey&&entry.heading!==PLAN_HEADING&&(!entry.excluded||entry.optOut)))throw new Error('줄을 더할 소제목을 찾을 수 없어요. 최신 보고를 확인해 주세요.');
       const project=groupKey.startsWith('jira:')?{jira:groupKey.slice(5)}:groupKey.startsWith('group:')?{group:groupKey.slice(6)}:{};
       // 완료일: 이번 주면 오늘(업무를 끝낼 때와 같다), 지난 주면 그 주 금요일(주말 날짜가 업무 목록에 서지 않게).
-      const madeId=tasks.create({description:text.trim(),done:groupHeading==='완료한 일',completed:weekKey<currentWeek()?dayAfter(weekKey,4):null,...project});
+      // 진행 중이면 지난 주 보고에서 더해도 지금 진행 중인 업무다(오늘 진행 시작·오늘 할 일 — 지난 날짜를 주면 밀린 업무가 된다).
+      const done=groupHeading==='완료한 일';
+      const madeId=tasks.create({description:text.trim(),done,completed:done&&weekKey<currentWeek()?dayAfter(weekKey,4):null,...project});
       const made=sources().find(item=>item.id===madeId);
       if(!made||heading(made)!==groupHeading)throw new Error('업무를 만들지 못했어요. 적은 내용은 그대로 있어요.');
       rows.push({id:randomUUID(),heading:groupHeading,group:made.label||made.group||made.project||'그룹 없음',bucket:bucket(made),text:text.trim(),

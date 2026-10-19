@@ -49,8 +49,9 @@ test('legacy prose and private archived work are preserved',t=>{
   const f=fixture(t,[{weekKey:'2026-09-14',body:'**완료한 일**\n- 내가 수정한 문장 ^a\n**조용히 완료한 일**\n- 보고 제외 문장'}]);
   assert.equal(f.view().rows[0].text,'내가 수정한 문장');assert.equal(f.view().rows[1].excluded,true);
 });
-test('past report never imports future decisions or current running tasks',t=>{
-  const f=fixture(t);f.items.push({id:'d',type:'decision',description:'새 결정',created:'2026-09-20',status:'to-do'},{id:'r',type:'task',description:'진행',created:'2026-09-07',doing:'2026-09-08',status:'to-do'});
+test('past report never imports future decisions or tasks started after that week',t=>{
+  // [2026-10-19] 지난 주에도 그 주 끝 기준으로 진행 중이던 업무는 든다 — 그 주 뒤에 진행을 켠 업무(doing>그 주 끝)는 들지 않는다.
+  const f=fixture(t);f.items.push({id:'d',type:'decision',description:'새 결정',created:'2026-09-20',status:'to-do'},{id:'r',type:'task',description:'진행',created:'2026-09-07',doing:'2026-09-14',status:'to-do'});
   assert.equal(f.store.view('2026-09-07').rows.length,0);
 });
 test('merge rejects completion-state mixing and undo restores edited text',t=>{
@@ -1109,7 +1110,7 @@ test('다듬기 B: 빈 문장·여러 줄·결정 칸·모르는 소제목·오�
     [{heading:'확인 완료',groupKey:'group:가입',text:'확인 한 줄'},/완료한 일·진행 중 칸에만/],
     [{heading:'확인 대기',groupKey:'group:가입',text:'확인 한 줄'},/완료한 일·진행 중 칸에만/],
     [{heading:'완료한 일',groupKey:'group:없는',text:'한 줄'},/소제목을 찾을 수 없어요/],
-    [{heading:'진행중',groupKey:'group:가입',text:'한 줄'},/소제목을 찾을 수 없어요/],
+    [{heading:'진행중',groupKey:'group:없는',text:'한 줄'},/소제목을 찾을 수 없어요/],
     [{heading:'완료한 일',groupKey:'name:여러 프로젝트',text:'한 줄'},/소제목을 찾을 수 없어요/],
   ];
   for(const [action,pattern] of bad)assert.throws(()=>f.change({action:'addLine',...action}),pattern);
@@ -1117,14 +1118,21 @@ test('다듬기 B: 빈 문장·여러 줄·결정 칸·모르는 소제목·오�
   assert.equal(f.made.length,0);
   assert.equal(fs.existsSync(f.file),false,'거절하면 보고 저장본도 쓰지 않는다');
 });
-test('다듬기 B: 지난 주 보고의 `+ 한 줄 추가`는 완료한 일 칸만 되고 완료일은 그 주 금요일이다',t=>{
+test('다듬기 B: 지난 주 보고의 `+ 한 줄 추가` — 완료한 일은 완료일이 그 주 금요일, 진행 중은 지금 진행 중인 업무(오늘)로 만든다',t=>{
   const f=lineFixture(t,{week:'2026-09-21'});
   f.change({action:'addLine',heading:'완료한 일',groupKey:'group:가입',text:'지난주에 한 일 적음'},'2026-09-14');
   assert.equal(f.made[0].completed,'2026-09-18');
   assert.equal(f.row('지난주에 한 일 적음','2026-09-14').heading,'완료한 일');
-  f.items.push({id:'r',type:'task',description:'진행 업무',status:'to-do',doing:'2026-09-22',created:'2026-09-21',group:'가입',label:'가입'});
-  assert.throws(()=>f.change({action:'addLine',heading:'진행중',groupKey:'group:가입',text:'x'},'2026-09-14'),/지난 주 보고에는 진행 중/);
-  assert.equal(f.made.length,1);
+  // [2026-10-19] 지난 주에도 진행 중 줄을 더한다 — 완료한 일만 있는 소제목에도(한 일 칸 한 소제목).
+  f.change({action:'addLine',heading:'진행중',groupKey:'group:가입',text:'가입 퍼널 분석 중'},'2026-09-14');
+  assert.deepEqual(f.made[1],{id:'w2',description:'가입 퍼널 분석 중',done:false,completed:null,jira:undefined,group:'가입'},'지난 날짜를 주지 않는다(밀린 업무가 되지 않게)');
+  const line=f.row('가입 퍼널 분석 중','2026-09-14');
+  assert.deepEqual([line.heading,line.groupKey,line.locked,line.origin,line.sourceIds],['진행중','group:가입',true,'weekly',['w2']]);
+  assert.equal(line.suggestion,undefined,'더한 줄은 다시 열어도 제안이 서지 않는다');
+  assert.equal(f.view('2026-09-14').rows.filter(entry=>entry.sourceIds.includes('w2')).length,1,'자동 문장이 같은 업무로 한 줄 더 생기지 않는다');
+  assert.ok(f.view().rows.some(entry=>entry.heading==='진행중'&&entry.sourceIds.includes('w2')),'이번 주 보고에도 진행 중으로 선다(받아들인 겹침)');
+  assert.throws(()=>f.change({action:'addLine',heading:'진행중',groupKey:'group:가입',text:'미래'},'2026-09-28'),/아직 오지 않은 주/);
+  assert.equal(f.made.length,2);
 });
 test('다듬기 B: 업무를 만들지 못하면(또는 만든 업무를 읽지 못하면) 줄도 쓰지 않는다',t=>{
   const f=lineFixture(t);
@@ -1587,8 +1595,9 @@ test('양식 ①: 미리 채운 줄 — 뺀 줄은 다시 안 들어오고, 안 
   assert.equal(carry('w'),undefined,'확정한 주는 미리 채우기가 줄을 더하지 않는다');
   f.change({action:'unconfirm'});
   assert.ok(carry('w'));
+  // [2026-10-19] 지난 주(확정 전)에도 그 주 끝 기준으로 미리 채운다 — 그 주에 진행 중이던 w가 든다.
   f.state.current='2026-09-28';
-  assert.equal(f.plan('2026-09-21').some(row=>row.planOf==='w'),false,'지난 주 화면은 저장된 줄만');
+  assert.equal(f.plan('2026-09-21').some(row=>row.planOf==='w'),true,'지난 주도 그 주 끝 기준 진행 중이면 미리 채운다');
 });
 test('양식 ①: keep은 지금 보이는 줄(미리 채운 줄 포함)을 문장·새로 기록·되돌리기 그대로 적고, 다음 주의 지난주 계획이 된다',t=>{
   const items=[
@@ -1891,4 +1900,91 @@ test('② 검수: 다른 문장 아래 줄은 팔로업으로 묶지 못하고, 
   const echo=h.view().rows.find(row=>row.carryOf);
   h.change({action:'setOut',ids:[echo.id],out:false});
   assert.equal(h.saved().weeks['2026-09-21'].rows.find(row=>row.id===echo.id).locked,true);
+});
+
+// ---------- [2026-10-19] 지난 주 보고에도 그 주에 진행 중이던 일 — 한 일 칸 진행 중 줄 · 할 일 칸 미리 채우기 ----------
+// 기준은 그 주 끝(일요일): doing이 그 주 끝까지 켜졌고, 지금 안 끝났거나 그 주 뒤에 끝났다. 이번 주 규칙은 그대로다.
+function pastFixture(t) {
+  const items=[
+    {id:'run',type:'task',description:'관리자 권한 등급 확인하기',status:'to-do',created:'2026-09-15',doing:'2026-09-23',group:'운영툴',label:'운영툴'},
+    {id:'late',type:'task',description:'환불 API 연동 확인하기',status:'done',created:'2026-09-15',doing:'2026-09-24',completed:'2026-09-29',outcome:'연동 완료, 운영 반영',group:'결제',label:'결제'},
+    {id:'after',type:'task',description:'새 배너 정리하기',status:'to-do',created:'2026-09-15',doing:'2026-09-29',group:'운영툴',label:'운영툴'},
+    {id:'done',type:'task',description:'가입 문구 검토하기',status:'done',created:'2026-09-15',doing:'2026-09-22',completed:'2026-09-25',group:'가입',label:'가입'},
+  ];
+  return formFixture(t,{items,current:'2026-09-28'});
+}
+const LAST='2026-09-21';
+test('지난 주 진행 중: 그 주 끝 기준으로 진행 중이던 업무가 한 일 칸에 진행 중으로 서고 할 일 칸에도 미리 채워진다 · 이번 주 보고에도 그대로',t=>{
+  const f=pastFixture(t);
+  const rows=f.view(LAST).rows,line=id=>rows.filter(row=>row.heading!=='다음 주 계획'&&row.sourceIds.includes(id));
+  assert.deepEqual(line('run').map(row=>[row.heading,row.text,row.group]),[['진행중','관리자 권한 등급 확인','운영툴']]);
+  const plan=f.plan(LAST).filter(row=>row.origin==='carry');
+  assert.deepEqual(plan.map(row=>row.planOf).sort(),['late','run'],'할 일 칸에도 그 주 진행 중이던 일(지금 끝났어도)');
+  assert.deepEqual(plan.map(row=>row.carryWhy).sort(),['doing','doing']);
+  // 같은 진행 중 업무가 이번 주 보고에도 선다(의도 — 받아들임).
+  assert.ok(f.view().rows.some(row=>row.heading==='진행중'&&row.sourceIds.includes('run')));
+  assert.ok(f.plan().some(row=>row.planOf==='run'));
+  assert.equal(fs.existsSync(f.file),false,'GET은 파일을 쓰지 않는다');
+});
+test('지난 주 진행 중: 그 주에 진행 중이었다가 이번 주에 끝난 업무는 지난주엔 진행 중(결과 한 줄은 쓰지 않음), 이번 주엔 완료',t=>{
+  const f=pastFixture(t);
+  const last=f.view(LAST).rows.find(row=>row.heading!=='다음 주 계획'&&row.sourceIds.includes('late'));
+  assert.deepEqual([last.heading,last.text],['진행중','환불 API 연동 확인']);
+  assert.equal(last.evidence[0].status,'done','근거는 지금 업무 그대로(사실대로 `완료`)');
+  assert.equal(last.completable,undefined,'그 주 뒤에 끝났으므로 `끝났어요 · 완료로`가 아니다');
+  assert.equal(last.review,undefined);
+  const now=f.view().rows.find(row=>row.sourceIds.includes('late'));
+  assert.deepEqual([now.heading,now.text],['완료한 일','연동 완료, 운영 반영']);
+  assert.equal(f.plan().some(row=>row.planOf==='late'),false,'이번 주 할 일 칸에는 끝난 업무가 없다');
+});
+test('지난 주 진행 중: 그 주 뒤에 진행을 켠 업무는 지난주에 없고, 그 주에 끝낸 일은 완료 줄 하나뿐이다(진행 중과 겹치지 않음)',t=>{
+  const f=pastFixture(t);
+  const rows=f.view(LAST).rows;
+  assert.equal(rows.some(row=>row.sourceIds.includes('after')||row.planOf==='after'),false,'doing>그 주 끝');
+  assert.deepEqual(rows.filter(row=>row.sourceIds.includes('done')).map(row=>row.heading),['완료한 일']);
+  assert.equal(f.plan(LAST).some(row=>row.planOf==='done'),false);
+  assert.ok(f.view().rows.some(row=>row.heading==='진행중'&&row.sourceIds.includes('after')),'이번 주에는 진행 중');
+});
+test('지난 주 진행 중: 지운 업무·확정한 주는 넣지 않고, 뺀 줄·고친 줄은 다시 들어오거나 덮이지 않는다',t=>{
+  const f=pastFixture(t);
+  // 지운 업무(목록에서 사라짐)는 들지 않는다.
+  f.items.find(item=>item.id==='after').doing='2026-09-23';
+  f.items.splice(f.items.findIndex(item=>item.id==='after'),1);
+  assert.equal(f.view(LAST).rows.some(row=>row.sourceIds.includes('after')||row.planOf==='after'),false);
+  // 지난 주의 진행 중 줄을 빼고, 미리 채운 할 일 줄 하나를 빼고, 다른 하나를 고친다.
+  const runLine=()=>f.view(LAST).rows.find(row=>row.heading==='진행중'&&row.sourceIds.includes('run'));
+  f.change({action:'exclude',id:runLine().id},LAST);
+  const carry=id=>f.plan(LAST).filter(row=>row.planOf===id);
+  f.change({action:'exclude',id:carry('run')[0].id},LAST);
+  f.change({action:'edit',id:carry('late')[0].id,text:'환불 연동 마무리'},LAST);
+  assert.deepEqual(f.view(LAST).rows.filter(row=>row.heading!=='다음 주 계획'&&row.sourceIds.includes('run')).map(row=>row.excluded),[true],'뺀 진행 중 줄은 제자리에 하나(다시 안 들어옴)');
+  assert.deepEqual(carry('run').map(row=>row.excluded),[true],'뺀 미리 채운 줄도 하나');
+  assert.deepEqual(carry('late').map(row=>[row.text,row.locked]),[['환불 연동 마무리',true]]);
+  f.items.find(item=>item.id==='late').description='환불 API 연동 다시 확인하기';
+  assert.equal(carry('late')[0].text,'환불 연동 마무리','고친 줄은 그대로');
+  assert.equal(f.saved().schema,1);
+  // 확정한 지난 주 — 진행 중 업무를 새로 넣지 않고 새 줄로 세지도 않으며, 할 일 칸도 새로 채우지 않는다.
+  const g=pastFixture(t);
+  g.change({action:'confirm'},LAST);
+  assert.ok(g.view(LAST).rows.some(row=>row.heading==='진행중'&&row.sourceIds.includes('run')),'확정할 때 보이던 줄은 그대로 남는다');
+  g.items.push({id:'new',type:'task',description:'정산 알림 점검하기',status:'to-do',created:'2026-09-15',doing:'2026-09-25',group:'정산',label:'정산'});
+  const locked=g.view(LAST);
+  assert.equal(locked.rows.some(row=>row.sourceIds.includes('new')||row.planOf==='new'),false,'확정 뒤 진행 중이던 업무를 새로 넣지 않는다');
+  assert.equal(locked.confirmed.pending,0,'진행 중 업무를 `보고에 없는 새 줄`로 세지 않는다');
+  g.change({action:'unconfirm'},LAST);
+  assert.ok(g.view(LAST).rows.some(row=>row.heading==='진행중'&&row.sourceIds.includes('new')),'확정을 풀면 다시 모은다');
+  assert.ok(g.plan(LAST).some(row=>row.planOf==='new'));
+});
+test('지난 주 진행 중: 지난주 계획 이어 보기(ⓑ)는 그 주의 전 주 계획을 본다 — 그 주 끝에 안 끝났던 것만',t=>{
+  const items=[
+    {id:'plan',type:'task',description:'결제 문구 정리하기',status:'done',created:'2026-09-10',completed:'2026-09-29',group:'결제',label:'결제'},
+    {id:'early',type:'task',description:'정산 표 정리하기',status:'done',created:'2026-09-10',completed:'2026-09-23',group:'결제',label:'결제'},
+  ];
+  const f=formFixture(t,{items,current:'2026-09-14'});
+  f.change({action:'add',text:'결제 문구',group:'결제',planOf:'plan'});
+  f.change({action:'add',text:'정산 표',group:'결제',planOf:'early'});
+  f.state.current='2026-09-28';
+  const plan=f.plan(LAST).filter(row=>row.origin==='carry'&&!row.carryOf);
+  assert.deepEqual(plan.map(row=>[row.planOf,row.carryWhy]),[['plan','plan']],'그 주 끝(9/27)에 안 끝났던 계획만 — 9/23에 끝난 것은 아니다');
+  assert.equal(f.plan().some(row=>row.planOf==='plan'),false,'이번 주에는 그 전 주(9/21) 계획을 보므로 없다');
 });

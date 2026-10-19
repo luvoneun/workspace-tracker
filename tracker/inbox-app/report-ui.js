@@ -898,7 +898,8 @@ async function reportChange(item, action, notice, options = {}) {
     if (action.action === 'edit') reportEditsDone(`${item.weekKey}:${action.id}`, options);
     if (action.action === 'retitle') reportEditsDone(reportTitleEditKey(item.weekKey), options);
     if (action.action === 'rename') reportEditsDone(reportNameEditKey(item.weekKey, action.heading, action.groupKey), options);
-    if (action.action === 'addLine') reportEditsDone(reportAddLineKey(item.weekKey, action.heading, action.groupKey), options, true);
+    // `+ 한 줄 추가` 칸은 진행 중으로 더해도 완료한 일 칸 자리 하나다(reportAddLineRow).
+    if (action.action === 'addLine') reportEditsDone(reportAddLineKey(item.weekKey, REPORT_DONE_HEADING, action.groupKey), options, true);
     // `add`로 적던 글을 비우는 것은 입력칸을 들고 있는 쪽(reportPlanAddLines)이 한다 —
     // 다른 입력줄(프로젝트 소제목의 `+ 추가`)에서 담았는데 맨 아래 줄의 글이 날아가면 안 된다.
     // `+ 한 줄 추가`를 되돌린 결과처럼 서버가 되돌리기 표를 주지 않으면 되돌릴 것이 없다.
@@ -1946,9 +1947,14 @@ function reportGroupHead(item, group, name) {
 // ---------- 칸마다 `+ 한 줄 추가`(다듬기 B) ----------
 // 완료한 일·진행 중 칸의 소제목(프로젝트) 묶음 맨 아래 조용한 한 줄. 글자를 누르면 문장 고치기와 같은 입력칸(`.rp-ta`)이 되고
 // Enter로 더한다 — 보고에는 적은 문장 그대로 한 줄, 같은 프로젝트(묶음이면 대표 티켓)에 업무도 하나(완료한 일 칸이면 이 주에
-// 끝낸 업무, 진행 중 칸이면 진행 중 업무). 결정·확인·다음 주 계획 칸에는 없다(만들 업무의 종류가 애매하다). 진행 중 칸은
-// 이번 주만(지난 주에 진행 중 업무를 만들면 그 주 기록이 아니다), 프로젝트 열쇠가 없는 소제목(여러 프로젝트 요약 등)에도 없다.
+// 끝낸 업무, 진행 중이면 진행 중 업무). 무엇으로 더할지는 입력칸 아래 안내 줄의 작은 고르개 `완료한 일 | 진행 중`으로 고른다
+// (기본 완료한 일 — 이번 주·지난 주 모두, 지난 주의 진행 중도 지금 진행 중인 업무가 된다). 고른 값은 다시 그려도 남고(칸을 열 때마다
+// 완료한 일로 돌아간다), 고르는 것은 다시 그리지 않고 안내 글만 바꾼다(그 사이 칸의 한글 조합이 끊기지 않게). 결정·확인·다음 주
+// 계획 칸에는 없다(만들 업무의 종류가 애매하다), 프로젝트 열쇠가 없는 소제목(여러 프로젝트 요약 등)에도 없다.
+// 칸 열쇠는 늘 완료한 일 칸 자리다(고르개를 바꿔도 적던 글이 같은 칸에 남게).
 const reportAddLineKey = (weekKey, heading, key) => `${weekKey}:addline:${heading}|${key}`;
+// 칸 열쇠 → 고른 쪽(`진행중`일 때만 둔다 — 없으면 완료한 일).
+const reportAddLineKind = new Map();
 // 적던 줄 → 요청 id. 같은 글을 다시 보내면(응답을 못 받아 다시 누름) 같은 id라 서버가 업무를 한 번만 만든다.
 const reportAddLineIds = new Map();
 function reportCanAddLine(item, group) {
@@ -1961,6 +1967,7 @@ function reportAddLineHint(item, heading, title) {
     : reportPlanIsCurrentWeek(item.weekKey) ? '이번 주에 끝낸 업무로도 남아요' : '그 주 금요일에 끝낸 업무로도 남아요';
   return `Enter 추가 · ${what} (${title})`;
 }
+const REPORT_ADDLINE_KINDS = [[REPORT_DONE_HEADING, '완료한 일'], ['진행중', '진행 중']];
 function reportAddLineFocus(editKey) {
   const host = document.getElementById('weeklyReportDetail');
   if (!host || typeof host.querySelectorAll !== 'function') return;
@@ -1976,7 +1983,7 @@ function reportRequestId() {
 }
 // `extra`는 reportChange에 넘길 칸 정보(Enter 때의 글 `typed`·`draw`) — 입력칸이 Enter로 부를 때만.
 async function reportAddLineSubmit(item, heading, group, editKey, text, extra = {}) {
-  const memo = `${editKey}|${text}`;
+  const memo = `${editKey}|${heading}|${text}`;
   if (!reportAddLineIds.has(memo)) reportAddLineIds.set(memo, reportRequestId());
   let done;
   try {
@@ -2011,6 +2018,7 @@ function reportAddLineRow(item, heading, group, title, host) {
     open.setAttribute('aria-label', `${reportHeadingText(heading)} · ${title}에 한 줄 추가`);
     open.addEventListener('click', () => {
       reportEdits.set(editKey, '');
+      reportAddLineKind.delete(editKey);
       renderReportDraft(item);
       reportAddLineFocus(editKey);
     });
@@ -2019,6 +2027,7 @@ function reportAddLineRow(item, heading, group, title, host) {
   }
   // 한 줄 입력(업무 제목이 되므로 줄바꿈은 받지 않는다 — 붙여 넣은 줄바꿈은 빈칸으로). 한글 조합 중 Enter는 넘긴다.
   // 빈 채로 Enter는 아무 일도 하지 않는다. 저장이 실패해도 적은 글은 reportEdits에 남는다.
+  const kind = () => (reportAddLineKind.get(editKey) === '진행중' ? '진행중' : heading);
   const input = reportNode('textarea', undefined, 'rp-ta');
   input.rows = 1;
   input.maxLength = 1000;
@@ -2034,7 +2043,7 @@ function reportAddLineRow(item, heading, group, title, host) {
     if (event.key === 'Escape') {
       if (reportEnterEsc(event, editKey)) return;
       event.preventDefault(); event.stopPropagation();
-      reportEdits.delete(editKey); renderReportDraft(item); reportAddLineFocus(editKey);
+      reportEdits.delete(editKey); reportAddLineKind.delete(editKey); renderReportDraft(item); reportAddLineFocus(editKey);
       return;
     }
     if (event.key !== 'Enter') return;
@@ -2044,14 +2053,24 @@ function reportAddLineRow(item, heading, group, title, host) {
     // 칸은 잠그지 않는다 — 저장하는 동안 이어 친 글자는 칸에 남는다(보낸 글 뒤에 친 것만 — reportEditsDone).
     reportEnterSaving.add(editKey);
     const typed = input.value;
-    reportAddLineSubmit(item, heading, group, editKey, text, { typed, draw: false })
+    reportAddLineSubmit(item, kind(), group, editKey, text, { typed, draw: false })
       .then(done => reportEnterDraw(item, done === false ? null : () => reportEditsDone(editKey, { typed }, true)))
       .then(() => reportAddLineFocus(editKey))
       .catch(error => showNotice(error.message || '저장됐는지 확인하지 못했어요. 적은 내용은 그대로 있어요', true))
       .finally(() => { reportEnterSaving.delete(editKey); });
   });
   box.appendChild(input);
-  box.appendChild(reportNode('div', reportAddLineHint(item, heading, title), 'rp-help'));
+  // 안내 줄 = 작은 고르개 `완료한 일 | 진행 중`(앱 공용 wfSegment — ←→로 옮기고 Tab으로는 고른 칸 하나에 닿는다) + 고른 쪽의 안내 글.
+  const help = reportNode('div', undefined, 'rp-help');
+  const note = reportNode('span', reportAddLineHint(item, kind(), title));
+  if (typeof wfSegment === 'function') {
+    help.appendChild(wfSegment(REPORT_ADDLINE_KINDS, kind(), (value) => {
+      if (value === '진행중') reportAddLineKind.set(editKey, value); else reportAddLineKind.delete(editKey);
+      note.textContent = reportAddLineHint(item, kind(), title);
+    }, `${title}에 더할 줄 — 완료한 일 또는 진행 중`));
+  }
+  help.appendChild(note);
+  box.appendChild(help);
   return line;
 }
 
@@ -2669,7 +2688,7 @@ function renderReportDraftNow(item, host) {
         shown += 1;
       }
       if (!shown) box.classList.add('is-empty');
-      // 한 일 칸 `+ 한 줄 추가`는 완료한 일로만 더한다(진행 중 업무는 할 일 칸 입력줄로).
+      // 한 일 칸 `+ 한 줄 추가` — 칸 아래 고르개로 완료한 일·진행 중을 고른다(기본 완료한 일).
       if (reportCanAddLine(item, group)) reportAddLineRow(item, REPORT_DONE_HEADING, group, titles.get(group.group), box);
     }
     if (done.loose.length) {

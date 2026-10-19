@@ -71,6 +71,9 @@
 /* 고치는 중 안내 줄의 글자 버튼(②, `보고에서 빼기`·`원래 문장으로`) — 안내 글과 한 줄에 띄어 선다(시안 2번) */
 .rp-s .rp-help { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; }
 .rp-s .rp-help .d-link { font-size: 12.5px; min-height: 24px; }
+/* `+ 한 줄 추가` 칸 아래 `완료한 일 | 진행 중` 고르개 — 회의 초안의 작은 세그먼트(.d-draft .d-seg)와 같은 크기 */
+.rp-s .rp-help .d-seg { padding: 2px; }
+.rp-s .rp-help .d-seg button { height: var(--h-sm); padding: 0 10px; font-size: var(--fs-cap); }
 /* 머리 아래 상태 줄 — 다듬은 뒤 새로 들어온 게 있을 때만(옅은 파란 판, 고른 줄과 같은 --sel). 확정한 주는 회색 판(.is-quiet)
    한 줄 `M/D에 확정했어요`(+ 새로 들어온 줄 수 · `보고에 넣기`). */
 .rp-top { display: grid; gap: 6px; margin: 12px 0 4px; }

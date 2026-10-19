@@ -15307,6 +15307,7 @@ test('다듬기 B: 한 일 칸 `+ 한 줄 추가`는 프로젝트 열쇠가 있�
 });
 test('다듬기 B: `+ 한 줄 추가` — 누르면 그 자리 입력칸과 안내 한 줄, 빈 Enter는 아무 일 없음, Enter는 요청 id와 함께 addLine, Esc는 닫기', async () => {
   const app = reportClient();
+  app.run(fs.readFileSync(path.join(__dirname, 'workflows.js'), 'utf8')); // 고르개는 앱 공용 wfSegment
   app.context.crypto = globalThis.crypto;
   app.run(`calls = []; reportChange = async (target, action, notice, options) => { calls.push([action, !!(options && options.key)]); };
     renderReportDraft = () => {}; reportPlanIsCurrentWeek = weekKey => weekKey === '2026-09-14';
@@ -15322,7 +15323,11 @@ test('다듬기 B: `+ 한 줄 추가` — 누르면 그 자리 입력칸과 안�
   assert.equal(app.run("reportEditing('2026-09-14')"), false, '열어만 둔 빈 칸은 고치는 중이 아니다(복사를 막지 않는다)');
   const box = v3Kid(draw(), 'tx');
   assert.deepEqual(box.children.map(kid => kid.className), ['rp-ta', 'rp-help']);
-  assert.equal(box.children[1].textContent, 'Enter 추가 · 이번 주에 끝낸 업무로도 남아요 (가입 개편)');
+  // 안내 줄 = 작은 고르개 `완료한 일 | 진행 중`(기본 완료한 일) + 고른 쪽의 안내 글.
+  const [seg, note] = box.children[1].children;
+  assert.deepEqual([seg.className, seg.getAttribute('role')], ['d-seg', 'radiogroup']);
+  assert.deepEqual(seg.children.map(b => [b.textContent, b.getAttribute('aria-checked'), b.tabIndex]), [['완료한 일', 'true', 0], ['진행 중', 'false', -1]]);
+  assert.equal(note.textContent, 'Enter 추가 · 이번 주에 끝낸 업무로도 남아요 (가입 개편)');
   const input = box.children[0];
   const key = (k, extra = {}) => input.listeners.keydown({ key: k, preventDefault() {}, stopPropagation() {}, ...extra });
   input.value = '   '; key('Enter');
@@ -15335,8 +15340,27 @@ test('다듬기 B: `+ 한 줄 추가` — 누르면 그 자리 입력칸과 안�
   key('Enter');
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)')), [[{ action: 'addLine', heading: '완료한 일', groupKey: 'group:가입', text: '카피 최종본 전달함' }, true]]);
+  // 진행 중을 고르면 다시 그리지 않고 안내 글만 바뀌고(칸은 그대로 — 한글 조합이 끊기지 않게), Enter는 진행 중으로 더한다.
+  app.run("__draws = 0; renderReportDraft = () => { __draws += 1; }");
+  seg.children[1].listeners.click();
+  assert.equal(app.run('__draws'), 0, '고르개를 눌러도 다시 그리지 않는다');
+  assert.deepEqual(seg.children.map(b => b.getAttribute('aria-checked')), ['false', 'true']);
+  assert.equal(note.textContent, 'Enter 추가 · 진행 중인 업무로도 남아요 (가입 개편)');
+  input.value = '환불 규칙 정리 중'; input.listeners.input();
+  key('Enter');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(calls)'))[1], [{ action: 'addLine', heading: '진행중', groupKey: 'group:가입', text: '환불 규칙 정리 중' }, true]);
+  // 키보드(←→·Tab은 고른 칸 하나)는 wfSegment 그대로 — 사람 속도 확인 시나리오 `주간요약-지난주-한줄추가-진행중`이 실제 키로 본다.
+  assert.equal(typeof seg.children[1].listeners.keydown, 'function');
+  // 다시 그려도 고른 쪽이 남고, 칸 열쇠는 그대로 완료한 일 칸 자리다(더한 뒤 닫힌 칸을 다시 연 것처럼 글만 넣어 둔다).
+  app.run("reportEdits.set('2026-09-14:addline:완료한 일|group:가입', '이어서')");
+  const again = v3Kid(draw(), 'tx').children[1].children;
+  assert.deepEqual([again[0].children[1].getAttribute('aria-checked'), again[1].textContent], ['true', 'Enter 추가 · 진행 중인 업무로도 남아요 (가입 개편)']);
   key('Escape');
   assert.equal(app.run("reportEdits.has('2026-09-14:addline:완료한 일|group:가입')"), false);
+  // 칸을 다시 열면 완료한 일부터.
+  v3Kid(draw(), 'tx').children[0].listeners.click();
+  assert.equal(v3Kid(draw(), 'tx').children[1].children[0].children[0].getAttribute('aria-checked'), 'true');
   // 진행 중 칸·지난 주 칸의 안내
   assert.equal(app.run("reportAddLineHint({ weekKey: '2026-09-14' }, '진행중', '결제')"), 'Enter 추가 · 진행 중인 업무로도 남아요 (결제)');
   assert.equal(app.run("reportAddLineHint({ weekKey: '2026-09-07' }, '완료한 일', '결제')"), 'Enter 추가 · 그 주 금요일에 끝낸 업무로도 남아요 (결제)');
