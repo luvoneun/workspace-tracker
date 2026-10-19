@@ -274,7 +274,7 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
     // 결정·확인 줄은 `다시 넣기`(included) 전까지 보고에서 빠진 줄로 보인다 — 확인 필요·새로 표시·슬랙 글 모두 제외로 센다.
     rows.forEach((row) => { if (OPT_IN.has(row.heading) && !row.included && !row.excluded) { row.excluded = true; row.optOut = true; } });
     // 할 일 칸 미리 채우기 — 이번 주·지난 주의 확정 전 보고에, ⓐ 진행 중 업무 ⓑ 그 전 주 보고의 계획 줄 중 업무와 이어진(`planOf`)
-    // 것이 아직 안 끝난 것 둘만 넣는다(실행일·기한만 보고 넣지는 않는다). "진행 중"·"안 끝남"은 그 주 끝 기준이다(위 doingBy —
+    // 것이 아직 안 끝난 것 ⓒ 그 주 진행 중 줄의 업무 중 안 끝난 것만 넣는다(실행일·기한만 보고 넣지는 않는다). "진행 중"·"안 끝남"은 그 주 끝 기준이다(위 doingBy —
     // 지난 주 보고에는 그 주 뒤에 끝났거나 아직 진행 중인 업무가, 그 주 뒤에 진행을 켠 업무는 빼고 든다). 줄은 `origin:'carry'`·`planOf`=업무 id·`locked:false`이고,
     // 같은 업무를 가리키는 계획 줄이 이미 있으면(뺀 줄 포함) 넣지 않는다 — 덜어 낸 줄이 다시 들어오지 않게. 안 고친 미리 채운
     // 줄은 업무가 끝나거나 지워지면 빠지고, 남아 있으면 업무 제목을 따라간다. 왜 들어왔는지(`carryWhy`)는 계산 값이다(저장 안 함).
@@ -293,7 +293,10 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
       const lastRows = state.weeks[dayAfter(weekKey, -7)]?.rows || [];
       const planned = lastRows
         .filter(row => row && row.heading === PLAN_HEADING && !row.excluded && typeof row.planOf === 'string').map(row => row.planOf);
-      const carried = [...all.filter(doing), ...planned.map(id => byId.get(id)).filter(open)];
+      // ⓒ 그 주 보고의 진행 중 줄(뺀 줄 제외)이 가리키는 업무 중 그 주 끝 기준 안 끝난 것 — 지난 주에 `+ 한 줄 추가`로 더한
+      // 진행 중 업무(진행 시작이 오늘이라 ⓐ에 안 걸린다)나 고친 진행 중 줄의 업무도 할 일 칸에 선다. 중복은 위 taken 그대로.
+      const inProgress = new Set(rows.filter(row => row.heading === '진행중' && !row.excluded).flatMap(row => row.sourceIds || []));
+      const carried = [...all.filter(doing), ...planned.map(id => byId.get(id)).filter(open), ...[...inProgress].map(id => byId.get(id)).filter(open)];
       for (const item of carried) {
         if (taken.has(item.id)) continue;
         taken.add(item.id);
@@ -314,7 +317,7 @@ module.exports = ({ directory, sources, legacy, currentWeek, bundles = () => [],
       rows.forEach((row) => {
         if (row.origin !== 'carry') return;
         if (typeof row.carryOf === 'string') row.carryWhy = 'note';
-        else if (open(byId.get(row.planOf))) row.carryWhy = doing(byId.get(row.planOf)) ? 'doing' : 'plan';
+        else if (open(byId.get(row.planOf))) row.carryWhy = doing(byId.get(row.planOf)) || inProgress.has(row.planOf) ? 'doing' : 'plan';
       });
     }
     dress(rows, weekKey, polish, opts.bundles !== undefined ? opts.bundles : bundles());

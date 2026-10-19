@@ -56,12 +56,17 @@
     {
       "do": "assert",
       "message": "지난주 보고에 진행 중 줄 `권한표점검`이 한 번 더해졌어요(사람이 쓴 줄)",
-      "expr": "fetch('/api/items').then(r => r.json()).then(d => { const rows = d.weeklyReports[1].draft.rows.filter(r => r.text === '권한표점검'); return rows.length === 1 && rows[0].heading === '진행중' && rows[0].locked === true && rows[0].origin === 'weekly'; })"
+      "expr": "fetch('/api/items').then(r => r.json()).then(d => { const rows = d.weeklyReports[1].draft.rows.filter(r => r.text === '권한표점검' && r.heading !== '다음 주 계획'); return rows.length === 1 && rows[0].heading === '진행중' && rows[0].locked === true && rows[0].origin === 'weekly'; })"
+    },
+    {
+      "do": "assert",
+      "message": "더한 진행 중 업무가 지난주 할 일 칸에도 미리 채워져요(ⓒ)",
+      "expr": "fetch('/api/items').then(r => r.json()).then(d => { const w = d.weeklyReports[1].draft; const id = w.rows.find(r => r.text === '권한표점검' && r.heading === '진행중').sourceIds[0]; return w.rows.some(r => r.heading === '다음 주 계획' && r.origin === 'carry' && r.planOf === id); })"
     },
     {
       "do": "assert",
       "message": "만든 업무는 지금 진행 중이라 이번 주 보고에도 진행 중으로 서요",
-      "expr": "fetch('/api/items').then(r => r.json()).then(d => { const id = d.weeklyReports[1].draft.rows.find(r => r.text === '권한표점검').sourceIds[0]; return d.weeklyReports[0].draft.rows.some(r => r.heading === '진행중' && r.sourceIds.includes(id)); })"
+      "expr": "fetch('/api/items').then(r => r.json()).then(d => { const id = d.weeklyReports[1].draft.rows.find(r => r.text === '권한표점검' && r.heading === '진행중').sourceIds[0]; return d.weeklyReports[0].draft.rows.some(r => r.heading === '진행중' && r.sourceIds.includes(id)); })"
     }
   ]
 }

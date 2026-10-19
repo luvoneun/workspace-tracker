@@ -1988,3 +1988,20 @@ test('지난 주 진행 중: 지난주 계획 이어 보기(ⓑ)는 그 주의 �
   assert.deepEqual(plan.map(row=>[row.planOf,row.carryWhy]),[['plan','plan']],'그 주 끝(9/27)에 안 끝났던 계획만 — 9/23에 끝난 것은 아니다');
   assert.equal(f.plan().some(row=>row.planOf==='plan'),false,'이번 주에는 그 전 주(9/21) 계획을 보므로 없다');
 });
+test('지난 주 진행 중: 할 일 칸 ⓒ — 그 주 진행 중 줄(뺀 줄 제외)의 업무 중 안 끝난 것도 미리 채운다(그 주 뒤에 진행을 켰어도)',t=>{
+  const items=[
+    {id:'n1',type:'task',description:'뺀 줄의 업무',status:'to-do',created:'2026-09-15',doing:'2026-09-29',group:'운영툴',label:'운영툴'},
+    {id:'n2',type:'task',description:'더한 진행 중 업무',status:'to-do',created:'2026-09-29',doing:'2026-09-29',group:'운영툴',label:'운영툴'},
+    {id:'n3',type:'task',description:'끝난 업무',status:'done',created:'2026-09-15',completed:'2026-09-24',group:'운영툴',label:'운영툴'},
+  ];
+  const f=formFixture(t,{items,current:'2026-09-28'});
+  const row=(id,source,extra={})=>({id,heading:'진행중',group:'운영툴',bucket:`group:운영툴:진행중:${id}`,text:id,sourceIds:[source],evidence:[],locked:true,excluded:false,...extra});
+  fs.writeFileSync(f.file,JSON.stringify({schema:1,weeks:{[LAST]:{rows:[row('r1','n1',{excluded:true}),row('r2','n2'),row('r3','n3')]}}}));
+  const plan=f.plan(LAST).filter(entry=>entry.origin==='carry'&&!entry.carryOf);
+  assert.deepEqual(plan.map(entry=>[entry.planOf,entry.carryWhy]),[['n2','doing']],'뺀 줄·그 주에 끝난 업무는 빼고');
+  // 지난 주 `+ 한 줄 추가` 진행 중(진행 시작 = 오늘)도 같은 길로 할 일 칸에 선다.
+  const g=lineFixture(t,{week:'2026-09-21'});
+  g.change({action:'addLine',heading:'진행중',groupKey:'group:가입',text:'가입 퍼널 분석 중'},'2026-09-14');
+  g.items.find(item=>item.id==='w1').doing='2026-09-22';
+  assert.ok(g.view('2026-09-14').rows.some(entry=>entry.heading==='다음 주 계획'&&entry.planOf==='w1'&&entry.origin==='carry'));
+});
