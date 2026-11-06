@@ -493,7 +493,7 @@ test('WP-D2 setup.sh: 캘린더가 비밀 주소면 calendar-sync를 내리고, 
   assert.doesNotMatch(script, /<string>\$LABEL\.app-refresh<\/string>/, 'app-refresh plist를 새로 쓰지 않는다');
   // WP-D2.5에서 `지금 가져오기` 에이전트 둘(slack-capture-now·calendar-sync-now)이 뒤에 붙었다.
   // WP-V에서 맥 캘린더 둘(mac-calendar·mac-calendar-now)이 뒤에 붙었다.
-  assert.match(script, /for f in server slack-capture calendar-sync tiro-sync data-backup slack-capture-now calendar-sync-now mac-calendar mac-calendar-now; do/);
+  assert.match(script, /for f in server slack-capture calendar-sync tiro-sync data-backup slack-capture-now calendar-sync-now mac-calendar mac-calendar-now meeting-transcribe; do/);
   assert.doesNotMatch(script, /"\$APP_DIR\/automation\/app-refresh\.sh"/, 'app-refresh.sh를 복사하지 않는다');
   assert.ok(!/osacompile|iconutil|sips |lsregister|codesign/.test(script), 'Dock 앱 만드는 코드가 없다');
   assert.match(script, /\[ "\$USE_CAL_SYNC" = "yes" \] && write_task_agent "calendar-sync"/);

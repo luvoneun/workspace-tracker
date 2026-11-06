@@ -2483,7 +2483,7 @@ const CLIENT_BLOCKED = new Set([
   'integrations.js', 'ical.js', 'calendar-live.js', 'personalize.js', 'news.js', 'test-support.js',
   'routes-jira.js', 'routes-integrations.js', 'routes-app.js', 'routes-personalize.js', 'routes-items.js',
   'routes-track.js', 'selfcheck.js', 'checkin.js', 'usage.js', 'auto-update.js', 'calendar-mac.js',
-  'slack-auth.js', 'slack-oauth.js', 'tryout-server.js', 'project-keys.js', 'routes-record.js',
+  'slack-auth.js', 'slack-oauth.js', 'tryout-server.js', 'project-keys.js', 'routes-record.js', 'meeting-transcribe.js',
 ]);
 function isClientFile(name) {
   if (!/^[A-Za-z0-9][\w.-]*\.(js|css)$/.test(name)) return false;   // 이름 한 칸짜리(하위 경로 없음)만
@@ -2831,8 +2831,8 @@ const routeCtx = {
   getAutomationStatus, fetchStateLive, fetchStateAutomation, fetchStateSlack, SLACK_AUTH_RE, todayLocal, getReportRefs, withApplyFailure,
   liveLog, integrationAlerts, getCalendarToday, getJiraSync, requestApply, fetchNow, FETCH_MESSAGE, backupStatus,
   meetingNotesStatus, writeMeetingNotesRequest,
-  // 회의 녹음
-  RECORDINGS_DIR,
+  // 회의 녹음(전사 실행기 깨우기는 요청 표시 파일 — automationDir/requests)
+  RECORDINGS_DIR, automationDir,
   // 꾸미기
   currentDockName,
   // 목록 읽기(routes-items.js) — `fs`는 읽기 묶음(readScope)을 거치는 이 파일의 fs다.

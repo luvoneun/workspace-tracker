@@ -1,4 +1,7 @@
-// 회의 녹음(1차) 경로 — 녹음 창 페이지, 회의 이름 읽기, 녹음본 올리기·듣기·삭제.
+// 회의 녹음(1차) 경로 — 녹음 창 페이지, 회의 이름 읽기, 녹음본 올리기·듣기·삭제, 전사·요약(대기열·진행·다시 시도·전사본).
+// 전사·요약은 서버가 직접 돌리지 않는다 — 요청 표시 파일(`requests/meeting-transcribe.request`)만 쓰고 launchd
+// `meeting-transcribe`가 meeting-transcribe.js를 돌린다(미팅 노트 가져오기와 같은 원칙). 그 실행기가 대기열을 읽고
+// 진행·결과를 이 경로로 알린다. 전사본은 `recordings/<회의 id>/<녹음 id>.transcript.json`, 요약은 녹음본 줄(.workflow.json).
 // server.js의 safeHandle 공통 가드(인증·호스트·출처)를 거친 뒤 들어온다. 처리했으면 true, 내 경로가 아니면 false.
 // 녹음본 파일은 업무 데이터 폴더의 `recordings/<회의 id>/<녹음 id>.webm`에 두고, 어느 회의에 붙었는지는
 // `.workflow.json`의 회의 오버레이(`recordings`)에 적는다(workflow-store.js). 녹음본은 공개 저장소·백업에 들어가지 않는다.
@@ -13,6 +16,36 @@ const REC_ID_RE = /^[0-9a-f]{16}$/;
 const MAX_BYTES = 500 * 1024 * 1024; // 한 번에 올리는 녹음본 상한(대략 8시간 이상)
 const AUDIO_TYPES = { 'audio/webm': 'webm', 'audio/ogg': 'ogg', 'audio/mp4': 'm4a' };
 const MIME_OF = { webm: 'audio/webm', ogg: 'audio/ogg', m4a: 'audio/mp4' };
+const BUSY = ['queued', 'transcribing', 'summarizing'];
+const STALE_MS = 3 * 60 * 60 * 1000; // 이만큼 진행 소식이 없는 전사(실행기가 죽음)는 다시 대기열에 올린다
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const oneLine = (value, max) => String(value == null ? '' : value).replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+
+// 실행기가 보낸 전사본(발언 목록)을 확인한다 — 화자는 `화자N`, 시각은 초.
+function cleanUtterances(list) {
+  if (!Array.isArray(list) || list.length > 20000) return null;
+  const out = [];
+  for (const item of list) {
+    if (!item || typeof item !== 'object') return null;
+    const start = Number(item.start), end = Number(item.end);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start || end > 24 * 3600) return null;
+    if (!/^화자\d{1,2}$/.test(String(item.speaker || ''))) return null;
+    const text = oneLine(item.text, 4000);
+    if (text) out.push({ start: Math.round(start * 10) / 10, end: Math.round(end * 10) / 10, speaker: item.speaker, text });
+  }
+  return out;
+}
+// 실행기가 보낸 요약을 확인한다 — 원문에 없는 칸은 빈 배열. 기한은 `YYYY-MM-DD`만(말로 된 날짜는 버린다 — DECISIONS 마감일 잠금).
+function cleanSummary(summary) {
+  if (!summary || typeof summary !== 'object') return null;
+  const lines = (value, count, max) => (Array.isArray(value) ? value : []).map(item => oneLine(item, max)).filter(Boolean).slice(0, count);
+  const actions = (Array.isArray(summary.actions) ? summary.actions : []).slice(0, 15).map(item => ({
+    task: oneLine(item && item.task, 300),
+    owner: /^화자\d{1,2}$/.test(String(item && item.owner || '')) ? item.owner : '',
+    due: DATE_RE.test(String(item && item.due || '')) ? item.due : '',
+  })).filter(item => item.task);
+  return { headline: oneLine(summary.headline, 300), topics: lines(summary.topics, 8, 300), decisions: lines(summary.decisions, 10, 300), actions };
+}
 
 // safeHandle이 POST 본문 형식 검사에서 이 경로의 오디오만 예외로 연다(그 밖은 JSON만).
 function isRecordingUpload(req) {
@@ -21,7 +54,7 @@ function isRecordingUpload(req) {
 }
 
 module.exports = function recordRoutes(req, res, url, ctx) {
-  const { RECORDINGS_DIR, PUBLIC_DIR, readBody, idempotent, workflows } = ctx;
+  const { RECORDINGS_DIR, PUBLIC_DIR, readBody, idempotent, workflows, automationDir } = ctx;
   // 저장소 쓰기는 다른 쓰기와 같은 잠금(idempotent → mutations.run) 안에서만 — 큰 파일을 받는 동안에는 잠금을 쥐지 않는다.
   const locked = action => Promise.resolve().then(() => idempotent(req, null, action));
   const sendJson = (status, body) => {
@@ -29,6 +62,23 @@ module.exports = function recordRoutes(req, res, url, ctx) {
     res.end(JSON.stringify(body));
   };
   const meetingDir = id => path.join(RECORDINGS_DIR, id);
+  const transcriptFile = (meetingId, recId) => path.join(meetingDir(meetingId), `${recId}.transcript.json`);
+  // 실행기를 깨운다 — 요청 표시 파일 하나만 쓴다(프로세스를 띄우지 않는다). 못 써도 녹음본은 대기열에 남아 다음 깨움에 돈다.
+  const wakeTranscriber = () => {
+    try {
+      const file = path.join(automationDir(), 'requests', 'meeting-transcribe.request');
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, `${JSON.stringify({ requestedAt: new Date().toISOString() })}\n`);
+      return true;
+    } catch { return false; }
+  };
+  const readJson = () => readBody(req, 8 * 1024 * 1024).then(body => body, () => { const error = new Error('요청을 읽지 못했어요.'); error.status = 400; throw error; });
+  const fail = error => { if (!res.headersSent) sendJson(error.status || (/찾을 수 없/.test(error.message || '') ? 404 : 500), { ok: false, error: error.message || '처리하지 못했어요.', code: error.code }); };
+  const recordingOf = (meetingId, recId) => {
+    const event = workflows.snapshot().meetings.find(item => item.id === meetingId);
+    const recording = event && Array.isArray(event.recordings) ? event.recordings.find(item => item.id === recId) : null;
+    return { event, recording };
+  };
 
   // 녹음 창 — 앱이 작은 창으로 연다. 녹음은 이 창에서 돌아서 앱 창을 닫거나 새로고침해도 이어진다.
   if (url.pathname === '/record' && req.method === 'GET') {
@@ -89,6 +139,7 @@ module.exports = function recordRoutes(req, res, url, ctx) {
         .then(() => locked(() => workflows.addRecording({ meetingId, id: recId, file, seconds, size, createdAt: new Date().toISOString() })))
         .then((recording) => {
           if (recording.id !== recId) { try { fs.rmSync(path.join(dir, file), { force: true }); } catch {} } // 이미 저장된 같은 녹음
+          else wakeTranscriber(); // 새 녹음본은 `전사 대기`로 붙었다 — 실행기를 깨운다
           sendJson(200, { ok: true, recording });
         })
         .catch((error) => {
@@ -139,6 +190,7 @@ module.exports = function recordRoutes(req, res, url, ctx) {
         const removed = await locked(() => workflows.removeRecording({ meetingId, recId }));
         if (removed && /^[0-9a-f]{16}\.(webm|ogg|m4a)$/.test(removed.file)) {
           try { fs.rmSync(path.join(meetingDir(meetingId), removed.file), { force: true }); } catch {}
+          try { fs.rmSync(transcriptFile(meetingId, recId), { force: true }); } catch {}
         }
         sendJson(200, { ok: true, removed: !!removed });
       }, () => sendJson(400, { ok: false, error: '요청을 읽지 못했어요.' }))
@@ -146,6 +198,91 @@ module.exports = function recordRoutes(req, res, url, ctx) {
     return true;
   }
 
+  // 대기열 — 실행기가 읽는다. 전사 대기, 그리고 오래 소식이 없는 진행 중(실행기가 죽었다)을 돌려준다.
+  if (url.pathname === '/api/meeting/recording/queue' && req.method === 'GET') {
+    const now = Date.now();
+    const jobs = [];
+    for (const event of workflows.snapshot().meetings) {
+      for (const recording of Array.isArray(event.recordings) ? event.recordings : []) {
+        const stale = BUSY.includes(recording.status) && recording.status !== 'queued' && now - Date.parse(recording.updatedAt || recording.createdAt || 0) > STALE_MS;
+        if (recording.status === 'queued' || stale) jobs.push({ meetingId: event.id, recId: recording.id, seconds: recording.seconds || 0, date: event.date || '', title: event.title || '' });
+      }
+    }
+    jobs.sort((a, b) => a.recId.localeCompare(b.recId));
+    sendJson(200, { ok: true, jobs });
+    return true;
+  }
+
+  // 진행·결과 — 실행기가 알린다. stage: transcribing · summarizing(+ 전사본) · done(+ 요약) · failed(+ 이유)
+  if (url.pathname === '/api/meeting/recording/progress' && req.method === 'POST') {
+    readJson().then(async (body) => {
+      const meetingId = String((body && body.meetingId) || '');
+      const recId = String((body && body.recId) || '');
+      const stage = String((body && body.stage) || '');
+      if (!MEETING_ID_RE.test(meetingId) || !REC_ID_RE.test(recId) || !['transcribing', 'summarizing', 'done', 'failed'].includes(stage)) { sendJson(400, { ok: false, error: '진행 알림을 확인해 주세요.' }); return; }
+      const { event, recording } = recordingOf(meetingId, recId);
+      if (!recording) { sendJson(404, { ok: false, error: '녹음본을 찾을 수 없어요.' }); return; }
+      const patch = { meetingId, recId, status: stage };
+      if (body.utterances !== undefined) {
+        const utterances = cleanUtterances(body.utterances);
+        if (!utterances) { sendJson(400, { ok: false, error: '전사본을 확인해 주세요.' }); return; }
+        fs.mkdirSync(meetingDir(meetingId), { recursive: true });
+        fs.writeFileSync(transcriptFile(meetingId, recId), JSON.stringify({ utterances }));
+        patch.transcript = true;
+        patch.speakers = new Set(utterances.map(item => item.speaker)).size;
+      }
+      if (stage === 'failed') patch.error = oneLine(body.error, 300);
+      let drafts = 0;
+      if (stage === 'done') {
+        const summary = body.summary == null ? null : cleanSummary(body.summary);
+        patch.summary = summary ? { ...summary, ...(body.summaryError ? { error: oneLine(body.summaryError, 200) } : {}) } : { error: oneLine(body.summaryError || '요약을 만들지 못했어요.', 200) };
+        // 할 일·결정 후보 → 이 회의의 `AI 초안`(티로 노트와 같은 검토 흐름).
+        if (summary && event.date && event.start && event.title) {
+          const items = [
+            ...summary.actions.map(item => ({ type: 'task', description: item.owner ? `${item.task} (${item.owner})` : item.task, ...(item.due ? { due: item.due } : {}) })),
+            ...summary.decisions.map(text => ({ type: 'decision', description: text })),
+          ];
+          const added = await locked(() => workflows.appendRecordingDraft({ recId, date: event.date, start: event.start, end: event.end || '', title: event.title, items }));
+          drafts = added.added ? added.count : 0;
+        }
+      }
+      const saved = await locked(() => workflows.setRecordingStatus(patch));
+      sendJson(200, { ok: true, recording: saved, drafts });
+    }).catch(fail);
+    return true;
+  }
+
+  // 다시 시도(실패했거나 이 버전 전에 녹음해 전사하지 않은 녹음본) — 대기열에 올리고 실행기를 깨운다.
+  if (url.pathname === '/api/meeting/recording/retry' && req.method === 'POST') {
+    readJson().then(async (body) => {
+      const meetingId = String((body && body.meetingId) || '');
+      const recId = String((body && body.recId) || '');
+      if (!MEETING_ID_RE.test(meetingId) || !REC_ID_RE.test(recId)) { sendJson(400, { ok: false, error: '녹음본을 찾지 못했어요.' }); return; }
+      const { recording } = recordingOf(meetingId, recId);
+      if (!recording) { sendJson(404, { ok: false, error: '녹음본을 찾을 수 없어요.' }); return; }
+      if (BUSY.includes(recording.status)) { sendJson(409, { ok: false, error: '이미 전사하고 있어요.' }); return; }
+      if (recording.status === 'done') { sendJson(409, { ok: false, error: '이미 전사했어요.' }); return; }
+      const saved = await locked(() => workflows.setRecordingStatus({ meetingId, recId, status: 'queued' }));
+      wakeTranscriber();
+      sendJson(200, { ok: true, recording: saved });
+    }).catch(fail);
+    return true;
+  }
+
+  // 전사본 읽기 — 화면이 `전사본 보기`를 펼칠 때.
+  if (url.pathname === '/api/meeting/recording/transcript' && req.method === 'GET') {
+    const meetingId = url.searchParams.get('meetingId') || '';
+    const recId = url.searchParams.get('recId') || '';
+    const rec = MEETING_ID_RE.test(meetingId) && REC_ID_RE.test(recId) ? workflows.recordingFile({ meetingId, recId }) : null;
+    let data = null;
+    try { data = rec ? JSON.parse(fs.readFileSync(transcriptFile(meetingId, recId), 'utf8')) : null; } catch { data = null; }
+    if (!data || !Array.isArray(data.utterances)) { sendJson(404, { ok: false, error: '전사본이 없어요.' }); return true; }
+    sendJson(200, { ok: true, utterances: data.utterances });
+    return true;
+  }
+
   return false;
 };
 module.exports.isRecordingUpload = isRecordingUpload;
+module.exports.cleanSummary = cleanSummary;
+module.exports.cleanUtterances = cleanUtterances;

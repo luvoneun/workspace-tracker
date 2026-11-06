@@ -45,7 +45,9 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
       const event = { start: note.start, end: /^\d{2}:\d{2}$/.test(note.end) ? note.end : '', title: note.title, link: null, project: null };
       const matched=Object.values(state.meetings).find(saved=>saved.date===note.date && ((note.eventId && saved.externalId===note.eventId) || (saved.start===note.start && saved.title===note.title)));
       const id = matched?.id || meetingId(note.date, event);
-      const entry = meetings[id] ||= { event: { ...event, id, date: note.date, series: note.title.trim() }, notes: [], drafts: [] };
+      const entry = meetings[id] ||= { event: { ...event, id, date: note.date, series: note.title.trim() }, notes: [], drafts: [], tiro: false };
+      // 회의 녹음 요약이 남긴 노트(`source: "recording"`)는 티로 노트가 아니다 — `미팅 노트 가져옴`·가져오기 버튼은 티로 노트로만 정한다.
+      if (note.source !== 'recording') entry.tiro = true;
       if (/^https:\/\/\S+$/.test(note.webUrl || '')) entry.notes.push(note.webUrl);
       (Array.isArray(note.items) ? note.items : []).forEach((item, index) => {
         const id = draftId(note,item);
@@ -79,7 +81,7 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     const items = Object.entries(all).map(([id, item]) => ({ id, ...item, ...state.items[id] }));
     const meetings = { ...state.meetings };
     for (const event of currentMeetings()) meetings[event.id] = { ...event, ...meetings[event.id] };
-    for (const [id, entry] of Object.entries(draftsByMeeting(state))) meetings[id] = { ...entry.event, ...meetings[id], tiroNotes: entry.notes, drafts: entry.drafts };
+    for (const [id, entry] of Object.entries(draftsByMeeting(state))) meetings[id] = { ...entry.event, ...meetings[id], ...(entry.tiro ? { tiroNotes: entry.notes } : {}), drafts: entry.drafts };
     return {
       items,
       meetings: Object.values(meetings).sort((a, b) => `${b.date} ${b.start}`.localeCompare(`${a.date} ${a.start}`)),
@@ -798,10 +800,48 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     if (!/^[0-9a-f]{16}$/.test(id || '') || !/^[0-9a-f]{16}\.(webm|ogg|m4a)$/.test(file || '')) throw new Error('녹음본을 확인해 주세요.');
     const state = read();
     const event = resolveMeeting(meetingId, state);
-    const recording = { id, file, seconds: Math.max(0, Number(seconds) || 0), size: Math.max(0, Number(size) || 0), createdAt: createdAt || new Date().toISOString() };
+    const recording = { id, file, seconds: Math.max(0, Number(seconds) || 0), size: Math.max(0, Number(size) || 0), createdAt: createdAt || new Date().toISOString(), status: 'queued' };
     state.meetings[meetingId] = { ...event, recordings: [...(Array.isArray(event.recordings) ? event.recordings : []), recording] };
     write(state);
     return recording;
+  }
+  // 전사·요약 진행 — 녹음본 한 줄의 상태 칸만 고친다(파일·전사본은 routes-record.js가 다룬다).
+  // status: queued(전사 대기) · transcribing · summarizing · done · failed
+  const RECORDING_STATUS = ['queued', 'transcribing', 'summarizing', 'done', 'failed'];
+  function setRecordingStatus({ meetingId, recId, status, error, transcript, speakers, summary }) {
+    if (!RECORDING_STATUS.includes(status)) throw new Error('녹음본 상태를 확인해 주세요.');
+    const state = read();
+    const event = state.meetings[meetingId];
+    const list = event && Array.isArray(event.recordings) ? event.recordings : [];
+    const index = list.findIndex(item => item.id === recId);
+    if (index < 0) throw new Error('녹음본을 찾을 수 없어요.');
+    const next = { ...list[index], status, updatedAt: new Date().toISOString() };
+    if (status === 'failed') next.error = String(error || '전사하지 못했어요.').slice(0, 300); else delete next.error;
+    if (transcript !== undefined) next.transcript = !!transcript;
+    if (speakers !== undefined) next.speakers = Math.max(0, Math.min(50, Number(speakers) || 0));
+    if (summary !== undefined) next.summary = summary;
+    if (status === 'queued') { delete next.summary; delete next.summaryError; }
+    const recordings = list.slice();
+    recordings[index] = next;
+    state.meetings[meetingId] = { ...event, recordings };
+    write(state);
+    return next;
+  }
+  // 녹음 요약의 할 일·결정 후보를 티로 노트와 같은 초안 파일 끝에 덧붙인다(`meeting_drafts.json`은 끝에 추가만 — DECISIONS).
+  // 같은 녹음(noteGuid)이 이미 있으면 다시 넣지 않는다. 회의는 날짜·시작·제목으로 맞춘다(draftsByMeeting과 같은 규칙).
+  function appendRecordingDraft({ recId, date, start, end, title, items }) {
+    const noteGuid = `rec-${recId}`;
+    let data = { notes: [] };
+    if (fs.existsSync(draftsFile)) {
+      data = JSON.parse(fs.readFileSync(draftsFile, 'utf8'));
+      if (!data || !Array.isArray(data.notes)) throw new Error('회의 초안 파일을 읽지 못했어요.');
+    }
+    if (data.notes.some(note => note && note.noteGuid === noteGuid)) return { ok: true, added: false };
+    const clean = (Array.isArray(items) ? items : []).filter(validItem).map(item => ({ type: item.type, description: item.description.trim(), ...(item.due ? { due: item.due } : {}) }));
+    if (!clean.length) return { ok: true, added: false };
+    data.notes.push({ noteGuid, source: 'recording', date, start, ...(end ? { end } : {}), title, items: clean });
+    atomicWrite(draftsFile, JSON.stringify(data, null, 2));
+    return { ok: true, added: true, count: clean.length };
   }
   function recordingFile({ meetingId, recId }) {
     const list = read().meetings[meetingId]?.recordings;
@@ -819,5 +859,5 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     write(state);
     return removed;
   }
-  return { archive, snapshot, patchItem, saveMeeting, addRecording, recordingFile, removeRecording, syncProject, meetingItemIds, markAnswerSeen, unmarkAnswerSeen, capture, review, restoreDismissed, undoReview, retype, link, checkProjectLink, linkProject, checkProjectAlias, setProjectAlias, projectAliases, checkJiraRoles, saveJiraRoles, bundleProjects, unbundleProjects, setBundleLead, restoreBundle, groupList, renameGroup, moveGroup, undoMoveGroup, recordProjectMove, takeProjectMove, mergeGroup, undoMergeGroup, recordProjectMerge, takeProjectMerge, attentionDismissed, dismissAttention, undismissAttention, outcome: id => read().items[id]?.outcome || '' };
+  return { archive, snapshot, patchItem, saveMeeting, addRecording, recordingFile, removeRecording, setRecordingStatus, appendRecordingDraft, syncProject, meetingItemIds, markAnswerSeen, unmarkAnswerSeen, capture, review, restoreDismissed, undoReview, retype, link, checkProjectLink, linkProject, checkProjectAlias, setProjectAlias, projectAliases, checkJiraRoles, saveJiraRoles, bundleProjects, unbundleProjects, setBundleLead, restoreBundle, groupList, renameGroup, moveGroup, undoMoveGroup, recordProjectMove, takeProjectMove, mergeGroup, undoMergeGroup, recordProjectMerge, takeProjectMerge, attentionDismissed, dismissAttention, undismissAttention, outcome: id => read().items[id]?.outcome || '' };
 };

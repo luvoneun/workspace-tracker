@@ -5754,10 +5754,9 @@ test('panelMeeting: `● 녹음` 입구와 `녹음본` 구역', () => {
   const box = draw('__past');
   const row = nodeFind(box, 'd-dget');
   assert.match(nodeText(row), /미팅 노트 가져옴/);
-  assert.ok(row.children.some(node => node.textContent === '● 녹음'), '노트 줄 끝에 붙는다');
-  assert.ok(row.children.some(node => node.className === 'd-itag d-beta' && node.textContent === 'Beta'), '입구 옆에 Beta 표시');
+  assert.ok(row.children.some(node => node.textContent === '● 녹음 (Beta)'), '노트 줄 끝에 붙는다');
   assert.equal(nodeFind(box, 'd-drec'), null, '줄을 하나 더 만들지 않는다');
-  assert.ok(nodeFind(box, 'd-beta'), '녹음본 구역 제목에도 Beta');
+  assert.match(fs.readFileSync(path.join(__dirname, 'meeting-record-ui.js'), 'utf8'), /meetingSection\('녹음본 \(Beta\)'/, '구역 제목에 (Beta)');
   const recs = nodeFind(box, 'd-reclist');
   assert.ok(recs);
   assert.equal(recs.children.length, 2);
@@ -5767,7 +5766,7 @@ test('panelMeeting: `● 녹음` 입구와 `녹음본` 구역', () => {
   assert.equal(audio.src, '/api/meeting/recording?meetingId=m1&recId=fedcba9876543210');
 
   const futureRow = nodeFind(draw('__future'), 'd-drec');
-  assert.ok(futureRow && futureRow.children.some(node => node.textContent === '● 녹음'), '노트 줄이 없으면 따로 한 줄');
+  assert.ok(futureRow && futureRow.children.some(node => node.textContent === '● 녹음 (Beta)'), '노트 줄이 없으면 따로 한 줄');
   const looseBox = draw('__loose');
   assert.equal(nodeFind(looseBox, 'd-drec'), null, '기록 안 된 회의에는 녹음 입구가 없다');
   assert.equal(nodeFind(looseBox, 'd-reclist'), null);
