@@ -132,3 +132,134 @@ test('녹음본: 오늘 회의에 프로젝트를 연결해(제목별 연결) �
     assert.equal(store.recordingFile({ meetingId: id, recId: '0123456789abcdef' }).file, '0123456789abcdef.webm');
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 });
+
+// ---------- 전사·화자 구분·요약 ----------
+const { automationHome } = support;
+const transcriber = require('./meeting-transcribe');
+const requestFile = path.join(automationHome, 'requests', 'meeting-transcribe.request');
+const draftsPath = path.join(directory, 'meeting_drafts.json');
+const progress = body => support.post('/api/meeting/recording/progress', { meetingId: MEETING, ...body });
+const snapshotMeeting = async () => (await support.items()).workflows.meetings.find(item => item.id === MEETING);
+
+test('실행기 계산: 화자 구간 읽기·글 조각에 화자 붙이기(무음의 지어낸 말은 버림)·요약 JSON 꺼내기', () => {
+  const turns = transcriber.parseDiarization('Started\n0.031 -- 6.713 speaker_01\n7.473 -- 13.970 speaker_00\n14.712 -- 21.901 speaker_01\nDuration : 17 s');
+  assert.deepEqual(turns.map(turn => turn.speaker), ['speaker_01', 'speaker_00', 'speaker_01']);
+  const segments = transcriber.parseWhisper({ transcription: [
+    { offsets: { from: 0, to: 3000 }, text: ' 안녕하세요.' },
+    { offsets: { from: 3000, to: 6500 }, text: ' 일정 정해요.' },
+    { offsets: { from: 7520, to: 13820 }, text: ' 목요일까지 할게요.' },
+    { offsets: { from: 14760, to: 21540 }, text: ' 화요일로 확정하죠.' },
+    { offsets: { from: 30000, to: 59980 }, text: ' 자막 제공 및 광고를 포함하고 있습니다.' },
+  ] });
+  const merged = transcriber.mergeTranscript(segments, turns);
+  assert.deepEqual(merged.map(item => [item.speaker, item.text]), [
+    ['화자1', '안녕하세요. 일정 정해요.'],
+    ['화자2', '목요일까지 할게요.'],
+    ['화자1', '화요일로 확정하죠.'],
+  ]);
+  assert.deepEqual(transcriber.parseSummary('여기요\n```json\n{"headline":"한 줄","topics":[]}\n```'), { headline: '한 줄', topics: [] });
+  assert.equal(transcriber.parseSummary('JSON 없음'), null);
+  assert.match(transcriber.summaryPrompt({ date: '2026-11-06', title: '주간' }, merged), /<transcript>\n\[00:00\] 화자1: 안녕하세요/);
+});
+
+test('전사: 새 녹음본은 `전사 대기`로 붙고 실행기를 깨운다 → 대기열 → 진행 → 완료면 요약·전사본·AI 초안(티로 노트로 세지 않음)', async () => {
+  seedMeeting();
+  fs.rmSync(requestFile, { force: true });
+  fs.rmSync(draftsPath, { force: true });
+  const up = await (await upload(Buffer.from('audio'))).json();
+  assert.equal(up.recording.status, 'queued');
+  assert.ok(fs.existsSync(requestFile), '요청 표시 파일만 쓴다(프로세스를 띄우지 않는다)');
+  const recId = up.recording.id;
+  const queue = await (await fetch(`${base}/api/meeting/recording/queue`)).json();
+  assert.deepEqual(queue.jobs.map(job => job.recId), [recId]);
+
+  assert.equal((await progress({ recId, stage: 'transcribing' })).recording.status, 'transcribing');
+  assert.deepEqual((await (await fetch(`${base}/api/meeting/recording/queue`)).json()).jobs, [], '진행 중은 대기열에서 빠진다');
+  const utterances = [{ start: 0, end: 3, speaker: '화자1', text: '출시는 화요일로 하죠.' }, { start: 3, end: 6, speaker: '화자2', text: '버그 목록은 제가 공유할게요.' }];
+  const mid = await progress({ recId, stage: 'summarizing', utterances });
+  assert.equal(mid.recording.transcript, true);
+  assert.equal(mid.recording.speakers, 2);
+  const done = await progress({ recId, stage: 'done', summary: {
+    headline: '출시 일정 확정', topics: ['일정'], decisions: ['출시는 화요일'],
+    actions: [{ task: '버그 목록 공유', owner: '화자2', due: '다음 주' }, { task: '결제 확인', owner: '', due: '2026-11-14' }],
+  } });
+  assert.equal(done.drafts, 3);
+  assert.equal(done.recording.status, 'done');
+  assert.equal(done.recording.summary.actions[0].due, '', '말로 된 날짜는 기한으로 넣지 않는다');
+
+  const transcript = await (await fetch(`${base}/api/meeting/recording/transcript?meetingId=${MEETING}&recId=${recId}`)).json();
+  assert.deepEqual(transcript.utterances.map(item => item.speaker), ['화자1', '화자2']);
+  const meeting = await snapshotMeeting();
+  assert.deepEqual(meeting.drafts.map(draft => [draft.type, draft.description, draft.due || '']), [
+    ['task', '버그 목록 공유 (화자2)', ''], ['task', '결제 확인', '2026-11-14'], ['decision', '출시는 화요일', ''],
+  ]);
+  assert.equal(meeting.tiroNotes, undefined, '녹음 요약의 초안은 티로 노트로 세지 않는다');
+  // 같은 결과가 또 와도(실행기 재시도) 초안을 두 번 넣지 않는다
+  assert.equal((await progress({ recId, stage: 'done', summary: { headline: 'x', decisions: ['출시는 화요일'] } })).drafts, 0);
+  assert.equal(JSON.parse(fs.readFileSync(draftsPath, 'utf8')).notes.length, 1);
+  // 지우면 전사본 파일도 지운다
+  await support.post('/api/meeting/recording/delete', { meetingId: MEETING, recId });
+  assert.equal(fs.existsSync(path.join(RECORDINGS, MEETING, `${recId}.transcript.json`)), false);
+});
+
+test('전사: 실패하면 이유를 남기고 `다시 시도`로 대기열에 올린다 — 진행 중·완료는 다시 시도하지 않는다', async () => {
+  seedMeeting();
+  const { recording } = await (await upload(Buffer.from('audio'))).json();
+  const recId = recording.id;
+  assert.equal((await support.post('/api/meeting/recording/retry', { meetingId: MEETING, recId })).status, 409, '이미 대기 중');
+  const failed = await progress({ recId, stage: 'failed', error: transcriber.WORDS.silent });
+  assert.equal(failed.recording.error, transcriber.WORDS.silent);
+  fs.rmSync(requestFile, { force: true });
+  const again = await support.post('/api/meeting/recording/retry', { meetingId: MEETING, recId });
+  assert.equal(again.recording.status, 'queued');
+  assert.equal(again.recording.error, undefined);
+  assert.ok(fs.existsSync(requestFile));
+  assert.equal((await progress({ recId, stage: 'done', summary: null, summaryError: 'x' })).recording.summary.error, 'x');
+  assert.equal((await support.post('/api/meeting/recording/retry', { meetingId: MEETING, recId })).status, 409, '완료');
+  assert.equal((await progress({ recId, stage: 'summarizing', utterances: [{ start: 0, end: 1, speaker: '../x', text: 'a' }] })).status, 400, '화자 이름은 화자N만');
+});
+
+test('실행기: 가짜 도구(ffmpeg·whisper·sherpa·claude)로 녹음 하나를 받아 전사·요약까지 앱에 알린다', async () => {
+  seedMeeting();
+  fs.rmSync(draftsPath, { force: true });
+  const { recording } = await (await upload(Buffer.from('audio'))).json();
+  const bin = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'workspace-fake-tools-'));
+  const script = (name, body) => { const file = path.join(bin, name); fs.writeFileSync(file, `#!${process.execPath}\n${body}\n`, { mode: 0o755 }); return file; };
+  const env = {
+    ...process.env,
+    WORKSPACE_PORT: new URL(base).port,
+    WORKSPACE_FFMPEG: script('ffmpeg', "const a=process.argv; require('fs').writeFileSync(a[a.length-1],'wav');"),
+    WORKSPACE_WHISPER: script('whisper', "const a=process.argv; const of=a[a.indexOf('-of')+1]; require('fs').writeFileSync(of+'.json', JSON.stringify({transcription:[{offsets:{from:0,to:3000},text:' 출시는 화요일로 확정하죠.'},{offsets:{from:3500,to:6000},text:' 버그 목록은 제가 공유할게요.'}]}));"),
+    WORKSPACE_WHISPER_MODEL: __filename,
+    WORKSPACE_SHERPA_DIARIZE: script('sherpa', "console.log('0.0 -- 3.2 speaker_00'); console.log('3.4 -- 6.1 speaker_01');"),
+    CLAUDE_BIN: script('claude', "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{ if(!s.includes('<transcript>'))process.exit(2); console.log(JSON.stringify({headline:'출시 확정',topics:[],decisions:['출시는 화요일'],actions:[{task:'버그 목록 공유',owner:'화자2',due:''}]})); });"),
+    AUTOMATION_LOG_DIR: path.join(bin, 'logs'),
+  };
+  try {
+    const { spawn } = require('node:child_process');
+    const child = spawn(process.execPath, [path.join(__dirname, 'meeting-transcribe.js')], { env, stdio: 'ignore' });
+    const code = await new Promise(resolve => child.on('close', resolve));
+    assert.equal(code, 0, fs.readFileSync(path.join(bin, 'logs', 'meeting-transcribe.log'), 'utf8'));
+    const saved = (await snapshotMeeting()).recordings.find(item => item.id === recording.id);
+    assert.equal(saved.status, 'done');
+    assert.equal(saved.speakers, 2);
+    assert.equal(saved.summary.headline, '출시 확정');
+    const meeting = await snapshotMeeting();
+    assert.deepEqual(meeting.drafts.map(draft => draft.description), ['버그 목록 공유 (화자2)', '출시는 화요일']);
+    assert.match(fs.readFileSync(path.join(bin, 'logs', 'meeting-transcribe.log'), 'utf8'), /meeting-transcribe 시작[\s\S]*완료 — 발언 2개, 초안 2개[\s\S]*종료 \(exit 0\)/);
+  } finally { fs.rmSync(bin, { recursive: true, force: true }); }
+});
+
+test('실행기: 도구가 없으면 녹음본 줄에 `설치해 주세요`만 남긴다', async () => {
+  seedMeeting();
+  const { recording } = await (await upload(Buffer.from('audio'))).json();
+  const logs = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'workspace-no-tools-'));
+  try {
+    const { spawn } = require('node:child_process');
+    const child = spawn(process.execPath, [path.join(__dirname, 'meeting-transcribe.js')], { env: { ...process.env, WORKSPACE_PORT: new URL(base).port, WORKSPACE_MEETING_TOOLS: logs, WORKSPACE_FFMPEG: '/nonexistent/ffmpeg', WORKSPACE_WHISPER: '/nonexistent/whisper', AUTOMATION_LOG_DIR: logs }, stdio: 'ignore' });
+    await new Promise(resolve => child.on('close', resolve));
+    const saved = (await snapshotMeeting()).recordings.find(item => item.id === recording.id);
+    assert.equal(saved.status, 'failed');
+    assert.equal(saved.error, transcriber.WORDS.tools);
+  } finally { fs.rmSync(logs, { recursive: true, force: true }); }
+});

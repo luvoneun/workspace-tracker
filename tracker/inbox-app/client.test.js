@@ -5759,10 +5759,14 @@ test('panelMeeting: `● 녹음` 입구와 `녹음본` 구역', () => {
   assert.match(fs.readFileSync(path.join(__dirname, 'meeting-record-ui.js'), 'utf8'), /meetingSection\('녹음본 \(Beta\)'/, '구역 제목에 (Beta)');
   const recs = nodeFind(box, 'd-reclist');
   assert.ok(recs);
-  assert.equal(recs.children.length, 2);
-  assert.match(nodeText(recs.children[0]), /00:30/, '최신이 위');
-  assert.match(nodeText(recs.children[1]), /12:34/);
-  const audio = nodeFind(recs.children[0], 'rc-audio');
+  const rows = recs.children.filter(node => node.className === 'd-recrow');
+  assert.equal(rows.length, 2);
+  assert.match(nodeText(rows[0]), /00:30/, '최신이 위');
+  assert.match(nodeText(rows[1]), /12:34/);
+  // 이 버전 전에 녹음한 녹음본(상태 없음)은 `전사·요약 시작`
+  assert.match(nodeText(recs), /아직 글로 옮기지 않은 녹음본이에요/);
+  assert.ok(nodeText(recs).includes('전사·요약 시작'));
+  const audio = nodeFind(rows[0], 'rc-audio');
   assert.equal(audio.src, '/api/meeting/recording?meetingId=m1&recId=fedcba9876543210');
 
   const futureRow = nodeFind(draw('__future'), 'd-drec');
@@ -5772,11 +5776,35 @@ test('panelMeeting: `● 녹음` 입구와 `녹음본` 구역', () => {
   assert.equal(nodeFind(looseBox, 'd-reclist'), null);
 
   // 다시 그려도 같은 녹음본의 재생기는 같은 것(듣던 자리가 끊기지 않게)
-  const again = nodeFind(nodeFind(draw('__past'), 'd-reclist').children[0], 'rc-audio');
+  const again = nodeFind(nodeFind(draw('__past'), 'd-reclist').children.filter(node => node.className === 'd-recrow')[0], 'rc-audio');
   assert.equal(again, audio);
   // 녹음본만 있는 회의도 `기록 있는 회의`라 기본 목록에서 숨지 않는다
   assert.equal(app.run('meetingHasRecord({ id: "r1", drafts: [], recordings: [{ id: "0123456789abcdef" }] }, () => [])'), true);
   assert.equal(app.run('meetingHasRecord({ id: "r2", drafts: [] }, () => [])'), false);
+});
+// 회의 녹음 전사·요약: 녹음본 줄 아래에 상태 한 줄 → 끝나면 핵심 한 줄·요지·결정·`전사본 보기`, 실패면 이유 + `다시 시도`.
+test('panelMeeting: 녹음본의 전사·요약 상태', () => {
+  const { app } = meetingNotesClient([]);
+  const base = { id: 'm9', date: meetingNotesDay(-1), start: '10:00', end: '10:30', title: '전사 회의', drafts: [] };
+  const rec = (id, extra) => ({ id, file: `${id}.webm`, seconds: 60, size: 1, createdAt: `2026-11-06T0${id.slice(-1)}:00:00.000Z`, ...extra });
+  const meeting = { ...base, recordings: [
+    rec('000000000000000a', { status: 'transcribing' }),
+    rec('000000000000000b', { status: 'failed', error: '말소리를 찾지 못했어요' }),
+    rec('000000000000000c', { status: 'done', transcript: true, speakers: 2, summary: { headline: '출시는 화요일로 확정', topics: ['일정'], decisions: ['출시 화요일'], actions: [{ task: '버그 목록 공유', owner: '화자2', due: '' }] } }),
+  ] };
+  app.context.__m = meeting;
+  app.run('workflowData.meetings = [__m]; wfIndexData();');
+  const box = app.run(`(() => { const box = document.createElement('div'); panelMeeting(__m, box); return box; })()`);
+  const text = nodeText(nodeFind(box, 'd-reclist'));
+  assert.match(text, /글로 옮기고 말한 사람을 나누는 중이에요/);
+  assert.match(text, /말소리를 찾지 못했어요 다시 시도/);
+  assert.match(text, /출시는 화요일로 확정/);
+  assert.match(text, /결정 출시 화요일/);
+  assert.match(text, /아래 AI 초안에서 골라 담아요/);
+  assert.match(text, /전사본 보기 · 화자 2명/);
+  const row = nodeFind(box, 'd-dget');
+  assert.doesNotMatch(nodeText(row), /미팅 노트 가져옴/, '녹음 요약만 있는 회의를 티로 노트를 가져온 회의로 보지 않는다');
+  assert.match(nodeText(row), /이 회의의 미팅 노트 가져오기/);
 });
 // 낡음 경고는 머리줄에 글자로 끼어들지 않는다(탭이 밀렸다) — 설정 톱니바퀴의 주황 점과 툴팁으로만 알린다.
 test('renderDateBar: 낡음 경고는 톱니바퀴의 점·툴팁으로만 알리고, 아침 첫 자동 갱신 전의 `어제 기준`은 알리지 않는다', () => {

@@ -333,6 +333,9 @@ if [ "$UPDATED" = "1" ]; then
     # 맥 캘린더 읽기 실행기도 복사본이 돈다. 이 파일이 없는 옛 버전이면 건너뛴다.
     [ -f "$APP_DIR/automation/mac-calendar.sh" ] && cp "$APP_DIR/automation/mac-calendar.sh" "$INSTALL_DIR/" 2>/dev/null \
       && chmod +x "$INSTALL_DIR/mac-calendar.sh" 2>/dev/null
+    # 회의 녹음 전사·요약 실행기도 복사본이 돈다(등록은 setup.sh). 이 파일이 없는 옛 버전이면 건너뛴다.
+    [ -f "$APP_DIR/automation/meeting-transcribe.sh" ] && cp "$APP_DIR/automation/meeting-transcribe.sh" "$INSTALL_DIR/" 2>/dev/null \
+      && chmod +x "$INSTALL_DIR/meeting-transcribe.sh" 2>/dev/null
   fi
 fi
 

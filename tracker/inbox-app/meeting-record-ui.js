@@ -137,14 +137,145 @@ function meetingRecordingsNode(event, host) {
       meetingRecPlayers.set(recording.id, audio);
     }
     row.append(meta, audio, meetingRecDeleteButton(event, recording, host));
-    box.appendChild(row);
+    box.append(row, meetingRecBody(event, recording, host));
   });
   section.appendChild(box);
-  const soon = document.createElement('p');
-  soon.className = 'd-hint rc-soon';
-  soon.textContent = '전사·AI 요약은 다음 버전에서 이 녹음본에 붙어요.';
-  section.appendChild(soon);
+  meetingRecWatch(list);
   return section;
+}
+
+// ---------- 전사·요약(녹음본 줄 아래) ----------
+// 상태는 서버가 녹음본 줄에 적는다(queued·transcribing·summarizing·done·failed). 실제 일은 launchd 실행기
+// (meeting-transcribe.js)가 하고, 화면은 그 상태를 보여 주고 `다시 시도`·`전사·요약 시작`만 보낸다.
+const MEETING_REC_WORKING = { queued: '전사 대기 중이에요', transcribing: '글로 옮기고 말한 사람을 나누는 중이에요 — 회의 길이에 따라 몇 분 걸려요', summarizing: '요약하는 중이에요' };
+const meetingRecTranscripts = new Map(); // 녹음 id → 받아 온 발언 목록(펼칠 때 한 번만 받는다)
+let meetingRecWatchTimer = null;
+
+// 진행 중인 녹음본이 보이는 동안 15초마다 다시 읽는다(load — 입력 중이면 미루는 길). 다 끝나면 멈춘다.
+function meetingRecWatch(list) {
+  const busy = list.some(item => MEETING_REC_WORKING[item.status]);
+  if (!busy || meetingRecWatchTimer) return;
+  meetingRecWatchTimer = setTimeout(() => { meetingRecWatchTimer = null; if (typeof load === 'function') load(); }, 15000);
+}
+
+function meetingRecBody(event, recording, host) {
+  const body = document.createElement('div');
+  body.className = 'rc-body';
+  const status = recording.status;
+  if (MEETING_REC_WORKING[status]) {
+    const line = document.createElement('p');
+    line.className = 'rc-state';
+    line.setAttribute('role', 'status');
+    line.textContent = MEETING_REC_WORKING[status];
+    body.appendChild(line);
+    return body;
+  }
+  if (status === 'failed' || !status) {
+    // 실패했거나, 이 버전 전에 녹음해 전사하지 않은 녹음본.
+    const line = document.createElement('p');
+    line.className = status === 'failed' ? 'rc-state rc-fail' : 'rc-state';
+    const why = document.createElement('span');
+    why.textContent = status === 'failed' ? (recording.error || '전사하지 못했어요') : '아직 글로 옮기지 않은 녹음본이에요';
+    const again = document.createElement('button');
+    again.type = 'button';
+    again.className = 'd-link';
+    again.textContent = status === 'failed' ? '다시 시도' : '전사·요약 시작';
+    again.addEventListener('click', async () => {
+      again.disabled = true;
+      try {
+        await request('/api/meeting/recording/retry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ meetingId: event.id, recId: recording.id }) });
+        if (typeof meetingLoadRedraw === 'function') await meetingLoadRedraw(host);
+      } catch (error) {
+        again.disabled = false;
+        if (!(error && error.reported) && typeof announce === 'function') announce((error && error.message) || '다시 시도하지 못했어요.');
+      }
+    });
+    line.append(why, ' ', again);
+    body.appendChild(line);
+    return body;
+  }
+  // done — 요약 + 전사본
+  const summary = recording.summary || {};
+  if (summary.headline) {
+    const head = document.createElement('p');
+    head.className = 'rc-head';
+    head.textContent = summary.headline;
+    body.appendChild(head);
+  }
+  const list = (label, items) => {
+    if (!items || !items.length) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'rc-sum';
+    const name = document.createElement('p');
+    name.className = 'rc-lbl';
+    name.textContent = label;
+    const ul = document.createElement('ul');
+    items.forEach((text) => { const li = document.createElement('li'); li.textContent = text; ul.appendChild(li); });
+    wrap.append(name, ul);
+    body.appendChild(wrap);
+  };
+  list('주제별 요지', summary.topics);
+  list('결정', summary.decisions);
+  const hasDrafts = (summary.actions && summary.actions.length) || (summary.decisions && summary.decisions.length);
+  if (hasDrafts) {
+    const note = document.createElement('p');
+    note.className = 'd-hint rc-note';
+    note.textContent = '할 일·결정 후보는 아래 AI 초안에서 골라 담아요.';
+    body.appendChild(note);
+  }
+  if (summary.error) {
+    const fail = document.createElement('p');
+    fail.className = 'rc-state rc-fail';
+    fail.textContent = summary.error;
+    body.appendChild(fail);
+  }
+  if (recording.transcript) body.appendChild(meetingRecTranscriptNode(event, recording));
+  return body;
+}
+
+// `전사본 보기` — 펼칠 때 서버에서 한 번 받아 화자별로 그린다.
+function meetingRecTranscriptNode(event, recording) {
+  const box = document.createElement('details');
+  box.className = 'rc-tx';
+  const label = document.createElement('summary');
+  label.textContent = recording.speakers ? `전사본 보기 · 화자 ${recording.speakers}명` : '전사본 보기';
+  const lines = document.createElement('div');
+  lines.className = 'rc-lines';
+  box.append(label, lines);
+  const draw = (utterances) => {
+    lines.replaceChildren();
+    utterances.forEach((item) => {
+      const line = document.createElement('p');
+      line.className = 'rc-line';
+      const who = document.createElement('span');
+      who.className = 'rc-who';
+      who.textContent = item.speaker;
+      const at = document.createElement('span');
+      at.className = 'rc-at';
+      at.textContent = meetingRecFmt(item.start);
+      const text = document.createElement('span');
+      text.className = 'rc-text';
+      text.textContent = item.text;
+      line.append(who, at, text);
+      lines.appendChild(line);
+    });
+  };
+  const cached = meetingRecTranscripts.get(recording.id);
+  if (cached) draw(cached);
+  box.addEventListener('toggle', async () => {
+    if (!box.open || meetingRecTranscripts.has(recording.id)) return;
+    lines.textContent = '불러오는 중…';
+    try {
+      const response = await fetch(`/api/meeting/recording/transcript?meetingId=${encodeURIComponent(event.id)}&recId=${encodeURIComponent(recording.id)}`);
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error);
+      meetingRecTranscripts.set(recording.id, data.utterances);
+      draw(data.utterances);
+    } catch {
+      lines.textContent = '전사본을 불러오지 못했어요.';
+    }
+  });
+  return box;
 }
 
 // 지우면 되돌릴 수 없으니 두 번 누른다: `삭제` → `한 번 더 누르면 삭제`(4초 뒤 원래대로).
