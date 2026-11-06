@@ -6,6 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { pipeline } = require('stream');
 
 const MEETING_ID_RE = /^[0-9a-f]{1,32}$/;
 const REC_ID_RE = /^[0-9a-f]{16}$/;
@@ -55,6 +56,8 @@ module.exports = function recordRoutes(req, res, url, ctx) {
     const seconds = Math.max(0, Math.min(24 * 3600, parseInt(url.searchParams.get('seconds') || '0', 10) || 0));
     const ext = AUDIO_TYPES[String(req.headers['content-type'] || '').split(';')[0].trim()];
     if (!MEETING_ID_RE.test(meetingId) || !ext) { req.resume(); sendJson(400, { ok: false, error: '회의를 찾지 못했어요.' }); return true; }
+    // 없는 회의(오래 열어 둔 녹음 창 등)면 본문을 받기 전에 거절한다 — 큰 파일을 다 받고 버리지 않게.
+    if (!workflows.snapshot().meetings.some(item => item.id === meetingId)) { req.resume(); sendJson(404, { ok: false, error: '회의를 찾을 수 없어요. 녹음은 이 창에 남아 있어요 — 파일로 받아 두세요.' }); return true; }
     const dir = meetingDir(meetingId);
     const recId = crypto.randomBytes(8).toString('hex');
     const temp = path.join(dir, `.${recId}.part`);
@@ -84,10 +87,13 @@ module.exports = function recordRoutes(req, res, url, ctx) {
       } catch { fail(500, '녹음본을 저장하지 못했어요.'); return; }
       Promise.resolve()
         .then(() => locked(() => workflows.addRecording({ meetingId, id: recId, file, seconds, size, createdAt: new Date().toISOString() })))
-        .then(recording => sendJson(200, { ok: true, recording }))
+        .then((recording) => {
+          if (recording.id !== recId) { try { fs.rmSync(path.join(dir, file), { force: true }); } catch {} } // 이미 저장된 같은 녹음
+          sendJson(200, { ok: true, recording });
+        })
         .catch((error) => {
           try { fs.rmSync(path.join(dir, file), { force: true }); } catch {}
-          sendJson(/찾을 수 없/.test(error.message || '') ? 404 : 500, { ok: false, error: error.message || '녹음본을 저장하지 못했어요.' });
+          sendJson(/찾을 수 없/.test(error.message || '') ? 404 : /요청 식별자|같은 요청/.test(error.message || '') ? 400 : 500, { ok: false, error: error.message || '녹음본을 저장하지 못했어요.' });
         });
     });
     return true;
@@ -113,11 +119,13 @@ module.exports = function recordRoutes(req, res, url, ctx) {
         res.writeHead(416, { 'Content-Range': `bytes */${stat.size}` }); res.end(); return true;
       }
       res.writeHead(206, { 'Content-Type': type, 'Content-Length': end - start + 1, 'Content-Range': `bytes ${start}-${end}/${stat.size}`, 'Accept-Ranges': 'bytes' });
-      fs.createReadStream(file, { start, end }).pipe(res);
+      pipeline(fs.createReadStream(file, { start, end }), res, () => {});
       return true;
     }
     res.writeHead(200, { 'Content-Type': type, 'Content-Length': stat.size, 'Accept-Ranges': 'bytes' });
-    fs.createReadStream(file).pipe(res);
+    // pipeline: 듣는 사이에 지워졌거나(ENOENT) 재생기가 중간에 끊어도(뒤로 감기) 파일 손잡이를 닫고 응답만 끝낸다 —
+    // 처리 안 한 스트림 오류는 서버 전체를 끈다.
+    pipeline(fs.createReadStream(file), res, () => {});
     return true;
   }
 
@@ -133,8 +141,8 @@ module.exports = function recordRoutes(req, res, url, ctx) {
           try { fs.rmSync(path.join(meetingDir(meetingId), removed.file), { force: true }); } catch {}
         }
         sendJson(200, { ok: true, removed: !!removed });
-      })
-      .catch(() => sendJson(400, { ok: false, error: '요청을 읽지 못했어요.' }));
+      }, () => sendJson(400, { ok: false, error: '요청을 읽지 못했어요.' }))
+      .catch(error => { if (!res.headersSent) sendJson(500, { ok: false, error: error.message || '녹음본을 지우지 못했어요.', code: error.code }); });
     return true;
   }
 

@@ -1594,6 +1594,7 @@ function meetingUnresolvedCount(event, itemsOf) {
 // 기록이 있는지: 검토할 초안이 있거나, 이 회의에서 나온 항목이 하나라도 있으면(끝난 것·결정도 포함).
 function meetingHasRecord(event, itemsOf) {
   if (event.drafts && event.drafts.length) return true;
+  if (Array.isArray(event.recordings) && event.recordings.length) return true; // 녹음본만 있어도 기록이 있는 회의
   const items = typeof itemsOf === 'function' ? itemsOf(event.id) : [];
   return items.length > 0;
 }

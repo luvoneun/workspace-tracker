@@ -141,7 +141,9 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     const state=read();let changed=false;
     for(const event of [...Object.values(state.meetings),...currentMeetings()]) {
       if(event.title!==title || event.date!==today())continue;
-      state.meetings[event.id]={...event,project};changed=true;
+      // 캘린더 원본으로 덮더라도 이 회의에 붙은 녹음본 목록은 남긴다(파일만 남고 목록이 사라지지 않게).
+      const kept=state.meetings[event.id]?.recordings;
+      state.meetings[event.id]={...event,...(Array.isArray(kept)&&kept.length?{recordings:kept}:{}),project};changed=true;
     }
     if(typeof meetingId==='string' && meetingId) {
       let event=null;

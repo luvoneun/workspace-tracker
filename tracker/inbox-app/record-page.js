@@ -233,6 +233,8 @@ function recFinish() {
     recSet('ready'); return;
   }
   rec.blob = new Blob(rec.chunks, { type: rec.chunks[0].type || 'audio/webm' });
+  // 이 녹음의 열쇠 — `다시 저장`도 같은 열쇠라, 서버가 이미 받았으면(응답만 잃었으면) 두 번 붙이지 않는다.
+  rec.key = (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`).slice(0, 100);
   rec.chunks = [];
   recUpload();
 }
@@ -244,7 +246,7 @@ async function recUpload() {
   const type = String(rec.blob.type || 'audio/webm').split(';')[0];
   try {
     const response = await fetch(`/api/meeting/recording?meetingId=${encodeURIComponent(recMeetingId)}&seconds=${rec.seconds}`, {
-      method: 'POST', headers: { 'Content-Type': type }, body: rec.blob,
+      method: 'POST', headers: { 'Content-Type': type, 'Idempotency-Key': rec.key }, body: rec.blob,
     });
     let data = null;
     try { data = await response.json(); } catch {}
@@ -264,6 +266,10 @@ async function recUpload() {
 window.addEventListener('beforeunload', (event) => {
   if (['starting', 'recording', 'paused', 'saving', 'failed'].includes(rec.state)) { event.preventDefault(); event.returnValue = ''; }
 });
+// 창이 닫히면(닫기 확인을 받아들였을 때 포함) 앱에 끝났다고 알린다.
+window.addEventListener('pagehide', () => { if (recChannel) recChannel.postMessage({ type: 'status', meetingId: recMeetingId, state: 'closed' }); });
+// 녹음 중에는 10초마다 살아 있다고 알린다 — 창이 갑자기 죽어도 앱이 `녹음 중`에 갇히지 않게(앱은 25초 소식이 없으면 끝난 것으로 본다).
+setInterval(() => { if (['starting', 'recording', 'paused', 'saving', 'failed'].includes(rec.state)) recSay(); }, 10000);
 // 앱 창이 새로 열리면 지금 상태를 묻는다.
 if (recChannel) recChannel.onmessage = (event) => { if (event.data && event.data.type === 'ping') recSay(); };
 

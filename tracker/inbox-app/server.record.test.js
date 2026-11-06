@@ -73,7 +73,7 @@ test('녹음본: 잘못된 회의 식별자·없는 회의·빈 본문은 거절
   const missing = 'f'.repeat(24);
   const gone = await upload(Buffer.from('x'), { meetingId: missing });
   assert.equal(gone.status, 404);
-  assert.deepEqual(fs.existsSync(path.join(RECORDINGS, missing)) ? fs.readdirSync(path.join(RECORDINGS, missing)) : [], []);
+  assert.equal(fs.existsSync(path.join(RECORDINGS, missing)), false, '없는 회의면 받기 전에 거절해 폴더도 만들지 않는다');
   const empty = await upload(Buffer.alloc(0));
   assert.equal(empty.status, 400);
   assert.deepEqual(fs.readdirSync(path.join(RECORDINGS, MEETING)), []);
@@ -97,4 +97,38 @@ test('녹음 창: /record는 페이지를 주고, 회의 이름은 meta로 읽�
   assert.equal(meta.title, '주간 회의');
   assert.equal((await fetch(`${base}/routes-record.js`)).status, 404); // 서버 파일은 화면 파일로 나가지 않는다
   assert.equal((await fetch(`${base}/record.html`)).status, 404);      // 페이지는 /record 한 길로만
+});
+
+test('녹음본: 응답을 잃어 같은 열쇠로 다시 저장해도 한 번만 붙고 새 파일은 남지 않는다', async () => {
+  seedMeeting();
+  const send = () => fetch(`${base}/api/meeting/recording?meetingId=${MEETING}&seconds=5`, {
+    method: 'POST', headers: { 'Content-Type': 'audio/webm', 'Idempotency-Key': 'rec-key-0123456789abcdef' }, body: Buffer.from('same-audio'),
+  }).then(response => response.json());
+  const first = await send();
+  const second = await send();
+  assert.equal(first.ok, true);
+  assert.equal(second.recording.id, first.recording.id);
+  const state = JSON.parse(fs.readFileSync(workflowFile, 'utf8'));
+  assert.equal(state.meetings[MEETING].recordings.length, 1);
+  assert.deepEqual(fs.readdirSync(path.join(RECORDINGS, MEETING)), [first.recording.file]);
+});
+
+test('녹음본: 오늘 회의에 프로젝트를 연결해(제목별 연결) 캘린더 원본으로 덮어도 녹음본 목록이 남는다', () => {
+  const os = require('node:os');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-record-store-'));
+  try {
+    const day = support.today;
+    const store = require('./workflow-store')({
+      directory: home, refs: () => ({}), calendar: () => ({ events: [{ start: '10:00', end: '11:00', title: '주간 회의' }] }), today: () => day, validateDate: () => {},
+      create: {}, remove: () => {}, move: () => {},
+    });
+    fs.writeFileSync(path.join(home, '.workflow.json'), JSON.stringify({ items: {}, meetings: {} }));
+    const id = store.snapshot().meetings[0].id; // 캘린더에서 온 오늘 회의 — 아직 기록이 없다
+    store.addRecording({ meetingId: id, id: '0123456789abcdef', file: '0123456789abcdef.webm', seconds: 3, size: 1 });
+    store.syncProject('주간 회의', { type: 'group', value: '기획', label: '기획' }, id);
+    const after = JSON.parse(fs.readFileSync(path.join(home, '.workflow.json'), 'utf8')).meetings[id];
+    assert.equal(after.project.value, '기획');
+    assert.equal(after.recordings.length, 1);
+    assert.equal(store.recordingFile({ meetingId: id, recId: '0123456789abcdef' }).file, '0123456789abcdef.webm');
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
 });

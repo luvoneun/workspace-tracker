@@ -5769,6 +5769,13 @@ test('panelMeeting: `● 녹음` 입구와 `녹음본` 구역', () => {
   const looseBox = draw('__loose');
   assert.equal(nodeFind(looseBox, 'd-drec'), null, '기록 안 된 회의에는 녹음 입구가 없다');
   assert.equal(nodeFind(looseBox, 'd-reclist'), null);
+
+  // 다시 그려도 같은 녹음본의 재생기는 같은 것(듣던 자리가 끊기지 않게)
+  const again = nodeFind(nodeFind(draw('__past'), 'd-reclist').children[0], 'rc-audio');
+  assert.equal(again, audio);
+  // 녹음본만 있는 회의도 `기록 있는 회의`라 기본 목록에서 숨지 않는다
+  assert.equal(app.run('meetingHasRecord({ id: "r1", drafts: [], recordings: [{ id: "0123456789abcdef" }] }, () => [])'), true);
+  assert.equal(app.run('meetingHasRecord({ id: "r2", drafts: [] }, () => [])'), false);
 });
 // 낡음 경고는 머리줄에 글자로 끼어들지 않는다(탭이 밀렸다) — 설정 톱니바퀴의 주황 점과 툴팁으로만 알린다.
 test('renderDateBar: 낡음 경고는 톱니바퀴의 점·툴팁으로만 알리고, 아침 첫 자동 갱신 전의 `어제 기준`은 알리지 않는다', () => {
