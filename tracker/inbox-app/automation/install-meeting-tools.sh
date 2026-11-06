@@ -36,7 +36,11 @@ if [ ! -f "$HOME_DIR/models/sherpa-onnx-pyannote-segmentation-3-0/model.onnx" ];
   tar -xjf "$TMP/seg.tar.bz2" -C "$HOME_DIR/models"
 fi
 EMB="3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"
-[ -f "$HOME_DIR/models/$EMB" ] || curl -fL --progress-bar -o "$HOME_DIR/models/$EMB" "$BASE/speaker-recongition-models/$EMB"
+if [ ! -f "$HOME_DIR/models/$EMB" ]; then
+  # 끊긴 반쪽 파일이 제자리에 남지 않게 임시 이름으로 받고, 다 받은 뒤에만 옮긴다.
+  curl -fL --progress-bar -o "$HOME_DIR/models/$EMB.part" "$BASE/speaker-recongition-models/$EMB"
+  mv "$HOME_DIR/models/$EMB.part" "$HOME_DIR/models/$EMB"
+fi
 
 echo "4/4 음성 인식 모델(약 1.6GB — 몇 분 걸려요)"
 MODEL="$HOME_DIR/models/ggml-large-v3-turbo.bin"

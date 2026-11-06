@@ -159,6 +159,11 @@ test('실행기 계산: 화자 구간 읽기·글 조각에 화자 붙이기(무
   ]);
   assert.deepEqual(transcriber.parseSummary('여기요\n```json\n{"headline":"한 줄","topics":[]}\n```'), { headline: '한 줄', topics: [] });
   assert.equal(transcriber.parseSummary('JSON 없음'), null);
+  // 혼자 길게 말해도 한 발언은 1,500자를 넘지 않게 나눈다(서버 상한 4,000자에서 잘리지 않게)
+  const long = Array.from({ length: 40 }, (_, i) => ({ start: i, end: i + 1, text: '가'.repeat(100) }));
+  const split = transcriber.mergeTranscript(long, [{ start: 0, end: 40, speaker: 'speaker_00' }]);
+  assert.ok(split.length > 1 && split.every(item => item.text.length <= 1500));
+  assert.equal(split.map(item => item.text.replace(/ /g, '')).join('').length, 4000);
   assert.match(transcriber.summaryPrompt({ date: '2026-11-06', title: '주간' }, merged), /<transcript>\n\[00:00\] 화자1: 안녕하세요/);
 });
 

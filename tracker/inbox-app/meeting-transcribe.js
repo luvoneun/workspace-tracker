@@ -121,7 +121,8 @@ function mergeTranscript(segments, turns) {
     const best = [...overlap.entries()].sort((a, b) => b[1] - a[1])[0][0];
     const speaker = nameOf(best);
     const last = out[out.length - 1];
-    if (last && last.speaker === speaker && segment.start - last.end < 2) {
+    // 한 발언은 1,500자까지만 이어 붙인다 — 혼자 길게 말해도 저장할 때 잘리지 않게(서버는 한 발언 4,000자 상한).
+    if (last && last.speaker === speaker && segment.start - last.end < 2 && last.text.length + segment.text.length < 1500) {
       last.end = segment.end;
       last.text = `${last.text} ${segment.text}`.trim();
     } else {
