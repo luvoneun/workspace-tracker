@@ -5755,7 +5755,9 @@ test('panelMeeting: `● 녹음` 입구와 `녹음본` 구역', () => {
   const row = nodeFind(box, 'd-dget');
   assert.match(nodeText(row), /미팅 노트 가져옴/);
   assert.ok(row.children.some(node => node.textContent === '● 녹음'), '노트 줄 끝에 붙는다');
+  assert.ok(row.children.some(node => node.className === 'd-itag d-beta' && node.textContent === 'Beta'), '입구 옆에 Beta 표시');
   assert.equal(nodeFind(box, 'd-drec'), null, '줄을 하나 더 만들지 않는다');
+  assert.ok(nodeFind(box, 'd-beta'), '녹음본 구역 제목에도 Beta');
   const recs = nodeFind(box, 'd-reclist');
   assert.ok(recs);
   assert.equal(recs.children.length, 2);

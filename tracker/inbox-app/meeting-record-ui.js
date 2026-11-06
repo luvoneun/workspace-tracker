@@ -43,6 +43,15 @@ if (meetingRecChannel) {
   meetingRecChannel.postMessage({ type: 'ping' });
 }
 
+// 아직 써 보는 기능이라는 작은 표시(입구·녹음본 구역·녹음 창 머리) — 정식이 되면 이 함수와 부르는 곳만 지운다.
+function meetingRecBeta() {
+  const tag = document.createElement('span');
+  tag.className = 'd-itag d-beta';
+  tag.textContent = 'Beta';
+  tag.title = '아직 써 보는 기능이에요';
+  return tag;
+}
+
 function meetingRecFmt(seconds) {
   const t = Math.max(0, Math.floor(seconds || 0));
   const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
@@ -76,7 +85,7 @@ function meetingRecordNodes(event, host) {
   btn.className = 'd-btn sm';
   btn.textContent = '● 녹음';
   btn.addEventListener('click', () => meetingRecOpen(event));
-  nodes.push(btn);
+  nodes.push(btn, meetingRecBeta());
   return nodes;
 }
 
@@ -109,7 +118,8 @@ function meetingRecWhen(iso) {
 function meetingRecordingsNode(event, host) {
   const list = event && Array.isArray(event.recordings) ? event.recordings : [];
   if (!list.length) return null;
-  const { section } = meetingSection('녹음본', list.length);
+  const { section, label } = meetingSection('녹음본', list.length);
+  label.appendChild(meetingRecBeta());
   section.classList.add('d-recs');
   const box = document.createElement('div');
   box.className = 'd-reclist';
