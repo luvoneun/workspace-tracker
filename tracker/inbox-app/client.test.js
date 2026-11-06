@@ -995,7 +995,7 @@ test('a save refused for recovery shows the server message and keeps the banner 
 // 같은 결과를 내는 함수를 넣어, 화면 문자열을 만드는 나머지 로직을 검증한다.
 // 화면 코드는 여러 파일로 나뉘어 있고, 브라우저에서는 index.html의 <script> 차례대로
 // 같은 전역 공간에서 돈다. 테스트도 같은 가짜 창에 같은 차례로 이어 붙인다.
-const CLIENT_PARTS = ['jira-ui.js', 'meeting-notes-ui.js', 'project-new-ui.js', 'projects-ui.js', 'meetings-ui.js', 'waiting-ui.js', 'settings-ui.js', 'selfcheck-ui.js', 'wrap-ui.js', 'attention-ui.js'];
+const CLIENT_PARTS = ['jira-ui.js', 'meeting-notes-ui.js', 'project-new-ui.js', 'projects-ui.js', 'meeting-record-ui.js', 'meetings-ui.js', 'waiting-ui.js', 'settings-ui.js', 'selfcheck-ui.js', 'wrap-ui.js', 'attention-ui.js'];
 function pureClient() {
   const app = client(new Response('{}'));
   CLIENT_PARTS.forEach(file => app.run(fs.readFileSync(path.join(__dirname, file), 'utf8')));
@@ -5734,6 +5734,41 @@ test('panelMeeting: 이미 가져온 회의에는 `미팅 노트 가져옴`이 �
   app.context.__future = future;
   const box3 = app.run(`(() => { const box = document.createElement('div'); panelMeeting(__future, box); return box; })()`);
   assert.equal(nodeFind(box3, 'd-dget'), null);
+});
+// 회의 녹음(1차): `● 녹음`은 노트 줄이 있으면 그 줄 끝에 붙고, 없으면 따로 한 줄(.d-drec). 기록 안 된 회의(id 없음)에는 없다.
+// 녹음본이 있으면 `녹음본` 구역에 재생기와 삭제가 서고, 녹음 id는 서버 경로의 쿼리로만 쓴다.
+test('panelMeeting: `● 녹음` 입구와 `녹음본` 구역', () => {
+  const { app } = meetingNotesClient([]);
+  app.run("meetingNotesApply({ used: true, state: 'idle' })");
+  const past = { id: 'm1', date: meetingNotesDay(-1), start: '10:00', end: '10:30', title: '지난 회의', tiroNotes: ['https://tiro.ooo/n/1'], drafts: [],
+    recordings: [
+      { id: '0123456789abcdef', file: '0123456789abcdef.webm', seconds: 754, size: 10, createdAt: '2026-11-05T01:00:00.000Z' },
+      { id: 'fedcba9876543210', file: 'fedcba9876543210.webm', seconds: 30, size: 10, createdAt: '2026-11-06T01:00:00.000Z' },
+    ] };
+  const future = { id: 'm2', date: meetingNotesDay(2), start: '10:00', title: '미래 회의' };
+  const loose = { date: meetingNotesDay(0), start: '11:00', title: '기록 안 된 회의' };
+  Object.assign(app.context, { __past: past, __future: future, __loose: loose });
+  app.run('workflowData.meetings = [__past, __future]; wfIndexData();');
+  const draw = name => app.run(`(() => { const box = document.createElement('div'); panelMeeting(${name}, box); return box; })()`);
+
+  const box = draw('__past');
+  const row = nodeFind(box, 'd-dget');
+  assert.match(nodeText(row), /미팅 노트 가져옴/);
+  assert.ok(row.children.some(node => node.textContent === '● 녹음'), '노트 줄 끝에 붙는다');
+  assert.equal(nodeFind(box, 'd-drec'), null, '줄을 하나 더 만들지 않는다');
+  const recs = nodeFind(box, 'd-reclist');
+  assert.ok(recs);
+  assert.equal(recs.children.length, 2);
+  assert.match(nodeText(recs.children[0]), /00:30/, '최신이 위');
+  assert.match(nodeText(recs.children[1]), /12:34/);
+  const audio = nodeFind(recs.children[0], 'rc-audio');
+  assert.equal(audio.src, '/api/meeting/recording?meetingId=m1&recId=fedcba9876543210');
+
+  const futureRow = nodeFind(draw('__future'), 'd-drec');
+  assert.ok(futureRow && futureRow.children.some(node => node.textContent === '● 녹음'), '노트 줄이 없으면 따로 한 줄');
+  const looseBox = draw('__loose');
+  assert.equal(nodeFind(looseBox, 'd-drec'), null, '기록 안 된 회의에는 녹음 입구가 없다');
+  assert.equal(nodeFind(looseBox, 'd-reclist'), null);
 });
 // 낡음 경고는 머리줄에 글자로 끼어들지 않는다(탭이 밀렸다) — 설정 톱니바퀴의 주황 점과 툴팁으로만 알린다.
 test('renderDateBar: 낡음 경고는 톱니바퀴의 점·툴팁으로만 알리고, 아침 첫 자동 갱신 전의 `어제 기준`은 알리지 않는다', () => {
@@ -18608,6 +18643,7 @@ const FLOAT_OPEN_OUTSIDE = [
   ['app.js', 'document.body.appendChild(panelScrimEl)', '남김', '좁은 폭 시트의 가림막 — 한 번 붙여 두고 hidden으로 켜고 끄는 요소다. 닫힘은 uiFloatGhost가 재생한다'],
   ['checkin-ui.js', 'document.body.appendChild(dialog)', '남김', '체크인 창(dialog) — 열 때마다 만들어 붙이고 showModal로 연다. 등장·닫힘은 창 부품 .d-stay'],
   ['usage-ui.js', 'document.body.appendChild(dialog)', '남김', '내 일 기록 창(dialog) — 한 번 만들어 붙이고 showModal로 연다. 등장·닫힘은 창 부품 .d-stay'],
+  ['record-page.js', 'document.body.appendChild(rec.pill)', '남김', '회의 녹음 알약 — 앱 화면이 아니라 따로 뜬 Picture-in-Picture 창의 body에 붙인다(그 창 전체가 알약이라 뜨는 것 부품이 맡을 자리가 없다)'],
 ];
 const FLOAT_MODAL_OUTSIDE = [
   ['checkin-ui.js', 2, '남김', '체크인 창 — 창 부품 .d-stay(다시 열기 포함 두 곳)'],

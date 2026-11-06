@@ -790,5 +790,32 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     write(state);
     return { ok: true };
   }
-  return { archive, snapshot, patchItem, saveMeeting, syncProject, meetingItemIds, markAnswerSeen, unmarkAnswerSeen, capture, review, restoreDismissed, undoReview, retype, link, checkProjectLink, linkProject, checkProjectAlias, setProjectAlias, projectAliases, checkJiraRoles, saveJiraRoles, bundleProjects, unbundleProjects, setBundleLead, restoreBundle, groupList, renameGroup, moveGroup, undoMoveGroup, recordProjectMove, takeProjectMove, mergeGroup, undoMergeGroup, recordProjectMerge, takeProjectMerge, attentionDismissed, dismissAttention, undismissAttention, outcome: id => read().items[id]?.outcome || '' };
+  // 회의 녹음본(1차) — 파일은 routes-record.js가 `recordings/<회의 id>/`에 두고, 여기에는 어느 회의에 붙었는지만 적는다.
+  // 오늘 회의처럼 아직 기록이 없는 회의도 resolveMeeting으로 찾아 오버레이를 만든다(saveMeeting·link와 같은 길).
+  function addRecording({ meetingId, id, file, seconds = 0, size = 0, createdAt }) {
+    if (!/^[0-9a-f]{16}$/.test(id || '') || !/^[0-9a-f]{16}\.(webm|ogg|m4a)$/.test(file || '')) throw new Error('녹음본을 확인해 주세요.');
+    const state = read();
+    const event = resolveMeeting(meetingId, state);
+    const recording = { id, file, seconds: Math.max(0, Number(seconds) || 0), size: Math.max(0, Number(size) || 0), createdAt: createdAt || new Date().toISOString() };
+    state.meetings[meetingId] = { ...event, recordings: [...(Array.isArray(event.recordings) ? event.recordings : []), recording] };
+    write(state);
+    return recording;
+  }
+  function recordingFile({ meetingId, recId }) {
+    const list = read().meetings[meetingId]?.recordings;
+    return (Array.isArray(list) && list.find(item => item.id === recId)) || null;
+  }
+  function removeRecording({ meetingId, recId }) {
+    const state = read();
+    const event = state.meetings[meetingId];
+    const list = event && Array.isArray(event.recordings) ? event.recordings : [];
+    const removed = list.find(item => item.id === recId);
+    if (!removed) return null;
+    const rest = list.filter(item => item.id !== recId);
+    const { recordings, ...others } = event;
+    state.meetings[meetingId] = rest.length ? { ...others, recordings: rest } : others;
+    write(state);
+    return removed;
+  }
+  return { archive, snapshot, patchItem, saveMeeting, addRecording, recordingFile, removeRecording, syncProject, meetingItemIds, markAnswerSeen, unmarkAnswerSeen, capture, review, restoreDismissed, undoReview, retype, link, checkProjectLink, linkProject, checkProjectAlias, setProjectAlias, projectAliases, checkJiraRoles, saveJiraRoles, bundleProjects, unbundleProjects, setBundleLead, restoreBundle, groupList, renameGroup, moveGroup, undoMoveGroup, recordProjectMove, takeProjectMove, mergeGroup, undoMergeGroup, recordProjectMerge, takeProjectMerge, attentionDismissed, dismissAttention, undismissAttention, outcome: id => read().items[id]?.outcome || '' };
 };

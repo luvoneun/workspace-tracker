@@ -53,3 +53,6 @@ design/mockup/
 
 # graphify 결과(코드 구조 지도 — 이 맥에서만)
 graphify-out/
+
+# 회의 녹음본 (동료 목소리 — 절대 올리지 말 것)
+tracker/recordings/

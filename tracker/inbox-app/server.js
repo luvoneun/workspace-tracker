@@ -25,6 +25,8 @@ const personalize = require('./personalize');
 const { parseNews, fetchRemoteNewsText, NEWS_MAX_VERSIONS } = require('./news');
 // 캘린더 `맥 캘린더` 갈래 — 서버는 `허용하고 확인`·지금 가져오기의 요청 표시 파일과 결과 읽기(route)만 쓴다(읽기는 launchd).
 const calendarMac = require('./calendar-mac');
+// 회의 녹음(1차) 경로 — safeHandle의 본문 형식 예외(isRecordingUpload)도 여기서 가져온다.
+const recordRoutes = require('./routes-record');
 const { randomBytes, createHash, timingSafeEqual } = require('node:crypto');
 
 // 사람/회사마다 달라지는 값은 전부 workspace.config.json 한 곳에 모아둔다.
@@ -1099,6 +1101,8 @@ function getCustomGroups() {
 // 제목을 키로 저장해서, 정기 미팅은 한 번만 연결하면 다음 주에도 유지된다.
 
 const MEETING_LINKS_PATH = path.join(process.env.WORKSPACE_DATA_DIR || __dirname, '.meeting_links.json');
+// 회의 녹음본 파일 — 업무 데이터 폴더 아래(공개 저장소·백업 대상 아님, .gitignore). 어느 회의에 붙었는지는 .workflow.json.
+const RECORDINGS_DIR = path.join(TRACKER_DIR, 'recordings');
 
 function readMeetingLinks() {
   if (!fs.existsSync(MEETING_LINKS_PATH)) return {};
@@ -2479,7 +2483,7 @@ const CLIENT_BLOCKED = new Set([
   'integrations.js', 'ical.js', 'calendar-live.js', 'personalize.js', 'news.js', 'test-support.js',
   'routes-jira.js', 'routes-integrations.js', 'routes-app.js', 'routes-personalize.js', 'routes-items.js',
   'routes-track.js', 'selfcheck.js', 'checkin.js', 'usage.js', 'auto-update.js', 'calendar-mac.js',
-  'slack-auth.js', 'slack-oauth.js', 'tryout-server.js', 'project-keys.js',
+  'slack-auth.js', 'slack-oauth.js', 'tryout-server.js', 'project-keys.js', 'routes-record.js',
 ]);
 function isClientFile(name) {
   if (!/^[A-Za-z0-9][\w.-]*\.(js|css)$/.test(name)) return false;   // 이름 한 칸짜리(하위 경로 없음)만
@@ -2803,6 +2807,7 @@ const ROUTE_MODULES = [
   require('./routes-track'),
   require('./routes-jira'),
   require('./routes-integrations'),
+  recordRoutes,
   require('./routes-app'),
   require('./routes-personalize'),
   checkin.route,
@@ -2826,6 +2831,8 @@ const routeCtx = {
   getAutomationStatus, fetchStateLive, fetchStateAutomation, fetchStateSlack, SLACK_AUTH_RE, todayLocal, getReportRefs, withApplyFailure,
   liveLog, integrationAlerts, getCalendarToday, getJiraSync, requestApply, fetchNow, FETCH_MESSAGE, backupStatus,
   meetingNotesStatus, writeMeetingNotesRequest,
+  // 회의 녹음
+  RECORDINGS_DIR,
   // 꾸미기
   currentDockName,
   // 목록 읽기(routes-items.js) — `fs`는 읽기 묶음(readScope)을 거치는 이 파일의 fs다.
@@ -2866,7 +2873,7 @@ function safeHandle(req, res) {
     if(!publicAsset && !remoteAuthorized(req)) {res.writeHead(401,{'WWW-Authenticate':'Basic realm="Workspace"'});res.end('Authentication required');return;}
     const hostname = host.split(':')[0];
     if (!['localhost','127.0.0.1',EXTRA_HOST].filter(Boolean).includes(hostname)) { res.writeHead(403); res.end('Forbidden host'); return; }
-    if (req.method === 'POST' && (req.headers['content-type']?.split(';')[0] !== 'application/json' || (req.headers.origin && req.headers.origin !== `http://${host}`) || req.headers['sec-fetch-site'] === 'cross-site')) { res.writeHead(403); res.end('Forbidden request'); return; }
+    if (req.method === 'POST' && ((req.headers['content-type']?.split(';')[0] !== 'application/json' && !recordRoutes.isRecordingUpload(req)) || (req.headers.origin && req.headers.origin !== `http://${host}`) || req.headers['sec-fetch-site'] === 'cross-site')) { res.writeHead(403); res.end('Forbidden request'); return; }
     // 쉬는 틈에 자동 업데이트(WP-U) — 사람이 한 쓰기(POST)만 센다. 슬랙 수집이 넣는 `/api/import`는 사람의 동작이 아니다.
     if (req.method === 'POST' && !/^\/api\/import(?:[?#]|$)/.test(req.url || '')) autoUpdate.touch();
     res.setHeader('X-Content-Type-Options','nosniff');

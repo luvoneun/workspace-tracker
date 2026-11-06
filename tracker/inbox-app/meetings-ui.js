@@ -154,11 +154,13 @@ function panelMeeting(event, box, host = MEETING_HOST_CARD) {
 
   // 머리 아래의 조용한 한 줄: 아직 안 가져왔으면 버튼(지난 회의에서도 된다), 이미 가져왔으면
   // `미팅 노트 가져옴` + (링크가 있으면) `티로에서 열기` — 초안을 다 검토해 0개가 되어도 남는다.
+  let quietRow = null; // 머리 아래 조용한 한 줄 — 녹음 입구도 여기에 붙는다
   if (meetingNotesCanFetch(event)) {
     const get = document.createElement('div');
     get.className = 'd-dget';
     get.appendChild(meetingNotesButton('이 회의의 미팅 노트 가져오기', event));
     box.appendChild(get);
+    quietRow = get;
   } else if (meetingNotesHasNote(event)) {
     const get = document.createElement('div');
     get.className = 'd-dget';
@@ -176,6 +178,18 @@ function panelMeeting(event, box, host = MEETING_HOST_CARD) {
       get.appendChild(note);
     });
     box.appendChild(get);
+    quietRow = get;
+  }
+
+  // `● 녹음` — 녹음 창을 연다(기록된 회의에서만, meeting-record-ui.js). 노트 줄이 있으면 그 줄 끝에, 없으면 따로 한 줄.
+  const recordNodes = meetingRecordNodes(event, host);
+  if (recordNodes.length) {
+    if (!quietRow) {
+      quietRow = document.createElement('div');
+      quietRow.className = 'd-drec';
+      box.appendChild(quietRow);
+    }
+    recordNodes.forEach(node => quietRow.appendChild(node));
   }
 
   if (!linked) {
@@ -184,10 +198,12 @@ function panelMeeting(event, box, host = MEETING_HOST_CARD) {
     note.textContent = '아직 기록되지 않은 회의예요. 여기서 적은 것은 회의에 연결되지 않고 바로 담겨요.';
     box.appendChild(note);
   }
-  // 차례: 결과 → AI 초안 → 이전 회차 → 기존 항목 연결 → 이 회의에서 나온 것 → (발) 입력줄.
+  // 차례: 결과 → 녹음본 → AI 초안 → 이전 회차 → 기존 항목 연결 → 이 회의에서 나온 것 → (발) 입력줄.
   // 방금 적은 줄이 늘 입력줄 바로 위에 서도록 `이 회의에서 나온 것`이 본문의 맨 끝이다.
   if (linked) {
     panelMeetingResult(event, box, host);
+    const recordings = meetingRecordingsNode(event, host);
+    if (recordings) box.appendChild(recordings);
     if (event.drafts && event.drafts.length) panelMeetingDrafts(event, box, host);
     panelMeetingPast(event, box, host);
     panelMeetingLink(event, box, host);
