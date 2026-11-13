@@ -107,7 +107,15 @@ function parseWhisper(json) {
 }
 // 글 조각마다 시각이 가장 많이 겹치는 화자를 붙이고, 같은 화자가 이어 말하면 한 발언으로 합친다.
 // 어떤 말소리 구간과도 안 겹치는 조각(무음에서 지어낸 말)은 버린다. 화자 이름은 처음 말한 순서대로 `화자1`, `화자2`…
+// 화자 구분이 한 사람을 여러 화자로 쪼개는 일이 있다(긴 회의에서 수십 명). 말한 시간이 전체의 2%도 안 되는 화자(17분 회의면 20초 남짓)는
+// 따로 세지 않고, 그 조각은 겹치는 큰 화자 → 없으면 바로 앞 발언의 화자에게 붙인다.
 function mergeTranscript(segments, turns) {
+  const talk = new Map();
+  for (const turn of turns) talk.set(turn.speaker, (talk.get(turn.speaker) || 0) + Math.max(0, turn.end - turn.start));
+  const total = [...talk.values()].reduce((sum, value) => sum + value, 0);
+  const cutoff = total * 0.02;
+  let major = new Set([...talk.entries()].filter(([, value]) => value >= cutoff).map(([name]) => name));
+  if (!major.size) major = new Set(talk.keys());
   const names = new Map();
   const nameOf = (raw) => { if (!names.has(raw)) names.set(raw, `화자${names.size + 1}`); return names.get(raw); };
   const out = [];
@@ -118,9 +126,10 @@ function mergeTranscript(segments, turns) {
       if (shared > 0) overlap.set(turn.speaker, (overlap.get(turn.speaker) || 0) + shared);
     }
     if (!overlap.size) continue;
-    const best = [...overlap.entries()].sort((a, b) => b[1] - a[1])[0][0];
-    const speaker = nameOf(best);
     const last = out[out.length - 1];
+    const ranked = [...overlap.entries()].sort((a, b) => b[1] - a[1]);
+    const big = ranked.find(([name]) => major.has(name));
+    const speaker = big ? nameOf(big[0]) : last ? last.speaker : nameOf(ranked[0][0]);
     // 한 발언은 1,500자까지만 이어 붙인다 — 혼자 길게 말해도 저장할 때 잘리지 않게(서버는 한 발언 4,000자 상한).
     if (last && last.speaker === speaker && segment.start - last.end < 2 && last.text.length + segment.text.length < 1500) {
       last.end = segment.end;
@@ -145,11 +154,12 @@ function summaryPrompt(job, utterances) {
     '2. 원문에 있는 내용만 쓴다. 추측하거나 지어내지 않는다. 해당하는 것이 없으면 빈 배열로 둔다.',
     '3. 모든 글은 한국어 한 줄 문장으로, 줄바꿈 없이 쓴다.',
     '4. 기한(due)은 원문에 "11월 14일"처럼 달력 날짜가 분명히 나온 할 일에만 YYYY-MM-DD로 쓰고, "다음 주 화요일"처럼 말로 된 날짜나 애매한 것은 빈 문자열로 둔다. 회의 날짜는 ' + (job.date || '알 수 없음') + '이다.',
-    '5. 할 일(actions)은 누군가 하겠다고 맡은 일만. 맡은 사람이 분명하면 owner에 "화자N"을 쓴다.',
-    '6. 결정(decisions)은 회의에서 확정된 것만. 제안·검토 중인 것은 넣지 않는다.',
+    '5. 할 일(actions)은 회의 뒤에 누군가 해야 하는 일을 빠짐없이 찾는다 — "제가 할게요"처럼 맡은 일뿐 아니라 "~해야 해요", "~해 주세요", "~하기로 하죠", "다음 회의 전까지 ~"처럼 해야 할 일로 나온 후속 조치도 넣는다. 한 줄은 동사로 끝나는 할 일 문장으로 쓴다. 맡은 사람이 분명하면 owner에 "화자N"을 쓴다. 그냥 의견이나 이미 끝난 일은 넣지 않는다.',
+    '6. 확인할 것(checks)은 다른 사람·팀의 답이나 사실 확인을 기다려야 하는 것이다("~에 물어봐야 해요", "~인지 확인이 필요해요"). 할 일과 겹치면 한쪽에만 넣는다.',
+    '7. 결정(decisions)은 회의에서 정하거나 합의한 것만. 제안·검토 중인 것은 넣지 않는다.',
     '아래 모양의 JSON 하나만 출력한다(설명·코드 블록 없이):',
-    '{"headline":"회의 전체를 한 문장으로","topics":["주제별 요지 한 줄", "..."],"decisions":["확정된 결정 한 줄", "..."],"actions":[{"task":"할 일 한 줄","owner":"화자N 또는 빈 문자열","due":"YYYY-MM-DD 또는 빈 문자열"}]}',
-    `topics는 6개까지, decisions는 8개까지, actions는 12개까지.`,
+    '{"headline":"회의 전체를 한 문장으로","topics":["주제별 요지 한 줄", "..."],"decisions":["결정 한 줄", "..."],"actions":[{"task":"할 일 한 줄","owner":"화자N 또는 빈 문자열","due":"YYYY-MM-DD 또는 빈 문자열"}],"checks":["확인할 것 한 줄", "..."]}',
+    `topics는 6개까지, decisions는 8개까지, actions는 15개까지, checks는 8개까지.`,
     '',
     `회의 제목: ${String(job.title || '').replace(/[\r\n]+/g, ' ').slice(0, 200)}`,
     '<transcript>',
@@ -231,7 +241,7 @@ async function transcribeOne(job, t) {
     if (heard.code !== 0 || !whisperJson) throw new Error(WORDS.whisper);
     // ④
     const args = t.segModel && fs.existsSync(t.segModel)
-      ? ['--clustering.cluster-threshold=0.5', `--segmentation.pyannote-model=${t.segModel}`, `--embedding.model=${t.embModel}`, wav]
+      ? ['--clustering.cluster-threshold=0.8', `--segmentation.pyannote-model=${t.segModel}`, `--embedding.model=${t.embModel}`, wav]
       : [wav];
     const split = await run(t.sherpa, args, { timeoutMs: stepLimit, cwd: work });
     if (split.timedOut) throw new Error(WORDS.timeout);

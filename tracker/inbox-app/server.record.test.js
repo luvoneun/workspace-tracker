@@ -160,6 +160,11 @@ test('실행기 계산: 화자 구간 읽기·글 조각에 화자 붙이기(무
   assert.ok(split.length > 1 && split.every(item => item.text.length <= 1500));
   assert.equal(split.map(item => item.text.replace(/ /g, '')).join('').length, 4000);
   assert.match(transcriber.summaryPrompt({ date: '2026-11-06', title: '주간' }, merged), /<transcript>\n\[00:00\] 화자1: 안녕하세요/);
+  assert.match(transcriber.summaryPrompt({ date: '2026-11-06', title: '주간' }, merged), /"checks"/, '확인할 것도 찾는다');
+  // 화자 구분이 한 사람을 잘게 쪼개도(긴 회의에서 수십 명) 말한 시간이 2%도 안 되는 화자는 세지 않는다 — 겹치는 큰 화자, 없으면 앞 발언의 화자로.
+  const shards = [{ start: 0, end: 300, speaker: 'speaker_00' }, { start: 300, end: 305, speaker: 'speaker_07' }, { start: 305, end: 600, speaker: 'speaker_01' }, { start: 600, end: 603, speaker: 'speaker_09' }];
+  const pieces = [{ start: 0, end: 290, text: '가' }, { start: 300, end: 305, text: '나' }, { start: 310, end: 590, text: '다' }, { start: 600, end: 603, text: '라' }];
+  assert.deepEqual(transcriber.mergeTranscript(pieces, shards).map(item => [item.speaker, item.text]), [['화자1', '가'], ['화자1', '나'], ['화자2', '다'], ['화자2', '라']]);
 });
 
 test('전사: 새 녹음본은 `전사 대기`로 붙고 실행기를 깨운다 → 대기열 → 진행 → 완료면 요약·전사본·AI 초안(티로 노트로 세지 않음)', async () => {
@@ -182,8 +187,9 @@ test('전사: 새 녹음본은 `전사 대기`로 붙고 실행기를 깨운다 
   const done = await progress({ recId, stage: 'done', summary: {
     headline: '출시 일정 확정', topics: ['일정'], decisions: ['출시는 화요일'],
     actions: [{ task: '버그 목록 공유', owner: '화자2', due: '다음 주' }, { task: '결제 확인', owner: '', due: '2026-11-14' }],
+    checks: ['법무팀에 약관 문구 확인'],
   } });
-  assert.equal(done.drafts, 3);
+  assert.equal(done.drafts, 4);
   assert.equal(done.recording.status, 'done');
   assert.equal(done.recording.summary.actions[0].due, '', '말로 된 날짜는 기한으로 넣지 않는다');
 
@@ -191,7 +197,7 @@ test('전사: 새 녹음본은 `전사 대기`로 붙고 실행기를 깨운다 
   assert.deepEqual(transcript.utterances.map(item => item.speaker), ['화자1', '화자2']);
   const meeting = await snapshotMeeting();
   assert.deepEqual(meeting.drafts.map(draft => [draft.type, draft.description, draft.due || '']), [
-    ['task', '버그 목록 공유 (화자2)', ''], ['task', '결제 확인', '2026-11-14'], ['decision', '출시는 화요일', ''],
+    ['task', '버그 목록 공유 (화자2)', ''], ['task', '결제 확인', '2026-11-14'], ['check', '법무팀에 약관 문구 확인', ''], ['decision', '출시는 화요일', ''],
   ]);
   assert.equal(meeting.tiroNotes, undefined, '녹음 요약의 초안은 티로 노트로 세지 않는다');
   // 같은 결과가 또 와도(실행기 재시도) 초안을 두 번 넣지 않는다
@@ -202,7 +208,7 @@ test('전사: 새 녹음본은 `전사 대기`로 붙고 실행기를 깨운다 
   assert.equal(fs.existsSync(path.join(RECORDINGS, MEETING, `${recId}.transcript.json`)), false);
 });
 
-test('전사: 실패하면 이유를 남기고 `다시 시도`로 대기열에 올린다 — 진행 중·완료는 다시 시도하지 않는다', async () => {
+test('전사: 실패하면 이유를 남기고 `다시 시도`로 대기열에 올린다 — 진행 중에는 막고, 끝난 것은 `다시 전사·요약`', async () => {
   seedMeeting();
   const { recording } = await (await upload(Buffer.from('audio'))).json();
   const recId = recording.id;
@@ -215,7 +221,9 @@ test('전사: 실패하면 이유를 남기고 `다시 시도`로 대기열에 �
   assert.equal(again.recording.error, undefined);
   assert.ok(fs.existsSync(requestFile));
   assert.equal((await progress({ recId, stage: 'done', summary: null, summaryError: 'x' })).recording.summary.error, 'x');
-  assert.equal((await support.post('/api/meeting/recording/retry', { meetingId: MEETING, recId })).status, 409, '완료');
+  const rerun = await support.post('/api/meeting/recording/retry', { meetingId: MEETING, recId });
+  assert.equal(rerun.recording.status, 'queued', '끝난 녹음본도 `다시 전사·요약`으로 처음부터 다시 돈다');
+  assert.equal(rerun.recording.summary, undefined);
   assert.equal((await progress({ recId, stage: 'summarizing', utterances: [{ start: 0, end: 1, speaker: '../x', text: 'a' }] })).status, 400, '화자 이름은 화자N만');
 });
 

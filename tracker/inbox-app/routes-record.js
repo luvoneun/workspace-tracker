@@ -40,12 +40,12 @@ function cleanUtterances(list) {
 function cleanSummary(summary) {
   if (!summary || typeof summary !== 'object') return null;
   const lines = (value, count, max) => (Array.isArray(value) ? value : []).map(item => oneLine(item, max)).filter(Boolean).slice(0, count);
-  const actions = (Array.isArray(summary.actions) ? summary.actions : []).slice(0, 15).map(item => ({
+  const actions = (Array.isArray(summary.actions) ? summary.actions : []).slice(0, 20).map(item => ({
     task: oneLine(item && item.task, 300),
     owner: /^화자\d{1,2}$/.test(String(item && item.owner || '')) ? item.owner : '',
     due: DATE_RE.test(String(item && item.due || '')) ? item.due : '',
   })).filter(item => item.task);
-  return { headline: oneLine(summary.headline, 300), topics: lines(summary.topics, 8, 300), decisions: lines(summary.decisions, 10, 300), actions };
+  return { headline: oneLine(summary.headline, 300), topics: lines(summary.topics, 8, 300), decisions: lines(summary.decisions, 10, 300), actions, checks: lines(summary.checks, 10, 300) };
 }
 
 // safeHandle이 POST 본문 형식 검사에서 이 경로의 오디오만 예외로 연다(그 밖은 JSON만).
@@ -255,6 +255,7 @@ module.exports = function recordRoutes(req, res, url, ctx) {
         if (summary && event.date && event.start && event.title) {
           const items = [
             ...summary.actions.map(item => ({ type: 'task', description: item.owner ? `${item.task} (${item.owner})` : item.task, ...(item.due ? { due: item.due } : {}) })),
+            ...summary.checks.map(text => ({ type: 'check', description: text })),
             ...summary.decisions.map(text => ({ type: 'decision', description: text })),
           ];
           const added = await locked(() => workflows.appendRecordingDraft({ recId, date: event.date, start: event.start, end: event.end || '', title: event.title, items }));
@@ -267,7 +268,8 @@ module.exports = function recordRoutes(req, res, url, ctx) {
     return true;
   }
 
-  // 다시 시도(실패했거나 이 버전 전에 녹음해 전사하지 않은 녹음본) — 대기열에 올리고 실행기를 깨운다.
+  // 다시 시도(실패했거나 이 버전 전에 녹음해 전사하지 않은 녹음본, 또는 끝났지만 `다시 전사·요약`을 누른 녹음본) — 대기열에 올리고 실행기를 깨운다.
+  // 다시 돌려도 AI 초안은 그 녹음에서 아직 하나도 안 나왔을 때만 들어간다(초안 파일은 끝에 추가만 — 같은 후보를 두 번 넣지 않게).
   if (url.pathname === '/api/meeting/recording/retry' && req.method === 'POST') {
     readJson().then(async (body) => {
       const meetingId = String((body && body.meetingId) || '');
@@ -276,7 +278,6 @@ module.exports = function recordRoutes(req, res, url, ctx) {
       const { recording } = recordingOf(meetingId, recId);
       if (!recording) { sendJson(404, { ok: false, error: '녹음본을 찾을 수 없어요.' }); return; }
       if (BUSY.includes(recording.status)) { sendJson(409, { ok: false, error: '이미 전사하고 있어요.' }); return; }
-      if (recording.status === 'done') { sendJson(409, { ok: false, error: '이미 전사했어요.' }); return; }
       const saved = await locked(() => workflows.setRecordingStatus({ meetingId, recId, status: 'queued' }));
       wakeTranscriber();
       sendJson(200, { ok: true, recording: saved });

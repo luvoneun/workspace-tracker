@@ -537,20 +537,7 @@ function meetingRecBody(event, recording, host) {
     line.className = status === 'failed' ? 'rc-state rc-fail' : 'rc-state';
     const why = document.createElement('span');
     why.textContent = status === 'failed' ? (recording.error || '전사하지 못했어요') : '아직 글로 옮기지 않은 녹음본이에요';
-    const again = document.createElement('button');
-    again.type = 'button';
-    again.className = 'd-link';
-    again.textContent = status === 'failed' ? '다시 시도' : '전사·요약 시작';
-    again.addEventListener('click', async () => {
-      again.disabled = true;
-      try {
-        await request('/api/meeting/recording/retry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ meetingId: event.id, recId: recording.id }) });
-        if (typeof meetingLoadRedraw === 'function') await meetingLoadRedraw(host);
-      } catch (error) {
-        again.disabled = false;
-        if (!(error && error.reported) && typeof announce === 'function') announce((error && error.message) || '다시 시도하지 못했어요.');
-      }
-    });
+    const again = meetingRecRetryButton(event, recording, host, status === 'failed' ? '다시 시도' : '전사·요약 시작');
     line.append(why, ' ', again);
     body.appendChild(line);
     return body;
@@ -576,14 +563,19 @@ function meetingRecBody(event, recording, host) {
     body.appendChild(wrap);
   };
   list('주제별 요지', summary.topics);
+  // 할 일 — 회의에서 나온 후속 조치(맡은 화자·날짜가 분명하면 함께). 담기는 아래 AI 초안에서.
+  const actions = (Array.isArray(summary.actions) ? summary.actions : []).map((item) => {
+    const extra = [item.owner, item.due].filter(Boolean).join(' · ');
+    return extra ? `${item.task} (${extra})` : item.task;
+  });
+  list('할 일', actions);
+  list('확인할 것', summary.checks);
   list('결정', summary.decisions);
-  const hasDrafts = (summary.actions && summary.actions.length) || (summary.decisions && summary.decisions.length);
-  if (hasDrafts) {
-    const note = document.createElement('p');
-    note.className = 'd-hint rc-note';
-    note.textContent = '할 일·결정 후보는 아래 AI 초안에서 골라 담아요.';
-    body.appendChild(note);
-  }
+  const hasDrafts = actions.length || (summary.checks && summary.checks.length) || (summary.decisions && summary.decisions.length);
+  const note = document.createElement('p');
+  note.className = 'd-hint rc-note';
+  note.textContent = hasDrafts ? '할 일·확인할 것·결정 후보는 아래 AI 초안에서 골라 담아요.' : '이 녹음에서는 할 일·결정을 찾지 못했어요.';
+  body.appendChild(note);
   if (summary.error) {
     const fail = document.createElement('p');
     fail.className = 'rc-state rc-fail';
@@ -591,6 +583,11 @@ function meetingRecBody(event, recording, host) {
     body.appendChild(fail);
   }
   if (recording.transcript) body.appendChild(meetingRecTranscriptNode(event, recording));
+  // 다시 전사·요약 — 화자 구분이 이상하거나 할 일을 놓쳤을 때(새 기준으로 처음부터 다시 돈다).
+  const again = document.createElement('p');
+  again.className = 'rc-state';
+  again.appendChild(meetingRecRetryButton(event, recording, host, '다시 전사·요약'));
+  body.appendChild(again);
   return body;
 }
 
@@ -756,4 +753,22 @@ function meetingRecMoveForm(event, recording, host, close) {
   form.append(select, go, cancel);
   setTimeout(() => { try { select.focus(); } catch {} }, 0);
   return form;
+}
+
+function meetingRecRetryButton(event, recording, host, label) {
+  const again = document.createElement('button');
+  again.type = 'button';
+  again.className = 'd-link';
+  again.textContent = label;
+  again.addEventListener('click', async () => {
+    again.disabled = true;
+    try {
+      await request('/api/meeting/recording/retry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ meetingId: event.id, recId: recording.id }) });
+      if (typeof meetingLoadRedraw === 'function') await meetingLoadRedraw(host);
+    } catch (error) {
+      again.disabled = false;
+      if (!(error && error.reported) && typeof announce === 'function') announce((error && error.message) || '다시 시도하지 못했어요.');
+    }
+  });
+  return again;
 }
