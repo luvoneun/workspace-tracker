@@ -206,11 +206,19 @@ async function meetingRecStart(event) {
   const key = (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`).slice(0, 100);
   const session = { key, meetingId: event.id, state: 'starting', chunks: [], seq: 0, startTs: 0, pausedAcc: 0, pauseStart: 0, seconds: 0, pip: null, pill: null, timer: null, beat: null, recorder: null, stream: null, type: '' };
   meetingRecSession = session;
+  // 이 녹음을 이 탭이 쥐고 있다는 표시(Web Locks) — 탭이 살아 있는 동안 다른 탭이 `끊긴 녹음`으로 보고 올리지 않게.
+  // 숨은 탭은 타이머가 1분에 한 번까지 느려져 5초 기록만으로는 살아 있는지 알 수 없다. 탭이 닫히면 브라우저가 풀어 준다.
+  try {
+    if (navigator.locks && navigator.locks.request) navigator.locks.request(`workspace-meeting-rec:${key}`, () => new Promise((resolve) => { session.releaseLock = resolve; })).catch(() => {});
+  } catch {}
+  meetingRecSayState(); // 마이크 허용을 기다리는 동안에도 다른 탭이 새 녹음을 시작하지 않게 바로 알린다
   // 알약 창은 사람이 누른 직후에만 열 수 있다 — 마이크 허용 창보다 먼저 연다(반대면 처음 쓸 때 알약이 안 뜬다).
   const pip = await meetingRecOpenPip(event.title);
   const giveUp = (text) => {
     if (pip) { try { pip.close(); } catch {} }
     if (meetingRecSession === session) meetingRecSession = null;
+    if (session.releaseLock) session.releaseLock();
+    meetingRecPost({ type: 'status', meetingId: session.meetingId, state: 'closed' });
     meetingRecSay(text);
     meetingRecRefresh();
   };
@@ -295,11 +303,13 @@ async function meetingRecFinish(session) {
   const meta = { key: session.key, meetingId: session.meetingId, type: session.type, seconds: session.seconds, lastAt: Date.now() };
   let result = { ok: true };
   if (!session.chunks.length) {
+    clearInterval(session.beat);
     meetingRecSay('녹음된 소리가 없어요.');
     await meetingRecStore.drop(session.key);
   } else {
     await meetingRecStore.put('sessions', meta);
     result = await meetingRecUpload({ ...meta, blob: new Blob(session.chunks, { type: session.type || 'audio/webm' }) });
+    clearInterval(session.beat); // 올리는 동안은 기록을 새로 적어 다른 탭이 되살리지 않게 — 끝나면 멈춘 뒤 지우거나 `저장 못 함`으로 남긴다
     if (result.ok) {
       await meetingRecStore.drop(session.key);
       meetingRecSay('녹음본을 회의에 붙였어요');
@@ -308,8 +318,8 @@ async function meetingRecFinish(session) {
       meetingRecSay(`${result.error} 녹음은 이 브라우저에 남아 있어요 — 회의 카드에서 다시 저장해 주세요.`);
     }
   }
-  clearInterval(session.beat);
   if (meetingRecSession === session) meetingRecSession = null;
+  if (session.releaseLock) session.releaseLock();
   meetingRecPost(result.ok ? { type: 'saved', meetingId: session.meetingId } : { type: 'status', meetingId: session.meetingId, state: 'closed' });
   meetingRecRefresh();
 }
@@ -325,14 +335,30 @@ window.addEventListener('pagehide', () => {
 // ---------- 끊긴 녹음 되살리기 ----------
 // 앱을 열 때 한 번: 이 브라우저에 남은 녹음 가운데 ① 녹음하던 탭이 닫힌 것(기록이 30초 넘게 멈춤)은 바로 그 회의에 올리고
 // ② 전에 올리지 못한 것은 회의 카드에 `다시 저장`·`파일로 받기`·`버리기`로 남긴다. 다른 탭이 지금 녹음 중인 것은 건드리지 않는다.
+let meetingRecRecoverTimer = null;
+// 다른 탭이 이 녹음을 쥐고 있나 — true · false, 알 수 없으면 null.
+async function meetingRecHeldElsewhere(key) {
+  try {
+    if (typeof navigator === 'undefined' || !navigator.locks || !navigator.locks.query) return null;
+    const state = await navigator.locks.query();
+    return (state.held || []).some(lock => lock.name === `workspace-meeting-rec:${key}`);
+  } catch { return null; }
+}
 async function meetingRecRecover() {
+  meetingRecRecoverTimer = null;
   const sessions = await meetingRecStore.sessions();
   if (!sessions || !sessions.length) return;
   let changed = false;
+  let wait = 0;
   for (const meta of sessions) {
     if (!meta || !meta.key || (meetingRecSession && meetingRecSession.key === meta.key)) continue;
-    if (meta.unsaved) { meetingRecUnsaved.set(meta.key, meta); changed = true; continue; }
-    if (Date.now() - (Number(meta.lastAt) || 0) < MEETING_REC_ORPHAN_MS) continue;
+    if (meta.unsaved) { if (!meetingRecUnsaved.has(meta.key)) { meetingRecUnsaved.set(meta.key, meta); changed = true; } continue; }
+    // 녹음한 탭이 아직 살아 있으면(그 탭이 쥔 표시가 있으면) 건드리지 않는다. 표시를 볼 수 없는 브라우저는 기록 시각으로 가린다:
+    // 아직 새것이면 다른 탭이 녹음 중이거나 방금 새로고침해서 끊긴 녹음이다 — 30초가 지나면 다시 본다.
+    const held = await meetingRecHeldElsewhere(meta.key);
+    if (held) { wait = Math.max(wait, MEETING_REC_ORPHAN_MS); continue; }
+    const age = Date.now() - (Number(meta.lastAt) || 0);
+    if (held === null && age < MEETING_REC_ORPHAN_MS) { wait = Math.max(wait, MEETING_REC_ORPHAN_MS - age + 1000); continue; }
     const blob = await meetingRecBlob(meta);
     if (!blob) { await meetingRecStore.drop(meta.key); continue; }
     const result = await meetingRecUpload({ ...meta, blob });
@@ -340,6 +366,7 @@ async function meetingRecRecover() {
     else await meetingRecKeepUnsaved(meta, result.error);
     changed = true;
   }
+  if (wait && !meetingRecRecoverTimer) meetingRecRecoverTimer = setTimeout(() => { meetingRecRecover().catch(() => {}); }, wait);
   if (changed) meetingRecRefresh();
 }
 setTimeout(() => { meetingRecRecover().catch(() => {}); }, 1500);

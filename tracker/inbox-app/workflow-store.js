@@ -46,11 +46,12 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     const recordingOwner = {};
     for (const saved of Object.values(state.meetings)) for (const recording of Array.isArray(saved.recordings) ? saved.recordings : []) if (recording && recording.id) recordingOwner[recording.id] = saved;
     for (const note of draftNotes()) {
-      const event = { start: note.start, end: /^\d{2}:\d{2}$/.test(note.end) ? note.end : '', title: note.title, link: null, project: null };
       const owner = note.source === 'recording' && /^rec-/.test(note.noteGuid) ? recordingOwner[note.noteGuid.slice(4)] : null;
-      const matched=owner || Object.values(state.meetings).find(saved=>saved.date===note.date && ((note.eventId && saved.externalId===note.eventId) || (saved.start===note.start && saved.title===note.title)));
+      const from = owner && owner.date && owner.start && owner.title ? owner : note;
+      const event = { start: from.start, end: /^\d{2}:\d{2}$/.test(from.end) ? from.end : '', title: from.title, link: null, project: null };
+      const matched=(from === owner && owner) || Object.values(state.meetings).find(saved=>saved.date===note.date && ((note.eventId && saved.externalId===note.eventId) || (saved.start===note.start && saved.title===note.title)));
       const id = matched?.id || meetingId(note.date, event);
-      const entry = meetings[id] ||= { event: { ...event, id, date: note.date, series: note.title.trim() }, notes: [], drafts: [], tiro: false };
+      const entry = meetings[id] ||= { event: { ...event, id, date: from.date, series: String(from.title).trim() }, notes: [], drafts: [], tiro: false };
       // 회의 녹음 요약이 남긴 노트(`source: "recording"`)는 티로 노트가 아니다 — `미팅 노트 가져옴`·가져오기 버튼은 티로 노트로만 정한다.
       if (note.source !== 'recording') entry.tiro = true;
       if (/^https:\/\/\S+$/.test(note.webUrl || '')) entry.notes.push(note.webUrl);
@@ -856,6 +857,8 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     const list = from && Array.isArray(from.recordings) ? from.recordings : [];
     const moving = list.find(item => item.id === recId);
     if (!moving) throw new Error('녹음본을 찾을 수 없어요.');
+    // 잠금 안에서 한 번 더 — 확인과 잠금 사이에 실행기가 전사를 시작했을 수 있다(실행기는 옛 회의로 진행을 알린다).
+    if (['transcribing', 'summarizing'].includes(moving.status)) throw Object.assign(new Error('전사가 끝난 뒤에 옮길 수 있어요.'), { status: 409 });
     const target = resolveMeeting(toMeetingId, state);
     const rest = list.filter(item => item.id !== recId);
     const { recordings, ...others } = from;
