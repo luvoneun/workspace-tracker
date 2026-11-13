@@ -181,7 +181,7 @@ function panelMeeting(event, box, host = MEETING_HOST_CARD) {
     quietRow = get;
   }
 
-  // `● 녹음` — 녹음 창을 연다(기록된 회의에서만, meeting-record-ui.js). 노트 줄이 있으면 그 줄 끝에, 없으면 따로 한 줄.
+  // `● 녹음` — 이 탭이 알약을 띄우고 녹음한다(기록된 회의에서만, meeting-record-ui.js). 노트 줄이 있으면 그 줄 끝에, 없으면 따로 한 줄.
   const recordNodes = meetingRecordNodes(event, host);
   if (recordNodes.length) {
     if (!quietRow) {

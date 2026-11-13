@@ -3441,16 +3441,25 @@ a.d-btn { text-decoration: none; }
 }
 :root[data-theme="dark"] ::-webkit-scrollbar-thumb { background: #3a4150; background-clip: content-box; border: 3px solid transparent; }
 
-/* ── 회의 녹음(1차) ─────────────────────────────────────────────────────────────
-   패널의 `녹음본` 목록, 녹음 창(record.html), 알약. 알약은 Picture-in-Picture 창에 이 파일을 통째로 옮겨 쓴다
-   (record-page.js) — 그래서 색은 모두 토큰이고 다크 모드도 따라간다. */
+/* ── 회의 녹음 ─────────────────────────────────────────────────────────────────
+   패널의 `녹음본` 목록과 알약. 알약은 Picture-in-Picture 창에 이 파일을 통째로 옮겨 쓴다
+   (meeting-record-ui.js) — 그래서 색은 모두 토큰이고 다크 모드도 따라간다. */
 .d-reclive { color: var(--urgent); font-weight: 600; }
 .d-reclist { display: flex; flex-direction: column; gap: 8px; }
 .d-recrow { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-height: var(--h-md); }
 .d-recrow .rc-meta { display: flex; gap: 8px; min-width: 112px; font-size: var(--fs-sm); color: var(--muted); font-variant-numeric: tabular-nums; }
 .d-recrow .rc-len { color: var(--dim); }
 .d-recrow .rc-audio { flex: 1 1 240px; min-width: 0; height: var(--h-md); }
+.d-recrow .rc-acts { display: flex; align-items: center; gap: 12px; }
 .d-recrow .rc-del { color: var(--dim); font-weight: 500; }
+/* `옮기기` — 녹음본 줄 바로 아래에 회의 고르기 한 줄 */
+.d-recrow .rc-move { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex-basis: 100%; padding-left: 124px; }
+.d-recrow .rc-move p { margin: 0; }
+.d-reclist .rc-movesel {
+  min-width: 0; max-width: 100%; flex: 0 1 320px; height: var(--h-sm); padding: 0 8px; box-sizing: border-box;
+  font: inherit; font-size: var(--fs-sm); color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm);
+}
+.d-reclist .rc-movesel:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .d-recrow .rc-del:hover, .d-recrow .rc-del.armed { color: var(--urgent); }
 .d-recs .rc-soon { margin-top: 4px; }
 
@@ -3473,22 +3482,6 @@ body.rec-pip { margin: 0; background: var(--surface); overflow: hidden; }
 .rec-b.rec-stop:hover { background: var(--urgent); filter: brightness(1.08); }
 .rec-b:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-body.rec-page { background: var(--surface); }
-.rec-page .rp { display: flex; flex-direction: column; gap: 8px; padding: 20px; max-width: 480px; }
-.rec-page .rp p { margin: 0; }
-.rec-page .rp-what { font-size: var(--fs-lg); font-weight: 700; }
-.rec-page .rp-when { font-size: var(--fs-sm); color: var(--muted); }
-.rec-page .rp-when:empty, .rec-page .rp-state:empty, .rec-page .rp-err:empty, .rec-page .rp-note:empty { display: none; }
-.rec-page .rp-live { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
-.rec-page .rp-live[hidden] { display: none; }
-.rec-page .rp-time { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
-.rec-page .rp-state { color: var(--muted); }
-.rec-page .rp-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-.rec-page .rp-acts:empty { display: none; }
-.rec-page .rp-acts a.d-btn { text-decoration: none; }
-.rec-page .rp-err { color: var(--urgent); font-size: var(--fs-sm); }
-.rec-page .rp-note { color: var(--muted); font-size: var(--fs-sm); margin-top: 8px; }
-
 /* 회의 녹음 — 전사·요약(녹음본 줄 아래). 상태 한 줄 · 핵심 한 줄 · 요지/결정 목록 · 접힌 전사본 */
 .d-reclist .rc-body { display: flex; flex-direction: column; gap: 8px; margin: -2px 0 8px; padding-left: 124px; }
 .d-reclist .rc-body:empty { display: none; }
@@ -3504,4 +3497,4 @@ body.rec-page { background: var(--surface); }
 .d-reclist .rc-line { display: grid; grid-template-columns: auto auto 1fr; gap: 8px; align-items: baseline; }
 .d-reclist .rc-who { font-weight: 600; font-size: var(--fs-sm); }
 .d-reclist .rc-at { font-size: var(--fs-cap); color: var(--dim); font-variant-numeric: tabular-nums; }
-@media (max-width: 640px) { .d-reclist .rc-body { padding-left: 0; } }
+@media (max-width: 640px) { .d-reclist .rc-body, .d-recrow .rc-move { padding-left: 0; } }

@@ -1,4 +1,4 @@
-// 서버: 회의 녹음(1차) — 녹음 창 페이지, 녹음본 올리기·듣기·삭제, 본문 형식 예외. 공용 준비는 test-support.js.
+// 서버: 회의 녹음 — 녹음본 올리기·듣기·옮기기·삭제, 본문 형식 예외. 공용 준비는 test-support.js.
 // 실제 마이크·브라우저는 쓰지 않는다: 가짜 바이트를 올려 저장 위치·회의 연결·되돌려 받기만 확인한다.
 const { test, before } = require('node:test');
 const assert = require('node:assert/strict');
@@ -87,16 +87,11 @@ test('녹음본: 목록에 없는 녹음 id는 들을 수 없다(파일 이름�
   assert.equal(odd.status, 404);
 });
 
-test('녹음 창: /record는 페이지를 주고, 회의 이름은 meta로 읽는다', async () => {
+test('녹음 창은 없다: 녹음은 앱 화면에서 돈다 — /record·meta는 없고, 서버 파일은 화면 파일로 나가지 않는다', async () => {
   seedMeeting();
-  const page = await fetch(`${base}/record?meetingId=${MEETING}`);
-  assert.equal(page.status, 200);
-  assert.match(await page.text(), /record-page\.js/);
-  const meta = await (await fetch(`${base}/api/meeting/recording/meta?meetingId=${MEETING}`)).json();
-  assert.equal(meta.ok, true);
-  assert.equal(meta.title, '주간 회의');
-  assert.equal((await fetch(`${base}/routes-record.js`)).status, 404); // 서버 파일은 화면 파일로 나가지 않는다
-  assert.equal((await fetch(`${base}/record.html`)).status, 404);      // 페이지는 /record 한 길로만
+  assert.equal((await fetch(`${base}/record?meetingId=${MEETING}`)).status, 404);
+  assert.equal((await fetch(`${base}/api/meeting/recording/meta?meetingId=${MEETING}`)).status, 404);
+  assert.equal((await fetch(`${base}/routes-record.js`)).status, 404);
 });
 
 test('녹음본: 응답을 잃어 같은 열쇠로 다시 저장해도 한 번만 붙고 새 파일은 남지 않는다', async () => {
@@ -267,4 +262,44 @@ test('실행기: 도구가 없으면 녹음본 줄에 `설치해 주세요`만 �
     assert.equal(saved.status, 'failed');
     assert.equal(saved.error, transcriber.WORDS.tools);
   } finally { fs.rmSync(logs, { recursive: true, force: true }); }
+});
+
+test('옮기기: 녹음본·전사본·요약·AI 초안이 다른 회의로 함께 간다 — 전사 중·같은 회의·없는 회의는 거절', async () => {
+  const OTHER = 'ffffeeeeddddccccbbbbaaaa';
+  fs.rmSync(RECORDINGS, { recursive: true, force: true });
+  fs.rmSync(draftsPath, { force: true });
+  fs.writeFileSync(workflowFile, JSON.stringify({ items: {}, meetings: {
+    [MEETING]: { id: MEETING, title: '주간 회의', date: support.today, start: '10:00' },
+    [OTHER]: { id: OTHER, title: '디자인 리뷰', date: support.today, start: '14:00' },
+  } }));
+  const { recording } = await (await upload(Buffer.from('audio-bytes'))).json();
+  const recId = recording.id;
+  const move = body => support.post('/api/meeting/recording/move', { meetingId: MEETING, recId, toMeetingId: OTHER, ...body });
+
+  await progress({ recId, stage: 'transcribing' });
+  assert.equal((await move({})).status, 409, '전사 중에는 옮기지 않는다');
+  await progress({ recId, stage: 'summarizing', utterances: [{ start: 0, end: 2, speaker: '화자1', text: '시안은 금요일까지요.' }] });
+  await progress({ recId, stage: 'done', summary: { headline: '시안 일정', decisions: ['시안은 금요일'] } });
+  assert.equal((await move({ toMeetingId: MEETING })).status, 400, '같은 회의');
+  assert.equal((await move({ toMeetingId: 'abababababababababababab' })).status, 404, '없는 회의');
+
+  const moved = await move({});
+  assert.equal(moved.ok, true);
+  assert.equal(moved.recording.status, 'done', '상태·요약은 그대로');
+  assert.equal(fs.existsSync(path.join(RECORDINGS, MEETING, recording.file)), false);
+  assert.deepEqual(fs.readFileSync(path.join(RECORDINGS, OTHER, recording.file)), Buffer.from('audio-bytes'));
+  assert.equal((await fetch(`${base}/api/meeting/recording?meetingId=${OTHER}&recId=${recId}`)).status, 200);
+  assert.equal((await fetch(`${base}/api/meeting/recording?meetingId=${MEETING}&recId=${recId}`)).status, 404);
+  const transcript = await (await fetch(`${base}/api/meeting/recording/transcript?meetingId=${OTHER}&recId=${recId}`)).json();
+  assert.equal(transcript.utterances[0].text, '시안은 금요일까지요.');
+
+  const meetings = (await support.items()).workflows.meetings;
+  const from = meetings.find(item => item.id === MEETING);
+  const to = meetings.find(item => item.id === OTHER);
+  assert.equal((from.recordings || []).length, 0);
+  assert.deepEqual(to.recordings.map(item => item.id), [recId]);
+  assert.deepEqual((from.drafts || []).map(draft => draft.description), [], '옛 회의에서 AI 초안이 빠진다');
+  assert.deepEqual(to.drafts.map(draft => draft.description), ['시안은 금요일'], '새 회의로 AI 초안이 따라간다');
+  assert.equal(JSON.parse(fs.readFileSync(draftsPath, 'utf8')).notes.length, 1, '초안 파일은 고쳐 쓰지 않는다(끝에 추가만)');
+  assert.equal((await move({})).status, 404, '이미 옮긴 녹음본');
 });

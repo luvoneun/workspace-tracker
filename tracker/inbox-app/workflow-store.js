@@ -41,9 +41,14 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
   function draftsByMeeting(state) {
     const reviewed = state.reviewed || {};
     const meetings = {};
+    // 녹음 요약 노트(`rec-<녹음 id>`)는 그 녹음본이 지금 붙어 있는 회의를 따른다 — 녹음본을 다른 회의로 옮기면 AI 초안도 함께 옮겨 간다
+    // (초안 파일은 끝에 추가만 하므로 노트를 고쳐 쓰지 않고 읽을 때 맞춘다).
+    const recordingOwner = {};
+    for (const saved of Object.values(state.meetings)) for (const recording of Array.isArray(saved.recordings) ? saved.recordings : []) if (recording && recording.id) recordingOwner[recording.id] = saved;
     for (const note of draftNotes()) {
       const event = { start: note.start, end: /^\d{2}:\d{2}$/.test(note.end) ? note.end : '', title: note.title, link: null, project: null };
-      const matched=Object.values(state.meetings).find(saved=>saved.date===note.date && ((note.eventId && saved.externalId===note.eventId) || (saved.start===note.start && saved.title===note.title)));
+      const owner = note.source === 'recording' && /^rec-/.test(note.noteGuid) ? recordingOwner[note.noteGuid.slice(4)] : null;
+      const matched=owner || Object.values(state.meetings).find(saved=>saved.date===note.date && ((note.eventId && saved.externalId===note.eventId) || (saved.start===note.start && saved.title===note.title)));
       const id = matched?.id || meetingId(note.date, event);
       const entry = meetings[id] ||= { event: { ...event, id, date: note.date, series: note.title.trim() }, notes: [], drafts: [], tiro: false };
       // 회의 녹음 요약이 남긴 노트(`source: "recording"`)는 티로 노트가 아니다 — `미팅 노트 가져옴`·가져오기 버튼은 티로 노트로만 정한다.
@@ -843,6 +848,22 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     atomicWrite(draftsFile, JSON.stringify(data, null, 2));
     return { ok: true, added: true, count: clean.length };
   }
+  // 잘못 붙인 녹음본을 다른 회의로 옮긴다 — 녹음본 줄(상태·요약 포함)을 그대로 떼어 옮긴다(파일은 routes-record.js가 옮긴다).
+  function moveRecording({ meetingId, recId, toMeetingId }) {
+    if (meetingId === toMeetingId) throw new Error('같은 회의예요.');
+    const state = read();
+    const from = state.meetings[meetingId];
+    const list = from && Array.isArray(from.recordings) ? from.recordings : [];
+    const moving = list.find(item => item.id === recId);
+    if (!moving) throw new Error('녹음본을 찾을 수 없어요.');
+    const target = resolveMeeting(toMeetingId, state);
+    const rest = list.filter(item => item.id !== recId);
+    const { recordings, ...others } = from;
+    state.meetings[meetingId] = rest.length ? { ...others, recordings: rest } : others;
+    state.meetings[toMeetingId] = { ...target, recordings: [...(Array.isArray(target.recordings) ? target.recordings : []), moving] };
+    write(state);
+    return moving;
+  }
   function recordingFile({ meetingId, recId }) {
     const list = read().meetings[meetingId]?.recordings;
     return (Array.isArray(list) && list.find(item => item.id === recId)) || null;
@@ -859,5 +880,5 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     write(state);
     return removed;
   }
-  return { archive, snapshot, patchItem, saveMeeting, addRecording, recordingFile, removeRecording, setRecordingStatus, appendRecordingDraft, syncProject, meetingItemIds, markAnswerSeen, unmarkAnswerSeen, capture, review, restoreDismissed, undoReview, retype, link, checkProjectLink, linkProject, checkProjectAlias, setProjectAlias, projectAliases, checkJiraRoles, saveJiraRoles, bundleProjects, unbundleProjects, setBundleLead, restoreBundle, groupList, renameGroup, moveGroup, undoMoveGroup, recordProjectMove, takeProjectMove, mergeGroup, undoMergeGroup, recordProjectMerge, takeProjectMerge, attentionDismissed, dismissAttention, undismissAttention, outcome: id => read().items[id]?.outcome || '' };
+  return { archive, snapshot, patchItem, saveMeeting, addRecording, recordingFile, removeRecording, moveRecording, setRecordingStatus, appendRecordingDraft, syncProject, meetingItemIds, markAnswerSeen, unmarkAnswerSeen, capture, review, restoreDismissed, undoReview, retype, link, checkProjectLink, linkProject, checkProjectAlias, setProjectAlias, projectAliases, checkJiraRoles, saveJiraRoles, bundleProjects, unbundleProjects, setBundleLead, restoreBundle, groupList, renameGroup, moveGroup, undoMoveGroup, recordProjectMove, takeProjectMove, mergeGroup, undoMergeGroup, recordProjectMerge, takeProjectMerge, attentionDismissed, dismissAttention, undismissAttention, outcome: id => read().items[id]?.outcome || '' };
 };

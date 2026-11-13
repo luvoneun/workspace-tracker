@@ -2597,7 +2597,8 @@ async function load() {
   // 입력 중이 아닐 때만 스스로 새로고침한다.
   if (data.appVersion) {
     if (!appVersion) appVersion = data.appVersion;
-    else if (appVersion !== data.appVersion && !isTyping()) {
+    // 회의 녹음 중(이 탭에서 녹음·저장 중)에도 미룬다 — 새로고침하면 녹음이 끊긴다(meeting-record-ui.js).
+    else if (appVersion !== data.appVersion && !isTyping() && !(typeof meetingRecBusy === 'function' && meetingRecBusy())) {
       location.reload();
       return;
     }

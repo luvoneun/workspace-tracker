@@ -5806,6 +5806,97 @@ test('panelMeeting: 녹음본의 전사·요약 상태', () => {
   assert.doesNotMatch(nodeText(row), /미팅 노트 가져옴/, '녹음 요약만 있는 회의를 티로 노트를 가져온 회의로 보지 않는다');
   assert.match(nodeText(row), /이 회의의 미팅 노트 가져오기/);
 });
+// 회의 녹음: `● 녹음`을 한 번 누르면 따로 뜨는 창 없이 이 탭이 알약(PiP)을 먼저 띄우고 마이크로 녹음한다.
+// 카드는 `● 녹음 중 · 일시정지 · 정지하고 저장`, 녹음 중에는 자동 새로고침을 미루고, 정지하면 올려 회의에 붙인다.
+test('회의 녹음: 한 번 누르면 알약만 뜨고(녹음 창 없음) 녹음 → 정지하면 올린다', async () => {
+  const { app } = meetingNotesClient([]);
+  const sent = [];
+  app.context.fetch = async (url, init) => { sent.push({ url, headers: init.headers, body: init.body }); return new Response(JSON.stringify({ ok: true, recording: { id: '0123456789abcdef' } })); };
+  const order = [];
+  const pipBody = { children: [], className: '', appendChild(node) { this.children.push(node); } };
+  const pipDoc = { title: '', head: { appendChild() {} }, body: pipBody, createElement: tag => app.run(`document.createElement(${JSON.stringify(tag)})`) };
+  const pip = { document: pipDoc, closed: false, listeners: {}, addEventListener(name, fn) { this.listeners[name] = fn; }, close() { this.closed = true; order.push('pip-close'); } };
+  let opened = 0;
+  Object.assign(app.context, {
+    __pip: pip,
+    __order: order,
+    __opened: () => { opened += 1; },
+  });
+  app.context.navigator = {};
+  app.context.Blob = Blob;
+  const intervals = [];
+  app.context.setInterval = (fn, ms) => { const id = setInterval(fn, ms); id.unref(); intervals.push(id); return id; };
+  app.context.clearInterval = clearInterval;
+  app.run(`
+    window.open = () => { __opened(); return null; };
+    documentPictureInPicture = { requestWindow: async () => { __order.push('pip'); return __pip; } };
+    navigator.mediaDevices = { getUserMedia: async () => { __order.push('mic'); return { getTracks: () => [{ stop() { __order.push('track-stop'); } }] }; } };
+    MediaRecorder = class { constructor() { this.state = 'inactive'; this.mimeType = 'audio/webm;codecs=opus'; }
+      start() { this.state = 'recording'; __order.push('start'); }
+      pause() { this.state = 'paused'; } resume() { this.state = 'recording'; }
+      stop() { this.state = 'inactive'; this.ondataavailable({ data: new Blob(['abc'], { type: 'audio/webm' }) }); this.onstop(); } };
+  `);
+  const meeting = { id: 'm1', date: meetingNotesDay(0), start: '10:00', title: '주간 회의', drafts: [] };
+  app.context.__m = meeting;
+  app.run('workflowData.meetings = [__m]; wfIndexData();');
+  const draw = () => app.run(`(() => { const box = document.createElement('div'); panelMeeting(__m, box); return box; })()`);
+  assert.ok(nodeText(draw()).includes('● 녹음 (Beta)'));
+  await app.run('meetingRecStart(__m)');
+  assert.equal(opened, 0, '따로 뜨는 녹음 창을 열지 않는다');
+  assert.deepEqual(order, ['pip', 'mic', 'start'], '알약을 마이크보다 먼저 연다(사람이 누른 직후에만 열린다)');
+  assert.equal(pipBody.children.length, 1);
+  assert.equal(pipBody.children[0].className, 'rec-pill');
+  assert.equal(app.run('String(meetingRecBusy())'), 'true', '녹음 중에는 앱 갱신 새로고침을 미룬다');
+  const live = nodeText(draw());
+  assert.match(live, /● 녹음 중/);
+  assert.match(live, /일시정지/);
+  assert.match(live, /정지하고 저장/);
+  assert.doesNotMatch(live, /● 녹음 \(Beta\)/, '녹음 중에는 새로 시작하는 입구가 없다');
+
+  app.run('meetingRecStop()');
+  await new Promise(resolve => setTimeout(resolve, 20));
+  const upload = sent.find(item => String(item.url).startsWith('/api/meeting/recording?'));
+  assert.ok(upload, '정지하면 올린다');
+  assert.match(upload.url, /meetingId=m1/);
+  assert.equal(upload.headers['Content-Type'], 'audio/webm');
+  assert.ok(upload.headers['Idempotency-Key'], '같은 녹음을 다시 올려도 한 번만 붙게 열쇠를 단다');
+  assert.ok(order.includes('pip-close') && order.includes('track-stop'), '알약을 닫고 마이크를 끈다');
+  assert.equal(app.run('String(meetingRecBusy())'), 'false');
+  assert.ok(nodeText(draw()).includes('● 녹음 (Beta)'));
+  intervals.forEach(clearInterval);
+});
+// 회의 녹음 옮기기: 녹음본 줄의 `옮기기` → 오늘·지난 2주 회의 고르기 → 서버에 옮기기 요청. 전사 중에는 `옮기기`가 없다.
+test('회의 녹음: `옮기기`는 다른 회의를 골라 옮기고, 전사 중인 녹음본에는 없다', async () => {
+  const { app, sent } = meetingNotesClient([{ ok: true }]);
+  const rec = (id, extra) => ({ id, file: `${id}.webm`, seconds: 60, size: 1, createdAt: '2026-11-06T01:00:00.000Z', ...extra });
+  const here = { id: 'm1', date: meetingNotesDay(0), start: '10:00', title: '주간 회의', drafts: [], recordings: [rec('000000000000000a', { status: 'done' })] };
+  const other = { id: 'm2', date: meetingNotesDay(0), start: '14:00', title: '디자인 리뷰', drafts: [] };
+  const old = { id: 'm3', date: meetingNotesDay(-30), start: '09:00', title: '아주 옛날 회의', drafts: [] };
+  const busy = { id: 'm4', date: meetingNotesDay(-1), start: '11:00', title: '전사 중 회의', drafts: [], recordings: [rec('000000000000000b', { status: 'transcribing' })] };
+  Object.assign(app.context, { __here: here, __other: other, __old: old, __busy: busy });
+  app.run('workflowData.meetings = [__here, __other, __old, __busy]; wfIndexData(); var redrawn = 0; meetingLoadRedraw = async () => { redrawn += 1; };');
+  const draw = name => app.run(`(() => { const box = document.createElement('div'); panelMeeting(${name}, box); return box; })()`);
+
+  const busyRow = nodeFind(nodeFind(draw('__busy'), 'd-reclist'), 'd-recrow');
+  assert.doesNotMatch(nodeText(busyRow), /옮기기/, '전사 중에는 옮기지 않는다');
+
+  const list = nodeFind(draw('__here'), 'd-reclist');
+  const row = nodeFind(list, 'd-recrow');
+  const moveBtn = nodeFind(row, 'rc-acts').children.find(node => node.textContent === '옮기기');
+  assert.ok(moveBtn);
+  moveBtn.listeners.click();
+  const form = nodeFind(row, 'rc-move');
+  assert.ok(form, '줄 아래에 회의 고르기가 열린다');
+  const select = nodeFind(form, 'rc-movesel');
+  assert.deepEqual(select.children.map(option => option.textContent), ['오늘 14:00 디자인 리뷰', `${Number(meetingNotesDay(-1).slice(5, 7))}월 ${Number(meetingNotesDay(-1).slice(8, 10))}일 11:00 전사 중 회의`],
+    '지금 회의·2주 밖 회의는 빠지고, 최근이 위');
+  select.value = 'm2';
+  await form.children.find(node => node.textContent === '이 회의로 옮기기').listeners.click();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  const call = sent.find(item => item.url === '/api/meeting/recording/move');
+  assert.deepEqual(call.body, { meetingId: 'm1', recId: '000000000000000a', toMeetingId: 'm2' });
+  assert.equal(app.run('redrawn'), 1);
+});
 // 낡음 경고는 머리줄에 글자로 끼어들지 않는다(탭이 밀렸다) — 설정 톱니바퀴의 주황 점과 툴팁으로만 알린다.
 test('renderDateBar: 낡음 경고는 톱니바퀴의 점·툴팁으로만 알리고, 아침 첫 자동 갱신 전의 `어제 기준`은 알리지 않는다', () => {
   const app = pureClient();
@@ -18679,7 +18770,7 @@ const FLOAT_OPEN_OUTSIDE = [
   ['app.js', 'document.body.appendChild(panelScrimEl)', '남김', '좁은 폭 시트의 가림막 — 한 번 붙여 두고 hidden으로 켜고 끄는 요소다. 닫힘은 uiFloatGhost가 재생한다'],
   ['checkin-ui.js', 'document.body.appendChild(dialog)', '남김', '체크인 창(dialog) — 열 때마다 만들어 붙이고 showModal로 연다. 등장·닫힘은 창 부품 .d-stay'],
   ['usage-ui.js', 'document.body.appendChild(dialog)', '남김', '내 일 기록 창(dialog) — 한 번 만들어 붙이고 showModal로 연다. 등장·닫힘은 창 부품 .d-stay'],
-  ['record-page.js', 'document.body.appendChild(rec.pill)', '남김', '회의 녹음 알약 — 앱 화면이 아니라 따로 뜬 Picture-in-Picture 창의 body에 붙인다(그 창 전체가 알약이라 뜨는 것 부품이 맡을 자리가 없다)'],
+  ['meeting-record-ui.js', 'document.body.appendChild(session.pill)', '남김', '회의 녹음 알약 — 앱 화면이 아니라 따로 뜬 Picture-in-Picture 창의 body에 붙인다(그 창 전체가 알약이라 뜨는 것 부품이 맡을 자리가 없다)'],
 ];
 const FLOAT_MODAL_OUTSIDE = [
   ['checkin-ui.js', 2, '남김', '체크인 창 — 창 부품 .d-stay(다시 열기 포함 두 곳)'],

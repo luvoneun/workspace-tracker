@@ -1,4 +1,5 @@
-// 회의 녹음(1차) 경로 — 녹음 창 페이지, 회의 이름 읽기, 녹음본 올리기·듣기·삭제, 전사·요약(대기열·진행·다시 시도·전사본).
+// 회의 녹음 경로 — 녹음본 올리기·듣기·삭제·다른 회의로 옮기기, 전사·요약(대기열·진행·다시 시도·전사본).
+// 녹음 자체는 앱 화면(meeting-record-ui.js)과 그 화면이 띄운 알약(Picture-in-Picture)에서 돈다.
 // 전사·요약은 서버가 직접 돌리지 않는다 — 요청 표시 파일(`requests/meeting-transcribe.request`)만 쓰고 launchd
 // `meeting-transcribe`가 meeting-transcribe.js를 돌린다(미팅 노트 가져오기와 같은 원칙). 그 실행기가 대기열을 읽고
 // 진행·결과를 이 경로로 알린다. 전사본은 `recordings/<회의 id>/<녹음 id>.transcript.json`, 요약은 녹음본 줄(.workflow.json).
@@ -54,7 +55,7 @@ function isRecordingUpload(req) {
 }
 
 module.exports = function recordRoutes(req, res, url, ctx) {
-  const { RECORDINGS_DIR, PUBLIC_DIR, readBody, idempotent, workflows, automationDir } = ctx;
+  const { RECORDINGS_DIR, readBody, idempotent, workflows, automationDir } = ctx;
   // 저장소 쓰기는 다른 쓰기와 같은 잠금(idempotent → mutations.run) 안에서만 — 큰 파일을 받는 동안에는 잠금을 쥐지 않는다.
   const locked = action => Promise.resolve().then(() => idempotent(req, null, action));
   const sendJson = (status, body) => {
@@ -80,25 +81,6 @@ module.exports = function recordRoutes(req, res, url, ctx) {
     return { event, recording };
   };
 
-  // 녹음 창 — 앱이 작은 창으로 연다. 녹음은 이 창에서 돌아서 앱 창을 닫거나 새로고침해도 이어진다.
-  if (url.pathname === '/record' && req.method === 'GET') {
-    fs.readFile(path.join(PUBLIC_DIR, 'record.html'), (error, data) => {
-      if (error) { res.writeHead(404); res.end('Not found'); return; }
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(data);
-    });
-    return true;
-  }
-
-  // 녹음 창 머리에 쓸 회의 이름·날짜.
-  if (url.pathname === '/api/meeting/recording/meta' && req.method === 'GET') {
-    const meetingId = url.searchParams.get('meetingId') || '';
-    const event = MEETING_ID_RE.test(meetingId) ? workflows.snapshot().meetings.find(item => item.id === meetingId) : null;
-    if (!event) { sendJson(404, { ok: false, error: '회의를 찾지 못했어요.' }); return true; }
-    sendJson(200, { ok: true, title: event.title || '', date: event.date || '', start: event.start || '' });
-    return true;
-  }
-
   // 올리기: 본문은 오디오 바이트 그대로. 임시 파일로 바로 흘려 쓰고(메모리에 쌓지 않는다), 다 받은 뒤에만
   // 이름을 바꾸고 회의에 붙인다. 중간에 끊기거나 상한을 넘으면 임시 파일을 지운다.
   if (url.pathname === '/api/meeting/recording' && req.method === 'POST') {
@@ -106,8 +88,8 @@ module.exports = function recordRoutes(req, res, url, ctx) {
     const seconds = Math.max(0, Math.min(24 * 3600, parseInt(url.searchParams.get('seconds') || '0', 10) || 0));
     const ext = AUDIO_TYPES[String(req.headers['content-type'] || '').split(';')[0].trim()];
     if (!MEETING_ID_RE.test(meetingId) || !ext) { req.resume(); sendJson(400, { ok: false, error: '회의를 찾지 못했어요.' }); return true; }
-    // 없는 회의(오래 열어 둔 녹음 창 등)면 본문을 받기 전에 거절한다 — 큰 파일을 다 받고 버리지 않게.
-    if (!workflows.snapshot().meetings.some(item => item.id === meetingId)) { req.resume(); sendJson(404, { ok: false, error: '회의를 찾을 수 없어요. 녹음은 이 창에 남아 있어요 — 파일로 받아 두세요.' }); return true; }
+    // 없는 회의면 본문을 받기 전에 거절한다 — 큰 파일을 다 받고 버리지 않게.
+    if (!workflows.snapshot().meetings.some(item => item.id === meetingId)) { req.resume(); sendJson(404, { ok: false, error: '회의를 찾을 수 없어요. 녹음은 이 브라우저에 남아 있어요 — 파일로 받아 두세요.' }); return true; }
     const dir = meetingDir(meetingId);
     const recId = crypto.randomBytes(8).toString('hex');
     const temp = path.join(dir, `.${recId}.part`);
@@ -195,6 +177,39 @@ module.exports = function recordRoutes(req, res, url, ctx) {
         sendJson(200, { ok: true, removed: !!removed });
       }, () => sendJson(400, { ok: false, error: '요청을 읽지 못했어요.' }))
       .catch(error => { if (!res.headersSent) sendJson(500, { ok: false, error: error.message || '녹음본을 지우지 못했어요.', code: error.code }); });
+    return true;
+  }
+
+  // 옮기기: 다른 회의에 잘못 녹음했을 때. 파일(녹음·전사본)을 먼저 옮기고(같은 디스크 안 이름 바꾸기) 기록을 바꾼다 —
+  // 기록을 못 바꾸면 파일을 되돌린다. 전사·요약 중에는 실행기가 옛 회의로 알려 오므로 끝난 뒤에만 옮긴다.
+  if (url.pathname === '/api/meeting/recording/move' && req.method === 'POST') {
+    readJson().then(async (body) => {
+      const meetingId = String((body && body.meetingId) || '');
+      const recId = String((body && body.recId) || '');
+      const toMeetingId = String((body && body.toMeetingId) || '');
+      if (!MEETING_ID_RE.test(meetingId) || !REC_ID_RE.test(recId) || !MEETING_ID_RE.test(toMeetingId)) { sendJson(400, { ok: false, error: '녹음본을 찾지 못했어요.' }); return; }
+      if (meetingId === toMeetingId) { sendJson(400, { ok: false, error: '같은 회의예요.' }); return; }
+      const { recording } = recordingOf(meetingId, recId);
+      if (!recording) { sendJson(404, { ok: false, error: '녹음본을 찾을 수 없어요.' }); return; }
+      if (['transcribing', 'summarizing'].includes(recording.status)) { sendJson(409, { ok: false, error: '전사가 끝난 뒤에 옮길 수 있어요.' }); return; }
+      if (!workflows.snapshot().meetings.some(item => item.id === toMeetingId)) { sendJson(404, { ok: false, error: '옮길 회의를 찾을 수 없어요.' }); return; }
+      const files = [];
+      if (/^[0-9a-f]{16}\.(webm|ogg|m4a)$/.test(recording.file || '')) files.push([path.join(meetingDir(meetingId), recording.file), path.join(meetingDir(toMeetingId), recording.file)]);
+      files.push([transcriptFile(meetingId, recId), transcriptFile(toMeetingId, recId)]);
+      const moved = [];
+      try {
+        fs.mkdirSync(meetingDir(toMeetingId), { recursive: true });
+        for (const [from, to] of files) if (fs.existsSync(from)) { fs.renameSync(from, to); moved.push([from, to]); }
+      } catch {
+        for (const [from, to] of moved.reverse()) { try { fs.renameSync(to, from); } catch {} }
+        sendJson(500, { ok: false, error: '녹음본 파일을 옮기지 못했어요.' }); return;
+      }
+      let saved;
+      try { saved = await locked(() => workflows.moveRecording({ meetingId, recId, toMeetingId })); }
+      catch (error) { for (const [from, to] of moved.reverse()) { try { fs.renameSync(to, from); } catch {} } throw error; }
+      if (saved.status === 'queued') wakeTranscriber(); // 기다리던 전사는 새 회의에서 다시 집는다
+      sendJson(200, { ok: true, recording: saved });
+    }).catch(fail);
     return true;
   }
 

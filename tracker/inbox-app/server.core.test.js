@@ -17,8 +17,7 @@ test('static server denies implementation and private state files', async () => 
 // 화면이 조용히 깨진다(404 · 자동 새로고침 누락). 셋이 같은 집합을 보는지 여기서 못 박는다.
 // 허용은 이름을 적지 않고 패턴으로 하므로, 나가면 안 되는 서버 파일은 아래에서 따로 확인한다.
 test('every screen script is served and counted in appVersion, and server files never are', async () => {
-  // 화면 페이지는 둘이다: 앱(index.html)과 회의 녹음 창(record.html, `/record`로 나간다).
-  const html = ['index.html', 'record.html'].map(name => fs.readFileSync(path.join(__dirname, name), 'utf8')).join('\n');
+  const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
   const scripts = [...html.matchAll(/<script src="\/([\w.-]+\.js)"><\/script>/g)].map(match => match[1]);
   assert.ok(scripts.includes('app.js'), 'index.html이 app.js를 읽어야 한다');
   for (const name of scripts) {
