@@ -65,6 +65,15 @@ if (meetingRecChannel) {
   meetingRecPost({ type: 'ping' });
 }
 
+// 녹음 길이 — `17분 25초`(시각 `17:25`과 헷갈리지 않게 말로).
+function meetingRecLen(seconds) {
+  const t = Math.max(0, Math.round(seconds || 0));
+  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+  if (h) return `${h}시간 ${m}분`;
+  if (m) return s ? `${m}분 ${s}초` : `${m}분`;
+  return `${s}초`;
+}
+
 function meetingRecFmt(seconds) {
   const t = Math.max(0, Math.floor(seconds || 0));
   const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
@@ -479,7 +488,7 @@ function meetingRecordingsNode(event, host) {
     when.textContent = meetingRecWhen(recording.createdAt);
     const length = document.createElement('span');
     length.className = 'rc-len';
-    length.textContent = meetingRecFmt(recording.seconds);
+    length.textContent = meetingRecLen(recording.seconds);
     meta.append(when, length);
     const src = `/api/meeting/recording?meetingId=${encodeURIComponent(event.id)}&recId=${encodeURIComponent(recording.id)}`;
     let audio = meetingRecPlayers.get(recording.id);
@@ -508,7 +517,7 @@ function meetingRecordingsNode(event, host) {
 // ---------- 전사·요약(녹음본 줄 아래) ----------
 // 상태는 서버가 녹음본 줄에 적는다(queued·transcribing·summarizing·done·failed). 실제 일은 launchd 실행기
 // (meeting-transcribe.js)가 하고, 화면은 그 상태를 보여 주고 `다시 시도`·`전사·요약 시작`만 보낸다.
-const MEETING_REC_WORKING = { queued: '전사 대기 중이에요', transcribing: '글로 옮기고 말한 사람을 나누는 중이에요 — 회의 길이에 따라 몇 분 걸려요', summarizing: '요약하는 중이에요' };
+const MEETING_REC_WORKING = { queued: '전사 대기 중이에요', redo: '요약 대기 중이에요 — 1~2분이면 끝나요', transcribing: '글로 옮기고 말한 사람을 나누는 중이에요 — 회의 길이에 따라 몇 분 걸려요', summarizing: '요약하는 중이에요' };
 const meetingRecTranscripts = new Map(); // 녹음 id → 받아 온 발언 목록(펼칠 때 한 번만 받는다)
 let meetingRecWatchTimer = null;
 
@@ -527,7 +536,7 @@ function meetingRecBody(event, recording, host) {
     const line = document.createElement('p');
     line.className = 'rc-state';
     line.setAttribute('role', 'status');
-    line.textContent = MEETING_REC_WORKING[status];
+    line.textContent = status === 'queued' && recording.redo === 'summary' ? MEETING_REC_WORKING.redo : MEETING_REC_WORKING[status];
     body.appendChild(line);
     return body;
   }
@@ -556,7 +565,10 @@ function meetingRecBody(event, recording, host) {
     wrap.className = 'rc-sum';
     const name = document.createElement('p');
     name.className = 'rc-lbl';
-    name.textContent = label;
+    const count = document.createElement('span');
+    count.className = 'rc-n';
+    count.textContent = String(items.length);
+    name.append(label, ' ', count);
     const ul = document.createElement('ul');
     items.forEach((text) => { const li = document.createElement('li'); li.textContent = text; ul.appendChild(li); });
     wrap.append(name, ul);
@@ -582,14 +594,22 @@ function meetingRecBody(event, recording, host) {
   if (summary.error) {
     const fail = document.createElement('p');
     fail.className = 'rc-state rc-fail';
-    fail.textContent = summary.error;
+    fail.append(summary.error, ' ');
+    if (recording.transcript) fail.appendChild(meetingRecRetryButton(event, recording, host, '요약 다시 하기', 'summary'));
     foot.appendChild(fail);
   }
   if (recording.transcript) foot.appendChild(meetingRecTranscriptNode(event, recording));
-  // 다시 전사·요약 — 화자 구분이 이상하거나 할 일을 놓쳤을 때(새 기준으로 처음부터 다시 돈다).
+  // 다시 하기 — 요약이 아쉬우면 `요약 다시 하기`(전사본 그대로, 1~2분), 글이나 화자가 틀렸으면 `전사부터 다시 하기`(처음부터).
   const again = document.createElement('p');
-  again.className = 'rc-state';
-  again.appendChild(meetingRecRetryButton(event, recording, host, '다시 전사·요약'));
+  again.className = 'rc-state rc-redo';
+  const summaryAgain = recording.transcript ? meetingRecRetryButton(event, recording, host, '요약 다시 하기', 'summary') : null;
+  if (summaryAgain) {
+    summaryAgain.title = '전사본은 그대로 두고 요약과 할 일만 새로 뽑아요 — 1~2분';
+    again.append(summaryAgain, ' · ');
+  }
+  const fullAgain = meetingRecRetryButton(event, recording, host, '전사부터 다시 하기');
+  fullAgain.title = '녹음을 처음부터 다시 글로 옮기고 말한 사람을 나눠요 — 회의 길이에 따라 몇 분 걸려요';
+  again.appendChild(fullAgain);
   foot.appendChild(again);
   body.appendChild(foot);
   return body;
@@ -759,7 +779,8 @@ function meetingRecMoveForm(event, recording, host, close) {
   return form;
 }
 
-function meetingRecRetryButton(event, recording, host, label) {
+// only: 'summary'면 전사본은 두고 요약만 다시(서버가 전사본이 있는지 다시 본다).
+function meetingRecRetryButton(event, recording, host, label, only) {
   const again = document.createElement('button');
   again.type = 'button';
   again.className = 'd-link';
@@ -767,7 +788,7 @@ function meetingRecRetryButton(event, recording, host, label) {
   again.addEventListener('click', async () => {
     again.disabled = true;
     try {
-      await request('/api/meeting/recording/retry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ meetingId: event.id, recId: recording.id }) });
+      await request('/api/meeting/recording/retry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ meetingId: event.id, recId: recording.id, ...(only ? { only } : {}) }) });
       if (typeof meetingLoadRedraw === 'function') await meetingLoadRedraw(host);
     } catch (error) {
       again.disabled = false;

@@ -45,7 +45,13 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     // (초안 파일은 끝에 추가만 하므로 노트를 고쳐 쓰지 않고 읽을 때 맞춘다).
     const recordingOwner = {};
     for (const saved of Object.values(state.meetings)) for (const recording of Array.isArray(saved.recordings) ? saved.recordings : []) if (recording && recording.id) recordingOwner[recording.id] = saved;
-    for (const note of draftNotes()) {
+    // 같은 녹음(`rec-<id>`)의 노트가 여럿이면 마지막 것만 — 요약을 다시 돌리면 새 노트가 끝에 붙고(파일은 추가만),
+    // 아직 고르지 않은 옛 후보는 새 요약의 후보로 바뀐다. 이미 담거나 뺀 후보는 기록(reviewed)에 남아 그대로다.
+    const notes = draftNotes();
+    const lastRec = {};
+    notes.forEach((note, index) => { if (note.source === 'recording' && /^rec-/.test(note.noteGuid)) lastRec[note.noteGuid] = index; });
+    for (const [index, note] of notes.entries()) {
+      if (note.source === 'recording' && /^rec-/.test(note.noteGuid) && lastRec[note.noteGuid] !== index) continue;
       const owner = note.source === 'recording' && /^rec-/.test(note.noteGuid) ? recordingOwner[note.noteGuid.slice(4)] : null;
       const from = owner && owner.date && owner.start && owner.title ? owner : note;
       const event = { start: from.start, end: /^\d{2}:\d{2}$/.test(from.end) ? from.end : '', title: from.title, link: null, project: null };
@@ -814,7 +820,7 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
   // 전사·요약 진행 — 녹음본 한 줄의 상태 칸만 고친다(파일·전사본은 routes-record.js가 다룬다).
   // status: queued(전사 대기) · transcribing · summarizing · done · failed
   const RECORDING_STATUS = ['queued', 'transcribing', 'summarizing', 'done', 'failed'];
-  function setRecordingStatus({ meetingId, recId, status, error, transcript, speakers, summary }) {
+  function setRecordingStatus({ meetingId, recId, status, error, transcript, speakers, summary, redo }) {
     if (!RECORDING_STATUS.includes(status)) throw new Error('녹음본 상태를 확인해 주세요.');
     const state = read();
     const event = state.meetings[meetingId];
@@ -826,6 +832,8 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     if (transcript !== undefined) next.transcript = !!transcript;
     if (speakers !== undefined) next.speakers = Math.max(0, Math.min(50, Number(speakers) || 0));
     if (summary !== undefined) next.summary = summary;
+    // redo: 'summary' — 전사본은 두고 요약만 다시(대기 중일 때만 붙어 있다). 그 밖의 대기는 처음부터.
+    if (status === 'queued' && redo === 'summary') next.redo = 'summary'; else delete next.redo;
     if (status === 'queued') { delete next.summary; delete next.summaryError; }
     const recordings = list.slice();
     recordings[index] = next;
@@ -834,7 +842,8 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     return next;
   }
   // 녹음 요약의 할 일·결정 후보를 티로 노트와 같은 초안 파일 끝에 덧붙인다(`meeting_drafts.json`은 끝에 추가만 — DECISIONS).
-  // 같은 녹음(noteGuid)이 이미 있으면 다시 넣지 않는다. 회의는 날짜·시작·제목으로 맞춘다(draftsByMeeting과 같은 규칙).
+  // 같은 녹음을 다시 돌리면 새 노트를 끝에 덧붙이고 읽을 때 마지막 것만 쓴다(draftsByMeeting) — 후보가 마지막 노트와 똑같으면 덧붙이지 않는다
+  // (실행기가 같은 결과를 두 번 알려도 늘지 않게). 회의는 날짜·시작·제목으로 맞춘다(draftsByMeeting과 같은 규칙).
   function appendRecordingDraft({ recId, date, start, end, title, items }) {
     const noteGuid = `rec-${recId}`;
     let data = { notes: [] };
@@ -842,12 +851,13 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
       data = JSON.parse(fs.readFileSync(draftsFile, 'utf8'));
       if (!data || !Array.isArray(data.notes)) throw new Error('회의 초안 파일을 읽지 못했어요.');
     }
-    if (data.notes.some(note => note && note.noteGuid === noteGuid)) return { ok: true, added: false };
     const clean = (Array.isArray(items) ? items : []).filter(validItem).map(item => ({ type: item.type, description: item.description.trim(), ...(item.due ? { due: item.due } : {}) }));
-    if (!clean.length) return { ok: true, added: false };
+    const before = data.notes.filter(note => note && note.noteGuid === noteGuid).pop();
+    // 처음인데 후보가 없으면 노트를 만들지 않는다. 전에 있었으면 빈 노트라도 붙여 옛 후보를 비운다.
+    if (before ? JSON.stringify(before.items || []) === JSON.stringify(clean) : !clean.length) return { ok: true, added: false };
     data.notes.push({ noteGuid, source: 'recording', date, start, ...(end ? { end } : {}), title, items: clean });
     atomicWrite(draftsFile, JSON.stringify(data, null, 2));
-    return { ok: true, added: true, count: clean.length };
+    return { ok: true, added: !!clean.length, count: clean.length };
   }
   // 잘못 붙인 녹음본을 다른 회의로 옮긴다 — 녹음본 줄(상태·요약 포함)을 그대로 떼어 옮긴다(파일은 routes-record.js가 옮긴다).
   function moveRecording({ meetingId, recId, toMeetingId }) {

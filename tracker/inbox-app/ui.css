@@ -3448,7 +3448,7 @@ a.d-btn { text-decoration: none; }
 /* 간격은 8px 단위(목록 안 촘촘한 자리만 4px). 메타 칸 112px + 칸 사이 16px = 요약·옮기기가 시작하는 선 128px(--rc-ind). */
 .d-reclist { --rc-ind: 128px; display: flex; flex-direction: column; gap: 8px; }
 .d-recrow { display: flex; align-items: center; gap: 8px 16px; flex-wrap: wrap; min-height: var(--h-md); }
-.d-recrow .rc-meta { display: flex; gap: 8px; min-width: 112px; font-size: var(--fs-sm); color: var(--muted); font-variant-numeric: tabular-nums; }
+.d-recrow .rc-meta { display: flex; flex-direction: column; width: 112px; font-size: var(--fs-sm); line-height: 16px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .d-recrow .rc-len { color: var(--dim); }
 .d-recrow .rc-audio { flex: 1 1 240px; min-width: 0; height: var(--h-md); }
 .d-recrow .rc-acts { display: flex; align-items: center; gap: 16px; }
@@ -3491,8 +3491,9 @@ body.rec-pip { margin: 0; background: var(--surface); overflow: hidden; }
 .d-reclist .rc-body p { margin: 0; }
 .d-reclist .rc-state { font-size: var(--fs-sm); color: var(--muted); }
 .d-reclist .rc-fail { color: var(--urgent); }
-.d-reclist .rc-head { font-weight: 600; color: var(--text); }
-.d-reclist .rc-lbl { font-size: var(--fs-cap); font-weight: 600; color: var(--dim); }
+.d-reclist .rc-head { font-size: var(--fs-md); font-weight: 600; color: var(--text); }
+.d-reclist .rc-lbl { font-size: var(--fs-sm); font-weight: 600; color: var(--muted); }
+.d-reclist .rc-lbl .rc-n { font-weight: 500; color: var(--dim); }
 .d-reclist .rc-sum ul { margin: 4px 0 0; padding-left: 16px; color: var(--text); }
 .d-reclist .rc-sum li + li { margin-top: 4px; }
 .d-reclist .rc-tx > summary { cursor: pointer; font-size: var(--fs-sm); font-weight: 600; color: var(--accent-text); }

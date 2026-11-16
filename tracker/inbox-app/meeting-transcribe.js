@@ -215,6 +215,32 @@ function log(line) {
   } catch {}
 }
 
+// 요약 한 번 — 실패하면 null(전사본은 남는다).
+async function summarize(job, utterances, t, work) {
+  if (!t.claude || !fs.existsSync(t.claude)) return null;
+  const asked = await run(t.claude, ['-p', '--model', process.env.MEETING_MODEL || 'sonnet', '--disallowedTools', 'Bash,Edit,Write,Read,Glob,Grep,WebFetch,WebSearch,NotebookEdit,Task'], { timeoutMs: 10 * 60 * 1000, input: summaryPrompt(job, utterances), cwd: work });
+  return asked.code === 0 && !asked.timedOut ? parseSummary(asked.out) : null;
+}
+
+// `요약 다시 하기`(job.only === 'summary') — 저장된 전사본으로 요약만 다시. 녹음 파일·whisper·화자 구분은 건너뛴다.
+async function summarizeOnly(job, t) {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-meeting-'));
+  try {
+    await progress(job, 'summarizing');
+    const got = await fetch(`${appBase()}/api/meeting/recording/transcript?meetingId=${encodeURIComponent(job.meetingId)}&recId=${encodeURIComponent(job.recId)}`, { signal: AbortSignal.timeout(60 * 1000) });
+    const data = got.ok ? await got.json() : null;
+    const utterances = data && Array.isArray(data.utterances) ? data.utterances : [];
+    const summary = utterances.length ? await summarize(job, utterances, t, work) : null;
+    const done = await progress(job, 'done', summary ? { summary } : { summary: null, summaryError: WORDS.summary });
+    log(`${stamp()} ${job.meetingId}/${job.recId} 요약만 다시 — 발언 ${utterances.length}개, 초안 ${done.drafts || 0}개${summary ? '' : ', 요약 실패'}`);
+  } catch (error) {
+    log(`${stamp()} ⚠️ ${job.meetingId}/${job.recId} 요약만 다시 — ${String((error && error.message) || error)}`);
+    try { await progress(job, 'done', { summary: null, summaryError: WORDS.summary }); } catch {}
+  } finally {
+    try { fs.rmSync(work, { recursive: true, force: true }); } catch {}
+  }
+}
+
 // ---------- 녹음본 하나 ----------
 async function transcribeOne(job, t) {
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-meeting-'));
@@ -251,11 +277,7 @@ async function transcribeOne(job, t) {
     if (!utterances.length) throw new Error(WORDS.silent);
     await progress(job, 'summarizing', { utterances });
     // ⑥ 요약 — 실패해도 전사본은 남긴다(`done` + 요약 없음).
-    let summary = null;
-    if (t.claude && fs.existsSync(t.claude)) {
-      const asked = await run(t.claude, ['-p', '--model', process.env.MEETING_MODEL || 'sonnet', '--disallowedTools', 'Bash,Edit,Write,Read,Glob,Grep,WebFetch,WebSearch,NotebookEdit,Task'], { timeoutMs: 10 * 60 * 1000, input: summaryPrompt(job, utterances), cwd: work });
-      summary = asked.code === 0 && !asked.timedOut ? parseSummary(asked.out) : null;
-    }
+    const summary = await summarize(job, utterances, t, work);
     const done = await progress(job, 'done', summary ? { summary } : { summary: null, summaryError: WORDS.summary });
     log(`${stamp()} ${job.meetingId}/${job.recId} 완료 — 발언 ${utterances.length}개, 초안 ${done.drafts || 0}개${summary ? '' : ', 요약 실패'}`);
   } catch (error) {
@@ -279,12 +301,13 @@ async function main() {
       const next = jobs.find(job => !seen.has(`${job.meetingId}/${job.recId}`));
       if (!next) break;
       seen.add(`${next.meetingId}/${next.recId}`);
-      if (missingTools(t)) {
+      if (next.only !== 'summary' && missingTools(t)) {
         log(`${stamp()} ⚠️ ${WORDS.tools}`);
         await progress(next, 'failed', { error: WORDS.tools }).catch(() => {});
         continue;
       }
-      await transcribeOne(next, t);
+      if (next.only === 'summary') await summarizeOnly(next, t);
+      else await transcribeOne(next, t);
     }
   } catch (error) {
     status = 1;

@@ -220,7 +220,7 @@ module.exports = function recordRoutes(req, res, url, ctx) {
     for (const event of workflows.snapshot().meetings) {
       for (const recording of Array.isArray(event.recordings) ? event.recordings : []) {
         const stale = BUSY.includes(recording.status) && recording.status !== 'queued' && now - Date.parse(recording.updatedAt || recording.createdAt || 0) > STALE_MS;
-        if (recording.status === 'queued' || stale) jobs.push({ meetingId: event.id, recId: recording.id, seconds: recording.seconds || 0, date: event.date || '', title: event.title || '' });
+        if (recording.status === 'queued' || stale) jobs.push({ meetingId: event.id, recId: recording.id, seconds: recording.seconds || 0, date: event.date || '', title: event.title || '', ...(recording.status === 'queued' && recording.redo === 'summary' ? { only: 'summary' } : {}) });
       }
     }
     jobs.sort((a, b) => a.recId.localeCompare(b.recId));
@@ -268,8 +268,9 @@ module.exports = function recordRoutes(req, res, url, ctx) {
     return true;
   }
 
-  // 다시 시도(실패했거나 이 버전 전에 녹음해 전사하지 않은 녹음본, 또는 끝났지만 `다시 전사·요약`을 누른 녹음본) — 대기열에 올리고 실행기를 깨운다.
-  // 다시 돌려도 AI 초안은 그 녹음에서 아직 하나도 안 나왔을 때만 들어간다(초안 파일은 끝에 추가만 — 같은 후보를 두 번 넣지 않게).
+  // 다시 시도(실패했거나 이 버전 전에 녹음해 전사하지 않은 녹음본, 또는 끝났지만 `전사부터 다시`를 누른 녹음본) — 대기열에 올리고 실행기를 깨운다.
+  // `only: 'summary'`(`요약 다시 하기`)는 전사본이 있는 녹음본만 — 전사본은 두고 요약만 다시 한다.
+  // 다시 돌린 요약의 할 일·결정 후보는 아직 고르지 않은 옛 후보를 대신한다(appendRecordingDraft · draftsByMeeting).
   if (url.pathname === '/api/meeting/recording/retry' && req.method === 'POST') {
     readJson().then(async (body) => {
       const meetingId = String((body && body.meetingId) || '');
@@ -278,7 +279,10 @@ module.exports = function recordRoutes(req, res, url, ctx) {
       const { recording } = recordingOf(meetingId, recId);
       if (!recording) { sendJson(404, { ok: false, error: '녹음본을 찾을 수 없어요.' }); return; }
       if (BUSY.includes(recording.status)) { sendJson(409, { ok: false, error: '이미 전사하고 있어요.' }); return; }
-      const saved = await locked(() => workflows.setRecordingStatus({ meetingId, recId, status: 'queued' }));
+      const only = body && body.only === 'summary' ? 'summary' : null;
+      if (body && body.only !== undefined && !only) { sendJson(400, { ok: false, error: '다시 할 범위를 확인해 주세요.' }); return; }
+      if (only && !recording.transcript) { sendJson(409, { ok: false, error: '전사본이 없어서 요약만 다시 할 수 없어요.' }); return; }
+      const saved = await locked(() => workflows.setRecordingStatus({ meetingId, recId, status: 'queued', ...(only ? { redo: only } : {}) }));
       wakeTranscriber();
       sendJson(200, { ok: true, recording: saved });
     }).catch(fail);

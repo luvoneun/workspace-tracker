@@ -5802,7 +5802,9 @@ test('panelMeeting: 녹음본의 전사·요약 상태', () => {
   assert.match(text, /결정 출시 화요일/);
   assert.match(text, /할 일 버그 목록 공유 \(화자2\)/, '할 일은 요약 안에서도 바로 보인다');
   assert.match(text, /아래 AI 초안에서 골라 담아요/);
-  assert.match(text, /다시 전사·요약/);
+  assert.match(text, /요약 다시 하기 · 전사부터 다시 하기/, '요약만 · 처음부터 둘 다 고를 수 있다');
+  assert.match(text, /할 일 1 버그 목록 공유/, '묶음 이름 옆에 개수');
+  assert.match(text, /1분/, '길이는 말로(시각과 헷갈리지 않게)');
   assert.match(text, /전사본 보기 · 화자 2명/);
   const row = nodeFind(box, 'd-dget');
   assert.doesNotMatch(nodeText(row), /미팅 노트 가져옴/, '녹음 요약만 있는 회의를 티로 노트를 가져온 회의로 보지 않는다');

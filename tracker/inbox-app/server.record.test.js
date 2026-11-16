@@ -201,8 +201,21 @@ test('전사: 새 녹음본은 `전사 대기`로 붙고 실행기를 깨운다 
   ]);
   assert.equal(meeting.tiroNotes, undefined, '녹음 요약의 초안은 티로 노트로 세지 않는다');
   // 같은 결과가 또 와도(실행기 재시도) 초안을 두 번 넣지 않는다
-  assert.equal((await progress({ recId, stage: 'done', summary: { headline: 'x', decisions: ['출시는 화요일'] } })).drafts, 0);
+  const same = { headline: '출시 일정 확정', topics: ['일정'], decisions: ['출시는 화요일'], actions: [{ task: '버그 목록 공유', owner: '화자2', due: '다음 주' }, { task: '결제 확인', owner: '', due: '2026-11-14' }], checks: ['법무팀에 약관 문구 확인'] };
+  assert.equal((await progress({ recId, stage: 'done', summary: same })).drafts, 0);
   assert.equal(JSON.parse(fs.readFileSync(draftsPath, 'utf8')).notes.length, 1);
+  // 요약을 다시 돌려 후보가 달라지면: 이미 담은 것은 그대로, 아직 고르지 않은 옛 후보는 새 후보로 바뀐다(초안 파일은 끝에 추가만).
+  const first = (await snapshotMeeting()).drafts;
+  const keep = first.find(draft => draft.description === '출시는 화요일');
+  assert.equal((await support.post('/api/workflow/review', { meetingId: MEETING, accept: [{ id: keep.id, type: keep.type, description: keep.description }] })).status, 200);
+  const redone = await progress({ recId, stage: 'done', summary: { headline: 'x', decisions: ['출시는 화요일'], actions: [{ task: '릴리스 노트 쓰기' }] } });
+  assert.equal(redone.drafts, 2);
+  const notes = JSON.parse(fs.readFileSync(draftsPath, 'utf8')).notes;
+  assert.equal(notes.length, 2, '고쳐 쓰지 않고 끝에 덧붙인다');
+  assert.deepEqual((await snapshotMeeting()).drafts.map(draft => draft.description), ['릴리스 노트 쓰기'], '담은 후보는 다시 뜨지 않고, 옛 후보(버그 목록 공유 등)는 빠진다');
+  // 다시 돌린 요약에 후보가 하나도 없으면 빈 노트로 남은 옛 후보를 비운다
+  assert.equal((await progress({ recId, stage: 'done', summary: { headline: 'y' } })).drafts, 0);
+  assert.deepEqual((await snapshotMeeting()).drafts, []);
   // 지우면 전사본 파일도 지운다
   await support.post('/api/meeting/recording/delete', { meetingId: MEETING, recId });
   assert.equal(fs.existsSync(path.join(RECORDINGS, MEETING, `${recId}.transcript.json`)), false);
@@ -225,6 +238,10 @@ test('전사: 실패하면 이유를 남기고 `다시 시도`로 대기열에 �
   assert.equal(rerun.recording.status, 'queued', '끝난 녹음본도 `다시 전사·요약`으로 처음부터 다시 돈다');
   assert.equal(rerun.recording.summary, undefined);
   assert.equal((await progress({ recId, stage: 'summarizing', utterances: [{ start: 0, end: 1, speaker: '../x', text: 'a' }] })).status, 400, '화자 이름은 화자N만');
+  // `요약 다시 하기`(only: summary)는 전사본이 있어야 한다 — 범위 값이 이상하면 400
+  await progress({ recId, stage: 'done', summary: null, summaryError: 'x' });
+  assert.equal((await support.post('/api/meeting/recording/retry', { meetingId: MEETING, recId, only: 'summary' })).status, 409, '전사본 없음');
+  assert.equal((await support.post('/api/meeting/recording/retry', { meetingId: MEETING, recId, only: 'all' })).status, 400);
 });
 
 test('실행기: 가짜 도구(ffmpeg·whisper·sherpa·claude)로 녹음 하나를 받아 전사·요약까지 앱에 알린다', async () => {
@@ -255,6 +272,27 @@ test('실행기: 가짜 도구(ffmpeg·whisper·sherpa·claude)로 녹음 하나
     const meeting = await snapshotMeeting();
     assert.deepEqual(meeting.drafts.map(draft => draft.description), ['버그 목록 공유 (화자2)', '출시는 화요일']);
     assert.match(fs.readFileSync(path.join(bin, 'logs', 'meeting-transcribe.log'), 'utf8'), /meeting-transcribe 시작[\s\S]*완료 — 발언 2개, 초안 2개[\s\S]*종료 \(exit 0\)/);
+
+    // `요약 다시 하기` — 대기열에 `only: summary`로 오고, 실행기는 녹음·whisper·화자 구분 없이 저장된 전사본으로 요약만 다시 한다.
+    const redo = await support.post('/api/meeting/recording/retry', { meetingId: MEETING, recId: recording.id, only: 'summary' });
+    assert.equal(redo.recording.status, 'queued');
+    assert.equal(redo.recording.redo, 'summary');
+    assert.equal(redo.recording.transcript, true, '전사본은 그대로');
+    const queued = (await (await fetch(`${base}/api/meeting/recording/queue`)).json()).jobs.find(job => job.recId === recording.id);
+    assert.equal(queued.only, 'summary');
+    const again = { ...env,
+      WORKSPACE_FFMPEG: '/nonexistent/ffmpeg', WORKSPACE_WHISPER: '/nonexistent/whisper', WORKSPACE_SHERPA_DIARIZE: '/nonexistent/sherpa',
+      CLAUDE_BIN: script('claude2', "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{ if(!s.includes('버그 목록은 제가 공유할게요'))process.exit(2); console.log(JSON.stringify({headline:'다시 한 요약',topics:[],decisions:['출시는 화요일'],actions:[{task:'릴리스 노트 쓰기',owner:'',due:''}]})); });"),
+    };
+    const child2 = spawn(process.execPath, [path.join(__dirname, 'meeting-transcribe.js')], { env: again, stdio: 'ignore' });
+    assert.equal(await new Promise(resolve => child2.on('close', resolve)), 0);
+    const resaved = (await snapshotMeeting()).recordings.find(item => item.id === recording.id);
+    assert.equal(resaved.status, 'done');
+    assert.equal(resaved.redo, undefined);
+    assert.equal(resaved.speakers, 2, '화자 구분은 그대로');
+    assert.equal(resaved.summary.headline, '다시 한 요약');
+    assert.deepEqual((await snapshotMeeting()).drafts.map(draft => draft.description), ['릴리스 노트 쓰기', '출시는 화요일']);
+    assert.match(fs.readFileSync(path.join(bin, 'logs', 'meeting-transcribe.log'), 'utf8'), /요약만 다시 — 발언 2개, 초안 2개/);
   } finally { fs.rmSync(bin, { recursive: true, force: true }); }
 });
 
