@@ -3456,8 +3456,9 @@ a.d-btn { text-decoration: none; }
 .d-recrow .rc-meta { display: flex; flex-direction: column; width: 112px; font-size: var(--fs-sm); line-height: 16px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .d-recrow .rc-len { color: var(--dim); }
 .d-recrow .rc-audio { flex: 1 1 240px; min-width: 0; height: var(--h-md); }
-.d-recrow .rc-acts { display: flex; align-items: center; gap: 16px; }
-.d-recrow .rc-del { color: var(--dim); font-weight: 500; }
+.d-recrow .rc-more { flex: none; color: var(--dim); }
+.d-recrow .rc-more:hover, .d-recrow .rc-more[aria-expanded="true"] { color: var(--text); }
+.d-recrow .rc-delgo { color: var(--urgent); }
 /* `옮기기` — 녹음본 줄 바로 아래에 회의 고르기 한 줄 */
 .d-recrow .rc-move { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex-basis: 100%; padding-left: var(--rc-ind); }
 .d-recrow .rc-move p { margin: 0; }
@@ -3466,7 +3467,6 @@ a.d-btn { text-decoration: none; }
   font: inherit; font-size: var(--fs-sm); color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm);
 }
 .d-reclist .rc-movesel:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.d-recrow .rc-del:hover, .d-recrow .rc-del.armed { color: var(--urgent); }
 .d-recs .rc-soon { margin-top: 8px; }
 
 /* 빨간 점은 깜빡이지 않는다(늘 도는 움직임은 기다림 표시에만 — 모션 규칙). 잠시 멈춤이면 옅어진다. */
@@ -3491,9 +3491,10 @@ body.rec-pip { margin: 0; background: var(--surface); overflow: hidden; }
 /* 회의 녹음 — 전사·요약(녹음본 줄 아래). 상태 한 줄 · 핵심 한 줄 · 요지/결정 목록 · 접힌 전사본 */
 .d-reclist .rc-body { display: flex; flex-direction: column; gap: 16px; }
 .d-reclist .rc-body:empty { display: none; }
-.d-reclist .rc-foot { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
-.d-reclist .rc-foot > .rc-tx { align-self: stretch; }
-.d-reclist .rc-body p, .d-reclist .rc-foot p { margin: 0; }
+.d-reclist .rc-body p, .d-reclist .rc-move p { margin: 0; }
+/* `버리기`(저장하지 못한 녹음) — 조용한 글자, 한 번 누르면 빨강 */
+.rc-del { color: var(--dim); font-weight: 500; }
+.rc-del:hover, .rc-del.armed { color: var(--urgent); }
 .d-reclist .rc-state { font-size: var(--fs-sm); color: var(--muted); }
 .d-reclist .rc-fail { color: var(--urgent); }
 .d-reclist .rc-head { font-size: var(--fs-md); font-weight: 600; color: var(--text); }
@@ -3501,7 +3502,8 @@ body.rec-pip { margin: 0; background: var(--surface); overflow: hidden; }
 .d-reclist .rc-lbl .rc-n { font-weight: 500; color: var(--dim); }
 .d-reclist .rc-sum ul { margin: 4px 0 0; padding-left: 16px; color: var(--text); }
 .d-reclist .rc-sum li + li { margin-top: 4px; }
-.d-reclist .rc-tx > summary { cursor: pointer; font-size: var(--fs-sm); font-weight: 600; color: var(--accent-text); }
+.d-reclist .rc-tx > summary { cursor: pointer; width: max-content; font-size: var(--fs-sm); font-weight: 500; color: var(--dim); }
+.d-reclist .rc-tx > summary:hover { color: var(--muted); }
 .d-reclist .rc-lines { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; max-height: 360px; overflow-y: auto; }
 .d-reclist .rc-line { display: grid; grid-template-columns: auto auto 1fr; gap: 8px; align-items: baseline; }
 .d-reclist .rc-who { font-weight: 600; font-size: var(--fs-sm); }

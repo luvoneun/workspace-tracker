@@ -498,16 +498,14 @@ function meetingRecordingsNode(event, host) {
       audio.controls = true;
       audio.preload = 'none';
       audio.className = 'rc-audio';
+      // 재생기 제 ⋮(내려받기·속도)를 끈다 — 바로 옆 녹음본 ⋯과 점 버튼이 둘 나란히 서지 않게.
+      try { audio.setAttribute('controlslist', 'nodownload noplaybackrate noremoteplayback'); audio.disableRemotePlayback = true; } catch {}
       audio.src = src;
       audio.setAttribute('aria-label', `${meetingRecWhen(recording.createdAt)} 녹음본`);
       meetingRecPlayers.set(recording.id, audio);
     }
-    const acts = document.createElement('div');
-    acts.className = 'rc-acts';
-    const move = MEETING_REC_WORKING[recording.status] && recording.status !== 'queued' ? null : meetingRecMoveButton(event, recording, host, row);
-    if (move) acts.appendChild(move);
-    acts.appendChild(meetingRecDeleteButton(event, recording, host));
-    row.append(meta, audio, acts);
+    // 다시 하기 · 옮기기 · 삭제는 줄 끝 ⋯ 하나에 — 자주 쓰지 않는 도구라 늘 펼쳐 두지 않는다.
+    row.append(meta, audio, meetingRecMenuButton(event, recording, host, row));
     const one = document.createElement('div');
     one.className = 'rc-one';
     const body = meetingRecBody(event, recording, host);
@@ -593,32 +591,14 @@ function meetingRecBody(event, recording, host) {
     note.textContent = '이 녹음에서는 할 일을 찾지 못했어요.';
     body.appendChild(note);
   }
-  // 실패 · 전사본 · 다시 하기는 녹음 줄 아래 한 묶음(.rc-foot, 8px) — 녹음본을 다루는 도구라 요약과 떼어 맨 아래에 둔다.
-  const foot = document.createElement('div');
-  foot.className = 'rc-foot';
   if (summary.error) {
     const fail = document.createElement('p');
     fail.className = 'rc-state rc-fail';
-    fail.textContent = summary.error;
-    foot.appendChild(fail);
+    fail.textContent = `${summary.error} — 오른쪽 ⋯의 \`요약 다시 하기\`로 다시 할 수 있어요`;
+    body.appendChild(fail);
   }
-  if (recording.transcript) foot.appendChild(meetingRecTranscriptNode(event, recording));
-  // 다시 하기 — 요약이 아쉬우면 `요약 다시 하기`(전사본 그대로, 1~2분), 글이나 화자가 틀렸으면 `전사부터 다시 하기`(처음부터).
-  const again = document.createElement('p');
-  again.className = 'rc-state rc-redo';
-  const summaryAgain = recording.transcript ? meetingRecRetryButton(event, recording, host, '요약 다시 하기', 'summary') : null;
-  if (summaryAgain) {
-    summaryAgain.title = '전사본은 그대로 두고 요약과 할 일만 새로 뽑아요 — 1~2분';
-    const sep = document.createElement('span');
-    sep.className = 'sep';
-    sep.textContent = ' · ';
-    again.append(summaryAgain, sep);
-  }
-  const fullAgain = meetingRecRetryButton(event, recording, host, '전사부터 다시 하기');
-  fullAgain.title = '녹음을 처음부터 다시 글로 옮기고 말한 사람을 나눠요 — 회의 길이에 따라 몇 분 걸려요';
-  again.appendChild(fullAgain);
-  foot.appendChild(again);
-  body.recFoot = foot;
+  // 전사본은 자주 펴 보지 않는다 — 녹음 줄 아래 조용한 회색 한 줄로 접어 둔다.
+  if (recording.transcript) body.recFoot = meetingRecTranscriptNode(event, recording);
   return body;
 }
 
@@ -667,23 +647,54 @@ function meetingRecTranscriptNode(event, recording) {
   return box;
 }
 
-// 지우면 되돌릴 수 없으니 두 번 누른다: `삭제` → `한 번 더 누르면 삭제`(4초 뒤 원래대로).
-function meetingRecDeleteButton(event, recording, host) {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = 'd-link rc-del';
-  button.textContent = '삭제';
-  let armed = null;
-  button.addEventListener('click', async () => {
-    if (!armed) {
-      button.textContent = '한 번 더 누르면 삭제';
-      button.classList.add('armed');
-      armed = setTimeout(() => { armed = null; button.textContent = '삭제'; button.classList.remove('armed'); }, 4000);
-      return;
-    }
-    clearTimeout(armed);
-    armed = null;
-    button.disabled = true;
+// 녹음 줄 끝 ⋯ — 요약 다시 하기 · 전사부터 다시 하기 / 다른 회의로 옮기기 / 삭제. 옮기기·삭제는 줄 아래 한 줄(.rc-move)에서 마저 묻는다
+// (삭제는 되돌릴 수 없어서 한 번 더 묻는다). 전사·요약 중에는 다시 하기·옮기기가 없다(서버도 막는다).
+function meetingRecMenuButton(event, recording, host, row) {
+  let button = null;
+  let form = null;
+  const close = () => { if (form) row.removeChild(form); form = null; if (button) button.focus(); };
+  const open = (make) => { if (form) row.removeChild(form); form = make(); row.appendChild(form); };
+  const sections = () => {
+    const busy = !!MEETING_REC_WORKING[recording.status];
+    const redo = [];
+    if (!busy && recording.transcript) redo.push({ label: '요약 다시 하기', onClick: () => meetingRecRetry(event, recording, host, 'summary') });
+    if (!busy && recording.status === 'done') redo.push({ label: '전사부터 다시 하기', onClick: () => meetingRecRetry(event, recording, host) });
+    const out = redo.length ? [redo] : [];
+    if (!busy || recording.status === 'queued') out.push([{ label: '다른 회의로 옮기기', onClick: () => open(() => meetingRecMoveForm(event, recording, host, close)) }]);
+    out.push([{ label: '삭제', danger: true, onClick: () => open(() => meetingRecDeleteForm(event, recording, host, close)) }]);
+    return out;
+  };
+  button = uiMoreButton(`${meetingRecWhen(recording.createdAt)} 녹음본 — 더 보기`, sections);
+  button.className += ' rc-more';
+  return button;
+}
+
+async function meetingRecRetry(event, recording, host, only) {
+  try {
+    await request('/api/meeting/recording/retry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ meetingId: event.id, recId: recording.id, ...(only ? { only } : {}) }) });
+    if (typeof meetingLoadRedraw === 'function') await meetingLoadRedraw(host);
+  } catch (error) {
+    if (!(error && error.reported) && typeof announce === 'function') announce((error && error.message) || '다시 시도하지 못했어요.');
+  }
+}
+
+function meetingRecDeleteForm(event, recording, host, close) {
+  const form = document.createElement('div');
+  form.className = 'rc-move';
+  const ask = document.createElement('p');
+  ask.className = 'd-hint';
+  ask.textContent = '이 녹음본을 지울까요? 전사본·요약도 함께 지워지고 되돌릴 수 없어요.';
+  const go = document.createElement('button');
+  go.type = 'button';
+  go.className = 'd-btn sm rc-delgo';
+  go.textContent = '지우기';
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'd-link';
+  cancel.textContent = '취소';
+  cancel.addEventListener('click', close);
+  go.addEventListener('click', async () => {
+    go.disabled = true;
     try {
       await request('/api/meeting/recording/delete', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -691,14 +702,14 @@ function meetingRecDeleteButton(event, recording, host) {
       });
       if (typeof meetingLoadRedraw === 'function') await meetingLoadRedraw(host);
     } catch (error) {
-      button.disabled = false;
-      button.textContent = '삭제';
-      button.classList.remove('armed');
+      go.disabled = false;
       // request()가 이미 알렸으면(error.reported) 또 알리지 않는다.
       if (!(error && error.reported) && typeof announce === 'function') announce((error && error.message) || '삭제하지 못했어요.');
     }
   });
-  return button;
+  form.append(ask, go, cancel);
+  setTimeout(() => { try { cancel.focus(); } catch {} }, 0);
+  return form;
 }
 
 // ---------- 다른 회의로 옮기기 ----------
@@ -720,20 +731,6 @@ function meetingRecMoveLabel(item, today) {
   const [, m, d] = String(item.date).split('-').map(Number);
   const day = item.date === today ? '오늘' : `${m}월 ${d}일`;
   return `${day} ${item.start || ''} ${item.title || '회의'}`.replace(/\s+/g, ' ').trim();
-}
-function meetingRecMoveButton(event, recording, host, row) {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = 'd-link';
-  button.textContent = '옮기기';
-  let form = null;
-  const close = () => { if (form) { row.removeChild(form); form = null; } button.focus(); };
-  button.addEventListener('click', () => {
-    if (form) { close(); return; }
-    form = meetingRecMoveForm(event, recording, host, close);
-    row.appendChild(form); // 줄은 감싸기(flex-wrap)라 고르기는 줄 아래 한 줄을 다 쓴다
-  });
-  return button;
 }
 function meetingRecMoveForm(event, recording, host, close) {
   const form = document.createElement('div');

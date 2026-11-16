@@ -5805,7 +5805,15 @@ test('panelMeeting: 녹음본의 전사·요약 상태', () => {
   assert.match(text, /출시는 화요일로 확정/);
   assert.match(text, /결정\s+1\s+출시 화요일/);
   assert.doesNotMatch(text, /버그 목록 공유/, '할 일은 요약에 다시 적지 않는다 — 카드 위쪽 AI 초안·이 회의에서 나온 것이 맡는다');
-  assert.match(text, /요약 다시 하기\s+·\s+전사부터 다시 하기/, '요약만 · 처음부터 둘 다 고를 수 있다');
+  assert.doesNotMatch(text, /다시 하기|옮기기|삭제/, '다시 하기·옮기기·삭제는 줄에 펼쳐 두지 않고 ⋯ 안에 있다');
+  app.run('var __menu = null; uiMenu = (anchor, sections) => { __menu = sections; return null; };');
+  const ones = nodeFind(box, 'd-reclist').children;
+  const doneRow = nodeFind(ones.find(one => /출시는 화요일로 확정/.test(nodeText(one))), 'd-recrow');
+  nodeFind(doneRow, 'rc-more').listeners.click({ stopPropagation() {} });
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(__menu.map(group => group.map(item => item.label)))')), [['요약 다시 하기', '전사부터 다시 하기'], ['다른 회의로 옮기기'], ['삭제']], '요약만 · 처음부터 둘 다 고를 수 있다');
+  const busyRow = nodeFind(ones.find(one => /나누는 중이에요/.test(nodeText(one))), 'd-recrow');
+  nodeFind(busyRow, 'rc-more').listeners.click({ stopPropagation() {} });
+  assert.deepEqual(JSON.parse(app.run('JSON.stringify(__menu.map(group => group.map(item => item.label)))')), [['삭제']], '전사 중에는 다시 하기·옮기기가 없다');
   assert.match(text, /결정\s+1\s+출시 화요일/, '묶음 이름 옆에 개수');
   assert.match(text, /1분/, '길이는 말로(시각과 헷갈리지 않게)');
   assert.match(text, /전사본 보기 · 화자 2명/);
@@ -5884,14 +5892,20 @@ test('회의 녹음: `옮기기`는 다른 회의를 골라 옮기고, 전사 �
   app.run('workflowData.meetings = [__here, __other, __old, __busy]; wfIndexData(); var redrawn = 0; meetingLoadRedraw = async () => { redrawn += 1; };');
   const draw = name => app.run(`(() => { const box = document.createElement('div'); panelMeeting(${name}, box); return box; })()`);
 
+  app.run('var __menu = null; uiMenu = (anchor, sections) => { __menu = sections; return null; };');
+  const menuOf = (row) => { nodeFind(row, 'rc-more').listeners.click({ stopPropagation() {} }); return app.run('__menu').flat(); };
   const busyRow = nodeFind(nodeFind(draw('__busy'), 'd-reclist'), 'd-recrow');
-  assert.doesNotMatch(nodeText(busyRow), /옮기기/, '전사 중에는 옮기지 않는다');
+  assert.ok(!menuOf(busyRow).some(item => item.label === '다른 회의로 옮기기'), '전사 중에는 옮기지 않는다');
 
   const list = nodeFind(draw('__here'), 'd-reclist');
   const row = nodeFind(list, 'd-recrow');
-  const moveBtn = nodeFind(row, 'rc-acts').children.find(node => node.textContent === '옮기기');
-  assert.ok(moveBtn);
-  moveBtn.listeners.click();
+  // 삭제는 줄 아래에서 한 번 더 묻는다(되돌릴 수 없다) — 취소하면 닫힌다
+  menuOf(row).find(item => item.label === '삭제').onClick();
+  const ask = nodeFind(row, 'rc-move');
+  assert.match(nodeText(ask), /되돌릴 수 없어요\. 지우기 취소/);
+  ask.children.find(node => node.textContent === '취소').listeners.click();
+  assert.equal(nodeFind(row, 'rc-move'), null);
+  menuOf(row).find(item => item.label === '다른 회의로 옮기기').onClick();
   const form = nodeFind(row, 'rc-move');
   assert.ok(form, '줄 아래에 회의 고르기가 열린다');
   const select = nodeFind(form, 'rc-movesel');
