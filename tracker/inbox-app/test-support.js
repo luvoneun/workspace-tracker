@@ -38,6 +38,9 @@ process.env.WORKSPACE_CLAUDE_GLOBAL_CONFIG = path.join(automationHome, 'claude-g
 // 슬랙 수집의 쉬는 시간(9~19시 밖이면 카드가 `대기 중`·실패를 숨김)이 시험을 돌린 시각에 따라 달라지지 않게 — 기본은 오늘 낮 12시
 // (이 프로세스의 서버와 시험이 띄우는 서버 모두). 쉬는 시간을 보는 시험은 setSlackClockForTests로 따로 끼우고 끝나면 null로 되돌린다.
 process.env.WORKSPACE_SLACK_TEST_HOUR = '12';
+// 회의 녹음 음성 인식 도구 자리도 임시 폴더다 — 실제 ~/.local/share/workspace-meeting·Homebrew(/opt/homebrew/bin)를 보지 않게.
+process.env.WORKSPACE_MEETING_TOOLS = path.join(automationHome, 'workspace-meeting');
+process.env.WORKSPACE_MEETING_SYSTEM_BIN = path.join(automationHome, 'no-system-bin');
 const { server } = require('./server');
 const date = value => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
 const today = date(new Date());

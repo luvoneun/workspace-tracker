@@ -301,18 +301,235 @@ test('실행기: 가짜 도구(ffmpeg·whisper·sherpa·claude)로 녹음 하나
   } finally { fs.rmSync(bin, { recursive: true, force: true }); }
 });
 
-test('실행기: 도구가 없으면 녹음본 줄에 `설치해 주세요`만 남긴다', async () => {
-  seedMeeting();
-  const { recording } = await (await upload(Buffer.from('audio'))).json();
-  const logs = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'workspace-no-tools-'));
+// ---------- 음성 인식 도구: 찾기·상태·준비 요청·저절로 받아 깔기 ----------
+const meetingTools = require('./meeting-tools');
+const os = require('node:os');
+const crypto = require('node:crypto');
+const http = require('node:http');
+const { spawn, spawnSync } = require('node:child_process');
+const toolsHome = process.env.WORKSPACE_MEETING_TOOLS;
+const toolsRequest = () => JSON.parse(fs.readFileSync(requestFile, 'utf8'));
+const toolsNow = async () => (await fetch(`${base}/api/meeting/tools`)).json();
+const withArch = async (arch, fn) => {
+  const before = process.env.WORKSPACE_MEETING_ARCH;
+  process.env.WORKSPACE_MEETING_ARCH = arch;
+  try { return await fn(); } finally { if (before === undefined) delete process.env.WORKSPACE_MEETING_ARCH; else process.env.WORKSPACE_MEETING_ARCH = before; }
+};
+const touch = (file, body = 'x', mode = 0o644) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, body, { mode }); return file; };
+
+test('도구 자리: 이 앱이 받은 bin → Homebrew 순서, 모델은 이미 있는 큰 모델 → 새 q5 모델', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-tools-locate-'));
   try {
-    const { spawn } = require('node:child_process');
-    const child = spawn(process.execPath, [path.join(__dirname, 'meeting-transcribe.js')], { env: { ...process.env, WORKSPACE_PORT: new URL(base).port, WORKSPACE_MEETING_TOOLS: logs, WORKSPACE_FFMPEG: '/nonexistent/ffmpeg', WORKSPACE_WHISPER: '/nonexistent/whisper', AUTOMATION_LOG_DIR: logs }, stdio: 'ignore' });
-    await new Promise(resolve => child.on('close', resolve));
+    const dir = path.join(root, 'meeting');
+    const brew = path.join(root, 'brew');
+    const env = { WORKSPACE_MEETING_TOOLS: dir, WORKSPACE_MEETING_SYSTEM_BIN: brew };
+    touch(path.join(brew, 'ffmpeg')); touch(path.join(brew, 'whisper-cli'));
+    let t = meetingTools.locate(env);
+    assert.equal(t.ffmpeg, path.join(brew, 'ffmpeg'), '예전 Homebrew 설치도 그대로 쓴다');
+    assert.equal(t.whisperModel, path.join(dir, 'models', meetingTools.MODEL_Q5), '모델이 없으면 받을 자리(q5)');
+    assert.deepEqual(meetingTools.missing(t, env), ['sherpa', 'seg', 'emb', 'model']);
+    touch(path.join(dir, 'bin', 'ffmpeg')); touch(path.join(dir, 'bin', 'whisper-cli'));
+    touch(path.join(dir, 'models', meetingTools.MODEL_Q5));
+    t = meetingTools.locate(env);
+    assert.equal(t.ffmpeg, path.join(dir, 'bin', 'ffmpeg'), '이 앱이 받은 것이 먼저');
+    assert.equal(t.whisper, path.join(dir, 'bin', 'whisper-cli'));
+    assert.equal(t.whisperModel, path.join(dir, 'models', meetingTools.MODEL_Q5));
+    touch(path.join(dir, 'models', meetingTools.MODEL_FULL));
+    assert.equal(meetingTools.locate(env).whisperModel, path.join(dir, 'models', meetingTools.MODEL_FULL), '이미 받아 둔 큰 모델이 있으면 그것');
+    assert.equal(meetingTools.locate({ ...env, WORKSPACE_FFMPEG: '/x/ffmpeg' }).ffmpeg, '/x/ffmpeg', '시험용 환경 변수가 가장 먼저');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('도구 상태·준비 요청: 서버는 상태를 읽고 요청 파일(prepare)만 쓴다 — 받는 중 %·실패·인텔 맥', async () => {
+  fs.rmSync(toolsHome, { recursive: true, force: true });
+  fs.rmSync(requestFile, { force: true });
+  await withArch('arm64', async () => {
+    const first = await toolsNow();
+    assert.equal(first.state, 'missing');
+    assert.ok(first.size > 600e6 && first.size < 700e6, '받을 크기(약 0.7GB)');
+    const asked = await support.post('/api/meeting/tools/prepare', {});
+    assert.equal(asked.ok, true);
+    assert.equal(asked.state, 'requested');
+    assert.equal(toolsRequest().prepare, true, '요청 표시 파일에 준비 표시만 쓴다(프로세스를 띄우지 않는다)');
+    assert.equal(fs.existsSync(toolsHome), false, '서버는 도구 폴더에 아무것도 쓰지 않는다');
+    // 실행기가 적는 진행(install.json)을 그대로 보여 준다
+    meetingTools.writeStatus({ stage: 'downloading', step: 'model', percent: 42, bytes: 1, total: 2 });
+    const busy = await toolsNow();
+    assert.deepEqual([busy.state, busy.percent], ['installing', 42]);
+    fs.rmSync(requestFile, { force: true });
+    assert.equal((await support.post('/api/meeting/tools/prepare', {})).state, 'installing');
+    assert.equal(fs.existsSync(requestFile), false, '받는 중이면 요청을 또 쓰지 않는다');
+    meetingTools.writeStatus({ stage: 'failed', error: meetingTools.WORDS.checksum });
+    const failed = await toolsNow();
+    assert.deepEqual([failed.state, failed.error], ['failed', meetingTools.WORDS.checksum]);
+    // 실패한 뒤 `다시 받기` → 다시 요청
+    assert.equal((await support.post('/api/meeting/tools/prepare', {})).state, 'requested');
+  });
+  await withArch('x64', async () => {
+    assert.equal((await toolsNow()).state, 'unsupported');
+    const no = await support.post('/api/meeting/tools/prepare', {});
+    assert.equal(no.status, 409);
+    assert.equal(no.error, meetingTools.WORDS.unsupported);
+  });
+  fs.rmSync(toolsHome, { recursive: true, force: true });
+});
+
+test('설치: 확인 값(sha256)이 다르면 실패로 적고 받은 파일을 남기지 않는다(.part도 지움)', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-tools-bad-'));
+  try {
+    const env = { WORKSPACE_MEETING_TOOLS: dir, WORKSPACE_MEETING_SYSTEM_BIN: path.join(dir, 'none'), WORKSPACE_MEETING_ARCH: 'arm64' };
+    const body = Buffer.from('not the real model');
+    const manifest = [{ id: 'model', label: '음성 인식 모델', url: 'https://example.test/model.bin', size: body.length, sha256: '0'.repeat(64), kind: 'file', dest: `models/${meetingTools.MODEL_Q5}` }];
+    const result = await meetingTools.install({ env, manifest, fetchImpl: async () => new Response(body), run: async () => ({ code: 0 }) });
+    assert.equal(result.ok, false);
+    assert.equal(result.error, meetingTools.WORDS.checksum);
+    assert.equal(fs.existsSync(path.join(dir, 'models', meetingTools.MODEL_Q5)), false, '완성본 자리에 아무것도 없다');
+    assert.deepEqual(fs.readdirSync(path.join(dir, 'downloads')), [], '반쪽 파일도 남지 않는다');
+    assert.equal(meetingTools.readStatus(env).stage, 'failed');
+    assert.equal(fs.existsSync(path.join(dir, '.install.lock')), false, '잠금은 풀린다');
+    // 크기가 적힌 것보다 크면 받다가 멈춘다
+    const big = await meetingTools.install({ env, manifest: [{ ...manifest[0], size: 3 }], fetchImpl: async () => new Response(body), run: async () => ({ code: 0 }) });
+    assert.equal(big.error, meetingTools.WORDS.checksum);
+    assert.deepEqual(fs.readdirSync(path.join(dir, 'downloads')), []);
+    // 인텔 맥이면 받지 않는다
+    const intel = await meetingTools.install({ env: { ...env, WORKSPACE_MEETING_ARCH: 'x64' }, manifest, fetchImpl: async () => { throw new Error('받으면 안 됨'); } });
+    assert.equal(intel.unsupported, true);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// 가짜 도구 꾸러미를 이 시험이 띄운 작은 서버에서 내준다(바깥 네트워크에 닿지 않는다). 받는 목록(주소·크기·sha256)은 시험용 목록 파일로.
+function fakeToolPackages(root) {
+  const src = path.join(root, 'src');
+  const node = body => `#!${process.execPath}\n${body}\n`;
+  touch(path.join(src, 'tools', 'bin', 'ffmpeg'), node("const a=process.argv; require('fs').writeFileSync(a[a.length-1],'wav');"), 0o755);
+  touch(path.join(src, 'tools', 'bin', 'whisper-cli'), node("const a=process.argv; const of=a[a.indexOf('-of')+1]; require('fs').writeFileSync(of+'.json', JSON.stringify({transcription:[{offsets:{from:0,to:3000},text:' 출시는 화요일로 확정하죠.'},{offsets:{from:3500,to:6000},text:' 버그 목록은 제가 공유할게요.'}]}));"), 0o755);
+  touch(path.join(src, 'tools', 'LICENSES', 'x.txt'));
+  touch(path.join(src, 'tools', 'BUILD.txt'));
+  touch(path.join(src, 'sherpa', 'sherpa-x', 'bin', 'sherpa-onnx-offline-speaker-diarization'), node("console.log('0.0 -- 3.2 speaker_00'); console.log('3.4 -- 6.1 speaker_01');"), 0o755);
+  touch(path.join(src, 'seg', 'sherpa-onnx-pyannote-segmentation-3-0', 'model.onnx'));
+  const files = {};
+  const tar = (name, dir, flag) => {
+    const out = path.join(root, name);
+    const made = spawnSync('/usr/bin/tar', [flag, out, '-C', dir, '.'], { encoding: 'utf8' });
+    assert.equal(made.status, 0, made.stderr);
+    files[name] = fs.readFileSync(out);
+  };
+  tar('tools.tar.gz', path.join(src, 'tools'), '-czf');
+  tar('sherpa.tar.bz2', path.join(src, 'sherpa'), '-cjf');
+  tar('seg.tar.bz2', path.join(src, 'seg'), '-cjf');
+  files['emb.onnx'] = Buffer.from('emb');
+  files['model.bin'] = Buffer.alloc(64 * 1024, 7);
+  return files;
+}
+function serveFiles(files, { holdModel = null } = {}) {
+  const server = http.createServer(async (req, res) => {
+    const name = decodeURIComponent(req.url.slice(1));
+    if (!files[name]) { res.writeHead(404); res.end(); return; }
+    res.writeHead(200, { 'Content-Length': files[name].length });
+    // 모델은 앞 절반만 먼저 보내고 붙잡아 둔다 — 받는 중(%)을 볼 수 있게.
+    if (name === 'model.bin' && holdModel) {
+      const half = files[name].length / 2;
+      res.write(files[name].subarray(0, half));
+      await holdModel;
+      res.end(files[name].subarray(half));
+      return;
+    }
+    res.end(files[name]);
+  });
+  return new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server)));
+}
+function fakeManifest(files, at) {
+  const sha = name => crypto.createHash('sha256').update(files[name]).digest('hex');
+  const item = (id, name, rest) => ({ id, label: id, url: `${at}/${name}`, size: files[name].length, sha256: sha(name), ...rest });
+  return [
+    item('tools', 'tools.tar.gz', { kind: 'tar', moves: [['bin/whisper-cli', 'bin/whisper-cli'], ['bin/ffmpeg', 'bin/ffmpeg'], ['LICENSES', 'licenses/meeting-tools']] }),
+    item('sherpa', 'sherpa.tar.bz2', { kind: 'tar', moves: [['sherpa-x', 'sherpa/sherpa-x']] }),
+    item('seg', 'seg.tar.bz2', { kind: 'tar', moves: [['sherpa-onnx-pyannote-segmentation-3-0', 'models/sherpa-onnx-pyannote-segmentation-3-0']] }),
+    item('emb', 'emb.onnx', { kind: 'file', dest: 'models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx' }),
+    item('model', 'model.bin', { kind: 'file', dest: `models/${meetingTools.MODEL_Q5}` }),
+  ];
+}
+const waitFor = async (check, ms = 15000) => {
+  const until = Date.now() + ms;
+  for (;;) {
+    const value = await check();
+    if (value) return value;
+    if (Date.now() > until) throw new Error('기다리던 상태가 오지 않았어요');
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+};
+
+test('실행기: 도구가 없으면 먼저 받아 깔고(그동안 녹음본은 `전사 대기`, 화면은 받는 중 %) 다 깔리면 저절로 전사·요약까지 간다', async () => {
+  seedMeeting();
+  fs.rmSync(draftsPath, { force: true });
+  fs.rmSync(toolsHome, { recursive: true, force: true });
+  const { recording } = await (await upload(Buffer.from('audio'))).json();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-tools-auto-'));
+  let release;
+  const holdModel = new Promise((resolve) => { release = resolve; });
+  const files = fakeToolPackages(root);
+  const fileServer = await serveFiles(files, { holdModel });
+  try {
+    const manifestFile = path.join(root, 'manifest.json');
+    fs.writeFileSync(manifestFile, JSON.stringify(fakeManifest(files, `http://127.0.0.1:${fileServer.address().port}`)));
+    const claude = touch(path.join(root, 'claude'), `#!${process.execPath}\nlet s='';process.stdin.on('data',d=>s+=d).on('end',()=>{ console.log(JSON.stringify({headline:'출시 확정',topics:[],decisions:['출시는 화요일'],actions:[]})); });\n`, 0o755);
+    const env = { ...process.env, WORKSPACE_PORT: new URL(base).port, WORKSPACE_MEETING_ARCH: 'arm64', WORKSPACE_MEETING_TOOLS_MANIFEST: manifestFile, CLAUDE_BIN: claude, AUTOMATION_LOG_DIR: path.join(root, 'logs') };
+    await withArch('arm64', async () => {
+      const child = spawn(process.execPath, [path.join(__dirname, 'meeting-transcribe.js')], { env, stdio: 'ignore' });
+      const closed = new Promise(resolve => child.on('close', resolve));
+      // 모델을 받는 동안(서버가 붙잡아 둠): 화면은 받는 중, 녹음본은 아직 `전사 대기`
+      const busy = await waitFor(async () => { const now = await toolsNow(); return now.state === 'installing' && now.percent > 0 ? now : null; });
+      assert.ok(busy.percent < 100);
+      assert.equal((await snapshotMeeting()).recordings.find(item => item.id === recording.id).status, 'queued', '받는 동안 녹음본은 기다린다');
+      release();
+      assert.equal(await closed, 0, fs.readFileSync(path.join(root, 'logs', 'meeting-transcribe.log'), 'utf8'));
+      assert.equal((await toolsNow()).state, 'ready');
+    });
+    const saved = (await snapshotMeeting()).recordings.find(item => item.id === recording.id);
+    assert.equal(saved.status, 'done', '사람이 누르지 않아도 이어서 전사했다');
+    assert.equal(saved.summary.headline, '출시 확정');
+    assert.equal(fs.statSync(path.join(toolsHome, 'bin', 'whisper-cli')).mode & 0o111, 0o111, '실행할 수 있게 깔린다');
+    assert.ok(fs.existsSync(path.join(toolsHome, 'licenses', 'meeting-tools', 'x.txt')), '라이선스도 함께');
+    assert.deepEqual(fs.readdirSync(path.join(toolsHome, 'downloads')), [], '받은 꾸러미·임시 폴더는 치운다');
+    assert.equal(meetingTools.readStatus().stage, 'done');
+    assert.match(fs.readFileSync(path.join(root, 'logs', 'meeting-transcribe.log'), 'utf8'), /도구 준비 시작[\s\S]*도구 준비 끝[\s\S]*완료 — 발언 2개/);
+  } finally {
+    release();
+    fileServer.close();
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(toolsHome, { recursive: true, force: true });
+  }
+});
+
+test('실행기: 도구를 못 받으면 녹음본은 `전사 대기`로 두고 이유를 적는다 — 인텔 맥이면 받지 않고 이유만 남긴다', async () => {
+  seedMeeting();
+  fs.rmSync(toolsHome, { recursive: true, force: true });
+  const { recording } = await (await upload(Buffer.from('audio'))).json();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-tools-fail-'));
+  const fileServer = await serveFiles({}); // 무엇을 달라 해도 404
+  try {
+    const manifestFile = path.join(root, 'manifest.json');
+    fs.writeFileSync(manifestFile, JSON.stringify([{ id: 'model', label: 'm', url: `http://127.0.0.1:${fileServer.address().port}/model.bin`, size: 1, sha256: '0'.repeat(64), kind: 'file', dest: `models/${meetingTools.MODEL_Q5}` }]));
+    const env = { ...process.env, WORKSPACE_PORT: new URL(base).port, WORKSPACE_MEETING_TOOLS_MANIFEST: manifestFile, AUTOMATION_LOG_DIR: path.join(root, 'logs') };
+    const runOnce = extra => new Promise(resolve => spawn(process.execPath, [path.join(__dirname, 'meeting-transcribe.js')], { env: { ...env, ...extra }, stdio: 'ignore' }).on('close', resolve));
+    await runOnce({ WORKSPACE_MEETING_ARCH: 'arm64' });
+    assert.equal((await snapshotMeeting()).recordings.find(item => item.id === recording.id).status, 'queued', '실패해도 녹음본은 기다린다(`다시 받기`가 깔면 이어서 돈다)');
+    await withArch('arm64', async () => {
+      fs.rmSync(requestFile, { force: true });
+      const now = await toolsNow();
+      assert.deepEqual([now.state, now.error], ['failed', meetingTools.WORDS.notFound]);
+    });
+    assert.deepEqual(fs.readdirSync(path.join(toolsHome, 'downloads')), []);
+
+    await runOnce({ WORKSPACE_MEETING_ARCH: 'x64' });
     const saved = (await snapshotMeeting()).recordings.find(item => item.id === recording.id);
     assert.equal(saved.status, 'failed');
-    assert.equal(saved.error, transcriber.WORDS.tools);
-  } finally { fs.rmSync(logs, { recursive: true, force: true }); }
+    assert.equal(saved.error, transcriber.WORDS.unsupported);
+  } finally {
+    fileServer.close();
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(toolsHome, { recursive: true, force: true });
+  }
 });
 
 test('옮기기: 녹음본·전사본·요약·AI 초안이 다른 회의로 함께 간다 — 전사 중·같은 회의·없는 회의는 거절', async () => {

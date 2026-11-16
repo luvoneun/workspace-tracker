@@ -11,6 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { pipeline } = require('stream');
+const meetingTools = require('./meeting-tools');
 
 const MEETING_ID_RE = /^[0-9a-f]{1,32}$/;
 const REC_ID_RE = /^[0-9a-f]{16}$/;
@@ -65,13 +66,21 @@ module.exports = function recordRoutes(req, res, url, ctx) {
   const meetingDir = id => path.join(RECORDINGS_DIR, id);
   const transcriptFile = (meetingId, recId) => path.join(meetingDir(meetingId), `${recId}.transcript.json`);
   // 실행기를 깨운다 — 요청 표시 파일 하나만 쓴다(프로세스를 띄우지 않는다). 못 써도 녹음본은 대기열에 남아 다음 깨움에 돈다.
-  const wakeTranscriber = () => {
+  // prepare: 녹음을 시작할 때 도구가 없으면 — 대기열이 비어 있어도 실행기가 도구부터 받는다(meeting-tools.js).
+  const requestPath = () => path.join(automationDir(), 'requests', 'meeting-transcribe.request');
+  const wakeTranscriber = (prepare = false) => {
     try {
-      const file = path.join(automationDir(), 'requests', 'meeting-transcribe.request');
+      const file = requestPath();
       fs.mkdirSync(path.dirname(file), { recursive: true });
-      fs.writeFileSync(file, `${JSON.stringify({ requestedAt: new Date().toISOString() })}\n`);
+      fs.writeFileSync(file, `${JSON.stringify({ requestedAt: new Date().toISOString(), ...(prepare ? { prepare: true } : {}) })}\n`);
       return true;
     } catch { return false; }
+  };
+  // 음성 인식 도구 상태 — 파일이 있는지와 실행기가 적는 install.json만 읽는다. 요청 파일을 쓴 시각은 `곧 시작해요`를 가린다.
+  const toolsState = () => {
+    let requestedAt = 0;
+    try { requestedAt = fs.statSync(requestPath()).mtimeMs; } catch { requestedAt = 0; }
+    return { ...meetingTools.summarize({ requestedAt }), size: meetingTools.totalBytes() };
   };
   const readJson = () => readBody(req, 8 * 1024 * 1024).then(body => body, () => { const error = new Error('요청을 읽지 못했어요.'); error.status = 400; throw error; });
   const fail = error => { if (!res.headersSent) sendJson(error.status || (/찾을 수 없/.test(error.message || '') ? 404 : 500), { ok: false, error: error.message || '처리하지 못했어요.', code: error.code }); };
@@ -285,6 +294,23 @@ module.exports = function recordRoutes(req, res, url, ctx) {
       const saved = await locked(() => workflows.setRecordingStatus({ meetingId, recId, status: 'queued', ...(only ? { redo: only } : {}) }));
       wakeTranscriber();
       sendJson(200, { ok: true, recording: saved });
+    }).catch(fail);
+    return true;
+  }
+
+  // 음성 인식 도구 — 화면이 `● 녹음`을 누를 때·전사 대기 줄을 그릴 때 읽는다(읽기만).
+  if (url.pathname === '/api/meeting/tools' && req.method === 'GET') {
+    sendJson(200, { ok: true, ...toolsState() });
+    return true;
+  }
+  // 준비 요청(`● 녹음`을 처음 누를 때, `다시 받기`) — 요청 파일만 쓴다. 이미 준비됐거나 받는 중이면 쓰지 않고, 인텔 맥이면 409.
+  if (url.pathname === '/api/meeting/tools/prepare' && req.method === 'POST') {
+    readJson().then(() => {
+      const now = toolsState();
+      if (now.state === 'unsupported') { sendJson(409, { ok: false, error: now.error, state: now.state }); return; }
+      if (now.state === 'ready' || now.state === 'installing') { sendJson(200, { ok: true, ...now }); return; }
+      if (!wakeTranscriber(true)) { sendJson(500, { ok: false, error: '준비 요청을 남기지 못했어요.' }); return; }
+      sendJson(200, { ok: true, ...toolsState() });
     }).catch(fail);
     return true;
   }

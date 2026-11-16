@@ -2484,6 +2484,7 @@ const CLIENT_BLOCKED = new Set([
   'routes-jira.js', 'routes-integrations.js', 'routes-app.js', 'routes-personalize.js', 'routes-items.js',
   'routes-track.js', 'selfcheck.js', 'checkin.js', 'usage.js', 'auto-update.js', 'calendar-mac.js',
   'slack-auth.js', 'slack-oauth.js', 'tryout-server.js', 'project-keys.js', 'routes-record.js', 'meeting-transcribe.js',
+  'meeting-tools.js',
 ]);
 function isClientFile(name) {
   if (!/^[A-Za-z0-9][\w.-]*\.(js|css)$/.test(name)) return false;   // 이름 한 칸짜리(하위 경로 없음)만

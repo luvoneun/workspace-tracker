@@ -5821,6 +5821,57 @@ test('panelMeeting: 녹음본의 전사·요약 상태', () => {
   assert.doesNotMatch(nodeText(row), /미팅 노트 가져옴/, '녹음 요약만 있는 회의를 티로 노트를 가져온 회의로 보지 않는다');
   assert.match(nodeText(row), /이 회의의 미팅 노트 가져오기/);
 });
+// 회의 녹음 — 음성 인식 도구를 처음 쓸 때: `● 녹음`을 누르면 도구가 없을 때만 준비를 부탁하고(서버는 요청 파일만), 녹음 중 줄에
+// 안내 + 퍼센트, 전사 대기 녹음본은 `받는 중이에요 — 끝나면 자동으로 시작해요`, 실패면 이유 + `다시 받기`, 인텔 맥은 다시 하기 없음.
+test('회의 녹음: 음성 인식 도구가 없으면 녹음하는 동안 받아 두고, 전사 대기 줄은 받는 중 % → 실패면 `다시 받기`', async () => {
+  const { app } = meetingNotesClient([]);
+  const sent = [];
+  const size = 642684966;
+  let tools = { ok: true, state: 'missing', size };
+  app.context.fetch = async (url, init) => {
+    sent.push({ url, method: (init && init.method) || 'GET' });
+    if (url === '/api/meeting/tools/prepare') { tools = { ok: true, state: 'requested', percent: 0, size }; return new Response(JSON.stringify(tools)); }
+    if (url === '/api/meeting/tools') return new Response(JSON.stringify(tools));
+    return new Response('{}');
+  };
+  const prepares = () => sent.filter(item => item.url === '/api/meeting/tools/prepare').length;
+  await app.run('meetingRecPrepareTools()');
+  assert.equal(prepares(), 1, '도구가 없으면 준비를 부탁한다');
+  const liveText = () => app.run('meetingRecToolsLiveNodes()').map(node => node.textContent).join(' ');
+  assert.equal(liveText(), '처음이라 음성 인식 도구(약 0.7GB)를 받아 둘게요 — 녹음하는 동안 준비돼요');
+  tools = { ok: true, state: 'installing', percent: 42, size };
+  await app.run('meetingRecToolsRead(true)');
+  assert.match(liveText(), /준비돼요 · 42%$/);
+
+  const rec = (id, extra) => ({ id, file: `${id}.webm`, seconds: 60, size: 1, createdAt: '2026-11-06T01:00:00.000Z', ...extra });
+  const meeting = { id: 'm7', date: meetingNotesDay(0), start: '10:00', title: '도구 회의', drafts: [], recordings: [rec('000000000000000a', { status: 'queued' })] };
+  app.context.__m = meeting;
+  app.run('workflowData.meetings = [__m]; wfIndexData();');
+  const draw = () => app.run(`(() => { const box = document.createElement('div'); panelMeeting(__m, box); return box; })()`);
+  assert.match(nodeText(nodeFind(draw(), 'd-reclist')), /음성 인식 도구를 받는 중이에요 — 끝나면 자동으로 시작해요 · 42%/, '정지했을 때 아직이면 기다렸다가 저절로 시작한다');
+
+  tools = { ok: true, state: 'failed', error: '받은 파일이 올바르지 않아요(확인 값이 달라요)', size };
+  await app.run('meetingRecToolsRead(true)');
+  const failedBox = nodeFind(draw(), 'd-reclist');
+  assert.match(nodeText(failedBox), /음성 인식 도구를 받지 못했어요 — 받은 파일이 올바르지 않아요/);
+  const again = nodeFind(failedBox, 'rc-state').children.find(node => node && node.textContent === '다시 받기');
+  assert.ok(again, '실패하면 `다시 받기`');
+  await again.listeners.click();
+  assert.equal(prepares(), 2, '`다시 받기`는 준비 요청을 다시 쓴다');
+
+  tools = { ok: true, state: 'ready', size };
+  await app.run('meetingRecToolsRead(true)');
+  assert.match(nodeText(nodeFind(draw(), 'd-reclist')), /전사 대기 중이에요/, '준비되면 원래 대기 줄');
+  assert.equal(app.run('meetingRecToolsLiveNodes().length'), 0, '준비되면 녹음 중 안내도 없다');
+  await app.run('meetingRecPrepareTools()');
+  assert.equal(prepares(), 2, '준비됐으면 부탁하지 않는다');
+
+  // 인텔 맥: 실행기가 남긴 이유에는 `다시 시도`가 없다(다시 해도 같다).
+  meeting.recordings = [rec('000000000000000b', { status: 'failed', error: '음성 인식은 애플 실리콘 맥에서만 쓸 수 있어요' })];
+  const intel = nodeText(nodeFind(draw(), 'd-reclist'));
+  assert.match(intel, /애플 실리콘 맥에서만/);
+  assert.doesNotMatch(intel, /다시 시도/);
+});
 // 회의 녹음: `● 녹음`을 한 번 누르면 따로 뜨는 창 없이 이 탭이 알약(PiP)을 먼저 띄우고 마이크로 녹음한다.
 // 카드는 `● 녹음 중 · 일시정지 · 정지하고 저장`, 녹음 중에는 자동 새로고침을 미루고, 정지하면 올려 회의에 붙인다.
 test('회의 녹음: 한 번 누르면 알약만 뜨고(녹음 창 없음) 녹음 → 정지하면 올린다', async () => {

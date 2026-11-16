@@ -10,21 +10,24 @@
 //
 // 프로그램(ffmpeg·whisper-cli·sherpa)은 **이 스크립트가 직접 띄운 자식**이고, 시간이 넘으면 그 자식에게만 신호를 보낸다
 // (프로세스 목록을 훑어 고르지 않는다 — AGENTS.md). 데이터 파일은 직접 쓰지 않고 앱 API로만 알린다.
-// 도구 자리는 `automation/install-meeting-tools.sh`가 까는 곳이 기본이고, 시험은 환경 변수로 가짜를 끼운다.
+// 도구 자리·설치는 meeting-tools.js가 맡는다(이 앱이 받은 `~/.local/share/workspace-meeting/bin` → 예전 Homebrew 순서).
+// 깨어났는데 도구가 없고 전사할 녹음본이나 준비 요청(`prepare`)이 있으면 **먼저 받아 깔고** 대기열을 돈다 — 그동안 녹음본은
+// `전사 대기`로 남고(화면은 install.json을 읽어 `받는 중 42%`), 다 깔리면 사람이 누르지 않아도 이어서 전사한다.
+// 시험은 환경 변수로 가짜를 끼운다.
 'use strict';
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const meetingTools = require('./meeting-tools');
 
 const HOME = os.homedir();
-const TOOLS_DIR = process.env.WORKSPACE_MEETING_TOOLS || path.join(HOME, '.local/share/workspace-meeting');
 const KILL_GRACE_MS = 3000;
 const MAX_OUTPUT = 32 * 1024 * 1024;
 const TASK = 'meeting-transcribe';
 
 // 사람에게 보이는 말 — 녹음본 줄의 `실패` 이유로 그대로 뜬다.
 const WORDS = {
-  tools: '음성 인식 도구가 설치돼 있지 않아요 — 터미널에서 automation/install-meeting-tools.sh를 한 번 실행해 주세요',
+  unsupported: meetingTools.WORDS.unsupported,
   download: '녹음 파일을 받지 못했어요',
   convert: '녹음 파일을 소리로 바꾸지 못했어요(ffmpeg)',
   whisper: '글로 옮기지 못했어요(음성 인식)',
@@ -38,28 +41,12 @@ function firstExisting(list) {
   return list.find(file => file && fs.existsSync(file)) || '';
 }
 function tools() {
-  let sherpa = process.env.WORKSPACE_SHERPA_DIARIZE || '';
-  if (!sherpa) {
-    const base = path.join(TOOLS_DIR, 'sherpa');
-    const dirs = fs.existsSync(base) ? fs.readdirSync(base).sort().reverse() : [];
-    sherpa = firstExisting(dirs.map(dir => path.join(base, dir, 'bin', 'sherpa-onnx-offline-speaker-diarization')));
-  }
-  const models = path.join(TOOLS_DIR, 'models');
   return {
-    ffmpeg: process.env.WORKSPACE_FFMPEG || firstExisting(['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg']),
-    whisper: process.env.WORKSPACE_WHISPER || firstExisting(['/opt/homebrew/bin/whisper-cli', '/usr/local/bin/whisper-cli']),
-    whisperModel: process.env.WORKSPACE_WHISPER_MODEL || path.join(models, 'ggml-large-v3-turbo.bin'),
-    sherpa,
-    segModel: path.join(models, 'sherpa-onnx-pyannote-segmentation-3-0', 'model.onnx'),
-    embModel: path.join(models, '3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx'),
+    ...meetingTools.locate(),
     claude: process.env.CLAUDE_BIN || firstExisting([path.join(HOME, '.local/bin/claude'), '/opt/homebrew/bin/claude', '/usr/local/bin/claude']),
   };
 }
-function missingTools(t) {
-  const needed = [t.ffmpeg, t.whisper, t.whisperModel, t.sherpa];
-  if (!process.env.WORKSPACE_SHERPA_DIARIZE) needed.push(t.segModel, t.embModel);
-  return needed.some(file => !file || !fs.existsSync(file));
-}
+const missingTools = t => meetingTools.missing(t).length > 0;
 
 // 자식 하나를 띄워 끝까지 기다린다. 시간이 넘으면 그 자식에게만 TERM → KILL.
 function run(bin, args, { timeoutMs, input = null, cwd } = {}) {
@@ -200,8 +187,14 @@ async function api(method, route, body) {
 }
 const progress = (job, stage, extra = {}) => api('POST', '/api/meeting/recording/progress', { meetingId: job.meetingId, recId: job.recId, stage, ...extra });
 
+const automationDir = () => process.env.WORKSPACE_AUTOMATION_DIR || path.join(HOME, '.local/share/workspace-automation');
 function logDir() {
-  return process.env.AUTOMATION_LOG_DIR || path.join(process.env.WORKSPACE_AUTOMATION_DIR || path.join(HOME, '.local/share/workspace-automation'), 'logs');
+  return process.env.AUTOMATION_LOG_DIR || path.join(automationDir(), 'logs');
+}
+const requestFile = () => path.join(automationDir(), 'requests', 'meeting-transcribe.request');
+// 화면이 `● 녹음`을 누를 때 보낸 준비 요청인가(요청 파일에 prepare: true) — 대기열이 비어 있어도 도구를 받는다.
+function prepareRequested() {
+  try { return JSON.parse(fs.readFileSync(requestFile(), 'utf8')).prepare === true; } catch { return false; }
 }
 function stamp() {
   const d = new Date();
@@ -289,11 +282,29 @@ async function transcribeOne(job, t) {
   }
 }
 
+// 도구가 없으면 받아 깐다 — 다른 설치가 돌고 있거나 실패하면 녹음본은 `전사 대기`로 둔다(화면이 이유와 `다시 받기`를 보인다).
+async function prepareTools() {
+  log(`${stamp()} 음성 인식 도구 준비 시작`);
+  const result = await meetingTools.install({ run, log: line => log(`${stamp()} ${line}`) });
+  if (result.ok) log(`${stamp()} 음성 인식 도구 준비 끝`);
+  else if (result.busy) log(`${stamp()} 다른 곳에서 도구를 받고 있어요 — 이번에는 건너뜀`);
+  else log(`${stamp()} ⚠️ 음성 인식 도구 준비 실패 — ${result.error}`);
+  return result;
+}
+
 async function main() {
   log(`───── ${stamp()} ${TASK} 시작`);
   let status = 0;
   try {
-    const t = tools();
+    let t = tools();
+    if (missingTools(t)) {
+      // 앱이 꺼져 있어도 준비 요청이면 받는다(대기열은 못 읽으면 빈 것으로 본다).
+      const waiting = await api('GET', '/api/meeting/recording/queue').then(data => data.jobs, () => []);
+      if (meetingTools.supported() && (prepareRequested() || waiting.some(job => job.only !== 'summary'))) {
+        await prepareTools();
+        t = tools();
+      }
+    }
     // 대기열이 빌 때까지(돌고 있는 동안 새 녹음이 들어올 수 있다). 같은 녹음을 두 번 하지 않게 한 번 본 것은 건너뛴다.
     const seen = new Set();
     for (let round = 0; round < 50; round += 1) {
@@ -302,8 +313,11 @@ async function main() {
       if (!next) break;
       seen.add(`${next.meetingId}/${next.recId}`);
       if (next.only !== 'summary' && missingTools(t)) {
-        log(`${stamp()} ⚠️ ${WORDS.tools}`);
-        await progress(next, 'failed', { error: WORDS.tools }).catch(() => {});
+        // 인텔 맥이면 이유를 남기고 끝낸다(다시 받아도 안 된다). 그 밖에는 `전사 대기`로 둔다 — 도구가 깔리면 이어서 돈다.
+        if (!meetingTools.supported()) {
+          log(`${stamp()} ⚠️ ${WORDS.unsupported}`);
+          await progress(next, 'failed', { error: WORDS.unsupported }).catch(() => {});
+        } else log(`${stamp()} ${next.meetingId}/${next.recId} 도구가 준비되면 전사해요 — 대기로 둠`);
         continue;
       }
       if (next.only === 'summary') await summarizeOnly(next, t);
@@ -317,5 +331,30 @@ async function main() {
   process.exitCode = status;
 }
 
-if (require.main === module) main();
+// 손으로 깔기(automation/install-meeting-tools.sh → `--install`): 진행을 화면에 찍고, 다 깔리면 실행기를 깨워 기다리던 녹음본을 돌린다.
+async function installByHand() {
+  if (!meetingTools.supported()) { console.log(WORDS.unsupported); return 1; }
+  if (!missingTools(tools())) { console.log('이미 다 깔려 있어요.'); return 0; }
+  console.log(`음성 인식 도구를 받아요(약 ${Math.ceil(meetingTools.totalBytes() / 1e8) / 10}GB, 몇 분 걸려요) — ${meetingTools.toolsDir()}`);
+  let shown = -1;
+  const timer = setInterval(() => {
+    const s = meetingTools.readStatus();
+    const percent = s && Math.floor(Number(s.percent) || 0);
+    if (s && percent !== shown && (percent - shown >= 5 || percent === 100)) { shown = percent; console.log(`  ${percent}%`); }
+  }, 1000);
+  const result = await meetingTools.install({ run, log: line => console.log(line) });
+  clearInterval(timer);
+  if (!result.ok) { console.log(result.busy ? '다른 곳에서 도구를 받고 있어요 — 끝난 뒤 다시 실행해 주세요.' : `받지 못했어요 — ${result.error}`); return 1; }
+  try {
+    fs.mkdirSync(path.dirname(requestFile()), { recursive: true });
+    fs.writeFileSync(requestFile(), `${JSON.stringify({ requestedAt: new Date().toISOString() })}\n`);
+  } catch {}
+  console.log('다 깔았어요. 기다리던 녹음본은 곧 저절로 전사돼요.');
+  return 0;
+}
+
+if (require.main === module) {
+  if (process.argv.includes('--install')) installByHand().then(code => { process.exitCode = code; });
+  else main();
+}
 module.exports = { parseDiarization, parseWhisper, mergeTranscript, summaryPrompt, parseSummary, WORDS };

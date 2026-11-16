@@ -472,7 +472,7 @@ cat > "$AGENTS_DIR/$LABEL.mac-calendar-now.plist" << PLIST
 PLIST
 
 # 회의 녹음 전사·요약 — 일정표가 없다. 녹음본을 저장하거나 `다시 시도`를 누르면 앱이 요청 파일을 쓰고, 이 에이전트가 한 번 돈다.
-# 도구(whisper·ffmpeg·sherpa)가 없으면 실행기가 녹음본 줄에 `설치해 주세요`만 남긴다 — 그래서 늘 등록한다.
+# 도구(whisper·ffmpeg·sherpa·모델)가 없으면 이 실행기가 먼저 받아 깐다(`● 녹음`이 쓰는 준비 요청도 같은 요청 파일) — 그래서 늘 등록한다.
 # 내용이 그대로면 아래 등록 루프에서 다시 올리지 않는다(도는 전사를 끊지 않게).
 OLD_TRANSCRIBE_PLIST="$(cat "$AGENTS_DIR/$LABEL.meeting-transcribe.plist" 2>/dev/null)"
 cat > "$AGENTS_DIR/$LABEL.meeting-transcribe.plist" << PLIST

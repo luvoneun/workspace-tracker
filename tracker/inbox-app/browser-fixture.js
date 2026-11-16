@@ -83,6 +83,9 @@ function prepareFixture({slack,jira}={}) {
     WORKSPACE_APPLICATIONS_DIR:apps,
     // 설정 › 앱의 `데이터 백업` 줄이 읽는 자리 — 실제 ~/workspace-data-backup을 보지 않게.
     WORKSPACE_BACKUP_DIR:backup,
+    // 회의 녹음 음성 인식 도구 자리 — 실제 ~/.local/share/workspace-meeting·Homebrew를 보지 않게(없는 자리 = 도구 없음).
+    WORKSPACE_MEETING_TOOLS:path.join(root,'workspace-meeting'),
+    WORKSPACE_MEETING_SYSTEM_BIN:path.join(root,'no-system-bin'),
     WORKSPACE_NO_OPEN:'1',
     WORKSPACE_NO_REMOTE_CHECK:'1',
   };
