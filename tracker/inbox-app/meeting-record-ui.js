@@ -575,19 +575,23 @@ function meetingRecBody(event, recording, host) {
   const note = document.createElement('p');
   note.className = 'd-hint rc-note';
   note.textContent = hasDrafts ? '할 일·확인할 것·결정 후보는 아래 AI 초안에서 골라 담아요.' : '이 녹음에서는 할 일·결정을 찾지 못했어요.';
-  body.appendChild(note);
+  // 안내 · 실패 · 전사본 · 다시 하기는 요약 밑 한 묶음(.rc-foot, 8px) — 요약 묶음끼리는 16px.
+  const foot = document.createElement('div');
+  foot.className = 'rc-foot';
+  foot.appendChild(note);
   if (summary.error) {
     const fail = document.createElement('p');
     fail.className = 'rc-state rc-fail';
     fail.textContent = summary.error;
-    body.appendChild(fail);
+    foot.appendChild(fail);
   }
-  if (recording.transcript) body.appendChild(meetingRecTranscriptNode(event, recording));
+  if (recording.transcript) foot.appendChild(meetingRecTranscriptNode(event, recording));
   // 다시 전사·요약 — 화자 구분이 이상하거나 할 일을 놓쳤을 때(새 기준으로 처음부터 다시 돈다).
   const again = document.createElement('p');
   again.className = 'rc-state';
   again.appendChild(meetingRecRetryButton(event, recording, host, '다시 전사·요약'));
-  body.appendChild(again);
+  foot.appendChild(again);
+  body.appendChild(foot);
   return body;
 }
 

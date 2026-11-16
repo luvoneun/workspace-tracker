@@ -3445,15 +3445,16 @@ a.d-btn { text-decoration: none; }
    패널의 `녹음본` 목록과 알약. 알약은 Picture-in-Picture 창에 이 파일을 통째로 옮겨 쓴다
    (meeting-record-ui.js) — 그래서 색은 모두 토큰이고 다크 모드도 따라간다. */
 .d-reclive { color: var(--urgent); font-weight: 600; }
-.d-reclist { display: flex; flex-direction: column; gap: 8px; }
-.d-recrow { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-height: var(--h-md); }
+/* 간격은 8px 단위(목록 안 촘촘한 자리만 4px). 메타 칸 112px + 칸 사이 16px = 요약·옮기기가 시작하는 선 128px(--rc-ind). */
+.d-reclist { --rc-ind: 128px; display: flex; flex-direction: column; gap: 8px; }
+.d-recrow { display: flex; align-items: center; gap: 8px 16px; flex-wrap: wrap; min-height: var(--h-md); }
 .d-recrow .rc-meta { display: flex; gap: 8px; min-width: 112px; font-size: var(--fs-sm); color: var(--muted); font-variant-numeric: tabular-nums; }
 .d-recrow .rc-len { color: var(--dim); }
 .d-recrow .rc-audio { flex: 1 1 240px; min-width: 0; height: var(--h-md); }
-.d-recrow .rc-acts { display: flex; align-items: center; gap: 12px; }
+.d-recrow .rc-acts { display: flex; align-items: center; gap: 16px; }
 .d-recrow .rc-del { color: var(--dim); font-weight: 500; }
 /* `옮기기` — 녹음본 줄 바로 아래에 회의 고르기 한 줄 */
-.d-recrow .rc-move { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex-basis: 100%; padding-left: 124px; }
+.d-recrow .rc-move { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex-basis: 100%; padding-left: var(--rc-ind); }
 .d-recrow .rc-move p { margin: 0; }
 .d-reclist .rc-movesel {
   min-width: 0; max-width: 100%; flex: 0 1 320px; height: var(--h-sm); padding: 0 8px; box-sizing: border-box;
@@ -3461,7 +3462,7 @@ a.d-btn { text-decoration: none; }
 }
 .d-reclist .rc-movesel:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .d-recrow .rc-del:hover, .d-recrow .rc-del.armed { color: var(--urgent); }
-.d-recs .rc-soon { margin-top: 4px; }
+.d-recs .rc-soon { margin-top: 8px; }
 
 /* 빨간 점은 깜빡이지 않는다(늘 도는 움직임은 기다림 표시에만 — 모션 규칙). 잠시 멈춤이면 옅어진다. */
 .rec-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--urgent-dot); flex: none; }
@@ -3469,7 +3470,7 @@ a.d-btn { text-decoration: none; }
 
 body.rec-pip { margin: 0; background: var(--surface); overflow: hidden; }
 .rec-pill {
-  display: flex; align-items: center; gap: 10px; height: 100vh; box-sizing: border-box; padding: 0 12px;
+  display: flex; align-items: center; gap: 8px; height: 100vh; box-sizing: border-box; padding: 0 16px;
   background: var(--surface); color: var(--text); font-family: var(--font);
 }
 .rec-pill .rec-time { flex: 1; font-size: var(--fs-lg); font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
@@ -3483,17 +3484,19 @@ body.rec-pip { margin: 0; background: var(--surface); overflow: hidden; }
 .rec-b:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* 회의 녹음 — 전사·요약(녹음본 줄 아래). 상태 한 줄 · 핵심 한 줄 · 요지/결정 목록 · 접힌 전사본 */
-.d-reclist .rc-body { display: flex; flex-direction: column; gap: 8px; margin: -2px 0 8px; padding-left: 124px; }
+.d-reclist .rc-body { display: flex; flex-direction: column; gap: 16px; margin: 0 0 8px; padding-left: var(--rc-ind); }
 .d-reclist .rc-body:empty { display: none; }
+.d-reclist .rc-foot { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.d-reclist .rc-foot > .rc-tx { align-self: stretch; }
 .d-reclist .rc-body p { margin: 0; }
 .d-reclist .rc-state { font-size: var(--fs-sm); color: var(--muted); }
 .d-reclist .rc-fail { color: var(--urgent); }
 .d-reclist .rc-head { font-weight: 600; color: var(--text); }
 .d-reclist .rc-lbl { font-size: var(--fs-cap); font-weight: 600; color: var(--dim); }
-.d-reclist .rc-sum ul { margin: 4px 0 0; padding-left: 18px; color: var(--text); }
-.d-reclist .rc-sum li + li { margin-top: 2px; }
+.d-reclist .rc-sum ul { margin: 4px 0 0; padding-left: 16px; color: var(--text); }
+.d-reclist .rc-sum li + li { margin-top: 4px; }
 .d-reclist .rc-tx > summary { cursor: pointer; font-size: var(--fs-sm); font-weight: 600; color: var(--accent-text); }
-.d-reclist .rc-lines { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; max-height: 360px; overflow-y: auto; }
+.d-reclist .rc-lines { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; max-height: 360px; overflow-y: auto; }
 .d-reclist .rc-line { display: grid; grid-template-columns: auto auto 1fr; gap: 8px; align-items: baseline; }
 .d-reclist .rc-who { font-weight: 600; font-size: var(--fs-sm); }
 .d-reclist .rc-at { font-size: var(--fs-cap); color: var(--dim); font-variant-numeric: tabular-nums; }
