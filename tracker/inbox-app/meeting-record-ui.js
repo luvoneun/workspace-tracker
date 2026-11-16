@@ -470,12 +470,13 @@ function meetingRecWhen(iso) {
   return d.toDateString() === new Date().toDateString() ? `오늘 ${time}` : `${d.getMonth() + 1}월 ${d.getDate()}일 ${time}`;
 }
 
-// 패널의 `녹음본` 구역 — 최신이 위. 줄마다: 시각·길이 | 재생기 | 옮기기 · 삭제(한 번 더 눌러야 지운다). 그 아래 전사·요약.
+// 패널의 `회의 요약` 구역 — 최신이 위. 녹음 하나마다: 요약(핵심 한 줄·결정·주제별 요지, 진행 중이면 상태 한 줄)이 먼저,
+// 그 아래 녹음 줄(시각·길이 | 재생기 | 옮기기 · 삭제), 맨 아래 전사본 보기 · 다시 하기. 할 일·확인할 것은 카드 위쪽 AI 초안이 맡는다.
 function meetingRecordingsNode(event, host) {
   const list = event && Array.isArray(event.recordings) ? event.recordings : [];
   if (!list.length) return null;
   // `(Beta)` — 아직 써 보는 기능이라는 말(문구로만, 따로 표시를 그리지 않는다). 정식이 되면 문구에서만 뺀다.
-  const { section } = meetingSection('녹음본 (Beta)', list.length);
+  const { section } = meetingSection('회의 요약 (Beta)', list.length);
   section.classList.add('d-recs');
   const box = document.createElement('div');
   box.className = 'd-reclist';
@@ -507,7 +508,13 @@ function meetingRecordingsNode(event, host) {
     if (move) acts.appendChild(move);
     acts.appendChild(meetingRecDeleteButton(event, recording, host));
     row.append(meta, audio, acts);
-    box.append(row, meetingRecBody(event, recording, host));
+    const one = document.createElement('div');
+    one.className = 'rc-one';
+    const body = meetingRecBody(event, recording, host);
+    one.appendChild(body);
+    one.appendChild(row);
+    if (body.recFoot) one.appendChild(body.recFoot);
+    box.appendChild(one);
   });
   section.appendChild(box);
   meetingRecWatch(list);
@@ -576,23 +583,19 @@ function meetingRecBody(event, recording, host) {
     wrap.append(name, ul);
     body.appendChild(wrap);
   };
-  list('주제별 요지', summary.topics);
-  // 할 일 — 회의에서 나온 후속 조치(맡은 화자·날짜가 분명하면 함께). 담기는 아래 AI 초안에서.
-  const actions = (Array.isArray(summary.actions) ? summary.actions : []).map((item) => {
-    const extra = [item.owner, item.due].filter(Boolean).join(' · ');
-    return extra ? `${item.task} (${extra})` : item.task;
-  });
-  list('할 일', actions);
-  list('확인할 것', summary.checks);
+  // 할 일·확인할 것은 여기 다시 적지 않는다 — 카드 맨 위 `AI 초안`(담기 전)·`이 회의에서 나온 것`(담은 뒤)이 맡는다.
   list('결정', summary.decisions);
-  const hasDrafts = actions.length || (summary.checks && summary.checks.length) || (summary.decisions && summary.decisions.length);
-  const note = document.createElement('p');
-  note.className = 'd-hint rc-note';
-  note.textContent = hasDrafts ? '할 일·확인할 것·결정 후보는 아래 AI 초안에서 골라 담아요.' : '이 녹음에서는 할 일·결정을 찾지 못했어요.';
-  // 안내 · 실패 · 전사본 · 다시 하기는 요약 밑 한 묶음(.rc-foot, 8px) — 요약 묶음끼리는 16px.
+  list('주제별 요지', summary.topics);
+  const found = (summary.actions && summary.actions.length) || (summary.checks && summary.checks.length);
+  if (!found && !summary.error) {
+    const note = document.createElement('p');
+    note.className = 'd-hint rc-note';
+    note.textContent = '이 녹음에서는 할 일을 찾지 못했어요.';
+    body.appendChild(note);
+  }
+  // 실패 · 전사본 · 다시 하기는 녹음 줄 아래 한 묶음(.rc-foot, 8px) — 녹음본을 다루는 도구라 요약과 떼어 맨 아래에 둔다.
   const foot = document.createElement('div');
   foot.className = 'rc-foot';
-  foot.appendChild(note);
   if (summary.error) {
     const fail = document.createElement('p');
     fail.className = 'rc-state rc-fail';
@@ -615,7 +618,7 @@ function meetingRecBody(event, recording, host) {
   fullAgain.title = '녹음을 처음부터 다시 글로 옮기고 말한 사람을 나눠요 — 회의 길이에 따라 몇 분 걸려요';
   again.appendChild(fullAgain);
   foot.appendChild(again);
-  body.appendChild(foot);
+  body.recFoot = foot;
   return body;
 }
 

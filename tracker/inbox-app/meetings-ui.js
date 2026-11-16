@@ -198,18 +198,18 @@ function panelMeeting(event, box, host = MEETING_HOST_CARD) {
     note.textContent = '아직 기록되지 않은 회의예요. 여기서 적은 것은 회의에 연결되지 않고 바로 담겨요.';
     box.appendChild(note);
   }
-  // 차례: 결과 → 녹음본 → AI 초안 → 이전 회차 → 기존 항목 연결 → 이 회의에서 나온 것 → (발) 입력줄.
-  // 방금 적은 줄이 늘 입력줄 바로 위에 서도록 `이 회의에서 나온 것`이 본문의 맨 끝이다.
+  // 차례는 "이 회의로 내가 할 일"이 먼저, 그다음 회의 내용, 도구는 맨 아래(2026-11-16 루본):
+  // 결과 → 이 회의에서 나온 것(맨 위 입력줄 + 방금 적은 줄 + 종류별) → AI 초안 → 이전 회차 → 회의 요약(녹음) → 기존 항목 연결.
+  // 입력줄은 구역 맨 위(프로젝트 탭의 `+ 이 프로젝트에 할 일 추가`와 같은 자리)이고 방금 적은 줄은 그 바로 아래에 선다.
+  if (linked) panelMeetingResult(event, box, host);
+  panelMeetingItems(event, box, host);
   if (linked) {
-    panelMeetingResult(event, box, host);
-    const recordings = meetingRecordingsNode(event, host);
-    if (recordings) box.appendChild(recordings);
     if (event.drafts && event.drafts.length) panelMeetingDrafts(event, box, host);
     panelMeetingPast(event, box, host);
+    const recordings = meetingRecordingsNode(event, host);
+    if (recordings) box.appendChild(recordings);
     panelMeetingLink(event, box, host);
   }
-  panelMeetingItems(event, box, host);
-  panelMeetingCapture(event, box, linked, host);
   // 카드를 통째로 다시 그렸으면 열려 있던 종류 목록의 글자도 사라졌다 — 새 카드가 붙은 뒤에 정리한다.
   if (meetingTypeOpen) setTimeout(() => meetingTypeOrphan(host), 0);
 }
@@ -1145,7 +1145,7 @@ function panelMeetingItems(event, box, host = MEETING_HOST_CARD) {
   const { section, number } = meetingSection(linked ? '이 회의에서 나온 것' : '방금 담은 것', 0);
   const list = document.createElement('div');
   list.className = 'd-mlist';
-  section.appendChild(list);
+  const capture = panelMeetingCapture(event, box, linked, host);
   // 초안도 담은 것도 없는 빈 회의에만 안내 한 줄.
   const result = host.getResult();
   const blank = linked && !(event.drafts && event.drafts.length) && !(result && result.meetingId === event.id);
@@ -1168,8 +1168,8 @@ function panelMeetingItems(event, box, host = MEETING_HOST_CARD) {
       return found || !entry.seen;
     });
     if (local.length) meetingCaptureLocal.set(key, local); else meetingCaptureLocal.delete(key);
-    // 이 자리를 연 동안 입력줄로 담은 줄은 종류 구역으로 튀어 들어가지 않고 맨 끝 `방금 담은 것`에 적은 순서대로 선다
-    // (입력줄 바로 위 — 방금 적은 줄을 놓치지 않게). 다시 열면 제 종류 구역으로 간다.
+    // 이 자리를 연 동안 입력줄로 담은 줄은 종류 구역으로 튀어 들어가지 않고 맨 위 `방금 담은 것`에 적은 순서대로 선다
+    // (입력줄 바로 아래 — 방금 적은 줄을 놓치지 않게). 다시 열면 제 종류 구역으로 간다.
     const recentSeq = new Map(((linked && host.getFresh ? host.getFresh() : null) || []).map(one => [one.id, one.seq]));
     const rows = [];
     const itemRow = (item) => {
@@ -1180,13 +1180,6 @@ function panelMeetingItems(event, box, host = MEETING_HOST_CARD) {
       const next = item.type === 'check' ? waitingNextItem(item.id) : null;
       if (next) rows.push(waitingNextRow(next));
     };
-    const settled = real.filter(item => !recentSeq.has(item.id));
-    meetingItemGroups().forEach(([type, label]) => {
-      const items = settled.filter(item => meetingItemGroup(item.type) === type);
-      if (!items.length) return; // 빈 구역은 소제목째 없다
-      rows.push(meetingSubhead(label, items.length));
-      items.forEach(itemRow);
-    });
     const recent = [
       ...real.filter(item => recentSeq.has(item.id)).map(item => ({ seq: recentSeq.get(item.id), item })),
       ...local.map(entry => ({ seq: entry.seq, entry })),
@@ -1199,18 +1192,33 @@ function panelMeetingItems(event, box, host = MEETING_HOST_CARD) {
       if (saved) { itemRow(saved); return; }
       rows.push(meetingLocalRow(entry, event, linked, host));
     });
+    const settled = real.filter(item => !recentSeq.has(item.id));
+    meetingItemGroups().forEach(([type, label]) => {
+      const items = settled.filter(item => meetingItemGroup(item.type) === type);
+      if (!items.length) return; // 빈 구역은 소제목째 없다
+      rows.push(meetingSubhead(label, items.length));
+      items.forEach(itemRow);
+    });
     list.replaceChildren(...rows);
     const added = rows.find(row => String(row.className).includes('is-new'));
     const count = real.length + local.length;
     number.textContent = String(count);
-    section.hidden = !count;
+    // 기록된 회의는 입력줄이 구역 안에 있어 늘 보인다(0이면 개수만 숨김). 기록 안 된 회의의 `방금 담은 것`은 담은 게 있을 때만.
+    number.hidden = !count;
+    if (!linked) section.hidden = !count;
     hint.hidden = !blank || !!count;
     // 방금 적은 줄(또는 다른 구역으로 옮겨 간 줄)이 보이게.
     if (added && added.scrollIntoView) added.scrollIntoView({ block: 'nearest' });
     meetingTypeOrphan(host);
   };
   box.meetingRepaint = paint;
-  box.append(section, hint);
+  if (linked) {
+    section.append(capture, hint, list);
+    box.appendChild(section);
+  } else {
+    section.appendChild(list);
+    box.append(capture, section, hint);
+  }
   paint();
 }
 
@@ -1245,10 +1253,11 @@ function panelMeetingPast(event, box, host = MEETING_HOST_CARD) {
   paint();
 }
 
-// 카드 발에 붙박인 입력줄 — 평소 맨 줄, 초점에서만 흰 면 + 파란 테. 칸은 저장 중에도 잠그지 않는다.
+// `이 회의에서 나온 것` 맨 위 입력줄 — 평소 맨 줄, 초점에서만 흰 면 + 파란 테. 칸은 저장 중에도 잠그지 않는다.
+// 만든 줄을 돌려주고, 붙이는 자리는 panelMeetingItems가 정한다.
 function panelMeetingCapture(event, box, linked, host = MEETING_HOST_CARD) {
   const foot = document.createElement('div');
-  foot.className = 'd-dbar d-qfoot';
+  foot.className = 'd-qtop';
   const line = document.createElement('label');
   line.className = 'd-qin';
   const plus = document.createElement('span');
@@ -1317,7 +1326,7 @@ function panelMeetingCapture(event, box, linked, host = MEETING_HOST_CARD) {
   line.append(plus, input, kind);
   foot.appendChild(line);
   box.meetingInput = input;
-  box.appendChild(foot);
+  return foot;
 }
 
 // ---------- 회의 프로젝트를 연결·변경·해제한 뒤: 이미 담은 것도 옮길까요·뺄까요? ----------

@@ -2939,7 +2939,7 @@ test('종류 구역: 줄 옆 카드와 회의 탭은 같은 함수로 같은 구
   app.run("panelState = { kind: 'meeting', id: 'ops1', fresh: [{ id: 't2', seq: 1 }] }; meetingsTabState.fresh = [{ id: 't2', seq: 1 }];");
   const card = meetingSection(app, "panelMeetingItems(workflowData.meetings[0], box, MEETING_HOST_CARD)");
   const tab = meetingSection(app, "panelMeetingItems(workflowData.meetings[0], box, MEETING_HOST_TAB)");
-  assert.deepEqual(meetingGroupShape(card), ['# 할 일 1', '권한 범위 확인', '# 확인 대기 1', '법무 회신 받기', '# 결정 1', '재시도는 3회', '# 방금 담은 것 1', '발송 정책 검토']);
+  assert.deepEqual(meetingGroupShape(card), ['# 방금 담은 것 1', '발송 정책 검토', '# 할 일 1', '권한 범위 확인', '# 확인 대기 1', '법무 회신 받기', '# 결정 1', '재시도는 3회']);
   assert.deepEqual(meetingGroupShape(tab), meetingGroupShape(card));
   assert.equal(nodeFind(card.children[0], 'n').textContent, '4', '머리 숫자는 `방금 담은 것`까지 센다');
   // 회의 탭은 다른 회의를 골랐다 돌아오면 `방금 담은 것`을 비운다(그 줄은 제 구역으로 간다).
@@ -3018,7 +3018,6 @@ function meetingCaptureClient({ linked = true } = {}) {
     function __draw() {
       __box = document.createElement('div');
       panelMeetingItems(__event, __box, __host);
-      panelMeetingCapture(__event, __box, ${linked}, __host);
       return __box;
     }
     __draw();
@@ -3031,10 +3030,12 @@ function meetingCaptureClient({ linked = true } = {}) {
   return { app, held, box, input, enter, rows, titles };
 }
 
-test('회의 적기: 입력줄은 카드 발에 있고(placeholder 한 줄), 접히는 `직접 적어 담기`·세그먼트·추가 버튼은 없다', () => {
+test('회의 적기: 입력줄은 `이 회의에서 나온 것` 맨 위에 있고(placeholder 한 줄), 접히는 `직접 적어 담기`·세그먼트·추가 버튼은 없다', () => {
   const { box, input } = meetingCaptureClient();
-  const foot = box().children[box().children.length - 1];
-  assert.equal(foot.className, 'd-dbar d-qfoot', '발 — 줄 옆 카드·회의 탭이 붙박는 그 자리다');
+  const section = box().children[0];
+  assert.equal(section.children[0].textContent.startsWith('이 회의에서 나온 것'), true, '구역 제목 바로 아래');
+  const foot = section.children[1];
+  assert.equal(foot.className, 'd-qtop', '구역 맨 위 — 프로젝트 탭의 `+ 할 일 추가`와 같은 자리');
   assert.equal(foot.children[0].className, 'd-qin');
   assert.equal(input().placeholder, '회의에서 나온 것 적기');
   assert.equal(input().getAttribute('aria-label'), '회의에서 나온 것 적기');
@@ -3042,10 +3043,11 @@ test('회의 적기: 입력줄은 카드 발에 있고(placeholder 한 줄), 접
   assert.equal(nodeFind(box(), 'd-dadd'), null, '접히는 구역이 아니다');
   assert.equal(nodeFind(box(), 'd-seg'), null, '종류 세그먼트가 없다');
   assert.equal(nodeFindAll(box(), 'd-btn').length, 0, '추가 버튼이 없다');
-  // 빈 회의에는 안내 한 줄만 있고, 목록 구역은 숨는다.
+  // 빈 회의에는 입력줄 아래 안내 한 줄만 있고, 구역은 입력줄 때문에 늘 서되 0개면 개수를 숨긴다.
   assert.equal(nodeFind(box(), 'd-hint').textContent, '적고 Enter를 누르면 바로 담겨요.');
   assert.equal(nodeFind(box(), 'd-hint').hidden, false);
-  assert.equal(box().children[0].hidden, true);
+  assert.equal(section.hidden, false);
+  assert.equal(nodeFind(section, 'n').hidden, true);
 });
 
 test('회의 적기: Enter 세 번 → 줄 셋이 바로 서고, 저장은 적은 순서대로 한 건씩 나가며 칸은 잠기지 않고 초점도 그대로다', async () => {
@@ -3192,7 +3194,8 @@ test('회의 적기: 기록되지 않은 회의는 지금처럼 회의에 연결
     ['/api/today-task/create', { description: '바로 담는 할 일', group: '결제 리뉴얼' }],
     ['/api/waiting/create', { description: '바로 담는 확인', group: '결제 리뉴얼' }],
   ]);
-  assert.equal(box().children[0].children[0].textContent, '방금 담은 것');
+  assert.equal(box().children[0].className, 'd-qtop', '기록 안 된 회의도 입력줄이 맨 위');
+  assert.equal(box().children[1].children[0].textContent, '방금 담은 것');
   assert.deepEqual(rows().map(row => nodeFind(row, 'ti').textContent), ['바로 담는 할 일', '바로 담는 확인'], '담은 줄은 이 자리에 남아 보인다');
   assert.equal(nodeFind(box(), 'd-mgrp'), null, '기록되지 않은 회의는 구역 제목이 이미 `방금 담은 것`이라 종류 소제목을 두지 않는다');
 });
@@ -3200,7 +3203,7 @@ test('회의 적기: 기록되지 않은 회의는 지금처럼 회의에 연결
 // 회의 카드(줄 옆 카드·회의 탭)의 목록을 구역째 읽는다.
 const meetingCaptureGroups = box => meetingGroupShape(nodeFind(box, 'd-mlist'));
 
-test('회의 적기 + 종류 구역: 입력줄로 담은 줄은 종류 구역으로 튀어 들어가지 않고 맨 끝 `방금 담은 것`에 적은 순서대로 선다 — 다시 열면 제 구역으로', async () => {
+test('회의 적기 + 종류 구역: 입력줄로 담은 줄은 종류 구역으로 튀어 들어가지 않고 맨 위 `방금 담은 것`(입력줄 바로 아래)에 적은 순서대로 선다 — 다시 열면 제 구역으로', async () => {
   const { app, held, enter, box, input } = meetingCaptureClient();
   // 이미 담긴 줄 하나(초안 담기로 들어온 것과 같다 — 바로 제 구역).
   app.run("__saved.push({ id: 'old', type: 'task', status: 'to-do', description: '이미 있던 일', meetingId: 'mc1' }); load().then(() => { loaded = 0; __draw(); });");
@@ -3208,17 +3211,17 @@ test('회의 적기 + 종류 구역: 입력줄로 담은 줄은 종류 구역으
   assert.deepEqual(meetingCaptureGroups(box()), ['# 할 일 1', '이미 있던 일']);
   const el = input();
   const sending = [enter('?법무 회신'), enter('새로 적은 일'), enter('!배포는 목요일')];
-  assert.deepEqual(meetingCaptureGroups(box()), ['# 할 일 1', '이미 있던 일', '# 방금 담은 것 3', '법무 회신', '새로 적은 일', '배포는 목요일'],
-    '담는 중인 줄도 `방금 담은 것`에 — 입력줄 바로 위');
+  assert.deepEqual(meetingCaptureGroups(box()), ['# 방금 담은 것 3', '법무 회신', '새로 적은 일', '배포는 목요일', '# 할 일 1', '이미 있던 일'],
+    '담는 중인 줄도 `방금 담은 것`에 — 입력줄 바로 아래');
   for (let index = 0; index < 3; index += 1) { await settle(); held[index].ok(); }
   await Promise.all(sending);
-  assert.deepEqual(meetingCaptureGroups(box()), ['# 할 일 1', '이미 있던 일', '# 방금 담은 것 3', '법무 회신', '새로 적은 일', '배포는 목요일'],
+  assert.deepEqual(meetingCaptureGroups(box()), ['# 방금 담은 것 3', '법무 회신', '새로 적은 일', '배포는 목요일', '# 할 일 1', '이미 있던 일'],
     '저장되어 진짜 줄이 된 뒤에도(다시 읽어도) 그 자리 그대로 시간순');
   assert.equal(input(), el, '입력줄은 그대로');
   assert.equal(nodeFind(box(), 'n').textContent, '4', '머리 숫자는 전체');
-  assert.ok(nodeFindAll(nodeFind(box(), 'd-mlist'), 'd-mrow2').slice(1).every(row => !row.className.includes('is-local')), '체크·⋯가 있는 진짜 줄');
+  assert.ok(nodeFindAll(nodeFind(box(), 'd-mlist'), 'd-mrow2').slice(0, 3).every(row => !row.className.includes('is-local')), '체크·⋯가 있는 진짜 줄');
   app.run('__draw()');
-  assert.deepEqual(meetingCaptureGroups(box()).slice(-4), ['# 방금 담은 것 3', '법무 회신', '새로 적은 일', '배포는 목요일'], '자동으로 다시 그려도 옮기지 않는다');
+  assert.deepEqual(meetingCaptureGroups(box()).slice(0, 4), ['# 방금 담은 것 3', '법무 회신', '새로 적은 일', '배포는 목요일'], '자동으로 다시 그려도 옮기지 않는다');
   // 카드를 닫았다 다시 열면(이 자리의 `방금 담은 것`이 새로 시작) 제 종류 구역으로 들어간다.
   app.run('__fresh = []; __draw();');
   assert.deepEqual(meetingCaptureGroups(box()),
@@ -3233,8 +3236,8 @@ test('회의 적기 + 종류 구역: 저장 중에 다시 열어도 그 줄은 �
   await settle(); held[0].ok();
   await settle(); held[1].fail();
   await Promise.all(sending);
-  assert.deepEqual(meetingCaptureGroups(box()), ['# 할 일 1', '담는 중에 다시 연 줄', '# 방금 담은 것 1', '못 담을 줄']);
-  assert.match(nodeFindAll(nodeFind(box(), 'd-mlist'), 'd-mrow2')[1].className, /is-fail/, '못 담았어요 · 다시 시도 줄 그대로');
+  assert.deepEqual(meetingCaptureGroups(box()), ['# 방금 담은 것 1', '못 담을 줄', '# 할 일 1', '담는 중에 다시 연 줄']);
+  assert.match(nodeFindAll(nodeFind(box(), 'd-mlist'), 'd-mrow2')[0].className, /is-fail/, '못 담았어요 · 다시 시도 줄 그대로');
 });
 
 test('종류 구역 + 종류 바꾸기: 구역의 줄은 새 구역으로 옮겨 가 떠오르고(.is-new, 빈 구역은 사라짐), `방금 담은 것`의 줄은 글자만 바뀌고 제자리다', async () => {
@@ -3260,12 +3263,12 @@ test('종류 구역 + 종류 바꾸기: 구역의 줄은 새 구역으로 옮겨
   };
   await enter('방금 적은 일');
   await settle();
-  assert.deepEqual(meetingCaptureGroups(box()).slice(-2), ['# 방금 담은 것 1', '방금 적은 일']);
+  assert.deepEqual(meetingCaptureGroups(box()).slice(0, 2), ['# 방금 담은 것 1', '방금 적은 일']);
   const fresh = () => rows().find(row => row.dataset.taskId === 'new1');
   nodeFind(fresh(), 'd-tpk').listeners.click({});
   await pop().children[1].listeners.click();
   await settle();
-  assert.deepEqual(meetingCaptureGroups(box()), ['# 확인 대기 1', '끝난 확인', '# 결정 1', 'QA 체크리스트 공유', '# 방금 담은 것 1', '방금 적은 일'], '제자리');
+  assert.deepEqual(meetingCaptureGroups(box()), ['# 방금 담은 것 1', '방금 적은 일', '# 확인 대기 1', '끝난 확인', '# 결정 1', 'QA 체크리스트 공유'], '제자리');
   assert.equal(nodeFind(nodeFind(fresh(), 'd-tpk'), 'tl').textContent, '확인 대기', '글자만 바뀐다');
   assert.doesNotMatch(fresh().className, /is-new/, '제자리 줄은 떠오르지 않는다');
   assert.ok(held);
@@ -3496,7 +3499,7 @@ test('종류 목록: 완료한 항목과 담는 중인 줄의 종류 글자는 �
   assert.equal(done.listeners.click, undefined);
   assert.ok(held);
   enter('방금 적은 줄');
-  const pending = nodeFind(rows()[2], 'd-tpk');
+  const pending = nodeFind(rows()[0], 'd-tpk');
   assert.equal(pending.disabled, true);
   assert.equal(nodeFind(pending, 'tl').textContent, '할 일');
 });
@@ -5756,11 +5759,12 @@ test('panelMeeting: `● 녹음` 입구와 `녹음본` 구역', () => {
   assert.match(nodeText(row), /미팅 노트 가져옴/);
   assert.ok(row.children.some(node => node.textContent === '● 녹음 (Beta)'), '노트 줄 끝에 붙는다');
   assert.equal(nodeFind(box, 'd-drec'), null, '줄을 하나 더 만들지 않는다');
-  assert.match(fs.readFileSync(path.join(__dirname, 'meeting-record-ui.js'), 'utf8'), /meetingSection\('녹음본 \(Beta\)'/, '구역 제목에 (Beta)');
+  assert.match(fs.readFileSync(path.join(__dirname, 'meeting-record-ui.js'), 'utf8'), /meetingSection\('회의 요약 \(Beta\)'/, '구역 제목에 (Beta)');
   const recs = nodeFind(box, 'd-reclist');
   assert.ok(recs);
-  const rows = recs.children.filter(node => node.className === 'd-recrow');
+  const rows = recs.children.map(one => nodeFind(one, 'd-recrow')).filter(Boolean);
   assert.equal(rows.length, 2);
+  assert.equal(recs.children[0].children[0].className, 'rc-body', '녹음 하나 안에서 요약이 먼저, 녹음 줄은 그 아래');
   assert.match(nodeText(rows[0]), /30초/, '최신이 위');
   assert.match(nodeText(rows[1]), /12분 34초/);
   // 이 버전 전에 녹음한 녹음본(상태 없음)은 `전사·요약 시작`
@@ -5776,7 +5780,7 @@ test('panelMeeting: `● 녹음` 입구와 `녹음본` 구역', () => {
   assert.equal(nodeFind(looseBox, 'd-reclist'), null);
 
   // 다시 그려도 같은 녹음본의 재생기는 같은 것(듣던 자리가 끊기지 않게)
-  const again = nodeFind(nodeFind(draw('__past'), 'd-reclist').children.filter(node => node.className === 'd-recrow')[0], 'rc-audio');
+  const again = nodeFind(nodeFind(nodeFind(draw('__past'), 'd-reclist').children[0], 'd-recrow'), 'rc-audio');
   assert.equal(again, audio);
   // 녹음본만 있는 회의도 `기록 있는 회의`라 기본 목록에서 숨지 않는다
   assert.equal(app.run('meetingHasRecord({ id: "r1", drafts: [], recordings: [{ id: "0123456789abcdef" }] }, () => [])'), true);
@@ -5800,10 +5804,9 @@ test('panelMeeting: 녹음본의 전사·요약 상태', () => {
   assert.match(text, /말소리를 찾지 못했어요 다시 시도/);
   assert.match(text, /출시는 화요일로 확정/);
   assert.match(text, /결정\s+1\s+출시 화요일/);
-  assert.match(text, /할 일\s+1\s+버그 목록 공유 \(화자2\)/, '할 일은 요약 안에서도 바로 보인다');
-  assert.match(text, /아래 AI 초안에서 골라 담아요/);
+  assert.doesNotMatch(text, /버그 목록 공유/, '할 일은 요약에 다시 적지 않는다 — 카드 위쪽 AI 초안·이 회의에서 나온 것이 맡는다');
   assert.match(text, /요약 다시 하기\s+·\s+전사부터 다시 하기/, '요약만 · 처음부터 둘 다 고를 수 있다');
-  assert.match(text, /할 일\s+1\s+버그 목록 공유/, '묶음 이름 옆에 개수');
+  assert.match(text, /결정\s+1\s+출시 화요일/, '묶음 이름 옆에 개수');
   assert.match(text, /1분/, '길이는 말로(시각과 헷갈리지 않게)');
   assert.match(text, /전사본 보기 · 화자 2명/);
   const row = nodeFind(box, 'd-dget');
