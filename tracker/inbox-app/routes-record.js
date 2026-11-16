@@ -220,7 +220,7 @@ module.exports = function recordRoutes(req, res, url, ctx) {
     for (const event of workflows.snapshot().meetings) {
       for (const recording of Array.isArray(event.recordings) ? event.recordings : []) {
         const stale = BUSY.includes(recording.status) && recording.status !== 'queued' && now - Date.parse(recording.updatedAt || recording.createdAt || 0) > STALE_MS;
-        if (recording.status === 'queued' || stale) jobs.push({ meetingId: event.id, recId: recording.id, seconds: recording.seconds || 0, date: event.date || '', title: event.title || '', ...(recording.status === 'queued' && recording.redo === 'summary' ? { only: 'summary' } : {}) });
+        if (recording.status === 'queued' || stale) jobs.push({ meetingId: event.id, recId: recording.id, seconds: recording.seconds || 0, date: event.date || '', title: event.title || '', ...(recording.redo === 'summary' ? { only: 'summary' } : {}) });
       }
     }
     jobs.sort((a, b) => a.recId.localeCompare(b.recId));

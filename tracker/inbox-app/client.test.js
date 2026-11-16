@@ -5761,8 +5761,8 @@ test('panelMeeting: `● 녹음` 입구와 `녹음본` 구역', () => {
   assert.ok(recs);
   const rows = recs.children.filter(node => node.className === 'd-recrow');
   assert.equal(rows.length, 2);
-  assert.match(nodeText(rows[0]), /00:30/, '최신이 위');
-  assert.match(nodeText(rows[1]), /12:34/);
+  assert.match(nodeText(rows[0]), /30초/, '최신이 위');
+  assert.match(nodeText(rows[1]), /12분 34초/);
   // 이 버전 전에 녹음한 녹음본(상태 없음)은 `전사·요약 시작`
   assert.match(nodeText(recs), /아직 글로 옮기지 않은 녹음본이에요/);
   assert.ok(nodeText(recs).includes('전사·요약 시작'));
@@ -5799,11 +5799,11 @@ test('panelMeeting: 녹음본의 전사·요약 상태', () => {
   assert.match(text, /글로 옮기고 말한 사람을 나누는 중이에요/);
   assert.match(text, /말소리를 찾지 못했어요 다시 시도/);
   assert.match(text, /출시는 화요일로 확정/);
-  assert.match(text, /결정 출시 화요일/);
-  assert.match(text, /할 일 버그 목록 공유 \(화자2\)/, '할 일은 요약 안에서도 바로 보인다');
+  assert.match(text, /결정\s+1\s+출시 화요일/);
+  assert.match(text, /할 일\s+1\s+버그 목록 공유 \(화자2\)/, '할 일은 요약 안에서도 바로 보인다');
   assert.match(text, /아래 AI 초안에서 골라 담아요/);
-  assert.match(text, /요약 다시 하기 · 전사부터 다시 하기/, '요약만 · 처음부터 둘 다 고를 수 있다');
-  assert.match(text, /할 일 1 버그 목록 공유/, '묶음 이름 옆에 개수');
+  assert.match(text, /요약 다시 하기\s+·\s+전사부터 다시 하기/, '요약만 · 처음부터 둘 다 고를 수 있다');
+  assert.match(text, /할 일\s+1\s+버그 목록 공유/, '묶음 이름 옆에 개수');
   assert.match(text, /1분/, '길이는 말로(시각과 헷갈리지 않게)');
   assert.match(text, /전사본 보기 · 화자 2명/);
   const row = nodeFind(box, 'd-dget');

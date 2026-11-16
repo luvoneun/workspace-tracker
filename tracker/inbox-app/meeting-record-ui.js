@@ -568,7 +568,9 @@ function meetingRecBody(event, recording, host) {
     const count = document.createElement('span');
     count.className = 'rc-n';
     count.textContent = String(items.length);
-    name.append(label, ' ', count);
+    const title = document.createElement('span');
+    title.textContent = `${label} `;
+    name.append(title, count);
     const ul = document.createElement('ul');
     items.forEach((text) => { const li = document.createElement('li'); li.textContent = text; ul.appendChild(li); });
     wrap.append(name, ul);
@@ -594,8 +596,7 @@ function meetingRecBody(event, recording, host) {
   if (summary.error) {
     const fail = document.createElement('p');
     fail.className = 'rc-state rc-fail';
-    fail.append(summary.error, ' ');
-    if (recording.transcript) fail.appendChild(meetingRecRetryButton(event, recording, host, '요약 다시 하기', 'summary'));
+    fail.textContent = summary.error;
     foot.appendChild(fail);
   }
   if (recording.transcript) foot.appendChild(meetingRecTranscriptNode(event, recording));
@@ -605,7 +606,10 @@ function meetingRecBody(event, recording, host) {
   const summaryAgain = recording.transcript ? meetingRecRetryButton(event, recording, host, '요약 다시 하기', 'summary') : null;
   if (summaryAgain) {
     summaryAgain.title = '전사본은 그대로 두고 요약과 할 일만 새로 뽑아요 — 1~2분';
-    again.append(summaryAgain, ' · ');
+    const sep = document.createElement('span');
+    sep.className = 'sep';
+    sep.textContent = ' · ';
+    again.append(summaryAgain, sep);
   }
   const fullAgain = meetingRecRetryButton(event, recording, host, '전사부터 다시 하기');
   fullAgain.title = '녹음을 처음부터 다시 글로 옮기고 말한 사람을 나눠요 — 회의 길이에 따라 몇 분 걸려요';

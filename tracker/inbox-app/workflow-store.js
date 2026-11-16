@@ -833,7 +833,9 @@ module.exports = function workflowStore({ directory, refs, calendar, today, vali
     if (speakers !== undefined) next.speakers = Math.max(0, Math.min(50, Number(speakers) || 0));
     if (summary !== undefined) next.summary = summary;
     // redo: 'summary' — 전사본은 두고 요약만 다시(대기 중일 때만 붙어 있다). 그 밖의 대기는 처음부터.
-    if (status === 'queued' && redo === 'summary') next.redo = 'summary'; else delete next.redo;
+    // 요약 중(summarizing)에도 남긴다 — 실행기가 그 사이 죽어 3시간 뒤 다시 돌 때도 요약만 다시 하게.
+    if (status === 'queued' && redo === 'summary') next.redo = 'summary';
+    else if (!(status === 'summarizing' && list[index].redo === 'summary')) delete next.redo;
     if (status === 'queued') { delete next.summary; delete next.summaryError; }
     const recordings = list.slice();
     recordings[index] = next;

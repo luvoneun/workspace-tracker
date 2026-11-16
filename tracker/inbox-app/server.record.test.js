@@ -280,6 +280,11 @@ test('실행기: 가짜 도구(ffmpeg·whisper·sherpa·claude)로 녹음 하나
     assert.equal(redo.recording.transcript, true, '전사본은 그대로');
     const queued = (await (await fetch(`${base}/api/meeting/recording/queue`)).json()).jobs.find(job => job.recId === recording.id);
     assert.equal(queued.only, 'summary');
+    // 요약 중에도 범위를 잊지 않는다(실행기가 죽어 오래 뒤 다시 돌 때도 요약만)
+    assert.equal((await progress({ recId: recording.id, stage: 'summarizing' })).recording.redo, 'summary');
+    assert.equal((await progress({ recId: recording.id, stage: 'transcribing' })).recording.redo, undefined, '전사 단계로 가면 처음부터');
+    await progress({ recId: recording.id, stage: 'done', summary: null, summaryError: 'x' });
+    assert.equal((await support.post('/api/meeting/recording/retry', { meetingId: MEETING, recId: recording.id, only: 'summary' })).recording.redo, 'summary');
     const again = { ...env,
       WORKSPACE_FFMPEG: '/nonexistent/ffmpeg', WORKSPACE_WHISPER: '/nonexistent/whisper', WORKSPACE_SHERPA_DIARIZE: '/nonexistent/sherpa',
       CLAUDE_BIN: script('claude2', "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{ if(!s.includes('버그 목록은 제가 공유할게요'))process.exit(2); console.log(JSON.stringify({headline:'다시 한 요약',topics:[],decisions:['출시는 화요일'],actions:[{task:'릴리스 노트 쓰기',owner:'',due:''}]})); });"),
