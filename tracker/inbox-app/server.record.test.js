@@ -391,6 +391,11 @@ test('설치: 확인 값(sha256)이 다르면 실패로 적고 받은 파일을 
     const big = await meetingTools.install({ env, manifest: [{ ...manifest[0], size: 3 }], fetchImpl: async () => new Response(body), run: async () => ({ code: 0 }) });
     assert.equal(big.error, meetingTools.WORDS.checksum);
     assert.deepEqual(fs.readdirSync(path.join(dir, 'downloads')), []);
+    // 지난 회차가 끊겨 남긴 반쪽 파일은 이번 받기가 404로 일찍 끝나도 치운다
+    fs.writeFileSync(path.join(dir, 'downloads', 'model.part'), 'half');
+    const gone = await meetingTools.install({ env, manifest, fetchImpl: async () => new Response('', { status: 404 }), run: async () => ({ code: 0 }) });
+    assert.equal(gone.error, meetingTools.WORDS.notFound);
+    assert.deepEqual(fs.readdirSync(path.join(dir, 'downloads')), [], '404여도 옛 반쪽 파일이 남지 않는다');
     // 인텔 맥이면 받지 않는다
     const intel = await meetingTools.install({ env: { ...env, WORKSPACE_MEETING_ARCH: 'x64' }, manifest, fetchImpl: async () => { throw new Error('받으면 안 됨'); } });
     assert.equal(intel.unsupported, true);

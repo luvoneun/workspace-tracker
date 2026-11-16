@@ -163,6 +163,7 @@ function takeLock(dir) {
 
 // 하나 받기: `.part`에 흘려 쓰며 sha256을 재고, 크기·값이 맞을 때만 돌려준다. 틀리면 `.part`를 지운다.
 async function download(item, part, onBytes, fetchImpl) {
+  try { fs.rmSync(part, { force: true }); } catch {} // 지난 회차가 남긴 반쪽 파일 — 받기 전에 먼저 치운다(아래에서 일찍 실패해도 남지 않게)
   let response;
   try { response = await fetchImpl(item.url, { signal: AbortSignal.timeout(60 * 60 * 1000) }); }
   catch { throw fail(WORDS.network); }
@@ -181,7 +182,15 @@ async function download(item, part, onBytes, fetchImpl) {
       size += value.length;
       if (size > item.size) { try { await reader.cancel(); } catch {} throw fail(WORDS.checksum); }
       hash.update(value);
-      if (!out.write(value)) await new Promise(resolve => out.once('drain', resolve));
+      // 디스크가 차면 drain 없이 error만 온다 — 둘 중 먼저 오는 것을 기다린다(영영 멈춰 잠금을 쥐지 않게)
+      if (!out.write(value)) {
+        await new Promise((resolve, reject) => {
+          const drained = () => { out.off('error', broke); resolve(); };
+          const broke = (err) => { out.off('drain', drained); reject(err); };
+          out.once('drain', drained);
+          out.once('error', broke);
+        });
+      }
       onBytes(value.length);
     }
     out.end();
@@ -231,6 +240,7 @@ async function install({ run, env = process.env, fetchImpl = fetch, manifest = l
   fs.mkdirSync(path.join(dir, 'downloads'), { recursive: true });
   const release = takeLock(dir);
   if (!release) return { ok: false, busy: true };
+  let heartbeat = null;
   try {
     const need = new Set(missing(locate(env), env));
     const items = manifest.filter(item => need.has(item.id));
@@ -243,13 +253,18 @@ async function install({ run, env = process.env, fetchImpl = fetch, manifest = l
       shownAt = now;
       writeStatus({ stage, step, bytes, total, percent: total ? Math.floor((bytes / total) * 100) : 100, pid: process.pid }, env);
     };
-    show('downloading', items[0] ? items[0].id : '', true);
+    let current = { stage: 'downloading', step: items[0] ? items[0].id : '' };
+    const beat = (stage, step, force) => { current = { stage, step }; show(stage, step, force); };
+    // 느린 망에서 한동안 바이트가 안 들어와도 실행기가 살아 있는 동안은 '받는 중'으로 보이게 — 30초마다 같은 진행을 다시 적는다.
+    heartbeat = setInterval(() => show(current.stage, current.step, true), 30 * 1000);
+    if (heartbeat.unref) heartbeat.unref();
+    beat('downloading', current.step, true);
     for (const item of items) {
       const part = path.join(dir, 'downloads', `${item.id}.part`);
       log(`${item.label} 받는 중 (${Math.round(item.size / 1024 / 1024)}MB)`);
-      show('downloading', item.id, true);
+      beat('downloading', item.id, true);
       await download(item, part, (n) => { bytes += n; show('downloading', item.id, false); }, fetchImpl);
-      show('extracting', item.id, true);
+      beat('extracting', item.id, true);
       try {
         if (item.kind === 'tar') await unpack(item, part, dir, run);
         else {
@@ -269,6 +284,7 @@ async function install({ run, env = process.env, fetchImpl = fetch, manifest = l
     writeStatus({ stage: 'failed', error: reason }, env);
     return { ok: false, error: reason };
   } finally {
+    if (heartbeat) clearInterval(heartbeat);
     release();
   }
 }
