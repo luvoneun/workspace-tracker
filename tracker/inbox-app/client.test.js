@@ -5770,7 +5770,7 @@ test('panelMeeting: `● 녹음` 입구와 `녹음본` 구역', () => {
   assert.ok(folds.every(fold => fold.className === 'rc-fold' && fold.getAttribute('aria-expanded') === 'false'), '처음엔 접힌 한 줄');
   assert.ok(recs.children.every(one => one.children[1].className === 'rc-open' && one.children[1].hidden === true), '펼칠 곳은 숨어 있다');
   assert.equal(recs.children[0].children[1].children[0].className, 'rc-body', '펼치면 요약이 먼저, 녹음 줄은 그 아래');
-  assert.match(nodeText(folds[0]), /30초/, '최신이 위 — 시각·길이는 접힌 줄에');
+  assert.match(nodeText(folds[0]), /^회의록.*30초/, '접힌 줄은 `회의록` · 시각·길이 — 최신이 위');
   assert.match(nodeText(folds[1]), /12분 34초/);
   assert.match(nodeText(folds[1]), /아직 글로 옮기지 않은 녹음본/, '접힌 줄에 상태');
   folds[0].listeners.click();
