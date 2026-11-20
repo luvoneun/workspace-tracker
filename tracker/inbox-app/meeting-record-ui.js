@@ -4,7 +4,7 @@
 // 브라우저는 사람이 연 창을 스스로 닫지 못하고, 알약은 그 알약을 띄운 탭이 닫히면 함께 닫힌다. 그래서 녹음 조각을 1초마다
 // 이 브라우저 안(IndexedDB)에 적어 둔다 — 녹음 중에 창을 닫거나 맥이 꺼져도, 다음에 앱을 열면 거기까지를 그 회의에 저장한다.
 // 이 파일은 ① 입구(meetingRecordNodes)와 녹음 ② 다른 탭과 상태 나누기(BroadcastChannel) ③ 끊긴 녹음 되살리기
-// ④ 패널의 `녹음본` 목록(재생·옮기기·삭제·전사·요약) ⑤ 음성 인식 도구를 처음 쓸 때 저절로 받기(준비 요청·받는 중 %)를 맡는다.
+// ④ 패널의 `녹음본` 목록(재생·옮기기·삭제·전사·요약) ⑤ 처음 녹음하기 전에 음성 인식 도구 받기(준비 요청·받는 동안 녹음 버튼 잠금·받는 중 %)를 맡는다.
 // meetings-ui.js의 panelMeeting이 ①·④를 부른다.
 
 const meetingRecChannel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('workspace-meeting-record') : null;
@@ -213,8 +213,15 @@ async function meetingRecStart(event) {
     meetingRecSay(live.meetingId === event.id ? '이미 이 회의를 녹음하고 있어요.' : '다른 회의를 녹음하고 있어요. 그 녹음을 먼저 멈춰 주세요.');
     return;
   }
-  // 음성 인식 도구가 없으면 녹음하는 동안 받아 두게 부탁한다 — 기다리지 않는다(알약은 사람이 누른 직후에만 열린다).
-  meetingRecPrepareTools().catch(() => {});
+  // 음성 인식 도구를 다 받기 전에는 녹음하지 않는다 — 받기를 부탁하고 기다려 달라고 한다(인텔 맥은 받을 수 없으니 녹음만 한다).
+  // 그릴 때 읽어 둔 상태가 `ready`면 다시 묻지 않고 바로 연다 — 알약은 사람이 누른 직후에만 열린다.
+  if (!(meetingRecTools && meetingRecTools.state === 'ready')) {
+    const tools = await meetingRecPrepareTools();
+    if (tools && tools.state !== 'ready' && tools.state !== 'unsupported') {
+      meetingRecSay(`${MEETING_REC_TOOLS_WORDS.gate(meetingRecToolsSize())}.`);
+      return;
+    }
+  }
   const key = (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`).slice(0, 100);
   const session = { key, meetingId: event.id, state: 'starting', chunks: [], seq: 0, startTs: 0, pausedAcc: 0, pauseStart: 0, seconds: 0, pip: null, pill: null, timer: null, beat: null, recorder: null, stream: null, type: '' };
   meetingRecSession = session;
@@ -454,7 +461,6 @@ function meetingRecordNodes(event, host) {
       nodes.push(meetingRecLink(live.state === 'paused' ? '다시 시작' : '일시정지', meetingRecTogglePause));
       nodes.push(meetingRecLink('정지하고 저장', meetingRecStop));
     }
-    if (live.local) nodes.push(...meetingRecToolsLiveNodes());
     return nodes;
   }
   const btn = document.createElement('button');
@@ -462,7 +468,10 @@ function meetingRecordNodes(event, host) {
   btn.className = 'd-btn sm';
   btn.textContent = '● 녹음 (Beta)';
   btn.addEventListener('click', () => meetingRecStart(event));
-  nodes.push(btn);
+  // 음성 인식 도구를 받는 중(또는 이 탭에서 부탁했다 실패)이면 녹음 버튼은 눌리지 않고 옆에 기다려 달라는 줄이 선다.
+  const gate = meetingRecToolsGateNodes();
+  btn.disabled = gate.length > 0;
+  nodes.push(btn, ...gate);
   return nodes;
 }
 
@@ -523,14 +532,16 @@ function meetingRecordingsNode(event, host) {
   return section;
 }
 
-// ---------- 음성 인식 도구(처음 쓸 때 저절로 받기) ----------
+// ---------- 음성 인식 도구(처음 녹음하기 전에 받기) ----------
 // 서버는 도구 상태만 알려 주고(GET /api/meeting/tools) 준비 요청 파일만 쓴다(POST …/prepare). 받기·깔기는 launchd 실행기가
-// 하고 진행을 install.json에 적는다. 화면은 `● 녹음`을 누를 때 한 번 묻고, 없으면 준비를 부탁한다 — 녹음하는 동안 받고,
-// 정지했을 때 아직이면 녹음본은 `전사 대기`로 기다렸다가 다 깔리면 저절로 전사된다(사람이 누를 것 없음).
+// 하고 진행을 install.json에 적는다. 화면은 `● 녹음`을 누를 때 묻고, 없으면 준비를 부탁하고 녹음은 시작하지 않는다 —
+// 다 받을 때까지 버튼은 눌리지 않고 옆에 `녹음하려면 먼저 … 받아야 해요 — 잠시 기다려 주세요 · 42%`, 다 받으면 알리고 버튼이 살아난다.
+// (도구를 지운 뒤 남은 `전사 대기` 녹음본은 줄에 받는 중 %를 보이고 다 깔리면 저절로 전사된다.)
 // 받는 동안 퍼센트는 그 글자만 바꾼다(다시 그리지 않는다 — 입력·초점이 끊기지 않게). 상태 종류가 바뀔 때만 load().
 const MEETING_REC_TOOLS_WORDS = {
   unsupported: '음성 인식은 애플 실리콘 맥에서만 쓸 수 있어요',
-  live: size => `처음이라 음성 인식 도구(약 ${size})를 받아 둘게요 — 녹음하는 동안 준비돼요`,
+  gate: size => `녹음하려면 먼저 음성 인식 도구(약 ${size})를 받아야 해요 — 잠시 기다려 주세요`,
+  done: '음성 인식 도구를 다 받았어요 — 이제 녹음할 수 있어요.',
   waiting: '음성 인식 도구를 받는 중이에요 — 끝나면 자동으로 시작해요',
   failed: '음성 인식 도구를 받지 못했어요',
   missing: '전사 대기 중이에요 — 음성 인식 도구가 아직 없어요',
@@ -540,7 +551,7 @@ let meetingRecTools = null;       // 서버가 알려 준 상태 { state, percen
 let meetingRecToolsAt = 0;
 let meetingRecToolsReading = null;
 let meetingRecToolsTimer = null;
-let meetingRecToolsAsked = false; // 이 탭에서 녹음을 시작하며 준비를 부탁했다 — 녹음 중 줄에 안내를 붙인다
+let meetingRecToolsAsked = false; // 이 탭에서 `● 녹음`을 눌러 준비를 부탁했다 — 실패 줄·다 받았다는 알림을 보인다
 
 // 화면 모양이 같은 상태끼리 묶는다(받는 중·곧 시작은 같은 줄 — 퍼센트만 다르다).
 const meetingRecToolsLook = t => (!t ? '' : MEETING_REC_TOOLS_ACTIVE.includes(t.state) ? 'active' : t.state);
@@ -551,7 +562,7 @@ function meetingRecToolsSize() {
 function meetingRecToolsText(kind) {
   const t = meetingRecTools || {};
   const percent = t.state === 'installing' && t.percent > 0 ? ` · ${t.percent}%` : '';
-  return (kind === 'live' ? MEETING_REC_TOOLS_WORDS.live(meetingRecToolsSize()) : MEETING_REC_TOOLS_WORDS.waiting) + percent;
+  return (kind === 'gate' ? MEETING_REC_TOOLS_WORDS.gate(meetingRecToolsSize()) : MEETING_REC_TOOLS_WORDS.waiting) + percent;
 }
 function meetingRecToolsPaint() {
   if (typeof document === 'undefined' || !document.querySelectorAll) return;
@@ -562,6 +573,7 @@ function meetingRecToolsSet(data) {
   const before = meetingRecToolsLook(meetingRecTools);
   meetingRecTools = { state: String(data.state), percent: Math.max(0, Math.min(100, Number(data.percent) || 0)), error: String(data.error || ''), size: Number(data.size) || 0 };
   meetingRecToolsAt = Date.now();
+  if (before === 'active' && meetingRecTools.state === 'ready' && meetingRecToolsAsked) meetingRecSay(MEETING_REC_TOOLS_WORDS.done);
   if (before !== meetingRecToolsLook(meetingRecTools)) meetingRecRefresh();
   else meetingRecToolsPaint();
   meetingRecToolsPoll();
@@ -595,13 +607,15 @@ async function meetingRecToolsAsk() {
     return data;
   } catch { return null; }
 }
-// `● 녹음`을 누를 때 — 준비됐으면 아무것도 안 한다. 없거나 지난번에 실패했으면 준비를 부탁한다.
+// `● 녹음`을 누를 때 — 준비됐으면 아무것도 안 한다. 없거나 지난번에 실패했으면 준비를 부탁한다. 아는 상태를 돌려준다
+// (서버에 닿지 못하면 null — 녹음은 막지 않는다).
 async function meetingRecPrepareTools() {
   const now = await meetingRecToolsRead(true);
-  if (!now || now.state === 'ready') return;
+  if (!now || now.state === 'ready' || now.state === 'unsupported') return now;
   meetingRecToolsAsked = true;
   if (now.state === 'missing' || now.state === 'failed') await meetingRecToolsAsk();
-  else meetingRecRefresh();
+  meetingRecRefresh();
+  return meetingRecTools;
 }
 // `다시 받기`·`받기` 버튼.
 function meetingRecToolsAgainButton(label) {
@@ -612,21 +626,23 @@ function meetingRecToolsAgainButton(label) {
   });
   return button;
 }
-// 녹음 중 줄 끝 — 이 탭이 준비를 부탁했고 아직 준비되지 않았을 때만.
-function meetingRecToolsLiveNodes() {
-  const t = meetingRecTools;
-  if (!meetingRecToolsAsked || !t || t.state === 'ready') return [];
+// `● 녹음` 옆 — 받는 중이면 기다려 달라는 줄(퍼센트), 이 탭에서 부탁했다 실패했으면 이유 + `다시 받기`. 그 밖은 없음(버튼이 눌린다).
+function meetingRecToolsGateNodes() {
+  const t = meetingRecToolsWant();
+  if (!t) return [];
   const note = document.createElement('span');
   note.className = 'd-mtlast';
   if (MEETING_REC_TOOLS_ACTIVE.includes(t.state)) {
     note.setAttribute('role', 'status');
-    note.dataset.recTools = 'live';
-    note.textContent = meetingRecToolsText('live');
-    setTimeout(meetingRecToolsPoll, 0);
+    note.dataset.recTools = 'gate';
+    note.textContent = meetingRecToolsText('gate');
     return [note];
   }
-  if (t.state === 'unsupported') { note.textContent = `${MEETING_REC_TOOLS_WORDS.unsupported} — 녹음은 저장돼요`; return [note]; }
-  if (t.state === 'failed') { note.textContent = `${MEETING_REC_TOOLS_WORDS.failed} — ${t.error}`; return [note, meetingRecToolsAgainButton('다시 받기')]; }
+  if (t.state === 'failed' && meetingRecToolsAsked) {
+    note.classList.add('rc-fail');
+    note.textContent = `${MEETING_REC_TOOLS_WORDS.failed} — ${t.error}`;
+    return [note, meetingRecToolsAgainButton('다시 받기')];
+  }
   return [];
 }
 // 전사 대기 녹음본 줄 — 도구가 준비됐거나 아직 모르면 null(원래 `전사 대기 중이에요`).

@@ -5821,11 +5821,12 @@ test('panelMeeting: 녹음본의 전사·요약 상태', () => {
   assert.doesNotMatch(nodeText(row), /미팅 노트 가져옴/, '녹음 요약만 있는 회의를 티로 노트를 가져온 회의로 보지 않는다');
   assert.match(nodeText(row), /이 회의의 미팅 노트 가져오기/);
 });
-// 회의 녹음 — 음성 인식 도구를 처음 쓸 때: `● 녹음`을 누르면 도구가 없을 때만 준비를 부탁하고(서버는 요청 파일만), 녹음 중 줄에
-// 안내 + 퍼센트, 전사 대기 녹음본은 `받는 중이에요 — 끝나면 자동으로 시작해요`, 실패면 이유 + `다시 받기`, 인텔 맥은 다시 하기 없음.
-test('회의 녹음: 음성 인식 도구가 없으면 녹음하는 동안 받아 두고, 전사 대기 줄은 받는 중 % → 실패면 `다시 받기`', async () => {
+// 회의 녹음 — 음성 인식 도구를 처음 쓸 때: `● 녹음`을 누르면 도구가 없을 때만 준비를 부탁하고(서버는 요청 파일만) 녹음은 시작하지 않는다.
+// 다 받을 때까지 버튼은 잠기고 옆에 기다려 달라는 줄 + 퍼센트, 다 받으면 알리고 풀린다. 전사 대기 녹음본은 받는 중 %, 실패면 이유 + `다시 받기`.
+test('회의 녹음: 음성 인식 도구가 없으면 먼저 받고 다 받을 때까지 녹음 버튼을 잠근다, 전사 대기 줄은 받는 중 % → 실패면 `다시 받기`', async () => {
   const { app } = meetingNotesClient([]);
   const sent = [];
+  const said = [];
   const size = 642684966;
   let tools = { ok: true, state: 'missing', size };
   app.context.fetch = async (url, init) => {
@@ -5834,19 +5835,28 @@ test('회의 녹음: 음성 인식 도구가 없으면 녹음하는 동안 받�
     if (url === '/api/meeting/tools') return new Response(JSON.stringify(tools));
     return new Response('{}');
   };
+  app.context.__said = said;
+  app.run('announce = text => __said.push(text);');
   const prepares = () => sent.filter(item => item.url === '/api/meeting/tools/prepare').length;
-  await app.run('meetingRecPrepareTools()');
-  assert.equal(prepares(), 1, '도구가 없으면 준비를 부탁한다');
-  const liveText = () => app.run('meetingRecToolsLiveNodes()').map(node => node.textContent).join(' ');
-  assert.equal(liveText(), '처음이라 음성 인식 도구(약 0.7GB)를 받아 둘게요 — 녹음하는 동안 준비돼요');
-  tools = { ok: true, state: 'installing', percent: 42, size };
-  await app.run('meetingRecToolsRead(true)');
-  assert.match(liveText(), /준비돼요 · 42%$/);
-
-  const rec = (id, extra) => ({ id, file: `${id}.webm`, seconds: 60, size: 1, createdAt: '2026-11-06T01:00:00.000Z', ...extra });
-  const meeting = { id: 'm7', date: meetingNotesDay(0), start: '10:00', title: '도구 회의', drafts: [], recordings: [rec('000000000000000a', { status: 'queued' })] };
+  const meeting = { id: 'm7', date: meetingNotesDay(0), start: '10:00', title: '도구 회의', drafts: [], recordings: [] };
   app.context.__m = meeting;
   app.run('workflowData.meetings = [__m]; wfIndexData();');
+  const entry = () => app.run('meetingRecordNodes(__m, null)');
+  const entryText = () => entry().map(node => node.textContent).join(' ');
+  const recordButton = () => entry().find(node => node.textContent === '● 녹음 (Beta)');
+
+  await app.run('meetingRecStart(__m)');
+  assert.equal(prepares(), 1, '도구가 없으면 준비를 부탁한다');
+  assert.equal(app.run('meetingRecBusy()'), false, '다 받기 전에는 녹음을 시작하지 않는다');
+  assert.match(said.at(-1), /^녹음하려면 먼저 음성 인식 도구\(약 0\.7GB\)를 받아야 해요 — 잠시 기다려 주세요/);
+  assert.equal(recordButton().disabled, true, '받는 동안 녹음 버튼은 눌리지 않는다');
+  assert.match(entryText(), /녹음하려면 먼저 음성 인식 도구\(약 0\.7GB\)를 받아야 해요 — 잠시 기다려 주세요$/);
+  tools = { ok: true, state: 'installing', percent: 42, size };
+  await app.run('meetingRecToolsRead(true)');
+  assert.match(entryText(), /기다려 주세요 · 42%$/);
+
+  const rec = (id, extra) => ({ id, file: `${id}.webm`, seconds: 60, size: 1, createdAt: '2026-11-06T01:00:00.000Z', ...extra });
+  meeting.recordings = [rec('000000000000000a', { status: 'queued' })];
   const draw = () => app.run(`(() => { const box = document.createElement('div'); panelMeeting(__m, box); return box; })()`);
   assert.match(nodeText(nodeFind(draw(), 'd-reclist')), /음성 인식 도구를 받는 중이에요 — 끝나면 자동으로 시작해요 · 42%/, '정지했을 때 아직이면 기다렸다가 저절로 시작한다');
 
@@ -5856,13 +5866,17 @@ test('회의 녹음: 음성 인식 도구가 없으면 녹음하는 동안 받�
   assert.match(nodeText(failedBox), /음성 인식 도구를 받지 못했어요 — 받은 파일이 올바르지 않아요/);
   const again = nodeFind(failedBox, 'rc-state').children.find(node => node && node.textContent === '다시 받기');
   assert.ok(again, '실패하면 `다시 받기`');
+  assert.equal(recordButton().disabled, true, '실패해도 녹음 버튼은 잠긴 채');
+  assert.match(entryText(), /받지 못했어요 — 받은 파일이 올바르지 않아요.* 다시 받기$/, '녹음 버튼 옆에도 이유 + `다시 받기`');
   await again.listeners.click();
   assert.equal(prepares(), 2, '`다시 받기`는 준비 요청을 다시 쓴다');
 
   tools = { ok: true, state: 'ready', size };
   await app.run('meetingRecToolsRead(true)');
   assert.match(nodeText(nodeFind(draw(), 'd-reclist')), /전사 대기 중이에요/, '준비되면 원래 대기 줄');
-  assert.equal(app.run('meetingRecToolsLiveNodes().length'), 0, '준비되면 녹음 중 안내도 없다');
+  assert.equal(said.at(-1), '음성 인식 도구를 다 받았어요 — 이제 녹음할 수 있어요.', '다 받으면 알린다');
+  assert.equal(recordButton().disabled, false, '다 받으면 녹음 버튼이 풀린다');
+  assert.equal(entry().length, 1, '준비되면 버튼 옆 줄도 없다');
   await app.run('meetingRecPrepareTools()');
   assert.equal(prepares(), 2, '준비됐으면 부탁하지 않는다');
 
