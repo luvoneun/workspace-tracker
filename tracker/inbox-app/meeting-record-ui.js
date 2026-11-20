@@ -483,27 +483,52 @@ function meetingRecWhen(iso) {
   return d.toDateString() === new Date().toDateString() ? `오늘 ${time}` : `${d.getMonth() + 1}월 ${d.getDate()}일 ${time}`;
 }
 
-// 패널의 `회의 요약` 구역 — 최신이 위. 녹음 하나마다: 요약(핵심 한 줄·결정·주제별 요지, 진행 중이면 상태 한 줄)이 먼저,
-// 그 아래 녹음 줄(시각·길이 | 재생기 | 옮기기 · 삭제), 맨 아래 전사본 보기 · 다시 하기. 할 일·확인할 것은 카드 위쪽 AI 초안이 맡는다.
+// 녹음본 목록 — `미팅 노트 가져오기`(·`● 녹음 (Beta)`) 줄 바로 아래, 최신이 위. 녹음 하나는 **접힌 한 줄**
+// (꺾쇠 · 핵심 한 줄(진행 중이면 상태) · 시각 · 길이)이고, 누르면 그 자리에서 펼쳐진다: 요약(결정·주제별 요지, 진행 중이면
+// 상태 한 줄)이 먼저, 그 아래 녹음 줄(재생기 | ⋯), 맨 아래 전사본 보기. 할 일·확인할 것은 카드의 AI 초안이 맡는다.
+// 구역 제목은 따로 두지 않는다 — 바로 위 `● 녹음 (Beta)`가 이름표다. 펼침은 다시 그려도 남는다(meetingRecOpen).
+const meetingRecOpen = new Set(); // 펼쳐 둔 녹음 id
+const MEETING_REC_SHORT = { queued: '전사 대기 중', redo: '요약 대기 중', transcribing: '글로 옮기는 중', summarizing: '요약하는 중', failed: '전사하지 못했어요' };
+function meetingRecFoldTitle(recording) {
+  const status = recording.status;
+  if (status === 'done') {
+    const summary = recording.summary || {};
+    return summary.headline || (summary.error ? '요약하지 못했어요' : '녹음 요약');
+  }
+  if (status === 'queued' && recording.redo === 'summary') return MEETING_REC_SHORT.redo;
+  return MEETING_REC_SHORT[status] || '아직 글로 옮기지 않은 녹음본';
+}
+function meetingRecFold(recording, open) {
+  const fold = document.createElement('button');
+  fold.type = 'button';
+  fold.className = 'rc-fold';
+  const title = document.createElement('span');
+  title.className = recording.status === 'done' ? 'rc-ftitle' : 'rc-ftitle rc-fstate';
+  title.textContent = meetingRecFoldTitle(recording);
+  const when = document.createElement('span');
+  when.className = 'rc-fwhen';
+  when.textContent = `${meetingRecWhen(recording.createdAt)} · ${meetingRecLen(recording.seconds)}`;
+  fold.innerHTML = uiIcon('chevron');
+  fold.append(title, when);
+  const paint = (on) => { fold.setAttribute('aria-expanded', on ? 'true' : 'false'); open.hidden = !on; };
+  paint(meetingRecOpen.has(recording.id));
+  fold.addEventListener('click', () => {
+    const on = !meetingRecOpen.has(recording.id);
+    if (on) meetingRecOpen.add(recording.id); else meetingRecOpen.delete(recording.id);
+    paint(on);
+  });
+  return fold;
+}
 function meetingRecordingsNode(event, host) {
   const list = event && Array.isArray(event.recordings) ? event.recordings : [];
   if (!list.length) return null;
-  // `(Beta)` — 아직 써 보는 기능이라는 말(문구로만, 따로 표시를 그리지 않는다). 정식이 되면 문구에서만 뺀다.
-  const { section } = meetingSection('회의 요약 (Beta)', list.length);
-  section.classList.add('d-recs');
+  const section = document.createElement('div');
+  section.className = 'd-recs';
   const box = document.createElement('div');
   box.className = 'd-reclist';
   list.slice().sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).forEach((recording) => {
     const row = document.createElement('div');
     row.className = 'd-recrow';
-    const meta = document.createElement('div');
-    meta.className = 'rc-meta';
-    const when = document.createElement('span');
-    when.textContent = meetingRecWhen(recording.createdAt);
-    const length = document.createElement('span');
-    length.className = 'rc-len';
-    length.textContent = meetingRecLen(recording.seconds);
-    meta.append(when, length);
     const src = `/api/meeting/recording?meetingId=${encodeURIComponent(event.id)}&recId=${encodeURIComponent(recording.id)}`;
     let audio = meetingRecPlayers.get(recording.id);
     if (!audio || audio.src.slice(-src.length) !== src) {
@@ -518,13 +543,18 @@ function meetingRecordingsNode(event, host) {
       meetingRecPlayers.set(recording.id, audio);
     }
     // 다시 하기 · 옮기기 · 삭제는 줄 끝 ⋯ 하나에 — 자주 쓰지 않는 도구라 늘 펼쳐 두지 않는다.
-    row.append(meta, audio, meetingRecMenuButton(event, recording, host, row));
+    row.append(audio, meetingRecMenuButton(event, recording, host, row));
     const one = document.createElement('div');
     one.className = 'rc-one';
+    const open = document.createElement('div');
+    open.className = 'rc-open';
+    open.id = `rc-open-${recording.id}`;
     const body = meetingRecBody(event, recording, host);
-    one.appendChild(body);
-    one.appendChild(row);
-    if (body.recFoot) one.appendChild(body.recFoot);
+    open.append(body, row);
+    if (body.recFoot) open.appendChild(body.recFoot);
+    const fold = meetingRecFold(recording, open);
+    fold.setAttribute('aria-controls', open.id);
+    one.append(fold, open);
     box.appendChild(one);
   });
   section.appendChild(box);
@@ -715,13 +745,8 @@ function meetingRecBody(event, recording, host) {
     return body;
   }
   // done — 요약 + 전사본
+  // 핵심 한 줄은 접힌 줄(meetingRecFold)이 맡는다 — 펼친 곳에 다시 적지 않는다.
   const summary = recording.summary || {};
-  if (summary.headline) {
-    const head = document.createElement('p');
-    head.className = 'rc-head';
-    head.textContent = summary.headline;
-    body.appendChild(head);
-  }
   const list = (label, items) => {
     if (!items || !items.length) return;
     const wrap = document.createElement('div');

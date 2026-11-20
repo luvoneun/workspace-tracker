@@ -5759,14 +5759,26 @@ test('panelMeeting: `● 녹음` 입구와 `녹음본` 구역', () => {
   assert.match(nodeText(row), /미팅 노트 가져옴/);
   assert.ok(row.children.some(node => node.textContent === '● 녹음 (Beta)'), '노트 줄 끝에 붙는다');
   assert.equal(nodeFind(box, 'd-drec'), null, '줄을 하나 더 만들지 않는다');
-  assert.match(fs.readFileSync(path.join(__dirname, 'meeting-record-ui.js'), 'utf8'), /meetingSection\('회의 요약 \(Beta\)'/, '구역 제목에 (Beta)');
   const recs = nodeFind(box, 'd-reclist');
   assert.ok(recs);
+  // 녹음본은 머리 아래 조용한 줄 바로 다음 — 회의에서 나온 것·AI 초안보다 위에, 접힌 한 줄씩(2026-11-20).
+  const order = box.children.map(node => node.className);
+  assert.ok(order.indexOf('d-recs') === order.indexOf('d-dget') + 1, '노트 줄 바로 아래');
   const rows = recs.children.map(one => nodeFind(one, 'd-recrow')).filter(Boolean);
   assert.equal(rows.length, 2);
-  assert.equal(recs.children[0].children[0].className, 'rc-body', '녹음 하나 안에서 요약이 먼저, 녹음 줄은 그 아래');
-  assert.match(nodeText(rows[0]), /30초/, '최신이 위');
-  assert.match(nodeText(rows[1]), /12분 34초/);
+  const folds = recs.children.map(one => one.children[0]);
+  assert.ok(folds.every(fold => fold.className === 'rc-fold' && fold.getAttribute('aria-expanded') === 'false'), '처음엔 접힌 한 줄');
+  assert.ok(recs.children.every(one => one.children[1].className === 'rc-open' && one.children[1].hidden === true), '펼칠 곳은 숨어 있다');
+  assert.equal(recs.children[0].children[1].children[0].className, 'rc-body', '펼치면 요약이 먼저, 녹음 줄은 그 아래');
+  assert.match(nodeText(folds[0]), /30초/, '최신이 위 — 시각·길이는 접힌 줄에');
+  assert.match(nodeText(folds[1]), /12분 34초/);
+  assert.match(nodeText(folds[1]), /아직 글로 옮기지 않은 녹음본/, '접힌 줄에 상태');
+  folds[0].listeners.click();
+  assert.equal(folds[0].getAttribute('aria-expanded'), 'true');
+  assert.equal(recs.children[0].children[1].hidden, false, '누르면 그 자리에서 펼쳐진다');
+  const redrawn = nodeFind(draw('__past'), 'd-reclist');
+  assert.equal(redrawn.children[0].children[1].hidden, false, '다시 그려도 펼친 채');
+  redrawn.children[0].children[0].listeners.click();
   // 이 버전 전에 녹음한 녹음본(상태 없음)은 `전사·요약 시작`
   assert.match(nodeText(recs), /아직 글로 옮기지 않은 녹음본이에요/);
   assert.ok(nodeText(recs).includes('전사·요약 시작'));
@@ -16920,7 +16932,7 @@ const MOTION_NOT_PRESSED = [
   ['입력칸 — 누르는 것이 아니라 글자를 친다', ['.d-dateinput', '.d-qa', '.d-din', '.d-dtxt', '.d-qin', '.d-recsearch']],
   ['줄·카드(div·li·label) — 줄은 줄어들지 않고 안의 버튼이 눌린다', ['.d-mrow', '.d-wrow', '.d-atrow', '.d-ibrow', '.d-row', '.d-prow2', '.d-rec', '.d-ich', '.rp-rec', '.rp-grp .rp-s.is-add', '.d-qaf', '.d-addrow', '.rp-add']],
   ['줄 위에 겹쳐 뜨는 묶음·물러나는 글자(div·span) — 안의 버튼이 공용 누름을 갖는다', ['.d-wrow .ac, .d-mrow .ac', '.d-mrow .ct, .d-wrow .mt', '.d-atrow .mt', '.d-atacts', '.d-acts', '.d-prow2 .ac', '.d-pri']],
-  ['아이콘·꺾쇠·숫자 칩·점 — 눌리는 것은 그 부모다', ['.new-dot.is-gone', '.d-grp.tog .d-i', '.d-dadd > summary .d-i', '.d-jira .foot .d-jexp .d-i', '.d-jfold .d-i', '.rp-s .rp-foldtoggle .d-i', '.rp-fl .d-i', '.d-imore > summary::before', '.d-lhd .sub .cnt, .d-wrapsum.cnt']],
+  ['아이콘·꺾쇠·숫자 칩·점 — 눌리는 것은 그 부모다', ['.new-dot.is-gone', '.d-grp.tog .d-i', '.d-dadd > summary .d-i', '.d-jira .foot .d-jexp .d-i', '.d-jfold .d-i', '.d-reclist .rc-fold .d-i', '.rp-s .rp-foldtoggle .d-i', '.rp-fl .d-i', '.d-imore > summary::before', '.d-lhd .sub .cnt, .d-wrapsum.cnt']],
   ['면·틀 — 버튼이 아니다', ['.pull-indicator.snapping', '.d-popd .d-detail.is-pop > .d-dtop', '.d-popd .d-detail.is-pop > .d-dfoot, .d-popd .d-detail.is-pop > .d-dbar', '.d-drawer', '#settingsDialog .d-mhd', '.d-stay', 'dialog.d-stay::backdrop', 'details::details-content']],
   ['그 자리에서 고치는 문장(span) — 글자 입력의 시작', ['.rp-s .rp-edit']],
 ];

@@ -191,6 +191,11 @@ function panelMeeting(event, box, host = MEETING_HOST_CARD) {
     }
     recordNodes.forEach(node => quietRow.appendChild(node));
   }
+  // 녹음본(요약·재생기·전사본)은 그 줄 바로 아래에 접힌 한 줄씩 — 누르면 그 자리에서 펼쳐진다(2026-11-20 루본).
+  if (linked) {
+    const recordings = meetingRecordingsNode(event, host);
+    if (recordings) box.appendChild(recordings);
+  }
 
   if (!linked) {
     const note = document.createElement('div');
@@ -199,15 +204,14 @@ function panelMeeting(event, box, host = MEETING_HOST_CARD) {
     box.appendChild(note);
   }
   // 차례는 "이 회의로 내가 할 일"이 먼저, 그다음 회의 내용, 도구는 맨 아래(2026-11-16 루본):
-  // 결과 → 이 회의에서 나온 것(맨 위 입력줄 + 방금 적은 줄 + 종류별) → AI 초안 → 이전 회차 → 회의 요약(녹음) → 기존 항목 연결.
+  // 결과 → 이 회의에서 나온 것(맨 위 입력줄 + 방금 적은 줄 + 종류별) → AI 초안 → 이전 회차 → 기존 항목 연결.
+  // (녹음본은 위에서 머리 아래 조용한 줄 바로 밑에 접혀 있다.)
   // 입력줄은 구역 맨 위(프로젝트 탭의 `+ 이 프로젝트에 할 일 추가`와 같은 자리)이고 방금 적은 줄은 그 바로 아래에 선다.
   if (linked) panelMeetingResult(event, box, host);
   panelMeetingItems(event, box, host);
   if (linked) {
     if (event.drafts && event.drafts.length) panelMeetingDrafts(event, box, host);
     panelMeetingPast(event, box, host);
-    const recordings = meetingRecordingsNode(event, host);
-    if (recordings) box.appendChild(recordings);
     panelMeetingLink(event, box, host);
   }
   // 카드를 통째로 다시 그렸으면 열려 있던 종류 목록의 글자도 사라졌다 — 새 카드가 붙은 뒤에 정리한다.
